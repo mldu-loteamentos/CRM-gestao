@@ -1498,17 +1498,17 @@ const ConfigUsersApp = {
       }
   },
 
-  toggleUserStatus(userId) {
+  async toggleUserStatus(userId) {
       const user = this.users.find(u => String(u.id) === String(userId));
-      if (user) {
-          if (user.status === 'ATIVO') {
-              user.status = 'INATIVO';
-          } else {
-              user.status = 'ATIVO';
-          }
-          this.persistUsers();
-          this.render();
+      if (!user) return;
+      user.status = String(user.status || "").toUpperCase() === "ATIVO" ? "INATIVO" : "ATIVO";
+      user.statusAt = Date.now();
+      try {
+          await this.persistUsers();
+      } catch (e) {
+          alert("Não consegui gravar a situação do usuário. " + ((e && e.message) || "Tente de novo."));
       }
+      this.render();
   },
 
   async saveUserModal(userId) {
@@ -1576,7 +1576,10 @@ const ConfigUsersApp = {
               return;
           }
           Object.assign(user, fields);
-          if (String(user.status || "").toUpperCase() === "PENDENTE") user.status = "ATIVO";
+          if (String(user.status || "").toUpperCase() === "PENDENTE") {
+            user.status = "ATIVO";
+            user.statusAt = Date.now();
+          }
       } else {
           const emailKey = email.toLowerCase();
           const existing = this.users.find(u => String(u.email || "").toLowerCase().trim() === emailKey);
@@ -1844,18 +1847,30 @@ const ConfigUsersApp = {
       <style>
         .ml-switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; vertical-align: middle; }
         .ml-switch input { opacity: 0; width: 0; height: 0; }
-        .ml-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #cbd5e1; transition: .25s; border-radius: 24px; }
-        .ml-slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background: #fff; transition: .25s; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+        .ml-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #94a3b8; transition: .25s; border-radius: 24px; }
+        .ml-slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background: #fff; transition: .25s; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.25); }
         .ml-switch input:checked + .ml-slider { background: #105436; }
         .ml-switch input:checked + .ml-slider:before { transform: translateX(20px); }
-        .cfg-tabs { display: flex; gap: 8px; margin: 0 0 22px; }
-        .cfg-tab { border: 1px solid #d7e3db; background: #fff; color: #334155; border-radius: 999px; padding: 8px 16px; font-weight: 700; cursor: pointer; }
+        .cfg-page { padding: 22px; max-width: 1140px; margin: 0 auto; }
+        .cfg-tabs { display: flex; gap: 8px; margin: 0 0 16px; }
+        .cfg-tab { border: 1px solid #0c3d28; background: #fff; color: #0c3d28; border-radius: 999px; padding: 8px 16px; font-weight: 800; cursor: pointer; }
         .cfg-tab.is-on { background: #105436; color: #fff; border-color: #105436; }
-        .cfg-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; align-items: end; }
-        .cfg-filters label { display: block; font-size: 0.72rem; font-weight: 700; color: #64748b; margin-bottom: 6px; }
-        .cfg-filters .form-control { height: 38px; }
+        .cfg-panel { background: #fff; border: 1px solid #cbd5e1; border-radius: 16px; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08); padding: 16px; }
+        .cfg-filters { display: grid; grid-template-columns: 1.3fr 1.1fr 1.2fr 0.9fr auto; gap: 12px; align-items: end; margin-bottom: 14px; }
+        .cfg-filters label { display: block; font-size: 0.75rem; font-weight: 800; color: #1e293b; margin-bottom: 6px; }
+        .cfg-filters .form-control { height: 40px; border: 1px solid #475569; border-radius: 8px; background: #fff; color: #0f172a; padding: 0 12px; width: 100%; font-size: 0.9rem; }
+        .cfg-filters .form-control:focus { outline: 2px solid #105436; border-color: #105436; }
+        .cfg-count { height: 40px; display: flex; align-items: center; padding: 0 12px; border-radius: 8px; background: #ecfdf5; color: #064e3b; font-weight: 800; font-size: 0.85rem; white-space: nowrap; }
+        .cfg-table-wrap { border: 1px solid #cbd5e1; border-radius: 12px; overflow: auto; }
+        .cfg-table { width: 100%; border-collapse: collapse; text-align: left; background: #fff; }
+        .cfg-table th { padding: 12px 14px; color: #fff; background: #105436; font-weight: 800; font-size: 0.82rem; }
+        .cfg-table td { padding: 14px; border-bottom: 1px solid #e2e8f0; color: #0f172a; }
+        .cfg-table tr:last-child td { border-bottom: 0; }
+        .cfg-prof-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #e2e8f0; }
+        .cfg-prof-bar select { height: 40px; min-width: 280px; border: 1px solid #475569; border-radius: 8px; padding: 0 12px; font-weight: 700; color: #0f172a; background: #fff; }
+        @media (max-width: 900px) { .cfg-filters { grid-template-columns: 1fr 1fr; } }
       </style>
-      <div style="padding: 30px; max-width: 1100px; margin: 0 auto;">
+      <div class="cfg-page">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; gap: 12px; flex-wrap: wrap;">
           <h2 style="display: flex; align-items: center; gap: 10px; font-size: 1.5rem; margin: 0; color: #202124;">
             <i data-lucide="users" style="width: 24px; height: 24px;"></i> Usuários e Perfis
@@ -1874,7 +1889,7 @@ const ConfigUsersApp = {
         </div>
 
         ${this.view === "usuarios" ? `
-        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:16px;margin-bottom:16px;">
+        <div class="cfg-panel">
           <div class="cfg-filters">
             <div>
               <label for="cfg-user-nome">Nome</label>
@@ -1899,36 +1914,38 @@ const ConfigUsersApp = {
                 <option value="inativos" ${filters.status === "inativos" ? "selected" : ""}>Desativados</option>
               </select>
             </div>
-            <div style="font-size:0.8rem;color:#64748b;padding-bottom:8px;">${shownUsers.length} usuário(s)</div>
+            <div class="cfg-count">${shownUsers.length} usuário(s)</div>
           </div>
-        </div>
-        <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); overflow: hidden; margin-bottom: 40px; border: 1px solid #f0f0f0;">
-          <table style="width: 100%; border-collapse: collapse; text-align: left;">
+          <div class="cfg-table-wrap">
+          <table class="cfg-table">
             <thead>
-              <tr style="border-bottom: 1px solid #f0f0f0;">
-                <th style="padding: 16px 15px; color: #202124; font-weight: 700; font-size: 0.95rem;">Nome Completo / E-mail</th>
-                <th style="padding: 16px 15px; color: #202124; font-weight: 700; font-size: 0.95rem;">Usuário Sienge</th>
-                <th style="padding: 16px 15px; color: #202124; font-weight: 700; font-size: 0.95rem;">Celular</th>
-                <th style="padding: 16px 15px; color: #202124; font-weight: 700; font-size: 0.95rem;">Perfil de Acesso</th>
-                <th style="padding: 16px 15px; color: #202124; font-weight: 700; font-size: 0.95rem;">Status</th>
-                <th style="padding: 16px 15px; color: #202124; font-weight: 700; font-size: 0.95rem;">Ações</th>
+              <tr>
+                <th>Nome Completo / E-mail</th>
+                <th>Usuário Sienge</th>
+                <th>Celular</th>
+                <th>Perfil de Acesso</th>
+                <th>Status</th>
+                <th>Ações</th>
               </tr>
             </thead>
             <tbody>
               ${trs}
             </tbody>
           </table>
+          </div>
         </div>
         ` : `
-        <div style="display: flex; margin-bottom: 24px; align-items: center;">
-           <div style="display: flex; gap: 10px; align-items: center;">
+        <div class="cfg-panel">
+        <div class="cfg-prof-bar">
+           <div style="display: flex; gap: 10px; align-items: center; flex: 1;">
               ${profileOptions}
            </div>
-           <button onclick="ConfigUsersApp.addProfile()" style="margin-left: 15%; padding: 8px 16px; border: 1px dashed #105436; background: transparent; color: #105436; font-weight: 600; border-radius: 8px; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; flex-shrink: 0;"><i data-lucide="plus" style="width: 16px; margin-right: 6px;"></i> Novo Perfil</button>
+           <button onclick="ConfigUsersApp.addProfile()" style="padding: 8px 16px; border: 1px solid #105436; background: #fff; color: #105436; font-weight: 800; border-radius: 8px; cursor: pointer; display: inline-flex; align-items: center; flex-shrink: 0;"><i data-lucide="plus" style="width: 16px; margin-right: 6px;"></i> Novo Perfil</button>
         </div>
 
         <div id="permissions-container">
            ${modulesHtml}
+        </div>
         </div>
         `}
 

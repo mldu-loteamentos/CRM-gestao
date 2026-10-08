@@ -1301,10 +1301,9 @@ const FluxoCaixaApp = {
             <div style="font-size:0.8rem;opacity:.9;margin-top:3px;">${this.esc(info.subtitle)} · ${this.esc(this.startDate)} a ${this.esc(this.endDate)}</div>
           </div>
           <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
-            <button type="button" onclick="event.stopPropagation();FluxoCaixaApp.exportDrillExcel()" ${items.length ? "" : "disabled"}
-              title="Exportar quadro em Excel"
-              style="border:none;background:rgba(255,255,255,0.16);color:#fff;height:34px;padding:0 12px;border-radius:8px;cursor:${items.length ? "pointer" : "not-allowed"};font-size:0.82rem;font-weight:700;display:inline-flex;align-items:center;gap:6px;opacity:${items.length ? "1" : "0.55"};">
-              <i data-lucide="file-spreadsheet" style="width:16px;height:16px;"></i> Excel
+            <button type="button" class="btn btn-sm btn-excel" onclick="event.stopPropagation();FluxoCaixaApp.exportDrillExcel()" ${items.length ? "" : "disabled"}
+              title="Exportar quadro em Excel">
+              <i data-lucide="download" style="width:14px;height:14px;"></i> Excel
             </button>
             <button type="button" onclick="FluxoCaixaApp.closeDrill()" style="border:none;background:rgba(255,255,255,0.15);color:#fff;width:34px;height:34px;border-radius:8px;cursor:pointer;font-size:1.25rem;line-height:1;">×</button>
           </div>

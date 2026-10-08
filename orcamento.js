@@ -83,8 +83,13 @@ const OrcamentoApp = {
         .orc-head p { margin: 6px 0 0; font-size: 0.84rem; color: #fff; max-width: 820px; line-height: 1.4; }
         .orc-tools { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 12px; }
         .orc-search { height: 40px; border: 1px solid #475569; border-radius: 8px; padding: 0 12px; min-width: 240px; font-size: 0.9rem; color: #0f172a; background: #fff; }
-        .orc-btn { height: 40px; border-radius: 8px; border: 1px solid #0c3d28; background: #105436; color: #fff; font-weight: 800; padding: 0 14px; cursor: pointer; }
-        .orc-btn:hover { background: #0c3d28; }
+        #orcamento-root .ml-emp-filter { flex: 0 0 460px; width: 460px; max-width: none; min-width: 420px; }
+        #orcamento-root .btn-excel { height: 40px; }
+        .orc-ghost { height: 40px; border-radius: 8px; border: 1px solid #105436; background: #fff; color: #105436; font-weight: 800; padding: 0 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; }
+        .orc-ghost:hover { background: #d1fae5; }
+        .orc-ghost-muted { border-color: #cbd5e1; color: #475569; }
+        .orc-ghost-muted:hover { background: #f1f5f9; }
+        .orc-ghost svg { width: 14px; height: 14px; }
         .orc-kpis { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
         .orc-kpi { background: #fff; border: 1px solid #94a3b8; border-top: 4px solid #105436; border-radius: 10px; padding: 12px 14px 10px; min-width: 150px; flex: 1; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08); }
         .orc-kpi span { display: block; color: #1e293b; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.03em; }
@@ -106,10 +111,15 @@ const OrcamentoApp = {
         .orc-table td:first-child { text-align: left; position: sticky; left: 0; z-index: 1; }
         .orc-split { border-left: 2px solid rgba(15, 23, 42, 0.18); }
         .orc-emp td { background: #0c3d28; color: #fff; font-weight: 700; }
+        .orc-table tbody tr.orc-leaf:hover td { background: #d1fae5; }
+        .orc-table tbody tr.orc-cc:hover td { background: #6ee7b7; }
+        .orc-table tbody tr.orc-emp:hover td { background: #166534; }
+        .orc-table tbody tr.orc-total:hover td { background: #065f46; }
+        .orc-table tbody tr:hover td:first-child { box-shadow: inset 4px 0 0 #f37021; }
         .orc-total td { position: sticky; bottom: 0; background: #134e3a; color: #fff; font-weight: 800; z-index: 2; border-top: 2px solid #0c3d28; }
         .orc-total td:first-child { z-index: 3; background: #134e3a; }
         .orc-var, .orc-pct { display: block; line-height: 1.2; }
-        .orc-pct { font-size: 0.72rem; font-weight: 800; }
+        .orc-pct, .orc-pct-col { font-size: 0.78rem; font-weight: 800; }
         .orc-view { display: inline-flex; border: 1px solid #0c3d28; border-radius: 8px; overflow: hidden; background: #fff; }
         .orc-view button { height: 40px; border: 0; border-right: 1px solid #0c3d28; background: #fff; color: #0c3d28; font-weight: 800; padding: 0 14px; cursor: pointer; }
         .orc-view button:last-child { border-right: 0; }
@@ -133,7 +143,7 @@ const OrcamentoApp = {
       <div class="orc-head">
         <div>
           <h2>Orçamento 2026 × 2027</h2>
-          <p>Empresa, centro de custo e a conta do plano. Os meses de 2026 vêm primeiro — janeiro a setembro recebido, outubro a dezembro forecast (*) — depois os de 2027. A variação traz o valor e o percentual. O total soma cada mês. Valor Moura Leite aplica o % MLDU de cada empresa.</p>
+          <p>Empresa, centro de custo e a conta do plano. Os meses de 2026 vêm primeiro — janeiro a setembro recebido, outubro a dezembro forecast (*) — depois os de 2027. A variação em reais e o percentual ficam em colunas separadas. O total soma cada mês. Valor Moura Leite aplica o % MLDU de cada empresa.</p>
         </div>
       </div>
       <div class="orc-tools">
@@ -143,8 +153,9 @@ const OrcamentoApp = {
           <button type="button" id="orc-view-total" class="${this.mouraView ? "" : "is-on"}">Valor total</button>
           <button type="button" id="orc-view-moura" class="${this.mouraView ? "is-on" : ""}">Valor Moura Leite</button>
         </div>
-        <button type="button" class="orc-btn" id="orc-expand">Expandir todos</button>
-        <button type="button" class="orc-btn" id="orc-collapse">Recolher todos</button>
+        <button type="button" class="orc-ghost" id="orc-expand"><i data-lucide="chevrons-down"></i> Expandir todos</button>
+        <button type="button" class="orc-ghost orc-ghost-muted" id="orc-collapse"><i data-lucide="chevrons-up"></i> Recolher todos</button>
+        <button type="button" class="btn btn-excel" id="orc-excel" title="Exportar tabela atual para Excel"><i data-lucide="download" style="width:14px;height:14px;"></i> Excel</button>
       </div>
       <div class="orc-kpis" id="orc-kpis"></div>
       <div class="orc-scroll">
@@ -154,7 +165,7 @@ const OrcamentoApp = {
               <th class="orc-label" rowspan="2">Empresa / Centro de custo / Plano</th>
               <th class="orc-h26" colspan="12">2026</th>
               <th class="orc-h27 orc-split" colspan="12">2027</th>
-              <th class="orc-cmp orc-split" colspan="3">Comparativo</th>
+              <th class="orc-cmp orc-split" colspan="4">Comparativo</th>
             </tr>
             <tr>
               ${months.map((m, i) => `<th class="orc-h26${i >= 9 ? " orc-fc" : ""}">${m}${i >= 9 ? "*" : ""}</th>`).join("")}
@@ -162,6 +173,7 @@ const OrcamentoApp = {
               <th class="orc-split">Total 2026</th>
               <th>Total 2027</th>
               <th>Variação</th>
+              <th>Variação %</th>
             </tr>
           </thead>
           <tbody id="orc-body"></tbody>
@@ -171,6 +183,7 @@ const OrcamentoApp = {
     this.paintCompany();
     this.bind();
     this.paint();
+    if (window.lucide && lucide.createIcons) lucide.createIcons();
     this.ready = true;
   },
 
@@ -252,6 +265,8 @@ const OrcamentoApp = {
     if (expand) expand.addEventListener("click", () => this.expandAll(true));
     const collapse = document.getElementById("orc-collapse");
     if (collapse) collapse.addEventListener("click", () => this.expandAll(false));
+    const excel = document.getElementById("orc-excel");
+    if (excel) excel.addEventListener("click", () => this.exportExcel());
     const body = document.getElementById("orc-body");
     if (body) {
       body.addEventListener("click", (ev) => {
@@ -461,10 +476,7 @@ const OrcamentoApp = {
     return totals;
   },
 
-  paint() {
-    const body = document.getElementById("orc-body");
-    const kpis = document.getElementById("orc-kpis");
-    if (!body) return;
+  collect() {
     const companies = this.companiesTree();
     const rows = [];
     const y26 = this.blank();
@@ -482,60 +494,87 @@ const OrcamentoApp = {
       se26.forEach((v, i) => { y26[i] += v; });
       se27.forEach((v, i) => { y27[i] += v; });
       const shareNote = this.mouraView ? (" · " + this.participation(emp.e).toLocaleString("pt-BR") + "% ML") : "";
-      rows.push(this.rowHtml({
+      rows.push({
         kind: "emp",
+        level: "Empresa",
         key: emp.key,
         depth: 0,
         label: emp.e + " — " + (emp.en || "") + shareNote,
         m26: se26,
         m27: se27,
-        expandable: true
-      }));
-      if (!this.expanded.has(emp.key)) return;
+        expandable: true,
+        parentEmp: "",
+        parentCc: ""
+      });
       emp.costCenters.forEach((cc) => {
-        rows.push(this.rowHtml({
+        rows.push({
           kind: "cc",
+          level: "Centro de custo",
           key: cc.key,
           depth: 1,
           label: cc.cc + " — " + cc.cn,
           m26: this.scaleMonths(this.sumNode(cc.tree, "m26"), factor),
           m27: this.scaleMonths(this.sumNode(cc.tree, "m27"), factor),
-          expandable: true
-        }));
-        if (!this.expanded.has(cc.key)) return;
+          expandable: true,
+          parentEmp: emp.key,
+          parentCc: ""
+        });
         this.leafAccounts(cc).forEach((acc) => {
-          rows.push(this.rowHtml({
+          rows.push({
             kind: "leaf",
+            level: "Conta",
             key: cc.key + "|" + acc.conta,
             depth: 2,
             label: acc.conta + "  " + (acc.nome || this.accountName(acc.conta)),
             m26: this.scaleMonths(acc.m26, factor),
             m27: this.scaleMonths(acc.m27, factor),
-            expandable: false
-          }));
+            expandable: false,
+            parentEmp: emp.key,
+            parentCc: cc.key
+          });
         });
       });
     });
     if (companies.length) {
-      rows.push(this.rowHtml({
+      rows.push({
         kind: "total",
+        level: "Total",
         key: "",
         depth: 0,
         label: "Total",
         m26: y26,
         m27: y27,
-        expandable: false
-      }));
+        expandable: false,
+        parentEmp: "",
+        parentCc: ""
+      });
     }
-    body.innerHTML = rows.join("") || '<tr><td class="orc-empty" colspan="28">Nenhuma empresa com essas contas.</td></tr>';
+    return { companies, rows, y26, y27 };
+  },
+
+  rowVisible(row) {
+    if (row.kind === "emp" || row.kind === "total") return true;
+    if (row.kind === "cc") return this.expanded.has(row.parentEmp);
+    return this.expanded.has(row.parentEmp) && this.expanded.has(row.parentCc);
+  },
+
+  paint() {
+    const body = document.getElementById("orc-body");
+    const kpis = document.getElementById("orc-kpis");
+    if (!body) return;
+    const data = this.collect();
+    const html = data.rows.filter((row) => this.rowVisible(row)).map((row) => this.rowHtml(row));
+    body.innerHTML = html.join("") || '<tr><td class="orc-empty" colspan="29">Nenhuma empresa com essas contas.</td></tr>';
     if (kpis) {
+      const y26 = data.y26;
+      const y27 = data.y27;
       const rec = this.sum(y26.slice(0, 9));
       const fc = this.sum(y26.slice(9));
       const t26 = this.sum(y26);
       const t27 = this.sum(y27);
       const delta = t27 - t26;
       kpis.innerHTML = `
-        <div class="orc-kpi"><span>EMPRESAS</span><strong>${companies.length}</strong></div>
+        <div class="orc-kpi"><span>EMPRESAS</span><strong>${data.companies.length}</strong></div>
         <div class="orc-kpi"><span>RECEBIDO JAN–SET 2026</span><strong>${this.money(rec)}</strong></div>
         <div class="orc-kpi"><span>FORECAST OUT–DEZ 2026</span><strong class="orc-fc">${this.money(fc)}</strong></div>
         <div class="orc-kpi"><span>2026 COMPLETO</span><strong>${this.money(t26)}</strong></div>
@@ -558,9 +597,9 @@ const OrcamentoApp = {
     return '<td class="' + cls + '">' + this.money(value) + "</td>";
   },
 
-  varCell(delta, base, extra) {
-    const cls = [delta < 0 ? "orc-neg" : "", extra || ""].filter(Boolean).join(" ");
-    return '<td class="' + cls + '"><span class="orc-var">' + this.money(delta) + '</span><span class="orc-pct">' + this.pctLabel(delta, base) + "</span></td>";
+  pctCell(delta, base) {
+    const cls = delta < 0 ? "orc-neg orc-pct-col" : "orc-pct-col";
+    return '<td class="' + cls + '">' + this.pctLabel(delta, base) + "</td>";
   },
 
   rowHtml(row) {
@@ -579,8 +618,276 @@ const OrcamentoApp = {
       + y26 + y27
       + this.moneyCell(t26, "orc-split")
       + this.moneyCell(t27, "orc-y27")
-      + this.varCell(delta, t26, "")
+      + this.moneyCell(delta, delta < 0 ? "orc-neg" : "")
+      + this.pctCell(delta, t26)
       + "</tr>";
+  },
+
+  async exportExcel() {
+    const data = this.collect();
+    if (!data.companies.length) {
+      alert("Não há empresas para exportar com esse filtro.");
+      return;
+    }
+    const inv = window.InvestimentoApp;
+    if (!inv || !inv.ensureExcelJS) {
+      alert("Não foi possível carregar a exportação. Recarregue a página.");
+      return;
+    }
+    let ExcelJS;
+    try {
+      ExcelJS = await inv.ensureExcelJS();
+    } catch (e) {
+      alert("Não foi possível carregar a biblioteca de Excel. Recarregue a página.");
+      return;
+    }
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "CRM Moura Leite";
+    wb.created = new Date();
+    let imgId = null;
+    try {
+      const logo = await inv.logoDataUrl();
+      imgId = wb.addImage({ base64: logo.dataUrl, extension: logo.extension || "png" });
+    } catch (e) { /* logo opcional */ }
+
+    const months = this.months();
+    const colCount = 2 + 24 + 4;
+    const ws = wb.addWorksheet("Orçamento", { properties: { showGridLines: false } });
+    ws.properties.outlineProperties = { summaryBelow: false, summaryRight: false };
+    ws.views = [{
+      state: "frozen",
+      xSplit: 2,
+      ySplit: 5,
+      topLeftCell: "C6",
+      activeCell: "C6",
+      showGridLines: false
+    }];
+    ws.columns = [
+      { width: 18 },
+      { width: 52 },
+      ...Array.from({ length: 24 }, () => ({ width: 14 })),
+      { width: 16 },
+      { width: 16 },
+      { width: 16 },
+      { width: 14 }
+    ];
+
+    const logoPx = Math.round(1.54 * 96 / 2.54);
+    ws.mergeCells("A1:B2");
+    ws.getRow(1).height = 28;
+    ws.getRow(2).height = 22;
+    const view = this.mouraView ? "Valor Moura Leite" : "Valor total";
+    const title = ws.getCell("A1");
+    title.value = {
+      richText: [
+        { font: { name: "Calibri", size: 14, bold: true, color: { argb: "FF475569" } }, text: "Orçamento 2026 × 2027\n" },
+        { font: { name: "Calibri", size: 9, color: { argb: "FF64748B" } }, text: view + " · empresa, centro de custo e conta" }
+      ]
+    };
+    inv.excelPaint(title, {
+      fill: "FFFFFFFF",
+      align: { vertical: "middle", horizontal: "left", wrapText: true, indent: 8 }
+    });
+    if (imgId != null) {
+      try {
+        ws.addImage(imgId, { tl: { col: 0.04, row: 0.08 }, ext: { width: logoPx, height: logoPx } });
+      } catch (e) { /* logo opcional */ }
+    }
+
+    const y26 = data.y26;
+    const y27 = data.y27;
+    const t26 = this.sum(y26);
+    const t27 = this.sum(y27);
+    const delta = t27 - t26;
+    const kpis = [
+      { label: "Empresas", value: data.companies.length, color: "FF0F172A", money: false },
+      { label: "Recebido jan–set 2026", value: this.sum(y26.slice(0, 9)), color: "FF0F172A", money: true },
+      { label: "Forecast out–dez 2026", value: this.sum(y26.slice(9)), color: "FF9A3412", money: true },
+      { label: "2026 completo", value: t26, color: "FF0F172A", money: true },
+      { label: "Orçado 2027", value: t27, color: "FF105436", money: true },
+      { label: "Variação", value: delta, color: delta < 0 ? "FFB91C1C" : "FF105436", money: true }
+    ];
+    kpis.forEach((k, i) => {
+      const col = 4 + i;
+      const cellL = ws.getRow(1).getCell(col);
+      const cellV = ws.getRow(2).getCell(col);
+      cellL.value = k.label;
+      cellV.value = k.value;
+      inv.excelPaint(cellL, {
+        fill: "FFFFFFFF",
+        font: { bold: true, size: 8, color: { argb: "FF94A3B8" } },
+        align: { horizontal: "right", vertical: "bottom" }
+      });
+      inv.excelPaint(cellV, {
+        fill: "FFFFFFFF",
+        font: { bold: true, size: 12, color: { argb: k.color } },
+        align: { horizontal: "right", vertical: "middle" },
+        numFmt: k.money ? "#,##0.00" : "0"
+      });
+    });
+    const pctHead = ws.getRow(1).getCell(10);
+    const pctVal = ws.getRow(2).getCell(10);
+    pctHead.value = "Variação %";
+    pctVal.value = Math.abs(t26) < 0.005 ? null : delta / t26;
+    inv.excelPaint(pctHead, {
+      fill: "FFFFFFFF",
+      font: { bold: true, size: 8, color: { argb: "FF94A3B8" } },
+      align: { horizontal: "right", vertical: "bottom" }
+    });
+    inv.excelPaint(pctVal, {
+      fill: "FFFFFFFF",
+      font: { bold: true, size: 12, color: { argb: delta < 0 ? "FFB91C1C" : "FF105436" } },
+      align: { horizontal: "right", vertical: "middle" },
+      numFmt: "0.0%"
+    });
+
+    ws.getRow(3).height = 8;
+    ws.mergeCells(4, 1, 5, 1);
+    ws.mergeCells(4, 2, 5, 2);
+    ws.mergeCells(4, 3, 4, 14);
+    ws.mergeCells(4, 15, 4, 26);
+    ws.mergeCells(4, 27, 4, 30);
+    const groupHeads = [
+      [1, "Nível", "FF334155"],
+      [2, "Empresa / Centro de custo / Plano", "FF334155"],
+      [3, "2026", "FF0C3D28"],
+      [15, "2027", "FF1A6B45"],
+      [27, "Comparativo", "FF334155"]
+    ];
+    const fillSpan = (from, to, fill) => {
+      for (let c = from; c <= to; c++) {
+        inv.excelPaint(ws.getRow(4).getCell(c), {
+          fill,
+          font: { bold: true, size: 9, color: { argb: "FFFFFFFF" } },
+          align: { horizontal: "center", vertical: "middle" },
+          border: true
+        });
+      }
+    };
+    fillSpan(1, 2, "FF334155");
+    fillSpan(3, 14, "FF0C3D28");
+    fillSpan(15, 26, "FF1A6B45");
+    fillSpan(27, 30, "FF334155");
+    groupHeads.forEach(([col, text]) => {
+      ws.getRow(4).getCell(col).value = text;
+    });
+    const monthHeads = months.map((m, i) => m + (i >= 9 ? "*" : ""));
+    const heads = ["", "", ...monthHeads, ...months, "Total 2026", "Total 2027", "Variação", "Variação %"];
+    const headRow = ws.getRow(5);
+    headRow.height = 20;
+    heads.forEach((h, i) => {
+      if (i < 2) return;
+      const cell = headRow.getCell(i + 1);
+      cell.value = h;
+      const forecast = i >= 2 && i <= 13 && (i - 2) >= 9;
+      inv.excelPaint(cell, {
+        fill: i <= 13 ? "FF0C3D28" : (i <= 25 ? "FF1A6B45" : "FF334155"),
+        font: { bold: true, size: 9, color: { argb: forecast ? "FFFDE68A" : "FFFFFFFF" } },
+        align: { horizontal: "center", vertical: "middle" },
+        border: true
+      });
+    });
+    ws.getRow(4).height = 20;
+
+    const moneyFmt = "#,##0.00";
+    const paintMoney = (cell, n, kind, forecast) => {
+      cell.value = Number(n) || 0;
+      const dark = kind === "emp" || kind === "total";
+      const bg = kind === "emp" ? "FF0C3D28" : (kind === "total" ? "FF134E3A" : (kind === "cc" ? "FFD1FAE5" : "FFFFFFFF"));
+      let color = dark ? "FFFFFFFF" : (n < 0 ? "FFB91C1C" : "FF0F172A");
+      if (!dark && forecast) color = "FF9A3412";
+      if (dark && forecast) color = "FFFDE68A";
+      if (!dark && kind === "cc" && n >= 0 && !forecast) color = "FF064E3B";
+      inv.excelPaint(cell, {
+        fill: bg,
+        font: { bold: kind !== "leaf", size: 9, color: { argb: color } },
+        align: { horizontal: "right", vertical: "middle" },
+        border: true,
+        numFmt: moneyFmt
+      });
+    };
+    const paintPct = (cell, d, base, kind) => {
+      const dark = kind === "emp" || kind === "total";
+      const bg = kind === "emp" ? "FF0C3D28" : (kind === "total" ? "FF134E3A" : (kind === "cc" ? "FFD1FAE5" : "FFFFFFFF"));
+      if (Math.abs(base) < 0.005) {
+        cell.value = "—";
+        inv.excelPaint(cell, {
+          fill: bg,
+          font: { bold: true, size: 9, color: { argb: dark ? "FFFFFFFF" : "FF64748B" } },
+          align: { horizontal: "right", vertical: "middle" },
+          border: true
+        });
+        return;
+      }
+      cell.value = d / base;
+      const color = dark ? "FFFFFFFF" : (d < 0 ? "FFB91C1C" : "FF105436");
+      inv.excelPaint(cell, {
+        fill: bg,
+        font: { bold: true, size: 9, color: { argb: color } },
+        align: { horizontal: "right", vertical: "middle" },
+        border: true,
+        numFmt: "0.0%"
+      });
+    };
+
+    let rowIdx = 6;
+    data.rows.forEach((row) => {
+      const excelRow = ws.getRow(rowIdx);
+      excelRow.height = 18;
+      if (row.kind === "cc") excelRow.outlineLevel = 1;
+      if (row.kind === "leaf") excelRow.outlineLevel = 2;
+      const bg = row.kind === "emp" ? "FF0C3D28" : (row.kind === "total" ? "FF134E3A" : (row.kind === "cc" ? "FFD1FAE5" : "FFFFFFFF"));
+      const color = (row.kind === "emp" || row.kind === "total") ? "FFFFFFFF" : (row.kind === "cc" ? "FF064E3B" : "FF0F172A");
+      const levelCell = excelRow.getCell(1);
+      levelCell.value = row.level;
+      inv.excelPaint(levelCell, {
+        fill: bg,
+        font: { bold: row.kind !== "leaf", size: 9, color: { argb: color } },
+        align: { horizontal: "left", vertical: "middle" },
+        border: true
+      });
+      const labelCell = excelRow.getCell(2);
+      labelCell.value = row.label;
+      inv.excelPaint(labelCell, {
+        fill: bg,
+        font: { bold: row.kind !== "leaf", size: 9, color: { argb: color } },
+        align: { horizontal: "left", vertical: "middle", indent: row.depth },
+        border: true
+      });
+      row.m26.forEach((v, i) => paintMoney(excelRow.getCell(3 + i), v, row.kind, i >= 9));
+      row.m27.forEach((v, i) => paintMoney(excelRow.getCell(15 + i), v, row.kind, false));
+      const a26 = this.sum(row.m26);
+      const a27 = this.sum(row.m27);
+      const d = a27 - a26;
+      paintMoney(excelRow.getCell(27), a26, row.kind, false);
+      paintMoney(excelRow.getCell(28), a27, row.kind, false);
+      paintMoney(excelRow.getCell(29), d, row.kind, false);
+      paintPct(excelRow.getCell(30), d, a26, row.kind);
+      rowIdx += 1;
+    });
+
+    rowIdx += 1;
+    ws.mergeCells(rowIdx, 1, rowIdx, colCount);
+    const foot = ws.getCell(rowIdx, 1);
+    foot.value = inv.generatedAtLabel(new Date()) + " · meses com * em 2026 são forecast · grupos: empresa, centro de custo e conta";
+    inv.excelPaint(foot, {
+      font: { italic: true, size: 8, color: { argb: "FF64748B" } },
+      align: { vertical: "middle", horizontal: "left" }
+    });
+    ws.getRow(rowIdx).height = 18;
+
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0, 10);
+    a.href = URL.createObjectURL(blob);
+    a.download = "orcamento_2026_2027_" + stamp + ".xlsx";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      URL.revokeObjectURL(a.href);
+      a.remove();
+    }, 1000);
   }
 };
 

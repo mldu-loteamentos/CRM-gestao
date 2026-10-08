@@ -4446,12 +4446,23 @@ window.mergeCrmUsers = function(localStr, cloudStr) {
   try { cloud = JSON.parse(cloudStr || "[]") || []; } catch (e) { cloud = []; }
   if (!Array.isArray(local)) local = [];
   if (!Array.isArray(cloud)) cloud = [];
-  const rankStatus = (s) => {
+    const rankStatus = (s) => {
     const n = String(s || "").toUpperCase();
     if (n === "ATIVO") return 3;
     if (n === "INATIVO") return 2;
     if (n === "PENDENTE") return 1;
     return 0;
+  };
+  const statusAt = (u) => {
+    const n = Number(u && u.statusAt);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+  const pickStatus = (prev, next) => {
+    const ap = statusAt(prev);
+    const an = statusAt(next);
+    if (ap || an) return ap >= an ? prev.status : next.status;
+    if (rankStatus(prev.status) >= rankStatus(next.status)) return prev.status;
+    return next.status;
   };
   const byKey = new Map();
   const put = (u) => {
@@ -4466,7 +4477,11 @@ window.mergeCrmUsers = function(localStr, cloudStr) {
       return;
     }
     const merged = Object.assign({}, prev, next);
-    if (rankStatus(prev.status) >= rankStatus(next.status)) merged.status = prev.status;
+    if (rankStatus(prev.status) || rankStatus(next.status) || statusAt(prev) || statusAt(next)) {
+      merged.status = pickStatus(prev, next);
+      const winnerAt = statusAt(prev) >= statusAt(next) ? statusAt(prev) : statusAt(next);
+      if (winnerAt) merged.statusAt = winnerAt;
+    }
     const prevProf = String(prev.profile_name || "").trim();
     const nextProf = String(next.profile_name || "").trim();
     if (prevProf && (!nextProf || nextProf.toUpperCase() === "OPERADOR") && prevProf.toUpperCase() !== "OPERADOR") {
@@ -28856,6 +28871,27 @@ window.nexHasLetterForClient = function(client) {
   return window.nexHasLetter(client.customerId, matchId);
 };
 
+window.nexCorreiosCheckDays = function() {
+  const cfg = window.readNexDueConfig ? window.readNexDueConfig() : { correiosCheckDays: 15 };
+  const n = Number(cfg.correiosCheckDays);
+  return Number.isFinite(n) && n >= 1 ? n : 15;
+};
+
+window.nexNeedsCorreiosCheck = function(item) {
+  if (!item) return false;
+  if (window.nexLostValidityByPayment(item).lost) return false;
+  if (window.nexHasArDigital(item)) return false;
+  const sent = window.nexParseIso(item.date || item.createdAt);
+  if (!sent) return false;
+  const days = window.nexDaysBetween(sent, window.nexTodayIso());
+  return days != null && days >= window.nexCorreiosCheckDays();
+};
+
+window.nexCorreiosCheckCount = function() {
+  if (typeof window.nexCollectAll !== "function") return 0;
+  return window.nexCollectAll().filter(it => window.nexNeedsCorreiosCheck(it)).length;
+};
+
 window.nexInFollowup = function(item) {
   if (!item) return false;
   if (window.nexLostValidityByPayment(item).lost) return false;
@@ -28863,7 +28899,7 @@ window.nexInFollowup = function(item) {
   const days = sent ? window.nexDaysBetween(sent, window.nexTodayIso()) : 999;
   const pendingConsult = !item.tracking || !item.status;
   const inDeadline = days != null && days <= 10;
-  return inDeadline || pendingConsult;
+  return inDeadline || pendingConsult || window.nexNeedsCorreiosCheck(item);
 };
 
 window.openNexElegiveisZero = function() {
@@ -28903,7 +28939,7 @@ window.NEX_DUE_SNOOZE_KEY = "crm_nex_due_alert_snooze_until";
 window.NEX_DUE_ACK_KEY = "crm_nex_due_alert_ack_cycles";
 
 window.defaultNexDueConfig = function() {
-  return { enabled: true, dueDays: [], openOffset: 1, maxOffset: 3 };
+  return { enabled: true, dueDays: [], openOffset: 1, maxOffset: 3, correiosCheckDays: 15 };
 };
 
 window.readNexDueConfig = function() {
@@ -28914,11 +28950,13 @@ window.readNexDueConfig = function() {
   const openOffset = Math.max(1, Math.min(10, Number(raw.openOffset) || def.openOffset));
   let maxOffset = Math.max(1, Math.min(15, Number(raw.maxOffset) || def.maxOffset));
   if (maxOffset < openOffset) maxOffset = openOffset;
+  const correiosCheckDays = Math.max(1, Math.min(90, Number(raw.correiosCheckDays) || def.correiosCheckDays));
   return {
     enabled: raw.enabled !== false,
     dueDays: [...new Set(days)].sort((a, b) => a - b),
     openOffset,
-    maxOffset
+    maxOffset,
+    correiosCheckDays
   };
 };
 
@@ -28928,6 +28966,7 @@ window.writeNexDueConfig = function(cfg) {
     dueDays: (cfg && Array.isArray(cfg.dueDays) ? cfg.dueDays : []).map(Number).filter(n => n >= 1 && n <= 31),
     openOffset: Math.max(1, Number(cfg && cfg.openOffset) || 1),
     maxOffset: Math.max(1, Number(cfg && cfg.maxOffset) || 3),
+    correiosCheckDays: Math.max(1, Math.min(90, Number(cfg && cfg.correiosCheckDays) || 15)),
     updatedAt: Date.now()
   };
   payload.dueDays = [...new Set(payload.dueDays)].sort((a, b) => a - b);
@@ -28946,6 +28985,7 @@ window.collectNexDueConfigFromForm = function() {
   const enabledEl = document.getElementById("nex-due-alert-enabled");
   const openEl = document.getElementById("nex-due-open-offset");
   const maxEl = document.getElementById("nex-due-max-offset");
+  const correiosEl = document.getElementById("nex-correios-check-days");
   const selected = [];
   document.querySelectorAll("#nex-due-days-grid [data-day].nex-due-day-on").forEach(btn => {
     selected.push(Number(btn.getAttribute("data-day")));
@@ -28954,7 +28994,8 @@ window.collectNexDueConfigFromForm = function() {
     enabled: !!(enabledEl && enabledEl.checked),
     dueDays: selected,
     openOffset: Number(openEl && openEl.value) || 1,
-    maxOffset: Number(maxEl && maxEl.value) || 3
+    maxOffset: Number(maxEl && maxEl.value) || 3,
+    correiosCheckDays: Number(correiosEl && correiosEl.value) || 15
   };
 };
 
@@ -29077,10 +29118,12 @@ window.renderNexDueConfigPanel = function() {
   const enabledEl = document.getElementById("nex-due-alert-enabled");
   const openEl = document.getElementById("nex-due-open-offset");
   const maxEl = document.getElementById("nex-due-max-offset");
+  const correiosEl = document.getElementById("nex-correios-check-days");
   const grid = document.getElementById("nex-due-days-grid");
   if (enabledEl) enabledEl.checked = cfg.enabled;
   if (openEl) openEl.value = cfg.openOffset;
   if (maxEl) maxEl.value = cfg.maxOffset;
+  if (correiosEl) correiosEl.value = cfg.correiosCheckDays || 15;
   if (grid) {
     const selected = new Set(cfg.dueDays);
     grid.innerHTML = "";
@@ -29491,7 +29534,8 @@ window.renderNexFollowup = function() {
     return true;
   });
   if (!filtered.length) {
-    body.innerHTML = `<tr><td colspan="12" style="text-align:center;padding:28px;color:#64748b;">Nenhuma NEX no prazo de 10 dias ou pendente de consulta.</td></tr>`;
+    const prazo = window.nexCorreiosCheckDays();
+    body.innerHTML = `<tr><td colspan="12" style="text-align:center;padding:28px;color:#64748b;">Nenhuma NEX no prazo de 10 dias, pendente de consulta ou com ${prazo} dias ou mais sem AR digital.</td></tr>`;
     return;
   }
   body.innerHTML = filtered.map(it => {

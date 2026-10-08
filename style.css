@@ -5811,11 +5811,38 @@ circle.donut-segment {
   min-width: max-content;
   padding: 0 16px;
 }
+.btn-excel,
 .cprev-excel-btn {
   background-color: #f8fafc !important;
   border: 1px solid #cbd5e1 !important;
   color: #334155 !important;
   font-weight: 600;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+  cursor: pointer;
+  box-sizing: border-box;
+  height: 36px;
+  padding: 0 16px;
+  width: auto;
+}
+.btn-excel:hover:not(:disabled),
+.cprev-excel-btn:hover:not(:disabled) {
+  background-color: #e2e8f0 !important;
+  color: #334155 !important;
+}
+.btn-excel:disabled,
+.cprev-excel-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.fila-align-btn.btn-excel,
+.ecau-actions .btn.btn-excel,
+.ecau-actions .btn.cprev-excel-btn {
+  width: 100%;
 }
 .cprev-updated {
   font-size: 0.8rem;

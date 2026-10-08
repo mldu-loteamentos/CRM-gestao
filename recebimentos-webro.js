@@ -556,8 +556,8 @@ const RecebimentosWebroApp = {
               <button type="button" class="btn btn-primary ccom-consult" ${s.loading ? "disabled" : ""} onclick="RecebimentosWebroApp.consultar()">
                 <i data-lucide="search" style="width:14px;"></i> ${s.loading ? "Consultando…" : "Consultar"}
               </button>
-              <button type="button" class="btn btn-primary ccom-consult" ${s.loading || !rows.length ? "disabled" : ""} onclick="RecebimentosWebroApp.exportExcel()">
-                <i data-lucide="file-spreadsheet" style="width:14px;"></i> Gerar Excel
+              <button type="button" class="btn btn-sm btn-excel" ${s.loading || !rows.length ? "disabled" : ""} onclick="RecebimentosWebroApp.exportExcel()" title="Exportar tabela atual para Excel">
+                <i data-lucide="download" style="width:14px;height:14px;"></i> Excel
               </button>
             </div>
           </div>

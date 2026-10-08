@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="i.ntegr.a/arvore.png">
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=1032">
+  <link rel="stylesheet" href="style.css?v=1038">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -888,7 +888,7 @@
 
     <div class="login-pane-brand">
       <div class="login-band login-band-logo">
-        <img src="i.ntegr.a/logo-oficial.png?v=1032" alt="I.ntegr.A Moura Leite">
+        <img src="i.ntegr.a/logo-oficial.png?v=1038" alt="I.ntegr.A Moura Leite">
       </div>
 
       <div class="login-band login-band-action">
@@ -1328,7 +1328,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.1032 &nbsp;&middot;&nbsp; 08/10/2026
+            v1.0.1038 &nbsp;&middot;&nbsp; 08/10/2026
           </span>
         </div>
       </div>
@@ -2653,7 +2653,7 @@ ____________________________________________
         <!-- Container padrão (Em Construção) -->
         <div id="home-em-construcao-container"
           style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="i.ntegr.a/arvore.png?v=1032" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 1.25rem;">
+          <img src="i.ntegr.a/arvore.png?v=1038" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 1.25rem;">
           <p style="color: var(--color-primary); font-size: 1.15rem; font-weight: 600; letter-spacing: 0.06em; margin: 0;">
             Inteligência - Integração - Agilidade
           </p>
@@ -3266,7 +3266,7 @@ ____________________________________________
               <div class="audit-filters-actions">
                 <button type="button" class="btn btn-cancel" onclick="clearAuditFilters()"><i data-lucide="eraser"></i> Limpar filtros</button>
                 <button type="button" class="btn btn-secondary" onclick="renderAuditLogs(true)"><i data-lucide="refresh-cw"></i> Atualizar</button>
-                <button type="button" class="btn btn-primary" onclick="exportAuditExcel()"><i data-lucide="download"></i> Exportar Excel</button>
+                <button type="button" class="btn btn-excel" onclick="exportAuditExcel()" title="Exportar tabela atual para Excel"><i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel</button>
               </div>
             </div>
 
@@ -3302,7 +3302,7 @@ ____________________________________________
         <section id="tab-construcao-seguranca" class="tab-pane" style="display: none;">
           <div
             style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-            <img src="i.ntegr.a/arvore.png?v=1032" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
+            <img src="i.ntegr.a/arvore.png?v=1038" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
             <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 0;">Módulo em Construção</h2>
           </div>
         </section>
@@ -3430,8 +3430,8 @@ ____________________________________________
                 <span id="adv-filters-badge" style="display:none; background: #9a3412; border-radius: 50%; width: 18px; height: 18px; font-size: 0.65rem; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0;">0</span>
               </button>
               <div class="fila-align-side">
-                <button id="btn-export-excel" class="btn btn-secondary fila-align-btn" onclick="exportFilteredToExcel()" style="white-space: nowrap; background-color: #f8fafc; border: 1px solid #cbd5e1; color: #334155; font-weight: 600; padding: 0 16px; height: 36px; border-radius: 4px; cursor: pointer;" title="Exportar tabela atual para Excel">
-                    <i data-lucide="download" style="width: 14px;"></i> Exportar em Excel
+                <button id="btn-export-excel" class="btn btn-excel fila-align-btn" onclick="exportFilteredToExcel()" title="Exportar tabela atual para Excel">
+                    <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
                 </button>
               </div>
 
@@ -3526,8 +3526,8 @@ ____________________________________________
               <button id="btn-gerar-mapa-juridico" class="btn btn-primary" onclick="openMapaJuridico()" style="display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 12px; border-radius: 4px; font-weight: 600; cursor: pointer; border: none; height: 36px; min-width: 188px; box-sizing: border-box;" title="Abrir mapa jurídico com indicadores e fases">
                 <i data-lucide="map" style="width: 14px;"></i> Gerar Mapa Jurídico
               </button>
-              <button class="btn btn-secondary" onclick="exportSubjudiceToExcel()" style="background-color: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 4px; cursor: pointer; height: 36px;" title="Exportar tabela atual para Excel">
-                <i data-lucide="download" style="width: 14px;"></i> Exportar em Excel
+              <button type="button" class="btn btn-excel" onclick="exportSubjudiceToExcel()" title="Exportar tabela atual para Excel">
+                <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
               </button>
             </div>
             <div id="subjudice-suggestions" class="suggestions-dropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #e2e8f0; border-radius: 4px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); z-index: 1000; max-height: 200px; overflow-y: auto;"></div>
@@ -3705,8 +3705,8 @@ ____________________________________________
                       id="selected-agenda-date-str" style="color: var(--color-secondary);">23/05/2026</span>
                   </h3>
                   <div style="display: flex; gap: 10px;">
-                    <button class="btn btn-secondary" onclick="exportAgendaToExcel()" style="background-color: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 4px; cursor: pointer;" title="Exportar Agenda do Dia para Excel">
-                      <i data-lucide="download" style="width: 14px;"></i> Exportar Agenda
+                    <button type="button" class="btn btn-excel" onclick="exportAgendaToExcel()" title="Exportar Agenda do Dia para Excel">
+                      <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
                     </button>
                   </div>
                 </div>
@@ -3784,8 +3784,8 @@ ____________________________________________
                   <i data-lucide="filter" style="width:14px;height:14px;flex-shrink:0;"></i> Filtros Avançados
                   <span id="zeropaid-adv-filters-badge" style="display:none; background: #9a3412; border-radius: 50%; width: 18px; height: 18px; font-size: 0.65rem; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0;">0</span>
                 </button>
-                <button class="btn btn-secondary fila-align-btn" onclick="exportZeropaidToExcel()" style="background-color: #f8fafc; border: 1px solid #cbd5e1; color: #334155; font-weight: 600; padding: 0 16px; height: 36px; border-radius: 4px; cursor: pointer;" title="Exportar tabela atual para Excel">
-                  <i data-lucide="download" style="width: 14px;"></i> Exportar em Excel
+                <button type="button" class="btn btn-excel fila-align-btn" onclick="exportZeropaidToExcel()" title="Exportar tabela atual para Excel">
+                  <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
                 </button>
                 <button id="btn-gerar-mapa-zeropaid" class="btn btn-primary fila-align-btn" onclick="gerarMapaZeropaidPDF()" style="font-weight: 600; border: none; border-radius: 4px; color: white; cursor: pointer; padding: 0 16px;" title="Gerar Mapa de Clientes 0% Pago">
                   <i data-lucide="map" style="width: 14px; height: 14px; flex-shrink: 0;"></i> Gerar Mapa 0% Pago
@@ -4145,6 +4145,18 @@ ____________________________________________
                     <input type="number" class="form-control" id="nex-due-max-offset" min="1" max="15" value="3" style="max-width:88px; font-size:1.05rem; font-weight:700;" oninput="window.queueNexDueConfigSave()">
                     <span style="font-size:0.82rem; color:#64748b;">dias úteis após o vencimento</span>
                   </div>
+                </div>
+              </div>
+
+              <div class="nex-due-card">
+                <h4>Consulta no site dos Correios</h4>
+                <p style="font-size:0.85rem; color:#64748b; margin:6px 0 0; line-height:1.5;">
+                  Toda NEX enviada precisa ser consultada nos Correios para checar o AR digital depois deste prazo.
+                </p>
+                <div style="display:flex; align-items:baseline; gap:8px; margin-top:10px; flex-wrap:wrap;">
+                  <span style="font-size:0.95rem; font-weight:800; color:#105436;">Após</span>
+                  <input type="number" class="form-control" id="nex-correios-check-days" min="1" max="90" value="15" style="max-width:88px; font-size:1.05rem; font-weight:700;" oninput="window.queueNexDueConfigSave()">
+                  <span style="font-size:0.82rem; color:#64748b;">dias do envio</span>
                 </div>
               </div>
 
@@ -5355,10 +5367,9 @@ ____________________________________________
                       </div>
                     </div>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-                      <button type="button" class="btn btn-secondary" onclick="exportQuitacaoSaldoDevedorExcel()"
-                        style="background:#f1f5f9;border:1px solid #e2e8f0;color:#475569;font-weight:600;display:inline-flex;align-items:center;gap:6px;padding:6px 12px;height:36px;border-radius:4px;cursor:pointer;"
+                      <button type="button" class="btn btn-excel" onclick="exportQuitacaoSaldoDevedorExcel()"
                         title="Exportar relatório Saldo Devedor Presente">
-                        <i data-lucide="file-spreadsheet" style="width:16px;height:16px;"></i> Exportar Excel
+                        <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
                       </button>
                       <button type="button" class="btn btn-secondary" onclick="loadQuitacaoDebtReport(true)"
                         style="background:#f1f5f9;border:1px solid #e2e8f0;color:#475569;font-weight:600;display:inline-flex;align-items:center;gap:6px;padding:6px 12px;height:36px;border-radius:4px;cursor:pointer;"
@@ -7573,65 +7584,65 @@ RG: {{TESTEMUNHA_1_RG}} RG: {{TESTEMUNHA_2_RG}}</textarea>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/digidem/leaflet-side-by-side@2.0.0/leaflet-side-by-side.min.js"></script>
   <!-- Scripts de Negócio -->
-  <script type="module" src="firebase-config.js?v=1032"></script>
+  <script type="module" src="firebase-config.js?v=1038"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
   <script>
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=1032"></script>
-  <script defer src="sienge-api.js?v=1032"></script>
-  <script defer src="consumo-api.js?v=1032"></script>
-  <script defer src="azure-auth.js?v=1032"></script>
-  <script defer src="app.js?v=1032"></script>
-  <script defer src="empresa-filter.js?v=1032"></script>
-  <script defer src="cartao-taxas.js?v=1032"></script>
-  <script defer src="alcada-desconto.js?v=1032"></script>
-  <script defer src="alcada-distrato.js?v=1032"></script>
-  <script defer src="home-dashboard.js?v=1032"></script>
-  <script defer src="anexos.js?v=1032"></script>
-  <script defer src="contas-pagar.js?v=1032"></script>
-  <script defer src="compras-previsoes.js?v=1032"></script>
-  <script defer src="compras-dashboard.js?v=1032"></script>
-  <script defer src="engenharia-caucao.js?v=1032"></script>
-  <script defer src="config-tags.js?v=1032"></script>
-  <script defer src="config-users.js?v=1032"></script>
-  <script defer src="suporte.js?v=1032"></script>
-  <script defer src="construcao.js?v=1032"></script>
-  <script defer src="empresas.js?v=1032"></script>
-  <script defer src="relacionamento.js?v=1032"></script>
-  <script defer src="cessao-direitos.js?v=1032"></script>
-  <script defer src="compromissario.js?v=1032"></script>
-  <script defer src="comercial.js?v=1032"></script>
-  <script defer src="estoque-comercial.js?v=1032"></script>
-  <script defer src="condicoes-pagamento.js?v=1032"></script>
-  <script defer src="tabelas-vigentes.js?v=1032"></script>
-  <script defer src="controle-comissao.js?v=1032"></script>
-  <script defer src="recebimentos-webro.js?v=1032"></script>
-  <script defer src="centros-custo.js?v=1032"></script>
-  <script defer src="marketing.js?v=1032"></script>
-  <script defer src="plano-financeiro.js?v=1032"></script>
-  <script defer src="orcamento-data.js?v=1032"></script>
-  <script defer src="orcamento-2026.js?v=1032"></script>
-  <script defer src="orcamento.js?v=1032"></script>
-  <script defer src="prestacao-contas.js?v=1032"></script>
+  <script defer src="data.js?v=1038"></script>
+  <script defer src="sienge-api.js?v=1038"></script>
+  <script defer src="consumo-api.js?v=1038"></script>
+  <script defer src="azure-auth.js?v=1038"></script>
+  <script defer src="app.js?v=1038"></script>
+  <script defer src="empresa-filter.js?v=1038"></script>
+  <script defer src="cartao-taxas.js?v=1038"></script>
+  <script defer src="alcada-desconto.js?v=1038"></script>
+  <script defer src="alcada-distrato.js?v=1038"></script>
+  <script defer src="home-dashboard.js?v=1038"></script>
+  <script defer src="anexos.js?v=1038"></script>
+  <script defer src="contas-pagar.js?v=1038"></script>
+  <script defer src="compras-previsoes.js?v=1038"></script>
+  <script defer src="compras-dashboard.js?v=1038"></script>
+  <script defer src="engenharia-caucao.js?v=1038"></script>
+  <script defer src="config-tags.js?v=1038"></script>
+  <script defer src="config-users.js?v=1038"></script>
+  <script defer src="suporte.js?v=1038"></script>
+  <script defer src="construcao.js?v=1038"></script>
+  <script defer src="empresas.js?v=1038"></script>
+  <script defer src="relacionamento.js?v=1038"></script>
+  <script defer src="cessao-direitos.js?v=1038"></script>
+  <script defer src="compromissario.js?v=1038"></script>
+  <script defer src="comercial.js?v=1038"></script>
+  <script defer src="estoque-comercial.js?v=1038"></script>
+  <script defer src="condicoes-pagamento.js?v=1038"></script>
+  <script defer src="tabelas-vigentes.js?v=1038"></script>
+  <script defer src="controle-comissao.js?v=1038"></script>
+  <script defer src="recebimentos-webro.js?v=1038"></script>
+  <script defer src="centros-custo.js?v=1038"></script>
+  <script defer src="marketing.js?v=1038"></script>
+  <script defer src="plano-financeiro.js?v=1038"></script>
+  <script defer src="orcamento-data.js?v=1038"></script>
+  <script defer src="orcamento-2026.js?v=1038"></script>
+  <script defer src="orcamento.js?v=1038"></script>
+  <script defer src="prestacao-contas.js?v=1038"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="fluxo-caixa.js?v=1032"></script>
-  <script defer src="caixa-diario.js?v=1032"></script>
-  <script defer src="investimento.js?v=1032"></script>
-  <script defer src="parametrizacao-parceiro.js?v=1032"></script>
-  <script defer src="societario.js?v=1032"></script>
-  <script defer src="participacoes.js?v=1032"></script>
-  <script defer src="fiscal.js?v=1032"></script>
-  <script defer src="indexadores.js?v=1032"></script>
-  <script defer src="verificar-construcao.js?v=1032"></script>
-  <script defer src="financiamento.js?v=1032"></script>
-  <script src="repactuacoes.js?v=1032"></script>
-  <script defer src="repactuacao-lote.js?v=1032"></script>
+  <script defer src="fluxo-caixa.js?v=1038"></script>
+  <script defer src="caixa-diario.js?v=1038"></script>
+  <script defer src="investimento.js?v=1038"></script>
+  <script defer src="parametrizacao-parceiro.js?v=1038"></script>
+  <script defer src="societario.js?v=1038"></script>
+  <script defer src="participacoes.js?v=1038"></script>
+  <script defer src="fiscal.js?v=1038"></script>
+  <script defer src="indexadores.js?v=1038"></script>
+  <script defer src="verificar-construcao.js?v=1038"></script>
+  <script defer src="financiamento.js?v=1038"></script>
+  <script src="repactuacoes.js?v=1038"></script>
+  <script defer src="repactuacao-lote.js?v=1038"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=1032"></script>
+  <script defer src="dashboard-inadimplencia.js?v=1038"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

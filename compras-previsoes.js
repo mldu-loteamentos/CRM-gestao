@@ -96,6 +96,8 @@ const ComprasPrevisoesApp = {
     allRows: [],
     shown: [],
     billsByTitulo: {},
+    pedidosByTitulo: {},
+    notaByPedido: {},
     parcelasCache: {},
     openTitulo: "",
     parcelas: [],
@@ -327,10 +329,90 @@ const ComprasPrevisoesApp = {
     this.state.billsByTitulo = map;
   },
 
+  pedidoKey(doc) {
+    const s = String(doc || "").trim();
+    if (!/^\d{3,}$/.test(s)) return "";
+    return String(Number(s));
+  },
+
+  indexPedidos() {
+    const byTitle = {};
+    const add = (titulo, doc) => {
+      const key = this.pedidoKey(doc);
+      if (!key) return;
+      const id = String(titulo || "");
+      if (!id) return;
+      if (!byTitle[id]) byTitle[id] = {};
+      byTitle[id][key] = 1;
+    };
+    Object.keys(this.state.billsByTitulo || {}).forEach((titulo) => {
+      (this.state.billsByTitulo[titulo] || []).forEach((bill) => add(titulo, bill && bill.documentNumber));
+    });
+    (this.state.allRows || []).forEach((row) => add(row.titulo, row.documento));
+    this.state.pedidosByTitulo = byTitle;
+  },
+
   titleHasNota(titulo) {
-    return (this.state.billsByTitulo[String(titulo)] || []).some((b) =>
+    const id = String(titulo);
+    const onBill = (this.state.billsByTitulo[id] || []).some((b) =>
       this.isNotaDoc(b.documentIdentificationId, b.documentIdentificationName, b)
     );
+    if (onBill) return true;
+    const pedidos = this.state.pedidosByTitulo[id] || {};
+    return Object.keys(pedidos).some((pedido) => this.state.notaByPedido[pedido] === true);
+  },
+
+  async resolvePedidos(ids, gen) {
+    if (!this._notaPending) this._notaPending = {};
+    const queue = [];
+    (ids || []).forEach((raw) => {
+      const id = this.pedidoKey(raw) || String(raw || "");
+      if (!id || this.state.notaByPedido[id] != null || this._notaPending[id]) return;
+      this._notaPending[id] = 1;
+      queue.push(id);
+    });
+    if (!queue.length) return;
+    let done = 0;
+    const worker = async () => {
+      while (queue.length) {
+        if (gen != null && gen !== this._notaGen) {
+          queue.splice(0).forEach((pendingId) => { delete this._notaPending[pendingId]; });
+          return;
+        }
+        const id = queue.shift();
+        try {
+          const data = await window.siengeFetchWithRetry(
+            "/purchase-invoices/deliveries-attended?purchaseOrderId=" + encodeURIComponent(id) + "&limit=200",
+            1
+          );
+          const rows = (data && data.results) || [];
+          this.state.notaByPedido[id] = rows.length > 0;
+        } catch (e) {
+          delete this.state.notaByPedido[id];
+        }
+        delete this._notaPending[id];
+        done += 1;
+        if (gen != null && gen !== this._notaGen) return;
+        if (done % 15 === 0 || !queue.length) this.refreshNotaView();
+      }
+    };
+    const n = Math.min(4, queue.length);
+    await Promise.all(Array.from({ length: n }, () => worker()));
+  },
+
+  refreshNotaView() {
+    if (!this.state.consulted || this.state.loading) return;
+    this.applyFilters();
+    this.renderList();
+    const titulo = this.state.openTitulo;
+    if (!titulo) return;
+    const flag = this.titleHasNota(titulo);
+    const mark = (p) => Object.assign({}, p, {
+      virouNota: !!(flag || p.virouNota || this.isNotaDoc(p.docId, p.docNome, null))
+    });
+    this.state.parcelas = (this.state.parcelas || []).map(mark);
+    if (this.state.parcelasCache[titulo]) this.state.parcelasCache[titulo] = this.state.parcelasCache[titulo].map(mark);
+    this.paintParcelasModal();
   },
 
   transform(payload) {
@@ -877,6 +959,7 @@ const ComprasPrevisoesApp = {
       const payload = await window.siengeFetchWithRetry(endpoint, 2);
       this.indexBills(payload);
       this.state.allRows = this.transform(payload);
+      this.indexPedidos();
       this.state.updatedAt = new Date().toISOString();
       this.applyFilters();
     } catch (e) {
@@ -887,6 +970,14 @@ const ComprasPrevisoesApp = {
     }
     this.state.loading = false;
     this.renderPage();
+    if (this.state.consulted && (this.state.allRows || []).length) {
+      const gen = ++this._notaGen;
+      const ids = [];
+      Object.keys(this.state.pedidosByTitulo || {}).forEach((titulo) => {
+        Object.keys(this.state.pedidosByTitulo[titulo] || {}).forEach((pedido) => ids.push(pedido));
+      });
+      this.resolvePedidos(ids, gen);
+    }
   },
 
   limpar() {
@@ -903,7 +994,9 @@ const ComprasPrevisoesApp = {
     this.state.shown = [];
     this.state.allRows = [];
     this.state.billsByTitulo = {};
+    this.state.pedidosByTitulo = {};
     this.state.parcelasCache = {};
+    this._notaGen = (this._notaGen || 0) + 1;
     this.state.consulted = false;
     this.state.error = "";
     this.closeParcelas();
@@ -1082,7 +1175,7 @@ const ComprasPrevisoesApp = {
       dataPagamento: substituido ? "" : this.paymentDateOf(inst, firstPay, null),
       saldo: this.billBalance(inst),
       situacao: this.billSituation(inst, firstPay),
-      virouNota: this.isNotaDoc(docId, docName, inst)
+      virouNota: this.isNotaDoc(docId, docName, inst) || this.titleHasNota(titulo)
     };
   },
 
@@ -1135,10 +1228,19 @@ const ComprasPrevisoesApp = {
     const active = document.querySelector('#cprev-table tr.cprev-row[data-titulo="' + id + '"]');
     if (active) active.classList.add("is-open");
     this.paintParcelasModal();
-    if (this.state.parcelasCache[id]) {
+    const pedidos = Object.keys((this.state.pedidosByTitulo || {})[id] || {});
+    (this.state.parcelas || []).forEach((p) => {
+      const key = this.pedidoKey(p.documento);
+      if (key && pedidos.indexOf(key) < 0) pedidos.push(key);
+    });
+    if (!this.state.pedidosByTitulo[id]) this.state.pedidosByTitulo[id] = {};
+    pedidos.forEach((pedido) => { this.state.pedidosByTitulo[id][pedido] = 1; });
+    if (pedidos.length) await this.resolvePedidos(pedidos, this._notaGen);
+    if (this.state.openTitulo === id) this.refreshNotaView();
+    if (this.state.parcelasCache[id] && pedidos.every((pedido) => this.state.notaByPedido[pedido] != null)) {
       this.state.parcelas = this.state.parcelasCache[id];
       this.state.parcelasLoading = false;
-      this.paintParcelasModal();
+      this.refreshNotaView();
       return;
     }
     try {
@@ -1367,7 +1469,7 @@ const ComprasPrevisoesApp = {
                   Consultar
                 </button>
                 <button type="button" class="btn btn-cancel btn-sm" ${busy ? "disabled" : ""} onclick="ComprasPrevisoesApp.limpar()">Limpar</button>
-                <button type="button" class="btn btn-sm cprev-excel-btn" ${busy || !s.consulted ? "disabled" : ""} onclick="ComprasPrevisoesApp.exportExcel()" title="Exportar tabela atual para Excel">
+                <button type="button" class="btn btn-sm btn-excel" ${busy || !s.consulted ? "disabled" : ""} onclick="ComprasPrevisoesApp.exportExcel()" title="Exportar tabela atual para Excel">
                   <i data-lucide="download" style="width:14px;height:14px;"></i> Excel
                 </button>
               </div>

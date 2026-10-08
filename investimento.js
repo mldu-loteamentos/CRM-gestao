@@ -1689,9 +1689,8 @@ const InvestimentoApp = {
             </label>
             ${this.accountDropHtml()}
             <button class="btn btn-primary" onclick="InvestimentoApp.load()" style="height:34px;display:inline-flex;align-items:center;gap:8px;" ${this.loading ? "disabled" : ""}>Consultar</button>
-            <button type="button" class="btn btn-outline" onclick="InvestimentoApp.exportExcel()" ${this.visibleAccounts().length ? "" : "disabled"}
-              style="height:34px;display:inline-flex;align-items:center;gap:6px;">
-              <i data-lucide="file-spreadsheet" style="width:14px;height:14px;"></i> Exportar Excel
+            <button type="button" class="btn btn-sm btn-excel" onclick="InvestimentoApp.exportExcel()" ${this.visibleAccounts().length ? "" : "disabled"} title="Exportar tabela atual para Excel">
+              <i data-lucide="download" style="width:14px;height:14px;"></i> Excel
             </button>
           </div>
           ${this.error ? `<div style="margin:12px 16px 0;padding:10px 12px;background:#fef2f2;color:#b91c1c;border-radius:8px;font-size:0.82rem;">${this.esc(this.error)}</div>` : ""}

@@ -1850,7 +1850,7 @@ window.EngenhariaCaucaoApp = {
                   Consultar
                 </button>
                 <button type="button" class="btn btn-cancel btn-sm" ${busy ? "disabled" : ""} onclick="EngenhariaCaucaoApp.limpar()">Limpar</button>
-                <button type="button" class="btn btn-sm cprev-excel-btn" ${busy ? "disabled" : ""} onclick="EngenhariaCaucaoApp.exportExcel()" title="Exportar agrupado por credor">
+                <button type="button" class="btn btn-sm btn-excel" ${busy ? "disabled" : ""} onclick="EngenhariaCaucaoApp.exportExcel()" title="Exportar agrupado por credor">
                   <i data-lucide="download" style="width:14px;height:14px;"></i> Excel
                 </button>
               </div>

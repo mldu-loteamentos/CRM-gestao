@@ -1719,9 +1719,8 @@ const ParticipacoesApp = {
               <option value="current" ${this.exportScope === "current" ? "selected" : ""}>Excel: empresa atual</option>
               <option value="all" ${this.exportScope === "all" ? "selected" : ""}>Excel: todas (1 aba cada)</option>
             </select>
-            <button type="button" class="btn btn-outline" onclick="ParticipacoesApp.exportExcel()" ${!this.companyId && this.exportScope === "current" ? "disabled" : ""}
-              style="display:inline-flex;align-items:center;gap:6px;">
-              <i data-lucide="file-spreadsheet" style="width:15px;"></i> Exportar Excel
+            <button type="button" class="btn btn-excel" onclick="ParticipacoesApp.exportExcel()" ${!this.companyId && this.exportScope === "current" ? "disabled" : ""} title="Exportar tabela atual para Excel">
+              <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
             </button>
             <label class="btn btn-secondary" style="cursor:${uploadDisabled ? "not-allowed" : "pointer"};opacity:${uploadDisabled ? 0.55 : 1};display:inline-flex;align-items:center;gap:6px;margin:0;">
               <i data-lucide="upload" style="width:15px;"></i> Enviar PDFs
