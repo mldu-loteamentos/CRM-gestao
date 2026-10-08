@@ -6255,9 +6255,6 @@ async function initializeApplication() {
     try { localStorage.setItem("crm_moura_timeline_v2", "true"); } catch (e) {}
   }
 
-  if (!localStorage.getItem('crm_moura_vistoria_recurrence_days')) {
-    localStorage.setItem('crm_moura_vistoria_recurrence_days', '90');
-  }
 
   const judStr = localStorage.getItem("crm_moura_judiciais");
   window.EtapasJudiciaisState = judStr ? JSON.parse(judStr) : [
@@ -40879,13 +40876,41 @@ window.canonicalVistoriaSendConfig = function(raw) {
     const openOffset = Math.max(0, Math.min(10, Number(cfg.openOffset) || 0));
     let maxOffset = Math.max(1, Math.min(15, Number(cfg.maxOffset) || 3));
     if (maxOffset < openOffset) maxOffset = openOffset || 1;
-    return JSON.stringify({
+    const intervalDays = Math.max(0, Number(cfg.intervalDays) || 0);
+    const out = {
         enabled: cfg.enabled !== false,
         dueDays: [...new Set(days)].sort(function(a, b) { return a - b; }),
         openOffset: openOffset,
         maxOffset: maxOffset,
         updatedAt: Number(cfg.updatedAt) || 0
-    });
+    };
+    if (intervalDays >= 1) out.intervalDays = intervalDays;
+    return JSON.stringify(out);
+};
+
+window.mergeVistoriaIntoPayload = function(payload, cloud) {
+    payload = payload || {};
+    cloud = cloud || {};
+    const key = "crm_moura_vistoria_send_days_config";
+    if (typeof window.pickNewerVistoriaSendConfig === "function") {
+        const chosen = window.pickNewerVistoriaSendConfig(payload[key] || "", cloud[key] || "");
+        if (chosen) {
+            payload[key] = chosen;
+            try { window._vistoriaSendConfigMem = JSON.parse(chosen); } catch (e) {}
+            try { _originalSetItem.call(localStorage, key, chosen); } catch (e) {}
+        }
+    }
+    let fromCfg = 0;
+    try { fromCfg = Number(JSON.parse(payload[key] || "{}").intervalDays) || 0; } catch (e) { fromCfg = 0; }
+    const mem = Number(window._vistoriaIntervalDaysMem) || 0;
+    const localN = Number(payload.crm_moura_vistoria_recurrence_days) || Number(localStorage.getItem("crm_moura_vistoria_recurrence_days")) || 0;
+    const cloudN = Number(cloud.crm_moura_vistoria_recurrence_days) || 0;
+    const chosenN = mem >= 1 ? mem : (fromCfg >= 1 ? fromCfg : (localN >= 1 ? localN : cloudN));
+    if (chosenN >= 1) {
+        payload.crm_moura_vistoria_recurrence_days = String(chosenN);
+        try { _originalSetItem.call(localStorage, "crm_moura_vistoria_recurrence_days", String(chosenN)); } catch (e) {}
+    }
+    return payload;
 };
 
 window.pickNewerVistoriaSendConfig = function(localRaw, cloudRaw) {
@@ -42122,6 +42147,7 @@ window.forceUploadLocalConfig = async function(silent = true) {
               payload.crm_moura_condicoes_pagamento = dedicatedRaw || cloud.crm_moura_condicoes_pagamento;
             }
           }
+          if (typeof window.mergeVistoriaIntoPayload === "function") window.mergeVistoriaIntoPayload(payload, cloud);
           Object.keys(cloud || {}).forEach((k) => {
             if (!k || !k.startsWith("crm_perms_")) return;
             const chosen = typeof window.pickPreferredCrmPerms === "function"
@@ -42130,18 +42156,6 @@ window.forceUploadLocalConfig = async function(silent = true) {
             if (chosen) payload[k] = chosen;
           });
         } catch (e) {}
-        if (typeof window.pickNewerVistoriaSendConfig === "function") {
-            const vistoriaKey = "crm_moura_vistoria_send_days_config";
-            const chosenVistoria = window.pickNewerVistoriaSendConfig(payload[vistoriaKey] || "", "");
-            if (chosenVistoria) {
-                payload[vistoriaKey] = chosenVistoria;
-                try { _originalSetItem.call(localStorage, vistoriaKey, chosenVistoria); } catch (e) {}
-            }
-        }
-        if (Number(window._vistoriaIntervalDaysMem) >= 1) {
-            payload.crm_moura_vistoria_recurrence_days = String(window._vistoriaIntervalDaysMem);
-            try { _originalSetItem.call(localStorage, "crm_moura_vistoria_recurrence_days", payload.crm_moura_vistoria_recurrence_days); } catch (e) {}
-        }
         if (!crmUsersMerged) delete payload.crm_users;
         await window.commitCrmGlobalConfig(payload);
         if (!silent) {
@@ -42424,6 +42438,7 @@ localStorage.setItem = function(key, value) {
                       } else {
                         crmUsersMerged = true;
                       }
+                      if (typeof window.mergeVistoriaIntoPayload === "function") window.mergeVistoriaIntoPayload(payload, cloud);
                       Object.keys(cloud || {}).forEach((k) => {
                         if (!k || !k.startsWith("crm_perms_")) return;
                         const chosen = typeof window.pickPreferredCrmPerms === "function"

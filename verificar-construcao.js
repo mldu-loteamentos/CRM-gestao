@@ -20,6 +20,12 @@ function _vcGetThreshold() {
 }
 
 function _vcGetRecurrenceDays() {
+    const mem = Number(window._vistoriaIntervalDaysMem);
+    if (Number.isFinite(mem) && mem >= 1) return mem;
+    if (typeof window.readVistoriaSendConfig === "function") {
+        const fromCfg = Number(window.readVistoriaSendConfig().intervalDays);
+        if (Number.isFinite(fromCfg) && fromCfg >= 1) return fromCfg;
+    }
     const value = parseInt(localStorage.getItem('crm_moura_vistoria_recurrence_days') || '90', 10);
     return Number.isFinite(value) && value > 0 ? value : 90;
 }
@@ -201,29 +207,104 @@ window.readVistoriaSendConfig = function() {
     const openOffset = Math.max(0, Math.min(10, Number(raw.openOffset != null ? raw.openOffset : def.openOffset)));
     let maxOffset = Math.max(1, Math.min(15, Number(raw.maxOffset) || def.maxOffset));
     if (maxOffset < openOffset) maxOffset = openOffset || 1;
+    const intervalDays = Math.max(0, Number(raw.intervalDays) || Number(window._vistoriaIntervalDaysMem) || 0);
     return {
         enabled: raw.enabled !== false,
         dueDays: [...new Set(days)].sort((a, b) => a - b),
         openOffset,
         maxOffset,
+        intervalDays: intervalDays >= 1 ? intervalDays : 0,
         updatedAt: Number(raw.updatedAt) || 0
     };
 };
 
-window.writeVistoriaSendConfig = function(cfg) {
+window.writeVistoriaSendConfig = function(cfg, opts) {
+    const keepUpdatedAt = !!(opts && opts.keepUpdatedAt);
+    const intervalDays = Math.max(0, Number(cfg && cfg.intervalDays) || Number(window._vistoriaIntervalDaysMem) || 0);
     const payload = {
         enabled: !!(cfg && cfg.enabled),
         dueDays: (cfg && Array.isArray(cfg.dueDays) ? cfg.dueDays : []).map(Number).filter(n => n >= 1 && n <= 31),
         openOffset: Math.max(0, Number(cfg && cfg.openOffset) || 0),
         maxOffset: Math.max(1, Number(cfg && cfg.maxOffset) || 3),
-        updatedAt: Date.now()
+        updatedAt: keepUpdatedAt ? (Number(cfg && cfg.updatedAt) || Date.now()) : Date.now()
     };
+    if (intervalDays >= 1) payload.intervalDays = intervalDays;
     payload.dueDays = [...new Set(payload.dueDays)].sort((a, b) => a - b);
     if (payload.maxOffset < payload.openOffset) payload.maxOffset = payload.openOffset || 1;
     window._vistoriaSendConfigMem = payload;
     window._vistoriaSendDaysDraft = new Set(payload.dueDays);
+    if (intervalDays >= 1) window._vistoriaIntervalDaysMem = intervalDays;
     window.storeVistoriaLocalValue(window.VISTORIA_SEND_CONFIG_KEY, JSON.stringify(payload));
     return payload;
+};
+
+window.applyVistoriaRecorrenciaRecord = function(rec) {
+    if (!rec || typeof rec !== "object") return false;
+    const cloudAt = Number(rec.updatedAt) || 0;
+    const local = window.readVistoriaSendConfig();
+    const localAt = Number(local.updatedAt) || 0;
+    if (!cloudAt || (localAt && cloudAt < localAt)) return false;
+    const intervalDays = Number(rec.intervalDays) >= 1 ? Number(rec.intervalDays) : (Number(local.intervalDays) || 0);
+    window.writeVistoriaSendConfig({
+        enabled: rec.enabled !== false,
+        dueDays: Array.isArray(rec.dueDays) ? rec.dueDays : [],
+        openOffset: rec.openOffset != null ? rec.openOffset : local.openOffset,
+        maxOffset: rec.maxOffset != null ? rec.maxOffset : local.maxOffset,
+        intervalDays: intervalDays,
+        updatedAt: cloudAt
+    }, { keepUpdatedAt: true });
+    if (intervalDays >= 1) {
+        window._vistoriaIntervalDaysMem = intervalDays;
+        window.storeVistoriaLocalValue("crm_moura_vistoria_recurrence_days", String(intervalDays));
+    }
+    return true;
+};
+
+window.pullVistoriaRecorrenciaFromCloud = async function() {
+    const fc = window.firebaseCollections;
+    if (!fc || !fc.getDoc || !fc.doc || !window.firebaseDb) return null;
+    const records = [];
+    try {
+        const snap = await fc.getDoc(fc.doc(window.firebaseDb, "config", "vistoria_recorrencia"));
+        const exists = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+        if (exists && snap.data()) records.push(snap.data());
+    } catch (e) {}
+    try {
+        const snap = await fc.getDoc(fc.doc(window.firebaseDb, "config", "global"));
+        const exists = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+        const data = exists ? (snap.data() || {}) : {};
+        let cfg = {};
+        try { cfg = JSON.parse(data.crm_moura_vistoria_send_days_config || "{}") || {}; } catch (e) { cfg = {}; }
+        const intervalDays = Number(cfg.intervalDays) || Number(data.crm_moura_vistoria_recurrence_days) || 0;
+        if (Number(cfg.updatedAt) || (Array.isArray(cfg.dueDays) && cfg.dueDays.length) || intervalDays >= 1) {
+            records.push(Object.assign({}, cfg, { intervalDays: intervalDays }));
+        }
+    } catch (e) {}
+    records.sort((a, b) => (Number(b && b.updatedAt) || 0) - (Number(a && a.updatedAt) || 0));
+    const rec = records[0] || null;
+    if (rec) window.applyVistoriaRecorrenciaRecord(rec);
+    const modal = document.getElementById("vistoria-recurrence-modal");
+    if (rec && modal && modal.style.display !== "none" && !window._vistoriaRecorrenciaFormDirty) {
+        window.renderVistoriaSendDaysGrid();
+        const input = document.getElementById("vistoria-recurrence-days");
+        if (input && Number(window._vistoriaIntervalDaysMem) >= 1) input.value = String(window._vistoriaIntervalDaysMem);
+    }
+    return rec;
+};
+
+window.pushVistoriaRecorrenciaDoc = async function(payload, intervalDays) {
+    const fc = window.firebaseCollections;
+    if (!fc || !fc.setDoc || !fc.doc || !window.firebaseDb || !payload) return false;
+    const rec = {
+        enabled: payload.enabled !== false,
+        dueDays: Array.isArray(payload.dueDays) ? payload.dueDays : [],
+        openOffset: Number(payload.openOffset) || 0,
+        maxOffset: Number(payload.maxOffset) || 3,
+        intervalDays: Number(intervalDays) >= 1 ? Number(intervalDays) : (Number(payload.intervalDays) || 90),
+        updatedAt: Number(payload.updatedAt) || Date.now()
+    };
+    await fc.setDoc(fc.doc(window.firebaseDb, "config", "vistoria_recorrencia"), rec, { merge: true });
+    return true;
 };
 
 window.pushVistoriaSendConfigToCloud = async function(payload, intervalDays) {
@@ -379,6 +460,7 @@ window.renderVistoriaSendDaysGrid = function() {
             btn.textContent = String(d);
             btn.onclick = function() {
                 btn.classList.toggle("vc-send-day-on");
+                window._vistoriaRecorrenciaFormDirty = true;
                 const day = Number(btn.getAttribute("data-day"));
                 if (!window._vistoriaSendDaysDraft) window._vistoriaSendDaysDraft = new Set();
                 if (btn.classList.contains("vc-send-day-on")) window._vistoriaSendDaysDraft.add(day);
@@ -388,26 +470,32 @@ window.renderVistoriaSendDaysGrid = function() {
             grid.appendChild(btn);
         }
     }
-    if (enabledEl) enabledEl.onchange = window.previewVistoriaSendConfig;
-    if (openEl) openEl.oninput = window.previewVistoriaSendConfig;
-    if (maxEl) maxEl.oninput = window.previewVistoriaSendConfig;
+    if (enabledEl) enabledEl.onchange = function() { window._vistoriaRecorrenciaFormDirty = true; window.previewVistoriaSendConfig(); };
+    if (openEl) openEl.oninput = function() { window._vistoriaRecorrenciaFormDirty = true; window.previewVistoriaSendConfig(); };
+    if (maxEl) maxEl.oninput = function() { window._vistoriaRecorrenciaFormDirty = true; window.previewVistoriaSendConfig(); };
+    const intervalEl = document.getElementById("vistoria-recurrence-days");
+    if (intervalEl) intervalEl.oninput = function() { window._vistoriaRecorrenciaFormDirty = true; };
     window.previewVistoriaSendConfig();
 };
 
-window.openVistoriaRecurrenceModal = function() {
+window.openVistoriaRecurrenceModal = async function() {
     const modal = document.getElementById('vistoria-recurrence-modal');
     const input = document.getElementById('vistoria-recurrence-days');
     if (!modal) {
         console.error('[Vistoria] Modal de recorrência não encontrado no HTML.');
         return;
     }
+    window._vistoriaRecorrenciaFormDirty = false;
+    modal.style.display = 'flex';
+    modal.classList.add('active');
+    const label = document.getElementById("vc-send-selected-label");
+    if (label && !Number(window.readVistoriaSendConfig().updatedAt)) label.textContent = "Carregando...";
+    try { await window.pullVistoriaRecorrenciaFromCloud(); } catch (e) {}
     const rememberedInterval = Number(window._vistoriaIntervalDaysMem);
     if (input) input.value = (Number.isFinite(rememberedInterval) && rememberedInterval >= 1)
         ? String(rememberedInterval)
         : (localStorage.getItem('crm_moura_vistoria_recurrence_days') || '90');
     window.renderVistoriaSendDaysGrid();
-    modal.style.display = 'flex';
-    modal.classList.add('active');
 };
 
 window.saveVistoriaRecurrence = async function() {
@@ -421,17 +509,26 @@ window.saveVistoriaRecurrence = async function() {
     const intervalStored = window.storeVistoriaLocalValue('crm_moura_vistoria_recurrence_days', String(days));
     const sendCfg = window.collectVistoriaSendConfigFromForm();
     if (sendCfg.maxOffset < sendCfg.openOffset) sendCfg.maxOffset = sendCfg.openOffset || 1;
+    sendCfg.intervalDays = days;
     const payload = window.writeVistoriaSendConfig(sendCfg);
     let storedRaw = "";
     try { storedRaw = localStorage.getItem(window.VISTORIA_SEND_CONFIG_KEY) || ""; } catch (e) { storedRaw = ""; }
     const daysStored = storedRaw.indexOf('"updatedAt":' + payload.updatedAt) !== -1;
     let cloud = false;
     try {
-        if (typeof window.pushVistoriaSendConfigToCloud === "function") {
-            cloud = await window.pushVistoriaSendConfigToCloud(payload, days);
+        if (typeof window.pushVistoriaRecorrenciaDoc === "function") {
+            cloud = await window.pushVistoriaRecorrenciaDoc(payload, days);
         }
     } catch (e) {
         cloud = false;
+        console.error("[Vistoria] falha ao gravar a recorrência", e);
+    }
+    try {
+        if (typeof window.pushVistoriaSendConfigToCloud === "function") {
+            const globalOk = await window.pushVistoriaSendConfigToCloud(payload, days);
+            cloud = cloud || globalOk;
+        }
+    } catch (e) {
         console.error("[Vistoria] falha ao gravar os dias na nuvem", e);
     }
     if (!daysStored && !cloud) {
@@ -441,6 +538,7 @@ window.saveVistoriaRecurrence = async function() {
     if (!intervalStored && !cloud) {
         alert("Os dias foram anotados nesta sessão, mas o intervalo da fila não coube no navegador. Libere espaço neste site para a equipe receber a mesma configuração.");
     }
+    window._vistoriaRecorrenciaFormDirty = false;
     if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(console.error);
     const modal = document.getElementById('vistoria-recurrence-modal');
     if (modal) {
@@ -454,6 +552,20 @@ window.saveVistoriaRecurrence = async function() {
         window.checkVistoriaSendAlerts();
     }
 };
+
+(function bootVistoriaRecorrenciaCloud() {
+    const tryPull = () => {
+        if (!window.firebaseDb || !window.firebaseCollections || !window.firebaseCollections.getDoc) return false;
+        window.pullVistoriaRecorrenciaFromCloud().catch(() => {});
+        return true;
+    };
+    if (tryPull()) return;
+    let tries = 0;
+    const timer = setInterval(() => {
+        tries += 1;
+        if (tryPull() || tries > 40) clearInterval(timer);
+    }, 500);
+})();
 
 function _vcGetCostCenterName(costCenterId) {
     if (!costCenterId) return '-';
