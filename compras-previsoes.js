@@ -414,7 +414,7 @@ const ComprasPrevisoesApp = {
 
   parcelaRecebeNota(parcela, pedido) {
     if (!parcela) return false;
-    if (this.samePedido(parcela, pedido)) return true;
+    if (this.samePedido(parcela, pedido)) return false;
     if (!parcela.pago || parcela.substituido) return false;
     if (this.pedidoKey(parcela.documento)) return false;
     if (this.isNotaDoc(parcela.docId, parcela.docNome, null)) return false;
@@ -441,33 +441,103 @@ const ComprasPrevisoesApp = {
       const key = doc + "|" + number + "|" + series;
       if (seen.has(key)) continue;
       seen.add(key);
+      const billId = inv && inv.billId != null && inv.billId !== "" ? String(inv.billId) : "";
+      let attachments = [];
+      if (billId) {
+        try { attachments = await this.anexosDoTitulo(billId); } catch (e) { attachments = []; }
+      }
       notas.push({
         number,
         series,
         label: doc + " " + number,
+        billId,
+        attachments,
         deliveryDate: delivery && delivery.deliveryDate ? String(delivery.deliveryDate).slice(0, 10) : ""
       });
     }
     return notas;
   },
 
+  async anexosDoTitulo(billId) {
+    const data = await window.siengeFetchWithRetry("/bills/" + encodeURIComponent(billId) + "/attachments", 1);
+    return ((data && data.results) || []).map((a) => ({
+      id: a.attachmentid != null ? a.attachmentid : a.attachmentId,
+      name: String(a.name || "anexo.pdf"),
+      description: String(a.description || "PDF").trim() || "PDF"
+    })).filter((a) => a.id != null && a.id !== "");
+  },
+
+  notasDaParcela(parcela, pedido, notas) {
+    if (!parcela || this.samePedido(parcela, pedido)) return [];
+    const list = notas || [];
+    const doc = String(parcela.documento || "").trim();
+    if (doc) {
+      const byNum = list.filter((n) => String(n.number) === doc);
+      if (byNum.length) return byNum;
+    }
+    if (!this.parcelaRecebeNota(parcela, pedido) || !parcela.vencimento) return [];
+    const due = String(parcela.vencimento).slice(0, 10);
+    return list.filter((n) => n.deliveryDate && n.deliveryDate === due);
+  },
+
+  notaCellHtml(n) {
+    const bill = n.billId
+      ? `<span class="cprev-nota-bill">Título ${this.esc(n.billId)}</span>`
+      : "";
+    const pdfs = (n.attachments || []).map((a) => {
+      const label = a.description || "PDF";
+      return `<button type="button" class="cprev-pdf-btn" title="Baixar ${this.esc(a.name)}" onclick="event.stopPropagation(); ComprasPrevisoesApp.baixarAnexoTitulo('${this.esc(n.billId)}','${this.esc(a.id)}')">Baixar ${this.esc(label)}</button>`;
+    }).join("");
+    return `<span class="cprev-nota-pack"><span class="cprev-tag cprev-tag-nota">${this.esc(n.label)}</span>${bill}${pdfs}</span>`;
+  },
+
+  async baixarAnexoTitulo(billId, attachmentId) {
+    let fileName = "titulo-" + billId + ".pdf";
+    Object.keys(this.state.notasByPedido || {}).forEach((pedido) => {
+      const notas = (this.state.notasByPedido[pedido] && this.state.notasByPedido[pedido].notas) || [];
+      notas.forEach((n) => {
+        if (String(n.billId) !== String(billId)) return;
+        (n.attachments || []).forEach((a) => {
+          if (String(a.id) === String(attachmentId) && a.name) fileName = a.name;
+        });
+      });
+    });
+    const base = (window.SIENGE_CONFIG && window.SIENGE_CONFIG.baseUrl) || "/api/sienge-proxy";
+    const path = "/bills/" + encodeURIComponent(billId) + "/attachments/" + encodeURIComponent(attachmentId);
+    const headers = {};
+    if (typeof getBasicAuthHeader === "function") headers.Authorization = getBasicAuthHeader();
+    try {
+      const res = await fetch(base + path, { headers });
+      if (!res.ok) throw new Error(String(res.status));
+      const blob = await res.blob();
+      const type = String(res.headers.get("content-type") || blob.type || "");
+      if (/json|text\/html/i.test(type)) throw new Error("resposta");
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+    } catch (e) {
+      alert("Não foi possível baixar o PDF deste título.");
+    }
+  },
+
   applyNotasDoPedido(titulo, pedido) {
     const pack = this.state.notasByPedido[String(pedido)] || { notas: [], error: "" };
     const stamp = (p) => {
-      if (!this.parcelaRecebeNota(p, pedido)) {
-        return Object.assign({}, p, { notasLoading: false });
+      if (this.samePedido(p, pedido)) {
+        return Object.assign({}, p, { notasLoading: false, notas: [], notasErro: "" });
       }
-      let notas = pack.notas || [];
-      if (!this.samePedido(p, pedido) && p.vencimento) {
-        const due = String(p.vencimento).slice(0, 10);
-        const matched = notas.filter((n) => n.deliveryDate && n.deliveryDate === due);
-        if (matched.length) notas = matched;
-      }
+      const notas = this.notasDaParcela(p, pedido, pack.notas || []);
+      if (!notas.length) return Object.assign({}, p, { notasLoading: false });
       return Object.assign({}, p, {
         notasLoading: false,
         notas,
-        notasErro: notas.length ? "" : (pack.error || ""),
-        virouNota: notas.length > 0
+        notasErro: "",
+        virouNota: true
       });
     };
     const id = String(titulo || "");
@@ -1518,7 +1588,7 @@ const ComprasPrevisoesApp = {
             : this.esc(docNum);
           let notaHtml = `<span class="cprev-tag">Não</span>`;
           if (p.notasLoading) notaHtml = `<span class="cprev-tag">Buscando…</span>`;
-          else if (p.notas && p.notas.length) notaHtml = p.notas.map((n) => `<span class="cprev-tag cprev-tag-nota">${this.esc(n.label)}</span>`).join(" ");
+          else if (p.notas && p.notas.length) notaHtml = p.notas.map((n) => this.notaCellHtml(n)).join(" ");
           else if (p.notasErro) notaHtml = `<span class="cprev-tag" title="${this.esc(p.notasErro)}">${this.esc(p.notasErro)}</span>`;
           else if (this.isNotaDoc(p.docId, p.docNome, null) && p.documento) notaHtml = `<span class="cprev-tag cprev-tag-nota">${this.esc(p.docId || "NFS")} ${this.esc(p.documento)}</span>`;
           return `<tr>

@@ -6285,6 +6285,29 @@ circle.donut-segment {
   padding: 0;
 }
 .cprev-ppc-btn:hover { color: #0d462c; }
+.cprev-nota-pack {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.cprev-nota-bill {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #105436;
+  white-space: nowrap;
+}
+.cprev-pdf-btn {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #105436;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  padding: 1px 7px;
+  cursor: pointer;
+}
+.cprev-pdf-btn:hover { background: #f0fdf4; }
 .cprev-tag-subst { background: #e0e7ff; color: #3730a3; }
 .cprev-table-wrap .ecau-table {
   table-layout: auto;
