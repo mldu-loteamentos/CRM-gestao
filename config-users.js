@@ -297,7 +297,7 @@ const ConfigUsersApp = {
     {
       name: "Compras", icon: "shopping-cart", key: "mod_compras",
       submodules: [{ name: "Compras", key: "sub_compras_geral", actions: [
-        { id: "dashboard", label: "Títulos lançados", permBase: "sub_compras_geral_dashboard" },
+        { id: "dashboard", label: "Dashboard", permBase: "sub_compras_geral_dashboard" },
         { id: "previsoes", label: "Follow-up de previsões", permBase: "sub_compras_geral_previsoes" },
         { id: "config", label: "Configurações", permBase: "sub_compras_geral_config" }
       ] }]

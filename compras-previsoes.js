@@ -930,6 +930,96 @@ const ComprasPrevisoesApp = {
     }
   },
 
+  isoShift(iso, days) {
+    const d = new Date(String(iso).slice(0, 10) + "T12:00:00");
+    d.setDate(d.getDate() + days);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  },
+
+  outcomeTooBig(err) {
+    return Number(err && err.status) === 507 || /\b507\b/.test(String((err && err.message) || ""));
+  },
+
+  outcomeEndpoint(start, end, companyId) {
+    let endpoint = "/bulk-data/v1/outcome?startDate=" + encodeURIComponent(start)
+      + "&endDate=" + encodeURIComponent(end)
+      + "&selectionType=D&correctionIndexerId=0&correctionDate=2023-01-01&withAuthorizations=false";
+    if (companyId) endpoint += "&companyId=" + encodeURIComponent(companyId);
+    return endpoint;
+  },
+
+  noteProgress(text) {
+    const box = document.getElementById("cprev-results");
+    if (box) box.innerHTML = '<div class="tvig-empty">' + this.esc(text) + "</div>";
+  },
+
+  async outcomeBills(start, end, companyId) {
+    const endpoint = this.outcomeEndpoint(start, end, companyId);
+    const once = typeof siengeFetch === "function" ? siengeFetch : window.siengeFetchWithRetry;
+    if (typeof once !== "function") throw new Error("API Sienge indisponível.");
+    let payload;
+    try {
+      payload = await once(endpoint);
+    } catch (err) {
+      if (this.outcomeTooBig(err) || typeof window.siengeFetchWithRetry !== "function") throw err;
+      payload = await window.siengeFetchWithRetry(endpoint, 2);
+    }
+    return (payload && payload.data) || (Array.isArray(payload) ? payload : []);
+  },
+
+  async outcomeRange(start, end, companyId) {
+    try {
+      return await this.outcomeBills(start, end, companyId);
+    } catch (err) {
+      if (!this.outcomeTooBig(err)) throw err;
+      if (start < end) {
+        const s = new Date(start + "T12:00:00");
+        const e = new Date(end + "T12:00:00");
+        const midDate = new Date(s.getTime() + Math.floor((e - s) / 2));
+        const mid = midDate.getFullYear() + "-" + String(midDate.getMonth() + 1).padStart(2, "0") + "-" + String(midDate.getDate()).padStart(2, "0");
+        const next = this.isoShift(mid, 1);
+        if (mid >= start && mid < end && next <= end) {
+          const left = await this.outcomeRange(start, mid, companyId);
+          const right = await this.outcomeRange(next, end, companyId);
+          return left.concat(right);
+        }
+      }
+      if (!companyId) {
+        const companies = (this.state.companies || []).map((c) => String(c.id)).filter(Boolean);
+        if (companies.length > 1) {
+          const parts = [];
+          for (let i = 0; i < companies.length; i++) {
+            this.noteProgress("Buscando empresa " + (i + 1) + " de " + companies.length + "…");
+            const rows = await this.outcomeRange(start, end, companies[i]);
+            parts.push.apply(parts, rows);
+          }
+          return parts;
+        }
+      }
+      throw err;
+    }
+  },
+
+  async fetchOutcome(start, end) {
+    const chunks = typeof siengeSplitDateRange === "function"
+      ? siengeSplitDateRange(start, end)
+      : [{ start: start, end: end }];
+    const ids = (this.state.companyIds || []).map(String).filter(Boolean);
+    const targets = ids.length ? ids : [""];
+    const data = [];
+    let step = 0;
+    const total = Math.max(1, chunks.length * targets.length);
+    for (const chunk of chunks) {
+      for (const companyId of targets) {
+        step += 1;
+        this.noteProgress("Buscando previsões no Sienge… " + step + " de " + total);
+        const bills = await this.outcomeRange(chunk.start, chunk.end, companyId);
+        data.push.apply(data, bills);
+      }
+    }
+    return { data: data };
+  },
+
   async consultar() {
     const start = this.state.startDate;
     const end = this.state.endDate;
@@ -947,16 +1037,7 @@ const ComprasPrevisoesApp = {
     this.state.parcelasCache = {};
     this.renderPage();
     try {
-      let endpoint = "/bulk-data/v1/outcome?startDate=" + encodeURIComponent(start)
-        + "&endDate=" + encodeURIComponent(end)
-        + "&selectionType=D&correctionIndexerId=0&correctionDate=2023-01-01&withAuthorizations=false";
-      if ((this.state.companyIds || []).length === 1) {
-        endpoint += "&companyId=" + encodeURIComponent(this.state.companyIds[0]);
-      }
-      if (typeof window.siengeFetchWithRetry !== "function") {
-        throw new Error("API Sienge indisponível.");
-      }
-      const payload = await window.siengeFetchWithRetry(endpoint, 2);
+      const payload = await this.fetchOutcome(start, end);
       this.indexBills(payload);
       this.state.allRows = this.transform(payload);
       this.indexPedidos();

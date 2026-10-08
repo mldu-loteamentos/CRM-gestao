@@ -3006,7 +3006,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "condicoes-pagamento": "Condições de Pagamento",
     "tabelas-vigentes": "Tabelas vigentes",
     "controle-comissao": "Controle de comissão",
-    "compras-dashboard": "Títulos lançados",
+    "compras-dashboard": "Dashboard",
     "compras-previsoes": "Follow-up de previsões",
     "compras-config": "Calendário de vencimento de títulos a pagar",
     "engenharia-caucao": "Gestão de caução",

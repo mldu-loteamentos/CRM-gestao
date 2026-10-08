@@ -1,5 +1,5 @@
 /**
- * Compras · Títulos lançados.
+ * Compras · Dashboard.
  * Conta o título pela data em que entrou no Sienge (registeredDate).
  * O tempo para cadastrar é a diferença, em dias, até a data de emissão (issueDate).
  */
@@ -442,7 +442,7 @@ const ComprasDashboardApp = {
       + '<div class="cdash-top"><div><label>Departamento</label>' + select + '</div>'
       + '<div><label>Data Atualização</label><div class="cdash-stamp">' + this.esc(this.stamp(this.state.updatedAt)) + "</div></div>"
       + '<button type="button" class="cdash-btn" id="cdash-refresh">Atualizar</button></div>'
-      + '<h2 class="cdash-title"><span class="cdash-dots"><i style="background:#105436"></i><i style="background:#f37021"></i><i style="background:#86efac"></i><i style="background:#f59e0b"></i></span>Títulos Lançados</h2>'
+      + '<h2 class="cdash-title"><span class="cdash-dots"><i style="background:#105436"></i><i style="background:#f37021"></i><i style="background:#86efac"></i><i style="background:#f59e0b"></i></span>Dashboard</h2>'
       + body + "</div>";
     const dept = document.getElementById("cdash-dept");
     if (dept) dept.addEventListener("change", () => {
