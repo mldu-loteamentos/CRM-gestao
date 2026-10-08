@@ -121,6 +121,44 @@ const EmpresasApp = {
     return cf[id] || cf[String(id)] || cf[Number(id)] || null;
   },
 
+  flushRowInputs(id, custom) {
+    const tr = document.querySelector('#empresas-content tr[data-company-id="' + id + '"]');
+    const rec = custom || this.customOf(id);
+    if (!tr || !rec) return;
+    const inputs = tr.querySelectorAll(".inline-input");
+    const nome = inputs[0];
+    const perc = inputs[1];
+    if (nome) rec.nome_usual = nome.value;
+    if (!perc) return;
+    const raw = String(perc.value || "").trim().replace(/\s/g, "").replace(",", ".");
+    if (raw === "") rec.percentual_mldu = 0;
+    else {
+      const n = Number(raw);
+      if (Number.isFinite(n)) rec.percentual_mldu = n;
+    }
+  },
+
+  paintRowState(id) {
+    const custom = this.customOf(id) || {};
+    const speOn = custom.spe_socios === 1 || custom.spe_socios === true || custom.spe_socios === "1";
+    const tr = document.querySelector('#empresas-content tr[data-company-id="' + id + '"]');
+    if (tr) {
+      tr.classList.toggle("is-spe-locked", speOn);
+      tr.querySelectorAll(".inline-input").forEach((input) => { input.disabled = speOn; });
+    }
+    ["consolidacao_padrao", "gerida_pelo_grupo", "cobranca_interna", "spe_socios"].forEach((field) => {
+      const checkbox = document.getElementById("chk-" + field + "-" + id);
+      if (!checkbox) return;
+      const on = field === "spe_socios"
+        ? speOn
+        : (custom[field] === 1 || custom[field] === true || custom[field] === "1");
+      checkbox.checked = !!on;
+      checkbox.disabled = field !== "spe_socios" && speOn;
+      const td = checkbox.closest("td");
+      if (td) td.style.backgroundColor = on ? "#e8f5e9" : "transparent";
+    });
+  },
+
   escAttr(s) {
     return String(s == null ? "" : s)
       .replace(/&/g, "&amp;")
@@ -167,7 +205,14 @@ const EmpresasApp = {
     };
 
     const speOn = custom.spe_socios === 1 || custom.spe_socios === true || custom.spe_socios === "1";
-    if (speOn && field !== "spe_socios") return;
+    if (field !== "nome_usual" && field !== "percentual_mldu") this.flushRowInputs(id, custom);
+    if (speOn && field !== "spe_socios") {
+      EmpresasState.customFields[id] = custom;
+      this.persistCustomMap();
+      if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(() => {});
+      this.paintRowState(id);
+      return;
+    }
 
     if (field === 'nome_usual') custom.nome_usual = value;
     if (field === 'percentual_mldu') {
@@ -196,20 +241,7 @@ const EmpresasApp = {
     this.persistCustomMap();
     if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(() => {});
     if (typeof this.renderFilaPrompt === "function") this.renderFilaPrompt();
-    const redraw = field !== "nome_usual" && field !== "percentual_mldu";
-    if (redraw && document.getElementById("empresas-content")) this.render();
-
-    try {
-      if (field === 'consolidacao_padrao' || field === 'gerida_pelo_grupo' || field === 'cobranca_interna' || field === 'spe_socios') {
-        const checkbox = document.getElementById(`chk-${field}-${id}`);
-        if (checkbox) {
-            checkbox.checked = !!value;
-            checkbox.closest('td').style.backgroundColor = value ? '#e8f5e9' : 'transparent';
-        }
-      }
-    } catch(e) {
-      console.error("Save inline error:", e);
-    }
+    this.paintRowState(id);
   },
 
   render() {
@@ -435,7 +467,7 @@ const EmpresasApp = {
       const bgSpe = speOn ? "background-color: #e8f5e9;" : "";
 
       html += `
-        <tr class="${speOn ? "is-spe-locked" : ""}">
+        <tr data-company-id="${company.id}" class="${speOn ? "is-spe-locked" : ""}">
           <td><strong>${company.id}</strong></td>
           <td>${this.escAttr(company.name)}</td>
           <td style="white-space: nowrap;">${this.escAttr(company.cnpj || "-")}</td>
