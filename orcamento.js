@@ -78,17 +78,18 @@ const OrcamentoApp = {
     root.innerHTML = `
       <style>
         #orcamento-root { font-family: inherit; color: #0f172a; }
-        .orc-head { background: #105436; color: #fff; border-radius: 12px; padding: 16px 18px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
-        .orc-head h2 { margin: 0; font-size: 1.15rem; font-weight: 700; }
-        .orc-head p { margin: 4px 0 0; font-size: 0.8rem; opacity: 0.9; max-width: 720px; }
+        .orc-head { background: #0c3d28; color: #fff; border-radius: 12px; padding: 16px 18px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+        .orc-head h2 { margin: 0; font-size: 1.15rem; font-weight: 800; color: #fff; }
+        .orc-head p { margin: 6px 0 0; font-size: 0.84rem; color: #fff; max-width: 820px; line-height: 1.4; }
         .orc-tools { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 12px; }
-        .orc-search { height: 38px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0 12px; min-width: 240px; font-size: 0.9rem; }
-        .orc-btn { height: 38px; border-radius: 8px; border: 1px solid #cbd5e1; background: #fff; color: #105436; font-weight: 650; padding: 0 12px; cursor: pointer; }
-        .orc-btn:hover { background: #f0fdf4; }
+        .orc-search { height: 40px; border: 1px solid #475569; border-radius: 8px; padding: 0 12px; min-width: 240px; font-size: 0.9rem; color: #0f172a; background: #fff; }
+        .orc-btn { height: 40px; border-radius: 8px; border: 1px solid #0c3d28; background: #105436; color: #fff; font-weight: 800; padding: 0 14px; cursor: pointer; }
+        .orc-btn:hover { background: #0c3d28; }
         .orc-kpis { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
-        .orc-kpi { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 14px; min-width: 140px; }
-        .orc-kpi span { display: block; color: #64748b; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; }
-        .orc-kpi strong { font-size: 1rem; color: #105436; }
+        .orc-kpi { background: #fff; border: 1px solid #94a3b8; border-top: 4px solid #105436; border-radius: 10px; padding: 12px 14px 10px; min-width: 150px; flex: 1; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08); }
+        .orc-kpi span { display: block; color: #1e293b; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.03em; }
+        .orc-kpi strong { display: block; margin-top: 4px; font-size: 1.15rem; font-weight: 800; color: #0c3d28; line-height: 1.2; }
+        .orc-kpi strong .orc-pct { display: inline; margin-left: 6px; font-size: 0.95rem; }
         .orc-scroll { overflow: auto; max-height: calc(100vh - 280px); border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; }
         .orc-table { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; font-size: 0.78rem; }
         .orc-table th { position: sticky; background: #105436; color: #fff; z-index: 2; padding: 8px 10px; text-align: right; font-weight: 700; white-space: nowrap; }
@@ -108,16 +109,21 @@ const OrcamentoApp = {
         .orc-total td { position: sticky; bottom: 0; background: #134e3a; color: #fff; font-weight: 800; z-index: 2; border-top: 2px solid #0c3d28; }
         .orc-total td:first-child { z-index: 3; background: #134e3a; }
         .orc-var, .orc-pct { display: block; line-height: 1.2; }
-        .orc-pct { font-size: 0.68rem; font-weight: 700; }
-        .orc-view { display: inline-flex; border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; }
-        .orc-view button { height: 38px; border: 0; background: #fff; color: #105436; font-weight: 700; padding: 0 12px; cursor: pointer; }
+        .orc-pct { font-size: 0.72rem; font-weight: 800; }
+        .orc-view { display: inline-flex; border: 1px solid #0c3d28; border-radius: 8px; overflow: hidden; background: #fff; }
+        .orc-view button { height: 40px; border: 0; border-right: 1px solid #0c3d28; background: #fff; color: #0c3d28; font-weight: 800; padding: 0 14px; cursor: pointer; }
+        .orc-view button:last-child { border-right: 0; }
         .orc-view button.is-on { background: #105436; color: #fff; }
-        .orc-cc td { background: #e8f5ee; font-weight: 700; color: #105436; }
-        .orc-leaf td { background: #fff; font-weight: 500; color: #1e293b; }
-        .orc-neg { color: #b91c1c; }
-        .orc-y27 { color: #105436; }
-        .orc-fc { color: #b45309; }
-        .orc-emp .orc-y27, .orc-emp .orc-fc, .orc-emp .orc-neg { color: inherit; }
+        .orc-view button:hover:not(.is-on) { background: #d1fae5; }
+        .orc-cc td { background: #d1fae5; font-weight: 700; color: #064e3b; }
+        .orc-leaf td { background: #fff; font-weight: 600; color: #0f172a; }
+        .orc-neg { color: #991b1b; }
+        .orc-y27 { color: #064e3b; }
+        .orc-fc { color: #9a3412; }
+        .orc-table th.orc-fc { color: #fde68a; }
+        .orc-kpi strong.orc-fc { color: #9a3412; }
+        .orc-emp .orc-y27, .orc-emp .orc-fc, .orc-emp .orc-neg,
+        .orc-total .orc-y27, .orc-total .orc-fc, .orc-total .orc-neg { color: #fff; }
         .orc-legend { font-size: 0.68rem; font-weight: 600; color: #64748b; }
         .orc-exp { border: 0; background: transparent; cursor: pointer; width: 22px; color: inherit; font-size: 0.85rem; }
         .orc-code { font-family: ui-monospace, Consolas, monospace; margin-right: 8px; }
