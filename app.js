@@ -4439,6 +4439,34 @@ window.readBackOfficePerms = function() {
   return best || {};
 };
 
+window.noteCrmUsersRemoved = function(emails) {
+  if (!window._crmUsersRemoved) window._crmUsersRemoved = new Set();
+  (Array.isArray(emails) ? emails : []).forEach((email) => {
+    const em = String(email || "").toLowerCase().trim();
+    if (em) window._crmUsersRemoved.add(em);
+  });
+  return window._crmUsersRemoved;
+};
+
+window.crmUsersRemovedList = function() {
+  return Array.from(window._crmUsersRemoved || []);
+};
+
+window.stripRemovedCrmUsers = function(raw) {
+  const removed = window._crmUsersRemoved;
+  if (!removed || !removed.size) return typeof raw === "string" ? raw : JSON.stringify(raw || []);
+  let list = raw;
+  if (typeof list === "string") {
+    try { list = JSON.parse(list || "[]") || []; } catch (e) { return raw; }
+  }
+  if (!Array.isArray(list)) return typeof raw === "string" ? raw : "[]";
+  const kept = list.filter((u) => {
+    const em = String((u && u.email) || "").toLowerCase().trim();
+    return !em || !removed.has(em);
+  });
+  return JSON.stringify(kept);
+};
+
 window.mergeCrmUsers = function(localStr, cloudStr) {
   let local = [];
   let cloud = [];
@@ -4468,6 +4496,7 @@ window.mergeCrmUsers = function(localStr, cloudStr) {
   const put = (u) => {
     if (!u) return;
     const email = String(u.email || "").toLowerCase().trim();
+    if (email && window._crmUsersRemoved && window._crmUsersRemoved.has(email)) return;
     const key = email || ("id:" + String(u.id || ""));
     if (!key || key === "id:") return;
     const next = Object.assign({}, u, { email: email || u.email });
@@ -4542,14 +4571,17 @@ window.syncCrmUsersFromFirebase = async function() {
   if (window.crmUsersDocExists(dSnap)) {
     const data = dSnap.data() || {};
     dedicated = data.list || data.crm_users || "[]";
+    window.noteCrmUsersRemoved(data.removedEmails);
   }
   const gSnap = await fc.getDoc(fc.doc(window.firebaseDb, "config", "global"));
   if (window.crmUsersDocExists(gSnap)) {
-    globalUsers = (gSnap.data() || {}).crm_users || "[]";
+    const gData = gSnap.data() || {};
+    globalUsers = gData.crm_users || "[]";
+    window.noteCrmUsersRemoved(gData.removedEmails);
   }
   let local = "[]";
   try { local = localStorage.getItem("crm_users") || "[]"; } catch (e) {}
-  const merged = window.mergeCrmUsers(window.mergeCrmUsers(local, globalUsers), dedicated);
+  const merged = window.stripRemovedCrmUsers(window.mergeCrmUsers(window.mergeCrmUsers(local, globalUsers), dedicated));
   try {
     const setter = window._originalSetItem || localStorage.setItem.bind(localStorage);
     setter.call(localStorage, "crm_users", merged);
@@ -4690,6 +4722,7 @@ window._writeCrmUsersNow = async function(mem) {
     const emails = new Set(out.map((u) => String((u && u.email) || "").toLowerCase().trim()).filter(Boolean));
     const missing = (Array.isArray(memList) ? memList : []).filter((u) => {
       const em = String((u && u.email) || "").toLowerCase().trim();
+      if (em && window._crmUsersRemoved && window._crmUsersRemoved.has(em)) return false;
       return em && !emails.has(em);
     });
     if (missing.length) throw new Error("O usuário não entrou na lista salva.");
@@ -4700,11 +4733,18 @@ window._writeCrmUsersNow = async function(mem) {
     saved = await fc.runTransaction(window.firebaseDb, async (tx) => {
       const dSnap = await tx.get(usersRef);
       const gSnap = await tx.get(globalRef);
-      const dedicated = window.crmUsersDocExists(dSnap) ? ((dSnap.data() || {}).list || (dSnap.data() || {}).crm_users || "[]") : "[]";
-      const globalUsers = window.crmUsersDocExists(gSnap) ? ((gSnap.data() || {}).crm_users || "[]") : "[]";
+      const dData = window.crmUsersDocExists(dSnap) ? (dSnap.data() || {}) : {};
+      const gData = window.crmUsersDocExists(gSnap) ? (gSnap.data() || {}) : {};
+      window.noteCrmUsersRemoved(dData.removedEmails);
+      window.noteCrmUsersRemoved(gData.removedEmails);
+      const dedicated = dData.list || dData.crm_users || "[]";
+      const globalUsers = gData.crm_users || "[]";
       const packed = await writeMerged(dedicated, globalUsers);
-      tx.set(usersRef, { list: packed.merged, updatedAt: new Date().toISOString() }, { merge: true });
-      tx.set(globalRef, { crm_users: packed.merged }, { merge: true });
+      packed.merged = window.stripRemovedCrmUsers(packed.merged);
+      try { packed.out = JSON.parse(packed.merged); } catch (e) { packed.out = []; }
+      const removedEmails = window.crmUsersRemovedList();
+      tx.set(usersRef, { list: packed.merged, removedEmails: removedEmails, updatedAt: new Date().toISOString() }, { merge: true });
+      tx.set(globalRef, { crm_users: packed.merged, removedEmails: removedEmails }, { merge: true });
       return packed;
     });
   } else {
@@ -4714,14 +4754,20 @@ window._writeCrmUsersNow = async function(mem) {
     if (window.crmUsersDocExists(dSnap)) {
       const data = dSnap.data() || {};
       dedicated = data.list || data.crm_users || "[]";
+      window.noteCrmUsersRemoved(data.removedEmails);
     }
     const gSnap = await fc.getDoc(globalRef);
     if (window.crmUsersDocExists(gSnap)) {
-      globalUsers = (gSnap.data() || {}).crm_users || "[]";
+      const data = gSnap.data() || {};
+      globalUsers = data.crm_users || "[]";
+      window.noteCrmUsersRemoved(data.removedEmails);
     }
     saved = await writeMerged(dedicated, globalUsers);
-    await fc.setDoc(usersRef, { list: saved.merged, updatedAt: new Date().toISOString() }, { merge: true });
-    await fc.setDoc(globalRef, { crm_users: saved.merged }, { merge: true });
+    saved.merged = window.stripRemovedCrmUsers(saved.merged);
+    try { saved.out = JSON.parse(saved.merged); } catch (e) { saved.out = []; }
+    const removedEmails = window.crmUsersRemovedList();
+    await fc.setDoc(usersRef, { list: saved.merged, removedEmails: removedEmails, updatedAt: new Date().toISOString() }, { merge: true });
+    await fc.setDoc(globalRef, { crm_users: saved.merged, removedEmails: removedEmails }, { merge: true });
   }
   const merged = saved.merged;
   const out = saved.out;
@@ -4849,9 +4895,11 @@ window.commitCrmGlobalConfig = async function(payload) {
     const memUsers = window.ConfigUsersApp && Array.isArray(ConfigUsersApp.users) && ConfigUsersApp.users.length
       ? JSON.stringify(ConfigUsersApp.users) : "[]";
     if (memUsers !== "[]") localUsers = window.mergeCrmUsers(localUsers, memUsers);
+    window.noteCrmUsersRemoved(cloud.removedEmails);
     if (localUsers !== "[]" || cloud.crm_users) {
-      next.crm_users = window.mergeCrmUsers(localUsers, cloud.crm_users || "[]");
+      next.crm_users = window.stripRemovedCrmUsers(window.mergeCrmUsers(localUsers, cloud.crm_users || "[]"));
     }
+    if (window.crmUsersRemovedList().length) next.removedEmails = window.crmUsersRemovedList();
     let localLib = next.crm_engenharia_caucao_liberados_v1 || "{}";
     try {
       const storedLib = localStorage.getItem("crm_engenharia_caucao_liberados_v1");
