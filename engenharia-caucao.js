@@ -68,6 +68,8 @@ window.EngenhariaCaucaoApp = {
     shown: [],
     billsByTitulo: {},
     selected: {},
+    sortCol: "",
+    sortDir: "desc",
     liberated: {},
     busy: false,
     modal: ""
@@ -723,11 +725,57 @@ window.EngenhariaCaucaoApp = {
       }
       if (qCredor && this.fold(r.credor).indexOf(qCredor) < 0) return false;
       return true;
-    }).sort((a, b) =>
-      String(a.credor || "").localeCompare(String(b.credor || ""), "pt-BR")
-      || String(a.vencimento).localeCompare(String(b.vencimento))
-      || String(a.titulo).localeCompare(String(b.titulo))
-    );
+    }).sort((a, b) => this.compareRows(a, b));
+  },
+
+  sortDate(r, col) {
+    if (!r) return "";
+    if (col === "emissao") return this.isoDate(r.emissao) || "";
+    if (col === "vencimento") return this.isoDate(r.vencimento) || "";
+    if (col === "pagamento") return r.pago ? (this.isoDate(r.dataPagamento) || "") : "";
+    return "";
+  },
+
+  tieRows(a, b) {
+    return String(a.credor || "").localeCompare(String(b.credor || ""), "pt-BR")
+      || String(a.vencimento || "").localeCompare(String(b.vencimento || ""))
+      || String(a.titulo || "").localeCompare(String(b.titulo || ""), "pt-BR", { numeric: true });
+  },
+
+  compareRows(a, b) {
+    const col = this.state.sortCol;
+    if (col === "emissao" || col === "vencimento" || col === "pagamento") {
+      const da = this.sortDate(a, col);
+      const db = this.sortDate(b, col);
+      if (da || db) {
+        if (!da) return 1;
+        if (!db) return -1;
+        const cmp = da.localeCompare(db);
+        if (cmp) return (this.state.sortDir === "asc" ? 1 : -1) * cmp;
+      }
+    }
+    return this.tieRows(a, b);
+  },
+
+  toggleSort(col) {
+    if (this.state.sortCol === col) {
+      this.state.sortDir = this.state.sortDir === "asc" ? "desc" : "asc";
+    } else {
+      this.state.sortCol = col;
+      this.state.sortDir = "desc";
+    }
+    if (!this.state.consulted) return;
+    this.applyFilters();
+    this.renderList();
+  },
+
+  sortHeader(col, label, cls) {
+    const on = this.state.sortCol === col;
+    const icon = on ? (this.state.sortDir === "asc" ? "chevron-up" : "chevron-down") : "chevrons-up-down";
+    const title = on
+      ? (this.state.sortDir === "desc" ? "Do maior para o menor. Clique para inverter." : "Do menor para o maior. Clique para inverter.")
+      : "Ordenar do maior para o menor";
+    return `<th class="${cls} ecau-sort${on ? " is-on" : ""}" title="${this.esc(title)}" style="cursor:pointer;user-select:none;" onclick="EngenhariaCaucaoApp.toggleSort('${col}')">${this.esc(label)} <i data-lucide="${icon}" style="width:11px;height:11px;vertical-align:middle;"></i></th>`;
   },
 
   selectedRows() {
@@ -984,6 +1032,8 @@ window.EngenhariaCaucaoApp = {
     this.state.allRows = [];
     this.state.billsByTitulo = {};
     this.state.selected = {};
+    this.state.sortCol = "";
+    this.state.sortDir = "desc";
     this.state.consulted = false;
     this.state.error = "";
     this.state.modal = "";
@@ -1237,9 +1287,9 @@ window.EngenhariaCaucaoApp = {
               <th class="cprev-col-parc">Parc.</th>
               <th class="cprev-col-doc">Doc.</th>
               <th class="cprev-col-ndoc">Nº doc.</th>
-              <th class="ecau-col-emissao">Emissão</th>
-              <th class="cprev-col-venc">Vencimento</th>
-              <th class="ecau-col-pag">Pagamento</th>
+              ${this.sortHeader("emissao", "Emissão", "ecau-col-emissao")}
+              ${this.sortHeader("vencimento", "Vencimento", "cprev-col-venc")}
+              ${this.sortHeader("pagamento", "Pagamento", "ecau-col-pag")}
               <th class="cprev-col-val">Valor</th>
               <th class="ecau-col-sit">Situação</th>
             </tr>
