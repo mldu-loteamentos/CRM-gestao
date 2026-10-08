@@ -100,6 +100,7 @@ const ComprasPrevisoesApp = {
     notaByPedido: {},
     notaByContrato: {},
     baixasByTitulo: {},
+    anexosByTitulo: {},
     notasByPedido: {},
     parcelasCache: {},
     openTitulo: "",
@@ -547,22 +548,31 @@ const ComprasPrevisoesApp = {
   },
 
   anexosCellHtml(p) {
-    if (p.notasLoading) return `<span class="cprev-anexo-vazio">Buscando…</span>`;
-    if (p.notas && p.notas.length) return p.notas.map((n) => this.anexoPackHtml(n)).join("");
-    if (p.notasErro) return `<span class="cprev-anexo-erro" title="${this.esc(p.notasErro)}">Sem anexo</span>`;
+    const packs = [];
+    if (p.notas && p.notas.length) packs.push(p.notas.map((n) => this.anexoPackHtml(n)).join(""));
+    if (p.anexoSubstituto) packs.push(this.anexoPackHtml(p.anexoSubstituto));
+    if (packs.length) return packs.join("");
+    if (p.notasLoading || p.anexosSubstitutoLoading) return `<span class="cprev-anexo-vazio">Buscando…</span>`;
+    const erro = p.anexosSubstitutoErro || p.notasErro;
+    if (erro) return `<span class="cprev-anexo-erro" title="${this.esc(erro)}">Sem anexo</span>`;
     return `<span class="cprev-anexo-vazio">—</span>`;
   },
 
   async baixarAnexoTitulo(billId, attachmentId) {
     let fileName = "titulo-" + billId + ".pdf";
+    const remember = (n) => {
+      if (!n || String(n.billId) !== String(billId)) return;
+      (n.attachments || []).forEach((a) => {
+        if (String(a.id) === String(attachmentId) && a.name) fileName = a.name;
+      });
+    };
     Object.keys(this.state.notasByPedido || {}).forEach((pedido) => {
       const notas = (this.state.notasByPedido[pedido] && this.state.notasByPedido[pedido].notas) || [];
-      notas.forEach((n) => {
-        if (String(n.billId) !== String(billId)) return;
-        (n.attachments || []).forEach((a) => {
-          if (String(a.id) === String(attachmentId) && a.name) fileName = a.name;
-        });
-      });
+      notas.forEach(remember);
+    });
+    (this.state.parcelas || []).forEach((p) => remember(p && p.anexoSubstituto));
+    Object.keys(this.state.parcelasCache || {}).forEach((key) => {
+      (this.state.parcelasCache[key] || []).forEach((p) => remember(p && p.anexoSubstituto));
     });
     const base = (window.SIENGE_CONFIG && window.SIENGE_CONFIG.baseUrl) || "/api/sienge-proxy";
     const path = "/bills/" + encodeURIComponent(billId) + "/attachments/" + encodeURIComponent(attachmentId);
@@ -871,6 +881,7 @@ const ComprasPrevisoesApp = {
     const cached = (this.state.baixasByTitulo || {})[id];
     if (cached && cached.done) {
       this.aplicarBaixas(id, cached.map);
+      await this.carregarAnexosSubstitutos(id);
       this.paintParcelasModal();
       return;
     }
@@ -920,7 +931,56 @@ const ComprasPrevisoesApp = {
     if (!this.state.baixasByTitulo) this.state.baixasByTitulo = {};
     this.state.baixasByTitulo[id] = { done: true, map };
     this.aplicarBaixas(id, map);
+    await this.carregarAnexosSubstitutos(id);
     this.paintParcelasModal();
+  },
+
+  async carregarAnexosSubstitutos(titulo) {
+    const id = String(titulo || "");
+    if (!id || this.state.openTitulo !== id) return;
+    const ids = [];
+    (this.state.parcelas || []).forEach((p) => {
+      const billId = p && p.substituido ? String(p.tituloSubstituto || "") : "";
+      if (billId && ids.indexOf(billId) < 0) ids.push(billId);
+    });
+    if (!ids.length || typeof window.siengeFetchWithRetry !== "function") return;
+    if (!this.state.anexosByTitulo) this.state.anexosByTitulo = {};
+    const stamp = (p) => {
+      const billId = p && p.substituido ? String(p.tituloSubstituto || "") : "";
+      if (!billId) return p;
+      const cached = this.state.anexosByTitulo[billId];
+      if (cached && cached.done) {
+        return Object.assign({}, p, {
+          anexosSubstitutoLoading: false,
+          anexoSubstituto: cached.pack,
+          anexosSubstitutoErro: cached.error || ""
+        });
+      }
+      return Object.assign({}, p, { anexosSubstitutoLoading: true, anexosSubstitutoErro: "" });
+    };
+    this.state.parcelas = (this.state.parcelas || []).map(stamp);
+    if (this.state.parcelasCache[id]) this.state.parcelasCache[id] = this.state.parcelasCache[id].map(stamp);
+    this.paintParcelasModal();
+    for (const billId of ids) {
+      if (this.state.openTitulo !== id) return;
+      const cached = this.state.anexosByTitulo[billId];
+      if (cached && cached.done) continue;
+      let attachments = [];
+      let error = "";
+      try {
+        attachments = await this.anexosDoTitulo(billId);
+      } catch (e) {
+        error = "Não foi possível consultar os anexos do título " + billId + ".";
+      }
+      this.state.anexosByTitulo[billId] = {
+        done: true,
+        error,
+        pack: { billId, attachments }
+      };
+    }
+    if (this.state.openTitulo !== id) return;
+    this.state.parcelas = (this.state.parcelas || []).map(stamp);
+    if (this.state.parcelasCache[id]) this.state.parcelasCache[id] = this.state.parcelasCache[id].map(stamp);
   },
 
   async carregarDocumentosDoTitulo(titulo) {
@@ -1671,6 +1731,7 @@ const ComprasPrevisoesApp = {
     this.state.notaByPedido = {};
     this.state.notaByContrato = {};
     this.state.baixasByTitulo = {};
+    this.state.anexosByTitulo = {};
     this.state.notasByPedido = {};
     this.state.notaLoadingPedido = "";
     this.state.parcelasCache = {};
@@ -1997,7 +2058,7 @@ const ComprasPrevisoesApp = {
             : (pedido
             ? `<button type="button" class="cprev-ppc-btn" onclick="event.stopPropagation(); ComprasPrevisoesApp.buscarNotasPedido('${pedido}','${this.esc(p.titulo || titulo)}')">${this.esc(p.documento)}</button>`
             : this.esc(docNum));
-          return `<tr>
+          return `<tr class="cprev-parcela-row">
           <td>${this.esc(p.parcela || "—")}</td>
           <td>${this.docCellHtml(p)}</td>
           <td>${docNumHtml}</td>

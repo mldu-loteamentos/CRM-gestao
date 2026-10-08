@@ -6493,6 +6493,12 @@ circle.donut-segment {
   color: #64748b;
 }
 .cprev-modal-body { overflow: auto; padding: 0; }
+.cprev-modal .cprev-table tbody tr.cprev-parcela-row:hover td {
+  background: #d1fae5;
+}
+.cprev-modal .cprev-table tbody tr.cprev-parcela-row:hover td:first-child {
+  box-shadow: inset 3px 0 0 #105436;
+}
 .cprev-config-page { padding: 4px 0 28px; }
 .cprev-config-card {
   padding: 20px 22px 18px;

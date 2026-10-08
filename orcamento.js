@@ -551,12 +551,14 @@ const OrcamentoApp = {
         return;
       }
       const first = list[0];
-      const head = prefix === "129" ? "12900" : prefix;
+      const product = list.find((cc) => !this.isParceriaCc(cc) && /00$/.test(String(cc.cc)))
+        || list.find((cc) => !this.isParceriaCc(cc))
+        || first;
       items.push({
         grouped: true,
         key: emp.key + "|obra:" + prefix,
         prefix: prefix,
-        label: head + " — " + (first.cn || ""),
+        label: product.cc + " — " + (product.cn || ""),
         centers: list,
         sort: String(first.cc)
       });
