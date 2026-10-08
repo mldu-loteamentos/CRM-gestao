@@ -197,6 +197,8 @@ const EmpresasApp = {
   render() {
     const contentDiv = document.getElementById('empresas-content');
     if (!contentDiv) return;
+    const prevScroll = document.getElementById("empresas-scroll");
+    const scrollTop = prevScroll ? prevScroll.scrollTop : 0;
 
     if (EmpresasState.loading) {
       contentDiv.innerHTML = `
@@ -375,7 +377,7 @@ const EmpresasApp = {
       </div>
 
       <div class="card" style="overflow: hidden; border-radius: 8px;">
-        <div style="max-height: 65vh; overflow-y: auto;">
+        <div id="empresas-scroll" style="max-height: 65vh; overflow-y: auto;">
           <table class="empresas-table">
             <thead>
               <tr>
@@ -461,6 +463,13 @@ const EmpresasApp = {
     `;
 
     contentDiv.innerHTML = html;
+    const nextScroll = document.getElementById("empresas-scroll");
+    if (nextScroll) {
+      nextScroll.scrollTop = scrollTop;
+      requestAnimationFrame(() => {
+        if (nextScroll.isConnected) nextScroll.scrollTop = scrollTop;
+      });
+    }
     if (window.lucide) window.lucide.createIcons();
   },
 
