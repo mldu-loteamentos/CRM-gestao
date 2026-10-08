@@ -1088,7 +1088,7 @@ const ParticipacoesApp = {
     this.detail = {
       credor: String(credor || ""),
       groupKey: this.credorGroupKey(credor),
-      periodo: String(periodo || "")
+      periodo: periodo ? String(periodo) : ""
     };
     this.render();
   },
@@ -1103,8 +1103,9 @@ const ParticipacoesApp = {
     const { credor, periodo, groupKey } = this.detail;
     const key = groupKey || this.credorGroupKey(credor);
     return this.filtered().filter((r) => {
-      const p = this.expensePeriodKey(r);
-      return this.credorGroupKey(r.credor) === key && String(p) === String(periodo);
+      if (this.credorGroupKey(r.credor) !== key) return false;
+      if (!periodo) return true;
+      return String(this.expensePeriodKey(r)) === String(periodo);
     }).sort((a, b) => String(a.iso || a.date).localeCompare(String(b.iso || b.date)));
   },
 
@@ -1125,7 +1126,7 @@ const ParticipacoesApp = {
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e2e8f0;flex-wrap:wrap;">
           <div>
             <strong style="color:#14532d;">Matriz por credor × mês</strong>
-            <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">Clique em um valor para ver o detalhamento dos lançamentos. Somente meses com DESPESAS PAGAS.</div>
+            <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">Clique no credor para ver todos os lançamentos. Clique no valor para ver só aquele mês.</div>
             ${warn ? `<div style="font-size:0.75rem;color:#9a3412;margin-top:4px;">Conferência Saldo Total: ${this.esc(warn)}</div>` : ""}
           </div>
           <div style="font-weight:800;color:#105436;">${this.fmt(mx.grand)} · ${mx.creditors.length} credor(es)</div>
@@ -1142,8 +1143,10 @@ const ParticipacoesApp = {
             <tbody>
               ${mx.creditors.map((c) => {
                 const enc = encodeURIComponent(c.credor);
-                return `<tr>
-                  <td class="part-matrix-sticky part-matrix-credor" title="${this.esc(c.credor)}">${this.esc(c.credor)}</td>
+                return `<tr class="${this.detail && this.detail.groupKey === this.credorGroupKey(c.credor) ? "is-on" : ""}">
+                  <td class="part-matrix-sticky part-matrix-credor" title="Ver todos os lançamentos de ${this.esc(c.credor)}">
+                    <button type="button" class="part-matrix-credor-btn" onclick="ParticipacoesApp.openMatrixDetail('${enc}','')">${this.esc(c.credor)}</button>
+                  </td>
                   ${mx.months.map((m) => {
                     const cell = c.cells[m];
                     if (!cell || !cell.total) {
@@ -1178,7 +1181,9 @@ const ParticipacoesApp = {
     if (!this.detail) return "";
     const rows = this.detailRows();
     const total = rows.reduce((s, r) => s + (Number(r.valor) || 0), 0);
-    const periodoLab = this.periodLabel(this.detail.periodo, this.detail.periodo);
+    const periodoLab = this.detail.periodo
+      ? this.periodLabel(this.detail.periodo, this.detail.periodo)
+      : "Todos os períodos";
     return `
       <div id="part-detail-modal" class="part-detail-overlay" onclick="if(event.target===this)ParticipacoesApp.closeMatrixDetail()">
         <div class="part-detail-panel" role="dialog" aria-modal="true">
@@ -1197,6 +1202,7 @@ const ParticipacoesApp = {
                 <thead>
                   <tr>
                     <th>Data</th>
+                    <th>Período</th>
                     <th>Detalhe</th>
                     <th>Categoria</th>
                     <th style="text-align:right;">Valor</th>
@@ -1205,6 +1211,7 @@ const ParticipacoesApp = {
                 <tbody>
                   ${rows.map((r) => `<tr style="${r.categoriaId === "relacionada" ? "background:#fff7ed;" : ""}">
                     <td style="white-space:nowrap;">${this.esc(r.date)}</td>
+                    <td style="white-space:nowrap;text-transform:capitalize;">${this.esc(this.periodLabel(r.periodo, "—"))}</td>
                     <td>${this.esc(r.detalhe || "—")}</td>
                     <td>${this.esc(r.categoria)}</td>
                     <td style="text-align:right;font-weight:700;">${r.valor ? this.fmt(r.valor) : "—"}</td>
@@ -1693,10 +1700,8 @@ const ParticipacoesApp = {
     const periodTitle = this.fileName
       ? this.periodLabel(selectedFile && selectedFile.closing, this.fileName)
       : (this.files.length ? "Todos os períodos" : "—");
-    const coList = this.filteredCompanies();
     const uploadDisabled = !this.companyId;
     const companyTitle = (crm && crm.name) || this.companyLabel(this.companyId) || "Selecione a empresa";
-    const companyUsual = this.companyLabel(this.companyId);
 
     const segBtn = (id, label, icon) => {
       const on = this.groupBy === id;
@@ -1708,64 +1713,34 @@ const ParticipacoesApp = {
 
     root.innerHTML = `
       <div style="padding:14px 18px 28px;">
-        <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start;margin-bottom:12px;">
+        <div class="part-top">
           <div>
             <div style="font-size:1.2rem;font-weight:800;color:#0f172a;">Prestação de Contas Ellenceo</div>
             <div style="font-size:0.8rem;color:#64748b;margin-top:3px;">DESPESAS PAGAS por empresa e período · PDF salvo no Firebase para consulta</div>
           </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-            <select class="form-control" style="width:auto;min-width:160px;font-size:0.8rem;font-weight:600;"
+          <div class="part-top-actions">
+            <select class="form-control" style="width:auto;min-width:180px;font-size:0.8rem;font-weight:600;"
               onchange="ParticipacoesApp.exportScope=this.value">
               <option value="current" ${this.exportScope === "current" ? "selected" : ""}>Excel: empresa atual</option>
               <option value="all" ${this.exportScope === "all" ? "selected" : ""}>Excel: todas (1 aba cada)</option>
             </select>
             <button type="button" class="btn btn-excel" onclick="ParticipacoesApp.exportExcel()" ${!this.companyId && this.exportScope === "current" ? "disabled" : ""} title="Exportar tabela atual para Excel">
-              <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
+              <i data-lucide="download" style="width:14px;height:14px;"></i> Excel
             </button>
-            <label class="btn btn-secondary" style="cursor:${uploadDisabled ? "not-allowed" : "pointer"};opacity:${uploadDisabled ? 0.55 : 1};display:inline-flex;align-items:center;gap:6px;margin:0;">
+            <label class="btn btn-secondary" style="cursor:${uploadDisabled ? "not-allowed" : "pointer"};opacity:${uploadDisabled ? 0.55 : 1};display:inline-flex;align-items:center;gap:6px;margin:0;height:40px;">
               <i data-lucide="upload" style="width:15px;"></i> Enviar PDFs
               <input type="file" accept="application/pdf,.pdf" multiple ${uploadDisabled ? "disabled" : ""} style="display:none" onchange="ParticipacoesApp.onUpload(this)">
             </label>
           </div>
         </div>
 
-        <div class="crm-card" style="padding:12px 14px;margin-bottom:12px;position:relative;">
-          <div style="display:grid;grid-template-columns:minmax(280px,1.2fr) minmax(220px,1fr);gap:12px;align-items:end;">
-            <div>
-              <div style="font-size:0.72rem;font-weight:800;color:#64748b;text-transform:uppercase;margin-bottom:6px;">Empresa</div>
-              <div style="display:flex;gap:8px;align-items:center;">
-                <button type="button" class="form-control" onclick="ParticipacoesApp.companyPickerOpen=!ParticipacoesApp.companyPickerOpen;ParticipacoesApp.render()"
-                  style="text-align:left;font-weight:700;color:#105436;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;">
-                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-                    ${this.companyId ? `${this.esc(String(this.companyId))} — ${this.esc(companyUsual || companyTitle)}` : "Buscar e selecionar empresa..."}
-                  </span>
-                  <i data-lucide="chevron-down" style="width:16px;flex-shrink:0;"></i>
-                </button>
-              </div>
-              ${this.companyPickerOpen ? `
-                <div style="position:absolute;left:14px;right:14px;top:78px;z-index:40;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 12px 30px rgba(15,23,42,0.12);padding:10px;max-width:520px;">
-                  <input class="form-control" placeholder="Buscar ID ou nome..." value="${this.esc(this.companyQ)}"
-                    oninput="ParticipacoesApp.companyQ=this.value;ParticipacoesApp.render()"
-                    style="margin-bottom:8px;font-size:0.82rem;" autofocus>
-                  <div style="max-height:260px;overflow:auto;">
-                    ${coList.length ? coList.map((c) => {
-                      const active = String(c.id) === String(this.companyId);
-                      const label = this.companyLabel(c.id) || c.name || "";
-                      return `<button type="button" onclick="ParticipacoesApp.onCompany('${String(c.id).replace(/'/g, "\\'")}')"
-                        style="display:block;width:100%;text-align:left;padding:8px 10px;border:none;border-radius:8px;background:${active ? "#ecfdf5" : "transparent"};cursor:pointer;margin-bottom:2px;">
-                        <div style="font-weight:800;color:#105436;font-size:0.82rem;">${c.id} — ${this.esc(label)}</div>
-                        ${label !== c.name && c.name ? `<div style="font-size:0.7rem;color:#94a3b8;">${this.esc(c.name)}</div>` : ""}
-                      </button>`;
-                    }).join("") : `<div style="padding:10px;color:#64748b;font-size:0.82rem;">Nenhuma empresa encontrada.</div>`}
-                  </div>
-                </div>` : ""}
-            </div>
-            <div>
-              <div style="font-size:0.72rem;font-weight:800;color:#64748b;text-transform:uppercase;margin-bottom:6px;">Buscar nas despesas</div>
-              <input class="form-control" placeholder="Credor, detalhe, categoria, data..." value="${this.esc(this.q)}"
-                oninput="ParticipacoesApp.q=this.value;ParticipacoesApp.render()" style="font-size:0.82rem;">
-            </div>
-          </div>
+        <div class="crm-card part-filters" style="padding:12px 14px;margin-bottom:12px;">
+          <div id="part-emp-box"></div>
+          <label class="part-search">
+            <div style="font-size:0.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;">Buscar nas despesas</div>
+            <input class="form-control" placeholder="Credor, detalhe, categoria, data..." value="${this.esc(this.q)}"
+              oninput="ParticipacoesApp.q=this.value;ParticipacoesApp.render()" style="font-size:0.85rem;">
+          </label>
         </div>
 
         ${this.error ? `<div style="margin-bottom:12px;padding:10px 12px;border-radius:8px;background:#fef2f2;color:#991b1b;font-size:0.85rem;">${this.esc(this.error)}</div>` : ""}
@@ -1826,7 +1801,7 @@ const ParticipacoesApp = {
               <span style="font-weight:800;color:#105436;">${this.fmt(g.total)} · ${g.rows.length}</span>
             </div>
             <div style="overflow:auto;">
-              <table style="width:100%;border-collapse:collapse;font-size:0.8rem;min-width:720px;">
+              <table class="part-expense-table" style="width:100%;border-collapse:collapse;font-size:0.8rem;min-width:720px;">
                 <thead>
                   <tr style="background:#105436;color:#fff;">
                     <th style="text-align:left;padding:6px 10px;">Data</th>
@@ -1855,6 +1830,61 @@ const ParticipacoesApp = {
         ${this.detailModalHtml()}
       </div>
     `;
+    this.paintCompany();
+    if (window.lucide) lucide.createIcons();
+  },
+
+  companyItems() {
+    return this.crmCompanies().map((c) => ({
+      id: String(c.id),
+      label: String(c.id) + " - " + String(this.companyLabel(c.id) || c.name || "").toUpperCase()
+    }));
+  },
+
+  paintCompany() {
+    const box = document.getElementById("part-emp-box");
+    if (!box || !window.MlEmpresaFilter) return;
+    const selected = this.companyId ? [String(this.companyId)] : [];
+    box.innerHTML = MlEmpresaFilter.html({
+      id: "part-emp",
+      label: "Empresas",
+      items: this.companyItems(),
+      selectedIds: selected,
+      open: this.companyPickerOpen,
+      query: this.companyQ,
+      emptyMeansAll: false
+    });
+    MlEmpresaFilter.bind("part-emp", {
+      toggleOpen: () => {
+        this.companyPickerOpen = !this.companyPickerOpen;
+        this.paintCompany();
+      },
+      close: () => {
+        this.companyPickerOpen = false;
+        this.paintCompany();
+      },
+      setQuery: (q) => {
+        this.companyQ = q || "";
+        const list = document.getElementById("part-emp-list");
+        if (!list) return;
+        list.innerHTML = MlEmpresaFilter.listHtml({
+          id: "part-emp",
+          items: this.companyItems(),
+          selectedIds: this.companyId ? [String(this.companyId)] : [],
+          query: this.companyQ
+        });
+      },
+      toggleId: (id, on) => {
+        this.companyPickerOpen = false;
+        if (on) this.onCompany(id);
+        else if (String(this.companyId) === String(id)) this.onCompany("");
+      },
+      selectAll: () => {},
+      selectNone: () => {
+        this.companyPickerOpen = false;
+        this.onCompany("");
+      }
+    });
     if (window.lucide) lucide.createIcons();
   }
 };

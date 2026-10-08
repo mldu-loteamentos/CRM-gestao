@@ -5,6 +5,10 @@ const OrcamentoApp = {
   selectedCompanyIds: [],
   companyDropOpen: false,
   companyQuery: "",
+  selectedPlanIds: [],
+  planDropOpen: false,
+  planQuery: "",
+  quarterView: false,
   expanded: new Set(),
   mouraView: false,
   ready: false,
@@ -74,7 +78,6 @@ const OrcamentoApp = {
   render() {
     const root = document.getElementById("orcamento-root");
     if (!root) return;
-    const months = this.months();
     root.innerHTML = `
       <style>
         #orcamento-root { font-family: inherit; color: #0f172a; }
@@ -83,12 +86,15 @@ const OrcamentoApp = {
         .orc-head p { margin: 6px 0 0; font-size: 0.84rem; color: #fff; max-width: 820px; line-height: 1.4; }
         .orc-tools { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 12px; }
         .orc-search { height: 40px; border: 1px solid #475569; border-radius: 8px; padding: 0 12px; min-width: 240px; font-size: 0.9rem; color: #0f172a; background: #fff; }
-        #orcamento-root .ml-emp-filter { flex: 0 0 460px; width: 460px; max-width: none; min-width: 420px; }
+        #orcamento-root .ml-emp-filter { flex: 0 0 420px; width: 420px; max-width: none; min-width: 280px; }
+        #orcamento-root #orc-plan-box .ml-emp-filter { flex: 0 0 340px; width: 340px; min-width: 240px; }
         #orcamento-root .btn-excel { height: 40px; }
         .orc-ghost { height: 40px; border-radius: 8px; border: 1px solid #105436; background: #fff; color: #105436; font-weight: 800; padding: 0 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; }
         .orc-ghost:hover { background: #d1fae5; }
         .orc-ghost-muted { border-color: #cbd5e1; color: #475569; }
         .orc-ghost-muted:hover { background: #f1f5f9; }
+        .orc-ghost.is-on { background: #105436; color: #fff; }
+        .orc-ghost.is-on:hover { background: #0c3d28; }
         .orc-ghost svg { width: 14px; height: 14px; }
         .orc-kpis { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
         .orc-kpi { background: #fff; border: 1px solid #94a3b8; border-top: 4px solid #105436; border-radius: 10px; padding: 12px 14px 10px; min-width: 150px; flex: 1; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08); }
@@ -97,12 +103,17 @@ const OrcamentoApp = {
         .orc-kpi strong .orc-pct { display: inline; margin-left: 6px; font-size: 0.95rem; }
         .orc-scroll { overflow: auto; max-height: calc(100vh - 280px); border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; }
         .orc-table { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; font-size: 0.78rem; }
-        .orc-table th { position: sticky; background: #105436; color: #fff; z-index: 2; padding: 8px 10px; text-align: right; font-weight: 700; white-space: nowrap; }
-        .orc-table thead tr:first-child th { top: 0; z-index: 4; }
+        .orc-table thead { background: #0c3d28; }
+        .orc-table th { position: sticky; background: #105436; color: #fff; z-index: 2; padding: 0 10px; height: 36px; line-height: 36px; box-sizing: border-box; text-align: right; font-weight: 700; white-space: nowrap; }
+        .orc-table thead tr:first-child th { top: 0; z-index: 4; box-shadow: 0 3px 0 #105436; }
         .orc-table thead tr:first-child th.orc-h26,
         .orc-table thead tr:first-child th.orc-h27,
         .orc-table thead tr:first-child th.orc-cmp { text-align: center; }
-        .orc-table thead tr:nth-child(2) th { top: 33px; z-index: 3; text-align: center; }
+        .orc-table thead tr:first-child th.orc-h26 { box-shadow: 0 3px 0 #0c3d28; }
+        .orc-table thead tr:first-child th.orc-h27 { box-shadow: 0 3px 0 #1a6b45; }
+        .orc-table thead tr:nth-child(2) th { top: 36px; z-index: 3; text-align: center; box-shadow: 0 -3px 0 #105436; }
+        .orc-table thead tr:nth-child(2) th.orc-h26 { box-shadow: 0 -3px 0 #0c3d28; }
+        .orc-table thead tr:nth-child(2) th.orc-h27 { box-shadow: 0 -3px 0 #1a6b45; }
         .orc-table th.orc-label { text-align: left; left: 0; z-index: 5; min-width: 380px; }
         .orc-table th.orc-h26 { background: #0c3d28; }
         .orc-table th.orc-h27 { background: #1a6b45; }
@@ -148,11 +159,13 @@ const OrcamentoApp = {
       </div>
       <div class="orc-tools">
         <div id="orc-emp-box"></div>
+        <div id="orc-plan-box"></div>
         <input id="orc-search" class="orc-search" type="search" placeholder="Buscar empresa, centro de custo ou conta" value="${this.esc(this.query)}">
         <div class="orc-view">
           <button type="button" id="orc-view-total" class="${this.mouraView ? "" : "is-on"}">Valor total</button>
           <button type="button" id="orc-view-moura" class="${this.mouraView ? "is-on" : ""}">Valor Moura Leite</button>
         </div>
+        <button type="button" class="orc-ghost${this.quarterView ? " is-on" : ""}" id="orc-quarter" title="Recolher os meses em trimestres"><i data-lucide="calendar-range"></i> ${this.quarterView ? "Ver meses" : "Por trimestre"}</button>
         <button type="button" class="orc-ghost" id="orc-expand"><i data-lucide="chevrons-down"></i> Expandir todos</button>
         <button type="button" class="orc-ghost orc-ghost-muted" id="orc-collapse"><i data-lucide="chevrons-up"></i> Recolher todos</button>
         <button type="button" class="btn btn-excel" id="orc-excel" title="Exportar tabela atual para Excel"><i data-lucide="download" style="width:14px;height:14px;"></i> Excel</button>
@@ -163,13 +176,13 @@ const OrcamentoApp = {
           <thead>
             <tr>
               <th class="orc-label" rowspan="2">Empresa / Centro de custo / Plano</th>
-              <th class="orc-h26" colspan="12">2026</th>
-              <th class="orc-h27 orc-split" colspan="12">2027</th>
+              <th class="orc-h26" colspan="${this.periodCols(2026).length}">2026</th>
+              <th class="orc-h27 orc-split" colspan="${this.periodCols(2027).length}">2027</th>
               <th class="orc-cmp orc-split" colspan="4">Comparativo</th>
             </tr>
             <tr>
-              ${months.map((m, i) => `<th class="orc-h26${i >= 9 ? " orc-fc" : ""}">${m}${i >= 9 ? "*" : ""}</th>`).join("")}
-              ${months.map((m, i) => `<th class="orc-h27${i === 0 ? " orc-split" : ""}">${m}</th>`).join("")}
+              ${this.periodCols(2026).map((col) => `<th class="orc-h26${col.forecast ? " orc-fc" : ""}">${this.esc(col.label)}</th>`).join("")}
+              ${this.periodCols(2027).map((col, i) => `<th class="orc-h27${i === 0 ? " orc-split" : ""}">${this.esc(col.label)}</th>`).join("")}
               <th class="orc-split">Total 2026</th>
               <th>Total 2027</th>
               <th>Variação</th>
@@ -181,6 +194,7 @@ const OrcamentoApp = {
       </div>
     `;
     this.paintCompany();
+    this.paintPlan();
     this.bind();
     this.paint();
     if (window.lucide && lucide.createIcons) lucide.createIcons();
@@ -209,6 +223,10 @@ const OrcamentoApp = {
     MlEmpresaFilter.bind("orc-emp", {
       toggleOpen: () => {
         this.companyDropOpen = !this.companyDropOpen;
+        if (this.companyDropOpen) {
+          this.planDropOpen = false;
+          this.paintPlan();
+        }
         this.paintCompany();
       },
       setQuery: (q) => {
@@ -249,6 +267,118 @@ const OrcamentoApp = {
     });
   },
 
+  plans() {
+    const map = new Map();
+    const add = (line) => {
+      const id = String((line && line.conta) || "");
+      if (!id || map.has(id)) return;
+      const nome = String((line && line.nome) || "").trim() || this.accountName(id);
+      map.set(id, nome);
+    };
+    (this.data().lines || []).forEach(add);
+    (this.received().lines || []).forEach(add);
+    return [...map.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => String(a.id).localeCompare(String(b.id), "pt-BR", { numeric: true }));
+  },
+
+  planItems() {
+    return this.plans().map((p) => ({
+      id: p.id,
+      label: p.id + " - " + String(p.name || "").toUpperCase()
+    }));
+  },
+
+  planOn(conta) {
+    if (!this.selectedPlanIds.length) return true;
+    const code = String(conta || "");
+    return this.selectedPlanIds.some((id) => code === id || code.indexOf(id + ".") === 0);
+  },
+
+  paintPlan() {
+    const box = document.getElementById("orc-plan-box");
+    if (!box || !window.MlEmpresaFilter) return;
+    box.innerHTML = MlEmpresaFilter.html({
+      id: "orc-plan",
+      label: "Planos",
+      items: this.planItems(),
+      selectedIds: this.selectedPlanIds.map(String),
+      open: this.planDropOpen,
+      query: this.planQuery,
+      emptyMeansAll: true,
+      nouns: { singular: "plano", plural: "planos" }
+    });
+    MlEmpresaFilter.bind("orc-plan", {
+      toggleOpen: () => {
+        this.planDropOpen = !this.planDropOpen;
+        if (this.planDropOpen) {
+          this.companyDropOpen = false;
+          this.paintCompany();
+        }
+        this.paintPlan();
+      },
+      setQuery: (q) => {
+        this.planQuery = q || "";
+        const list = document.getElementById("orc-plan-list");
+        if (list) {
+          list.innerHTML = MlEmpresaFilter.listHtml({
+            id: "orc-plan",
+            items: this.planItems(),
+            selectedIds: this.selectedPlanIds,
+            query: this.planQuery
+          });
+        }
+      },
+      toggleId: (id, on) => {
+        const sid = String(id);
+        if (on) {
+          if (!this.selectedPlanIds.includes(sid)) this.selectedPlanIds.push(sid);
+        } else {
+          this.selectedPlanIds = this.selectedPlanIds.filter((x) => x !== sid);
+        }
+        this.planDropOpen = true;
+        this.paintPlan();
+        this.paint();
+      },
+      selectAll: () => {
+        this.selectedPlanIds = this.plans().map((p) => p.id);
+        this.planDropOpen = true;
+        this.paintPlan();
+        this.paint();
+      },
+      selectNone: () => {
+        this.selectedPlanIds = [];
+        this.planDropOpen = true;
+        this.paintPlan();
+        this.paint();
+      }
+    });
+  },
+
+  periodCols(year) {
+    const months = this.months();
+    if (!this.quarterView) {
+      return months.map((m, i) => ({
+        label: m + (year === 2026 && i >= 9 ? "*" : ""),
+        indexes: [i],
+        forecast: year === 2026 && i >= 9
+      }));
+    }
+    return ["1º tri", "2º tri", "3º tri", "4º tri"].map((label, q) => ({
+      label: label + (year === 2026 && q === 3 ? "*" : ""),
+      indexes: [q * 3, q * 3 + 1, q * 3 + 2],
+      forecast: year === 2026 && q === 3
+    }));
+  },
+
+  sumIndexes(arr, indexes) {
+    return (indexes || []).reduce((s, i) => s + (Number(arr && arr[i]) || 0), 0);
+  },
+
+  tableSpan() {
+    return 1 + this.periodCols(2026).length + this.periodCols(2027).length + 4;
+  },
+
   bind() {
     const search = document.getElementById("orc-search");
     if (search) {
@@ -261,6 +391,11 @@ const OrcamentoApp = {
     if (viewTotal) viewTotal.addEventListener("click", () => this.setMoura(false));
     const viewMoura = document.getElementById("orc-view-moura");
     if (viewMoura) viewMoura.addEventListener("click", () => this.setMoura(true));
+    const quarter = document.getElementById("orc-quarter");
+    if (quarter) quarter.addEventListener("click", () => {
+      this.quarterView = !this.quarterView;
+      this.render();
+    });
     const expand = document.getElementById("orc-expand");
     if (expand) expand.addEventListener("click", () => this.expandAll(true));
     const collapse = document.getElementById("orc-collapse");
@@ -339,7 +474,7 @@ const OrcamentoApp = {
       const e = String(line.e || "");
       const cc = String(line.cc || "");
       const conta = String(line.conta || "");
-      if (!e || !cc || !conta || !this.companyOn(e)) return null;
+      if (!e || !cc || !conta || !this.companyOn(e) || !this.planOn(conta)) return null;
       const key = e + "|" + cc + "|" + conta;
       let row = map.get(key);
       if (!row) {
@@ -564,7 +699,7 @@ const OrcamentoApp = {
     if (!body) return;
     const data = this.collect();
     const html = data.rows.filter((row) => this.rowVisible(row)).map((row) => this.rowHtml(row));
-    body.innerHTML = html.join("") || '<tr><td class="orc-empty" colspan="29">Nenhuma empresa com essas contas.</td></tr>';
+    body.innerHTML = html.join("") || '<tr><td class="orc-empty" colspan="' + this.tableSpan() + '">Nenhuma empresa com essas contas.</td></tr>';
     if (kpis) {
       const y26 = data.y26;
       const y27 = data.y27;
@@ -612,8 +747,8 @@ const OrcamentoApp = {
     const t27 = this.sum(row.m27);
     const delta = t27 - t26;
     const cls = row.kind === "emp" ? "orc-emp" : (row.kind === "total" ? "orc-total" : (row.kind === "cc" ? "orc-cc" : "orc-leaf"));
-    const y26 = row.m26.map((v, i) => this.moneyCell(v, i >= 9 ? "orc-fc" : "")).join("");
-    const y27 = row.m27.map((v, i) => this.moneyCell(v, "orc-y27" + (i === 0 ? " orc-split" : ""))).join("");
+    const y26 = this.periodCols(2026).map((col) => this.moneyCell(this.sumIndexes(row.m26, col.indexes), col.forecast ? "orc-fc" : "")).join("");
+    const y27 = this.periodCols(2027).map((col, i) => this.moneyCell(this.sumIndexes(row.m27, col.indexes), "orc-y27" + (i === 0 ? " orc-split" : ""))).join("");
     return '<tr class="' + cls + '"><td style="padding-left:' + pad + 'px;">' + chevron + "<span>" + this.esc(row.label) + "</span></td>"
       + y26 + y27
       + this.moneyCell(t26, "orc-split")
@@ -650,8 +785,11 @@ const OrcamentoApp = {
       imgId = wb.addImage({ base64: logo.dataUrl, extension: logo.extension || "png" });
     } catch (e) { /* logo opcional */ }
 
-    const months = this.months();
-    const colCount = 2 + 24 + 4;
+    const c26 = this.periodCols(2026);
+    const c27 = this.periodCols(2027);
+    const colCount = 2 + c26.length + c27.length + 4;
+    const start27 = 3 + c26.length;
+    const startCmp = start27 + c27.length;
     const ws = wb.addWorksheet("Orçamento", { properties: { showGridLines: false } });
     ws.properties.outlineProperties = { summaryBelow: false, summaryRight: false };
     ws.views = [{
@@ -665,7 +803,7 @@ const OrcamentoApp = {
     ws.columns = [
       { width: 18 },
       { width: 52 },
-      ...Array.from({ length: 24 }, () => ({ width: 14 })),
+      ...Array.from({ length: c26.length + c27.length }, () => ({ width: 14 })),
       { width: 16 },
       { width: 16 },
       { width: 16 },
@@ -744,15 +882,15 @@ const OrcamentoApp = {
     ws.getRow(3).height = 8;
     ws.mergeCells(4, 1, 5, 1);
     ws.mergeCells(4, 2, 5, 2);
-    ws.mergeCells(4, 3, 4, 14);
-    ws.mergeCells(4, 15, 4, 26);
-    ws.mergeCells(4, 27, 4, 30);
+    ws.mergeCells(4, 3, 4, start27 - 1);
+    ws.mergeCells(4, start27, 4, startCmp - 1);
+    ws.mergeCells(4, startCmp, 4, colCount);
     const groupHeads = [
       [1, "Nível", "FF334155"],
       [2, "Empresa / Centro de custo / Plano", "FF334155"],
       [3, "2026", "FF0C3D28"],
-      [15, "2027", "FF1A6B45"],
-      [27, "Comparativo", "FF334155"]
+      [start27, "2027", "FF1A6B45"],
+      [startCmp, "Comparativo", "FF334155"]
     ];
     const fillSpan = (from, to, fill) => {
       for (let c = from; c <= to; c++) {
@@ -765,23 +903,24 @@ const OrcamentoApp = {
       }
     };
     fillSpan(1, 2, "FF334155");
-    fillSpan(3, 14, "FF0C3D28");
-    fillSpan(15, 26, "FF1A6B45");
-    fillSpan(27, 30, "FF334155");
+    fillSpan(3, start27 - 1, "FF0C3D28");
+    fillSpan(start27, startCmp - 1, "FF1A6B45");
+    fillSpan(startCmp, colCount, "FF334155");
     groupHeads.forEach(([col, text]) => {
       ws.getRow(4).getCell(col).value = text;
     });
-    const monthHeads = months.map((m, i) => m + (i >= 9 ? "*" : ""));
-    const heads = ["", "", ...monthHeads, ...months, "Total 2026", "Total 2027", "Variação", "Variação %"];
+    const heads = ["", ""].concat(c26.map((col) => col.label), c27.map((col) => col.label), ["Total 2026", "Total 2027", "Variação", "Variação %"]);
     const headRow = ws.getRow(5);
     headRow.height = 20;
     heads.forEach((h, i) => {
       if (i < 2) return;
       const cell = headRow.getCell(i + 1);
       cell.value = h;
-      const forecast = i >= 2 && i <= 13 && (i - 2) >= 9;
+      const in26 = i >= 2 && i < start27 - 1;
+      const in27 = i >= start27 - 1 && i < startCmp - 1;
+      const forecast = in26 && c26[i - 2] && c26[i - 2].forecast;
       inv.excelPaint(cell, {
-        fill: i <= 13 ? "FF0C3D28" : (i <= 25 ? "FF1A6B45" : "FF334155"),
+        fill: in26 ? "FF0C3D28" : (in27 ? "FF1A6B45" : "FF334155"),
         font: { bold: true, size: 9, color: { argb: forecast ? "FFFDE68A" : "FFFFFFFF" } },
         align: { horizontal: "center", vertical: "middle" },
         border: true
@@ -854,15 +993,15 @@ const OrcamentoApp = {
         align: { horizontal: "left", vertical: "middle", indent: row.depth },
         border: true
       });
-      row.m26.forEach((v, i) => paintMoney(excelRow.getCell(3 + i), v, row.kind, i >= 9));
-      row.m27.forEach((v, i) => paintMoney(excelRow.getCell(15 + i), v, row.kind, false));
+      c26.forEach((col, i) => paintMoney(excelRow.getCell(3 + i), this.sumIndexes(row.m26, col.indexes), row.kind, col.forecast));
+      c27.forEach((col, i) => paintMoney(excelRow.getCell(start27 + i), this.sumIndexes(row.m27, col.indexes), row.kind, false));
       const a26 = this.sum(row.m26);
       const a27 = this.sum(row.m27);
       const d = a27 - a26;
-      paintMoney(excelRow.getCell(27), a26, row.kind, false);
-      paintMoney(excelRow.getCell(28), a27, row.kind, false);
-      paintMoney(excelRow.getCell(29), d, row.kind, false);
-      paintPct(excelRow.getCell(30), d, a26, row.kind);
+      paintMoney(excelRow.getCell(startCmp), a26, row.kind, false);
+      paintMoney(excelRow.getCell(startCmp + 1), a27, row.kind, false);
+      paintMoney(excelRow.getCell(startCmp + 2), d, row.kind, false);
+      paintPct(excelRow.getCell(startCmp + 3), d, a26, row.kind);
       rowIdx += 1;
     });
 

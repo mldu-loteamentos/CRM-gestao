@@ -5168,6 +5168,35 @@ circle.donut-segment {
   box-shadow: 2px 0 0 #e2e8f0;
 }
 .part-matrix-credor { padding-left: 10px !important; }
+.part-matrix-table tbody tr:hover td { background: #d1fae5; }
+.part-matrix-table tbody tr:hover .part-matrix-sticky { background: #a7f3d0; box-shadow: inset 4px 0 0 #f37021, 2px 0 0 #e2e8f0; }
+.part-matrix-table tbody tr:hover .part-matrix-btn { background: #a7f3d0; border-color: #6ee7b7; }
+.part-matrix-credor-btn {
+  display: block;
+  width: 100%;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-weight: 800;
+  color: #105436;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.part-matrix-credor-btn:hover { text-decoration: underline; }
+.part-expense-table tbody tr:hover td { background: #d1fae5; }
+.part-top { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 12px; }
+.part-top-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.part-top-actions .form-control,
+.part-top-actions .btn,
+.part-top-actions .btn-excel { height: 40px; }
+#participacoes-root .ml-emp-filter { flex: 0 0 420px; width: 420px; max-width: none; min-width: 320px; }
+.part-filters { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.part-filters .part-search { flex: 1; min-width: 220px; }
+.part-filters .part-search input { height: 40px; }
 .part-matrix-empty { color: #cbd5e1; }
 .part-matrix-total {
   font-weight: 800;
