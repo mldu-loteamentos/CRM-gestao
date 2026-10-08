@@ -2265,10 +2265,7 @@ const DashboardInadimplencia = (function() {
     }).catch((e) => console.warn("[Sprint] Não salvou a base do dia", e));
 
     const opSummary = (typeof window.buildSprintOperatorSummaries === "function") ? window.buildSprintOperatorSummaries() : "";
-    const nexArDays = (typeof window.nexCorreiosCheckDays === "function") ? window.nexCorreiosCheckDays() : 15;
-    const nexArCount = (typeof window.nexCorreiosCheckCount === "function") ? window.nexCorreiosCheckCount() : 0;
-    const nexArLine = `📮 *AR digital:* ${nexArCount} NEX para checar nos Correios (${nexArDays} dias ou mais do envio, sem AR)`;
-    const teamsText = `📊 *Sprint Diário - ${dateStr}*\n💰 *Valor em Atraso:* ${fmtInteiro(totalOverdue)}${diffValueStr}\n👥 *Clientes em Atraso:* ${uniqueClients.size}${diffClientsStr}\n📄 *Títulos Vencidos:* ${totalBills}${diffBillsStr}\n⏱️ *Atraso Médio:* ${avgDelay} dias\n${nexArLine}` + (opSummary ? `\n\n${opSummary}` : "");
+    const teamsText = `📊 *Sprint Diário - ${dateStr}*\n💰 *Valor em Atraso:* ${fmtInteiro(totalOverdue)}${diffValueStr}\n👥 *Clientes em Atraso:* ${uniqueClients.size}${diffClientsStr}\n📄 *Títulos Vencidos:* ${totalBills}${diffBillsStr}\n⏱️ *Atraso Médio:* ${avgDelay} dias` + (opSummary ? `\n\n${opSummary}` : "");
     const teamsLink = `https://teams.microsoft.com/l/chat/19:1d1e6bd7448a479bace24f762a30b425@thread.v2/conversations?context=%7B%22contextType%22%3A%22chat%22%7D&message=${encodeURIComponent(teamsText)}`;
 
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Sprint Diário - ${dateStr}</title><style>
@@ -2347,11 +2344,6 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
     <button onclick="sendToTeams()" style="background:#464eb8;">💬 Enviar por Teams</button>
 </div>
 <h1>Sprint Diário — Inadimplência &nbsp;·&nbsp; ${dateStr}</h1>
-<div style="background:#fffbeb;border:1px solid #f59e0b;border-radius:8px;padding:8px 12px;margin:0 0 10px;display:flex;justify-content:space-between;align-items:center;gap:10px;">
-  <span style="font-size:10px;font-weight:800;color:#92400e;text-transform:uppercase;letter-spacing:.03em;">AR digital · Correios</span>
-  <span style="font-size:12px;font-weight:800;color:#0f1e17;">${nexArCount} NEX para checar</span>
-  <span style="font-size:9px;color:#64748b;">${nexArDays} dias ou mais do envio, ainda sem AR digital</span>
-</div>
 <div class="kpi-strip">
   <div style="display:flex; align-items:center; justify-content:center; padding: 0 5px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px;">
     <img src="https://yt3.googleusercontent.com/rx0DOaXFXLF0HHeZtC_xI7vR23Y7Jxmm7gA6o_emTX6qFNIDo3J91z11ASXDNypT57crV1EPOQ=s900-c-k-c0x00ffffff-no-rj" style="width: 45px; height: 45px; object-fit: contain; border-radius: 50%;">

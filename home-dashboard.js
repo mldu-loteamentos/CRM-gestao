@@ -298,6 +298,24 @@ const HomeDashboard = {
       groups.push({ id: 'prazo-etapa', label: vencidos.length + ' títulos venceram prazo da etapa', items: vencidos, hideIfEmpty: false });
       groups.push({ id: 'ir-juridico', label: paraJuridico.length + ' títulos precisam ir para jurídico', items: paraJuridico, hideIfEmpty: false });
       groups.push({ id: 'apos-acordo', label: aposAcordo.length + ' títulos atrasaram após acordo', items: aposAcordo, hideIfEmpty: false });
+      const nexDays = (typeof window.nexCorreiosCheckDays === 'function') ? window.nexCorreiosCheckDays() : 15;
+      const nexRows = (typeof window.nexCollectAll === 'function' && typeof window.nexNeedsCorreiosCheck === 'function')
+        ? window.nexCollectAll().filter(it => window.nexNeedsCorreiosCheck(it))
+        : [];
+      const nexItems = nexRows.map(it => ({
+        customerId: it.customerId,
+        saleId: it.titulo || it.saleId,
+        customerName: (typeof window.nexResolveCustomerName === 'function')
+          ? window.nexResolveCustomerName(it.customerId, it.titulo, it)
+          : ('NEX ' + (it.titulo || ''))
+      }));
+      groups.push({
+        id: 'ar-digital',
+        label: '*AR digital:* ' + nexRows.length + ' NEX para checar nos Correios (' + nexDays + ' dias ou mais do envio, sem AR)',
+        items: nexItems,
+        hideIfEmpty: false,
+        count: nexRows.length
+      });
       return groups;
     }
 
