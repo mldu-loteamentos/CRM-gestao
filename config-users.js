@@ -452,6 +452,7 @@ const ConfigUsersApp = {
 
   selectedProfile: "admin",
   view: "usuarios",
+  modView: { module: "", sub: "", action: "" },
   userFilters: { nome: "", perfil: "", email: "", status: "todos" },
 
   async loadUsers() {
@@ -1625,8 +1626,199 @@ const ConfigUsersApp = {
   },
 
   setView(view) {
-    this.view = view === "perfis" ? "perfis" : "usuarios";
+    this.view = view === "perfis" || view === "modulos" ? view : "usuarios";
     this.render();
+  },
+
+  setModPick(field, value) {
+    if (!this.modView) this.modView = { module: "", sub: "", action: "" };
+    this.modView[field] = value || "";
+    if (field === "module") {
+      this.modView.sub = "";
+      this.modView.action = "";
+    } else if (field === "sub") {
+      this.modView.action = "";
+    }
+    this.render();
+  },
+
+  profileAccess(profileName) {
+    const name = String(profileName || "").trim();
+    const profile = (this.profiles || []).find((p) => String(p && p.name || "").trim() === name);
+    const id = profile ? profile.id : name;
+    const isAdmin = String(id) === "admin"
+      || (typeof window.isCrmAdminProfileName === "function" && window.isCrmAdminProfileName(name));
+    let perms = {};
+    try { perms = Object.assign({}, this.getProfilePermsObject(id) || {}); } catch (e) { perms = {}; }
+    this.hydrateSubmoduleFlags(perms);
+    return { perms, isAdmin };
+  },
+
+  actionAccess(perms, sub, act) {
+    if (act && act.id === "configuracoes" && typeof window.configuracoesPermChecked === "function") {
+      return {
+        acessar: !!window.configuracoesPermChecked(perms, "acessar"),
+        visualizar: !!window.configuracoesPermChecked(perms, "visualizar"),
+        editar: !!window.configuracoesPermChecked(perms, "editar")
+      };
+    }
+    const f = this.permFlags(sub, act);
+    return {
+      acessar: !!(perms && perms[f.acessar]),
+      visualizar: !!(perms && perms[f.visualizar]),
+      editar: !!(perms && perms[f.editar])
+    };
+  },
+
+  moduleScope() {
+    const pick = this.modView || { module: "", sub: "", action: "" };
+    if (!pick.module) return null;
+    const mod = (this.modules || []).find((m) => m.key === pick.module);
+    if (!mod) return null;
+    const subs = (mod.submodules || []).filter((s) => !pick.sub || s.key === pick.sub);
+    const actions = [];
+    subs.forEach((sub) => {
+      (sub.actions || []).forEach((act) => {
+        const token = sub.key + "|" + act.id;
+        if (pick.action && pick.action !== token) return;
+        actions.push({ sub, act, token });
+      });
+    });
+    const level = pick.action ? "item" : (pick.sub ? "sub" : "module");
+    return { mod, subs, actions, level };
+  },
+
+  scopeAccess(perms, isAdmin, scope) {
+    const none = { acessar: false, visualizar: false, editar: false };
+    if (!scope) return none;
+    if (isAdmin) return { acessar: true, visualizar: true, editar: true };
+    const modOn = !!(perms && perms[scope.mod.key]);
+    if (scope.level === "module") {
+      let visualizar = false;
+      let editar = false;
+      if (modOn) {
+        scope.actions.forEach(({ sub, act }) => {
+          if (!perms[sub.key]) return;
+          const f = this.actionAccess(perms, sub, act);
+          if (f.visualizar) visualizar = true;
+          if (f.editar) editar = true;
+        });
+      }
+      return { acessar: modOn, visualizar, editar };
+    }
+    if (scope.level === "sub") {
+      const sub = scope.subs[0];
+      const subOn = modOn && !!(sub && perms[sub.key]);
+      let visualizar = false;
+      let editar = false;
+      if (subOn) {
+        scope.actions.forEach(({ sub: s, act }) => {
+          const f = this.actionAccess(perms, s, act);
+          if (f.visualizar) visualizar = true;
+          if (f.editar) editar = true;
+        });
+      }
+      return { acessar: subOn, visualizar, editar };
+    }
+    const one = scope.actions[0];
+    if (!one || !modOn || !perms[one.sub.key]) return none;
+    return this.actionAccess(perms, one.sub, one.act);
+  },
+
+  modulosPanelHtml() {
+    const pick = this.modView || { module: "", sub: "", action: "" };
+    const mod = (this.modules || []).find((m) => m.key === pick.module);
+    const subs = mod ? (mod.submodules || []) : [];
+    const sub = subs.find((s) => s.key === pick.sub);
+    const actions = sub ? (sub.actions || []) : [];
+    const opt = (value, label, selected) => `<option value="${this.esc(value)}" ${selected ? "selected" : ""}>${this.esc(label)}</option>`;
+    const scope = this.moduleScope();
+    const cache = {};
+    const people = [];
+    if (scope) {
+      (this.users || []).forEach((u) => {
+        if (!u) return;
+        const key = String(u.profile_name || "");
+        if (!cache[key]) cache[key] = this.profileAccess(key);
+        const access = this.scopeAccess(cache[key].perms, cache[key].isAdmin, scope);
+        if (!access.acessar && !access.visualizar && !access.editar) return;
+        people.push({ user: u, access });
+      });
+      people.sort((a, b) => {
+        const aa = String(a.user.status || "").toUpperCase() === "ATIVO" ? 0 : 1;
+        const bb = String(b.user.status || "").toUpperCase() === "ATIVO" ? 0 : 1;
+        if (aa !== bb) return aa - bb;
+        return String(a.user.name || "").localeCompare(String(b.user.name || ""), "pt-BR");
+      });
+    }
+    const mark = (on) => on
+      ? '<span style="color:#105436;font-weight:800;">Sim</span>'
+      : '<span style="color:#94a3b8;">—</span>';
+    const rows = people.map(({ user, access }) => {
+      const st = String(user.status || "").toUpperCase();
+      const tag = st === "ATIVO" ? "" : `<span style="margin-left:8px;background:#f1f5f9;color:#64748b;border-radius:999px;padding:2px 8px;font-size:0.7rem;font-weight:800;">${this.esc(st || "INATIVO")}</span>`;
+      return `<tr>
+        <td><div style="font-weight:700;">${this.esc(user.name || "—")}${tag}</div><div style="font-size:0.8rem;color:#64748b;margin-top:3px;">${this.esc(user.email || "")}</div></td>
+        <td style="font-weight:700;">${this.esc(user.profile_name || "—")}</td>
+        <td style="text-align:center;">${mark(access.acessar)}</td>
+        <td style="text-align:center;">${mark(access.visualizar)}</td>
+        <td style="text-align:center;">${mark(access.editar)}</td>
+      </tr>`;
+    }).join("");
+    const empty = !scope
+      ? "Selecione um módulo para ver quem tem permissão."
+      : "Ninguém com permissão neste nível.";
+    const path = [];
+    if (mod) path.push(mod.name);
+    if (sub) path.push(sub.name);
+    if (pick.action && sub) {
+      const act = actions.find((a) => (sub.key + "|" + a.id) === pick.action);
+      if (act) path.push(act.label);
+    }
+    return `
+      <div class="cfg-panel">
+        <div class="cfg-filters" style="grid-template-columns: 1fr 1fr 1fr auto;">
+          <div>
+            <label for="cfg-mod-modulo">Módulo</label>
+            <select id="cfg-mod-modulo" class="form-control" onchange="ConfigUsersApp.setModPick('module', this.value)">
+              ${opt("", "Selecione", !pick.module)}
+              ${(this.modules || []).map((m) => opt(m.key, m.name, pick.module === m.key)).join("")}
+            </select>
+          </div>
+          <div>
+            <label for="cfg-mod-sub">Subitem</label>
+            <select id="cfg-mod-sub" class="form-control" ${mod ? "" : "disabled"} onchange="ConfigUsersApp.setModPick('sub', this.value)">
+              ${opt("", "Todo o módulo", !pick.sub)}
+              ${subs.map((s) => opt(s.key, s.name, pick.sub === s.key)).join("")}
+            </select>
+          </div>
+          <div>
+            <label for="cfg-mod-item">Item</label>
+            <select id="cfg-mod-item" class="form-control" ${sub ? "" : "disabled"} onchange="ConfigUsersApp.setModPick('action', this.value)">
+              ${opt("", "Todo o subitem", !pick.action)}
+              ${actions.map((a) => opt(sub.key + "|" + a.id, a.label, pick.action === (sub.key + "|" + a.id))).join("")}
+            </select>
+          </div>
+          <div class="cfg-count">${scope ? people.length + " pessoa(s)" : ""}</div>
+        </div>
+        ${path.length ? `<p style="margin:0 0 12px;color:#105436;font-weight:800;">${this.esc(path.join(" · "))}</p>` : ""}
+        <div class="cfg-table-wrap">
+          <table class="cfg-table">
+            <thead>
+              <tr>
+                <th>Pessoa</th>
+                <th>Perfil</th>
+                <th style="text-align:center;">Acessar</th>
+                <th style="text-align:center;">Visualizar</th>
+                <th style="text-align:center;">Editar</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows || `<tr><td colspan="5" style="padding:28px 16px;text-align:center;color:#64748b;">${empty}</td></tr>`}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
   },
 
   onUserFilter(field, value) {
@@ -1771,7 +1963,7 @@ const ConfigUsersApp = {
       });
     }
 
-    const modulesHtml = this.modules.map(mod => {
+    const modulesHtml = this.view !== "perfis" ? "" : this.modules.map(mod => {
       const isModChecked = savedPerms[mod.key] ? 'checked' : '';
       const modDisabledAttr = isAdmin ? 'disabled' : '';
 
@@ -1892,17 +2084,18 @@ const ConfigUsersApp = {
           ${this.view === "usuarios" ? `
           <button class="btn btn-primary" style="background-color: #105436; border-color: #105436; font-weight: 600; padding: 10px 20px; border-radius: 8px;" onclick="ConfigUsersApp.openUserModal()">
             <i data-lucide="user-plus" style="width: 18px; margin-right: 6px;"></i> Convidar Usuário
-          </button>` : `
+          </button>` : this.view === "perfis" ? `
           <button class="btn btn-primary" style="background-color: #105436; border-color: #105436; font-weight: 600; padding: 10px 20px; border-radius: 8px;" onclick="ConfigUsersApp.savePermissions()">
             <i data-lucide="save" style="width: 18px; margin-right: 6px;"></i> Salvar Permissões
-          </button>`}
+          </button>` : ""}
         </div>
         <div class="cfg-tabs">
           <button type="button" class="cfg-tab ${this.view === "usuarios" ? "is-on" : ""}" onclick="ConfigUsersApp.setView('usuarios')">Usuários</button>
           <button type="button" class="cfg-tab ${this.view === "perfis" ? "is-on" : ""}" onclick="ConfigUsersApp.setView('perfis')">Perfis</button>
+          <button type="button" class="cfg-tab ${this.view === "modulos" ? "is-on" : ""}" onclick="ConfigUsersApp.setView('modulos')">Módulos</button>
         </div>
 
-        ${this.view === "usuarios" ? `
+        ${this.view === "modulos" ? this.modulosPanelHtml() : this.view === "usuarios" ? `
         <div class="cfg-panel">
           <div class="cfg-filters">
             <div>
