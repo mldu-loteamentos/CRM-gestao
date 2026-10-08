@@ -98,6 +98,7 @@ const ComprasPrevisoesApp = {
     billsByTitulo: {},
     pedidosByTitulo: {},
     notaByPedido: {},
+    notasByPedido: {},
     parcelasCache: {},
     openTitulo: "",
     parcelas: [],
@@ -362,42 +363,128 @@ const ComprasPrevisoesApp = {
     return Object.keys(pedidos).some((pedido) => this.state.notaByPedido[pedido] === true);
   },
 
-  async resolvePedidos(ids, gen) {
-    if (!this._notaPending) this._notaPending = {};
-    const queue = [];
-    (ids || []).forEach((raw) => {
-      const id = this.pedidoKey(raw) || String(raw || "");
-      if (!id || this.state.notaByPedido[id] != null || this._notaPending[id]) return;
-      this._notaPending[id] = 1;
-      queue.push(id);
-    });
-    if (!queue.length) return;
-    let done = 0;
-    const worker = async () => {
-      while (queue.length) {
-        if (gen != null && gen !== this._notaGen) {
-          queue.splice(0).forEach((pendingId) => { delete this._notaPending[pendingId]; });
-          return;
-        }
-        const id = queue.shift();
-        try {
-          const data = await window.siengeFetchWithRetry(
-            "/purchase-invoices/deliveries-attended?purchaseOrderId=" + encodeURIComponent(id) + "&limit=200",
-            1
-          );
-          const rows = (data && data.results) || [];
-          this.state.notaByPedido[id] = rows.length > 0;
-        } catch (e) {
-          delete this.state.notaByPedido[id];
-        }
-        delete this._notaPending[id];
-        done += 1;
-        if (gen != null && gen !== this._notaGen) return;
-        if (done % 15 === 0 || !queue.length) this.refreshNotaView();
-      }
+  notasFromDeliveries(data, orderId) {
+    const rows = (data && data.results) || (Array.isArray(data) ? data : []);
+    const order = String(orderId || "");
+    const found = [];
+    const seen = new Set();
+    const push = (num, series, doc) => {
+      const n = String(num == null ? "" : num).trim();
+      if (!n || n === order || !/^\d+$/.test(n)) return;
+      const kindRaw = this.docCode(doc);
+      const kind = /^NF/.test(kindRaw) ? kindRaw : "NFS";
+      const key = kind + "|" + n + "|" + String(series || "");
+      if (seen.has(key)) return;
+      seen.add(key);
+      found.push({ number: n, series: String(series || ""), label: kind + " " + n });
     };
-    const n = Math.min(4, queue.length);
-    await Promise.all(Array.from({ length: n }, () => worker()));
+    const looksInvoice = (obj) => {
+      const keys = Object.keys(obj || {}).map((k) => k.toLowerCase());
+      return keys.some((k) => k.includes("invoice") || k.includes("series") || k.includes("nota") || k === "issuedate");
+    };
+    const walk = (node, depth) => {
+      if (!node || depth > 6) return;
+      if (Array.isArray(node)) {
+        node.forEach((item) => walk(item, depth + 1));
+        return;
+      }
+      if (typeof node !== "object") return;
+      ["purchaseInvoice", "invoice", "invoiceData", "notaFiscal", "invoices", "notes"].forEach((key) => {
+        if (node[key]) walk(node[key], depth + 1);
+      });
+      const doc = node.documentId || node.documentIdentificationId || node.documentType || "";
+      const series = node.series || node.invoiceSeries || "";
+      ["invoiceNumber", "purchaseInvoiceNumber", "documentNumber", "notaNumber"].forEach((key) => {
+        if (node[key] != null && typeof node[key] !== "object") push(node[key], series, doc);
+      });
+      if (node.number != null && typeof node.number !== "object" && looksInvoice(node)) {
+        push(node.number, series, doc);
+      }
+      Object.keys(node).forEach((key) => {
+        if (node[key] && typeof node[key] === "object") walk(node[key], depth + 1);
+      });
+    };
+    rows.forEach((row) => walk(row, 0));
+    return found;
+  },
+
+  samePedido(parcela, pedido) {
+    return this.pedidoKey(parcela && parcela.documento) === String(pedido || "");
+  },
+
+  parcelaRecebeNota(parcela, pedido) {
+    if (!parcela) return false;
+    if (this.samePedido(parcela, pedido)) return true;
+    if (!parcela.pago || parcela.substituido) return false;
+    if (this.pedidoKey(parcela.documento)) return false;
+    if (this.isNotaDoc(parcela.docId, parcela.docNome, null)) return false;
+    return true;
+  },
+
+  applyNotasDoPedido(titulo, pedido) {
+    const pack = this.state.notasByPedido[String(pedido)] || { notas: [], error: "" };
+    const stamp = (p) => {
+      if (!this.parcelaRecebeNota(p, pedido)) {
+        return Object.assign({}, p, { notasLoading: false });
+      }
+      return Object.assign({}, p, {
+        notasLoading: false,
+        notas: pack.notas || [],
+        notasErro: pack.error || "",
+        virouNota: !!(pack.notas && pack.notas.length)
+      });
+    };
+    const id = String(titulo || "");
+    if (this.state.openTitulo === id) this.state.parcelas = (this.state.parcelas || []).map(stamp);
+    if (this.state.parcelasCache[id]) this.state.parcelasCache[id] = this.state.parcelasCache[id].map(stamp);
+  },
+
+  async buscarNotasPedido(pedido, titulo) {
+    const id = this.pedidoKey(pedido) || String(pedido || "");
+    const titleId = String(titulo || this.state.openTitulo || "");
+    if (!id || typeof window.siengeFetchWithRetry !== "function") return;
+    const cached = this.state.notasByPedido[id];
+    if (cached && cached.done && !cached.error) {
+      this.applyNotasDoPedido(titleId, id);
+      this.paintParcelasModal();
+      return;
+    }
+    if (this.state.notaLoadingPedido === id) return;
+    this.state.notaLoadingPedido = id;
+    const loading = (p) => this.parcelaRecebeNota(p, id)
+      ? Object.assign({}, p, { notasLoading: true, notasErro: "" })
+      : p;
+    if (this.state.openTitulo === titleId) this.state.parcelas = (this.state.parcelas || []).map(loading);
+    this.paintParcelasModal();
+    let notas = [];
+    let error = "";
+    let attended = false;
+    try {
+      const data = await window.siengeFetchWithRetry(
+        "/purchase-invoices/deliveries-attended?purchaseOrderId=" + encodeURIComponent(id) + "&limit=200",
+        1
+      );
+      const rows = (data && data.results) || [];
+      attended = rows.length > 0;
+      notas = this.notasFromDeliveries(data, id);
+      if (attended && !notas.length) error = "O pedido foi atendido, mas a API não devolveu o número da nota.";
+    } catch (e) {
+      const msg = String((e && e.message) || e || "");
+      error = /403/.test(msg)
+        ? "Sem permissão para consultar notas no Sienge."
+        : "Não foi possível consultar as notas deste PPC.";
+    }
+    this.state.notasByPedido[id] = { done: true, notas, error };
+    this.state.notaByPedido[id] = notas.length > 0 || attended;
+    if (this.state.notaLoadingPedido === id) this.state.notaLoadingPedido = "";
+    this.applyNotasDoPedido(titleId, id);
+    this.paintParcelasModal();
+    if (this.state.consulted && !this.state.loading) this.renderList();
+  },
+
+  async abrirPpc(titulo, pedido) {
+    await this.openParcelas(titulo);
+    await this.buscarNotasPedido(pedido, titulo);
   },
 
   refreshNotaView() {
@@ -1051,14 +1138,6 @@ const ComprasPrevisoesApp = {
     }
     this.state.loading = false;
     this.renderPage();
-    if (this.state.consulted && (this.state.allRows || []).length) {
-      const gen = ++this._notaGen;
-      const ids = [];
-      Object.keys(this.state.pedidosByTitulo || {}).forEach((titulo) => {
-        Object.keys(this.state.pedidosByTitulo[titulo] || {}).forEach((pedido) => ids.push(pedido));
-      });
-      this.resolvePedidos(ids, gen);
-    }
   },
 
   limpar() {
@@ -1076,6 +1155,9 @@ const ComprasPrevisoesApp = {
     this.state.allRows = [];
     this.state.billsByTitulo = {};
     this.state.pedidosByTitulo = {};
+    this.state.notaByPedido = {};
+    this.state.notasByPedido = {};
+    this.state.notaLoadingPedido = "";
     this.state.parcelasCache = {};
     this._notaGen = (this._notaGen || 0) + 1;
     this.state.consulted = false;
@@ -1193,7 +1275,9 @@ const ComprasPrevisoesApp = {
         <td class="cprev-col-tit" title="${this.esc(r.titulo)}">${this.esc(r.titulo)}${nota}${subst}${pago}</td>
         <td class="cprev-col-parc" title="${this.esc(r.parcela || "—")}">${this.esc(r.parcela || "—")}</td>
         <td class="cprev-col-doc" title="${this.esc(r.docId || "—")}">${this.esc(r.docId || "—")}</td>
-        <td class="cprev-col-ndoc" title="${this.esc(r.documento || "—")}">${this.esc(r.documento || "—")}</td>
+        <td class="cprev-col-ndoc" title="${this.esc(r.documento || "—")}">${this.pedidoKey(r.documento)
+          ? `<button type="button" class="cprev-ppc-btn" onclick="event.stopPropagation(); ComprasPrevisoesApp.abrirPpc('${this.esc(r.titulo)}','${this.pedidoKey(r.documento)}')">${this.esc(r.documento)}</button>`
+          : this.esc(r.documento || "—")}</td>
         <td class="cprev-col-venc" title="${this.esc(this.fmtDate(r.vencimento))}">${this.esc(this.fmtDate(r.vencimento))}</td>
         <td class="cprev-col-val" title="${this.esc(this.money(r.valorAjustado))}">${this.esc(this.money(r.valorAjustado))}</td>
       </tr>`;
@@ -1316,12 +1400,11 @@ const ComprasPrevisoesApp = {
     });
     if (!this.state.pedidosByTitulo[id]) this.state.pedidosByTitulo[id] = {};
     pedidos.forEach((pedido) => { this.state.pedidosByTitulo[id][pedido] = 1; });
-    if (pedidos.length) await this.resolvePedidos(pedidos, this._notaGen);
-    if (this.state.openTitulo === id) this.refreshNotaView();
-    if (this.state.parcelasCache[id] && pedidos.every((pedido) => this.state.notaByPedido[pedido] != null)) {
+    if (this.state.parcelasCache[id]) {
       this.state.parcelas = this.state.parcelasCache[id];
       this.state.parcelasLoading = false;
-      this.refreshNotaView();
+      Object.keys(this.state.notasByPedido || {}).forEach((pedido) => this.applyNotasDoPedido(id, pedido));
+      this.paintParcelasModal();
       return;
     }
     try {
@@ -1359,6 +1442,7 @@ const ComprasPrevisoesApp = {
       }
     }
     if (this.state.openTitulo === id) this.state.parcelasLoading = false;
+    Object.keys(this.state.notasByPedido || {}).forEach((pedido) => this.applyNotasDoPedido(id, pedido));
     this.paintParcelasModal();
   },
 
@@ -1385,10 +1469,26 @@ const ComprasPrevisoesApp = {
       || (this.state.allRows || []).find((r) => String(r.titulo) === String(titulo));
     const parcelas = this.state.parcelas || [];
     const rowsHtml = parcelas.length
-      ? parcelas.map((p) => `<tr>
+      ? parcelas.map((p) => {
+          const pedido = this.pedidoKey(p.documento);
+          const docId = (!p.docId && p.notas && p.notas.length) ? "NFS" : (p.docId || "—");
+          const docNum = (p.notas && p.notas.length && !pedido)
+            ? p.notas.map((n) => n.number).join(", ")
+            : (pedido
+              ? ""
+              : (p.documento || "—"));
+          const docNumHtml = pedido
+            ? `<button type="button" class="cprev-ppc-btn" onclick="event.stopPropagation(); ComprasPrevisoesApp.buscarNotasPedido('${pedido}','${this.esc(p.titulo || titulo)}')">${this.esc(p.documento)}</button>`
+            : this.esc(docNum);
+          let notaHtml = `<span class="cprev-tag">Não</span>`;
+          if (p.notasLoading) notaHtml = `<span class="cprev-tag">Buscando…</span>`;
+          else if (p.notas && p.notas.length) notaHtml = p.notas.map((n) => `<span class="cprev-tag cprev-tag-nota">${this.esc(n.label)}</span>`).join(" ");
+          else if (p.notasErro) notaHtml = `<span class="cprev-tag" title="${this.esc(p.notasErro)}">${this.esc(p.notasErro)}</span>`;
+          else if (this.isNotaDoc(p.docId, p.docNome, null) && p.documento) notaHtml = `<span class="cprev-tag cprev-tag-nota">${this.esc(p.docId || "NFS")} ${this.esc(p.documento)}</span>`;
+          return `<tr>
           <td>${this.esc(p.parcela || "—")}</td>
-          <td>${this.esc(p.docId || "—")}</td>
-          <td>${this.esc(p.documento || "—")}</td>
+          <td>${this.esc(docId)}</td>
+          <td>${docNumHtml}</td>
           <td>${this.esc(this.fmtDate(p.vencimento))}</td>
           <td style="text-align:right;white-space:nowrap;">${this.esc(this.money(p.valor))}</td>
           <td>${p.substituido
@@ -1396,10 +1496,9 @@ const ComprasPrevisoesApp = {
             : (p.pago
             ? `<span class="cprev-tag cprev-tag-pago">Paga${p.dataPagamento ? " · " + this.esc(this.fmtDate(p.dataPagamento)) : ""}</span>`
             : `<span class="cprev-tag cprev-tag-aberto">Em aberto</span>`)}</td>
-          <td>${p.virouNota
-            ? `<span class="cprev-tag cprev-tag-nota">Sim</span>`
-            : `<span class="cprev-tag">Não</span>`}</td>
-        </tr>`).join("")
+          <td>${notaHtml}</td>
+        </tr>`;
+        }).join("")
       : `<tr><td colspan="7" style="text-align:center;padding:20px;color:#64748b;">Nenhuma parcela encontrada para este título.</td></tr>`;
     host.innerHTML = `
       <div class="cprev-modal-overlay" onclick="if(event.target===this) ComprasPrevisoesApp.closeParcelas()">

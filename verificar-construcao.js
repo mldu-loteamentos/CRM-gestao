@@ -547,6 +547,107 @@ function _vcRowIsSubjudice(r) {
     return false;
 }
 
+function _vcTitleKey(value) {
+    const raw = _vcNormalizeKey(value);
+    if (!raw) return '';
+    const digits = raw.replace(/\D/g, '');
+    return digits || raw;
+}
+
+function _vcPortfolioClients() {
+    const out = [];
+    const seen = new Set();
+    [window.rawClientList, window._subjudiceList, window.clientList].forEach(list => {
+        (list || []).forEach(c => {
+            if (!c || seen.has(c)) return;
+            seen.add(c);
+            out.push(c);
+        });
+    });
+    return out;
+}
+
+function _vcBillMatchesRow(bill, row) {
+    if (!bill || !row) return false;
+    const ids = [bill.id, bill.saleId, bill.receivableBillId, bill.realSaleId].map(_vcTitleKey).filter(Boolean);
+    const titles = [row.titulo, row.tituloKey, row.contractId, row.contractNumberStr, row.realSaleIdStr]
+        .concat(row.contractKeys || [])
+        .map(_vcTitleKey)
+        .filter(Boolean);
+    if (titles.some(t => ids.includes(t))) return true;
+    const unit = _vcNormUnitName(row.unidade);
+    const billUnit = _vcNormUnitName(bill.units || bill.unitName || bill.unityName);
+    const cc = _vcNormalizeKey(row.costCenterId);
+    const billCc = _vcNormalizeKey(bill.costCenterId || (Array.isArray(bill.costCentersId) ? bill.costCentersId[0] : bill.costCentersId));
+    return !!(unit && billUnit && unit === billUnit && (!cc || !billCc || cc === billCc));
+}
+
+function _vcFindPortfolioClient(row) {
+    const clients = _vcPortfolioClients();
+    if (!clients.length || !row) return null;
+    const titles = [row.titulo, row.tituloKey, row.contractId, row.contractNumberStr, row.realSaleIdStr]
+        .concat(row.contractKeys || [])
+        .map(_vcTitleKey)
+        .filter(Boolean);
+    const customerId = _vcNormalizeKey(row.customerId);
+    const unit = _vcNormUnitName(row.unidade);
+    const cc = _vcNormalizeKey(row.costCenterId);
+    let byUnit = null;
+    let byCustomer = null;
+    for (let i = 0; i < clients.length; i++) {
+        const c = clients[i];
+        const keys = _vcClientLookupKeys(c).map(_vcTitleKey);
+        if (titles.some(t => keys.includes(t))) return c;
+        const cUnit = _vcNormUnitName(c.unitName || c.unit || c.unidade);
+        const cCc = _vcNormalizeKey(_vcExtractCostCenterId(c));
+        if (!byUnit && unit && cUnit === unit && (!cc || !cCc || cCc === cc)) byUnit = c;
+        if (!byCustomer && customerId && _vcNormalizeKey(c.customerId) === customerId && (!cc || !cCc || cCc === cc)) byCustomer = c;
+    }
+    return byUnit || byCustomer;
+}
+
+function _vcApplyPortfolioFinance(row) {
+    if (!row) return row;
+    const bills = (window.AppState && window.AppState.defaultersBills) || [];
+    let count = 0;
+    let value = 0;
+    let matchedBill = false;
+    let sub = _vcRowIsSubjudice(row);
+    bills.forEach(bill => {
+        if (!_vcBillMatchesRow(bill, row)) return;
+        matchedBill = true;
+        const inst = Array.isArray(bill.defaulterInstallments) ? bill.defaulterInstallments : [];
+        const delay = Number(bill.daysDelay) || 0;
+        count += inst.length > 0 ? inst.length : (delay > 0 ? 1 : 0);
+        value += Number(bill.value) || 0;
+        if (typeof window.valueIsSubjudice === 'function' ? window.valueIsSubjudice(bill.subjudice) : (bill.subjudice === 'S' || bill.subjudice === true)) {
+            sub = true;
+        }
+    });
+    const client = _vcFindPortfolioClient(row);
+    if (client && (typeof window.clientIsSubjudice === 'function' ? window.clientIsSubjudice(client) : (client.subjudice === 'S' || client.subjudice === true))) {
+        sub = true;
+    }
+    if (!matchedBill && client) {
+        const delay = Number(client.maxDaysDelay) || 0;
+        const overdue = (Number(client.overdueValue) || 0) + (Number(client.overdueCharges) || 0);
+        if (delay > 0 || overdue > 0.009) {
+            const parsed = parseInt(client.billCount, 10);
+            count = Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+            value = overdue;
+            matchedBill = true;
+        }
+    }
+    if (matchedBill) {
+        row.parcelasVencidas = count;
+        if (value > 0) row.valorVencido = value;
+    } else if ((Number(row.valorVencido) || 0) > 0.009 && !(Number(row.parcelasVencidas) > 0)) {
+        row.parcelasVencidas = 1;
+    }
+    row.subjudice = sub;
+    return row;
+}
+
 function _vcRowIsObraDispensed(r, obras) {
     if (!r) return false;
     const state = obras || _vcReadObrasState();
@@ -642,6 +743,7 @@ async function _vcSiengeGet(path) {
 window.VerificarConstrucaoApp = {
     renderedRows: null,
     allRows: null,
+    includeSubjudice: false,
     activeFilters: {
         cidade: 'Todos',
         empreendimento: 'Todos',
@@ -747,8 +849,8 @@ window.VerificarConstrucaoApp = {
                         <button class="btn btn-outline" style="border-color: #0f766e; color: #0f766e;" onclick="window.openVistoriaRecurrenceModal()">
                             <i data-lucide="refresh-cw" style="width: 16px;"></i> Recorrência de Vistoria
                         </button>
-                        <label class="moura-switch">
-                            <input type="checkbox" id="vc-include-subjudice" onchange="window.VerificarConstrucaoApp.renderTable()">
+                        <label class="moura-switch" id="vc-include-subjudice-label">
+                            <input type="checkbox" id="vc-include-subjudice">
                             <span class="moura-switch-track" aria-hidden="true"></span>
                             <span class="moura-switch-text">Incluir Sub Judice</span>
                         </label>
@@ -788,8 +890,41 @@ window.VerificarConstrucaoApp = {
         `;
 
         this._ensureModals();
+        const subCb = document.getElementById('vc-include-subjudice');
+        if (subCb) subCb.checked = !!this.includeSubjudice;
+        const subLabel = document.getElementById('vc-include-subjudice-label');
+        if (subLabel) {
+            subLabel.addEventListener('click', (ev) => {
+                ev.preventDefault();
+                this.setIncludeSubjudice(!this.includeSubjudice);
+            });
+        }
 
         if (window.lucide) lucide.createIcons();
+    },
+
+    setIncludeSubjudice(on) {
+        this.includeSubjudice = !!on;
+        const cb = document.getElementById('vc-include-subjudice');
+        if (cb) cb.checked = this.includeSubjudice;
+        this.renderTable();
+    },
+
+    onPortfolioReady() {
+        const root = document.getElementById('verificar-construcao-root');
+        if (!root || !root.querySelector('#vc-tbody')) return;
+        const portfolio = (window.rawClientList || []).length;
+        if (!this._builtWithClients && portfolio > 0) {
+            this.loadData();
+            return;
+        }
+        if (Array.isArray(this.allRows)) {
+            this.allRows.forEach(r => _vcApplyPortfolioFinance(r));
+            this.renderTable();
+            if (typeof window._vcUpdateSprintCountsFromRows === 'function') {
+                window._vcUpdateSprintCountsFromRows(this.allRows);
+            }
+        }
     },
 
     _ensureModals() {
@@ -1149,6 +1284,8 @@ window.VerificarConstrucaoApp = {
             });
 
             rows.forEach((r, i) => r.originalIdx = i);
+            rows.forEach(r => _vcApplyPortfolioFinance(r));
+            this._builtWithClients = (clients || []).length > 0;
             this.allRows = rows;
             this.renderedRows = [];
 
@@ -1379,7 +1516,10 @@ window.VerificarConstrucaoApp = {
         const tbody = document.getElementById('vc-tbody');
         if (!tbody || !this.allRows) return;
 
-        const includeSubjudice = !!(document.getElementById('vc-include-subjudice') && document.getElementById('vc-include-subjudice').checked);
+        this.allRows.forEach(r => _vcApplyPortfolioFinance(r));
+        const includeSubjudice = !!this.includeSubjudice;
+        const subCb = document.getElementById('vc-include-subjudice');
+        if (subCb) subCb.checked = includeSubjudice;
         let filtered = this.allRows.filter(r => {
             if (!includeSubjudice && _vcRowIsSubjudice(r)) return false;
             if (this.activeFilters.cidade !== 'Todos' && r.cidade !== this.activeFilters.cidade) return false;

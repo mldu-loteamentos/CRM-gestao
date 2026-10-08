@@ -6274,6 +6274,17 @@ circle.donut-segment {
 .cprev-tag-aberto { background: #fff7ed; color: #9a3412; }
 .cprev-tag-liberado { background: #dbeafe; color: #1d4ed8; }
 .cprev-tag-nota { background: #dbeafe; color: #1d4ed8; }
+.cprev-ppc-btn {
+  border: 0;
+  background: transparent;
+  color: #105436;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+}
+.cprev-ppc-btn:hover { color: #0d462c; }
 .cprev-tag-subst { background: #e0e7ff; color: #3730a3; }
 .cprev-table-wrap .ecau-table {
   table-layout: auto;
