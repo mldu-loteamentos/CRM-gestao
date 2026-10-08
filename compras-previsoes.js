@@ -593,7 +593,12 @@ const ComprasPrevisoesApp = {
         return Object.assign({}, p, { notasLoading: false, notas: [], notasErro: "" });
       }
       const notas = this.notasDaParcela(p, pedido, pack.notas || []);
-      if (!notas.length) return Object.assign({}, p, { notasLoading: false });
+      if (!notas.length) {
+        return Object.assign({}, p, {
+          notasLoading: false,
+          notasErro: this.parcelaRecebeNota(p, pedido) ? (pack.error || "") : ""
+        });
+      }
       return Object.assign({}, p, {
         notasLoading: false,
         notas,
@@ -650,7 +655,12 @@ const ComprasPrevisoesApp = {
           best = idx;
         }
       });
-      if (best < 0) return Object.assign({}, p, { notasLoading: false });
+      if (best < 0) {
+        return Object.assign({}, p, {
+          notasLoading: false,
+          notasErro: pack.error || ""
+        });
+      }
       used.add(best);
       const nota = notas[best];
       return Object.assign({}, p, {
@@ -774,6 +784,30 @@ const ComprasPrevisoesApp = {
     }
     this.paintParcelasModal();
     if (this.state.consulted && !this.state.loading) this.renderList();
+  },
+
+  async carregarDocumentosDoTitulo(titulo) {
+    const id = String(titulo || "");
+    if (!id || this.state.openTitulo !== id) return;
+    const fontes = (this.state.parcelas || []).concat(
+      (this.state.allRows || []).filter((r) => String(r.titulo) === id)
+    );
+    const pedidos = [];
+    let hasPct = false;
+    fontes.forEach((row) => {
+      if (this.docCode(row && row.docId) === "PCT") {
+        hasPct = true;
+        return;
+      }
+      if (this.docCode(row && row.docId) !== "PPC") return;
+      const key = this.pedidoKey(row && row.documento);
+      if (key && pedidos.indexOf(key) < 0) pedidos.push(key);
+    });
+    if (hasPct) await this.buscarNotasContrato(id);
+    for (const pedido of pedidos) {
+      if (this.state.openTitulo !== id) return;
+      await this.buscarNotasPedido(pedido, id);
+    }
   },
 
   async abrirPct(titulo) {
@@ -1746,6 +1780,7 @@ const ComprasPrevisoesApp = {
       this.state.parcelasLoading = false;
       this.applyStoredNotas(id);
       this.paintParcelasModal();
+      await this.carregarDocumentosDoTitulo(id);
       return;
     }
     try {
@@ -1785,6 +1820,7 @@ const ComprasPrevisoesApp = {
     if (this.state.openTitulo === id) this.state.parcelasLoading = false;
     this.applyStoredNotas(id);
     this.paintParcelasModal();
+    await this.carregarDocumentosDoTitulo(id);
   },
 
   closeParcelas() {
