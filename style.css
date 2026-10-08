@@ -5966,6 +5966,7 @@ circle.donut-segment {
 .cprev-table-wrap .cprev-col-doc { width: 72px; }
 .cprev-table-wrap .cprev-col-ndoc { width: 86px; }
 .cprev-table-wrap .cprev-col-venc { width: 84px; }
+.cprev-table-wrap .cprev-col-tipo { width: 108px; }
 .cprev-table-wrap .cprev-col-val { width: 96px; text-align: right; }
 .cprev-table-wrap .cprev-group-header td {
   overflow: visible;

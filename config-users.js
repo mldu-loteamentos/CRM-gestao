@@ -182,6 +182,19 @@ const ConfigUsersApp = {
         || savedPerms.sub_compras_geral_previsoes_editar
       );
     }
+    if (savedPerms.sub_compras_geral_controle_financeiro_acessar == null && (
+      savedPerms.mod_compras
+      || savedPerms.sub_compras_geral_compras_acessar
+      || savedPerms.sub_compras_geral_previsoes_acessar
+      || savedPerms.sub_compras_geral_dashboard_acessar
+    )) {
+      savedPerms.sub_compras_geral_controle_financeiro_acessar = true;
+      savedPerms.sub_compras_geral_controle_financeiro_visualizar = true;
+      savedPerms.sub_compras_geral_controle_financeiro_editar = !!(
+        savedPerms.sub_compras_geral_compras_editar
+        || savedPerms.sub_compras_geral_previsoes_editar
+      );
+    }
     if (savedPerms.sub_fin_cr_recebimentos_webro_acessar == null && (
       savedPerms.sub_fin_cr === true
       || savedPerms.sub_fin_cr_fila_cobranca_acessar
@@ -298,6 +311,7 @@ const ConfigUsersApp = {
       name: "Compras", icon: "shopping-cart", key: "mod_compras",
       submodules: [{ name: "Compras", key: "sub_compras_geral", actions: [
         { id: "dashboard", label: "Dashboard", permBase: "sub_compras_geral_dashboard" },
+        { id: "controle_financeiro", label: "Controle financeiro", permBase: "sub_compras_geral_controle_financeiro" },
         { id: "previsoes", label: "Follow-up de previsões", permBase: "sub_compras_geral_previsoes" },
         { id: "config", label: "Configurações", permBase: "sub_compras_geral_config" }
       ] }]

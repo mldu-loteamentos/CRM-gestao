@@ -3019,6 +3019,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "tabelas-vigentes": "Tabelas vigentes",
     "controle-comissao": "Controle de comissão",
     "compras-dashboard": "Dashboard",
+    "compras-controle": "Controle financeiro",
     "compras-previsoes": "Follow-up de previsões",
     "compras-config": "Calendário de vencimento de títulos a pagar",
     "engenharia-caucao": "Gestão de caução",
@@ -3075,6 +3076,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "tabelas-vigentes": "table",
     "controle-comissao": "percent",
     "compras-dashboard": "bar-chart-3",
+    "compras-controle": "wallet",
     "compras-previsoes": "clipboard-list",
     "compras-config": "calendar-clock",
     "engenharia-caucao": "shield-check",
@@ -4155,6 +4157,14 @@ window.expandCrmMenuPerms = function(perms) {
     copy.sub_compras_geral_dashboard_acessar = true;
     copy.sub_compras_geral_dashboard_visualizar = true;
     copy.sub_compras_geral_dashboard_editar = copy.sub_compras_geral_compras_editar === true || copy.sub_compras_geral_previsoes_editar === true;
+  }
+  if (copy.sub_compras_geral_controle_financeiro_acessar == null
+    && copy.sub_compras_geral_controle_financeiro_visualizar == null
+    && copy.sub_compras_geral_controle_financeiro_editar == null
+    && (copy.mod_compras === true || copy.sub_compras_geral === true || copy.sub_compras_geral_compras_acessar === true || copy.sub_compras_geral_previsoes_acessar === true || copy.sub_compras_geral_dashboard_acessar === true)) {
+    copy.sub_compras_geral_controle_financeiro_acessar = true;
+    copy.sub_compras_geral_controle_financeiro_visualizar = true;
+    copy.sub_compras_geral_controle_financeiro_editar = copy.sub_compras_geral_compras_editar === true || copy.sub_compras_geral_previsoes_editar === true;
   }
   return copy;
 };
@@ -5290,6 +5300,22 @@ window.permCoversMenuKey = function(perms, modKey) {
         || perms.sub_compras_geral_compras_acessar === true
         || perms.sub_compras_geral_previsoes_acessar === true
         || perms.sub_compras_geral_previsoes_visualizar === true;
+    }
+    return false;
+  }
+  if (modKey === "sub_compras_geral_controle_financeiro_acessar") {
+    if (perms.sub_compras_geral_controle_financeiro_acessar === true
+      || perms.sub_compras_geral_controle_financeiro_visualizar === true
+      || perms.sub_compras_geral_controle_financeiro_editar === true) return true;
+    if (perms.sub_compras_geral_controle_financeiro_acessar == null
+      && perms.sub_compras_geral_controle_financeiro_visualizar == null
+      && perms.sub_compras_geral_controle_financeiro_editar == null) {
+      return perms.mod_compras === true
+        || perms.sub_compras_geral === true
+        || perms.sub_compras_geral_compras_acessar === true
+        || perms.sub_compras_geral_previsoes_acessar === true
+        || perms.sub_compras_geral_previsoes_visualizar === true
+        || perms.sub_compras_geral_dashboard_acessar === true;
     }
     return false;
   }

@@ -135,6 +135,7 @@
     "engenharia-config": { modulo: "engenharia", subitem: "config" },
     vistoria: { modulo: "vistoria", subitem: "vistoria_tela" },
     "construcao-compras": { modulo: "compras" },
+    "compras-controle": { modulo: "compras", subitem: "controle_financeiro" },
     "compras-previsoes": { modulo: "compras", subitem: "previsoes" },
     "compras-config": { modulo: "compras", subitem: "config" },
     dashboard: { modulo: "financeiro", subitem: "fila" },
