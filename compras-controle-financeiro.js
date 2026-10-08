@@ -29,6 +29,8 @@ ComprasControleApp.state = {
   qTitulo: "",
   qCredor: "",
   status: "todos",
+  sortKey: "data",
+  sortDir: "asc",
   allRows: [],
   shown: [],
   billsByTitulo: {},
@@ -83,6 +85,7 @@ ComprasControleApp.transform = function (payload) {
               const valor = Number(bill.originalAmount) || 0;
               const substituido = this.isSubstituicao(bill, pay, bm, docId, bill.documentIdentificationName);
               const natureza = this.naturezaDe(bill, pay, bm, docId, bill.documentIdentificationName);
+              const forecast = this.ehPrevisao(docId, bill.documentIdentificationName, bill);
               rows.push({
                 companyId: String(bill.companyId || ""),
                 credor: String(bill.creditorName || "").trim(),
@@ -103,6 +106,7 @@ ComprasControleApp.transform = function (payload) {
                 dataPagamento: substituido ? "" : this.paymentDateOf(bill, pay, bm),
                 pago: natureza === "pago",
                 natureza,
+                forecast,
                 substituido,
                 tituloSubstituto: substituido ? this.tituloSubstituto(bill, pay, bm) : "",
                 saldo: this.billBalance(bill),
@@ -131,8 +135,9 @@ ComprasControleApp.transform = function (payload) {
       return;
     }
     const merged = this.preferParcela(prev, r);
+    merged.forecast = !!(prev.forecast || r.forecast);
     if (merged.pago && !merged.substituido) merged.natureza = "pago";
-    else if (prev.natureza === "previsao" || r.natureza === "previsao") merged.natureza = "previsao";
+    else if (merged.forecast) merged.natureza = "previsao";
     else merged.natureza = "programado";
     map.set(k, merged);
   });
@@ -173,21 +178,63 @@ ComprasControleApp.applyFilters = function () {
     if (!this.rowMatchesDepartment(r)) return false;
     if (start && r.vencimento && r.vencimento < start) return false;
     if (end && r.vencimento && r.vencimento > end) return false;
+    if (r.forecast && r.pago) return false;
     if (status !== "todos" && r.natureza !== status) return false;
     if (qTitulo) {
       const blob = this.fold([r.titulo, r.documento, r.parcela].join("")).replace(/\s+/g, "");
       if (blob.indexOf(qTitulo) < 0) return false;
     }
-    r.grupo = this.rowGroup(r);
     return true;
-  }).sort((a, b) => {
-    const ga = this.groupMeta(a.grupo).order;
-    const gb = this.groupMeta(b.grupo).order;
-    if (ga !== gb) return ga - gb;
-    return String(a.vencimento).localeCompare(String(b.vencimento))
-      || String(a.credor).localeCompare(String(b.credor), "pt-BR")
-      || String(a.titulo).localeCompare(String(b.titulo));
   });
+  this.sortShown();
+};
+
+ComprasControleApp.dataRef = function (r) {
+  if (r && r.natureza === "pago" && r.dataPagamento) return String(r.dataPagamento).slice(0, 10);
+  return String((r && r.vencimento) || "").slice(0, 10);
+};
+
+ComprasControleApp.sortValue = function (r, key) {
+  if (key === "emp") return Number(r.companyId) || 0;
+  if (key === "cc") return this.fold((r.ccId ? r.ccId + " " : "") + (r.ccNome || ""));
+  if (key === "dept") return this.fold(r.departamento || "");
+  if (key === "credor") return this.fold(r.credor || "");
+  if (key === "titulo") return Number(r.titulo) || 0;
+  if (key === "parc") return Number(r.parcela) || 0;
+  if (key === "doc") return this.fold(r.docId || "");
+  if (key === "ndoc") return this.fold(r.documento || "");
+  if (key === "data") return this.dataRef(r);
+  if (key === "tipo") return r.natureza === "pago" ? "pago" : (r.natureza === "programado" ? "programado" : "previsao");
+  if (key === "valor") return Number(r.valorAjustado) || 0;
+  return "";
+};
+
+ComprasControleApp.sortShown = function () {
+  const key = this.state.sortKey || "data";
+  const dir = this.state.sortDir === "desc" ? -1 : 1;
+  const numeric = key === "emp" || key === "titulo" || key === "parc" || key === "valor";
+  const rows = this.state.shown || [];
+  rows.sort((a, b) => {
+    const va = this.sortValue(a, key);
+    const vb = this.sortValue(b, key);
+    let cmp = 0;
+    if (numeric) cmp = va - vb;
+    else cmp = String(va).localeCompare(String(vb), "pt-BR", { numeric: true });
+    if (cmp === 0) cmp = String(a.titulo).localeCompare(String(b.titulo), "pt-BR", { numeric: true });
+    return cmp * dir;
+  });
+};
+
+ComprasControleApp.toggleSort = function (key) {
+  if (this.state.loading || !this.state.consulted) return;
+  if (this.state.sortKey === key) {
+    this.state.sortDir = this.state.sortDir === "desc" ? "asc" : "desc";
+  } else {
+    this.state.sortKey = key;
+    this.state.sortDir = "desc";
+  }
+  this.sortShown();
+  this.renderList();
 };
 
 ComprasControleApp.kpis = function () {
@@ -297,6 +344,8 @@ ComprasControleApp.limpar = function () {
   this.state.ccIds = [];
   this.state.qTitulo = "";
   this.state.status = "todos";
+  this.state.sortKey = "data";
+  this.state.sortDir = "asc";
   this.state.shown = [];
   this.state.allRows = [];
   this.state.billsByTitulo = {};
@@ -468,25 +517,18 @@ ComprasControleApp.renderList = function () {
     box.innerHTML = '<div class="tvig-empty">Nenhum título neste filtro.</div>';
     return;
   }
-  const totals = {};
-  rows.forEach((r) => {
-    const g = r.grupo || this.rowGroup(r);
-    if (!totals[g]) totals[g] = { count: 0, value: 0 };
-    totals[g].count += 1;
-    totals[g].value += Number(r.valorAjustado) || 0;
-  });
-  let lastGroup = null;
+  const sortKey = this.state.sortKey || "data";
+  const arrow = this.state.sortDir === "desc" ? "▼" : "▲";
+  const th = (key, label) => `<th><button type="button" class="cfin-sort" onclick="ComprasControleApp.toggleSort('${key}')">${label}${sortKey === key ? " " + arrow : ""}</button></th>`;
   const body = rows.map((r) => {
-    let header = "";
-    if (r.grupo !== lastGroup) {
-      lastGroup = r.grupo;
-      header = this.groupHeaderHtml(r.grupo, totals[r.grupo] || { count: 0, value: 0 });
-    }
     const subst = r.substituido
       ? `<span class="cprev-tag cprev-tag-subst">Substituído${r.tituloSubstituto ? " · " + this.esc(r.tituloSubstituto) : ""}</span>`
       : "";
     const ccLabel = (r.ccId ? r.ccId + " - " : "") + (r.ccNome || "—");
-    return header + `<tr class="cprev-row">
+    const pago = r.natureza === "pago" && r.dataPagamento;
+    const dataRaw = pago ? r.dataPagamento : r.vencimento;
+    const dataTitle = pago ? "Pagamento " + this.fmtDate(dataRaw) : "Vencimento " + this.fmtDate(dataRaw);
+    return `<tr class="cprev-row">
       <td class="cprev-col-id" title="${this.esc(r.companyId)}">${this.esc(r.companyId)}</td>
       <td class="cprev-col-cc" title="${this.esc(ccLabel)}">${this.esc(ccLabel)}</td>
       <td class="cprev-col-dept" title="${this.esc(r.departamento || "—")}">${this.esc(r.departamento || "—")}</td>
@@ -495,12 +537,18 @@ ComprasControleApp.renderList = function () {
       <td class="cprev-col-parc">${this.esc(r.parcela || "—")}</td>
       <td class="cprev-col-doc">${this.esc(r.docId || "—")}</td>
       <td class="cprev-col-ndoc">${this.esc(r.documento || "—")}</td>
-      <td class="cprev-col-venc">${this.esc(this.fmtDate(r.vencimento))}</td>
+      <td class="cprev-col-venc" title="${this.esc(dataTitle)}">${this.esc(this.fmtDate(dataRaw))}</td>
       <td class="cprev-col-tipo">${this.tipoTag(r)}</td>
       <td class="cprev-col-val">${this.esc(this.money(r.valorAjustado))}</td>
     </tr>`;
   }).join("");
   box.innerHTML = `
+    <style>
+      #cfin-table thead th { white-space: nowrap; }
+      #cfin-table .cfin-sort { background: none; border: 0; padding: 0; margin: 0; color: #105436; font: inherit; font-weight: 800; font-size: 0.72rem; letter-spacing: 0.02em; text-transform: uppercase; cursor: pointer; }
+      #cfin-table tbody tr.cprev-row { cursor: default; }
+      #cfin-table .cprev-col-venc { width: 108px; }
+    </style>
     <div class="table-container cprev-table-wrap">
       <table class="custom-table cprev-table" id="cfin-table">
         <colgroup>
@@ -509,8 +557,8 @@ ComprasControleApp.renderList = function () {
           <col class="cprev-col-venc"><col class="cprev-col-tipo"><col class="cprev-col-val">
         </colgroup>
         <thead><tr>
-          <th>Emp.</th><th>Centro de custo</th><th>Depto</th><th>Credor</th><th>Título</th>
-          <th>Parc.</th><th>Doc.</th><th>Nº doc.</th><th>Vencimento</th><th>Tipo</th><th>Valor</th>
+          ${th("emp", "Emp.")}${th("cc", "Centro de custo")}${th("dept", "Depto")}${th("credor", "Credor")}${th("titulo", "Título")}
+          ${th("parc", "Parc.")}${th("doc", "Doc.")}${th("ndoc", "Nº doc.")}${th("data", "Venc./Pagto")}${th("tipo", "Tipo")}${th("valor", "Valor")}
         </tr></thead>
         <tbody>${body}</tbody>
       </table>
@@ -523,7 +571,7 @@ ComprasControleApp.exportExcel = function () {
     alert("Não há títulos para exportar. Consulte antes.");
     return;
   }
-  const head = ["Empresa", "Centro de custo", "Departamento", "Credor", "Título", "Parcela", "Documento", "Nº documento", "Vencimento", "Tipo", "Valor"];
+  const head = ["Empresa", "Centro de custo", "Departamento", "Credor", "Título", "Parcela", "Documento", "Nº documento", "Venc./Pagto", "Tipo", "Valor"];
   const tipo = { pago: "Pago", programado: "Programado", previsao: "Previsão" };
   const aoa = [head].concat(rows.map((r) => [
     r.companyId,
@@ -534,7 +582,7 @@ ComprasControleApp.exportExcel = function () {
     r.parcela || "",
     r.docId || "",
     r.documento || "",
-    this.fmtDate(r.vencimento),
+    this.fmtDate(this.dataRef(r)),
     tipo[r.natureza] || r.natureza,
     Number(r.valorAjustado) || 0
   ]));
@@ -601,7 +649,7 @@ ComprasControleApp.renderPage = function () {
             </div>
           </div>
         </div>
-        <p class="cprev-hint"><strong>Pago</strong> já baixou. <strong>Programado</strong> é título real em aberto. <strong>Previsão</strong> ainda é só documento de previsão. A consulta traz os três.</p>
+        <p class="cprev-hint"><strong>Pago</strong> já baixou. <strong>Programado</strong> é título real em aberto. <strong>Previsão</strong> ainda não virou lançamento. Previsão já paga não entra nesta lista. Em <strong>Venc./Pagto</strong>, o pago mostra a data do pagamento.</p>
         ${this.departmentScopeNote() ? `<p class="cprev-hint">${this.esc(this.departmentScopeNote())}</p>` : ""}
       </div>
       <div id="cfin-kpis" class="ccom-kpis cprev-kpis"></div>
