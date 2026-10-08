@@ -160,7 +160,34 @@ ComprasControleApp.groupMeta = function (group) {
 ComprasControleApp.tipoTag = function (r) {
   if (r.natureza === "pago") return '<span class="cprev-tag cprev-tag-pago">Pago</span>';
   if (r.natureza === "previsao") return '<span class="cprev-tag cprev-tag-previsao">Previsão</span>';
+  if (r.natureza === "processamento") {
+    const lote = r.lote ? " title=\"Lote " + this.esc(r.lote) + " enviado ao banco\"" : "";
+    return '<span class="cprev-tag cprev-tag-banco"' + lote + ">Processamento bancário</span>";
+  }
   return '<span class="cprev-tag cprev-tag-nota">Programado</span>';
+};
+
+ComprasControleApp.pedidosConsumidosPorAdiantamento = function (rows) {
+  const set = new Set();
+  (rows || []).forEach((r) => {
+    if (!r || r.forecast) return;
+    if (this.docCode(r.docId) !== "ADTO") return;
+    const nums = String(r.documento || "").match(/\d{3,}/g) || [];
+    nums.forEach((n) => {
+      const ped = String(Number(n));
+      if (!ped || ped === "NaN") return;
+      set.add(String(r.companyId) + "|" + this.fold(r.credor) + "|" + ped);
+    });
+  });
+  return set;
+};
+
+ComprasControleApp.previsaoConsumidaPorAdiantamento = function (r, consumidos) {
+  if (!r || !r.forecast || !consumidos) return false;
+  if (this.docCode(r.docId) !== "PPC") return false;
+  const ped = this.pedidoKey(r.documento);
+  if (!ped) return false;
+  return consumidos.has(String(r.companyId) + "|" + this.fold(r.credor) + "|" + ped);
 };
 
 ComprasControleApp.applyFilters = function () {
@@ -171,6 +198,7 @@ ComprasControleApp.applyFilters = function () {
   const status = this.state.status || "todos";
   const start = this.state.startDate || "";
   const end = this.state.endDate || "";
+  const consumidos = this.pedidosConsumidosPorAdiantamento(this.scopedRows());
   this.state.shown = this.scopedRows().filter((r) => {
     if (emp.size && !emp.has(String(r.companyId))) return false;
     if (cc.size && !cc.has(String(r.ccId))) return false;
@@ -180,6 +208,7 @@ ComprasControleApp.applyFilters = function () {
     if (start && (!shownDate || shownDate < start)) return false;
     if (end && (!shownDate || shownDate > end)) return false;
     if (r.substituido) return false;
+    if (this.previsaoConsumidaPorAdiantamento(r, consumidos)) return false;
     if (r.forecast && r.pago) return false;
     if (status !== "todos" && r.natureza !== status) return false;
     if (qTitulo) {
@@ -206,7 +235,7 @@ ComprasControleApp.sortValue = function (r, key) {
   if (key === "doc") return this.fold(r.docId || "");
   if (key === "ndoc") return this.fold(r.documento || "");
   if (key === "data") return this.dataRef(r);
-  if (key === "tipo") return r.natureza === "pago" ? "pago" : (r.natureza === "programado" ? "programado" : "previsao");
+  if (key === "tipo") return r.natureza || "";
   if (key === "valor") return Number(r.valorAjustado) || 0;
   return "";
 };
@@ -241,11 +270,12 @@ ComprasControleApp.toggleSort = function (key) {
 
 ComprasControleApp.kpis = function () {
   const rows = this.state.shown || [];
-  const out = { qtd: rows.length, total: 0, pago: 0, programado: 0, previsao: 0 };
+  const out = { qtd: rows.length, total: 0, pago: 0, programado: 0, processamento: 0, previsao: 0 };
   rows.forEach((r) => {
     const v = Number(r.valorAjustado) || 0;
     out.total += v;
     if (r.natureza === "pago") out.pago += v;
+    else if (r.natureza === "processamento") out.processamento += v;
     else if (r.natureza === "previsao") out.previsao += v;
     else out.programado += v;
   });
@@ -283,6 +313,58 @@ ComprasControleApp.groupHeaderHtml = function (group, totals) {
       <span class="cprev-group-chip">R$ ${this.esc(valueLabel)}</span>
     </td>
   </tr>`;
+};
+
+ComprasControleApp.loteEnviado = function (inst) {
+  if (!inst || inst.batchNumber == null || inst.batchNumber === "") return null;
+  const sent = inst.sentToBank === true || inst.sentToBank === 1 || inst.sentToBank === "S" || inst.sentToBank === "true";
+  if (!sent) return null;
+  const n = Number(inst.batchNumber);
+  return Number.isFinite(n) && n > 0 ? n : null;
+};
+
+ComprasControleApp.carregarLotes = async function () {
+  const gen = (this.state.loteGen = (this.state.loteGen || 0) + 1);
+  if (typeof window.siengeFetchWithRetry !== "function") return;
+  const cache = this.state.lotesByTitulo || (this.state.lotesByTitulo = {});
+  const ids = [];
+  (this.state.allRows || []).forEach((r) => {
+    if (!r || r.natureza !== "programado" || r.forecast) return;
+    const id = String(r.titulo || "");
+    if (id && !cache[id] && ids.indexOf(id) < 0) ids.push(id);
+  });
+  const queue = ids.slice();
+  const worker = async () => {
+    while (queue.length && this.state.loteGen === gen) {
+      const id = queue.shift();
+      try {
+        const data = await window.siengeFetchWithRetry("/bills/" + encodeURIComponent(id) + "/installments", 1);
+        const map = {};
+        ((data && data.results) || []).forEach((inst) => {
+          const n = String(inst.installmentNumber != null ? inst.installmentNumber : "");
+          const lote = this.loteEnviado(inst);
+          if (n && lote) map[n] = lote;
+        });
+        cache[id] = map;
+      } catch (e) {
+        cache[id] = {};
+      }
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
+  if (this.state.loteGen !== gen || this.state.loading) return;
+  let changed = false;
+  (this.state.allRows || []).forEach((r) => {
+    if (!r || r.natureza !== "programado" || r.forecast) return;
+    const lote = (cache[String(r.titulo)] || {})[String(r.parcela || "")];
+    if (!lote) return;
+    r.natureza = "processamento";
+    r.lote = lote;
+    changed = true;
+  });
+  if (!changed) return;
+  this.applyFilters();
+  this.renderList();
 };
 
 ComprasControleApp.fetchOutcome = async function (start, end) {
@@ -325,6 +407,7 @@ ComprasControleApp.consultar = async function () {
     this.indexBills(payload);
     this.state.allRows = this.transform(payload);
     this.state.updatedAt = new Date().toISOString();
+    this.state.lotesByTitulo = {};
     this.applyFilters();
   } catch (e) {
     this.state.error = (e && e.message) ? e.message : "Falha ao buscar contas a pagar no Sienge.";
@@ -334,6 +417,7 @@ ComprasControleApp.consultar = async function () {
   }
   this.state.loading = false;
   this.renderPage();
+  if (this.state.consulted && !this.state.error) this.carregarLotes();
 };
 
 ComprasControleApp.limpar = function () {
@@ -351,6 +435,8 @@ ComprasControleApp.limpar = function () {
   this.state.shown = [];
   this.state.allRows = [];
   this.state.billsByTitulo = {};
+  this.state.lotesByTitulo = {};
+  this.state.loteGen = (this.state.loteGen || 0) + 1;
   this.state.consulted = false;
   this.state.error = "";
   this.renderPage();
@@ -512,6 +598,7 @@ ComprasControleApp.renderList = function () {
     kpi.innerHTML = `
       <div class="ccom-kpi"><span>Títulos</span><strong>${k.qtd}</strong></div>
       <div class="ccom-kpi"><span>Pago</span><strong>${this.esc(this.money(k.pago))}</strong></div>
+      <div class="ccom-kpi"><span>Processamento</span><strong>${this.esc(this.money(k.processamento))}</strong></div>
       <div class="ccom-kpi"><span>Programado</span><strong>${this.esc(this.money(k.programado))}</strong></div>
       <div class="ccom-kpi"><span>Previsão</span><strong>${this.esc(this.money(k.previsao))}</strong></div>
       <div class="ccom-kpi"><span>Total</span><strong>${this.esc(this.money(k.total))}</strong></div>`;
@@ -573,7 +660,7 @@ ComprasControleApp.exportExcel = function () {
     return;
   }
   const head = ["Empresa", "Centro de custo", "Departamento", "Credor", "Título", "Parcela", "Documento", "Nº documento", "Venc./Pagto", "Tipo", "Valor"];
-  const tipo = { pago: "Pago", programado: "Programado", previsao: "Previsão" };
+  const tipo = { pago: "Pago", processamento: "Processamento bancário", programado: "Programado", previsao: "Previsão" };
   const aoa = [head].concat(rows.map((r) => [
     r.companyId,
     (r.ccId ? r.ccId + " - " : "") + (r.ccNome || ""),
@@ -620,6 +707,7 @@ ComprasControleApp.renderPage = function () {
             <select class="form-control" ${refineLocked ? "disabled" : ""} onchange="ComprasControleApp.onField('status', this.value)">
               <option value="todos" ${status === "todos" ? "selected" : ""}>Todos</option>
               <option value="pago" ${status === "pago" ? "selected" : ""}>Pago</option>
+              <option value="processamento" ${status === "processamento" ? "selected" : ""}>Processamento bancário</option>
               <option value="programado" ${status === "programado" ? "selected" : ""}>Programado</option>
               <option value="previsao" ${status === "previsao" ? "selected" : ""}>Previsão</option>
             </select>
