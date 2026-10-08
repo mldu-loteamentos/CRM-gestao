@@ -40860,6 +40860,45 @@ window.SYNC_KEYS = [
     "crm_comissao_nfs_v1"
 ];
 
+window.canonicalVistoriaSendConfig = function(raw) {
+    let cfg = raw;
+    if (typeof raw === "string") {
+        try { cfg = JSON.parse(raw || "{}") || {}; } catch (e) { cfg = {}; }
+    }
+    if (!cfg || typeof cfg !== "object") cfg = {};
+    const days = Array.isArray(cfg.dueDays) ? cfg.dueDays.map(Number).filter(function(n) { return n >= 1 && n <= 31; }) : [];
+    const openOffset = Math.max(0, Math.min(10, Number(cfg.openOffset) || 0));
+    let maxOffset = Math.max(1, Math.min(15, Number(cfg.maxOffset) || 3));
+    if (maxOffset < openOffset) maxOffset = openOffset || 1;
+    return JSON.stringify({
+        enabled: cfg.enabled !== false,
+        dueDays: [...new Set(days)].sort(function(a, b) { return a - b; }),
+        openOffset: openOffset,
+        maxOffset: maxOffset,
+        updatedAt: Number(cfg.updatedAt) || 0
+    });
+};
+
+window.pickNewerVistoriaSendConfig = function(localRaw, cloudRaw) {
+    const parse = function(raw) {
+        if (!raw) return null;
+        if (typeof raw === "object") return raw;
+        try { return JSON.parse(raw) || null; } catch (e) { return null; }
+    };
+    const items = [parse(localRaw), parse(cloudRaw), window._vistoriaSendConfigMem].filter(Boolean);
+    if (!items.length) return "";
+    const score = function(c) {
+        const at = Number(c && c.updatedAt) || 0;
+        const days = Array.isArray(c && c.dueDays) ? c.dueDays.length : 0;
+        return at * 1000 + days;
+    };
+    let best = items[0];
+    items.forEach(function(c) {
+        if (score(c) >= score(best)) best = c;
+    });
+    return window.canonicalVistoriaSendConfig(best);
+};
+
 window.mergeCartoriosList = function(localStr, cloudStr) {
   let local = [];
   let cloud = [];
@@ -41686,6 +41725,21 @@ window.syncGlobalConfigFromFirebase = async function() {
                     }
                     return;
                 }
+                if (k === "crm_moura_vistoria_send_days_config" && typeof window.pickNewerVistoriaSendConfig === "function") {
+                    const chosen = window.pickNewerVistoriaSendConfig(localStorage.getItem(k), globalData[k]);
+                    const localCanon = window.canonicalVistoriaSendConfig(localStorage.getItem(k) || "");
+                    const cloudCanon = window.canonicalVistoriaSendConfig(globalData[k] || "");
+                    if (chosen && chosen !== localCanon) {
+                        try { _originalSetItem.call(localStorage, k, chosen); changed = true; } catch (e) {}
+                    }
+                    if (chosen) {
+                        try { window._vistoriaSendConfigMem = JSON.parse(chosen); } catch (e) {}
+                    }
+                    if (chosen && chosen !== cloudCanon && window.forceUploadLocalConfig) {
+                        setTimeout(() => window.forceUploadLocalConfig(true), 1500);
+                    }
+                    return;
+                }
                 if (globalData[k] && globalData[k] !== localStorage.getItem(k)) {
                     if (k === "crm_plano_visoes_v2") {
                         const merged = window.mergePlanoVisoes(localStorage.getItem(k), globalData[k]);
@@ -42025,6 +42079,18 @@ window.forceUploadLocalConfig = async function(silent = true) {
             if (chosen) payload[k] = chosen;
           });
         } catch (e) {}
+        if (typeof window.pickNewerVistoriaSendConfig === "function") {
+            const vistoriaKey = "crm_moura_vistoria_send_days_config";
+            const chosenVistoria = window.pickNewerVistoriaSendConfig(payload[vistoriaKey] || "", "");
+            if (chosenVistoria) {
+                payload[vistoriaKey] = chosenVistoria;
+                try { _originalSetItem.call(localStorage, vistoriaKey, chosenVistoria); } catch (e) {}
+            }
+        }
+        if (Number(window._vistoriaIntervalDaysMem) >= 1) {
+            payload.crm_moura_vistoria_recurrence_days = String(window._vistoriaIntervalDaysMem);
+            try { _originalSetItem.call(localStorage, "crm_moura_vistoria_recurrence_days", payload.crm_moura_vistoria_recurrence_days); } catch (e) {}
+        }
         if (!crmUsersMerged) delete payload.crm_users;
         await window.commitCrmGlobalConfig(payload);
         if (!silent) {

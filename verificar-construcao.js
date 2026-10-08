@@ -179,10 +179,24 @@ window.defaultVistoriaSendConfig = function() {
     return { enabled: true, dueDays: [], openOffset: 0, maxOffset: 3 };
 };
 
+window.storeVistoriaLocalValue = function(key, value) {
+    const text = String(value);
+    const native = window._nativeLocalStorageSetItem;
+    try {
+        if (typeof native === "function") native.call(localStorage, key, text);
+        else localStorage.setItem(key, text);
+    } catch (e) {
+        window._storageQuotaFull = true;
+    }
+    try { return localStorage.getItem(key) === text; } catch (e) { return false; }
+};
+
 window.readVistoriaSendConfig = function() {
     const def = window.defaultVistoriaSendConfig();
     let raw = {};
     try { raw = JSON.parse(localStorage.getItem(window.VISTORIA_SEND_CONFIG_KEY) || "{}") || {}; } catch (e) { raw = {}; }
+    const mem = window._vistoriaSendConfigMem;
+    if (mem && typeof mem === "object" && (Number(mem.updatedAt) || 0) >= (Number(raw.updatedAt) || 0)) raw = mem;
     const days = Array.isArray(raw.dueDays) ? raw.dueDays.map(Number).filter(n => n >= 1 && n <= 31) : [];
     const openOffset = Math.max(0, Math.min(10, Number(raw.openOffset != null ? raw.openOffset : def.openOffset)));
     let maxOffset = Math.max(1, Math.min(15, Number(raw.maxOffset) || def.maxOffset));
@@ -191,7 +205,8 @@ window.readVistoriaSendConfig = function() {
         enabled: raw.enabled !== false,
         dueDays: [...new Set(days)].sort((a, b) => a - b),
         openOffset,
-        maxOffset
+        maxOffset,
+        updatedAt: Number(raw.updatedAt) || 0
     };
 };
 
@@ -205,8 +220,30 @@ window.writeVistoriaSendConfig = function(cfg) {
     };
     payload.dueDays = [...new Set(payload.dueDays)].sort((a, b) => a - b);
     if (payload.maxOffset < payload.openOffset) payload.maxOffset = payload.openOffset || 1;
-    localStorage.setItem(window.VISTORIA_SEND_CONFIG_KEY, JSON.stringify(payload));
+    window._vistoriaSendConfigMem = payload;
+    window._vistoriaSendDaysDraft = new Set(payload.dueDays);
+    window.storeVistoriaLocalValue(window.VISTORIA_SEND_CONFIG_KEY, JSON.stringify(payload));
     return payload;
+};
+
+window.pushVistoriaSendConfigToCloud = async function(payload, intervalDays) {
+    const fc = window.firebaseCollections;
+    if (!fc || !fc.runTransaction || !fc.doc || !window.firebaseDb || !payload) return false;
+    const raw = JSON.stringify(payload);
+    const docRef = fc.doc(window.firebaseDb, "config", "global");
+    await fc.runTransaction(window.firebaseDb, async (tx) => {
+        const snap = await tx.get(docRef);
+        const exists = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+        const cloud = exists ? (snap.data() || {}) : {};
+        const chosen = typeof window.pickNewerVistoriaSendConfig === "function"
+            ? window.pickNewerVistoriaSendConfig(raw, cloud.crm_moura_vistoria_send_days_config || "")
+            : raw;
+        const patch = {};
+        patch[window.VISTORIA_SEND_CONFIG_KEY] = chosen;
+        if (Number(intervalDays) >= 1) patch.crm_moura_vistoria_recurrence_days = String(intervalDays);
+        tx.set(docRef, patch, { merge: true });
+    });
+    return true;
 };
 
 window.collectVistoriaSendConfigFromForm = function() {
@@ -217,6 +254,10 @@ window.collectVistoriaSendConfigFromForm = function() {
     document.querySelectorAll("#vc-send-days-grid [data-day].vc-send-day-on").forEach(btn => {
         selected.push(Number(btn.getAttribute("data-day")));
     });
+    const draft = window._vistoriaSendDaysDraft;
+    if (!selected.length && draft && typeof draft.forEach === "function" && draft.size) {
+        draft.forEach(day => selected.push(Number(day)));
+    }
     return {
         enabled: !!(enabledEl && enabledEl.checked),
         dueDays: selected,
@@ -327,6 +368,7 @@ window.renderVistoriaSendDaysGrid = function() {
     if (maxEl) maxEl.value = cfg.maxOffset;
     if (grid) {
         const selected = new Set(cfg.dueDays);
+        window._vistoriaSendDaysDraft = new Set(cfg.dueDays);
         grid.innerHTML = "";
         for (let d = 1; d <= 31; d++) {
             const on = selected.has(d);
@@ -337,6 +379,10 @@ window.renderVistoriaSendDaysGrid = function() {
             btn.textContent = String(d);
             btn.onclick = function() {
                 btn.classList.toggle("vc-send-day-on");
+                const day = Number(btn.getAttribute("data-day"));
+                if (!window._vistoriaSendDaysDraft) window._vistoriaSendDaysDraft = new Set();
+                if (btn.classList.contains("vc-send-day-on")) window._vistoriaSendDaysDraft.add(day);
+                else window._vistoriaSendDaysDraft.delete(day);
                 window.previewVistoriaSendConfig();
             };
             grid.appendChild(btn);
@@ -355,23 +401,46 @@ window.openVistoriaRecurrenceModal = function() {
         console.error('[Vistoria] Modal de recorrência não encontrado no HTML.');
         return;
     }
-    if (input) input.value = localStorage.getItem('crm_moura_vistoria_recurrence_days') || '90';
+    const rememberedInterval = Number(window._vistoriaIntervalDaysMem);
+    if (input) input.value = (Number.isFinite(rememberedInterval) && rememberedInterval >= 1)
+        ? String(rememberedInterval)
+        : (localStorage.getItem('crm_moura_vistoria_recurrence_days') || '90');
     window.renderVistoriaSendDaysGrid();
     modal.style.display = 'flex';
     modal.classList.add('active');
 };
 
-window.saveVistoriaRecurrence = function() {
+window.saveVistoriaRecurrence = async function() {
     const input = document.getElementById('vistoria-recurrence-days');
     const days = parseInt(input?.value || '', 10);
     if (!Number.isFinite(days) || days < 1) {
         alert('Informe um intervalo da fila válido maior que zero.');
         return;
     }
-    localStorage.setItem('crm_moura_vistoria_recurrence_days', String(days));
+    window._vistoriaIntervalDaysMem = days;
+    const intervalStored = window.storeVistoriaLocalValue('crm_moura_vistoria_recurrence_days', String(days));
     const sendCfg = window.collectVistoriaSendConfigFromForm();
     if (sendCfg.maxOffset < sendCfg.openOffset) sendCfg.maxOffset = sendCfg.openOffset || 1;
-    window.writeVistoriaSendConfig(sendCfg);
+    const payload = window.writeVistoriaSendConfig(sendCfg);
+    let storedRaw = "";
+    try { storedRaw = localStorage.getItem(window.VISTORIA_SEND_CONFIG_KEY) || ""; } catch (e) { storedRaw = ""; }
+    const daysStored = storedRaw.indexOf('"updatedAt":' + payload.updatedAt) !== -1;
+    let cloud = false;
+    try {
+        if (typeof window.pushVistoriaSendConfigToCloud === "function") {
+            cloud = await window.pushVistoriaSendConfigToCloud(payload, days);
+        }
+    } catch (e) {
+        cloud = false;
+        console.error("[Vistoria] falha ao gravar os dias na nuvem", e);
+    }
+    if (!daysStored && !cloud) {
+        alert("Não foi possível gravar os dias da vistoria. O navegador está sem espaço e a nuvem não respondeu. Libere espaço neste site e tente de novo.");
+        return;
+    }
+    if (!intervalStored && !cloud) {
+        alert("Os dias foram anotados nesta sessão, mas o intervalo da fila não coube no navegador. Libere espaço neste site para a equipe receber a mesma configuração.");
+    }
     if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(console.error);
     const modal = document.getElementById('vistoria-recurrence-modal');
     if (modal) {
