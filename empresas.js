@@ -121,6 +121,14 @@ const EmpresasApp = {
     return cf[id] || cf[String(id)] || cf[Number(id)] || null;
   },
 
+  escAttr(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;")
+      .replace(/"/g, "&quot;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  },
+
   hydrateCustomFields(parsed, preferMemory) {
     let fromLs = parsed;
     if (!fromLs || typeof fromLs !== "object") {
@@ -148,6 +156,7 @@ const EmpresasApp = {
   },
 
   async saveInline(companyId, field, value) {
+    if (this._empresasRendering) return;
     const id = Number(companyId);
     const custom = this.customOf(id) || {
       company_id: id,
@@ -161,7 +170,15 @@ const EmpresasApp = {
     if (speOn && field !== "spe_socios") return;
 
     if (field === 'nome_usual') custom.nome_usual = value;
-    if (field === 'percentual_mldu') custom.percentual_mldu = parseFloat(value) || 0;
+    if (field === 'percentual_mldu') {
+      const raw = String(value == null ? "" : value).trim().replace(/\s/g, "").replace(",", ".");
+      if (raw === "") custom.percentual_mldu = 0;
+      else {
+        const n = Number(raw);
+        if (!Number.isFinite(n)) return;
+        custom.percentual_mldu = n;
+      }
+    }
     if (field === 'consolidacao_padrao') custom.consolidacao_padrao = value ? 1 : 0;
     if (field === 'gerida_pelo_grupo') custom.gerida_pelo_grupo = value ? 1 : 0;
     if (field === 'spe_socios') custom.spe_socios = value ? 1 : 0;
@@ -179,7 +196,8 @@ const EmpresasApp = {
     this.persistCustomMap();
     if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(() => {});
     if (typeof this.renderFilaPrompt === "function") this.renderFilaPrompt();
-    if (document.getElementById("empresas-content")) this.render();
+    const redraw = field !== "nome_usual" && field !== "percentual_mldu";
+    if (redraw && document.getElementById("empresas-content")) this.render();
 
     try {
       if (field === 'consolidacao_padrao' || field === 'gerida_pelo_grupo' || field === 'cobranca_interna' || field === 'spe_socios') {
@@ -419,13 +437,13 @@ const EmpresasApp = {
       html += `
         <tr class="${speOn ? "is-spe-locked" : ""}">
           <td><strong>${company.id}</strong></td>
-          <td>${company.name}</td>
-          <td style="white-space: nowrap;">${company.cnpj || '-'}</td>
+          <td>${this.escAttr(company.name)}</td>
+          <td style="white-space: nowrap;">${this.escAttr(company.cnpj || "-")}</td>
           <td>
-            <input type="text" class="inline-input" value="${usualName}" placeholder="Nome usual..." ${lock} onblur="EmpresasApp.saveInline(${company.id}, 'nome_usual', this.value)">
+            <input type="text" class="inline-input" value="${this.escAttr(usualName)}" placeholder="Nome usual..." ${lock} onblur="EmpresasApp.saveInline(${company.id}, 'nome_usual', this.value)">
           </td>
           <td style="text-align: center;">
-            <input type="number" class="inline-input" style="text-align: center;" value="${percMldu}" step="0.01" min="0" max="100" ${lock} onblur="EmpresasApp.saveInline(${company.id}, 'percentual_mldu', this.value)">
+            <input type="text" inputmode="decimal" class="inline-input" style="text-align: center;" value="${this.escAttr(percMldu)}" ${lock} onblur="EmpresasApp.saveInline(${company.id}, 'percentual_mldu', this.value)">
           </td>
           <td style="text-align: center; ${bgCons} transition: background-color 0.3s;">
             <label class="switch">
@@ -462,15 +480,20 @@ const EmpresasApp = {
       </div>
     `;
 
-    contentDiv.innerHTML = html;
-    const nextScroll = document.getElementById("empresas-scroll");
-    if (nextScroll) {
-      nextScroll.scrollTop = scrollTop;
-      requestAnimationFrame(() => {
-        if (nextScroll.isConnected) nextScroll.scrollTop = scrollTop;
-      });
+    this._empresasRendering = true;
+    try {
+      contentDiv.innerHTML = html;
+      const nextScroll = document.getElementById("empresas-scroll");
+      if (nextScroll) {
+        nextScroll.scrollTop = scrollTop;
+        requestAnimationFrame(() => {
+          if (nextScroll.isConnected) nextScroll.scrollTop = scrollTop;
+        });
+      }
+      if (window.lucide) window.lucide.createIcons();
+    } finally {
+      this._empresasRendering = false;
     }
-    if (window.lucide) window.lucide.createIcons();
   },
 
   isCobrancaInternaSet(custom) {
