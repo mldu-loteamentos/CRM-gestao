@@ -157,10 +157,14 @@ const EmpresasApp = {
       gerida_pelo_grupo: 0
     };
 
+    const speOn = custom.spe_socios === 1 || custom.spe_socios === true || custom.spe_socios === "1";
+    if (speOn && field !== "spe_socios") return;
+
     if (field === 'nome_usual') custom.nome_usual = value;
     if (field === 'percentual_mldu') custom.percentual_mldu = parseFloat(value) || 0;
     if (field === 'consolidacao_padrao') custom.consolidacao_padrao = value ? 1 : 0;
     if (field === 'gerida_pelo_grupo') custom.gerida_pelo_grupo = value ? 1 : 0;
+    if (field === 'spe_socios') custom.spe_socios = value ? 1 : 0;
     if (field === 'cobranca_interna') {
       custom.cobranca_interna = value ? 1 : 0;
       if (window.AppState) {
@@ -178,7 +182,7 @@ const EmpresasApp = {
     if (document.getElementById("empresas-content")) this.render();
 
     try {
-      if (field === 'consolidacao_padrao' || field === 'gerida_pelo_grupo' || field === 'cobranca_interna') {
+      if (field === 'consolidacao_padrao' || field === 'gerida_pelo_grupo' || field === 'cobranca_interna' || field === 'spe_socios') {
         const checkbox = document.getElementById(`chk-${field}-${id}`);
         if (checkbox) {
             checkbox.checked = !!value;
@@ -318,6 +322,21 @@ const EmpresasApp = {
         input:checked + .slider:before {
           transform: translateX(20px);
         }
+        .empresas-table th.emp-spe-head {
+          white-space: normal;
+          text-align: center;
+          line-height: 1.25;
+          width: 150px;
+        }
+        .empresas-table tr.is-spe-locked td:not(.emp-spe-cell) .inline-input {
+          background: #f1f5f9;
+          color: #64748b;
+          pointer-events: none;
+        }
+        .empresas-table tr.is-spe-locked td:not(.emp-spe-cell) .switch {
+          pointer-events: none;
+          opacity: 0.45;
+        }
       </style>
     `;
 
@@ -368,13 +387,14 @@ const EmpresasApp = {
                 <th style="width: 130px; text-align: center;">Consolidação Padrão</th>
                 <th style="width: 130px; text-align: center;">Gerida pelo Grupo</th>
                 <th style="width: 130px; text-align: center;">Cobrança Interna</th>
+                <th class="emp-spe-head">SPE Sócios/Parceiros</th>
               </tr>
             </thead>
             <tbody>
     `;
 
     if (filteredCompanies.length === 0) {
-      html += `<tr><td colspan="8" style="text-align: center; padding: 30px;">Nenhuma empresa corresponde ao filtro.</td></tr>`;
+      html += `<tr><td colspan="9" style="text-align: center; padding: 30px;">Nenhuma empresa corresponde ao filtro.</td></tr>`;
     }
 
     filteredCompanies.forEach(company => {
@@ -382,41 +402,51 @@ const EmpresasApp = {
       const usualName = custom.nome_usual || '';
       const percMldu = custom.percentual_mldu || 0;
       
+      const speOn = custom.spe_socios === 1 || custom.spe_socios === true || custom.spe_socios === "1";
+      const lock = speOn ? "disabled" : "";
       const checkedCons = custom.consolidacao_padrao ? 'checked' : '';
       const checkedGerida = custom.gerida_pelo_grupo ? 'checked' : '';
       const checkedCobInt = custom.cobranca_interna ? 'checked' : '';
+      const checkedSpe = speOn ? "checked" : "";
       
       const bgCons = custom.consolidacao_padrao ? 'background-color: #e8f5e9;' : '';
       const bgGerida = custom.gerida_pelo_grupo ? 'background-color: #e8f5e9;' : '';
       const bgCobInt = custom.cobranca_interna ? 'background-color: #e8f5e9;' : '';
+      const bgSpe = speOn ? "background-color: #e8f5e9;" : "";
 
       html += `
-        <tr>
+        <tr class="${speOn ? "is-spe-locked" : ""}">
           <td><strong>${company.id}</strong></td>
           <td>${company.name}</td>
           <td style="white-space: nowrap;">${company.cnpj || '-'}</td>
           <td>
-            <input type="text" class="inline-input" value="${usualName}" placeholder="Nome usual..." onblur="EmpresasApp.saveInline(${company.id}, 'nome_usual', this.value)">
+            <input type="text" class="inline-input" value="${usualName}" placeholder="Nome usual..." ${lock} onblur="EmpresasApp.saveInline(${company.id}, 'nome_usual', this.value)">
           </td>
           <td style="text-align: center;">
-            <input type="number" class="inline-input" style="text-align: center;" value="${percMldu}" step="0.01" min="0" max="100" onblur="EmpresasApp.saveInline(${company.id}, 'percentual_mldu', this.value)">
+            <input type="number" class="inline-input" style="text-align: center;" value="${percMldu}" step="0.01" min="0" max="100" ${lock} onblur="EmpresasApp.saveInline(${company.id}, 'percentual_mldu', this.value)">
           </td>
           <td style="text-align: center; ${bgCons} transition: background-color 0.3s;">
             <label class="switch">
-              <input type="checkbox" id="chk-consolidacao_padrao-${company.id}" ${checkedCons} onchange="EmpresasApp.saveInline(${company.id}, 'consolidacao_padrao', this.checked)">
+              <input type="checkbox" id="chk-consolidacao_padrao-${company.id}" ${checkedCons} ${lock} onchange="EmpresasApp.saveInline(${company.id}, 'consolidacao_padrao', this.checked)">
               <span class="slider"></span>
             </label>
           </td>
           <td style="text-align: center; ${bgGerida} transition: background-color 0.3s;">
             <label class="switch">
-              <input type="checkbox" id="chk-gerida_pelo_grupo-${company.id}" ${checkedGerida} onchange="EmpresasApp.saveInline(${company.id}, 'gerida_pelo_grupo', this.checked)">
+              <input type="checkbox" id="chk-gerida_pelo_grupo-${company.id}" ${checkedGerida} ${lock} onchange="EmpresasApp.saveInline(${company.id}, 'gerida_pelo_grupo', this.checked)">
               <span class="slider"></span>
             </label>
           </td>
           <td style="text-align: center; ${bgCobInt} transition: background-color 0.3s;">
             <label class="switch">
-              <input type="checkbox" id="chk-cobranca_interna-${company.id}" ${checkedCobInt} onchange="EmpresasApp.saveInline(${company.id}, 'cobranca_interna', this.checked)">
+              <input type="checkbox" id="chk-cobranca_interna-${company.id}" ${checkedCobInt} ${lock} onchange="EmpresasApp.saveInline(${company.id}, 'cobranca_interna', this.checked)">
               <span class="slider"></span>
+            </label>
+          </td>
+          <td class="emp-spe-cell" style="text-align: center; ${bgSpe} transition: background-color 0.3s;">
+            <label class="moura-switch" style="justify-content: center;">
+              <input type="checkbox" id="chk-spe_socios-${company.id}" ${checkedSpe} onchange="EmpresasApp.saveInline(${company.id}, 'spe_socios', this.checked)">
+              <span class="moura-switch-track" aria-hidden="true"></span>
             </label>
           </td>
         </tr>

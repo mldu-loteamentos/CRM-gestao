@@ -421,17 +421,53 @@ const ComprasPrevisoesApp = {
     return true;
   },
 
+  async notasFromInvoiceSequentials(rows) {
+    const ids = [];
+    (rows || []).forEach((row) => {
+      const id = row && row.sequentialNumber;
+      if (id == null || id === "") return;
+      const key = String(id);
+      if (ids.indexOf(key) < 0) ids.push(key);
+    });
+    const notas = [];
+    const seen = new Set();
+    for (const seq of ids) {
+      const delivery = (rows || []).find((row) => String(row.sequentialNumber) === seq);
+      const inv = await window.siengeFetchWithRetry("/purchase-invoices/" + encodeURIComponent(seq), 1);
+      const number = String(inv && inv.number || "").trim();
+      if (!number) continue;
+      const doc = this.docCode(inv && inv.documentId) || "NFS";
+      const series = String(inv && inv.series || "").trim();
+      const key = doc + "|" + number + "|" + series;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      notas.push({
+        number,
+        series,
+        label: doc + " " + number,
+        deliveryDate: delivery && delivery.deliveryDate ? String(delivery.deliveryDate).slice(0, 10) : ""
+      });
+    }
+    return notas;
+  },
+
   applyNotasDoPedido(titulo, pedido) {
     const pack = this.state.notasByPedido[String(pedido)] || { notas: [], error: "" };
     const stamp = (p) => {
       if (!this.parcelaRecebeNota(p, pedido)) {
         return Object.assign({}, p, { notasLoading: false });
       }
+      let notas = pack.notas || [];
+      if (!this.samePedido(p, pedido) && p.vencimento) {
+        const due = String(p.vencimento).slice(0, 10);
+        const matched = notas.filter((n) => n.deliveryDate && n.deliveryDate === due);
+        if (matched.length) notas = matched;
+      }
       return Object.assign({}, p, {
         notasLoading: false,
-        notas: pack.notas || [],
-        notasErro: pack.error || "",
-        virouNota: !!(pack.notas && pack.notas.length)
+        notas,
+        notasErro: notas.length ? "" : (pack.error || ""),
+        virouNota: notas.length > 0
       });
     };
     const id = String(titulo || "");
@@ -466,8 +502,8 @@ const ComprasPrevisoesApp = {
       );
       const rows = (data && data.results) || [];
       attended = rows.length > 0;
-      notas = this.notasFromDeliveries(data, id);
-      if (attended && !notas.length) error = "O pedido foi atendido, mas a API não devolveu o número da nota.";
+      notas = await this.notasFromInvoiceSequentials(rows);
+      if (attended && !notas.length) error = "O pedido foi atendido, mas a nota não veio em GET /purchase-invoices.";
     } catch (e) {
       const msg = String((e && e.message) || e || "");
       error = /403/.test(msg)
