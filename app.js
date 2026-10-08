@@ -1241,7 +1241,10 @@ window.checkUnassignedCities = function() {
     const ccIdStr = String(ccId);
     const ccObj = (AppState.cachedCostCenters || []).find(function(cc) { return String(cc.id) === ccIdStr; });
     let city = "";
-    if (ccObj && typeof window.extractCityFromCostCenter === "function") {
+    if (typeof window.resolveCityRuleId === "function") {
+      const resolvedCity = window.resolveCityRuleId(ccIdStr, ccObj && ccObj.name);
+      city = (resolvedCity && resolvedCity.city) || "";
+    } else if (ccObj && typeof window.extractCityFromCostCenter === "function") {
       city = window.extractCityFromCostCenter(ccIdStr, ccObj.name) || "";
     }
     const fold = typeof window.foldCityKey === "function" ? window.foldCityKey(city) : String(city).toUpperCase();
@@ -1590,6 +1593,15 @@ function getRuleOperatorByType(ruleId, defaultOp, customerId, requiredType) {
 
     if (candidateOps.length === 0) {
         if (requiredType === 'externo') {
+            const cityFallback = cityOps.filter(o => o !== "NÃO ATRIBUÍDO" && o !== "SEM CARTEIRA INADIMPLENTE" && o !== "NÃO COBRAR" && o !== "OUTROS");
+            if (cityFallback.length === 1) return cityFallback[0];
+            if (cityFallback.length > 1 && customerId) {
+                let hash = 0;
+                const strId = String(customerId);
+                for (let i = 0; i < strId.length; i++) hash = Math.imul(31, hash) + strId.charCodeAt(i) | 0;
+                return cityFallback[Math.abs(hash) % cityFallback.length];
+            }
+            if (cityFallback.length > 0) return cityFallback[0];
             return defaultOp;
         }
         if (requiredType === 'interno_absoluto' || requiredType === 'interno') {
@@ -6902,7 +6914,55 @@ window.KNOWN_COST_CENTER_NAMES = {
   "16100": "PARDINHO - NONA INES",
   "16200": "PARDINHO - NONA INES 2",
   "16103": "ITATINGA - NOVO HORIZONTE",
-  "30200": "PARDINHO - RECANTO MARISTELA 2"
+  "30200": "PARDINHO - RECANTO MARISTELA 2",
+  "10300": "CERQUEIRA CÉSAR - JARDIM PRIMAVERA III",
+  "11300": "PIRAJU - JARDIM TROPICAL",
+  "11800": "FARTURA - JARDIM DA SERRA I",
+  "11900": "FARTURA - JARDIM DA SERRA II",
+  "12000": "FARTURA - JARDIM DA SERRA III",
+  "12200": "CERQUEIRA CÉSAR - JARDIM TROPICAL",
+  "12400": "TAGUAI - JARDIM DOS IPÊS",
+  "12500": "BOTUCATU - LIVIA",
+  "12600": "BOTUCATU - LIVIA II",
+  "12800": "TAGUAI - JARDIM DOS IPÊS II",
+  "12900": "CERQUEIRA CÉSAR - JARDIM TRÊS RANCHOS IV",
+  "12901": "CERQUEIRA CÉSAR - JARDIM TRÊS RANCHOS IV - PARCERIA TLM",
+  "13101": "PIRAJU - ALTO DA BELA VISTA - PARCERIA TADEU",
+  "13200": "CERQUEIRA CÉSAR - NOVO HORIZONTE",
+  "13201": "CERQUEIRA CÉSAR - NOVO HORIZONTE - PARCERIA TADEU",
+  "13300": "BOTUCATU - LIVIA",
+  "13301": "BOTUCATU - LIVIA - PARCERIA ALEXANDRE",
+  "13400": "BOTUCATU - LIVIA I",
+  "13401": "BOTUCATU - LIVIA I - PARCERIA ALEXANDRE",
+  "13500": "BOTUCATU - LIVIA II",
+  "13501": "BOTUCATU - LIVIA II - PARCERIA ALEXANDRE",
+  "13600": "BOTUCATU - RESERVA CENTRAL PARQUE",
+  "13601": "BOTUCATU - RESERVA CENTRAL PARQUE - PARCERIA ALEXANDRE",
+  "13700": "AVARÉ - CENTRAL PARQUE",
+  "13701": "AVARÉ - CENTRAL PARQUE - PARCERIA",
+  "13800": "AVARÉ - RESERVA CENTRAL PARQUE",
+  "13801": "AVARÉ - RESERVA CENTRAL PARQUE - PARCERIA",
+  "13900": "AVARÉ - CENTRAL PARQUE II",
+  "13901": "AVARÉ - CENTRAL PARQUE II - PARCERIA",
+  "14000": "AVARÉ - RESERVA CENTRAL PARQUE II",
+  "14001": "AVARÉ - RESERVA CENTRAL PARQUE II - PARCERIA",
+  "14100": "BOTUCATU - PARQUE CIDADE",
+  "14202": "ARAÇARIGUAMA - RESERVA DO ARAÇARI - PARCERIA GAP",
+  "14304": "BOITUVA - MORADA DOS IPÊS II",
+  "14305": "BOITUVA - RESERVA DOS IPÊS",
+  "14500": "BOTUCATU - DESMEMBRAMENTO GLEBA C",
+  "14703": "TATUÍ - MIRANTE DOS RAMOS - COMERCIAL",
+  "14704": "TATUÍ - RESERVA DOS RAMOS - RESIDENCIAL",
+  "14800": "BOTUCATU - CVA - MRV",
+  "14900": "ARAÇARIGUAMA - DESMEMBRAMENTO JARDIM SÃO PAULO",
+  "15311": "ITU - RESERVA ALTAVISTA I - PROJETOS",
+  "15801": "ITAPETININGA - RESERVA ITAPETININGA",
+  "15802": "ITAPETININGA - RESERVA ITAPETININGA - PARCERIA",
+  "16104": "ITATINGA - NOVO HORIZONTE - PARCERIA",
+  "16111": "ITATINGA - NOVO HORIZONTE - PROJETOS",
+  "16300": "BOTUCATU - BACIA DA CASCATA - SPA",
+  "17701": "TAGUAI - JARDIM DOS IPÊS III",
+  "17702": "TAGUAI - JARDIM DOS IPÊS III - PARCERIA"
 };
 
 window.knownCostCenterName = function(ccId) {
@@ -6963,16 +7023,30 @@ window.findCachedCostCenter = function(idCCusto) {
 window.resolveCityRuleId = function(idCCusto, ccNameHint) {
   const cc = typeof window.findCachedCostCenter === "function" ? window.findCachedCostCenter(idCCusto) : null;
   const id = (typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(idCCusto) : idCCusto) || (cc && cc.id);
-  const name = ccNameHint || (cc && cc.name) || (typeof window.knownCostCenterName === "function" ? window.knownCostCenterName(id) : "") || "";
-  let city = typeof window.extractCityFromCostCenter === "function"
-    ? window.extractCityFromCostCenter(id, name)
-    : "";
-  if (city) city = String(city).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
-  if (!city) return { city: "", ruleId: null };
-  const ruleId = typeof window.canonicalCityRuleId === "function"
-    ? window.canonicalCityRuleId(city)
-    : ("CID_" + city.replace(/\s+/g, "_"));
-  return { city, ruleId };
+  const liveName = ccNameHint || (cc && cc.name) || "";
+  const knownName = typeof window.knownCostCenterName === "function" ? (window.knownCostCenterName(id) || "") : "";
+  const pick = function(name) {
+    let city = typeof window.extractCityFromCostCenter === "function"
+      ? window.extractCityFromCostCenter(id, name || "")
+      : "";
+    if (city) city = String(city).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+    if (!city) return { city: "", ruleId: null, hasOps: false };
+    const ruleId = typeof window.canonicalCityRuleId === "function"
+      ? window.canonicalCityRuleId(city)
+      : ("CID_" + city.replace(/\s+/g, "_"));
+    const rule = typeof window.lookupCityRule === "function" ? window.lookupCityRule(ruleId) : null;
+    const ops = rule && typeof window.mergeCityOperatorValues === "function"
+      ? window.mergeCityOperatorValues(rule.operator)
+      : [];
+    return { city: city, ruleId: ruleId, hasOps: ops.length > 0 };
+  };
+  let chosen = pick(liveName || knownName);
+  if (!chosen.hasOps && knownName && knownName !== liveName) {
+    const alt = pick(knownName);
+    if (alt.hasOps || (!chosen.city && alt.city)) chosen = alt;
+  }
+  if (!chosen.city) return { city: "", ruleId: null };
+  return { city: chosen.city, ruleId: chosen.ruleId };
 };
 
 function parseSafeDate(dStr) {
@@ -30024,7 +30098,10 @@ function renderRulesSettingsTable() {
           ccObj = AppState.cachedCostCenters.find(cc => String(cc.id) === ccIdStr);
         }
         
-        if (ccObj) {
+        if (typeof window.resolveCityRuleId === "function") {
+           const resolvedCity = window.resolveCityRuleId(ccIdStr, ccObj && ccObj.name);
+           city = resolvedCity && resolvedCity.city;
+        } else if (ccObj) {
            city = window.extractCityFromCostCenter(ccIdStr, ccObj.name);
         }
         
@@ -42593,7 +42670,22 @@ async function saveWhatsappAlerts() {
     localStorage.setItem("whatsapp_alerts_data", JSON.stringify(window.whatsappAlertsData));
 }
 
+window.userCanToggleWhatsappAlert = function(user) {
+    let logged = user || (window.AppState && AppState.currentUser) || null;
+    if (!logged) {
+      try { logged = JSON.parse(localStorage.getItem("crm_logged_user") || "null"); } catch (e) { logged = null; }
+    }
+    if (!logged) return false;
+    const rec = typeof window.findCrmRegisteredUser === "function" ? window.findCrmRegisteredUser(logged) : null;
+    const profile = (rec && rec.profile_name) || logged.profile_name || logged.profile || "";
+    if (typeof window.crmProfileKind === "function" && window.crmProfileKind(profile) === "back_office") return true;
+    if (typeof window.isCrmAdministrator === "function" && window.isCrmAdministrator(logged)) return true;
+    if (typeof window.isCrmAdminProfileName === "function" && window.isCrmAdminProfileName(profile)) return true;
+    return false;
+};
+
 window.toggleWhatsappAlert = async function() {
+    if (!window.userCanToggleWhatsappAlert()) return;
     const customerId = String(AppState.selectedCustomerId);
     if (!customerId || customerId === "null" || customerId === "undefined") return;
     
@@ -42628,6 +42720,12 @@ window.updateWhatsappAlertButtonState = async function() {
     const icon = document.getElementById("icon-whatsapp-alert");
     const text = document.getElementById("text-whatsapp-alert");
     if (!btn || !icon || !text) return;
+
+    if (!window.userCanToggleWhatsappAlert()) {
+        btn.style.display = "none";
+        return;
+    }
+    btn.style.display = "";
     
     const customerId = String(AppState.selectedCustomerId);
     const isOn = !!window.whatsappAlertsData.clients[customerId];
