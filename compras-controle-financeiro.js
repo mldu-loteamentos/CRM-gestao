@@ -310,10 +310,22 @@ ComprasControleApp.kpis = function () {
   return out;
 };
 
-ComprasControleApp.noteProgress = function (text) {
+ComprasControleApp.noteProgress = function (text, ratio) {
   const box = document.getElementById("cfin-results");
   if (!box) return;
-  box.innerHTML = '<div class="tvig-empty"><span class="cfin-spin" aria-hidden="true"></span>' + this.esc(text) + "</div>";
+  const pct = Math.max(0, Math.min(100, Math.round((Number(ratio) || 0) * 100)));
+  let wrap = box.querySelector(".cfin-load");
+  if (!wrap || wrap.getAttribute("data-phase") !== text) {
+    box.innerHTML = '<div class="tvig-empty"><div class="cfin-load" data-phase="' + this.esc(text) + '" style="display:flex;flex-direction:column;align-items:center;gap:12px;width:100%;max-width:400px;margin:0 auto;">'
+      + '<div class="loading-spinner" style="width:32px;height:32px;border:3px solid rgba(16,84,54,0.15);border-top-color:var(--color-primary);border-radius:50%;animation:spin 0.8s linear infinite;"></div>'
+      + '<span class="loading-status-text" style="font-weight:500;">' + this.esc(text) + '</span>'
+      + '<div style="width:100%;background:#e2e8f0;border-radius:8px;height:10px;overflow:hidden;margin-top:5px;">'
+      + '<div class="loading-progress-bar" style="width:0%;height:100%;background:#10b981;transition:width 0.25s linear;"></div>'
+      + '</div></div></div>';
+    wrap = box.querySelector(".cfin-load");
+  }
+  const bar = box.querySelector(".loading-progress-bar");
+  if (bar) bar.style.width = pct + "%";
 };
 
 ComprasControleApp.departmentScopeNote = function () {
@@ -371,7 +383,7 @@ ComprasControleApp.carregarLotes = async function () {
   const total = ids.length;
   const paintProgress = () => {
     if (this.state.loteGen !== gen) return;
-    this.noteProgress("Buscando processamento bancário… " + done + " de " + total);
+    this.noteProgress("Buscando processamento bancário…", total ? done / total : 0);
   };
   paintProgress();
   await new Promise((r) => setTimeout(r, 0));
@@ -420,7 +432,7 @@ ComprasControleApp.fetchOutcome = async function (start, end) {
   for (const chunk of chunks) {
     for (const companyId of targets) {
       step += 1;
-      this.noteProgress("Buscando contas a pagar no Sienge… " + step + " de " + total);
+      this.noteProgress("Buscando contas a pagar no Sienge…", step / total);
       const bills = await this.outcomeRange(chunk.start, chunk.end, companyId);
       data.push.apply(data, bills);
     }
@@ -637,8 +649,8 @@ ComprasControleApp.renderList = function () {
   const kpi = document.getElementById("cfin-kpis");
   if (!box) return;
   if (this.state.loading) {
-    box.innerHTML = '<div class="tvig-empty">Buscando contas a pagar no Sienge…</div>';
     if (kpi) kpi.innerHTML = "";
+    this.noteProgress("Buscando contas a pagar no Sienge…", 0);
     return;
   }
   if (this.state.error) {
