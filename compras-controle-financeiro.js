@@ -159,7 +159,7 @@ ComprasControleApp.groupMeta = function (group) {
 
 ComprasControleApp.tipoTag = function (r) {
   if (r.natureza === "pago") return '<span class="cprev-tag cprev-tag-pago">Pago</span>';
-  if (r.natureza === "previsao") return '<span class="cprev-tag cprev-tag-subst">Previsão</span>';
+  if (r.natureza === "previsao") return '<span class="cprev-tag cprev-tag-previsao">Previsão</span>';
   return '<span class="cprev-tag cprev-tag-nota">Programado</span>';
 };
 
