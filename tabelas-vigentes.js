@@ -351,19 +351,26 @@ const TabelasVigentesApp = {
   },
 
   sanitizePlano(raw, lockedBoleto) {
-    if (lockedBoleto) return "Boleto único";
-    return String(raw == null ? "" : raw).replace(/\D/g, "");
+    return this.normalizePlano(raw, lockedBoleto);
   },
 
   normalizePlano(raw, lockedBoleto) {
     if (lockedBoleto || this.isBoletoPlano(raw)) return "Boleto único";
-    const n = String(raw == null ? "" : raw).replace(/\D/g, "");
+    const text = String(raw == null ? "" : raw).replace(/\s+/g, " ").trim();
+    const range = text.match(/^(\d+)\s*a\s*(\d+)$/i);
+    if (range) return String(parseInt(range[1], 10)) + " a " + String(parseInt(range[2], 10));
+    if (/[A-Za-zÀ-ÿ]/.test(text)) return text;
+    const n = text.replace(/\D/g, "");
     return n ? String(parseInt(n, 10)) : "";
   },
 
   planoSortKey(r) {
     if (!r || this.isBoletoPlano(r.plano)) return -1;
-    const n = parseInt(String(r.plano || "").replace(/\D/g, ""), 10);
+    const text = String(r.plano || "");
+    const range = text.match(/(\d+)\s*a\s*(\d+)/i);
+    if (range) return parseInt(range[2], 10) + 0.5;
+    if (/parcela/i.test(text)) return 36.5;
+    const n = parseInt(text.replace(/\D/g, ""), 10);
     return Number.isFinite(n) ? n : 999999;
   },
 

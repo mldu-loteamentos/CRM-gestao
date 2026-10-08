@@ -298,9 +298,6 @@ const ConfigTagsApp = {
       const docRef = window.firebaseCollections.doc(window.firebaseDb, "tags", String(id));
       await window.firebaseCollections.deleteDoc(docRef);
       this.loadTags();
-      if (window.AnexosApp && typeof AnexosApp.loadTagsAtivas === "function") {
-        AnexosApp.loadTagsAtivas(true);
-      }
     } catch (e) {
       alert("Erro ao excluir TAG: " + e.message);
     }
