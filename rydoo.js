@@ -13,7 +13,10 @@ const RydooApp = {
     view: "linhas",
     groups: [],
     preparing: false,
-    prepMsg: ""
+    prepMsg: "",
+    openUsers: {},
+    openCc: {},
+    openPlano: {}
   },
 
   esc(s) {
@@ -110,8 +113,12 @@ const RydooApp = {
         this.state.view = "linhas";
         this.state.groups = [];
         this.state.prepMsg = "";
+        this.state.openUsers = {};
+        this.state.openCc = {};
+        this.state.openPlano = {};
         this._prepGen = (this._prepGen || 0) + 1;
         this.render();
+        this.preparar();
       } catch (e) {
         this.state.error = "Não consegui ler esse arquivo.";
         this.render();
@@ -261,6 +268,9 @@ const RydooApp = {
     this.state.groups = [];
     this.state.preparing = false;
     this.state.prepMsg = "";
+    this.state.openUsers = {};
+    this.state.openCc = {};
+    this.state.openPlano = {};
     this.render();
   },
 
@@ -341,17 +351,23 @@ const RydooApp = {
         #rydoo-root .rydoo-empty, #rydoo-root .rydoo-error { padding:22px; color:#64748b; }
         #rydoo-root .rydoo-error { color:#b91c1c; }
         #rydoo-root .rydoo-file { margin-left:auto; color:#64748b; font-size:12px; align-self:center; }
-        #rydoo-root .rydoo-groups { display:flex; flex-direction:column; gap:12px; }
-        #rydoo-root .rydoo-credor { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:14px 16px; }
-        #rydoo-root .rydoo-credor h3 { margin:0; font-size:16px; color:#0f172a; }
-        #rydoo-root .rydoo-credor-top { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; flex-wrap:wrap; }
-        #rydoo-root .rydoo-meta { display:flex; flex-wrap:wrap; gap:10px; margin-top:12px; }
-        #rydoo-root .rydoo-meta > div { flex:1; min-width:220px; background:#f8fafc; border-radius:8px; padding:8px 10px; }
-        #rydoo-root .rydoo-meta > div > span { display:block; font-size:11px; font-weight:700; letter-spacing:.04em; color:#64748b; }
-        #rydoo-root .rydoo-meta .rydoo-tag { display:inline-block; margin-top:4px; }
-        #rydoo-root .rydoo-note { margin:8px 0 0; font-size:12.5px; color:#9a3412; }
-        #rydoo-root .rydoo-accounts { width:100%; margin-top:12px; border-collapse:collapse; }
-        #rydoo-root .rydoo-accounts td { padding:6px 8px; border-bottom:1px solid #f1f5f9; }
+        #rydoo-root .rydoo-tree { display:flex; flex-direction:column; gap:8px; }
+        #rydoo-root details.rydoo-user, #rydoo-root details.rydoo-cc, #rydoo-root details.rydoo-plano { background:#fff; border:1px solid #e2e8f0; border-radius:10px; }
+        #rydoo-root details.rydoo-cc, #rydoo-root details.rydoo-plano { margin-top:8px; }
+        #rydoo-root summary { cursor:pointer; display:flex; align-items:center; gap:10px; padding:10px 12px; list-style:none; }
+        #rydoo-root summary::-webkit-details-marker { display:none; }
+        #rydoo-root summary::before { content:""; width:0; height:0; border-top:5px solid transparent; border-bottom:5px solid transparent; border-left:6px solid #105436; flex:none; }
+        #rydoo-root details[open] > summary::before { transform:rotate(90deg); }
+        #rydoo-root .rydoo-user > summary { background:#f8fafc; border-radius:10px; }
+        #rydoo-root .rydoo-user[open] > summary { border-bottom:1px solid #e2e8f0; border-radius:10px 10px 0 0; }
+        #rydoo-root .rydoo-cc > summary { background:#f4faf7; border-radius:10px; }
+        #rydoo-root .rydoo-user-body, #rydoo-root .rydoo-cc-body, #rydoo-root .rydoo-plano-body { padding:4px 12px 12px 22px; }
+        #rydoo-root .rydoo-user-main { display:flex; flex-direction:column; gap:2px; min-width:0; }
+        #rydoo-root .rydoo-user-main strong { color:#0f172a; }
+        #rydoo-root .rydoo-sum { margin-left:auto; font-weight:700; color:#105436; white-space:nowrap; }
+        #rydoo-root .rydoo-lines { width:100%; border-collapse:collapse; font-size:12.5px; }
+        #rydoo-root .rydoo-lines td { padding:6px 8px; border-bottom:1px solid #f1f5f9; max-width:280px; }
+        #rydoo-root .rydoo-note { margin:4px 0 0; font-size:12.5px; color:#9a3412; }
       </style>
       <div class="rydoo-card">
         <div class="rydoo-bar">
@@ -360,9 +376,6 @@ const RydooApp = {
             <input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="RydooApp.onFile(this)">
           </label>
           <button type="button" class="btn btn-cancel btn-sm" style="height:36px;" onclick="RydooApp.limpar()" ${s.rows.length ? "" : "disabled"}>Limpar</button>
-          <button type="button" class="btn btn-sm ${s.view === "linhas" ? "btn-primary" : ""}" style="height:36px;" onclick="RydooApp.setView('linhas')" ${s.rows.length ? "" : "disabled"}>Lançamentos</button>
-          <button type="button" class="btn btn-sm ${s.view === "credores" ? "btn-primary" : ""}" style="height:36px;" onclick="RydooApp.setView('credores')" ${s.groups.length ? "" : "disabled"}>Por credor</button>
-          <button type="button" class="btn btn-primary btn-sm" style="height:36px;" onclick="RydooApp.preparar()" ${s.rows.length && !s.preparing ? "" : "disabled"}>${s.preparing ? "Preparando…" : "Agrupar reembolso"}</button>
           <div class="rydoo-field">
             <label>AGRUPAR POR</label>
             <select class="form-control" onchange="RydooApp.onFilter('pessoa', this.value)">
@@ -385,7 +398,7 @@ const RydooApp = {
           </div>
           ${s.fileName ? `<div class="rydoo-file">${this.esc(s.fileName)}</div>` : ""}
         </div>
-        <p class="rydoo-hint">${this.esc(s.prepMsg || "Depois da aprovação no Rydoo, importe o Excel. A classificação compara a conta com o padrão da categoria, com a hierárquica e com o comentário. Agrupar reembolso busca o credor, se é colaborador, a descrição no plano financeiro e os dados bancários, e gera o PDF de cada pessoa.")}</p>
+        <p class="rydoo-hint">${this.esc(s.prepMsg || "Os lançamentos abrem por usuário, centro de custo e plano financeiro. Ao importar, o Integra busca o credor e guarda os dados bancários. O PDF de cada usuário separa as despesas por centro de custo.")}</p>
       </div>
       <div id="rydoo-kpis"></div>
       <div id="rydoo-list"></div>`;
@@ -423,65 +436,154 @@ const RydooApp = {
       box.innerHTML = `<div class="rydoo-table-wrap"><div class="rydoo-empty">Nenhum Excel importado.</div></div>`;
       return;
     }
-    if (this.state.preparing && this.state.view !== "credores") {
-      box.innerHTML = `<div class="rydoo-table-wrap"><div class="rydoo-empty">${this.esc(this.state.prepMsg || "Preparando o reembolso…")}</div></div>`;
-      return;
-    }
-    if (this.state.view === "credores") {
-      this.renderGroups();
-      return;
-    }
-    const th = (key, label) => `<th onclick="RydooApp.toggleSort('${key}')" style="cursor:pointer;user-select:none;">${label} <i data-lucide="chevrons-up-down" style="width:11px;vertical-align:middle;"></i></th>`;
     const rows = this.visible();
+    if (!rows.length) {
+      box.innerHTML = `<div class="rydoo-table-wrap"><div class="rydoo-empty">Nenhuma linha com esse filtro.</div></div>`;
+      return;
+    }
+    box.innerHTML = `<div class="rydoo-tree">${this.treeHtml(rows)}</div>`;
+    if (window.lucide) lucide.createIcons();
+  },
+
+  paintHint() {
+    const hint = document.querySelector("#rydoo-root .rydoo-hint");
+    const fallback = "Os lançamentos abrem por usuário, centro de custo e plano financeiro. Ao importar, o Integra busca o credor e guarda os dados bancários. O PDF de cada usuário separa as despesas por centro de custo.";
+    if (hint) hint.textContent = this.state.prepMsg || fallback;
+  },
+
+  onToggle(kind, key, open) {
+    const bag = kind === "cc" ? "openCc" : (kind === "plano" ? "openPlano" : "openUsers");
+    if (!this.state[bag]) this.state[bag] = {};
+    this.state[bag][key] = !!open;
+  },
+
+  treeHtml(rows) {
+    const byUser = new Map();
+    rows.forEach((r) => {
+      const pessoa = r.pessoa || "(sem nome)";
+      if (!byUser.has(pessoa)) byUser.set(pessoa, []);
+      byUser.get(pessoa).push(r);
+    });
+    return Array.from(byUser.keys())
+      .sort((a, b) => this.fold(a).localeCompare(this.fold(b), "pt"))
+      .map((pessoa) => this.userBlock(pessoa, byUser.get(pessoa)))
+      .join("");
+  },
+
+  userBlock(pessoa, rows) {
+    const g = (this.state.groups || []).find((x) => x.pessoa === pessoa) || null;
+    const arg = this.arg(pessoa);
+    const open = this.state.openUsers[pessoa] ? "open" : "";
+    const n = rows.length;
+    const total = this.money(this.soma(rows));
+    const byCc = new Map();
+    rows.forEach((r) => {
+      const cc = r.cc || "(sem centro de custo)";
+      if (!byCc.has(cc)) byCc.set(cc, []);
+      byCc.get(cc).push(r);
+    });
+    const ccs = Array.from(byCc.keys())
+      .sort((a, b) => this.fold(a).localeCompare(this.fold(b), "pt"))
+      .map((cc) => this.ccBlock(pessoa, cc, byCc.get(cc)))
+      .join("");
+    return `<details class="rydoo-user" ${open} ontoggle="RydooApp.onToggle('user', decodeURIComponent('${arg}'), this.open)">
+      <summary>
+        <span class="rydoo-user-main">
+          <strong>${this.esc(pessoa)}</strong>
+          <span class="rydoo-why">${n === 1 ? "1 lançamento" : n + " lançamentos"} · ${this.esc(this.competencia(rows) || "")}</span>
+          ${this.credorLinha(g)}
+        </span>
+        <span class="rydoo-sum">${this.esc(total)}</span>
+        <button type="button" class="btn btn-primary btn-sm" style="height:32px;" onclick="event.preventDefault(); event.stopPropagation(); RydooApp.baixarPdf(decodeURIComponent('${arg}'))">PDF</button>
+      </summary>
+      <div class="rydoo-user-body">${ccs}</div>
+    </details>`;
+  },
+
+  credorLinha(g) {
+    if (!g) {
+      return this.state.preparing ? `<span class="rydoo-why">Buscando credor e dados bancários…</span>` : "";
+    }
+    if (!g.creditor && !(g.options && g.options.length)) {
+      return `<span class="rydoo-tag rydoo-tag-divergente">Credor não encontrado</span>`;
+    }
+    const c = g.creditor;
+    const arg = this.arg(g.pessoa);
+    let html = "";
+    if (g.options && g.options.length > 1) {
+      html += `<select class="form-control" style="height:32px;max-width:360px;" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()" onchange="event.stopPropagation(); RydooApp.escolher(decodeURIComponent('${arg}'), this.value)">
+        <option value="">Escolha o cadastro</option>
+        ${g.options.map((o) => `<option value="${this.esc(o.id)}" ${c && String(c.id) === String(o.id) ? "selected" : ""}>${this.esc(o.id + " — " + (o.tradeName || o.name))}</option>`).join("")}
+      </select>`;
+    }
+    if (c) {
+      const tag = this.colaborador(c)
+        ? `<span class="rydoo-tag rydoo-tag-ok">Colaborador</span>`
+        : `<span class="rydoo-tag rydoo-tag-revisar">Não é colaborador</span>`;
+      let banco = "Sem conta bancária no cadastro.";
+      if (g.bankStatus === "loading") banco = "Lendo dados bancários…";
+      else if (g.bankStatus === "erro") banco = "Não consegui ler os dados bancários.";
+      else if (g.bank) banco = this.bancoTexto(g.bank);
+      html += `<span class="rydoo-why">${this.esc(c.id + " — " + c.name)} ${tag} · ${this.esc(banco)}</span>`;
+    }
+    return html;
+  },
+
+  ccBlock(pessoa, cc, rows) {
+    const key = pessoa + "\0" + cc;
+    const arg = this.arg(key);
+    const open = this.state.openCc[key] ? "open" : "";
+    const byConta = new Map();
+    rows.forEach((r) => {
+      const conta = this.contaKey(r.conta) || "(sem conta)";
+      if (!byConta.has(conta)) byConta.set(conta, []);
+      byConta.get(conta).push(r);
+    });
+    const planos = Array.from(byConta.keys())
+      .sort()
+      .map((conta) => this.planoBlock(pessoa, cc, conta, byConta.get(conta)))
+      .join("");
+    return `<details class="rydoo-cc" ${open} ontoggle="RydooApp.onToggle('cc', decodeURIComponent('${arg}'), this.open)">
+      <summary>
+        <span class="rydoo-user-main"><strong>Centro de custo</strong><span class="rydoo-why">${this.esc(cc)}</span></span>
+        <span class="rydoo-sum">${this.esc(this.money(this.soma(rows)))}</span>
+      </summary>
+      <div class="rydoo-cc-body">${planos}</div>
+    </details>`;
+  },
+
+  planoBlock(pessoa, cc, conta, rows) {
+    const key = pessoa + "\0" + cc + "\0" + conta;
+    const arg = this.arg(key);
+    const open = this.state.openPlano[key] ? "open" : "";
+    const head = rows[0] || {};
+    const nome = this.contaNome(head.conta) || "Conta sem descrição no plano financeiro";
     const tag = (r) => {
       const label = r.level === "ok" ? "Ok" : (r.level === "revisar" ? "Revisar" : "Divergente");
       return `<span class="rydoo-tag rydoo-tag-${r.level}">${label}</span>${r.why ? `<div class="rydoo-why">${this.esc(r.why)}</div>` : ""}`;
     };
-    const td = (v) => `<td>${this.esc(v)}</td>`;
-    box.innerHTML = `<div class="rydoo-table-wrap"><table>
-      <thead><tr>
-        <th class="rydoo-sticky" onclick="RydooApp.toggleSort('level')" style="cursor:pointer;user-select:none;">Classificação <i data-lucide="chevrons-up-down" style="width:11px;vertical-align:middle;"></i></th>
-        ${th("pessoa", "Agrupar por")}
-        ${th("data", "Data da transação")}
-        ${th("valor", "Valor")}
-        ${th("aprovacao", "Data de aprovação")}
-        ${th("categoria", "Categoria")}
-        ${th("conta", "Conta contábil")}
-        ${th("comentario", "Comentário")}
-        ${th("tipo", "Tipo")}
-        ${th("cc", "Centro de custo")}
-        ${th("aprovador", "Aprovada por")}
-        ${th("finalizacao", "Data de finalização")}
-        ${th("pagamento", "Método de pagamento")}
-        ${th("hierCat", "Categorias hierárquicas")}
-      </tr></thead>
-      <tbody>
-        ${rows.map((r) => `<tr class="rydoo-row-${r.level}">
-          <td class="rydoo-sticky">${tag(r)}</td>
-          ${td(r.pessoa)}
-          ${td(r.data)}
-          <td style="text-align:right;white-space:nowrap;">${this.esc(this.money(r.valor))}</td>
-          ${td(r.aprovacao)}
-          ${td(r.categoria)}
-          <td>${this.esc(r.conta)}${this.contaNome(r.conta) ? `<div class="rydoo-why">${this.esc(this.contaNome(r.conta))}</div>` : ""}</td>
-          ${td(r.comentario)}
-          ${td(r.tipo)}
-          ${td(r.cc)}
-          ${td(r.aprovador)}
-          ${td(r.finalizacao)}
-          ${td(r.pagamento)}
-          ${td(r.hierCat)}
-        </tr>`).join("")}
-        ${rows.length ? "" : `<tr><td colspan="14" class="rydoo-empty">Nenhuma linha com esse filtro.</td></tr>`}
-      </tbody>
-    </table></div>`;
-    if (window.lucide) lucide.createIcons();
-  },
-
-  setView(view) {
-    if (view === "credores" && !this.state.groups.length) return;
-    this.state.view = view;
-    this.render();
+    const lines = rows.slice().sort((a, b) => this.dateKey(a.data).localeCompare(this.dateKey(b.data))).map((r) => `<tr class="rydoo-row-${r.level}">
+      <td>${this.esc(r.data)}</td>
+      <td>${this.esc(r.estabelecimento || "—")}</td>
+      <td>${this.esc(r.categoria || "—")}</td>
+      <td>${this.esc(r.comentario || "")}</td>
+      <td>${tag(r)}</td>
+      <td style="text-align:right;white-space:nowrap;">${this.esc(this.money(r.valor))}</td>
+    </tr>`).join("");
+    return `<details class="rydoo-plano" ${open} ontoggle="RydooApp.onToggle('plano', decodeURIComponent('${arg}'), this.open)">
+      <summary>
+        <span class="rydoo-user-main"><strong>${this.esc(head.conta || conta)}</strong><span class="rydoo-why">${this.esc(nome)}</span></span>
+        <span class="rydoo-sum">${this.esc(this.money(this.soma(rows)))}</span>
+      </summary>
+      <div class="rydoo-plano-body">
+        <table class="rydoo-lines">
+          <thead><tr>
+            <td>Data</td><td>Estabelecimento</td><td>Categoria</td><td>Comentário</td><td>Classificação</td><td style="text-align:right;">Valor</td>
+          </tr></thead>
+          <tbody>${lines}</tbody>
+        </table>
+      </div>
+    </details>`;
   },
 
   dottedCode(id) {
@@ -514,32 +616,34 @@ const RydooApp = {
     this.state.preparing = true;
     this.state.error = "";
     this.state.prepMsg = "Lendo o plano financeiro…";
-    this.render();
+    this.paintHint();
+    this.renderList();
     try {
       await this.loadAccounts();
       if (this._prepGen !== gen) return;
+      this.renderList();
       await this.loadCreditors((msg) => {
         if (this._prepGen !== gen) return;
         this.state.prepMsg = msg;
-        const hint = document.querySelector("#rydoo-root .rydoo-hint");
-        if (hint) hint.textContent = msg;
+        this.paintHint();
       });
       if (this._prepGen !== gen) return;
       this.state.groups = this.buildGroups();
-      this.state.view = "credores";
-      this.state.prepMsg = "Lendo dados bancários…";
-      this.render();
+      this.state.prepMsg = "Lendo e guardando os dados bancários…";
+      this.paintHint();
+      this.renderList();
       await this.loadBanks(this.state.groups);
       if (this._prepGen !== gen) return;
       this.state.preparing = false;
       this.state.prepMsg = "";
-      this.render();
+      this.paintHint();
+      this.renderList();
     } catch (e) {
       if (this._prepGen !== gen) return;
       this.state.preparing = false;
-      this.state.prepMsg = "";
-      this.state.error = (e && e.message) ? e.message : "Não consegui montar o reembolso.";
-      this.render();
+      this.state.prepMsg = (e && e.message) ? e.message : "Não consegui buscar os credores.";
+      this.paintHint();
+      this.renderList();
     }
   },
 
@@ -759,84 +863,43 @@ const RydooApp = {
     g.creditor = c;
     g.bank = null;
     g.bankStatus = "loading";
-    this.renderGroups();
+    this.renderList();
     await this.loadBank(g);
-    this.renderGroups();
+    this.renderList();
   },
 
-  renderGroups() {
-    const box = document.getElementById("rydoo-list");
-    if (!box) return;
-    const groups = this.state.groups;
-    if (!groups.length) {
-      box.innerHTML = `<div class="rydoo-table-wrap"><div class="rydoo-empty">Agrupar reembolso ainda não foi executado.</div></div>`;
-      return;
-    }
-    box.innerHTML = `<div class="rydoo-groups">${groups.map((g) => this.groupCard(g)).join("")}</div>`;
-    if (window.lucide) lucide.createIcons();
+  async logoJpeg() {
+    if (this._logoJpeg) return this._logoJpeg;
+    const img = new Image();
+    img.src = "i.ntegr.a/logo-oficial.png";
+    await img.decode();
+    const maxW = 280;
+    const scale = Math.min(1, maxW / img.width);
+    const w = Math.max(1, Math.round(img.width * scale));
+    const h = Math.max(1, Math.round(img.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    const bin = atob(canvas.toDataURL("image/jpeg", 0.86).split(",")[1]);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    this._logoJpeg = { bytes: bytes, w: w, h: h, dw: 78, dh: 78 * (h / w) };
+    return this._logoJpeg;
   },
 
-  groupCard(g) {
-    const pessoa = this.arg(g.pessoa);
-    const total = this.money(this.soma(g.rows));
-    const comp = this.competencia(g.rows);
-    const divergente = g.rows.filter((r) => r.level === "divergente").length;
-    const c = g.creditor;
-    let credorHtml = "";
-    if (g.options.length > 1) {
-      credorHtml = `<select class="form-control" onchange="RydooApp.escolher(decodeURIComponent('${pessoa}'), this.value)">
-        <option value="">Escolha o cadastro</option>
-        ${g.options.map((o) => `<option value="${this.esc(o.id)}" ${c && String(c.id) === String(o.id) ? "selected" : ""}>${this.esc(o.id + " — " + (o.tradeName || o.name))}</option>`).join("")}
-      </select>`;
-      if (!c) credorHtml += `<p class="rydoo-note">Há mais de um credor com esse nome. Escolha o cadastro antes de criar o título.</p>`;
-    }
-    if (c) {
-      const tag = this.colaborador(c)
-        ? `<span class="rydoo-tag rydoo-tag-ok">Colaborador</span>`
-        : `<span class="rydoo-tag rydoo-tag-revisar">Não é colaborador</span>`;
-      const nome = `<strong>${this.esc(c.id + " — " + c.name)}</strong> ${tag}`
-        + (c.tradeName ? `<div class="rydoo-why">${this.esc(c.tradeName)}</div>` : "");
-      credorHtml = g.options.length > 1 ? credorHtml + nome : nome;
-    } else if (!g.options.length) {
-      credorHtml = `<span class="rydoo-tag rydoo-tag-divergente">Credor não encontrado</span>
-        <p class="rydoo-note">Nenhum cadastro da base de credores bate com esse nome. O PDF sai mesmo assim.</p>`;
-    }
-    let banco = "—";
-    if (c && g.bankStatus === "loading") banco = "Lendo dados bancários…";
-    else if (c && g.bankStatus === "erro") banco = "Não consegui ler os dados bancários.";
-    else if (c && g.bank) banco = this.bancoTexto(g.bank);
-    else if (c) banco = "Sem conta bancária no cadastro do credor.";
-    const contas = this.contasDoGrupo(g.rows);
-    return `<article class="rydoo-credor">
-      <div class="rydoo-credor-top">
-        <div>
-          <h3>${this.esc(g.pessoa)}</h3>
-          <div class="rydoo-why">${this.esc([comp, g.rows.length + (g.rows.length === 1 ? " lançamento" : " lançamentos"), total].filter(Boolean).join(" · "))}</div>
-        </div>
-        <button type="button" class="btn btn-primary btn-sm" style="height:36px;" onclick="RydooApp.baixarPdf(decodeURIComponent('${pessoa}'))">
-          <i data-lucide="file-down" style="width:14px;height:14px;"></i> PDF do reembolso
-        </button>
-      </div>
-      <div class="rydoo-meta">
-        <div><span>CREDOR</span>${credorHtml}</div>
-        <div><span>DADOS BANCÁRIOS</span><strong>${this.esc(banco)}</strong></div>
-      </div>
-      ${divergente ? `<p class="rydoo-note">${divergente === 1 ? "1 lançamento divergente entra no PDF e pede conferência antes do título." : divergente + " lançamentos divergentes entram no PDF e pedem conferência antes do título."}</p>` : ""}
-      <table class="rydoo-accounts">
-        <tbody>
-          ${contas.map((item) => `<tr>
-            <td><strong>${this.esc(item.conta || "—")}</strong><div class="rydoo-why">${this.esc(item.nome || "Conta sem descrição no plano financeiro")}</div></td>
-            <td style="text-align:right;white-space:nowrap;">${this.esc(this.money(item.valor))}</td>
-          </tr>`).join("")}
-        </tbody>
-      </table>
-    </article>`;
-  },
-
-  baixarPdf(pessoa) {
-    const g = this.state.groups.find((x) => x.pessoa === pessoa);
-    if (!g) return;
-    const bytes = this.montarPdf(g);
+  async baixarPdf(pessoa) {
+    let g = (this.state.groups || []).find((x) => x.pessoa === pessoa);
+    const rows = this.state.rows.filter((r) => (r.pessoa || "(sem nome)") === pessoa);
+    if (!rows.length) return;
+    if (!g) g = { pessoa: pessoa, rows: rows };
+    else g = Object.assign({}, g, { rows: rows });
+    let logo = null;
+    try { logo = await this.logoJpeg(); } catch (e) { logo = null; }
+    const bytes = this.montarPdf(g, logo);
     const blob = new Blob([bytes], { type: "application/pdf" });
     const a = document.createElement("a");
     const comp = this.competencia(g.rows).replace(".", "-") || "reembolso";
@@ -862,38 +925,59 @@ const RydooApp = {
     return out + ")";
   },
 
-  pdfDocument(contents) {
-    const nPages = contents.length || 1;
-    const streams = contents.length ? contents : ["BT /F1 12 Tf 40 800 Td (vazio) Tj ET"];
-    const objects = [];
-    objects.push("<< /Type /Catalog /Pages 2 0 R >>");
-    const kids = streams.map((_, i) => (5 + i) + " 0 R").join(" ");
-    objects.push("<< /Type /Pages /Count " + nPages + " /Kids [" + kids + "] >>");
-    objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
-    objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
-    streams.forEach((stream, i) => {
-      objects.push("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents " + (5 + nPages + i) + " 0 R >>");
-    });
-    streams.forEach((stream) => {
-      objects.push("<< /Length " + stream.length + " >>\nstream\n" + stream + "\nendstream");
-    });
-    let out = "%PDF-1.4\n";
-    const offsets = [0];
-    objects.forEach((body, i) => {
-      offsets.push(out.length);
-      out += (i + 1) + " 0 obj\n" + body + "\nendobj\n";
-    });
-    const xref = out.length;
-    out += "xref\n0 " + (objects.length + 1) + "\n";
-    out += "0000000000 65535 f \n";
-    for (let i = 1; i <= objects.length; i++) {
-      out += String(offsets[i]).padStart(10, "0") + " 00000 n \n";
-    }
-    out += "trailer << /Size " + (objects.length + 1) + " /Root 1 0 R >>\nstartxref\n" + xref + "\n%%EOF";
-    return new TextEncoder().encode(out);
+  pdfBytes(parts) {
+    let n = 0;
+    parts.forEach((p) => { n += p.length; });
+    const out = new Uint8Array(n);
+    let o = 0;
+    parts.forEach((p) => { out.set(p, o); o += p.length; });
+    return out;
   },
 
-  montarPdf(g) {
+  pdfDocument(contents, image) {
+    const ascii = (s) => new TextEncoder().encode(s);
+    const nPages = contents.length || 1;
+    const streams = contents.length ? contents : ["BT /F1 12 Tf 40 800 Td (vazio) Tj ET"];
+    const imageObj = image ? 5 : 0;
+    const pageStart = image ? 6 : 5;
+    const contentStart = pageStart + nPages;
+    const objects = [];
+    const push = (body) => objects.push(typeof body === "string" ? ascii(body) : body);
+    const kids = streams.map((_, i) => (pageStart + i) + " 0 R").join(" ");
+    push("<< /Type /Catalog /Pages 2 0 R >>");
+    push("<< /Type /Pages /Count " + nPages + " /Kids [" + kids + "] >>");
+    push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
+    push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
+    if (image) {
+      const head = ascii("<< /Type /XObject /Subtype /Image /Width " + image.w + " /Height " + image.h + " /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length " + image.bytes.length + " >>\nstream\n");
+      const foot = ascii("\nendstream");
+      push(this.pdfBytes([head, image.bytes, foot]));
+    }
+    const xobj = image ? " /XObject << /Im1 " + imageObj + " 0 R >>" : "";
+    streams.forEach((stream, i) => {
+      push("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >>" + xobj + " >> /Contents " + (contentStart + i) + " 0 R >>");
+    });
+    streams.forEach((stream) => {
+      push("<< /Length " + stream.length + " >>\nstream\n" + stream + "\nendstream");
+    });
+    const parts = [ascii("%PDF-1.4\n")];
+    let len = parts[0].length;
+    const offsets = [0];
+    objects.forEach((body, i) => {
+      offsets.push(len);
+      const head = ascii((i + 1) + " 0 obj\n");
+      const tail = ascii("\nendobj\n");
+      parts.push(head, body, tail);
+      len += head.length + body.length + tail.length;
+    });
+    let xref = "xref\n0 " + (objects.length + 1) + "\n0000000000 65535 f \n";
+    for (let i = 1; i <= objects.length; i++) xref += String(offsets[i]).padStart(10, "0") + " 00000 n \n";
+    xref += "trailer << /Size " + (objects.length + 1) + " /Root 1 0 R >>\nstartxref\n" + len + "\n%%EOF";
+    parts.push(ascii(xref));
+    return this.pdfBytes(parts);
+  },
+
+  montarPdf(g, logo) {
     const pages = [];
     let ops = [];
     let y = 800;
@@ -952,9 +1036,15 @@ const RydooApp = {
       ops.push(left + " " + yy.toFixed(2) + " m " + right + " " + yy.toFixed(2) + " l S");
     };
 
-    text("MOURA LEITE", left, y, 11, true, green);
-    text("LOTEAMENTOS", left + 92, y, 11, false, orange);
-    y -= 26;
+    if (logo && logo.dw && logo.dh) {
+      const dw = logo.dw;
+      const dh = logo.dh;
+      ops.push("q");
+      ops.push(dw.toFixed(2) + " 0 0 " + dh.toFixed(2) + " " + left.toFixed(2) + " " + (y - dh + 8).toFixed(2) + " cm");
+      ops.push("/Im1 Do");
+      ops.push("Q");
+      y -= dh + 6;
+    }
     const center = (str, yy, size, bold, color) => {
       const x = Math.max(left, (595 - String(str).length * size * 0.5) / 2);
       text(str, x, yy, size, bold, color);
@@ -982,7 +1072,7 @@ const RydooApp = {
       ry -= Math.max(12, lines.length * 11);
     });
     y = Math.min(y, ry) - 8;
-    textRight("Resumido por categoria", right, y, 8, false, muted);
+    textRight("Resumido por centro de custo", right, y, 8, false, muted);
     y -= 8;
     rule(y);
     y -= 16;
@@ -995,18 +1085,32 @@ const RydooApp = {
     rule(y);
     y -= 16;
 
-    const bands = new Map();
+    const byCc = new Map();
     g.rows.forEach((r) => {
-      const key = (r.categoria || "") + "\0" + this.contaKey(r.conta);
-      if (!bands.has(key)) bands.set(key, []);
-      bands.get(key).push(r);
+      const cc = r.cc || "(sem centro de custo)";
+      if (!byCc.has(cc)) byCc.set(cc, []);
+      byCc.get(cc).push(r);
     });
     let seq = 0;
-    bands.forEach((rows) => {
+    Array.from(byCc.keys()).sort((a, b) => this.fold(a).localeCompare(this.fold(b), "pt")).forEach((cc) => {
+      const ccRows = byCc.get(cc);
+      need(24);
+      ops.push(green + " rg");
+      ops.push(left.toFixed(2) + " " + (y - 5).toFixed(2) + " " + (right - left).toFixed(2) + " 16 re f");
+      text("Centro de custo  " + cc, left + 6, y, 9, true, "1 1 1");
+      textRight(this.money(this.soma(ccRows)) + " BRL", right - 6, y, 9, true, "1 1 1");
+      y -= 22;
+      const bands = new Map();
+      ccRows.forEach((r) => {
+        const key = (r.categoria || "") + "\0" + this.contaKey(r.conta);
+        if (!bands.has(key)) bands.set(key, []);
+        bands.get(key).push(r);
+      });
+      bands.forEach((rows) => {
       rows.sort((a, b) => this.dateKey(a.data).localeCompare(this.dateKey(b.data)));
       const head = rows[0];
       const nome = this.contaNome(head.conta) || head.categoria || "Sem categoria";
-      const label = nome + " (" + (head.filial || filial) + ")" + (head.conta ? " (" + head.conta + ")" : "");
+      const label = nome + (head.conta ? " (" + head.conta + ")" : "");
       const labelLines = wrap(label, 9, 400);
       need(16 + labelLines.length * 12);
       labelLines.forEach((line, i) => text(line, left, y - i * 12, 9, true, ink));
@@ -1044,6 +1148,7 @@ const RydooApp = {
       y -= 4;
       rule(y);
       y -= 16;
+      });
     });
 
     const total = this.money(this.soma(g.rows)) + " BRL";
@@ -1055,7 +1160,7 @@ const RydooApp = {
     textRight("Nota Fiscal: 0 BRL", right, y, 9, false, muted);
     if (!ops.length) ops.push("BT /F1 10 Tf 40 800 Td ( ) Tj ET");
     pages.push(ops.join("\n"));
-    return this.pdfDocument(pages);
+    return this.pdfDocument(pages, logo);
   }
 };
 
