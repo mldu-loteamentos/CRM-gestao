@@ -21281,6 +21281,31 @@ window.centerSimpleDocSignature = function(html) {
   return (before ? before + "\n" : "") + centered + (afterRest ? "\n" + afterRest : "");
 };
 
+window.QUITACAO_RUBRICA_SRC = "Banner/rubrica-quitacao.png";
+
+window.quitacaoCanaisHtml = function() {
+  const red = "color:#e00000;font-weight:700;";
+  return '<div style="text-align:center;margin-top:2.4em;white-space:normal;font-family:Calibri,Arial,sans-serif;">'
+    + '<div style="' + red + '">TODOS OS DETALHES EM NOSSOS CANAIS DE ATENDIMENTO:</div>'
+    + '<div style="text-decoration:underline;">relacionamento@mouraleite.com.br</div>'
+    + '<div style="margin-top:8px;">4020-2109 (WhatsApp e telefone)</div>'
+    + '<div style="' + red + 'margin-top:2em;">Se preferir, procure um de nossos escritórios.<br>Ficaremos gratos em atendê-lo.</div>'
+    + '</div>';
+};
+
+// Modelos salvos antes da variável {{CANAIS_ATENDIMENTO}} traziam o rodapé em texto puro.
+window.upgradeQuitacaoCorpo = function(text) {
+  const s = String(text || "");
+  if (/\{\{\s*CANAIS_ATENDIMENTO\s*\}\}/.test(s)) return s;
+  return s.replace(/\s*relacionamento@mouraleite\.com\.br[\s\S]*?Ficaremos gratos em atend[eê]-lo\.?\s*$/i, "\n\n{{CANAIS_ATENDIMENTO}}");
+};
+
+// Termo de aviso: rubrica sobre a linha de assinatura. O formal sai sem ela, para o sócio assinar.
+window.applyQuitacaoRubrica = function(html) {
+  const img = '<img src="' + window.QUITACAO_RUBRICA_SRC + '" alt="" style="display:block;margin:0 auto -6px;height:64px;">';
+  return String(html || "").replace(/(<div class="pdf-sign-keep"[\s\S]*?)(<div style="border-top:1px solid #111;)/, "$1" + img + "$2");
+};
+
 function upgradeDistratoClauses(text) {
   let s = String(text || '');
   if (!/\{\{#SE_PERMUTA\}\}/.test(s)) {
@@ -34807,10 +34832,15 @@ async function previewDocPadrao(tipo) {
     content = `<h2 style="text-align:center;">${title}</h2><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${filled}</div>`;
   } else if (tipo === 'quitacao') {
     const title = document.getElementById('doc-quitacao-title')?.value || '';
-    const corpo = document.getElementById('doc-quitacao-corpo')?.value || '';
-    let filled = await fillLegalPreview(corpo);
-    if (window.centerSimpleDocSignature) filled = window.centerSimpleDocSignature(filled);
-    content = `<h2 style="text-align:center;">${title}</h2><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${filled}</div>`;
+    const corpo = window.upgradeQuitacaoCorpo(document.getElementById('doc-quitacao-corpo')?.value || '');
+    const formal = String(await fillLegalPreview(corpo)).replace(/\{\{\s*CANAIS_ATENDIMENTO\s*\}\}/g, '');
+    const aviso = window.applyQuitacaoRubrica(window.centerSimpleDocSignature(
+      String(await fillLegalPreview(corpo)).replace(/\{\{\s*CANAIS_ATENDIMENTO\s*\}\}/g, window.quitacaoCanaisHtml())
+    )).replace(/src="Banner\//, `src="${location.origin}/Banner/`);
+    const bloco = (rotulo, html) => `<h3 style="color:#64748b;font-size:13px;text-transform:uppercase;margin:24px 0 8px;">${rotulo}</h3><h2 style="text-align:center;">${title}</h2><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${html}</div>`;
+    content = bloco('Termo de aviso (informativo)', aviso)
+      + '<hr style="margin:32px 0;border-top:2px dashed #94a3b8;">'
+      + bloco('Termo formal (assinado pelo sócio)', window.centerSimpleDocSignature(formal));
   } else if (tipo === 'terceiros') {
     const title = document.getElementById('doc-terceiros-title')?.value || '';
     const corpo = document.getElementById('doc-terceiros-corpo')?.value || '';
@@ -34842,6 +34872,10 @@ function applySavedDocPadraoFields(tipo, data, fieldMap) {
       return;
     }
     if (id === 'doc-escritura-corpo' && /^Autorizamos o\(a\) Senhor\(a\) Tabelião/i.test(String(data[id] || ''))) return;
+    if (id === 'doc-quitacao-corpo') {
+      el.value = window.upgradeQuitacaoCorpo(data[id]);
+      return;
+    }
     if (id === 'doc-reneg-clauses') {
       if (typeof isLegacyRenegClauses === 'function' && isLegacyRenegClauses(data[id])) return;
       el.value = (typeof window.upgradeCredorPlaceholdersToPreamble === 'function')

@@ -1246,7 +1246,7 @@ const RelacionamentoApp = {
     if (card) card.style.display = "none";
     this._escSetResultsHtml("");
     this._liberarFiltrosDoc("escritura");
-    ["esc-filter-titulo", "esc-filter-contrato", "esc-filter-nome", "esc-cartorio", "esc-cidade-cartorio", "esc-localizacao", "esc-bancos"].forEach((id) => {
+    ["esc-filter-titulo", "esc-filter-contrato", "esc-filter-nome", "esc-cartorio", "esc-cidade-cartorio", "esc-localizacao", "esc-bancos", "esc-quitacao-modo"].forEach((id) => {
       const el = document.getElementById(id);
       if (el) el.value = "";
     });
@@ -1644,13 +1644,20 @@ const RelacionamentoApp = {
       alert("O termo de quitação só pode ser emitido se o contrato estiver quitado. " + (ctx.quitadoMotivo || ""));
       return;
     }
+    const modo = document.getElementById("esc-quitacao-modo")?.value || "";
+    if (modo !== "aviso" && modo !== "formal") {
+      alert("Escolha o tipo do termo de quitação: aviso (informativo) ou formal (assinado pelo sócio).");
+      document.getElementById("esc-quitacao-modo")?.focus();
+      return;
+    }
     try {
       let t = {};
       try { t = JSON.parse(localStorage.getItem("crm_docpadrao_quitacao") || "{}"); } catch (e) {}
       const titleEl = document.getElementById("doc-quitacao-title");
       const corpoEl = document.getElementById("doc-quitacao-corpo");
       const docTitle = (titleEl && titleEl.value) || t["doc-quitacao-title"] || "INSTRUMENTO PARTICULAR DE QUITAÇÃO E NOTIFICAÇÃO";
-      const corpo = (corpoEl && corpoEl.value) || t["doc-quitacao-corpo"] || (corpoEl && corpoEl.defaultValue) || "";
+      let corpo = (corpoEl && corpoEl.value) || t["doc-quitacao-corpo"] || (corpoEl && corpoEl.defaultValue) || "";
+      if (typeof window.upgradeQuitacaoCorpo === "function") corpo = window.upgradeQuitacaoCorpo(corpo);
       if (!corpo) {
         alert("O modelo do termo de quitação não está preenchido. Salve-o em Configurações → Documentos padrões.");
         return;
@@ -1661,9 +1668,11 @@ const RelacionamentoApp = {
         return;
       }
       legalBase.PREAMBULO = String(preambleText).trim().replace(/[.;,\s]+$/, "");
+      legalBase.CANAIS_ATENDIMENTO = modo === "aviso" && typeof window.quitacaoCanaisHtml === "function" ? window.quitacaoCanaisHtml() : "";
       const markup = typeof window.formatDocPadraoMarkup === "function" ? window.formatDocPadraoMarkup(corpo) : corpo;
       let filled = this._fillDocVars(markup, legalBase);
       if (typeof window.centerSimpleDocSignature === "function") filled = window.centerSimpleDocSignature(filled);
+      if (modo === "aviso" && typeof window.applyQuitacaoRubrica === "function") filled = window.applyQuitacaoRubrica(filled);
       const codEmp = legalBase.CODIGO_EMPREENDIMENTO && legalBase.CODIGO_EMPREENDIMENTO !== "____" ? legalBase.CODIGO_EMPREENDIMENTO : "";
       const headerUnidade = [codEmp, "Quadra-Lote: " + quadraLote].filter(Boolean).join(" - ");
       const docHtml = `
@@ -1673,7 +1682,7 @@ const RelacionamentoApp = {
           <h2 style="color:#105436;font-size:13pt;font-weight:bold;margin:0;">${docTitle}</h2>
         </div>
         <div style="font-family:'Times New Roman',serif;font-size:11pt;line-height:1.5;text-align:justify;white-space:pre-wrap;">${filled}</div>`;
-      document.getElementById("pdf-modal-title").textContent = "Termo de quitação";
+      document.getElementById("pdf-modal-title").textContent = modo === "aviso" ? "Termo de quitação (aviso)" : "Termo de quitação (formal)";
       document.getElementById("pdf-document-content").innerHTML = docHtml;
       document.getElementById("pdf-view-overlay").classList.add("active");
       if (window.lucide) lucide.createIcons();
