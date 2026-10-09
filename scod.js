@@ -16,7 +16,8 @@ const ScodApp = {
     imoveisTotal: 0,
     q: "",
     page: 0,
-    open: {}
+    open: {},
+    cnd: {}
   },
 
   esc(s) {
@@ -172,7 +173,7 @@ const ScodApp = {
     if (!c.imoveis.length) return '<div class="scod-sub-empty">Nenhum imóvel vinculado a este proprietário.</div>';
     return `<table class="custom-table scod-sub"><thead><tr>
         <th>Identificador</th><th>Inscrição</th><th>Empreendimento</th><th>Quadra/Lote</th><th>Cidade</th>
-        <th>Situação</th><th class="ccom-num">Valor venal</th><th class="ccom-num">Débito IPTU</th><th>Atualizado</th>
+        <th>Situação</th><th class="ccom-num">Valor venal</th><th class="ccom-num">Débito IPTU</th><th>Atualizado</th><th>CND</th>
       </tr></thead><tbody>${c.imoveis.map((i) => `<tr>
         <td class="ccom-td-id">${this.esc(i.identificador || "—")}</td>
         <td class="ccom-td-id">${this.esc(i.inscricao || "—")}</td>
@@ -183,7 +184,44 @@ const ScodApp = {
         <td class="ccom-num">${this.esc(this.money(i.valor_venal))}</td>
         <td class="ccom-num">${this.esc(this.money(i.valor_total))}</td>
         <td>${this.esc(String(i.ultima_atualizacao || "").slice(0, 10).split("-").reverse().join("/") || "—")}</td>
+        <td>${this.state.cnd[i.id]
+          ? '<span class="scod-muted">Gerando…</span>'
+          : `<button type="button" class="btn btn-outline btn-sm" onclick="event.stopPropagation();ScodApp.baixarCnd(${Number(i.id)}, '${this.esc(String(i.identificador || i.id).replace(/[^\w-]/g, ""))}')"><i data-lucide="file-down" style="width:13px;"></i> CND</button>`}</td>
       </tr>`).join("")}</tbody></table>`;
+  },
+
+  // A SCOD gera a certidão na hora (leva uns 20s) e devolve o PDF em base64.
+  async baixarCnd(id, ident) {
+    if (!id || this.state.cnd[id]) return;
+    const win = window.open("", "_blank");
+    if (win) win.document.write('<p style="font-family:sans-serif;padding:24px;">Gerando a CND na SCOD, aguarde…</p>');
+    this.state.cnd[id] = true;
+    this.renderTable();
+    try {
+      const data = await this.getJson(`/imovel/certidao/${id}`);
+      const b64 = String((data && (data.documento_b64 || data.documento)) || (typeof data === "string" ? data : "")).replace(/^data:[^,]+,/, "");
+      if (!b64 || (data && data.erro)) throw new Error((data && data.mensagem) || "a SCOD não devolveu a certidão deste imóvel");
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+      const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+      if (win) {
+        win.location.href = url;
+      } else {
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `CND-${ident || id}.pdf`;
+        a.click();
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 120000);
+    } catch (e) {
+      console.error("[Scod] CND", e);
+      if (win) win.close();
+      alert("Não foi possível gerar a CND: " + (e.message || e));
+    } finally {
+      delete this.state.cnd[id];
+      this.renderTable();
+    }
   },
 
   renderTable() {
