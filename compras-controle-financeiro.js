@@ -585,6 +585,7 @@ ComprasControleApp.consultar = async function () {
   this.state.error = "";
   this.state.consulted = true;
   this.state.loteGen = (this.state.loteGen || 0) + 1;
+  this.fecharTitulo();
   this.renderPage();
   try {
     const payload = await this.fetchOutcome(start, end);
@@ -629,6 +630,7 @@ ComprasControleApp.limpar = function () {
   this.state.loteGen = (this.state.loteGen || 0) + 1;
   this.state.consulted = false;
   this.state.error = "";
+  this.fecharTitulo();
   this.renderPage();
 };
 
@@ -775,6 +777,163 @@ ComprasControleApp.paintFilters = function () {
   if (window.lucide) lucide.createIcons();
 };
 
+ComprasControleApp.formaPagamento = async function (billId, parcela) {
+  if (typeof window.siengeFetchWithRetry !== "function") return null;
+  const id = parcela || 1;
+  const kinds = ["bank-transfer", "pix", "boleto-bancario", "boleto-concessionaria"];
+  for (let i = 0; i < kinds.length; i++) {
+    try {
+      const data = await window.siengeFetchWithRetry(
+        "/bills/" + encodeURIComponent(billId) + "/installments/" + encodeURIComponent(id) + "/payment-information/" + kinds[i],
+        1
+      );
+      if (data && typeof data === "object") return { kind: kinds[i], data: data };
+    } catch (e) {}
+  }
+  return null;
+};
+
+ComprasControleApp.formaHtml = function (payment, row) {
+  if (payment && payment.data) {
+    const d = payment.data;
+    if (payment.kind === "pix") {
+      return `<p><strong>Forma:</strong> PIX</p><p>${this.esc(d.notes || "Chave do credor")}</p>`;
+    }
+    if (payment.kind === "boleto-bancario" || payment.kind === "boleto-concessionaria") {
+      const nome = payment.kind === "boleto-concessionaria" ? "Boleto de concessionária" : "Boleto";
+      return `<p><strong>Forma:</strong> ${nome}</p><p>${this.esc(d.notes || d.digitableNumber || d.barCode || "")}</p>`;
+    }
+    const banco = [d.beneficiaryBankCode, d.beneficiaryBankName].filter(Boolean).join(" — ");
+    const ag = [d.beneficiaryBankBranchNumber, d.beneficiaryBankBranchDigit].filter(Boolean).join("-");
+    const conta = [d.beneficiaryAccountNumber, d.beneficiaryAccountDigit].filter(Boolean).join("-");
+    const tipo = d.beneficiaryAccountType === "P" ? "Poupança" : "Conta corrente";
+    return `<p><strong>Forma:</strong> Transferência</p>
+      <p><strong>Banco:</strong> ${this.esc(banco || "—")}</p>
+      <p><strong>Agência:</strong> ${this.esc(ag || "—")}</p>
+      <p><strong>${this.esc(tipo)}:</strong> ${this.esc(conta || "—")}</p>
+      <p><strong>Favorecido:</strong> ${this.esc(d.beneficiaryName || "—")}</p>
+      ${d.notes ? `<pre style="white-space:pre-wrap;font-family:inherit;margin:8px 0 0;">${this.esc(d.notes)}</pre>` : ""}`;
+  }
+  if (row && (row.tipoBaixa || row.conta || row.operacao)) {
+    return `<p><strong>Programação na consulta:</strong> ${this.esc([row.tipoBaixa, row.operacao, row.conta].filter(Boolean).join(" · "))}</p>`;
+  }
+  return `<p>O pagamento ainda não está programado neste título.</p>`;
+};
+
+ComprasControleApp.statusLabel = function (row) {
+  const map = {
+    pago: "Pago",
+    processamento: "Processamento bancário",
+    programado: "Programado",
+    previsao: "Previsão",
+    vencido: "Vencido",
+    rastreando: "Rastreando banco"
+  };
+  return map[this.statusDe(row)] || "Programado";
+};
+
+ComprasControleApp.fecharTitulo = function () {
+  this._tituloGen = (this._tituloGen || 0) + 1;
+  this._tituloDetalhe = null;
+  const el = document.getElementById("cfin-titulo");
+  if (el) el.remove();
+};
+
+ComprasControleApp.abrirTitulo = async function (index) {
+  const row = (this.state.shown || [])[Number(index)];
+  if (!row || !row.titulo) return;
+  const gen = (this._tituloGen || 0) + 1;
+  this._tituloGen = gen;
+  this._tituloDetalhe = { loading: true, error: "", row: row, bill: null, attachments: [], payment: null };
+  this.pintarTitulo();
+  try {
+    if (typeof window.siengeFetchWithRetry !== "function") throw new Error("A API do Sienge não está disponível nesta tela.");
+    const billId = row.titulo;
+    const bill = await window.siengeFetchWithRetry("/bills/" + encodeURIComponent(billId), 1);
+    let attachments = [];
+    try { attachments = await this.anexosDoTitulo(billId); } catch (e) { attachments = []; }
+    const payment = await this.formaPagamento(billId, row.parcela || 1);
+    if (this._tituloGen !== gen) return;
+    this._tituloDetalhe.loading = false;
+    this._tituloDetalhe.bill = bill || null;
+    this._tituloDetalhe.attachments = attachments || [];
+    this._tituloDetalhe.payment = payment;
+    this.pintarTitulo();
+  } catch (e) {
+    if (this._tituloGen !== gen) return;
+    this._tituloDetalhe.loading = false;
+    this._tituloDetalhe.error = (e && e.message) ? e.message : "Não consegui abrir o título.";
+    this.pintarTitulo();
+  }
+};
+
+ComprasControleApp.pintarTitulo = function () {
+  const det = this._tituloDetalhe;
+  let el = document.getElementById("cfin-titulo");
+  if (!det) {
+    if (el) el.remove();
+    return;
+  }
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "cfin-titulo";
+    document.body.appendChild(el);
+  }
+  const row = det.row || {};
+  const bill = det.bill || {};
+  const credor = bill.creditorName || row.credor || "—";
+  const doc = [row.docId || bill.documentIdentificationId, row.documento || bill.documentNumber].filter(Boolean).join(" ");
+  const cc = (row.ccId ? row.ccId + " - " : "") + (row.ccNome || "—");
+  const plano = [row.planoId, row.plano].filter(Boolean).join(" — ") || "—";
+  const dataLabel = row.natureza === "pago" && row.dataPagamento ? "Pagamento" : "Vencimento";
+  const dataValor = row.natureza === "pago" && row.dataPagamento ? row.dataPagamento : row.vencimento;
+  const anexos = (det.attachments || []).map((a) => `
+    <button type="button" class="btn btn-outline btn-sm" style="height:32px;" onclick="event.stopPropagation(); ComprasControleApp.baixarAnexoTitulo('${this.esc(row.titulo)}','${this.esc(a.id)}')">${this.esc(a.description || a.name || "Anexo")}</button>
+  `).join("");
+  el.innerHTML = `
+    <div class="cfin-titulo-back" onclick="if(event.target===this)ComprasControleApp.fecharTitulo()">
+      <div class="cfin-titulo-card" onclick="event.stopPropagation()">
+        <div class="cfin-titulo-head">
+          <h3>Título ${this.esc(row.titulo)}${row.parcela ? " · parcela " + this.esc(row.parcela) : ""}</h3>
+          <button type="button" class="btn btn-cancel btn-sm" onclick="ComprasControleApp.fecharTitulo()">Fechar</button>
+        </div>
+        ${det.loading ? `<p class="cfin-titulo-wait">Abrindo título, anexos e forma de pagamento…</p>` : ""}
+        ${det.error ? `<p class="cfin-titulo-erro">${this.esc(det.error)}</p>` : ""}
+        <div class="cfin-titulo-grid">
+          <div><span>Credor</span><strong>${this.esc(credor)}</strong></div>
+          <div><span>Documento</span><strong>${this.esc(doc || "—")}</strong></div>
+          <div><span>Empresa</span><div>${this.esc(row.companyId || bill.companyId || "—")}</div></div>
+          <div><span>${this.esc(dataLabel)}</span><div>${this.esc(this.fmtDate(dataValor))}</div></div>
+          <div><span>Valor</span><strong>${this.esc(this.money(row.valorAjustado))}</strong></div>
+          <div><span>Status</span><div>${this.esc(this.statusLabel(row))}</div></div>
+          <div><span>Centro de custo</span><div>${this.esc(cc)}</div></div>
+          <div><span>Departamento</span><div>${this.esc(row.departamento || "—")}</div></div>
+          <div><span>Plano financeiro</span><div>${this.esc(plano)}</div></div>
+        </div>
+        ${bill.notes ? `<p class="cfin-titulo-obs"><strong>Observação:</strong> ${this.esc(bill.notes)}</p>` : ""}
+        <h4>Forma de pagamento programada</h4>
+        <div class="cfin-titulo-box">${det.loading ? "" : this.formaHtml(det.payment, row)}</div>
+        <h4>Anexos</h4>
+        <div class="cfin-titulo-files">${anexos || `<span>Este título não tem anexo.</span>`}</div>
+      </div>
+    </div>
+    <style>
+      #cfin-titulo .cfin-titulo-back { position:fixed; inset:0; z-index:10020; background:rgba(15,23,42,.45); display:flex; align-items:center; justify-content:center; padding:16px; }
+      #cfin-titulo .cfin-titulo-card { background:#fff; border-radius:12px; width:min(720px,96vw); max-height:86vh; overflow:auto; padding:18px 20px; }
+      #cfin-titulo .cfin-titulo-head { display:flex; justify-content:space-between; gap:12px; align-items:center; }
+      #cfin-titulo h3 { margin:0; color:#105436; font-size:1.05rem; }
+      #cfin-titulo h4 { margin:16px 0 6px; color:#105436; font-size:0.92rem; }
+      #cfin-titulo .cfin-titulo-wait { color:#64748b; margin:12px 0 0; }
+      #cfin-titulo .cfin-titulo-erro { color:#b91c1c; margin:12px 0 0; }
+      #cfin-titulo .cfin-titulo-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px 16px; margin-top:12px; font-size:0.86rem; }
+      #cfin-titulo .cfin-titulo-grid span { display:block; color:#64748b; font-size:0.75rem; }
+      #cfin-titulo .cfin-titulo-obs { margin:12px 0 0; font-size:0.84rem; }
+      #cfin-titulo .cfin-titulo-box { background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px; font-size:0.86rem; }
+      #cfin-titulo .cfin-titulo-box p { margin:0 0 4px; }
+      #cfin-titulo .cfin-titulo-files { display:flex; flex-wrap:wrap; gap:8px; color:#64748b; font-size:0.84rem; }
+    </style>`;
+};
+
 ComprasControleApp.renderList = function () {
   const box = document.getElementById("cfin-results");
   const kpi = document.getElementById("cfin-kpis");
@@ -810,7 +969,7 @@ ComprasControleApp.renderList = function () {
     const dataRaw = pago ? r.dataPagamento : r.vencimento;
     const dataTitle = pago ? "Pagamento " + this.fmtDate(dataRaw) : "Vencimento " + this.fmtDate(dataRaw);
     const sig = this.statusDe(r) + "|" + (r.lote || "");
-    return `<tr class="cprev-row">
+    return `<tr class="cprev-row" title="Abrir título, anexos e forma de pagamento" onclick="ComprasControleApp.abrirTitulo(${rows.indexOf(r)})">
       <td class="cprev-col-id" title="${this.esc(r.companyId)}">${this.esc(r.companyId)}</td>
       <td class="cprev-col-cc" title="${this.esc(ccLabel)}">${this.esc(ccLabel)}</td>
       <td class="cprev-col-dept" title="${this.esc(r.departamento || "—")}">${this.esc(r.departamento || "—")}</td>
@@ -827,7 +986,8 @@ ComprasControleApp.renderList = function () {
   box.innerHTML = `
     <style>
       #cfin-table thead th { white-space: nowrap; }
-      #cfin-table tbody tr.cprev-row { cursor: default; }
+      #cfin-table tbody tr.cprev-row { cursor: pointer; }
+      #cfin-table tbody tr.cprev-row:hover td { background: #f3faf6; }
       #cfin-table th.cprev-col-tipo,
       #cfin-table td.cprev-col-tipo { text-align: center; }
       #cfin-table td.cprev-col-tipo .cprev-tag { margin-left: 0; margin-right: 0; }
@@ -935,7 +1095,7 @@ ComprasControleApp.renderPage = function () {
             </div>
           </div>
         </div>
-        <p class="cprev-hint">A consulta manda para a API a <strong>empresa</strong> e o <strong>vencimento</strong>. Empreendimento, credor, título, tipo e departamento ficam liberados depois e só filtram a lista. O processamento bancário segue em segundo plano e só atualiza o status na tabela.</p>
+        <p class="cprev-hint">A consulta manda para a API a <strong>empresa</strong> e o <strong>vencimento</strong>. Empreendimento, credor, título, tipo e departamento ficam liberados depois e só filtram a lista. O processamento bancário segue em segundo plano e só atualiza o status na tabela. Clique na linha para ver o título, os anexos e a forma de pagamento programada.</p>
         ${this.departmentScopeNote() ? `<p class="cprev-hint">${this.esc(this.departmentScopeNote())}</p>` : ""}
       </div>
       <div id="cfin-kpis" class="ccom-kpis cprev-kpis"></div>
