@@ -435,6 +435,7 @@ const RydooApp = {
         #rydoo-root .rydoo-node-toggle:hover { box-shadow:inset 0 0 0 9999px rgba(16,84,54,.06); }
         #rydoo-root .rydoo-n0 { background:#f8fafc; border-left-color:#cbd5e1; margin-top:6px; }
         #rydoo-root .rydoo-n0.rydoo-done { background:#ecfdf5; border-left-color:#105436; }
+        #rydoo-root .rydoo-n0.rydoo-blocked { background:#fef2f2; border-color:#fecaca; border-left-color:#dc2626; }
         #rydoo-root .rydoo-ugroup { margin-top:6px; border:2px solid transparent; border-radius:10px; transition:opacity .15s ease; }
         #rydoo-root .rydoo-ugroup > .rydoo-n0 { margin-top:0; }
         #rydoo-root .rydoo-ugroup.is-open { border-color:#f37021; background:#fff7ed; padding:6px 6px 1px; margin:10px 0 8px; box-shadow:0 6px 18px rgba(243,112,33,.16); }
@@ -679,7 +680,8 @@ const RydooApp = {
         .map((cc) => this.ccBlock(pessoa, cc, byCc.get(cc)))
         .join("");
     }
-    return `<div class="rydoo-ugroup${open ? " is-open" : ""}"><div class="rydoo-node rydoo-n0 rydoo-node-toggle${g && g.billId ? " rydoo-done" : ""}" onclick="RydooApp.toggleNode('user', decodeURIComponent('${arg}'))">
+    const bloqueado = alertas && !(g && g.billId);
+    return `<div class="rydoo-ugroup${open ? " is-open" : ""}"><div class="rydoo-node rydoo-n0 rydoo-node-toggle${g && g.billId ? " rydoo-done" : ""}${bloqueado ? " rydoo-blocked" : ""}" onclick="RydooApp.toggleNode('user', decodeURIComponent('${arg}'))">
         ${this.chevHtml(open)}
         ${pick}
         <i data-lucide="user" class="rydoo-ico"></i>
