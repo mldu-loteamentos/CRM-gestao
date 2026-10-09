@@ -867,6 +867,13 @@ ComprasControleApp.abrirTitulo = async function (index) {
   }
 };
 
+ComprasControleApp.companyLabel = function (id) {
+  const sid = id == null || id === "" ? "" : String(id);
+  const name = this.companyName(sid);
+  if (name) return sid + " — " + name;
+  return sid || "—";
+};
+
 ComprasControleApp.pintarTitulo = function () {
   const det = this._tituloDetalhe;
   let el = document.getElementById("cfin-titulo");
@@ -883,12 +890,17 @@ ComprasControleApp.pintarTitulo = function () {
   const bill = det.bill || {};
   const credor = bill.creditorName || row.credor || "—";
   const doc = [row.docId || bill.documentIdentificationId, row.documento || bill.documentNumber].filter(Boolean).join(" ");
-  const cc = (row.ccId ? row.ccId + " - " : "") + (row.ccNome || "—");
+  const cc = [row.ccId, row.ccNome].filter(Boolean).join(" — ") || "—";
   const plano = [row.planoId, row.plano].filter(Boolean).join(" — ") || "—";
-  const dataLabel = row.natureza === "pago" && row.dataPagamento ? "Pagamento" : "Vencimento";
-  const dataValor = row.natureza === "pago" && row.dataPagamento ? row.dataPagamento : row.vencimento;
+  const empresaId = row.companyId || bill.companyId || "";
+  const pago = row.natureza === "pago" && row.dataPagamento;
+  const valor = pago ? (row.valorAjustado != null ? row.valorAjustado : row.valor) : (Number(row.saldo) > 0 ? row.saldo : row.valorAjustado);
+  const obs = bill.notes || bill.observation || bill.historic || bill.history || bill.complement || "";
+  const forma = typeof caixaFormaHtml === "function"
+    ? caixaFormaHtml(det.payment, row)
+    : this.formaHtml(det.payment, row);
   const anexos = (det.attachments || []).map((a) => `
-    <button type="button" class="btn btn-outline btn-sm" style="height:32px;" onclick="event.stopPropagation(); ComprasControleApp.baixarAnexoTitulo('${this.esc(row.titulo)}','${this.esc(a.id)}')">${this.esc(a.description || a.name || "Anexo")}</button>
+    <button type="button" class="btn btn-outline btn-sm" style="height:32px;" onclick="event.stopPropagation(); ComprasControleApp.baixarAnexoTitulo('${this.esc(row.titulo)}','${this.esc(a.id)}','${this.esc(a.name || "anexo.pdf")}')">${this.esc(a.description || a.name || "Anexo")}</button>
   `).join("");
   el.innerHTML = `
     <div class="cfin-titulo-back" onclick="if(event.target===this)ComprasControleApp.fecharTitulo()">
@@ -900,19 +912,22 @@ ComprasControleApp.pintarTitulo = function () {
         ${det.loading ? `<p class="cfin-titulo-wait">Abrindo título, anexos e forma de pagamento…</p>` : ""}
         ${det.error ? `<p class="cfin-titulo-erro">${this.esc(det.error)}</p>` : ""}
         <div class="cfin-titulo-grid">
-          <div><span>Credor</span><strong>${this.esc(credor)}</strong></div>
-          <div><span>Documento</span><strong>${this.esc(doc || "—")}</strong></div>
-          <div><span>Empresa</span><div>${this.esc(row.companyId || bill.companyId || "—")}</div></div>
-          <div><span>${this.esc(dataLabel)}</span><div>${this.esc(this.fmtDate(dataValor))}</div></div>
-          <div><span>Valor</span><strong>${this.esc(this.money(row.valorAjustado))}</strong></div>
-          <div><span>Status</span><div>${this.esc(this.statusLabel(row))}</div></div>
+          <div><span>Credor</span><div class="cfin-titulo-strong">${this.esc(credor)}</div></div>
+          <div><span>Documento</span><div class="cfin-titulo-strong">${this.esc(doc || "—")}</div></div>
+          <div><span>Empresa</span><div>${this.esc(this.companyLabel(empresaId))}</div></div>
+          <div><span>Vencimento</span><div>${this.esc(this.fmtDate(row.vencimento || bill.dueDate))}</div></div>
+          <div><span>${pago ? "Valor pago" : "Valor a pagar"}</span><div class="cfin-titulo-valor">${this.esc(this.money(valor))}</div></div>
+          <div><span>Situação</span><div>${this.esc(this.statusLabel(row))}</div></div>
           <div><span>Centro de custo</span><div>${this.esc(cc)}</div></div>
-          <div><span>Departamento</span><div>${this.esc(row.departamento || "—")}</div></div>
           <div><span>Plano financeiro</span><div>${this.esc(plano)}</div></div>
+          <div><span>Emissão</span><div>${this.esc(this.fmtDate(row.emissao || bill.issueDate))}</div></div>
+          <div><span>Departamento</span><div>${this.esc(row.departamento || "—")}</div></div>
+          ${pago ? `<div><span>Pagamento</span><div>${this.esc(this.fmtDate(row.dataPagamento))}</div></div>` : ""}
+          ${row.conta || row.operacao || row.tipoBaixa ? `<div><span>Conta / operação</span><div>${this.esc([row.tipoBaixa, row.operacao, row.conta].filter(Boolean).join(" · "))}</div></div>` : ""}
         </div>
-        ${bill.notes ? `<p class="cfin-titulo-obs"><strong>Observação:</strong> ${this.esc(bill.notes)}</p>` : ""}
+        ${obs ? `<p class="cfin-titulo-obs"><strong>Observação:</strong> ${this.esc(obs)}</p>` : ""}
         <h4>Forma de pagamento programada</h4>
-        <div class="cfin-titulo-box">${det.loading ? "" : this.formaHtml(det.payment, row)}</div>
+        <div class="cfin-titulo-box">${det.loading ? "" : forma}</div>
         <h4>Anexos</h4>
         <div class="cfin-titulo-files">${anexos || `<span>Este título não tem anexo.</span>`}</div>
       </div>
@@ -927,6 +942,8 @@ ComprasControleApp.pintarTitulo = function () {
       #cfin-titulo .cfin-titulo-erro { color:#b91c1c; margin:12px 0 0; }
       #cfin-titulo .cfin-titulo-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px 16px; margin-top:12px; font-size:0.86rem; }
       #cfin-titulo .cfin-titulo-grid span { display:block; color:#64748b; font-size:0.75rem; }
+      #cfin-titulo .cfin-titulo-strong { font-weight:700; }
+      #cfin-titulo .cfin-titulo-valor { font-weight:700; color:#c2410c; }
       #cfin-titulo .cfin-titulo-obs { margin:12px 0 0; font-size:0.84rem; }
       #cfin-titulo .cfin-titulo-box { background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px; font-size:0.86rem; }
       #cfin-titulo .cfin-titulo-box p { margin:0 0 4px; }

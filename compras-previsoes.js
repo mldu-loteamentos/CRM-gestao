@@ -558,8 +558,8 @@ const ComprasPrevisoesApp = {
     return `<span class="cprev-anexo-vazio">—</span>`;
   },
 
-  async baixarAnexoTitulo(billId, attachmentId) {
-    let fileName = "titulo-" + billId + ".pdf";
+  async baixarAnexoTitulo(billId, attachmentId, name) {
+    let fileName = name ? String(name) : ("titulo-" + billId + ".pdf");
     const remember = (n) => {
       if (!n || String(n.billId) !== String(billId)) return;
       (n.attachments || []).forEach((a) => {

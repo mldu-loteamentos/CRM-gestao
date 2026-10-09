@@ -22,7 +22,7 @@ window.MlEmpresaFilter = {
       if (!t || !t.closest) return;
       const item = t.closest(".ml-emp-filter-item");
       if (!item) return;
-      const input = t.matches && t.matches("input[type=checkbox]") ? t : item.querySelector("input[type=checkbox]");
+      const input = t.matches && t.matches("input[type=checkbox],input[type=radio]") ? t : item.querySelector("input[type=checkbox],input[type=radio]");
       if (!input) return;
       const wrap = item.closest(".ml-emp-filter");
       if (!wrap || !wrap.id) return;
@@ -146,11 +146,13 @@ window.MlEmpresaFilter = {
         : ("Nenhum " + singular + " com esse nome.");
       return `<div class="ml-emp-filter-empty">${emptyMsg}</div>`;
     }
+    const kind = opts.single ? "radio" : "checkbox";
+    const group = opts.single ? ` name="${this.esc(opts.id || "ml-emp")}-radio"` : "";
     return filtered.map((it) => {
       const itemId = String(it.id);
       const on = selected.has(itemId);
       return `<label class="ml-emp-filter-item">
-        <input type="checkbox" data-ml-item="${this.esc(itemId)}" ${on ? "checked" : ""}>
+        <input type="${kind}"${group} data-ml-item="${this.esc(itemId)}" ${on ? "checked" : ""}>
         <span>${this.esc(this.formatItemLabel(it))}</span>
       </label>`;
     }).join("");
@@ -175,10 +177,10 @@ window.MlEmpresaFilter = {
           <input id="${this.esc(id)}-search" type="text" placeholder="Buscar..." value="${this.esc(opts.query || "")}"
             onclick="event.stopPropagation()">
         </div>
-        <div class="ml-emp-filter-actions">
+        ${opts.single ? "" : `<div class="ml-emp-filter-actions">
           <button type="button" class="ml-emp-filter-all" onclick="event.preventDefault();event.stopPropagation();${opts.selectAllJs || `MlEmpresaFilter.selectAll(${this.jsArg(id)})`}">Marcar Todos</button>
           <button type="button" class="ml-emp-filter-none" onclick="event.preventDefault();event.stopPropagation();${opts.selectNoneJs || `MlEmpresaFilter.selectNone(${this.jsArg(id)})`}">Desmarcar Todos</button>
-        </div>
+        </div>`}
         <div class="ml-emp-filter-list" id="${this.esc(id)}-list">${this.listHtml(opts)}</div>
       </div>
     </div>`;

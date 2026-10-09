@@ -313,6 +313,7 @@ const EstoqueComercialApp = {
       quitado: !!u.quitado,
       statementDone: !!u.statementDone,
       receivedLocked: !!u.receivedLocked,
+      censusAt: u.censusAt || null,
       contractNumber: u.contractNumber || null,
       contractId: u.contractId || null,
       receivableBillId: u.receivableBillId || null,
@@ -848,7 +849,7 @@ const EstoqueComercialApp = {
 
   unitNeedsCensus(u) {
     if (!this.isFinanceUnit(u) || !u.customerId) return false;
-    return !(u.statementDone && u.relFin && u.receivedLocked);
+    return !(u.statementDone && u.relFin && (u.receivedLocked || u.censusAt));
   },
 
   stampFilaOnUnits(scopeEmp, opts) {
@@ -887,7 +888,7 @@ const EstoqueComercialApp = {
   hasActivePending() {
     return (this.state.units || []).some((u) => {
       if (!this.isActiveFinance(u)) return false;
-      return !(u.statementDone && u.receivedLocked);
+      return !(u.statementDone && (u.receivedLocked || u.censusAt));
     });
   },
 
@@ -899,7 +900,7 @@ const EstoqueComercialApp = {
       if (!u || (empSel && String(u.enterpriseId) !== String(empSel))) return;
       if (!u.customerId || !u.enterpriseId) return;
       if (!this.isActiveFinance(u)) return;
-      const pending = !(u.statementDone && u.receivedLocked);
+      const pending = !(u.statementDone && (u.receivedLocked || u.censusAt));
       const paid = this.paidDaysForBillId(u.receivableBillId || u.contractId || u.contractNumber || "");
       const recent = paid != null && paid <= (Number(this.BATIMENTO_DELTA_DAYS) || 5);
       const leftFila = u.relFin === "inadimplente" && this.overdueValue(u) <= 0.009;
@@ -1511,6 +1512,7 @@ const EstoqueComercialApp = {
     if (u.contractNumber) s += 3;
     if (u.receivableBillId) s += 2;
     if (u.receivedLocked) s += 2;
+    if (u.censusAt) s += 2;
     if (u.kpiVencidas != null || u.kpiAVencer != null) s += 2;
     if (u.receivedAmount != null) s += 1;
     return s;
@@ -1627,6 +1629,7 @@ const EstoqueComercialApp = {
         receivedAmount: keep.receivedLocked ? keep.receivedAmount : (u.receivedAmount != null ? u.receivedAmount : keep.receivedAmount),
         receivedLocked: !!(keep.receivedLocked || u.receivedLocked),
         statementDone: !!(keep.statementDone || u.statementDone),
+        censusAt: u.censusAt || keep.censusAt || null,
         quitacaoDate: this.sealQuitacao({
           quitado: !!(keep.quitado || u.quitado || keep.relFin === "quitado"),
           relFin: keep.relFin || u.relFin,
@@ -2600,22 +2603,25 @@ const EstoqueComercialApp = {
     return out.slice(0, 24);
   },
 
+  /** null = falhou no Sienge (o cliente continua pendente); [] = consultado e sem dados. */
   async fetchStatementsCached(customerId) {
     const id = String(customerId || "");
     if (!id) return [];
     if (!this.state.stCache) this.state.stCache = {};
     if (this.state.stCache[id]) return this.state.stCache[id];
-    const fn = window.SiengeApiService && SiengeApiService.getCustomerFinancialStatements;
-    if (typeof fn !== "function") return [];
+    if (typeof window.siengeFetchWithRetry !== "function") return null;
     try {
-      const res = await fn.call(SiengeApiService, id);
+      const res = await window.siengeFetchWithRetry(`/customer-financial-statements?customerId=${encodeURIComponent(id)}&includeSubJudice=true&includeRemadeInstallments=N&includeRenegotiation=N`, 3);
       const rows = this.flattenStatements(res);
       this.state.stCache[id] = rows;
       return rows;
     } catch (e) {
+      if (Number(e && e.status) === 404) {
+        this.state.stCache[id] = [];
+        return [];
+      }
       console.warn("[Estoque] extrato ficha", id, e);
-      this.state.stCache[id] = [];
-      return [];
+      return null;
     }
   },
 
@@ -2624,17 +2630,19 @@ const EstoqueComercialApp = {
     if (!id) return [];
     if (!this.state.rbCache) this.state.rbCache = {};
     if (this.state.rbCache[id]) return this.state.rbCache[id];
-    const fn = window.SiengeApiService && SiengeApiService.getReceivableBills;
-    if (typeof fn !== "function") return [];
+    if (typeof window.siengeFetchWithRetry !== "function") return null;
     try {
-      const res = await fn.call(SiengeApiService, id);
+      const res = await window.siengeFetchWithRetry(`/accounts-receivable/receivable-bills?customerId=${encodeURIComponent(id)}&limit=100&offset=0`, 3);
       const rows = this.extractRows(res);
       this.state.rbCache[id] = rows;
       return rows;
     } catch (e) {
+      if (Number(e && e.status) === 404) {
+        this.state.rbCache[id] = [];
+        return [];
+      }
       console.warn("[Estoque] receivable-bills", id, e);
-      this.state.rbCache[id] = [];
-      return [];
+      return null;
     }
   },
 
@@ -2652,13 +2660,12 @@ const EstoqueComercialApp = {
     const refreshSet = opts && opts.custIdsToRefresh ? opts.custIdsToRefresh : null;
     let custIds = [...byCust.keys()];
     if (refreshSet) custIds = custIds.filter((id) => refreshSet.has(String(id)));
+    const today = this.todayStr();
+    const label = opts && opts.label ? opts.label + " · " : "";
     let marked = 0;
-    for (let i = 0; i < custIds.length; i++) {
-      if (this.state.stopSync) break;
-      const customerId = custIds[i];
-      this.setProgress(`Ficha ${i + 1}/${custIds.length} — cliente ${customerId} (ativo adimplente ou inadimplente)…`, ((i + 1) / Math.max(custIds.length, 1)) * 100);
-      const bills = await this.fetchReceivableBillsCached(customerId);
-      const statements = await this.fetchStatementsCached(customerId);
+    let failed = 0;
+    let done = 0;
+    const applyCustomer = (customerId, bills, statements) => {
       const unitIds = new Set(byCust.get(customerId).map(u => String(u.id)));
       this.state.units = this.state.units.map(u => {
         if (!unitIds.has(String(u.id))) return u;
@@ -2672,25 +2679,52 @@ const EstoqueComercialApp = {
           .sort((a, b) => String(b.payOffDate || "").localeCompare(String(a.payOffDate || "")))[0]
           || mine[0]
           || null;
+        let next;
         if (stmt && (stmt.installments || []).length) {
           marked += 1;
-          return this.applyFichaMoney(u, stmt.installments, status || "adimplente", rb || stmt);
-        }
-        if (mine.length) {
+          next = this.applyFichaMoney(u, stmt.installments, status || "adimplente", rb || stmt);
+        } else if (mine.length) {
           marked += 1;
-          return this.applyRelFin(u, status, rb);
+          next = this.applyRelFin(u, status, rb);
+        } else {
+          next = { ...u, relFin: u.relFin || status, statementDone: true };
         }
-        return u;
+        return { ...next, censusAt: today };
       });
-      if ((i + 1) % 10 === 0) {
+    };
+    const CONC = 3;
+    for (let i = 0; i < custIds.length; i += CONC) {
+      if (this.state.stopSync) break;
+      const batch = custIds.slice(i, i + CONC);
+      this.setProgress(`${label}Ficha ${Math.min(i + CONC, custIds.length)}/${custIds.length} — ${failed ? failed + " falha(s) no Sienge, ficam para a próxima rodada" : "ativos adimplentes e inadimplentes"}…`, (Math.min(i + CONC, custIds.length) / Math.max(custIds.length, 1)) * 100);
+      const results = await Promise.all(batch.map(async (customerId) => {
+        const [bills, statements] = await Promise.all([
+          this.fetchReceivableBillsCached(customerId),
+          this.fetchStatementsCached(customerId)
+        ]);
+        return { customerId, bills, statements };
+      }));
+      results.forEach(({ customerId, bills, statements }) => {
+        if (bills == null || statements == null) {
+          failed += 1;
+          return;
+        }
+        applyCustomer(customerId, bills, statements);
+      });
+      done += batch.length;
+      if (done % 30 < CONC) {
         this.saveCache();
         this.renderTable();
       }
-      await this.sleep(this.BATIMENTO_AUTO_PAUSED ? 220 : 90);
+      if (done % 60 < CONC) {
+        try { await this.saveFirebaseCc(ccId); } catch (e) { console.warn("[Estoque] gravação parcial", ccId, e); }
+      }
+      await this.sleep(this.BATIMENTO_AUTO_PAUSED ? 220 : 60);
     }
     this.saveCache();
     await this.saveFirebaseCc(ccId);
     this.renderTable();
+    this._batimentoFailed = (this._batimentoFailed || 0) + failed;
     return marked;
   },
 
@@ -2698,7 +2732,10 @@ const EstoqueComercialApp = {
     opts = opts || {};
     const isAuto = !!opts.auto;
     try {
-      if (this.state._autoFinanceRunning) return;
+      if (this.state._autoFinanceRunning) {
+        if (!isAuto) this.setProgress("O batimento já está rodando. Acompanhe o progresso acima.");
+        return;
+      }
       const today = this.todayStr();
       if (isAuto && this.state.batimentoDate === today && this.state.batimentoDone && !this.hasActivePending()) return;
       if (this.state.loading) {
@@ -2743,7 +2780,8 @@ const EstoqueComercialApp = {
       this.buildDefaulterIndex();
       this.stampFilaOnUnits(empSel);
       this.sealInferredFinance();
-      const planned = this.collectActiveCustomers(empSel, { onlyPending: !forceFull });
+      this._batimentoFailed = 0;
+      const planned = this.collectActiveCustomers(empSel, { onlyPending: true });
       this._censusStillOpen = this.hasActivePending();
 
       let custIdsToRefreshByCc = planned.byCc;
@@ -2765,7 +2803,8 @@ const EstoqueComercialApp = {
           const refreshSet = custIdsToRefreshByCc.get(String(ccId)) || null;
           marked += await this.applyRelacionamentoBatimento(ccId, {
             custIdsToRefresh: refreshSet,
-            includeSettled: false
+            includeSettled: false,
+            label: `Empreendimento ${i + 1}/${ccIds.length} (${ccId})`
           });
         }
       } else if (!this.state.stopSync) {
@@ -2782,9 +2821,11 @@ const EstoqueComercialApp = {
       const qtdA = this.state.units.filter(u => inScope(u) && this.financialStatus(u) === "Ativo adimplente").length;
       this.paintEmpSelect();
       const day = await this.persistTodayResult({ markDone: !this._censusStillOpen });
-      const extra = this._censusStillOpen
-        ? " Ainda há contrato ativo sem ficha — o batimento segue nesses adimplentes e inadimplentes."
-        : " Base do dia gravada (estoque + caixa).";
+      const pendentes = (this.state.units || []).filter((u) => this.isActiveFinance(u) && this.unitNeedsCensus(u)).length;
+      let extra;
+      if (this.state.stopSync) extra = ` Interrompido. ${pendentes} contrato(s) ativo(s) ainda não consultado(s) — rode de novo que ele continua de onde parou.`;
+      else if (this._censusStillOpen) extra = ` ${pendentes} contrato(s) ativo(s) ainda não consultado(s)${this._batimentoFailed ? " (" + this._batimentoFailed + " falha(s) no Sienge)" : ""} — rode de novo que ele continua só nesses.`;
+      else extra = " Todos os contratos ativos foram consultados. Base do dia gravada (estoque + caixa).";
       this.setProgress(`Batimento (${ccIds.length || 0} empreendimento(s)): ${qtdQ} quitados · ${qtdI} inadimplentes · ${qtdA} adimplentes · ${marked} ficha(s) · ${stamped} pela fila.${extra} ${day.split("-").reverse().join("/")}.`);
     } catch (e) {
       console.error("[Estoque] batimento", e);
