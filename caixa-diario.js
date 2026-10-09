@@ -271,6 +271,8 @@ const FluxoCaixaDiarioApp = {
     this._gen = gen;
     this.loading = true;
     this.error = "";
+    this.days = [];
+    this.accounts = [];
     this.progress = "Lendo recebimentos e saldo…";
     this.render();
     try {
@@ -379,7 +381,7 @@ const FluxoCaixaDiarioApp = {
   },
 
   async loadPayables(gen, bounds) {
-    const app = window.ComprasPrevisoesApp;
+    const app = window.ComprasControleApp || window.ComprasPrevisoesApp;
     if (!app || typeof app.outcomeRange !== "function" || typeof app.transform !== "function") {
       this.progress = "";
       this.error = this.error || "O módulo de compras não está disponível para ler os títulos a pagar.";
@@ -559,33 +561,111 @@ const FluxoCaixaDiarioApp = {
     }
   },
 
+  detailHtml() {
+    const det = this.detail;
+    if (!det) return "";
+    const item = det.item || {};
+    const bill = det.bill || {};
+    const credor = bill.creditorName || item.credor || "—";
+    const doc = [item.docId || bill.documentIdentificationId, item.documento || bill.documentNumber].filter(Boolean).join(" ");
+    const anexos = (det.attachments || []).map((a) => `
+      <button type="button" class="btn btn-outline btn-sm" style="height:32px;" onclick="FluxoCaixaDiarioApp.baixarAnexo('${caixaEsc(item.titulo)}','${caixaEsc(a.id)}','${caixaEsc(a.name || "anexo.pdf")}')">${caixaEsc(a.description || a.name || "Anexo")}</button>
+    `).join("");
+    return `<div style="position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:80;display:flex;align-items:center;justify-content:center;padding:16px;" onclick="if(event.target===this)FluxoCaixaDiarioApp.closeTitulo()">
+      <div style="background:#fff;border-radius:12px;width:min(720px,96vw);max-height:86vh;overflow:auto;padding:18px 20px;">
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;">
+          <h3 style="margin:0;color:#105436;">Título ${caixaEsc(item.titulo)}${item.parcela ? " · parcela " + caixaEsc(item.parcela) : ""}</h3>
+          <button type="button" class="btn btn-cancel btn-sm" onclick="FluxoCaixaDiarioApp.closeTitulo()">Fechar</button>
+        </div>
+        ${det.loading ? `<p style="color:#64748b;">Abrindo título, anexos e forma de pagamento…</p>` : ""}
+        ${det.error ? `<p style="color:#b91c1c;">${caixaEsc(det.error)}</p>` : ""}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;margin-top:12px;font-size:0.86rem;">
+          <div><span style="color:#64748b;">Credor</span><div style="font-weight:700;">${caixaEsc(credor)}</div></div>
+          <div><span style="color:#64748b;">Documento</span><div style="font-weight:700;">${caixaEsc(doc || "—")}</div></div>
+          <div><span style="color:#64748b;">Empresa</span><div>${caixaEsc(this.companyName(item.companyId) || item.companyId || "—")}</div></div>
+          <div><span style="color:#64748b;">Vencimento</span><div>${caixaFmtDate(item.date)}</div></div>
+          <div><span style="color:#64748b;">Valor a pagar</span><div style="font-weight:700;color:#c2410c;">${caixaMoney(item.valor)}</div></div>
+          <div><span style="color:#64748b;">Situação</span><div>${item.natureza === "previsao" ? "Previsão" : "Programado"}</div></div>
+          <div><span style="color:#64748b;">Centro de custo</span><div>${caixaEsc(item.ccNome || "—")}</div></div>
+          <div><span style="color:#64748b;">Plano financeiro</span><div>${caixaEsc(item.plano || "—")}</div></div>
+        </div>
+        ${bill.notes ? `<p style="margin:12px 0 0;font-size:0.84rem;"><strong>Observação:</strong> ${caixaEsc(bill.notes)}</p>` : ""}
+        <h4 style="margin:16px 0 6px;color:#105436;font-size:0.92rem;">Forma de pagamento programada</h4>
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:0.86rem;">${det.loading ? "" : caixaFormaHtml(det.payment, item)}</div>
+        <h4 style="margin:16px 0 6px;color:#105436;font-size:0.92rem;">Anexos</h4>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">${anexos || `<span style="color:#64748b;font-size:0.84rem;">Este título não tem anexo.</span>`}</div>
+      </div>
+    </div>`;
+  },
+
   render() {
     const root = document.getElementById("fluxo-caixa-diario-root");
     if (!root) return;
+    const hoje = new Date().toISOString().slice(0, 10);
+    let running = this.totals.saldo || 0;
+    let entrarFrente = 0;
+    let pagarFrente = 0;
     const rows = this.days.map((d) => {
+      const futuro = d.date >= hoje;
+      if (futuro) {
+        running += (d.entrar || 0) - (d.pagar || 0);
+        entrarFrente += d.entrar || 0;
+        pagarFrente += d.pagar || 0;
+      }
+      const saldoDia = futuro ? running : null;
       const open = this.openDay === d.date;
-      const kids = open ? d.itens.map((it) => `
-        <tr style="background:#f8fafc;">
+      const has = (d.itens && d.itens.length) || (d.pagarItens && d.pagarItens.length);
+      const entradas = open ? (d.itens || []).map((it) => `
+        <tr style="background:#f3faf6;">
           <td></td>
-          <td colspan="2" style="padding:6px 10px;font-size:0.78rem;">
-            ${caixaEsc(it.cc)} / ${caixaEsc(it.unidade)} · ${caixaEsc(it.cliente || "—")}
+          <td colspan="3" style="padding:6px 10px;font-size:0.78rem;">
+            <span style="color:#105436;font-weight:700;">Entrada</span>
+            · ${caixaEsc(it.cc)} / ${caixaEsc(it.unidade)} · ${caixaEsc(it.cliente || "—")}
             ${it.cpf ? ` · CPF ${caixaEsc(it.cpf)}` : ""}
             · venc. ${caixaFmtDate(it.vencimento)} + PMP ${it.pmp}d
           </td>
-          <td style="text-align:right;padding:6px 10px;">${caixaMoney(it.valor)}</td>
+          <td style="text-align:right;padding:6px 10px;color:#105436;">${caixaMoney(it.valor)}</td>
+        </tr>`).join("") : "";
+      const saidas = open ? (d.pagarItens || []).map((it) => `
+        <tr style="background:#fffaf6;cursor:pointer;" onclick="FluxoCaixaDiarioApp.openTitulo('${caixaEsc(it.key)}')">
+          <td></td>
+          <td colspan="3" style="padding:6px 10px;font-size:0.78rem;">
+            <span style="color:#c2410c;font-weight:700;">${it.natureza === "previsao" ? "Previsão" : "A pagar"}</span>
+            · tít. ${caixaEsc(it.titulo)}${it.parcela ? "/" + caixaEsc(it.parcela) : ""}
+            · ${caixaEsc(it.credor || "—")}
+            · ${caixaEsc(it.docId || "")} ${caixaEsc(it.documento || "")}
+          </td>
+          <td style="text-align:right;padding:6px 10px;color:#c2410c;">${caixaMoney(it.valor)}</td>
         </tr>`).join("") : "";
       return `<tr>
-        <td style="padding:8px 12px;"><button type="button" onclick="FluxoCaixaDiarioApp.toggle('${d.date}')" style="border:none;background:none;cursor:pointer;color:#64748b;">${d.itens.length ? (open ? "▾" : "▸") : "·"}</button></td>
+        <td style="padding:8px 12px;"><button type="button" onclick="FluxoCaixaDiarioApp.toggle('${d.date}')" style="border:none;background:none;cursor:pointer;color:#64748b;">${has ? (open ? "▾" : "▸") : "·"}</button></td>
         <td style="padding:8px 12px;font-weight:600;">${caixaFmtDate(d.date)}</td>
-        <td style="padding:8px 12px;">${d.itens.length} parcela(s)</td>
-        <td style="padding:8px 12px;text-align:right;font-weight:700;color:${d.valor ? "#105436" : "#94a3b8"};">${caixaMoney(d.valor)}</td>
-      </tr>${kids}`;
+        <td style="padding:8px 12px;text-align:right;color:${d.entrar ? "#105436" : "#94a3b8"};">${caixaMoney(d.entrar || 0)}</td>
+        <td style="padding:8px 12px;text-align:right;color:${d.pagar ? "#c2410c" : "#94a3b8"};">${caixaMoney(d.pagar || 0)}</td>
+        <td style="padding:8px 12px;text-align:right;font-weight:700;color:${saldoDia == null ? "#94a3b8" : (saldoDia < 0 ? "#b91c1c" : "#105436")};">${saldoDia == null ? "—" : caixaMoney(saldoDia)}</td>
+      </tr>${entradas}${saidas}`;
     }).join("");
+    const contas = (this.accounts || []).slice(0, 12).map((a) => `
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;min-width:180px;">
+        <div style="font-size:0.72rem;color:#64748b;">${caixaEsc(a.company || "Conta")} · ${caixaEsc(a.number || "")}</div>
+        <div style="font-weight:700;">${caixaEsc(a.name)}</div>
+        <div style="color:${a.amount < 0 ? "#b91c1c" : "#105436"};font-weight:700;">${caixaMoney(a.amount)}</div>
+      </div>`).join("");
+    const filtro = window.MlEmpresaFilter ? MlEmpresaFilter.html({
+      id: "cxd-emp",
+      label: "EMPRESAS",
+      items: this.empItems(),
+      selectedIds: this.companyIds,
+      open: this.openEmp,
+      query: this.qEmp,
+      emptyMeansAll: true
+    }) : "";
+    const posicao = (this.totals.saldo || 0) + entrarFrente - pagarFrente;
     root.innerHTML = `
       <div style="display:flex;flex-direction:column;height:calc(100vh - 85px);">
         <div style="background:#105436;padding:16px 20px;border-radius:12px 12px 0 0;">
           <h2 style="margin:0;color:#fff;font-size:1.15rem;">Fluxo de caixa diário</h2>
-          <p style="margin:4px 0 0;color:rgba(255,255,255,0.75);font-size:0.75rem;">Previsão de recebimento = vencimento + PMP dos últimos 3 meses (ex.: PMP 5 → vence dia 10, entra no caixa dia 15).</p>
+          <p style="margin:4px 0 0;color:rgba(255,255,255,0.75);font-size:0.75rem;">Saldo de hoje, o que entra (vencimento + PMP) e o que será pago no módulo de compras. Clique no título a pagar para ver anexos e a forma de pagamento.</p>
         </div>
         <div style="flex:1;background:#f8fafc;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 12px 12px;padding:14px 16px;overflow:auto;">
           <div style="display:flex;gap:12px;align-items:flex-end;margin-bottom:12px;flex-wrap:wrap;">
@@ -593,23 +673,34 @@ const FluxoCaixaDiarioApp = {
               <input type="month" value="${this.month}" onchange="FluxoCaixaDiarioApp.month=this.value;FluxoCaixaDiarioApp.load()"
                 style="display:block;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;margin-top:4px;">
             </label>
-            <div style="font-size:0.85rem;color:#334155;">Previsto no mês: <strong>${caixaMoney(this.totals.previsto)}</strong> · ${this.totals.titulos} parcela(s)</div>
+            ${filtro}
           </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px;min-width:150px;"><div style="font-size:0.72rem;color:#64748b;">Saldo atual</div><strong style="color:#105436;">${caixaMoney(this.totals.saldo || 0)}</strong></div>
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px;min-width:150px;"><div style="font-size:0.72rem;color:#64748b;">A entrar no mês</div><strong style="color:#105436;">${caixaMoney(this.totals.entrar || 0)}</strong></div>
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px;min-width:150px;"><div style="font-size:0.72rem;color:#64748b;">A pagar no mês</div><strong style="color:#c2410c;">${caixaMoney(this.totals.pagar || 0)}</strong></div>
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px;min-width:170px;"><div style="font-size:0.72rem;color:#64748b;">Posição projetada</div><strong style="color:${posicao < 0 ? "#b91c1c" : "#105436"};">${caixaMoney(posicao)}</strong></div>
+          </div>
+          ${contas ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">${contas}${(this.accounts || []).length > 12 ? `<div style="align-self:center;color:#64748b;font-size:0.78rem;">+ ${(this.accounts.length - 12)} contas</div>` : ""}</div>` : ""}
+          <p id="cxd-progress" style="margin:0 0 10px;color:#105436;font-size:0.8rem;font-weight:600;" ${this.progress ? "" : "hidden"}>${caixaEsc(this.progress || "")}</p>
           ${this.error ? `<div style="margin-bottom:10px;padding:10px;background:#fff7ed;color:#9a3412;border-radius:8px;font-size:0.82rem;">${caixaEsc(this.error)}</div>` : ""}
-          ${this.loading ? `<p style="color:#64748b;">Montando a previsão…</p>` : `
+          ${this.loading ? `<p style="color:#64748b;">Montando o fluxo…</p>` : `
           <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:auto;">
             <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
-              <thead><tr style="background:#f8fafc;">
+              <thead><tr style="background:#f8fafc;color:#105436;">
                 <th style="width:36px;"></th>
-                <th style="text-align:left;padding:8px 12px;">Dia (previsão de caixa)</th>
-                <th style="text-align:left;padding:8px 12px;">Parcelas</th>
-                <th style="text-align:right;padding:8px 12px;">Valor previsto</th>
+                <th style="text-align:left;padding:8px 12px;">Dia</th>
+                <th style="text-align:right;padding:8px 12px;">A entrar</th>
+                <th style="text-align:right;padding:8px 12px;">A pagar</th>
+                <th style="text-align:right;padding:8px 12px;">Saldo projetado</th>
               </tr></thead>
-              <tbody>${rows || `<tr><td colspan="4" style="padding:24px;text-align:center;color:#94a3b8;">Sem previsão neste mês.</td></tr>`}</tbody>
+              <tbody>${rows || `<tr><td colspan="5" style="padding:24px;text-align:center;color:#94a3b8;">Sem movimento neste mês.</td></tr>`}</tbody>
             </table>
           </div>`}
         </div>
-      </div>`;
+      </div>
+      ${this.detailHtml()}`;
+    this.bindCompanyFilter();
     if (window.lucide) lucide.createIcons();
   }
 };

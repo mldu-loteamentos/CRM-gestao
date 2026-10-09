@@ -268,17 +268,22 @@ const RydooApp = {
       const mes = this.dateKey(r.data).slice(0, 6);
       const retro = !!(comp && mes && mes < comp);
       r.retroativa = !!(retro && ((counts[r._chave] || 0) > 1 || hist.has(r._chave)));
+      r.fixCc = false;
+      r.fixConta = false;
       if (r.hierCat && this.fold(r.hierCat) !== this.fold(r.categoria)) {
         red.push("Categoria " + r.categoria + " diferente da hierárquica " + r.hierCat);
       }
       if (hierConta && conta && hierConta !== conta) {
         red.push("Conta " + r.conta + " diferente da hierárquica " + r.hierConta);
+        r.fixConta = true;
       }
       if (expected && conta && conta !== expected) {
         red.push("Conta " + r.conta + " fora do padrão " + expected + " da categoria " + r.categoria);
+        r.fixConta = true;
       }
       if (/plano financeiro|trocar a conta|outra conta/i.test(r.comentario || "")) {
         red.push("Comentário pede outra classificação");
+        r.fixConta = true;
       }
       const policy = [r.invalid, r.validation].filter(Boolean).join(" — ");
       if (policy) red.push(policy);
@@ -287,8 +292,13 @@ const RydooApp = {
       r.reembolsa = !r.clara;
       if (!r.clara && !this.viagem(r)) amber.push("Despesa fora de viagem — revisar");
       if (!r.clara && !r.aprovacao) amber.push("Sem data de aprovação");
-      if (!r.clara && !r.cc) amber.push("Sem centro de custo");
+      if (!r.clara && !r.cc) {
+        amber.push("Sem centro de custo");
+        r.fixCc = true;
+      }
       if (r.clara) {
+        r.fixCc = false;
+        r.fixConta = false;
         r.level = red.length ? "divergente" : "ok";
         r.why = red.join(" · ");
       } else {
@@ -424,9 +434,9 @@ const RydooApp = {
         #rydoo-root .rydoo-cc .rydoo-sum { color:#c2410c; }
         #rydoo-root .rydoo-plano .rydoo-sum { color:#334155; }
         #rydoo-root .rydoo-pick { width:16px; height:16px; flex:none; accent-color:#105436; }
-        #rydoo-root .rydoo-edit-row { display:flex; flex-wrap:wrap; gap:10px; padding:4px 0 2px; }
-        #rydoo-root .rydoo-edit-row label { display:flex; flex-direction:column; gap:4px; font-size:11px; font-weight:700; color:#64748b; min-width:240px; flex:1; }
-        #rydoo-root .rydoo-edit-row select { height:34px; }
+        #rydoo-root .rydoo-pencil { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; margin-left:6px; vertical-align:middle; border:1px solid #d7e6de; background:#fff; border-radius:8px; color:#105436; cursor:pointer; padding:0; }
+        #rydoo-root .rydoo-pencil:hover { background:#e7f6ee; border-color:#105436; }
+        #rydoo-root .rydoo-pencil svg { width:14px; height:14px; }
         #rydoo-root .rydoo-job { margin-top:12px; }
         #rydoo-root .rydoo-job-label { font-size:12.5px; font-weight:600; color:#105436; margin-bottom:6px; }
         #rydoo-root .rydoo-job-track { height:8px; background:#e7f6ee; border-radius:999px; overflow:hidden; }
@@ -529,13 +539,10 @@ const RydooApp = {
       if (!byUser.has(pessoa)) byUser.set(pessoa, []);
       byUser.get(pessoa).push(r);
     });
-    const tree = Array.from(byUser.keys())
+    return Array.from(byUser.keys())
       .sort((a, b) => this.fold(a).localeCompare(this.fold(b), "pt"))
       .map((pessoa) => this.userBlock(pessoa, byUser.get(pessoa)))
       .join("");
-    const contas = this.contaOpcoes();
-    const lista = contas.map((c) => `<option value="${this.esc(c.id)}">${this.esc(c.id + " — " + c.name)}</option>`).join("");
-    return tree + `<datalist id="rydoo-contas">${lista}</datalist>`;
   },
 
   userBlock(pessoa, rows) {
@@ -650,7 +657,7 @@ const RydooApp = {
         return `<span class="rydoo-tag rydoo-tag-clara">Cartão Clara</span><div class="rydoo-why">Não gera reembolso</div>${extra}`;
       }
       const label = r.level === "ok" ? "Ok" : (r.level === "revisar" ? "Revisar" : "Divergente");
-      return `<span class="rydoo-tag rydoo-tag-${r.level}">${label}</span>${r.why ? `<div class="rydoo-why">${this.esc(r.why)}</div>` : ""}`;
+      return `<span class="rydoo-tag rydoo-tag-${r.level}">${label}</span>${this.lapisHtml(r)}${r.why ? `<div class="rydoo-why">${this.esc(r.why)}</div>` : ""}`;
     };
     const lines = rows.slice().sort((a, b) => this.dateKey(a.data).localeCompare(this.dateKey(b.data))).map((r) => `<tr class="rydoo-row-${r.level}">
       <td>${this.esc(r.data)}</td>
@@ -659,7 +666,7 @@ const RydooApp = {
       <td>${this.esc(r.comentario || "")}</td>
       <td>${tag(r)}</td>
       <td style="text-align:right;white-space:nowrap;">${this.esc(this.money(r.valor))}</td>
-    </tr>${this.editorLinha(r)}`).join("");
+    </tr>`).join("");
     return `<details class="rydoo-plano" ${open} ontoggle="RydooApp.onToggle('plano', decodeURIComponent('${arg}'), this.open)">
       <summary>
         <span class="rydoo-user-main"><strong>${this.esc(head.conta || conta)}</strong><span class="rydoo-why">${this.esc(nome)}</span></span>
@@ -808,23 +815,135 @@ const RydooApp = {
     return out;
   },
 
-  editorLinha(r) {
-    if (!r || r.clara || (r.level !== "revisar" && r.level !== "divergente")) return "";
+  lapisHtml(r) {
+    if (!r || r.clara || (!r.fixCc && !r.fixConta)) return "";
     const idx = this.state.rows.indexOf(r);
     if (idx < 0) return "";
+    const title = r.fixCc && r.fixConta
+      ? "Ajustar centro de custo e plano financeiro"
+      : (r.fixCc ? "Ajustar centro de custo" : "Ajustar plano financeiro");
+    return `<button type="button" class="rydoo-pencil" title="${this.esc(title)}" onclick="event.preventDefault(); event.stopPropagation(); RydooApp.abrirAjuste(${idx})"><i data-lucide="pencil"></i></button>`;
+  },
+
+  centrosIntegra() {
+    const raw = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || this._costCenters || [];
+    const seen = {};
+    const out = [];
+    (raw || []).forEach((c) => {
+      const id = String(c && c.id != null ? c.id : "").trim();
+      if (!id || seen[id]) return;
+      seen[id] = true;
+      out.push({ id: id, name: String(c.name || c.costCenterName || "").trim() });
+    });
+    out.sort((a, b) => a.id.localeCompare(b.id, "pt", { numeric: true }));
+    return out;
+  },
+
+  abrirAjuste(index) {
+    const r = this.state.rows[Number(index)];
+    if (!r || (!r.fixCc && !r.fixConta)) return;
+    this._ajuste = { index: Number(index), q: "" };
+    this.pintarAjuste();
+  },
+
+  fecharAjuste() {
+    this._ajuste = null;
+    const el = document.getElementById("rydoo-ajuste");
+    if (el) el.remove();
+  },
+
+  pintarAjuste() {
+    const aj = this._ajuste;
+    const r = aj && this.state.rows[aj.index];
+    if (!r) return this.fecharAjuste();
+    let el = document.getElementById("rydoo-ajuste");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "rydoo-ajuste";
+      document.body.appendChild(el);
+    }
+    const titulo = r.fixCc && r.fixConta
+      ? "Centro de custo e plano financeiro"
+      : (r.fixCc ? "Centro de custo" : "Plano financeiro");
+    el.innerHTML = `
+      <style>
+        #rydoo-ajuste { position:fixed; inset:0; z-index:10020; background:rgba(15,23,42,.45); display:flex; align-items:center; justify-content:center; padding:18px; }
+        #rydoo-ajuste .rydoo-ajuste-card { width:min(560px, 100%); max-height:min(78vh, 640px); background:#fff; border-radius:12px; display:flex; flex-direction:column; overflow:hidden; }
+        #rydoo-ajuste .rydoo-ajuste-head { display:flex; align-items:center; gap:10px; padding:14px 16px; background:#105436; color:#fff; }
+        #rydoo-ajuste .rydoo-ajuste-head strong { font-size:15px; font-weight:600; }
+        #rydoo-ajuste .rydoo-ajuste-body { padding:12px 16px 8px; display:flex; flex-direction:column; gap:8px; min-height:0; }
+        #rydoo-ajuste input { height:36px; }
+        #rydoo-ajuste .rydoo-ajuste-list { overflow:auto; max-height:46vh; border:1px solid #e2e8f0; border-radius:8px; }
+        #rydoo-ajuste .rydoo-ajuste-sec { padding:8px 10px 4px; font-size:11px; font-weight:700; letter-spacing:.04em; color:#64748b; background:#f8fafc; }
+        #rydoo-ajuste button.rydoo-ajuste-item { display:block; width:100%; text-align:left; border:0; border-bottom:1px solid #f1f5f9; background:#fff; padding:8px 10px; cursor:pointer; color:#0f172a; }
+        #rydoo-ajuste button.rydoo-ajuste-item:hover, #rydoo-ajuste button.rydoo-ajuste-item.is-on { background:#e7f6ee; }
+        #rydoo-ajuste button.rydoo-ajuste-item b { color:#105436; font-weight:600; }
+        #rydoo-ajuste .rydoo-ajuste-empty { padding:14px 10px; color:#64748b; font-size:13px; }
+        #rydoo-ajuste .rydoo-ajuste-foot { display:flex; justify-content:flex-end; padding:10px 16px 14px; }
+      </style>
+      <div class="rydoo-ajuste-card" onclick="event.stopPropagation()">
+        <div class="rydoo-ajuste-head"><strong>${this.esc(titulo)}</strong></div>
+        <div class="rydoo-ajuste-body">
+          <input class="form-control" id="rydoo-ajuste-q" placeholder="Buscar" value="${this.esc(aj.q)}">
+          <div class="rydoo-ajuste-list" id="rydoo-ajuste-list"></div>
+        </div>
+        <div class="rydoo-ajuste-foot">
+          <button type="button" class="btn btn-cancel" onclick="RydooApp.fecharAjuste()">Cancelar</button>
+        </div>
+      </div>`;
+    el.onclick = () => this.fecharAjuste();
+    const input = document.getElementById("rydoo-ajuste-q");
+    if (input) {
+      input.focus();
+      const pos = input.value.length;
+      input.setSelectionRange(pos, pos);
+      input.addEventListener("input", () => {
+        if (!this._ajuste) return;
+        this._ajuste.q = input.value;
+        this.pintarAjusteLista();
+      });
+    }
+    this.pintarAjusteLista();
+  },
+
+  pintarAjusteLista() {
+    const box = document.getElementById("rydoo-ajuste-list");
+    const aj = this._ajuste;
+    const r = aj && this.state.rows[aj.index];
+    if (!box || !r) return;
+    const q = this.fold(aj.q);
     const atualCc = this.ccIdOf(r);
-    const ccs = (this._costCenters || []).slice();
-    if (atualCc && !ccs.some((c) => c.id === atualCc)) ccs.unshift({ id: atualCc, name: String(r.cc || "") });
-    const ccOpts = [`<option value="">Centro de custo</option>`].concat(ccs.map((c) => {
-      const sel = c.id === atualCc ? "selected" : "";
-      const label = c.name && c.name !== c.id ? (c.id + " — " + c.name) : c.id;
-      return `<option value="${this.esc(c.id)}" ${sel}>${this.esc(label)}</option>`;
-    })).join("");
-    const contaAtual = this.contaKey(r.conta);
-    return `<tr class="rydoo-edit"><td colspan="6"><div class="rydoo-edit-row">
-      <label>Centro de custo<select class="form-control" onclick="event.stopPropagation()" onchange="RydooApp.editarLinha(${idx}, 'cc', this.value)">${ccOpts}</select></label>
-      <label>Plano financeiro<input class="form-control" list="rydoo-contas" value="${this.esc(contaAtual)}" placeholder="Código da conta" onclick="event.stopPropagation()" onchange="RydooApp.editarLinha(${idx}, 'conta', this.value)"></label>
-    </div></td></tr>`;
+    const atualConta = this.contaKey(r.conta).replace(/\./g, "");
+    const filtrar = (list) => {
+      const hit = !q ? list : list.filter((item) => this.fold(item.id + " " + item.name).indexOf(q) >= 0);
+      return { shown: hit.slice(0, 80), more: Math.max(0, hit.length - 80), total: list.length };
+    };
+    const bloco = (titulo, pack, field, atual) => {
+      if (!pack.total) {
+        return `<div class="rydoo-ajuste-sec">${this.esc(titulo)}</div><div class="rydoo-ajuste-empty">A lista do Integra ainda não carregou.</div>`;
+      }
+      if (!pack.shown.length) {
+        return `<div class="rydoo-ajuste-sec">${this.esc(titulo)}</div><div class="rydoo-ajuste-empty">Nenhum item com esse texto.</div>`;
+      }
+      const rows = pack.shown.map((item) => {
+        const on = atual && String(item.id).replace(/\./g, "") === String(atual).replace(/\./g, "") ? " is-on" : "";
+        const nome = item.name && item.name !== item.id ? item.name : "";
+        return `<button type="button" class="rydoo-ajuste-item${on}" onclick="RydooApp.escolherAjuste('${field}', '${this.esc(item.id)}')"><b>${this.esc(item.id)}</b>${nome ? " — " + this.esc(nome) : ""}</button>`;
+      }).join("");
+      const extra = pack.more ? `<div class="rydoo-ajuste-empty">Mais ${pack.more}. Continue a busca para ver o restante.</div>` : "";
+      return `<div class="rydoo-ajuste-sec">${this.esc(titulo)}</div>${rows}${extra}`;
+    };
+    let html = "";
+    if (r.fixCc) html += bloco("Centros de custo", filtrar(this.centrosIntegra()), "cc", atualCc);
+    if (r.fixConta) html += bloco("Plano financeiro", filtrar(this.contaOpcoes()), "conta", atualConta);
+    box.innerHTML = html;
+  },
+
+  escolherAjuste(field, value) {
+    const idx = this._ajuste && this._ajuste.index;
+    this.fecharAjuste();
+    if (idx == null) return;
+    this.editarLinha(idx, field, value);
   },
 
   editarLinha(index, field, value) {
@@ -833,7 +952,7 @@ const RydooApp = {
     const raw = String(value || "").trim();
     if (!raw) return;
     if (field === "cc") {
-      const hit = (this._costCenters || []).find((c) => c.id === raw);
+      const hit = this.centrosIntegra().find((c) => c.id === raw);
       r.cc = hit && hit.name ? (hit.id + " — " + hit.name) : raw;
     } else if (field === "conta") {
       r.conta = raw.split("—")[0].trim() || raw;
