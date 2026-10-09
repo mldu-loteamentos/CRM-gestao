@@ -197,10 +197,11 @@ const OrcamentoApp = {
         .orc-vend-col { color: #c2410c; }
         .orc-kpi strong.orc-cart-col { color: #1e3a8a; }
         .orc-kpi strong.orc-vend-col { color: #c2410c; }
-        .orc-emp .orc-cart-col, .orc-emp .orc-vend-col,
-        .orc-total .orc-cart-col, .orc-total .orc-vend-col,
-        .orc-cc .orc-cart-col, .orc-cc .orc-vend-col,
-        .orc-obra .orc-cart-col, .orc-obra .orc-vend-col { color: inherit; }
+        .orc-emp td.orc-cart-col, .orc-emp td.orc-vend-col,
+        .orc-total td.orc-cart-col, .orc-total td.orc-vend-col { color: #fff; }
+        .orc-cc td.orc-cart-col, .orc-cc td.orc-vend-col,
+        .orc-obra td.orc-cart-col, .orc-obra td.orc-vend-col { color: #064e3b; }
+        .orc-table td.orc-vend-hover { cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
         .orc-empty { padding: 28px; text-align: center; color: #64748b; }
         .orc-sienge { color: #1e3a8a; cursor: help; font-variant-numeric: tabular-nums; }
         .orc-emp .orc-sienge, .orc-total .orc-sienge { color: #dbeafe; }
@@ -497,17 +498,18 @@ const OrcamentoApp = {
         this.paint();
       });
       body.addEventListener("mouseover", (ev) => {
-        const cell = ev.target.closest("td[data-sienge]");
+        const cell = ev.target.closest("td[data-sienge], td[data-vend]");
         if (!cell || cell === this._cartCell) return;
         this._cartCell = cell;
         this.placeCartTip(cell);
+        if (!cell.hasAttribute("data-sienge")) return;
         const row = this._rows && this._rows[Number(cell.getAttribute("data-sienge"))];
         (row && row.companyIds || []).forEach((id) => this.flightCarteira(id));
       });
       body.addEventListener("mouseout", (ev) => {
-        const cell = ev.target.closest("td[data-sienge]");
+        const cell = ev.target.closest("td[data-sienge], td[data-vend]");
         if (!cell) return;
-        const next = ev.relatedTarget && ev.relatedTarget.closest && ev.relatedTarget.closest("td[data-sienge]");
+        const next = ev.relatedTarget && ev.relatedTarget.closest && ev.relatedTarget.closest("td[data-sienge], td[data-vend]");
         if (next === cell) return;
         this.hideCartTip();
       });
@@ -699,12 +701,22 @@ const OrcamentoApp = {
       + '<div class="orc-cart-note">out–dez de 2026 são forecast. Sienge é a carteira em aberto, sem sub judice.</div>';
   },
 
+  vendTipHtml(row) {
+    const vm = row.vm || this.blank();
+    const lines = this.months().map((name, i) => "<tr><td>" + this.esc(String(name).toLowerCase()) + "</td><td>" + this.money(vm[i]) + "</td></tr>").join("");
+    return "<table><thead><tr><th></th><th>Novas vendas 2027</th></tr></thead><tbody>"
+      + lines
+      + '<tr class="orc-cart-total"><td>Total</td><td>' + this.money(this.sum(vm)) + "</td></tr></tbody></table>"
+      + '<div class="orc-cart-note">Orçado de vendas mês a mês, conforme a observação da base.</div>';
+  },
+
   placeCartTip(cell) {
     const tip = document.getElementById("orc-cart-tip");
     if (!tip || !cell || !cell.isConnected) return;
-    const row = this._rows && this._rows[Number(cell.getAttribute("data-sienge"))];
+    const vendIdx = cell.getAttribute("data-vend");
+    const row = this._rows && this._rows[Number(vendIdx != null ? vendIdx : cell.getAttribute("data-sienge"))];
     if (!row) return;
-    tip.innerHTML = this.siengeTipHtml(row, this.cartSum(row));
+    tip.innerHTML = vendIdx != null ? this.vendTipHtml(row) : this.siengeTipHtml(row, this.cartSum(row));
     tip.hidden = false;
     const rect = cell.getBoundingClientRect();
     const width = tip.offsetWidth || 280;
@@ -804,6 +816,7 @@ const OrcamentoApp = {
           m27: this.blank(),
           cart: 0,
           vend: 0,
+          vm: this.blank(),
           notas: ""
         };
         map.set(key, row);
@@ -823,6 +836,7 @@ const OrcamentoApp = {
       if (!o) return;
       row.cart = this.signed(line.conta, o.cart);
       row.vend = this.signed(line.conta, o.vend);
+      if (Array.isArray(o.vm)) row.vm = o.vm.map((v) => this.signed(line.conta, v));
       row.notas = (o.notas || []).join(" · ");
       row._origem = true;
     });
@@ -956,6 +970,7 @@ const OrcamentoApp = {
             m27: this.blank(),
             cart: 0,
             vend: 0,
+            vm: this.blank(),
             leaf: false,
             children: new Map()
           });
@@ -965,6 +980,7 @@ const OrcamentoApp = {
         acc.m27.forEach((v, i) => { child.m27[i] += v; });
         child.cart += Number(acc.cart) || 0;
         child.vend += Number(acc.vend) || 0;
+        (acc.vm || []).forEach((v, i) => { child.vm[i] += Number(v) || 0; });
         if (idx === parts.length - 1) child.leaf = true;
         node = child;
       });
@@ -1009,26 +1025,31 @@ const OrcamentoApp = {
     const rows = [];
     const y26 = this.blank();
     const y27 = this.blank();
+    const yVm = this.blank();
     let yCart = 0;
     let yVend = 0;
     companies.forEach((emp) => {
       const e26 = this.blank();
       const e27 = this.blank();
+      const eVm = this.blank();
       let eCart = 0;
       let eVend = 0;
       emp.costCenters.forEach((cc) => {
         this.sumNode(cc.tree, "m26").forEach((v, i) => { e26[i] += v; });
         this.sumNode(cc.tree, "m27").forEach((v, i) => { e27[i] += v; });
+        this.sumNode(cc.tree, "vm").forEach((v, i) => { eVm[i] += v; });
         eCart += this.sumScalar(cc.tree, "cart");
         eVend += this.sumScalar(cc.tree, "vend");
       });
       const factor = this.shareFactor(emp.e);
       const se26 = this.scaleMonths(e26, factor);
       const se27 = this.scaleMonths(e27, factor);
+      const seVm = this.scaleMonths(eVm, factor);
       const seCart = eCart * factor;
       const seVend = eVend * factor;
       se26.forEach((v, i) => { y26[i] += v; });
       se27.forEach((v, i) => { y27[i] += v; });
+      seVm.forEach((v, i) => { yVm[i] += v; });
       yCart += seCart;
       yVend += seVend;
       const shareNote = this.mouraView ? (" · " + this.participation(emp.e).toLocaleString("pt-BR") + "% ML") : "";
@@ -1045,6 +1066,7 @@ const OrcamentoApp = {
         m27: se27,
         cart: seCart,
         vend: seVend,
+        vm: seVm,
         expandable: true,
         parentEmp: "",
         parentObra: "",
@@ -1064,6 +1086,7 @@ const OrcamentoApp = {
           m27: this.scaleMonths(this.sumNode(cc.tree, "m27"), factor),
           cart: this.sumScalar(cc.tree, "cart") * factor,
           vend: this.sumScalar(cc.tree, "vend") * factor,
+          vm: this.scaleMonths(this.sumNode(cc.tree, "vm"), factor),
           expandable: true,
           parentEmp: emp.key,
           parentObra: parentObra,
@@ -1081,6 +1104,7 @@ const OrcamentoApp = {
             m27: this.scaleMonths(acc.m27, factor),
             cart: (Number(acc.cart) || 0) * factor,
             vend: (Number(acc.vend) || 0) * factor,
+            vm: this.scaleMonths(acc.vm, factor),
             expandable: false,
             parentEmp: emp.key,
             parentObra: parentObra,
@@ -1095,11 +1119,13 @@ const OrcamentoApp = {
         }
         const g26 = this.blank();
         const g27 = this.blank();
+        const gVm = this.blank();
         let gCart = 0;
         let gVend = 0;
         item.centers.forEach((cc) => {
           this.sumNode(cc.tree, "m26").forEach((v, i) => { g26[i] += v; });
           this.sumNode(cc.tree, "m27").forEach((v, i) => { g27[i] += v; });
+          this.sumNode(cc.tree, "vm").forEach((v, i) => { gVm[i] += v; });
           gCart += this.sumScalar(cc.tree, "cart");
           gVend += this.sumScalar(cc.tree, "vend");
         });
@@ -1116,6 +1142,7 @@ const OrcamentoApp = {
           m27: this.scaleMonths(g27, factor),
           cart: gCart * factor,
           vend: gVend * factor,
+          vm: this.scaleMonths(gVm, factor),
           expandable: true,
           parentEmp: emp.key,
           parentObra: "",
@@ -1143,6 +1170,7 @@ const OrcamentoApp = {
         m27: y27,
         cart: yCart,
         vend: yVend,
+        vm: yVm,
         expandable: false,
         parentEmp: "",
         parentObra: "",
@@ -1217,8 +1245,10 @@ const OrcamentoApp = {
     const cart = Number(row.cart) || 0;
     const vend = Number(row.vend) || 0;
     if (!cart && !vend && !row.notas) return '<td>—</td>';
-    const cls = field === "cart" ? "orc-cart-col" : "orc-vend-col";
-    return this.moneyCell(field === "cart" ? cart : vend, cls);
+    if (field === "cart") return this.moneyCell(cart, "orc-cart-col");
+    if (!vend) return this.moneyCell(vend, "orc-vend-col");
+    const cls = ["orc-vend-col", "orc-vend-hover", vend < 0 ? "orc-neg" : ""].filter(Boolean).join(" ");
+    return '<td class="' + cls + '" data-vend="' + row._i + '">' + this.money(vend) + "</td>";
   },
 
   moneyCell(value, extra) {

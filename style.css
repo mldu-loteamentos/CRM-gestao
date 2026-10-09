@@ -830,13 +830,6 @@ body {
   margin: 0 1px;
   vertical-align: middle;
 }
-.fila-signal.fila-signal-nex {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: #105436;
-  box-shadow: 0 0 0 2px #d1fae5;
-}
 .fila-fit-table .fila-group-header td {
   overflow: hidden;
   font-size: 0.66rem !important;

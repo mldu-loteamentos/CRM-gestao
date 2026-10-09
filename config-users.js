@@ -1470,13 +1470,14 @@ const ConfigUsersApp = {
               });
 
               allowedCities.sort();
-          } else {
-              allowedCities = [...cities];
           }
+          if (!allowedCities.length) allowedCities = [...cities];
           
-          const cityItems = allowedCities.map(c => ({ value: c, label: c }));
           const currentlyChecked = Array.from(document.querySelectorAll('input[name="umodal-adv-cities"]:checked')).map(cb => cb.value);
-          const newHtml = buildCheckboxList(cityItems, 'cities', currentlyChecked);
+          currentlyChecked.forEach((city) => { if (!allowedCities.includes(city)) allowedCities.push(city); });
+          allowedCities.sort();
+          const cityItems = allowedCities.map(c => ({ value: c, label: c }));
+          const newHtml = buildCheckboxList(cityItems, 'umodal-adv-cities', currentlyChecked);
           const container = document.getElementById('adv-cities-container');
           if (container) container.innerHTML = newHtml;
       };
@@ -1487,7 +1488,9 @@ const ConfigUsersApp = {
       const cityItems = cities.map(c => ({ value: c, label: c }));
 
       const advCompaniesHtml = buildCheckboxList(companyItems, 'umodal-adv-companies', user ? user.adv_companies : [], 'onchange="window.updateAdvogadoCities()"');
-      const advCitiesHtml = buildCheckboxList(cityItems, 'umodal-adv-cities', user ? user.adv_cities : []);
+      const savedAdvCities = (user && Array.isArray(user.adv_cities)) ? user.adv_cities : [];
+      const advCityItems = cities.concat(savedAdvCities.filter((c) => !cities.includes(c))).sort().map(c => ({ value: c, label: c }));
+      const advCitiesHtml = buildCheckboxList(advCityItems, 'umodal-adv-cities', savedAdvCities);
 
       window.updateConstCities = () => {};
 

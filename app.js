@@ -4759,7 +4759,8 @@ window.mergeCrmUsers = function(localStr, cloudStr) {
       byKey.set(key, next);
       return;
     }
-    const merged = Object.assign({}, prev, next);
+    const prevNewer = window.crmUserEditedAt(prev) > window.crmUserEditedAt(next);
+    const merged = prevNewer ? Object.assign({}, next, prev) : Object.assign({}, prev, next);
     if (rankStatus(prev.status) || rankStatus(next.status) || statusAt(prev) || statusAt(next)) {
       merged.status = pickStatus(prev, next);
       const winnerAt = statusAt(prev) >= statusAt(next) ? statusAt(prev) : statusAt(next);
@@ -29437,10 +29438,8 @@ window.filaSignalHtml = function(client) {
   const house = showHouse
     ? `<span class="fila-signal" data-kind="house" onmouseenter="window.showFilaSignalTip(event, this)" onmouseleave="window.hideFilaSignalTip()"><i data-lucide="house" style="width:14px;height:14px;color:${houseColor};"></i></span>`
     : "";
-  const mail = letter
-    ? `<span class="fila-signal fila-signal-nex" data-kind="mail" onmouseenter="window.showFilaSignalTip(event, this)" onmouseleave="window.hideFilaSignalTip()"><i data-lucide="mail" style="width:12px;height:12px;color:#fff;stroke-width:2.5;"></i></span>`
-    : `<span class="fila-signal" data-kind="mail" onmouseenter="window.showFilaSignalTip(event, this)" onmouseleave="window.hideFilaSignalTip()"><i data-lucide="mail" style="width:14px;height:14px;color:#cbd5e1;"></i></span>`;
-  return mail + house;
+  const mailColor = letter ? "#105436" : "#cbd5e1";
+  return `<span class="fila-signal" data-kind="mail" onmouseenter="window.showFilaSignalTip(event, this)" onmouseleave="window.hideFilaSignalTip()"><i data-lucide="mail" style="width:14px;height:14px;color:${mailColor};"></i></span>${house}`;
 };
 
 window.paintFilaSignalCells = function() {
