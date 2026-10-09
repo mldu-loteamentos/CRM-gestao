@@ -5227,8 +5227,12 @@ window.applyPermissions = function(profileName) {
     if (subJudiceMenu) subJudiceMenu.style.display = 'none';
   }
   
-  // 2. Advogado vê APENAS Financeiro -> Contas a Receber -> Sub Judice
-  if (opType === 'advogado') {
+  // 2. O subtipo antigo Advogado (Jurídico) do Operador Cobrança via só o Sub Judice.
+  // O perfil ADVOGADO COBRANÇA usa os módulos marcados nele.
+  const perfilAdvogadoCobranca = AppState.currentUser
+    && typeof window.isAdvogadoCobrancaProfile === "function"
+    && window.isAdvogadoCobrancaProfile(AppState.currentUser.profile_name);
+  if (opType === 'advogado' && !perfilAdvogadoCobranca) {
     const allModules = document.querySelectorAll('li[data-module]');
     allModules.forEach(item => {
       const modKey = item.getAttribute('data-module');
