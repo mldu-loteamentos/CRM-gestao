@@ -7,6 +7,12 @@ function rhonMoney(v) {
   return (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function rhonPct(part, whole) {
+  const w = Number(whole) || 0;
+  if (!w) return "—";
+  return ((Number(part) || 0) / w * 100).toFixed(1).replace(".", ",") + "%";
+}
+
 function rhonIso(d) {
   const x = d instanceof Date ? d : new Date(d);
   if (isNaN(x.getTime())) return "";
@@ -17,6 +23,10 @@ function rhonBr(iso) {
   const s = String(iso || "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return "";
   return s.slice(8, 10) + "/" + s.slice(5, 7) + "/" + s.slice(0, 4);
+}
+
+function rhonFold(s) {
+  return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
 }
 
 function rhonAppState() {
@@ -59,6 +69,33 @@ function rhonEnterpriseName(id) {
   return "";
 }
 
+function rhonCity(enterpriseId, enterpriseName) {
+  let key = "";
+  let label = "";
+  try {
+    if (typeof window.extractCityFromCostCenter === "function") key = window.extractCityFromCostCenter(enterpriseId, enterpriseName) || "";
+    if (key && typeof window.extractCityDisplayName === "function") label = window.extractCityDisplayName(enterpriseId, enterpriseName) || "";
+  } catch (e) {}
+  if (!key) {
+    const head = String(enterpriseName || "").replace(/^(?:\d+\s*-\s*)+/, "").split(" - ")[0].trim();
+    key = head;
+  }
+  key = rhonFold(key);
+  return { key, label: String(label || key).toUpperCase() };
+}
+
+function rhonLateCharges(base, dias, taxa) {
+  if (typeof window.computeLateCharges === "function") {
+    const c = window.computeLateCharges(base, dias, taxa);
+    return { multa: Number(c.multa) || 0, juros: Number(c.juros) || 0 };
+  }
+  const b = Number(base) || 0;
+  const d = Number(dias) || 0;
+  const t = Number.isFinite(Number(taxa)) ? Number(taxa) : 1;
+  if (d < 1 || b <= 0 || t <= 0) return { multa: 0, juros: 0 };
+  return { multa: b * 0.02 * t, juros: b * 0.01 * (d / 30) * t };
+}
+
 function rhonBoletoKey(billId, instIds, dueDate, genDate) {
   const ids = (instIds || []).map(String).sort().join(",");
   return [billId, ids, String(dueDate || "").slice(0, 10), genDate].join("|");
@@ -74,18 +111,31 @@ function rhonFindInst(list, id, number) {
 
 const HonorariosReport = {
   COLLECTION: "boletos_honorarios",
+  TABS: [
+    { id: "honorarios", label: "Honorários" },
+    { id: "desconto", label: "Desconto de juros" },
+    { id: "ranking", label: "Ranking de recebimentos" }
+  ],
+  FILTERS: [
+    { key: "emp", field: "companyId", label: "EMPRESAS", nouns: null },
+    { key: "city", field: "cityKey", label: "CIDADES", nouns: { singular: "cidade", plural: "cidades", none: "Nenhuma cidade", noMatch: "Nenhuma cidade com esse nome." } },
+    { key: "ent", field: "enterpriseId", label: "EMPREENDIMENTOS", nouns: { singular: "empreendimento", plural: "empreendimentos" } },
+    { key: "op", field: "opKey", label: "OPERADOR", nouns: { singular: "operador", plural: "operadores" } }
+  ],
   _inited: false,
+  tab: "honorarios",
   comp: "",
   loading: false,
-  progress: "",
+  progress: { label: "", done: 0, total: 0 },
   error: "",
   records: [],
   rows: [],
-  companyIds: [],
-  openEmp: false,
-  qEmp: "",
+  sel: { emp: [], city: [], ent: [], op: [] },
+  openF: "",
+  qF: { emp: "", city: "", ent: "", op: "" },
   status: "todos",
   search: "",
+  rankSort: { key: "recebido", dir: -1 },
 
   async record(ctx) {
     if (!window.firebaseDb || !window.firebaseCollections) return;
@@ -164,12 +214,9 @@ const HonorariosReport = {
   },
 
   init() {
-    if (!this.comp) this.comp = rhonIso(new Date()).slice(0, 7);
     if (!this._inited) {
       this._inited = true;
-      this.bindCompanyFilter();
-      this.load();
-      return;
+      this.bindFilters();
     }
     this.render();
   },
@@ -247,6 +294,7 @@ const HonorariosReport = {
     const ids = [...new Set(customerIds.filter(Boolean).map(String))];
     let idx = 0;
     let done = 0;
+    this.setProgress("Buscando pagamentos no Sienge", 0, ids.length);
     const worker = async () => {
       while (idx < ids.length) {
         const cid = ids[idx++];
@@ -269,8 +317,7 @@ const HonorariosReport = {
           console.warn("[Honorários] extrato", cid, e);
         }
         done += 1;
-        this.progress = `Consultando pagamentos no Sienge: ${done} de ${ids.length} cliente(s)...`;
-        this.renderProgress();
+        this.setProgress("Buscando pagamentos no Sienge", done, ids.length);
       }
     };
     await Promise.all(Array.from({ length: Math.min(3, ids.length) }, worker));
@@ -301,21 +348,30 @@ const HonorariosReport = {
     records.forEach((rec) => {
       const stmt = statements[String(rec.customerId)] || null;
       const stInsts = stmt ? (stmt[String(rec.billId)] || []) : null;
+      const taxa = Number.isFinite(Number(rec.taxa)) ? Number(rec.taxa) : 1;
+      const enterpriseName = rec.enterpriseName || rhonEnterpriseName(rec.enterpriseId);
+      const city = rhonCity(rec.enterpriseId, enterpriseName);
+      const opName = String(rec.author || rec.authorEmail || "Sem operador").trim().toUpperCase();
+      const opKey = String(rec.authorEmail || "").toLowerCase().trim() || rhonFold(rec.author) || "-";
       (rec.parcelas || []).forEach((p) => {
         const inst = stInsts ? rhonFindInst(stInsts, p.installmentId, p.installmentNumber || null) : null;
         let vals = p;
+        let base = p.saldo != null ? Number(p.saldo) : Number(p.valorOriginal);
+        let dias = p.dias;
         if (p.pendingValues) {
           vals = { installmentId: p.installmentId, valorOriginal: 0, multa: 0, juros: 0, honorarios: 0, dueDate: "" };
+          base = 0;
+          dias = 0;
           if (inst) {
             const orig = Number(inst.originalValue || inst.installmentValue || inst.value || 0) || 0;
             const bal = Number(inst.currentBalance);
-            const base = Number.isFinite(bal) && bal > 0.009 ? bal : orig;
+            base = Number.isFinite(bal) && bal > 0.009 ? bal : orig;
             const dueDate = String(inst.dueDate || "").slice(0, 10);
-            const dias = typeof window.daysOverdueUntilTarget === "function"
+            dias = typeof window.daysOverdueUntilTarget === "function"
               ? window.daysOverdueUntilTarget({ dueDate }, rec.boletoDueDate)
               : 0;
             const pack = typeof window.moraComHonorarios === "function"
-              ? window.moraComHonorarios(base, dias, rec.taxa, rec.honorariosPct)
+              ? window.moraComHonorarios(base, dias, taxa, rec.honorariosPct)
               : { multa: 0, jurosPadrao: 0, honorarios: 0 };
             vals = {
               installmentId: p.installmentId,
@@ -328,6 +384,14 @@ const HonorariosReport = {
               honorarios: Number(pack.honorarios) || 0
             };
           }
+        }
+        const multa = Number(vals.multa) || 0;
+        const juros = Number(vals.juros) || 0;
+        let devido;
+        if (Number.isFinite(Number(dias)) && Number(base) > 0) {
+          devido = rhonLateCharges(base, dias, 1);
+        } else {
+          devido = taxa > 0 ? { multa: multa / taxa, juros: juros / taxa } : { multa, juros };
         }
         let status = "aberto";
         let paidAt = "";
@@ -345,12 +409,17 @@ const HonorariosReport = {
           }
         }
         const parcLabel = [vals.conditionType, vals.installmentNumber || vals.installmentId].filter(Boolean).join(" ");
+        const valorOriginal = Number(vals.valorOriginal) || 0;
+        const honorarios = Number(vals.honorarios) || 0;
+        const encDevidos = devido.multa + devido.juros;
         rows.push({
           recId: rec.id,
           companyId: String(rec.companyId || ""),
           companyName: rec.companyName || rhonCompanyName(rec.companyId),
           enterpriseId: String(rec.enterpriseId || ""),
-          enterpriseName: rec.enterpriseName || rhonEnterpriseName(rec.enterpriseId),
+          enterpriseName,
+          cityKey: city.key,
+          cityName: city.label,
           customerId: rec.customerId,
           customerName: rec.customerName || (rec.customerId ? "Cliente " + rec.customerId : ""),
           customerDoc: rec.customerDoc || "",
@@ -360,16 +429,25 @@ const HonorariosReport = {
           parcela: parcLabel,
           dueDate: vals.dueDate || "",
           boletoDueDate: rec.boletoDueDate || "",
-          valorOriginal: Number(vals.valorOriginal) || 0,
-          multa: Number(vals.multa) || 0,
-          juros: Number(vals.juros) || 0,
-          honorarios: Number(vals.honorarios) || 0,
+          dias: Math.max(0, Number(dias) || 0),
+          valorOriginal,
+          multa,
+          juros,
+          honorarios,
           honorariosPct: Number(rec.honorariosPct) || 0,
+          multaDevida: devido.multa,
+          jurosDevido: devido.juros,
+          encDevidos,
+          abono: Math.max(0, encDevidos - multa - juros),
+          isencaoPct: Math.round(Math.min(1, Math.max(0, 1 - taxa)) * 100),
+          valorBoleto: valorOriginal + multa + juros + honorarios,
           status,
           paidAt,
           paidValue,
           generatedAt: rec.generatedAt || "",
           author: rec.author || "",
+          opKey,
+          opName,
           estimated: !!(rec.estimated || p.pendingValues)
         });
       });
@@ -378,7 +456,7 @@ const HonorariosReport = {
   },
 
   async load() {
-    if (this.loading) return;
+    if (this.loading || !this.comp) return;
     if (!window.firebaseDb || !window.firebaseCollections) {
       this.error = "Firebase indisponível. Atualize a página.";
       this.render();
@@ -386,7 +464,7 @@ const HonorariosReport = {
     }
     this.loading = true;
     this.error = "";
-    this.progress = "Carregando boletos gerados...";
+    this.progress = { label: "Buscando boletos gerados", done: 0, total: 0 };
     this.render();
     try {
       const comp = this.comp;
@@ -398,13 +476,13 @@ const HonorariosReport = {
       if (comp !== this.comp) return;
       this.records = all;
       this.rows = this.buildRows(all, statements);
+      this.pruneFilters();
     } catch (e) {
       console.error("[Honorários] relatório", e);
       this.error = "Não foi possível carregar o relatório: " + (e && e.message ? e.message : e);
       this.rows = [];
     } finally {
       this.loading = false;
-      this.progress = "";
       this.render();
     }
   },
@@ -416,6 +494,13 @@ const HonorariosReport = {
     this.rows = [];
     this.records = [];
     this.load();
+  },
+
+  setTab(id) {
+    if (this.tab === id) return;
+    this.tab = id;
+    this.openF = "";
+    this.render();
   },
 
   terceirizadaUser() {
@@ -446,43 +531,93 @@ const HonorariosReport = {
     this._searchT = setTimeout(() => this.render(), 200);
   },
 
-  empItems() {
-    const map = {};
-    this.rows.forEach((r) => {
-      if (!r.companyId || map[r.companyId]) return;
-      map[r.companyId] = { id: r.companyId, label: r.companyId + " - " + String(r.companyName || "").toUpperCase() };
-    });
-    return Object.values(map);
+  /** Linhas que passam pelos filtros anteriores ao da chave (empresa → cidade → empreendimento). */
+  rowsBefore(key) {
+    const order = this.FILTERS.map((f) => f.key);
+    const stop = order.indexOf(key);
+    const active = this.FILTERS.filter((f, i) => i < stop && f.key !== "op");
+    return this.rows.filter((r) => active.every((f) => {
+      const s = this.sel[f.key];
+      return !s.length || s.includes(String(r[f.field]));
+    }));
   },
 
-  bindCompanyFilter() {
+  filterItems(key) {
+    const src = key === "op" ? this.rows : this.rowsBefore(key);
+    const map = {};
+    src.forEach((r) => {
+      let id;
+      let label;
+      if (key === "emp") { id = r.companyId; label = r.companyId + " - " + String(r.companyName || "").toUpperCase(); }
+      else if (key === "city") { id = r.cityKey; label = r.cityName || "SEM CIDADE"; }
+      else if (key === "ent") { id = r.enterpriseId; label = [r.enterpriseId, String(r.enterpriseName || "").toUpperCase()].filter(Boolean).join(" - "); }
+      else { id = r.opKey; label = r.opName; }
+      if (!id || map[id]) return;
+      map[id] = { id: String(id), label };
+    });
+    const items = Object.values(map);
+    if (key === "city" || key === "op") items.sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+    return items;
+  },
+
+  pruneFilters() {
+    this.FILTERS.forEach((f) => {
+      const ok = new Set(this.filterItems(f.key).map((x) => x.id));
+      this.sel[f.key] = this.sel[f.key].filter((id) => ok.has(id));
+    });
+  },
+
+  bindFilters() {
     if (!window.MlEmpresaFilter) return;
     const self = this;
-    MlEmpresaFilter.bind("rhon-emp", {
-      toggleOpen() { self.openEmp = !self.openEmp; self.render(); },
-      close() { self.openEmp = false; self.render(); },
-      setQuery(q) {
-        self.qEmp = q || "";
-        const box = document.getElementById("rhon-emp-list");
-        if (box) box.innerHTML = MlEmpresaFilter.listHtml({ id: "rhon-emp", items: self.empItems(), selectedIds: self.companyIds, query: self.qEmp });
-      },
-      toggleId(id, on) {
-        const sid = String(id);
-        const set = new Set(self.companyIds);
-        if (on) set.add(sid); else set.delete(sid);
-        self.companyIds = [...set];
-        self.render();
-      },
-      selectAll() { self.companyIds = self.empItems().map((x) => String(x.id)); self.render(); },
-      selectNone() { self.companyIds = []; self.render(); }
+    this.FILTERS.forEach((f) => {
+      const wid = "rhon-f-" + f.key;
+      MlEmpresaFilter.bind(wid, {
+        toggleOpen() { self.openF = self.openF === f.key ? "" : f.key; self.render(); },
+        close() { if (self.openF === f.key) { self.openF = ""; self.render(); } },
+        setQuery(q) {
+          self.qF[f.key] = q || "";
+          const box = document.getElementById(wid + "-list");
+          if (box) box.innerHTML = MlEmpresaFilter.listHtml({ id: wid, items: self.filterItems(f.key), selectedIds: self.sel[f.key], query: self.qF[f.key], nouns: f.nouns });
+        },
+        toggleId(id, on) {
+          const set = new Set(self.sel[f.key]);
+          if (on) set.add(String(id)); else set.delete(String(id));
+          self.sel[f.key] = [...set];
+          self.pruneFilters();
+          self.render();
+        },
+        selectAll() { self.sel[f.key] = self.filterItems(f.key).map((x) => x.id); self.pruneFilters(); self.render(); },
+        selectNone() { self.sel[f.key] = []; self.pruneFilters(); self.render(); }
+      });
     });
+  },
+
+  filterHtml(f) {
+    if (!window.MlEmpresaFilter) return "";
+    return MlEmpresaFilter.html({
+      id: "rhon-f-" + f.key,
+      label: f.label,
+      items: this.filterItems(f.key),
+      selectedIds: this.sel[f.key],
+      open: this.openF === f.key,
+      query: this.qF[f.key],
+      nouns: f.nouns,
+      emptyMeansAll: true
+    });
+  },
+
+  /** Empresa, cidade, empreendimento e operador. */
+  scopedRows() {
+    return this.rows.filter((r) => this.FILTERS.every((f) => {
+      const s = this.sel[f.key];
+      return !s.length || s.includes(String(r[f.field]));
+    }));
   },
 
   filtered() {
-    const emp = new Set(this.companyIds);
     const q = this.search.trim().toLowerCase();
-    return this.rows.filter((r) => {
-      if (emp.size && !emp.has(r.companyId)) return false;
+    return this.scopedRows().filter((r) => {
       if (this.status === "pago" && r.status !== "pago") return false;
       if (this.status === "aberto" && r.status === "pago") return false;
       if (this.status === "vencido" && r.status !== "vencido") return false;
@@ -520,9 +655,13 @@ const HonorariosReport = {
       t.multa += r.multa;
       t.juros += r.juros;
       t.honorarios += r.honorarios;
+      t.multaDevida += r.multaDevida;
+      t.jurosDevido += r.jurosDevido;
+      t.encDevidos += r.encDevidos;
+      t.abono += r.abono;
       if (r.status === "pago") t.honPagos += r.honorarios;
       return t;
-    }, { valorOriginal: 0, multa: 0, juros: 0, honorarios: 0, honPagos: 0 });
+    }, { valorOriginal: 0, multa: 0, juros: 0, honorarios: 0, honPagos: 0, multaDevida: 0, jurosDevido: 0, encDevidos: 0, abono: 0 });
   },
 
   statusHtml(r) {
@@ -542,51 +681,241 @@ const HonorariosReport = {
     return ({ pago: "Pago", aberto: "Em aberto", vencido: "Vencido", naolocalizada: "Não localizada", naoverificado: "Não verificado" })[r.status] || "Em aberto";
   },
 
-  renderProgress() {
-    const el = document.getElementById("rhon-progress");
-    if (el) el.textContent = this.progress;
+  setProgress(label, done, total) {
+    this.progress = { label, done, total };
+    const txt = document.getElementById("rhon-progress-text");
+    const cnt = document.getElementById("rhon-progress-count");
+    const bar = document.getElementById("rhon-progress-bar");
+    if (txt) txt.textContent = label + "...";
+    if (cnt) cnt.textContent = total ? `${done} de ${total} cliente(s)` : "";
+    if (bar) {
+      bar.classList.toggle("is-indeterminate", !total);
+      bar.style.width = total ? Math.round(done / total * 100) + "%" : "";
+    }
   },
 
-  tableHtml(rows) {
-    if (!rows.length) {
-      return `<div class="rhon-empty">${this.rows.length ? "Nenhum boleto com esses filtros." : "Nenhum boleto gerado nesta competência."}</div>`;
-    }
-    const sumCells = (t) => `
-      <td class="rhon-num">${rhonMoney(t.valorOriginal)}</td>
+  loadingHtml() {
+    const p = this.progress;
+    const pct = p.total ? Math.round(p.done / p.total * 100) : 0;
+    return `<div class="rhon-overlay">
+      <div class="rhon-loader">
+        <div class="rhon-spin"></div>
+        <div class="rhon-loader-title" id="rhon-progress-text">${rhonEsc(p.label)}...</div>
+        <div class="rhon-loader-sub">Boletos gerados e pagamentos da competência</div>
+        <div class="rhon-track"><div id="rhon-progress-bar" class="rhon-fill${p.total ? "" : " is-indeterminate"}" style="${p.total ? `width:${pct}%` : ""}"></div></div>
+        <div class="rhon-loader-count" id="rhon-progress-count">${p.total ? `${p.done} de ${p.total} cliente(s)` : ""}</div>
+      </div>
+    </div>`;
+  },
+
+  emptyHtml(msg) {
+    return `<div class="rhon-empty">${msg}</div>`;
+  },
+
+  groupRowsHtml(rows, lineHtml, sumHtml, lead, tail) {
+    return this.grouped(rows).map((e) => {
+      const ccHtml = e.ccs.map((c) => {
+        const lines = c.rows.map(lineHtml).join("");
+        return `<tr class="rhon-cc"><td colspan="${lead}">${rhonEsc([c.id, c.name].filter(Boolean).join(" - ") || "Sem centro de custo")}</td>${sumHtml(c.rows)}<td colspan="${tail}"></td></tr>${lines}`;
+      }).join("");
+      const all = e.ccs.flatMap((c) => c.rows);
+      return `<tr class="rhon-emp"><td colspan="${lead}">${rhonEsc([e.id, e.name].filter(Boolean).join(" - ") || "Sem empresa")}</td>${sumHtml(all)}<td colspan="${tail}"></td></tr>${ccHtml}`;
+    }).join("");
+  },
+
+  honTableHtml(rows) {
+    if (!rows.length) return this.emptyHtml(this.rows.length ? "Nenhum boleto com esses filtros." : "Nenhum boleto gerado nesta competência.");
+    const sumCells = (list) => {
+      const t = this.totals(list);
+      return `<td class="rhon-num">${rhonMoney(t.valorOriginal)}</td>
       <td class="rhon-num">${rhonMoney(t.multa)}</td>
       <td class="rhon-num">${rhonMoney(t.juros)}</td>
       <td class="rhon-num">${rhonMoney(t.honorarios)}</td>`;
-    const body = this.grouped(rows).map((e) => {
-      const te = this.totals(e.ccs.flatMap((c) => c.rows));
-      const ccHtml = e.ccs.map((c) => {
-        const tc = this.totals(c.rows);
-        const lines = c.rows.map((r) => `<tr>
-          <td><div class="rhon-cli">${rhonEsc(r.customerName)}</div><div class="rhon-sub">${rhonEsc(r.customerDoc)}</div></td>
-          <td>${rhonEsc(r.billId)}${r.unitName ? `<div class="rhon-sub">${rhonEsc(r.unitName)}</div>` : ""}</td>
-          <td>${rhonEsc(r.parcela)}</td>
-          <td>${rhonBr(r.dueDate)}</td>
-          <td>${rhonBr(r.boletoDueDate)}</td>
-          <td class="rhon-num">${rhonMoney(r.valorOriginal)}</td>
-          <td class="rhon-num">${rhonMoney(r.multa)}</td>
-          <td class="rhon-num">${rhonMoney(r.juros)}</td>
-          <td class="rhon-num rhon-hon">${rhonMoney(r.honorarios)}${r.honorariosPct ? `<div class="rhon-sub">${String(r.honorariosPct).replace(".", ",")}%</div>` : ""}</td>
-          <td>${this.statusHtml(r)}</td>
-          <td><div>${rhonBr(rhonIso(r.generatedAt))}</div><div class="rhon-sub">${rhonEsc(r.author)}</div></td>
-        </tr>`).join("");
-        return `<tr class="rhon-cc"><td colspan="5">${rhonEsc([c.id, c.name].filter(Boolean).join(" - ") || "Sem centro de custo")}</td>${sumCells(tc)}<td colspan="2"></td></tr>${lines}`;
-      }).join("");
-      return `<tr class="rhon-emp"><td colspan="5">${rhonEsc([e.id, e.name].filter(Boolean).join(" - ") || "Sem empresa")}</td>${sumCells(te)}<td colspan="2"></td></tr>${ccHtml}`;
-    }).join("");
-    const t = this.totals(rows);
+    };
+    const line = (r) => `<tr>
+      <td><div class="rhon-cli">${rhonEsc(r.customerName)}</div><div class="rhon-sub">${rhonEsc(r.customerDoc)}</div></td>
+      <td>${rhonEsc(r.billId)}${r.unitName ? `<div class="rhon-sub">${rhonEsc(r.unitName)}</div>` : ""}</td>
+      <td>${rhonEsc(r.parcela)}</td>
+      <td>${rhonBr(r.dueDate)}</td>
+      <td>${rhonBr(r.boletoDueDate)}</td>
+      <td class="rhon-num">${rhonMoney(r.valorOriginal)}</td>
+      <td class="rhon-num">${rhonMoney(r.multa)}</td>
+      <td class="rhon-num">${rhonMoney(r.juros)}</td>
+      <td class="rhon-num rhon-hon">${rhonMoney(r.honorarios)}${r.honorariosPct ? `<div class="rhon-sub">${String(r.honorariosPct).replace(".", ",")}%</div>` : ""}</td>
+      <td>${this.statusHtml(r)}</td>
+      <td><div>${rhonBr(rhonIso(r.generatedAt))}</div><div class="rhon-sub">${rhonEsc(r.author)}</div></td>
+    </tr>`;
     return `<div class="rhon-wrap"><table class="rhon-table">
       <thead><tr>
         <th>Cliente</th><th>Título</th><th>Parcela</th><th>Vencimento</th><th>Venc. boleto</th>
         <th class="rhon-num">Valor original</th><th class="rhon-num">Multa</th><th class="rhon-num">Juros</th><th class="rhon-num">Honorários</th>
         <th>Status</th><th>Gerado em</th>
       </tr></thead>
-      <tbody>${body}</tbody>
-      <tfoot><tr><td colspan="5">Total geral</td>${sumCells(t)}<td colspan="2"></td></tr></tfoot>
+      <tbody>${this.groupRowsHtml(rows, line, sumCells, 5, 2)}</tbody>
+      <tfoot><tr><td colspan="5">Total geral</td>${sumCells(rows)}<td colspan="2"></td></tr></tfoot>
     </table></div>`;
+  },
+
+  descTableHtml(rows) {
+    if (!rows.length) return this.emptyHtml(this.rows.length ? "Nenhum boleto com esses filtros." : "Nenhum boleto gerado nesta competência.");
+    const sumCells = (list) => {
+      const t = this.totals(list);
+      return `<td class="rhon-num">${rhonMoney(t.valorOriginal)}</td>
+      <td class="rhon-num">${rhonMoney(t.multaDevida)}</td>
+      <td class="rhon-num">${rhonMoney(t.jurosDevido)}</td>
+      <td class="rhon-num">${rhonMoney(t.encDevidos)}</td>
+      <td class="rhon-num">${rhonPct(t.abono, t.encDevidos)}</td>
+      <td class="rhon-num">${rhonMoney(t.abono)}</td>
+      <td class="rhon-num">${rhonMoney(t.multa + t.juros)}</td>`;
+    };
+    const line = (r) => `<tr>
+      <td><div class="rhon-cli">${rhonEsc(r.customerName)}</div><div class="rhon-sub">${rhonEsc(r.customerDoc)}</div></td>
+      <td>${rhonEsc(r.billId)}${r.unitName ? `<div class="rhon-sub">${rhonEsc(r.unitName)}</div>` : ""}</td>
+      <td>${rhonEsc(r.parcela)}</td>
+      <td>${rhonBr(r.dueDate)}</td>
+      <td class="rhon-num">${r.dias}</td>
+      <td class="rhon-num">${rhonMoney(r.valorOriginal)}</td>
+      <td class="rhon-num">${rhonMoney(r.multaDevida)}</td>
+      <td class="rhon-num">${rhonMoney(r.jurosDevido)}</td>
+      <td class="rhon-num">${rhonMoney(r.encDevidos)}</td>
+      <td class="rhon-num">${r.isencaoPct ? `<span class="rhon-isen">${r.isencaoPct}%</span>` : "0%"}</td>
+      <td class="rhon-num${r.abono > 0.004 ? " rhon-abono" : ""}">${rhonMoney(r.abono)}</td>
+      <td class="rhon-num">${rhonMoney(r.multa + r.juros)}</td>
+      <td>${this.statusHtml(r)}</td>
+      <td><div>${rhonBr(rhonIso(r.generatedAt))}</div><div class="rhon-sub">${rhonEsc(r.author)}</div></td>
+    </tr>`;
+    return `<div class="rhon-wrap"><table class="rhon-table">
+      <thead><tr>
+        <th>Cliente</th><th>Título</th><th>Parcela</th><th>Vencimento</th><th class="rhon-num">Dias atraso</th>
+        <th class="rhon-num">Valor original</th><th class="rhon-num">Multa devida</th><th class="rhon-num">Juros devido</th>
+        <th class="rhon-num">Encargos devidos</th><th class="rhon-num">Isenção</th><th class="rhon-num">Abono</th><th class="rhon-num">Encargos cobrados</th>
+        <th>Status</th><th>Gerado em</th>
+      </tr></thead>
+      <tbody>${this.groupRowsHtml(rows, line, sumCells, 5, 2)}</tbody>
+      <tfoot><tr><td colspan="5">Total geral</td>${sumCells(rows)}<td colspan="2"></td></tr></tfoot>
+    </table></div>`;
+  },
+
+  ranking(rows) {
+    const byOp = {};
+    rows.forEach((r) => {
+      const k = r.opKey || "-";
+      if (!byOp[k]) byOp[k] = { key: k, name: r.opName, boletos: {}, parcelas: 0, gerado: 0, recebido: 0, devido: 0, abono: 0 };
+      const o = byOp[k];
+      if (!(r.recId in o.boletos)) o.boletos[r.recId] = true;
+      if (r.status !== "pago") o.boletos[r.recId] = false;
+      o.parcelas += 1;
+      o.gerado += r.valorBoleto;
+      o.recebido += r.paidValue;
+      o.devido += r.encDevidos;
+      o.abono += r.abono;
+    });
+    const list = Object.values(byOp).map((o) => {
+      const flags = Object.values(o.boletos);
+      const qtd = flags.length;
+      const pagos = flags.filter(Boolean).length;
+      return {
+        key: o.key, name: o.name, qtd, pagos, parcelas: o.parcelas, gerado: o.gerado, recebido: o.recebido,
+        devido: o.devido, abono: o.abono,
+        pctPagos: qtd ? pagos / qtd : 0,
+        pctDesc: o.devido ? o.abono / o.devido : 0
+      };
+    });
+    const { key, dir } = this.rankSort;
+    list.sort((a, b) => {
+      if (key === "name") return dir * a.name.localeCompare(b.name, "pt-BR");
+      return dir * ((a[key] || 0) - (b[key] || 0)) || a.name.localeCompare(b.name, "pt-BR");
+    });
+    return list;
+  },
+
+  toggleRankSort(key) {
+    if (this.rankSort.key === key) this.rankSort.dir *= -1;
+    else this.rankSort = { key, dir: key === "name" ? 1 : -1 };
+    this.render();
+  },
+
+  rankCardsHtml(list) {
+    const top = (field) => list.slice().sort((a, b) => (b[field] || 0) - (a[field] || 0))[0] || null;
+    const qtd = list.reduce((s, o) => s + o.qtd, 0);
+    const pagos = list.reduce((s, o) => s + o.pagos, 0);
+    const mais = top("qtd");
+    const receb = top("recebido");
+    const desc = top("pctDesc");
+    const who = (o, val) => o ? `<strong>${rhonEsc(o.name)}</strong><em>${val}</em>` : "<strong>—</strong>";
+    return `<div class="rhon-cards">
+      <div class="rhon-card rhon-card-main"><span>Boletos pagos</span><strong>${rhonPct(pagos, qtd)}</strong><em>${pagos} de ${qtd} boleto(s)</em></div>
+      <div class="rhon-card"><span>Mais boletos gerados</span>${who(mais, mais ? mais.qtd + " boleto(s)" : "")}</div>
+      <div class="rhon-card"><span>Maior recebimento</span>${who(receb && receb.recebido > 0 ? receb : null, receb ? "R$ " + rhonMoney(receb.recebido) : "")}</div>
+      <div class="rhon-card rhon-card-warn"><span>Mais desconto concedido</span>${who(desc && desc.abono > 0 ? desc : null, desc ? rhonPct(desc.abono, desc.devido) + " · R$ " + rhonMoney(desc.abono) : "")}</div>
+    </div>`;
+  },
+
+  rankTableHtml(list) {
+    if (!list.length) return this.emptyHtml(this.rows.length ? "Nenhum boleto com esses filtros." : "Nenhum boleto gerado nesta competência.");
+    const th = (key, label, num) => `<th class="${num ? "rhon-num " : ""}rhon-sort" onclick="HonorariosReport.toggleRankSort('${key}')">${label} <i data-lucide="chevrons-up-down" style="width:11px;vertical-align:middle;"></i></th>`;
+    const tot = list.reduce((t, o) => {
+      t.qtd += o.qtd; t.pagos += o.pagos; t.parcelas += o.parcelas; t.gerado += o.gerado;
+      t.recebido += o.recebido; t.devido += o.devido; t.abono += o.abono;
+      return t;
+    }, { qtd: 0, pagos: 0, parcelas: 0, gerado: 0, recebido: 0, devido: 0, abono: 0 });
+    const body = list.map((o, i) => `<tr>
+      <td class="rhon-pos">${i + 1}º</td>
+      <td class="rhon-cli">${rhonEsc(o.name)}</td>
+      <td class="rhon-num">${o.qtd}</td>
+      <td class="rhon-num">${o.pagos}</td>
+      <td class="rhon-num"><div class="rhon-pbar-wrap"><div class="rhon-pbar"><span style="width:${Math.round(o.pctPagos * 100)}%"></span></div>${rhonPct(o.pagos, o.qtd)}</div></td>
+      <td class="rhon-num">${o.parcelas}</td>
+      <td class="rhon-num">${rhonMoney(o.gerado)}</td>
+      <td class="rhon-num rhon-hon">${rhonMoney(o.recebido)}</td>
+      <td class="rhon-num">${rhonMoney(o.devido)}</td>
+      <td class="rhon-num${o.abono > 0.004 ? " rhon-abono" : ""}">${rhonMoney(o.abono)}</td>
+      <td class="rhon-num${o.pctDesc > 0 ? " rhon-abono" : ""}">${rhonPct(o.abono, o.devido)}</td>
+    </tr>`).join("");
+    return `<div class="rhon-wrap"><table class="rhon-table">
+      <thead><tr>
+        <th>#</th>${th("name", "Operador")}${th("qtd", "Boletos gerados", 1)}${th("pagos", "Boletos pagos", 1)}${th("pctPagos", "% pagos", 1)}
+        ${th("parcelas", "Parcelas", 1)}${th("gerado", "Valor gerado", 1)}${th("recebido", "Valor recebido", 1)}
+        ${th("devido", "Encargos devidos", 1)}${th("abono", "Abono concedido", 1)}${th("pctDesc", "% desconto", 1)}
+      </tr></thead>
+      <tbody>${body}</tbody>
+      <tfoot><tr><td colspan="2">Total geral</td>
+        <td class="rhon-num">${tot.qtd}</td><td class="rhon-num">${tot.pagos}</td><td class="rhon-num">${rhonPct(tot.pagos, tot.qtd)}</td>
+        <td class="rhon-num">${tot.parcelas}</td><td class="rhon-num">${rhonMoney(tot.gerado)}</td><td class="rhon-num">${rhonMoney(tot.recebido)}</td>
+        <td class="rhon-num">${rhonMoney(tot.devido)}</td><td class="rhon-num">${rhonMoney(tot.abono)}</td><td class="rhon-num">${rhonPct(tot.abono, tot.devido)}</td>
+      </tr></tfoot>
+    </table></div>`;
+  },
+
+  contentHtml() {
+    if (this.loading) return this.loadingHtml();
+    if (!this.comp) {
+      return `<div class="rhon-start"><i data-lucide="calendar-search" style="width:34px;height:34px;"></i>
+        <strong>Escolha a competência</strong><span>O relatório carrega os boletos gerados e os pagamentos do mês escolhido.</span></div>`;
+    }
+    if (this.tab === "ranking") {
+      const list = this.ranking(this.scopedRows());
+      return this.rankCardsHtml(list) + this.rankTableHtml(list);
+    }
+    const rows = this.filtered();
+    const t = this.totals(rows);
+    const boletos = new Set(rows.map((r) => r.recId)).size;
+    if (this.tab === "desconto") {
+      const comAbono = new Set(rows.filter((r) => r.abono > 0.004).map((r) => r.recId)).size;
+      return `<div class="rhon-cards">
+        <div class="rhon-card"><span>Encargos devidos</span><strong>R$ ${rhonMoney(t.encDevidos)}</strong><em>Multa R$ ${rhonMoney(t.multaDevida)} · Juros R$ ${rhonMoney(t.jurosDevido)}</em></div>
+        <div class="rhon-card rhon-card-warn"><span>Abono concedido</span><strong>R$ ${rhonMoney(t.abono)}</strong><em>${rhonPct(t.abono, t.encDevidos)} dos encargos devidos</em></div>
+        <div class="rhon-card"><span>Encargos cobrados</span><strong>R$ ${rhonMoney(t.multa + t.juros)}</strong></div>
+        <div class="rhon-card"><span>Boletos com abono</span><strong>${comAbono} de ${boletos}</strong><em>${rhonPct(comAbono, boletos)} dos boletos</em></div>
+      </div>${this.descTableHtml(rows)}`;
+    }
+    const pagas = rows.filter((r) => r.status === "pago").length;
+    return `<div class="rhon-cards">
+      <div class="rhon-card"><span>Boletos gerados</span><strong>${boletos}</strong></div>
+      <div class="rhon-card"><span>Parcelas pagas</span><strong>${pagas} de ${rows.length}</strong></div>
+      <div class="rhon-card"><span>Honorários gerados</span><strong>R$ ${rhonMoney(t.honorarios)}</strong></div>
+      <div class="rhon-card rhon-card-main"><span>Honorários pagos (repasse)</span><strong>R$ ${rhonMoney(t.honPagos)}</strong></div>
+    </div>${this.honTableHtml(rows)}`;
   },
 
   render() {
@@ -596,19 +925,9 @@ const HonorariosReport = {
     const prevWrap = root.querySelector(".rhon-wrap");
     const scroll = prevWrap ? { top: prevWrap.scrollTop, left: prevWrap.scrollLeft } : null;
     const searchFocused = document.activeElement && document.activeElement.id === "rhon-search";
-    const rows = this.filtered();
-    const t = this.totals(rows);
-    const boletos = new Set(rows.map((r) => r.recId)).size;
-    const pagas = rows.filter((r) => r.status === "pago").length;
-    const filtro = window.MlEmpresaFilter ? MlEmpresaFilter.html({
-      id: "rhon-emp",
-      label: "EMPRESAS",
-      items: this.empItems(),
-      selectedIds: this.companyIds,
-      open: this.openEmp,
-      query: this.qEmp,
-      emptyMeansAll: true
-    }) : "";
+    const isRank = this.tab === "ranking";
+    const canExport = !this.loading && this.rows.length > 0;
+    const off = this.loading ? "disabled" : "";
     root.innerHTML = `
       <div class="rhon-page">
         <div class="rhon-head">
@@ -616,18 +935,18 @@ const HonorariosReport = {
           <p>Contas a receber</p>
         </div>
         <div class="rhon-body">
-          <div class="rhon-tabs"><button type="button" class="rhon-tab is-active">Honorários</button></div>
+          <div class="rhon-tabs">${this.TABS.map((t) => `<button type="button" class="rhon-tab${this.tab === t.id ? " is-active" : ""}" onclick="HonorariosReport.setTab('${t.id}')">${t.label}</button>`).join("")}</div>
           <div class="rhon-tools">
             <div class="ml-comp-slot">
               <label class="ml-comp-label" for="rhon-comp">Competência</label>
-              <input type="month" id="rhon-comp" class="ml-comp-input" value="${rhonEsc(this.comp)}" ${this.loading ? "disabled" : ""}
+              <input type="month" id="rhon-comp" class="ml-comp-input" value="${rhonEsc(this.comp)}" ${off}
                 onchange="HonorariosReport.setComp(this.value)">
             </div>
-            <button type="button" class="btn btn-primary rhon-btn" onclick="HonorariosReport.load()" ${this.loading ? "disabled" : ""}>
+            <button type="button" class="btn btn-primary rhon-btn" onclick="HonorariosReport.load()" ${this.loading || !this.comp ? "disabled" : ""}>
               <i data-lucide="refresh-cw" style="width:14px;height:14px;"></i> Atualizar
             </button>
-            <div class="rhon-emp-slot">${filtro}</div>
-            <div class="rhon-field">
+            ${this.FILTERS.map((f) => `<div class="rhon-f-slot rhon-f-${f.key}">${this.filterHtml(f)}</div>`).join("")}
+            ${isRank ? "" : `<div class="rhon-field">
               <label for="rhon-status">Status</label>
               <select id="rhon-status" onchange="HonorariosReport.setStatus(this.value)">
                 <option value="todos" ${this.status === "todos" ? "selected" : ""}>Todos</option>
@@ -640,20 +959,13 @@ const HonorariosReport = {
               <label for="rhon-search">Buscar</label>
               <input type="text" id="rhon-search" placeholder="Cliente, CPF, título ou unidade" value="${rhonEsc(this.search)}"
                 oninput="HonorariosReport.setSearch(this.value)">
-            </div>
-            <button type="button" class="btn btn-excel" onclick="HonorariosReport.exportExcel()" title="Exportar tabela atual para Excel" ${rows.length ? "" : "disabled"}>
+            </div>`}
+            <button type="button" class="btn btn-excel" onclick="HonorariosReport.exportExcel()" title="Exportar tabela atual para Excel" ${canExport ? "" : "disabled"}>
               <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
             </button>
           </div>
           ${this.error ? `<div class="rhon-error">${rhonEsc(this.error)}</div>` : ""}
-          ${this.loading ? `<div class="rhon-loading"><div class="rhon-spin"></div><span id="rhon-progress">${rhonEsc(this.progress)}</span></div>` : `
-          <div class="rhon-cards">
-            <div class="rhon-card"><span>Boletos gerados</span><strong>${boletos}</strong></div>
-            <div class="rhon-card"><span>Parcelas pagas</span><strong>${pagas} de ${rows.length}</strong></div>
-            <div class="rhon-card"><span>Honorários gerados</span><strong>R$ ${rhonMoney(t.honorarios)}</strong></div>
-            <div class="rhon-card rhon-card-main"><span>Honorários pagos (repasse)</span><strong>R$ ${rhonMoney(t.honPagos)}</strong></div>
-          </div>
-          ${this.tableHtml(rows)}`}
+          <div class="rhon-content">${this.contentHtml()}</div>
         </div>
       </div>`;
     if (scroll) {
@@ -668,53 +980,52 @@ const HonorariosReport = {
   },
 
   exportExcel() {
-    const rows = this.filtered();
-    if (!rows.length) {
-      alert("Não há boletos para exportar neste filtro.");
-      return;
-    }
     if (typeof XLSX === "undefined") {
       alert("A biblioteca XLSX não foi carregada. Atualize a página e tente novamente.");
       return;
     }
-    const aoa = [[
-      "Competência", "Empresa", "Centro de custo", "Cliente", "CPF/CNPJ", "Título", "Contrato", "Unidade", "Parcela",
-      "Vencimento", "Vencimento do boleto", "Valor original", "Multa", "Juros", "Honorários (%)", "Honorários",
-      "Status", "Pago em", "Valor recebido", "Gerado em", "Gerado por"
-    ]];
-    this.grouped(rows).forEach((e) => e.ccs.forEach((c) => c.rows.forEach((r) => {
-      aoa.push([
-        this.comp,
-        [e.id, e.name].filter(Boolean).join(" - "),
-        [c.id, c.name].filter(Boolean).join(" - "),
-        r.customerName,
-        r.customerDoc,
-        r.billId,
-        r.contractNumber,
-        r.unitName,
-        r.parcela,
-        rhonBr(r.dueDate),
-        rhonBr(r.boletoDueDate),
-        Number(r.valorOriginal.toFixed(2)),
-        Number(r.multa.toFixed(2)),
-        Number(r.juros.toFixed(2)),
-        r.honorariosPct || 0,
-        Number(r.honorarios.toFixed(2)),
-        this.statusLabel(r),
-        rhonBr(r.paidAt),
-        r.paidValue ? Number(r.paidValue.toFixed(2)) : "",
-        rhonBr(rhonIso(r.generatedAt)),
-        r.author
-      ]);
-    })));
-    const t = this.totals(rows);
-    aoa.push(["Total", "", "", "", "", "", "", "", "", "", "",
-      Number(t.valorOriginal.toFixed(2)), Number(t.multa.toFixed(2)), Number(t.juros.toFixed(2)), "",
-      Number(t.honorarios.toFixed(2)), "", "", "", "", ""]);
+    let aoa;
+    let sheet;
+    if (this.tab === "ranking") {
+      const list = this.ranking(this.scopedRows());
+      if (!list.length) { alert("Não há boletos para exportar neste filtro."); return; }
+      aoa = [["Posição", "Operador", "Boletos gerados", "Boletos pagos", "% pagos", "Parcelas", "Valor gerado", "Valor recebido", "Encargos devidos", "Abono concedido", "% desconto"]];
+      list.forEach((o, i) => aoa.push([
+        i + 1, o.name, o.qtd, o.pagos, Number((o.pctPagos * 100).toFixed(1)), o.parcelas,
+        Number(o.gerado.toFixed(2)), Number(o.recebido.toFixed(2)), Number(o.devido.toFixed(2)),
+        Number(o.abono.toFixed(2)), Number((o.pctDesc * 100).toFixed(1))
+      ]));
+      sheet = "Ranking";
+    } else {
+      const rows = this.filtered();
+      if (!rows.length) { alert("Não há boletos para exportar neste filtro."); return; }
+      const desc = this.tab === "desconto";
+      aoa = [desc
+        ? ["Competência", "Empresa", "Centro de custo", "Cidade", "Cliente", "CPF/CNPJ", "Título", "Unidade", "Parcela",
+          "Vencimento", "Vencimento do boleto", "Dias de atraso", "Valor original", "Multa devida", "Juros devido",
+          "Encargos devidos", "Isenção (%)", "Abono", "Encargos cobrados", "Status", "Gerado em", "Gerado por"]
+        : ["Competência", "Empresa", "Centro de custo", "Cidade", "Cliente", "CPF/CNPJ", "Título", "Contrato", "Unidade", "Parcela",
+          "Vencimento", "Vencimento do boleto", "Valor original", "Multa", "Juros", "Honorários (%)", "Honorários",
+          "Status", "Pago em", "Valor recebido", "Gerado em", "Gerado por"]];
+      this.grouped(rows).forEach((e) => e.ccs.forEach((c) => c.rows.forEach((r) => {
+        const head = [this.comp, [e.id, e.name].filter(Boolean).join(" - "), [c.id, c.name].filter(Boolean).join(" - "), r.cityName, r.customerName, r.customerDoc, r.billId];
+        aoa.push(desc
+          ? head.concat([r.unitName, r.parcela, rhonBr(r.dueDate), rhonBr(r.boletoDueDate), r.dias,
+            Number(r.valorOriginal.toFixed(2)), Number(r.multaDevida.toFixed(2)), Number(r.jurosDevido.toFixed(2)),
+            Number(r.encDevidos.toFixed(2)), r.isencaoPct, Number(r.abono.toFixed(2)), Number((r.multa + r.juros).toFixed(2)),
+            this.statusLabel(r), rhonBr(rhonIso(r.generatedAt)), r.author])
+          : head.concat([r.contractNumber, r.unitName, r.parcela, rhonBr(r.dueDate), rhonBr(r.boletoDueDate),
+            Number(r.valorOriginal.toFixed(2)), Number(r.multa.toFixed(2)), Number(r.juros.toFixed(2)),
+            r.honorariosPct || 0, Number(r.honorarios.toFixed(2)), this.statusLabel(r), rhonBr(r.paidAt),
+            r.paidValue ? Number(r.paidValue.toFixed(2)) : "", rhonBr(rhonIso(r.generatedAt)), r.author]));
+      })));
+      sheet = desc ? "Desconto de juros" : "Honorarios";
+    }
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Honorarios");
-    XLSX.writeFile(wb, "relatorio_honorarios_" + this.comp + ".xlsx");
+    XLSX.utils.book_append_sheet(wb, ws, sheet);
+    const file = { honorarios: "relatorio_honorarios_", desconto: "relatorio_desconto_juros_", ranking: "ranking_recebimentos_" }[this.tab];
+    XLSX.writeFile(wb, file + this.comp + ".xlsx");
   },
 
   injectCss() {
@@ -723,40 +1034,58 @@ const HonorariosReport = {
     st.id = "rhon-css";
     st.textContent = `
       #relatorios-cr-root { color:#0f172a; }
-      #relatorios-cr-root .rhon-page { display:flex; flex-direction:column; height:calc(100vh - 85px); }
+      #relatorios-cr-root .rhon-page { display:flex; flex-direction:column; height:calc(100vh - 160px); min-height:520px; }
       #relatorios-cr-root .rhon-head { background:#105436; padding:16px 20px; border-radius:12px 12px 0 0; }
       #relatorios-cr-root .rhon-head h2 { margin:0; color:#fff; font-size:1.15rem; }
       #relatorios-cr-root .rhon-head p { margin:4px 0 0; color:rgba(255,255,255,.8); font-size:.75rem; }
       #relatorios-cr-root .rhon-body { flex:1; min-height:0; display:flex; flex-direction:column; background:#f8fafc; border:1px solid #e2e8f0; border-top:none; border-radius:0 0 12px 12px; padding:14px 16px; }
+      #relatorios-cr-root .rhon-content { flex:1; min-height:0; display:flex; flex-direction:column; position:relative; }
       #relatorios-cr-root .rhon-tabs { display:flex; gap:6px; border-bottom:1px solid #e2e8f0; margin-bottom:12px; }
       #relatorios-cr-root .rhon-tab { border:0; background:transparent; padding:8px 14px; font-weight:700; font-size:.82rem; color:#64748b; border-bottom:3px solid transparent; cursor:pointer; }
+      #relatorios-cr-root .rhon-tab:hover { color:#105436; }
       #relatorios-cr-root .rhon-tab.is-active { color:#105436; border-bottom-color:#105436; }
       #relatorios-cr-root .rhon-tools { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin-bottom:12px; }
-      #relatorios-cr-root .rhon-emp-slot { flex:0 0 260px; min-width:0; }
-      #relatorios-cr-root .rhon-emp-slot .ml-emp-filter { width:100%; }
+      #relatorios-cr-root .rhon-f-slot { flex:0 0 200px; min-width:0; }
+      #relatorios-cr-root .rhon-f-emp, #relatorios-cr-root .rhon-f-ent { flex-basis:230px; }
+      #relatorios-cr-root .rhon-f-city { flex-basis:170px; }
+      #relatorios-cr-root .rhon-f-slot .ml-emp-filter { width:100%; min-width:0; max-width:none; position:relative; }
+      #relatorios-cr-root .rhon-f-slot .ml-emp-filter-btn { height:38px; min-height:38px; }
+      #relatorios-cr-root .rhon-f-slot .ml-emp-filter-panel { width:max-content; min-width:100%; max-width:min(560px, 92vw); right:auto; }
+      #relatorios-cr-root .rhon-f-slot .ml-emp-filter-list { max-height:340px; }
+      #relatorios-cr-root .rhon-f-slot .ml-emp-filter-item span { white-space:nowrap; }
       #relatorios-cr-root .rhon-btn { height:38px; display:inline-flex; align-items:center; gap:6px; }
       #relatorios-cr-root .rhon-field { display:flex; flex-direction:column; gap:4px; }
       #relatorios-cr-root .rhon-field label { font-size:.8rem; font-weight:600; color:#475569; }
       #relatorios-cr-root .rhon-field select,
       #relatorios-cr-root .rhon-field input { height:38px; border:1px solid #cbd5e1; border-radius:6px; padding:0 10px; background:#fff; color:#0f172a; font-size:.85rem; }
-      #relatorios-cr-root .rhon-grow { flex:1; min-width:200px; }
+      #relatorios-cr-root .rhon-grow { flex:1; min-width:160px; }
       #relatorios-cr-root .rhon-cards { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:10px; margin-bottom:12px; }
-      #relatorios-cr-root .rhon-card { background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:10px 14px; display:flex; flex-direction:column; gap:4px; }
+      #relatorios-cr-root .rhon-card { background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:10px 14px; display:flex; flex-direction:column; gap:4px; min-width:0; }
       #relatorios-cr-root .rhon-card span { font-size:.72rem; font-weight:600; color:#64748b; text-transform:uppercase; letter-spacing:.03em; }
-      #relatorios-cr-root .rhon-card strong { font-size:1.05rem; color:#0f172a; font-variant-numeric:tabular-nums; }
-      #relatorios-cr-root .rhon-card-main { border-left:4px solid #f37021; }
+      #relatorios-cr-root .rhon-card strong { font-size:1.05rem; color:#0f172a; font-variant-numeric:tabular-nums; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      #relatorios-cr-root .rhon-card em { font-style:normal; font-size:.75rem; color:#64748b; font-variant-numeric:tabular-nums; }
+      #relatorios-cr-root .rhon-card-main { border-left:4px solid #105436; }
       #relatorios-cr-root .rhon-card-main strong { color:#105436; }
+      #relatorios-cr-root .rhon-card-warn { border-left:4px solid #f37021; }
+      #relatorios-cr-root .rhon-card-warn strong { color:#c2410c; }
       #relatorios-cr-root .rhon-wrap { flex:1; min-height:0; overflow:auto; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
       #relatorios-cr-root .rhon-table { width:100%; border-collapse:separate; border-spacing:0; font-size:.8rem; font-variant-numeric:tabular-nums; }
       #relatorios-cr-root .rhon-table th { background:#105436; color:#fff; font-weight:600; text-align:left; padding:8px 10px; position:sticky; top:0; z-index:2; white-space:nowrap; }
+      #relatorios-cr-root .rhon-table th.rhon-sort { cursor:pointer; user-select:none; }
       #relatorios-cr-root .rhon-table td { padding:7px 10px; border-bottom:1px solid #eef2f6; vertical-align:top; }
       #relatorios-cr-root .rhon-num { text-align:right !important; white-space:nowrap; }
       #relatorios-cr-root .rhon-emp td { background:#0c3d28; color:#fff; font-weight:700; }
       #relatorios-cr-root .rhon-cc td { background:#e7f6ee; color:#105436; font-weight:700; }
       #relatorios-cr-root .rhon-table tfoot td { background:#0c3d28; color:#fff; font-weight:800; position:sticky; bottom:0; }
       #relatorios-cr-root .rhon-cli { font-weight:600; }
+      #relatorios-cr-root .rhon-pos { font-weight:800; color:#105436; width:36px; }
       #relatorios-cr-root .rhon-sub { font-size:.7rem; color:#64748b; }
       #relatorios-cr-root .rhon-hon { font-weight:700; color:#105436; }
+      #relatorios-cr-root .rhon-abono { font-weight:700; color:#c2410c; }
+      #relatorios-cr-root .rhon-isen { display:inline-block; padding:1px 7px; border-radius:999px; background:#ffedd5; color:#c2410c; font-weight:700; font-size:.72rem; }
+      #relatorios-cr-root .rhon-pbar-wrap { display:inline-flex; align-items:center; gap:8px; }
+      #relatorios-cr-root .rhon-pbar { width:70px; height:6px; border-radius:999px; background:#e2e8f0; overflow:hidden; }
+      #relatorios-cr-root .rhon-pbar span { display:block; height:100%; background:#16a34a; border-radius:999px; }
       #relatorios-cr-root .rhon-st { display:inline-block; border-radius:999px; padding:2px 9px; font-size:.7rem; font-weight:700; white-space:nowrap; }
       #relatorios-cr-root .rhon-st-pago { background:#dcfce7; color:#105436; }
       #relatorios-cr-root .rhon-st-aberto { background:#f1f5f9; color:#475569; }
@@ -764,9 +1093,22 @@ const HonorariosReport = {
       #relatorios-cr-root .rhon-st-nd { background:#f8fafc; color:#94a3b8; border:1px dashed #cbd5e1; }
       #relatorios-cr-root .rhon-paid-at { font-size:.7rem; color:#64748b; margin-top:2px; }
       #relatorios-cr-root .rhon-empty { padding:40px; text-align:center; color:#64748b; background:#fff; border:1px dashed #cbd5e1; border-radius:8px; }
+      #relatorios-cr-root .rhon-start { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; color:#64748b; background:#fff; border:1px dashed #cbd5e1; border-radius:8px; text-align:center; padding:40px; }
+      #relatorios-cr-root .rhon-start i { color:#105436; }
+      #relatorios-cr-root .rhon-start strong { color:#0f172a; font-size:1rem; }
+      #relatorios-cr-root .rhon-start span { font-size:.85rem; }
       #relatorios-cr-root .rhon-error { padding:10px 12px; margin-bottom:12px; background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; border-radius:8px; font-size:.82rem; }
-      #relatorios-cr-root .rhon-loading { display:flex; align-items:center; gap:10px; padding:30px; color:#475569; font-size:.85rem; }
-      #relatorios-cr-root .rhon-spin { width:18px; height:18px; border:3px solid #cbd5e1; border-top-color:#105436; border-radius:50%; animation:spin 1s linear infinite; }
+      #relatorios-cr-root .rhon-overlay { flex:1; display:flex; align-items:center; justify-content:center; background:#fff; border:1px solid #e2e8f0; border-radius:8px; }
+      #relatorios-cr-root .rhon-loader { width:min(420px, 90%); display:flex; flex-direction:column; align-items:center; gap:10px; text-align:center; }
+      #relatorios-cr-root .rhon-spin { width:48px; height:48px; border:5px solid #d1fae5; border-top-color:#105436; border-radius:50%; animation:rhon-rot .9s linear infinite; }
+      #relatorios-cr-root .rhon-loader-title { font-weight:700; color:#105436; font-size:.95rem; margin-top:4px; }
+      #relatorios-cr-root .rhon-loader-sub { font-size:.78rem; color:#64748b; }
+      #relatorios-cr-root .rhon-track { width:100%; height:8px; background:#e2e8f0; border-radius:999px; overflow:hidden; margin-top:6px; position:relative; }
+      #relatorios-cr-root .rhon-fill { height:100%; background:linear-gradient(90deg, #16a34a, #105436); border-radius:999px; transition:width .3s ease; }
+      #relatorios-cr-root .rhon-fill.is-indeterminate { width:35%; position:absolute; animation:rhon-slide 1.2s ease-in-out infinite; }
+      #relatorios-cr-root .rhon-loader-count { font-size:.78rem; font-weight:600; color:#475569; font-variant-numeric:tabular-nums; min-height:1em; }
+      @keyframes rhon-rot { to { transform:rotate(360deg); } }
+      @keyframes rhon-slide { 0% { left:-35%; } 100% { left:100%; } }
       @media (max-width: 900px) { #relatorios-cr-root .rhon-cards { grid-template-columns:repeat(2, minmax(0,1fr)); } }
     `;
     document.head.appendChild(st);

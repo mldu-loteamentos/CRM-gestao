@@ -114,7 +114,7 @@ window.MlEmpresaFilter = {
     const n = sel.length;
     const singular = (nouns && nouns.singular) || "empresa";
     const plural = (nouns && nouns.plural) || "empresas";
-    if (!all.length) return singular === "empresa" ? "Nenhuma empresa" : ("Nenhum " + singular);
+    if (!all.length) return (nouns && nouns.none) || (singular === "empresa" ? "Nenhuma empresa" : ("Nenhum " + singular));
     if (countMode) {
       if (!n) return emptyMeansAll ? `Todos (${all.length})` : ("Selecione " + plural);
       if (n === all.length) return `Todos (${all.length})`;
@@ -141,9 +141,9 @@ window.MlEmpresaFilter = {
     });
     if (!filtered.length) {
       const singular = (nouns && nouns.singular) || "empresa";
-      const emptyMsg = singular === "empresa"
+      const emptyMsg = (nouns && nouns.noMatch) || (singular === "empresa"
         ? "Nenhuma empresa com esse nome."
-        : ("Nenhum " + singular + " com esse nome.");
+        : ("Nenhum " + singular + " com esse nome."));
       return `<div class="ml-emp-filter-empty">${emptyMsg}</div>`;
     }
     const kind = opts.single ? "radio" : "checkbox";
