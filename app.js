@@ -4662,9 +4662,24 @@ window.noteCrmUsersRemoved = function(emails) {
   if (!window._crmUsersRemoved) window._crmUsersRemoved = new Set();
   (Array.isArray(emails) ? emails : []).forEach((email) => {
     const em = String(email || "").toLowerCase().trim();
-    if (em) window._crmUsersRemoved.add(em);
+    if (em && !(window._crmUsersRevived && window._crmUsersRevived.has(em))) window._crmUsersRemoved.add(em);
   });
   return window._crmUsersRemoved;
+};
+
+window.removeCrmUserEmail = function(email) {
+  const em = String(email || "").toLowerCase().trim();
+  if (!em) return;
+  if (window._crmUsersRevived) window._crmUsersRevived.delete(em);
+  window.noteCrmUsersRemoved([em]);
+};
+
+window.reviveCrmUserEmail = function(email) {
+  const em = String(email || "").toLowerCase().trim();
+  if (!em) return;
+  if (!window._crmUsersRevived) window._crmUsersRevived = new Set();
+  window._crmUsersRevived.add(em);
+  if (window._crmUsersRemoved) window._crmUsersRemoved.delete(em);
 };
 
 window.crmUsersRemovedList = function() {

@@ -387,14 +387,52 @@ const ConfigUsersApp = {
       const n = Number(u && u.id);
       if (Number.isFinite(n) && n > max) max = n;
     });
+    const seen = new Set();
     (this.users || []).forEach((u) => {
       if (!u) return;
       const n = Number(u.id);
-      if (!Number.isFinite(n)) {
+      if (!Number.isFinite(n) || seen.has(n)) {
         max += 1;
         u.id = max;
         changed = true;
       }
+      seen.add(Number(u.id));
+    });
+    return changed;
+  },
+
+  findUser(userId, email) {
+    const em = String(email || "").toLowerCase().trim();
+    const list = this.users || [];
+    if (em) {
+      const exact = list.find((u) => u && String(u.id) === String(userId) && String(u.email || "").toLowerCase().trim() === em);
+      if (exact) return exact;
+    }
+    return list.find((u) => u && String(u.id) === String(userId)) || null;
+  },
+
+  attrArg(value) {
+    return JSON.stringify(value == null ? null : value).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+  },
+
+  dropReplacedUserEmails() {
+    const swaps = [{ from: "caco@colenci.com.br", to: "colenci@mouraleite.com.br" }];
+    let changed = false;
+    swaps.forEach(({ from, to }) => {
+      const list = this.users || [];
+      const emailOf = (u) => String((u && u.email) || "").toLowerCase().trim();
+      const keep = list.find((u) => emailOf(u) === to);
+      const olds = list.filter((u) => emailOf(u) === from);
+      if (!keep || !olds.length) return;
+      olds.forEach((old) => {
+        if (window.crmUserEditedAt(old) > window.crmUserEditedAt(keep)) {
+          const { id, email, ...rest } = old;
+          Object.assign(keep, rest);
+        }
+      });
+      this.users = list.filter((u) => emailOf(u) !== from);
+      if (typeof window.removeCrmUserEmail === "function") window.removeCrmUserEmail(from);
+      changed = true;
     });
     return changed;
   },
@@ -579,7 +617,8 @@ const ConfigUsersApp = {
       if (savedUsers) this.users = JSON.parse(savedUsers);
     }
     if (!Array.isArray(this.users)) this.users = [];
-    if (this.normalizeUserIds() && typeof window.persistCrmUsersToFirebase === "function") {
+    const droppedOld = this.dropReplacedUserEmails();
+    if ((this.normalizeUserIds() || droppedOld) && typeof window.persistCrmUsersToFirebase === "function") {
       try {
         const saved = await window.persistCrmUsersToFirebase(this.users);
         if (Array.isArray(saved) && saved.length) this.users = saved;
@@ -1317,10 +1356,10 @@ const ConfigUsersApp = {
     return out;
   },
 
-  openUserModal(userId = null) {
+  openUserModal(userId = null, userEmail = null) {
       let user = null;
       if (userId) {
-         user = this.users.find(u => String(u.id) === String(userId));
+         user = this.findUser(userId, userEmail);
          if (!user) return;
       }
       
@@ -1624,7 +1663,7 @@ const ConfigUsersApp = {
 
             <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; padding-top: 18px; border-top: 1px solid #e8eaed;">
                <button class="btn btn-cancel" onclick="document.getElementById('user-modal-overlay').remove()">Cancelar</button>
-               <button onclick="ConfigUsersApp.saveUserModal(${user ? JSON.stringify(user.id) : 'null'})" style="padding: 11px 20px; border: none; background: #105436; color: #fff; font-weight: 700; border-radius: 8px; cursor: pointer;" onmouseover="this.style.background='#0c4028'" onmouseout="this.style.background='#105436'">Salvar dados</button>
+               <button onclick="ConfigUsersApp.saveUserModal(${user ? this.attrArg(user.id) : 'null'}, ${user ? this.attrArg(user.email || '') : 'null'})" style="padding: 11px 20px; border: none; background: #105436; color: #fff; font-weight: 700; border-radius: 8px; cursor: pointer;" onmouseover="this.style.background='#0c4028'" onmouseout="this.style.background='#105436'">Salvar dados</button>
             </div>
             </div>
          </div>
@@ -1640,8 +1679,8 @@ const ConfigUsersApp = {
       }
   },
 
-  async toggleUserStatus(userId) {
-      const user = this.users.find(u => String(u.id) === String(userId));
+  async toggleUserStatus(userId, userEmail = null) {
+      const user = this.findUser(userId, userEmail);
       if (!user) return;
       user.status = String(user.status || "").toUpperCase() === "ATIVO" ? "INATIVO" : "ATIVO";
       user.statusAt = Date.now();
@@ -1653,7 +1692,7 @@ const ConfigUsersApp = {
       this.render();
   },
 
-  async saveUserModal(userId) {
+  async saveUserModal(userId, userEmail = null) {
       const name = document.getElementById('umodal-name').value.trim();
       const email = document.getElementById('umodal-email').value.trim();
       const sienge = document.getElementById('umodal-sienge').value.trim();
@@ -1713,19 +1752,29 @@ const ConfigUsersApp = {
       };
 
       try {
+      const emailKey = email.toLowerCase();
+      if (typeof window.reviveCrmUserEmail === "function") window.reviveCrmUserEmail(emailKey);
       if (userId) {
-          const user = this.users.find(u => String(u.id) === String(userId));
+          const user = this.findUser(userId, userEmail);
           if (!user) {
               alert("Não encontrei esse usuário na lista. Atualize a tela e tente de novo.");
               return;
           }
+          const oldEmail = String(user.email || "").toLowerCase().trim();
           Object.assign(user, fields);
+          if (oldEmail && oldEmail !== emailKey) {
+              this.users = this.users.filter((u) => {
+                  if (u === user) return true;
+                  const em = String((u && u.email) || "").toLowerCase().trim();
+                  return em !== oldEmail && em !== emailKey;
+              });
+              if (typeof window.removeCrmUserEmail === "function") window.removeCrmUserEmail(oldEmail);
+          }
           if (String(user.status || "").toUpperCase() === "PENDENTE") {
             user.status = "ATIVO";
             user.statusAt = Date.now();
           }
       } else {
-          const emailKey = email.toLowerCase();
           const existing = this.users.find(u => String(u.email || "").toLowerCase().trim() === emailKey);
           if (existing) {
               Object.assign(existing, fields);
@@ -2001,7 +2050,7 @@ const ConfigUsersApp = {
       const statusSwitch = `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
              ${isPending ? '<span style="background: #fef7e0; color: #f29900; padding: 4px 10px; border-radius: 12px; font-size: 0.7rem; font-weight: 700;">PENDENTE</span>' : ''}
              <label class="ml-switch" title="${isActive ? 'Desativar' : 'Ativar'}">
-             <input type="checkbox" ${isActive ? 'checked' : ''} onchange="ConfigUsersApp.toggleUserStatus(${JSON.stringify(u.id)})">
+             <input type="checkbox" ${isActive ? 'checked' : ''} onchange="ConfigUsersApp.toggleUserStatus(${this.attrArg(u.id)}, ${this.attrArg(u.email || '')})">
              <span class="ml-slider"></span>
            </label>
            </div>`;
@@ -2021,7 +2070,7 @@ const ConfigUsersApp = {
           </td>
           <td style="padding: 16px 15px;">${statusSwitch}</td>
           <td style="padding: 16px 15px;">
-             <button onclick="ConfigUsersApp.openUserModal(${JSON.stringify(u.id)})" class="btn btn-outline" style="padding: 6px; border-radius: 8px; border-color: #105436; color: #105436;" title="Editar Dados"><i data-lucide="edit" style="width:18px;height:18px;"></i></button>
+             <button onclick="ConfigUsersApp.openUserModal(${this.attrArg(u.id)}, ${this.attrArg(u.email || '')})" class="btn btn-outline" style="padding: 6px; border-radius: 8px; border-color: #105436; color: #105436;" title="Editar Dados"><i data-lucide="edit" style="width:18px;height:18px;"></i></button>
           </td>
         </tr>
       `;
