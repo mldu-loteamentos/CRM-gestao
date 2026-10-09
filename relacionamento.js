@@ -1480,8 +1480,9 @@ const RelacionamentoApp = {
           <div><span style="color:#64748b;">Valor</span><br><strong>${valorFmt}</strong></div>
           <div><span style="color:#64748b;">Situação</span><br>${statusHtml}</div>
         </div>`;
-      const genBtn = document.querySelector('#esc-doc-card [onclick="RelacionamentoApp.gerarEscrituraPdf()"]');
-      if (genBtn) genBtn.disabled = !quitadoInfo.quitado;
+      document.querySelectorAll('#esc-doc-card [onclick="RelacionamentoApp.gerarEscrituraPdf()"], #esc-doc-card [onclick="RelacionamentoApp.gerarQuitacaoPdf()"]').forEach((btn) => {
+        btn.disabled = !quitadoInfo.quitado;
+      });
       document.getElementById("esc-doc-card").style.display = "block";
       this._escSetResultsHtml("");
     } catch (err) {
@@ -1520,84 +1521,17 @@ const RelacionamentoApp = {
         alert("O modelo de autorização não está preenchido. Salve-o em Configurações → Documentos padrões.");
         return;
       }
-      const { customer, sale, unit, unitDetails, bill, empName, cidadeLote } = ctx;
-      const block = unit.block && unit.block !== "N/D" ? unit.block : "";
-      const lot = unit.lot && unit.lot !== "N/D" ? unit.lot : "";
-      const unitName = String(sale.unitId || "").split("-").slice(2).join("-");
-      const quadraLote = (block && lot) ? (block + " - " + lot) : (unitName || "____");
-      const unitNumericId = unitDetails?.id || (unit.id && !String(unit.id).startsWith("U-") ? unit.id : "");
-      const titulo = sale.receivableBillId || bill?.id || "____";
-      const contratoLabel = (ctx.contratoLabel || this._formatContratoDoc(sale, bill));
-      const matriculaRaw = unitDetails?.legalRegistrationNumber || unitDetails?.legalregistrationnumber || "";
-      const matriculaNum = String(matriculaRaw || "").replace(/\D/g, "");
-      const matricula = matriculaNum
-        ? Number(matriculaNum).toLocaleString("pt-BR")
-        : (matriculaRaw || "____");
-      const areaNum = unitDetails?.privateArea || unitDetails?.Privatearea || unit.area || "";
-      const areaLabel = areaNum === "" || areaNum == null ? "____" : (String(areaNum).match(/m/) ? String(areaNum) : (Number(areaNum).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " m²"));
-      const areaExt = areaNum && !isNaN(Number(areaNum))
-        ? ((typeof numeroPorExtenso === "function" ? numeroPorExtenso(areaNum) : String(areaNum)) + " metros quadrados")
-        : "____";
-      const valor = Number(sale.contractValue || sale.updatedContractValue || bill?.receivableBillValue || 0);
-      const valorFmt = valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-      const valorExt = typeof valorPorExtensoBRL === "function" ? valorPorExtensoBRL(valor) : "";
-      const custs = sale.customers || sale.salesContractCustomers || [];
-      const mine = custs.find((c) => String(c.id || c.customerId) === String(customer.id)) || custs.find((c) => c.main) || null;
-      const pct = mine && (mine.percentage != null || mine.participationPercentage != null)
-        ? Number(mine.percentage != null ? mine.percentage : mine.participationPercentage)
-        : (custs.length <= 1 ? 100 : null);
-      const pctLabel = pct != null && !isNaN(pct) ? " (" + pct + "%)" : "";
       const cidadeCartorio = nomeCartorio;
       const localizacao = (document.getElementById("esc-localizacao")?.value || "").trim() || "____";
       const bancos = (document.getElementById("esc-bancos")?.value || "").trim() || "conforme extrato anexo";
-      const dateExt = new Date().toLocaleDateString("pt-BR", { day: "numeric", month: "long", year: "numeric" });
-      const saleDateRaw = sale.saleDate || sale.contractDate || bill?.issueDate;
-      let saleDateStr = "____";
-      if (saleDateRaw) {
-        const iso = String(saleDateRaw).slice(0, 10);
-        saleDateStr = /^\d{4}-\d{2}-\d{2}/.test(iso)
-          ? iso.split("-").reverse().join("/")
-          : new Date(String(saleDateRaw).slice(0, 10) + "T12:00:00").toLocaleDateString("pt-BR");
-      }
-      let preambleText = "";
-      if (typeof window.getPreambleForContract === "function") {
-        preambleText = window.getPreambleForContract(unit, sale) || "";
-      }
-      const legalBase = window.buildLegalDocVarMap(customer, sale, unit, {
-        preambleText,
-        empName,
-        cidadeLote,
-        saleDateStr,
-        dateExt,
-        map: {
-          NOME_CARTORIO: nomeCartorio,
-          CIDADE_CARTORIO: cidadeCartorio,
-          QUADRA_LOTE: quadraLote,
-          LOCALIZACAO: localizacao,
-          MATRICULA: matricula,
-          AREA_LOTE: areaLabel,
-          AREA_LOTE_EXTENSO: areaExt,
-          VALOR_CONTRATO: valorFmt,
-          VALOR_CONTRATO_EXTENSO: valorExt,
-          PERCENTUAL_CLIENTE: pctLabel,
-          DADOS_BANCARIOS: bancos,
-          NUM_CONTRATO: sale.id || "____",
-          NUMERO_CONTRATO: sale.id || "____",
-          TITULO: titulo,
-          UNIDADE: unitNumericId || quadraLote
-        }
+      const { legalBase, quadraLote, unitNumericId, titulo } = this._escDocBase(ctx, {
+        NOME_CARTORIO: nomeCartorio,
+        CIDADE_CARTORIO: cidadeCartorio,
+        LOCALIZACAO: localizacao,
+        DADOS_BANCARIOS: bancos
       });
       const markup = typeof window.formatDocPadraoMarkup === "function" ? window.formatDocPadraoMarkup(corpo) : corpo;
-      const fillVars = typeof window.applyDistratoTemplateVars === "function"
-        ? window.applyDistratoTemplateVars
-        : function (text, map) {
-            let s = String(text || "");
-            Object.keys(map || {}).forEach((key) => {
-              s = s.replace(new RegExp("\\{\\{" + key.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&") + "\\}\\}", "g"), map[key] == null ? "" : String(map[key]));
-            });
-            return s;
-          };
-      const filled = fillVars(markup, legalBase);
+      const filled = this._fillDocVars(markup, legalBase);
       const headerUnidade = [unitNumericId, "Quadra-Lote: " + quadraLote].filter(Boolean).join(" - ");
       const alreadyHasTabeliao = /Livro\s*n/i.test(filled);
       const tabeliaoBox = alreadyHasTabeliao ? "" : `
@@ -1625,6 +1559,127 @@ const RelacionamentoApp = {
     } catch (err) {
       console.error("Erro ao gerar autorização de escritura", err);
       alert("Não foi possível gerar a autorização. Verifique o modelo em Documentos padrões e tente de novo.");
+    }
+  },
+
+  _fillDocVars(text, map) {
+    if (typeof window.applyDistratoTemplateVars === "function") return window.applyDistratoTemplateVars(text, map);
+    let s = String(text || "");
+    Object.keys(map || {}).forEach((key) => {
+      s = s.replace(new RegExp("\\{\\{" + key.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&") + "\\}\\}", "g"), map[key] == null ? "" : String(map[key]));
+    });
+    return s;
+  },
+
+  _escDocBase(ctx, extraMap) {
+      const { customer, sale, unit, unitDetails, bill, empName, cidadeLote } = ctx;
+      const block = unit.block && unit.block !== "N/D" ? unit.block : "";
+      const lot = unit.lot && unit.lot !== "N/D" ? unit.lot : "";
+      const unitName = String(sale.unitId || "").split("-").slice(2).join("-");
+      const quadraLote = (block && lot) ? (block + " - " + lot) : (unitName || "____");
+      const unitNumericId = unitDetails?.id || (unit.id && !String(unit.id).startsWith("U-") ? unit.id : "");
+      const titulo = sale.receivableBillId || bill?.id || "____";
+      const matriculaRaw = unitDetails?.legalRegistrationNumber || unitDetails?.legalregistrationnumber || "";
+      const matriculaNum = String(matriculaRaw || "").replace(/\D/g, "");
+      const matricula = matriculaNum
+        ? Number(matriculaNum).toLocaleString("pt-BR")
+        : (matriculaRaw || "____");
+      const areaNum = unitDetails?.privateArea || unitDetails?.Privatearea || unit.area || "";
+      const areaLabel = areaNum === "" || areaNum == null ? "____" : (String(areaNum).match(/m/) ? String(areaNum) : (Number(areaNum).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " m²"));
+      const areaExt = areaNum && !isNaN(Number(areaNum))
+        ? ((typeof numeroPorExtenso === "function" ? numeroPorExtenso(areaNum) : String(areaNum)) + " metros quadrados")
+        : "____";
+      const valor = Number(sale.contractValue || sale.updatedContractValue || bill?.receivableBillValue || 0);
+      const valorFmt = valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+      const valorExt = typeof valorPorExtensoBRL === "function" ? valorPorExtensoBRL(valor) : "";
+      const custs = sale.customers || sale.salesContractCustomers || [];
+      const mine = custs.find((c) => String(c.id || c.customerId) === String(customer.id)) || custs.find((c) => c.main) || null;
+      const pct = mine && (mine.percentage != null || mine.participationPercentage != null)
+        ? Number(mine.percentage != null ? mine.percentage : mine.participationPercentage)
+        : (custs.length <= 1 ? 100 : null);
+      const pctLabel = pct != null && !isNaN(pct) ? " (" + pct + "%)" : "";
+      const dateExt = new Date().toLocaleDateString("pt-BR", { day: "numeric", month: "long", year: "numeric" });
+      const saleDateRaw = sale.saleDate || sale.contractDate || bill?.issueDate;
+      let saleDateStr = "____";
+      if (saleDateRaw) {
+        const iso = String(saleDateRaw).slice(0, 10);
+        saleDateStr = /^\d{4}-\d{2}-\d{2}/.test(iso)
+          ? iso.split("-").reverse().join("/")
+          : new Date(String(saleDateRaw).slice(0, 10) + "T12:00:00").toLocaleDateString("pt-BR");
+      }
+      let preambleText = "";
+      if (typeof window.getPreambleForContract === "function") {
+        preambleText = window.getPreambleForContract(unit, sale) || "";
+      }
+      const legalBase = window.buildLegalDocVarMap(customer, sale, unit, {
+        preambleText,
+        empName,
+        cidadeLote,
+        saleDateStr,
+        dateExt,
+        map: Object.assign({
+          QUADRA_LOTE: quadraLote,
+          MATRICULA: matricula,
+          AREA_LOTE: areaLabel,
+          AREA_LOTE_EXTENSO: areaExt,
+          VALOR_CONTRATO: valorFmt,
+          VALOR_CONTRATO_EXTENSO: valorExt,
+          PERCENTUAL_CLIENTE: pctLabel,
+          NUM_CONTRATO: sale.id || "____",
+          NUMERO_CONTRATO: sale.id || "____",
+          TITULO: titulo,
+          UNIDADE: unitNumericId || quadraLote
+        }, extraMap || {})
+      });
+      return { legalBase, quadraLote, unitNumericId, titulo, preambleText };
+  },
+
+  async gerarQuitacaoPdf() {
+    const ctx = RelacionamentoState.escritura;
+    if (!ctx || !ctx.sale) {
+      alert("Busque e selecione um contrato antes de gerar o documento.");
+      return;
+    }
+    if (!ctx.quitado) {
+      alert("O termo de quitação só pode ser emitido se o contrato estiver quitado. " + (ctx.quitadoMotivo || ""));
+      return;
+    }
+    try {
+      let t = {};
+      try { t = JSON.parse(localStorage.getItem("crm_docpadrao_quitacao") || "{}"); } catch (e) {}
+      const titleEl = document.getElementById("doc-quitacao-title");
+      const corpoEl = document.getElementById("doc-quitacao-corpo");
+      const docTitle = (titleEl && titleEl.value) || t["doc-quitacao-title"] || "INSTRUMENTO PARTICULAR DE QUITAÇÃO E NOTIFICAÇÃO";
+      const corpo = (corpoEl && corpoEl.value) || t["doc-quitacao-corpo"] || (corpoEl && corpoEl.defaultValue) || "";
+      if (!corpo) {
+        alert("O modelo do termo de quitação não está preenchido. Salve-o em Configurações → Documentos padrões.");
+        return;
+      }
+      const { legalBase, quadraLote, titulo, preambleText } = this._escDocBase(ctx, {});
+      if (!preambleText || /NÃO CADASTRADO/i.test(String(preambleText))) {
+        alert("Preâmbulo não cadastrado para o centro de custo deste contrato. Cadastre-o antes de gerar o termo.");
+        return;
+      }
+      legalBase.PREAMBULO = String(preambleText).trim().replace(/[.;,\s]+$/, "");
+      const markup = typeof window.formatDocPadraoMarkup === "function" ? window.formatDocPadraoMarkup(corpo) : corpo;
+      let filled = this._fillDocVars(markup, legalBase);
+      if (typeof window.centerSimpleDocSignature === "function") filled = window.centerSimpleDocSignature(filled);
+      const codEmp = legalBase.CODIGO_EMPREENDIMENTO && legalBase.CODIGO_EMPREENDIMENTO !== "____" ? legalBase.CODIGO_EMPREENDIMENTO : "";
+      const headerUnidade = [codEmp, "Quadra-Lote: " + quadraLote].filter(Boolean).join(" - ");
+      const docHtml = `
+        <div style="text-align:center;margin-bottom:1.25rem;">
+          <div style="font-size:10pt;color:#334155;margin-bottom:4px;">${headerUnidade}</div>
+          <div style="font-size:10pt;color:#334155;margin-bottom:10px;">Título ${titulo}</div>
+          <h2 style="color:#105436;font-size:13pt;font-weight:bold;margin:0;">${docTitle}</h2>
+        </div>
+        <div style="font-family:'Times New Roman',serif;font-size:11pt;line-height:1.5;text-align:justify;white-space:pre-wrap;">${filled}</div>`;
+      document.getElementById("pdf-modal-title").textContent = "Termo de quitação";
+      document.getElementById("pdf-document-content").innerHTML = docHtml;
+      document.getElementById("pdf-view-overlay").classList.add("active");
+      if (window.lucide) lucide.createIcons();
+    } catch (err) {
+      console.error("Erro ao gerar termo de quitação", err);
+      alert("Não foi possível gerar o termo de quitação. Verifique o modelo em Documentos padrões e tente de novo.");
     }
   },
 

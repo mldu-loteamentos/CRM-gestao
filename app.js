@@ -34676,6 +34676,7 @@ async function saveDocPadrao(tipo) {
     suspensao: ['doc-suspensao-ref', 'doc-suspensao-corpo'],
     distrato: ['doc-distrato-title', 'doc-distrato-pct', 'doc-distrato-clauses'],
     escritura: ['doc-escritura-title', 'doc-escritura-corpo'],
+    quitacao: ['doc-quitacao-title', 'doc-quitacao-corpo'],
     terceiros: ['doc-terceiros-title', 'doc-terceiros-corpo'],
     vencimento: ['doc-vencimento-title', 'doc-vencimento-corpo'],
   };
@@ -34733,6 +34734,7 @@ async function previewDocPadrao(tipo) {
     suspensao: 'Suspensão de Contrato',
     distrato: 'Distrato / Rescisão',
     escritura: 'Autorização de Escritura',
+    quitacao: 'Termo de Quitação',
     terceiros: 'Autorização de Terceiros',
     vencimento: 'Alteração de Vencimento',
   };
@@ -34803,6 +34805,12 @@ async function previewDocPadrao(tipo) {
     const corpo = document.getElementById('doc-escritura-corpo')?.value || '';
     const filled = await fillLegalPreview(corpo);
     content = `<h2 style="text-align:center;">${title}</h2><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${filled}</div>`;
+  } else if (tipo === 'quitacao') {
+    const title = document.getElementById('doc-quitacao-title')?.value || '';
+    const corpo = document.getElementById('doc-quitacao-corpo')?.value || '';
+    let filled = await fillLegalPreview(corpo);
+    if (window.centerSimpleDocSignature) filled = window.centerSimpleDocSignature(filled);
+    content = `<h2 style="text-align:center;">${title}</h2><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${filled}</div>`;
   } else if (tipo === 'terceiros') {
     const title = document.getElementById('doc-terceiros-title')?.value || '';
     const corpo = document.getElementById('doc-terceiros-corpo')?.value || '';
@@ -34849,7 +34857,7 @@ function applySavedDocPadraoFields(tipo, data, fieldMap) {
 
 // Carregar templates salvos ao inicializar
 async function loadDocPadraoTemplates() {
-  const tipos = ['reneg', 'boleto', 'carta', 'cec', 'suspensao', 'distrato', 'escritura', 'terceiros', 'vencimento'];
+  const tipos = ['reneg', 'boleto', 'carta', 'cec', 'suspensao', 'distrato', 'escritura', 'quitacao', 'terceiros', 'vencimento'];
   const fieldMap = {
     reneg: ['doc-reneg-title', 'doc-reneg-subtitle', 'doc-reneg-clauses'],
     boleto: ['doc-boleto-inst1', 'doc-boleto-inst2', 'doc-boleto-obs'],
@@ -34858,6 +34866,7 @@ async function loadDocPadraoTemplates() {
     suspensao: ['doc-suspensao-ref', 'doc-suspensao-corpo'],
     distrato: ['doc-distrato-title', 'doc-distrato-pct', 'doc-distrato-clauses'],
     escritura: ['doc-escritura-title', 'doc-escritura-corpo'],
+    quitacao: ['doc-quitacao-title', 'doc-quitacao-corpo'],
     terceiros: ['doc-terceiros-title', 'doc-terceiros-corpo'],
     vencimento: ['doc-vencimento-title', 'doc-vencimento-corpo'],
   };
