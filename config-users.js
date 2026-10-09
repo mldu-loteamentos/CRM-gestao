@@ -53,6 +53,39 @@ window.userSeesOnlyAssignedClients = function(user) {
   return window.isOperadorCobrancaProfile(u.profile_name) && String(u.operator_type || "") === "externo";
 };
 
+window.currentUserCityRuleIds = function() {
+  const rules = (typeof AppState !== "undefined" && AppState.rules)
+    || (window.AppState && window.AppState.rules)
+    || {};
+  const ids = new Set();
+  Object.keys(rules).forEach(function(key) {
+    if (String(key).indexOf("CID_") !== 0) return;
+    const ops = typeof window.mergeCityOperatorValues === "function"
+      ? window.mergeCityOperatorValues(rules[key].operator)
+      : [];
+    if (!ops.some(function(op) { return window.clientAssignedToCurrentUser(op); })) return;
+    ids.add(String(key));
+    if (typeof window.canonicalCityRuleId === "function") {
+      const canon = window.canonicalCityRuleId(key);
+      if (canon) ids.add(String(canon));
+    }
+  });
+  return ids;
+};
+
+/** Terceirizado: o dashboard só inclui as cidades em que ele está na régua. */
+window.clientInCurrentUserCities = function(client) {
+  if (typeof window.userSeesOnlyAssignedClients === "function" && !window.userSeesOnlyAssignedClients()) return true;
+  const ids = window.currentUserCityRuleIds();
+  if (!ids || !ids.size) return true;
+  const cc = client && (client.costCenterId || client.enterpriseId);
+  if (cc == null || cc === "" || typeof window.resolveCityRuleId !== "function") return true;
+  const resolved = window.resolveCityRuleId(cc);
+  const ruleId = resolved && resolved.ruleId;
+  if (!ruleId) return false;
+  return ids.has(String(ruleId));
+};
+
 window.clientAssignedToCurrentUser = function(clientOrOp) {
   const assigned = typeof clientOrOp === "string"
     ? clientOrOp
@@ -74,14 +107,20 @@ window.currentUserCanViewCustomer = function(customerId) {
   const list = window.rawClientList || [];
   const mine = list.filter(function(c) { return String(c.customerId) === id; });
   if (!mine.length) return false;
-  return mine.some(function(c) { return window.clientAssignedToCurrentUser(c); });
+  return mine.some(function(c) {
+    return window.clientAssignedToCurrentUser(c)
+      && (typeof window.clientInCurrentUserCities !== "function" || window.clientInCurrentUserCities(c));
+  });
 };
 
 window.filterCustomersToAssignedPortfolio = function(customers) {
   if (!window.userSeesOnlyAssignedClients() || !Array.isArray(customers)) return customers || [];
   const allowed = new Set();
   (window.rawClientList || []).forEach(function(c) {
-    if (window.clientAssignedToCurrentUser(c)) allowed.add(String(c.customerId));
+    if (window.clientAssignedToCurrentUser(c)
+      && (typeof window.clientInCurrentUserCities !== "function" || window.clientInCurrentUserCities(c))) {
+      allowed.add(String(c.customerId));
+    }
   });
   return customers.filter(function(c) {
     const id = String((c && (c.customerId != null ? c.customerId : c.id)) || "");

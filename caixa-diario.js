@@ -598,59 +598,89 @@ const FluxoCaixaDiarioApp = {
     </div>`;
   },
 
+  contasComSaldo() {
+    const groups = [];
+    (this.accounts || []).forEach((a) => {
+      if (!a || Math.abs(Number(a.amount) || 0) < 0.005) return;
+      const id = String(a.companyId || "");
+      let g = groups.length ? groups[groups.length - 1] : null;
+      if (!g || g.id !== id) {
+        g = { id: id, name: a.company || (id ? ("Empresa " + id) : "Conta"), rows: [], total: 0 };
+        groups.push(g);
+      }
+      g.rows.push(a);
+      g.total += Number(a.amount) || 0;
+    });
+    return groups;
+  },
+
   render() {
     const root = document.getElementById("fluxo-caixa-diario-root");
     if (!root) return;
     const hoje = new Date().toISOString().slice(0, 10);
-    let running = this.totals.saldo || 0;
-    let entrarFrente = 0;
-    let pagarFrente = 0;
-    const rows = this.days.map((d) => {
-      const futuro = d.date >= hoje;
-      if (futuro) {
-        running += (d.entrar || 0) - (d.pagar || 0);
-        entrarFrente += d.entrar || 0;
-        pagarFrente += d.pagar || 0;
+    const saldoInicial = Number(this.totals.saldo) || 0;
+    let acumulado = saldoInicial;
+    let fim = saldoInicial;
+    const linhas = (this.days || []).map((d) => {
+      const entrar = Number(d.entrar) || 0;
+      const sair = Number(d.pagar) || 0;
+      const movimento = entrar - sair;
+      const passado = d.date < hoje;
+      let inicial = null;
+      let acum = null;
+      if (!passado) {
+        inicial = acumulado;
+        acumulado = inicial + movimento;
+        acum = acumulado;
+        fim = acumulado;
       }
-      const saldoDia = futuro ? running : null;
+      return { d, entrar, sair, movimento, inicial, acum, passado };
+    });
+    const rows = linhas.map((line) => {
+      const d = line.d;
       const open = this.openDay === d.date;
       const has = (d.itens && d.itens.length) || (d.pagarItens && d.pagarItens.length);
+      const hojeCls = d.date === hoje ? " cxd-hoje" : "";
       const entradas = open ? (d.itens || []).map((it) => `
-        <tr style="background:#f3faf6;">
+        <tr class="cxd-det cxd-in">
           <td></td>
-          <td colspan="3" style="padding:6px 10px;font-size:0.78rem;">
-            <span style="color:#105436;font-weight:700;">Entrada</span>
-            · ${caixaEsc(it.cc)} / ${caixaEsc(it.unidade)} · ${caixaEsc(it.cliente || "—")}
-            ${it.cpf ? ` · CPF ${caixaEsc(it.cpf)}` : ""}
-            · venc. ${caixaFmtDate(it.vencimento)} + PMP ${it.pmp}d
-          </td>
-          <td style="text-align:right;padding:6px 10px;color:#105436;">${caixaMoney(it.valor)}</td>
+          <td colspan="5">Entrada · ${caixaEsc(it.cc)} / ${caixaEsc(it.unidade)} · ${caixaEsc(it.cliente || "—")}${it.cpf ? " · CPF " + caixaEsc(it.cpf) : ""} · venc. ${caixaFmtDate(it.vencimento)} + PMP ${it.pmp}d</td>
+          <td class="cxd-num cxd-in">${caixaMoney(it.valor)}</td>
         </tr>`).join("") : "";
       const saidas = open ? (d.pagarItens || []).map((it) => `
-        <tr style="background:#fffaf6;cursor:pointer;" onclick="FluxoCaixaDiarioApp.openTitulo('${caixaEsc(it.key)}')">
+        <tr class="cxd-det cxd-out" onclick="FluxoCaixaDiarioApp.openTitulo('${caixaEsc(it.key)}')">
           <td></td>
-          <td colspan="3" style="padding:6px 10px;font-size:0.78rem;">
-            <span style="color:#c2410c;font-weight:700;">${it.natureza === "previsao" ? "Previsão" : "A pagar"}</span>
-            · tít. ${caixaEsc(it.titulo)}${it.parcela ? "/" + caixaEsc(it.parcela) : ""}
-            · ${caixaEsc(it.credor || "—")}
-            · ${caixaEsc(it.docId || "")} ${caixaEsc(it.documento || "")}
-          </td>
-          <td style="text-align:right;padding:6px 10px;color:#c2410c;">${caixaMoney(it.valor)}</td>
+          <td colspan="5">${it.natureza === "previsao" ? "Previsão" : "Saída"} · tít. ${caixaEsc(it.titulo)}${it.parcela ? "/" + caixaEsc(it.parcela) : ""} · ${caixaEsc(it.credor || "—")} · ${caixaEsc(it.docId || "")} ${caixaEsc(it.documento || "")}</td>
+          <td class="cxd-num cxd-out">${caixaMoney(it.valor)}</td>
         </tr>`).join("") : "";
-      return `<tr>
-        <td style="padding:8px 12px;"><button type="button" onclick="FluxoCaixaDiarioApp.toggle('${d.date}')" style="border:none;background:none;cursor:pointer;color:#64748b;">${has ? (open ? "▾" : "▸") : "·"}</button></td>
-        <td style="padding:8px 12px;font-weight:600;">${caixaFmtDate(d.date)}</td>
-        <td style="padding:8px 12px;text-align:right;color:${d.entrar ? "#105436" : "#94a3b8"};">${caixaMoney(d.entrar || 0)}</td>
-        <td style="padding:8px 12px;text-align:right;color:${d.pagar ? "#c2410c" : "#94a3b8"};">${caixaMoney(d.pagar || 0)}</td>
-        <td style="padding:8px 12px;text-align:right;font-weight:700;color:${saldoDia == null ? "#94a3b8" : (saldoDia < 0 ? "#b91c1c" : "#105436")};">${saldoDia == null ? "—" : caixaMoney(saldoDia)}</td>
+      const movCls = line.movimento < 0 ? "cxd-out" : (line.movimento > 0 ? "cxd-in" : "cxd-zero");
+      const acumCls = line.acum == null ? "cxd-zero" : (line.acum < 0 ? "cxd-out" : "cxd-in");
+      return `<tr class="cxd-day${hojeCls}">
+        <td><button type="button" class="cxd-exp" onclick="FluxoCaixaDiarioApp.toggle('${d.date}')">${has ? (open ? "▾" : "▸") : ""}</button></td>
+        <td class="cxd-dia">${caixaFmtDate(d.date)}${d.date === hoje ? '<span class="cxd-tag">hoje</span>' : ""}</td>
+        <td class="cxd-num">${line.inicial == null ? "—" : caixaMoney(line.inicial)}</td>
+        <td class="cxd-num ${line.entrar ? "cxd-in" : "cxd-zero"}">${caixaMoney(line.entrar)}</td>
+        <td class="cxd-num ${line.sair ? "cxd-out" : "cxd-zero"}">${caixaMoney(line.sair)}</td>
+        <td class="cxd-num ${movCls}">${caixaMoney(line.movimento)}</td>
+        <td class="cxd-num cxd-acum ${acumCls}">${line.acum == null ? "—" : caixaMoney(line.acum)}</td>
       </tr>${entradas}${saidas}`;
     }).join("");
-    const contas = (this.accounts || []).slice(0, 12).map((a) => `
-      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;min-width:180px;">
-        <div style="font-size:0.72rem;color:#64748b;">${caixaEsc(a.company || "Conta")} · ${caixaEsc(a.number || "")}</div>
-        <div style="font-weight:700;">${caixaEsc(a.name)}</div>
-        <div style="color:${a.amount < 0 ? "#b91c1c" : "#105436"};font-weight:700;">${caixaMoney(a.amount)}</div>
-      </div>`).join("");
+    const grupos = this.contasComSaldo();
+    const contasHtml = grupos.map((g) => {
+      const linhasConta = g.rows.map((a) => `
+        <tr>
+          <td class="cxd-conta">${caixaEsc(a.name || "Conta")}</td>
+          <td class="cxd-num-conta">${caixaEsc(a.number || "—")}</td>
+          <td class="cxd-num ${a.amount < 0 ? "cxd-out" : "cxd-in"}">${caixaMoney(a.amount)}</td>
+        </tr>`).join("");
+      return `<tbody>
+        <tr class="cxd-emp">
+          <td colspan="2">${caixaEsc(g.id ? (g.id + " — " + g.name) : g.name)}</td>
+          <td class="cxd-num">${caixaMoney(g.total)}</td>
+        </tr>
+        ${linhasConta}
+      </tbody>`;
+    }).join("");
     const filtro = window.MlEmpresaFilter ? MlEmpresaFilter.html({
       id: "cxd-emp",
       label: "EMPRESAS",
@@ -660,41 +690,97 @@ const FluxoCaixaDiarioApp = {
       query: this.qEmp,
       emptyMeansAll: true
     }) : "";
-    const posicao = (this.totals.saldo || 0) + entrarFrente - pagarFrente;
+    const totEntrar = Number(this.totals.entrar) || 0;
+    const totSair = Number(this.totals.pagar) || 0;
     root.innerHTML = `
-      <div style="display:flex;flex-direction:column;height:calc(100vh - 85px);">
-        <div style="background:#105436;padding:16px 20px;border-radius:12px 12px 0 0;">
-          <h2 style="margin:0;color:#fff;font-size:1.15rem;">Fluxo de caixa diário</h2>
-          <p style="margin:4px 0 0;color:rgba(255,255,255,0.75);font-size:0.75rem;">Saldo de hoje, o que entra (vencimento + PMP) e o que será pago no módulo de compras. Clique no título a pagar para ver anexos e a forma de pagamento.</p>
+      <style>
+        #fluxo-caixa-diario-root { color:#0f172a; }
+        #fluxo-caixa-diario-root .cxd-page { display:flex; flex-direction:column; height:calc(100vh - 85px); }
+        #fluxo-caixa-diario-root .cxd-head { background:#105436; padding:16px 20px; border-radius:12px 12px 0 0; }
+        #fluxo-caixa-diario-root .cxd-head h2 { margin:0; color:#fff; font-size:1.15rem; }
+        #fluxo-caixa-diario-root .cxd-head p { margin:4px 0 0; color:rgba(255,255,255,.8); font-size:.75rem; }
+        #fluxo-caixa-diario-root .cxd-body { flex:1; background:#f8fafc; border:1px solid #e2e8f0; border-top:none; border-radius:0 0 12px 12px; padding:14px 16px; overflow:auto; }
+        #fluxo-caixa-diario-root .cxd-tools { display:flex; gap:12px; align-items:flex-end; margin-bottom:12px; flex-wrap:wrap; }
+        #fluxo-caixa-diario-root .cxd-tools label { font-size:.75rem; font-weight:700; color:#475569; }
+        #fluxo-caixa-diario-root .cxd-tools input[type=month] { display:block; height:34px; border:1px solid #e2e8f0; border-radius:6px; padding:0 8px; margin-top:4px; }
+        #fluxo-caixa-diario-root .cxd-sheet { width:100%; border-collapse:collapse; background:#fff; font-size:.82rem; font-variant-numeric:tabular-nums; }
+        #fluxo-caixa-diario-root .cxd-sheet th { background:#105436; color:#fff; font-weight:600; text-align:right; padding:8px 10px; position:sticky; top:0; z-index:2; }
+        #fluxo-caixa-diario-root .cxd-sheet th:nth-child(2) { text-align:left; }
+        #fluxo-caixa-diario-root .cxd-sheet td { padding:7px 10px; border-bottom:1px solid #e2e8f0; }
+        #fluxo-caixa-diario-root .cxd-num { text-align:right; white-space:nowrap; }
+        #fluxo-caixa-diario-root .cxd-dia { font-weight:600; white-space:nowrap; }
+        #fluxo-caixa-diario-root .cxd-in { color:#105436; }
+        #fluxo-caixa-diario-root .cxd-out { color:#c2410c; }
+        #fluxo-caixa-diario-root .cxd-zero { color:#94a3b8; }
+        #fluxo-caixa-diario-root .cxd-acum { font-weight:700; }
+        #fluxo-caixa-diario-root .cxd-hoje td { background:#e7f6ee; }
+        #fluxo-caixa-diario-root .cxd-tag { margin-left:8px; background:#105436; color:#fff; border-radius:999px; padding:1px 7px; font-size:.66rem; font-weight:700; }
+        #fluxo-caixa-diario-root .cxd-exp { border:0; background:transparent; color:#64748b; cursor:pointer; width:22px; }
+        #fluxo-caixa-diario-root .cxd-det td { font-size:.75rem; background:#f8fafc; }
+        #fluxo-caixa-diario-root tr.cxd-out { cursor:pointer; }
+        #fluxo-caixa-diario-root tr.cxd-out:hover td { background:#fff4ec; }
+        #fluxo-caixa-diario-root .cxd-total td { background:#0c3d28; color:#fff; font-weight:700; position:sticky; bottom:0; }
+        #fluxo-caixa-diario-root .cxd-total .cxd-in,
+        #fluxo-caixa-diario-root .cxd-total .cxd-out,
+        #fluxo-caixa-diario-root .cxd-total .cxd-acum { color:#fff; }
+        #fluxo-caixa-diario-root .cxd-wrap { border:1px solid #e2e8f0; border-radius:8px; overflow:auto; background:#fff; margin-bottom:14px; }
+        #fluxo-caixa-diario-root .cxd-contas { width:100%; border-collapse:collapse; font-size:.82rem; font-variant-numeric:tabular-nums; }
+        #fluxo-caixa-diario-root .cxd-contas th { background:#105436; color:#fff; text-align:left; padding:8px 10px; position:sticky; top:0; }
+        #fluxo-caixa-diario-root .cxd-contas th:last-child,
+        #fluxo-caixa-diario-root .cxd-contas td:last-child { text-align:right; }
+        #fluxo-caixa-diario-root .cxd-contas td { padding:6px 10px; border-bottom:1px solid #eef2f6; }
+        #fluxo-caixa-diario-root .cxd-emp td { background:#e7f6ee; color:#105436; font-weight:700; }
+        #fluxo-caixa-diario-root .cxd-conta { padding-left:22px !important; }
+        #fluxo-caixa-diario-root .cxd-num-conta { font-family:ui-monospace,Consolas,monospace; color:#475569; }
+        #fluxo-caixa-diario-root .cxd-foot td { background:#0c3d28; color:#fff; font-weight:700; }
+        #fluxo-caixa-diario-root .cxd-block { max-height:240px; }
+        #fluxo-caixa-diario-root .cxd-title { margin:0 0 6px; font-size:.78rem; font-weight:700; color:#105436; letter-spacing:.03em; }
+      </style>
+      <div class="cxd-page">
+        <div class="cxd-head">
+          <h2>Fluxo de caixa diário</h2>
+          <p>Saldo inicial das contas, entradas e saídas do mês. O acumulado parte do saldo de hoje. Clique na saída para ver o título, os anexos e a forma de pagamento.</p>
         </div>
-        <div style="flex:1;background:#f8fafc;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 12px 12px;padding:14px 16px;overflow:auto;">
-          <div style="display:flex;gap:12px;align-items:flex-end;margin-bottom:12px;flex-wrap:wrap;">
-            <label style="font-size:0.75rem;font-weight:700;color:#475569;">Mês
-              <input type="month" value="${this.month}" onchange="FluxoCaixaDiarioApp.month=this.value;FluxoCaixaDiarioApp.load()"
-                style="display:block;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;margin-top:4px;">
+        <div class="cxd-body">
+          <div class="cxd-tools">
+            <label>Mês
+              <input type="month" value="${this.month}" onchange="FluxoCaixaDiarioApp.month=this.value;FluxoCaixaDiarioApp.load()">
             </label>
             ${filtro}
           </div>
-          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
-            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px;min-width:150px;"><div style="font-size:0.72rem;color:#64748b;">Saldo atual</div><strong style="color:#105436;">${caixaMoney(this.totals.saldo || 0)}</strong></div>
-            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px;min-width:150px;"><div style="font-size:0.72rem;color:#64748b;">A entrar no mês</div><strong style="color:#105436;">${caixaMoney(this.totals.entrar || 0)}</strong></div>
-            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px;min-width:150px;"><div style="font-size:0.72rem;color:#64748b;">A pagar no mês</div><strong style="color:#c2410c;">${caixaMoney(this.totals.pagar || 0)}</strong></div>
-            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px;min-width:170px;"><div style="font-size:0.72rem;color:#64748b;">Posição projetada</div><strong style="color:${posicao < 0 ? "#b91c1c" : "#105436"};">${caixaMoney(posicao)}</strong></div>
-          </div>
-          ${contas ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">${contas}${(this.accounts || []).length > 12 ? `<div style="align-self:center;color:#64748b;font-size:0.78rem;">+ ${(this.accounts.length - 12)} contas</div>` : ""}</div>` : ""}
           <p id="cxd-progress" style="margin:0 0 10px;color:#105436;font-size:0.8rem;font-weight:600;" ${this.progress ? "" : "hidden"}>${caixaEsc(this.progress || "")}</p>
           ${this.error ? `<div style="margin-bottom:10px;padding:10px;background:#fff7ed;color:#9a3412;border-radius:8px;font-size:0.82rem;">${caixaEsc(this.error)}</div>` : ""}
+          <p class="cxd-title">CONTAS COM SALDO DISPONÍVEL</p>
+          <div class="cxd-wrap cxd-block">
+            <table class="cxd-contas">
+              <thead><tr><th>Conta</th><th>Número</th><th>Saldo disponível</th></tr></thead>
+              ${contasHtml || `<tbody><tr><td colspan="3" style="padding:16px;color:#64748b;">Nenhuma conta com saldo disponível.</td></tr></tbody>`}
+              <tfoot><tr class="cxd-foot"><td colspan="2">Saldo inicial</td><td>${caixaMoney(saldoInicial)}</td></tr></tfoot>
+            </table>
+          </div>
           ${this.loading ? `<p style="color:#64748b;">Montando o fluxo…</p>` : `
-          <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:auto;">
-            <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
-              <thead><tr style="background:#f8fafc;color:#105436;">
-                <th style="width:36px;"></th>
-                <th style="text-align:left;padding:8px 12px;">Dia</th>
-                <th style="text-align:right;padding:8px 12px;">A entrar</th>
-                <th style="text-align:right;padding:8px 12px;">A pagar</th>
-                <th style="text-align:right;padding:8px 12px;">Saldo projetado</th>
+          <p class="cxd-title">MOVIMENTO DO MÊS</p>
+          <div class="cxd-wrap">
+            <table class="cxd-sheet">
+              <thead><tr>
+                <th style="width:32px;"></th>
+                <th>Dia</th>
+                <th>Saldo inicial</th>
+                <th>Entradas</th>
+                <th>Saídas</th>
+                <th>Saldo do dia</th>
+                <th>Saldo acumulado</th>
               </tr></thead>
-              <tbody>${rows || `<tr><td colspan="5" style="padding:24px;text-align:center;color:#94a3b8;">Sem movimento neste mês.</td></tr>`}</tbody>
+              <tbody>${rows || `<tr><td colspan="7" style="padding:24px;text-align:center;color:#94a3b8;">Sem movimento neste mês.</td></tr>`}</tbody>
+              <tfoot><tr class="cxd-total">
+                <td></td>
+                <td>Total</td>
+                <td class="cxd-num">${caixaMoney(saldoInicial)}</td>
+                <td class="cxd-num">${caixaMoney(totEntrar)}</td>
+                <td class="cxd-num">${caixaMoney(totSair)}</td>
+                <td class="cxd-num">${caixaMoney(totEntrar - totSair)}</td>
+                <td class="cxd-num">${caixaMoney(fim)}</td>
+              </tr></tfoot>
             </table>
           </div>`}
         </div>

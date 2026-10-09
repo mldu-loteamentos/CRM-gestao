@@ -2364,21 +2364,32 @@ window.syncReprocessChargePercents = function(fromModal) {
   }
   const preferSim = (typeof currentReprocessSource !== "undefined" && currentReprocessSource === "simulacao" && !fromModal);
   const pct = window.resolveBoletoChargePercents(preferSim);
-  currentReprocessFinePct = pct.fine;
-  currentReprocessInterestPct = pct.interest;
+  let fine = pct.fine;
+  let interest = pct.interest;
+  const dueEl = document.getElementById("reprocess-duedate");
+  const margin = typeof window.readHonorariosMarginPct === "function"
+    ? window.readHonorariosMarginPct({ forBoleto: true })
+    : 0;
+  if (margin > 0 && typeof window.boletoJurosIndex === "function" && typeof window.reprocessInstallmentRows === "function") {
+    const rows = window.reprocessInstallmentRows(typeof currentReprocessInstId !== "undefined" ? currentReprocessInstId : [], dueEl && dueEl.value);
+    const idx = window.boletoJurosIndex(rows, pct.taxa, margin);
+    if (idx && Number.isFinite(idx.interestPct)) interest = idx.interestPct;
+    if (idx && Number.isFinite(idx.finePct)) fine = idx.finePct;
+  }
+  currentReprocessFinePct = fine;
+  currentReprocessInterestPct = interest;
   currentReprocessTaxa = pct.taxa;
   if (typeof window.setBoletoTaxaSelect === "function") {
     window.setBoletoTaxaSelect(document.getElementById("reprocess-taxa"), pct.taxa);
   }
   const fineEl = document.getElementById("reprocess-fine");
   const interestEl = document.getElementById("reprocess-interest");
-  if (fineEl) fineEl.value = Number(pct.fine).toFixed(2);
-  if (interestEl) interestEl.value = Number(pct.interest).toFixed(2);
-  const dueEl = document.getElementById("reprocess-duedate");
+  if (fineEl) fineEl.value = Number(fine).toFixed(2);
+  if (interestEl) interestEl.value = Number(interest).toFixed(margin > 0 ? 4 : 2);
   if (typeof window.renderReprocessChargesSummary === "function") {
     window.renderReprocessChargesSummary(currentReprocessInstId, dueEl && dueEl.value, pct.taxa);
   }
-  return pct;
+  return { fine: fine, interest: interest, taxa: pct.taxa, honorariosPct: margin };
 };
 
 window.todayIsoLocal = function() {
@@ -2442,6 +2453,129 @@ window.computeLateCharges = function(baseVal, diasAtraso, taxaMultiplier) {
     diasAtraso: days,
     taxa
   };
+};
+
+/** Administrador e operador de cobrança terceirizado negociam honorários no boleto. */
+window.userCanSetHonorarios = function() {
+  const u = (typeof AppState !== "undefined" && AppState.currentUser)
+    || (window.AppState && window.AppState.currentUser)
+    || null;
+  if (!u) return false;
+  if (typeof window.isCrmAdministrator === "function" && window.isCrmAdministrator(u)) return true;
+  if (typeof window.isOperadorCobrancaTerceirizadoProfile === "function"
+    && window.isOperadorCobrancaTerceirizadoProfile(u.profile_name)) return true;
+  return false;
+};
+
+window.clampHonorariosPct = function(v) {
+  const n = typeof window.parseBoletoPercent === "function" ? window.parseBoletoPercent(v) : Number(v);
+  if (!Number.isFinite(n)) return 0;
+  return Math.min(10, Math.max(0, n));
+};
+
+window.readHonorariosMarginPct = function(opts) {
+  if (!window.userCanSetHonorarios()) return 0;
+  const forBoleto = !!(opts && opts.forBoleto);
+  const source = typeof currentReprocessSource !== "undefined" ? String(currentReprocessSource || "") : "";
+  if (forBoleto && source !== "simulacao" && source !== "ocorrencia") return 0;
+  const modal = document.getElementById("modal-reprocessar-boleto");
+  const modalOpen = !!(modal && modal.classList.contains("active"));
+  if ((forBoleto || modalOpen) && (source === "simulacao" || source === "ocorrencia")) {
+    const modalEl = document.getElementById("reprocess-honorarios");
+    if (modalEl) return window.clampHonorariosPct(modalEl.value);
+  }
+  return window.clampHonorariosPct(document.getElementById("simulador-honorarios") && document.getElementById("simulador-honorarios").value);
+};
+
+/**
+ * Honorários = margem% sobre (valor + multa 2% + juros 1% a.m.).
+ * O índice de juros faz o pró-rata do Sienge (dias/30) cobrir o juros padrão e o honorário.
+ * A multa permanece 2% vezes a isenção.
+ */
+window.moraComHonorarios = function(baseVal, diasAtraso, taxaMultiplier, honorariosPct) {
+  const base = Number(baseVal) || 0;
+  const days = Number(diasAtraso) || 0;
+  const taxa = Number.isFinite(Number(taxaMultiplier)) ? Number(taxaMultiplier) : 1;
+  const h = window.clampHonorariosPct(honorariosPct) / 100;
+  const std = window.computeLateCharges(base, days, taxa);
+  const multa = std.multa || 0;
+  const jurosPadrao = std.juros || 0;
+  const honorarios = (days >= 1 && base > 0 && h > 0) ? h * (base + multa + jurosPadrao) : 0;
+  let interestPct = std.interestPct;
+  if (days >= 1 && base > 0 && honorarios > 0) {
+    interestPct = ((jurosPadrao + honorarios) / base) * (30 / days) * 100;
+  }
+  return {
+    multa: multa,
+    jurosPadrao: jurosPadrao,
+    honorarios: honorarios,
+    juros: jurosPadrao + honorarios,
+    finePct: std.finePct,
+    interestPct: interestPct,
+    diasAtraso: days,
+    taxa: taxa
+  };
+};
+
+window.boletoJurosIndex = function(rows, taxa, honorariosPct) {
+  const list = Array.isArray(rows) ? rows : [];
+  const t = Number.isFinite(Number(taxa)) ? Number(taxa) : 1;
+  let encargos = 0;
+  let baseDias = 0;
+  let honorarios = 0;
+  list.forEach(function(row) {
+    const pack = window.moraComHonorarios(row.base, row.days, t, honorariosPct);
+    honorarios += pack.honorarios;
+    if ((Number(row.days) || 0) >= 1 && (Number(row.base) || 0) > 0) {
+      encargos += pack.juros;
+      baseDias += Number(row.base) * (Number(row.days) / 30);
+    }
+  });
+  if (!(baseDias > 0) || !(window.clampHonorariosPct(honorariosPct) > 0)) {
+    return {
+      finePct: Number((2 * t).toFixed(4)),
+      interestPct: Number((1 * t).toFixed(4)),
+      honorarios: 0
+    };
+  }
+  return {
+    finePct: Number((2 * t).toFixed(4)),
+    interestPct: Number(((encargos / baseDias) * 100).toFixed(4)),
+    honorarios: honorarios
+  };
+};
+
+window.reprocessInstallmentRows = function(instIds, dueDateStr) {
+  const ids = (Array.isArray(instIds) ? instIds : [instIds]).map(String).filter(Boolean);
+  const insts = (typeof AppState !== "undefined" && AppState.currentContractInstallments) || [];
+  const rows = [];
+  ids.forEach(function(id) {
+    const inst = insts.find(function(i) {
+      return String(i.installmentId) === String(id) || String(i.installmentNumber) === String(id);
+    });
+    if (!inst) return;
+    const base = Number(inst.currentBalance != null ? inst.currentBalance : inst.value) || 0;
+    const days = typeof window.daysOverdueUntilTarget === "function"
+      ? window.daysOverdueUntilTarget(inst, dueDateStr)
+      : 0;
+    rows.push({ base: base, days: days });
+  });
+  return rows;
+};
+
+window.onHonorariosInput = function(el, fromModal) {
+  if (!el) return;
+  const n = window.parseBoletoPercent(el.value);
+  if (n != null && n > 10) el.value = "10";
+  if (n != null && n < 0) el.value = "0";
+  const other = document.getElementById(fromModal ? "simulador-honorarios" : "reprocess-honorarios");
+  const source = typeof currentReprocessSource !== "undefined" ? currentReprocessSource : "";
+  if (other && (!fromModal || source === "simulacao")) other.value = el.value;
+  if (typeof window.syncReprocessChargePercents === "function") {
+    const modal = document.getElementById("modal-reprocessar-boleto");
+    if (modal && modal.classList.contains("active")) window.syncReprocessChargePercents(!!fromModal);
+  }
+  if (typeof window.recalcularSimulador === "function" && !fromModal) window.recalcularSimulador();
 };
 
 window.getAcordoJudicialQuebradoDays = function(client) {
@@ -9070,7 +9204,9 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
   });
   workload["NÃO ATRIBUÍDO"] = { name: "NÃO ATRIBUÍDO", uniqueClients: new Set(), titlesCount: 0, overdueSum: 0 };
 
+  const lockedCities = typeof window.userSeesOnlyAssignedClients === "function" && window.userSeesOnlyAssignedClients();
   Object.values(consolidated).forEach(c => {
+    if (lockedCities && !(window.clientAssignedToCurrentUser(c) && window.clientInCurrentUserCities(c))) return;
     const op = c.assignedOperator || "NÃO ATRIBUÍDO";
     if (!workload[op]) {
       workload[op] = { name: op, uniqueClients: new Set(), titlesCount: 0, overdueSum: 0 };
@@ -9084,6 +9220,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
   if (workloadContainer) {
     workloadContainer.innerHTML = "";
     Object.values(workload).forEach(wl => {
+      if (lockedCities && !window.clientAssignedToCurrentUser(wl.name)) return;
       if (wl.titlesCount === 0 && wl.name !== "NÃO ATRIBUÍDO") {
         return;
       }
@@ -9154,9 +9291,9 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
 
   let clientList = [...rawList]; // Mostrar sub judice na fila principal
 
-  // Terceirizado: só a própria carteira atribuída
+  // Terceirizado: só a própria carteira, e só das cidades em que ele atua
   if (typeof window.userSeesOnlyAssignedClients === "function" && window.userSeesOnlyAssignedClients()) {
-    clientList = clientList.filter(c => window.clientAssignedToCurrentUser(c));
+    clientList = clientList.filter(c => window.clientAssignedToCurrentUser(c) && window.clientInCurrentUserCities(c));
   }
 
 // Filtro de Operador (Abas do Switch) para Fila de Cobrança
@@ -13792,6 +13929,13 @@ function formatCpfCnpj(val) {
             let totalPrincipal = 0;
             let totalMulta = 0;
             let totalJuros = 0;
+            let totalHonorarios = 0;
+            const honWrap = document.getElementById("simulador-honorarios-wrap");
+            const podeHonorarios = typeof window.userCanSetHonorarios === "function" && window.userCanSetHonorarios();
+            if (honWrap) honWrap.style.display = podeHonorarios ? "flex" : "none";
+            const margemHon = podeHonorarios && typeof window.readHonorariosMarginPct === "function"
+              ? window.readHonorariosMarginPct()
+              : 0;
             
             if (simTableBody) simTableBody.innerHTML = "";
             const emptyEl = document.getElementById("simulador-empty-msg");
@@ -13819,7 +13963,8 @@ function formatCpfCnpj(val) {
                 else simThMulta.textContent = "Multa (0%)";
             }
             if (simThJuros) {
-                if (taxaMultiplier === 1) simThJuros.textContent = "Juros (1% a.m)";
+                if (margemHon > 0) simThJuros.textContent = "Juros + hon.";
+                else if (taxaMultiplier === 1) simThJuros.textContent = "Juros (1% a.m)";
                 else if (taxaMultiplier === 0.5) simThJuros.textContent = "Juros (0,5% a.m)";
                 else simThJuros.textContent = "Juros (0% a.m)";
             }
@@ -13828,16 +13973,21 @@ function formatCpfCnpj(val) {
                const diasAtraso = typeof window.daysOverdueUntilTarget === "function"
                  ? window.daysOverdueUntilTarget(inst, targetDate)
                  : Math.max(0, Math.round((targetDate - inst.due) / (1000 * 60 * 60 * 24)) || 0);
-               const charges = typeof window.computeLateCharges === "function"
-                 ? window.computeLateCharges(inst.cb, diasAtraso, taxaMultiplier)
-                 : { multa: 0, juros: 0 };
+               const charges = typeof window.moraComHonorarios === "function"
+                 ? window.moraComHonorarios(inst.cb, diasAtraso, taxaMultiplier, margemHon)
+                 : (typeof window.computeLateCharges === "function"
+                   ? window.computeLateCharges(inst.cb, diasAtraso, taxaMultiplier)
+                   : { multa: 0, juros: 0, jurosPadrao: 0, honorarios: 0 });
                const multa = charges.multa;
-               const juros = charges.juros;
+               const jurosContrato = charges.jurosPadrao != null ? charges.jurosPadrao : charges.juros;
+               const honorarios = charges.honorarios || 0;
+               const juros = jurosContrato + honorarios;
                
                if (inst.selected) {
                   totalPrincipal += inst.cb;
                   totalMulta += multa;
-                  totalJuros += juros;
+                  totalJuros += jurosContrato;
+                  totalHonorarios += honorarios;
                }
                
                if (simTableBody) {
@@ -13933,9 +14083,14 @@ function formatCpfCnpj(val) {
             
             if (simPrincipalEl) simPrincipalEl.textContent = kpiFmt(totalPrincipal);
             if (simJurosEl) simJurosEl.textContent = kpiFmt(totalMulta + totalJuros);
+            const honLinha = document.getElementById("simulador-honorarios-linha");
+            const honVal = document.getElementById("simulador-honorarios-val");
+            if (honLinha) honLinha.style.display = margemHon > 0 ? "flex" : "none";
+            if (honVal) honVal.textContent = kpiFmt(totalHonorarios);
             
             const totalAtualizado = totalPrincipal + totalMulta + totalJuros;
-            if (simTotalEl) simTotalEl.textContent = kpiFmt(totalAtualizado);
+            const totalComHonorarios = totalAtualizado + totalHonorarios;
+            if (simTotalEl) simTotalEl.textContent = kpiFmt(margemHon > 0 ? totalComHonorarios : totalAtualizado);
 
             // Atualiza VF do Funil
             window.funnelCurrentVF = kpiAVencer + totalAtualizado;
@@ -14044,6 +14199,15 @@ function formatCpfCnpj(val) {
          
          if (simInput) simInput.addEventListener('change', recalcularSimulador);
          if (simTaxaSelect) simTaxaSelect.addEventListener('change', recalcularSimulador);
+         const honInput = document.getElementById("simulador-honorarios");
+         if (honInput && !honInput.dataset.bound) {
+            honInput.dataset.bound = "1";
+            honInput.addEventListener("input", function() {
+               window.onHonorariosInput(honInput, false);
+               recalcularSimulador();
+            });
+         }
+         window.recalcularSimulador = recalcularSimulador;
          recalcularSimulador();
          vencidasSimulador.forEach((simInst) => {
             if (simInst.isFetchingBoleto) fetchSlipForSimInst(simInst);
@@ -22158,9 +22322,14 @@ window.renderReprocessChargesSummary = function(instIds, dueDateStr, taxaMultipl
   const taxa = Number.isFinite(Number(taxaMultiplier)) ? Number(taxaMultiplier)
     : (typeof window.getSimuladorTaxaMultiplier === "function" ? window.getSimuladorTaxaMultiplier() : 1);
   const money = (v) => (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const margin = typeof window.readHonorariosMarginPct === "function"
+    ? window.readHonorariosMarginPct({ forBoleto: true })
+    : 0;
   let principal = 0;
   let multa = 0;
-  let juros = 0;
+  let jurosPadrao = 0;
+  let honorarios = 0;
+  const rows = [];
   ids.forEach((id) => {
     const inst = insts.find(i => String(i.installmentId) === String(id) || String(i.installmentNumber) === String(id));
     if (!inst) return;
@@ -22168,30 +22337,41 @@ window.renderReprocessChargesSummary = function(instIds, dueDateStr, taxaMultipl
     const days = typeof window.daysOverdueUntilTarget === "function"
       ? window.daysOverdueUntilTarget(inst, dueDateStr)
       : 0;
-    const ch = typeof window.computeLateCharges === "function"
-      ? window.computeLateCharges(base, days, taxa)
-      : { multa: 0, juros: 0 };
+    const ch = typeof window.moraComHonorarios === "function"
+      ? window.moraComHonorarios(base, days, taxa, margin)
+      : (typeof window.computeLateCharges === "function"
+        ? window.computeLateCharges(base, days, taxa)
+        : { multa: 0, juros: 0, jurosPadrao: 0, honorarios: 0 });
     principal += base;
-    multa += ch.multa;
-    juros += ch.juros;
+    multa += ch.multa || 0;
+    jurosPadrao += ch.jurosPadrao != null ? ch.jurosPadrao : (ch.juros || 0);
+    honorarios += ch.honorarios || 0;
+    rows.push({ base: base, days: days });
   });
+  const juros = jurosPadrao + honorarios;
   const waiver = typeof window.shouldWaiveBoletoLateCharges === "function"
     ? window.shouldWaiveBoletoLateCharges(ids, dueDateStr)
-    : { waive: (multa + juros) <= 0.009, graceLabels: [] };
-  const finePct = waiver.waive ? 0 : 2 * taxa;
-  const interestPct = waiver.waive ? 0 : 1 * taxa;
+    : { waive: (multa + jurosPadrao) <= 0.009, graceLabels: [] };
+  const idx = (!waiver.waive && typeof window.boletoJurosIndex === "function")
+    ? window.boletoJurosIndex(rows, taxa, waiver.waive ? 0 : margin)
+    : null;
+  const finePct = waiver.waive ? 0 : (idx ? idx.finePct : 2 * taxa);
+  const interestPct = waiver.waive ? 0 : (idx ? idx.interestPct : 1 * taxa);
   const isento = !(finePct > 0 || interestPct > 0);
   const graceHint = (waiver.graceLabels && waiver.graceLabels.length)
     ? ` Vencimento em sábado, domingo ou feriado: o cliente pode pagar no próximo dia útil sem juros e multa (${waiver.graceLabels.join("; ")}).`
+    : "";
+  const honHint = (!waiver.waive && margin > 0)
+    ? ` Honorários de <b>${margin.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}%</b> sobre o valor com multa e juros (${money(honorarios)}) entram no índice de juros. A multa permanece ${finePct.toFixed(2)}%.`
     : "";
   if (isento) {
     box.style.cssText = "display:block;padding:10px 12px;border-radius:8px;background:#ecfdf5;border:1px solid #6ee7b7;color:#065f46;font-size:0.82rem;line-height:1.45;";
     box.innerHTML = `<strong>Sem multa e sem juros neste boleto.</strong> A API do Sienge receberá multa <b>0%</b> e juros <b>0%</b>. Principal: ${money(principal)}.${graceHint}`;
   } else {
     box.style.cssText = "display:block;padding:10px 12px;border-radius:8px;background:#fff7ed;border:1px solid #fdba74;color:#9a3412;font-size:0.82rem;line-height:1.45;";
-    box.innerHTML = `<strong>Este boleto será gerado COM acréscimos.</strong> A API do Sienge receberá multa <b>${finePct.toFixed(2)}%</b> e juros <b>${interestPct.toFixed(2)}% a.m.</b>${(multa + juros) > 0.009 ? ` · Estimativa: multa ${money(multa)} + juros ${money(juros)} · Total ${money(principal + multa + juros)}` : ""}.${graceHint}`;
+    box.innerHTML = `<strong>Este boleto será gerado COM acréscimos.</strong> A API do Sienge receberá multa <b>${Number(finePct).toFixed(2)}%</b> e juros <b>${Number(interestPct).toFixed(2)}% a.m.</b>${(multa + juros) > 0.009 ? ` · Estimativa: multa ${money(multa)} + juros ${money(juros)} · Total ${money(principal + multa + juros)}` : ""}.${honHint}${graceHint}`;
   }
-  return { multa, juros, principal, finePct, interestPct, waive: waiver.waive };
+  return { multa, juros, principal, honorarios, finePct, interestPct, waive: waiver.waive };
 };
 
 window.reprocessBoleto = async function(billId, instId, costCenterId, source = 'avulso') {
@@ -22248,6 +22428,17 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
     taxaEl.value = String(taxaInicial);
   }
   currentReprocessTaxa = Number.isFinite(Number(taxaInicial)) ? Number(taxaInicial) : 1;
+  const honWrap = document.getElementById("reprocess-honorarios-wrap");
+  const honEl = document.getElementById("reprocess-honorarios");
+  const simHon = document.getElementById("simulador-honorarios");
+  const showHon = (source === "simulacao" || source === "ocorrencia")
+    && typeof window.userCanSetHonorarios === "function" && window.userCanSetHonorarios();
+  if (honWrap) honWrap.style.display = showHon ? "block" : "none";
+  if (honEl) {
+    if (!showHon) honEl.value = "0";
+    else if (source === "simulacao" && simHon) honEl.value = simHon.value || "0";
+    else honEl.value = "0";
+  }
   const pct = typeof window.syncReprocessChargePercents === "function"
     ? window.syncReprocessChargePercents()
     : window.resolveBoletoChargePercents(true);
