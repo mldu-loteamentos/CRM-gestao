@@ -37721,6 +37721,25 @@ window.relFindTituloLocal = function(titulo) {
   return bill ? pack(bill) : null;
 };
 
+// O filtro number do Sienge casa por trecho (4637 traz CV1110814637); só vale o número idêntico.
+window.findSalesContractExact = async function(numero, getJson) {
+  const alvo = String(numero || "").trim().toUpperCase();
+  if (!alvo || typeof getJson !== "function") return null;
+  const exatos = [];
+  const limit = 200;
+  for (let offset = 0, page = 0; page < 15; page++, offset += limit) {
+    const data = await getJson("/sales-contracts?number=" + encodeURIComponent(alvo) + "&limit=" + limit + "&offset=" + offset);
+    const list = (data && data.results) || [];
+    list.forEach((c) => {
+      if (String((c && (c.number || c.contractNumber)) || "").trim().toUpperCase() === alvo) exatos.push(c);
+    });
+    const total = data && data.resultSetMetadata && Number(data.resultSetMetadata.count);
+    if (list.length < limit || (total && offset + limit >= total)) break;
+  }
+  if (!exatos.length) return null;
+  return exatos.find((c) => !/CANCEL/i.test(String(c.situation || c.status || ""))) || exatos[0];
+};
+
 window.searchRelacionamento = async function() {
   const docEl = document.getElementById('relacionamento-filter-doc');
   let doc = (!docEl.disabled ? docEl.value : '').replace(/\D/g,'');
@@ -37844,23 +37863,9 @@ window.searchRelacionamento = async function() {
       let myContract = null;
       let bill = null;
 
-      // O filtro number do Sienge casa por trecho (4637 traz CV1110814637); só vale o número idêntico.
-      const alvoContrato = contrato.trim().toUpperCase();
-      const numeroExato = (c) => String((c && (c.number || c.contractNumber)) || "").trim().toUpperCase() === alvoContrato;
-      const exatos = [];
       try {
-          const limit = 200;
-          for (let offset = 0, page = 0; page < 15; page++, offset += limit) {
-              const data = await window.relSiengeGet("/sales-contracts?number=" + encodeURIComponent(contrato) + "&limit=" + limit + "&offset=" + offset);
-              const list = (data && data.results) || [];
-              list.filter(numeroExato).forEach((c) => exatos.push(c));
-              const total = data && data.resultSetMetadata && Number(data.resultSetMetadata.count);
-              if (list.length < limit || (total && offset + limit >= total)) break;
-          }
+          myContract = await window.findSalesContractExact(contrato, window.relSiengeGet);
       } catch(e) {}
-      if (exatos.length) {
-          myContract = exatos.find(c => !/CANCEL/i.test(String(c.situation || c.status || ""))) || exatos[0];
-      }
       
       if (myContract) {
          // Tentar extrair o customerId do contrato

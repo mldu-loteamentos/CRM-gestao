@@ -357,10 +357,11 @@ const FinanciamentoApp = {
     }
 
     if (contrato) {
-      const res = await fetch(`${base}/sales-contracts?number=${encodeURIComponent(contrato)}`, { headers });
-      if (!res.ok) throw new Error(`Contrato não encontrado: ${contrato}`);
-      const data = await res.json();
-      const c = (data.results || [])[0];
+      const c = await window.findSalesContractExact(contrato, async (path) => {
+        const res = await fetch(`${base}${path}`, { headers });
+        if (!res.ok) throw new Error(`Contrato não encontrado: ${contrato}`);
+        return res.json();
+      });
       if (!c) throw new Error(`Contrato não encontrado: ${contrato}`);
       let cid = c.customerId || (c.customer && c.customer.id) || (c.customers && c.customers[0] && (c.customers[0].id || c.customers[0].customerId));
       if (!cid && c.receivableBillId) {

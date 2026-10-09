@@ -2178,9 +2178,14 @@ const CompromissarioApp = {
     return all;
   },
 
-  pickCessaoSale(results, rec, companyId) {
-    const list = Array.isArray(results) ? results : [];
+  pickCessaoSale(results, rec, companyId, numero) {
+    let list = Array.isArray(results) ? results : [];
     if (!list.length) return null;
+    const alvo = String(numero || '').trim().toUpperCase();
+    if (alvo) {
+      const exatos = list.filter((s) => String((s && (s.number || s.contractNumber)) || '').trim().toUpperCase() === alvo);
+      if (exatos.length) list = exatos;
+    }
     const city = this.cityLabelFromCessao(rec);
     const wantedCo = companyId != null && companyId !== ''
       ? String(companyId)
@@ -2235,7 +2240,7 @@ const CompromissarioApp = {
       let bill = null;
       if (contrato) {
         const data = await fetchFn(saleUrl(contrato)).catch(() => null);
-        sale = this.pickCessaoSale(data && data.results, rec, cid);
+        sale = this.pickCessaoSale(data && data.results, rec, cid, contrato);
       }
       if (!sale && titulo) {
         bill = await fetchFn('/accounts-receivable/receivable-bills/' + encodeURIComponent(titulo)).catch(() => null);
@@ -2246,7 +2251,7 @@ const CompromissarioApp = {
         const docNum = bill && (bill.documentNumber || bill.number || bill.contractNumber);
         if (docNum && billFits) {
           const data = await fetchFn(saleUrl(docNum)).catch(() => null);
-          sale = this.pickCessaoSale(data && data.results, rec, cid);
+          sale = this.pickCessaoSale(data && data.results, rec, cid, docNum);
         }
         if (!sale && bill && bill.id && billFits) {
           const byBill = await fetchFn('/sales-contracts?receivableBillId=' + encodeURIComponent(bill.id)).catch(() => null);

@@ -1331,10 +1331,8 @@ const RelacionamentoApp = {
         }
         customerId = hintBill.customerId;
       } else if (contrato) {
-        const data = await this._siengeGet("/sales-contracts?number=" + encodeURIComponent(contrato));
-        const list = data.results || [];
-        if (!list.length) throw new Error("Contrato não encontrado: " + contrato);
-        hintContract = list[0];
+        hintContract = await window.findSalesContractExact(contrato, (p) => this._siengeGet(p));
+        if (!hintContract) throw new Error("Contrato não encontrado: " + contrato);
         customerId = hintContract.customerId
           || hintContract.customer?.id
           || hintContract.salesContractCustomers?.[0]?.id
@@ -1925,10 +1923,8 @@ const RelacionamentoApp = {
         }
         customerId = hintBill.customerId;
       } else if (contrato) {
-        const data = await this._siengeGet("/sales-contracts?number=" + encodeURIComponent(contrato));
-        const list = data.results || [];
-        if (!list.length) throw new Error("Contrato não encontrado: " + contrato);
-        hintContract = list[0];
+        hintContract = await window.findSalesContractExact(contrato, (p) => this._siengeGet(p));
+        if (!hintContract) throw new Error("Contrato não encontrado: " + contrato);
         customerId = hintContract.customerId
           || hintContract.customer?.id
           || hintContract.salesContractCustomers?.[0]?.id
