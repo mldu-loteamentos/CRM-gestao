@@ -36,11 +36,26 @@ const ScodApp = {
     return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   },
 
+  sleep(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+  },
+
+  // A SCOD devolve 429 (Too Many Attempts) quando recebe consultas demais por minuto.
   async getJson(path) {
-    const res = await fetch(this.BASE + path, { headers: { Accept: "application/json" } });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error((data && (data.error || data.message)) || ("SCOD " + res.status));
-    return data;
+    for (let tentativa = 1; ; tentativa++) {
+      const res = await fetch(this.BASE + path, { headers: { Accept: "application/json" } });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) return data;
+      if (res.status === 429 && tentativa <= 6) {
+        const ra = Number(res.headers.get("Retry-After"));
+        const espera = Number.isFinite(ra) && ra > 0 ? ra * 1000 : 10000 * tentativa;
+        this.state.status = `A SCOD pediu uma pausa. Tentando de novo em ${Math.round(espera / 1000)}s…`;
+        this.render();
+        await this.sleep(espera);
+        continue;
+      }
+      throw new Error((data && (data.error || data.message)) || ("SCOD " + res.status));
+    }
   },
 
   async fetchAll(path, listKey, totalPagesKeys) {
@@ -53,12 +68,11 @@ const ScodApp = {
     const all = pageList(first).slice();
     // A SCOD pode limitar o tamanho da página (proprietários vêm de 50 em 50); vale o total que ela devolve.
     const pages = totalPagesKeys.map((k) => Number(first[k])).find((n) => Number.isFinite(n) && n > 0) || 1;
-    for (let p = 2; p <= pages; p += 5) {
-      this.state.status = `Buscando ${listKey} na SCOD (página ${Math.min(p + 4, pages)} de ${pages})…`;
+    for (let p = 2; p <= pages; p++) {
+      this.state.status = `Buscando ${listKey} na SCOD (página ${p} de ${pages})…`;
       this.render();
-      const batch = [];
-      for (let k = p; k < p + 5 && k <= pages; k++) batch.push(load(k));
-      (await Promise.all(batch)).forEach((data) => all.push(...pageList(data)));
+      await this.sleep(400);
+      all.push(...pageList(await load(p)));
     }
     return all;
   },

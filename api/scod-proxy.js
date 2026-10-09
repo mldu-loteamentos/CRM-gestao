@@ -31,7 +31,7 @@ function scodRequest(path, token) {
         const raw = Buffer.concat(chunks).toString("utf8");
         let json = null;
         try { json = raw ? JSON.parse(raw) : null; } catch (e) { json = { raw }; }
-        resolve({ status: res.statusCode || 0, json });
+        resolve({ status: res.statusCode || 0, json, retryAfter: res.headers["retry-after"] || "" });
       });
     });
     req.setTimeout(45000, () => req.destroy(new Error("timeout")));
@@ -56,6 +56,7 @@ module.exports = async function handler(req, res) {
   }
   try {
     const out = await scodRequest("/" + pathname + search, token);
+    if (out.retryAfter && typeof res.setHeader === "function") res.setHeader("Retry-After", String(out.retryAfter));
     return sendJson(res, out.status || 200, out.json == null ? {} : out.json);
   } catch (e) {
     return sendJson(res, 502, { error: "Falha ao consultar a SCOD", details: e.message });
