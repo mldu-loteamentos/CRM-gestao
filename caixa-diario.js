@@ -187,6 +187,9 @@ const FluxoCaixaDiarioApp = {
   accounts: [],
   progress: "",
   detail: null,
+  flags: {},
+  _flagsLoaded: false,
+  _types: {},
   _gen: 0,
 
   init() {
@@ -246,6 +249,102 @@ const FluxoCaixaDiarioApp = {
     this._ccCompany = map;
   },
 
+  ensureCompany() {
+    const ids = this.companies.map((c) => String(c.id));
+    if (this.companyIds.length === 1 && ids.indexOf(this.companyIds[0]) >= 0) return;
+    let saved = "";
+    try { saved = localStorage.getItem("cxd_company") || ""; } catch (e) {}
+    const sorted = ids.slice().sort((a, b) => Number(a) - Number(b) || a.localeCompare(b));
+    const pick = ids.indexOf(saved) >= 0 ? saved : (sorted[0] || "");
+    this.companyIds = pick ? [pick] : [];
+  },
+
+  async loadFlags() {
+    if (this._flagsLoaded) return;
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (!fx || !db || typeof fx.getDoc !== "function") return;
+    try {
+      const snap = await fx.getDoc(fx.doc(db, "caixa_diario_config", "saldo_inicial"));
+      this.flags = snap.exists() ? ((snap.data() || {}).contas || {}) : {};
+      this._flagsLoaded = true;
+    } catch (e) {
+      console.warn("[Caixa diário] flags de saldo inicial", e);
+    }
+  },
+
+  accountKey(a) {
+    return String(a.companyId || "") + "|" + String(a.number || a.name || "").trim().toUpperCase();
+  },
+
+  accountIncluded(a) {
+    return this.flags[this.accountKey(a)] !== false;
+  },
+
+  recalcSaldo() {
+    this.totals.saldo = (this.accounts || [])
+      .filter((a) => this.accountIncluded(a))
+      .reduce((s, a) => s + (Number(a.amount) || 0), 0);
+  },
+
+  async setFlag(key, on) {
+    this.flags[key] = !!on;
+    this.recalcSaldo();
+    this.render();
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (!fx || !db || typeof fx.setDoc !== "function") {
+      alert("O Firebase não está disponível. A marcação vale só nesta consulta.");
+      return;
+    }
+    const user = (window.AppState && AppState.currentUser) || {};
+    try {
+      await fx.setDoc(fx.doc(db, "caixa_diario_config", "saldo_inicial"), {
+        contas: { [key]: !!on },
+        updatedAt: new Date().toISOString(),
+        updatedBy: user.name || user.email || ""
+      }, { merge: true });
+    } catch (e) {
+      console.error("[Caixa diário] gravar flag", e);
+      alert("Não consegui gravar a marcação da conta no Firebase.");
+    }
+  },
+
+  async loadAccountTypes(companyId) {
+    const id = String(companyId || "");
+    if (!id) return {};
+    if (this._types[id]) return this._types[id];
+    const map = {};
+    if (window.SiengeApiService && typeof SiengeApiService.getCheckingAccounts === "function") {
+      try {
+        const res = await SiengeApiService.getCheckingAccounts(id, { allStatuses: true });
+        ((res && res.results) || []).forEach((raw) => {
+          const type = raw && raw.accountType;
+          const typeId = String((type && typeof type === "object" ? type.id : raw.accountTypeId) || "").trim().toUpperCase();
+          const desc = String((type && typeof type === "object" ? (type.description || type.name) : type) || raw.accountKind || "")
+            .normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+          const invest = typeId === "I" || typeId === "A" || /INVEST|APLIC/.test(desc);
+          [raw.accountNumber, raw.number, raw.accountName, raw.name].forEach((k) => {
+            const key = String(k || "").trim().toUpperCase();
+            if (key && !map[key]) map[key] = invest ? "investimento" : "corrente";
+          });
+        });
+      } catch (e) {
+        console.warn("[Caixa diário] tipos de conta", id, e);
+      }
+    }
+    this._types[id] = map;
+    return map;
+  },
+
+  accountTipo(types, number, name) {
+    const byNum = types[String(number || "").trim().toUpperCase()];
+    if (byNum) return byNum;
+    const byName = types[String(name || "").trim().toUpperCase()];
+    if (byName) return byName;
+    return /CDB|APLIC|INVEST|FUNDO|\bLCI\b|\bLCA\b|\bRDB\b|COMPR/.test(String(number + " " + name).toUpperCase()) ? "investimento" : "corrente";
+  },
+
   companyName(id) {
     const hit = this.companies.find((c) => String(c.id) === String(id));
     return hit ? hit.name : (id ? ("Empresa " + id) : "");
@@ -277,6 +376,7 @@ const FluxoCaixaDiarioApp = {
     this.render();
     try {
       await this.ensureCompanies();
+      this.ensureCompany();
       await this.ensureCcCompany();
       if (this._gen !== gen) return;
       const bounds = this.monthBounds();
@@ -354,28 +454,36 @@ const FluxoCaixaDiarioApp = {
       }
     }
     if (this._gen !== gen) return;
+    await this.loadFlags();
+    const typesByCo = {};
+    for (const id of this.companyIds) typesByCo[id] = await this.loadAccountTypes(id);
+    if (this._gen !== gen) return;
     const accounts = [];
     const seen = {};
-    (rows || []).forEach((b) => {
+    for (const b of (rows || [])) {
       const companyId = String(b.companyId || b.company || "");
-      if (!this.companyWanted(companyId)) return;
+      if (!this.companyWanted(companyId)) continue;
       const number = String(b.accountNumber || b.number || "").trim();
       const amount = caixaBalance(b);
-      if (amount == null) return;
+      if (amount == null) continue;
       const key = companyId + "|" + number + "|" + String(b.balanceDate || "");
-      if (seen[key]) return;
+      if (seen[key]) continue;
       seen[key] = true;
+      const name = b.accountName || b.name || number || "Conta";
+      if (!typesByCo[companyId]) typesByCo[companyId] = await this.loadAccountTypes(companyId);
       accounts.push({
         companyId,
         company: this.companyName(companyId),
         number,
-        name: b.accountName || b.name || number || "Conta",
-        amount
+        name,
+        amount,
+        tipo: this.accountTipo(typesByCo[companyId] || {}, number, name)
       });
-    });
+    }
+    if (this._gen !== gen) return;
     accounts.sort((a, b) => String(a.companyId).localeCompare(String(b.companyId), "pt") || String(a.name).localeCompare(String(b.name), "pt"));
     this.accounts = accounts;
-    this.totals.saldo = accounts.reduce((s, a) => s + a.amount, 0);
+    this.recalcSaldo();
     this.progress = "Buscando o que será pago…";
     this.render();
   },
@@ -476,30 +584,23 @@ const FluxoCaixaDiarioApp = {
             id: "cxd-emp",
             items: self.empItems(),
             selectedIds: self.companyIds,
-            query: self.qEmp
+            query: self.qEmp,
+            single: true
           });
         }
       },
       toggleId(id, on) {
+        if (!on) return;
         const sid = String(id);
-        if (on) {
-          if (self.companyIds.indexOf(sid) < 0) self.companyIds.push(sid);
-        } else {
-          self.companyIds = self.companyIds.filter((x) => x !== sid);
-        }
-        self.openEmp = true;
+        self.companyIds = [sid];
+        try { localStorage.setItem("cxd_company", sid); } catch (e) {}
+        self.openEmp = false;
+        self.qEmp = "";
+        self.openDay = "";
         self.load();
       },
-      selectAll() {
-        self.companyIds = self.companies.map((c) => String(c.id));
-        self.openEmp = true;
-        self.load();
-      },
-      selectNone() {
-        self.companyIds = [];
-        self.openEmp = true;
-        self.load();
-      }
+      selectAll() {},
+      selectNone() {}
     });
   },
 
@@ -599,19 +700,48 @@ const FluxoCaixaDiarioApp = {
   },
 
   contasComSaldo() {
-    const groups = [];
+    const tipos = [
+      { id: "corrente", name: "Conta corrente", rows: [], total: 0, marcado: 0 },
+      { id: "investimento", name: "Investimento", rows: [], total: 0, marcado: 0 }
+    ];
     (this.accounts || []).forEach((a) => {
       if (!a || Math.abs(Number(a.amount) || 0) < 0.005) return;
-      const id = String(a.companyId || "");
-      let g = groups.length ? groups[groups.length - 1] : null;
-      if (!g || g.id !== id) {
-        g = { id: id, name: a.company || (id ? ("Empresa " + id) : "Conta"), rows: [], total: 0 };
-        groups.push(g);
-      }
+      const g = a.tipo === "investimento" ? tipos[1] : tipos[0];
+      const v = Number(a.amount) || 0;
       g.rows.push(a);
-      g.total += Number(a.amount) || 0;
+      g.total += v;
+      if (this.accountIncluded(a)) g.marcado += v;
     });
-    return groups;
+    return tipos.filter((g) => g.rows.length);
+  },
+
+  contasHtml() {
+    const grupos = this.contasComSaldo();
+    if (!grupos.length) return `<tbody><tr><td colspan="4" style="padding:16px;color:#64748b;">Nenhuma conta com saldo disponível.</td></tr></tbody>`;
+    return grupos.map((g) => {
+      const linhas = g.rows.map((a) => {
+        const key = this.accountKey(a);
+        const on = this.accountIncluded(a);
+        return `<tr class="${on ? "" : "cxd-off"}">
+          <td class="cxd-flag">
+            <label class="moura-switch" title="${on ? "Considerada no saldo inicial" : "Fora do saldo inicial"}">
+              <input type="checkbox" ${on ? "checked" : ""} onchange="FluxoCaixaDiarioApp.setFlag(decodeURIComponent('${encodeURIComponent(key).replace(/'/g, "%27")}'), this.checked)">
+              <span class="moura-switch-track" aria-hidden="true"></span>
+            </label>
+          </td>
+          <td class="cxd-conta">${caixaEsc(a.name || "Conta")}</td>
+          <td class="cxd-num-conta">${caixaEsc(a.number || "—")}</td>
+          <td class="cxd-num ${a.amount < 0 ? "cxd-out" : "cxd-in"}">${caixaMoney(a.amount)}</td>
+        </tr>`;
+      }).join("");
+      return `<tbody>
+        <tr class="cxd-emp cxd-tipo-${g.id}">
+          <td colspan="3"><i data-lucide="${g.id === "investimento" ? "trending-up" : "landmark"}" style="width:14px;height:14px;vertical-align:-2px;margin-right:6px;"></i>${caixaEsc(g.name)} <span class="cxd-sub">· ${g.rows.length} conta(s) · marcadas ${caixaMoney(g.marcado)}</span></td>
+          <td class="cxd-num">${caixaMoney(g.total)}</td>
+        </tr>
+        ${linhas}
+      </tbody>`;
+    }).join("");
   },
 
   render() {
@@ -636,62 +766,71 @@ const FluxoCaixaDiarioApp = {
       }
       return { d, entrar, sair, movimento, inicial, acum, passado };
     });
-    const rows = linhas.map((line) => {
+    const prevWrap = root.querySelector(".cxd-wrap-mx");
+    const prevScroll = prevWrap && prevWrap.scrollLeft > 0 ? prevWrap.scrollLeft : null;
+    const totEntrar = Number(this.totals.entrar) || 0;
+    const totSair = Number(this.totals.pagar) || 0;
+    const semana = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+    const colCls = (line) => {
+      const c = [];
+      if (line.d.date === hoje) c.push("cxd-col-hoje");
+      if (this.openDay === line.d.date) c.push("cxd-col-open");
+      if (line.passado) c.push("cxd-col-past");
+      return c.join(" ");
+    };
+    const cell = (line, html, cls) => `<td class="${colCls(line)} ${cls || ""}" onclick="FluxoCaixaDiarioApp.toggle('${line.d.date}')">${html}</td>`;
+    const cabecalho = linhas.map((line) => {
       const d = line.d;
-      const open = this.openDay === d.date;
       const has = (d.itens && d.itens.length) || (d.pagarItens && d.pagarItens.length);
-      const hojeCls = d.date === hoje ? " cxd-hoje" : "";
-      const entradas = open ? (d.itens || []).map((it) => `
-        <tr class="cxd-det cxd-in">
-          <td></td>
-          <td colspan="5">Entrada · ${caixaEsc(it.cc)} / ${caixaEsc(it.unidade)} · ${caixaEsc(it.cliente || "—")}${it.cpf ? " · CPF " + caixaEsc(it.cpf) : ""} · venc. ${caixaFmtDate(it.vencimento)} + PMP ${it.pmp}d</td>
+      const wd = semana[new Date(d.date + "T12:00:00").getDay()];
+      return `<th class="${colCls(line)}" onclick="FluxoCaixaDiarioApp.toggle('${d.date}')" title="${has ? "Ver entradas e saídas do dia" : "Sem movimento"}">
+        <div>${caixaFmtDate(d.date).slice(0, 5)}</div>
+        <div class="cxd-wd">${d.date === hoje ? '<span class="cxd-tag">hoje</span>' : wd}${has ? '<span class="cxd-dot"></span>' : ""}</div>
+      </th>`;
+    }).join("");
+    const sinal = (v) => (v < 0 ? "cxd-out" : (v > 0 ? "cxd-in" : "cxd-zero"));
+    const linhaInicial = linhas.map((l) => cell(l, l.inicial == null ? "—" : caixaMoney(l.inicial))).join("");
+    const linhaEntradas = linhas.map((l) => cell(l, caixaMoney(l.entrar), l.entrar ? "cxd-in" : "cxd-zero")).join("");
+    const linhaSaidas = linhas.map((l) => cell(l, caixaMoney(l.sair), l.sair ? "cxd-out" : "cxd-zero")).join("");
+    const linhaDia = linhas.map((l) => cell(l, caixaMoney(l.movimento), sinal(l.movimento))).join("");
+    const linhaAcum = linhas.map((l) => cell(l, l.acum == null ? "—" : caixaMoney(l.acum), l.acum == null ? "cxd-zero" : sinal(l.acum))).join("");
+    const aberto = linhas.find((l) => l.d.date === this.openDay);
+    let detalheDia = "";
+    if (aberto) {
+      const d = aberto.d;
+      const entradas = (d.itens || []).map((it) => `
+        <tr class="cxd-det-in">
+          <td>Entrada</td>
+          <td>${caixaEsc(it.cc)} / ${caixaEsc(it.unidade)} · ${caixaEsc(it.cliente || "—")}${it.cpf ? " · CPF " + caixaEsc(it.cpf) : ""} · venc. ${caixaFmtDate(it.vencimento)} + PMP ${it.pmp}d</td>
           <td class="cxd-num cxd-in">${caixaMoney(it.valor)}</td>
-        </tr>`).join("") : "";
-      const saidas = open ? (d.pagarItens || []).map((it) => `
-        <tr class="cxd-det cxd-out" onclick="FluxoCaixaDiarioApp.openTitulo('${caixaEsc(it.key)}')">
-          <td></td>
-          <td colspan="5">${it.natureza === "previsao" ? "Previsão" : "Saída"} · tít. ${caixaEsc(it.titulo)}${it.parcela ? "/" + caixaEsc(it.parcela) : ""} · ${caixaEsc(it.credor || "—")} · ${caixaEsc(it.docId || "")} ${caixaEsc(it.documento || "")}</td>
-          <td class="cxd-num cxd-out">${caixaMoney(it.valor)}</td>
-        </tr>`).join("") : "";
-      const movCls = line.movimento < 0 ? "cxd-out" : (line.movimento > 0 ? "cxd-in" : "cxd-zero");
-      const acumCls = line.acum == null ? "cxd-zero" : (line.acum < 0 ? "cxd-out" : "cxd-in");
-      return `<tr class="cxd-day${hojeCls}">
-        <td><button type="button" class="cxd-exp" onclick="FluxoCaixaDiarioApp.toggle('${d.date}')">${has ? (open ? "▾" : "▸") : ""}</button></td>
-        <td class="cxd-dia">${caixaFmtDate(d.date)}${d.date === hoje ? '<span class="cxd-tag">hoje</span>' : ""}</td>
-        <td class="cxd-num">${line.inicial == null ? "—" : caixaMoney(line.inicial)}</td>
-        <td class="cxd-num ${line.entrar ? "cxd-in" : "cxd-zero"}">${caixaMoney(line.entrar)}</td>
-        <td class="cxd-num ${line.sair ? "cxd-out" : "cxd-zero"}">${caixaMoney(line.sair)}</td>
-        <td class="cxd-num ${movCls}">${caixaMoney(line.movimento)}</td>
-        <td class="cxd-num cxd-acum ${acumCls}">${line.acum == null ? "—" : caixaMoney(line.acum)}</td>
-      </tr>${entradas}${saidas}`;
-    }).join("");
-    const grupos = this.contasComSaldo();
-    const contasHtml = grupos.map((g) => {
-      const linhasConta = g.rows.map((a) => `
-        <tr>
-          <td class="cxd-conta">${caixaEsc(a.name || "Conta")}</td>
-          <td class="cxd-num-conta">${caixaEsc(a.number || "—")}</td>
-          <td class="cxd-num ${a.amount < 0 ? "cxd-out" : "cxd-in"}">${caixaMoney(a.amount)}</td>
         </tr>`).join("");
-      return `<tbody>
-        <tr class="cxd-emp">
-          <td colspan="2">${caixaEsc(g.id ? (g.id + " — " + g.name) : g.name)}</td>
-          <td class="cxd-num">${caixaMoney(g.total)}</td>
-        </tr>
-        ${linhasConta}
-      </tbody>`;
-    }).join("");
+      const saidas = (d.pagarItens || []).map((it) => `
+        <tr class="cxd-det-out" onclick="FluxoCaixaDiarioApp.openTitulo('${caixaEsc(it.key)}')">
+          <td>${it.natureza === "previsao" ? "Previsão" : "Saída"}</td>
+          <td>tít. ${caixaEsc(it.titulo)}${it.parcela ? "/" + caixaEsc(it.parcela) : ""} · ${caixaEsc(it.credor || "—")} · ${caixaEsc(it.docId || "")} ${caixaEsc(it.documento || "")}</td>
+          <td class="cxd-num cxd-out">${caixaMoney(it.valor)}</td>
+        </tr>`).join("");
+      detalheDia = `<div class="cxd-daydet">
+        <div class="cxd-daydet-head">
+          <strong>Movimento de ${caixaFmtDate(d.date)}</strong>
+          <span>Entradas ${caixaMoney(aberto.entrar)} · Saídas ${caixaMoney(aberto.sair)} · Saldo do dia ${caixaMoney(aberto.movimento)}</span>
+          <button type="button" class="btn btn-cancel btn-sm" onclick="FluxoCaixaDiarioApp.toggle('${d.date}')">Fechar</button>
+        </div>
+        <table class="cxd-sheet">
+          <tbody>${entradas}${saidas || ""}${entradas || saidas ? "" : `<tr><td colspan="3" style="padding:14px;color:#94a3b8;">Sem entradas ou saídas neste dia.</td></tr>`}</tbody>
+        </table>
+      </div>`;
+    }
     const filtro = window.MlEmpresaFilter ? MlEmpresaFilter.html({
       id: "cxd-emp",
-      label: "EMPRESAS",
+      label: "EMPRESA",
       items: this.empItems(),
       selectedIds: this.companyIds,
       open: this.openEmp,
       query: this.qEmp,
-      emptyMeansAll: true
+      emptyMeansAll: false,
+      single: true
     }) : "";
-    const totEntrar = Number(this.totals.entrar) || 0;
-    const totSair = Number(this.totals.pagar) || 0;
     root.innerHTML = `
       <style>
         #fluxo-caixa-diario-root { color:#0f172a; }
@@ -733,13 +872,47 @@ const FluxoCaixaDiarioApp = {
         #fluxo-caixa-diario-root .cxd-conta { padding-left:22px !important; }
         #fluxo-caixa-diario-root .cxd-num-conta { font-family:ui-monospace,Consolas,monospace; color:#475569; }
         #fluxo-caixa-diario-root .cxd-foot td { background:#0c3d28; color:#fff; font-weight:700; }
-        #fluxo-caixa-diario-root .cxd-block { max-height:240px; }
+        #fluxo-caixa-diario-root .cxd-block { max-height:280px; }
         #fluxo-caixa-diario-root .cxd-title { margin:0 0 6px; font-size:.78rem; font-weight:700; color:#105436; letter-spacing:.03em; }
+        #fluxo-caixa-diario-root .cxd-contas td.cxd-flag { width:56px; padding:4px 6px 4px 12px; }
+        #fluxo-caixa-diario-root .cxd-contas tr.cxd-off td.cxd-conta,
+        #fluxo-caixa-diario-root .cxd-contas tr.cxd-off td.cxd-num-conta,
+        #fluxo-caixa-diario-root .cxd-contas tr.cxd-off td.cxd-num { opacity:.45; }
+        #fluxo-caixa-diario-root .cxd-tipo-investimento td { background:#fff7ed; color:#9a3412; }
+        #fluxo-caixa-diario-root .cxd-sub { font-weight:500; font-size:.74rem; opacity:.85; }
+        #fluxo-caixa-diario-root .cxd-wrap-mx { width:0; min-width:100%; }
+        #fluxo-caixa-diario-root .cxd-mx { border-collapse:separate; border-spacing:0; background:#fff; font-size:.8rem; font-variant-numeric:tabular-nums; }
+        #fluxo-caixa-diario-root .cxd-mx th, #fluxo-caixa-diario-root .cxd-mx td { padding:7px 10px; text-align:right; white-space:nowrap; border-bottom:1px solid #e2e8f0; min-width:108px; }
+        #fluxo-caixa-diario-root .cxd-mx th { background:#105436; color:#fff; font-weight:600; position:sticky; top:0; z-index:2; cursor:pointer; vertical-align:top; }
+        #fluxo-caixa-diario-root .cxd-mx td { cursor:pointer; }
+        #fluxo-caixa-diario-root .cxd-mx .cxd-lbl { position:sticky; left:0; z-index:1; background:#fff; text-align:left; font-weight:700; color:#0f172a; min-width:150px; border-right:1px solid #e2e8f0; cursor:default; }
+        #fluxo-caixa-diario-root .cxd-mx th.cxd-lbl { z-index:3; background:#105436; color:#fff; }
+        #fluxo-caixa-diario-root .cxd-mx .cxd-wd { font-size:.68rem; font-weight:500; opacity:.85; margin-top:2px; display:flex; justify-content:flex-end; align-items:center; gap:5px; }
+        #fluxo-caixa-diario-root .cxd-mx .cxd-wd .cxd-tag { margin-left:0; background:#fff; color:#105436; }
+        #fluxo-caixa-diario-root .cxd-dot { width:6px; height:6px; border-radius:50%; background:#f37021; display:inline-block; }
+        #fluxo-caixa-diario-root .cxd-mx th.cxd-col-hoje { background:#0c3d28; }
+        #fluxo-caixa-diario-root .cxd-mx td.cxd-col-hoje { background:#e7f6ee; }
+        #fluxo-caixa-diario-root .cxd-mx th.cxd-col-open { background:#f37021; }
+        #fluxo-caixa-diario-root .cxd-mx td.cxd-col-open { background:#fff4ec; }
+        #fluxo-caixa-diario-root .cxd-mx td.cxd-col-past { background:#fafafa; }
+        #fluxo-caixa-diario-root .cxd-mx td:not(.cxd-lbl):hover { background:#f1f5f9; }
+        #fluxo-caixa-diario-root .cxd-mx .cxd-col-tot { background:#f1f5f9; font-weight:800; border-left:1px solid #cbd5e1; cursor:default; }
+        #fluxo-caixa-diario-root .cxd-mx th.cxd-col-tot { background:#0c3d28; }
+        #fluxo-caixa-diario-root .cxd-mx tr.cxd-row-acum td { font-weight:800; border-top:2px solid #105436; }
+        #fluxo-caixa-diario-root .cxd-mx tr.cxd-row-dia td { font-weight:700; }
+        #fluxo-caixa-diario-root .cxd-daydet { border:1px solid #fed7aa; border-left:4px solid #f37021; border-radius:8px; background:#fff; margin-bottom:14px; overflow:hidden; }
+        #fluxo-caixa-diario-root .cxd-daydet-head { display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:10px 12px; background:#fff7ed; }
+        #fluxo-caixa-diario-root .cxd-daydet-head strong { color:#9a3412; }
+        #fluxo-caixa-diario-root .cxd-daydet-head span { color:#475569; font-size:.8rem; flex:1; }
+        #fluxo-caixa-diario-root .cxd-daydet td { font-size:.78rem; }
+        #fluxo-caixa-diario-root .cxd-daydet td:first-child { width:90px; font-weight:700; }
+        #fluxo-caixa-diario-root tr.cxd-det-out { cursor:pointer; }
+        #fluxo-caixa-diario-root tr.cxd-det-out:hover td { background:#fff4ec; }
       </style>
       <div class="cxd-page">
         <div class="cxd-head">
           <h2>Fluxo de caixa diário</h2>
-          <p>Saldo inicial das contas, entradas e saídas do mês. O acumulado parte do saldo de hoje. Clique na saída para ver o título, os anexos e a forma de pagamento.</p>
+          <p>Saldo inicial das contas ligadas, entradas e saídas do mês dia a dia. O acumulado parte do saldo de hoje. Clique no dia e depois na saída para ver o título, os anexos e a forma de pagamento.</p>
         </div>
         <div class="cxd-body">
           <div class="cxd-tools">
@@ -750,42 +923,45 @@ const FluxoCaixaDiarioApp = {
           </div>
           <p id="cxd-progress" style="margin:0 0 10px;color:#105436;font-size:0.8rem;font-weight:600;" ${this.progress ? "" : "hidden"}>${caixaEsc(this.progress || "")}</p>
           ${this.error ? `<div style="margin-bottom:10px;padding:10px;background:#fff7ed;color:#9a3412;border-radius:8px;font-size:0.82rem;">${caixaEsc(this.error)}</div>` : ""}
-          <p class="cxd-title">CONTAS COM SALDO DISPONÍVEL</p>
+          <p class="cxd-title">CONTAS COM SALDO DISPONÍVEL · ligue as contas que entram no saldo inicial</p>
           <div class="cxd-wrap cxd-block">
             <table class="cxd-contas">
-              <thead><tr><th>Conta</th><th>Número</th><th>Saldo disponível</th></tr></thead>
-              ${contasHtml || `<tbody><tr><td colspan="3" style="padding:16px;color:#64748b;">Nenhuma conta com saldo disponível.</td></tr></tbody>`}
-              <tfoot><tr class="cxd-foot"><td colspan="2">Saldo inicial</td><td>${caixaMoney(saldoInicial)}</td></tr></tfoot>
+              <thead><tr><th title="Considerar no saldo inicial">Saldo</th><th>Conta</th><th>Número</th><th>Saldo disponível</th></tr></thead>
+              ${this.contasHtml()}
+              <tfoot><tr class="cxd-foot"><td colspan="3">Saldo inicial (contas ligadas)</td><td>${caixaMoney(saldoInicial)}</td></tr></tfoot>
             </table>
           </div>
           ${this.loading ? `<p style="color:#64748b;">Montando o fluxo…</p>` : `
-          <p class="cxd-title">MOVIMENTO DO MÊS</p>
-          <div class="cxd-wrap">
-            <table class="cxd-sheet">
+          <p class="cxd-title">MOVIMENTO DO MÊS · clique no dia para ver entradas e saídas</p>
+          <div class="cxd-wrap cxd-wrap-mx">
+            <table class="cxd-mx">
               <thead><tr>
-                <th style="width:32px;"></th>
-                <th>Dia</th>
-                <th>Saldo inicial</th>
-                <th>Entradas</th>
-                <th>Saídas</th>
-                <th>Saldo do dia</th>
-                <th>Saldo acumulado</th>
+                <th class="cxd-lbl">Dia</th>
+                ${cabecalho}
+                <th class="cxd-col-tot">Total</th>
               </tr></thead>
-              <tbody>${rows || `<tr><td colspan="7" style="padding:24px;text-align:center;color:#94a3b8;">Sem movimento neste mês.</td></tr>`}</tbody>
-              <tfoot><tr class="cxd-total">
-                <td></td>
-                <td>Total</td>
-                <td class="cxd-num">${caixaMoney(saldoInicial)}</td>
-                <td class="cxd-num">${caixaMoney(totEntrar)}</td>
-                <td class="cxd-num">${caixaMoney(totSair)}</td>
-                <td class="cxd-num">${caixaMoney(totEntrar - totSair)}</td>
-                <td class="cxd-num">${caixaMoney(fim)}</td>
-              </tr></tfoot>
+              <tbody>
+                <tr><td class="cxd-lbl">Saldo inicial</td>${linhaInicial}<td class="cxd-col-tot">${caixaMoney(saldoInicial)}</td></tr>
+                <tr><td class="cxd-lbl">Entradas</td>${linhaEntradas}<td class="cxd-col-tot cxd-in">${caixaMoney(totEntrar)}</td></tr>
+                <tr><td class="cxd-lbl">Saídas</td>${linhaSaidas}<td class="cxd-col-tot cxd-out">${caixaMoney(totSair)}</td></tr>
+                <tr class="cxd-row-dia"><td class="cxd-lbl">Saldo do dia</td>${linhaDia}<td class="cxd-col-tot ${sinal(totEntrar - totSair)}">${caixaMoney(totEntrar - totSair)}</td></tr>
+                <tr class="cxd-row-acum"><td class="cxd-lbl">Saldo acumulado</td>${linhaAcum}<td class="cxd-col-tot ${sinal(fim)}">${caixaMoney(fim)}</td></tr>
+              </tbody>
             </table>
-          </div>`}
+          </div>
+          ${detalheDia}`}
         </div>
       </div>
       ${this.detailHtml()}`;
+    const wrap = root.querySelector(".cxd-wrap-mx");
+    if (wrap) {
+      if (prevScroll != null) wrap.scrollLeft = prevScroll;
+      else {
+        const th = wrap.querySelector("th.cxd-col-hoje");
+        const lbl = wrap.querySelector("th.cxd-lbl");
+        if (th) wrap.scrollLeft = Math.max(0, th.offsetLeft - (lbl ? lbl.offsetWidth : 0) - th.offsetWidth);
+      }
+    }
     this.bindCompanyFilter();
     if (window.lucide) lucide.createIcons();
   }

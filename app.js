@@ -2563,6 +2563,34 @@ window.reprocessInstallmentRows = function(instIds, dueDateStr) {
   return rows;
 };
 
+/** Terceirizada só isenta multa e juros com honorários zerados. */
+window.syncTaxaLockForHonorarios = function() {
+  const u = (typeof AppState !== "undefined" && AppState.currentUser) || null;
+  const isAdmin = !!(u && typeof window.isCrmAdministrator === "function" && window.isCrmAdministrator(u));
+  const isTerc = !!(u && !isAdmin && typeof window.isOperadorCobrancaTerceirizadoProfile === "function"
+    && window.isOperadorCobrancaTerceirizadoProfile(u.profile_name));
+  [["simulador-taxa", "simulador-honorarios"], ["reprocess-taxa", "reprocess-honorarios"]].forEach(function(pair) {
+    const sel = document.getElementById(pair[0]);
+    const hon = document.getElementById(pair[1]);
+    if (!sel) return;
+    if (pair[0] === "simulador-taxa" && AppState && AppState.isSubjudiceMode) return;
+    const lock = isTerc && window.clampHonorariosPct(hon && hon.value) > 0;
+    if (lock) {
+      if (typeof window.setBoletoTaxaSelect === "function") window.setBoletoTaxaSelect(sel, 1);
+      else sel.value = "1";
+      sel.disabled = true;
+      sel.title = "Zere os honorários para negociar multa e juros.";
+      sel.style.cursor = "not-allowed";
+      sel.style.background = "#f1f5f9";
+    } else if (sel.disabled) {
+      sel.disabled = false;
+      sel.title = "";
+      sel.style.cursor = "";
+      sel.style.background = "";
+    }
+  });
+};
+
 window.onHonorariosInput = function(el, fromModal) {
   if (!el) return;
   const n = window.parseBoletoPercent(el.value);
@@ -2571,6 +2599,7 @@ window.onHonorariosInput = function(el, fromModal) {
   const other = document.getElementById(fromModal ? "simulador-honorarios" : "reprocess-honorarios");
   const source = typeof currentReprocessSource !== "undefined" ? currentReprocessSource : "";
   if (other && (!fromModal || source === "simulacao")) other.value = el.value;
+  window.syncTaxaLockForHonorarios();
   if (typeof window.syncReprocessChargePercents === "function") {
     const modal = document.getElementById("modal-reprocessar-boleto");
     if (modal && modal.classList.contains("active")) window.syncReprocessChargePercents(!!fromModal);
@@ -3130,6 +3159,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "prestacao-contas": "Prestação de Contas",
     "fluxo-caixa": "Fluxo de caixa (DFC)",
     "fluxo-caixa-diario": "Fluxo de caixa diário",
+    "relatorios-cr": "Relatórios",
     "resultado-caixa": "Resultado de caixa",
     "investimento": "Aplicações e Investimentos",
     "financiamento": "Financiamento",
@@ -3194,6 +3224,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "prestacao-contas": "receipt",
     "fluxo-caixa": "git-branch",
     "fluxo-caixa-diario": "calendar-clock",
+    "relatorios-cr": "file-bar-chart",
     "resultado-caixa": "scale",
     "investimento": "trending-up",
     "financiamento": "landmark",
@@ -13935,6 +13966,7 @@ function formatCpfCnpj(val) {
             const honWrap = document.getElementById("simulador-honorarios-wrap");
             const podeHonorarios = typeof window.userCanSetHonorarios === "function" && window.userCanSetHonorarios();
             if (honWrap) honWrap.style.display = podeHonorarios ? "flex" : "none";
+            if (typeof window.syncTaxaLockForHonorarios === "function") window.syncTaxaLockForHonorarios();
             const margemHon = podeHonorarios && typeof window.readHonorariosMarginPct === "function"
               ? window.readHonorariosMarginPct()
               : 0;
@@ -22440,6 +22472,7 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
     else if (source === "simulacao" && simHon) honEl.value = simHon.value || "0";
     else honEl.value = "0";
   }
+  if (typeof window.syncTaxaLockForHonorarios === "function") window.syncTaxaLockForHonorarios();
   const pct = typeof window.syncReprocessChargePercents === "function"
     ? window.syncReprocessChargePercents()
     : window.resolveBoletoChargePercents(true);
@@ -22774,17 +22807,37 @@ window.submitReprocessBoleto = async function() {
     window._lastGeneratedBoletoBillId = billId;
     window._lastGeneratedBoletoAt = Date.now();
 
+    const unit = sale && AppState.units && sale.unitId ? AppState.units[sale.unitId] : null;
+    const enterpriseId = currentReprocessCostCenterId
+      || (sale && (sale.costCenterId || sale.enterpriseId))
+      || (unit && unit.costCenterId)
+      || "";
+    const unitId = (sale && sale.unitId) || (unit && unit.id) || "";
+    const unitName = (sale && sale.unitName)
+      || (unit && (unit.name || [unit.block, unit.lot].filter(Boolean).join(" / ")))
+      || "";
+
+    if (window.HonorariosReport && typeof window.HonorariosReport.record === "function") {
+      window.HonorariosReport.record({
+        billId: billId,
+        instIds: instIds,
+        dueDate: dueDate,
+        fine: fine,
+        interest: interest,
+        honPct: honPct,
+        taxa: waiver.waive ? 0 : currentReprocessTaxa,
+        companyId: companyId,
+        enterpriseId: enterpriseId,
+        unitId: unitId,
+        unitName: unitName,
+        contractNumber: sale && (sale.contractNumber || sale.number || ""),
+        customerId: customerId,
+        source: (typeof currentReprocessSource !== "undefined" && currentReprocessSource) || ""
+      }).catch(function(err) { console.warn("[Honorários] registro do boleto", err); });
+    }
+
     if (typeof window.logCrmAudit === "function") {
       const accountLabel = (selectedOpt && selectedOpt.textContent) || account;
-      const unit = sale && AppState.units && sale.unitId ? AppState.units[sale.unitId] : null;
-      const enterpriseId = currentReprocessCostCenterId
-        || (sale && (sale.costCenterId || sale.enterpriseId))
-        || (unit && unit.costCenterId)
-        || "";
-      const unitId = (sale && sale.unitId) || (unit && unit.id) || "";
-      const unitName = (sale && sale.unitName)
-        || (unit && (unit.name || [unit.block, unit.lot].filter(Boolean).join(" / ")))
-        || "";
       window.logCrmAudit({
         action: "BOLETO_GERADO",
         module: "Financeiro",

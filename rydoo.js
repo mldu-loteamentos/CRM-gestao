@@ -416,7 +416,8 @@ const RydooApp = {
         #rydoo-root .rydoo-node { display:flex; align-items:center; gap:8px; padding:8px 12px; margin-bottom:5px; border:1px solid #e2e8f0; border-left:4px solid #cbd5e1; border-radius:6px; background:#fff; }
         #rydoo-root .rydoo-node-toggle { cursor:pointer; }
         #rydoo-root .rydoo-node-toggle:hover { box-shadow:inset 0 0 0 9999px rgba(16,84,54,.06); }
-        #rydoo-root .rydoo-n0 { background:#ecfdf5; border-left-color:#105436; margin-top:6px; }
+        #rydoo-root .rydoo-n0 { background:#f8fafc; border-left-color:#cbd5e1; margin-top:6px; }
+        #rydoo-root .rydoo-n0.rydoo-done { background:#ecfdf5; border-left-color:#105436; }
         #rydoo-root .rydoo-n1 { background:#f8fafc; border-left-color:#0f766e; }
         #rydoo-root .rydoo-n2 { background:#fff; border-left-color:#eab308; }
         #rydoo-root .rydoo-n3 { background:#f8fafc; border-left-color:#cbd5e1; align-items:flex-start; }
@@ -425,17 +426,20 @@ const RydooApp = {
         #rydoo-root .rydoo-chev { width:16px; height:16px; flex:none; display:inline-flex; align-items:center; justify-content:center; color:#64748b; }
         #rydoo-root .rydoo-chev svg { width:14px; height:14px; }
         #rydoo-root .rydoo-ico { width:14px; height:14px; flex:none; }
-        #rydoo-root .rydoo-n0 .rydoo-ico { color:#105436; }
+        #rydoo-root .rydoo-n0 .rydoo-ico { color:#64748b; }
+        #rydoo-root .rydoo-n0.rydoo-done .rydoo-ico { color:#105436; }
         #rydoo-root .rydoo-n1 .rydoo-ico { color:#0f766e; }
         #rydoo-root .rydoo-n2 .rydoo-ico { color:#ca8a04; }
         #rydoo-root .rydoo-n3 .rydoo-ico { color:#94a3b8; margin-top:2px; }
         #rydoo-root .rydoo-user-main { display:flex; flex-direction:column; gap:2px; min-width:0; flex:1; }
         #rydoo-root .rydoo-name { font-size:13.5px; color:#1e293b; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-        #rydoo-root .rydoo-n0 .rydoo-name { font-weight:800; color:#105436; font-size:14.5px; }
+        #rydoo-root .rydoo-n0 .rydoo-name { font-weight:800; color:#334155; font-size:14.5px; }
+        #rydoo-root .rydoo-n0.rydoo-done .rydoo-name { color:#105436; }
         #rydoo-root .rydoo-n1 .rydoo-name { font-weight:700; }
         #rydoo-root .rydoo-n2 .rydoo-name { font-weight:700; }
         #rydoo-root .rydoo-sum { margin-left:auto; font-weight:700; color:#1e293b; white-space:nowrap; min-width:110px; text-align:right; }
-        #rydoo-root .rydoo-n0 .rydoo-sum { color:#105436; font-weight:800; }
+        #rydoo-root .rydoo-n0 .rydoo-sum { color:#334155; font-weight:800; }
+        #rydoo-root .rydoo-n0.rydoo-done .rydoo-sum { color:#105436; }
         #rydoo-root .rydoo-acts { display:flex; align-items:center; gap:8px; flex:none; }
         #rydoo-root .rydoo-line { display:grid; grid-template-columns:86px minmax(120px,1.1fr) minmax(90px,.8fr) minmax(140px,1.4fr) minmax(150px,1fr); gap:10px; flex:1; min-width:0; font-size:12.5px; color:#334155; }
         #rydoo-root .rydoo-line > div { min-width:0; overflow:hidden; text-overflow:ellipsis; }
@@ -572,8 +576,7 @@ const RydooApp = {
     if (g && g.billId) {
       let banco = "";
       if (g.bankBusy) banco = `<span class="rydoo-tag rydoo-tag-revisar rydoo-bank-tag">Enviando dados bancários…</span>`;
-      else if (g.bankSent) banco = `<span class="rydoo-tag rydoo-tag-ok rydoo-bank-tag">Dados bancários enviados</span>`;
-      else if (g.bankError) banco = `<span class="rydoo-tag rydoo-tag-divergente rydoo-bank-tag" title="${this.esc(g.bankError)}">Banco não enviado</span>`;
+      else if (g.bankError && !g.bankSent) banco = `<span class="rydoo-tag rydoo-tag-divergente rydoo-bank-tag" title="${this.esc(g.bankError)}">Banco não enviado</span>`;
       acao = `<span class="rydoo-tag rydoo-tag-ok">Título ${this.esc(g.billId)}</span>${banco}`;
     } else if (pronto) {
       const off = alertas || g.billBusy ? "disabled" : "";
@@ -593,7 +596,7 @@ const RydooApp = {
         .map((cc) => this.ccBlock(pessoa, cc, byCc.get(cc)))
         .join("");
     }
-    return `<div class="rydoo-node rydoo-n0 rydoo-node-toggle" onclick="RydooApp.toggleNode('user', decodeURIComponent('${arg}'))">
+    return `<div class="rydoo-node rydoo-n0 rydoo-node-toggle${g && g.billId ? " rydoo-done" : ""}" onclick="RydooApp.toggleNode('user', decodeURIComponent('${arg}'))">
         ${this.chevHtml(open)}
         ${pick}
         <i data-lucide="user" class="rydoo-ico"></i>
@@ -1219,6 +1222,7 @@ const RydooApp = {
 
   bancoTexto(b) {
     if (!b) return "";
+    if (this.formaPagamento(b) === "pix") return "PIX · chave do cadastro do credor";
     const acc = String(b.accountNumber || "") + (b.checkDigit ? "-" + b.checkDigit : "");
     const nome = b.nameOfBank || "";
     const codigo = b.bank ? String(b.bank) : "";
@@ -1862,12 +1866,12 @@ const RydooApp = {
   },
 
   formaPagamento(bank) {
+    if (bank && (bank.accountNumber || bank.account)) return "bank-transfer";
     const pf = String((bank && (bank.paymentForm || bank.paymentTypeName || bank.paymentType)) || "").toUpperCase();
     if (pf.indexOf("PIX") >= 0) return "pix";
     if (pf.indexOf("CONCESS") >= 0) return "boleto-concessionaria";
     if (pf.indexOf("BOLETO") >= 0) return "boleto-bancario";
     if (pf.indexOf("TRANSFER") >= 0 || pf.indexOf("TED") >= 0 || pf.indexOf("DOC") >= 0 || pf === "BANK-TRANSFER") return "bank-transfer";
-    if (bank && (bank.accountNumber || bank.account)) return "bank-transfer";
     return "";
   },
 

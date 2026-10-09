@@ -433,6 +433,7 @@ const ConfigUsersApp = {
             { id: "sub_judice", label: "Sub Judice" },
             { id: "notificacoes", label: "Notificações" },
             { id: "recebimentos_webro", label: "Recebimentos Webro" },
+            { id: "relatorios", label: "Relatórios" },
             { id: "configuracoes", label: "Configurações" }
           ]
         },
