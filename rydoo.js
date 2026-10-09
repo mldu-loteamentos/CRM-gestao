@@ -106,6 +106,7 @@ const RydooApp = {
         }
         this.state.rows = parsed.rows;
         this.state.fileName = file.name;
+        this._excelBuffer = reader.result;
         this.state.error = "";
         this.state.pessoa = "";
         this.state.status = "";
@@ -206,7 +207,36 @@ const RydooApp = {
     return String(s || "").replace(/\s+/g, "").replace(/,/g, ".");
   },
 
-  classify(rows) {
+  cartaoClara(r) {
+    return this.fold(r && r.pagamento).indexOf("cartao clara") >= 0;
+  },
+
+  viagem(r) {
+    const blob = this.fold([r && r.categoria, r && r.tipo, r && r.hierCat].join(" "));
+    return /refeic|almoco|jantar|lanche|aliment|desloc|passagem|pedagio|estacion|hosped/.test(blob);
+  },
+
+  chaveLancamento(r) {
+    const tipo = this.fold((r && (r.categoria || r.tipo)) || "");
+    const valor = r && Number.isFinite(r.valor) ? r.valor.toFixed(2) : "";
+    return [this.fold(r && r.pessoa), this.dateKey(r && r.data), tipo, valor].join("|");
+  },
+
+  compAnoMes(rows) {
+    const c = this.competencia(rows);
+    const m = String(c || "").match(/^(\d{2})\.(\d{4})$/);
+    return m ? m[2] + m[1] : "";
+  },
+
+  classify(rows, historico) {
+    const hist = historico || new Set();
+    const comp = this.compAnoMes(rows);
+    const counts = {};
+    rows.forEach((r) => {
+      const k = this.chaveLancamento(r);
+      r._chave = k;
+      counts[k] = (counts[k] || 0) + 1;
+    });
     const buckets = {};
     rows.forEach((r) => {
       const cat = this.fold(r.categoria);
@@ -233,6 +263,9 @@ const RydooApp = {
       const conta = this.contaKey(r.conta);
       const hierConta = this.contaKey(r.hierConta);
       const expected = padrao[this.fold(r.categoria)] || "";
+      const mes = this.dateKey(r.data).slice(0, 6);
+      const retro = !!(comp && mes && mes < comp);
+      r.retroativa = !!(retro && ((counts[r._chave] || 0) > 1 || hist.has(r._chave)));
       if (r.hierCat && this.fold(r.hierCat) !== this.fold(r.categoria)) {
         red.push("Categoria " + r.categoria + " diferente da hierárquica " + r.hierCat);
       }
@@ -247,11 +280,19 @@ const RydooApp = {
       }
       const policy = [r.invalid, r.validation].filter(Boolean).join(" — ");
       if (policy) red.push(policy);
-      if (r.valor != null && r.valor < 0) amber.push("Ajuste negativo");
-      if (!r.aprovacao) amber.push("Sem data de aprovação");
-      if (!r.cc) amber.push("Sem centro de custo");
-      r.level = red.length ? "divergente" : (amber.length ? "revisar" : "ok");
-      r.why = red.concat(amber).join(" · ");
+      if (r.retroativa) red.push("Despesa igual já lançada, com data retroativa");
+      r.clara = this.cartaoClara(r);
+      r.reembolsa = !r.clara;
+      if (!r.clara && !this.viagem(r)) amber.push("Despesa fora de viagem — revisar");
+      if (!r.clara && !r.aprovacao) amber.push("Sem data de aprovação");
+      if (!r.clara && !r.cc) amber.push("Sem centro de custo");
+      if (r.clara) {
+        r.level = red.length ? "divergente" : "ok";
+        r.why = red.join(" · ");
+      } else {
+        r.level = red.length ? "divergente" : (amber.length ? "revisar" : "ok");
+        r.why = red.concat(amber).join(" · ");
+      }
       r.padrao = expected;
     });
   },
@@ -260,6 +301,7 @@ const RydooApp = {
     this._prepGen = (this._prepGen || 0) + 1;
     this.state.rows = [];
     this.state.fileName = "";
+    this._excelBuffer = null;
     this.state.error = "";
     this.state.pessoa = "";
     this.state.status = "";
@@ -319,7 +361,6 @@ const RydooApp = {
     const root = document.getElementById("rydoo-root");
     if (!root) return;
     const s = this.state;
-    const pessoas = this.pessoas();
     root.innerHTML = `
       <style>
         #rydoo-root { padding: 16px 18px 28px; }
@@ -345,6 +386,7 @@ const RydooApp = {
         #rydoo-root tr.rydoo-row-revisar td.rydoo-sticky { background:#fffaf3; }
         #rydoo-root .rydoo-tag { display:inline-block; border-radius:999px; padding:2px 8px; font-size:12px; font-weight:700; }
         #rydoo-root .rydoo-tag-ok { background:#dcfce7; color:#166534; }
+        #rydoo-root .rydoo-tag-clara { background:#e0f2fe; color:#075985; }
         #rydoo-root .rydoo-tag-revisar { background:#ffedd5; color:#c2410c; }
         #rydoo-root .rydoo-tag-divergente { background:#fee2e2; color:#b91c1c; }
         #rydoo-root .rydoo-why { margin-top:4px; color:#475569; font-size:12px; }
@@ -368,6 +410,7 @@ const RydooApp = {
         #rydoo-root .rydoo-lines { width:100%; border-collapse:collapse; font-size:12.5px; }
         #rydoo-root .rydoo-lines td { padding:6px 8px; border-bottom:1px solid #f1f5f9; max-width:280px; }
         #rydoo-root .rydoo-note { margin:4px 0 0; font-size:12.5px; color:#9a3412; }
+        #rydoo-root .btn:disabled { opacity:0.45; cursor:not-allowed; }
       </style>
       <div class="rydoo-card">
         <div class="rydoo-bar">
@@ -376,13 +419,6 @@ const RydooApp = {
             <input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="RydooApp.onFile(this)">
           </label>
           <button type="button" class="btn btn-cancel btn-sm" style="height:36px;" onclick="RydooApp.limpar()" ${s.rows.length ? "" : "disabled"}>Limpar</button>
-          <div class="rydoo-field">
-            <label>AGRUPAR POR</label>
-            <select class="form-control" onchange="RydooApp.onFilter('pessoa', this.value)">
-              <option value="">Todos</option>
-              ${pessoas.map((p) => `<option value="${this.esc(p)}" ${s.pessoa === p ? "selected" : ""}>${this.esc(p)}</option>`).join("")}
-            </select>
-          </div>
           <div class="rydoo-field">
             <label>CLASSIFICAÇÃO</label>
             <select class="form-control" onchange="RydooApp.onFilter('status', this.value)">
@@ -398,7 +434,7 @@ const RydooApp = {
           </div>
           ${s.fileName ? `<div class="rydoo-file">${this.esc(s.fileName)}</div>` : ""}
         </div>
-        <p class="rydoo-hint">${this.esc(s.prepMsg || "Os lançamentos abrem por usuário, centro de custo e plano financeiro. Ao importar, o Integra busca o credor e guarda os dados bancários. O PDF de cada usuário separa as despesas por centro de custo.")}</p>
+        <p class="rydoo-hint" ${s.prepMsg ? "" : "hidden"}>${this.esc(s.prepMsg || "")}</p>
       </div>
       <div id="rydoo-kpis"></div>
       <div id="rydoo-list"></div>`;
@@ -412,16 +448,14 @@ const RydooApp = {
     if (!box) return;
     const rows = this.state.rows;
     if (!rows.length) { box.innerHTML = ""; return; }
-    const shown = this.visible();
-    const sum = (list) => list.reduce((a, r) => a + (Number.isFinite(r.valor) ? r.valor : 0), 0);
+    const sum = (list) => list.reduce((a, r) => a + (r.reembolsa !== false && Number.isFinite(r.valor) ? r.valor : 0), 0);
     const count = (level) => rows.filter((r) => r.level === level).length;
     box.innerHTML = `<div class="rydoo-kpis">
       <div class="rydoo-kpi"><b>${rows.length}</b><span>Lançamentos</span></div>
-      <div class="rydoo-kpi"><b>${this.money(sum(rows))}</b><span>Valor</span></div>
+      <div class="rydoo-kpi"><b>${this.money(sum(rows))}</b><span>Reembolso</span></div>
       <div class="rydoo-kpi"><b>${count("ok")}</b><span>Classificação ok</span></div>
       <div class="rydoo-kpi"><b>${count("divergente")}</b><span>Divergentes</span></div>
       <div class="rydoo-kpi"><b>${count("revisar")}</b><span>A revisar</span></div>
-      <div class="rydoo-kpi"><b>${shown.length}</b><span>Na tela · ${this.money(sum(shown))}</span></div>
     </div>`;
   },
 
@@ -447,8 +481,9 @@ const RydooApp = {
 
   paintHint() {
     const hint = document.querySelector("#rydoo-root .rydoo-hint");
-    const fallback = "Os lançamentos abrem por usuário, centro de custo e plano financeiro. Ao importar, o Integra busca o credor e guarda os dados bancários. O PDF de cada usuário separa as despesas por centro de custo.";
-    if (hint) hint.textContent = this.state.prepMsg || fallback;
+    if (!hint) return;
+    hint.textContent = this.state.prepMsg || "";
+    hint.hidden = !this.state.prepMsg;
   },
 
   onToggle(kind, key, open) {
@@ -475,7 +510,17 @@ const RydooApp = {
     const arg = this.arg(pessoa);
     const open = this.state.openUsers[pessoa] ? "open" : "";
     const n = rows.length;
-    const total = this.money(this.soma(rows));
+    const total = this.money(this.somaReembolso(rows));
+    const alertas = rows.some((r) => r.reembolsa !== false && r.level !== "ok");
+    const pronto = g && g.creditor && this.colaborador(g.creditor) && this.somaReembolso(rows) > 0 && !this.state.preparing;
+    let acao = "";
+    if (g && g.billId) {
+      acao = `<span class="rydoo-tag rydoo-tag-ok">Título ${this.esc(g.billId)}</span>`;
+    } else if (pronto) {
+      const off = alertas || g.billBusy ? "disabled" : "";
+      const title = alertas ? "Revise os alertas antes de gerar o título" : "Gerar título REEM no Sienge";
+      acao = `<button type="button" class="btn btn-primary btn-sm" style="height:32px;" title="${this.esc(title)}" ${off} onclick="event.preventDefault(); event.stopPropagation(); RydooApp.gerarTitulo(decodeURIComponent('${arg}'))">Gerar título</button>`;
+    }
     const byCc = new Map();
     rows.forEach((r) => {
       const cc = r.cc || "(sem centro de custo)";
@@ -494,6 +539,7 @@ const RydooApp = {
           ${this.credorLinha(g)}
         </span>
         <span class="rydoo-sum">${this.esc(total)}</span>
+        ${acao}
         <button type="button" class="btn btn-primary btn-sm" style="height:32px;" onclick="event.preventDefault(); event.stopPropagation(); RydooApp.baixarPdf(decodeURIComponent('${arg}'))">PDF</button>
       </summary>
       <div class="rydoo-user-body">${ccs}</div>
@@ -546,7 +592,7 @@ const RydooApp = {
     return `<details class="rydoo-cc" ${open} ontoggle="RydooApp.onToggle('cc', decodeURIComponent('${arg}'), this.open)">
       <summary>
         <span class="rydoo-user-main"><strong>Centro de custo</strong><span class="rydoo-why">${this.esc(cc)}</span></span>
-        <span class="rydoo-sum">${this.esc(this.money(this.soma(rows)))}</span>
+        <span class="rydoo-sum">${this.esc(this.money(this.somaReembolso(rows)))}</span>
       </summary>
       <div class="rydoo-cc-body">${planos}</div>
     </details>`;
@@ -559,6 +605,10 @@ const RydooApp = {
     const head = rows[0] || {};
     const nome = this.contaNome(head.conta) || "Conta sem descrição no plano financeiro";
     const tag = (r) => {
+      if (r.clara) {
+        const extra = r.level !== "ok" && r.why ? `<div class="rydoo-why">${this.esc(r.why)}</div>` : "";
+        return `<span class="rydoo-tag rydoo-tag-clara">Cartão Clara</span><div class="rydoo-why">Não gera reembolso</div>${extra}`;
+      }
       const label = r.level === "ok" ? "Ok" : (r.level === "revisar" ? "Revisar" : "Divergente");
       return `<span class="rydoo-tag rydoo-tag-${r.level}">${label}</span>${r.why ? `<div class="rydoo-why">${this.esc(r.why)}</div>` : ""}`;
     };
@@ -573,7 +623,7 @@ const RydooApp = {
     return `<details class="rydoo-plano" ${open} ontoggle="RydooApp.onToggle('plano', decodeURIComponent('${arg}'), this.open)">
       <summary>
         <span class="rydoo-user-main"><strong>${this.esc(head.conta || conta)}</strong><span class="rydoo-why">${this.esc(nome)}</span></span>
-        <span class="rydoo-sum">${this.esc(this.money(this.soma(rows)))}</span>
+        <span class="rydoo-sum">${this.esc(this.money(this.somaReembolso(rows)))}</span>
       </summary>
       <div class="rydoo-plano-body">
         <table class="rydoo-lines">
@@ -615,10 +665,17 @@ const RydooApp = {
     this._prepGen = gen;
     this.state.preparing = true;
     this.state.error = "";
-    this.state.prepMsg = "Lendo o plano financeiro…";
+    this.state.prepMsg = "Conferindo reembolsos anteriores…";
     this.paintHint();
     this.renderList();
     try {
+      const hist = await this.lerHistorico();
+      if (this._prepGen !== gen) return;
+      this.classify(this.state.rows, hist);
+      await this.salvarImportacao();
+      if (this._prepGen !== gen) return;
+      this.state.prepMsg = "Lendo o plano financeiro…";
+      this.paintHint();
       await this.loadAccounts();
       if (this._prepGen !== gen) return;
       this.renderList();
@@ -629,6 +686,8 @@ const RydooApp = {
       });
       if (this._prepGen !== gen) return;
       this.state.groups = this.buildGroups();
+      await this.marcarTitulosGerados();
+      if (this._prepGen !== gen) return;
       this.state.prepMsg = "Lendo e guardando os dados bancários…";
       this.paintHint();
       this.renderList();
@@ -676,24 +735,53 @@ const RydooApp = {
   },
 
   async loadCreditors(onProgress) {
-    if (this._creditors && this._creditors.length) return;
+    const cached = await this.lerColaboradores();
+    if (cached.length) {
+      this._creditors = cached;
+      const age = Date.now() - (this._colabAt || 0);
+      if (age > 12 * 60 * 60 * 1000) this.atualizarColaboradores(null, true);
+      return;
+    }
+    await this.atualizarColaboradores(onProgress, false);
+  },
+
+  pessoaFisica(c) {
+    if (!c) return false;
+    const t = this.fold(c.personType || c.type || "");
+    if (t.indexOf("jurid") >= 0 || t === "j" || t === "pj") return false;
+    if (t.indexOf("fisic") >= 0 || t === "f" || t === "pf") return true;
+    const cpf = String(c.cpf || "").replace(/\D/g, "");
+    const cnpj = String(c.cnpj || "").replace(/\D/g, "");
+    const doc = String(c.registerNumber || c.cpfCnpj || "").replace(/\D/g, "");
+    if (cnpj.length === 14 || doc.length === 14) return false;
+    return cpf.length === 11 || doc.length === 11;
+  },
+
+  normalizarCredor(c) {
+    return {
+      id: c.id,
+      name: c.name || "",
+      tradeName: c.tradeName || "",
+      employee: c.employee,
+        personType: c.personType || c.type || "",
+        cpf: c.cpf || "",
+        cnpj: c.cnpj || "",
+        registerNumber: c.registerNumber || c.cpfCnpj || "",
+      active: c.active === true || c.active === "S" || c.active === "true"
+    };
+  },
+
+  async atualizarColaboradores(onProgress, silent) {
     const all = [];
     let offset = 0;
     let total = null;
     do {
       const res = await siengeFetchWithRetry("/creditors?limit=200&offset=" + offset);
       const results = (res && res.results) || [];
-      if (total == null) {
-        total = (res && res.resultSetMetadata && res.resultSetMetadata.count) || results.length;
-      }
+      if (total == null) total = (res && res.resultSetMetadata && res.resultSetMetadata.count) || results.length;
       results.forEach((c) => {
-        all.push({
-          id: c.id,
-          name: c.name || "",
-          tradeName: c.tradeName || "",
-          employee: c.employee,
-          active: c.active === true || c.active === "S" || c.active === "true"
-        });
+        const row = this.normalizarCredor(c);
+        if (this.colaborador(row)) all.push(row);
       });
       offset += 200;
       if (onProgress) onProgress("Lendo credores " + Math.min(offset, total) + " de " + total + "…");
@@ -701,6 +789,21 @@ const RydooApp = {
       if (offset < total) await new Promise((r) => setTimeout(r, 200));
     } while (offset < total);
     this._creditors = all;
+    this._colabAt = Date.now();
+    await this.salvarColaboradores(all);
+    if (silent && this.state.rows.length && !this.state.preparing) {
+      const prev = this.state.groups || [];
+      this.state.groups = this.buildGroups();
+      prev.forEach((old) => {
+        const next = this.state.groups.find((g) => g.pessoa === old.pessoa);
+        if (!next || !old.bank) return;
+        next.bank = old.bank;
+        next.banks = old.banks;
+        next.bankStatus = old.bankStatus;
+        next.billId = old.billId;
+      });
+      this.renderList();
+    }
   },
 
   matchCreditor(pessoa) {
@@ -809,11 +912,17 @@ const RydooApp = {
   },
 
   colaborador(c) {
-    return !!(c && (c.employee === "S" || c.employee === true || c.employee === "true"));
+    if (!c) return false;
+    const emp = c.employee === "S" || c.employee === true || c.employee === "true" || c.employee === 1 || c.employee === "1";
+    return !!(emp && this.pessoaFisica(c));
   },
 
   soma(rows) {
     return rows.reduce((a, r) => a + (Number.isFinite(r.valor) ? r.valor : 0), 0);
+  },
+
+  somaReembolso(rows) {
+    return (rows || []).reduce((a, r) => a + (r && r.reembolsa !== false && Number.isFinite(r.valor) ? r.valor : 0), 0);
   },
 
   mode(rows, key, fallback) {
@@ -871,7 +980,7 @@ const RydooApp = {
   async logoJpeg() {
     if (this._logoJpeg) return this._logoJpeg;
     const img = new Image();
-    img.src = "i.ntegr.a/logo-oficial.png";
+    img.src = "i.ntegr.a/logo-moura-leite.svg";
     await img.decode();
     const maxW = 280;
     const scale = Math.min(1, maxW / img.width);
@@ -887,14 +996,18 @@ const RydooApp = {
     const bin = atob(canvas.toDataURL("image/jpeg", 0.86).split(",")[1]);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    this._logoJpeg = { bytes: bytes, w: w, h: h, dw: 78, dh: 78 * (h / w) };
+    const wide = w / h > 1.6;
+    this._logoJpeg = { bytes: bytes, w: w, h: h, dw: wide ? 168 : 78, dh: (wide ? 168 : 78) * (h / w) };
     return this._logoJpeg;
   },
 
   async baixarPdf(pessoa) {
     let g = (this.state.groups || []).find((x) => x.pessoa === pessoa);
-    const rows = this.state.rows.filter((r) => (r.pessoa || "(sem nome)") === pessoa);
-    if (!rows.length) return;
+    const rows = this.state.rows.filter((r) => (r.pessoa || "(sem nome)") === pessoa && r.reembolsa !== false);
+    if (!rows.length) {
+      alert("Não há despesas reembolsáveis para este colaborador. Cartão Clara não gera reembolso.");
+      return;
+    }
     if (!g) g = { pessoa: pessoa, rows: rows };
     else g = Object.assign({}, g, { rows: rows });
     let logo = null;
@@ -983,11 +1096,8 @@ const RydooApp = {
     let y = 800;
     const left = 40;
     const right = 555;
-    const filial = this.mode(g.rows, "filial", "Moura Leite Loteamentos");
-    const grupo = this.mode(g.rows, "grupo", "");
+    const nome = String((g.creditor && g.creditor.name) || g.pessoa || "").trim();
     const comp = this.competencia(g.rows);
-    const primeiro = String(g.pessoa || "").trim().split(/\s+/)[0] || g.pessoa;
-    const titulo = String(primeiro).toUpperCase() + " - TIME - " + (comp || "");
     const hoje = new Date();
     const dataRel = String(hoje.getDate()).padStart(2, "0") + "/" + String(hoje.getMonth() + 1).padStart(2, "0") + "/" + hoje.getFullYear();
     const green = "0.063 0.329 0.212";
@@ -999,7 +1109,7 @@ const RydooApp = {
       pages.push(ops.join("\n"));
       ops = [];
       y = 800;
-      text(g.pessoa + " — continuação", left, y, 9, true, green);
+      text(nome + " — continuação", left, y, 9, true, green);
       y -= 18;
     };
     const need = (h) => {
@@ -1051,27 +1161,30 @@ const RydooApp = {
     };
     center("Relatório de despesas", y, 16, true, ink);
     y -= 18;
-    center(titulo, y, 12, true, ink);
-    y -= 28;
-    const blockTop = y;
-    ["Moura Leite Loteamentos", "Avenida Doutor Vital Brasil, 1190", "18603193 São Paulo", "Brazil", filial].forEach((line) => {
-      text(line, left, y, 9, false, ink);
-      y -= 12;
+    wrap(nome, 12, 460).forEach((line) => {
+      center(line, y, 12, true, ink);
+      y -= 16;
     });
-    let ry = blockTop;
+    if (comp) {
+      center(comp, y, 11, false, muted);
+      y -= 16;
+    }
+    y -= 8;
+    const grupo = this.mode(g.rows, "grupo", "");
+    const filial = this.mode(g.rows, "filial", "");
+    let ry = y;
     const meta = [
-      ["De:", grupo || filial],
+      ["De:", grupo || filial || "—"],
       ["Data do relatório:", dataRel],
-      ["ID do usuário:", g.pessoa],
-      ["Grupos:", grupo || "—"]
+      ["Colaborador:", nome]
     ];
     meta.forEach((pair) => {
-      text(pair[0], 320, ry, 9, true, ink);
-      const lines = wrap(pair[1], 9, 150);
-      lines.forEach((line, i) => text(line, 430, ry - i * 11, 9, false, ink));
+      text(pair[0], left, ry, 9, true, ink);
+      const lines = wrap(pair[1], 9, 360);
+      lines.forEach((line, i) => text(line, 150, ry - i * 11, 9, false, ink));
       ry -= Math.max(12, lines.length * 11);
     });
-    y = Math.min(y, ry) - 8;
+    y = ry - 8;
     textRight("Resumido por centro de custo", right, y, 8, false, muted);
     y -= 8;
     rule(y);
@@ -1161,6 +1274,365 @@ const RydooApp = {
     if (!ops.length) ops.push("BT /F1 10 Tf 40 800 Td ( ) Tj ET");
     pages.push(ops.join("\n"));
     return this.pdfDocument(pages, logo);
+  },
+
+  fb() {
+    const db = window.firebaseDb;
+    const fx = window.firebaseCollections;
+    if (!db || !fx || !fx.doc || !fx.setDoc || !fx.getDoc || !fx.getDocs || !fx.collection) return null;
+    return { db: db, fx: fx };
+  },
+
+  async lerColaboradores() {
+    const fb = this.fb();
+    if (!fb) return [];
+    try {
+      const snap = await fb.fx.getDoc(fb.fx.doc(fb.db, "rydoo_meta", "colaboradores"));
+      if (!snap.exists()) return [];
+      const data = snap.data() || {};
+      this._colabAt = data.updatedAt ? Date.parse(data.updatedAt) : 0;
+      const items = Array.isArray(data.items) ? data.items : [];
+      return items.filter((c) => this.colaborador(c));
+    } catch (e) {
+      return [];
+    }
+  },
+
+  async salvarColaboradores(list) {
+    const fb = this.fb();
+    if (!fb) return;
+    const items = list.map((c) => ({
+      id: c.id,
+      name: c.name || "",
+      tradeName: c.tradeName || "",
+      employee: c.employee === true || c.employee === "S" || c.employee === "true" ? "S" : c.employee,
+      personType: c.personType || "",
+      cpf: c.cpf || "",
+      cnpj: c.cnpj || "",
+      registerNumber: c.registerNumber || "",
+      active: !!c.active
+    }));
+    await fb.fx.setDoc(fb.fx.doc(fb.db, "rydoo_meta", "colaboradores"), {
+      updatedAt: new Date().toISOString(),
+      count: items.length,
+      items: items
+    });
+  },
+
+  async lerHistorico() {
+    if (this._historico) return this._historico;
+    const set = new Set();
+    const fb = this.fb();
+    if (!fb) {
+      this._historico = set;
+      return set;
+    }
+    try {
+      const snap = await fb.fx.getDocs(fb.fx.collection(fb.db, "rydoo_arquivos"));
+      snap.forEach((d) => {
+        const chaves = (d.data() || {}).chaves;
+        if (Array.isArray(chaves)) chaves.forEach((k) => { if (k) set.add(k); });
+      });
+    } catch (e) {}
+    this._historico = set;
+    return set;
+  },
+
+  async salvarImportacao() {
+    const fb = this.fb();
+    const rows = this.state.rows || [];
+    const chaves = [];
+    rows.forEach((r) => {
+      const chave = r._chave || this.chaveLancamento(r);
+      if (!chave || chave === "|||") return;
+      chaves.push(chave);
+      if (this._historico) this._historico.add(chave);
+    });
+    if (fb) {
+      try {
+        await fb.fx.setDoc(fb.fx.doc(fb.db, "rydoo_arquivos", String(Date.now())), {
+          fileName: this.state.fileName || "",
+          importedAt: new Date().toISOString(),
+          linhas: rows.length,
+          chaves: chaves
+        });
+      } catch (e) {}
+    }
+    const buf = this._excelBuffer;
+    const storage = window.firebaseStorage;
+    const fx = window.firebaseCollections;
+    if (buf && storage && fx && fx.ref && fx.uploadBytes) {
+      try {
+        const safe = String(this.state.fileName || "rydoo.xlsx").replace(/[^\w.\-]+/g, "_");
+        const storageRef = fx.ref(storage, "rydoo/excels/" + Date.now() + "-" + safe);
+        await fx.uploadBytes(storageRef, new Blob([buf]), {
+          contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        });
+      } catch (e) {}
+    }
+  },
+
+  async marcarTitulosGerados() {
+    const fb = this.fb();
+    if (!fb) return;
+    for (const g of this.state.groups || []) {
+      if (!g.creditor) continue;
+      const id = this.tituloDocId(g);
+      if (!id) continue;
+      try {
+        const snap = await fb.fx.getDoc(fb.fx.doc(fb.db, "rydoo_titulos", id));
+        if (snap.exists()) g.billId = (snap.data() || {}).billId || g.billId;
+      } catch (e) {}
+    }
+  },
+
+  tituloDocId(g) {
+    if (!g || !g.creditor) return "";
+    const comp = this.competencia(g.rows || []).replace(/\./g, "");
+    return String(g.creditor.id) + "_" + (comp || "sem");
+  },
+
+  mesNome(comp) {
+    const meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+    const m = String(comp || "").match(/^(\d{2})\.(\d{4})$/);
+    if (!m) return comp || "";
+    return (meses[Number(m[1]) - 1] || m[1]) + " " + m[2];
+  },
+
+  ccIdOf(r) {
+    const m = String((r && r.cc) || "").match(/(\d+)/);
+    return m ? m[1] : "";
+  },
+
+  hojeIso() {
+    const d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  },
+
+  siengeAuth() {
+    const c = window.SIENGE_CONFIG;
+    if (!c || !c.user) return "";
+    return "Basic " + btoa(c.user + ":" + c.pass);
+  },
+
+  siengeUrl(path) {
+    const base = (window.SIENGE_CONFIG && window.SIENGE_CONFIG.baseUrl) || "/api/sienge-proxy";
+    return String(base).replace(/\/$/, "") + path;
+  },
+
+  async siengeJson(path, options) {
+    const res = await fetch(this.siengeUrl(path), Object.assign({
+      headers: { Authorization: this.siengeAuth(), Accept: "application/json" }
+    }, options || {}));
+    const text = await res.text();
+    let body = null;
+    try { body = text ? JSON.parse(text) : null; } catch (e) { body = text; }
+    if (!res.ok) {
+      const msg = body && (body.message || body.clientMessage || body.developerMessage);
+      throw new Error(msg || (typeof body === "string" && body) || ("Sienge " + res.status));
+    }
+    return { res: res, body: body };
+  },
+
+  async empresaDoReembolso(rows) {
+    const totals = {};
+    rows.forEach((r) => {
+      if (r.reembolsa === false) return;
+      const id = this.ccIdOf(r);
+      if (!id) return;
+      totals[id] = (totals[id] || 0) + (Number(r.valor) || 0);
+    });
+    const ccId = Object.keys(totals).sort((a, b) => totals[b] - totals[a])[0];
+    if (!ccId) throw new Error("Nenhum centro de custo para identificar a empresa.");
+    let company = "";
+    try {
+      if (window.SiengeAPI && typeof SiengeAPI.getCostCenters === "function") {
+        const list = await SiengeAPI.getCostCenters();
+        const cc = (list || []).find((c) => String(c.id) === String(ccId));
+        company = cc && (cc.companyId || cc.idCompany || (cc.company && cc.company.id) || "");
+      }
+    } catch (e) {}
+    if (!company) {
+      const raw = await siengeFetchWithRetry("/cost-centers/" + encodeURIComponent(ccId));
+      company = raw && (raw.companyId || raw.idCompany || (raw.company && raw.company.id) || "");
+    }
+    const n = parseInt(company, 10);
+    if (!n) throw new Error("Não encontrei a empresa do centro de custo " + ccId + ".");
+    return n;
+  },
+
+  async departamentoTesouraria() {
+    let list = [];
+    if (window.SiengeAPI && typeof SiengeAPI.getDepartments === "function") {
+      list = await SiengeAPI.getDepartments();
+    } else {
+      const res = await siengeFetchWithRetry("/departments?limit=200&offset=0");
+      list = (res && res.results) || [];
+    }
+    const nome = (d) => this.fold(d.name || d.departmentName || "");
+    const found = (list || []).find((d) => nome(d) === "tesouraria")
+      || (list || []).find((d) => nome(d).indexOf("tesouraria") >= 0);
+    const id = found && (found.id != null ? found.id : found.departmentId);
+    const n = parseInt(id, 10);
+    if (!n) throw new Error("Não encontrei o departamento Tesouraria no Sienge.");
+    return n;
+  },
+
+  orcamento(rows) {
+    const map = new Map();
+    rows.forEach((r) => {
+      if (r.reembolsa === false) return;
+      const cc = parseInt(this.ccIdOf(r), 10);
+      const conta = String(r.conta || "").replace(/\./g, "").trim();
+      if (!cc || !conta) return;
+      const k = cc + "|" + conta;
+      map.set(k, (map.get(k) || 0) + (Number(r.valor) || 0));
+    });
+    const parts = [];
+    map.forEach((valor, k) => {
+      if (valor > 0) {
+        const bits = k.split("|");
+        parts.push({ costCenterId: parseInt(bits[0], 10), paymentCategoriesId: bits[1], valor: valor });
+      }
+    });
+    const base = parts.reduce((a, p) => a + p.valor, 0);
+    if (!base) return [];
+    let acc = 0;
+    return parts.map((p, i) => {
+      let perc = i === parts.length - 1
+        ? Math.round((100 - acc) * 10000) / 10000
+        : Math.round((p.valor / base) * 100 * 10000) / 10000;
+      acc += perc;
+      return { costCenterId: p.costCenterId, paymentCategoriesId: p.paymentCategoriesId, percentage: perc };
+    });
+  },
+
+  async gerarTitulo(pessoa) {
+    const g = (this.state.groups || []).find((x) => x.pessoa === pessoa);
+    const rows = this.state.rows.filter((r) => (r.pessoa || "(sem nome)") === pessoa);
+    if (!g || !g.creditor) {
+      alert("Valide o credor colaborador antes de gerar o título.");
+      return;
+    }
+    if (!this.colaborador(g.creditor)) {
+      alert("O título só é gerado para colaborador pessoa física.");
+      return;
+    }
+    const reembolso = rows.filter((r) => r.reembolsa !== false);
+    if (reembolso.some((r) => r.level !== "ok")) {
+      alert("Ainda há despesas para revisar. O título fica disponível quando não houver alerta.");
+      return;
+    }
+    const total = Math.round(this.somaReembolso(rows) * 100) / 100;
+    if (!(total > 0)) {
+      alert("Não há valor reembolsável. Cartão Clara não gera título.");
+      return;
+    }
+    if (g.billId) {
+      alert("Este reembolso já tem o título " + g.billId + ".");
+      return;
+    }
+    const comp = this.competencia(rows);
+    const docNum = "Reembolso " + (comp || "");
+    const obs = "Reembolso Despesas Mensais referente " + this.mesNome(comp);
+    const ok = window.confirm("Gerar o título " + docNum + " de " + this.money(total) + " para " + (g.creditor.name || pessoa) + " no Sienge?");
+    if (!ok) return;
+    g.billBusy = true;
+    this.renderList();
+    try {
+      const debtorId = await this.empresaDoReembolso(reembolso);
+      const departmentId = await this.departamentoTesouraria();
+      const hoje = this.hojeIso();
+      const payload = {
+        debtorId: debtorId,
+        creditorId: parseInt(g.creditor.id, 10),
+        documentIdentificationId: "REEM",
+        documentNumber: docNum,
+        issueDate: hoje,
+        installmentsNumber: 1,
+        indexId: 0,
+        baseDate: hoje,
+        dueDate: hoje,
+        billDate: hoje,
+        totalInvoiceAmount: total,
+        notes: obs,
+        discount: 0,
+        budgetCategories: this.orcamento(reembolso),
+        departmentsCost: [{ departmentId: departmentId, percentage: 100 }],
+        buildingsCost: [],
+        taxes: [],
+        units: []
+      };
+      const created = await this.siengeJson("/bills", {
+        method: "POST",
+        headers: {
+          Authorization: this.siengeAuth(),
+          Accept: "application/json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+      let billId = created.body && (created.body.id || created.body.billId);
+      if (!billId) {
+        const loc = created.res.headers.get("Location") || created.res.headers.get("location") || "";
+        const last = loc.split("/").filter(Boolean).pop();
+        if (last && !isNaN(parseInt(last, 10))) billId = last;
+      }
+      if (!billId) {
+        const busca = await siengeFetchWithRetry("/bills?startDate=" + hoje + "&endDate=" + hoje + "&debtorId=" + debtorId + "&creditorId=" + parseInt(g.creditor.id, 10));
+        const found = ((busca && busca.results) || []).find((b) => String(b.documentNumber) === docNum);
+        if (found && found.id) billId = found.id;
+      }
+      if (!billId) throw new Error("O Sienge criou o título, mas não devolveu o número.");
+      g.billId = String(billId);
+      await this.anexarPdf(g, rows, billId);
+      await this.guardarTitulo(g, billId, docNum, obs, total);
+      g.billBusy = false;
+      this.renderList();
+      alert("Título " + billId + " gerado no Sienge, com o PDF em anexo.");
+    } catch (e) {
+      g.billBusy = false;
+      this.renderList();
+      alert((e && e.message) ? e.message : "Não consegui gerar o título no Sienge.");
+    }
+  },
+
+  async anexarPdf(g, rows, billId) {
+    const grupo = Object.assign({}, g, { rows: rows.filter((r) => r.reembolsa !== false) });
+    let logo = null;
+    try { logo = await this.logoJpeg(); } catch (e) { logo = null; }
+    const bytes = this.montarPdf(grupo, logo);
+    const comp = this.competencia(grupo.rows).replace(".", "-") || "reembolso";
+    const nome = "reembolso-" + comp + ".pdf";
+    const file = new Blob([bytes], { type: "application/pdf" });
+    const form = new FormData();
+    form.append("file", file, nome);
+    const res = await fetch(this.siengeUrl("/bills/" + encodeURIComponent(billId) + "/attachments?description=" + encodeURIComponent(nome)), {
+      method: "POST",
+      headers: { Authorization: this.siengeAuth() },
+      body: form
+    });
+    if (!res.ok) {
+      let msg = "";
+      try { msg = await res.text(); } catch (e) {}
+      throw new Error("O título " + billId + " foi criado, mas o PDF não subiu. " + msg);
+    }
+  },
+
+  async guardarTitulo(g, billId, docNum, obs, total) {
+    const fb = this.fb();
+    if (!fb) return;
+    const id = this.tituloDocId(g);
+    if (!id) return;
+    await fb.fx.setDoc(fb.fx.doc(fb.db, "rydoo_titulos", id), {
+      billId: String(billId),
+      pessoa: g.pessoa,
+      creditorId: g.creditor.id,
+      documentNumber: docNum,
+      notes: obs,
+      total: total,
+      createdAt: new Date().toISOString()
+    });
   }
 };
 

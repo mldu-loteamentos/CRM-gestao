@@ -5984,17 +5984,32 @@ circle.donut-segment {
 .cprev-table-wrap .cprev-col-ndoc { width: 86px; }
 .cprev-table-wrap .cprev-col-venc { width: 84px; }
 .cprev-table-wrap .cprev-col-tipo { width: 108px; }
-.cprev-table-wrap #cfin-table .cprev-col-id { width: 52px; }
+.cprev-table-wrap #cfin-table .cprev-col-id { width: 54px; }
 .cprev-table-wrap #cfin-table .cprev-col-cc,
 .cprev-table-wrap #cfin-table .cprev-col-cred { width: auto; }
 .cprev-table-wrap #cfin-table .cprev-col-dept { width: 148px; }
 .cprev-table-wrap #cfin-table .cprev-col-tit { width: 78px; }
-.cprev-table-wrap #cfin-table .cprev-col-parc { width: 62px; }
+.cprev-table-wrap #cfin-table .cprev-col-parc { width: 54px; }
 .cprev-table-wrap #cfin-table .cprev-col-doc { width: 54px; }
 .cprev-table-wrap #cfin-table .cprev-col-ndoc { width: 108px; }
 .cprev-table-wrap #cfin-table .cprev-col-venc { width: 108px; }
 .cprev-table-wrap #cfin-table .cprev-col-tipo { width: 156px; }
-.cprev-table-wrap #cfin-table .cprev-col-val { width: 108px; }
+.cprev-table-wrap #cfin-table .cprev-col-val { width: 90px; }
+.cprev-table-wrap #cfin-table th.cprev-col-id,
+.cprev-table-wrap #cfin-table td.cprev-col-id { text-align: center; }
+.cprev-table-wrap #cfin-table .cfin-id-head {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+.cprev-table-wrap #cfin-table th.cprev-col-parc,
+.cprev-table-wrap #cfin-table td.cprev-col-parc,
+.cprev-table-wrap #cfin-table th.cprev-col-val,
+.cprev-table-wrap #cfin-table td.cprev-col-val {
+  padding-left: 4px;
+  padding-right: 4px;
+}
 .cprev-table-wrap #cfin-table th.cprev-col-tipo,
 .cprev-table-wrap #cfin-table td.cprev-col-tipo {
   overflow: hidden;
@@ -6327,6 +6342,36 @@ circle.donut-segment {
   display: inline-block;
   animation: ecau-spin 0.7s linear infinite;
   flex-shrink: 0;
+}
+.cfin-banco {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 10px;
+  padding: 7px 12px;
+  background: #fff;
+  border: 1px solid rgba(16, 84, 54, 0.14);
+  border-radius: 10px;
+  color: #334155;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.cfin-banco[hidden] { display: none !important; }
+.cfin-banco-text { white-space: nowrap; }
+.cfin-banco-track {
+  flex: 1;
+  height: 6px;
+  background: #e2e8f0;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.cfin-banco-fill {
+  height: 100%;
+  width: 0;
+  background: #105436;
+  border-radius: 999px;
+  transition: width 0.25s linear;
 }
 .cprev-ppc-btn {
   border: 0;

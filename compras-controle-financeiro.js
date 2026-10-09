@@ -41,7 +41,8 @@ ComprasControleApp.state = {
   anexosByTitulo: {},
   notasByPedido: {},
   parcelasCache: {},
-  openTitulo: ""
+  openTitulo: "",
+  banco: null
 };
 
 ComprasControleApp.ehPrevisao = function (docId, docName, bill) {
@@ -327,6 +328,99 @@ ComprasControleApp.noteProgress = function (text, ratio) {
   if (bar) bar.style.width = pct + "%";
 };
 
+ComprasControleApp.paintBanco = function () {
+  const el = document.getElementById("cfin-banco");
+  if (!el) return;
+  const b = this.state.banco;
+  if (!b || !b.active || !b.total) {
+    el.hidden = true;
+    return;
+  }
+  const pct = Math.max(0, Math.min(100, Math.round((b.done / b.total) * 100)));
+  el.hidden = false;
+  let text = el.querySelector(".cfin-banco-text");
+  let fill = el.querySelector(".cfin-banco-fill");
+  if (!text || !fill) {
+    el.innerHTML = '<span class="cfin-banco-text"></span><div class="cfin-banco-track" aria-hidden="true"><div class="cfin-banco-fill"></div></div>';
+    text = el.querySelector(".cfin-banco-text");
+    fill = el.querySelector(".cfin-banco-fill");
+  }
+  text.textContent = "Processamento bancário · " + b.done + " de " + b.total;
+  fill.style.width = pct + "%";
+};
+
+ComprasControleApp.paintKpis = function () {
+  const kpi = document.getElementById("cfin-kpis");
+  if (!kpi) return;
+  if (this.state.loading || this.state.error || !this.state.consulted) {
+    kpi.innerHTML = "";
+    return;
+  }
+  const k = this.kpis();
+  const values = [
+    String(k.qtd),
+    this.money(k.pago),
+    this.money(k.processamento),
+    this.money(k.programado),
+    this.money(k.vencido),
+    this.money(k.previsao),
+    this.money(k.total)
+  ];
+  const nodes = kpi.querySelectorAll(".ccom-kpi strong");
+  if (nodes.length === values.length) {
+    values.forEach((v, i) => {
+      if (nodes[i].textContent !== v) nodes[i].textContent = v;
+    });
+    return;
+  }
+  const labels = ["Títulos", "Pago", "Processamento", "Programado", "Vencido", "Previsão", "Total"];
+  kpi.innerHTML = labels.map((label, i) =>
+    '<div class="ccom-kpi"><span>' + label + "</span><strong>" + this.esc(values[i]) + "</strong></div>"
+  ).join("");
+};
+
+ComprasControleApp.patchStatuses = function () {
+  const rows = this.state.shown || [];
+  const trs = document.querySelectorAll("#cfin-table tbody tr.cprev-row");
+  if (!trs.length || trs.length !== rows.length) return false;
+  trs.forEach((tr, i) => {
+    const cell = tr.querySelector("td.cprev-col-tipo");
+    const r = rows[i];
+    if (!cell || !r) return;
+    const sig = this.statusDe(r) + "|" + (r.lote || "");
+    if (cell.getAttribute("data-st") === sig) return;
+    cell.setAttribute("data-st", sig);
+    cell.innerHTML = this.tipoTag(r);
+  });
+  this.paintKpis();
+  return true;
+};
+
+ComprasControleApp.renderListKeepingScroll = function () {
+  const wrap = document.querySelector("#cfin-results .cprev-table-wrap");
+  const top = wrap ? wrap.scrollTop : 0;
+  const left = wrap ? wrap.scrollLeft : 0;
+  const y = window.scrollY || 0;
+  this.renderList();
+  const next = document.querySelector("#cfin-results .cprev-table-wrap");
+  if (next) {
+    next.scrollTop = top;
+    next.scrollLeft = left;
+  }
+  if (y) window.scrollTo(0, y);
+};
+
+ComprasControleApp.refreshBancoRows = function () {
+  if (!this.state.consulted || this.state.loading) return;
+  const status = this.state.status || "todos";
+  const membership = status === "programado" || status === "vencido" || status === "processamento";
+  const resort = this.state.sortKey === "tipo";
+  if (membership || resort || !this.patchStatuses()) {
+    this.applyFilters();
+    this.renderListKeepingScroll();
+  }
+};
+
 ComprasControleApp.departmentScopeNote = function () {
   const note = ComprasPrevisoesApp.departmentScopeNote.call(this);
   return String(note || "").replace(/previsões/g, "títulos").replace(/previsão/g, "título");
@@ -369,29 +463,47 @@ ComprasControleApp.carregarLotes = async function () {
     clearTimeout(this._lotePaint);
     this._lotePaint = null;
   }
+  const stop = () => this.state.loteGen !== gen || !this.state.consulted;
   if (typeof window.siengeFetchWithRetry !== "function") return;
   const cache = this.state.lotesByTitulo || (this.state.lotesByTitulo = {});
   const ids = [];
+  const rowsByTitulo = new Map();
   (this.state.allRows || []).forEach((r) => {
     if (!r || r.natureza !== "programado" || r.forecast) return;
     const id = String(r.titulo || "");
-    if (id && !Object.prototype.hasOwnProperty.call(cache, id) && ids.indexOf(id) < 0) ids.push(id);
+    if (!id) return;
+    const list = rowsByTitulo.get(id);
+    if (list) list.push(r);
+    else {
+      rowsByTitulo.set(id, [r]);
+      if (!Object.prototype.hasOwnProperty.call(cache, id)) ids.push(id);
+    }
   });
-  if (!ids.length) return;
+  if (!ids.length || stop()) return;
   let done = 0;
+  let changed = false;
   const total = ids.length;
-  const paintProgress = () => {
-    if (this.state.loteGen !== gen) return;
-    this.noteProgress("Buscando processamento bancário…", total ? done / total : 0);
+  this.state.banco = { active: true, done: 0, total: total };
+  this.paintBanco();
+  const schedule = () => {
+    if (this._lotePaint || stop()) return;
+    this._lotePaint = setTimeout(() => {
+      this._lotePaint = null;
+      if (stop()) return;
+      this.state.banco = { active: true, done: done, total: total };
+      this.paintBanco();
+      if (!changed) return;
+      changed = false;
+      this.refreshBancoRows();
+    }, 400);
   };
-  paintProgress();
-  await new Promise((r) => setTimeout(r, 0));
   const queue = ids.slice();
   const worker = async () => {
-    while (queue.length && this.state.loteGen === gen) {
+    while (queue.length && !stop()) {
       const id = queue.shift();
       try {
         const data = await window.siengeFetchWithRetry("/bills/" + encodeURIComponent(id) + "/installments", 1);
+        if (stop()) return;
         const map = {};
         ((data && data.results) || []).forEach((inst) => {
           const n = String(inst.installmentNumber != null ? inst.installmentNumber : "");
@@ -400,23 +512,40 @@ ComprasControleApp.carregarLotes = async function () {
         });
         cache[id] = map;
       } catch (e) {
+        if (stop()) return;
         cache[id] = {};
       }
-      (this.state.allRows || []).forEach((r) => {
-        if (!r || String(r.titulo) !== id || r.natureza !== "programado" || r.forecast) return;
+      (rowsByTitulo.get(id) || []).forEach((r) => {
+        if (!r || r.natureza !== "programado" || r.forecast) return;
         const lote = (cache[id] || {})[String(r.parcela || "")];
         if (!lote) return;
         r.natureza = "processamento";
         r.lote = lote;
+        changed = true;
       });
       done += 1;
-      paintProgress();
+      this.state.banco = { active: true, done: done, total: total };
+      this.paintBanco();
+      if (changed) schedule();
     }
   };
   const jobs = [];
   const workers = Math.min(3, total);
   for (let i = 0; i < workers; i++) jobs.push(worker());
-  await Promise.all(jobs);
+  try {
+    await Promise.all(jobs);
+  } finally {
+    if (this._lotePaint) {
+      clearTimeout(this._lotePaint);
+      this._lotePaint = null;
+    }
+    if (!stop()) {
+      const pending = changed;
+      this.state.banco = null;
+      this.paintBanco();
+      if (pending) this.refreshBancoRows();
+    }
+  }
 };
 
 ComprasControleApp.fetchOutcome = async function (start, end) {
@@ -452,6 +581,7 @@ ComprasControleApp.consultar = async function () {
   }
   this.state.loading = true;
   this.state.rastreando = false;
+  this.state.banco = null;
   this.state.error = "";
   this.state.consulted = true;
   this.state.loteGen = (this.state.loteGen || 0) + 1;
@@ -462,19 +592,20 @@ ComprasControleApp.consultar = async function () {
     this.state.allRows = this.transform(payload);
     this.state.updatedAt = new Date().toISOString();
     this.state.lotesByTitulo = {};
-    await this.carregarLotes();
     this.applyFilters();
   } catch (e) {
     this.state.error = (e && e.message) ? e.message : "Falha ao buscar contas a pagar no Sienge.";
     this.state.allRows = [];
     this.state.shown = [];
     this.state.billsByTitulo = {};
+    this.state.banco = null;
   }
   this.state.loading = false;
   this.state.rastreando = false;
   const y = window.scrollY || 0;
   this.renderPage();
   if (y) window.scrollTo(0, y);
+  if (!this.state.error) this.carregarLotes();
 };
 
 ComprasControleApp.limpar = function () {
@@ -493,6 +624,7 @@ ComprasControleApp.limpar = function () {
   this.state.allRows = [];
   this.state.billsByTitulo = {};
   this.state.lotesByTitulo = {};
+  this.state.banco = null;
   this.state.rastreando = false;
   this.state.loteGen = (this.state.loteGen || 0) + 1;
   this.state.consulted = false;
@@ -663,17 +795,7 @@ ComprasControleApp.renderList = function () {
     return;
   }
   const rows = this.state.shown || [];
-  const k = this.kpis();
-  if (kpi) {
-    kpi.innerHTML = `
-      <div class="ccom-kpi"><span>Títulos</span><strong>${k.qtd}</strong></div>
-      <div class="ccom-kpi"><span>Pago</span><strong>${this.esc(this.money(k.pago))}</strong></div>
-      <div class="ccom-kpi"><span>Processamento</span><strong>${this.esc(this.money(k.processamento))}</strong></div>
-      <div class="ccom-kpi"><span>Programado</span><strong>${this.esc(this.money(k.programado))}</strong></div>
-      <div class="ccom-kpi"><span>Vencido</span><strong>${this.esc(this.money(k.vencido))}</strong></div>
-      <div class="ccom-kpi"><span>Previsão</span><strong>${this.esc(this.money(k.previsao))}</strong></div>
-      <div class="ccom-kpi"><span>Total</span><strong>${this.esc(this.money(k.total))}</strong></div>`;
-  }
+  this.paintKpis();
   if (!rows.length) {
     box.innerHTML = '<div class="tvig-empty">Nenhum título neste filtro.</div>';
     return;
@@ -687,6 +809,7 @@ ComprasControleApp.renderList = function () {
     const pago = r.natureza === "pago" && r.dataPagamento;
     const dataRaw = pago ? r.dataPagamento : r.vencimento;
     const dataTitle = pago ? "Pagamento " + this.fmtDate(dataRaw) : "Vencimento " + this.fmtDate(dataRaw);
+    const sig = this.statusDe(r) + "|" + (r.lote || "");
     return `<tr class="cprev-row">
       <td class="cprev-col-id" title="${this.esc(r.companyId)}">${this.esc(r.companyId)}</td>
       <td class="cprev-col-cc" title="${this.esc(ccLabel)}">${this.esc(ccLabel)}</td>
@@ -697,7 +820,7 @@ ComprasControleApp.renderList = function () {
       <td class="cprev-col-doc">${this.esc(r.docId || "—")}</td>
       <td class="cprev-col-ndoc">${this.esc(r.documento || "—")}</td>
       <td class="cprev-col-venc" title="${this.esc(dataTitle)}">${this.esc(this.fmtDate(dataRaw))}</td>
-      <td class="cprev-col-tipo">${this.tipoTag(r)}</td>
+      <td class="cprev-col-tipo" data-st="${this.esc(sig)}">${this.tipoTag(r)}</td>
       <td class="cprev-col-val">${this.esc(this.money(r.valorAjustado))}</td>
     </tr>`;
   }).join("");
@@ -717,8 +840,8 @@ ComprasControleApp.renderList = function () {
           <col class="cprev-col-venc"><col class="cprev-col-tipo"><col class="cprev-col-val">
         </colgroup>
         <thead><tr>
-          ${th("emp", "Emp.")}${th("cc", "Centro de custo")}${th("dept", "Depto")}${th("credor", "Credor")}${th("titulo", "Título")}
-          ${th("parc", "Parc.")}${th("doc", "Doc.")}${th("ndoc", "Nº doc.")}${th("data", "Venc./Pagto")}${th("tipo", "Status", "cprev-col-tipo")}${th("valor", "Valor")}
+          <th class="cprev-col-id" title="Id. da empresa" onclick="ComprasControleApp.toggleSort('emp')" style="cursor:pointer;user-select:none;text-align:center;"><div class="cfin-id-head">Id. <i data-lucide="info" style="width:11px;height:11px;cursor:help;color:#64748b;"></i> <i data-lucide="chevrons-up-down" style="width:11px;vertical-align:middle;"></i></div></th>${th("cc", "Centro de custo")}${th("dept", "Depto")}${th("credor", "Credor")}${th("titulo", "Título")}
+          ${th("parc", "Parc.", "cprev-col-parc")}${th("doc", "Doc.")}${th("ndoc", "Nº doc.")}${th("data", "Venc./Pagto")}${th("tipo", "Status", "cprev-col-tipo")}${th("valor", "Valor", "cprev-col-val")}
         </tr></thead>
         <tbody>${body}</tbody>
       </table>
@@ -812,14 +935,16 @@ ComprasControleApp.renderPage = function () {
             </div>
           </div>
         </div>
-        <p class="cprev-hint">A consulta manda para a API a <strong>empresa</strong> e o <strong>vencimento</strong>. Empreendimento, credor, título, tipo e departamento ficam liberados depois e só filtram a lista. Em <strong>Venc./Pagto</strong>, o pago mostra o pagamento, e essa data também precisa estar no período.</p>
+        <p class="cprev-hint">A consulta manda para a API a <strong>empresa</strong> e o <strong>vencimento</strong>. Empreendimento, credor, título, tipo e departamento ficam liberados depois e só filtram a lista. O processamento bancário segue em segundo plano e só atualiza o status na tabela.</p>
         ${this.departmentScopeNote() ? `<p class="cprev-hint">${this.esc(this.departmentScopeNote())}</p>` : ""}
       </div>
       <div id="cfin-kpis" class="ccom-kpis cprev-kpis"></div>
+      <div id="cfin-banco" class="cfin-banco" hidden></div>
       <div id="cfin-results" class="cprev-results"></div>
     </div>`;
   this.paintFilters();
   this.renderList();
+  this.paintBanco();
   if (window.lucide) lucide.createIcons();
 };
 
