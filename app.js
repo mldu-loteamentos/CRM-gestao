@@ -2575,7 +2575,9 @@ window.onHonorariosInput = function(el, fromModal) {
     const modal = document.getElementById("modal-reprocessar-boleto");
     if (modal && modal.classList.contains("active")) window.syncReprocessChargePercents(!!fromModal);
   }
-  if (typeof window.recalcularSimulador === "function" && !fromModal) window.recalcularSimulador();
+  if (typeof window.recalcularSimulador === "function" && (!fromModal || source === "simulacao")) {
+    window.recalcularSimulador();
+  }
 };
 
 window.getAcordoJudicialQuebradoDays = function(client) {
@@ -14204,7 +14206,6 @@ function formatCpfCnpj(val) {
             honInput.dataset.bound = "1";
             honInput.addEventListener("input", function() {
                window.onHonorariosInput(honInput, false);
-               recalcularSimulador();
             });
          }
          window.recalcularSimulador = recalcularSimulador;
@@ -22709,7 +22710,11 @@ window.submitReprocessBoleto = async function() {
     const checkIsTwoBiz = !window.isBusinessDayIso(dueDate);
     const checkHint = checkIsTwoBiz ? "2 dias úteis" : "D+1";
     const parcelasPart = parcelasLog || ("Parcela ID: " + instIds.join(", "));
-    const boletoText = `Boleto gerado. ${parcelasPart} | Novo vencimento: ${dueDateBr} | Multa: ${fine}% | Juros: ${interest}% | Lembrete automático: Checar pagamento em ${checkDateBr} (${checkHint})`;
+    const honPct = (typeof window.readHonorariosMarginPct === "function" && Number(interest) > 0)
+      ? window.readHonorariosMarginPct({ forBoleto: true })
+      : 0;
+    const honPart = honPct > 0 ? ` | Honorários: ${honPct}% (incluídos no índice de juros)` : "";
+    const boletoText = `Boleto gerado. ${parcelasPart} | Novo vencimento: ${dueDateBr} | Multa: ${fine}% | Juros: ${interest}%${honPart} | Lembrete automático: Checar pagamento em ${checkDateBr} (${checkHint})`;
 
     const promessaSection = document.getElementById('reprocess-promessa-section');
     const isPromessaHidden = promessaSection && promessaSection.style.display === 'none';
@@ -22798,6 +22803,7 @@ window.submitReprocessBoleto = async function() {
           newDueDate: dueDate,
           finePercentage: fine,
           interestPercentage: interest,
+          honorariosPct: honPct,
           source: (typeof currentReprocessSource !== "undefined" && currentReprocessSource) || "",
           contractNumber: sale && (sale.contractNumber || sale.number || ""),
           saleId: AppState.selectedSaleId || "",
