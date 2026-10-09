@@ -1,6 +1,70 @@
 // MÓDULO: CONFIGURAÇÕES > APOIO > PLANO FINANCEIRO
 // Integração com API Sienge + Visões Personalizadas + Drag&Drop DFC (70/30)
 
+// Contas reembolsáveis: config/global.crm_plano_reembolsaveis = { "1010101": true }, chave = código sem pontos.
+window.PlanoReembolsavel = {
+  FIELD: 'crm_plano_reembolsaveis',
+  CACHE_KEY: 'crm_plano_reembolsaveis_cache',
+  map: null,
+  _loading: null,
+
+  key(code) {
+    return String(code || '').replace(/[^0-9A-Za-z]/g, '');
+  },
+
+  cached() {
+    if (this.map) return this.map;
+    try { this.map = JSON.parse(localStorage.getItem(this.CACHE_KEY)) || {}; } catch (e) { this.map = {}; }
+    return this.map;
+  },
+
+  isOn(code) {
+    const k = this.key(code);
+    return !!(k && this.cached()[k] === true);
+  },
+
+  any() {
+    const m = this.cached();
+    return Object.keys(m).some((k) => m[k] === true);
+  },
+
+  remember(map) {
+    this.map = map || {};
+    try { localStorage.setItem(this.CACHE_KEY, JSON.stringify(this.map)); } catch (e) {}
+  },
+
+  load(force) {
+    if (this._loading && !force) return this._loading;
+    const db = window.firebaseDb;
+    const f = window.firebaseCollections;
+    if (!db || !f || !f.getDoc || !f.doc) return Promise.resolve(this.cached());
+    this._loading = f.getDoc(f.doc(db, 'config', 'global')).then((snap) => {
+      const ok = snap && (typeof snap.exists === 'function' ? snap.exists() : snap.exists);
+      const data = ok ? (snap.data() || {}) : {};
+      const raw = data[this.FIELD];
+      this.remember(raw && typeof raw === 'object' ? raw : {});
+      return this.map;
+    }).catch((e) => {
+      console.warn('[Plano Financeiro] reembolsáveis:', e);
+      this._loading = null;
+      return this.cached();
+    });
+    return this._loading;
+  },
+
+  async set(code, on) {
+    const k = this.key(code);
+    if (!k) return;
+    const db = window.firebaseDb;
+    const f = window.firebaseCollections;
+    if (!db || !f || !f.setDoc || !f.doc) throw new Error('Firebase indisponível');
+    await f.setDoc(f.doc(db, 'config', 'global'), { [this.FIELD]: { [k]: !!on } }, { merge: true });
+    const next = Object.assign({}, this.cached());
+    next[k] = !!on;
+    this.remember(next);
+  }
+};
+
 const PlanoFinanceiroApp = {
   categories: [],
   visoes: [],
@@ -39,6 +103,9 @@ const PlanoFinanceiroApp = {
     }
 
     this.renderShell(root);
+    window.PlanoReembolsavel.load(true).then(() => {
+      if (!this.selectedVisaoId) this.renderTable();
+    }).catch(() => {});
     await this.syncVisoesWithCloud();
     await this.loadCategories();
   },
@@ -528,6 +595,7 @@ const PlanoFinanceiroApp = {
                     <tr style="background:#f1f5f9;position:sticky;top:0;z-index:1;">
                       <th style="padding:10px 14px;text-align:left;border-bottom:2px solid #e2e8f0;width:170px;">Conta</th>
                       <th style="padding:10px 14px;text-align:left;border-bottom:2px solid #e2e8f0;">Descrição</th>
+                      <th style="padding:10px 14px;text-align:center;border-bottom:2px solid #e2e8f0;width:120px;" title="Contas ligadas aparecem no ajuste de plano financeiro do Rydoo">Reembolsável</th>
                       <th style="padding:10px 14px;text-align:left;border-bottom:2px solid #e2e8f0;width:120px;">Tipo</th>
                       <th style="padding:10px 14px;text-align:center;border-bottom:2px solid #e2e8f0;width:80px;">Ações</th>
                     </tr>
@@ -826,6 +894,11 @@ const PlanoFinanceiroApp = {
              </span>
           </td>
           <td style="padding:8px 14px;font-size:0.82rem;padding-left:${16 + (depth * 18)}px;font-weight:${isTotalizadora ? 700 : 500};text-transform:${isTotalizadora ? 'uppercase' : 'none'};">${this.esc(cat.name)} ${descTags}</td>
+          <td style="padding:6px 14px;text-align:center;">${isTotalizadora || hasChildren ? '' : `
+             <label class="moura-switch" title="Reembolsável no Rydoo" style="justify-content:center;">
+               <input type="checkbox" ${window.PlanoReembolsavel.isOn(codeDisp) ? 'checked' : ''} onchange="PlanoFinanceiroApp.toggleReembolsavel('${this.esc(codeDisp)}', this)">
+               <span class="moura-switch-track" aria-hidden="true"></span>
+             </label>`}</td>
           <td style="padding:8px 14px;font-size:0.78rem;color:#475569;">${typeInfo.label}</td>
           <td style="padding:8px 14px;text-align:center;">
              <button onclick="PlanoFinanceiroApp.openTaxModal('${strId}')" title="Base fiscal" style="background:none;border:none;cursor:pointer;color:#64748b;"><i data-lucide="settings" style="width:14px;"></i></button>
@@ -1099,6 +1172,20 @@ const PlanoFinanceiroApp = {
     `;
     const container = document.getElementById('pf-modal-container');
     if (container) container.innerHTML = modalHtml;
+  },
+
+  async toggleReembolsavel(code, input) {
+    const on = !!(input && input.checked);
+    if (input) input.disabled = true;
+    try {
+      await window.PlanoReembolsavel.set(code, on);
+    } catch (e) {
+      console.warn('[Plano Financeiro] reembolsável:', e);
+      if (input) input.checked = !on;
+      alert('Não foi possível salvar no Firebase. Tente de novo.');
+    } finally {
+      if (input) input.disabled = false;
+    }
   },
 
   saveTaxConfig(id) {

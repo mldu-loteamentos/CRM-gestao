@@ -3199,6 +3199,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     suporte: "Suporte",
     auditoria: "Auditoria do Sistema",
     "consumo-api": "Consumo de API",
+    "usuarios-online": "Usuários online",
     acessos: "Acessos"
   }
   document.dispatchEvent(new CustomEvent('tabChanged', { detail: tabId }));
@@ -3258,6 +3259,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     suporte: "headphones",
     auditoria: "shield",
     "consumo-api": "activity",
+    "usuarios-online": "users",
     acessos: "key-round"
   };
 
@@ -3418,6 +3420,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (typeof window.renderAuditLogs === "function") window.renderAuditLogs(true);
   } else if (tabId === "consumo-api") {
     if (window.ConsumoApiApp && typeof ConsumoApiApp.init === "function") ConsumoApiApp.init();
+  } else if (tabId === "usuarios-online") {
+    if (window.UsuariosOnline && typeof UsuariosOnline.init === "function") UsuariosOnline.init();
   }
 }
 
@@ -4128,6 +4132,11 @@ async function processSuccessfulLogin(loggedUser) {
     if (loginVideo) loginVideo.pause();
     renderUserSession();
     try {
+      if (window.UsuariosOnline) UsuariosOnline.start(validatedUser);
+    } catch (e) {
+      console.warn("[usuarios-online] início:", e);
+    }
+    try {
     await initializeApplication();
     } catch (initErr) {
       console.error("Erro ao inicializar o sistema após o login:", initErr);
@@ -4153,6 +4162,7 @@ async function processSuccessfulLogin(loggedUser) {
       const overlay = document.getElementById("login-modal-overlay");
       if (overlay) overlay.classList.remove("active");
       try { renderUserSession(); } catch (e) {}
+      try { if (window.UsuariosOnline) UsuariosOnline.start(AppState.currentUser); } catch (e) {}
       try { switchTab("construcao-home", "Home"); } catch (e) {}
       return;
     }
@@ -37834,13 +37844,23 @@ window.searchRelacionamento = async function() {
       let myContract = null;
       let bill = null;
 
-      // Buscar por number (parâmetro correto da Sienge)
+      // O filtro number do Sienge casa por trecho (4637 traz CV1110814637); só vale o número idêntico.
+      const alvoContrato = contrato.trim().toUpperCase();
+      const numeroExato = (c) => String((c && (c.number || c.contractNumber)) || "").trim().toUpperCase() === alvoContrato;
+      const exatos = [];
       try {
-          const data = await window.relSiengeGet("/sales-contracts?number=" + encodeURIComponent(contrato));
-          if (data && data.results && data.results.length > 0) {
-                  myContract = data.results[0];
+          const limit = 200;
+          for (let offset = 0, page = 0; page < 15; page++, offset += limit) {
+              const data = await window.relSiengeGet("/sales-contracts?number=" + encodeURIComponent(contrato) + "&limit=" + limit + "&offset=" + offset);
+              const list = (data && data.results) || [];
+              list.filter(numeroExato).forEach((c) => exatos.push(c));
+              const total = data && data.resultSetMetadata && Number(data.resultSetMetadata.count);
+              if (list.length < limit || (total && offset + limit >= total)) break;
           }
       } catch(e) {}
+      if (exatos.length) {
+          myContract = exatos.find(c => !/CANCEL/i.test(String(c.situation || c.status || ""))) || exatos[0];
+      }
       
       if (myContract) {
          // Tentar extrair o customerId do contrato

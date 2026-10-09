@@ -564,7 +564,8 @@ const ConfigUsersApp = {
       submodules: [
         { name: "Auditoria do Sistema", key: "sub_seg_aud", actions: [
           { id: "auditoria", label: "Auditoria do Sistema", permBase: "sub_seg_geral_auditoria" },
-          { id: "consumo_api", label: "Consumo de API", permBase: "sub_seg_geral_consumo_api" }
+          { id: "consumo_api", label: "Consumo de API", permBase: "sub_seg_geral_consumo_api" },
+          { id: "usuarios_online", label: "Usuários online", permBase: "sub_seg_geral_usuarios_online" }
         ] }
       ]
     },

@@ -15,8 +15,8 @@ const RydooApp = {
     preparing: false,
     prepMsg: "",
     openUsers: {},
-    openCc: {},
-    openPlano: {},
+    closedCc: {},
+    closedPlano: {},
     picked: {},
     job: null
   },
@@ -117,8 +117,8 @@ const RydooApp = {
         this.state.groups = [];
         this.state.prepMsg = "";
         this.state.openUsers = {};
-        this.state.openCc = {};
-        this.state.openPlano = {};
+        this.state.closedCc = {};
+        this.state.closedPlano = {};
         this._prepGen = (this._prepGen || 0) + 1;
         this.render();
         this.preparar();
@@ -328,8 +328,8 @@ const RydooApp = {
     this.state.preparing = false;
     this.state.prepMsg = "";
     this.state.openUsers = {};
-    this.state.openCc = {};
-    this.state.openPlano = {};
+    this.state.closedCc = {};
+    this.state.closedPlano = {};
     this.state.picked = {};
     this.state.job = null;
     this.render();
@@ -394,7 +394,7 @@ const RydooApp = {
         #rydoo-root .rydoo-b { height:36px; display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
         #rydoo-root .rydoo-file { display:inline-flex; align-items:center; gap:6px; margin-top:10px; padding:3px 10px; border-radius:999px; background:#f1f5f9; color:#475569; font-size:12px; }
         #rydoo-root .rydoo-file svg { color:#105436; }
-        #rydoo-root .rydoo-loading { display:flex; align-items:center; justify-content:center; min-height:calc(100vh - 330px); background:#fff; border:1px solid #e2e8f0; border-radius:12px; margin-top:12px; }
+        #rydoo-root .rydoo-loading { display:flex; align-items:flex-start; justify-content:center; padding-top:clamp(32px, 7vh, 72px); box-sizing:border-box; min-height:calc(100vh - 330px); background:#fff; border:1px solid #e2e8f0; border-radius:12px; margin-top:12px; }
         #rydoo-root .rydoo-loader { width:min(420px, 90%); display:flex; flex-direction:column; align-items:center; gap:10px; text-align:center; }
         #rydoo-root .rydoo-spin { width:48px; height:48px; border:5px solid #d1fae5; border-top-color:#105436; border-radius:50%; animation:rydoo-rot .9s linear infinite; }
         #rydoo-root .rydoo-loader-title { margin-top:4px; font-weight:700; font-size:15px; color:#105436; }
@@ -435,6 +435,14 @@ const RydooApp = {
         #rydoo-root .rydoo-node-toggle:hover { box-shadow:inset 0 0 0 9999px rgba(16,84,54,.06); }
         #rydoo-root .rydoo-n0 { background:#f8fafc; border-left-color:#cbd5e1; margin-top:6px; }
         #rydoo-root .rydoo-n0.rydoo-done { background:#ecfdf5; border-left-color:#105436; }
+        #rydoo-root .rydoo-ugroup { margin-top:6px; border:2px solid transparent; border-radius:10px; transition:opacity .15s ease; }
+        #rydoo-root .rydoo-ugroup > .rydoo-n0 { margin-top:0; }
+        #rydoo-root .rydoo-ugroup.is-open { border-color:#f37021; background:#fff7ed; padding:6px 6px 1px; margin:10px 0 8px; box-shadow:0 6px 18px rgba(243,112,33,.16); }
+        #rydoo-root .rydoo-ugroup.is-open > .rydoo-n0 { background:#ffedd5; border-color:#fdba74; border-left-color:#f37021; }
+        #rydoo-root .rydoo-ugroup.is-open > .rydoo-n0 .rydoo-name, #rydoo-root .rydoo-ugroup.is-open > .rydoo-n0 .rydoo-sum { color:#7c2d12; }
+        #rydoo-root .rydoo-ugroup.is-open > .rydoo-n0 .rydoo-ico, #rydoo-root .rydoo-ugroup.is-open > .rydoo-n0 .rydoo-chev { color:#c2410c; }
+        #rydoo-root .rydoo-tree.has-open .rydoo-ugroup:not(.is-open) { opacity:.55; }
+        #rydoo-root .rydoo-tree.has-open .rydoo-ugroup:not(.is-open):hover { opacity:1; }
         #rydoo-root .rydoo-n1 { background:#f8fafc; border-left-color:#0f766e; }
         #rydoo-root .rydoo-n2 { background:#fff; border-left-color:#eab308; }
         #rydoo-root .rydoo-n3 { background:#f8fafc; border-left-color:#cbd5e1; align-items:flex-start; }
@@ -578,7 +586,8 @@ const RydooApp = {
       box.innerHTML = `<div class="rydoo-table-wrap"><div class="rydoo-empty">Nenhuma linha com esse filtro.</div></div>`;
       return;
     }
-    box.innerHTML = `<div class="rydoo-tree">${this.treeHtml(rows)}</div>`;
+    const anyOpen = Object.keys(this.state.openUsers || {}).some((k) => this.state.openUsers[k]);
+    box.innerHTML = `<div class="rydoo-tree${anyOpen ? " has-open" : ""}">${this.treeHtml(rows)}</div>`;
     if (window.lucide) lucide.createIcons();
   },
 
@@ -602,7 +611,17 @@ const RydooApp = {
   },
 
   toggleNode(kind, key) {
-    const bag = kind === "cc" ? "openCc" : (kind === "plano" ? "openPlano" : "openUsers");
+    if (kind === "user") {
+      const opening = !(this.state.openUsers && this.state.openUsers[key]);
+      this.state.openUsers = opening ? { [key]: true } : {};
+      this.state.closedCc = {};
+      this.state.closedPlano = {};
+      this.renderList();
+      const head = opening && document.querySelector("#rydoo-root .rydoo-ugroup.is-open");
+      if (head) head.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      return;
+    }
+    const bag = kind === "cc" ? "closedCc" : "closedPlano";
     if (!this.state[bag]) this.state[bag] = {};
     this.state[bag][key] = !this.state[bag][key];
     this.renderList();
@@ -660,7 +679,7 @@ const RydooApp = {
         .map((cc) => this.ccBlock(pessoa, cc, byCc.get(cc)))
         .join("");
     }
-    return `<div class="rydoo-node rydoo-n0 rydoo-node-toggle${g && g.billId ? " rydoo-done" : ""}" onclick="RydooApp.toggleNode('user', decodeURIComponent('${arg}'))">
+    return `<div class="rydoo-ugroup${open ? " is-open" : ""}"><div class="rydoo-node rydoo-n0 rydoo-node-toggle${g && g.billId ? " rydoo-done" : ""}" onclick="RydooApp.toggleNode('user', decodeURIComponent('${arg}'))">
         ${this.chevHtml(open)}
         ${pick}
         <i data-lucide="user" class="rydoo-ico"></i>
@@ -673,7 +692,7 @@ const RydooApp = {
           <button type="button" class="btn btn-primary btn-sm" style="height:32px;" onclick="event.stopPropagation(); RydooApp.baixarPdf(decodeURIComponent('${arg}'))">PDF</button>
         </span>
         <span class="rydoo-sum">${this.esc(total)}</span>
-      </div>${filhos}`;
+      </div>${filhos}</div>`;
   },
 
   credorLinha(g) {
@@ -706,7 +725,7 @@ const RydooApp = {
   ccBlock(pessoa, cc, rows) {
     const key = pessoa + "\0" + cc;
     const arg = this.arg(key);
-    const open = !!this.state.openCc[key];
+    const open = !(this.state.closedCc && this.state.closedCc[key]);
     let filhos = "";
     if (open) {
       const byConta = new Map();
@@ -733,7 +752,7 @@ const RydooApp = {
   planoBlock(pessoa, cc, conta, rows) {
     const key = pessoa + "\0" + cc + "\0" + conta;
     const arg = this.arg(key);
-    const open = !!this.state.openPlano[key];
+    const open = !(this.state.closedPlano && this.state.closedPlano[key]);
     const head = rows[0] || {};
     const nome = this.contaNome(head.conta) || "Conta sem descrição no plano financeiro";
     const tag = (r) => {
@@ -945,6 +964,17 @@ const RydooApp = {
     if (!r || (!r.fixCc && !r.fixConta)) return;
     this._ajuste = { index: Number(index), q: "" };
     this.pintarAjuste();
+    const reemb = window.PlanoReembolsavel;
+    if (r.fixConta && reemb && typeof reemb.load === "function") {
+      reemb.load(true).then(() => { if (this._ajuste) this.pintarAjusteLista(); });
+    }
+  },
+
+  contaOpcoesReembolsaveis() {
+    const all = this.contaOpcoes();
+    const reemb = window.PlanoReembolsavel;
+    if (!reemb || typeof reemb.any !== "function" || !reemb.any()) return { list: all, filtered: false };
+    return { list: all.filter((item) => reemb.isOn(item.id)), filtered: true };
   },
 
   fecharAjuste() {
@@ -1036,7 +1066,11 @@ const RydooApp = {
     };
     let html = "";
     if (r.fixCc) html += bloco("Centros de custo", filtrar(this.centrosIntegra()), "cc", atualCc);
-    if (r.fixConta) html += bloco("Plano financeiro", filtrar(this.contaOpcoes()), "conta", atualConta);
+    if (r.fixConta) {
+      const contas = this.contaOpcoesReembolsaveis();
+      if (!contas.filtered) html += `<div class="rydoo-ajuste-empty">Nenhuma conta ligada como reembolsável no Plano Financeiro. Ligue as contas lá para esta lista mostrar só elas.</div>`;
+      html += bloco(contas.filtered ? "Plano financeiro · reembolsáveis" : "Plano financeiro", filtrar(contas.list), "conta", atualConta);
+    }
     box.innerHTML = html;
   },
 
