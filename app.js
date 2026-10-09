@@ -23499,6 +23499,31 @@ window.agendaNotesSignature = function() {
     return notes + ':' + due;
 };
 
+window.isRealContactOccurrence = function(occ) {
+    if (!occ || occ.status === 'Cancelada') return false;
+    const canal = String(occ.canal || '').toLowerCase();
+    if (canal === 'nota interna' || occ.fase === 'Nota Interna') return false;
+    const ini = String(occ.iniciativa || '').toLowerCase();
+    return ini === 'ativo' || ini === 'receptivo';
+};
+
+// Notas internas não contam como atendimento: só um Ativo/Receptivo posterior encerra o compromisso.
+window.occurrenceHandledByLaterContact = function(occ, occList) {
+    const baseTime = occ && occ.date ? new Date(occ.date).getTime() : NaN;
+    if (!Number.isFinite(baseTime)) return false;
+    const tok = (v) => (typeof window.normalizeContractIdToken === 'function')
+      ? window.normalizeContractIdToken(v)
+      : String(v == null ? '' : v);
+    const baseSale = tok(occ.saleId || occ.contractId);
+    return (occList || []).some(o => {
+      if (!o || o === occ || !window.isRealContactOccurrence(o)) return false;
+      const t = o.date ? new Date(o.date).getTime() : NaN;
+      if (!Number.isFinite(t) || t <= baseTime) return false;
+      const otherSale = tok(o.saleId || o.contractId);
+      return !baseSale || !otherSale || baseSale === otherSale;
+    });
+};
+
 window.collectAgendaDueItems = function(dateStr, opts) {
     opts = opts || {};
     const dateKey = window.promiseDateKey(dateStr);
@@ -23533,6 +23558,8 @@ window.collectAgendaDueItems = function(dateStr, opts) {
         const due = window.occurrenceDueDateKey(occ);
         if (due !== dateKey) return;
         if (pendingOnly && occ.promiseStatus !== 'Pendente') return;
+        const handledLater = window.occurrenceHandledByLaterContact(occ, occList);
+        if (pendingOnly && handledLater) return;
         if (selectedOperator !== 'Todos' && typeof window.occurrenceAuthorMatchesOperator === 'function'
             && !window.occurrenceAuthorMatchesOperator(occ.author, selectedOperator)) return;
         if (typeFilter !== 'todas') {
@@ -23604,6 +23631,7 @@ window.collectAgendaDueItems = function(dateStr, opts) {
           daysAgo: daysAgo,
           occIndex: index,
           agendaAlert: occ.agendaAlert,
+          isResolved: handledLater,
           isFila: false
         });
       });
