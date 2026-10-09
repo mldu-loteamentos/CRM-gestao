@@ -1409,9 +1409,9 @@ const RydooApp = {
   async logoJpeg() {
     if (this._logoJpeg) return this._logoJpeg;
     const img = new Image();
-    img.src = "Banner/logo preta comemorativa.png";
+    img.src = "Banner/logo moura leite loteamentos.png";
     await img.decode();
-    const maxW = 280;
+    const maxW = 400;
     const scale = Math.min(1, maxW / img.width);
     const w = Math.max(1, Math.round(img.width * scale));
     const h = Math.max(1, Math.round(img.height * scale));
@@ -1426,7 +1426,8 @@ const RydooApp = {
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     const wide = w / h > 1.6;
-    this._logoJpeg = { bytes: bytes, w: w, h: h, dw: wide ? 168 : 78, dh: (wide ? 168 : 78) * (h / w) };
+    const dw = wide ? 168 : 96;
+    this._logoJpeg = { bytes: bytes, w: w, h: h, dw: dw, dh: dw * (h / w) };
     return this._logoJpeg;
   },
 
