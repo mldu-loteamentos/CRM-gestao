@@ -5426,6 +5426,12 @@ window.applyPermissions = function(profileName) {
       }
     });
   }
+  // Perfil ADVOGADO COBRANÇA: só as telas marcadas explicitamente, sem herança do módulo.
+  if (perfilAdvogadoCobranca) {
+    document.querySelectorAll('li[data-module][data-tab]').forEach(item => {
+      if (perms[item.getAttribute('data-module')] !== true) item.style.display = 'none';
+    });
+  }
 
   if (window.isCrmSuperAdmin && window.isCrmSuperAdmin()) {
     const suporteMenu = document.querySelector('li[data-module="mod_suporte"]');
@@ -11035,13 +11041,13 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
 
   // --- Abas Inferiores ---
   const bottomTabsIds = [
-      'tab-contrato', 'tab-outros', 'tab-valor-quitacao', 'tab-simulacao',
-      'tab-ocorrencias', 'tab-boletos', 'tab-renegociacoes', 'tab-vizinhos',
+      'tab-contrato', 'tab-outros', 'tab-quitacao', 'tab-simulacao',
+      'tab-ocorrencias', 'tab-boletos', 'tab-historico-renegociacoes', 'tab-vizinhos',
       'tab-comportamento', 'tab-repactuacoes', 'tab-construcao', 'tab-notificacoes'
   ];
   
   // Abas permitidas para o advogado: Contrato de Venda | Valor quitação | Simulação vencidas | Construção
-  const allowedAdvogadoTabs = ['tab-contrato', 'tab-valor-quitacao', 'tab-simulacao', 'tab-construcao'];
+  const allowedAdvogadoTabs = ['tab-contrato', 'tab-quitacao', 'tab-simulacao', 'tab-construcao'];
   
   bottomTabsIds.forEach(tabId => {
       const btn = document.querySelector(`button[data-target="${tabId}"]`);
@@ -11068,6 +11074,14 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   const extratoBtn = document.getElementById('btn-visualizar-extrato-ativo');
   if (extratoBtn) {
     extratoBtn.style.display = 'flex'; // Todos podem ver (Advogado incluído pelo requisito)
+  }
+  ['btn-renegotiate-page', 'btn-distrato-page'].forEach((id) => {
+    const btn = document.getElementById(id);
+    if (btn) btn.style.display = isAdvogado ? 'none' : '';
+  });
+  if (isAdvogado) {
+    const waBtn = document.getElementById('btn-toggle-whatsapp-alert');
+    if (waBtn) waBtn.style.display = 'none';
   }
   
   // Abas judiciais: menu Sub Judice, advogado, ou contrato/cliente já sub judice (ex.: fila de cobrança)
@@ -43422,6 +43436,7 @@ window.userCanToggleWhatsappAlert = function(user) {
     if (!logged) return false;
     const rec = typeof window.findCrmRegisteredUser === "function" ? window.findCrmRegisteredUser(logged) : null;
     const profile = (rec && rec.profile_name) || logged.profile_name || logged.profile || "";
+    if (typeof window.crmOperatorType === "function" && window.crmOperatorType(rec || logged) === "advogado") return false;
     if (typeof window.crmProfileKind === "function" && window.crmProfileKind(profile) === "back_office") return true;
     if (typeof window.isCrmAdministrator === "function" && window.isCrmAdministrator(logged)) return true;
     if (typeof window.isCrmAdminProfileName === "function" && window.isCrmAdminProfileName(profile)) return true;

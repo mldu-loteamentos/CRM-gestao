@@ -11,6 +11,7 @@ const OrcamentoApp = {
   quarterView: false,
   includeParceria: true,
   expanded: new Set(),
+  pickedRows: new Set(),
   mouraView: false,
   ready: false,
   carteira: {},
@@ -178,6 +179,13 @@ const OrcamentoApp = {
         .orc-table tbody tr.orc-obra:hover td { background: #6ee7b7; }
         .orc-leaf td { background: #fff; font-weight: 600; color: #0f172a; }
         .orc-neg { color: #991b1b; }
+        .orc-table tbody tr[data-orc-row] { cursor: pointer; }
+        .orc-table tbody tr.orc-picked td,
+        .orc-table tbody tr.orc-picked .orc-y27,
+        .orc-table tbody tr.orc-picked .orc-fc { background: #ffedd5; color: #7c2d12; }
+        .orc-table tbody tr.orc-picked .orc-neg { color: #b91c1c; }
+        .orc-table tbody tr.orc-picked:hover td { background: #fed7aa; }
+        .orc-table tbody tr.orc-picked td:first-child { box-shadow: inset 4px 0 0 #f37021; }
         .orc-y27 { color: #064e3b; }
         .orc-fc { color: #9a3412; }
         .orc-table th.orc-fc { color: #fde68a; }
@@ -490,7 +498,15 @@ const OrcamentoApp = {
     if (body) {
       body.addEventListener("click", (ev) => {
         const btn = ev.target.closest("[data-orc-key]");
-        if (!btn) return;
+        if (!btn) {
+          const tr = ev.target.closest("tr[data-orc-row]");
+          if (!tr) return;
+          const rowKey = tr.getAttribute("data-orc-row");
+          if (this.pickedRows.has(rowKey)) this.pickedRows.delete(rowKey);
+          else this.pickedRows.add(rowKey);
+          tr.classList.toggle("orc-picked", this.pickedRows.has(rowKey));
+          return;
+        }
         const key = btn.getAttribute("data-orc-key");
         if (this.expanded.has(key)) this.expanded.delete(key);
         else this.expanded.add(key);
@@ -1270,8 +1286,10 @@ const OrcamentoApp = {
     const t26 = this.sum(row.m26);
     const t27 = this.sum(row.m27);
     const delta = t27 - t26;
-    const cls = row.kind === "emp" ? "orc-emp" : (row.kind === "total" ? "orc-total" : (row.kind === "obra" ? "orc-obra" : (row.kind === "cc" ? "orc-cc" : "orc-leaf")));
-    const cart = row.cartCcs ? ' data-cart="' + row._i + '"' : "";
+    const cls = (row.kind === "emp" ? "orc-emp" : (row.kind === "total" ? "orc-total" : (row.kind === "obra" ? "orc-obra" : (row.kind === "cc" ? "orc-cc" : "orc-leaf"))))
+      + (row.key && this.pickedRows.has(row.key) ? " orc-picked" : "");
+    const cart = (row.cartCcs ? ' data-cart="' + row._i + '"' : "")
+      + (row.key ? ' data-orc-row="' + this.esc(row.key) + '"' : "");
     const y26 = this.periodCols(2026).map((col) => this.moneyCell(this.sumIndexes(row.m26, col.indexes), col.forecast ? "orc-fc" : "")).join("");
     const y27 = this.periodCols(2027).map((col, i) => this.moneyCell(this.sumIndexes(row.m27, col.indexes), "orc-y27" + (i === 0 ? " orc-split" : ""))).join("");
     return '<tr class="' + cls + '"' + cart + '><td style="padding-left:' + pad + 'px;">' + chevron + "<span>" + this.esc(row.label) + "</span>" + this.origemHtml(row) + "</td>"
