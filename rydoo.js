@@ -681,6 +681,8 @@ const RydooApp = {
         .join("");
     }
     const bloqueado = alertas && !(g && g.billId);
+    const pdfOff = alertas || this.state.preparing;
+    const pdfTitle = alertas ? "Revise os alertas antes de gerar o PDF" : "Baixar relatório em PDF";
     return `<div class="rydoo-ugroup${open ? " is-open" : ""}"><div class="rydoo-node rydoo-n0 rydoo-node-toggle${g && g.billId ? " rydoo-done" : ""}${bloqueado ? " rydoo-blocked" : ""}" onclick="RydooApp.toggleNode('user', decodeURIComponent('${arg}'))">
         ${this.chevHtml(open)}
         ${pick}
@@ -691,7 +693,7 @@ const RydooApp = {
           ${this.credorLinha(g)}
         </span>
         <span class="rydoo-acts">${acao}
-          <button type="button" class="btn btn-primary btn-sm" style="height:32px;" onclick="event.stopPropagation(); RydooApp.baixarPdf(decodeURIComponent('${arg}'))">PDF</button>
+          <button type="button" class="btn btn-primary btn-sm" style="height:32px;" title="${this.esc(pdfTitle)}" ${pdfOff ? "disabled" : ""} onclick="event.stopPropagation(); RydooApp.baixarPdf(decodeURIComponent('${arg}'))">PDF</button>
         </span>
         <span class="rydoo-sum">${this.esc(total)}</span>
       </div>${filhos}</div>`;
@@ -1438,6 +1440,10 @@ const RydooApp = {
     const rows = this.state.rows.filter((r) => (r.pessoa || "(sem nome)") === pessoa && r.reembolsa !== false);
     if (!rows.length) {
       alert("Não há despesas reembolsáveis para este colaborador. Cartão Clara não gera reembolso.");
+      return;
+    }
+    if (this.state.preparing || rows.some((r) => r.level !== "ok")) {
+      alert("Revise os alertas deste colaborador antes de gerar o PDF.");
       return;
     }
     if (!g) g = { pessoa: pessoa, rows: rows };
