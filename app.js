@@ -14012,9 +14012,10 @@ function formatCpfCnpj(val) {
                 else if (taxaMultiplier === 0.5) simThMulta.textContent = "Multa (1%)";
                 else simThMulta.textContent = "Multa (0%)";
             }
+            const simThHon = document.getElementById("simulador-th-hon");
+            if (simThHon) simThHon.style.display = margemHon > 0 ? "" : "none";
             if (simThJuros) {
-                if (margemHon > 0) simThJuros.textContent = "Juros + hon.";
-                else if (taxaMultiplier === 1) simThJuros.textContent = "Juros (1% a.m)";
+                if (taxaMultiplier === 1) simThJuros.textContent = "Juros (1% a.m)";
                 else if (taxaMultiplier === 0.5) simThJuros.textContent = "Juros (0,5% a.m)";
                 else simThJuros.textContent = "Juros (0% a.m)";
             }
@@ -14121,7 +14122,8 @@ function formatCpfCnpj(val) {
                      <td>${kpiFmt(origVal)}</td>
                      <td style="color: var(--color-danger); font-weight: 700;">${kpiFmt(corrVal)}</td>
                      <td>${kpiFmt(multa)}</td>
-                     <td>${kpiFmt(juros)}</td>
+                     <td>${kpiFmt(jurosContrato)}</td>
+                     <td style="${margemHon > 0 ? "" : "display:none;"}">${kpiFmt(honorarios)}</td>
                      <td style="font-weight: 700; text-align: right; color: var(--color-primary);">${valorAtualizadoHtml}</td>
                      <td class="sim-col-status">${statusHtml}</td>
                      <td class="sim-col-acoes" style="${AppState.isSubjudiceMode ? "display:none;" : ""}">${acoesHtml || "—"}</td>
@@ -14250,6 +14252,11 @@ function formatCpfCnpj(val) {
          if (simInput) simInput.addEventListener('change', recalcularSimulador);
          if (simTaxaSelect) simTaxaSelect.addEventListener('change', recalcularSimulador);
          const honInput = document.getElementById("simulador-honorarios");
+         const honCustomer = String((AppState && AppState.selectedCustomerId) || "");
+         if (honInput && honInput.dataset.customerId !== honCustomer) {
+            honInput.dataset.customerId = honCustomer;
+            honInput.value = "10";
+         }
          if (honInput && !honInput.dataset.bound) {
             honInput.dataset.bound = "1";
             honInput.addEventListener("input", function() {
@@ -22485,8 +22492,8 @@ window.reprocessBoleto = async function(billId, instId, costCenterId, source = '
   if (honWrap) honWrap.style.display = showHon ? "block" : "none";
   if (honEl) {
     if (!showHon) honEl.value = "0";
-    else if (source === "simulacao" && simHon) honEl.value = simHon.value || "0";
-    else honEl.value = "0";
+    else if (source === "simulacao" && simHon) honEl.value = simHon.value === "" ? "0" : simHon.value;
+    else honEl.value = "10";
   }
   if (typeof window.syncTaxaLockForHonorarios === "function") window.syncTaxaLockForHonorarios();
   const pct = typeof window.syncReprocessChargePercents === "function"

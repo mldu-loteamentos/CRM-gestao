@@ -85,7 +85,6 @@ const HonorariosReport = {
   openEmp: false,
   qEmp: "",
   status: "todos",
-  soHon: false,
   search: "",
 
   async record(ctx) {
@@ -394,7 +393,7 @@ const HonorariosReport = {
       const records = await this.loadRecords(comp);
       const keys = new Set(records.map((r) => r.key).filter(Boolean));
       const fromAudit = await this.loadAuditRecords(comp, keys);
-      const all = records.concat(fromAudit);
+      const all = this.onlyMine(records.concat(fromAudit));
       const statements = await this.loadStatements(all.map((r) => r.customerId));
       if (comp !== this.comp) return;
       this.records = all;
@@ -419,8 +418,28 @@ const HonorariosReport = {
     this.load();
   },
 
+  terceirizadaUser() {
+    const u = (window.AppState && AppState.currentUser) || null;
+    if (!u) return null;
+    if (typeof window.isCrmAdministrator === "function" && window.isCrmAdministrator(u)) return null;
+    const terc = typeof window.isOperadorCobrancaTerceirizadoProfile === "function"
+      && window.isOperadorCobrancaTerceirizadoProfile(u.profile_name);
+    return terc ? u : null;
+  },
+
+  onlyMine(records) {
+    const u = this.terceirizadaUser();
+    if (!u) return records;
+    const email = String(u.email || "").toLowerCase().trim();
+    const name = String(u.name || "").trim().toUpperCase();
+    return records.filter((r) => {
+      const re = String(r.authorEmail || "").toLowerCase().trim();
+      if (re) return !!email && re === email;
+      return !!name && String(r.author || "").trim().toUpperCase() === name;
+    });
+  },
+
   setStatus(v) { this.status = v || "todos"; this.render(); },
-  setSoHon(on) { this.soHon = !!on; this.render(); },
   setSearch(v) {
     this.search = String(v || "");
     clearTimeout(this._searchT);
@@ -464,7 +483,6 @@ const HonorariosReport = {
     const q = this.search.trim().toLowerCase();
     return this.rows.filter((r) => {
       if (emp.size && !emp.has(r.companyId)) return false;
-      if (this.soHon && !(r.honorarios > 0.004)) return false;
       if (this.status === "pago" && r.status !== "pago") return false;
       if (this.status === "aberto" && r.status === "pago") return false;
       if (this.status === "vencido" && r.status !== "vencido") return false;
@@ -551,7 +569,7 @@ const HonorariosReport = {
           <td class="rhon-num">${rhonMoney(r.valorOriginal)}</td>
           <td class="rhon-num">${rhonMoney(r.multa)}</td>
           <td class="rhon-num">${rhonMoney(r.juros)}</td>
-          <td class="rhon-num rhon-hon">${rhonMoney(r.honorarios)}${r.honorariosPct ? `<div class="rhon-sub">${String(r.honorariosPct).replace(".", ",")}%</div>` : ""}${r.estimated ? `<span class="rhon-est" title="Boleto anterior ao registro: valores calculados pela auditoria e pelo extrato do Sienge">estimado</span>` : ""}</td>
+          <td class="rhon-num rhon-hon">${rhonMoney(r.honorarios)}${r.honorariosPct ? `<div class="rhon-sub">${String(r.honorariosPct).replace(".", ",")}%</div>` : ""}</td>
           <td>${this.statusHtml(r)}</td>
           <td><div>${rhonBr(rhonIso(r.generatedAt))}</div><div class="rhon-sub">${rhonEsc(r.author)}</div></td>
         </tr>`).join("");
@@ -623,13 +641,6 @@ const HonorariosReport = {
               <input type="text" id="rhon-search" placeholder="Cliente, CPF, título ou unidade" value="${rhonEsc(this.search)}"
                 oninput="HonorariosReport.setSearch(this.value)">
             </div>
-            <label class="rhon-switch-line">
-              <span class="moura-switch">
-                <input type="checkbox" ${this.soHon ? "checked" : ""} onchange="HonorariosReport.setSoHon(this.checked)">
-                <span class="moura-switch-track" aria-hidden="true"></span>
-              </span>
-              Só com honorários
-            </label>
             <button type="button" class="btn btn-excel" onclick="HonorariosReport.exportExcel()" title="Exportar tabela atual para Excel" ${rows.length ? "" : "disabled"}>
               <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
             </button>
@@ -669,7 +680,7 @@ const HonorariosReport = {
     const aoa = [[
       "Competência", "Empresa", "Centro de custo", "Cliente", "CPF/CNPJ", "Título", "Contrato", "Unidade", "Parcela",
       "Vencimento", "Vencimento do boleto", "Valor original", "Multa", "Juros", "Honorários (%)", "Honorários",
-      "Status", "Pago em", "Valor recebido", "Gerado em", "Gerado por", "Estimado"
+      "Status", "Pago em", "Valor recebido", "Gerado em", "Gerado por"
     ]];
     this.grouped(rows).forEach((e) => e.ccs.forEach((c) => c.rows.forEach((r) => {
       aoa.push([
@@ -693,14 +704,13 @@ const HonorariosReport = {
         rhonBr(r.paidAt),
         r.paidValue ? Number(r.paidValue.toFixed(2)) : "",
         rhonBr(rhonIso(r.generatedAt)),
-        r.author,
-        r.estimated ? "Sim" : ""
+        r.author
       ]);
     })));
     const t = this.totals(rows);
     aoa.push(["Total", "", "", "", "", "", "", "", "", "", "",
       Number(t.valorOriginal.toFixed(2)), Number(t.multa.toFixed(2)), Number(t.juros.toFixed(2)), "",
-      Number(t.honorarios.toFixed(2)), "", "", "", "", "", ""]);
+      Number(t.honorarios.toFixed(2)), "", "", "", "", ""]);
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Honorarios");
@@ -730,7 +740,6 @@ const HonorariosReport = {
       #relatorios-cr-root .rhon-field select,
       #relatorios-cr-root .rhon-field input { height:38px; border:1px solid #cbd5e1; border-radius:6px; padding:0 10px; background:#fff; color:#0f172a; font-size:.85rem; }
       #relatorios-cr-root .rhon-grow { flex:1; min-width:200px; }
-      #relatorios-cr-root .rhon-switch-line { display:flex; align-items:center; gap:8px; height:38px; font-size:.8rem; font-weight:600; color:#475569; cursor:pointer; white-space:nowrap; }
       #relatorios-cr-root .rhon-cards { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:10px; margin-bottom:12px; }
       #relatorios-cr-root .rhon-card { background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:10px 14px; display:flex; flex-direction:column; gap:4px; }
       #relatorios-cr-root .rhon-card span { font-size:.72rem; font-weight:600; color:#64748b; text-transform:uppercase; letter-spacing:.03em; }
@@ -748,7 +757,6 @@ const HonorariosReport = {
       #relatorios-cr-root .rhon-cli { font-weight:600; }
       #relatorios-cr-root .rhon-sub { font-size:.7rem; color:#64748b; }
       #relatorios-cr-root .rhon-hon { font-weight:700; color:#105436; }
-      #relatorios-cr-root .rhon-est { display:inline-block; margin-top:2px; font-size:.62rem; font-weight:700; color:#9a3412; background:#fff7ed; border:1px solid #fed7aa; border-radius:999px; padding:0 6px; }
       #relatorios-cr-root .rhon-st { display:inline-block; border-radius:999px; padding:2px 9px; font-size:.7rem; font-weight:700; white-space:nowrap; }
       #relatorios-cr-root .rhon-st-pago { background:#dcfce7; color:#105436; }
       #relatorios-cr-root .rhon-st-aberto { background:#f1f5f9; color:#475569; }
