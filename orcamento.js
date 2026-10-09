@@ -268,8 +268,8 @@ const OrcamentoApp = {
               <th title="Total 2027 − Total 2026">Variação</th>
               <th title="Total 2027 − Total 2026">Variação %</th>
               <th class="orc-split" title="Carteira em aberto em 2027, sem sub judice">Sienge 2027</th>
-              <th title="Orçado 2027 − Sienge 2027. Correção anual da carteira, vendas e antecipações.">Variação</th>
-              <th title="(Orçado 2027 − Sienge 2027) ÷ Sienge 2027">Variação %</th>
+              <th title="Carteira orçada 2027 − Sienge 2027, sem novas vendas">Variação</th>
+              <th title="(Carteira orçada 2027 − Sienge 2027) ÷ Sienge 2027">Variação %</th>
             </tr>
           </thead>
           <tbody id="orc-body"></tbody>
@@ -697,25 +697,26 @@ const OrcamentoApp = {
     const sum = this.cartSum(row);
     if (sum.loading) return { loading: true };
     if (sum.error) return { error: true };
-    const orcado = this.sum(row && row.m27);
+    const orcado = Number(row && row.cart) || 0;
     return { receber: sum.receber, orcado, delta: orcado - sum.receber };
   },
 
   siengeTipHtml(row, sum) {
     if (sum.loading) return "Buscando a carteira de 2027…";
     if (sum.error) return "Não foi possível consultar a carteira de 2027.";
+    const cm = row.cm || this.blank();
     const lines = this.months().map((name, i) => {
       return "<tr><td>" + this.esc(String(name).toLowerCase()) + "</td><td>"
         + this.money(row.m26 && row.m26[i]) + "</td><td>"
-        + this.money(row.m27 && row.m27[i]) + "</td><td>"
+        + this.money(cm[i]) + "</td><td>"
         + this.money(sum.months[i]) + "</td></tr>";
     }).join("");
-    return "<table><thead><tr><th></th><th>2026</th><th>2027</th><th>Sienge</th></tr></thead><tbody>"
+    return "<table><thead><tr><th></th><th>2026</th><th>Carteira 2027</th><th>Sienge</th></tr></thead><tbody>"
       + lines
       + '<tr class="orc-cart-total"><td>Total</td><td>' + this.money(this.sum(row.m26))
-      + "</td><td>" + this.money(this.sum(row.m27))
+      + "</td><td>" + this.money(Number(row.cart) || 0)
       + "</td><td>" + this.money(sum.receber) + "</td></tr></tbody></table>"
-      + '<div class="orc-cart-note">out–dez de 2026 são forecast. Sienge é a carteira em aberto, sem sub judice.</div>';
+      + '<div class="orc-cart-note">out–dez de 2026 são forecast. Carteira 2027 é o orçado marcado como carteira, sem novas vendas. Sienge é a carteira em aberto, sem sub judice.</div>';
   },
 
   vendTipHtml(row) {
@@ -832,6 +833,7 @@ const OrcamentoApp = {
           m26: this.blank(),
           m27: this.blank(),
           cart: 0,
+          cm: this.blank(),
           vend: 0,
           vm: this.blank(),
           notas: ""
@@ -853,6 +855,7 @@ const OrcamentoApp = {
       if (!o) return;
       row.cart = this.signed(line.conta, o.cart);
       row.vend = this.signed(line.conta, o.vend);
+      if (Array.isArray(o.cm)) row.cm = o.cm.map((v) => this.signed(line.conta, v));
       if (Array.isArray(o.vm)) row.vm = o.vm.map((v) => this.signed(line.conta, v));
       row.notas = (o.notas || []).join(" · ");
       row._origem = true;
@@ -986,6 +989,7 @@ const OrcamentoApp = {
             m26: this.blank(),
             m27: this.blank(),
             cart: 0,
+            cm: this.blank(),
             vend: 0,
             vm: this.blank(),
             leaf: false,
@@ -996,6 +1000,7 @@ const OrcamentoApp = {
         acc.m26.forEach((v, i) => { child.m26[i] += v; });
         acc.m27.forEach((v, i) => { child.m27[i] += v; });
         child.cart += Number(acc.cart) || 0;
+        (acc.cm || []).forEach((v, i) => { child.cm[i] += Number(v) || 0; });
         child.vend += Number(acc.vend) || 0;
         (acc.vm || []).forEach((v, i) => { child.vm[i] += Number(v) || 0; });
         if (idx === parts.length - 1) child.leaf = true;
@@ -1043,18 +1048,21 @@ const OrcamentoApp = {
     const y26 = this.blank();
     const y27 = this.blank();
     const yVm = this.blank();
+    const yCm = this.blank();
     let yCart = 0;
     let yVend = 0;
     companies.forEach((emp) => {
       const e26 = this.blank();
       const e27 = this.blank();
       const eVm = this.blank();
+      const eCm = this.blank();
       let eCart = 0;
       let eVend = 0;
       emp.costCenters.forEach((cc) => {
         this.sumNode(cc.tree, "m26").forEach((v, i) => { e26[i] += v; });
         this.sumNode(cc.tree, "m27").forEach((v, i) => { e27[i] += v; });
         this.sumNode(cc.tree, "vm").forEach((v, i) => { eVm[i] += v; });
+        this.sumNode(cc.tree, "cm").forEach((v, i) => { eCm[i] += v; });
         eCart += this.sumScalar(cc.tree, "cart");
         eVend += this.sumScalar(cc.tree, "vend");
       });
@@ -1062,11 +1070,13 @@ const OrcamentoApp = {
       const se26 = this.scaleMonths(e26, factor);
       const se27 = this.scaleMonths(e27, factor);
       const seVm = this.scaleMonths(eVm, factor);
+      const seCm = this.scaleMonths(eCm, factor);
       const seCart = eCart * factor;
       const seVend = eVend * factor;
       se26.forEach((v, i) => { y26[i] += v; });
       se27.forEach((v, i) => { y27[i] += v; });
       seVm.forEach((v, i) => { yVm[i] += v; });
+      seCm.forEach((v, i) => { yCm[i] += v; });
       yCart += seCart;
       yVend += seVend;
       const shareNote = this.mouraView ? (" · " + this.participation(emp.e).toLocaleString("pt-BR") + "% ML") : "";
@@ -1082,6 +1092,7 @@ const OrcamentoApp = {
         m26: se26,
         m27: se27,
         cart: seCart,
+        cm: seCm,
         vend: seVend,
         vm: seVm,
         expandable: true,
@@ -1102,6 +1113,7 @@ const OrcamentoApp = {
           m26: this.scaleMonths(this.sumNode(cc.tree, "m26"), factor),
           m27: this.scaleMonths(this.sumNode(cc.tree, "m27"), factor),
           cart: this.sumScalar(cc.tree, "cart") * factor,
+          cm: this.scaleMonths(this.sumNode(cc.tree, "cm"), factor),
           vend: this.sumScalar(cc.tree, "vend") * factor,
           vm: this.scaleMonths(this.sumNode(cc.tree, "vm"), factor),
           expandable: true,
@@ -1120,6 +1132,7 @@ const OrcamentoApp = {
             m26: this.scaleMonths(acc.m26, factor),
             m27: this.scaleMonths(acc.m27, factor),
             cart: (Number(acc.cart) || 0) * factor,
+            cm: this.scaleMonths(acc.cm, factor),
             vend: (Number(acc.vend) || 0) * factor,
             vm: this.scaleMonths(acc.vm, factor),
             expandable: false,
@@ -1137,12 +1150,14 @@ const OrcamentoApp = {
         const g26 = this.blank();
         const g27 = this.blank();
         const gVm = this.blank();
+        const gCm = this.blank();
         let gCart = 0;
         let gVend = 0;
         item.centers.forEach((cc) => {
           this.sumNode(cc.tree, "m26").forEach((v, i) => { g26[i] += v; });
           this.sumNode(cc.tree, "m27").forEach((v, i) => { g27[i] += v; });
           this.sumNode(cc.tree, "vm").forEach((v, i) => { gVm[i] += v; });
+          this.sumNode(cc.tree, "cm").forEach((v, i) => { gCm[i] += v; });
           gCart += this.sumScalar(cc.tree, "cart");
           gVend += this.sumScalar(cc.tree, "vend");
         });
@@ -1158,6 +1173,7 @@ const OrcamentoApp = {
           m26: this.scaleMonths(g26, factor),
           m27: this.scaleMonths(g27, factor),
           cart: gCart * factor,
+          cm: this.scaleMonths(gCm, factor),
           vend: gVend * factor,
           vm: this.scaleMonths(gVm, factor),
           expandable: true,
@@ -1186,6 +1202,7 @@ const OrcamentoApp = {
         m26: y26,
         m27: y27,
         cart: yCart,
+        cm: yCm,
         vend: yVend,
         vm: yVm,
         expandable: false,
