@@ -1,6 +1,6 @@
 const { initializeApp } = require("firebase/app");
 const {
-  getFirestore, doc, setDoc, getDoc, getDocs, collection
+  getFirestore, doc, setDoc, getDoc, getDocs, collection, deleteDoc
 } = require("firebase/firestore");
 const { isBusinessDaySP, todayIsoSP } = require("../lib/br-calendar");
 const { slimCaixaRow, isFinanceLike } = require("../lib/caixa-snapshot");
@@ -37,6 +37,8 @@ const db = getFirestore(app);
 const FB_COL = "estoque_comercial";
 const STATE_ID = "_batimento_state";
 const FB_CHUNK = 400;
+/** Firestore recusa documento acima de 1 MiB. */
+const FB_DOC_BYTES = 650000;
 /** maxDuration é 60s: sobra tempo para ler e gravar o estoque no Firebase. */
 const BUDGET_MS = 30000;
 const CONCURRENCY = 3;
@@ -108,22 +110,42 @@ async function loadFilaAndPaidMap(today) {
   return { bills, paidMap };
 }
 
+function chunkBySize(list) {
+  const out = [];
+  let cur = [];
+  let bytes = 0;
+  list.forEach((u) => {
+    const size = JSON.stringify(u || null).length + 2;
+    if (cur.length && (cur.length >= FB_CHUNK || bytes + size > FB_DOC_BYTES)) {
+      out.push(cur);
+      cur = [];
+      bytes = 0;
+    }
+    cur.push(u);
+    bytes += size;
+  });
+  if (cur.length) out.push(cur);
+  return out;
+}
+
 async function saveCc(ccId, allUnits) {
   const cc = String(ccId);
   const list = allUnits.filter((u) => String(u.enterpriseId) === cc);
   const empName = (list[0] && list[0].enterpriseName) || "";
-  const writes = [];
-  for (let i = 0, n = 0; i < list.length; i += FB_CHUNK, n += 1) {
-    writes.push(setDoc(doc(db, FB_COL, `cc_${cc}_${n}`), {
-      enterpriseId: cc,
-      enterpriseName: empName,
-      chunk: n,
-      units: list.slice(i, i + FB_CHUNK),
-      updatedAt: new Date().toISOString(),
-      date: todayIsoSP()
-    }));
+  const chunks = chunkBySize(list);
+  await Promise.all(chunks.map((units, n) => setDoc(doc(db, FB_COL, `cc_${cc}_${n}`), {
+    enterpriseId: cc,
+    enterpriseName: empName,
+    chunk: n,
+    units,
+    updatedAt: new Date().toISOString(),
+    date: todayIsoSP()
+  })));
+  const stale = [];
+  for (let n = chunks.length; n < chunks.length + 4; n++) {
+    stale.push(deleteDoc(doc(db, FB_COL, `cc_${cc}_${n}`)).catch(() => {}));
   }
-  await Promise.all(writes);
+  await Promise.all(stale);
 }
 
 async function saveCaixaPosicao(units, today) {

@@ -874,6 +874,11 @@ Sua resposta deve conter APENAS o nome da tag, sem pontuação, aspas ou texto e
         return handler(req, res);
       }
 
+      if (pathRoute.startsWith('/api/scod-proxy')) {
+        const handler = require('./api/scod-proxy');
+        return handler(req, res);
+      }
+
       if (pathRoute === '/api/proxy-download' && req.method === 'GET') {
         const queryParams = new URL(req.url, `http://${req.headers.host}`).searchParams;
         const targetUrl = queryParams.get('url');

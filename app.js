@@ -5607,6 +5607,17 @@ window.permCoversMenuKey = function(perms, modKey) {
     }
     return false;
   }
+  if (modKey === "sub_fin_cr_scod_acessar") {
+    if (perms.sub_fin_cr_scod_acessar === true
+      || perms.sub_fin_cr_scod_visualizar === true
+      || perms.sub_fin_cr_scod_editar === true) return true;
+    if (perms.sub_fin_cr_scod_acessar == null
+      && perms.sub_fin_cr_scod_visualizar == null
+      && perms.sub_fin_cr_scod_editar == null) {
+      return perms.sub_fin_cr === true;
+    }
+    return false;
+  }
   if (modKey === "sub_fin_cr_dashboard_acessar") {
     if (perms.sub_fin_cr_dashboard_acessar === true
       || perms.sub_fin_cr_dashboard_visualizar === true
