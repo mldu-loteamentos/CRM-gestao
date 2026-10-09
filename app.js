@@ -21300,9 +21300,9 @@ window.upgradeQuitacaoCorpo = function(text) {
   return s.replace(/\s*relacionamento@mouraleite\.com\.br[\s\S]*?Ficaremos gratos em atend[eê]-lo\.?\s*$/i, "\n\n{{CANAIS_ATENDIMENTO}}");
 };
 
-// Termo de aviso: rubrica sobre a linha de assinatura. O formal sai sem ela, para o sócio assinar.
+// Termo de aviso: rubrica acima da linha de assinatura, sem encostar nela. O formal sai sem ela, para o sócio assinar.
 window.applyQuitacaoRubrica = function(html) {
-  const img = '<img src="' + window.QUITACAO_RUBRICA_SRC + '" alt="" style="display:block;margin:0 auto -6px;height:64px;">';
+  const img = '<img src="' + window.QUITACAO_RUBRICA_SRC + '" alt="" style="display:block;margin:0 auto 6px;height:64px;">';
   return String(html || "").replace(/(<div class="pdf-sign-keep"[\s\S]*?)(<div style="border-top:1px solid #111;)/, "$1" + img + "$2");
 };
 
