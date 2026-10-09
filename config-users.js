@@ -549,7 +549,8 @@ const ConfigUsersApp = {
           { id: "autorizacao_escritura", label: "Autorização de escritura", permBase: "sub_rel_docs_autorizacao_escritura" },
           { id: "autorizacao_terceiros", label: "Autorização de terceiros", permBase: "sub_rel_docs_autorizacao_terceiros" },
           { id: "alteracao_vencimento", label: "Alteração de vencimento", permBase: "sub_rel_docs_alteracao_vencimento" },
-          { id: "cessao_direitos", label: "Cessão de Direitos", permBase: "sub_rel_docs_cessao_direitos" }
+          { id: "cessao_direitos", label: "Cessão de Direitos", permBase: "sub_rel_docs_cessao_direitos" },
+          { id: "termo_quitacao", label: "Termo de quitação", permBase: "sub_rel_docs_termo_quitacao" }
         ] }
       ]
     },

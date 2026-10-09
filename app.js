@@ -3073,6 +3073,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
   if (leavingTab && leavingTab !== tabId && relApp && typeof relApp.limparDocSimples === "function") {
     if (leavingTab === "relacionamento_vencimento" && keepKind !== "vencimento") relApp.limparDocSimples("vencimento");
     if (leavingTab === "relacionamento_terceiros" && keepKind !== "terceiros") relApp.limparDocSimples("terceiros");
+    if (leavingTab === "relacionamento_quitacao" && keepKind !== "quitacao") relApp.limparDocSimples("quitacao");
   }
 
   if (!String(tabId).startsWith('relacionamento_') && typeof window.clearRelacionamento === 'function') {
@@ -3106,8 +3107,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
         if (titleInput) titleInput.focus();
       }, 80);
     }
-    if (tabId === 'relacionamento_vencimento' || tabId === 'relacionamento_terceiros') {
-      const kind = tabId === 'relacionamento_vencimento' ? 'vencimento' : 'terceiros';
+    if (tabId === 'relacionamento_vencimento' || tabId === 'relacionamento_terceiros' || tabId === 'relacionamento_quitacao') {
+      const kind = tabId === 'relacionamento_vencimento' ? 'vencimento' : (tabId === 'relacionamento_quitacao' ? 'quitacao' : 'terceiros');
       const pending = window._gestaoDocPending;
       if (pending && pending.kind === kind) {
         if (typeof window._fillGestaoDocCampos === "function") window._fillGestaoDocCampos(kind, pending.dados);
@@ -3182,6 +3183,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "relacionamento_terceiros": "Autorização de terceiros",
     "relacionamento_vencimento": "Alteração de vencimento",
     "relacionamento_cessao": "Cessão de Direitos",
+    "relacionamento_quitacao": "Termo de quitação",
     "condicoes-pagamento": "Condições de Pagamento",
     "tabelas-vigentes": "Tabelas vigentes",
     "controle-comissao": "Controle de comissão",
@@ -3242,6 +3244,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "relacionamento_terceiros": "user-plus",
     "relacionamento_vencimento": "calendar-clock",
     "relacionamento_cessao": "handshake",
+    "relacionamento_quitacao": "badge-check",
     "condicoes-pagamento": "file-text",
     "tabelas-vigentes": "table",
     "controle-comissao": "percent",
@@ -5356,7 +5359,7 @@ window.applyPermissions = function(profileName) {
           || perms.sub_rel_geral_relacionamento_acessar === true;
         const relAlias = (
           (modKey === "sub_rel_geral_buscar_cliente_acessar" && relLegacy)
-          || ((modKey === "sub_rel_docs" || modKey === "sub_rel_docs_autorizacao_escritura_acessar" || modKey === "sub_rel_docs_cessao_direitos_acessar" || modKey === "sub_rel_docs_autorizacao_terceiros_acessar" || modKey === "sub_rel_docs_alteracao_vencimento_acessar") && (
+          || ((modKey === "sub_rel_docs" || modKey === "sub_rel_docs_autorizacao_escritura_acessar" || modKey === "sub_rel_docs_cessao_direitos_acessar" || modKey === "sub_rel_docs_autorizacao_terceiros_acessar" || modKey === "sub_rel_docs_alteracao_vencimento_acessar" || modKey === "sub_rel_docs_termo_quitacao_acessar") && (
             relLegacy
             || perms.sub_rel_docs === true
             || perms.sub_rel_docs_autorizacao_escritura_acessar === true
@@ -5371,6 +5374,9 @@ window.applyPermissions = function(profileName) {
             || perms.sub_rel_docs_cessao_direitos_acessar === true
             || perms.sub_rel_docs_cessao_direitos_visualizar === true
             || perms.sub_rel_docs_cessao_direitos_editar === true
+            || perms.sub_rel_docs_termo_quitacao_acessar === true
+            || perms.sub_rel_docs_termo_quitacao_visualizar === true
+            || perms.sub_rel_docs_termo_quitacao_editar === true
           ))
         );
         const suporteAlias = (modKey === "mod_suporte" || modKey === "sub_suporte_geral_chamados_acessar") && (
@@ -5688,7 +5694,7 @@ window.permCoversMenuKey = function(perms, modKey) {
       || perms.sub_rel_geral_relacionamento_visualizar === true
       || perms.sub_rel_geral_relacionamento_editar === true;
   }
-  if (modKey === "sub_rel_docs" || modKey === "sub_rel_docs_autorizacao_escritura_acessar" || modKey === "sub_rel_docs_cessao_direitos_acessar" || modKey === "sub_rel_docs_autorizacao_terceiros_acessar" || modKey === "sub_rel_docs_alteracao_vencimento_acessar") {
+  if (modKey === "sub_rel_docs" || modKey === "sub_rel_docs_autorizacao_escritura_acessar" || modKey === "sub_rel_docs_cessao_direitos_acessar" || modKey === "sub_rel_docs_autorizacao_terceiros_acessar" || modKey === "sub_rel_docs_alteracao_vencimento_acessar" || modKey === "sub_rel_docs_termo_quitacao_acessar") {
     return perms.mod_rel === true
       || perms.sub_rel_geral === true
       || perms.sub_rel_geral_relacionamento_acessar === true
@@ -5706,7 +5712,10 @@ window.permCoversMenuKey = function(perms, modKey) {
       || perms.sub_rel_docs_alteracao_vencimento_editar === true
       || perms.sub_rel_docs_cessao_direitos_acessar === true
       || perms.sub_rel_docs_cessao_direitos_visualizar === true
-      || perms.sub_rel_docs_cessao_direitos_editar === true;
+      || perms.sub_rel_docs_cessao_direitos_editar === true
+      || perms.sub_rel_docs_termo_quitacao_acessar === true
+      || perms.sub_rel_docs_termo_quitacao_visualizar === true
+      || perms.sub_rel_docs_termo_quitacao_editar === true;
   }
   if (!String(modKey).endsWith("_acessar")) return false;
   const stem = String(modKey).slice(0, -"_acessar".length);
@@ -34838,9 +34847,9 @@ async function previewDocPadrao(tipo) {
       String(await fillLegalPreview(corpo)).replace(/\{\{\s*CANAIS_ATENDIMENTO\s*\}\}/g, window.quitacaoCanaisHtml())
     )).replace(/src="Banner\//, `src="${location.origin}/Banner/`);
     const bloco = (rotulo, html) => `<h3 style="color:#64748b;font-size:13px;text-transform:uppercase;margin:24px 0 8px;">${rotulo}</h3><h2 style="text-align:center;">${title}</h2><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${html}</div>`;
-    content = bloco('Termo de aviso (informativo)', aviso)
+    content = bloco('Com rubrica digital', aviso)
       + '<hr style="margin:32px 0;border-top:2px dashed #94a3b8;">'
-      + bloco('Termo formal (assinado pelo sócio)', window.centerSimpleDocSignature(formal));
+      + bloco('Sem rubrica (assinado pelo sócio)', window.centerSimpleDocSignature(formal));
   } else if (tipo === 'terceiros') {
     const title = document.getElementById('doc-terceiros-title')?.value || '';
     const corpo = document.getElementById('doc-terceiros-corpo')?.value || '';
@@ -39086,9 +39095,10 @@ window.escolherGestaoDocumento = function(tipo) {
     return;
   }
 
-  if (tipo === "terceiros" || tipo === "vencimento") {
-    const tab = tipo === "vencimento" ? "relacionamento_vencimento" : "relacionamento_terceiros";
-    const label = tipo === "vencimento" ? "Alteração de vencimento" : "Autorização de terceiros";
+  if (tipo === "terceiros" || tipo === "vencimento" || tipo === "quitacao") {
+    const tab = tipo === "vencimento" ? "relacionamento_vencimento" : (tipo === "quitacao" ? "relacionamento_quitacao" : "relacionamento_terceiros");
+    const label = tipo === "vencimento" ? "Alteração de vencimento" : (tipo === "quitacao" ? "Termo de quitação" : "Autorização de terceiros");
+    if (tipo === "quitacao" && typeof RelacionamentoState !== "undefined") RelacionamentoState.quitacaoAutoGerar = true;
     const tituloVal = titulo && String(titulo) !== "—" ? (String(titulo).replace(/\D/g, "") || String(titulo)) : "";
     const contratoVal = contractNumber ? String(contractNumber).trim() : "";
     const nomeVal = customerName ? String(customerName).trim() : "";
@@ -39123,16 +39133,6 @@ window.escolherGestaoDocumento = function(tipo) {
     return;
   }
 
-  if (tipo === "quitacao") {
-    if (typeof openCustomerFromRelacionamento === "function" && customerId) {
-      openCustomerFromRelacionamento(customerId, contractId, titulo);
-      const tryQuit = () => {
-        if (typeof switchCustomerTab === "function") switchCustomerTab("tab-quitacao");
-      };
-      setTimeout(tryQuit, 600);
-      setTimeout(tryQuit, 1400);
-    }
-  }
 };
 
 window.openCustomerFromRelacionamento = function(customerId, contractId, titulo) {

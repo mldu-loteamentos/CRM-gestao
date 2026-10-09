@@ -1246,7 +1246,7 @@ const RelacionamentoApp = {
     if (card) card.style.display = "none";
     this._escSetResultsHtml("");
     this._liberarFiltrosDoc("escritura");
-    ["esc-filter-titulo", "esc-filter-contrato", "esc-filter-nome", "esc-cartorio", "esc-cidade-cartorio", "esc-localizacao", "esc-bancos", "esc-quitacao-modo"].forEach((id) => {
+    ["esc-filter-titulo", "esc-filter-contrato", "esc-filter-nome", "esc-cartorio", "esc-cidade-cartorio", "esc-localizacao", "esc-bancos"].forEach((id) => {
       const el = document.getElementById(id);
       if (el) el.value = "";
     });
@@ -1480,9 +1480,8 @@ const RelacionamentoApp = {
           <div><span style="color:#64748b;">Valor</span><br><strong>${valorFmt}</strong></div>
           <div><span style="color:#64748b;">Situação</span><br>${statusHtml}</div>
         </div>`;
-      document.querySelectorAll('#esc-doc-card [onclick="RelacionamentoApp.gerarEscrituraPdf()"], #esc-doc-card [onclick="RelacionamentoApp.gerarQuitacaoPdf()"]').forEach((btn) => {
-        btn.disabled = !quitadoInfo.quitado;
-      });
+      const genBtn = document.querySelector('#esc-doc-card [onclick="RelacionamentoApp.gerarEscrituraPdf()"]');
+      if (genBtn) genBtn.disabled = !quitadoInfo.quitado;
       document.getElementById("esc-doc-card").style.display = "block";
       this._escSetResultsHtml("");
     } catch (err) {
@@ -1634,8 +1633,59 @@ const RelacionamentoApp = {
       return { legalBase, quadraLote, unitNumericId, titulo, preambleText };
   },
 
-  async gerarQuitacaoPdf() {
-    const ctx = RelacionamentoState.escritura;
+  async _prepararQuitacao(ctx) {
+    const info = await this._avaliarContratoQuitado(ctx.sale, ctx.bill);
+    ctx.quitado = info.quitado;
+    ctx.quitadoMotivo = info.motivo;
+    const st = document.getElementById("qui-quitado-status");
+    if (st) {
+      st.innerHTML = info.quitado
+        ? `<span style="color:#15803d;font-weight:700;">Quitado</span> <span style="color:#64748b;font-size:0.8rem;">${info.motivo || ""}</span>`
+        : `<span style="color:#b91c1c;font-weight:700;">Não quitado</span> <span style="color:#b91c1c;font-size:0.8rem;">${info.motivo || ""}. O termo só pode ser emitido com o contrato quitado.</span>`;
+    }
+    const btn = document.getElementById("qui-btn-gerar");
+    if (btn) btn.disabled = !info.quitado;
+    if (RelacionamentoState.quitacaoAutoGerar) {
+      RelacionamentoState.quitacaoAutoGerar = false;
+      if (info.quitado) this.gerarQuitacaoPdf("quitacao");
+    }
+  },
+
+  _perguntarRubrica() {
+    return new Promise((resolve) => {
+      let ov = document.getElementById("qui-rubrica-modal");
+      if (!ov) {
+        ov = document.createElement("div");
+        ov.id = "qui-rubrica-modal";
+        ov.style.cssText = "display:none;position:fixed;inset:0;z-index:2147483001;align-items:center;justify-content:center;background:rgba(12,41,29,0.55);padding:16px;";
+        ov.innerHTML = `
+          <div style="background:#fff;border-radius:12px;width:100%;max-width:420px;box-shadow:0 18px 40px rgba(0,0,0,0.22);padding:22px;">
+            <div style="font-size:0.95rem;font-weight:800;color:#105436;margin-bottom:10px;">Termo de quitação</div>
+            <div style="font-size:0.92rem;color:#1e293b;line-height:1.45;">Com rubrica digital?</div>
+            <div style="font-size:0.78rem;color:#64748b;margin-top:6px;">Sim: sai com a rubrica e os canais de atendimento. Não: sai para o sócio assinar.</div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
+              <button type="button" class="btn btn-cancel" data-r="">Cancelar</button>
+              <button type="button" class="btn btn-outline" data-r="nao">Não</button>
+              <button type="button" class="btn btn-primary" data-r="sim">Sim</button>
+            </div>
+          </div>`;
+        document.body.appendChild(ov);
+        ov.addEventListener("click", (e) => {
+          const b = e.target.closest("[data-r]");
+          if (!b && e.target !== ov) return;
+          ov.style.display = "none";
+          const fn = ov._resolve;
+          ov._resolve = null;
+          if (fn) fn(b ? b.getAttribute("data-r") : "");
+        });
+      }
+      ov._resolve = resolve;
+      ov.style.display = "flex";
+    });
+  },
+
+  async gerarQuitacaoPdf(kind) {
+    const ctx = RelacionamentoState[kind || "quitacao"];
     if (!ctx || !ctx.sale) {
       alert("Busque e selecione um contrato antes de gerar o documento.");
       return;
@@ -1644,12 +1694,9 @@ const RelacionamentoApp = {
       alert("O termo de quitação só pode ser emitido se o contrato estiver quitado. " + (ctx.quitadoMotivo || ""));
       return;
     }
-    const modo = document.getElementById("esc-quitacao-modo")?.value || "";
-    if (modo !== "aviso" && modo !== "formal") {
-      alert("Escolha o tipo do termo de quitação: aviso (informativo) ou formal (assinado pelo sócio).");
-      document.getElementById("esc-quitacao-modo")?.focus();
-      return;
-    }
+    const resp = await this._perguntarRubrica();
+    if (resp !== "sim" && resp !== "nao") return;
+    const modo = resp === "sim" ? "aviso" : "formal";
     try {
       let t = {};
       try { t = JSON.parse(localStorage.getItem("crm_docpadrao_quitacao") || "{}"); } catch (e) {}
@@ -1682,7 +1729,7 @@ const RelacionamentoApp = {
           <h2 style="color:#105436;font-size:13pt;font-weight:bold;margin:0;">${docTitle}</h2>
         </div>
         <div style="font-family:'Times New Roman',serif;font-size:11pt;line-height:1.5;text-align:justify;white-space:pre-wrap;">${filled}</div>`;
-      document.getElementById("pdf-modal-title").textContent = modo === "aviso" ? "Termo de quitação (aviso)" : "Termo de quitação (formal)";
+      document.getElementById("pdf-modal-title").textContent = modo === "aviso" ? "Termo de quitação (com rubrica digital)" : "Termo de quitação (para assinatura do sócio)";
       document.getElementById("pdf-document-content").innerHTML = docHtml;
       document.getElementById("pdf-view-overlay").classList.add("active");
       if (window.lucide) lucide.createIcons();
@@ -1695,7 +1742,8 @@ const RelacionamentoApp = {
   _docCfg(kind) {
     const map = {
       terceiros: { p: "ter", title: "Autorização de terceiros", storage: "crm_docpadrao_terceiros", titleId: "doc-terceiros-title", corpoId: "doc-terceiros-corpo", defaultTitle: "AUTORIZAÇÃO DE TERCEIROS" },
-      vencimento: { p: "ven", title: "Alteração de vencimento", storage: "crm_docpadrao_vencimento", titleId: "doc-vencimento-title", corpoId: "doc-vencimento-corpo", defaultTitle: "ALTERAÇÃO DE VENCIMENTO" }
+      vencimento: { p: "ven", title: "Alteração de vencimento", storage: "crm_docpadrao_vencimento", titleId: "doc-vencimento-title", corpoId: "doc-vencimento-corpo", defaultTitle: "ALTERAÇÃO DE VENCIMENTO" },
+      quitacao: { p: "qui", title: "Termo de quitação", storage: "crm_docpadrao_quitacao", titleId: "doc-quitacao-title", corpoId: "doc-quitacao-corpo", defaultTitle: "INSTRUMENTO PARTICULAR DE QUITAÇÃO E NOTIFICAÇÃO" }
     };
     return map[kind] || map.terceiros;
   },
@@ -1882,6 +1930,11 @@ const RelacionamentoApp = {
     if (preview) preview.textContent = "";
     const dd = this._docEl(kind, "-nome-dropdown");
     if (dd) dd.style.display = "none";
+    if (kind === "quitacao") {
+      RelacionamentoState.quitacaoAutoGerar = false;
+      const st = document.getElementById("qui-quitado-status");
+      if (st) st.innerHTML = "";
+    }
     if (kind === "vencimento") {
       this._setVencimentoBloqueado(false);
       const orig = document.getElementById("ven-data-original");
@@ -2236,6 +2289,7 @@ const RelacionamentoApp = {
           this.atualizarPreviewVencimento();
         }
       }
+      if (kind === "quitacao") await this._prepararQuitacao(RelacionamentoState[kind]);
       if (RelacionamentoState[kind + "FromGestao"]) this._travarFiltrosDocOrigem(kind);
     } catch (err) {
       console.error(err);
