@@ -384,9 +384,27 @@ const RydooApp = {
       <style>
         #rydoo-root { padding: 16px 18px 28px; }
         #rydoo-root .rydoo-card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:14px 16px 12px; }
-        #rydoo-root .rydoo-bar { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; }
+        #rydoo-root .rydoo-bar { display:flex; flex-wrap:wrap; gap:14px 0; align-items:flex-end; }
+        #rydoo-root .rydoo-group { display:flex; gap:10px; align-items:flex-end; padding:0 16px; border-left:1px solid #e2e8f0; }
+        #rydoo-root .rydoo-group:first-child { padding-left:0; border-left:0; }
+        #rydoo-root .rydoo-group:last-child { padding-right:0; }
+        #rydoo-root .rydoo-group-grow { flex:1; min-width:360px; }
+        #rydoo-root .rydoo-field-btns { min-width:0; }
+        #rydoo-root .rydoo-btns { display:flex; gap:8px; }
+        #rydoo-root .rydoo-b { height:36px; display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+        #rydoo-root .rydoo-file { display:inline-flex; align-items:center; gap:6px; margin-top:10px; padding:3px 10px; border-radius:999px; background:#f1f5f9; color:#475569; font-size:12px; }
+        #rydoo-root .rydoo-file svg { color:#105436; }
+        #rydoo-root .rydoo-loading { display:flex; align-items:center; justify-content:center; min-height:calc(100vh - 330px); background:#fff; border:1px solid #e2e8f0; border-radius:12px; margin-top:12px; }
+        #rydoo-root .rydoo-loader { width:min(420px, 90%); display:flex; flex-direction:column; align-items:center; gap:10px; text-align:center; }
+        #rydoo-root .rydoo-spin { width:48px; height:48px; border:5px solid #d1fae5; border-top-color:#105436; border-radius:50%; animation:rydoo-rot .9s linear infinite; }
+        #rydoo-root .rydoo-loader-title { margin-top:4px; font-weight:700; font-size:15px; color:#105436; }
+        #rydoo-root .rydoo-loader-sub { font-size:12.5px; color:#64748b; min-height:1em; }
+        #rydoo-root .rydoo-loader-track { width:100%; height:8px; margin-top:6px; background:#e2e8f0; border-radius:999px; overflow:hidden; }
+        #rydoo-root .rydoo-loader-bar { height:100%; width:0; background:linear-gradient(90deg, #16a34a, #105436); border-radius:999px; transition:width .3s ease; }
+        #rydoo-root .rydoo-loader-pct { font-size:12px; font-weight:700; color:#475569; font-variant-numeric:tabular-nums; }
+        @keyframes rydoo-rot { to { transform:rotate(360deg); } }
         #rydoo-root .rydoo-field { display:flex; flex-direction:column; gap:4px; min-width:160px; }
-        #rydoo-root .rydoo-field label { font-size:11px; font-weight:700; letter-spacing:.04em; color:#64748b; }
+        #rydoo-root .rydoo-field > label { font-size:11px; font-weight:700; letter-spacing:.04em; color:#64748b; }
         #rydoo-root .rydoo-field input, #rydoo-root .rydoo-field select { height:36px; }
         #rydoo-root .rydoo-hint { margin:10px 0 0; color:#64748b; font-size:12.5px; }
         #rydoo-root .rydoo-kpis { display:flex; flex-wrap:wrap; gap:10px; margin:12px 0; }
@@ -411,7 +429,6 @@ const RydooApp = {
         #rydoo-root .rydoo-why { margin-top:4px; color:#475569; font-size:12px; }
         #rydoo-root .rydoo-empty, #rydoo-root .rydoo-error { padding:22px; color:#64748b; }
         #rydoo-root .rydoo-error { color:#b91c1c; }
-        #rydoo-root .rydoo-file { margin-left:auto; color:#64748b; font-size:12px; align-self:center; }
         #rydoo-root .rydoo-tree { display:flex; flex-direction:column; background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:10px; }
         #rydoo-root .rydoo-node { display:flex; align-items:center; gap:8px; padding:8px 12px; margin-bottom:5px; border:1px solid #e2e8f0; border-left:4px solid #cbd5e1; border-radius:6px; background:#fff; }
         #rydoo-root .rydoo-node-toggle { cursor:pointer; }
@@ -459,29 +476,51 @@ const RydooApp = {
       </style>
       <div class="rydoo-card">
         <div class="rydoo-bar">
-          <label class="btn btn-primary btn-sm" style="margin:0;height:36px;">
-            <i data-lucide="upload" style="width:14px;height:14px;"></i> Importar Excel
-            <input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="RydooApp.onFile(this)">
-          </label>
-          <button type="button" class="btn btn-cancel btn-sm" style="height:36px;" onclick="RydooApp.limpar()" ${s.rows.length ? "" : "disabled"}>Limpar</button>
-          <button type="button" class="btn btn-outline btn-sm" style="height:36px;" onclick="RydooApp.marcarTodos()" ${s.rows.length ? "" : "disabled"}>Marcar todos</button>
-          <button type="button" class="btn btn-primary btn-sm" style="height:36px;" onclick="RydooApp.gerarMarcados()" ${s.rows.length ? "" : "disabled"}>Gerar títulos</button>
-          <div class="rydoo-field">
-            <label>CLASSIFICAÇÃO</label>
-            <select class="form-control" onchange="RydooApp.onFilter('status', this.value)">
-              <option value="" ${s.status === "" ? "selected" : ""}>Todas</option>
-              <option value="divergente" ${s.status === "divergente" ? "selected" : ""}>Divergentes</option>
-              <option value="revisar" ${s.status === "revisar" ? "selected" : ""}>A revisar</option>
-              <option value="ok" ${s.status === "ok" ? "selected" : ""}>Ok</option>
-            </select>
+          <div class="rydoo-group">
+            <div class="rydoo-field rydoo-field-btns">
+              <label>ARQUIVO DO RYDOO</label>
+              <div class="rydoo-btns">
+                <label class="btn btn-primary btn-sm rydoo-b" style="margin:0;">
+                  <i data-lucide="upload" style="width:14px;height:14px;"></i> Importar Excel
+                  <input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="RydooApp.onFile(this)">
+                </label>
+                <button type="button" class="btn btn-cancel btn-sm rydoo-b" onclick="RydooApp.limpar()" ${s.rows.length ? "" : "disabled"}>
+                  <i data-lucide="eraser" style="width:14px;height:14px;"></i> Limpar
+                </button>
+              </div>
+            </div>
           </div>
-          <div class="rydoo-field" style="flex:1;min-width:220px;">
-            <label>BUSCAR</label>
-            <input class="form-control" value="${this.esc(s.q)}" placeholder="Pessoa, categoria, conta, comentário" oninput="RydooApp.onFilter('q', this.value)">
+          <div class="rydoo-group rydoo-group-grow">
+            <div class="rydoo-field" style="flex:1;min-width:220px;">
+              <label>BUSCAR</label>
+              <input class="form-control" value="${this.esc(s.q)}" placeholder="Pessoa, categoria, conta, comentário" oninput="RydooApp.onFilter('q', this.value)">
+            </div>
+            <div class="rydoo-field">
+              <label>CLASSIFICAÇÃO</label>
+              <select class="form-control" onchange="RydooApp.onFilter('status', this.value)">
+                <option value="" ${s.status === "" ? "selected" : ""}>Todas</option>
+                <option value="divergente" ${s.status === "divergente" ? "selected" : ""}>Divergentes</option>
+                <option value="revisar" ${s.status === "revisar" ? "selected" : ""}>A revisar</option>
+                <option value="ok" ${s.status === "ok" ? "selected" : ""}>Ok</option>
+              </select>
+            </div>
           </div>
-          ${s.fileName ? `<div class="rydoo-file">${this.esc(s.fileName)}</div>` : ""}
+          <div class="rydoo-group">
+            <div class="rydoo-field rydoo-field-btns">
+              <label>TÍTULOS NO SIENGE</label>
+              <div class="rydoo-btns">
+                <button type="button" id="rydoo-btn-marcar" class="btn btn-outline btn-sm rydoo-b" onclick="RydooApp.marcarTodos()" ${s.rows.length && !s.preparing ? "" : "disabled"}>
+                  <i data-lucide="check-square" style="width:14px;height:14px;"></i> Marcar todos
+                </button>
+                <button type="button" id="rydoo-btn-gerar" class="btn btn-primary btn-sm rydoo-b" onclick="RydooApp.gerarMarcados()" ${s.rows.length && !s.preparing ? "" : "disabled"}>
+                  <i data-lucide="file-plus-2" style="width:14px;height:14px;"></i> Gerar títulos
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
-        <p class="rydoo-hint" ${s.prepMsg ? "" : "hidden"}>${this.esc(s.prepMsg || "")}</p>
+        ${s.fileName ? `<div class="rydoo-file"><i data-lucide="file-spreadsheet" style="width:14px;height:14px;"></i> ${this.esc(s.fileName)}</div>` : ""}
+        <p class="rydoo-hint" ${s.prepMsg && !s.preparing ? "" : "hidden"}>${this.esc(s.prepMsg || "")}</p>
         <div id="rydoo-job" class="rydoo-job" ${s.job ? "" : "hidden"}>
           <div class="rydoo-job-label">${this.esc((s.job && s.job.label) || "")}</div>
           <div class="rydoo-job-track"><div class="rydoo-job-bar" style="width:${s.job ? s.job.pct : 0}%"></div></div>
@@ -498,7 +537,7 @@ const RydooApp = {
     const box = document.getElementById("rydoo-kpis");
     if (!box) return;
     const rows = this.state.rows;
-    if (!rows.length) { box.innerHTML = ""; return; }
+    if (!rows.length || this.state.preparing) { box.innerHTML = ""; return; }
     const sum = (list) => list.reduce((a, r) => a + (r.reembolsa !== false && Number.isFinite(r.valor) ? r.valor : 0), 0);
     const count = (level) => rows.filter((r) => r.level === level).length;
     box.innerHTML = `<div class="rydoo-kpis">
@@ -521,6 +560,19 @@ const RydooApp = {
       box.innerHTML = `<div class="rydoo-table-wrap"><div class="rydoo-empty">Nenhum Excel importado.</div></div>`;
       return;
     }
+    if (this.state.preparing) {
+      const pct = this.state.prepPct || 0;
+      box.innerHTML = `<div class="rydoo-loading">
+        <div class="rydoo-loader">
+          <div class="rydoo-spin"></div>
+          <div class="rydoo-loader-title">Analisando os dados do Rydoo</div>
+          <div class="rydoo-loader-sub" id="rydoo-prep-msg">${this.esc(this.state.prepMsg || "")}</div>
+          <div class="rydoo-loader-track"><div class="rydoo-loader-bar" id="rydoo-prep-bar" style="width:${pct}%"></div></div>
+          <div class="rydoo-loader-pct" id="rydoo-prep-pct">${pct}%</div>
+        </div>
+      </div>`;
+      return;
+    }
     const rows = this.visible();
     if (!rows.length) {
       box.innerHTML = `<div class="rydoo-table-wrap"><div class="rydoo-empty">Nenhuma linha com esse filtro.</div></div>`;
@@ -531,10 +583,22 @@ const RydooApp = {
   },
 
   paintHint() {
+    const s = this.state;
     const hint = document.querySelector("#rydoo-root .rydoo-hint");
-    if (!hint) return;
-    hint.textContent = this.state.prepMsg || "";
-    hint.hidden = !this.state.prepMsg;
+    if (hint) {
+      hint.textContent = s.prepMsg || "";
+      hint.hidden = !s.prepMsg || s.preparing;
+    }
+    const msg = document.getElementById("rydoo-prep-msg");
+    if (msg) msg.textContent = s.prepMsg || "";
+    const bar = document.getElementById("rydoo-prep-bar");
+    if (bar) bar.style.width = (s.prepPct || 0) + "%";
+    const pct = document.getElementById("rydoo-prep-pct");
+    if (pct) pct.textContent = (s.prepPct || 0) + "%";
+    ["rydoo-btn-marcar", "rydoo-btn-gerar"].forEach((id) => {
+      const b = document.getElementById(id);
+      if (b) b.disabled = !s.rows.length || s.preparing;
+    });
   },
 
   toggleNode(kind, key) {
@@ -629,9 +693,7 @@ const RydooApp = {
       </select>`;
     }
     if (c) {
-      const tag = this.colaborador(c)
-        ? `<span class="rydoo-tag rydoo-tag-ok">Colaborador</span>`
-        : `<span class="rydoo-tag rydoo-tag-revisar">Não é colaborador</span>`;
+      const tag = this.colaborador(c) ? "" : `<span class="rydoo-tag rydoo-tag-revisar">Não é colaborador</span>`;
       let banco = "Sem conta bancária no cadastro.";
       if (g.bankStatus === "loading") banco = "Lendo dados bancários…";
       else if (g.bankStatus === "erro") banco = "Não consegui ler os dados bancários.";
@@ -738,41 +800,50 @@ const RydooApp = {
     }
     const gen = (this._prepGen || 0) + 1;
     this._prepGen = gen;
+    const step = (msg, pct) => {
+      if (this._prepGen !== gen) return;
+      this.state.prepMsg = msg;
+      this.state.prepPct = Math.max(0, Math.min(100, Math.round(pct)));
+      this.paintHint();
+    };
     this.state.preparing = true;
     this.state.error = "";
-    this.state.prepMsg = "Conferindo reembolsos anteriores…";
-    this.paintHint();
+    this.state.prepPct = 0;
+    this.renderKpis();
     this.renderList();
+    step("Conferindo reembolsos anteriores…", 4);
     try {
       const hist = await this.lerHistorico();
       if (this._prepGen !== gen) return;
       this._historico = hist;
       this.classify(this.state.rows, hist);
+      step("Guardando a importação…", 10);
       await this.salvarImportacao();
       if (this._prepGen !== gen) return;
-      this.state.prepMsg = "Lendo o plano financeiro…";
-      this.paintHint();
+      step("Lendo o plano financeiro…", 16);
       await this.loadAccounts();
+      step("Lendo os centros de custo…", 28);
       try { await this.loadCostCenters(); } catch (e) {}
       if (this._prepGen !== gen) return;
-      this.renderList();
-      await this.loadCreditors((msg) => {
-        if (this._prepGen !== gen) return;
-        this.state.prepMsg = msg;
-        this.paintHint();
+      step("Buscando os credores…", 34);
+      await this.loadCreditors((msg, done, total) => {
+        step(msg, 34 + (total ? 24 * done / total : 0));
       });
       if (this._prepGen !== gen) return;
       this.state.groups = this.buildGroups();
+      step("Conferindo títulos já gerados…", 60);
       await this.marcarTitulosGerados();
       if (this._prepGen !== gen) return;
-      this.state.prepMsg = "Lendo e guardando os dados bancários…";
-      this.paintHint();
-      this.renderList();
-      await this.loadBanks(this.state.groups);
+      step("Lendo os dados bancários…", 66);
+      await this.loadBanks(this.state.groups, (done, total) => {
+        step("Lendo os dados bancários " + done + " de " + total + "…", 66 + (total ? 34 * done / total : 34));
+      });
       if (this._prepGen !== gen) return;
       this.state.preparing = false;
       this.state.prepMsg = "";
+      this.state.prepPct = 0;
       this.paintHint();
+      this.renderKpis();
       this.renderList();
       this.enviarBancosPendentes();
     } catch (e) {
@@ -780,6 +851,7 @@ const RydooApp = {
       this.state.preparing = false;
       this.state.prepMsg = (e && e.message) ? e.message : "Não consegui buscar os credores.";
       this.paintHint();
+      this.renderKpis();
       this.renderList();
     }
   },
@@ -1102,7 +1174,7 @@ const RydooApp = {
         if (this.colaborador(row)) all.push(row);
       });
       offset += 200;
-      if (onProgress) onProgress("Lendo credores " + Math.min(offset, total) + " de " + total + "…");
+      if (onProgress) onProgress("Lendo credores " + Math.min(offset, total) + " de " + total + "…", Math.min(offset, total), total);
       if (!results.length) break;
       if (offset < total) await new Promise((r) => setTimeout(r, 200));
     } while (offset < total);
@@ -1171,13 +1243,17 @@ const RydooApp = {
     return groups;
   },
 
-  async loadBanks(groups) {
+  async loadBanks(groups, onProgress) {
     const pending = groups.filter((g) => g.creditor && g.creditor.id != null);
     let cursor = 0;
+    let done = 0;
+    if (onProgress) onProgress(0, pending.length);
     const worker = async () => {
       while (cursor < pending.length) {
         const g = pending[cursor++];
         await this.loadBank(g);
+        done += 1;
+        if (onProgress) onProgress(done, pending.length);
       }
     };
     const n = Math.min(3, pending.length);
@@ -1299,7 +1375,7 @@ const RydooApp = {
   async logoJpeg() {
     if (this._logoJpeg) return this._logoJpeg;
     const img = new Image();
-    img.src = "i.ntegr.a/logo-moura-leite.svg";
+    img.src = "Banner/logo preta comemorativa.png";
     await img.decode();
     const maxW = 280;
     const scale = Math.min(1, maxW / img.width);
@@ -1494,8 +1570,7 @@ const RydooApp = {
     let ry = y;
     const meta = [
       ["De:", grupo || filial || "—"],
-      ["Data do relatório:", dataRel],
-      ["Colaborador:", nome]
+      ["Data do relatório:", dataRel]
     ];
     meta.forEach((pair) => {
       text(pair[0], left, ry, 9, true, ink);
@@ -1530,7 +1605,7 @@ const RydooApp = {
       ops.push(green + " rg");
       ops.push(left.toFixed(2) + " " + (y - 5).toFixed(2) + " " + (right - left).toFixed(2) + " 16 re f");
       text("Centro de custo  " + cc, left + 6, y, 9, true, "1 1 1");
-      textRight(this.money(this.soma(ccRows)) + " BRL", right - 6, y, 9, true, "1 1 1");
+      textRight(this.money(this.soma(ccRows)), right - 6, y, 9, true, "1 1 1");
       y -= 22;
       const bands = new Map();
       ccRows.forEach((r) => {
@@ -1546,7 +1621,7 @@ const RydooApp = {
       const labelLines = wrap(label, 9, 400);
       need(16 + labelLines.length * 12);
       labelLines.forEach((line, i) => text(line, left, y - i * 12, 9, true, ink));
-      textRight(this.money(this.soma(rows)) + " BRL", right, y, 9, true, ink);
+      textRight(this.money(this.soma(rows)), right, y, 9, true, ink);
       y -= labelLines.length * 12 + 2;
       rows.forEach((r) => {
         seq += 1;
@@ -1563,7 +1638,7 @@ const RydooApp = {
           if (local[i]) text(local[i], 190, y - i * 11, 8, false, ink);
           if (cat[i]) text(cat[i], 330, y - i * 11, 8, false, ink);
         }
-        textRight(this.money(r.valor) + " BRL", right, y, 8, false, ink);
+        textRight(this.money(r.valor), right, y, 8, false, ink);
         y -= lines * 11;
         if (r.xpd) {
           text(r.xpd, 62, y, 8, false, muted);
@@ -1583,13 +1658,9 @@ const RydooApp = {
       });
     });
 
-    const total = this.money(this.soma(g.rows)) + " BRL";
-    need(52);
+    const total = this.money(this.soma(g.rows));
+    need(24);
     textRight("TOTAL: " + total, right, y, 10, true, ink);
-    y -= 14;
-    textRight("Reembolsáveis: " + total, right, y, 9, false, ink);
-    y -= 14;
-    textRight("Nota Fiscal: 0 BRL", right, y, 9, false, muted);
     if (!ops.length) ops.push("BT /F1 10 Tf 40 800 Td ( ) Tj ET");
     pages.push(ops.join("\n"));
     return this.pdfDocument(pages, logo);

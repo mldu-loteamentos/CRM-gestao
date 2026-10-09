@@ -111,6 +111,10 @@ function rhonFindInst(list, id, number) {
 
 const HonorariosReport = {
   COLLECTION: "boletos_honorarios",
+  /** Situação das parcelas de cada boleto no Sienge; pagos não são consultados de novo. */
+  PAY_COLLECTION: "boletos_pagamentos",
+  /** Primeira competência com geração de boletos registrada. */
+  MIN_COMP: "2026-09",
   TABS: [
     { id: "honorarios", label: "Honorários" },
     { id: "desconto", label: "Desconto de juros" },
@@ -136,6 +140,7 @@ const HonorariosReport = {
   status: "todos",
   search: "",
   rankSort: { key: "recebido", dir: -1 },
+  sync: null,
 
   async record(ctx) {
     if (!window.firebaseDb || !window.firebaseCollections) return;
@@ -342,19 +347,88 @@ const HonorariosReport = {
     return { paid: true, paidAt, paidValue: use.reduce((s, r) => s + r.value, 0) };
   },
 
-  buildRows(records, statements) {
+  async loadPayCache(comp) {
+    const { collection, getDocs, query, where } = window.firebaseCollections;
+    const map = {};
+    try {
+      const snap = await getDocs(query(collection(window.firebaseDb, this.PAY_COLLECTION), where("competencia", "==", comp)));
+      snap.forEach((d) => {
+        const x = d.data() || {};
+        if (x.recId) map[x.recId] = x;
+      });
+    } catch (e) {
+      console.warn("[Honorários] pagamentos salvos", e);
+    }
+    return map;
+  },
+
+  /** Devolve quantos não foram salvos. */
+  async savePayCache(docs) {
+    if (!docs.length) return 0;
+    const { doc, setDoc } = window.firebaseCollections;
+    let i = 0;
+    let failed = 0;
+    const worker = async () => {
+      while (i < docs.length) {
+        const d = docs[i++];
+        try {
+          await setDoc(doc(window.firebaseDb, this.PAY_COLLECTION, String(d.recId).replace(/\//g, "_")), d);
+        } catch (e) {
+          failed += 1;
+          console.warn("[Honorários] salvar pagamento", d.recId, e);
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(5, docs.length) }, worker));
+    return failed;
+  },
+
+  /** Retrato das parcelas do boleto no extrato do Sienge. */
+  paySnapshot(rec, stmt, today) {
+    const stInsts = stmt[String(rec.billId)] || [];
+    const parcelas = (rec.parcelas || []).map((p) => {
+      const inst = rhonFindInst(stInsts, p.installmentId, p.installmentNumber || null);
+      if (!inst) return { installmentId: String(p.installmentId), found: false };
+      const pay = this.paymentInfo(inst, rec.generatedDate);
+      const bal = Number(inst.currentBalance);
+      return {
+        installmentId: String(p.installmentId),
+        found: true,
+        installmentNumber: inst.installmentNumber != null ? String(inst.installmentNumber) : "",
+        conditionType: String(inst.conditionType || inst.paymentConditionType || ""),
+        dueDate: String(inst.dueDate || "").slice(0, 10),
+        originalValue: Number(inst.originalValue || inst.installmentValue || inst.value || 0) || 0,
+        currentBalance: Number.isFinite(bal) ? bal : null,
+        paid: !!pay.paid,
+        paidAt: pay.paidAt || "",
+        paidValue: Number(pay.paidValue) || 0
+      };
+    });
+    return {
+      recId: String(rec.id),
+      competencia: rec.competencia || this.comp,
+      customerId: String(rec.customerId || ""),
+      billId: String(rec.billId || ""),
+      checkedDate: today,
+      checkedAt: new Date().toISOString(),
+      allPaid: parcelas.length > 0 && parcelas.every((x) => x.paid),
+      parcelas
+    };
+  },
+
+  buildRows(records, cache) {
     const today = rhonIso(new Date());
     const rows = [];
     records.forEach((rec) => {
-      const stmt = statements[String(rec.customerId)] || null;
-      const stInsts = stmt ? (stmt[String(rec.billId)] || []) : null;
+      const snapRec = cache[String(rec.id)] || null;
       const taxa = Number.isFinite(Number(rec.taxa)) ? Number(rec.taxa) : 1;
       const enterpriseName = rec.enterpriseName || rhonEnterpriseName(rec.enterpriseId);
       const city = rhonCity(rec.enterpriseId, enterpriseName);
       const opName = String(rec.author || rec.authorEmail || "Sem operador").trim().toUpperCase();
       const opKey = String(rec.authorEmail || "").toLowerCase().trim() || rhonFold(rec.author) || "-";
       (rec.parcelas || []).forEach((p) => {
-        const inst = stInsts ? rhonFindInst(stInsts, p.installmentId, p.installmentNumber || null) : null;
+        const snap = snapRec ? (snapRec.parcelas || []).find((x) => String(x.installmentId) === String(p.installmentId)) : null;
+        const inst = snap && snap.found ? snap : null;
         let vals = p;
         let base = p.saldo != null ? Number(p.saldo) : Number(p.valorOriginal);
         let dias = p.dias;
@@ -363,8 +437,8 @@ const HonorariosReport = {
           base = 0;
           dias = 0;
           if (inst) {
-            const orig = Number(inst.originalValue || inst.installmentValue || inst.value || 0) || 0;
-            const bal = Number(inst.currentBalance);
+            const orig = Number(inst.originalValue) || 0;
+            const bal = inst.currentBalance == null ? NaN : Number(inst.currentBalance);
             base = Number.isFinite(bal) && bal > 0.009 ? bal : orig;
             const dueDate = String(inst.dueDate || "").slice(0, 10);
             dias = typeof window.daysOverdueUntilTarget === "function"
@@ -375,8 +449,8 @@ const HonorariosReport = {
               : { multa: 0, jurosPadrao: 0, honorarios: 0 };
             vals = {
               installmentId: p.installmentId,
-              installmentNumber: inst.installmentNumber != null ? String(inst.installmentNumber) : "",
-              conditionType: String(inst.conditionType || inst.paymentConditionType || ""),
+              installmentNumber: inst.installmentNumber || "",
+              conditionType: inst.conditionType || "",
               dueDate,
               valorOriginal: orig,
               multa: Number(pack.multa) || 0,
@@ -396,14 +470,13 @@ const HonorariosReport = {
         let status = "aberto";
         let paidAt = "";
         let paidValue = 0;
-        if (!stmt) status = "naoverificado";
+        if (!snapRec) status = "naoverificado";
         else if (!inst) status = "naolocalizada";
         else {
-          const pay = this.paymentInfo(inst, rec.generatedDate);
-          if (pay.paid) {
+          if (inst.paid) {
             status = "pago";
-            paidAt = pay.paidAt;
-            paidValue = pay.paidValue;
+            paidAt = inst.paidAt || "";
+            paidValue = Number(inst.paidValue) || 0;
           } else if (rec.boletoDueDate && rec.boletoDueDate < today) {
             status = "vencido";
           }
@@ -455,7 +528,8 @@ const HonorariosReport = {
     return rows;
   },
 
-  async load() {
+  /** force: reconsulta hoje os boletos ainda em aberto (pagos nunca voltam ao Sienge). */
+  async load(force) {
     if (this.loading || !this.comp) return;
     if (!window.firebaseDb || !window.firebaseCollections) {
       this.error = "Firebase indisponível. Atualize a página.";
@@ -472,10 +546,38 @@ const HonorariosReport = {
       const keys = new Set(records.map((r) => r.key).filter(Boolean));
       const fromAudit = await this.loadAuditRecords(comp, keys);
       const all = this.onlyMine(records.concat(fromAudit));
-      const statements = await this.loadStatements(all.map((r) => r.customerId));
+      this.setProgress("Lendo pagamentos já conferidos", 0, 0);
+      const cache = await this.loadPayCache(comp);
+      const today = rhonIso(new Date());
+      const need = all.filter((r) => {
+        const c = cache[String(r.id)];
+        if (!c) return true;
+        if (c.allPaid) return false;
+        return force || c.checkedDate !== today;
+      });
+      const statements = await this.loadStatements(need.map((r) => r.customerId));
+      if (comp !== this.comp) return;
+      const fresh = [];
+      need.forEach((rec) => {
+        const stmt = statements[String(rec.customerId)];
+        if (!stmt) return;
+        const snap = this.paySnapshot(rec, stmt, today);
+        cache[snap.recId] = snap;
+        fresh.push(snap);
+      });
+      this.setProgress("Salvando a consulta de hoje", 0, 0);
+      const naoSalvos = await this.savePayCache(fresh);
       if (comp !== this.comp) return;
       this.records = all;
-      this.rows = this.buildRows(all, statements);
+      this.rows = this.buildRows(all, cache);
+      this.sync = {
+        at: new Date().toISOString(),
+        consultados: fresh.length,
+        falhas: need.length - fresh.length,
+        naoSalvos,
+        pagos: all.filter((r) => cache[String(r.id)] && cache[String(r.id)].allPaid).length,
+        total: all.length
+      };
       this.pruneFilters();
     } catch (e) {
       console.error("[Honorários] relatório", e);
@@ -487,12 +589,22 @@ const HonorariosReport = {
     }
   },
 
+  maxComp() {
+    return rhonIso(new Date()).slice(0, 7);
+  },
+
   setComp(v) {
-    const s = String(v || "").slice(0, 7);
-    if (!/^\d{4}-\d{2}$/.test(s) || s === this.comp) return;
+    let s = String(v || "").slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(s)) return;
+    if (s < this.MIN_COMP) s = this.MIN_COMP;
+    if (s > this.maxComp()) s = this.maxComp();
+    const input = document.getElementById("rhon-comp");
+    if (input && input.value !== s) input.value = s;
+    if (s === this.comp) return;
     this.comp = s;
     this.rows = [];
     this.records = [];
+    this.sync = null;
     this.load();
   },
 
@@ -706,6 +818,19 @@ const HonorariosReport = {
         <div class="rhon-loader-count" id="rhon-progress-count">${p.total ? `${p.done} de ${p.total} cliente(s)` : ""}</div>
       </div>
     </div>`;
+  },
+
+  syncHtml() {
+    const s = this.sync;
+    if (!s || this.loading) return "";
+    const hora = new Date(s.at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    const parts = [
+      `${s.consultados} boleto(s) consultado(s) no Sienge às ${hora}`,
+      `${s.pagos} de ${s.total} já pagos e salvos`
+    ];
+    if (s.falhas) parts.push(`${s.falhas} sem resposta do Sienge`);
+    if (s.naoSalvos) parts.push(`${s.naoSalvos} não foram salvos no Firebase`);
+    return `<div class="rhon-sync${s.falhas || s.naoSalvos ? " rhon-sync-warn" : ""}"><i data-lucide="database" style="width:13px;height:13px;"></i> ${parts.join(" · ")}</div>`;
   },
 
   emptyHtml(msg) {
@@ -939,10 +1064,10 @@ const HonorariosReport = {
           <div class="rhon-tools">
             <div class="ml-comp-slot">
               <label class="ml-comp-label" for="rhon-comp">Competência</label>
-              <input type="month" id="rhon-comp" class="ml-comp-input" value="${rhonEsc(this.comp)}" ${off}
+              <input type="month" id="rhon-comp" class="ml-comp-input" value="${rhonEsc(this.comp)}" min="${this.MIN_COMP}" max="${this.maxComp()}" ${off}
                 onchange="HonorariosReport.setComp(this.value)">
             </div>
-            <button type="button" class="btn btn-primary rhon-btn" onclick="HonorariosReport.load()" ${this.loading || !this.comp ? "disabled" : ""}>
+            <button type="button" class="btn btn-primary rhon-btn" onclick="HonorariosReport.load(true)" title="Consultar de novo no Sienge os boletos ainda em aberto" ${this.loading || !this.comp ? "disabled" : ""}>
               <i data-lucide="refresh-cw" style="width:14px;height:14px;"></i> Atualizar
             </button>
             ${this.FILTERS.map((f) => `<div class="rhon-f-slot rhon-f-${f.key}">${this.filterHtml(f)}</div>`).join("")}
@@ -965,6 +1090,7 @@ const HonorariosReport = {
             </button>
           </div>
           ${this.error ? `<div class="rhon-error">${rhonEsc(this.error)}</div>` : ""}
+          ${this.syncHtml()}
           <div class="rhon-content">${this.contentHtml()}</div>
         </div>
       </div>`;
@@ -1097,6 +1223,10 @@ const HonorariosReport = {
       #relatorios-cr-root .rhon-start i { color:#105436; }
       #relatorios-cr-root .rhon-start strong { color:#0f172a; font-size:1rem; }
       #relatorios-cr-root .rhon-start span { font-size:.85rem; }
+      #relatorios-cr-root .rhon-sync { display:flex; align-items:center; gap:6px; margin:-4px 0 10px; font-size:.75rem; color:#64748b; }
+      #relatorios-cr-root .rhon-sync svg { color:#105436; }
+      #relatorios-cr-root .rhon-sync-warn { color:#c2410c; }
+      #relatorios-cr-root .rhon-sync-warn svg { color:#c2410c; }
       #relatorios-cr-root .rhon-error { padding:10px 12px; margin-bottom:12px; background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; border-radius:8px; font-size:.82rem; }
       #relatorios-cr-root .rhon-overlay { flex:1; display:flex; align-items:center; justify-content:center; background:#fff; border:1px solid #e2e8f0; border-radius:8px; }
       #relatorios-cr-root .rhon-loader { width:min(420px, 90%); display:flex; flex-direction:column; align-items:center; gap:10px; text-align:center; }

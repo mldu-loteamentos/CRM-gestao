@@ -160,10 +160,6 @@ const OrcamentoApp = {
         .orc-table td:first-child { text-align: left; position: sticky; left: 0; z-index: 1; }
         .orc-split { border-left: 2px solid rgba(15, 23, 42, 0.18); }
         .orc-emp td { background: #0c3d28; color: #fff; font-weight: 700; }
-        .orc-table tbody tr.orc-leaf:hover td { background: #d1fae5; }
-        .orc-table tbody tr.orc-cc:hover td { background: #6ee7b7; }
-        .orc-table tbody tr.orc-emp:hover td { background: #166534; }
-        .orc-table tbody tr.orc-total:hover td { background: #065f46; }
         .orc-table tbody tr:hover td:first-child { box-shadow: inset 4px 0 0 #f37021; }
         .orc-total td { position: sticky; bottom: 0; background: #134e3a; color: #fff; font-weight: 800; z-index: 2; border-top: 2px solid #0c3d28; }
         .orc-total td:first-child { z-index: 3; background: #134e3a; }
@@ -176,7 +172,6 @@ const OrcamentoApp = {
         .orc-view button:hover:not(.is-on) { background: #d1fae5; }
         .orc-cc td { background: #d1fae5; font-weight: 700; color: #064e3b; }
         .orc-obra td { background: #a7f3d0; font-weight: 800; color: #064e3b; }
-        .orc-table tbody tr.orc-obra:hover td { background: #6ee7b7; }
         .orc-leaf td { background: #fff; font-weight: 600; color: #0f172a; }
         .orc-neg { color: #991b1b; }
         .orc-table tbody tr[data-orc-row] { cursor: pointer; }
@@ -209,6 +204,12 @@ const OrcamentoApp = {
         .orc-total td.orc-cart-col, .orc-total td.orc-vend-col { color: #fff; }
         .orc-cc td.orc-cart-col, .orc-cc td.orc-vend-col,
         .orc-obra td.orc-cart-col, .orc-obra td.orc-vend-col { color: #064e3b; }
+        .orc-table tbody tr:hover td { background: #ffedd5; }
+        .orc-table tbody tr.orc-emp:hover td, .orc-table tbody tr.orc-total:hover td,
+        .orc-table tbody tr.orc-emp:hover td *, .orc-table tbody tr.orc-total:hover td * { color: #7c2d12; }
+        .orc-table tbody tr:hover .orc-neg,
+        .orc-table tbody tr.orc-emp:hover .orc-neg, .orc-table tbody tr.orc-total:hover .orc-neg { color: #b91c1c; }
+        .orc-table tbody tr.orc-picked:hover td { background: #fed7aa; }
         .orc-table td.orc-vend-hover { cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
         .orc-empty { padding: 28px; text-align: center; color: #64748b; }
         .orc-sienge { color: #1e3a8a; cursor: help; font-variant-numeric: tabular-nums; }
