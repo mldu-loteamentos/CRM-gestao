@@ -1528,7 +1528,7 @@ function getRuleOperatorByType(ruleId, defaultOp, customerId, requiredType) {
       return defaultOp;
   }
   if (requiredType === 'advogado') {
-      const advOps = users.filter(u => u.operator_type === 'advogado' && u.status !== 'INATIVO');
+      const advOps = users.filter(u => typeof window.isAdvogadoCobrancaUser === "function" ? window.isAdvogadoCobrancaUser(u) : (u.operator_type === "advogado" && u.status !== "INATIVO"));
       if (advOps.length > 0) {
           let lawyerNames = advOps.map(u => u.sienge_user ? u.sienge_user.toUpperCase().replace(/\./g, ' ').trim() : u.name.toUpperCase());
           if (lawyerNames.length === 1) return lawyerNames[0];
@@ -2613,7 +2613,7 @@ function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
   } catch (e) {
     users = [];
   }
-  const advogados = users.filter(u => u.operator_type === "advogado" && u.status !== "INATIVO");
+  const advogados = users.filter(u => typeof window.isAdvogadoCobrancaUser === "function" ? window.isAdvogadoCobrancaUser(u) : (u.operator_type === "advogado" && u.status !== "INATIVO"));
 
   Object.keys(consolidated).forEach(key => {
     const c = consolidated[key];
@@ -4296,22 +4296,40 @@ window.parseCrmPermsPayload = function(raw) {
   }
 };
 
+window.crmPermShrinkConfirmed = function(obj) {
+  const at = Number(obj && obj._shrinkConfirmedAt);
+  return Number.isFinite(at) && at > 0;
+};
+
+window.mergeCrmPermPayloads = function(aRaw, bRaw) {
+  const a = window.parseCrmPermsPayload(aRaw) || {};
+  const b = window.parseCrmPermsPayload(bRaw) || {};
+  const aAt = window.crmPermsSavedAt(a);
+  const bAt = window.crmPermsSavedAt(b);
+  const newer = aAt >= bAt ? a : b;
+  const older = newer === a ? b : a;
+  const newerShrink = window.crmPermShrinkConfirmed(newer);
+  const keys = new Set(Object.keys(a).concat(Object.keys(b)));
+  const out = {};
+  keys.forEach((k) => {
+    if (k === "__mirror_of__" || k === "_savedAt" || k === "_shrinkConfirmedAt") return;
+    const nv = newer[k];
+    const ov = older[k];
+    if (nv === true || ov === true) {
+      out[k] = (nv === false && newerShrink) ? false : true;
+      return;
+    }
+    if (nv != null) out[k] = nv;
+    else if (ov != null) out[k] = ov;
+  });
+  out._savedAt = Math.max(aAt, bAt) || Date.now();
+  if (newerShrink) out._shrinkConfirmedAt = newer._shrinkConfirmedAt;
+  return JSON.stringify(out);
+};
+
 window.pickPreferredCrmPerms = function(localStr, cloudStr) {
-  const localHas = window.crmPermsPayloadHasTrue(localStr);
-  const cloudHas = window.crmPermsPayloadHasTrue(cloudStr);
-  const lockUntil = Number(window._crmPermsLocalLockUntil || 0);
-  if (lockUntil && Date.now() < lockUntil && localHas) return localStr || "{}";
-  if (localHas && !cloudHas) return localStr || "{}";
-  if (!localHas && cloudHas) return cloudStr || "{}";
-  if (localHas && cloudHas) {
-    const localAt = window.crmPermsSavedAt(localStr);
-    const cloudAt = window.crmPermsSavedAt(cloudStr);
-    if (localAt && Date.now() - localAt < 30000) return localStr;
-    if (cloudAt > localAt) return cloudStr;
-    return localStr;
-  }
-  if (localStr && String(localStr) !== "{}" && String(localStr) !== "null") return localStr;
-  return cloudStr || localStr || "{}";
+  if (!localStr && !cloudStr) return "{}";
+  return window.mergeCrmPermPayloads(localStr, cloudStr);
 };
 
 window.markCrmPermsLocalSave = function() {
@@ -4321,6 +4339,16 @@ window.markCrmPermsLocalSave = function() {
 window.backupCrmProfilePerms = function(profileId, payload) {
   if (!profileId || !payload) return;
   const key = "crm_perms_bak_" + profileId;
+  let prev = null;
+  try { prev = localStorage.getItem(key); } catch (e) {}
+  if (!prev) {
+    try { prev = sessionStorage.getItem(key); } catch (e) {}
+  }
+  const prevObj = window.parseCrmPermsPayload(prev);
+  const nextObj = window.parseCrmPermsPayload(payload);
+  const prevN = window.crmPermsTrueCount(prevObj);
+  const nextN = window.crmPermsTrueCount(nextObj);
+  if (prevN > nextN && !window.crmPermShrinkConfirmed(nextObj)) return;
   try { localStorage.setItem(key, payload); } catch (e) {}
   try { sessionStorage.setItem(key, payload); } catch (e) {}
 };

@@ -5,6 +5,17 @@ window.isOperadorCobrancaProfile = function(name) {
   return n.includes("OPERADOR COBRANCA");
 };
 
+window.isAdvogadoCobrancaProfile = function(name) {
+  const n = String(name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return n.includes("ADVOGADO") && n.includes("COBRANCA") && !n.includes("OPERADOR");
+};
+
+window.isAdvogadoCobrancaUser = function(user) {
+  if (!user || user.status === "INATIVO") return false;
+  if (window.isAdvogadoCobrancaProfile(user.profile_name)) return true;
+  return window.isOperadorCobrancaProfile(user.profile_name) && String(user.operator_type || "") === "advogado";
+};
+
 window.isOperadorCobrancaTerceirizadoProfile = function(name) {
   const n = String(name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   return n.includes("OPERADOR COBRANCA") && n.includes("TERCEIRIZ");
@@ -13,8 +24,25 @@ window.isOperadorCobrancaTerceirizadoProfile = function(name) {
 /** Tipo efetivo: o perfil Terceirizado vale como Externo, mesmo sem o subtipo antigo. */
 window.crmOperatorType = function(user) {
   if (!user) return "";
+  if (window.isAdvogadoCobrancaProfile(user.profile_name)) return "advogado";
   if (window.isOperadorCobrancaTerceirizadoProfile(user.profile_name)) return "externo";
   return String(user.operator_type || "");
+};
+
+window.syncUserModalProfile = function(sel) {
+  const name = sel && sel.value;
+  const isOp = window.isOperadorCobrancaProfile(name);
+  const isTerc = window.isOperadorCobrancaTerceirizadoProfile(name);
+  const isAdv = window.isAdvogadoCobrancaProfile(name);
+  const typeBox = document.getElementById("umodal-operator-type-container");
+  const advBox = document.getElementById("umodal-advogado-config");
+  const resend = document.getElementById("umodal-resend-billet-container");
+  const opType = document.getElementById("umodal-operator-type");
+  if (typeBox) typeBox.style.display = (isOp && !isTerc) ? "block" : "none";
+  if (resend) resend.style.display = (isOp || isAdv) ? "block" : "none";
+  if (opType && isTerc) opType.value = "externo";
+  if (advBox) advBox.style.display = (isAdv || (isOp && opType && opType.value === "advogado")) ? "block" : "none";
+  if (window.ConfigUsersApp && typeof ConfigUsersApp.syncDeptBox === "function") ConfigUsersApp.syncDeptBox();
 };
 
 /** Perfis/usuários que só enxergam clientes da própria carteira atribuída. */
@@ -552,6 +580,15 @@ const ConfigUsersApp = {
     try { this.breakSharedCobrancaMirrors(); } catch (e) { console.warn("[ConfigUsers] break mirrors:", e); }
     try { this.seedTerceirizadoPermsFromCobranca(); } catch (e) { console.warn("[ConfigUsers] seed terceirizado:", e); }
     try { this.migrateLuceliaToBackOffice(); } catch (e) { console.warn("[ConfigUsers] migrate lucelia:", e); }
+    if (!window._crmCloudIdentitySaved) {
+      window._crmCloudIdentitySaved = true;
+      if (this.profiles.length && typeof window.persistCrmProfilesNow === "function") {
+        this.persistProfilesCloud().catch((e) => console.warn("[ConfigUsers] perfis na nuvem:", e));
+      }
+      if (this.users.length && typeof window.persistCrmUsersToFirebase === "function") {
+        window.persistCrmUsersToFirebase(this.users).catch((e) => console.warn("[ConfigUsers] usuários na nuvem:", e));
+      }
+    }
     if (this.restoreNaiaraCadastroName()) {
       try { await this.persistUsers(); } catch (e) { console.warn("[ConfigUsers] nome Naiara:", e); }
     }
@@ -1456,13 +1493,13 @@ const ConfigUsersApp = {
             <div style="display: flex; gap: 16px; margin-bottom: 16px;">
                <div style="flex: 1;">
                   <label style="display: block; font-weight: 600; color: #5f6368; margin-bottom: 6px; font-size: 0.85rem;">Perfil de Acesso</label>
-                  <select id="umodal-profile" onchange="(function(sel){ const isOp = window.isOperadorCobrancaProfile(sel.value); const isTerc = window.isOperadorCobrancaTerceirizadoProfile(sel.value); document.getElementById('umodal-operator-type-container').style.display = (isOp && !isTerc) ? 'block' : 'none'; if(document.getElementById('umodal-resend-billet-container')) document.getElementById('umodal-resend-billet-container').style.display = isOp ? 'block' : 'none'; const opType = document.getElementById('umodal-operator-type'); if (opType && isTerc) { opType.value = 'externo'; document.getElementById('umodal-advogado-config').style.display = 'none'; } ConfigUsersApp.syncDeptBox(); })(this)" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; outline: none; cursor: pointer; transition: border-color 0.2s;" onfocus="this.style.borderColor='#105436'" onblur="this.style.borderColor='#e8eaed'">
+                  <select id="umodal-profile" onchange="window.syncUserModalProfile(this)" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; outline: none; cursor: pointer; transition: border-color 0.2s;" onfocus="this.style.borderColor='#105436'" onblur="this.style.borderColor='#e8eaed'">
                      ${userProfileOptions}
                   </select>
                </div>
                <div id="umodal-operator-type-container" style="flex: 1; display: ${((window.isOperadorCobrancaProfile(user && user.profile_name) && !window.isOperadorCobrancaTerceirizadoProfile(user && user.profile_name)) || !user) ? 'block' : 'none'};">
                   <label style="display: block; font-weight: 600; color: #5f6368; margin-bottom: 6px; font-size: 0.85rem;">Tipo de Operador</label>
-                  <select id="umodal-operator-type" onchange="document.getElementById('umodal-advogado-config').style.display = this.value === 'advogado' ? 'block' : 'none';" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; outline: none; cursor: pointer; transition: border-color 0.2s;" onfocus="this.style.borderColor='#105436'" onblur="this.style.borderColor='#e8eaed'">
+                  <select id="umodal-operator-type" onchange="window.syncUserModalProfile(document.getElementById('umodal-profile'))" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; outline: none; cursor: pointer; transition: border-color 0.2s;" onfocus="this.style.borderColor='#105436'" onblur="this.style.borderColor='#e8eaed'">
                      <option value="interno" ${user && user.operator_type === 'interno' && !window.isOperadorCobrancaTerceirizadoProfile(user.profile_name) ? 'selected' : ''}>Interno</option>
                      <option value="externo" ${user && (user.operator_type === 'externo' || window.isOperadorCobrancaTerceirizadoProfile(user.profile_name)) ? 'selected' : (!user ? '' : '')}>Externo (Terceirizada)</option>
                      <option value="apoio_juridico" ${user && user.operator_type === 'apoio_juridico' ? 'selected' : ''}>Apoio Jurídico (Interno)</option>
@@ -1471,7 +1508,7 @@ const ConfigUsersApp = {
                </div>
             </div>
             
-            <div id="umodal-advogado-config" style="margin-bottom: 16px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e8eaed; display: ${user && user.operator_type === 'advogado' ? 'block' : 'none'};">
+            <div id="umodal-advogado-config" style="margin-bottom: 16px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e8eaed; display: ${user && (window.isAdvogadoCobrancaProfile(user.profile_name) || user.operator_type === 'advogado') ? 'block' : 'none'};">
                <h4 style="margin: 0 0 8px 0; font-size: 0.95rem; color: #202124;">Configurações de Atuação do Advogado</h4>
                <p style="font-size: 0.8rem; color: #5f6368; margin-top: 0; margin-bottom: 12px;">Selecione os locais onde este advogado irá atuar (se o título coincidir com qualquer um dos locais marcados, será atribuído a este advogado).</p>
                
@@ -1493,7 +1530,7 @@ const ConfigUsersApp = {
 
             <div style="margin-bottom: 18px; padding: 16px; background: #f0fdf4; border: 1px solid #d1fae5; border-radius: 10px; display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
                ${switchField("umodal-check-const", !!(user && user.check_construction), "document.getElementById('umodal-const-config').style.display = this.checked ? 'block' : 'none';", "Responsável por checar construção")}
-               <div id="umodal-resend-billet-container" style="display: ${window.isOperadorCobrancaProfile(user && user.profile_name) || !user ? 'block' : 'none'};">
+               <div id="umodal-resend-billet-container" style="display: ${window.isOperadorCobrancaProfile(user && user.profile_name) || window.isAdvogadoCobrancaProfile(user && user.profile_name) || !user ? 'block' : 'none'};">
                    ${switchField("umodal-resend-billet", !!(user && user.resend_billet), "", "Responsável por reenviar boleto de cliente")}
                </div>
                ${switchField("umodal-assina-testemunha", !!(user && user.assina_testemunha), "document.getElementById('umodal-witness-docs').style.display = this.checked ? 'block' : 'none';", "Assina documentos como testemunha")}
@@ -1600,8 +1637,9 @@ const ConfigUsersApp = {
           return;
       }
 
-      const isOperatorProfile = window.isOperadorCobrancaProfile(profileName) || profileName.toUpperCase().includes('OPERADOR');
-      const resolvedOperatorType = isOperatorProfile ? operatorType : null;
+      const isAdvProfile = window.isAdvogadoCobrancaProfile(profileName);
+      const isOperatorProfile = window.isOperadorCobrancaProfile(profileName) || profileName.toUpperCase().includes("OPERADOR");
+      const resolvedOperatorType = isAdvProfile ? "advogado" : (isOperatorProfile ? operatorType : null);
       const fields = {
           name: name,
           email: email,
@@ -2347,23 +2385,28 @@ const ConfigUsersApp = {
 
   async savePermissions() {
     const checkboxes = document.querySelectorAll('.profile-perm-checkbox');
+    if (!checkboxes.length) {
+      alert("A tela de permissões não carregou. Nenhum acesso foi alterado.");
+      return;
+    }
     let totalEdit = 0;
     let checkedEdit = 0;
-    const perms = {};
+    const incoming = {};
     checkboxes.forEach(cb => {
        const key = cb.getAttribute('data-key');
-       if (key && key.endsWith('_editar')) {
+       if (!key) return;
+       if (key.endsWith('_editar')) {
           totalEdit++;
           if (cb.checked) checkedEdit++;
        }
-       perms[key] = cb.checked;
+       incoming[key] = cb.checked;
     });
-    window.syncConfiguracoesPermAliases(perms);
+    window.syncConfiguracoesPermAliases(incoming);
 
-    const incomingHas = typeof window.crmPermsHasAnyTrue === "function"
-      ? window.crmPermsHasAnyTrue(perms)
-      : Object.keys(perms).some((k) => perms[k] === true);
     const existing = this.getProfilePermsObject(this.selectedProfile) || {};
+    const incomingHas = typeof window.crmPermsHasAnyTrue === "function"
+      ? window.crmPermsHasAnyTrue(incoming)
+      : Object.keys(incoming).some((k) => incoming[k] === true);
     const existingHas = typeof window.crmPermsHasAnyTrue === "function"
       ? window.crmPermsHasAnyTrue(existing)
       : Object.keys(existing).some((k) => existing[k] === true);
@@ -2371,11 +2414,19 @@ const ConfigUsersApp = {
       alert("As marcações da tela vieram vazias, então as permissões já salvas deste perfil foram mantidas. Abra o perfil de novo, marque os módulos e clique em Salvar Permissões.");
       return;
     }
-
-    if (this.selectedProfile !== 'admin' && totalEdit > 0 && checkedEdit === totalEdit) {
-       alert("Acesso Negado: Não é permitido criar um perfil com permissão de edição em todas as funcionalidades. Perfil com edição irrestrita é um privilégio exclusivo do Administrador.");
-       return;
+    if (this.selectedProfile !== "admin" && totalEdit > 0 && checkedEdit === totalEdit) {
+      alert("Acesso Negado: Não é permitido criar um perfil com permissão de edição em todas as funcionalidades. Perfil com edição irrestrita é um privilégio exclusivo do Administrador.");
+      return;
     }
+    const removed = Object.keys(incoming).filter((k) => existing[k] === true && incoming[k] !== true);
+    if (removed.length) {
+      const ok = window.confirm("Você está tirando " + removed.length + " acesso(s) deste perfil. Permissão não é apagada sozinha. Confirma a retirada?");
+      if (!ok) return;
+    }
+    const perms = Object.assign({}, existing, incoming, { _savedAt: Date.now() });
+    delete perms.__mirror_of__;
+    if (removed.length) perms._shrinkConfirmedAt = Date.now();
+    else if (!existing._shrinkConfirmedAt) delete perms._shrinkConfirmedAt;
 
     if (!this.writePermissionPayload(this.selectedProfile, perms)) {
        alert("Armazenamento local cheio: não foi possível salvar as permissões deste perfil. Libere espaço no navegador e tente de novo.");
@@ -2383,7 +2434,15 @@ const ConfigUsersApp = {
     }
     if (typeof window.persistCrmProfilePermsNow === "function") {
       try {
-        await window.persistCrmProfilePermsNow(this.selectedProfile, perms);
+        const savedRaw = await window.persistCrmProfilePermsNow(this.selectedProfile, perms);
+        const savedObj = window.parseCrmPermsPayload ? window.parseCrmPermsPayload(savedRaw) : null;
+        const profile = (this.profiles || []).find((p) => String(p.id) === String(this.selectedProfile));
+        if (profile && savedObj) profile.perms = savedObj;
+        const shown = window.crmPermsTrueCount ? window.crmPermsTrueCount(incoming) : 0;
+        const kept = window.crmPermsTrueCount ? window.crmPermsTrueCount(savedObj) : shown;
+        if (kept > shown) {
+          alert("Os acessos que já estavam na nuvem foram mantidos. A tela tinha menos marcações e nada disso foi apagado.");
+        }
       } catch (e) {
         alert("As permissões ficaram neste navegador, mas não chegaram para os outros usuários. Abra de novo e clique em Salvar Permissões.\n\n" + (e && e.message ? e.message : e));
         return;

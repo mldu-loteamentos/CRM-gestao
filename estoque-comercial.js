@@ -1037,7 +1037,10 @@ const EstoqueComercialApp = {
       const code = String(u.commercialStock || "").toUpperCase() || "none";
       counts[code] = (counts[code] || 0) + 1;
     });
-    wrap.innerHTML = this.STATUS_PILLS.map(p => {
+    wrap.innerHTML = this.STATUS_PILLS.filter(p => {
+      if (p.id === "all" || p.id === this.state.status) return true;
+      return (counts[p.id] || 0) > 0;
+    }).map(p => {
       const n = p.id === "all" ? counts.all : (counts[p.id] || 0);
       return `<button type="button" class="est-pill${this.state.status === p.id ? " is-active" : ""}" data-status="${this.esc(p.id)}" onclick="EstoqueComercialApp.setStatus('${p.id}')">${this.esc(p.label)} <b>${n}</b></button>`;
     }).join("");
