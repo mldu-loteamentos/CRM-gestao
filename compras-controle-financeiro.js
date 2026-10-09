@@ -317,7 +317,6 @@ ComprasControleApp.noteProgress = function (text, ratio) {
   let wrap = box.querySelector(".cfin-load");
   if (!wrap || wrap.getAttribute("data-phase") !== text) {
     box.innerHTML = '<div class="tvig-empty"><div class="cfin-load" data-phase="' + this.esc(text) + '" style="display:flex;flex-direction:column;align-items:center;gap:12px;width:100%;max-width:400px;margin:0 auto;">'
-      + '<div class="loading-spinner" style="width:32px;height:32px;border:3px solid rgba(16,84,54,0.15);border-top-color:var(--color-primary);border-radius:50%;animation:spin 0.8s linear infinite;"></div>'
       + '<span class="loading-status-text" style="font-weight:500;">' + this.esc(text) + '</span>'
       + '<div style="width:100%;background:#e2e8f0;border-radius:8px;height:10px;overflow:hidden;margin-top:5px;">'
       + '<div class="loading-progress-bar" style="width:0%;height:100%;background:#10b981;transition:width 0.25s linear;"></div>'
@@ -706,13 +705,8 @@ ComprasControleApp.renderList = function () {
     <style>
       #cfin-table thead th { white-space: nowrap; }
       #cfin-table tbody tr.cprev-row { cursor: default; }
-      #cfin-table .cprev-col-venc { width: 96px; }
-      #cfin-table .cprev-col-cc { width: 15%; }
-      #cfin-table .cprev-col-dept { width: 8%; }
-      #cfin-table .cprev-col-cred { width: 12%; }
-      #cfin-table .cprev-col-tipo { width: 176px; }
       #cfin-table th.cprev-col-tipo,
-      #cfin-table td.cprev-col-tipo { overflow: visible; text-overflow: unset; text-align: center; }
+      #cfin-table td.cprev-col-tipo { text-align: center; }
       #cfin-table td.cprev-col-tipo .cprev-tag { margin-left: 0; margin-right: 0; }
     </style>
     <div class="table-container cprev-table-wrap">
