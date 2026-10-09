@@ -16,6 +16,61 @@ function caixaEsc(v) {
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+function caixaBalance(b) {
+  if (!b) return null;
+  const list = [b.amount, b.balance, b.balanceAmount, b.currentBalance, b.lastBalance, b.lastBalanceAmount, b.availableAmount, b.availableBalance, b.value];
+  for (let i = 0; i < list.length; i++) {
+    if (list[i] == null || list[i] === "") continue;
+    const n = Number(String(list[i]).replace(/\./g, "").replace(",", "."));
+    const raw = Number(list[i]);
+    if (Number.isFinite(raw)) return raw;
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+async function caixaFormaPagamento(billId, parcela) {
+  if (typeof window.siengeFetchWithRetry !== "function") return null;
+  const id = parcela || 1;
+  const kinds = ["bank-transfer", "pix", "boleto-bancario", "boleto-concessionaria"];
+  for (let i = 0; i < kinds.length; i++) {
+    try {
+      const data = await window.siengeFetchWithRetry(
+        "/bills/" + encodeURIComponent(billId) + "/installments/" + encodeURIComponent(id) + "/payment-information/" + kinds[i],
+        1
+      );
+      if (data && typeof data === "object") return { kind: kinds[i], data: data };
+    } catch (e) {}
+  }
+  return null;
+}
+
+function caixaFormaHtml(payment, item) {
+  if (payment && payment.data) {
+    const d = payment.data;
+    if (payment.kind === "pix") {
+      return `<p><strong>Forma:</strong> PIX</p><p>${caixaEsc(d.notes || "Chave do credor")}</p>`;
+    }
+    if (payment.kind === "boleto-bancario" || payment.kind === "boleto-concessionaria") {
+      return `<p><strong>Forma:</strong> ${payment.kind === "boleto-concessionaria" ? "Boleto de concessionária" : "Boleto"}</p><p>${caixaEsc(d.notes || d.digitableNumber || d.barCode || "")}</p>`;
+    }
+    const banco = [d.beneficiaryBankCode, d.beneficiaryBankName].filter(Boolean).join(" — ");
+    const ag = [d.beneficiaryBankBranchNumber, d.beneficiaryBankBranchDigit].filter(Boolean).join("-");
+    const conta = [d.beneficiaryAccountNumber, d.beneficiaryAccountDigit].filter(Boolean).join("-");
+    const tipo = d.beneficiaryAccountType === "P" ? "Poupança" : "Conta corrente";
+    return `<p><strong>Forma:</strong> Transferência</p>
+      <p><strong>Banco:</strong> ${caixaEsc(banco || "—")}</p>
+      <p><strong>Agência:</strong> ${caixaEsc(ag || "—")}</p>
+      <p><strong>${caixaEsc(tipo)}:</strong> ${caixaEsc(conta || "—")}</p>
+      <p><strong>Favorecido:</strong> ${caixaEsc(d.beneficiaryName || "—")}</p>
+      ${d.notes ? `<pre style="white-space:pre-wrap;font-family:inherit;margin:8px 0 0;">${caixaEsc(d.notes)}</pre>` : ""}`;
+  }
+  if (item && (item.tipoBaixa || item.conta || item.operacao)) {
+    return `<p><strong>Programação na consulta:</strong> ${caixaEsc([item.tipoBaixa, item.operacao, item.conta].filter(Boolean).join(" · "))}</p>`;
+  }
+  return `<p>O pagamento ainda não está programado neste título.</p>`;
+}
+
 function caixaFmtDate(iso) {
   if (!iso) return "—";
   const p = String(iso).slice(0, 10).split("-");
@@ -124,7 +179,15 @@ const FluxoCaixaDiarioApp = {
   error: "",
   days: [],
   openDay: "",
-  totals: { previsto: 0, titulos: 0 },
+  totals: { saldo: 0, entrar: 0, pagar: 0, titulos: 0 },
+  companyIds: [],
+  companies: [],
+  openEmp: false,
+  qEmp: "",
+  accounts: [],
+  progress: "",
+  detail: null,
+  _gen: 0,
 
   init() {
     if (!this.month) {
@@ -135,29 +198,108 @@ const FluxoCaixaDiarioApp = {
     this.load();
   },
 
+  monthBounds() {
+    const [y, m] = String(this.month || "").split("-").map(Number);
+    const last = new Date(y, m, 0).getDate();
+    return {
+      start: `${this.month}-01`,
+      end: `${this.month}-${String(last).padStart(2, "0")}`,
+      last
+    };
+  },
+
+  companyWanted(id) {
+    if (!this.companyIds.length) return true;
+    return this.companyIds.indexOf(String(id || "")) >= 0;
+  },
+
+  async ensureCompanies() {
+    if (this.companies.length) return;
+    const local = (window.AppState && AppState.companies) || [];
+    if (local.length) {
+      this.companies = local.map((c) => ({ id: String(c.id), name: c.name || c.tradeName || "" }));
+      return;
+    }
+    if (window.SiengeApiService && typeof SiengeApiService.getCompanies === "function") {
+      try {
+        const list = await SiengeApiService.getCompanies(false);
+        const rows = Array.isArray(list) ? list : ((list && list.results) || []);
+        this.companies = rows.map((c) => ({ id: String(c.id), name: c.name || c.tradeName || "" }));
+      } catch (e) {
+        this.companies = [];
+      }
+    }
+  },
+
+  async ensureCcCompany() {
+    if (this._ccCompany) return;
+    const map = {};
+    let list = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || [];
+    if (!list.length && window.SiengeApiService && typeof SiengeApiService.getCostCenters === "function") {
+      try { list = await SiengeApiService.getCostCenters(); } catch (e) { list = []; }
+    }
+    (list || []).forEach((c) => {
+      const id = String(c.id || "");
+      const co = c.companyId || c.idCompany || (c.company && c.company.id);
+      if (id && co != null && co !== "") map[id] = String(co);
+    });
+    this._ccCompany = map;
+  },
+
+  companyName(id) {
+    const hit = this.companies.find((c) => String(c.id) === String(id));
+    return hit ? hit.name : (id ? ("Empresa " + id) : "");
+  },
+
+  empItems() {
+    return this.companies.map((c) => ({
+      id: String(c.id),
+      name: String(c.name || "").toUpperCase(),
+      label: c.id + " - " + String(c.name || "").toUpperCase()
+    }));
+  },
+
+  paintProgress() {
+    const el = document.getElementById("cxd-progress");
+    if (!el) return;
+    el.textContent = this.progress || "";
+    el.hidden = !this.progress;
+  },
+
   async load() {
+    const gen = (this._gen || 0) + 1;
+    this._gen = gen;
     this.loading = true;
     this.error = "";
+    this.progress = "Lendo recebimentos e saldo…";
     this.render();
     try {
+      await this.ensureCompanies();
+      await this.ensureCcCompany();
+      if (this._gen !== gen) return;
+      const bounds = this.monthBounds();
       const units = await CaixaPosicaoStore.loadEstoqueUnits();
-      const [y, m] = this.month.split("-").map(Number);
-      const start = `${this.month}-01`;
-      const last = new Date(y, m, 0).getDate();
-      const end = `${this.month}-${String(last).padStart(2, "0")}`;
+      if (this._gen !== gen) return;
       const byDay = {};
+      const ensure = (iso) => {
+        if (!byDay[iso]) byDay[iso] = { date: iso, entrar: 0, pagar: 0, itens: [], pagarItens: [] };
+        return byDay[iso];
+      };
       let titulos = 0;
       units.forEach((u) => {
         if (u.quitado || u.relFin === "quitado") return;
+        const companyId = this._ccCompany[String(u.enterpriseId || "")] || "";
+        if (!this.companyWanted(companyId)) return;
         const pmp = Number(u.pmp3m) || 0;
         const parc = Array.isArray(u.openParcelas) ? u.openParcelas : [];
         parc.forEach((p) => {
           if (!p || !p.due || p.overdue) return;
           const prev = caixaAddDays(p.due, pmp);
-          if (prev < start || prev > end) return;
-          if (!byDay[prev]) byDay[prev] = { date: prev, valor: 0, itens: [] };
-          byDay[prev].valor += Number(p.val) || 0;
-          byDay[prev].itens.push({
+          if (prev < bounds.start || prev > bounds.end) return;
+          const day = ensure(prev);
+          const valor = Number(p.val) || 0;
+          day.entrar += valor;
+          day.itens.push({
             unidade: u.name,
             cc: u.enterpriseId,
             cliente: u.customerName || "",
@@ -165,31 +307,256 @@ const FluxoCaixaDiarioApp = {
             vencimento: p.due,
             pmp,
             previsto: prev,
-            valor: Number(p.val) || 0
+            valor
           });
           titulos += 1;
         });
       });
       const days = [];
-      for (let d = 1; d <= last; d++) {
+      for (let d = 1; d <= bounds.last; d++) {
         const iso = `${this.month}-${String(d).padStart(2, "0")}`;
-        days.push(byDay[iso] || { date: iso, valor: 0, itens: [] });
+        days.push(byDay[iso] || { date: iso, entrar: 0, pagar: 0, itens: [], pagarItens: [] });
       }
       this.days = days;
-      this.totals = { previsto: days.reduce((s, x) => s + x.valor, 0), titulos };
-      if (!units.some((u) => Array.isArray(u.openParcelas) && u.openParcelas.length)) {
-        this.error = "Ainda não há parcelas abertas no estoque. Rode o batimento da Posição de estoque para calcular o PMP dos últimos 3 meses.";
-      }
+      this.totals = {
+        saldo: 0,
+        entrar: days.reduce((s, x) => s + x.entrar, 0),
+        pagar: 0,
+        titulos
+      };
+      this.loading = false;
+      this.render();
+      await this.loadBalances(gen);
+      if (this._gen !== gen) return;
+      await this.loadPayables(gen, bounds);
     } catch (e) {
+      if (this._gen !== gen) return;
       this.error = e.message || String(e);
+      this.loading = false;
+      this.progress = "";
+      this.render();
     }
-    this.loading = false;
+  },
+
+  async loadBalances(gen) {
+    this.progress = "Lendo o saldo das contas…";
+    this.paintProgress();
+    const today = new Date().toISOString().slice(0, 10);
+    let rows = [];
+    if (window.SiengeApiService && typeof SiengeApiService.getAccountBalances === "function") {
+      if (this.companyIds.length) {
+        const chunks = await Promise.all(this.companyIds.map((id) => SiengeApiService.getAccountBalances(today, { companyId: id })));
+        chunks.forEach((list) => { if (Array.isArray(list)) rows.push.apply(rows, list); });
+      } else {
+        rows = await SiengeApiService.getAccountBalances(today) || [];
+      }
+    }
+    if (this._gen !== gen) return;
+    const accounts = [];
+    const seen = {};
+    (rows || []).forEach((b) => {
+      const companyId = String(b.companyId || b.company || "");
+      if (!this.companyWanted(companyId)) return;
+      const number = String(b.accountNumber || b.number || "").trim();
+      const amount = caixaBalance(b);
+      if (amount == null) return;
+      const key = companyId + "|" + number + "|" + String(b.balanceDate || "");
+      if (seen[key]) return;
+      seen[key] = true;
+      accounts.push({
+        companyId,
+        company: this.companyName(companyId),
+        number,
+        name: b.accountName || b.name || number || "Conta",
+        amount
+      });
+    });
+    accounts.sort((a, b) => String(a.companyId).localeCompare(String(b.companyId), "pt") || String(a.name).localeCompare(String(b.name), "pt"));
+    this.accounts = accounts;
+    this.totals.saldo = accounts.reduce((s, a) => s + a.amount, 0);
+    this.progress = "Buscando o que será pago…";
+    this.render();
+  },
+
+  async loadPayables(gen, bounds) {
+    const app = window.ComprasPrevisoesApp;
+    if (!app || typeof app.outcomeRange !== "function" || typeof app.transform !== "function") {
+      this.progress = "";
+      this.error = this.error || "O módulo de compras não está disponível para ler os títulos a pagar.";
+      this.render();
+      return;
+    }
+    const prevNote = app.noteProgress;
+    app.noteProgress = (text) => {
+      this.progress = text;
+      this.paintProgress();
+    };
+    let rows = [];
+    try {
+      const targets = this.companyIds.length ? this.companyIds.slice() : [""];
+      const bills = [];
+      for (let i = 0; i < targets.length; i++) {
+        if (this._gen !== gen) return;
+        this.progress = "Buscando contas a pagar · " + (i + 1) + " de " + targets.length;
+        this.paintProgress();
+        const part = await app.outcomeRange(bounds.start, bounds.end, targets[i]);
+        if (Array.isArray(part)) bills.push.apply(bills, part);
+      }
+      rows = app.transform({ data: bills }) || [];
+    } finally {
+      app.noteProgress = prevNote;
+    }
+    if (this._gen !== gen) return;
+    const seen = {};
+    const pay = [];
+    rows.forEach((r) => {
+      if (!r || r.pago || r.substituido) return;
+      if (r.natureza !== "programado" && r.natureza !== "previsao") return;
+      const due = String(r.vencimento || "").slice(0, 10);
+      if (!due || due < bounds.start || due > bounds.end) return;
+      if (!this.companyWanted(r.companyId)) return;
+      const key = r.titulo + "|" + (r.parcela || "") + "|" + due;
+      if (seen[key]) return;
+      seen[key] = true;
+      const saldo = Number(r.saldo);
+      const valor = Number.isFinite(saldo) && saldo > 0 ? saldo : (Number(r.valor) || 0);
+      if (!(valor > 0)) return;
+      pay.push({
+        key,
+        date: due,
+        valor,
+        titulo: r.titulo,
+        parcela: r.parcela || "",
+        credor: r.credor || "",
+        documento: r.documento || "",
+        docId: r.docId || "",
+        docNome: r.docNome || "",
+        companyId: r.companyId || "",
+        plano: r.plano || "",
+        ccNome: r.ccNome || "",
+        natureza: r.natureza,
+        tipoBaixa: r.tipoBaixa || "",
+        conta: r.conta || "",
+        operacao: r.operacao || ""
+      });
+    });
+    const byDay = {};
+    this.days.forEach((d) => { byDay[d.date] = d; d.pagar = 0; d.pagarItens = []; });
+    pay.forEach((item) => {
+      const day = byDay[item.date];
+      if (!day) return;
+      day.pagar += item.valor;
+      day.pagarItens.push(item);
+    });
+    this.totals.pagar = pay.reduce((s, x) => s + x.valor, 0);
+    this.progress = "";
     this.render();
   },
 
   toggle(iso) {
     this.openDay = this.openDay === iso ? "" : iso;
     this.render();
+  },
+
+  bindCompanyFilter() {
+    if (!window.MlEmpresaFilter) return;
+    const self = this;
+    MlEmpresaFilter.bind("cxd-emp", {
+      toggleOpen() {
+        self.openEmp = !self.openEmp;
+        self.render();
+      },
+      setQuery(q) {
+        self.qEmp = q || "";
+        const box = document.getElementById("cxd-emp-list");
+        if (box && window.MlEmpresaFilter) {
+          box.innerHTML = MlEmpresaFilter.listHtml({
+            id: "cxd-emp",
+            items: self.empItems(),
+            selectedIds: self.companyIds,
+            query: self.qEmp
+          });
+        }
+      },
+      toggleId(id, on) {
+        const sid = String(id);
+        if (on) {
+          if (self.companyIds.indexOf(sid) < 0) self.companyIds.push(sid);
+        } else {
+          self.companyIds = self.companyIds.filter((x) => x !== sid);
+        }
+        self.openEmp = true;
+        self.load();
+      },
+      selectAll() {
+        self.companyIds = self.companies.map((c) => String(c.id));
+        self.openEmp = true;
+        self.load();
+      },
+      selectNone() {
+        self.companyIds = [];
+        self.openEmp = true;
+        self.load();
+      }
+    });
+  },
+
+  async openTitulo(key) {
+    let item = null;
+    this.days.some((d) => {
+      item = (d.pagarItens || []).find((p) => p.key === key) || null;
+      return !!item;
+    });
+    if (!item) return;
+    this.detail = { loading: true, error: "", item, bill: null, attachments: [], payment: null };
+    this.render();
+    try {
+      const billId = item.titulo;
+      const bill = await window.siengeFetchWithRetry("/bills/" + encodeURIComponent(billId), 1);
+      let attachments = [];
+      if (window.ComprasPrevisoesApp && typeof ComprasPrevisoesApp.anexosDoTitulo === "function") {
+        try { attachments = await ComprasPrevisoesApp.anexosDoTitulo(billId); } catch (e) { attachments = []; }
+      }
+      const payment = await caixaFormaPagamento(billId, item.parcela || 1);
+      if (!this.detail || this.detail.item.key !== key) return;
+      this.detail.loading = false;
+      this.detail.bill = bill || null;
+      this.detail.attachments = attachments;
+      this.detail.payment = payment;
+      this.render();
+    } catch (e) {
+      if (!this.detail || this.detail.item.key !== key) return;
+      this.detail.loading = false;
+      this.detail.error = (e && e.message) ? e.message : "Não consegui abrir o título.";
+      this.render();
+    }
+  },
+
+  closeTitulo() {
+    this.detail = null;
+    this.render();
+  },
+
+  async baixarAnexo(billId, attachmentId, name) {
+    const base = (window.SIENGE_CONFIG && window.SIENGE_CONFIG.baseUrl) || "/api/sienge-proxy";
+    const path = "/bills/" + encodeURIComponent(billId) + "/attachments/" + encodeURIComponent(attachmentId);
+    const headers = {};
+    if (typeof getBasicAuthHeader === "function") headers.Authorization = getBasicAuthHeader();
+    try {
+      const res = await fetch(base + path, { headers });
+      if (!res.ok) throw new Error(String(res.status));
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name || ("titulo-" + billId + ".pdf");
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+    } catch (e) {
+      alert("Não foi possível baixar o anexo deste título.");
+    }
   },
 
   render() {

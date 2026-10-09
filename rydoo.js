@@ -16,7 +16,9 @@ const RydooApp = {
     prepMsg: "",
     openUsers: {},
     openCc: {},
-    openPlano: {}
+    openPlano: {},
+    picked: {},
+    job: null
   },
 
   esc(s) {
@@ -213,7 +215,7 @@ const RydooApp = {
 
   viagem(r) {
     const blob = this.fold([r && r.categoria, r && r.tipo, r && r.hierCat].join(" "));
-    return /refeic|almoco|jantar|lanche|aliment|desloc|passagem|pedagio|estacion|hosped/.test(blob);
+    return /refeic|almoco|jantar|lanche|aliment|desloc|passagem|pedagio|estacion|hosped|quilometr|kilometr|\bkm\b/.test(blob);
   },
 
   chaveLancamento(r) {
@@ -313,6 +315,8 @@ const RydooApp = {
     this.state.openUsers = {};
     this.state.openCc = {};
     this.state.openPlano = {};
+    this.state.picked = {};
+    this.state.job = null;
     this.render();
   },
 
@@ -393,20 +397,40 @@ const RydooApp = {
         #rydoo-root .rydoo-empty, #rydoo-root .rydoo-error { padding:22px; color:#64748b; }
         #rydoo-root .rydoo-error { color:#b91c1c; }
         #rydoo-root .rydoo-file { margin-left:auto; color:#64748b; font-size:12px; align-self:center; }
-        #rydoo-root .rydoo-tree { display:flex; flex-direction:column; gap:8px; }
-        #rydoo-root details.rydoo-user, #rydoo-root details.rydoo-cc, #rydoo-root details.rydoo-plano { background:#fff; border:1px solid #e2e8f0; border-radius:10px; }
-        #rydoo-root details.rydoo-cc, #rydoo-root details.rydoo-plano { margin-top:8px; }
+        #rydoo-root .rydoo-tree { display:flex; flex-direction:column; gap:14px; }
+        #rydoo-root details.rydoo-user { background:#fff; border:1px solid #105436; border-left:7px solid #105436; border-radius:10px; }
+        #rydoo-root details.rydoo-cc { background:#fff; border:1px solid #f37021; border-left:5px solid #f37021; border-radius:10px; margin:8px 0 0 8px; }
+        #rydoo-root details.rydoo-plano { background:#fff; border:1px solid #94a3b8; border-left:4px solid #64748b; border-radius:10px; margin:8px 0 0 16px; }
         #rydoo-root summary { cursor:pointer; display:flex; align-items:center; gap:10px; padding:10px 12px; list-style:none; }
         #rydoo-root summary::-webkit-details-marker { display:none; }
         #rydoo-root summary::before { content:""; width:0; height:0; border-top:5px solid transparent; border-bottom:5px solid transparent; border-left:6px solid #105436; flex:none; }
         #rydoo-root details[open] > summary::before { transform:rotate(90deg); }
-        #rydoo-root .rydoo-user > summary { background:#f8fafc; border-radius:10px; }
-        #rydoo-root .rydoo-user[open] > summary { border-bottom:1px solid #e2e8f0; border-radius:10px 10px 0 0; }
-        #rydoo-root .rydoo-cc > summary { background:#f4faf7; border-radius:10px; }
-        #rydoo-root .rydoo-user-body, #rydoo-root .rydoo-cc-body, #rydoo-root .rydoo-plano-body { padding:4px 12px 12px 22px; }
+        #rydoo-root .rydoo-user > summary { background:#e7f6ee; border-radius:8px; }
+        #rydoo-root .rydoo-user[open] > summary { border-bottom:1px solid #105436; border-radius:8px 8px 0 0; }
+        #rydoo-root .rydoo-user > summary strong { font-size:15px; color:#105436; }
+        #rydoo-root .rydoo-cc > summary { background:#fff4ec; border-radius:8px; }
+        #rydoo-root .rydoo-cc[open] > summary { border-bottom:1px solid #f37021; border-radius:8px 8px 0 0; }
+        #rydoo-root .rydoo-cc > summary strong { color:#c2410c; }
+        #rydoo-root .rydoo-cc > summary::before { border-left-color:#f37021; }
+        #rydoo-root .rydoo-plano > summary { background:#f1f5f9; border-radius:8px; }
+        #rydoo-root .rydoo-plano[open] > summary { border-bottom:1px solid #94a3b8; border-radius:8px 8px 0 0; }
+        #rydoo-root .rydoo-plano > summary strong { color:#334155; }
+        #rydoo-root .rydoo-plano > summary::before { border-left-color:#64748b; }
+        #rydoo-root .rydoo-user-body { padding:8px 12px 12px 14px; background:#f3faf6; }
+        #rydoo-root .rydoo-cc-body { padding:8px 10px 10px 12px; background:#fffaf6; }
+        #rydoo-root .rydoo-plano-body { padding:4px 10px 10px 12px; background:#fff; }
         #rydoo-root .rydoo-user-main { display:flex; flex-direction:column; gap:2px; min-width:0; }
-        #rydoo-root .rydoo-user-main strong { color:#0f172a; }
         #rydoo-root .rydoo-sum { margin-left:auto; font-weight:700; color:#105436; white-space:nowrap; }
+        #rydoo-root .rydoo-cc .rydoo-sum { color:#c2410c; }
+        #rydoo-root .rydoo-plano .rydoo-sum { color:#334155; }
+        #rydoo-root .rydoo-pick { width:16px; height:16px; flex:none; accent-color:#105436; }
+        #rydoo-root .rydoo-edit-row { display:flex; flex-wrap:wrap; gap:10px; padding:4px 0 2px; }
+        #rydoo-root .rydoo-edit-row label { display:flex; flex-direction:column; gap:4px; font-size:11px; font-weight:700; color:#64748b; min-width:240px; flex:1; }
+        #rydoo-root .rydoo-edit-row select { height:34px; }
+        #rydoo-root .rydoo-job { margin-top:12px; }
+        #rydoo-root .rydoo-job-label { font-size:12.5px; font-weight:600; color:#105436; margin-bottom:6px; }
+        #rydoo-root .rydoo-job-track { height:8px; background:#e7f6ee; border-radius:999px; overflow:hidden; }
+        #rydoo-root .rydoo-job-bar { height:100%; width:0; background:#105436; transition:width .25s; }
         #rydoo-root .rydoo-lines { width:100%; border-collapse:collapse; font-size:12.5px; }
         #rydoo-root .rydoo-lines td { padding:6px 8px; border-bottom:1px solid #f1f5f9; max-width:280px; }
         #rydoo-root .rydoo-note { margin:4px 0 0; font-size:12.5px; color:#9a3412; }
@@ -419,6 +443,8 @@ const RydooApp = {
             <input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="RydooApp.onFile(this)">
           </label>
           <button type="button" class="btn btn-cancel btn-sm" style="height:36px;" onclick="RydooApp.limpar()" ${s.rows.length ? "" : "disabled"}>Limpar</button>
+          <button type="button" class="btn btn-outline btn-sm" style="height:36px;" onclick="RydooApp.marcarTodos()" ${s.rows.length ? "" : "disabled"}>Marcar todos</button>
+          <button type="button" class="btn btn-primary btn-sm" style="height:36px;" onclick="RydooApp.gerarMarcados()" ${s.rows.length ? "" : "disabled"}>Gerar títulos</button>
           <div class="rydoo-field">
             <label>CLASSIFICAÇÃO</label>
             <select class="form-control" onchange="RydooApp.onFilter('status', this.value)">
@@ -435,6 +461,10 @@ const RydooApp = {
           ${s.fileName ? `<div class="rydoo-file">${this.esc(s.fileName)}</div>` : ""}
         </div>
         <p class="rydoo-hint" ${s.prepMsg ? "" : "hidden"}>${this.esc(s.prepMsg || "")}</p>
+        <div id="rydoo-job" class="rydoo-job" ${s.job ? "" : "hidden"}>
+          <div class="rydoo-job-label">${this.esc((s.job && s.job.label) || "")}</div>
+          <div class="rydoo-job-track"><div class="rydoo-job-bar" style="width:${s.job ? s.job.pct : 0}%"></div></div>
+        </div>
       </div>
       <div id="rydoo-kpis"></div>
       <div id="rydoo-list"></div>`;
@@ -499,10 +529,13 @@ const RydooApp = {
       if (!byUser.has(pessoa)) byUser.set(pessoa, []);
       byUser.get(pessoa).push(r);
     });
-    return Array.from(byUser.keys())
+    const tree = Array.from(byUser.keys())
       .sort((a, b) => this.fold(a).localeCompare(this.fold(b), "pt"))
       .map((pessoa) => this.userBlock(pessoa, byUser.get(pessoa)))
       .join("");
+    const contas = this.contaOpcoes();
+    const lista = contas.map((c) => `<option value="${this.esc(c.id)}">${this.esc(c.id + " — " + c.name)}</option>`).join("");
+    return tree + `<datalist id="rydoo-contas">${lista}</datalist>`;
   },
 
   userBlock(pessoa, rows) {
@@ -513,9 +546,15 @@ const RydooApp = {
     const total = this.money(this.somaReembolso(rows));
     const alertas = rows.some((r) => r.reembolsa !== false && r.level !== "ok");
     const pronto = g && g.creditor && this.colaborador(g.creditor) && this.somaReembolso(rows) > 0 && !this.state.preparing;
+    const podeGerar = !!(pronto && !alertas && !(g && g.billId));
+    const marcado = this.state.picked && this.state.picked[pessoa] && podeGerar;
+    const pick = `<input type="checkbox" class="rydoo-pick" ${podeGerar ? "" : "disabled"} ${marcado ? "checked" : ""} title="${podeGerar ? "Incluir na geração em massa" : "Revise os alertas antes de gerar o título"}" onclick="event.stopPropagation()" onchange="event.stopPropagation(); RydooApp.marcar(decodeURIComponent('${arg}'), this.checked)">`;
     let acao = "";
     if (g && g.billId) {
-      acao = `<span class="rydoo-tag rydoo-tag-ok">Título ${this.esc(g.billId)}</span>`;
+      const bancoBtn = g.bank && !g.bankSent
+        ? `<button type="button" class="btn btn-outline btn-sm" style="height:32px;" onclick="event.preventDefault(); event.stopPropagation(); RydooApp.reenviarBanco(decodeURIComponent('${arg}'))">Enviar dados bancários</button>`
+        : "";
+      acao = `<span class="rydoo-tag rydoo-tag-ok">Título ${this.esc(g.billId)}</span>${bancoBtn}`;
     } else if (pronto) {
       const off = alertas || g.billBusy ? "disabled" : "";
       const title = alertas ? "Revise os alertas antes de gerar o título" : "Gerar título REEM no Sienge";
@@ -533,6 +572,7 @@ const RydooApp = {
       .join("");
     return `<details class="rydoo-user" ${open} ontoggle="RydooApp.onToggle('user', decodeURIComponent('${arg}'), this.open)">
       <summary>
+        ${pick}
         <span class="rydoo-user-main">
           <strong>${this.esc(pessoa)}</strong>
           <span class="rydoo-why">${n === 1 ? "1 lançamento" : n + " lançamentos"} · ${this.esc(this.competencia(rows) || "")}</span>
@@ -619,7 +659,7 @@ const RydooApp = {
       <td>${this.esc(r.comentario || "")}</td>
       <td>${tag(r)}</td>
       <td style="text-align:right;white-space:nowrap;">${this.esc(this.money(r.valor))}</td>
-    </tr>`).join("");
+    </tr>${this.editorLinha(r)}`).join("");
     return `<details class="rydoo-plano" ${open} ontoggle="RydooApp.onToggle('plano', decodeURIComponent('${arg}'), this.open)">
       <summary>
         <span class="rydoo-user-main"><strong>${this.esc(head.conta || conta)}</strong><span class="rydoo-why">${this.esc(nome)}</span></span>
@@ -671,12 +711,14 @@ const RydooApp = {
     try {
       const hist = await this.lerHistorico();
       if (this._prepGen !== gen) return;
+      this._historico = hist;
       this.classify(this.state.rows, hist);
       await this.salvarImportacao();
       if (this._prepGen !== gen) return;
       this.state.prepMsg = "Lendo o plano financeiro…";
       this.paintHint();
       await this.loadAccounts();
+      try { await this.loadCostCenters(); } catch (e) {}
       if (this._prepGen !== gen) return;
       this.renderList();
       await this.loadCreditors((msg) => {
@@ -732,6 +774,132 @@ const RydooApp = {
     } while (offset < total && guard < 20);
     if (!Object.keys(map).length) throw new Error("O plano financeiro não retornou contas.");
     this._accounts = map;
+    this._contaOpcoes = null;
+  },
+
+  async loadCostCenters() {
+    if (this._costCenters && this._costCenters.length) return;
+    let list = [];
+    if (window.SiengeAPI && typeof SiengeAPI.getCostCenters === "function") {
+      list = await SiengeAPI.getCostCenters();
+    } else {
+      const res = await siengeFetchWithRetry("/cost-centers?limit=200&offset=0");
+      list = (res && res.results) || [];
+    }
+    this._costCenters = (list || []).map((c) => ({
+      id: String(c.id != null ? c.id : ""),
+      name: String(c.name || c.costCenterName || "").trim()
+    })).filter((c) => c.id);
+  },
+
+  contaOpcoes() {
+    if (this._contaOpcoes) return this._contaOpcoes;
+    const map = this._accounts || {};
+    const seen = {};
+    const out = [];
+    Object.keys(map).forEach((k) => {
+      const bare = String(k).replace(/\./g, "");
+      if (!bare || seen[bare]) return;
+      seen[bare] = true;
+      out.push({ id: k.indexOf(".") >= 0 ? k : this.dottedCode(bare), name: map[k] });
+    });
+    out.sort((a, b) => String(a.id).localeCompare(String(b.id), "pt"));
+    this._contaOpcoes = out;
+    return out;
+  },
+
+  editorLinha(r) {
+    if (!r || r.clara || (r.level !== "revisar" && r.level !== "divergente")) return "";
+    const idx = this.state.rows.indexOf(r);
+    if (idx < 0) return "";
+    const atualCc = this.ccIdOf(r);
+    const ccs = (this._costCenters || []).slice();
+    if (atualCc && !ccs.some((c) => c.id === atualCc)) ccs.unshift({ id: atualCc, name: String(r.cc || "") });
+    const ccOpts = [`<option value="">Centro de custo</option>`].concat(ccs.map((c) => {
+      const sel = c.id === atualCc ? "selected" : "";
+      const label = c.name && c.name !== c.id ? (c.id + " — " + c.name) : c.id;
+      return `<option value="${this.esc(c.id)}" ${sel}>${this.esc(label)}</option>`;
+    })).join("");
+    const contaAtual = this.contaKey(r.conta);
+    return `<tr class="rydoo-edit"><td colspan="6"><div class="rydoo-edit-row">
+      <label>Centro de custo<select class="form-control" onclick="event.stopPropagation()" onchange="RydooApp.editarLinha(${idx}, 'cc', this.value)">${ccOpts}</select></label>
+      <label>Plano financeiro<input class="form-control" list="rydoo-contas" value="${this.esc(contaAtual)}" placeholder="Código da conta" onclick="event.stopPropagation()" onchange="RydooApp.editarLinha(${idx}, 'conta', this.value)"></label>
+    </div></td></tr>`;
+  },
+
+  editarLinha(index, field, value) {
+    const r = this.state.rows[Number(index)];
+    if (!r) return;
+    const raw = String(value || "").trim();
+    if (!raw) return;
+    if (field === "cc") {
+      const hit = (this._costCenters || []).find((c) => c.id === raw);
+      r.cc = hit && hit.name ? (hit.id + " — " + hit.name) : raw;
+    } else if (field === "conta") {
+      r.conta = raw.split("—")[0].trim() || raw;
+      r.hierConta = r.conta;
+    }
+    this.classify(this.state.rows, this._historico || new Set());
+    this.renderKpis();
+    this.renderList();
+  },
+
+  marcar(pessoa, on) {
+    if (!this.state.picked) this.state.picked = {};
+    if (on) this.state.picked[pessoa] = true;
+    else delete this.state.picked[pessoa];
+  },
+
+  elegiveis() {
+    const byUser = new Map();
+    (this.state.rows || []).forEach((r) => {
+      const pessoa = r.pessoa || "(sem nome)";
+      if (!byUser.has(pessoa)) byUser.set(pessoa, []);
+      byUser.get(pessoa).push(r);
+    });
+    const out = [];
+    byUser.forEach((rows, pessoa) => {
+      const g = (this.state.groups || []).find((x) => x.pessoa === pessoa);
+      const alertas = rows.some((r) => r.reembolsa !== false && r.level !== "ok");
+      const pronto = g && g.creditor && this.colaborador(g.creditor) && this.somaReembolso(rows) > 0 && !this.state.preparing && !g.billId && !alertas;
+      if (pronto) out.push(pessoa);
+    });
+    return out;
+  },
+
+  marcarTodos() {
+    const lista = this.elegiveis();
+    if (!this.state.picked) this.state.picked = {};
+    const todos = lista.length && lista.every((p) => this.state.picked[p]);
+    lista.forEach((p) => {
+      if (todos) delete this.state.picked[p];
+      else this.state.picked[p] = true;
+    });
+    this.renderList();
+  },
+
+  setJob(label, pct) {
+    this.state.job = { label: label, pct: Math.max(0, Math.min(100, pct || 0)) };
+    const box = document.getElementById("rydoo-job");
+    if (!box) return;
+    box.hidden = false;
+    const lab = box.querySelector(".rydoo-job-label");
+    const bar = box.querySelector(".rydoo-job-bar");
+    if (lab) lab.textContent = label;
+    if (bar) bar.style.width = this.state.job.pct + "%";
+  },
+
+  clearJob() {
+    this.state.job = null;
+    const box = document.getElementById("rydoo-job");
+    if (box) box.hidden = true;
+  },
+
+  auditar(entry) {
+    if (!window.AuditService || typeof AuditService.logEvent !== "function") return;
+    try {
+      AuditService.logEvent(Object.assign({ module: "Rydoo", action: "Gerar título" }, entry || {}));
+    } catch (e) {}
   },
 
   async loadCreditors(onProgress) {
@@ -1381,7 +1549,11 @@ const RydooApp = {
       if (!id) continue;
       try {
         const snap = await fb.fx.getDoc(fb.fx.doc(fb.db, "rydoo_titulos", id));
-        if (snap.exists()) g.billId = (snap.data() || {}).billId || g.billId;
+        if (snap.exists()) {
+          const data = snap.data() || {};
+          g.billId = data.billId || g.billId;
+          g.bankSent = !!data.bankSent;
+        }
       } catch (e) {}
     }
   },
@@ -1507,39 +1679,196 @@ const RydooApp = {
     });
   },
 
-  async gerarTitulo(pessoa) {
+  formaPagamento(bank) {
+    const pf = String((bank && (bank.paymentForm || bank.paymentTypeName || bank.paymentType)) || "").toUpperCase();
+    if (pf.indexOf("PIX") >= 0) return "pix";
+    if (pf.indexOf("CONCESS") >= 0) return "boleto-concessionaria";
+    if (pf.indexOf("BOLETO") >= 0) return "boleto-bancario";
+    if (pf.indexOf("TRANSFER") >= 0 || pf.indexOf("TED") >= 0 || pf.indexOf("DOC") >= 0 || pf === "BANK-TRANSFER") return "bank-transfer";
+    if (bank && (bank.accountNumber || bank.account)) return "bank-transfer";
+    return "";
+  },
+
+  async enviarDadosBancarios(billId, bank, creditorName) {
+    const logs = [];
+    const pForm = this.formaPagamento(bank);
+    if (!pForm) {
+      logs.push("Credor sem dados bancários para enviar.");
+      return { ok: false, logs: logs };
+    }
+    if (pForm === "boleto-bancario" || pForm === "boleto-concessionaria") {
+      logs.push("A forma " + pForm + " não traz código de barras no cadastro do credor.");
+      return { ok: false, logs: logs };
+    }
+    const inst = await this.siengeJson("/bills/" + encodeURIComponent(billId) + "/installments");
+    const body = inst.body || {};
+    const list = body.results || body.data || (Array.isArray(body) ? body : []);
+    if (!list.length) {
+      logs.push("Nenhuma parcela encontrada para o título " + billId + ".");
+      return { ok: false, logs: logs };
+    }
+    const installmentId = list[0].installmentNumber || list[0].id || 1;
+    const headers = {
+      Authorization: this.siengeAuth(),
+      Accept: "application/json",
+      "Content-Type": "application/json"
+    };
+    if (pForm === "pix") {
+      logs.push("PATCH PIX na parcela " + installmentId + ".");
+      await this.siengeJson("/bills/" + encodeURIComponent(billId) + "/installments/" + encodeURIComponent(installmentId) + "/payment-information/pix", {
+        method: "PATCH",
+        headers: headers,
+        body: JSON.stringify({
+          paymentTypeId: 17,
+          isUsingCreditorData: "S",
+          notes: "Pagamento via PIX (Chave padrão do Credor)"
+        })
+      });
+      logs.push("Forma de pagamento atualizada para PIX.");
+      return { ok: true, logs: logs };
+    }
+    const isCC = bank.accountType === "Conta corrente" || bank.accountType === "CHECKING" || bank.accountType === "C";
+    const accTypeChar = isCC ? "C" : "P";
+    const accTypeLabel = isCC ? "Conta corrente" : "Conta poupança";
+    let ag = String(bank.agency || bank.branchNumber || "").trim();
+    let agNum = ag;
+    let agDig = "";
+    if (ag.indexOf("-") >= 0) {
+      const parts = ag.split("-");
+      agNum = parts[0];
+      agDig = parts[1] || "";
+    }
+    const bankCode = String(bank.bank || bank.bankCode || "").padStart(3, "0");
+    const bankName = bank.bankName || bank.nameOfBank || "";
+    const bankStr = bankName ? (bankCode + "-" + bankName) : bankCode;
+    const agStr = agDig ? (agNum + "-" + agDig) : (agNum + "-");
+    const accNumStr = String(bank.accountNumber || bank.account || "");
+    const digit = bank.checkDigit || bank.accountDigit || "";
+    const accDigStr = digit ? ("-" + digit) : "";
+    const favStr = String(bank.nameOfRecipient || bank.beneficiaryName || creditorName || "");
+    const notesText = "Banco: " + bankStr + "\nAgência: " + agStr + "\n" + accTypeLabel + ": " + accNumStr + accDigStr + "\nFavorecido: " + favStr;
+    logs.push("PATCH Transferência na parcela " + installmentId + ".");
+    await this.siengeJson("/bills/" + encodeURIComponent(billId) + "/installments/" + encodeURIComponent(installmentId) + "/payment-information/bank-transfer", {
+      method: "PATCH",
+      headers: headers,
+      body: JSON.stringify({
+        paymentTypeId: 5,
+        beneficiaryAccountType: accTypeChar,
+        beneficiaryBankCode: bankCode,
+        beneficiaryBankBranchNumber: String(agNum),
+        beneficiaryBankBranchDigit: agDig ? String(agDig) : "",
+        beneficiaryAccountNumber: accNumStr,
+        beneficiaryAccountDigit: digit ? String(digit) : "",
+        beneficiaryName: favStr,
+        notes: notesText
+      })
+    });
+    logs.push("Forma de pagamento atualizada para Transferência.");
+    return { ok: true, logs: logs };
+  },
+
+  async reenviarBanco(pessoa) {
+    const g = (this.state.groups || []).find((x) => x.pessoa === pessoa);
+    if (!g || !g.billId) return;
+    if (!g.bank) {
+      alert("Este credor não tem conta bancária no cadastro.");
+      return;
+    }
+    this.setJob("Enviando dados bancários do título " + g.billId + "…", 40);
+    const logs = ["Título " + g.billId + " já existente. Reenvio dos dados bancários."];
+    try {
+      const banco = await this.enviarDadosBancarios(g.billId, g.bank, g.creditor && g.creditor.name);
+      banco.logs.forEach((line) => logs.push(line));
+      if (!banco.ok) throw new Error(banco.logs.join(" "));
+      g.bankSent = true;
+      await this.guardarTitulo(g, g.billId, "", "", 0, { bankSent: true });
+      this.setJob("Dados bancários enviados no título " + g.billId + ".", 100);
+      this.auditar({
+        status: "ok",
+        summary: "Dados bancários enviados no título " + g.billId + " de " + pessoa,
+        titleId: String(g.billId),
+        customerLabel: pessoa,
+        endpoint: "/bills/" + g.billId + "/installments/payment-information",
+        method: "PATCH",
+        details: { pessoa: pessoa, creditorId: g.creditor && g.creditor.id, log: logs }
+      });
+      this.renderList();
+    } catch (e) {
+      const msg = (e && e.message) ? e.message : "Não consegui enviar os dados bancários.";
+      logs.push(msg);
+      this.auditar({
+        status: "erro",
+        summary: "Falha ao enviar dados bancários do título " + g.billId,
+        titleId: String(g.billId),
+        customerLabel: pessoa,
+        method: "PATCH",
+        details: { pessoa: pessoa, log: logs }
+      });
+      this.clearJob();
+      alert(msg);
+    }
+  },
+
+  async gerarMarcados() {
+    const lista = this.elegiveis().filter((p) => this.state.picked && this.state.picked[p]);
+    if (!lista.length) {
+      alert("Marque os colaboradores sem alerta. Quem ainda está em revisão fica de fora.");
+      return;
+    }
+    const ok = window.confirm("Gerar " + lista.length + " título(s) no Sienge?");
+    if (!ok) return;
+    const erros = [];
+    for (let i = 0; i < lista.length; i++) {
+      const pessoa = lista[i];
+      this.setJob("Gerando títulos no Sienge · " + (i + 1) + " de " + lista.length + " · " + pessoa, Math.round((i / lista.length) * 100));
+      const res = await this.gerarTitulo(pessoa, { skipConfirm: true, silent: true, bulk: true, bulkIndex: i, bulkTotal: lista.length });
+      if (!res || !res.ok) erros.push(pessoa + ": " + ((res && res.error) || "falha"));
+      else if (this.state.picked) delete this.state.picked[pessoa];
+    }
+    this.setJob(erros.length ? ("Geração concluída com " + erros.length + " falha(s).") : ("Títulos gerados no Sienge · " + lista.length + " de " + lista.length), 100);
+    this.auditar({
+      status: erros.length ? "erro" : "ok",
+      summary: "Geração em massa de " + lista.length + " título(s) Rydoo" + (erros.length ? " · " + erros.length + " falha(s)" : ""),
+      details: { pessoas: lista, erros: erros }
+    });
+    this.renderList();
+    if (erros.length) alert(erros.join("\n"));
+  },
+
+  async gerarTitulo(pessoa, opts) {
+    const options = opts || {};
     const g = (this.state.groups || []).find((x) => x.pessoa === pessoa);
     const rows = this.state.rows.filter((r) => (r.pessoa || "(sem nome)") === pessoa);
-    if (!g || !g.creditor) {
-      alert("Valide o credor colaborador antes de gerar o título.");
-      return;
-    }
-    if (!this.colaborador(g.creditor)) {
-      alert("O título só é gerado para colaborador pessoa física.");
-      return;
-    }
+    const fail = (msg) => {
+      if (!options.silent) alert(msg);
+      return { ok: false, error: msg };
+    };
+    if (!g || !g.creditor) return fail("Valide o credor colaborador antes de gerar o título.");
+    if (!this.colaborador(g.creditor)) return fail("O título só é gerado para colaborador pessoa física.");
     const reembolso = rows.filter((r) => r.reembolsa !== false);
-    if (reembolso.some((r) => r.level !== "ok")) {
-      alert("Ainda há despesas para revisar. O título fica disponível quando não houver alerta.");
-      return;
-    }
+    if (reembolso.some((r) => r.level !== "ok")) return fail("Ainda há despesas para revisar. O título fica disponível quando não houver alerta.");
     const total = Math.round(this.somaReembolso(rows) * 100) / 100;
-    if (!(total > 0)) {
-      alert("Não há valor reembolsável. Cartão Clara não gera título.");
-      return;
-    }
-    if (g.billId) {
-      alert("Este reembolso já tem o título " + g.billId + ".");
-      return;
-    }
+    if (!(total > 0)) return fail("Não há valor reembolsável. Cartão Clara não gera título.");
+    if (g.billId) return fail("Este reembolso já tem o título " + g.billId + ".");
     const comp = this.competencia(rows);
     const docNum = "Reembolso " + (comp || "");
     const obs = "Reembolso Despesas Mensais referente " + this.mesNome(comp);
-    const ok = window.confirm("Gerar o título " + docNum + " de " + this.money(total) + " para " + (g.creditor.name || pessoa) + " no Sienge?");
-    if (!ok) return;
+    if (!options.skipConfirm) {
+      const ok = window.confirm("Gerar o título " + docNum + " de " + this.money(total) + " para " + (g.creditor.name || pessoa) + " no Sienge?");
+      if (!ok) return { ok: false, error: "cancelado" };
+    }
+    const logs = [];
+    const basePct = options.bulk ? Math.round((options.bulkIndex / options.bulkTotal) * 100) : 0;
+    const step = (label, pct) => {
+      logs.push(label);
+      if (options.bulk) this.setJob("Gerando títulos no Sienge · " + (options.bulkIndex + 1) + " de " + options.bulkTotal + " · " + label, Math.max(basePct, pct));
+      else this.setJob(label, pct);
+    };
     g.billBusy = true;
     this.renderList();
+    let billId = "";
     try {
+      step("Criando título de " + pessoa + "…", options.bulk ? basePct + 5 : 20);
       const debtorId = await this.empresaDoReembolso(reembolso);
       const departmentId = await this.departamentoTesouraria();
       const hoje = this.hojeIso();
@@ -1572,7 +1901,7 @@ const RydooApp = {
         },
         body: JSON.stringify(payload)
       });
-      let billId = created.body && (created.body.id || created.body.billId);
+      billId = created.body && (created.body.id || created.body.billId);
       if (!billId) {
         const loc = created.res.headers.get("Location") || created.res.headers.get("location") || "";
         const last = loc.split("/").filter(Boolean).pop();
@@ -1585,15 +1914,66 @@ const RydooApp = {
       }
       if (!billId) throw new Error("O Sienge criou o título, mas não devolveu o número.");
       g.billId = String(billId);
+      logs.push("Título criado. Sienge ID: " + billId);
+      let bankOk = false;
+      let bankMsg = "";
+      step("Enviando dados bancários do título " + billId + "…", options.bulk ? basePct + 12 : 55);
+      try {
+        const banco = await this.enviarDadosBancarios(billId, g.bank, g.creditor.name);
+        banco.logs.forEach((line) => logs.push(line));
+        bankOk = banco.ok;
+        if (!bankOk) bankMsg = banco.logs.join(" ");
+      } catch (e) {
+        bankMsg = (e && e.message) ? e.message : "Falha ao enviar os dados bancários.";
+        logs.push(bankMsg);
+      }
+      g.bankSent = bankOk;
+      step("Anexando PDF do título " + billId + "…", options.bulk ? basePct + 18 : 80);
       await this.anexarPdf(g, rows, billId);
-      await this.guardarTitulo(g, billId, docNum, obs, total);
+      logs.push("PDF anexado.");
+      await this.guardarTitulo(g, billId, docNum, obs, total, { bankSent: bankOk });
       g.billBusy = false;
+      if (!options.bulk) this.setJob("Título " + billId + " gerado no Sienge.", 100);
       this.renderList();
-      alert("Título " + billId + " gerado no Sienge, com o PDF em anexo.");
+      this.auditar({
+        status: bankOk ? "ok" : "erro",
+        summary: "Título " + billId + " gerado para " + pessoa + (bankOk ? ", com dados bancários." : ". Dados bancários não enviados."),
+        titleId: String(billId),
+        customerLabel: (g.creditor && g.creditor.name) || pessoa,
+        endpoint: "/bills",
+        method: "POST",
+        details: {
+          pessoa: pessoa,
+          creditorId: g.creditor.id,
+          documentNumber: docNum,
+          total: total,
+          bankSent: bankOk,
+          log: logs
+        }
+      });
+      if (!options.silent) {
+        alert(bankOk
+          ? ("Título " + billId + " gerado no Sienge, com dados bancários e PDF.")
+          : ("Título " + billId + " gerado, mas os dados bancários não foram enviados. " + bankMsg));
+      }
+      return { ok: true, billId: String(billId), bankSent: bankOk, error: bankOk ? "" : bankMsg };
     } catch (e) {
       g.billBusy = false;
       this.renderList();
-      alert((e && e.message) ? e.message : "Não consegui gerar o título no Sienge.");
+      const msg = (e && e.message) ? e.message : "Não consegui gerar o título no Sienge.";
+      logs.push(msg);
+      if (!options.bulk) this.clearJob();
+      this.auditar({
+        status: "erro",
+        summary: "Falha ao gerar título de " + pessoa,
+        titleId: billId ? String(billId) : "",
+        customerLabel: pessoa,
+        endpoint: "/bills",
+        method: "POST",
+        details: { pessoa: pessoa, log: logs }
+      });
+      if (!options.silent) alert(msg);
+      return { ok: false, error: msg, billId: billId ? String(billId) : "" };
     }
   },
 
@@ -1619,20 +1999,25 @@ const RydooApp = {
     }
   },
 
-  async guardarTitulo(g, billId, docNum, obs, total) {
+  async guardarTitulo(g, billId, docNum, obs, total, extra) {
     const fb = this.fb();
     if (!fb) return;
     const id = this.tituloDocId(g);
     if (!id) return;
-    await fb.fx.setDoc(fb.fx.doc(fb.db, "rydoo_titulos", id), {
+    const data = Object.assign({
       billId: String(billId),
       pessoa: g.pessoa,
-      creditorId: g.creditor.id,
-      documentNumber: docNum,
-      notes: obs,
-      total: total,
-      createdAt: new Date().toISOString()
-    });
+      creditorId: g.creditor && g.creditor.id,
+      bankSent: !!(extra && extra.bankSent)
+    }, extra || {});
+    if (docNum) {
+      data.documentNumber = docNum;
+      data.createdAt = new Date().toISOString();
+    }
+    if (obs) data.notes = obs;
+    if (total) data.total = total;
+    if (extra && extra.bankSent) data.bankSentAt = new Date().toISOString();
+    await fb.fx.setDoc(fb.fx.doc(fb.db, "rydoo_titulos", id), data, { merge: true });
   }
 };
 

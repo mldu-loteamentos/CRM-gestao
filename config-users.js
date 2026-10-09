@@ -842,12 +842,21 @@ const ConfigUsersApp = {
   },
 
   seedTerceirizadoPermsFromCobranca() {
-    const terc = this.profiles.find(p => {
-      const n = String(p.name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      return n.includes("OPERADOR COBRANCA") && n.includes("TERCEIRIZ");
-    });
-    if (!terc) return;
-    this.seedIndependentPermsCopy(terc.id, this.resolveCobrancaProfileId());
+    const terc = (this.profiles || []).find(p => window.isOperadorCobrancaTerceirizadoProfile(p && p.name));
+    if (!terc) return false;
+    const hasTrue = (obj) => (typeof window.crmPermsHasAnyTrue === "function"
+      ? window.crmPermsHasAnyTrue(obj)
+      : Object.keys(obj || {}).some((k) => obj[k] === true));
+    const current = this.getProfilePermsObject(terc.id);
+    if (hasTrue(current)) return false;
+    const src = this.getProfilePermsObject(this.resolveCobrancaProfileId());
+    if (!hasTrue(src)) return false;
+    const copy = Object.assign({}, src);
+    delete copy.__mirror_of__;
+    delete copy._shrinkConfirmedAt;
+    const wrote = this.writePermissionPayload(terc.id, copy);
+    if (wrote) this.syncPermsToCloud();
+    return !!wrote;
   },
 
   breakSharedCobrancaMirrors() {
@@ -1686,6 +1695,9 @@ const ConfigUsersApp = {
           }
       }
 
+      if (window.isOperadorCobrancaTerceirizadoProfile(profileName)) {
+        try { this.seedTerceirizadoPermsFromCobranca(); } catch (e) { console.warn("[ConfigUsers] perfil terceirizado:", e); }
+      }
       await this.persistUsers();
       const cu = window.AppState && AppState.currentUser;
       if (cu && String(cu.email || "").toLowerCase().trim() === email.toLowerCase()) {
@@ -1935,7 +1947,7 @@ const ConfigUsersApp = {
       if (status === "ativos" && st !== "ATIVO") return false;
       if (status === "inativos" && st !== "INATIVO") return false;
       return true;
-    });
+    }).sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "pt", { sensitivity: "base" }));
   },
 
   render() {
