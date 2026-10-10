@@ -285,10 +285,29 @@ const RelacionamentoApp = {
       const t = JSON.parse(localStorage.getItem(cfg.storage) || "{}");
       saved = (t && t[cfg.corpoId]) || "";
     } catch (e) {}
+    if (saved && cfg.corpoId === "doc-quitacao-corpo" && typeof window.upgradeQuitacaoCorpo === "function") {
+      saved = window.upgradeQuitacaoCorpo(saved);
+    }
     const live = (corpoEl && corpoEl.value) || "";
     const fallback = (corpoEl && corpoEl.defaultValue) || "";
+    // O editor só recebe o modelo salvo quando a aba Documentos padrões é aberta.
+    if (saved && (!live || live === fallback)) return saved;
     if (saved && this._docHasTopoVars(saved) && !this._docHasTopoVars(live)) return saved;
     return live || saved || fallback;
+  },
+
+  async _sincronizarModeloDoc(cfg) {
+    const corpoEl = document.getElementById(cfg.corpoId);
+    if (corpoEl && corpoEl.value && corpoEl.value !== corpoEl.defaultValue) return;
+    const fc = window.firebaseCollections;
+    if (!fc || !window.firebaseDb || typeof fc.getDoc !== "function") return;
+    try {
+      const tipo = String(cfg.storage).replace(/^crm_docpadrao_/, "");
+      const snap = await fc.getDoc(fc.doc(window.firebaseDb, "settings", "docpadrao_" + tipo));
+      if (snap.exists()) localStorage.setItem(cfg.storage, JSON.stringify(snap.data()));
+    } catch (e) {
+      console.warn("Modelo " + cfg.storage + " não carregado do Firebase", e);
+    }
   },
 
   _formatUnidadeDoc(ctx) {
@@ -1782,12 +1801,13 @@ const RelacionamentoApp = {
     return { grupos: validos, avisos, texto };
   },
 
-  _paginarDoc(topo, blocos, corpoCss) {
+  _paginarDoc(topo, blocos, corpoCss, opts) {
+    const montar = (primeira, itens) => `${primeira ? topo : ""}<div class="qui-corpo" style="${corpoCss}">${itens.join("\n\n")}</div>`;
+    if (opts && opts.umaPagina) return [montar(true, blocos)];
     const W = 794, H = 1123, PAD_X = 57, PAD_TOP = 38, PAD_BOTTOM = 64, LOGO = 68;
     const box = document.createElement("div");
     box.style.cssText = `position:fixed;left:-13000px;top:0;width:${W - PAD_X * 2}px;display:flow-root;color:#111;`;
     document.body.appendChild(box);
-    const montar = (primeira, itens) => `${primeira ? topo : ""}<div class="qui-corpo" style="${corpoCss}">${itens.join("\n\n")}</div>`;
     const paginas = [];
     try {
       let atual = [];
@@ -2151,12 +2171,29 @@ const RelacionamentoApp = {
       const topo = `<div style="font-family:'Times New Roman',serif;font-size:11pt;color:#111;margin:0 0 32px;">Título: ${this._escDoc(titulo)} | Unidade: ${this._escDoc(unidade || "____")}</div>
         <h2 style="text-align:center;color:#111;font-size:13pt;font-weight:bold;letter-spacing:0.04em;margin:0 0 30px;">${docTitle}</h2>`;
       const corpoCss = "font-family:'Times New Roman',serif;font-size:11pt;line-height:1.5;text-align:justify;white-space:pre-wrap;color:#111;";
-      const paginas = this._paginarDoc(topo, blocos, corpoCss);
+      const customerId = (ctx.customer && ctx.customer.id) || ctx.sale.customerId;
+      const billId = String(ctx.sale.receivableBillId || titulo || "").replace(/\D/g, "");
+      const extratoProm = this._extratoTituloPdfBytes(customerId, billId).then((b) => ({ b }), (e) => ({ e }));
+      const paginas = this._paginarDoc(topo, blocos, corpoCss, { umaPagina: true });
       const nome = (ctx.customer && ctx.customer.name) || ctx.sale.customerName || "";
       const fileName = typeof window.buildFichaPdfFilename === "function"
         ? window.buildFichaPdfFilename("Autorização de escritura", { contrato: unidade, costCenterId: codEmp, titulo, nome })
         : "Autorização de escritura | Título " + titulo + ".pdf";
-      await this._baixarPaginasPdf(paginas, fileName);
+      const pdf = await this._baixarPaginasPdf(paginas, fileName, { umaPagina: true, retornar: true });
+      const extrato = await extratoProm;
+      let falhaExtrato = extrato.e ? (extrato.e.message || "erro") : "";
+      if (!falhaExtrato) {
+        try {
+          await this._juntarComExtrato(pdf, extrato.b, fileName);
+        } catch (e) {
+          console.error("Juntar extrato à escritura", e);
+          falhaExtrato = e.message || "erro";
+        }
+      }
+      if (falhaExtrato) {
+        pdf.save(fileName);
+        alert("A autorização foi gerada, mas não consegui anexar o extrato do título (" + falhaExtrato + "). Baixe o extrato pelo botão Extrato.");
+      }
       this.fecharEscrituraModal();
     } catch (err) {
       console.error("Erro ao gerar autorização de escritura", err);
@@ -2608,7 +2645,8 @@ const RelacionamentoApp = {
   },
 
   /** A4 retrato, uma imagem por página; logo só na primeira e "N de M" no rodapé, como na impressão. */
-  async _baixarPaginasPdf(paginas, fileName) {
+  async _baixarPaginasPdf(paginas, fileName, opts) {
+    opts = opts || {};
     if (typeof html2canvas !== "function" || !window.jspdf) throw new Error("Gerador de PDF indisponível.");
     const W = 794, H = 1123, PAD_X = 57, PAD_TOP = 38, PAD_BOTTOM = 64;
     const { jsPDF } = window.jspdf;
@@ -2628,9 +2666,17 @@ const RelacionamentoApp = {
         const area = page.querySelector(".qui-pg");
         const limite = H - PAD_BOTTOM - area.offsetTop;
         let pt = 11;
-        while (area.scrollHeight > limite && pt > 9) {
+        const minPt = opts.umaPagina ? 9.5 : 9;
+        while (area.scrollHeight > limite && pt > minPt) {
           pt -= 0.25;
           area.querySelectorAll(".qui-corpo").forEach((el) => { el.style.fontSize = pt + "pt"; });
+        }
+        // Documento de página única: o que ainda sobrar é reduzido por inteiro (inclusive o quadro do tabelião).
+        if (opts.umaPagina && area.scrollHeight > limite) {
+          const s = Math.max(0.6, limite / area.scrollHeight);
+          area.style.transformOrigin = "top left";
+          area.style.transform = `scale(${s})`;
+          area.style.width = (100 / s) + "%";
         }
         const canvas = await html2canvas(page, { scale: 2, useCORS: true, backgroundColor: "#ffffff", logging: false, width: W, height: H });
         if (i > 0) pdf.addPage();
@@ -2639,7 +2685,54 @@ const RelacionamentoApp = {
         page.remove();
       }
     }
+    if (opts.retornar) return pdf;
     pdf.save(fileName || "documento.pdf");
+  },
+
+  _carregarPdfLib() {
+    if (window.PDFLib) return Promise.resolve(window.PDFLib);
+    if (this._pdfLibPromise) return this._pdfLibPromise;
+    this._pdfLibPromise = new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js";
+      s.onload = () => (window.PDFLib ? resolve(window.PDFLib) : reject(new Error("pdf-lib indisponível")));
+      s.onerror = () => {
+        this._pdfLibPromise = null;
+        reject(new Error("Não consegui carregar o juntador de PDF."));
+      };
+      document.head.appendChild(s);
+    });
+    return this._pdfLibPromise;
+  },
+
+  /** Baixa do Sienge o PDF do extrato do título (pelo proxy, mesmo domínio). */
+  async _extratoTituloPdfBytes(customerId, titulo) {
+    if (!window.SiengeApiService || typeof SiengeApiService.getCustomerFinancialStatementsPdf !== "function") throw new Error("Extrato indisponível.");
+    const res = await SiengeApiService.getCustomerFinancialStatementsPdf(customerId, titulo);
+    const r0 = res && res.results && res.results[0];
+    const url = r0 && (r0.urlReport || r0.value);
+    if (!url) throw new Error("O Sienge não devolveu o extrato do título.");
+    const resp = await fetch(`/api/proxy-download?url=${encodeURIComponent(url)}&filename=extrato.pdf`);
+    if (!resp.ok) throw new Error("Falha ao baixar o extrato (" + resp.status + ").");
+    return resp.arrayBuffer();
+  },
+
+  /** Um arquivo só: as páginas do documento gerado e, em seguida, as do extrato do Sienge. */
+  async _juntarComExtrato(pdf, extratoBytes, fileName) {
+    const { PDFDocument } = await this._carregarPdfLib();
+    const out = await PDFDocument.load(pdf.output("arraybuffer"));
+    const ext = await PDFDocument.load(extratoBytes, { ignoreEncryption: true });
+    const pages = await out.copyPages(ext, ext.getPageIndices());
+    pages.forEach((p) => out.addPage(p));
+    const bytes = await out.save();
+    const blob = new Blob([bytes], { type: "application/pdf" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = fileName || "documento.pdf";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 30000);
   },
 
   _docCfg(kind) {
@@ -3261,7 +3354,10 @@ const RelacionamentoApp = {
       try { t = JSON.parse(localStorage.getItem(cfg.storage) || "{}"); } catch (e) {}
       const titleEl = document.getElementById(cfg.titleId);
       const corpoEl = document.getElementById(cfg.corpoId);
-      const docTitle = (titleEl && titleEl.value) || t[cfg.titleId] || cfg.defaultTitle;
+      await this._sincronizarModeloDoc(cfg);
+      try { t = JSON.parse(localStorage.getItem(cfg.storage) || "{}"); } catch (e) {}
+      const titleSalvo = t[cfg.titleId];
+      const docTitle = (titleEl && titleEl.value && (titleEl.value !== titleEl.defaultValue || !titleSalvo) ? titleEl.value : titleSalvo) || cfg.defaultTitle;
       let corpo = this._resolveDocCorpo(cfg, corpoEl);
       if (!corpo) {
         alert("O modelo não está preenchido. Salve-o em Configurações → Documentos padrões.");

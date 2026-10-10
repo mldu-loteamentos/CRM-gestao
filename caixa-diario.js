@@ -1048,7 +1048,7 @@ const FluxoCaixaDiarioApp = {
     (this.accounts || []).forEach((a) => {
       if (!a || (Math.abs(Number(a.amount) || 0) < 0.005 && Math.abs(Number(a.opening) || 0) < 0.005)) return;
       const g = a.tipo === "investimento" ? tipos[1] : tipos[0];
-      const v = this.saldoBase(a);
+      const v = Number(a.amount) || 0;
       g.rows.push(a);
       g.total += v;
       if (this.accountIncluded(a)) {
@@ -1104,7 +1104,10 @@ const FluxoCaixaDiarioApp = {
           <i data-lucide="${g.id === "investimento" ? "trending-up" : "landmark"}" style="width:15px;height:15px;"></i>
           <span>${caixaEsc(g.name)}</span>
           <small>${g.rows.length} conta(s) · ${g.ligadas} no caixa</small>
-          <strong>${caixaMoney(g.marcado)}</strong>
+          <div class="cxd-gbox-tot">
+            <div><label>Total do grupo</label><b>${caixaMoney(g.total)}</b></div>
+            <div class="cxd-gbox-nocaixa"><label>No caixa do dia a dia</label><strong>${caixaMoney(g.marcado)}</strong></div>
+          </div>
         </div>
         <div class="cxd-gbox-body">
           <table class="cxd-contas">
@@ -1271,6 +1274,10 @@ const FluxoCaixaDiarioApp = {
         #fluxo-caixa-diario-root .cxd-gbox-investimento .cxd-gbox-head { background:#fff7ed; color:#9a3412; }
         #fluxo-caixa-diario-root .cxd-gbox-head small { flex:1; font-weight:500; font-size:.74rem; opacity:.85; }
         #fluxo-caixa-diario-root .cxd-gbox-head strong { font-variant-numeric:tabular-nums; }
+        #fluxo-caixa-diario-root .cxd-gbox-tot { display:flex; gap:18px; text-align:right; }
+        #fluxo-caixa-diario-root .cxd-gbox-tot label { display:block; font-size:.62rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; opacity:.7; }
+        #fluxo-caixa-diario-root .cxd-gbox-tot b { font-weight:600; font-variant-numeric:tabular-nums; opacity:.8; }
+        #fluxo-caixa-diario-root .cxd-gbox-nocaixa strong { font-size:.95rem; }
         #fluxo-caixa-diario-root .cxd-gbox-body { max-height:250px; overflow:auto; }
         #fluxo-caixa-diario-root .cxd-contas { width:100%; border-collapse:collapse; font-size:.8rem; font-variant-numeric:tabular-nums; }
         #fluxo-caixa-diario-root .cxd-contas th { background:#f1f5f9; color:#475569; font-weight:700; font-size:.72rem; text-align:left; padding:6px 10px; position:sticky; top:0; z-index:1; white-space:nowrap; }
