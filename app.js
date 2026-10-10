@@ -39095,6 +39095,19 @@ window.escolherGestaoDocumento = function(tipo) {
     return;
   }
 
+  if (tipo === "terceiros" && window.RelacionamentoApp && typeof RelacionamentoApp.abrirTerceirosModal === "function") {
+    RelacionamentoApp.abrirTerceirosModal({
+      titulo: titulo && String(titulo) !== "—" ? (String(titulo).replace(/\D/g, "") || String(titulo)) : "",
+      contrato: contractNumber ? String(contractNumber).trim() : "",
+      nome: customerName ? String(customerName).trim() : "",
+      customerId: customerId,
+      contractId: contractId,
+      unidade: ctx.unidade || "",
+      empreendimento: ctx.empreendimento || ""
+    });
+    return;
+  }
+
   if (tipo === "terceiros" || tipo === "vencimento" || tipo === "quitacao") {
     const tab = tipo === "vencimento" ? "relacionamento_vencimento" : (tipo === "quitacao" ? "relacionamento_quitacao" : "relacionamento_terceiros");
     const label = tipo === "vencimento" ? "Alteração de vencimento" : (tipo === "quitacao" ? "Termo de quitação" : "Autorização de terceiros");

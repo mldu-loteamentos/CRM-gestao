@@ -808,11 +808,50 @@ const RelacionamentoApp = {
   _atualizarBtnGerarTerceiro() {
     const btn = document.getElementById("ter-btn-gerar");
     if (!btn) return;
-    const ok = this._camposTerceiroFaltando().length === 0;
+    const loaded = !!(RelacionamentoState.terceiros && RelacionamentoState.terceiros.sale);
+    const ok = loaded && this._camposTerceiroFaltando().length === 0;
     btn.disabled = !ok;
     btn.style.opacity = ok ? "" : "0.55";
     btn.style.cursor = ok ? "" : "not-allowed";
-    btn.title = ok ? "" : "Preencha nome, RG, CPF/CNPJ e telefone do terceiro.";
+    btn.title = ok ? "" : (loaded ? "Preencha nome, RG, CPF/CNPJ e telefone do terceiro." : "Aguarde o contrato carregar.");
+  },
+
+  abrirTerceirosModal(dados) {
+    dados = dados || {};
+    const modal = document.getElementById("ter-modal");
+    if (!modal) return;
+    if (modal.parentElement !== document.body) document.body.appendChild(modal);
+    this.limparDocSimples("terceiros");
+    const titulo = dados.titulo && String(dados.titulo) !== "—" ? String(dados.titulo).replace(/\D/g, "") || String(dados.titulo) : "";
+    const partes = [
+      dados.nome ? String(dados.nome).trim() : "",
+      titulo ? "Título " + titulo : "",
+      dados.contrato ? "Contrato " + String(dados.contrato).trim() : "",
+      dados.unidade ? String(dados.unidade).trim() : ""
+    ].filter(Boolean);
+    const titleEl = document.getElementById("ter-modal-title");
+    if (titleEl) titleEl.textContent = "Autorização de terceiros";
+    const sub = document.getElementById("ter-modal-sub");
+    if (sub) sub.textContent = partes.join(" · ");
+    modal.style.display = "flex";
+    if (!this._terModalKeyBound) {
+      this._terModalKeyBound = true;
+      document.addEventListener("keydown", (ev) => {
+        const m = document.getElementById("ter-modal");
+        const pdfOpen = document.getElementById("pdf-view-overlay")?.classList.contains("active");
+        if (ev.key === "Escape" && m && m.style.display !== "none" && !pdfOpen) this.fecharTerceirosModal();
+      });
+    }
+    this._atualizarBtnGerarTerceiro();
+    if (window.lucide) lucide.createIcons();
+    setTimeout(() => document.getElementById("ter-nome")?.focus(), 50);
+    this.preencherEBuscarDocSimples("terceiros", dados);
+  },
+
+  fecharTerceirosModal() {
+    const modal = document.getElementById("ter-modal");
+    if (modal) modal.style.display = "none";
+    this.limparDocSimples("terceiros");
   },
 
   _lockTerceiroDocs(lock) {
@@ -1865,6 +1904,10 @@ const RelacionamentoApp = {
   _docSetResults(kind, html) {
     const el = this._docEl(kind, "-search-results");
     if (el) el.innerHTML = html;
+    if (kind === "terceiros") {
+      const st = document.getElementById("ter-modal-status");
+      if (st) st.innerHTML = html;
+    }
     if (window.lucide) lucide.createIcons();
   },
 
@@ -1916,6 +1959,8 @@ const RelacionamentoApp = {
   },
 
   limparDocSimples(kind) {
+    this._docSeq = this._docSeq || {};
+    this._docSeq[kind] = (this._docSeq[kind] || 0) + 1;
     RelacionamentoState[kind] = null;
     RelacionamentoState[kind + "Matches"] = [];
     if (kind === "terceiros") {
@@ -2218,6 +2263,9 @@ const RelacionamentoApp = {
   async selecionarDocSimples(kind, idx) {
     let sale = (RelacionamentoState[kind + "Matches"] || [])[idx];
     if (!sale) return;
+    this._docSeq = this._docSeq || {};
+    const seq = this._docSeq[kind] || 0;
+    const stale = () => (this._docSeq[kind] || 0) !== seq;
     this._docSetResults(kind, this._docLoadingHtml("Carregando dados do lote e do contrato..."));
     try {
       const customerId = sale.customerId;
@@ -2277,8 +2325,10 @@ const RelacionamentoApp = {
       const empName = (window.resolveLoteamentoName ? window.resolveLoteamentoName(unit, sale) : "") || sale.empName || "";
       const cidadeLote = window.resolveCidadeLoteamento ? window.resolveCidadeLoteamento(unit, sale) : "";
       if (typeof window.rememberContractBuyers === "function") window.rememberContractBuyers(sale);
+      if (stale()) return;
       RelacionamentoState[kind] = { customer, sale, unit, unitDetails, bill, empName, cidadeLote, block, lot };
       const adimplencia = await this._avaliarAdimplencia(sale, bill);
+      if (stale()) return;
       RelacionamentoState[kind].adimplencia = adimplencia;
       const contratoLabel = this._formatContratoDoc(sale, bill);
       RelacionamentoState[kind].contratoLabel = contratoLabel;
@@ -2294,6 +2344,10 @@ const RelacionamentoApp = {
       if (kind === "terceiros") this._atualizarBtnGerarTerceiro();
       if (window.lucide) lucide.createIcons();
       this._docSetResults(kind, "");
+      if (kind === "terceiros") {
+        const st = document.getElementById("ter-modal-status");
+        if (st) st.innerHTML = `<span style="color:#15803d;font-weight:600;">Contrato carregado${contratoLabel && contratoLabel !== "—" ? " (" + this._escDoc(contratoLabel) + ")" : ""}. Preencha os dados do terceiro.</span>`;
+      }
       if (kind === "vencimento") {
         RelacionamentoState[kind].installments = adimplencia.installments || [];
         this._setVencimentoBloqueado(!adimplencia.adimplente, adimplencia.label);
@@ -2308,6 +2362,7 @@ const RelacionamentoApp = {
       if (RelacionamentoState[kind + "FromGestao"]) this._travarFiltrosDocOrigem(kind);
     } catch (err) {
       console.error(err);
+      if (stale()) return;
       this._docSetResults(kind, `<div style="padding:12px;color:#b91c1c;">${err.message || "Não foi possível carregar o contrato."}</div>`);
       if (RelacionamentoState[kind + "FromGestao"]) this._travarFiltrosDocOrigem(kind);
     }
