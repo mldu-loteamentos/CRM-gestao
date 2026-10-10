@@ -797,6 +797,7 @@ ComprasControleApp.formaHtml = function (payment, row) {
   if (payment && payment.data) {
     const d = payment.data;
     if (payment.kind === "pix") {
+      if (window.BoletoCheck) return BoletoCheck.html(payment, { check: row && row.pagCheck }) + (d.notes ? `<p style="margin-top:6px;">${this.esc(d.notes)}</p>` : "");
       return `<p><strong>Forma:</strong> PIX</p><p>${this.esc(d.notes || "Chave do credor")}</p>`;
     }
     if (payment.kind === "boleto-bancario" || payment.kind === "boleto-concessionaria") {

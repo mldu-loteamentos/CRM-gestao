@@ -61,6 +61,7 @@ function caixaFormaHtml(payment, item) {
   if (payment && payment.data) {
     const d = payment.data;
     if (payment.kind === "pix") {
+      if (window.BoletoCheck) return BoletoCheck.html(payment, { check: item && item.pagCheck }) + (d.notes ? `<p style="margin-top:6px;">${caixaEsc(d.notes)}</p>` : "");
       return `<p><strong>Forma:</strong> PIX</p><p>${caixaEsc(d.notes || "Chave do credor")}</p>`;
     }
     if (payment.kind === "boleto-bancario" || payment.kind === "boleto-concessionaria") {

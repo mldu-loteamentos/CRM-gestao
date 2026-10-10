@@ -290,18 +290,18 @@ const CompromissarioApp = {
     const competencia = this.competenciaValue();
     const gate = this.isCessaoGateReady();
     const tabs = [
-      { id: 'parametros', label: 'Parâmetros', locked: false },
-      { id: 'cessoes', label: 'Cessões', locked: !competencia },
-      { id: 'notificar', label: 'Notificar', locked: !competencia || !gate },
-      { id: 'followup', label: 'Follow-up', locked: false }
+      { id: 'parametros', label: 'Parâmetros', icon: 'sliders-horizontal', locked: false },
+      { id: 'cessoes', label: 'Cessões', icon: 'repeat', locked: !competencia },
+      { id: 'notificar', label: 'Notificar', icon: 'send', locked: !competencia || !gate },
+      { id: 'followup', label: 'Follow-up', icon: 'list-checks', locked: false }
     ];
 
     root.innerHTML = `
       <div class="comp-pref-page">
-        <div class="customer-tabs-menu comp-pref-tabs" role="tablist">
+        <div class="ml-tabs comp-pref-tabs" role="tablist">
           ${tabs.map((t) => `
-            <button type="button" class="customer-tab-btn ${tab === t.id ? 'active' : ''} ${t.locked ? 'is-locked' : ''}"
-              ${t.locked ? 'disabled' : ''} onclick="CompromissarioApp.setUiTab('${t.id}')">${t.label}</button>
+            <button type="button" role="tab" aria-selected="${tab === t.id}" class="ml-tab ${tab === t.id ? 'is-active' : ''} ${t.locked ? 'is-locked' : ''}"
+              ${t.locked ? 'disabled title="Informe a competência e conclua as etapas anteriores"' : ''} onclick="CompromissarioApp.setUiTab('${t.id}')"><i data-lucide="${t.icon}"></i> ${t.label}</button>
           `).join('')}
         </div>
         <div id="comp-pref-tab-body" class="comp-pref-tab-body"></div>

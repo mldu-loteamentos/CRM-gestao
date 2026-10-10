@@ -29,6 +29,8 @@ const GerarPagamentoApp = {
     selManual: {},
     validacao: { feitos: 0, total: 0, rodando: false },
     gerandoLote: "",
+    lotesAbertos: {},
+    credores: {},
     gen: 0
   },
 
@@ -52,6 +54,10 @@ const GerarPagamentoApp = {
 
   money(v) {
     return (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  },
+
+  pct(v) {
+    return (Number(v) || 0).toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "%";
   },
 
   dataBr(iso) {
@@ -284,6 +290,7 @@ const GerarPagamentoApp = {
     s.loteSienge = {};
     s.formaSienge = {};
     s.pagInfo = {};
+    s.credores = {};
     s.validacao = { feitos: 0, total: 0, rodando: false };
     this.render();
 
@@ -371,6 +378,18 @@ const GerarPagamentoApp = {
         });
       });
       const saldo = app.billBalance(bill);
+      const original = Number(bill.originalAmount) || 0;
+      const ccsTitulo = [];
+      lista(bill.paymentsCategories).forEach((c) => {
+        if (!c || c.costCenterId == null) return;
+        const id = String(c.costCenterId);
+        const rate = c.financialCategoryRate != null && Number.isFinite(Number(c.financialCategoryRate)) ? Number(c.financialCategoryRate) : 100;
+        const ja = ccsTitulo.find((x) => x.id === id);
+        if (ja) { ja.rateio += rate; return; }
+        const cad = ccMap[id] || this.ccDe(id);
+        ccsTitulo.push({ id, nome: (cad && cad.name) || c.costCenterName || "", parceria: !!ccMap[id], rateio: rate });
+      });
+      const tituloAPagar = saldo != null ? Math.max(0, saldo) : (pago ? 0 : original);
       cats.forEach((cat) => {
         const cc = ccMap[String(cat.costCenterId)];
         const chave = titulo + "|" + parcela + "|" + cc.id;
@@ -380,13 +399,16 @@ const GerarPagamentoApp = {
         const rateio = cat.financialCategoryRate != null ? Number(cat.financialCategoryRate) : 100;
         const fat = (Number.isFinite(rateio) ? rateio : 100) / 100;
         const datas = movs.map((m) => m.data).filter(Boolean).sort();
-        const original = Number(bill.originalAmount) || 0;
         linhas.push({
           pago,
-          aPagar: (saldo != null ? Math.max(0, saldo) : (pago ? 0 : original)) * fat,
+          aPagar: tituloAPagar * fat,
+          tituloAPagar,
+          tituloValor: original,
+          ccsTitulo,
           titulo,
           parcela,
           credor: String(bill.creditorName || "").trim(),
+          credorId: bill.creditorId != null ? String(bill.creditorId) : "",
           documento: [docId, bill.documentNumber].filter(Boolean).join(" "),
           vencimento: String(bill.dueDate || "").slice(0, 10),
           pagamento: datas.length ? datas[datas.length - 1] : "",
@@ -491,13 +513,64 @@ const GerarPagamentoApp = {
     return null;
   },
 
+  /** Cadastro do credor para conferir o titular da chave PIX: CPF/CNPJ, telefones, e-mails e chaves PIX cadastradas. */
+  carregarCredor(id) {
+    if (!id) return Promise.resolve({ erro: "título sem código do credor" });
+    const cache = this.state.credores;
+    if (!cache[id]) {
+      const BC = window.BoletoCheck;
+      const lista = (res) => (Array.isArray(res) ? res : ((res && (res.results || res.data)) || []));
+      cache[id] = (async () => {
+        const [cad, pix] = await Promise.all([
+          window.siengeFetchWithRetry(`/creditors/${encodeURIComponent(id)}`, 1),
+          window.siengeFetchWithRetry(`/creditors/${encodeURIComponent(id)}/pix-informations`, 1).catch(() => null)
+        ]);
+        if (!cad || typeof cad !== "object") return { erro: "credor não encontrado" };
+        const telefones = []
+          .concat(lista(cad.phones).map((p) => `${p.ddd || ""}${p.number || ""}`))
+          .concat(lista(cad.contacts).map((c) => `${c.ddd || ""}${c.number || ""}`))
+          .map((t) => BC.telNorm(t)).filter((t) => t.length >= 10);
+        const emails = []
+          .concat(lista(cad.otherContactMethods).filter((m) => ["1", "2"].includes(String(m.type))).map((m) => m.address))
+          .concat(lista(cad.contacts).map((c) => c.email))
+          .map((e) => String(e || "").trim().toLowerCase()).filter((e) => e.includes("@"));
+        const chaves = lista(pix).map((p) => {
+          const tipo = String(p.type || p.keyPixType || "").trim().toUpperCase();
+          const b = p.beneficiary && typeof p.beneficiary === "object" ? p.beneficiary : {};
+          const docBenef = BC.digits(p.cpf || p.cnpj || p.beneficiaryCpf || p.beneficiaryCnpj || b.cpf || b.cnpj || b.document || b.cpfCnpj || "");
+          return {
+            tipo,
+            original: String(p.key || p.keyPix || "").trim(),
+            chave: BC.chaveNorm(tipo, p.key || p.keyPix),
+            doc: docBenef.length === 11 || docBenef.length === 14 ? docBenef : "",
+            padrao: String(p.defaultFlag || "").toUpperCase() === "S"
+          };
+        }).filter((c) => c.tipo && c.chave);
+        return { id, nome: cad.name || "", doc: BC.digits(cad.cnpj || cad.cpf), telefones, emails, chaves };
+      })().catch((e) => ({ erro: (e && e.message) || "falha na consulta" }));
+    }
+    return cache[id];
+  },
+
+  /** Motivo que impede o título de entrar em lote (forma de pagamento não conferida ou com possível divergência). */
+  bloqueioLote(it) {
+    if (it.emLote) return "";
+    const p = it.pag;
+    if (!p) return "Forma de pagamento ainda não conferida.";
+    const c = p.check;
+    if (c.nivel === "erro" || c.nivel === "aviso" || c.nivel === "sem") return c.resumo || "Possível divergência na forma de pagamento.";
+    return "";
+  },
+
   resumoTitulo(chave) {
     const rows = this.state.titulos.filter((r) => this.chaveTitulo(r.titulo, r.parcela) === chave);
     if (!rows.length) return null;
+    const r0 = rows[0];
     return {
       rows,
-      aPagar: rows.reduce((t, r) => t + (Number(r.aPagar) || 0), 0),
-      valor: rows.reduce((t, r) => t + (Number(r.valor) || 0), 0)
+      aPagar: r0.tituloAPagar != null ? r0.tituloAPagar : rows.reduce((t, r) => t + (Number(r.aPagar) || 0), 0),
+      valor: r0.tituloValor != null ? r0.tituloValor : rows.reduce((t, r) => t + (Number(r.valor) || 0), 0),
+      ccs: r0.ccsTitulo && r0.ccsTitulo.length ? r0.ccsTitulo : rows.map((r) => ({ id: r.ccId, nome: r.ccNome, parceria: true }))
     };
   },
 
@@ -518,11 +591,13 @@ const GerarPagamentoApp = {
         const forma = s.formaSienge[chave] || {};
         const payment = await this.lerFormaPagamento(r.titulo, r.parcela, forma.tipo);
         if (gen !== s.gen) return;
-        const check = BoletoCheck.validar(payment, { valor: t.aPagar, vencimento: r.vencimento });
+        const credor = payment && payment.kind === "pix" ? await this.carregarCredor(r.credorId) : undefined;
+        if (gen !== s.gen) return;
+        const check = BoletoCheck.validar(payment, { valor: t.aPagar, vencimento: r.vencimento, credor });
         s.pagInfo[chave] = { payment, check, tipoSienge: forma.tipo || "" };
-        if (check.nivel === "erro") {
+        if (["erro", "aviso", "sem"].includes(check.nivel)) {
           Object.keys(s.sel).forEach((k) => {
-            if (k.endsWith("|" + chave) && !s.selManual[k]) s.sel[k] = false;
+            if (k.endsWith("|" + chave)) s.sel[k] = false;
           });
         }
         s.validacao.feitos += 1;
@@ -562,13 +637,14 @@ const GerarPagamentoApp = {
       saldo: t.aPagar,
       valor: t.valor,
       valorAjustado: t.valor,
-      ccId: [...new Set(t.rows.map((x) => x.ccId))].join(" / "),
-      ccNome: t.rows.length > 1 ? "rateado" : r.ccNome,
+      ccId: t.ccs.map((x) => x.id).join(" / "),
+      ccNome: t.ccs.length > 1 ? "rateado" : (t.ccs[0] && t.ccs[0].nome) || r.ccNome,
       companyId: cc ? this.companyIdOf(cc) : "",
       natureza: r.pago ? "pago" : "",
       dataPagamento: r.pagamento || "",
       conta: r.contas && r.contas.length ? "C/C " + r.contas.join(", ") : "",
-      situacaoTexto: situacao
+      situacaoTexto: situacao,
+      pagCheck: this.state.pagInfo[chave] ? this.state.pagInfo[chave].check : null
     });
   },
 
@@ -576,29 +652,46 @@ const GerarPagamentoApp = {
     return this.state.lotes.find((l) => (l.itens || []).some((i) => this.chaveTitulo(i.titulo, i.parcela) === chave)) || null;
   },
 
-  /* Títulos em aberto agrupados por conta de parceria e dia de vencimento (um lote por conta por dia);
-     o mesmo título rateado entre CCs da mesma conta vira uma linha. */
+  /* Títulos em aberto agrupados por conta de parceria e dia de vencimento (um lote por conta por dia).
+     Título com CC de parceria entra inteiro: valor total e todos os CCs do rateio, inclusive os que não são de parceria.
+     Se os CCs de parceria do título forem de contas diferentes, cada conta fica só com a sua parte. */
   gruposLote() {
     const grupos = {};
-    this.state.titulos.filter((r) => !r.pago && r.aPagar > 0.009).forEach((r) => {
+    const abertos = this.state.titulos.filter((r) => !r.pago && r.aPagar > 0.009);
+    const contaKeyDe = (r) => (r.esperada ? this.numConta(r.esperada.numero || r.esperada.id) || String(r.esperada.id) : "");
+    const contasDoTitulo = {};
+    abertos.forEach((r) => {
+      const chave = this.chaveTitulo(r.titulo, r.parcela);
+      (contasDoTitulo[chave] = contasDoTitulo[chave] || new Set()).add(contaKeyDe(r));
+    });
+    abertos.forEach((r) => {
       const conta = r.esperada;
-      const contaKey = conta ? this.numConta(conta.numero || conta.id) || String(conta.id) : "";
+      const contaKey = contaKeyDe(r);
       const dia = String(r.vencimento || "").slice(0, 10);
       const key = conta ? contaKey + "@" + (dia || "sem-data") : "__sem";
       if (!grupos[key]) grupos[key] = { key, contaKey, dia: conta ? dia : "", conta, itens: {}, ordem: [] };
       const g = grupos[key];
       const chave = this.chaveTitulo(r.titulo, r.parcela);
+      const inteiro = contasDoTitulo[chave].size === 1 && r.tituloAPagar != null;
       if (!g.itens[chave]) {
         g.itens[chave] = {
           chave, titulo: r.titulo, parcela: r.parcela, credor: r.credor, documento: r.documento,
-          vencimento: r.vencimento, valor: 0, aPagar: 0, ccs: []
+          vencimento: r.vencimento, valor: 0, aPagar: 0, ccs: [], inteiro
         };
         g.ordem.push(chave);
+        if (inteiro) {
+          Object.assign(g.itens[chave], {
+            valor: r.tituloValor,
+            aPagar: r.tituloAPagar,
+            ccs: (r.ccsTitulo || []).map((c) => ({ id: c.id, nome: c.nome, parceria: c.parceria, rateio: c.rateio }))
+          });
+        }
       }
       const it = g.itens[chave];
+      if (it.inteiro) return;
       it.valor += r.valor;
       it.aPagar += r.aPagar;
-      if (!it.ccs.some((c) => c.id === r.ccId)) it.ccs.push({ id: r.ccId, nome: r.ccNome });
+      if (!it.ccs.some((c) => c.id === r.ccId)) it.ccs.push({ id: r.ccId, nome: r.ccNome, parceria: true });
     });
     return Object.values(grupos).map((g) => {
       const itens = g.ordem.map((k) => g.itens[k]).sort((a, b) => (a.vencimento || "").localeCompare(b.vencimento || "") || Number(a.titulo) - Number(b.titulo));
@@ -612,8 +705,9 @@ const GerarPagamentoApp = {
           this.state.sel[selKey] = g.key !== "__sem" && !it.emLote;
         }
         it.selKey = selKey;
-        it.marcado = !it.emLote && !!this.state.sel[selKey];
         it.pag = this.state.pagInfo[it.chave] || null;
+        it.bloqueio = this.bloqueioLote(it);
+        it.marcado = !it.emLote && !it.bloqueio && !!this.state.sel[selKey];
       });
       return { ...g, itens };
     }).sort((a, b) => (a.key === "__sem") - (b.key === "__sem")
@@ -641,11 +735,18 @@ const GerarPagamentoApp = {
     this.paintTitulos();
   },
 
+  toggleLote(key) {
+    const abertos = this.state.lotesAbertos;
+    if (abertos[key]) delete abertos[key];
+    else abertos[key] = true;
+    this.paintTitulos();
+  },
+
   toggleGrupo(key, marcar) {
     const g = this.gruposLote().find((x) => x.key === key);
     if (!g) return;
     g.itens.forEach((it) => {
-      if (it.emLote) return;
+      if (it.emLote || it.bloqueio) return;
       this.state.sel[it.selKey] = !!marcar;
     });
     this.paintTitulos();
@@ -655,8 +756,13 @@ const GerarPagamentoApp = {
     const s = this.state;
     let g = this.gruposLote().find((x) => x.key === key);
     if (!g || !g.conta || s.gerandoLote) return;
+    if (s.validacao && s.validacao.rodando) {
+      alert("Aguarde terminar a conferência das formas de pagamento para gerar o lote.");
+      return;
+    }
     if (!g.itens.some((it) => it.marcado)) {
-      alert(g.itens.every((it) => it.emLote) ? "Todos os títulos deste dia já estão em lote." : "Marque ao menos um título para gerar o lote.");
+      alert(g.itens.every((it) => it.emLote) ? "Todos os títulos deste dia já estão em lote."
+        : (g.itens.some((it) => !it.emLote && !it.bloqueio) ? "Marque ao menos um título para gerar o lote." : "Nenhum título deste dia pode entrar em lote: todos têm possível divergência na forma de pagamento. Corrija no Sienge e busque de novo."));
       return;
     }
     s.gerandoLote = key;
@@ -671,12 +777,18 @@ const GerarPagamentoApp = {
       alert("Estes títulos já foram incluídos em outro lote. A tela foi atualizada.");
       return;
     }
+    const comBloqueio = itens.filter((it) => this.bloqueioLote(it));
+    if (comBloqueio.length) {
+      s.gerandoLote = "";
+      this.paintTitulos();
+      alert("Lote não gerado: há título com possível divergência na forma de pagamento.\n\n" + comBloqueio.slice(0, 8).map((it) => `• ${it.titulo}/${it.parcela || 1} ${it.credor}: ${this.bloqueioLote(it)}`).join("\n"));
+      return;
+    }
     const total = itens.reduce((t, it) => t + it.aPagar, 0);
-    const problemas = itens.filter((it) => it.pag && (it.pag.check.nivel === "erro" || it.pag.check.nivel === "sem"));
-    const semConferir = itens.filter((it) => !it.pag).length;
-    const alerta = (problemas.length
-      ? `\n\nAtenção: ${problemas.length} título(s) com problema na forma de pagamento:\n` + problemas.slice(0, 8).map((it) => `• ${it.titulo}/${it.parcela || 1} ${it.credor}: ${it.pag.check.resumo}`).join("\n") + (problemas.length > 8 ? `\n• e mais ${problemas.length - 8}` : "")
-      : "") + (semConferir ? `\n\n${semConferir} título(s) ainda sem conferência da forma de pagamento.` : "");
+    const fora = g.itens.filter((it) => it.bloqueio);
+    const alerta = fora.length
+      ? `\n\n${fora.length} título(s) deste dia ficam fora por possível divergência na forma de pagamento:\n` + fora.slice(0, 8).map((it) => `• ${it.titulo}/${it.parcela || 1} ${it.credor}: ${it.bloqueio}`).join("\n") + (fora.length > 8 ? `\n• e mais ${fora.length - 8}` : "")
+      : "";
     const pergunta = `Gerar lote do dia ${this.dataBr(g.dia)} com ${itens.length} título(s), total de ${this.money(total)}, pela conta ${this.contaLabel(g.conta)}?${alerta}`;
     const okConf = typeof window.mouraConfirm === "function" ? await window.mouraConfirm(pergunta) : confirm(pergunta);
     if (!okConf) {
@@ -794,8 +906,11 @@ const GerarPagamentoApp = {
       const marcados = g.itens.filter((it) => it.marcado);
       const total = marcados.reduce((t, it) => t + it.aPagar, 0);
       const disponiveis = g.itens.filter((it) => !it.emLote);
-      const todos = disponiveis.length > 0 && disponiveis.every((it) => it.marcado);
+      const liberados = disponiveis.filter((it) => !it.bloqueio);
+      const divergentes = disponiveis.filter((it) => it.pag && it.bloqueio).length;
+      const todos = liberados.length > 0 && liberados.every((it) => it.marcado);
       const gerando = s.gerandoLote === g.key;
+      const conferindo = !!(s.validacao && s.validacao.rodando);
       const jaGerado = !sem && !disponiveis.length;
       const lotesDoDia = this.lotesDoGrupo(g);
       const linhas = g.itens.map((it) => {
@@ -803,15 +918,15 @@ const GerarPagamentoApp = {
           ? `<span class="gp-pill gp-ok">No lote ${this.esc(it.loteIntegra.id)}</span>`
           : (it.loteSienge ? `<span class="gp-pill gp-warn">Já em lote no Sienge${it.loteSienge !== "sim" ? " nº " + this.esc(it.loteSienge) : ""}</span>` : `<span class="gp-pill gp-wait">Em aberto</span>`);
         const pagSelo = it.emLote ? `<span class="gp-muted">—</span>` : (window.BoletoCheck ? BoletoCheck.seloHtml(it.pag ? it.pag.check : null) : "");
-        return `<tr class="gp-click${it.emLote ? " gp-em-lote" : ""}${it.pag && it.pag.check.nivel === "erro" && !it.emLote ? " gp-row-bad" : ""}" onclick="GerarPagamentoApp.abrirResumo('${this.esc(it.chave)}')" title="Clique para ver o resumo do título">
-          <td style="text-align:center;" onclick="event.stopPropagation()"><input type="checkbox" ${it.marcado ? "checked" : ""} ${sem || it.emLote || gerando ? "disabled" : ""}
-            title="${it.emLote ? "Já está em lote; não pode entrar em outro." : ""}"
+        return `<tr class="gp-click${it.emLote ? " gp-em-lote" : ""}${it.pag && it.bloqueio ? " gp-row-bad" : ""}" onclick="GerarPagamentoApp.abrirResumo('${this.esc(it.chave)}')" title="Clique para ver o resumo do título">
+          <td style="text-align:center;" onclick="event.stopPropagation()"><input type="checkbox" ${it.marcado ? "checked" : ""} ${sem || it.emLote || it.bloqueio || gerando ? "disabled" : ""}
+            title="${this.esc(it.emLote ? "Já está em lote; não pode entrar em outro." : (it.bloqueio ? "Bloqueado: " + it.bloqueio : ""))}"
             onchange="GerarPagamentoApp.toggleItem('${this.esc(it.selKey)}')"></td>
           <td>${this.dataBr(it.vencimento)}</td>
           <td><strong>${this.esc(it.titulo)}</strong>${it.parcela ? `<span class="gp-muted"> / ${this.esc(it.parcela)}</span>` : ""}</td>
           <td title="${this.esc(it.credor)}">${this.esc(it.credor)}</td>
           <td>${this.esc(it.documento || "—")}</td>
-          <td title="${this.esc(it.ccs.map((c) => c.id + " " + c.nome).join(" / "))}">${it.ccs.map((c) => `<strong>${this.esc(c.id)}</strong>`).join(" / ")} <span class="gp-muted">${this.esc(it.ccs.length === 1 ? it.ccs[0].nome : "rateado")}</span></td>
+          <td title="${this.esc(it.ccs.map((c) => `${c.id} ${c.nome}${c.rateio != null ? ` · ${this.pct(c.rateio)}` : ""}${c.parceria ? " (parceria)" : ""}`).join("\n"))}">${it.ccs.map((c) => (c.parceria ? `<strong>${this.esc(c.id)}</strong>` : `<span class="gp-cc-outro">${this.esc(c.id)}</span>`)).join(" / ")} <span class="gp-muted">${this.esc(it.ccs.length === 1 ? it.ccs[0].nome : "rateado")}</span></td>
           <td style="text-align:right;">${this.money(it.aPagar)}</td>
           <td class="gp-status">${pagSelo}</td>
           <td class="gp-status">${tag}</td>
@@ -821,25 +936,32 @@ const GerarPagamentoApp = {
         ? "Cadastre a conta em Centros de Custo para incluir estes títulos em lote."
         : (jaGerado
           ? `${g.itens.length} título(s) · todos já em lote (${lotesDoDia.map((x) => this.esc(x)).join(", ")})`
-          : `${g.itens.length} título(s) · ${disponiveis.length} disponível(is) · ${marcados.length} marcado(s)${lotesDoDia.length ? ` · ${g.itens.length - disponiveis.length} já em lote` : ""}`);
-      return `<div class="gp-lote${sem ? " gp-lote-sem" : ""}${jaGerado ? " gp-lote-feito" : ""}">
-        <div class="gp-lote-h">
-          <div>
-            <div class="gp-lote-conta">${sem ? "Sem conta de parceria cadastrada" : `${this.esc(this.contaLabel(g.conta))} <span class="gp-lote-dia"><i data-lucide="calendar" style="width:13px;height:13px;"></i> ${this.dataBr(g.dia)}</span>`}</div>
-            <small>${resumo}</small>
+          : `${g.itens.length} título(s) · ${disponiveis.length} disponível(is) · ${marcados.length} marcado(s)${lotesDoDia.length ? ` · ${g.itens.length - disponiveis.length} já em lote` : ""}${divergentes ? ` · <b class="gp-bloq">${divergentes} bloqueado(s) por divergência</b>` : ""}`);
+      const somaGrupo = g.itens.reduce((t, it) => t + it.aPagar, 0);
+      const aberto = !!s.lotesAbertos[g.key];
+      return `<div class="gp-lote${sem ? " gp-lote-sem" : ""}${jaGerado ? " gp-lote-feito" : ""}${aberto ? " is-open" : ""}">
+        <div class="gp-lote-h" role="button" tabindex="0" aria-expanded="${aberto}" title="${aberto ? "Clique para fechar o lote" : "Clique para ver os títulos do lote"}"
+          onclick="GerarPagamentoApp.toggleLote('${this.esc(g.key)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();GerarPagamentoApp.toggleLote('${this.esc(g.key)}');}">
+          <div class="gp-lote-tit">
+            <i data-lucide="chevron-right" class="gp-lote-seta"></i>
+            <div>
+              <div class="gp-lote-conta">${sem ? "Sem conta de parceria cadastrada" : `${this.esc(this.contaLabel(g.conta))} <span class="gp-lote-dia"><i data-lucide="calendar" style="width:13px;height:13px;"></i> ${this.dataBr(g.dia)}</span>`}</div>
+              <small>${resumo} · ${this.money(somaGrupo)}</small>
+            </div>
           </div>
-          ${sem ? "" : (jaGerado ? `<div class="gp-lote-acoes">
+          ${sem ? "" : (jaGerado ? `<div class="gp-lote-acoes" onclick="event.stopPropagation()">
             <span class="gp-pill gp-ok" style="height:30px;display:inline-flex;align-items:center;gap:6px;padding:0 12px;"><i data-lucide="check-circle-2" style="width:14px;height:14px;"></i> Lote já gerado</span>
-          </div>` : `<div class="gp-lote-acoes">
-            <label class="gp-lote-todos"><input type="checkbox" ${todos ? "checked" : ""} ${gerando ? "disabled" : ""} onchange="GerarPagamentoApp.toggleGrupo('${this.esc(g.key)}', this.checked)"> Marcar todos</label>
+          </div>` : `<div class="gp-lote-acoes" onclick="event.stopPropagation()">
+            <label class="gp-lote-todos"><input type="checkbox" ${todos ? "checked" : ""} ${gerando || !liberados.length ? "disabled" : ""} onchange="GerarPagamentoApp.toggleGrupo('${this.esc(g.key)}', this.checked)"> Marcar todos</label>
             <strong class="gp-lote-total">${this.money(total)}</strong>
-            <button type="button" class="btn btn-primary" ${s.gerandoLote || !marcados.length ? "disabled" : ""} onclick="GerarPagamentoApp.gerarLote('${this.esc(g.key)}')"
+            <button type="button" class="btn btn-primary" ${s.gerandoLote || conferindo || !marcados.length ? "disabled" : ""} onclick="GerarPagamentoApp.gerarLote('${this.esc(g.key)}')"
+              title="${conferindo ? "Aguarde a conferência das formas de pagamento" : (!marcados.length && divergentes ? "Os títulos disponíveis têm possível divergência na forma de pagamento" : "")}"
               style="height:36px;width:150px;justify-content:center;display:inline-flex;align-items:center;gap:6px;">
               ${gerando ? '<span class="btn-spin"></span> Gerando…' : '<i data-lucide="layers" style="width:14px;"></i> Gerar lote'}
             </button>
           </div>`)}
         </div>
-        <div style="overflow:auto;">
+        <div class="gp-lote-corpo" style="overflow:auto;"${aberto ? "" : " hidden"}>
           <table class="gp-table gp-titulos">
             <colgroup><col style="width:3%"><col style="width:8%"><col style="width:8%"><col style="width:19%"><col style="width:10%"><col style="width:17%"><col style="width:9%"><col style="width:12%"><col style="width:14%"></colgroup>
             <thead><tr><th></th><th>Vencimento</th><th>Título</th><th>Credor</th><th>Documento</th><th>Centro de custo</th><th style="text-align:right;">A pagar</th><th>Pagamento</th><th>Situação</th></tr></thead>
@@ -872,10 +994,10 @@ const GerarPagamentoApp = {
         </table>
       </div>` : "";
     const v = s.validacao || {};
-    const errosPag = Object.values(s.pagInfo).filter((p) => p.check.nivel === "erro").length;
+    const errosPag = Object.values(s.pagInfo).filter((p) => ["erro", "aviso", "sem"].includes(p.check.nivel)).length;
     const progressoPag = v.rodando
       ? `<span class="gp-valida"><span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;"></span> Conferindo forma de pagamento e boletos · ${v.feitos} de ${v.total}</span>`
-      : (v.total ? `<span class="gp-valida">${errosPag ? `<b style="color:#b91c1c;">${errosPag} título(s) com problema na forma de pagamento</b> (desmarcados)` : "Formas de pagamento conferidas"}</span>` : "");
+      : (v.total ? `<span class="gp-valida">${errosPag ? `<b style="color:#b91c1c;">${errosPag} título(s) com possível divergência na forma de pagamento</b> (bloqueados para lote até corrigir no Sienge)` : "Formas de pagamento conferidas"}</span>` : "");
     return `<p class="gp-nota">Títulos em aberto separados por conta de parceria e dia de vencimento: um lote por conta por dia. Título que já está em lote (no Integra ou no Sienge) não entra em outro. Clique na linha para ver o resumo do título. ${progressoPag}</p>${cards}${geradosHtml}`;
   },
 
@@ -1023,6 +1145,14 @@ const GerarPagamentoApp = {
           #gerar-pagamento-root .gp-lote { margin:12px 20px; border:1px solid #e2e8f0; border-radius:10px; overflow:hidden; background:#fff; }
           #gerar-pagamento-root .gp-lote-sem { border-color:#fecaca; }
           #gerar-pagamento-root .gp-lote-h { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; padding:12px 14px; background:#f0f7f3; border-bottom:1px solid #e2e8f0; }
+          #gerar-pagamento-root .gp-lote-h[role="button"] { cursor:pointer; user-select:none; }
+          #gerar-pagamento-root .gp-lote-h[role="button"]:hover { filter:brightness(0.98); }
+          #gerar-pagamento-root .gp-lote:not(.is-open) .gp-lote-h { border-bottom:0; }
+          #gerar-pagamento-root .gp-lote-tit { display:flex; align-items:center; gap:10px; min-width:0; }
+          #gerar-pagamento-root .gp-lote-seta { width:18px; height:18px; color:#105436; flex-shrink:0; transition:transform .15s ease; }
+          #gerar-pagamento-root .gp-lote.is-open .gp-lote-seta { transform:rotate(90deg); }
+          #gerar-pagamento-root .gp-cc-outro { color:#64748b; font-weight:600; }
+          #gerar-pagamento-root .gp-bloq { color:#b91c1c; }
           #gerar-pagamento-root .gp-lote-sem .gp-lote-h { background:#fef2f2; }
           #gerar-pagamento-root .gp-lote-conta { font-weight:800; color:#105436; font-size:0.92rem; }
           #gerar-pagamento-root .gp-lote-sem .gp-lote-conta { color:#b91c1c; }

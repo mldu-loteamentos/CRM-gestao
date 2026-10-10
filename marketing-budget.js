@@ -979,8 +979,8 @@ const MarketingBudgetApp = {
 
   abasHtml() {
     const s = this.state;
-    const aba = (id, rotulo, ic) => `<button type="button" class="mkb-tab${s.aba === id ? " is-active" : ""}" onclick="MarketingBudgetApp.setAba('${id}')"><i data-lucide="${ic}" style="width:14px;height:14px;"></i> ${rotulo}</button>`;
-    return `<div class="mkb-tabs">${aba("budget", "Budget", "wallet")}${aba("contratos", "Contratos", "file-text")}${aba("perfil", "Perfil da venda", "users")}</div>`;
+    const aba = (id, rotulo, ic) => `<button type="button" role="tab" aria-selected="${s.aba === id}" class="ml-tab${s.aba === id ? " is-active" : ""}" onclick="MarketingBudgetApp.setAba('${id}')"><i data-lucide="${ic}"></i> ${rotulo}</button>`;
+    return `<div class="ml-tabs mkb-tabs" role="tablist">${aba("budget", "Budget", "wallet")}${aba("contratos", "Contratos", "file-text")}${aba("perfil", "Perfil da venda", "users")}</div>`;
   },
 
   /* ---------- aba Contratos: em dia, nada pago e entrada em aberto (possíveis cancelamentos) ---------- */
@@ -1430,10 +1430,7 @@ const MarketingBudgetApp = {
         #marketing-budget-root .mkb-st-previsao { background:#e2e8f0; color:#334155; }
         #marketing-budget-root .mkb-st-cancel { background:#fee2e2; color:#b91c1c; }
         #marketing-budget-root .mkb-vazio { text-align:center; color:#64748b; padding:24px; }
-        #marketing-budget-root .mkb-tabs { display:flex; gap:6px; border-bottom:1px solid #e2e8f0; margin-bottom:-4px; }
-        #marketing-budget-root .mkb-tab { display:inline-flex; align-items:center; gap:6px; border:0; background:transparent; padding:8px 14px; font-weight:700; font-size:0.82rem; color:#64748b; border-bottom:3px solid transparent; cursor:pointer; }
-        #marketing-budget-root .mkb-tab:hover { color:#105436; }
-        #marketing-budget-root .mkb-tab.is-active { color:#105436; border-bottom-color:#105436; }
+        #marketing-budget-root .mkb-tabs { margin-bottom:-4px; }
         #marketing-budget-root .mkb-atraso { color:#b91c1c; font-weight:700; }
         #marketing-budget-root .mkb-atraso small { color:#c2410c; font-weight:600; }
         #marketing-budget-root .mkb-perfil-aviso { display:flex; align-items:center; gap:10px; color:#475569; font-size:0.82rem; padding:10px 16px; }

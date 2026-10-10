@@ -2935,6 +2935,9 @@ circle.donut-segment {
 .est-conf.is-ok .est-conf-grid > div:last-child b { color: #105436; }
 .est-conf.is-bad .est-conf-grid > div:last-child b { color: #c2410c; }
 .est-conf-grid small { display: block; margin-top: 4px; color: #64748b; font-size: 0.74rem; }
+.est-conf-grid small b,
+.est-conf.is-ok .est-conf-grid > div:last-child small b,
+.est-conf.is-bad .est-conf-grid > div:last-child small b { display: inline; margin: 0; font-size: inherit; color: #334155; }
 .est-conf-det { margin-top: 10px; font-size: 0.8rem; color: #334155; }
 .est-conf-det summary { cursor: pointer; font-weight: 700; }
 .est-conf-det ul { margin: 6px 0 0; padding-left: 18px; max-height: 180px; overflow: auto; }
@@ -3017,6 +3020,9 @@ circle.donut-segment {
   vertical-align: middle;
 }
 .est-stock-table tbody tr:hover td { background: #f7fbf8; }
+.est-stock-table tbody tr.est-row-extrato { cursor: pointer; }
+.est-stock-table tbody tr.est-row-extrato:hover td { background: #eef7f1; }
+.est-stock-table tbody tr.est-row-extrato.is-loading { cursor: progress; opacity: 0.6; }
 .est-stock-table .est-num {
   text-align: right;
   white-space: nowrap;
@@ -7533,12 +7539,6 @@ circle.donut-segment {
 
 .comp-pref-page { padding: 8px 4px 24px; max-width: 1680px; margin: 0 auto; width: 100%; }
 .comp-pref-mov-body { padding: 16px; overflow-x: auto; }
-.comp-pref-tabs { margin-bottom: 0; }
-.comp-pref-tabs .customer-tab-btn.is-locked,
-.comp-pref-tabs .customer-tab-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
 .comp-pref-tab-body { padding-top: 16px; }
 .comp-pref-card {
   background: #fff;
@@ -7823,3 +7823,14 @@ circle.donut-segment {
 .bchk-info { background:#f1f5f9; color:#475569; }
 .bchk-wait { background:#f8fafc; color:#94a3b8; border:1px dashed #cbd5e1; }
 .bchk-desc { background:#e0f2fe; color:#0369a1; }
+
+/* Abas sublinhadas (padrão Budget do marketing) — skill abas-sublinhadas */
+.ml-tabs { display: flex; gap: 6px; border-bottom: 1px solid #e2e8f0; margin: 0; padding: 0; overflow-x: auto; scrollbar-width: none; }
+.ml-tabs::-webkit-scrollbar { display: none; }
+.ml-tab { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; padding: 8px 14px; margin-bottom: -1px; font-family: inherit; font-weight: 700; font-size: 0.82rem; color: #64748b; border-bottom: 3px solid transparent; cursor: pointer; white-space: nowrap; }
+.ml-tab:hover { color: var(--color-primary, #105436); }
+.ml-tab.is-active { color: var(--color-primary, #105436); border-bottom-color: var(--color-primary, #105436); }
+.ml-tab i, .ml-tab svg { width: 14px; height: 14px; flex-shrink: 0; }
+.ml-tab:disabled, .ml-tab.is-locked { opacity: 0.45; cursor: not-allowed; color: #64748b; border-bottom-color: transparent; }
+.ml-tab .ml-tab-count { font-size: 0.7rem; font-weight: 700; background: #e2e8f0; color: #475569; border-radius: 999px; padding: 1px 7px; }
+.ml-tab.is-active .ml-tab-count { background: #e7f6ee; color: var(--color-primary, #105436); }

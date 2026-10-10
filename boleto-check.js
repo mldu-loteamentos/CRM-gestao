@@ -127,6 +127,7 @@ window.BoletoCheck = {
       return out;
     }
     const d = payment.data || {};
+    if (payment.kind === "pix") return this.validarPix(payment, ctx.credor, out);
     if (!this.ehBoleto(payment)) {
       out.nivel = "info";
       out.forma = payment.kind === "pix" ? "PIX" : (payment.kind === "bank-transfer" ? "Transferência" : String(payment.kind));
@@ -226,6 +227,129 @@ window.BoletoCheck = {
     return out;
   },
 
+  /* ---------- PIX: a chave tem de ser do credor do título ---------- */
+  TIPOS_PIX: { C: "CPF/CNPJ", E: "E-mail", T: "Telefone", A: "Aleatória" },
+
+  cpfValido(c) {
+    if (!/^\d{11}$/.test(c) || /^(\d)\1{10}$/.test(c)) return false;
+    const dv = (n) => {
+      let s = 0;
+      for (let i = 0; i < n; i++) s += Number(c[i]) * (n + 1 - i);
+      const r = (s * 10) % 11;
+      return r === 10 ? 0 : r;
+    };
+    return dv(9) === Number(c[9]) && dv(10) === Number(c[10]);
+  },
+
+  cnpjValido(c) {
+    if (!/^\d{14}$/.test(c) || /^(\d)\1{13}$/.test(c)) return false;
+    const dv = (n) => {
+      const pesos = n === 12 ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2] : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+      const r = pesos.reduce((s, p, i) => s + Number(c[i]) * p, 0) % 11;
+      return r < 2 ? 0 : 11 - r;
+    };
+    return dv(12) === Number(c[12]) && dv(13) === Number(c[13]);
+  },
+
+  docFmt(d) {
+    d = this.digits(d);
+    if (d.length === 11) return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
+    if (d.length === 14) return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
+    return d || "—";
+  },
+
+  /** Telefone com DDD, sem o 55 do país: chave "+55 (14) 99999-8888" e cadastro "14 99999-8888" ficam iguais. */
+  telNorm(v) {
+    let t = this.digits(v);
+    if (t.length >= 12 && t.startsWith("55")) t = t.slice(2);
+    return t;
+  },
+
+  chaveNorm(tipo, chave) {
+    const k = String(chave == null ? "" : chave).trim();
+    if (tipo === "C") return this.digits(k);
+    if (tipo === "T") return this.telNorm(k);
+    return k.toLowerCase().replace(/\s+/g, "");
+  },
+
+  /**
+   * credor: { doc, nome, telefones[], emails[], chaves[{ tipo, chave, original, doc, padrao }], erro }.
+   * Sem consulta ao DICT do Banco Central: o titular de chave telefone, e-mail ou aleatória é conferido
+   * pelas chaves PIX cadastradas no credor do Sienge (que têm o CPF/CNPJ do credor).
+   */
+  validarPix(payment, credor, out) {
+    const d = payment.data || {};
+    out.forma = "PIX";
+    let tipo = String(d.keyPixType || "").trim().toUpperCase();
+    let chave = String(d.keyPix || "").trim();
+    const usaCredor = String(d.isUsingCreditorData || "").trim().toUpperCase() === "S";
+    const lido = credor && !credor.erro;
+    const credDoc = lido ? this.digits(credor.doc) : "";
+    if (!chave && usaCredor && lido && credor.chaves.length) {
+      const p = credor.chaves.find((c) => c.padrao) || credor.chaves[0];
+      tipo = p.tipo;
+      chave = p.original;
+      out.infos.push("O título usa a chave PIX padrão do cadastro do credor.");
+    }
+    const tipoNome = this.TIPOS_PIX[tipo] || (tipo ? `Tipo ${tipo}` : "—");
+    out.pix = { tipo, tipoNome, chave, beneficiario: String(d.beneficiaryName || "").trim(), benefDoc: this.digits(d.beneficiaryCNPJNumber || d.beneficiaryCPFNumber), credDoc, credNome: lido ? credor.nome : "", titular: "" };
+
+    if (credor && credor.erro) out.avisos.push(`Não consegui ler o cadastro do credor no Sienge para conferir o titular da chave (${credor.erro}).`);
+    else if (lido && !credDoc) out.avisos.push("O credor não tem CPF/CNPJ no cadastro do Sienge: não há como conferir o titular da chave.");
+
+    if (!chave) {
+      out.erros.push(usaCredor ? "O título usa os dados do credor, mas o credor não tem chave PIX cadastrada no Sienge." : "PIX sem chave informada no título.");
+    } else if (!this.TIPOS_PIX[tipo]) {
+      out.erros.push(`Tipo de chave PIX não reconhecido (${tipo || "vazio"}).`);
+    } else {
+      const k = this.chaveNorm(tipo, chave);
+      if (out.pix.benefDoc) {
+        if (!this.cpfValido(out.pix.benefDoc) && !this.cnpjValido(out.pix.benefDoc)) out.erros.push(`CPF/CNPJ do beneficiário do PIX inválido (${this.docFmt(out.pix.benefDoc)}).`);
+        else if (credDoc && out.pix.benefDoc !== credDoc) out.erros.push(`Beneficiário do PIX (${this.docFmt(out.pix.benefDoc)}) não é o credor do título (${this.docFmt(credDoc)}).`);
+      }
+      if (tipo === "C") {
+        if (!this.cpfValido(k) && !this.cnpjValido(k)) out.erros.push(`Chave PIX CPF/CNPJ inválida (${chave}).`);
+        else if (credDoc && k !== credDoc) out.erros.push(`A chave PIX é do CPF/CNPJ ${this.docFmt(k)}, mas o credor do título é ${this.docFmt(credDoc)}.`);
+        else if (credDoc) out.pix.titular = `A chave é o próprio CPF/CNPJ do credor (${this.docFmt(credDoc)}).`;
+      } else {
+        const formatoOk = tipo === "T" ? /^\d{10,11}$/.test(k)
+          : (tipo === "E" ? /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(k) : /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(k));
+        if (!formatoOk) out.erros.push(`Chave PIX ${tipoNome.toLowerCase()} em formato inválido (${chave}).`);
+        else if (lido) {
+          const reg = credor.chaves.find((c) => c.tipo === tipo && c.chave === k);
+          if (reg && reg.doc && credDoc && reg.doc !== credDoc) {
+            out.erros.push(`A chave ${tipoNome.toLowerCase()} está cadastrada no Sienge para o CPF/CNPJ ${this.docFmt(reg.doc)}, não para o credor (${this.docFmt(credDoc)}).`);
+          } else if (reg && credDoc) {
+            out.pix.titular = `Chave ${tipoNome.toLowerCase()} cadastrada nas chaves PIX do credor ${this.docFmt(credDoc)} no Sienge.`;
+          } else if (credDoc) {
+            const contato = tipo === "T" ? credor.telefones.includes(k) : (tipo === "E" ? credor.emails.includes(k) : false);
+            out.avisos.push(`Chave ${tipoNome.toLowerCase()} não confirmada como do titular ${this.docFmt(credDoc)}: `
+              + (contato ? `o ${tipo === "T" ? "telefone" : "e-mail"} está no cadastro do credor, mas a chave ` : "a chave ")
+              + "não está nas chaves PIX cadastradas no credor. Confirme o titular no banco e cadastre a chave no credor, ou troque para a chave CPF/CNPJ.");
+          }
+        }
+      }
+    }
+    if (out.erros.length) out.nivel = "erro";
+    else if (out.avisos.length) out.nivel = "aviso";
+    else out.nivel = "ok";
+    out.resumo = out.erros[0] || out.avisos[0] || (out.pix.titular ? "PIX conferido · " + out.pix.titular : "PIX conferido");
+    return out;
+  },
+
+  pixHtml(v) {
+    const p = v.pix || {};
+    const lista = (itens, cor, ic) => itens.map((t) => `<p style="margin:4px 0 0;color:${cor};">${ic} ${this.esc(t)}</p>`).join("");
+    return `<p><strong>Forma:</strong> PIX</p>
+      <p><strong>Chave (${this.esc(p.tipoNome || "—")}):</strong> ${this.esc(p.chave || "—")}</p>
+      ${p.beneficiario || p.benefDoc ? `<p><strong>Beneficiário:</strong> ${this.esc(p.beneficiario || "—")}${p.benefDoc ? ` · ${this.esc(this.docFmt(p.benefDoc))}` : ""}</p>` : ""}
+      ${p.credDoc ? `<p><strong>Credor do título:</strong> ${this.esc(p.credNome || "—")} · ${this.esc(this.docFmt(p.credDoc))}</p>` : ""}
+      ${v.nivel === "ok" && p.titular ? `<p style="margin:6px 0 0;color:#105436;font-weight:700;">✓ ${this.esc(p.titular)}</p>` : ""}
+      ${lista(v.erros, "#b91c1c", "✗")}
+      ${lista(v.avisos, "#c2410c", "!")}
+      ${lista(v.infos, "#0f766e", "ℹ")}`;
+  },
+
   /** Selo curto para tabelas. */
   seloHtml(v) {
     if (!v) return `<span class="bchk bchk-wait">Conferindo…</span>`;
@@ -237,7 +361,8 @@ window.BoletoCheck = {
 
   /** Bloco completo para o resumo do título. */
   html(payment, ctx) {
-    const v = this.validar(payment, ctx);
+    const v = (ctx && ctx.check) || this.validar(payment, ctx);
+    if (payment && payment.kind === "pix") return this.pixHtml(v);
     const d = (payment && payment.data) || {};
     const lista = (itens, cor, ic) => itens.map((t) => `<p style="margin:4px 0 0;color:${cor};">${ic} ${this.esc(t)}</p>`).join("");
     const cab = v.nivel === "ok"

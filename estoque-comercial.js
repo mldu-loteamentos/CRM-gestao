@@ -1437,6 +1437,8 @@ const EstoqueComercialApp = {
     let distratados = 0;
     let inadimplentes = 0;
     let semSaldo = 0;
+    let aVencer = 0;
+    let vencido = 0;
     (rows || []).forEach(u => {
       const fin = this.financialStatus(u);
       if (fin === "—") return;
@@ -1453,15 +1455,22 @@ const EstoqueComercialApp = {
       seen.add(key);
       ativos += 1;
       const bal = this.unitBalance(u);
-      if (bal == null || Number.isNaN(Number(bal))) semSaldo += 1;
-      else aReceber += Number(bal) || 0;
+      const saldo = bal == null || Number.isNaN(Number(bal)) ? null : Number(bal) || 0;
+      if (saldo == null) semSaldo += 1;
+      else aReceber += saldo;
       const ov = this.overdueValue(u);
       if (ov > 0.009) {
         inadimplentes += 1;
         atraso += ov;
       }
+      // "Em atraso" traz juros e multa; o a vencer e o vencido saem do principal (saldo − parcelas ainda no prazo).
+      if (saldo != null) {
+        const noPrazo = u.kpiAVencer != null && Number.isFinite(Number(u.kpiAVencer)) ? Math.min(saldo, Math.max(0, Number(u.kpiAVencer))) : Math.max(0, saldo - ov);
+        aVencer += noPrazo;
+        vencido += saldo - noPrazo;
+      }
     });
-    return { aReceber, atraso, aVencer: Math.max(0, aReceber - atraso), ativos, quitados, distratados, inadimplentes, semSaldo };
+    return { aReceber, atraso, vencido, aVencer, ativos, quitados, distratados, inadimplentes, semSaldo };
   },
 
   selectedUnits() {
@@ -1612,7 +1621,8 @@ const EstoqueComercialApp = {
     const page = this.state.tablePage || 0;
     const slice = prepared.slice(page * this.PAGE, page * this.PAGE + this.PAGE);
     this.renderPager(prepared.length);
-    tbody.innerHTML = slice.map(item => {
+    this._linhas = slice;
+    tbody.innerHTML = slice.map((item, i) => {
       const u = item.u;
       const fin = item.fin;
       const status = this.mapStock(u.commercialStock);
@@ -1627,7 +1637,8 @@ const EstoqueComercialApp = {
           ? "—"
           : this.money(bal));
       const valorContrato = this.displayContractValue(u, fin);
-      return `<tr>
+      const comExtrato = !!u.customerId;
+      return `<tr${comExtrato ? ` class="est-row-extrato" title="Clique para ver o extrato do cliente" onclick="EstoqueComercialApp.abrirExtrato(${i}, this)"` : ""}>
         <td><span class="est-status-chip">${this.esc(status)}</span></td>
         <td class="est-emp"><b>${this.esc(u.enterpriseId)}</b><span title="${this.esc(empName)}">${this.esc(empName)}</span></td>
         <td class="est-unit">${this.esc(u.name)}</td>
@@ -1644,6 +1655,64 @@ const EstoqueComercialApp = {
     const head = document.querySelector("#tab-estoque-comercial thead");
     if (window.lucide && head) lucide.createIcons({ root: head });
     this.verificarQuitacoes(slice);
+  },
+
+  /** Abre o PDF do extrato do cliente no Sienge (mesmo extrato do botão Visualizar Extrato da ficha). */
+  async abrirExtrato(idx, tr) {
+    const item = (this._linhas || [])[idx];
+    const u = item && item.u;
+    if (!u || !u.customerId) return;
+    if (tr && tr.classList.contains("is-loading")) return;
+    const win = this.abrirGuiaEspera(u);
+    if (tr) tr.classList.add("is-loading");
+    try {
+      const billId = u.receivableBillId || await this.acharTituloCliente(u);
+      if (!billId) throw new Error("Não encontrei o título desse contrato no Sienge.");
+      const res = await SiengeApiService.getCustomerFinancialStatementsPdf(u.customerId, billId);
+      const r0 = (res && res.results && res.results[0]) || (Array.isArray(res) ? res[0] : res) || {};
+      const url = r0.urlReport || r0.value || (typeof r0 === "string" && r0.startsWith("http") ? r0 : "");
+      if (!url) throw new Error("O Sienge não devolveu o extrato desse título.");
+      const ccId = String(u.enterpriseId || "");
+      const fileName = typeof window.buildFichaPdfFilename === "function"
+        ? window.buildFichaPdfFilename("Extrato", { contrato: u.name, costCenterId: ccId, titulo: billId, nome: u.customerName || "" })
+        : `Extrato ${ccId} ${u.name} - Título ${billId}.pdf`;
+      const aberta = window.openNamedSiengePdf(url, fileName, win);
+      if (!aberta && typeof window.showBoletoPdfFallback === "function") window.showBoletoPdfFallback(url, fileName);
+    } catch (e) {
+      console.warn("[Estoque] extrato do cliente", u.customerId, e);
+      if (win && !win.closed) win.close();
+      alert(e && e.message ? e.message : "Não foi possível gerar o extrato do cliente.");
+    } finally {
+      if (tr) tr.classList.remove("is-loading");
+    }
+  },
+
+  /** Guia aberta já no clique: depois da consulta ao Sienge o navegador bloquearia um window.open novo. */
+  abrirGuiaEspera(u) {
+    let w = null;
+    try { w = window.open("", "_blank"); } catch (e) { w = null; }
+    if (!w) return null;
+    try {
+      const ref = this.esc(`${u.enterpriseId || ""} · ${u.name || ""}${u.customerName ? " · " + u.customerName : ""}`);
+      w.document.open();
+      w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Extrato</title><style>body{font-family:Segoe UI,sans-serif;background:#f8fafc;color:#105436;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.box{text-align:center;padding:32px;max-width:440px}.spin{width:28px;height:28px;border:3px solid #cfe3d8;border-top-color:#105436;border-radius:50%;animation:s .8s linear infinite;margin:0 auto 16px}@keyframes s{to{transform:rotate(360deg)}}p{color:#64748b;font-size:14px;line-height:1.45}</style></head><body><div class="box"><div class="spin"></div><div style="font-weight:700;margin-bottom:8px">Gerando o extrato do cliente</div><p>${ref}</p></div></body></html>`);
+      w.document.close();
+    } catch (e) {}
+    return w;
+  },
+
+  /** Unidade sem título gravado: procura o título do contrato na lista do cliente no Sienge. */
+  async acharTituloCliente(u) {
+    if (!window.SiengeApiService || !SiengeApiService.getReceivableBills) return null;
+    const res = await SiengeApiService.getReceivableBills(u.customerId);
+    const list = (res && (res.results || res)) || [];
+    const arr = Array.isArray(list) ? list : [];
+    const contrato = String(this.displayContract(u) || "").trim();
+    const docNum = (b) => String(b.documentNumber || "").toUpperCase().replace(/^(CTCV|CT|CV)\s*/, "").trim();
+    const hit = (contrato && arr.find((b) => docNum(b) === contrato))
+      || arr.find((b) => String(b.costCenterId || b.enterpriseId || "") === String(u.enterpriseId || "") && String(b.unit || b.unitName || "").trim() === String(u.name || "").trim())
+      || (arr.length === 1 ? arr[0] : null);
+    return hit ? (hit.receivableBillId || hit.id || null) : null;
   },
 
   setBusy(on) {
@@ -3058,19 +3127,45 @@ const EstoqueComercialApp = {
     const hoje = this.todayStr();
     const usados = new Set();
     const semTitulo = [];
+    const distratadosNovos = [];
     let reabertos = 0;
     let quitadosNovos = 0;
+    const revogados = bills.filter((b) => b.revoked);
+    const daUnidade = (lista, u, rb) => {
+      const porId = lista.filter((b) => b.units.some((x) => x.id === String(u.id)) || (rb && b.id === rb));
+      return porId.length ? porId : lista.filter((b) => b.units.some((x) => this.unitNameMatches(x.name, u.name)));
+    };
     this.state.units = this.state.units.map((u) => {
       if (String(u.enterpriseId) !== String(ccId) || !this.isFinanceUnit(u)) return u;
+      const rb = String(u.receivableBillId || "").replace(/^B-/, "").split("-")[0];
+      const mine = daUnidade(vivos, u, rb);
+      if (u.distratoTitulo && mine.length) {
+        u = { ...u, relFin: null, distratoTitulo: null, distratoData: null };
+      }
       const fin0 = this.financialStatus(u);
       if (fin0 === "Distratado") return u;
-      const rb = String(u.receivableBillId || "").replace(/^B-/, "").split("-")[0];
-      let mine = vivos.filter((b) => b.units.some((x) => x.id === String(u.id)) || (rb && b.id === rb));
-      if (!mine.length) mine = vivos.filter((b) => b.units.some((x) => this.unitNameMatches(x.name, u.name)));
       if (!mine.length) {
-        if (fin0 === "Ativo adimplente" || fin0 === "Ativo inadimplente") {
-          semTitulo.push({ unidade: u.name, contrato: this.displayContract(u) || "", situacao: fin0, cliente: u.customerName || "" });
+        if (fin0 !== "Ativo adimplente" && fin0 !== "Ativo inadimplente") return u;
+        const rev = daUnidade(revogados, u, rb).sort((a, b) => String(b.revoked).localeCompare(String(a.revoked)))[0];
+        if (rev) {
+          distratadosNovos.push({ unidade: u.name, titulo: rev.id, cliente: (rev.cliente && rev.cliente.name) || u.customerName || "", data: String(rev.revoked).slice(0, 10) });
+          return {
+            ...u,
+            relFin: "distratado",
+            quitado: false,
+            quitadoEvidencia: false,
+            outstandingBalance: 0,
+            presentDebitBalance: 0,
+            kpiVencidas: 0,
+            kpiAVencer: 0,
+            openParcelas: [],
+            distratoTitulo: rev.id,
+            distratoData: String(rev.revoked).slice(0, 10),
+            finAt: agora,
+            siengeConferidoEm: agora
+          };
         }
+        semTitulo.push({ unidade: u.name, contrato: this.displayContract(u) || "", situacao: fin0, cliente: u.customerName || "" });
         return u;
       }
       mine.forEach((b) => usados.add(b.id));
@@ -3132,15 +3227,18 @@ const EstoqueComercialApp = {
       sienge: {
         aReceber: comSaldo.reduce((t, b) => t + b.aberto, 0),
         vencido: comSaldo.reduce((t, b) => t + b.vencido, 0),
+        vencidoAdd: comSaldo.reduce((t, b) => t + b.vencidoComAcrescimo, 0),
+        titulosVencidos: comSaldo.filter((b) => b.vencido > 0.009).length,
         titulos: comSaldo.length,
         clientes: new Set(comSaldo.map((b) => String((b.cliente && b.cliente.id) || b.id))).size,
         quitados: vivos.filter((b) => b.aberto <= 0.009 && b.recebido > 0.009).length
       },
-      integra: { aReceber: p.aReceber, atraso: p.atraso, ativos: p.ativos, quitados: p.quitados, semSaldo: p.semSaldo },
+      integra: { aReceber: p.aReceber, atraso: p.atraso, vencido: p.vencido, inadimplentes: p.inadimplentes, ativos: p.ativos, quitados: p.quitados, semSaldo: p.semSaldo },
       semUnidade: comSaldo.filter((b) => !usados.has(b.id)).map((b) => ({
         titulo: b.id, cliente: (b.cliente && b.cliente.name) || "", unidades: b.units.map((x) => x.name).join(", "), aberto: b.aberto
       })),
       semTitulo,
+      distratadosNovos,
       reabertos,
       quitadosNovos
     };
@@ -3154,20 +3252,30 @@ const EstoqueComercialApp = {
     const emp = this.requireEmpForApiHeavy();
     if (!c || !emp || c.ccId !== String(emp)) return "";
     const dif = c.integra.aReceber - c.sienge.aReceber;
-    const bate = Math.abs(dif) < 0.05;
+    const temVencido = c.integra.vencido != null;
+    const difVenc = temVencido ? c.integra.vencido - c.sienge.vencido : 0;
+    const bateSaldo = Math.abs(dif) < 0.05;
+    const bateVenc = Math.abs(difVenc) < 0.05;
+    const bate = bateSaldo && bateVenc && !(c.semTitulo || []).length && !(c.semUnidade || []).length;
+    const acresc = (c.sienge.vencidoAdd || 0) - (c.sienge.vencido || 0);
     const hora = new Date(c.at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
     const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
     const lista = (titulo, itens, linha) => itens.length ? `<details class="est-conf-det"><summary>${titulo} <b>${itens.length}</b></summary><ul>${itens.slice(0, 60).map(linha).join("")}</ul></details>` : "";
     return `<div class="est-conf ${bate ? "is-ok" : "is-bad"}">
       <div class="est-conf-h">
         <strong>Conferência com o Contas a Receber do Sienge · ${esc(c.ccId)}</strong>
-        <small>${hora} · ${c.reabertos} reaberto(s) · ${c.quitadosNovos} quitado(s) pela conferência</small>
+        <small>${hora} · ${c.reabertos} reaberto(s) · ${c.quitadosNovos} quitado(s)${(c.distratadosNovos || []).length ? ` · ${c.distratadosNovos.length} distratado(s)` : ""} pela conferência</small>
       </div>
       <div class="est-conf-grid">
-        <div><label>Sienge · a receber</label><b>${this.money(c.sienge.aReceber)}</b><small>${c.sienge.titulos} título(s) de ${c.sienge.clientes} cliente(s) · vencido ${this.money(c.sienge.vencido)}</small></div>
-        <div><label>Integra · a receber</label><b>${this.money(c.integra.aReceber)}</b><small>${c.integra.ativos} ativo(s) · ${c.integra.quitados} quitado(s)${c.integra.semSaldo ? ` · ${c.integra.semSaldo} sem saldo` : ""}</small></div>
-        <div><label>Diferença</label><b>${bate ? "Bate" : this.money(dif)}</b><small>${bate ? "Integra igual ao relatório do Sienge" : "Veja os itens abaixo"}</small></div>
+        <div><label>Sienge · a receber</label><b>${this.money(c.sienge.aReceber)}</b><small>${c.sienge.titulos} título(s) de ${c.sienge.clientes} cliente(s)</small>
+          <small>Vencido (principal) <b>${this.money(c.sienge.vencido)}</b>${c.sienge.titulosVencidos != null ? ` em ${c.sienge.titulosVencidos} título(s)` : ""}${acresc > 0.009 ? ` · com juros e multa ${this.money(c.sienge.vencidoAdd)}` : ""}</small></div>
+        <div><label>Integra · a receber</label><b>${this.money(c.integra.aReceber)}</b><small>${c.integra.ativos} ativo(s) · ${c.integra.quitados} quitado(s)${c.integra.semSaldo ? ` · ${c.integra.semSaldo} sem saldo` : ""}</small>
+          ${temVencido ? `<small>Vencido (principal) <b>${this.money(c.integra.vencido)}</b> em ${c.integra.inadimplentes} contrato(s) · em atraso com juros e multa ${this.money(c.integra.atraso)}</small>` : ""}</div>
+        <div><label>Diferença</label><b>${bate ? "Bate" : (bateSaldo ? "Saldo bate" : this.money(dif))}</b>
+          <small>${bateSaldo ? "A receber igual ao Sienge" : "A receber diferente do Sienge"}${temVencido ? (bateVenc ? " · vencido igual" : ` · vencido difere ${this.money(difVenc)}`) : ""}</small>
+          ${(c.semTitulo || []).length || (c.semUnidade || []).length ? `<small>Há unidades ou títulos sem par: veja abaixo</small>` : ""}</div>
       </div>
+      ${lista("Unidades distratadas no Sienge (passaram para Distratado)", c.distratadosNovos || [], (i) => `<li>${esc(i.unidade)} · título ${esc(i.titulo)}${i.cliente ? " · " + esc(i.cliente) : ""}${i.data ? " · distrato " + esc(i.data.split("-").reverse().join("/")) : ""}</li>`)}
       ${lista("Títulos com saldo no Sienge sem unidade no Integra", c.semUnidade, (i) => `<li>Título ${esc(i.titulo)} · ${esc(i.cliente)}${i.unidades ? " · " + esc(i.unidades) : ""} · ${this.money(i.aberto)}</li>`)}
       ${lista("Unidades ativas no Integra sem título no Sienge", c.semTitulo, (i) => `<li>${esc(i.unidade)}${i.contrato ? " · contrato " + esc(i.contrato) : ""}${i.cliente ? " · " + esc(i.cliente) : ""} · ${esc(i.situacao)}</li>`)}
     </div>`;
