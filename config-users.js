@@ -607,7 +607,8 @@ const ConfigUsersApp = {
             { id: "doc_padrao", label: "Documentos Padrões" },
             { id: "upload_kmz", label: "Upload de KMZ" },
             { id: "upload_mapa", label: "Projeto Urbanístico" },
-            { id: "indexadores", label: "Indexadores" }
+            { id: "indexadores", label: "Indexadores" },
+            { id: "documentos", label: "Tipos de Documento" }
           ]
         }
       ]

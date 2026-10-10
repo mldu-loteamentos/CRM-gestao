@@ -883,6 +883,15 @@ ComprasControleApp.companyLabel = function (id) {
   return sid || "—";
 };
 
+/** "Nome em dd/mm/aaaa às hh:mm" a partir do usuário e da data do Sienge (yyyy-MM-dd HH:mm:ss ou ISO). */
+ComprasControleApp.quemQuando = function (quem, quando) {
+  const m = String(quando || "").match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/);
+  const data = m ? `${m[3]}/${m[2]}/${m[1]}${m[4] ? ` às ${m[4]}:${m[5]}` : ""}` : "";
+  const nome = String(quem || "").trim();
+  if (!nome && !data) return "—";
+  return [nome || "—", data].filter(Boolean).join(" em ");
+};
+
 ComprasControleApp.pintarTitulo = function () {
   const det = this._tituloDetalhe;
   let el = document.getElementById("cfin-titulo");
@@ -932,6 +941,8 @@ ComprasControleApp.pintarTitulo = function () {
           <div><span>Plano financeiro</span><div>${this.esc(plano)}</div></div>`}
           <div><span>Emissão</span><div>${this.esc(this.fmtDate(row.emissao || bill.issueDate))}</div></div>
           <div><span>Departamento</span><div>${this.esc(row.departamento || "—")}</div></div>
+          ${det.loading ? "" : `<div><span>Criado por</span><div>${this.esc(this.quemQuando(bill.registeredBy || bill.registeredUserId, bill.registeredDate))}</div></div>
+          <div><span>Última alteração</span><div>${this.esc(this.quemQuando(bill.changedBy || bill.changedUserId, bill.changedDate))}</div></div>`}
           ${pago ? `<div><span>Pagamento</span><div>${this.esc(this.fmtDate(row.dataPagamento))}</div></div>` : ""}
           ${row.conta || row.operacao || row.tipoBaixa ? `<div><span>Conta / operação</span><div>${this.esc([row.tipoBaixa, row.operacao, row.conta].filter(Boolean).join(" · "))}</div></div>` : ""}
         </div>

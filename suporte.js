@@ -125,7 +125,8 @@
       { id: "doc_padrao", label: "Documentos Padrões" },
       { id: "upload_kmz", label: "Upload de KMZ" },
       { id: "upload_mapa", label: "Projeto Urbanístico" },
-      { id: "indexadores", label: "Indexadores" }
+      { id: "indexadores", label: "Indexadores" },
+      { id: "documentos", label: "Tipos de Documento" }
     ]},
     { id: "outro", label: "Outro / Geral" }
   ];
@@ -189,7 +190,8 @@
     "doc-padrao": { modulo: "configuracoes", subitem: "doc_padrao" },
     "upload-kmz": { modulo: "configuracoes", subitem: "upload_kmz" },
     "upload-mapa": { modulo: "configuracoes", subitem: "upload_mapa" },
-    indexadores: { modulo: "configuracoes", subitem: "indexadores" }
+    indexadores: { modulo: "configuracoes", subitem: "indexadores" },
+    "documentos-sienge": { modulo: "configuracoes", subitem: "documentos" }
   };
 
   const OLD_MODULO_LABEL = {

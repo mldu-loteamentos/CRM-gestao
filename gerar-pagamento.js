@@ -355,6 +355,9 @@ const GerarPagamentoApp = {
       this.pintarProgresso();
       await this.carregarLotes();
       await this.carregarLotesSienge(gen);
+      if (window.DocumentosSiengeApp) {
+        try { await DocumentosSiengeApp.garantirLista(false); } catch (e) { console.warn("[Gerar Pagamento] documentos do Sienge", e); }
+      }
     } catch (e) {
       if (gen !== s.gen) return;
       console.error("[Gerar Pagamento] títulos", e);
@@ -443,6 +446,7 @@ const GerarPagamentoApp = {
           credorId: bill.creditorId != null ? String(bill.creditorId) : "",
           companyId: bill.companyId != null ? String(bill.companyId) : String(this.companyIdOf(cc) || ""),
           documento: [docId, bill.documentNumber].filter(Boolean).join(" "),
+          docId: String(docId || "").trim(),
           vencimento: String(bill.dueDate || "").slice(0, 10),
           pagamento: datas.length ? datas[datas.length - 1] : "",
           valor: original * fat,
@@ -646,6 +650,30 @@ const GerarPagamentoApp = {
     return { ok: false, motivo: "Título não autorizado no Sienge." };
   },
 
+  /**
+   * Selo da coluna Autorização. Quando o documento exige ciência (Configurações → Apoio → Tipos de Documento),
+   * mostra a ciência antes. A API do Sienge não informa a ciência; ela é dada antes da autorização,
+   * então título com autorização (completa ou parcial) já teve ciência.
+   */
+  autorizacaoSeloHtml(it) {
+    if (it.emLote) return `<span class="gp-muted">—</span>`;
+    const aut = it.autorizacao || {};
+    const doc = it.docId || "";
+    const exige = !!doc && typeof window.documentoExigeCiencia === "function" && window.documentoExigeCiencia(doc);
+    let ciencia = "";
+    if (exige) {
+      ciencia = aut.ok || aut.parcial
+        ? `<span class="bchk bchk-ok" title="${this.esc(`O documento ${doc} exige ciência antes da autorização. O título já tem autorização no Sienge, então a ciência foi dada.`)}">Ciência ✓</span>`
+        : `<span class="bchk bchk-info" title="${this.esc(`O documento ${doc} exige ciência antes da autorização. A API do Sienge não informa se a ciência já foi dada: confira no Sienge.`)}">Ciência ?</span>`;
+    }
+    const dica = aut.ok
+      ? `Autorizado no Sienge por ${aut.por || "—"}${aut.em ? " em " + this.dataBr(aut.em) : ""}`
+      : (aut.motivo || "Autorização não verificada no Sienge.");
+    const cls = aut.ok ? "bchk-ok" : (aut.parcial ? "bchk-aviso" : "bchk-erro");
+    const txt = aut.ok ? "Autorizado ✓" : (aut.parcial ? "Autorização incompleta" : "Não autorizado");
+    return `<span class="gp-aut">${ciencia}${ciencia ? `<i data-lucide="chevron-right" class="gp-aut-seta"></i>` : ""}<span class="bchk ${cls}" title="${this.esc(dica)}">${txt}</span></span>`;
+  },
+
   semAutorizacao(it) {
     return !it.emLote && !(it.autorizacao && it.autorizacao.ok);
   },
@@ -752,9 +780,11 @@ const GerarPagamentoApp = {
       dataPagamento: r.pagamento || "",
       conta: r.contas && r.contas.length ? "C/C " + r.contas.join(", ") : "",
       situacaoTexto: situacao + (r.pago || !r.autorizacao ? ""
-        : (r.autorizacao.ok
+        : ((r.docId && typeof window.documentoExigeCiencia === "function" && window.documentoExigeCiencia(r.docId)
+          ? (r.autorizacao.ok || r.autorizacao.parcial ? " · ciência dada" : " · exige ciência antes da autorização")
+          : "") + (r.autorizacao.ok
           ? ` · autorizado por ${r.autorizacao.por || "—"}${r.autorizacao.em ? " em " + this.dataBr(r.autorizacao.em) : ""}`
-          : ` · ${r.autorizacao.parcial ? "autorização incompleta" : "não autorizado"} no Sienge`)),
+          : ` · ${r.autorizacao.parcial ? "autorização incompleta" : "não autorizado"} no Sienge`))),
       pagCheck: this.state.pagInfo[chave] ? this.state.pagInfo[chave].check : null
     });
   },
@@ -1401,11 +1431,6 @@ const GerarPagamentoApp = {
               ? `<span class="gp-pill gp-wait" title="Está no lote ${this.esc(this.lotePendenteDe(it.chave).id)}, que não foi gerado no Sienge. Ao gerar de novo, ele sai daquele lote.">Em aberto</span><small>Lote não gerado no Sienge</small>`
               : `<span class="gp-pill gp-wait">Em aberto</span>`));
         const pagSelo = it.emLote ? `<span class="gp-muted">—</span>` : (window.BoletoCheck ? BoletoCheck.seloHtml(it.pag ? it.pag.check : null) : "");
-        const aut = it.autorizacao;
-        const autSelo = it.emLote ? ""
-          : (aut && aut.ok
-            ? `<small class="gp-muted" title="${this.esc(`Autorizado no Sienge por ${aut.por || "—"}${aut.em ? " em " + this.dataBr(aut.em) : ""}`)}">Autorizado</small>`
-            : `<small class="gp-bloq" title="${this.esc((aut && aut.motivo) || "Autorização não verificada")}">${aut && aut.parcial ? "Autorização incompleta" : "Não autorizado"}</small>`);
         return `<tr class="gp-click${it.emLote ? " gp-em-lote" : ""}${this.bloqueioVisivel(it) ? " gp-row-bad" : ""}" onclick="GerarPagamentoApp.abrirResumo('${this.esc(it.chave)}')" title="Clique para ver o resumo do título">
           <td style="text-align:center;" onclick="event.stopPropagation()"><input type="checkbox" ${it.marcado ? "checked" : ""} ${sem || it.emLote || it.bloqueio || gerando ? "disabled" : ""}
             title="${this.esc(it.emLote ? "Já está em lote; não pode entrar em outro." : (it.bloqueio ? "Bloqueado: " + it.bloqueio : ""))}"
@@ -1417,7 +1442,8 @@ const GerarPagamentoApp = {
           <td class="gp-status">${this.ccsCelulaHtml(it)}${it.emLote ? "" : this.rateioSeloHtml(it.rateio)}</td>
           <td style="text-align:right;">${this.money(it.aPagar)}</td>
           <td class="gp-status">${pagSelo}</td>
-          <td class="gp-status">${tag}${autSelo}</td>
+          <td class="gp-status">${this.autorizacaoSeloHtml(it)}</td>
+          <td class="gp-status">${tag}</td>
         </tr>`;
       }).join("");
       const resumo = sem
@@ -1451,8 +1477,8 @@ const GerarPagamentoApp = {
         </div>
         <div class="gp-lote-corpo" style="overflow:auto;"${aberto ? "" : " hidden"}>
           <table class="gp-table gp-titulos">
-            <colgroup><col style="width:3%"><col style="width:8%"><col style="width:8%"><col style="width:19%"><col style="width:10%"><col style="width:17%"><col style="width:9%"><col style="width:12%"><col style="width:14%"></colgroup>
-            <thead><tr><th></th><th>Vencimento</th><th>Título</th><th>Credor</th><th>Documento</th><th>Centro de custo</th><th style="text-align:right;">A pagar</th><th>Pagamento</th><th>Situação</th></tr></thead>
+            <colgroup><col style="width:3%"><col style="width:8%"><col style="width:7%"><col style="width:17%"><col style="width:9%"><col style="width:9%"><col style="width:9%"><col style="width:11%"><col style="width:15%"><col style="width:12%"></colgroup>
+            <thead><tr><th></th><th>Vencimento</th><th>Título</th><th>Credor</th><th>Documento</th><th>Centro de custo</th><th style="text-align:right;">A pagar</th><th>Pagamento</th><th>Autorização</th><th>Situação</th></tr></thead>
             <tbody>${linhas}</tbody>
           </table>
         </div>
@@ -1612,6 +1638,18 @@ const GerarPagamentoApp = {
       const parcTitulo = o.linhas.find((l) => l.id !== base && ehParc(l));
       const parcCad = parcTitulo ? null : daObra.find((c) => String(c.id) !== base && this.ccDeParceriaPeloNome(c.id, c.name));
       const parc = parcTitulo ? parcTitulo.id : (parcCad ? String(parcCad.id) : "");
+      // CC da obra e CC do parceiro são exclusivos de cada lado: título só em um deles é 100% daquele lado, sem rateio.
+      const temBase = o.linhas.some((l) => l.id === base);
+      if (parc && temBase !== !!parcTitulo) {
+        o.exclusivo = temBase ? "ml" : "parceiro";
+        o.padrao = { ml: temBase ? 100 : 0, terr: temBase ? 0 : 100, aviso: "", exclusivo: true };
+        o.linhas.forEach((l) => {
+          l.padrao = o.pct > 0 ? l.pct * 100 / o.pct : 100;
+          l.esperado = l.valor;
+          l.ok = true;
+        });
+        return;
+      }
       const padrao = parc ? this.rateioPadraoObra(base, parc) : { ml: 100, terr: 0, aviso: "" };
       if (!padrao) {
         o.semPadrao = semPadrao = true;
@@ -1755,9 +1793,11 @@ const GerarPagamentoApp = {
   rateioHtml(conf) {
     if (!conf || !conf.obras.length) return "";
     const corpo = conf.obras.map((o) => `
-      <tr class="gp-rateio-obra"><td colspan="7">Obra ${this.esc(o.rotulo || o.obra)} · ${this.pct(o.pct)} do título · ${this.money(o.valor)}${o.padrao
-        ? ` <span>· padrão ${this.pct(o.padrao.ml)} Moura Leite${o.padrao.terr ? ` / ${this.pct(o.padrao.terr)} terrenista` : ""}</span>`
-        : ` <span class="gp-rateio-x">· sem rateio padrão no cadastro</span>`}</td></tr>
+      <tr class="gp-rateio-obra"><td colspan="7">Obra ${this.esc(o.rotulo || o.obra)} · ${this.pct(o.pct)} do título · ${this.money(o.valor)}${o.exclusivo
+        ? ` <span>· CC exclusivo ${o.exclusivo === "ml" ? "da Moura Leite" : "do parceiro"}: 100% ${o.exclusivo === "ml" ? "Moura Leite" : "do parceiro"}, sem rateio</span>`
+        : (o.padrao
+          ? ` <span>· padrão ${this.pct(o.padrao.ml)} Moura Leite${o.padrao.terr ? ` / ${this.pct(o.padrao.terr)} terrenista` : ""}</span>`
+          : ` <span class="gp-rateio-x">· sem rateio padrão no cadastro</span>`)}</td></tr>
       ${o.linhas.map((l) => `<tr class="${l.ok === false || l.planoErro ? "is-bad" : ""}">
         <td><strong>${this.esc(l.id)}</strong> <span class="gp-rateio-nome">${this.esc(l.nome)}</span></td>
         <td class="gp-rateio-plano${l.planoErro ? " is-bad" : ""}">${l.planos.length
@@ -1765,7 +1805,7 @@ const GerarPagamentoApp = {
           : "—"}</td>
         <td class="num">${this.pct(l.pct)}</td>
         <td class="num">${this.money(l.valor)}</td>
-        <td class="num">${l.padrao != null ? this.pct(l.padrao) + " da obra" : "—"}</td>
+        <td class="num">${o.exclusivo ? "exclusivo" : (l.padrao != null ? this.pct(l.padrao) + " da obra" : "—")}</td>
         <td class="num">${l.esperado != null ? this.money(l.esperado) : "—"}</td>
         <td class="ic">${l.ok == null && !l.planoErro ? "" : (l.ok && !l.planoErro ? `<span class="gp-rateio-ok">✓</span>` : `<span class="gp-rateio-x">✗</span>`)}</td>
       </tr>`).join("")}`).join("");
@@ -1911,6 +1951,8 @@ const GerarPagamentoApp = {
           #gerar-pagamento-root .gp-lote-seta { width:18px; height:18px; color:#105436; flex-shrink:0; transition:transform .15s ease; }
           #gerar-pagamento-root .gp-lote.is-open .gp-lote-seta { transform:rotate(90deg); }
           #gerar-pagamento-root .gp-cc-outro { color:#64748b; font-weight:600; }
+          #gerar-pagamento-root .gp-aut { display:inline-flex; align-items:center; gap:2px; flex-wrap:wrap; }
+          #gerar-pagamento-root .gp-aut-seta { width:12px; height:12px; color:#94a3b8; }
           #gerar-pagamento-root .gp-cc-lista { display:inline-flex; flex-direction:column; gap:1px; cursor:help; font-size:0.85rem; }
           .gp-cc-pop { display:none; position:fixed; z-index:3000; background:#fff; border:1px solid #e2e8f0; border-radius:10px; box-shadow:0 10px 30px rgba(15,23,42,.18); padding:8px 10px; pointer-events:none; }
           .gp-cc-pop-tab { border-collapse:collapse; font-size:0.8rem; color:#1e293b; }
