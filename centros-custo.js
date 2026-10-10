@@ -4,6 +4,8 @@ const CentrosCustoState = {
   customFields: {},
   loading: false,
   selectedFilterIds: [], // IDs of cost centers to show (empty = show all)
+  somenteParceiros: false,
+  contasPorEmpresa: {},
   tiposCc: [
     'Loteamento Aberto', 'Loteamento Fechado', 'Incorporação', 'Frota',
     'Corporativo', 'Diretoria', 'Sócios', 'Contrapartida'
@@ -124,6 +126,17 @@ const CentrosCustoApp = {
       custom.clausula_suspensiva_dias = (Number.isFinite(n) && n > 0) ? n : 30;
       if (wasDisabled) suspensivaDiasEl.disabled = true;
     }
+    const contaEl = document.getElementById(`edit-conta-parceria-${id}`);
+    if (contaEl && contaEl.dataset.loaded === "1") {
+      const cc = CentrosCustoState.costCenters.find(c => String(c.id) === key);
+      const contas = CentrosCustoState.contasPorEmpresa[String(cc && (cc.idCompany || cc.companyId))] || [];
+      const picked = contas.find(a => a.key === contaEl.value);
+      const atual = custom.conta_parceria;
+      const manterAtual = !picked && atual && contaEl.value && contaEl.value === String(atual.id || atual.numero);
+      if (!manterAtual) {
+        custom.conta_parceria = picked ? { id: picked.id, numero: picked.numero, nome: picked.nome, banco: picked.banco, agencia: picked.agencia } : null;
+      }
+    }
     custom.updatedAt = Date.now();
     custom.cc_id = key;
 
@@ -179,6 +192,64 @@ const CentrosCustoApp = {
         if (dashVisible) loadDashboardData();
       }
     } catch (e) {}
+  },
+
+  isParceiro(cc) {
+    return /parceir/i.test(String((cc && cc.name) || ""));
+  },
+
+  contaLabel(c) {
+    if (!c) return "";
+    return [c.banco ? "Banco " + c.banco : "", c.agencia ? "Ag. " + c.agencia : "", c.numero ? "C/C " + c.numero : "", c.nome || ""]
+      .filter(Boolean).join(" · ");
+  },
+
+  async contasDaEmpresa(companyId) {
+    const cid = String(companyId || "");
+    if (!cid) return [];
+    if (CentrosCustoState.contasPorEmpresa[cid]) return CentrosCustoState.contasPorEmpresa[cid];
+    let list = [];
+    try {
+      const res = await SiengeApiService.getCheckingAccounts(cid);
+      list = (res && res.results) || [];
+    } catch (e) {
+      console.warn("[CentrosCusto] contas correntes:", e);
+    }
+    const out = list.map(a => {
+      const numero = String(a.accountNumber || a.number || "").trim();
+      const id = a.id != null ? String(a.id) : (a.checkingAccountId != null ? String(a.checkingAccountId) : "");
+      return {
+        key: id || numero,
+        id,
+        numero,
+        nome: String(a.accountName || a.name || a.description || "").trim(),
+        banco: String(a.bankCode || (a.bank && (a.bank.id || a.bank.code)) || a.bankId || "").trim(),
+        agencia: String(a.agency || a.agencyNumber || a.bankBranch || "").trim()
+      };
+    }).filter(a => a.key);
+    out.sort((a, b) => a.numero.localeCompare(b.numero, "pt-BR", { numeric: true }));
+    CentrosCustoState.contasPorEmpresa[cid] = out;
+    return out;
+  },
+
+  async loadContaParceriaSelect(id) {
+    const sel = document.getElementById(`edit-conta-parceria-${id}`);
+    if (!sel) return;
+    const cc = CentrosCustoState.costCenters.find(c => String(c.id) === String(id));
+    const companyId = cc && (cc.idCompany || cc.companyId);
+    const atual = ((CentrosCustoState.customFields[id] || CentrosCustoState.customFields[String(id)] || {}).conta_parceria) || null;
+    const contas = await this.contasDaEmpresa(companyId);
+    const atualKey = atual ? (atual.id || atual.numero) : "";
+    const extra = atual && !contas.some(a => a.key === atualKey)
+      ? `<option value="${atualKey}" selected>${this.contaLabel(atual)} (não encontrada no Sienge)</option>`
+      : "";
+    sel.innerHTML = `<option value="">Nenhuma (paga pela conta padrão da empresa)</option>${extra}` +
+      contas.map(a => `<option value="${a.key}" ${a.key === atualKey ? "selected" : ""}>${this.contaLabel(a)}</option>`).join("");
+    if (!contas.length) {
+      sel.insertAdjacentHTML("beforeend", `<option value="" disabled>Nenhuma conta corrente ativa encontrada na empresa ${companyId || "?"}</option>`);
+    }
+    sel.disabled = false;
+    sel.dataset.loaded = "1";
   },
 
   syncIncorporacaoUi(id) {
@@ -305,6 +376,7 @@ const CentrosCustoApp = {
     const incorpLotesProprios = custom.incorporacao_lotes_proprios === true;
     const incorpLotesTipo = custom.incorporacao_lotes_tipo || 'abertos';
     const showIncorp = tipo_cc === 'Incorporação';
+    const parceiro = this.isParceiro(cc);
 
     const modalHtml = `
       <div id="cc-modal-overlay" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; justify-content: center; align-items: center;">
@@ -382,6 +454,18 @@ const CentrosCustoApp = {
               </div>
             </div>
             
+            <div style="padding:14px; background:${parceiro ? '#fffbeb' : '#f8fafc'}; border:1px solid ${parceiro ? '#fde68a' : '#e2e8f0'}; border-radius:8px;">
+              <h4 style="margin:0 0 6px 0; color:#334155; font-size:0.9rem;">Conta de parceria (pagamento)</h4>
+              <p style="margin:0 0 10px 0; font-size:0.75rem; color:#64748b; line-height:1.4;">
+                ${parceiro
+                  ? 'Este centro de custo é de <strong>parceiro</strong>. Os títulos a pagar dele saem por esta conta em Contas a Pagar → Gerar Pagamento.'
+                  : 'Se informada, os títulos a pagar deste centro de custo saem por esta conta em Contas a Pagar → Gerar Pagamento.'}
+              </p>
+              <select id="edit-conta-parceria-${id}" class="form-control" disabled>
+                <option value="">Carregando contas correntes da empresa ${cc.idCompany || cc.companyId || ''}...</option>
+              </select>
+            </div>
+
             <hr style="border: 0; border-top: 1px solid #eee; margin: 5px 0;">
             <h4 style="margin: 0; color: #334155; font-size: 0.95rem;">Automações de Cobrança</h4>
             <div style="display: flex; align-items: center; gap: 15px;">
@@ -413,6 +497,7 @@ const CentrosCustoApp = {
     container.innerHTML = modalHtml;
     if (window.lucide) window.lucide.createIcons();
     this.syncIncorporacaoUi(id);
+    this.loadContaParceriaSelect(id);
   },
 
   closeModal() {
@@ -506,6 +591,9 @@ const CentrosCustoApp = {
     if (CentrosCustoState.selectedFilterIds.length > 0) {
         filteredCCs = filteredCCs.filter(c => CentrosCustoState.selectedFilterIds.includes(c.id));
     }
+    if (CentrosCustoState.somenteParceiros) {
+        filteredCCs = filteredCCs.filter(c => this.isParceiro(c) || (CentrosCustoState.customFields[c.id] || {}).conta_parceria);
+    }
     
     // Sort by CC ID ASC
     filteredCCs.sort((a, b) => a.id - b.id);
@@ -535,7 +623,11 @@ const CentrosCustoApp = {
         .cc-filter-select { border: none; outline: none; background: transparent; font-size: 0.85rem; flex-grow: 1; min-width: 200px; color: #777;}
       </style>
 
-      <div style="display: flex; justify-content: flex-end; margin-bottom: 15px;">
+      <div style="display: flex; justify-content: flex-end; align-items: center; gap: 16px; margin-bottom: 15px;">
+        <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; font-weight:600; color:#334155; cursor:pointer;">
+          <input type="checkbox" ${CentrosCustoState.somenteParceiros ? 'checked' : ''} onchange="CentrosCustoState.somenteParceiros=this.checked;CentrosCustoApp.render()" style="width:16px;height:16px;accent-color:#105436;">
+          Somente parceiros
+        </label>
         <button class="btn btn-primary" style="display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 16px; font-weight: 600; border-radius: 6px; cursor: pointer; border: none;" onclick="CentrosCustoApp.loadData(true)">
           <i data-lucide="refresh-cw" style="width: 16px;"></i> Atualizar
         </button>
@@ -566,6 +658,7 @@ const CentrosCustoApp = {
                 <th style="width: 150px; text-align: center;">ID Preâmbulo</th>
                 <th style="width: 120px; text-align: center;">% Moura Leite</th>
                 <th style="width: 120px; text-align: center;">% Terrenista</th>
+                <th style="min-width: 180px;">Conta parceria</th>
                 <th style="width: 100px; text-align: center;">Ações</th>
               </tr>
             </thead>
@@ -573,7 +666,7 @@ const CentrosCustoApp = {
     `;
 
     if (filteredCCs.length === 0) {
-      html += `<tr><td colspan="7" style="text-align: center; padding: 30px;">Nenhum centro de custo para exibir.</td></tr>`;
+      html += `<tr><td colspan="10" style="text-align: center; padding: 30px;">Nenhum centro de custo para exibir.</td></tr>`;
     }
 
     const preamblesList = (AppState && AppState.preamblesList) ? AppState.preamblesList : [];
@@ -608,6 +701,9 @@ const CentrosCustoApp = {
           <td style="text-align: center;">${preambulo}</td>
           <td style="text-align: center;">${percMl}</td>
           <td style="text-align: center;">${percTerr}</td>
+          <td style="font-size:0.8rem;">${custom.conta_parceria
+            ? `<span style="color:#105436;font-weight:600;">${this.contaLabel(custom.conta_parceria)}</span>`
+            : (this.isParceiro(cc) ? `<span style="color:#b91c1c;font-weight:700;">Parceiro sem conta</span>` : '-')}</td>
           <td style="text-align: center;">
              <button class="btn btn-outline btn-sm" onclick="CentrosCustoApp.openEditModal(${cc.id})" style="padding: 4px 10px; font-size: 0.75rem;">
                 <i data-lucide="edit-3" style="width: 14px;"></i> Editar
