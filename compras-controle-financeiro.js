@@ -949,24 +949,38 @@ ComprasControleApp.pintarTitulo = function () {
     ? caixaFormaHtml(det.payment, conferir)
     : this.formaHtml(det.payment, conferir);
   const anexos = (det.attachments || []).map((a) => `
-    <button type="button" class="btn btn-outline btn-sm" style="height:32px;" onclick="event.stopPropagation(); ComprasControleApp.baixarAnexoTitulo('${this.esc(row.titulo)}','${this.esc(a.id)}','${this.esc(a.name || "anexo.pdf")}')">${this.esc(a.description || a.name || "Anexo")}</button>
+    <button type="button" class="btn btn-outline btn-sm" style="height:32px;" onclick="event.stopPropagation(); ComprasControleApp.baixarAnexoTitulo('${this.esc(row.titulo)}','${this.esc(a.id)}','${this.esc(a.name || "anexo.pdf")}')"><i data-lucide="file-down" style="width:14px;height:14px;"></i> ${this.esc(a.description || a.name || "Anexo")}</button>
   `).join("");
-  el.innerHTML = `
-    <div class="cfin-titulo-back" onclick="if(event.target===this)ComprasControleApp.fecharTitulo()">
-      <div class="cfin-titulo-card${row.rateioHtml ? " is-largo" : ""}" onclick="event.stopPropagation()">
-        <div class="cfin-titulo-head">
-          <h3>Título ${this.esc(row.titulo)}${row.parcela ? " · parcela " + this.esc(row.parcela) : ""}</h3>
-          <button type="button" class="btn btn-cancel btn-sm" onclick="ComprasControleApp.fecharTitulo()">Fechar</button>
-        </div>
-        ${det.loading ? `<p class="cfin-titulo-wait">Abrindo título, anexos e forma de pagamento…</p>` : ""}
-        ${det.error ? `<p class="cfin-titulo-erro">${this.esc(det.error)}</p>` : ""}
-        <div class="cfin-titulo-grid">
+
+  let formaNivel = "";
+  if (det.payment && window.BoletoCheck) {
+    const v = det.payment.kind === "pix" ? row.pagCheck
+      : (BoletoCheck.ehBoleto(det.payment) ? BoletoCheck.validar(det.payment, { valor: conferir.valorConferir, vencimento: row.vencimento, descontoTitulo: conferir.descontoTitulo, retido }) : null);
+    formaNivel = v ? v.nivel : "";
+  }
+  const rateio = String(row.rateioHtml || "").replace(/^\s*<h4>[^<]*<\/h4>/, "");
+  const rateioNivel = !rateio ? "" : (/is-bad/.test(rateio) ? "erro" : (/is-warn/.test(rateio) ? "aviso" : "ok"));
+  const fiscalNivel = fiscal ? fiscal.nivel : (det.fiscalErro ? "erro" : "espera");
+  const selo = (nivel) => ({
+    ok: `<span class="bchk bchk-ok">Conferido ✓</span>`,
+    erro: `<span class="bchk bchk-erro">Erro</span>`,
+    aviso: `<span class="bchk bchk-aviso">Atenção</span>`,
+    sem: `<span class="bchk bchk-aviso">Atenção</span>`,
+    info: `<span class="bchk bchk-info">Não conferido</span>`,
+    espera: `<span class="bchk bchk-wait">Conferindo…</span>`
+  }[nivel] || "");
+  const bloco = (icone, titulo, nivel, corpo, extra) => `<section class="cfin-sec${nivel === "erro" ? " is-erro" : (nivel === "aviso" || nivel === "sem" ? " is-aviso" : "")}${extra ? " " + extra : ""}">
+      <header class="cfin-sec-h"><i data-lucide="${icone}"></i><span>${titulo}</span>${selo(nivel)}</header>
+      <div class="cfin-sec-b">${corpo}</div>
+    </section>`;
+
+  const dados = `<div class="cfin-titulo-grid">
+          <div class="cfin-titulo-destaque"><span>${pago ? "Valor pago" : (retido ? "Valor a pagar (líquido)" : "Valor a pagar")}</span><div class="cfin-titulo-valor">${this.esc(this.money(retido ? valor - retido : valor))}</div>${retido ? `<small>bruto ${this.esc(this.money(valor))} − retido ${this.esc(this.money(retido))}</small>` : ""}</div>
+          <div class="cfin-titulo-destaque"><span>Vencimento</span><div class="cfin-titulo-strong">${this.esc(this.fmtDate(row.vencimento || bill.dueDate))}</div></div>
+          <div class="cfin-titulo-destaque cfin-titulo-sit"><span>Situação</span><div>${this.esc(row.situacaoTexto || this.statusLabel(row))}</div></div>
           <div><span>Credor</span><div class="cfin-titulo-strong">${this.esc(credor)}</div></div>
           <div><span>Documento</span><div class="cfin-titulo-strong">${this.esc(doc || "—")}</div></div>
           <div><span>Empresa</span><div>${this.esc(this.companyLabel(empresaId))}</div></div>
-          <div><span>Vencimento</span><div>${this.esc(this.fmtDate(row.vencimento || bill.dueDate))}</div></div>
-          <div><span>${pago ? "Valor pago" : (retido ? "Valor a pagar (líquido)" : "Valor a pagar")}</span><div class="cfin-titulo-valor">${this.esc(this.money(retido ? valor - retido : valor))}</div>${retido ? `<small style="color:#64748b;">bruto ${this.esc(this.money(valor))} − retido ${this.esc(this.money(retido))}</small>` : ""}</div>
-          <div><span>Situação</span><div>${this.esc(row.situacaoTexto || this.statusLabel(row))}</div></div>
           ${row.rateioHtml ? "" : `<div><span>Centro de custo</span><div>${this.esc(cc)}</div></div>
           <div><span>Plano financeiro</span><div>${this.esc(plano)}</div></div>`}
           <div><span>Emissão</span><div>${this.esc(this.fmtDate(row.emissao || bill.issueDate))}</div></div>
@@ -976,13 +990,24 @@ ComprasControleApp.pintarTitulo = function () {
           ${pago ? `<div><span>Pagamento</span><div>${this.esc(this.fmtDate(row.dataPagamento))}</div></div>` : ""}
           ${row.conta || row.operacao || row.tipoBaixa ? `<div><span>Conta / operação</span><div>${this.esc([row.tipoBaixa, row.operacao, row.conta].filter(Boolean).join(" · "))}</div></div>` : ""}
         </div>
-        ${obs ? `<p class="cfin-titulo-obs"><strong>Observação:</strong> ${this.esc(obs)}</p>` : ""}
-        ${row.rateioHtml || ""}
-        <h4>Forma de pagamento programada</h4>
-        <div class="cfin-titulo-box">${det.loading ? "" : forma}</div>
-        ${fiscalHtml && !det.loading ? `<h4>Impostos retidos, nota fiscal e CNAE do prestador</h4><div class="cfin-titulo-box nfchk">${fiscalHtml}</div>` : ""}
-        <h4>Anexos</h4>
-        <div class="cfin-titulo-files">${anexos || `<span>Este título não tem anexo.</span>`}</div>
+        ${obs ? `<p class="cfin-titulo-obs"><strong>Observação:</strong> ${this.esc(obs)}</p>` : ""}`;
+
+  el.innerHTML = `
+    <div class="cfin-titulo-back" onclick="if(event.target===this)ComprasControleApp.fecharTitulo()">
+      <div class="cfin-titulo-card${row.rateioHtml || fiscalHtml ? " is-largo" : ""}" onclick="event.stopPropagation()">
+        <div class="cfin-titulo-head">
+          <h3>Título ${this.esc(row.titulo)}${row.parcela ? " · parcela " + this.esc(row.parcela) : ""}</h3>
+          <button type="button" class="btn btn-cancel btn-sm" onclick="ComprasControleApp.fecharTitulo()">Fechar</button>
+        </div>
+        ${det.loading ? `<p class="cfin-titulo-wait">Abrindo título, anexos e forma de pagamento…</p>` : ""}
+        ${det.error ? `<p class="cfin-titulo-erro">${this.esc(det.error)}</p>` : ""}
+        ${bloco("file-text", "Dados do título", "", dados, "cfin-sec-dados")}
+        ${rateio ? bloco("pie-chart", "Rateio por centro de custo", rateioNivel, rateio) : ""}
+        ${det.loading ? "" : `<div class="cfin-sec-par">
+          ${bloco("credit-card", "Forma de pagamento programada", formaNivel, forma)}
+          ${bloco("paperclip", "Anexos", "", `<div class="cfin-titulo-files">${anexos || `<span>Este título não tem anexo.</span>`}</div>`)}
+        </div>
+        ${fiscalHtml ? bloco("receipt", "Impostos retidos, nota fiscal e CNAE do prestador", fiscalNivel, `<div class="nfchk">${fiscalHtml}</div>`) : ""}`}
       </div>
     </div>
     <style>
@@ -1000,11 +1025,30 @@ ComprasControleApp.pintarTitulo = function () {
       #cfin-titulo .cfin-titulo-grid span { display:block; color:#64748b; font-size:0.75rem; }
       #cfin-titulo .cfin-titulo-strong { font-weight:700; }
       #cfin-titulo .cfin-titulo-valor { font-weight:700; color:#c2410c; }
-      #cfin-titulo .cfin-titulo-obs { margin:12px 0 0; font-size:0.84rem; }
-      #cfin-titulo .cfin-titulo-box { background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px; font-size:0.86rem; }
-      #cfin-titulo .cfin-titulo-box p { margin:0 0 4px; }
+      #cfin-titulo .cfin-titulo-obs { margin:10px 0 0; padding-top:8px; border-top:1px dashed #e2e8f0; font-size:0.84rem; }
       #cfin-titulo .cfin-titulo-files { display:flex; flex-wrap:wrap; gap:8px; color:#64748b; font-size:0.84rem; }
+      #cfin-titulo .cfin-titulo-files .btn { display:inline-flex; align-items:center; gap:6px; }
+      #cfin-titulo .cfin-sec { border:1px solid #e2e8f0; border-radius:10px; margin-top:12px; overflow:hidden; background:#fff; }
+      #cfin-titulo .cfin-sec-h { display:flex; align-items:center; gap:8px; padding:8px 12px; background:#f1f5f9; border-bottom:1px solid #e2e8f0; color:#105436; font-weight:800; font-size:0.86rem; }
+      #cfin-titulo .cfin-sec-h svg { width:16px; height:16px; flex:none; }
+      #cfin-titulo .cfin-sec-h .bchk { margin-left:auto; }
+      #cfin-titulo .cfin-sec-b { padding:10px 14px 12px; font-size:0.86rem; }
+      #cfin-titulo .cfin-sec-b p { margin:0 0 4px; }
+      #cfin-titulo .cfin-sec-b .cfin-titulo-grid { margin-top:0; }
+      #cfin-titulo .cfin-sec-b .gp-rateio { margin-top:0; }
+      #cfin-titulo .cfin-sec.is-erro { border-color:#fecaca; }
+      #cfin-titulo .cfin-sec.is-erro .cfin-sec-h { background:#fef2f2; color:#b91c1c; border-bottom-color:#fecaca; }
+      #cfin-titulo .cfin-sec.is-aviso { border-color:#fed7aa; }
+      #cfin-titulo .cfin-sec.is-aviso .cfin-sec-h { background:#fff7ed; color:#c2410c; border-bottom-color:#fed7aa; }
+      #cfin-titulo .cfin-sec-par { display:grid; grid-template-columns:minmax(0, 1.7fr) minmax(0, 1fr); gap:12px; }
+      #cfin-titulo .cfin-sec-par > .cfin-sec { margin-top:12px; }
+      @media (max-width: 900px) { #cfin-titulo .cfin-sec-par { grid-template-columns:1fr; gap:0; } }
+      #cfin-titulo .cfin-titulo-destaque { background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:6px 10px; }
+      #cfin-titulo .cfin-titulo-destaque small { display:block; color:#64748b; font-size:0.72rem; }
+      #cfin-titulo .cfin-titulo-sit { grid-column:span 2; }
+      @media (max-width: 900px) { #cfin-titulo .cfin-titulo-sit { grid-column:auto; } }
     </style>`;
+  try { if (window.lucide) lucide.createIcons(); } catch (e) {}
 };
 
 ComprasControleApp.renderList = function () {
