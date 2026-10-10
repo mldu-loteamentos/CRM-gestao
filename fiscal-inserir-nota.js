@@ -44,6 +44,15 @@ window.InserirNotaApp = {
     this.render();
     if (!this.state.empresas.length) this.carregarEmpresas().then(() => { this.escolherEmpresa(); this.render(); });
     if (this.aba === "fila") this.carregarFila(true);
+    if (window.FilaNotasFiscais) FilaNotasFiscais.ouvir(this._aoMudar || (this._aoMudar = (lista) => this.aoMudarFila(lista)));
+  },
+
+  /** Fila mudou no Firebase (envio novo, devolução, lançamento): atualiza sem mexer no lançamento em andamento. */
+  aoMudarFila(lista) {
+    this.fila.itens = lista;
+    this.fila.carregada = true;
+    if (this.aba === "fila") this.render();
+    else this.pintarAbas();
   },
 
   async carregarEmpresas() {
@@ -1009,7 +1018,7 @@ window.InserirNotaApp = {
       return;
     }
     const z = this._zoom || 2.5;
-    const L = lente.offsetWidth || 240;
+    const L = lente.offsetWidth || 360;
     if (!lente.style.backgroundImage) lente.style.backgroundImage = `url("${img.src}")`;
     lente.style.display = "block";
     area.classList.add("is-ativa");
@@ -1196,7 +1205,7 @@ window.InserirNotaApp = {
         .inf-preview img { width: 100%; display: block; border: 1px solid #e2e8f0; border-radius: 8px; }
         .inf-lupa-area { position: relative; overflow: hidden; border-radius: 8px; cursor: zoom-in; }
         .inf-lupa-area.is-ativa { cursor: none; }
-        .inf-lupa { position: absolute; display: none; width: 240px; height: 240px; border-radius: 50%; border: 3px solid #105436; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.28); background-color: #fff; background-repeat: no-repeat; pointer-events: none; z-index: 5; }
+        .inf-lupa { position: absolute; display: none; width: 360px; height: 360px; border-radius: 50%; border: 3px solid #105436; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.28); background-color: #fff; background-repeat: no-repeat; pointer-events: none; z-index: 5; }
         .inf-lupa-dica { display: flex; align-items: center; gap: 6px; margin: 8px 0 0; color: #64748b; font-size: 0.76rem; }
         .inf-lupa-dica i { width: 14px; height: 14px; }
         .inf-resultado { border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; font-size: 0.85rem; }
@@ -1212,12 +1221,6 @@ window.InserirNotaApp = {
     if (!root) return;
     if (!this.state) this.state = this.novoEstado();
     const fila = !!window.FilaNotasFiscais;
-    const abertas = fila ? this.fila.itens.filter((x) => FilaNotasFiscais.aberta(x)).length : 0;
-    const item = this.state.item;
-    const tabs = [
-      { id: "fila", label: "Fila do fiscal", icon: "inbox", n: abertas },
-      { id: "lancar", label: item ? `Lançando pedido ${item.pedido}` : "Lançar nota", icon: "file-up" }
-    ];
     const aba = fila ? this.aba : "lancar";
     root.innerHTML = `
       <style>
@@ -1228,10 +1231,25 @@ window.InserirNotaApp = {
         .inf-item .inf-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
         .fnf-atrasado { color: #b91c1c; font-weight: 700; }
       </style>
-      ${fila ? `<div class="ml-tabs inf-tabs" role="tablist">
-        ${tabs.map((t) => `<button type="button" role="tab" aria-selected="${aba === t.id}" class="ml-tab ${aba === t.id ? "is-active" : ""}" onclick="InserirNotaApp.setAba('${t.id}')"><i data-lucide="${t.icon}"></i> ${this.esc(t.label)}${t.n ? ` <span class="ml-tab-count">${t.n}</span>` : ""}</button>`).join("")}
-      </div>` : ""}
+      ${fila ? `<div class="ml-tabs inf-tabs" id="inf-tabs" role="tablist">${this.abasHtml()}</div>` : ""}
       ${aba === "fila" ? this.filaHtml() : this.lancarHtml()}`;
+    if (window.lucide) lucide.createIcons();
+  },
+
+  abasHtml() {
+    const abertas = this.fila.itens.filter((x) => FilaNotasFiscais.aberta(x)).length;
+    const item = this.state.item;
+    const tabs = [
+      { id: "fila", label: "Fila do fiscal", icon: "inbox", n: abertas },
+      { id: "lancar", label: item ? `Lançando pedido ${item.pedido}` : "Lançar nota", icon: "file-up" }
+    ];
+    return tabs.map((t) => `<button type="button" role="tab" aria-selected="${this.aba === t.id}" class="ml-tab ${this.aba === t.id ? "is-active" : ""}" onclick="InserirNotaApp.setAba('${t.id}')"><i data-lucide="${t.icon}"></i> ${this.esc(t.label)}${t.n ? ` <span class="ml-tab-count">${t.n}</span>` : ""}</button>`).join("");
+  },
+
+  pintarAbas() {
+    const el = document.getElementById("inf-tabs");
+    if (!el) return;
+    el.innerHTML = this.abasHtml();
     if (window.lucide) lucide.createIcons();
   },
 

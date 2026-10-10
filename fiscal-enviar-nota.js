@@ -37,6 +37,24 @@ window.FilaNotasFiscais = {
     return snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
   },
 
+  /** Acompanha a fila em tempo real (um listener só, compartilhado entre Enviar nota e Inserir nota). */
+  ouvir(fn) {
+    this._ouvintes = this._ouvintes || [];
+    if (!this._ouvintes.includes(fn)) this._ouvintes.push(fn);
+    const copia = () => this._ultimo.map((x) => JSON.parse(JSON.stringify(x)));
+    if (this._unsub) { if (this._ultimo) fn(copia()); return; }
+    const fb = this.fb();
+    if (!fb || !fb.f.onSnapshot) return;
+    const { collection, query, orderBy, limit, onSnapshot } = fb.f;
+    this._unsub = onSnapshot(query(collection(fb.db, this.COL), orderBy("criadoEm", "desc"), limit(400)), (snap) => {
+      this._ultimo = snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+      this._ouvintes.forEach((cb) => { try { cb(copia()); } catch (e) { console.warn("[Fila notas]", e); } });
+    }, (e) => {
+      console.warn("[Fila notas] tempo real indisponível", e);
+      this._unsub = null;
+    });
+  },
+
   novoId() {
     return `NF${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
   },
@@ -127,7 +145,8 @@ window.FilaNotasFiscais = {
       .fnf-anexo { display: inline-flex; align-items: center; gap: 4px; margin: 0 6px 2px 0; color: #105436; font-weight: 600; text-decoration: none; font-size: 0.78rem; }
       .fnf-anexo:hover { text-decoration: underline; }
       .fnf-anexo i { width: 13px; height: 13px; }
-      .fnf-motivo { color: #b91c1c; }
+      .fnf-tab td small.fnf-motivo { color: #b91c1c; font-weight: 700; font-size: 0.78rem; }
+      .fnf-tab tr.fnf-devolvida td { background: #fef2f2; }
       .fnf-barra { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
       .fnf-barra select { height: 34px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0 10px; font-size: 0.84rem; background: #fff; }
       .fnf-vazio { color: #64748b; font-size: 0.85rem; padding: 18px 4px; text-align: center; }`;
@@ -143,6 +162,7 @@ window.EnviarNotaApp = {
       aba: ant.aba || "enviar",
       pedidoId: "", pedidoApi: "", pedidoNome: "", pedido: null, credor: null, cc: null, empresaCc: "", previsao: null,
       carregando: "", erro: "", abertas: [],
+      banco: { contas: [], pix: [], erro: "" },
       anexos: [], previewIdx: -1, preview: "", previewLendo: "",
       pag: { data: "", forma: "", detalhe: "" },
       numeroNota: "", valorNota: "", obs: "",
@@ -155,7 +175,18 @@ window.EnviarNotaApp = {
     if (!this.state) this.state = this.novoEstado();
     this.render();
     if (!this.empresas) this.carregarEmpresas();
-    if (this.state.aba === "minhas") this.carregarLista();
+    if (this.state.aba === "minhas") this.carregarLista(true);
+    FilaNotasFiscais.ouvir(this._aoMudar || (this._aoMudar = (lista) => this.aoMudarFila(lista)));
+  },
+
+  /** Fila mudou no Firebase (ex.: o fiscal devolveu ou lançou): atualiza a lista sem tirar o foco de quem está digitando. */
+  aoMudarFila(lista) {
+    const s = this.state;
+    if (!s) return;
+    s.lista = lista;
+    s.listaCarregada = true;
+    if (s.aba === "minhas") this.render();
+    else this.pintarAbas();
   },
 
   async carregarEmpresas() {
@@ -181,7 +212,7 @@ window.EnviarNotaApp = {
   setAba(aba) {
     this.state.aba = aba;
     this.render();
-    if (aba === "minhas") this.carregarLista();
+    if (aba === "minhas") this.carregarLista(true);
   },
 
   /* ---------- pedido ---------- */
@@ -190,7 +221,7 @@ window.EnviarNotaApp = {
     const digitado = String((document.getElementById("env-pedido") || {}).value || s.pedidoId || "").trim();
     const id = InserirNotaApp.idApi(digitado);
     if (!id) return;
-    Object.assign(s, { pedidoId: digitado, pedidoApi: id, pedidoNome: digitado, pedido: null, credor: null, cc: null, empresaCc: "", previsao: null, erro: "", abertas: [], feito: "" });
+    Object.assign(s, { pedidoId: digitado, pedidoApi: id, pedidoNome: digitado, pedido: null, credor: null, cc: null, empresaCc: "", previsao: null, erro: "", abertas: [], feito: "", banco: { contas: [], pix: [], erro: "" } });
     s.carregando = "Buscando o pedido no Sienge…";
     this.render();
     try {
@@ -199,12 +230,14 @@ window.EnviarNotaApp = {
       s.pedido = pedido;
       s.pedidoApi = String(pedido.id);
       s.pedidoNome = String(pedido.formattedPurchaseOrderId || digitado);
-      const [credor, cc, previsao, fila] = await Promise.all([
+      const [credor, cc, previsao, fila, banco] = await Promise.all([
         InserirNotaApp.get(`/creditors/${encodeURIComponent(pedido.supplierId)}`).catch(() => null),
         InserirNotaApp.centroDeCusto(pedido),
         InserirNotaApp.previsaoFinanceira(pedido).catch(() => null),
-        FilaNotasFiscais.listar().catch(() => [])
+        FilaNotasFiscais.listar().catch(() => []),
+        this.dadosBancarios(pedido.supplierId)
       ]);
+      s.banco = banco;
       s.credor = credor && typeof credor === "object"
         ? { id: String(pedido.supplierId), nome: credor.name || credor.tradeName || `Fornecedor ${pedido.supplierId}`, doc: InserirNotaApp.digits(credor.cnpj || credor.cpf) }
         : { id: String(pedido.supplierId), nome: `Fornecedor ${pedido.supplierId}`, doc: "" };
@@ -217,12 +250,65 @@ window.EnviarNotaApp = {
         const p = previsao.parcelas.find((x) => x.vencimento >= hoje) || previsao.parcelas[0];
         s.pag.data = p.vencimento;
       }
+      this.ajustarDestino();
     } catch (e) {
       const msg = String((e && e.message) || e || "");
       s.erro = /404|não encontrado/i.test(msg) ? `Pedido ${id} não encontrado no Sienge.`
         : (/403/.test(msg) ? "O usuário da API não tem permissão para consultar pedidos de compra." : `Não consegui buscar o pedido: ${msg}`);
     }
     s.carregando = "";
+    this.render();
+  },
+
+  /* ---------- dados bancários do credor (cadastro no Sienge) ---------- */
+  async dadosBancarios(credorId) {
+    const out = { contas: [], pix: [], erro: "" };
+    if (credorId == null || credorId === "") return out;
+    const id = encodeURIComponent(credorId);
+    const [contas, pix] = await Promise.all([
+      InserirNotaApp.get(`/creditors/${id}/bank-informations?limit=100`).catch((e) => { out.erro = String((e && e.message) || e); return null; }),
+      InserirNotaApp.get(`/creditors/${id}/pix-informations?limit=100`).catch((e) => { out.erro = out.erro || String((e && e.message) || e); return null; })
+    ]);
+    const padrao = (x) => ["S", "Y", "TRUE", "1"].includes(String(x && x.defaultFlag).toUpperCase());
+    out.contas = InserirNotaApp.lista(contas).filter((b) => b && (b.accountNumber || b.agency)).map((b) => ({
+      txt: this.contaTxt(b), padrao: padrao(b), favorecido: b.nameOfRecipient || "", doc: InserirNotaApp.digits(b.cpf || b.cnpj)
+    }));
+    out.pix = InserirNotaApp.lista(pix).filter((p) => p && (p.key || p.keyPix)).map((p) => ({
+      txt: `${String(p.type || p.keyPixType || "").trim().toUpperCase() || "Chave"}: ${String(p.key || p.keyPix).trim()}`, padrao: padrao(p)
+    }));
+    return out;
+  },
+
+  contaTxt(b) {
+    const tipo = { C: "Conta corrente", CHECKING: "Conta corrente", P: "Poupança", SAVING: "Poupança", SAVINGS: "Poupança" }[String(b.accountType || "").toUpperCase()] || "";
+    const banco = b.nameOfBank ? `${b.nameOfBank}${b.bank ? ` (${b.bank})` : ""}` : (b.bank ? `Banco ${b.bank}` : "");
+    const conta = `${b.accountNumber || ""}${b.checkDigit ? "-" + b.checkDigit : ""}`;
+    return [banco, b.agency ? `Ag. ${b.agency}` : "", conta ? `Conta ${conta}` : "", tipo].filter(Boolean).join(" · ");
+  },
+
+  /** Opções de destino do pagamento para a forma escolhida: chaves PIX ou contas do cadastro do credor. */
+  destinos(forma) {
+    const b = this.state.banco;
+    if (forma === "PIX") return b.pix;
+    if (forma === "Transferência (TED)" || forma === "Débito em conta") return b.contas;
+    return null;
+  },
+
+  /** Mantém o destino só se ele existir no cadastro do credor; senão usa o padrão do Sienge (ou o único cadastrado). */
+  ajustarDestino() {
+    const pag = this.state.pag;
+    const ops = this.destinos(pag.forma);
+    if (!ops) return;
+    if (ops.some((o) => o.txt === pag.detalhe)) return;
+    const pad = ops.find((o) => o.padrao) || (ops.length === 1 ? ops[0] : null);
+    pag.detalhe = pad ? pad.txt : "";
+  },
+
+  setForma(forma) {
+    const pag = this.state.pag;
+    if (pag.forma !== forma) pag.detalhe = "";
+    pag.forma = forma;
+    this.ajustarDestino();
     this.render();
   },
 
@@ -317,7 +403,13 @@ window.EnviarNotaApp = {
     else if (pag.data < this.hojeIso()) avisos.push(`A data de pagamento (${this.dataBr(pag.data)}) já passou.`);
     if (!pag.forma) erros.push("Escolha a forma de pagamento.");
     if (pag.forma === "Boleto" && !s.anexos.some((a) => a.tipo === "boleto")) avisos.push("Forma de pagamento boleto sem boleto anexado: anexe o boleto se ele não estiver no mesmo arquivo da nota.");
-    if (pag.forma === "PIX" && !pag.detalhe) avisos.push("Informe a chave PIX se ela não for a do cadastro do fornecedor.");
+    const ops = this.destinos(pag.forma);
+    if (ops) {
+      const oque = pag.forma === "PIX" ? "chave PIX" : "conta bancária";
+      if (!ops.length) erros.push(`O credor não tem ${oque} cadastrada no Sienge${s.banco.erro ? ` (não consegui consultar: ${s.banco.erro})` : ""}. Cadastre no credor ou escolha outra forma de pagamento.`);
+      else if (!pag.detalhe) erros.push(`Escolha a ${oque} do cadastro do credor.`);
+      else oks.push(`${pag.forma === "PIX" ? "Chave PIX" : "Conta"} do cadastro do credor: ${pag.detalhe}.`);
+    }
 
     const prev = s.previsao;
     if (prev && prev.parcelas.length && pag.data && !prev.parcelas.some((x) => x.vencimento === pag.data)) {
@@ -494,11 +586,22 @@ window.EnviarNotaApp = {
     const formas = FilaNotasFiscais.FORMAS;
     const prev = s.previsao;
     const sug = prev && prev.parcelas.length ? `Previsão financeira do pedido: ${prev.parcelas.map((x) => `${this.dataBr(x.vencimento)} · ${this.money(x.valor)}`).join(" | ")}` : "";
-    const rotDet = pag.forma === "Boleto" ? "Linha digitável (opcional)" : (pag.forma === "PIX" ? "Chave PIX" : (/TED|Débito/.test(pag.forma) ? "Banco / agência / conta" : "Detalhe do pagamento"));
+    const ops = this.destinos(pag.forma);
+    let destino;
+    if (ops) {
+      const rot = pag.forma === "PIX" ? "Chave PIX do credor (cadastro no Sienge)" : "Conta do credor (cadastro no Sienge)";
+      destino = !s.pedido ? `<input disabled placeholder="Busque o pedido para trazer o cadastro do credor">`
+        : (ops.length ? `<select onchange="EnviarNotaApp.setPag('detalhe', this.value)"><option value="">Escolha…</option>${ops.map((o) => `<option value="${this.esc(o.txt)}" ${pag.detalhe === o.txt ? "selected" : ""}>${this.esc(o.txt)}${o.padrao ? " (padrão)" : ""}</option>`).join("")}</select>`
+          : `<input disabled class="env-sem-cad" value="Nenhuma ${pag.forma === "PIX" ? "chave PIX" : "conta"} cadastrada no credor">`);
+      destino = `<label>${rot}</label>${destino}`;
+    } else {
+      const rot = pag.forma === "Boleto" ? "Linha digitável (opcional)" : "Detalhe do pagamento";
+      destino = `<label>${rot}</label><input value="${this.esc(pag.detalhe)}" oninput="EnviarNotaApp.setPag('detalhe', this.value)">`;
+    }
     return `<div class="inf-form">
         <div><label>Data de pagamento</label><input type="date" value="${this.esc(pag.data)}" onchange="EnviarNotaApp.setPag('data', this.value)"></div>
-        <div><label>Forma de pagamento</label><select onchange="EnviarNotaApp.setPag('forma', this.value); EnviarNotaApp.render();"><option value="">Escolha…</option>${formas.map((f) => `<option ${pag.forma === f ? "selected" : ""}>${this.esc(f)}</option>`).join("")}</select></div>
-        <div class="inf-span2"><label>${this.esc(rotDet)}</label><input value="${this.esc(pag.detalhe)}" oninput="EnviarNotaApp.setPag('detalhe', this.value)"></div>
+        <div><label>Forma de pagamento</label><select onchange="EnviarNotaApp.setForma(this.value)"><option value="">Escolha…</option>${formas.map((f) => `<option ${pag.forma === f ? "selected" : ""}>${this.esc(f)}</option>`).join("")}</select></div>
+        <div class="inf-span2">${destino}</div>
         <div><label>Nº da nota (opcional)</label><input value="${this.esc(s.numeroNota)}" oninput="EnviarNotaApp.setCampo('numeroNota', this.value)"></div>
         <div><label>Valor da nota (opcional)</label><input value="${this.esc(s.valorNota)}" placeholder="0,00" onchange="EnviarNotaApp.setCampo('valorNota', this.value)"></div>
         <div class="inf-span2"><label>Observação para o fiscal</label><input value="${this.esc(s.obs)}" oninput="EnviarNotaApp.setCampo('obs', this.value)"></div>
@@ -514,6 +617,7 @@ window.EnviarNotaApp = {
     return `<div class="inf-wrap">
         <div>
           ${s.feito ? `<div class="inf-resultado is-ok"><b>${this.esc(s.feito)}</b></div>` : ""}
+          ${this.devolvidasHtml()}
           ${s.editandoId ? `<div class="inf-resultado is-erro"><b>Corrigindo envio devolvido pelo fiscal</b><p>Ajuste o que foi pedido e clique em <b>Reenviar ao fiscal</b>.</p></div>` : ""}
           <div class="inf-card">
             <h3><i data-lucide="clipboard-list"></i> Pedido de compra</h3>
@@ -556,6 +660,17 @@ window.EnviarNotaApp = {
       </div>`;
   },
 
+  devolvidasHtml() {
+    const s = this.state;
+    if (s.editandoId) return "";
+    const u = FilaNotasFiscais.usuario();
+    const dev = s.lista.filter((x) => x.status === "devolvida" && x.criadoPorEmail === u.email);
+    if (!dev.length) return "";
+    return `<div class="inf-resultado is-erro"><b>${dev.length === 1 ? "1 nota devolvida" : `${dev.length} notas devolvidas`} pelo fiscal para corrigir</b>
+      <ul>${dev.slice(0, 5).map((x) => `<li>Pedido ${this.esc(x.pedido)}: ${this.esc(x.motivoDevolucao || "sem motivo")}</li>`).join("")}</ul>
+      <p><a href="javascript:void(0)" onclick="EnviarNotaApp.setAba('minhas')">Ver em Minhas notas enviadas</a></p></div>`;
+  },
+
   limpar() {
     const aba = this.state.aba;
     this.state = this.novoEstado();
@@ -572,7 +687,7 @@ window.EnviarNotaApp = {
       : (s.listaErro ? `<p class="inf-erro">${esc(s.listaErro)}</p>`
         : (!lista.length ? `<p class="fnf-vazio">Nenhuma nota enviada${s.todos ? "" : " por você"}.</p>`
           : `<table class="fnf-tab"><thead><tr><th>Enviada em</th><th>Pedido</th><th>Fornecedor</th><th>Pagamento</th><th>Anexos</th><th>Situação</th><th></th></tr></thead><tbody>
-            ${lista.map((x) => `<tr>
+            ${lista.map((x) => `<tr class="${x.status === "devolvida" ? "fnf-devolvida" : ""}">
               <td>${new Date(x.criadoEm).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}<small>${esc(x.criadoPor || "")}</small></td>
               <td><b>${esc(x.pedido)}</b>${x.numeroNota ? `<small>NF ${esc(x.numeroNota)}</small>` : ""}</td>
               <td>${esc(x.fornecedor ? x.fornecedor.nome : "")}${x.valorNota != null ? `<small>${this.money(x.valorNota)}</small>` : ""}</td>
@@ -593,16 +708,28 @@ window.EnviarNotaApp = {
       </div>`;
   },
 
-  render() {
-    const root = document.getElementById("enviar-nota-root");
-    if (!root) return;
-    const s = this.state || (this.state = this.novoEstado());
+  abasHtml() {
+    const s = this.state;
     const u = FilaNotasFiscais.usuario();
     const devolvidas = s.lista.filter((x) => x.status === "devolvida" && x.criadoPorEmail === u.email).length;
     const tabs = [
       { id: "enviar", label: s.editandoId ? "Corrigir envio" : "Enviar nota", icon: "send" },
-      { id: "minhas", label: "Minhas notas enviadas", icon: "list-checks", n: devolvidas }
+      { id: "minhas", label: "Minhas notas enviadas", icon: "list-checks", n: devolvidas, titulo: devolvidas ? `${devolvidas} nota(s) devolvida(s) pelo fiscal para corrigir` : "" }
     ];
+    return tabs.map((t) => `<button type="button" role="tab" aria-selected="${s.aba === t.id}" class="ml-tab ${s.aba === t.id ? "is-active" : ""}" ${t.titulo ? `title="${this.esc(t.titulo)}"` : ""} onclick="EnviarNotaApp.setAba('${t.id}')"><i data-lucide="${t.icon}"></i> ${t.label}${t.n ? ` <span class="ml-tab-count env-tab-alerta">${t.n}</span>` : ""}</button>`).join("");
+  },
+
+  pintarAbas() {
+    const el = document.getElementById("env-tabs");
+    if (!el) return;
+    el.innerHTML = this.abasHtml();
+    if (window.lucide) lucide.createIcons();
+  },
+
+  render() {
+    const root = document.getElementById("enviar-nota-root");
+    if (!root) return;
+    const s = this.state || (this.state = this.novoEstado());
     root.innerHTML = `
       <style>
         ${InserirNotaApp.css()}
@@ -619,10 +746,10 @@ window.EnviarNotaApp = {
         .env-x { background: none; border: 0; cursor: pointer; color: #94a3b8; display: inline-flex; padding: 2px; }
         .env-x:hover { color: #b91c1c; }
         .env-x i { width: 16px; height: 16px; }
+        .ml-tab .env-tab-alerta, .ml-tab.is-active .env-tab-alerta { background: #fee2e2; color: #b91c1c; }
+        .env-sem-cad { color: #b91c1c !important; background: #fef2f2 !important; }
       </style>
-      <div class="ml-tabs env-tabs" role="tablist">
-        ${tabs.map((t) => `<button type="button" role="tab" aria-selected="${s.aba === t.id}" class="ml-tab ${s.aba === t.id ? "is-active" : ""}" onclick="EnviarNotaApp.setAba('${t.id}')"><i data-lucide="${t.icon}"></i> ${t.label}${t.n ? ` <span class="ml-tab-count">${t.n}</span>` : ""}</button>`).join("")}
-      </div>
+      <div class="ml-tabs env-tabs" id="env-tabs" role="tablist">${this.abasHtml()}</div>
       ${s.aba === "minhas" ? this.minhasHtml() : this.enviarHtml()}`;
     if (window.lucide) lucide.createIcons();
   }
