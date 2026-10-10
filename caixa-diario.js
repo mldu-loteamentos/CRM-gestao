@@ -216,6 +216,7 @@ const FluxoCaixaDiarioApp = {
   accounts: [],
   openingDate: "",
   recItems: [],
+  outras: [],
   movs: [],
   payItems: [],
   progress: "",
@@ -502,6 +503,28 @@ const FluxoCaixaDiarioApp = {
     return sienge || "corrente";
   },
 
+  /** Conta do movimento: investimento ou conta corrente. Sem conta identificada, o previsto cai na corrente. */
+  ladoConta(companyId, number) {
+    if (!number) return "corrente";
+    const key = this.accountKey({ companyId: companyId || "", number });
+    const acc = (this.accounts || []).find((a) => this.accountKey(a) === key);
+    if (acc && acc.tipo === "investimento") return "investimento";
+    const types = (this._types && this._types[String(companyId || "")]) || {};
+    return this.accountTipo(types, number, (acc && acc.name) || "") === "investimento" ? "investimento" : "corrente";
+  },
+
+  saldoPorTipo() {
+    let corrente = 0;
+    let investimento = 0;
+    (this.accounts || []).forEach((a) => {
+      if (!this.accountIncluded(a)) return;
+      const v = this.saldoBase(a);
+      if (a.tipo === "investimento") investimento += v;
+      else corrente += v;
+    });
+    return { corrente, investimento, total: corrente + investimento };
+  },
+
   bankInfo(companyId, number) {
     const cad = window.RelacionamentoApp && typeof RelacionamentoApp._contaCadastrada === "function"
       ? RelacionamentoApp._contaCadastrada(number, companyId) : null;
@@ -537,6 +560,7 @@ const FluxoCaixaDiarioApp = {
     this.days = [];
     this.accounts = [];
     this.recItems = [];
+    this.outras = [];
     this.movs = [];
     this.payItems = [];
     this.openingDate = "";
@@ -565,6 +589,8 @@ const FluxoCaixaDiarioApp = {
       if (this._gen !== gen) return;
       if (b.end >= hoje) await this.loadPayables(gen, b, hoje);
       if (this._gen !== gen) return;
+      if (b.end >= hoje) await this.loadOutrasEntradas(gen, b, hoje);
+      if (this._gen !== gen) return;
       this.progress = "";
       this.render();
     } catch (e) {
@@ -583,13 +609,18 @@ const FluxoCaixaDiarioApp = {
       const companyId = this._ccCompany[String(u.enterpriseId || "")] || "";
       if (!this.companyWanted(companyId)) return;
       const pmp = Number(u.pmp3m) || 0;
+      const horizonte = b.end > caixaAddDays(hoje, 35) ? b.end : caixaAddDays(hoje, 35);
       (Array.isArray(u.openParcelas) ? u.openParcelas : []).forEach((p) => {
-        if (!p || !p.due || p.overdue) return;
+        if (!p || !p.due) return;
+        // Ainda cabe no caixa enquanto o próximo dia útil do vencimento não passou.
+        const vencEfetivo = caixaDiaUtil(p.due, 1);
+        if (vencEfetivo < hoje) return;
         const bruto = caixaAddDays(p.due, pmp);
-        const prev = caixaDiaUtil(bruto);
-        if (prev < b.start || prev > b.end || prev < hoje) return;
+        const prev = caixaDiaUtil(bruto, 1);
+        if (prev < b.start || prev > horizonte || prev < hoje) return;
         out.push({
           date: prev,
+          vencEfetivo,
           deslocadoDe: prev !== bruto ? bruto : "",
           valor: Number(p.val) || 0,
           unidade: u.name || "",
@@ -794,9 +825,11 @@ const FluxoCaixaDiarioApp = {
       return;
     }
     const inicio = hoje > b.start ? hoje : b.start;
+    const horizonte = b.end > caixaAddDays(hoje, 35) ? b.end : caixaAddDays(hoje, 35);
     // Títulos de fim de semana/feriado nas bordas do período podem entrar nele ao irem para o dia útil.
+    // A folga de 35 dias serve para saber se o dinheiro da conta corrente zera o IOF do CDB.
     const buscaIni = caixaAddDays(inicio, -4);
-    const buscaFim = caixaAddDays(b.end, 4);
+    const buscaFim = caixaAddDays(horizonte, 4);
     const prevNote = app.noteProgress;
     app.noteProgress = (text) => {
       this.progress = text;
@@ -834,7 +867,7 @@ const FluxoCaixaDiarioApp = {
       let pagamento = caixaDiaUtil(due, this.pagaAntes(r) ? -1 : 1);
       // Antecipado para um dia que já passou, mas ainda em aberto: entra no primeiro dia do período.
       if (pagamento < inicio && due >= inicio) pagamento = inicio;
-      if (pagamento < inicio || pagamento > b.end) return;
+      if (pagamento < inicio || pagamento > horizonte) return;
       if (!this.companyWanted(r.companyId)) return;
       const key = r.titulo + "|" + (r.parcela || "") + "|" + due;
       if (seen[key]) return;
@@ -871,6 +904,95 @@ const FluxoCaixaDiarioApp = {
     this.render();
   },
 
+  /** Recebimentos que não são contrato de venda (CT): distribuição, taxa, aluguel e demais previsões em aberto. */
+  async loadOutrasEntradas(gen, b, hoje) {
+    if (typeof window.siengeFetchWithRetry !== "function") return;
+    const inicio = hoje > b.start ? hoje : b.start;
+    const horizonte = b.end > caixaAddDays(hoje, 35) ? b.end : caixaAddDays(hoje, 35);
+    const buscaIni = caixaAddDays(inicio, -4);
+    const buscaFim = caixaAddDays(horizonte, 4);
+    const fora = { CT: 1, PFIN: 1, TC: 1, CIPT: 1, CREG: 1, IPTU: 1 };
+    const meio = (s, e) => {
+      const dias = Math.round((new Date(e + "T12:00:00") - new Date(s + "T12:00:00")) / 86400000);
+      return dias > 1 ? caixaAddDays(s, Math.floor(dias / 2)) : s;
+    };
+    const path = (s, e, companyId) => "/bulk-data/v1/income?startDate=" + encodeURIComponent(s)
+      + "&endDate=" + encodeURIComponent(e)
+      + "&selectionType=D&correctionIndexerId=0&correctionDate=2022-01-01"
+      + (companyId ? "&companyId=" + encodeURIComponent(companyId) : "");
+    const get = async (s, e, companyId, depth) => {
+      try {
+        const payload = await window.siengeFetchWithRetry(path(s, e, companyId), 2);
+        return (payload && payload.data) || (Array.isArray(payload) ? payload : []);
+      } catch (err) {
+        if (Number(err && err.status) !== 507 || depth > 6) throw err;
+        const m = meio(s, e);
+        if (!m || m <= s || m >= e) throw err;
+        const left = await get(s, m, companyId, depth + 1);
+        const right = await get(caixaAddDays(m, 1), e, companyId, depth + 1);
+        return left.concat(right);
+      }
+    };
+    this.progress = "Lendo outras entradas previstas…";
+    this.paintProgress();
+    const alvos = this.companyIds.length ? this.companyIds.slice() : [""];
+    const rows = [];
+    try {
+      for (let i = 0; i < alvos.length; i++) {
+        if (this._gen !== gen) return;
+        const part = await get(buscaIni, buscaFim, alvos[i], 0);
+        if (Array.isArray(part)) rows.push.apply(rows, part);
+      }
+    } catch (e) {
+      console.warn("[Caixa diário] outras entradas", e);
+      this.error = this.error || ("Não consegui ler as outras entradas previstas: " + ((e && e.message) || e));
+    }
+    if (this._gen !== gen) return;
+    const seen = {};
+    const out = [];
+    rows.forEach((r) => {
+      if (!r) return;
+      const doc = String(r.documentIdentificationId || "").trim().toUpperCase();
+      if (fora[doc]) return;
+      const numero = String(r.documentNumber || "");
+      const numUp = numero.toUpperCase();
+      if (numUp.indexOf("G1") >= 0 || numUp.indexOf("G2") >= 0 || numUp.indexOf("G3") >= 0) return;
+      const recs = Array.isArray(r.receipts) ? r.receipts : [];
+      if (recs.some((x) => x && x.operationTypeName)) return;
+      const due = String(r.dueDate || "").slice(0, 10);
+      if (!due) return;
+      const prev = caixaDiaUtil(due, 1);
+      if (prev < inicio || prev > horizonte) return;
+      const companyId = r.companyId != null ? String(r.companyId) : "";
+      if (companyId && !this.companyWanted(companyId)) return;
+      const valor = Number(r.originalAmount) || 0;
+      if (!(valor > 0.009)) return;
+      const titulo = r.billId != null ? String(r.billId) : "";
+      const parcela = r.installmentId != null ? String(r.installmentId) : "";
+      const key = titulo + "|" + parcela + "|" + due;
+      if (seen[key]) return;
+      seen[key] = true;
+      out.push({
+        outra: true,
+        date: prev,
+        deslocadoDe: prev !== due ? due : "",
+        valor,
+        cliente: r.clientName || "",
+        companyId,
+        empresa: r.companyName || "",
+        titulo,
+        parcela,
+        docId: doc,
+        documento: numero,
+        vencimento: due,
+        billId: titulo
+      });
+    });
+    this.outras = out;
+    this.rebuild();
+    this.render();
+  },
+
   /** Dias anteriores: extrato das contas ligadas. Hoje em diante: previsões. */
   rebuild() {
     const hoje = this.hoje();
@@ -883,14 +1005,29 @@ const FluxoCaixaDiarioApp = {
     const byDay = {};
     for (let d = 1; d <= b.last; d++) {
       const iso = `${this.month}-${String(d).padStart(2, "0")}`;
-      const day = { date: iso, real: iso < hoje, entrar: 0, pagar: 0, itens: [], pagarItens: [] };
+      const day = { date: iso, real: iso < hoje, entrar: 0, pagar: 0, entrarCc: 0, sairCc: 0, entrarInv: 0, sairInv: 0, itens: [], pagarItens: [] };
       days.push(day);
       byDay[iso] = day;
     }
+    const lanca = (day, valor, inv, saida) => {
+      if (saida) {
+        if (inv) day.sairInv += valor;
+        else day.sairCc += valor;
+      } else if (inv) day.entrarInv += valor;
+      else day.entrarCc += valor;
+    };
     this.recItems.forEach((it) => {
       const day = byDay[it.date];
       if (!day || day.real || excl.has(String(it.cc))) return;
       day.entrar += it.valor;
+      lanca(day, it.valor, false, false);
+      day.itens.push(it);
+    });
+    (this.outras || []).forEach((it) => {
+      const day = byDay[it.date];
+      if (!day || day.real) return;
+      day.entrar += it.valor;
+      lanca(day, it.valor, false, false);
       day.itens.push(it);
     });
     this.movs.forEach((m) => {
@@ -905,16 +1042,19 @@ const FluxoCaixaDiarioApp = {
       const fora = m.shares.reduce((s, x) => s + (excl.has(x.cc) ? x.share : 0), 0);
       const v = m.valor * (1 - fora);
       if (Math.abs(v) < 0.005) return;
+      const inv = this.ladoConta(m.companyId, m.conta) === "investimento";
       if (v > 0) {
         day.entrar += v;
-        day.itens.push(Object.assign({}, m, { real: true, valor: v }));
+        lanca(day, v, inv, false);
+        day.itens.push(Object.assign({}, m, { real: true, valor: v, tipoConta: inv ? "investimento" : "corrente" }));
       } else {
         day.pagar += -v;
+        lanca(day, -v, inv, true);
         day.pagarItens.push({
           key: m.id, real: true, natureza: "pago", date: m.date, valor: -v,
           titulo: m.billId, parcela: m.parcela, credor: m.party, documento: m.doc, historico: m.historico,
           conta: m.conta, companyId: m.companyId, plano: m.plano, planos: m.planos, ccNome: m.ccNome,
-          origem: m.origem, conciliado: m.conciliado, movId: m.movId
+          origem: m.origem, conciliado: m.conciliado, movId: m.movId, tipoConta: inv ? "investimento" : "corrente"
         });
       }
     });
@@ -924,8 +1064,11 @@ const FluxoCaixaDiarioApp = {
       const fora = (p.shares || []).reduce((s, x) => s + (excl.has(x.cc) ? x.share : 0), 0);
       const v = p.valor * (1 - fora);
       if (v < 0.005) return;
+      const inv = this.ladoConta(p.companyId, p.conta) === "investimento";
       day.pagar += v;
-      day.pagarItens.push(fora > 0 ? Object.assign({}, p, { valor: v }) : p);
+      lanca(day, v, inv, true);
+      const item = fora > 0 ? Object.assign({}, p, { valor: v }) : p;
+      day.pagarItens.push(Object.assign({}, item, { tipoConta: inv ? "investimento" : "corrente" }));
     });
     this.days = days;
     this.totals.entrar = days.reduce((s, x) => s + x.entrar, 0);
@@ -1152,6 +1295,41 @@ const FluxoCaixaDiarioApp = {
     return `<span class="cxd-conta-tag">C/C ${caixaEsc(conta)}${bank.bancoLabel ? " · " + caixaEsc(bank.bancoLabel) : ""}</span>`;
   },
 
+  contaLabel(it) {
+    if (it && it.conta) {
+      const bank = this.bankInfo(it.companyId, it.conta);
+      const key = this.accountKey({ companyId: it.companyId || "", number: it.conta });
+      const acc = (this.accounts || []).find((a) => this.accountKey(a) === key);
+      const nome = acc && acc.name && this.normNum(acc.name) !== this.normNum(it.conta) ? acc.name : "";
+      const tipo = (it.tipoConta || this.ladoConta(it.companyId, it.conta)) === "investimento" ? "Investimento" : "Conta corrente";
+      return [tipo, it.conta, nome, bank.bancoLabel].filter(Boolean).join(" · ");
+    }
+    return (it && it.tipoConta) === "investimento" ? "Investimento" : "Conta corrente";
+  },
+
+  /** Como o PMP deslocou a previsão: média de 3 meses e o próximo dia útil do vencimento. */
+  pmpTitle(it) {
+    if (!it || it.real || it.outra) return "";
+    const pmp = Number(it.pmp) || 0;
+    const habito = pmp > 0
+      ? `paga em média ${pmp} dia(s) depois do vencimento`
+      : (pmp < 0 ? `paga em média ${Math.abs(pmp)} dia(s) antes do vencimento` : "paga em média no próprio vencimento");
+    const partes = [
+      `PMP ${pmp}d: nos últimos 3 meses, cada recebimento entra com os dias entre o pagamento e o vencimento da parcela. A média arredondada desses dias é o PMP. Este cliente ${habito}.`
+    ];
+    if (it.vencimento && !caixaEhUtil(it.vencimento)) {
+      partes.push(`O vencimento ${caixaFmtDate(it.vencimento)} cai em sábado, domingo ou feriado. O cliente paga no próximo dia útil, ${caixaFmtDate(it.vencEfetivo || caixaDiaUtil(it.vencimento, 1))}.`);
+    } else if (it.vencimento) {
+      partes.push(`Vencimento ${caixaFmtDate(it.vencimento)}.`);
+    }
+    if (it.deslocadoDe && it.deslocadoDe !== it.date) {
+      partes.push(`Somando o PMP, a data caía em ${caixaFmtDate(it.deslocadoDe)} e passou para ${caixaFmtDate(it.date)}.`);
+    } else {
+      partes.push(`A previsão de caixa fica em ${caixaFmtDate(it.date)}.`);
+    }
+    return partes.join(" ");
+  },
+
   contasHtml() {
     const grupos = this.contasComSaldo();
     if (!grupos.length) {
@@ -1217,6 +1395,7 @@ const FluxoCaixaDiarioApp = {
   },
 
   origemHtml(it, lado) {
+    if (it && it.outra) return `<span class="cxd-org cxd-org-outra" title="Recebimento previsto que não é contrato de venda">Outras entradas previstas</span>`;
     if (!it.real) return `<span class="cxd-org cxd-org-prev">${lado === "in" ? "Contas a receber" : "Contas a pagar"} · previsto</span>`;
     const o = it.origem || { tipo: "outro", rotulo: "—" };
     const dica = o.tipo === "cb"
@@ -1250,16 +1429,89 @@ const FluxoCaixaDiarioApp = {
     return { manuais, semConc, valorSemConc };
   },
 
+  /** Movimento previsto de conta corrente num dia que já passou do mês desenhado (janela do IOF). */
+  netPrevistoCc(date) {
+    const excl = this.excludedCcs();
+    let net = 0;
+    (this.recItems || []).forEach((it) => {
+      if (it.date === date && !excl.has(String(it.cc))) net += Number(it.valor) || 0;
+    });
+    (this.outras || []).forEach((it) => {
+      if (it.date === date) net += Number(it.valor) || 0;
+    });
+    (this.payItems || []).forEach((p) => {
+      if (p.date !== date) return;
+      const fora = (p.shares || []).reduce((s, x) => s + (excl.has(x.cc) ? x.share : 0), 0);
+      net -= (Number(p.valor) || 0) * (1 - fora);
+    });
+    return net;
+  },
+
+  /**
+   * Folga da conta corrente nos próximos 30 dias.
+   * IOF de CDB zera aos 30 dias: o que cabe inteiro nessa janela vai para CDB;
+   * o que volta antes disso cabe na compromissada.
+   */
+  aplicacaoHtml(linhas) {
+    const hoje = this.hoje();
+    const fut = (linhas || []).filter((l) => l.d.date >= hoje);
+    if (!fut.length) return "";
+    const by = {};
+    fut.forEach((l) => { by[l.d.date] = l; });
+    const serie = [];
+    let saldo = fut[0].acumCc;
+    serie.push({ date: fut[0].d.date, cc: saldo });
+    for (let i = 1; i < 30; i++) {
+      const date = caixaAddDays(fut[0].d.date, i);
+      const line = by[date];
+      saldo = line ? line.acumCc : saldo + this.netPrevistoCc(date);
+      serie.push({ date, cc: saldo });
+    }
+    const hojeCc = serie[0].cc;
+    const min30 = serie.reduce((m, s) => Math.min(m, s.cc), hojeCc);
+    let cdb = 0;
+    let comp = 0;
+    if (min30 > 0.5) {
+      cdb = min30;
+      if (hojeCc - min30 > 0.5) comp = hojeCc - min30;
+    } else if (hojeCc > 0.5) {
+      let piso = hojeCc;
+      for (let i = 0; i < serie.length; i++) {
+        if (serie[i].cc <= 0.5) break;
+        piso = Math.min(piso, serie[i].cc);
+      }
+      comp = piso;
+    }
+    const resgates = fut.filter((l) => l.acumCc < -0.5 && l.acumInv > 0.5);
+    const msgs = [];
+    if (cdb > 0.5) {
+      msgs.push(`<p class="cxd-aplica-cdb">Há ${caixaMoney(cdb)} para aplicar em CDB. Esse valor segue na conta corrente pelos próximos 30 dias, prazo em que o IOF zera.</p>`);
+    }
+    if (comp > 0.5) {
+      msgs.push(`<p class="cxd-aplica-comp">${caixaMoney(comp)} pode ser aplicado na compromissada. Essa folga é usada de novo antes de completar 30 dias, então não zera o IOF do CDB.</p>`);
+    }
+    if (resgates.length) {
+      const dias = resgates.slice(0, 6).map((l) => `${caixaFmtDate(l.d.date).slice(0, 5)} (${caixaMoney(l.acumCc)})`).join(", ");
+      msgs.push(`<p class="cxd-aplica-resgate">Em ${resgates.length} dia(s) a conta corrente fica negativa e há saldo na aplicação: resgatar. ${caixaEsc(dias)}${resgates.length > 6 ? "…" : ""}</p>`);
+    }
+    return msgs.length ? `<div class="cxd-aplica">${msgs.join("")}</div>` : "";
+  },
+
   diaDetalheHtml(aberto) {
     const d = aberto.d;
     const entradas = (d.itens || []).map((it, i) => {
-      const clicavel = !!((it.customerId || it.clientId) && it.billId);
+      const clicavel = !it.outra && !!((it.customerId || it.clientId) && it.billId);
+      const pmpDica = this.pmpTitle(it);
       const desc = it.real
-        ? `${caixaEsc(it.party || it.historico || "Crédito em conta")}${it.billId ? " · tít. " + caixaEsc(it.billId) + (it.parcela ? "/" + caixaEsc(it.parcela) : "") : ""}${it.party && it.historico ? " · " + caixaEsc(it.historico) : ""}${it.conta ? this.contaTag(it.companyId, it.conta) : ""}`
-        : `${caixaEsc(it.cc)} / ${caixaEsc(it.unidade)} · ${caixaEsc(it.cliente || "—")}${it.cpf ? " · CPF " + caixaEsc(it.cpf) : ""} · venc. ${caixaFmtDate(it.vencimento)} + PMP ${it.pmp}d${it.deslocadoDe ? ` · caía em ${caixaFmtDate(it.deslocadoDe)}, passou para o próximo dia útil` : ""}`;
+        ? `${caixaEsc(it.party || it.historico || "Crédito em conta")}${it.billId ? " · tít. " + caixaEsc(it.billId) + (it.parcela ? "/" + caixaEsc(it.parcela) : "") : ""}${it.party && it.historico ? " · " + caixaEsc(it.historico) : ""}`
+        : (it.outra
+          ? `${caixaEsc(it.cliente || "—")}${it.empresa ? " · " + caixaEsc(it.empresa) : ""} · tít. ${caixaEsc(it.titulo || "—")}${it.parcela ? "/" + caixaEsc(it.parcela) : ""}${it.docId || it.documento ? " · " + caixaEsc([it.docId, it.documento].filter(Boolean).join(" ")) : ""} · venc. ${caixaFmtDate(it.vencimento)}${it.deslocadoDe ? ` · caía em ${caixaFmtDate(it.deslocadoDe)}, passou para o próximo dia útil` : ""}`
+          : `${caixaEsc(it.cc)} / ${caixaEsc(it.unidade)} · ${caixaEsc(it.cliente || "—")}${it.cpf ? " · CPF " + caixaEsc(it.cpf) : ""} · venc. ${caixaFmtDate(it.vencimento)} + PMP ${it.pmp}d${it.vencimento && !caixaEhUtil(it.vencimento) ? ` · vencimento em dia não útil, paga em ${caixaFmtDate(it.vencEfetivo || caixaDiaUtil(it.vencimento, 1))}` : ""}${it.deslocadoDe ? ` · caía em ${caixaFmtDate(it.deslocadoDe)}, passou para o próximo dia útil` : ""}`);
+      const tipo = it.real ? "Recebido" : (it.outra ? "Outra prevista" : "Previsto");
       return `<tr class="cxd-det-in${clicavel ? " cxd-click" : ""}" ${clicavel ? `onclick="FluxoCaixaDiarioApp.openEntrada('${d.date}',${i})" title="Ver o extrato do cliente"` : ""}>
-        <td>${it.real ? "Recebido" : "Previsto"}</td>
-        <td class="cxd-desc">${desc}</td>
+        <td>${tipo}</td>
+        <td class="cxd-desc" ${pmpDica ? `title="${caixaEsc(pmpDica)}"` : ""}>${desc}</td>
+        <td class="cxd-conta">${caixaEsc(this.contaLabel(it))}</td>
         <td class="cxd-plano">${this.planoHtml(it)}</td>
         <td>${this.origemHtml(it, "in")}</td>
         <td>${this.conciliacaoHtml(it)}</td>
@@ -1270,11 +1522,12 @@ const FluxoCaixaDiarioApp = {
       const clicavel = !!it.titulo;
       const tipo = it.real ? "Pago" : (it.natureza === "previsao" ? "Previsão" : "Programado");
       const desc = it.real
-        ? `${caixaEsc(it.credor || it.historico || "Débito em conta")}${it.titulo ? " · tít. " + caixaEsc(it.titulo) + (it.parcela ? "/" + caixaEsc(it.parcela) : "") : ""}${it.documento ? " · " + caixaEsc(it.documento) : ""}${it.conta ? this.contaTag(it.companyId, it.conta) : ""}`
+        ? `${caixaEsc(it.credor || it.historico || "Débito em conta")}${it.titulo ? " · tít. " + caixaEsc(it.titulo) + (it.parcela ? "/" + caixaEsc(it.parcela) : "") : ""}${it.documento ? " · " + caixaEsc(it.documento) : ""}`
         : `tít. ${caixaEsc(it.titulo)}${it.parcela ? "/" + caixaEsc(it.parcela) : ""} · ${caixaEsc(it.credor || "—")}${(it.docId || it.documento) ? " · " + caixaEsc([it.docId, it.documento].filter(Boolean).join(" ")) : ""}${it.deslocadoDe ? ` · vencia em ${caixaFmtDate(it.deslocadoDe)}, ${it.date < it.deslocadoDe ? "antecipado para o dia útil anterior" : "passou para o próximo dia útil"}` : ""}`;
       return `<tr class="cxd-det-out${clicavel ? " cxd-click" : ""}" ${clicavel ? `onclick="FluxoCaixaDiarioApp.openTitulo('${caixaEsc(it.key)}')" title="Ver o título, os anexos e a forma de pagamento"` : ""}>
         <td>${tipo}</td>
         <td class="cxd-desc">${desc}</td>
+        <td class="cxd-conta">${caixaEsc(this.contaLabel(it))}</td>
         <td class="cxd-plano">${this.planoHtml(it)}</td>
         <td>${this.origemHtml(it, "out")}</td>
         <td>${this.conciliacaoHtml(it)}</td>
@@ -1291,9 +1544,9 @@ const FluxoCaixaDiarioApp = {
           <b>${caixaMoney(total)}</b>
         </button>
         ${open ? `<table class="cxd-sheet cxd-analitico">
-          <colgroup><col style="width:96px"><col><col style="width:19%"><col style="width:150px"><col style="width:130px"><col style="width:130px"></colgroup>
-          <thead><tr><th>Tipo</th><th>Descrição</th><th>Plano financeiro</th><th>Origem</th><th>Conciliação</th><th class="cxd-num">Valor</th></tr></thead>
-          <tbody>${linhas || `<tr><td colspan="6" class="cxd-grp-vazio">${vazio}</td></tr>`}</tbody></table>` : ""}
+          <colgroup><col style="width:108px"><col><col style="width:18%"><col style="width:16%"><col style="width:140px"><col style="width:120px"><col style="width:120px"></colgroup>
+          <thead><tr><th>Tipo</th><th>Descrição</th><th>Conta</th><th>Plano financeiro</th><th>Origem</th><th>Conciliação</th><th class="cxd-num">Valor</th></tr></thead>
+          <tbody>${linhas || `<tr><td colspan="7" class="cxd-grp-vazio">${vazio}</td></tr>`}</tbody></table>` : ""}
       </div>`;
     };
     const al = this.alertasMov([d]);
@@ -1315,25 +1568,31 @@ const FluxoCaixaDiarioApp = {
     const root = document.getElementById("fluxo-caixa-diario-root");
     if (!root) return;
     const hoje = this.hoje();
-    const saldoInicial = Number(this.totals.saldo) || 0;
-    let acumulado = saldoInicial;
+    const saldoTipos = this.saldoPorTipo();
+    const saldoInicial = saldoTipos.total;
+    let cc = saldoTipos.corrente;
+    let inv = saldoTipos.investimento;
     const linhas = (this.days || []).map((d) => {
       const entrar = Number(d.entrar) || 0;
       const sair = Number(d.pagar) || 0;
       const movimento = entrar - sair;
-      const inicial = acumulado;
-      acumulado = inicial + movimento;
-      return { d, entrar, sair, movimento, inicial, acum: acumulado, passado: d.real };
+      const inicialCc = cc;
+      const inicialInv = inv;
+      cc += (Number(d.entrarCc) || 0) - (Number(d.sairCc) || 0);
+      inv += (Number(d.entrarInv) || 0) - (Number(d.sairInv) || 0);
+      return {
+        d, entrar, sair, movimento,
+        inicial: inicialCc + inicialInv, inicialCc, inicialInv,
+        acumCc: cc, acumInv: inv, acum: cc + inv, passado: d.real
+      };
     });
-    const fim = acumulado;
-    // Sábado, domingo e feriado só aparecem se tiverem movimento (ou forem hoje/o dia aberto), salvo se o usuário pedir.
-    const ocultos = [];
+    const fim = cc + inv;
+    const fimCc = cc;
+    const fimInv = inv;
     const visiveis = linhas.filter((l) => {
       const iso = l.d.date;
-      if (this.mostrarNaoUteis || caixaEhUtil(iso) || iso === hoje || iso === this.openDay) return true;
-      if (Math.abs(l.entrar) >= 0.005 || Math.abs(l.sair) >= 0.005) return true;
-      ocultos.push(iso);
-      return false;
+      if (caixaEhUtil(iso) || iso === hoje || iso === this.openDay) return true;
+      return Math.abs(l.entrar) >= 0.005 || Math.abs(l.sair) >= 0.005;
     });
     const alMes = this.alertasMov(this.days);
     const prevWrap = root.querySelector(".cxd-wrap-mx");
@@ -1374,6 +1633,9 @@ const FluxoCaixaDiarioApp = {
     const linhaSaidas = visiveis.map((l) => cell(l, caixaMoney(l.sair), l.sair ? "cxd-out" : "cxd-zero")).join("");
     const linhaDia = visiveis.map((l) => cell(l, caixaMoney(l.movimento), sinal(l.movimento))).join("");
     const linhaAcum = visiveis.map((l) => cell(l, caixaMoney(l.acum), sinal(l.acum))).join("");
+    const linhaCc = visiveis.map((l) => cell(l, caixaMoney(l.acumCc), `${sinal(l.acumCc)}${l.acumCc < -0.5 ? " cxd-resgate" : ""}`)).join("");
+    const linhaInv = visiveis.map((l) => cell(l, caixaMoney(l.acumInv), sinal(l.acumInv))).join("");
+    const avisoAplicacao = this.aplicacaoHtml(linhas);
     const aberto = linhas.find((l) => l.d.date === this.openDay);
     const detalheDia = aberto ? this.diaDetalheHtml(aberto) : "";
     const filtro = window.MlEmpresaFilter ? MlEmpresaFilter.html({
@@ -1457,7 +1719,7 @@ const FluxoCaixaDiarioApp = {
         #fluxo-caixa-diario-root .cxd-mx th, #fluxo-caixa-diario-root .cxd-mx td { padding:7px 10px; text-align:right; white-space:nowrap; border-bottom:1px solid #e2e8f0; min-width:108px; }
         #fluxo-caixa-diario-root .cxd-mx th { background:#105436; color:#fff; font-weight:600; position:sticky; top:0; z-index:2; cursor:pointer; vertical-align:top; }
         #fluxo-caixa-diario-root .cxd-mx td { cursor:pointer; }
-        #fluxo-caixa-diario-root .cxd-mx .cxd-lbl { position:sticky; left:0; z-index:1; background:#fff; text-align:left; font-weight:700; color:#0f172a; min-width:150px; border-right:1px solid #e2e8f0; cursor:default; }
+        #fluxo-caixa-diario-root .cxd-mx .cxd-lbl { position:sticky; left:0; z-index:1; background:#fff; text-align:left; font-weight:700; color:#0f172a; min-width:210px; border-right:1px solid #e2e8f0; cursor:default; }
         #fluxo-caixa-diario-root .cxd-mx th.cxd-lbl { z-index:3; background:#105436; color:#fff; }
         #fluxo-caixa-diario-root .cxd-mx .cxd-wd { font-size:.68rem; font-weight:500; opacity:.85; margin-top:2px; display:flex; justify-content:flex-end; align-items:center; gap:5px; }
         #fluxo-caixa-diario-root .cxd-mx .cxd-wd .cxd-tag { margin-left:0; background:#fff; color:#105436; }
@@ -1471,7 +1733,17 @@ const FluxoCaixaDiarioApp = {
         #fluxo-caixa-diario-root .cxd-mx td:not(.cxd-lbl):hover { background:#f1f5f9; }
         #fluxo-caixa-diario-root .cxd-mx .cxd-col-tot { background:#f1f5f9; font-weight:800; border-left:1px solid #cbd5e1; cursor:default; }
         #fluxo-caixa-diario-root .cxd-mx th.cxd-col-tot { background:#0c3d28; }
+        #fluxo-caixa-diario-root .cxd-mx tr.cxd-row-cc td { background:#f8fafc; }
+        #fluxo-caixa-diario-root .cxd-mx tr.cxd-row-inv td { background:#fffaf5; }
         #fluxo-caixa-diario-root .cxd-mx tr.cxd-row-acum td { font-weight:800; border-top:2px solid #105436; }
+        #fluxo-caixa-diario-root .cxd-mx td.cxd-resgate { box-shadow:inset 0 -2px 0 #c2410c; }
+        #fluxo-caixa-diario-root .cxd-aplica { display:flex; flex-direction:column; gap:6px; margin:0 0 12px; }
+        #fluxo-caixa-diario-root .cxd-aplica p { margin:0; padding:8px 12px; border-radius:8px; font-size:.8rem; font-weight:600; }
+        #fluxo-caixa-diario-root .cxd-aplica-cdb { background:#e7f6ee; color:#105436; }
+        #fluxo-caixa-diario-root .cxd-aplica-comp { background:#eff6ff; color:#1e3a8a; }
+        #fluxo-caixa-diario-root .cxd-aplica-resgate { background:#fff7ed; color:#9a3412; }
+        #fluxo-caixa-diario-root .cxd-org-outra { background:#ecfeff; color:#0e7490; }
+        #fluxo-caixa-diario-root .cxd-analitico td.cxd-conta { white-space:normal; color:#334155 !important; font-size:.74rem; }
         #fluxo-caixa-diario-root .cxd-mx tr.cxd-row-dia td { font-weight:700; }
         #fluxo-caixa-diario-root .cxd-daydet { border:1px solid #e2e8f0; border-radius:8px; background:#fff; margin-bottom:14px; overflow:hidden; }
         #fluxo-caixa-diario-root .cxd-daydet-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 12px; background:#f8fafc; border-bottom:1px solid #e2e8f0; }
@@ -1536,16 +1808,12 @@ const FluxoCaixaDiarioApp = {
           <p class="cxd-title">CONTAS COM SALDO <span>· ligue as contas que entram no caixa</span></p>
           ${this.contasHtml()}
           <div class="cxd-saldo-ini"><span>${iniLabel}</span><span>${caixaMoney(saldoInicial)}</span></div>
+          ${avisoAplicacao}
           ${this.loading ? `<p style="color:#64748b;">Montando o fluxo…</p>` : `
           <div class="cxd-mx-bar">
             <p class="cxd-title">MOVIMENTO DO MÊS <span>· dias anteriores realizados, de hoje em diante previstos · clique no dia para ver entradas e saídas</span></p>
             ${alMes.manuais ? `<span class="cxd-chip cxd-chip-cb" title="Lançamentos direto em Caixa e bancos, sem título do contas a pagar/receber. Abra o dia para conferir.">${alMes.manuais} lançamento(s) de caixa e bancos no mês</span>` : ""}
             ${alMes.semConc ? `<span class="cxd-chip cxd-chip-nc" title="Movimentos ainda não conciliados com o extrato do banco. Os dias com ponto vermelho têm movimento sem conciliação.">${alMes.semConc} sem conciliação · ${caixaMoney(alMes.valorSemConc)}</span>` : ""}
-            <label class="moura-switch cxd-naoutil-sw" title="${ocultos.length ? ocultos.length + " dia(s) sem movimento ocultos" : "Nenhum dia oculto"}">
-              <input type="checkbox" ${this.mostrarNaoUteis ? "checked" : ""} onchange="FluxoCaixaDiarioApp.mostrarNaoUteis=this.checked;FluxoCaixaDiarioApp.render()">
-              <span class="moura-switch-track" aria-hidden="true"></span>
-              <span class="moura-switch-text">Mostrar sábados, domingos e feriados${!this.mostrarNaoUteis && ocultos.length ? ` (${ocultos.length} oculto${ocultos.length > 1 ? "s" : ""})` : ""}</span>
-            </label>
           </div>
           <div class="cxd-wrap cxd-wrap-mx">
             <table class="cxd-mx">
@@ -1559,7 +1827,9 @@ const FluxoCaixaDiarioApp = {
                 <tr><td class="cxd-lbl">Entradas</td>${linhaEntradas}<td class="cxd-col-tot cxd-in">${caixaMoney(totEntrar)}</td></tr>
                 <tr><td class="cxd-lbl">Saídas</td>${linhaSaidas}<td class="cxd-col-tot cxd-out">${caixaMoney(totSair)}</td></tr>
                 <tr class="cxd-row-dia"><td class="cxd-lbl">Saldo do dia</td>${linhaDia}<td class="cxd-col-tot ${sinal(totEntrar - totSair)}">${caixaMoney(totEntrar - totSair)}</td></tr>
-                <tr class="cxd-row-acum"><td class="cxd-lbl">Saldo acumulado</td>${linhaAcum}<td class="cxd-col-tot ${sinal(fim)}">${caixaMoney(fim)}</td></tr>
+                <tr class="cxd-row-cc"><td class="cxd-lbl" title="Saldo das contas correntes ligadas, depois das entradas e saídas do dia">Saldo acum. conta corrente</td>${linhaCc}<td class="cxd-col-tot ${sinal(fimCc)}">${caixaMoney(fimCc)}</td></tr>
+                <tr class="cxd-row-inv"><td class="cxd-lbl" title="Saldo das aplicações ligadas. O previsto de receber e pagar passa pela conta corrente.">Saldo acum. investimento</td>${linhaInv}<td class="cxd-col-tot ${sinal(fimInv)}">${caixaMoney(fimInv)}</td></tr>
+                <tr class="cxd-row-acum"><td class="cxd-lbl">Saldo total</td>${linhaAcum}<td class="cxd-col-tot ${sinal(fim)}">${caixaMoney(fim)}</td></tr>
               </tbody>
             </table>
           </div>

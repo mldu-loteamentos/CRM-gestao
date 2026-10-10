@@ -182,7 +182,7 @@ ComprasControleApp.statusDe = function (r) {
 ComprasControleApp.tipoTag = function (r) {
   const st = this.statusDe(r);
   if (st === "pago") return '<span class="cprev-tag cprev-tag-pago">Pago</span>';
-  if (st === "previsao") return `<span class="cfin-prev"><span class="cprev-tag cprev-tag-previsao">Previsão</span>${this.autorizacaoHtml(r)}</span>`;
+  if (st === "previsao") return '<span class="cprev-tag cprev-tag-previsao">Previsão</span>';
   if (st === "processamento") {
     const lote = r.lote ? " title=\"Lote " + this.esc(r.lote) + " enviado ao banco\"" : "";
     return '<span class="cprev-tag cprev-tag-banco"' + lote + ">Processamento bancário</span>";
@@ -194,17 +194,52 @@ ComprasControleApp.tipoTag = function (r) {
   return '<span class="cprev-tag cprev-tag-nota">Programado</span>';
 };
 
-/** Situação da autorização do pedido e, se autorizada, o envio da nota para o fiscal. */
+/** Coluna Autorizado: só a situação do pedido no Sienge. */
 ComprasControleApp.autorizacaoHtml = function (r) {
+  if (this.statusDe(r) !== "previsao") return '<span class="cfin-vazio">—</span>';
+  const ped = this.pedidoKey(r && r.documento);
+  if (!ped) return '<span class="cfin-vazio">—</span>';
+  const aut = (this._autPedidos || {})[ped];
+  if (!aut) return '<span class="cprev-tag cprev-tag-rastreando">Consultando…</span>';
+  if (aut.ausente) return '<span class="cprev-tag cprev-tag-rastreando" title="Pedido não encontrado no Sienge">Não encontrado</span>';
+  if (aut.erro) return `<span class="cprev-tag cprev-tag-rastreando" title="${this.esc(aut.erro)}">Não lida</span>`;
+  if (!aut.ok) return '<span class="cprev-tag cprev-tag-previsao" title="O pedido ainda não foi autorizado no Sienge">Não</span>';
+  return '<span class="cprev-tag cprev-tag-pago" title="Pedido autorizado no Sienge">Sim</span>';
+};
+
+/** Coluna Fiscal: situação da nota e o envio, quando o pedido está autorizado. */
+ComprasControleApp.fiscalHtml = function (r) {
+  if (this.statusDe(r) !== "previsao") return '<span class="cfin-vazio">—</span>';
+  const ped = this.pedidoKey(r && r.documento);
+  if (!ped) return '<span class="cfin-vazio">—</span>';
+  const aut = (this._autPedidos || {})[ped];
+  if (!aut || !aut.ok) return '<span class="cfin-vazio">—</span>';
+  const envio = window.FilaNotasFiscais ? FilaNotasFiscais.acaoPedidoHtml(ped, this._filaFiscal) : "";
+  return envio || '<span class="cfin-vazio">—</span>';
+};
+
+ComprasControleApp.autorizacaoTexto = function (r) {
+  if (this.statusDe(r) !== "previsao") return "";
   const ped = this.pedidoKey(r && r.documento);
   if (!ped) return "";
   const aut = (this._autPedidos || {})[ped];
-  if (!aut) return '<span class="cprev-tag cprev-tag-rastreando">Autorização…</span>';
-  if (aut.ausente) return '<span class="cprev-tag cprev-tag-rastreando" title="Pedido não encontrado no Sienge">Pedido não encontrado</span>';
-  if (aut.erro) return `<span class="cprev-tag cprev-tag-rastreando" title="${this.esc(aut.erro)}">Autorização não lida</span>`;
-  if (!aut.ok) return '<span class="cprev-tag cprev-tag-previsao" title="O pedido ainda não foi autorizado no Sienge">Não autorizada</span>';
-  const envio = window.FilaNotasFiscais ? FilaNotasFiscais.acaoPedidoHtml(ped, this._filaFiscal) : "";
-  return '<span class="cprev-tag cprev-tag-pago" title="Pedido autorizado no Sienge">Autorizada</span>' + envio;
+  if (!aut) return "Consultando";
+  if (aut.ausente) return "Não encontrado";
+  if (aut.erro) return "Não lida";
+  return aut.ok ? "Sim" : "Não";
+};
+
+ComprasControleApp.fiscalTexto = function (r) {
+  if (this.statusDe(r) !== "previsao") return "";
+  const ped = this.pedidoKey(r && r.documento);
+  const aut = ped && (this._autPedidos || {})[ped];
+  if (!aut || !aut.ok || !window.FilaNotasFiscais) return "";
+  const item = FilaNotasFiscais.doPedido(this._filaFiscal, ped);
+  if (!item) return "Enviar ao fiscal";
+  if (item.status === "pendente" || item.status === "em_lancamento") return "Em análise fiscal";
+  if (item.status === "devolvida") return "Nota devolvida";
+  if (item.status === "lancada") return "Lançada no Sienge";
+  return "";
 };
 
 ComprasControleApp.carregarAutorizacoes = function (rows) {
@@ -315,6 +350,8 @@ ComprasControleApp.sortValue = function (r, key) {
   if (key === "ndoc") return this.fold(r.documento || "");
   if (key === "data") return this.dataRef(r);
   if (key === "tipo") return this.statusDe(r);
+  if (key === "aut") return this.autorizacaoTexto(r);
+  if (key === "fiscal") return this.fiscalTexto(r);
   if (key === "valor") return Number(r.valorAjustado) || 0;
   return "";
 };
@@ -1001,7 +1038,8 @@ ComprasControleApp.pintarTitulo = function () {
     info: `<span class="bchk bchk-info">Não conferido</span>`,
     espera: `<span class="bchk bchk-wait">Consultando…</span>`,
     autorizada: `<span class="bchk bchk-ok">Autorizada</span>`,
-    negada: `<span class="bchk bchk-erro">Não autorizada</span>`
+    negada: `<span class="bchk bchk-erro">Não autorizada</span>`,
+    analise: `<span class="bchk bchk-analise">Em análise</span>`
   }[nivel] || "");
   const bloco = (icone, titulo, nivel, corpo, extra) => `<section class="cfin-sec${nivel === "erro" ? " is-erro" : (nivel === "aviso" || nivel === "sem" ? " is-aviso" : "")}${extra ? " " + extra : ""}">
       <header class="cfin-sec-h"><i data-lucide="${icone}"></i><span>${titulo}</span>${selo(nivel)}</header>
@@ -1028,19 +1066,33 @@ ComprasControleApp.pintarTitulo = function () {
 
   const ped = this.statusDe(row) === "previsao" ? this.pedidoKey(row.documento) : "";
   let autBloco = "";
+  let fiscalBloco = "";
   if (ped && !det.loading) {
     const aut = (this._autPedidos || {})[ped];
+    const item = window.FilaNotasFiscais ? FilaNotasFiscais.doPedido(this._filaFiscal, ped) : null;
+    const emAnalise = item && (item.status === "pendente" || item.status === "em_lancamento");
+    const botaoEnvio = (rotulo, id) => `<div class="cfin-aut-acao"><button type="button" class="cprev-fiscal-btn" onclick="event.stopPropagation(); FilaNotasFiscais.abrirEnvio('${this.esc(ped)}','${this.esc(id || "")}')">${rotulo}</button></div>`;
     if (!aut) {
       autBloco = bloco("badge-check", "Autorização do pedido " + this.esc(ped), "espera", "<p>Consultando a autorização no Sienge…</p>");
-    } else if (aut.ok) {
-      const envio = window.FilaNotasFiscais ? FilaNotasFiscais.acaoPedidoHtml(ped, this._filaFiscal) : "";
-      autBloco = bloco("badge-check", "Autorização do pedido " + this.esc(ped), "autorizada", `<p>Pedido autorizado. Envie a nota para o fiscal por aqui.</p><div class="cfin-aut-acao">${envio}</div>`);
+      fiscalBloco = bloco("clipboard-check", "Fiscal", "espera", "<p>Aguardando a leitura da autorização.</p>");
     } else if (aut.ausente) {
       autBloco = bloco("badge-check", "Autorização do pedido " + this.esc(ped), "aviso", "<p>Pedido não encontrado no Sienge.</p>");
     } else if (aut.erro) {
       autBloco = bloco("badge-check", "Autorização do pedido " + this.esc(ped), "aviso", `<p>Não consegui ler a autorização: ${this.esc(aut.erro)}</p>`);
+    } else if (!aut.ok) {
+      autBloco = bloco("badge-check", "Autorização do pedido " + this.esc(ped), "negada", "<p>O pedido ainda não está autorizado.</p>");
+      fiscalBloco = bloco("clipboard-check", "Fiscal", "", "<p>O envio da nota fica disponível depois da autorização.</p>");
     } else {
-      autBloco = bloco("badge-check", "Autorização do pedido " + this.esc(ped), "negada", "<p>O pedido ainda não está autorizado. O envio da nota fica disponível depois da autorização.</p>");
+      autBloco = bloco("badge-check", "Autorização do pedido " + this.esc(ped), "autorizada", "<p>Pedido autorizado no Sienge.</p>");
+      if (emAnalise) {
+        fiscalBloco = bloco("clipboard-check", "Fiscal", "analise", "<p>A nota deste pedido já está com o fiscal.</p>");
+      } else if (item && item.status === "devolvida") {
+        fiscalBloco = bloco("clipboard-check", "Fiscal", "aviso", `<p>A nota foi devolvida${item.motivoDevolucao ? ": " + this.esc(item.motivoDevolucao) : "."}</p>${botaoEnvio("Corrigir envio", item.id)}`);
+      } else if (item && item.status === "lancada") {
+        fiscalBloco = bloco("clipboard-check", "Fiscal", "ok", "<p>A nota já foi lançada no Sienge.</p>");
+      } else {
+        fiscalBloco = bloco("clipboard-check", "Fiscal", "", `<p>Este pedido ainda não tem nota no fiscal.</p>${botaoEnvio("Enviar nota para o fiscal")}`);
+      }
     }
   }
 
@@ -1059,7 +1111,7 @@ ComprasControleApp.pintarTitulo = function () {
           ${bloco("credit-card", "Forma de pagamento programada", formaNivel, forma)}
           ${bloco("paperclip", "Anexos", "", `<div class="cfin-titulo-files">${anexos || `<span>Este título não tem anexo.</span>`}</div>`)}
         </div>
-        ${autBloco}`}
+        ${autBloco || fiscalBloco ? `<div class="cfin-sec-par">${autBloco}${fiscalBloco}</div>` : ""}`}
       </div>
     </div>
     <style>
@@ -1098,7 +1150,7 @@ ComprasControleApp.pintarTitulo = function () {
       #cfin-titulo .cfin-titulo-destaque { background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:6px 10px; }
       #cfin-titulo .cfin-titulo-destaque small { display:block; color:#64748b; font-size:0.72rem; }
       #cfin-titulo .cfin-aut-acao { margin-top:8px; }
-      #cfin-titulo .cfin-aut-acao .cprev-fiscal-acoes { margin-left:0; }
+      #cfin-titulo .bchk-analise { background:#fff7ed; color:#c2410c; }
       #cfin-titulo .cfin-titulo-sit { grid-column:span 2; }
       @media (max-width: 900px) { #cfin-titulo .cfin-titulo-sit { grid-column:auto; } }
     </style>`;
@@ -1151,6 +1203,8 @@ ComprasControleApp.renderList = function () {
       <td class="cprev-col-ndoc">${this.esc(r.documento || "—")}</td>
       <td class="cprev-col-venc" title="${this.esc(dataTitle)}">${this.esc(this.fmtDate(dataRaw))}</td>
       <td class="cprev-col-tipo" data-st="${this.esc(sig)}">${this.tipoTag(r)}</td>
+      <td class="cprev-col-aut">${this.autorizacaoHtml(r)}</td>
+      <td class="cprev-col-fiscal">${this.fiscalHtml(r)}</td>
       <td class="cprev-col-val">${this.esc(this.money(r.valorAjustado))}</td>
     </tr>`;
   }).join("");
@@ -1168,11 +1222,11 @@ ComprasControleApp.renderList = function () {
         <colgroup>
           <col class="cprev-col-id"><col class="cprev-col-cc"><col class="cprev-col-dept"><col class="cprev-col-cred">
           <col class="cprev-col-tit"><col class="cprev-col-parc"><col class="cprev-col-doc"><col class="cprev-col-ndoc">
-          <col class="cprev-col-venc"><col class="cprev-col-tipo"><col class="cprev-col-val">
+          <col class="cprev-col-venc"><col class="cprev-col-tipo"><col class="cprev-col-aut"><col class="cprev-col-fiscal"><col class="cprev-col-val">
         </colgroup>
         <thead><tr>
           <th class="cprev-col-id" title="Id. da empresa" onclick="ComprasControleApp.toggleSort('emp')" style="cursor:pointer;user-select:none;text-align:center;"><div class="cfin-id-head">Id. <i data-lucide="info" style="width:11px;height:11px;cursor:help;color:#64748b;"></i> <i data-lucide="chevrons-up-down" style="width:11px;vertical-align:middle;"></i></div></th>${th("cc", "Centro de custo")}${th("dept", "Depto")}${th("credor", "Credor")}${th("titulo", "Título")}
-          ${th("parc", "Parc.", "cprev-col-parc")}${th("doc", "Doc.")}${th("ndoc", "Nº doc.")}${th("data", "Venc./Pagto")}${th("tipo", "Status", "cprev-col-tipo")}${th("valor", "Valor", "cprev-col-val")}
+          ${th("parc", "Parc.", "cprev-col-parc")}${th("doc", "Doc.")}${th("ndoc", "Nº doc.")}${th("data", "Venc./Pagto")}${th("tipo", "Status", "cprev-col-tipo")}${th("aut", "Autorizado", "cprev-col-aut")}${th("fiscal", "Fiscal", "cprev-col-fiscal")}${th("valor", "Valor", "cprev-col-val")}
         </tr></thead>
         <tbody>${body}</tbody>
       </table>
@@ -1187,7 +1241,7 @@ ComprasControleApp.exportExcel = function () {
     alert("Não há títulos para exportar. Consulte antes.");
     return;
   }
-  const head = ["Empresa", "Centro de custo", "Departamento", "Credor", "Título", "Parcela", "Documento", "Nº documento", "Venc./Pagto", "Status", "Valor"];
+  const head = ["Empresa", "Centro de custo", "Departamento", "Credor", "Título", "Parcela", "Documento", "Nº documento", "Venc./Pagto", "Status", "Autorizado", "Fiscal", "Valor"];
   const tipo = { pago: "Pago", processamento: "Processamento bancário", programado: "Programado", previsao: "Previsão", vencido: "Vencido", rastreando: "Rastreando banco" };
   const aoa = [head].concat(rows.map((r) => [
     r.companyId,
@@ -1200,6 +1254,8 @@ ComprasControleApp.exportExcel = function () {
     r.documento || "",
     this.fmtDate(this.dataRef(r)),
     tipo[this.statusDe(r)] || r.natureza,
+    this.autorizacaoTexto(r),
+    this.fiscalTexto(r),
     Number(r.valorAjustado) || 0
   ]));
   const ws = XLSX.utils.aoa_to_sheet(aoa);

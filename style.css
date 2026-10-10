@@ -6595,7 +6595,9 @@ circle.donut-segment {
 .cprev-table-wrap #cfin-table .cprev-col-doc { width: 54px; }
 .cprev-table-wrap #cfin-table .cprev-col-ndoc { width: 108px; }
 .cprev-table-wrap #cfin-table .cprev-col-venc { width: 108px; }
-.cprev-table-wrap #cfin-table .cprev-col-tipo { width: 168px; }
+.cprev-table-wrap #cfin-table .cprev-col-tipo { width: 118px; }
+.cprev-table-wrap #cfin-table .cprev-col-aut { width: 118px; }
+.cprev-table-wrap #cfin-table .cprev-col-fiscal { width: 168px; }
 .cprev-table-wrap #cfin-table .cprev-col-val { width: 90px; }
 .cprev-table-wrap #cfin-table th.cprev-col-id,
 .cprev-table-wrap #cfin-table td.cprev-col-id { text-align: center; }
@@ -6613,30 +6615,32 @@ circle.donut-segment {
   padding-right: 4px;
 }
 .cprev-table-wrap #cfin-table th.cprev-col-tipo,
-.cprev-table-wrap #cfin-table td.cprev-col-tipo {
+.cprev-table-wrap #cfin-table td.cprev-col-tipo,
+.cprev-table-wrap #cfin-table th.cprev-col-aut,
+.cprev-table-wrap #cfin-table td.cprev-col-aut,
+.cprev-table-wrap #cfin-table th.cprev-col-fiscal,
+.cprev-table-wrap #cfin-table td.cprev-col-fiscal {
   overflow: visible;
   text-overflow: unset;
   white-space: normal;
   text-align: center;
 }
-.cprev-table-wrap #cfin-table .cfin-prev {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  max-width: 100%;
+.cprev-table-wrap #cfin-table td.cprev-col-tipo .cprev-tag,
+.cprev-table-wrap #cfin-table td.cprev-col-aut .cprev-tag,
+.cprev-table-wrap #cfin-table td.cprev-col-fiscal .cprev-tag {
+  margin-left: 0;
+  margin-right: 0;
 }
-.cprev-table-wrap #cfin-table .cfin-prev .cprev-fiscal-acoes {
+.cprev-table-wrap #cfin-table td.cprev-col-fiscal .cprev-fiscal-acoes {
   margin-left: 0;
   justify-content: center;
 }
-.cprev-table-wrap #cfin-table .cfin-prev .cprev-fiscal-btn {
+.cprev-table-wrap #cfin-table td.cprev-col-fiscal .cprev-fiscal-btn {
   min-width: 0;
   width: 148px;
 }
-.cprev-table-wrap #cfin-table td.cprev-col-tipo .cprev-tag {
-  margin-left: 0;
-  margin-right: 0;
+.cprev-table-wrap #cfin-table .cfin-vazio {
+  color: #94a3b8;
 }
 .cprev-table-wrap .cprev-col-val { width: 96px; text-align: right; }
 .cprev-table-wrap .cprev-group-header td {
