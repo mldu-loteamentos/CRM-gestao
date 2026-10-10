@@ -262,13 +262,15 @@ const CentrosCustoApp = {
   /**
    * Obra com CC exclusivo da Moura Leite (14000) e CC exclusivo do parceiro (14001):
    * o % Moura Leite fica no CC da obra, o % Terrenista no de parceria, e os dois somam 100%.
+   * Só forma par dentro da mesma empresa: obra que virou SPE mantém o CC antigo (ex.: 14200 na empresa 1) fora do par.
    */
   parDoRateio(cc) {
     if (!cc) return null;
     const id = String(cc.id);
     const obra = id.slice(0, -2);
     if (!obra) return null;
-    const mesmos = (CentrosCustoState.costCenters || []).filter(c => String(c.id).slice(0, -2) === obra && String(c.id) !== id);
+    const empresa = (c) => String((c && (c.idCompany || c.companyId)) || "");
+    const mesmos = (CentrosCustoState.costCenters || []).filter(c => String(c.id).slice(0, -2) === obra && String(c.id) !== id && empresa(c) === empresa(cc));
     const baseDe = (lista) => lista.find(c => String(c.id) === obra + "00" && !this.isParceiro(c)) || lista.find(c => !this.isParceiro(c));
     if (this.isParceiro(cc)) {
       const base = baseDe(mesmos);
