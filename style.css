@@ -5248,17 +5248,40 @@ circle.donut-segment {
   .doc-modal-panel .doc-modal-grid-ter { grid-template-columns: 1fr !important; }
 }
 .doc-modal-panel.adi-panel { overflow-y: auto; }
-.adi-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 20px; align-items: start; }
+.adi-resumo { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc; margin-bottom: 16px; }
+.adi-resumo > div { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; min-width: 0; }
+.adi-resumo > div + div { border-left: 1px solid #e2e8f0; }
+.adi-resumo span { font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.03em; font-weight: 700; }
+.adi-resumo strong { font-size: 0.98rem; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.adi-resumo small { font-size: 0.74rem; color: #64748b; }
+.adi-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 16px; align-items: stretch; }
 .adi-grid.adi-grid-um { grid-template-columns: minmax(0, 1fr); }
-.adi-col { border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 18px; background: #fff; }
+.adi-col { border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px; background: #fff; }
 .adi-col-novo { border-color: #a7d7bf; background: #f8fdfa; }
-.adi-col-tit { margin: 0 0 14px; font-size: 0.95rem; color: var(--color-primary); display: flex; align-items: center; gap: 8px; }
+.adi-col-tit { margin: 0 0 10px; font-size: 0.95rem; color: var(--color-primary); display: flex; align-items: center; gap: 8px; }
 .adi-col-tit i, .adi-col-tit svg { width: 17px; height: 17px; }
-.adi-kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
-.adi-kpi { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
-.adi-kpi span { font-size: 0.72rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.02em; }
-.adi-kpi strong { font-size: 0.95rem; color: #0f172a; }
-.adi-kpi small { font-size: 0.75rem; color: #64748b; }
+.adi-lbl-row .adi-col-tit { margin: 0; }
+.adi-tab tr.adi-quitadas td { color: #64748b; font-size: 0.78rem; background: #f8fafc; border-bottom: 0; }
+.adi-tab tr.adi-quitadas i, .adi-tab tr.adi-quitadas svg { width: 14px; height: 14px; color: #15803d; vertical-align: -2px; margin-right: 4px; }
+.adi-ajustes { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1.7fr); gap: 0; margin-top: 16px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; }
+.adi-ajustes > div { padding: 12px 16px; min-width: 0; }
+.adi-ajustes > div + div { border-left: 1px solid #e2e8f0; }
+.adi-ajustes .adi-lbl small { text-transform: none; font-weight: 500; color: #94a3b8; letter-spacing: 0; }
+.adi-reaj { display: flex; align-items: center; gap: 12px; flex-wrap: nowrap; }
+.adi-reaj .adi-in-indice { flex: 0 1 120px; width: 120px; min-width: 80px; }
+.adi-depara span { white-space: nowrap; }
+.adi-depara .adi-in-juros { flex: 0 0 80px; width: 80px; }
+.adi-reaj .adi-radio { margin: 0; flex-wrap: nowrap; white-space: nowrap; flex-shrink: 0; }
+.adi-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.adi-chip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid #cbd5e1; border-radius: 999px; background: #fff; color: #475569; font-size: 0.8rem; font-weight: 600; cursor: pointer; margin: 0; user-select: none; }
+.adi-chip input { width: 14px; height: 14px; margin: 0; accent-color: var(--color-primary); }
+.adi-chip:has(input:checked) { background: #ecfdf5; border-color: #86efac; color: #105436; }
+.adi-previa-box { margin-top: 14px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; }
+.adi-previa-box summary { cursor: pointer; list-style: none; padding: 10px 16px; font-size: 0.85rem; font-weight: 700; color: var(--color-primary); display: flex; align-items: center; gap: 8px; }
+.adi-previa-box summary::-webkit-details-marker { display: none; }
+.adi-previa-box summary i, .adi-previa-box summary svg { width: 16px; height: 16px; }
+.adi-previa-box[open] summary { border-bottom: 1px solid #e2e8f0; }
+.adi-previa-box .adi-previa { margin: 12px 16px 14px; }
 .adi-ok { color: #15803d !important; }
 .adi-ruim { color: #b91c1c !important; }
 .adi-atencao { color: #b45309 !important; }
@@ -5270,19 +5293,14 @@ circle.donut-segment {
 .adi-tab .adi-num { text-align: right; white-space: nowrap; }
 .adi-tab small { color: #64748b; }
 .adi-vazio { color: #64748b; font-style: italic; }
-.adi-info { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 12px; font-size: 0.8rem; color: #334155; }
-.adi-bloco { margin-bottom: 16px; }
-.adi-bloco:last-child { margin-bottom: 0; }
 .adi-lbl { font-size: 0.75rem; font-weight: 700; color: #334155; text-transform: uppercase; letter-spacing: 0.02em; margin-bottom: 8px; }
-.adi-lbl-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.adi-lbl-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
 .adi-lbl-row .adi-lbl { margin-bottom: 0; }
 .adi-acoes { display: flex; gap: 8px; }
 .adi-acoes .btn { display: inline-flex; align-items: center; gap: 6px; font-size: 0.78rem; }
 .adi-acoes .btn i, .adi-acoes .btn svg { width: 14px; height: 14px; }
-.adi-checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 16px; }
-.adi-check, .adi-radio { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #1e293b; cursor: pointer; margin: 0 0 6px; flex-wrap: wrap; }
-.adi-check input, .adi-radio input[type="radio"] { accent-color: var(--color-primary); width: 16px; height: 16px; margin: 0; }
-.adi-duas { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 16px; }
+.adi-radio { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #1e293b; cursor: pointer; margin: 0 0 6px; flex-wrap: wrap; }
+.adi-radio input[type="radio"] { accent-color: var(--color-primary); width: 16px; height: 16px; margin: 0; }
 .adi-depara { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #1e293b; }
 .doc-modal-panel .form-control.adi-in { height: 34px; font-size: 0.85rem; padding: 4px 8px; }
 .adi-in-juros { width: 96px; text-align: right; }
@@ -5304,8 +5322,15 @@ circle.donut-segment {
 .adi-bloqueio i, .adi-bloqueio svg { width: 18px; height: 18px; flex-shrink: 0; }
 .adi-rodape { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .adi-aviso { flex: 1; min-width: 0; margin: 0; font-size: 0.82rem; color: #b45309; }
-@media (max-width: 1000px) {
-  .adi-grid, .adi-duas { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 1100px) {
+  .adi-resumo { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .adi-resumo > div:nth-child(4) { border-left: 0; }
+  .adi-resumo > div:nth-child(n+4) { border-top: 1px solid #e2e8f0; }
+  .adi-ajustes { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .adi-ajustes > div:nth-child(3) { grid-column: 1 / -1; border-left: 0; border-top: 1px solid #e2e8f0; }
+}
+@media (max-width: 1180px) {
+  .adi-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* Rateio por centro de custo no resumo do título */

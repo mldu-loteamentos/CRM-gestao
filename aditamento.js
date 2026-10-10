@@ -205,94 +205,98 @@
       this._adiRender(ctx);
     },
 
-    _adiHojeHtml(ctx) {
+    _adiResumoHtml(ctx) {
       const a = ctx.adiAtual;
       const adimpl = ctx.adimplencia || { adimplente: true, label: "Adimplente" };
       const esc = (s) => this._escDoc(s);
-      const linhas = a.linhas.length
-        ? a.linhas.map((l) => `<tr>
+      const reajuste = !a.indice ? "não informado" : (a.indice === "REAL" ? "Sem reajuste" : a.indice);
+      return `
+        <div class="adi-resumo">
+          <div><span>Valor do contrato</span><strong>${brl(a.valorContrato)}</strong></div>
+          <div><span>Parcelas pagas</span><strong>${a.pagas} de ${a.total}</strong><small>${brl(a.valorPago)}</small></div>
+          <div><span>Saldo em aberto</span><strong>${brl(a.saldoAberto)}</strong><small>${a.abertas} parcela(s)</small></div>
+          <div><span>Juros hoje</span><strong>${a.juros != null ? pct4(a.juros) : "—"}</strong><small>ao mês</small></div>
+          <div><span>Reajuste hoje</span><strong>${esc(reajuste)}</strong></div>
+          <div><span>Situação</span><strong class="${adimpl.adimplente ? "adi-ok" : "adi-ruim"}">${esc(adimpl.label || "—")}</strong></div>
+        </div>`;
+    },
+
+    _adiHojeHtml(ctx) {
+      const a = ctx.adiAtual;
+      const esc = (s) => this._escDoc(s);
+      const quitadas = a.linhas.filter((l) => l.abertas === 0);
+      const abertas = a.linhas.filter((l) => l.abertas > 0);
+      const linhaAberta = (l) => `<tr>
             <td><strong>${esc(l.label)}</strong></td>
-            <td class="adi-num">${l.pagas}/${l.qtd}</td>
+            <td class="adi-num">${l.pagas} pagas · <strong>${l.abertas} em aberto</strong></td>
             <td class="adi-num">${brl(l.valorAberto || l.valorParcela)}${l.variavel ? ' <small title="As parcelas desta condição não têm todas o mesmo valor; aparece o valor mais comum.">(varia)</small>' : ""}</td>
-            <td class="adi-num">${brl(l.total)}</td>
-            <td>${my(l.primeiro)} a ${my(l.ultimo)}</td>
-          </tr>`).join("")
-        : `<tr><td colspan="5" class="adi-vazio">Não consegui ler as parcelas deste título no Sienge.</td></tr>`;
+            <td>${my(l.proximo || l.primeiro)} a ${my(l.ultimo)}</td>
+          </tr>`;
+      const linhaQuitadas = quitadas.length ? `<tr class="adi-quitadas">
+            <td colspan="4"><i data-lucide="check-circle-2"></i> Já quitadas: ${esc(quitadas.map((l) => l.label).join(", "))}
+              <small>(${quitadas.reduce((s, l) => s + l.qtd, 0)} parcela(s) · ${brl(quitadas.reduce((s, l) => s + l.total, 0))})</small></td>
+          </tr>` : "";
+      const corpo = a.linhas.length
+        ? abertas.map(linhaAberta).join("") + linhaQuitadas
+        : `<tr><td colspan="4" class="adi-vazio">Não consegui ler as parcelas deste título no Sienge.</td></tr>`;
       return `
         <section class="adi-col">
           <h4 class="adi-col-tit"><i data-lucide="file-text"></i> Como está hoje</h4>
-          <div class="adi-kpis">
-            <div class="adi-kpi"><span>Valor do contrato</span><strong>${brl(a.valorContrato)}</strong></div>
-            <div class="adi-kpi"><span>Parcelas pagas</span><strong>${a.pagas} de ${a.total}</strong><small>${brl(a.valorPago)}</small></div>
-            <div class="adi-kpi"><span>Saldo em aberto</span><strong>${brl(a.saldoAberto)}</strong><small>${a.abertas} parcela(s)</small></div>
-            <div class="adi-kpi"><span>Situação</span><strong class="${adimpl.adimplente ? "adi-ok" : "adi-ruim"}">${esc(adimpl.label || "—")}</strong></div>
-          </div>
-          <div class="adi-tab-wrap">
-            <table class="adi-tab">
-              <thead><tr><th>Condição</th><th class="adi-num">Pagas</th><th class="adi-num">Valor da parcela</th><th class="adi-num">Total</th><th>Vencimentos</th></tr></thead>
-              <tbody>${linhas}</tbody>
-            </table>
-          </div>
-          <div class="adi-info">
-            <span>Juros de parcelamento: <strong>${a.juros != null ? pct4(a.juros) : "não informado"}</strong></span>
-            <span>Reajuste: <strong>${a.indice ? esc(a.indice === "REAL" ? "REAL (sem reajuste)" : a.indice) : "não informado"}</strong></span>
-          </div>
+          <table class="adi-tab">
+            <thead><tr><th>Condição</th><th class="adi-num">Parcelas</th><th class="adi-num">Valor da parcela</th><th>Em aberto</th></tr></thead>
+            <tbody>${corpo}</tbody>
+          </table>
         </section>`;
     },
 
     _adiNovoHtml(ctx) {
+      return `
+        <section class="adi-col adi-col-novo">
+          <div class="adi-lbl-row">
+            <h4 class="adi-col-tit"><i data-lucide="pencil-line"></i> Como vai ficar</h4>
+            <span class="adi-acoes">
+              <button type="button" class="btn btn-outline btn-sm" onclick="RelacionamentoApp.adiRestaurar()" title="Voltar para as parcelas em aberto de hoje"><i data-lucide="rotate-ccw"></i> Restaurar padrão</button>
+              <button type="button" class="btn btn-primary btn-sm" onclick="RelacionamentoApp.adiAdicionarLinha()"><i data-lucide="plus"></i> Adicionar condição</button>
+            </span>
+          </div>
+          <table class="adi-tab adi-tab-edit">
+            <thead><tr><th>Tipo</th><th class="adi-num">Qtde.</th><th class="adi-num">Valor da parcela</th><th class="adi-num">Total</th><th>1º vencimento</th><th></th></tr></thead>
+            <tbody id="adi-linhas">${this._adiLinhasHtml(ctx)}</tbody>
+          </table>
+          <div id="adi-totais" class="adi-totais"></div>
+        </section>`;
+    },
+
+    _adiAjustesHtml(ctx) {
       const a = ctx.adiAtual;
       const f = ctx.adiForm;
       const esc = (s) => this._escDoc(s);
-      const checks = ALTERACOES.map((o) => `
-        <label class="adi-check"><input type="checkbox" id="adi-alt-${o.id}" ${f.alteracoes[o.id] ? "checked" : ""} onchange="RelacionamentoApp.adiMarcarAlteracao('${o.id}', this.checked)"> ${o.label}</label>`).join("");
+      const chips = ALTERACOES.map((o) => `
+        <label class="adi-chip"><input type="checkbox" id="adi-alt-${o.id}" ${f.alteracoes[o.id] ? "checked" : ""} onchange="RelacionamentoApp.adiMarcarAlteracao('${o.id}', this.checked)"> ${o.label}</label>`).join("");
       return `
-        <section class="adi-col adi-col-novo">
-          <h4 class="adi-col-tit"><i data-lucide="pencil-line"></i> Como vai ficar</h4>
-          <div class="adi-bloco">
-            <div class="adi-lbl">Alterações no contrato</div>
-            <div class="adi-checks">${checks}</div>
-          </div>
-          <div class="adi-bloco adi-duas">
-            <div>
-              <div class="adi-lbl">Juros de parcelamento (% ao mês)</div>
-              <div class="adi-depara">
-                <span>de <strong>${a.juros != null ? pct4(a.juros) : "—"}</strong> para</span>
-                <input type="text" class="form-control adi-in adi-in-juros" id="adi-juros" inputmode="decimal" value="${esc(String(f.juros).replace(".", ","))}" oninput="RelacionamentoApp.adiCampo('juros', this.value)">
-                <span>%</span>
-              </div>
+        <div class="adi-ajustes">
+          <div>
+            <div class="adi-lbl">Juros de parcelamento</div>
+            <div class="adi-depara">
+              <span>de <strong>${a.juros != null ? pct4(a.juros) : "—"}</strong> para</span>
+              <input type="text" class="form-control adi-in adi-in-juros" id="adi-juros" inputmode="decimal" value="${esc(String(f.juros).replace(".", ","))}" oninput="RelacionamentoApp.adiCampo('juros', this.value)">
+              <span>% ao mês</span>
             </div>
-            <div>
-              <div class="adi-lbl">Reajuste anual</div>
-              <label class="adi-radio"><input type="radio" name="adi-reajuste" value="com" ${f.reajuste === "com" ? "checked" : ""} onchange="RelacionamentoApp.adiCampo('reajuste', 'com')">
-                Com reajuste de <strong>${esc(a.indice || "—")}</strong> para
-                <input type="text" class="form-control adi-in adi-in-indice" id="adi-indice" list="adi-indices" value="${esc(f.indice)}" placeholder="Índice" oninput="RelacionamentoApp.adiCampo('indice', this.value)">
-              </label>
-              <datalist id="adi-indices">${INDICES.map((i) => `<option value="${i}"></option>`).join("")}</datalist>
+          </div>
+          <div>
+            <div class="adi-lbl">Reajuste anual</div>
+            <div class="adi-reaj">
               <label class="adi-radio"><input type="radio" name="adi-reajuste" value="sem" ${f.reajuste === "sem" ? "checked" : ""} onchange="RelacionamentoApp.adiCampo('reajuste', 'sem')"> Sem reajuste</label>
+              <label class="adi-radio"><input type="radio" name="adi-reajuste" value="com" ${f.reajuste === "com" ? "checked" : ""} onchange="RelacionamentoApp.adiCampo('reajuste', 'com')"> Com</label>
+              <input type="text" class="form-control adi-in adi-in-indice" id="adi-indice" list="adi-indices" value="${esc(f.indice)}" placeholder="Índice" oninput="RelacionamentoApp.adiCampo('indice', this.value)">
+              <datalist id="adi-indices">${INDICES.map((i) => `<option value="${i}"></option>`).join("")}</datalist>
             </div>
           </div>
-          <div class="adi-bloco">
-            <div class="adi-lbl-row">
-              <span class="adi-lbl">Novas condições de pagamento</span>
-              <span class="adi-acoes">
-                <button type="button" class="btn btn-outline btn-sm" onclick="RelacionamentoApp.adiRestaurar()"><i data-lucide="rotate-ccw"></i> Restaurar padrão</button>
-                <button type="button" class="btn btn-primary btn-sm" onclick="RelacionamentoApp.adiAdicionarLinha()"><i data-lucide="plus"></i> Adicionar condição</button>
-              </span>
-            </div>
-            <div class="adi-tab-wrap">
-              <table class="adi-tab adi-tab-edit">
-                <thead><tr><th>Tipo de condição</th><th class="adi-num">Qtde.</th><th class="adi-num">Valor da parcela</th><th class="adi-num">Total da condição</th><th>1º vencimento</th><th></th></tr></thead>
-                <tbody id="adi-linhas">${this._adiLinhasHtml(ctx)}</tbody>
-              </table>
-            </div>
-            <div id="adi-totais" class="adi-totais"></div>
+          <div>
+            <div class="adi-lbl">O que muda no termo <small>(marcado sozinho conforme você altera)</small></div>
+            <div class="adi-chips">${chips}</div>
           </div>
-          <div class="adi-bloco">
-            <div class="adi-lbl">Como sai no termo (cláusula 1.1)</div>
-            <div id="adi-previa" class="adi-previa"></div>
-          </div>
-        </section>`;
+        </div>`;
     },
 
     _adiLinhasHtml(ctx) {
@@ -315,9 +319,17 @@
       if (!box) return;
       if (ctx.adiBloqueio) {
         box.innerHTML = `<div class="adi-bloqueio"><i data-lucide="ban"></i> O aditamento só pode ser feito em contrato ativo: ${this._escDoc(ctx.adiBloqueio)}.</div>
+          ${this._adiResumoHtml(ctx)}
           <div class="adi-grid adi-grid-um">${this._adiHojeHtml(ctx)}</div>`;
       } else {
-        box.innerHTML = `<div class="adi-grid">${this._adiHojeHtml(ctx)}${this._adiNovoHtml(ctx)}</div>`;
+        const previaAberta = !!ctx.adiPreviaAberta;
+        box.innerHTML = `${this._adiResumoHtml(ctx)}
+          <div class="adi-grid">${this._adiHojeHtml(ctx)}${this._adiNovoHtml(ctx)}</div>
+          ${this._adiAjustesHtml(ctx)}
+          <details class="adi-previa-box"${previaAberta ? " open" : ""} ontoggle="RelacionamentoState.aditamento && (RelacionamentoState.aditamento.adiPreviaAberta = this.open)">
+            <summary><i data-lucide="file-search"></i> Ver como sai no termo (cláusula 1.1)</summary>
+            <div id="adi-previa" class="adi-previa"></div>
+          </details>`;
       }
       if (window.lucide) lucide.createIcons();
       this._adiAtualizar();
