@@ -800,8 +800,12 @@ ComprasControleApp.formaHtml = function (payment, row) {
       return `<p><strong>Forma:</strong> PIX</p><p>${this.esc(d.notes || "Chave do credor")}</p>`;
     }
     if (payment.kind === "boleto-bancario" || payment.kind === "boleto-concessionaria") {
+      if (window.BoletoCheck) {
+        const r = row || {};
+        return BoletoCheck.html(payment, { valor: r.valorConferir, vencimento: r.vencimento, descontoTitulo: r.descontoTitulo });
+      }
       const nome = payment.kind === "boleto-concessionaria" ? "Boleto de concessionária" : "Boleto";
-      return `<p><strong>Forma:</strong> ${nome}</p><p>${this.esc(d.notes || d.digitableNumber || d.barCode || "")}</p>`;
+      return `<p><strong>Forma:</strong> ${nome}</p><p>${this.esc(d.notes || d.boletoBancarioManualBarCodeNumber || d.boletoConcessionariaManualBarCodeNumber || "")}</p>`;
     }
     const banco = [d.beneficiaryBankCode, d.beneficiaryBankName].filter(Boolean).join(" — ");
     const ag = [d.beneficiaryBankBranchNumber, d.beneficiaryBankBranchDigit].filter(Boolean).join("-");
@@ -840,7 +844,11 @@ ComprasControleApp.fecharTitulo = function () {
 };
 
 ComprasControleApp.abrirTitulo = async function (index) {
-  const row = (this.state.shown || [])[Number(index)];
+  return this.abrirTituloRow((this.state.shown || [])[Number(index)]);
+};
+
+/** Abre o resumo do título (dados, anexos e forma de pagamento) a partir de uma linha de qualquer tela. */
+ComprasControleApp.abrirTituloRow = async function (row) {
   if (!row || !row.titulo) return;
   const gen = (this._tituloGen || 0) + 1;
   this._tituloGen = gen;
@@ -896,9 +904,10 @@ ComprasControleApp.pintarTitulo = function () {
   const pago = row.natureza === "pago" && row.dataPagamento;
   const valor = pago ? (row.valorAjustado != null ? row.valorAjustado : row.valor) : (Number(row.saldo) > 0 ? row.saldo : row.valorAjustado);
   const obs = bill.notes || bill.observation || bill.historic || bill.history || bill.complement || "";
+  const conferir = Object.assign({}, row, { valorConferir: pago ? null : valor, descontoTitulo: Number(bill.discount) || 0 });
   const forma = typeof caixaFormaHtml === "function"
-    ? caixaFormaHtml(det.payment, row)
-    : this.formaHtml(det.payment, row);
+    ? caixaFormaHtml(det.payment, conferir)
+    : this.formaHtml(det.payment, conferir);
   const anexos = (det.attachments || []).map((a) => `
     <button type="button" class="btn btn-outline btn-sm" style="height:32px;" onclick="event.stopPropagation(); ComprasControleApp.baixarAnexoTitulo('${this.esc(row.titulo)}','${this.esc(a.id)}','${this.esc(a.name || "anexo.pdf")}')">${this.esc(a.description || a.name || "Anexo")}</button>
   `).join("");
@@ -917,7 +926,7 @@ ComprasControleApp.pintarTitulo = function () {
           <div><span>Empresa</span><div>${this.esc(this.companyLabel(empresaId))}</div></div>
           <div><span>Vencimento</span><div>${this.esc(this.fmtDate(row.vencimento || bill.dueDate))}</div></div>
           <div><span>${pago ? "Valor pago" : "Valor a pagar"}</span><div class="cfin-titulo-valor">${this.esc(this.money(valor))}</div></div>
-          <div><span>Situação</span><div>${this.esc(this.statusLabel(row))}</div></div>
+          <div><span>Situação</span><div>${this.esc(row.situacaoTexto || this.statusLabel(row))}</div></div>
           <div><span>Centro de custo</span><div>${this.esc(cc)}</div></div>
           <div><span>Plano financeiro</span><div>${this.esc(plano)}</div></div>
           <div><span>Emissão</span><div>${this.esc(this.fmtDate(row.emissao || bill.issueDate))}</div></div>

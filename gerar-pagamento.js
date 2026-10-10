@@ -24,6 +24,10 @@ const GerarPagamentoApp = {
     selInit: {},
     lotes: [],
     loteSienge: {},
+    formaSienge: {},
+    pagInfo: {},
+    selManual: {},
+    validacao: { feitos: 0, total: 0, rodando: false },
     gerandoLote: "",
     gen: 0
   },
@@ -276,7 +280,11 @@ const GerarPagamentoApp = {
     s.previsoesIgnoradas = 0;
     s.sel = {};
     s.selInit = {};
+    s.selManual = {};
     s.loteSienge = {};
+    s.formaSienge = {};
+    s.pagInfo = {};
+    s.validacao = { feitos: 0, total: 0, rodando: false };
     this.render();
 
     const tipo = s.tipoData === "P" ? "P" : "D";
@@ -323,6 +331,7 @@ const GerarPagamentoApp = {
     s.consultando = false;
     s.progresso = "";
     this.render();
+    if (!s.erroTitulos) this.validarPagamentos(gen);
   },
 
   montarTitulos(app, bills, parceiros) {
@@ -447,6 +456,7 @@ const GerarPagamentoApp = {
           parcelas.forEach((p) => {
             const num = p.installmentId != null ? p.installmentId : p.installmentNumber;
             if (num == null) return;
+            s.formaSienge[this.chaveTitulo(billId, num)] = { tipo: String(p.paymentType || ""), tipoId: p.paymentTypeId != null ? String(p.paymentTypeId) : "" };
             if (p.batchNumber != null || p.sentToBank === true) {
               s.loteSienge[this.chaveTitulo(billId, num)] = p.batchNumber != null ? String(p.batchNumber) : "sim";
             }
@@ -457,6 +467,109 @@ const GerarPagamentoApp = {
       }
     };
     await Promise.all([worker(), worker(), worker()]);
+  },
+
+  /* ---------- forma de pagamento: boleto conferido (código, valor, vencimento, desconto) ---------- */
+  tiposPagamento(tipo) {
+    const t = String(tipo || "");
+    if (/pix/i.test(t)) return ["pix"];
+    if (/transf|ted\b|doc\b|cr[eé]dito em conta|dep[oó]sito/i.test(t)) return ["bank-transfer"];
+    if (/concession|consumo|arrecad|tribut|guia|darf|gps|fgts|imposto/i.test(t)) return ["boleto-concessionaria", "boleto-tax", "boleto-bancario"];
+    if (/boleto|bloqueto|cobran/i.test(t)) return ["boleto-bancario", "boleto-concessionaria"];
+    return ["boleto-bancario", "bank-transfer", "pix", "boleto-concessionaria"];
+  },
+
+  async lerFormaPagamento(titulo, parcela, tipo) {
+    const kinds = this.tiposPagamento(tipo);
+    for (let i = 0; i < kinds.length; i++) {
+      try {
+        const data = await window.siengeFetchWithRetry(
+          `/bills/${encodeURIComponent(titulo)}/installments/${encodeURIComponent(parcela || 1)}/payment-information/${kinds[i]}`, 1);
+        if (data && typeof data === "object" && Object.keys(data).length) return { kind: kinds[i], data };
+      } catch (e) {}
+    }
+    return null;
+  },
+
+  resumoTitulo(chave) {
+    const rows = this.state.titulos.filter((r) => this.chaveTitulo(r.titulo, r.parcela) === chave);
+    if (!rows.length) return null;
+    return {
+      rows,
+      aPagar: rows.reduce((t, r) => t + (Number(r.aPagar) || 0), 0),
+      valor: rows.reduce((t, r) => t + (Number(r.valor) || 0), 0)
+    };
+  },
+
+  async validarPagamentos(gen) {
+    const s = this.state;
+    if (typeof window.siengeFetchWithRetry !== "function" || !window.BoletoCheck) return;
+    const chaves = [...new Set(s.titulos.filter((r) => !r.pago && r.aPagar > 0.009).map((r) => this.chaveTitulo(r.titulo, r.parcela)))]
+      .filter((k) => !s.loteSienge[k] && !this.loteIntegraDe(k));
+    s.validacao = { feitos: 0, total: chaves.length, rodando: chaves.length > 0 };
+    let ultima = Date.now();
+    const fila = chaves.slice();
+    const worker = async () => {
+      while (fila.length && gen === s.gen) {
+        const chave = fila.shift();
+        const t = this.resumoTitulo(chave);
+        if (!t) continue;
+        const r = t.rows[0];
+        const forma = s.formaSienge[chave] || {};
+        const payment = await this.lerFormaPagamento(r.titulo, r.parcela, forma.tipo);
+        if (gen !== s.gen) return;
+        const check = BoletoCheck.validar(payment, { valor: t.aPagar, vencimento: r.vencimento });
+        s.pagInfo[chave] = { payment, check, tipoSienge: forma.tipo || "" };
+        if (check.nivel === "erro") {
+          Object.keys(s.sel).forEach((k) => {
+            if (k.endsWith("|" + chave) && !s.selManual[k]) s.sel[k] = false;
+          });
+        }
+        s.validacao.feitos += 1;
+        if (Date.now() - ultima > 1500) {
+          ultima = Date.now();
+          this.paintTitulos();
+        }
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    if (gen !== s.gen) return;
+    s.validacao.rodando = false;
+    this.paintTitulos();
+  },
+
+  /** Abre o mesmo resumo do título usado no Contas a Pagar (dados, anexos, forma de pagamento conferida). */
+  abrirResumo(chave) {
+    const app = window.ComprasControleApp;
+    const t = this.resumoTitulo(chave);
+    if (!t || !app || typeof app.abrirTituloRow !== "function") return;
+    const r = t.rows[0];
+    const doc = String(r.documento || "").trim();
+    const esp = doc.indexOf(" ");
+    const cc = this.ccDe(r.ccId);
+    const situacao = r.pago
+      ? (r.status === "ok" ? "Pago na conta de parceria" : (r.status === "outra" ? "Pago em outra conta" : "Pago"))
+      : (s => s.loteIntegra ? "No lote " + s.loteIntegra.id : (s.loteSienge ? "Já em lote no Sienge" + (s.loteSienge !== "sim" ? " nº " + s.loteSienge : "") : "Em aberto"))({
+        loteIntegra: this.loteIntegraDe(chave), loteSienge: this.state.loteSienge[chave] || ""
+      });
+    app.abrirTituloRow({
+      titulo: r.titulo,
+      parcela: r.parcela,
+      credor: r.credor,
+      docId: esp > 0 ? doc.slice(0, esp) : "",
+      documento: esp > 0 ? doc.slice(esp + 1) : doc,
+      vencimento: r.vencimento,
+      saldo: t.aPagar,
+      valor: t.valor,
+      valorAjustado: t.valor,
+      ccId: [...new Set(t.rows.map((x) => x.ccId))].join(" / "),
+      ccNome: t.rows.length > 1 ? "rateado" : r.ccNome,
+      companyId: cc ? this.companyIdOf(cc) : "",
+      natureza: r.pago ? "pago" : "",
+      dataPagamento: r.pagamento || "",
+      conta: r.contas && r.contas.length ? "C/C " + r.contas.join(", ") : "",
+      situacaoTexto: situacao
+    });
   },
 
   loteIntegraDe(chave) {
@@ -500,6 +613,7 @@ const GerarPagamentoApp = {
         }
         it.selKey = selKey;
         it.marcado = !it.emLote && !!this.state.sel[selKey];
+        it.pag = this.state.pagInfo[it.chave] || null;
       });
       return { ...g, itens };
     }).sort((a, b) => (a.key === "__sem") - (b.key === "__sem")
@@ -523,6 +637,7 @@ const GerarPagamentoApp = {
 
   toggleItem(selKey) {
     this.state.sel[selKey] = !this.state.sel[selKey];
+    this.state.selManual[selKey] = true;
     this.paintTitulos();
   },
 
@@ -557,9 +672,13 @@ const GerarPagamentoApp = {
       return;
     }
     const total = itens.reduce((t, it) => t + it.aPagar, 0);
-    const okConf = typeof window.mouraConfirm === "function"
-      ? await window.mouraConfirm(`Gerar lote do dia ${this.dataBr(g.dia)} com ${itens.length} título(s), total de ${this.money(total)}, pela conta ${this.contaLabel(g.conta)}?`)
-      : confirm(`Gerar lote do dia ${this.dataBr(g.dia)} com ${itens.length} título(s), total de ${this.money(total)}?`);
+    const problemas = itens.filter((it) => it.pag && (it.pag.check.nivel === "erro" || it.pag.check.nivel === "sem"));
+    const semConferir = itens.filter((it) => !it.pag).length;
+    const alerta = (problemas.length
+      ? `\n\nAtenção: ${problemas.length} título(s) com problema na forma de pagamento:\n` + problemas.slice(0, 8).map((it) => `• ${it.titulo}/${it.parcela || 1} ${it.credor}: ${it.pag.check.resumo}`).join("\n") + (problemas.length > 8 ? `\n• e mais ${problemas.length - 8}` : "")
+      : "") + (semConferir ? `\n\n${semConferir} título(s) ainda sem conferência da forma de pagamento.` : "");
+    const pergunta = `Gerar lote do dia ${this.dataBr(g.dia)} com ${itens.length} título(s), total de ${this.money(total)}, pela conta ${this.contaLabel(g.conta)}?${alerta}`;
+    const okConf = typeof window.mouraConfirm === "function" ? await window.mouraConfirm(pergunta) : confirm(pergunta);
     if (!okConf) {
       s.gerandoLote = "";
       this.paintTitulos();
@@ -585,7 +704,10 @@ const GerarPagamentoApp = {
       itens: itens.map((it) => ({
         titulo: it.titulo, parcela: it.parcela, credor: it.credor, documento: it.documento,
         vencimento: it.vencimento, valor: Math.round(it.aPagar * 100) / 100,
-        ccs: it.ccs.map((c) => c.id + " - " + c.nome).join(" / ")
+        ccs: it.ccs.map((c) => c.id + " - " + c.nome).join(" / "),
+        forma: it.pag ? it.pag.check.forma : "",
+        linhaDigitavel: it.pag ? it.pag.check.linhaFmt || "" : "",
+        conferencia: it.pag ? it.pag.check.resumo : "Não conferido"
       }))
     }));
     let salvoRemoto = false;
@@ -621,14 +743,15 @@ const GerarPagamentoApp = {
       ["Gerado em", new Date(lote.criadoEm).toLocaleString("pt-BR")],
       ["Gerado por", lote.criadoPor || ""],
       [],
-      ["Vencimento", "Título", "Parcela", "Credor", "Documento", "Centro de custo", "Valor a pagar"]
+      ["Vencimento", "Título", "Parcela", "Credor", "Documento", "Centro de custo", "Valor a pagar", "Forma de pagamento", "Linha digitável", "Conferência"]
     ];
     (lote.itens || []).forEach((i) => {
-      linhas.push([this.dataBr(i.vencimento), Number(i.titulo) || i.titulo, Number(i.parcela) || i.parcela, i.credor, i.documento, i.ccs, Number(i.valor) || 0]);
+      linhas.push([this.dataBr(i.vencimento), Number(i.titulo) || i.titulo, Number(i.parcela) || i.parcela, i.credor, i.documento, i.ccs, Number(i.valor) || 0,
+        i.forma || "", i.linhaDigitavel || "", i.conferencia || ""]);
     });
     linhas.push([], ["", "", "", "", "", "Total", Number(lote.total) || 0]);
     const ws = XLSX.utils.aoa_to_sheet(linhas);
-    ws["!cols"] = [{ wch: 12 }, { wch: 10 }, { wch: 8 }, { wch: 40 }, { wch: 18 }, { wch: 44 }, { wch: 16 }];
+    ws["!cols"] = [{ wch: 12 }, { wch: 10 }, { wch: 8 }, { wch: 40 }, { wch: 18 }, { wch: 44 }, { wch: 16 }, { wch: 22 }, { wch: 58 }, { wch: 50 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Lote");
     const conta = String((lote.conta && (lote.conta.numero || lote.conta.id)) || "").replace(/[^\w-]/g, "");
@@ -679,8 +802,9 @@ const GerarPagamentoApp = {
         const tag = it.loteIntegra
           ? `<span class="gp-pill gp-ok">No lote ${this.esc(it.loteIntegra.id)}</span>`
           : (it.loteSienge ? `<span class="gp-pill gp-warn">Já em lote no Sienge${it.loteSienge !== "sim" ? " nº " + this.esc(it.loteSienge) : ""}</span>` : `<span class="gp-pill gp-wait">Em aberto</span>`);
-        return `<tr class="${it.emLote ? "gp-em-lote" : ""}">
-          <td style="text-align:center;"><input type="checkbox" ${it.marcado ? "checked" : ""} ${sem || it.emLote || gerando ? "disabled" : ""}
+        const pagSelo = it.emLote ? `<span class="gp-muted">—</span>` : (window.BoletoCheck ? BoletoCheck.seloHtml(it.pag ? it.pag.check : null) : "");
+        return `<tr class="gp-click${it.emLote ? " gp-em-lote" : ""}${it.pag && it.pag.check.nivel === "erro" && !it.emLote ? " gp-row-bad" : ""}" onclick="GerarPagamentoApp.abrirResumo('${this.esc(it.chave)}')" title="Clique para ver o resumo do título">
+          <td style="text-align:center;" onclick="event.stopPropagation()"><input type="checkbox" ${it.marcado ? "checked" : ""} ${sem || it.emLote || gerando ? "disabled" : ""}
             title="${it.emLote ? "Já está em lote; não pode entrar em outro." : ""}"
             onchange="GerarPagamentoApp.toggleItem('${this.esc(it.selKey)}')"></td>
           <td>${this.dataBr(it.vencimento)}</td>
@@ -689,6 +813,7 @@ const GerarPagamentoApp = {
           <td>${this.esc(it.documento || "—")}</td>
           <td title="${this.esc(it.ccs.map((c) => c.id + " " + c.nome).join(" / "))}">${it.ccs.map((c) => `<strong>${this.esc(c.id)}</strong>`).join(" / ")} <span class="gp-muted">${this.esc(it.ccs.length === 1 ? it.ccs[0].nome : "rateado")}</span></td>
           <td style="text-align:right;">${this.money(it.aPagar)}</td>
+          <td class="gp-status">${pagSelo}</td>
           <td class="gp-status">${tag}</td>
         </tr>`;
       }).join("");
@@ -716,8 +841,8 @@ const GerarPagamentoApp = {
         </div>
         <div style="overflow:auto;">
           <table class="gp-table gp-titulos">
-            <colgroup><col style="width:4%"><col style="width:9%"><col style="width:9%"><col style="width:22%"><col style="width:11%"><col style="width:20%"><col style="width:10%"><col style="width:15%"></colgroup>
-            <thead><tr><th></th><th>Vencimento</th><th>Título</th><th>Credor</th><th>Documento</th><th>Centro de custo</th><th style="text-align:right;">A pagar</th><th>Situação</th></tr></thead>
+            <colgroup><col style="width:3%"><col style="width:8%"><col style="width:8%"><col style="width:19%"><col style="width:10%"><col style="width:17%"><col style="width:9%"><col style="width:12%"><col style="width:14%"></colgroup>
+            <thead><tr><th></th><th>Vencimento</th><th>Título</th><th>Credor</th><th>Documento</th><th>Centro de custo</th><th style="text-align:right;">A pagar</th><th>Pagamento</th><th>Situação</th></tr></thead>
             <tbody>${linhas}</tbody>
           </table>
         </div>
@@ -746,7 +871,12 @@ const GerarPagamentoApp = {
           </tr>`).join("")}</tbody>
         </table>
       </div>` : "";
-    return `<p class="gp-nota">Títulos em aberto separados por conta de parceria e dia de vencimento: um lote por conta por dia. Título que já está em lote (no Integra ou no Sienge) não entra em outro. O lote fica registrado no Integra e é baixado em Excel para pagamento.</p>${cards}${geradosHtml}`;
+    const v = s.validacao || {};
+    const errosPag = Object.values(s.pagInfo).filter((p) => p.check.nivel === "erro").length;
+    const progressoPag = v.rodando
+      ? `<span class="gp-valida"><span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;"></span> Conferindo forma de pagamento e boletos · ${v.feitos} de ${v.total}</span>`
+      : (v.total ? `<span class="gp-valida">${errosPag ? `<b style="color:#b91c1c;">${errosPag} título(s) com problema na forma de pagamento</b> (desmarcados)` : "Formas de pagamento conferidas"}</span>` : "");
+    return `<p class="gp-nota">Títulos em aberto separados por conta de parceria e dia de vencimento: um lote por conta por dia. Título que já está em lote (no Integra ou no Sienge) não entra em outro. Clique na linha para ver o resumo do título. ${progressoPag}</p>${cards}${geradosHtml}`;
   },
 
   grupoStatus(r) {
@@ -790,7 +920,7 @@ const GerarPagamentoApp = {
     const visiveis = s.filtro === "todos" ? todos : todos.filter((r) => this.grupoStatus(r) === s.filtro);
     const filtros = this.FILTROS.map((f) => `<button type="button" class="gp-filtro${s.filtro === f.id ? " is-active" : ""}${f.id === "outra" ? " is-bad" : ""}" onclick="GerarPagamentoApp.setFiltro('${f.id}')">${this.esc(f.label)} <b>${cont[f.id]}</b></button>`).join("");
     const linhas = visiveis.length
-      ? visiveis.map((r) => `<tr class="${r.status === "outra" || r.status === "sem-conta" ? "gp-row-bad" : ""}">
+      ? visiveis.map((r) => `<tr class="gp-click${r.status === "outra" || r.status === "sem-conta" ? " gp-row-bad" : ""}" onclick="GerarPagamentoApp.abrirResumo('${this.esc(this.chaveTitulo(r.titulo, r.parcela))}')" title="Clique para ver o resumo do título">
           <td>${this.dataBr(r.vencimento)}</td>
           <td>${r.pagamento ? this.dataBr(r.pagamento) : "—"}</td>
           <td><strong>${this.esc(r.titulo)}</strong>${r.parcela ? `<span class="gp-muted"> / ${this.esc(r.parcela)}</span>` : ""}</td>
@@ -900,6 +1030,9 @@ const GerarPagamentoApp = {
           #gerar-pagamento-root .gp-lote-feito { opacity:0.8; }
           #gerar-pagamento-root .gp-lote-feito .gp-lote-h { background:#f1f5f9; }
           #gerar-pagamento-root .gp-lote-feito .gp-lote-dia { background:#64748b; }
+          #gerar-pagamento-root tr.gp-click { cursor:pointer; }
+          #gerar-pagamento-root tr.gp-click:hover td { background:#ecfdf5; }
+          #gerar-pagamento-root .gp-valida { display:inline-flex; align-items:center; gap:6px; margin-left:6px; color:#475569; font-weight:600; }
           #gerar-pagamento-root tr.gp-em-lote td { color:#94a3b8; }
           #gerar-pagamento-root tr.gp-em-lote td strong { color:#64748b; }
           #gerar-pagamento-root .gp-lote-h small { color:#64748b; font-size:0.75rem; }

@@ -64,7 +64,15 @@ function caixaFormaHtml(payment, item) {
       return `<p><strong>Forma:</strong> PIX</p><p>${caixaEsc(d.notes || "Chave do credor")}</p>`;
     }
     if (payment.kind === "boleto-bancario" || payment.kind === "boleto-concessionaria") {
-      return `<p><strong>Forma:</strong> ${payment.kind === "boleto-concessionaria" ? "Boleto de concessionária" : "Boleto"}</p><p>${caixaEsc(d.notes || d.digitableNumber || d.barCode || "")}</p>`;
+      if (window.BoletoCheck) {
+        const it = item || {};
+        return BoletoCheck.html(payment, {
+          valor: it.valorConferir != null ? it.valorConferir : (it.aPagar != null ? it.aPagar : it.valor),
+          vencimento: it.vencimento,
+          descontoTitulo: it.descontoTitulo
+        });
+      }
+      return `<p><strong>Forma:</strong> ${payment.kind === "boleto-concessionaria" ? "Boleto de concessionária" : "Boleto"}</p><p>${caixaEsc(d.notes || d.boletoBancarioManualBarCodeNumber || d.boletoConcessionariaManualBarCodeNumber || "")}</p>`;
     }
     const banco = [d.beneficiaryBankCode, d.beneficiaryBankName].filter(Boolean).join(" — ");
     const ag = [d.beneficiaryBankBranchNumber, d.beneficiaryBankBranchDigit].filter(Boolean).join("-");

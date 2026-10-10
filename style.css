@@ -7814,3 +7814,12 @@ circle.donut-segment {
 .cpag-table .moura-switch { gap: 7px; }
 .cpag-table .moura-switch-text { font-size: 0.74rem; }
 
+
+/* Selo de conferência da forma de pagamento (boleto-check.js) */
+.bchk { display:inline-block; padding:2px 8px; border-radius:999px; font-size:0.7rem; font-weight:700; white-space:nowrap; cursor:help; }
+.bchk-ok { background:#dcfce7; color:#105436; }
+.bchk-erro { background:#fee2e2; color:#b91c1c; }
+.bchk-aviso { background:#ffedd5; color:#c2410c; }
+.bchk-info { background:#f1f5f9; color:#475569; }
+.bchk-wait { background:#f8fafc; color:#94a3b8; border:1px dashed #cbd5e1; }
+.bchk-desc { background:#e0f2fe; color:#0369a1; }
