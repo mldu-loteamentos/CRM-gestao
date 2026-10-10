@@ -83,6 +83,11 @@ window.NotaFiscalCheck = {
     return "";
   },
 
+  /** NF-e de mercadoria, conta de energia (NF3e), NFC-e e CT-e não têm retenção na fonte. */
+  semRetencao(docId, docNome) {
+    return /^(nfe|nf-e|nf3e|nfce|nfcom|cte|ct-e|danfe)/i.test(String(docId || "").trim()) || /mercadoria|produto|energia/i.test(String(docNome || ""));
+  },
+
   ehServico(docId, docNome) {
     return /^(nfs|nfse|nfts|nfsa|rpa|nfps)/i.test(String(docId || "").trim()) || /servi[cç]o/i.test(String(docNome || ""));
   },
@@ -553,9 +558,9 @@ window.NotaFiscalCheck = {
   seloHtml(r) {
     if (!r) return "";
     const cls = { ok: "bchk-ok", erro: "bchk-erro", aviso: "bchk-aviso" }[r.nivel] || "bchk-info";
-    const txt = r.nivel === "ok" ? "Impostos ✓" : (r.nivel === "erro" ? "Impostos: erro" : (r.nivel === "aviso" ? "Impostos: atenção" : (r.retido > this.TOL ? "Retido " + this.money(r.retido) : "Impostos ?")));
+    const txt = r.nivel === "ok" ? "Conferido ✓" : (r.nivel === "erro" ? "Erro" : (r.nivel === "aviso" ? "Atenção" : "Nota não lida"));
     const dica = [].concat(r.erros, r.avisos, r.infos).join("\n") || r.resumo;
-    return ` <span class="bchk ${cls}" title="${this.esc(dica)}">${this.esc(txt)}</span>`;
+    return `<span class="bchk ${cls}" title="${this.esc(dica)}">${this.esc(txt)}</span>`;
   },
 
   html(r) {

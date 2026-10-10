@@ -878,7 +878,8 @@ ComprasControleApp.abrirTituloRow = async function (row) {
     this._tituloDetalhe.attachments = attachments || [];
     this._tituloDetalhe.payment = payment;
     this.pintarTitulo();
-    if (!this._tituloDetalhe.fiscal && window.NotaFiscalCheck) {
+    const docTitulo = row.docId || (bill && bill.documentIdentificationId) || "";
+    if (!this._tituloDetalhe.fiscal && window.NotaFiscalCheck && !NotaFiscalCheck.semRetencao(docTitulo, row.docNome)) {
       const bruto = Number(bill && bill.installmentsNumber) > 1 ? Number(row.valor) || 0 : (Number(bill && bill.totalInvoiceAmount) || Number(row.valor) || 0);
       NotaFiscalCheck.analisar({ billId, credorId: (bill && bill.creditorId) || row.credorId, bruto, anexos: attachments })
         .then((f) => {
@@ -941,7 +942,7 @@ ComprasControleApp.pintarTitulo = function () {
   const fiscal = det.fiscal;
   const retido = !pago && fiscal && fiscal.retidoPagamento > 0.009 && fiscal.bruto && Math.abs(Number(valor) - fiscal.bruto) <= 0.01 ? fiscal.retidoPagamento : 0;
   const conferir = Object.assign({}, row, { valorConferir: pago ? null : valor, descontoTitulo: Number(bill.discount) || 0, retido });
-  const fiscalHtml = !window.NotaFiscalCheck ? "" : (det.fiscalErro
+  const fiscalHtml = !window.NotaFiscalCheck || (!fiscal && NotaFiscalCheck.semRetencao(row.docId || bill.documentIdentificationId, row.docNome)) ? "" : (det.fiscalErro
     ? `<p style="color:#b91c1c;margin:0;">Não consegui conferir os impostos: ${this.esc(det.fiscalErro)}</p>`
     : NotaFiscalCheck.html(fiscal));
   const forma = typeof caixaFormaHtml === "function"

@@ -754,7 +754,7 @@ const GerarPagamentoApp = {
         let check = BoletoCheck.validar(payment, ctx);
         let fiscal = null;
         const boletoMenor = check.valorBoleto != null && check.valorBoleto > 0 && check.valorBoleto < t.aPagar - 0.01;
-        if (window.NotaFiscalCheck && (NotaFiscalCheck.ehServico(r.docId, r.docNome) || boletoMenor)) {
+        if (window.NotaFiscalCheck && !NotaFiscalCheck.semRetencao(r.docId, r.docNome) && (NotaFiscalCheck.ehServico(r.docId, r.docNome) || boletoMenor)) {
           fiscal = await NotaFiscalCheck.analisar({ billId: r.titulo, credorId: r.credorId, bruto: t.valor }).catch(() => null);
           if (gen !== s.gen) return;
           if (fiscal && fiscal.retidoPagamento > 0.009) check = BoletoCheck.validar(payment, Object.assign({}, ctx, { retido: fiscal.retidoPagamento }));
@@ -1466,8 +1466,11 @@ const GerarPagamentoApp = {
             : (this.lotePendenteDe(it.chave)
               ? `<span class="gp-pill gp-wait" title="Está no lote ${this.esc(this.lotePendenteDe(it.chave).id)}, que não foi gerado no Sienge. Ao gerar de novo, ele sai daquele lote.">Em aberto</span><small>Lote não gerado no Sienge</small>`
               : `<span class="gp-pill gp-wait">Em aberto</span>`));
-        const pagSelo = it.emLote ? `<span class="gp-muted">—</span>` : (window.BoletoCheck ? BoletoCheck.seloHtml(it.pag ? it.pag.check : null) : "")
-          + (!it.emLote && it.pag && it.pag.fiscal && window.NotaFiscalCheck ? NotaFiscalCheck.seloHtml(it.pag.fiscal) : "");
+        const pagSelo = it.emLote ? `<span class="gp-muted">—</span>` : (window.BoletoCheck ? BoletoCheck.seloHtml(it.pag ? it.pag.check : null) : "");
+        const fiscalSelo = it.emLote || !window.NotaFiscalCheck ? `<span class="gp-muted">—</span>`
+          : (it.pag && it.pag.fiscal ? NotaFiscalCheck.seloHtml(it.pag.fiscal)
+            : (it.pag ? `<span class="gp-muted" title="Documento sem retenção de imposto na fonte (NF-e de produto, energia, CT-e ou documento que não é de serviço).">—</span>`
+              : (this.semAutorizacao(it) ? `<span class="gp-muted">—</span>` : `<span class="bchk bchk-wait">Conferindo…</span>`)));
         const retido = this.retidoDe(it);
         return `<tr class="gp-click${it.emLote ? " gp-em-lote" : ""}${this.bloqueioVisivel(it) ? " gp-row-bad" : ""}" onclick="GerarPagamentoApp.abrirResumo('${this.esc(it.chave)}')" title="Clique para ver o resumo do título">
           <td style="text-align:center;" onclick="event.stopPropagation()"><input type="checkbox" ${it.marcado ? "checked" : ""} ${sem || it.emLote || it.bloqueio || gerando ? "disabled" : ""}
@@ -1478,8 +1481,9 @@ const GerarPagamentoApp = {
           <td title="${this.esc(it.credor)}">${this.esc(it.credor)}</td>
           <td>${this.esc(it.documento || "—")}</td>
           <td class="gp-status">${this.ccsCelulaHtml(it)}${it.emLote ? "" : this.rateioSeloHtml(it.rateio)}</td>
-          <td style="text-align:right;"${retido ? ` title="${this.esc(`Bruto ${this.money(it.aPagar)} − impostos retidos ${this.money(retido)}`)}"` : ""}>${this.money(this.valorPagar(it))}${retido ? `<br><small class="gp-muted">líquido · retido ${this.money(retido)}</small>` : ""}</td>
+          <td style="text-align:right;"${retido ? ` title="${this.esc(`Líquido: bruto ${this.money(it.aPagar)} − impostos retidos ${this.money(retido)}`)}"` : ""}>${this.money(this.valorPagar(it))}${retido ? `<br><small class="gp-muted" style="white-space:nowrap;">retido ${this.money(retido)}</small>` : ""}</td>
           <td class="gp-status">${pagSelo}</td>
+          <td class="gp-status">${fiscalSelo}</td>
           <td class="gp-status">${this.autorizacaoSeloHtml(it)}</td>
           <td class="gp-status">${tag}</td>
         </tr>`;
@@ -1515,8 +1519,8 @@ const GerarPagamentoApp = {
         </div>
         <div class="gp-lote-corpo" style="overflow:auto;"${aberto ? "" : " hidden"}>
           <table class="gp-table gp-titulos">
-            <colgroup><col style="width:3%"><col style="width:8%"><col style="width:7%"><col style="width:17%"><col style="width:9%"><col style="width:9%"><col style="width:9%"><col style="width:11%"><col style="width:15%"><col style="width:12%"></colgroup>
-            <thead><tr><th></th><th>Vencimento</th><th>Título</th><th>Credor</th><th>Documento</th><th>Centro de custo</th><th style="text-align:right;">A pagar</th><th>Pagamento</th><th>Autorização</th><th>Situação</th></tr></thead>
+            <colgroup><col style="width:3%"><col style="width:8%"><col style="width:7%"><col style="width:15%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:9%"><col style="width:12%"><col style="width:10%"></colgroup>
+            <thead><tr><th></th><th>Vencimento</th><th>Título</th><th>Credor</th><th>Documento</th><th>Centro de custo</th><th style="text-align:right;">A pagar</th><th>Pagamento</th><th title="Imposto retido lançado no Sienge × nota fiscal anexada × CNAE do prestador">Fiscal</th><th>Autorização</th><th>Situação</th></tr></thead>
             <tbody>${linhas}</tbody>
           </table>
         </div>
