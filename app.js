@@ -3383,6 +3383,10 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (typeof MarketingBudgetApp !== "undefined") MarketingBudgetApp.init();
   } else if (tabId === "marketing-config") {
     if (typeof MarketingConfigApp !== "undefined") MarketingConfigApp.init();
+    else {
+      const mkcRoot = document.getElementById("marketing-config-root");
+      if (mkcRoot) mkcRoot.innerHTML = '<div class="crm-card" style="padding:20px;">Não foi possível carregar as Configurações do marketing. Atualize a página com Ctrl+F5.</div>';
+    }
   } else if (tabId === "prestacao-contas") {
     if (typeof PrestacaoContasApp !== "undefined") PrestacaoContasApp.init();
   } else if (tabId === "fluxo-caixa") {

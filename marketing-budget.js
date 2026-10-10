@@ -2,6 +2,7 @@
    Verba = VGV da obra (Sienge) × % de marketing (definido em Configurações). Consome com os títulos a pagar
    dos planos financeiros de marketing dos centros de custo configurados para a obra (pagos = realizado,
    em aberto = comprometido) e mede o custo de aquisição por unidade vendida com os contratos de venda.
+   A aba Contratos mostra quem está em dia, quem não pagou nada e quem deve a entrada (possíveis cancelamentos).
    A aba Perfil da venda cruza sexo e idade dos clientes com a situação de pagamento e os cancelamentos. */
 const MarketingBudgetApp = {
   CONFIG_COLLECTION: "marketing_budget_config",
@@ -29,6 +30,10 @@ const MarketingBudgetApp = {
     filtroGasto: "todos",
     ccsCfg: [],
     aba: "budget",
+    ctrEscopo: "periodo",
+    catOpen: false,
+    catQuery: "",
+    catPend: null,
     adimpl: { status: "", porVenda: {} },
     perfis: { status: "", map: {}, feitos: 0, total: 0 },
     gen: 0
@@ -148,16 +153,6 @@ const MarketingBudgetApp = {
     }
   },
 
-  async toggleCategoria(id) {
-    const s = this.state;
-    const sel = new Set(this.categoriasSelecionadas());
-    if (sel.has(id)) sel.delete(id);
-    else sel.add(id);
-    s.catSel = [...sel];
-    this.render();
-    await this.gravarConfig(this.CAT_DOC, { ids: s.catSel });
-  },
-
   categoriasSelecionadas() {
     const s = this.state;
     if (Array.isArray(s.catSel)) return s.catSel;
@@ -247,7 +242,7 @@ const MarketingBudgetApp = {
     }
     if (gen !== s.gen) return;
     this.repintarVendas();
-    if (s.aba === "perfil") this.render();
+    if (s.aba === "perfil" || s.aba === "contratos") this.render();
     try {
       await this.carregarPerfis(gen);
     } catch (e) {
@@ -354,6 +349,12 @@ const MarketingBudgetApp = {
       const titulo = String(bill.billId);
       const parcela = bill.installmentId != null ? String(bill.installmentId) : "";
       const venc = String(bill.dueDate || "").slice(0, 10);
+      const tituloInfo = {
+        companyId: bill.companyId != null ? String(bill.companyId) : "",
+        docId, docNum: String(bill.documentNumber || ""),
+        emissao: String(bill.issueDate || "").slice(0, 10),
+        tOriginal: original, tRealizado: realizado, tAberto: aberto, dataPg
+      };
       minhas.forEach((cat) => {
         const catId = String(cat.financialCategoryId != null ? cat.financialCategoryId : (cat.financialCategoryName || "?"));
         const catNome = cat.financialCategoryName || "Sem plano financeiro";
@@ -367,8 +368,10 @@ const MarketingBudgetApp = {
           vistos[key] = true;
           rows.push({
             titulo, parcela, ccId, catId, catNome, status, data, vencimento: venc, valor,
+            ccNome: cat.costCenterName || "",
             credor: String(bill.creditorName || "").trim(),
-            documento: [docId, bill.documentNumber].filter(Boolean).join(" ")
+            documento: [docId, bill.documentNumber].filter(Boolean).join(" "),
+            ...tituloInfo
           });
           if (!cats[catId]) cats[catId] = { id: catId, nome: catNome, total: 0 };
           cats[catId].total += valor;
@@ -381,6 +384,7 @@ const MarketingBudgetApp = {
       });
     });
     rows.sort((a, b) => String(b.data || "").localeCompare(String(a.data || "")));
+    rows.forEach((r, i) => { r.idx = i; });
     this.state.rows = rows;
     this.state.categorias = cats;
   },
@@ -481,15 +485,57 @@ const MarketingBudgetApp = {
       if (!b) b = v.unidadeIds.map((u) => porCliUnid[v.clienteId + "|" + u]).find(Boolean) || null;
       if (!b && v.unidadeNomes) b = v.unidadeNomes.split(",").map((n) => porCliUnid[v.clienteId + "|n:" + n.trim().toUpperCase()]).find(Boolean) || null;
       if (!b) { porVenda[v.id] = { status: "sem-titulo" }; return; }
-      const atrasada = b.abertas.find((p) => p.overdue);
-      if (atrasada) {
-        const dias = Math.max(1, Math.round((new Date(hoje + "T12:00:00") - new Date(atrasada.due + "T12:00:00")) / 86400000));
-        porVenda[v.id] = { status: "inadimplente", desde: atrasada.due, dias, vencido: b.vencido };
-      } else {
-        porVenda[v.id] = { status: b.aberto > 0.009 ? "adimplente" : "quitado" };
+      porVenda[v.id] = this.analisarTitulo(b, hoje);
+    });
+    const contratos = bills
+      .filter((b) => !b.revoked && b.nParcelas > 0 && (b.aberto > 0.009 || b.recebido > 0.009))
+      .map((b) => ({
+        id: "t" + b.id,
+        numero: "Título " + b.id,
+        data: "",
+        unidadeNomes: b.units.map((u) => u.name).filter(Boolean).join(", "),
+        cliente: (b.cliente && b.cliente.name) || "",
+        valor: b.aberto + b.recebido,
+        pag: this.analisarTitulo(b, hoje)
+      }));
+    s.adimpl = { status: "ok", porVenda, contratos };
+  },
+
+  /** Parcela de entrada pelo tipo de condição do Sienge (E1, E2…, entrada, sinal, ato). */
+  ehEntrada(p) {
+    const fold = (x) => String(x == null ? "" : (typeof x === "object" ? (x.id || x.code || x.description || x.name || "") : x))
+      .toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    const key = fold(typeof window.installmentConditionKey === "function" ? window.installmentConditionKey(p) : "");
+    if (/^(E\d*|SI|AT)$/.test(key)) return true;
+    const txt = [p.conditionType, p.conditionTypeName, p.paymentConditionType, p.paymentConditionTypeName, p.paymentTerm, p.installmentType].map(fold).join(" ");
+    return /\bENTRADA\b|\bSINAL\b|\bATO\b|\bE\d+\b/.test(txt);
+  },
+
+  /** Situação do título a receber: atraso, quanto já foi pago e se a entrada está paga. */
+  analisarTitulo(b, hoje) {
+    const pago = Number(b.recebido) || 0;
+    const aberto = Number(b.aberto) || 0;
+    const total = pago + aberto;
+    const entrada = { tem: false, aberta: 0, vencida: 0, desde: "" };
+    Object.values(b.parcelas || {}).forEach((p) => {
+      if (!p || !this.ehEntrada(p)) return;
+      entrada.tem = true;
+      const saldo = Number(p.currentBalance) || 0;
+      if (!(saldo > 0.009)) return;
+      const due = String(p.dueDate || "").slice(0, 10);
+      entrada.aberta += saldo;
+      if (due && due < hoje) {
+        entrada.vencida += saldo;
+        if (!entrada.desde || due < entrada.desde) entrada.desde = due;
       }
     });
-    s.adimpl = { status: "ok", porVenda };
+    const base = { recebido: pago, aberto, pctPago: total > 0.009 ? (pago / total) * 100 : 0, entrada };
+    const atrasada = (b.abertas || []).find((p) => p.overdue);
+    if (atrasada) {
+      const dias = Math.max(1, Math.round((new Date(hoje + "T12:00:00") - new Date(atrasada.due + "T12:00:00")) / 86400000));
+      return { ...base, status: "inadimplente", desde: atrasada.due, dias, vencido: b.vencido };
+    }
+    return { ...base, status: aberto > 0.009 ? "adimplente" : "quitado" };
   },
 
   atrasoHtml(v) {
@@ -497,7 +543,7 @@ const MarketingBudgetApp = {
     if (v.situacao === "Cancelado") return `<span class="mkb-muted">—</span>`;
     if (a.status === "carregando" || a.status === "") return `<span class="mkb-muted">Consultando…</span>`;
     if (a.status === "erro") return `<span class="mkb-muted" title="Não consegui ler o Contas a Receber">—</span>`;
-    const p = a.porVenda[v.id] || {};
+    const p = v.pagDireto || a.porVenda[v.id] || {};
     if (p.status === "inadimplente") {
       return `<span class="mkb-atraso" title="Inadimplente · ${this.money(p.vencido)} vencido">${this.dataBr(p.desde)} <small>(${p.dias} dia${p.dias === 1 ? "" : "s"})</small></span>`;
     }
@@ -683,7 +729,7 @@ const MarketingBudgetApp = {
     r.rows.forEach((x) => { cont[x.status] += 1; });
     const lista = s.filtroGasto === "todos" ? r.rows : r.rows.filter((x) => x.status === s.filtroGasto);
     const chips = ["todos", "realizado", "comprometido", "previsao"].map((id) => `<button type="button" class="mkb-chip${s.filtroGasto === id ? " is-on" : ""}" onclick="MarketingBudgetApp.setFiltroGasto('${id}')">${id === "todos" ? "Todos" : nomes[id]} <b>${cont[id]}</b></button>`).join("");
-    const linhas = lista.length ? lista.map((x) => `<tr>
+    const linhas = lista.length ? lista.map((x) => `<tr class="mkb-click" onclick="MarketingBudgetApp.abrirDespesa(${x.idx})" title="Clique para ver o resumo do título">
         <td>${this.dataBr(x.data)}</td>
         <td><span class="mkb-st mkb-st-${x.status}">${nomes[x.status]}</span></td>
         <td><strong>${this.esc(x.titulo)}</strong>${x.parcela ? `<span class="mkb-muted"> / ${this.esc(x.parcela)}</span>` : ""}</td>
@@ -702,6 +748,38 @@ const MarketingBudgetApp = {
       </table></div>`;
   },
 
+  /** Mesmo resumo do título do Controle financeiro (Compras): dados, anexos e forma de pagamento. */
+  abrirDespesa(idx) {
+    const x = this.state.rows[Number(idx)];
+    if (!x) return;
+    const app = window.ComprasControleApp;
+    if (!app || typeof app.abrirTituloRow !== "function") {
+      alert("O módulo de compras não está disponível para abrir o título.");
+      return;
+    }
+    const pago = x.status === "realizado";
+    app.abrirTituloRow({
+      titulo: x.titulo,
+      parcela: x.parcela,
+      credor: x.credor,
+      docId: x.docId,
+      documento: x.docNum,
+      vencimento: x.vencimento,
+      emissao: x.emissao,
+      companyId: x.companyId,
+      ccId: x.ccId,
+      ccNome: x.ccNome,
+      planoId: x.catId,
+      plano: x.catNome,
+      natureza: pago ? "pago" : (x.status === "previsao" ? "previsao" : "programado"),
+      dataPagamento: pago ? (x.dataPg || x.data) : "",
+      valor: x.tOriginal,
+      valorAjustado: pago ? x.tRealizado : x.tOriginal,
+      saldo: x.status === "comprometido" ? x.tAberto : 0,
+      situacaoTexto: pago ? "Pago" : (x.status === "previsao" ? "Previsão" : "Em aberto")
+    });
+  },
+
   vendasHtml() {
     const s = this.state;
     const lista = s.vendas.concat(s.distratos.filter((d) => !s.vendas.some((v) => v.id === d.id)));
@@ -716,19 +794,118 @@ const MarketingBudgetApp = {
       </tr>`).join("")
       : `<tr><td colspan="7" class="mkb-vazio">Nenhuma venda deste empreendimento no período.</td></tr>`;
     return `<div class="mkb-tablewrap"><table class="mkb-table">
-        <colgroup><col style="width:10%"><col style="width:13%"><col style="width:16%"><col style="width:25%"><col style="width:11%"><col style="width:12%"><col style="width:13%"></colgroup>
+        <colgroup><col style="width:9%"><col style="width:13%"><col style="width:10%"><col style="width:22%"><col style="width:11%"><col style="width:17%"><col style="width:18%"></colgroup>
         <thead><tr><th>Emissão</th><th>Contrato</th><th>Unidade</th><th>Cliente</th><th style="text-align:right;">Valor</th><th>Situação</th><th>Atrasado desde</th></tr></thead>
         <tbody>${linhas}</tbody>
       </table></div>`;
   },
 
+  /* ---------- planos financeiros de marketing (lista com Marcar Todos / Desmarcar Todos) ---------- */
+  CAT_FILTRO: "mkb-cats",
+
+  catItens() {
+    return Object.values(this.state.categorias).map((c) => ({ id: c.id, label: `${c.nome} · ${this.moneyShort(c.total)}` }));
+  },
+
+  catOpts() {
+    const s = this.state;
+    return {
+      id: this.CAT_FILTRO,
+      label: "Planos financeiros considerados marketing",
+      items: this.catItens(),
+      selectedIds: s.catOpen && s.catPend ? s.catPend : this.categoriasSelecionadas(),
+      open: !!s.catOpen,
+      query: s.catQuery || "",
+      emptyMeansAll: false,
+      countMode: true,
+      nouns: { singular: "plano financeiro", plural: "planos financeiros", none: "Nenhum plano financeiro", noMatch: "Nenhum plano financeiro com esse nome." }
+    };
+  },
+
+  pintarCatFiltro() {
+    const slot = document.getElementById("mkb-cats-slot");
+    if (!slot) return;
+    const lista = document.getElementById(this.CAT_FILTRO + "-list");
+    const top = lista ? lista.scrollTop : 0;
+    slot.innerHTML = MlEmpresaFilter.html(this.catOpts());
+    const nova = document.getElementById(this.CAT_FILTRO + "-list");
+    if (nova && top) nova.scrollTop = top;
+    if (window.lucide) lucide.createIcons();
+  },
+
+  pintarCatLista() {
+    const el = document.getElementById(this.CAT_FILTRO + "-list");
+    if (!el) return;
+    const top = el.scrollTop;
+    el.innerHTML = MlEmpresaFilter.listHtml(this.catOpts());
+    el.scrollTop = top;
+    const o = this.catOpts();
+    const btn = document.querySelector(`#${this.CAT_FILTRO} .ml-emp-filter-btn span`);
+    if (btn) btn.textContent = MlEmpresaFilter.buttonLabel(o.items, o.selectedIds, false, true, o.nouns);
+  },
+
+  /** Aplica a seleção ao fechar a lista: recalcula o budget uma vez e grava para todos os empreendimentos. */
+  async fecharCatFiltro() {
+    const s = this.state;
+    if (!s.catOpen) return;
+    const antes = this.categoriasSelecionadas().slice().sort().join("|");
+    const pend = (s.catPend || []).slice();
+    s.catOpen = false;
+    s.catQuery = "";
+    s.catPend = null;
+    if (pend.slice().sort().join("|") === antes) {
+      this.pintarCatFiltro();
+      return;
+    }
+    s.catSel = pend;
+    this.render();
+    await this.gravarConfig(this.CAT_DOC, { ids: s.catSel });
+  },
+
+  bindCatFiltro() {
+    if (!window.MlEmpresaFilter) return;
+    const self = this;
+    const s = this.state;
+    MlEmpresaFilter.bind(this.CAT_FILTRO, {
+      toggleOpen() {
+        if (s.catOpen) { self.fecharCatFiltro(); return; }
+        s.catOpen = true;
+        s.catPend = self.categoriasSelecionadas().slice();
+        self.pintarCatFiltro();
+        const q = document.getElementById(self.CAT_FILTRO + "-search");
+        if (q) q.focus();
+      },
+      close() { self.fecharCatFiltro(); },
+      setQuery(q) { s.catQuery = q || ""; self.pintarCatLista(); },
+      toggleId(id, on) {
+        const set = new Set(s.catPend || []);
+        if (on) set.add(String(id)); else set.delete(String(id));
+        s.catPend = [...set];
+        self.pintarCatLista();
+      },
+      selectAll() {
+        const q = String(s.catQuery || "").toLowerCase().trim();
+        const set = new Set(s.catPend || []);
+        self.catItens().forEach((it) => { if (!q || `${it.id} ${it.label}`.toLowerCase().includes(q)) set.add(String(it.id)); });
+        s.catPend = [...set];
+        self.pintarCatLista();
+      },
+      selectNone() { s.catPend = []; self.pintarCatLista(); }
+    });
+  },
+
   categoriasHtml() {
     const s = this.state;
+    if (!Object.keys(s.categorias).length) return `<p class="mkb-muted" style="margin:0;">Nenhum título a pagar ${s.ccsCfg.length > 1 ? "destes centros de custo" : "deste centro de custo"} no período.</p>`;
     const sel = new Set(this.categoriasSelecionadas());
-    const list = Object.values(s.categorias).sort((a, b) => (sel.has(b.id) - sel.has(a.id)) || b.total - a.total);
-    if (!list.length) return `<p class="mkb-muted" style="margin:0;">Nenhum título a pagar ${this.state.ccsCfg.length > 1 ? "destes centros de custo" : "deste centro de custo"} no período.</p>`;
-    return `<div class="mkb-cats">${list.map((c) => `<button type="button" class="mkb-cat${sel.has(c.id) ? " is-on" : ""}" onclick="MarketingBudgetApp.toggleCategoria('${this.esc(c.id)}')" title="${sel.has(c.id) ? "Considerado marketing — clique para tirar" : "Clique para considerar marketing"}">
-        ${sel.has(c.id) ? '<i data-lucide="check" style="width:12px;height:12px;"></i>' : ""}${this.esc(c.nome)} <b>${this.moneyShort(c.total)}</b></button>`).join("")}</div>`;
+    const marcados = Object.values(s.categorias).filter((c) => sel.has(c.id)).sort((a, b) => b.total - a.total);
+    const resumo = marcados.length
+      ? marcados.slice(0, 6).map((c) => `${this.esc(c.nome)} <b>${this.moneyShort(c.total)}</b>`).join(" · ") + (marcados.length > 6 ? ` · e mais ${marcados.length - 6}` : "")
+      : "Nenhum plano marcado: os gastos ficam zerados.";
+    return `<div class="mkb-cats-row">
+        <div id="mkb-cats-slot">${window.MlEmpresaFilter ? MlEmpresaFilter.html(this.catOpts()) : ""}</div>
+        <p class="mkb-cats-resumo">${resumo}</p>
+      </div>`;
   },
 
   resultadoHtml() {
@@ -749,11 +926,8 @@ const MarketingBudgetApp = {
         </div>
         <div class="mkb-cfg-item">
           <span>% do VGV para marketing</span>
-          <div class="mkb-pct">
-            <strong>${s.pct > 0 ? String(s.pct).replace(".", ",") + "%" : "—"}</strong>
-            <button type="button" class="btn btn-outline" onclick="MarketingBudgetApp.abrirConfig()" title="Percentual e centros de custo da obra"><i data-lucide="settings" style="width:14px;"></i> Configurar</button>
-          </div>
-          <small title="${this.esc(s.ccsCfg.join(", "))}">${s.pct > 0 ? "" : "Sem percentual configurado · "}Gastos dos centros de custo: ${this.esc(s.ccsCfg.join(", ") || "—")}</small>
+          <strong>${s.pct > 0 ? String(s.pct).replace(".", ",") + "%" : "—"}</strong>
+          <small title="${this.esc(s.ccsCfg.join(", "))}">${s.pct > 0 ? "Definido em Marketing › Configurações" : "Sem percentual · defina em Marketing › Configurações"} · gastos dos centros de custo ${this.esc(s.ccsCfg.join(", ") || "—")}</small>
         </div>
         <div class="mkb-cfg-item mkb-verba">
           <span>Verba de marketing</span>
@@ -776,13 +950,12 @@ const MarketingBudgetApp = {
       ${r.previsto > 0 || ev.length ? `<p class="mkb-nota">${r.previsto > 0 ? `Previsões de marketing no período: <strong>${this.money(r.previsto)}</strong> (não entram no comprometido). ` : ""}${ev.length ? `Eventos cadastrados neste empreendimento: <strong>${ev.length}</strong> · orçado ${this.money(evOrcado)}.` : ""}</p>` : ""}
 
       <div class="mkb-card">
-        <div class="mkb-card-h"><h3>Planos financeiros considerados marketing</h3><small>Clique para incluir ou tirar. Vale para todos os empreendimentos.</small></div>
+        <div class="mkb-card-h"><h3>Planos financeiros considerados marketing</h3><small>Marque na lista; os números atualizam ao fechar. Vale para todos os empreendimentos.</small></div>
         ${this.categoriasHtml()}
       </div>
 
       <div class="mkb-charts">
-        <div class="mkb-card mkb-chart-wide"><div class="mkb-card-h"><h3>Verba × gastos por mês</h3></div><div class="mkb-canvas"><canvas id="mkb-ch-mes"></canvas></div></div>
-        <div class="mkb-card"><div class="mkb-card-h"><h3>Gastos por plano financeiro</h3></div><div class="mkb-canvas"><canvas id="mkb-ch-cat"></canvas></div></div>
+        <div class="mkb-card mkb-chart-full"><div class="mkb-card-h"><h3>Verba × gastos por mês</h3></div><div class="mkb-canvas"><canvas id="mkb-ch-mes"></canvas></div></div>
         <div class="mkb-card mkb-chart-full"><div class="mkb-card-h"><h3>Vendas e custo por unidade vendida</h3></div><div class="mkb-canvas"><canvas id="mkb-ch-vendas"></canvas></div></div>
       </div>
 
@@ -807,7 +980,195 @@ const MarketingBudgetApp = {
   abasHtml() {
     const s = this.state;
     const aba = (id, rotulo, ic) => `<button type="button" class="mkb-tab${s.aba === id ? " is-active" : ""}" onclick="MarketingBudgetApp.setAba('${id}')"><i data-lucide="${ic}" style="width:14px;height:14px;"></i> ${rotulo}</button>`;
-    return `<div class="mkb-tabs">${aba("budget", "Budget", "wallet")}${aba("perfil", "Perfil da venda", "users")}</div>`;
+    return `<div class="mkb-tabs">${aba("budget", "Budget", "wallet")}${aba("contratos", "Contratos", "file-text")}${aba("perfil", "Perfil da venda", "users")}</div>`;
+  },
+
+  /* ---------- aba Contratos: em dia, nada pago e entrada em aberto (possíveis cancelamentos) ---------- */
+  setEscopoCtr(escopo) {
+    if (this.state.ctrEscopo === escopo) return;
+    this.state.ctrEscopo = escopo;
+    this.render();
+  },
+
+  /** Contratos ativos (não cancelados, com saldo a pagar) do escopo escolhido, com a situação de pagamento. */
+  contratosAtivos() {
+    const s = this.state;
+    const a = s.adimpl;
+    if (s.ctrEscopo === "todos") return (a.contratos || []).filter((c) => c.pag.status === "adimplente" || c.pag.status === "inadimplente");
+    const vistos = new Set();
+    return s.vendas.filter((v) => v.situacao !== "Cancelado" && !vistos.has(v.id) && vistos.add(v.id))
+      .map((v) => ({ ...v, pag: a.porVenda[v.id] || {} }))
+      .filter((c) => c.pag.status === "adimplente" || c.pag.status === "inadimplente");
+  },
+
+  riscoDe(c) {
+    const p = c.pag;
+    const motivos = [];
+    if (p.recebido < 0.01) motivos.push("nada");
+    if (p.entrada && p.entrada.vencida > 0.009) motivos.push("entrada");
+    return motivos;
+  },
+
+  FAIXAS_PAGO: [
+    { id: "0", nome: "0% · nada pago", ok: (p) => p.recebido < 0.01 },
+    { id: "10", nome: "Até 10%", ok: (p) => p.pctPago <= 10 },
+    { id: "25", nome: "10% a 25%", ok: (p) => p.pctPago <= 25 },
+    { id: "50", nome: "25% a 50%", ok: (p) => p.pctPago <= 50 },
+    { id: "75", nome: "50% a 75%", ok: (p) => p.pctPago <= 75 },
+    { id: "100", nome: "Acima de 75%", ok: () => true }
+  ],
+
+  faixaPago(p) {
+    return this.FAIXAS_PAGO.find((f) => f.ok(p)).nome;
+  },
+
+  FAIXAS_ATRASO: ["1 a 30 dias", "31 a 60 dias", "61 a 90 dias", "Mais de 90 dias"],
+
+  faixaAtraso(dias) {
+    if (dias <= 30) return this.FAIXAS_ATRASO[0];
+    if (dias <= 60) return this.FAIXAS_ATRASO[1];
+    if (dias <= 90) return this.FAIXAS_ATRASO[2];
+    return this.FAIXAS_ATRASO[3];
+  },
+
+  situacaoEntrada(p) {
+    const e = p.entrada || {};
+    if (!e.tem) return "Sem entrada identificada";
+    if (e.vencida > 0.009) return "Entrada vencida";
+    if (e.aberta > 0.009) return "Entrada a vencer";
+    return "Entrada paga";
+  },
+
+  contratosHtml() {
+    const s = this.state;
+    const a = s.adimpl;
+    if (a.status === "carregando" || a.status === "") {
+      return `<div class="mkb-card mkb-perfil-aviso"><div class="spinner" style="width:18px;height:18px;border-width:3px;margin:0;"></div><span>Lendo o Contas a Receber para saber quem paga em dia…</span></div>`;
+    }
+    if (a.status === "erro") return `<div class="mkb-card" style="color:#b91c1c;">Não consegui ler o Contas a Receber deste empreendimento.</div>`;
+    const todos = s.ctrEscopo === "todos";
+    const nPeriodo = s.vendas.filter((v) => v.situacao !== "Cancelado").length;
+    const nTodos = (a.contratos || []).length;
+    const escopo = `<div class="mkb-chips" style="margin:0;">
+        <button type="button" class="mkb-chip${todos ? "" : " is-on"}" onclick="MarketingBudgetApp.setEscopoCtr('periodo')">Vendas do período <b>${nPeriodo}</b></button>
+        <button type="button" class="mkb-chip${todos ? " is-on" : ""}" onclick="MarketingBudgetApp.setEscopoCtr('todos')">Todos os contratos do empreendimento <b>${nTodos}</b></button>
+      </div>`;
+    const L = this.contratosAtivos();
+    if (!L.length) return `<div class="mkb-card">${escopo}<p class="mkb-vazio" style="margin:12px 0 0;">Nenhum contrato ativo com saldo a pagar ${todos ? "neste empreendimento" : "entre as vendas do período"}.</p></div>`;
+    const emDia = L.filter((c) => c.pag.status === "adimplente");
+    const atraso = L.filter((c) => c.pag.status === "inadimplente");
+    const nada = L.filter((c) => c.pag.recebido < 0.01);
+    const devEntrada = L.filter((c) => c.pag.entrada && c.pag.entrada.vencida > 0.009);
+    const semEntrada = L.filter((c) => !(c.pag.entrada && c.pag.entrada.tem)).length;
+    const risco = L.filter((c) => this.riscoDe(c).length)
+      .sort((x, y) => (this.riscoDe(y).length - this.riscoDe(x).length) || ((y.pag.dias || 0) - (x.pag.dias || 0)));
+    const emRisco = risco.reduce((t, c) => t + (Number(c.pag.aberto) || 0), 0);
+    const vencido = atraso.reduce((t, c) => t + (Number(c.pag.vencido) || 0), 0);
+    const tag = (m) => m === "nada" ? `<span class="mkb-st mkb-st-cancel">Não pagou nada</span>` : `<span class="mkb-st mkb-st-comprometido">Devendo a entrada</span>`;
+    const linhas = risco.map((c) => `<tr>
+        <td><strong>${this.esc(c.numero)}</strong></td>
+        <td title="${this.esc(c.unidadeNomes)}">${this.esc(c.unidadeNomes || "—")}</td>
+        <td title="${this.esc(c.cliente)}">${this.esc(c.cliente || "—")}</td>
+        <td>${c.data ? this.dataBr(c.data) : "—"}</td>
+        <td style="text-align:right;">${c.pag.pctPago.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</td>
+        <td>${c.pag.entrada && c.pag.entrada.vencida > 0.009 ? `<span class="mkb-atraso">${this.money(c.pag.entrada.vencida)} <small>desde ${this.dataBr(c.pag.entrada.desde)}</small></span>` : this.esc(this.situacaoEntrada(c.pag))}</td>
+        <td>${this.atrasoHtml({ id: c.id, situacao: "", pagDireto: c.pag })}</td>
+        <td style="text-align:right;">${this.money(c.pag.aberto)}</td>
+        <td class="mkb-tags">${this.riscoDe(c).map(tag).join(" ")}</td>
+      </tr>`).join("");
+    return `<div class="mkb-card mkb-ctr-top">
+        ${escopo}
+        <small class="mkb-muted">Ativos = contratos não cancelados com saldo a pagar no Contas a Receber${todos ? "" : " · vendas emitidas no período"}. Entrada = parcelas de entrada, sinal ou ato.</small>
+      </div>
+      <div class="mkb-kpis">
+        ${this.kpi("Contratos ativos", L.length.toLocaleString("pt-BR"), todos ? "Todos os títulos a receber do empreendimento" : "Vendas do período", "#6366f1")}
+        ${this.kpi("Em dia", this.pct(emDia.length, L.length), `${emDia.length} de ${L.length} contrato(s)`, "#105436")}
+        ${this.kpi("Em atraso", this.pct(atraso.length, L.length), `${atraso.length} contrato(s) · ${this.money(vencido)} vencido`, atraso.length ? "#b91c1c" : "#105436")}
+        ${this.kpi("Não pagaram nada (0%)", nada.length.toLocaleString("pt-BR"), this.pct(nada.length, L.length) + " dos ativos", nada.length ? "#b91c1c" : "#105436")}
+        ${this.kpi("Devendo a entrada", devEntrada.length.toLocaleString("pt-BR"), this.pct(devEntrada.length, L.length) + " dos ativos" + (semEntrada ? ` · ${semEntrada} sem entrada identificada` : ""), devEntrada.length ? "#f37021" : "#105436")}
+        ${this.kpi("Possíveis cancelamentos", risco.length.toLocaleString("pt-BR"), "Não pagaram nada ou devem a entrada", risco.length ? "#b91c1c" : "#105436")}
+        ${this.kpi("Saldo a receber em risco", this.moneyShort(emRisco), "Saldo dos possíveis cancelamentos", "#f37021")}
+        ${this.kpi("Média já paga", (L.reduce((t, c) => t + c.pag.pctPago, 0) / L.length).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "%", "Recebido ÷ (recebido + saldo)", "#0f766e")}
+      </div>
+
+      <div class="mkb-charts mkb-charts-2">
+        <div class="mkb-card"><div class="mkb-card-h"><h3>Contratos ativos em dia × em atraso</h3></div><div class="mkb-canvas"><canvas id="mkb-ch-ctr-dia"></canvas></div></div>
+        <div class="mkb-card"><div class="mkb-card-h"><h3>Quanto do contrato já foi pago</h3><small>0% = não pagou nenhuma parcela</small></div><div class="mkb-canvas"><canvas id="mkb-ch-ctr-pago"></canvas></div></div>
+        <div class="mkb-card"><div class="mkb-card-h"><h3>Situação da entrada</h3></div><div class="mkb-canvas"><canvas id="mkb-ch-ctr-entrada"></canvas></div></div>
+        <div class="mkb-card"><div class="mkb-card-h"><h3>Tempo de atraso</h3><small>Parcela vencida mais antiga</small></div><div class="mkb-canvas"><canvas id="mkb-ch-ctr-atraso"></canvas></div></div>
+      </div>
+
+      <div class="mkb-card">
+        <div class="mkb-card-h"><h3>Possíveis cancelamentos</h3><small>Clientes que não pagaram nada ou estão devendo a entrada · base para o marketing se programar</small></div>
+        ${risco.length ? `<div class="mkb-tablewrap"><table class="mkb-table">
+          <colgroup><col style="width:13%"><col style="width:9%"><col style="width:20%"><col style="width:8%"><col style="width:7%"><col style="width:15%"><col style="width:11%"><col style="width:9%"><col style="width:8%"></colgroup>
+          <thead><tr><th>Contrato</th><th>Unidade</th><th>Cliente</th><th>Emissão</th><th style="text-align:right;">% pago</th><th>Entrada</th><th>Atrasado desde</th><th style="text-align:right;">Saldo</th><th>Motivo</th></tr></thead>
+          <tbody>${linhas}</tbody>
+        </table></div>` : `<p class="mkb-muted" style="margin:0;">Nenhum contrato ativo sem pagamento ou com entrada vencida.</p>`}
+      </div>`;
+  },
+
+  desenharGraficosContratos() {
+    if (typeof Chart === "undefined") return;
+    const L = this.contratosAtivos();
+    if (!L.length) return;
+    const n = L.length;
+    const legenda = { display: false };
+    const pctTip = { callbacks: { label: (c) => `${c.raw} contrato(s) · ${this.pct(c.raw, n)}` } };
+    const barras = (el, labels, data, cores, horizontal) => new Chart(el, {
+      type: "bar",
+      data: { labels, datasets: [{ data, backgroundColor: cores, borderRadius: 4 }] },
+      options: {
+        indexAxis: horizontal ? "y" : "x",
+        responsive: true, maintainAspectRatio: false,
+        layout: { padding: horizontal ? { right: 52 } : { top: 20 } },
+        plugins: { legend: legenda, tooltip: pctTip },
+        scales: horizontal
+          ? { x: { beginAtZero: true, ticks: { precision: 0 } }, y: { ticks: { font: { size: 11 } } } }
+          : { y: { beginAtZero: true, ticks: { precision: 0 } }, x: { ticks: { font: { size: 10 } } } }
+      },
+      plugins: [{
+        id: "mkbRotulo",
+        afterDatasetsDraw: (chart) => {
+          const ctx = chart.ctx;
+          ctx.save();
+          ctx.font = "600 11px sans-serif";
+          ctx.fillStyle = "#0f172a";
+          chart.getDatasetMeta(0).data.forEach((bar, i) => {
+            const v = data[i];
+            if (!v) return;
+            const txt = this.pct(v, n);
+            if (horizontal) { ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(txt, bar.x + 6, bar.y); }
+            else { ctx.textAlign = "center"; ctx.textBaseline = "bottom"; ctx.fillText(txt, bar.x, bar.y - 4); }
+          });
+          ctx.restore();
+        }
+      }]
+    });
+    const elD = document.getElementById("mkb-ch-ctr-dia");
+    if (elD) {
+      const emDia = L.filter((c) => c.pag.status === "adimplente").length;
+      this.charts.ctrDia = barras(elD, ["Em dia", "Em atraso"], [emDia, n - emDia], ["#105436", "#b91c1c"], true);
+    }
+    const elP = document.getElementById("mkb-ch-ctr-pago");
+    if (elP) {
+      const nomes = this.FAIXAS_PAGO.map((f) => f.nome);
+      const data = nomes.map((nm) => L.filter((c) => this.faixaPago(c.pag) === nm).length);
+      this.charts.ctrPago = barras(elP, nomes, data, nomes.map((_, i) => (i === 0 ? "#b91c1c" : (i === 1 ? "#f37021" : "#105436"))), false);
+    }
+    const elE = document.getElementById("mkb-ch-ctr-entrada");
+    if (elE) {
+      const nomes = ["Entrada paga", "Entrada a vencer", "Entrada vencida", "Sem entrada identificada"];
+      const data = nomes.map((nm) => L.filter((c) => this.situacaoEntrada(c.pag) === nm).length);
+      this.charts.ctrEntrada = barras(elE, nomes, data, ["#105436", "#0ea5e9", "#f37021", "#cbd5e1"], true);
+    }
+    const elA = document.getElementById("mkb-ch-ctr-atraso");
+    if (elA) {
+      const atr = L.filter((c) => c.pag.status === "inadimplente");
+      const nomes = ["Em dia"].concat(this.FAIXAS_ATRASO);
+      const data = [L.length - atr.length].concat(this.FAIXAS_ATRASO.map((f) => atr.filter((c) => this.faixaAtraso(c.pag.dias || 0) === f).length));
+      this.charts.ctrAtraso = barras(elA, nomes, data, ["#105436", "#eab308", "#f37021", "#dc2626", "#7f1d1d"], false);
+    }
   },
 
   pct(n, d) {
@@ -1009,7 +1370,7 @@ const MarketingBudgetApp = {
     const corpo = s.loading
       ? `<div class="mkb-card" style="text-align:center;padding:40px;color:#64748b;"><div class="spinner" style="margin:0 auto 12px;"></div><p id="mkb-progress" style="margin:0;">${this.esc(s.progress)}</p></div>`
       : (s.error ? `<div class="mkb-card" style="color:#b91c1c;">${this.esc(s.error)}</div>`
-        : (s.consultado ? this.abasHtml() + (s.aba === "perfil" ? this.perfilHtml() : this.resultadoHtml())
+        : (s.consultado ? this.abasHtml() + (s.aba === "perfil" ? this.perfilHtml() : (s.aba === "contratos" ? this.contratosHtml() : this.resultadoHtml()))
           : `<div class="mkb-card mkb-vazio">Escolha o empreendimento e o período e clique em <strong>Consultar</strong>. A verba vem do VGV da obra no Sienge × o percentual de marketing definido em <a href="#" onclick="event.preventDefault();MarketingBudgetApp.abrirConfig()">Configurações</a>.</div>`));
     this.destruirGraficos();
     root.innerHTML = `
@@ -1044,11 +1405,14 @@ const MarketingBudgetApp = {
         #marketing-budget-root .mkb-bar { height:6px; background:#e2e8f0; border-radius:999px; overflow:hidden; margin-top:8px; }
         #marketing-budget-root .mkb-bar i { display:block; height:100%; }
         #marketing-budget-root .mkb-nota { margin:0; font-size:0.8rem; color:#475569; }
-        #marketing-budget-root .mkb-cats { display:flex; flex-wrap:wrap; gap:6px; max-height:132px; overflow:auto; }
-        #marketing-budget-root .mkb-cat { display:inline-flex; align-items:center; gap:4px; height:30px; padding:0 10px; border-radius:999px; border:1px solid #cbd5e1; background:#fff; color:#334155; font-size:0.76rem; cursor:pointer; }
-        #marketing-budget-root .mkb-cat b { color:#64748b; font-weight:600; }
-        #marketing-budget-root .mkb-cat.is-on { background:#105436; border-color:#105436; color:#fff; }
-        #marketing-budget-root .mkb-cat.is-on b { color:#d1fae5; }
+        #marketing-budget-root .mkb-cats-row { display:flex; align-items:flex-end; gap:16px; }
+        #marketing-budget-root .mkb-cats-row .ml-emp-filter { flex:0 0 440px; width:440px; max-width:100%; }
+        #marketing-budget-root .mkb-cats-row .ml-emp-filter-btn { height:38px; min-height:38px; }
+        #marketing-budget-root .mkb-cats-row .ml-emp-filter-list { max-height:300px; }
+        #marketing-budget-root .mkb-cats-resumo { flex:1; min-width:0; margin:0 0 9px; font-size:0.76rem; color:#475569; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        #marketing-budget-root .mkb-cats-resumo b { color:#105436; font-weight:700; }
+        #marketing-budget-root tr.mkb-click { cursor:pointer; }
+        #marketing-budget-root tr.mkb-click:hover td { background:#e7f6ee; }
         #marketing-budget-root .mkb-charts { display:grid; grid-template-columns:2fr 1fr; gap:14px; }
         #marketing-budget-root .mkb-canvas { position:relative; height:260px; }
         #marketing-budget-root .mkb-chart-full { grid-column:1 / -1; }
@@ -1074,6 +1438,10 @@ const MarketingBudgetApp = {
         #marketing-budget-root .mkb-atraso small { color:#c2410c; font-weight:600; }
         #marketing-budget-root .mkb-perfil-aviso { display:flex; align-items:center; gap:10px; color:#475569; font-size:0.82rem; padding:10px 16px; }
         #marketing-budget-root .mkb-charts-3 { grid-template-columns:repeat(3, minmax(0,1fr)); }
+        #marketing-budget-root .mkb-charts-2 { grid-template-columns:repeat(2, minmax(0,1fr)); }
+        #marketing-budget-root .mkb-ctr-top { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:10px 16px; }
+        #marketing-budget-root .mkb-table td.mkb-tags { white-space:normal; }
+        #marketing-budget-root .mkb-table td.mkb-tags .mkb-st { margin:1px 0; }
         #marketing-budget-root .mkb-table-perfil { min-width:640px; }
         #marketing-budget-root .mkb-grp td { background:#e7f6ee !important; color:#105436; font-weight:700; font-size:0.76rem; text-transform:uppercase; }
         #marketing-budget-root .mkb-pbar { display:flex; align-items:center; gap:8px; }
@@ -1081,7 +1449,7 @@ const MarketingBudgetApp = {
         #marketing-budget-root .mkb-pbar b { min-width:48px; text-align:right; font-size:0.78rem; }
         #marketing-budget-root .mkb-canc { display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start; }
         @media (max-width: 1100px) {
-          #marketing-budget-root .mkb-charts-3, #marketing-budget-root .mkb-canc { grid-template-columns:1fr; }
+          #marketing-budget-root .mkb-charts-3, #marketing-budget-root .mkb-charts-2, #marketing-budget-root .mkb-canc { grid-template-columns:1fr; }
           #marketing-budget-root .mkb-kpis { grid-template-columns:repeat(2, minmax(0,1fr)); }
           #marketing-budget-root .mkb-charts, #marketing-budget-root .mkb-config { grid-template-columns:1fr; }
         }
@@ -1119,8 +1487,10 @@ const MarketingBudgetApp = {
         </div>
       </div>`;
     if (window.lucide) lucide.createIcons();
+    this.bindCatFiltro();
     if (s.consultado && !s.loading && !s.error) {
       if (s.aba === "perfil") this.desenharGraficosPerfil();
+      else if (s.aba === "contratos") this.desenharGraficosContratos();
       else this.desenharGraficos();
     }
   },
@@ -1155,18 +1525,6 @@ const MarketingBudgetApp = {
       this.charts.mes = new Chart(elMes, {
         data: { labels: rot, datasets: ds },
         options: { responsive: true, maintainAspectRatio: false, plugins: { tooltip: tip, legend: { position: "bottom" } }, scales: { x: { stacked: true }, y: { stacked: false, beginAtZero: true, ticks: tick } } }
-      });
-    }
-    const elCat = document.getElementById("mkb-ch-cat");
-    if (elCat) {
-      const porCat = {};
-      r.rows.filter((x) => x.status !== "previsao").forEach((x) => { porCat[x.catNome] = (porCat[x.catNome] || 0) + x.valor; });
-      const pares = Object.entries(porCat).sort((a, b) => b[1] - a[1]);
-      const cores = ["#105436", "#f37021", "#0ea5e9", "#6366f1", "#0f766e", "#eab308", "#b91c1c", "#64748b", "#a855f7", "#14b8a6"];
-      this.charts.cat = new Chart(elCat, {
-        type: "doughnut",
-        data: { labels: pares.map((p) => p[0]), datasets: [{ data: pares.map((p) => p[1]), backgroundColor: pares.map((_, i) => cores[i % cores.length]) }] },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "bottom", labels: { boxWidth: 10, font: { size: 10 } } }, tooltip: { callbacks: { label: (c) => `${c.label}: ${this.money(c.parsed)}` } } } }
       });
     }
     const elV = document.getElementById("mkb-ch-vendas");
@@ -1238,13 +1596,29 @@ const MarketingConfigApp = {
 
   async init() {
     const s = this.state;
-    s.carregando = true;
-    this.render();
-    await this.B.carregarCcs();
-    await this.carregarLista();
-    s.carregando = false;
-    if (s.ccId) await this.selecionar(s.ccId);
-    else this.render();
+    try {
+      s.carregando = true;
+      this.render();
+      await this.B.carregarCcs();
+      await this.carregarLista();
+      s.carregando = false;
+      if (s.ccId) await this.selecionar(s.ccId);
+      else this.render();
+    } catch (e) {
+      s.carregando = false;
+      console.error("[Marketing Config]", e);
+      this.erro(e);
+    }
+  },
+
+  erro(e) {
+    const root = document.getElementById("marketing-config-root");
+    if (!root) return;
+    const msg = String((e && e.message) || e || "erro desconhecido").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+    root.innerHTML = `<div class="crm-card" style="padding:20px;border-left:4px solid #dc2626;">
+      <strong style="color:#b91c1c;">Não foi possível abrir as Configurações do marketing.</strong>
+      <div style="margin-top:6px;color:#475569;font-size:0.85rem;">Atualize a página com Ctrl+F5. Se continuar, envie esta mensagem: <code>${msg}</code></div>
+    </div>`;
   },
 
   async carregarLista() {

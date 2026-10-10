@@ -658,19 +658,43 @@ const FluxoCaixaDiarioApp = {
     this.render();
   },
 
+  /** Parte de cada centro de custo no rateio (soma 1). */
+  sharesDe(cats) {
+    const pesos = {};
+    let n = 0;
+    (Array.isArray(cats) ? cats : []).forEach((fc) => {
+      const cc = fc && fc.costCenterId != null && typeof fc.costCenterId !== "object" ? String(fc.costCenterId).trim() : "";
+      const r = Number(fc && fc.financialCategoryRate);
+      if (!(cc in pesos)) n++;
+      pesos[cc] = (pesos[cc] || 0) + (Number.isFinite(r) && r > 0 ? r : 0);
+    });
+    const soma = Object.values(pesos).reduce((s, p) => s + p, 0);
+    return Object.keys(pesos).map((cc) => ({ cc, share: soma > 0 ? pesos[cc] / soma : 1 / n }));
+  },
+
+  /** O extrato do Sienge pode trazer o valor sempre positivo, com crédito/débito no tipo da operação. */
+  valorMov(m) {
+    const raw = Number(m.bankMovementAmount) || 0;
+    if (raw <= 0) return raw;
+    const norm = (v) => (v == null || typeof v === "object") ? "" : String(v).trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const tipo = norm(m.bankMovementOperationType || m.operationType);
+    if (/^(S|D)$/.test(tipo) || /DEBIT|SAIDA/.test(tipo)) return -raw;
+    if (/^(E|C)$/.test(tipo) || /CREDIT|ENTRADA/.test(tipo)) return raw;
+    const op = norm(m.bankMovementOperationName);
+    if (/PAGAMENTO|PAGTO|DEBITO|TARIFA|SAIDA/.test(op)) return -raw;
+    if (/RECEBIMENTO|CREDITO|ENTRADA/.test(op)) return raw;
+    if (norm(m.creditorName) && !norm(m.clientName)) return -raw;
+    return raw;
+  },
+
   normMov(m, i) {
     const txt = (v) => (v == null || typeof v === "object") ? "" : String(v).trim();
     const cats = Array.isArray(m.financialCategories) ? m.financialCategories : [];
-    const pesos = cats.map((fc) => {
-      const r = Number(fc && fc.financialCategoryRate);
-      return { cc: txt(fc && fc.costCenterId), peso: Number.isFinite(r) && r > 0 ? r : 0 };
-    });
-    const soma = pesos.reduce((s, p) => s + p.peso, 0);
-    const shares = pesos.map((p) => ({ cc: p.cc, share: soma > 0 ? p.peso / soma : 1 / pesos.length }));
+    const shares = this.sharesDe(cats);
     return {
       id: "m" + i,
       date: txt(m.bankMovementDate).slice(0, 10),
-      valor: Number(m.bankMovementAmount) || 0,
+      valor: this.valorMov(m),
       conta: txt(m.accountNumber),
       companyId: txt(m.companyId),
       shares,
@@ -735,6 +759,7 @@ const FluxoCaixaDiarioApp = {
       this.paintProgress();
     };
     let rows = [];
+    const rateios = {};
     try {
       const targets = this.companyIds.length ? this.companyIds.slice() : [""];
       const bills = [];
@@ -745,6 +770,11 @@ const FluxoCaixaDiarioApp = {
         const part = await app.outcomeRange(buscaIni, buscaFim, targets[i]);
         if (Array.isArray(part)) bills.push.apply(bills, part);
       }
+      bills.forEach((bill) => {
+        if (!bill || bill.billId == null) return;
+        const k = String(bill.billId) + "|" + (bill.installmentId != null ? String(bill.installmentId) : "");
+        if (!rateios[k]) rateios[k] = this.sharesDe(bill.paymentsCategories);
+      });
       rows = app.transform({ data: bills }) || [];
     } finally {
       app.noteProgress = prevNote;
@@ -768,8 +798,10 @@ const FluxoCaixaDiarioApp = {
       const saldo = Number(r.saldo);
       const valor = Number.isFinite(saldo) && saldo > 0 ? saldo : (Number(r.valor) || 0);
       if (!(valor > 0)) return;
+      const rateio = rateios[r.titulo + "|" + (r.parcela || "")];
       pay.push({
         key,
+        shares: rateio && rateio.length ? rateio : (r.ccId ? [{ cc: String(r.ccId), share: 1 }] : []),
         date: pagamento,
         vencimento: due,
         deslocadoDe: pagamento !== due ? due : "",
@@ -844,8 +876,11 @@ const FluxoCaixaDiarioApp = {
     this.payItems.forEach((p) => {
       const day = byDay[p.date];
       if (!day || day.real) return;
-      day.pagar += p.valor;
-      day.pagarItens.push(p);
+      const fora = (p.shares || []).reduce((s, x) => s + (excl.has(x.cc) ? x.share : 0), 0);
+      const v = p.valor * (1 - fora);
+      if (v < 0.005) return;
+      day.pagar += v;
+      day.pagarItens.push(fora > 0 ? Object.assign({}, p, { valor: v }) : p);
     });
     this.days = days;
     this.totals.entrar = days.reduce((s, x) => s + x.entrar, 0);
@@ -1199,6 +1234,10 @@ const FluxoCaixaDiarioApp = {
     const prevBody = root.querySelector(".cxd-body");
     const prevTop = prevBody ? prevBody.scrollTop : 0;
     const prevContas = Array.from(root.querySelectorAll(".cxd-gbox-body")).map((el) => el.scrollTop);
+    const prevListas = ["cxd-emp-list", "cxd-cc-list"].map((id) => {
+      const el = document.getElementById(id);
+      return el ? el.scrollTop : 0;
+    });
     const totEntrar = Number(this.totals.entrar) || 0;
     const totSair = Number(this.totals.pagar) || 0;
     const semana = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
@@ -1260,11 +1299,11 @@ const FluxoCaixaDiarioApp = {
         #fluxo-caixa-diario-root .cxd-head h2 { margin:0; color:#fff; font-size:1.15rem; }
         #fluxo-caixa-diario-root .cxd-head p { margin:4px 0 0; color:rgba(255,255,255,.8); font-size:.75rem; }
         #fluxo-caixa-diario-root .cxd-body { flex:1; background:#f8fafc; border:1px solid #e2e8f0; border-top:none; border-radius:0 0 12px 12px; padding:14px 16px; overflow:auto; }
-        #fluxo-caixa-diario-root .cxd-tools { display:flex; gap:12px; align-items:flex-end; margin-bottom:12px; flex-wrap:wrap; }
-        #fluxo-caixa-diario-root .cxd-tools label { font-size:.75rem; font-weight:700; color:#475569; }
+        #fluxo-caixa-diario-root .cxd-tools { display:flex; gap:12px; align-items:flex-end; margin-bottom:12px; flex-wrap:nowrap; }
+        #fluxo-caixa-diario-root .cxd-tools label { font-size:.75rem; font-weight:700; color:#475569; flex:0 0 auto; }
         #fluxo-caixa-diario-root .cxd-tools input[type=month] { display:block; height:34px; border:1px solid #e2e8f0; border-radius:6px; padding:0 8px; margin-top:4px; }
-        #fluxo-caixa-diario-root .cxd-tools .ml-emp-filter { flex:0 1 480px; width:480px; max-width:100%; }
-        #fluxo-caixa-diario-root .cxd-fora { font-size:.74rem; color:#9a3412; background:#ffedd5; border-radius:999px; padding:3px 10px; font-weight:600; align-self:center; }
+        #fluxo-caixa-diario-root .cxd-tools .ml-emp-filter { flex:1 1 0; min-width:180px; width:auto; max-width:480px; }
+        #fluxo-caixa-diario-root .cxd-fora { flex:0 0 auto; white-space:nowrap; font-size:.74rem; color:#9a3412; background:#ffedd5; border-radius:999px; padding:3px 10px; font-weight:600; align-self:center; }
         #fluxo-caixa-diario-root .cxd-sheet { width:100%; border-collapse:collapse; background:#fff; font-size:.82rem; font-variant-numeric:tabular-nums; }
         #fluxo-caixa-diario-root .cxd-sheet td { padding:7px 10px; border-bottom:1px solid #eef2f6; }
         #fluxo-caixa-diario-root .cxd-num { text-align:right; white-space:nowrap; }
@@ -1358,7 +1397,7 @@ const FluxoCaixaDiarioApp = {
             </label>
             ${filtro}
             ${filtroCc}
-            ${qtdFora ? `<span class="cxd-fora" title="Entradas, movimentos e conta de parceria desses empreendimentos não entram no caixa">${qtdFora} empreendimento(s) fora do caixa</span>` : ""}
+            ${qtdFora ? `<span class="cxd-fora" title="Contas a receber, contas a pagar, movimentos e conta de parceria desses empreendimentos não entram no caixa">${qtdFora} empreendimento(s) fora do caixa</span>` : ""}
           </div>
           <p id="cxd-progress" style="margin:0 0 10px;color:#105436;font-size:0.8rem;font-weight:600;" ${this.progress ? "" : "hidden"}>${caixaEsc(this.progress || "")}</p>
           ${this.error ? `<div style="margin-bottom:10px;padding:10px;background:#fff7ed;color:#9a3412;border-radius:8px;font-size:0.82rem;">${caixaEsc(this.error)}</div>` : ""}
@@ -1399,6 +1438,10 @@ const FluxoCaixaDiarioApp = {
     const body = root.querySelector(".cxd-body");
     if (body && prevTop) body.scrollTop = prevTop;
     root.querySelectorAll(".cxd-gbox-body").forEach((el, i) => { if (prevContas[i]) el.scrollTop = prevContas[i]; });
+    ["cxd-emp-list", "cxd-cc-list"].forEach((id, i) => {
+      const el = document.getElementById(id);
+      if (el && prevListas[i]) el.scrollTop = prevListas[i];
+    });
     this.bindCompanyFilter();
     if (window.lucide) lucide.createIcons();
   }
