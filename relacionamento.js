@@ -1650,8 +1650,9 @@ const RelacionamentoApp = {
 
   _escDocBase(ctx, extraMap) {
       const { customer, sale, unit, unitDetails, bill, empName, cidadeLote } = ctx;
-      const block = unit.block && unit.block !== "N/D" ? unit.block : "";
-      const lot = unit.lot && unit.lot !== "N/D" ? unit.lot : "";
+      const okVal = (v) => v && String(v).trim() && !/^n\/?d$/i.test(String(v).trim()) ? String(v).trim() : "";
+      const block = okVal(unit.block) || okVal(ctx.block);
+      const lot = okVal(unit.lot) || okVal(ctx.lot);
       const unitName = String(sale.unitId || "").split("-").slice(2).join("-");
       const quadraLote = (block && lot) ? (block + " - " + lot) : (unitName || "____");
       const unitNumericId = unitDetails?.id || (unit.id && !String(unit.id).startsWith("U-") ? unit.id : "");
@@ -1694,7 +1695,7 @@ const RelacionamentoApp = {
         cidadeLote,
         saleDateStr,
         dateExt,
-        map: Object.assign({
+        map: Object.assign(block ? { QUADRA: block } : {}, lot ? { LOTE: lot } : {}, {
           QUADRA_LOTE: quadraLote,
           MATRICULA: matricula,
           AREA_LOTE: areaLabel,
@@ -1843,12 +1844,26 @@ const RelacionamentoApp = {
         alert("O modelo do termo de quitação não está preenchido. Salve-o em Configurações → Documentos padrões.");
         return;
       }
+      if (!(await this._garantirMatricula(ctx))) {
+        this._avisoMatriculaSienge(ctx);
+        return;
+      }
+      const pago = await this._valorPagoTitulo(ctx);
+      if (!(pago > 0)) {
+        alert("Não foi possível obter no Sienge o valor pago deste título. Tente de novo em instantes.");
+        return;
+      }
       const { legalBase, quadraLote, titulo, preambleText } = this._escDocBase(ctx, {});
       if (!preambleText || /NÃO CADASTRADO/i.test(String(preambleText))) {
         alert("Preâmbulo não cadastrado para o centro de custo deste contrato. Cadastre-o antes de gerar o termo.");
         return;
       }
       legalBase.PREAMBULO = String(preambleText).trim().replace(/[.;,\s]+$/, "");
+      const pagoFmt = pago.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+      const pagoExt = typeof valorPorExtensoBRL === "function" ? valorPorExtensoBRL(pago) : "";
+      // No termo, o "montante total" é o que o cliente efetivamente pagou, não o valor de tabela do contrato.
+      legalBase.VALOR_QUITACAO = legalBase.VALOR_CONTRATO = pagoFmt;
+      legalBase.VALOR_QUITACAO_EXTENSO = legalBase.VALOR_CONTRATO_EXTENSO = pagoExt;
       legalBase.CANAIS_ATENDIMENTO = modo === "aviso" && typeof window.quitacaoCanaisHtml === "function" ? window.quitacaoCanaisHtml() : "";
       const markup = typeof window.formatDocPadraoMarkup === "function" ? window.formatDocPadraoMarkup(corpo) : corpo;
       let filled = this._fillDocVars(markup, legalBase);
@@ -1858,8 +1873,8 @@ const RelacionamentoApp = {
       const unidade = [codEmp, quadraLote].filter(Boolean).join(" - ");
       const topo = `<div style="font-family:'Times New Roman',serif;font-size:11pt;color:#111;margin:0 0 14px;">Título: ${this._escDoc(titulo)} | Unidade: ${this._escDoc(unidade || "____")}</div>
         <h2 style="text-align:center;color:#111;font-size:13pt;font-weight:bold;letter-spacing:0.04em;margin:0 0 18px;">${docTitle}</h2>`;
-      // Cláusulas 3 e 4 sempre na segunda página.
-      const corte = filled.search(/(^|\n)\s*(<(strong|b)[^>]*>\s*)?3\.\s/);
+      // Cláusulas 1 a 3 na primeira página; a 4 e a assinatura na segunda.
+      const corte = filled.search(/(^|\n)\s*(<(strong|b)[^>]*>\s*)?4\.\s/);
       const parte1 = corte > 0 ? filled.slice(0, corte) : filled;
       const parte2 = corte > 0 ? filled.slice(corte).replace(/^\s*\n+/, "") : "";
       const corpoCss = "font-family:'Times New Roman',serif;font-size:11pt;line-height:1.5;text-align:justify;white-space:pre-wrap;color:#111;";
@@ -1876,7 +1891,81 @@ const RelacionamentoApp = {
     }
   },
 
-  /** A4 retrato, uma imagem por página, com a faixa verde, o logo e "N de M" como na impressão. */
+  async _garantirMatricula(ctx) {
+    const get = (d) => String((d && (d.legalRegistrationNumber || d.legalregistrationnumber)) || "").trim();
+    if (get(ctx.unitDetails)) return true;
+    const id = (ctx.unitDetails && ctx.unitDetails.id) || (ctx.unit && ctx.unit.id && !isNaN(ctx.unit.id) ? ctx.unit.id : "");
+    if (id && !isNaN(id)) {
+      try {
+        const full = await this._siengeGet("/units/" + encodeURIComponent(id));
+        if (full) ctx.unitDetails = Object.assign({}, ctx.unitDetails || {}, full);
+      } catch (e) {}
+    }
+    return !!get(ctx.unitDetails);
+  },
+
+  _avisoMatriculaSienge(ctx) {
+    let ov = document.getElementById("qui-matricula-modal");
+    if (!ov) {
+      ov = document.createElement("div");
+      ov.id = "qui-matricula-modal";
+      ov.style.cssText = "display:none;position:fixed;inset:0;z-index:2147483002;align-items:center;justify-content:center;background:rgba(12,41,29,0.55);padding:16px;";
+      ov.innerHTML = `
+        <div style="background:#fff;border-radius:12px;width:100%;max-width:880px;max-height:calc(100vh - 32px);overflow:auto;box-shadow:0 18px 40px rgba(0,0,0,0.22);padding:22px;">
+          <div style="font-size:1rem;font-weight:800;color:#105436;margin-bottom:8px;">Matrícula não cadastrada no Sienge</div>
+          <div id="qui-matricula-texto" style="font-size:0.92rem;color:#1e293b;line-height:1.5;"></div>
+          <img src="Banner/sienge-matricula.png" alt="Sienge: Cadastro de Unidades, campo Matrícula" style="display:block;width:100%;margin-top:14px;border:1px solid #e2e8f0;border-radius:8px;">
+          <div style="display:flex;justify-content:flex-end;margin-top:16px;">
+            <button type="button" class="btn btn-primary" data-close="1">Entendi</button>
+          </div>
+        </div>`;
+      document.body.appendChild(ov);
+      ov.addEventListener("click", (e) => {
+        if (e.target === ov || e.target.closest("[data-close]")) ov.style.display = "none";
+      });
+    }
+    const unidade = this._formatUnidadeDoc(ctx);
+    const texto = ov.querySelector("#qui-matricula-texto");
+    if (texto) {
+      texto.innerHTML = `A unidade <strong>${this._escDoc(unidade)}</strong> está sem matrícula no Sienge. Para gerar o termo de quitação, atualize o cadastro em <strong>Cadastro de Unidades → Cadastro → Localização e Registro → Matrícula</strong> (campo destacado em amarelo) e gere o termo de novo.`;
+    }
+    ov.style.display = "flex";
+  },
+
+  /** Soma do que foi recebido no título (líquido de acréscimos e descontos), sem baixas de distrato. */
+  async _valorPagoTitulo(ctx) {
+    const sale = ctx.sale || {};
+    const billId = String(sale.receivableBillId || (ctx.bill && (ctx.bill.id || ctx.bill.receivableBillId)) || "");
+    const somar = (insts) => {
+      let liq = 0, bruto = 0, achou = false;
+      (insts || []).forEach((inst) => {
+        (inst.receipts || []).forEach((rec) => {
+          if (typeof window.isWriteOffReceipt === "function" && window.isWriteOffReceipt(rec)) return;
+          achou = true;
+          liq += Number(rec.netReceiptValue) || 0;
+          bruto += (Number(rec.receiptValue) || 0) + (Number(rec.additionalValue) || 0) - (Number(rec.discountValue) || 0);
+        });
+      });
+      if (!achou) return 0;
+      return Math.round((liq > 0 ? liq : bruto) * 100) / 100;
+    };
+    let total = somar(ctx.adimplencia && ctx.adimplencia.installments);
+    if (total > 0) return total;
+    const customerId = sale.customerId || (ctx.bill && ctx.bill.customerId);
+    if (customerId && window.SiengeApiService && typeof SiengeApiService.getCustomerFinancialStatements === "function") {
+      try {
+        const res = await SiengeApiService.getCustomerFinancialStatements(customerId);
+        const bills = (res && res.results) ? res.results.flatMap((it) => it.billsReceivable || it.bills || []) : [];
+        const db = bills.find((b) => String(b.billReceivableId) === billId || String(b.receivableBillId) === billId || String(b.id) === billId);
+        total = somar(db && db.installments);
+      } catch (e) {
+        console.warn("[Relacionamento] valor pago indisponível", e);
+      }
+    }
+    return total;
+  },
+
+  /** A4 retrato, uma imagem por página; logo só na primeira e "N de M" no rodapé, como na impressão. */
   async _baixarPaginasPdf(paginas, fileName) {
     if (typeof html2canvas !== "function" || !window.jspdf) throw new Error("Gerador de PDF indisponível.");
     const W = 794, H = 1123, PAD_X = 57, PAD_TOP = 38, PAD_BOTTOM = 64;
@@ -1888,8 +1977,7 @@ const RelacionamentoApp = {
       const page = document.createElement("div");
       page.style.cssText = `position:fixed;left:-13000px;top:0;width:${W}px;height:${H}px;background:#fff;box-sizing:border-box;padding:${PAD_TOP}px ${PAD_X}px ${PAD_BOTTOM}px;overflow:hidden;color:#111;`;
       page.innerHTML = `
-        <div style="height:5px;background:#105436;margin:0 0 10px;"></div>
-        <div style="display:flex;justify-content:flex-end;margin-bottom:8px;"><img src="Banner/logo moura leite loteamentos.png" style="height:60px;object-fit:contain;"></div>
+        ${i === 0 ? `<div style="display:flex;justify-content:flex-end;margin-bottom:8px;"><img src="Banner/logo moura leite loteamentos.png" style="height:60px;object-fit:contain;"></div>` : ""}
         <div class="qui-pg">${paginas[i]}</div>
         <div style="position:absolute;right:${PAD_X}px;bottom:28px;font-family:'Times New Roman',serif;font-size:9pt;color:#111;">${i + 1} de ${paginas.length}</div>`;
       document.body.appendChild(page);
