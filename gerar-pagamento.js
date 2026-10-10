@@ -949,9 +949,10 @@ const GerarPagamentoApp = {
     corpo = Object.assign({}, corpo, { usuario: this.usuarioAtual(), usuarioEmail: email });
     let token = "";
     try { token = localStorage.getItem(this.ROBO_TOKEN_KEY) || ""; } catch (e) {}
-    for (let tentativa = 0; tentativa < 2; tentativa++) {
+    for (let tentativa = 0; tentativa < 3; tentativa++) {
+      if (!token) token = await this.roboParear();
       if (!token) {
-        token = String(prompt("Cole o código do robô do Sienge (aparece na janela \"Iniciar robô\" deste computador):") || "").trim();
+        token = String(prompt("Cole o código do robô do Sienge (fica no arquivo robo-token.txt da pasta robo-sienge deste computador):") || "").trim();
         if (!token) return { ok: false, cancelado: true, erro: "Código do robô não informado." };
         try { localStorage.setItem(this.ROBO_TOKEN_KEY, token); } catch (e) {}
       }
@@ -963,15 +964,30 @@ const GerarPagamentoApp = {
           body: JSON.stringify(corpo)
         });
       } catch (e) {
-        return { ok: false, offline: true, erro: "O robô do Sienge não está aberto neste computador." };
+        return { ok: false, offline: true, erro: "O robô do Sienge não está ligado neste computador." };
       }
       const r = await resp.json().catch(() => ({ ok: false, erro: "Resposta inválida do robô." }));
       if (resp.status !== 401) return r;
       try { localStorage.removeItem(this.ROBO_TOKEN_KEY); } catch (e) {}
       token = "";
-      alert("O código do robô não confere. Copie de novo o código mostrado na janela \"Iniciar robô\".");
     }
-    return { ok: false, erro: "Código do robô inválido." };
+    return { ok: false, erro: "O código do robô não confere. Confira o arquivo robo-token.txt na pasta robo-sienge." };
+  },
+
+  /* O robô entrega o código só para o endereço oficial do Integra; assim ninguém precisa copiar e colar. */
+  async roboParear() {
+    try {
+      const resp = await fetch(this.ROBO_URL + "/parear", { method: "GET" });
+      if (!resp.ok) return "";
+      const r = await resp.json();
+      const token = r && r.ok ? String(r.token || "") : "";
+      if (token) {
+        try { localStorage.setItem(this.ROBO_TOKEN_KEY, token); } catch (e) {}
+      }
+      return token;
+    } catch (e) {
+      return "";
+    }
   },
 
   /* Lotes gravados antes de guardar a empresa: busca nos títulos carregados e no CC dono da conta. */
@@ -1021,7 +1037,7 @@ const GerarPagamentoApp = {
     s.roboLote = "";
     if (r.offline || r.cancelado) {
       this.paintTitulos();
-      alert(`Lote ${id} salvo no Integra, mas ainda não foi criado no Sienge.\n\n${r.erro}` + (r.offline ? `\nAbra "Iniciar robô" na pasta robo-sienge e clique em "Enviar ao Sienge" na lista de lotes gerados.` : ""));
+      alert(`Lote ${id} salvo no Integra, mas ainda não foi criado no Sienge.\n\n${r.erro}` + (r.offline ? `\nNa pasta robo-sienge, dê dois cliques em "Ligar robô automático" (só uma vez neste computador) e clique em "Enviar ao Sienge" na lista de lotes gerados.` : ""));
       return;
     }
     if (r.ok) {
@@ -1053,7 +1069,7 @@ const GerarPagamentoApp = {
     s.roboLote = "";
     if (r.offline || r.cancelado) {
       this.paintTitulos();
-      alert(r.erro + (r.offline ? `\nAbra "Iniciar robô" na pasta robo-sienge e tente aprovar de novo.` : ""));
+      alert(r.erro + (r.offline ? `\nNa pasta robo-sienge, dê dois cliques em "Ligar robô automático" (só uma vez neste computador) e tente aprovar de novo.` : ""));
       return;
     }
     if (r.ok) {
