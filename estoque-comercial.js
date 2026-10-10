@@ -3188,6 +3188,69 @@ const EstoqueComercialApp = {
     return { rows, somados, falhas };
   },
 
+  unidadeDistratada(u, titulo, data, agora) {
+    return {
+      ...u,
+      relFin: "distratado",
+      quitado: false,
+      quitadoEvidencia: false,
+      outstandingBalance: 0,
+      presentDebitBalance: 0,
+      kpiVencidas: 0,
+      kpiAVencer: 0,
+      openParcelas: [],
+      distratoTitulo: titulo || null,
+      distratoData: data || "",
+      finAt: agora,
+      siengeConferidoEm: agora
+    };
+  },
+
+  /**
+   * Título que sumiu do extrato aberto. O extrato do centro não pede parcelas revogadas,
+   * então um distrato deixa de vir e o saldo antigo ficava gravado na unidade.
+   */
+  async lerTituloForaDoExtrato(billId) {
+    let bill = null;
+    try {
+      bill = await window.siengeFetchWithRetry("/accounts-receivable/receivable-bills/" + encodeURIComponent(billId), 1);
+    } catch (e) {
+      const status = Number(e && e.status) || 0;
+      const msg = String((e && e.message) || e || "");
+      if (status === 404 || /\b404\b/.test(msg)) return { tipo: "ausente" };
+      return null;
+    }
+    if (!bill || typeof bill !== "object") return { tipo: "ausente" };
+    const st = this.classifyReceivableBill(bill);
+    const dataCab = this.isoDate(bill.cancellationDate || bill.revokedDate || bill.revokedBillReceivableDate || bill.cancelDate) || "";
+    if (st === "distratado" || dataCab) return { tipo: "distratado", data: dataCab };
+    if (st === "quitado") return { tipo: "quitado", data: this.isoQuitacao(bill.payOffDate || bill.payoffDate) || "" };
+    let inst = [];
+    try {
+      const res = await window.siengeFetchWithRetry("/accounts-receivable/receivable-bills/" + encodeURIComponent(billId) + "/installments?limit=200", 1);
+      inst = (res && res.results) || (Array.isArray(res) ? res : []);
+    } catch (e) {
+      return null;
+    }
+    let aberto = 0;
+    let baixaDistrato = "";
+    inst.forEach((p) => {
+      aberto += Number(p && (p.currentBalance != null ? p.currentBalance : p.balanceDue)) || 0;
+      ((p && p.receipts) || []).forEach((rc) => {
+        const off = typeof window.isWriteOffReceipt === "function"
+          ? window.isWriteOffReceipt(rc)
+          : /distrat|cancel/.test(String((rc && (rc.type || rc.receiptType || rc.receiptTypeId)) || "").toLowerCase());
+        if (!off) return;
+        const d = this.isoDate(rc.date || rc.receiptDate || rc.paymentDate);
+        if (d && d > baixaDistrato) baixaDistrato = d;
+      });
+    });
+    if (baixaDistrato && aberto <= 0.009) return { tipo: "distratado", data: baixaDistrato };
+    const quitacao = this.isoQuitacao(bill.payOffDate || bill.payoffDate);
+    if (quitacao && aberto <= 0.009) return { tipo: "quitado", data: quitacao };
+    return null;
+  },
+
   /** Recalcula as unidades do centro pelo extrato do Sienge e guarda o confronto Sienge × Integra. */
   async conferirComSienge(ccId, opts) {
     opts = opts || {};
@@ -3249,24 +3312,11 @@ const EstoqueComercialApp = {
         const rev = daUnidade(revogados, u, rb).sort((a, b) => String(b.revoked).localeCompare(String(a.revoked)))[0];
         if (rev) {
           distratadosNovos.push({ unidade: u.name, titulo: rev.id, cliente: (rev.cliente && rev.cliente.name) || u.customerName || "", data: String(rev.revoked).slice(0, 10) });
-          return {
-            ...u,
-            relFin: "distratado",
-            quitado: false,
-            quitadoEvidencia: false,
-            outstandingBalance: 0,
-            presentDebitBalance: 0,
-            kpiVencidas: 0,
-            kpiAVencer: 0,
-            openParcelas: [],
-            distratoTitulo: rev.id,
-            distratoData: String(rev.revoked).slice(0, 10),
-            finAt: agora,
-            siengeConferidoEm: agora
-          };
+          return this.unidadeDistratada(u, rev.id, String(rev.revoked).slice(0, 10), agora);
         }
         const saldoInt = Number(this.unitBalance(u)) || 0;
         semTitulo.push({
+          _uid: String(u.id),
           unidade: u.name, contrato: this.displayContract(u) || "", situacao: fin0, cliente: u.customerName || "",
           titulo: rb || "", saldo: saldoInt, atraso: Number(this.overdueValue(u)) || 0,
           conferidoEm: u.siengeConferidoEm || u.finAt || null
@@ -3324,6 +3374,42 @@ const EstoqueComercialApp = {
         quitacaoDate: (u.quitacaoFonte === "sienge" && this.isoQuitacao(u.quitacaoDate)) || this.isoQuitacao(ultima) || this.sealQuitacao({ ...u, quitado: true })
       };
     });
+    const sumidos = semTitulo.filter((s) => s._uid && Number(s.saldo) > 0.009 && s.titulo);
+    for (let i = 0; i < sumidos.length; i += 4) {
+      const lote = sumidos.slice(i, i + 4);
+      this.setProgress(`${rotulo}Conferindo ${ccId}: ${Math.min(i + lote.length, sumidos.length)}/${sumidos.length} título(s) que sumiram do Contas a Receber…`, this._progressoPct);
+      const lidos = await Promise.all(lote.map(async (s) => ({ s, info: await this.lerTituloForaDoExtrato(s.titulo) })));
+      lidos.forEach(({ s, info }) => {
+        if (!info) return;
+        const idx = this.state.units.findIndex((x) => String(x.id) === s._uid);
+        if (idx < 0) return;
+        const u = this.state.units[idx];
+        if (info.tipo === "quitado") {
+          quitadosNovos += 1;
+          this.state.units[idx] = {
+            ...u,
+            relFin: "quitado",
+            quitado: true,
+            quitadoEvidencia: true,
+            outstandingBalance: 0,
+            presentDebitBalance: 0,
+            kpiVencidas: 0,
+            kpiAVencer: 0,
+            openParcelas: [],
+            quitacaoDate: info.data || this.isoQuitacao(u.quitacaoDate),
+            quitacaoFonte: info.data ? "sienge" : u.quitacaoFonte,
+            finAt: agora,
+            siengeConferidoEm: agora
+          };
+        } else {
+          distratadosNovos.push({ unidade: u.name, titulo: s.titulo, cliente: u.customerName || "", data: info.data || "" });
+          this.state.units[idx] = this.unidadeDistratada(u, s.titulo, info.data || "", agora);
+        }
+        const pos = semTitulo.findIndex((x) => x._uid === s._uid);
+        if (pos >= 0) semTitulo.splice(pos, 1);
+      });
+    }
+    semTitulo.forEach((s) => { delete s._uid; });
     const doCc = this.state.units.filter((u) => String(u.enterpriseId) === String(ccId));
     const p = this.portfolioOf(doCc);
     const comSaldo = vivos.filter((b) => b.aberto > 0.009);
