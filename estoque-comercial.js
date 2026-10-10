@@ -3248,6 +3248,16 @@ const EstoqueComercialApp = {
     if (baixaDistrato && aberto <= 0.009) return { tipo: "distratado", data: baixaDistrato };
     const quitacao = this.isoQuitacao(bill.payOffDate || bill.payoffDate);
     if (quitacao && aberto <= 0.009) return { tipo: "quitado", data: quitacao };
+    const customerId = bill.customerId;
+    if (customerId) {
+      try {
+        const res = await window.siengeFetchWithRetry("/sales-contracts?customerId=" + encodeURIComponent(customerId) + "&situation=3&limit=200", 1);
+        const lista = (res && res.results) || [];
+        const hit = lista.find((c) => String(c.receivableBillId || "") === String(billId)
+          || this.docMatchesContract(bill.documentNumber, c.number || c.contractNumber));
+        if (hit) return { tipo: "distratado", data: this.isoDate(hit.cancellationDate) || "" };
+      } catch (e) {}
+    }
     return null;
   },
 
