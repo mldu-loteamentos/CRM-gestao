@@ -367,6 +367,7 @@ const EstoqueComercialApp = {
       kpiVencidas: u.kpiVencidas != null ? Number(u.kpiVencidas) : null,
       kpiAVencer: u.kpiAVencer != null ? Number(u.kpiAVencer) : null,
       quitacaoDate: this.isoQuitacao(u.quitacaoDate),
+      quitacaoFonte: u.quitacaoFonte || null,
       situation: u.situation || ""
     };
   },
@@ -1519,11 +1520,42 @@ const EstoqueComercialApp = {
       <button type="button" ${page >= pages - 1 ? "disabled" : ""} onclick="EstoqueComercialApp.setPage(${page + 1})">Próxima</button>`;
   },
 
+  FIN_FILTROS: [
+    { id: "all", label: "Todos" },
+    { id: "Quitado", label: "Quitados" },
+    { id: "Ativo adimplente", label: "Ativos adimplentes" },
+    { id: "Ativo inadimplente", label: "Ativos inadimplentes" }
+  ],
+
+  renderFinFiltros(base) {
+    const wrap = document.getElementById("est-fin-filtros");
+    if (!wrap) return;
+    const counts = { all: base.length };
+    base.forEach((u) => {
+      const fin = this.financialStatus(u);
+      counts[fin] = (counts[fin] || 0) + 1;
+    });
+    const atual = this.state.finFiltro || "all";
+    wrap.innerHTML = this.FIN_FILTROS.map((f) => {
+      const n = counts[f.id] || 0;
+      return `<button type="button" class="est-fin-filtro is-${f.id === "all" ? "todos" : this.finChipClass(f.id).replace("est-fin-", "").toLowerCase()}${atual === f.id ? " is-active" : ""}" onclick="EstoqueComercialApp.setFinFiltro('${f.id}')">${this.esc(f.label)} <b>${n.toLocaleString("pt-BR")}</b></button>`;
+    }).join("");
+  },
+
+  setFinFiltro(id) {
+    this.state.finFiltro = this.state.finFiltro === id ? "all" : id;
+    this.state.tablePage = 0;
+    this.renderTable();
+  },
+
   renderTable() {
     const tbody = document.getElementById("est-stock-tbody");
     if (!tbody) return;
-    const rows = this.selectedUnits();
-    this.renderKpis(rows);
+    const base = this.selectedUnits();
+    this.renderKpis(base);
+    this.renderFinFiltros(base);
+    const filtro = this.state.finFiltro || "all";
+    const rows = filtro === "all" ? base : base.filter((u) => this.financialStatus(u) === filtro);
     if (!rows.length) {
       this.renderPager(0);
       tbody.innerHTML = `<tr><td colspan="11" class="est-empty">Nenhuma unidade com esse filtro.</td></tr>`;
@@ -1550,7 +1582,7 @@ const EstoqueComercialApp = {
       const valorContrato = this.displayContractValue(u, fin);
       return `<tr>
         <td><span class="est-status-chip">${this.esc(status)}</span></td>
-        <td class="est-emp"><b>${this.esc(u.enterpriseId)}</b><span>${this.esc(empName)}</span></td>
+        <td class="est-emp"><b>${this.esc(u.enterpriseId)}</b><span title="${this.esc(empName)}">${this.esc(empName)}</span></td>
         <td class="est-unit">${this.esc(u.name)}</td>
         <td>${this.esc(this.mapCode(this.LEGAL_MAP, u.legalStock))}</td>
         <td class="est-num">${this.esc(area)}</td>
@@ -1564,6 +1596,7 @@ const EstoqueComercialApp = {
     }).join("");
     const head = document.querySelector("#tab-estoque-comercial thead");
     if (window.lucide && head) lucide.createIcons({ root: head });
+    this.verificarQuitacoes(slice);
   },
 
   setBusy(on) {
@@ -1712,12 +1745,15 @@ const EstoqueComercialApp = {
         receivedLocked: !!(keep.receivedLocked || u.receivedLocked),
         statementDone: !!(keep.statementDone || u.statementDone),
         censusAt: u.censusAt || keep.censusAt || null,
-        quitacaoDate: this.sealQuitacao({
-          quitado: !!(keep.quitado || u.quitado || keep.relFin === "quitado"),
-          relFin: keep.relFin || u.relFin,
-          quitacaoDate: keep.quitacaoDate || u.quitacaoDate,
-          finAt: keep.finAt || u.finAt
-        }, u.quitacaoDate, keep.quitacaoDate),
+        quitacaoDate: (u.quitacaoFonte === "sienge" && this.isoQuitacao(u.quitacaoDate))
+          || (keep.quitacaoFonte === "sienge" && this.isoQuitacao(keep.quitacaoDate))
+          || this.sealQuitacao({
+            quitado: !!(keep.quitado || u.quitado || keep.relFin === "quitado"),
+            relFin: keep.relFin || u.relFin,
+            quitacaoDate: keep.quitacaoDate || u.quitacaoDate,
+            finAt: keep.finAt || u.finAt
+          }, u.quitacaoDate, keep.quitacaoDate),
+        quitacaoFonte: (u.quitacaoFonte === "sienge" || keep.quitacaoFonte === "sienge") ? "sienge" : (u.quitacaoFonte || keep.quitacaoFonte || null),
         finAt: u.finAt || keep.finAt,
         situation: u.situation || keep.situation,
         quitado: !!(keep.quitado || u.quitado || keep.relFin === "quitado"),
@@ -1805,6 +1841,66 @@ const EstoqueComercialApp = {
       return this.isoQuitacao(u.finAt) || this.todayStr();
     }
     return null;
+  },
+
+  /** A data de quitação do título no Sienge vale sobre a última baixa do extrato, mesmo que já tenha sido gravada. */
+  quitacaoDoTitulo(next, bill) {
+    const iso = this.isoQuitacao(bill && (bill.payOffDate || bill.payoffDate));
+    if (iso) {
+      next.quitacaoDate = iso;
+      next.quitacaoFonte = "sienge";
+    }
+    return next;
+  },
+
+  /** Linhas visíveis quitadas cuja data ainda não veio do título: confere no Sienge, 3 por vez. */
+  verificarQuitacoes(items) {
+    if (typeof window.siengeFetchWithRetry !== "function" || this.state.loading) return;
+    this._quitConferidas = this._quitConferidas || new Set();
+    const ids = (items || []).map((i) => i.u).filter((u) => u && (u.quitado || u.relFin === "quitado") && u.receivableBillId
+      && u.quitacaoFonte !== "sienge" && !this._quitConferidas.has(String(u.id))).map((u) => String(u.id));
+    if (!ids.length) return;
+    ids.forEach((id) => this._quitConferidas.add(id));
+    this._quitFila = (this._quitFila || []).concat(ids);
+    if (!this._quitRodando) this._rodarQuitFila();
+  },
+
+  async _rodarQuitFila() {
+    this._quitRodando = true;
+    const dirtyCc = new Set();
+    try {
+      while (this._quitFila.length) {
+        const lote = this._quitFila.splice(0, 3);
+        let mudou = false;
+        await Promise.all(lote.map(async (id) => {
+          const u0 = this.state.units.find((x) => String(x.id) === id);
+          const billId = String((u0 && u0.receivableBillId) || "").replace(/^B-/, "").split("-")[0];
+          if (!billId) return;
+          let bill = null;
+          try {
+            bill = await window.siengeFetchWithRetry(`/accounts-receivable/receivable-bills/${encodeURIComponent(billId)}`, 2);
+          } catch (e) {
+            return;
+          }
+          const iso = this.isoQuitacao(bill && (bill.payOffDate || bill.payoffDate));
+          if (!iso) return;
+          const idx = this.state.units.findIndex((x) => String(x.id) === id);
+          if (idx < 0) return;
+          const cur = this.state.units[idx];
+          if (cur.quitacaoDate !== iso) mudou = true;
+          this.state.units[idx] = { ...cur, quitacaoDate: iso, quitacaoFonte: "sienge" };
+          dirtyCc.add(String(cur.enterpriseId));
+        }));
+        if (mudou) this.renderTable();
+        await this.sleep(150);
+      }
+    } finally {
+      this._quitRodando = false;
+    }
+    if (dirtyCc.size) {
+      this.saveCache();
+      for (const cc of dirtyCc) await this.saveFirebaseCc(cc);
+    }
   },
 
   formatQuitacao(u) {
@@ -2594,6 +2690,7 @@ const EstoqueComercialApp = {
       next.outstandingBalance = 0;
       next.presentDebitBalance = 0;
       next.quitacaoDate = this.sealQuitacao(u, bill && (bill.payOffDate || bill.payoffDate));
+      this.quitacaoDoTitulo(next, bill);
     } else if (status === "distratado") {
       next.quitado = false;
       next.quitacaoDate = null;
@@ -2635,9 +2732,10 @@ const EstoqueComercialApp = {
       next.presentDebitBalance = 0;
       next.quitacaoDate = this.sealQuitacao(
         { ...u, ...next, quitado: true },
-        this.lastBaixaFromInstallments(installments),
-        rb && (rb.payOffDate || rb.payoffDate)
+        rb && (rb.payOffDate || rb.payoffDate),
+        this.lastBaixaFromInstallments(installments)
       );
+      this.quitacaoDoTitulo(next, rb);
     }
     next.pmp3m = this.pmpLastMonths(installments, 3);
     next.openParcelas = next.quitado ? [] : this.openParcelasFromInstallments(installments);

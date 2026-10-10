@@ -5192,8 +5192,23 @@ window.commitCrmGlobalConfig = async function(payload) {
       localLib,
       cloud.crm_engenharia_caucao_liberados_v1 || "{}"
     ]);
+    // Sem esta união, um computador com a lista antiga apaga da nuvem o cartório que outro acabou de cadastrar.
+    if (typeof window.mergeCartoriosList === "function") {
+      const kCart = "crm_moura_cartorios_list";
+      let localCart = next[kCart] || "[]";
+      try {
+        const storedCart = localStorage.getItem(kCart);
+        if (storedCart) localCart = window.mergeCartoriosList(localCart, storedCart);
+      } catch (e) {}
+      next[kCart] = window.mergeCartoriosList(localCart, cloud[kCart] || "[]");
+      window._cartoriosAposCommit = next[kCart];
+    }
     tx.set(docRef, next, { merge: true });
   });
+  if (window._cartoriosAposCommit) {
+    try { _originalSetItem.call(localStorage, "crm_moura_cartorios_list", window._cartoriosAposCommit); } catch (e) {}
+    window._cartoriosAposCommit = null;
+  }
 };
 
 window.mergedCaucaoLiberados = function(parts) {

@@ -212,6 +212,7 @@ const FluxoCaixaDiarioApp = {
   _flagsLoaded: false,
   _types: {},
   _banks: {},
+  _nomes: {},
   _custom: null,
   _gen: 0,
 
@@ -298,17 +299,24 @@ const FluxoCaixaDiarioApp = {
     return String(v || "").trim().toUpperCase().replace(/\s+/g, "");
   },
 
+  /**
+   * Contas ligadas/desligadas, tipo e empreendimentos fora do caixa ficam no Firebase.
+   * Relê a cada consulta (outro operador pode ter mudado) e espera o Firebase subir; sem isso, abrir a
+   * tela logo após o login mostrava todas as contas ligadas.
+   */
   async loadFlags() {
-    if (this._flagsLoaded) return;
+    for (let i = 0; i < 40 && !(window.firebaseDb && window.firebaseCollections && window.firebaseCollections.getDoc); i++) {
+      await new Promise((r) => setTimeout(r, 250));
+    }
     const fx = window.firebaseCollections;
     const db = window.firebaseDb;
     if (!fx || !db || typeof fx.getDoc !== "function") return;
     try {
       const snap = await fx.getDoc(fx.doc(db, "caixa_diario_config", "saldo_inicial"));
       const data = snap.exists() ? (snap.data() || {}) : {};
-      this.flags = data.contas || {};
-      this.tipos = data.tipos || {};
-      this.ccExcl = data.empreendimentosExcluidos || {};
+      this.flags = Object.assign({}, data.contas || {}, this._flagsPendentes || {});
+      this.tipos = Object.assign({}, data.tipos || {}, this._tiposPendentes || {});
+      this.ccExcl = Object.assign({}, data.empreendimentosExcluidos || {}, this._ccPendentes || {});
       this._flagsLoaded = true;
     } catch (e) {
       console.warn("[Caixa diário] configuração do caixa", e);
@@ -320,7 +328,7 @@ const FluxoCaixaDiarioApp = {
     const db = window.firebaseDb;
     if (!fx || !db || typeof fx.setDoc !== "function") {
       alert("O Firebase não está disponível. A alteração vale só nesta consulta.");
-      return;
+      return false;
     }
     const user = (window.AppState && AppState.currentUser) || {};
     try {
@@ -328,10 +336,20 @@ const FluxoCaixaDiarioApp = {
         updatedAt: new Date().toISOString(),
         updatedBy: user.name || user.email || ""
       }), { merge: true });
+      return true;
     } catch (e) {
       console.error("[Caixa diário] gravar configuração", e);
       alert(erroMsg || "Não consegui gravar a alteração no Firebase.");
+      return false;
     }
+  },
+
+  /** Enquanto a gravação não confirma, a mudança vale sobre o que vier do Firebase. */
+  async _salvarPendente(bucket, key, value, patch, erroMsg) {
+    this[bucket] = this[bucket] || {};
+    this[bucket][key] = value;
+    const ok = await this.saveConfig(patch, erroMsg);
+    if (ok && this[bucket][key] === value) delete this[bucket][key];
   },
 
   readCustom() {
@@ -381,7 +399,7 @@ const FluxoCaixaDiarioApp = {
     this.ccExcl[co] = ids.map(String);
     this.rebuild();
     this.render();
-    await this.saveConfig({ empreendimentosExcluidos: { [co]: this.ccExcl[co] } }, "Não consegui gravar os empreendimentos no Firebase.");
+    await this._salvarPendente("_ccPendentes", co, this.ccExcl[co], { empreendimentosExcluidos: { [co]: this.ccExcl[co] } }, "Não consegui gravar os empreendimentos no Firebase.");
   },
 
   accountKey(a) {
@@ -410,14 +428,14 @@ const FluxoCaixaDiarioApp = {
     this.flags[key] = !!on;
     this.rebuild();
     this.render();
-    await this.saveConfig({ contas: { [key]: !!on } }, "Não consegui gravar a marcação da conta no Firebase.");
+    await this._salvarPendente("_flagsPendentes", key, !!on, { contas: { [key]: !!on } }, "Não consegui gravar a marcação da conta no Firebase.");
   },
 
   async setTipo(key, tipo) {
     this.tipos[key] = tipo;
     this.accounts.forEach((a) => { if (this.accountKey(a) === key) a.tipo = tipo; });
     this.render();
-    await this.saveConfig({ tipos: { [key]: tipo } }, "Não consegui gravar o tipo da conta no Firebase.");
+    await this._salvarPendente("_tiposPendentes", key, tipo, { tipos: { [key]: tipo } }, "Não consegui gravar o tipo da conta no Firebase.");
   },
 
   async loadAccountTypes(companyId) {
@@ -426,6 +444,7 @@ const FluxoCaixaDiarioApp = {
     if (this._types[id]) return this._types[id];
     const map = {};
     const banks = {};
+    const nomes = {};
     if (window.SiengeApiService && typeof SiengeApiService.getCheckingAccounts === "function") {
       try {
         const res = await SiengeApiService.getCheckingAccounts(id, { allStatuses: true });
@@ -440,6 +459,10 @@ const FluxoCaixaDiarioApp = {
             if (key && !map[key]) map[key] = invest ? "investimento" : "corrente";
           });
           const num = this.normNum(raw.accountNumber || raw.number);
+          const nome = [raw.accountName, raw.name, raw.description, raw.accountDescription]
+            .map((s) => String(s || "").trim())
+            .find((s) => s && this.normNum(s) !== num);
+          if (num && nome) nomes[num] = nome;
           if (num && window.RelacionamentoApp && typeof RelacionamentoApp._bancoDaConta === "function") {
             const info = RelacionamentoApp._bancoDaConta(raw);
             if (info && info.bancoLabel) banks[num] = info;
@@ -451,6 +474,7 @@ const FluxoCaixaDiarioApp = {
     }
     this._types[id] = map;
     this._banks[id] = banks;
+    this._nomes[id] = nomes;
     return map;
   },
 
@@ -614,6 +638,8 @@ const FluxoCaixaDiarioApp = {
       const bank = this.bankInfo(acc.companyId, acc.number);
       acc.banco = bank.bancoLabel || "";
       acc.agencia = bank.agencia || "";
+      const nomeCad = (this._nomes[String(acc.companyId)] || {})[this.normNum(acc.number)];
+      acc.descricao = nomeCad || (acc.name && this.normNum(acc.name) !== this.normNum(acc.number) ? acc.name : "");
       delete acc._dt;
     }
     if (this._gen !== gen) return;
@@ -1043,7 +1069,6 @@ const FluxoCaixaDiarioApp = {
     if (!grupos.length) {
       return `<div class="cxd-vazio">${this.loading || this.progress ? "Lendo as contas…" : "Nenhuma conta com saldo disponível."}</div>`;
     }
-    const ini = this.openingDate;
     const sinal = (v) => (v < 0 ? "cxd-out" : "cxd-in");
     return `<div class="cxd-contas-grid">${grupos.map((g) => {
       const linhas = g.rows.map((a) => {
@@ -1061,12 +1086,11 @@ const FluxoCaixaDiarioApp = {
             </label>
           </td>
           <td class="cxd-conta">
-            <div>${caixaEsc(a.name || a.number || "Conta")}</div>
-            ${a.number && a.number !== a.name ? `<small>${caixaEsc(a.number)}</small>` : ""}
+            <div title="${caixaEsc(a.descricao || a.name || a.number || "Conta")}">${caixaEsc(a.descricao || a.name || a.number || "Conta")}</div>
+            ${a.descricao && a.number ? `<small>C/C ${caixaEsc(a.number)}</small>` : ""}
             ${bloq ? `<span class="cxd-bloq">empreendimento fora do caixa</span>` : ""}
           </td>
-          <td class="cxd-banco">${a.banco ? caixaEsc(a.banco) : `<span class="cxd-zero">—</span>`}${a.agencia ? `<small>Agência ${caixaEsc(a.agencia)}</small>` : ""}</td>
-          ${ini ? `<td class="cxd-num ${sinal(a.opening)}">${caixaMoney(a.opening)}</td>` : ""}
+          <td class="cxd-banco">${a.banco ? caixaEsc(a.banco) : `<span class="cxd-zero">—</span>`}</td>
           <td class="cxd-num ${sinal(a.amount)}">${caixaMoney(a.amount)}</td>
           <td class="cxd-mover">
             <button type="button" title="Mover para ${outro === "investimento" ? "Investimento" : "Conta corrente"}" onclick="FluxoCaixaDiarioApp.setTipo(decodeURIComponent('${keyJs}'),'${outro}')">
@@ -1086,7 +1110,7 @@ const FluxoCaixaDiarioApp = {
           <table class="cxd-contas">
             <thead><tr>
               <th title="Considerar no saldo inicial">Caixa</th><th>Conta</th><th>Banco</th>
-              ${ini ? `<th>Saldo ${caixaFmtDate(ini).slice(0, 5)}</th>` : ""}<th>Saldo hoje</th><th></th>
+              <th>Saldo hoje</th><th></th>
             </tr></thead>
             <tbody>${linhas}</tbody>
           </table>
@@ -1228,6 +1252,7 @@ const FluxoCaixaDiarioApp = {
         #fluxo-caixa-diario-root .cxd-tools { display:flex; gap:12px; align-items:flex-end; margin-bottom:12px; flex-wrap:wrap; }
         #fluxo-caixa-diario-root .cxd-tools label { font-size:.75rem; font-weight:700; color:#475569; }
         #fluxo-caixa-diario-root .cxd-tools input[type=month] { display:block; height:34px; border:1px solid #e2e8f0; border-radius:6px; padding:0 8px; margin-top:4px; }
+        #fluxo-caixa-diario-root .cxd-tools .ml-emp-filter { flex:0 1 480px; width:480px; max-width:100%; }
         #fluxo-caixa-diario-root .cxd-fora { font-size:.74rem; color:#9a3412; background:#ffedd5; border-radius:999px; padding:3px 10px; font-weight:600; align-self:center; }
         #fluxo-caixa-diario-root .cxd-sheet { width:100%; border-collapse:collapse; background:#fff; font-size:.82rem; font-variant-numeric:tabular-nums; }
         #fluxo-caixa-diario-root .cxd-sheet td { padding:7px 10px; border-bottom:1px solid #eef2f6; }

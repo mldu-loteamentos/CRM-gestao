@@ -60,6 +60,27 @@ const RelacionamentoApp = {
     if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(() => {});
   },
 
+  /** Traz da nuvem os cartórios cadastrados em outros computadores sem precisar recarregar a página. */
+  async atualizarCartoriosDaNuvem() {
+    const fc = window.firebaseCollections;
+    if (!fc || !fc.getDoc || !fc.doc || !window.firebaseDb || typeof window.mergeCartoriosList !== "function") return;
+    try {
+      const snap = await fc.getDoc(fc.doc(window.firebaseDb, "config", "global"));
+      const ok = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+      const cloud = ok ? ((snap.data() || {}).crm_moura_cartorios_list || "[]") : "[]";
+      const k = "crm_moura_cartorios_list";
+      const local = localStorage.getItem(k) || "[]";
+      const merged = window.mergeCartoriosList(local, cloud);
+      if (merged !== local) {
+        const set = window._originalSetItem || localStorage.setItem;
+        set.call(localStorage, k, merged);
+        const sel = document.getElementById("esc-cartorio");
+        this.fillCartorioSelect(sel ? sel.value : "");
+      }
+      if (merged !== cloud && window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(() => {});
+    } catch (e) {}
+  },
+
   fillCartorioSelect(selectedNome) {
     const sel = document.getElementById("esc-cartorio");
     if (!sel) return;
@@ -1375,6 +1396,7 @@ const RelacionamentoApp = {
         .filter(Boolean).join(" · ");
     }
     this.fillCartorioSelect("");
+    this.atualizarCartoriosDaNuvem();
     modal.style.display = "flex";
     if (!this._escModalKeyBound) {
       this._escModalKeyBound = true;
@@ -1988,14 +2010,7 @@ const RelacionamentoApp = {
         unit = await SiengeApiService.getUnit(sale.unitId).catch(() => null);
       }
       unit = unit || { id: sale.unitId, block: "N/D", lot: "N/D", area: 0 };
-      let unitDetails = null;
-      if (window.SiengeApiService && SiengeApiService.getUnitDetails && enterpriseId && unitName) {
-        const det = await SiengeApiService.getUnitDetails(enterpriseId, unitName).catch(() => null);
-        if (det && det.results && det.results.length) {
-          const chave = (s) => String(s || "").replace(/\s+/g, "").toUpperCase();
-          unitDetails = det.results.find((u) => chave(u.name) === chave(unitName)) || det.results[0];
-        }
-      }
+      let unitDetails = await this._localizarUnidadeSienge(sale, enterpriseId, unitName);
       unitDetails = (await this._carregarUnidadeCompleta({ unit, unitDetails })) || unitDetails;
       let bill = null;
       if (sale.receivableBillId) {
@@ -2422,6 +2437,36 @@ const RelacionamentoApp = {
     return String((d && (d.legalRegistrationNumber || d.legalregistrationnumber)) || "").trim();
   },
 
+  /**
+   * O unitId da venda guarda o nome sem espaços ("04-25"), mas no Sienge a unidade pode se chamar "04- 25",
+   * e a busca por nome não acha. Por isso vale primeiro o id da unidade do contrato.
+   */
+  async _localizarUnidadeSienge(sale, enterpriseId, unitName) {
+    let id = sale && sale.siengeUnitId;
+    let nomeReal = String((sale && sale.unitName) || "").trim();
+    if (!id && sale && sale.id) {
+      try {
+        const sc = await this._siengeGet("/sales-contracts/" + encodeURIComponent(sale.id));
+        const su = ((sc && sc.salesContractUnits) || []).find((u) => u.main === true) || ((sc && sc.salesContractUnits) || [])[0];
+        if (su) {
+          id = su.id;
+          nomeReal = nomeReal || String(su.name || "").trim();
+        }
+      } catch (e) {}
+    }
+    if (id) return { id, name: nomeReal || unitName };
+    if (!(window.SiengeApiService && SiengeApiService.getUnitDetails && enterpriseId)) return null;
+    const chave = (s) => String(s || "").replace(/\s+/g, "").toUpperCase();
+    const nomes = [nomeReal, unitName, String(unitName || "").replace(/-/g, "- ")].filter((n, i, a) => n && a.indexOf(n) === i);
+    for (const nome of nomes) {
+      const det = await SiengeApiService.getUnitDetails(enterpriseId, nome).catch(() => null);
+      const lista = (det && det.results) || [];
+      const hit = lista.find((u) => chave(u.name) === chave(unitName || nome));
+      if (hit) return hit;
+    }
+    return null;
+  },
+
   /** A busca de unidades por nome não traz matrícula nem dados do terreno; o GET /units/{id} traz. */
   async _carregarUnidadeCompleta(ctx) {
     if (ctx._unidadeCompleta) return ctx.unitDetails;
@@ -2511,7 +2556,7 @@ const RelacionamentoApp = {
         <div style="background:#fff;border-radius:12px;width:100%;max-width:880px;max-height:calc(100vh - 32px);overflow:auto;box-shadow:0 18px 40px rgba(0,0,0,0.22);padding:22px;">
           <div style="font-size:1rem;font-weight:800;color:#105436;margin-bottom:8px;">Matrícula não cadastrada no Sienge</div>
           <div id="qui-matricula-texto" style="font-size:0.92rem;color:#1e293b;line-height:1.5;"></div>
-          <img src="Banner/sienge-matricula.png?v=2" alt="Sienge: Cadastro de Unidades, campo Matrícula" style="display:block;width:100%;margin-top:14px;border:1px solid #e2e8f0;border-radius:8px;">
+          <img src="Banner/sienge-matricula.png?v=3" alt="Sienge: Cadastro de Unidades, campo Matrícula" style="display:block;width:100%;margin-top:14px;border:1px solid #e2e8f0;border-radius:8px;">
           <div style="display:flex;justify-content:flex-end;margin-top:16px;">
             <button type="button" class="btn btn-primary" data-close="1">Entendi</button>
           </div>
@@ -3092,11 +3137,7 @@ const RelacionamentoApp = {
         unit = await SiengeApiService.getUnit(sale.unitId).catch(() => null);
       }
       unit = unit || { id: sale.unitId, block: "N/D", lot: "N/D", area: 0 };
-      let unitDetails = null;
-      if (window.SiengeApiService && SiengeApiService.getUnitDetails && enterpriseId && unitName) {
-        const det = await SiengeApiService.getUnitDetails(enterpriseId, unitName).catch(() => null);
-        if (det && det.results && det.results.length) unitDetails = det.results[0];
-      }
+      let unitDetails = await this._localizarUnidadeSienge(sale, enterpriseId, unitName);
       let bill = null;
       if (sale.receivableBillId) {
         try {

@@ -2035,6 +2035,8 @@ const SiengeApiService = {
           queriedCustomerId: customerId,
           companyId: c.companyId,
           unitId: unitId,
+          siengeUnitId: mainUnit.id || "",
+          unitName: mainUnit.name || "",
           saleDate: c.contractDate,
           contractValue: c.totalSellingValue || c.value,
           updatedContractValue: c.value,
