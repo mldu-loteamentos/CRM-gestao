@@ -94,9 +94,11 @@ const RelacionamentoApp = {
   },
 
   adicionarCartorio() {
+    const row = document.getElementById("esc-cartorio-row");
     const box = document.getElementById("esc-cartorio-novo-box");
     const input = document.getElementById("esc-cartorio-novo-nome");
-    if (box) box.style.display = "block";
+    if (row) row.style.display = "none";
+    if (box) box.style.display = "flex";
     if (input) {
       input.value = "";
       input.focus();
@@ -104,10 +106,23 @@ const RelacionamentoApp = {
   },
 
   cancelarNovoCartorio() {
+    const row = document.getElementById("esc-cartorio-row");
     const box = document.getElementById("esc-cartorio-novo-box");
     const input = document.getElementById("esc-cartorio-novo-nome");
     if (box) box.style.display = "none";
+    if (row) row.style.display = "";
     if (input) input.value = "";
+  },
+
+  onNovoCartorioKey(ev) {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      this.salvarNovoCartorio();
+    } else if (ev.key === "Escape") {
+      ev.preventDefault();
+      ev.stopPropagation();
+      this.cancelarNovoCartorio();
+    }
   },
 
   salvarNovoCartorio() {
@@ -1312,12 +1327,16 @@ const RelacionamentoApp = {
     throw busy;
   },
 
-  _escSetResultsHtml(html) {
+  _escSetResultsHtml(html, carregando) {
     const el = document.getElementById("esc-search-results");
-    if (el) el.innerHTML = html;
+    if (el) el.innerHTML = carregando ? this._docLoadingHtml(carregando) : html;
     const st = document.getElementById("esc-modal-status");
-    if (st) st.innerHTML = html;
+    if (st) st.innerHTML = carregando ? this._escScanHtml(carregando) : html;
     if (window.lucide) lucide.createIcons();
+  },
+
+  _escScanHtml(msg) {
+    return `<div class="esc-scan"><span>${this._escDoc(msg || "Carregando...")}</span><div class="esc-scan-bar"><div></div></div></div>`;
   },
 
   abrirEscrituraModal(dados) {
@@ -1380,26 +1399,20 @@ const RelacionamentoApp = {
     if (!ctx.quitado) {
       html = caixa("#991b1b", "#fef2f2", "#fecaca", `<strong>Contrato não quitado.</strong> ${esc(ctx.quitadoMotivo || "")}. A autorização de escritura só pode ser emitida com o contrato quitado.`);
     } else if (ctx.contasPendente) {
-      html = this._docLoadingHtml(ctx.contasEtapa || "Buscando no Sienge as contas em que as parcelas foram baixadas...");
+      html = this._escScanHtml(ctx.contasEtapa || "Buscando as contas bancárias em que as parcelas foram baixadas...");
     } else if (ctx.contas && ctx.contas.grupos.length) {
-      const brl = (v) => Number(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      const linhas = ctx.contas.grupos.map((g) => `<tr>
-          <td style="padding:4px 8px;">${esc(g.conta)}</td>
-          <td style="padding:4px 8px;">${esc(this._dmy(g.ate))}</td>
-          <td style="padding:4px 8px;text-align:right;">${brl(g.valor)}</td>
-          <td style="padding:4px 8px;">${esc(g.bancoLabel || "—")}</td>
-          <td style="padding:4px 8px;">${esc(g.agencia || "—")}</td>
-        </tr>`).join("");
-      const avisos = (ctx.contas.avisos || []).map((a) => `<div style="margin-top:6px;color:#92400e;">${esc(a)}</div>`).join("");
-      html = `<div style="font-size:0.8rem;color:#475569;margin-bottom:6px;">Contas em que as parcelas foram baixadas (vão para o texto da autorização):</div>
-        <div style="overflow:auto;border:1px solid #e2e8f0;border-radius:8px;">
-          <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
-            <thead><tr style="background:#f1f5f9;color:#334155;text-align:left;">
-              <th style="padding:6px 8px;">Conta</th><th style="padding:6px 8px;">Recebimento até</th><th style="padding:6px 8px;text-align:right;">Valor</th><th style="padding:6px 8px;">Banco</th><th style="padding:6px 8px;">Agência</th>
-            </tr></thead>
-            <tbody>${linhas}</tbody>
-          </table>
-        </div>${avisos}`;
+      const brl = (v) => Number(v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+      const itens = ctx.contas.grupos.map((g) => `
+        <div class="esc-conta${g.bancoLabel ? "" : " esc-conta-pendente"}">
+          <div class="esc-conta-ico"><i data-lucide="landmark" style="width:18px;height:18px;"></i></div>
+          <div class="esc-conta-info">
+            <div class="esc-conta-banco">${esc(g.bancoLabel || "Banco não identificado")}</div>
+            <div class="esc-conta-det">${g.agencia ? "Agência " + esc(g.agencia) + " · " : ""}Conta corrente ${esc(g.conta)}</div>
+          </div>
+          <div class="esc-conta-ate">Recebimentos até<strong>${esc(this._dmy(g.ate))}</strong>${brl(g.valor)}</div>
+        </div>`).join("");
+      const avisos = (ctx.contas.avisos || []).map((a) => `<div class="esc-aviso">${esc(a)}</div>`).join("");
+      html = `<div class="form-group" style="margin:0;"><label>Dados bancários dos recebimentos</label><div class="esc-contas">${itens}</div>${avisos}</div>`;
     } else {
       const motivo = ctx.contasErro || "Não encontrei no Sienge as contas em que as parcelas deste título foram baixadas.";
       html = caixa("#92400e", "#fffbeb", "#fde68a", `${esc(motivo)} A autorização sairá sem os dados bancários.`);
@@ -1526,7 +1539,7 @@ const RelacionamentoApp = {
     let codigo = txt(a.bankCode) || txt(a.bankNumber) || txt(a.bankId) || txt(bank.code) || txt(bank.number) || txt(bank.id) || txt(a.bank);
     let nome = txt(a.bankName) || txt(bank.name) || txt(bank.description);
     let agencia = txt(a.agencyNumber) || txt(a.agencyCode) || txt(a.bankAgency) || txt(a.bankBranch) || txt(a.branchNumber) || txt(a.agency) || txt(agency.number) || txt(agency.code);
-    const NOMES = { "001": "Banco do Brasil", "033": "Banco Santander", "104": "Caixa Econômica Federal", "237": "Banco Bradesco", "341": "Banco Itaú", "356": "Banco Real", "399": "HSBC", "422": "Banco Safra", "748": "Sicredi", "756": "Sicoob", "077": "Banco Inter" };
+    const NOMES = { "001": "Banco do Brasil", "033": "Banco Santander", "104": "Caixa Econômica Federal", "237": "Banco Bradesco", "341": "Banco Itaú Unibanco", "356": "Banco Real", "399": "HSBC", "422": "Banco Safra", "748": "Sicredi", "756": "Sicoob", "077": "Banco Inter" };
     if (!codigo) {
       const n = (txt(a.accountName) + " " + txt(a.name) + " " + nome).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
       if (/SANTANDER/.test(n)) codigo = "033";
@@ -1539,9 +1552,38 @@ const RelacionamentoApp = {
     }
     if (/^\d+$/.test(codigo)) codigo = codigo.padStart(3, "0");
     if (!nome && NOMES[codigo]) nome = NOMES[codigo];
-    if (/^\d{1,3}$/.test(agencia)) agencia = agencia.padStart(4, "0");
+    if (/^\d+$/.test(agencia)) agencia = String(Number(agencia)).padStart(4, "0");
     const bancoLabel = codigo && nome ? codigo + " - " + nome : (nome || (codigo ? "banco " + codigo : ""));
     return { bancoLabel, agencia };
+  },
+
+  /** Cadastro de contas da Moura Leite, inclusive as antigas que o Sienge já não devolve: [conta, empresa, banco, agência]. */
+  CONTAS_BANCARIAS: [
+    ["0000000001", "1", "104", "4206"], ["13001592-3", "1", "033", "0473"], ["24076-7", "1", "422", "0097"],
+    ["13001668-7", "1", "033", "0473"], ["0130016601", "3", "033", "0473"], ["0000022196", "3", "104", "4137"],
+    ["13008727-6", "1", "033", "0039"], ["0019797-1", "4", "237", "3316"], ["FI-RF-SIMP", "1", "104", "0292"],
+    ["0000000013", "13", "341", "0223"], ["1-6", "1", "341", "0223"], ["13009617-1", "13", "033", "0039"],
+    ["13008728-3", "1", "033", "0039"], ["0000000002", "2", "104", "4206"], ["13009603-0", "12", "033", "0039"],
+    ["13009458-8", "6", "033", "0039"], ["13003816-7", "6", "033", "3422"], ["13009288-5", "3", "033", "0039"],
+    ["13008729-0", "1", "033", "0039"], ["13001669-4", "1", "033", "0473"], ["13009287-8", "2", "033", "0039"],
+    ["1300015686", "2", "033", "0473"], ["99397-3", "6", "341", "0223"], ["99469-0", "1", "341", "0223"],
+    ["99466-6", "1", "341", "0223"], ["99534-1", "3", "341", "0223"], ["99363-5", "2", "341", "0223"],
+    ["099248-8", "4", "341", "0223"], ["99248-8", "1", "341", "0223"], ["99391-6", "1", "341", "0223"],
+    ["99382-5", "6", "341", "0223"], ["99370-0", "13", "341", "0223"], ["99464-1", "1", "341", "0223"],
+    ["99367-6", "12", "341", "0223"], ["98746-2", "1", "341", "0223"]
+  ],
+
+  _contaCadastrada(conta, empresa) {
+    const chave = (s) => String(s || "").toUpperCase().replace(/[^0-9A-Z]/g, "");
+    const alvo = chave(conta);
+    if (!alvo) return null;
+    const emp = String(Number(empresa) || "");
+    const lista = this.CONTAS_BANCARIAS.filter((c) => chave(c[0]) === alvo);
+    const semZeros = lista.length ? lista : this.CONTAS_BANCARIAS.filter((c) => chave(c[0]).replace(/^0+/, "") === alvo.replace(/^0+/, ""));
+    const hit = semZeros.find((c) => c[1] === emp) || semZeros[0];
+    if (!hit) return null;
+    const info = this._bancoDaConta({ bankCode: hit[2], agencyNumber: hit[3] });
+    return { conta: hit[0], bancoLabel: info.bancoLabel, agencia: info.agencia };
   },
 
   /** Agrupa as baixas do título por conta corrente (já corrigindo as contas AJUSTE) e monta o texto de DADOS_BANCARIOS. */
@@ -1653,6 +1695,11 @@ const RelacionamentoApp = {
     if (onStep) onStep("Identificando banco e agência das contas...");
     const digitos = (s) => String(s || "").replace(/\D/g, "");
     for (const g of grupos) {
+      const cad = this._contaCadastrada(g.conta, g.empresa || companyId);
+      if (cad) {
+        Object.assign(g, cad);
+        continue;
+      }
       const alvo = digitos(g.conta);
       if (!alvo) continue;
       const empresas = [g.empresa, companyId].filter((v, i, arr) => v && arr.indexOf(v) === i);
@@ -1788,7 +1835,7 @@ const RelacionamentoApp = {
       alert("Informe o título, o contrato ou o nome do cliente.");
       return;
     }
-    this._escSetResultsHtml(this._docLoadingHtml("Consultando contrato na Sienge..."));
+    this._escSetResultsHtml("", "Consultando o contrato no Sienge...");
     document.getElementById("esc-doc-card").style.display = "none";
     RelacionamentoState.escritura = null;
     this._escAtualizarBtnGerar();
@@ -1893,7 +1940,7 @@ const RelacionamentoApp = {
   async selecionarEscritura(idx) {
     const sale = (RelacionamentoState.escrituraMatches || [])[idx];
     if (!sale) return;
-    this._escSetResultsHtml(this._docLoadingHtml("Carregando dados do lote e do contrato..."));
+    this._escSetResultsHtml("", "Carregando os dados do lote e do contrato...");
     const seq = RelacionamentoState.escrituraSeq;
     try {
       const customerId = sale.customerId;
@@ -2542,11 +2589,11 @@ const RelacionamentoApp = {
     }
   },
 
-  _docSetResults(kind, html) {
+  _docSetResults(kind, html, carregando) {
     const el = this._docEl(kind, "-search-results");
     if (el) el.innerHTML = html;
     const st = document.getElementById(this._docCfg(kind).p + "-modal-status");
-    if (st) st.innerHTML = html;
+    if (st) st.innerHTML = carregando && kind === "terceiros" ? "" : html;
     if (window.lucide) lucide.createIcons();
   },
 
@@ -2704,7 +2751,7 @@ const RelacionamentoApp = {
       else if (nome) this._travarFiltrosDoc(kind, "nome");
     }
     this._docSearchBusy = kind;
-    this._docSetResults(kind, this._docLoadingHtml("Consultando contrato na Sienge..."));
+    this._docSetResults(kind, this._docLoadingHtml("Consultando contrato na Sienge..."), true);
     const card = this._docEl(kind, "-doc-card");
     if (card) card.style.display = "none";
     this._setDocExtraCard(kind, false);
@@ -2818,7 +2865,7 @@ const RelacionamentoApp = {
       console.error(err);
       const busy = this._siengeBusy(err);
       if (busy && titulo && !opts.retried) {
-        this._docSetResults(kind, `<div style="padding:12px;color:#92400e;">A Sienge está ocupada no momento. Nova tentativa em alguns segundos...</div>`);
+        this._docSetResults(kind, `<div style="padding:12px;color:#92400e;">A Sienge está ocupada no momento. Nova tentativa em alguns segundos...</div>`, true);
         await new Promise((r) => setTimeout(r, 4000));
         return this.buscarDocSimples(kind, { quiet: true, retried: true });
       }
@@ -2904,7 +2951,7 @@ const RelacionamentoApp = {
     this._docSeq = this._docSeq || {};
     const seq = this._docSeq[kind] || 0;
     const stale = () => (this._docSeq[kind] || 0) !== seq;
-    this._docSetResults(kind, this._docLoadingHtml("Carregando dados do lote e do contrato..."));
+    this._docSetResults(kind, this._docLoadingHtml("Carregando dados do lote e do contrato..."), true);
     try {
       const customerId = sale.customerId;
       let customer = { id: customerId, name: sale.customerName || sale.name || "" };

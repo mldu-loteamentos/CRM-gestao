@@ -5193,6 +5193,84 @@ circle.donut-segment {
 @media (max-width: 760px) {
   .doc-modal-panel .doc-modal-grid-ter { grid-template-columns: 1fr !important; }
 }
+.esc-scan {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 22px 0 10px;
+  color: var(--color-text-muted);
+  font-size: 0.88rem;
+  font-weight: 500;
+}
+.esc-scan-bar {
+  width: 260px;
+  height: 6px;
+  background: #e2e8f0;
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+.esc-scan-bar > div {
+  position: absolute;
+  inset: 0;
+  background: var(--color-primary);
+  animation: esc-scan 1.5s infinite linear;
+}
+@keyframes esc-scan {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+.esc-contas { display: flex; flex-direction: column; gap: 8px; }
+.esc-conta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+.esc-conta-ico {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 8px;
+  background: #e7f1ec;
+  color: var(--color-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.esc-conta-info { flex: 1; min-width: 0; }
+.esc-conta-banco { font-weight: 600; color: #1e293b; font-size: 0.9rem; }
+.esc-conta-det { font-size: 0.8rem; color: #64748b; margin-top: 2px; }
+.esc-conta-ate { text-align: right; font-size: 0.78rem; color: #64748b; white-space: nowrap; }
+.esc-conta-ate strong { display: block; color: #1e293b; font-size: 0.88rem; }
+.esc-conta-pendente .esc-conta-ico { background: #fef3c7; color: #b45309; }
+.esc-aviso { margin-top: 8px; font-size: 0.8rem; color: #92400e; }
+.esc-cartorio-row { display: flex; gap: 8px; align-items: stretch; }
+.esc-cartorio-row .form-control { flex: 1; min-width: 0; }
+.esc-cartorio-row .btn { height: 46px; white-space: nowrap; }
+.esc-btn-add-cartorio {
+  position: relative;
+  width: 46px;
+  padding: 0;
+  justify-content: center;
+}
+.esc-btn-add-cartorio .esc-plus {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  color: var(--color-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 .moura-gestao-docs-panel footer {
   padding: 10px 16px 14px;
   display: flex;
