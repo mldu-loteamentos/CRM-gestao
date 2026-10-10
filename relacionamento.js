@@ -132,15 +132,36 @@ const RelacionamentoApp = {
       alert("Informe o nome completo do cartório.");
       return;
     }
-    const list = this.getCartoriosList();
     const key = this._normCartorioNome(nome);
-    const exists = list.find((c) => this._normCartorioNome(c.nome) === key);
+    const exists = this.getCartoriosList().find((c) => this._normCartorioNome(c.nome) === key);
     if (!exists) {
-      list.push({ nome: nome, deleted: false, updatedAt: Date.now() });
-      this.persistCartoriosList(list);
+      let saved = [];
+      try { saved = JSON.parse(localStorage.getItem("crm_moura_cartorios_list") || "[]") || []; } catch (e) { saved = []; }
+      if (!Array.isArray(saved)) saved = [];
+      saved = saved.filter((c) => this._normCartorioNome((c && c.nome) || c) !== key);
+      saved.push({ nome: nome, deleted: false, updatedAt: Date.now() });
+      this.persistCartoriosList(saved);
     }
     this.fillCartorioSelect(nome);
     this.cancelarNovoCartorio();
+  },
+
+  async excluirCartorio() {
+    const sel = document.getElementById("esc-cartorio");
+    const nome = (sel && sel.value || "").trim();
+    if (!nome) return;
+    const msg = "Excluir o cartório \"" + nome + "\" da lista? Ele deixa de aparecer para todos os usuários.";
+    const ok = typeof window.mouraConfirm === "function" ? await window.mouraConfirm(msg) : confirm(msg);
+    if (!ok) return;
+    let saved = [];
+    try { saved = JSON.parse(localStorage.getItem("crm_moura_cartorios_list") || "[]") || []; } catch (e) { saved = []; }
+    if (!Array.isArray(saved)) saved = [];
+    const key = this._normCartorioNome(nome);
+    // Fica a marca de excluído (e não a remoção) para a sincronização não trazer o cartório de volta.
+    saved = saved.filter((c) => this._normCartorioNome((c && c.nome) || c) !== key);
+    saved.push({ nome: nome, deleted: true, updatedAt: Date.now() });
+    this.persistCartoriosList(saved);
+    this.fillCartorioSelect("");
   },
 
   _installmentSettled(inst) {
@@ -1384,9 +1405,11 @@ const RelacionamentoApp = {
     const ctx = RelacionamentoState.escritura;
     const cartorio = (document.getElementById("esc-cartorio")?.value || "").trim();
     const ok = !!(ctx && ctx.quitado && !ctx.contasPendente && cartorio && !this._escrituraBusy);
+    const del = document.getElementById("esc-btn-del-cartorio");
+    if (del) del.disabled = !cartorio || !!this._escrituraBusy;
     btn.disabled = !ok;
-    btn.style.opacity = ok ? "" : "0.55";
-    btn.style.cursor = ok ? "" : "not-allowed";
+    btn.style.opacity = ok || this._escrituraBusy ? "" : "0.55";
+    btn.style.cursor = ok ? "" : (this._escrituraBusy ? "progress" : "not-allowed");
   },
 
   _escRenderModal() {
@@ -1416,6 +1439,12 @@ const RelacionamentoApp = {
     } else {
       const motivo = ctx.contasErro || "Não encontrei no Sienge as contas em que as parcelas deste título foram baixadas.";
       html = caixa("#92400e", "#fffbeb", "#fde68a", `${esc(motivo)} A autorização sairá sem os dados bancários.`);
+    }
+    if (ctx.quitado) {
+      const faltas = [];
+      if (ctx.semMatricula) faltas.push("<strong>Matrícula não cadastrada no Sienge.</strong> Cadastre em Cadastro de Unidades → Localização e Registro → Matrícula para gerar a autorização.");
+      if (ctx.semConfrontacoes) faltas.push("<strong>Medidas e confrontações do lote não cadastradas no Sienge.</strong> A localização sairá com quadra, lote, loteamento e área.");
+      if (faltas.length) html += `<div style="margin-top:12px;">${caixa("#92400e", "#fffbeb", "#fde68a", faltas.join("<br>"))}</div>`;
     }
     st.innerHTML = html;
     this._escAtualizarBtnGerar();
@@ -1964,6 +1993,7 @@ const RelacionamentoApp = {
         const det = await SiengeApiService.getUnitDetails(enterpriseId, unitName).catch(() => null);
         if (det && det.results && det.results.length) unitDetails = det.results[0];
       }
+      unitDetails = (await this._carregarUnidadeCompleta({ unit, unitDetails })) || unitDetails;
       let bill = null;
       if (sale.receivableBillId) {
         try {
@@ -1974,18 +2004,17 @@ const RelacionamentoApp = {
       const lot = unit.lot && unit.lot !== "N/D" ? unit.lot : (unitName.split("-").slice(1).join("-") || unitName);
       const empName = window.resolveLoteamentoName ? window.resolveLoteamentoName(unit, sale) : "";
       const cidadeLote = window.resolveCidadeLoteamento ? window.resolveCidadeLoteamento(unit, sale) : "";
-      const areaNum = unitDetails?.privateArea || unitDetails?.Privatearea || unit.area || "";
-      const areaStr = areaNum === "" || areaNum == null
-        ? ""
-        : (String(areaNum).match(/m/) ? String(areaNum) : Number(areaNum).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " m²");
-      const localizacao = [
-        "Lote nº " + (lot || "____") + " da quadra " + (block || "____") + " do loteamento " + (empName || "____") + ",",
-        "situado no município de " + (cidadeLote || "____") + ",",
-        areaStr ? ("com área de " + areaStr + ".") : ""
-      ].filter(Boolean).join(" ");
+      const loc = this._localizacaoLote(unitDetails, { lot, block, empName, cidadeLote, area: unit.area });
+      const localizacao = loc.texto;
       const quitadoInfo = await this._avaliarContratoQuitado(sale, bill);
       if (seq !== RelacionamentoState.escrituraSeq) return;
-      const escCtx = { customer, sale, unit, unitDetails, bill, empName, cidadeLote, localizacao, quitado: quitadoInfo.quitado, quitadoMotivo: quitadoInfo.motivo };
+      const escCtx = {
+        customer, sale, unit, unitDetails, bill, empName, cidadeLote, localizacao,
+        semConfrontacoes: !loc.confrontacoes,
+        semMatricula: !this._matriculaDe(unitDetails),
+        quitado: quitadoInfo.quitado,
+        quitadoMotivo: quitadoInfo.motivo
+      };
       RelacionamentoState.escritura = escCtx;
       if (escCtx.quitado) {
         escCtx.contasPendente = true;
@@ -2054,7 +2083,7 @@ const RelacionamentoApp = {
     this._escrituraBusy = true;
     const btn = document.getElementById("esc-btn-gerar");
     const btnHtml = btn ? btn.innerHTML : "";
-    if (btn) btn.textContent = "Gerando...";
+    if (btn) btn.innerHTML = `<span class="btn-spin"></span> Gerando...`;
     this._escAtualizarBtnGerar();
     try {
       let t = {};
@@ -2069,6 +2098,10 @@ const RelacionamentoApp = {
       }
       if (!corpo) {
         alert("O modelo de autorização não está preenchido. Salve-o em Configurações → Documentos padrões.");
+        return;
+      }
+      if (!(await this._garantirMatricula(ctx))) {
+        this._avisoMatriculaSienge(ctx, "a autorização de escritura");
         return;
       }
       const contas = ctx.contasPromise ? await ctx.contasPromise : null;
@@ -2212,34 +2245,47 @@ const RelacionamentoApp = {
     }
   },
 
+  _rubricaModal() {
+    let ov = document.getElementById("qui-rubrica-modal");
+    if (ov) return ov;
+    ov = document.createElement("div");
+    ov.id = "qui-rubrica-modal";
+    ov.className = "qui-rub-overlay";
+    ov.innerHTML = `
+      <div class="qui-rub-panel" role="dialog" aria-modal="true" aria-labelledby="qui-rub-title">
+        <div class="qui-rub-title" id="qui-rub-title">Termo de quitação</div>
+        <div class="qui-rub-pergunta">Com rubrica digital?</div>
+        <ul class="qui-rub-opcoes">
+          <li><strong>Sim:</strong> sai com a rubrica e os canais de atendimento.</li>
+          <li><strong>Não:</strong> sai para o sócio assinar.</li>
+        </ul>
+        <div class="qui-rub-footer">
+          <button type="button" class="btn btn-cancel" data-r="">Cancelar</button>
+          <button type="button" class="btn btn-outline" data-r="nao">Não</button>
+          <button type="button" class="btn btn-primary" data-r="sim">Sim</button>
+          <button type="button" class="btn btn-primary qui-rub-gerando" disabled><span class="btn-spin"></span> Gerando...</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener("click", (e) => {
+      if (ov.classList.contains("is-gerando")) return;
+      const b = e.target.closest("[data-r]");
+      if (!b && e.target !== ov) return;
+      const r = b ? b.getAttribute("data-r") : "";
+      if (r === "sim" || r === "nao") ov.classList.add("is-gerando");
+      else ov.style.display = "none";
+      const fn = ov._resolve;
+      ov._resolve = null;
+      if (fn) fn(r);
+    });
+    return ov;
+  },
+
+  /** Sim/Não deixa o pop-up aberto em "Gerando..." até _quitacaoBusy(false). */
   _perguntarRubrica() {
     return new Promise((resolve) => {
-      let ov = document.getElementById("qui-rubrica-modal");
-      if (!ov) {
-        ov = document.createElement("div");
-        ov.id = "qui-rubrica-modal";
-        ov.style.cssText = "display:none;position:fixed;inset:0;z-index:2147483001;align-items:center;justify-content:center;background:rgba(12,41,29,0.55);padding:16px;";
-        ov.innerHTML = `
-          <div style="background:#fff;border-radius:12px;width:100%;max-width:420px;box-shadow:0 18px 40px rgba(0,0,0,0.22);padding:22px;">
-            <div style="font-size:0.95rem;font-weight:800;color:#105436;margin-bottom:10px;">Termo de quitação</div>
-            <div style="font-size:0.92rem;color:#1e293b;line-height:1.45;">Com rubrica digital?</div>
-            <div style="font-size:0.78rem;color:#64748b;margin-top:6px;">Sim: sai com a rubrica e os canais de atendimento. Não: sai para o sócio assinar.</div>
-            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
-              <button type="button" class="btn btn-cancel" data-r="">Cancelar</button>
-              <button type="button" class="btn btn-outline" data-r="nao">Não</button>
-              <button type="button" class="btn btn-primary" data-r="sim">Sim</button>
-            </div>
-          </div>`;
-        document.body.appendChild(ov);
-        ov.addEventListener("click", (e) => {
-          const b = e.target.closest("[data-r]");
-          if (!b && e.target !== ov) return;
-          ov.style.display = "none";
-          const fn = ov._resolve;
-          ov._resolve = null;
-          if (fn) fn(b ? b.getAttribute("data-r") : "");
-        });
-      }
+      const ov = this._rubricaModal();
+      ov.classList.remove("is-gerando");
       ov._resolve = resolve;
       ov.style.display = "flex";
     });
@@ -2277,17 +2323,9 @@ const RelacionamentoApp = {
   },
 
   _quitacaoBusy(on) {
-    let el = document.getElementById("qui-busy");
-    if (!el && on) {
-      el = document.createElement("div");
-      el.id = "qui-busy";
-      el.style.cssText = "position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;background:rgba(12,41,29,0.35);";
-      el.innerHTML = `<div style="background:#fff;border-radius:12px;padding:18px 24px;box-shadow:0 18px 40px rgba(0,0,0,0.22);display:flex;align-items:center;gap:12px;font-weight:700;color:#105436;">
-        <div style="width:20px;height:20px;border:3px solid #cfe3d8;border-top-color:#105436;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
-        Gerando termo de quitação...</div>`;
-      document.body.appendChild(el);
-    }
-    if (el) el.style.display = on ? "flex" : "none";
+    const ov = this._rubricaModal();
+    ov.classList.toggle("is-gerando", !!on);
+    ov.style.display = on ? "flex" : "none";
   },
 
   async gerarQuitacaoPdf(kind) {
@@ -2372,20 +2410,89 @@ const RelacionamentoApp = {
     }
   },
 
-  async _garantirMatricula(ctx) {
-    const get = (d) => String((d && (d.legalRegistrationNumber || d.legalregistrationnumber)) || "").trim();
-    if (get(ctx.unitDetails)) return true;
+  _matriculaDe(d) {
+    return String((d && (d.legalRegistrationNumber || d.legalregistrationnumber)) || "").trim();
+  },
+
+  /** A busca de unidades por nome não traz matrícula nem dados do terreno; o GET /units/{id} traz. */
+  async _carregarUnidadeCompleta(ctx) {
+    if (ctx._unidadeCompleta) return ctx.unitDetails;
     const id = (ctx.unitDetails && ctx.unitDetails.id) || (ctx.unit && ctx.unit.id && !isNaN(ctx.unit.id) ? ctx.unit.id : "");
     if (id && !isNaN(id)) {
       try {
         const full = await this._siengeGet("/units/" + encodeURIComponent(id));
-        if (full) ctx.unitDetails = Object.assign({}, ctx.unitDetails || {}, full);
+        if (full) {
+          ctx.unitDetails = Object.assign({}, ctx.unitDetails || {}, full);
+          ctx._unidadeCompleta = true;
+        }
       } catch (e) {}
     }
-    return !!get(ctx.unitDetails);
+    return ctx.unitDetails;
   },
 
-  _avisoMatriculaSienge(ctx) {
+  async _garantirMatricula(ctx) {
+    if (this._matriculaDe(ctx.unitDetails)) return true;
+    await this._carregarUnidadeCompleta(ctx);
+    return !!this._matriculaDe(ctx.unitDetails);
+  },
+
+  /** Medidas e confrontações do cadastro da unidade no Sienge (frente, laterais, fundos e chanfro). */
+  _confrontacoesLote(ud) {
+    const src = (ud && (ud.landDetails || ud.landDetail)) || ud || {};
+    const num = (v) => {
+      const n = Number(String(v == null ? "" : v).replace(",", "."));
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    };
+    const metros = (n) => {
+      const [i, d] = n.toFixed(2).split(".");
+      return i.padStart(2, "0") + "," + d + " METROS";
+    };
+    const FEM = /^(RUA|AVENIDA|AV\.?|ALAMEDA|ESTRADA|RODOVIA|AREA|ÁREA|VIELA|PRACA|PRAÇA|TRAVESSA|VIA|RESERVA|FAIXA|GLEBA|QUADRA|PROPRIEDADE|CHACARA|CHÁCARA|FAZENDA|MATA|LINHA)\b/;
+    const MASC = /^(LOTE|SISTEMA|LOTEAMENTO|IM[OÓ]VEL|TERRENO|C[OÓ]RREGO|RIO|PROLONGAMENTO|REMANESCENTE|CANTEIRO|ACESSO|CAMINHO|BOSQUE|LAGO|LIMITE|SÍTIO|SITIO|CONDOM[IÍ]NIO)\b/;
+    const alvo = (ligacao, limite) => {
+      const l = String(limite || "").trim().toUpperCase();
+      if (!l) return "";
+      if (/^(CONFRONTANDO|COM|PARA|PELA|PELO|DIVISA)\b/.test(l)) return " " + l;
+      const art = /^LOTES\b/.test(l) ? "OS " : FEM.test(l) ? "A " : MASC.test(l) ? "O " : "";
+      return " " + ligacao + " " + art + l;
+    };
+    const lados = [
+      [src.front, src.frontLimit, "DE FRENTE", "PARA"],
+      [src.leftSide, src.leftSideLimit, "PELO LADO ESQUERDO", "CONFRONTANDO COM"],
+      [src.rightSide, src.rightSideLimit, "PELO LADO DIREITO", "CONFRONTANDO COM"],
+      [src.back, src.backLimit, "PELOS FUNDOS", "CONFRONTANDO COM"],
+      [src.chamfer, src.chamferLimit, "DE CHANFRO", "CONFRONTANDO COM"]
+    ];
+    return lados
+      .filter(([m]) => num(m))
+      .map(([m, lim, lado, ligacao]) => metros(num(m)) + " " + lado + alvo(ligacao, lim))
+      .join("\n");
+  },
+
+  _localizacaoLote(ud, info) {
+    const linhas = this._confrontacoesLote(ud);
+    const areaNum = Number((ud && (ud.terrainArea || ud.privateArea || ud.Privatearea)) || info.area || 0);
+    if (linhas) {
+      let area = "";
+      if (areaNum > 0) {
+        const fmt = areaNum.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const ext = typeof numeroPorExtenso === "function" && Number.isInteger(areaNum) ? numeroPorExtenso(areaNum) : "";
+        area = "\nPERFAZENDO A ÁREA DE " + fmt + " m²" + (ext ? " (" + String(ext).toUpperCase() + " METROS QUADRADOS)" : "") + ".";
+      }
+      return { texto: linhas + area, confrontacoes: true };
+    }
+    const nota = String((ud && ud.note) || "").trim();
+    if (/METROS/i.test(nota)) return { texto: nota.toUpperCase(), confrontacoes: true };
+    const areaStr = areaNum > 0 ? areaNum.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " m²" : "";
+    const texto = [
+      "Lote nº " + (info.lot || "____") + " da quadra " + (info.block || "____") + " do loteamento " + (info.empName || "____") + ",",
+      "situado no município de " + (info.cidadeLote || "____") + ",",
+      areaStr ? ("com área de " + areaStr + ".") : ""
+    ].filter(Boolean).join(" ");
+    return { texto, confrontacoes: false };
+  },
+
+  _avisoMatriculaSienge(ctx, documento) {
     let ov = document.getElementById("qui-matricula-modal");
     if (!ov) {
       ov = document.createElement("div");
@@ -2408,7 +2515,7 @@ const RelacionamentoApp = {
     const unidade = this._formatUnidadeDoc(ctx);
     const texto = ov.querySelector("#qui-matricula-texto");
     if (texto) {
-      texto.innerHTML = `A unidade <strong>${this._escDoc(unidade)}</strong> está sem matrícula no Sienge. Para gerar o termo de quitação, atualize o cadastro em <strong>Cadastro de Unidades → Cadastro → Localização e Registro → Matrícula</strong> (campo destacado em amarelo) e gere o termo de novo.`;
+      texto.innerHTML = `A unidade <strong>${this._escDoc(unidade)}</strong> está sem matrícula no Sienge. Para gerar ${documento || "o termo de quitação"}, atualize o cadastro em <strong>Cadastro de Unidades → Cadastro → Localização e Registro → Matrícula</strong> (campo destacado em amarelo) e gere o termo de novo.`;
     }
     ov.style.display = "flex";
   },
@@ -3178,6 +3285,10 @@ const RelacionamentoApp = {
             return s;
           };
       let filled = fillVars(markup, legalBase);
+      if (kind === "terceiros") {
+        await this._baixarTerceirosPdf(ctx, cfg, docTitle, this._ensureDocHeaderTopo(filled, legalBase), legalBase);
+        return;
+      }
       if (typeof window.centerSimpleDocSignature === "function") {
         filled = window.centerSimpleDocSignature(filled);
       }
@@ -3193,6 +3304,47 @@ const RelacionamentoApp = {
     } catch (err) {
       console.error("Erro ao gerar " + cfg.title, err);
       alert("Não foi possível gerar o documento. Verifique o modelo em Documentos padrões e tente de novo.");
+    }
+  },
+
+  async _baixarTerceirosPdf(ctx, cfg, docTitle, filled, legalBase) {
+    if (this._terceirosBusy) return;
+    this._terceirosBusy = true;
+    const btn = document.getElementById("ter-btn-gerar");
+    const btnHtml = btn ? btn.innerHTML : "";
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = `<span class="btn-spin"></span> Gerando...`;
+    }
+    try {
+      const visivel = (s) => String(s || "").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim();
+      const soTraco = (s) => /^_{5,}$/.test(visivel(s).split(/\n/).filter(Boolean).pop() || "");
+      const blocos = [];
+      String(filled).replace(/[ \t]+\n/g, "\n").split(/\n[ \t]*\n/).map((b) => b.replace(/^\n+|\s+$/g, "")).filter((b) => visivel(b)).forEach((b) => {
+        // Data, linha de assinatura e nome ficam juntos na mesma página.
+        if (blocos.length && (/^_{5,}/.test(visivel(b)) || soTraco(blocos[blocos.length - 1]))) blocos[blocos.length - 1] += "\n\n" + b;
+        else blocos.push(b);
+      });
+      const iAss = blocos.findIndex((b) => /_{5,}/.test(visivel(b)));
+      if (iAss >= 0 && typeof window.centerSimpleDocSignature === "function") blocos[iAss] = window.centerSimpleDocSignature(blocos[iAss]);
+      const topo = `<h2 style="text-align:center;color:#111;font-size:13pt;font-weight:bold;letter-spacing:0.04em;margin:0 0 30px;font-family:'Times New Roman',serif;">${docTitle}</h2>`;
+      const corpoCss = "font-family:'Times New Roman',serif;font-size:11pt;line-height:1.75;text-align:justify;white-space:pre-wrap;color:#111;";
+      const paginas = this._paginarDoc(topo, blocos, corpoCss);
+      const codEmp = legalBase.CODIGO_EMPREENDIMENTO && legalBase.CODIGO_EMPREENDIMENTO !== "____" ? legalBase.CODIGO_EMPREENDIMENTO : "";
+      const titulo = legalBase.TITULO || (ctx.sale && ctx.sale.receivableBillId) || "";
+      const nome = (ctx.customer && ctx.customer.name) || (ctx.sale && ctx.sale.customerName) || "";
+      const fileName = typeof window.buildFichaPdfFilename === "function"
+        ? window.buildFichaPdfFilename(cfg.title, { contrato: legalBase.UNIDADE, costCenterId: codEmp, titulo, nome })
+        : cfg.title + " | Título " + titulo + ".pdf";
+      await this._baixarPaginasPdf(paginas, fileName);
+      this.fecharDocModal("terceiros");
+    } finally {
+      this._terceirosBusy = false;
+      if (btn) {
+        btn.innerHTML = btnHtml;
+        this._atualizarBtnGerarTerceiro();
+      }
+      if (window.lucide) lucide.createIcons();
     }
   }
 };

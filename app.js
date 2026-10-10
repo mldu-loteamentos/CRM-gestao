@@ -41853,7 +41853,8 @@ window.mergeCartoriosList = function(localStr, cloudStr) {
   };
   cloud.forEach(mergeOne);
   local.forEach(mergeOne);
-  return JSON.stringify([...byKey.values()].filter(x => x && !x.deleted).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")));
+  // A marca de excluído precisa ficar salva; sem ela, um cartório padrão ou uma cópia antiga em outro computador volta para a lista.
+  return JSON.stringify([...byKey.values()].filter(Boolean).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")));
 };
 
 window.preambleLinkScore = function(p) {

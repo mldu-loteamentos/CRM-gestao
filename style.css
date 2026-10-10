@@ -5258,6 +5258,73 @@ circle.donut-segment {
   padding: 0;
   justify-content: center;
 }
+.esc-btn-del-cartorio {
+  width: 46px;
+  padding: 0;
+  justify-content: center;
+  background: #fff;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+.esc-btn-del-cartorio:hover:not(:disabled) { background: #fef2f2; border-color: #f87171; }
+.esc-btn-del-cartorio:disabled { color: #cbd5e1; border-color: #e2e8f0; cursor: not-allowed; }
+.btn-spin {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2.5px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+.qui-rub-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 2147483001;
+  align-items: center;
+  justify-content: center;
+  background: rgba(12, 41, 29, 0.55);
+  padding: 16px;
+}
+.qui-rub-panel {
+  background: #fff;
+  border-radius: 14px;
+  width: 100%;
+  max-width: 500px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.22);
+  padding: 26px 28px 24px;
+}
+.qui-rub-title { font-size: 1.05rem; font-weight: 800; color: var(--color-primary); margin-bottom: 14px; }
+.qui-rub-pergunta { font-size: 1rem; font-weight: 600; color: #1e293b; }
+.qui-rub-opcoes {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.84rem;
+  color: #475569;
+  line-height: 1.4;
+}
+.qui-rub-opcoes strong { color: #1e293b; }
+.qui-rub-footer {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 24px;
+}
+.qui-rub-footer .btn { height: 44px; justify-content: center; gap: 8px; }
+.qui-rub-footer .qui-rub-gerando { display: none; grid-column: span 2; cursor: progress; opacity: 1; }
+.qui-rub-overlay.is-gerando [data-r="sim"],
+.qui-rub-overlay.is-gerando [data-r="nao"] { display: none; }
+.qui-rub-overlay.is-gerando .qui-rub-gerando { display: inline-flex; }
+.qui-rub-overlay.is-gerando [data-r=""] { opacity: 0.45; pointer-events: none; }
 .esc-btn-add-cartorio .esc-plus {
   position: absolute;
   top: 5px;
