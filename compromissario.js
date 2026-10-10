@@ -1050,8 +1050,10 @@ const CompromissarioApp = {
     this.getActivePortfolioCompanies().forEach((c) => {
       const prev = pickPrev(c.id);
       const records = this.normalizeCessaoRecords(Array.isArray(prev.records) ? prev.records : []);
+      const pickedNone = prev.status === 'none' && prev.userPicked === true;
       next[c.id] = {
-        status: prev.status === 'none' || prev.status === 'has' ? prev.status : null,
+        status: prev.status === 'has' ? 'has' : (pickedNone ? 'none' : null),
+        userPicked: prev.status === 'has' || pickedNone,
         fileName: prev.fileName || '',
         records,
         uploadedAt: prev.uploadedAt || null,
@@ -1073,7 +1075,11 @@ const CompromissarioApp = {
     Object.entries(this.state.cessaoByCompany || {}).forEach(([id, row]) => {
       if (!row) return;
       const prev = next[id] || next[String(id)] || next[Number(id)] || {};
-      if ((row.status == null || row.status === '') && (prev.status === 'none' || prev.status === 'has')) {
+      if ((row.status == null || row.status === '') && prev.status === 'has') {
+        next[id] = prev;
+        return;
+      }
+      if ((row.status == null || row.status === '') && prev.status === 'none' && prev.userPicked === true && row.userPicked !== false) {
         next[id] = prev;
         return;
       }
@@ -1274,7 +1280,7 @@ const CompromissarioApp = {
         catch (e) { window.scrollTo(0, saved.win || 0); }
       }
       if (companyId) {
-        const el = document.querySelector('input[name="comp-cessao-' + companyId + '"]:checked');
+        const el = document.querySelector('#comp-cessao-list input[name$="-' + companyId + '"]:checked');
         if (el && typeof el.focus === 'function') {
           try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); }
         }
@@ -1303,6 +1309,7 @@ const CompromissarioApp = {
       const hasFile = !!(row.fileName);
       const noneChecked = status === 'none' ? 'checked' : '';
       const hasChecked = status === 'has' ? 'checked' : '';
+      const radioName = 'comp-cessao-' + month + '-' + c.id;
       const uploadDisabled = status !== 'has' ? 'disabled' : '';
       const tone = status === 'none' ? 'is-none' : (status === 'has' && hasFile ? 'is-has' : (status === 'has' ? 'is-wait' : 'is-pending'));
       const fileInput = `<input type="file" id="comp-cessao-file-${c.id}" accept=".xlsx,.xls,.csv,.txt,.pdf" ${uploadDisabled}
@@ -1336,10 +1343,10 @@ const CompromissarioApp = {
           </td>
           <td class="comp-cessao-mes">
             <div class="comp-cessao-choice">
-              <label><input type="radio" name="comp-cessao-${c.id}" value="none" ${noneChecked}
-                onchange="CompromissarioApp.setCessaoStatus('${c.id}','none')"> Não teve</label>
-              <label><input type="radio" name="comp-cessao-${c.id}" value="has" ${hasChecked}
-                onchange="CompromissarioApp.setCessaoStatus('${c.id}','has')"> Teve</label>
+              <label><input type="radio" name="${radioName}" value="none" ${noneChecked} autocomplete="off"
+                onclick="CompromissarioApp.setCessaoStatus('${c.id}','none')"> Não teve</label>
+              <label><input type="radio" name="${radioName}" value="has" ${hasChecked} autocomplete="off"
+                onclick="CompromissarioApp.setCessaoStatus('${c.id}','has')"> Teve</label>
             </div>
           </td>
           <td class="comp-cessao-rel">${relHtml}</td>
@@ -1395,6 +1402,7 @@ const CompromissarioApp = {
     }
     const row = this.state.cessaoByCompany[id];
     row.status = status === 'none' || status === 'has' ? status : null;
+    row.userPicked = row.status === 'none' || row.status === 'has';
     row.declaredAt = Date.now();
     if (row.status === 'none') {
       row.fileName = '';

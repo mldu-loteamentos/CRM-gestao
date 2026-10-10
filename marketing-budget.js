@@ -18,6 +18,7 @@ const MarketingBudgetApp = {
     endDate: "",
     loading: false,
     progress: "",
+    progressRatio: 0,
     error: "",
     consultado: false,
     obra: null,
@@ -304,10 +305,26 @@ const MarketingBudgetApp = {
     this.state[key] = value;
   },
 
-  setProgress(text) {
-    this.state.progress = text;
+  textoProgresso(text) {
+    return String(text || "")
+      .replace(/\s*\(\s*\d+\s+de\s+\d+\s*\)/gi, "")
+      .replace(/\s*·\s*período\s+\d+\s+de\s+\d+/gi, "")
+      .replace(/\s+\d+\s+de\s+\d+/gi, "")
+      .replace(/\s*·\s*(·\s*)+/g, " · ")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+  },
+
+  setProgress(text, ratio) {
+    const clean = this.textoProgresso(text);
+    this.state.progress = clean;
+    if (Number.isFinite(Number(ratio))) {
+      this.state.progressRatio = Math.max(0, Math.min(1, Number(ratio)));
+    }
     const el = document.getElementById("mkb-progress");
-    if (el) el.textContent = text;
+    if (el) el.textContent = clean;
+    const bar = document.getElementById("mkb-progress-bar");
+    if (bar) bar.style.width = Math.round((this.state.progressRatio || 0) * 100) + "%";
   },
 
   async consultar() {
@@ -321,6 +338,8 @@ const MarketingBudgetApp = {
     s.loading = true;
     s.error = "";
     s.consultado = true;
+    s.progress = "Lendo o cadastro da obra (VGV)…";
+    s.progressRatio = 0.06;
     s.rows = [];
     s.vendas = [];
     s.distratos = [];
@@ -328,7 +347,7 @@ const MarketingBudgetApp = {
     s.perfis = { status: "", map: {}, feitos: 0, total: 0 };
     this.render();
     try {
-      this.setProgress("Lendo o cadastro da obra (VGV)…");
+      this.setProgress("Lendo o cadastro da obra (VGV)…", 0.06);
       const [obra, cfg, catCfg] = await Promise.all([
         this.lerVgv(cc),
         this.lerConfig(String(cc.id)),
@@ -340,20 +359,26 @@ const MarketingBudgetApp = {
       s.ccsCfg = this.ccsDaConfig(cfg, cc.id);
       s.catSel = catCfg && Array.isArray(catCfg.ids) ? catCfg.ids.map(String) : null;
       s.eventos = await this.lerEventos(cc.id);
-      this.setProgress("Lendo o grupo de marketing do plano financeiro…");
+      this.setProgress("Lendo o grupo de marketing do plano financeiro…", 0.16);
       await this.carregarGrupoMarketing();
       if (gen !== s.gen) return;
+      const faixas = typeof siengeSplitDateRange === "function"
+        ? siengeSplitDateRange(s.startDate, s.endDate)
+        : [{ start: s.startDate, end: s.endDate }];
+      const totalPassos = Math.max(1, s.ccsCfg.length * faixas.length);
       const bills = [];
       for (let i = 0; i < s.ccsCfg.length; i++) {
         const alvo = s.costCenters.find((c) => String(c.id) === s.ccsCfg[i]) || { id: s.ccsCfg[i] };
-        const rotulo = s.ccsCfg.length > 1 ? ` · centro ${alvo.id} (${i + 1} de ${s.ccsCfg.length})` : "";
-        this.setProgress("Buscando os títulos a pagar" + rotulo + "…");
-        const parte = await this.buscarTitulos(alvo, gen, rotulo);
+        const rotulo = s.ccsCfg.length > 1 ? ` · centro ${alvo.id}` : "";
+        const parte = await this.buscarTitulos(alvo, gen, rotulo, (idx) => {
+          const passo = i * faixas.length + idx + 1;
+          this.setProgress("Buscando os títulos a pagar" + rotulo + "…", 0.16 + 0.72 * (passo / totalPassos));
+        });
         if (gen !== s.gen) return;
         bills.push.apply(bills, parte);
       }
       this.montarGastos(bills, s.ccsCfg);
-      this.setProgress("Buscando as vendas do empreendimento…");
+      this.setProgress("Buscando as vendas do empreendimento…", 0.94);
       await this.buscarVendas(cc, gen);
     } catch (e) {
       if (gen !== s.gen) return;
@@ -423,7 +448,7 @@ const MarketingBudgetApp = {
     return list.filter((b) => String(b.costCenterId) === String(ccId));
   },
 
-  async buscarTitulos(cc, gen, rotulo) {
+  async buscarTitulos(cc, gen, rotulo, onStep) {
     const base = window.ComprasControleApp || window.ComprasPrevisoesApp;
     if (!base || typeof base.outcomeRange !== "function") throw new Error("O módulo de contas a pagar não está disponível.");
     const s = this.state;
@@ -433,13 +458,15 @@ const MarketingBudgetApp = {
       + "&selectionType=D&correctionIndexerId=0&correctionDate=2023-01-01&withAuthorizations=false&withBankMovements=true"
       + "&costCentersId=" + encodeURIComponent(cc.id)
       + (companyId ? "&companyId=" + encodeURIComponent(companyId) : "");
-    api.noteProgress = (t) => { if (gen === s.gen) this.setProgress(t); };
+    const fase = "Buscando os títulos a pagar" + (rotulo || " do empreendimento") + "…";
+    api.noteProgress = () => { if (gen === s.gen) this.setProgress(fase); };
     const companyId = String(cc.idCompany != null ? cc.idCompany : (cc.companyId != null ? cc.companyId : ""));
     const faixas = typeof siengeSplitDateRange === "function" ? siengeSplitDateRange(s.startDate, s.endDate) : [{ start: s.startDate, end: s.endDate }];
     const bills = [];
     for (let i = 0; i < faixas.length; i++) {
       if (gen !== s.gen) return [];
-      this.setProgress(`Buscando os títulos a pagar${rotulo || " do empreendimento"} · período ${i + 1} de ${faixas.length}`);
+      if (typeof onStep === "function") onStep(i, faixas.length);
+      else this.setProgress(fase);
       const parte = await api.outcomeRange(faixas[i].start, faixas[i].end, companyId);
       if (Array.isArray(parte)) bills.push.apply(bills, parte);
     }
@@ -1592,7 +1619,7 @@ const MarketingBudgetApp = {
     const s = this.state;
     const cc = this.ccAtual();
     const corpo = s.loading
-      ? `<div class="mkb-card" style="text-align:center;padding:40px;color:#64748b;"><div class="spinner" style="margin:0 auto 12px;"></div><p id="mkb-progress" style="margin:0;">${this.esc(s.progress)}</p></div>`
+      ? `<div class="mkb-card mkb-load"><div class="loading-spinner"></div><p id="mkb-progress">${this.esc(s.progress)}</p><div class="mkb-load-track"><div id="mkb-progress-bar" style="width:${Math.round((s.progressRatio || 0) * 100)}%"></div></div></div>`
       : (s.error ? `<div class="mkb-card" style="color:#b91c1c;">${this.esc(s.error)}</div>`
         : (s.consultado ? this.abasHtml() + (s.aba === "perfil" ? this.perfilHtml() : (s.aba === "contratos" ? this.contratosHtml() : this.resultadoHtml()))
           : `<div class="mkb-card mkb-vazio">Escolha o empreendimento e o período e clique em <strong>Consultar</strong>. A verba vem do VGV da obra no Sienge × o percentual de marketing definido em <a href="#" onclick="event.preventDefault();MarketingBudgetApp.abrirConfig()">Configurações</a>.</div>`));
@@ -1604,6 +1631,10 @@ const MarketingBudgetApp = {
         #marketing-budget-root .mkb-head-ic { width:36px; height:36px; background:rgba(255,255,255,0.2); border-radius:8px; display:flex; align-items:center; justify-content:center; }
         #marketing-budget-root .mkb-body { background:#f8fafc; border:1px solid #e2e8f0; border-top:none; padding:16px; border-radius:0 0 12px 12px; display:flex; flex-direction:column; gap:14px; }
         #marketing-budget-root .mkb-card { background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:14px 16px; }
+        #marketing-budget-root .mkb-load { display:flex; flex-direction:column; align-items:center; gap:14px; padding:40px 24px; color:#64748b; text-align:center; }
+        #marketing-budget-root .mkb-load p { margin:0; font-size:0.9rem; }
+        #marketing-budget-root .mkb-load-track { width:100%; max-width:420px; height:8px; background:#e2e8f0; border-radius:99px; overflow:hidden; }
+        #marketing-budget-root .mkb-load-bar, #marketing-budget-root #mkb-progress-bar { height:100%; background:#105436; border-radius:99px; transition:width 0.25s linear; }
         #marketing-budget-root .mkb-card-h { display:flex; align-items:baseline; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
         #marketing-budget-root .mkb-card-h h3 { margin:0; font-size:0.95rem; color:#105436; }
         #marketing-budget-root .mkb-card-h small, #marketing-budget-root .mkb-muted { color:#64748b; font-size:0.75rem; font-weight:400; }
