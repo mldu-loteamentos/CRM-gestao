@@ -5324,7 +5324,12 @@ circle.donut-segment {
 .gp-rateio-msg { margin: 8px 0 0; font-size: 0.8rem; border-radius: 8px; padding: 8px 10px; }
 .gp-rateio-msg.is-ok { background: #ecfdf5; color: #105436; }
 .gp-rateio-msg.is-bad { background: #fef2f2; color: #b91c1c; }
-.gp-rateio-msg.is-bad div + div { margin-top: 3px; }
+.gp-rateio-msg.is-bad div, .gp-rateio-msg.is-warn div + div { margin-top: 3px; }
+.gp-rateio-msg.is-warn { background: #fff7ed; color: #c2410c; }
+.gp-rateio td.gp-rateio-plano { color: #334155; }
+.gp-rateio td.gp-rateio-plano div + div { margin-top: 2px; }
+.gp-rateio .gp-rateio-cod { font-variant-numeric: tabular-nums; color: #475569; font-weight: 600; margin-right: 4px; }
+.gp-rateio td.gp-rateio-plano.is-bad, .gp-rateio td.gp-rateio-plano.is-bad .gp-rateio-cod { color: #b91c1c; font-weight: 700; }
 .esc-scan {
   display: flex;
   flex-direction: column;

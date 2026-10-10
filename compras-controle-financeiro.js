@@ -914,7 +914,7 @@ ComprasControleApp.pintarTitulo = function () {
   `).join("");
   el.innerHTML = `
     <div class="cfin-titulo-back" onclick="if(event.target===this)ComprasControleApp.fecharTitulo()">
-      <div class="cfin-titulo-card" onclick="event.stopPropagation()">
+      <div class="cfin-titulo-card${row.rateioHtml ? " is-largo" : ""}" onclick="event.stopPropagation()">
         <div class="cfin-titulo-head">
           <h3>Título ${this.esc(row.titulo)}${row.parcela ? " · parcela " + this.esc(row.parcela) : ""}</h3>
           <button type="button" class="btn btn-cancel btn-sm" onclick="ComprasControleApp.fecharTitulo()">Fechar</button>
@@ -928,8 +928,8 @@ ComprasControleApp.pintarTitulo = function () {
           <div><span>Vencimento</span><div>${this.esc(this.fmtDate(row.vencimento || bill.dueDate))}</div></div>
           <div><span>${pago ? "Valor pago" : "Valor a pagar"}</span><div class="cfin-titulo-valor">${this.esc(this.money(valor))}</div></div>
           <div><span>Situação</span><div>${this.esc(row.situacaoTexto || this.statusLabel(row))}</div></div>
-          <div><span>Centro de custo</span><div>${this.esc(cc)}</div></div>
-          <div><span>Plano financeiro</span><div>${this.esc(plano)}</div></div>
+          ${row.rateioHtml ? "" : `<div><span>Centro de custo</span><div>${this.esc(cc)}</div></div>
+          <div><span>Plano financeiro</span><div>${this.esc(plano)}</div></div>`}
           <div><span>Emissão</span><div>${this.esc(this.fmtDate(row.emissao || bill.issueDate))}</div></div>
           <div><span>Departamento</span><div>${this.esc(row.departamento || "—")}</div></div>
           ${pago ? `<div><span>Pagamento</span><div>${this.esc(this.fmtDate(row.dataPagamento))}</div></div>` : ""}
@@ -946,6 +946,9 @@ ComprasControleApp.pintarTitulo = function () {
     <style>
       #cfin-titulo .cfin-titulo-back { position:fixed; inset:0; z-index:10020; background:rgba(15,23,42,.45); display:flex; align-items:center; justify-content:center; padding:16px; }
       #cfin-titulo .cfin-titulo-card { background:#fff; border-radius:12px; width:min(720px,96vw); max-height:86vh; overflow:auto; padding:18px 20px; }
+      #cfin-titulo .cfin-titulo-card.is-largo { width:min(1180px,96vw); max-height:92vh; padding:20px 26px; }
+      #cfin-titulo .cfin-titulo-card.is-largo .cfin-titulo-grid { grid-template-columns:repeat(4, minmax(0, 1fr)); }
+      @media (max-width: 900px) { #cfin-titulo .cfin-titulo-card.is-largo .cfin-titulo-grid { grid-template-columns:1fr 1fr; } }
       #cfin-titulo .cfin-titulo-head { display:flex; justify-content:space-between; gap:12px; align-items:center; }
       #cfin-titulo h3 { margin:0; color:#105436; font-size:1.05rem; }
       #cfin-titulo h4 { margin:16px 0 6px; color:#105436; font-size:0.92rem; }

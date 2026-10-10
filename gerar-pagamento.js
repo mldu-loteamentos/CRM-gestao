@@ -407,10 +407,15 @@ const GerarPagamentoApp = {
         if (!c || c.costCenterId == null) return;
         const id = String(c.costCenterId);
         const rate = c.financialCategoryRate != null && Number.isFinite(Number(c.financialCategoryRate)) ? Number(c.financialCategoryRate) : 100;
+        const plano = { id: c.financialCategoryId != null ? String(c.financialCategoryId).trim() : "", nome: String(c.financialCategoryName || "").trim() };
         const ja = ccsTitulo.find((x) => x.id === id);
-        if (ja) { ja.rateio += rate; return; }
+        if (ja) {
+          ja.rateio += rate;
+          if ((plano.id || plano.nome) && !ja.planos.some((p) => p.id === plano.id && p.nome === plano.nome)) ja.planos.push(plano);
+          return;
+        }
         const cad = ccMap[id] || this.ccDe(id);
-        ccsTitulo.push({ id, nome: (cad && cad.name) || c.costCenterName || "", parceria: !!ccMap[id], rateio: rate });
+        ccsTitulo.push({ id, nome: (cad && cad.name) || c.costCenterName || "", parceria: !!ccMap[id], rateio: rate, planos: plano.id || plano.nome ? [plano] : [] });
       });
       ccsTitulo.sort((a, b) => Number(a.id) - Number(b.id));
       const tituloAPagar = saldo != null ? Math.max(0, saldo) : (pago ? 0 : original);
@@ -577,9 +582,11 @@ const GerarPagamentoApp = {
     return cache[id];
   },
 
-  /** Motivo que impede o título de entrar em lote (forma de pagamento não conferida ou com possível divergência). */
+  /** Motivo que impede o título de entrar em lote (rateio ou plano financeiro fora do padrão, forma de pagamento não conferida ou divergente). */
   bloqueioLote(it) {
     if (it.emLote) return "";
+    const rateio = this.bloqueioRateio(it.rateio);
+    if (rateio) return rateio;
     const p = it.pag;
     if (!p) return "Forma de pagamento ainda não conferida.";
     const c = p.check;
@@ -665,7 +672,7 @@ const GerarPagamentoApp = {
       valorAjustado: t.valor,
       ccId: t.ccs.map((x) => x.id).join(" / "),
       ccNome: t.ccs.length > 1 ? "rateado" : (t.ccs[0] && t.ccs[0].nome) || r.ccNome,
-      rateioHtml: t.ccs.length > 1 ? this.rateioHtml(this.conferirRateio(t.ccs, t.valor)) : "",
+      rateioHtml: this.rateioHtml(this.conferirRateio(t.ccs, t.valor)),
       companyId: cc ? this.companyIdOf(cc) : "",
       natureza: r.pago ? "pago" : "",
       dataPagamento: r.pagamento || "",
@@ -748,7 +755,7 @@ const GerarPagamentoApp = {
           Object.assign(g.itens[chave], {
             valor: r.tituloValor,
             aPagar: r.tituloAPagar,
-            ccs: (r.ccsTitulo || []).map((c) => ({ id: c.id, nome: c.nome, parceria: c.parceria, rateio: c.rateio }))
+            ccs: (r.ccsTitulo || []).map((c) => ({ id: c.id, nome: c.nome, parceria: c.parceria, rateio: c.rateio, planos: c.planos || [] }))
           });
         }
       }
@@ -830,7 +837,7 @@ const GerarPagamentoApp = {
     }
     if (!g.itens.some((it) => it.marcado)) {
       alert(g.itens.every((it) => it.emLote) ? "Todos os títulos deste dia já estão em lote."
-        : (g.itens.some((it) => !it.emLote && !it.bloqueio) ? "Marque ao menos um título para gerar o lote." : "Nenhum título deste dia pode entrar em lote: todos têm possível divergência na forma de pagamento. Corrija no Sienge e busque de novo."));
+        : (g.itens.some((it) => !it.emLote && !it.bloqueio) ? "Marque ao menos um título para gerar o lote." : "Nenhum título deste dia pode entrar em lote: todos estão bloqueados (rateio, plano financeiro ou forma de pagamento). Corrija e busque de novo."));
       return;
     }
     s.gerandoLote = key;
@@ -849,13 +856,13 @@ const GerarPagamentoApp = {
     if (comBloqueio.length) {
       s.gerandoLote = "";
       this.paintTitulos();
-      alert("Lote não gerado: há título com possível divergência na forma de pagamento.\n\n" + comBloqueio.slice(0, 8).map((it) => `• ${it.titulo}/${it.parcela || 1} ${it.credor}: ${this.bloqueioLote(it)}`).join("\n"));
+      alert("Lote não gerado: há título bloqueado (rateio, plano financeiro ou forma de pagamento).\n\n" + comBloqueio.slice(0, 8).map((it) => `• ${it.titulo}/${it.parcela || 1} ${it.credor}: ${this.bloqueioLote(it)}`).join("\n"));
       return;
     }
     const total = itens.reduce((t, it) => t + it.aPagar, 0);
     const fora = g.itens.filter((it) => it.bloqueio);
     const alerta = fora.length
-      ? `\n\n${fora.length} título(s) deste dia ficam fora por possível divergência na forma de pagamento:\n` + fora.slice(0, 8).map((it) => `• ${it.titulo}/${it.parcela || 1} ${it.credor}: ${it.bloqueio}`).join("\n") + (fora.length > 8 ? `\n• e mais ${fora.length - 8}` : "")
+      ? `\n\n${fora.length} título(s) deste dia ficam fora por bloqueio:\n` + fora.slice(0, 8).map((it) => `• ${it.titulo}/${it.parcela || 1} ${it.credor}: ${it.bloqueio}`).join("\n") + (fora.length > 8 ? `\n• e mais ${fora.length - 8}` : "")
       : "";
     const pergunta = `Gerar lote do dia ${this.dataBr(g.dia)} com ${itens.length} título(s), total de ${this.money(total)}, pela conta ${this.contaLabel(g.conta)}?${alerta}`;
     const okConf = typeof window.mouraConfirm === "function" ? await window.mouraConfirm(pergunta) : confirm(pergunta);
@@ -1155,7 +1162,7 @@ const GerarPagamentoApp = {
       const total = marcados.reduce((t, it) => t + it.aPagar, 0);
       const disponiveis = g.itens.filter((it) => !it.emLote);
       const liberados = disponiveis.filter((it) => !it.bloqueio);
-      const divergentes = disponiveis.filter((it) => it.pag && it.bloqueio).length;
+      const divergentes = disponiveis.filter((it) => it.bloqueio && (it.pag || this.bloqueioRateio(it.rateio))).length;
       const todos = liberados.length > 0 && liberados.every((it) => it.marcado);
       const gerando = s.gerandoLote === g.key;
       const conferindo = !!(s.validacao && s.validacao.rodando);
@@ -1169,7 +1176,7 @@ const GerarPagamentoApp = {
               ? `<span class="gp-pill gp-wait" title="Está no lote ${this.esc(this.lotePendenteDe(it.chave).id)}, que não foi gerado no Sienge. Ao gerar de novo, ele sai daquele lote.">Em aberto</span><small>Lote não gerado no Sienge</small>`
               : `<span class="gp-pill gp-wait">Em aberto</span>`));
         const pagSelo = it.emLote ? `<span class="gp-muted">—</span>` : (window.BoletoCheck ? BoletoCheck.seloHtml(it.pag ? it.pag.check : null) : "");
-        return `<tr class="gp-click${it.emLote ? " gp-em-lote" : ""}${it.pag && it.bloqueio ? " gp-row-bad" : ""}" onclick="GerarPagamentoApp.abrirResumo('${this.esc(it.chave)}')" title="Clique para ver o resumo do título">
+        return `<tr class="gp-click${it.emLote ? " gp-em-lote" : ""}${it.bloqueio && (it.pag || this.bloqueioRateio(it.rateio)) ? " gp-row-bad" : ""}" onclick="GerarPagamentoApp.abrirResumo('${this.esc(it.chave)}')" title="Clique para ver o resumo do título">
           <td style="text-align:center;" onclick="event.stopPropagation()"><input type="checkbox" ${it.marcado ? "checked" : ""} ${sem || it.emLote || it.bloqueio || gerando ? "disabled" : ""}
             title="${this.esc(it.emLote ? "Já está em lote; não pode entrar em outro." : (it.bloqueio ? "Bloqueado: " + it.bloqueio : ""))}"
             onchange="GerarPagamentoApp.toggleItem('${this.esc(it.selKey)}')"></td>
@@ -1177,7 +1184,7 @@ const GerarPagamentoApp = {
           <td><strong>${this.esc(it.titulo)}</strong>${it.parcela ? `<span class="gp-muted"> / ${this.esc(it.parcela)}</span>` : ""}</td>
           <td title="${this.esc(it.credor)}">${this.esc(it.credor)}</td>
           <td>${this.esc(it.documento || "—")}</td>
-          <td class="gp-status" title="${this.esc(it.ccs.map((c) => `${c.id} ${c.nome}${c.rateio != null ? ` · ${this.pct(c.rateio)}` : ""}${c.parceria ? " (parceria)" : ""}`).join("\n"))}">${it.ccs.map((c) => (c.parceria ? `<strong>${this.esc(c.id)}</strong>` : `<span class="gp-cc-outro">${this.esc(c.id)}</span>`)).join(" / ")} <span class="gp-muted">${this.esc(it.ccs.length === 1 ? it.ccs[0].nome : "rateado")}</span>${it.ccs.length > 1 ? this.rateioSeloHtml(it.rateio) : ""}</td>
+          <td class="gp-status" title="${this.esc(it.ccs.map((c) => `${c.id} ${c.nome}${c.rateio != null ? ` · ${this.pct(c.rateio)}` : ""}${c.parceria ? " (parceria)" : ""}`).join("\n"))}">${it.ccs.map((c) => (c.parceria ? `<strong>${this.esc(c.id)}</strong>` : `<span class="gp-cc-outro">${this.esc(c.id)}</span>`)).join(" / ")} <span class="gp-muted">${this.esc(it.ccs.length === 1 ? it.ccs[0].nome : "rateado")}</span>${this.rateioSeloHtml(it.rateio)}</td>
           <td style="text-align:right;">${this.money(it.aPagar)}</td>
           <td class="gp-status">${pagSelo}</td>
           <td class="gp-status">${tag}</td>
@@ -1206,7 +1213,7 @@ const GerarPagamentoApp = {
             <label class="gp-lote-todos"><input type="checkbox" ${todos ? "checked" : ""} ${gerando || !liberados.length ? "disabled" : ""} onchange="GerarPagamentoApp.toggleGrupo('${this.esc(g.key)}', this.checked)"> Marcar todos</label>
             <strong class="gp-lote-total">${this.money(total)}</strong>
             <button type="button" class="btn btn-primary" ${s.gerandoLote || conferindo || !marcados.length ? "disabled" : ""} onclick="GerarPagamentoApp.gerarLote('${this.esc(g.key)}')"
-              title="${conferindo ? "Aguarde a conferência das formas de pagamento" : (!marcados.length && divergentes ? "Os títulos disponíveis têm possível divergência na forma de pagamento" : "")}"
+              title="${conferindo ? "Aguarde a conferência das formas de pagamento" : (!marcados.length && divergentes ? "Os títulos disponíveis estão bloqueados (rateio, plano financeiro ou forma de pagamento)" : "")}"
               style="height:36px;width:150px;justify-content:center;display:inline-flex;align-items:center;gap:6px;">
               ${gerando ? '<span class="btn-spin"></span> Gerando…' : '<i data-lucide="layers" style="width:14px;"></i> Gerar lote'}
             </button>
@@ -1251,7 +1258,9 @@ const GerarPagamentoApp = {
     const progressoPag = v.rodando
       ? `<span class="gp-valida"><span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;"></span> Conferindo forma de pagamento e boletos · ${v.feitos} de ${v.total}</span>`
       : (v.total ? `<span class="gp-valida">${errosPag ? `<b style="color:#b91c1c;">${errosPag} título(s) com possível divergência na forma de pagamento</b> (bloqueados para lote até corrigir no Sienge)` : "Formas de pagamento conferidas"}</span>` : "");
-    return `<p class="gp-nota">Títulos em aberto separados por conta de parceria e dia de vencimento: um lote por conta por dia. Título que já está em lote (no Integra ou no Sienge) não entra em outro. Clique na linha para ver o resumo do título. ${progressoPag}</p>${cards}${geradosHtml}`;
+    const errosRateio = new Set(grupos.flatMap((g) => g.itens.filter((it) => !it.emLote && this.bloqueioRateio(it.rateio)).map((it) => it.chave))).size;
+    const avisoRateio = errosRateio ? `<span class="gp-valida"><b style="color:#b91c1c;">${errosRateio} título(s) com rateio ou plano financeiro fora do padrão</b> (bloqueados para lote)</span>` : "";
+    return `<p class="gp-nota">Títulos em aberto separados por conta de parceria e dia de vencimento: um lote por conta por dia. Título que já está em lote (no Integra ou no Sienge) não entra em outro. Clique na linha para ver o resumo do título. ${progressoPag}${avisoRateio}</p>${cards}${geradosHtml}`;
   },
 
   grupoStatus(r) {
@@ -1313,7 +1322,7 @@ const GerarPagamentoApp = {
     const soma = (ccs || []).reduce((t, c) => t + this.num(c.rateio), 0);
     const linhas = (ccs || []).map((c) => {
       const pct = soma > 0 ? this.num(c.rateio) * 100 / soma : 100 / ccs.length;
-      return { id: String(c.id), nome: c.nome || ((this.ccDe(c.id) || {}).name) || "", parceria: !!c.parceria, pct, valor: total * pct / 100 };
+      return { id: String(c.id), nome: c.nome || ((this.ccDe(c.id) || {}).name) || "", parceria: !!c.parceria, pct, valor: total * pct / 100, planos: c.planos || [] };
     }).sort((a, b) => Number(a.id) - Number(b.id));
     const obras = [];
     const porObra = {};
@@ -1323,24 +1332,34 @@ const GerarPagamentoApp = {
       porObra[ob].linhas.push(l);
     });
     const problemas = [];
+    const avisos = [];
+    let erroRateio = false;
+    let erroPlano = false;
+    let semPadrao = false;
     obras.forEach((o) => {
       o.pct = o.linhas.reduce((t, l) => t + l.pct, 0);
       o.valor = total * o.pct / 100;
+      const comPlano = o.linhas.filter((l) => l.planos.length);
+      if (comPlano.length > 1 && new Set(comPlano.map((l) => this.chavePlanos(l.planos))).size > 1) {
+        erroPlano = true;
+        comPlano.forEach((l) => { l.planoErro = true; });
+        problemas.push(`Plano financeiro diferente na obra ${o.obra}: ${comPlano.map((l) => `${l.id} em ${this.planosTexto(l.planos)}`).join("; ")}. O CC da obra e o do parceiro devem usar o mesmo plano.`);
+      }
       const base = (o.linhas.find((l) => !l.parceria) || {}).id || o.obra + "00";
       const parcTitulo = o.linhas.find((l) => l.parceria);
       const parcCad = parcTitulo ? null : this.state.costCenters.find((c) => this.obra(c.id) === o.obra && String(c.id) !== base && this.isParceiro(c));
       const parc = parcTitulo ? parcTitulo.id : (parcCad ? String(parcCad.id) : "");
       const padrao = this.rateioPadraoObra(base, parc) || (parc ? null : { ml: 100, terr: 0, aviso: "" });
       if (!padrao) {
-        o.semPadrao = true;
+        o.semPadrao = semPadrao = true;
         problemas.push(`Obra ${o.obra}: rateio padrão não cadastrado. Informe o % Moura Leite no ${base} e o % Terrenista no ${parc} em Centros de Custo.`);
         return;
       }
       o.padrao = padrao;
-      if (padrao.aviso) problemas.push(padrao.aviso);
+      if (padrao.aviso) avisos.push(padrao.aviso);
       [base, parc].filter(Boolean).forEach((id) => {
         if (o.linhas.some((l) => l.id === id) || !((id === base ? padrao.ml : padrao.terr) > 0)) return;
-        o.linhas.push({ id, nome: (this.ccDe(id) || {}).name || "", parceria: id === parc, pct: 0, valor: 0, ausente: true });
+        o.linhas.push({ id, nome: (this.ccDe(id) || {}).name || "", parceria: id === parc, pct: 0, valor: 0, planos: [], ausente: true });
       });
       o.linhas.sort((a, b) => Number(a.id) - Number(b.id));
       o.linhas.forEach((l) => {
@@ -1349,43 +1368,65 @@ const GerarPagamentoApp = {
         const pctObra = o.pct > 0 ? l.pct * 100 / o.pct : 0;
         l.ok = Math.abs(l.valor - l.esperado) < 0.02 || Math.abs(pctObra - l.padrao) < 0.006;
         if (l.ok) return;
+        erroRateio = true;
         problemas.push(l.ausente
           ? `${l.id} não está no rateio; o padrão é ${this.pct(l.padrao)} da obra ${o.obra} = ${this.money(l.esperado)}.`
           : `${l.id}: lançado ${this.money(l.valor)}; o padrão é ${this.pct(l.padrao)} da obra ${o.obra} = ${this.money(l.esperado)}.`);
       });
     });
-    return { total, obras, problemas, ok: !problemas.length };
+    return { total, obras, problemas, avisos, erroRateio, erroPlano, semPadrao, ok: !problemas.length };
+  },
+
+  chavePlanos(planos) {
+    return (planos || []).map((p) => p.id || p.nome).sort().join("|");
+  },
+
+  planosTexto(planos) {
+    return (planos || []).map((p) => [p.id, p.nome].filter(Boolean).join(" - ")).join(" + ") || "sem plano";
+  },
+
+  /* Motivo que impede o título de ir para lote por causa do rateio ou do plano financeiro. */
+  bloqueioRateio(conf) {
+    if (!conf || conf.ok) return "";
+    return conf.problemas[0] + (conf.problemas.length > 1 ? ` (e mais ${conf.problemas.length - 1} divergência(s) no rateio)` : "");
   },
 
   rateioSeloHtml(conf) {
-    if (!conf || !conf.obras.length) return "";
-    if (conf.ok) return "";
-    const semPadrao = conf.obras.every((o) => o.semPadrao);
-    return `<small class="${semPadrao ? "gp-muted" : "gp-bloq"}" title="${this.esc(conf.problemas.join("\n"))}">${semPadrao ? "Sem rateio padrão no cadastro" : "Rateio fora do padrão"}</small>`;
+    if (!conf || !conf.obras.length || conf.ok) return "";
+    const rotulos = [
+      conf.erroRateio ? "Rateio fora do padrão" : "",
+      conf.erroPlano ? "Plano financeiro diferente" : "",
+      conf.semPadrao ? "Sem rateio padrão no cadastro" : ""
+    ].filter(Boolean);
+    return `<small class="gp-bloq" title="${this.esc(conf.problemas.join("\n"))}">${this.esc((rotulos.length ? rotulos : ["Rateio fora do padrão"]).join(" · "))}</small>`;
   },
 
   rateioHtml(conf) {
     if (!conf || !conf.obras.length) return "";
     const corpo = conf.obras.map((o) => `
-      <tr class="gp-rateio-obra"><td colspan="6">Obra ${this.esc(o.obra)} · ${this.pct(o.pct)} do título · ${this.money(o.valor)}${o.padrao
+      <tr class="gp-rateio-obra"><td colspan="7">Obra ${this.esc(o.obra)} · ${this.pct(o.pct)} do título · ${this.money(o.valor)}${o.padrao
         ? ` <span>· padrão ${this.pct(o.padrao.ml)} Moura Leite${o.padrao.terr ? ` / ${this.pct(o.padrao.terr)} terrenista` : ""}</span>`
         : ` <span class="gp-rateio-x">· sem rateio padrão no cadastro</span>`}</td></tr>
-      ${o.linhas.map((l) => `<tr class="${l.ok === false ? "is-bad" : ""}">
+      ${o.linhas.map((l) => `<tr class="${l.ok === false || l.planoErro ? "is-bad" : ""}">
         <td><strong>${this.esc(l.id)}</strong> <span class="gp-rateio-nome">${this.esc(l.nome)}</span></td>
+        <td class="gp-rateio-plano${l.planoErro ? " is-bad" : ""}">${l.planos.length
+          ? l.planos.map((p) => `<div><span class="gp-rateio-cod">${this.esc(p.id || "")}</span> ${this.esc(p.nome || "")}</div>`).join("")
+          : "—"}</td>
         <td class="num">${this.pct(l.pct)}</td>
         <td class="num">${this.money(l.valor)}</td>
         <td class="num">${l.padrao != null ? this.pct(l.padrao) + " da obra" : "—"}</td>
         <td class="num">${l.esperado != null ? this.money(l.esperado) : "—"}</td>
-        <td class="ic">${l.ok == null ? "" : (l.ok ? `<span class="gp-rateio-ok">✓</span>` : `<span class="gp-rateio-x">✗</span>`)}</td>
+        <td class="ic">${l.ok == null && !l.planoErro ? "" : (l.ok && !l.planoErro ? `<span class="gp-rateio-ok">✓</span>` : `<span class="gp-rateio-x">✗</span>`)}</td>
       </tr>`).join("")}`).join("");
-    const rodape = conf.ok
-      ? `<p class="gp-rateio-msg is-ok">O rateio confere com o padrão cadastrado em Centros de Custo.</p>`
-      : `<div class="gp-rateio-msg is-bad">${conf.problemas.map((p) => `<div>${this.esc(p)}</div>`).join("")}</div>`;
+    const rodape = (conf.ok
+      ? `<p class="gp-rateio-msg is-ok">O rateio e o plano financeiro conferem com o padrão cadastrado em Centros de Custo.</p>`
+      : `<div class="gp-rateio-msg is-bad"><strong>Título bloqueado para lote até corrigir:</strong>${conf.problemas.map((p) => `<div>${this.esc(p)}</div>`).join("")}</div>`)
+      + (conf.avisos.length ? `<div class="gp-rateio-msg is-warn">${conf.avisos.map((p) => `<div>${this.esc(p)}</div>`).join("")}</div>` : "");
     return `<h4>Rateio por centro de custo</h4>
       <table class="gp-rateio">
-        <thead><tr><th>Centro de custo</th><th class="num">% do título</th><th class="num">Valor</th><th class="num">Padrão</th><th class="num">Esperado</th><th></th></tr></thead>
+        <thead><tr><th>Centro de custo</th><th>Plano financeiro</th><th class="num">% do título</th><th class="num">Valor</th><th class="num">Padrão</th><th class="num">Esperado</th><th></th></tr></thead>
         <tbody>${corpo}</tbody>
-        <tfoot><tr><td>Total</td><td class="num">${this.pct(conf.obras.reduce((t, o) => t + o.pct, 0))}</td><td class="num">${this.money(conf.total)}</td><td colspan="3"></td></tr></tfoot>
+        <tfoot><tr><td>Total</td><td></td><td class="num">${this.pct(conf.obras.reduce((t, o) => t + o.pct, 0))}</td><td class="num">${this.money(conf.total)}</td><td colspan="3"></td></tr></tfoot>
       </table>${rodape}`;
   },
 
@@ -1394,7 +1435,7 @@ const GerarPagamentoApp = {
       .slice().sort((a, b) => Number(a.id) - Number(b.id));
     const semObra = ccs.filter((c) => c.parceria && !ccs.some((o) => !o.parceria && this.obra(o.id) === this.obra(c.id)));
     const nomes = ccs.map((c) => `${c.id} ${c.nome}${c.rateio != null ? ` · ${this.pct(c.rateio)}` : ""}${c.parceria ? " (parceria)" : ""}`).join("\n");
-    const conf = ccs.length > 1 ? this.conferirRateio(ccs, r.tituloValor != null ? r.tituloValor : r.valor) : null;
+    const conf = this.conferirRateio(ccs, r.tituloValor != null ? r.tituloValor : r.valor);
     return `<span title="${this.esc(nomes)}">${ccs.map((c) => (c.parceria ? `<strong>${this.esc(c.id)}</strong>` : `<span class="gp-cc-outro">${this.esc(c.id)}</span>`)).join(" / ")} <span class="gp-muted">${this.esc(ccs.length === 1 ? ccs[0].nome : "rateado")}</span></span>`
       + (semObra.length ? `<small class="gp-bloq">Sem o CC da obra de ${semObra.map((c) => this.esc(c.id)).join(", ")}</small>` : "")
       + this.rateioSeloHtml(conf);
@@ -1518,7 +1559,7 @@ const GerarPagamentoApp = {
           #gerar-pagamento-root .gp-lote-seta { width:18px; height:18px; color:#105436; flex-shrink:0; transition:transform .15s ease; }
           #gerar-pagamento-root .gp-lote.is-open .gp-lote-seta { transform:rotate(90deg); }
           #gerar-pagamento-root .gp-cc-outro { color:#64748b; font-weight:600; }
-          #gerar-pagamento-root .gp-bloq { color:#b91c1c; }
+          #gerar-pagamento-root .gp-bloq, #gerar-pagamento-root .gp-status small.gp-bloq { color:#b91c1c; font-weight:700; }
           #gerar-pagamento-root .gp-lote-sem .gp-lote-h { background:#fef2f2; }
           #gerar-pagamento-root .gp-lote-conta { font-weight:800; color:#105436; font-size:0.92rem; }
           #gerar-pagamento-root .gp-lote-sem .gp-lote-conta { color:#b91c1c; }
