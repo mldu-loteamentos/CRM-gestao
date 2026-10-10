@@ -118,7 +118,14 @@ const CentrosCustoApp = {
     const key = String(id);
     const percMl = parseFloat(document.getElementById(`edit-perc-ml-${id}`).value) || 0;
     const percTerr = parseFloat(document.getElementById(`edit-perc-terrenista-${id}`).value) || 0;
-    if ((percMl || percTerr) && Math.abs(percMl + percTerr - 100) > 0.009) {
+    const par = this.parDoRateio(CentrosCustoState.costCenters.find(c => String(c.id) === key));
+    if (par) {
+      const v = par.papel === 'ml' ? percMl : percTerr;
+      if (v < 0 || v > 100) {
+        alert(`O percentual ${par.papel === 'ml' ? 'da Moura Leite' : 'do terrenista'} precisa ficar entre 0% e 100%.`);
+        return;
+      }
+    } else if ((percMl || percTerr) && Math.abs(percMl + percTerr - 100) > 0.009) {
       alert(`O rateio precisa totalizar 100%. Hoje está em ${Number((percMl + percTerr).toFixed(2)).toLocaleString('pt-BR')}% (Moura Leite ${percMl.toLocaleString('pt-BR')}% + Terrenista ${percTerr.toLocaleString('pt-BR')}%).`);
       return;
     }
@@ -128,8 +135,24 @@ const CentrosCustoApp = {
     );
     
     custom.valor_vgv = parseFloat(document.getElementById(`edit-vgv-${id}`).value) || 0;
-    custom.perc_ml = parseFloat(document.getElementById(`edit-perc-ml-${id}`).value) || 0;
-    custom.perc_terrenista = parseFloat(document.getElementById(`edit-perc-terrenista-${id}`).value) || 0;
+    custom.perc_ml = percMl;
+    custom.perc_terrenista = percTerr;
+    if (par) {
+      const parKey = String(par.outro.id);
+      const outro = Object.assign({}, this.customOf(parKey), { cc_id: parKey, updatedAt: Date.now() });
+      const v = par.papel === 'ml' ? percMl : percTerr;
+      if (par.papel === 'ml') {
+        custom.perc_terrenista = 0;
+        outro.perc_ml = 0;
+        if (v > 0) outro.perc_terrenista = Number((100 - v).toFixed(2));
+      } else {
+        custom.perc_ml = 0;
+        outro.perc_terrenista = 0;
+        if (v > 0) outro.perc_ml = Number((100 - v).toFixed(2));
+      }
+      CentrosCustoState.customFields[parKey] = outro;
+      CentrosCustoState.customFields[par.outro.id] = outro;
+    }
     const tipoCcEl = document.getElementById(`edit-tipo-cc-${id}`);
     if (tipoCcEl) custom.tipo_cc = tipoCcEl.value;
 
@@ -230,6 +253,30 @@ const CentrosCustoApp = {
 
   isParceiro(cc) {
     return /parce(ir|ri)/i.test(String((cc && cc.name) || ""));
+  },
+
+  escHtml(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  },
+
+  /**
+   * Obra com CC exclusivo da Moura Leite (14000) e CC exclusivo do parceiro (14001):
+   * o % Moura Leite fica no CC da obra, o % Terrenista no de parceria, e os dois somam 100%.
+   */
+  parDoRateio(cc) {
+    if (!cc) return null;
+    const id = String(cc.id);
+    const obra = id.slice(0, -2);
+    if (!obra) return null;
+    const mesmos = (CentrosCustoState.costCenters || []).filter(c => String(c.id).slice(0, -2) === obra && String(c.id) !== id);
+    const baseDe = (lista) => lista.find(c => String(c.id) === obra + "00" && !this.isParceiro(c)) || lista.find(c => !this.isParceiro(c));
+    if (this.isParceiro(cc)) {
+      const base = baseDe(mesmos);
+      return base ? { papel: "parceiro", outro: base } : null;
+    }
+    const parc = mesmos.find(c => this.isParceiro(c));
+    const base = baseDe(mesmos.concat([cc]).sort((a, b) => Number(a.id) - Number(b.id)));
+    return parc && base && String(base.id) === id ? { papel: "ml", outro: parc } : null;
   },
 
   contaLabel(c) {
@@ -535,6 +582,21 @@ const CentrosCustoApp = {
     const incorpLotesTipo = custom.incorporacao_lotes_tipo || 'abertos';
     const showIncorp = tipo_cc === 'Incorporação';
     const parceiro = this.isParceiro(cc);
+    const par = this.parDoRateio(cc);
+    const parCustom = par ? this.customOf(par.outro.id) : {};
+    const fmtPct = (n) => String(Number((Number(n) || 0).toFixed(2)));
+    let valorMl = perc_ml || '';
+    let valorTerr = perc_terrenista || '';
+    if (par && par.papel === 'ml') {
+      const terrPar = Number(parCustom.perc_terrenista) || 0;
+      valorTerr = perc_ml > 0 ? fmtPct(100 - perc_ml) : (terrPar ? fmtPct(terrPar) : '');
+      if (!perc_ml && terrPar > 0 && terrPar < 100) valorMl = fmtPct(100 - terrPar);
+    } else if (par && par.papel === 'parceiro') {
+      const mlPar = Number(parCustom.perc_ml) || 0;
+      valorMl = perc_terrenista > 0 ? fmtPct(100 - perc_terrenista) : (mlPar ? fmtPct(mlPar) : '');
+      if (!perc_terrenista && mlPar > 0 && mlPar < 100) valorTerr = fmtPct(100 - mlPar);
+    }
+    const parRotulo = par ? `${par.outro.id} – ${par.outro.name || ''}` : '';
 
     const modalHtml = `
       <div id="cc-modal-overlay" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; justify-content: center; align-items: center;">
@@ -571,13 +633,19 @@ const CentrosCustoApp = {
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
                 <div>
                   <label style="display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.85rem;">Percentual Moura Leite (%)</label>
-                  <input type="number" id="edit-perc-ml-${id}" class="form-control" step="0.01" min="0" max="100" value="${perc_ml}" oninput="CentrosCustoApp.completarRateio(${id}, 'ml')">
+                  <input type="number" id="edit-perc-ml-${id}" class="form-control" step="0.01" min="0" max="100" value="${valorMl}" ${par && par.papel === 'parceiro' ? 'disabled' : ''} oninput="CentrosCustoApp.completarRateio(${id}, 'ml')">
+                  ${par && par.papel === 'parceiro' ? `<small style="display:block;margin-top:4px;color:#64748b;">Fica no CC ${this.escHtml(parRotulo)}.</small>` : ''}
                 </div>
                 <div>
                   <label style="display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.85rem;">Percentual Terrenista (%)</label>
-                  <input type="number" id="edit-perc-terrenista-${id}" class="form-control" step="0.01" min="0" max="100" value="${perc_terrenista}" oninput="CentrosCustoApp.completarRateio(${id}, 'terrenista')">
+                  <input type="number" id="edit-perc-terrenista-${id}" class="form-control" step="0.01" min="0" max="100" value="${valorTerr}" ${par && par.papel === 'ml' ? 'disabled' : ''} oninput="CentrosCustoApp.completarRateio(${id}, 'terrenista')">
+                  ${par && par.papel === 'ml' ? `<small style="display:block;margin-top:4px;color:#64748b;">Fica no CC ${this.escHtml(parRotulo)}.</small>` : ''}
                 </div>
             </div>
+            ${par ? `<p style="margin:-8px 0 0;padding:8px 12px;border-radius:6px;background:#f0fdf4;color:#14532d;font-size:0.8rem;line-height:1.4;">
+              Centro de custo exclusivo ${par.papel === 'ml' ? 'da Moura Leite' : 'do parceiro'}: ele é 100% ${par.papel === 'ml' ? 'da Moura Leite' : 'do terrenista'}.
+              O percentual aqui é a participação ${par.papel === 'ml' ? 'da Moura Leite' : 'do terrenista'} na obra. A outra parte fica no CC ${this.escHtml(parRotulo)} e é atualizada junto ao salvar, para a obra fechar 100%.
+            </p>` : ''}
             <div style="display: flex; align-items: center; gap: 8px;">
                 <input type="checkbox" id="edit-imposto-pago-${id}" ${imposto_pago ? 'checked' : ''} style="width: 16px; height: 16px;">
                 <label for="edit-imposto-pago-${id}" style="font-weight: bold; font-size: 0.85rem; cursor: pointer;">Imposto pago pela empresa?</label>
