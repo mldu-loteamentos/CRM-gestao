@@ -194,6 +194,11 @@ const CentrosCustoApp = {
     } catch (e) {}
   },
 
+  customOf(id) {
+    const map = CentrosCustoState.customFields || {};
+    return map[id] || map[String(id)] || {};
+  },
+
   isParceiro(cc) {
     return /parceir/i.test(String((cc && cc.name) || ""));
   },
@@ -216,15 +221,16 @@ const CentrosCustoApp = {
       console.warn("[CentrosCusto] contas correntes:", e);
     }
     const out = list.map(a => {
-      const numero = String(a.accountNumber || a.number || "").trim();
+      const numero = String(a.accountNumber || a.number || a.checkingAccountNumber || "").trim();
       const id = a.id != null ? String(a.id) : (a.checkingAccountId != null ? String(a.checkingAccountId) : "");
+      const bank = a.bank && typeof a.bank === "object" ? a.bank : {};
       return {
         key: id || numero,
         id,
         numero,
         nome: String(a.accountName || a.name || a.description || "").trim(),
-        banco: String(a.bankCode || (a.bank && (a.bank.id || a.bank.code)) || a.bankId || "").trim(),
-        agencia: String(a.agency || a.agencyNumber || a.bankBranch || "").trim()
+        banco: String(a.bankNumber || a.bankCode || bank.id || bank.code || bank.number || a.bankId || "").trim(),
+        agencia: String(a.agencyNumber || a.agency || a.bankBranch || bank.agency || "").trim()
       };
     }).filter(a => a.key);
     out.sort((a, b) => a.numero.localeCompare(b.numero, "pt-BR", { numeric: true }));
@@ -237,7 +243,7 @@ const CentrosCustoApp = {
     if (!sel) return;
     const cc = CentrosCustoState.costCenters.find(c => String(c.id) === String(id));
     const companyId = cc && (cc.idCompany || cc.companyId);
-    const atual = ((CentrosCustoState.customFields[id] || CentrosCustoState.customFields[String(id)] || {}).conta_parceria) || null;
+    const atual = (this.customOf(id).conta_parceria) || null;
     const contas = await this.contasDaEmpresa(companyId);
     const atualKey = atual ? (atual.id || atual.numero) : "";
     const extra = atual && !contas.some(a => a.key === atualKey)
@@ -592,7 +598,7 @@ const CentrosCustoApp = {
         filteredCCs = filteredCCs.filter(c => CentrosCustoState.selectedFilterIds.includes(c.id));
     }
     if (CentrosCustoState.somenteParceiros) {
-        filteredCCs = filteredCCs.filter(c => this.isParceiro(c) || (CentrosCustoState.customFields[c.id] || {}).conta_parceria);
+        filteredCCs = filteredCCs.filter(c => this.isParceiro(c) || this.customOf(c.id).conta_parceria);
     }
     
     // Sort by CC ID ASC
@@ -675,7 +681,7 @@ const CentrosCustoApp = {
     filteredCCs.sort((a, b) => a.id - b.id);
 
     filteredCCs.forEach(cc => {
-      const custom = CentrosCustoState.customFields[cc.id] || {};
+      const custom = this.customOf(cc.id);
       const vgv = custom.valor_vgv ? parseFloat(custom.valor_vgv).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '-';
       
       const foundPreamble = preamblesList.find(p => p.centrosCustoIds && p.centrosCustoIds.includes(cc.id));

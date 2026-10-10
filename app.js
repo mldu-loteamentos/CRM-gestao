@@ -3149,6 +3149,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     preambles: "Preâmbulos & Configurações",
     anexos: "Assistente de Anexos",
     "contas-pagar": "Assistente de Contas a Pagar",
+    "gerar-pagamento": "Gerar Pagamento",
     rydoo: "Rydoo",
     "config-tags": "Configuração de TAGs",
     "config-users": "Configuração de Usuários",
@@ -3216,6 +3217,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     preambles: "settings",
     anexos: "paperclip",
     "contas-pagar": "landmark",
+    "gerar-pagamento": "wallet",
     rydoo: "receipt",
     "config-tags": "tags",
     "config-users": "users",
@@ -3413,6 +3415,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     };
     bootRepac();
     setTimeout(bootRepac, 0);
+  } else if (tabId === "gerar-pagamento") {
+    if (typeof GerarPagamentoApp !== "undefined") GerarPagamentoApp.init();
   } else if (tabId === "parametrizacao-parceiro") {
     if (typeof ParametrizacaoParceiroApp !== "undefined") ParametrizacaoParceiroApp.init();
   } else if (tabId === "estrutura-societaria") {
@@ -5340,6 +5344,9 @@ window.applyPermissions = function(profileName) {
         const rydooAlias = modKey === 'sub_fin_cp_rydoo_acessar'
           && perms.sub_fin_cp_rydoo_acessar == null
           && (perms.sub_fin_cp === true || perms.sub_fin_cp_assistente_cp_acessar === true || perms.sub_fin_cp_prestacao_contas_acessar === true || perms.sub_fin_cp_parametrizacao_parceiro_acessar === true);
+        const gerarPagAlias = modKey === 'sub_fin_cp_gerar_pagamento_acessar'
+          && perms.sub_fin_cp_gerar_pagamento_acessar == null
+          && (perms.sub_fin_cp === true || perms.sub_fin_cp_assistente_cp_acessar === true || perms.sub_fin_cp_prestacao_contas_acessar === true || perms.sub_fin_cp_parametrizacao_parceiro_acessar === true);
         const orcAlias = modKey === "sub_fin_orc_orcamento_acessar"
           && perms.sub_fin_orc_orcamento_acessar == null
           && perms.sub_fin_orc_orcamento_visualizar == null
@@ -5398,7 +5405,7 @@ window.applyPermissions = function(profileName) {
           || perms.sub_com_geral_estoque_acessar === true
           || perms.sub_com_geral_tabelas_vigentes_acessar === true
         );
-        if (perms[modKey] === true || mktAlias || cpAlias || rydooAlias || cbAlias || orcAlias || finanAlias || repacAlias || relAlias || suporteAlias || tvigAlias || ccomAlias || window.permCoversMenuKey(perms, modKey)) {
+        if (perms[modKey] === true || mktAlias || cpAlias || rydooAlias || gerarPagAlias || cbAlias || orcAlias || finanAlias || repacAlias || relAlias || suporteAlias || tvigAlias || ccomAlias || window.permCoversMenuKey(perms, modKey)) {
           item.style.display = '';
         } else {
           item.style.display = 'none';
@@ -20824,7 +20831,19 @@ window.resolveLoteamentoName = function(unit, sale) {
   name = String(name || "").replace(/^(?:C\.C\.\s*)?(?:\d+\s*-\s*)+/i, "").trim();
   name = name.replace(/^LOTEAMENTOS\s*[-–:]\s*/i, "").trim();
   if (/^C\.C\.\s*\d+$/i.test(name)) name = "";
-  return name;
+  return window.stripCidadeEmpreendimento(name, ccId, window.resolveCidadeLoteamento(unit, sale));
+};
+
+// "FARTURA - JARDIM DA SERRA II" → "JARDIM DA SERRA II": a cidade já sai em {{CIDADE_LOTEAMENTO}}.
+window.stripCidadeEmpreendimento = function(name, ccId, cidade) {
+  const s = String(name || "").trim();
+  const parts = s.split(/\s+[-–]\s+/);
+  if (parts.length < 2) return s;
+  const fold = (v) => String(v || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/\s*[-/]\s*[A-Z]{2}$/, "").trim();
+  const first = fold(parts[0]);
+  const fromCc = typeof window.extractCityFromCostCenter === "function" ? fold(window.extractCityFromCostCenter(ccId, s)) : "";
+  if (first && (first === fromCc || first === fold(cidade))) return parts.slice(1).join(" - ").trim();
+  return s;
 };
 
 window.resolveCidadeLoteamento = function(unit, sale) {
@@ -37697,6 +37716,106 @@ window.toggleRelacionamentoFilters = function() {
   if (contrato) contrato.disabled = hasNome || hasTel || hasEmail || hasDoc || hasTitulo || hasEmp;
   if (emp) emp.disabled = hasNome || hasTel || hasEmail || hasDoc || hasTitulo || hasContrato;
   if (uni) uni.disabled = !hasEmp || hasNome || hasTel || hasEmail || hasDoc || hasTitulo || hasContrato;
+  if (window.RelEmpPicker) window.RelEmpPicker.render();
+};
+
+/** Empreendimento da Buscar Cliente no padrão Integra (busca + escolha única); o <select> oculto segue como fonte do valor. */
+window.RelEmpPicker = {
+  id: "rel-emp-filter",
+  open: false,
+  query: "",
+  bound: false,
+
+  select() { return document.getElementById("relacionamento-filter-emp"); },
+
+  items() {
+    const sel = this.select();
+    if (!sel) return [];
+    return Array.from(sel.options)
+      .filter((o) => o.value !== "")
+      .map((o) => ({ id: String(o.value), label: String(o.textContent || "").trim().toUpperCase() }));
+  },
+
+  opts() {
+    const sel = this.select();
+    return {
+      id: this.id,
+      label: "Empreendimento",
+      items: this.items(),
+      selectedIds: sel && sel.value ? [String(sel.value)] : [],
+      open: this.open,
+      query: this.query,
+      single: true,
+      emptyMeansAll: false,
+      nouns: { singular: "empreendimento", plural: "empreendimentos", noMatch: "Nenhum empreendimento com esse nome." }
+    };
+  },
+
+  bind() {
+    if (this.bound || !window.MlEmpresaFilter) return;
+    this.bound = true;
+    const self = this;
+    MlEmpresaFilter.bind(this.id, {
+      toggleOpen() {
+        const sel = self.select();
+        if (sel && sel.disabled) return;
+        self.open = !self.open;
+        if (!self.open) self.query = "";
+        self.render();
+      },
+      close() {
+        self.open = false;
+        self.query = "";
+        self.render();
+      },
+      setQuery(q) {
+        self.query = q || "";
+        const list = document.getElementById(self.id + "-list");
+        if (list) list.innerHTML = MlEmpresaFilter.listHtml(self.opts());
+      },
+      toggleId(itemId) {
+        const sel = self.select();
+        if (!sel) return;
+        self.open = false;
+        self.query = "";
+        if (String(sel.value) !== String(itemId)) {
+          sel.value = String(itemId);
+          sel.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        self.render();
+      }
+    });
+    const sel = this.select();
+    if (sel && typeof MutationObserver === "function") {
+      new MutationObserver(() => self.render()).observe(sel, { childList: true, attributes: true, attributeFilter: ["disabled"] });
+    }
+  },
+
+  render() {
+    const slot = document.getElementById("rel-emp-slot");
+    const sel = this.select();
+    if (!slot || !sel || !window.MlEmpresaFilter) return;
+    this.bind();
+    if (sel.disabled) { this.open = false; this.query = ""; }
+    slot.innerHTML = MlEmpresaFilter.html(this.opts());
+    const btn = slot.querySelector(".ml-emp-filter-btn");
+    if (btn) {
+      btn.disabled = !!sel.disabled;
+      if (!sel.value) {
+        const span = btn.querySelector("span");
+        if (span) span.textContent = this.items().length ? "Selecione..." : "Carregando empreendimentos...";
+      }
+    }
+    if (window.lucide) lucide.createIcons();
+    if (this.open) {
+      const input = document.getElementById(this.id + "-search");
+      if (input) {
+        input.focus();
+        const len = input.value.length;
+        input.setSelectionRange(len, len);
+      }
+    }
+  }
 };
 
 window.clearRelacionamento = function() {
@@ -38928,6 +39047,7 @@ document.addEventListener('tabChanged', async (e) => {
             empSelect.value = keep;
          }
       } catch(e) {}
+      if (window.RelEmpPicker) window.RelEmpPicker.render();
     }
   }
 });
@@ -39079,36 +39199,14 @@ window.escolherGestaoDocumento = function(tipo) {
     return;
   }
 
-  if (tipo === "autorizacao") {
-    if (typeof switchTab === "function") switchTab("relacionamento_autorizacao", "Autorização de escritura");
-    setTimeout(() => {
-      const tituloVal = titulo && String(titulo) !== "—" ? (String(titulo).replace(/\D/g, "") || String(titulo)) : "";
-      const contratoVal = contractNumber ? String(contractNumber).trim() : "";
-      const nomeVal = customerName ? String(customerName).trim() : "";
-      if (window.RelacionamentoApp && typeof RelacionamentoApp._travarFiltrosDocOrigem === "function") {
-        RelacionamentoApp._travarFiltrosDocOrigem("escritura", { titulo: tituloVal, contrato: contratoVal, nome: nomeVal });
-      } else {
-      const tEl = document.getElementById("esc-filter-titulo");
-      const cEl = document.getElementById("esc-filter-contrato");
-      const nEl = document.getElementById("esc-filter-nome");
-        if (tEl && tituloVal) tEl.value = tituloVal;
-        if (cEl && contratoVal) cEl.value = contratoVal;
-        if (nEl && nomeVal) nEl.value = nomeVal;
-        if (tEl) { tEl.disabled = true; tEl.readOnly = true; }
-        if (cEl) { cEl.disabled = true; cEl.readOnly = true; }
-        if (nEl) { nEl.disabled = true; nEl.readOnly = true; }
-      }
-      if (customerId) {
-        window.SelectedDynamicCustomerId = customerId;
-        window.SelectedDynamicCustomerName = nomeVal;
-      }
-      if (window.RelacionamentoApp && typeof RelacionamentoApp.fillCartorioSelect === "function") {
-        RelacionamentoApp.fillCartorioSelect();
-      }
-      if (window.RelacionamentoApp && typeof RelacionamentoApp.buscarEscritura === "function" && (tituloVal || contratoVal || nomeVal)) {
-        RelacionamentoApp.buscarEscritura();
-      }
-    }, 120);
+  if (tipo === "autorizacao" && window.RelacionamentoApp && typeof RelacionamentoApp.abrirEscrituraModal === "function") {
+    RelacionamentoApp.abrirEscrituraModal({
+      titulo: titulo && String(titulo) !== "—" ? (String(titulo).replace(/\D/g, "") || String(titulo)) : "",
+      contrato: contractNumber ? String(contractNumber).trim() : "",
+      nome: customerName ? String(customerName).trim() : "",
+      customerId: customerId,
+      unidade: ctx.unidade || ""
+    });
     return;
   }
 

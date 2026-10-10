@@ -81,6 +81,7 @@ const RelacionamentoApp = {
         sel.value = current;
       }
     }
+    this._escAtualizarBtnGerar();
     if (window.lucide) lucide.createIcons();
   },
 
@@ -1314,10 +1315,404 @@ const RelacionamentoApp = {
   _escSetResultsHtml(html) {
     const el = document.getElementById("esc-search-results");
     if (el) el.innerHTML = html;
+    const st = document.getElementById("esc-modal-status");
+    if (st) st.innerHTML = html;
     if (window.lucide) lucide.createIcons();
   },
 
+  abrirEscrituraModal(dados) {
+    dados = dados || {};
+    const modal = document.getElementById("esc-modal");
+    if (!modal) return;
+    if (modal.parentElement !== document.body) document.body.appendChild(modal);
+    this.limparEscritura();
+    const titulo = dados.titulo && String(dados.titulo) !== "—" ? String(dados.titulo).replace(/\D/g, "") || String(dados.titulo) : "";
+    const contrato = dados.contrato ? String(dados.contrato).trim() : "";
+    const nome = dados.nome ? String(dados.nome).trim() : "";
+    const sub = document.getElementById("esc-modal-sub");
+    if (sub) {
+      sub.textContent = [nome, titulo ? "Título " + titulo : "", contrato ? "Contrato " + contrato : "", dados.unidade ? String(dados.unidade).trim() : ""]
+        .filter(Boolean).join(" · ");
+    }
+    this.fillCartorioSelect("");
+    modal.style.display = "flex";
+    if (!this._escModalKeyBound) {
+      this._escModalKeyBound = true;
+      document.addEventListener("keydown", (ev) => {
+        if (ev.key !== "Escape" || this._escrituraBusy) return;
+        const m = document.getElementById("esc-modal");
+        if (m && m.style.display !== "none") this.fecharEscrituraModal();
+      });
+    }
+    this._travarFiltrosDocOrigem("escritura", { titulo, contrato, nome });
+    if (dados.customerId) {
+      window.SelectedDynamicCustomerId = dados.customerId;
+      window.SelectedDynamicCustomerName = nome || window.SelectedDynamicCustomerName;
+    }
+    if (window.lucide) lucide.createIcons();
+    if (titulo || contrato || nome || dados.customerId) this.buscarEscritura();
+  },
+
+  fecharEscrituraModal() {
+    const modal = document.getElementById("esc-modal");
+    if (modal) modal.style.display = "none";
+    this.limparEscritura();
+  },
+
+  _escAtualizarBtnGerar() {
+    const btn = document.getElementById("esc-btn-gerar");
+    if (!btn) return;
+    const ctx = RelacionamentoState.escritura;
+    const cartorio = (document.getElementById("esc-cartorio")?.value || "").trim();
+    const ok = !!(ctx && ctx.quitado && !ctx.contasPendente && cartorio && !this._escrituraBusy);
+    btn.disabled = !ok;
+    btn.style.opacity = ok ? "" : "0.55";
+    btn.style.cursor = ok ? "" : "not-allowed";
+  },
+
+  _escRenderModal() {
+    const st = document.getElementById("esc-modal-status");
+    const ctx = RelacionamentoState.escritura;
+    if (!st || !ctx) return;
+    const esc = (s) => this._escDoc(s);
+    const caixa = (cor, fundo, borda, html) => `<div style="padding:10px 12px;border-radius:8px;border:1px solid ${borda};background:${fundo};color:${cor};font-size:0.88rem;line-height:1.45;">${html}</div>`;
+    let html = "";
+    if (!ctx.quitado) {
+      html = caixa("#991b1b", "#fef2f2", "#fecaca", `<strong>Contrato não quitado.</strong> ${esc(ctx.quitadoMotivo || "")}. A autorização de escritura só pode ser emitida com o contrato quitado.`);
+    } else if (ctx.contasPendente) {
+      html = this._docLoadingHtml(ctx.contasEtapa || "Buscando no Sienge as contas em que as parcelas foram baixadas...");
+    } else if (ctx.contas && ctx.contas.grupos.length) {
+      const brl = (v) => Number(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const linhas = ctx.contas.grupos.map((g) => `<tr>
+          <td style="padding:4px 8px;">${esc(g.conta)}</td>
+          <td style="padding:4px 8px;">${esc(this._dmy(g.ate))}</td>
+          <td style="padding:4px 8px;text-align:right;">${brl(g.valor)}</td>
+          <td style="padding:4px 8px;">${esc(g.bancoLabel || "—")}</td>
+          <td style="padding:4px 8px;">${esc(g.agencia || "—")}</td>
+        </tr>`).join("");
+      const avisos = (ctx.contas.avisos || []).map((a) => `<div style="margin-top:6px;color:#92400e;">${esc(a)}</div>`).join("");
+      html = `<div style="font-size:0.8rem;color:#475569;margin-bottom:6px;">Contas em que as parcelas foram baixadas (vão para o texto da autorização):</div>
+        <div style="overflow:auto;border:1px solid #e2e8f0;border-radius:8px;">
+          <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+            <thead><tr style="background:#f1f5f9;color:#334155;text-align:left;">
+              <th style="padding:6px 8px;">Conta</th><th style="padding:6px 8px;">Recebimento até</th><th style="padding:6px 8px;text-align:right;">Valor</th><th style="padding:6px 8px;">Banco</th><th style="padding:6px 8px;">Agência</th>
+            </tr></thead>
+            <tbody>${linhas}</tbody>
+          </table>
+        </div>${avisos}`;
+    } else {
+      const motivo = ctx.contasErro || "Não encontrei no Sienge as contas em que as parcelas deste título foram baixadas.";
+      html = caixa("#92400e", "#fffbeb", "#fde68a", `${esc(motivo)} A autorização sairá sem os dados bancários.`);
+    }
+    st.innerHTML = html;
+    this._escAtualizarBtnGerar();
+    if (window.lucide) lucide.createIcons();
+  },
+
+  _dmy(iso) {
+    const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m ? m[3] + "/" + m[2] + "/" + m[1] : String(iso || "");
+  },
+
+  /** Baixas em massa da implantação (até 31/12/2016) foram para contas AJUSTE; esta é a conta real. */
+  _ajusteContaRecebimento(conta, ccId) {
+    const raw = String(conta || "").trim();
+    const c = raw.toUpperCase().replace(/\s+/g, "");
+    const cc = Number(ccId) || 0;
+    if (c === "AJUSTE02") return "1300015686";
+    if (c === "AJUSTE01") {
+      if (cc >= 13300) return "13001669-4";
+      if (cc >= 12900) return "13001668-7";
+      if (cc >= 10400) return "13001592-3";
+    }
+    return raw;
+  },
+
+  _contaDoRecebimento(rec) {
+    const txt = (v) => (v == null || typeof v === "object") ? "" : String(v).trim();
+    const de = (o) => {
+      if (!o || typeof o !== "object") return "";
+      const acc = o.account && typeof o.account === "object" ? o.account : null;
+      const ck = o.checkingAccount && typeof o.checkingAccount === "object" ? o.checkingAccount : null;
+      return txt(o.accountNumber) || txt(o.checkingAccountNumber) || txt(o.bankAccountNumber)
+        || txt(o.checkingAccount) || txt(o.bankAccount) || txt(o.account)
+        || (acc ? txt(acc.accountNumber) || txt(acc.number) : "")
+        || (ck ? txt(ck.accountNumber) || txt(ck.number) : "");
+    };
+    if (!rec || typeof rec !== "object") return "";
+    const direto = de(rec);
+    if (direto) return direto;
+    const movs = [].concat(rec.bankMovements || rec.bankMovement || []);
+    for (const m of movs) {
+      const v = de(m);
+      if (v) return v;
+    }
+    return "";
+  },
+
+  _dataDoRecebimento(rec) {
+    const v = String((rec && (rec.paymentDate || rec.receiptDate || rec.date || rec.calculationDate)) || "");
+    const iso = v.slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+    const m = v.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+    return m ? m[3] + "-" + m[2] + "-" + m[1] : "";
+  },
+
+  _valorDoRecebimento(rec) {
+    const n = (v) => (v == null || v === "" || isNaN(Number(v))) ? null : Number(v);
+    const liq = n(rec.netAmount) != null ? n(rec.netAmount) : n(rec.netReceiptValue);
+    if (liq != null && liq !== 0) return liq;
+    const bruto = n(rec.grossAmount) != null ? n(rec.grossAmount) : (n(rec.receiptValue) != null ? n(rec.receiptValue) : n(rec.value));
+    if (bruto == null) return 0;
+    return bruto + (n(rec.additionalValue) || 0) - (n(rec.discountValue) || 0);
+  },
+
+  _recebimentoIgnorado(rec) {
+    if (!rec) return true;
+    if (typeof window.isWriteOffReceipt === "function" && window.isWriteOffReceipt(rec)) return true;
+    const tipo = String(rec.operationTypeName || rec.operationName || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    return /DISTRAT|CANCEL|SUBSTITUI|ESTORN/.test(tipo);
+  },
+
+  async _empresaDoCentroCusto(ccId) {
+    let list = (typeof AppState !== "undefined" && Array.isArray(AppState.cachedCostCenters)) ? AppState.cachedCostCenters : [];
+    if (!list.length && window.SiengeApiService && typeof SiengeApiService.getCostCenters === "function") {
+      try { list = await SiengeApiService.getCostCenters(); } catch (e) { list = []; }
+    }
+    const cc = (Array.isArray(list) ? list : []).find((c) => String(c.id) === String(ccId));
+    return cc ? String(cc.idCompany || cc.companyId || "") : "";
+  },
+
+  async _bulkIncomeRange(buildPath, start, end) {
+    try {
+      const payload = await window.siengeFetchWithRetry(buildPath(start, end), 2);
+      return (payload && payload.data) || (Array.isArray(payload) ? payload : []);
+    } catch (err) {
+      if (Number(err && err.status) !== 507 || start >= end) throw err;
+      const iso = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+      const s = new Date(start + "T12:00:00");
+      const e = new Date(end + "T12:00:00");
+      const mid = iso(new Date(s.getTime() + Math.floor((e - s) / 2)));
+      const nextDate = new Date(mid + "T12:00:00");
+      nextDate.setDate(nextDate.getDate() + 1);
+      const next = iso(nextDate);
+      if (mid < start || mid >= end || next > end) throw err;
+      const left = await this._bulkIncomeRange(buildPath, start, mid);
+      const right = await this._bulkIncomeRange(buildPath, next, end);
+      return left.concat(right);
+    }
+  },
+
+  async _contasCorrentesEmpresa(companyId) {
+    const cid = String(companyId || "");
+    this._contasCorrentesCache = this._contasCorrentesCache || {};
+    if (!cid) return [];
+    if (this._contasCorrentesCache[cid]) return this._contasCorrentesCache[cid];
+    let list = [];
+    try {
+      const res = await SiengeApiService.getCheckingAccounts(cid, { allStatuses: true });
+      list = (res && res.results) || [];
+    } catch (e) {
+      list = [];
+    }
+    this._contasCorrentesCache[cid] = list;
+    return list;
+  },
+
+  _bancoDaConta(a) {
+    const txt = (v) => (v == null || typeof v === "object") ? "" : String(v).trim();
+    const bank = a && a.bank && typeof a.bank === "object" ? a.bank : {};
+    const agency = a && a.agency && typeof a.agency === "object" ? a.agency : {};
+    let codigo = txt(a.bankCode) || txt(a.bankNumber) || txt(a.bankId) || txt(bank.code) || txt(bank.number) || txt(bank.id) || txt(a.bank);
+    let nome = txt(a.bankName) || txt(bank.name) || txt(bank.description);
+    let agencia = txt(a.agencyNumber) || txt(a.agencyCode) || txt(a.bankAgency) || txt(a.bankBranch) || txt(a.branchNumber) || txt(a.agency) || txt(agency.number) || txt(agency.code);
+    const NOMES = { "001": "Banco do Brasil", "033": "Banco Santander", "104": "Caixa Econômica Federal", "237": "Banco Bradesco", "341": "Banco Itaú", "356": "Banco Real", "399": "HSBC", "422": "Banco Safra", "748": "Sicredi", "756": "Sicoob", "077": "Banco Inter" };
+    if (!codigo) {
+      const n = (txt(a.accountName) + " " + txt(a.name) + " " + nome).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+      if (/SANTANDER/.test(n)) codigo = "033";
+      else if (/ITAU/.test(n)) codigo = "341";
+      else if (/BRADESCO/.test(n)) codigo = "237";
+      else if (/CAIXA|\bCEF\b/.test(n)) codigo = "104";
+      else if (/SICREDI/.test(n)) codigo = "748";
+      else if (/SICOOB/.test(n)) codigo = "756";
+      else if (/BANCO DO BRASIL|\bBB\b/.test(n)) codigo = "001";
+    }
+    if (/^\d+$/.test(codigo)) codigo = codigo.padStart(3, "0");
+    if (!nome && NOMES[codigo]) nome = NOMES[codigo];
+    if (/^\d{1,3}$/.test(agencia)) agencia = agencia.padStart(4, "0");
+    const bancoLabel = codigo && nome ? codigo + " - " + nome : (nome || (codigo ? "banco " + codigo : ""));
+    return { bancoLabel, agencia };
+  },
+
+  /** Agrupa as baixas do título por conta corrente (já corrigindo as contas AJUSTE) e monta o texto de DADOS_BANCARIOS. */
+  async _contasRecebimento(ctx, onStep) {
+    const sale = ctx.sale || {};
+    const bill = ctx.bill || {};
+    const billId = String(sale.receivableBillId || bill.id || bill.receivableBillId || "");
+    if (!billId) throw new Error("Título não identificado.");
+    const ccId = String(sale.enterpriseId || sale.costCenterId || bill.costCenterId || bill.enterpriseCode || String(sale.unitId || "").split("-")[1] || "").trim();
+    let companyId = String(bill.companyId || sale.companyId || "").trim();
+    if (!companyId && ccId) companyId = await this._empresaDoCentroCusto(ccId);
+
+    const coletar = (lista, recs, instId) => {
+      (recs || []).forEach((rec) => {
+        if (this._recebimentoIgnorado(rec)) return;
+        const data = this._dataDoRecebimento(rec);
+        if (!data) return;
+        lista.push({
+          data,
+          conta: this._contaDoRecebimento(rec),
+          valor: this._valorDoRecebimento(rec),
+          empresa: String(rec.accountCompanyId || "") || companyId,
+          inst: String(instId || rec.installmentId || rec.installmentNumber || "")
+        });
+      });
+    };
+
+    const doExtrato = [];
+    const customerId = sale.customerId || bill.customerId;
+    if (customerId && window.SiengeApiService && typeof SiengeApiService.getCustomerFinancialStatements === "function") {
+      if (onStep) onStep("Lendo as parcelas pagas do título...");
+      try {
+        const res = await SiengeApiService.getCustomerFinancialStatements(customerId);
+        const bills = (res && res.results) ? res.results.flatMap((it) => it.billsReceivable || it.bills || []) : [];
+        const db = bills.find((b) => String(b.billReceivableId) === billId || String(b.receivableBillId) === billId || String(b.id) === billId);
+        ((db && db.installments) || []).forEach((inst) => coletar(doExtrato, inst.receipts, inst.installmentId || inst.installmentNumber));
+      } catch (e) {
+        console.warn("[Escritura] extrato do cliente indisponível", e);
+      }
+    }
+
+    let usados = doExtrato.length && doExtrato.every((r) => r.conta) ? doExtrato : null;
+    if (!usados) {
+      if (!companyId) throw new Error("Não foi possível identificar a empresa do título para buscar as baixas.");
+      const hoje = new Date();
+      const hojeIso = hoje.getFullYear() + "-" + String(hoje.getMonth() + 1).padStart(2, "0") + "-" + String(hoje.getDate()).padStart(2, "0");
+      const datas = doExtrato.map((r) => r.data).sort();
+      const inicioVenda = this._dataDoRecebimento({ date: sale.saleDate || sale.contractDate || bill.issueDate });
+      const inicio = datas[0] || inicioVenda || "2008-01-01";
+      const fim = datas.length ? datas[datas.length - 1] : hojeIso;
+      const anoIni = Number(inicio.slice(0, 4));
+      const anoFim = Number(fim.slice(0, 4));
+      const doBulk = [];
+      const vistos = new Set();
+      let variante = 0;
+      const caminho = (ini, fimR) => {
+        let p = `/bulk-data/v1/income?startDate=${ini}&endDate=${fimR}&selectionType=P&companyId=${encodeURIComponent(companyId)}`;
+        if (variante === 0 && ccId) p += `&costCentersId=${encodeURIComponent(ccId)}`;
+        if (variante <= 1) p += "&withBankMovements=true";
+        return p;
+      };
+      for (let ano = anoIni; ano <= anoFim; ano++) {
+        const ini = ano === anoIni ? inicio : ano + "-01-01";
+        const fimR = ano === anoFim ? fim : ano + "-12-31";
+        if (onStep) onStep(`Buscando no Sienge as contas das baixas de ${ano}...`);
+        let rows = null;
+        while (rows === null) {
+          try {
+            rows = await this._bulkIncomeRange(caminho, ini, fimR);
+          } catch (err) {
+            const st = Number(err && err.status);
+            if ((st === 400 || st === 422) && variante < 2) { variante++; continue; }
+            throw err;
+          }
+        }
+        rows.forEach((item) => {
+          const bId = String(item.billId || item.billReceivableId || item.receivableBillId || "");
+          if (bId !== billId) return;
+          const recs = [].concat(item.receipts || []);
+          (item.receiptsCategories || []).forEach((cat) => (cat.receipts || []).forEach((r) => recs.push(r)));
+          const tmp = [];
+          coletar(tmp, recs, item.installmentId || item.installmentNumber);
+          tmp.forEach((r) => {
+            const key = [r.inst, r.data, r.valor.toFixed(2), r.conta].join("|");
+            if (vistos.has(key)) return;
+            vistos.add(key);
+            doBulk.push(r);
+          });
+        });
+      }
+      const comConta = doBulk.filter((r) => r.conta);
+      if (comConta.length) usados = comConta;
+      else if (doExtrato.some((r) => r.conta)) usados = doExtrato.filter((r) => r.conta);
+    }
+    if (!usados || !usados.length) {
+      throw new Error("O Sienge não informou as contas correntes das baixas deste título.");
+    }
+
+    const porConta = {};
+    usados.forEach((r) => {
+      const conta = this._ajusteContaRecebimento(r.conta, ccId);
+      const k = conta.replace(/[^0-9A-Z]/gi, "").toUpperCase();
+      const g = porConta[k] || (porConta[k] = { conta, ate: "", valor: 0, qtd: 0, empresa: r.empresa || companyId, bancoLabel: "", agencia: "" });
+      if (r.data > g.ate) g.ate = r.data;
+      g.valor += Number(r.valor) || 0;
+      g.qtd += 1;
+    });
+    const grupos = Object.values(porConta).sort((a, b) => a.ate.localeCompare(b.ate));
+    if (onStep) onStep("Identificando banco e agência das contas...");
+    const digitos = (s) => String(s || "").replace(/\D/g, "");
+    for (const g of grupos) {
+      const alvo = digitos(g.conta);
+      if (!alvo) continue;
+      const empresas = [g.empresa, companyId].filter((v, i, arr) => v && arr.indexOf(v) === i);
+      for (const emp of empresas) {
+        const lista = await this._contasCorrentesEmpresa(emp);
+        const hit = lista.find((a) => digitos(a.accountNumber || a.number || a.checkingAccountNumber) === alvo);
+        if (hit) {
+          const info = this._bancoDaConta(hit);
+          g.bancoLabel = info.bancoLabel;
+          g.agencia = info.agencia;
+          g.conta = String(hit.accountNumber || hit.number || g.conta).trim();
+          break;
+        }
+      }
+    }
+    const avisos = [];
+    const validos = grupos.filter((g) => {
+      if (/^AJUSTE/i.test(g.conta)) {
+        avisos.push(`Há ${g.qtd} baixa(s) na conta ${g.conta} sem conta real correspondente para o centro de custo ${ccId}; ficaram fora do texto.`);
+        return false;
+      }
+      if (!g.bancoLabel) avisos.push(`Conta ${g.conta}: banco e agência não encontrados no Sienge.`);
+      return true;
+    });
+    const texto = validos.map((g) => {
+      const via = g.bancoLabel ? `através do ${g.bancoLabel}, ${g.agencia ? "agência " + g.agencia + ", " : ""}` : "na ";
+      return `Os recebimentos até ${this._dmy(g.ate)} foram realizados ${via}conta corrente ${g.conta}.`;
+    }).join(" ");
+    return { grupos: validos, avisos, texto };
+  },
+
+  _paginarDoc(topo, blocos, corpoCss) {
+    const W = 794, H = 1123, PAD_X = 57, PAD_TOP = 38, PAD_BOTTOM = 64, LOGO = 68;
+    const box = document.createElement("div");
+    box.style.cssText = `position:fixed;left:-13000px;top:0;width:${W - PAD_X * 2}px;display:flow-root;color:#111;`;
+    document.body.appendChild(box);
+    const montar = (primeira, itens) => `${primeira ? topo : ""}<div class="qui-corpo" style="${corpoCss}">${itens.join("\n\n")}</div>`;
+    const paginas = [];
+    try {
+      let atual = [];
+      blocos.forEach((b) => {
+        const primeira = paginas.length === 0;
+        const limite = H - PAD_TOP - PAD_BOTTOM - (primeira ? LOGO : 0);
+        box.innerHTML = montar(primeira, atual.concat(b));
+        if (atual.length && box.getBoundingClientRect().height > limite) {
+          paginas.push(montar(primeira, atual));
+          atual = [b];
+        } else {
+          atual.push(b);
+        }
+      });
+      if (atual.length || !paginas.length) paginas.push(montar(paginas.length === 0, atual));
+    } finally {
+      box.remove();
+    }
+    return paginas;
+  },
+
   limparEscritura() {
+    RelacionamentoState.escrituraSeq = (RelacionamentoState.escrituraSeq || 0) + 1;
     RelacionamentoState.escritura = null;
     RelacionamentoState.escrituraMatches = [];
     const card = document.getElementById("esc-doc-card");
@@ -1331,6 +1726,7 @@ const RelacionamentoApp = {
     this.cancelarNovoCartorio();
     const dd = document.getElementById("esc-nome-dropdown");
     if (dd) dd.style.display = "none";
+    this._escAtualizarBtnGerar();
   },
 
   sugerirNomeEscritura(query) {
@@ -1395,6 +1791,8 @@ const RelacionamentoApp = {
     this._escSetResultsHtml(this._docLoadingHtml("Consultando contrato na Sienge..."));
     document.getElementById("esc-doc-card").style.display = "none";
     RelacionamentoState.escritura = null;
+    this._escAtualizarBtnGerar();
+    const seq = RelacionamentoState.escrituraSeq;
 
     try {
       let customerId = null;
@@ -1459,6 +1857,7 @@ const RelacionamentoApp = {
           customers: []
         }];
       }
+      if (seq !== RelacionamentoState.escrituraSeq) return;
       if (!matches.length) throw new Error("Nenhum contrato encontrado para este cliente.");
 
       RelacionamentoState.escrituraMatches = matches;
@@ -1486,6 +1885,7 @@ const RelacionamentoApp = {
         </table></div>`);
     } catch (err) {
       console.error(err);
+      if (seq !== RelacionamentoState.escrituraSeq) return;
       this._escSetResultsHtml(`<div style="padding:12px;color:#b91c1c;">${err.message || "Erro ao buscar."}</div>`);
     }
   },
@@ -1494,6 +1894,7 @@ const RelacionamentoApp = {
     const sale = (RelacionamentoState.escrituraMatches || [])[idx];
     if (!sale) return;
     this._escSetResultsHtml(this._docLoadingHtml("Carregando dados do lote e do contrato..."));
+    const seq = RelacionamentoState.escrituraSeq;
     try {
       const customerId = sale.customerId;
       let customer = {};
@@ -1536,7 +1937,26 @@ const RelacionamentoApp = {
         areaStr ? ("com área de " + areaStr + ".") : ""
       ].filter(Boolean).join(" ");
       const quitadoInfo = await this._avaliarContratoQuitado(sale, bill);
-      RelacionamentoState.escritura = { customer, sale, unit, unitDetails, bill, empName, cidadeLote, quitado: quitadoInfo.quitado, quitadoMotivo: quitadoInfo.motivo };
+      if (seq !== RelacionamentoState.escrituraSeq) return;
+      const escCtx = { customer, sale, unit, unitDetails, bill, empName, cidadeLote, localizacao, quitado: quitadoInfo.quitado, quitadoMotivo: quitadoInfo.motivo };
+      RelacionamentoState.escritura = escCtx;
+      if (escCtx.quitado) {
+        escCtx.contasPendente = true;
+        escCtx.contasPromise = this._contasRecebimento(escCtx, (etapa) => {
+          escCtx.contasEtapa = etapa;
+          if (RelacionamentoState.escritura === escCtx) this._escRenderModal();
+        }).then((r) => {
+          escCtx.contas = r;
+          return r;
+        }).catch((err) => {
+          console.warn("[Escritura] contas das baixas", err);
+          escCtx.contasErro = (err && err.message) || "";
+          return null;
+        }).finally(() => {
+          escCtx.contasPendente = false;
+          if (RelacionamentoState.escritura === escCtx) this._escRenderModal();
+        });
+      }
       const cartorioHint = this.pickCartorioForCidade(cidadeLote);
       this.fillCartorioSelect(cartorioHint);
       const locEl = document.getElementById("esc-localizacao");
@@ -1558,12 +1978,12 @@ const RelacionamentoApp = {
           <div><span style="color:#64748b;">Valor</span><br><strong>${valorFmt}</strong></div>
           <div><span style="color:#64748b;">Situação</span><br>${statusHtml}</div>
         </div>`;
-      const genBtn = document.querySelector('#esc-doc-card [onclick="RelacionamentoApp.gerarEscrituraPdf()"]');
-      if (genBtn) genBtn.disabled = !quitadoInfo.quitado;
       document.getElementById("esc-doc-card").style.display = "block";
       this._escSetResultsHtml("");
+      this._escRenderModal();
     } catch (err) {
       console.error(err);
+      if (seq !== RelacionamentoState.escrituraSeq) return;
       this._escSetResultsHtml(`<div style="padding:12px;color:#b91c1c;">${err.message || "Não foi possível carregar o contrato."}</div>`);
     }
   },
@@ -1583,6 +2003,12 @@ const RelacionamentoApp = {
       alert("Selecione o cartório.");
       return;
     }
+    if (this._escrituraBusy) return;
+    this._escrituraBusy = true;
+    const btn = document.getElementById("esc-btn-gerar");
+    const btnHtml = btn ? btn.innerHTML : "";
+    if (btn) btn.textContent = "Gerando...";
+    this._escAtualizarBtnGerar();
     try {
       let t = {};
       try { t = JSON.parse(localStorage.getItem("crm_docpadrao_escritura") || "{}"); } catch (e) {}
@@ -1598,44 +2024,50 @@ const RelacionamentoApp = {
         alert("O modelo de autorização não está preenchido. Salve-o em Configurações → Documentos padrões.");
         return;
       }
-      const cidadeCartorio = nomeCartorio;
-      const localizacao = (document.getElementById("esc-localizacao")?.value || "").trim() || "____";
-      const bancos = (document.getElementById("esc-bancos")?.value || "").trim() || "conforme extrato anexo";
-      const { legalBase, quadraLote, unitNumericId, titulo } = this._escDocBase(ctx, {
+      const contas = ctx.contasPromise ? await ctx.contasPromise : null;
+      const bancos = (contas && contas.texto) || "";
+      if (!bancos && !confirm("Não encontrei no Sienge as contas em que as parcelas foram baixadas. Gerar a autorização sem os dados bancários?")) return;
+      const { legalBase, quadraLote, titulo } = this._escDocBase(ctx, {
         NOME_CARTORIO: nomeCartorio,
-        CIDADE_CARTORIO: cidadeCartorio,
-        LOCALIZACAO: localizacao,
+        CIDADE_CARTORIO: nomeCartorio,
+        LOCALIZACAO: ctx.localizacao || "____",
         DADOS_BANCARIOS: bancos
       });
       const markup = typeof window.formatDocPadraoMarkup === "function" ? window.formatDocPadraoMarkup(corpo) : corpo;
-      const filled = this._fillDocVars(markup, legalBase);
-      const headerUnidade = [unitNumericId, "Quadra-Lote: " + quadraLote].filter(Boolean).join(" - ");
-      const alreadyHasTabeliao = /Livro\s*n/i.test(filled);
-      const tabeliaoBox = alreadyHasTabeliao ? "" : `
-        <div style="border:1.5px solid #105436;padding:12px 14px;margin-top:2rem;font-size:10pt;">
-          <p style="margin:0 0 10px;font-weight:bold;">ATENÇÃO: Senhor tabelião, favor preencher os dados abaixo e devolver esta autorização à Moura Leite Desenvolvimento & Urbanização, no ato da assinatura desta.</p>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 18px;">
-            <div>Livro nº ________________________</div>
-            <div>Folha nº ________________________</div>
-            <div>Matrícula nº ____________________</div>
-            <div>Data ____ / ____ / ________</div>
-          </div>
-        </div>`;
-      const docHtml = `
-        <div style="text-align:center;margin-bottom:1.25rem;">
-          <div style="font-size:10pt;color:#334155;margin-bottom:4px;">${headerUnidade}</div>
-          <div style="font-size:10pt;color:#334155;margin-bottom:10px;">Título ${titulo}</div>
-          <h2 style="color:#105436;font-size:13pt;font-weight:bold;margin:0;">${docTitle}</h2>
-        </div>
-        <div style="font-family:'Times New Roman',serif;font-size:11pt;line-height:1.5;text-align:justify;white-space:pre-wrap;">${filled}</div>
-        ${tabeliaoBox}`;
-      document.getElementById("pdf-modal-title").textContent = "Autorização para lavratura de escritura";
-      document.getElementById("pdf-document-content").innerHTML = docHtml;
-      document.getElementById("pdf-view-overlay").classList.add("active");
-      if (window.lucide) lucide.createIcons();
+      const filled = this._fillDocVars(markup, legalBase).replace(/[ \t]+\n/g, "\n");
+      const visivel = (s) => String(s || "").replace(/<[^>]+>/g, "").trim();
+      const blocos = [];
+      filled.split(/\n[ \t]*\n/).map((b) => b.replace(/^\n+|\s+$/g, "")).filter((b) => visivel(b)).forEach((b) => {
+        const txt = visivel(b);
+        // Assinatura fica com a linha de data; os campos do tabelião, com o aviso deles.
+        if (blocos.length && (/^_{5,}/.test(txt) || /^Livro\s*n/i.test(txt))) blocos[blocos.length - 1] += "\n\n" + b;
+        else blocos.push(b);
+      });
+      if (!/Livro\s*n/i.test(filled)) {
+        blocos.push('<div style="border:1.5px solid #105436;padding:10px 12px;font-size:10pt;white-space:normal;"><p style="margin:0 0 8px;font-weight:bold;">ATENÇÃO: Senhor tabelião, favor preencher os dados abaixo e devolver esta autorização à Moura Leite Desenvolvimento &amp; Urbanização, no ato da assinatura desta.</p><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 18px;"><div>Livro nº ____________________</div><div>Folha nº ____________________</div><div>Matrícula nº ________________</div><div>Data ____ / ____ / ________</div></div></div>');
+      }
+      const iAss = blocos.findIndex((b) => /_{5,}/.test(visivel(b)) && !/Livro\s*n/i.test(b));
+      if (iAss >= 0 && typeof window.centerSimpleDocSignature === "function") blocos[iAss] = window.centerSimpleDocSignature(blocos[iAss]);
+      const codEmp = legalBase.CODIGO_EMPREENDIMENTO && legalBase.CODIGO_EMPREENDIMENTO !== "____" ? legalBase.CODIGO_EMPREENDIMENTO : "";
+      const unidade = [codEmp, quadraLote].filter(Boolean).join(" - ");
+      const topo = `<div style="font-family:'Times New Roman',serif;font-size:11pt;color:#111;margin:0 0 32px;">Título: ${this._escDoc(titulo)} | Unidade: ${this._escDoc(unidade || "____")}</div>
+        <h2 style="text-align:center;color:#111;font-size:13pt;font-weight:bold;letter-spacing:0.04em;margin:0 0 30px;">${docTitle}</h2>`;
+      const corpoCss = "font-family:'Times New Roman',serif;font-size:11pt;line-height:1.5;text-align:justify;white-space:pre-wrap;color:#111;";
+      const paginas = this._paginarDoc(topo, blocos, corpoCss);
+      const nome = (ctx.customer && ctx.customer.name) || ctx.sale.customerName || "";
+      const fileName = typeof window.buildFichaPdfFilename === "function"
+        ? window.buildFichaPdfFilename("Autorização de escritura", { contrato: unidade, costCenterId: codEmp, titulo, nome })
+        : "Autorização de escritura | Título " + titulo + ".pdf";
+      await this._baixarPaginasPdf(paginas, fileName);
+      this.fecharEscrituraModal();
     } catch (err) {
       console.error("Erro ao gerar autorização de escritura", err);
       alert("Não foi possível gerar a autorização. Verifique o modelo em Documentos padrões e tente de novo.");
+    } finally {
+      this._escrituraBusy = false;
+      if (btn) btn.innerHTML = btnHtml;
+      this._escAtualizarBtnGerar();
+      if (window.lucide) lucide.createIcons();
     }
   },
 
@@ -1840,6 +2272,8 @@ const RelacionamentoApp = {
       const docTitle = (titleEl && titleEl.value) || t["doc-quitacao-title"] || "INSTRUMENTO PARTICULAR DE QUITAÇÃO E NOTIFICAÇÃO";
       let corpo = (corpoEl && corpoEl.value) || t["doc-quitacao-corpo"] || (corpoEl && corpoEl.defaultValue) || "";
       if (typeof window.upgradeQuitacaoCorpo === "function") corpo = window.upgradeQuitacaoCorpo(corpo);
+      // O cabeçalho "Título | Unidade" já sai acima do título; a linha do modelo duplicaria.
+      corpo = corpo.replace(/^\s*(?:<[^>]+>\s*|[*_]+\s*)*t[ií]tulo\s*:[^\n]*\n*/i, "");
       if (!corpo) {
         alert("O modelo do termo de quitação não está preenchido. Salve-o em Configurações → Documentos padrões.");
         return;
@@ -1871,8 +2305,8 @@ const RelacionamentoApp = {
       if (modo === "aviso" && typeof window.applyQuitacaoRubrica === "function") filled = window.applyQuitacaoRubrica(filled);
       const codEmp = legalBase.CODIGO_EMPREENDIMENTO && legalBase.CODIGO_EMPREENDIMENTO !== "____" ? legalBase.CODIGO_EMPREENDIMENTO : "";
       const unidade = [codEmp, quadraLote].filter(Boolean).join(" - ");
-      const topo = `<div style="font-family:'Times New Roman',serif;font-size:11pt;color:#111;margin:0 0 14px;">Título: ${this._escDoc(titulo)} | Unidade: ${this._escDoc(unidade || "____")}</div>
-        <h2 style="text-align:center;color:#111;font-size:13pt;font-weight:bold;letter-spacing:0.04em;margin:0 0 18px;">${docTitle}</h2>`;
+      const topo = `<div style="font-family:'Times New Roman',serif;font-size:11pt;color:#111;margin:0 0 32px;">Título: ${this._escDoc(titulo)} | Unidade: ${this._escDoc(unidade || "____")}</div>
+        <h2 style="text-align:center;color:#111;font-size:13pt;font-weight:bold;letter-spacing:0.04em;margin:0 0 30px;">${docTitle}</h2>`;
       // Cláusulas 1 a 3 na primeira página; a 4 e a assinatura na segunda.
       const corte = filled.search(/(^|\n)\s*(<(strong|b)[^>]*>\s*)?4\.\s/);
       const parte1 = corte > 0 ? filled.slice(0, corte) : filled;
@@ -2526,8 +2960,11 @@ const RelacionamentoApp = {
       }
       const block = unit.block && unit.block !== "N/D" ? unit.block : (unitName.split("-")[0] || "");
       const lot = unit.lot && unit.lot !== "N/D" ? unit.lot : (unitName.split("-").slice(1).join("-") || unitName);
-      const empName = (window.resolveLoteamentoName ? window.resolveLoteamentoName(unit, sale) : "") || sale.empName || "";
       const cidadeLote = window.resolveCidadeLoteamento ? window.resolveCidadeLoteamento(unit, sale) : "";
+      let empName = (window.resolveLoteamentoName ? window.resolveLoteamentoName(unit, sale) : "") || sale.empName || "";
+      if (typeof window.stripCidadeEmpreendimento === "function") {
+        empName = window.stripCidadeEmpreendimento(String(empName).replace(/^(?:\d+\s*-\s*)+/, ""), enterpriseId, cidadeLote);
+      }
       if (typeof window.rememberContractBuyers === "function") window.rememberContractBuyers(sale);
       if (stale()) return;
       RelacionamentoState[kind] = { customer, sale, unit, unitDetails, bill, empName, cidadeLote, block, lot };
