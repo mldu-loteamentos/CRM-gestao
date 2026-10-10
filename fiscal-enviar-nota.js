@@ -97,6 +97,7 @@ window.FilaNotasFiscais = {
   abrirEnvio(pedido, idEnvio) {
     const ped = String(pedido || "").trim();
     if (!ped) return;
+    if (window.ComprasControleApp && typeof ComprasControleApp.fecharTitulo === "function") ComprasControleApp.fecharTitulo();
     if (typeof window.switchTab === "function") window.switchTab("fiscal-enviar-nota", "Enviar nota ao fiscal");
     const abrir = () => {
       const app = window.EnviarNotaApp;
@@ -262,6 +263,10 @@ window.EnviarNotaApp = {
       enviando: "", feito: "", editandoId: "",
       lista: ant.lista || [], listaCarregada: !!ant.listaCarregada, listaErro: "", listaCarregando: false, todos: !!ant.todos, verLancadas: !!ant.verLancadas
     };
+  },
+
+  voltarBudget() {
+    if (typeof switchTab === "function") switchTab("marketing-budget", "Budget");
   },
 
   init() {
@@ -1179,7 +1184,10 @@ window.EnviarNotaApp = {
         #enviar-nota-root .fnf-tab .fnf-acoes .btn { height: 28px; min-width: 0; font-size: 0.72rem; padding: 0 8px; }
         #enviar-nota-root .fnf-tab .fnf-acoes .fnf-excluir { background: #fff; color: #b91c1c; border: 1px solid #fecaca; }
         #enviar-nota-root .fnf-tab .fnf-acoes .fnf-excluir:hover { background: #fef2f2; }
+        .env-voltar { margin: 16px 20px 0; }
+        .env-voltar .btn { height: 34px; display: inline-flex; align-items: center; gap: 6px; }
       </style>
+      ${window._voltarBudget ? `<div class="env-voltar"><button type="button" class="btn btn-outline" onclick="EnviarNotaApp.voltarBudget()"><i data-lucide="arrow-left"></i> Voltar para o Budget</button></div>` : ""}
       <div class="ml-tabs env-tabs" id="env-tabs" role="tablist">${this.abasHtml()}</div>
       ${s.aba === "minhas" ? this.minhasHtml() : this.enviarHtml()}`;
     if (window.lucide) lucide.createIcons();

@@ -1,8 +1,9 @@
 /* Marketing · Budget
    Verba = VGV da obra (Sienge) × % de marketing (definido em Configurações).
    Centro de custo com MARKETING no nome: 100% das despesas entram no budget.
-   Centro sem MARKETING no nome: só títulos pagos nas contas do grupo 2.03.05 MARKETING
+   Centro sem MARKETING no nome: títulos pagos, em aberto e previsões nas contas do grupo 2.03.05 MARKETING
    (a conta, as filhas e as contas alocadas em 05.02 MARKETING na visão DFC).
+   Previsão entra no comprometido junto com o título em aberto.
    A aba Contratos mostra quem está em dia, quem não pagou nada e quem deve a entrada (possíveis cancelamentos).
    A aba Perfil da venda cruza sexo e idade dos clientes com a situação de pagamento e os cancelamentos. */
 const MarketingBudgetApp = {
@@ -105,11 +106,11 @@ const MarketingBudgetApp = {
     });
   },
 
-  /** Centro com MARKETING no nome: todas as despesas. Os demais: só título pago do grupo. */
+  /** Centro com MARKETING no nome: todas as despesas. Os demais: pago, em aberto e previsão do grupo. */
   gastoEntraNoBudget(r) {
     if (!r) return false;
     if (this.ccTemMarketing(r.ccId, r.ccNome)) return true;
-    return r.status === "realizado" && this.contaNoGrupoMarketing(r.catId);
+    return this.contaNoGrupoMarketing(r.catId);
   },
 
   money(v) {
@@ -842,8 +843,8 @@ const MarketingBudgetApp = {
     const soma = (st) => rows.filter((r) => r.status === st).reduce((t, r) => t + r.valor, 0);
     const verba = (Number(s.obra && s.obra.vgv) || 0) * ((Number(s.pct) || 0) / 100);
     const realizado = soma("realizado");
-    const comprometido = soma("comprometido");
     const previsto = soma("previsao");
+    const comprometido = soma("comprometido") + previsto;
     const brutas = s.vendas.reduce((t, v) => t + v.unidades, 0);
     const distr = s.distratos.reduce((t, v) => t + v.unidades, 0);
     const liquidas = Math.max(0, brutas - distr);
@@ -909,7 +910,7 @@ const MarketingBudgetApp = {
         <td title="${this.esc(x.catNome)}">${this.esc(x.catNome)}</td>
         <td style="text-align:right;">${this.money(x.valor)}</td>
       </tr>`).join("")
-      : `<tr><td colspan="8" class="mkb-vazio">Nenhum gasto ${s.filtroGasto === "todos" ? "no período" : "nesta situação"}. Centro com MARKETING no nome entra inteiro; os demais só com título pago do grupo 2.03.05 MARKETING.</td></tr>`;
+      : `<tr><td colspan="8" class="mkb-vazio">Nenhum gasto ${s.filtroGasto === "todos" ? "no período" : "nesta situação"}.</td></tr>`;
     return `<div class="mkb-chips">${chips}</div>
       <div class="mkb-tablewrap"><table class="mkb-table">
         <colgroup><col style="width:9%"><col style="width:11%"><col style="width:9%"><col style="width:20%"><col style="width:10%"><col style="width:8%"><col style="width:20%"><col style="width:13%"></colgroup>
@@ -1078,22 +1079,17 @@ const MarketingBudgetApp = {
     const s = this.state;
     const r = this.resumo();
     const obra = s.obra || { vgv: 0, fonte: "sem" };
-    const fonte = obra.fonte === "obra" ? "Cadastro da obra no Sienge" : (obra.fonte === "centro" ? "Digitado no centro de custo (a obra não tem VGV)" : "Sem VGV — preencha o Valor geral de vendas na obra no Sienge");
     const consumo = Math.min(r.consumo, 100);
     const corConsumo = r.consumo > 100 ? "#b91c1c" : (r.consumo >= 80 ? "#f37021" : "#105436");
-    const ev = s.eventos || [];
-    const evOrcado = ev.reduce((t, b) => t + (Number(b.plannedValue) || 0), 0);
     const verba = `
       <div class="mkb-card mkb-config">
         <div class="mkb-cfg-item">
           <span>VGV do empreendimento</span>
           <strong>${obra.vgv > 0 ? this.money(obra.vgv) : "—"}</strong>
-          <small>${fonte}</small>
         </div>
         <div class="mkb-cfg-item">
           <span>% do VGV para marketing</span>
           <strong>${s.pct > 0 ? String(s.pct).replace(".", ",") + "%" : "—"}</strong>
-          <small title="${this.esc(s.ccsCfg.join(", "))}">${s.pct > 0 ? "Definido em Marketing › Configurações" : "Sem percentual · defina em Marketing › Configurações"} · gastos dos centros de custo ${this.esc(s.ccsCfg.join(", ") || "—")}</small>
         </div>
         <div class="mkb-cfg-item mkb-verba">
           <span>Verba de marketing</span>
@@ -1104,35 +1100,29 @@ const MarketingBudgetApp = {
     const uso = `
       <div class="mkb-kpis">
         ${this.kpi("Realizado", this.money(r.realizado), "Títulos de marketing já pagos no período", "#105436")}
-        ${this.kpi("Comprometido", this.money(r.comprometido), "Títulos de marketing em aberto, ainda não pagos", "#f37021")}
+        ${this.kpi("Comprometido", this.money(r.comprometido), "Em aberto e previsão, ainda não pagos", "#f37021")}
         ${this.kpi("Saldo da verba", this.money(r.saldo), r.saldo < 0 ? "A verba já foi ultrapassada" : "O que ainda cabe na verba", r.saldo < 0 ? "#b91c1c" : "#0ea5e9")}
-        ${this.kpi("Consumo da verba", r.verba > 0 ? r.consumo.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "%" : "—", "Pago + em aberto, em relação à verba", corConsumo,
+        ${this.kpi("Consumo da verba", r.verba > 0 ? r.consumo.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "%" : "—", "Pago + comprometido, em relação à verba", corConsumo,
           `<div class="mkb-bar"><i style="width:${consumo}%;background:${corConsumo};"></i></div>`)}
       </div>
-      ${r.previsto > 0 || ev.length ? `<p class="mkb-nota">${r.previsto > 0 ? `Previsões de marketing no período: <strong>${this.money(r.previsto)}</strong>. Previsão ainda não é título em aberto, por isso não entra no comprometido. ` : ""}${ev.length ? `Eventos cadastrados neste empreendimento: <strong>${ev.length}</strong> · orçado ${this.money(evOrcado)}.` : ""}</p>` : ""}
-      <div class="mkb-card mkb-cats-row">
-        <div class="mkb-cats-tit"><h3>O que entra nesses números</h3><small>Regra do centro de custo e da conta 2.03.05 MARKETING</small></div>
-        <p class="mkb-muted" style="margin:0;">Centro com <strong>MARKETING</strong> no nome: 100% das despesas, pagas, em aberto ou previstas. Nos outros centros, só o título já pago nas contas do grupo <strong>2.03.05 MARKETING</strong> e nas contas ligadas a 05.02 MARKETING no fluxo de caixa.</p>
-      </div>
-      <div class="mkb-card mkb-chart-full"><div class="mkb-card-h"><h3>Verba e gastos mês a mês</h3><small>Barras = o que foi pago e o que está em aberto · linha = acumulado comparado com a verba</small></div><div class="mkb-canvas"><canvas id="mkb-ch-mes"></canvas></div></div>
+      <div class="mkb-card mkb-chart-full"><div class="mkb-card-h"><h3>Verba e gastos mês a mês</h3><small>Barras = o que foi pago e o que está comprometido · linha = acumulado comparado com a verba</small></div><div class="mkb-canvas"><canvas id="mkb-ch-mes"></canvas></div></div>
       <div class="mkb-card">
-        <div class="mkb-card-h"><h3>Títulos que compõem a verba</h3><small>Pago entra no realizado · em aberto entra no comprometido · previsão fica só de referência</small></div>
+        <div class="mkb-card-h"><h3>Títulos que compõem a verba</h3><small>Pago entra no realizado · em aberto e previsão entram no comprometido</small></div>
         <div id="mkb-gastos">${this.gastosHtml(r)}</div>
       </div>`;
     const vendas = `
       <div class="mkb-kpis">
         ${this.kpi("Unidades vendidas", r.liquidas.toLocaleString("pt-BR"), `${r.brutas} contratos emitidos · ${r.distr} distratados no período`, "#6366f1")}
         ${this.kpi("Custo por unidade vendida", r.cac != null ? this.money(r.cac) : "—", "Só o que já foi pago de marketing, dividido pelas unidades", "#105436")}
-        ${this.kpi("Custo por unidade com o em aberto", r.cacTotal != null ? this.money(r.cacTotal) : "—", "Pago + em aberto, dividido pelas unidades", "#f37021")}
-        ${this.kpi("Vendido no período", this.moneyShort(r.vgvVendido), r.vgvVendido > 0 ? "O marketing pago é " + ((r.realizado / r.vgvVendido) * 100).toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "% desse valor" : "Soma do valor dos contratos", "#0f766e")}
+        ${this.kpi("Custo por unidade com o em aberto", r.cacTotal != null ? this.money(r.cacTotal) : "—", "Pago + comprometido, dividido pelas unidades", "#f37021")}
       </div>
       <div class="mkb-card mkb-chart-full"><div class="mkb-card-h"><h3>Vendas e custo por unidade</h3><small>Quantas unidades venderam em cada mês e quanto de marketing cada uma consumiu</small></div><div class="mkb-canvas"><canvas id="mkb-ch-vendas"></canvas></div></div>
       <div class="mkb-card">
         <div class="mkb-card-h"><h3>Contratos vendidos no período</h3><small>Emitidos e distratados no período · Atrasado desde é a parcela vencida mais antiga no Contas a Receber</small></div>
         <div id="mkb-vendas">${this.vendasHtml()}</div>
       </div>`;
-    return this.secao("De onde vem a verba", "O teto de marketing é o VGV da obra multiplicado pelo percentual definido em Configurações.", verba)
-      + this.secao("Uso da verba", "Quanto desse teto já foi pago e quanto ainda está comprometido em títulos em aberto.", uso)
+    return this.secao("De onde vem a verba", "", verba)
+      + this.secao("Uso da verba", "Quanto desse teto já foi pago e quanto ainda está comprometido.", uso)
       + this.secao("Vendas do período", "As unidades vendidas servem para ver quanto de marketing cada venda consumiu.", vendas);
   },
 
@@ -1223,7 +1213,6 @@ const MarketingBudgetApp = {
     if (!L.length) return `<div class="mkb-card">${escopo}<p class="mkb-vazio" style="margin:12px 0 0;">Nenhum contrato ativo com saldo a pagar ${todos ? "neste empreendimento" : "entre as vendas do período"}.</p></div>`;
     const emDia = L.filter((c) => c.pag.status === "adimplente");
     const atraso = L.filter((c) => c.pag.status === "inadimplente");
-    const nada = L.filter((c) => c.pag.recebido < 0.01);
     const devEntrada = L.filter((c) => c.pag.entrada && c.pag.entrada.vencida > 0.009);
     const semEntrada = L.filter((c) => !(c.pag.entrada && c.pag.entrada.tem)).length;
     const risco = L.filter((c) => this.riscoDe(c).length)
@@ -1239,7 +1228,6 @@ const MarketingBudgetApp = {
         <td style="text-align:right;">${c.pag.pctPago.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</td>
         <td>${c.pag.entrada && c.pag.entrada.vencida > 0.009 ? `<span class="mkb-atraso">${this.money(c.pag.entrada.vencida)} <small>desde ${this.dataBr(c.pag.entrada.desde)}</small></span>` : this.esc(this.situacaoEntrada(c.pag))}</td>
         <td>${this.atrasoHtml({ id: c.id, situacao: "", pagDireto: c.pag })}</td>
-        <td style="text-align:right;">${this.money(c.pag.aberto)}</td>
         <td class="mkb-tags">${this.riscoDe(c).map(tag).join(" ")}</td>
       </tr>`).join("");
     const qtdDistrato = risco.length.toLocaleString("pt-BR");
@@ -1248,25 +1236,22 @@ const MarketingBudgetApp = {
         ${this.kpi("Contratos ativos", L.length.toLocaleString("pt-BR"), todos ? "Títulos a receber ainda em aberto neste empreendimento" : "Vendas do período que ainda têm saldo", "#6366f1")}
         ${this.kpi("Em dia", this.pct(emDia.length, L.length), `${emDia.length} contrato(s) sem parcela vencida`, "#105436")}
         ${this.kpi("Em atraso", this.pct(atraso.length, L.length), `${atraso.length} contrato(s) · ${this.money(vencido)} já vencido`, atraso.length ? "#b91c1c" : "#105436")}
-        ${this.kpi("Média já paga", (L.reduce((t, c) => t + c.pag.pctPago, 0) / L.length).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "%", "O que já entrou dividido pelo valor do contrato", "#0f766e")}
       </div>
-      <div class="mkb-charts mkb-charts-2">
-        <div class="mkb-card"><div class="mkb-card-h"><h3>Em dia e em atraso</h3><small>Dos contratos ativos, quantos pagam no prazo</small></div><div class="mkb-canvas"><canvas id="mkb-ch-ctr-dia"></canvas></div></div>
-        <div class="mkb-card"><div class="mkb-card-h"><h3>Quanto do contrato já foi pago</h3><small>0% significa que nenhuma parcela entrou</small></div><div class="mkb-canvas"><canvas id="mkb-ch-ctr-pago"></canvas></div></div>
-        <div class="mkb-card mkb-chart-full"><div class="mkb-card-h"><h3>Há quanto tempo está vencido</h3><small>Conta a partir da parcela vencida mais antiga de cada contrato</small></div><div class="mkb-canvas"><canvas id="mkb-ch-ctr-atraso"></canvas></div></div>
+      <div class="mkb-charts mkb-charts-3">
+        <div class="mkb-card"><div class="mkb-card-h"><h3>Em dia e em atraso</h3><small>Dos contratos ativos, quantos pagam no prazo</small></div><div class="mkb-canvas mkb-canvas-curto"><canvas id="mkb-ch-ctr-dia"></canvas></div></div>
+        <div class="mkb-card"><div class="mkb-card-h"><h3>Quanto do contrato já foi pago</h3><small>0% significa que nenhuma parcela entrou</small></div><div class="mkb-canvas mkb-canvas-curto"><canvas id="mkb-ch-ctr-pago"></canvas></div></div>
+        <div class="mkb-card"><div class="mkb-card-h"><h3>Há quanto tempo está vencido</h3><small>Conta a partir da parcela vencida mais antiga de cada contrato</small></div><div class="mkb-canvas mkb-canvas-curto"><canvas id="mkb-ch-ctr-atraso"></canvas></div></div>
       </div>`;
     const distrato = `
       <div class="mkb-kpis">
-        ${this.kpi("Títulos que podem distratar", qtdDistrato, "A quantidade da lista abaixo: não pagou nada ou está com a entrada vencida", risco.length ? "#b91c1c" : "#105436")}
-        ${this.kpi("Não pagaram nada", nada.length.toLocaleString("pt-BR"), this.pct(nada.length, L.length) + " dos contratos ativos", nada.length ? "#b91c1c" : "#105436")}
         ${this.kpi("Entrada vencida", devEntrada.length.toLocaleString("pt-BR"), this.pct(devEntrada.length, L.length) + " dos ativos" + (semEntrada ? ` · ${semEntrada} sem parcela de entrada no título` : ""), devEntrada.length ? "#f37021" : "#105436")}
         ${this.kpi("Saldo desses títulos", this.moneyShort(emRisco), "Quanto ainda falta receber se esses contratos seguirem", "#f37021")}
       </div>
       <div class="mkb-card">
         <div class="mkb-card-h"><h3>Lista dos ${qtdDistrato} título(s)</h3><small>Cada linha é um contrato que o marketing pode tratar como possível distrato</small></div>
         ${risco.length ? `<div class="mkb-tablewrap"><table class="mkb-table">
-          <colgroup><col style="width:13%"><col style="width:9%"><col style="width:20%"><col style="width:8%"><col style="width:7%"><col style="width:15%"><col style="width:11%"><col style="width:9%"><col style="width:8%"></colgroup>
-          <thead><tr><th>Contrato</th><th>Unidade</th><th>Cliente</th><th>Emissão</th><th style="text-align:right;">% pago</th><th>Entrada</th><th>Atrasado desde</th><th style="text-align:right;">Saldo</th><th>Motivo</th></tr></thead>
+          <colgroup><col style="width:16%"><col style="width:10%"><col style="width:24%"><col style="width:10%"><col style="width:8%"><col style="width:16%"><col style="width:10%"><col style="width:6%"></colgroup>
+          <thead><tr><th>Contrato</th><th>Unidade</th><th>Cliente</th><th>Emissão</th><th style="text-align:right;">% pago</th><th>Entrada</th><th>Atrasado desde</th><th>Motivo</th></tr></thead>
           <tbody>${linhas}</tbody>
         </table></div>` : `<p class="mkb-muted" style="margin:0;">Nenhum contrato ativo sem pagamento ou com entrada vencida.</p>`}
       </div>`;
@@ -1275,7 +1260,7 @@ const MarketingBudgetApp = {
         <small class="mkb-muted">Contrato ativo é o que não foi cancelado e ainda tem saldo no Contas a Receber${todos ? "" : ", entre as vendas emitidas no período"}.</small>
       </div>
       ${this.secao("Situação de pagamento", "Quem está em dia, quem está atrasado e quanto do contrato já entrou.", pagamento)}
-      ${this.secao(`Títulos que podem distratar <b class="mkb-qtd">${qtdDistrato}</b>`, "Não pagaram nenhuma parcela ou estão com a entrada vencida. O número ao lado é a quantidade da lista, para não precisar contar.", distrato)}`;
+      ${this.secao(`Títulos que podem distratar <b class="mkb-qtd">${qtdDistrato}</b>`, "Não pagaram nenhuma parcela ou estão com a entrada vencida.", distrato)}`;
   },
 
   desenharGraficosContratos() {
@@ -1681,6 +1666,7 @@ const MarketingBudgetApp = {
         #marketing-budget-root tr.mkb-click:hover td { background:#e7f6ee; }
         #marketing-budget-root .mkb-charts { display:grid; grid-template-columns:2fr 1fr; gap:14px; }
         #marketing-budget-root .mkb-canvas { position:relative; height:260px; }
+        #marketing-budget-root .mkb-canvas-curto { height:190px; }
         #marketing-budget-root .mkb-chart-full { grid-column:1 / -1; }
         #marketing-budget-root .mkb-chips { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
         #marketing-budget-root .mkb-chip { height:32px; padding:0 12px; border-radius:8px; border:1px solid #cbd5e1; background:#fff; color:#334155; font-size:0.8rem; font-weight:600; cursor:pointer; }
@@ -1770,7 +1756,8 @@ const MarketingBudgetApp = {
     const rot = meses.map((m) => ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"][Number(m.slice(5)) - 1] + "/" + m.slice(2, 4));
     const porMes = (st) => meses.map((m) => r.rows.filter((x) => x.status === st && String(x.data).slice(0, 7) === m).reduce((t, x) => t + x.valor, 0));
     const real = porMes("realizado");
-    const comp = porMes("comprometido");
+    const prev = porMes("previsao");
+    const comp = porMes("comprometido").map((v, i) => v + prev[i]);
     let acc = 0;
     const acum = meses.map((_, i) => (acc += real[i] + comp[i]));
     const tick = { callback: (v) => this.moneyShort(v) };
@@ -2121,7 +2108,7 @@ const MarketingConfigApp = {
               </div>
               <div class="mkc-campo" id="mkc-ccs-slot">${MlEmpresaFilter.html(this.filtroOpts())}</div>
               <div class="mkc-sel" id="mkc-sel">${this.selecaoHtml()}</div>
-              <small class="mkc-muted">Chip <em>100%</em>: o nome do centro tem MARKETING e todo o gasto entra. Chip <em>Grupo</em>: só o título pago nas contas do grupo 2.03.05 MARKETING.</small>
+              <small class="mkc-muted">Chip <em>100%</em>: o nome do centro tem MARKETING e todo o gasto entra. Chip <em>Grupo</em>: pago, em aberto e previsão nas contas do grupo 2.03.05 MARKETING.</small>
             </div>
             <div class="mkc-lado">
               <div class="mkc-verba" id="mkc-verba">${this.verbaHtml()}</div>

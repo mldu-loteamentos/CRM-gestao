@@ -3066,6 +3066,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     }
   }
   const leavingTab = window.activeAppTab;
+  window._voltarBudget = tabId === "fiscal-enviar-nota" && leavingTab === "marketing-budget";
   // Guardar aba ativa para o voltar (sem session storage para não persistir no F5)
   window.activeAppTab = tabId;
   const relApp = window.RelacionamentoApp || null;
