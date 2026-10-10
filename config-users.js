@@ -530,6 +530,7 @@ const ConfigUsersApp = {
       submodules: [
         { name: "PIS/COFINS", key: "sub_fiscal_pis", actions: [{ id: "fiscal", label: "PIS/COFINS", permBase: "sub_fiscal_geral_fiscal" }] },
         { name: "CSLL/IRPJ", key: "sub_fiscal_csll", actions: [{ id: "csll", label: "CSLL/IRPJ", permBase: "sub_fiscal_geral_csll" }] },
+        { name: "Enviar nota", key: "sub_fiscal_enviar_nota", actions: [{ id: "enviar_nota", label: "Enviar nota ao fiscal", permBase: "sub_fiscal_geral_enviar_nota" }] },
         { name: "Inserir nota", key: "sub_fiscal_inserir_nota", actions: [{ id: "inserir_nota", label: "Inserir nota no Sienge", permBase: "sub_fiscal_geral_inserir_nota" }] }
       ]
     },
