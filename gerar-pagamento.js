@@ -319,7 +319,7 @@ const GerarPagamentoApp = {
     const api = Object.create(base);
     api.outcomeEndpoint = (start, end, companyId) => "/bulk-data/v1/outcome?startDate=" + encodeURIComponent(start)
       + "&endDate=" + encodeURIComponent(end)
-      + "&selectionType=D&correctionIndexerId=0&correctionDate=2023-01-01&withAuthorizations=false&withBankMovements=true"
+      + "&selectionType=D&correctionIndexerId=0&correctionDate=2023-01-01&withAuthorizations=true&withBankMovements=true"
       + (companyId ? "&companyId=" + encodeURIComponent(companyId) : "");
     api.noteProgress = (text) => {
       if (gen !== s.gen) return;
@@ -352,7 +352,8 @@ const GerarPagamentoApp = {
       s.progresso = "Conferindo lotes já gerados…";
       s.progressoPct = 0.9;
       this.pintarProgresso();
-      await Promise.all([this.carregarLotes(), this.carregarLotesSienge(gen)]);
+      await this.carregarLotes();
+      await this.carregarLotesSienge(gen);
     } catch (e) {
       if (gen !== s.gen) return;
       console.error("[Gerar Pagamento] títulos", e);
@@ -419,6 +420,7 @@ const GerarPagamentoApp = {
       });
       ccsTitulo.sort((a, b) => Number(a.id) - Number(b.id));
       const tituloAPagar = saldo != null ? Math.max(0, saldo) : (pago ? 0 : original);
+      const autorizacao = this.autorizacaoDe(bill);
       cats.forEach((cat) => {
         const cc = ccMap[String(cat.costCenterId)];
         const chave = titulo + "|" + parcela + "|" + cc.id;
@@ -448,6 +450,7 @@ const GerarPagamentoApp = {
           ccNome: cc.name || "",
           esperada: null,
           contas,
+          autorizacao,
           status: ""
         });
       });
@@ -498,7 +501,9 @@ const GerarPagamentoApp = {
   async carregarLotesSienge(gen) {
     const s = this.state;
     if (typeof window.siengeFetchWithRetry !== "function") return;
-    const abertos = [...new Set(s.titulos.filter((r) => !r.pago).map((r) => r.titulo))];
+    s.loteSiengeLidoEm = Date.now();
+    const deLotes = s.lotes.filter((l) => this.loteNoSienge(l)).flatMap((l) => (l.itens || []).map((i) => String(i.titulo)));
+    const abertos = [...new Set(s.titulos.filter((r) => !r.pago).map((r) => r.titulo).concat(deLotes))];
     const fila = abertos.slice();
     const worker = async () => {
       while (fila.length && gen === s.gen) {
@@ -520,6 +525,40 @@ const GerarPagamentoApp = {
       }
     };
     await Promise.all([worker(), worker(), worker()]);
+    if (gen === s.gen) await this.conferirLotesExcluidosNoSienge();
+  },
+
+  /**
+   * Lote que o Integra registrou no Sienge, mas cujas parcelas não estão mais naquele número de lote:
+   * foi excluído direto no Sienge. Sai da lista e os títulos voltam a ficar livres.
+   */
+  async conferirLotesExcluidosNoSienge() {
+    const s = this.state;
+    const lidoEm = s.loteSiengeLidoEm || 0;
+    const sumidos = s.lotes.filter((l) => {
+      const sg = l.sienge || {};
+      if (!this.loteNoSienge(l) || !sg.numero) return false;
+      const desde = new Date(sg.geradoEm || l.criadoEm || 0).getTime();
+      if (!(desde < lidoEm)) return false;
+      const chaves = (l.itens || []).map((i) => this.chaveTitulo(i.titulo, i.parcela));
+      if (!chaves.length || !chaves.every((k) => s.formaSienge[k])) return false;
+      return chaves.every((k) => !s.loteSienge[k] || (s.loteSienge[k] !== "sim" && s.loteSienge[k] !== String(sg.numero)));
+    });
+    for (const l of sumidos) {
+      const sg = l.sienge;
+      const msg = `O lote nº ${sg.numero} não existe mais no Sienge (excluído direto no Sienge).`;
+      sg.historico = (sg.historico || []).concat([{ acao: "excluir", por: this.usuarioAtual(), porEmail: this.emailAtual(), em: new Date().toISOString(), ok: true, msg }]).slice(-30);
+      sg.status = "excluido";
+      l.cancelado = true;
+      l.canceladoEm = new Date().toISOString();
+      l.canceladoMotivo = msg;
+      await this.salvarLote(l);
+      this.auditarLote(l);
+    }
+    if (sumidos.length) {
+      const ids = new Set(sumidos.map((l) => l.id));
+      s.lotes = s.lotes.filter((l) => !ids.has(l.id));
+    }
   },
 
   /* ---------- forma de pagamento: boleto conferido (código, valor, vencimento, desconto) ---------- */
@@ -583,9 +622,36 @@ const GerarPagamentoApp = {
     return cache[id];
   },
 
-  /** Motivo que impede o título de entrar em lote (rateio ou plano financeiro fora do padrão, forma de pagamento não conferida ou divergente). */
+  /**
+   * Autorização da parcela no Sienge (bulk com withAuthorizations=true): só está autorizada
+   * quando o último da alçada (isLastToAuthorize) já autorizou.
+   */
+  autorizacaoDe(bill) {
+    const lista = (Array.isArray(bill && bill.authorizations) ? bill.authorizations : []).filter(Boolean);
+    const sim = (v) => v === true || /^(s|sim|y|yes|true|1)$/i.test(String(v == null ? "" : v).trim());
+    const nome = (a) => String(a.authorizationUserName || a.authorizationUserId || "").trim();
+    const ultima = lista.filter((a) => sim(a.isLastToAuthorize))
+      .sort((a, b) => String(b.authorizationDate || "").localeCompare(String(a.authorizationDate || "")))[0];
+    if (ultima) return { ok: true, por: nome(ultima), em: String(ultima.authorizationDate || "").slice(0, 10) };
+    if (lista.length) {
+      return { ok: false, parcial: true, motivo: `Autorização incompleta no Sienge: autorizado por ${[...new Set(lista.map(nome).filter(Boolean))].join(", ") || "parte da alçada"}, falta o último a autorizar.` };
+    }
+    return { ok: false, motivo: "Título não autorizado no Sienge." };
+  },
+
+  semAutorizacao(it) {
+    return !it.emLote && !(it.autorizacao && it.autorizacao.ok);
+  },
+
+  /** Bloqueio que aponta problema no título (não só a espera da conferência da forma de pagamento). */
+  bloqueioVisivel(it) {
+    return !!it.bloqueio && !!(it.pag || this.bloqueioRateio(it.rateio) || this.semAutorizacao(it));
+  },
+
+  /** Motivo que impede o título de entrar em lote (sem autorização, rateio ou plano financeiro fora do padrão, forma de pagamento não conferida ou divergente). */
   bloqueioLote(it) {
     if (it.emLote) return "";
+    if (this.semAutorizacao(it)) return (it.autorizacao && it.autorizacao.motivo) || "Autorização do título não verificada no Sienge.";
     const rateio = this.bloqueioRateio(it.rateio);
     if (rateio) return rateio;
     const p = it.pag;
@@ -611,7 +677,7 @@ const GerarPagamentoApp = {
   async validarPagamentos(gen) {
     const s = this.state;
     if (typeof window.siengeFetchWithRetry !== "function" || !window.BoletoCheck) return;
-    const chaves = [...new Set(s.titulos.filter((r) => !r.pago && r.aPagar > 0.009).map((r) => this.chaveTitulo(r.titulo, r.parcela)))]
+    const chaves = [...new Set(s.titulos.filter((r) => !r.pago && r.aPagar > 0.009 && r.autorizacao && r.autorizacao.ok).map((r) => this.chaveTitulo(r.titulo, r.parcela)))]
       .filter((k) => !s.loteSienge[k] && !this.loteIntegraDe(k));
     s.validacao = { feitos: 0, total: chaves.length, rodando: chaves.length > 0 };
     let ultima = Date.now();
@@ -678,7 +744,10 @@ const GerarPagamentoApp = {
       natureza: r.pago ? "pago" : "",
       dataPagamento: r.pagamento || "",
       conta: r.contas && r.contas.length ? "C/C " + r.contas.join(", ") : "",
-      situacaoTexto: situacao,
+      situacaoTexto: situacao + (r.pago || !r.autorizacao ? ""
+        : (r.autorizacao.ok
+          ? ` · autorizado por ${r.autorizacao.por || "—"}${r.autorizacao.em ? " em " + this.dataBr(r.autorizacao.em) : ""}`
+          : ` · ${r.autorizacao.parcial ? "autorização incompleta" : "não autorizado"} no Sienge`)),
       pagCheck: this.state.pagInfo[chave] ? this.state.pagInfo[chave].check : null
     });
   },
@@ -749,7 +818,7 @@ const GerarPagamentoApp = {
       if (!g.itens[chave]) {
         g.itens[chave] = {
           chave, titulo: r.titulo, parcela: r.parcela, credor: r.credor, credorId: r.credorId, companyId: r.companyId, documento: r.documento,
-          vencimento: r.vencimento, valor: 0, aPagar: 0, ccs: [], inteiro
+          vencimento: r.vencimento, valor: 0, aPagar: 0, ccs: [], inteiro, autorizacao: r.autorizacao || null
         };
         g.ordem.push(chave);
         if (inteiro) {
@@ -838,7 +907,7 @@ const GerarPagamentoApp = {
     }
     if (!g.itens.some((it) => it.marcado)) {
       alert(g.itens.every((it) => it.emLote) ? "Todos os títulos deste dia já estão em lote."
-        : (g.itens.some((it) => !it.emLote && !it.bloqueio) ? "Marque ao menos um título para gerar o lote." : "Nenhum título deste dia pode entrar em lote: todos estão bloqueados (rateio, plano financeiro ou forma de pagamento). Corrija e busque de novo."));
+        : (g.itens.some((it) => !it.emLote && !it.bloqueio) ? "Marque ao menos um título para gerar o lote." : "Nenhum título deste dia pode entrar em lote: todos estão bloqueados (autorização, rateio, plano financeiro ou forma de pagamento). Corrija e busque de novo."));
       return;
     }
     s.gerandoLote = key;
@@ -857,7 +926,7 @@ const GerarPagamentoApp = {
     if (comBloqueio.length) {
       s.gerandoLote = "";
       this.paintTitulos();
-      alert("Lote não gerado: há título bloqueado (rateio, plano financeiro ou forma de pagamento).\n\n" + comBloqueio.slice(0, 8).map((it) => `• ${it.titulo}/${it.parcela || 1} ${it.credor}: ${this.bloqueioLote(it)}`).join("\n"));
+      alert("Lote não gerado: há título bloqueado (autorização, rateio, plano financeiro ou forma de pagamento).\n\n" + comBloqueio.slice(0, 8).map((it) => `• ${it.titulo}/${it.parcela || 1} ${it.credor}: ${this.bloqueioLote(it)}`).join("\n"));
       return;
     }
     const total = itens.reduce((t, it) => t + it.aPagar, 0);
@@ -895,7 +964,7 @@ const GerarPagamentoApp = {
         forma: it.pag ? it.pag.check.forma : "",
         linhaDigitavel: it.pag ? it.pag.check.linhaFmt || "" : "",
         conferencia: it.pag ? it.pag.check.resumo : "Não conferido",
-        valida: this.validacoesDe(it.rateio, it.pag)
+        valida: this.validacoesDe(it.rateio, it.pag, it.autorizacao)
       })),
       sienge: { status: "pendente", historico: [] }
     }));
@@ -1028,8 +1097,8 @@ const GerarPagamentoApp = {
     if (!lote || !lote.id || !window.AuditService) return;
     const eventos = [{ tipo: "LOTE_GERADO", em: lote.criadoEm, por: lote.criadoPor, porEmail: lote.criadoPorEmail, ok: true }];
     ((lote.sienge && lote.sienge.historico) || []).forEach((h) => eventos.push({
-      tipo: !h.ok ? "LOTE_ERRO" : (h.acao === "aprovar" ? "LOTE_APROVADO" : "LOTE_SIENGE"),
-      acao: h.acao, em: h.em, por: h.por, porEmail: h.porEmail || "", ok: !!h.ok, msg: h.ok ? "" : h.msg || ""
+      tipo: h.acao === "excluir" ? "LOTE_EXCLUIDO" : (!h.ok ? "LOTE_ERRO" : (h.acao === "aprovar" ? "LOTE_APROVADO" : "LOTE_SIENGE")),
+      acao: h.acao, em: h.em, por: h.por, porEmail: h.porEmail || "", ok: !!h.ok, msg: h.ok && h.acao !== "excluir" ? "" : h.msg || ""
     }));
     let feitos;
     try { feitos = new Set(JSON.parse(localStorage.getItem(this.LOTE_AUDIT_KEY) || "[]")); } catch (e) { feitos = new Set(); }
@@ -1061,7 +1130,7 @@ const GerarPagamentoApp = {
       LOTE_SIENGE: "Lote criado no Sienge pelo robô",
       LOTE_APROVADO: "Lote aprovado no Sienge pelo robô",
       LOTE_ERRO: ev.acao === "aprovar" ? "O robô não aprovou o lote no Sienge" : "O robô não criou o lote no Sienge",
-      LOTE_EXCLUIDO: "Lote excluído no Integra"
+      LOTE_EXCLUIDO: ev.acao === "excluir" ? "Lote excluído no Sienge" : "Lote excluído no Integra"
     }[ev.tipo] || ev.tipo;
     const numero = (ev.tipo === "LOTE_SIENGE" || ev.tipo === "LOTE_APROVADO" || (ev.tipo === "LOTE_ERRO" && ev.acao === "aprovar")) && sg.numero ? ` (Sienge nº ${sg.numero})` : "";
     try {
@@ -1185,8 +1254,8 @@ const GerarPagamentoApp = {
     const empresa = lote.empresaConta ? `${String(lote.empresaConta).padStart(4, "0")}${emp ? " - " + (emp.name || emp.tradeName || "") : ""}` : "";
     const situacao = sg.status === "aprovado" ? "Aprovado no Sienge" : (sg.status === "gerado" ? "Programado no Sienge (aguardando aprovação)" : (sg.status === "erro" ? "Erro no Sienge" : "Só no Integra"));
     const quando = (iso, quem) => iso ? `${new Date(iso).toLocaleString("pt-BR")}${quem ? " · " + quem : ""}` : "—";
-    const N = 13;
-    const cab = ["Título/Parcela", "Documento", "Vencimento", "Valor", "Credor", "Rateio (CC e % do título)", "Plano financeiro", "Forma de pagamento", "Linha digitável / chave", "Plano financeiro", "Rateio parceiro", "Boleto / PIX", "Desconto"];
+    const N = 14;
+    const cab = ["Título/Parcela", "Documento", "Vencimento", "Valor", "Credor", "Rateio (CC e % do título)", "Plano financeiro", "Forma de pagamento", "Linha digitável / chave", "Autorização", "Plano financeiro", "Rateio parceiro", "Boleto / PIX", "Desconto"];
     const linhas = [
       ["Lote de Pagamento Escritural"],
       [],
@@ -1202,12 +1271,12 @@ const GerarPagamentoApp = {
     itens.forEach((i) => {
       const v = this.validacoesItem(i);
       linhas.push([`${i.titulo}/${i.parcela || 1}`, i.documento || "", this.dataBr(i.vencimento), Number(i.valor) || 0, i.credor || "",
-        v.rateioTexto || i.ccs || "", v.planoTexto || "", i.forma || "", i.linhaDigitavel || "", v.plano, v.rateio, v.pagamento, v.desconto]);
+        v.rateioTexto || i.ccs || "", v.planoTexto || "", i.forma || "", i.linhaDigitavel || "", v.autorizacao || "Não verificada", v.plano, v.rateio, v.pagamento, v.desconto]);
     });
     linhas.push(["", "", "Total do lote", Number(lote.total) || 0]);
     linhas.push([], [`Gerado pelo Integra em ${new Date().toLocaleString("pt-BR")}`]);
     const ws = XLSX.utils.aoa_to_sheet(linhas);
-    ws["!cols"] = [{ wch: 14 }, { wch: 14 }, { wch: 11 }, { wch: 13 }, { wch: 34 }, { wch: 30 }, { wch: 34 }, { wch: 18 }, { wch: 50 }, { wch: 15 }, { wch: 15 }, { wch: 13 }, { wch: 14 }];
+    ws["!cols"] = [{ wch: 14 }, { wch: 14 }, { wch: 11 }, { wch: 13 }, { wch: 34 }, { wch: 30 }, { wch: 34 }, { wch: 18 }, { wch: 50 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 13 }, { wch: 14 }];
     ws["!merges"] = [
       { s: { r: 0, c: 0 }, e: { r: 0, c: N - 1 } },
       ...[2, 3, 4, 5].map((r) => ({ s: { r, c: 1 }, e: { r, c: 4 } })),
@@ -1215,9 +1284,9 @@ const GerarPagamentoApp = {
     ];
     const borda = { style: "thin", color: { rgb: "B8C4BE" } };
     const bordas = { top: borda, bottom: borda, left: borda, right: borda };
-    const cor = (txt) => /^(Conferido)$/.test(txt) ? { fg: "DCFCE7", fc: "166534" }
+    const cor = (txt) => /^(Conferido|Autorizado)$/.test(txt) ? { fg: "DCFCE7", fc: "166534" }
       : (/^(Não se aplica)$/.test(txt) ? { fg: "F1F5F9", fc: "475569" }
-        : (/^(Com desconto|Sem plano|Sem padrão|Não conferido)$/.test(txt) ? { fg: "FEF3C7", fc: "92400E" } : { fg: "FEE2E2", fc: "991B1B" }));
+        : (/^(Com desconto|Sem plano|Sem padrão|Não conferido|Não verificada)$/.test(txt) ? { fg: "FEF3C7", fc: "92400E" } : { fg: "FEE2E2", fc: "991B1B" }));
     const pinta = (r, c, s) => {
       const ref = XLSX.utils.encode_cell({ r, c });
       if (!ws[ref]) ws[ref] = { t: "s", v: "" };
@@ -1303,7 +1372,7 @@ const GerarPagamentoApp = {
       const total = marcados.reduce((t, it) => t + it.aPagar, 0);
       const disponiveis = g.itens.filter((it) => !it.emLote);
       const liberados = disponiveis.filter((it) => !it.bloqueio);
-      const divergentes = disponiveis.filter((it) => it.bloqueio && (it.pag || this.bloqueioRateio(it.rateio))).length;
+      const divergentes = disponiveis.filter((it) => this.bloqueioVisivel(it)).length;
       const todos = liberados.length > 0 && liberados.every((it) => it.marcado);
       const gerando = s.gerandoLote === g.key;
       const conferindo = !!(s.validacao && s.validacao.rodando);
@@ -1317,7 +1386,12 @@ const GerarPagamentoApp = {
               ? `<span class="gp-pill gp-wait" title="Está no lote ${this.esc(this.lotePendenteDe(it.chave).id)}, que não foi gerado no Sienge. Ao gerar de novo, ele sai daquele lote.">Em aberto</span><small>Lote não gerado no Sienge</small>`
               : `<span class="gp-pill gp-wait">Em aberto</span>`));
         const pagSelo = it.emLote ? `<span class="gp-muted">—</span>` : (window.BoletoCheck ? BoletoCheck.seloHtml(it.pag ? it.pag.check : null) : "");
-        return `<tr class="gp-click${it.emLote ? " gp-em-lote" : ""}${it.bloqueio && (it.pag || this.bloqueioRateio(it.rateio)) ? " gp-row-bad" : ""}" onclick="GerarPagamentoApp.abrirResumo('${this.esc(it.chave)}')" title="Clique para ver o resumo do título">
+        const aut = it.autorizacao;
+        const autSelo = it.emLote ? ""
+          : (aut && aut.ok
+            ? `<small class="gp-muted" title="${this.esc(`Autorizado no Sienge por ${aut.por || "—"}${aut.em ? " em " + this.dataBr(aut.em) : ""}`)}">Autorizado</small>`
+            : `<small class="gp-bloq" title="${this.esc((aut && aut.motivo) || "Autorização não verificada")}">${aut && aut.parcial ? "Autorização incompleta" : "Não autorizado"}</small>`);
+        return `<tr class="gp-click${it.emLote ? " gp-em-lote" : ""}${this.bloqueioVisivel(it) ? " gp-row-bad" : ""}" onclick="GerarPagamentoApp.abrirResumo('${this.esc(it.chave)}')" title="Clique para ver o resumo do título">
           <td style="text-align:center;" onclick="event.stopPropagation()"><input type="checkbox" ${it.marcado ? "checked" : ""} ${sem || it.emLote || it.bloqueio || gerando ? "disabled" : ""}
             title="${this.esc(it.emLote ? "Já está em lote; não pode entrar em outro." : (it.bloqueio ? "Bloqueado: " + it.bloqueio : ""))}"
             onchange="GerarPagamentoApp.toggleItem('${this.esc(it.selKey)}')"></td>
@@ -1328,7 +1402,7 @@ const GerarPagamentoApp = {
           <td class="gp-status" title="${this.esc(it.ccs.map((c) => `${c.id} ${c.nome}${c.rateio != null ? ` · ${this.pct(c.rateio)}` : ""}${c.parceria ? " (parceria)" : ""}`).join("\n"))}">${it.ccs.map((c) => (c.parceria ? `<strong>${this.esc(c.id)}</strong>` : `<span class="gp-cc-outro">${this.esc(c.id)}</span>`)).join(" / ")} <span class="gp-muted">${this.esc(it.ccs.length === 1 ? it.ccs[0].nome : "rateado")}</span>${this.rateioSeloHtml(it.rateio)}</td>
           <td style="text-align:right;">${this.money(it.aPagar)}</td>
           <td class="gp-status">${pagSelo}</td>
-          <td class="gp-status">${tag}</td>
+          <td class="gp-status">${tag}${autSelo}</td>
         </tr>`;
       }).join("");
       const resumo = sem
@@ -1354,7 +1428,7 @@ const GerarPagamentoApp = {
             <label class="gp-lote-todos"><input type="checkbox" ${todos ? "checked" : ""} ${gerando || !liberados.length ? "disabled" : ""} onchange="GerarPagamentoApp.toggleGrupo('${this.esc(g.key)}', this.checked)"> Marcar todos</label>
             <strong class="gp-lote-total">${this.money(total)}</strong>
             <button type="button" class="btn btn-primary" ${s.gerandoLote || conferindo || !marcados.length ? "disabled" : ""} onclick="GerarPagamentoApp.gerarLote('${this.esc(g.key)}')"
-              title="${conferindo ? "Aguarde a conferência das formas de pagamento" : (!marcados.length && divergentes ? "Os títulos disponíveis estão bloqueados (rateio, plano financeiro ou forma de pagamento)" : "")}"
+              title="${conferindo ? "Aguarde a conferência das formas de pagamento" : (!marcados.length && divergentes ? "Os títulos disponíveis estão bloqueados (autorização, rateio, plano financeiro ou forma de pagamento)" : "")}"
               style="height:36px;width:150px;justify-content:center;display:inline-flex;align-items:center;gap:6px;">
               ${gerando ? '<span class="btn-spin"></span> Gerando…' : '<i data-lucide="layers" style="width:14px;"></i> Gerar lote'}
             </button>
@@ -1401,7 +1475,9 @@ const GerarPagamentoApp = {
       : (v.total ? `<span class="gp-valida">${errosPag ? `<b style="color:#b91c1c;">${errosPag} título(s) com possível divergência na forma de pagamento</b> (bloqueados para lote até corrigir no Sienge)` : "Formas de pagamento conferidas"}</span>` : "");
     const errosRateio = new Set(grupos.flatMap((g) => g.itens.filter((it) => !it.emLote && this.bloqueioRateio(it.rateio)).map((it) => it.chave))).size;
     const avisoRateio = errosRateio ? `<span class="gp-valida"><b style="color:#b91c1c;">${errosRateio} título(s) com rateio ou plano financeiro fora do padrão</b> (bloqueados para lote)</span>` : "";
-    return `<p class="gp-nota">Títulos em aberto separados por conta de parceria e dia de vencimento: um lote por conta por dia. Título que já está em lote (no Integra ou no Sienge) não entra em outro. Clique na linha para ver o resumo do título. ${progressoPag}${avisoRateio}</p>${cards}${geradosHtml}`;
+    const semAut = new Set(grupos.flatMap((g) => g.itens.filter((it) => this.semAutorizacao(it)).map((it) => it.chave))).size;
+    const avisoAut = semAut ? `<span class="gp-valida"><b style="color:#b91c1c;">${semAut} título(s) sem autorização no Sienge</b> (bloqueados para lote até autorizar)</span>` : "";
+    return `<p class="gp-nota">Títulos em aberto separados por conta de parceria e dia de vencimento: um lote por conta por dia. Só título autorizado no Sienge entra em lote, e título que já está em lote (no Integra ou no Sienge) não entra em outro. Clique na linha para ver o resumo do título. ${progressoPag}${avisoAut}${avisoRateio}</p>${cards}${geradosHtml}`;
   },
 
   grupoStatus(r) {
@@ -1519,7 +1595,7 @@ const GerarPagamentoApp = {
   },
 
   /** Caixinhas do relatório do lote: plano financeiro, rateio do parceiro, boleto/PIX e desconto. */
-  validacoesDe(conf, pag) {
+  validacoesDe(conf, pag, aut) {
     const linhas = conf ? conf.obras.reduce((l, o) => l.concat(o.linhas.filter((x) => !x.ausente)), []) : [];
     const planos = [];
     linhas.forEach((l) => l.planos.forEach((p) => {
@@ -1529,6 +1605,8 @@ const GerarPagamentoApp = {
     const temParceiro = !!conf && conf.obras.some((o) => o.linhas.some((l) => l.parceria) || (o.padrao && o.padrao.terr > 0));
     const c = pag && pag.check;
     return {
+      autorizacao: !aut ? "Não verificada" : (aut.ok ? "Autorizado" : (aut.parcial ? "Autorização incompleta" : "Não autorizado")),
+      autorizadoPor: aut && aut.ok ? `${aut.por || ""}${aut.em ? " em " + this.dataBr(aut.em) : ""}`.trim() : "",
       rateioTexto: linhas.map((l) => `${l.id} ${this.pct(l.pct)}`).join(" · "),
       planoTexto: planos.join(" / "),
       plano: !conf ? "Não conferido" : (conf.erroPlano ? "Divergente" : (planos.length ? "Conferido" : "Sem plano")),
@@ -1543,7 +1621,7 @@ const GerarPagamentoApp = {
     if (i.valida) return i.valida;
     const chave = this.chaveTitulo(i.titulo, i.parcela);
     const t = this.resumoTitulo(chave);
-    const v = this.validacoesDe(t ? this.conferirRateio(t.ccs, t.valor) : null, this.state.pagInfo[chave] || null);
+    const v = this.validacoesDe(t ? this.conferirRateio(t.ccs, t.valor) : null, this.state.pagInfo[chave] || null, t ? t.rows[0].autorizacao : null);
     if (!t) v.rateioTexto = i.ccs || "";
     if (v.pagamento === "Não conferido" && /conferid/i.test(i.conferencia || "")) v.pagamento = "Conferido";
     return v;

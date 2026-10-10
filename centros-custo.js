@@ -100,8 +100,28 @@ const CentrosCustoApp = {
     this.render();
   },
 
+  /** Rateio Moura Leite + Terrenista fecha em 100%: o campo digitado completa o outro. */
+  completarRateio(id, origem) {
+    const el = document.getElementById(`edit-perc-${origem}-${id}`);
+    const outro = document.getElementById(`edit-perc-${origem === 'ml' ? 'terrenista' : 'ml'}-${id}`);
+    if (!el || !outro) return;
+    const txt = String(el.value || '').trim();
+    if (txt === '') return;
+    let v = parseFloat(txt);
+    if (!Number.isFinite(v)) return;
+    if (v > 100) { v = 100; el.value = '100'; }
+    if (v < 0) { v = 0; el.value = '0'; }
+    outro.value = String(Number((100 - v).toFixed(2)));
+  },
+
   async saveCustom(id) {
     const key = String(id);
+    const percMl = parseFloat(document.getElementById(`edit-perc-ml-${id}`).value) || 0;
+    const percTerr = parseFloat(document.getElementById(`edit-perc-terrenista-${id}`).value) || 0;
+    if ((percMl || percTerr) && Math.abs(percMl + percTerr - 100) > 0.009) {
+      alert(`O rateio precisa totalizar 100%. Hoje está em ${Number((percMl + percTerr).toFixed(2)).toLocaleString('pt-BR')}% (Moura Leite ${percMl.toLocaleString('pt-BR')}% + Terrenista ${percTerr.toLocaleString('pt-BR')}%).`);
+      return;
+    }
     const custom = Object.assign(
       {},
       CentrosCustoState.customFields[id] || CentrosCustoState.customFields[key] || { cc_id: key }
@@ -551,11 +571,11 @@ const CentrosCustoApp = {
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
                 <div>
                   <label style="display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.85rem;">Percentual Moura Leite (%)</label>
-                  <input type="number" id="edit-perc-ml-${id}" class="form-control" step="0.01" value="${perc_ml}">
+                  <input type="number" id="edit-perc-ml-${id}" class="form-control" step="0.01" min="0" max="100" value="${perc_ml}" oninput="CentrosCustoApp.completarRateio(${id}, 'ml')">
                 </div>
                 <div>
                   <label style="display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.85rem;">Percentual Terrenista (%)</label>
-                  <input type="number" id="edit-perc-terrenista-${id}" class="form-control" step="0.01" value="${perc_terrenista}">
+                  <input type="number" id="edit-perc-terrenista-${id}" class="form-control" step="0.01" min="0" max="100" value="${perc_terrenista}" oninput="CentrosCustoApp.completarRateio(${id}, 'terrenista')">
                 </div>
             </div>
             <div style="display: flex; align-items: center; gap: 8px;">

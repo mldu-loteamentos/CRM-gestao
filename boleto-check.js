@@ -208,10 +208,14 @@ window.BoletoCheck = {
       out.avisos.push(`Vencimento no boleto ${this.dataBr(out.vencBoleto)} diferente do vencimento do título ${this.dataBr(ctx.vencimento)}.`);
     }
     const limite = String(d.discountDueDate || "").slice(0, 10);
-    if (limite) {
+    const vencTitulo = String(ctx.vencimento || "").slice(0, 10);
+    const valorDesconto = Object.keys(d).filter((k) => /discount/i.test(k) && !/date/i.test(k))
+      .map((k) => Number(d[k])).find((n) => Number.isFinite(n) && n > 0.009);
+    // O Sienge costuma preencher a data limite do desconto com o próprio vencimento, sem desconto nenhum.
+    if (limite && (valorDesconto || !vencTitulo || limite < vencTitulo)) {
       out.desconto = true;
       if (limite < this.hoje()) out.avisos.push(`Instrução de desconto até ${this.dataBr(limite)}: o prazo do desconto já passou.`);
-      else out.infos.push(`Instrução de desconto: pagar até ${this.dataBr(limite)} para ter o desconto.`);
+      else out.infos.push(`Instrução de desconto${valorDesconto ? ` de ${this.money(valorDesconto)}` : ""}: pagar até ${this.dataBr(limite)} para ter o desconto.`);
     }
     if (Number(ctx.descontoTitulo) > 0) {
       out.desconto = true;
