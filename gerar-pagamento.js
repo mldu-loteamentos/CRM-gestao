@@ -88,9 +88,13 @@ const GerarPagamentoApp = {
     return c && (c.id || c.numero) ? c : null;
   },
 
+  /** CC Corporativo não segue a regra de parceria, mesmo com "parceiro/parceria" no nome. */
+  ehCorporativo(id) {
+    return String(this.customOf(id).tipo_cc || "") === "Corporativo";
+  },
+
   isParceiro(cc) {
-    if (window.CentrosCustoApp && typeof CentrosCustoApp.isParceiro === "function" && CentrosCustoApp.isParceiro(cc)) return true;
-    if (/parce(ir|ri)/i.test(String((cc && cc.name) || ""))) return true;
+    if (cc && !this.ehCorporativo(cc.id) && /parce(ir|ri)/i.test(String(cc.name || ""))) return true;
     return !!this.contaParceriaDe(cc);
   },
 
@@ -447,6 +451,8 @@ const GerarPagamentoApp = {
           companyId: bill.companyId != null ? String(bill.companyId) : String(this.companyIdOf(cc) || ""),
           documento: [docId, bill.documentNumber].filter(Boolean).join(" "),
           docId: String(docId || "").trim(),
+          docNome: String(docNome || bill.documentIdentificationName || "").trim(),
+          emissao: String(bill.issueDate || "").slice(0, 10),
           vencimento: String(bill.dueDate || "").slice(0, 10),
           pagamento: datas.length ? datas[datas.length - 1] : "",
           valor: original * fat,
@@ -702,6 +708,7 @@ const GerarPagamentoApp = {
     const r0 = rows[0];
     return {
       rows,
+      ctx: this.contextoRateio(r0),
       aPagar: r0.tituloAPagar != null ? r0.tituloAPagar : rows.reduce((t, r) => t + (Number(r.aPagar) || 0), 0),
       valor: r0.tituloValor != null ? r0.tituloValor : rows.reduce((t, r) => t + (Number(r.valor) || 0), 0),
       ccs: (r0.ccsTitulo && r0.ccsTitulo.length ? r0.ccsTitulo : rows.map((r) => ({ id: r.ccId, nome: r.ccNome, parceria: true })))
@@ -774,7 +781,7 @@ const GerarPagamentoApp = {
       valorAjustado: t.valor,
       ccId: t.ccs.map((x) => x.id).join(" / "),
       ccNome: t.ccs.length > 1 ? "rateado" : (t.ccs[0] && t.ccs[0].nome) || r.ccNome,
-      rateioHtml: this.rateioHtml(this.conferirRateio(t.ccs, t.valor)),
+      rateioHtml: this.rateioHtml(this.conferirRateio(t.ccs, t.valor, t.ctx)),
       companyId: cc ? this.companyIdOf(cc) : "",
       natureza: r.pago ? "pago" : "",
       dataPagamento: r.pagamento || "",
@@ -880,7 +887,7 @@ const GerarPagamentoApp = {
       itens.forEach((it) => {
         it.ccs.sort((a, b) => Number(a.id) - Number(b.id));
         const t = this.resumoTitulo(it.chave);
-        it.rateio = t ? this.conferirRateio(t.ccs, t.valor) : null;
+        it.rateio = t ? this.conferirRateio(t.ccs, t.valor, t.ctx) : null;
         it.loteIntegra = this.loteIntegraDe(it.chave);
         it.loteSienge = this.state.loteSienge[it.chave] || "";
         it.emLote = !!(it.loteIntegra || it.loteSienge);
@@ -1569,7 +1576,7 @@ const GerarPagamentoApp = {
   },
 
   ccDeParceriaPeloNome(id, nome) {
-    return /parce(ir|ri)/i.test(String(nome || ((this.ccDe(id) || {}).name) || ""));
+    return !this.ehCorporativo(id) && /parce(ir|ri)/i.test(String(nome || ((this.ccDe(id) || {}).name) || ""));
   },
 
   num(v) {
@@ -1591,8 +1598,23 @@ const GerarPagamentoApp = {
     return null;
   },
 
+  /* Distrato emitido até esta data pode ficar só no CC do parceiro. */
+  DISTRATO_PARCEIRO_ATE: "2025-12-31",
+
+  contextoRateio(r) {
+    return { emissao: (r && r.emissao) || "", docId: (r && r.docId) || "", docNome: (r && r.docNome) || "" };
+  },
+
+  ehDistrato(ccs, ctx) {
+    const planos = (ccs || []).reduce((l, c) => l.concat((c.planos || []).map((p) => p.nome || "")), []);
+    return /distrat/i.test([ctx && ctx.docId, ctx && ctx.docNome].concat(planos).join(" "));
+  },
+
   /* O valor de cada obra no título é dividido entre o CC da obra e o do parceiro pelo padrão do cadastro. */
-  conferirRateio(ccs, valor) {
+  conferirRateio(ccs, valor, ctx) {
+    const distrato = this.ehDistrato(ccs, ctx);
+    const emissao = String((ctx && ctx.emissao) || "");
+    const distratoAntigo = distrato && !!emissao && emissao <= this.DISTRATO_PARCEIRO_ATE;
     const total = Number(valor) || 0;
     const soma = (ccs || []).reduce((t, c) => t + this.num(c.rateio), 0);
     const linhas = (ccs || []).map((c) => {
@@ -1638,9 +1660,15 @@ const GerarPagamentoApp = {
       const parcTitulo = o.linhas.find((l) => l.id !== base && ehParc(l));
       const parcCad = parcTitulo ? null : daObra.find((c) => String(c.id) !== base && this.ccDeParceriaPeloNome(c.id, c.name));
       const parc = parcTitulo ? parcTitulo.id : (parcCad ? String(parcCad.id) : "");
-      // CC da obra e CC do parceiro são exclusivos de cada lado: título só em um deles é 100% daquele lado, sem rateio.
+      // Título só no CC da Moura Leite é 100% dela, sem rateio. Só no CC do parceiro, apenas distrato emitido até 31/12/2025.
       const temBase = o.linhas.some((l) => l.id === base);
-      if (parc && temBase !== !!parcTitulo) {
+      const soParceiro = parc && !temBase && !!parcTitulo;
+      if (soParceiro && !distratoAntigo) {
+        problemas.push(distrato
+          ? `Obra ${o.rotulo}: distrato lançado só no CC do parceiro ${parc} com emissão ${emissao ? this.dataBr(emissao) : "não informada"}. Só distrato emitido até ${this.dataBr(this.DISTRATO_PARCEIRO_ATE)} pode ficar só no CC do parceiro.`
+          : `Obra ${o.rotulo}: título lançado só no CC do parceiro ${parc}. Ele precisa estar rateado com o ${base} (exceto distrato emitido até ${this.dataBr(this.DISTRATO_PARCEIRO_ATE)}).`);
+      }
+      if (parc && temBase !== !!parcTitulo && (temBase || distratoAntigo)) {
         o.exclusivo = temBase ? "ml" : "parceiro";
         o.padrao = { ml: temBase ? 100 : 0, terr: temBase ? 0 : 100, aviso: "", exclusivo: true };
         o.linhas.forEach((l) => {
@@ -1705,7 +1733,7 @@ const GerarPagamentoApp = {
     if (i.valida) return i.valida;
     const chave = this.chaveTitulo(i.titulo, i.parcela);
     const t = this.resumoTitulo(chave);
-    const v = this.validacoesDe(t ? this.conferirRateio(t.ccs, t.valor) : null, this.state.pagInfo[chave] || null, t ? t.rows[0].autorizacao : null);
+    const v = this.validacoesDe(t ? this.conferirRateio(t.ccs, t.valor, t.ctx) : null, this.state.pagInfo[chave] || null, t ? t.rows[0].autorizacao : null);
     if (!t) v.rateioTexto = i.ccs || "";
     if (v.pagamento === "Não conferido" && /conferid/i.test(i.conferencia || "")) v.pagamento = "Conferido";
     return v;
@@ -1794,7 +1822,7 @@ const GerarPagamentoApp = {
     if (!conf || !conf.obras.length) return "";
     const corpo = conf.obras.map((o) => `
       <tr class="gp-rateio-obra"><td colspan="7">Obra ${this.esc(o.rotulo || o.obra)} · ${this.pct(o.pct)} do título · ${this.money(o.valor)}${o.exclusivo
-        ? ` <span>· CC exclusivo ${o.exclusivo === "ml" ? "da Moura Leite" : "do parceiro"}: 100% ${o.exclusivo === "ml" ? "Moura Leite" : "do parceiro"}, sem rateio</span>`
+        ? ` <span>· ${o.exclusivo === "ml" ? "CC exclusivo da Moura Leite: 100% Moura Leite, sem rateio" : `distrato emitido até ${this.dataBr(this.DISTRATO_PARCEIRO_ATE)}: 100% no CC do parceiro, sem rateio`}</span>`
         : (o.padrao
           ? ` <span>· padrão ${this.pct(o.padrao.ml)} Moura Leite${o.padrao.terr ? ` / ${this.pct(o.padrao.terr)} terrenista` : ""}</span>`
           : ` <span class="gp-rateio-x">· sem rateio padrão no cadastro</span>`)}</td></tr>
@@ -1826,7 +1854,7 @@ const GerarPagamentoApp = {
       .slice().sort((a, b) => Number(a.id) - Number(b.id));
     const semObra = ccs.filter((c) => c.parceria && !ccs.some((o) => !o.parceria && this.obra(o.id) === this.obra(c.id)));
     const nomes = ccs.map((c) => `${c.id} ${c.nome}${c.rateio != null ? ` · ${this.pct(c.rateio)}` : ""}${c.parceria ? " (parceria)" : ""}`).join("\n");
-    const conf = this.conferirRateio(ccs, r.tituloValor != null ? r.tituloValor : r.valor);
+    const conf = this.conferirRateio(ccs, r.tituloValor != null ? r.tituloValor : r.valor, this.contextoRateio(r));
     return `<span title="${this.esc(nomes)}">${ccs.map((c) => (c.parceria ? `<strong>${this.esc(c.id)}</strong>` : `<span class="gp-cc-outro">${this.esc(c.id)}</span>`)).join(" / ")} <span class="gp-muted">${this.esc(ccs.length === 1 ? ccs[0].nome : "rateado")}</span></span>`
       + (semObra.length ? `<small class="gp-bloq">Sem o CC da obra de ${semObra.map((c) => this.esc(c.id)).join(", ")}</small>` : "")
       + this.rateioSeloHtml(conf);

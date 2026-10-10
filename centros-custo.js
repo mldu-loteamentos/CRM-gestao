@@ -251,8 +251,13 @@ const CentrosCustoApp = {
     return map[id] || map[String(id)] || {};
   },
 
+  /** CC Corporativo não segue a regra de parceria, mesmo com "parceiro/parceria" no nome. */
+  isCorporativo(cc) {
+    return !!cc && String(this.customOf(cc.id).tipo_cc || "") === "Corporativo";
+  },
+
   isParceiro(cc) {
-    return /parce(ir|ri)/i.test(String((cc && cc.name) || ""));
+    return /parce(ir|ri)/i.test(String((cc && cc.name) || "")) && !this.isCorporativo(cc);
   },
 
   escHtml(s) {

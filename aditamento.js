@@ -131,9 +131,16 @@
         const valores = itens.map((i) => i.valor);
         const min = Math.min.apply(null, valores);
         const max = Math.max.apply(null, valores);
+        const mesDe = (iso) => { const m = String(iso || "").match(/^(\d{4})-(\d{2})/); return m ? Number(m[1]) * 12 + Number(m[2]) : null; };
+        const saltos = itens.slice(1).map((it, k) => {
+          const a = mesDe(itens[k].due);
+          const b = mesDe(it.due);
+          return a != null && b != null ? b - a : null;
+        }).filter((n) => n > 0);
         return {
           chave: g.chave,
           label: g.label,
+          meses: saltos.length ? moda(saltos) : null,
           qtd: itens.length,
           pagas: itens.length - abertos.length,
           abertas: abertos.length,
@@ -185,7 +192,7 @@
     _adiFormPadrao(atual) {
       const linhas = atual.linhas.filter((l) => l.abertas > 0).map((l) => ({
         tipo: String(l.chave || l.label || ""),
-        periodo: periodoDoCodigo(l.chave, l.abertas),
+        periodo: this._adiPeriodoDe(l.chave || l.label, l.abertas, atual),
         qtd: l.abertas,
         valor: l.valorAberto,
         venc: l.proximo || ""
@@ -235,15 +242,35 @@
       return this._adiTipos || [];
     },
 
+    /**
+     * Periodicidade da condição: intervalo real das parcelas desse código no contrato; senão o nome
+     * do tipo no Sienge ("Parcelas Semestrais"…); senão o código. Uma parcela só é parcela única.
+     */
+    _adiPeriodoDe(tipo, qtd, atual) {
+      const codigo = String(tipo || "").trim();
+      if (qtd === 1) return "unica";
+      const porMeses = { 1: "mensal", 2: "bimestral", 3: "trimestral", 6: "semestral", 12: "anual" };
+      const noContrato = ((atual || (this._adiCtx() || {}).adiAtual || {}).linhas || []).find((l) => String(l.chave || l.label) === codigo);
+      if (noContrato && porMeses[noContrato.meses]) return porMeses[noContrato.meses];
+      const nome = ((this._adiTipos || []).find((t) => t.id === codigo) || {}).name || "";
+      if (/mensa/i.test(nome)) return "mensal";
+      if (/bimestr/i.test(nome)) return "bimestral";
+      if (/trimestr/i.test(nome)) return "trimestral";
+      if (/semestr/i.test(nome)) return "semestral";
+      if (/anua/i.test(nome)) return "anual";
+      const p = periodoDoCodigo(codigo, qtd);
+      return p === "unica" ? "mensal" : p;
+    },
+
     /** Motivo de a condição estar incompleta ou fora da regra; vazio quando está certa. */
     _adiProblemaLinha(l) {
       if (!l) return "condição vazia";
       if (!l.tipo) return "escolha a condição";
       if (!(Number.isInteger(l.qtd) && l.qtd >= 1)) return "informe a quantidade";
       if (!(Number.isFinite(l.valor) && l.valor > 0)) return "informe o valor da parcela";
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(l.venc || ""))) return l.periodo === "mensal" ? "escolha o mês e o dia do 1º vencimento" : "informe o 1º vencimento";
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(l.venc || ""))) return "escolha o 1º vencimento";
       if (l.venc < hojeIso()) return "o 1º vencimento não pode ser retroativo";
-      if (l.periodo === "mensal" && !DIAS_MENSAL.includes(l.venc.slice(8, 10))) return "parcela mensal só vence nos dias 10, 15 ou 20";
+      if (l.qtd > 1 && !DIAS_MENSAL.includes(l.venc.slice(8, 10))) return "parcelas recorrentes só vencem nos dias 10, 15 ou 20";
       return "";
     },
 
@@ -303,7 +330,7 @@
           </div>
           <div class="adi-linhas-scroll">
             <table class="adi-tab adi-tab-edit">
-              <thead><tr><th></th><th>Condição</th><th>Periodicidade</th><th class="adi-num">Qtde.</th><th class="adi-num">Valor da parcela</th><th class="adi-num">Total</th><th>1º vencimento</th><th></th></tr></thead>
+              <thead><tr><th></th><th>Condição</th><th class="adi-num">Qtde.</th><th class="adi-num">Valor da parcela</th><th class="adi-num">Total</th><th>1º vencimento</th><th></th></tr></thead>
               <tbody id="adi-linhas">${this._adiLinhasHtml(ctx)}</tbody>
             </table>
           </div>
@@ -401,6 +428,7 @@
     },
 
     adiFecharParcelas() {
+      this.adiCalFechar();
       const pop = this._adiEl("adi-pop");
       if (this._adiPopKey) document.removeEventListener("keydown", this._adiPopKey);
       if (!pop) return;
@@ -533,45 +561,124 @@
       return users.find((u) => String(u.id) === id) || null;
     },
 
-    _adiTipoOptions(l) {
+    /** Uma condição só pode aparecer em uma linha: as usadas nas outras linhas ficam desabilitadas. */
+    _adiTipoOptions(l, i, ctx) {
       const esc = (s) => this._escDoc(s);
       const tipos = this._adiTiposHabilitados();
       const atual = String(l.tipo || "");
+      const usados = new Set(((ctx && ctx.adiForm.linhas) || []).filter((x, k) => k !== i && x.tipo).map((x) => String(x.tipo)));
       const extra = atual && !tipos.some((t) => t.id === atual) ? [{ id: atual, name: this._adiTipos ? "não gera boleto no Sienge" : "" }] : [];
       const carregando = !this._adiTipos ? `<option value="" disabled>Carregando condições…</option>` : "";
       return `<option value="" ${atual ? "" : "selected"}>Condição…</option>${carregando}` +
-        extra.concat(tipos).map((t) => `<option value="${esc(t.id)}" ${t.id === atual ? "selected" : ""}>${esc(t.id)}${t.name && t.name !== t.id ? " · " + esc(t.name) : ""}</option>`).join("");
+        extra.concat(tipos).map((t) => {
+          const usado = usados.has(t.id) && t.id !== atual;
+          return `<option value="${esc(t.id)}" ${t.id === atual ? "selected" : ""} ${usado ? "disabled" : ""}>${esc(t.id)}${t.name && t.name !== t.id ? " · " + esc(t.name) : ""}${usado ? " (já usada)" : ""}</option>`;
+        }).join("");
     },
 
     _adiVencHtml(l, i) {
-      const hoje = hojeIso();
-      if (l.periodo !== "mensal") {
-        return `<input type="date" class="form-control adi-in adi-in-data" min="${hoje}" value="${l.venc || ""}" onchange="RelacionamentoApp.adiLinha(${i}, 'venc', this.value)">`;
-      }
-      const mes = l._mes || String(l.venc || "").slice(0, 7);
-      const dia = l._dia != null ? l._dia : String(l.venc || "").slice(8, 10);
-      const mesHoje = hoje.slice(0, 7);
-      return `<div class="adi-venc-md">
-          <input type="month" class="form-control adi-in adi-in-mes" min="${mesHoje}" value="${mes}" title="Mês do 1º vencimento" onchange="RelacionamentoApp.adiLinhaVenc(${i}, 'mes', this.value)">
-          <select class="form-control adi-in adi-in-dia" title="Parcela mensal vence nos dias 10, 15 ou 20" onchange="RelacionamentoApp.adiLinhaVenc(${i}, 'dia', this.value)">
-            <option value="" ${DIAS_MENSAL.includes(dia) ? "" : "selected"}>Dia</option>
-            ${DIAS_MENSAL.map((d) => `<option value="${d}" ${d === dia ? "selected" : ""} ${mes && `${mes}-${d}` < hoje ? "disabled" : ""}>${d}</option>`).join("")}
-          </select>
-        </div>`;
+      return `<button type="button" class="form-control adi-in adi-cal-btn${l.venc ? "" : " is-vazio"}" onclick="RelacionamentoApp.adiCalAbrir(${i}, this)">
+          <span>${l.venc ? dmy(l.venc) : "Escolher data"}</span><i data-lucide="calendar"></i>
+        </button>`;
     },
 
-    adiLinhaVenc(i, parte, valor) {
+    /** Dia permitido no 1º vencimento: nunca retroativo; com mais de uma parcela, só 10, 15 ou 20. */
+    _adiDiaPermitido(l, iso) {
+      if (iso < hojeIso()) return false;
+      return !(l && l.qtd > 1) || DIAS_MENSAL.includes(iso.slice(8, 10));
+    },
+
+    adiCalAbrir(i, btn) {
       const ctx = this._adiCtx();
       if (!ctx || !ctx.adiForm.linhas[i]) return;
       const l = ctx.adiForm.linhas[i];
-      const mes = parte === "mes" ? valor : (l._mes || String(l.venc || "").slice(0, 7));
-      let dia = parte === "dia" ? valor : (l._dia != null ? l._dia : String(l.venc || "").slice(8, 10));
-      if (mes && dia && `${mes}-${dia}` < hojeIso()) dia = "";
-      l._mes = mes;
-      l._dia = DIAS_MENSAL.includes(dia) ? dia : "";
-      l.venc = mes && l._dia ? `${mes}-${l._dia}` : "";
-      if (parte === "mes") this._adiRedesenharLinhas(ctx);
-      else this._adiAtualizar();
+      const base = /^\d{4}-\d{2}/.test(String(l.venc || "")) && l.venc >= hojeIso() ? l.venc : hojeIso();
+      this._adiCal = { i, ano: Number(base.slice(0, 4)), mes: Number(base.slice(5, 7)) - 1, btn };
+      this._adiCalRender();
+      if (!this._adiCalFora) {
+        this._adiCalFora = (e) => {
+          const pop = this._adiEl("adi-cal-pop");
+          if (pop && !pop.contains(e.target) && !(this._adiCal && this._adiCal.btn && this._adiCal.btn.contains(e.target))) this.adiCalFechar();
+        };
+        this._adiCalEsc = (e) => { if (e.key === "Escape") { e.stopPropagation(); this.adiCalFechar(); } };
+      }
+      document.addEventListener("mousedown", this._adiCalFora, true);
+      document.addEventListener("keydown", this._adiCalEsc, true);
+    },
+
+    adiCalFechar() {
+      const pop = this._adiEl("adi-cal-pop");
+      if (pop) pop.remove();
+      this._adiCal = null;
+      if (this._adiCalFora) document.removeEventListener("mousedown", this._adiCalFora, true);
+      if (this._adiCalEsc) document.removeEventListener("keydown", this._adiCalEsc, true);
+    },
+
+    adiCalMes(delta) {
+      const c = this._adiCal;
+      if (!c) return;
+      const d = new Date(c.ano, c.mes + delta, 1);
+      const hoje = hojeIso();
+      if (d.getFullYear() * 12 + d.getMonth() < Number(hoje.slice(0, 4)) * 12 + Number(hoje.slice(5, 7)) - 1) return;
+      c.ano = d.getFullYear();
+      c.mes = d.getMonth();
+      this._adiCalRender();
+    },
+
+    adiCalEscolher(iso) {
+      const c = this._adiCal;
+      const ctx = this._adiCtx();
+      if (!c || !ctx || !ctx.adiForm.linhas[c.i]) return;
+      if (!this._adiDiaPermitido(ctx.adiForm.linhas[c.i], iso)) return;
+      const i = c.i;
+      this.adiCalFechar();
+      this.adiLinha(i, "venc", iso);
+      this._adiRedesenharLinhas(ctx);
+    },
+
+    _adiCalRender() {
+      const c = this._adiCal;
+      const ctx = this._adiCtx();
+      if (!c || !ctx) return;
+      const l = ctx.adiForm.linhas[c.i];
+      const hoje = hojeIso();
+      const nomes = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+      const noMesAtual = c.ano * 12 + c.mes <= Number(hoje.slice(0, 4)) * 12 + Number(hoje.slice(5, 7)) - 1;
+      const primeiro = new Date(c.ano, c.mes, 1).getDay();
+      const dias = new Date(c.ano, c.mes + 1, 0).getDate();
+      const cel = [];
+      for (let k = 0; k < primeiro; k++) cel.push(`<span></span>`);
+      for (let d = 1; d <= dias; d++) {
+        const iso = `${c.ano}-${String(c.mes + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+        const ok = this._adiDiaPermitido(l, iso);
+        const cls = [iso === l.venc ? "is-sel" : "", iso === hoje ? "is-hoje" : ""].filter(Boolean).join(" ");
+        cel.push(ok
+          ? `<button type="button" class="${cls}" onclick="RelacionamentoApp.adiCalEscolher('${iso}')">${d}</button>`
+          : `<button type="button" class="${cls}" disabled>${d}</button>`);
+      }
+      let pop = this._adiEl("adi-cal-pop");
+      if (!pop) {
+        pop = document.createElement("div");
+        pop.id = "adi-cal-pop";
+        pop.className = "adi-cal-pop";
+        document.body.appendChild(pop);
+      }
+      pop.innerHTML = `
+        <div class="adi-cal-cab">
+          <button type="button" ${noMesAtual ? "disabled" : ""} onclick="RelacionamentoApp.adiCalMes(-1)" aria-label="Mês anterior">‹</button>
+          <strong>${nomes[c.mes].charAt(0).toUpperCase() + nomes[c.mes].slice(1)} de ${c.ano}</strong>
+          <button type="button" onclick="RelacionamentoApp.adiCalMes(1)" aria-label="Próximo mês">›</button>
+        </div>
+        <div class="adi-cal-sem">${["D", "S", "T", "Q", "Q", "S", "S"].map((s) => `<span>${s}</span>`).join("")}</div>
+        <div class="adi-cal-dias">${cel.join("")}</div>
+        <div class="adi-cal-nota">${l.qtd > 1 ? "Parcelas recorrentes: só dias 10, 15 ou 20." : "Parcela única: qualquer dia a partir de hoje."}</div>`;
+      const r = c.btn && document.body.contains(c.btn) ? c.btn.getBoundingClientRect() : null;
+      if (r) {
+        const w = pop.offsetWidth;
+        const h = pop.offsetHeight;
+        pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + "px";
+        pop.style.top = (r.bottom + 4 + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 4) : r.bottom + 4) + "px";
+      }
     },
 
     _adiLinhasHtml(ctx) {
@@ -579,11 +686,9 @@
       return f.linhas.map((l, i) => `
         <tr>
           <td class="adi-cond-n">${i + 1}</td>
-          <td><select class="form-control adi-in adi-in-tipo" onchange="RelacionamentoApp.adiLinha(${i}, 'tipo', this.value)">${this._adiTipoOptions(l)}</select></td>
-          <td><select class="form-control adi-in adi-in-per" onchange="RelacionamentoApp.adiLinha(${i}, 'periodo', this.value)">
-            ${Object.keys(PERIODOS).map((k) => `<option value="${k}" ${l.periodo === k ? "selected" : ""}>${PERIODOS[k].label}</option>`).join("")}
-          </select></td>
-          <td class="adi-num"><input type="number" min="1" step="1" class="form-control adi-in adi-in-qtd" value="${l.qtd || ""}" ${l.periodo === "unica" ? "readonly" : ""} oninput="RelacionamentoApp.adiLinha(${i}, 'qtd', this.value)"></td>
+          <td><select class="form-control adi-in adi-in-tipo" onchange="RelacionamentoApp.adiLinha(${i}, 'tipo', this.value)">${this._adiTipoOptions(l, i, ctx)}</select>
+            <small class="adi-ate" id="adi-per-${i}"></small></td>
+          <td class="adi-num"><input type="number" min="1" step="1" class="form-control adi-in adi-in-qtd" value="${l.qtd || ""}" oninput="RelacionamentoApp.adiLinha(${i}, 'qtd', this.value)"></td>
           <td class="adi-num"><input type="text" inputmode="decimal" class="form-control adi-in adi-in-valor" value="${l.valor ? num2(l.valor) : ""}" placeholder="0,00" oninput="RelacionamentoApp.adiLinha(${i}, 'valor', this.value)" onblur="RelacionamentoApp.adiFormatarValor(this, ${i})"></td>
           <td class="adi-num" id="adi-total-${i}">—</td>
           <td>${this._adiVencHtml(l, i)}<small class="adi-ate" id="adi-ate-${i}"></small></td>
@@ -599,14 +704,9 @@
           ${this._adiResumoHtml(ctx)}
           <div class="adi-grid adi-grid-um">${this._adiHojeHtml(ctx)}</div>`;
       } else {
-        const previaAberta = !!ctx.adiPreviaAberta;
         box.innerHTML = `${this._adiResumoHtml(ctx)}
           ${this._adiParcelasCardHtml(ctx)}
           ${this._adiAjustesHtml(ctx)}
-          <details class="adi-previa-box"${previaAberta ? " open" : ""} ontoggle="RelacionamentoState.aditamento && (RelacionamentoState.aditamento.adiPreviaAberta = this.open)">
-            <summary><i data-lucide="file-search"></i> Ver como sai no termo (cláusula 1.1)</summary>
-            <div id="adi-previa" class="adi-previa"></div>
-          </details>
           ${this._adiTestemunhasHtml(ctx)}`;
       }
       if (window.lucide) lucide.createIcons();
@@ -662,18 +762,8 @@
       if (campo === "qtd") l.qtd = Math.floor(Number(valor) || 0);
       else if (campo === "valor") l.valor = parseValor(valor);
       else l[campo] = valor;
-      if (campo === "tipo" && valor) {
-        const sugerido = periodoDoCodigo(valor, l.qtd);
-        if (sugerido !== l.periodo && !(sugerido === "unica" && l.qtd > 1)) {
-          l.periodo = sugerido;
-          campo = "periodo";
-          valor = sugerido;
-        }
-      }
-      if (campo === "periodo") {
-        if (valor === "unica") l.qtd = 1;
-        delete l._mes;
-        delete l._dia;
+      if (campo === "tipo" || campo === "qtd") l.periodo = this._adiPeriodoDe(l.tipo, l.qtd);
+      if (campo === "tipo") {
         this._adiRedesenharLinhas(ctx);
         return;
       }
@@ -692,8 +782,8 @@
       if (!ctx) return;
       const ult = ctx.adiForm.linhas[ctx.adiForm.linhas.length - 1];
       ctx.adiForm.linhas.push({
-        tipo: (ult && ult.tipo) || "",
-        periodo: (ult && ult.periodo) || "mensal",
+        tipo: "",
+        periodo: "unica",
         qtd: 1,
         valor: 0,
         venc: ult && ult.venc ? somarMeses(this._adiUltimoVenc(ult), Math.max(1, (PERIODOS[ult.periodo] || PERIODOS.mensal).meses)) : ""
@@ -706,6 +796,7 @@
     adiRemoverLinha(i) {
       const ctx = this._adiCtx();
       if (!ctx || ctx.adiForm.linhas.length <= 1) return;
+      this.adiCalFechar();
       ctx.adiForm.linhas.splice(i, 1);
       this._adiRedesenharLinhas(ctx);
     },
@@ -794,6 +885,7 @@
       f.linhas.forEach((l, i) => {
         const p = this._adiProblemaLinha(l);
         if (p) out.push(`Condição ${i + 1}: ${p}.`);
+        if (l.tipo && f.linhas.findIndex((x) => x.tipo === l.tipo) !== i) out.push(`Condição ${i + 1}: ${l.tipo} já está em outra linha.`);
       });
       if (!Number.isFinite(f.juros) || f.juros < 0) out.push("Informe os juros de parcelamento (0 se não houver).");
       if (f.reajuste === "com" && (!f.indice || f.indice === "REAL")) out.push("Informe o índice de reajuste.");
@@ -816,6 +908,8 @@
           total += t;
           const tc = this._adiEl("adi-total-" + i);
           if (tc) tc.textContent = t ? brl(t) : "—";
+          const per = this._adiEl("adi-per-" + i);
+          if (per) per.textContent = l.tipo ? (PERIODOS[l.periodo] || PERIODOS.mensal).label : "";
           const ate = this._adiEl("adi-ate-" + i);
           if (ate) ate.textContent = (l.qtd > 1 && l.venc && (PERIODOS[l.periodo] || {}).meses) ? "último em " + dmy(this._adiUltimoVenc(l)) : "";
         });
@@ -830,14 +924,6 @@
         }
         const resumo = this._adiEl("adi-parc-resumo");
         if (resumo) resumo.innerHTML = this._adiParcelasResumoHtml(ctx);
-        const previa = this._adiEl("adi-previa");
-        if (previa) {
-          const cond = this._adiTextoCondicoes(ctx);
-          const motivo = this._adiTextoMotivo(ctx);
-          previa.innerHTML = cond
-            ? `${motivo ? `<p class="adi-previa-motivo">(II) … procurara(m) o(s) PROMITENTE(S) VENDEDOR(ES) para ${this._escDoc(motivo)}.</p>` : ""}<p>${this._escDoc(cond).replace(/\n/g, "<br>")}</p><p>${this._escDoc(this._adiTextoReajusteJuros(ctx))}</p>`
-            : `<p class="adi-vazio">Preencha as novas condições para ver o texto.</p>`;
-        }
       }
       this._adiAtualizarBotao();
     },
