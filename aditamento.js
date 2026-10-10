@@ -72,12 +72,14 @@
     },
 
     _adiAoAbrir() {
+      this.adiFecharParcelas();
       const c = this._adiEl("adi-conteudo");
       if (c) c.innerHTML = "";
       this._adiAtualizarBotao();
     },
 
     _adiLimpar() {
+      this.adiFecharParcelas();
       const c = this._adiEl("adi-conteudo");
       if (c) c.innerHTML = "";
       const aviso = this._adiEl("adi-aviso");
@@ -259,12 +261,110 @@
               <button type="button" class="btn btn-primary btn-sm" onclick="RelacionamentoApp.adiAdicionarLinha()"><i data-lucide="plus"></i> Adicionar condição</button>
             </span>
           </div>
-          <table class="adi-tab adi-tab-edit">
-            <thead><tr><th>Tipo</th><th class="adi-num">Qtde.</th><th class="adi-num">Valor da parcela</th><th class="adi-num">Total</th><th>1º vencimento</th><th></th></tr></thead>
-            <tbody id="adi-linhas">${this._adiLinhasHtml(ctx)}</tbody>
-          </table>
+          <div class="adi-linhas-scroll">
+            <table class="adi-tab adi-tab-edit">
+              <thead><tr><th></th><th>Tipo</th><th class="adi-num">Qtde.</th><th class="adi-num">Valor da parcela</th><th class="adi-num">Total</th><th>1º vencimento</th><th></th></tr></thead>
+              <tbody id="adi-linhas">${this._adiLinhasHtml(ctx)}</tbody>
+            </table>
+          </div>
           <div id="adi-totais" class="adi-totais"></div>
         </section>`;
+    },
+
+    /** Resumo de tamanho fixo na tela do aditamento; a edição das parcelas fica no pop-up. */
+    _adiParcelasCardHtml(ctx) {
+      return `
+        <section class="adi-parc">
+          <div id="adi-parc-resumo" class="adi-parc-resumo">${this._adiParcelasResumoHtml(ctx)}</div>
+          <button type="button" class="btn btn-primary" onclick="RelacionamentoApp.adiAbrirParcelas()"><i data-lucide="table-2"></i> Ver e editar parcelas</button>
+        </section>`;
+    },
+
+    _adiParcelasResumoHtml(ctx) {
+      const a = ctx.adiAtual;
+      const f = ctx.adiForm;
+      const esc = (s) => this._escDoc(s);
+      const MAX = 4;
+      const lista = (itens) => (itens.length > MAX
+        ? itens.slice(0, MAX - 1).concat([`<li class="adi-parc-mais">+ ${itens.length - (MAX - 1)} condição(ões)</li>`])
+        : itens).join("");
+      const abertas = a.linhas.filter((l) => l.abertas > 0);
+      const quitadas = a.linhas.filter((l) => l.abertas === 0);
+      const hoje = abertas.map((l) => `<li><strong>${esc(l.label)}</strong> ${l.abertas} × ${brl(l.valorAberto || l.valorParcela)}<span>${my(l.proximo || l.primeiro)} a ${my(l.ultimo)}</span></li>`);
+      if (quitadas.length) hoje.push(`<li class="adi-parc-mais">Já quitadas: ${esc(quitadas.map((l) => l.label).join(", "))}</li>`);
+      let total = 0;
+      const novas = f.linhas.map((l, i) => {
+        if (!this._adiLinhaValida(l)) return `<li class="adi-atencao">Condição ${i + 1}: falta preencher quantidade, valor ou vencimento</li>`;
+        total += l.qtd * l.valor;
+        const p = PERIODOS[l.periodo] || PERIODOS.mensal;
+        const ult = this._adiUltimoVenc(l);
+        return `<li><strong>${esc(p.label)}</strong> ${l.qtd} × ${brl(l.valor)}<span>${dmy(l.venc)}${ult && ult !== l.venc ? " a " + dmy(ult) : ""}</span></li>`;
+      });
+      const diff = total - a.saldoAberto;
+      return `
+        <div class="adi-parc-col">
+          <div class="adi-lbl">Como está hoje</div>
+          <ul>${hoje.length ? lista(hoje) : '<li class="adi-vazio">Sem parcelas lidas do Sienge.</li>'}</ul>
+          <div class="adi-parc-rod">Saldo em aberto <strong>${brl(a.saldoAberto)}</strong> · ${a.abertas} parcela(s)</div>
+        </div>
+        <div class="adi-parc-seta" aria-hidden="true">→</div>
+        <div class="adi-parc-col adi-parc-novo">
+          <div class="adi-lbl">Como vai ficar</div>
+          <ul>${lista(novas)}</ul>
+          <div class="adi-parc-rod">Total <strong>${brl(total)}</strong> · Diferença <strong class="${Math.abs(diff) < 1 ? "adi-ok" : "adi-atencao"}">${diff > 0 ? "+" : ""}${brl(diff)}</strong></div>
+        </div>`;
+    },
+
+    adiAbrirParcelas() {
+      const ctx = this._adiCtx();
+      if (!ctx) return;
+      let pop = this._adiEl("adi-pop");
+      if (!pop) {
+        pop = document.createElement("div");
+        pop.id = "adi-pop";
+        pop.className = "doc-modal adi-pop";
+        pop.setAttribute("role", "dialog");
+        pop.setAttribute("aria-modal", "true");
+        pop.addEventListener("mousedown", (e) => { if (e.target === pop) this.adiFecharParcelas(); });
+        document.body.appendChild(pop);
+      }
+      this._adiPopKey = this._adiPopKey || ((e) => { if (e.key === "Escape") this.adiFecharParcelas(); });
+      document.addEventListener("keydown", this._adiPopKey);
+      this._adiPopRender(ctx);
+    },
+
+    _adiPopRender(ctx) {
+      const pop = this._adiEl("adi-pop");
+      if (!pop) return;
+      const sub = this._adiEl("adi-modal-sub");
+      pop.innerHTML = `
+        <div class="doc-modal-panel adi-pop-panel">
+          <div class="crm-card" style="margin:0;display:flex;flex-direction:column;max-height:inherit;">
+            <div class="crm-card-header adi-pop-head">
+              <div>
+                <h3 style="margin:0;font-size:1.1rem;color:var(--color-primary);">Parcelas: como está hoje e como vai ficar</h3>
+                ${sub && sub.textContent ? `<div class="doc-modal-sub">${this._escDoc(sub.textContent)}</div>` : ""}
+              </div>
+              <button type="button" class="adi-pop-x" onclick="RelacionamentoApp.adiFecharParcelas()" title="Fechar">&times;</button>
+            </div>
+            <div class="adi-pop-body">
+              <div class="adi-grid">${this._adiHojeHtml(ctx)}${this._adiNovoHtml(ctx)}</div>
+            </div>
+            <div class="adi-pop-rodape">
+              <button type="button" class="btn btn-primary" style="height:40px;min-width:150px;justify-content:center;" onclick="RelacionamentoApp.adiFecharParcelas()"><i data-lucide="check"></i> Concluir</button>
+            </div>
+          </div>
+        </div>`;
+      if (window.lucide) lucide.createIcons();
+      this._adiAtualizar();
+    },
+
+    adiFecharParcelas() {
+      const pop = this._adiEl("adi-pop");
+      if (this._adiPopKey) document.removeEventListener("keydown", this._adiPopKey);
+      if (!pop) return;
+      pop.remove();
+      if (this._adiCtx()) this._adiAtualizar();
     },
 
     _adiAjustesHtml(ctx) {
@@ -288,8 +388,12 @@
             <div class="adi-reaj">
               <label class="adi-radio"><input type="radio" name="adi-reajuste" value="sem" ${f.reajuste === "sem" ? "checked" : ""} onchange="RelacionamentoApp.adiCampo('reajuste', 'sem')"> Sem reajuste</label>
               <label class="adi-radio"><input type="radio" name="adi-reajuste" value="com" ${f.reajuste === "com" ? "checked" : ""} onchange="RelacionamentoApp.adiCampo('reajuste', 'com')"> Com</label>
-              <input type="text" class="form-control adi-in adi-in-indice" id="adi-indice" list="adi-indices" value="${esc(f.indice)}" placeholder="Índice" oninput="RelacionamentoApp.adiCampo('indice', this.value)">
-              <datalist id="adi-indices">${INDICES.map((i) => `<option value="${i}"></option>`).join("")}</datalist>
+              <select class="form-control adi-in adi-in-indice" id="adi-indice" onchange="RelacionamentoApp.adiCampo('indice', this.value)">
+                <option value="">Índice…</option>
+                ${INDICES.concat([f.indice, a.comReajuste ? a.indice : ""].filter((i) => i && !INDICES.includes(i)))
+                  .filter((i, n, l) => l.indexOf(i) === n)
+                  .map((i) => `<option value="${esc(i)}" ${f.indice === i ? "selected" : ""}>${esc(i)}</option>`).join("")}
+              </select>
             </div>
           </div>
           <div>
@@ -303,6 +407,7 @@
       const f = ctx.adiForm;
       return f.linhas.map((l, i) => `
         <tr>
+          <td class="adi-cond-n">${i + 1}</td>
           <td><select class="form-control adi-in" onchange="RelacionamentoApp.adiLinha(${i}, 'periodo', this.value)">
             ${Object.keys(PERIODOS).map((k) => `<option value="${k}" ${l.periodo === k ? "selected" : ""}>${PERIODOS[k].label}</option>`).join("")}
           </select></td>
@@ -324,7 +429,7 @@
       } else {
         const previaAberta = !!ctx.adiPreviaAberta;
         box.innerHTML = `${this._adiResumoHtml(ctx)}
-          <div class="adi-grid">${this._adiHojeHtml(ctx)}${this._adiNovoHtml(ctx)}</div>
+          ${this._adiParcelasCardHtml(ctx)}
           ${this._adiAjustesHtml(ctx)}
           <details class="adi-previa-box"${previaAberta ? " open" : ""} ontoggle="RelacionamentoState.aditamento && (RelacionamentoState.aditamento.adiPreviaAberta = this.open)">
             <summary><i data-lucide="file-search"></i> Ver como sai no termo (cláusula 1.1)</summary>
@@ -392,6 +497,8 @@
       const ult = ctx.adiForm.linhas[ctx.adiForm.linhas.length - 1];
       ctx.adiForm.linhas.push({ periodo: "mensal", qtd: 1, valor: 0, venc: ult && ult.venc ? somarMeses(this._adiUltimoVenc(ult), 1) : "" });
       this._adiRedesenharLinhas(ctx);
+      const rolagem = document.querySelector("#adi-pop .adi-linhas-scroll");
+      if (rolagem) rolagem.scrollTop = rolagem.scrollHeight;
     },
 
     adiRemoverLinha(i) {
@@ -406,6 +513,7 @@
       if (!ctx) return;
       ctx.adiForm = this._adiFormPadrao(ctx.adiAtual);
       this._adiRender(ctx);
+      if (this._adiEl("adi-pop")) this._adiPopRender(ctx);
     },
 
     _adiRedesenharLinhas(ctx) {
@@ -526,6 +634,8 @@
             <span>Saldo em aberto hoje <strong>${brl(saldo)}</strong></span>
             <span>Diferença <strong class="${cls}">${diff > 0 ? "+" : ""}${brl(diff)}</strong></span>`;
         }
+        const resumo = this._adiEl("adi-parc-resumo");
+        if (resumo) resumo.innerHTML = this._adiParcelasResumoHtml(ctx);
         const previa = this._adiEl("adi-previa");
         if (previa) {
           const cond = this._adiTextoCondicoes(ctx);

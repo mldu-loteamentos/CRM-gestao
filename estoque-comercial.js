@@ -3194,6 +3194,7 @@ const EstoqueComercialApp = {
     const semTitulo = [];
     const distratadosNovos = [];
     let reabertos = 0;
+    let reativados = 0;
     let quitadosNovos = 0;
     const revogados = bills.filter((b) => b.revoked);
     const daUnidade = (lista, u, rb) => {
@@ -3202,11 +3203,18 @@ const EstoqueComercialApp = {
     };
     this.state.units = this.state.units.map((u) => {
       if (String(u.enterpriseId) !== String(ccId) || !this.isFinanceUnit(u)) return u;
-      if (opts.pularQuitados && this.financialStatus(u) === "Quitado") return u;
       const rb = String(u.receivableBillId || "").replace(/^B-/, "").split("-")[0];
       const mine = daUnidade(vivos, u, rb);
-      if (u.distratoTitulo && mine.length) {
-        u = { ...u, relFin: null, distratoTitulo: null, distratoData: null };
+      // Quitado/distratado só fica parado se o Sienge também não tiver saldo vivo na unidade.
+      const saldoVivo = mine.some((b) => b.aberto > 0.009);
+      const finAntes = this.financialStatus(u);
+      if (opts.pularQuitados && finAntes === "Quitado" && !saldoVivo) {
+        mine.forEach((b) => usados.add(b.id));
+        return u;
+      }
+      if ((u.distratoTitulo && mine.length) || (finAntes === "Distratado" && saldoVivo)) {
+        if (finAntes === "Distratado" && saldoVivo) reativados += 1;
+        u = { ...u, relFin: null, distratoTitulo: null, distratoData: null, situation: /distrat/i.test(String(u.situation || "")) && saldoVivo ? "" : u.situation };
       }
       const fin0 = this.financialStatus(u);
       if (fin0 === "Distratado") return u;
@@ -3301,11 +3309,13 @@ const EstoqueComercialApp = {
       },
       integra: { aReceber: p.aReceber, atraso: p.atraso, vencido: p.vencido, inadimplentes: p.inadimplentes, ativos: p.ativos, quitados: p.quitados, semSaldo: p.semSaldo },
       semUnidade: comSaldo.filter((b) => !usados.has(b.id)).map((b) => ({
-        titulo: b.id, cliente: (b.cliente && b.cliente.name) || "", unidades: b.units.map((x) => x.name).join(", "), aberto: b.aberto
+        titulo: b.id, cliente: (b.cliente && b.cliente.name) || "", unidades: b.units.map((x) => x.name).join(", "), aberto: b.aberto,
+        ...this.motivoTituloSemUnidade(b, ccId)
       })),
       semTitulo,
       distratadosNovos,
       reabertos,
+      reativados,
       quitadosNovos,
       rateio: extrato.somados,
       rateioFalhas: extrato.falhas
@@ -3315,6 +3325,30 @@ const EstoqueComercialApp = {
     this.saveCache();
     await this.saveFirebaseCc(ccId);
     return this.state.conferencia;
+  },
+
+  MOTIVOS_SEM_UNIDADE: {
+    "sem-unidade": { titulo: "Título sem unidade vinculada no Sienge", acao: "No Sienge, vincular a unidade ao título (comum em renegociação, terreno, permuta ou título avulso). Se não for de unidade, é recebível fora do estoque." },
+    "nao-encontrada": { titulo: "Unidade do título não existe no estoque do Integra", acao: "Rodar \"Atualizar estoque\" e conferir se o nome/código da unidade no título é o mesmo do cadastro de unidades do Sienge." },
+    "estoque": { titulo: "Unidade não está como vendida no estoque", acao: "No Sienge a unidade está disponível/reservada/outra situação, mas tem título com saldo: acertar a situação comercial da unidade para vendida." },
+    "outro-emp": { titulo: "Unidade cadastrada em outro empreendimento", acao: "O título está num centro de custo e a unidade em outro: acertar o centro de custo do título ou o empreendimento da unidade no Sienge." },
+    "outro": { titulo: "Unidade encontrada, mas sem ligação com o título", acao: "Conferir o título da unidade na Posição de estoque (pode haver dois títulos para a mesma unidade)." }
+  },
+
+  /** Por que um título com saldo no Sienge não entrou em nenhuma unidade ativa do Integra. */
+  motivoTituloSemUnidade(b, ccId) {
+    if (!b.units || !b.units.length) return { motivo: "sem-unidade" };
+    const casa = (u) => b.units.some((x) => x.id === String(u.id) || this.unitNameMatches(x.name, u.name));
+    const doCc = (this.state.units || []).filter((u) => String(u.enterpriseId) === String(ccId) && casa(u));
+    if (!doCc.length) {
+      const outra = (this.state.units || []).find((u) => b.units.some((x) => x.id === String(u.id)));
+      return outra
+        ? { motivo: "outro-emp", situacao: `unidade no empreendimento ${outra.enterpriseId}` }
+        : { motivo: "nao-encontrada" };
+    }
+    const u = doCc[0];
+    if (!this.isFinanceUnit(u)) return { motivo: "estoque", situacao: `estoque: ${this.mapStock(u.commercialStock) || u.commercialStock || "sem situação"}` };
+    return { motivo: "outro", situacao: `Integra: ${this.financialStatus(u)}` };
   },
 
   /** Empreendimentos do relatório Contas a Receber por centro de custo; o centro do parceiro entra pelo rateio da obra. */
@@ -3361,6 +3395,14 @@ const EstoqueComercialApp = {
           sienge: c.sienge,
           integra: c.integra,
           semUnidade: { n: c.semUnidade.length, valor: c.semUnidade.reduce((t, b) => t + (Number(b.aberto) || 0), 0) },
+          motivos: c.semUnidade.reduce((m, b) => {
+            const k = b.motivo || "outro";
+            m[k] = m[k] || { n: 0, valor: 0 };
+            m[k].n += 1;
+            m[k].valor += Number(b.aberto) || 0;
+            return m;
+          }, {}),
+          reabertos: (c.reabertos || 0) + (c.reativados || 0),
           semTitulo: c.semTitulo.length,
           rateioFalhas: c.rateioFalhas || []
         });
@@ -3397,6 +3439,30 @@ const EstoqueComercialApp = {
     const dif = tot.integra - tot.sienge;
     const bate = Math.abs(dif) < 1 && !g.falhas.length;
     const hora = new Date(g.at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+    const motivos = {};
+    g.ccs.forEach((c) => Object.entries(c.motivos || {}).forEach(([k, v]) => {
+      const m = motivos[k] || (motivos[k] = { n: 0, valor: 0, ccs: [] });
+      m.n += v.n;
+      m.valor += v.valor;
+      m.ccs.push({ id: c.ccId, valor: v.valor });
+    }));
+    const semMotivo = g.ccs.some((c) => c.semUnidade.n && !c.motivos);
+    const reabertos = soma((c) => c.reabertos);
+    const acertar = Object.entries(motivos).sort((a, b) => b[1].valor - a[1].valor).map(([k, m]) => {
+      const info = this.MOTIVOS_SEM_UNIDADE[k] || this.MOTIVOS_SEM_UNIDADE.outro;
+      const top = m.ccs.sort((a, b) => b.valor - a.valor).slice(0, 4).map((x) => esc(x.id)).join(", ");
+      return `<tr><td><b>${esc(info.titulo)}</b><small>${esc(info.acao)}</small></td><td class="num">${m.n}</td><td class="num">${this.money(m.valor)}</td><td>${top}${m.ccs.length > 4 ? ` e mais ${m.ccs.length - 4}` : ""}</td></tr>`;
+    }).join("");
+    const acertarHtml = bate ? "" : `<div class="est-conf-acertar">
+        <strong>O que falta acertar</strong>
+        ${acertar ? `<div class="est-conf-tab"><table>
+          <thead><tr><th>Motivo e o que fazer</th><th>Títulos</th><th>Saldo no Sienge</th><th>Maiores empreendimentos</th></tr></thead>
+          <tbody>${acertar}</tbody>
+        </table></div>` : ""}
+        ${semMotivo ? `<small class="est-conf-nota">Esta conferência foi feita antes da separação por motivo: clique em "Batimento financeiro" de novo para ver o motivo de cada título.</small>` : ""}
+        ${tot.semTitulo ? `<small class="est-conf-nota">${tot.semTitulo} unidade(s) ativa(s) no Integra sem título no Sienge: conferir se foram distratadas ou quitadas (lista ao escolher o empreendimento).</small>` : ""}
+        ${reabertos ? `<small class="est-conf-nota">${reabertos} unidade(s) estavam como quitadas ou distratadas no Integra, mas têm saldo no Sienge, e foram reabertas nesta conferência.</small>` : ""}
+      </div>`;
     const linhas = g.ccs.slice()
       .sort((a, b) => Math.abs(b.integra.aReceber - b.sienge.aReceber) - Math.abs(a.integra.aReceber - a.sienge.aReceber))
       .map((c) => {
@@ -3423,6 +3489,7 @@ const EstoqueComercialApp = {
         <div><label>Integra · a receber</label><b>${this.money(tot.integra)}</b><small>Em atraso ${this.money(tot.integraAtraso)} em ${tot.integraInad} contrato(s)</small></div>
         <div><label>Diferença</label><b>${bate ? "Bate" : this.money(dif)}</b><small>${tot.semUnidN ? `${tot.semUnidN} título(s) com saldo no Sienge sem unidade ativa no Integra: ${this.money(tot.semUnidV)}` : "Todo título com saldo tem unidade no Integra"}${tot.semTitulo ? ` · ${tot.semTitulo} unidade(s) ativa(s) sem título no Sienge` : ""}</small></div>
       </div>
+      ${acertarHtml}
       <details class="est-conf-det" ${bate ? "" : "open"}><summary>Por empreendimento (maior diferença primeiro)</summary>
         <div class="est-conf-tab"><table>
           <thead><tr><th>Empreendimento</th><th>Sienge a receber</th><th>Integra a receber</th><th>Diferença</th><th>Sienge em atraso</th><th>Integra em atraso</th><th>Títulos sem unidade</th><th>Unid. sem título</th></tr></thead>
@@ -3467,7 +3534,7 @@ const EstoqueComercialApp = {
           ${(c.semTitulo || []).length || (c.semUnidade || []).length ? `<small>Há unidades ou títulos sem par: veja abaixo</small>` : ""}</div>
       </div>
       ${lista("Unidades distratadas no Sienge (passaram para Distratado)", c.distratadosNovos || [], (i) => `<li>${esc(i.unidade)} · título ${esc(i.titulo)}${i.cliente ? " · " + esc(i.cliente) : ""}${i.data ? " · distrato " + esc(i.data.split("-").reverse().join("/")) : ""}</li>`)}
-      ${lista("Títulos com saldo no Sienge sem unidade no Integra", c.semUnidade, (i) => `<li>Título ${esc(i.titulo)} · ${esc(i.cliente)}${i.unidades ? " · " + esc(i.unidades) : ""} · ${this.money(i.aberto)}</li>`)}
+      ${lista("Títulos com saldo no Sienge sem unidade no Integra", (c.semUnidade || []).slice().sort((a, b) => String(a.motivo || "").localeCompare(String(b.motivo || "")) || b.aberto - a.aberto), (i) => `<li>Título ${esc(i.titulo)} · ${esc(i.cliente)}${i.unidades ? " · " + esc(i.unidades) : ""} · ${this.money(i.aberto)}${i.motivo ? ` · <em class="est-conf-motivo">${esc((this.MOTIVOS_SEM_UNIDADE[i.motivo] || {}).titulo || i.motivo)}${i.situacao ? " (" + esc(i.situacao) + ")" : ""}</em>` : ""}</li>`)}
       ${lista("Unidades ativas no Integra sem título no Sienge", c.semTitulo, (i) => `<li>${esc(i.unidade)}${i.contrato ? " · contrato " + esc(i.contrato) : ""}${i.cliente ? " · " + esc(i.cliente) : ""} · ${esc(i.situacao)}</li>`)}
     </div>`;
   },
