@@ -979,6 +979,21 @@ const RelacionamentoApp = {
     const perc = Number(sale && sale.percPaid);
     if (Number.isFinite(perc) && perc >= 0.999) return { quitado: true, motivo: "Contrato 100% pago" };
     const billId = (sale && sale.receivableBillId) || (bill && (bill.id || bill.receivableBillId));
+    // Mesma fonte da Gestão: a lista de títulos do cliente traz a data de quitação (payOffDate),
+    // que o detalhe do título nem sempre traz.
+    const customerId = (sale && sale.customerId) || (bill && bill.customerId);
+    if (billId && customerId && window.SiengeApiService && SiengeApiService.getReceivableBills) {
+      try {
+        const res = await SiengeApiService.getReceivableBills(customerId);
+        const list = (res && (res.results || res)) || [];
+        const arr = Array.isArray(list) ? list : [];
+        const docNum = (b) => String(b.documentNumber || "").toUpperCase().replace(/^(CTCV|CT|CV)\s*/, "").trim();
+        const contrato = String((sale && (sale.contractNumber || sale.number || sale.id)) || "").trim();
+        const hit = arr.find((b) => String(b.receivableBillId || b.id) === String(billId))
+          || (contrato ? arr.find((b) => docNum(b) === contrato) : null);
+        if (hit && hit.payOffDate) return { quitado: true, motivo: "Título com data de quitação no Sienge" };
+      } catch (e) {}
+    }
     if (billId && window.SiengeApiService && SiengeApiService.getBillInstallments) {
       try {
         const inst = await SiengeApiService.getBillInstallments(billId);

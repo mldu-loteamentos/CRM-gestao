@@ -6,8 +6,8 @@ const EstoqueComercialApp = {
   CC_EMPTY_KEY: "crm_cc_ids_sem_unidade",
   LIMIT: 200,
   FB_CHUNK: 400,
-  /** Firestore recusa documento acima de 1 MiB; com parcelas abertas 400 unidades passam disso. */
-  FB_DOC_BYTES: 650000,
+  /** Firestore recusa documento acima de 1 MiB (contado em bytes UTF-8, com nomes de campo); com parcelas abertas 400 unidades passam disso. */
+  FB_DOC_BYTES: 600000,
   /** Censo pesado fica no cron. No browser o automático é diário (delta + fila). */
   BATIMENTO_AUTO_PAUSED: false,
   BATIMENTO_AUTO_DELTA: true,
@@ -316,12 +316,23 @@ const EstoqueComercialApp = {
     }
   },
 
+  // Firestore rejeita o documento inteiro se houver undefined, função ou NaN em qualquer unidade.
+  fbClean(value) {
+    return JSON.parse(JSON.stringify(value == null ? null : value));
+  },
+
+  fbBytes(value) {
+    const json = JSON.stringify(value == null ? null : value);
+    if (!this._fbEncoder && typeof TextEncoder !== "undefined") this._fbEncoder = new TextEncoder();
+    return this._fbEncoder ? this._fbEncoder.encode(json).length : json.length * 2;
+  },
+
   fbChunks(list) {
     const out = [];
     let cur = [];
     let bytes = 0;
     (list || []).forEach((u) => {
-      const size = JSON.stringify(u || null).length + 2;
+      const size = this.fbBytes(u) + 2;
       if (cur.length && (cur.length >= this.FB_CHUNK || bytes + size > this.FB_DOC_BYTES)) {
         out.push(cur);
         cur = [];
@@ -528,23 +539,26 @@ const EstoqueComercialApp = {
         this.fbChunks(list).forEach((units, n) => {
           const id = `cc_${cc}_${n}`;
           keep.add(id);
-          writes.push(setDoc(doc(window.firebaseDb, this.FB_COL, id), {
+          writes.push(() => setDoc(doc(window.firebaseDb, this.FB_COL, id), {
             enterpriseId: cc,
-            enterpriseName: empName,
+            enterpriseName: empName || "",
             chunk: n,
-            units,
+            units: this.fbClean(units),
             updatedAt: new Date().toISOString(),
             date: this.todayStr()
           }));
         });
       });
-      await Promise.all(writes);
-      await setDoc(doc(window.firebaseDb, this.FB_COL, "_meta"), {
+      // Uns 70 documentos de ~300 KB de uma vez estouram a fila de escrita do SDK; vai de 5 em 5.
+      for (let i = 0; i < writes.length; i += 5) {
+        await Promise.all(writes.slice(i, i + 5).map((w) => w()));
+      }
+      await setDoc(doc(window.firebaseDb, this.FB_COL, "_meta"), this.fbClean({
         date: this.todayStr(),
-        ccDone: this.state.ccDone,
-        complete: this.state.complete,
-        contractsEnriched: this.state.contractsEnriched,
-        contractsCcDone: this.state.contractsCcDone,
+        ccDone: this.state.ccDone || [],
+        complete: !!this.state.complete,
+        contractsEnriched: !!this.state.contractsEnriched,
+        contractsCcDone: this.state.contractsCcDone || [],
         fetchedAt: this.state.fetchedAt || new Date().toISOString(),
         batimentoDate: this.state.batimentoDate || null,
         batimentoAt: this.state.batimentoAt || null,
@@ -552,7 +566,7 @@ const EstoqueComercialApp = {
         unitsSavedDate: this.todayStr(),
         unitCount: this.state.units.length,
         updatedAt: new Date().toISOString()
-      }, { merge: true });
+      }), { merge: true });
 
       const existing = await getDocs(collection(window.firebaseDb, this.FB_COL));
       const leftovers = [];
@@ -644,9 +658,9 @@ const EstoqueComercialApp = {
       const chunks = this.fbChunks(list);
       const writes = chunks.map((units, n) => setDoc(doc(window.firebaseDb, this.FB_COL, `cc_${cc}_${n}`), {
         enterpriseId: cc,
-        enterpriseName: empName,
+        enterpriseName: empName || "",
         chunk: n,
-        units,
+        units: this.fbClean(units),
         updatedAt: new Date().toISOString(),
         date: this.todayStr()
       }));
@@ -658,20 +672,21 @@ const EstoqueComercialApp = {
         }
         await Promise.all(stale);
       }
-      await setDoc(doc(window.firebaseDb, this.FB_COL, "_meta"), {
+      await setDoc(doc(window.firebaseDb, this.FB_COL, "_meta"), this.fbClean({
         date: this.todayStr(),
-        ccDone: this.state.ccDone,
-        complete: this.state.complete,
-        contractsEnriched: this.state.contractsEnriched,
-        contractsCcDone: this.state.contractsCcDone,
+        ccDone: this.state.ccDone || [],
+        complete: !!this.state.complete,
+        contractsEnriched: !!this.state.contractsEnriched,
+        contractsCcDone: this.state.contractsCcDone || [],
         fetchedAt: this.state.fetchedAt || new Date().toISOString(),
         unitCount: this.state.units.length,
         updatedAt: new Date().toISOString()
-      }, { merge: true });
+      }), { merge: true });
       this.state.firebaseOk = true;
       return true;
     } catch (e) {
       console.error("[Estoque] gravação CC Firebase", cc, e);
+      this.state.fbSaveError = "empreendimento " + cc + ": " + ((e && e.message) || String(e));
       return false;
     }
   },
@@ -1206,7 +1221,7 @@ const EstoqueComercialApp = {
         ? ` Situação financeira de ${finN} título(s) da última base.`
         : " Sem classificação financeira gravada — aguardando a última atualização.");
     const fb = this.state.fbSaveError
-      ? " Falha ao gravar no Firebase — o resultado ficou só neste navegador."
+      ? ` Falha ao gravar no Firebase — o resultado ficou só neste navegador (${String(this.state.fbSaveError).slice(0, 160)}).`
       : (this.state.firebaseOk ? " Firebase ok." : (this.fbReady() ? " Gravando/lendo Firebase." : " Firebase indisponível."));
     const extra = this.state.complete ? "" : ` Carga incompleta (${this.state.ccDone.length} empreendimentos).`;
     el.textContent = `${this.state.units.length} unidades.${last}${extra}${fb}`;
