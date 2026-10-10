@@ -463,13 +463,16 @@ const GerarPagamentoApp = {
     return this.state.lotes.find((l) => (l.itens || []).some((i) => this.chaveTitulo(i.titulo, i.parcela) === chave)) || null;
   },
 
-  /* Títulos em aberto agrupados pela conta de parceria; o mesmo título rateado entre CCs da mesma conta vira uma linha. */
+  /* Títulos em aberto agrupados por conta de parceria e dia de vencimento (um lote por conta por dia);
+     o mesmo título rateado entre CCs da mesma conta vira uma linha. */
   gruposLote() {
     const grupos = {};
     this.state.titulos.filter((r) => !r.pago && r.aPagar > 0.009).forEach((r) => {
       const conta = r.esperada;
-      const key = conta ? this.numConta(conta.numero || conta.id) || String(conta.id) : "__sem";
-      if (!grupos[key]) grupos[key] = { key, conta, itens: {}, ordem: [] };
+      const contaKey = conta ? this.numConta(conta.numero || conta.id) || String(conta.id) : "";
+      const dia = String(r.vencimento || "").slice(0, 10);
+      const key = conta ? contaKey + "@" + (dia || "sem-data") : "__sem";
+      if (!grupos[key]) grupos[key] = { key, contaKey, dia: conta ? dia : "", conta, itens: {}, ordem: [] };
       const g = grupos[key];
       const chave = this.chaveTitulo(r.titulo, r.parcela);
       if (!g.itens[chave]) {
@@ -489,16 +492,28 @@ const GerarPagamentoApp = {
       itens.forEach((it) => {
         it.loteIntegra = this.loteIntegraDe(it.chave);
         it.loteSienge = this.state.loteSienge[it.chave] || "";
+        it.emLote = !!(it.loteIntegra || it.loteSienge);
         const selKey = g.key + "|" + it.chave;
         if (!this.state.selInit[selKey]) {
           this.state.selInit[selKey] = true;
-          this.state.sel[selKey] = g.key !== "__sem" && !it.loteIntegra && !it.loteSienge;
+          this.state.sel[selKey] = g.key !== "__sem" && !it.emLote;
         }
         it.selKey = selKey;
-        it.marcado = !!this.state.sel[selKey];
+        it.marcado = !it.emLote && !!this.state.sel[selKey];
       });
       return { ...g, itens };
-    }).sort((a, b) => (a.key === "__sem") - (b.key === "__sem") || this.contaLabel(a.conta).localeCompare(this.contaLabel(b.conta)));
+    }).sort((a, b) => (a.key === "__sem") - (b.key === "__sem")
+      || this.contaLabel(a.conta).localeCompare(this.contaLabel(b.conta))
+      || String(a.dia).localeCompare(String(b.dia)));
+  },
+
+  lotesDoGrupo(g) {
+    const ids = [];
+    g.itens.forEach((it) => {
+      const nome = it.loteIntegra ? it.loteIntegra.id : (it.loteSienge ? "Sienge" + (it.loteSienge !== "sim" ? " nº " + it.loteSienge : "") : "");
+      if (nome && !ids.includes(nome)) ids.push(nome);
+    });
+    return ids;
   },
 
   setVisao(v) {
@@ -515,7 +530,7 @@ const GerarPagamentoApp = {
     const g = this.gruposLote().find((x) => x.key === key);
     if (!g) return;
     g.itens.forEach((it) => {
-      if (it.loteIntegra) return;
+      if (it.emLote) return;
       this.state.sel[it.selKey] = !!marcar;
     });
     this.paintTitulos();
@@ -523,23 +538,37 @@ const GerarPagamentoApp = {
 
   async gerarLote(key) {
     const s = this.state;
-    const g = this.gruposLote().find((x) => x.key === key);
+    let g = this.gruposLote().find((x) => x.key === key);
     if (!g || !g.conta || s.gerandoLote) return;
-    const itens = g.itens.filter((it) => it.marcado && !it.loteIntegra);
+    if (!g.itens.some((it) => it.marcado)) {
+      alert(g.itens.every((it) => it.emLote) ? "Todos os títulos deste dia já estão em lote." : "Marque ao menos um título para gerar o lote.");
+      return;
+    }
+    s.gerandoLote = key;
+    this.paintTitulos();
+    // Relê os lotes antes de gravar: outro usuário pode ter gerado lote com estes títulos.
+    await this.carregarLotes();
+    g = this.gruposLote().find((x) => x.key === key);
+    const itens = g ? g.itens.filter((it) => it.marcado && !it.emLote) : [];
     if (!itens.length) {
-      alert("Marque ao menos um título para gerar o lote.");
+      s.gerandoLote = "";
+      this.paintTitulos();
+      alert("Estes títulos já foram incluídos em outro lote. A tela foi atualizada.");
       return;
     }
     const total = itens.reduce((t, it) => t + it.aPagar, 0);
     const okConf = typeof window.mouraConfirm === "function"
-      ? await window.mouraConfirm(`Gerar lote com ${itens.length} título(s), total de ${this.money(total)}, pela conta ${this.contaLabel(g.conta)}?`)
-      : confirm(`Gerar lote com ${itens.length} título(s), total de ${this.money(total)}?`);
-    if (!okConf) return;
-    s.gerandoLote = key;
-    this.paintTitulos();
+      ? await window.mouraConfirm(`Gerar lote do dia ${this.dataBr(g.dia)} com ${itens.length} título(s), total de ${this.money(total)}, pela conta ${this.contaLabel(g.conta)}?`)
+      : confirm(`Gerar lote do dia ${this.dataBr(g.dia)} com ${itens.length} título(s), total de ${this.money(total)}?`);
+    if (!okConf) {
+      s.gerandoLote = "";
+      this.paintTitulos();
+      return;
+    }
     const agora = new Date();
     const pad = (n) => String(n).padStart(2, "0");
-    const id = "L" + agora.getFullYear() + pad(agora.getMonth() + 1) + pad(agora.getDate()) + "-" + pad(agora.getHours()) + pad(agora.getMinutes()) + pad(agora.getSeconds());
+    const id = "L" + agora.getFullYear() + pad(agora.getMonth() + 1) + pad(agora.getDate()) + "-" + pad(agora.getHours()) + pad(agora.getMinutes()) + pad(agora.getSeconds())
+      + "-" + String(g.contaKey || "").replace(/[^\w]/g, "").slice(-6) + "-" + String(g.dia || "").replace(/-/g, "").slice(4);
     let usuario = "Usuário";
     try {
       const u = window.MouraAuth && MouraAuth.getCurrentUser && MouraAuth.getCurrentUser();
@@ -549,7 +578,8 @@ const GerarPagamentoApp = {
       id,
       criadoEm: agora.toISOString(),
       criadoPor: usuario,
-      contaKey: key,
+      contaKey: g.contaKey,
+      dia: g.dia,
       conta: g.conta,
       total: Math.round(total * 100) / 100,
       itens: itens.map((it) => ({
@@ -587,6 +617,7 @@ const GerarPagamentoApp = {
     const linhas = [
       ["Lote a pagar", lote.id],
       ["Conta de parceria", this.contaLabel(lote.conta)],
+      ["Vencimento", lote.dia ? this.dataBr(lote.dia) : ""],
       ["Gerado em", new Date(lote.criadoEm).toLocaleString("pt-BR")],
       ["Gerado por", lote.criadoPor || ""],
       [],
@@ -637,17 +668,20 @@ const GerarPagamentoApp = {
     }
     const cards = grupos.map((g) => {
       const sem = g.key === "__sem";
-      const marcados = g.itens.filter((it) => it.marcado && !it.loteIntegra);
+      const marcados = g.itens.filter((it) => it.marcado);
       const total = marcados.reduce((t, it) => t + it.aPagar, 0);
-      const disponiveis = g.itens.filter((it) => !it.loteIntegra);
+      const disponiveis = g.itens.filter((it) => !it.emLote);
       const todos = disponiveis.length > 0 && disponiveis.every((it) => it.marcado);
       const gerando = s.gerandoLote === g.key;
+      const jaGerado = !sem && !disponiveis.length;
+      const lotesDoDia = this.lotesDoGrupo(g);
       const linhas = g.itens.map((it) => {
         const tag = it.loteIntegra
           ? `<span class="gp-pill gp-ok">No lote ${this.esc(it.loteIntegra.id)}</span>`
           : (it.loteSienge ? `<span class="gp-pill gp-warn">Já em lote no Sienge${it.loteSienge !== "sim" ? " nº " + this.esc(it.loteSienge) : ""}</span>` : `<span class="gp-pill gp-wait">Em aberto</span>`);
-        return `<tr>
-          <td style="text-align:center;"><input type="checkbox" ${it.marcado && !it.loteIntegra ? "checked" : ""} ${sem || it.loteIntegra || gerando ? "disabled" : ""}
+        return `<tr class="${it.emLote ? "gp-em-lote" : ""}">
+          <td style="text-align:center;"><input type="checkbox" ${it.marcado ? "checked" : ""} ${sem || it.emLote || gerando ? "disabled" : ""}
+            title="${it.emLote ? "Já está em lote; não pode entrar em outro." : ""}"
             onchange="GerarPagamentoApp.toggleItem('${this.esc(it.selKey)}')"></td>
           <td>${this.dataBr(it.vencimento)}</td>
           <td><strong>${this.esc(it.titulo)}</strong>${it.parcela ? `<span class="gp-muted"> / ${this.esc(it.parcela)}</span>` : ""}</td>
@@ -658,20 +692,27 @@ const GerarPagamentoApp = {
           <td class="gp-status">${tag}</td>
         </tr>`;
       }).join("");
-      return `<div class="gp-lote${sem ? " gp-lote-sem" : ""}">
+      const resumo = sem
+        ? "Cadastre a conta em Centros de Custo para incluir estes títulos em lote."
+        : (jaGerado
+          ? `${g.itens.length} título(s) · todos já em lote (${lotesDoDia.map((x) => this.esc(x)).join(", ")})`
+          : `${g.itens.length} título(s) · ${disponiveis.length} disponível(is) · ${marcados.length} marcado(s)${lotesDoDia.length ? ` · ${g.itens.length - disponiveis.length} já em lote` : ""}`);
+      return `<div class="gp-lote${sem ? " gp-lote-sem" : ""}${jaGerado ? " gp-lote-feito" : ""}">
         <div class="gp-lote-h">
           <div>
-            <div class="gp-lote-conta">${sem ? "Sem conta de parceria cadastrada" : this.esc(this.contaLabel(g.conta))}</div>
-            <small>${sem ? "Cadastre a conta em Centros de Custo para incluir estes títulos em lote." : `${g.itens.length} título(s) em aberto · ${marcados.length} marcado(s)`}</small>
+            <div class="gp-lote-conta">${sem ? "Sem conta de parceria cadastrada" : `${this.esc(this.contaLabel(g.conta))} <span class="gp-lote-dia"><i data-lucide="calendar" style="width:13px;height:13px;"></i> ${this.dataBr(g.dia)}</span>`}</div>
+            <small>${resumo}</small>
           </div>
-          ${sem ? "" : `<div class="gp-lote-acoes">
-            <label class="gp-lote-todos"><input type="checkbox" ${todos ? "checked" : ""} ${gerando || !disponiveis.length ? "disabled" : ""} onchange="GerarPagamentoApp.toggleGrupo('${this.esc(g.key)}', this.checked)"> Marcar todos</label>
+          ${sem ? "" : (jaGerado ? `<div class="gp-lote-acoes">
+            <span class="gp-pill gp-ok" style="height:30px;display:inline-flex;align-items:center;gap:6px;padding:0 12px;"><i data-lucide="check-circle-2" style="width:14px;height:14px;"></i> Lote já gerado</span>
+          </div>` : `<div class="gp-lote-acoes">
+            <label class="gp-lote-todos"><input type="checkbox" ${todos ? "checked" : ""} ${gerando ? "disabled" : ""} onchange="GerarPagamentoApp.toggleGrupo('${this.esc(g.key)}', this.checked)"> Marcar todos</label>
             <strong class="gp-lote-total">${this.money(total)}</strong>
-            <button type="button" class="btn btn-primary" ${gerando || !marcados.length ? "disabled" : ""} onclick="GerarPagamentoApp.gerarLote('${this.esc(g.key)}')"
+            <button type="button" class="btn btn-primary" ${s.gerandoLote || !marcados.length ? "disabled" : ""} onclick="GerarPagamentoApp.gerarLote('${this.esc(g.key)}')"
               style="height:36px;width:150px;justify-content:center;display:inline-flex;align-items:center;gap:6px;">
               ${gerando ? '<span class="btn-spin"></span> Gerando…' : '<i data-lucide="layers" style="width:14px;"></i> Gerar lote'}
             </button>
-          </div>`}
+          </div>`)}
         </div>
         <div style="overflow:auto;">
           <table class="gp-table gp-titulos">
@@ -689,10 +730,11 @@ const GerarPagamentoApp = {
     const geradosHtml = gerados.length ? `<div class="gp-lote">
         <div class="gp-lote-h"><div><div class="gp-lote-conta">Lotes gerados com títulos deste período</div></div></div>
         <table class="gp-table gp-titulos">
-          <colgroup><col style="width:16%"><col style="width:32%"><col style="width:9%"><col style="width:12%"><col style="width:15%"><col style="width:16%"></colgroup>
-          <thead><tr><th>Lote</th><th>Conta</th><th>Títulos</th><th style="text-align:right;">Total</th><th>Gerado</th><th></th></tr></thead>
+          <colgroup><col style="width:20%"><col style="width:10%"><col style="width:24%"><col style="width:7%"><col style="width:11%"><col style="width:13%"><col style="width:15%"></colgroup>
+          <thead><tr><th>Lote</th><th>Vencimento</th><th>Conta</th><th>Títulos</th><th style="text-align:right;">Total</th><th>Gerado</th><th></th></tr></thead>
           <tbody>${gerados.map((l) => `<tr>
             <td><strong>${this.esc(l.id)}</strong></td>
+            <td>${l.dia ? this.dataBr(l.dia) : this.esc([...new Set((l.itens || []).map((i) => this.dataBr(i.vencimento)))].join(", "))}</td>
             <td title="${this.esc(this.contaLabel(l.conta))}">${this.esc(this.contaLabel(l.conta))}</td>
             <td>${(l.itens || []).length}</td>
             <td style="text-align:right;">${this.money(l.total)}</td>
@@ -704,7 +746,7 @@ const GerarPagamentoApp = {
           </tr>`).join("")}</tbody>
         </table>
       </div>` : "";
-    return `<p class="gp-nota">Títulos em aberto agrupados pela conta de parceria do centro de custo. O lote fica registrado no Integra e é baixado em Excel para pagamento.</p>${cards}${geradosHtml}`;
+    return `<p class="gp-nota">Títulos em aberto separados por conta de parceria e dia de vencimento: um lote por conta por dia. Título que já está em lote (no Integra ou no Sienge) não entra em outro. O lote fica registrado no Integra e é baixado em Excel para pagamento.</p>${cards}${geradosHtml}`;
   },
 
   grupoStatus(r) {
@@ -739,7 +781,7 @@ const GerarPagamentoApp = {
     const nAbertos = new Set(s.titulos.filter((r) => !r.pago && r.aPagar > 0.009).map((r) => this.chaveTitulo(r.titulo, r.parcela))).size;
     const visoes = `<div class="gp-visoes">
         <button type="button" class="gp-visao${s.visao !== "lotes" ? " is-active" : ""}" onclick="GerarPagamentoApp.setVisao('titulos')"><i data-lucide="list" style="width:14px;"></i> Títulos</button>
-        <button type="button" class="gp-visao${s.visao === "lotes" ? " is-active" : ""}" onclick="GerarPagamentoApp.setVisao('lotes')"><i data-lucide="layers" style="width:14px;"></i> Lotes por conta <b>${nAbertos}</b></button>
+        <button type="button" class="gp-visao${s.visao === "lotes" ? " is-active" : ""}" onclick="GerarPagamentoApp.setVisao('lotes')"><i data-lucide="layers" style="width:14px;"></i> Lotes por conta e dia <b>${nAbertos}</b></button>
       </div>`;
     if (s.visao === "lotes") return visoes + this.lotesHtml();
     const todos = s.titulos;
@@ -854,6 +896,12 @@ const GerarPagamentoApp = {
           #gerar-pagamento-root .gp-lote-sem .gp-lote-h { background:#fef2f2; }
           #gerar-pagamento-root .gp-lote-conta { font-weight:800; color:#105436; font-size:0.92rem; }
           #gerar-pagamento-root .gp-lote-sem .gp-lote-conta { color:#b91c1c; }
+          #gerar-pagamento-root .gp-lote-dia { display:inline-flex; align-items:center; gap:4px; margin-left:8px; padding:2px 10px; border-radius:999px; background:#105436; color:#fff; font-size:0.78rem; font-weight:700; vertical-align:middle; }
+          #gerar-pagamento-root .gp-lote-feito { opacity:0.8; }
+          #gerar-pagamento-root .gp-lote-feito .gp-lote-h { background:#f1f5f9; }
+          #gerar-pagamento-root .gp-lote-feito .gp-lote-dia { background:#64748b; }
+          #gerar-pagamento-root tr.gp-em-lote td { color:#94a3b8; }
+          #gerar-pagamento-root tr.gp-em-lote td strong { color:#64748b; }
           #gerar-pagamento-root .gp-lote-h small { color:#64748b; font-size:0.75rem; }
           #gerar-pagamento-root .gp-lote-acoes { display:flex; align-items:center; gap:14px; }
           #gerar-pagamento-root .gp-lote-todos { display:inline-flex; align-items:center; gap:6px; font-size:0.8rem; color:#334155; cursor:pointer; }

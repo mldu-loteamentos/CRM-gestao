@@ -554,7 +554,8 @@ const ConfigUsersApp = {
       name: "Marketing", icon: "megaphone", key: "mod_mkt",
       submodules: [
         { name: "Budget", key: "sub_mkt_budget", actions: [{ id: "budget", label: "Budget", permBase: "sub_mkt_geral_budget" }] },
-        { name: "Eventos", key: "sub_mkt_eventos", actions: [{ id: "eventos", label: "Eventos", permBase: "sub_mkt_geral_eventos" }] }
+        { name: "Eventos", key: "sub_mkt_eventos", actions: [{ id: "eventos", label: "Eventos", permBase: "sub_mkt_geral_eventos" }] },
+        { name: "Configurações", key: "sub_mkt_config", actions: [{ id: "config", label: "Configurações", permBase: "sub_mkt_geral_config" }] }
       ]
     },
     {

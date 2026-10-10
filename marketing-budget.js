@@ -1,7 +1,8 @@
 /* Marketing · Budget
-   Verba = VGV da obra (Sienge) × % de marketing. Consome com os títulos a pagar dos planos financeiros
-   de marketing do centro de custo (pagos = realizado, em aberto = comprometido) e mede o custo de
-   aquisição por unidade vendida com os contratos de venda do empreendimento. */
+   Verba = VGV da obra (Sienge) × % de marketing (definido em Configurações). Consome com os títulos a pagar
+   dos planos financeiros de marketing dos centros de custo configurados para a obra (pagos = realizado,
+   em aberto = comprometido) e mede o custo de aquisição por unidade vendida com os contratos de venda.
+   A aba Perfil da venda cruza sexo e idade dos clientes com a situação de pagamento e os cancelamentos. */
 const MarketingBudgetApp = {
   CONFIG_COLLECTION: "marketing_budget_config",
   CONFIG_LOCAL: "crm_marketing_budget_config",
@@ -26,9 +27,16 @@ const MarketingBudgetApp = {
     distratos: [],
     eventos: [],
     filtroGasto: "todos",
+    ccsCfg: [],
+    aba: "budget",
+    adimpl: { status: "", porVenda: {} },
+    perfis: { status: "", map: {}, feitos: 0, total: 0 },
     gen: 0
   },
   charts: {},
+  PERFIL_LOCAL: "crm_mkt_perfil_clientes",
+  FAIXAS: ["Até 25", "26 a 35", "36 a 45", "46 a 55", "56 a 65", "Acima de 65", "Sem nascimento"],
+  SEXOS: { F: "Feminino", M: "Masculino", PJ: "Pessoa jurídica", "?": "Não informado" },
 
   esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
@@ -63,13 +71,8 @@ const MarketingBudgetApp = {
     return this.state.costCenters.find((c) => String(c.id) === String(this.state.ccId)) || null;
   },
 
-  async init() {
+  async carregarCcs() {
     const s = this.state;
-    if (!s.startDate) {
-      const d = new Date();
-      s.startDate = d.getFullYear() + "-01-01";
-      s.endDate = d.getFullYear() + "-12-31";
-    }
     if (!s.costCenters.length) {
       try {
         const list = window.SiengeApiService && SiengeApiService.getCostCenters ? await SiengeApiService.getCostCenters() : [];
@@ -78,7 +81,29 @@ const MarketingBudgetApp = {
         s.costCenters = [];
       }
     }
+    return s.costCenters;
+  },
+
+  async init() {
+    const s = this.state;
+    if (!s.startDate) {
+      const d = new Date();
+      s.startDate = d.getFullYear() + "-01-01";
+      s.endDate = d.getFullYear() + "-12-31";
+    }
+    await this.carregarCcs();
     this.render();
+  },
+
+  /** Centros de custo que compõem os gastos da obra; sem configuração, só o centro da própria obra. */
+  ccsDaConfig(cfg, obraId) {
+    const ids = cfg && Array.isArray(cfg.ccs) && cfg.ccs.length ? cfg.ccs.map(String) : [String(obraId)];
+    return [...new Set(ids)];
+  },
+
+  abrirConfig() {
+    if (window.MarketingConfigApp) MarketingConfigApp.state.ccId = String(this.state.ccId || "");
+    if (typeof switchTab === "function") switchTab("marketing-config", "Configurações");
   },
 
   /* ---------- configuração (% de marketing e planos financeiros) ---------- */
@@ -121,20 +146,6 @@ const MarketingBudgetApp = {
       console.warn("[Budget] gravar config", key, e);
       return false;
     }
-  },
-
-  async salvarPct() {
-    const el = document.getElementById("mkb-pct");
-    const raw = String((el && el.value) || "").replace(",", ".");
-    const pct = Number(raw);
-    if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
-      alert("Informe um percentual entre 0 e 100.");
-      return;
-    }
-    this.state.pct = pct;
-    const ok = await this.gravarConfig(String(this.state.ccId), { pct });
-    this.render();
-    if (!ok) alert("O percentual ficou salvo neste computador, mas não consegui gravar no Firebase.");
   },
 
   async toggleCategoria(id) {
@@ -184,6 +195,8 @@ const MarketingBudgetApp = {
     s.rows = [];
     s.vendas = [];
     s.distratos = [];
+    s.adimpl = { status: "", porVenda: {} };
+    s.perfis = { status: "", map: {}, feitos: 0, total: 0 };
     this.render();
     try {
       this.setProgress("Lendo o cadastro da obra (VGV)…");
@@ -195,12 +208,19 @@ const MarketingBudgetApp = {
       if (gen !== s.gen) return;
       s.obra = obra;
       s.pct = cfg && Number.isFinite(Number(cfg.pct)) ? Number(cfg.pct) : 0;
+      s.ccsCfg = this.ccsDaConfig(cfg, cc.id);
       s.catSel = catCfg && Array.isArray(catCfg.ids) ? catCfg.ids.map(String) : null;
       s.eventos = await this.lerEventos(cc.id);
-      this.setProgress("Buscando os títulos a pagar do empreendimento…");
-      const bills = await this.buscarTitulos(cc, gen);
-      if (gen !== s.gen) return;
-      this.montarGastos(bills, cc);
+      const bills = [];
+      for (let i = 0; i < s.ccsCfg.length; i++) {
+        const alvo = s.costCenters.find((c) => String(c.id) === s.ccsCfg[i]) || { id: s.ccsCfg[i] };
+        const rotulo = s.ccsCfg.length > 1 ? ` · centro ${alvo.id} (${i + 1} de ${s.ccsCfg.length})` : "";
+        this.setProgress("Buscando os títulos a pagar" + rotulo + "…");
+        const parte = await this.buscarTitulos(alvo, gen, rotulo);
+        if (gen !== s.gen) return;
+        bills.push.apply(bills, parte);
+      }
+      this.montarGastos(bills, s.ccsCfg);
       this.setProgress("Buscando as vendas do empreendimento…");
       await this.buscarVendas(cc, gen);
     } catch (e) {
@@ -212,6 +232,29 @@ const MarketingBudgetApp = {
     s.loading = false;
     s.progress = "";
     this.render();
+    if (!s.error) this.carregarComplementos(cc, gen);
+  },
+
+  /** Depois do budget na tela: situação de pagamento das vendas e perfil dos clientes. */
+  async carregarComplementos(cc, gen) {
+    const s = this.state;
+    if (!s.vendas.length && !s.distratos.length) return;
+    try {
+      await this.carregarAdimplencia(cc, gen);
+    } catch (e) {
+      console.warn("[Budget] adimplência", e);
+      if (gen === s.gen) s.adimpl.status = "erro";
+    }
+    if (gen !== s.gen) return;
+    this.repintarVendas();
+    if (s.aba === "perfil") this.render();
+    try {
+      await this.carregarPerfis(gen);
+    } catch (e) {
+      console.warn("[Budget] perfil", e);
+      if (gen === s.gen) s.perfis.status = "erro";
+    }
+    if (gen === s.gen && s.aba === "perfil") this.render();
   },
 
   async lerVgv(cc) {
@@ -248,7 +291,7 @@ const MarketingBudgetApp = {
     return list.filter((b) => String(b.costCenterId) === String(ccId));
   },
 
-  async buscarTitulos(cc, gen) {
+  async buscarTitulos(cc, gen, rotulo) {
     const base = window.ComprasControleApp || window.ComprasPrevisoesApp;
     if (!base || typeof base.outcomeRange !== "function") throw new Error("O módulo de contas a pagar não está disponível.");
     const s = this.state;
@@ -264,15 +307,16 @@ const MarketingBudgetApp = {
     const bills = [];
     for (let i = 0; i < faixas.length; i++) {
       if (gen !== s.gen) return [];
-      this.setProgress(`Buscando os títulos a pagar do empreendimento · ${i + 1} de ${faixas.length}`);
+      this.setProgress(`Buscando os títulos a pagar${rotulo || " do empreendimento"} · período ${i + 1} de ${faixas.length}`);
       const parte = await api.outcomeRange(faixas[i].start, faixas[i].end, companyId);
       if (Array.isArray(parte)) bills.push.apply(bills, parte);
     }
     return bills;
   },
 
-  montarGastos(bills, cc) {
+  montarGastos(bills, ccIds) {
     const app = window.ComprasControleApp || window.ComprasPrevisoesApp;
+    const ccSet = new Set((ccIds || []).map(String));
     const lista = (x) => (Array.isArray(x) ? x : (x ? [x] : []));
     const cats = {};
     const rows = [];
@@ -281,7 +325,7 @@ const MarketingBudgetApp = {
       if (!bill || bill.billId == null) return;
       const docId = app.docCode(bill.documentIdentificationId);
       const docNome = bill.documentIdentificationName || "";
-      const minhas = lista(bill.paymentsCategories).filter((c) => c && String(c.costCenterId) === String(cc.id));
+      const minhas = lista(bill.paymentsCategories).filter((c) => c && ccSet.has(String(c.costCenterId)));
       if (!minhas.length) return;
       const pays = lista(bill.payments);
       const movsDe = (p) => {
@@ -315,13 +359,14 @@ const MarketingBudgetApp = {
         const catNome = cat.financialCategoryName || "Sem plano financeiro";
         const rate = cat.financialCategoryRate != null ? Number(cat.financialCategoryRate) / 100 : 1;
         const fat = Number.isFinite(rate) ? rate : 1;
+        const ccId = String(cat.costCenterId);
         const push = (status, valor, data) => {
           if (!(valor > 0.009)) return;
-          const key = [titulo, parcela, catId, status].join("|");
+          const key = [titulo, parcela, ccId, catId, status].join("|");
           if (vistos[key]) return;
           vistos[key] = true;
           rows.push({
-            titulo, parcela, catId, catNome, status, data, vencimento: venc, valor,
+            titulo, parcela, ccId, catId, catNome, status, data, vencimento: venc, valor,
             credor: String(bill.creditorName || "").trim(),
             documento: [docId, bill.documentNumber].filter(Boolean).join(" ")
           });
@@ -392,10 +437,192 @@ const MarketingBudgetApp = {
       dataCancel: String(c.cancellationDate || "").slice(0, 10),
       unidades: units.length || 1,
       unidadeNomes: units.map((u) => u.name).filter(Boolean).join(", "),
+      unidadeIds: units.map((u) => String(u.id != null ? u.id : "")).filter(Boolean),
+      billId: c.receivableBillId != null ? String(c.receivableBillId) : "",
+      clienteId: cust.id != null ? String(cust.id) : "",
       cliente: cust.name || "",
       valor: Number(c.totalSellingValue || c.value || 0) || 0,
       situacao: sit === "3" || /cancel/i.test(sit) ? "Cancelado" : (sit === "4" ? "Quitado" : "Emitido")
     };
+  },
+
+  /* ---------- situação de pagamento (extrato do Contas a Receber) ---------- */
+  hoje() {
+    return window.EstoqueComercialApp && EstoqueComercialApp.todayStr ? EstoqueComercialApp.todayStr() : this.iso(new Date());
+  },
+
+  async carregarAdimplencia(cc, gen) {
+    const s = this.state;
+    const est = window.EstoqueComercialApp;
+    if (!est || typeof est.fetchExtratoCc !== "function") {
+      s.adimpl.status = "erro";
+      return;
+    }
+    s.adimpl = { status: "carregando", porVenda: {} };
+    this.repintarVendas();
+    const bills = est.agruparExtratoCc(await est.fetchExtratoCc(cc.id));
+    if (gen !== s.gen) return;
+    const porId = {};
+    const porCliUnid = {};
+    bills.forEach((b) => {
+      porId[b.id] = b;
+      const cli = String((b.cliente && b.cliente.id) || "");
+      b.units.forEach((u) => {
+        porCliUnid[cli + "|" + u.id] = b;
+        if (u.name) porCliUnid[cli + "|n:" + String(u.name).trim().toUpperCase()] = b;
+      });
+    });
+    const hoje = this.hoje();
+    const porVenda = {};
+    s.vendas.concat(s.distratos).forEach((v) => {
+      if (porVenda[v.id]) return;
+      if (v.situacao === "Cancelado") { porVenda[v.id] = { status: "cancelado" }; return; }
+      let b = v.billId ? porId[v.billId] : null;
+      if (!b) b = v.unidadeIds.map((u) => porCliUnid[v.clienteId + "|" + u]).find(Boolean) || null;
+      if (!b && v.unidadeNomes) b = v.unidadeNomes.split(",").map((n) => porCliUnid[v.clienteId + "|n:" + n.trim().toUpperCase()]).find(Boolean) || null;
+      if (!b) { porVenda[v.id] = { status: "sem-titulo" }; return; }
+      const atrasada = b.abertas.find((p) => p.overdue);
+      if (atrasada) {
+        const dias = Math.max(1, Math.round((new Date(hoje + "T12:00:00") - new Date(atrasada.due + "T12:00:00")) / 86400000));
+        porVenda[v.id] = { status: "inadimplente", desde: atrasada.due, dias, vencido: b.vencido };
+      } else {
+        porVenda[v.id] = { status: b.aberto > 0.009 ? "adimplente" : "quitado" };
+      }
+    });
+    s.adimpl = { status: "ok", porVenda };
+  },
+
+  atrasoHtml(v) {
+    const a = this.state.adimpl;
+    if (v.situacao === "Cancelado") return `<span class="mkb-muted">—</span>`;
+    if (a.status === "carregando" || a.status === "") return `<span class="mkb-muted">Consultando…</span>`;
+    if (a.status === "erro") return `<span class="mkb-muted" title="Não consegui ler o Contas a Receber">—</span>`;
+    const p = a.porVenda[v.id] || {};
+    if (p.status === "inadimplente") {
+      return `<span class="mkb-atraso" title="Inadimplente · ${this.money(p.vencido)} vencido">${this.dataBr(p.desde)} <small>(${p.dias} dia${p.dias === 1 ? "" : "s"})</small></span>`;
+    }
+    if (p.status === "adimplente") return `<span class="mkb-st mkb-st-realizado" title="Adimplente">Em dia</span>`;
+    if (p.status === "quitado") return `<span class="mkb-st mkb-st-previsao" title="Todas as parcelas pagas">Quitado</span>`;
+    return `<span class="mkb-muted" title="Não achei o título a receber deste contrato">Sem título</span>`;
+  },
+
+  repintarVendas() {
+    const box = document.getElementById("mkb-vendas");
+    if (box) box.innerHTML = this.vendasHtml();
+  },
+
+  /* ---------- perfil dos clientes (sexo e idade) ---------- */
+  perfilCache() {
+    try { return JSON.parse(localStorage.getItem(this.PERFIL_LOCAL) || "{}") || {}; } catch (e) { return {}; }
+  },
+
+  perfilDe(c) {
+    if (!c || typeof c !== "object") return null;
+    const doc = String(c.cnpj || "").replace(/\D/g, "");
+    const pj = /jur/i.test(String(c.personType || "")) || doc.length === 14;
+    const sx = String(c.sex || c.gender || "").trim().toUpperCase();
+    const sexo = pj ? "PJ" : (sx === "F" || sx.startsWith("FEM") ? "F" : (sx === "M" || sx.startsWith("MASC") ? "M" : "?"));
+    const nasc = /^\d{4}-\d{2}-\d{2}/.test(String(c.birthDate || "")) ? String(c.birthDate).slice(0, 10) : "";
+    return { sexo, nasc: pj ? "" : nasc };
+  },
+
+  async lerPerfilCliente(id) {
+    const fc = window.firebaseCollections;
+    let p = null;
+    if (window.firebaseDb && fc && fc.getDoc) {
+      try {
+        const snap = await fc.getDoc(fc.doc(window.firebaseDb, "sienge_customers", String(id)));
+        if (snap.exists()) p = this.perfilDe(snap.data());
+      } catch (e) {}
+    }
+    if ((!p || p.sexo === "?" || (p.sexo !== "PJ" && !p.nasc)) && typeof window.siengeFetchWithRetry === "function") {
+      try {
+        const q = this.perfilDe(await window.siengeFetchWithRetry(`/customers/${encodeURIComponent(id)}`));
+        if (q) p = { sexo: q.sexo !== "?" ? q.sexo : ((p && p.sexo) || "?"), nasc: q.nasc || (p && p.nasc) || "" };
+      } catch (e) {}
+    }
+    return p;
+  },
+
+  async carregarPerfis(gen) {
+    const s = this.state;
+    const ids = [...new Set(s.vendas.concat(s.distratos).map((v) => v.clienteId).filter(Boolean))];
+    const cache = this.perfilCache();
+    const limite = Date.now() - 30 * 86400000;
+    const map = {};
+    const faltam = [];
+    ids.forEach((id) => {
+      const c = cache[id];
+      if (c && c.at > limite) map[id] = c;
+      else faltam.push(id);
+    });
+    s.perfis = { status: faltam.length ? "carregando" : "ok", map, feitos: ids.length - faltam.length, total: ids.length };
+    if (s.aba === "perfil") this.render();
+    let i = 0;
+    let ultimaPintura = Date.now();
+    const worker = async () => {
+      while (i < faltam.length) {
+        if (gen !== s.gen) return;
+        const id = faltam[i++];
+        const p = await this.lerPerfilCliente(id);
+        if (p) {
+          map[id] = { ...p, at: Date.now() };
+          cache[id] = map[id];
+        }
+        s.perfis.feitos += 1;
+        const el = document.getElementById("mkb-perfil-prog");
+        if (el) el.textContent = `Lendo o cadastro dos clientes · ${s.perfis.feitos} de ${s.perfis.total}`;
+        if (s.aba === "perfil" && Date.now() - ultimaPintura > 4000) {
+          ultimaPintura = Date.now();
+          this.render();
+        }
+      }
+    };
+    await Promise.all([worker(), worker(), worker(), worker()]);
+    if (gen !== s.gen) return;
+    try { localStorage.setItem(this.PERFIL_LOCAL, JSON.stringify(cache)); } catch (e) {}
+    s.perfis.status = "ok";
+  },
+
+  idade(nasc, data) {
+    if (!nasc) return null;
+    const ref = data || this.hoje();
+    let a = Number(ref.slice(0, 4)) - Number(nasc.slice(0, 4));
+    if (ref.slice(5, 10) < nasc.slice(5, 10)) a -= 1;
+    return a >= 14 && a <= 110 ? a : null;
+  },
+
+  faixa(idade) {
+    if (idade == null) return "Sem nascimento";
+    if (idade <= 25) return "Até 25";
+    if (idade <= 35) return "26 a 35";
+    if (idade <= 45) return "36 a 45";
+    if (idade <= 55) return "46 a 55";
+    if (idade <= 65) return "56 a 65";
+    return "Acima de 65";
+  },
+
+  /** Cada contrato com sexo, faixa etária, situação de pagamento e (se cancelado) tempo até o cancelamento. */
+  linhasPerfil() {
+    const s = this.state;
+    const vistos = new Set();
+    return s.vendas.concat(s.distratos).filter((v) => !vistos.has(v.id) && vistos.add(v.id)).map((v) => {
+      const p = s.perfis.map[v.clienteId] || null;
+      const sexo = p ? p.sexo : "?";
+      const idade = p && sexo !== "PJ" ? this.idade(p.nasc, v.data) : null;
+      const pag = s.adimpl.porVenda[v.id] || {};
+      const cancelado = v.situacao === "Cancelado";
+      let meses = null;
+      if (cancelado && v.data && v.dataCancel) {
+        meses = Math.max(0, Math.round((new Date(v.dataCancel + "T12:00:00") - new Date(v.data + "T12:00:00")) / (30.44 * 86400000)));
+      }
+      return {
+        v, sexo, idade, cancelado, meses,
+        faixa: sexo === "PJ" ? "Pessoa jurídica" : this.faixa(idade),
+        pag: pag.status || "",
+        vencido: pag.vencido || 0
+      };
+    });
   },
 
   /* ---------- números ---------- */
@@ -462,14 +689,15 @@ const MarketingBudgetApp = {
         <td><strong>${this.esc(x.titulo)}</strong>${x.parcela ? `<span class="mkb-muted"> / ${this.esc(x.parcela)}</span>` : ""}</td>
         <td title="${this.esc(x.credor)}">${this.esc(x.credor)}</td>
         <td>${this.esc(x.documento || "—")}</td>
+        <td>${this.esc(x.ccId || "—")}</td>
         <td title="${this.esc(x.catNome)}">${this.esc(x.catNome)}</td>
         <td style="text-align:right;">${this.money(x.valor)}</td>
       </tr>`).join("")
-      : `<tr><td colspan="7" class="mkb-vazio">Nenhum gasto ${s.filtroGasto === "todos" ? "nos planos de marketing selecionados" : "nesta situação"} no período.</td></tr>`;
+      : `<tr><td colspan="8" class="mkb-vazio">Nenhum gasto ${s.filtroGasto === "todos" ? "nos planos de marketing selecionados" : "nesta situação"} no período.</td></tr>`;
     return `<div class="mkb-chips">${chips}</div>
       <div class="mkb-tablewrap"><table class="mkb-table">
-        <colgroup><col style="width:9%"><col style="width:11%"><col style="width:9%"><col style="width:22%"><col style="width:11%"><col style="width:24%"><col style="width:14%"></colgroup>
-        <thead><tr><th>Data</th><th>Situação</th><th>Título</th><th>Credor</th><th>Documento</th><th>Plano financeiro</th><th style="text-align:right;">Valor</th></tr></thead>
+        <colgroup><col style="width:9%"><col style="width:11%"><col style="width:9%"><col style="width:20%"><col style="width:10%"><col style="width:8%"><col style="width:20%"><col style="width:13%"></colgroup>
+        <thead><tr><th>Data</th><th>Situação</th><th>Título</th><th>Credor</th><th>Documento</th><th>Centro de custo</th><th>Plano financeiro</th><th style="text-align:right;">Valor</th></tr></thead>
         <tbody>${linhas}</tbody>
       </table></div>`;
   },
@@ -484,11 +712,12 @@ const MarketingBudgetApp = {
         <td title="${this.esc(v.cliente)}">${this.esc(v.cliente || "—")}</td>
         <td style="text-align:right;">${this.money(v.valor)}</td>
         <td><span class="mkb-st ${v.situacao === "Cancelado" ? "mkb-st-cancel" : "mkb-st-realizado"}">${v.situacao}${v.situacao === "Cancelado" && v.dataCancel ? " em " + this.dataBr(v.dataCancel) : ""}</span></td>
+        <td>${this.atrasoHtml(v)}</td>
       </tr>`).join("")
-      : `<tr><td colspan="6" class="mkb-vazio">Nenhuma venda deste empreendimento no período.</td></tr>`;
+      : `<tr><td colspan="7" class="mkb-vazio">Nenhuma venda deste empreendimento no período.</td></tr>`;
     return `<div class="mkb-tablewrap"><table class="mkb-table">
-        <colgroup><col style="width:11%"><col style="width:14%"><col style="width:20%"><col style="width:27%"><col style="width:13%"><col style="width:15%"></colgroup>
-        <thead><tr><th>Emissão</th><th>Contrato</th><th>Unidade</th><th>Cliente</th><th style="text-align:right;">Valor</th><th>Situação</th></tr></thead>
+        <colgroup><col style="width:10%"><col style="width:13%"><col style="width:16%"><col style="width:25%"><col style="width:11%"><col style="width:12%"><col style="width:13%"></colgroup>
+        <thead><tr><th>Emissão</th><th>Contrato</th><th>Unidade</th><th>Cliente</th><th style="text-align:right;">Valor</th><th>Situação</th><th>Atrasado desde</th></tr></thead>
         <tbody>${linhas}</tbody>
       </table></div>`;
   },
@@ -497,7 +726,7 @@ const MarketingBudgetApp = {
     const s = this.state;
     const sel = new Set(this.categoriasSelecionadas());
     const list = Object.values(s.categorias).sort((a, b) => (sel.has(b.id) - sel.has(a.id)) || b.total - a.total);
-    if (!list.length) return `<p class="mkb-muted" style="margin:0;">Nenhum título a pagar deste centro de custo no período.</p>`;
+    if (!list.length) return `<p class="mkb-muted" style="margin:0;">Nenhum título a pagar ${this.state.ccsCfg.length > 1 ? "destes centros de custo" : "deste centro de custo"} no período.</p>`;
     return `<div class="mkb-cats">${list.map((c) => `<button type="button" class="mkb-cat${sel.has(c.id) ? " is-on" : ""}" onclick="MarketingBudgetApp.toggleCategoria('${this.esc(c.id)}')" title="${sel.has(c.id) ? "Considerado marketing — clique para tirar" : "Clique para considerar marketing"}">
         ${sel.has(c.id) ? '<i data-lucide="check" style="width:12px;height:12px;"></i>' : ""}${this.esc(c.nome)} <b>${this.moneyShort(c.total)}</b></button>`).join("")}</div>`;
   },
@@ -521,11 +750,10 @@ const MarketingBudgetApp = {
         <div class="mkb-cfg-item">
           <span>% do VGV para marketing</span>
           <div class="mkb-pct">
-            <input id="mkb-pct" type="text" inputmode="decimal" value="${String(s.pct || 0).replace(".", ",")}">
-            <em>%</em>
-            <button type="button" class="btn btn-primary" onclick="MarketingBudgetApp.salvarPct()">Salvar</button>
+            <strong>${s.pct > 0 ? String(s.pct).replace(".", ",") + "%" : "—"}</strong>
+            <button type="button" class="btn btn-outline" onclick="MarketingBudgetApp.abrirConfig()" title="Percentual e centros de custo da obra"><i data-lucide="settings" style="width:14px;"></i> Configurar</button>
           </div>
-          <small>Fica salvo para este empreendimento</small>
+          <small title="${this.esc(s.ccsCfg.join(", "))}">${s.pct > 0 ? "" : "Sem percentual configurado · "}Gastos dos centros de custo: ${this.esc(s.ccsCfg.join(", ") || "—")}</small>
         </div>
         <div class="mkb-cfg-item mkb-verba">
           <span>Verba de marketing</span>
@@ -564,9 +792,212 @@ const MarketingBudgetApp = {
       </div>
 
       <div class="mkb-card">
-        <div class="mkb-card-h"><h3>Vendas do empreendimento no período</h3><small>Contratos de venda do Sienge emitidos no período e distratos do período</small></div>
-        ${this.vendasHtml()}
+        <div class="mkb-card-h"><h3>Vendas do empreendimento no período</h3><small>Contratos de venda do Sienge emitidos no período e distratos do período · Atrasado desde = parcela vencida mais antiga no Contas a Receber</small></div>
+        <div id="mkb-vendas">${this.vendasHtml()}</div>
       </div>`;
+  },
+
+  /* ---------- aba Perfil da venda ---------- */
+  setAba(aba) {
+    if (this.state.aba === aba) return;
+    this.state.aba = aba;
+    this.render();
+  },
+
+  abasHtml() {
+    const s = this.state;
+    const aba = (id, rotulo, ic) => `<button type="button" class="mkb-tab${s.aba === id ? " is-active" : ""}" onclick="MarketingBudgetApp.setAba('${id}')"><i data-lucide="${ic}" style="width:14px;height:14px;"></i> ${rotulo}</button>`;
+    return `<div class="mkb-tabs">${aba("budget", "Budget", "wallet")}${aba("perfil", "Perfil da venda", "users")}</div>`;
+  },
+
+  pct(n, d) {
+    return d > 0 ? ((n / d) * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "%" : "—";
+  },
+
+  grupos(lista, chave, ordem) {
+    const g = {};
+    lista.forEach((x) => {
+      const k = chave(x);
+      const o = g[k] || (g[k] = { nome: k, total: 0, emDia: 0, atraso: 0, vencido: 0, cancelados: 0, valor: 0 });
+      o.total += 1;
+      o.valor += x.v.valor;
+      if (x.cancelado) o.cancelados += 1;
+      else if (x.pag === "inadimplente") { o.atraso += 1; o.vencido += x.vencido; }
+      else if (x.pag === "adimplente" || x.pag === "quitado") o.emDia += 1;
+    });
+    return ordem.filter((k) => g[k]).map((k) => g[k]);
+  },
+
+  ordemFaixas() {
+    return this.FAIXAS.concat(["Pessoa jurídica"]);
+  },
+
+  ordemSexos() {
+    return ["Feminino", "Masculino", "Pessoa jurídica", "Não informado"];
+  },
+
+  linhaGrupoHtml(g) {
+    const base = g.emDia + g.atraso;
+    const p = base > 0 ? (g.atraso / base) * 100 : 0;
+    const cor = p >= 20 ? "#b91c1c" : (p >= 10 ? "#f37021" : "#105436");
+    return `<tr>
+      <td>${this.esc(g.nome)}</td>
+      <td style="text-align:right;">${g.total}</td>
+      <td style="text-align:right;">${g.emDia}</td>
+      <td style="text-align:right;">${g.atraso}</td>
+      <td><div class="mkb-pbar"><div class="mkb-bar"><i style="width:${Math.min(100, p)}%;background:${cor};"></i></div><b style="color:${cor};">${base > 0 ? this.pct(g.atraso, base) : "—"}</b></div></td>
+      <td style="text-align:right;">${g.vencido > 0 ? this.money(g.vencido) : "—"}</td>
+    </tr>`;
+  },
+
+  perfilHtml() {
+    const s = this.state;
+    const L = this.linhasPerfil();
+    const ativos = L.filter((x) => !x.cancelado);
+    const canc = L.filter((x) => x.cancelado);
+    if (!L.length) return `<div class="mkb-card mkb-vazio">Nenhuma venda nem distrato deste empreendimento no período.</div>`;
+    const carregando = [];
+    if (s.adimpl.status === "carregando" || s.adimpl.status === "") carregando.push("Lendo o Contas a Receber para saber quem paga em dia…");
+    if (s.perfis.status === "carregando" || s.perfis.status === "") carregando.push(`Lendo o cadastro dos clientes · ${s.perfis.feitos} de ${s.perfis.total}`);
+    const aviso = carregando.length ? `<div class="mkb-card mkb-perfil-aviso"><div class="spinner" style="width:18px;height:18px;border-width:3px;margin:0;"></div><span id="mkb-perfil-prog">${this.esc(carregando[carregando.length - 1])}</span></div>` : "";
+    const erros = [];
+    if (s.adimpl.status === "erro") erros.push("Não consegui ler o Contas a Receber; a situação de pagamento ficou de fora.");
+    if (s.perfis.status === "erro") erros.push("Não consegui ler o cadastro de parte dos clientes.");
+    const pf = ativos.filter((x) => x.sexo === "F" || x.sexo === "M");
+    const mulheres = pf.filter((x) => x.sexo === "F").length;
+    const homens = pf.length - mulheres;
+    const comIdade = ativos.filter((x) => x.idade != null);
+    const idadeMedia = comIdade.length ? comIdade.reduce((t, x) => t + x.idade, 0) / comIdade.length : null;
+    const comPag = ativos.filter((x) => ["adimplente", "inadimplente", "quitado"].includes(x.pag));
+    const atraso = comPag.filter((x) => x.pag === "inadimplente");
+    const vencido = atraso.reduce((t, x) => t + x.vencido, 0);
+    const semTitulo = ativos.filter((x) => x.pag === "sem-titulo").length;
+    const cancMeses = canc.filter((x) => x.meses != null);
+    const mediaMeses = cancMeses.length ? cancMeses.reduce((t, x) => t + x.meses, 0) / cancMeses.length : null;
+    const sexoNome = (x) => this.SEXOS[x.sexo] || "Não informado";
+    const gSexo = this.grupos(ativos, sexoNome, this.ordemSexos());
+    const gFaixa = this.grupos(ativos, (x) => x.faixa, this.ordemFaixas());
+    const cSexo = this.grupos(L, sexoNome, this.ordemSexos());
+    const cFaixa = this.grupos(L, (x) => x.faixa, this.ordemFaixas());
+    const tabelaPag = `<div class="mkb-tablewrap"><table class="mkb-table mkb-table-perfil">
+        <colgroup><col style="width:24%"><col style="width:11%"><col style="width:11%"><col style="width:11%"><col style="width:26%"><col style="width:17%"></colgroup>
+        <thead><tr><th>Grupo</th><th style="text-align:right;">Contratos</th><th style="text-align:right;">Em dia</th><th style="text-align:right;">Em atraso</th><th>% em atraso</th><th style="text-align:right;">Vencido</th></tr></thead>
+        <tbody>
+          <tr class="mkb-grp"><td colspan="6">Por sexo</td></tr>${gSexo.map((g) => this.linhaGrupoHtml(g)).join("")}
+          <tr class="mkb-grp"><td colspan="6">Por faixa etária (idade na data da venda)</td></tr>${gFaixa.map((g) => this.linhaGrupoHtml(g)).join("")}
+        </tbody>
+      </table></div>`;
+    const taxa = (lista) => lista.map((g) => `<tr><td>${this.esc(g.nome)}</td><td style="text-align:right;">${g.cancelados}</td><td style="text-align:right;">${g.total}</td><td style="text-align:right;"><b style="color:${g.cancelados ? "#b91c1c" : "#64748b"};">${this.pct(g.cancelados, g.total)}</b></td></tr>`).join("");
+    const listaCanc = canc.slice().sort((a, b) => String(b.v.dataCancel || "").localeCompare(String(a.v.dataCancel || ""))).map((x) => `<tr>
+        <td>${this.dataBr(x.v.dataCancel)}</td>
+        <td><strong>${this.esc(x.v.numero)}</strong></td>
+        <td title="${this.esc(x.v.cliente)}">${this.esc(x.v.cliente || "—")}</td>
+        <td>${this.esc(sexoNome(x))}</td>
+        <td style="text-align:right;">${x.idade != null ? x.idade + " anos" : "—"}</td>
+        <td>${this.dataBr(x.v.data)}</td>
+        <td style="text-align:right;">${x.meses == null ? "—" : (x.meses === 0 ? "menos de 1 mês" : x.meses + (x.meses === 1 ? " mês" : " meses"))}</td>
+        <td style="text-align:right;">${this.money(x.v.valor)}</td>
+      </tr>`).join("");
+    return `${aviso}
+      ${erros.length ? `<div class="mkb-card" style="color:#b91c1c;font-size:0.82rem;">${erros.map((e) => this.esc(e)).join("<br>")}</div>` : ""}
+      <div class="mkb-kpis">
+        ${this.kpi("Contratos ativos", ativos.length.toLocaleString("pt-BR"), `${canc.length} cancelado(s) no período`, "#6366f1")}
+        ${this.kpi("Mulheres", this.pct(mulheres, pf.length), `${mulheres} contrato(s) · pessoa física`, "#db2777")}
+        ${this.kpi("Homens", this.pct(homens, pf.length), `${homens} contrato(s) · pessoa física`, "#0ea5e9")}
+        ${this.kpi("Idade média", idadeMedia != null ? Math.round(idadeMedia) + " anos" : "—", `${comIdade.length} com data de nascimento`, "#0f766e")}
+        ${this.kpi("Em atraso", this.pct(atraso.length, comPag.length), `${atraso.length} de ${comPag.length} contrato(s)${semTitulo ? ` · ${semTitulo} sem título` : ""}`, atraso.length ? "#b91c1c" : "#105436")}
+        ${this.kpi("Valor vencido", this.money(vencido), "Parcelas vencidas e não pagas", "#f37021")}
+        ${this.kpi("Cancelamentos", canc.length.toLocaleString("pt-BR"), this.pct(canc.length, L.length) + " dos contratos do período", "#b91c1c")}
+        ${this.kpi("Tempo até cancelar", mediaMeses != null ? mediaMeses.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + (Math.abs(mediaMeses - 1) < 0.05 ? " mês" : " meses") : "—", "Média entre a venda e o cancelamento", "#64748b")}
+      </div>
+
+      <div class="mkb-charts mkb-charts-3">
+        <div class="mkb-card"><div class="mkb-card-h"><h3>Vendas por sexo</h3></div><div class="mkb-canvas"><canvas id="mkb-ch-sexo"></canvas></div></div>
+        <div class="mkb-card"><div class="mkb-card-h"><h3>Vendas por faixa etária</h3></div><div class="mkb-canvas"><canvas id="mkb-ch-faixa"></canvas></div></div>
+        <div class="mkb-card"><div class="mkb-card-h"><h3>Em dia × em atraso por faixa etária</h3></div><div class="mkb-canvas"><canvas id="mkb-ch-pag"></canvas></div></div>
+      </div>
+
+      <div class="mkb-card">
+        <div class="mkb-card-h"><h3>Quem paga em dia e quem está em atraso</h3><small>Contratos ativos · em dia inclui os quitados · em atraso = tem parcela vencida e não paga</small></div>
+        ${tabelaPag}
+      </div>
+
+      <div class="mkb-card">
+        <div class="mkb-card-h"><h3>Perfil de quem cancelou</h3><small>Contratos cancelados no período · taxa = cancelados ÷ contratos do grupo</small></div>
+        ${canc.length ? `<div class="mkb-canc">
+          <div class="mkb-canvas"><canvas id="mkb-ch-canc"></canvas></div>
+          <div class="mkb-tablewrap"><table class="mkb-table mkb-table-perfil" style="min-width:0;">
+            <thead><tr><th>Grupo</th><th style="text-align:right;">Cancelados</th><th style="text-align:right;">Contratos</th><th style="text-align:right;">Taxa</th></tr></thead>
+            <tbody>
+              <tr class="mkb-grp"><td colspan="4">Por sexo</td></tr>${taxa(cSexo)}
+              <tr class="mkb-grp"><td colspan="4">Por faixa etária</td></tr>${taxa(cFaixa)}
+            </tbody>
+          </table></div>
+        </div>
+        <div class="mkb-tablewrap" style="margin-top:12px;"><table class="mkb-table">
+          <colgroup><col style="width:11%"><col style="width:14%"><col style="width:25%"><col style="width:11%"><col style="width:9%"><col style="width:10%"><col style="width:9%"><col style="width:11%"></colgroup>
+          <thead><tr><th>Cancelamento</th><th>Contrato</th><th>Cliente</th><th>Sexo</th><th style="text-align:right;">Idade</th><th>Venda</th><th style="text-align:right;">Durou</th><th style="text-align:right;">Valor</th></tr></thead>
+          <tbody>${listaCanc}</tbody>
+        </table></div>` : `<p class="mkb-muted" style="margin:0;">Nenhum cancelamento deste empreendimento no período.</p>`}
+      </div>`;
+  },
+
+  desenharGraficosPerfil() {
+    if (typeof Chart === "undefined") return;
+    const L = this.linhasPerfil();
+    const ativos = L.filter((x) => !x.cancelado);
+    const canc = L.filter((x) => x.cancelado);
+    const corSexo = { F: "#db2777", M: "#0ea5e9", PJ: "#6366f1", "?": "#cbd5e1" };
+    const legenda = { position: "bottom", labels: { boxWidth: 10, font: { size: 10 } } };
+    const elS = document.getElementById("mkb-ch-sexo");
+    if (elS) {
+      const ks = ["F", "M", "PJ", "?"].filter((k) => ativos.some((x) => x.sexo === k));
+      this.charts.sexo = new Chart(elS, {
+        type: "doughnut",
+        data: { labels: ks.map((k) => this.SEXOS[k]), datasets: [{ data: ks.map((k) => ativos.filter((x) => x.sexo === k).length), backgroundColor: ks.map((k) => corSexo[k]) }] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: legenda } }
+      });
+    }
+    const faixas = this.ordemFaixas().filter((f) => ativos.some((x) => x.faixa === f));
+    const elF = document.getElementById("mkb-ch-faixa");
+    if (elF) {
+      const ks = ["F", "M", "PJ", "?"].filter((k) => ativos.some((x) => x.sexo === k));
+      this.charts.faixa = new Chart(elF, {
+        type: "bar",
+        data: { labels: faixas, datasets: ks.map((k) => ({ label: this.SEXOS[k], data: faixas.map((f) => ativos.filter((x) => x.faixa === f && x.sexo === k).length), backgroundColor: corSexo[k], stack: "s" })) },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: legenda }, scales: { x: { stacked: true, ticks: { font: { size: 10 } } }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } } }
+      });
+    }
+    const elP = document.getElementById("mkb-ch-pag");
+    if (elP) {
+      const g = this.grupos(ativos, (x) => x.faixa, faixas);
+      const base = (x) => x.emDia + x.atraso;
+      this.charts.pag = new Chart(elP, {
+        type: "bar",
+        data: {
+          labels: g.map((x) => x.nome),
+          datasets: [
+            { label: "Em dia", data: g.map((x) => base(x) ? (x.emDia / base(x)) * 100 : 0), backgroundColor: "#105436", stack: "p", n: g.map((x) => x.emDia) },
+            { label: "Em atraso", data: g.map((x) => base(x) ? (x.atraso / base(x)) * 100 : 0), backgroundColor: "#f37021", stack: "p", n: g.map((x) => x.atraso) }
+          ]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: legenda, tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.parsed.y.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% (${c.dataset.n[c.dataIndex]})` } } },
+          scales: { x: { stacked: true, ticks: { font: { size: 10 } } }, y: { stacked: true, beginAtZero: true, max: 100, ticks: { callback: (v) => v + "%" } } }
+        }
+      });
+    }
+    const elC = document.getElementById("mkb-ch-canc");
+    if (elC && canc.length) {
+      const fx = this.ordemFaixas().filter((f) => canc.some((x) => x.faixa === f));
+      const ks = ["F", "M", "PJ", "?"].filter((k) => canc.some((x) => x.sexo === k));
+      this.charts.canc = new Chart(elC, {
+        type: "bar",
+        data: { labels: fx, datasets: ks.map((k) => ({ label: this.SEXOS[k], data: fx.map((f) => canc.filter((x) => x.faixa === f && x.sexo === k).length), backgroundColor: corSexo[k], stack: "c" })) },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: legenda, title: { display: true, text: "Cancelados por faixa etária e sexo", font: { size: 11 } } }, scales: { x: { stacked: true, ticks: { font: { size: 10 } } }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } } }
+      });
+    }
   },
 
   render() {
@@ -578,8 +1009,8 @@ const MarketingBudgetApp = {
     const corpo = s.loading
       ? `<div class="mkb-card" style="text-align:center;padding:40px;color:#64748b;"><div class="spinner" style="margin:0 auto 12px;"></div><p id="mkb-progress" style="margin:0;">${this.esc(s.progress)}</p></div>`
       : (s.error ? `<div class="mkb-card" style="color:#b91c1c;">${this.esc(s.error)}</div>`
-        : (s.consultado ? this.resultadoHtml()
-          : `<div class="mkb-card mkb-vazio">Escolha o empreendimento e o período e clique em <strong>Consultar</strong>. A verba vem do VGV da obra no Sienge × o percentual de marketing.</div>`));
+        : (s.consultado ? this.abasHtml() + (s.aba === "perfil" ? this.perfilHtml() : this.resultadoHtml())
+          : `<div class="mkb-card mkb-vazio">Escolha o empreendimento e o período e clique em <strong>Consultar</strong>. A verba vem do VGV da obra no Sienge × o percentual de marketing definido em <a href="#" onclick="event.preventDefault();MarketingBudgetApp.abrirConfig()">Configurações</a>.</div>`));
     this.destruirGraficos();
     root.innerHTML = `
       <style>
@@ -635,7 +1066,22 @@ const MarketingBudgetApp = {
         #marketing-budget-root .mkb-st-previsao { background:#e2e8f0; color:#334155; }
         #marketing-budget-root .mkb-st-cancel { background:#fee2e2; color:#b91c1c; }
         #marketing-budget-root .mkb-vazio { text-align:center; color:#64748b; padding:24px; }
+        #marketing-budget-root .mkb-tabs { display:flex; gap:6px; border-bottom:1px solid #e2e8f0; margin-bottom:-4px; }
+        #marketing-budget-root .mkb-tab { display:inline-flex; align-items:center; gap:6px; border:0; background:transparent; padding:8px 14px; font-weight:700; font-size:0.82rem; color:#64748b; border-bottom:3px solid transparent; cursor:pointer; }
+        #marketing-budget-root .mkb-tab:hover { color:#105436; }
+        #marketing-budget-root .mkb-tab.is-active { color:#105436; border-bottom-color:#105436; }
+        #marketing-budget-root .mkb-atraso { color:#b91c1c; font-weight:700; }
+        #marketing-budget-root .mkb-atraso small { color:#c2410c; font-weight:600; }
+        #marketing-budget-root .mkb-perfil-aviso { display:flex; align-items:center; gap:10px; color:#475569; font-size:0.82rem; padding:10px 16px; }
+        #marketing-budget-root .mkb-charts-3 { grid-template-columns:repeat(3, minmax(0,1fr)); }
+        #marketing-budget-root .mkb-table-perfil { min-width:640px; }
+        #marketing-budget-root .mkb-grp td { background:#e7f6ee !important; color:#105436; font-weight:700; font-size:0.76rem; text-transform:uppercase; }
+        #marketing-budget-root .mkb-pbar { display:flex; align-items:center; gap:8px; }
+        #marketing-budget-root .mkb-pbar .mkb-bar { flex:1; margin-top:0; }
+        #marketing-budget-root .mkb-pbar b { min-width:48px; text-align:right; font-size:0.78rem; }
+        #marketing-budget-root .mkb-canc { display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start; }
         @media (max-width: 1100px) {
+          #marketing-budget-root .mkb-charts-3, #marketing-budget-root .mkb-canc { grid-template-columns:1fr; }
           #marketing-budget-root .mkb-kpis { grid-template-columns:repeat(2, minmax(0,1fr)); }
           #marketing-budget-root .mkb-charts, #marketing-budget-root .mkb-config { grid-template-columns:1fr; }
         }
@@ -673,7 +1119,10 @@ const MarketingBudgetApp = {
         </div>
       </div>`;
     if (window.lucide) lucide.createIcons();
-    if (s.consultado && !s.loading && !s.error) this.desenharGraficos();
+    if (s.consultado && !s.loading && !s.error) {
+      if (s.aba === "perfil") this.desenharGraficosPerfil();
+      else this.desenharGraficos();
+    }
   },
 
   destruirGraficos() {
@@ -755,3 +1204,360 @@ const MarketingBudgetApp = {
 };
 
 window.MarketingBudgetApp = MarketingBudgetApp;
+
+/* Marketing · Configurações
+   Por empreendimento: % do VGV para marketing e quais centros de custo compõem os gastos de marketing da obra.
+   Grava em marketing_budget_config/{empreendimento} = { pct, ccs }. */
+const MarketingConfigApp = {
+  FILTRO_ID: "mkc-ccs",
+
+  state: {
+    ccId: "",
+    pct: "",
+    ccs: [],
+    open: false,
+    query: "",
+    lista: {},
+    carregando: false,
+    salvando: false,
+    obra: null,
+    salvoEm: ""
+  },
+
+  get B() {
+    return window.MarketingBudgetApp;
+  },
+
+  ccs() {
+    return this.B.state.costCenters || [];
+  },
+
+  ccDe(id) {
+    return this.ccs().find((c) => String(c.id) === String(id)) || null;
+  },
+
+  async init() {
+    const s = this.state;
+    s.carregando = true;
+    this.render();
+    await this.B.carregarCcs();
+    await this.carregarLista();
+    s.carregando = false;
+    if (s.ccId) await this.selecionar(s.ccId);
+    else this.render();
+  },
+
+  async carregarLista() {
+    const B = this.B;
+    const fc = window.firebaseCollections;
+    const lista = {};
+    let ok = false;
+    if (window.firebaseDb && fc && fc.getDocs) {
+      try {
+        const snap = await fc.getDocs(fc.collection(window.firebaseDb, B.CONFIG_COLLECTION));
+        snap.forEach((d) => { if (d.id !== B.CAT_DOC) lista[d.id] = d.data() || {}; });
+        ok = true;
+      } catch (e) {
+        console.warn("[Marketing Config] lista", e);
+      }
+    }
+    if (!ok) {
+      const local = B.configLocal();
+      Object.keys(local).forEach((k) => { if (k !== B.CAT_DOC) lista[k] = local[k] || {}; });
+    }
+    this.state.lista = lista;
+  },
+
+  onObraInput(raw) {
+    const val = String(raw || "").trim();
+    const cc = this.ccs().find((c) => String(c.id) === val || this.B.ccLabel(c) === val || `${c.id} - ${c.name}` === val);
+    this.selecionar(cc ? String(cc.id) : "");
+  },
+
+  async selecionar(id) {
+    const s = this.state;
+    s.ccId = id ? String(id) : "";
+    s.open = false;
+    s.query = "";
+    s.salvoEm = "";
+    s.obra = null;
+    if (!s.ccId) {
+      s.pct = "";
+      s.ccs = [];
+      this.render();
+      return;
+    }
+    const cfg = s.lista[s.ccId] || await this.B.lerConfig(s.ccId);
+    s.pct = cfg && Number.isFinite(Number(cfg.pct)) && cfg.pct !== "" ? String(cfg.pct).replace(".", ",") : "";
+    s.ccs = this.B.ccsDaConfig(cfg, s.ccId);
+    this.render();
+    const cc = this.ccDe(s.ccId) || { id: s.ccId };
+    const alvo = s.ccId;
+    const obra = await this.B.lerVgv(cc);
+    if (this.state.ccId !== alvo) return;
+    s.obra = obra;
+    this.pintarVerba();
+  },
+
+  pctNumero() {
+    const n = Number(String(this.state.pct || "").replace(",", "."));
+    return Number.isFinite(n) ? n : NaN;
+  },
+
+  onPct(v) {
+    this.state.pct = v;
+    this.pintarVerba();
+  },
+
+  pintarVerba() {
+    const el = document.getElementById("mkc-verba");
+    if (el) el.innerHTML = this.verbaHtml();
+  },
+
+  verbaHtml() {
+    const B = this.B;
+    const s = this.state;
+    if (!s.obra) return `<span>VGV da obra</span><strong>…</strong><small>Lendo o cadastro da obra no Sienge</small>`;
+    const pct = this.pctNumero();
+    const fonte = s.obra.fonte === "obra" ? "Cadastro da obra no Sienge" : (s.obra.fonte === "centro" ? "Digitado no centro de custo" : "Obra sem VGV no Sienge");
+    const verba = s.obra.vgv > 0 && pct >= 0 ? s.obra.vgv * (pct / 100) : 0;
+    return `<span>VGV da obra</span><strong>${s.obra.vgv > 0 ? B.money(s.obra.vgv) : "—"}</strong><small>${fonte}</small>
+      <span style="margin-top:10px;">Verba de marketing</span><strong class="mkc-verba-v">${verba > 0 ? B.money(verba) : "—"}</strong><small>VGV × ${Number.isFinite(pct) ? String(pct).replace(".", ",") : "—"}%</small>`;
+  },
+
+  /* ---------- seleção de centros de custo (padrão Marcar Todos / Desmarcar Todos) ---------- */
+  itensFiltro() {
+    return this.ccs().map((c) => ({ id: String(c.id), label: `${c.id} - ${String(c.name || c.nome || "").toUpperCase()}` }));
+  },
+
+  filtroOpts() {
+    const s = this.state;
+    return {
+      id: this.FILTRO_ID,
+      label: "Centros de custo que compõem os gastos",
+      items: this.itensFiltro(),
+      selectedIds: s.ccs,
+      open: s.open,
+      query: s.query,
+      emptyMeansAll: false,
+      countMode: true,
+      nouns: { singular: "centro de custo", plural: "centros de custo", none: "Nenhum centro de custo", noMatch: "Nenhum centro de custo com esse nome." }
+    };
+  },
+
+  bindFiltro() {
+    const self = this;
+    MlEmpresaFilter.bind(this.FILTRO_ID, {
+      toggleOpen() { self.state.open = !self.state.open; self.pintarFiltro(); },
+      close() { if (self.state.open) { self.state.open = false; self.pintarFiltro(); } },
+      setQuery(q) { self.state.query = q; self.pintarLista(); },
+      toggleId(itemId, on) {
+        const set = new Set(self.state.ccs);
+        if (on) set.add(String(itemId)); else set.delete(String(itemId));
+        self.state.ccs = [...set];
+        self.pintarSelecao();
+      },
+      selectAll() {
+        const q = String(self.state.query || "").toLowerCase().trim();
+        const set = new Set(self.state.ccs);
+        self.itensFiltro().forEach((it) => { if (!q || `${it.id} ${it.label}`.toLowerCase().includes(q)) set.add(it.id); });
+        self.state.ccs = [...set];
+        self.pintarLista();
+        self.pintarSelecao();
+      },
+      selectNone() {
+        self.state.ccs = [];
+        self.pintarLista();
+        self.pintarSelecao();
+      }
+    });
+  },
+
+  pintarFiltro() {
+    const slot = document.getElementById("mkc-ccs-slot");
+    if (!slot) return;
+    slot.innerHTML = MlEmpresaFilter.html(this.filtroOpts());
+    if (window.lucide) lucide.createIcons();
+    if (this.state.open) {
+      const q = document.getElementById(this.FILTRO_ID + "-search");
+      if (q) q.focus();
+    }
+  },
+
+  pintarLista() {
+    const el = document.getElementById(this.FILTRO_ID + "-list");
+    if (el) el.innerHTML = MlEmpresaFilter.listHtml(this.filtroOpts());
+  },
+
+  pintarSelecao() {
+    const o = this.filtroOpts();
+    const btn = document.querySelector(`#${this.FILTRO_ID} .ml-emp-filter-btn span`);
+    if (btn) btn.textContent = MlEmpresaFilter.buttonLabel(o.items, o.selectedIds, false, true, o.nouns);
+    const sel = document.getElementById("mkc-sel");
+    if (sel) sel.innerHTML = this.selecaoHtml();
+  },
+
+  remover(id) {
+    this.state.ccs = this.state.ccs.filter((x) => x !== String(id));
+    this.pintarLista();
+    this.pintarSelecao();
+  },
+
+  selecaoHtml() {
+    const B = this.B;
+    const s = this.state;
+    if (!s.ccs.length) return `<span class="mkc-muted">Nenhum centro de custo marcado.</span>`;
+    return s.ccs.slice().sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true })).map((id) => {
+      const cc = this.ccDe(id);
+      const nome = cc ? B.ccLabel(cc) : id;
+      return `<span class="mkc-chip${id === s.ccId ? " is-obra" : ""}" title="${B.esc(nome)}">${B.esc(nome)}
+        <button type="button" onclick="MarketingConfigApp.remover('${B.esc(id)}')" title="Tirar"><i data-lucide="x" style="width:12px;height:12px;"></i></button></span>`;
+    }).join("");
+  },
+
+  async salvar() {
+    const B = this.B;
+    const s = this.state;
+    if (!s.ccId) { alert("Escolha o empreendimento."); return; }
+    const pct = this.pctNumero();
+    if (String(s.pct || "").trim() === "" || !Number.isFinite(pct) || pct < 0 || pct > 100) { alert("Informe o percentual de marketing entre 0 e 100."); return; }
+    if (!s.ccs.length) { alert("Marque pelo menos um centro de custo."); return; }
+    s.salvando = true;
+    this.render();
+    const ccs = s.ccs.slice().sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true }));
+    const ok = await B.gravarConfig(s.ccId, { pct, ccs });
+    s.salvando = false;
+    s.lista[s.ccId] = { ...(s.lista[s.ccId] || {}), pct, ccs, updatedAt: new Date().toISOString(), updatedBy: (window.MarketingApp && MarketingApp.currentUserName()) || "" };
+    s.salvoEm = ok ? new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "";
+    if (B.state.ccId === s.ccId && B.state.consultado) {
+      B.state.pct = pct;
+      const mudouCcs = ccs.join(",") !== B.state.ccsCfg.slice().sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true })).join(",");
+      if (mudouCcs) B.state.consultado = false;
+    }
+    this.render();
+    if (!ok) alert("A configuração ficou salva só neste computador: não consegui gravar no Firebase. Tente salvar de novo.");
+  },
+
+  editar(id) {
+    this.selecionar(id);
+    const el = document.getElementById("marketing-config-root");
+    if (el && el.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  },
+
+  listaHtml() {
+    const B = this.B;
+    const s = this.state;
+    const ids = Object.keys(s.lista).filter((id) => s.lista[id] && (s.lista[id].pct != null || Array.isArray(s.lista[id].ccs)))
+      .sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true }));
+    if (!ids.length) return `<p class="mkc-muted" style="margin:0;">Nenhum empreendimento configurado ainda.</p>`;
+    return `<div class="mkc-tablewrap"><table class="mkc-table">
+      <colgroup><col style="width:30%"><col style="width:10%"><col style="width:36%"><col style="width:16%"><col style="width:8%"></colgroup>
+      <thead><tr><th>Empreendimento</th><th style="text-align:right;">% marketing</th><th>Centros de custo considerados</th><th>Atualizado</th><th></th></tr></thead>
+      <tbody>${ids.map((id) => {
+        const c = s.lista[id];
+        const cc = this.ccDe(id);
+        const ccs = B.ccsDaConfig(c, id);
+        const quando = c.updatedAt ? new Date(c.updatedAt).toLocaleDateString("pt-BR") : "—";
+        return `<tr class="${id === s.ccId ? "is-sel" : ""}">
+          <td title="${B.esc(cc ? B.ccLabel(cc) : id)}"><strong>${B.esc(cc ? B.ccLabel(cc) : id)}</strong></td>
+          <td style="text-align:right;">${c.pct != null && c.pct !== "" ? String(c.pct).replace(".", ",") + "%" : "—"}</td>
+          <td title="${B.esc(ccs.map((x) => { const o = this.ccDe(x); return o ? B.ccLabel(o) : x; }).join("\n"))}">${B.esc(ccs.join(", "))}${Array.isArray(c.ccs) && c.ccs.length ? "" : ' <span class="mkc-muted">(só a obra)</span>'}</td>
+          <td>${B.esc(quando)}${c.updatedBy ? `<div class="mkc-muted">${B.esc(c.updatedBy)}</div>` : ""}</td>
+          <td style="text-align:right;"><button type="button" class="btn btn-outline btn-sm" onclick="MarketingConfigApp.editar('${B.esc(id)}')">Editar</button></td>
+        </tr>`;
+      }).join("")}</tbody>
+    </table></div>`;
+  },
+
+  render() {
+    const root = document.getElementById("marketing-config-root");
+    if (!root) return;
+    const B = this.B;
+    const s = this.state;
+    const cc = this.ccDe(s.ccId);
+    const opts = this.ccs().map((c) => `<option value="${B.esc(B.ccLabel(c))}"></option>`).join("");
+    this.bindFiltro();
+    const form = s.ccId ? `
+          <div class="mkc-grid">
+            <div class="mkc-campo">
+              <label for="mkc-pct">% do VGV para marketing</label>
+              <div class="mkc-pct"><input id="mkc-pct" type="text" inputmode="decimal" placeholder="0,00" value="${B.esc(s.pct)}" oninput="MarketingConfigApp.onPct(this.value)"><em>%</em></div>
+              <div class="mkc-campo" id="mkc-ccs-slot" style="margin-top:14px;">${MlEmpresaFilter.html(this.filtroOpts())}</div>
+              <div class="mkc-sel" id="mkc-sel">${this.selecaoHtml()}</div>
+              <small class="mkc-muted">Os títulos a pagar desses centros de custo, nos planos financeiros de marketing, entram como gasto de marketing desta obra.</small>
+            </div>
+            <div class="mkc-verba" id="mkc-verba">${this.verbaHtml()}</div>
+          </div>
+          <div class="mkc-acoes">
+            ${s.salvoEm ? `<span class="mkc-ok"><i data-lucide="check-circle-2" style="width:14px;height:14px;"></i> Salvo às ${B.esc(s.salvoEm)}</span>` : ""}
+            <button type="button" class="btn btn-primary" ${s.salvando ? "disabled" : ""} onclick="MarketingConfigApp.salvar()" style="height:38px;min-width:140px;display:inline-flex;align-items:center;justify-content:center;gap:6px;">
+              ${s.salvando ? '<span class="btn-spin"></span> Salvando…' : '<i data-lucide="save" style="width:14px;"></i> Salvar'}
+            </button>
+          </div>` : `<p class="mkc-muted" style="margin:12px 0 0;">Escolha o empreendimento para definir o percentual de marketing e os centros de custo.</p>`;
+    root.innerHTML = `
+      <style>
+        #marketing-config-root .mkc-wrap { padding:8px 4px 24px; }
+        #marketing-config-root .mkc-head { background:#105436; padding:16px 20px; border-radius:12px 12px 0 0; display:flex; align-items:center; gap:12px; color:#fff; }
+        #marketing-config-root .mkc-head-ic { width:36px; height:36px; background:rgba(255,255,255,0.2); border-radius:8px; display:flex; align-items:center; justify-content:center; }
+        #marketing-config-root .mkc-body { background:#f8fafc; border:1px solid #e2e8f0; border-top:none; padding:16px; border-radius:0 0 12px 12px; display:flex; flex-direction:column; gap:14px; }
+        #marketing-config-root .mkc-card { background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:14px 16px; }
+        #marketing-config-root .mkc-card h3 { margin:0 0 10px; font-size:0.95rem; color:#105436; }
+        #marketing-config-root .mkc-muted { color:#64748b; font-size:0.75rem; font-weight:400; }
+        #marketing-config-root label, #marketing-config-root .ml-emp-filter-label { display:block; font-size:0.72rem; font-weight:700; color:#475569; text-transform:uppercase; margin-bottom:4px; }
+        #marketing-config-root .mkc-obra input { width:100%; max-width:560px; height:38px; padding:0 10px; border:1px solid #cbd5e1; border-radius:8px; font:inherit; font-size:0.85rem; box-sizing:border-box; }
+        #marketing-config-root .mkc-grid { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(0,1fr); gap:20px; margin-top:16px; }
+        #marketing-config-root .mkc-pct { display:flex; align-items:center; gap:6px; }
+        #marketing-config-root .mkc-pct input { width:110px; height:38px; padding:0 10px; border:1px solid #cbd5e1; border-radius:8px; font-size:1rem; font-weight:700; text-align:right; }
+        #marketing-config-root .mkc-pct em { font-style:normal; font-weight:700; color:#475569; }
+        #marketing-config-root .ml-emp-filter { max-width:560px; }
+        #marketing-config-root .ml-emp-filter-btn { height:38px; min-height:38px; }
+        #marketing-config-root .ml-emp-filter-list { max-height:320px; }
+        #marketing-config-root .mkc-sel { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0 8px; max-height:120px; overflow:auto; }
+        #marketing-config-root .mkc-chip { display:inline-flex; align-items:center; gap:4px; max-width:100%; height:28px; padding:0 4px 0 10px; border-radius:999px; background:#e7f6ee; color:#105436; font-size:0.76rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        #marketing-config-root .mkc-chip.is-obra { background:#105436; color:#fff; }
+        #marketing-config-root .mkc-chip button { border:0; background:transparent; color:inherit; cursor:pointer; display:inline-flex; padding:2px; border-radius:50%; }
+        #marketing-config-root .mkc-chip button:hover { background:rgba(0,0,0,0.1); }
+        #marketing-config-root .mkc-verba { background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:14px 16px; align-self:start; }
+        #marketing-config-root .mkc-verba span { display:block; font-size:0.72rem; font-weight:700; color:#64748b; text-transform:uppercase; }
+        #marketing-config-root .mkc-verba strong { display:block; font-size:1.3rem; color:#0f172a; margin-top:4px; }
+        #marketing-config-root .mkc-verba .mkc-verba-v { color:#105436; }
+        #marketing-config-root .mkc-verba small { display:block; color:#64748b; font-size:0.72rem; margin-top:2px; }
+        #marketing-config-root .mkc-acoes { display:flex; justify-content:flex-end; align-items:center; gap:12px; margin-top:14px; padding-top:12px; border-top:1px solid #e2e8f0; }
+        #marketing-config-root .mkc-ok { display:inline-flex; align-items:center; gap:4px; color:#105436; font-size:0.8rem; font-weight:600; }
+        #marketing-config-root .mkc-tablewrap { max-height:50vh; overflow:auto; }
+        #marketing-config-root .mkc-table { width:100%; min-width:760px; border-collapse:collapse; table-layout:fixed; font-size:0.82rem; }
+        #marketing-config-root .mkc-table thead th { position:sticky; top:0; background:#1b8253; color:#fff; padding:10px; text-align:left; font-weight:600; z-index:1; }
+        #marketing-config-root .mkc-table td { padding:8px 10px; border-bottom:1px solid #e2e8f0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:middle; }
+        #marketing-config-root .mkc-table tbody tr:nth-child(even) { background:#f8faf9; }
+        #marketing-config-root .mkc-table tr.is-sel td { background:#e7f6ee; }
+        @media (max-width: 1000px) { #marketing-config-root .mkc-grid { grid-template-columns:1fr; } }
+      </style>
+      <div class="mkc-wrap">
+        <div class="mkc-head">
+          <div class="mkc-head-ic"><i data-lucide="settings" style="width:18px;height:18px;color:#fff;"></i></div>
+          <div>
+            <div style="font-weight:800;font-size:1.05rem;">Configurações do marketing</div>
+            <div style="font-size:0.8rem;opacity:0.85;">Percentual de marketing e centros de custo que compõem os gastos de cada obra</div>
+          </div>
+        </div>
+        <div class="mkc-body">
+          <div class="mkc-card">
+            <div class="mkc-obra">
+              <label for="mkc-obra">Empreendimento</label>
+              <input id="mkc-obra" list="mkc-obra-list" placeholder="Digite o ID ou o nome do empreendimento" value="${B.esc(cc ? B.ccLabel(cc) : (s.ccId || ""))}" ${s.carregando ? "disabled" : ""}
+                onchange="MarketingConfigApp.onObraInput(this.value)">
+              <datalist id="mkc-obra-list">${opts}</datalist>
+            </div>
+            ${s.carregando ? `<p class="mkc-muted" style="margin:12px 0 0;">Carregando…</p>` : form}
+          </div>
+          <div class="mkc-card">
+            <h3>Empreendimentos configurados</h3>
+            ${s.carregando ? `<p class="mkc-muted" style="margin:0;">Carregando…</p>` : this.listaHtml()}
+          </div>
+        </div>
+      </div>`;
+    if (window.lucide) lucide.createIcons();
+  }
+};
+
+window.MarketingConfigApp = MarketingConfigApp;

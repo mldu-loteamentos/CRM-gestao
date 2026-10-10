@@ -96,7 +96,8 @@
     ]},
     { id: "marketing", label: "Marketing", subs: [
       { id: "budget", label: "Budget" },
-      { id: "eventos", label: "Eventos" }
+      { id: "eventos", label: "Eventos" },
+      { id: "config", label: "Configurações" }
     ]},
     { id: "relacionamento", label: "Relacionamento", subs: [
       { id: "buscar", label: "Buscar Cliente" },
@@ -169,6 +170,7 @@
     "controle-comissao": { modulo: "comercial", subitem: "comissao" },
     "marketing-eventos": { modulo: "marketing", subitem: "eventos" },
     "marketing-budget": { modulo: "marketing", subitem: "budget" },
+    "marketing-config": { modulo: "marketing", subitem: "config" },
     relacionamento_gestao: { modulo: "relacionamento", subitem: "buscar" },
     relacionamento_autorizacao: { modulo: "relacionamento", subitem: "autorizacao" },
     relacionamento_cessao: { modulo: "relacionamento", subitem: "cessao" },

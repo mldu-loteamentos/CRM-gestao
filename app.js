@@ -3199,6 +3199,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "construcao-marketing": "Eventos",
     "marketing-eventos": "Eventos",
     "marketing-budget": "Budget",
+    "marketing-config": "Configurações",
     suporte: "Suporte",
     auditoria: "Auditoria do Sistema",
     "consumo-api": "Consumo de API",
@@ -3261,6 +3262,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "construcao-marketing": "calendar",
     "marketing-eventos": "calendar",
     "marketing-budget": "wallet",
+    "marketing-config": "settings",
     suporte: "headphones",
     auditoria: "shield",
     "consumo-api": "activity",
@@ -3379,6 +3381,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (typeof MarketingApp !== "undefined") MarketingApp.init();
   } else if (tabId === "marketing-budget") {
     if (typeof MarketingBudgetApp !== "undefined") MarketingBudgetApp.init();
+  } else if (tabId === "marketing-config") {
+    if (typeof MarketingConfigApp !== "undefined") MarketingConfigApp.init();
   } else if (tabId === "prestacao-contas") {
     if (typeof PrestacaoContasApp !== "undefined") PrestacaoContasApp.init();
   } else if (tabId === "fluxo-caixa") {
@@ -5352,7 +5356,7 @@ window.applyPermissions = function(profileName) {
       moduleItems.forEach(item => {
         const modKey = item.getAttribute('data-module');
         const inheritedMkt = perms.mod_mkt === true || perms.sub_mkt_geral_marketing_acessar === true;
-        const mktAlias = (modKey === 'sub_mkt_geral_eventos_acessar' || modKey === 'sub_mkt_geral_budget_acessar') && inheritedMkt;
+        const mktAlias = (modKey === 'sub_mkt_geral_eventos_acessar' || modKey === 'sub_mkt_geral_budget_acessar' || modKey === 'sub_mkt_geral_config_acessar') && inheritedMkt;
         const cpAlias = modKey === 'sub_fin_cp_parametrizacao_parceiro_acessar' && (
           perms.sub_fin_cp === true || perms.sub_fin_cp_prestacao_contas_acessar === true || perms.sub_fin_cp_assistente_cp_acessar === true
         );
