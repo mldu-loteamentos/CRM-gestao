@@ -7,6 +7,8 @@ const AuditoriaLoginApp = {
   COL_REL: "auditoria_login_relatorios",
   COL_PARTES: "auditoria_login_partes",
   TIMEOUT_MIN: 10,
+  OCIOSO_NORMAL: 0.1,
+  OCIOSO_ALTO: 0.2,
   ESCRITORIO: { ini: 8 * 60, fim: 18 * 60 },
   LINHAS_POR_PARTE: 2500,
   relatorios: [],
@@ -16,7 +18,7 @@ const AuditoriaLoginApp = {
   enviando: "",
   erro: "",
   filtro: { de: "", ate: "", escritorio: true },
-  sort: { campo: "causados", dir: -1 },
+  sort: { campo: "ocioso", dir: -1 },
 
   esc(s) {
     return String(s == null ? "" : s)
@@ -392,14 +394,14 @@ const AuditoriaLoginApp = {
     });
     const usuarios = [...por.values()].map((p) => Object.assign(p, {
       vitimasN: p.vitimas.size,
-      pctExp: p.sessoes ? p.expiradas / p.sessoes : 0
+      pctOcioso: p.logado ? Math.min(1, p.ocioso / p.logado) : 0
     }));
     const { campo, dir } = this.sort;
     usuarios.sort((a, b) => {
       const va = a[campo];
       const vb = b[campo];
       const c = typeof va === "string" ? va.localeCompare(vb, "pt-BR") : (va || 0) - (vb || 0);
-      return c * dir || b.causados - a.causados || b.ocioso - a.ocioso || a.u.localeCompare(b.u);
+      return c * dir || b.ocioso - a.ocioso || b.causados - a.causados || a.u.localeCompare(b.u);
     });
     return {
       usuarios,
@@ -427,15 +429,24 @@ const AuditoriaLoginApp = {
     const card = (rotulo, valor, sub, cor) => `<div class="crm-card alog-card"><span>${rotulo}</span><b style="color:${cor || "#0f172a"}">${valor}</b>${sub ? `<small>${sub}</small>` : ""}</div>`;
     const th = (rot, campo, dir) => `<th class="${dir ? "num" : ""}" onclick="AuditoriaLoginApp.ordenar('${campo}')" style="cursor:pointer;user-select:none;">${rot} <i data-lucide="chevrons-up-down" style="width:11px;vertical-align:middle;"></i></th>`;
     const pct = (x) => `${Math.round(x * 100)}%`;
-    const top = a && a.usuarios.find((u) => u.causados > 0);
+    const top = a && a.usuarios.reduce((m, u) => (u.causados > (m ? m.causados : 0) ? u : m), null);
+    const nivelOcioso = (x) => (x <= this.OCIOSO_NORMAL ? ["ok", "Normal"] : x <= this.OCIOSO_ALTO ? ["atencao", "Atenção"] : ["alto", "Alto"]);
+    const marca = Math.round(this.OCIOSO_NORMAL * 100);
+    const celOcioso = (u) => {
+      if (!u.logado) return `<td class="alog-ocio alog-cinza">—</td>`;
+      const [cls, rot] = nivelOcioso(u.pctOcioso);
+      return `<td class="alog-ocio is-${cls}" title="${pct(u.pctOcioso)} do tempo logado ficou parado (${u.expiradas} queda(s) por inatividade em ${u.sessoes} sessão(ões))">
+          <div class="alog-ocio-top"><b>${this.fmtDuracao(u.ocioso)}</b><span class="alog-ocio-tag">${rot}</span></div>
+          <div class="alog-ocio-bar"><i style="width:${Math.max(u.ocioso ? 2 : 0, Math.round(u.pctOcioso * 100))}%"></i><em style="left:${marca}%"></em></div>
+          <small>${pct(u.pctOcioso)} do tempo logado</small>
+        </td>`;
+    };
 
     const linhasUsu = a ? a.usuarios.map((u) => `<tr class="${u.causados ? "is-causa" : ""}">
         <td><b>${esc(u.u)}</b></td>
         <td class="num">${u.sessoes}</td>
         <td class="num">${this.fmtDuracao(u.logado)}</td>
-        <td class="num">${u.expiradas}${u.sessoes ? ` <small>(${pct(u.pctExp)})</small>` : ""}</td>
-        <td class="num">${this.fmtDuracao(u.ocioso)}</td>
-        <td class="num">${u.saiu}</td>
+        ${celOcioso(u)}
         <td class="num alog-forte">${u.causados || "—"}</td>
         <td class="num">${u.vitimasN || "—"}</td>
         <td class="num">${u.presente || "—"}</td>
@@ -510,13 +521,14 @@ const AuditoriaLoginApp = {
           <div class="alog-tit">Quem segura licença parado <small>clique no título da coluna para ordenar</small></div>
           <div class="alog-tab alog-usu"><table>
             <thead><tr>
-              ${th("Usuário", "u")}${th("Sessões", "sessoes", 1)}${th("Tempo logado", "logado", 1)}${th("Caiu por inatividade", "expiradas", 1)}
-              ${th("Tempo parado", "ocioso", 1)}${th("Saiu pelo botão", "saiu", 1)}${th("Barrou outros", "causados", 1)}${th("Pessoas barradas", "vitimasN", 1)}
+              ${th("Usuário", "u")}${th("Sessões", "sessoes", 1)}${th("Tempo logado", "logado", 1)}
+              ${th("Tempo parado", "ocioso")}${th("Barrou outros", "causados", 1)}${th("Pessoas barradas", "vitimasN", 1)}
               ${th("Logado em bloqueios", "presente", 1)}${th("Foi barrado", "barrado", 1)}
             </tr></thead>
-            <tbody>${linhasUsu || `<tr><td colspan="10" class="alog-cinza">Sem acessos no período.</td></tr>`}</tbody>
+            <tbody>${linhasUsu || `<tr><td colspan="8" class="alog-cinza">Sem acessos no período.</td></tr>`}</tbody>
           </table></div>
           <small class="alog-nota"><b>Tempo parado</b>: ${this.TIMEOUT_MIN} minutos por sessão expirada (o Sienge só derruba depois de ${this.TIMEOUT_MIN} minutos sem uso).
+            A barra mostra quanto do tempo logado ficou parado: até ${marca}% é <b>normal</b> (risco na barra), até ${Math.round(this.OCIOSO_ALTO * 100)}% pede <b>atenção</b> e acima disso é <b>alto</b>.
             <b>Barrou outros</b>: tentativas de outras pessoas recusadas por falta de licença enquanto este usuário estava nesses ${this.TIMEOUT_MIN} minutos parado.
             <b>Logado em bloqueios</b>: vezes em que estava logado (usando ou não) quando alguém foi barrado.${a.outrasFalhas ? ` ${a.outrasFalhas} falha(s) de login por outros motivos não entram na conta.` : ""}</small>
         </div>

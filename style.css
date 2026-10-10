@@ -8080,6 +8080,20 @@ circle.donut-segment {
 .alog-usu td.num { white-space: normal; }
 .alog-usu td.num small { display: block; }
 .alog-usu th { font-size: 0.66rem; white-space: normal; }
+.alog-ocio { min-width: 190px; }
+.alog-ocio-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.alog-ocio-top b { font-weight: 700; color: #0f172a; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.alog-ocio-tag { font-size: 0.66rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.alog-ocio-bar { position: relative; height: 8px; margin: 5px 0 3px; background: #eef2f6; border-radius: 999px; overflow: hidden; }
+.alog-ocio-bar i { display: block; height: 100%; border-radius: 999px; }
+.alog-ocio-bar em { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #334155; opacity: 0.45; }
+.alog-tab td.alog-ocio small { display: block; font-size: 0.7rem; }
+.alog-ocio.is-ok .alog-ocio-tag { background: #dcfce7; color: #105436; }
+.alog-ocio.is-ok .alog-ocio-bar i { background: #16a34a; }
+.alog-ocio.is-atencao .alog-ocio-tag { background: #fff7ed; color: #c2410c; }
+.alog-ocio.is-atencao .alog-ocio-bar i { background: #f37021; }
+.alog-ocio.is-alto .alog-ocio-tag { background: #fef2f2; color: #b91c1c; }
+.alog-ocio.is-alto .alog-ocio-bar i { background: #dc2626; }
 .alog-tab tr.is-causa td:first-child { box-shadow: inset 3px 0 0 #f37021; }
 .alog-forte { font-weight: 800; color: #c2410c !important; }
 .alog-cinza { color: #94a3b8; }
