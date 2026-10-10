@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="i.ntegr.a/arvore.png">
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=1275">
+  <link rel="stylesheet" href="style.css?v=1276">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -888,7 +888,7 @@
 
     <div class="login-pane-brand">
       <div class="login-band login-band-logo">
-        <img src="i.ntegr.a/logo-oficial.png?v=1275" alt="I.ntegr.A Moura Leite">
+        <img src="i.ntegr.a/logo-oficial.png?v=1276" alt="I.ntegr.A Moura Leite">
       </div>
 
       <div class="login-band login-band-action">
@@ -1329,7 +1329,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.1275 &nbsp;&middot;&nbsp; 10/10/2026
+            v1.0.1276 &nbsp;&middot;&nbsp; 10/10/2026
           </span>
         </div>
       </div>
@@ -1666,6 +1666,9 @@
               </div>
               <div class="doc-menu-item" onclick="selectDocTemplate('vencimento')" id="menu-doc-vencimento">
                 <i data-lucide="calendar-clock"></i> Alteração de Vencimento
+              </div>
+              <div class="doc-menu-item" onclick="selectDocTemplate('aditamento')" id="menu-doc-aditamento">
+                <i data-lucide="file-plus"></i> Aditamento Contratual
               </div>
             </div>
             
@@ -2219,6 +2222,84 @@ ____________________________________________
                   </button>
                 </div>
               </div>
+
+              <div id="editor-aditamento" class="doc-editor-form">
+                <h3 style="margin-top: 0; color: #1e293b; font-size: 1.3rem; margin-bottom: 20px;">Aditamento Contratual</h3>
+                <div class="form-group">
+                  <label>Título do Documento</label>
+                  <input type="text" class="form-control" id="doc-aditamento-title" value="TERMO DE ADITAMENTO CONTRATUAL">
+                </div>
+                <div class="form-group">
+                  <label>Texto Padrão</label>
+                  <div class="doc-fmt-bar">
+                    <button type="button" class="doc-fmt-btn" onclick="wrapDocPadraoBold('doc-aditamento-corpo')" title="Negrito (Ctrl+B)"><b>N</b> Negrito</button>
+                    <span class="doc-fmt-hint">Usado em Buscar Cliente → Gestão → Aditamento. O motivo, as novas condições e a frase de reajuste e juros saem do que foi preenchido na tela do aditamento.</span>
+                  </div>
+                  <textarea class="form-control" id="doc-aditamento-corpo" rows="32" onkeydown="docPadraoEditorKey(event)" style="font-family: monospace; font-size: 0.8rem; line-height: 1.4; resize: vertical;">Título: {{TITULO}} | Unidade: {{UNIDADE}}
+
+Pelo presente instrumento particular e na melhor forma de direito, de um lado:
+
+{{PREAMBULO}}. De ora em diante chamados simplesmente de PROMITENTE VENDEDORA, e de outro lado:
+
+{{NOME_CLIENTE}}, {{NACIONALIDADE_CLIENTE}}, {{PROFISSAO_CLIENTE}}, {{ESTADO_CIVIL}}, portador(a) da Cédula de Identidade RG Nº {{RG_CLIENTE}}, inscrito(a) no CPF-MF sob o Nº {{CPF_CNPJ}}, residente(s) e domiciliado(s) na {{ENDERECO_CLIENTE}}{{#SE_CONJUGE}}, e {{NOME_CONJUGE}}, {{NACIONALIDADE_CONJUGE}}, {{PROFISSAO_CONJUGE}}, portador(a) da Cédula de Identidade RG Nº {{RG_CONJUGE}}, inscrito(a) no CPF-MF sob o Nº {{CPF_CONJUGE}}{{/SE_CONJUGE}}; de ora em diante chamado(a)(s) simplesmente de PROMITENTE(S) COMPRADOR(ES).
+
+Sendo o(s) PROMITENTE(S) VENDEDOR(ES) e o(a)(s) PROMITENTE(S) COMPRADOR(A)(ES) adiante denominados, quando mencionados em conjunto, simplesmente como "Partes" e, individualmente, como "Parte".
+
+Considerando que:
+
+(I) As Partes firmaram Contrato de Compromisso de Compra e Venda em {{DATA_CONTRATO}} relativo ao imóvel da Quadra-Lote: {{QUADRA}}-{{LOTE}}, no loteamento denominado {{EMPREENDIMENTO}}, medindo {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).
+
+(II) O(s) PROMITENTE(S) COMPRADOR(ES) procurara(m) o(s) PROMITENTE(S) VENDEDOR(ES) para {{MOTIVO_ADITAMENTO}}.
+
+As Partes resolvem celebrar este Termo de Aditamento Contratual, conforme cláusulas e condições previstas a seguir.
+
+**CLÁUSULA PRIMEIRA – DA ALTERAÇÃO DAS CONDIÇÕES DE PAGAMENTO**
+1.1. Tendo em vista estarem de comum acordo, as Partes resolvem alterar as condições de pagamento prevista no Quadro Resumo do Contrato, para pagamento da seguinte forma:
+
+{{NOVAS_CONDICOES}}
+
+{{REAJUSTE_JUROS_ADITAMENTO}}
+
+**CLÁUSULA SEGUNDA – DA APLICAÇÃO DA ATUAL LEGISLAÇÃO**
+2.1. O presente aditamento contratual é assinado nos termos da lei 6.766/79 com as alterações dadas pela lei nº 13.786/2018 (lei do distrato), cuja aplicação concordam as partes.
+
+**CLÁUSULA TERCEIRA – DAS DISPOSIÇÕES GERAIS**
+3.1. As Partes ratificam as disposições constantes no Contrato não alteradas, expressamente, pelo presente Termo de Aditamento Contratual.
+3.2. Este Termo de Aditamento Contratual constituirá parte integrante do Contrato.
+
+**CLÁUSULA QUARTA – DO FORO**
+4.1. As partes ratificam todas as estipulações do Contrato de Compromisso de Compra e Venda objeto desta composição, em tudo quanto não tiverem sido alteradas pelo presente instrumento, que ora é feito sem o ânimo de novar.
+As Partes elegem o Foro da Comarca do imóvel para dirimir qualquer questão decorrente deste Primeiro Termo de Aditamento Contratual.
+
+E, por estarem as Partes de pleno acordo em tudo que se encontra disposto neste Primeiro Termo de Aditamento Contratual, assinam, na presença das duas testemunhas abaixo, em 02 (duas) vias igual teor e forma.
+
+{{CIDADE_ATUAL}}, {{DATA_HOJE_EXTENSO}}
+
+{{ASSINATURAS_VENDEDORES}}
+
+__________________________________________________________________
+{{NOME_CLIENTE}}
+Promitente(s) Comprador(es)
+
+{{#SE_CONJUGE}}
+__________________________________________________________________
+{{NOME_CONJUGE}}
+Cônjuge
+{{/SE_CONJUGE}}
+
+Testemunhas
+Nome: {{TESTEMUNHA_1_NOME}}                              Nome: {{TESTEMUNHA_2_NOME}}
+RG: {{TESTEMUNHA_1_RG}}                                                                  RG: {{TESTEMUNHA_2_RG}}</textarea>
+                </div>
+                <div style="display: flex; gap: 12px; margin-top: 16px;">
+                  <button class="btn btn-primary" onclick="saveDocPadrao('aditamento')">
+                    <i data-lucide="save" style="width:18px;"></i> Salvar Modelo
+                  </button>
+                  <button class="btn btn-outline" onclick="previewDocPadrao('aditamento')">
+                    <i data-lucide="eye" style="width:18px;"></i> Simular PDF
+                  </button>
+                </div>
+              </div>
             </div>
 
             <!-- Variáveis Lateral (Right Sidebar) -->
@@ -2315,6 +2396,15 @@ ____________________________________________
                 <div class="var-pill" onclick="copyVar(this)">{{DATA_VENCIMENTO_ORIGINAL}}</div>
                 <div class="var-pill" onclick="copyVar(this)">{{DATA_NOVO_VENCIMENTO}}</div>
                 <div class="var-pill" onclick="copyVar(this)">{{DATA_NOVO_VENCIMENTO_EXTENSO}}</div>
+
+                <div class="var-pill-group-title">Aditamento</div>
+                <div class="var-pill" onclick="copyVar(this)">{{MOTIVO_ADITAMENTO}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{NOVAS_CONDICOES}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{REAJUSTE_JUROS_ADITAMENTO}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{JUROS_ADITAMENTO}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{INDICE_REAJUSTE}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{AREA_LOTE}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{AREA_LOTE_EXTENSO}}</div>
 
                 <div class="var-pill-group-title">Distrato</div>
                 <div class="var-pill" onclick="copyVar(this)">{{AREA_LOTE}}</div>
@@ -2748,7 +2838,7 @@ ____________________________________________
         <!-- Container padrão (Em Construção) -->
         <div id="home-em-construcao-container"
           style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="i.ntegr.a/arvore.png?v=1275" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 1.25rem;">
+          <img src="i.ntegr.a/arvore.png?v=1276" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 1.25rem;">
           <p style="color: var(--color-primary); font-size: 1.15rem; font-weight: 600; letter-spacing: 0.06em; margin: 0;">
             Inteligência - Integração - Agilidade
           </p>
@@ -3295,6 +3385,32 @@ ____________________________________________
           </div>
         </div>
       </div>
+      <div id="adi-modal" class="doc-modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="adi-modal-title">
+        <div class="doc-modal-panel adi-panel">
+          <div class="crm-card" style="margin: 0;">
+            <div class="crm-card-header">
+              <h3 id="adi-modal-title" style="margin: 0; font-size: 1.15rem; color: var(--color-primary);">Aditamento de contrato</h3>
+              <div id="adi-modal-sub" class="doc-modal-sub"></div>
+            </div>
+            <div class="doc-modal-body">
+              <div id="adi-modal-status" class="doc-modal-status"></div>
+              <div id="adi-conteudo"></div>
+              <div class="adi-rodape">
+                <p id="adi-aviso" class="adi-aviso"></p>
+                <div style="display: flex; gap: 10px; flex-shrink: 0; margin-left: auto;">
+                  <button type="button" class="btn btn-secondary" id="adi-btn-extrato" style="width: 185px; height: 44px; justify-content: center; white-space: nowrap;" onclick="RelacionamentoApp.abrirExtratoDoc('aditamento')">
+                    <i data-lucide="file-text" style="width:16px;"></i> Extrato
+                  </button>
+                  <button type="button" class="btn btn-cancel" style="width: 185px; height: 44px; justify-content: center; white-space: nowrap;" onclick="RelacionamentoApp.fecharDocModal('aditamento')">Cancelar</button>
+                  <button type="button" class="btn btn-primary" id="adi-btn-gerar" style="width: 185px; height: 44px; justify-content: center; white-space: nowrap;" onclick="RelacionamentoApp.gerarAditamentoPdf()">
+                    <i data-lucide="file-check" style="width:16px;"></i> Gerar aditamento
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
       <section id="tab-relacionamento_cessao" class="tab-pane" style="display: none;">
         <div id="relacionamento-cessao-root"></div>
       </section>
@@ -3484,7 +3600,7 @@ ____________________________________________
         <section id="tab-construcao-seguranca" class="tab-pane" style="display: none;">
           <div
             style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-            <img src="i.ntegr.a/arvore.png?v=1275" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
+            <img src="i.ntegr.a/arvore.png?v=1276" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
             <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 0;">Módulo em Construção</h2>
           </div>
         </section>
@@ -7812,74 +7928,75 @@ RG: {{TESTEMUNHA_1_RG}} RG: {{TESTEMUNHA_2_RG}}</textarea>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/digidem/leaflet-side-by-side@2.0.0/leaflet-side-by-side.min.js"></script>
   <!-- Scripts de Negócio -->
-  <script type="module" src="firebase-config.js?v=1275"></script>
+  <script type="module" src="firebase-config.js?v=1276"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
   <script>
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=1275"></script>
-  <script defer src="sienge-api.js?v=1275"></script>
-  <script defer src="consumo-api.js?v=1275"></script>
-  <script defer src="azure-auth.js?v=1275"></script>
-  <script defer src="usuarios-online.js?v=1275"></script>
-  <script defer src="app.js?v=1275"></script>
-  <script defer src="empresa-filter.js?v=1275"></script>
-  <script defer src="cartao-taxas.js?v=1275"></script>
-  <script defer src="alcada-desconto.js?v=1275"></script>
-  <script defer src="alcada-distrato.js?v=1275"></script>
-  <script defer src="home-dashboard.js?v=1275"></script>
-  <script defer src="anexos.js?v=1275"></script>
-  <script defer src="contas-pagar.js?v=1275"></script>
-    <script defer src="boleto-check.js?v=1275"></script>
-    <script defer src="gerar-pagamento.js?v=1275"></script>
-  <script defer src="rydoo.js?v=1275"></script>
-  <script defer src="compras-previsoes.js?v=1275"></script>
-  <script defer src="compras-controle-financeiro.js?v=1275"></script>
-  <script defer src="compras-dashboard.js?v=1275"></script>
-  <script defer src="engenharia-caucao.js?v=1275"></script>
-  <script defer src="config-tags.js?v=1275"></script>
-  <script defer src="config-users.js?v=1275"></script>
-  <script defer src="suporte.js?v=1275"></script>
-  <script defer src="construcao.js?v=1275"></script>
-  <script defer src="empresas.js?v=1275"></script>
-  <script defer src="relacionamento.js?v=1275"></script>
-  <script defer src="cessao-direitos.js?v=1275"></script>
-  <script defer src="compromissario.js?v=1275"></script>
-  <script defer src="comercial.js?v=1275"></script>
-  <script defer src="estoque-comercial.js?v=1275"></script>
-  <script defer src="condicoes-pagamento.js?v=1275"></script>
-  <script defer src="tabelas-vigentes.js?v=1275"></script>
-  <script defer src="controle-comissao.js?v=1275"></script>
-  <script defer src="recebimentos-webro.js?v=1275"></script>
-  <script defer src="scod.js?v=1275"></script>
-  <script defer src="centros-custo.js?v=1275"></script>
-  <script defer src="marketing.js?v=1275"></script>
-  <script defer src="marketing-budget.js?v=1275"></script>
-  <script defer src="plano-financeiro.js?v=1275"></script>
-  <script defer src="orcamento-data.js?v=1275"></script>
-  <script defer src="orcamento-origem.js?v=1275"></script>
-  <script defer src="orcamento-2026.js?v=1275"></script>
-  <script defer src="orcamento.js?v=1275"></script>
-  <script defer src="prestacao-contas.js?v=1275"></script>
+  <script defer src="data.js?v=1276"></script>
+  <script defer src="sienge-api.js?v=1276"></script>
+  <script defer src="consumo-api.js?v=1276"></script>
+  <script defer src="azure-auth.js?v=1276"></script>
+  <script defer src="usuarios-online.js?v=1276"></script>
+  <script defer src="app.js?v=1276"></script>
+  <script defer src="empresa-filter.js?v=1276"></script>
+  <script defer src="cartao-taxas.js?v=1276"></script>
+  <script defer src="alcada-desconto.js?v=1276"></script>
+  <script defer src="alcada-distrato.js?v=1276"></script>
+  <script defer src="home-dashboard.js?v=1276"></script>
+  <script defer src="anexos.js?v=1276"></script>
+  <script defer src="contas-pagar.js?v=1276"></script>
+    <script defer src="boleto-check.js?v=1276"></script>
+    <script defer src="gerar-pagamento.js?v=1276"></script>
+  <script defer src="rydoo.js?v=1276"></script>
+  <script defer src="compras-previsoes.js?v=1276"></script>
+  <script defer src="compras-controle-financeiro.js?v=1276"></script>
+  <script defer src="compras-dashboard.js?v=1276"></script>
+  <script defer src="engenharia-caucao.js?v=1276"></script>
+  <script defer src="config-tags.js?v=1276"></script>
+  <script defer src="config-users.js?v=1276"></script>
+  <script defer src="suporte.js?v=1276"></script>
+  <script defer src="construcao.js?v=1276"></script>
+  <script defer src="empresas.js?v=1276"></script>
+  <script defer src="relacionamento.js?v=1276"></script>
+  <script defer src="aditamento.js?v=1276"></script>
+  <script defer src="cessao-direitos.js?v=1276"></script>
+  <script defer src="compromissario.js?v=1276"></script>
+  <script defer src="comercial.js?v=1276"></script>
+  <script defer src="estoque-comercial.js?v=1276"></script>
+  <script defer src="condicoes-pagamento.js?v=1276"></script>
+  <script defer src="tabelas-vigentes.js?v=1276"></script>
+  <script defer src="controle-comissao.js?v=1276"></script>
+  <script defer src="recebimentos-webro.js?v=1276"></script>
+  <script defer src="scod.js?v=1276"></script>
+  <script defer src="centros-custo.js?v=1276"></script>
+  <script defer src="marketing.js?v=1276"></script>
+  <script defer src="marketing-budget.js?v=1276"></script>
+  <script defer src="plano-financeiro.js?v=1276"></script>
+  <script defer src="orcamento-data.js?v=1276"></script>
+  <script defer src="orcamento-origem.js?v=1276"></script>
+  <script defer src="orcamento-2026.js?v=1276"></script>
+  <script defer src="orcamento.js?v=1276"></script>
+  <script defer src="prestacao-contas.js?v=1276"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="fluxo-caixa.js?v=1275"></script>
-  <script defer src="caixa-diario.js?v=1275"></script>
-  <script defer src="relatorio-honorarios.js?v=1275"></script>
-  <script defer src="investimento.js?v=1275"></script>
-  <script defer src="parametrizacao-parceiro.js?v=1275"></script>
-  <script defer src="societario.js?v=1275"></script>
-  <script defer src="participacoes.js?v=1275"></script>
-  <script defer src="fiscal.js?v=1275"></script>
-  <script defer src="indexadores.js?v=1275"></script>
-  <script defer src="verificar-construcao.js?v=1275"></script>
-  <script defer src="financiamento.js?v=1275"></script>
-  <script src="repactuacoes.js?v=1275"></script>
-  <script defer src="repactuacao-lote.js?v=1275"></script>
+  <script defer src="fluxo-caixa.js?v=1276"></script>
+  <script defer src="caixa-diario.js?v=1276"></script>
+  <script defer src="relatorio-honorarios.js?v=1276"></script>
+  <script defer src="investimento.js?v=1276"></script>
+  <script defer src="parametrizacao-parceiro.js?v=1276"></script>
+  <script defer src="societario.js?v=1276"></script>
+  <script defer src="participacoes.js?v=1276"></script>
+  <script defer src="fiscal.js?v=1276"></script>
+  <script defer src="indexadores.js?v=1276"></script>
+  <script defer src="verificar-construcao.js?v=1276"></script>
+  <script defer src="financiamento.js?v=1276"></script>
+  <script src="repactuacoes.js?v=1276"></script>
+  <script defer src="repactuacao-lote.js?v=1276"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=1275"></script>
+  <script defer src="dashboard-inadimplencia.js?v=1276"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

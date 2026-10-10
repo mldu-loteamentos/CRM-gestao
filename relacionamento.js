@@ -924,7 +924,7 @@ const RelacionamentoApp = {
       document.addEventListener("keydown", (ev) => {
         if (ev.key !== "Escape") return;
         if (document.getElementById("pdf-view-overlay")?.classList.contains("active")) return;
-        ["terceiros", "vencimento"].forEach((k) => {
+        ["terceiros", "vencimento", "aditamento"].forEach((k) => {
           const m = document.getElementById(this._docCfg(k).p + "-modal");
           if (m && m.style.display !== "none") this.fecharDocModal(k);
         });
@@ -933,6 +933,8 @@ const RelacionamentoApp = {
     if (kind === "terceiros") {
       this._atualizarBtnGerarTerceiro();
       setTimeout(() => document.getElementById("ter-nome")?.focus(), 50);
+    } else if (kind === "aditamento" && typeof this._adiAoAbrir === "function") {
+      this._adiAoAbrir();
     } else if (kind === "vencimento") {
       ["ven-dia", "ven-data-original", "ven-btn-gerar"].forEach((id) => {
         const el = document.getElementById(id);
@@ -2747,7 +2749,8 @@ const RelacionamentoApp = {
     const map = {
       terceiros: { p: "ter", title: "Autorização de terceiros", storage: "crm_docpadrao_terceiros", titleId: "doc-terceiros-title", corpoId: "doc-terceiros-corpo", defaultTitle: "AUTORIZAÇÃO DE TERCEIROS" },
       vencimento: { p: "ven", title: "Alteração de vencimento", storage: "crm_docpadrao_vencimento", titleId: "doc-vencimento-title", corpoId: "doc-vencimento-corpo", defaultTitle: "ALTERAÇÃO DE VENCIMENTO" },
-      quitacao: { p: "qui", title: "Termo de quitação", storage: "crm_docpadrao_quitacao", titleId: "doc-quitacao-title", corpoId: "doc-quitacao-corpo", defaultTitle: "INSTRUMENTO PARTICULAR DE QUITAÇÃO E NOTIFICAÇÃO" }
+      quitacao: { p: "qui", title: "Termo de quitação", storage: "crm_docpadrao_quitacao", titleId: "doc-quitacao-title", corpoId: "doc-quitacao-corpo", defaultTitle: "INSTRUMENTO PARTICULAR DE QUITAÇÃO E NOTIFICAÇÃO" },
+      aditamento: { p: "adi", title: "Aditamento contratual", storage: "crm_docpadrao_aditamento", titleId: "doc-aditamento-title", corpoId: "doc-aditamento-corpo", defaultTitle: "TERMO DE ADITAMENTO CONTRATUAL" }
     };
     return map[kind] || map.terceiros;
   },
@@ -2952,6 +2955,7 @@ const RelacionamentoApp = {
       }
       this._popularOpcoesDiaVencimento();
     }
+    if (kind === "aditamento" && typeof this._adiLimpar === "function") this._adiLimpar();
     const terDd = document.getElementById("ter-terceiro-dropdown");
     if (kind === "terceiros" && terDd) {
       terDd.style.display = "none";
@@ -3255,7 +3259,13 @@ const RelacionamentoApp = {
               number: sale.number || sc.number || sc.contractNumber,
               salesContractCustomers: sale.salesContractCustomers || sc.salesContractCustomers,
               customers: sale.customers || sc.salesContractCustomers || sale.customers,
-              receivableBillId: sale.receivableBillId || sc.receivableBillId
+              receivableBillId: sale.receivableBillId || sc.receivableBillId,
+              saleDate: sale.saleDate || sc.contractDate,
+              contractValue: sale.contractValue || sc.totalSellingValue || sc.value,
+              interestPercentage: sale.interestPercentage != null ? sale.interestPercentage : sc.interestPercentage,
+              paymentConditions: sale.paymentConditions || sc.paymentConditions,
+              situation: sale.situation || sc.situation,
+              cancellationDate: sale.cancellationDate || sc.cancellationDate
             });
             const su = (sc.salesContractUnits || []).find((u) => u.main === true) || (sc.salesContractUnits || [])[0] || {};
             if (su.id && !(unitDetails && unitDetails.id)) {
@@ -3308,6 +3318,10 @@ const RelacionamentoApp = {
         }
       }
       if (kind === "quitacao") await this._prepararQuitacao(RelacionamentoState[kind]);
+      if (kind === "aditamento" && typeof this._adiPreparar === "function") {
+        RelacionamentoState[kind].installments = adimplencia.installments || [];
+        this._adiPreparar(RelacionamentoState[kind]);
+      }
       if (RelacionamentoState[kind + "FromGestao"]) this._travarFiltrosDocOrigem(kind);
     } catch (err) {
       console.error(err);

@@ -20578,7 +20578,7 @@ function numeroPorExtenso(n) {
   const rest = n % 1000;
   const milStr = mil === 1 ? 'mil' : ate999(mil) + ' mil';
   if (!rest) return milStr;
-  return milStr + (rest < 100 ? ' e ' : ' ') + ate999(rest);
+  return milStr + (rest < 100 || rest % 100 === 0 ? ' e ' : ' ') + ate999(rest);
 }
 
 window.dataPorExtenso = function(value) {
@@ -34755,6 +34755,7 @@ async function saveDocPadrao(tipo) {
     quitacao: ['doc-quitacao-title', 'doc-quitacao-corpo'],
     terceiros: ['doc-terceiros-title', 'doc-terceiros-corpo'],
     vencimento: ['doc-vencimento-title', 'doc-vencimento-corpo'],
+    aditamento: ['doc-aditamento-title', 'doc-aditamento-corpo'],
   };
   const ids = keyMap[tipo] || [];
   const data = {};
@@ -34813,6 +34814,7 @@ async function previewDocPadrao(tipo) {
     quitacao: 'Termo de Quitação',
     terceiros: 'Autorização de Terceiros',
     vencimento: 'Alteração de Vencimento',
+    aditamento: 'Aditamento Contratual',
   };
   const label = labelMap[tipo] || tipo;
   const fillLegalPreview = async (rawText) => {
@@ -34904,6 +34906,15 @@ async function previewDocPadrao(tipo) {
     let filled = await fillLegalPreview(corpo);
     if (window.centerSimpleDocSignature) filled = window.centerSimpleDocSignature(filled);
     content = `<h2 style="text-align:center;">${title}</h2><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.85;">${filled}</div>`;
+  } else if (tipo === 'aditamento') {
+    const title = document.getElementById('doc-aditamento-title')?.value || '';
+    const corpo = document.getElementById('doc-aditamento-corpo')?.value || '';
+    const exemplo = applyDistratoConditionals(corpo, { hasConjuge: false })
+      .replace(/\{\{\s*MOTIVO_ADITAMENTO\s*\}\}/g, 'alterar quantidade de parcelas')
+      .replace(/\{\{\s*NOVAS_CONDICOES\s*\}\}/g, '50 parcelas mensais no valor de R$ 1.000,00 (mil reais) cada, com primeiro vencimento no dia 30/10/2026 e demais nos meses subsequentes.')
+      .replace(/\{\{\s*REAJUSTE_JUROS_ADITAMENTO\s*\}\}/g, 'As referidas parcelas estão sem reajuste anual e sem juros de parcelamento.');
+    const filled = window.centerDistratoSignatures(await fillLegalPreview(exemplo));
+    content = `<h2 style="text-align:center;">${title}</h2><p style="font-size:12px;color:#64748b;">Na prévia, motivo e condições usam um exemplo (50 parcelas de R$ 1.000,00). No PDF entram os dados preenchidos na tela do aditamento.</p><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${filled}</div>`;
   }
   
   const win = window.open('', '_blank', 'width=700,height=600,scrollbars=yes');
@@ -34942,7 +34953,7 @@ function applySavedDocPadraoFields(tipo, data, fieldMap) {
 
 // Carregar templates salvos ao inicializar
 async function loadDocPadraoTemplates() {
-  const tipos = ['reneg', 'boleto', 'carta', 'cec', 'suspensao', 'distrato', 'escritura', 'quitacao', 'terceiros', 'vencimento'];
+  const tipos = ['reneg', 'boleto', 'carta', 'cec', 'suspensao', 'distrato', 'escritura', 'quitacao', 'terceiros', 'vencimento', 'aditamento'];
   const fieldMap = {
     reneg: ['doc-reneg-title', 'doc-reneg-subtitle', 'doc-reneg-clauses'],
     boleto: ['doc-boleto-inst1', 'doc-boleto-inst2', 'doc-boleto-obs'],
@@ -34954,6 +34965,7 @@ async function loadDocPadraoTemplates() {
     quitacao: ['doc-quitacao-title', 'doc-quitacao-corpo'],
     terceiros: ['doc-terceiros-title', 'doc-terceiros-corpo'],
     vencimento: ['doc-vencimento-title', 'doc-vencimento-corpo'],
+    aditamento: ['doc-aditamento-title', 'doc-aditamento-corpo'],
   };
   
   if (window.firebaseCollections && window.firebaseDb) {
@@ -39164,13 +39176,14 @@ window.openGestaoDocumentoMenu = function(ctx) {
 
 /** Status vem da coluna Status da Gestão; vazio (ex.: aberto pela Cessão) não bloqueia aqui, a tela confere no Sienge. */
 window._gestaoDocBloqueio = function(tipo, status) {
-  if (tipo === "aditamento" || tipo === "cessao") {
-    return (tipo === "aditamento" ? "Aditamento" : "Cessão de direitos") + " ainda não está disponível.";
-  }
+  if (tipo === "cessao") return "Cessão de direitos ainda não está disponível.";
   const s = String(status || "").trim().toLowerCase();
   if (!s) return "";
   const distratado = /distrat|cancel/.test(s);
   const quitado = /^quitado$/.test(s);
+  if (tipo === "aditamento" && (quitado || distratado)) {
+    return "O aditamento só pode ser feito em contrato ativo (status atual: " + status + ").";
+  }
   if (tipo === "quitacao" && !quitado) {
     return "O termo de quitação só pode ser gerado para título quitado (status atual: " + status + ").";
   }
@@ -39225,13 +39238,17 @@ window.escolherGestaoDocumento = function(tipo) {
   const contractNumber = ctx.contractNumber || contractId || "";
   const customerName = ctx.customerName || "";
 
-  if (tipo === "aditamento") {
-    if (typeof openCustomerFromRelacionamento === "function" && customerId) {
-      openCustomerFromRelacionamento(customerId, contractId, titulo);
-    }
-    setTimeout(() => {
-      alert("Aditamento: módulo em desenvolvimento. A ficha do cliente foi aberta.");
-    }, 400);
+  if (tipo === "aditamento" && window.RelacionamentoApp && typeof RelacionamentoApp.gerarAditamentoPdf === "function") {
+    RelacionamentoApp.abrirDocModal("aditamento", {
+      titulo: titulo && String(titulo) !== "—" ? (String(titulo).replace(/\D/g, "") || String(titulo)) : "",
+      contrato: contractNumber ? String(contractNumber).trim() : "",
+      nome: customerName ? String(customerName).trim() : "",
+      customerId: customerId,
+      contractId: contractId,
+      unidade: ctx.unidade || "",
+      empreendimento: ctx.empreendimento || "",
+      status: ctx.status || ""
+    });
     return;
   }
 

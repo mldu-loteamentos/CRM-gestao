@@ -177,6 +177,7 @@ const CentrosCustoApp = {
       }
     }
     this.closeModal();
+    this._ultimoSalvo = key;
     this.render();
     this.refreshCobrancaViews();
     if (typeof window.persistCentrosCustoCustomToFirebase === "function") {
@@ -719,6 +720,8 @@ const CentrosCustoApp = {
   render() {
     const contentDiv = document.getElementById('centros-custo-content');
     if (!contentDiv) return;
+    const rolagemAnterior = contentDiv.querySelector('.cc-scroll');
+    if (rolagemAnterior) this._topoLista = rolagemAnterior.scrollTop;
 
     if (CentrosCustoState.loading) {
       contentDiv.innerHTML = `
@@ -761,6 +764,11 @@ const CentrosCustoApp = {
         .empresas-table tbody tr { border-bottom: 1px solid #e0e5e0; }
         .empresas-table tbody tr:nth-child(even) { background-color: #f4f6f4; }
         .empresas-table tbody tr:hover { background-color: #eef2ef; }
+        .empresas-table.cc-table tbody tr { transition: background-color .12s ease, box-shadow .12s ease; }
+        .empresas-table.cc-table tbody tr:hover { background-color: #d9f2e3; box-shadow: inset 4px 0 0 #105436; }
+        .empresas-table.cc-table tbody tr:hover td { color: #0f3d27; }
+        .empresas-table.cc-table tbody tr.cc-row-salvo { animation: ccRowSalvo 2.4s ease-out; }
+        @keyframes ccRowSalvo { 0%, 40% { background-color: #bbf7d0; } 100% { background-color: transparent; } }
         .empresas-table td { padding: 10px 12px; vertical-align: middle; }
         .cc-filter-container { border: 1px solid #ccc; border-radius: 6px; padding: 8px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: white; min-height: 42px; margin-bottom: 20px;}
         .cc-filter-select { border: none; outline: none; background: transparent; font-size: 0.85rem; flex-grow: 1; min-width: 200px; color: #777;}
@@ -789,8 +797,8 @@ const CentrosCustoApp = {
       </div>
 
       <div class="card" style="overflow: hidden; border-radius: 8px;">
-        <div style="max-height: 65vh; overflow-y: auto;">
-          <table class="empresas-table">
+        <div class="cc-scroll" style="max-height: 65vh; overflow-y: auto;">
+          <table class="empresas-table cc-table">
             <thead>
               <tr>
                 <th style="width: 80px;">ID Empresa</th>
@@ -835,7 +843,7 @@ const CentrosCustoApp = {
         : `<span style="background: #f0f2f5; padding: 2px 6px; border-radius: 4px; font-size: 0.8rem; color: #555;">${tipoCc}</span>`;
 
       html += `
-        <tr>
+        <tr id="cc-row-${cc.id}">
           <td>${cc.idCompany || cc.companyId || '-'}</td>
           <td><strong>${cc.id}</strong></td>
           <td>${cc.name}</td>
@@ -865,6 +873,13 @@ const CentrosCustoApp = {
 
     contentDiv.innerHTML = html;
     if (window.lucide) window.lucide.createIcons();
+    const rolagem = contentDiv.querySelector('.cc-scroll');
+    if (rolagem && this._topoLista) rolagem.scrollTop = this._topoLista;
+    if (this._ultimoSalvo != null) {
+      const linha = document.getElementById(`cc-row-${this._ultimoSalvo}`);
+      if (linha) linha.classList.add('cc-row-salvo');
+      this._ultimoSalvo = null;
+    }
     this.preencherVgvObra(filteredCCs);
   },
 

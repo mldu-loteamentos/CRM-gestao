@@ -936,6 +936,7 @@ ComprasControleApp.pintarTitulo = function () {
           ${row.conta || row.operacao || row.tipoBaixa ? `<div><span>Conta / operação</span><div>${this.esc([row.tipoBaixa, row.operacao, row.conta].filter(Boolean).join(" · "))}</div></div>` : ""}
         </div>
         ${obs ? `<p class="cfin-titulo-obs"><strong>Observação:</strong> ${this.esc(obs)}</p>` : ""}
+        ${row.rateioHtml || ""}
         <h4>Forma de pagamento programada</h4>
         <div class="cfin-titulo-box">${det.loading ? "" : forma}</div>
         <h4>Anexos</h4>

@@ -5247,6 +5247,84 @@ circle.donut-segment {
 @media (max-width: 760px) {
   .doc-modal-panel .doc-modal-grid-ter { grid-template-columns: 1fr !important; }
 }
+.doc-modal-panel.adi-panel { overflow-y: auto; }
+.adi-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 20px; align-items: start; }
+.adi-grid.adi-grid-um { grid-template-columns: minmax(0, 1fr); }
+.adi-col { border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 18px; background: #fff; }
+.adi-col-novo { border-color: #a7d7bf; background: #f8fdfa; }
+.adi-col-tit { margin: 0 0 14px; font-size: 0.95rem; color: var(--color-primary); display: flex; align-items: center; gap: 8px; }
+.adi-col-tit i, .adi-col-tit svg { width: 17px; height: 17px; }
+.adi-kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.adi-kpi { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+.adi-kpi span { font-size: 0.72rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.02em; }
+.adi-kpi strong { font-size: 0.95rem; color: #0f172a; }
+.adi-kpi small { font-size: 0.75rem; color: #64748b; }
+.adi-ok { color: #15803d !important; }
+.adi-ruim { color: #b91c1c !important; }
+.adi-atencao { color: #b45309 !important; }
+.adi-tab-wrap { overflow-x: auto; }
+.adi-tab { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+.adi-tab th { text-align: left; font-size: 0.7rem; text-transform: uppercase; color: #64748b; font-weight: 700; padding: 6px 6px; border-bottom: 1px solid #e2e8f0; vertical-align: bottom; }
+.adi-tab th.adi-num { white-space: normal; }
+.adi-tab td { padding: 6px 6px; border-bottom: 1px solid #f1f5f9; vertical-align: top; color: #1e293b; }
+.adi-tab .adi-num { text-align: right; white-space: nowrap; }
+.adi-tab small { color: #64748b; }
+.adi-vazio { color: #64748b; font-style: italic; }
+.adi-info { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 12px; font-size: 0.8rem; color: #334155; }
+.adi-bloco { margin-bottom: 16px; }
+.adi-bloco:last-child { margin-bottom: 0; }
+.adi-lbl { font-size: 0.75rem; font-weight: 700; color: #334155; text-transform: uppercase; letter-spacing: 0.02em; margin-bottom: 8px; }
+.adi-lbl-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.adi-lbl-row .adi-lbl { margin-bottom: 0; }
+.adi-acoes { display: flex; gap: 8px; }
+.adi-acoes .btn { display: inline-flex; align-items: center; gap: 6px; font-size: 0.78rem; }
+.adi-acoes .btn i, .adi-acoes .btn svg { width: 14px; height: 14px; }
+.adi-checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 16px; }
+.adi-check, .adi-radio { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #1e293b; cursor: pointer; margin: 0 0 6px; flex-wrap: wrap; }
+.adi-check input, .adi-radio input[type="radio"] { accent-color: var(--color-primary); width: 16px; height: 16px; margin: 0; }
+.adi-duas { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 16px; }
+.adi-depara { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #1e293b; }
+.doc-modal-panel .form-control.adi-in { height: 34px; font-size: 0.85rem; padding: 4px 8px; }
+.adi-in-juros { width: 96px; text-align: right; }
+.adi-in-indice { width: 120px; }
+.adi-tab-edit select.adi-in { min-width: 104px; }
+.adi-in-qtd { width: 60px; text-align: right; }
+.adi-in-valor { width: 100px; text-align: right; }
+.adi-in-data { width: 136px; }
+.adi-tab-edit td { vertical-align: middle; }
+.adi-ate { display: block; font-size: 0.7rem; margin-top: 2px; }
+.adi-del { background: none; border: none; cursor: pointer; color: #b91c1c; padding: 4px; display: inline-flex; }
+.adi-del i, .adi-del svg { width: 16px; height: 16px; }
+.adi-totais { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 10px; font-size: 0.82rem; color: #334155; }
+.adi-previa { background: #fff; border: 1px dashed #a7d7bf; border-radius: 8px; padding: 10px 12px; font-family: 'Times New Roman', serif; font-size: 0.95rem; line-height: 1.45; color: #111; }
+.adi-previa p { margin: 0 0 6px; }
+.adi-previa p:last-child { margin-bottom: 0; }
+.adi-previa-motivo { color: #475569; }
+.adi-bloqueio { display: flex; align-items: center; gap: 8px; padding: 10px 14px; margin-bottom: 14px; border-radius: 8px; background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; font-weight: 700; font-size: 0.88rem; }
+.adi-bloqueio i, .adi-bloqueio svg { width: 18px; height: 18px; flex-shrink: 0; }
+.adi-rodape { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.adi-aviso { flex: 1; min-width: 0; margin: 0; font-size: 0.82rem; color: #b45309; }
+@media (max-width: 1000px) {
+  .adi-grid, .adi-duas { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Rateio por centro de custo no resumo do título */
+.gp-rateio { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.gp-rateio th { background: #f1f5f9; color: #475569; font-weight: 700; font-size: 0.74rem; text-align: left; padding: 6px 8px; border-bottom: 1px solid #e2e8f0; }
+.gp-rateio td { padding: 6px 8px; border-bottom: 1px solid #eef2f5; vertical-align: middle; }
+.gp-rateio .num { text-align: right; white-space: nowrap; }
+.gp-rateio .ic { width: 22px; text-align: center; font-weight: 800; }
+.gp-rateio .gp-rateio-obra td { background: #f0f7f3; color: #105436; font-weight: 700; font-size: 0.78rem; }
+.gp-rateio .gp-rateio-obra span { color: #475569; font-weight: 600; }
+.gp-rateio .gp-rateio-nome { color: #64748b; font-size: 0.76rem; }
+.gp-rateio tr.is-bad td { background: #fef2f2; }
+.gp-rateio tfoot td { font-weight: 800; color: #0f172a; border-bottom: 0; border-top: 2px solid #e2e8f0; }
+.gp-rateio .gp-rateio-ok { color: #105436; }
+.gp-rateio .gp-rateio-x { color: #b91c1c; }
+.gp-rateio-msg { margin: 8px 0 0; font-size: 0.8rem; border-radius: 8px; padding: 8px 10px; }
+.gp-rateio-msg.is-ok { background: #ecfdf5; color: #105436; }
+.gp-rateio-msg.is-bad { background: #fef2f2; color: #b91c1c; }
+.gp-rateio-msg.is-bad div + div { margin-top: 3px; }
 .esc-scan {
   display: flex;
   flex-direction: column;

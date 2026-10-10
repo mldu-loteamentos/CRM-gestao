@@ -412,6 +412,7 @@ const GerarPagamentoApp = {
         const cad = ccMap[id] || this.ccDe(id);
         ccsTitulo.push({ id, nome: (cad && cad.name) || c.costCenterName || "", parceria: !!ccMap[id], rateio: rate });
       });
+      ccsTitulo.sort((a, b) => Number(a.id) - Number(b.id));
       const tituloAPagar = saldo != null ? Math.max(0, saldo) : (pago ? 0 : original);
       cats.forEach((cat) => {
         const cc = ccMap[String(cat.costCenterId)];
@@ -594,7 +595,8 @@ const GerarPagamentoApp = {
       rows,
       aPagar: r0.tituloAPagar != null ? r0.tituloAPagar : rows.reduce((t, r) => t + (Number(r.aPagar) || 0), 0),
       valor: r0.tituloValor != null ? r0.tituloValor : rows.reduce((t, r) => t + (Number(r.valor) || 0), 0),
-      ccs: r0.ccsTitulo && r0.ccsTitulo.length ? r0.ccsTitulo : rows.map((r) => ({ id: r.ccId, nome: r.ccNome, parceria: true }))
+      ccs: (r0.ccsTitulo && r0.ccsTitulo.length ? r0.ccsTitulo : rows.map((r) => ({ id: r.ccId, nome: r.ccNome, parceria: true })))
+        .slice().sort((a, b) => Number(a.id) - Number(b.id))
     };
   },
 
@@ -663,6 +665,7 @@ const GerarPagamentoApp = {
       valorAjustado: t.valor,
       ccId: t.ccs.map((x) => x.id).join(" / "),
       ccNome: t.ccs.length > 1 ? "rateado" : (t.ccs[0] && t.ccs[0].nome) || r.ccNome,
+      rateioHtml: t.ccs.length > 1 ? this.rateioHtml(this.conferirRateio(t.ccs, t.valor)) : "",
       companyId: cc ? this.companyIdOf(cc) : "",
       natureza: r.pago ? "pago" : "",
       dataPagamento: r.pagamento || "",
@@ -758,6 +761,9 @@ const GerarPagamentoApp = {
     return Object.values(grupos).map((g) => {
       const itens = g.ordem.map((k) => g.itens[k]).sort((a, b) => (a.vencimento || "").localeCompare(b.vencimento || "") || Number(a.titulo) - Number(b.titulo));
       itens.forEach((it) => {
+        it.ccs.sort((a, b) => Number(a.id) - Number(b.id));
+        const t = this.resumoTitulo(it.chave);
+        it.rateio = t ? this.conferirRateio(t.ccs, t.valor) : null;
         it.loteIntegra = this.loteIntegraDe(it.chave);
         it.loteSienge = this.state.loteSienge[it.chave] || "";
         it.emLote = !!(it.loteIntegra || it.loteSienge);
@@ -1171,7 +1177,7 @@ const GerarPagamentoApp = {
           <td><strong>${this.esc(it.titulo)}</strong>${it.parcela ? `<span class="gp-muted"> / ${this.esc(it.parcela)}</span>` : ""}</td>
           <td title="${this.esc(it.credor)}">${this.esc(it.credor)}</td>
           <td>${this.esc(it.documento || "—")}</td>
-          <td title="${this.esc(it.ccs.map((c) => `${c.id} ${c.nome}${c.rateio != null ? ` · ${this.pct(c.rateio)}` : ""}${c.parceria ? " (parceria)" : ""}`).join("\n"))}">${it.ccs.map((c) => (c.parceria ? `<strong>${this.esc(c.id)}</strong>` : `<span class="gp-cc-outro">${this.esc(c.id)}</span>`)).join(" / ")} <span class="gp-muted">${this.esc(it.ccs.length === 1 ? it.ccs[0].nome : "rateado")}</span></td>
+          <td class="gp-status" title="${this.esc(it.ccs.map((c) => `${c.id} ${c.nome}${c.rateio != null ? ` · ${this.pct(c.rateio)}` : ""}${c.parceria ? " (parceria)" : ""}`).join("\n"))}">${it.ccs.map((c) => (c.parceria ? `<strong>${this.esc(c.id)}</strong>` : `<span class="gp-cc-outro">${this.esc(c.id)}</span>`)).join(" / ")} <span class="gp-muted">${this.esc(it.ccs.length === 1 ? it.ccs[0].nome : "rateado")}</span>${it.ccs.length > 1 ? this.rateioSeloHtml(it.rateio) : ""}</td>
           <td style="text-align:right;">${this.money(it.aPagar)}</td>
           <td class="gp-status">${pagSelo}</td>
           <td class="gp-status">${tag}</td>
@@ -1282,12 +1288,116 @@ const GerarPagamentoApp = {
     return String(ccId || "").slice(0, -2);
   },
 
+  num(v) {
+    const n = parseFloat(String(v == null ? "" : v).replace(",", "."));
+    return Number.isFinite(n) ? n : 0;
+  },
+
+  /* Padrão da obra no cadastro: % Moura Leite no CC da obra (14000) e % Terrenista no CC do parceiro (14001). */
+  rateioPadraoObra(baseId, parcId) {
+    const ml = this.num(this.customOf(baseId).perc_ml);
+    const terr = parcId ? this.num(this.customOf(parcId).perc_terrenista) : 0;
+    if (terr > 0 && terr < 100) {
+      const aviso = ml > 0 && ml < 100 && Math.abs(ml + terr - 100) > 0.01
+        ? `Cadastro da obra ${this.obra(baseId)}: ${this.pct(ml)} Moura Leite (${baseId}) + ${this.pct(terr)} terrenista (${parcId}) não somam 100%. Usei ${this.pct(100 - terr)} / ${this.pct(terr)}.`
+        : "";
+      return { ml: 100 - terr, terr, aviso };
+    }
+    if (ml > 0 && ml < 100) return { ml, terr: 100 - ml, aviso: "" };
+    return null;
+  },
+
+  /* O valor de cada obra no título é dividido entre o CC da obra e o do parceiro pelo padrão do cadastro. */
+  conferirRateio(ccs, valor) {
+    const total = Number(valor) || 0;
+    const soma = (ccs || []).reduce((t, c) => t + this.num(c.rateio), 0);
+    const linhas = (ccs || []).map((c) => {
+      const pct = soma > 0 ? this.num(c.rateio) * 100 / soma : 100 / ccs.length;
+      return { id: String(c.id), nome: c.nome || ((this.ccDe(c.id) || {}).name) || "", parceria: !!c.parceria, pct, valor: total * pct / 100 };
+    }).sort((a, b) => Number(a.id) - Number(b.id));
+    const obras = [];
+    const porObra = {};
+    linhas.forEach((l) => {
+      const ob = this.obra(l.id);
+      if (!porObra[ob]) obras.push(porObra[ob] = { obra: ob, linhas: [] });
+      porObra[ob].linhas.push(l);
+    });
+    const problemas = [];
+    obras.forEach((o) => {
+      o.pct = o.linhas.reduce((t, l) => t + l.pct, 0);
+      o.valor = total * o.pct / 100;
+      const base = (o.linhas.find((l) => !l.parceria) || {}).id || o.obra + "00";
+      const parcTitulo = o.linhas.find((l) => l.parceria);
+      const parcCad = parcTitulo ? null : this.state.costCenters.find((c) => this.obra(c.id) === o.obra && String(c.id) !== base && this.isParceiro(c));
+      const parc = parcTitulo ? parcTitulo.id : (parcCad ? String(parcCad.id) : "");
+      const padrao = this.rateioPadraoObra(base, parc) || (parc ? null : { ml: 100, terr: 0, aviso: "" });
+      if (!padrao) {
+        o.semPadrao = true;
+        problemas.push(`Obra ${o.obra}: rateio padrão não cadastrado. Informe o % Moura Leite no ${base} e o % Terrenista no ${parc} em Centros de Custo.`);
+        return;
+      }
+      o.padrao = padrao;
+      if (padrao.aviso) problemas.push(padrao.aviso);
+      [base, parc].filter(Boolean).forEach((id) => {
+        if (o.linhas.some((l) => l.id === id) || !((id === base ? padrao.ml : padrao.terr) > 0)) return;
+        o.linhas.push({ id, nome: (this.ccDe(id) || {}).name || "", parceria: id === parc, pct: 0, valor: 0, ausente: true });
+      });
+      o.linhas.sort((a, b) => Number(a.id) - Number(b.id));
+      o.linhas.forEach((l) => {
+        l.padrao = l.id === base ? padrao.ml : (l.id === parc ? padrao.terr : 0);
+        l.esperado = o.valor * l.padrao / 100;
+        const pctObra = o.pct > 0 ? l.pct * 100 / o.pct : 0;
+        l.ok = Math.abs(l.valor - l.esperado) < 0.02 || Math.abs(pctObra - l.padrao) < 0.006;
+        if (l.ok) return;
+        problemas.push(l.ausente
+          ? `${l.id} não está no rateio; o padrão é ${this.pct(l.padrao)} da obra ${o.obra} = ${this.money(l.esperado)}.`
+          : `${l.id}: lançado ${this.money(l.valor)}; o padrão é ${this.pct(l.padrao)} da obra ${o.obra} = ${this.money(l.esperado)}.`);
+      });
+    });
+    return { total, obras, problemas, ok: !problemas.length };
+  },
+
+  rateioSeloHtml(conf) {
+    if (!conf || !conf.obras.length) return "";
+    if (conf.ok) return "";
+    const semPadrao = conf.obras.every((o) => o.semPadrao);
+    return `<small class="${semPadrao ? "gp-muted" : "gp-bloq"}" title="${this.esc(conf.problemas.join("\n"))}">${semPadrao ? "Sem rateio padrão no cadastro" : "Rateio fora do padrão"}</small>`;
+  },
+
+  rateioHtml(conf) {
+    if (!conf || !conf.obras.length) return "";
+    const corpo = conf.obras.map((o) => `
+      <tr class="gp-rateio-obra"><td colspan="6">Obra ${this.esc(o.obra)} · ${this.pct(o.pct)} do título · ${this.money(o.valor)}${o.padrao
+        ? ` <span>· padrão ${this.pct(o.padrao.ml)} Moura Leite${o.padrao.terr ? ` / ${this.pct(o.padrao.terr)} terrenista` : ""}</span>`
+        : ` <span class="gp-rateio-x">· sem rateio padrão no cadastro</span>`}</td></tr>
+      ${o.linhas.map((l) => `<tr class="${l.ok === false ? "is-bad" : ""}">
+        <td><strong>${this.esc(l.id)}</strong> <span class="gp-rateio-nome">${this.esc(l.nome)}</span></td>
+        <td class="num">${this.pct(l.pct)}</td>
+        <td class="num">${this.money(l.valor)}</td>
+        <td class="num">${l.padrao != null ? this.pct(l.padrao) + " da obra" : "—"}</td>
+        <td class="num">${l.esperado != null ? this.money(l.esperado) : "—"}</td>
+        <td class="ic">${l.ok == null ? "" : (l.ok ? `<span class="gp-rateio-ok">✓</span>` : `<span class="gp-rateio-x">✗</span>`)}</td>
+      </tr>`).join("")}`).join("");
+    const rodape = conf.ok
+      ? `<p class="gp-rateio-msg is-ok">O rateio confere com o padrão cadastrado em Centros de Custo.</p>`
+      : `<div class="gp-rateio-msg is-bad">${conf.problemas.map((p) => `<div>${this.esc(p)}</div>`).join("")}</div>`;
+    return `<h4>Rateio por centro de custo</h4>
+      <table class="gp-rateio">
+        <thead><tr><th>Centro de custo</th><th class="num">% do título</th><th class="num">Valor</th><th class="num">Padrão</th><th class="num">Esperado</th><th></th></tr></thead>
+        <tbody>${corpo}</tbody>
+        <tfoot><tr><td>Total</td><td class="num">${this.pct(conf.obras.reduce((t, o) => t + o.pct, 0))}</td><td class="num">${this.money(conf.total)}</td><td colspan="3"></td></tr></tfoot>
+      </table>${rodape}`;
+  },
+
   ccsHtml(r) {
-    const ccs = r.ccsTitulo && r.ccsTitulo.length ? r.ccsTitulo : [{ id: r.ccId, nome: r.ccNome, parceria: true }];
+    const ccs = (r.ccsTitulo && r.ccsTitulo.length ? r.ccsTitulo : [{ id: r.ccId, nome: r.ccNome, parceria: true }])
+      .slice().sort((a, b) => Number(a.id) - Number(b.id));
     const semObra = ccs.filter((c) => c.parceria && !ccs.some((o) => !o.parceria && this.obra(o.id) === this.obra(c.id)));
     const nomes = ccs.map((c) => `${c.id} ${c.nome}${c.rateio != null ? ` · ${this.pct(c.rateio)}` : ""}${c.parceria ? " (parceria)" : ""}`).join("\n");
+    const conf = ccs.length > 1 ? this.conferirRateio(ccs, r.tituloValor != null ? r.tituloValor : r.valor) : null;
     return `<span title="${this.esc(nomes)}">${ccs.map((c) => (c.parceria ? `<strong>${this.esc(c.id)}</strong>` : `<span class="gp-cc-outro">${this.esc(c.id)}</span>`)).join(" / ")} <span class="gp-muted">${this.esc(ccs.length === 1 ? ccs[0].nome : "rateado")}</span></span>`
-      + (semObra.length ? `<small class="gp-bloq">Sem o CC da obra de ${semObra.map((c) => this.esc(c.id)).join(", ")}</small>` : "");
+      + (semObra.length ? `<small class="gp-bloq">Sem o CC da obra de ${semObra.map((c) => this.esc(c.id)).join(", ")}</small>` : "")
+      + this.rateioSeloHtml(conf);
   },
 
   statusHtml(r) {
