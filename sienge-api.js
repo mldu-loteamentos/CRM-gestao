@@ -1318,6 +1318,8 @@ const SiengeApiService = {
   OBRA_VGV_CACHE_KEY: "crm_obra_vgv_cache",
 
   obraVgvCache(id) {
+    const mem = this._vgvMem && this._vgvMem[String(id)];
+    if (mem && (!mem.erro || Date.now() - mem.at < 10 * 60000)) return mem;
     try {
       const map = JSON.parse(localStorage.getItem(this.OBRA_VGV_CACHE_KEY) || "{}");
       const hit = map[String(id)];
@@ -1334,6 +1336,15 @@ const SiengeApiService = {
       if (hit) return hit;
     }
     if (s_apiMode === "simulado") return null;
+    this._vgvMem = this._vgvMem || {};
+    this._vgvVoo = this._vgvVoo || {};
+    if (this._vgvVoo[id]) return this._vgvVoo[id];
+    const busca = this._buscarEnterpriseVgv(id).finally(() => { delete this._vgvVoo[id]; });
+    this._vgvVoo[id] = busca;
+    return busca;
+  },
+
+  async _buscarEnterpriseVgv(id) {
     let out = { id, vgv: null, nome: "", at: Date.now() };
     try {
       const ent = await siengeFetchWithRetry(`/enterprises/${encodeURIComponent(id)}`, 1);
@@ -1347,8 +1358,13 @@ const SiengeApiService = {
         at: Date.now()
       };
     } catch (e) {
-      if (Number(e && e.status) !== 404) throw e;
+      // A lista de centros pede a cada repintura: falha fica guardada por 10 min para não repetir a chamada.
+      if (Number(e && e.status) !== 404) {
+        this._vgvMem[id] = Object.assign({}, out, { erro: true });
+        throw e;
+      }
     }
+    this._vgvMem[id] = out;
     try {
       const map = JSON.parse(localStorage.getItem(this.OBRA_VGV_CACHE_KEY) || "{}");
       map[id] = out;
@@ -2311,10 +2327,20 @@ const SiengeApiService = {
     if (s_apiMode === "simulado") {
       return window.MOCK_DATA.COST_CENTERS.find(cc => String(cc.id) === String(costCenterId)) || { id: costCenterId, name: `Centro de Custo ${costCenterId}` };
     }
+    const chave = String(costCenterId || "").trim();
+    this._ccNomeMem = this._ccNomeMem || {};
+    if (this._ccNomeMem[chave]) return this._ccNomeMem[chave];
+    try {
+      const lista = JSON.parse(localStorage.getItem("crm_cost_centers_data") || "[]");
+      const hit = Array.isArray(lista) && lista.find((c) => c && String(c.id) === chave && c.name);
+      if (hit) return (this._ccNomeMem[chave] = { id: hit.id, name: hit.name });
+    } catch (e) {}
+    const obra = this.obraVgvCache(chave);
+    if (obra && obra.nome) return (this._ccNomeMem[chave] = { id: chave, name: obra.nome });
     try {
       // Tentar a rota de empreendimentos primeiro, já que o usuário pediu "Empreendimento"
       const ent = await siengeFetchWithRetry(`/enterprises/${costCenterId}`);
-      if (ent && ent.name) return { id: ent.id, name: ent.name };
+      if (ent && ent.name) return (this._ccNomeMem[chave] = { id: ent.id, name: ent.name });
     } catch (e1) {
       // Fallback para costcenters caso não seja um enterprise válido
       try {

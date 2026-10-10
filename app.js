@@ -3203,6 +3203,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "marketing-config": "Configurações",
     suporte: "Suporte",
     auditoria: "Auditoria do Sistema",
+    "auditoria-login": "Auditoria do Login Sienge",
     "consumo-api": "Consumo de API",
     "usuarios-online": "Usuários online",
     acessos: "Acessos"
@@ -3267,6 +3268,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "marketing-config": "settings",
     suporte: "headphones",
     auditoria: "shield",
+    "auditoria-login": "log-in",
     "consumo-api": "activity",
     "usuarios-online": "users",
     acessos: "key-round"
@@ -3439,6 +3441,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (window.ConsumoApiApp && typeof ConsumoApiApp.init === "function") ConsumoApiApp.init();
   } else if (tabId === "usuarios-online") {
     if (window.UsuariosOnline && typeof UsuariosOnline.init === "function") UsuariosOnline.init();
+  } else if (tabId === "auditoria-login") {
+    if (window.AuditoriaLoginApp && typeof AuditoriaLoginApp.init === "function") AuditoriaLoginApp.init();
   }
 }
 
@@ -41804,6 +41808,7 @@ window.SYNC_KEYS = [
     "crm_moura_cartao_taxas",
     "crm_moura_condicoes_pagamento",
     "crm_documentos_ciencia",
+    "crm_documentos_vistos",
     "crm_moura_alcada_desconto",
     "crm_moura_alcada_distrato",
     "crm_compromissario_configs",

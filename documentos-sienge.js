@@ -7,10 +7,12 @@
 const DocumentosSiengeApp = {
   STORAGE_KEY: "crm_documentos_ciencia",
   CACHE_KEY: "crm_documentos_sienge_cache",
+  VISTOS_KEY: "crm_documentos_vistos",
   CACHE_HORAS: 24,
   items: [],
   loading: false,
   error: "",
+  semAcesso: false,
   q: "",
   inativos: false,
   _carregando: null,
@@ -36,6 +38,40 @@ const DocumentosSiengeApp = {
     } catch (e) {
       return { at: 0, items: [] };
     }
+  },
+
+  vistos() {
+    try {
+      const v = JSON.parse(localStorage.getItem(this.VISTOS_KEY) || "{}");
+      return v && typeof v.byId === "object" ? v : { byId: {}, updatedAt: 0 };
+    } catch (e) {
+      return { byId: {}, updatedAt: 0 };
+    }
+  },
+
+  /** Documentos que aparecem nos títulos a pagar: base da lista quando o Sienge nega a API de documentos. */
+  registrarVistos(lista) {
+    const v = this.vistos();
+    let mudou = false;
+    (lista || []).forEach((d) => {
+      const id = String((d && d.id) || "").trim().toUpperCase();
+      if (!id) return;
+      const nome = String((d && d.nome) || "").trim();
+      const atual = v.byId[id];
+      if (!atual || (nome && atual.nome !== nome)) {
+        v.byId[id] = { nome: nome || (atual && atual.nome) || id };
+        mudou = true;
+      }
+    });
+    if (!mudou) return;
+    v.updatedAt = Date.now();
+    try { localStorage.setItem(this.VISTOS_KEY, JSON.stringify(v)); } catch (e) {}
+  },
+
+  listaDosTitulos() {
+    return Object.entries(this.vistos().byId)
+      .map(([id, d]) => ({ id, nome: (d && d.nome) || id, ativo: true, pagamento: true, cienciaSienge: false, soDosTitulos: true }))
+      .sort((a, b) => a.id.localeCompare(b.id, "pt-BR", { numeric: true }));
   },
 
   normalizar(raw) {
@@ -76,12 +112,23 @@ const DocumentosSiengeApp = {
       this.items = c.items;
       return this.items;
     }
+    if (!forcar && this.semAcesso && Date.now() - (this._negadoEm || 0) < 3600000) {
+      this.items = c.items.length ? c.items : this.listaDosTitulos();
+      return this.items;
+    }
     if (this._carregando) return this._carregando;
     this._carregando = this.buscarNoSienge()
-      .then((list) => { this.items = list; return list; })
+      .then((list) => { this.items = list; this.semAcesso = false; return list; })
       .catch((e) => {
+        this.semAcesso = /\b403\b/.test(String((e && e.message) || e));
+        if (this.semAcesso) this._negadoEm = Date.now();
         if (c.items.length) {
           this.items = c.items;
+          return this.items;
+        }
+        const dosTitulos = this.listaDosTitulos();
+        if (this.semAcesso && dosTitulos.length) {
+          this.items = dosTitulos;
           return this.items;
         }
         throw e;
@@ -133,7 +180,7 @@ const DocumentosSiengeApp = {
       return `<tr${d.ativo ? "" : ' style="opacity:.55"'}>
         <td class="cpag-td-code">${this.esc(d.id)}</td>
         <td><div class="cpag-name">${this.esc(d.nome)}</div>${d.ativo ? "" : `<div class="cpag-desc">Inativo no Sienge</div>`}</td>
-        <td><span class="cpag-desc">${d.cienciaSienge ? "Exige ciência" : "Não exige"}</span></td>
+        <td><span class="cpag-desc">${d.soDosTitulos ? "Sem acesso à API" : (d.cienciaSienge ? "Exige ciência" : "Não exige")}</span></td>
         <td>
           <label class="moura-switch" title="Exige ciência antes da autorização">
             <input type="checkbox" ${on ? "checked" : ""} onchange="DocumentosSiengeApp.setCiencia('${this.esc(d.id)}', this.checked)">
@@ -164,6 +211,11 @@ const DocumentosSiengeApp = {
           </button>
         </div>
         <p class="cpag-desc" style="margin:0 0 10px;">A ciência é dada no Sienge antes da autorização do título. O padrão de cada documento vem do cadastro do Sienge; o que for alterado aqui vale para o Gerar Pagamento.</p>
+        ${this.semAcesso ? `<div class="crm-card" style="margin:0 0 10px;padding:10px 14px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:0.82rem;line-height:1.45;">
+          <b>O Sienge negou acesso à lista de documentos (erro 403).</b> O usuário de API do CRM não tem permissão no recurso
+          <b>Documentos</b> (<code>document-identifications</code>). Peça para liberar em Sienge &gt; Integrações &gt; Usuários de API &gt; editar o usuário &gt; recursos permitidos, e depois clique em Atualizar do Sienge.
+          ${this.items.length ? `<br>Enquanto isso, a lista abaixo traz os documentos que já apareceram nos títulos do Gerar Pagamento: marque à mão os que exigem ciência.` : `<br>Enquanto isso, abra o Gerar Pagamento uma vez: os documentos dos títulos aparecem aqui e você marca à mão os que exigem ciência.`}
+        </div>` : ""}
         <div class="crm-card cpag-card">
           <div class="crm-scroll-table cpag-table-wrap">
             <table class="custom-table cpag-table">
@@ -189,7 +241,9 @@ const DocumentosSiengeApp = {
     try {
       await this.garantirLista(forcar);
     } catch (e) {
-      this.error = "Não foi possível carregar os documentos do Sienge: " + (e.message || e);
+      this.error = this.semAcesso
+        ? "Sem permissão na API de documentos do Sienge e nenhum documento visto nos títulos ainda."
+        : "Não foi possível carregar os documentos do Sienge: " + (e.message || e);
     }
     this.loading = false;
     this.render();

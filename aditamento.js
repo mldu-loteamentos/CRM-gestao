@@ -463,10 +463,6 @@
               </select>
             </div>
           </div>
-          <div>
-            <div class="adi-lbl">O que muda no termo <small>(automático, conforme você edita)</small></div>
-            <div class="adi-mudancas" id="adi-mudancas">${this._adiMudancasHtml(ctx)}</div>
-          </div>
         </div>`;
     },
 
@@ -537,7 +533,6 @@
       };
       return `
         <div class="adi-testemunhas" id="adi-testemunhas">
-          <div class="adi-lbl">Testemunhas <small>(quem assina este aditamento)</small></div>
           ${users.length
             ? `<div class="adi-test-grid">${select(1)}${select(2)}</div>`
             : `<div class="adi-atencao">Nenhum usuário marcado como testemunha. Ligue “Assina documentos como testemunha” no cadastro de usuários.</div>`}
@@ -704,10 +699,20 @@
           ${this._adiResumoHtml(ctx)}
           <div class="adi-grid adi-grid-um">${this._adiHojeHtml(ctx)}</div>`;
       } else {
-        box.innerHTML = `${this._adiResumoHtml(ctx)}
-          ${this._adiParcelasCardHtml(ctx)}
-          ${this._adiAjustesHtml(ctx)}
-          ${this._adiTestemunhasHtml(ctx)}`;
+        const sec = (n, icone, titulo, sub, corpo, cls) => `
+          <section class="adi-sec ${cls || ""}">
+            <header class="adi-sec-h">${n ? `<span class="adi-sec-n">${n}</span>` : `<i data-lucide="${icone}"></i>`}<strong>${titulo}</strong>${sub ? `<small>${sub}</small>` : ""}</header>
+            <div class="adi-sec-b">${corpo}</div>
+          </section>`;
+        box.innerHTML = `<div class="adi-blocos">
+          ${sec(0, "file-text", "Contrato hoje", "", this._adiResumoHtml(ctx), "adi-sec-info")}
+          ${sec(1, "", "Parcelas", "como está hoje e como vai ficar", this._adiParcelasCardHtml(ctx))}
+          <div class="adi-sec-par">
+            ${sec(2, "", "Juros e reajuste", "", this._adiAjustesHtml(ctx))}
+            ${sec(3, "", "O que muda no termo", "automático, conforme você edita", `<div class="adi-mudancas" id="adi-mudancas">${this._adiMudancasHtml(ctx)}</div>`)}
+          </div>
+          ${sec(4, "", "Testemunhas", "quem assina este aditamento", this._adiTestemunhasHtml(ctx))}
+        </div>`;
       }
       if (window.lucide) lucide.createIcons();
       this._adiAtualizar();

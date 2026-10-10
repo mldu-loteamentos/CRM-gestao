@@ -469,6 +469,7 @@ const GerarPagamentoApp = {
     linhas.sort((a, b) => (a.vencimento || "").localeCompare(b.vencimento || "") || Number(a.titulo) - Number(b.titulo) || Number(a.parcela) - Number(b.parcela));
     this.state.titulos = linhas;
     this.state.previsoesIgnoradas = previsoes;
+    if (window.DocumentosSiengeApp) DocumentosSiengeApp.registrarVistos(linhas.map((l) => ({ id: l.docId, nome: l.docNome })));
     this.reclassificar();
   },
 

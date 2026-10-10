@@ -111,6 +111,7 @@
     ]},
     { id: "seguranca", label: "Segurança", subs: [
       { id: "auditoria", label: "Auditoria do Sistema" },
+      { id: "auditoria_login", label: "Auditoria do Login Sienge" },
       { id: "consumo", label: "Consumo de API" },
       { id: "usuarios_online", label: "Usuários online" }
     ]},
@@ -178,6 +179,7 @@
     compromissario_prefeitura: { modulo: "compromissario", subitem: "prefeitura" },
     compromissario_associacoes: { modulo: "compromissario", subitem: "associacoes" },
     auditoria: { modulo: "seguranca", subitem: "auditoria" },
+    "auditoria-login": { modulo: "seguranca", subitem: "auditoria_login" },
     "consumo-api": { modulo: "seguranca", subitem: "consumo" },
     "usuarios-online": { modulo: "seguranca", subitem: "usuarios_online" },
     suporte: { modulo: "suporte" },
