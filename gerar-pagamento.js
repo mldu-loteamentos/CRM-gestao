@@ -1692,22 +1692,54 @@ const GerarPagamentoApp = {
     const ccs = (it.ccs || []).slice().sort((a, b) => Number(a.id) - Number(b.id))
       .map((c) => ({ ...c, parceria: (it.ccs || []).length > 1 ? this.ccDeParceriaPeloNome(c.id, c.nome) : c.parceria }));
     const doRateio = {};
+    const ausentes = [];
     ((it.rateio && it.rateio.obras) || []).forEach((o) => o.linhas.forEach((l) => {
-      if (!l.ausente) doRateio[l.id] = { titulo: l.pct, obra: o.pct > 0 ? l.pct * 100 / o.pct : 0, obras: it.rateio.obras.length };
+      if (l.ausente) ausentes.push(l);
+      else doRateio[l.id] = { titulo: l.pct, obra: o.pct > 0 ? l.pct * 100 / o.pct : 0, linha: l };
     }));
-    const dica = ccs.map((c) => {
+    const idHtml = (c) => (c.parceria ? `<strong>${this.esc(c.id)}</strong>` : `<span class="gp-cc-outro">${this.esc(c.id)}</span>`);
+    const status = (l) => {
+      if (!l) return `<span class="gp-muted">—</span>`;
+      if (l.ausente) return `<span class="bchk bchk-erro">Falta ✗</span>`;
+      if (l.ok === false || l.planoErro) return `<span class="bchk bchk-erro">${l.planoErro && l.ok !== false ? "Plano ✗" : "Rateio ✗"}</span>`;
+      return l.ok || (l.ok == null && it.rateio && it.rateio.ok) ? `<span class="bchk bchk-ok">Rateio ✓</span>` : `<span class="gp-muted">—</span>`;
+    };
+    const linhas = ccs.map((c) => {
       const r = doRateio[c.id];
-      return `${c.id} ${c.nome || ""}${r ? ` · ${this.pct(r.titulo)} do título${r.obras && r.obra < 99.99 ? ` · ${this.pct(r.obra)} da obra` : ""}` : ""}${c.parceria ? " (parceria)" : ""}`;
-    }).join("\n");
-    if (ccs.length === 1) {
-      const c = ccs[0];
-      return `<span title="${this.esc(dica)}">${c.parceria ? `<strong>${this.esc(c.id)}</strong>` : `<span class="gp-cc-outro">${this.esc(c.id)}</span>`} <span class="gp-muted">${this.esc(c.nome || "")}</span></span>`;
+      return `<tr><td>${idHtml(c)} <span class="gp-cc-pop-nome">${this.esc(c.nome || "")}</span></td>
+        <td class="num">${r ? this.pct(r.titulo) : "—"}</td>
+        <td class="num">${r ? this.pct(r.obra) : "—"}</td>
+        <td>${status(r && r.linha)}</td></tr>`;
+    }).concat(ausentes.map((l) => `<tr><td><strong>${this.esc(l.id)}</strong> <span class="gp-cc-pop-nome">${this.esc(l.nome || "")}</span></td>
+        <td class="num">—</td><td class="num">${l.padrao != null ? this.pct(l.padrao) : "—"}</td><td>${status(l)}</td></tr>`)).join("");
+    const pop = `<table class="gp-cc-pop-tab"><thead><tr><th>Centro de custo</th><th class="num">Rateio título</th><th class="num">Rateio parceria</th><th>Status</th></tr></thead><tbody>${linhas}</tbody></table>`;
+    return `<span class="gp-cc-lista" onmouseenter="GerarPagamentoApp.ccPopAbrir(this)" onmouseleave="GerarPagamentoApp.ccPopFechar()">${ccs.map(idHtml).join("")}<template>${pop}</template></span>`;
+  },
+
+  ccPopAbrir(el) {
+    const tpl = el && el.querySelector("template");
+    if (!tpl) return;
+    let pop = document.getElementById("gp-cc-pop");
+    if (!pop) {
+      pop = document.createElement("div");
+      pop.id = "gp-cc-pop";
+      pop.className = "gp-cc-pop";
+      document.body.appendChild(pop);
     }
-    return `<span class="gp-cc-lista" title="${this.esc(dica)}">${ccs.map((c) => {
-      const r = doRateio[c.id];
-      const id = c.parceria ? `<strong>${this.esc(c.id)}</strong>` : `<span class="gp-cc-outro">${this.esc(c.id)}</span>`;
-      return `<span class="gp-cc-l">${id}${r ? ` ${this.pct(r.titulo)}${r.obra < 99.99 ? ` <small>${this.pct(r.obra)} da obra</small>` : ""}` : ""}</span>`;
-    }).join("")}</span>`;
+    pop.innerHTML = tpl.innerHTML;
+    pop.style.display = "block";
+    const r = el.getBoundingClientRect();
+    const w = pop.offsetWidth;
+    const h = pop.offsetHeight;
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+    const top = r.bottom + 6 + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 6) : r.bottom + 6;
+    pop.style.left = left + "px";
+    pop.style.top = top + "px";
+  },
+
+  ccPopFechar() {
+    const pop = document.getElementById("gp-cc-pop");
+    if (pop) pop.style.display = "none";
   },
 
   rateioSeloHtml(conf) {
@@ -1879,9 +1911,16 @@ const GerarPagamentoApp = {
           #gerar-pagamento-root .gp-lote-seta { width:18px; height:18px; color:#105436; flex-shrink:0; transition:transform .15s ease; }
           #gerar-pagamento-root .gp-lote.is-open .gp-lote-seta { transform:rotate(90deg); }
           #gerar-pagamento-root .gp-cc-outro { color:#64748b; font-weight:600; }
-          #gerar-pagamento-root .gp-cc-lista { display:flex; flex-direction:column; gap:1px; }
-          #gerar-pagamento-root .gp-cc-l { white-space:nowrap; font-size:0.8rem; }
-          #gerar-pagamento-root .gp-cc-l small { color:#64748b; font-size:0.72rem; margin-left:2px; }
+          #gerar-pagamento-root .gp-cc-lista { display:inline-flex; flex-direction:column; gap:1px; cursor:help; font-size:0.85rem; }
+          .gp-cc-pop { display:none; position:fixed; z-index:3000; background:#fff; border:1px solid #e2e8f0; border-radius:10px; box-shadow:0 10px 30px rgba(15,23,42,.18); padding:8px 10px; pointer-events:none; }
+          .gp-cc-pop-tab { border-collapse:collapse; font-size:0.8rem; color:#1e293b; }
+          .gp-cc-pop-tab th { text-align:left; font-size:0.68rem; text-transform:uppercase; color:#64748b; font-weight:700; padding:4px 10px; border-bottom:1px solid #e2e8f0; white-space:nowrap; }
+          .gp-cc-pop-tab td { padding:5px 10px; border-bottom:1px solid #f1f5f9; white-space:nowrap; }
+          .gp-cc-pop-tab tr:last-child td { border-bottom:0; }
+          .gp-cc-pop-tab .num { text-align:right; }
+          .gp-cc-pop-tab .gp-cc-outro { color:#64748b; font-weight:600; }
+          .gp-cc-pop-nome { color:#64748b; font-size:0.74rem; margin-left:4px; }
+          .gp-cc-pop .bchk { display:inline-block; padding:2px 8px; border-radius:999px; font-size:0.72rem; font-weight:700; }
           #gerar-pagamento-root .gp-bloq, #gerar-pagamento-root .gp-status small.gp-bloq { color:#b91c1c; font-weight:700; }
           #gerar-pagamento-root .gp-lote-sem .gp-lote-h { background:#fef2f2; }
           #gerar-pagamento-root .gp-lote-conta { font-weight:800; color:#105436; font-size:0.92rem; }

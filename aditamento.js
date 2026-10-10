@@ -12,14 +12,13 @@
     unica: { label: "Parcela única", meses: 0, plural: "", demais: "" }
   };
 
-  const ALTERACOES = [
-    { id: "condicao", label: "Condição de pagamento", texto: "condição de pagamento" },
-    { id: "qtd", label: "Quantidade de parcelas", texto: "quantidade de parcelas" },
-    { id: "valor", label: "Valor das parcelas", texto: "valor das parcelas" },
-    { id: "venc", label: "Vencimentos", texto: "vencimentos" }
-  ];
+  const INDICES = ["REAL", "IGP-M", "IPCA", "INCC", "INPC", "IPC-DI"];
+  const DIAS_MENSAL = ["10", "15", "20"];
 
-  const INDICES = ["IGP-M", "IPCA", "INCC", "INPC", "IPC-DI"];
+  function hojeIso() {
+    const d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
 
   const brl = (v) => (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   const num2 = (v) => (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -185,18 +184,17 @@
 
     _adiFormPadrao(atual) {
       const linhas = atual.linhas.filter((l) => l.abertas > 0).map((l) => ({
+        tipo: String(l.chave || l.label || ""),
         periodo: periodoDoCodigo(l.chave, l.abertas),
         qtd: l.abertas,
         valor: l.valorAberto,
         venc: l.proximo || ""
       }));
       return {
-        alteracoes: {},
-        manual: {},
         juros: atual.juros != null ? atual.juros : 0,
         reajuste: atual.comReajuste ? "com" : "sem",
-        indice: atual.comReajuste ? atual.indice : "",
-        linhas: linhas.length ? linhas : [{ periodo: "mensal", qtd: 1, valor: 0, venc: "" }]
+        indice: atual.comReajuste ? atual.indice : "REAL",
+        linhas: linhas.length ? linhas : [{ tipo: "", periodo: "mensal", qtd: 1, valor: 0, venc: "" }]
       };
     },
 
@@ -205,6 +203,48 @@
       ctx.adiForm = this._adiFormPadrao(ctx.adiAtual);
       ctx.adiBloqueio = this._adiMotivoBloqueio(ctx);
       this._adiRender(ctx);
+      this._adiCarregarTipos();
+    },
+
+    /** Tipos de condição do Sienge com "Gera boleto (Sienge)" ligado em Comercial → Condições de Pagamento. */
+    _adiTiposHabilitados() {
+      const permite = typeof window.paymentConditionAllowsBoleto === "function" ? window.paymentConditionAllowsBoleto : () => true;
+      return (this._adiTipos || []).filter((t) => permite(t.id));
+    },
+
+    async _adiCarregarTipos() {
+      if (this._adiTipos) return this._adiTipos;
+      const cp = window.CondicoesPagamentoApp;
+      if (cp && Array.isArray(cp.items) && cp.items.length) {
+        this._adiTipos = cp.items.map((t) => ({ id: String(t.id), name: String(t.name || t.id) }));
+      } else if (window.SiengeApiService && typeof SiengeApiService.getPaymentConditionTypes === "function") {
+        try {
+          this._adiTiposP = this._adiTiposP || SiengeApiService.getPaymentConditionTypes();
+          const lista = await this._adiTiposP;
+          this._adiTipos = (lista || []).map((t) => (cp && cp.normalizeItem ? cp.normalizeItem(t) : t)).filter(Boolean)
+            .map((t) => ({ id: String(t.id), name: String(t.name || t.description || t.id) }))
+            .sort((a, b) => a.id.localeCompare(b.id, "pt-BR", { numeric: true }));
+        } catch (e) {
+          console.warn("[Aditamento] tipos de condição", e);
+          this._adiTiposP = null;
+          return [];
+        }
+      }
+      const ctx = this._adiCtx();
+      if (ctx && this._adiEl("adi-pop")) this._adiRedesenharLinhas(ctx);
+      return this._adiTipos || [];
+    },
+
+    /** Motivo de a condição estar incompleta ou fora da regra; vazio quando está certa. */
+    _adiProblemaLinha(l) {
+      if (!l) return "condição vazia";
+      if (!l.tipo) return "escolha a condição";
+      if (!(Number.isInteger(l.qtd) && l.qtd >= 1)) return "informe a quantidade";
+      if (!(Number.isFinite(l.valor) && l.valor > 0)) return "informe o valor da parcela";
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(l.venc || ""))) return l.periodo === "mensal" ? "escolha o mês e o dia do 1º vencimento" : "informe o 1º vencimento";
+      if (l.venc < hojeIso()) return "o 1º vencimento não pode ser retroativo";
+      if (l.periodo === "mensal" && !DIAS_MENSAL.includes(l.venc.slice(8, 10))) return "parcela mensal só vence nos dias 10, 15 ou 20";
+      return "";
     },
 
     _adiResumoHtml(ctx) {
@@ -263,7 +303,7 @@
           </div>
           <div class="adi-linhas-scroll">
             <table class="adi-tab adi-tab-edit">
-              <thead><tr><th></th><th>Tipo</th><th class="adi-num">Qtde.</th><th class="adi-num">Valor da parcela</th><th class="adi-num">Total</th><th>1º vencimento</th><th></th></tr></thead>
+              <thead><tr><th></th><th>Condição</th><th>Periodicidade</th><th class="adi-num">Qtde.</th><th class="adi-num">Valor da parcela</th><th class="adi-num">Total</th><th>1º vencimento</th><th></th></tr></thead>
               <tbody id="adi-linhas">${this._adiLinhasHtml(ctx)}</tbody>
             </table>
           </div>
@@ -294,11 +334,12 @@
       if (quitadas.length) hoje.push(`<li class="adi-parc-mais">Já quitadas: ${esc(quitadas.map((l) => l.label).join(", "))}</li>`);
       let total = 0;
       const novas = f.linhas.map((l, i) => {
-        if (!this._adiLinhaValida(l)) return `<li class="adi-atencao">Condição ${i + 1}: falta preencher quantidade, valor ou vencimento</li>`;
+        const problema = this._adiProblemaLinha(l);
+        if (problema) return `<li class="adi-atencao">Condição ${i + 1}: ${esc(problema)}</li>`;
         total += l.qtd * l.valor;
         const p = PERIODOS[l.periodo] || PERIODOS.mensal;
         const ult = this._adiUltimoVenc(l);
-        return `<li><strong>${esc(p.label)}</strong> ${l.qtd} × ${brl(l.valor)}<span>${dmy(l.venc)}${ult && ult !== l.venc ? " a " + dmy(ult) : ""}</span></li>`;
+        return `<li><strong>${esc(l.tipo || p.label)}</strong> ${l.qtd} × ${brl(l.valor)} <small>${esc(p.label.toLowerCase())}</small><span>${dmy(l.venc)}${ult && ult !== l.venc ? " a " + dmy(ult) : ""}</span></li>`;
       });
       const diff = total - a.saldoAberto;
       return `
@@ -371,8 +412,6 @@
       const a = ctx.adiAtual;
       const f = ctx.adiForm;
       const esc = (s) => this._escDoc(s);
-      const chips = ALTERACOES.map((o) => `
-        <label class="adi-chip"><input type="checkbox" id="adi-alt-${o.id}" ${f.alteracoes[o.id] ? "checked" : ""} onchange="RelacionamentoApp.adiMarcarAlteracao('${o.id}', this.checked)"> ${o.label}</label>`).join("");
       return `
         <div class="adi-ajustes">
           <div>
@@ -397,10 +436,142 @@
             </div>
           </div>
           <div>
-            <div class="adi-lbl">O que muda no termo <small>(marcado sozinho conforme você altera)</small></div>
-            <div class="adi-chips">${chips}</div>
+            <div class="adi-lbl">O que muda no termo <small>(automático, conforme você edita)</small></div>
+            <div class="adi-mudancas" id="adi-mudancas">${this._adiMudancasHtml(ctx)}</div>
           </div>
         </div>`;
+    },
+
+    /** Cada item que pode mudar no termo, comparando o contrato de hoje com o que está sendo editado. */
+    _adiMudancas(ctx) {
+      const a = ctx.adiAtual;
+      const f = ctx.adiForm;
+      const dif = this._adiDiferencas(ctx);
+      const padrao = this._adiFormPadrao(a).linhas;
+      const novas = f.linhas;
+      const nomeTipos = (ls) => ls.map((l) => l.tipo || (PERIODOS[l.periodo] || PERIODOS.mensal).label).join(", ") || "—";
+      const soma = (ls) => ls.reduce((s, l) => s + (l.qtd || 0), 0);
+      const vencs = novas.map((l) => l.venc).filter(Boolean).sort();
+      const idxValor = novas.map((l, i) => i).filter((i) => !padrao[i] || Math.abs((padrao[i].valor || 0) - (novas[i].valor || 0)) > 0.009);
+      const valorDetalhe = () => {
+        if (idxValor.length !== 1) return `${idxValor.length} condições com valor novo`;
+        const i = idxValor[0];
+        const nome = novas[i].tipo || (PERIODOS[novas[i].periodo] || PERIODOS.mensal).label;
+        return padrao[i] ? `${nome}: ${brl(padrao[i].valor)} → ${brl(novas[i].valor)}` : `${nome}: ${brl(novas[i].valor)} (nova)`;
+      };
+      const jurosHoje = a.juros != null ? Number(a.juros) : null;
+      const jurosNovo = Number.isFinite(f.juros) ? f.juros : 0;
+      const reajHoje = a.comReajuste ? String(a.indice || "").toUpperCase() : "";
+      const reajNovo = f.reajuste === "com" ? String(f.indice || "").toUpperCase() : "";
+      const reajLbl = (v) => v || "sem reajuste";
+      return [
+        { id: "condicao", label: "Condição de pagamento", texto: "condição de pagamento", muda: !!dif.condicao,
+          detalhe: dif.condicao ? `${nomeTipos(padrao)} → ${nomeTipos(novas)}` : nomeTipos(padrao) },
+        { id: "qtd", label: "Quantidade de parcelas", texto: "quantidade de parcelas", muda: !!dif.qtd,
+          detalhe: dif.qtd ? `${soma(padrao)} → ${soma(novas)}` : `${soma(padrao)} em aberto` },
+        { id: "valor", label: "Valor das parcelas", texto: "valor das parcelas", muda: !!dif.valor,
+          detalhe: dif.valor ? valorDetalhe() : "mesmos valores" },
+        { id: "venc", label: "Vencimentos", texto: "vencimentos", muda: !!dif.venc,
+          detalhe: dif.venc ? (vencs[0] ? `1º em ${dmy(vencs[0])}` : "a definir") : "mesmas datas" },
+        { id: "juros", label: "Juros de parcelamento", texto: "juros de parcelamento", muda: jurosHoje != null && Math.abs(jurosNovo - jurosHoje) > 0.00001,
+          detalhe: jurosHoje != null && Math.abs(jurosNovo - jurosHoje) > 0.00001 ? `${pct4(jurosHoje)} → ${pct4(jurosNovo)}` : (jurosHoje != null ? pct4(jurosHoje) + " ao mês" : "não informado") },
+        { id: "reajuste", label: "Reajuste", texto: "reajuste do contrato", muda: reajHoje !== reajNovo,
+          detalhe: reajHoje !== reajNovo ? `${reajLbl(reajHoje)} → ${reajLbl(reajNovo)}` : reajLbl(reajHoje) }
+      ];
+    },
+
+    _adiMudancasHtml(ctx) {
+      const esc = (s) => this._escDoc(s);
+      const itens = this._adiMudancas(ctx);
+      const n = itens.filter((m) => m.muda).length;
+      return `
+        <div class="adi-mud-cont ${n ? "" : "adi-mud-nada"}">${n ? `${n} ${n === 1 ? "item muda" : "itens mudam"}` : "Nada mudou ainda: edite as parcelas, os juros ou o reajuste"}</div>
+        <ul class="adi-mud-lista">${itens.map((m) => `
+          <li class="${m.muda ? "adi-mud-sim" : ""}">
+            <i data-lucide="${m.muda ? "circle-check" : "circle-minus"}"></i>
+            <span><strong>${esc(m.label)}</strong><small>${m.muda ? "" : "mantém · "}${esc(m.detalhe)}</small></span>
+          </li>`).join("")}
+        </ul>`;
+    },
+
+    _adiTestemunhasHtml(ctx) {
+      const users = typeof window.getDistratoWitnessUsers === "function" ? window.getDistratoWitnessUsers() : [];
+      const t = ctx.adiTestemunhas || (ctx.adiTestemunhas = { 1: "", 2: "" });
+      const esc = (s) => this._escDoc(s);
+      const select = (n) => {
+        const outro = String(t[n === 1 ? 2 : 1] || "");
+        const opts = users.filter((u) => String(u.id) !== outro).map((u) => {
+          const rg = u.doc_rg || u.rg || "";
+          return `<option value="${esc(u.id)}" ${String(u.id) === String(t[n]) ? "selected" : ""}>${esc(u.name || u.nome || "")}${rg ? " — RG " + esc(rg) : ""}</option>`;
+        }).join("");
+        return `<label class="adi-test-campo"><span>Testemunha ${n}</span>
+          <select class="form-control adi-in" id="adi-test-${n}" onchange="RelacionamentoApp.adiTestemunha(${n}, this.value)"><option value="">Selecione…</option>${opts}</select></label>`;
+      };
+      return `
+        <div class="adi-testemunhas" id="adi-testemunhas">
+          <div class="adi-lbl">Testemunhas <small>(quem assina este aditamento)</small></div>
+          ${users.length
+            ? `<div class="adi-test-grid">${select(1)}${select(2)}</div>`
+            : `<div class="adi-atencao">Nenhum usuário marcado como testemunha. Ligue “Assina documentos como testemunha” no cadastro de usuários.</div>`}
+        </div>`;
+    },
+
+    adiTestemunha(n, valor) {
+      const ctx = this._adiCtx();
+      if (!ctx) return;
+      ctx.adiTestemunhas = ctx.adiTestemunhas || { 1: "", 2: "" };
+      ctx.adiTestemunhas[n] = String(valor || "");
+      const box = this._adiEl("adi-testemunhas");
+      if (box) box.outerHTML = this._adiTestemunhasHtml(ctx);
+      this._adiAtualizarBotao();
+    },
+
+    _adiTestemunhaEscolhida(ctx, n) {
+      const id = ctx && ctx.adiTestemunhas ? String(ctx.adiTestemunhas[n] || "") : "";
+      if (!id) return null;
+      const users = typeof window.getDistratoWitnessUsers === "function" ? window.getDistratoWitnessUsers() : [];
+      return users.find((u) => String(u.id) === id) || null;
+    },
+
+    _adiTipoOptions(l) {
+      const esc = (s) => this._escDoc(s);
+      const tipos = this._adiTiposHabilitados();
+      const atual = String(l.tipo || "");
+      const extra = atual && !tipos.some((t) => t.id === atual) ? [{ id: atual, name: this._adiTipos ? "não gera boleto no Sienge" : "" }] : [];
+      const carregando = !this._adiTipos ? `<option value="" disabled>Carregando condições…</option>` : "";
+      return `<option value="" ${atual ? "" : "selected"}>Condição…</option>${carregando}` +
+        extra.concat(tipos).map((t) => `<option value="${esc(t.id)}" ${t.id === atual ? "selected" : ""}>${esc(t.id)}${t.name && t.name !== t.id ? " · " + esc(t.name) : ""}</option>`).join("");
+    },
+
+    _adiVencHtml(l, i) {
+      const hoje = hojeIso();
+      if (l.periodo !== "mensal") {
+        return `<input type="date" class="form-control adi-in adi-in-data" min="${hoje}" value="${l.venc || ""}" onchange="RelacionamentoApp.adiLinha(${i}, 'venc', this.value)">`;
+      }
+      const mes = l._mes || String(l.venc || "").slice(0, 7);
+      const dia = l._dia != null ? l._dia : String(l.venc || "").slice(8, 10);
+      const mesHoje = hoje.slice(0, 7);
+      return `<div class="adi-venc-md">
+          <input type="month" class="form-control adi-in adi-in-mes" min="${mesHoje}" value="${mes}" title="Mês do 1º vencimento" onchange="RelacionamentoApp.adiLinhaVenc(${i}, 'mes', this.value)">
+          <select class="form-control adi-in adi-in-dia" title="Parcela mensal vence nos dias 10, 15 ou 20" onchange="RelacionamentoApp.adiLinhaVenc(${i}, 'dia', this.value)">
+            <option value="" ${DIAS_MENSAL.includes(dia) ? "" : "selected"}>Dia</option>
+            ${DIAS_MENSAL.map((d) => `<option value="${d}" ${d === dia ? "selected" : ""} ${mes && `${mes}-${d}` < hoje ? "disabled" : ""}>${d}</option>`).join("")}
+          </select>
+        </div>`;
+    },
+
+    adiLinhaVenc(i, parte, valor) {
+      const ctx = this._adiCtx();
+      if (!ctx || !ctx.adiForm.linhas[i]) return;
+      const l = ctx.adiForm.linhas[i];
+      const mes = parte === "mes" ? valor : (l._mes || String(l.venc || "").slice(0, 7));
+      let dia = parte === "dia" ? valor : (l._dia != null ? l._dia : String(l.venc || "").slice(8, 10));
+      if (mes && dia && `${mes}-${dia}` < hojeIso()) dia = "";
+      l._mes = mes;
+      l._dia = DIAS_MENSAL.includes(dia) ? dia : "";
+      l.venc = mes && l._dia ? `${mes}-${l._dia}` : "";
+      if (parte === "mes") this._adiRedesenharLinhas(ctx);
+      else this._adiAtualizar();
     },
 
     _adiLinhasHtml(ctx) {
@@ -408,13 +579,14 @@
       return f.linhas.map((l, i) => `
         <tr>
           <td class="adi-cond-n">${i + 1}</td>
-          <td><select class="form-control adi-in" onchange="RelacionamentoApp.adiLinha(${i}, 'periodo', this.value)">
+          <td><select class="form-control adi-in adi-in-tipo" onchange="RelacionamentoApp.adiLinha(${i}, 'tipo', this.value)">${this._adiTipoOptions(l)}</select></td>
+          <td><select class="form-control adi-in adi-in-per" onchange="RelacionamentoApp.adiLinha(${i}, 'periodo', this.value)">
             ${Object.keys(PERIODOS).map((k) => `<option value="${k}" ${l.periodo === k ? "selected" : ""}>${PERIODOS[k].label}</option>`).join("")}
           </select></td>
           <td class="adi-num"><input type="number" min="1" step="1" class="form-control adi-in adi-in-qtd" value="${l.qtd || ""}" ${l.periodo === "unica" ? "readonly" : ""} oninput="RelacionamentoApp.adiLinha(${i}, 'qtd', this.value)"></td>
           <td class="adi-num"><input type="text" inputmode="decimal" class="form-control adi-in adi-in-valor" value="${l.valor ? num2(l.valor) : ""}" placeholder="0,00" oninput="RelacionamentoApp.adiLinha(${i}, 'valor', this.value)" onblur="RelacionamentoApp.adiFormatarValor(this, ${i})"></td>
           <td class="adi-num" id="adi-total-${i}">—</td>
-          <td><input type="date" class="form-control adi-in adi-in-data" value="${l.venc || ""}" onchange="RelacionamentoApp.adiLinha(${i}, 'venc', this.value)"><small class="adi-ate" id="adi-ate-${i}"></small></td>
+          <td>${this._adiVencHtml(l, i)}<small class="adi-ate" id="adi-ate-${i}"></small></td>
           <td>${f.linhas.length > 1 ? `<button type="button" class="adi-del" title="Remover condição" onclick="RelacionamentoApp.adiRemoverLinha(${i})"><i data-lucide="trash-2"></i></button>` : ""}</td>
         </tr>`).join("");
     },
@@ -434,7 +606,8 @@
           <details class="adi-previa-box"${previaAberta ? " open" : ""} ontoggle="RelacionamentoState.aditamento && (RelacionamentoState.aditamento.adiPreviaAberta = this.open)">
             <summary><i data-lucide="file-search"></i> Ver como sai no termo (cláusula 1.1)</summary>
             <div id="adi-previa" class="adi-previa"></div>
-          </details>`;
+          </details>
+          ${this._adiTestemunhasHtml(ctx)}`;
       }
       if (window.lucide) lucide.createIcons();
       this._adiAtualizar();
@@ -445,25 +618,38 @@
       return ctx && ctx.adiForm ? ctx : null;
     },
 
-    adiMarcarAlteracao(id, on) {
-      const ctx = this._adiCtx();
-      if (!ctx) return;
-      ctx.adiForm.alteracoes[id] = !!on;
-      ctx.adiForm.manual[id] = true;
-      this._adiAtualizar();
-    },
-
     adiCampo(campo, valor) {
       const ctx = this._adiCtx();
       if (!ctx) return;
       const f = ctx.adiForm;
+      const marcar = (v) => {
+        const r = document.querySelector(`input[name="adi-reajuste"][value="${v}"]`);
+        if (r) r.checked = true;
+      };
+      const indiceSel = (v) => {
+        const s = this._adiEl("adi-indice");
+        if (s) s.value = v;
+      };
       if (campo === "juros") f.juros = parseValor(valor);
       else if (campo === "indice") {
         f.indice = String(valor || "").trim();
-        if (f.indice && f.reajuste !== "com") {
+        // REAL é o indexador sem correção: equivale a "Sem reajuste".
+        if (f.indice === "REAL") {
+          f.reajuste = "sem";
+          marcar("sem");
+        } else if (f.indice && f.reajuste !== "com") {
           f.reajuste = "com";
-          const r = document.querySelector('input[name="adi-reajuste"][value="com"]');
-          if (r) r.checked = true;
+          marcar("com");
+        }
+      } else if (campo === "reajuste") {
+        f.reajuste = valor;
+        marcar(valor);
+        if (valor === "sem") {
+          f.indice = "REAL";
+          indiceSel("REAL");
+        } else if (f.indice === "REAL") {
+          f.indice = "";
+          indiceSel("");
         }
       } else f[campo] = valor;
       this._adiAtualizar();
@@ -476,8 +662,18 @@
       if (campo === "qtd") l.qtd = Math.floor(Number(valor) || 0);
       else if (campo === "valor") l.valor = parseValor(valor);
       else l[campo] = valor;
+      if (campo === "tipo" && valor) {
+        const sugerido = periodoDoCodigo(valor, l.qtd);
+        if (sugerido !== l.periodo && !(sugerido === "unica" && l.qtd > 1)) {
+          l.periodo = sugerido;
+          campo = "periodo";
+          valor = sugerido;
+        }
+      }
       if (campo === "periodo") {
         if (valor === "unica") l.qtd = 1;
+        delete l._mes;
+        delete l._dia;
         this._adiRedesenharLinhas(ctx);
         return;
       }
@@ -495,7 +691,13 @@
       const ctx = this._adiCtx();
       if (!ctx) return;
       const ult = ctx.adiForm.linhas[ctx.adiForm.linhas.length - 1];
-      ctx.adiForm.linhas.push({ periodo: "mensal", qtd: 1, valor: 0, venc: ult && ult.venc ? somarMeses(this._adiUltimoVenc(ult), 1) : "" });
+      ctx.adiForm.linhas.push({
+        tipo: (ult && ult.tipo) || "",
+        periodo: (ult && ult.periodo) || "mensal",
+        qtd: 1,
+        valor: 0,
+        venc: ult && ult.venc ? somarMeses(this._adiUltimoVenc(ult), Math.max(1, (PERIODOS[ult.periodo] || PERIODOS.mensal).meses)) : ""
+      });
       this._adiRedesenharLinhas(ctx);
       const rolagem = document.querySelector("#adi-pop .adi-linhas-scroll");
       if (rolagem) rolagem.scrollTop = rolagem.scrollHeight;
@@ -530,7 +732,7 @@
     },
 
     _adiLinhaValida(l) {
-      return l && Number.isInteger(l.qtd) && l.qtd >= 1 && Number.isFinite(l.valor) && l.valor > 0 && /^\d{4}-\d{2}-\d{2}$/.test(String(l.venc || ""));
+      return !!l && !this._adiProblemaLinha(l);
     },
 
     /** O que mudou em relação ao contrato hoje; serve para marcar as alterações sozinho. */
@@ -542,7 +744,7 @@
       const qtdHoje = padrao.reduce((s, l) => s + (l.qtd || 0), 0);
       const qtdNova = novas.reduce((s, l) => s + (l.qtd || 0), 0);
       if (qtdHoje !== qtdNova) out.qtd = true;
-      if (novas.length !== padrao.length || novas.some((l, i) => !padrao[i] || padrao[i].periodo !== l.periodo)) out.condicao = true;
+      if (novas.length !== padrao.length || novas.some((l, i) => !padrao[i] || padrao[i].periodo !== l.periodo || padrao[i].tipo !== l.tipo)) out.condicao = true;
       if (novas.some((l, i) => !padrao[i] || Math.abs((padrao[i].valor || 0) - (l.valor || 0)) > 0.009)) out.valor = true;
       if (novas.some((l, i) => !padrao[i] || padrao[i].venc !== l.venc)) out.venc = true;
       return out;
@@ -579,16 +781,7 @@
     },
 
     _adiTextoMotivo(ctx) {
-      const f = ctx.adiForm;
-      const a = ctx.adiAtual;
-      const itens = ALTERACOES.filter((o) => f.alteracoes[o.id]).map((o) => o.texto);
-      const juros = Number.isFinite(f.juros) ? f.juros : 0;
-      if (a.juros != null && Math.abs(juros - Number(a.juros)) > 0.00001) itens.push("juros de parcelamento");
-      if (a.indice) {
-        const hoje = a.comReajuste ? a.indice.toUpperCase() : "";
-        const novo = f.reajuste === "com" ? String(f.indice || "").toUpperCase() : "";
-        if (hoje !== novo) itens.push("reajuste do contrato");
-      }
+      const itens = this._adiMudancas(ctx).filter((m) => m.muda).map((m) => m.texto);
       return itens.length ? "alterar " + juntarE(itens) : "";
     },
 
@@ -597,11 +790,14 @@
       if (ctx.adiBloqueio) return ["O aditamento só pode ser feito em contrato ativo (" + ctx.adiBloqueio + ")."];
       const f = ctx.adiForm;
       const out = [];
-      if (!ALTERACOES.some((o) => f.alteracoes[o.id])) out.push("Marque o que está sendo alterado no contrato.");
-      const ruins = f.linhas.map((l, i) => (this._adiLinhaValida(l) ? 0 : i + 1)).filter(Boolean);
-      if (ruins.length) out.push("Preencha quantidade, valor e 1º vencimento da condição " + ruins.join(", ") + ".");
+      if (!this._adiMudancas(ctx).some((m) => m.muda)) out.push("Nada mudou em relação ao contrato: edite as parcelas, os juros ou o reajuste.");
+      f.linhas.forEach((l, i) => {
+        const p = this._adiProblemaLinha(l);
+        if (p) out.push(`Condição ${i + 1}: ${p}.`);
+      });
       if (!Number.isFinite(f.juros) || f.juros < 0) out.push("Informe os juros de parcelamento (0 se não houver).");
-      if (f.reajuste === "com" && !f.indice) out.push("Informe o índice de reajuste.");
+      if (f.reajuste === "com" && (!f.indice || f.indice === "REAL")) out.push("Informe o índice de reajuste.");
+      if (!this._adiTestemunhaEscolhida(ctx, 1) || !this._adiTestemunhaEscolhida(ctx, 2)) out.push("Escolha as duas testemunhas.");
       return out;
     },
 
@@ -609,13 +805,11 @@
       const ctx = this._adiCtx();
       if (ctx && !ctx.adiBloqueio) {
         const f = ctx.adiForm;
-        const dif = this._adiDiferencas(ctx);
-        ALTERACOES.forEach((o) => {
-          if (f.manual[o.id]) return;
-          f.alteracoes[o.id] = !!dif[o.id];
-          const cb = this._adiEl("adi-alt-" + o.id);
-          if (cb) cb.checked = f.alteracoes[o.id];
-        });
+        const mud = this._adiEl("adi-mudancas");
+        if (mud) {
+          mud.innerHTML = this._adiMudancasHtml(ctx);
+          if (window.lucide) lucide.createIcons();
+        }
         let total = 0;
         f.linhas.forEach((l, i) => {
           const t = (l.qtd > 0 && l.valor > 0) ? l.qtd * l.valor : 0;
@@ -694,9 +888,8 @@
         }
         corpo = corpo.replace(/^\s*(?:<[^>]+>\s*|[*_]+\s*)*t[ií]tulo\s*:[^\n]*\n*/i, "");
         await this._carregarUnidadeCompleta(ctx);
-        const users = typeof window.getDistratoWitnessUsers === "function" ? window.getDistratoWitnessUsers() : [];
-        const w1 = users[0] || {};
-        const w2 = users[1] || {};
+        const w1 = this._adiTestemunhaEscolhida(ctx, 1) || {};
+        const w2 = this._adiTestemunhaEscolhida(ctx, 2) || {};
         const { legalBase, quadraLote, titulo, preambleText } = this._escDocBase(ctx, {
           MOTIVO_ADITAMENTO: this._adiTextoMotivo(ctx),
           NOVAS_CONDICOES: this._adiTextoCondicoes(ctx),
@@ -704,10 +897,10 @@
           JUROS_ADITAMENTO: pct4(ctx.adiForm.juros || 0),
           INDICE_REAJUSTE: ctx.adiForm.reajuste === "com" ? ctx.adiForm.indice : "sem reajuste",
           CIDADE_ATUAL: "Botucatu",
-          TESTEMUNHA_1_NOME: w1.name || w1.nome || "LETICIA PEREIRA DE OLIVIERA",
-          TESTEMUNHA_1_RG: w1.doc_rg || w1.rg || "50.505.231-3",
-          TESTEMUNHA_2_NOME: w2.name || w2.nome || "MICHELLE FRANCINE VIEIRA",
-          TESTEMUNHA_2_RG: w2.doc_rg || w2.rg || "463210852"
+          TESTEMUNHA_1_NOME: w1.name || w1.nome || "________________",
+          TESTEMUNHA_1_RG: w1.doc_rg || w1.rg || "________________",
+          TESTEMUNHA_2_NOME: w2.name || w2.nome || "________________",
+          TESTEMUNHA_2_RG: w2.doc_rg || w2.rg || "________________"
         });
         if (!preambleText || /NÃO CADASTRADO/i.test(String(preambleText))) {
           alert("Preâmbulo não cadastrado para o centro de custo deste contrato. Cadastre-o antes de gerar o aditamento.");
