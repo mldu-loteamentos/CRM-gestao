@@ -194,45 +194,56 @@ ComprasControleApp.tipoTag = function (r) {
   return '<span class="cprev-tag cprev-tag-nota">Programado</span>';
 };
 
-/** Coluna Autorizado: só a situação do pedido no Sienge. */
-ComprasControleApp.autorizacaoHtml = function (r) {
-  if (this.statusDe(r) !== "previsao") return '<span class="cfin-vazio">—</span>';
-  const ped = this.pedidoKey(r && r.documento);
-  if (!ped) return '<span class="cfin-vazio">—</span>';
-  const aut = (this._autPedidos || {})[ped];
-  if (!aut) return '<span class="cprev-tag cprev-tag-rastreando">Consultando…</span>';
-  if (aut.ausente) return '<span class="cprev-tag cprev-tag-rastreando" title="Pedido não encontrado no Sienge">Não encontrado</span>';
-  if (aut.erro) return `<span class="cprev-tag cprev-tag-rastreando" title="${this.esc(aut.erro)}">Não lida</span>`;
-  if (!aut.ok) return '<span class="cprev-tag cprev-tag-previsao" title="O pedido ainda não foi autorizado no Sienge">Não</span>';
-  return '<span class="cprev-tag cprev-tag-pago" title="Pedido autorizado no Sienge">Sim</span>';
+/** PPC consulta o pedido de compra. PCT consulta o contrato de suprimentos. Os dois não usam o mesmo número. */
+ComprasControleApp.autorizacaoChave = function (r) {
+  if (!r || this.statusDe(r) !== "previsao") return "";
+  const num = this.pedidoKey(r.documento);
+  if (!num) return "";
+  const doc = this.docCode(r.docId);
+  if (doc === "PPC") return "ppc:" + num;
+  if (doc === "PCT") return "ct:" + num;
+  return "";
 };
 
-/** Coluna Fiscal: situação da nota e o envio, quando o pedido está autorizado. */
+ComprasControleApp.autorizacaoRotulo = function (aut) {
+  if (!aut) return { texto: "Consultando…", title: "Lendo a autorização no Sienge", cls: "cprev-tag-rastreando" };
+  if (aut.limite) return { texto: "Limite do Sienge", title: "O Sienge recusou a consulta por excesso de chamadas (429). Consulte de novo em instantes.", cls: "cprev-tag-rastreando" };
+  if (aut.ausente) return { texto: "Não encontrado", title: "Não encontrado no Sienge", cls: "cprev-tag-rastreando" };
+  if (aut.erro) return { texto: "Não lida", title: aut.erro, cls: "cprev-tag-rastreando" };
+  if (!aut.ok) return { texto: "Não", title: "Ainda não autorizado no Sienge", cls: "cprev-tag-previsao" };
+  return { texto: "Sim", title: "Autorizado no Sienge", cls: "cprev-tag-pago" };
+};
+
+/** Coluna Autorizado: pedido de compra no PPC e contrato no PCT. */
+ComprasControleApp.autorizacaoHtml = function (r) {
+  const chave = this.autorizacaoChave(r);
+  if (!chave) return '<span class="cfin-vazio">—</span>';
+  const rot = this.autorizacaoRotulo((this._autPedidos || {})[chave]);
+  return `<span class="cprev-tag ${rot.cls}" title="${this.esc(rot.title)}">${rot.texto}</span>`;
+};
+
+/** Coluna Fiscal: situação da nota e o envio, quando o pedido de compra está autorizado. */
 ComprasControleApp.fiscalHtml = function (r) {
-  if (this.statusDe(r) !== "previsao") return '<span class="cfin-vazio">—</span>';
-  const ped = this.pedidoKey(r && r.documento);
-  if (!ped) return '<span class="cfin-vazio">—</span>';
-  const aut = (this._autPedidos || {})[ped];
+  const chave = this.autorizacaoChave(r);
+  if (!chave || chave.indexOf("ppc:") !== 0) return '<span class="cfin-vazio">—</span>';
+  const aut = (this._autPedidos || {})[chave];
   if (!aut || !aut.ok) return '<span class="cfin-vazio">—</span>';
+  const ped = chave.slice(4);
   const envio = window.FilaNotasFiscais ? FilaNotasFiscais.acaoPedidoHtml(ped, this._filaFiscal) : "";
   return envio || '<span class="cfin-vazio">—</span>';
 };
 
 ComprasControleApp.autorizacaoTexto = function (r) {
-  if (this.statusDe(r) !== "previsao") return "";
-  const ped = this.pedidoKey(r && r.documento);
-  if (!ped) return "";
-  const aut = (this._autPedidos || {})[ped];
-  if (!aut) return "Consultando";
-  if (aut.ausente) return "Não encontrado";
-  if (aut.erro) return "Não lida";
-  return aut.ok ? "Sim" : "Não";
+  const chave = this.autorizacaoChave(r);
+  if (!chave) return "";
+  return this.autorizacaoRotulo((this._autPedidos || {})[chave]).texto.replace("…", "");
 };
 
 ComprasControleApp.fiscalTexto = function (r) {
-  if (this.statusDe(r) !== "previsao") return "";
-  const ped = this.pedidoKey(r && r.documento);
-  const aut = ped && (this._autPedidos || {})[ped];
+  const chave = this.autorizacaoChave(r);
+  if (!chave || chave.indexOf("ppc:") !== 0) return "";
+  const ped = chave.slice(4);
+  const aut = (this._autPedidos || {})[chave];
   if (!aut || !aut.ok || !window.FilaNotasFiscais) return "";
   const item = FilaNotasFiscais.doPedido(this._filaFiscal, ped);
   if (!item) return "Enviar ao fiscal";
@@ -243,41 +254,68 @@ ComprasControleApp.fiscalTexto = function (r) {
 };
 
 ComprasControleApp.carregarAutorizacoes = function (rows) {
-  const peds = [];
+  const fila = [];
   this._autPedidos = this._autPedidos || {};
   this._autFila = this._autFila || {};
   (rows || []).forEach((r) => {
-    if (this.statusDe(r) !== "previsao") return;
-    const ped = this.pedidoKey(r.documento);
-    if (!ped || this._autPedidos[ped] || this._autFila[ped]) return;
-    this._autFila[ped] = true;
-    peds.push(ped);
+    const chave = this.autorizacaoChave(r);
+    if (!chave || this._autPedidos[chave] || this._autFila[chave]) return;
+    this._autFila[chave] = true;
+    fila.push({ chave, companyId: r.companyId });
   });
-  if (!peds.length) return;
+  if (!fila.length) return;
   const lote = async () => {
-    const conc = 4;
-    for (let i = 0; i < peds.length; i += conc) {
-      await Promise.all(peds.slice(i, i + conc).map((ped) => this.lerAutorizacao(ped)));
+    const conc = 2;
+    for (let i = 0; i < fila.length; i += conc) {
+      await Promise.all(fila.slice(i, i + conc).map((item) => this.lerAutorizacao(item.chave, item.companyId)));
       if (this.state && this.state.consulted && !this.state.loading) this.renderList();
       if (this._tituloDetalhe) this.pintarTitulo();
+      if (i + conc < fila.length) await new Promise((resolve) => setTimeout(resolve, 350));
     }
   };
   lote();
 };
 
-ComprasControleApp.lerAutorizacao = async function (ped) {
-  const id = window.InserirNotaApp && typeof InserirNotaApp.idApi === "function" ? InserirNotaApp.idApi(ped) : String(ped || "").replace(/\D/g, "");
+ComprasControleApp.flagAutorizada = function (flag, approval) {
+  const texto = String(approval || "");
+  if (/reprov/i.test(texto)) return false;
+  if (flag === true || flag === 1 || /^(S|Y|SIM|TRUE)$/i.test(String(flag || ""))) return true;
+  return /autoriz/i.test(texto) && !/aguard|pend/i.test(texto);
+};
+
+ComprasControleApp.lerAutorizacao = async function (chave, companyId) {
+  const partes = String(chave || "").split(":");
+  const tipo = partes[0];
+  const num = partes[1];
   try {
-    if (!id || typeof window.siengeFetchWithRetry !== "function") throw new Error("API do Sienge indisponível");
-    const pedido = await window.siengeFetchWithRetry("/purchase-orders/" + encodeURIComponent(id), 1);
-    const flag = pedido && pedido.authorized;
-    const ok = flag === true || flag === 1 || /^(S|Y|SIM|TRUE)$/i.test(String(flag || ""));
-    this._autPedidos[ped] = { ok };
+    if (!num || typeof window.siengeFetchWithRetry !== "function") throw new Error("API do Sienge indisponível");
+    if (tipo === "ct") {
+      const data = await window.siengeFetchWithRetry("/supply-contracts?documentId=CT&contractNumber=" + encodeURIComponent(num), 4);
+      let lista = (data && data.results) || (data && (data.contractNumber != null || data.isAuthorized != null) ? [data] : []);
+      if (companyId) {
+        const daEmpresa = lista.filter((x) => String(x && x.companyId) === String(companyId));
+        if (daEmpresa.length) lista = daEmpresa;
+      }
+      const item = lista[0];
+      if (!item) {
+        this._autPedidos[chave] = { ok: false, ausente: true };
+        return;
+      }
+      const approval = item.statusApproval || item.authorization || item.status || "";
+      this._autPedidos[chave] = { ok: this.flagAutorizada(item.isAuthorized != null ? item.isAuthorized : item.authorized, approval) };
+      return;
+    }
+    const id = window.InserirNotaApp && typeof InserirNotaApp.idApi === "function" ? InserirNotaApp.idApi(num) : num;
+    const pedido = await window.siengeFetchWithRetry("/purchase-orders/" + encodeURIComponent(id), 4);
+    this._autPedidos[chave] = { ok: this.flagAutorizada(pedido && pedido.authorized, "") };
   } catch (e) {
     const msg = String((e && e.message) || e || "");
-    this._autPedidos[ped] = /404/.test(msg) ? { ok: false, ausente: true } : { ok: false, erro: msg || "falha" };
+    const status = Number(e && e.status) || 0;
+    if (status === 404 || /\b404\b/.test(msg)) this._autPedidos[chave] = { ok: false, ausente: true };
+    else if (status === 429 || /\b429\b/.test(msg)) this._autPedidos[chave] = { ok: false, limite: true };
+    else this._autPedidos[chave] = { ok: false, erro: msg || "falha" };
   } finally {
-    if (this._autFila) delete this._autFila[ped];
+    if (this._autFila) delete this._autFila[chave];
   }
 };
 
@@ -1064,26 +1102,33 @@ ComprasControleApp.pintarTitulo = function () {
         </div>
         ${obs ? `<p class="cfin-titulo-obs"><strong>Observação:</strong> ${this.esc(obs)}</p>` : ""}`;
 
-  const ped = this.statusDe(row) === "previsao" ? this.pedidoKey(row.documento) : "";
+  const chave = this.statusDe(row) === "previsao" ? this.autorizacaoChave(row) : "";
+  const ped = chave.indexOf("ppc:") === 0 ? chave.slice(4) : "";
+  const contrato = chave.indexOf("ct:") === 0 ? chave.slice(3) : "";
   let autBloco = "";
   let fiscalBloco = "";
-  if (ped && !det.loading) {
-    const aut = (this._autPedidos || {})[ped];
-    const item = window.FilaNotasFiscais ? FilaNotasFiscais.doPedido(this._filaFiscal, ped) : null;
+  if (chave && !det.loading) {
+    const aut = (this._autPedidos || {})[chave];
+    const item = ped && window.FilaNotasFiscais ? FilaNotasFiscais.doPedido(this._filaFiscal, ped) : null;
     const emAnalise = item && (item.status === "pendente" || item.status === "em_lancamento");
+    const nome = contrato ? "Autorização do contrato " + this.esc(contrato) : "Autorização do pedido " + this.esc(ped);
     const botaoEnvio = (rotulo, id) => `<div class="cfin-aut-acao"><button type="button" class="cprev-fiscal-btn" onclick="event.stopPropagation(); FilaNotasFiscais.abrirEnvio('${this.esc(ped)}','${this.esc(id || "")}')">${rotulo}</button></div>`;
     if (!aut) {
-      autBloco = bloco("badge-check", "Autorização do pedido " + this.esc(ped), "espera", "<p>Consultando a autorização no Sienge…</p>");
-      fiscalBloco = bloco("clipboard-check", "Fiscal", "espera", "<p>Aguardando a leitura da autorização.</p>");
+      autBloco = bloco("badge-check", nome, "espera", "<p>Consultando a autorização no Sienge…</p>");
+      if (ped) fiscalBloco = bloco("clipboard-check", "Fiscal", "espera", "<p>Aguardando a leitura da autorização.</p>");
+    } else if (aut.limite) {
+      autBloco = bloco("badge-check", nome, "aviso", "<p>O Sienge limitou as consultas (429). Consulte de novo em instantes.</p>");
     } else if (aut.ausente) {
-      autBloco = bloco("badge-check", "Autorização do pedido " + this.esc(ped), "aviso", "<p>Pedido não encontrado no Sienge.</p>");
+      autBloco = bloco("badge-check", nome, "aviso", `<p>${contrato ? "Contrato" : "Pedido"} não encontrado no Sienge.</p>`);
     } else if (aut.erro) {
-      autBloco = bloco("badge-check", "Autorização do pedido " + this.esc(ped), "aviso", `<p>Não consegui ler a autorização: ${this.esc(aut.erro)}</p>`);
+      autBloco = bloco("badge-check", nome, "aviso", `<p>Não consegui ler a autorização: ${this.esc(aut.erro)}</p>`);
     } else if (!aut.ok) {
-      autBloco = bloco("badge-check", "Autorização do pedido " + this.esc(ped), "negada", "<p>O pedido ainda não está autorizado.</p>");
-      fiscalBloco = bloco("clipboard-check", "Fiscal", "", "<p>O envio da nota fica disponível depois da autorização.</p>");
+      autBloco = bloco("badge-check", nome, "negada", `<p>${contrato ? "O contrato" : "O pedido"} ainda não está autorizado.</p>`);
+      if (ped) fiscalBloco = bloco("clipboard-check", "Fiscal", "", "<p>O envio da nota fica disponível depois da autorização.</p>");
+    } else if (contrato) {
+      autBloco = bloco("badge-check", nome, "autorizada", "<p>Contrato autorizado no Sienge.</p>");
     } else {
-      autBloco = bloco("badge-check", "Autorização do pedido " + this.esc(ped), "autorizada", "<p>Pedido autorizado no Sienge.</p>");
+      autBloco = bloco("badge-check", nome, "autorizada", "<p>Pedido autorizado no Sienge.</p>");
       if (emAnalise) {
         fiscalBloco = bloco("clipboard-check", "Fiscal", "analise", "<p>A nota deste pedido já está com o fiscal.</p>");
       } else if (item && item.status === "devolvida") {

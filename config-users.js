@@ -2281,9 +2281,7 @@ const ConfigUsersApp = {
         .ml-switch input:checked + .ml-slider { background: #105436; }
         .ml-switch input:checked + .ml-slider:before { transform: translateX(20px); }
         .cfg-page { padding: 22px; max-width: 1140px; margin: 0 auto; }
-        .cfg-tabs { display: flex; gap: 8px; margin: 0 0 16px; }
-        .cfg-tab { border: 1px solid #0c3d28; background: #fff; color: #0c3d28; border-radius: 999px; padding: 8px 16px; font-weight: 800; cursor: pointer; }
-        .cfg-tab.is-on { background: #105436; color: #fff; border-color: #105436; }
+        .cfg-tabs { margin: 0 0 16px; }
         .cfg-panel { background: #fff; border: 1px solid #cbd5e1; border-radius: 16px; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08); padding: 16px; }
         .cfg-filters { display: grid; grid-template-columns: 1.3fr 1.1fr 1.2fr 0.9fr auto; gap: 12px; align-items: end; margin-bottom: 14px; }
         .cfg-filters label { display: block; font-size: 0.75rem; font-weight: 800; color: #1e293b; margin-bottom: 6px; }
@@ -2312,10 +2310,10 @@ const ConfigUsersApp = {
             <i data-lucide="save" style="width: 18px; margin-right: 6px;"></i> Salvar Permissões
           </button>` : ""}
         </div>
-        <div class="cfg-tabs">
-          <button type="button" class="cfg-tab ${this.view === "usuarios" ? "is-on" : ""}" onclick="ConfigUsersApp.setView('usuarios')">Usuários</button>
-          <button type="button" class="cfg-tab ${this.view === "perfis" ? "is-on" : ""}" onclick="ConfigUsersApp.setView('perfis')">Perfis</button>
-          <button type="button" class="cfg-tab ${this.view === "modulos" ? "is-on" : ""}" onclick="ConfigUsersApp.setView('modulos')">Módulos</button>
+        <div class="ml-tabs cfg-tabs" role="tablist">
+          <button type="button" role="tab" aria-selected="${this.view === "usuarios"}" class="ml-tab ${this.view === "usuarios" ? "is-active" : ""}" onclick="ConfigUsersApp.setView('usuarios')"><i data-lucide="users"></i> Usuários</button>
+          <button type="button" role="tab" aria-selected="${this.view === "perfis"}" class="ml-tab ${this.view === "perfis" ? "is-active" : ""}" onclick="ConfigUsersApp.setView('perfis')"><i data-lucide="shield"></i> Perfis</button>
+          <button type="button" role="tab" aria-selected="${this.view === "modulos"}" class="ml-tab ${this.view === "modulos" ? "is-active" : ""}" onclick="ConfigUsersApp.setView('modulos')"><i data-lucide="layout-grid"></i> Módulos</button>
         </div>
 
         ${this.view === "modulos" ? this.modulosPanelHtml() : this.view === "usuarios" ? `

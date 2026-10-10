@@ -951,7 +951,7 @@ window.InserirNotaApp = {
     if (!txt) { alert("Informe o motivo da devolução."); return; }
     const u = FilaNotasFiscais.usuario();
     try {
-      await FilaNotasFiscais.atualizar(item, { status: "devolvida", motivoDevolucao: txt, devolvidoPor: u.nome, devolvidoEm: Date.now(), assumidoPor: "", assumidoPorEmail: "" }, "devolvida", txt);
+      await FilaNotasFiscais.atualizar(item, { status: "devolvida", motivoDevolucao: txt, devolvidoPor: u.nome, devolvidoPorSienge: u.sienge, devolvidoEm: Date.now(), assumidoPor: "", assumidoPorEmail: "" }, "devolvida", txt);
     } catch (e) {
       alert(`Não consegui devolver: ${(e && e.message) || e}`);
       return;

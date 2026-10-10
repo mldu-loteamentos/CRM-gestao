@@ -22,7 +22,35 @@ window.FilaNotasFiscais = {
 
   usuario() {
     const u = (window.AppState && AppState.currentUser) || {};
-    return { nome: u.name || u.nome || u.email || "", email: String(u.email || "").toLowerCase() };
+    return {
+      nome: u.name || u.nome || u.email || "",
+      email: String(u.email || "").toLowerCase(),
+      sienge: String(u.sienge_user || "").trim()
+    };
+  },
+
+  /** Login do Sienge, nunca o nome completo. Envios antigos são achados pelo e-mail ou pelo nome cadastrado. */
+  usuarioSienge(nome, email, gravado) {
+    const pronto = String(gravado || "").trim();
+    if (pronto) return pronto;
+    const eu = (window.AppState && AppState.currentUser) || {};
+    const mail = String(email || "").toLowerCase();
+    const alvo = String(nome || "").trim().toUpperCase();
+    if (eu.sienge_user && ((mail && String(eu.email || "").toLowerCase() === mail) || (alvo && String(eu.name || eu.nome || "").trim().toUpperCase() === alvo))) {
+      return String(eu.sienge_user).trim();
+    }
+    let users = [];
+    try { users = JSON.parse(localStorage.getItem("crm_users") || "[]") || []; } catch (e) { users = []; }
+    const u = users.find((x) => mail && String(x.email || "").toLowerCase() === mail)
+      || users.find((x) => alvo && String(x.name || "").trim().toUpperCase() === alvo)
+      || users.find((x) => alvo && String(x.sienge_user || "").replace(/\./g, " ").trim().toUpperCase() === alvo);
+    return u && u.sienge_user ? String(u.sienge_user).trim() : "";
+  },
+
+  async excluir(id) {
+    const fb = this.fb();
+    if (!fb || typeof fb.f.deleteDoc !== "function") throw new Error("Firebase indisponível");
+    await fb.f.deleteDoc(fb.f.doc(fb.db, this.COL, id));
   },
 
   aberta(item) {
@@ -232,7 +260,7 @@ window.EnviarNotaApp = {
       lendoNota: "", leituraErro: "", leituraToken: 0, fiscal: null,
       obs: "",
       enviando: "", feito: "", editandoId: "",
-      lista: ant.lista || [], listaCarregada: !!ant.listaCarregada, listaErro: "", listaCarregando: false, todos: !!ant.todos
+      lista: ant.lista || [], listaCarregada: !!ant.listaCarregada, listaErro: "", listaCarregando: false, todos: !!ant.todos, verLancadas: !!ant.verLancadas
     };
   },
 
@@ -824,7 +852,7 @@ window.EnviarNotaApp = {
         anexos,
         motivoDevolucao: "", assumidoPor: "", assumidoPorEmail: ""
       };
-      if (!s.editandoId) Object.assign(dados, { criadoEm: Date.now(), criadoPor: u.nome, criadoPorEmail: u.email });
+      if (!s.editandoId) Object.assign(dados, { criadoEm: Date.now(), criadoPor: u.nome, criadoPorEmail: u.email, criadoPorSienge: u.sienge });
       await FilaNotasFiscais.atualizar(Object.assign(antigo, s.editandoId ? {} : { historico: [] }), dados, s.editandoId ? "reenviada" : "enviada");
       this.auditar(`Nota do pedido ${s.pedidoNome} ${s.editandoId ? "reenviada" : "enviada"} ao fiscal · pagamento ${this.dataBr(s.pag.data)} ${s.pag.forma}`, { id, pedido: s.pedidoNome, anexos: anexos.length });
       const feito = `Nota do pedido ${s.pedidoNome} ${s.editandoId ? "reenviada" : "enviada"} ao fiscal. Acompanhe em "Minhas notas enviadas".`;
@@ -868,6 +896,11 @@ window.EnviarNotaApp = {
     this.render();
   },
 
+  setVerLancadas(v) {
+    this.state.verLancadas = !!v;
+    this.render();
+  },
+
   async cancelar(id) {
     const item = this.state.lista.find((x) => x.id === id);
     if (!item || item.status !== "pendente") return;
@@ -878,6 +911,23 @@ window.EnviarNotaApp = {
       this.auditar(`Envio da nota do pedido ${item.pedido} cancelado`, { id });
     } catch (e) {
       alert(`Não consegui cancelar: ${(e && e.message) || e}`);
+    }
+    this.render();
+  },
+
+  async excluir(id) {
+    const item = this.state.lista.find((x) => x.id === id);
+    if (!item || item.status === "lancada") return;
+    const ok = typeof window.mouraConfirm === "function"
+      ? await window.mouraConfirm(`Excluir o envio da nota do pedido ${item.pedido}? Ele sai da fila e não dá para desfazer.`)
+      : confirm("Excluir o envio?");
+    if (!ok) return;
+    try {
+      await FilaNotasFiscais.excluir(id);
+      this.state.lista = this.state.lista.filter((x) => x.id !== id);
+      this.auditar(`Envio da nota do pedido ${item.pedido} excluído`, { id });
+    } catch (e) {
+      alert(`Não consegui excluir: ${(e && e.message) || e}`);
     }
     this.render();
   },
@@ -1051,27 +1101,35 @@ window.EnviarNotaApp = {
   minhasHtml() {
     const s = this.state;
     const u = FilaNotasFiscais.usuario();
-    const lista = s.todos ? s.lista : s.lista.filter((x) => (u.email && x.criadoPorEmail === u.email) || (!u.email && x.criadoPor === u.nome));
+    const minhas = s.todos ? s.lista : s.lista.filter((x) => (u.email && x.criadoPorEmail === u.email) || (!u.email && x.criadoPor === u.nome));
+    const lista = s.verLancadas ? minhas : minhas.filter((x) => x.status !== "lancada");
+    const quem = (nome, email, gravado) => FilaNotasFiscais.usuarioSienge(nome, email, gravado);
     const esc = (v) => this.esc(v);
     const corpo = s.listaCarregando ? `<p class="fnf-vazio"><span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;"></span> Carregando…</p>`
       : (s.listaErro ? `<p class="inf-erro">${esc(s.listaErro)}</p>`
         : (!lista.length ? `<p class="fnf-vazio">Nenhuma nota enviada${s.todos ? "" : " por você"}.</p>`
           : `<table class="fnf-tab"><thead><tr><th>Enviada em</th><th>Pedido</th><th>Fornecedor</th><th>Pagamento</th><th>Anexos</th><th>Situação</th><th></th></tr></thead><tbody>
             ${lista.map((x) => `<tr class="${x.status === "devolvida" ? "fnf-devolvida" : ""}">
-              <td>${new Date(x.criadoEm).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}<small>${esc(x.criadoPor || "")}</small></td>
+              <td>${new Date(x.criadoEm).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}<small>${esc(quem(x.criadoPor, x.criadoPorEmail, x.criadoPorSienge))}</small></td>
               <td><b>${esc(x.pedido)}</b>${x.numeroNota ? `<small>NF ${esc(x.numeroNota)}</small>` : ""}</td>
               <td>${esc(x.fornecedor ? x.fornecedor.nome : "")}${x.valorNota != null ? `<small>${this.money(x.valorNota)}</small>` : ""}</td>
               <td>${esc(FilaNotasFiscais.pagamentoTxt(x, (d) => this.dataBr(d)))}${x.pagamento && x.pagamento.detalhe ? `<small>${esc(x.pagamento.detalhe)}</small>` : ""}</td>
               <td>${FilaNotasFiscais.anexosHtml(x, esc)}</td>
-              <td>${FilaNotasFiscais.statusHtml(x, esc)}${x.status === "devolvida" && x.motivoDevolucao ? `<small class="fnf-motivo">${esc(x.motivoDevolucao)}${x.devolvidoPor ? ` · ${esc(x.devolvidoPor)}` : ""}</small>` : ""}</td>
+              <td>${FilaNotasFiscais.statusHtml(Object.assign({}, x, { assumidoPor: quem(x.assumidoPor, x.assumidoPorEmail, x.assumidoPorSienge) }), esc)}${x.status === "devolvida" && x.motivoDevolucao ? `<small class="fnf-motivo">${esc(x.motivoDevolucao)}${quem(x.devolvidoPor, x.devolvidoPorEmail, x.devolvidoPorSienge) ? ` · ${esc(quem(x.devolvidoPor, x.devolvidoPorEmail, x.devolvidoPorSienge))}` : ""}</small>` : ""}</td>
               <td class="fnf-acoes">
-                ${x.status === "devolvida" && this.podeEditar() ? `<button type="button" class="btn btn-primary" onclick="EnviarNotaApp.corrigir('${esc(x.id)}')"><i data-lucide="pencil"></i> Corrigir e reenviar</button>` : ""}
+                ${x.status === "devolvida" && this.podeEditar() ? `<button type="button" class="btn btn-primary" onclick="EnviarNotaApp.corrigir('${esc(x.id)}')"><i data-lucide="pencil"></i> Corrigir</button>` : ""}
                 ${x.status === "pendente" && this.podeEditar() ? `<button type="button" class="btn btn-cancel" onclick="EnviarNotaApp.cancelar('${esc(x.id)}')"><i data-lucide="x"></i> Cancelar</button>` : ""}
+                ${x.status !== "lancada" && this.podeEditar() ? `<button type="button" class="btn fnf-excluir" onclick="EnviarNotaApp.excluir('${esc(x.id)}')"><i data-lucide="trash-2"></i> Excluir</button>` : ""}
               </td>
             </tr>`).join("")}</tbody></table>`));
     return `<div class="inf-card" style="margin:16px 20px;">
         <div class="fnf-barra">
           <label class="inf-chk"><input type="checkbox" ${s.todos ? "checked" : ""} onchange="EnviarNotaApp.setTodos(this.checked)"> Mostrar envios de todos os operadores</label>
+          <label class="moura-switch" title="Desligado, as notas que o fiscal já lançou no Sienge ficam de fora. Ligue para vê-las de novo.">
+            <input type="checkbox" ${s.verLancadas ? "checked" : ""} onchange="EnviarNotaApp.setVerLancadas(this.checked)">
+            <span class="moura-switch-track" aria-hidden="true"></span>
+            <span class="moura-switch-text">Mostrar notas já lançadas no Sienge</span>
+          </label>
           <button type="button" class="btn btn-outline inf-btn-sm" onclick="EnviarNotaApp.carregarLista(true)" ${s.listaCarregando ? "disabled" : ""}><i data-lucide="refresh-cw"></i> Atualizar</button>
         </div>
         ${corpo}
@@ -1118,6 +1176,9 @@ window.EnviarNotaApp = {
         .env-x i { width: 16px; height: 16px; }
         .ml-tab .env-tab-alerta, .ml-tab.is-active .env-tab-alerta { background: #fee2e2; color: #b91c1c; }
         .env-sem-cad { color: #b91c1c !important; background: #fef2f2 !important; }
+        #enviar-nota-root .fnf-tab .fnf-acoes .btn { height: 28px; min-width: 0; font-size: 0.72rem; padding: 0 8px; }
+        #enviar-nota-root .fnf-tab .fnf-acoes .fnf-excluir { background: #fff; color: #b91c1c; border: 1px solid #fecaca; }
+        #enviar-nota-root .fnf-tab .fnf-acoes .fnf-excluir:hover { background: #fef2f2; }
       </style>
       <div class="ml-tabs env-tabs" id="env-tabs" role="tablist">${this.abasHtml()}</div>
       ${s.aba === "minhas" ? this.minhasHtml() : this.enviarHtml()}`;

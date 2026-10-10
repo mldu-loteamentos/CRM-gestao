@@ -858,6 +858,13 @@ const MarketingBudgetApp = {
     </div>`;
   },
 
+  secao(titulo, texto, miolo) {
+    return `<section class="mkb-sec">
+      <div class="mkb-sec-h"><h3>${titulo}</h3>${texto ? `<small>${texto}</small>` : ""}</div>
+      ${miolo}
+    </section>`;
+  },
+
   gastosHtml(r) {
     const s = this.state;
     const nomes = { realizado: "Realizado", comprometido: "Comprometido", previsao: "Previsão" };
@@ -1049,7 +1056,7 @@ const MarketingBudgetApp = {
     const corConsumo = r.consumo > 100 ? "#b91c1c" : (r.consumo >= 80 ? "#f37021" : "#105436");
     const ev = s.eventos || [];
     const evOrcado = ev.reduce((t, b) => t + (Number(b.plannedValue) || 0), 0);
-    return `
+    const verba = `
       <div class="mkb-card mkb-config">
         <div class="mkb-cfg-item">
           <span>VGV do empreendimento</span>
@@ -1066,40 +1073,40 @@ const MarketingBudgetApp = {
           <strong>${this.money(r.verba)}</strong>
           <small>VGV × ${String(s.pct || 0).replace(".", ",")}%</small>
         </div>
-      </div>
-
+      </div>`;
+    const uso = `
       <div class="mkb-kpis">
-        ${this.kpi("Realizado", this.money(r.realizado), "Títulos pagos no período", "#105436")}
-        ${this.kpi("Comprometido", this.money(r.comprometido), "Títulos em aberto", "#f37021")}
-        ${this.kpi("Saldo da verba", this.money(r.saldo), r.saldo < 0 ? "Verba estourada" : "Verba − realizado − comprometido", r.saldo < 0 ? "#b91c1c" : "#0ea5e9")}
-        ${this.kpi("Consumo da verba", r.verba > 0 ? r.consumo.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "%" : "—", "Realizado + comprometido", corConsumo,
+        ${this.kpi("Realizado", this.money(r.realizado), "Títulos de marketing já pagos no período", "#105436")}
+        ${this.kpi("Comprometido", this.money(r.comprometido), "Títulos de marketing em aberto, ainda não pagos", "#f37021")}
+        ${this.kpi("Saldo da verba", this.money(r.saldo), r.saldo < 0 ? "A verba já foi ultrapassada" : "O que ainda cabe na verba", r.saldo < 0 ? "#b91c1c" : "#0ea5e9")}
+        ${this.kpi("Consumo da verba", r.verba > 0 ? r.consumo.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "%" : "—", "Pago + em aberto, em relação à verba", corConsumo,
           `<div class="mkb-bar"><i style="width:${consumo}%;background:${corConsumo};"></i></div>`)}
-        ${this.kpi("Unidades vendidas", r.liquidas.toLocaleString("pt-BR"), `${r.brutas} vendidas · ${r.distr} distratadas no período`, "#6366f1")}
-        ${this.kpi("Custo por unidade vendida", r.cac != null ? this.money(r.cac) : "—", "Realizado ÷ unidades vendidas", "#105436")}
-        ${this.kpi("Custo por unidade (c/ comprometido)", r.cacTotal != null ? this.money(r.cacTotal) : "—", "(Realizado + comprometido) ÷ unidades", "#f37021")}
-        ${this.kpi("Vendido no período", this.moneyShort(r.vgvVendido), r.vgvVendido > 0 ? "Marketing = " + ((r.realizado / r.vgvVendido) * 100).toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "% do vendido" : "Valor dos contratos", "#0f766e")}
       </div>
-      ${r.previsto > 0 || ev.length ? `<p class="mkb-nota">${r.previsto > 0 ? `Previsões de marketing no período: <strong>${this.money(r.previsto)}</strong> (não entram no comprometido). ` : ""}${ev.length ? `Eventos cadastrados neste empreendimento: <strong>${ev.length}</strong> · orçado ${this.money(evOrcado)}.` : ""}</p>` : ""}
-
+      ${r.previsto > 0 || ev.length ? `<p class="mkb-nota">${r.previsto > 0 ? `Previsões de marketing no período: <strong>${this.money(r.previsto)}</strong>. Previsão ainda não é título em aberto, por isso não entra no comprometido. ` : ""}${ev.length ? `Eventos cadastrados neste empreendimento: <strong>${ev.length}</strong> · orçado ${this.money(evOrcado)}.` : ""}</p>` : ""}
       <div class="mkb-card mkb-cats-row">
-        <div class="mkb-cats-tit"><h3>O que entra no budget</h3><small>Pelo nome do centro de custo e pelo grupo 2.03.05 MARKETING do plano financeiro</small></div>
-        <p class="mkb-muted" style="margin:0;">Centro com <strong>MARKETING</strong> no nome: 100% das despesas (pago, em aberto e previsão). Nos demais centros, só o título pago nas contas do grupo <strong>2.03.05 MARKETING</strong> e nas contas alocadas em 05.02 MARKETING na visão do fluxo de caixa.</p>
+        <div class="mkb-cats-tit"><h3>O que entra nesses números</h3><small>Regra do centro de custo e da conta 2.03.05 MARKETING</small></div>
+        <p class="mkb-muted" style="margin:0;">Centro com <strong>MARKETING</strong> no nome: 100% das despesas, pagas, em aberto ou previstas. Nos outros centros, só o título já pago nas contas do grupo <strong>2.03.05 MARKETING</strong> e nas contas ligadas a 05.02 MARKETING no fluxo de caixa.</p>
       </div>
-
-      <div class="mkb-charts">
-        <div class="mkb-card mkb-chart-full"><div class="mkb-card-h"><h3>Verba × gastos por mês</h3></div><div class="mkb-canvas"><canvas id="mkb-ch-mes"></canvas></div></div>
-        <div class="mkb-card mkb-chart-full"><div class="mkb-card-h"><h3>Vendas e custo por unidade vendida</h3></div><div class="mkb-canvas"><canvas id="mkb-ch-vendas"></canvas></div></div>
-      </div>
-
+      <div class="mkb-card mkb-chart-full"><div class="mkb-card-h"><h3>Verba e gastos mês a mês</h3><small>Barras = o que foi pago e o que está em aberto · linha = acumulado comparado com a verba</small></div><div class="mkb-canvas"><canvas id="mkb-ch-mes"></canvas></div></div>
       <div class="mkb-card">
-        <div class="mkb-card-h"><h3>Detalhamento dos gastos</h3><small>Realizado = pago · Comprometido = título em aberto · Previsão = documento de previsão</small></div>
+        <div class="mkb-card-h"><h3>Títulos que compõem a verba</h3><small>Pago entra no realizado · em aberto entra no comprometido · previsão fica só de referência</small></div>
         <div id="mkb-gastos">${this.gastosHtml(r)}</div>
+      </div>`;
+    const vendas = `
+      <div class="mkb-kpis">
+        ${this.kpi("Unidades vendidas", r.liquidas.toLocaleString("pt-BR"), `${r.brutas} contratos emitidos · ${r.distr} distratados no período`, "#6366f1")}
+        ${this.kpi("Custo por unidade vendida", r.cac != null ? this.money(r.cac) : "—", "Só o que já foi pago de marketing, dividido pelas unidades", "#105436")}
+        ${this.kpi("Custo por unidade com o em aberto", r.cacTotal != null ? this.money(r.cacTotal) : "—", "Pago + em aberto, dividido pelas unidades", "#f37021")}
+        ${this.kpi("Vendido no período", this.moneyShort(r.vgvVendido), r.vgvVendido > 0 ? "O marketing pago é " + ((r.realizado / r.vgvVendido) * 100).toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "% desse valor" : "Soma do valor dos contratos", "#0f766e")}
       </div>
-
+      <div class="mkb-card mkb-chart-full"><div class="mkb-card-h"><h3>Vendas e custo por unidade</h3><small>Quantas unidades venderam em cada mês e quanto de marketing cada uma consumiu</small></div><div class="mkb-canvas"><canvas id="mkb-ch-vendas"></canvas></div></div>
       <div class="mkb-card">
-        <div class="mkb-card-h"><h3>Vendas do empreendimento no período</h3><small>Contratos de venda do Sienge emitidos no período e distratos do período · Atrasado desde = parcela vencida mais antiga no Contas a Receber</small></div>
+        <div class="mkb-card-h"><h3>Contratos vendidos no período</h3><small>Emitidos e distratados no período · Atrasado desde é a parcela vencida mais antiga no Contas a Receber</small></div>
         <div id="mkb-vendas">${this.vendasHtml()}</div>
       </div>`;
+    return this.secao("De onde vem a verba", "O teto de marketing é o VGV da obra multiplicado pelo percentual definido em Configurações.", verba)
+      + this.secao("Uso da verba", "Quanto desse teto já foi pago e quanto ainda está comprometido em títulos em aberto.", uso)
+      + this.secao("Vendas do período", "As unidades vendidas servem para ver quanto de marketing cada venda consumiu.", vendas);
   },
 
   /* ---------- aba Perfil da venda ---------- */
@@ -1208,36 +1215,40 @@ const MarketingBudgetApp = {
         <td style="text-align:right;">${this.money(c.pag.aberto)}</td>
         <td class="mkb-tags">${this.riscoDe(c).map(tag).join(" ")}</td>
       </tr>`).join("");
-    return `<div class="mkb-card mkb-ctr-top">
-        ${escopo}
-        <small class="mkb-muted">Ativos = contratos não cancelados com saldo a pagar no Contas a Receber${todos ? "" : " · vendas emitidas no período"}. Entrada = parcelas de entrada, sinal ou ato.</small>
-      </div>
+    const qtdDistrato = risco.length.toLocaleString("pt-BR");
+    const pagamento = `
       <div class="mkb-kpis">
-        ${this.kpi("Contratos ativos", L.length.toLocaleString("pt-BR"), todos ? "Todos os títulos a receber do empreendimento" : "Vendas do período", "#6366f1")}
-        ${this.kpi("Em dia", this.pct(emDia.length, L.length), `${emDia.length} de ${L.length} contrato(s)`, "#105436")}
-        ${this.kpi("Em atraso", this.pct(atraso.length, L.length), `${atraso.length} contrato(s) · ${this.money(vencido)} vencido`, atraso.length ? "#b91c1c" : "#105436")}
-        ${this.kpi("Não pagaram nada (0%)", nada.length.toLocaleString("pt-BR"), this.pct(nada.length, L.length) + " dos ativos", nada.length ? "#b91c1c" : "#105436")}
-        ${this.kpi("Devendo a entrada", devEntrada.length.toLocaleString("pt-BR"), this.pct(devEntrada.length, L.length) + " dos ativos" + (semEntrada ? ` · ${semEntrada} sem entrada identificada` : ""), devEntrada.length ? "#f37021" : "#105436")}
-        ${this.kpi("Possíveis cancelamentos", risco.length.toLocaleString("pt-BR"), "Não pagaram nada ou devem a entrada", risco.length ? "#b91c1c" : "#105436")}
-        ${this.kpi("Saldo a receber em risco", this.moneyShort(emRisco), "Saldo dos possíveis cancelamentos", "#f37021")}
-        ${this.kpi("Média já paga", (L.reduce((t, c) => t + c.pag.pctPago, 0) / L.length).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "%", "Recebido ÷ (recebido + saldo)", "#0f766e")}
+        ${this.kpi("Contratos ativos", L.length.toLocaleString("pt-BR"), todos ? "Títulos a receber ainda em aberto neste empreendimento" : "Vendas do período que ainda têm saldo", "#6366f1")}
+        ${this.kpi("Em dia", this.pct(emDia.length, L.length), `${emDia.length} contrato(s) sem parcela vencida`, "#105436")}
+        ${this.kpi("Em atraso", this.pct(atraso.length, L.length), `${atraso.length} contrato(s) · ${this.money(vencido)} já vencido`, atraso.length ? "#b91c1c" : "#105436")}
+        ${this.kpi("Média já paga", (L.reduce((t, c) => t + c.pag.pctPago, 0) / L.length).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "%", "O que já entrou dividido pelo valor do contrato", "#0f766e")}
       </div>
-
       <div class="mkb-charts mkb-charts-2">
-        <div class="mkb-card"><div class="mkb-card-h"><h3>Contratos ativos em dia × em atraso</h3></div><div class="mkb-canvas"><canvas id="mkb-ch-ctr-dia"></canvas></div></div>
-        <div class="mkb-card"><div class="mkb-card-h"><h3>Quanto do contrato já foi pago</h3><small>0% = não pagou nenhuma parcela</small></div><div class="mkb-canvas"><canvas id="mkb-ch-ctr-pago"></canvas></div></div>
-        <div class="mkb-card"><div class="mkb-card-h"><h3>Situação da entrada</h3></div><div class="mkb-canvas"><canvas id="mkb-ch-ctr-entrada"></canvas></div></div>
-        <div class="mkb-card"><div class="mkb-card-h"><h3>Tempo de atraso</h3><small>Parcela vencida mais antiga</small></div><div class="mkb-canvas"><canvas id="mkb-ch-ctr-atraso"></canvas></div></div>
+        <div class="mkb-card"><div class="mkb-card-h"><h3>Em dia e em atraso</h3><small>Dos contratos ativos, quantos pagam no prazo</small></div><div class="mkb-canvas"><canvas id="mkb-ch-ctr-dia"></canvas></div></div>
+        <div class="mkb-card"><div class="mkb-card-h"><h3>Quanto do contrato já foi pago</h3><small>0% significa que nenhuma parcela entrou</small></div><div class="mkb-canvas"><canvas id="mkb-ch-ctr-pago"></canvas></div></div>
+        <div class="mkb-card mkb-chart-full"><div class="mkb-card-h"><h3>Há quanto tempo está vencido</h3><small>Conta a partir da parcela vencida mais antiga de cada contrato</small></div><div class="mkb-canvas"><canvas id="mkb-ch-ctr-atraso"></canvas></div></div>
+      </div>`;
+    const distrato = `
+      <div class="mkb-kpis">
+        ${this.kpi("Títulos que podem distratar", qtdDistrato, "A quantidade da lista abaixo: não pagou nada ou está com a entrada vencida", risco.length ? "#b91c1c" : "#105436")}
+        ${this.kpi("Não pagaram nada", nada.length.toLocaleString("pt-BR"), this.pct(nada.length, L.length) + " dos contratos ativos", nada.length ? "#b91c1c" : "#105436")}
+        ${this.kpi("Entrada vencida", devEntrada.length.toLocaleString("pt-BR"), this.pct(devEntrada.length, L.length) + " dos ativos" + (semEntrada ? ` · ${semEntrada} sem parcela de entrada no título` : ""), devEntrada.length ? "#f37021" : "#105436")}
+        ${this.kpi("Saldo desses títulos", this.moneyShort(emRisco), "Quanto ainda falta receber se esses contratos seguirem", "#f37021")}
       </div>
-
       <div class="mkb-card">
-        <div class="mkb-card-h"><h3>Possíveis cancelamentos</h3><small>Clientes que não pagaram nada ou estão devendo a entrada · base para o marketing se programar</small></div>
+        <div class="mkb-card-h"><h3>Lista dos ${qtdDistrato} título(s)</h3><small>Cada linha é um contrato que o marketing pode tratar como possível distrato</small></div>
         ${risco.length ? `<div class="mkb-tablewrap"><table class="mkb-table">
           <colgroup><col style="width:13%"><col style="width:9%"><col style="width:20%"><col style="width:8%"><col style="width:7%"><col style="width:15%"><col style="width:11%"><col style="width:9%"><col style="width:8%"></colgroup>
           <thead><tr><th>Contrato</th><th>Unidade</th><th>Cliente</th><th>Emissão</th><th style="text-align:right;">% pago</th><th>Entrada</th><th>Atrasado desde</th><th style="text-align:right;">Saldo</th><th>Motivo</th></tr></thead>
           <tbody>${linhas}</tbody>
         </table></div>` : `<p class="mkb-muted" style="margin:0;">Nenhum contrato ativo sem pagamento ou com entrada vencida.</p>`}
       </div>`;
+    return `<div class="mkb-card mkb-ctr-top">
+        ${escopo}
+        <small class="mkb-muted">Contrato ativo é o que não foi cancelado e ainda tem saldo no Contas a Receber${todos ? "" : ", entre as vendas emitidas no período"}.</small>
+      </div>
+      ${this.secao("Situação de pagamento", "Quem está em dia, quem está atrasado e quanto do contrato já entrou.", pagamento)}
+      ${this.secao(`Títulos que podem distratar <b class="mkb-qtd">${qtdDistrato}</b>`, "Não pagaram nenhuma parcela ou estão com a entrada vencida. O número ao lado é a quantidade da lista, para não precisar contar.", distrato)}`;
   },
 
   desenharGraficosContratos() {
@@ -1287,12 +1298,6 @@ const MarketingBudgetApp = {
       const nomes = this.FAIXAS_PAGO.map((f) => f.nome);
       const data = nomes.map((nm) => L.filter((c) => this.faixaPago(c.pag) === nm).length);
       this.charts.ctrPago = barras(elP, nomes, data, nomes.map((_, i) => (i === 0 ? "#b91c1c" : (i === 1 ? "#f37021" : "#105436"))), false);
-    }
-    const elE = document.getElementById("mkb-ch-ctr-entrada");
-    if (elE) {
-      const nomes = ["Entrada paga", "Entrada a vencer", "Entrada vencida", "Sem entrada identificada"];
-      const data = nomes.map((nm) => L.filter((c) => this.situacaoEntrada(c.pag) === nm).length);
-      this.charts.ctrEntrada = barras(elE, nomes, data, ["#105436", "#0ea5e9", "#f37021", "#cbd5e1"], true);
     }
     const elA = document.getElementById("mkb-ch-ctr-atraso");
     if (elA) {
@@ -1391,32 +1396,36 @@ const MarketingBudgetApp = {
         <td style="text-align:right;">${x.meses == null ? "—" : (x.meses === 0 ? "menos de 1 mês" : x.meses + (x.meses === 1 ? " mês" : " meses"))}</td>
         <td style="text-align:right;">${this.money(x.v.valor)}</td>
       </tr>`).join("");
-    return `${aviso}
-      ${erros.length ? `<div class="mkb-card" style="color:#b91c1c;font-size:0.82rem;">${erros.map((e) => this.esc(e)).join("<br>")}</div>` : ""}
+    const quem = `
       <div class="mkb-kpis">
-        ${this.kpi("Contratos ativos", ativos.length.toLocaleString("pt-BR"), `${canc.length} cancelado(s) no período`, "#6366f1")}
-        ${this.kpi("Mulheres", this.pct(mulheres, pf.length), `${mulheres} contrato(s) · pessoa física`, "#db2777")}
-        ${this.kpi("Homens", this.pct(homens, pf.length), `${homens} contrato(s) · pessoa física`, "#0ea5e9")}
-        ${this.kpi("Idade média", idadeMedia != null ? Math.round(idadeMedia) + " anos" : "—", `${comIdade.length} com data de nascimento`, "#0f766e")}
-        ${this.kpi("Em atraso", this.pct(atraso.length, comPag.length), `${atraso.length} de ${comPag.length} contrato(s)${semTitulo ? ` · ${semTitulo} sem título` : ""}`, atraso.length ? "#b91c1c" : "#105436")}
-        ${this.kpi("Valor vencido", this.money(vencido), "Parcelas vencidas e não pagas", "#f37021")}
+        ${this.kpi("Contratos ativos", ativos.length.toLocaleString("pt-BR"), `${canc.length} já cancelado(s) neste período`, "#6366f1")}
+        ${this.kpi("Mulheres", this.pct(mulheres, pf.length), `${mulheres} contrato(s) de pessoa física`, "#db2777")}
+        ${this.kpi("Homens", this.pct(homens, pf.length), `${homens} contrato(s) de pessoa física`, "#0ea5e9")}
+        ${this.kpi("Idade média na venda", idadeMedia != null ? Math.round(idadeMedia) + " anos" : "—", `${comIdade.length} cliente(s) com data de nascimento`, "#0f766e")}
+      </div>
+      <div class="mkb-par mkb-par-sexo">
+        <div class="mkb-card"><div class="mkb-card-h"><h3>Vendas por sexo</h3><small>Quantidade de contratos ativos em cada grupo</small></div><div class="mkb-canvas"><canvas id="mkb-ch-sexo"></canvas></div></div>
+        <div class="mkb-card"><div class="mkb-card-h"><h3>Vendas por faixa etária</h3><small>Idade na data da venda · o número em cada cor é a quantidade, e o de cima é o total</small></div><div class="mkb-canvas mkb-canvas-alto"><canvas id="mkb-ch-faixa"></canvas></div></div>
+      </div>`;
+    const pagando = `
+      <div class="mkb-kpis mkb-kpis-2">
+        ${this.kpi("Em atraso", this.pct(atraso.length, comPag.length), `${atraso.length} de ${comPag.length} contrato(s) com parcela vencida${semTitulo ? ` · ${semTitulo} sem título no Contas a Receber` : ""}`, atraso.length ? "#b91c1c" : "#105436")}
+        ${this.kpi("Valor vencido", this.money(vencido), "Soma das parcelas vencidas e ainda não pagas", "#f37021")}
+      </div>
+      <div class="mkb-par">
+        <div class="mkb-card"><div class="mkb-card-h"><h3>Em dia e em atraso por idade</h3><small>O número verde é quem está em dia e o laranja é quem está atrasado</small></div><div class="mkb-canvas mkb-canvas-alto"><canvas id="mkb-ch-pag"></canvas></div></div>
+        <div class="mkb-card">
+          <div class="mkb-card-h"><h3>A mesma conta, em tabela</h3><small>Em dia inclui quem já quitou · em atraso é quem tem parcela vencida</small></div>
+          ${tabelaPag}
+        </div>
+      </div>`;
+    const cancelou = `
+      <div class="mkb-kpis mkb-kpis-2">
         ${this.kpi("Cancelamentos", canc.length.toLocaleString("pt-BR"), this.pct(canc.length, L.length) + " dos contratos do período", "#b91c1c")}
-        ${this.kpi("Tempo até cancelar", mediaMeses != null ? mediaMeses.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + (Math.abs(mediaMeses - 1) < 0.05 ? " mês" : " meses") : "—", "Média entre a venda e o cancelamento", "#64748b")}
+        ${this.kpi("Tempo até cancelar", mediaMeses != null ? mediaMeses.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + (Math.abs(mediaMeses - 1) < 0.05 ? " mês" : " meses") : "—", "Média de meses entre a venda e o cancelamento", "#64748b")}
       </div>
-
-      <div class="mkb-charts mkb-charts-3">
-        <div class="mkb-card"><div class="mkb-card-h"><h3>Vendas por sexo</h3></div><div class="mkb-canvas"><canvas id="mkb-ch-sexo"></canvas></div></div>
-        <div class="mkb-card"><div class="mkb-card-h"><h3>Vendas por faixa etária</h3></div><div class="mkb-canvas"><canvas id="mkb-ch-faixa"></canvas></div></div>
-        <div class="mkb-card"><div class="mkb-card-h"><h3>Em dia × em atraso por faixa etária</h3></div><div class="mkb-canvas"><canvas id="mkb-ch-pag"></canvas></div></div>
-      </div>
-
       <div class="mkb-card">
-        <div class="mkb-card-h"><h3>Quem paga em dia e quem está em atraso</h3><small>Contratos ativos · em dia inclui os quitados · em atraso = tem parcela vencida e não paga</small></div>
-        ${tabelaPag}
-      </div>
-
-      <div class="mkb-card">
-        <div class="mkb-card-h"><h3>Perfil de quem cancelou</h3><small>Contratos cancelados no período · taxa = cancelados ÷ contratos do grupo</small></div>
+        <div class="mkb-card-h"><h3>Perfil de quem cancelou</h3><small>Taxa = cancelados do grupo ÷ contratos do grupo no período</small></div>
         ${canc.length ? `<div class="mkb-canc">
           <div class="mkb-canvas"><canvas id="mkb-ch-canc"></canvas></div>
           <div class="mkb-tablewrap"><table class="mkb-table mkb-table-perfil" style="min-width:0;">
@@ -1433,6 +1442,67 @@ const MarketingBudgetApp = {
           <tbody>${listaCanc}</tbody>
         </table></div>` : `<p class="mkb-muted" style="margin:0;">Nenhum cancelamento deste empreendimento no período.</p>`}
       </div>`;
+    return `${aviso}
+      ${erros.length ? `<div class="mkb-card" style="color:#b91c1c;font-size:0.82rem;">${erros.map((e) => this.esc(e)).join("<br>")}</div>` : ""}
+      ${this.secao("Quem comprou", "Sexo e idade dos clientes dos contratos que continuam ativos.", quem)}
+      ${this.secao("Quem está pagando", "Dos contratos ativos, quem segue em dia e quem já tem parcela vencida.", pagando)}
+      ${this.secao("Quem cancelou", "Distratos do período e quanto tempo o contrato durou antes do cancelamento.", cancelou)}`;
+  },
+
+  /** Escreve a quantidade em cada pedaço do gráfico, para não depender do mouse. */
+  pluginNumeros() {
+    return {
+      id: "mkbNumeros",
+      afterDatasetsDraw: (chart) => {
+        const ctx = chart.ctx;
+        const tipo = chart.config.type;
+        ctx.save();
+        ctx.font = "700 11px sans-serif";
+        ctx.textAlign = "center";
+        if (tipo === "doughnut") {
+          const ds = chart.data.datasets[0];
+          const meta = chart.getDatasetMeta(0);
+          ctx.textBaseline = "middle";
+          ctx.fillStyle = "#fff";
+          meta.data.forEach((arc, i) => {
+            const v = Number(ds.data[i]) || 0;
+            if (!v || Math.abs(arc.endAngle - arc.startAngle) < 0.35) return;
+            const p = arc.tooltipPosition();
+            ctx.fillText(String(v), p.x, p.y);
+          });
+          ctx.restore();
+          return;
+        }
+        const totais = chart.data.labels.map(() => 0);
+        chart.data.datasets.forEach((ds, di) => {
+          const meta = chart.getDatasetMeta(di);
+          if (meta.hidden) return;
+          meta.data.forEach((bar, i) => {
+            const v = Number(ds.data[i]) || 0;
+            if (!v) return;
+            totais[i] += v;
+            const altura = Math.abs((bar.base != null ? bar.base : bar.y) - bar.y);
+            if (altura < 16) return;
+            ctx.fillStyle = "#fff";
+            ctx.textBaseline = "middle";
+            ctx.fillText(String(v), bar.x, ((bar.base != null ? bar.base : bar.y) + bar.y) / 2);
+          });
+        });
+        if (chart.data.datasets.length > 1) {
+          ctx.fillStyle = "#0f172a";
+          ctx.textBaseline = "bottom";
+          chart.getDatasetMeta(0).data.forEach((bar, i) => {
+            if (!totais[i]) return;
+            const topo = Math.min(...chart.data.datasets.map((_, di) => {
+              const meta = chart.getDatasetMeta(di);
+              return meta.hidden || !meta.data[i] ? Infinity : meta.data[i].y;
+            }));
+            ctx.fillText(String(totais[i]), bar.x, topo - 2);
+          });
+        }
+        ctx.restore();
+      }
+    };
   },
 
   desenharGraficosPerfil() {
@@ -1441,14 +1511,39 @@ const MarketingBudgetApp = {
     const ativos = L.filter((x) => !x.cancelado);
     const canc = L.filter((x) => x.cancelado);
     const corSexo = { F: "#db2777", M: "#0ea5e9", PJ: "#6366f1", "?": "#cbd5e1" };
-    const legenda = { position: "bottom", labels: { boxWidth: 10, font: { size: 10 } } };
+    const legenda = { position: "bottom", labels: { boxWidth: 10, font: { size: 11 }, padding: 12 } };
+    const eixoX = { stacked: true, ticks: { font: { size: 11 }, maxRotation: 0, minRotation: 0, autoSkip: false } };
+    const eixoY = { stacked: true, beginAtZero: true, ticks: { precision: 0 }, grace: "12%" };
+    const numeros = this.pluginNumeros();
     const elS = document.getElementById("mkb-ch-sexo");
     if (elS) {
       const ks = ["F", "M", "PJ", "?"].filter((k) => ativos.some((x) => x.sexo === k));
+      const data = ks.map((k) => ativos.filter((x) => x.sexo === k).length);
+      const total = data.reduce((t, n) => t + n, 0);
       this.charts.sexo = new Chart(elS, {
         type: "doughnut",
-        data: { labels: ks.map((k) => this.SEXOS[k]), datasets: [{ data: ks.map((k) => ativos.filter((x) => x.sexo === k).length), backgroundColor: ks.map((k) => corSexo[k]) }] },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: legenda } }
+        data: { labels: ks.map((k) => this.SEXOS[k]), datasets: [{ data, backgroundColor: ks.map((k) => corSexo[k]) }] },
+        options: {
+          responsive: true, maintainAspectRatio: false, cutout: "58%",
+          plugins: {
+            legend: {
+              ...legenda,
+              labels: {
+                ...legenda.labels,
+                generateLabels: (chart) => {
+                  const ds = chart.data.datasets[0];
+                  return chart.data.labels.map((label, i) => ({
+                    text: `${label} · ${ds.data[i]} (${this.pct(ds.data[i], total)})`,
+                    fillStyle: ds.backgroundColor[i],
+                    strokeStyle: ds.backgroundColor[i],
+                    index: i
+                  }));
+                }
+              }
+            }
+          }
+        },
+        plugins: [numeros]
       });
     }
     const faixas = this.ordemFaixas().filter((f) => ativos.some((x) => x.faixa === f));
@@ -1458,27 +1553,24 @@ const MarketingBudgetApp = {
       this.charts.faixa = new Chart(elF, {
         type: "bar",
         data: { labels: faixas, datasets: ks.map((k) => ({ label: this.SEXOS[k], data: faixas.map((f) => ativos.filter((x) => x.faixa === f && x.sexo === k).length), backgroundColor: corSexo[k], stack: "s" })) },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: legenda }, scales: { x: { stacked: true, ticks: { font: { size: 10 } } }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } } }
+        options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 16 } }, plugins: { legend: legenda }, scales: { x: eixoX, y: eixoY } },
+        plugins: [numeros]
       });
     }
     const elP = document.getElementById("mkb-ch-pag");
     if (elP) {
       const g = this.grupos(ativos, (x) => x.faixa, faixas);
-      const base = (x) => x.emDia + x.atraso;
       this.charts.pag = new Chart(elP, {
         type: "bar",
         data: {
           labels: g.map((x) => x.nome),
           datasets: [
-            { label: "Em dia", data: g.map((x) => base(x) ? (x.emDia / base(x)) * 100 : 0), backgroundColor: "#105436", stack: "p", n: g.map((x) => x.emDia) },
-            { label: "Em atraso", data: g.map((x) => base(x) ? (x.atraso / base(x)) * 100 : 0), backgroundColor: "#f37021", stack: "p", n: g.map((x) => x.atraso) }
+            { label: "Em dia", data: g.map((x) => x.emDia), backgroundColor: "#105436", stack: "p" },
+            { label: "Em atraso", data: g.map((x) => x.atraso), backgroundColor: "#f37021", stack: "p" }
           ]
         },
-        options: {
-          responsive: true, maintainAspectRatio: false,
-          plugins: { legend: legenda, tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.parsed.y.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% (${c.dataset.n[c.dataIndex]})` } } },
-          scales: { x: { stacked: true, ticks: { font: { size: 10 } } }, y: { stacked: true, beginAtZero: true, max: 100, ticks: { callback: (v) => v + "%" } } }
-        }
+        options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 16 } }, plugins: { legend: legenda }, scales: { x: eixoX, y: eixoY } },
+        plugins: [numeros]
       });
     }
     const elC = document.getElementById("mkb-ch-canc");
@@ -1488,7 +1580,8 @@ const MarketingBudgetApp = {
       this.charts.canc = new Chart(elC, {
         type: "bar",
         data: { labels: fx, datasets: ks.map((k) => ({ label: this.SEXOS[k], data: fx.map((f) => canc.filter((x) => x.faixa === f && x.sexo === k).length), backgroundColor: corSexo[k], stack: "c" })) },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: legenda, title: { display: true, text: "Cancelados por faixa etária e sexo", font: { size: 11 } } }, scales: { x: { stacked: true, ticks: { font: { size: 10 } } }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } } }
+        options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 16 } }, plugins: { legend: legenda }, scales: { x: eixoX, y: eixoY } },
+        plugins: [numeros]
       });
     }
   },
@@ -1528,7 +1621,15 @@ const MarketingBudgetApp = {
         #marketing-budget-root .mkb-pct input { width:90px; height:38px; padding:0 10px; border:1px solid #cbd5e1; border-radius:8px; font-size:1rem; font-weight:700; text-align:right; }
         #marketing-budget-root .mkb-pct em { font-style:normal; font-weight:700; color:#475569; }
         #marketing-budget-root .mkb-pct .btn { height:38px; }
+        #marketing-budget-root .mkb-sec { display:flex; flex-direction:column; gap:12px; }
+        #marketing-budget-root .mkb-sec-h h3 { margin:0; color:#105436; font-size:1rem; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+        #marketing-budget-root .mkb-sec-h small { display:block; color:#64748b; font-size:0.78rem; margin-top:2px; font-weight:400; }
+        #marketing-budget-root .mkb-qtd { display:inline-flex; align-items:center; justify-content:center; min-width:1.7rem; height:1.7rem; padding:0 8px; border-radius:999px; background:#b91c1c; color:#fff; font-size:0.95rem; }
         #marketing-budget-root .mkb-kpis { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:12px; }
+        #marketing-budget-root .mkb-kpis-2 { grid-template-columns:repeat(2, minmax(0, 280px)); }
+        #marketing-budget-root .mkb-par { display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:stretch; }
+        #marketing-budget-root .mkb-par-sexo { grid-template-columns:minmax(280px, 0.85fr) minmax(0, 1.4fr); }
+        #marketing-budget-root .mkb-canvas-alto { height:340px; }
         #marketing-budget-root .mkb-kpi { background:#fff; border:1px solid #e2e8f0; border-top:4px solid #105436; border-radius:10px; padding:12px 14px; min-width:0; }
         #marketing-budget-root .mkb-kpi span { display:block; font-size:0.7rem; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:0.3px; }
         #marketing-budget-root .mkb-kpi strong { display:block; font-size:1.2rem; color:#0f172a; margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -1580,7 +1681,7 @@ const MarketingBudgetApp = {
         #marketing-budget-root .mkb-pbar b { min-width:48px; text-align:right; font-size:0.78rem; }
         #marketing-budget-root .mkb-canc { display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start; }
         @media (max-width: 1100px) {
-          #marketing-budget-root .mkb-charts-3, #marketing-budget-root .mkb-charts-2, #marketing-budget-root .mkb-canc { grid-template-columns:1fr; }
+          #marketing-budget-root .mkb-charts-3, #marketing-budget-root .mkb-charts-2, #marketing-budget-root .mkb-canc, #marketing-budget-root .mkb-par, #marketing-budget-root .mkb-par-sexo { grid-template-columns:1fr; }
           #marketing-budget-root .mkb-kpis { grid-template-columns:repeat(2, minmax(0,1fr)); }
           #marketing-budget-root .mkb-charts, #marketing-budget-root .mkb-config { grid-template-columns:1fr; }
         }
