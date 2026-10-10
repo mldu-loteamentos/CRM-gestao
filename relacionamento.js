@@ -2847,7 +2847,7 @@ const RelacionamentoApp = {
     const el = this._docEl(kind, "-search-results");
     if (el) el.innerHTML = html;
     const st = document.getElementById(this._docCfg(kind).p + "-modal-status");
-    if (st) st.innerHTML = carregando && kind === "terceiros" ? "" : html;
+    if (st) st.innerHTML = carregando && (kind === "terceiros" || kind === "vencimento") ? "" : html;
     if (window.lucide) lucide.createIcons();
   },
 
@@ -3431,8 +3431,8 @@ const RelacionamentoApp = {
             return s;
           };
       let filled = fillVars(markup, legalBase);
-      if (kind === "terceiros") {
-        await this._baixarTerceirosPdf(ctx, cfg, docTitle, this._ensureDocHeaderTopo(filled, legalBase), legalBase);
+      if (kind === "terceiros" || kind === "vencimento") {
+        await this._baixarDocSimplesPdf(kind, ctx, cfg, docTitle, this._ensureDocHeaderTopo(filled, legalBase), legalBase);
         return;
       }
       if (typeof window.centerSimpleDocSignature === "function") {
@@ -3453,10 +3453,11 @@ const RelacionamentoApp = {
     }
   },
 
-  async _baixarTerceirosPdf(ctx, cfg, docTitle, filled, legalBase) {
-    if (this._terceirosBusy) return;
-    this._terceirosBusy = true;
-    const btn = document.getElementById("ter-btn-gerar");
+  async _baixarDocSimplesPdf(kind, ctx, cfg, docTitle, filled, legalBase) {
+    this._docPdfBusy = this._docPdfBusy || {};
+    if (this._docPdfBusy[kind]) return;
+    this._docPdfBusy[kind] = true;
+    const btn = document.getElementById(cfg.p + "-btn-gerar");
     const btnHtml = btn ? btn.innerHTML : "";
     if (btn) {
       btn.disabled = true;
@@ -3474,7 +3475,7 @@ const RelacionamentoApp = {
       const iAss = blocos.findIndex((b) => /_{5,}/.test(visivel(b)));
       if (iAss >= 0 && typeof window.centerSimpleDocSignature === "function") blocos[iAss] = window.centerSimpleDocSignature(blocos[iAss]);
       const topo = `<h2 style="text-align:center;color:#111;font-size:13pt;font-weight:bold;letter-spacing:0.04em;margin:0 0 30px;font-family:'Times New Roman',serif;">${docTitle}</h2>`;
-      const corpoCss = "font-family:'Times New Roman',serif;font-size:11pt;line-height:1.75;text-align:justify;white-space:pre-wrap;color:#111;";
+      const corpoCss = "font-family:'Times New Roman',serif;font-size:11pt;line-height:" + (kind === "vencimento" ? "1.85" : "1.75") + ";text-align:justify;white-space:pre-wrap;color:#111;";
       const paginas = this._paginarDoc(topo, blocos, corpoCss);
       const codEmp = legalBase.CODIGO_EMPREENDIMENTO && legalBase.CODIGO_EMPREENDIMENTO !== "____" ? legalBase.CODIGO_EMPREENDIMENTO : "";
       const titulo = legalBase.TITULO || (ctx.sale && ctx.sale.receivableBillId) || "";
@@ -3483,12 +3484,13 @@ const RelacionamentoApp = {
         ? window.buildFichaPdfFilename(cfg.title, { contrato: legalBase.UNIDADE, costCenterId: codEmp, titulo, nome })
         : cfg.title + " | Título " + titulo + ".pdf";
       await this._baixarPaginasPdf(paginas, fileName);
-      this.fecharDocModal("terceiros");
+      this.fecharDocModal(kind);
     } finally {
-      this._terceirosBusy = false;
+      this._docPdfBusy[kind] = false;
       if (btn) {
         btn.innerHTML = btnHtml;
-        this._atualizarBtnGerarTerceiro();
+        if (kind === "terceiros") this._atualizarBtnGerarTerceiro();
+        else btn.disabled = false;
       }
       if (window.lucide) lucide.createIcons();
     }

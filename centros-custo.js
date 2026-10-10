@@ -200,7 +200,7 @@ const CentrosCustoApp = {
   },
 
   isParceiro(cc) {
-    return /parceir/i.test(String((cc && cc.name) || ""));
+    return /parce(ir|ri)/i.test(String((cc && cc.name) || ""));
   },
 
   contaLabel(c) {

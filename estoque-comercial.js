@@ -368,6 +368,7 @@ const EstoqueComercialApp = {
       kpiAVencer: u.kpiAVencer != null ? Number(u.kpiAVencer) : null,
       quitacaoDate: this.isoQuitacao(u.quitacaoDate),
       quitacaoFonte: u.quitacaoFonte || null,
+      quitadoEvidencia: !!u.quitadoEvidencia,
       situation: u.situation || ""
     };
   },
@@ -881,13 +882,48 @@ const EstoqueComercialApp = {
     if (this.isInadimplente(u)) return "inadimplente";
     const bal = this.unitBalance(u);
     const rec = u.receivedAmount != null ? Number(u.receivedAmount) : null;
-    if (bal != null && Number(bal) <= 0.009 && (rec > 0.009 || u.receivedLocked || u.statementDone)) return "quitado";
+    if (bal != null && Number(bal) <= 0.009 && rec > 0.009) return "quitado";
     if (bal != null && Number(bal) > 0.009) return "adimplente";
     if (u.statementDone || u.receivedLocked || this.displayContract(u) || u.contractId) return "adimplente";
     return null;
   },
 
+  /** Quitado sem data do Sienge e sem nenhum valor recebido não tem prova: volta para conferência. */
+  quitadoSemEvidencia(u) {
+    if (!u || !(u.quitado || u.relFin === "quitado")) return false;
+    if (u.quitacaoFonte === "sienge" || u.quitadoEvidencia) return false;
+    return !(Number(u.receivedAmount) > 0.009);
+  },
+
+  reabrirParaConferencia(u) {
+    return {
+      ...u,
+      relFin: null,
+      quitado: false,
+      quitacaoDate: null,
+      quitacaoFonte: null,
+      statementDone: false,
+      receivedLocked: false,
+      censusAt: null,
+      outstandingBalance: null,
+      presentDebitBalance: null
+    };
+  },
+
+  revisarQuitadosSemEvidencia() {
+    const ccs = new Set();
+    this.state.units = (this.state.units || []).map((u) => {
+      if (!this.isFinanceUnit(u) || !this.quitadoSemEvidencia(u)) return u;
+      ccs.add(String(u.enterpriseId || ""));
+      return this.reabrirParaConferencia(u);
+    });
+    if (!ccs.size) return 0;
+    this.saveCache();
+    return ccs.size;
+  },
+
   sealInferredFinance() {
+    this.revisarQuitadosSemEvidencia();
     let n = 0;
     this.state.units = (this.state.units || []).map((u) => {
       if (!this.isFinanceUnit(u) || u.relFin) return u;
@@ -1754,6 +1790,7 @@ const EstoqueComercialApp = {
             finAt: keep.finAt || u.finAt
           }, u.quitacaoDate, keep.quitacaoDate),
         quitacaoFonte: (u.quitacaoFonte === "sienge" || keep.quitacaoFonte === "sienge") ? "sienge" : (u.quitacaoFonte || keep.quitacaoFonte || null),
+        quitadoEvidencia: !!(u.quitadoEvidencia || keep.quitadoEvidencia),
         finAt: u.finAt || keep.finAt,
         situation: u.situation || keep.situation,
         quitado: !!(keep.quitado || u.quitado || keep.relFin === "quitado"),
@@ -1883,10 +1920,17 @@ const EstoqueComercialApp = {
             return;
           }
           const iso = this.isoQuitacao(bill && (bill.payOffDate || bill.payoffDate));
-          if (!iso) return;
           const idx = this.state.units.findIndex((x) => String(x.id) === id);
           if (idx < 0) return;
           const cur = this.state.units[idx];
+          if (!iso) {
+            const st = bill ? this.classifyReceivableBill(bill) : "";
+            if (st !== "adimplente" && st !== "inadimplente") return;
+            this.state.units[idx] = this.reabrirParaConferencia(cur);
+            mudou = true;
+            dirtyCc.add(String(cur.enterpriseId));
+            return;
+          }
           if (cur.quitacaoDate !== iso) mudou = true;
           this.state.units[idx] = { ...cur, quitacaoDate: iso, quitacaoFonte: "sienge" };
           dirtyCc.add(String(cur.enterpriseId));
@@ -2205,7 +2249,7 @@ const EstoqueComercialApp = {
     if (String(u.situation || "").toLowerCase().includes("distrat")) return "distratado";
     if (this.isInadimplente(u)) return "inadimplente";
     if (this.displayContract(u) || u.contractId) return "adimplente";
-    return "quitado";
+    return null;
   },
 
   needsStatement(u) {
@@ -2283,7 +2327,7 @@ const EstoqueComercialApp = {
     const kpis = this.kpisFromInstallments(installments);
     const aReceber = (Number(kpis.kpiVencidas) || 0) + (Number(kpis.kpiAVencer) || 0);
     const received = Number(kpis.recebido != null ? kpis.recebido : kpis.kpiLiquido) || 0;
-    const quitado = aReceber <= 0.009 && (received <= 0.009 || !u.contractValue || received >= Number(u.contractValue) * 0.8);
+    const quitado = aReceber <= 0.009 && received > 0.009 && (!u.contractValue || received >= Number(u.contractValue) * 0.8);
     const value = Number(kpis.kpiTotalContrato) > 0.009
       ? kpis.kpiTotalContrato
       : (u.contractValue != null ? Number(u.contractValue) : (received + aReceber));
@@ -2413,7 +2457,7 @@ const EstoqueComercialApp = {
     const paid = Number(g.paid) || 0;
     const contract = Number(u.contractValue) || 0;
     const lastBaixa = g.lastBaixa || null;
-    if (!lastBaixa && paid <= 0.009) return u;
+    if (paid <= 0.009) return u;
     if (contract > 1 && paid > 0.009 && paid < contract * 0.8) {
       return {
         ...u,
@@ -2662,13 +2706,19 @@ const EstoqueComercialApp = {
   pickStatementForUnit(u, statements, bills) {
     const list = statements || [];
     const mine = (bills || []).filter(b => this.billMatchesEstoqueUnit(b, u));
-    const byRb = list.find(s => {
+    const byRb = list.filter(s => {
       const sid = String(s.billReceivableId || s.receivableBillId || s.id || "").replace(/^B-/, "").split("-")[0];
       const uBill = String(u.receivableBillId || "").replace(/^B-/, "").split("-")[0];
       if (uBill && sid && uBill === sid) return true;
       return mine.some(b => String(b.id || b.receivableBillId || "").replace(/^B-/, "").split("-")[0] === sid);
     });
-    if (byRb) return byRb;
+    // Mais de um título da unidade (repactuação gera outro): vale o que ainda tem saldo, depois o que tem baixa.
+    const peso = (s) => {
+      const parc = (s && s.installments) || [];
+      if (parc.some(i => Number(i.currentBalance != null ? i.currentBalance : i.balanceDue || 0) > 0.009)) return 2;
+      return parc.some(i => (i.receipts || []).length) ? 1 : 0;
+    };
+    if (byRb.length) return byRb.slice().sort((a, b) => peso(b) - peso(a))[0];
     const byDoc = list.find(s => this.billMatchesUnit(s, u) || this.billMatchesEstoqueUnit(s, u));
     if (byDoc) return byDoc;
     return null;
@@ -2690,6 +2740,7 @@ const EstoqueComercialApp = {
       next.outstandingBalance = 0;
       next.presentDebitBalance = 0;
       next.quitacaoDate = this.sealQuitacao(u, bill && (bill.payOffDate || bill.payoffDate));
+      if (bill && this.classifyReceivableBill(bill) === "quitado") next.quitadoEvidencia = true;
       this.quitacaoDoTitulo(next, bill);
     } else if (status === "distratado") {
       next.quitado = false;
@@ -2706,12 +2757,16 @@ const EstoqueComercialApp = {
     return next;
   },
 
-  applyFichaMoney(u, installments, status, rb) {
+  applyFichaMoney(u, installments, status, rb, quitadoNoSienge) {
     const kpis = this.kpisFromInstallments(installments);
     const aReceber = (Number(kpis.kpiVencidas) || 0) + (Number(kpis.kpiAVencer) || 0);
     const received = Number(kpis.recebido != null ? kpis.recebido : kpis.kpiLiquido) || 0;
     let fin = status;
-    if (kpis.kpiVencidas <= 0.009 && kpis.kpiAVencer <= 0.009) fin = "quitado";
+    if (kpis.kpiVencidas <= 0.009 && kpis.kpiAVencer <= 0.009) {
+      // Título zerado sem nenhum recebimento (ex.: repactuado em outro título) não é quitação.
+      const prova = received > 0.009 || quitadoNoSienge || !!(rb && (rb.payOffDate || rb.payoffDate));
+      fin = prova ? "quitado" : (status && status !== "quitado" ? status : "adimplente");
+    }
     else if (kpis.kpiVencidas > 0.009) fin = "inadimplente";
     else if (aReceber > 0.009) fin = "adimplente";
     const next = this.applyRelFin(u, fin, rb);
@@ -2852,7 +2907,8 @@ const EstoqueComercialApp = {
         if (this.isSettledUnit(u) || !this.isActiveFinance(u)) return u;
         const mine = bills.filter(b => this.billMatchesEstoqueUnit(b, u));
         const stmt = this.pickStatementForUnit(u, statements, bills);
-        const status = this.classifyUnitBills(mine)
+        const statusTitulos = this.classifyUnitBills(mine);
+        const status = statusTitulos
           || (this.isInadimplente(u) ? "inadimplente" : this.defaultFinanceStatus(u));
         const rb = mine
           .filter(b => this.classifyReceivableBill(b) === status)
@@ -2862,7 +2918,7 @@ const EstoqueComercialApp = {
         let next;
         if (stmt && (stmt.installments || []).length) {
           marked += 1;
-          next = this.applyFichaMoney(u, stmt.installments, status || "adimplente", rb || stmt);
+          next = this.applyFichaMoney(u, stmt.installments, status || "adimplente", rb || stmt, statusTitulos === "quitado");
         } else if (mine.length) {
           marked += 1;
           next = this.applyRelFin(u, status, rb);
@@ -3129,7 +3185,7 @@ const EstoqueComercialApp = {
         if (present != null) {
           u.presentDebitBalance = present;
           if (u.outstandingBalance == null) u.outstandingBalance = present;
-          if (present === 0 && u.statementDone) {
+          if (present === 0 && u.statementDone && Number(u.receivedAmount) > 0.009) {
             u.quitado = true;
             u.relFin = u.relFin || "quitado";
             u.quitacaoDate = this.sealQuitacao({ ...u, quitado: true });
