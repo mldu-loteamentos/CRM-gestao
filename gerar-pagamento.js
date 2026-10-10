@@ -1514,6 +1514,10 @@ const GerarPagamentoApp = {
     return String(ccId || "").slice(0, -2);
   },
 
+  ccDeParceriaPeloNome(id, nome) {
+    return /parce(ir|ri)/i.test(String(nome || ((this.ccDe(id) || {}).name) || ""));
+  },
+
   num(v) {
     const n = parseFloat(String(v == null ? "" : v).replace(",", "."));
     return Number.isFinite(n) ? n : 0;
@@ -1562,11 +1566,13 @@ const GerarPagamentoApp = {
         comPlano.forEach((l) => { l.planoErro = true; });
         problemas.push(`Plano financeiro diferente na obra ${o.obra}: ${comPlano.map((l) => `${l.id} em ${this.planosTexto(l.planos)}`).join("; ")}. O CC da obra e o do parceiro devem usar o mesmo plano.`);
       }
-      const base = (o.linhas.find((l) => !l.parceria) || {}).id || o.obra + "00";
-      const parcTitulo = o.linhas.find((l) => l.parceria);
-      const parcCad = parcTitulo ? null : this.state.costCenters.find((c) => this.obra(c.id) === o.obra && String(c.id) !== base && this.isParceiro(c));
+      // O CC da obra também pode ter conta de parceria cadastrada; o par do rateio é decidido pelo nome.
+      const ehParc = (l) => this.ccDeParceriaPeloNome(l.id, l.nome);
+      const base = (o.linhas.find((l) => l.id === o.obra + "00" && !ehParc(l)) || o.linhas.find((l) => !ehParc(l)) || {}).id || o.obra + "00";
+      const parcTitulo = o.linhas.find((l) => l.id !== base && ehParc(l));
+      const parcCad = parcTitulo ? null : this.state.costCenters.find((c) => this.obra(c.id) === o.obra && String(c.id) !== base && this.ccDeParceriaPeloNome(c.id, c.name));
       const parc = parcTitulo ? parcTitulo.id : (parcCad ? String(parcCad.id) : "");
-      const padrao = this.rateioPadraoObra(base, parc) || (parc ? null : { ml: 100, terr: 0, aviso: "" });
+      const padrao = parc ? this.rateioPadraoObra(base, parc) : { ml: 100, terr: 0, aviso: "" };
       if (!padrao) {
         o.semPadrao = semPadrao = true;
         problemas.push(`Obra ${o.obra}: rateio padrão não cadastrado. Informe o % Moura Leite no ${base} e o % Terrenista no ${parc} em Centros de Custo.`);
