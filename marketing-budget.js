@@ -1,7 +1,8 @@
 /* Marketing · Budget
-   Verba = VGV da obra (Sienge) × % de marketing (definido em Configurações). Consome com os títulos a pagar
-   dos planos financeiros de marketing dos centros de custo configurados para a obra (pagos = realizado,
-   em aberto = comprometido) e mede o custo de aquisição por unidade vendida com os contratos de venda.
+   Verba = VGV da obra (Sienge) × % de marketing (definido em Configurações).
+   Centro de custo com MARKETING no nome: 100% das despesas entram no budget.
+   Centro sem MARKETING no nome: só títulos pagos nas contas do grupo 2.03.05 MARKETING
+   (a conta, as filhas e as contas alocadas em 05.02 MARKETING na visão DFC).
    A aba Contratos mostra quem está em dia, quem não pagou nada e quem deve a entrada (possíveis cancelamentos).
    A aba Perfil da venda cruza sexo e idade dos clientes com a situação de pagamento e os cancelamentos. */
 const MarketingBudgetApp = {
@@ -45,6 +46,69 @@ const MarketingBudgetApp = {
 
   esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+  },
+
+  fold(s) {
+    return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+  },
+
+  /** Centro de marketing: o nome do centro de custo contém MARKETING. */
+  ccTemMarketing(ccId, ccNome) {
+    const cc = (this.state.costCenters || []).find((c) => String(c.id) === String(ccId));
+    const nome = (cc && (cc.name || cc.nome)) || ccNome || "";
+    return this.fold(nome).includes("MARKETING");
+  },
+
+  /**
+   * Grupo de marketing do plano: conta 2.03.05 MARKETING e as filhas,
+   * mais as contas colocadas no grupo 05.02 MARKETING da visão DFC.
+   */
+  async carregarGrupoMarketing() {
+    let cats = (window.PlanoFinanceiroApp && Array.isArray(PlanoFinanceiroApp.categories) && PlanoFinanceiroApp.categories) || [];
+    if (!cats.length && window.SiengeApiService && typeof SiengeApiService.getPaymentCategories === "function") {
+      try { cats = await SiengeApiService.getPaymentCategories() || []; } catch (e) { cats = []; }
+    }
+    const prefixos = new Set(["2.03.05"]);
+    const ids = new Set();
+    (cats || []).forEach((c) => {
+      const id = String(c && c.id || "").trim();
+      const nome = this.fold(c && (c.name || c.description || c.financialCategoryName));
+      if (!id) return;
+      const partes = id.split(".").filter(Boolean).length;
+      if (id === "2.03.05" || id.replace(/\D/g, "") === "20305" || (nome === "MARKETING" && partes >= 3)) prefixos.add(id);
+    });
+    let visoes = [];
+    try { visoes = JSON.parse(localStorage.getItem("crm_plano_visoes_v2") || "[]") || []; } catch (e) { visoes = []; }
+    if (window.PlanoFinanceiroApp && Array.isArray(PlanoFinanceiroApp.visoes) && PlanoFinanceiroApp.visoes.length) visoes = PlanoFinanceiroApp.visoes;
+    visoes.forEach((v) => {
+      (v.groups || []).forEach((g) => {
+        const nome = this.fold(g && g.name);
+        if (!g || (g.id !== "g_05_02" && !nome.includes("MARKETING"))) return;
+        (g.accounts || []).forEach((id) => ids.add(String(id)));
+      });
+    });
+    this._grupoMkt = { prefixos: [...prefixos], ids };
+  },
+
+  /** Conta paga entra no budget quando pertence ao grupo MARKETING (código, filha ou visão). */
+  contaNoGrupoMarketing(catId) {
+    const id = String(catId || "").trim();
+    if (!id) return false;
+    const grupo = this._grupoMkt || { prefixos: ["2.03.05"], ids: new Set() };
+    if (grupo.ids && grupo.ids.has(id)) return true;
+    const dig = id.replace(/\D/g, "");
+    return (grupo.prefixos || []).some((p) => {
+      if (id === p || id.startsWith(p + ".")) return true;
+      const pd = String(p).replace(/\D/g, "");
+      return !!(pd && dig && (dig === pd || dig.startsWith(pd)));
+    });
+  },
+
+  /** Centro com MARKETING no nome: todas as despesas. Os demais: só título pago do grupo. */
+  gastoEntraNoBudget(r) {
+    if (!r) return false;
+    if (this.ccTemMarketing(r.ccId, r.ccNome)) return true;
+    return r.status === "realizado" && this.contaNoGrupoMarketing(r.catId);
   },
 
   money(v) {
@@ -276,6 +340,9 @@ const MarketingBudgetApp = {
       s.ccsCfg = this.ccsDaConfig(cfg, cc.id);
       s.catSel = catCfg && Array.isArray(catCfg.ids) ? catCfg.ids.map(String) : null;
       s.eventos = await this.lerEventos(cc.id);
+      this.setProgress("Lendo o grupo de marketing do plano financeiro…");
+      await this.carregarGrupoMarketing();
+      if (gen !== s.gen) return;
       const bills = [];
       for (let i = 0; i < s.ccsCfg.length; i++) {
         const alvo = s.costCenters.find((c) => String(c.id) === s.ccsCfg[i]) || { id: s.ccsCfg[i] };
@@ -744,8 +811,7 @@ const MarketingBudgetApp = {
   /* ---------- números ---------- */
   resumo() {
     const s = this.state;
-    const sel = new Set(this.categoriasSelecionadas());
-    const rows = s.rows.filter((r) => sel.has(r.catId));
+    const rows = s.rows.filter((r) => this.gastoEntraNoBudget(r));
     const soma = (st) => rows.filter((r) => r.status === st).reduce((t, r) => t + r.valor, 0);
     const verba = (Number(s.obra && s.obra.vgv) || 0) * ((Number(s.pct) || 0) / 100);
     const realizado = soma("realizado");
@@ -809,7 +875,7 @@ const MarketingBudgetApp = {
         <td title="${this.esc(x.catNome)}">${this.esc(x.catNome)}</td>
         <td style="text-align:right;">${this.money(x.valor)}</td>
       </tr>`).join("")
-      : `<tr><td colspan="8" class="mkb-vazio">Nenhum gasto ${s.filtroGasto === "todos" ? "nos planos de marketing selecionados" : "nesta situação"} no período.</td></tr>`;
+      : `<tr><td colspan="8" class="mkb-vazio">Nenhum gasto ${s.filtroGasto === "todos" ? "no período" : "nesta situação"}. Centro com MARKETING no nome entra inteiro; os demais só com título pago do grupo 2.03.05 MARKETING.</td></tr>`;
     return `<div class="mkb-chips">${chips}</div>
       <div class="mkb-tablewrap"><table class="mkb-table">
         <colgroup><col style="width:9%"><col style="width:11%"><col style="width:9%"><col style="width:20%"><col style="width:10%"><col style="width:8%"><col style="width:20%"><col style="width:13%"></colgroup>
@@ -933,7 +999,7 @@ const MarketingBudgetApp = {
   },
 
   bindCatFiltro() {
-    if (!window.MlEmpresaFilter) return;
+    if (!window.MlEmpresaFilter || !document.getElementById(this.CAT_FILTRO)) return;
     const self = this;
     const s = this.state;
     MlEmpresaFilter.bind(this.CAT_FILTRO, {
@@ -1016,8 +1082,8 @@ const MarketingBudgetApp = {
       ${r.previsto > 0 || ev.length ? `<p class="mkb-nota">${r.previsto > 0 ? `Previsões de marketing no período: <strong>${this.money(r.previsto)}</strong> (não entram no comprometido). ` : ""}${ev.length ? `Eventos cadastrados neste empreendimento: <strong>${ev.length}</strong> · orçado ${this.money(evOrcado)}.` : ""}</p>` : ""}
 
       <div class="mkb-card mkb-cats-row">
-        <div class="mkb-cats-tit"><h3>Planos financeiros considerados marketing</h3><small>Vale para todos os empreendimentos · os números atualizam ao fechar a lista</small></div>
-        ${this.categoriasHtml()}
+        <div class="mkb-cats-tit"><h3>O que entra no budget</h3><small>Pelo nome do centro de custo e pelo grupo 2.03.05 MARKETING do plano financeiro</small></div>
+        <p class="mkb-muted" style="margin:0;">Centro com <strong>MARKETING</strong> no nome: 100% das despesas (pago, em aberto e previsão). Nos demais centros, só o título pago nas contas do grupo <strong>2.03.05 MARKETING</strong> e nas contas alocadas em 05.02 MARKETING na visão do fluxo de caixa.</p>
       </div>
 
       <div class="mkb-charts">
@@ -1845,7 +1911,10 @@ const MarketingConfigApp = {
     return s.ccs.slice().sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true })).map((id) => {
       const cc = this.ccDe(id);
       const nome = cc ? B.ccLabel(cc) : id;
-      return `<span class="mkc-chip${id === s.ccId ? " is-obra" : ""}" title="${B.esc(nome)}">${B.esc(nome)}
+      const integral = B.ccTemMarketing(id, nome);
+      return `<span class="mkc-chip${id === s.ccId ? " is-obra" : ""}${integral ? " is-mkt" : ""}" title="${B.esc(nome)}">
+        ${integral ? `<em>100%</em>` : `<em>Grupo</em>`}
+        ${B.esc(nome)}
         <button type="button" onclick="MarketingConfigApp.remover('${B.esc(id)}')" title="Tirar"><i data-lucide="x" style="width:12px;height:12px;"></i></button></span>`;
     }).join("");
   },
@@ -1913,20 +1982,24 @@ const MarketingConfigApp = {
     this.bindFiltro();
     const form = s.ccId ? `
           <div class="mkc-grid">
-            <div class="mkc-campo">
-              <label for="mkc-pct">% do VGV para marketing</label>
-              <div class="mkc-pct"><input id="mkc-pct" type="text" inputmode="decimal" placeholder="0,00" value="${B.esc(s.pct)}" oninput="MarketingConfigApp.onPct(this.value)"><em>%</em></div>
-              <div class="mkc-campo" id="mkc-ccs-slot" style="margin-top:14px;">${MlEmpresaFilter.html(this.filtroOpts())}</div>
+            <div class="mkc-main">
+              <div class="mkc-campo mkc-pct-campo">
+                <label for="mkc-pct">% do VGV para marketing</label>
+                <div class="mkc-pct"><input id="mkc-pct" type="text" inputmode="decimal" placeholder="0,00" value="${B.esc(s.pct)}" oninput="MarketingConfigApp.onPct(this.value)"><em>%</em></div>
+              </div>
+              <div class="mkc-campo" id="mkc-ccs-slot">${MlEmpresaFilter.html(this.filtroOpts())}</div>
               <div class="mkc-sel" id="mkc-sel">${this.selecaoHtml()}</div>
-              <small class="mkc-muted">Os títulos a pagar desses centros de custo, nos planos financeiros de marketing, entram como gasto de marketing desta obra.</small>
+              <small class="mkc-muted">Chip <em>100%</em>: o nome do centro tem MARKETING e todo o gasto entra. Chip <em>Grupo</em>: só o título pago nas contas do grupo 2.03.05 MARKETING.</small>
             </div>
-            <div class="mkc-verba" id="mkc-verba">${this.verbaHtml()}</div>
-          </div>
-          <div class="mkc-acoes">
-            ${s.salvoEm ? `<span class="mkc-ok"><i data-lucide="check-circle-2" style="width:14px;height:14px;"></i> Salvo às ${B.esc(s.salvoEm)}</span>` : ""}
-            <button type="button" class="btn btn-primary" ${s.salvando ? "disabled" : ""} onclick="MarketingConfigApp.salvar()" style="height:38px;min-width:140px;display:inline-flex;align-items:center;justify-content:center;gap:6px;">
-              ${s.salvando ? '<span class="btn-spin"></span> Salvando…' : '<i data-lucide="save" style="width:14px;"></i> Salvar'}
-            </button>
+            <div class="mkc-lado">
+              <div class="mkc-verba" id="mkc-verba">${this.verbaHtml()}</div>
+              <div class="mkc-acoes">
+                ${s.salvoEm ? `<span class="mkc-ok"><i data-lucide="check-circle-2" style="width:14px;height:14px;"></i> Salvo às ${B.esc(s.salvoEm)}</span>` : `<span></span>`}
+                <button type="button" class="btn btn-primary" ${s.salvando ? "disabled" : ""} onclick="MarketingConfigApp.salvar()">
+                  ${s.salvando ? '<span class="btn-spin"></span> Salvando…' : '<i data-lucide="save" style="width:14px;height:14px;"></i> Salvar'}
+                </button>
+              </div>
+            </div>
           </div>` : `<p class="mkc-muted" style="margin:12px 0 0;">Escolha o empreendimento para definir o percentual de marketing e os centros de custo.</p>`;
     root.innerHTML = `
       <style>
@@ -1938,33 +2011,42 @@ const MarketingConfigApp = {
         #marketing-config-root .mkc-card h3 { margin:0 0 10px; font-size:0.95rem; color:#105436; }
         #marketing-config-root .mkc-muted { color:#64748b; font-size:0.75rem; font-weight:400; }
         #marketing-config-root label, #marketing-config-root .ml-emp-filter-label { display:block; font-size:0.72rem; font-weight:700; color:#475569; text-transform:uppercase; margin-bottom:4px; }
-        #marketing-config-root .mkc-obra select { cursor:pointer; background:#fff; width:100%; max-width:560px; height:38px; padding:0 10px; border:1px solid #cbd5e1; border-radius:8px; font:inherit; font-size:0.85rem; box-sizing:border-box; }
-        #marketing-config-root .mkc-grid { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(0,1fr); gap:20px; margin-top:16px; }
+        #marketing-config-root .mkc-obra select { cursor:pointer; background:#fff; width:100%; height:38px; padding:0 10px; border:1px solid #cbd5e1; border-radius:8px; font:inherit; font-size:0.85rem; box-sizing:border-box; }
+        #marketing-config-root .mkc-grid { display:grid; grid-template-columns:minmax(0,1.7fr) minmax(260px,0.8fr); gap:16px; margin-top:16px; align-items:stretch; }
+        #marketing-config-root .mkc-main { display:flex; flex-direction:column; gap:12px; min-width:0; }
+        #marketing-config-root .mkc-pct-campo { max-width:220px; }
         #marketing-config-root .mkc-pct { display:flex; align-items:center; gap:6px; }
-        #marketing-config-root .mkc-pct input { width:110px; height:38px; padding:0 10px; border:1px solid #cbd5e1; border-radius:8px; font-size:1rem; font-weight:700; text-align:right; }
+        #marketing-config-root .mkc-pct input { width:100%; height:38px; padding:0 10px; border:1px solid #cbd5e1; border-radius:8px; font-size:1rem; font-weight:700; text-align:right; box-sizing:border-box; }
         #marketing-config-root .mkc-pct em { font-style:normal; font-weight:700; color:#475569; }
-        #marketing-config-root .ml-emp-filter { max-width:560px; }
-        #marketing-config-root .ml-emp-filter-btn { height:38px; min-height:38px; }
+        #marketing-config-root .ml-emp-filter { max-width:none; width:100%; }
+        #marketing-config-root .ml-emp-filter-btn { height:38px; min-height:38px; width:100%; }
         #marketing-config-root .ml-emp-filter-list { max-height:320px; }
-        #marketing-config-root .mkc-sel { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0 8px; max-height:120px; overflow:auto; }
-        #marketing-config-root .mkc-chip { display:inline-flex; align-items:center; gap:4px; max-width:100%; height:28px; padding:0 4px 0 10px; border-radius:999px; background:#e7f6ee; color:#105436; font-size:0.76rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        #marketing-config-root .mkc-sel { display:flex; flex-wrap:wrap; gap:6px; margin:0; }
+        #marketing-config-root .mkc-chip { display:inline-flex; align-items:center; gap:6px; max-width:100%; height:30px; padding:0 4px 0 6px; border-radius:999px; background:#e7f6ee; color:#105436; font-size:0.76rem; font-weight:600; }
+        #marketing-config-root .mkc-chip em { font-style:normal; font-size:0.62rem; font-weight:800; letter-spacing:0.02em; text-transform:uppercase; background:#fff; color:#105436; border-radius:999px; padding:2px 6px; flex:none; }
         #marketing-config-root .mkc-chip.is-obra { background:#105436; color:#fff; }
-        #marketing-config-root .mkc-chip button { border:0; background:transparent; color:inherit; cursor:pointer; display:inline-flex; padding:2px; border-radius:50%; }
+        #marketing-config-root .mkc-chip.is-obra em { background:rgba(255,255,255,0.18); color:#fff; }
+        #marketing-config-root .mkc-chip button { border:0; background:transparent; color:inherit; cursor:pointer; display:inline-flex; padding:2px; border-radius:50%; flex:none; }
         #marketing-config-root .mkc-chip button:hover { background:rgba(0,0,0,0.1); }
-        #marketing-config-root .mkc-verba { background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:14px 16px; align-self:start; }
+        #marketing-config-root .mkc-lado { display:flex; flex-direction:column; gap:12px; min-width:0; }
+        #marketing-config-root .mkc-verba { background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:14px 16px; flex:1; }
         #marketing-config-root .mkc-verba span { display:block; font-size:0.72rem; font-weight:700; color:#64748b; text-transform:uppercase; }
-        #marketing-config-root .mkc-verba strong { display:block; font-size:1.3rem; color:#0f172a; margin-top:4px; }
+        #marketing-config-root .mkc-verba strong { display:block; font-size:1.35rem; color:#0f172a; margin-top:2px; }
         #marketing-config-root .mkc-verba .mkc-verba-v { color:#105436; }
-        #marketing-config-root .mkc-verba small { display:block; color:#64748b; font-size:0.72rem; margin-top:2px; }
-        #marketing-config-root .mkc-acoes { display:flex; justify-content:flex-end; align-items:center; gap:12px; margin-top:14px; padding-top:12px; border-top:1px solid #e2e8f0; }
-        #marketing-config-root .mkc-ok { display:inline-flex; align-items:center; gap:4px; color:#105436; font-size:0.8rem; font-weight:600; }
+        #marketing-config-root .mkc-verba small { display:block; color:#64748b; font-size:0.72rem; margin:0 0 12px; }
+        #marketing-config-root .mkc-acoes { display:flex; flex-direction:column; align-items:stretch; gap:8px; }
+        #marketing-config-root .mkc-acoes .btn { height:38px; width:100%; display:inline-flex; align-items:center; justify-content:center; gap:6px; }
+        #marketing-config-root .mkc-ok { display:inline-flex; align-items:center; justify-content:flex-end; gap:4px; color:#105436; font-size:0.8rem; font-weight:600; }
         #marketing-config-root .mkc-tablewrap { max-height:50vh; overflow:auto; }
         #marketing-config-root .mkc-table { width:100%; min-width:760px; border-collapse:collapse; table-layout:fixed; font-size:0.82rem; }
         #marketing-config-root .mkc-table thead th { position:sticky; top:0; background:#1b8253; color:#fff; padding:10px; text-align:left; font-weight:600; z-index:1; }
         #marketing-config-root .mkc-table td { padding:8px 10px; border-bottom:1px solid #e2e8f0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:middle; }
         #marketing-config-root .mkc-table tbody tr:nth-child(even) { background:#f8faf9; }
         #marketing-config-root .mkc-table tr.is-sel td { background:#e7f6ee; }
-        @media (max-width: 1000px) { #marketing-config-root .mkc-grid { grid-template-columns:1fr; } }
+        @media (max-width: 1000px) {
+          #marketing-config-root .mkc-grid { grid-template-columns:1fr; }
+          #marketing-config-root .mkc-pct-campo { max-width:none; }
+        }
       </style>
       <div class="mkc-wrap">
         <div class="mkc-head">
