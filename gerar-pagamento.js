@@ -19,8 +19,17 @@ const GerarPagamentoApp = {
     titulos: [],
     previsoesIgnoradas: 0,
     filtro: "todos",
+    visao: "lotes",
+    sel: {},
+    selInit: {},
+    lotes: [],
+    loteSienge: {},
+    gerandoLote: "",
     gen: 0
   },
+
+  LOTES_COLLECTION: "pagamento_lotes",
+  LOTES_LOCAL: "crm_pagamento_lotes",
 
   FILTROS: [
     { id: "todos", label: "Todos" },
@@ -132,10 +141,66 @@ const GerarPagamentoApp = {
       this.state.endDate = this.iso(new Date(d.getFullYear(), d.getMonth() + 1, 0));
     }
     if (this.state.started && this.state.costCenters.length) {
+      this.recarregarCustom();
       this.render();
+      this.sincronizarContas().then(() => {
+        this.recarregarCustom();
+        if (this.state.titulos && this.state.titulos.length) this.reclassificar();
+        this.render();
+      });
       return;
     }
     this.load();
+  },
+
+  recarregarCustom() {
+    let custom = {};
+    try {
+      const raw = localStorage.getItem("crm_centros_custo_custom") || "{}";
+      custom = (typeof window.parseCentrosCustoCustomMap === "function")
+        ? window.parseCentrosCustoCustomMap(raw)
+        : (JSON.parse(raw) || {});
+    } catch (e) {
+      custom = {};
+    }
+    if (window.CentrosCustoState && CentrosCustoState.customFields && Object.keys(CentrosCustoState.customFields).length) {
+      custom = Object.assign({}, custom, CentrosCustoState.customFields);
+    }
+    const remoto = window._contasParceriaRemotas || {};
+    Object.keys(remoto).forEach((id) => {
+      const r = remoto[id] || {};
+      const rec = custom[id] = Object.assign({ cc_id: id }, custom[id] || {});
+      if (Number(r.updatedAt || 0) >= Number(rec.conta_parceria_at || 0)) {
+        rec.conta_parceria = r.conta || null;
+        rec.conta_parceria_at = Number(r.updatedAt) || 0;
+      }
+    });
+    this.state.customFields = custom;
+  },
+
+  async sincronizarContas() {
+    if (typeof window.carregarContasParceriaFirebase !== "function") return;
+    try {
+      await window.carregarContasParceriaFirebase();
+    } catch (e) {
+      console.warn("[Gerar Pagamento] contas de parceria", e);
+    }
+  },
+
+  ccDe(id) {
+    return this.state.costCenters.find((c) => String(c.id) === String(id)) || null;
+  },
+
+  /* Conta e situação são recalculadas na hora, para refletir a conta cadastrada depois da busca. */
+  reclassificar() {
+    this.state.titulos.forEach((r) => {
+      const esperada = this.contaParceriaDe(this.ccDe(r.ccId));
+      const alvo = esperada ? this.numConta(esperada.numero || esperada.id) : "";
+      r.esperada = esperada;
+      if (!r.contas.length) r.status = r.pago ? "pago-sem-conta" : "aberto";
+      else if (!alvo) r.status = "sem-conta";
+      else r.status = r.contas.every((c) => this.numConta(c) === alvo) ? "ok" : "outra";
+    });
   },
 
   async load() {
@@ -149,19 +214,8 @@ const GerarPagamentoApp = {
       ]);
       this.state.costCenters = Array.isArray(ccs) ? ccs : ((ccs && ccs.results) || []);
       this.state.companies = Array.isArray(companies) ? companies : ((companies && companies.results) || []);
-      let custom = {};
-      try {
-        const raw = localStorage.getItem("crm_centros_custo_custom") || "{}";
-        custom = (typeof window.parseCentrosCustoCustomMap === "function")
-          ? window.parseCentrosCustoCustomMap(raw)
-          : (JSON.parse(raw) || {});
-      } catch (e) {
-        custom = {};
-      }
-      if (window.CentrosCustoState && CentrosCustoState.customFields && Object.keys(CentrosCustoState.customFields).length) {
-        custom = Object.assign({}, custom, CentrosCustoState.customFields);
-      }
-      this.state.customFields = custom;
+      await this.sincronizarContas();
+      this.recarregarCustom();
       this.state.started = true;
     } catch (e) {
       console.error("[Gerar Pagamento]", e);
@@ -206,6 +260,8 @@ const GerarPagamentoApp = {
       alert("O módulo de contas a pagar não está disponível.");
       return;
     }
+    await this.sincronizarContas();
+    this.recarregarCustom();
     const parceiros = this.parceiros();
     if (!parceiros.length) {
       alert("Nenhum centro de custo de parceiro encontrado. Cadastre a conta de parceria em Centros de Custo.");
@@ -218,6 +274,9 @@ const GerarPagamentoApp = {
     s.progresso = "Buscando títulos a pagar no Sienge…";
     s.titulos = [];
     s.previsoesIgnoradas = 0;
+    s.sel = {};
+    s.selInit = {};
+    s.loteSienge = {};
     this.render();
 
     const tipo = s.tipoData === "P" ? "P" : "D";
@@ -253,6 +312,9 @@ const GerarPagamentoApp = {
       }
       if (gen !== s.gen) return;
       this.montarTitulos(base, bills, parceiros);
+      s.progresso = "Conferindo lotes já gerados…";
+      this.pintarProgresso();
+      await Promise.all([this.carregarLotes(), this.carregarLotesSienge(gen)]);
     } catch (e) {
       if (gen !== s.gen) return;
       console.error("[Gerar Pagamento] títulos", e);
@@ -305,35 +367,344 @@ const GerarPagamentoApp = {
         const chave = titulo + "|" + parcela + "|" + cc.id;
         if (vistos[chave]) return;
         vistos[chave] = true;
-        const esperada = this.contaParceriaDe(cc);
-        const alvo = esperada ? this.numConta(esperada.numero || esperada.id) : "";
         const contas = [...new Set(movs.map((m) => m.conta))];
-        let status;
-        if (!contas.length) status = pago ? "pago-sem-conta" : "aberto";
-        else if (!alvo) status = "sem-conta";
-        else status = contas.every((c) => this.numConta(c) === alvo) ? "ok" : "outra";
         const rateio = cat.financialCategoryRate != null ? Number(cat.financialCategoryRate) : 100;
+        const fat = (Number.isFinite(rateio) ? rateio : 100) / 100;
         const datas = movs.map((m) => m.data).filter(Boolean).sort();
+        const original = Number(bill.originalAmount) || 0;
         linhas.push({
+          pago,
+          aPagar: (saldo != null ? Math.max(0, saldo) : (pago ? 0 : original)) * fat,
           titulo,
           parcela,
           credor: String(bill.creditorName || "").trim(),
           documento: [docId, bill.documentNumber].filter(Boolean).join(" "),
           vencimento: String(bill.dueDate || "").slice(0, 10),
           pagamento: datas.length ? datas[datas.length - 1] : "",
-          valor: (Number(bill.originalAmount) || 0) * ((Number.isFinite(rateio) ? rateio : 100) / 100),
+          valor: original * fat,
           saldo: saldo,
           ccId: String(cc.id),
           ccNome: cc.name || "",
-          esperada,
+          esperada: null,
           contas,
-          status
+          status: ""
         });
       });
     });
     linhas.sort((a, b) => (a.vencimento || "").localeCompare(b.vencimento || "") || Number(a.titulo) - Number(b.titulo) || Number(a.parcela) - Number(b.parcela));
     this.state.titulos = linhas;
     this.state.previsoesIgnoradas = previsoes;
+    this.reclassificar();
+  },
+
+  /* ---------- lotes a pagar por conta ---------- */
+  chaveTitulo(titulo, parcela) {
+    return String(titulo) + "|" + String(parcela || "");
+  },
+
+  lotesLocal() {
+    try {
+      const v = JSON.parse(localStorage.getItem(this.LOTES_LOCAL) || "[]");
+      return Array.isArray(v) ? v : [];
+    } catch (e) {
+      return [];
+    }
+  },
+
+  salvarLotesLocal(list) {
+    try { localStorage.setItem(this.LOTES_LOCAL, JSON.stringify(list.slice(-300))); } catch (e) {}
+  },
+
+  async carregarLotes() {
+    let list = null;
+    const fc = window.firebaseCollections;
+    if (window.firebaseDb && fc && fc.getDocs) {
+      try {
+        const snap = await fc.getDocs(fc.collection(window.firebaseDb, this.LOTES_COLLECTION));
+        list = [];
+        snap.forEach((d) => list.push({ ...d.data(), id: d.id }));
+        this.salvarLotesLocal(list);
+      } catch (e) {
+        console.warn("[Gerar Pagamento] lotes", e);
+        list = null;
+      }
+    }
+    this.state.lotes = (list || this.lotesLocal()).filter((l) => l && !l.cancelado);
+  },
+
+  /* Parcelas que já estão em lote/pagamento escritural no Sienge. */
+  async carregarLotesSienge(gen) {
+    const s = this.state;
+    if (typeof window.siengeFetchWithRetry !== "function") return;
+    const abertos = [...new Set(s.titulos.filter((r) => !r.pago).map((r) => r.titulo))];
+    const fila = abertos.slice();
+    const worker = async () => {
+      while (fila.length && gen === s.gen) {
+        const billId = fila.shift();
+        try {
+          const res = await window.siengeFetchWithRetry(`/bills/${encodeURIComponent(billId)}/installments`, 1);
+          const parcelas = (res && (res.results || res.data)) || (Array.isArray(res) ? res : []);
+          parcelas.forEach((p) => {
+            const num = p.installmentId != null ? p.installmentId : p.installmentNumber;
+            if (num == null) return;
+            if (p.batchNumber != null || p.sentToBank === true) {
+              s.loteSienge[this.chaveTitulo(billId, num)] = p.batchNumber != null ? String(p.batchNumber) : "sim";
+            }
+          });
+        } catch (e) {
+          // sem a informação, o título continua disponível para lote
+        }
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+  },
+
+  loteIntegraDe(chave) {
+    return this.state.lotes.find((l) => (l.itens || []).some((i) => this.chaveTitulo(i.titulo, i.parcela) === chave)) || null;
+  },
+
+  /* Títulos em aberto agrupados pela conta de parceria; o mesmo título rateado entre CCs da mesma conta vira uma linha. */
+  gruposLote() {
+    const grupos = {};
+    this.state.titulos.filter((r) => !r.pago && r.aPagar > 0.009).forEach((r) => {
+      const conta = r.esperada;
+      const key = conta ? this.numConta(conta.numero || conta.id) || String(conta.id) : "__sem";
+      if (!grupos[key]) grupos[key] = { key, conta, itens: {}, ordem: [] };
+      const g = grupos[key];
+      const chave = this.chaveTitulo(r.titulo, r.parcela);
+      if (!g.itens[chave]) {
+        g.itens[chave] = {
+          chave, titulo: r.titulo, parcela: r.parcela, credor: r.credor, documento: r.documento,
+          vencimento: r.vencimento, valor: 0, aPagar: 0, ccs: []
+        };
+        g.ordem.push(chave);
+      }
+      const it = g.itens[chave];
+      it.valor += r.valor;
+      it.aPagar += r.aPagar;
+      if (!it.ccs.some((c) => c.id === r.ccId)) it.ccs.push({ id: r.ccId, nome: r.ccNome });
+    });
+    return Object.values(grupos).map((g) => {
+      const itens = g.ordem.map((k) => g.itens[k]).sort((a, b) => (a.vencimento || "").localeCompare(b.vencimento || "") || Number(a.titulo) - Number(b.titulo));
+      itens.forEach((it) => {
+        it.loteIntegra = this.loteIntegraDe(it.chave);
+        it.loteSienge = this.state.loteSienge[it.chave] || "";
+        const selKey = g.key + "|" + it.chave;
+        if (!this.state.selInit[selKey]) {
+          this.state.selInit[selKey] = true;
+          this.state.sel[selKey] = g.key !== "__sem" && !it.loteIntegra && !it.loteSienge;
+        }
+        it.selKey = selKey;
+        it.marcado = !!this.state.sel[selKey];
+      });
+      return { ...g, itens };
+    }).sort((a, b) => (a.key === "__sem") - (b.key === "__sem") || this.contaLabel(a.conta).localeCompare(this.contaLabel(b.conta)));
+  },
+
+  setVisao(v) {
+    this.state.visao = v;
+    this.paintTitulos();
+  },
+
+  toggleItem(selKey) {
+    this.state.sel[selKey] = !this.state.sel[selKey];
+    this.paintTitulos();
+  },
+
+  toggleGrupo(key, marcar) {
+    const g = this.gruposLote().find((x) => x.key === key);
+    if (!g) return;
+    g.itens.forEach((it) => {
+      if (it.loteIntegra) return;
+      this.state.sel[it.selKey] = !!marcar;
+    });
+    this.paintTitulos();
+  },
+
+  async gerarLote(key) {
+    const s = this.state;
+    const g = this.gruposLote().find((x) => x.key === key);
+    if (!g || !g.conta || s.gerandoLote) return;
+    const itens = g.itens.filter((it) => it.marcado && !it.loteIntegra);
+    if (!itens.length) {
+      alert("Marque ao menos um título para gerar o lote.");
+      return;
+    }
+    const total = itens.reduce((t, it) => t + it.aPagar, 0);
+    const okConf = typeof window.mouraConfirm === "function"
+      ? await window.mouraConfirm(`Gerar lote com ${itens.length} título(s), total de ${this.money(total)}, pela conta ${this.contaLabel(g.conta)}?`)
+      : confirm(`Gerar lote com ${itens.length} título(s), total de ${this.money(total)}?`);
+    if (!okConf) return;
+    s.gerandoLote = key;
+    this.paintTitulos();
+    const agora = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    const id = "L" + agora.getFullYear() + pad(agora.getMonth() + 1) + pad(agora.getDate()) + "-" + pad(agora.getHours()) + pad(agora.getMinutes()) + pad(agora.getSeconds());
+    let usuario = "Usuário";
+    try {
+      const u = window.MouraAuth && MouraAuth.getCurrentUser && MouraAuth.getCurrentUser();
+      usuario = (u && (u.name || u.email)) || usuario;
+    } catch (e) {}
+    const lote = JSON.parse(JSON.stringify({
+      id,
+      criadoEm: agora.toISOString(),
+      criadoPor: usuario,
+      contaKey: key,
+      conta: g.conta,
+      total: Math.round(total * 100) / 100,
+      itens: itens.map((it) => ({
+        titulo: it.titulo, parcela: it.parcela, credor: it.credor, documento: it.documento,
+        vencimento: it.vencimento, valor: Math.round(it.aPagar * 100) / 100,
+        ccs: it.ccs.map((c) => c.id + " - " + c.nome).join(" / ")
+      }))
+    }));
+    let salvoRemoto = false;
+    const fc = window.firebaseCollections;
+    if (window.firebaseDb && fc && fc.setDoc) {
+      try {
+        await fc.setDoc(fc.doc(window.firebaseDb, this.LOTES_COLLECTION, id), lote);
+        salvoRemoto = true;
+      } catch (e) {
+        console.warn("[Gerar Pagamento] salvar lote", e);
+      }
+    }
+    s.lotes = s.lotes.concat([lote]);
+    this.salvarLotesLocal(this.lotesLocal().filter((l) => l.id !== id).concat([lote]));
+    itens.forEach((it) => { s.sel[it.selKey] = false; });
+    this.baixarLoteExcel(lote);
+    s.gerandoLote = "";
+    this.paintTitulos();
+    if (!salvoRemoto) alert("O lote foi gerado e baixado, mas ficou salvo só neste computador (não consegui gravar no Firebase).");
+  },
+
+  baixarLoteExcel(loteOuId) {
+    const lote = typeof loteOuId === "string" ? this.state.lotes.find((l) => l.id === loteOuId) : loteOuId;
+    if (!lote) return;
+    if (typeof XLSX === "undefined") {
+      alert("A biblioteca de Excel não carregou. Recarregue a página.");
+      return;
+    }
+    const linhas = [
+      ["Lote a pagar", lote.id],
+      ["Conta de parceria", this.contaLabel(lote.conta)],
+      ["Gerado em", new Date(lote.criadoEm).toLocaleString("pt-BR")],
+      ["Gerado por", lote.criadoPor || ""],
+      [],
+      ["Vencimento", "Título", "Parcela", "Credor", "Documento", "Centro de custo", "Valor a pagar"]
+    ];
+    (lote.itens || []).forEach((i) => {
+      linhas.push([this.dataBr(i.vencimento), Number(i.titulo) || i.titulo, Number(i.parcela) || i.parcela, i.credor, i.documento, i.ccs, Number(i.valor) || 0]);
+    });
+    linhas.push([], ["", "", "", "", "", "Total", Number(lote.total) || 0]);
+    const ws = XLSX.utils.aoa_to_sheet(linhas);
+    ws["!cols"] = [{ wch: 12 }, { wch: 10 }, { wch: 8 }, { wch: 40 }, { wch: 18 }, { wch: 44 }, { wch: 16 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Lote");
+    const conta = String((lote.conta && (lote.conta.numero || lote.conta.id)) || "").replace(/[^\w-]/g, "");
+    XLSX.writeFile(wb, `lote_pagar_${lote.id}${conta ? "_cc" + conta : ""}.xlsx`);
+  },
+
+  async excluirLote(id) {
+    const lote = this.state.lotes.find((l) => l.id === id);
+    if (!lote) return;
+    const okConf = typeof window.mouraConfirm === "function"
+      ? await window.mouraConfirm(`Excluir o lote ${id}? Os títulos voltam a ficar disponíveis para um novo lote.`)
+      : confirm(`Excluir o lote ${id}?`);
+    if (!okConf) return;
+    const fc = window.firebaseCollections;
+    if (window.firebaseDb && fc && fc.deleteDoc) {
+      try {
+        await fc.deleteDoc(fc.doc(window.firebaseDb, this.LOTES_COLLECTION, id));
+      } catch (e) {
+        console.warn("[Gerar Pagamento] excluir lote", e);
+        alert("Não consegui excluir o lote no Firebase.");
+        return;
+      }
+    }
+    this.state.lotes = this.state.lotes.filter((l) => l.id !== id);
+    this.salvarLotesLocal(this.lotesLocal().filter((l) => l.id !== id));
+    Object.keys(this.state.selInit).forEach((k) => {
+      if ((lote.itens || []).some((i) => k.endsWith("|" + this.chaveTitulo(i.titulo, i.parcela)))) delete this.state.selInit[k];
+    });
+    this.paintTitulos();
+  },
+
+  lotesHtml() {
+    const s = this.state;
+    const grupos = this.gruposLote();
+    if (!grupos.length) {
+      return `<div style="padding:22px 20px;color:#64748b;font-size:0.85rem;">Nenhum título em aberto dos centros de custo de parceiro no período.</div>`;
+    }
+    const cards = grupos.map((g) => {
+      const sem = g.key === "__sem";
+      const marcados = g.itens.filter((it) => it.marcado && !it.loteIntegra);
+      const total = marcados.reduce((t, it) => t + it.aPagar, 0);
+      const disponiveis = g.itens.filter((it) => !it.loteIntegra);
+      const todos = disponiveis.length > 0 && disponiveis.every((it) => it.marcado);
+      const gerando = s.gerandoLote === g.key;
+      const linhas = g.itens.map((it) => {
+        const tag = it.loteIntegra
+          ? `<span class="gp-pill gp-ok">No lote ${this.esc(it.loteIntegra.id)}</span>`
+          : (it.loteSienge ? `<span class="gp-pill gp-warn">Já em lote no Sienge${it.loteSienge !== "sim" ? " nº " + this.esc(it.loteSienge) : ""}</span>` : `<span class="gp-pill gp-wait">Em aberto</span>`);
+        return `<tr>
+          <td style="text-align:center;"><input type="checkbox" ${it.marcado && !it.loteIntegra ? "checked" : ""} ${sem || it.loteIntegra || gerando ? "disabled" : ""}
+            onchange="GerarPagamentoApp.toggleItem('${this.esc(it.selKey)}')"></td>
+          <td>${this.dataBr(it.vencimento)}</td>
+          <td><strong>${this.esc(it.titulo)}</strong>${it.parcela ? `<span class="gp-muted"> / ${this.esc(it.parcela)}</span>` : ""}</td>
+          <td title="${this.esc(it.credor)}">${this.esc(it.credor)}</td>
+          <td>${this.esc(it.documento || "—")}</td>
+          <td title="${this.esc(it.ccs.map((c) => c.id + " " + c.nome).join(" / "))}">${it.ccs.map((c) => `<strong>${this.esc(c.id)}</strong>`).join(" / ")} <span class="gp-muted">${this.esc(it.ccs.length === 1 ? it.ccs[0].nome : "rateado")}</span></td>
+          <td style="text-align:right;">${this.money(it.aPagar)}</td>
+          <td class="gp-status">${tag}</td>
+        </tr>`;
+      }).join("");
+      return `<div class="gp-lote${sem ? " gp-lote-sem" : ""}">
+        <div class="gp-lote-h">
+          <div>
+            <div class="gp-lote-conta">${sem ? "Sem conta de parceria cadastrada" : this.esc(this.contaLabel(g.conta))}</div>
+            <small>${sem ? "Cadastre a conta em Centros de Custo para incluir estes títulos em lote." : `${g.itens.length} título(s) em aberto · ${marcados.length} marcado(s)`}</small>
+          </div>
+          ${sem ? "" : `<div class="gp-lote-acoes">
+            <label class="gp-lote-todos"><input type="checkbox" ${todos ? "checked" : ""} ${gerando || !disponiveis.length ? "disabled" : ""} onchange="GerarPagamentoApp.toggleGrupo('${this.esc(g.key)}', this.checked)"> Marcar todos</label>
+            <strong class="gp-lote-total">${this.money(total)}</strong>
+            <button type="button" class="btn btn-primary" ${gerando || !marcados.length ? "disabled" : ""} onclick="GerarPagamentoApp.gerarLote('${this.esc(g.key)}')"
+              style="height:36px;width:150px;justify-content:center;display:inline-flex;align-items:center;gap:6px;">
+              ${gerando ? '<span class="btn-spin"></span> Gerando…' : '<i data-lucide="layers" style="width:14px;"></i> Gerar lote'}
+            </button>
+          </div>`}
+        </div>
+        <div style="overflow:auto;">
+          <table class="gp-table gp-titulos">
+            <colgroup><col style="width:4%"><col style="width:9%"><col style="width:9%"><col style="width:22%"><col style="width:11%"><col style="width:20%"><col style="width:10%"><col style="width:15%"></colgroup>
+            <thead><tr><th></th><th>Vencimento</th><th>Título</th><th>Credor</th><th>Documento</th><th>Centro de custo</th><th style="text-align:right;">A pagar</th><th>Situação</th></tr></thead>
+            <tbody>${linhas}</tbody>
+          </table>
+        </div>
+      </div>`;
+    }).join("");
+    const chaves = new Set(s.titulos.map((r) => this.chaveTitulo(r.titulo, r.parcela)));
+    const gerados = s.lotes
+      .filter((l) => (l.itens || []).some((i) => chaves.has(this.chaveTitulo(i.titulo, i.parcela))))
+      .sort((a, b) => String(b.criadoEm).localeCompare(String(a.criadoEm)));
+    const geradosHtml = gerados.length ? `<div class="gp-lote">
+        <div class="gp-lote-h"><div><div class="gp-lote-conta">Lotes gerados com títulos deste período</div></div></div>
+        <table class="gp-table gp-titulos">
+          <colgroup><col style="width:16%"><col style="width:32%"><col style="width:9%"><col style="width:12%"><col style="width:15%"><col style="width:16%"></colgroup>
+          <thead><tr><th>Lote</th><th>Conta</th><th>Títulos</th><th style="text-align:right;">Total</th><th>Gerado</th><th></th></tr></thead>
+          <tbody>${gerados.map((l) => `<tr>
+            <td><strong>${this.esc(l.id)}</strong></td>
+            <td title="${this.esc(this.contaLabel(l.conta))}">${this.esc(this.contaLabel(l.conta))}</td>
+            <td>${(l.itens || []).length}</td>
+            <td style="text-align:right;">${this.money(l.total)}</td>
+            <td title="${this.esc(l.criadoPor || "")}">${new Date(l.criadoEm).toLocaleDateString("pt-BR")} · ${this.esc(String(l.criadoPor || "").split(" ")[0])}</td>
+            <td style="text-align:right;white-space:nowrap;">
+              <button type="button" class="btn btn-sm btn-excel" onclick="GerarPagamentoApp.baixarLoteExcel('${this.esc(l.id)}')" title="Baixar o lote em Excel"><i data-lucide="download" style="width:14px;height:14px;"></i> Excel</button>
+              <button type="button" class="btn btn-sm" onclick="GerarPagamentoApp.excluirLote('${this.esc(l.id)}')" style="color:#b91c1c;background:#fff;border:1px solid #fecaca;">Excluir</button>
+            </td>
+          </tr>`).join("")}</tbody>
+        </table>
+      </div>` : "";
+    return `<p class="gp-nota">Títulos em aberto agrupados pela conta de parceria do centro de custo. O lote fica registrado no Integra e é baixado em Excel para pagamento.</p>${cards}${geradosHtml}`;
   },
 
   grupoStatus(r) {
@@ -364,6 +735,13 @@ const GerarPagamentoApp = {
     if (!s.consultado) {
       return `<div style="padding:22px 20px;color:#64748b;font-size:0.85rem;">Escolha o período e clique em <strong>Buscar títulos</strong> para conferir em qual conta os títulos dos centros de custo de parceiro foram pagos.</div>`;
     }
+    this.reclassificar();
+    const nAbertos = new Set(s.titulos.filter((r) => !r.pago && r.aPagar > 0.009).map((r) => this.chaveTitulo(r.titulo, r.parcela))).size;
+    const visoes = `<div class="gp-visoes">
+        <button type="button" class="gp-visao${s.visao !== "lotes" ? " is-active" : ""}" onclick="GerarPagamentoApp.setVisao('titulos')"><i data-lucide="list" style="width:14px;"></i> Títulos</button>
+        <button type="button" class="gp-visao${s.visao === "lotes" ? " is-active" : ""}" onclick="GerarPagamentoApp.setVisao('lotes')"><i data-lucide="layers" style="width:14px;"></i> Lotes por conta <b>${nAbertos}</b></button>
+      </div>`;
+    if (s.visao === "lotes") return visoes + this.lotesHtml();
     const todos = s.titulos;
     const cont = { todos: todos.length, ok: 0, outra: 0, aberto: 0 };
     todos.forEach((r) => { cont[this.grupoStatus(r)] += 1; });
@@ -381,7 +759,7 @@ const GerarPagamentoApp = {
           <td class="gp-status">${this.statusHtml(r)}</td>
         </tr>`).join("")
       : `<tr><td colspan="8" style="text-align:center;padding:24px;color:#64748b;">Nenhum título ${s.filtro === "todos" ? "dos centros de custo de parceiro" : "neste filtro"} no período.</td></tr>`;
-    return `
+    return `${visoes}
       <div class="gp-filtros">${filtros}</div>
       ${s.previsoesIgnoradas ? `<p class="gp-nota">${s.previsoesIgnoradas} previsão(ões) ignorada(s) — só entram títulos que não são previsão.</p>` : ""}
       <div style="max-height:56vh;overflow:auto;">
@@ -398,6 +776,7 @@ const GerarPagamentoApp = {
   paintTitulos() {
     const box = document.getElementById("gp-titulos-box");
     if (box) box.innerHTML = this.titulosHtml();
+    if (window.lucide) lucide.createIcons();
   },
 
   rowsHtml() {
@@ -464,6 +843,22 @@ const GerarPagamentoApp = {
           #gerar-pagamento-root .gp-filtro.is-active { background:#105436; border-color:#105436; color:#fff; }
           #gerar-pagamento-root .gp-filtro.is-bad.is-active { background:#b91c1c; border-color:#b91c1c; }
           #gerar-pagamento-root .gp-nota { margin:6px 20px 10px; color:#64748b; font-size:0.78rem; }
+          #gerar-pagamento-root .gp-warn { background:#ffedd5; color:#c2410c; }
+          #gerar-pagamento-root .btn:disabled { opacity:0.55; cursor:not-allowed; }
+          #gerar-pagamento-root .gp-visoes { display:flex; gap:8px; padding:14px 20px 0; }
+          #gerar-pagamento-root .gp-visao { height:34px; padding:0 14px; border-radius:8px; border:1px solid #cbd5e1; background:#fff; color:#334155; font-size:0.82rem; font-weight:700; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+          #gerar-pagamento-root .gp-visao.is-active { background:#105436; border-color:#105436; color:#fff; }
+          #gerar-pagamento-root .gp-lote { margin:12px 20px; border:1px solid #e2e8f0; border-radius:10px; overflow:hidden; background:#fff; }
+          #gerar-pagamento-root .gp-lote-sem { border-color:#fecaca; }
+          #gerar-pagamento-root .gp-lote-h { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; padding:12px 14px; background:#f0f7f3; border-bottom:1px solid #e2e8f0; }
+          #gerar-pagamento-root .gp-lote-sem .gp-lote-h { background:#fef2f2; }
+          #gerar-pagamento-root .gp-lote-conta { font-weight:800; color:#105436; font-size:0.92rem; }
+          #gerar-pagamento-root .gp-lote-sem .gp-lote-conta { color:#b91c1c; }
+          #gerar-pagamento-root .gp-lote-h small { color:#64748b; font-size:0.75rem; }
+          #gerar-pagamento-root .gp-lote-acoes { display:flex; align-items:center; gap:14px; }
+          #gerar-pagamento-root .gp-lote-todos { display:inline-flex; align-items:center; gap:6px; font-size:0.8rem; color:#334155; cursor:pointer; }
+          #gerar-pagamento-root .gp-lote-total { font-size:1.05rem; color:#0f172a; min-width:120px; text-align:right; }
+          #gerar-pagamento-root .gp-lote .gp-titulos { min-width:1000px; }
         </style>
         <div class="crm-card" style="padding:18px 20px;margin-bottom:16px;">
           <h3 style="margin:0 0 8px;color:var(--color-primary);font-size:1rem;">Conta de parceria</h3>

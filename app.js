@@ -42178,6 +42178,20 @@ window.parseCentrosCustoCustomMap = function(raw) {
   }
 };
 
+window.aplicarContaParceriaMerge = function(target, a, b) {
+  const temConta = (o) => !!(o && o.conta_parceria && (o.conta_parceria.id || o.conta_parceria.numero));
+  const atDe = (o) => Number((o && o.conta_parceria_at) || 0) || 0;
+  let win;
+  if (atDe(a) !== atDe(b)) win = atDe(a) > atDe(b) ? a : b;
+  else win = temConta(a) ? a : (temConta(b) ? b : null);
+  if (win) {
+    target.conta_parceria = win.conta_parceria || null;
+    if (atDe(win)) target.conta_parceria_at = atDe(win);
+    else delete target.conta_parceria_at;
+  }
+  return target;
+};
+
 window.mergeCentrosCustoCustom = function(localStr, cloudStr) {
   const local = window.parseCentrosCustoCustomMap(localStr);
   const cloud = window.parseCentrosCustoCustomMap(cloudStr);
@@ -42206,6 +42220,7 @@ window.mergeCentrosCustoCustom = function(localStr, cloudStr) {
       if (!("clausula_suspensiva_ativa" in newer) && ("clausula_suspensiva_ativa" in older)) {
         merged.clausula_suspensiva_ativa = older.clausula_suspensiva_ativa;
       }
+      window.aplicarContaParceriaMerge(merged, newer, older);
       recs[id] = merged;
     });
   };
@@ -42286,6 +42301,7 @@ window.persistCentrosCustoCustomToFirebase = async function() {
         if ("clausula_suspensiva_ativa" in mine) {
           map[key].clausula_suspensiva_ativa = mine.clausula_suspensiva_ativa;
         }
+        window.aplicarContaParceriaMerge(map[key], mine, theirs || {});
       }
     });
     const json = JSON.stringify(map);

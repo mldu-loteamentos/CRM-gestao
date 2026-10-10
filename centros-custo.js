@@ -77,6 +77,7 @@ const CentrosCustoApp = {
       
       // Load companies
       CentrosCustoState.companies = await SiengeApiService.getCompanies();
+      await this.carregarContasParceria({ enviarLocais: true });
 
     } catch (e) {
       console.error(e);
@@ -99,7 +100,7 @@ const CentrosCustoApp = {
     this.render();
   },
 
-  saveCustom(id) {
+  async saveCustom(id) {
     const key = String(id);
     const custom = Object.assign(
       {},
@@ -127,15 +128,15 @@ const CentrosCustoApp = {
       if (wasDisabled) suspensivaDiasEl.disabled = true;
     }
     const contaEl = document.getElementById(`edit-conta-parceria-${id}`);
-    if (contaEl && contaEl.dataset.loaded === "1") {
+    let contaNova;
+    // Só mexe na conta quando o usuário trocou a seleção; salvar outros campos não apaga a conta.
+    if (contaEl && contaEl.dataset.loaded === "1" && contaEl.value !== (contaEl.dataset.inicial || "")) {
       const cc = CentrosCustoState.costCenters.find(c => String(c.id) === key);
       const contas = CentrosCustoState.contasPorEmpresa[String(cc && (cc.idCompany || cc.companyId))] || [];
       const picked = contas.find(a => a.key === contaEl.value);
-      const atual = custom.conta_parceria;
-      const manterAtual = !picked && atual && contaEl.value && contaEl.value === String(atual.id || atual.numero);
-      if (!manterAtual) {
-        custom.conta_parceria = picked ? { id: picked.id, numero: picked.numero, nome: picked.nome, banco: picked.banco, agencia: picked.agencia } : null;
-      }
+      contaNova = picked ? { id: picked.id, numero: picked.numero, nome: picked.nome, banco: picked.banco, agencia: picked.agencia } : null;
+      custom.conta_parceria = contaNova;
+      custom.conta_parceria_at = Date.now();
     }
     custom.updatedAt = Date.now();
     custom.cc_id = key;
@@ -168,6 +169,19 @@ const CentrosCustoApp = {
       try { localStorage.setItem("crm_centros_custo_custom", json); } catch (err) {}
     }
 
+    if (contaNova !== undefined) {
+      try {
+        custom.conta_parceria_at = await this.gravarContaParceria(key, contaNova);
+        CentrosCustoState.customFields[key] = custom;
+        const json2 = JSON.stringify(CentrosCustoState.customFields);
+        const orig2 = window._originalSetItem;
+        if (typeof orig2 === "function") orig2.call(localStorage, "crm_centros_custo_custom", json2);
+        else localStorage.setItem("crm_centros_custo_custom", json2);
+      } catch (e) {
+        console.error("[CentrosCusto] gravar conta de parceria", e);
+        alert("A conta de parceria ficou salva só neste computador: não consegui gravar no Firebase (" + (e.message || e) + "). Tente salvar de novo.");
+      }
+    }
     this.closeModal();
     this.render();
     this.refreshCobrancaViews();
@@ -209,6 +223,86 @@ const CentrosCustoApp = {
       .filter(Boolean).join(" · ");
   },
 
+  /* Conta de parceria: um documento por centro de custo em cc_conta_parceria (fonte da verdade). */
+  CONTA_COLLECTION: "cc_conta_parceria",
+
+  usuarioAtual() {
+    try {
+      const u = window.MouraAuth && MouraAuth.getCurrentUser && MouraAuth.getCurrentUser();
+      return (u && (u.name || u.email)) || "";
+    } catch (e) {
+      return "";
+    }
+  },
+
+  async gravarContaParceria(ccId, conta) {
+    const fc = window.firebaseCollections;
+    if (!window.firebaseDb || !fc || !fc.setDoc) throw new Error("Firebase indisponível.");
+    const limpa = conta ? JSON.parse(JSON.stringify({
+      id: conta.id || "", numero: conta.numero || "", nome: conta.nome || "", banco: conta.banco || "", agencia: conta.agencia || ""
+    })) : null;
+    const at = Date.now();
+    await fc.setDoc(fc.doc(window.firebaseDb, this.CONTA_COLLECTION, String(ccId)), {
+      cc_id: String(ccId), conta: limpa, updatedAt: at, updatedBy: this.usuarioAtual()
+    });
+    return at;
+  },
+
+  /** Lê as contas do Firebase e aplica no mapa local; envia para o Firebase as que só existem neste navegador. */
+  async carregarContasParceria(opts) {
+    const fc = window.firebaseCollections;
+    if (!window.firebaseDb || !fc || !fc.getDocs) return {};
+    let remoto = {};
+    try {
+      const snap = await fc.getDocs(fc.collection(window.firebaseDb, this.CONTA_COLLECTION));
+      snap.forEach((d) => { remoto[d.id] = d.data() || {}; });
+    } catch (e) {
+      console.warn("[CentrosCusto] contas de parceria no Firebase:", e);
+      return {};
+    }
+    const parse = window.parseCentrosCustoCustomMap || ((r) => { try { return JSON.parse(r || "{}") || {}; } catch (e) { return {}; } });
+    const map = parse(localStorage.getItem("crm_centros_custo_custom") || "{}");
+    const mem = CentrosCustoState.customFields || {};
+    let mudou = false;
+    const aplicar = (alvo, id, r) => {
+      const rec = alvo[id] || (alvo[id] = { cc_id: id });
+      if (Number(r.updatedAt || 0) < Number(rec.conta_parceria_at || 0)) return false;
+      const antes = JSON.stringify(rec.conta_parceria || null);
+      rec.conta_parceria = r.conta || null;
+      rec.conta_parceria_at = Number(r.updatedAt) || Date.now();
+      return antes !== JSON.stringify(rec.conta_parceria);
+    };
+    Object.keys(remoto).forEach((id) => {
+      if (aplicar(map, id, remoto[id])) mudou = true;
+      if (mem !== map) aplicar(mem, id, remoto[id]);
+    });
+    if (mudou) {
+      const json = JSON.stringify(map);
+      try {
+        const orig = window._originalSetItem;
+        if (typeof orig === "function") orig.call(localStorage, "crm_centros_custo_custom", json);
+        else localStorage.setItem("crm_centros_custo_custom", json);
+      } catch (e) {}
+    }
+    if (opts && opts.enviarLocais) {
+      const pendentes = Object.keys(map).filter((id) => {
+        const c = map[id] && map[id].conta_parceria;
+        return c && (c.id || c.numero) && !remoto[id];
+      });
+      for (const id of pendentes) {
+        try {
+          const at = await this.gravarContaParceria(id, map[id].conta_parceria);
+          remoto[id] = { conta: map[id].conta_parceria, updatedAt: at };
+        } catch (e) {
+          console.warn("[CentrosCusto] envio da conta de parceria", id, e);
+          break;
+        }
+      }
+    }
+    window._contasParceriaRemotas = remoto;
+    return remoto;
+  },
+
   async contasDaEmpresa(companyId) {
     const cid = String(companyId || "");
     if (!cid) return [];
@@ -243,9 +337,26 @@ const CentrosCustoApp = {
     if (!sel) return;
     const cc = CentrosCustoState.costCenters.find(c => String(c.id) === String(id));
     const companyId = cc && (cc.idCompany || cc.companyId);
+    const fc = window.firebaseCollections;
+    if (window.firebaseDb && fc && fc.getDoc) {
+      try {
+        const snap = await fc.getDoc(fc.doc(window.firebaseDb, this.CONTA_COLLECTION, String(id)));
+        if (snap.exists()) {
+          const r = snap.data() || {};
+          const rec = CentrosCustoState.customFields[String(id)] || (CentrosCustoState.customFields[String(id)] = { cc_id: String(id) });
+          if (Number(r.updatedAt || 0) >= Number(rec.conta_parceria_at || 0)) {
+            rec.conta_parceria = r.conta || null;
+            rec.conta_parceria_at = Number(r.updatedAt) || 0;
+          }
+        }
+      } catch (e) {
+        console.warn("[CentrosCusto] conta de parceria", id, e);
+      }
+    }
     const atual = (this.customOf(id).conta_parceria) || null;
     const contas = await this.contasDaEmpresa(companyId);
     const atualKey = atual ? (atual.id || atual.numero) : "";
+    sel.dataset.inicial = atualKey;
     const extra = atual && !contas.some(a => a.key === atualKey)
       ? `<option value="${atualKey}" selected>${this.contaLabel(atual)} (não encontrada no Sienge)</option>`
       : "";
@@ -806,3 +917,4 @@ document.addEventListener('tabChanged', (e) => {
 });
 
 window.CentrosCustoApp = CentrosCustoApp;
+window.carregarContasParceriaFirebase = (opts) => CentrosCustoApp.carregarContasParceria(opts);

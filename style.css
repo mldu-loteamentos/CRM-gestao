@@ -2923,6 +2923,22 @@ circle.donut-segment {
 .est-fin-card.is-warn strong { color: #c2410c; }
 .est-fin-card small { display: block; margin-top: 6px; color: #64748b; font-size: 0.75rem; line-height: 1.35; }
 .est-stock-kpis:empty { display: none; }
+#est-conferencia:empty { display: none; }
+.est-conf { background: #fff; border: 1px solid #e6eeea; border-left: 4px solid #105436; border-radius: 16px; padding: 14px 18px; }
+.est-conf.is-bad { border-left-color: #c2410c; }
+.est-conf-h { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.est-conf-h strong { color: #105436; font-size: 0.92rem; }
+.est-conf-h small { color: #64748b; font-size: 0.75rem; }
+.est-conf-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 10px; }
+.est-conf-grid label { display: block; font-size: 0.68rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.06em; }
+.est-conf-grid b { display: block; margin-top: 4px; font-size: 1.15rem; color: #0f172a; font-variant-numeric: tabular-nums; }
+.est-conf.is-ok .est-conf-grid > div:last-child b { color: #105436; }
+.est-conf.is-bad .est-conf-grid > div:last-child b { color: #c2410c; }
+.est-conf-grid small { display: block; margin-top: 4px; color: #64748b; font-size: 0.74rem; }
+.est-conf-det { margin-top: 10px; font-size: 0.8rem; color: #334155; }
+.est-conf-det summary { cursor: pointer; font-weight: 700; }
+.est-conf-det ul { margin: 6px 0 0; padding-left: 18px; max-height: 180px; overflow: auto; }
+.est-conf-det li { margin: 2px 0; }
 .est-stock-toolbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .est-fin-filtros { display: flex; flex-wrap: wrap; gap: 8px; }
 .est-fin-filtro {

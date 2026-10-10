@@ -369,6 +369,7 @@ const EstoqueComercialApp = {
       quitacaoDate: this.isoQuitacao(u.quitacaoDate),
       quitacaoFonte: u.quitacaoFonte || null,
       quitadoEvidencia: !!u.quitadoEvidencia,
+      siengeConferidoEm: u.siengeConferidoEm || null,
       situation: u.situation || ""
     };
   },
@@ -910,9 +911,10 @@ const EstoqueComercialApp = {
     };
   },
 
-  revisarQuitadosSemEvidencia() {
+  revisarQuitadosSemEvidencia(scopeEmp) {
     const ccs = new Set();
     this.state.units = (this.state.units || []).map((u) => {
+      if (scopeEmp && String(u && u.enterpriseId) !== String(scopeEmp)) return u;
       if (!this.isFinanceUnit(u) || !this.quitadoSemEvidencia(u)) return u;
       ccs.add(String(u.enterpriseId || ""));
       return this.reabrirParaConferencia(u);
@@ -922,10 +924,11 @@ const EstoqueComercialApp = {
     return ccs.size;
   },
 
-  sealInferredFinance() {
-    this.revisarQuitadosSemEvidencia();
+  sealInferredFinance(scopeEmp) {
+    this.revisarQuitadosSemEvidencia(scopeEmp);
     let n = 0;
     this.state.units = (this.state.units || []).map((u) => {
+      if (scopeEmp && String(u && u.enterpriseId) !== String(scopeEmp)) return u;
       if (!this.isFinanceUnit(u) || u.relFin) return u;
       const inferred = this.inferRelFin(u);
       if (!inferred) return u;
@@ -1324,6 +1327,7 @@ const EstoqueComercialApp = {
   overdueValue(u) {
     const ficha = Number(u && u.kpiVencidas);
     if (Number.isFinite(ficha) && ficha > 0.009) return ficha;
+    if (u && Number.isFinite(ficha) && String(u.siengeConferidoEm || "").slice(0, 10) === this.todayStr()) return 0;
     const idx = this.state.defaulterIndex || this.buildDefaulterIndex();
     if (u.receivableBillId && idx.byRb.has(String(u.receivableBillId))) {
       return idx.byRb.get(String(u.receivableBillId)) || 0;
@@ -1493,6 +1497,13 @@ const EstoqueComercialApp = {
         <div class="est-fin-card"><label>A vencer</label><strong>${this.money(p.aVencer)}</strong><small>Saldo ainda no prazo</small></div>
         <div class="est-fin-card is-ok"><label>Quitados</label><strong>${p.quitados}</strong><small>Fora do saldo a receber</small></div>
       `;
+      let conf = document.getElementById("est-conferencia");
+      if (!conf) {
+        conf = document.createElement("div");
+        conf.id = "est-conferencia";
+        finEl.insertAdjacentElement("afterend", conf);
+      }
+      conf.innerHTML = this.conferenciaHtml();
     }
     const el = document.getElementById("est-stock-kpis");
     if (el) el.innerHTML = "";
@@ -1771,6 +1782,15 @@ const EstoqueComercialApp = {
     return (next || []).map(u => {
       const keep = old[String(u.id)];
       if (!keep) return u;
+      const confU = String(u.siengeConferidoEm || "");
+      const confK = String(keep.siengeConferidoEm || "");
+      if (confU || confK) {
+        // Conferência com o extrato do Sienge é a fonte mais recente: vale sobre quitado antigo.
+        if (confU >= confK) return this.sanitizeUnit({ ...keep, ...u });
+        const fin = this.financeLite(keep);
+        delete fin.id;
+        return this.sanitizeUnit({ ...u, ...fin, openParcelas: keep.openParcelas || u.openParcelas, pmp3m: keep.pmp3m != null ? keep.pmp3m : u.pmp3m });
+      }
       return this.sanitizeUnit({
         ...u,
         contractNumber: u.contractNumber || keep.contractNumber,
@@ -1924,6 +1944,7 @@ const EstoqueComercialApp = {
           if (idx < 0) return;
           const cur = this.state.units[idx];
           if (!iso) {
+            if (cur.siengeConferidoEm) return;
             const st = bill ? this.classifyReceivableBill(bill) : "";
             if (st !== "adimplente" && st !== "inadimplente") return;
             this.state.units[idx] = this.reabrirParaConferencia(cur);
@@ -2964,6 +2985,194 @@ const EstoqueComercialApp = {
     return marked;
   },
 
+  /* ---------- Conferência com o Contas a Receber do Sienge (extrato histórico do centro de custo) ---------- */
+  async fetchExtratoCc(ccId) {
+    const path = (s, e) => `/bulk-data/v1/customer-extract-history?startDueDate=${s}&endDueDate=${e}&costCenterId=${encodeURIComponent(ccId)}`
+      + "&includeRemadeInstallments=false&includeCanceledInstallments=false&includeRevokedInstallments=false&includeRenegotiatedDischarge=false";
+    const get = async (s, e, depth) => {
+      try {
+        return this.extractRows(await window.siengeFetchWithRetry(path(s, e), 2));
+      } catch (err) {
+        const sy = Number(s.slice(0, 4));
+        const ey = Number(e.slice(0, 4));
+        if (Number(err && err.status) !== 507 || depth > 6 || ey - sy < 1) throw err;
+        const mid = Math.floor((sy + ey) / 2);
+        const left = await get(s, `${mid}-12-31`, depth + 1);
+        const right = await get(`${mid + 1}-01-01`, e, depth + 1);
+        return left.concat(right);
+      }
+    };
+    return get("1996-01-01", `${new Date().getFullYear() + 30}-12-31`, 0);
+  },
+
+  agruparExtratoCc(rows) {
+    const hoje = this.todayStr();
+    const map = {};
+    (rows || []).forEach((r) => {
+      if (!r || r.billReceivableId == null) return;
+      const id = String(r.billReceivableId);
+      const b = map[id] || (map[id] = { id, cliente: r.customer || {}, units: [], document: r.document || "", revoked: r.revokedBillReceivableDate || "", parcelas: {} });
+      (r.units || []).forEach((x) => {
+        if (x && x.id != null && !b.units.some((y) => y.id === String(x.id))) b.units.push({ id: String(x.id), name: x.name || "" });
+      });
+      (r.installments || []).forEach((p) => { if (p) b.parcelas[String(p.id) + "|" + String(p.dueDate || "")] = p; });
+    });
+    return Object.values(map).map((b) => {
+      let aberto = 0;
+      let vencido = 0;
+      let vencidoComAcrescimo = 0;
+      let recebido = 0;
+      let ultimaBaixa = "";
+      const abertas = [];
+      Object.values(b.parcelas).forEach((p) => {
+        const saldo = Number(p.currentBalance) || 0;
+        const due = String(p.dueDate || "").slice(0, 10);
+        if (saldo > 0.009) {
+          aberto += saldo;
+          const atrasada = !!due && due < hoje;
+          if (atrasada) {
+            vencido += saldo;
+            vencidoComAcrescimo += Number(p.currentBalanceWithAddition) > saldo ? Number(p.currentBalanceWithAddition) : saldo;
+          }
+          abertas.push({ due, val: saldo, overdue: atrasada });
+        }
+        (p.receipts || []).forEach((rc) => {
+          if (/distrat|cancel|reparcel|repactu/i.test(String(rc && rc.type || ""))) return;
+          recebido += Number(rc.netReceipt != null ? rc.netReceipt : rc.value) || 0;
+          const d = String(rc.date || "").slice(0, 10);
+          if (d > ultimaBaixa) ultimaBaixa = d;
+        });
+      });
+      abertas.sort((x, y) => x.due.localeCompare(y.due));
+      return { ...b, aberto, vencido, vencidoComAcrescimo, recebido, ultimaBaixa, nParcelas: Object.keys(b.parcelas).length, abertas: abertas.slice(0, 24) };
+    });
+  },
+
+  /** Recalcula as unidades do centro pelo extrato do Sienge e guarda o confronto Sienge × Integra. */
+  async conferirComSienge(ccId) {
+    if (typeof window.siengeFetchWithRetry !== "function") return null;
+    this.setProgress(`Conferindo ${ccId} com o Contas a Receber do Sienge…`);
+    const bills = this.agruparExtratoCc(await this.fetchExtratoCc(ccId));
+    const vivos = bills.filter((b) => !b.revoked && b.nParcelas > 0);
+    const agora = new Date().toISOString();
+    const hoje = this.todayStr();
+    const usados = new Set();
+    const semTitulo = [];
+    let reabertos = 0;
+    let quitadosNovos = 0;
+    this.state.units = this.state.units.map((u) => {
+      if (String(u.enterpriseId) !== String(ccId) || !this.isFinanceUnit(u)) return u;
+      const fin0 = this.financialStatus(u);
+      if (fin0 === "Distratado") return u;
+      const rb = String(u.receivableBillId || "").replace(/^B-/, "").split("-")[0];
+      let mine = vivos.filter((b) => b.units.some((x) => x.id === String(u.id)) || (rb && b.id === rb));
+      if (!mine.length) mine = vivos.filter((b) => b.units.some((x) => this.unitNameMatches(x.name, u.name)));
+      if (!mine.length) {
+        if (fin0 === "Ativo adimplente" || fin0 === "Ativo inadimplente") {
+          semTitulo.push({ unidade: u.name, contrato: this.displayContract(u) || "", situacao: fin0, cliente: u.customerName || "" });
+        }
+        return u;
+      }
+      mine.forEach((b) => usados.add(b.id));
+      const aberto = mine.reduce((t, b) => t + b.aberto, 0);
+      const vencido = mine.reduce((t, b) => t + b.vencido, 0);
+      const vencidoAdd = mine.reduce((t, b) => t + b.vencidoComAcrescimo, 0);
+      const recebido = mine.reduce((t, b) => t + b.recebido, 0);
+      const principal = mine.slice().sort((a, b) => b.aberto - a.aberto || b.recebido - a.recebido)[0];
+      const base = {
+        ...u,
+        receivableBillId: principal.id,
+        customerId: u.customerId || (principal.cliente && principal.cliente.id != null ? String(principal.cliente.id) : u.customerId),
+        customerName: (principal.cliente && principal.cliente.name) || u.customerName,
+        receivedAmount: recebido,
+        receivedLocked: true,
+        statementDone: true,
+        censusAt: hoje,
+        finAt: agora,
+        siengeConferidoEm: agora
+      };
+      if (aberto > 0.009) {
+        if (fin0 === "Quitado") reabertos += 1;
+        return {
+          ...base,
+          relFin: vencido > 0.009 ? "inadimplente" : "adimplente",
+          quitado: false,
+          quitacaoDate: null,
+          quitacaoFonte: null,
+          quitadoEvidencia: false,
+          outstandingBalance: aberto,
+          presentDebitBalance: aberto,
+          kpiVencidas: vencido > 0.009 ? vencidoAdd : 0,
+          kpiAVencer: Math.max(0, aberto - vencido),
+          openParcelas: mine.reduce((l, b) => l.concat(b.abertas), []).sort((a, b) => a.due.localeCompare(b.due)).slice(0, 24)
+        };
+      }
+      if (recebido <= 0.009) return u;
+      if (fin0 !== "Quitado") quitadosNovos += 1;
+      const ultima = mine.map((b) => b.ultimaBaixa).filter(Boolean).sort().pop() || null;
+      return {
+        ...base,
+        relFin: "quitado",
+        quitado: true,
+        quitadoEvidencia: true,
+        outstandingBalance: 0,
+        presentDebitBalance: 0,
+        kpiVencidas: 0,
+        kpiAVencer: 0,
+        openParcelas: [],
+        quitacaoDate: (u.quitacaoFonte === "sienge" && this.isoQuitacao(u.quitacaoDate)) || this.isoQuitacao(ultima) || this.sealQuitacao({ ...u, quitado: true })
+      };
+    });
+    const doCc = this.state.units.filter((u) => String(u.enterpriseId) === String(ccId));
+    const p = this.portfolioOf(doCc);
+    const comSaldo = vivos.filter((b) => b.aberto > 0.009);
+    this.state.conferencia = {
+      ccId: String(ccId),
+      at: agora,
+      sienge: {
+        aReceber: comSaldo.reduce((t, b) => t + b.aberto, 0),
+        vencido: comSaldo.reduce((t, b) => t + b.vencido, 0),
+        titulos: comSaldo.length,
+        clientes: new Set(comSaldo.map((b) => String((b.cliente && b.cliente.id) || b.id))).size,
+        quitados: vivos.filter((b) => b.aberto <= 0.009 && b.recebido > 0.009).length
+      },
+      integra: { aReceber: p.aReceber, atraso: p.atraso, ativos: p.ativos, quitados: p.quitados, semSaldo: p.semSaldo },
+      semUnidade: comSaldo.filter((b) => !usados.has(b.id)).map((b) => ({
+        titulo: b.id, cliente: (b.cliente && b.cliente.name) || "", unidades: b.units.map((x) => x.name).join(", "), aberto: b.aberto
+      })),
+      semTitulo,
+      reabertos,
+      quitadosNovos
+    };
+    this.saveCache();
+    await this.saveFirebaseCc(ccId);
+    return this.state.conferencia;
+  },
+
+  conferenciaHtml() {
+    const c = this.state.conferencia;
+    const emp = this.requireEmpForApiHeavy();
+    if (!c || !emp || c.ccId !== String(emp)) return "";
+    const dif = c.integra.aReceber - c.sienge.aReceber;
+    const bate = Math.abs(dif) < 0.05;
+    const hora = new Date(c.at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+    const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+    const lista = (titulo, itens, linha) => itens.length ? `<details class="est-conf-det"><summary>${titulo} <b>${itens.length}</b></summary><ul>${itens.slice(0, 60).map(linha).join("")}</ul></details>` : "";
+    return `<div class="est-conf ${bate ? "is-ok" : "is-bad"}">
+      <div class="est-conf-h">
+        <strong>Conferência com o Contas a Receber do Sienge · ${esc(c.ccId)}</strong>
+        <small>${hora} · ${c.reabertos} reaberto(s) · ${c.quitadosNovos} quitado(s) pela conferência</small>
+      </div>
+      <div class="est-conf-grid">
+        <div><label>Sienge · a receber</label><b>${this.money(c.sienge.aReceber)}</b><small>${c.sienge.titulos} título(s) de ${c.sienge.clientes} cliente(s) · vencido ${this.money(c.sienge.vencido)}</small></div>
+        <div><label>Integra · a receber</label><b>${this.money(c.integra.aReceber)}</b><small>${c.integra.ativos} ativo(s) · ${c.integra.quitados} quitado(s)${c.integra.semSaldo ? ` · ${c.integra.semSaldo} sem saldo` : ""}</small></div>
+        <div><label>Diferença</label><b>${bate ? "Bate" : this.money(dif)}</b><small>${bate ? "Integra igual ao relatório do Sienge" : "Veja os itens abaixo"}</small></div>
+      </div>
+      ${lista("Títulos com saldo no Sienge sem unidade no Integra", c.semUnidade, (i) => `<li>Título ${esc(i.titulo)} · ${esc(i.cliente)}${i.unidades ? " · " + esc(i.unidades) : ""} · ${this.money(i.aberto)}</li>`)}
+      ${lista("Unidades ativas no Integra sem título no Sienge", c.semTitulo, (i) => `<li>${esc(i.unidade)}${i.contrato ? " · contrato " + esc(i.contrato) : ""}${i.cliente ? " · " + esc(i.cliente) : ""} · ${esc(i.situacao)}</li>`)}
+    </div>`;
+  },
+
   async batimentoFinanceiro(opts) {
     opts = opts || {};
     const isAuto = !!opts.auto;
@@ -3001,24 +3210,42 @@ const EstoqueComercialApp = {
       }
 
       const forceFull = !isAuto;
-      if (forceFull) this.state.stCache = {};
-      if (forceFull) this.state.rbCache = {};
+      if (forceFull && empSel) {
+        // Só o empreendimento filtrado: limpa o cache dos clientes dele e mantém o resto.
+        const st = this.state.stCache || {};
+        const rbc = this.state.rbCache || {};
+        this.state.units.forEach((u) => {
+          if (String(u.enterpriseId) !== empSel || !u.customerId) return;
+          delete st[String(u.customerId)];
+          delete rbc[String(u.customerId)];
+        });
+        this.state.stCache = st;
+        this.state.rbCache = rbc;
+      } else if (forceFull) {
+        this.state.stCache = {};
+        this.state.rbCache = {};
+      }
+      const pendenteNoEscopo = () => (this.state.units || []).some((u) => {
+        if (empSel && String(u.enterpriseId) !== empSel) return false;
+        return this.isActiveFinance(u) && !(u.statementDone && (u.receivedLocked || u.censusAt));
+      });
 
       this.state._autoFinanceRunning = true;
       this.state.stopSync = false;
       this.setBusy(true);
       this.buildDefaulterIndex();
       this.stampFilaOnUnits(empSel);
-      this.sealInferredFinance();
+      this.sealInferredFinance(empSel);
       this.renderTable();
       await this.enrichContracts({ quiet: true, keepBusy: true });
       if (this.state.stopSync) return;
       this.buildDefaulterIndex();
       this.stampFilaOnUnits(empSel);
-      this.sealInferredFinance();
+      this.sealInferredFinance(empSel);
       this._batimentoFailed = 0;
-      const planned = this.collectActiveCustomers(empSel, { onlyPending: true });
-      this._censusStillOpen = this.hasActivePending();
+      // Com empreendimento filtrado, reconsulta todos os ativos dele (teste completo), não só os pendentes.
+      const planned = this.collectActiveCustomers(empSel, { onlyPending: !empSel });
+      this._censusStillOpen = pendenteNoEscopo();
 
       let custIdsToRefreshByCc = planned.byCc;
       if (custIdsToRefreshByCc.size) {
@@ -3049,18 +3276,36 @@ const EstoqueComercialApp = {
       const stamped = forceFull
         ? this.stampFilaOnUnits(empSel, { onlyWithoutStatement: true })
         : stampedPre;
-      this._censusStillOpen = this.hasActivePending();
-      this.sealInferredFinance();
+      let conferencia = null;
+      if (empSel && !this.state.stopSync) {
+        try {
+          conferencia = await this.conferirComSienge(empSel);
+        } catch (e) {
+          console.warn("[Estoque] conferência com o Sienge", e);
+        }
+      }
+      this._censusStillOpen = pendenteNoEscopo();
+      this.sealInferredFinance(empSel);
       const inScope = u => !empSel || String(u.enterpriseId) === empSel;
       const qtdQ = this.state.units.filter(u => inScope(u) && this.financialStatus(u) === "Quitado").length;
       const qtdI = this.state.units.filter(u => inScope(u) && this.financialStatus(u) === "Ativo inadimplente").length;
       const qtdA = this.state.units.filter(u => inScope(u) && this.financialStatus(u) === "Ativo adimplente").length;
       this.paintEmpSelect();
-      const day = await this.persistTodayResult({ markDone: !this._censusStillOpen });
-      const pendentes = (this.state.units || []).filter((u) => this.isActiveFinance(u) && this.unitNeedsCensus(u)).length;
+      let day = this.todayStr();
+      if (empSel) {
+        // Teste de um empreendimento: grava só ele e não marca o dia como concluído.
+        this.saveCache();
+        await this.saveFirebaseCc(empSel);
+      } else {
+        day = await this.persistTodayResult({ markDone: !this._censusStillOpen });
+      }
+      const pendentes = (this.state.units || []).filter((u) => inScope(u) && this.isActiveFinance(u) && this.unitNeedsCensus(u)).length;
       let extra;
       if (this.state.stopSync) extra = ` Interrompido. ${pendentes} contrato(s) ativo(s) ainda não consultado(s) — rode de novo que ele continua de onde parou.`;
       else if (this._censusStillOpen) extra = ` ${pendentes} contrato(s) ativo(s) ainda não consultado(s)${this._batimentoFailed ? " (" + this._batimentoFailed + " falha(s) no Sienge)" : ""} — rode de novo que ele continua só nesses.`;
+      else if (empSel) extra = conferencia
+        ? ` Conferido com o Sienge: a receber ${this.money(conferencia.sienge.aReceber)} no Sienge × ${this.money(conferencia.integra.aReceber)} no Integra.`
+        : " Não consegui ler o extrato do Sienge para a conferência.";
       else extra = " Todos os contratos ativos foram consultados. Base do dia gravada (estoque + caixa).";
       this.setProgress(`Batimento (${ccIds.length || 0} empreendimento(s)): ${qtdQ} quitados · ${qtdI} inadimplentes · ${qtdA} adimplentes · ${marked} ficha(s) · ${stamped} pela fila.${extra} ${day.split("-").reverse().join("/")}.`);
     } catch (e) {
