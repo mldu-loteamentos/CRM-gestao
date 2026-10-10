@@ -72,7 +72,7 @@ const CentrosCustoApp = {
       });
       
       if (customFieldsChanged) {
-          localStorage.setItem('crm_centros_custo_custom', JSON.stringify(CentrosCustoState.customFields));
+          this.gravarLocal(JSON.stringify(CentrosCustoState.customFields));
       }
       
       // Load companies
@@ -160,26 +160,20 @@ const CentrosCustoApp = {
 
     CentrosCustoState.customFields[key] = custom;
     CentrosCustoState.customFields[id] = custom;
-    const json = JSON.stringify(CentrosCustoState.customFields);
-    try {
-      const orig = window._originalSetItem;
-      if (typeof orig === "function") orig.call(localStorage, "crm_centros_custo_custom", json);
-      else localStorage.setItem("crm_centros_custo_custom", json);
-    } catch (e) {
-      try { localStorage.setItem("crm_centros_custo_custom", json); } catch (err) {}
-    }
+    this.gravarLocal(JSON.stringify(CentrosCustoState.customFields));
 
     if (contaNova !== undefined) {
+      let gravouNuvem = false;
       try {
         custom.conta_parceria_at = await this.gravarContaParceria(key, contaNova);
-        CentrosCustoState.customFields[key] = custom;
-        const json2 = JSON.stringify(CentrosCustoState.customFields);
-        const orig2 = window._originalSetItem;
-        if (typeof orig2 === "function") orig2.call(localStorage, "crm_centros_custo_custom", json2);
-        else localStorage.setItem("crm_centros_custo_custom", json2);
+        gravouNuvem = true;
       } catch (e) {
         console.error("[CentrosCusto] gravar conta de parceria", e);
-        alert("A conta de parceria ficou salva só neste computador: não consegui gravar no Firebase (" + (e.message || e) + "). Tente salvar de novo.");
+        alert("Não consegui gravar a conta de parceria no Firebase (" + (e.message || e) + "). Tente salvar de novo.");
+      }
+      if (gravouNuvem) {
+        CentrosCustoState.customFields[key] = custom;
+        this.gravarLocal(JSON.stringify(CentrosCustoState.customFields));
       }
     }
     this.closeModal();
@@ -221,6 +215,39 @@ const CentrosCustoApp = {
     if (!c) return "";
     return [c.banco ? "Banco " + c.banco : "", c.agencia ? "Ag. " + c.agencia : "", c.numero ? "C/C " + c.numero : "", c.nome || ""]
       .filter(Boolean).join(" · ");
+  },
+
+  /* Caches que o próprio Integra refaz; a fila do dia (crm_daily_queue_cache_v5) não entra. */
+  CACHES_DESCARTAVEIS: [
+    "crm_geocache", "crm_estoque_posicao_v1", "crm_obra_vgv_cache", "crm_plano_reembolsaveis_cache", "crm_broker_names_v1",
+    "crm_daily_queue_cache_v4", "crm_daily_queue_cache_v3", "crm_daily_queue_cache_v2"
+  ],
+
+  /* Cópia local dos campos do CC. Com o armazenamento do navegador cheio, apaga caches refazíveis e tenta de novo. */
+  gravarLocal(json) {
+    const gravar = () => {
+      const orig = window._originalSetItem;
+      if (typeof orig === "function") orig.call(localStorage, "crm_centros_custo_custom", json);
+      else localStorage.setItem("crm_centros_custo_custom", json);
+    };
+    try {
+      gravar();
+      return true;
+    } catch (e) {
+      if (!/quota|exceeded/i.test(String((e && (e.name + " " + e.message)) || e))) {
+        console.warn("[CentrosCusto] cópia local", e);
+        return false;
+      }
+    }
+    for (const k of this.CACHES_DESCARTAVEIS) {
+      try { localStorage.removeItem(k); } catch (e) {}
+      try {
+        gravar();
+        return true;
+      } catch (e) {}
+    }
+    console.warn("[CentrosCusto] armazenamento do navegador cheio; os campos do CC ficam só na nuvem");
+    return false;
   },
 
   /* Conta de parceria: um documento por centro de custo em cc_conta_parceria (fonte da verdade). */
@@ -276,14 +303,7 @@ const CentrosCustoApp = {
       if (aplicar(map, id, remoto[id])) mudou = true;
       if (mem !== map) aplicar(mem, id, remoto[id]);
     });
-    if (mudou) {
-      const json = JSON.stringify(map);
-      try {
-        const orig = window._originalSetItem;
-        if (typeof orig === "function") orig.call(localStorage, "crm_centros_custo_custom", json);
-        else localStorage.setItem("crm_centros_custo_custom", json);
-      } catch (e) {}
-    }
+    if (mudou) this.gravarLocal(JSON.stringify(map));
     if (opts && opts.enviarLocais) {
       const pendentes = Object.keys(map).filter((id) => {
         const c = map[id] && map[id].conta_parceria;

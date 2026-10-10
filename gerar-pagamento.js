@@ -11,11 +11,12 @@ const GerarPagamentoApp = {
     started: false,
     startDate: "",
     endDate: "",
-    tipoData: "D",
     consultando: false,
     consultado: false,
     erroTitulos: "",
     progresso: "",
+    progressoPct: 0,
+    progressoInicio: 0,
     titulos: [],
     previsoesIgnoradas: 0,
     filtro: "todos",
@@ -94,11 +95,6 @@ const GerarPagamentoApp = {
 
   companyIdOf(cc) {
     return cc && (cc.idCompany != null ? cc.idCompany : cc.companyId);
-  },
-
-  companyName(id) {
-    const hit = this.state.companies.find((c) => String(c.id) === String(id));
-    return hit ? hit.name : "";
   },
 
   contaLabel(c) {
@@ -253,8 +249,25 @@ const GerarPagamentoApp = {
   },
 
   pintarProgresso() {
+    const s = this.state;
     const el = document.getElementById("gp-progresso");
-    if (el) el.textContent = this.state.progresso || "";
+    if (el) el.textContent = s.progresso || "";
+    const bar = document.getElementById("gp-progresso-barra");
+    if (bar) bar.style.width = Math.max(2, Math.min(99, Math.round((s.progressoPct || 0) * 100))) + "%";
+    const tempo = document.getElementById("gp-progresso-tempo");
+    if (tempo && s.progressoInicio) tempo.textContent = "Tempo decorrido: " + Math.floor((Date.now() - s.progressoInicio) / 1000) + "s";
+  },
+
+  /* Mesmo carregamento da Fila de cobrança: círculo girando e barra verde. */
+  carregandoHtml() {
+    return `<div style="display:flex;flex-direction:column;align-items:center;gap:12px;width:100%;max-width:400px;margin:0 auto;padding:40px 0;color:var(--color-text-muted);">
+        <div class="loading-spinner" style="width:32px;height:32px;border:3px solid rgba(16,84,54,0.15);border-top-color:var(--color-primary);border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+        <span id="gp-progresso" class="loading-status-text" style="font-weight:500;">${this.esc(this.state.progresso)}</span>
+        <div style="width:100%;background:#e2e8f0;border-radius:8px;height:10px;overflow:hidden;margin-top:5px;">
+          <div id="gp-progresso-barra" class="loading-progress-bar" style="width:${Math.max(2, Math.round((this.state.progressoPct || 0) * 100))}%;height:100%;background:#10b981;transition:width 0.4s linear;"></div>
+        </div>
+        <span id="gp-progresso-tempo" class="loading-time-text" style="font-size:0.85rem;color:#64748b;margin-top:4px;"></span>
+      </div>`;
   },
 
   /* Lê no Sienge os títulos a pagar dos CCs de parceiro no período e confere a conta usada no pagamento. */
@@ -285,6 +298,12 @@ const GerarPagamentoApp = {
     s.consultado = true;
     s.erroTitulos = "";
     s.progresso = "Buscando títulos a pagar no Sienge…";
+    s.progressoPct = 0;
+    s.progressoInicio = Date.now();
+    const relogio = setInterval(() => {
+      if (gen !== s.gen || !s.consultando) clearInterval(relogio);
+      else this.pintarProgresso();
+    }, 1000);
     s.titulos = [];
     s.previsoesIgnoradas = 0;
     s.sel = {};
@@ -297,11 +316,10 @@ const GerarPagamentoApp = {
     s.validacao = { feitos: 0, total: 0, rodando: false };
     this.render();
 
-    const tipo = s.tipoData === "P" ? "P" : "D";
     const api = Object.create(base);
     api.outcomeEndpoint = (start, end, companyId) => "/bulk-data/v1/outcome?startDate=" + encodeURIComponent(start)
       + "&endDate=" + encodeURIComponent(end)
-      + "&selectionType=" + tipo + "&correctionIndexerId=0&correctionDate=2023-01-01&withAuthorizations=false&withBankMovements=true"
+      + "&selectionType=D&correctionIndexerId=0&correctionDate=2023-01-01&withAuthorizations=false&withBankMovements=true"
       + (companyId ? "&companyId=" + encodeURIComponent(companyId) : "");
     api.noteProgress = (text) => {
       if (gen !== s.gen) return;
@@ -323,6 +341,7 @@ const GerarPagamentoApp = {
           if (gen !== s.gen) return;
           passo += 1;
           s.progresso = "Buscando títulos a pagar no Sienge · " + passo + " de " + total;
+          s.progressoPct = ((passo - 1) / total) * 0.85;
           this.pintarProgresso();
           const parte = await api.outcomeRange(faixa.start, faixa.end, emp);
           if (Array.isArray(parte)) bills.push.apply(bills, parte);
@@ -331,6 +350,7 @@ const GerarPagamentoApp = {
       if (gen !== s.gen) return;
       this.montarTitulos(base, bills, parceiros);
       s.progresso = "Conferindo lotes já gerados…";
+      s.progressoPct = 0.9;
       this.pintarProgresso();
       await Promise.all([this.carregarLotes(), this.carregarLotesSienge(gen)]);
     } catch (e) {
@@ -412,6 +432,7 @@ const GerarPagamentoApp = {
           parcela,
           credor: String(bill.creditorName || "").trim(),
           credorId: bill.creditorId != null ? String(bill.creditorId) : "",
+          companyId: bill.companyId != null ? String(bill.companyId) : String(this.companyIdOf(cc) || ""),
           documento: [docId, bill.documentNumber].filter(Boolean).join(" "),
           vencimento: String(bill.dueDate || "").slice(0, 10),
           pagamento: datas.length ? datas[datas.length - 1] : "",
@@ -707,7 +728,10 @@ const GerarPagamentoApp = {
       const contaKey = contaKeyDe(r);
       const dia = String(r.vencimento || "").slice(0, 10);
       const key = conta ? contaKey + "@" + (dia || "sem-data") : "__sem";
-      if (!grupos[key]) grupos[key] = { key, contaKey, dia: conta ? dia : "", conta, itens: {}, ordem: [] };
+      if (!grupos[key]) {
+        const ccConta = this.ccDe(r.ccId);
+        grupos[key] = { key, contaKey, dia: conta ? dia : "", conta, empresaConta: String((ccConta && this.companyIdOf(ccConta)) || ""), itens: {}, ordem: [] };
+      }
       const g = grupos[key];
       const chave = this.chaveTitulo(r.titulo, r.parcela);
       const inteiro = contasDoTitulo[chave].size === 1 && r.tituloAPagar != null;
@@ -844,9 +868,11 @@ const GerarPagamentoApp = {
       id,
       criadoEm: agora.toISOString(),
       criadoPor: usuario,
+      criadoPorEmail: this.emailAtual(),
       contaKey: g.contaKey,
       dia: g.dia,
       conta: g.conta,
+      empresaConta: g.empresaConta || "",
       total: Math.round(total * 100) / 100,
       itens: itens.map((it) => ({
         titulo: it.titulo, parcela: it.parcela, credor: it.credor, credorId: it.credorId || "", companyId: it.companyId || "", documento: it.documento,
@@ -876,6 +902,16 @@ const GerarPagamentoApp = {
     }
   },
 
+  /* O robô entra no Sienge com este e-mail: o lote é criado e aprovado com o acesso de quem está no Integra. */
+  emailAtual() {
+    try {
+      const u = (window.MouraAuth && MouraAuth.getCurrentUser && MouraAuth.getCurrentUser()) || (window.AppState && AppState.currentUser);
+      return String((u && u.email) || "").trim().toLowerCase();
+    } catch (e) {
+      return "";
+    }
+  },
+
   async salvarLote(lote) {
     this.salvarLotesLocal(this.lotesLocal().filter((l) => l.id !== lote.id).concat([lote]));
     const fc = window.firebaseCollections;
@@ -895,6 +931,9 @@ const GerarPagamentoApp = {
   },
 
   async roboChamar(caminho, corpo) {
+    const email = this.emailAtual();
+    if (!email) return { ok: false, cancelado: true, erro: "Entre no Integra com sua conta Microsoft da Moura Leite: o robô usa o mesmo usuário no Sienge." };
+    corpo = Object.assign({}, corpo, { usuario: this.usuarioAtual(), usuarioEmail: email });
     let token = "";
     try { token = localStorage.getItem(this.ROBO_TOKEN_KEY) || ""; } catch (e) {}
     for (let tentativa = 0; tentativa < 2; tentativa++) {
@@ -922,6 +961,22 @@ const GerarPagamentoApp = {
     return { ok: false, erro: "Código do robô inválido." };
   },
 
+  /* Lotes gravados antes de guardar a empresa: busca nos títulos carregados e no CC dono da conta. */
+  completarLote(lote) {
+    (lote.itens || []).forEach((it) => {
+      if (it.companyId) return;
+      const r = this.state.titulos.find((x) => x.titulo === String(it.titulo) && String(x.parcela) === String(it.parcela || ""));
+      if (r && r.companyId) it.companyId = r.companyId;
+    });
+    if (lote.empresaConta) return;
+    const alvo = this.numConta(lote.conta && (lote.conta.numero || lote.conta.id));
+    const cc = alvo && this.state.costCenters.find((c) => {
+      const conta = this.contaParceriaDe(c);
+      return conta && this.numConta(conta.numero || conta.id) === alvo;
+    });
+    if (cc) lote.empresaConta = String(this.companyIdOf(cc) || "");
+  },
+
   async registrarSienge(lote, acao, r, extra) {
     const sg = lote.sienge || { historico: [] };
     sg.historico = (sg.historico || []).concat([{
@@ -946,13 +1001,14 @@ const GerarPagamentoApp = {
       alert(`Não dá para enviar o lote ${id}: estes títulos já estão em outro lote no Sienge.\n\n${ocupados.slice(0, 8).map((i) => `• ${i.titulo}/${i.parcela || 1} ${i.credor || ""}`).join("\n")}\n\nExclua este lote e gere de novo com os títulos livres.`);
       return;
     }
+    this.completarLote(lote);
     s.roboLote = id;
     this.paintTitulos();
-    const r = await this.roboChamar("/lotes/gerar", { lote, usuario: this.usuarioAtual() });
+    const r = await this.roboChamar("/lotes/gerar", { lote });
     s.roboLote = "";
     if (r.offline || r.cancelado) {
       this.paintTitulos();
-      alert(`Lote ${id} salvo no Integra, mas ainda não foi criado no Sienge.\n\n${r.erro}\nAbra "Iniciar robô" na pasta robo-sienge e clique em "Enviar ao Sienge" na lista de lotes gerados.`);
+      alert(`Lote ${id} salvo no Integra, mas ainda não foi criado no Sienge.\n\n${r.erro}` + (r.offline ? `\nAbra "Iniciar robô" na pasta robo-sienge e clique em "Enviar ao Sienge" na lista de lotes gerados.` : ""));
       return;
     }
     if (r.ok) {
@@ -979,11 +1035,12 @@ const GerarPagamentoApp = {
     if (!okConf) return;
     s.roboLote = id;
     this.paintTitulos();
-    const r = await this.roboChamar("/lotes/aprovar", { lote, numeroSienge: sg.numero || "", usuario: this.usuarioAtual() });
+    this.completarLote(lote);
+    const r = await this.roboChamar("/lotes/aprovar", { lote, numeroSienge: sg.numero || "" });
     s.roboLote = "";
     if (r.offline || r.cancelado) {
       this.paintTitulos();
-      alert(`${r.erro}\nAbra "Iniciar robô" na pasta robo-sienge e tente aprovar de novo.`);
+      alert(r.erro + (r.offline ? `\nAbra "Iniciar robô" na pasta robo-sienge e tente aprovar de novo.` : ""));
       return;
     }
     if (r.ok) {
@@ -1197,9 +1254,46 @@ const GerarPagamentoApp = {
     return "aberto";
   },
 
+  /* Uma linha por título/parcela: CC de parceiro sempre vem rateado com o CC da obra (13901 com 13900). */
+  titulosAgrupados() {
+    const ordem = [];
+    const grupos = {};
+    const prioridade = ["outra", "sem-conta", "aberto", "pago-sem-conta", "ok"];
+    this.state.titulos.forEach((r) => {
+      const chave = this.chaveTitulo(r.titulo, r.parcela);
+      if (!grupos[chave]) {
+        grupos[chave] = { ...r, linhas: [], valor: 0 };
+        ordem.push(chave);
+      }
+      const g = grupos[chave];
+      g.linhas.push(r);
+      g.valor += r.valor;
+      if (prioridade.indexOf(r.status) < prioridade.indexOf(g.status)) g.status = r.status;
+    });
+    return ordem.map((k) => {
+      const g = grupos[k];
+      if (g.tituloValor != null) g.valor = g.tituloValor;
+      g.contasEsperadas = [...new Set(g.linhas.map((r) => (r.esperada ? String(r.esperada.numero || r.esperada.id) : "")).filter(Boolean))];
+      return g;
+    });
+  },
+
+  obra(ccId) {
+    return String(ccId || "").slice(0, -2);
+  },
+
+  ccsHtml(r) {
+    const ccs = r.ccsTitulo && r.ccsTitulo.length ? r.ccsTitulo : [{ id: r.ccId, nome: r.ccNome, parceria: true }];
+    const semObra = ccs.filter((c) => c.parceria && !ccs.some((o) => !o.parceria && this.obra(o.id) === this.obra(c.id)));
+    const nomes = ccs.map((c) => `${c.id} ${c.nome}${c.rateio != null ? ` · ${this.pct(c.rateio)}` : ""}${c.parceria ? " (parceria)" : ""}`).join("\n");
+    return `<span title="${this.esc(nomes)}">${ccs.map((c) => (c.parceria ? `<strong>${this.esc(c.id)}</strong>` : `<span class="gp-cc-outro">${this.esc(c.id)}</span>`)).join(" / ")} <span class="gp-muted">${this.esc(ccs.length === 1 ? ccs[0].nome : "rateado")}</span></span>`
+      + (semObra.length ? `<small class="gp-bloq">Sem o CC da obra de ${semObra.map((c) => this.esc(c.id)).join(", ")}</small>` : "");
+  },
+
   statusHtml(r) {
-    const conta = r.esperada ? (r.esperada.numero || r.esperada.id) : "";
-    const outras = r.contas.filter((c) => this.numConta(c) !== this.numConta(conta));
+    const conta = r.contasEsperadas && r.contasEsperadas.length ? r.contasEsperadas.join(" / ") : (r.esperada ? (r.esperada.numero || r.esperada.id) : "");
+    const alvos = (r.contasEsperadas || [conta]).map((c) => this.numConta(c));
+    const outras = r.contas.filter((c) => !alvos.includes(this.numConta(c)));
     if (r.status === "ok") return `<span class="gp-pill gp-ok">Pago na conta de parceria</span>`;
     if (r.status === "outra") return `<span class="gp-pill gp-bad">Pago em outra conta</span><small>Saiu pela C/C ${this.esc(outras.join(", "))} · esperado C/C ${this.esc(conta)}</small>`;
     if (r.status === "sem-conta") return `<span class="gp-pill gp-bad">CC sem conta de parceria</span><small>Pago pela C/C ${this.esc(r.contas.join(", "))}</small>`;
@@ -1209,12 +1303,7 @@ const GerarPagamentoApp = {
 
   titulosHtml() {
     const s = this.state;
-    if (s.consultando) {
-      return `<div style="text-align:center;padding:30px;color:#64748b;">
-        <div class="spinner" style="margin:0 auto 12px;"></div>
-        <p id="gp-progresso" style="margin:0;">${this.esc(s.progresso)}</p>
-      </div>`;
-    }
+    if (s.consultando) return this.carregandoHtml();
     if (s.erroTitulos) return `<div style="padding:18px 20px;color:#b91c1c;">${this.esc(s.erroTitulos)}</div>`;
     if (!s.consultado) {
       return `<div style="padding:22px 20px;color:#64748b;font-size:0.85rem;">Escolha o período e clique em <strong>Buscar títulos</strong> para conferir em qual conta os títulos dos centros de custo de parceiro foram pagos.</div>`;
@@ -1226,7 +1315,7 @@ const GerarPagamentoApp = {
         <button type="button" class="gp-visao${s.visao === "lotes" ? " is-active" : ""}" onclick="GerarPagamentoApp.setVisao('lotes')"><i data-lucide="layers" style="width:14px;"></i> Lotes por conta e dia <b>${nAbertos}</b></button>
       </div>`;
     if (s.visao === "lotes") return visoes + this.lotesHtml();
-    const todos = s.titulos;
+    const todos = this.titulosAgrupados();
     const cont = { todos: todos.length, ok: 0, outra: 0, aberto: 0 };
     todos.forEach((r) => { cont[this.grupoStatus(r)] += 1; });
     const visiveis = s.filtro === "todos" ? todos : todos.filter((r) => this.grupoStatus(r) === s.filtro);
@@ -1238,7 +1327,7 @@ const GerarPagamentoApp = {
           <td><strong>${this.esc(r.titulo)}</strong>${r.parcela ? `<span class="gp-muted"> / ${this.esc(r.parcela)}</span>` : ""}</td>
           <td title="${this.esc(r.credor)}">${this.esc(r.credor)}</td>
           <td>${this.esc(r.documento || "—")}</td>
-          <td title="${this.esc(r.ccNome)}"><strong>${this.esc(r.ccId)}</strong> <span class="gp-muted">${this.esc(r.ccNome)}</span></td>
+          <td class="gp-status">${this.ccsHtml(r)}</td>
           <td style="text-align:right;">${this.money(r.valor)}</td>
           <td class="gp-status">${this.statusHtml(r)}</td>
         </tr>`).join("")
@@ -1263,29 +1352,6 @@ const GerarPagamentoApp = {
     if (window.lucide) lucide.createIcons();
   },
 
-  rowsHtml() {
-    const list = this.parceiros();
-    if (!list.length) {
-      return `<tr><td colspan="5" style="text-align:center;padding:28px;color:#64748b;">
-        Nenhum centro de custo de parceiro. Cadastre a conta de parceria em Centros de Custo.
-      </td></tr>`;
-    }
-    return list.map((cc) => {
-      const empId = this.companyIdOf(cc);
-      const conta = this.contaParceriaDe(cc);
-      const status = conta
-        ? `<span style="color:#105436;font-weight:700;">${this.esc(this.contaLabel(conta))}</span>`
-        : `<span style="color:#b91c1c;font-weight:700;">Sem conta — cadastre em Centros de Custo</span>`;
-      return `<tr>
-        <td>${this.esc(empId || "-")}</td>
-        <td><strong>${this.esc(cc.id)}</strong></td>
-        <td>${this.esc(cc.name || "")}</td>
-        <td>${this.esc(this.companyName(empId) || "")}</td>
-        <td>${status}</td>
-      </tr>`;
-    }).join("");
-  },
-
   render() {
     const root = document.getElementById("gerar-pagamento-root");
     if (!root) return;
@@ -1294,9 +1360,9 @@ const GerarPagamentoApp = {
     const semConta = list.filter((cc) => !this.contaParceriaDe(cc)).length;
     const busy = s.consultando;
     const body = s.loading
-      ? `<div style="text-align:center;padding:40px;color:#64748b;">
-          <div class="spinner" style="margin:0 auto 12px;"></div>
-          <p>Carregando centros de custo de parceiro…</p>
+      ? `<div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:40px 0;color:var(--color-text-muted);">
+          <div class="loading-spinner" style="width:32px;height:32px;border:3px solid rgba(16,84,54,0.15);border-top-color:var(--color-primary);border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+          <span style="font-weight:500;">Carregando centros de custo de parceiro…</span>
         </div>`
       : (s.error
         ? `<div class="crm-card" style="padding:20px;color:#b91c1c;">${this.esc(s.error)}</div>`
@@ -1361,49 +1427,14 @@ const GerarPagamentoApp = {
           #gerar-pagamento-root .gp-lote-total { font-size:1.05rem; color:#0f172a; min-width:120px; text-align:right; }
           #gerar-pagamento-root .gp-lote .gp-titulos { min-width:1000px; }
         </style>
-        <div class="crm-card" style="padding:18px 20px;margin-bottom:16px;">
-          <h3 style="margin:0 0 8px;color:var(--color-primary);font-size:1rem;">Conta de parceria</h3>
-          <p style="margin:0;color:#475569;font-size:0.85rem;line-height:1.5;">
-            Centros de custo com <strong>parceiro/parceria</strong> no nome ou com conta de parceria cadastrada.
-            Quando o título a pagar tiver um desses centros de custo, o pagamento sai pela
-            <strong>conta de parceria</strong> cadastrada no próprio centro de custo — não pela conta padrão da empresa.
-          </p>
-          <p style="margin:10px 0 0;color:#64748b;font-size:0.8rem;">
-            ${list.length} centro(s) de parceiro ·
-            ${semConta ? `<span style="color:#b91c1c;font-weight:700;">${semConta} sem conta cadastrada</span>` : `<span style="color:#105436;font-weight:700;">todos com conta</span>`}
-          </p>
-        </div>
         <div class="crm-card" style="overflow:hidden;padding:0;">
-          <div style="max-height:40vh;overflow:auto;">
-            <table class="gp-table">
-              <thead>
-                <tr>
-                  <th style="width:90px;">Empresa</th>
-                  <th style="width:80px;">ID CC</th>
-                  <th>Centro de custo</th>
-                  <th style="min-width:180px;">Nome da empresa</th>
-                  <th style="min-width:220px;">Conta de parceria</th>
-                </tr>
-              </thead>
-              <tbody>${this.rowsHtml()}</tbody>
-            </table>
-          </div>
-        </div>
-        <div class="crm-card" style="overflow:hidden;padding:0;margin-top:16px;">
           <div class="gp-busca">
             <div style="flex:1 1 220px;">
               <h3 style="margin:0 0 4px;color:var(--color-primary);font-size:1rem;">Títulos a pagar dos centros de custo de parceiro</h3>
-              <p style="margin:0;color:#64748b;font-size:0.78rem;">Confere se o pagamento saiu pela conta de parceria cadastrada. Previsões ficam de fora.</p>
+              <p style="margin:0;color:#64748b;font-size:0.78rem;">Busca pelo vencimento, para programar os lotes. Previsões ficam de fora.${semConta ? ` <b style="color:#b91c1c;">${semConta} centro(s) de parceiro sem conta de parceria cadastrada.</b>` : ""}</p>
             </div>
             <div class="form-group">
-              <label>Data de</label>
-              <select class="form-control" ${busy ? "disabled" : ""} onchange="GerarPagamentoApp.onField('tipoData', this.value)">
-                <option value="D" ${s.tipoData !== "P" ? "selected" : ""}>Vencimento</option>
-                <option value="P" ${s.tipoData === "P" ? "selected" : ""}>Pagamento</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>De</label>
+              <label>Vencimento de</label>
               <input type="date" class="form-control" value="${this.esc(s.startDate)}" ${busy ? "disabled" : ""}
                 onchange="GerarPagamentoApp.onField('startDate', this.value)">
             </div>
