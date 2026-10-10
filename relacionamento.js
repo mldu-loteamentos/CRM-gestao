@@ -605,7 +605,7 @@ const RelacionamentoApp = {
   _setVencimentoBloqueado(blocked, motivo) {
     const dia = document.getElementById("ven-dia");
     const orig = document.getElementById("ven-data-original");
-    const gen = document.querySelector('#ven-doc-card [onclick*="gerarDocSimplesPdf"]');
+    const gen = document.getElementById("ven-btn-gerar");
     if (dia) {
       dia.disabled = !!blocked;
       if (blocked) dia.value = "";
@@ -816,12 +816,14 @@ const RelacionamentoApp = {
     btn.title = ok ? "" : (loaded ? "Preencha nome, RG, CPF/CNPJ e telefone do terceiro." : "Aguarde o contrato carregar.");
   },
 
-  abrirTerceirosModal(dados) {
+  abrirDocModal(kind, dados) {
     dados = dados || {};
-    const modal = document.getElementById("ter-modal");
+    const p = this._docCfg(kind).p;
+    const modal = document.getElementById(p + "-modal");
     if (!modal) return;
     if (modal.parentElement !== document.body) document.body.appendChild(modal);
-    this.limparDocSimples("terceiros");
+    this.limparDocSimples(kind);
+    RelacionamentoState[kind + "StatusGestao"] = dados.status || "";
     const titulo = dados.titulo && String(dados.titulo) !== "—" ? String(dados.titulo).replace(/\D/g, "") || String(dados.titulo) : "";
     const partes = [
       dados.nome ? String(dados.nome).trim() : "",
@@ -829,29 +831,50 @@ const RelacionamentoApp = {
       dados.contrato ? "Contrato " + String(dados.contrato).trim() : "",
       dados.unidade ? String(dados.unidade).trim() : ""
     ].filter(Boolean);
-    const titleEl = document.getElementById("ter-modal-title");
-    if (titleEl) titleEl.textContent = "Autorização de terceiros";
-    const sub = document.getElementById("ter-modal-sub");
+    const sub = document.getElementById(p + "-modal-sub");
     if (sub) sub.textContent = partes.join(" · ");
     modal.style.display = "flex";
-    if (!this._terModalKeyBound) {
-      this._terModalKeyBound = true;
+    if (!this._docModalKeyBound) {
+      this._docModalKeyBound = true;
       document.addEventListener("keydown", (ev) => {
-        const m = document.getElementById("ter-modal");
-        const pdfOpen = document.getElementById("pdf-view-overlay")?.classList.contains("active");
-        if (ev.key === "Escape" && m && m.style.display !== "none" && !pdfOpen) this.fecharTerceirosModal();
+        if (ev.key !== "Escape") return;
+        if (document.getElementById("pdf-view-overlay")?.classList.contains("active")) return;
+        ["terceiros", "vencimento"].forEach((k) => {
+          const m = document.getElementById(this._docCfg(k).p + "-modal");
+          if (m && m.style.display !== "none") this.fecharDocModal(k);
+        });
       });
     }
-    this._atualizarBtnGerarTerceiro();
+    if (kind === "terceiros") {
+      this._atualizarBtnGerarTerceiro();
+      setTimeout(() => document.getElementById("ter-nome")?.focus(), 50);
+    } else if (kind === "vencimento") {
+      ["ven-dia", "ven-data-original", "ven-btn-gerar"].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = true;
+      });
+      const gen = document.getElementById("ven-btn-gerar");
+      if (gen) { gen.style.opacity = "0.55"; gen.style.cursor = "not-allowed"; }
+    }
     if (window.lucide) lucide.createIcons();
-    setTimeout(() => document.getElementById("ter-nome")?.focus(), 50);
-    this.preencherEBuscarDocSimples("terceiros", dados);
+    this.preencherEBuscarDocSimples(kind, dados);
   },
 
-  fecharTerceirosModal() {
-    const modal = document.getElementById("ter-modal");
+  fecharDocModal(kind) {
+    const modal = document.getElementById(this._docCfg(kind).p + "-modal");
     if (modal) modal.style.display = "none";
-    this.limparDocSimples("terceiros");
+    this.limparDocSimples(kind);
+  },
+
+  /** Quitado ou distratado não altera vencimento; o status da Gestão vale primeiro, depois o do Sienge. */
+  _motivoBloqueioVencimento(ctx) {
+    const g = String(RelacionamentoState.vencimentoStatusGestao || "").toLowerCase();
+    if (/distrat|cancel/.test(g)) return "contrato distratado/cancelado";
+    if (/quitad/.test(g)) return "contrato quitado";
+    const s = String((ctx && ctx.sale && ctx.sale.status) || "").toLowerCase();
+    if (/distrat|cancel/.test(s)) return "contrato distratado/cancelado";
+    if (/quit/.test(s) || (ctx && ctx.bill && ctx.bill.payOffDate)) return "contrato quitado";
+    return "";
   },
 
   _lockTerceiroDocs(lock) {
@@ -1004,6 +1027,7 @@ const RelacionamentoApp = {
 
   async _avaliarContratoQuitado(sale, bill) {
     const status = String((sale && sale.status) || "").toLowerCase();
+    if (/distrat|cancel/.test(status)) return { quitado: false, motivo: "Contrato distratado/cancelado" };
     if (status === "quitado") return { quitado: true, motivo: "Status do contrato: Quitado" };
     if (bill && bill.payOffDate) return { quitado: true, motivo: "Título com data de quitação" };
     const bals = [
@@ -1688,7 +1712,10 @@ const RelacionamentoApp = {
   },
 
   async _prepararQuitacao(ctx) {
-    const info = await this._avaliarContratoQuitado(ctx.sale, ctx.bill);
+    const g = String(RelacionamentoState.quitacaoStatusGestao || "").trim();
+    const info = g && !/^quitado$/i.test(g)
+      ? { quitado: false, motivo: "Status do título: " + g }
+      : await this._avaliarContratoQuitado(ctx.sale, ctx.bill);
     ctx.quitado = info.quitado;
     ctx.quitadoMotivo = info.motivo;
     const st = document.getElementById("qui-quitado-status");
@@ -1738,6 +1765,51 @@ const RelacionamentoApp = {
     });
   },
 
+  /** Gestão → Termo de quitação: só o pop-up da rubrica; o contrato carrega enquanto o operador responde. */
+  async gerarQuitacaoDireto(dados) {
+    dados = dados || {};
+    this.limparDocSimples("quitacao");
+    RelacionamentoState.quitacaoStatusGestao = dados.status || "";
+    const load = Promise.resolve(this.preencherEBuscarDocSimples("quitacao", dados)).catch(() => null);
+    const resp = await this._perguntarRubrica();
+    if (resp !== "sim" && resp !== "nao") {
+      this.limparDocSimples("quitacao");
+      return;
+    }
+    this._quitacaoBusy(true);
+    try {
+      await load;
+      const ctx = RelacionamentoState.quitacao;
+      if (!ctx || !ctx.sale) {
+        const msg = String(document.getElementById("qui-search-results")?.textContent || "").trim();
+        alert(msg || "Não foi possível carregar o contrato no Sienge. Tente de novo.");
+        return;
+      }
+      if (!ctx.quitado) {
+        alert("O termo de quitação só pode ser emitido com o título quitado. " + (ctx.quitadoMotivo || ""));
+        return;
+      }
+      await this._emitirQuitacao(ctx, resp === "sim" ? "aviso" : "formal");
+    } finally {
+      this._quitacaoBusy(false);
+      this.limparDocSimples("quitacao");
+    }
+  },
+
+  _quitacaoBusy(on) {
+    let el = document.getElementById("qui-busy");
+    if (!el && on) {
+      el = document.createElement("div");
+      el.id = "qui-busy";
+      el.style.cssText = "position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;background:rgba(12,41,29,0.35);";
+      el.innerHTML = `<div style="background:#fff;border-radius:12px;padding:18px 24px;box-shadow:0 18px 40px rgba(0,0,0,0.22);display:flex;align-items:center;gap:12px;font-weight:700;color:#105436;">
+        <div style="width:20px;height:20px;border:3px solid #cfe3d8;border-top-color:#105436;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+        Gerando termo de quitação...</div>`;
+      document.body.appendChild(el);
+    }
+    if (el) el.style.display = on ? "flex" : "none";
+  },
+
   async gerarQuitacaoPdf(kind) {
     const ctx = RelacionamentoState[kind || "quitacao"];
     if (!ctx || !ctx.sale) {
@@ -1750,7 +1822,15 @@ const RelacionamentoApp = {
     }
     const resp = await this._perguntarRubrica();
     if (resp !== "sim" && resp !== "nao") return;
-    const modo = resp === "sim" ? "aviso" : "formal";
+    this._quitacaoBusy(true);
+    try {
+      await this._emitirQuitacao(ctx, resp === "sim" ? "aviso" : "formal");
+    } finally {
+      this._quitacaoBusy(false);
+    }
+  },
+
+  async _emitirQuitacao(ctx, modo) {
     try {
       let t = {};
       try { t = JSON.parse(localStorage.getItem("crm_docpadrao_quitacao") || "{}"); } catch (e) {}
@@ -1775,22 +1855,61 @@ const RelacionamentoApp = {
       if (typeof window.centerSimpleDocSignature === "function") filled = window.centerSimpleDocSignature(filled);
       if (modo === "aviso" && typeof window.applyQuitacaoRubrica === "function") filled = window.applyQuitacaoRubrica(filled);
       const codEmp = legalBase.CODIGO_EMPREENDIMENTO && legalBase.CODIGO_EMPREENDIMENTO !== "____" ? legalBase.CODIGO_EMPREENDIMENTO : "";
-      const headerUnidade = [codEmp, "Quadra-Lote: " + quadraLote].filter(Boolean).join(" - ");
-      const docHtml = `
-        <div style="text-align:center;margin-bottom:1.25rem;">
-          <div style="font-size:10pt;color:#334155;margin-bottom:4px;">${headerUnidade}</div>
-          <div style="font-size:10pt;color:#334155;margin-bottom:10px;">Título ${titulo}</div>
-          <h2 style="color:#105436;font-size:13pt;font-weight:bold;margin:0;">${docTitle}</h2>
-        </div>
-        <div style="font-family:'Times New Roman',serif;font-size:11pt;line-height:1.5;text-align:justify;white-space:pre-wrap;">${filled}</div>`;
-      document.getElementById("pdf-modal-title").textContent = modo === "aviso" ? "Termo de quitação (com rubrica digital)" : "Termo de quitação (para assinatura do sócio)";
-      document.getElementById("pdf-document-content").innerHTML = docHtml;
-      document.getElementById("pdf-view-overlay").classList.add("active");
-      if (window.lucide) lucide.createIcons();
+      const unidade = [codEmp, quadraLote].filter(Boolean).join(" - ");
+      const topo = `<div style="font-family:'Times New Roman',serif;font-size:11pt;color:#111;margin:0 0 14px;">Título: ${this._escDoc(titulo)} | Unidade: ${this._escDoc(unidade || "____")}</div>
+        <h2 style="text-align:center;color:#111;font-size:13pt;font-weight:bold;letter-spacing:0.04em;margin:0 0 18px;">${docTitle}</h2>`;
+      // Cláusulas 3 e 4 sempre na segunda página.
+      const corte = filled.search(/(^|\n)\s*(<(strong|b)[^>]*>\s*)?3\.\s/);
+      const parte1 = corte > 0 ? filled.slice(0, corte) : filled;
+      const parte2 = corte > 0 ? filled.slice(corte).replace(/^\s*\n+/, "") : "";
+      const corpoCss = "font-family:'Times New Roman',serif;font-size:11pt;line-height:1.5;text-align:justify;white-space:pre-wrap;color:#111;";
+      const paginas = [`${topo}<div class="qui-corpo" style="${corpoCss}">${parte1.replace(/\s+$/, "")}</div>`];
+      if (parte2) paginas.push(`<div class="qui-corpo" style="${corpoCss}">${parte2}</div>`);
+      const nome = (ctx.customer && ctx.customer.name) || ctx.sale.customerName || "";
+      const fileName = typeof window.buildFichaPdfFilename === "function"
+        ? window.buildFichaPdfFilename("Termo de quitação", { contrato: unidade, costCenterId: codEmp, titulo, nome })
+        : "Termo de quitação | Título " + titulo + ".pdf";
+      await this._baixarPaginasPdf(paginas, fileName);
     } catch (err) {
       console.error("Erro ao gerar termo de quitação", err);
       alert("Não foi possível gerar o termo de quitação. Verifique o modelo em Documentos padrões e tente de novo.");
     }
+  },
+
+  /** A4 retrato, uma imagem por página, com a faixa verde, o logo e "N de M" como na impressão. */
+  async _baixarPaginasPdf(paginas, fileName) {
+    if (typeof html2canvas !== "function" || !window.jspdf) throw new Error("Gerador de PDF indisponível.");
+    const W = 794, H = 1123, PAD_X = 57, PAD_TOP = 38, PAD_BOTTOM = 64;
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF("p", "mm", "a4");
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    for (let i = 0; i < paginas.length; i++) {
+      const page = document.createElement("div");
+      page.style.cssText = `position:fixed;left:-13000px;top:0;width:${W}px;height:${H}px;background:#fff;box-sizing:border-box;padding:${PAD_TOP}px ${PAD_X}px ${PAD_BOTTOM}px;overflow:hidden;color:#111;`;
+      page.innerHTML = `
+        <div style="height:5px;background:#105436;margin:0 0 10px;"></div>
+        <div style="display:flex;justify-content:flex-end;margin-bottom:8px;"><img src="Banner/logo moura leite loteamentos.png" style="height:60px;object-fit:contain;"></div>
+        <div class="qui-pg">${paginas[i]}</div>
+        <div style="position:absolute;right:${PAD_X}px;bottom:28px;font-family:'Times New Roman',serif;font-size:9pt;color:#111;">${i + 1} de ${paginas.length}</div>`;
+      document.body.appendChild(page);
+      try {
+        await Promise.all(Array.from(page.querySelectorAll("img")).map((img) => img.complete ? null : new Promise((r) => { img.onload = img.onerror = r; })));
+        const area = page.querySelector(".qui-pg");
+        const limite = H - PAD_BOTTOM - area.offsetTop;
+        let pt = 11;
+        while (area.scrollHeight > limite && pt > 9) {
+          pt -= 0.25;
+          area.querySelectorAll(".qui-corpo").forEach((el) => { el.style.fontSize = pt + "pt"; });
+        }
+        const canvas = await html2canvas(page, { scale: 2, useCORS: true, backgroundColor: "#ffffff", logging: false, width: W, height: H });
+        if (i > 0) pdf.addPage();
+        pdf.addImage(canvas.toDataURL("image/jpeg", 0.95), "JPEG", 0, 0, pageW, pageH);
+      } finally {
+        page.remove();
+      }
+    }
+    pdf.save(fileName || "documento.pdf");
   },
 
   _docCfg(kind) {
@@ -1904,10 +2023,8 @@ const RelacionamentoApp = {
   _docSetResults(kind, html) {
     const el = this._docEl(kind, "-search-results");
     if (el) el.innerHTML = html;
-    if (kind === "terceiros") {
-      const st = document.getElementById("ter-modal-status");
-      if (st) st.innerHTML = html;
-    }
+    const st = document.getElementById(this._docCfg(kind).p + "-modal-status");
+    if (st) st.innerHTML = html;
     if (window.lucide) lucide.createIcons();
   },
 
@@ -2219,10 +2336,9 @@ const RelacionamentoApp = {
     if (dados.customerId && (titulo || contrato || dados.contractId)) {
       const seeded = this._docSaleFromGestao(dados, titulo, contrato, nome);
       RelacionamentoState[kind + "Matches"] = [seeded];
-      this.selecionarDocSimples(kind, 0);
-      return;
+      return this.selecionarDocSimples(kind, 0);
     }
-    this.buscarDocSimples(kind, { quiet: true });
+    return this.buscarDocSimples(kind, { quiet: true });
   },
 
   _docSaleFromGestao(dados, titulo, contrato, nome) {
@@ -2344,14 +2460,16 @@ const RelacionamentoApp = {
       if (kind === "terceiros") this._atualizarBtnGerarTerceiro();
       if (window.lucide) lucide.createIcons();
       this._docSetResults(kind, "");
-      if (kind === "terceiros") {
-        const st = document.getElementById("ter-modal-status");
-        if (st) st.innerHTML = `<span style="color:#15803d;font-weight:600;">Contrato carregado${contratoLabel && contratoLabel !== "—" ? " (" + this._escDoc(contratoLabel) + ")" : ""}. Preencha os dados do terceiro.</span>`;
-      }
       if (kind === "vencimento") {
         RelacionamentoState[kind].installments = adimplencia.installments || [];
-        this._setVencimentoBloqueado(!adimplencia.adimplente, adimplencia.label);
-        if (adimplencia.adimplente) {
+        const bloqueio = this._motivoBloqueioVencimento(RelacionamentoState[kind]);
+        if (bloqueio) {
+          RelacionamentoState[kind].bloqueio = bloqueio;
+          this._setVencimentoBloqueado(true, bloqueio);
+        } else {
+          this._setVencimentoBloqueado(!adimplencia.adimplente, adimplencia.label);
+        }
+        if (!bloqueio && adimplencia.adimplente) {
           const diaEl = document.getElementById("ven-dia");
           if (diaEl) diaEl.value = "";
           this._aplicarJanelaCalendarioVencimento(RelacionamentoState[kind].installments);
@@ -2389,6 +2507,11 @@ const RelacionamentoApp = {
       }
     }
     if (kind === "vencimento") {
+      const bloqueio = this._motivoBloqueioVencimento(ctx);
+      if (bloqueio) {
+        alert("Não é possível alterar o vencimento: " + bloqueio + ".");
+        return;
+      }
       const adimpl = RelacionamentoState.vencimento && RelacionamentoState.vencimento.adimplencia;
       if (adimpl && adimpl.adimplente === false) {
         alert("Não é possível alterar o vencimento: " + (adimpl.label || "o cliente possui parcelas vencidas") + ".");

@@ -5125,6 +5125,14 @@ circle.donut-segment {
   background: #f0fdf4;
   border-color: #86efac;
 }
+.moura-gestao-docs-item.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.moura-gestao-docs-item.is-disabled:hover {
+  background: #fff;
+  border-color: #e2e8f0;
+}
 .moura-gestao-docs-item i {
   width: 18px;
   height: 18px;
@@ -5132,7 +5140,7 @@ circle.donut-segment {
   flex-shrink: 0;
 }
 /* Abaixo do #pdf-view-overlay (1000) para o PDF gerado abrir por cima. */
-.ter-modal {
+.doc-modal {
   position: fixed;
   inset: 0;
   z-index: 990;
@@ -5142,16 +5150,48 @@ circle.donut-segment {
   background: rgba(15, 23, 42, 0.45);
   padding: 16px;
 }
-.ter-modal-panel {
-  width: min(1000px, 100%);
+.doc-modal-panel {
+  width: min(1240px, 100%);
   max-height: calc(100vh - 32px);
   overflow: visible;
   border-radius: 12px;
   box-shadow: 0 20px 50px rgba(15, 23, 42, 0.22);
 }
+.doc-modal-panel .crm-card-header {
+  background-color: #f3f4f6;
+  padding: 18px 28px;
+  border-bottom: 1px solid #e5e7eb;
+  border-radius: 12px 12px 0 0;
+}
+.doc-modal-sub {
+  margin-top: 6px;
+  font-size: 0.85rem;
+  color: #64748b;
+}
+.doc-modal-body {
+  padding: 26px 28px 28px;
+  min-height: 230px;
+  display: flex;
+  flex-direction: column;
+}
+.doc-modal-body > :last-child {
+  margin-top: auto !important;
+  padding-top: 24px;
+}
+.doc-modal-status:empty { display: none; }
+.doc-modal-status {
+  font-size: 0.85rem;
+  margin-bottom: 14px;
+}
+.doc-modal-panel .form-control {
+  height: 46px;
+  font-size: 0.95rem;
+}
+.doc-modal-panel label {
+  margin-bottom: 6px;
+}
 @media (max-width: 760px) {
-  .ter-modal-panel .form-group { grid-column: 1 / -1; }
-  .ter-modal-panel [style*="grid-template-columns: 3fr"] { grid-template-columns: 1fr !important; }
+  .doc-modal-panel .doc-modal-grid-ter { grid-template-columns: 1fr !important; }
 }
 .moura-gestao-docs-panel footer {
   padding: 10px 16px 14px;

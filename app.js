@@ -38799,6 +38799,7 @@ window.searchRelacionamento = async function() {
          unidade: empStr + (unitStr ? ` - ${unitStr}` : ''),
          dataVenda: dataVendaStr,
          statusHTML: `<span style="background: ${badgeColor}15; border: 1px solid ${badgeColor}40; color: ${badgeColor}; padding: 6px 14px; border-radius: 12px; font-size: 1rem; font-weight: 700; white-space: nowrap; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">${statusText}</span>`,
+         statusText,
          rawId: tituloId,
          isHighlight: isTarget,
          rawDate: c.contractDate ? new Date(c.contractDate).getTime() : 0,
@@ -38861,7 +38862,7 @@ window.searchRelacionamento = async function() {
           <td style="border-bottom: 1px solid var(--color-border); padding: 10px 10px; color: #1e293b; font-weight: 500; text-align: left; font-size: 0.75rem;">${r.dataVenda}</td>
           <td style="border-bottom: 1px solid var(--color-border); text-align: center; padding: 10px 10px;">${r.statusHTML.replace('font-size: 1rem;', 'font-size: 0.75rem;').replace('padding: 6px 14px;', 'padding: 4px 10px;')}</td>
           <td style="border-bottom: 1px solid var(--color-border); text-align: center; padding: 10px 10px; white-space: nowrap;">
-            <button type="button" class="btn btn-primary btn-sm" onclick="openGestaoDocumentoMenu({customerId:'${r.openCustomerId || customerId}',contractId:'${r.contractId || ''}',titulo:'${String(r.titulo || '').replace(/'/g, "\\'")}',contractNumber:'${String(r.contrato || '').replace(/'/g, "\\'")}',customerName:'${String(r.nome || '').replace(/'/g, "\\'")}',unidade:'${String(r.unidade || '').replace(/'/g, "\\'")}',empreendimento:'${String(r.empreendimento || '').replace(/'/g, "\\'")}'})" style="margin-right: 6px; padding: 6px 12px; font-size: 0.75rem; font-weight: 700; display: inline-flex; justify-content: center; align-items: center; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; border-radius: 6px;">
+            <button type="button" class="btn btn-primary btn-sm" onclick="openGestaoDocumentoMenu({customerId:'${r.openCustomerId || customerId}',contractId:'${r.contractId || ''}',titulo:'${String(r.titulo || '').replace(/'/g, "\\'")}',contractNumber:'${String(r.contrato || '').replace(/'/g, "\\'")}',customerName:'${String(r.nome || '').replace(/'/g, "\\'")}',unidade:'${String(r.unidade || '').replace(/'/g, "\\'")}',empreendimento:'${String(r.empreendimento || '').replace(/'/g, "\\'")}',status:'${String(r.statusText || '').replace(/'/g, "\\'")}'})" style="margin-right: 6px; padding: 6px 12px; font-size: 0.75rem; font-weight: 700; display: inline-flex; justify-content: center; align-items: center; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; border-radius: 6px;">
               <i data-lucide="briefcase" style="width:14px;height:14px; margin-right:4px;"></i> Gestão
             </button>
             <button class="btn btn-secondary btn-sm" data-customer-id="${r.openCustomerId || customerId}" data-title="${r.titulo || ''}" data-name="${(r.nome || '').replace(/"/g, '&quot;')}" data-unit="${(r.unidade || '').replace(/"/g, '&quot;')}" data-cc="${String((r.unidade || '').split(' - ')[0] || '').replace(/"/g, '&quot;')}" onclick="visualizarExtratoDireto(this)" style="margin-right: 6px; padding: 6px 12px; font-size: 0.75rem; font-weight: 700; display: inline-flex; justify-content: center; align-items: center; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; border-radius: 6px;">
@@ -38999,8 +39000,31 @@ window.openGestaoDocumentoMenu = function(ctx) {
             <i data-lucide="badge-check"></i> Termo de quitação
           </button>`;
   }
+  if (list) {
+    list.querySelectorAll(".moura-gestao-docs-item").forEach((b) => {
+      const m = String(b.getAttribute("onclick") || "").match(/escolherGestaoDocumento\('(\w+)'\)/);
+      const motivo = m ? window._gestaoDocBloqueio(m[1], overlay._ctx.status) : "";
+      b.classList.toggle("is-disabled", !!motivo);
+      b.title = motivo;
+    });
+  }
   overlay.style.display = "flex";
   if (window.lucide) window.lucide.createIcons();
+};
+
+/** Status vem da coluna Status da Gestão; vazio (ex.: aberto pela Cessão) não bloqueia aqui, a tela confere no Sienge. */
+window._gestaoDocBloqueio = function(tipo, status) {
+  const s = String(status || "").trim().toLowerCase();
+  if (!s) return "";
+  const distratado = /distrat|cancel/.test(s);
+  const quitado = /^quitado$/.test(s);
+  if (tipo === "quitacao" && !quitado) {
+    return "O termo de quitação só pode ser gerado para título quitado (status atual: " + status + ").";
+  }
+  if (tipo === "vencimento" && (quitado || distratado)) {
+    return "Não é possível alterar o vencimento de contrato " + (quitado ? "quitado" : "distratado/cancelado") + ".";
+  }
+  return "";
 };
 
 window.closeGestaoDocumentoMenu = function() {
@@ -39033,6 +39057,11 @@ window._fillGestaoDocCampos = function(tipo, dados) {
 window.escolherGestaoDocumento = function(tipo) {
   const overlay = document.getElementById("moura-gestao-docs-modal");
   const ctx = (overlay && overlay._ctx) || {};
+  const bloqueio = window._gestaoDocBloqueio(tipo, ctx.status);
+  if (bloqueio) {
+    alert(bloqueio);
+    return;
+  }
   closeGestaoDocumentoMenu();
   const customerId = ctx.customerId;
   const contractId = ctx.contractId;
@@ -39095,15 +39124,29 @@ window.escolherGestaoDocumento = function(tipo) {
     return;
   }
 
-  if (tipo === "terceiros" && window.RelacionamentoApp && typeof RelacionamentoApp.abrirTerceirosModal === "function") {
-    RelacionamentoApp.abrirTerceirosModal({
+  if ((tipo === "terceiros" || tipo === "vencimento") && window.RelacionamentoApp && typeof RelacionamentoApp.abrirDocModal === "function") {
+    RelacionamentoApp.abrirDocModal(tipo, {
       titulo: titulo && String(titulo) !== "—" ? (String(titulo).replace(/\D/g, "") || String(titulo)) : "",
       contrato: contractNumber ? String(contractNumber).trim() : "",
       nome: customerName ? String(customerName).trim() : "",
       customerId: customerId,
       contractId: contractId,
       unidade: ctx.unidade || "",
-      empreendimento: ctx.empreendimento || ""
+      empreendimento: ctx.empreendimento || "",
+      status: ctx.status || ""
+    });
+    return;
+  }
+  if (tipo === "quitacao" && window.RelacionamentoApp && typeof RelacionamentoApp.gerarQuitacaoDireto === "function") {
+    RelacionamentoApp.gerarQuitacaoDireto({
+      titulo: titulo && String(titulo) !== "—" ? (String(titulo).replace(/\D/g, "") || String(titulo)) : "",
+      contrato: contractNumber ? String(contractNumber).trim() : "",
+      nome: customerName ? String(customerName).trim() : "",
+      customerId: customerId,
+      contractId: contractId,
+      unidade: ctx.unidade || "",
+      empreendimento: ctx.empreendimento || "",
+      status: ctx.status || ""
     });
     return;
   }
