@@ -76,6 +76,77 @@ const MarketingBudgetApp = {
     return this.state.costCenters.find((c) => String(c.id) === String(this.state.ccId)) || null;
   },
 
+  idsComUnidade() {
+    const ids = new Set(this.state.ccsComUnidade || []);
+    const E = window.EstoqueComercialApp;
+    ((E && E.state && E.state.units) || []).forEach((u) => { if (u && u.enterpriseId) ids.add(String(u.enterpriseId)); });
+    try {
+      const raw = JSON.parse(localStorage.getItem("crm_estoque_posicao_v1") || "null");
+      ((raw && (raw.units || (raw.data && raw.data.units))) || []).forEach((u) => { if (u && u.enterpriseId) ids.add(String(u.enterpriseId)); });
+    } catch (e) {}
+    try {
+      const salvos = JSON.parse(localStorage.getItem("crm_cc_ids_com_unidade") || "[]");
+      (Array.isArray(salvos) ? salvos : []).forEach((id) => id && ids.add(String(id)));
+    } catch (e) {}
+    return ids;
+  },
+
+  idsComCarteira() {
+    const ids = new Set();
+    const clientes = (window.AppState && AppState.customers) || {};
+    Object.values(clientes).forEach((c) => { if (c && c.costCenterId != null && c.costCenterId !== "") ids.add(String(c.costCenterId)); });
+    return ids;
+  },
+
+  /** Empreendimentos no padrão Moura Leite (tipo loteamento/incorporação no cadastro de centros de custo, sem CC de departamento) que têm unidades no estoque ou carteira. */
+  empreendimentos() {
+    const E = window.EstoqueComercialApp;
+    let custom = {};
+    try { custom = JSON.parse(localStorage.getItem("crm_centros_custo_custom") || "{}") || {}; } catch (e) {}
+    const TIPOS = ["Loteamento Aberto", "Loteamento Fechado", "Incorporação"];
+    const base = this.state.costCenters.filter((c) => {
+      const id = String((c && c.id) || "").trim();
+      if (!(E && E.isEmpreendimentoCcId ? E.isEmpreendimentoCcId(id) : /^[12]/.test(id))) return false;
+      return !(E && E.isDeptOnlyCc && E.isDeptOnlyCc(c));
+    });
+    const tipados = base.filter((c) => TIPOS.includes((custom[c.id] || custom[String(c.id)] || {}).tipo_cc || ""));
+    const lista = tipados.length ? tipados : base;
+    const unidades = this.idsComUnidade();
+    const carteira = this.idsComCarteira();
+    if (!unidades.size && !carteira.size) return lista;
+    return lista.filter((c) => unidades.has(String(c.id)) || carteira.has(String(c.id)));
+  },
+
+  empreendimentoOptions(selId) {
+    const sel = String(selId || "");
+    const lista = this.empreendimentos();
+    const atual = sel && !lista.some((c) => String(c.id) === sel) ? this.state.costCenters.find((c) => String(c.id) === sel) : null;
+    return `<option value="">Selecione o empreendimento</option>`
+      + (atual ? [atual] : []).concat(lista).map((c) => `<option value="${this.esc(c.id)}" ${String(c.id) === sel ? "selected" : ""}>${this.esc(this.ccLabel(c))}</option>`).join("");
+  },
+
+  /** Sem estoque nem carteira carregados nesta sessão, lê do Firebase quais empreendimentos têm unidades. */
+  async carregarUnidades() {
+    const s = this.state;
+    if (s.ccsComUnidade || this.idsComUnidade().size || this.idsComCarteira().size) return false;
+    const fc = window.firebaseCollections;
+    if (!(window.firebaseDb && fc && fc.getDocs)) return false;
+    try {
+      const snap = await fc.getDocs(fc.collection(window.firebaseDb, "estoque_comercial"));
+      const ids = new Set();
+      snap.forEach((d) => {
+        const data = d.data() || {};
+        if (d.id !== "_meta" && data.enterpriseId && Array.isArray(data.units) && data.units.length) ids.add(String(data.enterpriseId));
+      });
+      s.ccsComUnidade = [...ids];
+      return ids.size > 0;
+    } catch (e) {
+      console.warn("[Budget] unidades por empreendimento", e);
+      s.ccsComUnidade = [];
+      return false;
+    }
+  },
+
   async carregarCcs() {
     const s = this.state;
     if (!s.costCenters.length) {
@@ -98,6 +169,7 @@ const MarketingBudgetApp = {
     }
     await this.carregarCcs();
     this.render();
+    if (await this.carregarUnidades()) this.render();
   },
 
   /** Centros de custo que compõem os gastos da obra; sem configuração, só o centro da própria obra. */
@@ -160,10 +232,8 @@ const MarketingBudgetApp = {
   },
 
   /* ---------- consulta ---------- */
-  onCcInput(raw) {
-    const val = String(raw || "").trim();
-    const cc = this.state.costCenters.find((c) => String(c.id) === val || this.ccLabel(c) === val || `${c.id} - ${c.name}` === val);
-    this.state.ccId = cc ? String(cc.id) : "";
+  onCcSelect(id) {
+    this.state.ccId = String(id || "");
   },
 
   onField(key, value) {
@@ -179,7 +249,7 @@ const MarketingBudgetApp = {
   async consultar() {
     const s = this.state;
     const input = document.getElementById("mkb-cc");
-    if (input) this.onCcInput(input.value);
+    if (input) this.onCcSelect(input.value);
     const cc = this.ccAtual();
     if (!cc) { alert("Escolha o empreendimento (centro de custo)."); return; }
     if (!s.startDate || !s.endDate || s.startDate > s.endDate) { alert("Informe um período válido."); return; }
@@ -897,14 +967,10 @@ const MarketingBudgetApp = {
   categoriasHtml() {
     const s = this.state;
     if (!Object.keys(s.categorias).length) return `<p class="mkb-muted" style="margin:0;">Nenhum título a pagar ${s.ccsCfg.length > 1 ? "destes centros de custo" : "deste centro de custo"} no período.</p>`;
-    const sel = new Set(this.categoriasSelecionadas());
-    const marcados = Object.values(s.categorias).filter((c) => sel.has(c.id)).sort((a, b) => b.total - a.total);
-    const resumo = marcados.length
-      ? marcados.slice(0, 6).map((c) => `${this.esc(c.nome)} <b>${this.moneyShort(c.total)}</b>`).join(" · ") + (marcados.length > 6 ? ` · e mais ${marcados.length - 6}` : "")
-      : "Nenhum plano marcado: os gastos ficam zerados.";
-    return `<div class="mkb-cats-row">
+    const nenhum = !this.categoriasSelecionadas().length;
+    return `<div class="mkb-cats-dir">
+        ${nenhum ? `<span class="mkb-cats-aviso">Nenhum plano marcado: os gastos ficam zerados.</span>` : ""}
         <div id="mkb-cats-slot">${window.MlEmpresaFilter ? MlEmpresaFilter.html(this.catOpts()) : ""}</div>
-        <p class="mkb-cats-resumo">${resumo}</p>
       </div>`;
   },
 
@@ -949,8 +1015,8 @@ const MarketingBudgetApp = {
       </div>
       ${r.previsto > 0 || ev.length ? `<p class="mkb-nota">${r.previsto > 0 ? `Previsões de marketing no período: <strong>${this.money(r.previsto)}</strong> (não entram no comprometido). ` : ""}${ev.length ? `Eventos cadastrados neste empreendimento: <strong>${ev.length}</strong> · orçado ${this.money(evOrcado)}.` : ""}</p>` : ""}
 
-      <div class="mkb-card">
-        <div class="mkb-card-h"><h3>Planos financeiros considerados marketing</h3><small>Marque na lista; os números atualizam ao fechar. Vale para todos os empreendimentos.</small></div>
+      <div class="mkb-card mkb-cats-row">
+        <div class="mkb-cats-tit"><h3>Planos financeiros considerados marketing</h3><small>Vale para todos os empreendimentos · os números atualizam ao fechar a lista</small></div>
         ${this.categoriasHtml()}
       </div>
 
@@ -1366,7 +1432,6 @@ const MarketingBudgetApp = {
     if (!root) return;
     const s = this.state;
     const cc = this.ccAtual();
-    const opts = s.costCenters.map((c) => `<option value="${this.esc(this.ccLabel(c))}"></option>`).join("");
     const corpo = s.loading
       ? `<div class="mkb-card" style="text-align:center;padding:40px;color:#64748b;"><div class="spinner" style="margin:0 auto 12px;"></div><p id="mkb-progress" style="margin:0;">${this.esc(s.progress)}</p></div>`
       : (s.error ? `<div class="mkb-card" style="color:#b91c1c;">${this.esc(s.error)}</div>`
@@ -1385,9 +1450,9 @@ const MarketingBudgetApp = {
         #marketing-budget-root .mkb-card-h small, #marketing-budget-root .mkb-muted { color:#64748b; font-size:0.75rem; font-weight:400; }
         #marketing-budget-root .mkb-filtros { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; }
         #marketing-budget-root .mkb-filtros label { display:block; font-size:0.72rem; font-weight:700; color:#475569; text-transform:uppercase; margin-bottom:4px; }
-        #marketing-budget-root .mkb-filtros input { height:38px; padding:0 10px; border:1px solid #cbd5e1; border-radius:8px; font:inherit; font-size:0.85rem; box-sizing:border-box; background:#fff; }
+        #marketing-budget-root .mkb-filtros input, #marketing-budget-root .mkb-filtros select { height:38px; padding:0 10px; border:1px solid #cbd5e1; border-radius:8px; font:inherit; font-size:0.85rem; box-sizing:border-box; background:#fff; }
         #marketing-budget-root .mkb-filtros .mkb-f-cc { flex:1 1 360px; }
-        #marketing-budget-root .mkb-filtros .mkb-f-cc input { width:100%; }
+        #marketing-budget-root .mkb-filtros .mkb-f-cc select { width:100%; cursor:pointer; }
         #marketing-budget-root .mkb-config { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:16px; }
         #marketing-budget-root .mkb-cfg-item span { display:block; font-size:0.72rem; font-weight:700; color:#64748b; text-transform:uppercase; }
         #marketing-budget-root .mkb-cfg-item strong { display:block; font-size:1.35rem; color:#0f172a; margin-top:4px; }
@@ -1405,12 +1470,15 @@ const MarketingBudgetApp = {
         #marketing-budget-root .mkb-bar { height:6px; background:#e2e8f0; border-radius:999px; overflow:hidden; margin-top:8px; }
         #marketing-budget-root .mkb-bar i { display:block; height:100%; }
         #marketing-budget-root .mkb-nota { margin:0; font-size:0.8rem; color:#475569; }
-        #marketing-budget-root .mkb-cats-row { display:flex; align-items:flex-end; gap:16px; }
-        #marketing-budget-root .mkb-cats-row .ml-emp-filter { flex:0 0 440px; width:440px; max-width:100%; }
+        #marketing-budget-root .mkb-cats-row { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+        #marketing-budget-root .mkb-cats-tit h3 { margin:0; font-size:0.95rem; color:#105436; }
+        #marketing-budget-root .mkb-cats-tit small { color:#64748b; font-size:0.75rem; }
+        #marketing-budget-root .mkb-cats-dir { display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:flex-end; }
+        #marketing-budget-root .mkb-cats-aviso { color:#b91c1c; font-size:0.78rem; font-weight:700; }
+        #marketing-budget-root .mkb-cats-row .ml-emp-filter { width:360px; max-width:100%; }
+        #marketing-budget-root .mkb-cats-row .ml-emp-filter-label { display:none; }
         #marketing-budget-root .mkb-cats-row .ml-emp-filter-btn { height:38px; min-height:38px; }
         #marketing-budget-root .mkb-cats-row .ml-emp-filter-list { max-height:300px; }
-        #marketing-budget-root .mkb-cats-resumo { flex:1; min-width:0; margin:0 0 9px; font-size:0.76rem; color:#475569; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-        #marketing-budget-root .mkb-cats-resumo b { color:#105436; font-weight:700; }
         #marketing-budget-root tr.mkb-click { cursor:pointer; }
         #marketing-budget-root tr.mkb-click:hover td { background:#e7f6ee; }
         #marketing-budget-root .mkb-charts { display:grid; grid-template-columns:2fr 1fr; gap:14px; }
@@ -1463,9 +1531,7 @@ const MarketingBudgetApp = {
           <div class="mkb-card mkb-filtros">
             <div class="mkb-f-cc">
               <label for="mkb-cc">Empreendimento</label>
-              <input id="mkb-cc" list="mkb-cc-list" placeholder="Digite o ID ou o nome do empreendimento" value="${this.esc(cc ? this.ccLabel(cc) : "")}" ${s.loading ? "disabled" : ""}
-                onchange="MarketingBudgetApp.onCcInput(this.value)">
-              <datalist id="mkb-cc-list">${opts}</datalist>
+              <select id="mkb-cc" ${s.loading ? "disabled" : ""} onchange="MarketingBudgetApp.onCcSelect(this.value)">${this.empreendimentoOptions(cc ? cc.id : "")}</select>
             </div>
             <div>
               <label for="mkb-de">De (vencimento)</label>
@@ -1597,7 +1663,7 @@ const MarketingConfigApp = {
       s.carregando = true;
       this.render();
       await this.B.carregarCcs();
-      await this.carregarLista();
+      await Promise.all([this.carregarLista(), this.B.carregarUnidades()]);
       s.carregando = false;
       if (s.ccId) await this.selecionar(s.ccId);
       else this.render();
@@ -1639,10 +1705,8 @@ const MarketingConfigApp = {
     this.state.lista = lista;
   },
 
-  onObraInput(raw) {
-    const val = String(raw || "").trim();
-    const cc = this.ccs().find((c) => String(c.id) === val || this.B.ccLabel(c) === val || `${c.id} - ${c.name}` === val);
-    this.selecionar(cc ? String(cc.id) : "");
+  onObraSelect(id) {
+    this.selecionar(String(id || ""));
   },
 
   async selecionar(id) {
@@ -1846,7 +1910,6 @@ const MarketingConfigApp = {
     const B = this.B;
     const s = this.state;
     const cc = this.ccDe(s.ccId);
-    const opts = this.ccs().map((c) => `<option value="${B.esc(B.ccLabel(c))}"></option>`).join("");
     this.bindFiltro();
     const form = s.ccId ? `
           <div class="mkc-grid">
@@ -1875,7 +1938,7 @@ const MarketingConfigApp = {
         #marketing-config-root .mkc-card h3 { margin:0 0 10px; font-size:0.95rem; color:#105436; }
         #marketing-config-root .mkc-muted { color:#64748b; font-size:0.75rem; font-weight:400; }
         #marketing-config-root label, #marketing-config-root .ml-emp-filter-label { display:block; font-size:0.72rem; font-weight:700; color:#475569; text-transform:uppercase; margin-bottom:4px; }
-        #marketing-config-root .mkc-obra input { width:100%; max-width:560px; height:38px; padding:0 10px; border:1px solid #cbd5e1; border-radius:8px; font:inherit; font-size:0.85rem; box-sizing:border-box; }
+        #marketing-config-root .mkc-obra select { cursor:pointer; background:#fff; width:100%; max-width:560px; height:38px; padding:0 10px; border:1px solid #cbd5e1; border-radius:8px; font:inherit; font-size:0.85rem; box-sizing:border-box; }
         #marketing-config-root .mkc-grid { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(0,1fr); gap:20px; margin-top:16px; }
         #marketing-config-root .mkc-pct { display:flex; align-items:center; gap:6px; }
         #marketing-config-root .mkc-pct input { width:110px; height:38px; padding:0 10px; border:1px solid #cbd5e1; border-radius:8px; font-size:1rem; font-weight:700; text-align:right; }
@@ -1915,9 +1978,7 @@ const MarketingConfigApp = {
           <div class="mkc-card">
             <div class="mkc-obra">
               <label for="mkc-obra">Empreendimento</label>
-              <input id="mkc-obra" list="mkc-obra-list" placeholder="Digite o ID ou o nome do empreendimento" value="${B.esc(cc ? B.ccLabel(cc) : (s.ccId || ""))}" ${s.carregando ? "disabled" : ""}
-                onchange="MarketingConfigApp.onObraInput(this.value)">
-              <datalist id="mkc-obra-list">${opts}</datalist>
+              <select id="mkc-obra" ${s.carregando ? "disabled" : ""} onchange="MarketingConfigApp.onObraSelect(this.value)">${B.empreendimentoOptions(s.ccId)}</select>
             </div>
             ${s.carregando ? `<p class="mkc-muted" style="margin:12px 0 0;">Carregando…</p>` : form}
           </div>

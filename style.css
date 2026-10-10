@@ -2938,6 +2938,9 @@ circle.donut-segment {
 .est-conf-grid small b,
 .est-conf.is-ok .est-conf-grid > div:last-child small b,
 .est-conf.is-bad .est-conf-grid > div:last-child small b { display: inline; margin: 0; font-size: inherit; color: #334155; }
+.est-conf-rateio { margin: 6px 0 0; font-size: 0.76rem; color: #475569; }
+.est-conf-rateio b { color: #105436; }
+.est-conf-falha { display: block; color: #b91c1c; font-weight: 700; }
 .est-conf-det { margin-top: 10px; font-size: 0.8rem; color: #334155; }
 .est-conf-det summary { cursor: pointer; font-weight: 700; }
 .est-conf-det ul { margin: 6px 0 0; padding-left: 18px; max-height: 180px; overflow: auto; }

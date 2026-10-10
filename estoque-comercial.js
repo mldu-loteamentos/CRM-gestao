@@ -3084,7 +3084,13 @@ const EstoqueComercialApp = {
       (r.units || []).forEach((x) => {
         if (x && x.id != null && !b.units.some((y) => y.id === String(x.id))) b.units.push({ id: String(x.id), name: x.name || "" });
       });
-      (r.installments || []).forEach((p) => { if (p) b.parcelas[String(p.id) + "|" + String(p.dueDate || "")] = p; });
+      // Título rateado entre centros de custo vem em uma linha por centro, cada uma com a sua fatia da parcela.
+      const cc = String(r._cc || "");
+      (r.installments || []).forEach((p) => {
+        if (!p) return;
+        const k = String(p.id) + "|" + String(p.dueDate || "");
+        (b.parcelas[k] = b.parcelas[k] || {})[cc] = p;
+      });
     });
     return Object.values(map).map((b) => {
       let aberto = 0;
@@ -3093,35 +3099,69 @@ const EstoqueComercialApp = {
       let recebido = 0;
       let ultimaBaixa = "";
       const abertas = [];
-      Object.values(b.parcelas).forEach((p) => {
-        const saldo = Number(p.currentBalance) || 0;
-        const due = String(p.dueDate || "").slice(0, 10);
+      Object.values(b.parcelas).forEach((partes) => {
+        const ps = Object.values(partes);
+        const saldo = ps.reduce((t, p) => t + (Number(p.currentBalance) || 0), 0);
+        const due = String(ps[0].dueDate || "").slice(0, 10);
         if (saldo > 0.009) {
           aberto += saldo;
           const atrasada = !!due && due < hoje;
           if (atrasada) {
             vencido += saldo;
-            vencidoComAcrescimo += Number(p.currentBalanceWithAddition) > saldo ? Number(p.currentBalanceWithAddition) : saldo;
+            vencidoComAcrescimo += ps.reduce((t, p) => t + Math.max(Number(p.currentBalanceWithAddition) || 0, Number(p.currentBalance) || 0), 0);
           }
           abertas.push({ due, val: saldo, overdue: atrasada });
         }
-        (p.receipts || []).forEach((rc) => {
+        ps.forEach((p) => (p.receipts || []).forEach((rc) => {
           if (/distrat|cancel|reparcel|repactu/i.test(String(rc && rc.type || ""))) return;
           recebido += Number(rc.netReceipt != null ? rc.netReceipt : rc.value) || 0;
           const d = String(rc.date || "").slice(0, 10);
           if (d > ultimaBaixa) ultimaBaixa = d;
-        });
+        }));
       });
       abertas.sort((x, y) => x.due.localeCompare(y.due));
       return { ...b, aberto, vencido, vencidoComAcrescimo, recebido, ultimaBaixa, nParcelas: Object.keys(b.parcelas).length, abertas: abertas.slice(0, 24) };
     });
   },
 
+  /** Centros de departamento do mesmo empreendimento (ex.: "… - PARCERIA") que podem ter parte do rateio dos títulos. */
+  ccsDoRateio(ccId) {
+    const lista = this.state.enterprises || [];
+    const main = lista.find((c) => String(c.id) === String(ccId));
+    const nome = this.foldCcName(main && main.name).trim();
+    if (!nome) return [];
+    return lista
+      .filter((c) => String(c.id) !== String(ccId) && this.isDeptOnlyCc(c) && this.foldCcName(c.name).trim().startsWith(nome + " "))
+      .map((c) => ({ id: String(c.id), name: c.name || "" }));
+  },
+
+  /** Extrato do centro mais a fatia dos mesmos títulos nos centros do rateio, para compor o título inteiro. */
+  async fetchExtratoTituloInteiro(ccId) {
+    const rows = (await this.fetchExtratoCc(ccId)).map((r) => ({ ...r, _cc: String(ccId) }));
+    const ids = new Set(rows.filter((r) => r && r.billReceivableId != null).map((r) => String(r.billReceivableId)));
+    const somados = [];
+    const falhas = [];
+    for (const cc of this.ccsDoRateio(ccId)) {
+      this.setProgress(`Conferindo ${ccId}: somando a parte do centro ${cc.id} nos títulos rateados…`);
+      try {
+        const deles = (await this.fetchExtratoCc(cc.id)).filter((r) => r && ids.has(String(r.billReceivableId)));
+        if (!deles.length) continue;
+        deles.forEach((r) => rows.push({ ...r, _cc: cc.id }));
+        somados.push({ id: cc.id, name: cc.name, titulos: new Set(deles.map((r) => String(r.billReceivableId))).size });
+      } catch (e) {
+        console.warn("[Estoque] extrato do rateio", cc.id, e);
+        falhas.push(cc.id);
+      }
+    }
+    return { rows, somados, falhas };
+  },
+
   /** Recalcula as unidades do centro pelo extrato do Sienge e guarda o confronto Sienge × Integra. */
   async conferirComSienge(ccId) {
     if (typeof window.siengeFetchWithRetry !== "function") return null;
     this.setProgress(`Conferindo ${ccId} com o Contas a Receber do Sienge…`);
-    const bills = this.agruparExtratoCc(await this.fetchExtratoCc(ccId));
+    const extrato = await this.fetchExtratoTituloInteiro(ccId);
+    const bills = this.agruparExtratoCc(extrato.rows);
     const vivos = bills.filter((b) => !b.revoked && b.nParcelas > 0);
     const agora = new Date().toISOString();
     const hoje = this.todayStr();
@@ -3240,7 +3280,9 @@ const EstoqueComercialApp = {
       semTitulo,
       distratadosNovos,
       reabertos,
-      quitadosNovos
+      quitadosNovos,
+      rateio: extrato.somados,
+      rateioFalhas: extrato.falhas
     };
     this.saveCache();
     await this.saveFirebaseCc(ccId);
@@ -3266,6 +3308,10 @@ const EstoqueComercialApp = {
         <strong>Conferência com o Contas a Receber do Sienge · ${esc(c.ccId)}</strong>
         <small>${hora} · ${c.reabertos} reaberto(s) · ${c.quitadosNovos} quitado(s)${(c.distratadosNovos || []).length ? ` · ${c.distratadosNovos.length} distratado(s)` : ""} pela conferência</small>
       </div>
+      ${(c.rateio || []).length || (c.rateioFalhas || []).length ? `<p class="est-conf-rateio">
+        ${(c.rateio || []).length ? `Título inteiro: somada a parte rateada em ${c.rateio.map((r) => `<b>${esc(r.id)}</b>${r.name ? " " + esc(r.name) : ""} (${r.titulos} título(s))`).join(", ")}.` : ""}
+        ${(c.rateioFalhas || []).length ? `<span class="est-conf-falha">Não consegui ler o centro ${c.rateioFalhas.map(esc).join(", ")}: os títulos rateados podem estar incompletos.</span>` : ""}
+      </p>` : ""}
       <div class="est-conf-grid">
         <div><label>Sienge · a receber</label><b>${this.money(c.sienge.aReceber)}</b><small>${c.sienge.titulos} título(s) de ${c.sienge.clientes} cliente(s)</small>
           <small>Vencido (principal) <b>${this.money(c.sienge.vencido)}</b>${c.sienge.titulosVencidos != null ? ` em ${c.sienge.titulosVencidos} título(s)` : ""}${acresc > 0.009 ? ` · com juros e multa ${this.money(c.sienge.vencidoAdd)}` : ""}</small></div>

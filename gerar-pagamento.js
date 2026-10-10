@@ -29,6 +29,7 @@ const GerarPagamentoApp = {
     selManual: {},
     validacao: { feitos: 0, total: 0, rodando: false },
     gerandoLote: "",
+    roboLote: "",
     lotesAbertos: {},
     credores: {},
     gen: 0
@@ -36,6 +37,8 @@ const GerarPagamentoApp = {
 
   LOTES_COLLECTION: "pagamento_lotes",
   LOTES_LOCAL: "crm_pagamento_lotes",
+  ROBO_URL: "http://127.0.0.1:7788",
+  ROBO_TOKEN_KEY: "gp_robo_token",
 
   FILTROS: [
     { id: "todos", label: "Todos" },
@@ -648,8 +651,43 @@ const GerarPagamentoApp = {
     });
   },
 
+  loteNoSienge(l) {
+    const st = l && l.sienge && l.sienge.status;
+    return st === "gerado" || st === "aprovado";
+  },
+
+  temTitulo(l, chave) {
+    return (l.itens || []).some((i) => this.chaveTitulo(i.titulo, i.parcela) === chave);
+  },
+
+  /* Só o lote confirmado no Sienge prende o título; o que ficou só no Integra não impede gerar de novo. */
   loteIntegraDe(chave) {
-    return this.state.lotes.find((l) => (l.itens || []).some((i) => this.chaveTitulo(i.titulo, i.parcela) === chave)) || null;
+    return this.state.lotes.find((l) => this.loteNoSienge(l) && this.temTitulo(l, chave)) || null;
+  },
+
+  lotePendenteDe(chave) {
+    return this.state.lotes.find((l) => !this.loteNoSienge(l) && this.temTitulo(l, chave)) || null;
+  },
+
+  /** Tira os títulos de lotes que não chegaram ao Sienge; lote que fica vazio é apagado. */
+  async limparPendentes(chaves) {
+    const s = this.state;
+    const alvo = new Set(chaves);
+    const fc = window.firebaseCollections;
+    for (const l of s.lotes.filter((x) => !this.loteNoSienge(x) && (x.itens || []).some((i) => alvo.has(this.chaveTitulo(i.titulo, i.parcela))))) {
+      const resto = (l.itens || []).filter((i) => !alvo.has(this.chaveTitulo(i.titulo, i.parcela)));
+      if (resto.length) {
+        l.itens = resto;
+        l.total = Math.round(resto.reduce((t, i) => t + (Number(i.valor) || 0), 0) * 100) / 100;
+        await this.salvarLote(l);
+        continue;
+      }
+      s.lotes = s.lotes.filter((x) => x.id !== l.id);
+      this.salvarLotesLocal(this.lotesLocal().filter((x) => x.id !== l.id));
+      if (window.firebaseDb && fc && fc.deleteDoc) {
+        try { await fc.deleteDoc(fc.doc(window.firebaseDb, this.LOTES_COLLECTION, l.id)); } catch (e) { console.warn("[Gerar Pagamento] apagar lote pendente", l.id, e); }
+      }
+    }
   },
 
   /* Títulos em aberto agrupados por conta de parceria e dia de vencimento (um lote por conta por dia).
@@ -675,7 +713,7 @@ const GerarPagamentoApp = {
       const inteiro = contasDoTitulo[chave].size === 1 && r.tituloAPagar != null;
       if (!g.itens[chave]) {
         g.itens[chave] = {
-          chave, titulo: r.titulo, parcela: r.parcela, credor: r.credor, documento: r.documento,
+          chave, titulo: r.titulo, parcela: r.parcela, credor: r.credor, credorId: r.credorId, companyId: r.companyId, documento: r.documento,
           vencimento: r.vencimento, valor: 0, aPagar: 0, ccs: [], inteiro
         };
         g.ordem.push(chave);
@@ -796,15 +834,12 @@ const GerarPagamentoApp = {
       this.paintTitulos();
       return;
     }
+    await this.limparPendentes(itens.map((it) => it.chave));
     const agora = new Date();
     const pad = (n) => String(n).padStart(2, "0");
     const id = "L" + agora.getFullYear() + pad(agora.getMonth() + 1) + pad(agora.getDate()) + "-" + pad(agora.getHours()) + pad(agora.getMinutes()) + pad(agora.getSeconds())
       + "-" + String(g.contaKey || "").replace(/[^\w]/g, "").slice(-6) + "-" + String(g.dia || "").replace(/-/g, "").slice(4);
-    let usuario = "Usuário";
-    try {
-      const u = window.MouraAuth && MouraAuth.getCurrentUser && MouraAuth.getCurrentUser();
-      usuario = (u && (u.name || u.email)) || usuario;
-    } catch (e) {}
+    const usuario = this.usuarioAtual();
     const lote = JSON.parse(JSON.stringify({
       id,
       criadoEm: agora.toISOString(),
@@ -814,31 +849,174 @@ const GerarPagamentoApp = {
       conta: g.conta,
       total: Math.round(total * 100) / 100,
       itens: itens.map((it) => ({
-        titulo: it.titulo, parcela: it.parcela, credor: it.credor, documento: it.documento,
+        titulo: it.titulo, parcela: it.parcela, credor: it.credor, credorId: it.credorId || "", companyId: it.companyId || "", documento: it.documento,
         vencimento: it.vencimento, valor: Math.round(it.aPagar * 100) / 100,
         ccs: it.ccs.map((c) => c.id + " - " + c.nome).join(" / "),
         forma: it.pag ? it.pag.check.forma : "",
         linhaDigitavel: it.pag ? it.pag.check.linhaFmt || "" : "",
         conferencia: it.pag ? it.pag.check.resumo : "Não conferido"
-      }))
+      })),
+      sienge: { status: "pendente", historico: [] }
     }));
-    let salvoRemoto = false;
-    const fc = window.firebaseCollections;
-    if (window.firebaseDb && fc && fc.setDoc) {
-      try {
-        await fc.setDoc(fc.doc(window.firebaseDb, this.LOTES_COLLECTION, id), lote);
-        salvoRemoto = true;
-      } catch (e) {
-        console.warn("[Gerar Pagamento] salvar lote", e);
-      }
-    }
     s.lotes = s.lotes.concat([lote]);
-    this.salvarLotesLocal(this.lotesLocal().filter((l) => l.id !== id).concat([lote]));
+    const salvoRemoto = await this.salvarLote(lote);
     itens.forEach((it) => { s.sel[it.selKey] = false; });
-    this.baixarLoteExcel(lote);
     s.gerandoLote = "";
     this.paintTitulos();
-    if (!salvoRemoto) alert("O lote foi gerado e baixado, mas ficou salvo só neste computador (não consegui gravar no Firebase).");
+    if (!salvoRemoto) alert("O lote foi gerado, mas ficou salvo só neste computador (não consegui gravar no Firebase).");
+    await this.enviarAoSienge(id);
+  },
+
+  usuarioAtual() {
+    try {
+      const u = (window.MouraAuth && MouraAuth.getCurrentUser && MouraAuth.getCurrentUser()) || (window.AppState && AppState.currentUser);
+      return (u && (u.name || u.email)) || "Usuário";
+    } catch (e) {
+      return "Usuário";
+    }
+  },
+
+  async salvarLote(lote) {
+    this.salvarLotesLocal(this.lotesLocal().filter((l) => l.id !== lote.id).concat([lote]));
+    const fc = window.firebaseCollections;
+    if (!(window.firebaseDb && fc && fc.setDoc)) return false;
+    try {
+      await fc.setDoc(fc.doc(window.firebaseDb, this.LOTES_COLLECTION, lote.id), JSON.parse(JSON.stringify(lote)));
+      return true;
+    } catch (e) {
+      console.warn("[Gerar Pagamento] salvar lote", e);
+      return false;
+    }
+  },
+
+  podeAprovar() {
+    if (typeof window.isCrmSuperAdmin === "function" && window.isCrmSuperAdmin()) return true;
+    return typeof window.hasCrmPerm === "function" && window.hasCrmPerm("sub_fin_cp_gerar_pagamento_editar");
+  },
+
+  async roboChamar(caminho, corpo) {
+    let token = "";
+    try { token = localStorage.getItem(this.ROBO_TOKEN_KEY) || ""; } catch (e) {}
+    for (let tentativa = 0; tentativa < 2; tentativa++) {
+      if (!token) {
+        token = String(prompt("Cole o código do robô do Sienge (aparece na janela \"Iniciar robô\" deste computador):") || "").trim();
+        if (!token) return { ok: false, cancelado: true, erro: "Código do robô não informado." };
+        try { localStorage.setItem(this.ROBO_TOKEN_KEY, token); } catch (e) {}
+      }
+      let resp;
+      try {
+        resp = await fetch(this.ROBO_URL + caminho, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Robo-Token": token },
+          body: JSON.stringify(corpo)
+        });
+      } catch (e) {
+        return { ok: false, offline: true, erro: "O robô do Sienge não está aberto neste computador." };
+      }
+      const r = await resp.json().catch(() => ({ ok: false, erro: "Resposta inválida do robô." }));
+      if (resp.status !== 401) return r;
+      try { localStorage.removeItem(this.ROBO_TOKEN_KEY); } catch (e) {}
+      token = "";
+      alert("O código do robô não confere. Copie de novo o código mostrado na janela \"Iniciar robô\".");
+    }
+    return { ok: false, erro: "Código do robô inválido." };
+  },
+
+  async registrarSienge(lote, acao, r, extra) {
+    const sg = lote.sienge || { historico: [] };
+    sg.historico = (sg.historico || []).concat([{
+      acao, por: this.usuarioAtual(), em: new Date().toISOString(), ok: !!r.ok, msg: r.ok ? (r.numeroSienge ? "Lote Sienge nº " + r.numeroSienge : "OK") : r.erro || ""
+    }]).slice(-30);
+    Object.assign(sg, extra);
+    lote.sienge = sg;
+    await this.salvarLote(lote);
+  },
+
+  async enviarAoSienge(id) {
+    const s = this.state;
+    const lote = s.lotes.find((l) => l.id === id);
+    if (!lote || s.roboLote) return;
+    const sg = lote.sienge || {};
+    if (sg.status === "gerado" || sg.status === "aprovado") return;
+    const ocupados = (lote.itens || []).filter((i) => {
+      const k = this.chaveTitulo(i.titulo, i.parcela);
+      return s.loteSienge[k] || this.loteIntegraDe(k);
+    });
+    if (ocupados.length) {
+      alert(`Não dá para enviar o lote ${id}: estes títulos já estão em outro lote no Sienge.\n\n${ocupados.slice(0, 8).map((i) => `• ${i.titulo}/${i.parcela || 1} ${i.credor || ""}`).join("\n")}\n\nExclua este lote e gere de novo com os títulos livres.`);
+      return;
+    }
+    s.roboLote = id;
+    this.paintTitulos();
+    const r = await this.roboChamar("/lotes/gerar", { lote, usuario: this.usuarioAtual() });
+    s.roboLote = "";
+    if (r.offline || r.cancelado) {
+      this.paintTitulos();
+      alert(`Lote ${id} salvo no Integra, mas ainda não foi criado no Sienge.\n\n${r.erro}\nAbra "Iniciar robô" na pasta robo-sienge e clique em "Enviar ao Sienge" na lista de lotes gerados.`);
+      return;
+    }
+    if (r.ok) {
+      await this.registrarSienge(lote, "gerar", r, { status: "gerado", numero: r.numeroSienge || "", geradoEm: new Date().toISOString(), geradoPor: this.usuarioAtual(), erro: "" });
+    } else {
+      await this.registrarSienge(lote, "gerar", r, { status: "erro", erro: r.erro || "Falha no robô." });
+    }
+    this.paintTitulos();
+    if (!r.ok) alert(`O robô não conseguiu criar o lote ${id} no Sienge:\n\n${r.erro || "Falha no robô."}`);
+  },
+
+  async aprovarNoSienge(id) {
+    const s = this.state;
+    const lote = s.lotes.find((l) => l.id === id);
+    if (!lote || s.roboLote) return;
+    const sg = lote.sienge || {};
+    if (sg.status !== "gerado") return;
+    if (!this.podeAprovar()) {
+      alert("Você não tem permissão para aprovar lotes de pagamento (precisa de Gerar Pagamento · editar).");
+      return;
+    }
+    const pergunta = `Aprovar no Sienge o lote ${sg.numero ? "nº " + sg.numero : id}: ${(lote.itens || []).length} título(s), total de ${this.money(lote.total)}, pela conta ${this.contaLabel(lote.conta)}?\n\nA aprovação fica registrada em seu nome.`;
+    const okConf = typeof window.mouraConfirm === "function" ? await window.mouraConfirm(pergunta) : confirm(pergunta);
+    if (!okConf) return;
+    s.roboLote = id;
+    this.paintTitulos();
+    const r = await this.roboChamar("/lotes/aprovar", { lote, numeroSienge: sg.numero || "", usuario: this.usuarioAtual() });
+    s.roboLote = "";
+    if (r.offline || r.cancelado) {
+      this.paintTitulos();
+      alert(`${r.erro}\nAbra "Iniciar robô" na pasta robo-sienge e tente aprovar de novo.`);
+      return;
+    }
+    if (r.ok) {
+      await this.registrarSienge(lote, "aprovar", r, { status: "aprovado", aprovadoEm: new Date().toISOString(), aprovadoPor: this.usuarioAtual(), erro: "" });
+    } else {
+      await this.registrarSienge(lote, "aprovar", r, { erro: r.erro || "Falha no robô." });
+    }
+    this.paintTitulos();
+    if (!r.ok) alert(`O robô não conseguiu aprovar o lote no Sienge:\n\n${r.erro || "Falha no robô."}`);
+  },
+
+  siengeHtml(l) {
+    const sg = l.sienge || {};
+    const rodando = this.state.roboLote === l.id;
+    const hist = (sg.historico || []).map((h) => `${new Date(h.em).toLocaleString("pt-BR")} · ${h.acao === "aprovar" ? "Aprovar" : "Gerar"} · ${h.por} · ${h.ok ? "ok" : "erro"}${h.msg ? " · " + h.msg : ""}`).join("\n");
+    if (rodando) return `<span class="gp-pill gp-wait"><span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;width:10px;height:10px;"></span> Robô no Sienge…</span>`;
+    if (!l.sienge) return `<span class="gp-pill gp-warn" title="Lote salvo só no Integra (Excel); os títulos continuam livres para um novo lote">Não gerado no Sienge</span>`;
+    if (sg.status === "aprovado") return `<span class="gp-pill gp-ok" title="${this.esc(hist)}">Aprovado${sg.numero ? " · nº " + this.esc(sg.numero) : ""}</span><small>${this.esc(String(sg.aprovadoPor || "").split(" ")[0])} · ${new Date(sg.aprovadoEm).toLocaleDateString("pt-BR")}</small>`;
+    if (sg.status === "gerado") return `<span class="gp-pill gp-ok" title="${this.esc(hist)}">No Sienge${sg.numero ? " · nº " + this.esc(sg.numero) : ""}</span><small>${sg.erro ? `<b style="color:#b91c1c;">Aprovação falhou</b>` : "Aguardando aprovação"}</small>`;
+    if (sg.status === "erro") return `<span class="gp-pill gp-bad" title="${this.esc(hist)}">Erro no Sienge</span><small title="${this.esc(sg.erro || "")}">${this.esc(String(sg.erro || "").slice(0, 60))}</small>`;
+    return `<span class="gp-pill gp-warn" title="${this.esc(hist)}">Não gerado no Sienge</span><small>Aguardando robô</small>`;
+  },
+
+  siengeAcoesHtml(l) {
+    const sg = l.sienge || {};
+    if (this.state.roboLote) return "";
+    if (!l.sienge || sg.status === "pendente" || sg.status === "erro") {
+      return `<button type="button" class="btn btn-sm btn-primary" onclick="GerarPagamentoApp.enviarAoSienge('${this.esc(l.id)}')" title="Pedir ao robô deste computador para criar o lote no Sienge"><i data-lucide="send" style="width:14px;height:14px;"></i> Enviar ao Sienge</button>`;
+    }
+    if (sg.status === "gerado" && this.podeAprovar()) {
+      return `<button type="button" class="btn btn-sm btn-primary" onclick="GerarPagamentoApp.aprovarNoSienge('${this.esc(l.id)}')" title="Aprovar o lote no Sienge (fica registrado em seu nome)"><i data-lucide="badge-check" style="width:14px;height:14px;"></i> Aprovar</button>`;
+    }
+    return "";
   },
 
   baixarLoteExcel(loteOuId) {
@@ -873,8 +1051,15 @@ const GerarPagamentoApp = {
   async excluirLote(id) {
     const lote = this.state.lotes.find((l) => l.id === id);
     if (!lote) return;
+    const sg = lote.sienge || {};
+    if (this.state.roboLote === id) return;
+    if (sg.status === "aprovado") {
+      alert(`O lote ${id} já foi aprovado no Sienge${sg.numero ? " (nº " + sg.numero + ")" : ""}. Cancele primeiro no Sienge; aqui ele não pode ser excluído.`);
+      return;
+    }
+    const aviso = sg.status === "gerado" ? `\n\nAtenção: este lote já existe no Sienge${sg.numero ? " (nº " + sg.numero + ")" : ""}. Excluir aqui NÃO exclui no Sienge.` : "";
     const okConf = typeof window.mouraConfirm === "function"
-      ? await window.mouraConfirm(`Excluir o lote ${id}? Os títulos voltam a ficar disponíveis para um novo lote.`)
+      ? await window.mouraConfirm(`Excluir o lote ${id}? Os títulos voltam a ficar disponíveis para um novo lote.${aviso}`)
       : confirm(`Excluir o lote ${id}?`);
     if (!okConf) return;
     const fc = window.firebaseCollections;
@@ -916,7 +1101,10 @@ const GerarPagamentoApp = {
       const linhas = g.itens.map((it) => {
         const tag = it.loteIntegra
           ? `<span class="gp-pill gp-ok">No lote ${this.esc(it.loteIntegra.id)}</span>`
-          : (it.loteSienge ? `<span class="gp-pill gp-warn">Já em lote no Sienge${it.loteSienge !== "sim" ? " nº " + this.esc(it.loteSienge) : ""}</span>` : `<span class="gp-pill gp-wait">Em aberto</span>`);
+          : (it.loteSienge ? `<span class="gp-pill gp-warn">Já em lote no Sienge${it.loteSienge !== "sim" ? " nº " + this.esc(it.loteSienge) : ""}</span>`
+            : (this.lotePendenteDe(it.chave)
+              ? `<span class="gp-pill gp-wait" title="Está no lote ${this.esc(this.lotePendenteDe(it.chave).id)}, que não foi gerado no Sienge. Ao gerar de novo, ele sai daquele lote.">Em aberto</span><small>Lote não gerado no Sienge</small>`
+              : `<span class="gp-pill gp-wait">Em aberto</span>`));
         const pagSelo = it.emLote ? `<span class="gp-muted">—</span>` : (window.BoletoCheck ? BoletoCheck.seloHtml(it.pag ? it.pag.check : null) : "");
         return `<tr class="gp-click${it.emLote ? " gp-em-lote" : ""}${it.pag && it.bloqueio ? " gp-row-bad" : ""}" onclick="GerarPagamentoApp.abrirResumo('${this.esc(it.chave)}')" title="Clique para ver o resumo do título">
           <td style="text-align:center;" onclick="event.stopPropagation()"><input type="checkbox" ${it.marcado ? "checked" : ""} ${sem || it.emLote || it.bloqueio || gerando ? "disabled" : ""}
@@ -977,8 +1165,8 @@ const GerarPagamentoApp = {
     const geradosHtml = gerados.length ? `<div class="gp-lote">
         <div class="gp-lote-h"><div><div class="gp-lote-conta">Lotes gerados com títulos deste período</div></div></div>
         <table class="gp-table gp-titulos">
-          <colgroup><col style="width:20%"><col style="width:10%"><col style="width:24%"><col style="width:7%"><col style="width:11%"><col style="width:13%"><col style="width:15%"></colgroup>
-          <thead><tr><th>Lote</th><th>Vencimento</th><th>Conta</th><th>Títulos</th><th style="text-align:right;">Total</th><th>Gerado</th><th></th></tr></thead>
+          <colgroup><col style="width:17%"><col style="width:8%"><col style="width:19%"><col style="width:6%"><col style="width:9%"><col style="width:10%"><col style="width:14%"><col style="width:17%"></colgroup>
+          <thead><tr><th>Lote</th><th>Vencimento</th><th>Conta</th><th>Títulos</th><th style="text-align:right;">Total</th><th>Gerado</th><th>Sienge</th><th></th></tr></thead>
           <tbody>${gerados.map((l) => `<tr>
             <td><strong>${this.esc(l.id)}</strong></td>
             <td>${l.dia ? this.dataBr(l.dia) : this.esc([...new Set((l.itens || []).map((i) => this.dataBr(i.vencimento)))].join(", "))}</td>
@@ -986,7 +1174,9 @@ const GerarPagamentoApp = {
             <td>${(l.itens || []).length}</td>
             <td style="text-align:right;">${this.money(l.total)}</td>
             <td title="${this.esc(l.criadoPor || "")}">${new Date(l.criadoEm).toLocaleDateString("pt-BR")} · ${this.esc(String(l.criadoPor || "").split(" ")[0])}</td>
+            <td class="gp-status">${this.siengeHtml(l)}</td>
             <td style="text-align:right;white-space:nowrap;">
+              ${this.siengeAcoesHtml(l)}
               <button type="button" class="btn btn-sm btn-excel" onclick="GerarPagamentoApp.baixarLoteExcel('${this.esc(l.id)}')" title="Baixar o lote em Excel"><i data-lucide="download" style="width:14px;height:14px;"></i> Excel</button>
               <button type="button" class="btn btn-sm" onclick="GerarPagamentoApp.excluirLote('${this.esc(l.id)}')" style="color:#b91c1c;background:#fff;border:1px solid #fecaca;">Excluir</button>
             </td>

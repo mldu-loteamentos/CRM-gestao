@@ -7,13 +7,16 @@ function caixaAddDays(iso, n) {
   return `${y}-${m}-${day}`;
 }
 
+function caixaEhUtil(iso) {
+  return typeof window.isBusinessDayIso === "function"
+    ? window.isBusinessDayIso(iso)
+    : [0, 6].indexOf(new Date(iso + "T12:00:00").getDay()) < 0;
+}
+
 function caixaDiaUtil(iso, passo) {
   let d = String(iso || "").slice(0, 10);
   for (let i = 0; i < 15; i++) {
-    const util = typeof window.isBusinessDayIso === "function"
-      ? window.isBusinessDayIso(d)
-      : [0, 6].indexOf(new Date(d + "T12:00:00").getDay()) < 0;
-    if (util) return d;
+    if (caixaEhUtil(d)) return d;
     d = caixaAddDays(d, passo || 1);
   }
   return d;
@@ -215,6 +218,7 @@ const FluxoCaixaDiarioApp = {
   progress: "",
   detail: null,
   detOpen: { in: true, out: true },
+  mostrarNaoUteis: false,
   flags: {},
   tipos: {},
   ccExcl: {},
@@ -688,14 +692,50 @@ const FluxoCaixaDiarioApp = {
     return raw;
   },
 
+  /**
+   * Origem do movimento no Sienge: título do contas a pagar/receber ou lançamento direto em caixa e bancos
+   * (avulso, digitado à mão). O código de origem vale primeiro; sem ele, o título vinculado decide.
+   */
+  origemMov(m, valor) {
+    const txt = (v) => (v == null || typeof v === "object") ? "" : String(v).trim();
+    const cod = txt(m.bankMovementOriginId).toUpperCase();
+    const temTitulo = !!txt(m.billId);
+    if (/^CP/.test(cod)) return { tipo: "cp", rotulo: "Contas a pagar", cod };
+    if (/^CR/.test(cod)) return { tipo: "cr", rotulo: "Contas a receber", cod };
+    if (/^(CB|CX|BC)/.test(cod)) return { tipo: "cb", rotulo: "Caixa e bancos", cod };
+    if (/^(TR|TB|TC)/.test(cod)) return { tipo: "tr", rotulo: "Transferência entre contas", cod };
+    if (temTitulo) {
+      if (txt(m.clientName) || txt(m.clientId)) return { tipo: "cr", rotulo: "Contas a receber", cod };
+      if (txt(m.creditorName) || txt(m.creditorId)) return { tipo: "cp", rotulo: "Contas a pagar", cod };
+      return valor >= 0 ? { tipo: "cr", rotulo: "Contas a receber", cod } : { tipo: "cp", rotulo: "Contas a pagar", cod };
+    }
+    if (cod) return { tipo: "outro", rotulo: "Origem " + cod, cod };
+    return { tipo: "cb", rotulo: "Caixa e bancos", cod };
+  },
+
+  conciliadoMov(m) {
+    const v = m.bankMovementReconcile;
+    if (v === true || v === false) return v;
+    const s = String(v == null ? "" : v).trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    if (/^(S|SIM|Y|YES|TRUE|1|C|CONCILIADO)$/.test(s)) return true;
+    if (/^(N|NAO|NO|FALSE|0|NAO CONCILIADO)$/.test(s)) return false;
+    return null;
+  },
+
   normMov(m, i) {
     const txt = (v) => (v == null || typeof v === "object") ? "" : String(v).trim();
     const cats = Array.isArray(m.financialCategories) ? m.financialCategories : [];
     const shares = this.sharesDe(cats);
+    const valor = this.valorMov(m);
+    const planos = [...new Set(cats.map((fc) => txt(fc && fc.financialCategoryName)).filter(Boolean))];
     return {
+      origem: this.origemMov(m, valor),
+      conciliado: this.conciliadoMov(m),
+      planos,
+      movId: txt(m.bankMovementId),
       id: "m" + i,
       date: txt(m.bankMovementDate).slice(0, 10),
-      valor: this.valorMov(m),
+      valor,
       conta: txt(m.accountNumber),
       companyId: txt(m.companyId),
       shares,
@@ -870,7 +910,8 @@ const FluxoCaixaDiarioApp = {
         day.pagarItens.push({
           key: m.id, real: true, natureza: "pago", date: m.date, valor: -v,
           titulo: m.billId, parcela: m.parcela, credor: m.party, documento: m.doc, historico: m.historico,
-          conta: m.conta, companyId: m.companyId, plano: m.plano, ccNome: m.ccNome
+          conta: m.conta, companyId: m.companyId, plano: m.plano, planos: m.planos, ccNome: m.ccNome,
+          origem: m.origem, conciliado: m.conciliado, movId: m.movId
         });
       }
     });
@@ -1166,6 +1207,46 @@ const FluxoCaixaDiarioApp = {
     }).join("")}</div>`;
   },
 
+  planoHtml(it) {
+    const planos = it.planos && it.planos.length ? it.planos : (it.plano ? [it.plano] : []);
+    if (!planos.length) return `<span class="cxd-muted">—</span>`;
+    return `<span title="${caixaEsc(planos.join("\n"))}">${caixaEsc(planos[0])}${planos.length > 1 ? ` <small class="cxd-muted">+${planos.length - 1}</small>` : ""}</span>`;
+  },
+
+  origemHtml(it, lado) {
+    if (!it.real) return `<span class="cxd-org cxd-org-prev">${lado === "in" ? "Contas a receber" : "Contas a pagar"} · previsto</span>`;
+    const o = it.origem || { tipo: "outro", rotulo: "—" };
+    const dica = o.tipo === "cb"
+      ? "Lançado direto em Caixa e bancos, sem título do contas a pagar/receber. Confira se não é inserção manual indevida."
+      : (o.cod ? "Código de origem no Sienge: " + o.cod : "");
+    return `<span class="cxd-org cxd-org-${o.tipo}" title="${caixaEsc(dica)}">${caixaEsc(o.rotulo)}</span>`;
+  },
+
+  conciliacaoHtml(it) {
+    if (!it.real) return `<span class="cxd-muted">—</span>`;
+    if (it.conciliado === true) return `<span class="cxd-conc cxd-conc-ok">Conciliado</span>`;
+    if (it.conciliado === false) return `<span class="cxd-conc cxd-conc-no" title="Movimento ainda não conciliado com o extrato do banco no Sienge">Sem conciliação</span>`;
+    return `<span class="cxd-muted" title="O Sienge não informou a conciliação deste movimento">—</span>`;
+  },
+
+  /** Lançamentos realizados do dia (ou do mês) que pedem atenção: avulsos de caixa e bancos e sem conciliação. */
+  alertasMov(dias) {
+    let manuais = 0;
+    let semConc = 0;
+    let valorSemConc = 0;
+    (dias || []).forEach((d) => {
+      (d.itens || []).concat(d.pagarItens || []).forEach((it) => {
+        if (!it.real) return;
+        if (it.origem && it.origem.tipo === "cb") manuais += 1;
+        if (it.conciliado === false) {
+          semConc += 1;
+          valorSemConc += Math.abs(Number(it.valor) || 0);
+        }
+      });
+    });
+    return { manuais, semConc, valorSemConc };
+  },
+
   diaDetalheHtml(aberto) {
     const d = aberto.d;
     const entradas = (d.itens || []).map((it, i) => {
@@ -1175,7 +1256,10 @@ const FluxoCaixaDiarioApp = {
         : `${caixaEsc(it.cc)} / ${caixaEsc(it.unidade)} · ${caixaEsc(it.cliente || "—")}${it.cpf ? " · CPF " + caixaEsc(it.cpf) : ""} · venc. ${caixaFmtDate(it.vencimento)} + PMP ${it.pmp}d${it.deslocadoDe ? ` · caía em ${caixaFmtDate(it.deslocadoDe)}, passou para o próximo dia útil` : ""}`;
       return `<tr class="cxd-det-in${clicavel ? " cxd-click" : ""}" ${clicavel ? `onclick="FluxoCaixaDiarioApp.openEntrada('${d.date}',${i})" title="Ver o extrato do cliente"` : ""}>
         <td>${it.real ? "Recebido" : "Previsto"}</td>
-        <td>${desc}</td>
+        <td class="cxd-desc">${desc}</td>
+        <td class="cxd-plano">${this.planoHtml(it)}</td>
+        <td>${this.origemHtml(it, "in")}</td>
+        <td>${this.conciliacaoHtml(it)}</td>
         <td class="cxd-num">${caixaMoney(it.valor)}</td>
       </tr>`;
     }).join("");
@@ -1187,7 +1271,10 @@ const FluxoCaixaDiarioApp = {
         : `tít. ${caixaEsc(it.titulo)}${it.parcela ? "/" + caixaEsc(it.parcela) : ""} · ${caixaEsc(it.credor || "—")}${(it.docId || it.documento) ? " · " + caixaEsc([it.docId, it.documento].filter(Boolean).join(" ")) : ""}${it.deslocadoDe ? ` · vencia em ${caixaFmtDate(it.deslocadoDe)}, ${it.date < it.deslocadoDe ? "antecipado para o dia útil anterior" : "passou para o próximo dia útil"}` : ""}`;
       return `<tr class="cxd-det-out${clicavel ? " cxd-click" : ""}" ${clicavel ? `onclick="FluxoCaixaDiarioApp.openTitulo('${caixaEsc(it.key)}')" title="Ver o título, os anexos e a forma de pagamento"` : ""}>
         <td>${tipo}</td>
-        <td>${desc}</td>
+        <td class="cxd-desc">${desc}</td>
+        <td class="cxd-plano">${this.planoHtml(it)}</td>
+        <td>${this.origemHtml(it, "out")}</td>
+        <td>${this.conciliacaoHtml(it)}</td>
         <td class="cxd-num">${caixaMoney(it.valor)}</td>
       </tr>`;
     }).join("");
@@ -1200,13 +1287,19 @@ const FluxoCaixaDiarioApp = {
           <span>${qtd} lançamento(s)</span>
           <b>${caixaMoney(total)}</b>
         </button>
-        ${open ? `<table class="cxd-sheet"><tbody>${linhas || `<tr><td colspan="3" class="cxd-grp-vazio">${vazio}</td></tr>`}</tbody></table>` : ""}
+        ${open ? `<table class="cxd-sheet cxd-analitico">
+          <colgroup><col style="width:96px"><col><col style="width:19%"><col style="width:150px"><col style="width:130px"><col style="width:130px"></colgroup>
+          <thead><tr><th>Tipo</th><th>Descrição</th><th>Plano financeiro</th><th>Origem</th><th>Conciliação</th><th class="cxd-num">Valor</th></tr></thead>
+          <tbody>${linhas || `<tr><td colspan="6" class="cxd-grp-vazio">${vazio}</td></tr>`}</tbody></table>` : ""}
       </div>`;
     };
+    const al = this.alertasMov([d]);
     return `<div class="cxd-daydet">
       <div class="cxd-daydet-head">
         <strong>${caixaFmtDate(d.date)}</strong>
         <span class="cxd-chip ${d.real ? "cxd-chip-real" : "cxd-chip-prev"}">${d.real ? "Realizado · extrato bancário" : "Previsto"}</span>
+        ${al.manuais ? `<span class="cxd-chip cxd-chip-cb" title="Lançamentos direto em Caixa e bancos, sem título do contas a pagar/receber">${al.manuais} lançamento(s) de caixa e bancos</span>` : ""}
+        ${al.semConc ? `<span class="cxd-chip cxd-chip-nc" title="Movimentos ainda não conciliados com o extrato do banco">${al.semConc} sem conciliação · ${caixaMoney(al.valorSemConc)}</span>` : ""}
         <span class="cxd-daydet-res">Saldo do dia <b class="${aberto.movimento < 0 ? "cxd-out" : "cxd-in"}">${caixaMoney(aberto.movimento)}</b></span>
         <button type="button" class="btn btn-cancel btn-sm" onclick="FluxoCaixaDiarioApp.toggle('${d.date}')">Fechar</button>
       </div>
@@ -1230,6 +1323,16 @@ const FluxoCaixaDiarioApp = {
       return { d, entrar, sair, movimento, inicial, acum: acumulado, passado: d.real };
     });
     const fim = acumulado;
+    // Sábado, domingo e feriado só aparecem se tiverem movimento (ou forem hoje/o dia aberto), salvo se o usuário pedir.
+    const ocultos = [];
+    const visiveis = linhas.filter((l) => {
+      const iso = l.d.date;
+      if (this.mostrarNaoUteis || caixaEhUtil(iso) || iso === hoje || iso === this.openDay) return true;
+      if (Math.abs(l.entrar) >= 0.005 || Math.abs(l.sair) >= 0.005) return true;
+      ocultos.push(iso);
+      return false;
+    });
+    const alMes = this.alertasMov(this.days);
     const prevWrap = root.querySelector(".cxd-wrap-mx");
     const prevScroll = prevWrap && prevWrap.scrollLeft > 0 ? prevWrap.scrollLeft : null;
     const prevBody = root.querySelector(".cxd-body");
@@ -1247,24 +1350,27 @@ const FluxoCaixaDiarioApp = {
       if (line.d.date === hoje) c.push("cxd-col-hoje");
       if (this.openDay === line.d.date) c.push("cxd-col-open");
       if (line.passado) c.push("cxd-col-past");
+      if (!caixaEhUtil(line.d.date)) c.push("cxd-col-naoutil");
       return c.join(" ");
     };
     const cell = (line, html, cls) => `<td class="${colCls(line)} ${cls || ""}" onclick="FluxoCaixaDiarioApp.toggle('${line.d.date}')">${html}</td>`;
-    const cabecalho = linhas.map((line) => {
+    const cabecalho = visiveis.map((line) => {
       const d = line.d;
       const has = (d.itens && d.itens.length) || (d.pagarItens && d.pagarItens.length);
       const wd = semana[new Date(d.date + "T12:00:00").getDay()];
-      return `<th class="${colCls(line)}" onclick="FluxoCaixaDiarioApp.toggle('${d.date}')" title="${d.real ? "Realizado (extrato bancário)" : "Previsto"}${has ? " · clique para ver entradas e saídas" : ""}">
+      const al = d.real ? this.alertasMov([d]) : { semConc: 0, manuais: 0 };
+      const marcas = [al.semConc ? `${al.semConc} sem conciliação` : "", al.manuais ? `${al.manuais} de caixa e bancos` : ""].filter(Boolean).join(" · ");
+      return `<th class="${colCls(line)}" onclick="FluxoCaixaDiarioApp.toggle('${d.date}')" title="${d.real ? "Realizado (extrato bancário)" : "Previsto"}${!caixaEhUtil(d.date) ? " · fim de semana ou feriado" : ""}${marcas ? " · " + marcas : ""}${has ? " · clique para ver entradas e saídas" : ""}">
         <div>${caixaFmtDate(d.date).slice(0, 5)}</div>
-        <div class="cxd-wd">${d.date === hoje ? '<span class="cxd-tag">hoje</span>' : wd}${has ? '<span class="cxd-dot"></span>' : ""}</div>
+        <div class="cxd-wd">${d.date === hoje ? '<span class="cxd-tag">hoje</span>' : wd}${al.semConc ? '<span class="cxd-dot cxd-dot-nc"></span>' : (has ? '<span class="cxd-dot"></span>' : "")}</div>
       </th>`;
     }).join("");
     const sinal = (v) => (v < 0 ? "cxd-out" : (v > 0 ? "cxd-in" : "cxd-zero"));
-    const linhaInicial = linhas.map((l) => cell(l, caixaMoney(l.inicial), sinal(l.inicial))).join("");
-    const linhaEntradas = linhas.map((l) => cell(l, caixaMoney(l.entrar), l.entrar ? "cxd-in" : "cxd-zero")).join("");
-    const linhaSaidas = linhas.map((l) => cell(l, caixaMoney(l.sair), l.sair ? "cxd-out" : "cxd-zero")).join("");
-    const linhaDia = linhas.map((l) => cell(l, caixaMoney(l.movimento), sinal(l.movimento))).join("");
-    const linhaAcum = linhas.map((l) => cell(l, caixaMoney(l.acum), sinal(l.acum))).join("");
+    const linhaInicial = visiveis.map((l) => cell(l, caixaMoney(l.inicial), sinal(l.inicial))).join("");
+    const linhaEntradas = visiveis.map((l) => cell(l, caixaMoney(l.entrar), l.entrar ? "cxd-in" : "cxd-zero")).join("");
+    const linhaSaidas = visiveis.map((l) => cell(l, caixaMoney(l.sair), l.sair ? "cxd-out" : "cxd-zero")).join("");
+    const linhaDia = visiveis.map((l) => cell(l, caixaMoney(l.movimento), sinal(l.movimento))).join("");
+    const linhaAcum = visiveis.map((l) => cell(l, caixaMoney(l.acum), sinal(l.acum))).join("");
     const aberto = linhas.find((l) => l.d.date === this.openDay);
     const detalheDia = aberto ? this.diaDetalheHtml(aberto) : "";
     const filtro = window.MlEmpresaFilter ? MlEmpresaFilter.html({
@@ -1385,6 +1491,28 @@ const FluxoCaixaDiarioApp = {
         #fluxo-caixa-diario-root tr.cxd-det-in.cxd-click:hover td { background:#e7f6ee; }
         #fluxo-caixa-diario-root tr.cxd-det-out.cxd-click:hover td { background:#ffedd5; }
         #fluxo-caixa-diario-root .cxd-conta-tag { margin-left:6px; font-size:.7rem; color:#64748b; }
+        #fluxo-caixa-diario-root .cxd-mx-bar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:0 0 6px; }
+        #fluxo-caixa-diario-root .cxd-mx-bar .cxd-title { margin:0; flex:1 1 auto; }
+        #fluxo-caixa-diario-root .cxd-naoutil-sw { margin-left:auto; }
+        #fluxo-caixa-diario-root .cxd-mx th.cxd-col-naoutil:not(.cxd-col-open):not(.cxd-col-hoje) { background:#64748b; }
+        #fluxo-caixa-diario-root .cxd-dot-nc { background:#dc2626; box-shadow:0 0 0 2px rgba(255,255,255,.7); }
+        #fluxo-caixa-diario-root .cxd-chip-cb { background:#ffedd5; color:#9a3412; }
+        #fluxo-caixa-diario-root .cxd-chip-nc { background:#fee2e2; color:#b91c1c; }
+        #fluxo-caixa-diario-root .cxd-analitico { table-layout:fixed; }
+        #fluxo-caixa-diario-root .cxd-analitico thead th { background:#f1f5f9; color:#475569; font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.03em; text-align:left; padding:6px 10px; border-bottom:1px solid #e2e8f0; }
+        #fluxo-caixa-diario-root .cxd-analitico thead th.cxd-num { text-align:right; }
+        #fluxo-caixa-diario-root .cxd-analitico td { overflow:hidden; text-overflow:ellipsis; }
+        #fluxo-caixa-diario-root .cxd-analitico td.cxd-desc { white-space:normal; }
+        #fluxo-caixa-diario-root .cxd-analitico td.cxd-plano { white-space:nowrap; color:#334155 !important; }
+        #fluxo-caixa-diario-root .cxd-muted { color:#94a3b8; }
+        #fluxo-caixa-diario-root .cxd-org, #fluxo-caixa-diario-root .cxd-conc { display:inline-block; font-size:.68rem; font-weight:700; border-radius:999px; padding:2px 8px; white-space:nowrap; }
+        #fluxo-caixa-diario-root .cxd-org-cp { background:#fff4ec; color:#c2410c; }
+        #fluxo-caixa-diario-root .cxd-org-cr { background:#e7f6ee; color:#105436; }
+        #fluxo-caixa-diario-root .cxd-org-cb { background:#ffedd5; color:#9a3412; border:1px solid #fdba74; }
+        #fluxo-caixa-diario-root .cxd-org-tr { background:#e0f2fe; color:#075985; }
+        #fluxo-caixa-diario-root .cxd-org-outro, #fluxo-caixa-diario-root .cxd-org-prev { background:#f1f5f9; color:#64748b; }
+        #fluxo-caixa-diario-root .cxd-conc-ok { background:#e7f6ee; color:#105436; }
+        #fluxo-caixa-diario-root .cxd-conc-no { background:#fee2e2; color:#b91c1c; }
       </style>
       <div class="cxd-page">
         <div class="cxd-head">
@@ -1406,7 +1534,16 @@ const FluxoCaixaDiarioApp = {
           ${this.contasHtml()}
           <div class="cxd-saldo-ini"><span>${iniLabel}</span><span>${caixaMoney(saldoInicial)}</span></div>
           ${this.loading ? `<p style="color:#64748b;">Montando o fluxo…</p>` : `
-          <p class="cxd-title">MOVIMENTO DO MÊS <span>· dias anteriores realizados, de hoje em diante previstos · clique no dia para ver entradas e saídas</span></p>
+          <div class="cxd-mx-bar">
+            <p class="cxd-title">MOVIMENTO DO MÊS <span>· dias anteriores realizados, de hoje em diante previstos · clique no dia para ver entradas e saídas</span></p>
+            ${alMes.manuais ? `<span class="cxd-chip cxd-chip-cb" title="Lançamentos direto em Caixa e bancos, sem título do contas a pagar/receber. Abra o dia para conferir.">${alMes.manuais} lançamento(s) de caixa e bancos no mês</span>` : ""}
+            ${alMes.semConc ? `<span class="cxd-chip cxd-chip-nc" title="Movimentos ainda não conciliados com o extrato do banco. Os dias com ponto vermelho têm movimento sem conciliação.">${alMes.semConc} sem conciliação · ${caixaMoney(alMes.valorSemConc)}</span>` : ""}
+            <label class="moura-switch cxd-naoutil-sw" title="${ocultos.length ? ocultos.length + " dia(s) sem movimento ocultos" : "Nenhum dia oculto"}">
+              <input type="checkbox" ${this.mostrarNaoUteis ? "checked" : ""} onchange="FluxoCaixaDiarioApp.mostrarNaoUteis=this.checked;FluxoCaixaDiarioApp.render()">
+              <span class="moura-switch-track" aria-hidden="true"></span>
+              <span class="moura-switch-text">Mostrar sábados, domingos e feriados${!this.mostrarNaoUteis && ocultos.length ? ` (${ocultos.length} oculto${ocultos.length > 1 ? "s" : ""})` : ""}</span>
+            </label>
+          </div>
           <div class="cxd-wrap cxd-wrap-mx">
             <table class="cxd-mx">
               <thead><tr>
