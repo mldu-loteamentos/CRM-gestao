@@ -365,6 +365,7 @@ const AuditService = {
 
   _saveLocal: function(rec) {
     const logs = this.getLogs();
+    if (logs.some(function(l) { return l && l.id === rec.id; })) return;
     logs.unshift(rec);
     if (logs.length > this.MAX_LOCAL) logs.length = this.MAX_LOCAL;
     localStorage.setItem("crm_audit_logs", JSON.stringify(logs));
@@ -403,10 +404,10 @@ const AuditService = {
       const unitId = String((entry && entry.unitId) || d.unitId || "").trim();
       const titleId = String((entry && entry.titleId) || d.receivableBillId || d.titleId || "").trim();
       const rec = {
-        id: Date.now() + "-" + Math.random().toString(36).slice(2, 9),
-        timestamp: new Date().toISOString(),
-        user: user.name || "Desconhecido",
-        userEmail: user.email || "",
+        id: (entry && entry.id) || (Date.now() + "-" + Math.random().toString(36).slice(2, 9)),
+        timestamp: (entry && entry.timestamp) || new Date().toISOString(),
+        user: (entry && entry.user) || user.name || "Desconhecido",
+        userEmail: String((entry && entry.userEmail) || user.email || "").toLowerCase(),
         action: (entry && entry.action) || "HTTP",
         module: (entry && entry.module) || "Sistema",
         status: (entry && entry.status) || "ok",

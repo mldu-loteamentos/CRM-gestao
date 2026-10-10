@@ -3449,6 +3449,11 @@ function auditActionMeta(action, summary, module) {
   const blob = (key + " " + String(summary || "") + " " + mod).toLowerCase();
   if (key === "BOLETO_GERADO" || /boleto gerado/.test(blob)) return { group: "boleto", label: "Geração de Boleto" };
   if (key === "BOLETO_ERRO" || /falha ao gerar boleto/.test(blob)) return { group: "boleto", label: "Falha ao gerar boleto" };
+  if (key === "LOTE_GERADO") return { group: "lote", label: "Lote de pagamento gerado" };
+  if (key === "LOTE_SIENGE") return { group: "lote", label: "Lote criado no Sienge" };
+  if (key === "LOTE_APROVADO") return { group: "lote", label: "Lote aprovado no Sienge" };
+  if (key === "LOTE_ERRO") return { group: "lote", label: "Falha no lote (robô do Sienge)" };
+  if (key === "LOTE_EXCLUIDO") return { group: "lote", label: "Lote de pagamento excluído" };
   if (key === "ANEXO_ENVIADO") return { group: "anexo", label: "Envio de Anexo" };
   if (key === "ANEXO_ERRO") return { group: "anexo", label: "Falha no envio de anexo" };
   if (key === "CAUCAO_VENCIMENTO" || /vencimento da cau[cç][aã]o/.test(blob)) return { group: "caucao", label: "Vencimento de caução" };
@@ -3830,6 +3835,7 @@ window.renderAuditLogs = async function(forceReload) {
     if (actionFilter === "boleto" && meta.group !== "boleto") return false;
     if (actionFilter === "anexo" && meta.group !== "anexo") return false;
     if (actionFilter === "caucao" && meta.group !== "caucao") return false;
+    if (actionFilter === "lote" && meta.group !== "lote") return false;
     if (userQ && !auditUserMatches(row, userQ)) return false;
     if (fromTs && !isNaN(fromTs)) {
       const t = auditParseTs(row.timestamp);

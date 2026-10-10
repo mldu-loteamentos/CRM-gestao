@@ -1012,6 +1012,7 @@ const EstoqueComercialApp = {
 
   collectActiveCustomers(empSel, opts) {
     const onlyPending = !!(opts && opts.onlyPending);
+    const filaOk = this.filaCarregada();
     const byCc = new Map();
     let count = 0;
     this.state.units.forEach((u) => {
@@ -1021,7 +1022,7 @@ const EstoqueComercialApp = {
       const pending = !(u.statementDone && (u.receivedLocked || u.censusAt));
       const paid = this.paidDaysForBillId(u.receivableBillId || u.contractId || u.contractNumber || "");
       const recent = paid != null && paid <= (Number(this.BATIMENTO_DELTA_DAYS) || 5);
-      const leftFila = u.relFin === "inadimplente" && this.overdueValue(u) <= 0.009;
+      const leftFila = filaOk && u.relFin === "inadimplente" && this.filaValue(u) <= 0.009;
       if (onlyPending && !pending && !recent && !leftFila) return;
       const ccKey = String(u.enterpriseId);
       if (!byCc.has(ccKey)) byCc.set(ccKey, new Set());
@@ -1046,6 +1047,7 @@ const EstoqueComercialApp = {
 
   collectBatimentoCustomers(empSel, includeCensus) {
     const deltaDays = Number(this.BATIMENTO_DELTA_DAYS) || 5;
+    const filaOk = this.filaCarregada();
     const byCc = new Map();
     const census = new Set();
     this.state.units.forEach((u) => {
@@ -1061,8 +1063,7 @@ const EstoqueComercialApp = {
         return;
       }
       const paid = this.paidDaysForBillId(u.receivableBillId || u.contractId || u.contractNumber || "");
-      const inFila = this.overdueValue(u) > 0.009;
-      const leftFila = u.relFin === "inadimplente" && !inFila;
+      const leftFila = filaOk && u.relFin === "inadimplente" && this.filaValue(u) <= 0.009;
       if ((paid != null && paid <= deltaDays) || leftFila) {
         if (!byCc.has(ccKey)) byCc.set(ccKey, new Set());
         byCc.get(ccKey).add(cid);
@@ -1305,6 +1306,10 @@ const EstoqueComercialApp = {
     return this.overdueValue(u) > 0.009;
   },
 
+  filaCarregada() {
+    return ((window.AppState && AppState.defaultersBills) || []).length > 0;
+  },
+
   filaBillAmount(b) {
     if (!b) return 0;
     const charges = Number(b.overdueCharges);
@@ -1328,6 +1333,12 @@ const EstoqueComercialApp = {
     const ficha = Number(u && u.kpiVencidas);
     if (Number.isFinite(ficha) && ficha > 0.009) return ficha;
     if (u && Number.isFinite(ficha) && String(u.siengeConferidoEm || "").slice(0, 10) === this.todayStr()) return 0;
+    return this.filaValue(u);
+  },
+
+  /** Valor da unidade na Fila de cobrança do dia (sem o atraso gravado na última ficha). */
+  filaValue(u) {
+    if (!u) return 0;
     const idx = this.state.defaulterIndex || this.buildDefaulterIndex();
     if (u.receivableBillId && idx.byRb.has(String(u.receivableBillId))) {
       return idx.byRb.get(String(u.receivableBillId)) || 0;
@@ -3062,6 +3073,7 @@ const EstoqueComercialApp = {
       try {
         return this.extractRows(await window.siengeFetchWithRetry(path(s, e), 2));
       } catch (err) {
+        if (Number(err && err.status) === 404) return [];
         const sy = Number(s.slice(0, 4));
         const ey = Number(e.slice(0, 4));
         if (Number(err && err.status) !== 507 || depth > 6 || ey - sy < 1) throw err;
@@ -3124,25 +3136,36 @@ const EstoqueComercialApp = {
     });
   },
 
-  /** Centros de departamento do mesmo empreendimento (ex.: "… - PARCERIA") que podem ter parte do rateio dos títulos. */
+  /**
+   * Centros do mesmo empreendimento com parte do rateio dos títulos: departamentos ("… - PARCERIA")
+   * e o centro do parceiro da mesma obra (13100 → 13101 "… - PARCERIA TADEU").
+   */
   ccsDoRateio(ccId) {
     const lista = this.state.enterprises || [];
-    const main = lista.find((c) => String(c.id) === String(ccId));
+    const id = String(ccId);
+    const main = lista.find((c) => String(c.id) === id);
     const nome = this.foldCcName(main && main.name).trim();
     if (!nome) return [];
+    const obra = id.length > 2 ? id.slice(0, -2) : "";
     return lista
-      .filter((c) => String(c.id) !== String(ccId) && this.isDeptOnlyCc(c) && this.foldCcName(c.name).trim().startsWith(nome + " "))
+      .filter((c) => {
+        const cid = String(c.id);
+        if (cid === id) return false;
+        const fold = this.foldCcName(c.name).trim();
+        if (this.isDeptOnlyCc(c) && fold.startsWith(nome + " ")) return true;
+        return !!obra && cid.length === id.length && cid.slice(0, -2) === obra && /\bPARCERIA\b/.test(fold) && !/\bPARCERIA\b/.test(nome);
+      })
       .map((c) => ({ id: String(c.id), name: c.name || "" }));
   },
 
   /** Extrato do centro mais a fatia dos mesmos títulos nos centros do rateio, para compor o título inteiro. */
-  async fetchExtratoTituloInteiro(ccId) {
+  async fetchExtratoTituloInteiro(ccId, rotulo) {
     const rows = (await this.fetchExtratoCc(ccId)).map((r) => ({ ...r, _cc: String(ccId) }));
     const ids = new Set(rows.filter((r) => r && r.billReceivableId != null).map((r) => String(r.billReceivableId)));
     const somados = [];
     const falhas = [];
     for (const cc of this.ccsDoRateio(ccId)) {
-      this.setProgress(`Conferindo ${ccId}: somando a parte do centro ${cc.id} nos títulos rateados…`);
+      this.setProgress(`${rotulo || ""}Conferindo ${ccId}: somando a parte do centro ${cc.id} nos títulos rateados…`, this._progressoPct);
       try {
         const deles = (await this.fetchExtratoCc(cc.id)).filter((r) => r && ids.has(String(r.billReceivableId)));
         if (!deles.length) continue;
@@ -3157,10 +3180,12 @@ const EstoqueComercialApp = {
   },
 
   /** Recalcula as unidades do centro pelo extrato do Sienge e guarda o confronto Sienge × Integra. */
-  async conferirComSienge(ccId) {
+  async conferirComSienge(ccId, opts) {
+    opts = opts || {};
     if (typeof window.siengeFetchWithRetry !== "function") return null;
-    this.setProgress(`Conferindo ${ccId} com o Contas a Receber do Sienge…`);
-    const extrato = await this.fetchExtratoTituloInteiro(ccId);
+    const rotulo = opts.rotulo ? opts.rotulo + " · " : "";
+    this.setProgress(`${rotulo}Conferindo ${ccId} com o Contas a Receber do Sienge…`, this._progressoPct);
+    const extrato = await this.fetchExtratoTituloInteiro(ccId, rotulo);
     const bills = this.agruparExtratoCc(extrato.rows);
     const vivos = bills.filter((b) => !b.revoked && b.nParcelas > 0);
     const agora = new Date().toISOString();
@@ -3177,6 +3202,7 @@ const EstoqueComercialApp = {
     };
     this.state.units = this.state.units.map((u) => {
       if (String(u.enterpriseId) !== String(ccId) || !this.isFinanceUnit(u)) return u;
+      if (opts.pularQuitados && this.financialStatus(u) === "Quitado") return u;
       const rb = String(u.receivableBillId || "").replace(/^B-/, "").split("-")[0];
       const mine = daUnidade(vivos, u, rb);
       if (u.distratoTitulo && mine.length) {
@@ -3284,15 +3310,134 @@ const EstoqueComercialApp = {
       rateio: extrato.somados,
       rateioFalhas: extrato.falhas
     };
+    if (!this.state.conferencias) this.state.conferencias = {};
+    this.state.conferencias[String(ccId)] = this.state.conferencia;
     this.saveCache();
     await this.saveFirebaseCc(ccId);
     return this.state.conferencia;
   },
 
+  /** Empreendimentos do relatório Contas a Receber por centro de custo; o centro do parceiro entra pelo rateio da obra. */
+  ccsParaConferir() {
+    const lista = (this.state.enterprises || []).filter((c) => this.isEmpreendimentoCcId(c.id) && !this.isDeptOnlyCc(c));
+    const doRateio = new Set();
+    lista.forEach((c) => this.ccsDoRateio(c.id).forEach((p) => doRateio.add(p.id)));
+    const ids = new Set(lista.map((c) => String(c.id)).filter((id) => !doRateio.has(id)));
+    (this.state.units || []).forEach((u) => {
+      if (u && u.enterpriseId && this.isFinanceUnit(u)) ids.add(String(u.enterpriseId));
+    });
+    return [...ids].sort((a, b) => Number(a) - Number(b));
+  },
+
+  CONF_GERAL_KEY: "est_conferencia_geral",
+
+  loadConferenciaGeral() {
+    if (this.state.conferenciaGeral) return this.state.conferenciaGeral;
+    try {
+      this.state.conferenciaGeral = JSON.parse(localStorage.getItem(this.CONF_GERAL_KEY) || "null");
+    } catch (e) {
+      this.state.conferenciaGeral = null;
+    }
+    return this.state.conferenciaGeral;
+  },
+
+  /** Batimento de todos os empreendimentos pelo extrato do Contas a Receber (poucas consultas por centro, sem ficha por cliente). */
+  async conferirTodos() {
+    const ids = this.ccsParaConferir();
+    const geral = { at: new Date().toISOString(), ccs: [], falhas: [], interrompido: false };
+    for (let i = 0; i < ids.length; i++) {
+      if (this.state.stopSync) {
+        geral.interrompido = true;
+        break;
+      }
+      const id = ids[i];
+      this._progressoPct = ((i + 1) / ids.length) * 100;
+      try {
+        const c = await this.conferirComSienge(id, { pularQuitados: true, rotulo: `Empreendimento ${i + 1}/${ids.length}` });
+        if (!c) continue;
+        geral.ccs.push({
+          ccId: c.ccId,
+          nome: this.empName(c.ccId),
+          sienge: c.sienge,
+          integra: c.integra,
+          semUnidade: { n: c.semUnidade.length, valor: c.semUnidade.reduce((t, b) => t + (Number(b.aberto) || 0), 0) },
+          semTitulo: c.semTitulo.length,
+          rateioFalhas: c.rateioFalhas || []
+        });
+      } catch (e) {
+        console.warn("[Estoque] conferência geral", id, e);
+        geral.falhas.push(id);
+      }
+      if (i % 5 === 4) this.renderTable();
+    }
+    this._progressoPct = undefined;
+    this.state.conferenciaGeral = geral;
+    try {
+      localStorage.setItem(this.CONF_GERAL_KEY, JSON.stringify(geral));
+    } catch (e) {}
+    return geral;
+  },
+
+  conferenciaGeralHtml() {
+    const g = this.loadConferenciaGeral();
+    if (!g || !(g.ccs || []).length) return "";
+    const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+    const soma = (f) => g.ccs.reduce((t, c) => t + (Number(f(c)) || 0), 0);
+    const tot = {
+      sienge: soma((c) => c.sienge.aReceber),
+      integra: soma((c) => c.integra.aReceber),
+      siengeAtraso: soma((c) => c.sienge.vencidoAdd),
+      integraAtraso: soma((c) => c.integra.atraso),
+      siengeTitVenc: soma((c) => c.sienge.titulosVencidos),
+      integraInad: soma((c) => c.integra.inadimplentes),
+      semUnidN: soma((c) => c.semUnidade.n),
+      semUnidV: soma((c) => c.semUnidade.valor),
+      semTitulo: soma((c) => c.semTitulo)
+    };
+    const dif = tot.integra - tot.sienge;
+    const bate = Math.abs(dif) < 1 && !g.falhas.length;
+    const hora = new Date(g.at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+    const linhas = g.ccs.slice()
+      .sort((a, b) => Math.abs(b.integra.aReceber - b.sienge.aReceber) - Math.abs(a.integra.aReceber - a.sienge.aReceber))
+      .map((c) => {
+        const d = c.integra.aReceber - c.sienge.aReceber;
+        const ok = Math.abs(d) < 1;
+        return `<tr class="${ok ? "" : "is-bad"}">
+          <td><b>${esc(c.ccId)}</b> ${esc(c.nome && c.nome !== c.ccId ? c.nome : "")}</td>
+          <td class="num">${this.money(c.sienge.aReceber)}</td>
+          <td class="num">${this.money(c.integra.aReceber)}</td>
+          <td class="num est-conf-dif">${ok ? "Bate" : this.money(d)}</td>
+          <td class="num">${c.sienge.titulosVencidos || 0} · ${this.money(c.sienge.vencidoAdd)}</td>
+          <td class="num">${c.integra.inadimplentes || 0} · ${this.money(c.integra.atraso)}</td>
+          <td class="num">${c.semUnidade.n ? `${c.semUnidade.n} · ${this.money(c.semUnidade.valor)}` : "—"}</td>
+          <td class="num">${c.semTitulo || "—"}</td>
+        </tr>`;
+      }).join("");
+    return `<div class="est-conf ${bate ? "is-ok" : "is-bad"}">
+      <div class="est-conf-h">
+        <strong>Conferência de todos os empreendimentos com o Contas a Receber do Sienge</strong>
+        <small>${hora} · ${g.ccs.length} empreendimento(s)${g.falhas.length ? ` · <span class="est-conf-falha" style="display:inline">sem resposta do Sienge: ${g.falhas.map(esc).join(", ")}</span>` : ""}${g.interrompido ? " · interrompida" : ""}</small>
+      </div>
+      <div class="est-conf-grid">
+        <div><label>Sienge · a receber</label><b>${this.money(tot.sienge)}</b><small>Em atraso com juros e multa ${this.money(tot.siengeAtraso)} em ${tot.siengeTitVenc} título(s)</small></div>
+        <div><label>Integra · a receber</label><b>${this.money(tot.integra)}</b><small>Em atraso ${this.money(tot.integraAtraso)} em ${tot.integraInad} contrato(s)</small></div>
+        <div><label>Diferença</label><b>${bate ? "Bate" : this.money(dif)}</b><small>${tot.semUnidN ? `${tot.semUnidN} título(s) com saldo no Sienge sem unidade ativa no Integra: ${this.money(tot.semUnidV)}` : "Todo título com saldo tem unidade no Integra"}${tot.semTitulo ? ` · ${tot.semTitulo} unidade(s) ativa(s) sem título no Sienge` : ""}</small></div>
+      </div>
+      <details class="est-conf-det" ${bate ? "" : "open"}><summary>Por empreendimento (maior diferença primeiro)</summary>
+        <div class="est-conf-tab"><table>
+          <thead><tr><th>Empreendimento</th><th>Sienge a receber</th><th>Integra a receber</th><th>Diferença</th><th>Sienge em atraso</th><th>Integra em atraso</th><th>Títulos sem unidade</th><th>Unid. sem título</th></tr></thead>
+          <tbody>${linhas}</tbody>
+        </table></div>
+        <small class="est-conf-nota">Escolha o empreendimento no filtro para ver a lista de títulos sem unidade e de unidades sem título.</small>
+      </details>
+    </div>`;
+  },
+
   conferenciaHtml() {
-    const c = this.state.conferencia;
     const emp = this.requireEmpForApiHeavy();
-    if (!c || !emp || c.ccId !== String(emp)) return "";
+    if (!emp) return this.conferenciaGeralHtml();
+    const c = (this.state.conferencias || {})[String(emp)] || this.state.conferencia;
+    if (!c || c.ccId !== String(emp)) return "";
     const dif = c.integra.aReceber - c.sienge.aReceber;
     const temVencido = c.integra.vencido != null;
     const difVenc = temVencido ? c.integra.vencido - c.sienge.vencido : 0;
@@ -3397,6 +3542,19 @@ const EstoqueComercialApp = {
       this.stampFilaOnUnits(empSel);
       this.sealInferredFinance(empSel);
       this._batimentoFailed = 0;
+      if (!empSel && !isAuto) {
+        const geral = await this.conferirTodos();
+        this.sealInferredFinance();
+        const conta = (fin) => this.state.units.filter((u) => this.financialStatus(u) === fin).length;
+        const completo = !geral.interrompido && !geral.falhas.length;
+        const dia = await this.persistTodayResult({ markDone: completo });
+        const tot = geral.ccs.reduce((t, c) => ({ s: t.s + (Number(c.sienge.aReceber) || 0), i: t.i + (Number(c.integra.aReceber) || 0) }), { s: 0, i: 0 });
+        const fim = geral.interrompido
+          ? " Interrompido — rode de novo para terminar."
+          : (geral.falhas.length ? ` O Sienge não respondeu em ${geral.falhas.join(", ")} — rode de novo.` : " Todos os empreendimentos conferidos.");
+        this.setProgress(`Batimento pelo Contas a Receber: ${geral.ccs.length} empreendimento(s) · Sienge ${this.money(tot.s)} × Integra ${this.money(tot.i)} · ${conta("Quitado")} quitados (não reconsultados) · ${conta("Ativo inadimplente")} inadimplentes · ${conta("Ativo adimplente")} adimplentes.${fim} ${dia.split("-").reverse().join("/")}.`);
+        return;
+      }
       // Com empreendimento filtrado, reconsulta todos os ativos dele (teste completo), não só os pendentes.
       const planned = this.collectActiveCustomers(empSel, { onlyPending: !empSel });
       this._censusStillOpen = pendenteNoEscopo();

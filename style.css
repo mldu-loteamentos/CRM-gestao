@@ -2945,6 +2945,15 @@ circle.donut-segment {
 .est-conf-det summary { cursor: pointer; font-weight: 700; }
 .est-conf-det ul { margin: 6px 0 0; padding-left: 18px; max-height: 180px; overflow: auto; }
 .est-conf-det li { margin: 2px 0; }
+.est-conf-tab { margin-top: 8px; max-height: 340px; overflow: auto; border: 1px solid #e6eeea; border-radius: 10px; }
+.est-conf-tab table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.est-conf-tab th { position: sticky; top: 0; background: #f4f8f6; color: #105436; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; text-align: right; padding: 7px 10px; white-space: nowrap; }
+.est-conf-tab th:first-child, .est-conf-tab td:first-child { text-align: left; }
+.est-conf-tab td { padding: 6px 10px; border-top: 1px solid #eef2f0; white-space: nowrap; }
+.est-conf-tab td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.est-conf-tab tr.is-bad td.est-conf-dif { color: #c2410c; font-weight: 700; }
+.est-conf-tab tr:not(.is-bad) td.est-conf-dif { color: #105436; font-weight: 700; }
+.est-conf-nota { display: block; margin-top: 6px; color: #64748b; font-size: 0.74rem; }
 .est-stock-toolbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .est-fin-filtros { display: flex; flex-wrap: wrap; gap: 8px; }
 .est-fin-filtro {

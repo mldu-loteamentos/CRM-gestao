@@ -491,6 +491,7 @@ const GerarPagamentoApp = {
       }
     }
     this.state.lotes = (list || this.lotesLocal()).filter((l) => l && !l.cancelado);
+    this.state.lotes.forEach((l) => this.auditarLote(l));
   },
 
   /* Parcelas que já estão em lote/pagamento escritural no Sienge. */
@@ -893,12 +894,14 @@ const GerarPagamentoApp = {
         ccs: it.ccs.map((c) => c.id + " - " + c.nome).join(" / "),
         forma: it.pag ? it.pag.check.forma : "",
         linhaDigitavel: it.pag ? it.pag.check.linhaFmt || "" : "",
-        conferencia: it.pag ? it.pag.check.resumo : "Não conferido"
+        conferencia: it.pag ? it.pag.check.resumo : "Não conferido",
+        valida: this.validacoesDe(it.rateio, it.pag)
       })),
       sienge: { status: "pendente", historico: [] }
     }));
     s.lotes = s.lotes.concat([lote]);
     const salvoRemoto = await this.salvarLote(lote);
+    this.auditarLote(lote);
     itens.forEach((it) => { s.sel[it.selKey] = false; });
     s.gerandoLote = "";
     this.paintTitulos();
@@ -1009,11 +1012,76 @@ const GerarPagamentoApp = {
   async registrarSienge(lote, acao, r, extra) {
     const sg = lote.sienge || { historico: [] };
     sg.historico = (sg.historico || []).concat([{
-      acao, por: this.usuarioAtual(), em: new Date().toISOString(), ok: !!r.ok, msg: r.ok ? (r.numeroSienge ? "Lote Sienge nº " + r.numeroSienge : "OK") : r.erro || ""
+      acao, por: this.usuarioAtual(), porEmail: this.emailAtual(), em: new Date().toISOString(), ok: !!r.ok, msg: r.ok ? (r.numeroSienge ? "Lote Sienge nº " + r.numeroSienge : "OK") : r.erro || ""
     }]).slice(-30);
     Object.assign(sg, extra);
     lote.sienge = sg;
     await this.salvarLote(lote);
+    this.auditarLote(lote);
+  },
+
+  /* ---------- auditoria: cada passo do lote vira um registro em Segurança › Auditoria ---------- */
+  LOTE_AUDIT_KEY: "gp_lotes_auditados",
+
+  /** Grava na auditoria os passos do lote que ainda não foram gravados (o id fixo evita registro em dobro). */
+  auditarLote(lote) {
+    if (!lote || !lote.id || !window.AuditService) return;
+    const eventos = [{ tipo: "LOTE_GERADO", em: lote.criadoEm, por: lote.criadoPor, porEmail: lote.criadoPorEmail, ok: true }];
+    ((lote.sienge && lote.sienge.historico) || []).forEach((h) => eventos.push({
+      tipo: !h.ok ? "LOTE_ERRO" : (h.acao === "aprovar" ? "LOTE_APROVADO" : "LOTE_SIENGE"),
+      acao: h.acao, em: h.em, por: h.por, porEmail: h.porEmail || "", ok: !!h.ok, msg: h.ok ? "" : h.msg || ""
+    }));
+    let feitos;
+    try { feitos = new Set(JSON.parse(localStorage.getItem(this.LOTE_AUDIT_KEY) || "[]")); } catch (e) { feitos = new Set(); }
+    const remoto = !!window.firebaseDb;
+    let novo = false;
+    eventos.forEach((ev) => {
+      const ms = new Date(ev.em || "").getTime();
+      if (!Number.isFinite(ms)) return;
+      const id = `lote-${lote.id}-${ev.tipo}-${ms}`;
+      if (feitos.has(id)) return;
+      this.auditarEvento(lote, ev, id);
+      if (remoto) {
+        feitos.add(id);
+        novo = true;
+      }
+    });
+    if (novo) {
+      try { localStorage.setItem(this.LOTE_AUDIT_KEY, JSON.stringify([...feitos].slice(-3000))); } catch (e) {}
+    }
+  },
+
+  auditarEvento(lote, ev, id) {
+    const sg = lote.sienge || {};
+    const itens = lote.itens || [];
+    const titulos = itens.map((i) => `${i.titulo}/${i.parcela || 1}`);
+    const credores = [...new Set(itens.map((i) => i.credor).filter(Boolean))];
+    const titulo = {
+      LOTE_GERADO: "Lote gerado no Integra",
+      LOTE_SIENGE: "Lote criado no Sienge pelo robô",
+      LOTE_APROVADO: "Lote aprovado no Sienge pelo robô",
+      LOTE_ERRO: ev.acao === "aprovar" ? "O robô não aprovou o lote no Sienge" : "O robô não criou o lote no Sienge",
+      LOTE_EXCLUIDO: "Lote excluído no Integra"
+    }[ev.tipo] || ev.tipo;
+    const numero = (ev.tipo === "LOTE_SIENGE" || ev.tipo === "LOTE_APROVADO" || (ev.tipo === "LOTE_ERRO" && ev.acao === "aprovar")) && sg.numero ? ` (Sienge nº ${sg.numero})` : "";
+    try {
+      window.AuditService.logEvent({
+        id,
+        timestamp: new Date(ev.em).toISOString(),
+        user: ev.por || "",
+        userEmail: ev.porEmail || "",
+        action: ev.tipo,
+        module: "Gerar Pagamento",
+        status: ev.ok ? "ok" : "erro",
+        summary: `${titulo}: ${lote.id}${numero} · ${titulos.length} título(s) · ${this.money(lote.total)} · pagamento ${this.dataBr(lote.dia)} · ${this.contaLabel(lote.conta)}${ev.msg ? " · " + ev.msg : ""}`,
+        customerLabel: credores.slice(0, 3).join(", ") + (credores.length > 3 ? ` e mais ${credores.length - 3}` : ""),
+        enterpriseId: String((itens[0] && itens[0].ccs) || "").split(" - ")[0],
+        titleId: titulos.join(", "),
+        details: { lote: lote.id, numeroSienge: sg.numero || "", total: lote.total, pagamento: lote.dia, conta: this.contaLabel(lote.conta), titulos, mensagem: ev.msg || "" }
+      });
+    } catch (e) {
+      console.warn("[Gerar Pagamento] auditoria", e);
+    }
   },
 
   async enviarAoSienge(id) {
@@ -1112,22 +1180,76 @@ const GerarPagamentoApp = {
       alert("A biblioteca de Excel não carregou. Recarregue a página.");
       return;
     }
+    const sg = lote.sienge || {};
+    const emp = (this.state.companies || []).find((c) => String(c.id) === String(lote.empresaConta || ""));
+    const empresa = lote.empresaConta ? `${String(lote.empresaConta).padStart(4, "0")}${emp ? " - " + (emp.name || emp.tradeName || "") : ""}` : "";
+    const situacao = sg.status === "aprovado" ? "Aprovado no Sienge" : (sg.status === "gerado" ? "Programado no Sienge (aguardando aprovação)" : (sg.status === "erro" ? "Erro no Sienge" : "Só no Integra"));
+    const quando = (iso, quem) => iso ? `${new Date(iso).toLocaleString("pt-BR")}${quem ? " · " + quem : ""}` : "—";
+    const N = 13;
+    const cab = ["Título/Parcela", "Documento", "Vencimento", "Valor", "Credor", "Rateio (CC e % do título)", "Plano financeiro", "Forma de pagamento", "Linha digitável / chave", "Plano financeiro", "Rateio parceiro", "Boleto / PIX", "Desconto"];
     const linhas = [
-      ["Lote a pagar", lote.id],
-      ["Conta de parceria", this.contaLabel(lote.conta)],
-      ["Vencimento", lote.dia ? this.dataBr(lote.dia) : ""],
-      ["Gerado em", new Date(lote.criadoEm).toLocaleString("pt-BR")],
-      ["Gerado por", lote.criadoPor || ""],
+      ["Lote de Pagamento Escritural"],
       [],
-      ["Vencimento", "Título", "Parcela", "Credor", "Documento", "Centro de custo", "Valor a pagar", "Forma de pagamento", "Linha digitável", "Conferência"]
+      ["Empresa", empresa, "", "", "", "Situação", situacao],
+      ["Lote Sienge", sg.numero ? String(sg.numero) : "—", "", "", "", "Lote Integra", lote.id],
+      ["Conta corrente", this.contaLabel(lote.conta), "", "", "", "Data de pagamento", lote.dia ? this.dataBr(lote.dia) : ""],
+      ["Gerado", quando(lote.criadoEm, lote.criadoPor), "", "", "", "Aprovado", quando(sg.aprovadoEm, sg.aprovadoPor)],
+      [],
+      cab
     ];
-    (lote.itens || []).forEach((i) => {
-      linhas.push([this.dataBr(i.vencimento), Number(i.titulo) || i.titulo, Number(i.parcela) || i.parcela, i.credor, i.documento, i.ccs, Number(i.valor) || 0,
-        i.forma || "", i.linhaDigitavel || "", i.conferencia || ""]);
+    const inicio = linhas.length;
+    const itens = lote.itens || [];
+    itens.forEach((i) => {
+      const v = this.validacoesItem(i);
+      linhas.push([`${i.titulo}/${i.parcela || 1}`, i.documento || "", this.dataBr(i.vencimento), Number(i.valor) || 0, i.credor || "",
+        v.rateioTexto || i.ccs || "", v.planoTexto || "", i.forma || "", i.linhaDigitavel || "", v.plano, v.rateio, v.pagamento, v.desconto]);
     });
-    linhas.push([], ["", "", "", "", "", "Total", Number(lote.total) || 0]);
+    linhas.push(["", "", "Total do lote", Number(lote.total) || 0]);
+    linhas.push([], [`Gerado pelo Integra em ${new Date().toLocaleString("pt-BR")}`]);
     const ws = XLSX.utils.aoa_to_sheet(linhas);
-    ws["!cols"] = [{ wch: 12 }, { wch: 10 }, { wch: 8 }, { wch: 40 }, { wch: 18 }, { wch: 44 }, { wch: 16 }, { wch: 22 }, { wch: 58 }, { wch: 50 }];
+    ws["!cols"] = [{ wch: 14 }, { wch: 14 }, { wch: 11 }, { wch: 13 }, { wch: 34 }, { wch: 30 }, { wch: 34 }, { wch: 18 }, { wch: 50 }, { wch: 15 }, { wch: 15 }, { wch: 13 }, { wch: 14 }];
+    ws["!merges"] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: N - 1 } },
+      ...[2, 3, 4, 5].map((r) => ({ s: { r, c: 1 }, e: { r, c: 4 } })),
+      ...[2, 3, 4, 5].map((r) => ({ s: { r, c: 6 }, e: { r, c: N - 1 } }))
+    ];
+    const borda = { style: "thin", color: { rgb: "B8C4BE" } };
+    const bordas = { top: borda, bottom: borda, left: borda, right: borda };
+    const cor = (txt) => /^(Conferido)$/.test(txt) ? { fg: "DCFCE7", fc: "166534" }
+      : (/^(Não se aplica)$/.test(txt) ? { fg: "F1F5F9", fc: "475569" }
+        : (/^(Com desconto|Sem plano|Sem padrão|Não conferido)$/.test(txt) ? { fg: "FEF3C7", fc: "92400E" } : { fg: "FEE2E2", fc: "991B1B" }));
+    const pinta = (r, c, s) => {
+      const ref = XLSX.utils.encode_cell({ r, c });
+      if (!ws[ref]) ws[ref] = { t: "s", v: "" };
+      ws[ref].s = s;
+    };
+    pinta(0, 0, { font: { bold: true, sz: 16, color: { rgb: "105436" } }, alignment: { horizontal: "center" } });
+    [2, 3, 4, 5].forEach((r) => {
+      [0, 5].forEach((c) => pinta(r, c, { font: { bold: true }, fill: { fgColor: { rgb: "E2E8E5" } }, alignment: { horizontal: "right" }, border: bordas }));
+      for (let c = 1; c < N; c++) if (c !== 5) pinta(r, c, { border: bordas });
+    });
+    cab.forEach((_, c) => pinta(inicio - 1, c, {
+      font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: c >= 9 ? "0B3D27" : "105436" } },
+      alignment: { horizontal: "center", vertical: "center", wrapText: true }, border: bordas
+    }));
+    itens.forEach((_, k) => {
+      const r = inicio + k;
+      for (let c = 0; c < N; c++) {
+        const ref = XLSX.utils.encode_cell({ r, c });
+        const txt = ws[ref] ? String(ws[ref].v) : "";
+        if (c >= 9) {
+          const k2 = cor(txt);
+          pinta(r, c, { font: { bold: true, color: { rgb: k2.fc } }, fill: { fgColor: { rgb: k2.fg } }, alignment: { horizontal: "center", vertical: "center" }, border: bordas });
+        } else {
+          pinta(r, c, Object.assign({ alignment: { vertical: "center", horizontal: c === 3 ? "right" : "left" }, border: bordas }, c === 3 ? { numFmt: "#,##0.00" } : {}));
+        }
+      }
+    });
+    const rTot = inicio + itens.length;
+    [2, 3].forEach((c) => pinta(rTot, c, Object.assign({ font: { bold: true }, fill: { fgColor: { rgb: "E2E8E5" } }, alignment: { horizontal: "right" }, border: bordas }, c === 3 ? { numFmt: "#,##0.00" } : {})));
+    pinta(rTot + 2, 0, { font: { italic: true, sz: 9, color: { rgb: "64748B" } } });
+    ws["!rows"] = [{ hpt: 26 }];
+    ws["!rows"][inicio - 1] = { hpt: 30 };
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Lote");
     const conta = String((lote.conta && (lote.conta.numero || lote.conta.id)) || "").replace(/[^\w-]/g, "");
@@ -1158,6 +1280,9 @@ const GerarPagamentoApp = {
         return;
       }
     }
+    const em = new Date().toISOString();
+    this.auditarEvento(lote, { tipo: "LOTE_EXCLUIDO", em, por: this.usuarioAtual(), porEmail: this.emailAtual(), ok: true,
+      msg: sg.status === "gerado" ? "continua no Sienge — excluir lá também" : "" }, `lote-${id}-LOTE_EXCLUIDO-${new Date(em).getTime()}`);
     this.state.lotes = this.state.lotes.filter((l) => l.id !== id);
     this.salvarLotesLocal(this.lotesLocal().filter((l) => l.id !== id));
     Object.keys(this.state.selInit).forEach((k) => {
@@ -1391,6 +1516,37 @@ const GerarPagamentoApp = {
       });
     });
     return { total, obras, problemas, avisos, erroRateio, erroPlano, semPadrao, ok: !problemas.length };
+  },
+
+  /** Caixinhas do relatório do lote: plano financeiro, rateio do parceiro, boleto/PIX e desconto. */
+  validacoesDe(conf, pag) {
+    const linhas = conf ? conf.obras.reduce((l, o) => l.concat(o.linhas.filter((x) => !x.ausente)), []) : [];
+    const planos = [];
+    linhas.forEach((l) => l.planos.forEach((p) => {
+      const t = [p.id, p.nome].filter(Boolean).join(" ");
+      if (t && !planos.includes(t)) planos.push(t);
+    }));
+    const temParceiro = !!conf && conf.obras.some((o) => o.linhas.some((l) => l.parceria) || (o.padrao && o.padrao.terr > 0));
+    const c = pag && pag.check;
+    return {
+      rateioTexto: linhas.map((l) => `${l.id} ${this.pct(l.pct)}`).join(" · "),
+      planoTexto: planos.join(" / "),
+      plano: !conf ? "Não conferido" : (conf.erroPlano ? "Divergente" : (planos.length ? "Conferido" : "Sem plano")),
+      rateio: !conf ? "Não conferido" : (conf.erroRateio ? "Fora do padrão" : (conf.semPadrao ? "Sem padrão" : (temParceiro ? "Conferido" : "Não se aplica"))),
+      pagamento: !c ? "Não conferido" : (["erro", "aviso", "sem"].includes(c.nivel) ? "Divergente" : "Conferido"),
+      desconto: !c ? "Não conferido" : (c.desconto ? "Com desconto" : "Não se aplica")
+    };
+  },
+
+  /** Validações gravadas no lote; lote antigo usa a conferência dos títulos carregados na tela. */
+  validacoesItem(i) {
+    if (i.valida) return i.valida;
+    const chave = this.chaveTitulo(i.titulo, i.parcela);
+    const t = this.resumoTitulo(chave);
+    const v = this.validacoesDe(t ? this.conferirRateio(t.ccs, t.valor) : null, this.state.pagInfo[chave] || null);
+    if (!t) v.rateioTexto = i.ccs || "";
+    if (v.pagamento === "Não conferido" && /conferid/i.test(i.conferencia || "")) v.pagamento = "Conferido";
+    return v;
   },
 
   chavePlanos(planos) {
