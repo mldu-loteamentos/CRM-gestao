@@ -181,8 +181,11 @@ ComprasControleApp.statusDe = function (r) {
 
 ComprasControleApp.tipoTag = function (r) {
   const st = this.statusDe(r);
+  const fiscal = st === "previsao" && window.FilaNotasFiscais
+    ? FilaNotasFiscais.acaoPedidoHtml(r && r.documento, this._filaFiscal)
+    : "";
   if (st === "pago") return '<span class="cprev-tag cprev-tag-pago">Pago</span>';
-  if (st === "previsao") return '<span class="cprev-tag cprev-tag-previsao">Previsão</span>';
+  if (st === "previsao") return '<span class="cprev-tag cprev-tag-previsao">Previsão</span>' + fiscal;
   if (st === "processamento") {
     const lote = r.lote ? " title=\"Lote " + this.esc(r.lote) + " enviado ao banco\"" : "";
     return '<span class="cprev-tag cprev-tag-banco"' + lote + ">Processamento bancário</span>";
@@ -1234,10 +1237,20 @@ ComprasControleApp.init = async function () {
     this.state.endDate = range.endDate;
     this.state.inited = true;
     this.renderPage();
+    this.ouvirFilaFiscal();
     await this.loadCompanies();
   }
   if (this.state.consulted) this.applyFilters();
   this.renderPage();
+};
+
+ComprasControleApp.ouvirFilaFiscal = function () {
+  if (this._filaOuvida || !window.FilaNotasFiscais) return;
+  this._filaOuvida = true;
+  FilaNotasFiscais.ouvir((lista) => {
+    this._filaFiscal = lista || [];
+    if (this.state && this.state.consulted && !this.state.loading) this.renderList();
+  });
 };
 
 window.ComprasControleApp = ComprasControleApp;

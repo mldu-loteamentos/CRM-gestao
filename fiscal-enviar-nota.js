@@ -29,6 +29,68 @@ window.FilaNotasFiscais = {
     return item && (item.status === "pendente" || item.status === "em_lancamento");
   },
 
+  /** Envio deste pedido na base do fiscal (prioriza o que ainda está em análise). */
+  doPedido(lista, doc) {
+    const alvo = String(doc || "").replace(/\s/g, "");
+    const dig = alvo.replace(/\D/g, "");
+    if (!alvo) return null;
+    const rank = { em_lancamento: 0, pendente: 1, devolvida: 2, lancada: 3 };
+    const hits = (lista || []).filter((x) => {
+      if (!x || x.status === "cancelada") return false;
+      return [x.pedido, x.pedidoApi].some((v) => {
+        const n = String(v || "").replace(/\s/g, "");
+        return n && (n === alvo || n.replace(/\D/g, "") === dig);
+      });
+    });
+    hits.sort((a, b) => (rank[a.status] == null ? 9 : rank[a.status]) - (rank[b.status] == null ? 9 : rank[b.status]) || (b.criadoEm || 0) - (a.criadoEm || 0));
+    return hits[0] || null;
+  },
+
+  /** Tag e botão da previsão: em análise fiscal, ou enviar/corrigir quando o pedido já pode ir ao fiscal. */
+  acaoPedidoHtml(doc, lista) {
+    const ped = String(doc || "").trim();
+    if (!/^\d{3,}$/.test(ped)) return "";
+    const item = this.doPedido(lista, ped);
+    const esc = (v) => String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+    let tag = "";
+    if (item && (item.status === "pendente" || item.status === "em_lancamento")) {
+      tag = `<span class="cprev-tag cprev-tag-fiscal" title="Nota enviada e aguardando o lançamento do fiscal">Em análise fiscal</span>`;
+      return `<span class="cprev-fiscal-acoes">${tag}</span>`;
+    }
+    if (item && item.status === "devolvida") {
+      tag = `<span class="cprev-tag cprev-tag-previsao" title="${esc(item.motivoDevolucao || "Devolvida pelo fiscal")}">Nota devolvida</span>`;
+    }
+    const rot = item && item.status === "devolvida" ? "Corrigir envio" : "Enviar ao fiscal";
+    const id = item && item.status === "devolvida" ? item.id : "";
+    return `<span class="cprev-fiscal-acoes">${tag}<button type="button" class="cprev-fiscal-btn" onclick="event.stopPropagation(); FilaNotasFiscais.abrirEnvio('${esc(ped)}','${esc(id)}')">${rot}</button></span>`;
+  },
+
+  /** Abre Enviar nota com o pedido. Se a nota foi devolvida, abre a correção desse envio. */
+  abrirEnvio(pedido, idEnvio) {
+    const ped = String(pedido || "").trim();
+    if (!ped) return;
+    if (typeof window.switchTab === "function") window.switchTab("fiscal-enviar-nota", "Enviar nota ao fiscal");
+    const abrir = () => {
+      const app = window.EnviarNotaApp;
+      if (!app) return;
+      const item = idEnvio && (app.state && app.state.lista || []).concat(this._ultimo || []).find((x) => x && x.id === idEnvio);
+      if (item && item.status === "devolvida") {
+        if (!app.state || !app.state.lista || !app.state.lista.some((x) => x.id === idEnvio)) {
+          app.state = app.novoEstado();
+          app.state.lista = (this._ultimo || []).slice();
+          app.state.listaCarregada = true;
+        }
+        app.corrigir(idEnvio);
+        return;
+      }
+      app.state = app.novoEstado();
+      app.state.pedidoId = ped;
+      app.init();
+      app.buscarPedido();
+    };
+    setTimeout(abrir, 40);
+  },
+
   async listar() {
     const fb = this.fb();
     if (!fb) throw new Error("Firebase indisponível");
@@ -134,7 +196,7 @@ window.FilaNotasFiscais = {
       .fnf-tab td small { display: block; color: #64748b; font-size: 0.74rem; margin-top: 2px; }
       .fnf-tab .num { text-align: right; white-space: nowrap; }
       .fnf-tab .fnf-acoes { white-space: nowrap; text-align: right; }
-      .fnf-tab .fnf-acoes .btn { height: 30px; font-size: 0.76rem; display: inline-flex; align-items: center; gap: 5px; padding: 0 10px; margin-left: 4px; }
+      .fnf-tab .fnf-acoes .btn { height: 32px; min-width: 168px; justify-content: center; font-size: 0.76rem; display: inline-flex; align-items: center; gap: 5px; padding: 0 10px; margin-left: 4px; box-sizing: border-box; }
       .fnf-tab .fnf-acoes .btn i { width: 13px; height: 13px; }
       .fnf-pill { display: inline-block; border-radius: 999px; padding: 2px 9px; font-size: 0.72rem; font-weight: 700; white-space: nowrap; }
       .fnf-pill.is-wait { background: #fff7ed; color: #c2410c; }
@@ -162,10 +224,13 @@ window.EnviarNotaApp = {
       aba: ant.aba || "enviar",
       pedidoId: "", pedidoApi: "", pedidoNome: "", pedido: null, credor: null, cc: null, empresaCc: "", previsao: null,
       carregando: "", erro: "", abertas: [],
-      banco: { contas: [], pix: [], erro: "" },
+      banco: { contas: [], pix: [], formas: [], erro: "" },
       anexos: [], previewIdx: -1, preview: "", previewLendo: "",
       pag: { data: "", forma: "", detalhe: "" },
-      numeroNota: "", valorNota: "", obs: "",
+      formaManual: "",
+      numeroNota: "", serieNota: "", valorNota: "", linhaBoleto: "",
+      lendoNota: "", leituraErro: "", leituraToken: 0, fiscal: null,
+      obs: "",
       enviando: "", feito: "", editandoId: "",
       lista: ant.lista || [], listaCarregada: !!ant.listaCarregada, listaErro: "", listaCarregando: false, todos: !!ant.todos
     };
@@ -221,7 +286,7 @@ window.EnviarNotaApp = {
     const digitado = String((document.getElementById("env-pedido") || {}).value || s.pedidoId || "").trim();
     const id = InserirNotaApp.idApi(digitado);
     if (!id) return;
-    Object.assign(s, { pedidoId: digitado, pedidoApi: id, pedidoNome: digitado, pedido: null, credor: null, cc: null, empresaCc: "", previsao: null, erro: "", abertas: [], feito: "", banco: { contas: [], pix: [], erro: "" } });
+    Object.assign(s, { pedidoId: digitado, pedidoApi: id, pedidoNome: digitado, pedido: null, credor: null, cc: null, empresaCc: "", previsao: null, erro: "", abertas: [], feito: "", banco: { contas: [], pix: [], formas: [], erro: "" } });
     s.carregando = "Buscando o pedido no Sienge…";
     this.render();
     try {
@@ -238,19 +303,22 @@ window.EnviarNotaApp = {
         this.dadosBancarios(pedido.supplierId)
       ]);
       s.banco = banco;
+      s.lista = Array.isArray(fila) ? fila : (s.lista || []);
+      s.listaCarregada = true;
       s.credor = credor && typeof credor === "object"
         ? { id: String(pedido.supplierId), nome: credor.name || credor.tradeName || `Fornecedor ${pedido.supplierId}`, doc: InserirNotaApp.digits(credor.cnpj || credor.cpf) }
         : { id: String(pedido.supplierId), nome: `Fornecedor ${pedido.supplierId}`, doc: "" };
       s.cc = cc;
       s.empresaCc = cc.companyId;
       s.previsao = previsao;
-      s.abertas = fila.filter((x) => FilaNotasFiscais.aberta(x) && String(x.pedidoApi) === s.pedidoApi && x.id !== s.editandoId);
+      s.abertas = s.lista.filter((x) => FilaNotasFiscais.aberta(x) && String(x.pedidoApi) === s.pedidoApi && x.id !== s.editandoId);
       if (!s.pag.data && previsao && previsao.parcelas.length) {
         const hoje = this.hojeIso();
         const p = previsao.parcelas.find((x) => x.vencimento >= hoje) || previsao.parcelas[0];
         s.pag.data = p.vencimento;
       }
-      this.ajustarDestino();
+      this.sugerirForma();
+      if (s._fonteNota) this.analisarFiscal(s.leituraToken);
     } catch (e) {
       const msg = String((e && e.message) || e || "");
       s.erro = /404|não encontrado/i.test(msg) ? `Pedido ${id} não encontrado no Sienge.`
@@ -262,7 +330,7 @@ window.EnviarNotaApp = {
 
   /* ---------- dados bancários do credor (cadastro no Sienge) ---------- */
   async dadosBancarios(credorId) {
-    const out = { contas: [], pix: [], erro: "" };
+    const out = { contas: [], pix: [], formas: [], erro: "" };
     if (credorId == null || credorId === "") return out;
     const id = encodeURIComponent(credorId);
     const [contas, pix] = await Promise.all([
@@ -270,8 +338,12 @@ window.EnviarNotaApp = {
       InserirNotaApp.get(`/creditors/${id}/pix-informations?limit=100`).catch((e) => { out.erro = out.erro || String((e && e.message) || e); return null; })
     ]);
     const padrao = (x) => ["S", "Y", "TRUE", "1"].includes(String(x && x.defaultFlag).toUpperCase());
-    out.contas = InserirNotaApp.lista(contas).filter((b) => b && (b.accountNumber || b.agency)).map((b) => ({
+    const bancos = InserirNotaApp.lista(contas);
+    out.contas = bancos.filter((b) => b && (b.accountNumber || b.agency)).map((b) => ({
       txt: this.contaTxt(b), padrao: padrao(b), favorecido: b.nameOfRecipient || "", doc: InserirNotaApp.digits(b.cpf || b.cnpj)
+    }));
+    out.formas = bancos.filter((b) => b && (b.paymentForm || b.paymentTypeName)).map((b) => ({
+      forma: String(b.paymentForm || b.paymentTypeName).trim(), padrao: padrao(b)
     }));
     out.pix = InserirNotaApp.lista(pix).filter((p) => p && (p.key || p.keyPix)).map((p) => ({
       txt: `${String(p.type || p.keyPixType || "").trim().toUpperCase() || "Chave"}: ${String(p.key || p.keyPix).trim()}`, padrao: padrao(p)
@@ -305,11 +377,65 @@ window.EnviarNotaApp = {
   },
 
   setForma(forma) {
-    const pag = this.state.pag;
+    const s = this.state;
+    const pag = s.pag;
+    s.formaManual = forma;
     if (pag.forma !== forma) pag.detalhe = "";
     pag.forma = forma;
     this.ajustarDestino();
     this.render();
+  },
+
+  /** Forma padrão do cadastro bancário do credor no Sienge (paymentForm). */
+  formaDoTexto(txt) {
+    const pf = String(txt || "").toUpperCase();
+    if (!pf) return "";
+    if (pf.includes("PIX")) return "PIX";
+    if (pf.includes("CART")) return "Cartão de crédito";
+    if (pf.includes("DÉBITO") || pf.includes("DEBITO")) return "Débito em conta";
+    if (pf.includes("TRANSFER") || pf.includes("TED") || pf.includes("DOC") || pf.includes("BANK-TRANSFER")) return "Transferência (TED)";
+    if (pf.includes("BOLETO")) return "Boleto";
+    return "";
+  },
+
+  formaDoCredor() {
+    const formas = (this.state.banco && this.state.banco.formas) || [];
+    const escolhida = formas.find((c) => c.padrao) || formas[0];
+    return escolhida ? this.formaDoTexto(escolhida.forma) : "";
+  },
+
+  linhaBoleto(texto) {
+    const t = String(texto || "");
+    const m = t.match(/\d{5}\.?\d{5}\s+\d{5}\.?\d{6}\s+\d{5}\.?\d{6}\s+\d\s+\d{14}/);
+    if (m) return m[0].replace(/\s+/g, " ").trim();
+    const b = t.match(/\d{47,48}/);
+    return b ? b[0] : "";
+  },
+
+  temBoleto() {
+    const s = this.state;
+    return s.anexos.some((a) => a.tipo === "boleto") || !!s.linhaBoleto;
+  },
+
+  /** Boleto no envio manda a forma. Sem boleto, usa a forma cadastrada no credor. */
+  sugerirForma() {
+    const s = this.state;
+    const pag = s.pag;
+    if (this.temBoleto()) {
+      if (pag.forma !== "Boleto") pag.detalhe = "";
+      pag.forma = "Boleto";
+      if (s.linhaBoleto && !String(pag.detalhe || "").trim()) pag.detalhe = s.linhaBoleto;
+      return;
+    }
+    if (s.formaManual) {
+      pag.forma = s.formaManual;
+      this.ajustarDestino();
+      return;
+    }
+    const forma = this.formaDoCredor();
+    if (pag.forma !== forma) pag.detalhe = "";
+    pag.forma = forma;
+    this.ajustarDestino();
   },
 
   /* ---------- anexos ---------- */
@@ -326,6 +452,8 @@ window.EnviarNotaApp = {
       s.anexos.push({ file, nome: file.name, tipo, size: file.size, contentType: file.type });
     });
     if (input) input.value = "";
+    this.agendarLeitura();
+    this.sugerirForma();
     if (s.previewIdx < 0) {
       const i = s.anexos.findIndex((a) => a.tipo === "nota");
       if (i >= 0) { this.verAnexo(i); return; }
@@ -336,6 +464,8 @@ window.EnviarNotaApp = {
   setTipoAnexo(i, tipo) {
     const a = this.state.anexos[i];
     if (a) a.tipo = tipo;
+    this.agendarLeitura();
+    this.sugerirForma();
     this.render();
   },
 
@@ -344,7 +474,212 @@ window.EnviarNotaApp = {
     s.anexos.splice(i, 1);
     if (s.previewIdx === i) { s.previewIdx = -1; s.preview = ""; }
     else if (s.previewIdx > i) s.previewIdx--;
+    this.agendarLeitura();
+    this.sugerirForma();
     this.render();
+  },
+
+  /** Lê número, valor e boleto do arquivo da nota. Os campos não aparecem na tela. */
+  agendarLeitura() {
+    const s = this.state;
+    const token = (s.leituraToken || 0) + 1;
+    s.leituraToken = token;
+    const a = s.anexos.find((x) => x.tipo === "nota");
+    if (!a) {
+      s.lendoNota = "";
+      s.leituraErro = "";
+      s.linhaBoleto = "";
+      s.fiscal = null;
+      if (!s.editandoId) {
+        s.numeroNota = "";
+        s.serieNota = "";
+        s.valorNota = "";
+      }
+      return;
+    }
+    s.lendoNota = "Lendo o número e o valor da nota…";
+    s.leituraErro = "";
+    const pronto = a.file ? Promise.resolve(a.file) : FilaNotasFiscais.baixar(a);
+    pronto.then((file) => this.lerNota(file, token)).catch((e) => {
+      if (s.leituraToken !== token) return;
+      s.lendoNota = "";
+      if (!s.numeroNota) s.leituraErro = `Não consegui ler a nota: ${(e && e.message) || e}`;
+      this.render();
+    });
+  },
+
+  async lerNota(file, token) {
+    const s = this.state;
+    try {
+      const buf = await file.arrayBuffer();
+      if (s.leituraToken !== token) return;
+      const inicio = new TextDecoder("latin1").decode(new Uint8Array(buf.slice(0, 64))).trim();
+      let nota = null;
+      let texto = "";
+      if (/^\uFEFF?</.test(inicio) || /\.xml$/i.test(file.name)) {
+        const xml = new TextDecoder("utf-8").decode(buf);
+        nota = InserirNotaApp.lerXml(xml);
+        texto = xml;
+      } else if (/^%PDF/.test(inicio)) {
+        const itens = window.NotaFiscalCheck ? await NotaFiscalCheck.itensDoPdf(buf) : [];
+        if (s.leituraToken !== token) return;
+        texto = itens.map((i) => i.s).join("\n");
+        if (itens.length >= 20) nota = InserirNotaApp.extrair(InserirNotaApp.celulasPdf(itens));
+        else {
+          const canvas = await InserirNotaApp.pdfParaCanvas(buf);
+          if (s.leituraToken !== token) return;
+          const celulas = await this.ocr(canvas, token);
+          if (s.leituraToken !== token) return;
+          texto = texto || celulas.map((c) => c.s).join("\n");
+          nota = InserirNotaApp.extrair(celulas);
+        }
+      } else if (/^image\//.test(file.type)) {
+        const canvas = await InserirNotaApp.imagemParaCanvas(file);
+        if (s.leituraToken !== token) return;
+        const celulas = await this.ocr(canvas, token);
+        if (s.leituraToken !== token) return;
+        texto = celulas.map((c) => c.s).join("\n");
+        nota = InserirNotaApp.extrair(celulas);
+      } else {
+        throw new Error("formato não reconhecido; use PDF, XML ou imagem");
+      }
+      if (s.leituraToken !== token) return;
+      s.numeroNota = (nota && nota.numero) || "";
+      s.serieNota = (nota && nota.serie) || "";
+      s.valorNota = nota && nota.valor != null ? nota.valor : "";
+      s.linhaBoleto = this.linhaBoleto(texto);
+      s.leituraErro = s.numeroNota ? "" : "Não consegui ler o número da nota no arquivo.";
+      s._fonteNota = { xml: /^\s*</.test(texto) ? texto : "", texto, buf, nome: file.name || "", nota };
+      s.fiscal = { carregando: true, erros: [], avisos: [], oks: [], infos: [], itens: [] };
+    } catch (e) {
+      if (s.leituraToken !== token) return;
+      s.linhaBoleto = "";
+      if (!s.numeroNota) s.leituraErro = `Não consegui ler a nota: ${(e && e.message) || e}`;
+    }
+    s.lendoNota = "";
+    this.sugerirForma();
+    this.render();
+    if (s._fonteNota) this.analisarFiscal(token);
+  },
+
+  async cnpjEmpresa() {
+    const id = this.state.empresaCc;
+    if (!id) return { cnpj: "", nome: "" };
+    const c = await InserirNotaApp.get(`/companies/${encodeURIComponent(id)}`).catch(() => null);
+    return {
+      cnpj: InserirNotaApp.digits(c && (c.cnpj || c.cpfCnpj || c.documentNumber || "")),
+      nome: (c && (c.tradeName || c.name)) || this.nomeEmpresa(id)
+    };
+  },
+
+  async itensDoPedido() {
+    const id = this.state.pedidoApi;
+    if (!id) return [];
+    const res = await InserirNotaApp.get(`/purchase-orders/${id}/items?limit=200`).catch(() => null);
+    return InserirNotaApp.lista(res).map((it) => {
+      const qtd = Number(it.quantity) || 0;
+      const unit = Number(it.netPrice) || Number(it.unitPrice) || 0;
+      const valor = Number(it.totalAmount != null ? it.totalAmount : it.totalPrice) || Math.round(unit * qtd * 100) / 100;
+      return {
+        descricao: [it.resourceDescription, it.detailDescription].filter(Boolean).join(" ") || `Item ${it.itemNumber}`,
+        qtd, valor
+      };
+    });
+  },
+
+  async analisarFiscal(token) {
+    const s = this.state;
+    const fonte = s._fonteNota;
+    if (!fonte || !window.NotaFiscalCheck) return;
+    s.fiscal = { carregando: true, erros: [], avisos: [], oks: [], infos: [], itens: [] };
+    this.pintarFiscal();
+    try {
+      const [itensPedido, empresa] = await Promise.all([this.itensDoPedido(), this.cnpjEmpresa()]);
+      if (s.leituraToken !== token) return;
+      s.fiscal = await NotaFiscalCheck.conferirEnvio({
+        xml: fonte.xml, texto: fonte.texto, buf: fonte.buf, nome: fonte.nome, nota: fonte.nota,
+        credorDoc: s.credor && s.credor.doc, empresaCnpj: empresa.cnpj, empresaNome: empresa.nome, itensPedido
+      });
+    } catch (e) {
+      if (s.leituraToken !== token) return;
+      s.fiscal = { carregando: false, nivel: "aviso", erros: [], oks: [], infos: [], itens: [], avisos: [`Não consegui concluir a análise fiscal: ${(e && e.message) || e}`] };
+    }
+    if (s.leituraToken === token) this.render();
+  },
+
+  pintarFiscal() {
+    const el = document.getElementById("env-fiscal");
+    if (!el || !window.NotaFiscalCheck) return;
+    el.innerHTML = NotaFiscalCheck.painelEnvio(this.state.fiscal);
+  },
+
+  async ocr(canvas, token) {
+    const s = this.state;
+    s.lendoNota = "Carregando o leitor de imagem…";
+    this.pintarConferencia();
+    await InserirNotaApp.carregarTesseract();
+    const worker = await Tesseract.createWorker("por", 1, {
+      logger: (m) => {
+        if (s.leituraToken !== token) return;
+        if (m.status === "recognizing text" && m.progress != null) {
+          s.lendoNota = `Lendo a nota… ${Math.round(m.progress * 100)}%`;
+          this.pintarConferencia();
+        }
+      }
+    });
+    try {
+      const { data } = await worker.recognize(canvas);
+      const E = canvas._escala || 1;
+      const celulas = [];
+      (data.lines || []).forEach((l) => {
+        const ws = (l.words || []).filter((w) => String(w.text || "").trim());
+        if (!ws.length) return;
+        const h = Math.max(...ws.map((w) => w.bbox.y1 - w.bbox.y0));
+        let cur = null;
+        ws.forEach((w) => {
+          if (cur && w.bbox.x0 - cur.x1 * E < h * 1.1) {
+            cur.s += " " + w.text;
+            cur.x1 = w.bbox.x1 / E;
+          } else {
+            cur = { s: w.text, x0: w.bbox.x0 / E, x1: w.bbox.x1 / E, y: l.bbox.y0 / E };
+            celulas.push(cur);
+          }
+        });
+      });
+      return celulas;
+    } finally {
+      await worker.terminate();
+    }
+  },
+
+  mesmoNumero(a, b) {
+    const n = (v) => String(v || "").replace(/\D/g, "").replace(/^0+/, "");
+    const na = n(a);
+    const nb = n(b);
+    return !!na && na === nb;
+  },
+
+  docCredor(c) {
+    return InserirNotaApp.digits((c && (c.doc || c.cnpj || c.cpf)) || "");
+  },
+
+  /** Mesma nota (número + fornecedor) já enviada pelo CRM, mesmo que em outro pedido. */
+  duplicadaNaFila() {
+    const s = this.state;
+    if (!s.numeroNota) return null;
+    const doc = this.docCredor(s.credor);
+    const idCred = s.credor && String(s.credor.id || "");
+    const serie = String(s.serieNota || "").trim().toUpperCase();
+    return (s.lista || []).find((x) => {
+      if (!x || x.id === s.editandoId || x.status === "cancelada") return false;
+      if (!this.mesmoNumero(x.numeroNota, s.numeroNota)) return false;
+      const serieX = String(x.serieNota || "").trim().toUpperCase();
+      if (serie && serieX && serie !== serieX) return false;
+      const docX = this.docCredor(x.fornecedor);
+      if (doc && docX) return doc === docX;
+      const idX = x.fornecedor && String(x.fornecedor.id || "");
+      return !!(idCred && idX && idCred === idX);
+    }) || null;
   },
 
   async verAnexo(i) {
@@ -397,12 +732,27 @@ window.EnviarNotaApp = {
     const notas = s.anexos.filter((a) => a.tipo === "nota");
     if (!notas.length) erros.push("Anexe a nota fiscal (PDF, XML ou imagem) e marque o tipo \"Nota fiscal\".");
     else oks.push(`${notas.length === 1 ? "Nota fiscal anexada" : `${notas.length} arquivos de nota anexados`}${s.anexos.length > notas.length ? ` + ${s.anexos.length - notas.length} outro(s) anexo(s)` : ""}.`);
+    if (s.lendoNota) erros.push(s.lendoNota);
+    else if (notas.length && s.leituraErro) erros.push(s.leituraErro);
+    else if (notas.length && s.numeroNota) {
+      const valorLido = this.num(s.valorNota);
+      oks.push(`Nota ${s.numeroNota}${s.serieNota ? "/" + s.serieNota : ""} lida do arquivo${valorLido != null ? `, no valor de ${this.money(valorLido)}` : ""}.`);
+    }
+
+    const dup = this.duplicadaNaFila();
+    if (dup) {
+      const st = (FilaNotasFiscais.STATUS[dup.status] || {}).rot || dup.status || "enviada";
+      const quando = dup.criadoEm ? new Date(dup.criadoEm).toLocaleDateString("pt-BR") : "";
+      erros.push(`A NF ${s.numeroNota} deste fornecedor já está na base de notas enviadas (pedido ${dup.pedido || "—"}, ${st}${quando ? " em " + quando : ""}${dup.criadoPor ? " por " + dup.criadoPor : ""}). A mesma nota não pode ir ao fiscal de novo, mesmo em outro pedido.`);
+    }
 
     const pag = s.pag;
     if (!pag.data) erros.push("Confirme a data de pagamento.");
     else if (pag.data < this.hojeIso()) avisos.push(`A data de pagamento (${this.dataBr(pag.data)}) já passou.`);
-    if (!pag.forma) erros.push("Escolha a forma de pagamento.");
-    if (pag.forma === "Boleto" && !s.anexos.some((a) => a.tipo === "boleto")) avisos.push("Forma de pagamento boleto sem boleto anexado: anexe o boleto se ele não estiver no mesmo arquivo da nota.");
+    if (!pag.forma) erros.push(s.pedido && !this.temBoleto() ? "Escolha a forma de pagamento. O cadastro do credor não informa uma forma padrão." : "Escolha a forma de pagamento.");
+    else if (this.temBoleto()) oks.push(s.anexos.some((a) => a.tipo === "boleto") ? "Boleto anexado: pagamento em boleto." : "Boleto identificado na nota: pagamento em boleto.");
+    else if (!s.formaManual && pag.forma === this.formaDoCredor()) oks.push(`Forma de pagamento do cadastro do credor: ${pag.forma}.`);
+    if (pag.forma === "Boleto" && !this.temBoleto()) avisos.push("Forma de pagamento boleto sem boleto anexado: anexe o boleto se ele não estiver no mesmo arquivo da nota.");
     const ops = this.destinos(pag.forma);
     if (ops) {
       const oque = pag.forma === "PIX" ? "chave PIX" : "conta bancária";
@@ -419,7 +769,16 @@ window.EnviarNotaApp = {
     if (valor != null && prev && prev.valor != null && Math.abs(prev.valor - valor) > 0.05) {
       avisos.push(`O valor da nota (${this.money(valor)}) é diferente da previsão financeira do pedido (${this.money(prev.valor)}).`);
     }
-    if (s.abertas.length) avisos.push(`Este pedido já tem ${s.abertas.length} nota(s) na fila do fiscal (${s.abertas.map((x) => `${x.numeroNota ? "NF " + x.numeroNota + " · " : ""}enviada por ${x.criadoPor || "?"} em ${new Date(x.criadoEm).toLocaleDateString("pt-BR")}`).join("; ")}).`);
+    const fiscal = s.fiscal;
+    if (fiscal && fiscal.carregando) erros.push("Ainda estou cruzando a nota com o pedido, o CNAE e o endereço da empresa.");
+    else if (fiscal) {
+      (fiscal.erros || []).forEach((t) => erros.push(t));
+      (fiscal.avisos || []).forEach((t) => avisos.push(t));
+      (fiscal.infos || []).forEach((t) => avisos.push(t));
+      (fiscal.oks || []).forEach((t) => oks.push(t));
+    }
+    const outras = s.abertas.filter((x) => !dup || x.id !== dup.id);
+    if (outras.length) avisos.push(`Este pedido já tem ${outras.length} nota(s) na fila do fiscal (${outras.map((x) => `${x.numeroNota ? "NF " + x.numeroNota + " · " : ""}enviada por ${x.criadoPor || "?"} em ${new Date(x.criadoEm).toLocaleDateString("pt-BR")}`).join("; ")}).`);
     return { erros, avisos, oks };
   },
 
@@ -427,9 +786,17 @@ window.EnviarNotaApp = {
   async enviar() {
     const s = this.state;
     if (!this.podeEditar()) { alert("Sem permissão para enviar notas ao fiscal."); return; }
+    try {
+      s.lista = await FilaNotasFiscais.listar();
+      s.listaCarregada = true;
+    } catch (e) {
+      alert("Não consegui consultar a base de notas enviadas. O envio não foi feito.");
+      return;
+    }
     const c = this.conferir();
-    if (c.erros.length) { alert(c.erros.join("\n")); return; }
-    const msg = `Enviar ao fiscal a nota do pedido ${s.pedidoNome} (${s.credor ? s.credor.nome : ""}), com pagamento em ${this.dataBr(s.pag.data)} por ${s.pag.forma}?`
+    if (c.erros.length) { this.render(); alert(c.erros.join("\n")); return; }
+    const nf = s.numeroNota ? ` NF ${s.numeroNota}${s.serieNota ? "/" + s.serieNota : ""}` : "";
+    const msg = `Enviar ao fiscal a nota${nf} do pedido ${s.pedidoNome} (${s.credor ? s.credor.nome : ""}), com pagamento em ${this.dataBr(s.pag.data)} por ${s.pag.forma}?`
       + (c.avisos.length ? `\n\nAtenção:\n• ${c.avisos.join("\n• ")}` : "");
     const ok = typeof window.mouraConfirm === "function" ? await window.mouraConfirm(msg) : confirm(msg);
     if (!ok) return;
@@ -450,6 +817,7 @@ window.EnviarNotaApp = {
         valorPedido: s.pedido.totalAmount != null ? Number(s.pedido.totalAmount) : null,
         previsao: s.previsao,
         numeroNota: String(s.numeroNota || "").trim(),
+        serieNota: String(s.serieNota || "").trim(),
         valorNota: this.num(s.valorNota),
         pagamento: { data: s.pag.data, forma: s.pag.forma, detalhe: String(s.pag.detalhe || "").trim() },
         observacao: String(s.obs || "").trim(),
@@ -524,11 +892,14 @@ window.EnviarNotaApp = {
       anexos: (item.anexos || []).map((a) => Object.assign({}, a)),
       pag: Object.assign({ data: "", forma: "", detalhe: "" }, item.pagamento || {}),
       numeroNota: item.numeroNota || "",
-      valorNota: item.valorNota != null ? Number(item.valorNota).toLocaleString("pt-BR", { minimumFractionDigits: 2 }) : "",
+      serieNota: item.serieNota || "",
+      formaManual: (item.pagamento && item.pagamento.forma) || "",
+      valorNota: item.valorNota != null ? item.valorNota : "",
       obs: item.observacao || ""
     });
     this.state = s;
     this.render();
+    this.agendarLeitura();
     this.buscarPedido();
     const i = s.anexos.findIndex((a) => a.tipo === "nota");
     if (i >= 0) this.verAnexo(i);
@@ -602,8 +973,6 @@ window.EnviarNotaApp = {
         <div><label>Data de pagamento</label><input type="date" value="${this.esc(pag.data)}" onchange="EnviarNotaApp.setPag('data', this.value)"></div>
         <div><label>Forma de pagamento</label><select onchange="EnviarNotaApp.setForma(this.value)"><option value="">Escolha…</option>${formas.map((f) => `<option ${pag.forma === f ? "selected" : ""}>${this.esc(f)}</option>`).join("")}</select></div>
         <div class="inf-span2">${destino}</div>
-        <div><label>Nº da nota (opcional)</label><input value="${this.esc(s.numeroNota)}" oninput="EnviarNotaApp.setCampo('numeroNota', this.value)"></div>
-        <div><label>Valor da nota (opcional)</label><input value="${this.esc(s.valorNota)}" placeholder="0,00" onchange="EnviarNotaApp.setCampo('valorNota', this.value)"></div>
         <div class="inf-span2"><label>Observação para o fiscal</label><input value="${this.esc(s.obs)}" oninput="EnviarNotaApp.setCampo('obs', this.value)"></div>
       </div>
       ${sug ? `<p class="inf-muted">${this.esc(sug)}</p>` : ""}`;
@@ -639,6 +1008,7 @@ window.EnviarNotaApp = {
           <div class="inf-card">
             <h3><i data-lucide="list-checks"></i> Conferência</h3>
             <div id="env-conf">${this.conferenciaHtml()}</div>
+            <div id="env-fiscal">${window.NotaFiscalCheck ? NotaFiscalCheck.painelEnvio(s.fiscal) : ""}</div>
             <div class="inf-acoes">
               <button type="button" class="btn btn-outline" onclick="EnviarNotaApp.limpar()" ${s.enviando ? "disabled" : ""}><i data-lucide="rotate-ccw"></i> ${s.editandoId ? "Desistir da correção" : "Limpar"}</button>
               <button type="button" id="env-enviar" class="btn btn-primary" onclick="EnviarNotaApp.enviar()" ${bloqueado ? "disabled" : ""}

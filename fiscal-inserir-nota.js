@@ -196,6 +196,7 @@ window.InserirNotaApp = {
       s.carregando = "";
       this.render();
       this.verificarDuplicada();
+      if (s._fonteNota) this.analisarFiscal();
     } catch (e) {
       s.carregando = "";
       const msg = String((e && e.message) || e || "");
@@ -343,6 +344,8 @@ window.InserirNotaApp = {
         throw new Error("formato não reconhecido; use PDF, XML ou imagem");
       }
       s.nota = nota;
+      s._fonteNota = { buf, nome: file.name || "", nota };
+      s.fiscal = { carregando: true, erros: [], avisos: [], oks: [], infos: [], itens: [] };
       const f = s.form;
       if (nota.numero) f.numero = nota.numero;
       if (nota.serie) f.serie = nota.serie;
@@ -356,6 +359,40 @@ window.InserirNotaApp = {
     s.lendo = "";
     this.render();
     this.verificarDuplicada();
+    if (s._fonteNota) this.analisarFiscal();
+  },
+
+  async analisarFiscal() {
+    const s = this.state;
+    const fonte = s._fonteNota;
+    if (!fonte || !window.NotaFiscalCheck) return;
+    const token = (s._fiscalToken = (s._fiscalToken || 0) + 1);
+    s.fiscal = { carregando: true, erros: [], avisos: [], oks: [], infos: [], itens: [] };
+    const el = document.getElementById("inf-fiscal");
+    if (el) el.innerHTML = NotaFiscalCheck.painelEnvio(s.fiscal);
+    try {
+      let cnpj = "";
+      let nome = "";
+      if (s.form.companyId) {
+        const c = await this.get(`/companies/${encodeURIComponent(s.form.companyId)}`).catch(() => null);
+        cnpj = this.digits(c && (c.cnpj || c.cpfCnpj || c.documentNumber || ""));
+        nome = (c && (c.tradeName || c.name)) || this.nomeEmpresa(s.form.companyId);
+      }
+      if (s._fiscalToken !== token) return;
+      const itensPedido = (s.itens || []).map((it) => {
+        const qtd = (it.entregas || []).reduce((t, e) => t + (Number(e.qtd) || 0), 0) || Number(it.quantidade) || 0;
+        return { descricao: it.descricao || "", qtd, valor: Math.round(((Number(it.preco) || 0) * qtd) * 100) / 100 };
+      });
+      s.fiscal = await NotaFiscalCheck.conferirEnvio({
+        buf: fonte.buf, nome: fonte.nome, nota: fonte.nota,
+        credorDoc: s.credor && s.credor.doc, empresaCnpj: cnpj, empresaNome: nome, itensPedido
+      });
+    } catch (e) {
+      if (s._fiscalToken !== token) return;
+      s.fiscal = { carregando: false, erros: [], oks: [], infos: [], itens: [], avisos: [`Não consegui concluir a análise fiscal: ${(e && e.message) || e}`] };
+    }
+    if (s._fiscalToken !== token) return;
+    this.render();
   },
 
   observacaoPadrao() {
@@ -632,6 +669,14 @@ window.InserirNotaApp = {
     else if (dup && dup.conferindo) avisos.push("Conferindo se a nota já existe no Sienge…");
     else if (dup && dup.erro) avisos.push("Não consegui conferir se a nota já existe no Sienge.");
     else if (dup) oks.push("Nota ainda não cadastrada no Sienge.");
+    const fiscal = s.fiscal;
+    if (fiscal && fiscal.carregando) erros.push("Ainda estou cruzando a nota com o pedido, o CNAE e o endereço da empresa.");
+    else if (fiscal) {
+      (fiscal.erros || []).forEach((t) => erros.push(t));
+      (fiscal.avisos || []).forEach((t) => avisos.push(t));
+      (fiscal.infos || []).forEach((t) => avisos.push(t));
+      (fiscal.oks || []).forEach((t) => oks.push(t));
+    }
     return { erros, avisos, oks };
   },
 
@@ -1197,7 +1242,10 @@ window.InserirNotaApp = {
         .inf-check { list-style: none; margin: 0; padding: 0; font-size: 0.84rem; }
         .inf-check li { display: flex; gap: 8px; padding: 4px 0; }
         .inf-check li span { font-weight: 800; width: 14px; flex: 0 0 14px; }
-        .inf-check .is-erro { color: #b91c1c; } .inf-check .is-aviso { color: #c2410c; } .inf-check .is-ok { color: #105436; }
+        .inf-check .is-erro { color: #b91c1c; } .inf-check .is-aviso { color: #c2410c; } .inf-check .is-ok { color: #105436; } .inf-check .is-info { color: #0f766e; }
+        .nfchk-tab { width: 100%; border-collapse: collapse; font-size: 0.78rem; margin-top: 8px; }
+        .nfchk-tab th, .nfchk-tab td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+        .nfchk-tab th { font-size: 0.68rem; text-transform: uppercase; color: #64748b; }
         .inf-acoes { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
         .inf-acoes .btn { height: 38px; display: inline-flex; align-items: center; gap: 8px; padding: 0 16px; }
         .inf-acoes .btn i { width: 16px; height: 16px; }
@@ -1279,6 +1327,7 @@ window.InserirNotaApp = {
           <div class="inf-card">
             <h3><i data-lucide="list-checks"></i> Conferência</h3>
             <div id="inf-conf">${this.conferenciaHtml()}</div>
+            <div id="inf-fiscal">${window.NotaFiscalCheck ? NotaFiscalCheck.painelEnvio(s.fiscal) : ""}</div>
             <label class="inf-chk" style="margin-top:10px;"><input type="checkbox" ${s.form.anexar ? "checked" : ""} onchange="InserirNotaApp.setCampo('anexar', this.checked)"> Anexar ${s.item && (s.item.anexos || []).length > 1 ? "a nota e os outros anexos do envio (boleto etc.)" : "o arquivo da nota"} no pedido e copiar para a nota no Sienge</label>
             <div class="inf-acoes">
               <button type="button" class="btn btn-outline" onclick="InserirNotaApp.recomecar()" ${s.enviando ? "disabled" : ""}><i data-lucide="rotate-ccw"></i> Recomeçar</button>

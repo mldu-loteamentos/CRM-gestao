@@ -2338,7 +2338,15 @@ const EstoqueComercialApp = {
   isFinanceUnit(u) {
     if (!u) return false;
     const code = String(u.commercialStock || "").toUpperCase();
-    return code === "V" || code === "O" || !!u.contractId || !!this.displayContract(u);
+    return code === "V" || code === "O" || !!u.contractId || !!this.displayContract(u) || !!u.carteiraCt;
+  },
+
+  /** Carteira é só contrato (CT). Recibo, devolução e outros documentos ficam de fora. Sem tipo identificado, o título permanece. */
+  ehDocumentoCt(b) {
+    if (!b) return false;
+    const tipo = String(b.documentIdentificationId || b.documentId || b.documentsId || "").trim().toUpperCase();
+    if (!tipo || /^\d+$/.test(tipo)) return true;
+    return tipo === "CT";
   },
 
   isSettledUnit(u) {
@@ -2808,6 +2816,7 @@ const EstoqueComercialApp = {
     const list = statements || [];
     const mine = (bills || []).filter(b => this.billMatchesEstoqueUnit(b, u));
     const byRb = list.filter(s => {
+      if (!this.ehDocumentoCt(s)) return false;
       const sid = String(s.billReceivableId || s.receivableBillId || s.id || "").replace(/^B-/, "").split("-")[0];
       const uBill = String(u.receivableBillId || "").replace(/^B-/, "").split("-")[0];
       if (uBill && sid && uBill === sid) return true;
@@ -2820,7 +2829,7 @@ const EstoqueComercialApp = {
       return parc.some(i => (i.receipts || []).length) ? 1 : 0;
     };
     if (byRb.length) return byRb.slice().sort((a, b) => peso(b) - peso(a))[0];
-    const byDoc = list.find(s => this.billMatchesUnit(s, u) || this.billMatchesEstoqueUnit(s, u));
+    const byDoc = list.find(s => this.ehDocumentoCt(s) && (this.billMatchesUnit(s, u) || this.billMatchesEstoqueUnit(s, u)));
     if (byDoc) return byDoc;
     return null;
   },
@@ -3006,7 +3015,7 @@ const EstoqueComercialApp = {
       this.state.units = this.state.units.map(u => {
         if (!unitIds.has(String(u.id))) return u;
         if (this.isSettledUnit(u) || !this.isActiveFinance(u)) return u;
-        const mine = bills.filter(b => this.billMatchesEstoqueUnit(b, u));
+        const mine = bills.filter(b => this.ehDocumentoCt(b) && this.billMatchesEstoqueUnit(b, u));
         const stmt = this.pickStatementForUnit(u, statements, bills);
         const statusTitulos = this.classifyUnitBills(mine);
         const status = statusTitulos
@@ -3068,7 +3077,7 @@ const EstoqueComercialApp = {
   /* ---------- Conferência com o Contas a Receber do Sienge (extrato histórico do centro de custo) ---------- */
   async fetchExtratoCc(ccId) {
     const path = (s, e) => `/bulk-data/v1/customer-extract-history?startDueDate=${s}&endDueDate=${e}&costCenterId=${encodeURIComponent(ccId)}`
-      + "&includeRemadeInstallments=false&includeCanceledInstallments=false&includeRevokedInstallments=false&includeRenegotiatedDischarge=false";
+      + "&documentsId=CT&includeRemadeInstallments=false&includeCanceledInstallments=false&includeRevokedInstallments=false&includeRenegotiatedDischarge=false";
     const get = async (s, e, depth) => {
       try {
         return this.extractRows(await window.siengeFetchWithRetry(path(s, e), 2));
@@ -3090,7 +3099,7 @@ const EstoqueComercialApp = {
     const hoje = this.todayStr();
     const map = {};
     (rows || []).forEach((r) => {
-      if (!r || r.billReceivableId == null) return;
+      if (!r || r.billReceivableId == null || !this.ehDocumentoCt(r)) return;
       const id = String(r.billReceivableId);
       const b = map[id] || (map[id] = { id, cliente: r.customer || {}, units: [], document: r.document || "", revoked: r.revokedBillReceivableDate || "", parcelas: {} });
       (r.units || []).forEach((x) => {
@@ -3202,8 +3211,25 @@ const EstoqueComercialApp = {
       return porId.length ? porId : lista.filter((b) => b.units.some((x) => this.unitNameMatches(x.name, u.name)));
     };
     this.state.units = this.state.units.map((u) => {
-      if (String(u.enterpriseId) !== String(ccId) || !this.isFinanceUnit(u)) return u;
+      if (String(u.enterpriseId) !== String(ccId)) return u;
       const rb = String(u.receivableBillId || "").replace(/^B-/, "").split("-")[0];
+      const ligada = daUnidade(vivos, u, rb).some((b) => b.aberto > 0.009);
+      const soPeloTitulo = !!u.carteiraCt && !this.isFinanceUnit({ ...u, carteiraCt: false });
+      if (!ligada && soPeloTitulo) {
+        return {
+          ...u,
+          carteiraCt: false,
+          relFin: null,
+          outstandingBalance: null,
+          presentDebitBalance: null,
+          kpiVencidas: 0,
+          kpiAVencer: 0,
+          openParcelas: [],
+          receivableBillId: null,
+          siengeConferidoEm: agora
+        };
+      }
+      if (!this.isFinanceUnit(u) && !ligada) return u;
       const mine = daUnidade(vivos, u, rb);
       // Quitado/distratado só fica parado se o Sienge também não tiver saldo vivo na unidade.
       const saldoVivo = mine.some((b) => b.aberto > 0.009);
@@ -3255,6 +3281,7 @@ const EstoqueComercialApp = {
       const principal = mine.slice().sort((a, b) => b.aberto - a.aberto || b.recebido - a.recebido)[0];
       const base = {
         ...u,
+        carteiraCt: true,
         receivableBillId: principal.id,
         customerId: u.customerId || (principal.cliente && principal.cliente.id != null ? String(principal.cliente.id) : u.customerId),
         customerName: (principal.cliente && principal.cliente.name) || u.customerName,

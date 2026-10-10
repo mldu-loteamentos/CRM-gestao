@@ -158,7 +158,7 @@ window.NotaFiscalCheck = {
     cnpj = this.digits(cnpj);
     if (cnpj.length !== 14) return Promise.resolve(null);
     const cache = this.lerCache(this.CNPJ_KEY);
-    if (cache[cnpj] && Date.now() - cache[cnpj].em < this.CNPJ_TTL) return Promise.resolve(cache[cnpj].d);
+    if (cache[cnpj] && cache[cnpj].d && cache[cnpj].d.cep != null && Date.now() - cache[cnpj].em < this.CNPJ_TTL) return Promise.resolve(cache[cnpj].d);
     if (this._cnpjVoo[cnpj]) return this._cnpjVoo[cnpj];
     this._cnpjVoo[cnpj] = (async () => {
       const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpj}`);
@@ -173,7 +173,13 @@ window.NotaFiscalCheck = {
         simples: j.opcao_pelo_simples === true ? true : (j.opcao_pelo_simples === false ? false : null),
         mei: j.opcao_pelo_mei === true,
         situacao: j.descricao_situacao_cadastral || "",
-        cidade: [j.municipio, j.uf].filter(Boolean).join("/")
+        cidade: [j.municipio, j.uf].filter(Boolean).join("/"),
+        logradouro: j.logradouro || "",
+        numero: j.numero != null ? String(j.numero) : "",
+        bairro: j.bairro || "",
+        municipio: j.municipio || "",
+        uf: j.uf || "",
+        cep: j.cep != null ? String(j.cep) : ""
       };
       const c = this.lerCache(this.CNPJ_KEY);
       c[cnpj] = { em: Date.now(), d };
@@ -564,6 +570,243 @@ window.NotaFiscalCheck = {
     if (a.csrf && !tem("CSRF") && base * 0.0465 > 10) r.avisos.push(`Atividade de ${a.nome}: costuma ter retenção de PIS/COFINS/CSLL de 4,65% (${this.money(base * 0.0465)}).`);
     if (a.irrf && !tem("IRRF") && base * a.irrf / 100 > 10) r.avisos.push(`Atividade de ${a.nome}: costuma ter IR na fonte de ${this.pct(a.irrf)} (${this.money(base * a.irrf / 100)}).`);
     if (a.inss && !tem("INSS")) r.avisos.push(`Atividade de ${a.nome}: com cessão de mão de obra ou empreitada, há retenção de 11% de INSS (${this.money(base * 0.11)}).`);
+  },
+
+  /* ---------- conferência na entrada da nota (pedido × nota × CNAE × endereço) ---------- */
+  tagEl(raiz, ...nomes) {
+    if (!raiz) return "";
+    for (const nome of nomes) {
+      const el = (raiz.getElementsByTagNameNS && raiz.getElementsByTagNameNS("*", nome)[0])
+        || (raiz.getElementsByTagName && raiz.getElementsByTagName(nome)[0]);
+      if (el && String(el.textContent).trim()) return String(el.textContent).trim();
+    }
+    return "";
+  },
+
+  grupoXml(doc, ...nomes) {
+    for (const nome of nomes) {
+      const el = doc.getElementsByTagNameNS("*", nome)[0];
+      if (el) return el;
+    }
+    return null;
+  },
+
+  itensDoXml(xml) {
+    const doc = new DOMParser().parseFromString(xml, "application/xml");
+    if (doc.getElementsByTagName("parsererror").length) return [];
+    const dets = Array.from(doc.getElementsByTagNameNS("*", "det"));
+    if (dets.length) {
+      return dets.map((det) => {
+        const prod = det.getElementsByTagNameNS("*", "prod")[0] || det;
+        return {
+          descricao: this.tagEl(prod, "xProd", "xDescServ"),
+          qtd: this.num(this.tagEl(prod, "qCom", "qTrib")),
+          valor: this.num(this.tagEl(prod, "vProd", "vServ")),
+          unidade: this.tagEl(prod, "uCom")
+        };
+      }).filter((i) => i.descricao || i.valor != null);
+    }
+    const desc = this.tagEl(doc, "xDescServ", "Discriminacao");
+    const valor = this.num(this.tagEl(doc, "vServ", "ValorServicos", "vLiq"));
+    if (desc || valor != null) return [{ descricao: desc || "Serviço da nota", qtd: 1, valor, unidade: "" }];
+    return [];
+  },
+
+  enderecoNoXml(xml) {
+    const doc = new DOMParser().parseFromString(xml, "application/xml");
+    if (doc.getElementsByTagName("parsererror").length) return null;
+    const toma = this.grupoXml(doc, "toma", "dest", "Tomador", "TomadorServico");
+    const base = toma || doc;
+    const end = (toma && (toma.getElementsByTagNameNS("*", "end")[0] || toma.getElementsByTagNameNS("*", "Endereco")[0])) || this.grupoXml(doc, "enderToma", "enderDest");
+    const raiz = end || base;
+    const cnpj = toma ? this.digits(this.tagEl(toma, "CNPJ", "Cnpj")) : "";
+    const out = {
+      cnpj: cnpj.length === 14 ? cnpj : "",
+      logradouro: this.tagEl(raiz, "xLgr", "Logradouro", "xEnd"),
+      numero: this.tagEl(raiz, "nro", "Numero"),
+      bairro: this.tagEl(raiz, "xBairro", "Bairro"),
+      municipio: this.tagEl(raiz, "xMun", "Municipio", "xMunTom"),
+      uf: this.tagEl(raiz, "UF", "Uf"),
+      cep: this.digits(this.tagEl(raiz, "CEP", "Cep"))
+    };
+    if (!out.logradouro && !out.cep && !out.municipio && !out.cnpj) return null;
+    return out;
+  },
+
+  enderecoNoTexto(texto) {
+    const t = String(texto || "");
+    const i = t.search(/tomador/i);
+    const trecho = i >= 0 ? t.slice(i, i + 700) : t;
+    const cep = (trecho.match(/\b(\d{5})-?(\d{3})\b/) || [])[0] || "";
+    const uf = (trecho.match(/\b(AC|AL|AM|AP|BA|CE|DF|ES|GO|MA|MG|MS|MT|PA|PB|PE|PI|PR|RJ|RN|RO|RR|RS|SC|SE|SP|TO)\b/) || [])[0] || "";
+    return cep || uf ? { cnpj: "", logradouro: "", numero: "", bairro: "", municipio: "", uf, cep: this.digits(cep) } : null;
+  },
+
+  tokens(s) {
+    const stop = { de: 1, da: 1, do: 1, das: 1, dos: 1, para: 1, com: 1, em: 1, servico: 1, servicos: 1, prestacao: 1 };
+    return this.fold(s).split(/[^a-z0-9]+/).filter((t) => t.length > 2 && !stop[t]);
+  },
+
+  parece(a, b) {
+    const ta = this.tokens(a);
+    const tb = this.tokens(b);
+    if (!ta.length || !tb.length) return 0;
+    const hit = ta.filter((t) => tb.some((u) => u === t || (t.length > 4 && (u.includes(t) || t.includes(u))))).length;
+    return hit / Math.max(ta.length, tb.length);
+  },
+
+  /** Cruza os itens da nota com os do pedido e confere CNAE, retenção, alíquota e endereço do tomador. */
+  async conferirEnvio(opts) {
+    const o = opts || {};
+    const r = { carregando: false, nivel: "info", erros: [], avisos: [], oks: [], infos: [], itens: [], prestador: "", atividade: "", endereco: "" };
+    let xml = o.xml || "";
+    let texto = o.texto || "";
+    const buf = o.buf;
+    if (!xml && buf) {
+      const inicio = new TextDecoder("latin1").decode(new Uint8Array(buf.slice(0, 80))).trim();
+      if (/^\uFEFF?</.test(inicio) || /\.xml$/i.test(o.nome || "")) xml = new TextDecoder("utf-8").decode(buf);
+    }
+    let campos = xml ? this.lerXml(xml) : null;
+    if (!campos && buf && /^%PDF/.test(new TextDecoder("latin1").decode(new Uint8Array(buf.slice(0, 8))))) {
+      try {
+        const itensPdf = await this.itensDoPdf(buf);
+        texto = texto || itensPdf.map((i) => i.s).join("\n");
+        campos = this.lerPdfItens(itensPdf);
+      } catch (e) {}
+    }
+    const nota = Object.assign({}, o.nota || {}, campos || {});
+    const servico = /infNFSe|<DPS|CompNfse|nfs-?e/i.test(xml) || this.ehServico("", texto) || (!/<infNFe[\s>]/i.test(xml) && !!(nota.codigo || nota.descricao || nota.aliquotaIss));
+    const mercadoria = /<infNFe[\s>]/i.test(xml);
+
+    const credorDoc = this.digits(o.credorDoc);
+    if (servico && !mercadoria && credorDoc.length === 14) {
+      let empresa = null;
+      try { empresa = await this.receita(credorDoc); } catch (e) {
+        r.avisos.push(`Não consegui consultar o CNAE do credor na Receita (${(e && e.message) || e}).`);
+      }
+      if (empresa) {
+        r.prestador = `${empresa.razao || ""} · ${this.cnaeFmt(empresa.cnae)} ${empresa.cnaeDesc || ""}`.trim();
+        const falso = { impostos: [], avisos: [], erros: [], infos: [], bruto: Number(nota.valorServico != null ? nota.valorServico : nota.valor) || 0, regime: null, atividade: "" };
+        this.avaliarAtividade(falso, { empresa }, nota.descricao || nota.codigo ? nota : null);
+        r.atividade = falso.atividade || "";
+        falso.avisos.forEach((t) => r.avisos.push(t));
+        falso.infos.forEach((t) => r.infos.push(t));
+        if (r.atividade && !falso.avisos.some((t) => /CNAE/.test(t))) r.oks.push(`Atividade da nota (${r.atividade}) cabe no CNAE do credor.`);
+        else if (!r.atividade && empresa.cnae) r.infos.push(`CNAE ${this.cnaeFmt(empresa.cnae)} (${empresa.cnaeDesc || "sem descrição"}). A descrição da nota não caiu numa atividade com retenção obrigatória.`);
+      }
+      if (nota.aliquotaIss != null && nota.aliquotaIss > 0 && (nota.aliquotaIss < 2 - 0.001 || nota.aliquotaIss > 5 + 0.001)) {
+        r.avisos.push(`Alíquota de ISS ${this.pct(nota.aliquotaIss)} fora do intervalo legal de 2% a 5%.`);
+      } else if (nota.aliquotaIss != null && nota.aliquotaIss > 0) {
+        r.oks.push(`Alíquota de ISS ${this.pct(nota.aliquotaIss)} dentro de 2% a 5%.`);
+      }
+      if (nota.baseIss && nota.aliquotaIss && nota.valorIss != null && Math.abs(nota.baseIss * nota.aliquotaIss / 100 - nota.valorIss) > this.TOL) {
+        r.avisos.push(`ISS da nota não fecha: base ${this.money(nota.baseIss)} × ${this.pct(nota.aliquotaIss)} = ${this.money(nota.baseIss * nota.aliquotaIss / 100)}, e a nota mostra ${this.money(nota.valorIss)}.`);
+      }
+      const pcc = (nota.csrf || 0) > 0 ? nota.csrf : (nota.pis || 0) + (nota.cofins || 0) + (nota.csll || 0);
+      const ret = nota.totalRetencoes != null ? nota.totalRetencoes : Math.round((((nota.issRetido ? nota.valorIss : 0) || 0) + (nota.irrf || 0) + (nota.inss || 0) + pcc) * 100) / 100;
+      if (ret > this.TOL) r.oks.push(`Retenções lidas na nota: ${this.money(ret)}.`);
+      if (nota.valorServico != null && nota.liquido != null && ret != null && Math.abs(nota.valorServico - ret - nota.liquido) > this.TOL) {
+        r.avisos.push(`Serviço ${this.money(nota.valorServico)} − retenções ${this.money(ret)} não fecha com o líquido ${this.money(nota.liquido)}.`);
+      }
+    } else if (mercadoria) {
+      r.infos.push("Nota de mercadoria: a retenção de serviço e o CNAE do prestador não se aplicam. A conciliação é item a item com o pedido.");
+    }
+
+    const empresaCnpj = this.digits(o.empresaCnpj);
+    let endNota = xml ? this.enderecoNoXml(xml) : null;
+    if (!endNota) endNota = this.enderecoNoTexto(texto);
+    const cnpjTomador = (endNota && endNota.cnpj) || this.digits(nota.cnpjTomador);
+    if (empresaCnpj.length === 14 && cnpjTomador.length === 14 && cnpjTomador !== empresaCnpj) {
+      r.erros.push(`A nota está no CNPJ ${this.docFmt(cnpjTomador)}, mas a empresa do pedido é ${this.docFmt(empresaCnpj)}${o.empresaNome ? " (" + o.empresaNome + ")" : ""}.`);
+    } else if (empresaCnpj.length === 14 && cnpjTomador.length === 14) {
+      r.oks.push(`Tomador da nota é o CNPJ da empresa do pedido (${this.docFmt(empresaCnpj)}).`);
+    }
+    if (empresaCnpj.length === 14 && endNota && (endNota.cep || endNota.municipio || endNota.logradouro)) {
+      let oficial = null;
+      try { oficial = await this.receita(empresaCnpj); } catch (e) {
+        r.infos.push("Não consegui conferir o endereço da empresa na Receita.");
+      }
+      if (oficial) {
+        const cepNota = this.digits(endNota.cep);
+        const cepOf = this.digits(oficial.cep);
+        if (cepNota.length === 8 && cepOf.length === 8 && cepNota !== cepOf) {
+          r.avisos.push(`CEP do tomador na nota (${cepNota}) é diferente do CEP do CNPJ da empresa (${cepOf}). Fornecedores costumam errar este endereço.`);
+        } else if (cepNota && cepNota === cepOf) r.oks.push(`CEP do tomador confere com o CNPJ da empresa (${cepOf}).`);
+        if (endNota.municipio && oficial.municipio && this.fold(endNota.municipio) !== this.fold(oficial.municipio)) {
+          r.avisos.push(`Município na nota (${endNota.municipio}) diferente do cadastro do CNPJ (${oficial.municipio}/${oficial.uf || ""}).`);
+        }
+        if (endNota.uf && oficial.uf && this.fold(endNota.uf) !== this.fold(oficial.uf)) {
+          r.avisos.push(`UF na nota (${endNota.uf}) diferente da UF do CNPJ (${oficial.uf}).`);
+        }
+        if (endNota.logradouro && oficial.logradouro && this.parece(endNota.logradouro, oficial.logradouro) < 0.34) {
+          r.avisos.push(`Logradouro na nota (${endNota.logradouro}) não parece o do CNPJ (${oficial.logradouro}${oficial.numero ? ", " + oficial.numero : ""}).`);
+        } else if (endNota.logradouro && oficial.logradouro) {
+          r.oks.push("Logradouro do tomador confere com o cadastro do CNPJ.");
+        }
+        r.endereco = [oficial.logradouro, oficial.numero, oficial.bairro, oficial.municipio, oficial.uf, oficial.cep].filter(Boolean).join(", ");
+      }
+    }
+
+    let itensNota = xml ? this.itensDoXml(xml) : [];
+    if (!itensNota.length && (nota.descricao || nota.valorServico != null || nota.valor != null)) {
+      itensNota = [{ descricao: nota.descricao || "Serviço da nota", qtd: 1, valor: nota.valorServico != null ? nota.valorServico : nota.valor, unidade: "" }];
+    }
+    const pedido = (o.itensPedido || []).filter((it) => it && (it.descricao || it.valor));
+    const usados = new Set();
+    itensNota.forEach((n) => {
+      let melhor = -1;
+      let score = 0;
+      pedido.forEach((p, i) => {
+        if (usados.has(i)) return;
+        const s = this.parece(n.descricao, p.descricao);
+        const porValor = n.valor != null && p.valor != null && Math.abs(n.valor - p.valor) <= Math.max(this.TOL, Math.abs(p.valor) * 0.01);
+        const s2 = s + (porValor ? 0.35 : 0);
+        if (s2 > score) { score = s2; melhor = i; }
+      });
+      const p = melhor >= 0 && score >= 0.34 ? pedido[melhor] : null;
+      if (p) usados.add(melhor);
+      const linha = { nota: n.descricao || "Item da nota", pedido: p ? p.descricao : "", ok: !!p, detalhe: "" };
+      if (!p) {
+        linha.ok = false;
+        linha.detalhe = "Sem item correspondente no pedido.";
+        r.avisos.push(`Item da nota "${(n.descricao || "").slice(0, 80)}" não encontrou correspondente no pedido. Na reforma tributária a base de IBS/CBS é por item: nota e pedido precisam conciliar.`);
+      } else {
+        const partes = [];
+        if (n.qtd != null && p.qtd && Math.abs(n.qtd - p.qtd) > 0.001) {
+          linha.ok = false;
+          partes.push(`quantidade ${n.qtd} na nota e ${p.qtd} no pedido`);
+        }
+        if (n.valor != null && p.valor != null && Math.abs(n.valor - p.valor) > Math.max(0.05, Math.abs(p.valor) * 0.01)) {
+          linha.ok = false;
+          partes.push(`valor ${this.money(n.valor)} na nota e ${this.money(p.valor)} no pedido`);
+        }
+        linha.detalhe = partes.length ? partes.join("; ") : "Concilia com o pedido.";
+        if (partes.length) r.avisos.push(`Item "${(n.descricao || p.descricao).slice(0, 80)}": ${partes.join("; ")}. A base do item precisa fechar com o pedido por causa da reforma tributária.`);
+      }
+      r.itens.push(linha);
+    });
+    if (itensNota.length && r.itens.every((l) => l.ok)) r.oks.push(`${r.itens.length} item(ns) da nota conciliado(s) com o pedido.`);
+    else if (!itensNota.length) r.infos.push("Não li itens discriminados na nota para cruzar com o pedido.");
+    pedido.forEach((p, i) => {
+      if (!usados.has(i)) r.infos.push(`Item do pedido sem correspondente nesta nota: ${(p.descricao || "item").slice(0, 80)}.`);
+    });
+
+    if (r.erros.length) r.nivel = "erro";
+    else if (r.avisos.length) r.nivel = "aviso";
+    else if (r.oks.length) r.nivel = "ok";
+    return r;
+  },
+
+  painelEnvio(r) {
+    if (!r) return "";
+    if (r.carregando) return `<p class="inf-muted">Analisando itens, CNAE, retenções, alíquotas e endereço do tomador…</p>`;
+    const itens = (r.itens || []).map((it) => `<tr><td>${this.esc((it.nota || "").slice(0, 90))}</td><td>${this.esc((it.pedido || "—").slice(0, 90))}</td><td>${it.ok ? "✓" : "!"} ${this.esc(it.detalhe || "")}</td></tr>`).join("");
+    if (!r.prestador && !r.endereco && !itens) return "";
+    return `<div class="nf-envio">
+      ${r.prestador ? `<p class="inf-muted"><b>Credor:</b> ${this.esc(r.prestador)}</p>` : ""}
+      ${r.endereco ? `<p class="inf-muted"><b>Endereço do CNPJ da empresa:</b> ${this.esc(r.endereco)}</p>` : ""}
+      ${itens ? `<table class="nfchk-tab"><thead><tr><th>Item da nota</th><th>Item do pedido</th><th>Conciliação</th></tr></thead><tbody>${itens}</tbody></table>` : ""}
+    </div>`;
   },
 
   /* ---------- telas ---------- */

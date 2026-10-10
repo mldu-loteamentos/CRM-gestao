@@ -1885,7 +1885,7 @@ const ComprasPrevisoesApp = {
         <td class="cprev-col-cc" title="${this.esc(ccLabel)}">${this.esc(ccLabel)}</td>
         <td class="cprev-col-dept" title="${this.esc(r.departamento || "—")}">${this.esc(r.departamento || "—")}</td>
         <td class="cprev-col-cred" title="${this.esc(r.credor || "—")}">${this.esc(r.credor || "—")}</td>
-        <td class="cprev-col-tit" title="${this.esc(r.titulo)}">${this.esc(r.titulo)}${nota}${subst}${pago}</td>
+        <td class="cprev-col-tit" title="${this.esc(r.titulo)}">${this.esc(r.titulo)}${nota}${subst}${pago}${window.FilaNotasFiscais ? FilaNotasFiscais.acaoPedidoHtml(r.documento, this._filaFiscal) : ""}</td>
         <td class="cprev-col-parc" title="${this.esc(r.parcela || "—")}">${this.esc(r.parcela || "—")}</td>
         <td class="cprev-col-doc" title="${this.esc(r.docId || "—")}">${this.esc(r.docId || "—")}</td>
         <td class="cprev-col-ndoc" title="${this.esc(r.documento || "—")}">${this.docNumButton(r)}</td>
@@ -2352,10 +2352,20 @@ const ComprasPrevisoesApp = {
       this.state.endDate = range.endDate;
       this.state.inited = true;
       this.renderPage();
+      this.ouvirFilaFiscal();
       await this.loadCompanies();
     }
     if (this.state.consulted) this.applyFilters();
     this.renderPage();
+  },
+
+  ouvirFilaFiscal() {
+    if (this._filaOuvida || !window.FilaNotasFiscais) return;
+    this._filaOuvida = true;
+    FilaNotasFiscais.ouvir((lista) => {
+      this._filaFiscal = lista || [];
+      if (this.state && this.state.consulted && !this.state.loading) this.renderList();
+    });
   },
 
   initConfig() {

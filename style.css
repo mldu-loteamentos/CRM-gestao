@@ -6931,6 +6931,33 @@ circle.donut-segment {
 .cprev-tag-liberado { background: #dbeafe; color: #1d4ed8; }
 .cprev-tag-nota { background: #dbeafe; color: #1d4ed8; }
 .cprev-tag-previsao { background: #fee2e2; color: #b91c1c; }
+.cprev-tag-fiscal { background: #fff7ed; color: #c2410c; }
+.cprev-fiscal-acoes {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.cprev-fiscal-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 28px;
+  min-width: 132px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: #105436;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cprev-fiscal-btn:hover { background: #0d462c; }
 .cprev-tag-banco { background: #cffafe; color: #0e7490; }
 .cprev-tag-vencido { background: #ffedd5; color: #c2410c; }
 .cprev-tag-rastreando { background: #f1f5f9; color: #475569; }
@@ -7316,11 +7343,17 @@ circle.donut-segment {
   color: #64748b;
 }
 .cprev-config-actions {
-  display: flex;
-  justify-content: flex-end;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin-top: 18px;
+}
+.cprev-config-actions .btn {
+  width: 100%;
+  height: 38px;
+  min-height: 38px;
+  justify-content: center;
+  box-sizing: border-box;
 }
 
 /* Comercial · Tabelas vigentes */
