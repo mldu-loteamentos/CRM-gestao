@@ -1442,8 +1442,8 @@ const RelacionamentoApp = {
     }
     if (ctx.quitado) {
       const faltas = [];
-      if (ctx.semMatricula) faltas.push("<strong>Matrícula não cadastrada no Sienge.</strong> Cadastre em Cadastro de Unidades → Localização e Registro → Matrícula para gerar a autorização.");
-      if (ctx.semConfrontacoes) faltas.push("<strong>Medidas e confrontações do lote não cadastradas no Sienge.</strong> A localização sairá com quadra, lote, loteamento e área.");
+      if (ctx.semMatricula) faltas.push("<strong>Matrícula não cadastrada no Sienge.</strong> Cadastre em Comercial → Gestão de Unidades → Unidades → Cadastro de Unidades → Editar → Matrícula para gerar a autorização.");
+      if (ctx.semConfrontacoes) faltas.push("<strong>Localização do lote não cadastrada no Sienge.</strong> Preencha a Observação da unidade em Comercial → Gestão de Unidades → Unidades → Cadastro de Unidades → Editar. Sem ela, a localização sairá com quadra, lote, loteamento e área.");
       if (faltas.length) html += `<div style="margin-top:12px;">${caixa("#92400e", "#fffbeb", "#fde68a", faltas.join("<br>"))}</div>`;
     }
     st.innerHTML = html;
@@ -1991,7 +1991,10 @@ const RelacionamentoApp = {
       let unitDetails = null;
       if (window.SiengeApiService && SiengeApiService.getUnitDetails && enterpriseId && unitName) {
         const det = await SiengeApiService.getUnitDetails(enterpriseId, unitName).catch(() => null);
-        if (det && det.results && det.results.length) unitDetails = det.results[0];
+        if (det && det.results && det.results.length) {
+          const chave = (s) => String(s || "").replace(/\s+/g, "").toUpperCase();
+          unitDetails = det.results.find((u) => chave(u.name) === chave(unitName)) || det.results[0];
+        }
       }
       unitDetails = (await this._carregarUnidadeCompleta({ unit, unitDetails })) || unitDetails;
       let bill = null;
@@ -2259,6 +2262,7 @@ const RelacionamentoApp = {
           <li><strong>Sim:</strong> sai com a rubrica e os canais de atendimento.</li>
           <li><strong>Não:</strong> sai para o sócio assinar.</li>
         </ul>
+        <div class="qui-rub-escolha" aria-live="polite"></div>
         <div class="qui-rub-footer">
           <button type="button" class="btn btn-cancel" data-r="">Cancelar</button>
           <button type="button" class="btn btn-outline" data-r="nao">Não</button>
@@ -2272,8 +2276,12 @@ const RelacionamentoApp = {
       const b = e.target.closest("[data-r]");
       if (!b && e.target !== ov) return;
       const r = b ? b.getAttribute("data-r") : "";
-      if (r === "sim" || r === "nao") ov.classList.add("is-gerando");
-      else ov.style.display = "none";
+      if (r === "sim" || r === "nao") {
+        ov.querySelector(".qui-rub-escolha").textContent = r === "sim"
+          ? "Ok, gerando com rubrica e canais de atendimento"
+          : "Ok, gerando para sócio assinar";
+        ov.classList.add("is-gerando");
+      } else ov.style.display = "none";
       const fn = ov._resolve;
       ov._resolve = null;
       if (fn) fn(r);
@@ -2469,7 +2477,10 @@ const RelacionamentoApp = {
       .join("\n");
   },
 
+  /** Prioridade: Observação da unidade no Sienge (a mesma da aba Vizinhos), depois os dados do terreno. */
   _localizacaoLote(ud, info) {
+    const nota = String((ud && ud.note) || "").replace(/\r\n?/g, "\n").trim();
+    if (nota) return { texto: nota, confrontacoes: true };
     const linhas = this._confrontacoesLote(ud);
     const areaNum = Number((ud && (ud.terrainArea || ud.privateArea || ud.Privatearea)) || info.area || 0);
     if (linhas) {
@@ -2481,8 +2492,6 @@ const RelacionamentoApp = {
       }
       return { texto: linhas + area, confrontacoes: true };
     }
-    const nota = String((ud && ud.note) || "").trim();
-    if (/METROS/i.test(nota)) return { texto: nota.toUpperCase(), confrontacoes: true };
     const areaStr = areaNum > 0 ? areaNum.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " m²" : "";
     const texto = [
       "Lote nº " + (info.lot || "____") + " da quadra " + (info.block || "____") + " do loteamento " + (info.empName || "____") + ",",
@@ -2502,7 +2511,7 @@ const RelacionamentoApp = {
         <div style="background:#fff;border-radius:12px;width:100%;max-width:880px;max-height:calc(100vh - 32px);overflow:auto;box-shadow:0 18px 40px rgba(0,0,0,0.22);padding:22px;">
           <div style="font-size:1rem;font-weight:800;color:#105436;margin-bottom:8px;">Matrícula não cadastrada no Sienge</div>
           <div id="qui-matricula-texto" style="font-size:0.92rem;color:#1e293b;line-height:1.5;"></div>
-          <img src="Banner/sienge-matricula.png" alt="Sienge: Cadastro de Unidades, campo Matrícula" style="display:block;width:100%;margin-top:14px;border:1px solid #e2e8f0;border-radius:8px;">
+          <img src="Banner/sienge-matricula.png?v=2" alt="Sienge: Cadastro de Unidades, campo Matrícula" style="display:block;width:100%;margin-top:14px;border:1px solid #e2e8f0;border-radius:8px;">
           <div style="display:flex;justify-content:flex-end;margin-top:16px;">
             <button type="button" class="btn btn-primary" data-close="1">Entendi</button>
           </div>
@@ -2515,7 +2524,7 @@ const RelacionamentoApp = {
     const unidade = this._formatUnidadeDoc(ctx);
     const texto = ov.querySelector("#qui-matricula-texto");
     if (texto) {
-      texto.innerHTML = `A unidade <strong>${this._escDoc(unidade)}</strong> está sem matrícula no Sienge. Para gerar ${documento || "o termo de quitação"}, atualize o cadastro em <strong>Cadastro de Unidades → Cadastro → Localização e Registro → Matrícula</strong> (campo destacado em amarelo) e gere o termo de novo.`;
+      texto.innerHTML = `A unidade <strong>${this._escDoc(unidade)}</strong> está sem matrícula no Sienge. Para gerar ${documento || "o termo de quitação"}, atualize o cadastro em <strong>Comercial → Gestão de Unidades → Unidades → Cadastro de Unidades → Editar → Matrícula</strong> (campo destacado em amarelo) e gere o documento de novo.`;
     }
     ov.style.display = "flex";
   },

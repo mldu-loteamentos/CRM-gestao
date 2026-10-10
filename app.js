@@ -37357,11 +37357,6 @@ window.renderVizinhosTab = async function() {
     
     const allPoints = await window.loadKmzPlacemarks(enterpriseId);
     
-    if (!allPoints || allPoints.length === 0) {
-      contentEl.innerHTML = `<div style="padding: 20px; color: #666; text-align: center;">Nenhum arquivo KMZ cadastrado para o empreendimento ${enterpriseId || "N/D"}. Faça o upload em Upload de KMZ para buscar vizinhos por proximidade.</div>`;
-      return;
-    }
-    
     // Obter observações da Unidade Atual (Lote Atual)
     let currentUnitNote = "";
     try {
@@ -37370,6 +37365,18 @@ window.renderVizinhosTab = async function() {
         currentUnitNote = currentUnitData.note;
       }
     } catch(e) {}
+    
+    if (!allPoints || allPoints.length === 0) {
+      const escapeHtml = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const notaHtml = currentUnitNote ? `
+        <div style="margin-bottom: 16px; background: #e8f5e9; border-left: 4px solid var(--color-primary); padding: 15px; border-radius: 4px;">
+          <strong style="color: var(--color-primary); font-size: 0.9rem; display: block; margin-bottom: 5px;"><i data-lucide="info" style="width:16px; margin-right: 5px; vertical-align: text-bottom;"></i> Observações do Lote Atual (${escapeHtml(realName)}):</strong>
+          <span style="font-size: 0.85rem; color: #333; white-space: pre-wrap;">${escapeHtml(currentUnitNote)}</span>
+        </div>` : "";
+      contentEl.innerHTML = `${notaHtml}<div style="padding: 20px; color: #666; text-align: center;">Nenhum arquivo KMZ cadastrado para o empreendimento ${enterpriseId || "N/D"}. Faça o upload em Upload de KMZ para buscar vizinhos por proximidade.</div>`;
+      if (window.lucide) lucide.createIcons();
+      return;
+    }
     
     const centerPoint = allPoints.find((p) => window.kmzLotMatches(p.lot_name, unitName, enterpriseId) || window.kmzLotMatches(p.lot_name, realName, enterpriseId));
     
@@ -39134,12 +39141,18 @@ window.openGestaoDocumentoMenu = function(ctx) {
 
 /** Status vem da coluna Status da Gestão; vazio (ex.: aberto pela Cessão) não bloqueia aqui, a tela confere no Sienge. */
 window._gestaoDocBloqueio = function(tipo, status) {
+  if (tipo === "aditamento" || tipo === "cessao") {
+    return (tipo === "aditamento" ? "Aditamento" : "Cessão de direitos") + " ainda não está disponível.";
+  }
   const s = String(status || "").trim().toLowerCase();
   if (!s) return "";
   const distratado = /distrat|cancel/.test(s);
   const quitado = /^quitado$/.test(s);
   if (tipo === "quitacao" && !quitado) {
     return "O termo de quitação só pode ser gerado para título quitado (status atual: " + status + ").";
+  }
+  if (tipo === "autorizacao" && !quitado) {
+    return "A autorização de escritura só pode ser gerada para título quitado (status atual: " + status + ").";
   }
   if (tipo === "vencimento" && (quitado || distratado)) {
     return "Não é possível alterar o vencimento de contrato " + (quitado ? "quitado" : "distratado/cancelado") + ".";
