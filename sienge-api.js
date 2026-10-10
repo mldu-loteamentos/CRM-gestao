@@ -611,6 +611,9 @@ const ApiUsage = {
     day.apis[apiKey] = day.apis[apiKey] || { rest: 0, bulk: 0, user: 0, system: 0 };
     day.apis[apiKey][kind] = (Number(day.apis[apiKey][kind]) || 0) + 1;
     day.apis[apiKey][actor.source] = (Number(day.apis[apiKey][actor.source]) || 0) + 1;
+    const tela = this.telaAtual();
+    day.apis[apiKey].telas = day.apis[apiKey].telas || {};
+    day.apis[apiKey].telas[tela] = (Number(day.apis[apiKey].telas[tela]) || 0) + 1;
     day.users = day.users || {};
     day.users[actor.userKey] = day.users[actor.userKey] || { rest: 0, bulk: 0, label: actor.userLabel, kind: actor.source };
     day.users[actor.userKey][kind] = (Number(day.users[actor.userKey][kind]) || 0) + 1;
@@ -622,6 +625,11 @@ const ApiUsage = {
     while (keys.length > 14) delete store[keys.shift()];
     try { localStorage.setItem(this.LOCAL_KEY, JSON.stringify(store)); } catch (e) {}
     return day;
+  },
+
+  /** Aba aberta no momento da chamada (chamada em segundo plano conta para a aba em que o usuário estava). */
+  telaAtual: function() {
+    return this.safeKey(window.activeAppTab || "inicio");
   },
 
   trackFetch: function(urlStr) {
@@ -639,6 +647,9 @@ const ApiUsage = {
     pend.apis[pk] = pend.apis[pk] || { path: info.path, rest: 0, bulk: 0, user: 0, system: 0 };
     pend.apis[pk][info.kind] += 1;
     pend.apis[pk][actor.source] += 1;
+    const tela = this.telaAtual();
+    pend.apis[pk].telas = pend.apis[pk].telas || {};
+    pend.apis[pk].telas[tela] = (pend.apis[pk].telas[tela] || 0) + 1;
     pend.users[actor.userKey] = pend.users[actor.userKey] || { label: actor.userLabel, kind: actor.source, rest: 0, bulk: 0 };
     pend.users[actor.userKey][info.kind] += 1;
     this.pending[date] = pend;
@@ -677,6 +688,10 @@ const ApiUsage = {
           user: increment(a.user || 0),
           system: increment(a.system || 0)
         };
+        if (a.telas && Object.keys(a.telas).length) {
+          payload.apis[k].telas = {};
+          Object.keys(a.telas).forEach((t) => { payload.apis[k].telas[t] = increment(a.telas[t] || 0); });
+        }
       });
       Object.keys(pend.users || {}).forEach((k) => {
         const u = pend.users[k];
@@ -1314,16 +1329,27 @@ const SiengeApiService = {
     }
   },
 
-  // 1.5c. VGV do cadastro da obra (salesDetails.generalSalesValue). Cache de 7 dias por empreendimento.
+  /* 1.5c. VGV do cadastro da obra (salesDetails.generalSalesValue).
+     Cache compartilhado no Firebase (config/obra_vgv) + navegador: cada obra é consultada no Sienge
+     no máximo uma vez a cada 7 dias para todos os usuários. Centro de custo que não está na lista de
+     empreendimentos não é consultado. Erro de limite ou do servidor pausa as consultas por 15 minutos. */
   OBRA_VGV_CACHE_KEY: "crm_obra_vgv_cache",
+  OBRA_VGV_TTL: 7 * 86400000,
+  ENTERPRISES_IDS_KEY: "crm_enterprises_ids_v1",
+  VGV_PAUSA_MS: 15 * 60000,
 
   obraVgvCache(id) {
-    const mem = this._vgvMem && this._vgvMem[String(id)];
-    if (mem && (!mem.erro || Date.now() - mem.at < 10 * 60000)) return mem;
+    const chave = String(id);
+    const mem = this._vgvMem && this._vgvMem[chave];
+    if (mem && (mem.erro ? Date.now() - mem.at < this.VGV_PAUSA_MS : Date.now() - Number(mem.at || 0) < this.OBRA_VGV_TTL)) return mem;
     try {
       const map = JSON.parse(localStorage.getItem(this.OBRA_VGV_CACHE_KEY) || "{}");
-      const hit = map[String(id)];
-      if (hit && Date.now() - Number(hit.at || 0) < 7 * 86400000) return hit;
+      const hit = map[chave];
+      if (hit && Date.now() - Number(hit.at || 0) < this.OBRA_VGV_TTL) {
+        this._vgvMem = this._vgvMem || {};
+        this._vgvMem[chave] = hit;
+        return hit;
+      }
     } catch (e) {}
     return null;
   },
@@ -1339,13 +1365,44 @@ const SiengeApiService = {
     this._vgvMem = this._vgvMem || {};
     this._vgvVoo = this._vgvVoo || {};
     if (this._vgvVoo[id]) return this._vgvVoo[id];
-    const busca = this._buscarEnterpriseVgv(id).finally(() => { delete this._vgvVoo[id]; });
+    const busca = this._buscarEnterpriseVgv(id, opts).finally(() => { delete this._vgvVoo[id]; });
     this._vgvVoo[id] = busca;
     return busca;
   },
 
-  async _buscarEnterpriseVgv(id) {
+  vgvPausado() {
+    return (this._vgvPausaAte || 0) > Date.now();
+  },
+
+  async _buscarEnterpriseVgv(id, opts = {}) {
+    await this._vgvCompartilhado();
+    if (!opts.force) {
+      const hit = this.obraVgvCache(id);
+      if (hit) return hit;
+    }
+    if (this.vgvPausado()) {
+      const err = new Error("Consulta de VGV pausada: o Sienge recusou chamadas há pouco.");
+      err.pausado = true;
+      throw err;
+    }
     let out = { id, vgv: null, nome: "", at: Date.now() };
+    const empreendimentos = await this._empreendimentos();
+    if (!empreendimentos && this.vgvPausado()) {
+      const err = new Error("Consulta de VGV pausada: o Sienge recusou chamadas há pouco.");
+      err.pausado = true;
+      throw err;
+    }
+    const daLista = empreendimentos && empreendimentos.porId[id];
+    if (empreendimentos && !daLista) {
+      out.naoObra = true;
+      this._guardarVgv(id, out);
+      return out;
+    }
+    if (daLista && daLista.vgvNaLista && !opts.force) {
+      out = { id, vgv: daLista.vgv, nome: daLista.nome, lancamento: daLista.lancamento, at: Date.now() };
+      this._guardarVgv(id, out);
+      return out;
+    }
     try {
       const ent = await siengeFetchWithRetry(`/enterprises/${encodeURIComponent(id)}`, 1);
       const sd = (ent && ent.salesDetails) || {};
@@ -1358,12 +1415,20 @@ const SiengeApiService = {
         at: Date.now()
       };
     } catch (e) {
-      // A lista de centros pede a cada repintura: falha fica guardada por 10 min para não repetir a chamada.
       if (Number(e && e.status) !== 404) {
+        const st = Number(e && e.status);
+        if (!st || st === 429 || st >= 500) this._vgvPausaAte = Date.now() + this.VGV_PAUSA_MS;
         this._vgvMem[id] = Object.assign({}, out, { erro: true });
         throw e;
       }
+      out.naoObra = true;
     }
+    this._guardarVgv(id, out);
+    return out;
+  },
+
+  _guardarVgv(id, out) {
+    this._vgvMem = this._vgvMem || {};
     this._vgvMem[id] = out;
     try {
       const map = JSON.parse(localStorage.getItem(this.OBRA_VGV_CACHE_KEY) || "{}");
@@ -1372,7 +1437,84 @@ const SiengeApiService = {
       if (typeof orig === "function") orig.call(localStorage, this.OBRA_VGV_CACHE_KEY, JSON.stringify(map));
       else localStorage.setItem(this.OBRA_VGV_CACHE_KEY, JSON.stringify(map));
     } catch (e) {}
-    return out;
+    this._vgvParaFirebase = this._vgvParaFirebase || {};
+    this._vgvParaFirebase[id] = out;
+    clearTimeout(this._vgvFbTimer);
+    this._vgvFbTimer = setTimeout(() => this._gravarVgvFirebase(), 5000);
+  },
+
+  /** Lê uma vez por sessão o cache de VGV que todos os usuários compartilham. */
+  _vgvCompartilhado() {
+    if (this._vgvFbLido) return this._vgvFbLido;
+    const fc = window.firebaseCollections;
+    if (!window.firebaseDb || !fc || !fc.getDoc || !fc.doc) return Promise.resolve();
+    this._vgvFbLido = (async () => {
+      try {
+        const snap = await fc.getDoc(fc.doc(window.firebaseDb, "config", "obra_vgv"));
+        const existe = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+        const obras = (existe && snap.data() && snap.data().obras) || {};
+        this._vgvMem = this._vgvMem || {};
+        Object.keys(obras).forEach((id) => {
+          const o = obras[id];
+          const atual = this._vgvMem[id];
+          if (o && o.at && (!atual || atual.erro || Number(atual.at || 0) < Number(o.at))) this._vgvMem[id] = o;
+        });
+      } catch (e) {
+        console.warn("[Sienge] cache compartilhado de VGV:", e);
+      }
+    })();
+    return this._vgvFbLido;
+  },
+
+  async _gravarVgvFirebase() {
+    const pend = this._vgvParaFirebase;
+    this._vgvParaFirebase = {};
+    const fc = window.firebaseCollections;
+    if (!pend || !Object.keys(pend).length || !window.firebaseDb || !fc || !fc.setDoc || !fc.doc) return;
+    try {
+      await fc.setDoc(fc.doc(window.firebaseDb, "config", "obra_vgv"), { obras: pend, atualizadoEm: Date.now() }, { merge: true });
+    } catch (e) {
+      console.warn("[Sienge] gravar cache de VGV:", e);
+    }
+  },
+
+  /** Lista de empreendimentos (paginada, 200 por chamada), guardada por 1 dia: diz quais centros de custo são obra. */
+  async _empreendimentos() {
+    if (this._entLista && Date.now() - this._entLista.at < 86400000) return this._entLista;
+    try {
+      const c = JSON.parse(localStorage.getItem(this.ENTERPRISES_IDS_KEY) || "null");
+      if (c && Date.now() - Number(c.at || 0) < 86400000 && c.porId && Object.keys(c.porId).length) return (this._entLista = c);
+    } catch (e) {}
+    if (this._entVoo) return this._entVoo;
+    this._entVoo = (async () => {
+      const lista = await siengeFetchAllPages("/enterprises");
+      if (!Array.isArray(lista) || !lista.length) return null;
+      const porId = {};
+      lista.forEach((e) => {
+        if (!e || e.id == null) return;
+        const sd = e.salesDetails || {};
+        const vgv = Number(sd.generalSalesValue);
+        porId[String(e.id)] = {
+          nome: e.commercialName || e.name || "",
+          vgv: Number.isFinite(vgv) && vgv > 0 ? vgv : null,
+          vgvNaLista: !!e.salesDetails,
+          lancamento: (e.constructionDetails && e.constructionDetails.startDate) || ""
+        };
+      });
+      const out = { at: Date.now(), porId };
+      this._entLista = out;
+      try {
+        const orig = window._originalSetItem;
+        if (typeof orig === "function") orig.call(localStorage, this.ENTERPRISES_IDS_KEY, JSON.stringify(out));
+        else localStorage.setItem(this.ENTERPRISES_IDS_KEY, JSON.stringify(out));
+      } catch (e) {}
+      return out;
+    })().catch((e) => {
+      const st = Number(e && e.status);
+      if (!st || st === 429 || st >= 500) this._vgvPausaAte = Date.now() + this.VGV_PAUSA_MS;
+      return null;
+    }).finally(() => { this._entVoo = null; });
+    return this._entVoo;
   },
 
   // 1.6. Movimentos Bancários (Fiscal / Prestação de Contas)
@@ -2337,6 +2479,8 @@ const SiengeApiService = {
     } catch (e) {}
     const obra = this.obraVgvCache(chave);
     if (obra && obra.nome) return (this._ccNomeMem[chave] = { id: chave, name: obra.nome });
+    const daLista = this._entLista && this._entLista.porId && this._entLista.porId[chave];
+    if (daLista && daLista.nome) return (this._ccNomeMem[chave] = { id: chave, name: daLista.nome });
     try {
       // Tentar a rota de empreendimentos primeiro, já que o usuário pediu "Empreendimento"
       const ent = await siengeFetchWithRetry(`/enterprises/${costCenterId}`);

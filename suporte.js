@@ -81,7 +81,8 @@
     ]},
     { id: "fiscal", label: "Fiscal / Contábil", subs: [
       { id: "pis_cofins", label: "PIS/COFINS" },
-      { id: "csll_irpj", label: "CSLL/IRPJ" }
+      { id: "csll_irpj", label: "CSLL/IRPJ" },
+      { id: "inserir_nota", label: "Inserir nota" }
     ]},
     { id: "gerencial", label: "Gerencial", subs: [
       { id: "participacoes", label: "Prestação Contas Ellenceo" },
@@ -162,6 +163,7 @@
     "repactuacao-lote": { modulo: "financeiro", subitem: "repactuacao" },
     "construcao-fiscal": { modulo: "fiscal", subitem: "pis_cofins" },
     "construcao-fiscal-csll": { modulo: "fiscal", subitem: "csll_irpj" },
+    "fiscal-inserir-nota": { modulo: "fiscal", subitem: "inserir_nota" },
     participacoes: { modulo: "gerencial", subitem: "participacoes" },
     "estrutura-societaria": { modulo: "gerencial", subitem: "estrutura" },
     "dashboard-comercial": { modulo: "comercial", subitem: "dash_com" },

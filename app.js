@@ -3175,6 +3175,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "upload-kmz": "Upload de KMZ",
     "upload-mapa": "Upload de Projeto Urbanístico",
     "construcao-fiscal": "Retenções Fiscais (PIS / COFINS)",
+    "fiscal-inserir-nota": "Inserir nota fiscal de compra",
     "plano-financeiro": "Plano Financeiro e Visões",
     "indexadores": "Indexadores Financeiros",
     "documentos-sienge": "Tipos de Documento",
@@ -3269,6 +3270,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     suporte: "headphones",
     auditoria: "shield",
     "auditoria-login": "log-in",
+    "fiscal-inserir-nota": "file-up",
     "consumo-api": "activity",
     "usuarios-online": "users",
     acessos: "key-round"
@@ -3443,6 +3445,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (window.UsuariosOnline && typeof UsuariosOnline.init === "function") UsuariosOnline.init();
   } else if (tabId === "auditoria-login") {
     if (window.AuditoriaLoginApp && typeof AuditoriaLoginApp.init === "function") AuditoriaLoginApp.init();
+  } else if (tabId === "fiscal-inserir-nota") {
+    if (window.InserirNotaApp && typeof InserirNotaApp.init === "function") InserirNotaApp.init();
   }
 }
 

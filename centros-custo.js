@@ -998,7 +998,9 @@ const CentrosCustoApp = {
 
   async preencherVgvObra(list) {
     if (!window.SiengeApiService || typeof SiengeApiService.getEnterpriseVgv !== 'function') return;
+    if (typeof SiengeApiService.vgvPausado === 'function' && SiengeApiService.vgvPausado()) return;
     const fila = (list || []).map(cc => String(cc.id)).filter(id => !SiengeApiService.obraVgvCache(id));
+    if (!fila.length) return;
     const gen = (this._vgvGen = (this._vgvGen || 0) + 1);
     const worker = async () => {
       while (fila.length && gen === this._vgvGen) {
@@ -1006,6 +1008,7 @@ const CentrosCustoApp = {
         try {
           await SiengeApiService.getEnterpriseVgv(id);
         } catch (e) {
+          if (e && e.pausado) return;
           continue;
         }
         const cell = document.getElementById(`cc-vgv-${id}`);

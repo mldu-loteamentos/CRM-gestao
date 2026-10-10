@@ -1564,7 +1564,7 @@ const GerarPagamentoApp = {
     const v = s.validacao || {};
     const errosPag = Object.values(s.pagInfo).filter((p) => ["erro", "aviso", "sem"].includes(p.check.nivel)).length;
     const errosFiscal = Object.values(s.pagInfo).filter((p) => !["erro", "aviso", "sem"].includes(p.check.nivel) && p.fiscal && p.fiscal.nivel === "erro").length;
-    const avisoFiscal = errosFiscal ? `<span class="gp-valida"><b style="color:#b91c1c;">${errosFiscal} título(s) com imposto retido divergente da nota fiscal</b> (bloqueados para lote até corrigir no Sienge)</span>` : "";
+    const avisoFiscal = errosFiscal ? `<span class="gp-valida"><b style="color:#b91c1c;">${errosFiscal} título(s) em que o valor da nota não fecha com as retenções lançadas</b> (bloqueados para lote até corrigir no Sienge; os demais alertas fiscais são só informativos)</span>` : "";
     const progressoPag = v.rodando
       ? `<span class="gp-valida"><span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;"></span> Conferindo forma de pagamento, boletos e impostos retidos · ${v.feitos} de ${v.total}</span>`
       : (v.total ? `<span class="gp-valida">${errosPag ? `<b style="color:#b91c1c;">${errosPag} título(s) com possível divergência na forma de pagamento</b> (bloqueados para lote até corrigir no Sienge)` : "Formas de pagamento conferidas"}</span>` : "");

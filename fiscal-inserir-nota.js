@@ -1,0 +1,894 @@
+/* Fiscal › Inserir nota: cadastra a nota fiscal de compra no Sienge a partir das entregas de um pedido de compra.
+   Sienge: POST /purchase-invoices (cabeçalho) → POST /purchase-invoices/{seq}/items/purchase-orders/delivery-schedules (itens).
+   A API não informa impostos, condição de pagamento nem consiste a nota: isso é finalizado no Sienge.
+   Leitura da nota: XML, PDF com texto ou, se for imagem, OCR (Tesseract.js carregado só quando preciso). */
+window.InserirNotaApp = {
+  TESSERACT_URL: "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js",
+  TOL: 0.05,
+  DOCUMENTOS: ["NFS", "NFSE", "NF", "NFE", "RPA", "FAT"],
+
+  state: null,
+
+  novoEstado() {
+    const hoje = this.hojeIso();
+    return {
+      pedidoId: "",
+      pedido: null,
+      credor: null,
+      itens: [],
+      empresas: [],
+      empresaObra: "",
+      carregando: "",
+      erro: "",
+      nota: null,
+      lendo: "",
+      leituraErro: "",
+      preview: "",
+      form: { documento: "NFS", numero: "", serie: "", emissao: "", movimento: hoje, companyId: "", notes: "", manterSaldo: true, anexar: true },
+      qtdEditada: false,
+      duplicada: null,
+      enviando: "",
+      criada: null,
+      resultado: null
+    };
+  },
+
+  init() {
+    if (!this.state) this.state = this.novoEstado();
+    this.render();
+  },
+
+  /* ---------- utilitários ---------- */
+  esc(v) {
+    return String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  },
+  money(v) {
+    return (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  },
+  qtdFmt(v) {
+    return (Number(v) || 0).toLocaleString("pt-BR", { maximumFractionDigits: 4 });
+  },
+  digits(v) {
+    return String(v == null ? "" : v).replace(/\D/g, "");
+  },
+  num(v) {
+    return window.NotaFiscalCheck ? NotaFiscalCheck.num(v) : (Number(String(v).replace(/\./g, "").replace(",", ".")) || null);
+  },
+  docFmt(d) {
+    return window.NotaFiscalCheck ? NotaFiscalCheck.docFmt(d) : this.digits(d);
+  },
+  hojeIso() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  },
+  dataBr(iso) {
+    const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : (iso || "—");
+  },
+  brParaIso(t) {
+    const m = String(t || "").match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+    const i = String(t || "").match(/(\d{4})-(\d{2})-(\d{2})/);
+    return i ? `${i[1]}-${i[2]}-${i[3]}` : "";
+  },
+  lista(res) {
+    return Array.isArray(res) ? res : ((res && (res.results || res.data)) || []);
+  },
+  podeEditar() {
+    return typeof window.hasCrmPerm === "function" && window.hasCrmPerm("sub_fiscal_geral_inserir_nota_editar");
+  },
+  usuario() {
+    const u = (window.AppState && AppState.currentUser) || {};
+    return { nome: u.name || u.nome || u.email || "", email: u.email || "" };
+  },
+
+  /* ---------- Sienge ---------- */
+  async get(path) {
+    return window.siengeFetchWithRetry(path, 1);
+  },
+
+  async enviar(path, opts) {
+    const base = ((window.SIENGE_CONFIG && SIENGE_CONFIG.baseUrl) || "/api/sienge-proxy").replace(/\/$/, "");
+    const headers = Object.assign({ Accept: "application/json" }, opts.headers || {});
+    if (typeof getBasicAuthHeader === "function") headers.Authorization = getBasicAuthHeader();
+    const res = await fetch(base + path, { method: opts.method || "POST", headers, body: opts.body });
+    const text = await res.text();
+    let body = null;
+    try { body = text ? JSON.parse(text) : null; } catch (e) { body = text; }
+    if (!res.ok) {
+      const det = body && typeof body === "object"
+        ? (body.clientMessage || body.developerMessage || body.message || (Array.isArray(body.errors) ? body.errors.map((e) => e.message || e).join("; ") : ""))
+        : String(body || "");
+      const err = new Error(`${det || "Sienge recusou"} (HTTP ${res.status})`);
+      err.status = res.status;
+      throw err;
+    }
+    return { res, body };
+  },
+
+  /* ---------- pedido ---------- */
+  async buscarPedido() {
+    const s = this.state;
+    const id = this.digits((document.getElementById("inf-pedido") || {}).value || s.pedidoId);
+    if (!id) return;
+    Object.assign(s, { pedidoId: id, pedido: null, credor: null, itens: [], erro: "", empresaObra: "", qtdEditada: false, duplicada: null, criada: null, resultado: null });
+    s.carregando = "Buscando o pedido no Sienge…";
+    this.render();
+    try {
+      const pedido = await this.get(`/purchase-orders/${id}`);
+      if (!pedido || typeof pedido !== "object" || pedido.id == null) throw new Error("pedido não encontrado");
+      s.pedido = pedido;
+      s.carregando = "Buscando itens e entregas do pedido…";
+      this.render();
+      const [itensRes, credor, empresas] = await Promise.all([
+        this.get(`/purchase-orders/${id}/items?limit=200`),
+        this.get(`/creditors/${encodeURIComponent(pedido.supplierId)}`).catch(() => null),
+        window.SiengeApiService && SiengeApiService.getCompanies ? SiengeApiService.getCompanies().catch(() => []) : Promise.resolve([])
+      ]);
+      s.credor = credor && typeof credor === "object"
+        ? { id: pedido.supplierId, nome: credor.name || credor.tradeName || `Fornecedor ${pedido.supplierId}`, doc: this.digits(credor.cnpj || credor.cpf) }
+        : { id: pedido.supplierId, nome: `Fornecedor ${pedido.supplierId}`, doc: "" };
+      s.empresas = (empresas || []).map((c) => ({ id: String(c.id), nome: c.name || c.tradeName || `Empresa ${c.id}`, cnpj: this.digits(c.cnpj || c.cnpjCpf) }));
+      const itens = this.lista(itensRes);
+      const out = [];
+      for (const it of itens) {
+        const ent = await this.get(`/purchase-orders/${id}/items/${it.itemNumber}/delivery-schedules?limit=200`).catch(() => null);
+        out.push({
+          itemNumber: it.itemNumber,
+          descricao: [it.resourceCode, it.resourceDescription, it.detailDescription].filter(Boolean).join(" · ") || `Item ${it.itemNumber}`,
+          unidade: it.unitOfMeasure || "",
+          quantidade: Number(it.quantity) || 0,
+          preco: Number(it.netPrice) || Number(it.unitPrice) || 0,
+          entregas: this.lista(ent).map((e) => ({
+            n: e.deliveryScheduleNumber,
+            data: e.sheduledDate || e.scheduledDate || "",
+            prevista: Number(e.sheduledQuantity != null ? e.sheduledQuantity : e.scheduledQuantity) || 0,
+            entregue: Number(e.deliveredQuantity) || 0,
+            saldo: Math.max(0, Number(e.openQuantity) || 0),
+            qtd: 0
+          })),
+          semEntregas: !ent
+        });
+      }
+      s.itens = out;
+      s.empresaObra = await this.empresaDaObra(pedido.buildingId || pedido.costCenterId);
+      this.escolherEmpresa();
+      this.distribuir();
+      s.carregando = "";
+      this.render();
+      this.verificarDuplicada();
+    } catch (e) {
+      s.carregando = "";
+      const msg = String((e && e.message) || e || "");
+      s.erro = /404|não encontrado/i.test(msg) ? `Pedido ${id} não encontrado no Sienge.`
+        : (/403/.test(msg) ? "O usuário da API não tem permissão para consultar pedidos de compra." : `Não consegui buscar o pedido: ${msg}`);
+      this.render();
+    }
+  },
+
+  async empresaDaObra(obraId) {
+    if (!obraId) return "";
+    try {
+      const lista = JSON.parse(localStorage.getItem("crm_cost_centers_data") || "[]");
+      const cc = Array.isArray(lista) && lista.find((c) => c && String(c.id) === String(obraId));
+      if (cc && (cc.idCompany || cc.companyId)) return String(cc.idCompany || cc.companyId);
+    } catch (e) {}
+    try {
+      const ent = await this.get(`/enterprises/${encodeURIComponent(obraId)}`);
+      return ent && ent.companyId != null ? String(ent.companyId) : "";
+    } catch (e) {
+      return "";
+    }
+  },
+
+  /** Empresa da nota: a do CNPJ do tomador; sem nota lida, a da obra do pedido. */
+  escolherEmpresa() {
+    const s = this.state;
+    const toma = s.nota && s.nota.cnpjTomador;
+    const pelaNota = toma ? s.empresas.find((c) => c.cnpj === toma) : null;
+    if (pelaNota) s.form.companyId = pelaNota.id;
+    else if (!s.form.companyId && s.empresaObra) s.form.companyId = s.empresaObra;
+  },
+
+  /** Preenche as quantidades com o saldo das entregas, na ordem, até fechar o valor da nota. */
+  distribuir() {
+    const s = this.state;
+    if (s.qtdEditada) return;
+    const valor = Number(this.valorNota()) || 0;
+    let resta = valor;
+    s.itens.forEach((it) => it.entregas.forEach((e) => {
+      if (!valor) { e.qtd = 0; return; }
+      if (resta <= 0.004 || !it.preco || e.saldo <= 0) { e.qtd = 0; return; }
+      const cheio = e.saldo * it.preco;
+      e.qtd = cheio <= resta + 0.005 ? e.saldo : Math.round((resta / it.preco) * 10000) / 10000;
+      resta = Math.round((resta - e.qtd * it.preco) * 100) / 100;
+    }));
+  },
+
+  totalItens() {
+    return Math.round(this.state.itens.reduce((t, it) => t + it.entregas.reduce((u, e) => u + (Number(e.qtd) || 0) * it.preco, 0), 0) * 100) / 100;
+  },
+
+  valorNota() {
+    const n = this.state.nota;
+    return n ? (n.valor != null ? n.valor : n.liquido) : null;
+  },
+
+  async verificarDuplicada() {
+    const s = this.state;
+    const numero = s.form.numero;
+    if (!s.pedido || !numero) { s.duplicada = null; return; }
+    const chave = `${s.pedido.supplierId}|${numero}|${s.form.serie}|${s.form.documento}`;
+    if (s.duplicada && s.duplicada.chave === chave) return;
+    s.duplicada = { chave, conferindo: true };
+    this.pintarConferencia();
+    try {
+      const res = await this.get(`/purchase-invoices?supplierId=${encodeURIComponent(s.pedido.supplierId)}&number=${encodeURIComponent(numero)}&limit=20`);
+      if (!s.duplicada || s.duplicada.chave !== chave) return;
+      const achada = this.lista(res).find((n) => String(n.number) === String(numero)
+        && (!s.form.serie || !n.series || String(n.series).trim().toUpperCase() === s.form.serie.trim().toUpperCase()));
+      s.duplicada = { chave, achada: achada || null };
+    } catch (e) {
+      if (s.duplicada && s.duplicada.chave === chave) s.duplicada = { chave, erro: String((e && e.message) || e) };
+    }
+    this.pintarConferencia();
+  },
+
+  /* ---------- leitura da nota ---------- */
+  async lerArquivo(input) {
+    const file = input && input.files && input.files[0];
+    if (!file) return;
+    const s = this.state;
+    s.arquivo = file;
+    s.nota = null;
+    s.leituraErro = "";
+    s.preview = "";
+    s.lendo = "Abrindo o arquivo…";
+    s.qtdEditada = false;
+    this.render();
+    try {
+      const buf = await file.arrayBuffer();
+      const inicio = new TextDecoder("latin1").decode(new Uint8Array(buf.slice(0, 64))).trim();
+      let nota = null;
+      if (/^\uFEFF?</.test(inicio) || /\.xml$/i.test(file.name)) {
+        nota = this.lerXml(new TextDecoder("utf-8").decode(buf));
+        nota.origem = "XML";
+      } else if (/^%PDF/.test(inicio)) {
+        const canvas = await this.pdfParaCanvas(buf);
+        s.preview = canvas.toDataURL("image/jpeg", 0.85);
+        this.render();
+        const itens = window.NotaFiscalCheck ? await NotaFiscalCheck.itensDoPdf(buf) : [];
+        if (itens.length >= 20) {
+          nota = this.extrair(this.celulasPdf(itens));
+          nota.origem = "texto do PDF";
+        } else {
+          nota = this.extrair(await this.ocr(canvas));
+          nota.origem = "leitura da imagem (OCR)";
+        }
+      } else if (/^image\//.test(file.type)) {
+        const canvas = await this.imagemParaCanvas(file);
+        s.preview = canvas.toDataURL("image/jpeg", 0.85);
+        this.render();
+        nota = this.extrair(await this.ocr(canvas));
+        nota.origem = "leitura da imagem (OCR)";
+      } else {
+        throw new Error("formato não reconhecido; use PDF, XML ou imagem");
+      }
+      s.nota = nota;
+      const f = s.form;
+      if (nota.numero) f.numero = nota.numero;
+      if (nota.serie) f.serie = nota.serie;
+      if (nota.emissao) f.emissao = nota.emissao;
+      f.notes = this.observacaoPadrao();
+      this.escolherEmpresa();
+      this.distribuir();
+    } catch (e) {
+      s.leituraErro = `Não consegui ler a nota: ${(e && e.message) || e}. Preencha os campos manualmente.`;
+    }
+    s.lendo = "";
+    this.render();
+    this.verificarDuplicada();
+  },
+
+  observacaoPadrao() {
+    const s = this.state;
+    const f = s.form;
+    return [`NF ${f.numero || ""}${f.serie ? "/" + f.serie : ""}`.trim(), s.pedidoId ? `pedido ${s.pedidoId}` : "", "inserida pelo CRM"].filter(Boolean).join(" · ");
+  },
+
+  async pdfParaCanvas(buf) {
+    const lib = window["pdfjs-dist/build/pdf"] || window.pdfjsLib;
+    if (!lib) throw new Error("leitor de PDF indisponível");
+    const pdf = await lib.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise;
+    const page = await pdf.getPage(1);
+    const vp = page.getViewport({ scale: 2.5 });
+    const canvas = document.createElement("canvas");
+    canvas.width = vp.width;
+    canvas.height = vp.height;
+    await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
+    canvas._escala = 2.5;
+    return canvas;
+  },
+
+  imagemParaCanvas(file) {
+    return new Promise((ok, falha) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        canvas.getContext("2d").drawImage(img, 0, 0);
+        canvas._escala = img.naturalWidth / 595;
+        URL.revokeObjectURL(img.src);
+        ok(canvas);
+      };
+      img.onerror = () => falha(new Error("imagem inválida"));
+      img.src = URL.createObjectURL(file);
+    });
+  },
+
+  carregarTesseract() {
+    if (window.Tesseract) return Promise.resolve();
+    if (this._tessVoo) return this._tessVoo;
+    this._tessVoo = new Promise((ok, falha) => {
+      const sc = document.createElement("script");
+      sc.src = this.TESSERACT_URL;
+      sc.onload = () => ok();
+      sc.onerror = () => { this._tessVoo = null; falha(new Error("não consegui carregar o leitor de imagem (OCR)")); };
+      document.head.appendChild(sc);
+    });
+    return this._tessVoo;
+  },
+
+  /** OCR da página: devolve células (palavras próximas da mesma linha) em pontos de PDF. */
+  async ocr(canvas) {
+    const s = this.state;
+    s.lendo = "Carregando o leitor de imagem (OCR)…";
+    this.render();
+    await this.carregarTesseract();
+    const worker = await Tesseract.createWorker("por", 1, {
+      logger: (m) => {
+        if (m.status === "recognizing text" && m.progress != null) {
+          const txt = `Lendo a imagem da nota… ${Math.round(m.progress * 100)}%`;
+          if (txt !== s.lendo) { s.lendo = txt; this.pintarLeitura(); }
+        }
+      }
+    });
+    try {
+      const { data } = await worker.recognize(canvas);
+      const E = canvas._escala || 1;
+      const celulas = [];
+      (data.lines || []).forEach((l) => {
+        const ws = (l.words || []).filter((w) => String(w.text || "").trim());
+        if (!ws.length) return;
+        const h = Math.max(...ws.map((w) => w.bbox.y1 - w.bbox.y0));
+        let cur = null;
+        ws.forEach((w) => {
+          if (cur && w.bbox.x0 - cur.x1 * E < h * 1.1) {
+            cur.s += " " + w.text;
+            cur.x1 = w.bbox.x1 / E;
+          } else {
+            cur = { s: w.text, x0: w.bbox.x0 / E, x1: w.bbox.x1 / E, y: l.bbox.y0 / E };
+            celulas.push(cur);
+          }
+        });
+      });
+      return celulas;
+    } finally {
+      await worker.terminate();
+    }
+  },
+
+  celulasPdf(itens) {
+    const ord = itens.slice().sort((a, b) => a.y - b.y || a.x - b.x);
+    const celulas = [];
+    ord.forEach((it) => {
+      const c = celulas[celulas.length - 1];
+      if (c && Math.abs(c.y - it.y) < 2.5 && it.x - c.x1 < 6) {
+        c.s += " " + it.s;
+        c.x1 = it.x + it.w;
+      } else {
+        celulas.push({ s: it.s, x0: it.x, x1: it.x + it.w, y: it.y });
+      }
+    });
+    return celulas;
+  },
+
+  /** Campos da nota a partir das células: o valor fica logo abaixo do rótulo (alinhado por sobreposição) ou ao lado dele. */
+  extrair(celulas) {
+    const ord = celulas.slice().sort((a, b) => a.y - b.y || a.x0 - b.x0);
+    const texto = ord.map((c) => c.s).join("\n");
+    const achar = (rotulos, aceita) => {
+      for (const re of rotulos) {
+        let melhor = null;
+        ord.forEach((r) => {
+          if (r.s.length > 140) return;
+          const m = r.s.match(re);
+          if (!m) return;
+          const depois = r.s.slice(m.index + m[0].length).replace(/^[\s:\-–]+/, "");
+          if (depois && aceita(depois)) { melhor = melhor && melhor.d <= 0 ? melhor : { d: 0, s: depois }; return; }
+          const larg = Math.max(1, r.s.length);
+          let fim = m.index + m[0].length;
+          const fecha = r.s.slice(fim).indexOf(")");
+          if (fecha >= 0 && fecha < 30) fim += fecha + 1;
+          const lx0 = r.x0 + (r.x1 - r.x0) * (m.index / larg);
+          const lx1 = r.x0 + (r.x1 - r.x0) * (fim / larg);
+          ord.forEach((v) => {
+            const dy = v.y - r.y;
+            if (dy < 3 || dy > 32 || !aceita(v.s)) return;
+            const sobre = Math.min(lx1, v.x1) - Math.max(lx0, v.x0);
+            if (sobre <= 0 && Math.abs(v.x0 - lx0) > 8) return;
+            const d = dy + (sobre > 0 ? 0 : 12);
+            if (!melhor || d < melhor.d) melhor = { d, s: v.s };
+          });
+        });
+        if (melhor) return melhor.s;
+      }
+      return null;
+    };
+    const ehValor = (t) => /\d[\d.]*,\d{2}\b/.test(t) && !/\d{2}\/\d{2}\/\d{4}/.test(t);
+    const valor = (rotulos) => { const v = achar(rotulos, ehValor); return v == null ? null : this.num(v); };
+    const n = {};
+
+    const ns = achar([/n[uú]mero\s*\/\s*s[eé]rie/i, /n[uú]mero da nfs-?e/i, /n[uú]mero da nota( fiscal)?/i, /n[º°o]\.?\s*da\s*(nfs-?e|nota)/i, /^n[uú]mero$/i, /^nota (fiscal )?n[º°o]/i],
+      (t) => /^\s*\d{1,12}\b/.test(t));
+    if (ns) {
+      const m = ns.match(/^\s*(\d{1,12})\s*(?:[\/\-]\s*([A-Za-z0-9]{1,5}))?/);
+      if (m) { n.numero = String(Number(m[1])); if (m[2]) n.serie = m[2].toUpperCase(); }
+    }
+    if (!n.numero) {
+      const m = texto.match(/n[uú]mero(?: da (?:nfs-?e|nota))?\s*[:\-]?\s*(\d{1,12})/i);
+      if (m) n.numero = String(Number(m[1]));
+    }
+    if (!n.serie) {
+      const sr = achar([/^s[eé]rie$/i, /s[eé]rie da nota/i], (t) => /^\s*[A-Za-z0-9]{1,5}\s*$/.test(t));
+      if (sr) n.serie = sr.trim().toUpperCase();
+    }
+
+    const em = achar([/data e hora (da )?emiss[aã]o/i, /data (da )?emiss[aã]o/i, /emitida em/i, /^emiss[aã]o$/i, /data e hora da nfs-?e/i], (t) => /\d{2}\/\d{2}\/\d{4}/.test(t));
+    n.emissao = this.brParaIso(em || (texto.match(/\d{2}\/\d{2}\/\d{4}/) || [""])[0]);
+
+    const cnpjs = [];
+    const reCnpj = /\d{2}[.,]?\d{3}[.,]?\d{3}\s*\/\s*\d{4}\s*-?\s*\d{2}/g;
+    let m;
+    while ((m = reCnpj.exec(texto))) cnpjs.push({ i: m.index, d: this.digits(m[0]) });
+    const depoisDe = (re) => {
+      const p = texto.search(re);
+      if (p < 0) return "";
+      const c = cnpjs.find((x) => x.i > p);
+      return c ? c.d : "";
+    };
+    n.cnpjPrestador = depoisDe(/prestador|emitente/i) || (cnpjs[0] && cnpjs[0].d) || "";
+    n.cnpjTomador = depoisDe(/tomador/i) || (cnpjs.find((c) => c.d !== n.cnpjPrestador) || {}).d || "";
+
+    n.valor = valor([/valor total da (nfs-?e|nota)/i, /valor (total )?d[oa]s? servi[cç]os?/i, /valor da opera[cç][aã]o/i, /valor bruto/i, /total da nota/i, /valor total/i]);
+    n.liquido = valor([/valor l[ií]quido/i]);
+    n.retencoes = valor([/^reten[cç][oõ]es\s*\(r\$\)/i, /total (das )?reten[cç][oõ]es/i, /valor (total )?(das )?reten[cç][oõ]es/i]);
+    if (n.valor == null && n.liquido != null) n.valor = Math.round((n.liquido + (n.retencoes || 0)) * 100) / 100;
+    return n;
+  },
+
+  lerXml(xml) {
+    const doc = new DOMParser().parseFromString(xml, "application/xml");
+    if (doc.getElementsByTagName("parsererror").length) throw new Error("XML inválido");
+    const tag = (raiz, ...nomes) => {
+      for (const nome of nomes) {
+        const el = (raiz || doc).getElementsByTagNameNS("*", nome)[0] || (raiz || doc).getElementsByTagName(nome)[0];
+        if (el && String(el.textContent).trim()) return String(el.textContent).trim();
+      }
+      return null;
+    };
+    const grupo = (...nomes) => { for (const g of nomes) { const el = doc.getElementsByTagNameNS("*", g)[0]; if (el) return el; } return null; };
+    const prest = grupo("prest", "emit", "Prestador", "PrestadorServico");
+    const toma = grupo("toma", "dest", "Tomador", "TomadorServico");
+    const base = window.NotaFiscalCheck ? NotaFiscalCheck.lerXml(xml) || {} : {};
+    const n = {
+      numero: (tag(null, "nNFSe", "nNF", "Numero") || "").replace(/^0+(?=\d)/, ""),
+      serie: (tag(null, "serie", "Serie") || "").toUpperCase(),
+      emissao: this.brParaIso(tag(null, "dhEmi", "dhProc", "DataEmissao", "dEmi") || ""),
+      cnpjPrestador: this.digits(prest ? tag(prest, "CNPJ", "Cnpj") : ""),
+      cnpjTomador: this.digits(toma ? tag(toma, "CNPJ", "Cnpj") : ""),
+      valor: base.valorServico != null ? base.valorServico : this.num(tag(null, "vNF", "vServ", "ValorServicos")),
+      liquido: base.liquido != null ? base.liquido : null,
+      retencoes: base.totalRetencoes != null ? base.totalRetencoes : null
+    };
+    if (/^\d{4}-\d{2}-\d{2}/.test(String(tag(null, "dhEmi", "DataEmissao") || ""))) n.emissao = String(tag(null, "dhEmi", "DataEmissao")).slice(0, 10);
+    return n;
+  },
+
+  /* ---------- conferência ---------- */
+  conferir() {
+    const s = this.state;
+    const f = s.form;
+    const p = s.pedido;
+    const n = s.nota;
+    const erros = [];
+    const avisos = [];
+    const oks = [];
+    if (!p) return { erros: ["Busque o pedido de compra."], avisos, oks };
+    const status = String(p.status || "").toUpperCase();
+    if (status === "CANCELED") erros.push("O pedido está cancelado.");
+    if (p.authorized === false) erros.push("O pedido ainda não foi autorizado no Sienge.");
+    else if (p.authorized === true) oks.push("Pedido autorizado.");
+    if (status === "FULLY_DELIVERED") erros.push("O pedido já foi totalmente atendido: não há saldo para faturar.");
+
+    if (!f.documento || !f.numero) erros.push("Informe o documento e o número da nota.");
+    if (!f.companyId) erros.push("Escolha a empresa da nota.");
+    if (!f.emissao) avisos.push("Sem data de emissão: o Sienge usará a data de hoje.");
+
+    if (n && n.cnpjPrestador && s.credor && s.credor.doc) {
+      if (n.cnpjPrestador === s.credor.doc) oks.push(`CNPJ do prestador confere com o fornecedor do pedido (${this.docFmt(n.cnpjPrestador)}).`);
+      else erros.push(`A nota é de ${this.docFmt(n.cnpjPrestador)}, mas o fornecedor do pedido é ${this.docFmt(s.credor.doc)}.`);
+    } else if (n) avisos.push("Não consegui confirmar o CNPJ do prestador na nota: confira o fornecedor.");
+
+    const emp = s.empresas.find((c) => c.id === String(f.companyId));
+    if (n && n.cnpjTomador && emp && emp.cnpj) {
+      if (n.cnpjTomador === emp.cnpj) oks.push(`CNPJ do tomador confere com a empresa ${emp.id}.`);
+      else erros.push(`O tomador da nota é ${this.docFmt(n.cnpjTomador)}, mas a empresa escolhida (${emp.id}) tem CNPJ ${this.docFmt(emp.cnpj)}.`);
+    }
+    if (s.empresaObra && f.companyId && String(f.companyId) !== String(s.empresaObra)) {
+      avisos.push(`A obra do pedido é da empresa ${s.empresaObra}, e a nota está na empresa ${f.companyId}.`);
+    }
+
+    const entregas = s.itens.flatMap((it) => it.entregas.filter((e) => Number(e.qtd) > 0).map((e) => ({ it, e })));
+    if (!entregas.length) erros.push("Nenhuma entrega com quantidade a faturar.");
+    entregas.forEach(({ it, e }) => {
+      if (Number(e.qtd) > e.saldo + 0.00001) erros.push(`Item ${it.itemNumber}, entrega ${e.n}: quantidade ${this.qtdFmt(e.qtd)} maior que o saldo ${this.qtdFmt(e.saldo)}.`);
+    });
+    const total = this.totalItens();
+    const valor = this.valorNota();
+    if (valor != null && entregas.length) {
+      if (Math.abs(total - valor) <= this.TOL) oks.push(`Itens somam ${this.money(total)}, igual ao valor da nota.`);
+      else erros.push(`Os itens somam ${this.money(total)}, mas a nota é de ${this.money(valor)}.`);
+    } else if (entregas.length) avisos.push("Valor da nota não lido: confira o total dos itens com a nota.");
+    if (n && n.retencoes > 0.009) avisos.push(`A nota tem ${this.money(n.retencoes)} de retenções: lance os impostos ao finalizar a nota no Sienge.`);
+
+    const dup = s.duplicada;
+    if (dup && dup.achada) erros.push(`Esta nota já está cadastrada no Sienge (sequencial ${dup.achada.sequentialNumber}, emissão ${this.dataBr(dup.achada.issueDate)}).`);
+    else if (dup && dup.conferindo) avisos.push("Conferindo se a nota já existe no Sienge…");
+    else if (dup && dup.erro) avisos.push("Não consegui conferir se a nota já existe no Sienge.");
+    else if (dup) oks.push("Nota ainda não cadastrada no Sienge.");
+    return { erros, avisos, oks };
+  },
+
+  /* ---------- gravação ---------- */
+  async inserir() {
+    const s = this.state;
+    if (!this.podeEditar()) { alert("Sem permissão para inserir notas no Sienge."); return; }
+    const c = this.conferir();
+    if (c.erros.length) { alert(c.erros.join("\n")); return; }
+    const f = s.form;
+    const entregas = s.itens.flatMap((it) => it.entregas.filter((e) => Number(e.qtd) > 0).map((e) => ({
+      purchaseOrderId: Number(s.pedidoId), itemNumber: Number(it.itemNumber), deliveryScheduleNumber: Number(e.n),
+      deliveredQuantity: Number(e.qtd), keepBalance: !!f.manterSaldo
+    })));
+    const total = this.totalItens();
+    const msg = `Inserir no Sienge a nota ${f.documento} ${f.numero}${f.serie ? "/" + f.serie : ""} de ${s.credor ? s.credor.nome : ""}, `
+      + `no valor de ${this.money(total)}, com ${entregas.length} entrega(s) do pedido ${s.pedidoId}?\n\n`
+      + "A nota fica \"em inclusão\" no Sienge: depois confira impostos e condição de pagamento e consista a nota para gerar o título.";
+    const ok = typeof window.mouraConfirm === "function" ? await window.mouraConfirm(msg) : confirm(msg);
+    if (!ok) return;
+
+    const log = [];
+    let anexou = false;
+    s.resultado = null;
+    try {
+      if (!s.criada) {
+        if (f.anexar && s.arquivo) {
+          s.enviando = "Anexando a nota no pedido…";
+          this.render();
+          try {
+            const fd = new FormData();
+            fd.append("description", `NF ${f.numero}${f.serie ? "/" + f.serie : ""}`.slice(0, 100));
+            fd.append("attachment", s.arquivo, String(s.arquivo.name || "nota.pdf").slice(-100));
+            await this.enviar(`/purchase-orders/${s.pedidoId}/attachments`, { body: fd });
+            anexou = true;
+            log.push("PDF anexado no pedido.");
+          } catch (e) {
+            log.push(`Não consegui anexar o PDF no pedido: ${e.message}`);
+          }
+        }
+        s.enviando = "Criando a nota no Sienge…";
+        this.render();
+        const cab = {
+          documentId: f.documento.trim().toUpperCase(),
+          number: String(f.numero).trim(),
+          supplierId: Number(s.pedido.supplierId),
+          companyId: Number(f.companyId),
+          movementDate: f.movimento || this.hojeIso(),
+          notes: f.notes || this.observacaoPadrao()
+        };
+        if (f.serie) cab.series = String(f.serie).trim();
+        if (f.emissao) cab.issueDate = f.emissao;
+        const r = await this.enviar("/purchase-invoices", { headers: { "Content-Type": "application/json" }, body: JSON.stringify(cab) });
+        let seq = r.body && r.body.sequentialNumber;
+        if (!seq) {
+          const loc = r.res.headers.get("Location") || r.res.headers.get("location") || "";
+          seq = loc.split("/").filter(Boolean).pop();
+        }
+        if (!seq || isNaN(Number(seq))) throw new Error("o Sienge criou a nota, mas não devolveu o número sequencial");
+        s.criada = { seq: String(seq), anexou };
+        log.push(`Nota criada no Sienge (sequencial ${seq}).`);
+        this.auditar("ok", `Nota ${cab.documentId} ${cab.number} criada (sequencial ${seq}) para o pedido ${s.pedidoId}`, { cabecalho: cab, log });
+      }
+      s.enviando = "Incluindo os itens do pedido na nota…";
+      this.render();
+      const corpo = { deliveriesOrder: entregas, copyNotesPurchaseOrders: false, copyNotesResources: false, copyAttachmentsPurchaseOrders: !!(s.criada.anexou || anexou) };
+      const r2 = await this.enviar(`/purchase-invoices/${s.criada.seq}/items/purchase-orders/delivery-schedules`, { headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo) });
+      const itens = this.lista(r2.body);
+      log.push(`${itens.length || entregas.length} item(ns) incluído(s).`);
+      s.resultado = { ok: true, seq: s.criada.seq, log, itens };
+      this.auditar("ok", `Itens do pedido ${s.pedidoId} incluídos na nota sequencial ${s.criada.seq} · ${this.money(total)}`, { entregas, log });
+      s.duplicada = Object.assign({}, s.duplicada, { achada: { sequentialNumber: s.criada.seq, issueDate: f.emissao } });
+      s.criada = null;
+    } catch (e) {
+      const m = (e && e.message) || String(e);
+      log.push(m);
+      s.resultado = { ok: false, seq: s.criada ? s.criada.seq : "", log, erro: m };
+      this.auditar("erro", s.criada
+        ? `Nota sequencial ${s.criada.seq} criada, mas os itens do pedido ${s.pedidoId} não entraram: ${m}`
+        : `Falha ao criar a nota ${f.numero} do pedido ${s.pedidoId}: ${m}`, { log });
+    }
+    s.enviando = "";
+    this.render();
+  },
+
+  auditar(status, summary, details) {
+    if (!window.AuditService || typeof AuditService.logEvent !== "function") return;
+    const s = this.state;
+    const u = this.usuario();
+    try {
+      AuditService.logEvent({
+        module: "Fiscal", action: "Inserir nota", status, summary,
+        user: u.nome, userEmail: u.email,
+        customerLabel: s.credor ? s.credor.nome : "",
+        endpoint: "/purchase-invoices", method: "POST",
+        details: Object.assign({ pedido: s.pedidoId, documento: s.form.documento, numero: s.form.numero, serie: s.form.serie, empresa: s.form.companyId }, details || {})
+      });
+    } catch (e) {}
+  },
+
+  /* ---------- eventos ---------- */
+  setCampo(campo, valor) {
+    const f = this.state.form;
+    f[campo] = typeof f[campo] === "boolean" ? !!valor : String(valor == null ? "" : valor);
+    if (["numero", "serie", "documento"].includes(campo)) {
+      if (campo !== "documento" && /^NF\b/.test(f.notes || "")) f.notes = this.observacaoPadrao();
+      clearTimeout(this._dupT);
+      this._dupT = setTimeout(() => this.verificarDuplicada(), 600);
+    }
+    this.pintarConferencia();
+  },
+
+  setValorNota(v) {
+    const s = this.state;
+    s.nota = s.nota || { origem: "digitado" };
+    s.nota.valor = this.num(v);
+    this.distribuir();
+    this.render();
+  },
+
+  setQtd(item, entrega, v) {
+    const s = this.state;
+    const it = s.itens.find((x) => String(x.itemNumber) === String(item));
+    const e = it && it.entregas.find((x) => String(x.n) === String(entrega));
+    if (!e) return;
+    e.qtd = Math.max(0, this.num(v) || 0);
+    s.qtdEditada = true;
+    this.render();
+  },
+
+  redistribuir() {
+    this.state.qtdEditada = false;
+    this.distribuir();
+    this.render();
+  },
+
+  recomecar() {
+    this.state = this.novoEstado();
+    this.render();
+  },
+
+  /* ---------- tela ---------- */
+  pintarLeitura() {
+    const el = document.getElementById("inf-lendo");
+    if (el) el.textContent = this.state.lendo;
+  },
+
+  pintarConferencia() {
+    const el = document.getElementById("inf-conf");
+    if (!el) return;
+    el.innerHTML = this.conferenciaHtml();
+    const btn = document.getElementById("inf-inserir");
+    if (btn) btn.disabled = !!this.state.enviando || this.conferir().erros.length > 0 || !this.podeEditar();
+  },
+
+  conferenciaHtml() {
+    const c = this.conferir();
+    const linha = (t, cls, ic) => `<li class="${cls}"><span>${ic}</span>${this.esc(t)}</li>`;
+    return `<ul class="inf-check">${c.erros.map((t) => linha(t, "is-erro", "✗")).join("")}${c.avisos.map((t) => linha(t, "is-aviso", "!")).join("")}${c.oks.map((t) => linha(t, "is-ok", "✓")).join("")}</ul>`;
+  },
+
+  pedidoHtml() {
+    const s = this.state;
+    const p = s.pedido;
+    if (!p) return s.erro ? `<p class="inf-erro">${this.esc(s.erro)}</p>` : `<p class="inf-muted">Informe o número do pedido de compra para trazer fornecedor, empresa e entregas em aberto.</p>`;
+    const sit = { PENDING: "Pendente", PARTIALLY_DELIVERED: "Parcialmente entregue", FULLY_DELIVERED: "Totalmente atendido", CANCELED: "Cancelado" }[String(p.status || "").toUpperCase()] || p.status || "—";
+    return `<div class="inf-grid">
+      <div><label>Fornecedor</label><b>${this.esc(s.credor ? s.credor.nome : p.supplierId)}</b><small>${this.esc(s.credor && s.credor.doc ? this.docFmt(s.credor.doc) : `código ${p.supplierId}`)}</small></div>
+      <div><label>Obra / centro de custo</label><b>${this.esc(p.buildingId || p.costCenterId || "—")}</b><small>${s.empresaObra ? `empresa ${this.esc(s.empresaObra)}` : ""}</small></div>
+      <div><label>Data do pedido</label><b>${this.dataBr(p.date)}</b><small>${this.esc(p.paymentCondition || "")}</small></div>
+      <div><label>Situação</label><b>${this.esc(sit)}</b><small>${p.authorized ? "autorizado" : (p.authorized === false ? "não autorizado" : "")}</small></div>
+      <div><label>Total do pedido</label><b>${p.totalAmount != null ? this.money(p.totalAmount) : "—"}</b></div>
+    </div>`;
+  },
+
+  notaHtml() {
+    const s = this.state;
+    const f = s.form;
+    const n = s.nota;
+    const empOpts = [`<option value="">Escolha a empresa…</option>`].concat(s.empresas
+      .slice().sort((a, b) => Number(a.id) - Number(b.id))
+      .map((c) => `<option value="${this.esc(c.id)}" ${String(f.companyId) === c.id ? "selected" : ""}>${this.esc(c.id)} - ${this.esc(c.nome)}</option>`));
+    if (f.companyId && !s.empresas.some((c) => c.id === String(f.companyId))) empOpts.push(`<option value="${this.esc(f.companyId)}" selected>${this.esc(f.companyId)}</option>`);
+    const docs = this.DOCUMENTOS.includes(f.documento) ? this.DOCUMENTOS : this.DOCUMENTOS.concat([f.documento]);
+    const lido = n ? `<p class="inf-muted">Lido por ${this.esc(n.origem || "")}${n.cnpjPrestador ? ` · prestador ${this.esc(this.docFmt(n.cnpjPrestador))}` : ""}${n.cnpjTomador ? ` · tomador ${this.esc(this.docFmt(n.cnpjTomador))}` : ""}${n.retencoes != null ? ` · retenções ${this.money(n.retencoes)}` : ""}${n.liquido != null ? ` · líquido ${this.money(n.liquido)}` : ""}. Confira os campos com a nota ao lado.</p>` : "";
+    return `
+      <label class="inf-file"><i data-lucide="file-up"></i><span>${s.arquivo ? this.esc(s.arquivo.name) : "Escolher a nota (PDF, XML ou imagem)"}</span>
+        <input type="file" accept=".pdf,.xml,image/*" onchange="InserirNotaApp.lerArquivo(this)"></label>
+      ${s.lendo ? `<p class="inf-muted"><span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;"></span> <span id="inf-lendo">${this.esc(s.lendo)}</span></p>` : ""}
+      ${s.leituraErro ? `<p class="inf-erro">${this.esc(s.leituraErro)}</p>` : ""}
+      ${lido}
+      <div class="inf-form">
+        <div><label>Documento</label><select onchange="InserirNotaApp.setCampo('documento', this.value)">${docs.map((d) => `<option ${d === f.documento ? "selected" : ""}>${this.esc(d)}</option>`).join("")}</select></div>
+        <div><label>Número</label><input value="${this.esc(f.numero)}" oninput="InserirNotaApp.setCampo('numero', this.value)"></div>
+        <div><label>Série</label><input value="${this.esc(f.serie)}" oninput="InserirNotaApp.setCampo('serie', this.value)"></div>
+        <div><label>Emissão</label><input type="date" value="${this.esc(f.emissao)}" onchange="InserirNotaApp.setCampo('emissao', this.value)"></div>
+        <div><label>Data do movimento</label><input type="date" value="${this.esc(f.movimento)}" onchange="InserirNotaApp.setCampo('movimento', this.value)"></div>
+        <div><label>Valor da nota</label><input value="${n && n.valor != null ? this.esc(n.valor.toLocaleString("pt-BR", { minimumFractionDigits: 2 })) : ""}" placeholder="0,00" onchange="InserirNotaApp.setValorNota(this.value)"></div>
+        <div class="inf-span2"><label>Empresa</label><select onchange="InserirNotaApp.setCampo('companyId', this.value)">${empOpts.join("")}</select></div>
+        <div class="inf-span4"><label>Observação</label><input value="${this.esc(f.notes)}" oninput="InserirNotaApp.setCampo('notes', this.value)"></div>
+      </div>`;
+  },
+
+  itensHtml() {
+    const s = this.state;
+    if (!s.pedido) return "";
+    if (!s.itens.length) return `<p class="inf-muted">O pedido não tem itens.</p>`;
+    const linhas = [];
+    s.itens.forEach((it) => {
+      if (!it.entregas.length) {
+        linhas.push(`<tr><td>${it.itemNumber}</td><td>${this.esc(it.descricao)}</td><td colspan="6" class="inf-muted">${it.semEntregas ? "Não consegui ler as entregas deste item." : "Sem entregas programadas."}</td></tr>`);
+        return;
+      }
+      it.entregas.forEach((e, i) => {
+        const valor = (Number(e.qtd) || 0) * it.preco;
+        linhas.push(`<tr class="${e.saldo <= 0 ? "is-sem-saldo" : ""}">
+          <td>${i === 0 ? it.itemNumber : ""}</td>
+          <td>${i === 0 ? this.esc(it.descricao) : ""}</td>
+          <td>${e.n}${e.data ? ` · ${this.dataBr(e.data)}` : ""}</td>
+          <td class="num">${this.money(it.preco)}${it.unidade ? `<small>/${this.esc(it.unidade)}</small>` : ""}</td>
+          <td class="num">${this.qtdFmt(e.saldo)}</td>
+          <td class="num"><input class="inf-qtd" value="${this.esc(e.qtd ? String(e.qtd).replace(".", ",") : "")}" ${e.saldo <= 0 ? "disabled" : ""}
+            onchange="InserirNotaApp.setQtd('${it.itemNumber}', '${e.n}', this.value)"></td>
+          <td class="num">${this.money(valor)}</td>
+        </tr>`);
+      });
+    });
+    const total = this.totalItens();
+    const valor = this.valorNota();
+    const fecha = valor != null && Math.abs(total - valor) <= this.TOL;
+    return `<table class="inf-tab"><thead><tr><th>Item</th><th>Insumo</th><th>Entrega</th><th class="num">Preço líquido</th><th class="num">Saldo</th><th class="num">Qtd. a faturar</th><th class="num">Valor</th></tr></thead>
+      <tbody>${linhas.join("")}</tbody>
+      <tfoot><tr><td colspan="6">Total dos itens${valor != null ? ` · nota ${this.money(valor)}` : ""}</td><td class="num ${valor == null ? "" : (fecha ? "is-ok" : "is-erro")}">${this.money(total)}</td></tr></tfoot></table>
+      <div class="inf-linha-acoes">
+        <label class="inf-chk"><input type="checkbox" ${s.form.manterSaldo ? "checked" : ""} onchange="InserirNotaApp.setCampo('manterSaldo', this.checked)"> Manter o saldo restante do pedido em aberto</label>
+        ${s.qtdEditada ? `<button type="button" class="btn btn-outline inf-btn-sm" onclick="InserirNotaApp.redistribuir()"><i data-lucide="rotate-ccw"></i> Recalcular pelo valor da nota</button>` : ""}
+      </div>`;
+  },
+
+  resultadoHtml() {
+    const r = this.state.resultado;
+    if (!r) return "";
+    return `<div class="inf-resultado ${r.ok ? "is-ok" : "is-erro"}">
+      <b>${r.ok ? `Nota inserida no Sienge · sequencial ${this.esc(r.seq)}` : (r.seq ? `A nota foi criada (sequencial ${this.esc(r.seq)}), mas os itens não entraram` : "A nota não foi criada")}</b>
+      <ul>${r.log.map((t) => `<li>${this.esc(t)}</li>`).join("")}</ul>
+      ${r.ok ? `<p>Agora, no Sienge, abra a nota ${this.esc(r.seq)}: confira os impostos e a condição de pagamento e consista a nota para gerar o título.</p>`
+        : (r.seq ? `<p>Corrija o motivo acima e clique em <b>Inserir no Sienge</b> de novo: o CRM tenta incluir os itens na mesma nota ${this.esc(r.seq)}, sem criar outra.</p>` : "")}
+    </div>`;
+  },
+
+  render() {
+    const root = document.getElementById("inserir-nota-root");
+    if (!root) return;
+    const s = this.state || (this.state = this.novoEstado());
+    const pode = this.podeEditar();
+    const bloqueado = !!s.enviando || this.conferir().erros.length > 0 || !pode;
+    root.innerHTML = `
+      <style>
+        .inf-wrap { padding: 20px; max-width: 1400px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, 1fr); gap: 16px; align-items: start; }
+        .inf-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+        .inf-card h3 { margin: 0 0 10px; font-size: 0.95rem; color: #105436; display: flex; align-items: center; gap: 8px; }
+        .inf-card h3 i { width: 16px; height: 16px; }
+        .inf-muted { color: #64748b; font-size: 0.82rem; margin: 6px 0; }
+        .inf-erro { color: #b91c1c; font-size: 0.85rem; margin: 6px 0; }
+        .inf-busca { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+        .inf-busca input { height: 38px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0 12px; font-size: 0.95rem; width: 180px; }
+        .inf-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+        .inf-grid label, .inf-form label { display: block; font-size: 0.7rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 3px; }
+        .inf-grid b { display: block; font-size: 0.86rem; color: #0f172a; }
+        .inf-grid small { color: #64748b; font-size: 0.75rem; }
+        .inf-form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+        .inf-form input, .inf-form select { width: 100%; height: 36px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0 10px; font-size: 0.86rem; background: #fff; box-sizing: border-box; }
+        .inf-span2 { grid-column: span 2; } .inf-span4 { grid-column: span 4; }
+        .inf-file { display: flex; align-items: center; gap: 8px; border: 1px dashed #94a3b8; border-radius: 8px; padding: 10px 12px; cursor: pointer; color: #334155; font-size: 0.86rem; }
+        .inf-file i { width: 18px; height: 18px; color: #105436; }
+        .inf-file input { display: none; }
+        .inf-tab { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+        .inf-tab th { text-align: left; font-size: 0.7rem; text-transform: uppercase; color: #64748b; padding: 6px 8px; border-bottom: 1px solid #e2e8f0; }
+        .inf-tab td { padding: 6px 8px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+        .inf-tab .num { text-align: right; white-space: nowrap; }
+        .inf-tab small { color: #94a3b8; }
+        .inf-tab tfoot td { font-weight: 800; border-bottom: 0; }
+        .inf-tab .is-ok { color: #105436; } .inf-tab .is-erro { color: #b91c1c; }
+        .inf-tab tr.is-sem-saldo td { color: #94a3b8; }
+        .inf-qtd { width: 90px; height: 30px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 8px; text-align: right; }
+        .inf-linha-acoes { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+        .inf-chk { display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: #334155; }
+        .inf-btn-sm { height: 32px; font-size: 0.78rem; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; }
+        .inf-btn-sm i { width: 14px; height: 14px; }
+        .inf-check { list-style: none; margin: 0; padding: 0; font-size: 0.84rem; }
+        .inf-check li { display: flex; gap: 8px; padding: 4px 0; }
+        .inf-check li span { font-weight: 800; width: 14px; flex: 0 0 14px; }
+        .inf-check .is-erro { color: #b91c1c; } .inf-check .is-aviso { color: #c2410c; } .inf-check .is-ok { color: #105436; }
+        .inf-acoes { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+        .inf-acoes .btn { height: 38px; display: inline-flex; align-items: center; gap: 8px; padding: 0 16px; }
+        .inf-acoes .btn i { width: 16px; height: 16px; }
+        .inf-preview { position: sticky; top: 12px; }
+        .inf-preview img { width: 100%; border: 1px solid #e2e8f0; border-radius: 8px; }
+        .inf-resultado { border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; font-size: 0.85rem; }
+        .inf-resultado.is-ok { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; }
+        .inf-resultado.is-erro { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+        .inf-resultado ul { margin: 6px 0; padding-left: 18px; }
+        .inf-resultado p { margin: 6px 0 0; }
+        @media (max-width: 1100px) { .inf-wrap { grid-template-columns: 1fr; } .inf-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+      </style>
+      <div class="inf-wrap">
+        <div>
+          ${this.resultadoHtml()}
+          <div class="inf-card">
+            <h3><i data-lucide="clipboard-list"></i> Pedido de compra</h3>
+            <div class="inf-busca">
+              <input id="inf-pedido" inputmode="numeric" placeholder="Nº do pedido" value="${this.esc(s.pedidoId)}" onkeydown="if(event.key==='Enter')InserirNotaApp.buscarPedido()">
+              <button type="button" class="btn btn-primary inf-btn-sm" style="height:38px;" onclick="InserirNotaApp.buscarPedido()" ${s.carregando ? "disabled" : ""}><i data-lucide="search"></i> Buscar pedido</button>
+              ${s.carregando ? `<span class="inf-muted"><span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;"></span> ${this.esc(s.carregando)}</span>` : ""}
+            </div>
+            ${this.pedidoHtml()}
+          </div>
+          <div class="inf-card">
+            <h3><i data-lucide="file-text"></i> Nota fiscal</h3>
+            ${this.notaHtml()}
+          </div>
+          ${s.pedido ? `<div class="inf-card"><h3><i data-lucide="package-check"></i> Entregas do pedido a faturar</h3>${this.itensHtml()}</div>` : ""}
+          <div class="inf-card">
+            <h3><i data-lucide="list-checks"></i> Conferência</h3>
+            <div id="inf-conf">${this.conferenciaHtml()}</div>
+            <label class="inf-chk" style="margin-top:10px;"><input type="checkbox" ${s.form.anexar ? "checked" : ""} onchange="InserirNotaApp.setCampo('anexar', this.checked)"> Anexar o arquivo da nota no pedido e copiar para a nota no Sienge</label>
+            <div class="inf-acoes">
+              <button type="button" class="btn btn-outline" onclick="InserirNotaApp.recomecar()" ${s.enviando ? "disabled" : ""}><i data-lucide="rotate-ccw"></i> Recomeçar</button>
+              <button type="button" id="inf-inserir" class="btn btn-primary" onclick="InserirNotaApp.inserir()" ${bloqueado ? "disabled" : ""}
+                title="${pode ? "" : "Sem permissão de edição em Fiscal › Inserir nota"}">
+                ${s.enviando ? `<span class="btn-spin"></span> ${this.esc(s.enviando)}` : `<i data-lucide="upload"></i> Inserir no Sienge`}</button>
+            </div>
+          </div>
+        </div>
+        <div class="inf-preview">
+          <div class="inf-card">
+            <h3><i data-lucide="image"></i> Nota anexada</h3>
+            ${s.preview ? `<img src="${s.preview}" alt="Nota fiscal">` : `<p class="inf-muted">${s.arquivo && /\.xml$/i.test(s.arquivo.name) ? "Nota em XML: os campos foram lidos direto do arquivo." : "A imagem da nota aparece aqui para conferir os campos."}</p>`}
+          </div>
+        </div>
+      </div>`;
+    if (window.lucide) lucide.createIcons();
+  }
+};

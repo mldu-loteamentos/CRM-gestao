@@ -407,7 +407,7 @@ window.NotaFiscalCheck = {
 
     imp.forEach((x) => {
       if (x.base != null && x.aliquota != null && x.base > 0 && Math.abs(x.base * x.aliquota / 100 - x.valor) > T) {
-        r.erros.push(`${x.nome} no Sienge: base ${this.money(x.base)} × ${this.pct(x.aliquota)} = ${this.money(x.base * x.aliquota / 100)}, mas o valor lançado é ${this.money(x.valor)}.`);
+        r.avisos.push(`${x.nome} no Sienge: base ${this.money(x.base)} × ${this.pct(x.aliquota)} = ${this.money(x.base * x.aliquota / 100)}, mas o valor lançado é ${this.money(x.valor)}.`);
       }
     });
 
@@ -423,7 +423,7 @@ window.NotaFiscalCheck = {
       r.retidoNota = retNota;
 
       if (n.baseIss && n.aliquotaIss && n.valorIss != null && Math.abs(n.baseIss * n.aliquotaIss / 100 - n.valorIss) > T) {
-        r.erros.push(`Na nota, o ISS não fecha: base ${this.money(n.baseIss)} × ${this.pct(n.aliquotaIss)} = ${this.money(n.baseIss * n.aliquotaIss / 100)}, mas a nota mostra ${this.money(n.valorIss)}.`);
+        r.avisos.push(`Na nota, o ISS não fecha: base ${this.money(n.baseIss)} × ${this.pct(n.aliquotaIss)} = ${this.money(n.baseIss * n.aliquotaIss / 100)}, mas a nota mostra ${this.money(n.valorIss)}.`);
       }
       if (n.valorServico != null && n.liquido != null && Math.abs(n.valorServico - retNota - n.liquido) > T) {
         r.avisos.push(`Na nota, serviço ${this.money(n.valorServico)} − retenções ${this.money(retNota)} = ${this.money(n.valorServico - retNota)}, mas o líquido da nota é ${this.money(n.liquido)}.`);
@@ -458,28 +458,40 @@ window.NotaFiscalCheck = {
         o.base = x.base != null ? x.base : o.base;
         o.n += 1;
       });
+      const semTipo = doSienge["?"];
+      const totalFecha = !!d.impostos && Math.abs(retNota - r.retido) <= T;
       ["ISS", "IRRF", "INSS", "CSRF"].forEach((t) => {
         const s = doSienge[t];
         const nt = naNota[t];
         if (!s && !nt) return;
         const linha = { tipo: t, sienge: s ? { base: s.base, aliquota: s.n === 1 || t === "CSRF" ? s.aliquota : null, valor: s.valor } : null, nota: nt, ok: true };
         if (s && nt) {
-          if (this.difere(s.valor, nt.valor)) { linha.ok = false; r.erros.push(`${t}: lançado ${this.money(s.valor)} no Sienge, a nota retém ${this.money(nt.valor)}.`); }
-          if (t === "ISS" && this.difere(s.base, nt.base)) { linha.ok = false; r.erros.push(`ISS: base ${this.money(s.base)} no Sienge, a nota usa ${this.money(nt.base)}.`); }
+          if (this.difere(s.valor, nt.valor)) { linha.ok = false; r.avisos.push(`${t}: lançado ${this.money(s.valor)} no Sienge, a nota retém ${this.money(nt.valor)}.`); }
+          if (t === "ISS" && this.difere(s.base, nt.base)) { linha.ok = false; r.avisos.push(`ISS: base ${this.money(s.base)} no Sienge, a nota usa ${this.money(nt.base)}.`); }
           if (t === "ISS" && s.n === 1 && nt.aliquota != null && s.aliquota && Math.abs(s.aliquota - nt.aliquota) > 0.005) {
             linha.ok = false;
-            r.erros.push(`ISS: alíquota ${this.pct(s.aliquota)} no Sienge, a nota usa ${this.pct(nt.aliquota)}.`);
+            r.avisos.push(`ISS: alíquota ${this.pct(s.aliquota)} no Sienge, a nota usa ${this.pct(nt.aliquota)}.`);
           }
+        } else if (nt && semTipo && totalFecha) {
+          linha.ok = null;
         } else if (nt && d.impostos && r.retido > T) {
           linha.ok = false;
-          r.erros.push(`A nota retém ${t} (${this.money(nt.valor)}), mas esse imposto não está lançado no título.`);
+          r.avisos.push(`A nota retém ${t} (${this.money(nt.valor)}), mas esse imposto não está lançado no título.`);
         } else if (s && !nt && retNota > T) {
           linha.ok = false;
-          r.erros.push(`${t} de ${this.money(s.valor)} lançado no Sienge, mas a nota não retém esse imposto.`);
+          r.avisos.push(`${t} de ${this.money(s.valor)} lançado no Sienge, mas a nota não retém esse imposto.`);
         }
         r.linhas.push(linha);
       });
-      if (doSienge["?"]) r.linhas.push({ tipo: "Outros", sienge: { valor: doSienge["?"].valor, base: null, aliquota: null }, nota: null, ok: true });
+      if (semTipo) {
+        const nomes = Array.from(new Set(semTipo.nomes)).join(", ");
+        r.linhas.push({ tipo: "Sem tipo no Sienge", detalhe: nomes, sienge: { valor: semTipo.valor, base: null, aliquota: null }, nota: null, ok: totalFecha ? true : null });
+        if (totalFecha) r.infos.push(`O Sienge não informa o tipo de cada imposto retido (${nomes}): conferido pelo total, ${this.money(r.retido)} no Sienge = ${this.money(retNota)} na nota.`);
+      }
+      if (!n.issRetido && n.valorIss > T) {
+        r.linhas.unshift({ tipo: "ISS", destacado: true, sienge: null, nota: { base: n.baseIss, aliquota: n.aliquotaIss, valor: n.valorIss }, ok: true });
+        r.infos.push(`ISS de ${this.money(n.valorIss)}${n.aliquotaIss ? ` (${this.pct(n.aliquotaIss)})` : ""} destacado na nota e não retido: recolhido pelo prestador, não entra no desconto do pagamento.`);
+      }
 
       if (n.valorServico != null && r.bruto && this.difere(n.valorServico, r.bruto)) {
         r.avisos.push(`Valor do serviço na nota (${this.money(n.valorServico)}) diferente do valor do título (${this.money(r.bruto)}).`);
@@ -488,7 +500,7 @@ window.NotaFiscalCheck = {
         r.erros.push(`Valor líquido da nota ${this.money(n.liquido)} diferente do líquido do título (${this.money(r.bruto)} − ${this.money(r.retido)} = ${this.money(r.liquido)}).`);
       }
       if (d.credorDoc && d.credorDoc.length === 14 && n.cnpjs && n.cnpjs.length && !n.cnpjs.includes(d.credorDoc)) {
-        r.erros.push(`A nota anexada não traz o CNPJ do credor (${this.docFmt(d.credorDoc)}): pode ser nota de outro fornecedor.`);
+        r.avisos.push(`A nota anexada não traz o CNPJ do credor (${this.docFmt(d.credorDoc)}): pode ser nota de outro fornecedor.`);
       }
       if (n.aliquotaIss != null && n.aliquotaIss > 0 && (n.aliquotaIss < 2 - 0.001 || n.aliquotaIss > 5 + 0.001)) {
         r.avisos.push(`Alíquota de ISS ${this.pct(n.aliquotaIss)} fora do intervalo legal de 2% a 5% (LC 116).`);
@@ -573,10 +585,20 @@ window.NotaFiscalCheck = {
       const v = (l.sienge && l.sienge[campo]) || (l.nota && l.nota[campo]) || null;
       return v ? (campo === "aliquota" ? this.pct(v) : this.money(v)) : "—";
     };
-    const tabela = r.linhas.length ? `<table class="nfchk-tab"><thead><tr><th>Imposto retido</th><th>Base</th><th>Alíquota</th><th>No Sienge</th><th>Na nota</th><th></th></tr></thead><tbody>
-      ${r.linhas.map((l) => `<tr><td>${this.esc(nomes[l.tipo] || l.tipo)}</td><td>${cel(l, "base")}</td><td>${cel(l, "aliquota")}</td>
+    const rotulo = (l) => {
+      if (l.destacado) return `${this.esc(nomes[l.tipo])} <span style="color:#64748b;font-weight:400;">(destacado, não retido)</span>`;
+      if (l.detalhe) return `${this.esc(l.tipo)} <span style="color:#64748b;font-weight:400;">(${this.esc(l.detalhe)})</span>`;
+      return this.esc(nomes[l.tipo] || l.tipo);
+    };
+    const marca = (l) => {
+      if (!n) return "";
+      if (l.ok == null) return `<span style="color:#64748b;" title="Conferido pelo total">=</span>`;
+      return `<span style="color:${l.ok ? "#105436" : "#c2410c"};">${l.ok ? "✓" : "!"}</span>`;
+    };
+    const tabela = r.linhas.length ? `<table class="nfchk-tab"><thead><tr><th>Imposto</th><th>Base</th><th>Alíquota</th><th>No Sienge</th><th>Na nota</th><th></th></tr></thead><tbody>
+      ${r.linhas.map((l) => `<tr${l.destacado ? ' style="color:#64748b;"' : ""}><td>${rotulo(l)}</td><td>${cel(l, "base")}</td><td>${cel(l, "aliquota")}</td>
         <td>${l.sienge ? this.money(l.sienge.valor) : "—"}</td><td>${n ? (l.nota ? this.money(l.nota.valor) : "—") : "não lida"}</td>
-        <td style="color:${l.ok ? "#105436" : "#b91c1c"};font-weight:800;">${n ? (l.ok ? "✓" : "✗") : ""}</td></tr>`).join("")}
+        <td style="font-weight:800;">${marca(l)}</td></tr>`).join("")}
       </tbody></table>` : "";
     const totais = r.bruto ? `<p><strong>Valor do título:</strong> ${this.money(r.bruto)} · <strong>Impostos retidos no Sienge:</strong> ${this.money(r.retido)} · <strong>Valor líquido a pagar:</strong> ${this.money(r.liquido)}</p>` : "";
     const nota = n ? `<p><strong>Nota${n.numero ? " " + this.esc(n.numero) : ""}</strong> (anexo ${this.esc(n.anexo || "")}):

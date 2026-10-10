@@ -960,7 +960,7 @@ ComprasControleApp.pintarTitulo = function () {
   }
   const rateio = String(row.rateioHtml || "").replace(/^\s*<h4>[^<]*<\/h4>/, "");
   const rateioNivel = !rateio ? "" : (/is-bad/.test(rateio) ? "erro" : (/is-warn/.test(rateio) ? "aviso" : "ok"));
-  const fiscalNivel = fiscal ? fiscal.nivel : (det.fiscalErro ? "erro" : "espera");
+  const fiscalNivel = fiscal ? fiscal.nivel : (det.fiscalErro ? "aviso" : "espera");
   const selo = (nivel) => ({
     ok: `<span class="bchk bchk-ok">Conferido ✓</span>`,
     erro: `<span class="bchk bchk-erro">Erro</span>`,

@@ -67,9 +67,19 @@ const ConsumoApiApp = {
         bulk: Number(row.bulk || 0),
         user: Number(row.user || 0),
         system: Number(row.system || 0),
-        total: Number(row.rest || 0) + Number(row.bulk || 0)
+        total: Number(row.rest || 0) + Number(row.bulk || 0),
+        telas: Object.keys(row.telas || {}).map((t) => ({ t, n: Number(row.telas[t]) || 0 })).sort((x, y) => y.n - x.n)
       };
     }).sort((a, b) => b.total - a.total);
+    const nomeTela = (id) => {
+      const li = document.querySelector(`[data-tab="${String(id).replace(/"/g, "")}"]`);
+      const txt = li ? String(li.textContent || "").replace(/\s+/g, " ").trim() : "";
+      return txt || id;
+    };
+    const telasHtml = (a) => (a.telas.length
+      ? a.telas.slice(0, 3).map((x) => `<span style="display:inline-block;margin:1px 4px 1px 0;padding:1px 8px;border-radius:999px;background:#f1f5f9;color:#334155;font-size:0.72rem;white-space:nowrap;" title="${this.esc(x.t)}">${this.esc(nomeTela(x.t))} <b>${this.fmt(x.n)}</b></span>`).join("")
+        + (a.telas.length > 3 ? `<span style="color:#94a3b8;font-size:0.72rem;">+${a.telas.length - 3}</span>` : "")
+      : `<span style="color:#94a3b8;font-size:0.72rem;">—</span>`);
     const users = Object.keys(cur.users || {}).map((k) => {
       const row = cur.users[k] || {};
       return {
@@ -155,6 +165,7 @@ const ConsumoApiApp = {
                 <thead><tr style="background:#f8fafc;color:#64748b;">
                   <th style="padding:8px 12px;text-align:left;">API</th>
                   <th style="padding:8px 12px;text-align:left;">Tipo</th>
+                  <th style="padding:8px 12px;text-align:left;">Telas que chamaram</th>
                   <th style="padding:8px 12px;text-align:right;">REST</th>
                   <th style="padding:8px 12px;text-align:right;">Bulk</th>
                   <th style="padding:8px 12px;text-align:right;">Usuário</th>
@@ -163,11 +174,12 @@ const ConsumoApiApp = {
                 <tbody>${apis.length ? apis.slice(0, 20).map((a) => `<tr>
                   <td style="padding:8px 12px;font-family:ui-monospace,monospace;font-size:0.75rem;">${this.esc(a.key.replace(/__/g, "/"))}</td>
                   <td style="padding:8px 12px;">${a.bulk >= a.rest ? "Bulk" : "REST"}</td>
+                  <td style="padding:8px 12px;">${telasHtml(a)}</td>
                   <td style="padding:8px 12px;text-align:right;">${this.fmt(a.rest)}</td>
                   <td style="padding:8px 12px;text-align:right;">${this.fmt(a.bulk)}</td>
                   <td style="padding:8px 12px;text-align:right;">${this.fmt(a.user)}</td>
                   <td style="padding:8px 12px;text-align:right;">${this.fmt(a.system)}</td>
-                </tr>`).join("") : `<tr><td colspan="6" style="padding:16px;color:#94a3b8;text-align:center;">${total ? "Detalhamento antigo sem caminho da API. Novas chamadas passam a aparecer aqui." : "Nenhuma chamada neste dia."}</td></tr>`}</tbody>
+                </tr>`).join("") : `<tr><td colspan="7" style="padding:16px;color:#94a3b8;text-align:center;">${total ? "Detalhamento antigo sem caminho da API. Novas chamadas passam a aparecer aqui." : "Nenhuma chamada neste dia."}</td></tr>`}</tbody>
               </table>
             </div>
 
