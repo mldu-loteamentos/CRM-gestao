@@ -624,15 +624,21 @@ const GerarPagamentoApp = {
   },
 
   /**
-   * Autorização da parcela no Sienge (bulk com withAuthorizations=true): só está autorizada
-   * quando o último da alçada (isLastToAuthorize) já autorizou.
+   * Autorização da parcela no Sienge (bulk com withAuthorizations=true). Vale o authorizationStatus da parcela
+   * (S = autorizada, N = não autorizada); sem ele, a parcela está autorizada quando o último da alçada (isLastToAuthorize) autorizou.
    */
   autorizacaoDe(bill) {
     const lista = (Array.isArray(bill && bill.authorizations) ? bill.authorizations : []).filter(Boolean);
     const sim = (v) => v === true || /^(s|sim|y|yes|true|1)$/i.test(String(v == null ? "" : v).trim());
     const nome = (a) => String(a.authorizationUserName || a.authorizationUserId || "").trim();
-    const ultima = lista.filter((a) => sim(a.isLastToAuthorize))
-      .sort((a, b) => String(b.authorizationDate || "").localeCompare(String(a.authorizationDate || "")))[0];
+    const recentes = lista.slice().sort((a, b) => String(b.authorizationDate || "").localeCompare(String(a.authorizationDate || "")));
+    const status = String((bill && bill.authorizationStatus) == null ? "" : bill.authorizationStatus).trim().toUpperCase();
+    if (status === "S") {
+      const quem = recentes.find((a) => sim(a.isLastToAuthorize)) || recentes[0];
+      return { ok: true, por: quem ? nome(quem) : "", em: quem ? String(quem.authorizationDate || "").slice(0, 10) : "" };
+    }
+    if (status === "N" && !lista.length) return { ok: false, motivo: "Título não autorizado no Sienge." };
+    const ultima = status === "N" ? null : recentes.find((a) => sim(a.isLastToAuthorize));
     if (ultima) return { ok: true, por: nome(ultima), em: String(ultima.authorizationDate || "").slice(0, 10) };
     if (lista.length) {
       return { ok: false, parcial: true, motivo: `Autorização incompleta no Sienge: autorizado por ${[...new Set(lista.map(nome).filter(Boolean))].join(", ") || "parte da alçada"}, falta o último a autorizar.` };
@@ -797,7 +803,10 @@ const GerarPagamentoApp = {
      Se os CCs de parceria do título forem de contas diferentes, cada conta fica só com a sua parte. */
   gruposLote() {
     const grupos = {};
-    const abertos = this.state.titulos.filter((r) => !r.pago && r.aPagar > 0.009);
+    const abertosTodos = this.state.titulos.filter((r) => !r.pago && r.aPagar > 0.009);
+    // CC da obra com conta própria (ex.: 14000 na conta MLDU) só define a conta quando o título não tem CC de parceria.
+    const comParceria = new Set(abertosTodos.filter((r) => this.ccDeParceriaPeloNome(r.ccId, r.ccNome)).map((r) => this.chaveTitulo(r.titulo, r.parcela)));
+    const abertos = abertosTodos.filter((r) => !comParceria.has(this.chaveTitulo(r.titulo, r.parcela)) || this.ccDeParceriaPeloNome(r.ccId, r.ccNome));
     const contaKeyDe = (r) => (r.esperada ? this.numConta(r.esperada.numero || r.esperada.id) || String(r.esperada.id) : "");
     const contasDoTitulo = {};
     abertos.forEach((r) => {
@@ -1405,7 +1414,7 @@ const GerarPagamentoApp = {
           <td><strong>${this.esc(it.titulo)}</strong>${it.parcela ? `<span class="gp-muted"> / ${this.esc(it.parcela)}</span>` : ""}</td>
           <td title="${this.esc(it.credor)}">${this.esc(it.credor)}</td>
           <td>${this.esc(it.documento || "—")}</td>
-          <td class="gp-status" title="${this.esc(it.ccs.map((c) => `${c.id} ${c.nome}${c.rateio != null ? ` · ${this.pct(c.rateio)}` : ""}${c.parceria ? " (parceria)" : ""}`).join("\n"))}">${it.ccs.map((c) => (c.parceria ? `<strong>${this.esc(c.id)}</strong>` : `<span class="gp-cc-outro">${this.esc(c.id)}</span>`)).join(" / ")} <span class="gp-muted">${this.esc(it.ccs.length === 1 ? it.ccs[0].nome : "rateado")}</span>${it.emLote ? "" : this.rateioSeloHtml(it.rateio)}</td>
+          <td class="gp-status">${this.ccsCelulaHtml(it)}${it.emLote ? "" : this.rateioSeloHtml(it.rateio)}</td>
           <td style="text-align:right;">${this.money(it.aPagar)}</td>
           <td class="gp-status">${pagSelo}</td>
           <td class="gp-status">${tag}${autSelo}</td>
@@ -1678,6 +1687,29 @@ const GerarPagamentoApp = {
     return conf.problemas[0] + (conf.problemas.length > 1 ? ` (e mais ${conf.problemas.length - 1} divergência(s) no rateio)` : "");
   },
 
+  /** Centros de custo do título em ordem crescente: % do título e % dentro da obra (rateio Moura Leite × parceiro). */
+  ccsCelulaHtml(it) {
+    const ccs = (it.ccs || []).slice().sort((a, b) => Number(a.id) - Number(b.id))
+      .map((c) => ({ ...c, parceria: (it.ccs || []).length > 1 ? this.ccDeParceriaPeloNome(c.id, c.nome) : c.parceria }));
+    const doRateio = {};
+    ((it.rateio && it.rateio.obras) || []).forEach((o) => o.linhas.forEach((l) => {
+      if (!l.ausente) doRateio[l.id] = { titulo: l.pct, obra: o.pct > 0 ? l.pct * 100 / o.pct : 0, obras: it.rateio.obras.length };
+    }));
+    const dica = ccs.map((c) => {
+      const r = doRateio[c.id];
+      return `${c.id} ${c.nome || ""}${r ? ` · ${this.pct(r.titulo)} do título${r.obras && r.obra < 99.99 ? ` · ${this.pct(r.obra)} da obra` : ""}` : ""}${c.parceria ? " (parceria)" : ""}`;
+    }).join("\n");
+    if (ccs.length === 1) {
+      const c = ccs[0];
+      return `<span title="${this.esc(dica)}">${c.parceria ? `<strong>${this.esc(c.id)}</strong>` : `<span class="gp-cc-outro">${this.esc(c.id)}</span>`} <span class="gp-muted">${this.esc(c.nome || "")}</span></span>`;
+    }
+    return `<span class="gp-cc-lista" title="${this.esc(dica)}">${ccs.map((c) => {
+      const r = doRateio[c.id];
+      const id = c.parceria ? `<strong>${this.esc(c.id)}</strong>` : `<span class="gp-cc-outro">${this.esc(c.id)}</span>`;
+      return `<span class="gp-cc-l">${id}${r ? ` ${this.pct(r.titulo)}${r.obra < 99.99 ? ` <small>${this.pct(r.obra)} da obra</small>` : ""}` : ""}</span>`;
+    }).join("")}</span>`;
+  },
+
   rateioSeloHtml(conf) {
     if (!conf || !conf.obras.length || conf.ok) return "";
     const rotulos = [
@@ -1847,6 +1879,9 @@ const GerarPagamentoApp = {
           #gerar-pagamento-root .gp-lote-seta { width:18px; height:18px; color:#105436; flex-shrink:0; transition:transform .15s ease; }
           #gerar-pagamento-root .gp-lote.is-open .gp-lote-seta { transform:rotate(90deg); }
           #gerar-pagamento-root .gp-cc-outro { color:#64748b; font-weight:600; }
+          #gerar-pagamento-root .gp-cc-lista { display:flex; flex-direction:column; gap:1px; }
+          #gerar-pagamento-root .gp-cc-l { white-space:nowrap; font-size:0.8rem; }
+          #gerar-pagamento-root .gp-cc-l small { color:#64748b; font-size:0.72rem; margin-left:2px; }
           #gerar-pagamento-root .gp-bloq, #gerar-pagamento-root .gp-status small.gp-bloq { color:#b91c1c; font-weight:700; }
           #gerar-pagamento-root .gp-lote-sem .gp-lote-h { background:#fef2f2; }
           #gerar-pagamento-root .gp-lote-conta { font-weight:800; color:#105436; font-size:0.92rem; }
