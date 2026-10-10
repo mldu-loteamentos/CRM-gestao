@@ -3239,7 +3239,12 @@ const EstoqueComercialApp = {
             siengeConferidoEm: agora
           };
         }
-        semTitulo.push({ unidade: u.name, contrato: this.displayContract(u) || "", situacao: fin0, cliente: u.customerName || "" });
+        const saldoInt = Number(this.unitBalance(u)) || 0;
+        semTitulo.push({
+          unidade: u.name, contrato: this.displayContract(u) || "", situacao: fin0, cliente: u.customerName || "",
+          titulo: rb || "", saldo: saldoInt, atraso: Number(this.overdueValue(u)) || 0,
+          conferidoEm: u.siengeConferidoEm || u.finAt || null
+        });
         return u;
       }
       mine.forEach((b) => usados.add(b.id));
@@ -3404,6 +3409,8 @@ const EstoqueComercialApp = {
           }, {}),
           reabertos: (c.reabertos || 0) + (c.reativados || 0),
           semTitulo: c.semTitulo.length,
+          titulosSemUnidade: c.semUnidade,
+          unidadesSemTitulo: c.semTitulo,
           rateioFalhas: c.rateioFalhas || []
         });
       } catch (e) {
@@ -3463,6 +3470,40 @@ const EstoqueComercialApp = {
         ${tot.semTitulo ? `<small class="est-conf-nota">${tot.semTitulo} unidade(s) ativa(s) no Integra sem título no Sienge: conferir se foram distratadas ou quitadas (lista ao escolher o empreendimento).</small>` : ""}
         ${reabertos ? `<small class="est-conf-nota">${reabertos} unidade(s) estavam como quitadas ou distratadas no Integra, mas têm saldo no Sienge, e foram reabertas nesta conferência.</small>` : ""}
       </div>`;
+    const temListas = g.ccs.some((c) => Array.isArray(c.titulosSemUnidade));
+    const itensDif = [];
+    let unidZeradas = 0;
+    g.ccs.forEach((c) => {
+      (c.titulosSemUnidade || []).forEach((t) => itensDif.push({
+        cc: c.ccId, lado: "Só no Sienge", titulo: t.titulo, unidade: t.unidades || "—", cliente: t.cliente,
+        sienge: Number(t.aberto) || 0, integra: 0,
+        motivo: ((this.MOTIVOS_SEM_UNIDADE[t.motivo] || {}).titulo || t.motivo || "") + (t.situacao ? ` (${t.situacao})` : "")
+      }));
+      (c.unidadesSemTitulo || []).forEach((u) => {
+        if (!(Math.abs(Number(u.saldo) || 0) > 0.009)) {
+          unidZeradas += 1;
+          return;
+        }
+        itensDif.push({
+          cc: c.ccId, lado: "Só no Integra", titulo: u.titulo || "—", unidade: u.unidade, cliente: u.cliente,
+          sienge: 0, integra: Number(u.saldo) || 0,
+          motivo: `Integra: ${u.situacao}${u.atraso > 0.009 ? `, em atraso ${this.money(u.atraso)}` : ""}. O título não está no Contas a Receber do Sienge deste empreendimento: ver se foi quitado, distratado ou mudou de centro de custo`
+        });
+      });
+    });
+    itensDif.sort((a, b) => Math.abs(b.integra - b.sienge) - Math.abs(a.integra - a.sienge));
+    const somaItens = itensDif.reduce((t, i) => t + i.integra - i.sienge, 0);
+    const resto = dif - somaItens;
+    const analisarHtml = bate ? "" : `<details class="est-conf-det" open><summary>Títulos e unidades que formam a diferença <b>${itensDif.length}</b></summary>
+        ${itensDif.length ? `<div class="est-conf-tab est-conf-itens"><table>
+          <thead><tr><th>Empreendimento</th><th>Onde está</th><th>Título</th><th>Unidade</th><th>Cliente</th><th>Saldo Sienge</th><th>Saldo Integra</th><th>Efeito na diferença</th><th>Motivo</th></tr></thead>
+          <tbody>${itensDif.map((i) => `<tr>
+            <td><b>${esc(i.cc)}</b></td><td>${esc(i.lado)}</td><td>${esc(i.titulo)}</td><td>${esc(i.unidade)}</td><td>${esc(i.cliente)}</td>
+            <td class="num">${i.sienge ? this.money(i.sienge) : "—"}</td><td class="num">${i.integra ? this.money(i.integra) : "—"}</td>
+            <td class="num est-conf-dif">${this.money(i.integra - i.sienge)}</td><td><small>${esc(i.motivo)}</small></td></tr>`).join("")}</tbody>
+        </table></div>` : ""}
+        <small class="est-conf-nota">${!temListas ? "Esta conferência foi feita antes desta lista existir: clique em \"Batimento financeiro\" de novo para ver título por título." : `Soma dos itens: ${this.money(somaItens)}${Math.abs(resto) >= 1 ? ` · ${this.money(resto)} vêm de diferença de saldo em unidades que existem nos dois lados (veja a coluna Diferença por empreendimento)` : " · explica toda a diferença"}${unidZeradas ? ` · ${unidZeradas} unidade(s) sem título no Sienge e sem saldo no Integra (não afetam a diferença)` : ""}.`}</small>
+      </details>`;
     const linhas = g.ccs.slice()
       .sort((a, b) => Math.abs(b.integra.aReceber - b.sienge.aReceber) - Math.abs(a.integra.aReceber - a.sienge.aReceber))
       .map((c) => {
@@ -3490,6 +3531,7 @@ const EstoqueComercialApp = {
         <div><label>Diferença</label><b>${bate ? "Bate" : this.money(dif)}</b><small>${tot.semUnidN ? `${tot.semUnidN} título(s) com saldo no Sienge sem unidade ativa no Integra: ${this.money(tot.semUnidV)}` : "Todo título com saldo tem unidade no Integra"}${tot.semTitulo ? ` · ${tot.semTitulo} unidade(s) ativa(s) sem título no Sienge` : ""}</small></div>
       </div>
       ${acertarHtml}
+      ${analisarHtml}
       <details class="est-conf-det" ${bate ? "" : "open"}><summary>Por empreendimento (maior diferença primeiro)</summary>
         <div class="est-conf-tab"><table>
           <thead><tr><th>Empreendimento</th><th>Sienge a receber</th><th>Integra a receber</th><th>Diferença</th><th>Sienge em atraso</th><th>Integra em atraso</th><th>Títulos sem unidade</th><th>Unid. sem título</th></tr></thead>
@@ -3535,7 +3577,7 @@ const EstoqueComercialApp = {
       </div>
       ${lista("Unidades distratadas no Sienge (passaram para Distratado)", c.distratadosNovos || [], (i) => `<li>${esc(i.unidade)} · título ${esc(i.titulo)}${i.cliente ? " · " + esc(i.cliente) : ""}${i.data ? " · distrato " + esc(i.data.split("-").reverse().join("/")) : ""}</li>`)}
       ${lista("Títulos com saldo no Sienge sem unidade no Integra", (c.semUnidade || []).slice().sort((a, b) => String(a.motivo || "").localeCompare(String(b.motivo || "")) || b.aberto - a.aberto), (i) => `<li>Título ${esc(i.titulo)} · ${esc(i.cliente)}${i.unidades ? " · " + esc(i.unidades) : ""} · ${this.money(i.aberto)}${i.motivo ? ` · <em class="est-conf-motivo">${esc((this.MOTIVOS_SEM_UNIDADE[i.motivo] || {}).titulo || i.motivo)}${i.situacao ? " (" + esc(i.situacao) + ")" : ""}</em>` : ""}</li>`)}
-      ${lista("Unidades ativas no Integra sem título no Sienge", c.semTitulo, (i) => `<li>${esc(i.unidade)}${i.contrato ? " · contrato " + esc(i.contrato) : ""}${i.cliente ? " · " + esc(i.cliente) : ""} · ${esc(i.situacao)}</li>`)}
+      ${lista("Unidades ativas no Integra sem título no Sienge", c.semTitulo, (i) => `<li>${esc(i.unidade)}${i.contrato ? " · contrato " + esc(i.contrato) : ""}${i.cliente ? " · " + esc(i.cliente) : ""} · ${esc(i.situacao)}${i.saldo != null ? ` · saldo no Integra ${this.money(i.saldo)}` : ""}</li>`)}
     </div>`;
   },
 

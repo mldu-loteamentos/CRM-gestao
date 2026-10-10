@@ -2960,6 +2960,10 @@ circle.donut-segment {
 .est-conf-acertar .est-conf-tab td:first-child { white-space: normal; min-width: 340px; }
 .est-conf-acertar .est-conf-tab td:first-child small { display: block; color: #64748b; font-size: 0.72rem; margin-top: 2px; }
 .est-conf-acertar .est-conf-tab th:last-child, .est-conf-acertar .est-conf-tab td:last-child { text-align: left; }
+.est-conf-itens th:nth-child(-n+5), .est-conf-itens td:nth-child(-n+5), .est-conf-itens th:last-child { text-align: left; }
+.est-conf-itens td:nth-child(5) { white-space: normal; min-width: 160px; }
+.est-conf-itens td:last-child { white-space: normal; min-width: 260px; color: #64748b; }
+.est-conf-itens tr td.est-conf-dif { color: #c2410c; font-weight: 700; }
 .est-conf-motivo { color: #9a3412; font-style: normal; }
 .est-stock-toolbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .est-fin-filtros { display: flex; flex-wrap: wrap; gap: 8px; }
