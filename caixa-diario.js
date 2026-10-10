@@ -7,14 +7,14 @@ function caixaAddDays(iso, n) {
   return `${y}-${m}-${day}`;
 }
 
-function caixaDiaUtil(iso) {
+function caixaDiaUtil(iso, passo) {
   let d = String(iso || "").slice(0, 10);
   for (let i = 0; i < 15; i++) {
     const util = typeof window.isBusinessDayIso === "function"
       ? window.isBusinessDayIso(d)
       : [0, 6].indexOf(new Date(d + "T12:00:00").getDay()) < 0;
     if (util) return d;
-    d = caixaAddDays(d, 1);
+    d = caixaAddDays(d, passo || 1);
   }
   return d;
 }
@@ -676,6 +676,14 @@ const FluxoCaixaDiarioApp = {
     this.render();
   },
 
+  /** Folha, distribuição, aportes e tributos federais são pagos no dia útil anterior; os demais, no seguinte. */
+  pagaAntes(r) {
+    const SEM_DESLOCAR = /^(FPAG|DIST|APOR|PIS|COFINS|IRPJ|CSLL)$/;
+    const cod = String((r && r.docId) || "").trim().toUpperCase();
+    const nome = String((r && r.docNome) || "").trim().toUpperCase().split(/[\s-]+/)[0];
+    return SEM_DESLOCAR.test(cod) || SEM_DESLOCAR.test(nome);
+  },
+
   async loadPayables(gen, b, hoje) {
     const app = window.ComprasControleApp || window.ComprasPrevisoesApp;
     if (!app || typeof app.outcomeRange !== "function" || typeof app.transform !== "function") {
@@ -684,6 +692,9 @@ const FluxoCaixaDiarioApp = {
       return;
     }
     const inicio = hoje > b.start ? hoje : b.start;
+    // Títulos de fim de semana/feriado nas bordas do período podem entrar nele ao irem para o dia útil.
+    const buscaIni = caixaAddDays(inicio, -4);
+    const buscaFim = caixaAddDays(b.end, 4);
     const prevNote = app.noteProgress;
     app.noteProgress = (text) => {
       this.progress = text;
@@ -697,7 +708,7 @@ const FluxoCaixaDiarioApp = {
         if (this._gen !== gen) return;
         this.progress = "Buscando contas a pagar · " + (i + 1) + " de " + targets.length;
         this.paintProgress();
-        const part = await app.outcomeRange(inicio, b.end, targets[i]);
+        const part = await app.outcomeRange(buscaIni, buscaFim, targets[i]);
         if (Array.isArray(part)) bills.push.apply(bills, part);
       }
       rows = app.transform({ data: bills }) || [];
@@ -711,7 +722,11 @@ const FluxoCaixaDiarioApp = {
       if (!r || r.pago || r.substituido) return;
       if (r.natureza !== "programado" && r.natureza !== "previsao") return;
       const due = String(r.vencimento || "").slice(0, 10);
-      if (!due || due < inicio || due > b.end) return;
+      if (!due) return;
+      let pagamento = caixaDiaUtil(due, this.pagaAntes(r) ? -1 : 1);
+      // Antecipado para um dia que já passou, mas ainda em aberto: entra no primeiro dia do período.
+      if (pagamento < inicio && due >= inicio) pagamento = inicio;
+      if (pagamento < inicio || pagamento > b.end) return;
       if (!this.companyWanted(r.companyId)) return;
       const key = r.titulo + "|" + (r.parcela || "") + "|" + due;
       if (seen[key]) return;
@@ -721,7 +736,9 @@ const FluxoCaixaDiarioApp = {
       if (!(valor > 0)) return;
       pay.push({
         key,
-        date: due,
+        date: pagamento,
+        vencimento: due,
+        deslocadoDe: pagamento !== due ? due : "",
         valor,
         titulo: r.titulo,
         parcela: r.parcela || "",
@@ -982,7 +999,7 @@ const FluxoCaixaDiarioApp = {
           <div><span style="color:#64748b;">Credor</span><div style="font-weight:700;">${caixaEsc(credor)}</div></div>
           <div><span style="color:#64748b;">Documento</span><div style="font-weight:700;">${caixaEsc(doc || "—")}</div></div>
           <div><span style="color:#64748b;">Empresa</span><div>${caixaEsc(this.companyName(item.companyId) || item.companyId || "—")}</div></div>
-          <div><span style="color:#64748b;">${pago ? "Pagamento" : "Vencimento"}</span><div>${caixaFmtDate(item.date)}</div></div>
+          <div><span style="color:#64748b;">${pago ? "Pagamento" : "Vencimento"}</span><div>${caixaFmtDate(pago ? item.date : (item.vencimento || item.date))}${item.deslocadoDe ? ` <span style="color:#64748b;font-size:.78rem;">(pagamento ${item.date < item.deslocadoDe ? "antecipado" : "no próximo dia útil"}, ${caixaFmtDate(item.date)})</span>` : ""}</div></div>
           <div><span style="color:#64748b;">${pago ? "Valor pago" : "Valor a pagar"}</span><div style="font-weight:700;color:#c2410c;">${caixaMoney(item.valor)}</div></div>
           <div><span style="color:#64748b;">Situação</span><div>${situacao}</div></div>
           <div><span style="color:#64748b;">Centro de custo</span><div>${caixaEsc(item.ccNome || "—")}</div></div>
@@ -1096,7 +1113,7 @@ const FluxoCaixaDiarioApp = {
       const tipo = it.real ? "Pago" : (it.natureza === "previsao" ? "Previsão" : "Programado");
       const desc = it.real
         ? `${caixaEsc(it.credor || it.historico || "Débito em conta")}${it.titulo ? " · tít. " + caixaEsc(it.titulo) + (it.parcela ? "/" + caixaEsc(it.parcela) : "") : ""}${it.documento ? " · " + caixaEsc(it.documento) : ""}${it.conta ? this.contaTag(it.companyId, it.conta) : ""}`
-        : `tít. ${caixaEsc(it.titulo)}${it.parcela ? "/" + caixaEsc(it.parcela) : ""} · ${caixaEsc(it.credor || "—")}${(it.docId || it.documento) ? " · " + caixaEsc([it.docId, it.documento].filter(Boolean).join(" ")) : ""}`;
+        : `tít. ${caixaEsc(it.titulo)}${it.parcela ? "/" + caixaEsc(it.parcela) : ""} · ${caixaEsc(it.credor || "—")}${(it.docId || it.documento) ? " · " + caixaEsc([it.docId, it.documento].filter(Boolean).join(" ")) : ""}${it.deslocadoDe ? ` · vencia em ${caixaFmtDate(it.deslocadoDe)}, ${it.date < it.deslocadoDe ? "antecipado para o dia útil anterior" : "passou para o próximo dia útil"}` : ""}`;
       return `<tr class="cxd-det-out${clicavel ? " cxd-click" : ""}" ${clicavel ? `onclick="FluxoCaixaDiarioApp.openTitulo('${caixaEsc(it.key)}')" title="Ver o título, os anexos e a forma de pagamento"` : ""}>
         <td>${tipo}</td>
         <td>${desc}</td>
