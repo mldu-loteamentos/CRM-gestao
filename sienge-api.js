@@ -1313,6 +1313,51 @@ const SiengeApiService = {
     }
   },
 
+  // 1.5c. VGV do cadastro da obra (salesDetails.generalSalesValue). Cache de 7 dias por empreendimento.
+  OBRA_VGV_CACHE_KEY: "crm_obra_vgv_cache",
+
+  obraVgvCache(id) {
+    try {
+      const map = JSON.parse(localStorage.getItem(this.OBRA_VGV_CACHE_KEY) || "{}");
+      const hit = map[String(id)];
+      if (hit && Date.now() - Number(hit.at || 0) < 7 * 86400000) return hit;
+    } catch (e) {}
+    return null;
+  },
+
+  async getEnterpriseVgv(enterpriseId, opts = {}) {
+    const id = String(enterpriseId || "").trim();
+    if (!id) return null;
+    if (!opts.force) {
+      const hit = this.obraVgvCache(id);
+      if (hit) return hit;
+    }
+    if (s_apiMode === "simulado") return null;
+    let out = { id, vgv: null, nome: "", at: Date.now() };
+    try {
+      const ent = await siengeFetchWithRetry(`/enterprises/${encodeURIComponent(id)}`, 1);
+      const sd = (ent && ent.salesDetails) || {};
+      const vgv = Number(sd.generalSalesValue);
+      out = {
+        id,
+        vgv: Number.isFinite(vgv) && vgv > 0 ? vgv : null,
+        nome: (ent && (ent.commercialName || ent.name)) || "",
+        lancamento: (ent && ent.constructionDetails && ent.constructionDetails.startDate) || "",
+        at: Date.now()
+      };
+    } catch (e) {
+      if (Number(e && e.status) !== 404) throw e;
+    }
+    try {
+      const map = JSON.parse(localStorage.getItem(this.OBRA_VGV_CACHE_KEY) || "{}");
+      map[id] = out;
+      const orig = window._originalSetItem;
+      if (typeof orig === "function") orig.call(localStorage, this.OBRA_VGV_CACHE_KEY, JSON.stringify(map));
+      else localStorage.setItem(this.OBRA_VGV_CACHE_KEY, JSON.stringify(map));
+    } catch (e) {}
+    return out;
+  },
+
   // 1.6. Movimentos Bancários (Fiscal / Prestação de Contas)
   // selectionType M = data do movimento/pagamento (caixa real).
   // P (vencimento) não é válido neste endpoint (Sienge 422) e não reflete o caixa.

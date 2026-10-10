@@ -695,11 +695,7 @@ const RelacionamentoApp = {
         orig.removeAttribute("max");
       }
     }
-    if (gen) {
-      gen.disabled = !!blocked;
-      gen.style.opacity = blocked ? "0.55" : "";
-      gen.style.cursor = blocked ? "not-allowed" : "";
-    }
+    if (gen) this._atualizarBtnGerarVencimento();
     const preview = document.getElementById("ven-preview");
     if (preview) {
       if (blocked) {
@@ -891,6 +887,18 @@ const RelacionamentoApp = {
     btn.style.opacity = ok ? "" : "0.55";
     btn.style.cursor = ok ? "" : "not-allowed";
     btn.title = ok ? "" : (loaded ? "Preencha nome, RG, CPF/CNPJ e telefone do terceiro." : "Aguarde o contrato carregar.");
+  },
+
+  _atualizarBtnGerarVencimento() {
+    const btn = document.getElementById("ven-btn-gerar");
+    if (!btn) return;
+    const dia = document.getElementById("ven-dia");
+    const liberado = !!dia && !dia.disabled;
+    const ok = liberado && !!this._calcularNovoVencimento();
+    btn.disabled = !ok;
+    btn.style.opacity = ok ? "" : "0.55";
+    btn.style.cursor = ok ? "" : "not-allowed";
+    btn.title = ok ? "" : (liberado ? "Selecione o novo dia de vencimento." : "");
   },
 
   abrirDocModal(kind, dados) {
@@ -2956,6 +2964,7 @@ const RelacionamentoApp = {
     if (adimpl && adimpl.adimplente === false) return;
     this._garantirDataOriginalNaJanela();
     const computed = this._calcularNovoVencimento();
+    this._atualizarBtnGerarVencimento();
     const el = document.getElementById("ven-preview");
     if (!el) return;
     if (!computed) {
@@ -3490,6 +3499,7 @@ const RelacionamentoApp = {
       if (btn) {
         btn.innerHTML = btnHtml;
         if (kind === "terceiros") this._atualizarBtnGerarTerceiro();
+        else if (kind === "vencimento") this._atualizarBtnGerarVencimento();
         else btn.disabled = false;
       }
       if (window.lucide) lucide.createIcons();

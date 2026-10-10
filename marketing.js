@@ -592,31 +592,6 @@ document.addEventListener('tabChanged', (e) => {
     MarketingApp.init();
   }
   if (e.detail === 'marketing-budget') {
-    MarketingBudgetApp.init();
+    if (window.MarketingBudgetApp) window.MarketingBudgetApp.init();
   }
 });
-
-const MarketingBudgetApp = {
-  init() {
-    const root = document.getElementById('marketing-budget-root');
-    if (!root) return;
-    root.innerHTML = `
-      <div style="padding:8px 4px 24px;">
-        <div style="background:#105436;padding:16px 20px;border-radius:12px 12px 0 0;display:flex;align-items:center;gap:12px;color:#fff;">
-          <div style="width:36px;height:36px;background:rgba(255,255,255,0.2);border-radius:8px;display:flex;align-items:center;justify-content:center;">
-            <i data-lucide="wallet" style="width:18px;height:18px;color:#fff;"></i>
-          </div>
-          <div>
-            <div style="font-weight:800;font-size:1.05rem;">Budget</div>
-            <div style="font-size:0.8rem;opacity:0.85;">Planejamento de verba de marketing por centro de custo</div>
-          </div>
-        </div>
-        <div style="background:#fff;border:1px solid #e2e8f0;border-top:none;padding:48px 24px;border-radius:0 0 12px 12px;text-align:center;color:#64748b;">
-          <p style="margin:0 0 8px;font-weight:700;color:#334155;">Em construção</p>
-          <p style="margin:0;max-width:480px;display:inline-block;">Aqui ficará o budget geral (anual/mensal) por centro de custo. Os eventos passam a consumir essa verba.</p>
-        </div>
-      </div>`;
-    if (window.lucide) lucide.createIcons();
-  }
-};
-window.MarketingBudgetApp = MarketingBudgetApp;

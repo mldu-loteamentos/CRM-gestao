@@ -396,6 +396,12 @@ const CentrosCustoApp = {
               <div>
                 <label style="display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.85rem;">Valor VGV (R$)</label>
                 <input type="number" id="edit-vgv-${id}" class="form-control" step="0.01" value="${vgv}">
+                ${(() => {
+                  const obra = window.SiengeApiService && SiengeApiService.obraVgvCache ? SiengeApiService.obraVgvCache(id) : null;
+                  return obra && obra.vgv > 0
+                    ? `<small style="display:block;margin-top:4px;color:#105436;font-weight:600;">VGV na obra (Sienge): ${obra.vgv.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} — este é o valor usado.</small>`
+                    : `<small style="display:block;margin-top:4px;color:#64748b;">A obra no Sienge não tem VGV; vale o valor digitado aqui.</small>`;
+                })()}
               </div>
               <div>
                 <label style="display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.85rem;">Tipo de Centro de Custo</label>
@@ -682,7 +688,7 @@ const CentrosCustoApp = {
 
     filteredCCs.forEach(cc => {
       const custom = this.customOf(cc.id);
-      const vgv = custom.valor_vgv ? parseFloat(custom.valor_vgv).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '-';
+      const vgv = this.vgvCellHtml(cc.id);
       
       const foundPreamble = preamblesList.find(p => p.centrosCustoIds && p.centrosCustoIds.includes(cc.id));
       const preambulo = foundPreamble ? foundPreamble.id : '-';
@@ -703,7 +709,7 @@ const CentrosCustoApp = {
           <td><strong>${cc.id}</strong></td>
           <td>${cc.name}</td>
           <td>${tipoBadge}</td>
-          <td style="text-align: right; font-weight: 500; color: #1b8253;">${vgv}</td>
+          <td id="cc-vgv-${cc.id}" style="text-align: right; font-weight: 500; color: #1b8253;">${vgv}</td>
           <td style="text-align: center;">${preambulo}</td>
           <td style="text-align: center;">${percMl}</td>
           <td style="text-align: center;">${percTerr}</td>
@@ -728,6 +734,44 @@ const CentrosCustoApp = {
 
     contentDiv.innerHTML = html;
     if (window.lucide) window.lucide.createIcons();
+    this.preencherVgvObra(filteredCCs);
+  },
+
+  /* VGV vem do cadastro da obra no Sienge; o valor digitado aqui só vale quando a obra não tem VGV. */
+  vgvDe(id) {
+    const obra = window.SiengeApiService && SiengeApiService.obraVgvCache ? SiengeApiService.obraVgvCache(id) : null;
+    if (obra && obra.vgv > 0) return { valor: obra.vgv, fonte: 'obra' };
+    const manual = parseFloat(this.customOf(id).valor_vgv) || 0;
+    if (manual > 0) return { valor: manual, fonte: 'manual' };
+    return { valor: 0, fonte: obra ? 'sem' : 'pendente' };
+  },
+
+  vgvCellHtml(id) {
+    const v = this.vgvDe(id);
+    if (!(v.valor > 0)) return '-';
+    const txt = v.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    return v.fonte === 'obra'
+      ? `<span title="VGV do cadastro da obra no Sienge">${txt}</span>`
+      : `<span title="Digitado no centro de custo (a obra não tem VGV)" style="color:#64748b;">${txt}</span>`;
+  },
+
+  async preencherVgvObra(list) {
+    if (!window.SiengeApiService || typeof SiengeApiService.getEnterpriseVgv !== 'function') return;
+    const fila = (list || []).map(cc => String(cc.id)).filter(id => !SiengeApiService.obraVgvCache(id));
+    const gen = (this._vgvGen = (this._vgvGen || 0) + 1);
+    const worker = async () => {
+      while (fila.length && gen === this._vgvGen) {
+        const id = fila.shift();
+        try {
+          await SiengeApiService.getEnterpriseVgv(id);
+        } catch (e) {
+          continue;
+        }
+        const cell = document.getElementById(`cc-vgv-${id}`);
+        if (cell) cell.innerHTML = this.vgvCellHtml(id);
+      }
+    };
+    await Promise.all([worker(), worker()]);
   }
 };
 
