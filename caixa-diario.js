@@ -54,7 +54,9 @@ async function caixaFormaPagamento(billId, parcela) {
         "/bills/" + encodeURIComponent(billId) + "/installments/" + encodeURIComponent(id) + "/payment-information/" + kinds[i],
         1
       );
-      if (data && typeof data === "object") return { kind: kinds[i], data: data };
+      const temDados = window.ComprasControleApp && typeof ComprasControleApp.temDadosForma === "function"
+        ? ComprasControleApp.temDadosForma(data) : !!(data && typeof data === "object" && Object.keys(data).length);
+      if (temDados) return { kind: kinds[i], data: data };
     } catch (e) {}
   }
   return null;
@@ -73,7 +75,8 @@ function caixaFormaHtml(payment, item) {
         return BoletoCheck.html(payment, {
           valor: it.valorConferir != null ? it.valorConferir : (it.aPagar != null ? it.aPagar : it.valor),
           vencimento: it.vencimento,
-          descontoTitulo: it.descontoTitulo
+          descontoTitulo: it.descontoTitulo,
+          retido: it.retido
         });
       }
       return `<p><strong>Forma:</strong> ${payment.kind === "boleto-concessionaria" ? "Boleto de concessionária" : "Boleto"}</p><p>${caixaEsc(d.notes || d.boletoBancarioManualBarCodeNumber || d.boletoConcessionariaManualBarCodeNumber || "")}</p>`;

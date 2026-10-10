@@ -787,10 +787,20 @@ ComprasControleApp.formaPagamento = async function (billId, parcela) {
         "/bills/" + encodeURIComponent(billId) + "/installments/" + encodeURIComponent(id) + "/payment-information/" + kinds[i],
         1
       );
-      if (data && typeof data === "object") return { kind: kinds[i], data: data };
+      if (this.temDadosForma(data)) return { kind: kinds[i], data: data };
     } catch (e) {}
   }
   return null;
+};
+
+/** O Sienge responde vazio (200 sem corpo ou campos nulos) para a forma que não está programada na parcela. */
+ComprasControleApp.temDadosForma = function (data) {
+  if (!data || typeof data !== "object") return false;
+  return Object.keys(data).some((k) => {
+    const v = data[k];
+    if (v == null || v === "") return false;
+    return typeof v !== "object" || Object.keys(v).length > 0;
+  });
 };
 
 ComprasControleApp.formaHtml = function (payment, row) {
@@ -803,7 +813,7 @@ ComprasControleApp.formaHtml = function (payment, row) {
     if (payment.kind === "boleto-bancario" || payment.kind === "boleto-concessionaria") {
       if (window.BoletoCheck) {
         const r = row || {};
-        return BoletoCheck.html(payment, { valor: r.valorConferir, vencimento: r.vencimento, descontoTitulo: r.descontoTitulo });
+        return BoletoCheck.html(payment, { valor: r.valorConferir, vencimento: r.vencimento, descontoTitulo: r.descontoTitulo, retido: r.retido });
       }
       const nome = payment.kind === "boleto-concessionaria" ? "Boleto de concessionária" : "Boleto";
       return `<p><strong>Forma:</strong> ${nome}</p><p>${this.esc(d.notes || d.boletoBancarioManualBarCodeNumber || d.boletoConcessionariaManualBarCodeNumber || "")}</p>`;
@@ -853,7 +863,7 @@ ComprasControleApp.abrirTituloRow = async function (row) {
   if (!row || !row.titulo) return;
   const gen = (this._tituloGen || 0) + 1;
   this._tituloGen = gen;
-  this._tituloDetalhe = { loading: true, error: "", row: row, bill: null, attachments: [], payment: null };
+  this._tituloDetalhe = { loading: true, error: "", row: row, bill: null, attachments: [], payment: null, fiscal: row.fiscal || null, fiscalErro: "" };
   this.pintarTitulo();
   try {
     if (typeof window.siengeFetchWithRetry !== "function") throw new Error("A API do Sienge não está disponível nesta tela.");
@@ -861,13 +871,27 @@ ComprasControleApp.abrirTituloRow = async function (row) {
     const bill = await window.siengeFetchWithRetry("/bills/" + encodeURIComponent(billId), 1);
     let attachments = [];
     try { attachments = await this.anexosDoTitulo(billId); } catch (e) { attachments = []; }
-    const payment = await this.formaPagamento(billId, row.parcela || 1);
+    const payment = row.pagPayment !== undefined ? row.pagPayment : await this.formaPagamento(billId, row.parcela || 1);
     if (this._tituloGen !== gen) return;
     this._tituloDetalhe.loading = false;
     this._tituloDetalhe.bill = bill || null;
     this._tituloDetalhe.attachments = attachments || [];
     this._tituloDetalhe.payment = payment;
     this.pintarTitulo();
+    if (!this._tituloDetalhe.fiscal && window.NotaFiscalCheck) {
+      const bruto = Number(bill && bill.installmentsNumber) > 1 ? Number(row.valor) || 0 : (Number(bill && bill.totalInvoiceAmount) || Number(row.valor) || 0);
+      NotaFiscalCheck.analisar({ billId, credorId: (bill && bill.creditorId) || row.credorId, bruto, anexos: attachments })
+        .then((f) => {
+          if (this._tituloGen !== gen || !this._tituloDetalhe) return;
+          this._tituloDetalhe.fiscal = f;
+          this.pintarTitulo();
+        })
+        .catch((e) => {
+          if (this._tituloGen !== gen || !this._tituloDetalhe) return;
+          this._tituloDetalhe.fiscalErro = (e && e.message) || "falha na conferência";
+          this.pintarTitulo();
+        });
+    }
   } catch (e) {
     if (this._tituloGen !== gen) return;
     this._tituloDetalhe.loading = false;
@@ -914,7 +938,12 @@ ComprasControleApp.pintarTitulo = function () {
   const pago = row.natureza === "pago" && row.dataPagamento;
   const valor = pago ? (row.valorAjustado != null ? row.valorAjustado : row.valor) : (Number(row.saldo) > 0 ? row.saldo : row.valorAjustado);
   const obs = bill.notes || bill.observation || bill.historic || bill.history || bill.complement || "";
-  const conferir = Object.assign({}, row, { valorConferir: pago ? null : valor, descontoTitulo: Number(bill.discount) || 0 });
+  const fiscal = det.fiscal;
+  const retido = !pago && fiscal && fiscal.retidoPagamento > 0.009 && fiscal.bruto && Math.abs(Number(valor) - fiscal.bruto) <= 0.01 ? fiscal.retidoPagamento : 0;
+  const conferir = Object.assign({}, row, { valorConferir: pago ? null : valor, descontoTitulo: Number(bill.discount) || 0, retido });
+  const fiscalHtml = !window.NotaFiscalCheck ? "" : (det.fiscalErro
+    ? `<p style="color:#b91c1c;margin:0;">Não consegui conferir os impostos: ${this.esc(det.fiscalErro)}</p>`
+    : NotaFiscalCheck.html(fiscal));
   const forma = typeof caixaFormaHtml === "function"
     ? caixaFormaHtml(det.payment, conferir)
     : this.formaHtml(det.payment, conferir);
@@ -935,7 +964,7 @@ ComprasControleApp.pintarTitulo = function () {
           <div><span>Documento</span><div class="cfin-titulo-strong">${this.esc(doc || "—")}</div></div>
           <div><span>Empresa</span><div>${this.esc(this.companyLabel(empresaId))}</div></div>
           <div><span>Vencimento</span><div>${this.esc(this.fmtDate(row.vencimento || bill.dueDate))}</div></div>
-          <div><span>${pago ? "Valor pago" : "Valor a pagar"}</span><div class="cfin-titulo-valor">${this.esc(this.money(valor))}</div></div>
+          <div><span>${pago ? "Valor pago" : (retido ? "Valor a pagar (líquido)" : "Valor a pagar")}</span><div class="cfin-titulo-valor">${this.esc(this.money(retido ? valor - retido : valor))}</div>${retido ? `<small style="color:#64748b;">bruto ${this.esc(this.money(valor))} − retido ${this.esc(this.money(retido))}</small>` : ""}</div>
           <div><span>Situação</span><div>${this.esc(row.situacaoTexto || this.statusLabel(row))}</div></div>
           ${row.rateioHtml ? "" : `<div><span>Centro de custo</span><div>${this.esc(cc)}</div></div>
           <div><span>Plano financeiro</span><div>${this.esc(plano)}</div></div>`}
@@ -950,6 +979,7 @@ ComprasControleApp.pintarTitulo = function () {
         ${row.rateioHtml || ""}
         <h4>Forma de pagamento programada</h4>
         <div class="cfin-titulo-box">${det.loading ? "" : forma}</div>
+        ${fiscalHtml && !det.loading ? `<h4>Impostos retidos, nota fiscal e CNAE do prestador</h4><div class="cfin-titulo-box nfchk">${fiscalHtml}</div>` : ""}
         <h4>Anexos</h4>
         <div class="cfin-titulo-files">${anexos || `<span>Este título não tem anexo.</span>`}</div>
       </div>

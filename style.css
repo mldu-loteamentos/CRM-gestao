@@ -8033,6 +8033,13 @@ circle.donut-segment {
 .bchk-info { background:#f1f5f9; color:#475569; }
 .bchk-wait { background:#f8fafc; color:#94a3b8; border:1px dashed #cbd5e1; }
 .bchk-desc { background:#e0f2fe; color:#0369a1; }
+.nfchk p { margin: 3px 0; }
+.nfchk-tab { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin: 6px 0 8px; }
+.nfchk-tab th { text-align: left; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.03em; color: #105436; background: #f1f5f9; padding: 5px 8px; }
+.nfchk-tab td { padding: 5px 8px; border-top: 1px solid #e2e8f0; font-variant-numeric: tabular-nums; }
+.nfchk-sec { margin: 2px 0 4px; font-size: 0.8rem; color: #475569; }
+.nfchk-sec summary { cursor: pointer; color: #105436; font-weight: 700; }
+.nfchk-sec div { padding: 1px 0 1px 14px; }
 
 /* Abas sublinhadas (padrão Budget do marketing) — skill abas-sublinhadas */
 .ml-tabs { display: flex; gap: 6px; border-bottom: 1px solid #e2e8f0; margin: 0; padding: 0; overflow-x: auto; scrollbar-width: none; }

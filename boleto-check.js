@@ -197,11 +197,17 @@ window.BoletoCheck = {
       }
     }
     const valor = Number(ctx.valor);
+    const retido = Number(ctx.retido) || 0;
     if (out.valorBoleto != null && Number.isFinite(valor) && valor > 0) {
       if (out.valorBoleto === 0) out.avisos.push("Boleto sem valor no código de barras: o valor será digitado na hora do pagamento.");
-      else if (Math.abs(out.valorBoleto - valor) > 0.01) {
+      else if (retido > 0.009 && Math.abs(out.valorBoleto - (valor - retido)) <= 0.01) {
+        out.retidoAplicado = retido;
+        out.infos.push(`Boleto pelo valor líquido: ${this.money(valor)} − ${this.money(retido)} de impostos retidos = ${this.money(out.valorBoleto)}.`);
+      } else if (Math.abs(out.valorBoleto - valor) > 0.01) {
         const dif = out.valorBoleto - valor;
-        out.erros.push(`Valor do boleto ${this.money(out.valorBoleto)} diferente do valor a pagar ${this.money(valor)} (${dif > 0 ? "+" : "−"}${this.money(Math.abs(dif))}).`);
+        out.erros.push(`Valor do boleto ${this.money(out.valorBoleto)} diferente do valor a pagar ${this.money(valor)} (${dif > 0 ? "+" : "−"}${this.money(Math.abs(dif))})`
+          + (retido > 0.009 ? `, nem bate com o líquido de ${this.money(valor - retido)} (impostos retidos de ${this.money(retido)}).`
+            : (dif < 0 ? ". Se a nota tem imposto retido, o imposto não foi lançado no título do Sienge." : ".")));
       }
     }
     if (out.vencBoleto && ctx.vencimento && out.vencBoleto !== String(ctx.vencimento).slice(0, 10)) {
@@ -370,7 +376,7 @@ window.BoletoCheck = {
     const d = (payment && payment.data) || {};
     const lista = (itens, cor, ic) => itens.map((t) => `<p style="margin:4px 0 0;color:${cor};">${ic} ${this.esc(t)}</p>`).join("");
     const cab = v.nivel === "ok"
-      ? `<p style="margin:6px 0 0;color:#105436;font-weight:700;">✓ Código de barras conferido: dígitos, valor${v.vencBoleto ? " e vencimento" : ""} batem com o título.</p>`
+      ? `<p style="margin:6px 0 0;color:#105436;font-weight:700;">✓ Código de barras conferido: dígitos, valor${v.retidoAplicado ? " líquido" : ""}${v.vencBoleto ? " e vencimento" : ""} batem com o título.</p>`
       : "";
     return `<p><strong>Forma:</strong> ${this.esc(v.forma)}</p>
       ${v.linhaFmt ? `<p><strong>Linha digitável:</strong> <span style="font-family:monospace;font-size:0.82rem;">${this.esc(v.linhaFmt)}</span></p>` : ""}

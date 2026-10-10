@@ -589,7 +589,9 @@ const GerarPagamentoApp = {
       try {
         const data = await window.siengeFetchWithRetry(
           `/bills/${encodeURIComponent(titulo)}/installments/${encodeURIComponent(parcela || 1)}/payment-information/${kinds[i]}`, 1);
-        if (data && typeof data === "object" && Object.keys(data).length) return { kind: kinds[i], data };
+        const temDados = window.ComprasControleApp && typeof ComprasControleApp.temDadosForma === "function"
+          ? ComprasControleApp.temDadosForma(data) : !!(data && typeof data === "object" && Object.keys(data).length);
+        if (temDados) return { kind: kinds[i], data };
       } catch (e) {}
     }
     return null;
@@ -700,7 +702,19 @@ const GerarPagamentoApp = {
     if (!p) return "Forma de pagamento ainda não conferida.";
     const c = p.check;
     if (c.nivel === "erro" || c.nivel === "aviso" || c.nivel === "sem") return c.resumo || "Possível divergência na forma de pagamento.";
+    if (p.fiscal && p.fiscal.nivel === "erro") return "Impostos: " + p.fiscal.resumo;
     return "";
+  },
+
+  /** Imposto retido que sai do valor a pagar: só quando o saldo da parcela ainda é o valor bruto do título. */
+  retidoDe(it) {
+    const f = it.pag && it.pag.fiscal;
+    if (!f || !(f.retidoPagamento > 0.009) || !f.bruto) return 0;
+    return Math.abs(it.aPagar - f.bruto) <= 0.01 ? f.retidoPagamento : 0;
+  },
+
+  valorPagar(it) {
+    return Math.round((it.aPagar - this.retidoDe(it)) * 100) / 100;
   },
 
   resumoTitulo(chave) {
@@ -736,8 +750,16 @@ const GerarPagamentoApp = {
         if (gen !== s.gen) return;
         const credor = payment && payment.kind === "pix" ? await this.carregarCredor(r.credorId) : undefined;
         if (gen !== s.gen) return;
-        const check = BoletoCheck.validar(payment, { valor: t.aPagar, vencimento: r.vencimento, credor });
-        s.pagInfo[chave] = { payment, check, tipoSienge: forma.tipo || "" };
+        const ctx = { valor: t.aPagar, vencimento: r.vencimento, credor };
+        let check = BoletoCheck.validar(payment, ctx);
+        let fiscal = null;
+        const boletoMenor = check.valorBoleto != null && check.valorBoleto > 0 && check.valorBoleto < t.aPagar - 0.01;
+        if (window.NotaFiscalCheck && (NotaFiscalCheck.ehServico(r.docId, r.docNome) || boletoMenor)) {
+          fiscal = await NotaFiscalCheck.analisar({ billId: r.titulo, credorId: r.credorId, bruto: t.valor }).catch(() => null);
+          if (gen !== s.gen) return;
+          if (fiscal && fiscal.retidoPagamento > 0.009) check = BoletoCheck.validar(payment, Object.assign({}, ctx, { retido: fiscal.retidoPagamento }));
+        }
+        s.pagInfo[chave] = { payment, check, fiscal, tipoSienge: forma.tipo || "" };
         if (["erro", "aviso", "sem"].includes(check.nivel)) {
           Object.keys(s.sel).forEach((k) => {
             if (k.endsWith("|" + chave)) s.sel[k] = false;
@@ -793,7 +815,11 @@ const GerarPagamentoApp = {
           : "") + (r.autorizacao.ok
           ? ` · autorizado por ${r.autorizacao.por || "—"}${r.autorizacao.em ? " em " + this.dataBr(r.autorizacao.em) : ""}`
           : ` · ${r.autorizacao.parcial ? "autorização incompleta" : "não autorizado"} no Sienge`))),
-      pagCheck: this.state.pagInfo[chave] ? this.state.pagInfo[chave].check : null
+      pagCheck: this.state.pagInfo[chave] ? this.state.pagInfo[chave].check : null,
+      pagPayment: this.state.pagInfo[chave] ? this.state.pagInfo[chave].payment : undefined,
+      fiscal: this.state.pagInfo[chave] ? this.state.pagInfo[chave].fiscal : null,
+      credorId: r.credorId,
+      docNome: r.docNome
     });
   },
 
@@ -982,7 +1008,7 @@ const GerarPagamentoApp = {
       alert("Lote não gerado: há título bloqueado (autorização, rateio, plano financeiro ou forma de pagamento).\n\n" + comBloqueio.slice(0, 8).map((it) => `• ${it.titulo}/${it.parcela || 1} ${it.credor}: ${this.bloqueioLote(it)}`).join("\n"));
       return;
     }
-    const total = itens.reduce((t, it) => t + it.aPagar, 0);
+    const total = itens.reduce((t, it) => t + this.valorPagar(it), 0);
     const fora = g.itens.filter((it) => it.bloqueio);
     const alerta = fora.length
       ? `\n\n${fora.length} título(s) deste dia ficam fora por bloqueio:\n` + fora.slice(0, 8).map((it) => `• ${it.titulo}/${it.parcela || 1} ${it.credor}: ${it.bloqueio}`).join("\n") + (fora.length > 8 ? `\n• e mais ${fora.length - 8}` : "")
@@ -1012,7 +1038,9 @@ const GerarPagamentoApp = {
       total: Math.round(total * 100) / 100,
       itens: itens.map((it) => ({
         titulo: it.titulo, parcela: it.parcela, credor: it.credor, credorId: it.credorId || "", companyId: it.companyId || "", documento: it.documento,
-        vencimento: it.vencimento, valor: Math.round(it.aPagar * 100) / 100,
+        vencimento: it.vencimento, valor: this.valorPagar(it),
+        ...(this.retidoDe(it) ? { valorBruto: Math.round(it.aPagar * 100) / 100, impostosRetidos: this.retidoDe(it) } : {}),
+        impostos: it.pag && it.pag.fiscal ? it.pag.fiscal.resumo : "",
         ccs: it.ccs.map((c) => c.id + " - " + c.nome).join(" / "),
         forma: it.pag ? it.pag.check.forma : "",
         linhaDigitavel: it.pag ? it.pag.check.linhaFmt || "" : "",
@@ -1422,7 +1450,7 @@ const GerarPagamentoApp = {
     const card = (g) => {
       const sem = g.key === "__sem";
       const marcados = g.itens.filter((it) => it.marcado);
-      const total = marcados.reduce((t, it) => t + it.aPagar, 0);
+      const total = marcados.reduce((t, it) => t + this.valorPagar(it), 0);
       const disponiveis = g.itens.filter((it) => !it.emLote);
       const liberados = disponiveis.filter((it) => !it.bloqueio);
       const divergentes = disponiveis.filter((it) => this.bloqueioVisivel(it)).length;
@@ -1438,7 +1466,9 @@ const GerarPagamentoApp = {
             : (this.lotePendenteDe(it.chave)
               ? `<span class="gp-pill gp-wait" title="Está no lote ${this.esc(this.lotePendenteDe(it.chave).id)}, que não foi gerado no Sienge. Ao gerar de novo, ele sai daquele lote.">Em aberto</span><small>Lote não gerado no Sienge</small>`
               : `<span class="gp-pill gp-wait">Em aberto</span>`));
-        const pagSelo = it.emLote ? `<span class="gp-muted">—</span>` : (window.BoletoCheck ? BoletoCheck.seloHtml(it.pag ? it.pag.check : null) : "");
+        const pagSelo = it.emLote ? `<span class="gp-muted">—</span>` : (window.BoletoCheck ? BoletoCheck.seloHtml(it.pag ? it.pag.check : null) : "")
+          + (!it.emLote && it.pag && it.pag.fiscal && window.NotaFiscalCheck ? NotaFiscalCheck.seloHtml(it.pag.fiscal) : "");
+        const retido = this.retidoDe(it);
         return `<tr class="gp-click${it.emLote ? " gp-em-lote" : ""}${this.bloqueioVisivel(it) ? " gp-row-bad" : ""}" onclick="GerarPagamentoApp.abrirResumo('${this.esc(it.chave)}')" title="Clique para ver o resumo do título">
           <td style="text-align:center;" onclick="event.stopPropagation()"><input type="checkbox" ${it.marcado ? "checked" : ""} ${sem || it.emLote || it.bloqueio || gerando ? "disabled" : ""}
             title="${this.esc(it.emLote ? "Já está em lote; não pode entrar em outro." : (it.bloqueio ? "Bloqueado: " + it.bloqueio : ""))}"
@@ -1448,7 +1478,7 @@ const GerarPagamentoApp = {
           <td title="${this.esc(it.credor)}">${this.esc(it.credor)}</td>
           <td>${this.esc(it.documento || "—")}</td>
           <td class="gp-status">${this.ccsCelulaHtml(it)}${it.emLote ? "" : this.rateioSeloHtml(it.rateio)}</td>
-          <td style="text-align:right;">${this.money(it.aPagar)}</td>
+          <td style="text-align:right;"${retido ? ` title="${this.esc(`Bruto ${this.money(it.aPagar)} − impostos retidos ${this.money(retido)}`)}"` : ""}>${this.money(this.valorPagar(it))}${retido ? `<br><small class="gp-muted">líquido · retido ${this.money(retido)}</small>` : ""}</td>
           <td class="gp-status">${pagSelo}</td>
           <td class="gp-status">${this.autorizacaoSeloHtml(it)}</td>
           <td class="gp-status">${tag}</td>
@@ -1459,7 +1489,7 @@ const GerarPagamentoApp = {
         : (jaGerado
           ? `${g.itens.length} título(s) · todos já em lote (${lotesDoDia.map((x) => this.esc(x)).join(", ")})`
           : `${g.itens.length} título(s) · ${disponiveis.length} disponível(is) · ${marcados.length} marcado(s)${lotesDoDia.length ? ` · ${g.itens.length - disponiveis.length} já em lote` : ""}${divergentes ? ` · <b class="gp-bloq">${divergentes} bloqueado(s) por divergência</b>` : ""}`);
-      const somaGrupo = g.itens.reduce((t, it) => t + it.aPagar, 0);
+      const somaGrupo = g.itens.reduce((t, it) => t + this.valorPagar(it), 0);
       const aberto = !!s.lotesAbertos[g.key];
       return `<div class="gp-lote${sem ? " gp-lote-sem" : ""}${jaGerado ? " gp-lote-feito" : ""}${aberto ? " is-open" : ""}">
         <div class="gp-lote-h" role="button" tabindex="0" aria-expanded="${aberto}" title="${aberto ? "Clique para fechar o lote" : "Clique para ver os títulos do lote"}"
@@ -1529,8 +1559,10 @@ const GerarPagamentoApp = {
       </div>` : "";
     const v = s.validacao || {};
     const errosPag = Object.values(s.pagInfo).filter((p) => ["erro", "aviso", "sem"].includes(p.check.nivel)).length;
+    const errosFiscal = Object.values(s.pagInfo).filter((p) => !["erro", "aviso", "sem"].includes(p.check.nivel) && p.fiscal && p.fiscal.nivel === "erro").length;
+    const avisoFiscal = errosFiscal ? `<span class="gp-valida"><b style="color:#b91c1c;">${errosFiscal} título(s) com imposto retido divergente da nota fiscal</b> (bloqueados para lote até corrigir no Sienge)</span>` : "";
     const progressoPag = v.rodando
-      ? `<span class="gp-valida"><span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;"></span> Conferindo forma de pagamento e boletos · ${v.feitos} de ${v.total}</span>`
+      ? `<span class="gp-valida"><span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;"></span> Conferindo forma de pagamento, boletos e impostos retidos · ${v.feitos} de ${v.total}</span>`
       : (v.total ? `<span class="gp-valida">${errosPag ? `<b style="color:#b91c1c;">${errosPag} título(s) com possível divergência na forma de pagamento</b> (bloqueados para lote até corrigir no Sienge)` : "Formas de pagamento conferidas"}</span>` : "");
     const errosRateio = new Set(grupos.flatMap((g) => g.itens.filter((it) => !it.emLote && this.bloqueioRateio(it.rateio)).map((it) => it.chave))).size;
     const avisoRateio = errosRateio ? `<span class="gp-valida"><b style="color:#b91c1c;">${errosRateio} título(s) com rateio ou plano financeiro fora do padrão</b> (bloqueados para lote)</span>` : "";
@@ -1539,7 +1571,7 @@ const GerarPagamentoApp = {
     if (aba === "lote") {
       return `${abas}<p class="gp-nota">Lotes gerados e títulos deste período que já estão em lote no Integra ou no Sienge. Eles não entram em outro lote. Clique na linha para ver o resumo do título.</p>${geradosHtml}${emLote.length ? emLote.map(card).join("") : (gerados.length ? "" : vazio("Nenhum título deste período está em lote."))}`;
     }
-    return `${abas}<p class="gp-nota">Títulos em aberto que ainda não estão em lote, separados por conta de parceria e dia de vencimento: um lote por conta por dia. Só título autorizado no Sienge entra em lote. Clique na linha para ver o resumo do título. ${progressoPag}${avisoAut}${avisoRateio}</p>${aGerar.length ? aGerar.map(card).join("") : vazio("Nenhum título a gerar lote no período: todos já estão em lote.")}`;
+    return `${abas}<p class="gp-nota">Títulos em aberto que ainda não estão em lote, separados por conta de parceria e dia de vencimento: um lote por conta por dia. Só título autorizado no Sienge entra em lote. Clique na linha para ver o resumo do título. ${progressoPag}${avisoFiscal}${avisoAut}${avisoRateio}</p>${aGerar.length ? aGerar.map(card).join("") : vazio("Nenhum título a gerar lote no período: todos já estão em lote.")}`;
   },
 
   grupoStatus(r) {
