@@ -358,7 +358,7 @@ window.EnviarNotaApp = {
       anexos: [], previewIdx: -1, preview: "", previewLendo: "",
       pag: { data: "", forma: "", detalhe: "" },
       formaManual: "",
-      numeroNota: "", serieNota: "", valorNota: "", linhaBoleto: "",
+      numeroNota: "", serieNota: "", valorNota: "", linhaBoleto: "", linhaTocada: false,
       lendoNota: "", leituraErro: "", leituraToken: 0, fiscal: null,
       obs: "",
       enviando: "", feito: "", editandoId: "",
@@ -596,6 +596,7 @@ window.EnviarNotaApp = {
     }
     s.formaManual = o.forma;
     s.pag.forma = o.forma;
+    if (o.forma === "Boleto") s.linhaTocada = false;
     s.pag.detalhe = o.forma === "Boleto" ? (s.linhaBoleto || "") : (o.detalhe || "");
     this.render();
     if (o.forma === "Boleto") this.lerBoletoAnexo();
@@ -720,10 +721,9 @@ window.EnviarNotaApp = {
       const linha = this.linhaBoleto(texto);
       if (!linha) return;
       s.linhaBoleto = linha;
-      if (!s.formaManual || s.formaManual === "Boleto" || s.pag.forma === "Boleto") {
-        s.pag.forma = "Boleto";
-        s.pag.detalhe = linha;
-      }
+      s.formaManual = "";
+      s.pag.forma = "Boleto";
+      if (!s.linhaTocada) s.pag.detalhe = linha;
       this.render();
     }).catch((e) => console.warn("[Enviar nota] linha do boleto", e));
   },
@@ -737,9 +737,13 @@ window.EnviarNotaApp = {
     const s = this.state;
     const pag = s.pag;
     if (this.temBoleto()) {
-      if (pag.forma !== "Boleto") pag.detalhe = "";
+      s.formaManual = "";
+      if (pag.forma !== "Boleto") {
+        pag.detalhe = "";
+        s.linhaTocada = false;
+      }
       pag.forma = "Boleto";
-      if (s.linhaBoleto && !String(pag.detalhe || "").trim()) pag.detalhe = s.linhaBoleto;
+      if (!s.linhaTocada && s.linhaBoleto) pag.detalhe = s.linhaBoleto;
       return;
     }
     if (s.formaManual) {
@@ -759,17 +763,21 @@ window.EnviarNotaApp = {
     const files = Array.from((input && input.files) || []);
     const grandes = files.filter((f) => f.size > FilaNotasFiscais.MAX_MB * 1024 * 1024);
     if (grandes.length) alert(`Arquivo acima de ${FilaNotasFiscais.MAX_MB} MB não entra: ${grandes.map((f) => f.name).join(", ")}`);
+    const novos = [];
     files.filter((f) => f.size <= FilaNotasFiscais.MAX_MB * 1024 * 1024).forEach((file) => {
       if (s.anexos.some((a) => a.file && a.file.name === file.name && a.file.size === file.size)) return;
       const temNota = s.anexos.some((a) => a.tipo === "nota");
       const ehNota = /\.(pdf|xml)$/i.test(file.name) || /^image\//.test(file.type);
       const tipo = /boleto/i.test(file.name) ? "boleto" : (!temNota && ehNota ? "nota" : "outro");
-      s.anexos.push({ file, nome: file.name, tipo, size: file.size, contentType: file.type });
+      const item = { file, nome: file.name, tipo, size: file.size, contentType: file.type };
+      s.anexos.push(item);
+      novos.push(item);
     });
     if (input) input.value = "";
     this.agendarLeitura();
     this.sugerirForma();
     this.lerBoletoAnexo();
+    this.classificarBoletos(novos);
     if (s.previewIdx < 0) {
       const i = s.anexos.findIndex((a) => a.tipo === "nota");
       if (i >= 0) { this.verAnexo(i); return; }
@@ -777,9 +785,46 @@ window.EnviarNotaApp = {
     this.render();
   },
 
+  /** Um PDF ou imagem extra, sem "boleto" no nome, vira boleto quando a linha digitável está no arquivo. */
+  classificarBoletos(itens) {
+    const s = this.state;
+    const lista = (itens || []).filter((a) => a && a.tipo === "outro");
+    if (!lista.length) return;
+    const token = (s.classificarToken || 0) + 1;
+    s.classificarToken = token;
+    lista.forEach((a) => { a._classificar = token; });
+    const app = this;
+    (async () => {
+      for (let i = 0; i < lista.length; i++) {
+        const a = lista[i];
+        if (s.classificarToken !== token || a._classificar !== token || a.tipo !== "outro") continue;
+        try {
+          const file = a.file ? a.file : await FilaNotasFiscais.baixar(a);
+          const texto = await app.textoDeArquivo(file);
+          if (s.classificarToken !== token || a._classificar !== token || a.tipo !== "outro") continue;
+          const linha = app.linhaBoleto(texto);
+          if (!linha) continue;
+          a.tipo = "boleto";
+          s.linhaBoleto = linha;
+          s.linhaTocada = false;
+          s.formaManual = "";
+          s.pag.forma = "Boleto";
+          s.pag.detalhe = linha;
+          app.render();
+        } catch (e) {
+          console.warn("[Enviar nota] classificar boleto", e);
+        }
+      }
+    })();
+  },
+
   setTipoAnexo(i, tipo) {
     const a = this.state.anexos[i];
     if (a) a.tipo = tipo;
+    if (tipo === "boleto") {
+      this.state.linhaTocada = false;
+      this.state.formaManual = "";
+    }
     this.agendarLeitura();
     this.sugerirForma();
     this.lerBoletoAnexo();
@@ -1046,6 +1091,7 @@ window.EnviarNotaApp = {
 
   setPag(campo, valor) {
     this.state.pag[campo] = String(valor == null ? "" : valor);
+    if (campo === "detalhe") this.state.linhaTocada = true;
     this.pintarConferencia();
   },
 
@@ -1091,16 +1137,21 @@ window.EnviarNotaApp = {
     if (dup) {
       const st = (FilaNotasFiscais.STATUS[dup.status] || {}).rot || dup.status || "enviada";
       const quando = dup.criadoEm ? new Date(dup.criadoEm).toLocaleDateString("pt-BR") : "";
-      erros.push(`A NF ${s.numeroNota} deste fornecedor já está na base de notas enviadas (pedido ${dup.pedido || "—"}, ${st}${quando ? " em " + quando : ""}${dup.criadoPor ? " por " + dup.criadoPor : ""}). A mesma nota não pode ir ao fiscal de novo, mesmo em outro pedido.${dup.status === "lancada" ? " Esse registro continua no CRM. Em Minhas notas enviadas, ligue “Mostrar notas já lançadas no Sienge” e exclua esse envio para liberar outro teste." : ""}`);
+      erros.push(`A NF ${s.numeroNota} deste fornecedor já está na base de notas enviadas (pedido ${dup.pedido || "—"}, ${st}${quando ? " em " + quando : ""}${dup.criadoPor ? " por " + dup.criadoPor : ""}). A mesma nota não pode ir ao fiscal de novo, mesmo em outro pedido.${dup.status === "lancada" ? " Esse registro continua no CRM. Em Minhas notas enviadas, ele aparece em “Notas já lançadas no Sienge”, mesmo com os filtros desligados. Exclua esse envio para liberar outro teste." : ""}`);
     }
 
     const pag = s.pag;
+    const soDig = (v) => String(v || "").replace(/\D/g, "");
+    const linhaBate = !!(s.linhaBoleto && soDig(pag.detalhe) === soDig(s.linhaBoleto));
     if (!pag.data) erros.push("Confirme a data de pagamento.");
     else if (pag.data < this.hojeIso()) avisos.push(`A data de pagamento (${this.dataBr(pag.data)}) já passou.`);
     if (!pag.forma) erros.push(s.pedido && !this.temBoleto() ? "Escolha a forma de pagamento. O cadastro do credor não informa uma forma padrão." : "Escolha a forma de pagamento.");
-    else if (this.temBoleto()) oks.push(s.linhaBoleto ? "Boleto anexado: linha digitável conferida." : "Boleto anexado: pagamento em boleto.");
+    else if (this.temBoleto()) oks.push(linhaBate ? "Boleto anexado: linha digitável conferida." : "Boleto anexado: pagamento em boleto.");
     else if (!s.formaManual && pag.forma === this.formaDoCredor()) oks.push(`Forma de pagamento do cadastro do credor: ${pag.forma}.`);
-    if (pag.forma === "Boleto" && !this.temBoleto()) avisos.push("Forma de pagamento boleto sem boleto anexado: anexe o boleto se ele não estiver no mesmo arquivo da nota.");
+    if (pag.forma === "Boleto" && !this.temBoleto()) erros.push("A forma de pagamento é boleto e não há boleto anexado. Anexe o boleto para seguir.");
+    if (this.temBoleto() && s.linhaBoleto && !s.linhaTocada && !linhaBate) {
+      erros.push("A linha digitável está diferente da linha do boleto anexado. O campo não foi alterado: confira o código antes de enviar.");
+    }
     const ops = this.destinos(pag.forma);
     if (ops) {
       const oque = pag.forma === "PIX" ? "chave PIX" : "conta bancária";
@@ -1358,12 +1409,12 @@ window.EnviarNotaApp = {
     const idx = opts.findIndex((o) => o.forma === pag.forma && (o.forma === "Boleto" || (o.detalhe || "") === (pag.detalhe || "")));
     let destino = "";
     if (pag.forma === "Boleto") {
-      destino = `<div class="inf-span4"><label>Linha digitável</label><input value="${this.esc(pag.detalhe)}" placeholder="Preenchida somente quando houver boleto anexado" oninput="EnviarNotaApp.setPag('detalhe', this.value)"></div>`;
+      destino = `<div class="inf-span4"><label>Linha digitável</label><input value="${this.esc(pag.detalhe)}" placeholder="Preenchida automaticamente ao anexar o boleto" oninput="EnviarNotaApp.setPag('detalhe', this.value)"></div>`;
     }
     const avisoBanco = this.erroBancoVisivel();
     return `<div class="inf-form">
-        <div><label>Data de pagamento</label><input type="date" value="${this.esc(pag.data)}" onchange="EnviarNotaApp.setPag('data', this.value)"></div>
-        <div><label>Forma de pagamento</label><select onchange="EnviarNotaApp.escolherPagamento(this.value)"><option value="">Escolha…</option>${opts.map((o, i) => `<option value="${i}" ${i === idx ? "selected" : ""}>${this.esc(o.rotulo)}</option>`).join("")}</select></div>
+        <div class="inf-span2 env-pag-campo"><label>Data de pagamento</label><input type="date" value="${this.esc(pag.data)}" onchange="EnviarNotaApp.setPag('data', this.value)"></div>
+        <div class="inf-span2 env-pag-campo"><label>Forma de pagamento</label><select onchange="EnviarNotaApp.escolherPagamento(this.value)"><option value="">Escolha…</option>${opts.map((o, i) => `<option value="${i}" ${i === idx ? "selected" : ""}>${this.esc(o.rotulo)}</option>`).join("")}</select></div>
         ${destino}
         <div class="inf-span4"><label>Observação para o fiscal</label><input value="${this.esc(s.obs)}" oninput="EnviarNotaApp.setCampo('obs', this.value)"></div>
       </div>
@@ -1414,9 +1465,7 @@ window.EnviarNotaApp = {
           <div class="inf-card">
             <h3><i data-lucide="image"></i> ${prevAnexo ? this.esc(prevAnexo.nome) : "Anexo"}</h3>
             ${s.previewLendo ? `<p class="inf-muted">${s.previewLendo.startsWith("Abrindo") ? `<span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;"></span> ` : ""}${this.esc(s.previewLendo)}</p>` : ""}
-            ${s.preview ? `<div class="inf-lupa-area" onmousemove="InserirNotaApp.lupa(event)" onmouseleave="InserirNotaApp.lupa(event, true)" onwheel="InserirNotaApp.zoomLupa(event)">
-                <img src="${s.preview}" alt="Anexo" draggable="false"><div class="inf-lupa"></div></div>
-              <p class="inf-lupa-dica"><i data-lucide="zoom-in"></i> Passe o mouse: a faixa amplia a nota na largura da página · role a roda para o zoom: <strong class="inf-lupa-zoom">${(InserirNotaApp._zoom || 2.5).toLocaleString("pt-BR")}x</strong></p>`
+            ${s.preview ? `<div class="env-nota-scroll"><img src="${s.preview}" alt="Anexo" draggable="false"></div>`
               : (s.previewLendo ? "" : `<p class="inf-muted">Clique no nome de um anexo para ver aqui.</p>`)}
           </div>
         </div>
@@ -1471,11 +1520,7 @@ window.EnviarNotaApp = {
     const lista = s.verLancadas ? minhas : minhas.filter((x) => x.status !== "lancada");
     const quem = (nome, email, gravado) => FilaNotasFiscais.usuarioSienge(nome, email, gravado);
     const esc = (v) => this.esc(v);
-    const corpo = s.listaCarregando ? `<p class="fnf-vazio"><span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;"></span> Carregando…</p>`
-      : (s.listaErro ? `<p class="inf-erro">${esc(s.listaErro)}</p>`
-        : (!lista.length ? `<p class="fnf-vazio">Nenhuma nota enviada${s.todos ? "" : " por você"}.</p>`
-          : `<table class="fnf-tab"><thead><tr><th>Enviada em</th><th>Pedido</th><th>Fornecedor</th><th>Pagamento</th><th>Anexos</th><th>Situação</th><th></th></tr></thead><tbody>
-            ${lista.map((x) => `<tr class="${x.status === "devolvida" ? "fnf-devolvida" : ""}">
+    const linha = (x) => `<tr class="${x.status === "devolvida" ? "fnf-devolvida" : ""}">
               <td>${new Date(x.criadoEm).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}<small>${esc(quem(x.criadoPor, x.criadoPorEmail, x.criadoPorSienge))}</small></td>
               <td><b>${esc(x.pedido)}</b>${x.numeroNota ? `<small>NF ${esc(x.numeroNota)}</small>` : ""}</td>
               <td>${esc(x.fornecedor ? x.fornecedor.nome : "")}${x.valorNota != null ? `<small>${this.money(x.valorNota)}</small>` : ""}</td>
@@ -1487,7 +1532,17 @@ window.EnviarNotaApp = {
                 ${x.status === "pendente" && this.podeEditar() ? `<button type="button" class="tvig-ico" title="Cancelar" onclick="EnviarNotaApp.cancelar('${esc(x.id)}')"><i data-lucide="x" style="width:15px;height:15px;"></i></button>` : ""}
                 ${this.podeEditar() ? `<button type="button" class="tvig-ico is-danger" title="Excluir" onclick="EnviarNotaApp.excluir('${esc(x.id)}')"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button>` : ""}
               </td>
-            </tr>`).join("")}</tbody></table>`));
+            </tr>`;
+    const tabela = (itens) => `<table class="fnf-tab"><thead><tr><th>Enviada em</th><th>Pedido</th><th>Fornecedor</th><th>Pagamento</th><th>Anexos</th><th>Situação</th><th></th></tr></thead><tbody>${itens.map(linha).join("")}</tbody></table>`;
+    const ocultas = s.lista.filter((x) => x.status === "lancada" && !lista.some((y) => y.id === x.id)).slice(0, 30);
+    const blocoOcultas = ocultas.length ? `<div class="env-lancadas">
+          <h4>Notas já lançadas no Sienge</h4>
+          <p>Estas notas ficam de fora da lista com os filtros desligados, inclusive quando o envio foi de outro operador. Exclua o registro para enviar a mesma nota de novo neste teste. A exclusão não desfaz o lançamento no Sienge.</p>
+          ${tabela(ocultas)}
+        </div>` : "";
+    const corpo = s.listaCarregando ? `<p class="fnf-vazio"><span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;"></span> Carregando…</p>`
+      : (s.listaErro ? `<p class="inf-erro">${esc(s.listaErro)}</p>`
+        : `${!lista.length ? `<p class="fnf-vazio">Nenhuma nota enviada${s.todos ? "" : " por você"}.</p>` : tabela(lista)}${blocoOcultas}`);
     return `<div class="inf-card" style="margin:16px 20px;">
         <div class="fnf-barra">
           <label class="inf-chk"><input type="checkbox" ${s.todos ? "checked" : ""} onchange="EnviarNotaApp.setTodos(this.checked)"> Mostrar envios de todos os operadores</label>
@@ -1551,6 +1606,12 @@ window.EnviarNotaApp = {
         .env-banco-grade span { display: block; font-size: 0.68rem; font-weight: 700; color: #64748b; text-transform: uppercase; }
         .env-banco-grade b { display: block; margin-top: 2px; font-size: 0.88rem; color: #0f172a; font-weight: 700; }
         .env-voltar .btn { height: 34px; display: inline-flex; align-items: center; gap: 6px; }
+        .env-pag-campo input, .env-pag-campo select { height: 42px; font-size: 0.95rem; }
+        .env-nota-scroll { max-height: min(78vh, 920px); overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; }
+        .env-nota-scroll img { width: 100%; height: auto; display: block; border: 0; border-radius: 0; }
+        .env-lancadas { margin-top: 16px; padding-top: 12px; border-top: 1px solid #e2e8f0; }
+        .env-lancadas h4 { margin: 0 0 4px; font-size: 0.84rem; color: #105436; }
+        .env-lancadas > p { margin: 0 0 8px; font-size: 0.8rem; color: #64748b; }
       </style>
       ${window._voltarBudget ? `<div class="env-voltar"><button type="button" class="btn btn-outline" onclick="EnviarNotaApp.voltarBudget()"><i data-lucide="arrow-left"></i> Voltar para o Budget</button></div>` : ""}
       <div class="ml-tabs env-tabs" id="env-tabs" role="tablist">${this.abasHtml()}</div>

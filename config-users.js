@@ -510,16 +510,20 @@ const ConfigUsersApp = {
           actions: [
             { id: "assistente_cp", label: "Assistente de Contas a Pagar" },
             { id: "gerar_pagamento", label: "Gerar Pagamento", permBase: "sub_fin_cp_gerar_pagamento" },
-            { id: "prestacao_contas", label: "Prestação de Contas" },
-            { id: "parametrizacao_parceiro", label: "Parametrização de Parceiro" },
             { id: "titulos_incompletos", label: "Títulos incompletos", permBase: "sub_fin_cp_titulos_incompletos" },
             { id: "rydoo", label: "Rydoo", permBase: "sub_fin_cp_rydoo" }
           ]
         },
         {
+          name: "Prestação de contas", key: "sub_fin_pc",
+          actions: [
+            { id: "nova_prestacao", label: "Nova prestação", permBase: "sub_fin_cp_prestacao_contas" },
+            { id: "config", label: "Configurações", permBase: "sub_fin_cp_parametrizacao_parceiro" }
+          ]
+        },
+        {
           name: "Caixa e Banco", key: "sub_fin_cb",
           actions: [
-            { id: "caixa_banco", label: "Movimentações" },
             { id: "investimento", label: "Aplicações e Investimentos" },
             { id: "fluxo_caixa", label: "Fluxo de caixa (DFC)" },
             { id: "fluxo_caixa_diario", label: "Fluxo de caixa diário" },

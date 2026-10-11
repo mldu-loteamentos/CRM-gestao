@@ -18,6 +18,7 @@ const TitulosIncompletosApp = {
       loading: false,
       erro: "",
       consultado: false,
+      aberto: -1,
       rows: []
     };
   },
@@ -65,11 +66,6 @@ const TitulosIncompletosApp = {
     this.state[k] = v;
   },
 
-  setStatus(id) {
-    this.state.status = id;
-    this.pintarCorpo();
-  },
-
   ordenar(col) {
     if (this.state.sort === col) this.state.dir = this.state.dir === "asc" ? "desc" : "asc";
     else {
@@ -109,16 +105,26 @@ const TitulosIncompletosApp = {
   normalizar(bill) {
     const status = String(bill.consistencyStatus || "").trim().toUpperCase();
     if (status !== "N" && status !== "I") return null;
+    const cats = Array.isArray(bill.paymentsCategories) ? bill.paymentsCategories : [];
+    const cat = cats.find((c) => c && c.costCenterId != null) || null;
     return {
       empresa: String(bill.companyName || "").trim(),
+      companyId: bill.companyId != null ? String(bill.companyId) : "",
       emissao: String(bill.issueDate || "").slice(0, 10),
       tipo: String(bill.documentIdentificationId || "").trim(),
+      docNome: String(bill.documentIdentificationName || "").trim(),
       documento: String(bill.documentNumber || "").trim(),
       titulo: String(bill.billId || "").trim(),
+      parcela: bill.installmentId != null ? String(bill.installmentId) : "1",
       credor: String(bill.creditorName || "").trim(),
+      credorId: bill.creditorId != null ? String(bill.creditorId) : "",
       criado: String(bill.registeredUserId || "").trim(),
       cadastrado: String(bill.registeredDate || ""),
       vencimento: String(bill.dueDate || "").slice(0, 10),
+      valor: Number(bill.originalAmount) || 0,
+      saldo: bill.balanceAmount != null ? Number(bill.balanceAmount) : (Number(bill.originalAmount) || 0),
+      ccId: cat && cat.costCenterId != null ? String(cat.costCenterId) : "",
+      ccNome: (cat && cat.costCenterName) || "",
       status,
       legenda: this.legenda(status)
     };
@@ -138,6 +144,7 @@ const TitulosIncompletosApp = {
     }
     s.loading = true;
     s.erro = "";
+    s.aberto = -1;
     s.consultado = true;
     this.render();
     try {
@@ -150,6 +157,7 @@ const TitulosIncompletosApp = {
         const chave = [row.titulo, row.vencimento, row.documento, row.tipo, row.empresa].join("|");
         if (vistos.has(chave)) return;
         vistos.add(chave);
+        row._i = rows.length;
         rows.push(row);
       });
       s.rows = rows;
@@ -165,7 +173,7 @@ const TitulosIncompletosApp = {
   visiveis() {
     const s = this.state;
     const q = String(s.busca || "").trim().toLowerCase();
-    let lista = s.rows.filter((r) => s.status === "todos" || r.status === s.status);
+    let lista = s.rows.slice();
     if (q) {
       lista = lista.filter((r) => [r.empresa, r.credor, r.documento, r.titulo, r.tipo, r.criado, r.legenda].join(" ").toLowerCase().includes(q));
     }
@@ -173,12 +181,6 @@ const TitulosIncompletosApp = {
     const campo = s.sort;
     lista = lista.slice().sort((a, b) => String(a[campo] || "").localeCompare(String(b[campo] || ""), "pt-BR", { numeric: true, sensitivity: "base" }) * dir);
     return lista;
-  },
-
-  contagens() {
-    const n = this.state.rows.filter((r) => r.status === "N").length;
-    const i = this.state.rows.filter((r) => r.status === "I").length;
-    return { n, i, todos: this.state.rows.length };
   },
 
   th(col, rotulo) {
@@ -196,7 +198,8 @@ const TitulosIncompletosApp = {
     }
     return lista.map((r) => {
       const atrasado = r.vencimento && r.vencimento < hoje;
-      return `<tr>
+      const aberto = this.state.aberto === r._i;
+      return `<tr class="tin-row${aberto ? " is-on" : ""}" onclick="TitulosIncompletosApp.abrir(${r._i})">
         <td title="${this.esc(r.empresa)}">${this.esc(r.empresa || "—")}</td>
         <td>${this.dataBr(r.emissao)}</td>
         <td>${this.esc(r.tipo || "—")}</td>
@@ -214,24 +217,36 @@ const TitulosIncompletosApp = {
   pintarCorpo() {
     if (this.state && this.state.loading) return;
     const body = document.getElementById("tin-body");
-    const kpis = document.getElementById("tin-kpis");
-    if (!body || !kpis) { this.render(); return; }
-    const c = this.contagens();
-    const s = this.state;
-    kpis.innerHTML = this.kpisHtml(c, s.status);
+    if (!body) { this.render(); return; }
     body.innerHTML = this.linhas(this.visiveis());
     const head = document.getElementById("tin-head");
     if (head) head.innerHTML = this.cabecalho();
     if (window.lucide) lucide.createIcons();
   },
 
-  kpisHtml(c, status) {
-    const item = (id, rotulo, qtd, cor) => `<button type="button" class="tin-kpi${status === id ? " is-on" : ""}" style="border-top-color:${cor}" onclick="TitulosIncompletosApp.setStatus('${id}')">
-      <span>${rotulo}</span><strong>${qtd.toLocaleString("pt-BR")}</strong>
-    </button>`;
-    return item("todos", "No período", c.todos, "#105436")
-      + item("N", "Incompletos", c.n, "#b91c1c")
-      + item("I", "Em inclusão", c.i, "#c2410c");
+  abrir(i) {
+    const r = (this.state.rows || [])[i];
+    if (!r) return;
+    this.state.aberto = r._i;
+    this.pintarCorpo();
+    const app = window.ComprasControleApp;
+    if (!app || typeof app.abrirTituloRow !== "function") return;
+    app.abrirTituloRow({
+      titulo: r.titulo,
+      parcela: r.parcela || "1",
+      credor: r.credor,
+      credorId: r.credorId,
+      companyId: r.companyId,
+      docId: r.tipo,
+      docNome: r.docNome,
+      documento: r.documento,
+      vencimento: r.vencimento,
+      valor: r.valor,
+      saldo: r.saldo,
+      ccId: r.ccId,
+      ccNome: r.ccNome,
+      situacaoTexto: r.legenda
+    });
   },
 
   async exportar() {
@@ -279,25 +294,19 @@ const TitulosIncompletosApp = {
     if (!root) return;
     if (!this.state) this.state = this.novo();
     const s = this.state;
-    const c = this.contagens();
     const lista = s.loading ? [] : this.visiveis();
     root.innerHTML = `
       <style>
         #titulos-incompletos-root { padding: 16px 18px 28px; }
-        #titulos-incompletos-root .tin-head { display:flex; align-items:center; gap:10px; margin-bottom:14px; }
-        #titulos-incompletos-root .tin-head h2 { margin:0; font-size:1.05rem; color:#105436; }
-        #titulos-incompletos-root .tin-head small { display:block; color:#64748b; font-size:0.78rem; font-weight:500; margin-top:2px; }
-        #titulos-incompletos-root .tin-card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:14px 16px; }
+        #titulos-incompletos-root .tin-card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:14px 16px; margin-bottom:14px; }
         #titulos-incompletos-root .tin-bar { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }
         #titulos-incompletos-root .tin-bar label { display:block; font-size:0.72rem; font-weight:700; color:#475569; text-transform:uppercase; margin-bottom:4px; }
         #titulos-incompletos-root .tin-bar input { height:36px; padding:0 10px; border:1px solid #cbd5e1; border-radius:4px; font:inherit; font-size:0.85rem; background:#fff; box-sizing:border-box; }
         #titulos-incompletos-root .tin-bar input[type="search"] { min-width:240px; }
-        #titulos-incompletos-root .tin-kpis { display:grid; grid-template-columns:repeat(3, minmax(0, 180px)); gap:12px; margin:14px 0; }
-        #titulos-incompletos-root .tin-kpi { text-align:left; background:#fff; border:1px solid #e2e8f0; border-top:4px solid #105436; border-radius:10px; padding:12px 14px; cursor:pointer; font:inherit; min-height:78px; }
-        #titulos-incompletos-root .tin-kpi.is-on { background:#f0fdf4; box-shadow:inset 0 0 0 1px #105436; }
-        #titulos-incompletos-root .tin-kpi span { display:block; font-size:0.7rem; font-weight:700; color:#64748b; text-transform:uppercase; }
-        #titulos-incompletos-root .tin-kpi strong { display:block; font-size:1.45rem; color:#0f172a; margin-top:2px; }
-        #titulos-incompletos-root .tin-tablewrap { max-height:62vh; overflow:auto; border:1px solid #e2e8f0; border-radius:10px; }
+        #titulos-incompletos-root .tin-dica { margin:10px 0 0; color:#64748b; font-size:0.78rem; }
+        #titulos-incompletos-root .tin-tablewrap { max-height:68vh; overflow:auto; border:1px solid #e2e8f0; border-radius:10px; background:#fff; }
+        #titulos-incompletos-root tbody tr.tin-row { cursor:pointer; }
+        #titulos-incompletos-root tbody tr.tin-row.is-on td { background:#e7f6ee; }
         #titulos-incompletos-root table { width:100%; border-collapse:collapse; font-size:0.82rem; }
         #titulos-incompletos-root thead th { position:sticky; top:0; background:#f8fafc; color:#105436; padding:10px; text-align:left; font-weight:700; z-index:1; border-bottom:2px solid #105436; }
         #titulos-incompletos-root td { padding:9px 10px; border-bottom:1px solid #e2e8f0; white-space:nowrap; max-width:280px; overflow:hidden; text-overflow:ellipsis; }
@@ -315,13 +324,6 @@ const TitulosIncompletosApp = {
         #titulos-incompletos-root .tin-barfill { height:100%; width:45%; background:#105436; border-radius:99px; animation:tin-run 1.1s ease-in-out infinite; }
         @keyframes tin-run { 0% { transform:translateX(-120%); } 100% { transform:translateX(280%); } }
       </style>
-      <div class="tin-head">
-        <i data-lucide="file-warning" style="width:22px;height:22px;color:#105436;"></i>
-        <div>
-          <h2>Títulos incompletos</h2>
-          <small>Contas a pagar com emissão no período e consistência Incompleto ou Em inclusão</small>
-        </div>
-      </div>
       <div class="tin-card">
         <div class="tin-bar">
           <div><label for="tin-de">Emissão de</label><input id="tin-de" type="date" value="${this.esc(s.startDate)}" onchange="TitulosIncompletosApp.setCampo('startDate', this.value)"></div>
@@ -331,9 +333,9 @@ const TitulosIncompletosApp = {
           <button type="button" class="btn btn-excel" onclick="TitulosIncompletosApp.exportar()" title="Exportar tabela atual para Excel"><i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel</button>
         </div>
         ${s.erro ? `<p class="tin-erro">${this.esc(s.erro)}</p>` : ""}
+        <p class="tin-dica">Clique na linha para abrir o detalhe do título.</p>
       </div>
-      ${s.loading ? `<div class="tin-card" style="margin-top:14px;"><div class="tin-load"><div class="loading-spinner"></div><div>Buscando títulos incompletos no Sienge…</div><div class="tin-track"><div class="tin-barfill"></div></div></div></div>` : `
-      <div class="tin-kpis" id="tin-kpis">${this.kpisHtml(c, s.status)}</div>
+      ${s.loading ? `<div class="tin-card"><div class="tin-load"><div class="loading-spinner"></div><div>Buscando títulos incompletos no Sienge…</div><div class="tin-track"><div class="tin-barfill"></div></div></div></div>` : `
       <div class="tin-tablewrap"><table>
         <thead id="tin-head">${this.cabecalho()}</thead>
         <tbody id="tin-body">${this.linhas(lista)}</tbody>

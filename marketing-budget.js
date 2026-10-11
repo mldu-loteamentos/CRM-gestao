@@ -651,8 +651,14 @@ const MarketingBudgetApp = {
       const saldo = app.billBalance(bill);
       const aberta = typeof app.isSituacaoAberta === "function" && app.isSituacaoAberta(bill, null);
       if (aberta) pago = false;
+      const quitado = !aberta && original > 0.009 && (
+        (saldo != null && saldo <= 0.009) ||
+        (pago && (saldo == null || saldo <= 0.009))
+      );
       let realizado = 0;
-      if (!previsao && pago) realizado = saldo != null && saldo > 0.009 ? Math.max(0, original - saldo) : original;
+      if (quitado) realizado = original;
+      else if (pago && saldo != null && saldo > 0.009) realizado = Math.max(0, original - saldo);
+      else if (!previsao && pago) realizado = original;
       const aberto = Math.max(0, original - realizado);
       const titulo = String(bill.billId);
       const parcela = bill.installmentId != null ? String(bill.installmentId) : "";
@@ -688,9 +694,15 @@ const MarketingBudgetApp = {
           if (!cats[catId]) cats[catId] = { id: catId, nome: catNome, total: 0 };
           cats[catId].total += valor;
         };
-        if (previsao) {
+        if (previsao && realizado <= 0.009) {
           if (retro) push("previsao_vencida", original * fat, hoje, true);
           else push("previsao", original * fat, venc);
+        } else if (previsao) {
+          push("realizado", realizado * fat, dataPg || venc);
+          if (aberto > 0.009) {
+            if (retro) push("previsao_vencida", aberto * fat, hoje, true);
+            else push("previsao", aberto * fat, venc);
+          }
         } else {
           push("realizado", realizado * fat, dataPg || venc);
           push("comprometido", aberto * fat, (nota && retro) ? hoje : venc, nota && retro);

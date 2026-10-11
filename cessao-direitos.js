@@ -1196,8 +1196,12 @@ const CessaoPopup = {
         if (Array.isArray(rows)) installments = rows;
       } catch (e) {}
     }
-    const liquidoRecebido = await this.liquidoRecebidoDoTitulo(ctx.customerId, billId);
-    const extrato = await this.parcelasDoExtrato(billId);
+    const billFin = await this.billFinanceiro(ctx.customerId, billId);
+    const liquidoRecebido = this.liquidoDe(billFin);
+    const instFin = billFin && Array.isArray(billFin.installments) && billFin.installments.length
+      ? billFin.installments
+      : [].concat((billFin && billFin.paidInstallments) || [], (billFin && billFin.dueInstallments) || []);
+    const extrato = instFin.length ? [] : await this.parcelasDoExtrato(billId);
     const units = contract.salesContractUnits || contract.units || [];
     const u0 = units.find((u) => u && u.main) || units[0] || {};
     const unitName = String(u0.name || ctx.unidade || "").trim();
@@ -1273,7 +1277,7 @@ const CessaoPopup = {
       indexador = this.indiceDoContrato(condsApi, installments);
     }
     if (!condicoes.length) condicoes = [{ id: "c1", tipo: "Mensal", qtde: "", valor: "", vencimento: "" }];
-    const situacao = this.situacaoParcelas(extrato.length ? extrato : installments);
+    const situacao = this.situacaoParcelas(instFin.length ? instFin : (extrato.length ? extrato : installments));
     const empName = typeof window.resolveLoteamentoName === "function" ? window.resolveLoteamentoName(unit, sale) : (ctx.empreendimento || "");
     let preamble = "";
     if (typeof window.getPreambleForContract === "function") preamble = window.getPreambleForContract(unit, sale) || "";
@@ -1306,6 +1310,7 @@ const CessaoPopup = {
       valorParcelaAberta: situacao.valor,
       primeiroVencAberto: situacao.primeiro,
       saldoAberto: situacao.saldo,
+      valorPresente: situacao.valorPresente,
       saldoVencer: situacao.saldoVencer,
       parcelasVencer: situacao.parcelasVencer,
       valorPago: liquidoRecebido > 0 ? liquidoRecebido : situacao.pago
@@ -1382,13 +1387,17 @@ const CessaoPopup = {
     return "REAL";
   },
 
-  async liquidoRecebidoDoTitulo(customerId, billId) {
+  async billFinanceiro(customerId, billId) {
     const svc = window.SiengeApiService;
-    if (!customerId || !billId || !svc || typeof svc.getCustomerFinancialStatements !== "function") return 0;
+    if (!customerId || !billId || !svc || typeof svc.getCustomerFinancialStatements !== "function") return null;
     let fs = null;
     try { fs = await svc.getCustomerFinancialStatements(customerId); } catch (e) { fs = null; }
     const bills = ((fs && fs.results) || []).flatMap((item) => item.billsReceivable || item.billReceivable || []);
-    const bill = bills.find((db) => String(db.billReceivableId || db.receivableBillId) === String(billId));
+    const alvo = String(billId).replace(/^B-/, "").split("-")[0];
+    return bills.find((db) => String(db.billReceivableId || db.receivableBillId || "").replace(/^B-/, "").split("-")[0] === alvo) || null;
+  },
+
+  liquidoDe(bill) {
     if (!bill) return 0;
     const lista = Array.isArray(bill.installments) && bill.installments.length
       ? bill.installments
@@ -1437,6 +1446,7 @@ const CessaoPopup = {
     }).map((row) => ({
       dueDate: row.dueDate || row.originalDueDate || row.installmentDueDate || "",
       currentBalance: row.currentBalance,
+      originalValue: row.originalValue != null ? row.originalValue : (row.originalAmount != null ? row.originalAmount : row.amount),
       receipts: row.receipts || [],
       installmentSituation: row.installmentSituation
     }));
@@ -1466,41 +1476,39 @@ const CessaoPopup = {
   },
 
   situacaoParcelas(installments) {
-    const rel = window.RelacionamentoApp;
     const hoje = this.hojeIso();
     let pagas = 0;
     let abertas = 0;
     let saldo = 0;
     let pago = 0;
+    let presente = 0;
     const abertos = [];
     const vencer = [];
     (installments || []).forEach((p) => {
-      const original = Number(p.originalAmount != null ? p.originalAmount : (p.originalValue != null ? p.originalValue : (p.amount || 0))) || 0;
+      const original = Number(p.originalValue != null ? p.originalValue : (p.originalAmount != null ? p.originalAmount : (p.amount || 0))) || 0;
       const saldoAtual = this.saldoAtualDe(p);
-      const atual = saldoAtual != null ? saldoAtual : (Number(p.balanceDue != null ? p.balanceDue : original) || 0);
-      const pagaPeloSaldo = saldoAtual != null && saldoAtual <= 0.009;
-      const pagaPeloStatus = !pagaPeloSaldo && saldoAtual == null && rel && typeof rel._installmentSettled === "function" && rel._installmentSettled(p);
-      const paga = pagaPeloSaldo || pagaPeloStatus;
-      const recibos = this.valorRecibos(p);
-      if (recibos != null) pago += recibos;
-      else if (paga) pago += original;
-      if (paga) {
-        pagas += 1;
-        return;
-      }
-      abertas += 1;
-      saldo += atual;
+      const cb = saldoAtual != null ? saldoAtual : (Number(p.balanceDue) || 0);
       const due = String(p.dueDate || p.originalDueDate || "").slice(0, 10);
-      const item = { due: due, valor: atual > 0.009 ? atual : original };
+      (p.receipts || []).forEach((rec) => {
+        if (typeof window.isWriteOffReceipt === "function" && window.isWriteOffReceipt(rec)) return;
+        pagas += 1;
+        pago += Number(rec.receiptValue || 0);
+      });
+      if (!(cb > 0.009)) return;
+      abertas += 1;
+      saldo += cb;
+      const vpFn = typeof window.distPermutaInstVp === "function" ? window.distPermutaInstVp : null;
+      const vp = vpFn ? Number(vpFn(p)) : cb;
+      presente += Number.isFinite(vp) && vp > 0.009 ? vp : cb;
+      const face = original > 0.009 ? original : cb;
+      const item = { due: due, valor: face };
       abertos.push(item);
       if (!due || due >= hoje) vencer.push(item);
     });
     abertos.sort((a, b) => String(a.due).localeCompare(String(b.due)));
     vencer.sort((a, b) => String(a.due).localeCompare(String(b.due)));
-    const baseValor = (vencer.length ? vencer : abertos).map((x) => x.valor);
-    const valor = this.modaValor(baseValor);
+    const prox = vencer[0] || abertos[0] || null;
     const saldoVencer = vencer.reduce((s, x) => s + (Number(x.valor) || 0), 0);
-    const primeiro = (vencer[0] && vencer[0].due) || (abertos[0] && abertos[0].due) || "";
     return {
       pagas: pagas,
       abertas: abertas,
@@ -1508,9 +1516,10 @@ const CessaoPopup = {
       pago: Math.round(pago * 100) / 100,
       saldo: Math.round(saldo * 100) / 100,
       saldoVencer: Math.round(saldoVencer * 100) / 100,
-      valor: Math.round(valor * 100) / 100,
-      primeiro: primeiro,
-      parcelasVencer: vencer
+      valor: prox ? Math.round(prox.valor * 100) / 100 : 0,
+      primeiro: prox ? prox.due : "",
+      parcelasVencer: vencer,
+      valorPresente: Math.round(presente * 100) / 100
     };
   },
 
@@ -1631,7 +1640,7 @@ const CessaoPopup = {
         ${this.campoContrato("Indexador", st.indexador || "REAL")}
         ${this.campoContrato("Parcelas já pagas", String(st.qtdPagas || 0))}
         ${this.campoContrato("Parcelas a pagar", String(st.qtdAbertas || 0))}
-        ${this.campoContrato("Valor da parcela em aberto", this.money(st.valorParcelaAberta), true)}
+        ${this.campoContrato("Valor da próxima parcela", this.money(st.valorParcelaAberta), true)}
         ${this.campoContrato("Próximo vencimento", st.primeiroVencAberto ? CessaoApp.fmtDate(st.primeiroVencAberto) : "—", true)}
         ${this.campoContrato("Saldo com o vendedor", this.money(st.saldoAberto), true)}
       </div>
@@ -1732,7 +1741,6 @@ const CessaoPopup = {
         <div class="is-wide"><dt>Endereço</dt><dd>${this.esc(typeof window.formatLegalCustomerAddress === "function" ? (window.formatLegalCustomerAddress(c) || "Endereço não informado") : "Endereço não informado")}</dd></div>
         <div><dt>E-mail</dt><dd>${this.esc(this.emailDe(c) || "não consta")}</dd></div>
       </dl>
-      ${bloco("Cônjuge", conj)}
       ${bloco("Representante", rep)}` : ""}
     </div>`;
   },
@@ -1859,7 +1867,7 @@ const CessaoPopup = {
 
   removeCessionario(idx) {
     CessaoPopupState.cessionarios.splice(idx, 1);
-    if (Number(CessaoPopupState.cesAberto) === idx) CessaoPopupState.cesAberto = CessaoPopupState.cessionarios.length - 1;
+    if (Number(CessaoPopupState.cesAberto) === idx) CessaoPopupState.cesAberto = -1;
     else if (Number(CessaoPopupState.cesAberto) > idx) CessaoPopupState.cesAberto -= 1;
     if (CessaoPopupState.buscaModo.tipo === "representante") CessaoPopupState.buscaModo = { tipo: "cessionario" };
     this.pintar();
@@ -1968,7 +1976,7 @@ const CessaoPopup = {
         pct: Math.round(rem * 100) / 100,
         representante: null
       });
-      CessaoPopupState.cesAberto = CessaoPopupState.cessionarios.length - 1;
+      CessaoPopupState.cesAberto = -1;
     }
     CessaoPopupState.busca = "";
     CessaoPopupState.sugestoes = [];
@@ -2000,9 +2008,10 @@ const CessaoPopup = {
 
   clausulaJuros() {
     const juros = Number(CessaoPopupState.juros) || 0;
-    const saldo = Number(CessaoPopupState.saldoAberto) || 0;
+    const presente = Number(CessaoPopupState.valorPresente);
+    const divida = Number.isFinite(presente) ? presente : (Number(CessaoPopupState.saldoAberto) || 0);
     if (juros <= 0.000001) return "1.3. O contrato não possui juros de parcelamento.";
-    if (saldo <= 0.009) return "1.3. O contrato está quitado.";
+    if (divida <= 0.009) return "1.3. O contrato está quitado.";
     return "1.3. O contrato possui juros de parcelamento de " + this.fmtPct(juros) + "% ao mês.";
   },
 
@@ -2106,16 +2115,16 @@ const CessaoPopup = {
 
   assinaturaHtml() {
     const st = CessaoPopupState;
-    const campo = (nome, papel) => `<div style="height:64px;"></div>
+    const campo = (nome, papel) => `<div style="height:32px;"></div>
       <div style="border-top:1px solid #111;margin:0 10px 8px;"></div>
       <div style="font-weight:bold;line-height:1.3;">${this.esc(String(nome || "").toUpperCase())}</div>
       <div style="margin-top:2px;">${this.esc(papel)}</div>`;
     const faixa = (campos) => {
       if (!campos.length) return "";
       if (campos.length === 1) {
-        return `<tr><td colspan="2" style="padding:40px 22% 0;text-align:center;white-space:normal;vertical-align:bottom;">${campo(campos[0].nome, campos[0].papel)}</td></tr>`;
+        return `<tr><td colspan="2" style="padding:20px 22% 0;text-align:center;white-space:normal;vertical-align:bottom;">${campo(campos[0].nome, campos[0].papel)}</td></tr>`;
       }
-      return `<tr>${campos.slice(0, 2).map((c) => `<td style="width:50%;padding:40px 14px 0;text-align:center;white-space:normal;vertical-align:bottom;">${campo(c.nome, c.papel)}</td>`).join("")}</tr>`;
+      return `<tr>${campos.slice(0, 2).map((c) => `<td style="width:50%;padding:20px 14px 0;text-align:center;white-space:normal;vertical-align:bottom;">${campo(c.nome, c.papel)}</td>`).join("")}</tr>`;
     };
     const grupoDe = (customer, papel) => {
       const nome = customer && (customer.name || customer.nome);
@@ -2139,7 +2148,7 @@ const CessaoPopup = {
     const testemunha = (u) => {
       const nome = u.name || u.nome || "________________";
       const rg = u.doc_rg || u.rg || "________________";
-      return `<td style="width:50%;padding:36px 16px 0;text-align:center;white-space:normal;">Nome: ${this.esc(nome)}<br>RG: ${this.esc(rg)}</td>`;
+      return `<td style="width:50%;padding:18px 16px 0;text-align:center;white-space:normal;">${this.esc(nome)}<br>RG: ${this.esc(rg)}</td>`;
     };
     const data = this.dataHoje();
     return `<div style="font-family:'Times New Roman',serif;white-space:normal;line-height:1.35;">` +
@@ -2147,7 +2156,7 @@ const CessaoPopup = {
       `<p style="text-align:center;margin:28px 0 8px;">Botucatu, ${this.esc(data)}</p>` +
       `<table style="width:100%;border-collapse:collapse;margin-top:8px;">${linhasCed.map(faixa).join("")}${linhasCes.map(faixa).join("")}` +
       faixa([{ nome: st.empresaNome || "ANUENTE", papel: "Anuente" }]) +
-      `<tr><td colspan="2" style="padding-top:48px;text-align:center;font-weight:bold;">Testemunhas</td></tr>` +
+      `<tr><td colspan="2" style="padding-top:24px;text-align:center;font-weight:bold;">Testemunhas</td></tr>` +
       `<tr>${testemunha(w(st.testemunha1))}${testemunha(w(st.testemunha2))}</tr>` +
       `</table></div>`;
   },

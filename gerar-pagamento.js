@@ -301,11 +301,41 @@ const GerarPagamentoApp = {
     if (el) el.textContent = s.progresso || "";
     const bar = document.getElementById("gp-progresso-barra");
     if (bar) bar.style.width = Math.max(2, Math.min(99, Math.round((s.progressoPct || 0) * 100))) + "%";
-    const tempo = document.getElementById("gp-progresso-tempo");
-    if (tempo && s.progressoInicio) tempo.textContent = "Tempo decorrido: " + Math.floor((Date.now() - s.progressoInicio) / 1000) + "s";
   },
 
-  /* Mesmo carregamento da Fila de cobrança: círculo girando e barra verde. */
+  FRASES_CARGA: ["Buscando títulos", "Checando lotes", "Conferindo boletos", "Analisando notas", "Conferindo rateios"],
+
+  iniciarFrases(gen) {
+    this.pararFrases();
+    const s = this.state;
+    s.fraseIdx = 0;
+    s.progresso = this.FRASES_CARGA[0];
+    const timer = setInterval(() => {
+      if (s._fraseTimer !== timer) {
+        clearInterval(timer);
+        return;
+      }
+      if (gen !== s.gen || !s.consultando) {
+        clearInterval(timer);
+        if (s._fraseTimer === timer) s._fraseTimer = null;
+        return;
+      }
+      s.fraseIdx = (s.fraseIdx + 1) % this.FRASES_CARGA.length;
+      s.progresso = this.FRASES_CARGA[s.fraseIdx];
+      this.pintarProgresso();
+    }, 2400);
+    s._fraseTimer = timer;
+  },
+
+  pararFrases() {
+    const s = this.state;
+    if (s && s._fraseTimer) {
+      clearInterval(s._fraseTimer);
+      s._fraseTimer = null;
+    }
+  },
+
+  /* Círculo, frase da etapa e barra. Sem contagem de títulos e sem tempo decorrido. */
   carregandoHtml() {
     return `<div style="display:flex;flex-direction:column;align-items:center;gap:12px;width:100%;max-width:400px;margin:0 auto;padding:40px 0;color:var(--color-text-muted);">
         <div class="loading-spinner" style="width:32px;height:32px;border:3px solid rgba(16,84,54,0.15);border-top-color:var(--color-primary);border-radius:50%;animation:spin 0.8s linear infinite;"></div>
@@ -313,7 +343,6 @@ const GerarPagamentoApp = {
         <div style="width:100%;background:#e2e8f0;border-radius:8px;height:10px;overflow:hidden;margin-top:5px;">
           <div id="gp-progresso-barra" class="loading-progress-bar" style="width:${Math.max(2, Math.round((this.state.progressoPct || 0) * 100))}%;height:100%;background:#10b981;transition:width 0.4s linear;"></div>
         </div>
-        <span id="gp-progresso-tempo" class="loading-time-text" style="font-size:0.85rem;color:#64748b;margin-top:4px;"></span>
       </div>`;
   },
 
@@ -344,13 +373,8 @@ const GerarPagamentoApp = {
     s.consultando = true;
     s.consultado = true;
     s.erroTitulos = "";
-    s.progresso = "Buscando títulos a pagar no Sienge…";
     s.progressoPct = 0;
-    s.progressoInicio = Date.now();
-    const relogio = setInterval(() => {
-      if (gen !== s.gen || !s.consultando) clearInterval(relogio);
-      else this.pintarProgresso();
-    }, 1000);
+    this.iniciarFrases(gen);
     s.titulos = [];
     s.previsoesIgnoradas = 0;
     s.sel = {};
@@ -368,11 +392,7 @@ const GerarPagamentoApp = {
       + "&endDate=" + encodeURIComponent(end)
       + "&selectionType=D&correctionIndexerId=0&correctionDate=2023-01-01&withAuthorizations=true&withBankMovements=true"
       + (companyId ? "&companyId=" + encodeURIComponent(companyId) : "");
-    api.noteProgress = (text) => {
-      if (gen !== s.gen) return;
-      s.progresso = text;
-      this.pintarProgresso();
-    };
+    api.noteProgress = () => {};
 
     try {
       const empresas = [...new Set(parceiros.map((cc) => String(this.companyIdOf(cc) || "")).filter(Boolean))];
@@ -393,7 +413,6 @@ const GerarPagamentoApp = {
         for (const emp of alvos) {
           if (gen !== s.gen) return;
           passo += 1;
-          s.progresso = "Buscando títulos a pagar no Sienge · " + passo + " de " + total;
           s.progressoPct = ((passo - 1) / total) * 0.85;
           this.pintarProgresso();
           const parte = await api.outcomeRange(faixa.start, faixa.end, emp);
@@ -402,7 +421,6 @@ const GerarPagamentoApp = {
       }
       if (gen !== s.gen) return;
       this.montarTitulos(base, bills, parceiros);
-      s.progresso = "Conferindo lotes já gerados…";
       s.progressoPct = 0.9;
       this.pintarProgresso();
       await this.carregarLotes();
@@ -415,6 +433,8 @@ const GerarPagamentoApp = {
       console.error("[Gerar Pagamento] títulos", e);
       s.erroTitulos = (e && e.message) ? e.message : "Falha ao buscar os títulos a pagar no Sienge.";
     }
+    if (gen !== s.gen) return;
+    this.pararFrases();
     s.consultando = false;
     s.progresso = "";
     this.render();
@@ -1525,7 +1545,7 @@ const GerarPagamentoApp = {
           <td><strong>${this.esc(it.titulo)}</strong>${it.parcela ? `<span class="gp-muted"> / ${this.esc(it.parcela)}</span>` : ""}</td>
           <td title="${this.esc(it.credor)}">${this.esc(it.credor)}</td>
           <td>${this.esc(it.documento || "—")}</td>
-          <td class="gp-status">${this.ccsCelulaHtml(it)}${it.emLote ? "" : this.rateioSeloHtml(it.rateio)}</td>
+          <td class="gp-status">${this.ccsCelulaHtml(it)}</td>
           <td style="text-align:right;"${retido ? ` title="${this.esc(`Líquido: bruto ${this.money(it.aPagar)} − impostos retidos ${this.money(retido)}`)}"` : ""}>${this.money(this.valorPagar(it))}${retido ? `<br><small class="gp-muted" style="white-space:nowrap;">retido ${this.money(retido)}</small>` : ""}</td>
           <td class="gp-status">${pagSelo}</td>
           <td class="gp-status">${fiscalSelo}</td>
@@ -1564,8 +1584,8 @@ const GerarPagamentoApp = {
         </div>
         <div class="gp-lote-corpo" style="overflow:auto;"${aberto ? "" : " hidden"}>
           <table class="gp-table gp-titulos">
-            <colgroup><col style="width:3%"><col style="width:8%"><col style="width:7%"><col style="width:15%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:9%"><col style="width:12%"><col style="width:10%"></colgroup>
-            <thead><tr><th></th><th>Vencimento</th><th>Título</th><th>Credor</th><th>Documento</th><th>Centro de custo</th><th style="text-align:right;">A pagar</th><th>Pagamento</th><th title="Imposto retido lançado no Sienge × nota fiscal anexada × CNAE do prestador">Fiscal</th><th>Autorização</th><th>Situação</th></tr></thead>
+            <colgroup><col style="width:3%"><col style="width:8%"><col style="width:7%"><col style="width:12%"><col style="width:9%"><col style="width:11%"><col style="width:9%"><col style="width:10%"><col style="width:9%"><col style="width:12%"><col style="width:10%"></colgroup>
+            <thead><tr><th></th><th>Vencimento</th><th>Título</th><th>Credor</th><th>Documento</th><th>Rateio</th><th style="text-align:right;">A pagar</th><th>Pagamento</th><th title="Imposto retido lançado no Sienge × nota fiscal anexada × CNAE do prestador">Fiscal</th><th>Autorização</th><th>Situação</th></tr></thead>
             <tbody>${linhas}</tbody>
           </table>
         </div>
@@ -1834,6 +1854,7 @@ const GerarPagamentoApp = {
       if (l.ausente) ausentes.push(l);
       else doRateio[l.id] = { titulo: l.pct, obra: o.pct > 0 ? l.pct * 100 / o.pct : 0, linha: l };
     }));
+    const resumo = this.rateioResumo(it);
     const idHtml = (c) => (c.parceria ? `<strong>${this.esc(c.id)}</strong>` : `<span class="gp-cc-outro">${this.esc(c.id)}</span>`);
     const status = (l) => {
       if (!l) return `<span class="gp-muted">—</span>`;
@@ -1850,7 +1871,20 @@ const GerarPagamentoApp = {
     }).concat(ausentes.map((l) => `<tr><td><strong>${this.esc(l.id)}</strong> <span class="gp-cc-pop-nome">${this.esc(l.nome || "")}</span></td>
         <td class="num">—</td><td class="num">${l.padrao != null ? this.pct(l.padrao) : "—"}</td><td>${status(l)}</td></tr>`)).join("");
     const pop = `<table class="gp-cc-pop-tab"><thead><tr><th>Centro de custo</th><th class="num">Rateio título</th><th class="num">Rateio parceria</th><th>Status</th></tr></thead><tbody>${linhas}</tbody></table>`;
-    return `<span class="gp-cc-lista" onmouseenter="GerarPagamentoApp.ccPopAbrir(this)" onmouseleave="GerarPagamentoApp.ccPopFechar()">${ccs.map(idHtml).join("")}<template>${pop}</template></span>`;
+    const selo = `<span class="bchk ${resumo.cls}">${this.esc(resumo.tem)}</span><span class="bchk ${resumo.cls}">${this.esc(resumo.validacao)}</span>`;
+    return `<span class="gp-cc-lista" title="${this.esc(resumo.dica)}" onmouseenter="GerarPagamentoApp.ccPopAbrir(this)" onmouseleave="GerarPagamentoApp.ccPopFechar()">${selo}<template>${pop}</template></span>`;
+  },
+
+  /** Primeira conferência: se o título tem rateio entre centros e se esse rateio passou na validação atual. */
+  rateioResumo(it) {
+    const conf = it && it.rateio;
+    const n = ((it && it.ccs) || []).filter((c) => c && (c.rateio == null || this.num(c.rateio) > 0.009)).length;
+    const temRateio = n > 1;
+    const tem = temRateio ? "Com rateio" : "Sem rateio";
+    if (!conf) return { tem, validacao: "Não conferido", cls: "bchk-wait", dica: "O rateio ainda não foi conferido." };
+    const validado = !!conf.ok;
+    const dica = conf.problemas && conf.problemas.length ? conf.problemas.join("\n") : (validado ? tem + " e validado." : tem + " e não validado.");
+    return { tem, validacao: validado ? "Validado" : "Não validado", cls: validado ? "bchk-ok" : "bchk-erro", dica };
   },
 
   ccPopAbrir(el) {
@@ -2055,7 +2089,7 @@ const GerarPagamentoApp = {
           #gerar-pagamento-root .gp-cc-outro { color:#64748b; font-weight:600; }
           #gerar-pagamento-root .gp-aut { display:inline-flex; align-items:center; gap:2px; flex-wrap:wrap; }
           #gerar-pagamento-root .gp-aut-seta { width:12px; height:12px; color:#94a3b8; }
-          #gerar-pagamento-root .gp-cc-lista { display:inline-flex; flex-direction:column; gap:1px; cursor:help; font-size:0.85rem; }
+          #gerar-pagamento-root .gp-cc-lista { display:inline-flex; flex-direction:column; align-items:flex-start; gap:3px; cursor:help; font-size:0.85rem; }
           .gp-cc-pop { display:none; position:fixed; z-index:3000; background:#fff; border:1px solid #e2e8f0; border-radius:10px; box-shadow:0 10px 30px rgba(15,23,42,.18); padding:8px 10px; pointer-events:none; }
           .gp-cc-pop-tab { border-collapse:collapse; font-size:0.8rem; color:#1e293b; }
           .gp-cc-pop-tab th { text-align:left; font-size:0.68rem; text-transform:uppercase; color:#64748b; font-weight:700; padding:4px 10px; border-bottom:1px solid #e2e8f0; white-space:nowrap; }

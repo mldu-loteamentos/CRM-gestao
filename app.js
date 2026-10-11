@@ -3160,7 +3160,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "configuracoes": "Configurações",
     "regras-negociacao": "Configurações",
     "regras-cobranca": "Configurações",
-    "prestacao-contas": "Prestação de Contas",
+    "prestacao-contas": "Nova prestação",
     "fluxo-caixa": "Fluxo de caixa (DFC)",
     "fluxo-caixa-diario": "Fluxo de caixa diário",
     "relatorios-cr": "Relatórios",
@@ -3168,7 +3168,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "investimento": "Aplicações e Investimentos",
     "financiamento": "Financiamento",
     "repactuacao-lote": "Repactuação",
-    "parametrizacao-parceiro": "Parametrização de Parceiro",
+    "parametrizacao-parceiro": "Configurações",
     "estrutura-societaria": "Organograma Societário",
     "participacoes": "Prestação Contas Ellenceo",
     "parametrizacoes": "Gestão de Empresas",
@@ -5412,7 +5412,6 @@ window.applyPermissions = function(profileName) {
           && perms.mod_fin === true;
         const cbAlias = (
           modKey === 'sub_fin_cb_fluxo_caixa_acessar'
-          || modKey === 'sub_fin_cb_caixa_banco_acessar'
           || modKey === 'sub_fin_cb_investimento_acessar'
           || modKey === 'sub_fin_cb_fluxo_caixa_diario_acessar'
           || modKey === 'sub_fin_cb_resultado_caixa_acessar'
@@ -21703,6 +21702,15 @@ window.centerDistratoSignatures = function(html) {
       i++;
       continue;
     }
+    if (hasWitnessTitle && !w1Name && !/rg\s*:/i.test(line)) {
+      const names = String(line || "").split(/\s{2,}|\t+/).map((x) => x.trim()).filter(Boolean);
+      if (names.length) {
+        w1Name = names[0] || w1Name;
+        w2Name = names[1] || w2Name;
+        i++;
+        continue;
+      }
+    }
     if (/rg\s*:/i.test(line)) {
       const rgs = splitDistratoWitnessFields(line, "RG");
       w1Rg = rgs[0] || w1Rg;
@@ -21722,11 +21730,11 @@ window.centerDistratoSignatures = function(html) {
     <table style="width: 100%; max-width: 680px; margin: 14px auto 0; border-collapse: collapse; white-space: normal;">
       <tr>
         <td style="width: 50%; text-align: center; vertical-align: top; padding: 0 12px;">
-          <div>Nome: ${w1Name || "________________"}</div>
+          <div>${w1Name || "________________"}</div>
           <div>RG: ${w1Rg || "________________"}</div>
         </td>
         <td style="width: 50%; text-align: center; vertical-align: top; padding: 0 12px;">
-          <div>Nome: ${w2Name || "________________"}</div>
+          <div>${w2Name || "________________"}</div>
           <div>RG: ${w2Rg || "________________"}</div>
         </td>
       </tr>

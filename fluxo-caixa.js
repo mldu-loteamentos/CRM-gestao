@@ -7,6 +7,8 @@ const FluxoCaixaApp = {
   // e a API bank-movement rejeita P com 422.
   selectionType: "M",
   selectedCompanyIds: [],
+  consolidacaoAtiva: true,
+  companyMonthsOpen: null,
   companyDropOpen: false,
   companyQuery: "",
   loading: false,
@@ -33,7 +35,14 @@ const FluxoCaixaApp = {
     // Sempre a visão DFC Padrão do cadastro de visões (Apoio / Integra)
     this.visao();
     const cons = this.consolidacaoCompanies();
-    if (!this.selectedCompanyIds.length) this.selectedCompanyIds = cons.map(c => String(c.id));
+    if (!this.selectedCompanyIds.length && cons.length) {
+      this.selectedCompanyIds = cons.map(c => String(c.id));
+      this.consolidacaoAtiva = true;
+    } else if (!cons.length) {
+      this.consolidacaoAtiva = false;
+    }
+    if (!this.companyMonthsOpen) this.companyMonthsOpen = new Set();
+    this.noteCompanySet(true);
     this.render();
     this.ensureCategories();
     if (!window._fcEmpDropBound) {
@@ -71,20 +80,33 @@ const FluxoCaixaApp = {
     } catch (e) { return {}; }
   },
 
-  consolidacaoCompanies() {
+  allCompanies() {
     const all = (window.AppState && AppState.companies) || [];
     const custom = this.empresasCustom();
-    return all.filter(c => {
-      const cfg = custom[c.id] || custom[String(c.id)] || {};
-      return Number(cfg.consolidacao_padrao) === 1;
-    }).map(c => {
+    return all.map(c => {
       const cfg = custom[c.id] || custom[String(c.id)] || {};
       return {
         id: String(c.id),
-        name: cfg.nome_usual || c.name || `Empresa ${c.id}`,
-        pct: Number(cfg.percentual_mldu) || 0
+        fullName: c.name || c.tradeName || `Empresa ${c.id}`,
+        usual: String(cfg.nome_usual || "").trim(),
+        pct: Number(cfg.percentual_mldu) || 0,
+        consolidacao: Number(cfg.consolidacao_padrao) === 1
       };
     }).sort((a, b) => Number(a.id) - Number(b.id));
+  },
+
+  consolidacaoCompanies() {
+    return this.allCompanies().filter(c => c.consolidacao);
+  },
+
+  companyById(id) {
+    return this.allCompanies().find(c => String(c.id) === String(id)) || null;
+  },
+
+  columnHeader(c) {
+    if (!c) return "";
+    const usual = c.usual || String(c.fullName || "").trim();
+    return `${c.id}-${usual}`;
   },
 
   visao() {
@@ -134,8 +156,10 @@ const FluxoCaixaApp = {
   },
 
   factorForCompany(companyId) {
-    const c = this.consolidacaoCompanies().find(x => String(x.id) === String(companyId));
-    return c ? (Number(c.pct) || 0) / 100 : 0;
+    if (!this.consolidacaoAtiva) return 1;
+    const c = this.companyById(companyId);
+    if (!c || !c.consolidacao) return 0;
+    return (Number(c.pct) || 0) / 100;
   },
 
   /**
@@ -498,10 +522,58 @@ const FluxoCaixaApp = {
     return o;
   },
 
-  addInto(bucket, month, amount) {
+  addInto(bucket, month, amount, companyId) {
+    if (!bucket.months) bucket.months = this.emptyMonths(this.months);
     if (!bucket.months[month]) bucket.months[month] = 0;
     bucket.months[month] += amount;
-    bucket.total += amount;
+    bucket.total = (Number(bucket.total) || 0) + amount;
+    const cid = companyId != null && companyId !== "" ? String(companyId) : "";
+    if (!cid) return;
+    if (!bucket.byCompany) bucket.byCompany = {};
+    if (!bucket.byCompany[cid]) bucket.byCompany[cid] = { months: this.emptyMonths(this.months), total: 0 };
+    const bag = bucket.byCompany[cid];
+    if (!bag.months[month]) bag.months[month] = 0;
+    bag.months[month] += amount;
+    bag.total += amount;
+  },
+
+  costCenterRows(acc) {
+    const map = {};
+    (acc.items || []).forEach(it => {
+      const id = it.costCenterId != null && String(it.costCenterId).trim() !== "" ? String(it.costCenterId) : "—";
+      const name = String(it.costCenterName || "").trim();
+      if (!map[id]) {
+        map[id] = {
+          id,
+          ccName: name,
+          months: this.emptyMonths(this.months),
+          total: 0,
+          byCompany: {},
+          items: []
+        };
+      }
+      const row = map[id];
+      if (name && !row.ccName) row.ccName = name;
+      this.addInto(row, it.month, Number(it.amount) || 0, it.companyId);
+      row.items.push(it);
+    });
+    return Object.values(map).sort((a, b) => {
+      const diff = Math.abs(Number(b.total) || 0) - Math.abs(Number(a.total) || 0);
+      if (diff) return diff;
+      return (Number(b.total) || 0) - (Number(a.total) || 0);
+    });
+  },
+
+  mergeByCompany(dest, src) {
+    if (!src || !src.byCompany) return;
+    if (!dest.byCompany) dest.byCompany = {};
+    Object.keys(src.byCompany).forEach(id => {
+      const s = src.byCompany[id];
+      if (!dest.byCompany[id]) dest.byCompany[id] = { months: this.emptyMonths(this.months), total: 0 };
+      const d = dest.byCompany[id];
+      this.months.forEach(m => { d.months[m] = (d.months[m] || 0) + ((s.months && s.months[m]) || 0); });
+      d.total += Number(s.total) || 0;
+    });
   },
 
   build(allocs) {
@@ -543,7 +615,7 @@ const FluxoCaixaApp = {
       const nid = accToNode[rawId] || (nk && accToNode[nk]) || (dotted && accToNode[dotted]) || null;
       if (!nid || !byId[nid]) {
         const amount = Number(a.amount) || 0;
-        this.addInto(unmatched, a.month, amount);
+        this.addInto(unmatched, a.month, amount, a.companyId);
         if (unmatched.samples.length < 12) {
           unmatched.samples.push({ id: rawId, name: a.categoryName, amount });
         }
@@ -551,7 +623,7 @@ const FluxoCaixaApp = {
       }
       const node = byId[nid];
       const amount = this.signedAmount(node, a.categoryId, a.categoryName, a.amount, a.reducer, a.categoryType, a.mov);
-      this.addInto(node, a.month, amount);
+      this.addInto(node, a.month, amount, a.companyId);
       const idxKey = nk || rawId;
       if (!accIndex[idxKey]) {
         accIndex[idxKey] = {
@@ -566,7 +638,7 @@ const FluxoCaixaApp = {
             || /^(S|SIM|TRUE|1|Y|R)$/i.test(String(a.reducer || "").trim()))
         };
       }
-      this.addInto(accIndex[idxKey], a.month, amount);
+      this.addInto(accIndex[idxKey], a.month, amount, a.companyId);
       accIndex[idxKey].name = a.categoryName || accIndex[idxKey].name;
       const item = { ...a, amount, signedAmount: amount };
       accIndex[idxKey].items.push(item);
@@ -614,25 +686,28 @@ const FluxoCaixaApp = {
       children.forEach(ch => {
         this.months.forEach(m => { g.months[m] += ch.months[m] || 0; });
         g.total += ch.total;
+        this.mergeByCompany(g, ch);
       });
     });
 
     const sumNodes = (ids) => {
       const months = this.emptyMonths(this.months);
-      let total = 0;
+      const acc = { months, total: 0, byCompany: {} };
       ids.forEach(id => {
         const n = byId[id];
         if (!n) return;
         this.months.forEach(m => { months[m] += n.months[m] || 0; });
-        total += n.total;
+        acc.total += n.total;
+        this.mergeByCompany(acc, n);
       });
-      return { months, total };
+      return acc;
     };
     const applySum = (id, parts) => {
       if (!byId[id]) return;
       const s = sumNodes(parts);
       byId[id].months = s.months;
       byId[id].total = s.total;
+      byId[id].byCompany = s.byCompany;
     };
     applySum("g_03", ["g_04", "g_05"]);
     applySum("g_06", ["g_01", "g_02", "g_03"]);
@@ -663,12 +738,32 @@ const FluxoCaixaApp = {
       (node.accountRows || []).forEach(acc => {
         const code = acc.displayId || this.formatAccountCode(acc.id);
         const redFlag = acc.redutora ? " (−)" : "";
+        const toggleId = "acc:" + (acc.displayId || acc.id);
+        const ccRows = this.costCenterRows(acc);
         rows.push({
           ...acc,
           level: level + 1,
           isAccount: true,
-          hasKids: false,
+          isCostCenter: false,
+          hasKids: ccRows.length > 0,
+          toggleId,
           name: `${code} ${acc.name || ""}${redFlag}`.trim()
+        });
+        if (!ccRows.length || !this.expanded.has(toggleId)) return;
+        ccRows.forEach(cc => {
+          const label = cc.id === "—"
+            ? "Sem centro de custo"
+            : `${cc.id}${cc.ccName ? " - " + cc.ccName : ""}`;
+          rows.push({
+            ...cc,
+            level: level + 2,
+            isAccount: false,
+            isCostCenter: true,
+            hasKids: false,
+            parentAccountId: acc.id,
+            ccId: cc.id,
+            name: label
+          });
         });
       });
     };
@@ -683,7 +778,7 @@ const FluxoCaixaApp = {
       return;
     }
     if (!this.selectedCompanyIds.length) {
-      this.error = "Selecione ao menos uma empresa da consolidação padrão.";
+      this.error = "Selecione ao menos uma empresa.";
       this.render();
       return;
     }
@@ -710,8 +805,10 @@ const FluxoCaixaApp = {
         const d = this.cashDate(m);
         return d && d >= this.startDate && d <= this.endDate;
       });
+      const selected = new Set(this.selectedCompanyIds.map(String));
       const allocs = [];
       this.movements.forEach(mov => {
+        if (selected.size && !selected.has(String(mov.companyId))) return;
         const factor = this.factorForCompany(mov.companyId);
         if (factor <= 0) return;
         this.allocate(mov, factor).forEach(a => allocs.push(a));
@@ -735,6 +832,49 @@ const FluxoCaixaApp = {
     this.rebuildFromCache();
   },
 
+  noteCompanySet(force) {
+    const key = this.selectedCompanyIds.map(String).slice().sort((a, b) => Number(a) - Number(b)).join(",");
+    if (!force && key === this._companySetKey) return;
+    this._companySetKey = key;
+    if (this.selectedCompanyIds.length <= 1) this.companyMonthsOpen = new Set(this.selectedCompanyIds.map(String));
+    else this.companyMonthsOpen = new Set();
+  },
+
+  toggleCompanyMonths(id) {
+    const sid = String(id);
+    if (!this.companyMonthsOpen) this.companyMonthsOpen = new Set();
+    if (this.companyMonthsOpen.has(sid)) this.companyMonthsOpen.delete(sid);
+    else this.companyMonthsOpen.add(sid);
+    this.render();
+  },
+
+  aplicarConsolidacao() {
+    if (this.consolidacaoAtiva) {
+      this.consolidacaoAtiva = false;
+    } else {
+      const cons = this.consolidacaoCompanies();
+      if (!cons.length) {
+        this.error = "Nenhuma empresa está marcada como consolidação padrão no cadastro.";
+        this.render();
+        return;
+      }
+      this.consolidacaoAtiva = true;
+      this.selectedCompanyIds = cons.map(c => String(c.id));
+      this.error = "";
+    }
+    this.noteCompanySet(true);
+    this.companyDropOpen = false;
+    if (this.startDate && this.endDate && this.selectedCompanyIds.length) this.load();
+    else this.render();
+  },
+
+  refreshAfterCompanyChange() {
+    this.noteCompanySet();
+    this.companyDropOpen = true;
+    if (this.movements.length) this.rebuildFromCache();
+    else this.render();
+  },
+
   toggleCompany(id, on) {
     const sid = String(id);
     if (on) {
@@ -742,14 +882,14 @@ const FluxoCaixaApp = {
     } else {
       this.selectedCompanyIds = this.selectedCompanyIds.filter(x => x !== sid);
     }
-    this.companyDropOpen = true;
-    this.render();
+    this.consolidacaoAtiva = false;
+    this.refreshAfterCompanyChange();
   },
 
   companyFilterItems() {
-    return this.consolidacaoCompanies().map(c => ({
+    return this.allCompanies().map(c => ({
       id: String(c.id),
-      label: `${c.id} - ${String(c.name || "").toUpperCase()} · ${c.pct}%`
+      label: `${c.id} - ${String(c.fullName || "").toUpperCase()}`
     }));
   },
 
@@ -774,22 +914,22 @@ const FluxoCaixaApp = {
       },
       toggleId: (id, on) => this.toggleCompany(id, on),
       selectAll: () => {
-        this.selectedCompanyIds = this.consolidacaoCompanies().map(c => String(c.id));
-        this.companyDropOpen = true;
-        this.render();
+        this.selectedCompanyIds = this.allCompanies().map(c => String(c.id));
+        this.consolidacaoAtiva = false;
+        this.refreshAfterCompanyChange();
       },
       selectNone: () => {
         this.selectedCompanyIds = [];
-        this.companyDropOpen = true;
-        this.render();
+        this.consolidacaoAtiva = false;
+        this.refreshAfterCompanyChange();
       }
     });
   },
 
   companyDropHtml() {
-    const companies = this.consolidacaoCompanies();
+    const companies = this.allCompanies();
     if (!companies.length) {
-      return `<div style="flex:1;min-width:240px;"><div class="ml-emp-filter-label">Empresas</div><span style="color:#94a3b8;font-size:0.8rem;">Nenhuma empresa com consolidação padrão.</span></div>`;
+      return `<div style="flex:1;min-width:240px;"><div class="ml-emp-filter-label">Empresas</div><span style="color:#94a3b8;font-size:0.8rem;">Nenhuma empresa cadastrada.</span></div>`;
     }
     this.bindCompanyFilter();
     if (window.MlEmpresaFilter) {
@@ -828,9 +968,24 @@ const FluxoCaixaApp = {
         return;
       }
     }
+    const acc = [];
+    (this.rows || []).forEach(r => {
+      if (r.isAccount && r.hasKids && r.toggleId && !this.expanded.has(r.toggleId)) acc.push(r.toggleId);
+    });
+    if (acc.length) {
+      acc.forEach(id => this.expanded.add(id));
+      this.rebuildFromCache();
+    }
   },
 
   collapseAll() {
+    const acc = [];
+    this.expanded.forEach(id => { if (String(id).indexOf("acc:") === 0) acc.push(id); });
+    if (acc.length) {
+      acc.forEach(id => this.expanded.delete(id));
+      this.rebuildFromCache();
+      return;
+    }
     const byLevel = this.expandableByLevel();
     const levels = [...byLevel.keys()].sort((a, b) => b - a);
     for (const level of levels) {
@@ -844,8 +999,10 @@ const FluxoCaixaApp = {
   },
 
   rebuildFromCache() {
+    const selected = new Set(this.selectedCompanyIds.map(String));
     const allocs = [];
     this.movements.forEach(mov => {
+      if (selected.size && !selected.has(String(mov.companyId))) return;
       const factor = this.factorForCompany(mov.companyId);
       if (factor <= 0) return;
       this.allocate(mov, factor).forEach(a => allocs.push(a));
@@ -881,8 +1038,13 @@ const FluxoCaixaApp = {
     const unmatched = this.unmatchedInfo || { total: 0, samples: [] };
     const hasUnmatched = Math.abs(Number(unmatched.total) || 0) > 0.005;
     const byLevel = this.expandableByLevel();
-    const canExpand = [...byLevel.values()].some(ids => ids.some(id => !this.expanded.has(id)));
-    const canCollapse = [...byLevel.values()].some(ids => ids.some(id => this.expanded.has(id)));
+    const accPending = (this.rows || []).some(r => r.isAccount && r.hasKids && r.toggleId && !this.expanded.has(r.toggleId));
+    const accOpen = [...this.expanded].some(id => String(id).indexOf("acc:") === 0);
+    const canExpand = accPending || [...byLevel.values()].some(ids => ids.some(id => !this.expanded.has(id)));
+    const canCollapse = accOpen || [...byLevel.values()].some(ids => ids.some(id => this.expanded.has(id)));
+    const modo = this.consolidacaoAtiva
+      ? "consolidação padrão · percentual Moura Leite"
+      : "empresas selecionadas · 100% do valor";
     root.innerHTML = `
       <div class="fc-shell">
         <div class="fc-head">
@@ -890,7 +1052,7 @@ const FluxoCaixaApp = {
             <div class="fc-head-icon"><i data-lucide="git-branch"></i></div>
             <div>
               <h2>Fluxo de caixa (DFC)</h2>
-              <p>Estrutura <strong>DFC Padrão</strong> do cadastro de visões · API caixa e banco · % MLDU</p>
+              <p>Estrutura <strong>DFC Padrão</strong> · ${this.esc(modo)}</p>
             </div>
           </div>
           <button type="button" class="btn btn-outline fc-link-visoes" onclick="switchTab('plano-financeiro','Plano Financeiro e Visões')">
@@ -906,6 +1068,9 @@ const FluxoCaixaApp = {
               <input type="date" value="${this.endDate}" onchange="FluxoCaixaApp.endDate=this.value">
             </label>
             ${this.companyDropHtml()}
+            <button type="button" class="btn ${this.consolidacaoAtiva ? "btn-primary" : "btn-outline"} fc-cons-btn" onclick="FluxoCaixaApp.aplicarConsolidacao()" ${this.loading ? "disabled" : ""} title="Empresas marcadas como consolidação padrão, pelo percentual da Moura Leite">
+              Consolidação padrão
+            </button>
             <button type="button" class="btn btn-primary fc-consult-btn" onclick="FluxoCaixaApp.load()" ${this.loading ? "disabled" : ""}>
               Consultar
             </button>
@@ -929,9 +1094,7 @@ const FluxoCaixaApp = {
               <div class="fc-tree-scroll">
                 ${this.loading
                   ? `<div class="fc-loading"><span class="fc-loading-spin" aria-hidden="true"></span><span>buscando lançamentos</span></div>`
-                  : ((this.rows || []).length
-                    ? (this.rows || []).map(r => this.rowHtml(r)).join("")
-                    : "")}
+                  : ((this.rows || []).length ? this.gridHtml() : "")}
               </div>
             </div>
           </div>
@@ -955,35 +1118,93 @@ const FluxoCaixaApp = {
     if (window.lucide) lucide.createIcons();
   },
 
-  rowHtml(r) {
-    const chrome = this.nodeChrome(r);
-    const pad = (r.level || 0) * 18;
-    const isHead = r.type === "total_n1" || r.type === "formula";
+  visibleColumns() {
+    const ids = this.selectedCompanyIds.map(String).slice().sort((a, b) => Number(a) - Number(b));
+    const cols = [];
+    ids.forEach(id => {
+      const open = this.companyMonthsOpen && this.companyMonthsOpen.has(id);
+      if (open) this.months.forEach(m => cols.push({ type: "month", companyId: id, month: m }));
+      cols.push({ type: "co", companyId: id });
+    });
+    cols.push({ type: "total" });
+    return cols;
+  },
+
+  valueOf(row, col) {
+    if (!col || col.type === "total") return Number(row.total) || 0;
+    const bag = row.byCompany && row.byCompany[String(col.companyId)];
+    if (!bag) return 0;
+    if (col.type === "month") return Number(bag.months && bag.months[col.month]) || 0;
+    return Number(bag.total) || 0;
+  },
+
+  valClass(n, strong) {
+    const v = Number(n) || 0;
+    const tone = v < 0 ? "is-neg" : (v > 0 ? "is-pos" : "is-zero");
+    return `fc-num ${tone}${strong ? " is-strong" : ""}`;
+  },
+
+  rowClass(r) {
+    if (r.isCostCenter) return "fc-r-cc";
+    if (r.isAccount) return "fc-r-acc";
+    if (r.type === "formula") return "fc-r-formula";
+    if (r.type === "resultado") return "fc-r-res";
+    if (r.type === "total_n1") return "fc-r-n1";
+    return "fc-r-node";
+  },
+
+  gridHtml() {
+    const cols = this.visibleColumns();
+    const ids = this.selectedCompanyIds.map(String).slice().sort((a, b) => Number(a) - Number(b));
+    const anyOpen = ids.some(id => this.companyMonthsOpen && this.companyMonthsOpen.has(id));
+    const span = anyOpen ? 2 : 1;
+    const row1 = [`<th class="fc-th-name" rowspan="${span}">Estrutura</th>`];
+    const row2 = [];
+    ids.forEach(id => {
+      const c = this.companyById(id);
+      const open = this.companyMonthsOpen && this.companyMonthsOpen.has(id);
+      const label = this.esc(this.columnHeader(c || { id, usual: "", fullName: "" }));
+      const tip = this.esc((c && c.fullName) || label);
+      const chev = open ? "▾" : "▸";
+      if (open) {
+        row1.push(`<th class="fc-th-co" colspan="${this.months.length + 1}" title="${tip}" onclick="FluxoCaixaApp.toggleCompanyMonths('${id}')">${chev} ${label}</th>`);
+        this.months.forEach(m => row2.push(`<th>${this.esc(this.monthLabel(m))}</th>`));
+        row2.push(`<th>Total</th>`);
+      } else {
+        row1.push(`<th class="fc-th-co" rowspan="${span}" title="${tip}" onclick="FluxoCaixaApp.toggleCompanyMonths('${id}')">${chev} ${label}</th>`);
+      }
+    });
+    row1.push(`<th class="fc-th-total" rowspan="${span}">Total</th>`);
+    const head = `<thead><tr>${row1.join("")}</tr>${anyOpen ? `<tr class="fc-months">${row2.join("")}</tr>` : ""}</thead>`;
+    const body = (this.rows || []).map(r => this.gridRowHtml(r, cols)).join("");
+    return `<table class="fc-grid">${head}<tbody>${body}</tbody></table>`;
+  },
+
+  gridRowHtml(r, cols) {
+    const pad = (r.level || 0) * 12;
+    const toggleId = r.toggleId || r.id;
+    const open = !!(toggleId && this.expanded.has(toggleId));
+    const safeToggle = String(toggleId || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
     const chevron = r.hasKids
-      ? `<button type="button" class="fc-chevron" onclick="event.stopPropagation();FluxoCaixaApp.toggle('${r.id}')"><i data-lucide="${this.expanded.has(r.id) ? "chevron-down" : "chevron-right"}"></i></button>`
+      ? `<button type="button" class="fc-chevron" onclick="event.stopPropagation();FluxoCaixaApp.toggle('${safeToggle}')">${open ? "▾" : "▸"}</button>`
       : `<span class="fc-chevron-spacer"></span>`;
-    const monthVals = this.months.map(m => {
-      const v = r.months && r.months[m];
-      return `<span class="fc-val" style="${this.cellStyle(v, isHead)}">${this.fmt(v)}</span>`;
-    }).join("");
-    const drillId = r.isAccount ? (r.id || "") : (r.id || "");
-    const canDrill = !!(drillId && (r.isAccount || r.type === "resultado" || r.type === "total_n1" || r.type === "formula"));
-    const click = canDrill
-      ? `onclick="FluxoCaixaApp.openDrill('${String(drillId).replace(/'/g, "\\'")}', ${r.isAccount ? "true" : "false"})" title="Ver lançamentos que formam este valor" style="cursor:pointer;"`
+    const drillId = r.isCostCenter ? (r.parentAccountId || "") : (r.id || "");
+    const canDrill = !!(drillId && (r.isAccount || r.isCostCenter || r.type === "resultado" || r.type === "total_n1" || r.type === "formula"));
+    const safeId = String(drillId).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    const ccArg = r.isCostCenter ? `'${String(r.ccId || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'` : "''";
+    const isAccFlag = r.isAccount || r.isCostCenter;
+    const clickFixed = canDrill
+      ? `onclick="FluxoCaixaApp.openDrill('${safeId}', ${isAccFlag ? "true" : "false"}, ${r.isCostCenter ? ccArg : "''"})"`
       : "";
-    const nameHint = r.isAccount ? ` <span style="font-size:0.65rem;color:#94a3b8;font-weight:500;">(clique p/ detalhar)</span>` : "";
-    return `
-      <div class="fc-node${canDrill ? " fc-node--drill" : ""}" style="margin-left:${pad}px;background:${chrome.bg};border-left-color:${chrome.border};" ${click}>
-        <div class="fc-node-main">
-          ${chevron}
-          <i data-lucide="${chrome.icon}" class="fc-node-icon" style="color:${chrome.border};"></i>
-          <span class="fc-node-name" style="font-weight:${isHead ? 800 : (r.isAccount ? 500 : 700)};">${this.esc(r.name)}${r.isAccount ? nameHint : ""}</span>
-        </div>
-        <div class="fc-node-vals">
-          ${monthVals}
-          <span class="fc-val fc-val-total" style="${this.cellStyle(r.total, true)}">${this.fmt(r.total)}</span>
-        </div>
-      </div>`;
+    const cells = cols.map(col => {
+      const v = this.valueOf(r, col);
+      const strong = col.type !== "month";
+      return `<td class="${this.valClass(v, strong)}">${this.fmt(v)}</td>`;
+    }).join("");
+    return `<tr class="${this.rowClass(r)}${canDrill ? " is-drill" : ""}" ${clickFixed} title="${canDrill ? "Ver lançamentos que formam este valor" : ""}">
+      <td class="fc-td-name" style="padding-left:${6 + pad}px">${chevron}<span>${this.esc(r.name)}</span></td>
+      ${cells}
+    </tr>`;
   },
 
   collectNodeItems(nodeId) {
@@ -1000,27 +1221,44 @@ const FluxoCaixaApp = {
     return items;
   },
 
-  resolveDrill(id, isAccount) {
+  resolveDrill(id, isAccount, ccId) {
     const sid = String(id || "");
     const nk = this.normAccountKey(sid);
+    let info;
     if (isAccount) {
       const acc = this.accountIndex[sid] || this.accountIndex[nk] || null;
-      if (!acc) return { title: sid, subtitle: "Conta", items: [], total: 0 };
-      return {
+      if (!acc) info = { title: sid, subtitle: "Conta", items: [], total: 0 };
+      else info = {
         title: `${acc.displayId || acc.id} ${acc.name || ""}`.trim(),
         subtitle: "Conta do plano financeiro",
         items: acc.items || [],
         total: acc.total || 0
       };
+    } else {
+      const row = (this.rows || []).find(r => !r.isAccount && !r.isCostCenter && String(r.id) === sid);
+      const items = this.collectNodeItems(sid);
+      const total = items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
+      info = {
+        title: (row && row.name) || sid,
+        subtitle: "Nó da visão DFC (lançamentos agregados)",
+        items,
+        total: row && row.total != null ? row.total : total
+      };
     }
-    const row = (this.rows || []).find(r => !r.isAccount && String(r.id) === sid);
-    const items = this.collectNodeItems(sid);
+    if (!ccId) return info;
+    const want = String(ccId);
+    const items = (info.items || []).filter(it => {
+      const got = it.costCenterId != null && String(it.costCenterId).trim() !== "" ? String(it.costCenterId) : "—";
+      return got === want;
+    });
+    const sample = items[0];
+    const ccLabel = want === "—" ? "Sem centro de custo" : [want, sample && sample.costCenterName].filter(Boolean).join(" - ");
     const total = items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
     return {
-      title: (row && row.name) || sid,
-      subtitle: "Nó da visão DFC (lançamentos agregados)",
+      title: `${info.title} · ${ccLabel}`,
+      subtitle: "Centro de custo",
       items,
-      total: row && row.total != null ? row.total : total
+      total
     };
   },
 
@@ -1104,17 +1342,16 @@ const FluxoCaixaApp = {
   },
 
   companyLabel(id) {
-    const c = this.consolidacaoCompanies().find(x => String(x.id) === String(id));
-    if (c) return `${c.id} - ${c.name} (${c.pct}%)`;
-    return id != null ? String(id) : "—";
+    const c = this.companyById(id);
+    if (!c) return id != null ? String(id) : "—";
+    const pct = this.consolidacaoAtiva ? ` · ${c.pct}%` : "";
+    return `${c.id} - ${c.fullName}${pct}`;
   },
 
   companyLabelShort(id) {
-    const c = this.consolidacaoCompanies().find(x => String(x.id) === String(id));
+    const c = this.companyById(id);
     if (!c) return id != null ? String(id) : "—";
-    const name = String(c.name || "").trim();
-    const short = name.length > 28 ? name.slice(0, 26) + "…" : name;
-    return `${c.id} · ${short} (${c.pct}%)`;
+    return this.columnHeader(c);
   },
 
   closeDrill() {
@@ -1213,7 +1450,7 @@ const FluxoCaixaApp = {
     }
   },
 
-  openDrill(id, isAccount) {
+  openDrill(id, isAccount, ccId) {
     const tree = document.querySelector("#fluxo-caixa-root .fc-tree-scroll");
     const keepTop = tree ? tree.scrollTop : 0;
     const keepLeft = tree ? tree.scrollLeft : 0;
@@ -1229,7 +1466,7 @@ const FluxoCaixaApp = {
       if (main) main.scrollTop = keepMain;
       if (keepWin) window.scrollTo(0, keepWin);
     };
-    const info = this.resolveDrill(id, !!isAccount);
+    const info = this.resolveDrill(id, !!isAccount, ccId);
     const items = [...(info.items || [])].sort((a, b) => {
       const da = this.cashDate(a.mov || {}) || String(a.month || "");
       const db = this.cashDate(b.mov || {}) || String(b.month || "");
@@ -1249,6 +1486,7 @@ const FluxoCaixaApp = {
       Object.keys(byTitle).filter((k) => byTitle[k].adiantamento && byTitle[k].abatimento)
     );
 
+    this._drillItems = items;
     this._drillExport = {
       items,
       sum,
@@ -1283,7 +1521,7 @@ const FluxoCaixaApp = {
               </tr>
             </thead>
             <tbody>
-              ${items.map(it => {
+              ${items.map((it, idx) => {
                 const mov = it.mov || {};
                 const amt = Number(it.amount) || 0;
                 const raw = Number(it.rawBankAmount);
@@ -1304,6 +1542,9 @@ const FluxoCaixaApp = {
                   ? (rateado < 0 ? "#b91c1c" : (rateado > 0 ? "#105436" : "#64748b"))
                   : "#64748b";
                 const title = this.movTitleInfo(mov);
+                const titleHtml = title.billId
+                  ? `<button type="button" class="fc-title-btn" onclick="event.stopPropagation();FluxoCaixaApp.abrirTituloDrill(${idx})">${this.esc(title.label)}</button>`
+                  : `<span style="font-weight:700;color:#0f172a;">${this.esc(title.label)}</span>`;
                 const roleBadge = title.role === "adiantamento"
                   ? `<span style="display:inline-block;margin-left:6px;padding:2px 7px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:0.68rem;font-weight:800;vertical-align:middle;">ADIANT.</span>`
                   : (title.role === "abatimento"
@@ -1320,7 +1561,7 @@ const FluxoCaixaApp = {
                   <td style="padding:10px 12px;white-space:nowrap;vertical-align:top;">${this.esc(this.fmtDatePt(this.cashDate(mov)))}</td>
                   <td style="padding:10px 12px;font-weight:700;color:#105436;white-space:nowrap;vertical-align:top;">${this.esc(this.movNumber(mov))}</td>
                   <td style="padding:10px 12px;min-width:200px;max-width:280px;vertical-align:top;">
-                    <div style="font-weight:700;color:#0f172a;line-height:1.35;">${this.esc(title.label)}${pairMark}</div>
+                    <div style="line-height:1.35;">${titleHtml}${pairMark}</div>
                     ${partyLine}
                   </td>
                   <td style="padding:10px 12px;min-width:150px;max-width:200px;vertical-align:top;line-height:1.35;" title="${this.esc(this.companyLabel(it.companyId || mov.companyId))}">${this.esc(this.companyLabelShort(it.companyId || mov.companyId))}</td>
@@ -1353,7 +1594,7 @@ const FluxoCaixaApp = {
     this.closeDrill();
     const overlay = document.createElement("div");
     overlay.id = "fc-drill-modal";
-    overlay.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(15,23,42,0.45);display:flex;align-items:center;justify-content:center;padding:16px;";
+    overlay.style.cssText = "position:fixed;inset:0;z-index:9000;background:rgba(15,23,42,0.45);display:flex;align-items:center;justify-content:center;padding:16px;";
     overlay.onclick = (e) => { if (e.target === overlay) this.closeDrill(); };
     overlay.innerHTML = `
       <div style="background:#fff;border-radius:12px;width:min(1680px,98vw);max-height:94vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,0.25);">
@@ -1377,6 +1618,95 @@ const FluxoCaixaApp = {
     requestAnimationFrame(hold);
     try { if (window.lucide) lucide.createIcons({ nodes: [overlay] }); } catch (e) {}
     hold();
+  },
+
+  abrirTituloDrill(idx) {
+    const it = (this._drillItems || [])[Number(idx)];
+    if (!it) return;
+    const mov = it.mov || {};
+    const title = this.movTitleInfo(mov);
+    if (!title.billId) return;
+    if (title.tipo === "CR") {
+      this.abrirReceber(title, mov, it);
+      return;
+    }
+    if (window.ComprasControleApp && typeof ComprasControleApp.abrirTituloRow === "function") {
+      ComprasControleApp.abrirTituloRow({
+        titulo: title.billId,
+        parcela: mov.installmentId || mov.installmentNumber || mov.installment || 1,
+        credor: title.party || mov.creditorName || "",
+        credorId: mov.creditorId || "",
+        companyId: it.companyId || mov.companyId || "",
+        documento: mov.documentIdentificationNumber || mov.documentNumber || "",
+        docId: mov.documentIdentificationId || mov.documentId || "",
+        docNome: mov.documentIdentificationName || "",
+        valor: Number(it.rawBankAmount),
+        valorAjustado: Number(it.rawBankAmount)
+      });
+      return;
+    }
+    this.abrirReceber(title, mov, it);
+  },
+
+  closeReceber() {
+    const el = document.getElementById("fc-receber-modal");
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  },
+
+  async abrirReceber(title, mov, it) {
+    this.closeReceber();
+    const overlay = document.createElement("div");
+    overlay.id = "fc-receber-modal";
+    overlay.style.cssText = "position:fixed;inset:0;z-index:10040;background:rgba(15,23,42,0.45);display:flex;align-items:center;justify-content:center;padding:16px;";
+    overlay.onclick = (e) => { if (e.target === overlay) this.closeReceber(); };
+    overlay.innerHTML = `<div class="fc-receber-box"><div style="font-weight:800;color:#105436;">Abrindo título ${this.esc(title.billId)}…</div></div>`;
+    document.body.appendChild(overlay);
+    const billId = title.billId;
+    let bill = null;
+    let anexos = [];
+    let erro = "";
+    try {
+      if (typeof window.siengeFetchWithRetry !== "function") throw new Error("A API do Sienge não está disponível nesta tela.");
+      bill = await window.siengeFetchWithRetry("/accounts-receivable/receivable-bills/" + encodeURIComponent(billId), 1);
+      try {
+        if (window.FluxoCaixaDiarioApp && typeof FluxoCaixaDiarioApp.anexosDe === "function") {
+          anexos = await FluxoCaixaDiarioApp.anexosDe(billId, "receber");
+        }
+      } catch (e2) {
+        anexos = [];
+      }
+    } catch (e) {
+      erro = (e && e.message) ? e.message : "Não consegui abrir o título.";
+    }
+    if (!document.getElementById("fc-receber-modal")) return;
+    const b = bill || {};
+    const cliente = b.customerName || b.clientName || title.party || "—";
+    const doc = [b.documentIdentificationId || b.documentId || mov.documentIdentificationId, b.documentNumber || mov.documentNumber].filter(Boolean).join(" ");
+    const valor = b.originalAmount != null ? b.originalAmount : (b.receivableBillValue != null ? b.receivableBillValue : it.rawBankAmount);
+    const empresa = this.companyLabel(it.companyId || mov.companyId || b.companyId);
+    const anexosHtml = (anexos || []).length
+      ? (anexos || []).map(a => `<button type="button" class="btn btn-outline btn-sm" style="height:32px;" onclick="FluxoCaixaDiarioApp.baixarAnexo('${this.esc(billId)}','${this.esc(a.id)}','${this.esc(a.name || "anexo.pdf")}','receber')">${this.esc(a.description || a.name || "Anexo")}</button>`).join("")
+      : `<span style="color:#64748b;">Nenhum anexo neste título.</span>`;
+    const box = overlay.querySelector(".fc-receber-box");
+    if (!box) return;
+    box.innerHTML = erro
+      ? `<div style="color:#b91c1c;font-weight:700;">${this.esc(erro)}</div><button type="button" class="btn btn-outline" style="margin-top:12px;" onclick="FluxoCaixaApp.closeReceber()">Fechar</button>`
+      : `<div class="fc-receber-head">
+          <div>
+            <strong>Título ${this.esc(billId)}</strong>
+            <span>${this.esc(doc || title.label || "")}</span>
+          </div>
+          <button type="button" onclick="FluxoCaixaApp.closeReceber()">×</button>
+        </div>
+        <dl class="fc-receber-dl">
+          <dt>Cliente</dt><dd>${this.esc(cliente)}</dd>
+          <dt>Empresa</dt><dd>${this.esc(empresa)}</dd>
+          <dt>Emissão</dt><dd>${this.esc(this.fmtDatePt(b.issueDate || b.billDate || ""))}</dd>
+          <dt>Vencimento</dt><dd>${this.esc(this.fmtDatePt(b.dueDate || mov.dueDate || ""))}</dd>
+          <dt>Valor</dt><dd>${this.fmt(valor)}</dd>
+          <dt>Histórico</dt><dd>${this.esc(this.movHistoric(mov))}</dd>
+        </dl>
+        <div class="fc-receber-anexos"><span>Anexos</span>${anexosHtml}</div>`;
   },
 
   esc(s) {
