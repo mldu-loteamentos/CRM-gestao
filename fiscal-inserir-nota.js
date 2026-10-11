@@ -1,4 +1,4 @@
-/* Fiscal › Inserir nota: cadastra a nota fiscal de compra no Sienge a partir das entregas de um pedido de compra.
+/* Fiscal › Validar nota: cadastra a nota fiscal de compra no Sienge a partir das entregas de um pedido de compra.
    Sienge: POST /purchase-invoices (cabeçalho) → POST /purchase-invoices/{seq}/items/purchase-orders/delivery-schedules (itens).
    A API não informa impostos, condição de pagamento nem consiste a nota: isso é finalizado no Sienge.
    Leitura da nota: XML, PDF com texto ou, se for imagem, OCR (Tesseract.js carregado só quando preciso). */
@@ -1760,7 +1760,7 @@ window.InserirNotaApp = {
               <button type="button" class="btn btn-outline" onclick="InserirNotaApp.recomecar()" ${s.enviando ? "disabled" : ""}><i data-lucide="rotate-ccw"></i> Recomeçar</button>
               <button type="button" id="inf-validar" class="btn ${s.validado ? "btn-outline" : "btn-primary"}" onclick="InserirNotaApp.validar()" ${(travado || s.validado) ? "disabled" : ""}>${s.validado ? "Validada" : "Validar"}</button>
               <button type="button" id="inf-inserir" class="btn btn-primary" onclick="InserirNotaApp.inserir()" ${s.enviando ? "disabled" : ""}
-                title="${pode ? (s.validado ? "" : "Valide a nota antes de inserir no Sienge") : "Sem permissão de edição em Fiscal › Inserir nota"}">
+                title="${pode ? (s.validado ? "" : "Valide a nota antes de inserir no Sienge") : "Sem permissão de edição em Fiscal › Validar nota"}">
                 ${s.enviando ? `<span class="btn-spin"></span> ${this.esc(s.enviando)}` : `<i data-lucide="upload"></i> Inserir no Sienge`}</button>
             </div>
           </div>

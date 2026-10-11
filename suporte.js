@@ -80,11 +80,11 @@
       { id: "financiamento", label: "Financiamento" },
       { id: "repactuacao", label: "Repactuação" }
     ]},
-    { id: "fiscal", label: "Fiscal / Contábil", subs: [
-      { id: "pis_cofins", label: "PIS/COFINS" },
-      { id: "csll_irpj", label: "CSLL/IRPJ" },
+    { id: "fiscal", label: "Fiscal", subs: [
+      { id: "pis_cofins", label: "Calcular impostos" },
       { id: "enviar_nota", label: "Enviar nota" },
-      { id: "inserir_nota", label: "Inserir nota" }
+      { id: "inserir_nota", label: "Validar nota" },
+      { id: "rastrear_pedido", label: "Rastrear pedido" }
     ]},
     { id: "gerencial", label: "Gerencial", subs: [
       { id: "participacoes", label: "Prestação Contas Ellenceo" },
@@ -165,9 +165,10 @@
     investimento: { modulo: "financeiro", subitem: "investimento" },
     "repactuacao-lote": { modulo: "financeiro", subitem: "repactuacao" },
     "construcao-fiscal": { modulo: "fiscal", subitem: "pis_cofins" },
-    "construcao-fiscal-csll": { modulo: "fiscal", subitem: "csll_irpj" },
+    "construcao-fiscal-csll": { modulo: "fiscal", subitem: "pis_cofins" },
     "fiscal-inserir-nota": { modulo: "fiscal", subitem: "inserir_nota" },
     "fiscal-enviar-nota": { modulo: "fiscal", subitem: "enviar_nota" },
+    "fiscal-rastrear-pedido": { modulo: "fiscal", subitem: "rastrear_pedido" },
     participacoes: { modulo: "gerencial", subitem: "participacoes" },
     "estrutura-societaria": { modulo: "gerencial", subitem: "estrutura" },
     "dashboard-comercial": { modulo: "comercial", subitem: "dash_com" },

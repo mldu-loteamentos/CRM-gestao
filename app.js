@@ -3041,6 +3041,11 @@ function switchTab(tabId, titleOverride, showLoader = false) {
   if (tabId === 'construcao-marketing') tabId = 'marketing-eventos';
   if (tabId === 'construcao-compras') tabId = 'compras-previsoes';
   if (tabId === 'construcao-engenharia') tabId = 'engenharia-caucao';
+  if (tabId === 'construcao-fiscal-csll') {
+    tabId = 'construcao-fiscal';
+    titleOverride = 'Calcular impostos';
+    if (window.FiscalState) FiscalState.aba = 'irpj';
+  }
   if (tabId === 'engenharia-caucao' && typeof window.bootEngenhariaCaucao === 'function') {
     window.bootEngenhariaCaucao();
   }
@@ -3187,9 +3192,10 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "kmz": "Upload de Mapeamento (KMZ)",
     "upload-kmz": "Upload de KMZ",
     "upload-mapa": "Upload de Projeto Urbanístico",
-    "construcao-fiscal": "Retenções Fiscais (PIS / COFINS)",
-    "fiscal-inserir-nota": "Inserir nota fiscal de compra",
+    "construcao-fiscal": "Calcular impostos",
+    "fiscal-inserir-nota": "Validar nota",
     "fiscal-enviar-nota": "Enviar nota ao fiscal",
+    "fiscal-rastrear-pedido": "Rastrear pedido",
     "plano-financeiro": "Plano Financeiro e Visões",
     "indexadores": "Indexadores Financeiros",
     "documentos-sienge": "Tipos de Documento",
@@ -3279,14 +3285,16 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "construcao-engenharia": "shield-check",
     "construcao-compras": "clipboard-list",
     "construcao-marketing": "calendar",
+    "construcao-fiscal": "percent",
     "marketing-eventos": "calendar",
     "marketing-budget": "wallet",
     "marketing-config": "settings",
     suporte: "headphones",
     auditoria: "shield",
     "auditoria-login": "log-in",
-    "fiscal-inserir-nota": "file-up",
+    "fiscal-inserir-nota": "clipboard-check",
     "fiscal-enviar-nota": "send",
+    "fiscal-rastrear-pedido": "search",
     "consumo-api": "activity",
     "usuarios-online": "users",
     acessos: "key-round"
@@ -3465,6 +3473,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (window.InserirNotaApp && typeof InserirNotaApp.init === "function") InserirNotaApp.init();
   } else if (tabId === "fiscal-enviar-nota") {
     if (window.EnviarNotaApp && typeof EnviarNotaApp.init === "function") EnviarNotaApp.init();
+  } else if (tabId === "fiscal-rastrear-pedido") {
+    if (window.RastrearPedidoApp && typeof RastrearPedidoApp.init === "function") RastrearPedidoApp.init();
   }
 }
 
@@ -5725,6 +5735,16 @@ window.permCoversMenuKey = function(perms, modKey) {
     return perms.sub_fiscal_geral_csll_acessar === true
       || perms.sub_fiscal_geral_csll_visualizar === true
       || perms.sub_fiscal_geral_csll_editar === true;
+  }
+  if (modKey === "sub_fiscal_geral_fiscal_acessar") {
+    const flags = (base) => perms[base + "_acessar"] === true || perms[base + "_visualizar"] === true || perms[base + "_editar"] === true;
+    return flags("sub_fiscal_geral_fiscal") || flags("sub_fiscal_geral_csll");
+  }
+  if (modKey === "sub_fiscal_geral_rastrear_pedido_acessar") {
+    const flags = (base) => perms[base + "_acessar"] === true || perms[base + "_visualizar"] === true || perms[base + "_editar"] === true;
+    return flags("sub_fiscal_geral_rastrear_pedido")
+      || flags("sub_fiscal_geral_enviar_nota")
+      || flags("sub_fiscal_geral_inserir_nota");
   }
   if (modKey === "sub_fin_cr_configuracoes_acessar") {
     return ["configuracoes", "regras_cobranca", "regras_negociacao"].some(id =>

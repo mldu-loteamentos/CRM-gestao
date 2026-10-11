@@ -391,12 +391,12 @@ const ConfigUsersApp = {
       ]
     },
     {
-      name: "Fiscal / Contábil", icon: "calculator", key: "mod_fiscal",
+      name: "Fiscal", icon: "calculator", key: "mod_fiscal",
       submodules: [
-        { name: "PIS/COFINS", key: "sub_fiscal_pis", actions: [{ id: "fiscal", label: "PIS/COFINS", permBase: "sub_fiscal_geral_fiscal" }] },
-        { name: "CSLL/IRPJ", key: "sub_fiscal_csll", actions: [{ id: "csll", label: "CSLL/IRPJ", permBase: "sub_fiscal_geral_csll" }] },
+        { name: "Calcular impostos", key: "sub_fiscal_pis", actions: [{ id: "fiscal", label: "Calcular impostos", permBase: "sub_fiscal_geral_fiscal" }] },
         { name: "Enviar nota", key: "sub_fiscal_enviar_nota", actions: [{ id: "enviar_nota", label: "Enviar nota ao fiscal", permBase: "sub_fiscal_geral_enviar_nota" }] },
-        { name: "Inserir nota", key: "sub_fiscal_inserir_nota", actions: [{ id: "inserir_nota", label: "Inserir nota no Sienge", permBase: "sub_fiscal_geral_inserir_nota" }] }
+        { name: "Validar nota", key: "sub_fiscal_inserir_nota", actions: [{ id: "inserir_nota", label: "Validar nota", permBase: "sub_fiscal_geral_inserir_nota" }] },
+        { name: "Rastrear pedido", key: "sub_fiscal_rastrear_pedido", actions: [{ id: "rastrear_pedido", label: "Rastrear pedido", permBase: "sub_fiscal_geral_rastrear_pedido" }] }
       ]
     },
     {
