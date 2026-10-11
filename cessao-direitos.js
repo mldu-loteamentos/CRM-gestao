@@ -957,12 +957,10 @@ const CessaoPopupState = {
   busca: "",
   buscaModo: { tipo: "cessionario" },
   sugestoes: [],
-  precoCessao: "",
+      valorPago: 0,
   testemunha1: "",
   testemunha2: ""
 };
-
-const CESSAO_INDICES = ["REAL", "IGP-M", "IPCA", "INCC", "INPC", "IPC-DI"];
 
 const CessaoPopup = {
   esc(s) { return CessaoApp.esc(s); },
@@ -1075,7 +1073,7 @@ const CessaoPopup = {
     if (Math.abs(this.totalCedido() - this.totalAdquirido()) > 0.05) return "O percentual adquirido precisa fechar com o percentual cedido.";
     const semRep = st.cessionarios.find((c) => this.isPj(c.customer) && !c.representante);
     if (semRep) return "Pessoa jurídica precisa de representante: " + (semRep.customer.name || "cessionário") + ".";
-    if (!(this.parseValor(st.precoCessao) > 0)) return "Informe o preço da cessão, pago pelo cessionário ao cedente.";
+    if (!(Number(st.valorPago) > 0)) return "O contrato não tem valores pagos para a cláusula 4.";
     if (!st.testemunha1 || !st.testemunha2) return "Escolha as duas testemunhas.";
     if (String(st.testemunha1) === String(st.testemunha2)) return "As testemunhas precisam ser pessoas diferentes.";
     return "";
@@ -1117,7 +1115,7 @@ const CessaoPopup = {
       busca: "",
       buscaModo: { tipo: "cessionario" },
       sugestoes: [],
-      precoCessao: "",
+      valorPago: 0,
       testemunha1: "",
       testemunha2: ""
     });
@@ -1303,7 +1301,8 @@ const CessaoPopup = {
       qtdAbertas: situacao.abertas,
       valorParcelaAberta: situacao.valor,
       primeiroVencAberto: situacao.primeiro,
-      saldoAberto: situacao.saldo
+      saldoAberto: situacao.saldo,
+      valorPago: situacao.pago
     });
   },
 
@@ -1377,17 +1376,34 @@ const CessaoPopup = {
     return "REAL";
   },
 
+  valorRecibos(p) {
+    const recs = Array.isArray(p && p.receipts) ? p.receipts : [];
+    const direta = Number(p && p.receiptValue);
+    if (!recs.length && !(direta > 0)) return null;
+    let soma = 0;
+    recs.forEach((r) => {
+      if (typeof window.isWriteOffReceipt === "function" && window.isWriteOffReceipt(r)) return;
+      soma += Number(r.receiptValue || 0);
+    });
+    if (!recs.length) soma = direta;
+    return soma;
+  },
+
   situacaoParcelas(installments) {
     const rel = window.RelacionamentoApp;
     let pagas = 0;
     let abertas = 0;
     let saldo = 0;
+    let pago = 0;
     const abertos = [];
     (installments || []).forEach((p) => {
       const paga = rel && typeof rel._installmentSettled === "function" ? rel._installmentSettled(p) : false;
       const valor = Number(p.originalAmount != null ? p.originalAmount : (p.originalValue != null ? p.originalValue : (p.amount || 0))) || 0;
       if (paga) pagas += 1;
-      else {
+      const recibos = this.valorRecibos(p);
+      if (recibos != null) pago += recibos;
+      else if (paga) pago += valor;
+      if (!paga) {
         abertas += 1;
         const atual = Number(p.currentBalance != null ? p.currentBalance : (p.balanceDue != null ? p.balanceDue : valor)) || 0;
         saldo += atual;
@@ -1403,6 +1419,7 @@ const CessaoPopup = {
     return {
       pagas: pagas,
       abertas: abertas,
+      pago: Math.round(pago * 100) / 100,
       saldo: Math.round(saldo * 100) / 100,
       valor: Math.round(valor * 100) / 100,
       primeiro: (abertos[0] && abertos[0].due) || ""
@@ -1430,9 +1447,8 @@ const CessaoPopup = {
     const box = document.getElementById("cessao-popup-tabs");
     if (box) {
       box.innerHTML = `<div class="ml-tabs" role="tablist">${tabs.map((t) => {
-        const travada = t.id === "condicoes" ? !!this.pendenciaAba("cedentes") : (t.id === "cessionario" ? !!(this.pendenciaAba("cedentes") || this.pendenciaAba("condicoes")) : false);
         const ativa = st.tab === t.id;
-        return `<button type="button" role="tab" aria-selected="${ativa}" class="ml-tab ${ativa ? "is-active" : ""} ${travada && !ativa ? "is-locked" : ""}" ${travada && !ativa ? "disabled" : ""} title="${travada && !ativa ? this.esc(this.pendenciaAba(t.id === "cessionario" ? "condicoes" : "cedentes") || "Conclua a aba anterior") : ""}" onclick="CessaoPopup.ir('${t.id}')"><i data-lucide="${t.icon}"></i> ${t.label}</button>`;
+        return `<button type="button" role="tab" aria-selected="${ativa}" class="ml-tab ${ativa ? "is-active" : "is-locked"}" ${ativa ? "" : "disabled"} tabindex="-1" title="${ativa ? "Etapa atual" : "Use Avançar para seguir e Voltar para retornar"}"><i data-lucide="${t.icon}"></i> ${t.label}</button>`;
       }).join("")}</div>`;
     }
     const body = document.getElementById("cessao-popup-body");
@@ -1498,10 +1514,8 @@ const CessaoPopup = {
     const st = CessaoPopupState;
     const quando = st.dataVenda ? CessaoApp.fmtDate(st.dataVenda) : "sem data de venda";
     const nota = st.recente
-      ? `<p class="cessao-pop-nota is-ok">Venda de ${this.esc(quando)}. As condições vieram do contrato no Sienge e podem ser editadas.</p>`
-      : `<p class="cessao-pop-nota">Venda de ${this.esc(quando)}, anterior a 2017. Preencha as condições: o Sienge não traz o parcelamento original desses contratos.</p>`;
-    const indices = CESSAO_INDICES.slice();
-    if (st.indexador && indices.indexOf(st.indexador) < 0) indices.push(st.indexador);
+      ? `<p class="cessao-pop-nota is-ok">Venda de ${this.esc(quando)}. Ajuste as condições da compra se precisar. Juros, indexador, parcelas e saldo vêm do contrato e não podem ser editados.</p>`
+      : `<p class="cessao-pop-nota">Venda de ${this.esc(quando)}, anterior a 2017. Preencha as condições da compra: o Sienge não traz o parcelamento original. Juros, indexador, parcelas e saldo vêm do que o sistema leu e não podem ser editados.</p>`;
     const rows = (st.condicoes || []).map((row) => {
       const total = (Number(row.qtde) || 0) * this.parseValor(row.valor);
       return `<tr>
@@ -1515,7 +1529,7 @@ const CessaoPopup = {
     }).join("");
     return `${nota}
       <div class="cessao-cond-head">CONDIÇÕES DE PAGAMENTO DA COMPRA</div>
-      <div style="overflow:auto;padding:8px 0 12px;">
+      <div class="cessao-cond-scroll">
         <table class="cessao-cond-table">
           <thead><tr>
             <th>Tipo</th><th>Qtde. parcelas</th><th>Valor da parcela</th><th>Total</th><th>1º vencimento</th><th></th>
@@ -1524,66 +1538,59 @@ const CessaoPopup = {
         </table>
       </div>
       <button type="button" class="btn btn-outline" onclick="CessaoPopup.addCond()"><i data-lucide="plus" style="width:14px;height:14px;"></i> Adicionar condição</button>
-      <div class="cessao-pop-grid" style="margin-top:16px;">
-        <label class="cessao-pop-field">Juros ao mês (%)
-          <input class="form-control" type="number" min="0" step="0.0001" value="${st.juros}" oninput="CessaoPopup.setNum('juros', this.value)">
-        </label>
-        <label class="cessao-pop-field">Indexador
-          <select class="form-control" onchange="CessaoPopup.setTxt('indexador', this.value)">
-            ${indices.map((n) => `<option value="${this.esc(n)}" ${st.indexador === n ? "selected" : ""}>${this.esc(n)}</option>`).join("")}
-          </select>
-        </label>
-        <label class="cessao-pop-field">Parcelas já pagas
-          <input class="form-control" type="number" min="0" step="1" value="${st.qtdPagas}" oninput="CessaoPopup.setNum('qtdPagas', this.value)">
-        </label>
-        <label class="cessao-pop-field">Parcelas a pagar
-          <input class="form-control" type="number" min="0" step="1" value="${st.qtdAbertas}" oninput="CessaoPopup.setNum('qtdAbertas', this.value)">
-        </label>
-        <label class="cessao-pop-field">Valor da parcela em aberto
-          <input class="form-control" value="${st.valorParcelaAberta ? st.valorParcelaAberta.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ""}" placeholder="0,00" oninput="CessaoPopup.setMoney('valorParcelaAberta', this.value)">
-        </label>
-        <label class="cessao-pop-field">Próximo vencimento
-          <input class="form-control" type="date" value="${this.esc(st.primeiroVencAberto || "")}" onchange="CessaoPopup.setTxt('primeiroVencAberto', this.value)">
-        </label>
-        <label class="cessao-pop-field">Saldo com o vendedor
-          <input class="form-control" value="${st.saldoAberto ? st.saldoAberto.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ""}" placeholder="0,00" oninput="CessaoPopup.setMoney('saldoAberto', this.value)">
-        </label>
+      <div class="cessao-contrato-dados">
+        ${this.campoContrato("Juros ao mês (%)", this.fmtPct(st.juros))}
+        ${this.campoContrato("Indexador", st.indexador || "REAL")}
+        ${this.campoContrato("Parcelas já pagas", String(st.qtdPagas || 0))}
+        ${this.campoContrato("Parcelas a pagar", String(st.qtdAbertas || 0))}
+        ${this.campoContrato("Valor da parcela em aberto", this.money(st.valorParcelaAberta), true)}
+        ${this.campoContrato("Próximo vencimento", st.primeiroVencAberto ? CessaoApp.fmtDate(st.primeiroVencAberto) : "—", true)}
+        ${this.campoContrato("Saldo com o vendedor", this.money(st.saldoAberto), true)}
       </div>
       <p style="margin:0;color:#64748b;font-size:0.78rem;">Juros 0 significa contrato sem juros de parcelamento. Indexador REAL significa parcela sem reajuste anual. As quantidades e o saldo entram nas cláusulas 1.5 e 5.</p>`;
+  },
+
+  campoContrato(rotulo, valor, largo) {
+    return `<label class="cessao-pop-field${largo ? " is-wide" : ""}">${rotulo}<input class="form-control" value="${this.esc(valor == null || valor === "" ? "—" : valor)}" disabled></label>`;
+  },
+
+  opcoesTestemunha(selecionada, outra) {
+    const users = typeof getDistratoWitnessUsers === "function" ? getDistratoWitnessUsers() : [];
+    const bloqueada = String(outra || "");
+    const opts = users.filter((u) => String(u.id) !== bloqueada).map((u) => {
+      const id = String(u.id);
+      return `<option value="${this.esc(id)}" ${String(selecionada) === id ? "selected" : ""}>${this.esc(u.name || u.nome || u.email || id)}</option>`;
+    }).join("");
+    return `<option value="">Selecione</option>${opts}`;
   },
 
   cessionarioHtml() {
     const st = CessaoPopupState;
     const modoRep = st.buscaModo && st.buscaModo.tipo === "representante";
     const alvo = modoRep ? st.cessionarios[st.buscaModo.idx] : null;
-    const users = typeof getDistratoWitnessUsers === "function" ? getDistratoWitnessUsers() : [];
-    const opt = (sel) => `<option value="">Selecione</option>` + users.map((u) => {
-      const id = String(u.id);
-      return `<option value="${this.esc(id)}" ${String(sel) === id ? "selected" : ""}>${this.esc(u.name || u.nome || u.email || id)}</option>`;
-    }).join("");
     const cards = (st.cessionarios || []).map((row, idx) => this.cardCessionario(row, idx)).join("");
     return `
       <p class="cessao-pop-nota ${modoRep ? "" : "is-ok"}">${modoRep
         ? "Selecione o representante de " + this.esc((alvo && alvo.customer && alvo.customer.name) || "o cessionário") + "."
-        : "Busque um cliente do Sienge pelo ID, nome ou CPF/CNPJ. Confira os dados, inclusive do cônjuge, e informe quanto essa pessoa adquiriu."}</p>
-      <div style="position:relative;margin-bottom:14px;">
+        : "Busque o cliente no Sienge. Confira estado civil, regime de casamento e cônjuge, e informe o percentual que essa pessoa adquiriu."}</p>
+      <div class="cessao-ces-busca">
         <label class="cessao-pop-field">${modoRep ? "Representante" : "Cessionário"}
           <input id="cessao-pop-busca" class="form-control" placeholder="ID, nome ou CPF/CNPJ" value="${this.esc(st.busca)}"
             oninput="CessaoPopup.aoDigitar(this.value)" autocomplete="off">
         </label>
         <div id="cessao-pop-sug" class="cessao-sugestoes" style="display:none;"></div>
       </div>
-      ${cards || `<p style="color:#94a3b8;">Nenhum cessionário selecionado. Total cedido: ${this.fmtPct(this.totalCedido())}%.</p>`}
-      <div class="cessao-pop-grid">
-        <label class="cessao-pop-field">Preço da cessão (pago ao cedente)
-          <input class="form-control" placeholder="0,00" value="${this.esc(st.precoCessao)}" oninput="CessaoPopup.setTxt('precoCessao', this.value)">
-        </label>
-        <label class="cessao-pop-field">Testemunha 1
-          <select class="form-control" onchange="CessaoPopup.setTxt('testemunha1', this.value)">${opt(st.testemunha1)}</select>
-        </label>
-        <label class="cessao-pop-field">Testemunha 2
-          <select class="form-control" onchange="CessaoPopup.setTxt('testemunha2', this.value)">${opt(st.testemunha2)}</select>
-        </label>
+      ${cards || `<p class="cessao-ces-vazio">Nenhum cessionário selecionado. Total cedido: ${this.fmtPct(this.totalCedido())}%.</p>`}
+      <div class="cessao-ces-fechamento">
+        <div class="cessao-cond-head">TESTEMUNHAS</div>
+        <div class="cessao-ces-fechamento-grid">
+          <label class="cessao-pop-field">Testemunha 1
+            <select class="form-control" onchange="CessaoPopup.setTxt('testemunha1', this.value)">${this.opcoesTestemunha(st.testemunha1, st.testemunha2)}</select>
+          </label>
+          <label class="cessao-pop-field">Testemunha 2
+            <select class="form-control" onchange="CessaoPopup.setTxt('testemunha2', this.value)">${this.opcoesTestemunha(st.testemunha2, st.testemunha1)}</select>
+          </label>
+        </div>
       </div>`;
   },
 
@@ -1592,6 +1599,8 @@ const CessaoPopup = {
     const pj = this.isPj(c);
     const conj = typeof window.legalSpouseRecord === "function" ? window.legalSpouseRecord(c) : null;
     const rep = row.representante;
+    const civil = c.civilStatus || c.maritalStatus || "";
+    const regime = c.matrimonialRegime || (conj && conj.matrimonialRegime) || "";
     const bloco = (titulo, pessoa) => {
       if (!pessoa) return "";
       const doc = this.docDe(pessoa);
@@ -1609,25 +1618,31 @@ const CessaoPopup = {
     };
     return `<div class="cessao-ces-card">
       <div class="cessao-ces-top">
-        <div style="flex:1;">
+        <div>
           <strong>${this.esc(c.name || "—")}</strong>
           <span class="cessao-badge">${pj ? "Pessoa jurídica" : "Pessoa física"}</span>
-          <div style="font-size:0.8rem;color:#64748b;margin-top:4px;">ID ${this.esc(c.id || row.customerId)} · ${this.esc(this.docDe(c) || "sem documento")}</div>
-          <div style="font-size:0.8rem;color:#334155;margin-top:4px;">${this.esc(typeof window.formatLegalCustomerAddress === "function" ? (window.formatLegalCustomerAddress(c) || "Endereço não informado") : "")}</div>
-          <div style="font-size:0.8rem;color:#334155;">Tel. ${this.esc(this.foneDe(c) || "não consta")} · ${this.esc(this.emailDe(c) || "e-mail não consta")}</div>
-          ${bloco("Cônjuge", conj)}
-          ${bloco("Representante", rep)}
+          <div class="cessao-ces-id">ID ${this.esc(c.id || row.customerId)}</div>
         </div>
-        <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;">
+        <div class="cessao-ces-acoes">
           <label class="cessao-pop-field">% adquirido
-            <input class="form-control" type="number" min="0" step="0.01" value="${row.pct}" oninput="CessaoPopup.setCessionarioPct(${idx}, this.value)" style="width:110px;">
+            <input class="form-control" type="number" min="0" step="0.01" value="${row.pct}" oninput="CessaoPopup.setCessionarioPct(${idx}, this.value)">
           </label>
           <button type="button" class="btn btn-outline btn-sm" onclick="CessaoPopup.pedirRepresentante(${idx})" title="${pj ? "Obrigatório para pessoa jurídica" : "Adicionar representante"}">
             <i data-lucide="user-plus" style="width:14px;height:14px;"></i> ${rep ? "Trocar representante" : "Adicionar representante"}
           </button>
-          <button type="button" class="btn btn-outline btn-sm" onclick="CessaoPopup.removeCessionario(${idx})"><i data-lucide="trash-2" style="width:14px;height:14px;"></i></button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="CessaoPopup.removeCessionario(${idx})" title="Remover cessionário"><i data-lucide="trash-2" style="width:14px;height:14px;"></i></button>
         </div>
       </div>
+      <dl class="cessao-ces-dados">
+        <div><dt>Documento</dt><dd>${this.esc(this.docDe(c) || "não informado")}</dd></div>
+        <div><dt>Estado civil</dt><dd>${this.esc(civil || "não informado")}</dd></div>
+        <div><dt>Regime de casamento</dt><dd>${this.esc(regime || "não informado")}</dd></div>
+        <div><dt>Telefone</dt><dd>${this.esc(this.foneDe(c) || "não consta")}</dd></div>
+        <div class="is-full"><dt>Endereço</dt><dd>${this.esc(typeof window.formatLegalCustomerAddress === "function" ? (window.formatLegalCustomerAddress(c) || "Endereço não informado") : "Endereço não informado")}</dd></div>
+        <div class="is-full"><dt>E-mail</dt><dd>${this.esc(this.emailDe(c) || "não consta")}</dd></div>
+      </dl>
+      ${bloco("Cônjuge", conj)}
+      ${bloco("Representante", rep)}
     </div>`;
   },
 
@@ -1733,6 +1748,12 @@ const CessaoPopup = {
 
   setTxt(campo, val) {
     CessaoPopupState[campo] = val;
+    if ((campo === "testemunha1" || campo === "testemunha2") && val) {
+      const outra = campo === "testemunha1" ? "testemunha2" : "testemunha1";
+      if (String(CessaoPopupState[outra]) === String(val)) CessaoPopupState[outra] = "";
+      this.pintar();
+      return;
+    }
     this.atualizarAviso();
   },
 
@@ -1972,7 +1993,7 @@ const CessaoPopup = {
 
   assinaturaHtml() {
     const st = CessaoPopupState;
-    const linha = (nomes, papel) => `<div style="margin-top:28px;text-align:center;">__________________________________________________________________<br><strong>${nomes}</strong><br>${papel}</div>`;
+    const linha = (nomes, papel) => `<div style="margin-top:12px;text-align:center;white-space:normal;"><div style="width:260px;margin:0 auto 2px;border-top:1px solid #111;"></div><strong>${nomes}</strong><br>${papel}</div>`;
     const ced = (st.cedentes || []).filter((c) => c.cede && Number(c.cederPct) > 0).map((c) => String(c.name || "").toUpperCase());
     const ces = [];
     (st.cessionarios || []).forEach((row) => {
@@ -1988,20 +2009,17 @@ const CessaoPopup = {
     const rg = (u) => u.doc_rg || u.rg || "________________";
     const nome = (u) => u.name || u.nome || "________________";
     const data = this.dataHoje();
-    return `<div style="font-family:'Times New Roman',serif;">
-      <p style="text-align:justify;">${this.htmlTexto("E assim, por estarem justas e contratadas, assinam o presente em 03 (três) vias de igual teor, na presença das testemunhas abaixo.")}</p>
-      <p style="text-align:center;margin-top:18px;">Botucatu, ${this.esc(data)}</p>
-      ${linha(this.esc(ced.join(" ")), "Cedente(s)")}
-      ${linha(this.esc(ces.join(" ")), "Cessionário(s)")}
-      ${linha(this.esc(String(st.empresaNome || "ANUENTE").toUpperCase()), "Anuente(s)")}
-      <div style="margin-top:26px;">
-        <div>Testemunhas</div>
-        <div style="display:flex;justify-content:space-between;gap:24px;margin-top:12px;">
-          <div>Nome: ${this.esc(nome(w1))}<br>RG: ${this.esc(rg(w1))}</div>
-          <div>Nome: ${this.esc(nome(w2))}<br>RG: ${this.esc(rg(w2))}</div>
-        </div>
-      </div>
-    </div>`;
+    const testemunha = (u) => `<div style="text-align:center;white-space:normal;min-width:200px;">Nome: ${this.esc(nome(u))}<br>RG: ${this.esc(rg(u))}</div>`;
+    return `<div style="font-family:'Times New Roman',serif;white-space:normal;line-height:1.25;">` +
+      `<p style="text-align:justify;margin:0;">${this.htmlTexto("E assim, por estarem justas e contratadas, assinam o presente em 03 (três) vias de igual teor, na presença das testemunhas abaixo.")}</p>` +
+      `<p style="text-align:center;margin:12px 0 0;">Botucatu, ${this.esc(data)}</p>` +
+      linha(this.esc(ced.join(" ")), "Cedente(s)") +
+      linha(this.esc(ces.join(" ")), "Cessionário(s)") +
+      linha(this.esc(String(st.empresaNome || "ANUENTE").toUpperCase()), "Anuente(s)") +
+      `<div style="margin-top:14px;text-align:center;white-space:normal;">` +
+      `<div style="font-weight:bold;">Testemunhas</div>` +
+      `<div style="display:flex;justify-content:center;gap:48px;margin-top:8px;">${testemunha(w1)}${testemunha(w2)}</div>` +
+      `</div></div>`;
   },
 
   /** Cada palavra vira um bloco: o gerador de PDF apagava o espaço no texto justificado. */
@@ -2150,7 +2168,7 @@ const CessaoPopup = {
       const data = st.dataVenda ? CessaoApp.fmtDate(st.dataVenda) : "____";
       const pct = this.totalCedido();
       const pctTxt = Math.abs(pct - Math.round(pct)) < 0.001 ? String(Math.round(pct)) : this.fmtPct(pct);
-      const preco = this.parseValor(st.precoCessao);
+      const preco = Number(st.valorPago) || 0;
       const cedentes = (st.cedentes || []).filter((c) => c.cede && Number(c.cederPct) > 0);
       const ces = st.cessionarios || [];
       const paragrafos = [

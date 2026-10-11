@@ -1043,7 +1043,7 @@ const MarketingBudgetApp = {
 
   valorOrdenacaoGasto(x, col) {
     const nomes = { realizado: "Realizado", comprometido: "Comprometido", previsao: "Previsão" };
-    if (col === "data") return x.data || "";
+    if (col === "data") return this.dataGasto(x);
     if (col === "situacao") return nomes[x.status] || x.status || "";
     if (col === "titulo") return String(x.titulo || "") + "/" + String(x.parcela || "").padStart(6, "0");
     if (col === "credor") return x.credor || "";
@@ -1157,7 +1157,7 @@ const MarketingBudgetApp = {
       return `<tr><td colspan="7" class="mkb-vazio">Nenhum gasto ${vazio}.</td></tr>`;
     }
     return lista.map((x) => `<tr class="mkb-click" onclick="MarketingBudgetApp.abrirDespesa(${x.idx})" title="Clique para ver o resumo do título">
-        <td>${this.dataBr(x.data)}${x.prorrogado && x.vencimento && x.vencimento !== x.data ? `<div class="mkb-muted">venc. ${this.dataBr(x.vencimento)}</div>` : ""}</td>
+        <td>${this.dataBr(this.dataGasto(x))}</td>
         <td><span class="mkb-st mkb-st-${x.status}">${nomes[x.status]}</span></td>
         <td><strong>${this.esc(x.titulo)}</strong>${x.parcela ? `<span class="mkb-muted"> / ${this.esc(x.parcela)}</span>` : ""}</td>
         <td title="${this.esc(x.credor)}">${this.esc(x.credor)}</td>
@@ -1233,7 +1233,7 @@ const MarketingBudgetApp = {
     lista.forEach((x, i) => {
       const row = ws.getRow(5 + i);
       row.height = 18;
-      const vals = [this.dataBr(x.data), nomes[x.status] || x.status, x.titulo, x.parcela || "", x.credor || "", x.documento || "", x.catNome || ""];
+      const vals = [this.dataBr(this.dataGasto(x)), nomes[x.status] || x.status, x.titulo, x.parcela || "", x.credor || "", x.documento || "", x.catNome || ""];
       const bg = i % 2 ? "FFF8FAFC" : "FFFFFFFF";
       vals.forEach((v, c) => {
         const cell = row.getCell(c + 1);
@@ -1262,6 +1262,11 @@ const MarketingBudgetApp = {
   },
 
   /* ---------- render ---------- */
+  /** Na lista, a data é o vencimento. Títulos vencidos guardam o dia de hoje só para entrar no período. */
+  dataGasto(x) {
+    return (x && x.prorrogado && x.vencimento) ? x.vencimento : ((x && x.data) || "");
+  },
+
   kpi(label, valor, sub, cor, extra) {
     return `<div class="mkb-kpi" style="border-top-color:${cor};">
       <span>${label}</span><strong>${valor}</strong>${sub ? `<small>${sub}</small>` : ""}${extra || ""}
@@ -1775,7 +1780,8 @@ const MarketingBudgetApp = {
     const fmtN = (n) => Number(n || 0).toLocaleString("pt-BR");
     const lotes = this.lotesDoEmpreendimento();
     const disponiveis = lotes.total ? lotes.total - liquidas : null;
-    const pctDisp = lotes.total ? Math.max(0, Math.min(100, Math.round((Math.max(0, disponiveis) / lotes.total) * 1000) / 10)) : 0;
+    const pctVendido = lotes.total ? Math.max(0, Math.min(100, Math.round((liquidas / lotes.total) * 1000) / 10)) : 0;
+    const pctVendidoTxt = pctVendido.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "%";
     const subLotes = lotes.total
       ? `${fmtN(lotes.total)} lotes no empreendimento - ${fmtN(liquidas)} venda${liquidas === 1 ? "" : "s"} líquida${liquidas === 1 ? "" : "s"}`
       : (lotes.status === "lendo" ? "Lendo a posição de estoque…" : "Este empreendimento não tem lotes na posição de estoque");
@@ -1785,7 +1791,7 @@ const MarketingBudgetApp = {
         ${this.kpi("Pagamentos em dia", this.pct(emDia.length, L.length), `${emDia.length} contrato(s) sem parcela vencida`, "#105436")}
         ${this.kpi("Pagamentos em atraso", this.pct(atraso.length, L.length), `${atraso.length} contrato(s) · ${this.money(vencido)} já vencido`, atraso.length ? "#b91c1c" : "#105436")}
         ${this.kpi("Lotes disponíveis", disponiveis == null ? "—" : fmtN(disponiveis), subLotes, "#6366f1",
-          lotes.total ? `<div class="mkb-bar" title="${fmtN(lotes.total)} lotes no empreendimento - ${fmtN(liquidas)} vendas líquidas"><i style="width:${pctDisp}%;background:#6366f1;"></i></div>` : "")}
+          lotes.total ? `<div class="mkb-pbar" title="${fmtN(liquidas)} vendidos de ${fmtN(lotes.total)} lotes"><div class="mkb-bar"><i style="width:${pctVendido}%;background:#6366f1;"></i></div><b style="color:#6366f1;">${pctVendidoTxt} vendido</b></div>` : "")}
       </div>
       ${L.length ? `<div class="mkb-charts mkb-charts-3">
         <div class="mkb-card"><div class="mkb-card-h"><h3>Em dia e em atraso</h3><small>Dos contratos ativos, quantos pagam no prazo</small></div><div class="mkb-canvas mkb-canvas-curto"><canvas id="mkb-ch-ctr-dia"></canvas></div></div>

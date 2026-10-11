@@ -1075,7 +1075,7 @@ const EstoqueComercialApp = {
   async autoStartDailyBatimento() {
     this.paintBatimentoPauseBanner();
     const today = this.todayStr();
-    if (this.state._autoFinanceRunning) return;
+    if (this.state._autoFinanceRunning || this.state.loading) return;
 
     await this.loadFirebaseInBackground();
     if (this._pendingFin && this._pendingFin.length) {
@@ -1092,15 +1092,19 @@ const EstoqueComercialApp = {
     this.buildDefaulterIndex();
     this.stampFilaOnUnits();
     this.sealInferredFinance();
+    if (!this.state.units.length) {
+      await this.consultar(true);
+      if (!this.state.units.length) return;
+    }
+    if (this.needsContractEnrich() && !this._contractsAutoStarted) {
+      this._contractsAutoStarted = true;
+      const ok = await this.enrichContracts({ quiet: true });
+      if (!ok) this._contractsAutoStarted = false;
+    }
     const already = (meta && meta.batimentoDate === today) || this.state.batimentoDate === today;
     if (already && !this.hasActivePending()) return;
     // Posição do dia já gravada inteira no Firebase: mostra a de hoje sem refazer o batimento.
     if (meta && meta.batimentoDate === today && meta.unitsSavedDate === today) return;
-
-    if (!this.state.units.length) {
-      this.setProgress("Sem estoque salvo. Use Baixar unidades do Sienge — a classificação anterior será reaproveitada.");
-      return;
-    }
 
     this._firebasePendingData = null;
     this._autoDeltaRun = true;
@@ -1181,6 +1185,14 @@ const EstoqueComercialApp = {
     this.renderTable();
   },
 
+  onUnitChange() {
+    this.state.tablePage = 0;
+    const unitId = (document.getElementById("est-filter-unit") || {}).value || "";
+    this.renderTable();
+    if (!unitId) return;
+    this.hydrateUnitById(unitId).then(() => this.renderTable()).catch(() => {});
+  },
+
   scheduleRender() {
     this.state.tablePage = 0;
     clearTimeout(this._renderTimer);
@@ -1250,22 +1262,16 @@ const EstoqueComercialApp = {
     const el = document.getElementById("est-stock-meta");
     if (!el) return;
     if (!this.state.units.length) {
-      el.textContent = "Ainda sem estoque. Só Atualizar unidades dispara o loop no Sienge.";
+      el.textContent = "Buscando as unidades no Sienge…";
       return;
     }
-    const when = this.state.batimentoAt || this.state.fetchedAt;
-    const whenLabel = when ? new Date(when).toLocaleString("pt-BR") : "";
-    const finN = (this.state.units || []).filter((u) => u && u.relFin).length;
-    const last = this.state.batimentoDate
-      ? ` Última atualização financeira: ${String(this.state.batimentoDate).split("-").reverse().join("/")}${whenLabel ? " · " + whenLabel : ""} (${finN} títulos classificados).`
-      : (finN
-        ? ` Situação financeira de ${finN} título(s) da última base.`
-        : " Sem classificação financeira gravada — aguardando a última atualização.");
-    const fb = this.state.fbSaveError
-      ? ` Falha ao gravar no Firebase — o resultado ficou só neste navegador (${String(this.state.fbSaveError).slice(0, 160)}).`
-      : (this.state.firebaseOk ? " Firebase ok." : (this.fbReady() ? " Gravando/lendo Firebase." : " Firebase indisponível."));
-    const extra = this.state.complete ? "" : ` Carga incompleta (${this.state.ccDone.length} empreendimentos).`;
-    el.textContent = `${this.state.units.length} unidades.${last}${extra}${fb}`;
+    const n = this.state.units.length.toLocaleString("pt-BR");
+    const day = this.state.batimentoDate ? String(this.state.batimentoDate).split("-").reverse().join("/") : "";
+    const incompleta = this.state.complete ? "" : " · carga dos empreendimentos ainda incompleta";
+    const erro = this.state.fbSaveError ? " · a última gravação não concluiu" : "";
+    el.textContent = day
+      ? `${n} unidades · situação de ${day}${incompleta}${erro}`
+      : `${n} unidades · atualizando a situação financeira${incompleta}${erro}`;
   },
 
   normName(name) {
@@ -1509,7 +1515,7 @@ const EstoqueComercialApp = {
     if (finEl) {
       const p = this.portfolioOf(rows);
       const falta = p.semSaldo
-        ? `<small>${p.semSaldo} contrato(s) ativo(s) ainda sem saldo — rode o cruzamento de contratos.</small>`
+        ? `<small>${p.semSaldo} contrato(s) ativo(s) ainda sem saldo</small>`
         : `<small>${p.ativos} contrato(s) ativo(s) · ${p.inadimplentes} em atraso</small>`;
       finEl.innerHTML = `
         <div class="est-fin-card"><label>A receber</label><strong>${this.money(p.aReceber)}</strong>${falta}</div>
@@ -3720,7 +3726,7 @@ const EstoqueComercialApp = {
       }
       if (!this.state.units.length) await this.init();
       if (!this.state.units.length) {
-        alert("Não há estoque salvo. Use Atualizar unidades uma vez.");
+        alert("Não há unidades salvas e a busca no Sienge não trouxe lotes.");
         return;
       }
       const empSel = this.requireEmpForApiHeavy();
@@ -3736,7 +3742,7 @@ const EstoqueComercialApp = {
         return !this.isDeptOnlyCc(cc) && !this.readIdSet(this.CC_EMPTY_KEY).has(String(id));
       });
       if (!ccIds.length) {
-        alert("Não há empreendimentos com unidades para bater. Baixe as unidades do Sienge ou escolha um centro que tenha lote.");
+        alert("Não há empreendimentos com unidades para atualizar.");
         return;
       }
 
@@ -3799,8 +3805,6 @@ const EstoqueComercialApp = {
         ccIds = [];
       }
 
-      const stampedPre = 0;
-      let marked = 0;
       if (ccIds.length && custIdsToRefreshByCc.size) {
         for (let i = 0; i < ccIds.length; i++) {
           if (this.state.stopSync) break;
@@ -3808,7 +3812,7 @@ const EstoqueComercialApp = {
           const ativosN = this.state.units.filter(u => String(u.enterpriseId) === String(ccId) && this.isActiveFinance(u)).length;
           this.setProgress(`Batimento ${i + 1}/${ccIds.length} — ${ccId} (${ativosN} ativos)…`, ((i + 1) / ccIds.length) * 100);
           const refreshSet = custIdsToRefreshByCc.get(String(ccId)) || null;
-          marked += await this.applyRelacionamentoBatimento(ccId, {
+          await this.applyRelacionamentoBatimento(ccId, {
             custIdsToRefresh: refreshSet,
             includeSettled: false,
             label: `Empreendimento ${i + 1}/${ccIds.length} (${ccId})`
@@ -3817,13 +3821,10 @@ const EstoqueComercialApp = {
       } else if (!this.state.stopSync) {
         this.setProgress("Base classificada. Nenhum contrato ativo adimplente ou inadimplente pendente de ficha.");
       }
-      const stamped = forceFull
-        ? this.stampFilaOnUnits(empSel, { onlyWithoutStatement: true })
-        : stampedPre;
-      let conferencia = null;
+      if (forceFull) this.stampFilaOnUnits(empSel, { onlyWithoutStatement: true });
       if (empSel && !this.state.stopSync) {
         try {
-          conferencia = await this.conferirComSienge(empSel);
+          await this.conferirComSienge(empSel);
         } catch (e) {
           console.warn("[Estoque] conferência com o Sienge", e);
         }
@@ -3831,9 +3832,6 @@ const EstoqueComercialApp = {
       this._censusStillOpen = pendenteNoEscopo();
       this.sealInferredFinance(empSel);
       const inScope = u => !empSel || String(u.enterpriseId) === empSel;
-      const qtdQ = this.state.units.filter(u => inScope(u) && this.financialStatus(u) === "Quitado").length;
-      const qtdI = this.state.units.filter(u => inScope(u) && this.financialStatus(u) === "Ativo inadimplente").length;
-      const qtdA = this.state.units.filter(u => inScope(u) && this.financialStatus(u) === "Ativo adimplente").length;
       this.paintEmpSelect();
       let day = this.todayStr();
       if (empSel) {
@@ -3844,14 +3842,9 @@ const EstoqueComercialApp = {
         day = await this.persistTodayResult({ markDone: !this._censusStillOpen });
       }
       const pendentes = (this.state.units || []).filter((u) => inScope(u) && this.isActiveFinance(u) && this.unitNeedsCensus(u)).length;
-      let extra;
-      if (this.state.stopSync) extra = ` Interrompido. ${pendentes} contrato(s) ativo(s) ainda não consultado(s) — rode de novo que ele continua de onde parou.`;
-      else if (this._censusStillOpen) extra = ` ${pendentes} contrato(s) ativo(s) ainda não consultado(s)${this._batimentoFailed ? " (" + this._batimentoFailed + " falha(s) no Sienge)" : ""} — rode de novo que ele continua só nesses.`;
-      else if (empSel) extra = conferencia
-        ? ` Conferido com o Sienge: a receber ${this.money(conferencia.sienge.aReceber)} no Sienge × ${this.money(conferencia.integra.aReceber)} no Integra.`
-        : " Não consegui ler o extrato do Sienge para a conferência.";
-      else extra = " Todos os contratos ativos foram consultados. Base do dia gravada (estoque + caixa).";
-      this.setProgress(`Batimento (${ccIds.length || 0} empreendimento(s)): ${qtdQ} quitados · ${qtdI} inadimplentes · ${qtdA} adimplentes · ${marked} ficha(s) · ${stamped} pela fila.${extra} ${day.split("-").reverse().join("/")}.`);
+      if (this.state.stopSync) this.setProgress(`Atualização interrompida. ${pendentes} contrato(s) ainda não consultado(s).`);
+      else if (this._censusStillOpen) this.setProgress(`${pendentes} contrato(s) ainda sem consulta. Continua na próxima abertura.`);
+      else this.setProgress("");
     } catch (e) {
       console.error("[Estoque] batimento", e);
       alert("Erro no batimento: " + (e.message || e));
@@ -3995,7 +3988,7 @@ const EstoqueComercialApp = {
       if (this.state.loading) return;
       if (!this.state.units.length) await this.init();
       if (!this.state.units.length) {
-        alert("Não há estoque salvo. Use Atualizar unidades uma vez.");
+        alert("Não há unidades salvas e a busca no Sienge não trouxe lotes.");
         return;
       }
       if (this.requireEmpForApiHeavy() === null) return;
