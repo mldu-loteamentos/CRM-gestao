@@ -447,15 +447,15 @@ const FluxoCaixaApp = {
    *
    * Reaprop. / ABATE: negativo no DFC na conta em que o movimento foi
    * apropriado (repasse, obras, marketing, pessoas…).
-   * Conta de adiantamento (2.11.03 etc.) com pagamento: positivo no DFC,
-   * inclusive quando o histórico é ABATE.
+   * Conta de adiantamento (2.11.01 fornecedor, 2.11.03 parceiro) entra
+   * positiva no DFC mesmo sendo conta 2.x e mesmo com histórico ABATE.
    */
   signedAmount(node, categoryId, categoryName, amount, reducerFlag, categoryType, mov) {
     const raw = Number(amount) || 0;
     if (!raw) return 0;
     const role = mov ? this.movAdvanceRole(mov) : "";
+    if (this.isAdiantamentoAccount(categoryId, categoryName)) return Math.abs(raw);
     if (role === "adiantamento") return Math.abs(raw);
-    if (this.isAdiantamentoAccount(categoryId, categoryName) && role !== "abatimento") return Math.abs(raw);
     if (this.isDescontoFolhaAccount(categoryId, categoryName)) return -Math.abs(raw);
     if (role === "abatimento") return -Math.abs(raw);
     const dividend = this.signedDividendLine(node, categoryName, raw);
