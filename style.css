@@ -8510,6 +8510,13 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .ml-tab:disabled, .ml-tab.is-locked { opacity: 0.45; cursor: not-allowed; color: #64748b; border-bottom-color: transparent; }
 .ml-tab .ml-tab-count { font-size: 0.7rem; font-weight: 700; background: #e2e8f0; color: #475569; border-radius: 999px; padding: 1px 7px; }
 .ml-tab.is-active .ml-tab-count { background: #e7f6ee; color: var(--color-primary, #105436); }
+.ficha-tabs,
+.ficha-contrato-tabs {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0 8px;
+}
 .ficha-tabs { margin-top: 4px; }
 .ficha-contrato-tabs { margin-top: 8px; }
 

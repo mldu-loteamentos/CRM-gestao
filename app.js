@@ -5588,6 +5588,7 @@ window.crmAbrirTesteConta = function(email) {
   }
   window.crmPintarTesteConta();
   window.crmAtualizarTelasDoAcesso();
+  if (typeof switchTab === "function") switchTab("construcao-home", "Home");
 };
 
 window.syncQuitacaoAdvogadoVista = function() {
@@ -5623,6 +5624,7 @@ window.crmEncerrarTesteConta = function() {
   }
   window.crmPintarTesteConta();
   if (typeof window.crmAtualizarTelasDoAcesso === "function") window.crmAtualizarTelasDoAcesso();
+  if (typeof switchTab === "function") switchTab("construcao-home", "Home");
 };
 
 window.crmPintarTesteConta = function() {

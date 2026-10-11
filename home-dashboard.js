@@ -82,6 +82,8 @@ const HomeDashboard = {
   },
 
   getViewUser() {
+    const imp = typeof window.crmImpersonacaoAtual === "function" ? window.crmImpersonacaoAtual() : null;
+    if (imp) return imp;
     const real = window.AppState?.currentUser;
     if (!this.isAdminUser(real)) return real;
 
@@ -643,7 +645,8 @@ const HomeDashboard = {
     if (!bar || !select) return;
 
     const real = window.AppState?.currentUser;
-    if (!this.isAdminUser(real)) {
+    const testando = typeof window.crmImpersonacaoAtual === "function" && window.crmImpersonacaoAtual();
+    if (testando || !this.isAdminUser(real)) {
       bar.style.display = 'none';
       return;
     }
@@ -674,7 +677,7 @@ const HomeDashboard = {
   },
 
   init() {
-    const user = window.AppState?.currentUser;
+    const user = (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo()) || window.AppState?.currentUser;
     const isOperador = this.showsOperadorHome(user);
     
     if (isOperador) {
