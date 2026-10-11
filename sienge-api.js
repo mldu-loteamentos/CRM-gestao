@@ -1023,7 +1023,7 @@ window.fetch = async function(...args) {
   try {
     if (window.ApiUsage && typeof ApiUsage.trackFetch === "function") ApiUsage.trackFetch(urlStr);
   } catch (e) {}
-  const skipSemantic = /overdue-receivable-bill|\/attachments/i.test(urlStr);
+  const skipSemantic = /overdue-receivable-bill|\/attachments|purchase-invoices/i.test(urlStr);
   if (!skipSemantic && (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE') && 
       (urlStr.includes('sienge-proxy') || urlStr.includes('/api/') || urlStr.includes('sienge'))) {
       

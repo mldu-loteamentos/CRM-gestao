@@ -787,6 +787,7 @@ window.InserirNotaApp = {
     s.enviando = "Localizando o título no contas a pagar…";
     this.render();
     const billId = await this.tituloDaNota(seq);
+    s.billId = billId || "";
     if (!billId) {
       log.push("A nota entrou, mas o Sienge ainda não devolveu o número do título. O anexo e a forma de pagamento não foram enviados.");
       return;
@@ -876,6 +877,9 @@ window.InserirNotaApp = {
         module: "Fiscal", action: "Inserir nota", status, summary,
         user: u.nome, userEmail: u.email,
         customerLabel: s.credor ? s.credor.nome : "",
+        customerId: s.pedido && s.pedido.supplierId != null ? String(s.pedido.supplierId) : "",
+        enterpriseId: s.form && s.form.companyId != null ? String(s.form.companyId) : "",
+        titleId: s.billId || "",
         endpoint: "/purchase-invoices", method: "POST",
         details: Object.assign({ pedido: s.pedidoNome, pedidoApi: s.pedidoApi, documento: s.form.documento, numero: s.form.numero, serie: s.form.serie, empresa: s.form.companyId }, details || {})
       });

@@ -1062,20 +1062,30 @@ const CessaoPopup = {
       if (!Number.isFinite(Number(st.juros)) || Number(st.juros) < 0) return "Informe os juros do contrato. Use 0 quando não houver.";
       return "";
     }
+    if (tab === "cessionario") {
+      if (!(st.cessionarios || []).length) return "Escolha o cessionário.";
+      if (Math.abs(this.totalCedido() - this.totalAdquirido()) > 0.05) return "O percentual adquirido precisa fechar com o percentual cedido.";
+      const semRep = (st.cessionarios || []).find((c) => this.isPj(c.customer) && !c.representante);
+      if (semRep) return "Pessoa jurídica precisa de representante: " + (semRep.customer.name || "cessionário") + ".";
+      return "";
+    }
+    if (tab === "testemunhas") {
+      if (!st.testemunha1 || !st.testemunha2) return "Escolha as duas testemunhas.";
+      if (String(st.testemunha1) === String(st.testemunha2)) return "As testemunhas precisam ser pessoas diferentes.";
+      return "";
+    }
+    if (tab === "taxa") {
+      if (st.taxaStatus === "buscando") return "Consultando o título da taxa…";
+      if (st.taxaStatus !== "paga") return st.taxaMsg || "Informe o título da taxa de cessão e pressione Enter ou Tab.";
+      return "";
+    }
     return "";
   },
 
   pendenciaPdf() {
-    const aba = this.pendenciaAba("cedentes") || this.pendenciaAba("condicoes");
+    const aba = this.pendenciaAba("cedentes") || this.pendenciaAba("condicoes") || this.pendenciaAba("cessionario") || this.pendenciaAba("testemunhas") || this.pendenciaAba("taxa");
     if (aba) return aba;
-    const st = CessaoPopupState;
-    if (!(st.cessionarios || []).length) return "Escolha o cessionário.";
-    if (Math.abs(this.totalCedido() - this.totalAdquirido()) > 0.05) return "O percentual adquirido precisa fechar com o percentual cedido.";
-    const semRep = st.cessionarios.find((c) => this.isPj(c.customer) && !c.representante);
-    if (semRep) return "Pessoa jurídica precisa de representante: " + (semRep.customer.name || "cessionário") + ".";
-    if (!(Number(st.valorPago) > 0)) return "Não encontrei o líquido recebido deste título para a cláusula 4.";
-    if (!st.testemunha1 || !st.testemunha2) return "Escolha as duas testemunhas.";
-    if (String(st.testemunha1) === String(st.testemunha2)) return "As testemunhas precisam ser pessoas diferentes.";
+    if (!(Number(CessaoPopupState.valorPago) > 0)) return "Não encontrei o líquido recebido deste título para a cláusula 4.";
     return "";
   },
 
@@ -1118,6 +1128,9 @@ const CessaoPopup = {
       valorPago: 0,
       testemunha1: "",
       testemunha2: "",
+      taxaTitulo: "",
+      taxaStatus: "",
+      taxaMsg: "",
       cesAberto: -1
     });
     this.montar();
@@ -1539,7 +1552,9 @@ const CessaoPopup = {
     const tabs = [
       { id: "cedentes", label: "Cedentes", icon: "users" },
       { id: "condicoes", label: "Condições da compra", icon: "wallet" },
-      { id: "cessionario", label: "Cessionário", icon: "user-plus" }
+      { id: "cessionario", label: "Cessionário", icon: "user-plus" },
+      { id: "testemunhas", label: "Testemunhas", icon: "pen-line" },
+      { id: "taxa", label: "Taxa de cessão", icon: "receipt" }
     ];
     const box = document.getElementById("cessao-popup-tabs");
     if (box) {
@@ -1558,19 +1573,21 @@ const CessaoPopup = {
     const prox = document.getElementById("cessao-popup-proximo");
     if (voltar) voltar.style.display = st.tab === "cedentes" ? "none" : "";
     if (prox) {
-      prox.innerHTML = st.tab === "cessionario"
-        ? (st.gerando ? `<span class="btn-spin"></span> Gerando...` : `<i data-lucide="file-down" style="width:16px;height:16px;"></i> Gerar PDF`)
+      prox.innerHTML = st.tab === "taxa"
+        ? (st.gerando ? `<span class="btn-spin"></span> Gerando...` : `<i data-lucide="file-down" style="width:16px;height:16px;"></i> Gerar cessão`)
         : "Avançar";
-      prox.disabled = !!st.loading || !!st.gerando;
+      prox.disabled = !!st.loading || !!st.gerando || (st.tab === "taxa" && (st.taxaStatus !== "paga" || !!this.pendenciaPdf()));
     }
     const aviso = document.getElementById("cessao-popup-aviso");
-    if (aviso) aviso.textContent = st.loading ? "" : (st.tab === "cessionario" ? this.pendenciaPdf() : this.pendenciaAba(st.tab));
+    if (aviso) aviso.textContent = st.loading ? "" : (st.tab === "taxa" ? this.pendenciaPdf() : this.pendenciaAba(st.tab));
     if (window.lucide) lucide.createIcons();
   },
 
   corpoHtml() {
     if (CessaoPopupState.tab === "condicoes") return this.condicoesHtml();
     if (CessaoPopupState.tab === "cessionario") return this.cessionarioHtml();
+    if (CessaoPopupState.tab === "testemunhas") return this.testemunhasHtml();
+    if (CessaoPopupState.tab === "taxa") return this.taxaHtml();
     return this.cedentesHtml();
   },
 
@@ -1642,9 +1659,8 @@ const CessaoPopup = {
         ${this.campoContrato("Parcelas a pagar", String(st.qtdAbertas || 0))}
         ${this.campoContrato("Valor da próxima parcela", this.money(st.valorParcelaAberta), true)}
         ${this.campoContrato("Próximo vencimento", st.primeiroVencAberto ? CessaoApp.fmtDate(st.primeiroVencAberto) : "—", true)}
-        ${this.campoContrato("Saldo com o vendedor", this.money(st.saldoAberto), true)}
-      </div>
-      <p style="margin:0;color:#64748b;font-size:0.78rem;">Juros 0 significa contrato sem juros de parcelamento. Indexador REAL significa parcela sem reajuste anual. As quantidades e o saldo entram nas cláusulas 1.5 e 5.</p>`;
+        ${this.campoContrato("Saldo com o vendedor", this.money(st.saldoAberto))}
+      </div>`;
   },
 
   campoContrato(rotulo, valor, largo) {
@@ -1661,23 +1677,37 @@ const CessaoPopup = {
     return `<option value="">Selecione</option>${opts}`;
   },
 
+  cessionarioCheio() {
+    return this.totalCedido() > 0 && (this.totalCedido() - this.totalAdquirido()) <= 0.05;
+  },
+
   cessionarioHtml() {
     const st = CessaoPopupState;
     const modoRep = st.buscaModo && st.buscaModo.tipo === "representante";
     const alvo = modoRep ? st.cessionarios[st.buscaModo.idx] : null;
     const cards = (st.cessionarios || []).map((row, idx) => this.cardCessionario(row, idx)).join("");
-    return `
-      <p class="cessao-pop-nota ${modoRep ? "" : "is-ok"}">${modoRep
-        ? "Selecione o representante de " + this.esc((alvo && alvo.customer && alvo.customer.name) || "o cessionário") + "."
-        : "Busque o cliente como na tela de Relacionamento. Confira os dados e o cônjuge, e informe o percentual que essa pessoa adquiriu."}</p>
-      <div class="cessao-ces-busca">
+    const cheio = !modoRep && this.cessionarioCheio();
+    const busca = cheio
+      ? `<p class="cessao-pop-nota">O percentual cedido já soma com o cessionário. Ajuste o % adquirido para incluir outra pessoa.</p>`
+      : `<div class="cessao-ces-busca">
         <label class="cessao-pop-field">${modoRep ? "Representante" : "Nome do cliente"}
           <input id="cessao-pop-busca" class="form-control" placeholder="Digite para buscar..." value="${this.esc(st.busca)}"
             oninput="CessaoPopup.aoDigitar(this.value)" autocomplete="off">
         </label>
         <div id="cessao-pop-sug" class="cessao-pop-sug" style="display:none;"></div>
-      </div>
-      <div class="cessao-ces-lista">${cards || `<p class="cessao-ces-vazio">Nenhum cessionário selecionado. Total cedido: ${this.fmtPct(this.totalCedido())}%.</p>`}</div>
+      </div>`;
+    return `
+      <p class="cessao-pop-nota ${modoRep || cheio ? "" : "is-ok"}">${modoRep
+        ? "Selecione o representante de " + this.esc((alvo && alvo.customer && alvo.customer.name) || "o cessionário") + "."
+        : "Busque o cliente como na tela de Relacionamento. Confira os dados e o cônjuge, e informe o percentual que essa pessoa adquiriu."}</p>
+      ${busca}
+      <div class="cessao-ces-lista">${cards || `<p class="cessao-ces-vazio">Nenhum cessionário selecionado. Total cedido: ${this.fmtPct(this.totalCedido())}%.</p>`}</div>`;
+  },
+
+  testemunhasHtml() {
+    const st = CessaoPopupState;
+    return `
+      <p class="cessao-pop-nota is-ok">Escolha duas pessoas diferentes para assinar como testemunha.</p>
       <div class="cessao-ces-fechamento">
         <div class="cessao-cond-head">TESTEMUNHAS</div>
         <div class="cessao-ces-fechamento-grid">
@@ -1689,6 +1719,19 @@ const CessaoPopup = {
           </label>
         </div>
       </div>`;
+  },
+
+  taxaHtml() {
+    const st = CessaoPopupState;
+    const cls = st.taxaStatus === "paga" ? "is-ok" : (st.taxaStatus ? "" : "is-ok");
+    const msg = st.taxaMsg || "Digite o número do título da taxa e pressione Enter ou Tab.";
+    return `
+      <p class="cessao-pop-nota ${cls}">${this.esc(msg)}</p>
+      <label class="cessao-pop-field" style="max-width:280px;">Título da taxa de cessão
+        <input id="cessao-taxa-titulo" class="form-control" inputmode="numeric" placeholder="Número do título" value="${this.esc(st.taxaTitulo || "")}"
+          oninput="CessaoPopup.aoDigitarTaxa(this.value)"
+          onkeydown="CessaoPopup.taxaTecla(event)">
+      </label>`;
   },
 
   cardCessionario(row, idx) {
@@ -1745,22 +1788,32 @@ const CessaoPopup = {
     </div>`;
   },
 
+  ordemAbas() {
+    return ["cedentes", "condicoes", "cessionario", "testemunhas", "taxa"];
+  },
+
   ir(tab) {
-    if (tab === "condicoes" && this.pendenciaAba("cedentes")) return;
-    if (tab === "cessionario" && (this.pendenciaAba("cedentes") || this.pendenciaAba("condicoes"))) return;
+    const ordem = this.ordemAbas();
+    const destino = ordem.indexOf(tab);
+    for (let i = 0; i < destino; i++) {
+      if (this.pendenciaAba(ordem[i])) return;
+    }
     CessaoPopupState.tab = tab;
     this.pintar();
   },
 
   voltar() {
-    const ordem = ["cedentes", "condicoes", "cessionario"];
+    const ordem = this.ordemAbas();
     const i = ordem.indexOf(CessaoPopupState.tab);
-    if (i > 0) this.ir(ordem[i - 1]);
+    if (i > 0) {
+      CessaoPopupState.tab = ordem[i - 1];
+      this.pintar();
+    }
   },
 
   proximo() {
     const st = CessaoPopupState;
-    if (st.tab === "cessionario") {
+    if (st.tab === "taxa") {
       this.gerarPdf();
       return;
     }
@@ -1770,7 +1823,9 @@ const CessaoPopup = {
       if (aviso) aviso.textContent = erro;
       return;
     }
-    this.ir(st.tab === "cedentes" ? "condicoes" : "cessionario");
+    const ordem = this.ordemAbas();
+    const i = ordem.indexOf(st.tab);
+    if (i >= 0 && ordem[i + 1]) this.ir(ordem[i + 1]);
   },
 
   setParticipacao(idx, el) {
@@ -1807,7 +1862,7 @@ const CessaoPopup = {
   atualizarAviso() {
     const aviso = document.getElementById("cessao-popup-aviso");
     if (!aviso || CessaoPopupState.loading) return;
-    aviso.textContent = CessaoPopupState.tab === "cessionario" ? this.pendenciaPdf() : this.pendenciaAba(CessaoPopupState.tab);
+    aviso.textContent = CessaoPopupState.tab === "taxa" ? this.pendenciaPdf() : this.pendenciaAba(CessaoPopupState.tab);
     const tot = document.getElementById("cessao-pop-total-cedido");
     if (tot) tot.textContent = this.fmtPct(this.totalCedido()) + "%";
   },
@@ -1859,10 +1914,87 @@ const CessaoPopup = {
   setCessionarioPct(idx, val) {
     const row = CessaoPopupState.cessionarios[idx];
     if (!row) return;
+    const antes = this.cessionarioCheio();
     let n = Number(String(val).replace(",", "."));
     if (!Number.isFinite(n) || n < 0) n = 0;
     row.pct = Math.round(n * 100) / 100;
-    this.atualizarAviso();
+    if (antes !== this.cessionarioCheio()) this.pintar();
+    else this.atualizarAviso();
+  },
+
+  aoDigitarTaxa(val) {
+    CessaoPopupState.taxaTitulo = val;
+    if (!CessaoPopupState.taxaStatus) return;
+    CessaoPopupState.taxaStatus = "";
+    CessaoPopupState.taxaMsg = "";
+    const prox = document.getElementById("cessao-popup-proximo");
+    if (prox) prox.disabled = true;
+    const aviso = document.getElementById("cessao-popup-aviso");
+    if (aviso) aviso.textContent = "Pressione Enter ou Tab para consultar o título da taxa.";
+  },
+
+  taxaTecla(ev) {
+    if (!ev || (ev.key !== "Enter" && ev.key !== "Tab")) return;
+    if (ev.key === "Enter") ev.preventDefault();
+    CessaoPopupState.taxaTitulo = ev.target ? ev.target.value : CessaoPopupState.taxaTitulo;
+    this.buscarTaxa();
+  },
+
+  async buscarTaxa() {
+    const id = String(CessaoPopupState.taxaTitulo || "").replace(/\D/g, "");
+    CessaoPopupState.taxaTitulo = id;
+    if (!id) {
+      CessaoPopupState.taxaStatus = "";
+      CessaoPopupState.taxaMsg = "Informe o número do título da taxa de cessão.";
+      this.pintar();
+      return;
+    }
+    CessaoPopupState.taxaStatus = "buscando";
+    CessaoPopupState.taxaMsg = "Consultando o título " + id + " no contas a receber…";
+    this.pintar();
+    const fetchFn = window.siengeFetchWithRetry;
+    if (typeof fetchFn !== "function") {
+      CessaoPopupState.taxaStatus = "nao";
+      CessaoPopupState.taxaMsg = "A consulta ao Sienge não está disponível.";
+      this.pintar();
+      return;
+    }
+    try {
+      const bill = await fetchFn("/accounts-receivable/receivable-bills/" + encodeURIComponent(id), 1);
+      if (!bill || typeof bill !== "object") throw new Error("ausente");
+      let inst = [];
+      try {
+        const res = await fetchFn("/accounts-receivable/receivable-bills/" + encodeURIComponent(id) + "/installments?limit=200", 1);
+        inst = (res && res.results) || (Array.isArray(res) ? res : []);
+      } catch (e) {
+        inst = [];
+      }
+      let aberto = 0;
+      let recebido = 0;
+      inst.forEach((p) => {
+        const cb = p && (p.currentBalance != null ? p.currentBalance : p.balanceDue);
+        aberto += Number(cb) || 0;
+        (p.receipts || []).forEach((rec) => {
+          if (typeof window.isWriteOffReceipt === "function" && window.isWriteOffReceipt(rec)) return;
+          recebido += Number(rec.receiptValue || rec.value || 0);
+        });
+      });
+      const quitado = !!(bill.payOffDate || bill.payoffDate);
+      const paga = inst.length > 0 && aberto <= 0.009 && (recebido > 0.009 || quitado);
+      if (!inst.length) {
+        CessaoPopupState.taxaStatus = "aberta";
+        CessaoPopupState.taxaMsg = "Encontrei o título " + id + ", mas não consegui ler as parcelas para confirmar o pagamento.";
+      } else {
+        CessaoPopupState.taxaStatus = paga ? "paga" : "aberta";
+        CessaoPopupState.taxaMsg = paga
+          ? "Título " + id + " está pago. Pode gerar a cessão."
+          : "Título " + id + " ainda tem saldo em aberto. A cessão só gera com a taxa paga.";
+      }
+    } catch (e) {
+      CessaoPopupState.taxaStatus = "nao";
+      CessaoPopupState.taxaMsg = "Não encontrei o título " + id + " no contas a receber.";
+    }
+    this.pintar();
   },
 
   removeCessionario(idx) {
@@ -1967,6 +2099,10 @@ const CessaoPopup = {
       }
       if ((CessaoPopupState.cessionarios || []).some((c) => String(c.customerId) === String(id))) {
         alert("Cessionário já adicionado.");
+        return;
+      }
+      if (this.cessionarioCheio()) {
+        alert("O percentual cedido já soma com o cessionário. Ajuste o % adquirido para incluir outra pessoa.");
         return;
       }
       const rem = Math.max(0, this.totalCedido() - this.totalAdquirido());

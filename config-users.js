@@ -2564,6 +2564,11 @@ const ConfigUsersApp = {
     }
     const perms = Object.assign({}, existing, incoming, { _savedAt: Date.now() });
     delete perms.__mirror_of__;
+    if (perms.mod_rel !== true) {
+      Object.keys(perms).forEach((k) => {
+        if (k === "mod_rel" || k.indexOf("sub_rel_") === 0) perms[k] = false;
+      });
+    }
     if (removed.length) perms._shrinkConfirmedAt = Date.now();
     else if (!existing._shrinkConfirmedAt) delete perms._shrinkConfirmedAt;
 

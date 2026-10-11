@@ -5919,10 +5919,19 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .cessao-ces-extra { margin-top: 10px; padding: 8px 10px; background: #f8fafc; border-radius: 8px; }
 .cessao-ces-fechamento { margin-top: 6px; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
 .cessao-ces-fechamento-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 12px 14px 14px; }
-.cessao-contrato-dados { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 10px 12px; margin: 16px 0 10px; }
-.cessao-contrato-dados > label { grid-column: span 3; min-width: 0; }
-.cessao-contrato-dados > label.is-wide { grid-column: span 4; }
-.cessao-contrato-dados input:disabled { background: #f8fafc; color: #0f172a; opacity: 1; cursor: default; }
+.cessao-contrato-dados {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px 10px;
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+}
+.cessao-contrato-dados > label,
+.cessao-contrato-dados > label.is-wide { grid-column: auto; min-width: 0; }
+.cessao-contrato-dados input:disabled { background: #fff; color: #0f172a; opacity: 1; cursor: default; }
 .cessao-popup-panel .cessao-cond-scroll { overflow: hidden; }
 .cessao-popup-panel .cessao-cond-table { table-layout: fixed; width: 100%; }
 .cessao-popup-panel .cessao-cond-table th:nth-child(1) { width: 24%; }
@@ -5936,8 +5945,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .cessao-popup-panel .cessao-cond-table td:last-child { text-align: center; width: 52px; }
 @media (max-width: 800px) {
   .cessao-pop-pessoa, .cessao-pop-grid { grid-template-columns: 1fr 1fr; }
-  .cessao-contrato-dados > label,
-  .cessao-contrato-dados > label.is-wide { grid-column: span 6; }
+  .cessao-contrato-dados { grid-template-columns: 1fr 1fr; }
   .cessao-ces-dados { grid-template-columns: 1fr; }
   .cessao-ces-dados .is-wide { grid-column: auto; }
   .cessao-ces-fechamento-grid { grid-template-columns: 1fr; }
@@ -5985,10 +5993,15 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
   border-bottom: 1px solid #e2e8f0;
 }
 .cessao-cond-table td {
-  padding: 6px 8px;
-  border-bottom: 1px dashed #e2e8f0;
-  background: #fffbeb;
+  padding: 3px 6px;
+  border-bottom: 1px solid #dcfce7;
+  background: #f0fdf4;
   vertical-align: middle;
+}
+.cessao-cond-scroll {
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  overflow: hidden;
 }
 .cessao-kpi-row {
   display: grid;

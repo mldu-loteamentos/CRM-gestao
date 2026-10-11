@@ -3027,6 +3027,17 @@ window.bootEngenhariaCaucao = function () {
 };
 
 function switchTab(tabId, titleOverride, showLoader = false) {
+  if (String(tabId || "").indexOf("relacionamento") === 0 && typeof window.isCrmSuperAdmin === "function" && !window.isCrmSuperAdmin()) {
+    let relPerms = {};
+    try {
+      const perfil = (window.crmUsuarioAcesso && window.crmUsuarioAcesso() && window.crmUsuarioAcesso().profile_name) || "";
+      relPerms = typeof window.readCrmProfilePerms === "function" ? window.readCrmProfilePerms(perfil) : {};
+    } catch (e) { relPerms = {}; }
+    if (relPerms.mod_rel !== true) {
+      alert("Sem permissão para Relacionamento.");
+      return;
+    }
+  }
   if (tabId === 'construcao-marketing') tabId = 'marketing-eventos';
   if (tabId === 'construcao-compras') tabId = 'compras-previsoes';
   if (tabId === 'construcao-engenharia') tabId = 'engenharia-caucao';
@@ -3471,6 +3482,17 @@ function auditActionMeta(action, summary, module) {
   if (key === "LOTE_APROVADO") return { group: "lote", label: "Lote aprovado no Sienge" };
   if (key === "LOTE_ERRO") return { group: "lote", label: "Falha no lote (robô do Sienge)" };
   if (key === "LOTE_EXCLUIDO") return { group: "lote", label: "Lote de pagamento excluído" };
+  if (key === "Inserir nota" || key === "NOTA_SIENGE" || /purchase-invoices/.test(blob)) {
+    if (/erro|falha/.test(blob)) return { group: "nota", label: "Falha ao lançar nota no Sienge" };
+    if (/criada/.test(blob)) return { group: "nota", label: "Nota criada no Sienge" };
+    return { group: "nota", label: "Nota lançada no Sienge" };
+  }
+  if (key === "Enviar nota") {
+    if (/cancel/.test(blob)) return { group: "nota", label: "Envio de nota cancelado" };
+    if (/exclu/.test(blob)) return { group: "nota", label: "Envio de nota excluído" };
+    return { group: "nota", label: "Nota enviada ao fiscal" };
+  }
+  if (key === "Gerar título") return { group: "sienge", label: "Título gerado no Sienge" };
   if (key === "ANEXO_ENVIADO") return { group: "anexo", label: "Envio de Anexo" };
   if (key === "ANEXO_ERRO") return { group: "anexo", label: "Falha no envio de anexo" };
   if (key === "CAUCAO_VENCIMENTO" || /vencimento da cau[cç][aã]o/.test(blob)) return { group: "caucao", label: "Vencimento de caução" };
@@ -3853,6 +3875,8 @@ window.renderAuditLogs = async function(forceReload) {
     if (actionFilter === "anexo" && meta.group !== "anexo") return false;
     if (actionFilter === "caucao" && meta.group !== "caucao") return false;
     if (actionFilter === "lote" && meta.group !== "lote") return false;
+    if (actionFilter === "nota" && meta.group !== "nota") return false;
+    if (actionFilter === "sienge" && meta.group !== "sienge") return false;
     if (userQ && !auditUserMatches(row, userQ)) return false;
     if (fromTs && !isNaN(fromTs)) {
       const t = auditParseTs(row.timestamp);
@@ -4337,8 +4361,13 @@ window.expandCrmMenuPerms = function(perms) {
   ["acessar", "visualizar", "editar"].forEach(function(flag) {
     fill("sub_eng_geral_caucao_" + flag, "sub_eng_geral_engenharia_" + flag);
     fill("sub_eng_geral_config_" + flag, "sub_eng_geral_engenharia_" + flag);
-    fill("sub_rel_geral_buscar_cliente_" + flag, "sub_rel_geral_relacionamento_" + flag);
+    if (copy.mod_rel === true) fill("sub_rel_geral_buscar_cliente_" + flag, "sub_rel_geral_relacionamento_" + flag);
   });
+  if (copy.mod_rel === false) {
+    Object.keys(copy).forEach(function(k) {
+      if (k.indexOf("sub_rel_") === 0) copy[k] = false;
+    });
+  }
   if (copy.sub_eng_geral_caucao_acessar == null && (
     copy.mod_eng === true || copy.sub_eng_geral === true || copy.sub_eng_geral_engenharia_acessar === true
   )) {
@@ -5391,6 +5420,10 @@ window.applyPermissions = function(profileName) {
       
       moduleItems.forEach(item => {
         const modKey = item.getAttribute('data-module');
+        if (perms.mod_rel !== true && (modKey === "mod_rel" || String(modKey).indexOf("sub_rel_") === 0)) {
+          item.style.display = "none";
+          return;
+        }
         const inheritedMkt = perms.mod_mkt === true || perms.sub_mkt_geral_marketing_acessar === true;
         const mktAlias = (modKey === 'sub_mkt_geral_eventos_acessar' || modKey === 'sub_mkt_geral_budget_acessar' || modKey === 'sub_mkt_geral_config_acessar') && inheritedMkt;
         const cpAlias = modKey === 'sub_fin_cp_parametrizacao_parceiro_acessar' && (
@@ -5527,6 +5560,11 @@ window.applyPermissions = function(profileName) {
     if (!kids.length) continue;
     const anyVisible = kids.some(li => li.style.display !== "none");
     group.style.display = anyVisible ? "" : "none";
+  }
+
+  const activeNav = document.querySelector("li.nav-item.active[data-tab]");
+  if (activeNav && activeNav.style.display === "none" && typeof switchTab === "function") {
+    switchTab("construcao-home", "Home");
   }
 }
 
@@ -5902,6 +5940,9 @@ window.permCoversMenuKey = function(perms, modKey) {
       || perms.sub_soc_geral_estrutura_societaria_visualizar === true
       || perms.sub_soc_geral_estrutura_societaria_editar === true;
   }
+  if (modKey === "mod_rel" || String(modKey).indexOf("sub_rel_") === 0) {
+    if (perms.mod_rel !== true) return false;
+  }
   if (modKey === "sub_rel_geral_buscar_cliente_acessar") {
     return perms.mod_rel === true
       || perms.sub_rel_geral === true
@@ -5910,6 +5951,7 @@ window.permCoversMenuKey = function(perms, modKey) {
       || perms.sub_rel_geral_relacionamento_editar === true;
   }
   if (modKey === "sub_rel_docs" || modKey === "sub_rel_docs_autorizacao_escritura_acessar" || modKey === "sub_rel_docs_cessao_direitos_acessar" || modKey === "sub_rel_docs_autorizacao_terceiros_acessar" || modKey === "sub_rel_docs_alteracao_vencimento_acessar" || modKey === "sub_rel_docs_termo_quitacao_acessar") {
+    if (perms.mod_rel !== true) return false;
     return perms.mod_rel === true
       || perms.sub_rel_geral === true
       || perms.sub_rel_geral_relacionamento_acessar === true

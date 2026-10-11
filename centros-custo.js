@@ -157,8 +157,8 @@ const CentrosCustoApp = {
     if (tipoCcEl) custom.tipo_cc = tipoCcEl.value;
     const assocEl = document.getElementById(`edit-assoc-nome-${id}`);
     if (String(custom.tipo_cc || "") === "Loteamento Fechado") {
-      custom.associacao_nome = assocEl ? String(assocEl.value || "").trim() : (custom.associacao_nome || "");
-      this.propagarLoteamentoFechado(id, custom);
+      custom.associacao_nome = assocEl ? String(assocEl.value || "").trim() : "";
+      if (custom.associacao_nome) this.propagarLoteamentoFechado(id, custom);
     } else {
       custom.associacao_nome = "";
     }
@@ -645,7 +645,7 @@ const CentrosCustoApp = {
     const incorpLotesTipo = custom.incorporacao_lotes_tipo || 'abertos';
     const showIncorp = tipo_cc === 'Incorporação';
     const showAssoc = tipo_cc === 'Loteamento Fechado';
-    const assocNome = this.associacaoHerdada(id);
+    const assocNome = String(custom.associacao_nome || "").trim();
     const irmaos = this.irmaosObra(id).map((c) => String(c.id)).filter((x) => x !== String(id));
     const parceiro = this.isParceiro(cc);
     const par = this.parDoRateio(cc);
@@ -711,7 +711,7 @@ const CentrosCustoApp = {
             <div id="edit-assoc-panel-${id}" style="display:${showAssoc ? 'block' : 'none'}; padding:14px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px;">
               <h4 style="margin:0 0 6px 0; color:#14532d; font-size:0.9rem;">Loteamento fechado</h4>
               <label for="edit-assoc-nome-${id}" style="display:block; font-weight:bold; margin-bottom:5px; font-size:0.85rem;">Nome da associação</label>
-              <input type="text" id="edit-assoc-nome-${id}" class="form-control" value="${this.escHtml(assocNome)}" placeholder="Associação Mirante dos Ramos">
+              <input type="text" id="edit-assoc-nome-${id}" class="form-control" value="${this.escHtml(assocNome)}" placeholder="" style="width:100%;box-sizing:border-box;min-height:48px;font-size:1rem;padding:12px 14px;">
               <p style="margin:8px 0 0; font-size:0.75rem; color:#166534; line-height:1.4;">
                 Usado na adesão gerada junto com a cessão de direitos.
                 ${irmaos.length ? `O mesmo tipo e o mesmo nome valem para os centros da obra ${this.escHtml(this.obraDe(id))}: ${this.escHtml(irmaos.join(", "))}.` : ""}

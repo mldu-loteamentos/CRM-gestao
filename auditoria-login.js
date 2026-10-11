@@ -73,6 +73,12 @@ const AuditoriaLoginApp = {
     return s.length >= 10 ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : "—";
   },
 
+  nomeUsuario(u) {
+    const s = String(u || "").trim().toUpperCase();
+    if (s === "ISRAEL" || s === "ISRAEL1") return "ISRAEL";
+    return s;
+  },
+
   fmtDuracao(min) {
     const t = Math.round(Math.max(0, min || 0));
     if (!t) return "0 min";
@@ -139,7 +145,7 @@ const AuditoriaLoginApp = {
       const doBloco = usuario || (cel.slice().reverse().find((c) => c && c !== modo && c !== okTxt && !/\d{2}\/\d{2}\/\d{4}/.test(c)) || "").toUpperCase();
       if (!doBloco) return;
       linhas.push({
-        u: doBloco,
+        u: this.nomeUsuario(doBloco),
         ip: cel[iIp],
         ok,
         motivo: ok ? "" : okTxt.replace(/^n[aã]o\s*[-–]?\s*/i, ""),
@@ -161,7 +167,7 @@ const AuditoriaLoginApp = {
   },
 
   expandir(a) {
-    return { u: a[0], ip: a[1], ok: a[2] === 1, ent: this.minDoIso(a[3]), sai: a[4] ? this.minDoIso(a[4]) : null, modo: a[5] || "", motivo: a[6] || "" };
+    return { u: this.nomeUsuario(a[0]), ip: a[1], ok: a[2] === 1, ent: this.minDoIso(a[3]), sai: a[4] ? this.minDoIso(a[4]) : null, modo: a[5] || "", motivo: a[6] || "" };
   },
 
   async carregar(forcar) {
@@ -429,7 +435,6 @@ const AuditoriaLoginApp = {
     const card = (rotulo, valor, sub, cor) => `<div class="crm-card alog-card"><span>${rotulo}</span><b style="color:${cor || "#0f172a"}">${valor}</b>${sub ? `<small>${sub}</small>` : ""}</div>`;
     const th = (rot, campo, dir) => `<th class="${dir ? "num" : ""}" onclick="AuditoriaLoginApp.ordenar('${campo}')" style="cursor:pointer;user-select:none;">${rot} <i data-lucide="chevrons-up-down" style="width:11px;vertical-align:middle;"></i></th>`;
     const pct = (x) => `${Math.round(x * 100)}%`;
-    const top = a && a.usuarios.reduce((m, u) => (u.causados > (m ? m.causados : 0) ? u : m), null);
     const nivelOcioso = (x) => (x <= this.OCIOSO_NORMAL ? ["ok", "Normal"] : x <= this.OCIOSO_ALTO ? ["atencao", "Atenção"] : ["alto", "Alto"]);
     const marca = Math.round(this.OCIOSO_NORMAL * 100);
     const celOcioso = (u) => {
@@ -482,7 +487,6 @@ const AuditoriaLoginApp = {
       <div class="alog-page">
         <div class="alog-head">
           <div>
-            <h2><i data-lucide="log-in"></i> Auditoria do Login Sienge</h2>
             <p>Suba o relatório <b>Auditoria do Login</b> do Sienge (Excel). O Sienge derruba quem fica ${this.TIMEOUT_MIN} minutos sem usar:
               cada <b>sessão expirada</b> são ${this.TIMEOUT_MIN} minutos com a licença presa sem ninguém usando. Aqui aparece quem mais segura licença parado
               enquanto outras pessoas são barradas por falta de licença.</p>
@@ -513,12 +517,10 @@ const AuditoriaLoginApp = {
           ${card("Tentativas barradas", a.bloqueios, `${a.barradosPessoas} pessoa(s) não conseguiram entrar por falta de licença`, "#c2410c")}
           ${card("Barradas com licença parada", a.bloqueios ? `${a.evitaveis} <small>(${pct(a.evitaveis / a.bloqueios)})</small>` : "0", "Na hora da tentativa havia alguém logado sem usar, esperando cair", "#c2410c")}
           ${card("Tempo de licença parada", this.fmtDuracao(a.ocioso), `${a.expiradas} sessão(ões) expirada(s) × ${this.TIMEOUT_MIN} min`, "#0f172a")}
-          ${card("Quem mais congestiona", top ? esc(top.u) : "—", top ? `${top.causados} tentativa(s) de outros barrada(s) enquanto estava parado` : "Ninguém parado nas horas de bloqueio", "#105436")}
-          ${card("Licenças em uso nos bloqueios", a.picoLicencas || "—", "Máximo de pessoas logadas quando alguém foi barrado", "#0f172a")}
         </div>
 
         <div class="crm-card alog-bloco">
-          <div class="alog-tit">Quem segura licença parado <small>clique no título da coluna para ordenar</small></div>
+          <div class="alog-tit">Quem segura licença parado</div>
           <div class="alog-tab alog-usu"><table>
             <thead><tr>
               ${th("Usuário", "u")}${th("Sessões", "sessoes", 1)}${th("Tempo logado", "logado", 1)}
