@@ -7,6 +7,9 @@ const FluxoCaixaApp = {
   // e a API bank-movement rejeita P com 422.
   selectionType: "M",
   selectedCompanyIds: [],
+  loadedCompanyIds: null,
+  loadedStart: "",
+  loadedEnd: "",
   consolidacaoAtiva: true,
   companyMonthsOpen: null,
   companyDropOpen: false,
@@ -821,6 +824,10 @@ const FluxoCaixaApp = {
       this.error = err && err.message ? err.message : "Falha ao consultar a API de caixa e banco.";
       this.rows = [];
     } finally {
+      this.loadedCompanyIds = this.selectedCompanyIds.map(String);
+      this.loadedStart = this.startDate;
+      this.loadedEnd = this.endDate;
+      this.noteCompanySet(true);
       this.loading = false;
       this.render();
     }
@@ -869,10 +876,47 @@ const FluxoCaixaApp = {
   },
 
   refreshAfterCompanyChange() {
-    this.noteCompanySet();
     this.companyDropOpen = true;
-    if (this.movements.length) this.rebuildFromCache();
-    else this.render();
+    this.render();
+  },
+
+  setPeriod(which, value) {
+    if (which === "start") this.startDate = value || "";
+    else this.endDate = value || "";
+    this.paintConsultDirty();
+  },
+
+  gridCompanyIds() {
+    const src = this.loadedCompanyIds && this.loadedCompanyIds.length ? this.loadedCompanyIds : this.selectedCompanyIds;
+    return src.map(String).slice().sort((a, b) => Number(a) - Number(b));
+  },
+
+  filtersDirty() {
+    if (!this.loadedCompanyIds) return false;
+    const loaded = this.loadedCompanyIds.map(String).slice().sort((a, b) => Number(a) - Number(b)).join(",");
+    const now = this.selectedCompanyIds.map(String).slice().sort((a, b) => Number(a) - Number(b)).join(",");
+    return loaded !== now || this.loadedStart !== this.startDate || this.loadedEnd !== this.endDate;
+  },
+
+  paintConsultDirty() {
+    const dirty = this.filtersDirty();
+    const btn = document.querySelector("#fluxo-caixa-root .fc-consult-btn");
+    if (btn) {
+      btn.classList.toggle("is-dirty", dirty);
+      btn.title = dirty ? "A seleção ou o período mudou. Consulte de novo para atualizar a grade." : "";
+    }
+    let note = document.getElementById("fc-stale");
+    if (dirty && !note) {
+      const filters = document.querySelector("#fluxo-caixa-root .fc-filters");
+      if (!filters) return;
+      note = document.createElement("p");
+      note.id = "fc-stale";
+      note.className = "fc-stale";
+      note.textContent = "A grade é da consulta anterior. Clique em Consultar para aplicar a empresa ou o período.";
+      filters.insertAdjacentElement("afterend", note);
+    } else if (!dirty && note) {
+      note.remove();
+    }
   },
 
   toggleCompany(id, on) {
@@ -999,7 +1043,7 @@ const FluxoCaixaApp = {
   },
 
   rebuildFromCache() {
-    const selected = new Set(this.selectedCompanyIds.map(String));
+    const selected = new Set(this.gridCompanyIds());
     const allocs = [];
     this.movements.forEach(mov => {
       if (selected.size && !selected.has(String(mov.companyId))) return;
@@ -1062,19 +1106,20 @@ const FluxoCaixaApp = {
         <div class="fc-body">
           <div class="fc-filters">
             <label class="fc-field">Início
-              <input type="date" value="${this.startDate}" onchange="FluxoCaixaApp.startDate=this.value">
+              <input type="date" value="${this.startDate}" onchange="FluxoCaixaApp.setPeriod('start', this.value)">
             </label>
             <label class="fc-field">Fim
-              <input type="date" value="${this.endDate}" onchange="FluxoCaixaApp.endDate=this.value">
+              <input type="date" value="${this.endDate}" onchange="FluxoCaixaApp.setPeriod('end', this.value)">
             </label>
             ${this.companyDropHtml()}
             <button type="button" class="btn ${this.consolidacaoAtiva ? "btn-primary" : "btn-outline"} fc-cons-btn" onclick="FluxoCaixaApp.aplicarConsolidacao()" ${this.loading ? "disabled" : ""} title="Empresas marcadas como consolidação padrão, pelo percentual da Moura Leite">
               Consolidação padrão
             </button>
-            <button type="button" class="btn btn-primary fc-consult-btn" onclick="FluxoCaixaApp.load()" ${this.loading ? "disabled" : ""}>
+            <button type="button" class="btn btn-primary fc-consult-btn${this.filtersDirty() ? " is-dirty" : ""}" onclick="FluxoCaixaApp.load()" ${this.loading ? "disabled" : ""} title="${this.filtersDirty() ? "A seleção ou o período mudou. Consulte de novo para atualizar a grade." : ""}">
               Consultar
             </button>
           </div>
+          ${this.filtersDirty() ? `<p id="fc-stale" class="fc-stale">A grade é da consulta anterior. Clique em Consultar para aplicar a empresa ou o período.</p>` : ""}
           ${this.error ? `<div class="fc-error">${this.esc(this.error)}</div>` : ""}
           <div class="fc-board">
             <div class="fc-tree-pane">
@@ -1119,7 +1164,13 @@ const FluxoCaixaApp = {
   },
 
   visibleColumns() {
-    const ids = this.selectedCompanyIds.map(String).slice().sort((a, b) => Number(a) - Number(b));
+    const ids = this.gridCompanyIds();
+    if (ids.length <= 1) {
+      const id = ids[0] || "";
+      const cols = this.months.map(m => ({ type: "month", companyId: id, month: m }));
+      cols.push({ type: "total", companyId: id });
+      return cols;
+    }
     const cols = [];
     ids.forEach(id => {
       const open = this.companyMonthsOpen && this.companyMonthsOpen.has(id);
@@ -1131,8 +1182,11 @@ const FluxoCaixaApp = {
   },
 
   valueOf(row, col) {
-    if (!col || col.type === "total") return Number(row.total) || 0;
+    if (!col) return Number(row.total) || 0;
+    if (col.type === "total" && !col.companyId) return Number(row.total) || 0;
+    if (col.type === "total" && this.gridCompanyIds().length <= 1) return Number(row.total) || 0;
     const bag = row.byCompany && row.byCompany[String(col.companyId)];
+    if (col.type === "total") return bag ? (Number(bag.total) || 0) : 0;
     if (!bag) return 0;
     if (col.type === "month") return Number(bag.months && bag.months[col.month]) || 0;
     return Number(bag.total) || 0;
@@ -1155,29 +1209,68 @@ const FluxoCaixaApp = {
 
   gridHtml() {
     const cols = this.visibleColumns();
-    const ids = this.selectedCompanyIds.map(String).slice().sort((a, b) => Number(a) - Number(b));
-    const anyOpen = ids.some(id => this.companyMonthsOpen && this.companyMonthsOpen.has(id));
-    const span = anyOpen ? 2 : 1;
-    const row1 = [`<th class="fc-th-name" rowspan="${span}">Estrutura</th>`];
-    const row2 = [];
-    ids.forEach(id => {
-      const c = this.companyById(id);
-      const open = this.companyMonthsOpen && this.companyMonthsOpen.has(id);
-      const label = this.esc(this.columnHeader(c || { id, usual: "", fullName: "" }));
-      const tip = this.esc((c && c.fullName) || label);
-      const chev = open ? "▾" : "▸";
-      if (open) {
-        row1.push(`<th class="fc-th-co" colspan="${this.months.length + 1}" title="${tip}" onclick="FluxoCaixaApp.toggleCompanyMonths('${id}')">${chev} ${label}</th>`);
-        this.months.forEach(m => row2.push(`<th>${this.esc(this.monthLabel(m))}</th>`));
-        row2.push(`<th>Total</th>`);
-      } else {
-        row1.push(`<th class="fc-th-co" rowspan="${span}" title="${tip}" onclick="FluxoCaixaApp.toggleCompanyMonths('${id}')">${chev} ${label}</th>`);
-      }
-    });
-    row1.push(`<th class="fc-th-total" rowspan="${span}">Total</th>`);
-    const head = `<thead><tr>${row1.join("")}</tr>${anyOpen ? `<tr class="fc-months">${row2.join("")}</tr>` : ""}</thead>`;
+    const ids = this.gridCompanyIds();
+    let head;
+    if (ids.length <= 1) {
+      const months = this.months.map(m => `<th class="fc-th-num">${this.esc(this.monthLabel(m))}</th>`).join("");
+      head = `<thead><tr><th class="fc-th-name">Estrutura</th>${months}<th class="fc-th-num fc-th-total">Total</th></tr></thead>`;
+    } else {
+      const anyOpen = ids.some(id => this.companyMonthsOpen && this.companyMonthsOpen.has(id));
+      const span = anyOpen ? 2 : 1;
+      const row1 = [`<th class="fc-th-name" rowspan="${span}">Estrutura</th>`];
+      const row2 = [];
+      ids.forEach(id => {
+        const c = this.companyById(id);
+        const open = this.companyMonthsOpen && this.companyMonthsOpen.has(id);
+        const label = this.esc(this.columnHeader(c || { id, usual: "", fullName: "" }));
+        const tip = this.esc((c && c.fullName) || label);
+        const chev = open ? "▾" : "▸";
+        if (open) {
+          row1.push(`<th class="fc-th-co" colspan="${this.months.length + 1}" title="${tip}" onclick="FluxoCaixaApp.toggleCompanyMonths('${id}')">${chev} ${label}</th>`);
+          this.months.forEach(m => row2.push(`<th class="fc-th-num">${this.esc(this.monthLabel(m))}</th>`));
+          row2.push(`<th class="fc-th-num">Total</th>`);
+        } else {
+          row1.push(`<th class="fc-th-co" rowspan="${span}" title="${tip}" onclick="FluxoCaixaApp.toggleCompanyMonths('${id}')">${chev} ${label}</th>`);
+        }
+      });
+      row1.push(`<th class="fc-th-total fc-th-num" rowspan="${span}">Total</th>`);
+      head = `<thead><tr>${row1.join("")}</tr>${anyOpen ? `<tr class="fc-months">${row2.join("")}</tr>` : ""}</thead>`;
+    }
     const body = (this.rows || []).map(r => this.gridRowHtml(r, cols)).join("");
     return `<table class="fc-grid">${head}<tbody>${body}</tbody></table>`;
+  },
+
+  ehVendaImoveis(r) {
+    if (!r) return false;
+    if (r.id === "g_01_01" || r.parentId === "g_01_01") return true;
+    if (r.isCostCenter && r.parentAccountId) {
+      const key = this.normAccountKey(r.parentAccountId);
+      const acc = this.accountIndex[r.parentAccountId] || (key && this.accountIndex[key]);
+      return !!(acc && acc.parentId === "g_01_01");
+    }
+    return false;
+  },
+
+  abrirCentrosVenda(toggleId, isAccount) {
+    const id = String(toggleId || "");
+    if (!id) return;
+    if (isAccount) {
+      if (this.expanded.has(id)) this.expanded.delete(id);
+      else this.expanded.add(id);
+    } else {
+      const accIds = Object.values(this.accountIndex || {})
+        .filter(a => a && a.parentId === "g_01_01")
+        .map(a => "acc:" + (a.displayId || a.id));
+      const aberto = this.expanded.has(id) && accIds.length > 0 && accIds.every(x => this.expanded.has(x));
+      if (aberto) {
+        this.expanded.delete(id);
+        accIds.forEach(x => this.expanded.delete(x));
+      } else {
+        this.expanded.add(id);
+        accIds.forEach(x => this.expanded.add(x));
+      }
+    }
+    this.rebuildFromCache();
   },
 
   gridRowHtml(r, cols) {
@@ -1189,19 +1282,28 @@ const FluxoCaixaApp = {
       ? `<button type="button" class="fc-chevron" onclick="event.stopPropagation();FluxoCaixaApp.toggle('${safeToggle}')">${open ? "▾" : "▸"}</button>`
       : `<span class="fc-chevron-spacer"></span>`;
     const drillId = r.isCostCenter ? (r.parentAccountId || "") : (r.id || "");
-    const canDrill = !!(drillId && (r.isAccount || r.isCostCenter || r.type === "resultado" || r.type === "total_n1" || r.type === "formula"));
+    const venda = this.ehVendaImoveis(r);
+    const canDrill = !venda && !!(drillId && (r.isAccount || r.isCostCenter || r.type === "resultado" || r.type === "total_n1" || r.type === "formula"));
     const safeId = String(drillId).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
     const ccArg = r.isCostCenter ? `'${String(r.ccId || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'` : "''";
     const isAccFlag = r.isAccount || r.isCostCenter;
-    const clickFixed = canDrill
-      ? `onclick="FluxoCaixaApp.openDrill('${safeId}', ${isAccFlag ? "true" : "false"}, ${r.isCostCenter ? ccArg : "''"})"`
-      : "";
     const cells = cols.map(col => {
       const v = this.valueOf(r, col);
       const strong = col.type !== "month";
-      return `<td class="${this.valClass(v, strong)}">${this.fmt(v)}</td>`;
+      const co = col.companyId ? `'${String(col.companyId).replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'` : "''";
+      const mo = col.type === "month" && col.month ? `'${col.month}'` : "''";
+      let click = "";
+      let tip = "";
+      if (canDrill) {
+        click = `onclick="FluxoCaixaApp.openDrill('${safeId}', ${isAccFlag ? "true" : "false"}, ${r.isCostCenter ? ccArg : "''"}, ${co}, ${mo})"`;
+        tip = "Ver lançamentos desta célula";
+      } else if (venda && !r.isCostCenter) {
+        click = `onclick="FluxoCaixaApp.abrirCentrosVenda('${safeToggle}', ${r.isAccount ? "true" : "false"})"`;
+        tip = "Abrir os centros de custo";
+      }
+      return `<td class="${this.valClass(v, strong)}${click ? " is-cell" : ""}" ${click} title="${tip}">${this.fmt(v)}</td>`;
     }).join("");
-    return `<tr class="${this.rowClass(r)}${canDrill ? " is-drill" : ""}" ${clickFixed} title="${canDrill ? "Ver lançamentos que formam este valor" : ""}">
+    return `<tr class="${this.rowClass(r)}">
       <td class="fc-td-name" style="padding-left:${6 + pad}px">${chevron}<span>${this.esc(r.name)}</span></td>
       ${cells}
     </tr>`;
@@ -1321,10 +1423,10 @@ const FluxoCaixaApp = {
     if (tipo) parts.push(tipo);
     if (docLabel) parts.push(docLabel);
     else if (billId) parts.push(`#${billId}`);
-    if (billId && docLabel && String(billId) !== String(docLabel).replace(/\D/g, "") && String(billId) !== String(docLabel)) {
-      parts.push(`id ${billId}`);
+    if (billId) {
+      const parc = installment ? `/${installment}` : "";
+      parts.push(`Tit. ${billId}${parc}`);
     }
-    if (installment) parts.push(`parc. ${installment}`);
 
     const party = m.creditorName || m.creditor || m.clientName || m.customerName || m.client || "";
     const role = this.movAdvanceRole(m);
@@ -1450,7 +1552,7 @@ const FluxoCaixaApp = {
     }
   },
 
-  openDrill(id, isAccount, ccId) {
+  openDrill(id, isAccount, ccId, companyId, month) {
     const tree = document.querySelector("#fluxo-caixa-root .fc-tree-scroll");
     const keepTop = tree ? tree.scrollTop : 0;
     const keepLeft = tree ? tree.scrollLeft : 0;
@@ -1467,12 +1569,27 @@ const FluxoCaixaApp = {
       if (keepWin) window.scrollTo(0, keepWin);
     };
     const info = this.resolveDrill(id, !!isAccount, ccId);
-    const items = [...(info.items || [])].sort((a, b) => {
+    const wantCo = companyId != null && String(companyId) !== "" ? String(companyId) : "";
+    const wantMonth = month != null && String(month) !== "" ? String(month).slice(0, 7) : "";
+    let items = [...(info.items || [])].filter((it) => {
+      if (wantCo && String(it.companyId || "") !== wantCo) return false;
+      if (wantMonth) {
+        const mk = String(it.month || this.cashDate(it.mov || {}) || "").slice(0, 7);
+        if (mk !== wantMonth) return false;
+      }
+      return true;
+    });
+    items.sort((a, b) => {
       const da = this.cashDate(a.mov || {}) || String(a.month || "");
       const db = this.cashDate(b.mov || {}) || String(b.month || "");
       return da.localeCompare(db);
     });
     const sum = items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
+    const partes = [];
+    if (wantCo) partes.push(this.companyLabelShort(wantCo));
+    if (wantMonth) partes.push(this.monthLabel(wantMonth));
+    if (partes.length) info.subtitle = `${info.subtitle} · ${partes.join(" · ")}`;
+    info.total = sum;
 
     // Pares adiantamento × abatimento pelo mesmo título (billId / documento)
     const byTitle = {};
@@ -1557,7 +1674,7 @@ const FluxoCaixaApp = {
                   ? `<div style="font-size:0.72rem;color:#64748b;margin-top:3px;line-height:1.35;">${this.esc(title.party)}</div>`
                   : "";
                 const ccTxt = [it.costCenterId, it.costCenterName].filter(Boolean).join(" — ") || "—";
-                return `<tr style="border-bottom:1px solid #e2e8f0;">
+                return `<tr class="fc-drill-row${title.billId ? " is-open" : ""}" ${title.billId ? `onclick="FluxoCaixaApp.abrirTituloDrill(${idx})" title="Abrir o título"` : ""}>
                   <td style="padding:10px 12px;white-space:nowrap;vertical-align:top;">${this.esc(this.fmtDatePt(this.cashDate(mov)))}</td>
                   <td style="padding:10px 12px;font-weight:700;color:#105436;white-space:nowrap;vertical-align:top;">${this.esc(this.movNumber(mov))}</td>
                   <td style="padding:10px 12px;min-width:200px;max-width:280px;vertical-align:top;">
