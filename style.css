@@ -3672,7 +3672,10 @@ circle.donut-segment {
 .fc-consult-btn.is-dirty { box-shadow: 0 0 0 2px #f59e0b; }
 .rcx-page { padding: 4px 2px 24px; }
 .rcx-tabs { margin-bottom: 14px; }
-.rcx-tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-bottom: 10px; }
+.rcx-head { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.rcx-tools { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-end; }
+.rcx-arqs-box { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 12px; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; }
+.rcx-arqs-label { font-size: 0.68rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: #64748b; }
 .rcx-field { display: flex; flex-direction: column; gap: 4px; font-size: 0.72rem; font-weight: 700; color: #475569; }
 .rcx-field select { height: 38px; min-width: 92px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; padding: 0 10px; font-weight: 650; color: #0f172a; }
 .rcx-file { height: 38px; display: inline-flex; align-items: center; gap: 6px; padding: 0 14px; border-radius: 8px; border: 1px solid #105436; background: #fff; color: #105436; font-weight: 700; font-size: 0.82rem; cursor: pointer; }
@@ -3690,7 +3693,12 @@ circle.donut-segment {
 .rcx-outros td { background: #f8fafc; font-weight: 700; }
 .rcx-filho td.rcx-nome { padding-left: 26px; font-weight: 500; }
 .rcx-nome i { width: 14px; height: 14px; vertical-align: -2px; margin-right: 4px; }
-.rcx-nota { margin: 0 0 10px; font-size: 0.78rem; color: #64748b; }
+.rcx-nota { margin: 0; font-size: 0.75rem; color: #64748b; line-height: 1.45; }
+.rcx-load { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; min-height: 280px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 40px 20px; }
+.rcx-spin { width: 48px; height: 48px; border: 3px solid rgba(16, 84, 54, 0.15); border-top-color: #105436; border-radius: 50%; animation: spin 0.8s linear infinite; }
+.rcx-load-title { font-weight: 800; color: #105436; font-size: 1rem; min-height: 1.3em; }
+.rcx-load-track { width: min(380px, 86%); height: 8px; background: #e2e8f0; border-radius: 99px; overflow: hidden; }
+.rcx-load-fill { height: 100%; background: #105436; border-radius: 99px; transition: width 0.4s ease; }
 .rcx-muted { color: #94a3b8; font-size: 0.8rem; }
 .rcx-vazio { padding: 18px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; color: #64748b; }
 .rcx-erro { margin-bottom: 10px; padding: 10px; background: #fef2f2; color: #b91c1c; border-radius: 8px; font-size: 0.82rem; }

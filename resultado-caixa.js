@@ -11,14 +11,52 @@ const ResultadoCaixaApp = {
   dates: [],
   anos: {},
   lendo: false,
-  escala: "real",
-  agrupar: false,
+  escala: "milhoes",
+  agrupar: true,
   outrosAberto: false,
   dfcLinhas: [],
   dfcLendo: false,
   dfcErro: "",
 
-  SOLTOS: { "14703": 1, "14704": 1, "14304": 1, "14305": 1 },
+  FRASES_CARGA: ["Analisando resultados", "Cruzando informações", "Consolidando empresas"],
+
+  fraseCarga() {
+    const p = Number(this._cargaPct) || 0;
+    const i = p < 34 ? 0 : p < 68 ? 1 : 2;
+    return this.FRASES_CARGA[i];
+  },
+
+  iniciarCarga(reiniciar) {
+    if (reiniciar) this._cargaPct = 8;
+    if (this._cargaTimer) return;
+    if (!this._cargaPct) this._cargaPct = 8;
+    this._cargaTimer = setInterval(() => {
+      if (!this.dfcLendo && !this.lendo && !this.loading) {
+        this.pararCarga();
+        return;
+      }
+      const p = Number(this._cargaPct) || 8;
+      this._cargaPct = Math.min(92, p + (p < 40 ? 5 : p < 70 ? 2.4 : 0.7));
+      const txt = document.getElementById("rcx-load-text");
+      const bar = document.getElementById("rcx-load-bar");
+      if (txt) txt.textContent = this.fraseCarga();
+      if (bar) bar.style.width = this._cargaPct + "%";
+    }, 420);
+  },
+
+  pararCarga() {
+    if (this._cargaTimer) clearInterval(this._cargaTimer);
+    this._cargaTimer = null;
+  },
+
+  loaderHtml() {
+    const pct = Math.max(8, Math.min(92, Number(this._cargaPct) || 8));
+    return `<div class="rcx-load" role="status" aria-live="polite">
+      <div class="rcx-spin"></div>
+      <div class="rcx-load-title" id="rcx-load-text">${this.fraseCarga()}</div>
+      <div class="rcx-load-track"><div class="rcx-load-fill" id="rcx-load-bar" style="width:${pct}%"></div></div>
+    </div>`;
+  },
   MESES: ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"],
 
   init() {
@@ -418,7 +456,7 @@ const ResultadoCaixaApp = {
   aplicarBlocos(nomeArquivo, blocos) {
     const porAno = {};
     const slot = (ano) => {
-      if (!porAno[ano]) porAno[ano] = { entradas: {}, contas: {} };
+      if (!porAno[ano]) porAno[ano] = { entradas: {}, contas: {}, contasPorCc: {} };
       return porAno[ano];
     };
     blocos.forEach((b) => {
@@ -443,6 +481,13 @@ const ResultadoCaixaApp = {
           cel.o += Number(m.orc) || 0;
           cel.r += Number(m.real) || 0;
           contas[l.code].meses[mm] = cel;
+          const dono = slot(ano).contasPorCc;
+          if (!dono[b.id]) dono[b.id] = { nome: b.nome, contas: {} };
+          if (!dono[b.id].contas[l.code]) dono[b.id].contas[l.code] = { nome: l.nome || l.code, meses: {} };
+          const celCc = dono[b.id].contas[l.code].meses[mm] || { o: 0, r: 0 };
+          celCc.o += Number(m.orc) || 0;
+          celCc.r += Number(m.real) || 0;
+          dono[b.id].contas[l.code].meses[mm] = celCc;
         });
       });
     });
@@ -454,7 +499,8 @@ const ResultadoCaixaApp = {
         empresa: empresa,
         rotulo: rotulo,
         entradas: porAno[ano].entradas,
-        contas: porAno[ano].contas
+        contas: porAno[ano].contas,
+        contasPorCc: porAno[ano].contasPorCc
       };
       delete atual.file;
       delete atual.entradas;
@@ -657,6 +703,8 @@ const ResultadoCaixaApp = {
     this._dfcToken = token;
     this.dfcLendo = true;
     this.dfcErro = "";
+    this.iniciarCarga(true);
+    this.render();
     try {
       const ant = this.anoAtual() - 1;
       const linhas = await this.lerDfc(ant, Number(this.mes) || 1, lado);
@@ -670,7 +718,14 @@ const ResultadoCaixaApp = {
       this._dfcKey = key;
     }
     this.dfcLendo = false;
-    if (this._dfcToken === token) this.render();
+    this.pararCarga();
+    const bar = document.getElementById("rcx-load-bar");
+    const txt = document.getElementById("rcx-load-text");
+    if (bar) bar.style.width = "100%";
+    if (txt) txt.textContent = "Consolidando empresas";
+    if (this._dfcToken === token) {
+      setTimeout(() => { if (this._dfcToken === token) this.render(); }, 280);
+    }
   },
 
   aplicarDfc(rows, mes) {
@@ -719,8 +774,10 @@ const ResultadoCaixaApp = {
     const ant = ano - 1;
     const mes = Number(this.mes) || 1;
     const fontes = [];
-    const bag = this.bagLado(ano, lado);
-    Object.keys(bag).forEach((id) => fontes.push({ id, nome: bag[id].nome || id }));
+    [ano, ant].forEach((y) => {
+      const bag = this.bagLado(y, lado);
+      Object.keys(bag).forEach((id) => fontes.push({ id, nome: bag[id].nome || id }));
+    });
     const grupos = {};
     fontes.forEach((f) => {
       const key = this.grupoCc(f.id);
@@ -733,12 +790,11 @@ const ResultadoCaixaApp = {
       const g = grupos[key];
       const uniq = [...new Set(g.ids)];
       const rot = this.rotulo(key, g.nome, g.solto);
-      const soma = (campo, ate) => uniq.reduce((s, id) => s + this.valor(lado, ano, id, mes, campo, ate) * this.pctMl(id), 0);
-      const rec = (ate) => ({ ant: 0, orc: soma("o", ate), real: soma("r", ate) });
+      const soma = (y, campo, ate) => uniq.reduce((s, id) => s + this.valor(lado, y, id, mes, campo, ate) * this.pctMl(id), 0);
+      const rec = (ate) => ({ ant: soma(ant, "r", ate), orc: soma(ano, "o", ate), real: soma(ano, "r", ate) });
       return { key, nome: rot.nome, cidade: rot.cidade, ids: uniq, mensal: rec(false), acum: rec(true) };
     });
-    const comDfc = this.aplicarDfc(base, mes);
-    const distintos = this.distinguirCidades(comDfc);
+    const distintos = this.distinguirCidades(base);
     const fundidos = {};
     distintos.forEach((r) => {
       const nome = r.nome;
@@ -811,19 +867,35 @@ const ResultadoCaixaApp = {
     return t;
   },
 
-  chipsHtml() {
-    const anos = Object.keys(this.anos || {}).sort();
-    const chips = [];
-    anos.forEach((y) => {
+  papelAno(y) {
+    const atual = this.anoAtual();
+    if (!atual) return "";
+    if (Number(y) === atual) return "atual";
+    if (Number(y) === atual - 1) return "anterior";
+    return "";
+  },
+
+  chipsDoAno(y) {
+    const a = this.anoDados(y);
+    const arquivos = (a && a.arquivos) || {};
+    return Object.keys(arquivos).map((nome) => {
+      const rotulo = arquivos[nome].rotulo || this.nomeEmpresaArquivo(nome) || nome;
+      const chave = encodeURIComponent(nome);
+      return `<span class="rcx-arq" title="${caixaEsc(nome)}">${caixaEsc(rotulo)} <button type="button" onclick="ResultadoCaixaApp.removerArquivo('${y}','${chave}')">tirar</button></span>`;
+    }).join("");
+  },
+
+  faltaCentroNasSaidas() {
+    if (!this.agrupar) return false;
+    const anos = [this.anoAtual(), this.anoAtual() - 1];
+    return anos.some((y) => {
       const a = this.anoDados(y);
-      const arquivos = (a && a.arquivos) || {};
-      Object.keys(arquivos).forEach((nome) => {
-        const rotulo = arquivos[nome].rotulo || this.nomeEmpresaArquivo(nome) || nome;
-        const chave = encodeURIComponent(nome);
-        chips.push(`<span class="rcx-arq" title="${caixaEsc(nome)}">${caixaEsc(y)} · ${caixaEsc(rotulo)} <button type="button" onclick="ResultadoCaixaApp.removerArquivo('${y}','${chave}')">tirar</button></span>`);
+      if (!a) return false;
+      return Object.keys(a.arquivos || {}).some((n) => {
+        const arq = a.arquivos[n];
+        return arq && arq.contas && !(arq.contasPorCc && Object.keys(arq.contasPorCc).length);
       });
     });
-    return chips.join("");
   },
 
   faixaHtml(lado, antH) {
@@ -839,30 +911,33 @@ const ResultadoCaixaApp = {
       ? `<div class="rcx-erro">Não achei no Sienge a empresa destes arquivos: ${caixaEsc(uso.faltou.join(", "))}. O orçado entra na soma; o ano anterior delas fica de fora até o nome bater com o cadastro.</div>`
       : "";
     return `
-      <div class="rcx-tools">
-        <label class="rcx-file"><i data-lucide="upload"></i> Subir orçamento
-          <input type="file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple onchange="ResultadoCaixaApp.subir(this)">
-        </label>
-        <label class="rcx-field">Mês
-          <select onchange="ResultadoCaixaApp.setMes(this.value)">${mesOpts}</select>
-        </label>
-        <div class="rcx-field">Valor
-          <div class="rcx-escala">
-            <button type="button" class="${realOn ? "is-on" : ""}" onclick="ResultadoCaixaApp.setEscala('real')">Real</button>
-            <button type="button" class="${realOn ? "" : "is-on"}" onclick="ResultadoCaixaApp.setEscala('milhoes')">Milhões</button>
+      <div class="rcx-head">
+        <div class="rcx-tools">
+          <label class="rcx-file"><i data-lucide="upload"></i> Subir orçamento
+            <input type="file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple onchange="ResultadoCaixaApp.subir(this)">
+          </label>
+          <label class="rcx-field">Mês
+            <select onchange="ResultadoCaixaApp.setMes(this.value)">${mesOpts}</select>
+          </label>
+          <div class="rcx-field">Valor
+            <div class="rcx-escala">
+              <button type="button" class="${realOn ? "is-on" : ""}" onclick="ResultadoCaixaApp.setEscala('real')">Real</button>
+              <button type="button" class="${realOn ? "" : "is-on"}" onclick="ResultadoCaixaApp.setEscala('milhoes')">Milhões</button>
+            </div>
           </div>
+          ${lado === "entradas" ? `<div class="rcx-field">Participação
+            <button type="button" class="rcx-agrupar ${this.agrupar ? "is-on" : ""}" onclick="ResultadoCaixaApp.toggleAgrupar()" title="Aplica o percentual de participação da Moura Leite de cada centro de custo">${this.agrupar ? "Agrupado" : "Agrupar"}</button>
+          </div>` : ""}
         </div>
-        ${lado === "entradas" ? `<div class="rcx-field">Participação
-          <button type="button" class="rcx-agrupar ${this.agrupar ? "is-on" : ""}" onclick="ResultadoCaixaApp.toggleAgrupar()" title="Aplica o percentual de participação da Moura Leite de cada centro de custo">${this.agrupar ? "Agrupado" : "Agrupar"}</button>
-        </div>` : ""}
-        <div class="rcx-arqs">${this.chipsHtml() || `<span class="rcx-muted">Nenhum arquivo ainda. Dá para escolher vários de uma vez.</span>`}</div>
+        <div class="rcx-arqs-box">
+          <span class="rcx-arqs-label">Arquivos</span>
+          <div class="rcx-arqs">${this.chipsHtml() || `<span class="rcx-muted">Nenhum arquivo ainda. Dá para escolher vários de uma vez.</span>`}</div>
+        </div>
+        <p class="rcx-nota">${nota}${quem ? " Empresas: " + caixaEsc(quem) + "." : ""}</p>
       </div>
-      <p class="rcx-nota">${nota}${quem ? " Empresas: " + caixaEsc(quem) + "." : ""}</p>
       ${this.error ? `<div class="rcx-erro">${caixaEsc(this.error)}</div>` : ""}
       ${avisoEmpresa}
       ${this.dfcErro ? `<div class="rcx-erro">${caixaEsc(this.dfcErro)}</div>` : ""}
-      ${this.lendo ? `<p class="rcx-muted">Lendo a planilha…</p>` : ""}
-      ${this.dfcLendo ? `<p class="rcx-muted">Buscando ${caixaEsc(antH)} no DFC${quem ? " de " + caixaEsc(quem) : ""}…</p>` : ""}
       ${anos.length ? "" : `<p class="rcx-vazio">Suba o Excel do comparativo orçado × realizado, visão DFC. Pode selecionar várias empresas juntas.</p>`}
     `;
   },
@@ -927,32 +1002,39 @@ const ResultadoCaixaApp = {
     return nomes.every((n) => !a.arquivos[n].contas);
   },
 
+  somaSaidaDef(ano, def, mes, campo, ate) {
+    const a = this.anoDados(ano);
+    if (!a) return 0;
+    let s = 0;
+    Object.keys(a.arquivos || {}).forEach((nome) => {
+      const arq = a.arquivos[nome] || {};
+      const porCc = arq.contasPorCc;
+      if (porCc && Object.keys(porCc).length) {
+        Object.keys(porCc).forEach((ccId) => {
+          s += this.somaCodigos(porCc[ccId].contas || {}, def, mes, campo, ate) * this.pctMl(ccId);
+        });
+      } else if (arq.contas) {
+        s += this.somaCodigos(arq.contas, def, mes, campo, ate);
+      }
+    });
+    return -s;
+  },
+
   linhasSaida() {
     const ano = this.anoAtual();
     const ant = ano - 1;
     const mes = Number(this.mes) || 1;
-    const a = this.anoDados(ano);
     const rows = this.contasSaida().map((def) => {
-      const soma = (campo, ate) => {
-        let s = 0;
-        if (!a) return 0;
-        Object.keys(a.arquivos || {}).forEach((nome) => {
-          const contas = a.arquivos[nome].contas;
-          if (!contas) return;
-          s += this.somaCodigos(contas, def, mes, campo, ate);
-        });
-        return -s;
-      };
+      const valor = (y, campo, ate) => this.somaSaidaDef(y, def, mes, campo, ate);
       return {
         key: def.id,
         nome: def.nome,
         destaque: !!def.destaque,
         def: def,
-        mensal: { ant: 0, orc: soma("o", false), real: soma("r", false) },
-        acum: { ant: 0, orc: soma("o", true), real: soma("r", true) }
+        mensal: { ant: valor(ant, "r", false), orc: valor(ano, "o", false), real: valor(ano, "r", false) },
+        acum: { ant: valor(ant, "r", true), orc: valor(ano, "o", true), real: valor(ano, "r", true) }
       };
     });
-    this.aplicarDfcContas(rows, mes);
     return { ano, ant, rows };
   },
 
@@ -973,6 +1055,7 @@ const ResultadoCaixaApp = {
   orcamentoHtml(lado) {
     const antH = this.anoAtual() > 1900 ? String(this.anoAtual() - 1) : "Ano ant.";
     const faixa = this.faixaHtml(lado, antH);
+    if (this.lendo) return faixa + this.loaderHtml();
     if (!Object.keys(this.anos || {}).length) return faixa;
     if (lado === "saidas") return faixa + this.saidasHtml();
     const pack = this.linhasTabela(lado);
@@ -1115,7 +1198,6 @@ const ResultadoCaixaApp = {
     const root = document.getElementById("resultado-caixa-root");
     if (!root) return;
     const aba = this.aba || "entradas";
-    if (aba !== "posicao") this.garantirDfc(aba);
     const tab = (id, label, icon) => `<button type="button" role="tab" aria-selected="${aba === id}" class="ml-tab${aba === id ? " is-active" : ""}" onclick="ResultadoCaixaApp.setAba('${id}')"><i data-lucide="${icon}"></i> ${label}</button>`;
     const corpo = aba === "posicao" ? this.posicaoHtml() : this.orcamentoHtml(aba);
     root.innerHTML = `
@@ -1128,6 +1210,8 @@ const ResultadoCaixaApp = {
         ${corpo}
       </div>`;
     if (window.lucide) lucide.createIcons();
+    if (this.dfcLendo || this.lendo || this.loading) this.iniciarCarga(false);
+    else this.pararCarga();
   }
 };
 

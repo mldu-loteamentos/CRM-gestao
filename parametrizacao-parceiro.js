@@ -136,7 +136,92 @@ const ParametrizacaoParceiroApp = {
   },
 
   isSociedade(p) {
-    return String((p && p.kind) || "parceria") === "sociedade";
+    return this.kindOf(p) === "sociedade";
+  },
+
+  isMista(p) {
+    return this.kindOf(p) === "mista";
+  },
+
+  kindOf(p) {
+    const k = String((p && p.kind) || "parceria");
+    return k === "sociedade" || k === "mista" ? k : "parceria";
+  },
+
+  kindLabel(p) {
+    if (this.isMista(p)) return "Mista";
+    if (this.isSociedade(p)) return "Sociedade";
+    return "Parceria";
+  },
+
+  temSocios(p) {
+    return this.isSociedade(p) || this.isMista(p);
+  },
+
+  VERCELLINO_SOCIOS: [
+    { id: "1806", name: "ELLENCO & MOURA LEITE BOITUVA EMPREENDIMENTO IMOBILIÁRIO SPE LTDA", sharePct: 55.498 },
+    { id: "2044", name: "FERNANDO VERCELLINO", sharePct: 6.179 },
+    { id: "2045", name: "MARIA REGINA VERCELLINO", sharePct: 6.179 },
+    { id: "2043", name: "MARIO VERCELLINO NETO", sharePct: 6.179 },
+    { id: "2046", name: "NORBERTO VERCELLINO", sharePct: 6.179 },
+    { id: "2047", name: "VERA LUCIA VERCELLINO", sharePct: 6.179 },
+    { id: "2048", name: "NATASHA MOREIRA MORAES VERCELLINO", sharePct: 3.089 },
+    { id: "2049", name: "VITOR SOARES VERCELLINO", sharePct: 3.089 },
+    { id: "2050", name: "DANIEL FILIPE VERCELLINO RODRIGUES", sharePct: 1.545 },
+    { id: "2051", name: "EDGAR TADEU VERCELLINO RODRIGUES", sharePct: 1.545 },
+    { id: "2052", name: "LUIS GUSTAVO VERCELLINO RODRIGUES", sharePct: 1.545 },
+    { id: "2053", name: "PEDRO ADEMIR PRESTES", sharePct: 1.25 },
+    { id: "2054", name: "CARLOS EDUARDO VERCELLINO RODRIGUES", sharePct: 0.772 },
+    { id: "2055", name: "MAISA MAGORDO VERCELLINOS", sharePct: 0.772 }
+  ],
+
+  blankSocio(src) {
+    const s = src || {};
+    const pct = s.sharePct == null || s.sharePct === "" ? "" : Number(s.sharePct);
+    return {
+      id: String(s.id || ""),
+      name: String(s.name || ""),
+      cpfCnpj: String(s.cpfCnpj || ""),
+      sharePct: pct === "" || !Number.isFinite(pct) ? "" : pct,
+      bankInfo: s.bankInfo || null,
+      bankList: Array.isArray(s.bankList) ? s.bankList : [],
+      bankId: s.bankId || (s.bankInfo && s.bankInfo.id != null ? s.bankInfo.id : ""),
+      bankLoaded: !!s.bankLoaded
+    };
+  },
+
+  totalSociosPct(p) {
+    return (p && p.socios || []).reduce((sum, s) => sum + (Number(s.sharePct) || 0), 0);
+  },
+
+  fmtPct(n) {
+    return Number(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+  },
+
+  ehVercellino(p) {
+    const fold = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    const nome = fold(p && p.partnerName);
+    const emp = fold(p && p.companyName);
+    return nome === "VERCELLINO" || (emp.includes("VERCELLINO") && nome.includes("VERCELLINO"));
+  },
+
+  aplicarSociosVercellino(p) {
+    if (!p || p.sociosSeed === "vercellino-v1") return false;
+    if (!this.ehVercellino(p) || !this.temSocios(p)) return false;
+    const prev = p.creditor || {};
+    p.socios = this.VERCELLINO_SOCIOS.map((s) => {
+      const row = this.blankSocio(s);
+      if (String(prev.id) === String(s.id)) {
+        row.cpfCnpj = prev.cpfCnpj || row.cpfCnpj;
+        row.bankInfo = prev.bankInfo || null;
+        row.bankList = prev.bankList || [];
+        row.bankId = prev.bankId || row.bankId;
+        row.bankLoaded = !!prev.bankLoaded;
+      }
+      return row;
+    });
+    p.sociosSeed = "vercellino-v1";
+    return true;
   },
 
   /** Grupos DFC que não entram no rateio de parceria (nem os nós internos). */
@@ -156,7 +241,7 @@ const ParametrizacaoParceiroApp = {
 
   normalizeItem(p) {
     if (!p) return p;
-    p.kind = p.kind === "sociedade" ? "sociedade" : "parceria";
+    p.kind = this.kindOf(p);
     if (!Array.isArray(p.obras)) p.obras = [];
     if (!p.obras.length && (p.obraCode || (p.costCenters && p.costCenters.length))) {
       p.obras = [{
@@ -184,6 +269,9 @@ const ParametrizacaoParceiroApp = {
     p.creditor.paymentDayMode = p.creditor.paymentDayMode === "businessDays" ? "businessDays" : "monthDay";
     if (p.creditor.paymentBusinessDays == null) p.creditor.paymentBusinessDays = "";
     p.creditor.bankList = p.creditor.bankList || [];
+    const tinhaSocios = Array.isArray(p.socios);
+    p.socios = tinhaSocios ? p.socios.map(s => this.blankSocio(s)) : [];
+    if (this.temSocios(p) && !tinhaSocios && p.creditor.id) p.socios.push(this.blankSocio(p.creditor));
     p.obraCode = p.obras.map(o => o.code).filter(Boolean).join(", ");
     const first = p.obras[0];
     p.defaultPartnerShare = first ? first.defaultPartnerShare : (Number(p.defaultPartnerShare) || 0);
@@ -583,6 +671,9 @@ const ParametrizacaoParceiroApp = {
       }
     }
     this.items.forEach(p => this.normalizeItem(p));
+    let semeou = false;
+    this.items.forEach(p => { if (this.aplicarSociosVercellino(p)) semeou = true; });
+    if (semeou) this.persist();
     if (this.items.length && !this.selectedId) this.selectedId = this.items[0].id;
     const cur = this.current();
     if (cur && !this.selectedObraCode && cur.obras[0]) this.selectedObraCode = cur.obras[0].code;
@@ -661,7 +752,7 @@ const ParametrizacaoParceiroApp = {
     const companyId = document.getElementById("pp-new-company").value;
     const partnerName = (document.getElementById("pp-new-partner").value || "").trim();
     const kindEl = document.querySelector('input[name="pp-new-kind"]:checked');
-    const kind = (kindEl && kindEl.value) === "sociedade" ? "sociedade" : "parceria";
+    const kind = kindEl && (kindEl.value === "sociedade" || kindEl.value === "mista") ? kindEl.value : "parceria";
     if (!companyId || !partnerName) {
       alert("Informe a empresa e o nome do parceiro ou sócio.");
       return;
@@ -863,7 +954,7 @@ const ParametrizacaoParceiroApp = {
     const p = this.current();
     if (!p) return;
     if (field === "partnerName") p.partnerName = value;
-    if (field === "kind") p.kind = value === "sociedade" ? "sociedade" : "parceria";
+    if (field === "kind") p.kind = value === "sociedade" || value === "mista" ? value : "parceria";
     this.persist();
     this.render();
   },
@@ -892,6 +983,43 @@ const ParametrizacaoParceiroApp = {
     this.render();
   },
 
+  setSocioPct(id, value) {
+    const p = this.current();
+    if (!p) return;
+    const row = (p.socios || []).find(s => String(s.id) === String(id));
+    if (!row) return;
+    const raw = String(value == null ? "" : value).trim().replace(",", ".");
+    if (raw === "") row.sharePct = "";
+    else {
+      const n = Number(raw);
+      if (!Number.isFinite(n)) return;
+      row.sharePct = Math.max(0, Math.min(100, n));
+    }
+    this.persist();
+    const totalEl = document.getElementById("pp-socios-total");
+    const restoEl = document.getElementById("pp-socios-resto");
+    const total = this.totalSociosPct(p);
+    const resto = Math.round((100 - total) * 1000) / 1000;
+    if (totalEl) totalEl.textContent = this.fmtPct(total) + "%";
+    if (restoEl) {
+      restoEl.textContent = this.fmtPct(resto) + "%";
+      restoEl.style.color = Math.abs(resto) < 0.001 ? "#105436" : "#b45309";
+    }
+  },
+
+  async removeSocio(id) {
+    const p = this.current();
+    if (!p) return;
+    const row = (p.socios || []).find(s => String(s.id) === String(id));
+    if (!row) return;
+    const msg = "Remover " + (row.name || "este sócio") + " da sociedade?";
+    const ok = typeof window.mouraConfirm === "function" ? await window.mouraConfirm(msg) : confirm(msg);
+    if (!ok) return;
+    p.socios = (p.socios || []).filter(s => String(s.id) !== String(id));
+    this.persist();
+    this.render();
+  },
+
   pickCreditorByIndex(i) {
     const c = this.creditorHits[Number(i)];
     if (!c) return;
@@ -901,6 +1029,20 @@ const ParametrizacaoParceiroApp = {
   pickCreditor(id, name, doc) {
     const p = this.current();
     if (!p) return;
+    if (this.temSocios(p)) {
+      if ((p.socios || []).some(s => String(s.id) === String(id))) {
+        alert("Este sócio já está na lista.");
+        return;
+      }
+      p.socios = p.socios || [];
+      p.socios.push(this.blankSocio({ id, name, cpfCnpj: doc, sharePct: "" }));
+      this.creditorQuery = "";
+      this.creditorHits = [];
+      this.persist();
+      this.render();
+      this.ensureSociosBanks();
+      return;
+    }
     const prev = p.creditor || {};
     p.creditor = {
       id: String(id || ""),
@@ -1086,6 +1228,7 @@ const ParametrizacaoParceiroApp = {
 
   async ensureCreditorBank() {
     const p = this.current();
+    if (p && this.temSocios(p)) return this.ensureSociosBanks();
     if (!p || !p.creditor || !p.creditor.id) return;
     if (this._bankLoading) return;
     if (p.creditor.bankLoaded) return;
@@ -1117,9 +1260,58 @@ const ParametrizacaoParceiroApp = {
 
   refreshCreditorBank() {
     const p = this.current();
+    if (p && this.temSocios(p)) {
+      (p.socios || []).forEach(s => { s.bankLoaded = false; });
+      this.ensureSociosBanks();
+      return;
+    }
     if (!p || !p.creditor) return;
     p.creditor.bankLoaded = false;
     this.ensureCreditorBank();
+  },
+
+  async ensureSociosBanks() {
+    const p = this.current();
+    if (!p || !this.temSocios(p)) return;
+    const pending = (p.socios || []).filter(s => s.id && !s.bankLoaded);
+    if (!pending.length || this._bankLoading) return;
+    this._bankLoading = true;
+    this.render();
+    try {
+      await Promise.all(pending.map(async (s) => {
+        let list = [];
+        try { list = await this.fetchCreditorBanks(s.id); } catch (e) { list = []; }
+        const cur = this.current();
+        const row = cur && (cur.socios || []).find(x => String(x.id) === String(s.id));
+        if (!row) return;
+        row.bankList = list;
+        const picked = (row.bankId && list.find(b => String(b.id) === String(row.bankId)))
+          || list.find(b => this.isDefaultBank(b))
+          || list[0]
+          || null;
+        row.bankInfo = picked;
+        row.bankId = picked && picked.id != null ? picked.id : "";
+        row.bankLoaded = true;
+      }));
+      this.persist();
+    } catch (e) {
+      console.warn("[Parcerias] Dados bancários dos sócios:", e);
+    } finally {
+      this._bankLoading = false;
+      this.render();
+    }
+  },
+
+  selectSocioBank(socioId, bankId) {
+    const p = this.current();
+    if (!p) return;
+    const row = (p.socios || []).find(s => String(s.id) === String(socioId));
+    if (!row) return;
+    const picked = (row.bankList || []).find(b => String(b.id) === String(bankId)) || null;
+    row.bankId = picked && picked.id != null ? picked.id : "";
+    row.bankInfo = picked;
+    this.persist();
+    this.render();
   },
 
   selectCreditorBank(bankId) {
@@ -1364,10 +1556,12 @@ const ParametrizacaoParceiroApp = {
       const active = p.id === this.selectedId;
       const nCc = (p.obras || []).reduce((acc, o) => acc + (o.costCenters || []).filter(c => c.inAccount).length, 0);
       const obras = (p.obras || []).map(o => o.code).filter(Boolean).join(", ") || "—";
-      const tipo = this.isSociedade(p) ? "Sociedade" : "Parceria";
+      const tipo = this.kindLabel(p);
       const shares = this.isSociedade(p)
-        ? "distribuição de lucro"
-        : ([...new Set((p.obras || []).map(o => o.defaultPartnerShare + "%"))].join(" / ") || "sem rateio");
+        ? ((p.socios || []).length + " sócios · " + this.fmtPct(this.totalSociosPct(p)) + "%")
+        : (this.isMista(p)
+          ? ((p.socios || []).length + " sócios · " + ([...new Set((p.obras || []).map(o => o.defaultPartnerShare + "%"))].join(" / ") || "sem rateio"))
+          : ([...new Set((p.obras || []).map(o => o.defaultPartnerShare + "%"))].join(" / ") || "sem rateio"));
       return `<button onclick="ParametrizacaoParceiroApp.select('${p.id}')"
         style="width:100%;text-align:left;border:1.5px solid ${active ? "#105436" : "#e5e7eb"};background:${active ? "#e8f5ee" : "#fff"};color:${active ? "#105436" : "#334155"};border-radius:8px;padding:10px;margin-bottom:6px;cursor:pointer;">
         <div style="font-weight:800;font-size:0.82rem;">${this.esc(p.partnerName)}</div>
@@ -1445,7 +1639,7 @@ const ParametrizacaoParceiroApp = {
 
   emptyHtml() {
     return `<div class="crm-card" style="padding:40px;text-align:center;color:#64748b;">
-      Cadastre uma prestação de contas. Informe se é parceria (rateio por obra) ou sociedade (SPE, sem rateio).
+      Cadastre uma prestação de contas. Informe se é parceria (rateio por obra), sociedade (sócios) ou mista (os dois).
     </div>`;
   },
 
@@ -1456,9 +1650,9 @@ const ParametrizacaoParceiroApp = {
     return `<div class="crm-card" style="padding:20px;max-width:560px;width:100%;overflow:hidden;box-sizing:border-box;">
       <h3 style="margin:0 0 6px;color:var(--color-primary);">Nova prestação de contas</h3>
       <p style="margin:0 0 16px;color:#64748b;font-size:0.82rem;line-height:1.45;">
-        Informe a empresa (cobrança interna), o nome e se é <strong>parceria</strong> ou <strong>sociedade</strong>.
-        Centro de custo e percentual ficam para depois, por obra — cada uma tem o próprio rateio.
-        Em sociedade não há rateio: o que ocorre na SPE é dos sócios, via distribuição de lucro.
+        Informe a empresa (cobrança interna), o nome e se é <strong>parceria</strong>, <strong>sociedade</strong> ou <strong>mista</strong>.
+        Centro de custo e percentual de obra ficam para depois. Em sociedade os sócios entram na aba Credor, cada um com o seu percentual.
+        Mista junta os dois: sócios com participação e parceiros com rateio por obra.
       </p>
       <div style="display:flex;flex-direction:column;gap:12px;min-width:0;">
         <label style="${field}">Empresa
@@ -1478,6 +1672,9 @@ const ParametrizacaoParceiroApp = {
             <label style="display:inline-flex;align-items:center;gap:6px;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;cursor:pointer;font-size:0.82rem;font-weight:700;color:#334155;">
               <input type="radio" name="pp-new-kind" value="sociedade"> Sociedade
             </label>
+            <label style="display:inline-flex;align-items:center;gap:6px;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;cursor:pointer;font-size:0.82rem;font-weight:700;color:#334155;">
+              <input type="radio" name="pp-new-kind" value="mista"> Mista
+            </label>
           </div>
         </div>
       </div>
@@ -1495,7 +1692,8 @@ const ParametrizacaoParceiroApp = {
     const tab = this.detailTab || "geral";
     const nObras = (p.obras || []).length;
     const nCc = (p.obras || []).reduce((acc, o) => acc + (o.costCenters || []).filter(c => c.inAccount).length, 0);
-    const credOk = !!(p.creditor && p.creditor.id);
+    const nSocios = (p.socios || []).filter(s => s.id).length;
+    const credOk = this.temSocios(p) ? nSocios > 0 : !!(p.creditor && p.creditor.id);
     const btn = (id, label, icon, count) =>
       `<button type="button" role="tab" aria-selected="${tab === id}" class="ml-tab${tab === id ? " is-active" : ""}" onclick="ParametrizacaoParceiroApp.setDetailTab('${id}')"><i data-lucide="${icon}"></i> ${label}${count ? ` <span class="ml-tab-count">${count}</span>` : ""}</button>`;
     let body = "";
@@ -1510,12 +1708,12 @@ const ParametrizacaoParceiroApp = {
           <div>
             <div style="font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;">Empresa ${this.esc(p.companyId)}</div>
             <div style="font-size:1.05rem;font-weight:800;color:#0f172a;">${this.esc(p.companyName)}</div>
-            <div style="font-size:0.78rem;color:#64748b;margin-top:2px;">${this.esc(p.partnerName)} · ${sociedade ? "Sociedade" : "Parceria"}</div>
+            <div style="font-size:0.78rem;color:#64748b;margin-top:2px;">${this.esc(p.partnerName)} · ${this.kindLabel(p)}</div>
           </div>
         </div>
         <div class="ml-tabs" role="tablist" style="margin-bottom:16px;">
           ${btn("geral", "Geral", "sliders-horizontal")}
-          ${btn("credor", "Credor", "user", credOk ? "✓" : "")}
+          ${btn("credor", "Credor", "user", this.temSocios(p) ? (nSocios || "") : (credOk ? "✓" : ""))}
           ${btn("obras", "Obras", "building-2", nObras || "")}
           ${btn("centros", "Centros de custo", "layers", nCc || "")}
           ${btn("rateio", sociedade ? "Sociedade" : "Rateio DFC", sociedade ? "users" : "pie-chart")}
@@ -1563,17 +1761,22 @@ const ParametrizacaoParceiroApp = {
           <div>
             <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:6px;">Tipo</div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
-              <label style="display:inline-flex;align-items:center;gap:6px;border:1px solid ${sociedade ? "#e2e8f0" : "#105436"};background:${sociedade ? "#fff" : "#e8f5ee"};border-radius:8px;padding:8px 12px;cursor:pointer;font-size:0.82rem;font-weight:700;">
-                <input type="radio" name="pp-kind" ${sociedade ? "" : "checked"} onchange="ParametrizacaoParceiroApp.updateField('kind','parceria')"> Parceria
+              <label style="display:inline-flex;align-items:center;gap:6px;border:1px solid ${p.kind === "parceria" ? "#105436" : "#e2e8f0"};background:${p.kind === "parceria" ? "#e8f5ee" : "#fff"};border-radius:8px;padding:8px 12px;cursor:pointer;font-size:0.82rem;font-weight:700;">
+                <input type="radio" name="pp-kind" ${p.kind === "parceria" ? "checked" : ""} onchange="ParametrizacaoParceiroApp.updateField('kind','parceria')"> Parceria
               </label>
-              <label style="display:inline-flex;align-items:center;gap:6px;border:1px solid ${sociedade ? "#105436" : "#e2e8f0"};background:${sociedade ? "#e8f5ee" : "#fff"};border-radius:8px;padding:8px 12px;cursor:pointer;font-size:0.82rem;font-weight:700;">
-                <input type="radio" name="pp-kind" ${sociedade ? "checked" : ""} onchange="ParametrizacaoParceiroApp.updateField('kind','sociedade')"> Sociedade
+              <label style="display:inline-flex;align-items:center;gap:6px;border:1px solid ${p.kind === "sociedade" ? "#105436" : "#e2e8f0"};background:${p.kind === "sociedade" ? "#e8f5ee" : "#fff"};border-radius:8px;padding:8px 12px;cursor:pointer;font-size:0.82rem;font-weight:700;">
+                <input type="radio" name="pp-kind" ${p.kind === "sociedade" ? "checked" : ""} onchange="ParametrizacaoParceiroApp.updateField('kind','sociedade')"> Sociedade
+              </label>
+              <label style="display:inline-flex;align-items:center;gap:6px;border:1px solid ${p.kind === "mista" ? "#105436" : "#e2e8f0"};background:${p.kind === "mista" ? "#e8f5ee" : "#fff"};border-radius:8px;padding:8px 12px;cursor:pointer;font-size:0.82rem;font-weight:700;">
+                <input type="radio" name="pp-kind" ${p.kind === "mista" ? "checked" : ""} onchange="ParametrizacaoParceiroApp.updateField('kind','mista')"> Mista
               </label>
             </div>
             <p style="margin:8px 0 0;font-size:0.78rem;color:#64748b;line-height:1.4;">
-              ${sociedade
-                ? "Sociedade: não aplica rateio. Tudo que ocorre na SPE é de responsabilidade dos sócios, com distribuição de lucro."
-                : "Parceria: cada centro de custo pode ter rateio próprio. Percentuais são definidos por obra, não neste cadastro inicial."}
+              ${p.kind === "sociedade"
+                ? "Sociedade: não aplica rateio por obra. Cada sócio tem um percentual de participação e recebe pela distribuição de lucro."
+                : (p.kind === "mista"
+                  ? "Mista: há sócios com percentual de participação e também parceiros com rateio por obra."
+                  : "Parceria: cada centro de custo pode ter rateio próprio. O percentual fica na obra, não neste cadastro.")}
             </p>
           </div>
         </div>
@@ -1581,7 +1784,116 @@ const ParametrizacaoParceiroApp = {
     `;
   },
 
+  sociosCredorHtml(p) {
+    const cred = p.creditor || {};
+    const day = cred.paymentDay == null ? "" : cred.paymentDay;
+    const mode = cred.paymentDayMode === "businessDays" ? "businessDays" : "monthDay";
+    const biz = cred.paymentBusinessDays == null ? "" : cred.paymentBusinessDays;
+    const bizN = parseInt(String(biz), 10);
+    const bizPrev = Number.isFinite(bizN) && bizN >= 1 ? this.previewBusinessPay(bizN) : null;
+    const bizOk = bizPrev && bizPrev.day >= this.PAY_MIN_DAY;
+    const bizHint = !bizPrev
+      ? "Contados a partir do último dia do mês de fechamento, pulando sábados, domingos e feriados."
+      : (bizOk
+        ? `Com fechamento em ${this.fmtDateBR(bizPrev.close)}, o título cai em ${this.fmtDateBR(bizPrev.due)} (dia ${bizPrev.day}).`
+        : `Cairia no dia ${bizPrev.day} (${this.fmtDateBR(bizPrev.due)}). O mínimo é dia ${this.PAY_MIN_DAY}. Aumente os dias úteis.`);
+    const modeBtn = (id, label) => {
+      const on = mode === id;
+      return `<button type="button" onclick="ParametrizacaoParceiroApp.updatePaymentDayMode('${id}')"
+        style="border:1px solid ${on ? "#105436" : "#e2e8f0"};background:${on ? "#e8f5ee" : "#fff"};color:${on ? "#105436" : "#334155"};border-radius:8px;padding:8px 12px;cursor:pointer;font-size:0.78rem;font-weight:700;">${label}</button>`;
+    };
+    const total = this.totalSociosPct(p);
+    const resto = Math.round((100 - total) * 1000) / 1000;
+    const socios = p.socios || [];
+    const card = (s) => {
+      const banks = s.bankList || [];
+      const bank = s.bankInfo || null;
+      const banksHtml = banks.map((b) => {
+        const on = bank && String(b.id) === String(bank.id);
+        const acc = `${b.accountNumber || ""}${b.checkDigit ? "-" + b.checkDigit : ""}`;
+        return `<label style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1px solid ${on ? "#a7f3d0" : "#e2e8f0"};background:${on ? "#fff" : "#f8fafc"};border-radius:8px;cursor:pointer;margin-top:6px;">
+          <input type="radio" name="pp-socio-bank-${this.esc(s.id)}" ${on ? "checked" : ""} onchange="ParametrizacaoParceiroApp.selectSocioBank('${this.esc(s.id)}','${this.esc(String(b.id))}')" style="margin-top:3px;">
+          <span style="font-size:0.78rem;line-height:1.4;color:#334155;">
+            <strong>${this.esc(b.bank || "")} ${this.esc(b.nameOfBank || "")}</strong>
+            ${this.isDefaultBank(b) ? `<span style="margin-left:6px;font-size:0.65rem;font-weight:800;color:#105436;background:#d1fae5;padding:1px 6px;border-radius:99px;">Padrão Sienge</span>` : ""}
+            <span style="display:block;color:#64748b;">Ag. ${this.esc(b.agency || "—")} · Conta ${this.esc(acc)} · ${this.esc(this.accountTypeLabel(b.accountType))}</span>
+            <span style="display:block;color:#64748b;">Favorecido: ${this.esc(b.nameOfRecipient || s.name || "—")} · Doc.: ${this.esc(b.cpf || b.cnpj || s.cpfCnpj || "—")}</span>
+          </span>
+        </label>`;
+      }).join("");
+      return `<div style="border:1px solid #d1fae5;background:#f0fdf4;border-radius:10px;padding:12px 14px;">
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-end;flex-wrap:wrap;">
+          <div style="min-width:0;flex:1;">
+            <div style="font-weight:800;color:#065f46;">${this.esc(s.name)}</div>
+            <div style="font-size:0.75rem;color:#047857;margin-top:2px;">ID ${this.esc(s.id)}${s.cpfCnpj ? " · " + this.esc(s.cpfCnpj) : ""}</div>
+          </div>
+          <label style="display:flex;flex-direction:column;gap:4px;width:150px;font-size:0.68rem;font-weight:700;color:#475569;text-transform:uppercase;">% de participação
+            <input type="number" min="0" max="100" step="0.001" value="${s.sharePct === "" ? "" : s.sharePct}"
+              onchange="ParametrizacaoParceiroApp.setSocioPct('${this.esc(s.id)}', this.value)"
+              style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;font-weight:800;background:#fff;">
+          </label>
+          <button type="button" onclick="ParametrizacaoParceiroApp.removeSocio('${this.esc(s.id)}')" style="height:36px;border:none;background:transparent;color:#dc2626;cursor:pointer;font-size:0.78rem;font-weight:700;">Remover</button>
+        </div>
+        <div style="margin-top:8px;">
+          ${this._bankLoading && !s.bankLoaded ? `<div style="font-size:0.75rem;color:#64748b;">Buscando dados bancários no Sienge…</div>` : ""}
+          ${!this._bankLoading && s.bankLoaded && !banks.length ? `<div style="font-size:0.75rem;color:#b45309;">Nenhuma conta bancária neste credor no Sienge.</div>` : ""}
+          ${banksHtml}
+        </div>
+      </div>`;
+    };
+    return `
+      <div class="crm-card" style="padding:16px;">
+        <h3 style="margin:0 0 4px;font-size:0.95rem;color:var(--color-primary);">Sócios (credores)</h3>
+        <p style="margin:0 0 12px;font-size:0.78rem;color:#64748b;">Cada sócio é um credor do Sienge, com o percentual de participação no negócio. A busca acrescenta mais um, no mesmo agrupamento.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;min-width:120px;">
+            <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;">Sócios</div>
+            <strong style="color:#0f172a;">${socios.length}</strong>
+          </div>
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;min-width:140px;">
+            <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;">Participação</div>
+            <strong id="pp-socios-total" style="color:#105436;">${this.fmtPct(total)}%</strong>
+          </div>
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;min-width:140px;">
+            <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;">Restante</div>
+            <strong id="pp-socios-resto" style="color:${Math.abs(resto) < 0.001 ? "#105436" : "#b45309"};">${this.fmtPct(resto)}%</strong>
+          </div>
+        </div>
+        <div style="margin-bottom:14px;">
+          <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:8px;">Dia do pagamento dos sócios</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+            ${modeBtn("monthDay", "Dia do mês")}
+            ${modeBtn("businessDays", "Dias úteis após o fechamento")}
+          </div>
+          ${mode === "monthDay" ? `
+            <label style="display:flex;flex-direction:column;gap:4px;max-width:220px;font-size:0.75rem;font-weight:700;color:#475569;">Dia (mínimo ${this.PAY_MIN_DAY})
+              <input type="number" min="${this.PAY_MIN_DAY}" max="31" placeholder="${this.PAY_MIN_DAY} a 31" value="${this.esc(day)}"
+                onchange="ParametrizacaoParceiroApp.updatePaymentDay(this.value)"
+                style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
+            </label>
+          ` : `
+            <label style="display:flex;flex-direction:column;gap:4px;max-width:280px;font-size:0.75rem;font-weight:700;color:#475569;">Dias úteis após o fechamento
+              <input type="number" min="1" max="31" placeholder="Ex.: 6" value="${this.esc(biz)}"
+                onchange="ParametrizacaoParceiroApp.updatePaymentBusinessDays(this.value)"
+                style="height:36px;border:1px solid ${bizPrev && !bizOk ? "#fca5a5" : "#e2e8f0"};border-radius:6px;padding:0 10px;">
+              <span style="font-weight:500;color:${bizPrev && !bizOk ? "#b91c1c" : "#94a3b8"};">${this.esc(bizHint)}</span>
+            </label>
+          `}
+        </div>
+        <label style="display:block;font-size:0.7rem;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:4px;">Adicionar sócio</label>
+        <input placeholder="Buscar credor por nome, CPF ou CNPJ" value="${this.esc(this.creditorQuery)}"
+          oninput="ParametrizacaoParceiroApp.onCreditorSearch(this.value)"
+          style="width:100%;max-width:520px;height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
+        <div id="pp-cred-sugg">${this.creditorSuggHtml()}</div>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:14px;">
+          ${socios.map(card).join("") || `<p style="color:#94a3b8;margin:0;">Nenhum sócio adicionado ainda.</p>`}
+        </div>
+      </div>
+    `;
+  },
+
   credorTabHtml(p) {
+    if (this.temSocios(p)) return this.sociosCredorHtml(p);
     const cred = p.creditor || {};
     const banks = cred.bankList || [];
     const bank = cred.bankInfo || null;

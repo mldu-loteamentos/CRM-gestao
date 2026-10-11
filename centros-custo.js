@@ -172,6 +172,7 @@ const CentrosCustoApp = {
       custom.associacao_nome = "";
     }
 
+    const cc = CentrosCustoState.costCenters.find(c => String(c.id) === key);
     const impostoPagoEl = document.getElementById(`edit-imposto-pago-${id}`);
     if (impostoPagoEl) custom.imposto_pago_empresa = this.isParceiro(cc) ? false : impostoPagoEl.checked;
 
@@ -190,7 +191,6 @@ const CentrosCustoApp = {
     let contaNova;
     // Só mexe na conta quando o usuário trocou a seleção; salvar outros campos não apaga a conta.
     if (contaEl && contaEl.dataset.loaded === "1" && contaEl.value !== (contaEl.dataset.inicial || "")) {
-      const cc = CentrosCustoState.costCenters.find(c => String(c.id) === key);
       const contas = CentrosCustoState.contasPorEmpresa[String(cc && (cc.idCompany || cc.companyId))] || [];
       const picked = contas.find(a => a.key === contaEl.value);
       contaNova = picked ? { id: picked.id, numero: picked.numero, nome: picked.nome, banco: picked.banco, agencia: picked.agencia } : null;
