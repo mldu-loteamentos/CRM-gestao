@@ -1032,12 +1032,12 @@ window.EnviarNotaApp = {
     if (!p) return s.erro ? `<p class="inf-erro">${this.esc(s.erro)}</p>` : `<p class="inf-muted">Informe o número do pedido de compra da nota.</p>`;
     const sit = { PENDING: "Pendente", PARTIALLY_DELIVERED: "Parcialmente entregue", FULLY_DELIVERED: "Totalmente atendido", CANCELED: "Cancelado" }[String(p.status || "").toUpperCase()] || p.status || "—";
     const emp = s.empresaCc ? `empresa ${this.esc(s.empresaCc)}${this.nomeEmpresa(s.empresaCc) ? " - " + this.esc(this.nomeEmpresa(s.empresaCc)) : ""}` : "empresa não identificada";
-    return `<div class="inf-grid">
-      <div><label>Fornecedor</label><b>${this.esc(s.credor ? s.credor.nome : p.supplierId)}</b><small>${this.esc(s.credor && s.credor.doc ? InserirNotaApp.docFmt(s.credor.doc) : `código ${p.supplierId}`)}</small></div>
-      <div><label>Centro de custo</label><b>${this.esc((s.cc && s.cc.id) || "—")}${s.cc && s.cc.nome ? ` - ${this.esc(s.cc.nome)}` : ""}</b><small>${emp}</small></div>
-      <div><label>Pedido ${this.esc(s.pedidoNome)}</label><b>${this.dataBr(p.date)}</b><small>${this.esc(p.paymentCondition || "")}</small></div>
-      <div><label>Situação</label><b>${this.esc(sit)}</b><small>${p.authorized ? "autorizado" : (p.authorized === false ? "não autorizado" : "")}</small></div>
-      <div><label>Total do pedido</label><b>${p.totalAmount != null ? this.money(p.totalAmount) : "—"}</b></div>
+    return `<div class="inf-pedido">
+      <div><span>Fornecedor</span><div><b>${this.esc(s.credor ? s.credor.nome : p.supplierId)}</b><small>${this.esc(s.credor && s.credor.doc ? InserirNotaApp.docFmt(s.credor.doc) : `código ${p.supplierId}`)}</small></div></div>
+      <div><span>Centro de custo</span><div><b>${this.esc((s.cc && s.cc.id) || "—")}${s.cc && s.cc.nome ? ` - ${this.esc(s.cc.nome)}` : ""}</b><small>${emp}</small></div></div>
+      <div><span>Pedido ${this.esc(s.pedidoNome)}</span><div><b>${this.dataBr(p.date)}</b>${p.paymentCondition ? `<small>${this.esc(p.paymentCondition)}</small>` : ""}</div></div>
+      <div><span>Situação</span><div><b>${this.esc(sit)}</b>${p.authorized || p.authorized === false ? `<small>${p.authorized ? "autorizado" : "não autorizado"}</small>` : ""}</div></div>
+      <div><span>Total do pedido</span><div><b>${p.totalAmount != null ? this.money(p.totalAmount) : "—"}</b></div></div>
     </div>
     ${InserirNotaApp.previsaoHtml(s.previsao)}`;
   },

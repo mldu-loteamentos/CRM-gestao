@@ -208,7 +208,7 @@ function normalizeBill(bill, underJudgmentIds) {
   return mapped;
 }
 
-const DEFAULTERS_CACHE_REV = 2;
+const DEFAULTERS_CACHE_REV = 3;
 
 function documentoExtratoEhCt(row) {
   const tipo = String((row && (row.documentIdentificationId || row.documentId || row.documentsId)) || "").trim().toUpperCase();
@@ -304,7 +304,7 @@ function incluirParcelasForaDaCobranca(normalized, rows, today, companyId) {
     (row.installments || []).forEach((p) => {
       if (!p) return;
       const due = String(p.dueDate || "").slice(0, 10);
-      if (!due || due > today) return;
+      if (!due || due >= today) return;
       const saldo = Number(p.currentBalance);
       const comAcr = Number(p.currentBalanceWithAddition);
       const valor = Number.isFinite(comAcr) && comAcr > 0.009 ? comAcr : (Number.isFinite(saldo) ? saldo : 0);
@@ -389,6 +389,61 @@ function incluirParcelasForaDaCobranca(normalized, rows, today, companyId) {
     acrescentadas += 1;
   });
   return acrescentadas;
+}
+
+function mesclarTitulosInadimplentes(bills) {
+  const porId = new Map();
+  const semId = [];
+  (bills || []).forEach((bill) => {
+    if (!bill) return;
+    const id = String(bill.receivableBillId || bill.id || "");
+    if (!id) { semId.push(bill); return; }
+    const prev = porId.get(id);
+    if (!prev) { porId.set(id, bill); return; }
+    const insts = new Map();
+    const add = (inst) => {
+      if (!inst) return;
+      const key = String(inst.installmentId || inst.id || "") + "|" + String(inst.dueDate || "").slice(0, 10);
+      const cur = insts.get(key);
+      const v = Number(inst.correctedValueWithAdditions);
+      const cv = cur ? Number(cur.correctedValueWithAdditions) : -1;
+      if (!cur || (Number.isFinite(v) && v > cv)) insts.set(key, inst);
+    };
+    (prev.defaulterInstallments || []).forEach(add);
+    (bill.defaulterInstallments || []).forEach(add);
+    prev.defaulterInstallments = Array.from(insts.values());
+  });
+  return Array.from(porId.values()).concat(semId);
+}
+
+function mesclarNormalizados(bills) {
+  const porId = new Map();
+  (bills || []).forEach((bill) => {
+    if (!bill) return;
+    const id = String(bill.id || bill.saleId || "");
+    if (!id) return;
+    const prev = porId.get(id);
+    if (!prev) { porId.set(id, bill); return; }
+    const insts = new Map();
+    const add = (inst) => {
+      if (!inst) return;
+      const key = String(inst.installmentId || inst.id || "") + "|" + String(inst.dueDate || "").slice(0, 10);
+      const cur = insts.get(key);
+      const v = Number(inst.correctedValueWithAdditions != null ? inst.correctedValueWithAdditions : inst.currentBalanceWithAddition);
+      const cv = cur ? Number(cur.correctedValueWithAdditions != null ? cur.correctedValueWithAdditions : cur.currentBalanceWithAddition) : -1;
+      if (!cur || (Number.isFinite(v) && v >= cv)) insts.set(key, inst);
+    };
+    (prev.defaulterInstallments || []).forEach(add);
+    (bill.defaulterInstallments || []).forEach(add);
+    prev.defaulterInstallments = Array.from(insts.values());
+    const open = summarizeOpenDefaulterBill(prev);
+    prev.value = open.value;
+    prev.interest = open.interest;
+    prev.fine = open.fine;
+    prev.daysDelay = open.daysDelay;
+    prev.defaulterInstallments = open.installments || prev.defaulterInstallments;
+  });
+  return Array.from(porId.values()).filter((b) => (b.daysDelay || 0) > 0 && (b.value || 0) > 0.009);
 }
 
 function buildDefaulterQuery(cId, today, extraParams, billTypeParams) {
@@ -510,6 +565,7 @@ module.exports = async function handler(req, res) {
           log.push(`defaulters emp ${cId} lote ${state.batchIndex}: ${e.message}`);
         }
         const under = new Set(rawJudge.map((b) => String(b.receivableBillId || b.id)));
+        rawAll = mesclarTitulosInadimplentes(rawAll);
         const normalized = rawAll.map((b) => normalizeBill(b, under)).filter((b) => b.daysDelay > 0 && (b.value || 0) > 0.009);
         let foraDaCobranca = 0;
         for (const cc of batch) {
@@ -590,7 +646,7 @@ module.exports = async function handler(req, res) {
     }
 
     if (state.step === "finalize") {
-      const bills = [];
+      const billsRaw = [];
       const paidMerged = new Map();
       const toDelete = [...(state.warmupChunks || []), ...(state.incomeChunks || [])];
       for (const id of toDelete) {
@@ -599,7 +655,7 @@ module.exports = async function handler(req, res) {
           if (!snap.exists()) continue;
           const d = snap.data() || {};
           if (id.indexOf("_warmup_") >= 0) {
-            try { bills.push(...JSON.parse(d.data || "[]")); } catch (e) {}
+            try { billsRaw.push(...JSON.parse(d.data || "[]")); } catch (e) {}
           } else {
             try {
               JSON.parse(d.data || "[]").forEach((pair) => {
@@ -614,6 +670,7 @@ module.exports = async function handler(req, res) {
           }
         } catch (e) {}
       }
+      const bills = mesclarNormalizados(billsRaw);
       const paidMap = Array.from(paidMerged.entries());
       const CHUNK = 100;
       const numChunks = Math.max(1, Math.ceil(bills.length / CHUNK));

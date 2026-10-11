@@ -1106,12 +1106,12 @@ window.InserirNotaApp = {
     const p = s.pedido;
     if (!p) return s.erro ? `<p class="inf-erro">${this.esc(s.erro)}</p>` : `<p class="inf-muted">Informe o número do pedido de compra para trazer fornecedor, empresa e entregas em aberto.</p>`;
     const sit = { PENDING: "Pendente", PARTIALLY_DELIVERED: "Parcialmente entregue", FULLY_DELIVERED: "Totalmente atendido", CANCELED: "Cancelado" }[String(p.status || "").toUpperCase()] || p.status || "—";
-    return `<div class="inf-grid">
-      <div><label>Fornecedor</label><b>${this.esc(s.credor ? s.credor.nome : p.supplierId)}</b><small>${this.esc(s.credor && s.credor.doc ? this.docFmt(s.credor.doc) : `código ${p.supplierId}`)}</small></div>
-      <div><label>Centro de custo</label><b>${this.esc((s.cc && s.cc.id) || "—")}${s.cc && s.cc.nome ? ` - ${this.esc(s.cc.nome)}` : ""}</b><small>${s.empresaCc ? `empresa ${this.esc(s.empresaCc)}${this.nomeEmpresa(s.empresaCc) ? " - " + this.esc(this.nomeEmpresa(s.empresaCc)) : ""}` : "empresa não identificada"}</small></div>
-      <div><label>Pedido ${this.esc(s.pedidoNome)}</label><b>${this.dataBr(p.date)}</b><small>${s.pedidoApi !== s.pedidoNome ? `id na API ${this.esc(s.pedidoApi)} · ` : ""}${this.esc(p.paymentCondition || "")}</small></div>
-      <div><label>Situação</label><b>${this.esc(sit)}</b><small>${p.authorized ? "autorizado" : (p.authorized === false ? "não autorizado" : "")}</small></div>
-      <div><label>Total do pedido</label><b>${p.totalAmount != null ? this.money(p.totalAmount) : "—"}</b></div>
+    return `<div class="inf-pedido">
+      <div><span>Fornecedor</span><div><b>${this.esc(s.credor ? s.credor.nome : p.supplierId)}</b><small>${this.esc(s.credor && s.credor.doc ? this.docFmt(s.credor.doc) : `código ${p.supplierId}`)}</small></div></div>
+      <div><span>Centro de custo</span><div><b>${this.esc((s.cc && s.cc.id) || "—")}${s.cc && s.cc.nome ? ` - ${this.esc(s.cc.nome)}` : ""}</b><small>${s.empresaCc ? `empresa ${this.esc(s.empresaCc)}${this.nomeEmpresa(s.empresaCc) ? " - " + this.esc(this.nomeEmpresa(s.empresaCc)) : ""}` : "empresa não identificada"}</small></div></div>
+      <div><span>Pedido ${this.esc(s.pedidoNome)}</span><div><b>${this.dataBr(p.date)}</b><small>${s.pedidoApi !== s.pedidoNome ? `id na API ${this.esc(s.pedidoApi)} · ` : ""}${this.esc(p.paymentCondition || "")}</small></div></div>
+      <div><span>Situação</span><div><b>${this.esc(sit)}</b>${p.authorized || p.authorized === false ? `<small>${p.authorized ? "autorizado" : "não autorizado"}</small>` : ""}</div></div>
+      <div><span>Total do pedido</span><div><b>${p.totalAmount != null ? this.money(p.totalAmount) : "—"}</b></div></div>
     </div>
     ${this.previsaoHtml()}`;
   },
@@ -1215,6 +1215,12 @@ window.InserirNotaApp = {
         .inf-busca { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
         .inf-busca input { height: 38px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0 12px; font-size: 0.95rem; width: 180px; }
         .inf-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+        .inf-pedido { display: flex; flex-direction: column; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; margin-top: 4px; }
+        .inf-pedido > div { display: grid; grid-template-columns: 148px minmax(0, 1fr); gap: 12px; align-items: start; padding: 10px 14px; border-bottom: 1px solid #e2e8f0; }
+        .inf-pedido > div:last-child { border-bottom: 0; }
+        .inf-pedido > div > span { font-size: 0.7rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.03em; padding-top: 3px; }
+        .inf-pedido b { display: block; font-size: 0.92rem; color: #0f172a; line-height: 1.35; }
+        .inf-pedido small { display: block; color: #64748b; font-size: 0.78rem; margin-top: 2px; line-height: 1.35; }
         .inf-grid label, .inf-form label { display: block; font-size: 0.7rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 3px; }
         .inf-grid b { display: block; font-size: 0.86rem; color: #0f172a; }
         .inf-grid small { color: #64748b; font-size: 0.75rem; }
@@ -1261,7 +1267,8 @@ window.InserirNotaApp = {
         .inf-resultado.is-erro { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
         .inf-resultado ul { margin: 6px 0; padding-left: 18px; }
         .inf-resultado p { margin: 6px 0 0; }
-        @media (max-width: 1100px) { .inf-wrap { grid-template-columns: 1fr; } .inf-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }`;
+        @media (max-width: 1100px) { .inf-wrap { grid-template-columns: 1fr; } .inf-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 720px) { .inf-pedido > div { grid-template-columns: 1fr; gap: 2px; } }`;
   },
 
   render() {

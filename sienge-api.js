@@ -161,8 +161,38 @@ function installmentOverdueAmount(inst) {
   return (Number(inst.value) || 0) + (Number(inst.interest) || 0) + (Number(inst.fine) || 0);
 }
 
-/** Cache da fila anterior a esta revisão não traz parcelas de tipos que não geram cobrança. */
-const DEFAULTERS_CACHE_REV = 2;
+function mesclarTitulosInadimplentes(bills) {
+  const porId = new Map();
+  const semId = [];
+  (bills || []).forEach((bill) => {
+    if (!bill) return;
+    const id = String(bill.receivableBillId || bill.id || "");
+    if (!id) { semId.push(bill); return; }
+    const prev = porId.get(id);
+    if (!prev) { porId.set(id, bill); return; }
+    const insts = new Map();
+    const add = (inst) => {
+      if (!inst) return;
+      const key = String(inst.installmentId || inst.id || "") + "|" + String(inst.dueDate || "").slice(0, 10);
+      const cur = insts.get(key);
+      const v = Number(inst.correctedValueWithAdditions);
+      const cv = cur ? Number(cur.correctedValueWithAdditions) : -1;
+      if (!cur || (Number.isFinite(v) && v > cv)) insts.set(key, inst);
+    };
+    (prev.defaulterInstallments || []).forEach(add);
+    (bill.defaulterInstallments || []).forEach(add);
+    prev.defaulterInstallments = Array.from(insts.values());
+    if ((!prev.costCentersId || !prev.costCentersId.length) && bill.costCentersId) prev.costCentersId = bill.costCentersId;
+  });
+  return Array.from(porId.values()).concat(semId);
+}
+
+/**
+ * Revisão 3: o saldo corrigido continua na fila mesmo quando o título teve
+ * recebimento recente e só resta uma parcela em aberto. A revisão 2 já trazia
+ * as parcelas de tipo que não gera cobrança.
+ */
+const DEFAULTERS_CACHE_REV = 3;
 
 function documentoExtratoEhCt(row) {
   const tipo = String((row && (row.documentIdentificationId || row.documentId || row.documentsId)) || "").trim().toUpperCase();
@@ -252,7 +282,7 @@ function incluirParcelasForaDaCobranca(normalized, rows, today, companyId) {
     (row.installments || []).forEach((p) => {
       if (!p) return;
       const due = String(p.dueDate || "").slice(0, 10);
-      if (!due || due > today) return;
+      if (!due || due >= today) return;
       const saldo = Number(p.currentBalance);
       const comAcr = Number(p.currentBalanceWithAddition);
       const valor = Number.isFinite(comAcr) && comAcr > 0.009 ? comAcr : (Number.isFinite(saldo) ? saldo : 0);
@@ -436,13 +466,10 @@ function serializePaidInstallmentIds() {
 window.summarizeOpenDefaulterBill = function(bill) {
   const todayIso = new Date().toISOString().slice(0, 10);
   const all = (bill && bill.defaulterInstallments) || [];
-  const paidMap = (typeof window !== "undefined" && window.advFilters && window.advFilters.paidMap) || null;
   const paidInst = (typeof window !== "undefined" && window.advFilters && window.advFilters.paidInstallmentIds) || null;
   const billIds = [bill && bill.id, bill && bill.saleId, bill && bill.receivableBillId]
     .filter((v) => v !== undefined && v !== null && v !== "")
     .map((v) => String(v));
-  const paidDays = paidMapDaysForBill(bill || {}, paidMap);
-  const lastPayIso = paidDays != null ? lastPayIsoFromDays(paidDays, todayIso) : null;
 
   let open = all.filter((inst) => {
     if (installmentIsSettled(inst)) return false;
@@ -452,11 +479,6 @@ window.summarizeOpenDefaulterBill = function(bill) {
     if (paidInst && instKey && billIds.some((id) => paidInst.has(id + ":" + instKey))) return false;
     return true;
   });
-
-  if (lastPayIso && open.length === 1) {
-    const due = installmentDueIso(open[0]);
-    if (due && due <= lastPayIso) open = [];
-  }
 
   let value = 0, interest = 0, fine = 0, daysDelay = 0;
   open.forEach((inst) => {
@@ -1809,7 +1831,7 @@ const SiengeApiService = {
                const localCache = await IdbDefaultersCache.get(`defaulters_${todayStr}`);
                if (localCache && localCache.data) {
                    if (localCache.cacheRev !== DEFAULTERS_CACHE_REV) {
-                       console.warn('%c[Sienge] ⚠️ Cache IndexedDB sem as parcelas que não geram cobrança — buscando de novo.', 'color:#f59e0b;font-weight:bold;');
+                       console.warn('%c[Sienge] ⚠️ Cache da fila desatualizado — buscando o saldo em aberto de novo.', 'color:#f59e0b;font-weight:bold;');
                    } else if (defaultersCacheLooksIncomplete(localCache.data, localCache, expectedCompanyIds)) {
                        console.warn('%c[Sienge] ⚠️ Cache IndexedDB incompleto (faltam empresas internas) — ignorando.', 'color:#f59e0b;font-weight:bold;');
                    } else {
@@ -1858,7 +1880,7 @@ const SiengeApiService = {
                    });
 
                    if (meta.cacheRev !== DEFAULTERS_CACHE_REV) {
-                     console.warn('%c[Sienge] ⚠️ Cache Firestore sem as parcelas que não geram cobrança — buscando de novo.', 'color:#f59e0b;font-weight:bold;');
+                     console.warn('%c[Sienge] ⚠️ Cache da fila desatualizado — buscando o saldo em aberto de novo.', 'color:#f59e0b;font-weight:bold;');
                    } else if (defaultersCacheLooksIncomplete(result, meta, expectedCompanyIds)) {
                      console.warn('%c[Sienge] ⚠️ Cache Firestore incompleto (faltam empresas internas) — buscando base completa.', 'color:#f59e0b;font-weight:bold;');
                    } else {
@@ -2284,6 +2306,7 @@ const SiengeApiService = {
 
       try {
         const underJudgmentIds = new Set(rawUnderJudgment.map(b => String(b.receivableBillId || b.id)));
+        rawArray = mesclarTitulosInadimplentes(rawArray);
 
         const normalizedArray = rawArray.map(bill => {
           const installments = bill.defaulterInstallments || [];

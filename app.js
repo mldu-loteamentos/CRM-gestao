@@ -16802,6 +16802,43 @@ function toggleAllRenegBills(checked) {
   calculateRenegotiation();
 }
 
+function renegPricePmt(principal, monthlyRate, n) {
+  const base = Number(principal) || 0;
+  const qty = Math.max(0, Math.round(Number(n) || 0));
+  if (!(base > 0) || qty < 1) return 0;
+  const rate = Number(monthlyRate) || 0;
+  if (!(rate > 0) || qty === 1) return base / qty;
+  const fator = Math.pow(1 + rate, qty);
+  return base * (rate * fator) / (fator - 1);
+}
+
+function renegContractMonthlyRate(sale, bills) {
+  let rate = 0;
+  if (typeof quitacaoGetMonthlyInterestRate === "function") {
+    rate = Number(quitacaoGetMonthlyInterestRate(sale)) || 0;
+  }
+  if (!(rate > 0)) {
+    (bills || []).some((b) => {
+      const raw = b && (b.interestRate != null ? b.interestRate : b.interestPercentage);
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n <= 0) return false;
+      rate = n > 0.05 ? n / 100 : n;
+      return true;
+    });
+  }
+  return rate > 0 ? rate : 0;
+}
+
+function renegCenarioAtual() {
+  const raw = document.getElementById("reneg-payment-method")?.value || "deslocar";
+  if (raw === "cartao" || raw === "diluir" || raw === "somar" || raw === "deslocar") return raw;
+  return "deslocar";
+}
+
+function renegFuturasOrdenadas(bills) {
+  return (bills || []).filter((b) => b && !b.isOverdue).slice().sort((a, b) => String(a.dueDate || "").localeCompare(String(b.dueDate || "")));
+}
+
 function calculateRenegotiation() {
   const checkboxes = document.querySelectorAll('.reneg-bill-check:not([disabled])');
   const selectedIds = Array.from(checkboxes).filter(c => c.checked).map(c => c.value);
@@ -16880,24 +16917,42 @@ function calculateRenegotiation() {
   }
 
   const discountPct = Number(document.getElementById("reneg-discount-pct").value) || 0;
-  const paymentMethod = (document.getElementById("reneg-payment-method")?.value === "cartao") ? "cartao" : "interno";
+  const cenario = renegCenarioAtual();
+  const paymentMethod = cenario === "cartao" ? "cartao" : "interno";
   const cardBrand = document.getElementById("reneg-card-brand")?.value || "masterVisa";
-  const isCartao = paymentMethod === "cartao";
+  const isCartao = cenario === "cartao";
+  const usaTaxaContrato = cenario === "diluir" || cenario === "somar";
+  const futuras = renegFuturasOrdenadas(g_renegBills);
+  const vencidasBase = (g_renegBills || []).filter((b) => b && b.isOverdue);
 
   // Cartão: sem sinal / datas de sinal e 1º vencimento
   const sinalPctWrap = document.getElementById("reneg-sinal-pct-wrap");
   const sinalDueWrap = document.getElementById("reneg-sinal-due-wrap");
   const firstDueWrap = document.getElementById("reneg-first-due-wrap");
+  const qtyWrap = document.getElementById("reneg-qty-wrap");
+  const qtyLabel = document.getElementById("reneg-qty-label");
   const cardBrandWrap = document.getElementById("reneg-card-brand-wrap");
   const mathSinalRow = document.getElementById("reneg-math-sinal-row");
+  const cenarioHint = document.getElementById("reneg-cenario-hint");
   if (cardBrandWrap) cardBrandWrap.style.display = isCartao ? "" : "none";
   if (sinalPctWrap) sinalPctWrap.style.display = isCartao ? "none" : "";
   if (sinalDueWrap) sinalDueWrap.style.display = isCartao ? "none" : "";
-  if (firstDueWrap) firstDueWrap.style.display = isCartao ? "none" : "";
+  if (firstDueWrap) firstDueWrap.style.display = cenario === "deslocar" ? "" : "none";
+  if (qtyWrap) qtyWrap.style.display = cenario === "diluir" ? "none" : "";
+  if (qtyLabel) qtyLabel.textContent = cenario === "somar" ? "Parcelas a somar (N×)" : "Parcelas (N×)";
   if (mathSinalRow) mathSinalRow.style.display = isCartao ? "none" : "flex";
+  if (cenarioHint) {
+    cenarioHint.textContent = cenario === "diluir"
+      ? "Depois do sinal, o saldo vencido entra em todas as parcelas a vencer, com a taxa do contrato."
+      : (cenario === "somar"
+        ? "Depois do sinal, o saldo vencido vira N parcelas com a taxa do contrato e soma nas próximas parcelas a vencer."
+        : (cenario === "deslocar"
+          ? "O saldo vencido vira um acordo à parte. As parcelas a vencer continuam depois dele."
+          : "O saldo vai para o cartão, na bandeira e no número de parcelas escolhidos."));
+  }
 
-  // Acordo interno usa taxa da regra; cartão usa só a taxa da bandeira × N (tabela de taxas)
-  const interestRate = isCartao ? 0 : ((ruleTaxa) / 100);
+  const contractRate = renegContractMonthlyRate(g_renegSale, g_renegBills);
+  const interestRate = isCartao ? 0 : (usaTaxaContrato ? contractRate : (ruleTaxa / 100));
   let sinalPct = isCartao ? 0 : (Number(document.getElementById("reneg-sinal-pct")?.value) || ruleSinalMin);
   if (isCartao) {
     const sinalInput = document.getElementById("reneg-sinal-pct");
@@ -16909,26 +16964,30 @@ function calculateRenegotiation() {
   // Atualizar dropdown de parcelas restrito ao MaxParcelas da regra
   const selectedCount = selectedBills.length;
   const maxInstallmentsCalc = Math.floor(selectedCount + (selectedCount * (sinalPct / 100)));
-  // Cartão: no máximo 12x (faixas da tabela de taxas)
-  const maxInstallments = Math.min(maxInstallmentsCalc, ruleMaxParcelas, isCartao ? 12 : 9999);
+  // Cartão: no máximo 12x. Somar: no máximo as parcelas a vencer. Diluir: todas elas.
+  let maxInstallments = Math.min(maxInstallmentsCalc, ruleMaxParcelas, isCartao ? 12 : 9999);
+  if (cenario === "somar") maxInstallments = Math.min(ruleMaxParcelas, Math.max(1, futuras.length));
+  if (cenario === "diluir") maxInstallments = Math.max(1, futuras.length);
   
   const qtySelect = document.getElementById("reneg-installments-qty");
   const currentSelectedQty = Number(qtySelect.value) || 1;
-  qtySelect.innerHTML = '';
-  for (let i = 1; i <= Math.max(1, maxInstallments); i++) {
-    const opt = document.createElement('option');
-    opt.value = i;
-    opt.textContent = `${i}\u00D7${i === 1 ? ' (À vista)' : ''}`;
-    if (i === currentSelectedQty || (i === maxInstallments && currentSelectedQty > maxInstallments)) {
-      opt.selected = true;
+  if (cenario !== "diluir") {
+    qtySelect.innerHTML = '';
+    for (let i = 1; i <= Math.max(1, maxInstallments); i++) {
+      const opt = document.createElement('option');
+      opt.value = i;
+      opt.textContent = `${i}\u00D7${i === 1 ? ' (À vista)' : ''}`;
+      if (i === currentSelectedQty || (i === maxInstallments && currentSelectedQty > maxInstallments)) {
+        opt.selected = true;
+      }
+      qtySelect.appendChild(opt);
     }
-    qtySelect.appendChild(opt);
   }
-  const instQty = Number(qtySelect.value) || 1;
+  const instQty = cenario === "diluir" ? futuras.length : (Number(qtySelect.value) || 1);
 
-  // Somatórios SOMENTE das selecionadas
-  const principal = selectedBills.reduce((acc, b) => acc + (b.value || 0), 0);
-  const updatedTotal = selectedBills.reduce((acc, b) => acc + (b.computedCorrected || b.value || 0), 0);
+  const debtBills = usaTaxaContrato ? vencidasBase : selectedBills;
+  const principal = debtBills.reduce((acc, b) => acc + (b.value || 0), 0);
+  const updatedTotal = debtBills.reduce((acc, b) => acc + (b.computedCorrected || b.value || 0), 0);
   const charges = updatedTotal - principal;
   
   // Desconto sobre encargos
@@ -16967,11 +17026,8 @@ function calculateRenegotiation() {
     }
   }
   
-  // Cálculo das parcelas (Price) — sobre base já com taxa de cartão embutida, se houver
-  let installmentValue = amountToFinance / instQty;
-  if (interestRate > 0 && instQty > 1) {
-    installmentValue = amountToFinance * (interestRate * Math.pow(1 + interestRate, instQty)) / (Math.pow(1 + interestRate, instQty) - 1);
-  }
+  // Price: diluir e somar usam a taxa do contrato; deslocar usa a taxa da regra.
+  const installmentValue = instQty > 0 ? renegPricePmt(amountToFinance, interestRate, instQty) : 0;
 
   // Preencher resumo
   if (chargesEl) chargesEl.textContent = fmt(charges);
@@ -16979,7 +17035,9 @@ function calculateRenegotiation() {
   
   const interestLabelEl = document.getElementById("reneg-interest-label");
   if (interestLabelEl) {
-    interestLabelEl.textContent = `(Tabela Price - Juros ${(interestRate * 100).toFixed(1)}% a.m.)`;
+    interestLabelEl.textContent = usaTaxaContrato
+      ? `(Tabela Price - taxa do contrato ${(interestRate * 100).toFixed(2)}% a.m.)`
+      : `(Tabela Price - Juros ${(interestRate * 100).toFixed(1)}% a.m.)`;
   }
   
   const totalRenegHeaderEl = document.getElementById("reneg-total-renegociar");
@@ -17014,14 +17072,22 @@ function calculateRenegotiation() {
     }
     if (mathTaxaSuffixEl) mathTaxaSuffixEl.textContent = "";
   } else {
-    if (mathTaxaLabelEl) mathTaxaLabelEl.textContent = `${(interestRate * 100).toFixed(1)}%`;
-    if (mathTaxaSuffixEl) mathTaxaSuffixEl.textContent = " a.m.";
+    if (mathTaxaLabelEl) mathTaxaLabelEl.textContent = usaTaxaContrato
+      ? `${(interestRate * 100).toFixed(2)}% do contrato`
+      : `${(interestRate * 100).toFixed(1)}%`;
+    if (mathTaxaSuffixEl) mathTaxaSuffixEl.textContent = usaTaxaContrato ? "" : " a.m.";
   }
   
   if (mathCustoOperacaoEl) mathCustoOperacaoEl.textContent = fmt(financingCost);
   if (headerSinalPctEl) headerSinalPctEl.textContent = sinalPct;
   if (headerParcelasEl) {
-    headerParcelasEl.textContent = instQty > 0 ? `${instQty}\u00D7 de ${fmt(installmentValue)} = ${fmt(totalAcordo)}` : 'R$ 0,00';
+    if (cenario === "diluir") {
+      headerParcelasEl.textContent = instQty > 0 ? `${instQty}\u00D7 acréscimo de ${fmt(installmentValue)}` : "Sem parcelas a vencer";
+    } else if (cenario === "somar") {
+      headerParcelasEl.textContent = instQty > 0 ? `${instQty}\u00D7 de ${fmt(installmentValue)} somadas às próximas` : "R$ 0,00";
+    } else {
+      headerParcelasEl.textContent = instQty > 0 ? `${instQty}\u00D7 de ${fmt(installmentValue)} = ${fmt(totalAcordo)}` : 'R$ 0,00';
+    }
   }
 
   // Linha extra de taxa cartão fica oculta: no cartão a taxa já aparece em "Taxa da operação"
@@ -17155,33 +17221,58 @@ function calculateRenegotiation() {
       scheduleBody.appendChild(tr);
     }
     
-    // 2. Parcelas do Acordo (N×)
-    if (instQty > 0 && amountToFinance > 0) {
+    const pushAgenda = (tipo, dateStr, valor, title) => {
+      rowNum++;
+      greenTotalParcelas++;
+      greenTotalPagar += valor;
+      greenLastDate = dateStr;
+      const tr = document.createElement("tr");
+      const badge = tipo === "MANTIDA"
+        ? "background:rgba(107,114,128,0.1);color:#6b7280;"
+        : "background:rgba(239,68,68,0.1);color:var(--color-danger);";
+      tr.innerHTML = `
+        <td style="padding:5px 8px;">${rowNum}</td>
+        <td style="padding:5px 8px;"><span style="${badge}border-radius:4px;padding:1px 6px;font-size:0.7rem;font-weight:700;">${tipo}</span></td>
+        <td style="padding:5px 8px;">${dateStr}</td>
+        <td style="padding:5px 8px; text-align:right; font-weight:600;" ${title ? `title="${title}"` : ""}>${fmt(valor)}</td>
+      `;
+      scheduleBody.appendChild(tr);
+    };
+    const dataParcela = (bill) => bill && bill.dueDate
+      ? new Date(bill.dueDate + "T12:00:00").toLocaleDateString("pt-BR")
+      : "–";
+
+    if (cenario === "diluir" || cenario === "somar") {
+      if (!futuras.length) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td colspan="4" style="text-align:center; color:var(--color-text-muted); padding:16px; font-size:0.78rem;">Não há parcelas a vencer para ${cenario === "diluir" ? "diluir" : "somar"} o saldo.</td>`;
+        scheduleBody.appendChild(tr);
+      } else {
+        const limite = cenario === "diluir" ? futuras.length : Math.min(instQty, futuras.length);
+        futuras.forEach((bill, i) => {
+          const mensal = Number(bill.value) || 0;
+          const soma = i < limite && installmentValue > 0;
+          const valor = soma ? mensal + installmentValue : mensal;
+          if (!soma) greenMantidasCount++;
+          const tipo = cenario === "diluir" ? (soma ? "DILUÍDA" : "MANTIDA") : (soma ? "SOMADA" : "MANTIDA");
+          const title = soma ? `Parcela ${fmt(mensal)} + acordo ${fmt(installmentValue)}` : "";
+          pushAgenda(tipo, dataParcela(bill), valor, title);
+        });
+      }
+    } else if (instQty > 0 && amountToFinance > 0) {
       const scheduleFirstStr = (!isCartao && firstDueDateStr)
         ? firstDueDateStr
         : (typeof window.localDateStr === "function" ? window.localDateStr(new Date()) : new Date().toISOString().slice(0, 10));
-      let firstDate = scheduleFirstStr ? new Date(scheduleFirstStr + 'T12:00:00') : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-        for (let i = 0; i < instQty; i++) {
-          rowNum++;
-          const dueDate = new Date(firstDate);
-          dueDate.setMonth(dueDate.getMonth() + i);
-          const dateStr = dueDate.toLocaleDateString('pt-BR');
-          greenTotalParcelas++;
-          greenTotalPagar += installmentValue;
-          greenLastDate = dateStr;
-          const tr = document.createElement('tr');
-          tr.innerHTML = `
-            <td style="padding:5px 8px;">${rowNum}</td>
-            <td style="padding:5px 8px;"><span style="background:rgba(239,68,68,0.1);color:var(--color-danger);border-radius:4px;padding:1px 6px;font-size:0.7rem;font-weight:700;">${isCartao ? "CARTÃO" : "ACORDO"}</span></td>
-            <td style="padding:5px 8px;">${dateStr}</td>
-            <td style="padding:5px 8px; text-align:right; font-weight:600;">${fmt(installmentValue)}</td>
-          `;
-          scheduleBody.appendChild(tr);
-        }
+      const firstDate = scheduleFirstStr ? new Date(scheduleFirstStr + "T12:00:00") : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      for (let i = 0; i < instQty; i++) {
+        const dueDate = new Date(firstDate);
+        dueDate.setMonth(dueDate.getMonth() + i);
+        pushAgenda(isCartao ? "CARTÃO" : "ACORDO", dueDate.toLocaleDateString("pt-BR"), installmentValue, "");
+      }
     }
-    
-    // 3. Parcelas NÃO selecionadas — só exibir as que vencem APÓS a última parcela do ACORDO
-    if (unselectedBills.length > 0) {
+
+    // Deslocar e cartão: as parcelas a vencer continuam depois da última do acordo.
+    if ((cenario === "deslocar" || isCartao) && unselectedBills.length > 0) {
       // Calcular a data da última parcela do ACORDO
       let lastAcordoDate = null;
       const scheduleFirstStr2 = (!isCartao && firstDueDateStr)
@@ -17245,11 +17336,21 @@ function calculateRenegotiation() {
   if (greenSinalLabelEl) greenSinalLabelEl.textContent = (sinalPct > 0 && sinalValue > 0) ? "1 Sinal" : "0 Sinal";
   if (greenSinalValEl) greenSinalValEl.textContent = (sinalPct > 0 && sinalValue > 0) ? fmt(sinalValue) : "R$ 0,00";
   
-  if (greenAcordoLabelEl) greenAcordoLabelEl.textContent = `${instQty} Parcela${instQty !== 1 ? 's' : ''} de Acordo`;
-  if (greenAcordoValEl) greenAcordoValEl.textContent = instQty > 0 ? fmt(installmentValue) : "R$ 0,00";
+  const acordoQtd = cenario === "diluir" ? futuras.length : (cenario === "somar" ? Math.min(instQty, futuras.length) : instQty);
+  if (greenAcordoLabelEl) {
+    greenAcordoLabelEl.textContent = cenario === "diluir"
+      ? `${acordoQtd} parcela${acordoQtd !== 1 ? "s" : ""} diluída${acordoQtd !== 1 ? "s" : ""}`
+      : (cenario === "somar"
+        ? `${acordoQtd} parcela${acordoQtd !== 1 ? "s" : ""} somada${acordoQtd !== 1 ? "s" : ""}`
+        : `${instQty} Parcela${instQty !== 1 ? "s" : ""} de Acordo`);
+  }
+  if (greenAcordoValEl) greenAcordoValEl.textContent = acordoQtd > 0 ? fmt(installmentValue) : "R$ 0,00";
 
-  if (greenMantidasLabelEl) greenMantidasLabelEl.textContent = `${greenMantidasCount} Parcela${greenMantidasCount !== 1 ? 's' : ''} Mantida${greenMantidasCount !== 1 ? 's' : ''}`;
-  if (greenMantidasValEl) greenMantidasValEl.textContent = greenMantidasCount > 0 ? fmt(unselectedBills[0].value || 0) : "R$ 0,00";
+  const mantidaRef = cenario === "somar"
+    ? (futuras[acordoQtd] || null)
+    : (unselectedBills[0] || null);
+  if (greenMantidasLabelEl) greenMantidasLabelEl.textContent = `${greenMantidasCount} Parcela${greenMantidasCount !== 1 ? "s" : ""} Mantida${greenMantidasCount !== 1 ? "s" : ""}`;
+  if (greenMantidasValEl) greenMantidasValEl.textContent = greenMantidasCount > 0 && mantidaRef ? fmt(mantidaRef.value || 0) : "R$ 0,00";
 
   const greenTotalParcelasEl = document.getElementById("reneg-green-total-parcelas");
   const greenTotalPagarEl = document.getElementById("reneg-green-total-pagar");
@@ -17271,6 +17372,7 @@ function calculateRenegotiation() {
     discountValue,
     firstDueDate: firstDueDateStr,
     paymentMethod,
+    cenario,
     cardBrand: paymentMethod === "cartao" ? cardBrand : null,
     cardFee,
     totalAcordo,
@@ -17281,7 +17383,7 @@ function calculateRenegotiation() {
 
 
 function onRenegPaymentMethodChange() {
-  const method = document.getElementById("reneg-payment-method")?.value || "interno";
+  const method = renegCenarioAtual();
   const isCartao = method === "cartao";
   const brandWrap = document.getElementById("reneg-card-brand-wrap");
   const sinalPctWrap = document.getElementById("reneg-sinal-pct-wrap");
