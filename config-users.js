@@ -45,9 +45,19 @@ window.syncUserModalProfile = function(sel) {
   if (window.ConfigUsersApp && typeof ConfigUsersApp.syncDeptBox === "function") ConfigUsersApp.syncDeptBox();
 };
 
+/** Quem está usando o sistema agora, inclusive no teste de conta. */
+window.crmUsuarioEfetivo = function(user) {
+  if (user) return user;
+  if (typeof window.crmUsuarioAcesso === "function") {
+    const acesso = window.crmUsuarioAcesso();
+    if (acesso) return acesso;
+  }
+  return (typeof AppState !== "undefined" && AppState.currentUser) || (window.AppState && window.AppState.currentUser) || null;
+};
+
 /** Perfis/usuários que só enxergam clientes da própria carteira atribuída. */
 window.userSeesOnlyAssignedClients = function(user) {
-  const u = user || (typeof AppState !== "undefined" && AppState.currentUser) || (window.AppState && window.AppState.currentUser) || null;
+  const u = window.crmUsuarioEfetivo(user);
   if (!u) return false;
   if (window.isOperadorCobrancaTerceirizadoProfile(u.profile_name)) return true;
   return window.isOperadorCobrancaProfile(u.profile_name) && String(u.operator_type || "") === "externo";
@@ -90,7 +100,7 @@ window.clientAssignedToCurrentUser = function(clientOrOp) {
   const assigned = typeof clientOrOp === "string"
     ? clientOrOp
     : (clientOrOp && (clientOrOp.assignedOperator || clientOrOp.operator)) || "";
-  const u = (typeof AppState !== "undefined" && AppState.currentUser) || (window.AppState && window.AppState.currentUser) || null;
+  const u = window.crmUsuarioEfetivo();
   if (!u || !assigned) return false;
   const match = typeof window.occurrenceAuthorMatchesOperator === "function"
     ? window.occurrenceAuthorMatchesOperator

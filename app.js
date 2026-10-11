@@ -399,7 +399,9 @@ window.updateOperatorTabsUI = function(useActualData = true) {
   let opsToShow;
   const fromFila = [...activeFromFila].map(n => displayByNorm.get(n)).filter(Boolean);
   if (typeof window.userSeesOnlyAssignedClients === "function" && window.userSeesOnlyAssignedClients()) {
-    const u = (typeof AppState !== "undefined" && AppState.currentUser) || window.AppState && window.AppState.currentUser;
+    const u = (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo())
+      || (typeof AppState !== "undefined" && AppState.currentUser)
+      || (window.AppState && window.AppState.currentUser);
     const selfNames = [];
     if (u) {
       if (u.sienge_user) selfNames.push(String(u.sienge_user).replace(/\./g, " ").toUpperCase());
@@ -476,11 +478,12 @@ window.updateOperatorTabsUI = function(useActualData = true) {
      } else {
          console.log("updateOperatorTabsUI - isAdmin is FALSE. Hiding agenda tabs. User:", window.AppState ? window.AppState.currentUser : null);
          agendaTabs.style.cssText = "display: none !important;";
-         const _cu = window.AppState && window.AppState.currentUser;
-         if (_cu) {
-             const opName = _cu.sienge_user
-                 ? _cu.sienge_user.toUpperCase().replace(/\./g, ' ').trim()
-                 : (_cu.name ? _cu.name.toUpperCase() : '');
+         const _acesso = (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo())
+           || (window.AppState && window.AppState.currentUser);
+         if (_acesso) {
+             const opName = _acesso.sienge_user
+                 ? _acesso.sienge_user.toUpperCase().replace(/\./g, ' ').trim()
+                 : (_acesso.name ? _acesso.name.toUpperCase() : '');
              if (opName) window.AgendaSelectedOperator = opName;
          }
      }
@@ -5411,8 +5414,9 @@ window.applyPermissions = function(profileName) {
   }
 
   // --- SOBREPOSIÇÃ•ES POR TIPO DE OPERADOR (Advogado, Externo, etc) ---
-  const opType = AppState.currentUser
-    ? ((typeof window.crmOperatorType === "function" && window.crmOperatorType(AppState.currentUser)) || AppState.currentUser.operator_type || "")
+  const acesso = (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo()) || AppState.currentUser;
+  const opType = acesso
+    ? ((typeof window.crmOperatorType === "function" && window.crmOperatorType(acesso)) || acesso.operator_type || "")
     : "";
   
   // 1. Externo (Terceirizado) não vê menu Sub Judice
@@ -5423,9 +5427,9 @@ window.applyPermissions = function(profileName) {
   
   // 2. O subtipo antigo Advogado (Jurídico) do Operador Cobrança via só o Sub Judice.
   // O perfil ADVOGADO COBRANÇA usa os módulos marcados nele.
-  const perfilAdvogadoCobranca = AppState.currentUser
+  const perfilAdvogadoCobranca = acesso
     && typeof window.isAdvogadoCobrancaProfile === "function"
-    && window.isAdvogadoCobrancaProfile(AppState.currentUser.profile_name);
+    && window.isAdvogadoCobrancaProfile(acesso.profile_name);
   if (opType === 'advogado' && !perfilAdvogadoCobranca) {
     const allModules = document.querySelectorAll('li[data-module]');
     allModules.forEach(item => {
@@ -5580,6 +5584,16 @@ window.crmAbrirTesteConta = function(email) {
     try { window.updateOperatorTabsUI(); } catch (err) {}
   }
   window.crmPintarTesteConta();
+  window.crmAtualizarTelasDoAcesso();
+};
+
+window.crmAtualizarTelasDoAcesso = function() {
+  if (typeof loadDashboardData === "function" && window.AppState && AppState.defaultersLoaded && !window._isDefaultersLoading) {
+    try { loadDashboardData(false); } catch (e) {}
+  }
+  if (window.DashboardInadimplencia && typeof window.DashboardInadimplencia.render === "function" && document.getElementById("inadimplencia-dashboard-root")) {
+    try { window.DashboardInadimplencia.render(); } catch (e) {}
+  }
 };
 
 window.crmEncerrarTesteConta = function() {
@@ -5590,6 +5604,7 @@ window.crmEncerrarTesteConta = function() {
     try { window.updateOperatorTabsUI(); } catch (err) {}
   }
   window.crmPintarTesteConta();
+  if (typeof window.crmAtualizarTelasDoAcesso === "function") window.crmAtualizarTelasDoAcesso();
 };
 
 window.crmPintarTesteConta = function() {
@@ -9659,6 +9674,9 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
 
   // Filtro de Busca para a lista de Sub Judice
   let filteredSubjudice = subjudiceList;
+  if (typeof window.userSeesOnlyAssignedClients === "function" && window.userSeesOnlyAssignedClients()) {
+    filteredSubjudice = filteredSubjudice.filter(c => window.clientAssignedToCurrentUser(c) && window.clientInCurrentUserCities(c));
+  }
   if (subjudiceSearchValue) {
     filteredSubjudice = await window.filterClientsWithSecondaryBuyers(subjudiceList, subjudiceSearchValue);
   } else {
@@ -11274,11 +11292,12 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   // Conditionally hide tabs if coming from Sub Judice or based on Role
   const currentOriginTab = window.activeAppTab || sessionStorage.getItem('currentTab');
   const isSubjudice = currentOriginTab === 'subjudice';
-  
-  const opType = AppState.currentUser
-    ? ((typeof window.crmOperatorType === "function" && window.crmOperatorType(AppState.currentUser)) || AppState.currentUser.operator_type || "")
+  const acessoFicha = (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo()) || AppState.currentUser;
+  const opType = acessoFicha
+    ? ((typeof window.crmOperatorType === "function" && window.crmOperatorType(acessoFicha)) || acessoFicha.operator_type || "")
     : "";
-  const isAdvogado = (opType === 'advogado');
+  const isAdvogado = (opType === "advogado")
+    || (typeof window.isAdvogadoCobrancaUser === "function" && window.isAdvogadoCobrancaUser(acessoFicha));
   const isInternoOuApoio = (opType === 'interno' || opType === 'apoio_juridico');
 
   // --- Abas Superiores ---
@@ -11317,18 +11336,15 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
       'tab-comportamento', 'tab-repactuacoes', 'tab-construcao', 'tab-notificacoes'
   ];
   
-  // Abas permitidas para o advogado: Contrato de Venda | Valor quitação | Simulação vencidas | Construção
-  const allowedAdvogadoTabs = ['tab-contrato', 'tab-quitacao', 'tab-simulacao', 'tab-construcao'];
-  
+  const hideAdvogadoTabs = ['tab-repactuacoes', 'tab-notificacoes'];
   bottomTabsIds.forEach(tabId => {
       const btn = document.querySelector(`button[data-target="${tabId}"]`);
       if (!btn) return;
-      if (isAdvogado) {
-          btn.style.display = allowedAdvogadoTabs.includes(tabId) ? 'inline-block' : 'none';
+      if (isAdvogado && hideAdvogadoTabs.includes(tabId)) {
+          btn.style.display = 'none';
       } else if (isInternoOuApoio) {
           btn.style.display = 'inline-block';
       } else {
-          // Logica padrao antiga de Sub Judice
           const hideInSub = ['tab-ocorrencias', 'tab-boletos', 'tab-vizinhos', 'tab-outros', 'tab-comportamento'];
           btn.style.display = (isSubjudice && hideInSub.includes(tabId)) ? 'none' : 'inline-block';
       }
@@ -11346,14 +11362,14 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   if (extratoBtn) {
     extratoBtn.style.display = 'flex'; // Todos podem ver (Advogado incluído pelo requisito)
   }
-  ['btn-renegotiate-page', 'btn-distrato-page'].forEach((id) => {
+  ['btn-renegotiate-page', 'btn-distrato-page', 'btn-toggle-whatsapp-alert', 'btn-solicitar-wpp-client', 'btn-nova-vistoria-client'].forEach((id) => {
     const btn = document.getElementById(id);
     if (btn) btn.style.display = isAdvogado ? 'none' : '';
   });
-  if (isAdvogado) {
-    const waBtn = document.getElementById('btn-toggle-whatsapp-alert');
-    if (waBtn) waBtn.style.display = 'none';
-  }
+  document.querySelectorAll('#tab-quitacao .quitacao-kpi').forEach((el) => {
+    const keep = el.classList.contains('quitacao-kpi--vp');
+    el.style.display = isAdvogado && !keep ? 'none' : '';
+  });
   
   // Abas judiciais: menu Sub Judice, advogado, ou contrato/cliente já sub judice (ex.: fila de cobrança)
   syncCobrancaJudicialTabs(isSubjudice, isAdvogado);
@@ -17114,6 +17130,8 @@ function calculateRenegotiation() {
   const usaTaxaContrato = cenario === "diluir" || cenario === "somar";
   const futuras = renegFuturasOrdenadas(g_renegBills);
   const vencidasBase = (g_renegBills || []).filter((b) => b && b.isOverdue);
+  const billKey = (b) => String((b && (b.installmentId || b.installmentNum)) || "");
+  const futurasDestino = futuras.filter((b) => !selectedIds.includes(billKey(b)));
 
   // Cartão: sem sinal / datas de sinal e 1º vencimento
   const sinalPctWrap = document.getElementById("reneg-sinal-pct-wrap");
@@ -17133,7 +17151,7 @@ function calculateRenegotiation() {
   if (mathSinalRow) mathSinalRow.style.display = isCartao ? "none" : "flex";
   if (cenarioHint) {
     cenarioHint.textContent = cenario === "diluir"
-      ? "Depois do sinal, o saldo vencido entra em todas as parcelas a vencer, com a taxa do contrato."
+      ? "Depois do sinal, as parcelas selecionadas — vencidas ou não — se diluem nas demais não vencidas, com a taxa do contrato."
       : (cenario === "somar"
         ? "Depois do sinal, o saldo vencido vira N parcelas com a taxa do contrato e soma nas próximas parcelas a vencer."
         : (cenario === "deslocar"
@@ -17157,7 +17175,7 @@ function calculateRenegotiation() {
   // Cartão: no máximo 12x. Somar: no máximo as parcelas a vencer. Diluir: todas elas.
   let maxInstallments = Math.min(maxInstallmentsCalc, ruleMaxParcelas, isCartao ? 12 : 9999);
   if (cenario === "somar") maxInstallments = Math.min(ruleMaxParcelas, Math.max(1, futuras.length));
-  if (cenario === "diluir") maxInstallments = Math.max(1, futuras.length);
+  if (cenario === "diluir") maxInstallments = Math.max(1, futurasDestino.length);
   
   const qtySelect = document.getElementById("reneg-installments-qty");
   const currentSelectedQty = Number(qtySelect.value) || 1;
@@ -17173,9 +17191,9 @@ function calculateRenegotiation() {
       qtySelect.appendChild(opt);
     }
   }
-  const instQty = cenario === "diluir" ? futuras.length : (Number(qtySelect.value) || 1);
+  const instQty = cenario === "diluir" ? futurasDestino.length : (Number(qtySelect.value) || 1);
 
-  const debtBills = usaTaxaContrato ? vencidasBase : selectedBills;
+  const debtBills = cenario === "diluir" ? selectedBills : (cenario === "somar" ? vencidasBase : selectedBills);
   const principal = debtBills.reduce((acc, b) => acc + (b.value || 0), 0);
   const updatedTotal = debtBills.reduce((acc, b) => acc + (b.computedCorrected || b.value || 0), 0);
   const charges = updatedTotal - principal;
@@ -17272,7 +17290,7 @@ function calculateRenegotiation() {
   if (headerSinalPctEl) headerSinalPctEl.textContent = sinalPct;
   if (headerParcelasEl) {
     if (cenario === "diluir") {
-      headerParcelasEl.textContent = instQty > 0 ? `${instQty}\u00D7 acréscimo de ${fmt(installmentValue)}` : "Sem parcelas a vencer";
+      headerParcelasEl.textContent = instQty > 0 ? `${instQty}\u00D7 acréscimo de ${fmt(installmentValue)}` : "Sem outras parcelas não vencidas";
     } else if (cenario === "somar") {
       headerParcelasEl.textContent = instQty > 0 ? `${instQty}\u00D7 de ${fmt(installmentValue)} somadas às próximas` : "R$ 0,00";
     } else {
@@ -17389,6 +17407,17 @@ function calculateRenegotiation() {
   let greenMantidasCount = 0;
 
   // --- GERAR CRONOGRAMA ---
+  const diluirCols = cenario === "diluir";
+  const scheduleHead = document.getElementById("reneg-schedule-head");
+  if (scheduleHead) {
+    const th = "padding:6px; color:#1b5e20;";
+    const thr = th + " text-align:right;";
+    scheduleHead.innerHTML = diluirCols
+      ? `<th style="${th}">#</th><th style="${th}">Tipo</th><th style="${th}">Vencimento</th><th style="${thr}">Original</th><th style="${thr}">Acréscimo</th><th style="${thr}">Total</th>`
+      : `<th style="${th}">#</th><th style="${th}">Tipo</th><th style="${th}">Vencimento</th><th style="${thr}">Valor</th>`;
+  }
+  const colSpan = diluirCols ? 6 : 4;
+
   if (scheduleBody) {
     scheduleBody.innerHTML = '';
     let rowNum = 0;
@@ -17402,7 +17431,16 @@ function calculateRenegotiation() {
       greenLastDate = sinalDateDisplay;
       const tr = document.createElement('tr');
       tr.style.background = 'rgba(37,99,235,0.06)';
-      tr.innerHTML = `
+      tr.innerHTML = diluirCols
+        ? `
+        <td style="padding:5px 8px; font-weight:700;">${rowNum}</td>
+        <td style="padding:5px 8px;"><span style="background:var(--color-primary);color:#fff;border-radius:4px;padding:1px 6px;font-size:0.7rem;font-weight:700;">SINAL</span></td>
+        <td style="padding:5px 8px;">${sinalDateDisplay}</td>
+        <td style="padding:5px 8px; text-align:right; color:var(--color-text-muted);">—</td>
+        <td style="padding:5px 8px; text-align:right; color:var(--color-text-muted);">—</td>
+        <td style="padding:5px 8px; text-align:right; font-weight:700; color:var(--color-primary);">${fmt(sinalValue)}</td>
+      `
+        : `
         <td style="padding:5px 8px; font-weight:700;">${rowNum}</td>
         <td style="padding:5px 8px;"><span style="background:var(--color-primary);color:#fff;border-radius:4px;padding:1px 6px;font-size:0.7rem;font-weight:700;">SINAL</span></td>
         <td style="padding:5px 8px;">${sinalDateDisplay}</td>
@@ -17432,21 +17470,46 @@ function calculateRenegotiation() {
       ? new Date(bill.dueDate + "T12:00:00").toLocaleDateString("pt-BR")
       : "–";
 
-    if (cenario === "diluir" || cenario === "somar") {
-      if (!futuras.length) {
+    if (cenario === "diluir") {
+      if (!futurasDestino.length) {
         const tr = document.createElement("tr");
-        tr.innerHTML = `<td colspan="4" style="text-align:center; color:var(--color-text-muted); padding:16px; font-size:0.78rem;">Não há parcelas a vencer para ${cenario === "diluir" ? "diluir" : "somar"} o saldo.</td>`;
+        tr.innerHTML = `<td colspan="${colSpan}" style="text-align:center; color:var(--color-text-muted); padding:16px; font-size:0.78rem;">Não há outras parcelas não vencidas para diluir o saldo.</td>`;
         scheduleBody.appendChild(tr);
       } else {
-        const limite = cenario === "diluir" ? futuras.length : Math.min(instQty, futuras.length);
+        futurasDestino.forEach((bill) => {
+          const original = Number(bill.value) || 0;
+          const acrescimo = installmentValue > 0 ? installmentValue : 0;
+          const total = original + acrescimo;
+          rowNum++;
+          greenTotalParcelas++;
+          greenTotalPagar += total;
+          greenLastDate = dataParcela(bill);
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td style="padding:5px 8px;">${rowNum}</td>
+            <td style="padding:5px 8px;"><span style="background:rgba(239,68,68,0.1);color:var(--color-danger);border-radius:4px;padding:1px 6px;font-size:0.7rem;font-weight:700;">DILUÍDA</span></td>
+            <td style="padding:5px 8px;">${dataParcela(bill)}</td>
+            <td style="padding:5px 8px; text-align:right;">${fmt(original)}</td>
+            <td style="padding:5px 8px; text-align:right; color:var(--color-danger); font-weight:600;">${fmt(acrescimo)}</td>
+            <td style="padding:5px 8px; text-align:right; font-weight:700;">${fmt(total)}</td>
+          `;
+          scheduleBody.appendChild(tr);
+        });
+      }
+    } else if (cenario === "somar") {
+      if (!futuras.length) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td colspan="${colSpan}" style="text-align:center; color:var(--color-text-muted); padding:16px; font-size:0.78rem;">Não há parcelas a vencer para somar o saldo.</td>`;
+        scheduleBody.appendChild(tr);
+      } else {
+        const limite = Math.min(instQty, futuras.length);
         futuras.forEach((bill, i) => {
           const mensal = Number(bill.value) || 0;
           const soma = i < limite && installmentValue > 0;
           const valor = soma ? mensal + installmentValue : mensal;
           if (!soma) greenMantidasCount++;
-          const tipo = cenario === "diluir" ? (soma ? "DILUÍDA" : "MANTIDA") : (soma ? "SOMADA" : "MANTIDA");
           const title = soma ? `Parcela ${fmt(mensal)} + acordo ${fmt(installmentValue)}` : "";
-          pushAgenda(tipo, dataParcela(bill), valor, title);
+          pushAgenda(soma ? "SOMADA" : "MANTIDA", dataParcela(bill), valor, title);
         });
       }
     } else if (instQty > 0 && amountToFinance > 0) {
@@ -17526,7 +17589,7 @@ function calculateRenegotiation() {
   if (greenSinalLabelEl) greenSinalLabelEl.textContent = (sinalPct > 0 && sinalValue > 0) ? "1 Sinal" : "0 Sinal";
   if (greenSinalValEl) greenSinalValEl.textContent = (sinalPct > 0 && sinalValue > 0) ? fmt(sinalValue) : "R$ 0,00";
   
-  const acordoQtd = cenario === "diluir" ? futuras.length : (cenario === "somar" ? Math.min(instQty, futuras.length) : instQty);
+  const acordoQtd = cenario === "diluir" ? futurasDestino.length : (cenario === "somar" ? Math.min(instQty, futuras.length) : instQty);
   if (greenAcordoLabelEl) {
     greenAcordoLabelEl.textContent = cenario === "diluir"
       ? `${acordoQtd} parcela${acordoQtd !== 1 ? "s" : ""} diluída${acordoQtd !== 1 ? "s" : ""}`
@@ -44101,12 +44164,14 @@ async function saveWhatsappAlerts() {
 }
 
 window.userCanToggleWhatsappAlert = function(user) {
-    let logged = user || (window.AppState && AppState.currentUser) || null;
+    let logged = user || (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo()) || (window.AppState && AppState.currentUser) || null;
     if (!logged) {
       try { logged = JSON.parse(localStorage.getItem("crm_logged_user") || "null"); } catch (e) { logged = null; }
     }
     if (!logged) return false;
-    const rec = typeof window.findCrmRegisteredUser === "function" ? window.findCrmRegisteredUser(logged) : null;
+    if (typeof window.isAdvogadoCobrancaUser === "function" && window.isAdvogadoCobrancaUser(logged)) return false;
+    if (typeof window.crmOperatorType === "function" && window.crmOperatorType(logged) === "advogado") return false;
+    const rec = (typeof window.crmImpersonacaoAtual === "function" && window.crmImpersonacaoAtual()) ? logged : (typeof window.findCrmRegisteredUser === "function" ? window.findCrmRegisteredUser(logged) : null);
     const profile = (rec && rec.profile_name) || logged.profile_name || logged.profile || "";
     if (typeof window.crmOperatorType === "function" && window.crmOperatorType(rec || logged) === "advogado") return false;
     if (typeof window.crmProfileKind === "function" && window.crmProfileKind(profile) === "back_office") return true;

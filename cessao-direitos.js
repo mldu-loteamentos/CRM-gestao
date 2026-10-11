@@ -1971,6 +1971,7 @@ const CessaoPopup = {
 
   parcelaDaTaxaPaga(p) {
     if (!p) return false;
+    if (Number(p.installmentSituation) === 2 || p.isValidReceipt === true) return true;
     const sit = [p.installmentSituation, p.situation, p.installmentStatus, p.status, p.situationDescription, p.installmentSituationDescription]
       .filter((v) => v != null && v !== "")
       .map((v) => String(v).trim().toUpperCase());
@@ -1980,6 +1981,11 @@ const CessaoPopup = {
     const recebido = recs.reduce((s, rec) => s + (Number(rec.receiptValue || rec.value || 0) || 0), 0);
     const cb = Number(p.currentBalance != null ? p.currentBalance : p.balanceDue);
     return Number.isFinite(cb) && cb <= 0.009 && recebido > 0.009;
+  },
+
+  tituloDaTaxaPago(bill, inst) {
+    if (bill && (bill.payOffDate || bill.payoffDate || bill.paymentDate)) return true;
+    return inst.length > 0 && inst.every((p) => this.parcelaDaTaxaPaga(p));
   },
 
   async buscarTaxa() {
@@ -2011,28 +2017,24 @@ const CessaoPopup = {
       } catch (e) {
         inst = [];
       }
-      if (!inst.length) {
+      const bruto = bill.documentId || bill.documentIdentificationId || bill.documentsId || bill.documentIdentification || "";
+      const doc = String((bruto && (bruto.id || bruto.code)) || bruto).trim().toUpperCase();
+      const clienteId = String(bill.customerId || (bill.customer && bill.customer.id) || "");
+      const pago = this.tituloDaTaxaPago(bill, inst);
+      if (!pago) {
         CessaoPopupState.taxaStatus = "aberta";
-        CessaoPopupState.taxaMsg = "Encontrei o título " + id + ", mas não consegui ler as parcelas para confirmar o pagamento.";
-      } else if (!inst.every((p) => this.parcelaDaTaxaPaga(p))) {
-        CessaoPopupState.taxaStatus = "aberta";
-        CessaoPopupState.taxaMsg = "Título " + id + " ainda tem saldo em aberto. A cessão só gera com a taxa paga.";
+        CessaoPopupState.taxaMsg = inst.length
+          ? "Título " + id + " ainda tem saldo em aberto. A cessão só gera com a taxa paga."
+          : "Encontrei o título " + id + ", mas não consegui confirmar o pagamento.";
+      } else if (doc !== "TC") {
+        CessaoPopupState.taxaStatus = "nao";
+        CessaoPopupState.taxaMsg = "Título " + id + " está pago, mas o documento é " + (doc || "outro") + ", não TC.";
+      } else if (!this.idsDoProcesso().has(clienteId)) {
+        CessaoPopupState.taxaStatus = "nao";
+        CessaoPopupState.taxaMsg = "A taxa não é compatível com as pessoas da cessão.";
       } else {
-        const bruto = bill.documentId || bill.documentIdentificationId || bill.documentsId || bill.documentIdentification || "";
-        const doc = String((bruto && (bruto.id || bruto.code)) || bruto).trim().toUpperCase();
-        const clienteId = String(bill.customerId || (bill.customer && bill.customer.id) || "");
-        const clienteNome = String(bill.customerName || (bill.customer && bill.customer.name) || "").trim();
-        const quem = clienteNome || (clienteId ? "ID " + clienteId : "não identificado");
-        if (doc !== "TC") {
-          CessaoPopupState.taxaStatus = "nao";
-          CessaoPopupState.taxaMsg = "Título " + id + " está pago, mas o documento é " + (doc || "outro") + ", não TC.";
-        } else if (!this.idsDoProcesso().has(clienteId)) {
-          CessaoPopupState.taxaStatus = "nao";
-          CessaoPopupState.taxaMsg = "Título " + id + " está pago, mas o cliente " + quem + " não é cedente nem cessionário deste processo.";
-        } else {
-          CessaoPopupState.taxaStatus = "paga";
-          CessaoPopupState.taxaMsg = "Título " + id + " é TC, está pago e o cliente confere. Pode gerar a cessão.";
-        }
+        CessaoPopupState.taxaStatus = "paga";
+        CessaoPopupState.taxaMsg = "Título " + id + " é TC, está pago e o cliente confere. Pode gerar a cessão.";
       }
     } catch (e) {
       CessaoPopupState.taxaStatus = "nao";

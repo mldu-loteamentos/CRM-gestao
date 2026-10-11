@@ -31,6 +31,32 @@ const DashboardInadimplencia = (function() {
     qAging: ""
   };
 
+  function usuarioTerceirizado() {
+    if (typeof window.userSeesOnlyAssignedClients !== "function" || !window.userSeesOnlyAssignedClients()) return null;
+    const u = typeof window.crmUsuarioEfetivo === "function" ? window.crmUsuarioEfetivo() : null;
+    return u || null;
+  }
+
+  function chaveOperadora(u) {
+    if (!u) return "";
+    if (u.sienge_user) return String(u.sienge_user).toUpperCase().replace(/\./g, " ").trim();
+    return String(u.name || "").toUpperCase().trim();
+  }
+
+  function nomeOperadora(u) {
+    const nome = String((u && u.name) || "").trim();
+    return nome || chaveOperadora(u);
+  }
+
+  function travarOperadora() {
+    const u = usuarioTerceirizado();
+    const chave = chaveOperadora(u);
+    if (!chave) return "";
+    filterDraft.operators = [chave];
+    filterApplied.operators = [chave];
+    return nomeOperadora(u);
+  }
+
   async function carregarDados() {
     try {
       if (window.firebaseCollections && window.firebaseDb) {
@@ -1203,7 +1229,7 @@ const DashboardInadimplencia = (function() {
     bindOne("dash-inad-emp", "companies", "openEmp", "qEmp", options.companies);
     bindOne("dash-inad-cc", "centers", "openCc", "qCc", options.centers);
     bindOne("dash-inad-cid", "cities", "openCid", "qCid", options.cities);
-    bindOne("dash-inad-op", "operators", "openOp", "qOp", options.operators);
+    if (!usuarioTerceirizado()) bindOne("dash-inad-op", "operators", "openOp", "qOp", options.operators);
     bindOne("dash-inad-aging", "aging", "openAging", "qAging", agingFilterItems());
   }
 
@@ -1224,7 +1250,15 @@ const DashboardInadimplencia = (function() {
     })}</div>`;
   }
 
+  function campoOperadoraHtml(nome) {
+    return `<div class="dash-inad-filter-slot">
+      <div class="ml-emp-filter-label">OPERADORA</div>
+      <div style="height:38px;display:flex;align-items:center;padding:0 12px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;font-weight:700;color:#0f172a;">${escHtml(nome)}</div>
+    </div>`;
+  }
+
   function renderFilterBar(options) {
+    const nomeOp = travarOperadora();
     bindFilters(options);
     return `
       <div class="dash-inad-filters" style="background:white;border-radius:8px;border:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,0.05);padding:18px 20px;margin-bottom:22px;">
@@ -1245,7 +1279,9 @@ const DashboardInadimplencia = (function() {
           ${filterDropHtml("dash-inad-emp", "EMPRESAS", options.companies, filterDraft.companies, filterUi.openEmp, filterUi.qEmp)}
           ${filterDropHtml("dash-inad-cc", "EMPREENDIMENTOS", options.centers, filterDraft.centers, filterUi.openCc, filterUi.qCc)}
           ${filterDropHtml("dash-inad-cid", "CIDADES", options.cities, filterDraft.cities, filterUi.openCid, filterUi.qCid)}
-          ${filterDropHtml("dash-inad-op", "OPERADORES", options.operators, filterDraft.operators, filterUi.openOp, filterUi.qOp)}
+          ${nomeOp
+            ? campoOperadoraHtml(nomeOp)
+            : filterDropHtml("dash-inad-op", "OPERADORES", options.operators, filterDraft.operators, filterUi.openOp, filterUi.qOp)}
           ${filterDropHtml("dash-inad-aging", "AGING", agingFilterItems(), filterDraft.aging, filterUi.openAging, filterUi.qAging, { nouns: { singular: "faixa", plural: "faixas" } })}
         </div>
       </div>
@@ -1708,10 +1744,12 @@ const DashboardInadimplencia = (function() {
         return;
       }
 
+      travarOperadora();
       const optionsAll = buildFilterOptions();
       let options = cascadeFilterOptions(optionsAll);
       pruneDraftToVisible(options);
       options = cascadeFilterOptions(optionsAll);
+      travarOperadora();
 
       const metrics = getCurrentMetrics();
       const fechSnap = getSnapshotFechamentoMes() || getSnapshotAnterior();
@@ -1721,11 +1759,11 @@ const DashboardInadimplencia = (function() {
         <div style="width: 100%; padding: 16px 24px 32px; box-sizing: border-box;">
           ${renderFilterBar(options)}
 
-          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 20px;">
+          ${usuarioTerceirizado() ? "" : `<div style="display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 20px;">
             <button class="btn btn-primary" onclick="window.DashboardInadimplencia.gerarRelatorioDiarioPdf()">
               <i data-lucide="file-text" style="width: 16px;"></i> Gerar Sprint Diário (PDF)
             </button>
-          </div>
+          </div>`}
 
           ${renderCards(metrics, fechMetrics)}
 

@@ -2270,7 +2270,9 @@ const MarketingBudgetApp = {
         #marketing-budget-root .mkb-card-h small, #marketing-budget-root .mkb-muted { color:#64748b; font-size:0.75rem; font-weight:400; }
         #marketing-budget-root .mkb-filtros { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; }
         #marketing-budget-root .mkb-filtros label { display:block; font-size:0.72rem; font-weight:700; color:#475569; text-transform:uppercase; margin-bottom:4px; }
-        #marketing-budget-root .mkb-filtros input, #marketing-budget-root .mkb-filtros select { height:38px; padding:0 10px; border:1px solid #cbd5e1; border-radius:8px; font:inherit; font-size:0.85rem; box-sizing:border-box; background:#fff; }
+        #marketing-budget-root .mkb-filtros input:not([type="checkbox"]):not([type="radio"]), #marketing-budget-root .mkb-filtros select { height:38px; padding:0 10px; border:1px solid #cbd5e1; border-radius:8px; font:inherit; font-size:0.85rem; box-sizing:border-box; background:#fff; }
+        #marketing-budget-root .mkb-filtros .ml-emp-filter-item { display:flex; align-items:center; gap:10px; }
+        #marketing-budget-root .mkb-filtros .ml-emp-filter-item input { width:16px; height:16px; min-height:16px; margin:0; padding:0; flex:0 0 16px; accent-color:#105436; }
         #marketing-budget-root .mkb-filtros .mkb-f-cc { flex:1 1 420px; min-width:min(100%, 320px); }
         #marketing-budget-root .mkb-f-cc .ml-emp-filter { width:100%; max-width:none; min-width:0; flex:1 1 auto; }
         #marketing-budget-root .mkb-config { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:16px; }

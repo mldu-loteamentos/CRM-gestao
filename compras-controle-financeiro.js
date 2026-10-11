@@ -1325,7 +1325,12 @@ ComprasControleApp.pintarTitulo = function () {
   }).join("")}</div>`;
   const anterior = etapas[indice - 1];
   const seguinte = etapas[indice + 1];
-  const nav = etapas.length > 1 ? `<div class="cfin-etapas-nav"><span>Etapa ${indice + 1} de ${etapas.length}</span><button type="button" class="btn btn-outline" ${anterior ? "" : "disabled"} onclick="ComprasControleApp.irEtapa('${anterior ? anterior.id : ""}')">Voltar</button><button type="button" class="btn btn-primary" ${seguinte ? "" : "disabled"} onclick="ComprasControleApp.irEtapa('${seguinte ? seguinte.id : ""}')">Próxima etapa</button></div>` : "";
+  const chaveFiscal = this.chaveEnvioFiscal(row);
+  const pedidoFiscal = chaveFiscal.indexOf("ppc:") === 0 ? chaveFiscal.slice(4) : "";
+  const enviarFiscal = this.statusDe(row) === "previsao" && pedidoFiscal
+    ? `<button type="button" class="cfin-enviar-fiscal" onclick="event.stopPropagation(); if(window.FilaNotasFiscais) FilaNotasFiscais.abrirEnvio('${this.esc(pedidoFiscal)}','')">Enviar para fiscal</button>`
+    : "";
+  const nav = etapas.length > 1 ? `<div class="cfin-etapas-nav"><span>Etapa ${indice + 1} de ${etapas.length}</span>${enviarFiscal}<button type="button" class="btn btn-outline" ${anterior ? "" : "disabled"} onclick="ComprasControleApp.irEtapa('${anterior ? anterior.id : ""}')">Voltar</button><button type="button" class="btn btn-primary" ${seguinte ? "" : "disabled"} onclick="ComprasControleApp.irEtapa('${seguinte ? seguinte.id : ""}')">Próxima etapa</button></div>` : "";
 
   el.innerHTML = `
     <div class="cfin-titulo-back" onclick="if(event.target===this)ComprasControleApp.fecharTitulo()">
@@ -1353,6 +1358,7 @@ ComprasControleApp.pintarTitulo = function () {
       #cfin-titulo .cfin-etapas .ml-tab.is-active .ml-tab-count { background:#fee2e2; color:#b91c1c; }
       #cfin-titulo .cfin-etapas-nav { display:flex; justify-content:flex-end; align-items:center; gap:8px; flex:none; margin-top:0; padding-top:14px; border-top:1px solid #e2e8f0; }
       #cfin-titulo .cfin-etapas-nav span { margin-right:auto; color:#64748b; font-size:0.8rem; font-weight:700; }
+      #cfin-titulo .cfin-enviar-fiscal { height:36px; padding:0 14px; border-radius:8px; border:1px solid #eab308; background:#fef08a; color:#713f12; font-weight:800; cursor:pointer; }
       @media (max-width: 900px) {
         #cfin-titulo .cfin-titulo-card.is-largo .cfin-titulo-grid,
         #cfin-titulo .cfin-dados-topo { grid-template-columns:1fr 1fr; }

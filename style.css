@@ -3670,13 +3670,22 @@ circle.donut-segment {
 .fc-consult-btn.is-dirty { box-shadow: 0 0 0 2px #f59e0b; }
 .rcx-page { padding: 4px 2px 24px; }
 .rcx-tabs { margin-bottom: 14px; }
-.rcx-tools { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 8px; }
-.rcx-tools label { font-size: 0.72rem; font-weight: 700; color: #475569; }
-.rcx-tools select, .rcx-up input { display: block; height: 36px; margin-top: 4px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
-.rcx-tools select { padding: 0 8px; }
-.rcx-arqs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.rcx-tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-bottom: 10px; }
+.rcx-field { display: flex; flex-direction: column; gap: 4px; font-size: 0.72rem; font-weight: 700; color: #475569; }
+.rcx-field select { height: 38px; min-width: 92px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; padding: 0 10px; font-weight: 650; color: #0f172a; }
+.rcx-file { height: 38px; display: inline-flex; align-items: center; gap: 6px; padding: 0 14px; border-radius: 8px; border: 1px solid #105436; background: #fff; color: #105436; font-weight: 700; font-size: 0.82rem; cursor: pointer; }
+.rcx-file input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+.rcx-file i { width: 16px; height: 16px; }
+.rcx-escala { display: inline-flex; height: 38px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; background: #fff; }
+.rcx-escala button { border: 0; background: transparent; padding: 0 12px; font-weight: 700; font-size: 0.78rem; color: #64748b; cursor: pointer; }
+.rcx-escala button.is-on { background: #105436; color: #fff; }
+.rcx-arqs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 38px; }
 .rcx-arq { font-size: 0.75rem; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 999px; padding: 4px 10px; }
 .rcx-arq button { border: 0; background: transparent; color: #b91c1c; font-weight: 700; cursor: pointer; }
+.rcx-outros { cursor: pointer; }
+.rcx-outros td { background: #f8fafc; font-weight: 700; }
+.rcx-filho td.rcx-nome { padding-left: 26px; font-weight: 500; }
+.rcx-nome i { width: 14px; height: 14px; vertical-align: -2px; margin-right: 4px; }
 .rcx-nota { margin: 0 0 10px; font-size: 0.78rem; color: #64748b; }
 .rcx-muted { color: #94a3b8; font-size: 0.8rem; }
 .rcx-vazio { padding: 18px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; color: #64748b; }
@@ -5996,8 +6005,8 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .cessao-ces-fechamento { margin-top: 6px; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
 .cessao-ces-fechamento-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 12px 14px 14px; }
 .cessao-cond-box {
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
   border-radius: 8px;
   overflow: hidden;
 }
@@ -6011,9 +6020,9 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
   gap: 8px 10px;
   margin: 12px 0 0;
   padding: 12px;
-  background: #f0fdf4;
+  background: #fff7ed;
   border: 0;
-  border-top: 1px solid #bbf7d0;
+  border-top: 1px solid #fed7aa;
   border-radius: 0;
 }
 .cessao-contrato-dados > label,
@@ -6068,6 +6077,9 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
   padding: 10px 14px;
   font-size: 0.82rem;
 }
+.cessao-cond-box .cessao-cond-head {
+  background: #f37021;
+}
 .cessao-cond-table {
   width: 100%;
   border-collapse: collapse;
@@ -6081,8 +6093,8 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 }
 .cessao-cond-table td {
   padding: 3px 6px;
-  border-bottom: 1px solid #dcfce7;
-  background: #f0fdf4;
+  border-bottom: 1px solid #ffedd5;
+  background: #fff7ed;
   vertical-align: middle;
 }
 .cessao-cond-box .cessao-cond-scroll {
@@ -6091,7 +6103,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
   max-height: 240px;
   overflow-y: auto;
 }
-.cessao-cond-scroll thead th { position: sticky; top: 0; background: #f0fdf4; z-index: 1; }
+.cessao-cond-scroll thead th { position: sticky; top: 0; background: #ffedd5; z-index: 1; }
 .cessao-kpi-row {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

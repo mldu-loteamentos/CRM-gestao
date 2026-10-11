@@ -121,11 +121,11 @@ window.MlEmpresaFilter = {
       return `${n} de ${all.length} ${plural}`;
     }
     if (!n) return emptyMeansAll ? "Todos" : ("Selecione " + plural);
-    if (n === all.length) return "Todos";
     if (n === 1) {
       const it = all.find((x) => String(x.id) === sel[0]);
       return it ? this.formatItemLabel(it) : "1 selecionado";
     }
+    if (n === all.length) return "Todos";
     return n + " selecionado(s)";
   },
 
