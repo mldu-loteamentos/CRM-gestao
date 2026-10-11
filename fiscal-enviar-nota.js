@@ -323,6 +323,11 @@ window.FilaNotasFiscais = {
       .fnf-dev-box textarea { min-height: 72px; resize: vertical; }
       .fnf-dev-acoes { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
       .fnf-carta-h { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 6px; color: #64748b; font-size: 0.7rem; text-transform: uppercase; margin-top: 8px; }
+      @media (max-width: 820px) {
+        .fnf-fila-item { grid-template-columns: 1fr; }
+        .fnf-fila-lado, .fnf-fila-acoes { align-items: flex-start; justify-content: flex-start; }
+        .fnf-dev-ops, .fnf-carta-linhas .fnf-carta-linha, .fnf-carta-h { grid-template-columns: 1fr; }
+      }
       .fnf-pill { display: inline-block; border-radius: 999px; padding: 2px 9px; font-size: 0.72rem; font-weight: 700; white-space: nowrap; }
       .fnf-pill.is-wait { background: #fff7ed; color: #c2410c; }
       .fnf-pill.is-info { background: #eff6ff; color: #1d4ed8; }
@@ -1057,7 +1062,7 @@ window.EnviarNotaApp = {
       erros.push(`Este pedido está amarrado à nota devolvida para cancelamento${amarrada.numeroNota ? " (NF " + amarrada.numeroNota + ")" : ""}. Abra Corrigir envio neste mesmo pedido e anexe a nota nova junto com a nota cancelada, com a tarja de cancelada. Sem essa nota o sistema não libera outro envio.`);
     } else if (amarrada) {
       const nova = s.anexos.some((a) => a.tipo === "nota" && a.file);
-      const cancelada = s.anexos.some((a) => a.tipo === "cancelada");
+      const cancelada = s.anexos.some((a) => a.tipo === "cancelada" && (a.file || a.origemTipo === "cancelada"));
       if (!nova) erros.push("Anexe a nota nova neste mesmo pedido, no tipo Nota fiscal. A nota que já estava no envio não substitui a nota cancelada.");
       if (!cancelada) erros.push("Anexe a nota cancelada, com a tarja de cancelada, no tipo Nota cancelada. Sem ela o pedido continua amarrado e o reenvio não segue.");
       else if (nova) oks.push("Nota nova e nota cancelada com a tarja anexadas: o pedido pode ser reenviado.");
@@ -1244,7 +1249,7 @@ window.EnviarNotaApp = {
     const s = this.novoEstado();
     Object.assign(s, {
       aba: "enviar", editandoId: id, pedidoId: item.pedido,
-      anexos: (item.anexos || []).map((a) => Object.assign({}, a)),
+      anexos: (item.anexos || []).map((a) => Object.assign({ origemTipo: a.tipo }, a)),
       pag: Object.assign({ data: "", forma: "", detalhe: "" }, item.pagamento || {}),
       numeroNota: item.numeroNota || "",
       serieNota: item.serieNota || "",

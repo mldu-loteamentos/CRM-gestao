@@ -698,40 +698,14 @@ window.InserirNotaApp = {
     const total = this.totalItens();
     const msg = `Inserir no Sienge a nota ${f.documento} ${f.numero}${f.serie ? "/" + f.serie : ""} de ${s.credor ? s.credor.nome : ""}, `
       + `no valor de ${this.money(total)}, com ${entregas.length} entrega(s) do pedido ${s.pedidoNome}?\n\n`
-      + "A nota fica \"em inclusão\" no Sienge: depois confira impostos e condição de pagamento e consista a nota para gerar o título.";
+      + "A nota gera o título no contas a pagar. O CRM envia o anexo e a forma de pagamento nesse título. Impostos e a consistência da nota continuam no Sienge.";
     const ok = typeof window.mouraConfirm === "function" ? await window.mouraConfirm(msg) : confirm(msg);
     if (!ok) return;
 
     const log = [];
-    let anexou = false;
     s.resultado = null;
     try {
       if (!s.criada) {
-        const nf = `NF ${f.numero}${f.serie ? "/" + f.serie : ""}`;
-        if (f.anexar && s.arquivo) {
-          s.enviando = "Anexando a nota no pedido…";
-          this.render();
-          try {
-            await this.anexarNoPedido(s.arquivo, nf);
-            anexou = true;
-            log.push("Nota anexada no pedido.");
-          } catch (e) {
-            log.push(`Não consegui anexar a nota no pedido: ${e.message}`);
-          }
-        }
-        const extras = f.anexar && s.item ? (s.item.anexos || []).filter((a) => a !== s.itemAnexoNota && !(a.tipo === "nota" && s.arquivo)) : [];
-        for (const a of extras) {
-          const rot = (window.FilaNotasFiscais && FilaNotasFiscais.TIPOS_ANEXO[a.tipo]) || "Anexo";
-          s.enviando = `Anexando ${rot.toLowerCase()} no pedido…`;
-          this.render();
-          try {
-            await this.anexarNoPedido(await FilaNotasFiscais.baixar(a), `${rot} ${nf}`);
-            anexou = true;
-            log.push(`${rot} (${a.nome}) anexado no pedido.`);
-          } catch (e) {
-            log.push(`Não consegui anexar ${a.nome} no pedido: ${e.message}`);
-          }
-        }
         s.enviando = "Criando a nota no Sienge…";
         this.render();
         const cab = {
@@ -751,16 +725,17 @@ window.InserirNotaApp = {
           seq = loc.split("/").filter(Boolean).pop();
         }
         if (!seq || isNaN(Number(seq))) throw new Error("o Sienge criou a nota, mas não devolveu o número sequencial");
-        s.criada = { seq: String(seq), anexou };
+        s.criada = { seq: String(seq) };
         log.push(`Nota criada no Sienge (sequencial ${seq}).`);
         this.auditar("ok", `Nota ${cab.documentId} ${cab.number} criada (sequencial ${seq}) para o pedido ${s.pedidoNome}`, { cabecalho: cab, log });
       }
       s.enviando = "Incluindo os itens do pedido na nota…";
       this.render();
-      const corpo = { deliveriesOrder: entregas, copyNotesPurchaseOrders: false, copyNotesResources: false, copyAttachmentsPurchaseOrders: !!(s.criada.anexou || anexou) };
+      const corpo = { deliveriesOrder: entregas, copyNotesPurchaseOrders: false, copyNotesResources: false, copyAttachmentsPurchaseOrders: false };
       const r2 = await this.enviar(`/purchase-invoices/${s.criada.seq}/items/purchase-orders/delivery-schedules`, { headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo) });
       const itens = this.lista(r2.body);
       log.push(`${itens.length || entregas.length} item(ns) incluído(s).`);
+      await this.completarTitulo(s.criada.seq, log);
       s.resultado = { ok: true, seq: s.criada.seq, log, itens };
       this.auditar("ok", `Itens do pedido ${s.pedidoNome} incluídos na nota sequencial ${s.criada.seq} · ${this.money(total)}`, { entregas, log });
       s.duplicada = Object.assign({}, s.duplicada, { achada: { sequentialNumber: s.criada.seq, issueDate: f.emissao } });
@@ -787,11 +762,105 @@ window.InserirNotaApp = {
     this.render();
   },
 
-  async anexarNoPedido(file, descricao) {
+  /** O título nasce junto com os itens da nota. O Sienge pode demorar um instante para devolver o billId. */
+  async tituloDaNota(seq) {
+    for (let i = 0; i < 5; i++) {
+      const inv = await this.get(`/purchase-invoices/${encodeURIComponent(seq)}`).catch(() => null);
+      const id = inv && inv.billId;
+      if (id != null && id !== "") return String(id);
+      await new Promise((r) => setTimeout(r, 1200 * (i + 1)));
+    }
+    return "";
+  },
+
+  async anexarNoTitulo(billId, file, descricao) {
     const fd = new FormData();
-    fd.append("description", String(descricao).slice(0, 100));
-    fd.append("attachment", file, String(file.name || "anexo.pdf").slice(-100));
-    await this.enviar(`/purchase-orders/${encodeURIComponent(this.state.pedidoApi)}/attachments`, { body: fd });
+    const nome = String(file.name || "anexo.pdf").slice(-100);
+    fd.append("file", file, nome);
+    const q = encodeURIComponent(String(descricao || nome).slice(0, 499));
+    await this.enviar(`/bills/${encodeURIComponent(billId)}/attachments?description=${q}`, { body: fd });
+  },
+
+  async completarTitulo(seq, log) {
+    const s = this.state;
+    const f = s.form;
+    s.enviando = "Localizando o título no contas a pagar…";
+    this.render();
+    const billId = await this.tituloDaNota(seq);
+    if (!billId) {
+      log.push("A nota entrou, mas o Sienge ainda não devolveu o número do título. O anexo e a forma de pagamento não foram enviados.");
+      return;
+    }
+    log.push(`Título ${billId} no contas a pagar.`);
+    if (f.anexar) {
+      const arquivos = [];
+      const nf = `NF ${f.numero}${f.serie ? "/" + f.serie : ""}`;
+      if (s.arquivo) arquivos.push({ file: s.arquivo, desc: nf });
+      const extras = s.item && window.FilaNotasFiscais
+        ? (s.item.anexos || []).filter((a) => a !== s.itemAnexoNota && !(a.tipo === "nota" && s.arquivo))
+        : [];
+      for (const a of extras) {
+        try {
+          const rot = FilaNotasFiscais.TIPOS_ANEXO[a.tipo] || "Anexo";
+          arquivos.push({ file: await FilaNotasFiscais.baixar(a), desc: `${rot} ${nf}` });
+        } catch (e) {
+          log.push(`Não consegui baixar ${a.nome || "o anexo"} para o título: ${e.message}`);
+        }
+      }
+      for (const arq of arquivos) {
+        s.enviando = "Anexando no título…";
+        this.render();
+        try {
+          await this.anexarNoTitulo(billId, arq.file, arq.desc);
+          log.push(`Anexo enviado no título ${billId}: ${arq.desc}.`);
+        } catch (e) {
+          log.push(`Não consegui anexar no título ${billId}: ${e.message}`);
+        }
+      }
+    }
+    const pag = s.item && s.item.pagamento;
+    if (pag && pag.forma) {
+      s.enviando = "Gravando a forma de pagamento no título…";
+      this.render();
+      try {
+        log.push(await this.informarPagamento(billId, pag));
+      } catch (e) {
+        log.push(`Não consegui gravar a forma de pagamento no título ${billId}: ${e.message}`);
+      }
+    }
+  },
+
+  async informarPagamento(billId, pag) {
+    const inst = this.lista(await this.get(`/bills/${encodeURIComponent(billId)}/installments`));
+    const parcela = (inst[0] && (inst[0].installmentNumber || inst[0].id)) || 1;
+    const forma = String(pag.forma || "");
+    const base = `/bills/${encodeURIComponent(billId)}/installments/${encodeURIComponent(parcela)}/payment-information`;
+    const json = (path, body) => this.enviar(path, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (/boleto/i.test(forma)) {
+      const linha = String(pag.detalhe || "").replace(/\D/g, "");
+      if (linha.length !== 47) throw new Error("o boleto não tem linha digitável de 47 dígitos");
+      const codigo = window.BoletoCheck && typeof BoletoCheck.linhaBancariaParaCodigo === "function" ? BoletoCheck.linhaBancariaParaCodigo(linha) : "";
+      const body = {
+        notes: `Pagamento em ${this.dataBr(pag.data)} · boleto`,
+        boletoBancarioManualBarCodeNumber: linha,
+        documentNumber: String(this.state.form.numero || "")
+      };
+      if (codigo && codigo.length === 44) body.boletoBancarioBarCodeNumber = codigo;
+      await json(`${base}/boleto-bancario`, body);
+      return `Boleto gravado na parcela ${parcela} do título ${billId}.`;
+    }
+    if (/pix/i.test(forma)) {
+      await json(`${base}/pix`, {
+        paymentTypeId: 17,
+        isUsingCreditorData: "S",
+        notes: pag.detalhe ? `PIX: ${pag.detalhe}` : "Pagamento via PIX (chave do credor)"
+      });
+      return `PIX gravado na parcela ${parcela} do título ${billId}.`;
+    }
+    if (/transf|ted|d[eé]bito/i.test(forma)) {
+      return `A forma ${forma} foi confirmada pelo operador${pag.detalhe ? ` (${pag.detalhe})` : ""}. O título não recebeu a conta: a transferência pede banco, agência e conta separados, e o envio guarda só o texto.`;
+    }
+    return `A forma ${forma} foi confirmada pelo operador. O título não recebeu um tipo de pagamento correspondente.`;
   },
 
   pagamentoTxt(pag) {
@@ -953,27 +1022,265 @@ window.InserirNotaApp = {
     this.verificarDuplicada();
   },
 
-  async devolver(id) {
+  invalidarValidacao() {
+    const s = this.state;
+    if (!s || s._mantemValidacao || (!s.validado && !(s.item && s.item.validadoEm))) return;
+    s.validado = false;
+    const item = s.item;
+    if (item && item.validadoEm && window.FilaNotasFiscais) {
+      item.validadoEm = 0;
+      item.validadoPor = "";
+      FilaNotasFiscais.atualizar(item, { validadoEm: 0, validadoPor: "" }, "validacao-desfeita").catch(() => {});
+    }
+  },
+
+  async validar() {
+    const s = this.state;
+    if (!this.podeEditar()) { alert("Sem permissão para inserir notas no Sienge."); return; }
+    const c = this.conferir();
+    if (c.erros.length) { alert("Ainda há pendência na conferência:\n\n" + c.erros.join("\n")); return; }
+    s.validado = true;
+    const item = s.item;
+    if (item && window.FilaNotasFiscais) {
+      const u = FilaNotasFiscais.usuario();
+      try {
+        await FilaNotasFiscais.atualizar(item, { validadoEm: Date.now(), validadoPor: u.nome }, "validada", "Nota conferida antes do lançamento");
+      } catch (e) {
+        s.validado = false;
+        alert(`Não consegui registrar a validação: ${(e && e.message) || e}`);
+        return;
+      }
+    }
+    this.render();
+  },
+
+  motivosCancelamento() {
+    const base = [
+      "Valor do serviço ou da mercadoria errado",
+      "CNPJ ou nome do tomador errado",
+      "CNPJ ou razão social do prestador errado",
+      "Imposto, retenção ou alíquota errados",
+      "Discriminação que altera o serviço, a mercadoria ou o fato gerador",
+      "Data de emissão errada",
+      "Município de incidência do ISS errado",
+      "Nota em duplicidade",
+      "Nota emitida para outro pedido, empresa ou centro de custo"
+    ];
+    let extra = [];
+    try { extra = JSON.parse(localStorage.getItem(this.MOTIVOS_CANCELAMENTO_KEY) || "[]"); } catch (e) { extra = []; }
+    if (!Array.isArray(extra)) extra = [];
+    const vistos = new Set(base.map((t) => t.toLowerCase()));
+    extra.forEach((t) => {
+      const s = String(t || "").trim();
+      if (s && !vistos.has(s.toLowerCase())) { vistos.add(s.toLowerCase()); base.push(s); }
+    });
+    return base;
+  },
+
+  devolver(id) {
     const item = this.fila.itens.find((x) => x.id === id) || (this.state.item && this.state.item.id === id ? this.state.item : null);
     if (!item || !this.podeEditar()) return;
-    const pergunta = `Devolver ao operador a nota do pedido ${item.pedido}? Escreva o motivo: ele aparece para quem enviou corrigir e reenviar.`;
-    const motivo = typeof window.mouraPrompt === "function" ? await window.mouraPrompt(pergunta, "") : prompt(pergunta);
-    if (motivo == null) return;
-    const txt = String(motivo).trim();
-    if (!txt) { alert("Informe o motivo da devolução."); return; }
+    this._devItem = item;
+    this._devTipo = "cancelamento";
+    this.fecharDevolver();
+    const pop = document.createElement("div");
+    pop.id = "fnf-dev";
+    pop.className = "fnf-dev";
+    pop.innerHTML = this.devolucaoModalHtml(item);
+    pop.addEventListener("click", (ev) => { if (ev.target === pop) this.fecharDevolver(); });
+    document.body.appendChild(pop);
+    if (window.lucide) lucide.createIcons();
+  },
+
+  devolucaoModalHtml(item) {
+    const esc = (v) => this.esc(v);
+    return `<div class="fnf-dev-box" role="dialog" aria-modal="true">
+      <h3>Devolver a nota do pedido ${esc(item.pedido)}</h3>
+      <p class="inf-muted">${esc(item.fornecedor && item.fornecedor.nome || "")}${item.numeroNota ? ` · NF ${esc(item.numeroNota)}` : ""}. A orientação abaixo chega para quem enviou a nota.</p>
+      <div class="fnf-dev-ops">
+        <button type="button" class="fnf-dev-op ${this._devTipo === "cancelamento" ? "is-on" : ""}" onclick="InserirNotaApp.tipoDevolucao('cancelamento')"><b>Cancelar nota</b><small>O operador reenvia neste mesmo pedido a nota nova e a nota cancelada com a tarja.</small></button>
+        <button type="button" class="fnf-dev-op ${this._devTipo === "carta" ? "is-on" : ""}" onclick="InserirNotaApp.tipoDevolucao('carta')"><b>Pedir carta de correção</b><small>Gera um documento com o que foi informado e o que deveria ser.</small></button>
+      </div>
+      <div id="fnf-dev-corpo">${this._devTipo === "carta" ? this.cartaDevolucaoHtml() : this.cancelamentoDevolucaoHtml()}</div>
+      <label class="inf-muted" for="fnf-dev-extra">Orientação extra para o operador</label>
+      <textarea id="fnf-dev-extra" placeholder="O que a pessoa que enviou a nota precisa fazer, além do motivo marcado."></textarea>
+      <div class="fnf-dev-acoes">
+        <button type="button" class="btn btn-cancel" onclick="InserirNotaApp.fecharDevolver()">Cancelar</button>
+        <button type="button" id="fnf-dev-ok" class="btn btn-primary" onclick="InserirNotaApp.confirmarDevolver()">Devolver ao operador</button>
+      </div>
+    </div>`;
+  },
+
+  cancelamentoDevolucaoHtml() {
+    const esc = (v) => this.esc(v);
+    const checks = this.motivosCancelamento().map((m) => `<label><input type="checkbox" name="motivo" value="${esc(m)}"> <span>${esc(m)}</span></label>`).join("");
+    return `<p class="inf-muted">Carta de correção não altera valor, imposto, tomador, prestador nem a descrição do serviço. Nestes casos a nota precisa ser cancelada:</p>
+      <div class="fnf-motivos" id="fnf-motivos">${checks}</div>
+      <button type="button" class="btn btn-outline inf-btn-sm" onclick="InserirNotaApp.adicionarMotivoCancelamento()"><i data-lucide="plus"></i> Adicionar motivo</button>
+      <p class="inf-muted" style="margin-top:10px;">O operador usa o mesmo pedido, anexa a nota nova e a nota cancelada com a tarja de cancelada. Sem a nota cancelada o sistema não deixa começar outro envio nesse pedido.</p>`;
+  },
+
+  cartaDevolucaoHtml() {
+    const linha = (campo) => `<div class="fnf-carta-linha"><input data-k="campo" placeholder="Campo" value="${this.esc(campo || "")}"><input data-k="informado" placeholder="O que foi informado"><input data-k="deveria" placeholder="O que deveria ser"></div>`;
+    return `<p class="inf-muted">Preencha o que saiu na nota e o que deveria constar. O sistema devolve um documento com essa comparação.</p>
+      <div class="fnf-carta-h"><span>Campo</span><span>Informado na nota</span><span>Deveria ser</span></div>
+      <div class="fnf-carta-linhas" id="fnf-carta-linhas">${linha("")}${linha("")}</div>
+      <button type="button" class="btn btn-outline inf-btn-sm" onclick="InserirNotaApp.adicionarLinhaCarta()"><i data-lucide="plus"></i> Adicionar linha</button>`;
+  },
+
+  tipoDevolucao(tipo) {
+    this._devTipo = tipo === "carta" ? "carta" : "cancelamento";
+    const box = document.querySelector("#fnf-dev .fnf-dev-box");
+    if (!box || !this._devItem) return;
+    const extra = (document.getElementById("fnf-dev-extra") || {}).value || "";
+    box.outerHTML = this.devolucaoModalHtml(this._devItem).replace('id="fnf-dev-extra"', `id="fnf-dev-extra"`);
+    const ta = document.getElementById("fnf-dev-extra");
+    if (ta) ta.value = extra;
+    if (window.lucide) lucide.createIcons();
+  },
+
+  async adicionarMotivoCancelamento() {
+    const pergunta = "Novo motivo de cancelamento";
+    const resp = typeof window.mouraPrompt === "function" ? await window.mouraPrompt(pergunta, "") : prompt(pergunta);
+    const txt = String(resp || "").trim();
+    if (!txt) return;
+    let extra = [];
+    try { extra = JSON.parse(localStorage.getItem(this.MOTIVOS_CANCELAMENTO_KEY) || "[]"); } catch (e) { extra = []; }
+    if (!Array.isArray(extra)) extra = [];
+    if (!this.motivosCancelamento().some((t) => t.toLowerCase() === txt.toLowerCase())) {
+      extra.push(txt);
+      localStorage.setItem(this.MOTIVOS_CANCELAMENTO_KEY, JSON.stringify(extra));
+    }
+    const marcados = new Set([...document.querySelectorAll("#fnf-motivos input:checked")].map((el) => el.value));
+    marcados.add(txt);
+    const box = document.getElementById("fnf-motivos");
+    if (!box) return;
+    const esc = (v) => this.esc(v);
+    box.innerHTML = this.motivosCancelamento().map((m) => `<label><input type="checkbox" name="motivo" value="${esc(m)}" ${marcados.has(m) ? "checked" : ""}> <span>${esc(m)}</span></label>`).join("");
+  },
+
+  adicionarLinhaCarta() {
+    const box = document.getElementById("fnf-carta-linhas");
+    if (!box) return;
+    const div = document.createElement("div");
+    div.className = "fnf-carta-linha";
+    div.innerHTML = `<input data-k="campo" placeholder="Campo"><input data-k="informado" placeholder="O que foi informado"><input data-k="deveria" placeholder="O que deveria ser">`;
+    box.appendChild(div);
+  },
+
+  fecharDevolver() {
+    const pop = document.getElementById("fnf-dev");
+    if (pop) pop.remove();
+  },
+
+  async confirmarDevolver() {
+    const item = this._devItem;
+    if (!item) return;
+    const btn = document.getElementById("fnf-dev-ok");
+    const extra = String((document.getElementById("fnf-dev-extra") || {}).value || "").trim();
     const u = FilaNotasFiscais.usuario();
+    const tipo = this._devTipo === "carta" ? "carta" : "cancelamento";
+    let patch;
+    let txt;
+    if (tipo === "cancelamento") {
+      const motivos = [...document.querySelectorAll("#fnf-motivos input[name=motivo]:checked")].map((el) => el.value).filter(Boolean);
+      if (!motivos.length) { alert("Marque ao menos um motivo de cancelamento."); return; }
+      txt = [
+        "Cancele esta nota e reenvie neste mesmo pedido a nota nova e a nota cancelada, com a tarja de cancelada.",
+        "Sem a nota cancelada anexada, o pedido continua amarrado e o sistema não deixa começar outro envio.",
+        "",
+        "Motivos:",
+        ...motivos.map((m) => "• " + m),
+        extra ? "" : "",
+        extra ? "Orientação: " + extra : ""
+      ].filter((x) => x !== "").join("\n");
+      patch = {
+        status: "devolvida", devolucaoTipo: "cancelamento", motivosCancelamento: motivos, motivoDevolucao: txt,
+        devolvidoPor: u.nome, devolvidoPorSienge: u.sienge, devolvidoEm: Date.now(), assumidoPor: "", assumidoPorEmail: "",
+        validadoEm: 0, validadoPor: ""
+      };
+    } else {
+      const campo = (row, k) => String((row.querySelector(`[data-k="${k}"]`) || {}).value || "").trim();
+      const linhas = [...document.querySelectorAll("#fnf-carta-linhas .fnf-carta-linha")].map((row) => ({
+        campo: campo(row, "campo"),
+        informado: campo(row, "informado"),
+        deveria: campo(row, "deveria")
+      })).filter((l) => l.campo || l.informado || l.deveria);
+      if (!linhas.length || linhas.some((l) => !l.informado || !l.deveria)) { alert("Em cada linha, informe o que foi lançado na nota e o que deveria ser."); return; }
+      txt = [
+        "Emita carta de correção. O documento em anexo mostra o que foi informado e o que deveria ser.",
+        ...linhas.map((l) => `• ${l.campo || "Campo"}: informado “${l.informado}” · deveria ser “${l.deveria}”`),
+        extra ? "Orientação: " + extra : ""
+      ].filter(Boolean).join("\n");
+      patch = {
+        status: "devolvida", devolucaoTipo: "carta", cartaLinhas: linhas, motivoDevolucao: txt,
+        devolvidoPor: u.nome, devolvidoPorSienge: u.sienge, devolvidoEm: Date.now(), assumidoPor: "", assumidoPorEmail: "",
+        validadoEm: 0, validadoPor: ""
+      };
+    }
+    if (btn) { btn.disabled = true; btn.textContent = "Devolvendo…"; }
     try {
-      await FilaNotasFiscais.atualizar(item, { status: "devolvida", motivoDevolucao: txt, devolvidoPor: u.nome, devolvidoPorSienge: u.sienge, devolvidoEm: Date.now(), assumidoPor: "", assumidoPorEmail: "" }, "devolvida", txt);
+      await FilaNotasFiscais.atualizar(item, patch, "devolvida", txt);
+      if (tipo === "carta") {
+        const file = this.cartaArquivo(item, patch.cartaLinhas, extra);
+        const [anexo] = await FilaNotasFiscais.subirAnexos(item.id, [{ file, tipo: "carta" }]);
+        const anexos = (item.anexos || []).filter((a) => a.tipo !== "carta").concat([anexo]);
+        await FilaNotasFiscais.atualizar(item, { anexos }, "carta-anexada", "Documento da carta de correção");
+      }
     } catch (e) {
+      if (btn) { btn.disabled = false; btn.textContent = "Devolver ao operador"; }
       alert(`Não consegui devolver: ${(e && e.message) || e}`);
       return;
     }
-    this.auditar("ok", `Nota do pedido ${item.pedido} devolvida ao operador ${item.criadoPor || ""}: ${txt}`, { filaId: id });
-    if (this.state.item && this.state.item.id === id) {
+    this.auditar("ok", `Nota do pedido ${item.pedido} devolvida (${tipo}) ao operador ${item.criadoPor || ""}`, { filaId: item.id });
+    this.fecharDevolver();
+    this._devItem = null;
+    if (this.state.item && this.state.item.id === item.id) {
       this.state = this.novoEstado();
       this.aba = "fila";
     }
     this.render();
+  },
+
+  cartaArquivo(item, linhas, extra) {
+    if (!window.jspdf || !window.jspdf.jsPDF) throw new Error("gerador de PDF indisponível");
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: "mm", format: "a4" });
+    const m = 16;
+    const w = 210 - m * 2;
+    let y = 20;
+    const bloco = (txt, size, style) => {
+      pdf.setFont("times", style || "normal");
+      pdf.setFontSize(size);
+      pdf.splitTextToSize(String(txt || ""), w).forEach((ln) => {
+        if (y > 280) { pdf.addPage(); y = 20; }
+        pdf.text(ln, m, y);
+        y += size * 0.45 + 2;
+      });
+    };
+    bloco("Orientação para carta de correção", 16, "bold");
+    y += 2;
+    bloco(`Pedido ${item.pedido || "—"}    NF ${item.numeroNota || "—"}${item.serieNota ? "/" + item.serieNota : ""}`, 12, "normal");
+    if (item.fornecedor && item.fornecedor.nome) bloco(item.fornecedor.nome, 12, "normal");
+    const u = FilaNotasFiscais.usuario();
+    bloco(`Fiscal: ${u.nome || "—"}    ${new Date().toLocaleString("pt-BR")}`, 11, "italic");
+    y += 3;
+    (linhas || []).forEach((l, i) => {
+      bloco(`${i + 1}. ${l.campo || "Campo"}`, 13, "bold");
+      bloco(`O que foi informado: ${l.informado || "—"}`, 12, "normal");
+      bloco(`O que deveria ser: ${l.deveria || "—"}`, 12, "normal");
+      y += 2;
+    });
+    if (extra) {
+      y += 2;
+      bloco("Orientação", 13, "bold");
+      bloco(extra, 12, "normal");
+    }
+    y += 4;
+    bloco("Emita a carta de correção com o que foi informado e o que deveria ser, e reenvie a nota neste mesmo pedido.", 11, "italic");
+    const blob = pdf.output("blob");
+    const nome = `carta-correcao-pedido-${String(item.pedido || "nota").replace(/[^\w.-]+/g, "_")}.pdf`;
+    return new File([blob], nome, { type: "application/pdf" });
   },
 
   /** Larga a nota assumida: ela volta para a fila como "aguardando fiscal". */
@@ -1031,28 +1338,45 @@ window.InserirNotaApp = {
     const corpo = f.carregando && !f.itens.length ? `<p class="fnf-vazio"><span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;"></span> Carregando a fila…</p>`
       : (f.erro ? `<p class="inf-erro">${esc(f.erro)}</p>`
         : (!lista.length ? `<p class="fnf-vazio">${f.filtro === "abertas" ? "Nenhuma nota esperando lançamento." : "Nenhuma nota nesta situação."}</p>`
-          : `<table class="fnf-tab"><thead><tr><th>Pagamento</th><th>Pedido</th><th>Fornecedor</th><th>Empresa / CC</th><th>Anexos</th><th>Enviada por</th><th>Situação</th><th></th></tr></thead><tbody>
-            ${lista.map((x) => {
+          : `<div class="fnf-fila">${lista.map((x) => {
               const p = x.pagamento || {};
               const atrasado = FilaNotasFiscais.aberta(x) && p.data && p.data < hoje;
               const aberta = FilaNotasFiscais.aberta(x);
-              return `<tr>
-                <td><span class="${atrasado ? "fnf-atrasado" : ""}">${this.dataBr(p.data)}</span><small>${esc(p.forma || "")}${p.detalhe ? ` · ${esc(p.detalhe)}` : ""}</small></td>
-                <td><b>${esc(x.pedido)}</b>${x.numeroNota ? `<small>NF ${esc(x.numeroNota)}</small>` : ""}</td>
-                <td>${esc(x.fornecedor ? x.fornecedor.nome : "")}<small>${x.valorNota != null ? this.money(x.valorNota) : (x.previsao && x.previsao.valor != null ? `previsão ${this.money(x.previsao.valor)}` : "")}</small></td>
-                <td>${x.empresa ? `Empresa ${esc(x.empresa)}` : "—"}${x.cc && x.cc.id ? `<small>CC ${esc(x.cc.id)}${x.cc.nome ? " - " + esc(x.cc.nome) : ""}</small>` : ""}</td>
-                <td>${FilaNotasFiscais.anexosHtml(x, esc)}</td>
-                <td>${esc(x.criadoPor || "")}<small>${x.criadoEm ? new Date(x.criadoEm).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : ""}</small>${x.observacao ? `<small title="${esc(x.observacao)}">“${esc(x.observacao.length > 60 ? x.observacao.slice(0, 60) + "…" : x.observacao)}”</small>` : ""}</td>
-                <td>${FilaNotasFiscais.statusHtml(x, esc)}${x.status === "devolvida" && x.motivoDevolucao ? `<small class="fnf-motivo">${esc(x.motivoDevolucao)}</small>` : ""}</td>
-                <td class="fnf-acoes">${aberta && pode ? `
-                  <button type="button" class="btn btn-primary" onclick="InserirNotaApp.lancarDaFila('${esc(x.id)}')"><i data-lucide="file-up"></i> ${x.status === "em_lancamento" ? "Continuar" : "Lançar"}</button>
-                  <button type="button" class="btn btn-outline" onclick="InserirNotaApp.devolver('${esc(x.id)}')"><i data-lucide="corner-up-left"></i> Devolver</button>` : ""}</td>
-              </tr>`;
-            }).join("")}</tbody></table>`));
+              const validada = !!x.validadoEm;
+              const valor = x.valorNota != null ? this.money(x.valorNota) : (x.previsao && x.previsao.valor != null ? `previsão ${this.money(x.previsao.valor)}` : "");
+              const quando = x.criadoEm ? new Date(x.criadoEm).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "";
+              return `<article class="fnf-fila-item">
+                <div>
+                  <div class="fnf-fila-top">
+                    <b>Pedido ${esc(x.pedido)}</b>
+                    ${x.numeroNota ? `<span>NF ${esc(x.numeroNota)}</span>` : ""}
+                    <span class="fnf-forn">${esc(x.fornecedor ? x.fornecedor.nome : "")}</span>
+                    ${valor ? `<span>${esc(valor)}</span>` : ""}
+                    ${FilaNotasFiscais.statusHtml(x, esc)}
+                  </div>
+                  <div class="fnf-fila-meta">
+                    <span class="${atrasado ? "fnf-atrasado" : ""}">${this.dataBr(p.data)}${p.forma ? " · " + esc(p.forma) : ""}${p.detalhe ? " · " + esc(p.detalhe) : ""}</span>
+                    <span>${x.empresa ? `Empresa ${esc(x.empresa)}` : "Empresa —"}${x.cc && x.cc.id ? ` · CC ${esc(x.cc.id)}${x.cc.nome ? " - " + esc(x.cc.nome) : ""}` : ""}</span>
+                    <span>${esc(x.criadoPor || "")}${quando ? " · " + esc(quando) : ""}</span>
+                    <span>${FilaNotasFiscais.anexosHtml(x, esc)}</span>
+                    ${validada ? `<span>Validada${x.validadoPor ? " por " + esc(x.validadoPor) : ""}</span>` : ""}
+                  </div>
+                  ${x.observacao ? `<div class="fnf-fila-meta"><span title="${esc(x.observacao)}">“${esc(x.observacao.length > 90 ? x.observacao.slice(0, 90) + "…" : x.observacao)}”</span></div>` : ""}
+                  ${FilaNotasFiscais.motivoHtml(x, esc)}
+                </div>
+                <div class="fnf-fila-lado">
+                  ${aberta && pode ? `<div class="fnf-fila-acoes">
+                    <button type="button" class="btn btn-outline inf-btn-sm" onclick="InserirNotaApp.lancarDaFila('${esc(x.id)}')"><i data-lucide="list-checks"></i> Abrir</button>
+                    <button type="button" class="btn btn-primary inf-btn-sm" ${validada ? "" : "disabled"} title="${validada ? "Abrir o lançamento" : "Valide a nota antes de lançar no Sienge"}" onclick="InserirNotaApp.lancarDaFila('${esc(x.id)}')"><i data-lucide="file-up"></i> ${x.status === "em_lancamento" && validada ? "Continuar" : "Lançar"}</button>
+                    <button type="button" class="btn btn-outline inf-btn-sm" onclick="InserirNotaApp.devolver('${esc(x.id)}')"><i data-lucide="corner-up-left"></i> Devolver</button>
+                  </div>` : ""}
+                </div>
+              </article>`;
+            }).join("")}</div>`));
     return `<div class="inf-card" style="margin:16px 20px;">
         <div class="fnf-barra">
           <select onchange="InserirNotaApp.setFiltroFila(this.value)">${filtros.map(([v, t]) => `<option value="${v}" ${f.filtro === v ? "selected" : ""}>${t}</option>`).join("")}</select>
-          <span class="inf-muted">Notas enviadas pelos operadores em Fiscal › Enviar nota, por data de pagamento. Clique em <b>Lançar</b> para conferir e inserir no Sienge.</span>
+          <span class="inf-muted">Por data de pagamento. Abra a nota, confira e clique em <b>Validar</b>. <b>Lançar</b> só libera depois dessa confirmação.</span>
           <button type="button" class="btn btn-outline inf-btn-sm" onclick="InserirNotaApp.carregarFila(true)" ${f.carregando ? "disabled" : ""}><i data-lucide="refresh-cw"></i> Atualizar</button>
         </div>
         ${corpo}
@@ -1106,8 +1430,22 @@ window.InserirNotaApp = {
     const el = document.getElementById("inf-conf");
     if (!el) return;
     el.innerHTML = this.conferenciaHtml();
+    const c = this.conferir();
+    const s = this.state;
+    const travado = !!s.enviando || c.erros.length > 0 || !this.podeEditar();
     const btn = document.getElementById("inf-inserir");
-    if (btn) btn.disabled = !!this.state.enviando || this.conferir().erros.length > 0 || !this.podeEditar();
+    if (btn) btn.disabled = travado || !s.validado;
+    const v = document.getElementById("inf-validar");
+    if (v) {
+      v.disabled = travado || !!s.validado;
+      v.textContent = s.validado ? "Validada" : "Validar";
+      v.classList.toggle("btn-primary", !s.validado);
+      v.classList.toggle("btn-outline", !!s.validado);
+    }
+    const h = document.getElementById("inf-validacao");
+    if (h) h.textContent = s.validado
+      ? "Nota validada. Pode inserir no Sienge."
+      : "Clique em Validar depois de conferir. Inserir no Sienge só libera depois dessa confirmação.";
   },
 
   conferenciaHtml() {
@@ -1214,7 +1552,7 @@ window.InserirNotaApp = {
     return `<div class="inf-resultado ${r.ok ? "is-ok" : "is-erro"}">
       <b>${r.ok ? `Nota inserida no Sienge · sequencial ${this.esc(r.seq)}` : (r.seq ? `A nota foi criada (sequencial ${this.esc(r.seq)}), mas os itens não entraram` : "A nota não foi criada")}</b>
       <ul>${r.log.map((t) => `<li>${this.esc(t)}</li>`).join("")}</ul>
-      ${r.ok ? `<p>Agora, no Sienge, abra a nota ${this.esc(r.seq)}: confira os impostos e a condição de pagamento${this.state.item && this.state.item.pagamento ? ` (<b>${this.esc(this.pagamentoTxt(this.state.item.pagamento))}</b>)` : ""} e consista a nota para gerar o título.</p>`
+      ${r.ok ? `<p>O título foi para o contas a pagar. Confira no Sienge os impostos e consista a nota${this.state.item && this.state.item.pagamento ? `. Pagamento confirmado pelo operador: <b>${this.esc(this.pagamentoTxt(this.state.item.pagamento))}</b>` : ""}.</p>`
         : (r.seq ? `<p>Corrija o motivo acima e clique em <b>Inserir no Sienge</b> de novo: o CRM tenta incluir os itens na mesma nota ${this.esc(r.seq)}, sem criar outra.</p>` : "")}
     </div>`;
   },
@@ -1326,7 +1664,8 @@ window.InserirNotaApp = {
   lancarHtml() {
     const s = this.state;
     const pode = this.podeEditar();
-    const bloqueado = !!s.enviando || this.conferir().erros.length > 0 || !pode;
+    const travado = !!s.enviando || this.conferir().erros.length > 0 || !pode;
+    const bloqueado = travado || !s.validado;
     return `
       <div class="inf-wrap">
         <div>
@@ -1350,11 +1689,13 @@ window.InserirNotaApp = {
             <h3><i data-lucide="list-checks"></i> Conferência</h3>
             <div id="inf-conf">${this.conferenciaHtml()}</div>
             <div id="inf-fiscal">${window.NotaFiscalCheck ? NotaFiscalCheck.painelEnvio(s.fiscal) : ""}</div>
-            <label class="inf-chk" style="margin-top:10px;"><input type="checkbox" ${s.form.anexar ? "checked" : ""} onchange="InserirNotaApp.setCampo('anexar', this.checked)"> Anexar ${s.item && (s.item.anexos || []).length > 1 ? "a nota e os outros anexos do envio (boleto etc.)" : "o arquivo da nota"} no pedido e copiar para a nota no Sienge</label>
+            <label class="inf-chk" style="margin-top:10px;"><input type="checkbox" ${s.form.anexar ? "checked" : ""} onchange="InserirNotaApp.setCampo('anexar', this.checked)"> Anexar ${s.item && (s.item.anexos || []).length > 1 ? "a nota e os outros anexos do envio" : "o arquivo da nota"} no título do contas a pagar</label>
+            <p id="inf-validacao" class="inf-muted">${s.validado ? "Nota validada. Pode inserir no Sienge." : "Clique em Validar depois de conferir. Inserir no Sienge só libera depois dessa confirmação."}</p>
             <div class="inf-acoes">
               <button type="button" class="btn btn-outline" onclick="InserirNotaApp.recomecar()" ${s.enviando ? "disabled" : ""}><i data-lucide="rotate-ccw"></i> Recomeçar</button>
+              <button type="button" id="inf-validar" class="btn ${s.validado ? "btn-outline" : "btn-primary"}" onclick="InserirNotaApp.validar()" ${(travado || s.validado) ? "disabled" : ""}>${s.validado ? "Validada" : "Validar"}</button>
               <button type="button" id="inf-inserir" class="btn btn-primary" onclick="InserirNotaApp.inserir()" ${bloqueado ? "disabled" : ""}
-                title="${pode ? "" : "Sem permissão de edição em Fiscal › Inserir nota"}">
+                title="${pode ? (s.validado ? "" : "Valide a nota antes de inserir no Sienge") : "Sem permissão de edição em Fiscal › Inserir nota"}">
                 ${s.enviando ? `<span class="btn-spin"></span> ${this.esc(s.enviando)}` : `<i data-lucide="upload"></i> Inserir no Sienge`}</button>
             </div>
           </div>
