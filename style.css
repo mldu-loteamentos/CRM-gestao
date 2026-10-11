@@ -3576,11 +3576,13 @@ circle.donut-segment {
   background: #fff;
   border-bottom: 1px solid #e2e8f0;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 12px;
   align-items: flex-end;
+  overflow: visible;
 }
 .fc-field {
+  flex: 0 0 auto;
   font-size: 0.68rem;
   font-weight: 700;
   color: #475569;
@@ -3596,6 +3598,7 @@ circle.donut-segment {
 .fc-cons-btn {
   height: 34px;
   padding: 0 12px;
+  flex: 0 0 auto;
   white-space: nowrap;
 }
 .fc-consult-btn {
@@ -3652,15 +3655,16 @@ circle.donut-segment {
   background: #fff;
 }
 .fc-filters .ml-emp-filter {
-  flex: 0 1 auto;
-  width: max-content;
-  max-width: min(720px, 58vw);
-  min-width: 320px;
+  flex: 0 0 615px;
+  width: 615px;
+  max-width: 615px;
+  min-width: 615px;
 }
 .fc-filters .ml-emp-filter-btn span {
-  flex: 0 0 auto;
-  overflow: visible;
-  text-overflow: clip;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .fc-filters .ml-emp-filter-item span { white-space: nowrap; }
@@ -3674,7 +3678,8 @@ circle.donut-segment {
 .rcx-tabs { margin-bottom: 14px; }
 .rcx-head { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
 .rcx-tools { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-end; }
-.rcx-arqs-box { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 12px; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; }
+.rcx-arqs-box { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-start; padding: 10px 12px; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; }
+.rcx-arqs-col { display: flex; flex-direction: column; gap: 6px; min-width: 240px; flex: 1; }
 .rcx-arqs-label { font-size: 0.68rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: #64748b; }
 .rcx-field { display: flex; flex-direction: column; gap: 4px; font-size: 0.72rem; font-weight: 700; color: #475569; }
 .rcx-field select { height: 38px; min-width: 92px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; padding: 0 10px; font-weight: 650; color: #0f172a; }

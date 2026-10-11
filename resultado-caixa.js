@@ -867,14 +867,6 @@ const ResultadoCaixaApp = {
     return t;
   },
 
-  papelAno(y) {
-    const atual = this.anoAtual();
-    if (!atual) return "";
-    if (Number(y) === atual) return "atual";
-    if (Number(y) === atual - 1) return "anterior";
-    return "";
-  },
-
   chipsDoAno(y) {
     const a = this.anoDados(y);
     const arquivos = (a && a.arquivos) || {};
@@ -902,13 +894,22 @@ const ResultadoCaixaApp = {
     const anos = Object.keys(this.anos || {}).sort();
     const mesOpts = this.MESES.map((n, i) => `<option value="${i + 1}" ${Number(this.mes) === i + 1 ? "selected" : ""}>${n}</option>`).join("");
     const realOn = this.escala !== "milhoes";
-    const quem = this.nomesEmpresas();
-    const uso = this.empresasUsadas();
+    const atual = this.anoAtual();
+    const antN = atual > 1900 ? atual - 1 : 0;
+    const chipsAtual = atual ? this.chipsDoAno(atual) : "";
+    const chipsAnt = antN ? this.chipsDoAno(antN) : "";
+    const agrupa = this.agrupar
+      ? " Agrupado: cada valor está na participação da Moura Leite do centro de custo."
+      : "";
+    const base = "Orçado e realizado vêm dos arquivos da competência atual (" + (atual || "—") + "). A coluna do ano anterior é o realizado dos arquivos da competência anterior" + (antN ? " (" + antN + ")" : "") + ".";
     const nota = lado === "entradas"
-      ? "Orçado e realizado somam os Excel enviados. A coluna do ano anterior é o realizado do DFC dessas empresas, pelo nome do centro de custo. Livia, Livia I e Livia II aparecem como Central Parque. Empreendimentos com o mesmo nome ganham a sigla da cidade. MLDU aparece como Corporativo. Os quatro maiores desvios positivos e os quatro negativos do acumulado ficam à vista; o restante abre ao clicar em Outros." + (this.agrupar ? " Agrupado: cada valor está na participação da Moura Leite do centro de custo." : "")
-      : "As saídas seguem as contas do DFC. Orçado e realizado somam os Excel. A coluna do ano anterior é o realizado do DFC das mesmas empresas. O valor aparece como saída (positivo). Gastar acima do orçado fica em vermelho. As contas de fora da lista principal abrem em Outros.";
-    const avisoEmpresa = uso.faltou.length
-      ? `<div class="rcx-erro">Não achei no Sienge a empresa destes arquivos: ${caixaEsc(uso.faltou.join(", "))}. O orçado entra na soma; o ano anterior delas fica de fora até o nome bater com o cadastro.</div>`
+      ? base + " Livia, Livia I e Livia II aparecem como Central Parque. Empreendimentos com o mesmo nome ganham a sigla da cidade. MLDU aparece como Corporativo. Os quatro maiores desvios positivos e os quatro negativos do acumulado ficam à vista; o restante abre ao clicar em Outros." + agrupa
+      : base + " As saídas seguem as contas do DFC e aparecem como saída. Gastar acima do orçado fica em vermelho. As contas de fora da lista principal abrem em Outros." + agrupa;
+    const avisoRateio = lado === "saidas" && this.faltaCentroNasSaidas()
+      ? `<div class="rcx-erro">Para agrupar as saídas destes arquivos, suba o Excel de novo. O arquivo que já estava salvo não guarda o centro de custo de cada conta.</div>`
+      : "";
+    const avisoAnt = atual && !chipsAnt
+      ? `<p class="rcx-muted">Nenhum arquivo de ${antN} ainda. A coluna do ano anterior fica zerada até você subir essa competência.</p>`
       : "";
     return `
       <div class="rcx-head">
@@ -925,20 +926,27 @@ const ResultadoCaixaApp = {
               <button type="button" class="${realOn ? "" : "is-on"}" onclick="ResultadoCaixaApp.setEscala('milhoes')">Milhões</button>
             </div>
           </div>
-          ${lado === "entradas" ? `<div class="rcx-field">Participação
+          <div class="rcx-field">Participação
             <button type="button" class="rcx-agrupar ${this.agrupar ? "is-on" : ""}" onclick="ResultadoCaixaApp.toggleAgrupar()" title="Aplica o percentual de participação da Moura Leite de cada centro de custo">${this.agrupar ? "Agrupado" : "Agrupar"}</button>
-          </div>` : ""}
+          </div>
         </div>
         <div class="rcx-arqs-box">
-          <span class="rcx-arqs-label">Arquivos</span>
-          <div class="rcx-arqs">${this.chipsHtml() || `<span class="rcx-muted">Nenhum arquivo ainda. Dá para escolher vários de uma vez.</span>`}</div>
+          <div class="rcx-arqs-col">
+            <span class="rcx-arqs-label">Competência atual${atual ? " · " + atual : ""}</span>
+            <div class="rcx-arqs">${chipsAtual || `<span class="rcx-muted">Nenhum arquivo desta competência.</span>`}</div>
+          </div>
+          <div class="rcx-arqs-col">
+            <span class="rcx-arqs-label">Competência anterior${antN ? " · " + antN : ""}</span>
+            <div class="rcx-arqs">${chipsAnt || `<span class="rcx-muted">Nenhum arquivo desta competência.</span>`}</div>
+          </div>
         </div>
-        <p class="rcx-nota">${nota}${quem ? " Empresas: " + caixaEsc(quem) + "." : ""}</p>
+        <p class="rcx-nota">${nota}</p>
       </div>
       ${this.error ? `<div class="rcx-erro">${caixaEsc(this.error)}</div>` : ""}
-      ${avisoEmpresa}
+      ${avisoRateio}
+      ${avisoAnt}
       ${this.dfcErro ? `<div class="rcx-erro">${caixaEsc(this.dfcErro)}</div>` : ""}
-      ${anos.length ? "" : `<p class="rcx-vazio">Suba o Excel do comparativo orçado × realizado, visão DFC. Pode selecionar várias empresas juntas.</p>`}
+      ${anos.length ? "" : `<p class="rcx-vazio">Suba o Excel do comparativo orçado × realizado, visão DFC. Pode escolher o ano atual e o anterior juntos.</p>`}
     `;
   },
 

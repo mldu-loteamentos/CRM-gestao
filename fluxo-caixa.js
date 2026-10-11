@@ -1119,7 +1119,6 @@ const FluxoCaixaApp = {
               Consultar
             </button>
           </div>
-          ${this.filtersDirty() ? `<p id="fc-stale" class="fc-stale">A grade é da consulta anterior. Clique em Consultar para aplicar a empresa ou o período.</p>` : ""}
           ${this.error ? `<div class="fc-error">${this.esc(this.error)}</div>` : ""}
           <div class="fc-board">
             <div class="fc-tree-pane">
@@ -1137,6 +1136,7 @@ const FluxoCaixaApp = {
                   <button type="button" class="btn btn-outline fc-mini" onclick="switchTab('plano-financeiro','Plano Financeiro e Visões')">Alocar</button>
                 </div>` : ""}
               <div class="fc-tree-scroll">
+                ${this.filtersDirty() ? `<p id="fc-stale" class="fc-stale">A grade é da consulta anterior. Clique em Consultar para aplicar a empresa ou o período.</p>` : ""}
                 ${this.loading
                   ? `<div class="fc-loading"><span class="fc-loading-spin" aria-hidden="true"></span><span>buscando lançamentos</span></div>`
                   : ((this.rows || []).length ? this.gridHtml() : "")}
