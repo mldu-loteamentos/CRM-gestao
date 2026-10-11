@@ -198,15 +198,21 @@ window.BoletoCheck = {
     }
     const valor = Number(ctx.valor);
     const retido = Number(ctx.retido) || 0;
+    const liquido = Math.round((valor - (retido > 0.009 ? retido : 0)) * 100) / 100;
+    const aPagar = retido > 0.009 ? liquido : valor;
     if (out.valorBoleto != null && Number.isFinite(valor) && valor > 0) {
       if (out.valorBoleto === 0) out.avisos.push("Boleto sem valor no código de barras: o valor será digitado na hora do pagamento.");
-      else if (retido > 0.009 && Math.abs(out.valorBoleto - (valor - retido)) <= 0.01) {
-        out.retidoAplicado = retido;
-        out.infos.push(`Boleto pelo valor líquido: ${this.money(valor)} − ${this.money(retido)} de impostos retidos = ${this.money(out.valorBoleto)}.`);
-      } else if (Math.abs(out.valorBoleto - valor) > 0.01) {
-        const dif = out.valorBoleto - valor;
-        out.erros.push(`Valor do boleto ${this.money(out.valorBoleto)} diferente do valor a pagar ${this.money(valor)} (${dif > 0 ? "+" : "−"}${this.money(Math.abs(dif))})`
-          + (retido > 0.009 ? `, nem bate com o líquido de ${this.money(valor - retido)} (impostos retidos de ${this.money(retido)}).`
+      else if (Math.abs(out.valorBoleto - aPagar) <= 0.01) {
+        if (retido > 0.009) {
+          out.retidoAplicado = retido;
+          out.infos.push(`Boleto pelo valor líquido: ${this.money(valor)} − ${this.money(retido)} de impostos retidos = ${this.money(out.valorBoleto)}.`);
+        }
+      } else if (retido > 0.009 && Math.abs(out.valorBoleto - valor) <= 0.01) {
+        out.erros.push(`Boleto no valor bruto ${this.money(valor)}. Com imposto retido de ${this.money(retido)}, o valor a pagar é ${this.money(liquido)}.`);
+      } else {
+        const dif = out.valorBoleto - aPagar;
+        out.erros.push(`Valor do boleto ${this.money(out.valorBoleto)} diferente do valor a pagar ${this.money(aPagar)} (${dif > 0 ? "+" : "−"}${this.money(Math.abs(dif))})`
+          + (retido > 0.009 ? `. Bruto ${this.money(valor)} − impostos retidos ${this.money(retido)}.`
             : (dif < 0 ? ". Se a nota tem imposto retido, o imposto não foi lançado no título do Sienge." : ".")));
       }
     }

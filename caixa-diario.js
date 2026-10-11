@@ -26,6 +26,13 @@ function caixaMoney(v) {
   return (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
+function caixaParseMoney(v) {
+  const s = String(v == null ? "" : v).replace(/[^\d,.-]/g, "").trim();
+  if (!s) return 0;
+  const n = s.indexOf(",") >= 0 ? Number(s.replace(/\./g, "").replace(",", ".")) : Number(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
 function caixaEsc(v) {
   return String(v == null ? "" : v)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -221,8 +228,10 @@ const FluxoCaixaDiarioApp = {
   payItems: [],
   progress: "",
   detail: null,
-  detOpen: { in: true, out: true },
+  detOpen: {},
+  contasAbertas: { corrente: true, investimento: true },
   mostrarNaoUteis: false,
+  compAberto: false,
   flags: {},
   tipos: {},
   ccExcl: {},
@@ -625,6 +634,8 @@ const FluxoCaixaDiarioApp = {
           valor: Number(p.val) || 0,
           unidade: u.name || "",
           cc: String(u.enterpriseId || ""),
+          ccNome: u.enterpriseName || "",
+          titulo: u.receivableBillId != null ? String(u.receivableBillId) : "",
           cliente: u.customerName || "",
           cpf: u.customerDoc || "",
           vencimento: p.due,
@@ -972,6 +983,8 @@ const FluxoCaixaDiarioApp = {
       const key = titulo + "|" + parcela + "|" + due;
       if (seen[key]) return;
       seen[key] = true;
+      const cats = Array.isArray(r.receiptsCategories) ? r.receiptsCategories : (Array.isArray(r.paymentsCategories) ? r.paymentsCategories : []);
+      const cat = cats.find((c) => c && (c.costCenterId != null || c.costCenterName)) || {};
       out.push({
         outra: true,
         date: prev,
@@ -980,6 +993,9 @@ const FluxoCaixaDiarioApp = {
         cliente: r.clientName || "",
         companyId,
         empresa: r.companyName || "",
+        cc: cat.costCenterId != null ? String(cat.costCenterId) : "",
+        ccNome: cat.costCenterName || "",
+        unidade: String(r.mainUnit || r.unitName || r.unit || "").trim(),
         titulo,
         parcela,
         docId: doc,
@@ -1077,7 +1093,9 @@ const FluxoCaixaDiarioApp = {
   },
 
   toggle(iso) {
-    this.openDay = this.openDay === iso ? "" : iso;
+    const mesmo = this.openDay === iso;
+    this.openDay = mesmo ? "" : iso;
+    if (!mesmo && this.openDay) this.detOpen = {};
     this.render();
     const det = this.openDay && document.querySelector("#fluxo-caixa-diario-root .cxd-daydet");
     if (det) det.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -1085,6 +1103,11 @@ const FluxoCaixaDiarioApp = {
 
   toggleGrupo(tipo) {
     this.detOpen[tipo] = !this.detOpen[tipo];
+    this.render();
+  },
+
+  toggleContas(id) {
+    this.contasAbertas[id] = this.contasAbertas[id] === false;
     this.render();
   },
 
@@ -1307,6 +1330,61 @@ const FluxoCaixaDiarioApp = {
     return (it && it.tipoConta) === "investimento" ? "Investimento" : "Conta corrente";
   },
 
+  ccNomeDe(id) {
+    const hit = (this._ccAll || []).find((c) => String(c.id) === String(id || ""));
+    return hit && hit.name ? String(hit.name).trim() : "";
+  },
+
+  nomeEmp(it) {
+    return String((it && (it.ccNome || this.ccNomeDe(it.cc || it.ccId))) || "").trim();
+  },
+
+  rotuloEmp(it) {
+    const id = String((it && (it.cc || it.ccId)) || "").trim();
+    const nome = this.nomeEmp(it).toUpperCase();
+    if (id && nome) return id + " - " + nome;
+    return nome || id || "Sem empreendimento";
+  },
+
+  /** empreendimento - unidade (título) NOME DO CLIENTE */
+  resumoLinha(it) {
+    if (!it) return "—";
+    const emp = this.nomeEmp(it).toUpperCase() || String(it.cc || it.ccId || "").trim();
+    const un = String(it.unidade || "").trim() || (it.outra ? String(it.documento || "").trim() : "");
+    const tit = [it.titulo || it.billId, it.parcela].filter(Boolean).join("/");
+    const nome = String(it.cliente || it.credor || it.party || "").trim().toUpperCase();
+    if (it.real && !un && !tit) return nome || String(it.historico || "Movimento").trim() || "—";
+    const corpo = [emp, un].filter(Boolean).join(" - ");
+    const comTit = tit ? (corpo ? corpo + " (" + tit + ")" : "(" + tit + ")") : corpo;
+    return [comTit, nome].filter(Boolean).join(" ") || "—";
+  },
+
+  /** Vencimento original, PMP de 3 meses e o motivo da data no caixa. */
+  dicaLinha(it) {
+    if (!it) return "";
+    const linhas = [];
+    if (it.vencimento) linhas.push("<b>Vencimento original</b> " + caixaEsc(caixaFmtDate(it.vencimento)));
+    if (!it.real && !it.outra) {
+      const pmp = Number(it.pmp) || 0;
+      const quando = pmp > 0 ? pmp + " dia(s) depois do vencimento" : (pmp < 0 ? Math.abs(pmp) + " dia(s) antes do vencimento" : "no próprio vencimento");
+      linhas.push("<b>PMP</b> " + caixaEsc(String(pmp)) + " dia(s) · média de 3 meses, paga " + caixaEsc(quando));
+      const passos = ["soma o PMP ao vencimento"];
+      if (it.vencimento && !caixaEhUtil(it.vencimento)) passos.push("o vencimento não é dia útil, então parte de " + caixaFmtDate(it.vencEfetivo || caixaDiaUtil(it.vencimento, 1)));
+      if (it.deslocadoDe && it.deslocadoDe !== it.date) passos.push("caiu em " + caixaFmtDate(it.deslocadoDe) + " e foi para " + caixaFmtDate(it.date));
+      else passos.push("a previsão fica em " + caixaFmtDate(it.date));
+      linhas.push(caixaEsc(passos.join("; ")) + ".");
+    } else if (it.outra) {
+      linhas.push(it.deslocadoDe
+        ? caixaEsc("O vencimento não é dia útil. O recebimento entra em " + caixaFmtDate(it.date) + ".")
+        : caixaEsc("Recebimento previsto em " + caixaFmtDate(it.date) + "."));
+    } else if (!it.real && it.vencimento) {
+      linhas.push(it.deslocadoDe
+        ? caixaEsc("O pagamento foi para o dia útil " + caixaFmtDate(it.date) + ".")
+        : caixaEsc("Pagamento previsto em " + caixaFmtDate(it.date) + "."));
+    }
+    return linhas.join("<br>");
+  },
+
   /** Como o PMP deslocou a previsão: média de 3 meses e o próximo dia útil do vencimento. */
   pmpTitle(it) {
     if (!it || it.real || it.outra) return "";
@@ -1365,8 +1443,10 @@ const FluxoCaixaDiarioApp = {
           </td>
         </tr>`;
       }).join("");
-      return `<div class="cxd-gbox cxd-gbox-${g.id}">
-        <div class="cxd-gbox-head">
+      const aberto = this.contasAbertas[g.id] !== false;
+      return `<div class="cxd-gbox cxd-gbox-${g.id}${aberto ? "" : " is-fechado"}">
+        <div class="cxd-gbox-head" role="button" tabindex="0" onclick="FluxoCaixaDiarioApp.toggleContas('${g.id}')">
+          <i data-lucide="${aberto ? "chevron-down" : "chevron-right"}" style="width:16px;height:16px;"></i>
           <i data-lucide="${g.id === "investimento" ? "trending-up" : "landmark"}" style="width:15px;height:15px;"></i>
           <span>${caixaEsc(g.name)}</span>
           <small>${g.rows.length} conta(s) · ${g.ligadas} no caixa</small>
@@ -1375,7 +1455,7 @@ const FluxoCaixaDiarioApp = {
             <div class="cxd-gbox-nocaixa"><label>No caixa do dia a dia</label><strong>${caixaMoney(g.marcado)}</strong></div>
           </div>
         </div>
-        <div class="cxd-gbox-body">
+        ${aberto ? `<div class="cxd-gbox-body">
           <table class="cxd-contas">
             <thead><tr>
               <th title="Considerar no saldo inicial">Caixa</th><th>Conta</th><th>Banco</th>
@@ -1383,7 +1463,7 @@ const FluxoCaixaDiarioApp = {
             </tr></thead>
             <tbody>${linhas}</tbody>
           </table>
-        </div>
+        </div>` : ""}
       </div>`;
     }).join("")}</div>`;
   },
@@ -1447,48 +1527,92 @@ const FluxoCaixaDiarioApp = {
     return net;
   },
 
+  /** Prazo mínimo da compromissada e piso que fica na conta corrente. */
+  parametrosComp() {
+    let prazo = 10;
+    let piso = 200000;
+    try {
+      const raw = JSON.parse(localStorage.getItem("cxd_comp") || "{}");
+      const p = Math.round(Number(raw.prazo));
+      const s = Number(raw.piso);
+      if (p >= 1) prazo = p;
+      if (Number.isFinite(s) && s >= 0) piso = s;
+    } catch (e) {}
+    return { prazo, piso };
+  },
+
+  toggleComp() {
+    this.compAberto = !this.compAberto;
+    this.render();
+  },
+
+  salvarComp() {
+    const prazoEl = document.getElementById("cxd-comp-prazo");
+    const pisoEl = document.getElementById("cxd-comp-piso");
+    const prazo = Math.max(1, Math.round(Number(prazoEl && prazoEl.value) || 10));
+    const piso = Math.max(0, caixaParseMoney(pisoEl && pisoEl.value));
+    try { localStorage.setItem("cxd_comp", JSON.stringify({ prazo, piso })); } catch (e) {}
+    this.compAberto = false;
+    this.render();
+  },
+
+  compPainelHtml() {
+    if (!this.compAberto) return "";
+    const p = this.parametrosComp();
+    const pisoTxt = p.piso.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return `<div class="cxd-comp-box">
+      <label>Prazo mínimo
+        <input id="cxd-comp-prazo" type="number" min="1" step="1" value="${p.prazo}">
+        <small>dias</small>
+      </label>
+      <label>Saldo mínimo na conta corrente
+        <input id="cxd-comp-piso" type="text" inputmode="decimal" value="${pisoTxt}">
+      </label>
+      <button type="button" class="cxd-comp-save" onclick="FluxoCaixaDiarioApp.salvarComp()">Salvar</button>
+    </div>`;
+  },
+
   /**
-   * Folga da conta corrente nos próximos 30 dias.
-   * IOF de CDB zera aos 30 dias: o que cabe inteiro nessa janela vai para CDB;
-   * o que volta antes disso cabe na compromissada.
+   * Folga da conta corrente.
+   * IOF de CDB zera aos 30 dias. A compromissada usa o prazo mínimo e deixa o piso na conta corrente.
    */
   aplicacaoHtml(linhas) {
     const hoje = this.hoje();
     const fut = (linhas || []).filter((l) => l.d.date >= hoje);
     if (!fut.length) return "";
+    const par = this.parametrosComp();
     const by = {};
     fut.forEach((l) => { by[l.d.date] = l; });
     const serie = [];
     let saldo = fut[0].acumCc;
+    const janela = Math.max(30, par.prazo);
     serie.push({ date: fut[0].d.date, cc: saldo });
-    for (let i = 1; i < 30; i++) {
+    for (let i = 1; i < janela; i++) {
       const date = caixaAddDays(fut[0].d.date, i);
       const line = by[date];
       saldo = line ? line.acumCc : saldo + this.netPrevistoCc(date);
       serie.push({ date, cc: saldo });
     }
-    const hojeCc = serie[0].cc;
-    const min30 = serie.reduce((m, s) => Math.min(m, s.cc), hojeCc);
-    let cdb = 0;
-    let comp = 0;
-    if (min30 > 0.5) {
-      cdb = min30;
-      if (hojeCc - min30 > 0.5) comp = hojeCc - min30;
-    } else if (hojeCc > 0.5) {
-      let piso = hojeCc;
-      for (let i = 0; i < serie.length; i++) {
-        if (serie[i].cc <= 0.5) break;
-        piso = Math.min(piso, serie[i].cc);
-      }
-      comp = piso;
-    }
+    const minAte = (n) => {
+      let m = Infinity;
+      const fim = Math.min(n, serie.length);
+      for (let i = 0; i < fim; i++) m = Math.min(m, serie[i].cc);
+      return m;
+    };
+    const cabe = (n) => {
+      const folga = minAte(n) - par.piso;
+      return folga > 0.5 ? folga : 0;
+    };
+    const cdb = cabe(30);
+    const comp = Math.max(0, cabe(par.prazo) - cdb);
     const resgates = fut.filter((l) => l.acumCc < -0.5 && l.acumInv > 0.5);
     const msgs = [];
+    const pisoTxt = caixaMoney(par.piso);
     if (cdb > 0.5) {
-      msgs.push(`<p class="cxd-aplica-cdb">Há ${caixaMoney(cdb)} para aplicar em CDB. Esse valor segue na conta corrente pelos próximos 30 dias, prazo em que o IOF zera.</p>`);
+      msgs.push(`<p class="cxd-aplica-cdb">Há ${caixaMoney(cdb)} para aplicar em CDB, deixando ${pisoTxt} na conta corrente. Esse valor segue disponível pelos próximos 30 dias, prazo em que o IOF zera.</p>`);
     }
     if (comp > 0.5) {
-      msgs.push(`<p class="cxd-aplica-comp">${caixaMoney(comp)} pode ser aplicado na compromissada. Essa folga é usada de novo antes de completar 30 dias, então não zera o IOF do CDB.</p>`);
+      msgs.push(`<p class="cxd-aplica-comp">${caixaMoney(comp)} pode ser aplicado na compromissada. Prazo mínimo de ${par.prazo} dia(s), deixando ${pisoTxt} na conta corrente. Essa folga volta antes de completar 30 dias, então não zera o IOF do CDB.</p>`);
     }
     if (resgates.length) {
       const dias = resgates.slice(0, 6).map((l) => `${caixaFmtDate(l.d.date).slice(0, 5)} (${caixaMoney(l.acumCc)})`).join(", ");
@@ -1497,58 +1621,83 @@ const FluxoCaixaDiarioApp = {
     return msgs.length ? `<div class="cxd-aplica">${msgs.join("")}</div>` : "";
   },
 
+  linhaDetalhe(it, cls, click) {
+    const dica = this.dicaLinha(it);
+    return `<tr class="${cls}${click ? " cxd-click" : ""}" ${click || ""}>
+      <td class="cxd-desc cxd-tip">${caixaEsc(this.resumoLinha(it))}${dica ? `<span class="cxd-tip-box">${dica}</span>` : ""}</td>
+      <td class="cxd-num">${caixaMoney(it.valor)}</td>
+    </tr>`;
+  },
+
+  tabelaLinhas(rows) {
+    return `<table class="cxd-sheet cxd-analitico cxd-linhas"><tbody>${rows}</tbody></table>`;
+  },
+
+  grupoDetalhe(tipo, titulo, qtd, total, corpo, extra) {
+    const open = this.detOpen[tipo] === true;
+    return `<div class="cxd-grp cxd-grp-${extra || tipo}">
+      <button type="button" class="cxd-grp-head" onclick="FluxoCaixaDiarioApp.toggleGrupo('${tipo}')">
+        <i data-lucide="${open ? "chevron-down" : "chevron-right"}" style="width:16px;height:16px;"></i>
+        <strong>${titulo}</strong>
+        <span>${qtd} lançamento(s)</span>
+        <b>${caixaMoney(total)}</b>
+      </button>
+      ${open ? corpo : ""}
+    </div>`;
+  },
+
   diaDetalheHtml(aberto) {
     const d = aberto.d;
-    const entradas = (d.itens || []).map((it, i) => {
-      const clicavel = !it.outra && !!((it.customerId || it.clientId) && it.billId);
-      const pmpDica = this.pmpTitle(it);
-      const desc = it.real
-        ? `${caixaEsc(it.party || it.historico || "Crédito em conta")}${it.billId ? " · tít. " + caixaEsc(it.billId) + (it.parcela ? "/" + caixaEsc(it.parcela) : "") : ""}${it.party && it.historico ? " · " + caixaEsc(it.historico) : ""}`
-        : (it.outra
-          ? `${caixaEsc(it.cliente || "—")}${it.empresa ? " · " + caixaEsc(it.empresa) : ""} · tít. ${caixaEsc(it.titulo || "—")}${it.parcela ? "/" + caixaEsc(it.parcela) : ""}${it.docId || it.documento ? " · " + caixaEsc([it.docId, it.documento].filter(Boolean).join(" ")) : ""} · venc. ${caixaFmtDate(it.vencimento)}${it.deslocadoDe ? ` · caía em ${caixaFmtDate(it.deslocadoDe)}, passou para o próximo dia útil` : ""}`
-          : `${caixaEsc(it.cc)} / ${caixaEsc(it.unidade)} · ${caixaEsc(it.cliente || "—")}${it.cpf ? " · CPF " + caixaEsc(it.cpf) : ""} · venc. ${caixaFmtDate(it.vencimento)} + PMP ${it.pmp}d${it.vencimento && !caixaEhUtil(it.vencimento) ? ` · vencimento em dia não útil, paga em ${caixaFmtDate(it.vencEfetivo || caixaDiaUtil(it.vencimento, 1))}` : ""}${it.deslocadoDe ? ` · caía em ${caixaFmtDate(it.deslocadoDe)}, passou para o próximo dia útil` : ""}`);
-      const tipo = it.real ? "Recebido" : (it.outra ? "Outra prevista" : "Previsto");
-      return `<tr class="cxd-det-in${clicavel ? " cxd-click" : ""}" ${clicavel ? `onclick="FluxoCaixaDiarioApp.openEntrada('${d.date}',${i})" title="Ver o extrato do cliente"` : ""}>
-        <td>${tipo}</td>
-        <td class="cxd-desc" ${pmpDica ? `title="${caixaEsc(pmpDica)}"` : ""}>${desc}</td>
-        <td class="cxd-conta">${caixaEsc(this.contaLabel(it))}</td>
-        <td class="cxd-plano">${this.planoHtml(it)}</td>
-        <td>${this.origemHtml(it, "in")}</td>
-        <td>${this.conciliacaoHtml(it)}</td>
-        <td class="cxd-num">${caixaMoney(it.valor)}</td>
-      </tr>`;
-    }).join("");
-    const saidas = (d.pagarItens || []).map((it) => {
-      const clicavel = !!it.titulo;
-      const tipo = it.real ? "Pago" : (it.natureza === "previsao" ? "Previsão" : "Programado");
-      const desc = it.real
-        ? `${caixaEsc(it.credor || it.historico || "Débito em conta")}${it.titulo ? " · tít. " + caixaEsc(it.titulo) + (it.parcela ? "/" + caixaEsc(it.parcela) : "") : ""}${it.documento ? " · " + caixaEsc(it.documento) : ""}`
-        : `tít. ${caixaEsc(it.titulo)}${it.parcela ? "/" + caixaEsc(it.parcela) : ""} · ${caixaEsc(it.credor || "—")}${(it.docId || it.documento) ? " · " + caixaEsc([it.docId, it.documento].filter(Boolean).join(" ")) : ""}${it.deslocadoDe ? ` · vencia em ${caixaFmtDate(it.deslocadoDe)}, ${it.date < it.deslocadoDe ? "antecipado para o dia útil anterior" : "passou para o próximo dia útil"}` : ""}`;
-      return `<tr class="cxd-det-out${clicavel ? " cxd-click" : ""}" ${clicavel ? `onclick="FluxoCaixaDiarioApp.openTitulo('${caixaEsc(it.key)}')" title="Ver o título, os anexos e a forma de pagamento"` : ""}>
-        <td>${tipo}</td>
-        <td class="cxd-desc">${desc}</td>
-        <td class="cxd-conta">${caixaEsc(this.contaLabel(it))}</td>
-        <td class="cxd-plano">${this.planoHtml(it)}</td>
-        <td>${this.origemHtml(it, "out")}</td>
-        <td>${this.conciliacaoHtml(it)}</td>
-        <td class="cxd-num">${caixaMoney(it.valor)}</td>
-      </tr>`;
-    }).join("");
-    const grupo = (tipo, titulo, qtd, total, linhas, vazio) => {
-      const open = this.detOpen[tipo] !== false;
-      return `<div class="cxd-grp cxd-grp-${tipo}">
-        <button type="button" class="cxd-grp-head" onclick="FluxoCaixaDiarioApp.toggleGrupo('${tipo}')">
-          <i data-lucide="${open ? "chevron-down" : "chevron-right"}" style="width:16px;height:16px;"></i>
-          <strong>${titulo}</strong>
-          <span>${qtd} lançamento(s)</span>
-          <b>${caixaMoney(total)}</b>
-        </button>
-        ${open ? `<table class="cxd-sheet cxd-analitico">
-          <colgroup><col style="width:108px"><col><col style="width:18%"><col style="width:16%"><col style="width:140px"><col style="width:120px"><col style="width:120px"></colgroup>
-          <thead><tr><th>Tipo</th><th>Descrição</th><th>Conta</th><th>Plano financeiro</th><th>Origem</th><th>Conciliação</th><th class="cxd-num">Valor</th></tr></thead>
-          <tbody>${linhas || `<tr><td colspan="7" class="cxd-grp-vazio">${vazio}</td></tr>`}</tbody></table>` : ""}
-      </div>`;
+    const lista = (d.itens || []).map((it, i) => ({ it, i }));
+    const carteira = lista.filter((x) => !x.it.real && !x.it.outra);
+    const outros = lista.filter((x) => x.it.outra);
+    const reais = lista.filter((x) => x.it.real);
+    const porEmp = [];
+    const empMap = {};
+    carteira.forEach((x) => {
+      const key = String(x.it.cc || x.it.ccId || "");
+      if (!empMap[key]) {
+        empMap[key] = { key, rotulo: this.rotuloEmp(x.it), itens: [], total: 0 };
+        porEmp.push(empMap[key]);
+      }
+      empMap[key].itens.push(x);
+      empMap[key].total += Number(x.it.valor) || 0;
+    });
+    porEmp.sort((a, b) => a.rotulo.localeCompare(b.rotulo, "pt"));
+    porEmp.forEach((g) => g.itens.sort((a, b) => String(a.it.unidade || "").localeCompare(String(b.it.unidade || ""), "pt") || String(a.it.cliente || "").localeCompare(String(b.it.cliente || ""), "pt")));
+    const linhaIn = (x) => {
+      const abre = !x.it.outra && !!((x.it.customerId || x.it.clientId) && x.it.billId);
+      return this.linhaDetalhe(x.it, "cxd-det-in", abre ? `onclick="FluxoCaixaDiarioApp.openEntrada('${d.date}',${x.i})"` : "");
     };
+    const subs = porEmp.map((g) => {
+      const id = "emp:" + g.key;
+      const abertoEmp = this.detOpen[id] === true;
+      const linhas = g.itens.map(linhaIn).join("");
+      return `<div class="cxd-sub">
+        <button type="button" class="cxd-grp-head" onclick="FluxoCaixaDiarioApp.toggleGrupo('${id}')">
+          <i data-lucide="${abertoEmp ? "chevron-down" : "chevron-right"}" style="width:16px;height:16px;"></i>
+          <strong>${caixaEsc(g.rotulo)}</strong>
+          <span>${g.itens.length} lançamento(s)</span>
+          <b>${caixaMoney(g.total)}</b>
+        </button>
+        ${abertoEmp ? this.tabelaLinhas(linhas) : ""}
+      </div>`;
+    }).join("");
+    const totalCarteira = carteira.reduce((s, x) => s + (Number(x.it.valor) || 0), 0);
+    const totalOutros = outros.reduce((s, x) => s + (Number(x.it.valor) || 0), 0);
+    const totalReais = reais.reduce((s, x) => s + (Number(x.it.valor) || 0), 0);
+    outros.sort((a, b) => this.resumoLinha(a.it).localeCompare(this.resumoLinha(b.it), "pt"));
+    const linhasOutros = outros.map(linhaIn).join("");
+    const linhasReais = reais.map(linhaIn).join("");
+    const linhasSaida = (d.pagarItens || []).map((it) => {
+      const abre = !!it.titulo;
+      return this.linhaDetalhe(it, "cxd-det-out", abre ? `onclick="FluxoCaixaDiarioApp.openTitulo('${caixaEsc(it.key)}')"` : "");
+    }).join("");
+    const blocos = [];
+    if (carteira.length) blocos.push(this.grupoDetalhe("carteira", "Carteira Prevista", carteira.length, totalCarteira, subs, "in"));
+    if (outros.length) blocos.push(this.grupoDetalhe("outros", "Outros Recebimentos", outros.length, totalOutros, this.tabelaLinhas(linhasOutros), "outros"));
+    if (reais.length) blocos.push(this.grupoDetalhe("reais", "Entradas", reais.length, totalReais, this.tabelaLinhas(linhasReais), "in"));
+    if ((d.pagarItens || []).length) blocos.push(this.grupoDetalhe("saidas", "Saídas", d.pagarItens.length, aberto.sair, this.tabelaLinhas(linhasSaida), "out"));
     const al = this.alertasMov([d]);
     return `<div class="cxd-daydet">
       <div class="cxd-daydet-head">
@@ -1559,8 +1708,7 @@ const FluxoCaixaDiarioApp = {
         <span class="cxd-daydet-res">Saldo do dia <b class="${aberto.movimento < 0 ? "cxd-out" : "cxd-in"}">${caixaMoney(aberto.movimento)}</b></span>
         <button type="button" class="btn btn-cancel btn-sm" onclick="FluxoCaixaDiarioApp.toggle('${d.date}')">Fechar</button>
       </div>
-      ${grupo("in", "Entradas", (d.itens || []).length, aberto.entrar, entradas, "Nenhuma entrada neste dia.")}
-      ${grupo("out", "Saídas", (d.pagarItens || []).length, aberto.sair, saidas, "Nenhuma saída neste dia.")}
+      ${blocos.join("")}
     </div>`;
   },
 
@@ -1615,14 +1763,14 @@ const FluxoCaixaDiarioApp = {
       if (!caixaEhUtil(line.d.date)) c.push("cxd-col-naoutil");
       return c.join(" ");
     };
-    const cell = (line, html, cls) => `<td class="${colCls(line)} ${cls || ""}" onclick="FluxoCaixaDiarioApp.toggle('${line.d.date}')">${html}</td>`;
+    const cell = (line, html, cls, extra) => `<td class="${colCls(line)} ${cls || ""}" data-col="${line.d.date}" onclick="FluxoCaixaDiarioApp.toggle('${line.d.date}')"${extra || ""}>${html}</td>`;
     const cabecalho = visiveis.map((line) => {
       const d = line.d;
       const has = (d.itens && d.itens.length) || (d.pagarItens && d.pagarItens.length);
       const wd = semana[new Date(d.date + "T12:00:00").getDay()];
       const al = d.real ? this.alertasMov([d]) : { semConc: 0, manuais: 0 };
       const marcas = [al.semConc ? `${al.semConc} sem conciliação` : "", al.manuais ? `${al.manuais} de caixa e bancos` : ""].filter(Boolean).join(" · ");
-      return `<th class="${colCls(line)}" onclick="FluxoCaixaDiarioApp.toggle('${d.date}')" title="${d.real ? "Realizado (extrato bancário)" : "Previsto"}${!caixaEhUtil(d.date) ? " · fim de semana ou feriado" : ""}${marcas ? " · " + marcas : ""}${has ? " · clique para ver entradas e saídas" : ""}">
+      return `<th class="${colCls(line)}" data-col="${d.date}" onclick="FluxoCaixaDiarioApp.toggle('${d.date}')" title="${d.real ? "Realizado (extrato bancário)" : "Previsto"}${!caixaEhUtil(d.date) ? " · fim de semana ou feriado" : ""}${marcas ? " · " + marcas : ""}${has ? " · clique para ver entradas e saídas" : ""}">
         <div>${caixaFmtDate(d.date).slice(0, 5)}</div>
         <div class="cxd-wd">${d.date === hoje ? '<span class="cxd-tag">hoje</span>' : wd}${al.semConc ? '<span class="cxd-dot cxd-dot-nc"></span>' : (has ? '<span class="cxd-dot"></span>' : "")}</div>
       </th>`;
@@ -1632,9 +1780,9 @@ const FluxoCaixaDiarioApp = {
     const linhaEntradas = visiveis.map((l) => cell(l, caixaMoney(l.entrar), l.entrar ? "cxd-in" : "cxd-zero")).join("");
     const linhaSaidas = visiveis.map((l) => cell(l, caixaMoney(l.sair), l.sair ? "cxd-out" : "cxd-zero")).join("");
     const linhaDia = visiveis.map((l) => cell(l, caixaMoney(l.movimento), sinal(l.movimento))).join("");
-    const linhaAcum = visiveis.map((l) => cell(l, caixaMoney(l.acum), sinal(l.acum))).join("");
+    const tipSaldo = (ccV, invV) => `<span class="cxd-tip-box"><b>Conta corrente</b> ${caixaMoney(ccV)}<br><b>Investimento</b> ${caixaMoney(invV)}</span>`;
+    const linhaAcum = visiveis.map((l) => cell(l, caixaMoney(l.acum) + tipSaldo(l.acumCc, l.acumInv), `cxd-tip ${sinal(l.acum)}`)).join("");
     const linhaCc = visiveis.map((l) => cell(l, caixaMoney(l.acumCc), `${sinal(l.acumCc)}${l.acumCc < -0.5 ? " cxd-resgate" : ""}`)).join("");
-    const linhaInv = visiveis.map((l) => cell(l, caixaMoney(l.acumInv), sinal(l.acumInv))).join("");
     const avisoAplicacao = this.aplicacaoHtml(linhas);
     const aberto = linhas.find((l) => l.d.date === this.openDay);
     const detalheDia = aberto ? this.diaDetalheHtml(aberto) : "";
@@ -1689,7 +1837,7 @@ const FluxoCaixaDiarioApp = {
         #fluxo-caixa-diario-root .cxd-vazio { padding:16px; color:#64748b; background:#fff; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:10px; font-size:.84rem; }
         #fluxo-caixa-diario-root .cxd-contas-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(520px, 1fr)); gap:12px; margin-bottom:10px; align-items:start; }
         #fluxo-caixa-diario-root .cxd-gbox { background:#fff; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden; }
-        #fluxo-caixa-diario-root .cxd-gbox-head { display:flex; align-items:center; gap:8px; padding:9px 12px; background:#e7f6ee; color:#105436; font-weight:700; font-size:.84rem; }
+        #fluxo-caixa-diario-root .cxd-gbox-head { display:flex; align-items:center; gap:8px; width:100%; padding:9px 12px; background:#e7f6ee; color:#105436; font-weight:700; font-size:.84rem; border:0; cursor:pointer; text-align:left; font-family:inherit; }
         #fluxo-caixa-diario-root .cxd-gbox-investimento .cxd-gbox-head { background:#fff7ed; color:#9a3412; }
         #fluxo-caixa-diario-root .cxd-gbox-head small { flex:1; font-weight:500; font-size:.74rem; opacity:.85; }
         #fluxo-caixa-diario-root .cxd-gbox-head strong { font-variant-numeric:tabular-nums; }
@@ -1730,7 +1878,22 @@ const FluxoCaixaDiarioApp = {
         #fluxo-caixa-diario-root .cxd-mx th.cxd-col-open { background:#f37021; }
         #fluxo-caixa-diario-root .cxd-mx td.cxd-col-open { background:#fff4ec; }
         #fluxo-caixa-diario-root .cxd-mx td.cxd-col-past { background:#fafafa; }
-        #fluxo-caixa-diario-root .cxd-mx td:not(.cxd-lbl):hover { background:#f1f5f9; }
+        #fluxo-caixa-diario-root .cxd-mx tr.cxd-row-hot td,
+        #fluxo-caixa-diario-root .cxd-mx th.cxd-hot,
+        #fluxo-caixa-diario-root .cxd-mx td.cxd-hot { box-shadow:inset 0 0 0 999px rgba(243,112,33,.16); }
+        #fluxo-caixa-diario-root .cxd-mx tr.cxd-row-hot td.cxd-hot,
+        #fluxo-caixa-diario-root .cxd-mx tr.cxd-row-hot th.cxd-hot { box-shadow:inset 0 0 0 999px rgba(243,112,33,.34); }
+        #fluxo-caixa-diario-root .cxd-tip-box { display:none; }
+        #cxd-float-tip { position:fixed; z-index:80; background:#0c3d28; color:#fff; padding:8px 10px; border-radius:8px; font-size:.72rem; font-weight:600; line-height:1.45; text-align:left; white-space:nowrap; box-shadow:0 8px 20px rgba(15,23,42,.2); pointer-events:none; }
+        #cxd-float-tip b { font-weight:700; margin-right:6px; }
+        #fluxo-caixa-diario-root .cxd-comp-head { display:flex; justify-content:flex-end; margin:0 0 8px; }
+        #fluxo-caixa-diario-root .cxd-comp-btn { height:34px; display:inline-flex; align-items:center; gap:6px; border:1px solid #105436; background:#fff; color:#105436; border-radius:6px; font-weight:700; font-size:.75rem; padding:0 12px; cursor:pointer; font-family:inherit; }
+        #fluxo-caixa-diario-root .cxd-comp-btn:hover { background:#e7f6ee; }
+        #fluxo-caixa-diario-root .cxd-comp-box { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:10px 12px; margin:0 0 12px; }
+        #fluxo-caixa-diario-root .cxd-comp-box label { font-size:.72rem; font-weight:700; color:#1e3a8a; }
+        #fluxo-caixa-diario-root .cxd-comp-box input { display:block; height:34px; margin-top:4px; border:1px solid #cbd5e1; border-radius:6px; padding:0 8px; min-width:140px; font-size:.84rem; }
+        #fluxo-caixa-diario-root .cxd-comp-box small { display:block; margin-top:2px; font-weight:600; color:#64748b; }
+        #fluxo-caixa-diario-root .cxd-comp-save { height:34px; border:0; border-radius:6px; background:#105436; color:#fff; font-weight:700; padding:0 14px; cursor:pointer; font-family:inherit; }
         #fluxo-caixa-diario-root .cxd-mx .cxd-col-tot { background:#f1f5f9; font-weight:800; border-left:1px solid #cbd5e1; cursor:default; }
         #fluxo-caixa-diario-root .cxd-mx th.cxd-col-tot { background:#0c3d28; }
         #fluxo-caixa-diario-root .cxd-mx tr.cxd-row-cc td { background:#f8fafc; }
@@ -1756,7 +1919,12 @@ const FluxoCaixaDiarioApp = {
         #fluxo-caixa-diario-root .cxd-grp-head span { flex:1; font-weight:500; opacity:.85; font-size:.78rem; }
         #fluxo-caixa-diario-root .cxd-grp-head b { font-variant-numeric:tabular-nums; }
         #fluxo-caixa-diario-root .cxd-grp-in .cxd-grp-head { background:#e7f6ee; color:#105436; border-left:4px solid #105436; }
+        #fluxo-caixa-diario-root .cxd-grp-outros .cxd-grp-head { background:#ecfeff; color:#0e7490; border-left:4px solid #0891b2; }
         #fluxo-caixa-diario-root .cxd-grp-out .cxd-grp-head { background:#fff4ec; color:#c2410c; border-left:4px solid #f37021; }
+        #fluxo-caixa-diario-root .cxd-sub { margin:0 10px 0 20px; }
+        #fluxo-caixa-diario-root .cxd-sub .cxd-grp-head { background:#f8fafc; color:#0f172a; border-left:4px solid #105436; }
+        #fluxo-caixa-diario-root .cxd-grp .cxd-linhas td:first-child { width:auto; font-weight:700; font-size:.8rem; }
+        #fluxo-caixa-diario-root .cxd-linhas td.cxd-num { width:140px; font-weight:800; }
         #fluxo-caixa-diario-root .cxd-grp-in td { background:#f7fcf9; color:#105436; }
         #fluxo-caixa-diario-root .cxd-grp-out td { background:#fffaf6; color:#9a3412; }
         #fluxo-caixa-diario-root .cxd-grp td:first-child { width:96px; font-weight:700; font-size:.76rem; }
@@ -1808,6 +1976,10 @@ const FluxoCaixaDiarioApp = {
           <p class="cxd-title">CONTAS COM SALDO <span>· ligue as contas que entram no caixa</span></p>
           ${this.contasHtml()}
           <div class="cxd-saldo-ini"><span>${iniLabel}</span><span>${caixaMoney(saldoInicial)}</span></div>
+          <div class="cxd-comp-head">
+            <button type="button" class="cxd-comp-btn" onclick="FluxoCaixaDiarioApp.toggleComp()"><i data-lucide="sliders-horizontal" style="width:14px;height:14px;"></i> Parametrizar compromissada</button>
+          </div>
+          ${this.compPainelHtml()}
           ${avisoAplicacao}
           ${this.loading ? `<p style="color:#64748b;">Montando o fluxo…</p>` : `
           <div class="cxd-mx-bar">
@@ -1820,16 +1992,15 @@ const FluxoCaixaDiarioApp = {
               <thead><tr>
                 <th class="cxd-lbl">Dia</th>
                 ${cabecalho}
-                <th class="cxd-col-tot">Total</th>
+                <th class="cxd-col-tot" data-col="tot">Total</th>
               </tr></thead>
               <tbody>
-                <tr><td class="cxd-lbl">Saldo inicial</td>${linhaInicial}<td class="cxd-col-tot">${caixaMoney(saldoInicial)}</td></tr>
-                <tr><td class="cxd-lbl">Entradas</td>${linhaEntradas}<td class="cxd-col-tot cxd-in">${caixaMoney(totEntrar)}</td></tr>
-                <tr><td class="cxd-lbl">Saídas</td>${linhaSaidas}<td class="cxd-col-tot cxd-out">${caixaMoney(totSair)}</td></tr>
-                <tr class="cxd-row-dia"><td class="cxd-lbl">Saldo do dia</td>${linhaDia}<td class="cxd-col-tot ${sinal(totEntrar - totSair)}">${caixaMoney(totEntrar - totSair)}</td></tr>
-                <tr class="cxd-row-cc"><td class="cxd-lbl" title="Saldo das contas correntes ligadas, depois das entradas e saídas do dia">Saldo acum. conta corrente</td>${linhaCc}<td class="cxd-col-tot ${sinal(fimCc)}">${caixaMoney(fimCc)}</td></tr>
-                <tr class="cxd-row-inv"><td class="cxd-lbl" title="Saldo das aplicações ligadas. O previsto de receber e pagar passa pela conta corrente.">Saldo acum. investimento</td>${linhaInv}<td class="cxd-col-tot ${sinal(fimInv)}">${caixaMoney(fimInv)}</td></tr>
-                <tr class="cxd-row-acum"><td class="cxd-lbl">Saldo total</td>${linhaAcum}<td class="cxd-col-tot ${sinal(fim)}">${caixaMoney(fim)}</td></tr>
+                <tr><td class="cxd-lbl">Saldo inicial</td>${linhaInicial}<td class="cxd-col-tot" data-col="tot">${caixaMoney(saldoInicial)}</td></tr>
+                <tr><td class="cxd-lbl">Entradas</td>${linhaEntradas}<td class="cxd-col-tot cxd-in" data-col="tot">${caixaMoney(totEntrar)}</td></tr>
+                <tr><td class="cxd-lbl">Saídas</td>${linhaSaidas}<td class="cxd-col-tot cxd-out" data-col="tot">${caixaMoney(totSair)}</td></tr>
+                <tr class="cxd-row-dia"><td class="cxd-lbl">Saldo do dia</td>${linhaDia}<td class="cxd-col-tot ${sinal(totEntrar - totSair)}" data-col="tot">${caixaMoney(totEntrar - totSair)}</td></tr>
+                <tr class="cxd-row-cc"><td class="cxd-lbl" title="Saldo das contas correntes ligadas, depois das entradas e saídas do dia">Saldo acum. conta corrente</td>${linhaCc}<td class="cxd-col-tot ${sinal(fimCc)}" data-col="tot">${caixaMoney(fimCc)}</td></tr>
+                <tr class="cxd-row-acum"><td class="cxd-lbl">Saldo total</td>${linhaAcum}<td class="cxd-col-tot cxd-tip ${sinal(fim)}" data-col="tot">${caixaMoney(fim)}${tipSaldo(fimCc, fimInv)}</td></tr>
               </tbody>
             </table>
           </div>
@@ -1854,7 +2025,58 @@ const FluxoCaixaDiarioApp = {
       if (el && prevListas[i]) el.scrollTop = prevListas[i];
     });
     this.bindCompanyFilter();
+    this.bindMxHover();
     if (window.lucide) lucide.createIcons();
+  },
+
+  bindMxHover() {
+    const table = document.querySelector("#fluxo-caixa-diario-root .cxd-mx");
+    const dropTip = () => {
+      const tip = document.getElementById("cxd-float-tip");
+      if (tip) tip.remove();
+    };
+    if (!table) { dropTip(); return; }
+    const clear = () => {
+      table.querySelectorAll(".cxd-hot").forEach((el) => el.classList.remove("cxd-hot"));
+      table.querySelectorAll("tr.cxd-row-hot").forEach((el) => el.classList.remove("cxd-row-hot"));
+      dropTip();
+    };
+    const showTip = (cell) => {
+      const tipCell = cell && cell.closest
+        ? (cell.classList.contains("cxd-tip") ? cell : cell.closest(".cxd-tip"))
+        : null;
+      const box = tipCell ? tipCell.querySelector(".cxd-tip-box") : null;
+      if (!box) { dropTip(); return; }
+      let tip = document.getElementById("cxd-float-tip");
+      if (!tip) {
+        tip = document.createElement("div");
+        tip.id = "cxd-float-tip";
+        document.body.appendChild(tip);
+      }
+      tip.innerHTML = box.innerHTML;
+      const r = tipCell.getBoundingClientRect();
+      const w = tip.offsetWidth;
+      const h = tip.offsetHeight;
+      tip.style.left = Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8)) + "px";
+      tip.style.top = Math.max(8, r.top - h - 6) + "px";
+    };
+    table.addEventListener("mouseover", (ev) => {
+      const cell = ev.target.closest("td, th");
+      if (!cell || !table.contains(cell)) return;
+      table.querySelectorAll(".cxd-hot").forEach((el) => el.classList.remove("cxd-hot"));
+      table.querySelectorAll("tr.cxd-row-hot").forEach((el) => el.classList.remove("cxd-row-hot"));
+      const tr = cell.parentElement;
+      if (tr) tr.classList.add("cxd-row-hot");
+      const col = cell.getAttribute("data-col");
+      if (col != null) table.querySelectorAll('[data-col="' + col + '"]').forEach((el) => el.classList.add("cxd-hot"));
+      showTip(cell);
+    });
+    table.addEventListener("mouseleave", clear);
+    const det = document.querySelector("#fluxo-caixa-diario-root .cxd-daydet");
+    if (det) {
+      det.addEventListener("mouseover", (ev) => showTip(ev.target));
+      det.addEventListener("mouseleave", dropTip);
+    }
   }
 };
 

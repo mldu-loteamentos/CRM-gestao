@@ -110,17 +110,22 @@ window.NotaFiscalCheck = {
     const lista = Array.isArray(res) ? res : ((res && (res.results || res.data)) || []);
     const pick = (o, ks) => { for (const k of ks) if (o[k] != null && o[k] !== "") return o[k]; return null; };
     return lista.filter((t) => t && typeof t === "object").map((t) => {
-      const nome = String(pick(t, ["taxName", "name", "description", "taxDescription", "taxAcronym", "acronym", "taxTypeName"]) || "").trim();
-      let tipo = this.tipo(nome);
-      if (!tipo && pick(t, ["ibgeCityId", "cityId", "ibgeCode"])) tipo = "ISS";
       const id = pick(t, ["taxId", "id", "taxTypeId"]);
+      const nome = String(pick(t, ["taxName", "name", "description", "taxDescription", "taxAcronym", "acronym", "taxTypeName"]) || id || "").trim();
+      let tipo = this.tipo(nome);
+      if (!tipo && /^(iss|irrf|inss|pis|cofins|csll|csrf)$/i.test(String(id || ""))) tipo = String(id).toUpperCase();
+      if (!tipo && pick(t, ["ibgeCityId", "cityId", "ibgeCode"])) tipo = "ISS";
+      const base = this.num(pick(t, ["taxableBaseAmount", "taxBase", "baseAmount", "calculationBase", "taxableBase", "baseValue"]));
+      const aliquota = this.num(pick(t, ["rate", "taxRate", "aliquot", "aliquota", "percentage"]));
+      let valor = this.num(pick(t, ["amount", "value", "taxAmount", "retainedAmount", "taxValue", "retainedValue"]));
+      if (!(valor > 0.004) && base > 0 && aliquota > 0) valor = Math.round(base * aliquota) / 100;
       return {
         id: id != null ? String(id) : "",
         nome: nome || (id != null ? `Imposto ${id}` : "Imposto"),
         tipo,
-        base: this.num(pick(t, ["taxableBaseAmount", "taxBase", "baseAmount", "calculationBase", "taxableBase", "baseValue"])),
-        aliquota: this.num(pick(t, ["rate", "taxRate", "aliquot", "aliquota", "percentage"])),
-        valor: this.num(pick(t, ["amount", "value", "taxAmount", "retainedAmount", "taxValue", "retainedValue"])) || 0
+        base,
+        aliquota,
+        valor: valor || 0
       };
     }).filter((t) => t.valor > 0.004);
   },

@@ -32,10 +32,15 @@ const MarketingBudgetApp = {
     distratos: [],
     eventos: [],
     filtroGasto: "todos",
-    buscaCredor: "",
-    filtroPlano: "",
+    credoresSel: [],
+    planosSel: [],
+    credorOpen: false,
+    planoOpen: false,
+    credorQuery: "",
+    planoQuery: "",
     sortGasto: "data",
     sortGastoDir: "desc",
+    lotesCache: null,
     ccsCfg: [],
     aba: "budget",
     ctrEscopo: "periodo",
@@ -246,24 +251,73 @@ const MarketingBudgetApp = {
       + (atual ? [atual] : []).concat(lista).map((c) => `<option value="${this.esc(c.id)}" ${String(c.id) === sel ? "selected" : ""}>${this.esc(this.ccLabel(c))}</option>`).join("");
   },
 
-  lotesDoEmpreendimento() {
-    const id = String(this.state.ccId || "");
-    if (!id) return { total: 0, vendidos: 0, faltam: 0 };
+  contarLotes(units) {
     const E = window.EstoqueComercialApp;
-    let units = ((E && E.state && E.state.units) || []).filter((u) => String(u.enterpriseId) === id);
-    if (!units.length) {
-      try {
-        const raw = JSON.parse(localStorage.getItem("crm_estoque_posicao_v1") || "null");
-        units = ((raw && (raw.units || (raw.data && raw.data.units))) || []).filter((u) => String(u.enterpriseId) === id);
-      } catch (e) { units = []; }
-    }
     const vendido = (u) => {
       if (E && typeof E.isSoldUnit === "function") return E.isSoldUnit(u);
       const code = String((u && u.commercialStock) || "").toUpperCase();
       return ["V", "O", "G", "P", "L"].includes(code) || !!(u && u.contractId);
     };
-    const vendidos = units.filter(vendido).length;
-    return { total: units.length, vendidos, faltam: Math.max(0, units.length - vendidos) };
+    const lista = units || [];
+    const vendidos = lista.filter(vendido).length;
+    return { total: lista.length, vendidos, faltam: Math.max(0, lista.length - vendidos) };
+  },
+
+  unitsEstoque(id) {
+    const E = window.EstoqueComercialApp;
+    const mesmo = (u) => String((u && (u.enterpriseId || u.costCenterId)) || "") === id;
+    let units = ((E && E.state && E.state.units) || []).filter(mesmo);
+    if (units.length) return units;
+    try {
+      const raw = JSON.parse(localStorage.getItem("crm_estoque_posicao_v1") || "null");
+      units = ((raw && raw.units) || []).filter(mesmo);
+    } catch (e) { units = []; }
+    return units;
+  },
+
+  lotesDoEmpreendimento() {
+    const id = String(this.state.ccId || "");
+    if (!id) return { total: 0, vendidos: 0, faltam: 0, status: "" };
+    const cache = this.state.lotesCache;
+    if (cache && cache.id === id) return cache;
+    const units = this.unitsEstoque(id);
+    if (units.length) {
+      this.state.lotesCache = Object.assign({ id, status: "ok" }, this.contarLotes(units));
+      return this.state.lotesCache;
+    }
+    this.carregarLotesEstoque(id);
+    return { total: 0, vendidos: 0, faltam: 0, status: "lendo" };
+  },
+
+  /** Lotes da Posição de estoque deste empreendimento (memória, cache local ou Firebase). */
+  async carregarLotesEstoque(id) {
+    if (this._lotesLoading === id) return;
+    this._lotesLoading = id;
+    try {
+      let units = this.unitsEstoque(id);
+      if (!units.length) {
+        const fc = window.firebaseCollections;
+        if (window.firebaseDb && fc && fc.getDoc && fc.doc) {
+          units = [];
+          for (let n = 0; n < 40; n++) {
+            const snap = await fc.getDoc(fc.doc(window.firebaseDb, "estoque_comercial", "cc_" + id + "_" + n));
+            const existe = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+            if (!existe) break;
+            const data = snap.data() || {};
+            if (!Array.isArray(data.units) || !data.units.length) break;
+            units = units.concat(data.units);
+          }
+        }
+      }
+      if (String(this.state.ccId) !== id) return;
+      this.state.lotesCache = Object.assign({ id, status: units.length ? "ok" : "vazio" }, this.contarLotes(units));
+      if (this.state.aba === "contratos" && !this.state.loading) this.render();
+    } catch (e) {
+      console.warn("[Budget] lotes da posição de estoque", e);
+      if (String(this.state.ccId) === id) this.state.lotesCache = { id, total: 0, vendidos: 0, faltam: 0, status: "vazio" };
+    } finally {
+      if (this._lotesLoading === id) this._lotesLoading = "";
+    }
   },
 
   /** Sem estoque nem carteira carregados nesta sessão, lê do Firebase quais empreendimentos têm unidades. */
@@ -420,8 +474,11 @@ const MarketingBudgetApp = {
     s.progress = "Lendo o cadastro da obra (VGV)…";
     s.progressRatio = 0.06;
     s.rows = [];
-    s.buscaCredor = "";
-    s.filtroPlano = "";
+    s.credoresSel = [];
+    s.planosSel = [];
+    s.credorOpen = false;
+    s.planoOpen = false;
+    s.lotesCache = null;
     s.vendas = [];
     s.distratos = [];
     s.adimpl = { status: "", porVenda: {} };
@@ -957,15 +1014,8 @@ const MarketingBudgetApp = {
     this.pintarGastos();
   },
 
-  setBuscaCredor(v) {
-    this.state.buscaCredor = v;
-    this.pintarGastosCorpo();
-  },
-
-  setFiltroPlano(id) {
-    this.state.filtroPlano = id || "";
-    this.pintarGastos();
-  },
+  GASTO_CREDOR: "mkb-credores",
+  GASTO_PLANO: "mkb-planos",
 
   ordenarGasto(col) {
     const s = this.state;
@@ -981,6 +1031,7 @@ const MarketingBudgetApp = {
     const box = document.getElementById("mkb-gastos");
     if (!box) return;
     box.innerHTML = this.gastosHtml(this.resumo());
+    this.bindGastoFiltros();
     if (window.lucide) lucide.createIcons();
   },
 
@@ -990,38 +1041,52 @@ const MarketingBudgetApp = {
     if (!body || !sel) { this.pintarGastos(); return; }
     const view = this.gastosView(this.resumo());
     body.innerHTML = this.gastosLinhas(view.lista);
-    sel.innerHTML = this.gastosSelecaoHtml(view.lista);
+    sel.innerHTML = this.gastosSelecaoHtml(view);
   },
 
   gastosView(r) {
     const s = this.state;
     const base = s.filtroGasto === "todos" ? r.rows : r.rows.filter((x) => x.status === s.filtroGasto);
+    const credores = new Map();
     const planos = new Map();
-    base.forEach((x) => { if (!planos.has(String(x.catId))) planos.set(String(x.catId), x.catNome || "Sem plano financeiro"); });
-    const q = String(s.buscaCredor || "").trim().toLowerCase();
+    base.forEach((x) => {
+      const nome = String(x.credor || "").trim();
+      if (nome) credores.set(nome, nome.toUpperCase());
+      const cat = String(x.catId || "");
+      if (cat && !planos.has(cat)) planos.set(cat, (x.catNome || "Sem plano financeiro").toUpperCase());
+    });
+    const credItems = [...credores.entries()].map(([id, label]) => ({ id, label })).sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+    const planItems = [...planos.entries()].map(([id, nome]) => ({ id, label: `${id} - ${nome}` })).sort((a, b) => a.label.localeCompare(b.label, "pt-BR", { numeric: true }));
+    const credSel = new Set((s.credoresSel || []).map(String));
+    const planSel = new Set((s.planosSel || []).map(String));
     let lista = base;
-    if (q) lista = lista.filter((x) => String(x.credor || "").toLowerCase().includes(q));
-    if (s.filtroPlano) lista = lista.filter((x) => String(x.catId) === String(s.filtroPlano));
+    if (credSel.size) lista = lista.filter((x) => credSel.has(String(x.credor || "").trim()));
+    if (planSel.size) lista = lista.filter((x) => planSel.has(String(x.catId)));
     const dir = s.sortGastoDir === "asc" ? 1 : -1;
     const campo = s.sortGasto === "plano" ? "catNome" : "data";
-    lista = lista.slice().sort((a, b) => {
-      const c = String(a[campo] || "").localeCompare(String(b[campo] || ""), "pt-BR", { numeric: true, sensitivity: "base" });
-      return c * dir;
-    });
-    return { lista, planos: [...planos.entries()].sort((a, b) => a[1].localeCompare(b[1], "pt-BR", { sensitivity: "base" })) };
+    lista = lista.slice().sort((a, b) => String(a[campo] || "").localeCompare(String(b[campo] || ""), "pt-BR", { numeric: true, sensitivity: "base" }) * dir);
+    return { lista, base: base.length, credores: credItems, planos: planItems };
   },
 
-  gastosSelecaoHtml(lista) {
+  gastosSelecaoHtml(view) {
+    const lista = view.lista;
     const total = lista.reduce((t, x) => t + (Number(x.valor) || 0), 0);
     const n = lista.length;
-    return `<span>Seleção</span><strong>${this.valorLista(total)}</strong><small>${n.toLocaleString("pt-BR")} título${n === 1 ? "" : "s"}</small>`;
+    const s = this.state;
+    const nc = (s.credoresSel || []).length;
+    const np = (s.planosSel || []).length;
+    const partes = [];
+    if (nc) partes.push(nc === 1 ? "1 credor" : nc + " credores");
+    if (np) partes.push(np === 1 ? "1 plano financeiro" : np + " planos financeiros");
+    const de = view.base !== n ? ` de ${view.base.toLocaleString("pt-BR")}` : "";
+    return `<span>Seleção</span><strong>${this.valorLista(total)}</strong><small>${n.toLocaleString("pt-BR")} título${n === 1 ? "" : "s"}${de}</small><em>${partes.length ? partes.join(" · ") : "Toda a lista"}</em>`;
   },
 
   gastosLinhas(lista) {
     const s = this.state;
     const nomes = { realizado: "Realizado", comprometido: "Comprometido", previsao: "Previsão" };
     if (!lista.length) {
-      const vazio = s.buscaCredor || s.filtroPlano ? "com esse filtro" : (s.filtroGasto === "todos" ? "no período" : "nesta situação");
+      const vazio = (s.credoresSel || []).length || (s.planosSel || []).length ? "com esse filtro" : (s.filtroGasto === "todos" ? "no período" : "nesta situação");
       return `<tr><td colspan="7" class="mkb-vazio">Nenhum gasto ${vazio}.</td></tr>`;
     }
     return lista.map((x) => `<tr class="mkb-click" onclick="MarketingBudgetApp.abrirDespesa(${x.idx})" title="Clique para ver o resumo do título">
@@ -1035,27 +1100,98 @@ const MarketingBudgetApp = {
       </tr>`).join("");
   },
 
-  exportarGastos() {
-    if (typeof XLSX === "undefined") {
-      alert("A biblioteca XLSX não foi carregada. Atualize a página e tente novamente.");
+  async exportarGastos() {
+    const Inv = window.InvestimentoApp;
+    let ExcelJS = window.ExcelJS;
+    try {
+      if (!ExcelJS && Inv && typeof Inv.ensureExcelJS === "function") ExcelJS = await Inv.ensureExcelJS();
+    } catch (e) {
+      ExcelJS = null;
+    }
+    if (!ExcelJS) {
+      alert("Não foi possível carregar a biblioteca de Excel. Recarregue a página.");
       return;
     }
     const nomes = { realizado: "Realizado", comprometido: "Comprometido", previsao: "Previsão" };
-    const lista = this.gastosView(this.resumo()).lista;
-    const aoa = [["Data", "Situação", "Título", "Parcela", "Credor", "Documento", "Plano financeiro", "Valor"]];
-    lista.forEach((x) => aoa.push([
-      this.dataBr(x.data), nomes[x.status] || x.status, x.titulo, x.parcela || "",
-      x.credor || "", x.documento || "", x.catNome || "", Number(x.valor) || 0
-    ]));
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    for (let i = 1; i < aoa.length; i++) {
-      const cell = ws[XLSX.utils.encode_cell({ r: i, c: 7 })];
-      if (cell) cell.z = "#,##0.00";
+    const view = this.gastosView(this.resumo());
+    const lista = view.lista;
+    const cc = this.ccAtual();
+    const paint = (cell, opts) => (Inv && Inv.excelPaint ? Inv.excelPaint(cell, opts) : null);
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "CRM Moura Leite";
+    wb.created = new Date();
+    let imgId = null;
+    if (Inv && typeof Inv.logoDataUrl === "function") {
+      try {
+        const logo = await Inv.logoDataUrl();
+        imgId = wb.addImage({ base64: logo.dataUrl, extension: logo.extension || "png" });
+      } catch (e) { /* logo opcional */ }
     }
-    ws["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 36 }, { wch: 16 }, { wch: 36 }, { wch: 14 }];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Títulos");
-    XLSX.writeFile(wb, "budget_titulos_" + new Date().toISOString().slice(0, 10) + ".xlsx");
+    const ws = wb.addWorksheet("Títulos", { properties: { showGridLines: false } });
+    ws.views = [{ state: "frozen", ySplit: 4, topLeftCell: "A5", activeCell: "A5", showGridLines: false }];
+    ws.columns = [
+      { width: 14 }, { width: 16 }, { width: 14 }, { width: 12 },
+      { width: 42 }, { width: 18 }, { width: 36 }, { width: 16 }
+    ];
+    ws.mergeCells("A1:H2");
+    ws.getRow(1).height = 28;
+    ws.getRow(2).height = 22;
+    const quando = Inv && Inv.generatedAtLabel ? Inv.generatedAtLabel(new Date()) : "";
+    const sub = [cc ? this.ccLabel(cc) : "", this.dataBr(this.state.startDate) + " a " + this.dataBr(this.state.endDate), quando].filter(Boolean).join(" · ");
+    const title = ws.getCell("A1");
+    title.value = {
+      richText: [
+        { font: { name: "Calibri", size: 14, bold: true, color: { argb: "FF475569" } }, text: "Títulos que compõem a verba\n" },
+        { font: { name: "Calibri", size: 9, color: { argb: "FF64748B" } }, text: sub }
+      ]
+    };
+    paint(title, { fill: "FFFFFFFF", align: { vertical: "middle", horizontal: "left", wrapText: true, indent: 8 } });
+    if (imgId != null) {
+      try { ws.addImage(imgId, { tl: { col: 0.04, row: 0.08 }, ext: { width: 58, height: 58 } }); } catch (e) {}
+    }
+    ws.getRow(3).height = 8;
+    const heads = ["Data", "Situação", "Título", "Parcela", "Credor", "Documento", "Plano financeiro", "Valor"];
+    const head = ws.getRow(4);
+    head.height = 20;
+    heads.forEach((h, i) => {
+      const cell = head.getCell(i + 1);
+      cell.value = h;
+      paint(cell, {
+        fill: "FF334155",
+        font: { bold: true, size: 9, color: { argb: "FFFFFFFF" } },
+        align: { horizontal: i === 7 ? "right" : "left", vertical: "middle" },
+        border: true
+      });
+    });
+    lista.forEach((x, i) => {
+      const row = ws.getRow(5 + i);
+      row.height = 18;
+      const vals = [this.dataBr(x.data), nomes[x.status] || x.status, x.titulo, x.parcela || "", x.credor || "", x.documento || "", x.catNome || ""];
+      const bg = i % 2 ? "FFF8FAFC" : "FFFFFFFF";
+      vals.forEach((v, c) => {
+        const cell = row.getCell(c + 1);
+        cell.value = v;
+        paint(cell, { fill: bg, font: { size: 9 }, align: { vertical: "middle", horizontal: "left" }, border: true });
+      });
+      const valor = row.getCell(8);
+      valor.value = Number(x.valor) || 0;
+      paint(valor, { fill: bg, font: { size: 9 }, align: { vertical: "middle", horizontal: "right" }, border: true, numFmt: "#,##0.00" });
+    });
+    const tot = ws.getRow(5 + lista.length);
+    tot.height = 20;
+    tot.getCell(1).value = "Seleção";
+    paint(tot.getCell(1), { fill: "FFECFDF5", font: { bold: true, size: 9, color: { argb: "FF105436" } }, align: { vertical: "middle" }, border: true });
+    for (let c = 2; c <= 7; c++) paint(tot.getCell(c), { fill: "FFECFDF5", border: true });
+    const soma = tot.getCell(8);
+    soma.value = lista.reduce((t, x) => t + (Number(x.valor) || 0), 0);
+    paint(soma, { fill: "FFECFDF5", font: { bold: true, size: 9, color: { argb: "FF105436" } }, align: { horizontal: "right", vertical: "middle" }, border: true, numFmt: "#,##0.00" });
+    const buf = await wb.xlsx.writeBuffer();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    a.download = "budget_titulos_" + new Date().toISOString().slice(0, 10) + ".xlsx";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
   },
 
   /* ---------- render ---------- */
@@ -1080,18 +1216,15 @@ const MarketingBudgetApp = {
     const view = this.gastosView(r);
     const chips = ["todos", "realizado", "comprometido", "previsao"].map((id) => `<button type="button" class="mkb-chip${s.filtroGasto === id ? " is-on" : ""}" onclick="MarketingBudgetApp.setFiltroGasto('${id}')">${id === "todos" ? "Todos" : nomes[id]} <b>${cont[id]}</b></button>`).join("");
     const thSort = (col, rotulo, direita) => `<th onclick="MarketingBudgetApp.ordenarGasto('${col}')" style="cursor:pointer;user-select:none;${direita ? "text-align:right;" : ""}">${rotulo} <i data-lucide="chevrons-up-down" style="width:11px;vertical-align:middle;"></i></th>`;
-    const planos = view.planos.some(([id]) => String(id) === String(s.filtroPlano)) || !s.filtroPlano
-      ? view.planos
-      : view.planos.concat([[s.filtroPlano, s.filtroPlano]]);
+    const filtro = (id, label, items, selected, open, query, nouns) => window.MlEmpresaFilter ? MlEmpresaFilter.html({
+      id, label, items, selectedIds: selected, open, query, emptyMeansAll: true, countMode: true, nouns
+    }) : "";
     return `<div class="mkb-gastos-bar">
       <div class="mkb-chips">${chips}</div>
-      <input id="mkb-credor" class="mkb-busca" type="search" placeholder="Credor" value="${this.esc(s.buscaCredor)}" oninput="MarketingBudgetApp.setBuscaCredor(this.value)">
-      <select id="mkb-plano" class="mkb-plano" onchange="MarketingBudgetApp.setFiltroPlano(this.value)">
-        <option value="">Plano financeiro</option>
-        ${planos.map(([id, nome]) => `<option value="${this.esc(id)}"${String(s.filtroPlano) === String(id) ? " selected" : ""}>${this.esc(nome)}</option>`).join("")}
-      </select>
+      <div class="mkb-filtro" id="mkb-credor-slot">${filtro(this.GASTO_CREDOR, "Credor", view.credores, s.credoresSel, s.credorOpen, s.credorQuery, { singular: "credor", plural: "credores", none: "Nenhum credor", noMatch: "Nenhum credor com esse nome." })}</div>
+      <div class="mkb-filtro" id="mkb-plano-slot">${filtro(this.GASTO_PLANO, "Plano financeiro", view.planos, s.planosSel, s.planoOpen, s.planoQuery, { singular: "plano financeiro", plural: "planos financeiros", none: "Nenhum plano financeiro", noMatch: "Nenhum plano financeiro com esse nome." })}</div>
       <div class="mkb-gastos-tools">
-        <div class="mkb-sel-val" id="mkb-sel-val">${this.gastosSelecaoHtml(view.lista)}</div>
+        <div class="mkb-sel-val" id="mkb-sel-val">${this.gastosSelecaoHtml(view)}</div>
         <button type="button" class="btn btn-excel" onclick="MarketingBudgetApp.exportarGastos()" title="Exportar tabela atual para Excel">
           <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
         </button>
@@ -1154,6 +1287,109 @@ const MarketingBudgetApp = {
         <thead><tr><th>Emissão</th><th>Contrato</th><th>Unidade</th><th>Cliente</th><th style="text-align:right;">Valor</th><th>Situação</th><th>Atrasado desde</th></tr></thead>
         <tbody>${linhas}</tbody>
       </table></div>`;
+  },
+
+  gastoFiltroOpts(qual) {
+    const s = this.state;
+    const view = this.gastosView(this.resumo());
+    if (qual === "plano") {
+      return {
+        id: this.GASTO_PLANO,
+        label: "Plano financeiro",
+        items: view.planos,
+        selectedIds: s.planosSel,
+        open: !!s.planoOpen,
+        query: s.planoQuery || "",
+        emptyMeansAll: true,
+        countMode: true,
+        nouns: { singular: "plano financeiro", plural: "planos financeiros", none: "Nenhum plano financeiro", noMatch: "Nenhum plano financeiro com esse nome." }
+      };
+    }
+    return {
+      id: this.GASTO_CREDOR,
+      label: "Credor",
+      items: view.credores,
+      selectedIds: s.credoresSel,
+      open: !!s.credorOpen,
+      query: s.credorQuery || "",
+      emptyMeansAll: true,
+      countMode: true,
+      nouns: { singular: "credor", plural: "credores", none: "Nenhum credor", noMatch: "Nenhum credor com esse nome." }
+    };
+  },
+
+  pintarGastoFiltro(id) {
+    const slot = document.getElementById(id === this.GASTO_PLANO ? "mkb-plano-slot" : "mkb-credor-slot");
+    if (!slot || !window.MlEmpresaFilter) return;
+    const opts = this.gastoFiltroOpts(id === this.GASTO_PLANO ? "plano" : "credor");
+    const lista = document.getElementById(id + "-list");
+    const top = lista ? lista.scrollTop : 0;
+    slot.innerHTML = MlEmpresaFilter.html(opts);
+    const nova = document.getElementById(id + "-list");
+    if (nova && top) nova.scrollTop = top;
+    if (window.lucide) lucide.createIcons();
+    if (opts.open) {
+      const q = document.getElementById(id + "-search");
+      if (q) q.focus();
+    }
+  },
+
+  pintarGastoLista(id) {
+    const el = document.getElementById(id + "-list");
+    const opts = this.gastoFiltroOpts(id === this.GASTO_PLANO ? "plano" : "credor");
+    if (el && window.MlEmpresaFilter) {
+      const top = el.scrollTop;
+      el.innerHTML = MlEmpresaFilter.listHtml(opts);
+      el.scrollTop = top;
+    }
+    const btn = document.querySelector(`#${id} .ml-emp-filter-btn span`);
+    if (btn && window.MlEmpresaFilter) btn.textContent = MlEmpresaFilter.buttonLabel(opts.items, opts.selectedIds, true, true, opts.nouns);
+  },
+
+  bindGastoFiltros() {
+    if (!window.MlEmpresaFilter) return;
+    const self = this;
+    const ligar = (id, openKey, queryKey, selKey) => {
+      if (!document.getElementById(id)) return;
+      MlEmpresaFilter.bind(id, {
+        toggleOpen() {
+          self.state[openKey] = !self.state[openKey];
+          if (self.state[openKey]) self.state[queryKey] = "";
+          self.pintarGastoFiltro(id);
+        },
+        close() {
+          if (!self.state[openKey]) return;
+          self.state[openKey] = false;
+          self.state[queryKey] = "";
+          self.pintarGastoFiltro(id);
+        },
+        setQuery(q) { self.state[queryKey] = q || ""; self.pintarGastoLista(id); },
+        toggleId(itemId, on) {
+          const set = new Set(self.state[selKey] || []);
+          if (on) set.add(String(itemId)); else set.delete(String(itemId));
+          self.state[selKey] = [...set];
+          self.pintarGastoLista(id);
+          self.pintarGastosCorpo();
+        },
+        selectAll() {
+          const q = String(self.state[queryKey] || "").toLowerCase().trim();
+          const set = new Set(self.state[selKey] || []);
+          self.gastoFiltroOpts(id === self.GASTO_PLANO ? "plano" : "credor").items.forEach((it) => {
+            if (!q || `${it.id} ${it.label}`.toLowerCase().includes(q)) set.add(String(it.id));
+          });
+          self.state[selKey] = [...set];
+          self.pintarGastoLista(id);
+          self.pintarGastosCorpo();
+        },
+        selectNone() {
+          self.state[selKey] = [];
+          self.pintarGastoLista(id);
+          self.pintarGastosCorpo();
+        }
+      });
+    };
+    ligar(this.GASTO_CREDOR, "credorOpen", "credorQuery", "credoresSel");
+    ligar(this.GASTO_PLANO, "planoOpen", "planoQuery", "planosSel");
   },
 
   /* ---------- planos financeiros de marketing (lista com Marcar Todos / Desmarcar Todos) ---------- */
@@ -1420,7 +1656,7 @@ const MarketingBudgetApp = {
         ${this.kpi("Contratos ativos", L.length.toLocaleString("pt-BR"), todos ? "Títulos a receber ainda em aberto neste empreendimento" : "Vendas do período que ainda têm saldo", "#6366f1")}
         ${this.kpi("Em dia", this.pct(emDia.length, L.length), `${emDia.length} contrato(s) sem parcela vencida`, "#105436")}
         ${this.kpi("Em atraso", this.pct(atraso.length, L.length), `${atraso.length} contrato(s) · ${this.money(vencido)} já vencido`, atraso.length ? "#b91c1c" : "#105436")}
-        ${this.kpi("Lotes vendidos", lotes.total ? lotes.vendidos.toLocaleString("pt-BR") : "—", lotes.total ? `${lotes.faltam.toLocaleString("pt-BR")} faltam · ${lotes.total.toLocaleString("pt-BR")} no empreendimento` : "Estoque deste empreendimento ainda não foi carregado", "#6366f1",
+        ${this.kpi("Lotes vendidos", lotes.total ? lotes.vendidos.toLocaleString("pt-BR") : "—", lotes.total ? `${lotes.faltam.toLocaleString("pt-BR")} faltam · ${lotes.total.toLocaleString("pt-BR")} na posição de estoque` : (lotes.status === "lendo" ? "Lendo a posição de estoque…" : "Este empreendimento não tem lotes na posição de estoque"), "#6366f1",
           lotes.total ? `<div class="mkb-bar" title="${lotes.vendidos} vendidos · ${lotes.faltam} faltam"><i style="width:${pctLotes}%;background:#6366f1;"></i></div>` : "")}
       </div>
       <div class="mkb-charts mkb-charts-3">
@@ -1571,7 +1807,7 @@ const MarketingBudgetApp = {
     const gFaixa = this.grupos(ativos, (x) => x.faixa, this.ordemFaixas());
     const cSexo = this.grupos(L, sexoNome, this.ordemSexos());
     const cFaixa = this.grupos(L, (x) => x.faixa, this.ordemFaixas());
-    const tabelaPag = `<div class="mkb-tablewrap"><table class="mkb-table mkb-table-perfil">
+    const tabelaPag = `<div class="mkb-tablewrap mkb-tablewrap-livre"><table class="mkb-table mkb-table-perfil">
         <colgroup><col style="width:24%"><col style="width:11%"><col style="width:11%"><col style="width:11%"><col style="width:26%"><col style="width:17%"></colgroup>
         <thead><tr><th>Grupo</th><th style="text-align:right;">Contratos</th><th style="text-align:right;">Em dia</th><th style="text-align:right;">Em atraso</th><th>% em atraso</th><th style="text-align:right;">Vencido</th></tr></thead>
         <tbody>
@@ -1606,7 +1842,7 @@ const MarketingBudgetApp = {
         ${this.kpi("Em atraso", this.pct(atraso.length, comPag.length), `${atraso.length} de ${comPag.length} contrato(s) com parcela vencida${semTitulo ? ` · ${semTitulo} sem título no Contas a Receber` : ""}`, atraso.length ? "#b91c1c" : "#105436")}
         ${this.kpi("Valor vencido", this.money(vencido), "Soma das parcelas vencidas e ainda não pagas", "#f37021")}
       </div>
-      <div class="mkb-par">
+      <div class="mkb-par mkb-par-pag">
         <div class="mkb-card"><div class="mkb-card-h"><h3>Em dia e em atraso por idade</h3><small>O número verde é quem está em dia e o laranja é quem está atrasado</small></div><div class="mkb-canvas mkb-canvas-alto"><canvas id="mkb-ch-pag"></canvas></div></div>
         <div class="mkb-card">
           <div class="mkb-card-h"><h3>A mesma conta, em tabela</h3><small>Em dia inclui quem já quitou · em atraso é quem tem parcela vencida</small></div>
@@ -1622,7 +1858,7 @@ const MarketingBudgetApp = {
         <div class="mkb-card-h"><h3>Perfil de quem cancelou</h3><small>Taxa = cancelados do grupo ÷ contratos do grupo no período</small></div>
         ${canc.length ? `<div class="mkb-canc">
           <div class="mkb-canvas"><canvas id="mkb-ch-canc"></canvas></div>
-          <div class="mkb-tablewrap"><table class="mkb-table mkb-table-perfil" style="min-width:0;">
+          <div class="mkb-tablewrap mkb-tablewrap-livre"><table class="mkb-table mkb-table-perfil">
             <thead><tr><th>Grupo</th><th style="text-align:right;">Cancelados</th><th style="text-align:right;">Contratos</th><th style="text-align:right;">Taxa</th></tr></thead>
             <tbody>
               <tr class="mkb-grp"><td colspan="4">Por sexo</td></tr>${taxa(cSexo)}
@@ -1753,6 +1989,12 @@ const MarketingBudgetApp = {
     }
     const elP = document.getElementById("mkb-ch-pag");
     if (elP) {
+      const tabela = document.querySelector("#marketing-budget-root .mkb-par-pag .mkb-tablewrap-livre");
+      const box = elP.parentElement;
+      if (tabela && box) {
+        const h = Math.round(tabela.getBoundingClientRect().height);
+        if (h > 160) box.style.height = h + "px";
+      }
       const g = this.grupos(ativos, (x) => x.faixa, faixas);
       this.charts.pag = new Chart(elP, {
         type: "bar",
@@ -1769,6 +2011,12 @@ const MarketingBudgetApp = {
     }
     const elC = document.getElementById("mkb-ch-canc");
     if (elC && canc.length) {
+      const tabela = elC.closest(".mkb-canc") && elC.closest(".mkb-canc").querySelector(".mkb-tablewrap-livre");
+      const box = elC.parentElement;
+      if (tabela && box) {
+        const h = Math.round(tabela.getBoundingClientRect().height);
+        if (h > 160) box.style.height = h + "px";
+      }
       const fx = this.ordemFaixas().filter((f) => canc.some((x) => x.faixa === f));
       const ks = ["F", "M", "PJ", "?"].filter((k) => canc.some((x) => x.sexo === k));
       this.charts.canc = new Chart(elC, {
@@ -1824,9 +2072,13 @@ const MarketingBudgetApp = {
         #marketing-budget-root .mkb-sec-h small { display:block; color:#64748b; font-size:0.78rem; margin-top:2px; font-weight:400; }
         #marketing-budget-root .mkb-qtd { display:inline-flex; align-items:center; justify-content:center; min-width:1.7rem; height:1.7rem; padding:0 8px; border-radius:999px; background:#b91c1c; color:#fff; font-size:0.95rem; }
         #marketing-budget-root .mkb-kpis { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:12px; }
-        #marketing-budget-root .mkb-kpis-2 { grid-template-columns:repeat(2, minmax(0, 280px)); }
+        #marketing-budget-root .mkb-kpis.mkb-kpis-2 { width:100%; grid-template-columns:repeat(2, minmax(0,1fr)); }
         #marketing-budget-root .mkb-kpis.mkb-kpis-3 { grid-template-columns:repeat(3, minmax(0,1fr)); }
         #marketing-budget-root .mkb-par { display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:stretch; }
+        #marketing-budget-root .mkb-par-pag > .mkb-card { display:flex; flex-direction:column; min-width:0; min-height:0; }
+        #marketing-budget-root .mkb-par-pag .mkb-canvas-alto { flex:1 1 auto; height:auto; min-height:0; }
+        #marketing-budget-root .mkb-tablewrap-livre { max-height:none; overflow:visible; }
+        #marketing-budget-root .mkb-tablewrap-livre .mkb-table { min-width:0; }
         #marketing-budget-root .mkb-par-sexo { grid-template-columns:minmax(280px, 0.85fr) minmax(0, 1.4fr); }
         #marketing-budget-root .mkb-canvas-alto { height:340px; }
         #marketing-budget-root .mkb-kpi { background:#fff; border:1px solid #e2e8f0; border-top:4px solid #105436; border-radius:10px; padding:12px 14px; min-width:0; }
@@ -1853,14 +2105,15 @@ const MarketingBudgetApp = {
         #marketing-budget-root .mkb-chart-full { grid-column:1 / -1; }
         #marketing-budget-root .mkb-gastos-bar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
         #marketing-budget-root .mkb-gastos-bar .mkb-chips { margin:0; flex:0 1 auto; }
-        #marketing-budget-root .mkb-busca, #marketing-budget-root .mkb-plano { height:36px; border:1px solid #cbd5e1; border-radius:8px; background:#fff; color:#334155; font:inherit; font-size:0.8rem; box-sizing:border-box; }
-        #marketing-budget-root .mkb-busca { width:220px; padding:0 10px; }
-        #marketing-budget-root .mkb-plano { width:240px; padding:0 8px; }
+        #marketing-budget-root .mkb-filtro { width:260px; flex:none; position:relative; z-index:5; }
+        #marketing-budget-root .mkb-filtro .ml-emp-filter { width:100%; max-width:none; }
+        #marketing-budget-root .mkb-filtro .ml-emp-filter-btn { height:36px; min-height:36px; }
+        #marketing-budget-root .mkb-filtro .ml-emp-filter-list { max-height:280px; }
         #marketing-budget-root .mkb-gastos-tools { margin-left:auto; display:flex; align-items:center; gap:8px; }
-        #marketing-budget-root .mkb-sel-val { display:flex; align-items:baseline; gap:8px; min-height:36px; padding:0 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; box-sizing:border-box; }
+        #marketing-budget-root .mkb-sel-val { display:flex; flex-direction:column; align-items:flex-end; justify-content:center; gap:1px; min-width:190px; min-height:58px; padding:6px 14px; background:#fff; border:1px solid #e2e8f0; border-top:3px solid #105436; border-radius:10px; box-sizing:border-box; }
         #marketing-budget-root .mkb-sel-val span { font-size:0.68rem; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:0.02em; }
-        #marketing-budget-root .mkb-sel-val strong { color:#105436; font-size:1rem; }
-        #marketing-budget-root .mkb-sel-val small { color:#64748b; font-size:0.72rem; }
+        #marketing-budget-root .mkb-sel-val strong { color:#105436; font-size:1.25rem; line-height:1.15; }
+        #marketing-budget-root .mkb-sel-val small, #marketing-budget-root .mkb-sel-val em { color:#64748b; font-size:0.72rem; font-style:normal; }
         #marketing-budget-root .mkb-chips { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
         #marketing-budget-root .mkb-chip { height:32px; padding:0 12px; border-radius:8px; border:1px solid #cbd5e1; background:#fff; color:#334155; font-size:0.8rem; font-weight:600; cursor:pointer; }
         #marketing-budget-root .mkb-chip.is-on { background:#105436; border-color:#105436; color:#fff; }
@@ -1891,10 +2144,12 @@ const MarketingBudgetApp = {
         #marketing-budget-root .mkb-pbar { display:flex; align-items:center; gap:8px; }
         #marketing-budget-root .mkb-pbar .mkb-bar { flex:1; margin-top:0; }
         #marketing-budget-root .mkb-pbar b { min-width:48px; text-align:right; font-size:0.78rem; }
-        #marketing-budget-root .mkb-canc { display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start; }
+        #marketing-budget-root .mkb-canc { display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:stretch; }
+        #marketing-budget-root .mkb-canc .mkb-canvas { height:auto; min-height:0; }
+        #marketing-budget-root .mkb-canc .mkb-table { min-width:0; }
         @media (max-width: 1100px) {
           #marketing-budget-root .mkb-charts-3, #marketing-budget-root .mkb-charts-2, #marketing-budget-root .mkb-canc, #marketing-budget-root .mkb-par, #marketing-budget-root .mkb-par-sexo { grid-template-columns:1fr; }
-          #marketing-budget-root .mkb-kpis, #marketing-budget-root .mkb-kpis.mkb-kpis-3 { grid-template-columns:1fr; }
+          #marketing-budget-root .mkb-kpis, #marketing-budget-root .mkb-kpis.mkb-kpis-3, #marketing-budget-root .mkb-kpis.mkb-kpis-2 { grid-template-columns:1fr; }
           #marketing-budget-root .mkb-charts, #marketing-budget-root .mkb-config { grid-template-columns:1fr; }
         }
       </style>
@@ -1930,6 +2185,7 @@ const MarketingBudgetApp = {
       </div>`;
     if (window.lucide) lucide.createIcons();
     this.bindCatFiltro();
+    this.bindGastoFiltros();
     if (s.consultado && !s.loading && !s.error) {
       if (s.aba === "perfil") this.desenharGraficosPerfil();
       else if (s.aba === "contratos") this.desenharGraficosContratos();

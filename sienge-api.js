@@ -161,6 +161,192 @@ function installmentOverdueAmount(inst) {
   return (Number(inst.value) || 0) + (Number(inst.interest) || 0) + (Number(inst.fine) || 0);
 }
 
+/** Cache da fila anterior a esta revisão não traz parcelas de tipos que não geram cobrança. */
+const DEFAULTERS_CACHE_REV = 2;
+
+function documentoExtratoEhCt(row) {
+  const tipo = String((row && (row.documentIdentificationId || row.documentId || row.documentsId)) || "").trim().toUpperCase();
+  if (!tipo || /^\d+$/.test(tipo)) return true;
+  return tipo === "CT";
+}
+
+function idTituloExtrato(row) {
+  return String((row && (row.billReceivableId || row.receivableBillId)) || "").replace(/^B-/, "").split("-")[0];
+}
+
+function diasAtrasoParcela(due, today) {
+  const iso = String(due || "").slice(0, 10);
+  if (!iso || iso > today) return 0;
+  const a = new Date(iso + "T12:00:00");
+  const b = new Date(today + "T12:00:00");
+  return Math.max(0, Math.round((b.getTime() - a.getTime()) / 86400000));
+}
+
+function rotuloUnidadesExtrato(row) {
+  if (!row) return "N/D";
+  if (typeof row.units === "string" && row.units.trim()) return row.units;
+  if (Array.isArray(row.units)) {
+    const names = row.units.map((u) => u && (u.name || u.unitName || u.id)).filter(Boolean);
+    if (names.length) return names.join(", ");
+  }
+  return row.unitName || "N/D";
+}
+
+function linhasDoExtrato(res) {
+  if (!res) return [];
+  if (Array.isArray(res)) return res;
+  if (Array.isArray(res.data)) return res.data;
+  if (Array.isArray(res.results)) return res.results;
+  return [];
+}
+
+async function fetchExtratoVencidoCc(ccId, today) {
+  const path = (s, e) => `/bulk-data/v1/customer-extract-history?startDueDate=${s}&endDueDate=${e}&costCenterId=${encodeURIComponent(ccId)}`
+    + "&documentsId=CT&includeRemadeInstallments=false&includeCanceledInstallments=false&includeRevokedInstallments=false&includeRenegotiatedDischarge=false";
+  const get = async (s, e, depth) => {
+    try {
+      return linhasDoExtrato(await siengeFetch(path(s, e)));
+    } catch (err) {
+      const status = Number(err && err.status);
+      if (status === 429 && depth < 8) {
+        await new Promise((r) => setTimeout(r, 2000));
+        return get(s, e, depth + 1);
+      }
+      if (status === 404) return [];
+      const sy = Number(String(s).slice(0, 4));
+      const ey = Number(String(e).slice(0, 4));
+      if (status !== 507 || depth > 6 || ey - sy < 1) throw err;
+      const mid = Math.floor((sy + ey) / 2);
+      const left = await get(s, mid + "-12-31", depth + 1);
+      const right = await get((mid + 1) + "-01-01", e, depth + 1);
+      return left.concat(right);
+    }
+  };
+  return get("1996-01-01", today, 0);
+}
+
+/**
+ * A fila de inadimplentes do Sienge deixa de fora a parcela cujo tipo de condição não gera cobrança.
+ * O extrato CT traz o saldo em aberto. Entram no total vencido só as que ainda não estão no título.
+ */
+function incluirParcelasForaDaCobranca(normalized, rows, today, companyId) {
+  const porId = new Set();
+  const porVencimento = new Set();
+  const porTitulo = new Map();
+  (normalized || []).forEach((b) => {
+    const billId = String(b.id);
+    porTitulo.set(billId, b);
+    (b.defaulterInstallments || []).forEach((inst) => {
+      const id = String(inst.installmentId || inst.id || "");
+      const due = String(inst.dueDate || "").slice(0, 10);
+      if (id) porId.add(billId + "|" + id);
+      if (due) porVencimento.add(billId + "|" + due);
+    });
+  });
+
+  const extras = new Map();
+  (rows || []).forEach((row) => {
+    if (!row || !documentoExtratoEhCt(row)) return;
+    const billId = idTituloExtrato(row);
+    if (!billId) return;
+    (row.installments || []).forEach((p) => {
+      if (!p) return;
+      const due = String(p.dueDate || "").slice(0, 10);
+      if (!due || due > today) return;
+      const saldo = Number(p.currentBalance);
+      const comAcr = Number(p.currentBalanceWithAddition);
+      const valor = Number.isFinite(comAcr) && comAcr > 0.009 ? comAcr : (Number.isFinite(saldo) ? saldo : 0);
+      if (!(valor > 0.009)) return;
+      const instId = String(p.id || p.installmentId || "");
+      if (instId && porId.has(billId + "|" + instId)) return;
+      if (due && porVencimento.has(billId + "|" + due)) return;
+      const chave = billId + "|" + (instId || due) + "|" + due;
+      let acc = extras.get(chave);
+      if (!acc) {
+        const cliente = row.customer || {};
+        acc = {
+          billId,
+          instId,
+          due,
+          saldo: 0,
+          valor: 0,
+          companyId: row.companyId || companyId,
+          customerId: cliente.id != null ? Number(cliente.id) : (row.clientId != null ? Number(row.clientId) : 0),
+          clientName: cliente.name || cliente.tradeName || row.clientName || "Cliente",
+          costCenterId: row.costCenterId || null,
+          units: rotuloUnidadesExtrato(row),
+          conditionType: p.conditionType || p.paymentConditionType || p.paymentCondition || ""
+        };
+        extras.set(chave, acc);
+      }
+      acc.saldo += Number.isFinite(saldo) ? saldo : valor;
+      acc.valor += valor;
+    });
+  });
+
+  let acrescentadas = 0;
+  extras.forEach((acc) => {
+    if (!(acc.valor > 0.009)) return;
+    const inst = {
+      id: acc.instId || undefined,
+      installmentId: acc.instId || undefined,
+      dueDate: acc.due,
+      currentBalance: acc.saldo,
+      correctedValueWithAdditions: acc.valor,
+      conditionType: acc.conditionType,
+      receipts: [],
+      daysOfDelay: diasAtrasoParcela(acc.due, today),
+      foraDaCobranca: true
+    };
+    let bill = porTitulo.get(acc.billId);
+    if (!bill) {
+      bill = {
+        id: acc.billId,
+        saleId: Number(acc.billId) || acc.billId,
+        realSaleId: null,
+        customerId: acc.customerId,
+        clientName: acc.clientName,
+        companyId: acc.companyId,
+        costCentersId: acc.costCenterId ? [acc.costCenterId] : [],
+        costCenterId: acc.costCenterId,
+        units: acc.units,
+        value: 0,
+        interest: 0,
+        fine: 0,
+        daysDelay: 0,
+        slipStatus: "Vencido",
+        subjudice: "N",
+        defaulterInstallments: [],
+        defaulterJudicialActivities: [],
+        totalInstallmentsCount: 0,
+        foraDaCobranca: true
+      };
+      porTitulo.set(acc.billId, bill);
+      normalized.push(bill);
+    }
+    bill.defaulterInstallments = bill.defaulterInstallments || [];
+    bill.defaulterInstallments.push(inst);
+    bill.totalInstallmentsCount = (Number(bill.totalInstallmentsCount) || 0) + 1;
+    const open = typeof window.summarizeOpenDefaulterBill === "function"
+      ? window.summarizeOpenDefaulterBill(bill)
+      : null;
+    if (open) {
+      bill.value = open.value;
+      bill.interest = open.interest;
+      bill.fine = open.fine;
+      bill.daysDelay = open.daysDelay;
+      bill.defaulterInstallments = open.installments || bill.defaulterInstallments;
+    } else {
+      bill.value = (Number(bill.value) || 0) + acc.valor;
+      if (inst.daysOfDelay > (bill.daysDelay || 0)) bill.daysDelay = inst.daysOfDelay;
+    }
+    if (acc.instId) porId.add(acc.billId + "|" + acc.instId);
+    porVencimento.add(acc.billId + "|" + acc.due);
+    acrescentadas += 1;
+  });
+  return acrescentadas;
+}
+
 function paidMapDaysForBill(bill, paidMap) {
   if (!paidMap || typeof paidMap.get !== "function") return null;
   const ids = [bill.id, bill.saleId, bill.receivableBillId, bill.billReceivableId]
@@ -1622,7 +1808,9 @@ const SiengeApiService = {
            try {
                const localCache = await IdbDefaultersCache.get(`defaulters_${todayStr}`);
                if (localCache && localCache.data) {
-                   if (defaultersCacheLooksIncomplete(localCache.data, localCache, expectedCompanyIds)) {
+                   if (localCache.cacheRev !== DEFAULTERS_CACHE_REV) {
+                       console.warn('%c[Sienge] ⚠️ Cache IndexedDB sem as parcelas que não geram cobrança — buscando de novo.', 'color:#f59e0b;font-weight:bold;');
+                   } else if (defaultersCacheLooksIncomplete(localCache.data, localCache, expectedCompanyIds)) {
                        console.warn('%c[Sienge] ⚠️ Cache IndexedDB incompleto (faltam empresas internas) — ignorando.', 'color:#f59e0b;font-weight:bold;');
                    } else {
                    console.log(`%c[Sienge] ✅ Base carregada do IndexedDB local — ${localCache.data.length} títulos`, 'color:#10b981;font-size:13px;font-weight:bold;');
@@ -1669,7 +1857,9 @@ const SiengeApiService = {
                      }
                    });
 
-                   if (defaultersCacheLooksIncomplete(result, meta, expectedCompanyIds)) {
+                   if (meta.cacheRev !== DEFAULTERS_CACHE_REV) {
+                     console.warn('%c[Sienge] ⚠️ Cache Firestore sem as parcelas que não geram cobrança — buscando de novo.', 'color:#f59e0b;font-weight:bold;');
+                   } else if (defaultersCacheLooksIncomplete(result, meta, expectedCompanyIds)) {
                      console.warn('%c[Sienge] ⚠️ Cache Firestore incompleto (faltam empresas internas) — buscando base completa.', 'color:#f59e0b;font-weight:bold;');
                    } else {
                    
@@ -1779,6 +1969,7 @@ const SiengeApiService = {
                       paidMap: paidMapStr,
                       paidInstallmentIds: paidInstStr,
                       companyIds: fetchedCompanyIds,
+                      cacheRev: DEFAULTERS_CACHE_REV,
                       createdAt: window.firebaseCollections.serverTimestamp ? window.firebaseCollections.serverTimestamp() : new Date().toISOString()
                   });
                   console.log(`%c[Firebase] Cache diário (${todayStr}) salvo com sucesso no Firestore!`, 'color:#3b82f6;font-weight:bold;');
@@ -1801,7 +1992,8 @@ const SiengeApiService = {
                        paidInstallmentIds: serializePaidInstallmentIds(),
                        timestampStr: timestampStr,
                        atFull: atFull,
-                       companyIds: fetchedCompanyIds
+                       companyIds: fetchedCompanyIds,
+                       cacheRev: DEFAULTERS_CACHE_REV
                    });
                    console.log(`%c[IndexedDB] Cache diário salvo localmente com sucesso!`, 'color:#3b82f6;font-weight:bold;');
                 } catch(e) {
@@ -2136,6 +2328,18 @@ const SiengeApiService = {
           return mapped;
         });
 
+        let foraDaCobranca = 0;
+        for (let ci = 0; ci < companyCcs.length; ci++) {
+          const cc = companyCcs[ci];
+          if (onProgress) onProgress(cId, cc, _companyIndex, targetCompanies.length, cName + " · parcelas sem cobrança");
+          try {
+            const rows = await fetchExtratoVencidoCc(cc, today);
+            foraDaCobranca += incluirParcelasForaDaCobranca(normalizedArray, rows, today, cId);
+          } catch (e) {
+            console.warn("[Sienge] Extrato das parcelas sem cobrança", cc, e);
+          }
+        }
+        console.log(`[Sienge] Empresa ${cId}: ${foraDaCobranca} parcela(s) de tipo que não gera cobrança incluída(s) no vencido.`);
         console.log(`[Sienge] Retornou ${normalizedArray.length} títulos inadimplentes da empresa ${cId}`);
         allNormalized.push(...normalizedArray.filter(b => b.daysDelay > 0 && (b.value || 0) > 0.009));
 

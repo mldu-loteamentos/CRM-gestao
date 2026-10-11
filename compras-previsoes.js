@@ -1645,9 +1645,36 @@ const ComprasPrevisoesApp = {
     return endpoint;
   },
 
-  noteProgress(text) {
+  textoProgresso(text) {
+    return String(text || "")
+      .replace(/\s*\d+\s+de\s+\d+/gi, "")
+      .replace(/\s{2,}/g, " ")
+      .replace(/\s+([.…])/g, "$1")
+      .trim();
+  },
+
+  noteProgress(text, ratio) {
     const box = document.getElementById("cprev-results");
-    if (box) box.innerHTML = '<div class="tvig-empty">' + this.esc(text) + "</div>";
+    if (!box) return;
+    if (!document.getElementById("cprev-load-style")) {
+      const st = document.createElement("style");
+      st.id = "cprev-load-style";
+      st.textContent = ".cprev-load{background:#fff;border:1px dashed #cbd5e1;border-radius:8px;padding:36px 20px;display:flex;flex-direction:column;align-items:center;gap:14px;color:#64748b;text-align:center;}"
+        + ".cprev-load p{margin:0;font-size:.9rem;font-weight:600;color:#105436;}"
+        + ".cprev-load-track{width:100%;max-width:420px;height:8px;background:#e2e8f0;border-radius:99px;overflow:hidden;}"
+        + ".cprev-load-bar{height:100%;width:0;background:#105436;border-radius:99px;transition:width .25s linear;}";
+      document.head.appendChild(st);
+    }
+    const clean = this.textoProgresso(text) || "Buscando previsões no Sienge…";
+    let wrap = box.querySelector(".cprev-load");
+    if (!wrap) {
+      box.innerHTML = '<div class="cprev-load"><div class="loading-spinner"></div><p class="cprev-load-text"></p><div class="cprev-load-track"><div class="cprev-load-bar"></div></div></div>';
+      wrap = box.querySelector(".cprev-load");
+    }
+    const label = wrap.querySelector(".cprev-load-text");
+    if (label) label.textContent = clean;
+    const bar = wrap.querySelector(".cprev-load-bar");
+    if (bar && Number.isFinite(Number(ratio))) bar.style.width = Math.max(0, Math.min(100, Math.round(Number(ratio) * 100))) + "%";
   },
 
   async outcomeBills(start, end, companyId) {
@@ -1686,7 +1713,9 @@ const ComprasPrevisoesApp = {
         if (companies.length > 1) {
           const parts = [];
           for (let i = 0; i < companies.length; i++) {
-            this.noteProgress("Buscando empresa " + (i + 1) + " de " + companies.length + "…");
+            const base = Number(this._progressBase) || 0;
+            const span = Number(this._progressSpan) || 1;
+            this.noteProgress("Buscando previsões no Sienge…", base + span * ((i + 1) / companies.length));
             const rows = await this.outcomeRange(start, end, companies[i]);
             parts.push.apply(parts, rows);
           }
@@ -1706,12 +1735,15 @@ const ComprasPrevisoesApp = {
     const data = [];
     let step = 0;
     const total = Math.max(1, chunks.length * targets.length);
+    this._progressSpan = 1 / total;
     for (const chunk of chunks) {
       for (const companyId of targets) {
         step += 1;
-        this.noteProgress("Buscando previsões no Sienge… " + step + " de " + total);
+        this._progressBase = (step - 1) / total;
+        this.noteProgress("Buscando previsões no Sienge…", this._progressBase);
         const bills = await this.outcomeRange(chunk.start, chunk.end, companyId);
         data.push.apply(data, bills);
+        this.noteProgress("Buscando previsões no Sienge…", step / total);
       }
     }
     return { data: data };
@@ -1818,7 +1850,7 @@ const ComprasPrevisoesApp = {
     const kpi = document.getElementById("cprev-kpis");
     if (!box) return;
     if (this.state.loading) {
-      box.innerHTML = `<div class="tvig-empty">Buscando títulos no Sienge…</div>`;
+      this.noteProgress("Buscando previsões no Sienge…", 0);
       if (kpi) kpi.innerHTML = "";
       return;
     }

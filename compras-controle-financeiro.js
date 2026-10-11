@@ -995,15 +995,21 @@ ComprasControleApp.abrirTituloRow = async function (row) {
   try {
     if (typeof window.siengeFetchWithRetry !== "function") throw new Error("A API do Sienge não está disponível nesta tela.");
     const billId = row.titulo;
-    const bill = await window.siengeFetchWithRetry("/bills/" + encodeURIComponent(billId), 1);
-    let attachments = [];
-    try { attachments = await this.anexosDoTitulo(billId); } catch (e) { attachments = []; }
-    const payment = row.pagPayment !== undefined ? row.pagPayment : await this.formaPagamento(billId, row.parcela || 1);
+    const impostosP = window.NotaFiscalCheck && typeof NotaFiscalCheck.impostosDoTitulo === "function"
+      ? NotaFiscalCheck.impostosDoTitulo(billId).catch(() => [])
+      : Promise.resolve([]);
+    const [bill, attachments, payment, impostos] = await Promise.all([
+      window.siengeFetchWithRetry("/bills/" + encodeURIComponent(billId), 1),
+      this.anexosDoTitulo(billId).catch(() => []),
+      row.pagPayment !== undefined ? Promise.resolve(row.pagPayment) : this.formaPagamento(billId, row.parcela || 1),
+      impostosP
+    ]);
     if (this._tituloGen !== gen) return;
     this._tituloDetalhe.loading = false;
     this._tituloDetalhe.bill = bill || null;
     this._tituloDetalhe.attachments = attachments || [];
     this._tituloDetalhe.payment = payment;
+    this._tituloDetalhe.impostos = Array.isArray(impostos) ? impostos : [];
     this.pintarTitulo();
     if (this.statusDe(row) === "previsao") this.carregarAutorizacoes([row]);
   } catch (e) {
@@ -1030,6 +1036,53 @@ ComprasControleApp.quemQuando = function (quem, quando) {
   return [nome || "—", data].filter(Boolean).join(" em ");
 };
 
+ComprasControleApp.lerPct = function (txt) {
+  const s = String(txt || "").replace("%", "").replace(/\s/g, "").trim();
+  if (!s || s === "—" || s === "-") return null;
+  const n = Number(s.indexOf(",") >= 0 ? s.replace(/\./g, "").replace(",", ".") : s);
+  return Number.isFinite(n) ? n : null;
+};
+
+/** Na linha do rateio, embaixo do valor e do esperado: imposto retido e o que de fato será pago. */
+ComprasControleApp.anotarRateioImposto = function (html, impostos, retido, bruto) {
+  if (!html || !(retido > 0.009) || !(bruto > 0.009)) return html;
+  const lista = (impostos || []).filter((t) => t && Number(t.valor) > 0.009);
+  const dica = lista.map((t) => `${t.tipo || t.nome || "Imposto"} ${this.money(t.valor)}`).join(" · ");
+  const re = /<tr(?![^>]*\bgp-rateio-obra\b)([^>]*)>([\s\S]*?)<\/tr>/g;
+  const found = [];
+  let m;
+  while ((m = re.exec(html))) {
+    const tds = m[2].match(/<td\b[\s\S]*?<\/td>/g);
+    if (!tds || tds.length < 6) continue;
+    const pct = this.lerPct(tds[2].replace(/<[^>]+>/g, ""));
+    if (pct == null) continue;
+    found.push({ start: m.index, end: m.index + m[0].length, attrs: m[1] || "", tds, pct });
+  }
+  if (!found.length) return html;
+  const soma = found.reduce((s, f) => s + f.pct, 0) || 100;
+  let restoRet = retido;
+  let restoLiq = Math.round((bruto - retido) * 100) / 100;
+  found.forEach((f, i) => {
+    const ultimo = i === found.length - 1;
+    const parte = f.pct / soma;
+    const ret = ultimo ? Math.round(restoRet * 100) / 100 : Math.round(retido * parte * 100) / 100;
+    const base = Math.round(bruto * parte * 100) / 100;
+    const pagar = ultimo ? Math.round(restoLiq * 100) / 100 : Math.round((base - ret) * 100) / 100;
+    restoRet = Math.round((restoRet - ret) * 100) / 100;
+    restoLiq = Math.round((restoLiq - pagar) * 100) / 100;
+    f.tds[3] = f.tds[3].replace(/<\/td>$/i, `<div class="gp-rateio-ret" title="${this.esc(dica)}">imposto retido ${this.esc(this.money(ret))}</div></td>`);
+    f.tds[5] = f.tds[5].replace(/<\/td>$/i, `<div class="gp-rateio-liq">líquido ${this.esc(this.money(pagar))}</div></td>`);
+    f.html = `<tr${f.attrs}>${f.tds.join("")}</tr>`;
+  });
+  let out = "";
+  let cursor = 0;
+  found.forEach((f) => {
+    out += html.slice(cursor, f.start) + f.html;
+    cursor = f.end;
+  });
+  return out + html.slice(cursor);
+};
+
 ComprasControleApp.pintarTitulo = function () {
   const det = this._tituloDetalhe;
   let el = document.getElementById("cfin-titulo");
@@ -1051,8 +1104,22 @@ ComprasControleApp.pintarTitulo = function () {
   const empresaId = row.companyId || bill.companyId || "";
   const pago = row.natureza === "pago" && row.dataPagamento;
   const valor = pago ? (row.valorAjustado != null ? row.valorAjustado : row.valor) : (Number(row.saldo) > 0 ? row.saldo : row.valorAjustado);
+  const impostos = Array.isArray(det.impostos) ? det.impostos : [];
+  const retidoCheio = Math.round(impostos.reduce((s, t) => s + (Number(t.valor) || 0), 0) * 100) / 100;
+  const bruto = Number(row.valor) || Number(row.valorAjustado) || Number(valor) || 0;
+  const aberto = Number(valor) || 0;
+  const bases = impostos.map((t) => Number(t.base)).filter((n) => n > 0.009);
+  const baseImp = bases.length ? Math.max.apply(null, bases) : 0;
+  const referencia = baseImp > 0.009 ? baseImp : bruto;
+  const liquidoCalc = Math.round((referencia - retidoCheio) * 100) / 100;
+  const jaLiquido = retidoCheio > 0.009 && Math.abs(aberto - liquidoCalc) <= 0.05 && Math.abs(aberto - referencia) > 0.05;
+  const casaComBruto = Math.abs(aberto - referencia) <= 0.05 || Math.abs(aberto - bruto) <= 0.05;
+  const retido = !pago && retidoCheio > 0.009 && !jaLiquido && casaComBruto ? retidoCheio : 0;
+  const aPagar = pago ? valor : (retido > 0.009 ? Math.round((aberto - retido) * 100) / 100 : aberto);
+  const nomeImposto = impostos.filter((t) => Number(t.valor) > 0.009).map((t) => t.tipo || t.nome).filter(Boolean);
+  const rotuloImposto = nomeImposto.length === 1 ? nomeImposto[0] : (nomeImposto.length ? nomeImposto.join(" + ") : "Imposto");
   const obs = bill.notes || bill.observation || bill.historic || bill.history || bill.complement || "";
-  const conferir = Object.assign({}, row, { valorConferir: pago ? null : valor, descontoTitulo: Number(bill.discount) || 0, retido: 0 });
+  const conferir = Object.assign({}, row, { valorConferir: pago ? null : aberto, descontoTitulo: Number(bill.discount) || 0, retido });
   const forma = typeof caixaFormaHtml === "function"
     ? caixaFormaHtml(det.payment, conferir)
     : this.formaHtml(det.payment, conferir);
@@ -1063,10 +1130,10 @@ ComprasControleApp.pintarTitulo = function () {
   let formaNivel = "";
   if (det.payment && window.BoletoCheck) {
     const v = det.payment.kind === "pix" ? row.pagCheck
-      : (BoletoCheck.ehBoleto(det.payment) ? BoletoCheck.validar(det.payment, { valor: conferir.valorConferir, vencimento: row.vencimento, descontoTitulo: conferir.descontoTitulo, retido: 0 }) : null);
+      : (BoletoCheck.ehBoleto(det.payment) ? BoletoCheck.validar(det.payment, { valor: conferir.valorConferir, vencimento: row.vencimento, descontoTitulo: conferir.descontoTitulo, retido: conferir.retido }) : null);
     formaNivel = v ? v.nivel : "";
   }
-  const rateio = String(row.rateioHtml || "").replace(/^\s*<h4>[^<]*<\/h4>/, "");
+  const rateio = this.anotarRateioImposto(String(row.rateioHtml || "").replace(/^\s*<h4>[^<]*<\/h4>/, ""), impostos, retido, bruto);
   const rateioNivel = !rateio ? "" : (/is-bad/.test(rateio) ? "erro" : (/is-warn/.test(rateio) ? "aviso" : "ok"));
   const selo = (nivel) => ({
     ok: `<span class="bchk bchk-ok">Conferido ✓</span>`,
@@ -1085,7 +1152,7 @@ ComprasControleApp.pintarTitulo = function () {
     </section>`;
 
   const dados = `<div class="cfin-titulo-grid">
-          <div class="cfin-titulo-destaque"><span>${pago ? "Valor pago" : "Valor a pagar"}</span><div class="cfin-titulo-valor">${this.esc(this.money(valor))}</div></div>
+          <div class="cfin-titulo-destaque"><span>${pago ? "Valor pago" : "Valor a pagar"}</span><div class="cfin-titulo-valor">${this.esc(this.money(pago ? valor : aPagar))}</div>${retido > 0.009 ? `<small>bruto ${this.esc(this.money(referencia))} − imposto retido ${this.esc(this.money(retido))}</small>` : ""}</div>
           <div class="cfin-titulo-destaque"><span>Vencimento</span><div class="cfin-titulo-strong">${this.esc(this.fmtDate(row.vencimento || bill.dueDate))}</div></div>
           <div class="cfin-titulo-destaque cfin-titulo-sit"><span>Situação</span><div>${this.esc(row.situacaoTexto || this.statusLabel(row))}</div></div>
           <div><span>Credor</span><div class="cfin-titulo-strong">${this.esc(credor)}</div></div>
@@ -1151,7 +1218,7 @@ ComprasControleApp.pintarTitulo = function () {
         ${det.loading ? `<p class="cfin-titulo-wait">Abrindo título, anexos e forma de pagamento…</p>` : ""}
         ${det.error ? `<p class="cfin-titulo-erro">${this.esc(det.error)}</p>` : ""}
         ${bloco("file-text", "Dados do título", "", dados, "cfin-sec-dados")}
-        ${rateio ? bloco("pie-chart", "Rateio por centro de custo", rateioNivel, rateio) : ""}
+        ${rateio ? bloco("pie-chart", "Rateio por centro de custo", rateioNivel, (retido > 0.009 ? `<div class="cfin-retencao"><div><span>Imposto retido</span><strong>${this.esc(rotuloImposto)} ${this.esc(this.money(retido))}</strong></div><div><span>Líquido</span><strong>${this.esc(this.money(aPagar))}</strong></div></div>` : "") + rateio) : ""}
         ${det.loading ? "" : `<div class="cfin-sec-par">
           ${bloco("credit-card", "Forma de pagamento programada", formaNivel, forma)}
           ${bloco("paperclip", "Anexos", "", `<div class="cfin-titulo-files">${anexos || `<span>Este título não tem anexo.</span>`}</div>`)}
@@ -1185,6 +1252,12 @@ ComprasControleApp.pintarTitulo = function () {
       #cfin-titulo .cfin-sec-b p { margin:0 0 4px; }
       #cfin-titulo .cfin-sec-b .cfin-titulo-grid { margin-top:0; }
       #cfin-titulo .cfin-sec-b .gp-rateio { margin-top:0; }
+      #cfin-titulo .gp-rateio-ret { display:block; margin-top:3px; color:#9a3412; font-weight:700; font-size:0.75rem; white-space:nowrap; }
+      #cfin-titulo .gp-rateio-liq { display:block; margin-top:3px; color:#105436; font-weight:800; font-size:0.78rem; white-space:nowrap; }
+      #cfin-titulo .cfin-retencao { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:0 0 10px; }
+      #cfin-titulo .cfin-retencao div { background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:8px 10px; }
+      #cfin-titulo .cfin-retencao span { display:block; color:#92400e; font-size:0.72rem; font-weight:700; }
+      #cfin-titulo .cfin-retencao strong { color:#105436; font-size:1rem; }
       #cfin-titulo .cfin-sec.is-erro { border-color:#fecaca; }
       #cfin-titulo .cfin-sec.is-erro .cfin-sec-h { background:#fef2f2; color:#b91c1c; border-bottom-color:#fecaca; }
       #cfin-titulo .cfin-sec.is-aviso { border-color:#fed7aa; }

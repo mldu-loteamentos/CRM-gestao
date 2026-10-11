@@ -208,6 +208,189 @@ function normalizeBill(bill, underJudgmentIds) {
   return mapped;
 }
 
+const DEFAULTERS_CACHE_REV = 2;
+
+function documentoExtratoEhCt(row) {
+  const tipo = String((row && (row.documentIdentificationId || row.documentId || row.documentsId)) || "").trim().toUpperCase();
+  if (!tipo || /^\d+$/.test(tipo)) return true;
+  return tipo === "CT";
+}
+
+function idTituloExtrato(row) {
+  return String((row && (row.billReceivableId || row.receivableBillId)) || "").replace(/^B-/, "").split("-")[0];
+}
+
+function diasAtrasoParcela(due, today) {
+  const iso = String(due || "").slice(0, 10);
+  if (!iso || iso > today) return 0;
+  const a = new Date(iso + "T12:00:00");
+  const b = new Date(today + "T12:00:00");
+  return Math.max(0, Math.round((b.getTime() - a.getTime()) / 86400000));
+}
+
+function rotuloUnidadesExtrato(row) {
+  if (!row) return "N/D";
+  if (typeof row.units === "string" && row.units.trim()) return row.units;
+  if (Array.isArray(row.units)) {
+    const names = row.units.map((u) => u && (u.name || u.unitName || u.id)).filter(Boolean);
+    if (names.length) return names.join(", ");
+  }
+  return row.unitName || "N/D";
+}
+
+function linhasDoExtrato(res) {
+  if (!res) return [];
+  if (Array.isArray(res)) return res;
+  if (Array.isArray(res.data)) return res.data;
+  if (Array.isArray(res.results)) return res.results;
+  return [];
+}
+
+async function siengeFetchOnce(url) {
+  const res = await fetch(url, { headers: { Authorization: SIENGE_AUTH, Accept: "application/json" } });
+  if (!res.ok) {
+    const err = new Error("Sienge " + res.status);
+    err.status = res.status;
+    throw err;
+  }
+  const text = await res.text();
+  return text ? JSON.parse(text) : {};
+}
+
+async function fetchExtratoVencidoCc(ccId, today) {
+  const url = (s, e) => `${SIENGE_BULK_BASE}/bulk-data/v1/customer-extract-history?startDueDate=${s}&endDueDate=${e}&costCenterId=${encodeURIComponent(ccId)}`
+    + "&documentsId=CT&includeRemadeInstallments=false&includeCanceledInstallments=false&includeRevokedInstallments=false&includeRenegotiatedDischarge=false";
+  const get = async (s, e, depth) => {
+    try {
+      return linhasDoExtrato(await siengeFetchOnce(url(s, e)));
+    } catch (err) {
+      const status = Number(err && err.status);
+      if (status === 429 && depth < 4) {
+        await new Promise((r) => setTimeout(r, 2000));
+        return get(s, e, depth + 1);
+      }
+      if (status === 404) return [];
+      const sy = Number(String(s).slice(0, 4));
+      const ey = Number(String(e).slice(0, 4));
+      if (status !== 507 || depth > 6 || ey - sy < 1) throw err;
+      const mid = Math.floor((sy + ey) / 2);
+      const left = await get(s, mid + "-12-31", depth + 1);
+      const right = await get((mid + 1) + "-01-01", e, depth + 1);
+      return left.concat(right);
+    }
+  };
+  return get("1996-01-01", today, 0);
+}
+
+function incluirParcelasForaDaCobranca(normalized, rows, today, companyId) {
+  const porId = new Set();
+  const porVencimento = new Set();
+  const porTitulo = new Map();
+  (normalized || []).forEach((b) => {
+    const billId = String(b.id);
+    porTitulo.set(billId, b);
+    (b.defaulterInstallments || []).forEach((inst) => {
+      const id = String(inst.installmentId || inst.id || "");
+      const due = String(inst.dueDate || "").slice(0, 10);
+      if (id) porId.add(billId + "|" + id);
+      if (due) porVencimento.add(billId + "|" + due);
+    });
+  });
+  const extras = new Map();
+  (rows || []).forEach((row) => {
+    if (!row || !documentoExtratoEhCt(row)) return;
+    const billId = idTituloExtrato(row);
+    if (!billId) return;
+    (row.installments || []).forEach((p) => {
+      if (!p) return;
+      const due = String(p.dueDate || "").slice(0, 10);
+      if (!due || due > today) return;
+      const saldo = Number(p.currentBalance);
+      const comAcr = Number(p.currentBalanceWithAddition);
+      const valor = Number.isFinite(comAcr) && comAcr > 0.009 ? comAcr : (Number.isFinite(saldo) ? saldo : 0);
+      if (!(valor > 0.009)) return;
+      const instId = String(p.id || p.installmentId || "");
+      if (instId && porId.has(billId + "|" + instId)) return;
+      if (due && porVencimento.has(billId + "|" + due)) return;
+      const chave = billId + "|" + (instId || due) + "|" + due;
+      let acc = extras.get(chave);
+      if (!acc) {
+        const cliente = row.customer || {};
+        acc = {
+          billId,
+          instId,
+          due,
+          saldo: 0,
+          valor: 0,
+          companyId: row.companyId || companyId,
+          customerId: cliente.id != null ? Number(cliente.id) : (row.clientId != null ? Number(row.clientId) : 0),
+          clientName: cliente.name || cliente.tradeName || row.clientName || "Cliente",
+          costCenterId: row.costCenterId || null,
+          units: rotuloUnidadesExtrato(row),
+          conditionType: p.conditionType || p.paymentConditionType || p.paymentCondition || ""
+        };
+        extras.set(chave, acc);
+      }
+      acc.saldo += Number.isFinite(saldo) ? saldo : valor;
+      acc.valor += valor;
+    });
+  });
+  let acrescentadas = 0;
+  extras.forEach((acc) => {
+    if (!(acc.valor > 0.009)) return;
+    const inst = {
+      id: acc.instId || undefined,
+      installmentId: acc.instId || undefined,
+      dueDate: acc.due,
+      currentBalance: acc.saldo,
+      correctedValueWithAdditions: acc.valor,
+      conditionType: acc.conditionType,
+      receipts: [],
+      daysOfDelay: diasAtrasoParcela(acc.due, today),
+      foraDaCobranca: true
+    };
+    let bill = porTitulo.get(acc.billId);
+    if (!bill) {
+      bill = {
+        id: acc.billId,
+        saleId: Number(acc.billId) || acc.billId,
+        realSaleId: null,
+        customerId: acc.customerId,
+        clientName: acc.clientName,
+        companyId: acc.companyId,
+        costCentersId: acc.costCenterId ? [acc.costCenterId] : [],
+        costCenterId: acc.costCenterId,
+        units: acc.units,
+        value: 0,
+        interest: 0,
+        fine: 0,
+        daysDelay: 0,
+        slipStatus: "Vencido",
+        subjudice: "N",
+        defaulterInstallments: [],
+        defaulterJudicialActivities: [],
+        totalInstallmentsCount: 0,
+        foraDaCobranca: true
+      };
+      porTitulo.set(acc.billId, bill);
+      normalized.push(bill);
+    }
+    bill.defaulterInstallments = bill.defaulterInstallments || [];
+    bill.defaulterInstallments.push(inst);
+    bill.totalInstallmentsCount = (Number(bill.totalInstallmentsCount) || 0) + 1;
+    const open = summarizeOpenDefaulterBill(bill);
+    bill.value = open.value;
+    bill.interest = open.interest;
+    bill.fine = open.fine;
+    bill.daysDelay = open.daysDelay;
+    bill.defaulterInstallments = open.installments || bill.defaulterInstallments;
+    if (acc.instId) porId.add(acc.billId + "|" + acc.instId);
+    porVencimento.add(acc.billId + "|" + acc.due);
+    acrescentadas += 1;
+  });
+  return acrescentadas;
+}
+
 function buildDefaulterQuery(cId, today, extraParams, billTypeParams) {
   return `${SIENGE_BULK_BASE}/bulk-data/v1/defaulters-receivable-bills?companyId=${cId}`
     + `&dueDateLimit=${today}&documentsId=CT&correctionDate=${today}`
@@ -328,16 +511,27 @@ module.exports = async function handler(req, res) {
         }
         const under = new Set(rawJudge.map((b) => String(b.receivableBillId || b.id)));
         const normalized = rawAll.map((b) => normalizeBill(b, under)).filter((b) => b.daysDelay > 0 && (b.value || 0) > 0.009);
+        let foraDaCobranca = 0;
+        for (const cc of batch) {
+          try {
+            const rows = await fetchExtratoVencidoCc(cc, today);
+            foraDaCobranca += incluirParcelasForaDaCobranca(normalized, rows, today, cId);
+          } catch (e) {
+            log.push(`extrato ${cc}: ${e.message}`);
+          }
+        }
+        const prontos = normalized.filter((b) => b.daysDelay > 0 && (b.value || 0) > 0.009);
+        log.push(`emp ${cId} lote ${state.batchIndex + 1}: ${foraDaCobranca} parcela(s) sem cobrança`);
         const chunkId = `${today}_warmup_${cId}_${state.batchIndex}`;
         await setDoc(doc(db, "sienge_defaulters_history", chunkId), {
           date: today,
           companyId: cId,
           batchIndex: state.batchIndex,
-          data: JSON.stringify(normalized)
+          data: JSON.stringify(prontos)
         });
         state.warmupChunks = state.warmupChunks || [];
         state.warmupChunks.push(chunkId);
-        log.push(`emp ${cId} lote ${state.batchIndex + 1}/${ccBatches.length}: ${normalized.length} títulos`);
+        log.push(`emp ${cId} lote ${state.batchIndex + 1}/${ccBatches.length}: ${prontos.length} títulos`);
         state.batchIndex += 1;
         if (state.batchIndex >= ccBatches.length) {
           state.companyIndex += 1;
@@ -434,6 +628,7 @@ module.exports = async function handler(req, res) {
         timestampStr,
         paidMap: JSON.stringify(paidMap.filter((x) => x && x[0])),
         warmupDone: true,
+        cacheRev: DEFAULTERS_CACHE_REV,
         createdAt: new Date().toISOString()
       });
       for (const id of toDelete) {
