@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="i.ntegr.a/arvore.png">
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=1313">
+  <link rel="stylesheet" href="style.css?v=1314">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -888,7 +888,7 @@
 
     <div class="login-pane-brand">
       <div class="login-band login-band-logo">
-        <img src="i.ntegr.a/logo-oficial.png?v=1313" alt="I.ntegr.A Moura Leite">
+        <img src="i.ntegr.a/logo-oficial.png?v=1314" alt="I.ntegr.A Moura Leite">
       </div>
 
       <div class="login-band login-band-action">
@@ -1067,6 +1067,9 @@
                 </li>
                 <li data-tab="parametrizacao-parceiro" data-module="sub_fin_cp_parametrizacao_parceiro_acessar">
                   <a onclick="switchTab('parametrizacao-parceiro', 'Parametrização de Parceiro')">Parametrização de Parceiro</a>
+                </li>
+                <li data-tab="titulos-incompletos" data-module="sub_fin_cp_titulos_incompletos_acessar">
+                  <a onclick="switchTab('titulos-incompletos', 'Títulos incompletos')">Títulos incompletos</a>
                 </li>
                 <li data-tab="rydoo" data-module="sub_fin_cp_rydoo_acessar">
                   <a onclick="switchTab('rydoo', 'Rydoo')">Rydoo</a>
@@ -1341,7 +1344,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.1313 &nbsp;&middot;&nbsp; 10/10/2026
+            v1.0.1314 &nbsp;&middot;&nbsp; 10/10/2026
           </span>
         </div>
       </div>
@@ -1418,6 +1421,9 @@
       </section>
       <section id="tab-parametrizacao-parceiro" class="tab-pane" style="display: none;">
         <div id="parametrizacao-parceiro-root"></div>
+      </section>
+      <section id="tab-titulos-incompletos" class="tab-pane" style="display: none;">
+        <div id="titulos-incompletos-root"></div>
       </section>
       <section id="tab-rydoo" class="tab-pane" style="display: none;">
         <div id="rydoo-root"></div>
@@ -2853,7 +2859,7 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
         <!-- Container padrão (Em Construção) -->
         <div id="home-em-construcao-container"
           style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="i.ntegr.a/arvore.png?v=1313" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 1.25rem;">
+          <img src="i.ntegr.a/arvore.png?v=1314" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 1.25rem;">
           <p style="color: var(--color-primary); font-size: 1.15rem; font-weight: 600; letter-spacing: 0.06em; margin: 0;">
             Inteligência - Integração - Agilidade
           </p>
@@ -3625,7 +3631,7 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
         <section id="tab-construcao-seguranca" class="tab-pane" style="display: none;">
           <div
             style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-            <img src="i.ntegr.a/arvore.png?v=1313" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
+            <img src="i.ntegr.a/arvore.png?v=1314" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
             <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 0;">Módulo em Construção</h2>
           </div>
         </section>
@@ -4648,20 +4654,21 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
         <div class="crm-card" style="margin-top: 1.5rem;">
           <div class="skill-card-bordered" style="margin-top: 1.5rem; padding: 0; background: #fff;">
             <!-- Header de Abas -->
-            <div class="customer-tabs-menu" id="regras-tabs-menu" style="display: flex; align-items: flex-end; flex-wrap: wrap; margin-bottom: 0;">
-                <button class="customer-tab-btn active" onclick="switchRegrasTab('regra-regua')" id="btn-regra-regua">Régua de Cobrança</button>
-                <button class="customer-tab-btn" onclick="switchRegrasTab('regra-judiciais')" id="btn-regra-judiciais">Etapas Judiciais</button>
-                <button class="customer-tab-btn" onclick="switchRegrasTab('regra-financiamento')" id="btn-regra-financiamento">Etapas Financiamento</button>
-                <button class="customer-tab-btn" onclick="switchRegrasTab('regra-atribuicao')" id="btn-regra-atribuicao">Atribuição de Operadores</button>
-                <button class="customer-tab-btn" onclick="switchRegrasTab('regra-negociacao')" id="btn-regra-negociacao">Regras de Negociação</button>
-                <button class="customer-tab-btn" onclick="switchRegrasTab('regra-fila')" id="btn-regra-fila">Fila de Cobrança</button>
-                <button class="customer-tab-btn" onclick="switchRegrasTab('regra-cartao')" id="btn-regra-cartao">Cartão de Crédito</button>
-                <button class="customer-tab-btn" onclick="switchRegrasTab('regra-alcada')" id="btn-regra-alcada">Alçada para Desconto</button>
-                <button class="customer-tab-btn" onclick="switchRegrasTab('regra-alcada-distrato')" id="btn-regra-alcada-distrato">Alçada para Distrato</button>
+            <div class="ml-tabs" id="regras-tabs-menu" role="tablist">
+                <button type="button" role="tab" class="ml-tab is-active" onclick="switchRegrasTab('regra-regua')" id="btn-regra-regua" aria-selected="true"><i data-lucide="calendar-clock"></i> Régua de Cobrança</button>
+                <button type="button" role="tab" class="ml-tab" onclick="switchRegrasTab('regra-judiciais')" id="btn-regra-judiciais"><i data-lucide="scale"></i> Etapas Judiciais</button>
+                <button type="button" role="tab" class="ml-tab" onclick="switchRegrasTab('regra-financiamento')" id="btn-regra-financiamento"><i data-lucide="landmark"></i> Etapas Financiamento</button>
+                <button type="button" role="tab" class="ml-tab" onclick="switchRegrasTab('regra-atribuicao')" id="btn-regra-atribuicao"><i data-lucide="users"></i> Atribuição de Operadores</button>
+                <button type="button" role="tab" class="ml-tab" onclick="switchRegrasTab('regra-negociacao')" id="btn-regra-negociacao"><i data-lucide="handshake"></i> Regras de Negociação</button>
+                <button type="button" role="tab" class="ml-tab" onclick="switchRegrasTab('regra-fila')" id="btn-regra-fila"><i data-lucide="list-todo"></i> Fila de Cobrança</button>
+                <button type="button" role="tab" class="ml-tab" onclick="switchRegrasTab('regra-cartao')" id="btn-regra-cartao"><i data-lucide="credit-card"></i> Cartão de Crédito</button>
+                <button type="button" role="tab" class="ml-tab" onclick="switchRegrasTab('regra-alcada')" id="btn-regra-alcada"><i data-lucide="badge-percent"></i> Alçada para Desconto</button>
+                <button type="button" role="tab" class="ml-tab" onclick="switchRegrasTab('regra-alcada-distrato')" id="btn-regra-alcada-distrato"><i data-lucide="file-minus"></i> Alçada para Distrato</button>
+                <button type="button" role="tab" class="ml-tab" onclick="switchRegrasTab('regra-honorarios-internos')" id="btn-regra-honorarios-internos"><i data-lucide="coins"></i> Honorários internos</button>
             </div>
             
             <!-- Conteúdos -->
-            <div class="skill-tabs-content" style="padding: 20px; border-top: 2px solid var(--color-primary); margin-top: -1px; background: #fff; border-radius: 0 8px 8px 8px; border-left: 1px solid #ccc; border-right: 1px solid #ccc; border-bottom: 1px solid #ccc;">
+            <div class="skill-tabs-content" style="padding: 16px 4px 8px; background: transparent; border: 0;">
               
               <!-- ABA 1: Régua -->
               <div id="content-regra-regua" class="regra-tab-content">
@@ -5270,6 +5277,20 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
               <!-- ABA: Alçada para Distrato -->
               <div id="content-regra-alcada-distrato" class="regra-tab-content" style="display: none;"></div>
 
+              <div id="content-regra-honorarios-internos" class="regra-tab-content" style="display: none;">
+                <h3 style="font-size: 1.1rem; color: #1e293b; margin: 0 0 6px; display: flex; align-items: center; gap: 8px;">
+                  <i data-lucide="coins" style="color: var(--color-primary);"></i> Honorários internos
+                </h3>
+                <p style="font-size: 0.85rem; color: #64748b; margin: 0 0 16px; max-width: 640px;">A comissão interna de cada boleto pago é (juros devido − abono concedido) × este percentual. O relatório Comissão interna usa o valor salvo aqui.</p>
+                <label for="hon-internos-pct" style="display: block; font-size: 0.72rem; font-weight: 700; color: #475569; text-transform: uppercase; margin-bottom: 4px;">Percentual</label>
+                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                  <input id="hon-internos-pct" type="number" min="0" max="100" step="0.01" value="5" style="height: 38px; width: 120px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0 10px; font-size: 0.95rem;">
+                  <span style="color: #64748b; font-weight: 700;">%</span>
+                  <button type="button" class="btn btn-primary" style="height: 38px;" onclick="window.saveHonorariosInternosPct()">Salvar</button>
+                </div>
+                <p id="hon-internos-status" style="margin: 10px 0 0; font-size: 0.8rem; color: #105436;"></p>
+              </div>
+
             </div> <!-- fim tabs content -->
           </div> <!-- fim skill card -->
 
@@ -5279,8 +5300,15 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
                 window.switchRegrasTab(tabId);
                 return;
               }
-              document.querySelectorAll('#regras-tabs-menu .customer-tab-btn').forEach(btn => btn.classList.remove('active'));
-              document.getElementById('btn-' + tabId).classList.add('active');
+              document.querySelectorAll('#regras-tabs-menu .ml-tab').forEach(btn => {
+                btn.classList.remove('is-active');
+                btn.setAttribute('aria-selected', 'false');
+              });
+              const ativo = document.getElementById('btn-' + tabId);
+              if (ativo) {
+                ativo.classList.add('is-active');
+                ativo.setAttribute('aria-selected', 'true');
+              }
               document.querySelectorAll('.regra-tab-content').forEach(content => content.style.display = 'none');
               document.getElementById('content-' + tabId).style.display = 'block';
             }
@@ -7956,80 +7984,81 @@ RG: {{TESTEMUNHA_1_RG}} RG: {{TESTEMUNHA_2_RG}}</textarea>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/digidem/leaflet-side-by-side@2.0.0/leaflet-side-by-side.min.js"></script>
   <!-- Scripts de Negócio -->
-  <script type="module" src="firebase-config.js?v=1313"></script>
+  <script type="module" src="firebase-config.js?v=1314"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
   <script>
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=1313"></script>
-  <script defer src="sienge-api.js?v=1313"></script>
-  <script defer src="consumo-api.js?v=1313"></script>
-  <script defer src="azure-auth.js?v=1313"></script>
-  <script defer src="usuarios-online.js?v=1313"></script>
-  <script defer src="auditoria-login.js?v=1313"></script>
-  <script defer src="app.js?v=1313"></script>
-  <script defer src="empresa-filter.js?v=1313"></script>
-  <script defer src="cartao-taxas.js?v=1313"></script>
-  <script defer src="alcada-desconto.js?v=1313"></script>
-  <script defer src="alcada-distrato.js?v=1313"></script>
-  <script defer src="home-dashboard.js?v=1313"></script>
-  <script defer src="anexos.js?v=1313"></script>
-  <script defer src="contas-pagar.js?v=1313"></script>
-    <script defer src="boleto-check.js?v=1313"></script>
-    <script defer src="nota-fiscal-check.js?v=1313"></script>
-    <script defer src="gerar-pagamento.js?v=1313"></script>
-  <script defer src="rydoo.js?v=1313"></script>
-  <script defer src="compras-previsoes.js?v=1313"></script>
-  <script defer src="compras-controle-financeiro.js?v=1313"></script>
-  <script defer src="compras-dashboard.js?v=1313"></script>
-  <script defer src="engenharia-caucao.js?v=1313"></script>
-  <script defer src="config-tags.js?v=1313"></script>
-  <script defer src="config-users.js?v=1313"></script>
-  <script defer src="suporte.js?v=1313"></script>
-  <script defer src="construcao.js?v=1313"></script>
-  <script defer src="empresas.js?v=1313"></script>
-  <script defer src="relacionamento.js?v=1313"></script>
-  <script defer src="aditamento.js?v=1313"></script>
-  <script defer src="cessao-direitos.js?v=1313"></script>
-  <script defer src="compromissario.js?v=1313"></script>
-  <script defer src="comercial.js?v=1313"></script>
-  <script defer src="estoque-comercial.js?v=1313"></script>
-  <script defer src="condicoes-pagamento.js?v=1313"></script>
-  <script defer src="documentos-sienge.js?v=1313"></script>
-  <script defer src="tabelas-vigentes.js?v=1313"></script>
-  <script defer src="controle-comissao.js?v=1313"></script>
-  <script defer src="recebimentos-webro.js?v=1313"></script>
-  <script defer src="scod.js?v=1313"></script>
-  <script defer src="centros-custo.js?v=1313"></script>
-  <script defer src="marketing.js?v=1313"></script>
-  <script defer src="marketing-budget.js?v=1313"></script>
-  <script defer src="plano-financeiro.js?v=1313"></script>
-  <script defer src="orcamento-data.js?v=1313"></script>
-  <script defer src="orcamento-origem.js?v=1313"></script>
-  <script defer src="orcamento-2026.js?v=1313"></script>
-  <script defer src="orcamento.js?v=1313"></script>
-  <script defer src="prestacao-contas.js?v=1313"></script>
+  <script defer src="data.js?v=1314"></script>
+  <script defer src="sienge-api.js?v=1314"></script>
+  <script defer src="consumo-api.js?v=1314"></script>
+  <script defer src="azure-auth.js?v=1314"></script>
+  <script defer src="usuarios-online.js?v=1314"></script>
+  <script defer src="auditoria-login.js?v=1314"></script>
+  <script defer src="app.js?v=1314"></script>
+  <script defer src="empresa-filter.js?v=1314"></script>
+  <script defer src="cartao-taxas.js?v=1314"></script>
+  <script defer src="alcada-desconto.js?v=1314"></script>
+  <script defer src="alcada-distrato.js?v=1314"></script>
+  <script defer src="home-dashboard.js?v=1314"></script>
+  <script defer src="anexos.js?v=1314"></script>
+  <script defer src="contas-pagar.js?v=1314"></script>
+    <script defer src="boleto-check.js?v=1314"></script>
+    <script defer src="nota-fiscal-check.js?v=1314"></script>
+    <script defer src="gerar-pagamento.js?v=1314"></script>
+  <script defer src="rydoo.js?v=1314"></script>
+  <script defer src="titulos-incompletos.js?v=1314"></script>
+  <script defer src="compras-previsoes.js?v=1314"></script>
+  <script defer src="compras-controle-financeiro.js?v=1314"></script>
+  <script defer src="compras-dashboard.js?v=1314"></script>
+  <script defer src="engenharia-caucao.js?v=1314"></script>
+  <script defer src="config-tags.js?v=1314"></script>
+  <script defer src="config-users.js?v=1314"></script>
+  <script defer src="suporte.js?v=1314"></script>
+  <script defer src="construcao.js?v=1314"></script>
+  <script defer src="empresas.js?v=1314"></script>
+  <script defer src="relacionamento.js?v=1314"></script>
+  <script defer src="aditamento.js?v=1314"></script>
+  <script defer src="cessao-direitos.js?v=1314"></script>
+  <script defer src="compromissario.js?v=1314"></script>
+  <script defer src="comercial.js?v=1314"></script>
+  <script defer src="estoque-comercial.js?v=1314"></script>
+  <script defer src="condicoes-pagamento.js?v=1314"></script>
+  <script defer src="documentos-sienge.js?v=1314"></script>
+  <script defer src="tabelas-vigentes.js?v=1314"></script>
+  <script defer src="controle-comissao.js?v=1314"></script>
+  <script defer src="recebimentos-webro.js?v=1314"></script>
+  <script defer src="scod.js?v=1314"></script>
+  <script defer src="centros-custo.js?v=1314"></script>
+  <script defer src="marketing.js?v=1314"></script>
+  <script defer src="marketing-budget.js?v=1314"></script>
+  <script defer src="plano-financeiro.js?v=1314"></script>
+  <script defer src="orcamento-data.js?v=1314"></script>
+  <script defer src="orcamento-origem.js?v=1314"></script>
+  <script defer src="orcamento-2026.js?v=1314"></script>
+  <script defer src="orcamento.js?v=1314"></script>
+  <script defer src="prestacao-contas.js?v=1314"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="fluxo-caixa.js?v=1313"></script>
-  <script defer src="caixa-diario.js?v=1313"></script>
-  <script defer src="relatorio-honorarios.js?v=1313"></script>
-  <script defer src="investimento.js?v=1313"></script>
-  <script defer src="parametrizacao-parceiro.js?v=1313"></script>
-  <script defer src="societario.js?v=1313"></script>
-  <script defer src="participacoes.js?v=1313"></script>
-  <script defer src="fiscal.js?v=1313"></script>
-  <script defer src="fiscal-inserir-nota.js?v=1313"></script>
-  <script defer src="fiscal-enviar-nota.js?v=1313"></script>
-  <script defer src="indexadores.js?v=1313"></script>
-  <script defer src="verificar-construcao.js?v=1313"></script>
-  <script defer src="financiamento.js?v=1313"></script>
-  <script src="repactuacoes.js?v=1313"></script>
-  <script defer src="repactuacao-lote.js?v=1313"></script>
+  <script defer src="fluxo-caixa.js?v=1314"></script>
+  <script defer src="caixa-diario.js?v=1314"></script>
+  <script defer src="relatorio-honorarios.js?v=1314"></script>
+  <script defer src="investimento.js?v=1314"></script>
+  <script defer src="parametrizacao-parceiro.js?v=1314"></script>
+  <script defer src="societario.js?v=1314"></script>
+  <script defer src="participacoes.js?v=1314"></script>
+  <script defer src="fiscal.js?v=1314"></script>
+  <script defer src="fiscal-inserir-nota.js?v=1314"></script>
+  <script defer src="fiscal-enviar-nota.js?v=1314"></script>
+  <script defer src="indexadores.js?v=1314"></script>
+  <script defer src="verificar-construcao.js?v=1314"></script>
+  <script defer src="financiamento.js?v=1314"></script>
+  <script src="repactuacoes.js?v=1314"></script>
+  <script defer src="repactuacao-lote.js?v=1314"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=1313"></script>
+  <script defer src="dashboard-inadimplencia.js?v=1314"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

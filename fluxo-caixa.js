@@ -414,11 +414,35 @@ const FluxoCaixaApp = {
     return /^(D|2|DESPESA|SAIDA)$/.test(t) || t.includes("DESPESA") || t.includes("SAIDA");
   },
 
+  isEstornoName(categoryName) {
+    const n = String(categoryName || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toUpperCase();
+    return /ESTORNO/.test(n);
+  },
+
+  /**
+   * 11.01 (-) DIVIDENDOS reduz o caixa. 11.02 (+) DIVIDENDOS entra.
+   * Estorno (nome ou valor cru negativo) inverte o sinal da linha.
+   * Não usar a regra "conta 2.x redutora = positivo": isso vale para
+   * retenção dentro de grupo de saída, e deixava 11.01 somando.
+   */
+  signedDividendLine(node, categoryName, raw) {
+    const id = String(node && node.id || "");
+    if (id !== "g_11_01" && id !== "g_11_02") return null;
+    const abs = Math.abs(raw);
+    const reversal = this.isEstornoName(categoryName) || raw < 0;
+    if (id === "g_11_01") return reversal ? abs : -abs;
+    return reversal ? -abs : abs;
+  },
+
   /**
    * Sinal no DFC (mesmo critério do demonstrativo Excel):
    * — grupo de saída (02/04/05/07/09.02/09.05) ou conta 2.x / tipo despesa → negativo
    * — redutora nesses grupos (retenção, desconto obtido, flag Sienge) → positivo
    * — redutora em RECEITAS (cancelamento) → negativo
+   * — 11.01 (-) DIVIDENDOS → negativo; 11.02 (+) DIVIDENDOS → positivo
    * Em geral usa módulo do valor (API costuma mandar saída positiva).
    *
    * Reaprop. / ABATE: negativo no DFC na conta em que o movimento foi
@@ -434,6 +458,8 @@ const FluxoCaixaApp = {
     if (this.isAdiantamentoAccount(categoryId, categoryName) && role !== "abatimento") return Math.abs(raw);
     if (this.isDescontoFolhaAccount(categoryId, categoryName)) return -Math.abs(raw);
     if (role === "abatimento") return -Math.abs(raw);
+    const dividend = this.signedDividendLine(node, categoryName, raw);
+    if (dividend !== null) return dividend;
     const abs = Math.abs(raw);
     const apiReducer = /^(S|SIM|TRUE|1|Y|R)$/i.test(String(reducerFlag || "").trim());
     const reduce = apiReducer || this.isReducingAccount(categoryId, categoryName, node);

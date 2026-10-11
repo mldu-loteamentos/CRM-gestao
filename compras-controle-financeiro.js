@@ -1116,8 +1116,6 @@ ComprasControleApp.pintarTitulo = function () {
   const casaComBruto = Math.abs(aberto - referencia) <= 0.05 || Math.abs(aberto - bruto) <= 0.05;
   const retido = !pago && retidoCheio > 0.009 && !jaLiquido && casaComBruto ? retidoCheio : 0;
   const aPagar = pago ? valor : (retido > 0.009 ? Math.round((aberto - retido) * 100) / 100 : aberto);
-  const nomeImposto = impostos.filter((t) => Number(t.valor) > 0.009).map((t) => t.tipo || t.nome).filter(Boolean);
-  const rotuloImposto = nomeImposto.length === 1 ? nomeImposto[0] : (nomeImposto.length ? nomeImposto.join(" + ") : "Imposto");
   const obs = bill.notes || bill.observation || bill.historic || bill.history || bill.complement || "";
   const conferir = Object.assign({}, row, { valorConferir: pago ? null : aberto, descontoTitulo: Number(bill.discount) || 0, retido });
   const forma = typeof caixaFormaHtml === "function"
@@ -1218,7 +1216,7 @@ ComprasControleApp.pintarTitulo = function () {
         ${det.loading ? `<p class="cfin-titulo-wait">Abrindo título, anexos e forma de pagamento…</p>` : ""}
         ${det.error ? `<p class="cfin-titulo-erro">${this.esc(det.error)}</p>` : ""}
         ${bloco("file-text", "Dados do título", "", dados, "cfin-sec-dados")}
-        ${rateio ? bloco("pie-chart", "Rateio por centro de custo", rateioNivel, (retido > 0.009 ? `<div class="cfin-retencao"><div><span>Imposto retido</span><strong>${this.esc(rotuloImposto)} ${this.esc(this.money(retido))}</strong></div><div><span>Líquido</span><strong>${this.esc(this.money(aPagar))}</strong></div></div>` : "") + rateio) : ""}
+        ${rateio ? bloco("pie-chart", "Rateio por centro de custo", rateioNivel, rateio) : ""}
         ${det.loading ? "" : `<div class="cfin-sec-par">
           ${bloco("credit-card", "Forma de pagamento programada", formaNivel, forma)}
           ${bloco("paperclip", "Anexos", "", `<div class="cfin-titulo-files">${anexos || `<span>Este título não tem anexo.</span>`}</div>`)}
@@ -1254,10 +1252,6 @@ ComprasControleApp.pintarTitulo = function () {
       #cfin-titulo .cfin-sec-b .gp-rateio { margin-top:0; }
       #cfin-titulo .gp-rateio-ret { display:block; margin-top:3px; color:#9a3412; font-weight:700; font-size:0.75rem; white-space:nowrap; }
       #cfin-titulo .gp-rateio-liq { display:block; margin-top:3px; color:#105436; font-weight:800; font-size:0.78rem; white-space:nowrap; }
-      #cfin-titulo .cfin-retencao { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:0 0 10px; }
-      #cfin-titulo .cfin-retencao div { background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:8px 10px; }
-      #cfin-titulo .cfin-retencao span { display:block; color:#92400e; font-size:0.72rem; font-weight:700; }
-      #cfin-titulo .cfin-retencao strong { color:#105436; font-size:1rem; }
       #cfin-titulo .cfin-sec.is-erro { border-color:#fecaca; }
       #cfin-titulo .cfin-sec.is-erro .cfin-sec-h { background:#fef2f2; color:#b91c1c; border-bottom-color:#fecaca; }
       #cfin-titulo .cfin-sec.is-aviso { border-color:#fed7aa; }

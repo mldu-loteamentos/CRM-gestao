@@ -3152,6 +3152,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "contas-pagar": "Assistente de Contas a Pagar",
     "gerar-pagamento": "Gerar Pagamento",
     rydoo: "Rydoo",
+    "titulos-incompletos": "Títulos incompletos",
     "config-tags": "Configuração de TAGs",
     "config-users": "Configuração de Usuários",
     "doc-padrao": "Documentos Padrões",
@@ -3225,6 +3226,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "contas-pagar": "landmark",
     "gerar-pagamento": "wallet",
     rydoo: "receipt",
+    "titulos-incompletos": "file-warning",
     "config-tags": "tags",
     "config-users": "users",
     "doc-padrao": "file-cog",
@@ -5388,6 +5390,9 @@ window.applyPermissions = function(profileName) {
         const rydooAlias = modKey === 'sub_fin_cp_rydoo_acessar'
           && perms.sub_fin_cp_rydoo_acessar == null
           && (perms.sub_fin_cp === true || perms.sub_fin_cp_assistente_cp_acessar === true || perms.sub_fin_cp_prestacao_contas_acessar === true || perms.sub_fin_cp_parametrizacao_parceiro_acessar === true);
+        const incompletosAlias = modKey === 'sub_fin_cp_titulos_incompletos_acessar'
+          && perms.sub_fin_cp_titulos_incompletos_acessar == null
+          && (perms.sub_fin_cp === true || perms.sub_fin_cp_assistente_cp_acessar === true || perms.sub_fin_cp_prestacao_contas_acessar === true || perms.sub_fin_cp_parametrizacao_parceiro_acessar === true || perms.sub_fin_cp_gerar_pagamento_acessar === true);
         const gerarPagAlias = modKey === 'sub_fin_cp_gerar_pagamento_acessar'
           && perms.sub_fin_cp_gerar_pagamento_acessar == null
           && (perms.sub_fin_cp === true || perms.sub_fin_cp_assistente_cp_acessar === true || perms.sub_fin_cp_prestacao_contas_acessar === true || perms.sub_fin_cp_parametrizacao_parceiro_acessar === true);
@@ -5449,7 +5454,7 @@ window.applyPermissions = function(profileName) {
           || perms.sub_com_geral_estoque_acessar === true
           || perms.sub_com_geral_tabelas_vigentes_acessar === true
         );
-        if (perms[modKey] === true || mktAlias || cpAlias || rydooAlias || gerarPagAlias || cbAlias || orcAlias || finanAlias || repacAlias || relAlias || suporteAlias || tvigAlias || ccomAlias || window.permCoversMenuKey(perms, modKey)) {
+        if (perms[modKey] === true || mktAlias || cpAlias || rydooAlias || incompletosAlias || gerarPagAlias || cbAlias || orcAlias || finanAlias || repacAlias || relAlias || suporteAlias || tvigAlias || ccomAlias || window.permCoversMenuKey(perms, modKey)) {
           item.style.display = '';
         } else {
           item.style.display = 'none';
@@ -5830,7 +5835,7 @@ window.applyRulesModulePermissions = function() {
   const canViewNeg = window.hasFinCrAction("regras_negociacao", "visualizar");
   const canEditNeg = window.hasFinCrAction("regras_negociacao", "editar");
 
-  ["regua", "judiciais", "financiamento", "atribuicao", "fila", "cartao", "alcada", "alcada-distrato"].forEach(id => {
+  ["regua", "judiciais", "financiamento", "atribuicao", "fila", "cartao", "alcada", "alcada-distrato", "honorarios-internos"].forEach(id => {
     const btn = document.getElementById("btn-regra-" + id);
     if (btn) btn.style.display = canAccCob ? "" : "none";
   });
@@ -5885,9 +5890,15 @@ window.switchRegrasTab = function(tabId) {
     alert("Sem permissão para acessar Regras de Cobrança.");
     return;
   }
-  document.querySelectorAll("#regras-tabs-menu .customer-tab-btn").forEach(btn => btn.classList.remove("active"));
+  document.querySelectorAll("#regras-tabs-menu .ml-tab").forEach(btn => {
+    btn.classList.remove("is-active");
+    btn.setAttribute("aria-selected", "false");
+  });
   const btn = document.getElementById("btn-" + tabId);
-  if (btn) btn.classList.add("active");
+  if (btn) {
+    btn.classList.add("is-active");
+    btn.setAttribute("aria-selected", "true");
+  }
   document.querySelectorAll(".regra-tab-content").forEach(content => content.style.display = "none");
   const content = document.getElementById("content-" + tabId);
   if (content) {
@@ -5913,6 +5924,9 @@ window.switchRegrasTab = function(tabId) {
   }
   if (tabId === "regra-financiamento" && typeof window.renderEtapasFinanciamento === "function") {
     window.renderEtapasFinanciamento();
+  }
+  if (tabId === "regra-honorarios-internos" && typeof window.paintHonorariosInternosPct === "function") {
+    window.paintHonorariosInternosPct();
   }
   window.applyRulesModulePermissions();
   if (window.lucide && typeof window.lucide.createIcons === "function") window.lucide.createIcons();
@@ -41922,6 +41936,7 @@ window.SYNC_KEYS = [
     "crm_documentos_vistos",
     "crm_moura_alcada_desconto",
     "crm_moura_alcada_distrato",
+    "crm_honorarios_internos_pct",
     "crm_compromissario_configs",
     "crm_compromissario_cessao_v1",
     "crm_compras_prazo_lancamento_v1",

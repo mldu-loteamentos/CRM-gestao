@@ -275,6 +275,20 @@ const ConfigUsersApp = {
         || savedPerms.sub_fin_cp_prestacao_contas_editar
       );
     }
+    if (savedPerms.sub_fin_cp_titulos_incompletos_acessar == null && (
+      savedPerms.sub_fin_cp === true
+      || savedPerms.sub_fin_cp_assistente_cp_acessar
+      || savedPerms.sub_fin_cp_prestacao_contas_acessar
+      || savedPerms.sub_fin_cp_parametrizacao_parceiro_acessar
+      || savedPerms.sub_fin_cp_gerar_pagamento_acessar
+    )) {
+      savedPerms.sub_fin_cp_titulos_incompletos_acessar = true;
+      savedPerms.sub_fin_cp_titulos_incompletos_visualizar = true;
+      savedPerms.sub_fin_cp_titulos_incompletos_editar = !!(
+        savedPerms.sub_fin_cp_assistente_cp_editar
+        || savedPerms.sub_fin_cp_prestacao_contas_editar
+      );
+    }
     if (savedPerms.sub_fin_cp_gerar_pagamento_acessar == null && (
       savedPerms.sub_fin_cp === true
       || savedPerms.sub_fin_cp_assistente_cp_acessar
@@ -498,6 +512,7 @@ const ConfigUsersApp = {
             { id: "gerar_pagamento", label: "Gerar Pagamento", permBase: "sub_fin_cp_gerar_pagamento" },
             { id: "prestacao_contas", label: "Prestação de Contas" },
             { id: "parametrizacao_parceiro", label: "Parametrização de Parceiro" },
+            { id: "titulos_incompletos", label: "Títulos incompletos", permBase: "sub_fin_cp_titulos_incompletos" },
             { id: "rydoo", label: "Rydoo", permBase: "sub_fin_cp_rydoo" }
           ]
         },

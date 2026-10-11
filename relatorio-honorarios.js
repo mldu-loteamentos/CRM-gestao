@@ -116,9 +116,10 @@ const HonorariosReport = {
   /** Primeira competência com geração de boletos registrada. */
   MIN_COMP: "2026-09",
   TABS: [
-    { id: "honorarios", label: "Honorários" },
-    { id: "desconto", label: "Desconto de juros" },
-    { id: "ranking", label: "Ranking de recebimentos" }
+    { id: "honorarios", label: "Honorários", icon: "receipt" },
+    { id: "desconto", label: "Desconto de juros", icon: "badge-percent" },
+    { id: "ranking", label: "Ranking de recebimentos", icon: "trophy" },
+    { id: "comissao", label: "Comissão interna", icon: "coins" }
   ],
   FILTERS: [
     { key: "emp", field: "companyId", label: "EMPRESAS", nouns: null },
@@ -796,10 +797,8 @@ const HonorariosReport = {
   setProgress(label, done, total) {
     this.progress = { label, done, total };
     const txt = document.getElementById("rhon-progress-text");
-    const cnt = document.getElementById("rhon-progress-count");
     const bar = document.getElementById("rhon-progress-bar");
     if (txt) txt.textContent = label + "...";
-    if (cnt) cnt.textContent = total ? `${done} de ${total} cliente(s)` : "";
     if (bar) {
       bar.classList.toggle("is-indeterminate", !total);
       bar.style.width = total ? Math.round(done / total * 100) + "%" : "";
@@ -815,7 +814,6 @@ const HonorariosReport = {
         <div class="rhon-loader-title" id="rhon-progress-text">${rhonEsc(p.label)}...</div>
         <div class="rhon-loader-sub">Boletos gerados e pagamentos da competência</div>
         <div class="rhon-track"><div id="rhon-progress-bar" class="rhon-fill${p.total ? "" : " is-indeterminate"}" style="${p.total ? `width:${pct}%` : ""}"></div></div>
-        <div class="rhon-loader-count" id="rhon-progress-count">${p.total ? `${p.done} de ${p.total} cliente(s)` : ""}</div>
       </div>
     </div>`;
   },
@@ -1012,6 +1010,100 @@ const HonorariosReport = {
     </table></div>`;
   },
 
+  pctInterno() {
+    return typeof window.honorariosInternosPct === "function" ? window.honorariosInternosPct() : 5;
+  },
+
+  baseComissao(r) {
+    return Math.max(0, (Number(r.jurosDevido) || 0) - (Number(r.abono) || 0));
+  },
+
+  valorComissao(r) {
+    const v = this.baseComissao(r) * this.pctInterno() / 100;
+    return Math.round(v * 100) / 100;
+  },
+
+  comissaoGrupos() {
+    const q = this.search.trim().toLowerCase();
+    const rows = this.scopedRows().filter((r) => {
+      if (r.status !== "pago") return false;
+      if (!q) return true;
+      const blob = [r.customerName, r.customerDoc, r.billId, r.opName, r.unitName, r.parcela].join(" ").toLowerCase();
+      return blob.includes(q);
+    });
+    const by = {};
+    rows.forEach((r) => {
+      const k = r.opKey || "-";
+      if (!by[k]) by[k] = { key: k, name: r.opName || "Sem operador", rows: [], clientes: {}, juros: 0, abono: 0, base: 0, comissao: 0 };
+      const g = by[k];
+      g.rows.push(r);
+      g.clientes[r.customerId || r.customerName] = 1;
+      g.juros += Number(r.jurosDevido) || 0;
+      g.abono += Number(r.abono) || 0;
+      g.base += this.baseComissao(r);
+      g.comissao += this.valorComissao(r);
+    });
+    return Object.values(by).map((g) => {
+      g.rows.sort((a, b) => String(a.customerName).localeCompare(String(b.customerName), "pt") || String(a.billId).localeCompare(String(b.billId), "pt"));
+      g.nClientes = Object.keys(g.clientes).length;
+      return g;
+    }).sort((a, b) => b.comissao - a.comissao || a.name.localeCompare(b.name, "pt"));
+  },
+
+  comissaoHtml() {
+    const grupos = this.comissaoGrupos();
+    const pct = this.pctInterno();
+    const pctTxt = pct.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+    const tot = grupos.reduce((t, g) => {
+      t.comissao += g.comissao;
+      t.juros += g.juros;
+      t.abono += g.abono;
+      t.base += g.base;
+      t.clientes += g.nClientes;
+      t.linhas += g.rows.length;
+      return t;
+    }, { comissao: 0, juros: 0, abono: 0, base: 0, clientes: 0, linhas: 0 });
+    const cards = `<div class="rhon-cards">
+      <div class="rhon-card"><span>Percentual</span><strong>${pctTxt}%</strong><em>(juros devido − abono) × percentual</em></div>
+      <div class="rhon-card rhon-card-main"><span>Comissão interna</span><strong>R$ ${rhonMoney(tot.comissao)}</strong><em>${tot.linhas} parcela(s) paga(s)</em></div>
+      <div class="rhon-card"><span>Operadores</span><strong>${grupos.length}</strong></div>
+      <div class="rhon-card"><span>Clientes que pagaram</span><strong>${tot.clientes}</strong></div>
+    </div>`;
+    if (!grupos.length) return cards + this.emptyHtml(this.rows.length ? "Nenhum boleto pago com esses filtros." : "Nenhum boleto gerado nesta competência.");
+    const body = grupos.map((g) => {
+      const linhas = g.rows.map((r) => `<tr>
+        <td><div class="rhon-cli">${rhonEsc(r.customerName)}</div><div class="rhon-sub">${rhonEsc(r.customerDoc)}</div></td>
+        <td>${rhonEsc(r.billId)}${r.unitName ? `<div class="rhon-sub">${rhonEsc(r.unitName)}</div>` : ""}</td>
+        <td>${rhonEsc(r.parcela || "—")}</td>
+        <td>${rhonBr(r.paidAt) || "—"}</td>
+        <td class="rhon-num">${rhonMoney(r.jurosDevido)}</td>
+        <td class="rhon-num${r.abono > 0.004 ? " rhon-abono" : ""}">${rhonMoney(r.abono)}</td>
+        <td class="rhon-num">${rhonMoney(this.baseComissao(r))}</td>
+        <td class="rhon-num rhon-hon">${rhonMoney(this.valorComissao(r))}</td>
+      </tr>`).join("");
+      return `<tr class="rhon-emp"><td colspan="4">${rhonEsc(g.name)} · ${g.nClientes} cliente(s)</td>
+        <td class="rhon-num">${rhonMoney(g.juros)}</td>
+        <td class="rhon-num">${rhonMoney(g.abono)}</td>
+        <td class="rhon-num">${rhonMoney(g.base)}</td>
+        <td class="rhon-num">${rhonMoney(g.comissao)}</td>
+      </tr>${linhas}`;
+    }).join("");
+    return cards + `<div class="rhon-wrap"><table class="rhon-table">
+      <thead><tr>
+        <th>Cliente</th><th>Título</th><th>Parcela</th><th>Pago em</th>
+        <th class="rhon-num">Juros devido</th><th class="rhon-num">Abono concedido</th>
+        <th class="rhon-num">Base</th><th class="rhon-num">Comissão ${pctTxt}%</th>
+      </tr></thead>
+      <tbody>${body}</tbody>
+      <tfoot><tr><td colspan="4">Total geral</td>
+        <td class="rhon-num">${rhonMoney(tot.juros)}</td>
+        <td class="rhon-num">${rhonMoney(tot.abono)}</td>
+        <td class="rhon-num">${rhonMoney(tot.base)}</td>
+        <td class="rhon-num">${rhonMoney(tot.comissao)}</td>
+      </tr></tfoot>
+    </table></div>`;
+  },
+
   contentHtml() {
     if (this.loading) return this.loadingHtml();
     if (!this.comp) {
@@ -1022,6 +1114,7 @@ const HonorariosReport = {
       const list = this.ranking(this.scopedRows());
       return this.rankCardsHtml(list) + this.rankTableHtml(list);
     }
+    if (this.tab === "comissao") return this.comissaoHtml();
     const rows = this.filtered();
     const t = this.totals(rows);
     const boletos = new Set(rows.map((r) => r.recId)).size;
@@ -1050,7 +1143,8 @@ const HonorariosReport = {
     const prevWrap = root.querySelector(".rhon-wrap");
     const scroll = prevWrap ? { top: prevWrap.scrollTop, left: prevWrap.scrollLeft } : null;
     const searchFocused = document.activeElement && document.activeElement.id === "rhon-search";
-    const isRank = this.tab === "ranking";
+    const semStatus = this.tab === "ranking" || this.tab === "comissao";
+    const semBusca = this.tab === "ranking";
     const canExport = !this.loading && this.rows.length > 0;
     const off = this.loading ? "disabled" : "";
     root.innerHTML = `
@@ -1060,7 +1154,7 @@ const HonorariosReport = {
           <p>Contas a receber</p>
         </div>
         <div class="rhon-body">
-          <div class="rhon-tabs">${this.TABS.map((t) => `<button type="button" class="rhon-tab${this.tab === t.id ? " is-active" : ""}" onclick="HonorariosReport.setTab('${t.id}')">${t.label}</button>`).join("")}</div>
+          <div class="ml-tabs rhon-tabs" role="tablist">${this.TABS.map((t) => `<button type="button" role="tab" aria-selected="${this.tab === t.id}" class="ml-tab${this.tab === t.id ? " is-active" : ""}" onclick="HonorariosReport.setTab('${t.id}')"><i data-lucide="${t.icon}"></i> ${t.label}</button>`).join("")}</div>
           <div class="rhon-tools">
             <div class="ml-comp-slot">
               <label class="ml-comp-label" for="rhon-comp">Competência</label>
@@ -1071,7 +1165,7 @@ const HonorariosReport = {
               <i data-lucide="refresh-cw" style="width:14px;height:14px;"></i> Atualizar
             </button>
             ${this.FILTERS.map((f) => `<div class="rhon-f-slot rhon-f-${f.key}">${this.filterHtml(f)}</div>`).join("")}
-            ${isRank ? "" : `<div class="rhon-field">
+            ${semStatus ? "" : `<div class="rhon-field">
               <label for="rhon-status">Status</label>
               <select id="rhon-status" onchange="HonorariosReport.setStatus(this.value)">
                 <option value="todos" ${this.status === "todos" ? "selected" : ""}>Todos</option>
@@ -1079,8 +1173,8 @@ const HonorariosReport = {
                 <option value="aberto" ${this.status === "aberto" ? "selected" : ""}>Não pagos</option>
                 <option value="vencido" ${this.status === "vencido" ? "selected" : ""}>Vencidos</option>
               </select>
-            </div>
-            <div class="rhon-field rhon-grow">
+            </div>`}
+            ${semBusca ? "" : `<div class="rhon-field rhon-grow">
               <label for="rhon-search">Buscar</label>
               <input type="text" id="rhon-search" placeholder="Cliente, CPF, título ou unidade" value="${rhonEsc(this.search)}"
                 oninput="HonorariosReport.setSearch(this.value)">
@@ -1122,6 +1216,17 @@ const HonorariosReport = {
         Number(o.abono.toFixed(2)), Number((o.pctDesc * 100).toFixed(1))
       ]));
       sheet = "Ranking";
+    } else if (this.tab === "comissao") {
+      const grupos = this.comissaoGrupos();
+      if (!grupos.length) { alert("Não há boletos pagos para exportar neste filtro."); return; }
+      const pct = this.pctInterno();
+      aoa = [["Operador", "Cliente", "CPF/CNPJ", "Título", "Parcela", "Pago em", "Juros devido", "Abono concedido", "Base", "Percentual", "Comissão"]];
+      grupos.forEach((g) => g.rows.forEach((r) => aoa.push([
+        g.name, r.customerName, r.customerDoc, r.billId, r.parcela, rhonBr(r.paidAt),
+        Number((Number(r.jurosDevido) || 0).toFixed(2)), Number((Number(r.abono) || 0).toFixed(2)),
+        Number(this.baseComissao(r).toFixed(2)), pct, Number(this.valorComissao(r).toFixed(2))
+      ])));
+      sheet = "Comissao interna";
     } else {
       const rows = this.filtered();
       if (!rows.length) { alert("Não há boletos para exportar neste filtro."); return; }
@@ -1150,7 +1255,7 @@ const HonorariosReport = {
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, sheet);
-    const file = { honorarios: "relatorio_honorarios_", desconto: "relatorio_desconto_juros_", ranking: "ranking_recebimentos_" }[this.tab];
+    const file = { honorarios: "relatorio_honorarios_", desconto: "relatorio_desconto_juros_", ranking: "ranking_recebimentos_", comissao: "comissao_interna_" }[this.tab];
     XLSX.writeFile(wb, file + this.comp + ".xlsx");
   },
 
@@ -1166,10 +1271,7 @@ const HonorariosReport = {
       #relatorios-cr-root .rhon-head p { margin:4px 0 0; color:rgba(255,255,255,.8); font-size:.75rem; }
       #relatorios-cr-root .rhon-body { flex:1; min-height:0; display:flex; flex-direction:column; background:#f8fafc; border:1px solid #e2e8f0; border-top:none; border-radius:0 0 12px 12px; padding:14px 16px; }
       #relatorios-cr-root .rhon-content { flex:1; min-height:0; display:flex; flex-direction:column; position:relative; }
-      #relatorios-cr-root .rhon-tabs { display:flex; gap:6px; border-bottom:1px solid #e2e8f0; margin-bottom:12px; }
-      #relatorios-cr-root .rhon-tab { border:0; background:transparent; padding:8px 14px; font-weight:700; font-size:.82rem; color:#64748b; border-bottom:3px solid transparent; cursor:pointer; }
-      #relatorios-cr-root .rhon-tab:hover { color:#105436; }
-      #relatorios-cr-root .rhon-tab.is-active { color:#105436; border-bottom-color:#105436; }
+      #relatorios-cr-root .rhon-tabs { margin-bottom: 12px; }
       #relatorios-cr-root .rhon-tools { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin-bottom:12px; }
       #relatorios-cr-root .rhon-f-slot { flex:0 0 200px; min-width:0; }
       #relatorios-cr-root .rhon-f-emp, #relatorios-cr-root .rhon-f-ent { flex-basis:230px; }
@@ -1236,7 +1338,6 @@ const HonorariosReport = {
       #relatorios-cr-root .rhon-track { width:100%; height:8px; background:#e2e8f0; border-radius:999px; overflow:hidden; margin-top:6px; position:relative; }
       #relatorios-cr-root .rhon-fill { height:100%; background:linear-gradient(90deg, #16a34a, #105436); border-radius:999px; transition:width .3s ease; }
       #relatorios-cr-root .rhon-fill.is-indeterminate { width:35%; position:absolute; animation:rhon-slide 1.2s ease-in-out infinite; }
-      #relatorios-cr-root .rhon-loader-count { font-size:.78rem; font-weight:600; color:#475569; font-variant-numeric:tabular-nums; min-height:1em; }
       @keyframes rhon-rot { to { transform:rotate(360deg); } }
       @keyframes rhon-slide { 0% { left:-35%; } 100% { left:100%; } }
       @media (max-width: 900px) { #relatorios-cr-root .rhon-cards { grid-template-columns:repeat(2, minmax(0,1fr)); } }
@@ -1246,6 +1347,48 @@ const HonorariosReport = {
 };
 
 window.HonorariosReport = HonorariosReport;
+
+window.honorariosInternosPct = function () {
+  try {
+    const raw = localStorage.getItem("crm_honorarios_internos_pct");
+    if (raw == null || raw === "") return 5;
+    const parsed = JSON.parse(raw);
+    const n = Number(parsed && parsed.pct != null ? parsed.pct : raw);
+    if (!Number.isFinite(n) || n < 0) return 5;
+    return Math.min(100, n);
+  } catch (e) {
+    return 5;
+  }
+};
+
+window.paintHonorariosInternosPct = function () {
+  const input = document.getElementById("hon-internos-pct");
+  if (!input || document.activeElement === input) return;
+  const n = window.honorariosInternosPct();
+  input.value = String(n);
+};
+
+window.saveHonorariosInternosPct = async function () {
+  if (typeof window.hasFinCrAction === "function" && !window.hasFinCrAction("regras_cobranca", "editar")) {
+    alert("Sem permissão para editar os honorários internos.");
+    return;
+  }
+  const input = document.getElementById("hon-internos-pct");
+  const n = Number(String(input && input.value || "").replace(",", "."));
+  const status = document.getElementById("hon-internos-status");
+  if (!Number.isFinite(n) || n < 0 || n > 100) {
+    if (status) status.textContent = "Informe um percentual entre 0 e 100.";
+    return;
+  }
+  localStorage.setItem("crm_honorarios_internos_pct", JSON.stringify({ pct: n, updatedAt: Date.now() }));
+  if (status) status.textContent = "Salvando…";
+  try {
+    if (typeof window.forceUploadLocalConfig === "function") await window.forceUploadLocalConfig(true);
+    if (status) status.textContent = "Percentual salvo. A comissão interna usa " + n.toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "%.";
+  } catch (e) {
+    if (status) status.textContent = "Salvo neste computador. A nuvem não confirmou o envio.";
+  }
+};
 
 document.addEventListener("tabChanged", (e) => {
   if (e.detail === "relatorios-cr") HonorariosReport.init();

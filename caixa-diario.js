@@ -312,13 +312,16 @@ const FluxoCaixaDiarioApp = {
   },
 
   ensureCompany() {
-    const ids = this.companies.map((c) => String(c.id));
+    const ids = this.empresasGeridas().map((c) => String(c.id));
     if (this.companyIds.length === 1 && ids.indexOf(this.companyIds[0]) >= 0) return;
     let saved = "";
     try { saved = localStorage.getItem("cxd_company") || ""; } catch (e) {}
     const sorted = ids.slice().sort((a, b) => Number(a) - Number(b) || a.localeCompare(b));
     const pick = ids.indexOf(saved) >= 0 ? saved : (sorted[0] || "");
     this.companyIds = pick ? [pick] : [];
+    if (pick) {
+      try { localStorage.setItem("cxd_company", pick); } catch (e) {}
+    }
   },
 
   normNum(v) {
@@ -546,8 +549,32 @@ const FluxoCaixaDiarioApp = {
     return hit ? hit.name : (id ? ("Empresa " + id) : "");
   },
 
+  /** Cadastro de Empresas: só entra quem está com Gerida pelo Grupo ligada. */
+  empresaGerida(id) {
+    const sid = String(id == null ? "" : id).trim();
+    if (!sid) return false;
+    const num = String(Number(sid));
+    const fontes = [];
+    if (window.EmpresasState && EmpresasState.customFields) fontes.push(EmpresasState.customFields);
+    try { fontes.push(JSON.parse(localStorage.getItem("crm_empresas_custom") || "{}") || {}); } catch (e) {}
+    if (window.AppState && AppState.companiesCustom) fontes.push(AppState.companiesCustom);
+    for (let i = 0; i < fontes.length; i++) {
+      const map = fontes[i] || {};
+      const cfg = map[sid] || map[num] || map[Number(sid)];
+      if (!cfg || typeof cfg !== "object") continue;
+      const v = cfg.gerida_pelo_grupo != null ? cfg.gerida_pelo_grupo : cfg.gerida_grupo;
+      if (v == null) continue;
+      return v === 1 || v === true || v === "1" || Number(v) === 1;
+    }
+    return false;
+  },
+
+  empresasGeridas() {
+    return (this.companies || []).filter((c) => this.empresaGerida(c.id));
+  },
+
   empItems() {
-    return this.companies.map((c) => ({
+    return this.empresasGeridas().map((c) => ({
       id: String(c.id),
       name: String(c.name || "").toUpperCase(),
       label: c.id + " - " + String(c.name || "").toUpperCase()
@@ -1346,9 +1373,19 @@ const FluxoCaixaDiarioApp = {
     return nome || id || "Sem empreendimento";
   },
 
+  /** Conta a pagar: o PMP é de recebimento. A linha mostra o credor e o título. */
+  ehPagar(it) {
+    return !!(it && it.credor && !it.cliente);
+  },
+
   /** empreendimento - unidade (título) NOME DO CLIENTE */
   resumoLinha(it) {
     if (!it) return "—";
+    if (this.ehPagar(it)) {
+      const credor = String(it.credor).trim().toUpperCase();
+      const tit = [it.titulo || it.billId, it.parcela].filter(Boolean).join(" - ");
+      return tit ? credor + " (" + tit + ")" : (credor || "—");
+    }
     const emp = this.nomeEmp(it).toUpperCase() || String(it.cc || it.ccId || "").trim();
     const un = String(it.unidade || "").trim() || (it.outra ? String(it.documento || "").trim() : "");
     const tit = [it.titulo || it.billId, it.parcela].filter(Boolean).join("/");
@@ -1361,7 +1398,7 @@ const FluxoCaixaDiarioApp = {
 
   /** Vencimento original, PMP de 3 meses e o motivo da data no caixa. */
   dicaLinha(it) {
-    if (!it) return "";
+    if (!it || this.ehPagar(it)) return "";
     const linhas = [];
     if (it.vencimento) linhas.push("<b>Vencimento original</b> " + caixaEsc(caixaFmtDate(it.vencimento)));
     if (!it.real && !it.outra) {
@@ -1422,16 +1459,20 @@ const FluxoCaixaDiarioApp = {
         const on = this.accountIncluded(a);
         const outro = g.id === "investimento" ? "corrente" : "investimento";
         const titulo = bloq ? "Conta de parceria de um empreendimento fora do caixa" : (on ? "Considerada no saldo inicial" : "Fora do saldo inicial");
-        return `<tr class="${on ? "" : "cxd-off"}">
+        const comp = this.ehCompromissada(a);
+        const nomeConta = a.descricao || a.name || a.number || "Conta";
+        const nomeJs = encodeURIComponent(nomeConta).replace(/'/g, "%27");
+        return `<tr class="${on ? "" : "cxd-off"}${comp ? " cxd-comp-row" : ""}">
           <td class="cxd-flag">
             <label class="moura-switch" title="${titulo}">
               <input type="checkbox" ${on ? "checked" : ""} ${bloq ? "disabled" : ""} onchange="FluxoCaixaDiarioApp.setFlag(decodeURIComponent('${keyJs}'), this.checked)">
               <span class="moura-switch-track" aria-hidden="true"></span>
             </label>
           </td>
-          <td class="cxd-conta">
-            <div title="${caixaEsc(a.descricao || a.name || a.number || "Conta")}">${caixaEsc(a.descricao || a.name || a.number || "Conta")}</div>
+          <td class="cxd-conta${comp ? " cxd-comp-conta" : ""}" ${comp ? `title="Parametrizar prazo e saldo mínimo" onclick="FluxoCaixaDiarioApp.abrirComp(decodeURIComponent('${nomeJs}'))"` : ""}>
+            <div title="${caixaEsc(nomeConta)}">${caixaEsc(nomeConta)}</div>
             ${a.descricao && a.number ? `<small>C/C ${caixaEsc(a.number)}</small>` : ""}
+            ${comp ? `<small class="cxd-comp-dica">Clique para parametrizar</small>` : ""}
             ${bloq ? `<span class="cxd-bloq">empreendimento fora do caixa</span>` : ""}
           </td>
           <td class="cxd-banco">${a.banco ? caixaEsc(a.banco) : `<span class="cxd-zero">—</span>`}</td>
@@ -1541,8 +1582,19 @@ const FluxoCaixaDiarioApp = {
     return { prazo, piso };
   },
 
-  toggleComp() {
-    this.compAberto = !this.compAberto;
+  ehCompromissada(a) {
+    const txt = [a && a.descricao, a && a.name, a && a.number].filter(Boolean).join(" ").toUpperCase();
+    return /COMPROMISS/.test(txt);
+  },
+
+  abrirComp(nome) {
+    this.compContaNome = nome || "Compromissada";
+    this.compAberto = true;
+    this.render();
+  },
+
+  fecharComp() {
+    this.compAberto = false;
     this.render();
   },
 
@@ -1556,19 +1608,26 @@ const FluxoCaixaDiarioApp = {
     this.render();
   },
 
-  compPainelHtml() {
+  compModalHtml() {
     if (!this.compAberto) return "";
     const p = this.parametrosComp();
     const pisoTxt = p.piso.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    return `<div class="cxd-comp-box">
-      <label>Prazo mínimo
-        <input id="cxd-comp-prazo" type="number" min="1" step="1" value="${p.prazo}">
-        <small>dias</small>
-      </label>
-      <label>Saldo mínimo na conta corrente
-        <input id="cxd-comp-piso" type="text" inputmode="decimal" value="${pisoTxt}">
-      </label>
-      <button type="button" class="cxd-comp-save" onclick="FluxoCaixaDiarioApp.salvarComp()">Salvar</button>
+    return `<div class="cxd-comp-modal" onclick="if(event.target===this)FluxoCaixaDiarioApp.fecharComp()">
+      <div class="cxd-comp-dialog" role="dialog" aria-label="Parametrizar compromissada">
+        <h3>Parametrizar compromissada</h3>
+        <p>${caixaEsc(this.compContaNome || "Compromissada")}</p>
+        <label>Prazo mínimo
+          <input id="cxd-comp-prazo" type="number" min="1" step="1" value="${p.prazo}">
+          <small>dias</small>
+        </label>
+        <label>Saldo mínimo na conta corrente
+          <input id="cxd-comp-piso" type="text" inputmode="decimal" value="${pisoTxt}">
+        </label>
+        <div class="cxd-comp-actions">
+          <button type="button" class="btn btn-cancel" onclick="FluxoCaixaDiarioApp.fecharComp()">Cancelar</button>
+          <button type="button" class="btn btn-primary" onclick="FluxoCaixaDiarioApp.salvarComp()">Salvar</button>
+        </div>
+      </div>
     </div>`;
   },
 
@@ -1886,14 +1945,18 @@ const FluxoCaixaDiarioApp = {
         #fluxo-caixa-diario-root .cxd-tip-box { display:none; }
         #cxd-float-tip { position:fixed; z-index:80; background:#0c3d28; color:#fff; padding:8px 10px; border-radius:8px; font-size:.72rem; font-weight:600; line-height:1.45; text-align:left; white-space:nowrap; box-shadow:0 8px 20px rgba(15,23,42,.2); pointer-events:none; }
         #cxd-float-tip b { font-weight:700; margin-right:6px; }
-        #fluxo-caixa-diario-root .cxd-comp-head { display:flex; justify-content:flex-end; margin:0 0 8px; }
-        #fluxo-caixa-diario-root .cxd-comp-btn { height:34px; display:inline-flex; align-items:center; gap:6px; border:1px solid #105436; background:#fff; color:#105436; border-radius:6px; font-weight:700; font-size:.75rem; padding:0 12px; cursor:pointer; font-family:inherit; }
-        #fluxo-caixa-diario-root .cxd-comp-btn:hover { background:#e7f6ee; }
-        #fluxo-caixa-diario-root .cxd-comp-box { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:10px 12px; margin:0 0 12px; }
-        #fluxo-caixa-diario-root .cxd-comp-box label { font-size:.72rem; font-weight:700; color:#1e3a8a; }
-        #fluxo-caixa-diario-root .cxd-comp-box input { display:block; height:34px; margin-top:4px; border:1px solid #cbd5e1; border-radius:6px; padding:0 8px; min-width:140px; font-size:.84rem; }
-        #fluxo-caixa-diario-root .cxd-comp-box small { display:block; margin-top:2px; font-weight:600; color:#64748b; }
-        #fluxo-caixa-diario-root .cxd-comp-save { height:34px; border:0; border-radius:6px; background:#105436; color:#fff; font-weight:700; padding:0 14px; cursor:pointer; font-family:inherit; }
+        #fluxo-caixa-diario-root .cxd-comp-conta { cursor:pointer; }
+        #fluxo-caixa-diario-root tr.cxd-comp-row:hover td.cxd-comp-conta { background:#eff6ff; }
+        #fluxo-caixa-diario-root .cxd-comp-dica { color:#1d4ed8; font-weight:700; }
+        #fluxo-caixa-diario-root .cxd-comp-modal { position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:80; display:flex; align-items:center; justify-content:center; padding:16px; }
+        #fluxo-caixa-diario-root .cxd-comp-dialog { background:#fff; border-radius:12px; width:min(420px, 96vw); padding:18px 20px; box-shadow:0 16px 40px rgba(15,23,42,.18); }
+        #fluxo-caixa-diario-root .cxd-comp-dialog h3 { margin:0; color:#105436; font-size:1.05rem; }
+        #fluxo-caixa-diario-root .cxd-comp-dialog > p { margin:4px 0 14px; color:#64748b; font-size:.82rem; }
+        #fluxo-caixa-diario-root .cxd-comp-dialog label { display:block; margin-bottom:12px; font-size:.72rem; font-weight:700; color:#334155; text-transform:uppercase; }
+        #fluxo-caixa-diario-root .cxd-comp-dialog input { display:block; width:100%; height:38px; margin-top:4px; border:1px solid #cbd5e1; border-radius:8px; padding:0 10px; font-size:.9rem; box-sizing:border-box; text-transform:none; font-weight:600; }
+        #fluxo-caixa-diario-root .cxd-comp-dialog small { display:block; margin-top:2px; font-weight:600; color:#64748b; text-transform:none; }
+        #fluxo-caixa-diario-root .cxd-comp-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:4px; }
+        #fluxo-caixa-diario-root .cxd-comp-actions .btn { height:36px; }
         #fluxo-caixa-diario-root .cxd-mx .cxd-col-tot { background:#f1f5f9; font-weight:800; border-left:1px solid #cbd5e1; cursor:default; }
         #fluxo-caixa-diario-root .cxd-mx th.cxd-col-tot { background:#0c3d28; }
         #fluxo-caixa-diario-root .cxd-mx tr.cxd-row-cc td { background:#f8fafc; }
@@ -1976,10 +2039,6 @@ const FluxoCaixaDiarioApp = {
           <p class="cxd-title">CONTAS COM SALDO <span>· ligue as contas que entram no caixa</span></p>
           ${this.contasHtml()}
           <div class="cxd-saldo-ini"><span>${iniLabel}</span><span>${caixaMoney(saldoInicial)}</span></div>
-          <div class="cxd-comp-head">
-            <button type="button" class="cxd-comp-btn" onclick="FluxoCaixaDiarioApp.toggleComp()"><i data-lucide="sliders-horizontal" style="width:14px;height:14px;"></i> Parametrizar compromissada</button>
-          </div>
-          ${this.compPainelHtml()}
           ${avisoAplicacao}
           ${this.loading ? `<p style="color:#64748b;">Montando o fluxo…</p>` : `
           <div class="cxd-mx-bar">
@@ -2007,7 +2066,8 @@ const FluxoCaixaDiarioApp = {
           ${detalheDia}`}
         </div>
       </div>
-      ${this.detailHtml()}`;
+      ${this.detailHtml()}
+      ${this.compModalHtml()}`;
     const wrap = root.querySelector(".cxd-wrap-mx");
     if (wrap) {
       if (prevScroll != null) wrap.scrollLeft = prevScroll;

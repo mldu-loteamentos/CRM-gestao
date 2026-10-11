@@ -59,7 +59,8 @@
         { id: "regra-negociacao", label: "Regras de Negociação" },
         { id: "regra-fila", label: "Fila de Cobrança" },
         { id: "regra-cartao", label: "Cartão de Crédito" },
-        { id: "regra-alcada", label: "Alçada para Desconto" }
+        { id: "regra-alcada", label: "Alçada para Desconto" },
+        { id: "regra-honorarios-internos", label: "Honorários internos" }
       ]},
       { id: "extrato", label: "Extrato" },
       { id: "mapa", label: "Mapa jurídico" },
@@ -68,6 +69,7 @@
       { id: "distrato", label: "Distrato" },
       { id: "cp_assistente", label: "Assistente de Contas a Pagar" },
       { id: "gerar_pagamento", label: "Gerar Pagamento" },
+      { id: "titulos_incompletos", label: "Títulos incompletos" },
       { id: "rydoo", label: "Rydoo" },
       { id: "prestacao_contas", label: "Prestação de Contas" },
       { id: "param_parceiro", label: "Parametrização de Parceiro" },
@@ -153,6 +155,7 @@
     configuracoes: { modulo: "financeiro", subitem: "config_cr" },
     "contas-pagar": { modulo: "financeiro", subitem: "cp_assistente" },
     "gerar-pagamento": { modulo: "financeiro", subitem: "gerar_pagamento" },
+    "titulos-incompletos": { modulo: "financeiro", subitem: "titulos_incompletos" },
     rydoo: { modulo: "financeiro", subitem: "rydoo" },
     "prestacao-contas": { modulo: "financeiro", subitem: "prestacao_contas" },
     "parametrizacao-parceiro": { modulo: "financeiro", subitem: "param_parceiro" },
