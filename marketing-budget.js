@@ -44,6 +44,8 @@ const MarketingBudgetApp = {
     ccsCfg: [],
     aba: "budget",
     ctrEscopo: "periodo",
+    sortCtr: "emissao",
+    sortCtrDir: "desc",
     catOpen: false,
     catQuery: "",
     catPend: null,
@@ -857,8 +859,9 @@ const MarketingBudgetApp = {
   },
 
   repintarVendas() {
-    const box = document.getElementById("mkb-vendas");
-    if (box) box.innerHTML = this.vendasHtml();
+    const body = document.getElementById("mkb-ctr-vendas-body");
+    if (!body) return;
+    body.innerHTML = this.vendasLinhas();
   },
 
   /* ---------- perfil dos clientes (sexo e idade) ---------- */
@@ -1301,10 +1304,82 @@ const MarketingBudgetApp = {
     });
   },
 
-  vendasHtml() {
+  contratosDoPeriodo() {
     const s = this.state;
-    const lista = s.vendas.concat(s.distratos.filter((d) => !s.vendas.some((v) => v.id === d.id)));
-    const linhas = lista.length ? lista.map((v) => `<tr>
+    return s.vendas.concat(s.distratos.filter((d) => !s.vendas.some((v) => v.id === d.id)));
+  },
+
+  diasAteCancelar(v) {
+    if (!v || v.situacao !== "Cancelado" || !v.data || !v.dataCancel) return null;
+    const ms = new Date(v.dataCancel + "T12:00:00") - new Date(v.data + "T12:00:00");
+    if (!Number.isFinite(ms)) return null;
+    return Math.max(0, Math.round(ms / 86400000));
+  },
+
+  textoDuracao(v) {
+    const dias = this.diasAteCancelar(v);
+    if (dias == null) return "";
+    if (dias < 30) return `contrato durou ${dias} ${dias === 1 ? "dia" : "dias"}`;
+    const meses = Math.max(1, Math.round(dias / 30));
+    return `contrato durou ${meses} ${meses === 1 ? "mês" : "meses"}`;
+  },
+
+  /** Textos da coluna Alerta: risco de distrato ou, no cancelado, quanto tempo durou. */
+  alertasDe(v) {
+    if (!v) return [];
+    if (v.situacao === "Cancelado") {
+      const t = this.textoDuracao(v);
+      return t ? [t] : [];
+    }
+    const p = (this.state.adimpl.porVenda || {})[v.id];
+    if (!p) return [];
+    return this.riscoDe({ pag: p }).map((m) => m === "nada"
+      ? "risco distrato - motivo: não pagou sinal"
+      : "risco distrato - motivo: entrada em atraso");
+  },
+
+  valorOrdenacaoContrato(v, col) {
+    const p = (this.state.adimpl.porVenda || {})[v.id] || {};
+    if (col === "emissao") return v.data || "";
+    if (col === "contrato") return v.numero || "";
+    if (col === "unidade") return v.unidadeNomes || "";
+    if (col === "cliente") return v.cliente || "";
+    if (col === "valor") return Number(v.valor) || 0;
+    if (col === "situacao") return v.situacao || "";
+    if (col === "atraso") return p.status === "inadimplente" ? (p.desde || "") : "";
+    if (col === "alerta") return this.alertasDe(v).join(" ");
+    return "";
+  },
+
+  ordenarContratos(col) {
+    const s = this.state;
+    if (s.sortCtr === col) s.sortCtrDir = s.sortCtrDir === "asc" ? "desc" : "asc";
+    else {
+      s.sortCtr = col;
+      s.sortCtrDir = "desc";
+    }
+    this.repintarVendas();
+  },
+
+  contratosOrdenados() {
+    const s = this.state;
+    const dir = s.sortCtrDir === "asc" ? 1 : -1;
+    const col = s.sortCtr || "emissao";
+    return this.contratosDoPeriodo().slice().sort((a, b) => {
+      const va = this.valorOrdenacaoContrato(a, col);
+      const vb = this.valorOrdenacaoContrato(b, col);
+      if (typeof va === "number" || typeof vb === "number") return ((Number(va) || 0) - (Number(vb) || 0)) * dir;
+      return String(va).localeCompare(String(vb), "pt-BR", { numeric: true, sensitivity: "base" }) * dir;
+    });
+  },
+
+  vendasLinhas() {
+    const lista = this.contratosOrdenados();
+    if (!lista.length) return `<tr><td colspan="8" class="mkb-vazio">Nenhuma venda deste empreendimento no período.</td></tr>`;
+    return lista.map((v) => {
+      const alertas = this.alertasDe(v);
+      const alertaCls = v.situacao === "Cancelado" ? "mkb-alerta mkb-alerta-dias" : "mkb-alerta";
+      return `<tr>
         <td>${this.dataBr(v.data)}</td>
         <td><strong>${this.esc(v.numero)}</strong></td>
         <td title="${this.esc(v.unidadeNomes)}">${this.esc(v.unidadeNomes || v.unidades + " unid.")}</td>
@@ -1312,12 +1387,17 @@ const MarketingBudgetApp = {
         <td style="text-align:right;">${this.money(v.valor)}</td>
         <td><span class="mkb-st ${v.situacao === "Cancelado" ? "mkb-st-cancel" : "mkb-st-realizado"}">${v.situacao}${v.situacao === "Cancelado" && v.dataCancel ? " em " + this.dataBr(v.dataCancel) : ""}</span></td>
         <td>${this.atrasoHtml(v)}</td>
-      </tr>`).join("")
-      : `<tr><td colspan="7" class="mkb-vazio">Nenhuma venda deste empreendimento no período.</td></tr>`;
+        <td class="${alertaCls}">${alertas.length ? alertas.map((t) => this.esc(t)).join("<br>") : `<span class="mkb-muted">—</span>`}</td>
+      </tr>`;
+    }).join("");
+  },
+
+  vendasHtml() {
+    const th = (col, rotulo, direita) => `<th onclick="MarketingBudgetApp.ordenarContratos('${col}')" style="cursor:pointer;user-select:none;${direita ? "text-align:right;" : ""}">${rotulo} <i data-lucide="chevrons-up-down" style="width:11px;vertical-align:middle;"></i></th>`;
     return `<div class="mkb-tablewrap"><table class="mkb-table">
-        <colgroup><col style="width:9%"><col style="width:13%"><col style="width:10%"><col style="width:22%"><col style="width:11%"><col style="width:17%"><col style="width:18%"></colgroup>
-        <thead><tr><th>Emissão</th><th>Contrato</th><th>Unidade</th><th>Cliente</th><th style="text-align:right;">Valor</th><th>Situação</th><th>Atrasado desde</th></tr></thead>
-        <tbody>${linhas}</tbody>
+        <colgroup><col style="width:8%"><col style="width:11%"><col style="width:9%"><col style="width:16%"><col style="width:9%"><col style="width:14%"><col style="width:12%"><col style="width:21%"></colgroup>
+        <thead><tr>${th("emissao", "Emissão")}${th("contrato", "Contrato")}${th("unidade", "Unidade")}${th("cliente", "Cliente")}${th("valor", "Valor", true)}${th("situacao", "Situação")}${th("atraso", "Atrasado desde")}${th("alerta", "Alerta")}</tr></thead>
+        <tbody id="mkb-ctr-vendas-body">${this.vendasLinhas()}</tbody>
       </table></div>`;
   },
 
@@ -1569,11 +1649,7 @@ const MarketingBudgetApp = {
         ${this.kpi("Custo por unidade vendida", r.cac != null ? this.money(r.cac) : "—", "Só o que já foi pago de marketing, dividido pelas unidades", "#105436")}
         ${this.kpi("Custo por unidade com o em aberto", r.cacTotal != null ? this.money(r.cacTotal) : "—", "Marketing já pago e o que ainda está comprometido, dividido pelas unidades vendidas", "#f37021")}
       </div>
-      <div class="mkb-card mkb-chart-full"><div class="mkb-card-h"><h3>Vendas e custo por unidade</h3><small>Quantas unidades venderam em cada mês e quanto de marketing cada uma consumiu</small></div><div class="mkb-canvas"><canvas id="mkb-ch-vendas"></canvas></div></div>
-      <div class="mkb-card">
-        <div class="mkb-card-h"><h3>Contratos vendidos no período</h3><small>Emitidos e distratados no período · Atrasado desde é a parcela vencida mais antiga no Contas a Receber</small></div>
-        <div id="mkb-vendas">${this.vendasHtml()}</div>
-      </div>`;
+      <div class="mkb-card mkb-chart-full"><div class="mkb-card-h"><h3>Vendas e custo por unidade</h3><small>Quantas unidades venderam em cada mês e quanto de marketing cada uma consumiu</small></div><div class="mkb-canvas"><canvas id="mkb-ch-vendas"></canvas></div></div>`;
     return this.secao("De onde vem a verba", "", verba)
       + this.secao("Uso da verba", "Quanto desse teto já foi pago e quanto ainda está comprometido.", uso)
       + this.secao("Vendas do período", "As unidades vendidas servem para ver quanto de marketing cada venda consumiu.", vendas);
@@ -1663,26 +1739,13 @@ const MarketingBudgetApp = {
         <button type="button" class="mkb-chip${todos ? " is-on" : ""}" onclick="MarketingBudgetApp.setEscopoCtr('todos')">Todos os contratos do empreendimento <b>${nTodos}</b></button>
       </div>`;
     const L = this.contratosAtivos();
-    if (!L.length) return `<div class="mkb-card">${escopo}<p class="mkb-vazio" style="margin:12px 0 0;">Nenhum contrato ativo com saldo a pagar ${todos ? "neste empreendimento" : "entre as vendas do período"}.</p></div>`;
+    const listaContratos = this.secao("Contratos vendidos no período", "Emitidos e distratados no período. A coluna Alerta marca risco de distrato e, nos cancelados, quanto tempo o contrato durou.", `<div class="mkb-card">${this.vendasHtml()}</div>`);
+    if (!L.length) return `<div class="mkb-card">${escopo}<p class="mkb-vazio" style="margin:12px 0 0;">Nenhum contrato ativo com saldo a pagar ${todos ? "neste empreendimento" : "entre as vendas do período"}.</p></div>${listaContratos}`;
     const emDia = L.filter((c) => c.pag.status === "adimplente");
     const atraso = L.filter((c) => c.pag.status === "inadimplente");
-    const risco = L.filter((c) => this.riscoDe(c).length)
-      .sort((x, y) => (this.riscoDe(y).length - this.riscoDe(x).length) || ((y.pag.dias || 0) - (x.pag.dias || 0)));
     const vencido = atraso.reduce((t, c) => t + (Number(c.pag.vencido) || 0), 0);
     const lotes = this.lotesDoEmpreendimento();
     const pctLotes = lotes.total ? Math.round((lotes.vendidos / lotes.total) * 1000) / 10 : 0;
-    const tag = (m) => m === "nada" ? `<span class="mkb-st mkb-st-cancel">Não pagou nada</span>` : `<span class="mkb-st mkb-st-comprometido">Devendo a entrada</span>`;
-    const linhas = risco.map((c) => `<tr>
-        <td><strong>${this.esc(c.numero)}</strong></td>
-        <td title="${this.esc(c.unidadeNomes)}">${this.esc(c.unidadeNomes || "—")}</td>
-        <td title="${this.esc(c.cliente)}">${this.esc(c.cliente || "—")}</td>
-        <td>${c.data ? this.dataBr(c.data) : "—"}</td>
-        <td style="text-align:right;">${c.pag.pctPago.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</td>
-        <td>${c.pag.entrada && c.pag.entrada.vencida > 0.009 ? `<span class="mkb-atraso">${this.money(c.pag.entrada.vencida)} <small>desde ${this.dataBr(c.pag.entrada.desde)}</small></span>` : this.esc(this.situacaoEntrada(c.pag))}</td>
-        <td>${this.atrasoHtml({ id: c.id, situacao: "", pagDireto: c.pag })}</td>
-        <td class="mkb-motivo">${this.riscoDe(c).map(tag).join(" ")}</td>
-      </tr>`).join("");
-    const qtdDistrato = risco.length.toLocaleString("pt-BR");
     const pagamento = `
       <div class="mkb-kpis">
         ${this.kpi("Contratos ativos", L.length.toLocaleString("pt-BR"), todos ? "Títulos a receber ainda em aberto neste empreendimento" : "Vendas do período que ainda têm saldo", "#6366f1")}
@@ -1696,21 +1759,12 @@ const MarketingBudgetApp = {
         <div class="mkb-card"><div class="mkb-card-h"><h3>Quanto do contrato já foi pago</h3><small>0% significa que nenhuma parcela entrou</small></div><div class="mkb-canvas mkb-canvas-curto"><canvas id="mkb-ch-ctr-pago"></canvas></div></div>
         <div class="mkb-card"><div class="mkb-card-h"><h3>Há quanto tempo está vencido</h3><small>Conta a partir da parcela vencida mais antiga de cada contrato</small></div><div class="mkb-canvas mkb-canvas-curto"><canvas id="mkb-ch-ctr-atraso"></canvas></div></div>
       </div>`;
-    const distrato = `
-      <div class="mkb-card">
-        <div class="mkb-card-h"><h3>Lista dos ${qtdDistrato} título(s)</h3><small>Cada linha é um contrato que o marketing pode tratar como possível distrato</small></div>
-        ${risco.length ? `<div class="mkb-tablewrap"><table class="mkb-table">
-          <colgroup><col style="width:13%"><col style="width:8%"><col style="width:18%"><col style="width:9%"><col style="width:6%"><col style="width:14%"><col style="width:11%"><col style="width:21%"></colgroup>
-          <thead><tr><th>Contrato</th><th>Unidade</th><th>Cliente</th><th>Emissão</th><th style="text-align:right;">% pago</th><th>Entrada</th><th>Atrasado desde</th><th>Motivo</th></tr></thead>
-          <tbody>${linhas}</tbody>
-        </table></div>` : `<p class="mkb-muted" style="margin:0;">Nenhum contrato ativo sem pagamento ou com entrada vencida.</p>`}
-      </div>`;
     return `<div class="mkb-card mkb-ctr-top">
         ${escopo}
         <small class="mkb-muted">Contrato ativo é o que não foi cancelado e ainda tem saldo no Contas a Receber${todos ? "" : ", entre as vendas emitidas no período"}.</small>
       </div>
       ${this.secao("Situação de pagamento", "Quem está em dia, quem está atrasado e quanto do contrato já entrou.", pagamento)}
-      ${this.secao(`Títulos que podem distratar <b class="mkb-qtd">${qtdDistrato}</b>`, "Não pagaram nenhuma parcela ou estão com a entrada vencida.", distrato)}`;
+      ${listaContratos}`;
   },
 
   desenharGraficosContratos() {
@@ -1833,7 +1887,7 @@ const MarketingBudgetApp = {
     const vencido = atraso.reduce((t, x) => t + x.vencido, 0);
     const semTitulo = ativos.filter((x) => x.pag === "sem-titulo").length;
     const cancMeses = canc.filter((x) => x.meses != null);
-    const mediaMeses = cancMeses.length ? cancMeses.reduce((t, x) => t + x.meses, 0) / cancMeses.length : null;
+    const mediaMeses = cancMeses.length ? Math.round(cancMeses.reduce((t, x) => t + x.meses, 0) / cancMeses.length) : null;
     const sexoNome = (x) => this.SEXOS[x.sexo] || "Não informado";
     const gSexo = this.grupos(ativos, sexoNome, this.ordemSexos());
     const gFaixa = this.grupos(ativos, (x) => x.faixa, this.ordemFaixas());
@@ -1848,16 +1902,6 @@ const MarketingBudgetApp = {
         </tbody>
       </table></div>`;
     const taxa = (lista) => lista.map((g) => `<tr><td>${this.esc(g.nome)}</td><td style="text-align:right;">${g.cancelados}</td><td style="text-align:right;">${g.total}</td><td style="text-align:right;"><b style="color:${g.cancelados ? "#b91c1c" : "#64748b"};">${this.pct(g.cancelados, g.total)}</b></td></tr>`).join("");
-    const listaCanc = canc.slice().sort((a, b) => String(b.v.dataCancel || "").localeCompare(String(a.v.dataCancel || ""))).map((x) => `<tr>
-        <td>${this.dataBr(x.v.dataCancel)}</td>
-        <td><strong>${this.esc(x.v.numero)}</strong></td>
-        <td title="${this.esc(x.v.cliente)}">${this.esc(x.v.cliente || "—")}</td>
-        <td>${this.esc(sexoNome(x))}</td>
-        <td style="text-align:right;">${x.idade != null ? x.idade + " anos" : "—"}</td>
-        <td>${this.dataBr(x.v.data)}</td>
-        <td style="text-align:right;">${x.meses == null ? "—" : (x.meses === 0 ? "menos de 1 mês" : x.meses + (x.meses === 1 ? " mês" : " meses"))}</td>
-        <td style="text-align:right;">${this.money(x.v.valor)}</td>
-      </tr>`).join("");
     const quem = `
       <div class="mkb-kpis">
         ${this.kpi("Contratos ativos", ativos.length.toLocaleString("pt-BR"), `${canc.length} já cancelado(s) neste período`, "#6366f1")}
@@ -1877,14 +1921,14 @@ const MarketingBudgetApp = {
       <div class="mkb-par mkb-par-pag">
         <div class="mkb-card"><div class="mkb-card-h"><h3>Em dia e em atraso por idade</h3></div><div class="mkb-canvas mkb-canvas-alto"><canvas id="mkb-ch-pag"></canvas></div></div>
         <div class="mkb-card">
-          <div class="mkb-card-h"><h3>A mesma conta, em tabela</h3><small>Em dia inclui quem já quitou · em atraso é quem tem parcela vencida</small></div>
+          <div class="mkb-card-h"><small>Em dia inclui quem já quitou · em atraso é quem tem parcela vencida</small></div>
           ${tabelaPag}
         </div>
       </div>`;
     const cancelou = `
       <div class="mkb-kpis mkb-kpis-2">
         ${this.kpi("Cancelamentos", canc.length.toLocaleString("pt-BR"), this.pct(canc.length, L.length) + " dos contratos do período", "#b91c1c")}
-        ${this.kpi("Tempo até cancelar", mediaMeses != null ? mediaMeses.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + (Math.abs(mediaMeses - 1) < 0.05 ? " mês" : " meses") : "—", "Média de meses entre a venda e o cancelamento", "#64748b")}
+        ${this.kpi("Tempo até cancelar", mediaMeses == null ? "—" : (mediaMeses < 1 ? "menos de 1 mês" : mediaMeses + (mediaMeses === 1 ? " mês" : " meses")), "Média de meses entre a venda e o cancelamento", "#64748b")}
       </div>
       ${canc.length ? `<div class="mkb-par mkb-par-pag mkb-par-canc">
         <div class="mkb-card">
@@ -1892,7 +1936,6 @@ const MarketingBudgetApp = {
           <div class="mkb-canvas mkb-canvas-alto"><canvas id="mkb-ch-canc"></canvas></div>
         </div>
         <div class="mkb-card">
-          <div class="mkb-card-h"><h3>A mesma conta, em tabela</h3></div>
           <div class="mkb-tablewrap mkb-tablewrap-livre"><table class="mkb-table mkb-table-perfil">
             <colgroup><col style="width:40%"><col style="width:20%"><col style="width:20%"><col style="width:20%"></colgroup>
             <thead><tr><th>Grupo</th><th style="text-align:right;">Cancelados</th><th style="text-align:right;">Contratos</th><th style="text-align:right;">Taxa</th></tr></thead>
@@ -1902,12 +1945,7 @@ const MarketingBudgetApp = {
             </tbody>
           </table></div>
         </div>
-      </div>
-      <div class="mkb-card"><div class="mkb-tablewrap"><table class="mkb-table">
-          <colgroup><col style="width:11%"><col style="width:14%"><col style="width:25%"><col style="width:11%"><col style="width:9%"><col style="width:10%"><col style="width:9%"><col style="width:11%"></colgroup>
-          <thead><tr><th>Cancelamento</th><th>Contrato</th><th>Cliente</th><th>Sexo</th><th style="text-align:right;">Idade</th><th>Venda</th><th style="text-align:right;">Durou</th><th style="text-align:right;">Valor</th></tr></thead>
-          <tbody>${listaCanc}</tbody>
-        </table></div></div>` : `<div class="mkb-card"><p class="mkb-muted" style="margin:0;">Nenhum cancelamento deste empreendimento no período.</p></div>`}`;
+      </div>` : `<div class="mkb-card"><p class="mkb-muted" style="margin:0;">Nenhum cancelamento deste empreendimento no período.</p></div>`}`;
     return `${aviso}
       ${erros.length ? `<div class="mkb-card" style="color:#b91c1c;font-size:0.82rem;">${erros.map((e) => this.esc(e)).join("<br>")}</div>` : ""}
       ${this.secao("Quem comprou", "Sexo e idade dos clientes dos contratos que continuam ativos.", quem)}
@@ -2178,6 +2216,8 @@ const MarketingBudgetApp = {
         #marketing-budget-root .mkb-charts-2 { grid-template-columns:repeat(2, minmax(0,1fr)); }
         #marketing-budget-root .mkb-ctr-top { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:10px 16px; }
         #marketing-budget-root .mkb-table td.mkb-tags { white-space:normal; }
+        #marketing-budget-root .mkb-table td.mkb-alerta { white-space:normal; line-height:1.35; color:#7f1d1d; }
+        #marketing-budget-root .mkb-table td.mkb-alerta-dias { color:#475569; }
         #marketing-budget-root .mkb-table td.mkb-motivo { white-space:nowrap; overflow:visible; text-overflow:clip; }
         #marketing-budget-root .mkb-table td.mkb-motivo .mkb-st { white-space:nowrap; }
         #marketing-budget-root .mkb-table td.mkb-tags .mkb-st { margin:1px 0; }
