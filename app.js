@@ -7234,6 +7234,147 @@ window.getAnaliseInternaJuridicoAgingHtml = function(client) {
   </span>`;
 };
 
+function filaUnitKey(s) {
+  return String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function filaTituloKey(v) {
+  return String(v || "").replace(/^B-/i, "").split("-")[0].trim();
+}
+
+function filaBuildPmpIndex(units, rows) {
+  const byBill = new Map();
+  const byUnit = new Map();
+  const byClientLists = new Map();
+  const pushClient = (cid, rec) => {
+    if (!cid) return;
+    if (!byClientLists.has(cid)) byClientLists.set(cid, []);
+    byClientLists.get(cid).push(rec.pmp);
+  };
+  (units || []).forEach((u) => {
+    if (!u || u.pmp3m == null || !Number.isFinite(Number(u.pmp3m))) return;
+    const rec = { known: true, pmp: Math.round(Number(u.pmp3m)) };
+    const bill = filaTituloKey(u.receivableBillId);
+    if (bill) byBill.set(bill, rec);
+    const cid = String(u.customerId || "");
+    const un = filaUnitKey(u.name);
+    if (cid && un) byUnit.set(cid + "|" + un, rec);
+    pushClient(cid, rec);
+  });
+  (rows || []).forEach((r) => {
+    if (!r || r.pmp == null || !Number.isFinite(Number(r.pmp))) return;
+    const rec = { known: true, pmp: Math.round(Number(r.pmp)) };
+    const cid = String(r.cid || "");
+    const un = filaUnitKey(r.un);
+    if (cid && un && !byUnit.has(cid + "|" + un)) byUnit.set(cid + "|" + un, rec);
+    pushClient(cid, rec);
+  });
+  const byClient = new Map();
+  byClientLists.forEach((list, cid) => {
+    const uniq = [...new Set(list)];
+    if (uniq.length === 1) byClient.set(cid, { known: true, pmp: uniq[0] });
+  });
+  return { byBill, byUnit, byClient };
+}
+
+window.filaPmpLookup = function(client) {
+  const idx = window._filaPmpIdx;
+  if (!idx || !client) return { known: false, pmp: null };
+  const bills = [];
+  (client.billIds || []).forEach((b) => bills.push(filaTituloKey(b)));
+  bills.push(filaTituloKey(client.saleId));
+  for (let i = 0; i < bills.length; i++) {
+    if (bills[i] && idx.byBill.has(bills[i])) return idx.byBill.get(bills[i]);
+  }
+  const cid = String(client.customerId || "");
+  const un = filaUnitKey(client.unitName);
+  if (cid && un && idx.byUnit.has(cid + "|" + un)) return idx.byUnit.get(cid + "|" + un);
+  if (cid && idx.byClient.has(cid)) return idx.byClient.get(cid);
+  return { known: false, pmp: null };
+};
+
+window.filaPmpHtml = function(client) {
+  const info = window.filaPmpLookup(client);
+  if (!info || !info.known) {
+    if (!window._filaPmpIdx) {
+      return `<span class="fila-pmp fila-pmp-wait" title="Carregando o PMP médio de 3 meses">…</span>`;
+    }
+    return `<span class="fila-pmp fila-pmp-none" title="Sem PMP médio de 3 meses para este cliente">—</span>`;
+  }
+  const pmp = info.pmp;
+  const atraso = Number(client && client.maxDaysDelay) || 0;
+  const dentro = atraso <= pmp;
+  const habito = pmp > 0
+    ? "paga em média " + pmp + " dia(s) depois do vencimento"
+    : (pmp < 0 ? "paga em média " + Math.abs(pmp) + " dia(s) antes do vencimento" : "paga em média no próprio vencimento");
+  const titulo = dentro
+    ? "Atraso de " + atraso + " dia(s) está dentro do PMP médio (" + pmp + " d). Nos últimos 3 meses, este cliente " + habito + "."
+    : "Atraso de " + atraso + " dia(s) passou do PMP médio (" + pmp + " d). Nos últimos 3 meses, este cliente " + habito + ".";
+  const icon = dentro ? "" : `<i data-lucide="alert-triangle"></i>`;
+  return `<span class="fila-pmp ${dentro ? "fila-pmp-ok" : "fila-pmp-alert"}" title="${titulo.replace(/"/g, "&quot;")}">${icon}${pmp} d</span>`;
+};
+
+function filaPaintPmpCells() {
+  document.querySelectorAll("#defaulters-table-body td.fila-pmp-cell").forEach((td) => {
+    const cid = td.getAttribute("data-cid");
+    const sale = td.getAttribute("data-sale");
+    const client = (window.clientList || []).find((c) => String(c.customerId) === String(cid) && String(c.saleId) === String(sale));
+    if (!client) return;
+    td.innerHTML = window.filaPmpHtml(client);
+  });
+  if (window.lucide) lucide.createIcons();
+}
+
+window.ensureFilaPmpIndex = async function() {
+  if (window._filaPmpIdx || window._filaPmpLoading) return;
+  window._filaPmpLoading = true;
+  try {
+    let units = [];
+    let rows = [];
+    const est = window.EstoqueComercialApp;
+    if (est && est.state && Array.isArray(est.state.units) && est.state.units.length) {
+      units = est.state.units;
+    } else if (window.firebaseDb && window.firebaseCollections && window.firebaseCollections.getDocs) {
+      const { collection, getDocs } = window.firebaseCollections;
+      const snap = await getDocs(collection(window.firebaseDb, "caixa_posicao"));
+      let best = "";
+      const buckets = {};
+      snap.forEach((d) => {
+        if (d.id === "_meta") return;
+        const data = d.data() || {};
+        const date = String(data.date || "");
+        if (!date || !Array.isArray(data.rows)) return;
+        if (!buckets[date]) buckets[date] = [];
+        buckets[date].push.apply(buckets[date], data.rows);
+        if (date > best) best = date;
+      });
+      rows = best ? buckets[best] : [];
+      if (!rows.length) {
+        const estSnap = await getDocs(collection(window.firebaseDb, "estoque_comercial"));
+        estSnap.forEach((d) => {
+          if (d.id === "_meta" || d.id === "_batimento_state") return;
+          const data = d.data() || {};
+          (data.units || []).forEach((u) => {
+            if (u && u.pmp3m != null) units.push(u);
+          });
+        });
+      }
+    }
+    window._filaPmpIdx = filaBuildPmpIndex(units, rows);
+    if (AppState.currentSortCol === "pmp" && typeof loadDashboardData === "function" && AppState.defaultersLoaded && !window._isDefaultersLoading) {
+      loadDashboardData(false);
+    } else {
+      filaPaintPmpCells();
+    }
+  } catch (e) {
+    console.warn("[Fila] PMP", e);
+    window._filaPmpIdx = filaBuildPmpIndex([], []);
+    filaPaintPmpCells();
+  } finally {
+    window._filaPmpLoading = false;
+  }
+};
+
 window.getFilaSortValue = function(client, sortCol) {
   if (!client) return { value: 0, type: 'number', missing: true };
   switch (sortCol) {
@@ -7254,6 +7395,11 @@ window.getFilaSortValue = function(client, sortCol) {
       return { value: String(client.assignedOperator || ''), type: 'string' };
     case 'maxDaysDelay':
       return { value: Number(client.maxDaysDelay) || 0, type: 'number' };
+    case 'pmp': {
+      const info = typeof window.filaPmpLookup === "function" ? window.filaPmpLookup(client) : null;
+      if (!info || !info.known) return { value: 0, type: 'number', missing: true };
+      return { value: info.pmp, type: 'number' };
+    }
     case 'billCount':
       return { value: Number(client.billCount) || 0, type: 'number' };
     case 'overdueValue':
@@ -9960,7 +10106,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
   if (body) {
     body.innerHTML = "";
     if (clientList.length === 0) {
-      body.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:30px; color:var(--color-text-muted);">Nenhum cliente inadimplente encontrado com os filtros ativos.</td></tr>`;
+      body.innerHTML = `<tr><td colspan="13" style="text-align:center; padding:30px; color:var(--color-text-muted);">Nenhum cliente inadimplente encontrado com os filtros ativos.</td></tr>`;
     } else {
       const subjudiceHistory = JSON.parse(localStorage.getItem('subjudiceHistory') || '{}');
 
@@ -9997,7 +10143,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
               </div>
             </td>
             <td style="${cellBase} width:1%; padding-left:10px; padding-right:10px;"></td>
-            <td colspan="5" style="${cellBase}"></td>
+            <td colspan="6" style="${cellBase}"></td>
             <td style="${cellBase} white-space:nowrap; padding-right:10px; letter-spacing:0; text-transform:none;" title="Soma do R$ atualizado em atraso neste grupo">
               <span style="display:inline-flex; align-items:center; gap:4px; background:rgba(255,255,255,0.55); border:1px solid rgba(0,0,0,0.08); border-radius:999px; padding:2px 10px; font-weight:800;">
                 R$ ${valueLabel}
@@ -10124,6 +10270,9 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
               })()}
             </div>
           </td>
+          <td class="fila-pmp-cell" data-cid="${client.customerId}" data-sale="${client.saleId}" style="text-align: center;">
+            ${window.filaPmpHtml(client)}
+          </td>
           <td style="white-space: nowrap; text-align: center; width: 1%;">
             <span>${client.billCount}</span>
           </td>
@@ -10150,6 +10299,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
         body.appendChild(row);
       });
       if (typeof window.ensureFilaSignalsIndex === "function") window.ensureFilaSignalsIndex();
+      if (typeof window.ensureFilaPmpIndex === "function") window.ensureFilaPmpIndex();
       if (window.lucide) lucide.createIcons();
     }
   }
@@ -41845,7 +41995,16 @@ window.exportFilteredToExcel = function() {
                 "Último Contato": lastContact.date,
                 "Última Ocorrência / Nota": lastContact.text,
                 "Telefones": phonesStr,
-                "E-mails": emailsStr
+                "E-mails": emailsStr,
+                "PMP 3m": (function() {
+                    const info = typeof window.filaPmpLookup === "function" ? window.filaPmpLookup(c) : null;
+                    return info && info.known ? info.pmp : "";
+                })(),
+                "Atraso x PMP": (function() {
+                    const info = typeof window.filaPmpLookup === "function" ? window.filaPmpLookup(c) : null;
+                    if (!info || !info.known) return "";
+                    return (Number(c.maxDaysDelay) || 0) <= info.pmp ? "Dentro do PMP" : "Acima do PMP";
+                })()
             };
         });
 
@@ -41871,7 +42030,9 @@ window.exportFilteredToExcel = function() {
             { wch: 14 }, // Último Contato
             { wch: 50 }, // Última Ocorrência / Nota
             { wch: 25 }, // Telefones
-            { wch: 30 }  // E-mails
+            { wch: 30 }, // E-mails
+            { wch: 10 }, // PMP 3m
+            { wch: 16 }  // Atraso x PMP
         ];
 
         // Aplica formato monetário, bordas em toda a grade, e cabeçalho cinza/negrito
