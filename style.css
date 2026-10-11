@@ -8513,12 +8513,39 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .ficha-tabs,
 .ficha-contrato-tabs {
   background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  padding: 0 8px;
+  border: 0;
+  border-top: 1px solid #105436;
+  border-bottom: 1px solid #105436;
+  border-radius: 0;
+  padding: 1px 8px;
+  margin-top: -4px;
+  margin-bottom: -4px;
 }
-.ficha-tabs { margin-top: 4px; }
-.ficha-contrato-tabs { margin-top: 8px; }
+.ficha-tabs .ml-tab,
+.ficha-contrato-tabs .ml-tab {
+  padding: 4px 12px;
+  margin: 2px 0;
+  border-bottom: 0;
+  border-radius: 6px;
+}
+.ficha-tabs .ml-tab:hover,
+.ficha-contrato-tabs .ml-tab:hover {
+  color: #f37021;
+  background: #fff6ef;
+}
+.ficha-tabs .ml-tab.is-active,
+.ficha-contrato-tabs .ml-tab.is-active {
+  color: #f37021;
+  background: #ffe8d4;
+  border-bottom-color: transparent;
+}
+.ficha-tabs .ml-tab:disabled,
+.ficha-tabs .ml-tab.is-locked,
+.ficha-contrato-tabs .ml-tab:disabled,
+.ficha-contrato-tabs .ml-tab.is-locked {
+  background: transparent;
+  color: #64748b;
+}
 
 /* Segurança · Auditoria do Login Sienge */
 .alog-page { padding: 16px 18px 28px; display: flex; flex-direction: column; gap: 12px; }
