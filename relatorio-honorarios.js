@@ -610,19 +610,32 @@ const HonorariosReport = {
   },
 
   setTab(id) {
+    if (this.soHonorarios() && id !== "honorarios") return;
     if (this.tab === id) return;
     this.tab = id;
     this.openF = "";
     this.render();
   },
 
+  usuarioEfetivo() {
+    if (typeof window.crmUsuarioEfetivo === "function") return window.crmUsuarioEfetivo();
+    return (window.AppState && AppState.currentUser) || null;
+  },
+
+  soHonorarios() {
+    const u = this.usuarioEfetivo();
+    return !!(u && typeof window.isOperadorCobrancaTerceirizadoProfile === "function"
+      && window.isOperadorCobrancaTerceirizadoProfile(u.profile_name));
+  },
+
+  abasVisiveis() {
+    return this.soHonorarios() ? this.TABS.filter((t) => t.id === "honorarios") : this.TABS;
+  },
+
   terceirizadaUser() {
-    const u = (window.AppState && AppState.currentUser) || null;
+    const u = this.usuarioEfetivo();
     if (!u) return null;
-    if (typeof window.isCrmAdministrator === "function" && window.isCrmAdministrator(u)) return null;
-    const terc = typeof window.isOperadorCobrancaTerceirizadoProfile === "function"
-      && window.isOperadorCobrancaTerceirizadoProfile(u.profile_name);
-    return terc ? u : null;
+    return this.soHonorarios() ? u : null;
   },
 
   onlyMine(records) {
@@ -1143,6 +1156,7 @@ const HonorariosReport = {
     const prevWrap = root.querySelector(".rhon-wrap");
     const scroll = prevWrap ? { top: prevWrap.scrollTop, left: prevWrap.scrollLeft } : null;
     const searchFocused = document.activeElement && document.activeElement.id === "rhon-search";
+    if (this.soHonorarios() && this.tab !== "honorarios") this.tab = "honorarios";
     const semStatus = this.tab === "ranking" || this.tab === "comissao";
     const semBusca = this.tab === "ranking";
     const canExport = !this.loading && this.rows.length > 0;
@@ -1154,7 +1168,7 @@ const HonorariosReport = {
           <p>Contas a receber</p>
         </div>
         <div class="rhon-body">
-          <div class="ml-tabs rhon-tabs" role="tablist">${this.TABS.map((t) => `<button type="button" role="tab" aria-selected="${this.tab === t.id}" class="ml-tab${this.tab === t.id ? " is-active" : ""}" onclick="HonorariosReport.setTab('${t.id}')"><i data-lucide="${t.icon}"></i> ${t.label}</button>`).join("")}</div>
+          <div class="ml-tabs rhon-tabs" role="tablist">${this.abasVisiveis().map((t) => `<button type="button" role="tab" aria-selected="${this.tab === t.id}" class="ml-tab${this.tab === t.id ? " is-active" : ""}" onclick="HonorariosReport.setTab('${t.id}')"><i data-lucide="${t.icon}"></i> ${t.label}</button>`).join("")}</div>
           <div class="rhon-tools">
             <div class="ml-comp-slot">
               <label class="ml-comp-label" for="rhon-comp">Competência</label>
@@ -1199,64 +1213,437 @@ const HonorariosReport = {
     if (window.lucide) lucide.createIcons();
   },
 
-  exportExcel() {
-    if (typeof XLSX === "undefined") {
-      alert("A biblioteca XLSX não foi carregada. Atualize a página e tente novamente.");
+  compTexto() {
+    const nomes = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+    const p = String(this.comp || "").split("-");
+    const i = Number(p[1]) - 1;
+    if (!p[0] || !nomes[i]) return this.comp || "";
+    return nomes[i] + " de " + p[0];
+  },
+
+  nomeAbaExcel(rotulo, used) {
+    let base = String(rotulo || "Relatorio").replace(/[:\\/?*\[\]]/g, " ").replace(/\s+/g, " ").trim() || "Relatorio";
+    if (base.length > 31) base = base.slice(0, 31);
+    let name = base;
+    let n = 2;
+    while (used.has(name.toLowerCase())) {
+      const suf = "-" + (n++);
+      name = (base.slice(0, Math.max(1, 31 - suf.length)) + suf).slice(0, 31);
+    }
+    used.add(name.toLowerCase());
+    return name;
+  },
+
+  celTxt(partes) {
+    return partes.filter((p) => p != null && String(p) !== "").join("\n");
+  },
+
+  kpisHonorarios(rows) {
+    const t = this.totals(rows);
+    const boletos = new Set(rows.map((r) => r.recId)).size;
+    const pagas = rows.filter((r) => r.status === "pago").length;
+    return [
+      { label: "Boletos gerados", value: boletos, color: "FF0F172A" },
+      { label: "Parcelas pagas", value: pagas + " de " + rows.length, color: "FF0F172A" },
+      { label: "Honorários gerados", value: t.honorarios, money: true, color: "FF0F172A" },
+      { label: "Honorários pagos (repasse)", value: t.honPagos, money: true, color: "FF105436" }
+    ];
+  },
+
+  kpisDesconto(rows) {
+    const t = this.totals(rows);
+    const boletos = new Set(rows.map((r) => r.recId)).size;
+    const comAbono = new Set(rows.filter((r) => r.abono > 0.004).map((r) => r.recId)).size;
+    return [
+      { label: "Encargos devidos", value: t.encDevidos, money: true, color: "FF0F172A" },
+      { label: "Abono concedido", value: t.abono, money: true, color: "FF9A3412" },
+      { label: "Encargos cobrados", value: t.multa + t.juros, money: true, color: "FF0F172A" },
+      { label: "Boletos com abono", value: comAbono + " de " + boletos, color: "FF0F172A" }
+    ];
+  },
+
+  colsHonorarios() {
+    return [
+      { h: "Cliente", w: 36 }, { h: "Título", w: 18 }, { h: "Parcela", w: 14 },
+      { h: "Vencimento", w: 14 }, { h: "Venc. boleto", w: 14 },
+      { h: "Valor original", w: 16, money: true }, { h: "Multa", w: 14, money: true },
+      { h: "Juros", w: 14, money: true }, { h: "Honorários", w: 14, money: true },
+      { h: "Status", w: 16 }, { h: "Gerado em", w: 22 }
+    ];
+  },
+
+  colsDesconto() {
+    return [
+      { h: "Cliente", w: 36 }, { h: "Título", w: 18 }, { h: "Parcela", w: 14 },
+      { h: "Vencimento", w: 14 }, { h: "Dias atraso", w: 12 },
+      { h: "Valor original", w: 16, money: true }, { h: "Multa devida", w: 14, money: true },
+      { h: "Juros devido", w: 14, money: true }, { h: "Encargos devidos", w: 16, money: true },
+      { h: "Isenção", w: 12 }, { h: "Abono", w: 14, money: true },
+      { h: "Encargos cobrados", w: 16, money: true }, { h: "Status", w: 16 }, { h: "Gerado em", w: 22 }
+    ];
+  },
+
+  linhaSoma(nome, nums, lead, tail) {
+    const cells = [{ t: nome }];
+    for (let i = 1; i < lead; i++) cells.push({ t: "" });
+    nums.forEach((n) => cells.push({ n }));
+    for (let i = 0; i < tail; i++) cells.push({ t: "" });
+    return cells;
+  },
+
+  linhaHonorarios(r) {
+    return [
+      { t: this.celTxt([r.customerName, r.customerDoc]) },
+      { t: this.celTxt([r.billId, r.unitName]) },
+      { t: r.parcela || "" },
+      { t: rhonBr(r.dueDate) },
+      { t: rhonBr(r.boletoDueDate) },
+      { n: r.valorOriginal },
+      { n: r.multa },
+      { n: r.juros },
+      { n: r.honorarios, color: r.honorarios ? "FF105436" : "" },
+      { t: this.celTxt([this.statusLabel(r), r.status === "pago" ? rhonBr(r.paidAt) : ""]) },
+      { t: this.celTxt([rhonBr(rhonIso(r.generatedAt)), r.author]) }
+    ];
+  },
+
+  linhaDesconto(r) {
+    return [
+      { t: this.celTxt([r.customerName, r.customerDoc]) },
+      { t: this.celTxt([r.billId, r.unitName]) },
+      { t: r.parcela || "" },
+      { t: rhonBr(r.dueDate) },
+      { n: r.dias || 0 },
+      { n: r.valorOriginal },
+      { n: r.multaDevida },
+      { n: r.jurosDevido },
+      { n: r.encDevidos },
+      { t: (r.isencaoPct || 0) + "%" },
+      { n: r.abono, color: r.abono > 0.004 ? "FF9A3412" : "" },
+      { n: (Number(r.multa) || 0) + (Number(r.juros) || 0) },
+      { t: this.celTxt([this.statusLabel(r), r.status === "pago" ? rhonBr(r.paidAt) : ""]) },
+      { t: this.celTxt([rhonBr(rhonIso(r.generatedAt)), r.author]) }
+    ];
+  },
+
+  somaHonorarios(nome, list) {
+    const t = this.totals(list);
+    return this.linhaSoma(nome, [t.valorOriginal, t.multa, t.juros, t.honorarios], 5, 2);
+  },
+
+  somaDesconto(nome, list) {
+    const t = this.totals(list);
+    const cells = this.linhaSoma(nome, [t.valorOriginal, t.multaDevida, t.jurosDevido, t.encDevidos], 5, 0);
+    cells.push({ t: rhonPct(t.abono, t.encDevidos) });
+    cells.push({ n: t.abono, color: t.abono > 0.004 ? "FF9A3412" : "" });
+    cells.push({ n: t.multa + t.juros });
+    cells.push({ t: "" }, { t: "" });
+    return cells;
+  },
+
+  planilhas() {
+    if (this.soHonorarios() && this.tab !== "honorarios") this.tab = "honorarios";
+    if (this.tab === "ranking") return this.planilhaRanking();
+    if (this.tab === "comissao") return this.planilhaComissao();
+    return this.planilhasPorEmpresa(this.tab === "desconto");
+  },
+
+  planilhasPorEmpresa(desc) {
+    const rows = this.filtered();
+    if (!rows.length) { alert("Não há boletos para exportar neste filtro."); return null; }
+    const linha = desc ? (r) => this.linhaDesconto(r) : (r) => this.linhaHonorarios(r);
+    const soma = desc ? (nome, list) => this.somaDesconto(nome, list) : (nome, list) => this.somaHonorarios(nome, list);
+    const title = desc ? "Desconto de juros" : "Honorários";
+    return this.grouped(rows).map((e) => {
+      const list = e.ccs.flatMap((c) => c.rows);
+      const body = [];
+      e.ccs.forEach((c) => {
+        body.push({ kind: "cc", cells: soma([c.id, c.name].filter(Boolean).join(" - ") || "Sem centro de custo", c.rows) });
+        c.rows.forEach((r) => body.push({ kind: "line", cells: linha(r) }));
+      });
+      body.push({ kind: "total", cells: soma("Total da empresa", list) });
+      return {
+        companyId: e.id,
+        fallback: title,
+        title,
+        subtitle: this.compTexto() + " · " + ([e.id, e.name].filter(Boolean).join(" - ") || "Sem empresa"),
+        kpis: desc ? this.kpisDesconto(list) : this.kpisHonorarios(list),
+        columns: desc ? this.colsDesconto() : this.colsHonorarios(),
+        rows: body
+      };
+    });
+  },
+
+  planilhaRanking() {
+    const list = this.ranking(this.scopedRows());
+    if (!list.length) { alert("Não há boletos para exportar neste filtro."); return null; }
+    const tot = list.reduce((t, o) => {
+      t.qtd += o.qtd; t.pagos += o.pagos; t.parcelas += o.parcelas; t.gerado += o.gerado;
+      t.recebido += o.recebido; t.devido += o.devido; t.abono += o.abono;
+      return t;
+    }, { qtd: 0, pagos: 0, parcelas: 0, gerado: 0, recebido: 0, devido: 0, abono: 0 });
+    const pct = (part, whole) => (Number(whole) ? (Number(part) || 0) / Number(whole) : 0);
+    const linha = (pos, nome, o) => [
+      { t: pos }, { t: nome }, { n: o.qtd }, { n: o.pagos },
+      { n: pct(o.pagos, o.qtd), pct: true }, { n: o.parcelas },
+      { n: o.gerado }, { n: o.recebido, color: "FF105436" }, { n: o.devido },
+      { n: o.abono, color: o.abono > 0.004 ? "FF9A3412" : "" },
+      { n: pct(o.abono, o.devido), pct: true }
+    ];
+    return [{
+      sheet: "Ranking",
+      title: "Ranking de recebimentos",
+      subtitle: this.compTexto() + " · Contas a receber",
+      kpis: [
+        { label: "Boletos pagos", value: rhonPct(tot.pagos, tot.qtd), color: "FF105436" },
+        { label: "Valor recebido", value: tot.recebido, money: true, color: "FF0F172A" },
+        { label: "Encargos devidos", value: tot.devido, money: true, color: "FF0F172A" },
+        { label: "Abono concedido", value: tot.abono, money: true, color: "FF9A3412" }
+      ],
+      columns: [
+        { h: "#", w: 8 }, { h: "Operador", w: 32 }, { h: "Boletos gerados", w: 16 },
+        { h: "Boletos pagos", w: 14 }, { h: "% pagos", w: 12 }, { h: "Parcelas", w: 12 },
+        { h: "Valor gerado", w: 16, money: true }, { h: "Valor recebido", w: 16, money: true },
+        { h: "Encargos devidos", w: 16, money: true }, { h: "Abono concedido", w: 16, money: true },
+        { h: "% desconto", w: 14 }
+      ],
+      rows: list.map((o, i) => ({ kind: "line", cells: linha(String(i + 1), o.name, o) }))
+        .concat([{ kind: "total", cells: linha("", "Total geral", tot) }])
+    }];
+  },
+
+  planilhaComissao() {
+    const grupos = this.comissaoGrupos();
+    if (!grupos.length) { alert("Não há boletos pagos para exportar neste filtro."); return null; }
+    const pct = this.pctInterno();
+    const tot = grupos.reduce((t, g) => {
+      t.juros += g.juros; t.abono += g.abono; t.base += g.base; t.comissao += g.comissao;
+      return t;
+    }, { juros: 0, abono: 0, base: 0, comissao: 0 });
+    const rows = [];
+    grupos.forEach((g) => {
+      rows.push({
+        kind: "emp",
+        cells: [
+          { t: g.name + " · " + g.nClientes + " cliente(s)" }, { t: "" }, { t: "" }, { t: "" },
+          { n: g.juros }, { n: g.abono }, { n: g.base }, { n: g.comissao, color: "FF105436" }
+        ]
+      });
+      g.rows.forEach((r) => rows.push({
+        kind: "line",
+        cells: [
+          { t: this.celTxt([r.customerName, r.customerDoc]) },
+          { t: this.celTxt([r.billId, r.unitName]) },
+          { t: r.parcela || "" },
+          { t: rhonBr(r.paidAt) },
+          { n: r.jurosDevido },
+          { n: r.abono, color: r.abono > 0.004 ? "FF9A3412" : "" },
+          { n: this.baseComissao(r) },
+          { n: this.valorComissao(r), color: "FF105436" }
+        ]
+      }));
+    });
+    rows.push({
+      kind: "total",
+      cells: [
+        { t: "Total geral" }, { t: "" }, { t: "" }, { t: "" },
+        { n: tot.juros }, { n: tot.abono }, { n: tot.base }, { n: tot.comissao }
+      ]
+    });
+    return [{
+      sheet: "Comissao interna",
+      title: "Comissão interna",
+      subtitle: this.compTexto() + " · " + String(pct).replace(".", ",") + "% sobre (juros devido − abono)",
+      kpis: [
+        { label: "Percentual", value: String(pct).replace(".", ",") + "%", color: "FF0F172A" },
+        { label: "Comissão interna", value: tot.comissao, money: true, color: "FF105436" },
+        { label: "Operadores", value: grupos.length, color: "FF0F172A" },
+        { label: "Base", value: tot.base, money: true, color: "FF0F172A" }
+      ],
+      columns: [
+        { h: "Cliente", w: 36 }, { h: "Título", w: 18 }, { h: "Parcela", w: 14 }, { h: "Pago em", w: 14 },
+        { h: "Juros devido", w: 16, money: true }, { h: "Abono concedido", w: 16, money: true },
+        { h: "Base", w: 14, money: true }, { h: "Comissão", w: 14, money: true }
+      ],
+      rows
+    }];
+  },
+
+  pintarPlanilha(ws, spec) {
+    const XL = spec.XL;
+    const columns = spec.columns || [];
+    const kpis = spec.kpis || [];
+    const colCount = Math.max(columns.length, 3 + kpis.length, 9);
+    const moneyFmt = "#,##0.00";
+    const pctFmt = "0.0%";
+    ws.properties.showGridLines = false;
+    ws.views = [{
+      state: "frozen",
+      xSplit: 1,
+      ySplit: 4,
+      topLeftCell: "B5",
+      activeCell: "B5",
+      showGridLines: false
+    }];
+    ws.columns = columns.map((c) => ({ width: c.w || 14 })).concat(
+      Array.from({ length: Math.max(0, colCount - columns.length) }, () => ({ width: 16 }))
+    );
+    const logoCm = 1.54;
+    const logoPx = Math.round(logoCm * 96 / 2.54);
+    ws.mergeCells("A1:A2");
+    ws.getRow(1).height = 28;
+    ws.getRow(2).height = 22;
+    const titleCell = ws.getCell("A1");
+    titleCell.value = {
+      richText: [
+        { font: { name: "Calibri", size: 14, bold: true, color: { argb: "FF475569" } }, text: spec.title + "\n" },
+        { font: { name: "Calibri", size: 9, color: { argb: "FF64748B" } }, text: spec.subtitle || "" }
+      ]
+    };
+    XL.excelPaint(titleCell, {
+      fill: "FFFFFFFF",
+      align: { vertical: "middle", horizontal: "left", wrapText: true, indent: 8 }
+    });
+    if (spec.imgId != null) {
+      try {
+        ws.addImage(spec.imgId, { tl: { col: 0.04, row: 0.08 }, ext: { width: logoPx, height: logoPx } });
+      } catch (e) {}
+    }
+    kpis.forEach((k, i) => {
+      const col = 4 + i;
+      const cellL = ws.getRow(1).getCell(col);
+      const cellV = ws.getRow(2).getCell(col);
+      cellL.value = k.label;
+      cellV.value = k.money ? (Number(k.value) || 0) : k.value;
+      XL.excelPaint(cellL, {
+        fill: "FFFFFFFF",
+        font: { bold: true, size: 8, color: { argb: "FF94A3B8" } },
+        align: { horizontal: "right", vertical: "bottom" }
+      });
+      XL.excelPaint(cellV, {
+        fill: "FFFFFFFF",
+        font: { bold: true, size: 12, color: { argb: k.color || "FF0F172A" } },
+        align: { horizontal: "right", vertical: "middle" },
+        numFmt: k.money ? moneyFmt : undefined
+      });
+    });
+    ws.getRow(3).height = 8;
+    const headRow = ws.getRow(4);
+    headRow.height = 20;
+    columns.forEach((c, i) => {
+      const cell = headRow.getCell(i + 1);
+      cell.value = c.h;
+      XL.excelPaint(cell, {
+        fill: "FF334155",
+        font: { bold: true, size: 9, color: { argb: "FFFFFFFF" } },
+        align: { horizontal: c.money ? "right" : "left", vertical: "middle" },
+        border: true
+      });
+    });
+    const paintCell = (cell, item, kind, moneyCol) => {
+      const dark = kind === "total" || kind === "emp";
+      const bg = kind === "total" ? "FF475569" : (kind === "emp" ? "FF0C3D28" : (kind === "cc" ? "FFE7F6EE" : "FFFFFFFF"));
+      const base = dark ? "FFFFFFFF" : (kind === "cc" ? "FF105436" : "FF0F172A");
+      const wrap = !!(item && item.t && String(item.t).indexOf("\n") >= 0);
+      if (item && item.n != null && item.t == null) {
+        const n = Number(item.n) || 0;
+        cell.value = item.pct ? n : n;
+        const zero = !n;
+        const color = dark ? "FFFFFFFF" : (item.color || (n < 0 ? "FFB91C1C" : (zero ? "FF94A3B8" : base)));
+        XL.excelPaint(cell, {
+          fill: bg,
+          font: { bold: kind !== "line", size: 9, color: { argb: color } },
+          align: { horizontal: "right", vertical: "middle" },
+          border: true,
+          numFmt: item.pct ? pctFmt : moneyFmt
+        });
+        return;
+      }
+      cell.value = item && item.t != null ? item.t : "";
+      XL.excelPaint(cell, {
+        fill: bg,
+        font: { bold: kind !== "line", size: 9, color: { argb: base } },
+        align: { horizontal: "left", vertical: wrap ? "top" : "middle", wrapText: wrap },
+        border: true
+      });
+    };
+    let rowIdx = 5;
+    (spec.rows || []).forEach((row) => {
+      const excelRow = ws.getRow(rowIdx);
+      const wrapped = (row.cells || []).some((c) => c && c.t && String(c.t).indexOf("\n") >= 0);
+      excelRow.height = wrapped ? 32 : 18;
+      columns.forEach((col, i) => {
+        const item = (row.cells || [])[i] || { t: "" };
+        const cell = excelRow.getCell(i + 1);
+        if (item.n != null && !col.money && !item.pct) {
+          cell.value = Number(item.n) || 0;
+          const dark = row.kind === "total" || row.kind === "emp";
+          const bg = row.kind === "total" ? "FF475569" : (row.kind === "emp" ? "FF0C3D28" : (row.kind === "cc" ? "FFE7F6EE" : "FFFFFFFF"));
+          XL.excelPaint(cell, {
+            fill: bg,
+            font: { bold: row.kind !== "line", size: 9, color: { argb: dark ? "FFFFFFFF" : (row.kind === "cc" ? "FF105436" : "FF0F172A") } },
+            align: { horizontal: "right", vertical: "middle" },
+            border: true
+          });
+          return;
+        }
+        paintCell(cell, item, row.kind, !!col.money);
+      });
+      rowIdx += 1;
+    });
+    rowIdx += 1;
+    ws.mergeCells(rowIdx, 1, rowIdx, Math.max(columns.length, 1));
+    const foot = ws.getCell(rowIdx, 1);
+    foot.value = spec.generatedAt;
+    XL.excelPaint(foot, {
+      font: { italic: true, size: 8, color: { argb: "FF64748B" } },
+      align: { vertical: "middle", horizontal: "left" }
+    });
+    ws.getRow(rowIdx).height = 18;
+  },
+
+  async exportExcel() {
+    const XL = window.InvestimentoApp;
+    if (!XL || typeof XL.ensureExcelJS !== "function") {
+      alert("Não foi possível carregar o formato de Aplicações e Investimentos. Atualize a página.");
       return;
     }
-    let aoa;
-    let sheet;
-    if (this.tab === "ranking") {
-      const list = this.ranking(this.scopedRows());
-      if (!list.length) { alert("Não há boletos para exportar neste filtro."); return; }
-      aoa = [["Posição", "Operador", "Boletos gerados", "Boletos pagos", "% pagos", "Parcelas", "Valor gerado", "Valor recebido", "Encargos devidos", "Abono concedido", "% desconto"]];
-      list.forEach((o, i) => aoa.push([
-        i + 1, o.name, o.qtd, o.pagos, Number((o.pctPagos * 100).toFixed(1)), o.parcelas,
-        Number(o.gerado.toFixed(2)), Number(o.recebido.toFixed(2)), Number(o.devido.toFixed(2)),
-        Number(o.abono.toFixed(2)), Number((o.pctDesc * 100).toFixed(1))
-      ]));
-      sheet = "Ranking";
-    } else if (this.tab === "comissao") {
-      const grupos = this.comissaoGrupos();
-      if (!grupos.length) { alert("Não há boletos pagos para exportar neste filtro."); return; }
-      const pct = this.pctInterno();
-      aoa = [["Operador", "Cliente", "CPF/CNPJ", "Título", "Parcela", "Pago em", "Juros devido", "Abono concedido", "Base", "Percentual", "Comissão"]];
-      grupos.forEach((g) => g.rows.forEach((r) => aoa.push([
-        g.name, r.customerName, r.customerDoc, r.billId, r.parcela, rhonBr(r.paidAt),
-        Number((Number(r.jurosDevido) || 0).toFixed(2)), Number((Number(r.abono) || 0).toFixed(2)),
-        Number(this.baseComissao(r).toFixed(2)), pct, Number(this.valorComissao(r).toFixed(2))
-      ])));
-      sheet = "Comissao interna";
-    } else {
-      const rows = this.filtered();
-      if (!rows.length) { alert("Não há boletos para exportar neste filtro."); return; }
-      const desc = this.tab === "desconto";
-      aoa = [desc
-        ? ["Competência", "Empresa", "Centro de custo", "Cidade", "Cliente", "CPF/CNPJ", "Título", "Unidade", "Parcela",
-          "Vencimento", "Vencimento do boleto", "Dias de atraso", "Valor original", "Multa devida", "Juros devido",
-          "Encargos devidos", "Isenção (%)", "Abono", "Encargos cobrados", "Status", "Gerado em", "Gerado por"]
-        : ["Competência", "Empresa", "Centro de custo", "Cidade", "Cliente", "CPF/CNPJ", "Título", "Contrato", "Unidade", "Parcela",
-          "Vencimento", "Vencimento do boleto", "Valor original", "Multa", "Juros", "Honorários (%)", "Honorários",
-          "Status", "Pago em", "Valor recebido", "Gerado em", "Gerado por"]];
-      this.grouped(rows).forEach((e) => e.ccs.forEach((c) => c.rows.forEach((r) => {
-        const head = [this.comp, [e.id, e.name].filter(Boolean).join(" - "), [c.id, c.name].filter(Boolean).join(" - "), r.cityName, r.customerName, r.customerDoc, r.billId];
-        aoa.push(desc
-          ? head.concat([r.unitName, r.parcela, rhonBr(r.dueDate), rhonBr(r.boletoDueDate), r.dias,
-            Number(r.valorOriginal.toFixed(2)), Number(r.multaDevida.toFixed(2)), Number(r.jurosDevido.toFixed(2)),
-            Number(r.encDevidos.toFixed(2)), r.isencaoPct, Number(r.abono.toFixed(2)), Number((r.multa + r.juros).toFixed(2)),
-            this.statusLabel(r), rhonBr(rhonIso(r.generatedAt)), r.author])
-          : head.concat([r.contractNumber, r.unitName, r.parcela, rhonBr(r.dueDate), rhonBr(r.boletoDueDate),
-            Number(r.valorOriginal.toFixed(2)), Number(r.multa.toFixed(2)), Number(r.juros.toFixed(2)),
-            r.honorariosPct || 0, Number(r.honorarios.toFixed(2)), this.statusLabel(r), rhonBr(r.paidAt),
-            r.paidValue ? Number(r.paidValue.toFixed(2)) : "", rhonBr(rhonIso(r.generatedAt)), r.author]));
-      })));
-      sheet = desc ? "Desconto de juros" : "Honorarios";
+    const packs = this.planilhas();
+    if (!packs || !packs.length) return;
+    let ExcelJS;
+    try { ExcelJS = await XL.ensureExcelJS(); }
+    catch (e) {
+      alert("Não foi possível carregar a biblioteca de Excel. Recarregue a página.");
+      return;
     }
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, sheet);
-    const file = { honorarios: "relatorio_honorarios_", desconto: "relatorio_desconto_juros_", ranking: "ranking_recebimentos_", comissao: "comissao_interna_" }[this.tab];
-    XLSX.writeFile(wb, file + this.comp + ".xlsx");
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "CRM Moura Leite";
+    wb.created = new Date();
+    let imgId = null;
+    try {
+      const logo = await XL.logoDataUrl();
+      imgId = wb.addImage({ base64: logo.dataUrl, extension: logo.extension || "png" });
+    } catch (e) {}
+    const used = new Set();
+    const generatedAt = XL.generatedAtLabel(new Date());
+    packs.forEach((p) => {
+      const sheetName = p.sheet
+        ? this.nomeAbaExcel(p.sheet, used)
+        : (p.companyId && typeof XL.excelSheetName === "function"
+          ? XL.excelSheetName(p.companyId, used)
+          : this.nomeAbaExcel(p.fallback || p.title, used));
+      const ws = wb.addWorksheet(sheetName, { properties: { showGridLines: false } });
+      this.pintarPlanilha(ws, Object.assign({}, p, { imgId, generatedAt, XL }));
+    });
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const a = document.createElement("a");
+    const file = { honorarios: "relatorio_honorarios_", desconto: "relatorio_desconto_juros_", ranking: "ranking_recebimentos_", comissao: "comissao_interna_" }[this.tab] || "relatorio_";
+    a.href = URL.createObjectURL(blob);
+    a.download = file + this.comp + ".xlsx";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
   },
 
   injectCss() {

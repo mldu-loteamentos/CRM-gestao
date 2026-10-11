@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="i.ntegr.a/arvore.png">
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=1331">
+  <link rel="stylesheet" href="style.css?v=1332">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -241,21 +241,14 @@
 
     .customer-tabs-content-container,
     .ficha-tabs-content-container {
-      /* Removidos padding e background para não duplicar o card */
-      margin-top: -1px;
-      /* Para grudar na linha das abas */
+      padding-top: 16px;
     }
 
-    /* Faz com que o primeiro crm-card dentro da aba grude perfeitamente e tenha a linha verde */
     .customer-tab-pane>.crm-card,
     .customer-tab-pane>#funnel-chart-container>.kpi-card,
     .customer-tab-pane>#simulador-full-container.kpi-card,
     .customer-tab-pane>#simulador-full-container>.kpi-card,
     .ficha-tab-pane>.crm-card {
-      border-top-left-radius: 0;
-      border-top-right-radius: 0;
-      margin-top: 0 !important;
-      border-top: none;
       border-left: 4px solid var(--color-primary) !important;
     }
 
@@ -888,7 +881,7 @@
 
     <div class="login-pane-brand">
       <div class="login-band login-band-logo">
-        <img src="i.ntegr.a/logo-oficial.png?v=1331" alt="I.ntegr.A Moura Leite">
+        <img src="i.ntegr.a/logo-oficial.png?v=1332" alt="I.ntegr.A Moura Leite">
       </div>
 
       <div class="login-band login-band-action">
@@ -1349,7 +1342,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.1331 &nbsp;&middot;&nbsp; 11/10/2026
+            v1.0.1332 &nbsp;&middot;&nbsp; 11/10/2026
           </span>
         </div>
       </div>
@@ -2856,7 +2849,7 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
         <!-- Container padrão (Em Construção) -->
         <div id="home-em-construcao-container"
           style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="i.ntegr.a/arvore.png?v=1331" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 1.25rem;">
+          <img src="i.ntegr.a/arvore.png?v=1332" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 1.25rem;">
           <p style="color: var(--color-primary); font-size: 1.15rem; font-weight: 600; letter-spacing: 0.06em; margin: 0;">
             Inteligência - Integração - Agilidade
           </p>
@@ -3625,7 +3618,7 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
         <section id="tab-construcao-seguranca" class="tab-pane" style="display: none;">
           <div
             style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-            <img src="i.ntegr.a/arvore.png?v=1331" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
+            <img src="i.ntegr.a/arvore.png?v=1332" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
             <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 0;">Módulo em Construção</h2>
           </div>
         </section>
@@ -5362,24 +5355,15 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
               <span id="customer-subtypes-alert-text"></span>
             </div>
 
-            <!-- Controle de Abas da Ficha Cadastral -->
-            <div class="ficha-tabs-menu">
-              <button class="ficha-tab-btn active" data-target="ficha-cadastro"
-                onclick="switchFichaTab('ficha-cadastro')">Cadastro</button>
-              <button class="ficha-tab-btn" data-target="ficha-conjuge"
-                onclick="switchFichaTab('ficha-conjuge')">Cônjuge</button>
-              <button class="ficha-tab-btn" data-target="ficha-complemento"
-                onclick="switchFichaTab('ficha-complemento')">Complemento</button>
-              <button class="ficha-tab-btn" data-target="ficha-representante" style="display:none;"
-                onclick="switchFichaTab('ficha-representante')">Representante legal</button>
-              <button class="ficha-tab-btn" data-target="ficha-procuradores"
-                onclick="switchFichaTab('ficha-procuradores')">Procuradores</button>
-              <button class="ficha-tab-btn" data-target="ficha-anexos"
-                onclick="switchFichaTab('ficha-anexos')">Anexos</button>
-              <button class="ficha-tab-btn" data-target="ficha-score"
-                onclick="switchFichaTab('ficha-score')">Score Interno</button>
-              <button class="ficha-tab-btn" data-target="ficha-compradores"
-                onclick="switchFichaTab('ficha-compradores')">Compradores</button>
+            <div class="ml-tabs ficha-tabs" role="tablist">
+              <button type="button" role="tab" class="ml-tab is-active" aria-selected="true" data-target="ficha-cadastro" onclick="switchFichaTab('ficha-cadastro')"><i data-lucide="user"></i> Cadastro</button>
+              <button type="button" role="tab" class="ml-tab" aria-selected="false" data-target="ficha-conjuge" onclick="switchFichaTab('ficha-conjuge')"><i data-lucide="heart"></i> Cônjuge</button>
+              <button type="button" role="tab" class="ml-tab" aria-selected="false" data-target="ficha-complemento" onclick="switchFichaTab('ficha-complemento')"><i data-lucide="clipboard-list"></i> Complemento</button>
+              <button type="button" role="tab" class="ml-tab" aria-selected="false" data-target="ficha-representante" style="display:none;" onclick="switchFichaTab('ficha-representante')"><i data-lucide="user-check"></i> Representante legal</button>
+              <button type="button" role="tab" class="ml-tab" aria-selected="false" data-target="ficha-procuradores" onclick="switchFichaTab('ficha-procuradores')"><i data-lucide="briefcase"></i> Procuradores</button>
+              <button type="button" role="tab" class="ml-tab" aria-selected="false" data-target="ficha-anexos" onclick="switchFichaTab('ficha-anexos')"><i data-lucide="paperclip"></i> Anexos</button>
+              <button type="button" role="tab" class="ml-tab" aria-selected="false" data-target="ficha-score" onclick="switchFichaTab('ficha-score')"><i data-lucide="gauge"></i> Score Interno</button>
+              <button type="button" role="tab" class="ml-tab" aria-selected="false" data-target="ficha-compradores" onclick="switchFichaTab('ficha-compradores')"><i data-lucide="users"></i> Compradores</button>
             </div>
 
             <!-- Conteiner das Abas da Ficha Cadastral -->
@@ -5534,57 +5518,23 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
               </div>
             </div>
 
-            <!-- Controle de Abas (Tabs) -->
-            <div class="customer-tabs-menu" style="display: flex; align-items: flex-end; flex-wrap: wrap;">
-              <button class="customer-tab-btn" data-target="tab-cobranca-judicial" id="btn-tab-cobranca-judicial"
-                onclick="switchCustomerTab('tab-cobranca-judicial'); if(typeof renderJudicialTimeline === 'function') renderJudicialTimeline();" style="display: none; align-items: center; gap: 6px; background-color: var(--color-warning-glow); color: var(--color-danger); border-bottom-color: var(--color-danger);">
-                <i data-lucide="scale" style="width: 14px; height: 14px;"></i> Cobrança Judicial
-              </button>
-              <button class="customer-tab-btn active" data-target="tab-contrato"
-                onclick="switchCustomerTab('tab-contrato')">Contrato de Venda</button>
-              <button class="customer-tab-btn" data-target="tab-outros" onclick="switchCustomerTab('tab-outros')">Outros
-                Contratos</button>
-              <button class="customer-tab-btn" data-target="tab-quitacao"
-                onclick="switchCustomerTab('tab-quitacao')">Valor Quitação</button>
-              <button class="customer-tab-btn" data-target="tab-simulacao"
-                onclick="switchCustomerTab('tab-simulacao')">Simulação de Vencidas</button>
-              <button class="customer-tab-btn" data-target="tab-ocorrencias"
-                onclick="switchCustomerTab('tab-ocorrencias')">Ocorrências e Promessas</button>
-              <button class="customer-tab-btn" data-target="tab-boletos"
-                onclick="switchCustomerTab('tab-boletos')">Boletos do Contrato</button>
-              <button class="customer-tab-btn" data-target="tab-historico-renegociacoes"
-                onclick="switchCustomerTab('tab-historico-renegociacoes')">Histórico de Renegociações</button>
-              
-              <button class="customer-tab-btn" data-target="tab-vizinhos"
-                onclick="switchCustomerTab('tab-vizinhos'); if(typeof renderVizinhosTab === 'function') renderVizinhosTab();">Vizinhos</button>
-              <button class="customer-tab-btn" data-target="tab-comportamento"
-                onclick="switchCustomerTab('tab-comportamento')">Comportamento de Pgto</button>
-              <button class="customer-tab-btn" data-target="tab-repactuacoes"
-                onclick="switchCustomerTab('tab-repactuacoes'); if(typeof loadRepactuacoes === 'function') loadRepactuacoes();">Repactuações</button>
-              <button class="customer-tab-btn" data-target="tab-construcao"
-                onclick="switchCustomerTab('tab-construcao'); if(typeof window.loadConstrucoes === 'function') window.loadConstrucoes();" style="display: flex; align-items: center; gap: 6px;">
-                <i data-lucide="hard-hat" style="width: 16px; height: 16px;"></i> Construção
-              </button>
-              <button class="customer-tab-btn" data-target="tab-notificacoes"
-                onclick="switchCustomerTab('tab-notificacoes')" style="display: flex; align-items: center; gap: 6px;">
-                <i data-lucide="mail" style="width: 16px; height: 16px;"></i> Notificações
-              </button>
-              <button id="btn-informe-rendimentos" class="customer-tab-btn"
-                onclick="switchCustomerTab('tab-informe-rendimentos')" style="display: flex; align-items: center; gap: 6px;">
-                <span style="position: relative; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px;">
-                  <i data-lucide="file" style="width: 16px; height: 16px;"></i>
-                  <span style="position: absolute; font-size: 7px; font-weight: 800; font-family: sans-serif; top: 58%; left: 50%; transform: translate(-50%, -50%); color: inherit;">IR</span>
-                </span>
-                Informe de Rendimentos
-              </button>
-              <button id="btn-visualizar-extrato-ativo" class="customer-tab-btn"
-                style="display: flex; align-items: center; gap: 6px;">
-                <i data-lucide="file-text" style="width:16px; height:16px;"></i> Visualizar Extrato
-              </button>
-              <button id="btn-anexos-juridico" class="customer-tab-btn"
-                onclick="switchCustomerTab('tab-anexos-juridico'); AnexosApp.renderAnexosJuridicoTab()" style="display: flex; align-items: center; gap: 6px;">
-                <i data-lucide="paperclip" style="width:16px; height:16px;"></i> Anexos Jurídico
-              </button>
+            <div class="ml-tabs ficha-contrato-tabs" role="tablist">
+              <button type="button" role="tab" class="ml-tab" aria-selected="false" data-target="tab-cobranca-judicial" id="btn-tab-cobranca-judicial" style="display:none;" onclick="switchCustomerTab('tab-cobranca-judicial'); if(typeof renderJudicialTimeline === 'function') renderJudicialTimeline();"><i data-lucide="scale"></i> Cobrança Judicial</button>
+              <button type="button" role="tab" class="ml-tab is-active" aria-selected="true" data-target="tab-contrato" onclick="switchCustomerTab('tab-contrato')"><i data-lucide="file-text"></i> Contrato de Venda</button>
+              <button type="button" role="tab" class="ml-tab" aria-selected="false" data-target="tab-outros" onclick="switchCustomerTab('tab-outros')"><i data-lucide="files"></i> Outros Contratos</button>
+              <button type="button" role="tab" class="ml-tab" aria-selected="false" data-target="tab-quitacao" onclick="switchCustomerTab('tab-quitacao')"><i data-lucide="badge-dollar-sign"></i> Valor Quitação</button>
+              <button type="button" role="tab" class="ml-tab" aria-selected="false" data-target="tab-simulacao" onclick="switchCustomerTab('tab-simulacao')"><i data-lucide="calendar-clock"></i> Simulação de Vencidas</button>
+              <button type="button" role="tab" class="ml-tab" aria-selected="false" data-target="tab-ocorrencias" onclick="switchCustomerTab('tab-ocorrencias')"><i data-lucide="message-square"></i> Ocorrências e Promessas</button>
+              <button type="button" role="tab" class="ml-tab" aria-selected="false" data-target="tab-boletos" onclick="switchCustomerTab('tab-boletos')"><i data-lucide="receipt"></i> Boletos do Contrato</button>
+              <button type="button" role="tab" class="ml-tab" aria-selected="false" data-target="tab-historico-renegociacoes" onclick="switchCustomerTab('tab-historico-renegociacoes')"><i data-lucide="history"></i> Histórico de Renegociações</button>
+              <button type="button" role="tab" class="ml-tab" aria-selected="false" data-target="tab-vizinhos" onclick="switchCustomerTab('tab-vizinhos'); if(typeof renderVizinhosTab === 'function') renderVizinhosTab();"><i data-lucide="map-pin"></i> Vizinhos</button>
+              <button type="button" role="tab" class="ml-tab" aria-selected="false" data-target="tab-comportamento" onclick="switchCustomerTab('tab-comportamento')"><i data-lucide="activity"></i> Comportamento de Pgto</button>
+              <button type="button" role="tab" class="ml-tab" aria-selected="false" data-target="tab-repactuacoes" onclick="switchCustomerTab('tab-repactuacoes'); if(typeof loadRepactuacoes === 'function') loadRepactuacoes();"><i data-lucide="refresh-cw"></i> Repactuações</button>
+              <button type="button" role="tab" class="ml-tab" aria-selected="false" data-target="tab-construcao" onclick="switchCustomerTab('tab-construcao'); if(typeof window.loadConstrucoes === 'function') window.loadConstrucoes();"><i data-lucide="hard-hat"></i> Construção</button>
+              <button type="button" role="tab" class="ml-tab" aria-selected="false" data-target="tab-notificacoes" onclick="switchCustomerTab('tab-notificacoes')"><i data-lucide="mail"></i> Notificações</button>
+              <button type="button" role="tab" class="ml-tab" aria-selected="false" id="btn-informe-rendimentos" data-target="tab-informe-rendimentos" onclick="switchCustomerTab('tab-informe-rendimentos')"><i data-lucide="scroll-text"></i> Informe de Rendimentos</button>
+              <button type="button" class="ml-tab" id="btn-visualizar-extrato-ativo"><i data-lucide="file-text"></i> Visualizar Extrato</button>
+              <button type="button" role="tab" class="ml-tab" aria-selected="false" id="btn-anexos-juridico" data-target="tab-anexos-juridico" style="display:none;" onclick="switchCustomerTab('tab-anexos-juridico'); AnexosApp.renderAnexosJuridicoTab()"><i data-lucide="paperclip"></i> Anexos Jurídico</button>
             </div>
 
             <!-- Conteiner das Abas -->
@@ -7979,83 +7929,83 @@ RG: {{TESTEMUNHA_1_RG}} RG: {{TESTEMUNHA_2_RG}}</textarea>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/digidem/leaflet-side-by-side@2.0.0/leaflet-side-by-side.min.js"></script>
   <!-- Scripts de Negócio -->
-  <script type="module" src="firebase-config.js?v=1331"></script>
+  <script type="module" src="firebase-config.js?v=1332"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
   <script>
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=1331"></script>
-  <script defer src="sienge-api.js?v=1331"></script>
-  <script defer src="consumo-api.js?v=1331"></script>
-  <script defer src="azure-auth.js?v=1331"></script>
-  <script defer src="usuarios-online.js?v=1331"></script>
-  <script defer src="auditoria-login.js?v=1331"></script>
-  <script defer src="app.js?v=1331"></script>
-  <script defer src="empresa-filter.js?v=1331"></script>
-  <script defer src="cartao-taxas.js?v=1331"></script>
-  <script defer src="alcada-desconto.js?v=1331"></script>
-  <script defer src="alcada-distrato.js?v=1331"></script>
-  <script defer src="home-dashboard.js?v=1331"></script>
-  <script defer src="anexos.js?v=1331"></script>
-  <script defer src="contas-pagar.js?v=1331"></script>
-    <script defer src="boleto-check.js?v=1331"></script>
-    <script defer src="nota-fiscal-check.js?v=1331"></script>
-    <script defer src="gerar-pagamento.js?v=1331"></script>
-  <script defer src="rydoo.js?v=1331"></script>
-  <script defer src="titulos-incompletos.js?v=1331"></script>
-  <script defer src="compras-previsoes.js?v=1331"></script>
-  <script defer src="compras-controle-financeiro.js?v=1331"></script>
-  <script defer src="compras-dashboard.js?v=1331"></script>
-  <script defer src="engenharia-caucao.js?v=1331"></script>
-  <script defer src="config-tags.js?v=1331"></script>
-  <script defer src="config-users.js?v=1331"></script>
-  <script defer src="suporte.js?v=1331"></script>
-  <script defer src="construcao.js?v=1331"></script>
-  <script defer src="empresas.js?v=1331"></script>
-  <script defer src="relacionamento.js?v=1331"></script>
-  <script defer src="aditamento.js?v=1331"></script>
-  <script defer src="cessao-direitos.js?v=1331"></script>
-  <script defer src="compromissario.js?v=1331"></script>
-  <script defer src="comercial.js?v=1331"></script>
-  <script defer src="estoque-comercial.js?v=1331"></script>
-  <script defer src="condicoes-pagamento.js?v=1331"></script>
-  <script defer src="documentos-sienge.js?v=1331"></script>
-  <script defer src="tabelas-vigentes.js?v=1331"></script>
-  <script defer src="controle-comissao.js?v=1331"></script>
-  <script defer src="recebimentos-webro.js?v=1331"></script>
-  <script defer src="scod.js?v=1331"></script>
-  <script defer src="centros-custo.js?v=1331"></script>
-  <script defer src="marketing.js?v=1331"></script>
-  <script defer src="marketing-budget.js?v=1331"></script>
-  <script defer src="plano-financeiro.js?v=1331"></script>
-  <script defer src="orcamento-data.js?v=1331"></script>
-  <script defer src="orcamento-origem.js?v=1331"></script>
-  <script defer src="orcamento-2026.js?v=1331"></script>
-  <script defer src="orcamento.js?v=1331"></script>
-  <script defer src="prestacao-contas.js?v=1331"></script>
+  <script defer src="data.js?v=1332"></script>
+  <script defer src="sienge-api.js?v=1332"></script>
+  <script defer src="consumo-api.js?v=1332"></script>
+  <script defer src="azure-auth.js?v=1332"></script>
+  <script defer src="usuarios-online.js?v=1332"></script>
+  <script defer src="auditoria-login.js?v=1332"></script>
+  <script defer src="app.js?v=1332"></script>
+  <script defer src="empresa-filter.js?v=1332"></script>
+  <script defer src="cartao-taxas.js?v=1332"></script>
+  <script defer src="alcada-desconto.js?v=1332"></script>
+  <script defer src="alcada-distrato.js?v=1332"></script>
+  <script defer src="home-dashboard.js?v=1332"></script>
+  <script defer src="anexos.js?v=1332"></script>
+  <script defer src="contas-pagar.js?v=1332"></script>
+    <script defer src="boleto-check.js?v=1332"></script>
+    <script defer src="nota-fiscal-check.js?v=1332"></script>
+    <script defer src="gerar-pagamento.js?v=1332"></script>
+  <script defer src="rydoo.js?v=1332"></script>
+  <script defer src="titulos-incompletos.js?v=1332"></script>
+  <script defer src="compras-previsoes.js?v=1332"></script>
+  <script defer src="compras-controle-financeiro.js?v=1332"></script>
+  <script defer src="compras-dashboard.js?v=1332"></script>
+  <script defer src="engenharia-caucao.js?v=1332"></script>
+  <script defer src="config-tags.js?v=1332"></script>
+  <script defer src="config-users.js?v=1332"></script>
+  <script defer src="suporte.js?v=1332"></script>
+  <script defer src="construcao.js?v=1332"></script>
+  <script defer src="empresas.js?v=1332"></script>
+  <script defer src="relacionamento.js?v=1332"></script>
+  <script defer src="aditamento.js?v=1332"></script>
+  <script defer src="cessao-direitos.js?v=1332"></script>
+  <script defer src="compromissario.js?v=1332"></script>
+  <script defer src="comercial.js?v=1332"></script>
+  <script defer src="estoque-comercial.js?v=1332"></script>
+  <script defer src="condicoes-pagamento.js?v=1332"></script>
+  <script defer src="documentos-sienge.js?v=1332"></script>
+  <script defer src="tabelas-vigentes.js?v=1332"></script>
+  <script defer src="controle-comissao.js?v=1332"></script>
+  <script defer src="recebimentos-webro.js?v=1332"></script>
+  <script defer src="scod.js?v=1332"></script>
+  <script defer src="centros-custo.js?v=1332"></script>
+  <script defer src="marketing.js?v=1332"></script>
+  <script defer src="marketing-budget.js?v=1332"></script>
+  <script defer src="plano-financeiro.js?v=1332"></script>
+  <script defer src="orcamento-data.js?v=1332"></script>
+  <script defer src="orcamento-origem.js?v=1332"></script>
+  <script defer src="orcamento-2026.js?v=1332"></script>
+  <script defer src="orcamento.js?v=1332"></script>
+  <script defer src="prestacao-contas.js?v=1332"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="fluxo-caixa.js?v=1331"></script>
-  <script defer src="caixa-diario.js?v=1331"></script>
-  <script defer src="resultado-caixa.js?v=1331"></script>
-  <script defer src="relatorio-honorarios.js?v=1331"></script>
-  <script defer src="investimento.js?v=1331"></script>
-  <script defer src="parametrizacao-parceiro.js?v=1331"></script>
-  <script defer src="societario.js?v=1331"></script>
-  <script defer src="participacoes.js?v=1331"></script>
-  <script defer src="fiscal.js?v=1331"></script>
-  <script defer src="fiscal-inserir-nota.js?v=1331"></script>
-  <script defer src="fiscal-enviar-nota.js?v=1331"></script>
-  <script defer src="fiscal-rastrear-pedido.js?v=1331"></script>
-  <script defer src="indexadores.js?v=1331"></script>
-  <script defer src="verificar-construcao.js?v=1331"></script>
-  <script defer src="financiamento.js?v=1331"></script>
-  <script src="repactuacoes.js?v=1331"></script>
-  <script defer src="repactuacao-lote.js?v=1331"></script>
+  <script defer src="fluxo-caixa.js?v=1332"></script>
+  <script defer src="caixa-diario.js?v=1332"></script>
+  <script defer src="resultado-caixa.js?v=1332"></script>
+  <script defer src="relatorio-honorarios.js?v=1332"></script>
+  <script defer src="investimento.js?v=1332"></script>
+  <script defer src="parametrizacao-parceiro.js?v=1332"></script>
+  <script defer src="societario.js?v=1332"></script>
+  <script defer src="participacoes.js?v=1332"></script>
+  <script defer src="fiscal.js?v=1332"></script>
+  <script defer src="fiscal-inserir-nota.js?v=1332"></script>
+  <script defer src="fiscal-enviar-nota.js?v=1332"></script>
+  <script defer src="fiscal-rastrear-pedido.js?v=1332"></script>
+  <script defer src="indexadores.js?v=1332"></script>
+  <script defer src="verificar-construcao.js?v=1332"></script>
+  <script defer src="financiamento.js?v=1332"></script>
+  <script src="repactuacoes.js?v=1332"></script>
+  <script defer src="repactuacao-lote.js?v=1332"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=1331"></script>
+  <script defer src="dashboard-inadimplencia.js?v=1332"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

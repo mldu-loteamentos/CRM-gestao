@@ -9,7 +9,10 @@ const FiscalState = {
   erro: "",
   aviso: "",
   linhas: [],
-  marcas: 0
+  marcas: 0,
+  progresso: 0,
+  progressoTexto: "Lendo o caixa do DFC…",
+  abertos: {}
 };
 
 const FiscalApp = {
@@ -160,11 +163,21 @@ const FiscalApp = {
     return (hit && (hit.name || hit.tradeName)) || (mov && mov.companyName) || `Empresa ${n}`;
   },
 
-  async loadData() {
+  etapaCarga(ratio, texto) {
     FiscalState.loading = true;
+    FiscalState.progresso = ratio;
+    FiscalState.progressoTexto = texto;
+    const txt = document.getElementById("fim-carga-txt");
+    const bar = document.getElementById("fim-carga-bar");
+    if (txt) txt.textContent = texto;
+    if (bar) bar.style.width = Math.round(ratio * 100) + "%";
+    if (!txt || !bar) this.render();
+  },
+
+  async loadData() {
     FiscalState.erro = "";
     FiscalState.aviso = "";
-    this.render();
+    this.etapaCarga(0.06, "Lendo o caixa do DFC…");
     const FC = window.FluxoCaixaApp;
     if (!FC || typeof FC.allocate !== "function" || !window.SiengeApiService) {
       FiscalState.loading = false;
@@ -189,12 +202,16 @@ const FiscalApp = {
     const end = `${meses[meses.length - 1]}-${String(last).padStart(2, "0")}`;
     try {
       const ids = Array.from(geridas);
+      let lidos = 0;
       const chunks = await Promise.all(ids.map(async (id) => {
         try {
           const data = await SiengeApiService.getBankMovements(start, end, { selectionType: "M", companyId: id });
           return (data || []).map((m) => Object.assign({}, m, { companyId: m.companyId || id }));
         } catch (e) {
           return [];
+        } finally {
+          lidos += 1;
+          this.etapaCarga(0.06 + 0.5 * (lidos / ids.length), "Lendo o caixa do DFC…");
         }
       }));
       let movements = chunks.flat();
@@ -203,6 +220,8 @@ const FiscalApp = {
         const d = FC.cashDate(m);
         return d && d >= start && d <= end && geridas.has(Number(m.companyId));
       });
+      this.etapaCarga(0.62, "Analisando as bases");
+      await new Promise((r) => setTimeout(r, 40));
       const mapa = this.mapaDfc();
       const cfg = this.taxConfig();
       FiscalState.marcas = Object.keys(cfg).length;
@@ -239,6 +258,10 @@ const FiscalApp = {
           });
         });
       });
+      this.etapaCarga(0.86, "Fazendo os cálculos");
+      await new Promise((r) => setTimeout(r, 40));
+      this.etapaCarga(0.96, "Cruzando as bases fiscais");
+      await new Promise((r) => setTimeout(r, 40));
       FiscalState.linhas = linhas;
       if (!FiscalState.marcas) {
         FiscalState.aviso = "Nenhuma conta do plano está marcada como base fiscal. Marque em Plano Financeiro e Visões. As redutoras de receita do DFC entram mesmo assim.";
@@ -263,10 +286,13 @@ const FiscalApp = {
     const contas = {};
     linhas.forEach((l) => {
       const c = empresas[l.companyId] || (empresas[l.companyId] = this.empresaVazia(l.companyId, l.companyName));
-      this.somar(c, l);
       const cc = c.ccs[l.ccId] || (c.ccs[l.ccId] = this.empresaVazia(l.ccId, l.ccName || l.ccId));
       cc.name = cc.name || l.ccName || l.ccId;
+      cc.entra = this.entraNaEmpresa(l.ccId, cc.name);
+      if (cc.entra) this.somar(c, l);
       this.somar(cc, l);
+      this.somarConta(cc, l);
+      if (!cc.entra) return;
       const k = `${l.categoryId}|${l.papel}|${l.bucket}`;
       const acc = contas[k] || (contas[k] = { id: l.categoryId, name: l.categoryName, papel: l.papel, bucket: l.bucket, valor: 0 });
       acc.valor += l.valor;
@@ -274,7 +300,7 @@ const FiscalApp = {
     });
     const lista = Object.values(empresas).map((c) => this.fechar(c, ali)).sort((a, b) => a.id - b.id);
     lista.forEach((c) => {
-      c.ccs = Object.values(c.ccs).map((cc) => this.fechar(cc, ali)).sort((a, b) => Math.abs(b.basePis) - Math.abs(a.basePis));
+      c.ccs = Object.values(c.ccs).map((cc) => this.fechar(cc, ali)).sort((a, b) => (a.entra === b.entra ? Math.abs(b.basePis) - Math.abs(a.basePis) : (a.entra ? -1 : 1)));
     });
     return {
       ali,
@@ -288,7 +314,33 @@ const FiscalApp = {
 
   empresaVazia(id, name) {
     const z = () => ({ vendas: 0, servicos: 0, financeiras: 0 });
-    return { id, name: name || "", bruto: z(), red: z(), ccs: {} };
+    return { id, name: name || "", bruto: z(), red: z(), ccs: {}, contas: {}, entra: true };
+  },
+
+  customCc(id) {
+    const mem = window.CentrosCustoState && CentrosCustoState.customFields;
+    if (mem && (mem[id] || mem[String(id)])) return mem[id] || mem[String(id)];
+    try {
+      const map = JSON.parse(localStorage.getItem("crm_centros_custo_custom") || "{}") || {};
+      return map[id] || map[String(id)] || {};
+    } catch (e) {
+      return {};
+    }
+  },
+
+  entraNaEmpresa(ccId, ccName) {
+    const custom = this.customCc(ccId);
+    const tipo = String(custom.tipo_cc || "");
+    const parceiro = /parce(ir|ri)/i.test(String(ccName || "")) && tipo !== "Corporativo";
+    if (parceiro) return false;
+    return custom.imposto_pago_empresa === true;
+  },
+
+  somarConta(alvo, l) {
+    const k = `${l.categoryId}|${l.papel}|${l.bucket}`;
+    const acc = alvo.contas[k] || (alvo.contas[k] = { id: l.categoryId, name: l.categoryName, papel: l.papel, bucket: l.bucket, valor: 0 });
+    acc.valor += l.valor;
+    if (l.categoryName) acc.name = l.categoryName;
   },
 
   somar(c, l) {
@@ -314,6 +366,9 @@ const FiscalApp = {
     const pis = basePis > 0 ? basePis * ali.pis / 100 : 0;
     const cofins = basePis > 0 ? basePis * ali.cofins / 100 : 0;
     const csll = lucroCsll > 0 ? lucroCsll * ali.csll / 100 : 0;
+    if (c.contas && !Array.isArray(c.contas)) {
+      c.contas = Object.values(c.contas).sort((a, b) => Math.abs(b.valor) - Math.abs(a.valor));
+    }
     return Object.assign(c, {
       vendas, servicos, financeiras, basePis, lucroIrpj, lucroCsll,
       pis, cofins, ir, adicional, irpj: ir + adicional, csll, limite
@@ -427,14 +482,34 @@ const FiscalApp = {
       .fim-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 14px; border-left: 4px solid #105436; }
       .fim-card span { display: block; font-size: 0.72rem; font-weight: 700; color: #64748b; text-transform: uppercase; }
       .fim-card strong { display: block; margin-top: 6px; font-size: 1.25rem; color: #0f172a; }
+      .fim { position: relative; }
+      .fim-carga { position: absolute; inset: 0; z-index: 4; background: rgba(248,250,252,0.86); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 220px; }
+      .fim-carga p { margin: 0; color: #475569; font-size: 0.9rem; }
+      .fim-carga-trilha { width: min(420px, 80%); height: 8px; background: #e2e8f0; border-radius: 99px; overflow: hidden; }
+      .fim-carga-trilha i { display: block; height: 100%; background: #105436; border-radius: 99px; transition: width 0.25s linear; }
       .fim-scroll { overflow: auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; }
       .fim-grid { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
       .fim-grid th, .fim-grid td { padding: 8px 10px; border-bottom: 1px solid #e2e8f0; text-align: left; }
       .fim-grid th { background: #105436; color: #fff; font-size: 0.68rem; }
-      .fim-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-      .fim-grid th.fim-num { text-align: right; }
-      .fim-grid tbody tr:hover td { background: #f0fdf4; }
-      .fim-cc td { background: #f8fafc; color: #475569; font-size: 0.78rem; }
+      .fim-num { text-align: left; font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .fim-grid th.fim-num, .fim-grid td.fim-num { text-align: left; }
+      .fim-head, .fim-linha { display: grid; gap: 8px; align-items: center; text-align: left; }
+      .fim-cols-3 { grid-template-columns: minmax(0, 1fr) 108px 92px 248px; }
+      .fim-cols-4 { grid-template-columns: minmax(0, 1fr) 108px 92px 100px 8px; }
+      .fim-head { background: #105436; color: #fff; padding: 8px 12px; font-size: 0.68rem; font-weight: 700; }
+      .fim-emp { border-bottom: 1px solid #e2e8f0; }
+      .fim-linha { padding: 8px 12px; }
+      .fim-abre { display: flex; align-items: center; gap: 6px; border: 0; background: transparent; padding: 0; cursor: pointer; text-align: left; color: inherit; font: inherit; min-width: 0; }
+      .fim-abre b, .fim-abre span { min-width: 0; }
+      .fim-filhos { background: #f8fafc; }
+      .fim-cc .fim-linha { padding-left: 28px; }
+      .fim-fora { color: #94a3b8; }
+      .fim-fora .fim-nome, .fim-fora .fim-val { text-decoration: line-through; }
+      .fim-contas-cc { padding: 0 12px 10px 48px; }
+      .fim-contas-cc .fim-grid { font-size: 0.76rem; }
+      .fim-acao { display: flex; gap: 6px; align-items: center; justify-content: flex-start; flex-wrap: wrap; }
+      .fim-acao .btn { height: 32px; padding: 0 10px; white-space: nowrap; font-size: 0.75rem; }
+      .fim-arquivo { flex: 1 0 100%; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.68rem; color: #64748b; }
       .fim-aviso { margin: 0 0 12px; padding: 10px 12px; background: #fffbeb; color: #92400e; border-radius: 8px; font-size: 0.84rem; }
       .fim-erro { margin: 0 0 12px; padding: 10px 12px; background: #fef2f2; color: #991b1b; border-radius: 8px; font-size: 0.84rem; }
       .fim-contas { margin-top: 8px; }
@@ -448,21 +523,27 @@ const FiscalApp = {
       .fim-ali-l input, .fim-ali-l select { height: 36px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0 8px; font-weight: 600; color: #0f172a; }
       .fim-chk { display: flex; gap: 8px; align-items: center; margin: 12px 0; font-size: 0.84rem; color: #0f172a; font-weight: 600; }
       .fim-pop-acoes { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
-      .fim-acao { display: flex; gap: 8px; align-items: center; justify-content: flex-end; }
-      .fim-acao input[type="file"] { max-width: 150px; font-size: 0.7rem; }
+      .fim-acao input[type="file"] { display: none; }
       @media (max-width: 900px) { .fim-cards, .fim-ali-grid, .fim-form { grid-template-columns: 1fr; } }`;
+  },
+
+  cargaHtml() {
+    const pct = Math.round((FiscalState.progresso || 0) * 100);
+    return `<div class="fim-carga" id="fim-carga">
+      <div class="loading-spinner"></div>
+      <p id="fim-carga-txt">${this.esc(FiscalState.progressoTexto || "Lendo o caixa do DFC…")}</p>
+      <div class="fim-carga-trilha"><i id="fim-carga-bar" style="width:${pct}%"></i></div>
+    </div>`;
   },
 
   render() {
     const root = document.getElementById("fiscal-root");
     if (!root) return;
-    if (FiscalState.loading) {
-      root.innerHTML = `<div class="fim"><p class="fim-muted">Lendo o caixa do DFC e cruzando as bases fiscais…</p></div>`;
-      return;
-    }
+    if (FiscalState.loading && document.getElementById("fim-carga-txt")) return;
     const p = this.pacote();
-    FiscalState.empresas = p.empresas;
-    root.innerHTML = `<style>${this.css()}</style><div class="fim">${this.corpo(p)}</div>`;
+    if (!FiscalState.loading) FiscalState.empresas = p.empresas;
+    const carga = FiscalState.loading ? this.cargaHtml() : "";
+    root.innerHTML = `<style>${this.css()}</style><div class="fim">${this.corpo(p)}${carga}</div>`;
     if (window.lucide) lucide.createIcons();
   },
 
@@ -582,6 +663,44 @@ const FiscalApp = {
     </div>`;
   },
 
+  valorAba(item, aba) {
+    if (aba === "irpj") return item.lucroIrpj;
+    if (aba === "csll") return item.lucroCsll;
+    return item.basePis;
+  },
+
+  impostoAba(item, aba) {
+    if (aba === "irpj") return item.ir;
+    return item[aba] || 0;
+  },
+
+  toggle(tipo, id) {
+    const key = tipo + "-" + id;
+    FiscalState.abertos[key] = !FiscalState.abertos[key];
+    const box = document.getElementById("fim-box-" + key);
+    const aberto = !!FiscalState.abertos[key];
+    if (box) box.hidden = !aberto;
+    const btn = document.getElementById("fim-abre-" + key);
+    if (btn) {
+      btn.setAttribute("aria-expanded", aberto ? "true" : "false");
+      const ic = btn.querySelector("i");
+      if (ic) ic.setAttribute("data-lucide", aberto ? "chevron-down" : "chevron-right");
+    }
+    if (window.lucide) lucide.createIcons();
+  },
+
+  nomeGuia(input) {
+    const el = document.getElementById(String(input.id || "").replace("file-", "nome-"));
+    if (el) el.textContent = input.files && input.files[0] ? input.files[0].name : "";
+  },
+
+  contasHtml(contas) {
+    if (!contas || !contas.length) return `<p class="fim-muted" style="margin:0;">Nenhuma conta nesta base.</p>`;
+    return `<table class="fim-grid"><thead><tr><th>Conta</th><th>Papel</th><th>Valor no DFC</th></tr></thead><tbody>
+      ${contas.map((c) => `<tr><td>${this.esc(c.id)} ${this.esc(c.name)}</td><td>${c.papel === "redutora" ? "Redutora" : this.esc(this.nomeBase(c.bucket))}</td><td>${this.money(c.valor)}</td></tr>`).join("")}
+    </tbody></table>`;
+  },
+
   tabela(p) {
     if (!p.empresas.length) {
       return `<div class="fim-racional"><p class="fim-muted">Nenhuma base neste período. Calcule de novo ou marque as contas no plano financeiro.</p></div>`;
@@ -589,24 +708,56 @@ const FiscalApp = {
     const aba = p.aba;
     const colImp = aba.toUpperCase();
     const headBase = aba === "irpj" ? "Lucro presumido" : (aba === "csll" ? "Base da CSLL" : "Base");
+    const cols = aba === "irpj" ? "fim-cols-4" : "fim-cols-3";
     const linhas = p.empresas.map((c) => {
-      const base = aba === "irpj" ? c.lucroIrpj : (aba === "csll" ? c.lucroCsll : c.basePis);
+      const base = this.valorAba(c, aba);
       const imp = c[aba] || 0;
+      const empKey = "e-" + c.id;
+      const aberto = !!FiscalState.abertos[empKey];
       const acao = (aba === "pis" || aba === "cofins") ? `<div class="fim-acao">
-        <input type="file" id="file-${aba}-${c.id}" accept=".pdf,.png,.jpg" title="Anexar a guia">
-        <button type="button" id="btn-${aba}-${c.id}" class="btn btn-primary" style="height:32px;" onclick="FiscalApp.sendToSienge(${c.id}, '${aba}')">Criar título</button>
-      </div>` : "";
-      const extra = aba === "irpj" ? `<td class="fim-num">${this.money(c.adicional)}</td>` : "";
+        <label class="btn btn-outline">Carregar a guia
+          <input type="file" id="file-${aba}-${c.id}" accept=".pdf,.png,.jpg" onchange="FiscalApp.nomeGuia(this)">
+        </label>
+        <button type="button" id="btn-${aba}-${c.id}" class="btn btn-primary" onclick="FiscalApp.sendToSienge(${c.id}, '${aba}')">Gerar guia</button>
+        <span class="fim-arquivo" id="nome-${aba}-${c.id}"></span>
+      </div>` : "<span></span>";
+      const extra = aba === "irpj" ? `<span class="fim-val">${this.money(c.adicional)}</span>` : "";
       const ccs = (c.ccs || []).map((cc) => {
-        const b = aba === "irpj" ? cc.lucroIrpj : (aba === "csll" ? cc.lucroCsll : cc.basePis);
-        const i = aba === "irpj" ? cc.ir : (cc[aba] || 0);
-        return `<tr class="fim-cc"><td style="padding-left:28px;">${this.esc(cc.id)} ${this.esc(cc.name || "")}</td><td class="fim-num">${this.money(b)}</td><td class="fim-num">${this.money(i)}</td>${aba === "irpj" ? `<td class="fim-num">—</td>` : ""}<td></td></tr>`;
+        const b = this.valorAba(cc, aba);
+        const i = this.impostoAba(cc, aba);
+        const ccKey = "c-" + c.id + "-" + cc.id;
+        const ccAberto = !!FiscalState.abertos[ccKey];
+        const motivo = cc.entra ? "" : (/parce(ir|ri)/i.test(String(cc.name || "")) ? "Parceiro — não entra na soma" : "Sem imposto pago pela empresa — não entra na soma");
+        return `<div class="fim-cc${cc.entra ? "" : " fim-fora"}">
+          <div class="fim-linha ${cols}">
+            <button type="button" class="fim-abre" id="fim-abre-${ccKey}" aria-expanded="${ccAberto ? "true" : "false"}" onclick="FiscalApp.toggle('c', '${c.id}-${cc.id}')">
+              <i data-lucide="${ccAberto ? "chevron-down" : "chevron-right"}" style="width:14px;height:14px;"></i>
+              <span class="fim-nome">${this.esc(cc.id)} ${this.esc(cc.name || "")}${motivo ? ` <small>${this.esc(motivo)}</small>` : ""}</span>
+            </button>
+            <span class="fim-val">${this.money(b)}</span>
+            <span class="fim-val">${this.money(i)}</span>
+            ${aba === "irpj" ? `<span class="fim-val">—</span>` : "<span></span>"}
+          </div>
+          <div class="fim-contas-cc" id="fim-box-${ccKey}" ${ccAberto ? "" : "hidden"}>${this.contasHtml(cc.contas)}</div>
+        </div>`;
       }).join("");
-      return `<tr><td><b>${this.esc(c.id)} ${this.esc(c.name)}</b></td><td class="fim-num">${this.money(base)}</td><td class="fim-num">${this.money(imp)}</td>${extra}<td>${acao}</td></tr>${ccs}`;
+      return `<div class="fim-emp">
+        <div class="fim-linha ${cols}">
+          <button type="button" class="fim-abre" id="fim-abre-${empKey}" aria-expanded="${aberto ? "true" : "false"}" onclick="FiscalApp.toggle('e', '${c.id}')">
+            <i data-lucide="${aberto ? "chevron-down" : "chevron-right"}" style="width:16px;height:16px;"></i>
+            <b>${this.esc(c.id)} ${this.esc(c.name)}</b>
+          </button>
+          <span class="fim-val">${this.money(base)}</span>
+          <span class="fim-val">${this.money(imp)}</span>
+          ${extra}${acao}
+        </div>
+        <div class="fim-filhos" id="fim-box-${empKey}" ${aberto ? "" : "hidden"}>${ccs}</div>
+      </div>`;
     }).join("");
-    return `<div class="fim-scroll"><table class="fim-grid"><thead><tr>
-      <th>Empresa / centro de custo</th><th class="fim-num">${headBase}</th><th class="fim-num">${colImp}</th>${aba === "irpj" ? `<th class="fim-num">Adicional</th>` : ""}<th></th>
-    </tr></thead><tbody>${linhas}</tbody></table></div>`;
+    return `<p class="fim-muted">As empresas começam fechadas. Centro de custo de parceiro, ou sem a marca de imposto pago pela empresa, aparece riscado e fica fora da soma.</p><div class="fim-scroll">
+      <div class="fim-head ${cols}"><span>Empresa / centro de custo</span><span>${headBase}</span><span>${colImp}</span>${aba === "irpj" ? "<span>Adicional</span><span></span>" : "<span></span>"}</div>
+      ${linhas}
+    </div>`;
   },
 
   async sendToSienge(companyId, type) {

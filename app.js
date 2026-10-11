@@ -995,9 +995,9 @@ function switchCustomerTab(tabId) {
     pane.classList.remove('active');
   });
   
-  // Remover active de todos os botões
-  document.querySelectorAll('.customer-tab-btn').forEach(btn => {
-    btn.classList.remove('active');
+  document.querySelectorAll('.ficha-contrato-tabs .ml-tab').forEach(btn => {
+    btn.classList.remove('is-active');
+    btn.setAttribute('aria-selected', 'false');
   });
   
   // Mostrar o painel selecionado
@@ -1067,9 +1067,10 @@ function switchCustomerTab(tabId) {
     window.renderNexHistory();
   }
   
-  const activeBtn = document.querySelector(`.customer-tab-btn[data-target="${tabId}"]`);
+  const activeBtn = document.querySelector(`.ficha-contrato-tabs .ml-tab[data-target="${tabId}"]`);
   if (activeBtn) {
-    activeBtn.classList.add('active');
+    activeBtn.classList.add('is-active');
+    activeBtn.setAttribute('aria-selected', 'true');
   }
 
   if (tabId === 'tab-informe-rendimentos') {
@@ -1087,8 +1088,9 @@ window.switchFichaTab = function(tabId) {
     pane.classList.remove('active');
   });
   
-  document.querySelectorAll('.ficha-tab-btn').forEach(btn => {
-    btn.classList.remove('active');
+  document.querySelectorAll('.ficha-tabs .ml-tab').forEach(btn => {
+    btn.classList.remove('is-active');
+    btn.setAttribute('aria-selected', 'false');
   });
   
   const selectedPane = document.getElementById(tabId);
@@ -1097,9 +1099,10 @@ window.switchFichaTab = function(tabId) {
     selectedPane.classList.add('active');
   }
   
-  const activeBtn = document.querySelector(`.ficha-tab-btn[data-target="${tabId}"]`);
+  const activeBtn = document.querySelector(`.ficha-tabs .ml-tab[data-target="${tabId}"]`);
   if (activeBtn) {
-    activeBtn.classList.add('active');
+    activeBtn.classList.add('is-active');
+    activeBtn.setAttribute('aria-selected', 'true');
   }
 };
 
@@ -1149,14 +1152,14 @@ window.applyFichaPersonTypeTabs = function(customer) {
   const conj = document.querySelector('button[data-target="ficha-conjuge"]');
   const comp = document.querySelector('button[data-target="ficha-complemento"]');
   const repr = document.querySelector('button[data-target="ficha-representante"]');
-  if (conj) conj.style.display = pj ? "none" : "inline-block";
-  if (comp) comp.style.display = pj ? "none" : "inline-block";
-  if (repr) repr.style.display = pj ? "inline-block" : "none";
+  if (conj) conj.style.display = pj ? "none" : "";
+  if (comp) comp.style.display = pj ? "none" : "";
+  if (repr) repr.style.display = pj ? "" : "none";
   const ageItem = document.getElementById("ficha-item-age");
   const civilItem = document.getElementById("ficha-item-civil");
   if (ageItem) ageItem.style.display = pj ? "none" : "";
   if (civilItem) civilItem.style.display = pj ? "none" : "";
-  const active = document.querySelector(".ficha-tab-btn.active");
+  const active = document.querySelector(".ficha-tabs .ml-tab.is-active");
   const target = active && active.getAttribute("data-target");
   if (pj && (target === "ficha-conjuge" || target === "ficha-complemento")) {
     if (typeof switchFichaTab === "function") switchFichaTab("ficha-cadastro");
@@ -5587,6 +5590,20 @@ window.crmAbrirTesteConta = function(email) {
   window.crmAtualizarTelasDoAcesso();
 };
 
+window.syncQuitacaoAdvogadoVista = function() {
+  const tab = document.getElementById("tab-quitacao");
+  if (!tab) return;
+  const u = (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo())
+    || (window.AppState && AppState.currentUser)
+    || null;
+  const opType = u
+    ? ((typeof window.crmOperatorType === "function" && window.crmOperatorType(u)) || u.operator_type || "")
+    : "";
+  const advogado = opType === "advogado"
+    || (u && typeof window.isAdvogadoCobrancaUser === "function" && window.isAdvogadoCobrancaUser(u));
+  tab.classList.toggle("quitacao-so-vp", !!advogado);
+};
+
 window.crmAtualizarTelasDoAcesso = function() {
   if (typeof loadDashboardData === "function" && window.AppState && AppState.defaultersLoaded && !window._isDefaultersLoading) {
     try { loadDashboardData(false); } catch (e) {}
@@ -5594,6 +5611,7 @@ window.crmAtualizarTelasDoAcesso = function() {
   if (window.DashboardInadimplencia && typeof window.DashboardInadimplencia.render === "function" && document.getElementById("inadimplencia-dashboard-root")) {
     try { window.DashboardInadimplencia.render(); } catch (e) {}
   }
+  if (typeof window.syncQuitacaoAdvogadoVista === "function") window.syncQuitacaoAdvogadoVista();
 };
 
 window.crmEncerrarTesteConta = function() {
@@ -11207,9 +11225,9 @@ function syncCobrancaJudicialTabs(originIsSubjudice, isAdvogado, saleObj) {
   const passedJuridico = hasPassedJuridicoHistory(AppState.selectedCustomerId);
   const show = !!(originIsSubjudice || isAdvogado || clientSub || passedJuridico);
   const cobrancaJudicialBtn = document.getElementById("btn-tab-cobranca-judicial");
-  if (cobrancaJudicialBtn) cobrancaJudicialBtn.style.display = show ? "inline-flex" : "none";
+  if (cobrancaJudicialBtn) cobrancaJudicialBtn.style.display = show ? "" : "none";
   const anexosJuridicoBtn = document.getElementById("btn-anexos-juridico");
-  if (anexosJuridicoBtn) anexosJuridicoBtn.style.display = show ? "flex" : "none";
+  if (anexosJuridicoBtn) anexosJuridicoBtn.style.display = show ? "" : "none";
   syncJudicialOccurrenceFormLock(saleObj);
 }
 
@@ -11308,25 +11326,25 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   const fichaComplementoBtn = document.querySelector('button[data-target="ficha-complemento"]');
   const fichaProcuradoresBtn = document.querySelector('button[data-target="ficha-procuradores"]');
   
-  if (fichaCompradoresBtn) fichaCompradoresBtn.style.display = 'inline-block';
+  if (fichaCompradoresBtn) fichaCompradoresBtn.style.display = '';
   if (isAdvogado) {
-      if (fichaConjugeBtn) fichaConjugeBtn.style.display = 'inline-block';
-      if (fichaComplementoBtn) fichaComplementoBtn.style.display = 'inline-block';
-      if (fichaProcuradoresBtn) fichaProcuradoresBtn.style.display = 'inline-block';
+      if (fichaConjugeBtn) fichaConjugeBtn.style.display = '';
+      if (fichaComplementoBtn) fichaComplementoBtn.style.display = '';
+      if (fichaProcuradoresBtn) fichaProcuradoresBtn.style.display = '';
       if (fichaAnexosBtn) fichaAnexosBtn.style.display = 'none';
       if (fichaScoreBtn) fichaScoreBtn.style.display = 'none';
   } else if (isInternoOuApoio) {
-      if (fichaConjugeBtn) fichaConjugeBtn.style.display = 'inline-block';
-      if (fichaComplementoBtn) fichaComplementoBtn.style.display = 'inline-block';
-      if (fichaProcuradoresBtn) fichaProcuradoresBtn.style.display = 'inline-block';
-      if (fichaAnexosBtn) fichaAnexosBtn.style.display = 'inline-block';
-      if (fichaScoreBtn) fichaScoreBtn.style.display = 'inline-block';
+      if (fichaConjugeBtn) fichaConjugeBtn.style.display = '';
+      if (fichaComplementoBtn) fichaComplementoBtn.style.display = '';
+      if (fichaProcuradoresBtn) fichaProcuradoresBtn.style.display = '';
+      if (fichaAnexosBtn) fichaAnexosBtn.style.display = '';
+      if (fichaScoreBtn) fichaScoreBtn.style.display = '';
   } else {
-      if (fichaConjugeBtn) fichaConjugeBtn.style.display = 'inline-block';
-      if (fichaComplementoBtn) fichaComplementoBtn.style.display = 'inline-block';
-      if (fichaProcuradoresBtn) fichaProcuradoresBtn.style.display = 'inline-block';
-      if (fichaAnexosBtn) fichaAnexosBtn.style.display = isSubjudice ? 'none' : 'inline-block';
-      if (fichaScoreBtn) fichaScoreBtn.style.display = isSubjudice ? 'none' : 'inline-block';
+      if (fichaConjugeBtn) fichaConjugeBtn.style.display = '';
+      if (fichaComplementoBtn) fichaComplementoBtn.style.display = '';
+      if (fichaProcuradoresBtn) fichaProcuradoresBtn.style.display = '';
+      if (fichaAnexosBtn) fichaAnexosBtn.style.display = isSubjudice ? 'none' : '';
+      if (fichaScoreBtn) fichaScoreBtn.style.display = isSubjudice ? 'none' : '';
   }
 
   // --- Abas Inferiores ---
@@ -11343,10 +11361,10 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
       if (isAdvogado && hideAdvogadoTabs.includes(tabId)) {
           btn.style.display = 'none';
       } else if (isInternoOuApoio) {
-          btn.style.display = 'inline-block';
+          btn.style.display = '';
       } else {
           const hideInSub = ['tab-ocorrencias', 'tab-boletos', 'tab-vizinhos', 'tab-outros', 'tab-comportamento'];
-          btn.style.display = (isSubjudice && hideInSub.includes(tabId)) ? 'none' : 'inline-block';
+          btn.style.display = (isSubjudice && hideInSub.includes(tabId)) ? 'none' : '';
       }
   });
 
@@ -11354,22 +11372,19 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   const irBtn = document.getElementById('btn-informe-rendimentos');
   if (irBtn) {
     if (isAdvogado) irBtn.style.display = 'none';
-    else if (isInternoOuApoio) irBtn.style.display = 'inline-flex';
-    else irBtn.style.display = isSubjudice ? 'none' : 'inline-flex';
+    else if (isInternoOuApoio) irBtn.style.display = '';
+    else irBtn.style.display = isSubjudice ? 'none' : '';
   }
   
   const extratoBtn = document.getElementById('btn-visualizar-extrato-ativo');
   if (extratoBtn) {
-    extratoBtn.style.display = 'flex'; // Todos podem ver (Advogado incluído pelo requisito)
+    extratoBtn.style.display = '';
   }
   ['btn-renegotiate-page', 'btn-distrato-page', 'btn-toggle-whatsapp-alert', 'btn-solicitar-wpp-client', 'btn-nova-vistoria-client'].forEach((id) => {
     const btn = document.getElementById(id);
     if (btn) btn.style.display = isAdvogado ? 'none' : '';
   });
-  document.querySelectorAll('#tab-quitacao .quitacao-kpi').forEach((el) => {
-    const keep = el.classList.contains('quitacao-kpi--vp');
-    el.style.display = isAdvogado && !keep ? 'none' : '';
-  });
+  if (typeof window.syncQuitacaoAdvogadoVista === "function") window.syncQuitacaoAdvogadoVista();
   
   // Abas judiciais: menu Sub Judice, advogado, ou contrato/cliente já sub judice (ex.: fila de cobrança)
   syncCobrancaJudicialTabs(isSubjudice, isAdvogado);
@@ -13850,7 +13865,7 @@ function formatCpfCnpj(val) {
     const btnExtrato = document.getElementById("btn-visualizar-extrato-ativo");
     if (btnExtrato) {
       btnExtrato.onclick = () => {
-        btnExtrato.innerHTML = '<div class="loading-spinner" style="width:14px; height:14px; border:2px solid rgba(255,255,255,0.3); border-top-color:#fff; border-radius:50%; animation:spin 0.8s linear infinite;"></div> Aguarde...';
+        btnExtrato.innerHTML = '<div class="loading-spinner" style="width:14px; height:14px; border:2px solid rgba(16,84,54,0.25); border-top-color:#105436; border-radius:50%; animation:spin 0.8s linear infinite;"></div> Aguarde...';
         btnExtrato.disabled = true;
         const domBillEl = document.getElementById("det-bill-id");
         const domBillId = domBillEl && domBillEl.textContent ? domBillEl.textContent.trim() : null;
@@ -13866,7 +13881,7 @@ function formatCpfCnpj(val) {
 
         SiengeApiService.getCustomerFinancialStatementsPdf(customerId, billIdForPdf)
         .then(res => {
-          btnExtrato.innerHTML = '<i data-lucide="file-text" style="width:16px; height:16px;"></i> Visualizar Extrato';
+          btnExtrato.innerHTML = '<i data-lucide="file-text"></i> Visualizar Extrato';
           btnExtrato.disabled = false;
           lucide.createIcons();
           
@@ -13911,7 +13926,7 @@ function formatCpfCnpj(val) {
         })
         .catch(err => {
           console.error("Erro ao gerar PDF:", err);
-          btnExtrato.innerHTML = '<i data-lucide="file-text" style="width:16px; height:16px;"></i> Visualizar Extrato';
+          btnExtrato.innerHTML = '<i data-lucide="file-text"></i> Visualizar Extrato';
           btnExtrato.disabled = false;
           lucide.createIcons();
           alert('Ocorreu um erro ao gerar o extrato.');
@@ -19664,6 +19679,7 @@ window.loadQuitacaoDebtReport = async function(force) {
       try { window.syncQuitacaoSiTypesToFila(window._quitacaoState && window._quitacaoState.billId); } catch (e) {}
     }
     if (statusEl) statusEl.textContent = `Atualizado · ${n} parcela(s) em aberto · juros ${quitacaoFormatJurosLabel(sale) || "—"}`;
+    if (typeof window.syncQuitacaoAdvogadoVista === "function") window.syncQuitacaoAdvogadoVista();
   } catch (e) {
     console.error("Erro relatório quitação:", e);
     if (statusEl) statusEl.textContent = "Falha ao obter saldo devedor presente.";
@@ -41028,7 +41044,7 @@ window.enviarParaJuridico = async function(customerId, saleId) {
   // Força a aba judicial a aparecer
   const btnJudicial = document.getElementById("btn-tab-cobranca-judicial");
   if (btnJudicial) {
-      btnJudicial.style.display = "inline-flex";
+      btnJudicial.style.display = "";
   }
 
   // Mostra um aviso orientando a criar a ocorrência

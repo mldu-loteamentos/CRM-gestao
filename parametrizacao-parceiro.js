@@ -690,6 +690,56 @@ const ParametrizacaoParceiroApp = {
     this.render();
   },
 
+  copiarLigacoes(src, dest) {
+    dest.naNodes = JSON.parse(JSON.stringify(src.naNodes || {}));
+    dest.naAccounts = JSON.parse(JSON.stringify(src.naAccounts || {}));
+    dest.inAccounts = JSON.parse(JSON.stringify(src.inAccounts || {}));
+    dest.accountShares = {};
+  },
+
+  /** Obras de outros parceiros, para copiar o perfil de contas ligadas e desligadas. */
+  fontesRateio() {
+    const atual = this.current();
+    const out = [];
+    (this.items || []).forEach((raw) => {
+      const p = this.normalizeItem(raw);
+      if (!p || this.isSociedade(p) || (atual && p.id === atual.id)) return;
+      (p.obras || []).forEach((o) => {
+        if (!o || o.code == null || o.code === "") return;
+        out.push({ id: p.id, code: String(o.code), nome: p.partnerName || "Parceiro", obra: o });
+      });
+    });
+    return out.sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR") || String(a.code).localeCompare(String(b.code), "pt-BR", { numeric: true }));
+  },
+
+  importarRateio() {
+    const p = this.current();
+    const dest = this.currentObra(p);
+    const sel = document.getElementById("pp-import-rateio");
+    const valor = sel ? String(sel.value || "") : "";
+    if (!p || !dest) return;
+    if (!valor) {
+      alert("Escolha a obra de outro parceiro para importar o rateio.");
+      return;
+    }
+    const sep = valor.indexOf("|");
+    const id = valor.slice(0, sep);
+    const code = valor.slice(sep + 1);
+    const fonte = this.fontesRateio().find((f) => f.id === id && f.code === code);
+    if (!fonte || !fonte.obra) {
+      alert("Não encontrei essa obra para importar.");
+      return;
+    }
+    const msg = `Importar o que está ligado e desligado da obra ${fonte.code} de ${fonte.nome} para a obra ${dest.code}?\n\nO percentual desta obra continua o da aba Obras.`;
+    const ok = typeof window.mouraConfirm === "function" ? window.mouraConfirm(msg) : Promise.resolve(confirm(msg));
+    Promise.resolve(ok).then((sim) => {
+      if (!sim) return;
+      this.copiarLigacoes(fonte.obra, dest);
+      this.persist();
+      this.render();
+    });
+  },
+
   /** Copia só grupos e contas ligados ou desligados. O percentual de cada obra fica o da aba Obras. */
   replicarLigacoes() {
     const p = this.current();
@@ -705,12 +755,7 @@ const ParametrizacaoParceiroApp = {
     const ok = typeof window.mouraConfirm === "function" ? window.mouraConfirm(msg) : Promise.resolve(confirm(msg));
     Promise.resolve(ok).then((sim) => {
       if (!sim) return;
-      destinos.forEach((dest) => {
-        dest.naNodes = JSON.parse(JSON.stringify(src.naNodes || {}));
-        dest.naAccounts = JSON.parse(JSON.stringify(src.naAccounts || {}));
-        dest.inAccounts = JSON.parse(JSON.stringify(src.inAccounts || {}));
-        dest.accountShares = {};
-      });
+      destinos.forEach((dest) => this.copiarLigacoes(src, dest));
       this.persist();
       this.render();
     });
@@ -1718,6 +1763,16 @@ const ParametrizacaoParceiroApp = {
     </div>`;
   },
 
+  importarRateioHtml() {
+    const fontes = this.fontesRateio();
+    if (!fontes.length) return "";
+    const opts = fontes.map((f) => `<option value="${this.esc(f.id)}|${this.esc(f.code)}">${this.esc(f.nome)} · obra ${this.esc(f.code)}</option>`).join("");
+    return `<select id="pp-import-rateio" class="form-control" style="height:34px;max-width:280px;font-size:0.75rem;" title="Obra de outro parceiro com o mesmo perfil de contas">
+      <option value="">Importar de outro parceiro</option>${opts}
+    </select>
+    <button type="button" class="btn btn-outline" onclick="ParametrizacaoParceiroApp.importarRateio()" style="height:34px;font-size:0.75rem;white-space:nowrap;">Importar rateio</button>`;
+  },
+
   matrixHtml(p) {
     if (this.isSociedade(p)) {
       return `<div class="crm-card" style="padding:18px;background:#f8fafc;">
@@ -1747,12 +1802,13 @@ const ParametrizacaoParceiroApp = {
             <div style="font-size:0.72rem;color:#64748b;margin-top:3px;">
               Contas 1.xxx entram como receita (positivo) e 2.xxx como despesa (negativo) na prestação de contas. Campo em branco herda ${def}%.
               Desmarcar um grupo tira todas as contas; dá para incluir de volta uma a uma (o grupo fica Parcial) ou usar o ícone de check para incluir todas.
-              Replicar nas outras obras copia só o que está ligado ou desligado. O percentual de cada obra continua o da aba Obras.
+              Replicar nas outras obras copia só o que está ligado ou desligado neste parceiro. Importar traz o mesmo perfil de uma obra de outro parceiro. O percentual de cada obra continua o da aba Obras.
             </div>
           </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
-            <button type="button" class="btn btn-outline" onclick="ParametrizacaoParceiroApp.applyDefaultToAll()" style="height:34px;font-size:0.75rem;white-space:nowrap;">Usar padrão em todas</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center;">
+            <button type="button" class="btn btn-outline" title="Apaga o percentual digitado em cada conta. Todas voltam a usar o percentual padrão desta obra." onclick="ParametrizacaoParceiroApp.applyDefaultToAll()" style="height:34px;font-size:0.75rem;white-space:nowrap;">Usar padrão em todas</button>
             <button type="button" class="btn btn-primary" onclick="ParametrizacaoParceiroApp.replicarLigacoes()" style="height:34px;font-size:0.75rem;white-space:nowrap;">Replicar nas outras obras</button>
+            ${this.importarRateioHtml()}
           </div>
         </div>
         <div id="pp-tree-scroll" style="flex:1;overflow:auto;padding:15px;background:#fff;">

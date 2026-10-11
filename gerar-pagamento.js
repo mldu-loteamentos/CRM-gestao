@@ -1689,6 +1689,45 @@ const GerarPagamentoApp = {
     return /distrat/i.test([ctx && ctx.docId, ctx && ctx.docNome].concat(planos).join(" "));
   },
 
+  parceriasRateio() {
+    const PP = window.ParametrizacaoParceiroApp;
+    if (!PP || typeof PP.normalizeItem !== "function") return [];
+    const lista = Array.isArray(PP.items) && PP.items.length
+      ? PP.items
+      : (() => { try { return JSON.parse(localStorage.getItem("crm_parcerias_v1") || "[]") || []; } catch (e) { return []; } })();
+    return (Array.isArray(lista) ? lista : []).map((p) => PP.normalizeItem(p)).filter((p) => p && !PP.isSociedade(p));
+  },
+
+  planoConstaNoDfc(accId) {
+    const PP = window.ParametrizacaoParceiroApp;
+    if (!PP || typeof PP.dfcGroups !== "function") return false;
+    const nk = typeof PP.normKey === "function" ? PP.normKey(accId) : String(accId || "").replace(/\D/g, "");
+    if (!nk) return false;
+    return PP.dfcGroups().some((g) => (g.accounts || []).some((a) => String(a) === String(accId) || PP.normKey(a) === nk));
+  },
+
+  /** Plano que a configuração do parceiro manda ratear. Vazio quando a conta está fora ou não há parceria neste centro. */
+  planoExigeRateio(ccIds, planos) {
+    const PP = window.ParametrizacaoParceiroApp;
+    if (!PP || typeof PP.accountEntersPartnership !== "function") return "";
+    const lista = [];
+    (planos || []).forEach((p) => {
+      const id = String((p && p.id) || "").trim();
+      if (!id || lista.some((x) => x.id === id) || !this.planoConstaNoDfc(id)) return;
+      lista.push({ id, nome: String((p && p.nome) || "").trim() });
+    });
+    if (!lista.length) return "";
+    const ids = (ccIds || []).map((id) => String(id || "")).filter(Boolean);
+    for (const part of this.parceriasRateio()) {
+      const obra = ids.map((id) => PP.obraForCostCenter(part, id)).find(Boolean);
+      if (!obra) continue;
+      for (const plano of lista) {
+        if (PP.accountEntersPartnership(part, obra, plano.id)) return [plano.id, plano.nome].filter(Boolean).join(" — ");
+      }
+    }
+    return "";
+  },
+
   /* O valor de cada obra no título é dividido entre o CC da obra e o do parceiro pelo padrão do cadastro. */
   conferirRateio(ccs, valor, ctx) {
     const distrato = this.ehDistrato(ccs, ctx);
@@ -1742,6 +1781,15 @@ const GerarPagamentoApp = {
       // Título só no CC da Moura Leite é 100% dela, sem rateio. Só no CC do parceiro, apenas distrato emitido até 31/12/2025.
       const temBase = o.linhas.some((l) => l.id === base);
       const soParceiro = parc && !temBase && !!parcTitulo;
+      const aplicouRateio = !!(temBase && parcTitulo && parcTitulo.pct > 0.009);
+      const planosObra = o.linhas.reduce((acc, l) => acc.concat(l.planos || []), []);
+      const exigeRateio = this.planoExigeRateio(o.linhas.map((l) => l.id).concat([base, parc].filter(Boolean)), planosObra);
+      if (exigeRateio && !aplicouRateio && !distratoAntigo) {
+        erroRateio = true;
+        o.linhas.forEach((l) => { l.ok = false; });
+        problemas.push(`Obra ${o.rotulo}: o plano ${exigeRateio} exige rateio e o título foi lançado sem rateio.`);
+        return;
+      }
       if (soParceiro && !distratoAntigo) {
         problemas.push(distrato
           ? `Obra ${o.rotulo}: distrato lançado só no CC do parceiro ${parc} com emissão ${emissao ? this.dataBr(emissao) : "não informada"}. Só distrato emitido até ${this.dataBr(this.DISTRATO_PARCEIRO_ATE)} pode ficar só no CC do parceiro.`
@@ -1859,7 +1907,7 @@ const GerarPagamentoApp = {
     }).concat(ausentes.map((l) => `<tr><td><strong>${this.esc(l.id)}</strong> <span class="gp-cc-pop-nome">${this.esc(l.nome || "")}</span></td>
         <td class="num">—</td><td class="num">${l.padrao != null ? this.pct(l.padrao) : "—"}</td><td>${status(l)}</td></tr>`)).join("");
     const pop = `<table class="gp-cc-pop-tab"><thead><tr><th>Centro de custo</th><th class="num">Rateio título</th><th class="num">Rateio parceria</th><th>Status</th></tr></thead><tbody>${linhas}</tbody></table>`;
-    const selo = `<span class="bchk ${resumo.cls}">${this.esc(resumo.tem)}</span><span class="bchk ${resumo.cls}">${this.esc(resumo.validacao)}</span>`;
+    const selo = `<span class="bchk ${resumo.cls}">${this.esc(resumo.texto)}</span>`;
     return `<span class="gp-cc-lista" title="${this.esc(resumo.dica)}" onmouseenter="GerarPagamentoApp.ccPopAbrir(this)" onmouseleave="GerarPagamentoApp.ccPopFechar()">${selo}<template>${pop}</template></span>`;
   },
 
@@ -1872,11 +1920,15 @@ const GerarPagamentoApp = {
       if (c && c.id && (c.rateio == null || this.num(c.rateio) > 0.009)) ids.add(String(c.id));
     });
     const temRateio = ids.size > 1;
-    const tem = temRateio ? "Com rateio" : "Sem rateio";
-    if (!conf) return { tem, validacao: "Não conferido", cls: "bchk-wait", dica: "O rateio ainda não foi conferido." };
+    if (conf && conf.ok === false) {
+      const dica = conf.problemas && conf.problemas.length ? conf.problemas.join("\n") : "Não validado.";
+      return { texto: "Não validado", cls: "bchk-erro", dica };
+    }
+    if (!temRateio) return { texto: "Não se aplica", cls: "bchk-info", dica: "Este título não tem rateio entre centros de custo." };
+    if (!conf) return { texto: "Não conferido", cls: "bchk-wait", dica: "O rateio ainda não foi conferido." };
     const validado = !!conf.ok;
-    const dica = conf.problemas && conf.problemas.length ? conf.problemas.join("\n") : (validado ? tem + " e validado." : tem + " e não validado.");
-    return { tem, validacao: validado ? "Validado ✓" : "Não validado", cls: validado ? "bchk-ok" : "bchk-erro", dica };
+    const dica = conf.problemas && conf.problemas.length ? conf.problemas.join("\n") : (validado ? "Validado." : "Não validado.");
+    return { texto: validado ? "Validado ✓" : "Não validado", cls: validado ? "bchk-ok" : "bchk-erro", dica };
   },
 
   ccPopAbrir(el) {

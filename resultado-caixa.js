@@ -12,6 +12,7 @@ const ResultadoCaixaApp = {
   anos: {},
   lendo: false,
   escala: "real",
+  agrupar: false,
   outrosAberto: false,
   dfcLinhas: [],
   dfcLendo: false,
@@ -69,12 +70,34 @@ const ResultadoCaixaApp = {
     return s;
   },
 
+  SIGLAS: {
+    BOTUCATU: "BTU",
+    AVARE: "AVR",
+    TAGUAI: "TAG",
+    ITATINGA: "ITA",
+    "CERQUEIRA CESAR": "CCS",
+    PARDINHO: "PAR",
+    PIRAJU: "PRJ",
+    FARTURA: "FAR",
+    ARACARIGUAMA: "ARA",
+    BOITUVA: "BOI"
+  },
+
   rotulo(id, nome, solto) {
     const partes = String(nome || "").split(/\s+-\s+/).map((p) => p.trim()).filter(Boolean);
-    let n = partes.length >= 3 && /^\d+$/.test(partes[0]) ? partes.slice(2).join(" - ") : (nome || id);
-    n = n.replace(/\s+MLDU$/i, "").trim();
+    let cidade = "";
+    let n = nome || id;
+    if (partes.length >= 2 && /^\d+$/.test(partes[0])) {
+      if (partes.length >= 3) {
+        cidade = partes[1];
+        n = partes.slice(2).join(" - ");
+      } else {
+        n = partes.slice(1).join(" - ");
+      }
+    }
+    n = String(n || "").replace(/\s+MLDU$/i, "").trim();
     if (!solto) n = n.replace(/\s*-\s*PARCERIA\b.*$/i, "").trim();
-    return this.nomeVisao(n || id);
+    return { nome: this.nomeVisao(n || id), cidade };
   },
 
   fold(s) {
@@ -83,8 +106,59 @@ const ResultadoCaixaApp = {
 
   nomeVisao(nome) {
     const f = this.fold(nome);
-    if (/^LIVIA( I{1,3}| [123])?$/.test(f)) return "CENTRAL PARQUE (BTU)";
+    if (f === "MLDU" || f === "CORPORATIVO") return "CORPORATIVO";
+    if (/^LIVIA( I{1,3}| [123])?$/.test(f)) return "CENTRAL PARQUE";
     return String(nome || "").trim();
+  },
+
+  siglaCidade(cidade) {
+    const f = this.fold(cidade);
+    if (!f) return "";
+    if (this.SIGLAS[f]) return this.SIGLAS[f];
+    const palavras = f.split(" ").filter(Boolean);
+    if (palavras.length >= 2) return palavras.map((w) => w.charAt(0)).join("").slice(0, 3);
+    return f.slice(0, 3);
+  },
+
+  distinguirCidades(rows) {
+    const porNome = {};
+    rows.forEach((r) => {
+      const k = this.fold(r.nome);
+      if (!porNome[k]) porNome[k] = {};
+      const cid = this.fold(r.cidade);
+      if (cid) porNome[k][cid] = r.cidade;
+    });
+    rows.forEach((r) => {
+      const cidades = Object.keys(porNome[this.fold(r.nome)] || {});
+      if (cidades.length > 1 && r.cidade) r.nome = r.nome + " (" + this.siglaCidade(r.cidade) + ")";
+    });
+    return rows;
+  },
+
+  customCc() {
+    try { return JSON.parse(localStorage.getItem("crm_centros_custo_custom") || "{}") || {}; }
+    catch (e) { return {}; }
+  },
+
+  pctMl(id) {
+    if (!this.agrupar) return 1;
+    const map = this.customCc();
+    const s = String(id || "").replace(/\D/g, "");
+    const base = this.grupoCc(s);
+    const pick = (k) => (k && (map[k] || map[String(Number(k))] || map[String(k)])) || null;
+    const c = pick(base) || pick(s) || {};
+    let p = Number(c.perc_ml) || 0;
+    if (!(p > 0)) {
+      const terr = Number(c.perc_terrenista) || 0;
+      if (terr > 0 && terr < 100) p = 100 - terr;
+    }
+    if (!(p > 0) && base.length >= 4) {
+      const irmao = pick(base.slice(0, -2) + "01");
+      const terr = irmao ? Number(irmao.perc_terrenista) || 0 : 0;
+      if (terr > 0 && terr < 100) p = 100 - terr;
+    }
+    if (!(p > 0)) p = 100;
+    return p / 100;
   },
 
   normCode(v) {
@@ -561,8 +635,7 @@ const ResultadoCaixaApp = {
         const valor = FC.signedAmount(node, a.categoryId, a.categoryName, a.amount, a.reducer, a.categoryType, a.mov);
         if (!valor) return;
         const ccId = String(a.costCenterId || "").replace(/\D/g, "");
-        const solto = !!this.SOLTOS[ccId];
-        const nome = this.rotulo(ccId, this.nomeCc(ccId, a.costCenterName), solto);
+        const nome = this.nomeCc(ccId, a.costCenterName);
         out.push({ ccId, nome, mes: mm, valor, node: node.id });
       });
     });
@@ -614,23 +687,26 @@ const ResultadoCaixaApp = {
     const extra = {};
     (this.dfcLinhas || []).forEach((l) => {
       const id = String(l.ccId || "");
-      let row = porNome[this.fold(l.nome)] || porId[id] || porId[this.grupoCc(id)];
+      let row = porId[id] || porId[this.grupoCc(id)] || porNome[this.fold(l.nome)];
       if (!row) {
-        const nome = l.nome || id || "Sem nome";
-        row = extra[this.fold(nome)];
+        const bruto = this.rotulo(id, l.nome || id, false);
+        const chave = this.fold(bruto.nome) + "|" + this.fold(bruto.cidade);
+        row = extra[chave];
         if (!row) {
-          row = extra[this.fold(nome)] = {
-            key: "dfc-" + this.fold(nome),
-            nome,
+          row = extra[chave] = {
+            key: "dfc-" + chave,
+            nome: bruto.nome,
+            cidade: bruto.cidade,
             ids: id ? [id] : [],
             mensal: { ant: 0, orc: 0, real: 0 },
             acum: { ant: 0, orc: 0, real: 0 }
           };
-          porNome[this.fold(nome)] = row;
+          porNome[this.fold(bruto.nome)] = row;
         }
       }
-      if (l.mes === mes) row.mensal.ant += l.valor;
-      if (l.mes >= 1 && l.mes <= mes) row.acum.ant += l.valor;
+      const fator = this.pctMl(id);
+      if (l.mes === mes) row.mensal.ant += l.valor * fator;
+      if (l.mes >= 1 && l.mes <= mes) row.acum.ant += l.valor * fator;
     });
     return rows.concat(Object.values(extra)).filter((r) => {
       const z = (b) => Math.abs(b.ant) + Math.abs(b.orc) + Math.abs(b.real);
@@ -656,20 +732,22 @@ const ResultadoCaixaApp = {
     const base = Object.keys(grupos).map((key) => {
       const g = grupos[key];
       const uniq = [...new Set(g.ids)];
-      const soma = (campo, ate) => uniq.reduce((s, id) => s + this.valor(lado, ano, id, mes, campo, ate), 0);
+      const rot = this.rotulo(key, g.nome, g.solto);
+      const soma = (campo, ate) => uniq.reduce((s, id) => s + this.valor(lado, ano, id, mes, campo, ate) * this.pctMl(id), 0);
       const rec = (ate) => ({ ant: 0, orc: soma("o", ate), real: soma("r", ate) });
-      return { key, nome: this.rotulo(key, g.nome, g.solto), ids: uniq, mensal: rec(false), acum: rec(true) };
+      return { key, nome: rot.nome, cidade: rot.cidade, ids: uniq, mensal: rec(false), acum: rec(true) };
     });
+    const comDfc = this.aplicarDfc(base, mes);
+    const distintos = this.distinguirCidades(comDfc);
     const fundidos = {};
-    base.forEach((r) => {
+    distintos.forEach((r) => {
       const nome = r.nome;
       const g = fundidos[this.fold(nome)];
       if (!g) { fundidos[this.fold(nome)] = r; return; }
       g.ids = g.ids.concat(r.ids);
-      ["mensal", "acum"].forEach((b) => ["orc", "real"].forEach((k) => { g[b][k] += r[b][k]; }));
+      ["mensal", "acum"].forEach((b) => ["ant", "orc", "real"].forEach((k) => { g[b][k] += r[b][k]; }));
     });
-    const rows = this.aplicarDfc(Object.values(fundidos), mes);
-    return { ano, ant, rows };
+    return { ano, ant, rows: Object.values(fundidos) };
   },
 
   destacar(rows) {
@@ -700,6 +778,11 @@ const ResultadoCaixaApp = {
 
   toggleOutros() {
     this.outrosAberto = !this.outrosAberto;
+    this.render();
+  },
+
+  toggleAgrupar() {
+    this.agrupar = !this.agrupar;
     this.render();
   },
 
@@ -750,7 +833,7 @@ const ResultadoCaixaApp = {
     const quem = this.nomesEmpresas();
     const uso = this.empresasUsadas();
     const nota = lado === "entradas"
-      ? "Orçado e realizado somam os Excel enviados. A coluna do ano anterior é o realizado do DFC dessas empresas, pelo nome do centro de custo. Livia, Livia I e Livia II aparecem como Central Parque (BTU). Os quatro maiores desvios positivos e os quatro negativos do acumulado ficam à vista; o restante abre em Outros."
+      ? "Orçado e realizado somam os Excel enviados. A coluna do ano anterior é o realizado do DFC dessas empresas, pelo nome do centro de custo. Livia, Livia I e Livia II aparecem como Central Parque. Empreendimentos com o mesmo nome ganham a sigla da cidade. MLDU aparece como Corporativo. Os quatro maiores desvios positivos e os quatro negativos do acumulado ficam à vista; o restante abre ao clicar em Outros." + (this.agrupar ? " Agrupado: cada valor está na participação da Moura Leite do centro de custo." : "")
       : "As saídas seguem as contas do DFC. Orçado e realizado somam os Excel. A coluna do ano anterior é o realizado do DFC das mesmas empresas. O valor aparece como saída (positivo). Gastar acima do orçado fica em vermelho. As contas de fora da lista principal abrem em Outros.";
     const avisoEmpresa = uso.faltou.length
       ? `<div class="rcx-erro">Não achei no Sienge a empresa destes arquivos: ${caixaEsc(uso.faltou.join(", "))}. O orçado entra na soma; o ano anterior delas fica de fora até o nome bater com o cadastro.</div>`
@@ -769,6 +852,9 @@ const ResultadoCaixaApp = {
             <button type="button" class="${realOn ? "" : "is-on"}" onclick="ResultadoCaixaApp.setEscala('milhoes')">Milhões</button>
           </div>
         </div>
+        ${lado === "entradas" ? `<div class="rcx-field">Participação
+          <button type="button" class="rcx-agrupar ${this.agrupar ? "is-on" : ""}" onclick="ResultadoCaixaApp.toggleAgrupar()" title="Aplica o percentual de participação da Moura Leite de cada centro de custo">${this.agrupar ? "Agrupado" : "Agrupar"}</button>
+        </div>` : ""}
         <div class="rcx-arqs">${this.chipsHtml() || `<span class="rcx-muted">Nenhum arquivo ainda. Dá para escolher vários de uma vez.</span>`}</div>
       </div>
       <p class="rcx-nota">${nota}${quem ? " Empresas: " + caixaEsc(quem) + "." : ""}</p>
@@ -893,11 +979,10 @@ const ResultadoCaixaApp = {
     const vista = this.destacar(pack.rows);
     const principais = vista.pos.concat(vista.neg).map((r) => this.linhaPronta(r, "", "", "", false)).join("");
     const outrosSoma = { mensal: this.somaBloco(vista.outros, "mensal"), acum: this.somaBloco(vista.outros, "acum") };
-    const chev = this.outrosAberto ? "chevron-down" : "chevron-right";
     const outros = vista.outros.length ? this.linhaPronta(
       { nome: "OUTROS", mensal: outrosSoma.mensal, acum: outrosSoma.acum },
       "rcx-outros",
-      `<i data-lucide="${chev}"></i> OUTROS`,
+      "OUTROS",
       "ResultadoCaixaApp.toggleOutros()",
       false
     ) + (this.outrosAberto ? vista.outros.map((r) => this.linhaPronta(r, "rcx-filho", "", "", false)).join("") : "") : "";
@@ -916,13 +1001,12 @@ const ResultadoCaixaApp = {
     const vivo = (r) => ["mensal", "acum"].some((b) => ["ant", "orc", "real"].some((k) => Math.abs(r[b][k]) > 0.5));
     const destaque = pack.rows.filter((r) => r.destaque);
     const miudos = pack.rows.filter((r) => !r.destaque && vivo(r));
-    const chev = this.outrosAberto ? "chevron-down" : "chevron-right";
     const outrosSoma = { mensal: this.somaBloco(miudos, "mensal"), acum: this.somaBloco(miudos, "acum") };
     const linhas = destaque.map((r) => this.linhaPronta(r, "", "", "", true)).join("");
     const outros = miudos.length ? this.linhaPronta(
       { nome: "OUTROS", mensal: outrosSoma.mensal, acum: outrosSoma.acum },
       "rcx-outros",
-      `<i data-lucide="${chev}"></i> OUTROS`,
+      "OUTROS",
       "ResultadoCaixaApp.toggleOutros()",
       true
     ) + (this.outrosAberto ? miudos.map((r) => this.linhaPronta(r, "rcx-filho", "", "", true)).join("") : "") : "";

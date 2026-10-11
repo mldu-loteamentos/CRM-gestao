@@ -326,6 +326,8 @@ body {
   border-radius: var(--border-radius-md);
   border: 1px solid var(--glass-border);
   box-shadow: var(--shadow-sm);
+  position: relative;
+  z-index: 400;
 }
 
 .page-title h1 {
@@ -3163,7 +3165,7 @@ circle.donut-segment {
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   box-shadow: 0 16px 40px rgba(15, 23, 42, 0.16);
-  z-index: 80;
+  z-index: 5;
   padding: 12px;
 }
 .teste-conta-menu[hidden] { display: none !important; }
@@ -3679,6 +3681,8 @@ circle.donut-segment {
 .rcx-escala { display: inline-flex; height: 38px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; background: #fff; }
 .rcx-escala button { border: 0; background: transparent; padding: 0 12px; font-weight: 700; font-size: 0.78rem; color: #64748b; cursor: pointer; }
 .rcx-escala button.is-on { background: #105436; color: #fff; }
+.rcx-agrupar { height: 38px; padding: 0 14px; border-radius: 8px; border: 1px solid #105436; background: #fff; color: #105436; font-weight: 700; font-size: 0.78rem; cursor: pointer; }
+.rcx-agrupar.is-on { background: #105436; color: #fff; }
 .rcx-arqs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 38px; }
 .rcx-arq { font-size: 0.75rem; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 999px; padding: 4px 10px; }
 .rcx-arq button { border: 0; background: transparent; color: #b91c1c; font-weight: 700; cursor: pointer; }
@@ -5269,6 +5273,16 @@ circle.donut-segment {
 .quitacao-kpi--vp {
   background: #f3f8f5;
   border-color: #b7d4c4;
+}
+#tab-quitacao.quitacao-so-vp .crm-card > :not(.quitacao-kpis) {
+  display: none !important;
+}
+#tab-quitacao.quitacao-so-vp .quitacao-kpi:not(.quitacao-kpi--vp) {
+  display: none !important;
+}
+#tab-quitacao.quitacao-so-vp .quitacao-kpis {
+  grid-template-columns: minmax(200px, 280px);
+  justify-content: start;
 }
 .quitacao-kpi--vp span { color: #105436; }
 .quitacao-kpi--disc strong { color: #0f766e; }
@@ -8496,6 +8510,8 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .ml-tab:disabled, .ml-tab.is-locked { opacity: 0.45; cursor: not-allowed; color: #64748b; border-bottom-color: transparent; }
 .ml-tab .ml-tab-count { font-size: 0.7rem; font-weight: 700; background: #e2e8f0; color: #475569; border-radius: 999px; padding: 1px 7px; }
 .ml-tab.is-active .ml-tab-count { background: #e7f6ee; color: var(--color-primary, #105436); }
+.ficha-tabs { margin-top: 4px; }
+.ficha-contrato-tabs { margin-top: 8px; }
 
 /* Segurança · Auditoria do Login Sienge */
 .alog-page { padding: 16px 18px 28px; display: flex; flex-direction: column; gap: 12px; }
@@ -8569,9 +8585,19 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .cc-parceiros input { width: 16px; height: 16px; accent-color: #105436; margin: 0; }
 .cc-atualizar { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px; font-weight: 600; white-space: nowrap; }
 .cc-scroll { overflow: auto; max-height: calc(100vh - 210px); border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
-.cc-table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 0.78rem; }
-.cc-table thead th { position: sticky; top: 0; z-index: 2; background: #1b8253; color: #fff; padding: 8px 10px; text-align: left; font-weight: 700; white-space: nowrap; }
-.cc-table td { padding: 5px 10px; border-bottom: 1px solid #e8eee9; vertical-align: middle; white-space: nowrap; color: #1c2e24; }
+.cc-table { width: 100%; min-width: 0; table-layout: fixed; border-collapse: collapse; font-size: 0.72rem; }
+.cc-table col.cc-c-emp { width: 52px; }
+.cc-table col.cc-c-id { width: 58px; }
+.cc-table col.cc-c-nome { width: 22%; }
+.cc-table col.cc-c-tipo { width: 11%; }
+.cc-table col.cc-c-vgv { width: 108px; }
+.cc-table col.cc-c-pre { width: 64px; }
+.cc-table col.cc-c-pct { width: 52px; }
+.cc-table col.cc-c-conta { width: 16%; }
+.cc-table col.cc-c-acao { width: 42px; }
+.cc-table thead th { position: sticky; top: 0; z-index: 2; background: #1b8253; color: #fff; padding: 6px; text-align: left; font-weight: 700; white-space: normal; line-height: 1.2; }
+.cc-table td { padding: 4px 6px; border-bottom: 1px solid #e8eee9; vertical-align: middle; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #1c2e24; }
+.cc-table td.cc-nome, .cc-table td.cc-conta, .cc-table td.cc-sem-conta { white-space: normal; }
 .cc-table tbody tr:nth-child(even) { background: #f7faf8; }
 .cc-table tbody tr:hover { background: #e7f6ee; }
 .cc-table tbody tr:hover td { color: #0f3d27; }

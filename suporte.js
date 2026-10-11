@@ -303,8 +303,8 @@
       return { modulo: "financeiro", subitem: "distrato", aba: "" };
     }
     if (isVisible(document.getElementById("view-customer-details"))) {
-      const ficha = document.querySelector(".ficha-tab-btn.active");
-      const cust = document.querySelector(".customer-tabs-menu .customer-tab-btn.active");
+      const ficha = document.querySelector(".ficha-tabs .ml-tab.is-active");
+      const cust = document.querySelector(".ficha-contrato-tabs .ml-tab.is-active");
       let aba = "";
       if (cust && cust.id === "btn-visualizar-extrato-ativo") aba = "extrato-cliente";
       else if (cust && cust.getAttribute("data-target")) aba = cust.getAttribute("data-target");

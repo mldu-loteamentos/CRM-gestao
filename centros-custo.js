@@ -74,6 +74,10 @@ const CentrosCustoApp = {
                   customFieldsChanged = true;
               }
           }
+          if (this.isParceiro(cc) && custom.imposto_pago_empresa) {
+              custom.imposto_pago_empresa = false;
+              customFieldsChanged = true;
+          }
       });
       
       if (customFieldsChanged) {
@@ -169,7 +173,7 @@ const CentrosCustoApp = {
     }
 
     const impostoPagoEl = document.getElementById(`edit-imposto-pago-${id}`);
-    if (impostoPagoEl) custom.imposto_pago_empresa = impostoPagoEl.checked;
+    if (impostoPagoEl) custom.imposto_pago_empresa = this.isParceiro(cc) ? false : impostoPagoEl.checked;
 
     const suspensivaAtivaEl = document.getElementById(`edit-suspensiva-ativa-${id}`);
     if (suspensivaAtivaEl) custom.clausula_suspensiva_ativa = suspensivaAtivaEl.checked;
@@ -727,9 +731,10 @@ const CentrosCustoApp = {
               O percentual aqui é a participação ${par.papel === 'ml' ? 'da Moura Leite' : 'do terrenista'} na obra. A outra parte fica no CC ${this.escHtml(parRotulo)} e é atualizada junto ao salvar, para a obra fechar 100%.
             </p>` : ''}
             <div style="display: flex; align-items: center; gap: 8px;">
-                <input type="checkbox" id="edit-imposto-pago-${id}" ${imposto_pago ? 'checked' : ''} style="width: 16px; height: 16px;">
+                <input type="checkbox" id="edit-imposto-pago-${id}" ${parceiro ? "" : (imposto_pago ? "checked" : "")} ${parceiro ? "disabled" : ""} style="width: 16px; height: 16px;">
                 <label for="edit-imposto-pago-${id}" style="font-weight: bold; font-size: 0.85rem; cursor: pointer;">Imposto pago pela empresa?</label>
             </div>
+            ${parceiro ? `<p style="margin:-12px 0 0; font-size:0.78rem; color:#64748b;">Centro de custo de parceiro: o imposto fica por conta dele e não entra no recolhimento da empresa.</p>` : ""}
 
             <div id="edit-incorp-panel-${id}" style="display:${showIncorp ? 'block' : 'none'}; padding:14px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px;">
               <h4 style="margin:0 0 6px 0; color:#14532d; font-size:0.9rem;">Incorporação</h4>
@@ -1087,18 +1092,22 @@ const CentrosCustoApp = {
 
       <div class="cc-scroll">
         <table class="cc-table">
+          <colgroup>
+            <col class="cc-c-emp"><col class="cc-c-id"><col class="cc-c-nome"><col class="cc-c-tipo"><col class="cc-c-vgv">
+            <col class="cc-c-pre"><col class="cc-c-pct"><col class="cc-c-pct"><col class="cc-c-conta"><col class="cc-c-acao">
+          </colgroup>
           <thead>
             <tr>
-              <th>ID Empresa</th>
-              <th>ID CC</th>
-              <th>Centro de Custo</th>
+              <th>Emp.</th>
+              <th>ID</th>
+              <th>Centro de custo</th>
               <th>Tipo</th>
-              <th class="is-right">Valor VGV</th>
-              <th class="is-center">ID Preâmbulo</th>
-              <th class="is-center">% Moura Leite</th>
-              <th class="is-center">% Terrenista</th>
-              <th>Conta parceria</th>
-              <th class="is-center">Ações</th>
+              <th class="is-right">VGV</th>
+              <th class="is-center">Preâmb.</th>
+              <th class="is-center">% ML</th>
+              <th class="is-center">% Terr.</th>
+              <th>Conta</th>
+              <th class="is-center"></th>
             </tr>
           </thead>
           <tbody>
@@ -1132,7 +1141,7 @@ const CentrosCustoApp = {
         <tr id="cc-row-${cc.id}">
           <td>${this.escHtml(cc.idCompany || cc.companyId || "-")}</td>
           <td><strong>${this.escHtml(cc.id)}</strong></td>
-          <td>${this.escHtml(cc.name || "")}</td>
+          <td class="cc-nome" title="${this.escHtml(cc.name || "")}">${this.escHtml(cc.name || "")}</td>
           <td>${tipoTxt}</td>
           <td id="cc-vgv-${cc.id}" class="is-right cc-vgv">${vgv}</td>
           <td class="is-center">${this.escHtml(preambulo)}</td>
