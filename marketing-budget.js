@@ -15,6 +15,7 @@ const MarketingBudgetApp = {
   state: {
     costCenters: [],
     ccId: "",
+    verbas: {},
     startDate: "",
     endDate: "",
     loading: false,
@@ -31,6 +32,10 @@ const MarketingBudgetApp = {
     distratos: [],
     eventos: [],
     filtroGasto: "todos",
+    buscaCredor: "",
+    filtroPlano: "",
+    sortGasto: "data",
+    sortGastoDir: "desc",
     ccsCfg: [],
     aba: "budget",
     ctrEscopo: "periodo",
@@ -117,6 +122,11 @@ const MarketingBudgetApp = {
     return (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   },
 
+  /** Número no padrão brasileiro, sem o símbolo R$. */
+  valorLista(v) {
+    return (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  },
+
   moneyShort(v) {
     const n = Number(v) || 0;
     const a = Math.abs(n);
@@ -135,7 +145,9 @@ const MarketingBudgetApp = {
   },
 
   ccLabel(cc) {
-    return cc ? `${cc.id} — ${cc.name || cc.nome || ""}` : "";
+    if (!cc) return "";
+    const nome = String(cc.name || cc.nome || "").trim().toUpperCase();
+    return nome ? `${cc.id} - ${nome}` : String(cc.id);
   },
 
   ccAtual() {
@@ -183,12 +195,75 @@ const MarketingBudgetApp = {
     return lista.filter((c) => unidades.has(String(c.id)) || carteira.has(String(c.id)));
   },
 
-  empreendimentoOptions(selId) {
+  temCadastroVerba(cfg) {
+    if (!cfg || typeof cfg !== "object") return false;
+    if (cfg.pct != null && cfg.pct !== "" && Number.isFinite(Number(cfg.pct))) return true;
+    return Array.isArray(cfg.ccs) && cfg.ccs.length > 0;
+  },
+
+  idsComVerba() {
+    const ids = new Set();
+    const add = (map) => {
+      Object.keys(map || {}).forEach((k) => {
+        if (k === this.CAT_DOC) return;
+        if (this.temCadastroVerba(map[k])) ids.add(String(k));
+      });
+    };
+    add(this.state.verbas);
+    add(this.configLocal());
+    if (window.MarketingConfigApp && MarketingConfigApp.state) add(MarketingConfigApp.state.lista);
+    return ids;
+  },
+
+  async carregarVerbas() {
+    const lista = {};
+    const fc = window.firebaseCollections;
+    if (window.firebaseDb && fc && fc.getDocs) {
+      try {
+        const snap = await fc.getDocs(fc.collection(window.firebaseDb, this.CONFIG_COLLECTION));
+        snap.forEach((d) => { if (d.id !== this.CAT_DOC) lista[d.id] = d.data() || {}; });
+      } catch (e) {
+        console.warn("[Budget] verbas", e);
+      }
+    }
+    const local = this.configLocal();
+    Object.keys(local).forEach((k) => {
+      if (k !== this.CAT_DOC && !lista[k]) lista[k] = local[k];
+    });
+    this.state.verbas = lista;
+  },
+
+  empreendimentoOptions(selId, opts) {
     const sel = String(selId || "");
-    const lista = this.empreendimentos();
+    let lista = this.empreendimentos();
+    if (opts && opts.somenteVerba) {
+      const ids = this.idsComVerba();
+      lista = lista.filter((c) => ids.has(String(c.id)));
+    }
     const atual = sel && !lista.some((c) => String(c.id) === sel) ? this.state.costCenters.find((c) => String(c.id) === sel) : null;
-    return `<option value="">Selecione o empreendimento</option>`
+    const vazio = opts && opts.somenteVerba ? "Nenhum empreendimento com verba cadastrada" : "Selecione o empreendimento";
+    return `<option value="">${vazio}</option>`
       + (atual ? [atual] : []).concat(lista).map((c) => `<option value="${this.esc(c.id)}" ${String(c.id) === sel ? "selected" : ""}>${this.esc(this.ccLabel(c))}</option>`).join("");
+  },
+
+  lotesDoEmpreendimento() {
+    const id = String(this.state.ccId || "");
+    if (!id) return { total: 0, vendidos: 0, faltam: 0 };
+    const E = window.EstoqueComercialApp;
+    let units = ((E && E.state && E.state.units) || []).filter((u) => String(u.enterpriseId) === id);
+    if (!units.length) {
+      try {
+        const raw = JSON.parse(localStorage.getItem("crm_estoque_posicao_v1") || "null");
+        units = ((raw && (raw.units || (raw.data && raw.data.units))) || []).filter((u) => String(u.enterpriseId) === id);
+      } catch (e) { units = []; }
+    }
+    const vendido = (u) => {
+      if (E && typeof E.isSoldUnit === "function") return E.isSoldUnit(u);
+      const code = String((u && u.commercialStock) || "").toUpperCase();
+      return ["V", "O", "G", "P", "L"].includes(code) || !!(u && u.contractId);
+    };
+    const vendidos = units.filter(vendido).length;
+    return { total: units.length, vendidos, faltam: Math.max(0, units.length - vendidos) };
   },
 
   /** Sem estoque nem carteira carregados nesta sessão, lê do Firebase quais empreendimentos têm unidades. */
@@ -234,6 +309,7 @@ const MarketingBudgetApp = {
       s.endDate = d.getFullYear() + "-12-31";
     }
     await this.carregarCcs();
+    await this.carregarVerbas();
     this.render();
     if (await this.carregarUnidades()) this.render();
   },
@@ -310,7 +386,9 @@ const MarketingBudgetApp = {
     return String(text || "")
       .replace(/\s*\(\s*\d+\s+de\s+\d+\s*\)/gi, "")
       .replace(/\s*·\s*período\s+\d+\s+de\s+\d+/gi, "")
+      .replace(/\s*·\s*centro\s+[\d.\-]+/gi, "")
       .replace(/\s+\d+\s+de\s+\d+/gi, "")
+      .replace(/\d+/g, "")
       .replace(/\s*·\s*(·\s*)+/g, " · ")
       .replace(/\s{2,}/g, " ")
       .trim();
@@ -342,6 +420,8 @@ const MarketingBudgetApp = {
     s.progress = "Lendo o cadastro da obra (VGV)…";
     s.progressRatio = 0.06;
     s.rows = [];
+    s.buscaCredor = "";
+    s.filtroPlano = "";
     s.vendas = [];
     s.distratos = [];
     s.adimpl = { status: "", porVenda: {} };
@@ -370,10 +450,9 @@ const MarketingBudgetApp = {
       const bills = [];
       for (let i = 0; i < s.ccsCfg.length; i++) {
         const alvo = s.costCenters.find((c) => String(c.id) === s.ccsCfg[i]) || { id: s.ccsCfg[i] };
-        const rotulo = s.ccsCfg.length > 1 ? ` · centro ${alvo.id}` : "";
-        const parte = await this.buscarTitulos(alvo, gen, rotulo, (idx) => {
+        const parte = await this.buscarTitulos(alvo, gen, "", (idx) => {
           const passo = i * faixas.length + idx + 1;
-          this.setProgress("Buscando os títulos a pagar" + rotulo + "…", 0.16 + 0.72 * (passo / totalPassos));
+          this.setProgress("Buscando os títulos a pagar…", 0.16 + 0.72 * (passo / totalPassos));
         });
         if (gen !== s.gen) return;
         bills.push.apply(bills, parte);
@@ -459,7 +538,7 @@ const MarketingBudgetApp = {
       + "&selectionType=D&correctionIndexerId=0&correctionDate=2023-01-01&withAuthorizations=false&withBankMovements=true"
       + "&costCentersId=" + encodeURIComponent(cc.id)
       + (companyId ? "&companyId=" + encodeURIComponent(companyId) : "");
-    const fase = "Buscando os títulos a pagar" + (rotulo || " do empreendimento") + "…";
+    const fase = "Buscando os títulos a pagar…";
     api.noteProgress = () => { if (gen === s.gen) this.setProgress(fase); };
     const companyId = String(cc.idCompany != null ? cc.idCompany : (cc.companyId != null ? cc.companyId : ""));
     const faixas = typeof siengeSplitDateRange === "function" ? siengeSplitDateRange(s.startDate, s.endDate) : [{ start: s.startDate, end: s.endDate }];
@@ -875,8 +954,108 @@ const MarketingBudgetApp = {
 
   setFiltroGasto(id) {
     this.state.filtroGasto = this.state.filtroGasto === id && id !== "todos" ? "todos" : id;
+    this.pintarGastos();
+  },
+
+  setBuscaCredor(v) {
+    this.state.buscaCredor = v;
+    this.pintarGastosCorpo();
+  },
+
+  setFiltroPlano(id) {
+    this.state.filtroPlano = id || "";
+    this.pintarGastos();
+  },
+
+  ordenarGasto(col) {
+    const s = this.state;
+    if (s.sortGasto === col) s.sortGastoDir = s.sortGastoDir === "asc" ? "desc" : "asc";
+    else {
+      s.sortGasto = col;
+      s.sortGastoDir = col === "plano" ? "asc" : "desc";
+    }
+    this.pintarGastos();
+  },
+
+  pintarGastos() {
     const box = document.getElementById("mkb-gastos");
-    if (box) box.innerHTML = this.gastosHtml(this.resumo());
+    if (!box) return;
+    box.innerHTML = this.gastosHtml(this.resumo());
+    if (window.lucide) lucide.createIcons();
+  },
+
+  pintarGastosCorpo() {
+    const body = document.getElementById("mkb-gastos-body");
+    const sel = document.getElementById("mkb-sel-val");
+    if (!body || !sel) { this.pintarGastos(); return; }
+    const view = this.gastosView(this.resumo());
+    body.innerHTML = this.gastosLinhas(view.lista);
+    sel.innerHTML = this.gastosSelecaoHtml(view.lista);
+  },
+
+  gastosView(r) {
+    const s = this.state;
+    const base = s.filtroGasto === "todos" ? r.rows : r.rows.filter((x) => x.status === s.filtroGasto);
+    const planos = new Map();
+    base.forEach((x) => { if (!planos.has(String(x.catId))) planos.set(String(x.catId), x.catNome || "Sem plano financeiro"); });
+    const q = String(s.buscaCredor || "").trim().toLowerCase();
+    let lista = base;
+    if (q) lista = lista.filter((x) => String(x.credor || "").toLowerCase().includes(q));
+    if (s.filtroPlano) lista = lista.filter((x) => String(x.catId) === String(s.filtroPlano));
+    const dir = s.sortGastoDir === "asc" ? 1 : -1;
+    const campo = s.sortGasto === "plano" ? "catNome" : "data";
+    lista = lista.slice().sort((a, b) => {
+      const c = String(a[campo] || "").localeCompare(String(b[campo] || ""), "pt-BR", { numeric: true, sensitivity: "base" });
+      return c * dir;
+    });
+    return { lista, planos: [...planos.entries()].sort((a, b) => a[1].localeCompare(b[1], "pt-BR", { sensitivity: "base" })) };
+  },
+
+  gastosSelecaoHtml(lista) {
+    const total = lista.reduce((t, x) => t + (Number(x.valor) || 0), 0);
+    const n = lista.length;
+    return `<span>Seleção</span><strong>${this.valorLista(total)}</strong><small>${n.toLocaleString("pt-BR")} título${n === 1 ? "" : "s"}</small>`;
+  },
+
+  gastosLinhas(lista) {
+    const s = this.state;
+    const nomes = { realizado: "Realizado", comprometido: "Comprometido", previsao: "Previsão" };
+    if (!lista.length) {
+      const vazio = s.buscaCredor || s.filtroPlano ? "com esse filtro" : (s.filtroGasto === "todos" ? "no período" : "nesta situação");
+      return `<tr><td colspan="7" class="mkb-vazio">Nenhum gasto ${vazio}.</td></tr>`;
+    }
+    return lista.map((x) => `<tr class="mkb-click" onclick="MarketingBudgetApp.abrirDespesa(${x.idx})" title="Clique para ver o resumo do título">
+        <td>${this.dataBr(x.data)}</td>
+        <td><span class="mkb-st mkb-st-${x.status}">${nomes[x.status]}</span></td>
+        <td><strong>${this.esc(x.titulo)}</strong>${x.parcela ? `<span class="mkb-muted"> / ${this.esc(x.parcela)}</span>` : ""}</td>
+        <td title="${this.esc(x.credor)}">${this.esc(x.credor)}</td>
+        <td>${this.esc(x.documento || "—")}</td>
+        <td title="${this.esc(x.catNome)}">${this.esc(x.catNome)}</td>
+        <td style="text-align:right;">${this.valorLista(x.valor)}</td>
+      </tr>`).join("");
+  },
+
+  exportarGastos() {
+    if (typeof XLSX === "undefined") {
+      alert("A biblioteca XLSX não foi carregada. Atualize a página e tente novamente.");
+      return;
+    }
+    const nomes = { realizado: "Realizado", comprometido: "Comprometido", previsao: "Previsão" };
+    const lista = this.gastosView(this.resumo()).lista;
+    const aoa = [["Data", "Situação", "Título", "Parcela", "Credor", "Documento", "Plano financeiro", "Valor"]];
+    lista.forEach((x) => aoa.push([
+      this.dataBr(x.data), nomes[x.status] || x.status, x.titulo, x.parcela || "",
+      x.credor || "", x.documento || "", x.catNome || "", Number(x.valor) || 0
+    ]));
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    for (let i = 1; i < aoa.length; i++) {
+      const cell = ws[XLSX.utils.encode_cell({ r: i, c: 7 })];
+      if (cell) cell.z = "#,##0.00";
+    }
+    ws["!cols"] = [{ wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 36 }, { wch: 16 }, { wch: 36 }, { wch: 14 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Títulos");
+    XLSX.writeFile(wb, "budget_titulos_" + new Date().toISOString().slice(0, 10) + ".xlsx");
   },
 
   /* ---------- render ---------- */
@@ -898,24 +1077,30 @@ const MarketingBudgetApp = {
     const nomes = { realizado: "Realizado", comprometido: "Comprometido", previsao: "Previsão" };
     const cont = { todos: r.rows.length, realizado: 0, comprometido: 0, previsao: 0 };
     r.rows.forEach((x) => { cont[x.status] += 1; });
-    const lista = s.filtroGasto === "todos" ? r.rows : r.rows.filter((x) => x.status === s.filtroGasto);
+    const view = this.gastosView(r);
     const chips = ["todos", "realizado", "comprometido", "previsao"].map((id) => `<button type="button" class="mkb-chip${s.filtroGasto === id ? " is-on" : ""}" onclick="MarketingBudgetApp.setFiltroGasto('${id}')">${id === "todos" ? "Todos" : nomes[id]} <b>${cont[id]}</b></button>`).join("");
-    const linhas = lista.length ? lista.map((x) => `<tr class="mkb-click" onclick="MarketingBudgetApp.abrirDespesa(${x.idx})" title="Clique para ver o resumo do título">
-        <td>${this.dataBr(x.data)}</td>
-        <td><span class="mkb-st mkb-st-${x.status}">${nomes[x.status]}</span></td>
-        <td><strong>${this.esc(x.titulo)}</strong>${x.parcela ? `<span class="mkb-muted"> / ${this.esc(x.parcela)}</span>` : ""}</td>
-        <td title="${this.esc(x.credor)}">${this.esc(x.credor)}</td>
-        <td>${this.esc(x.documento || "—")}</td>
-        <td>${this.esc(x.ccId || "—")}</td>
-        <td title="${this.esc(x.catNome)}">${this.esc(x.catNome)}</td>
-        <td style="text-align:right;">${this.money(x.valor)}</td>
-      </tr>`).join("")
-      : `<tr><td colspan="8" class="mkb-vazio">Nenhum gasto ${s.filtroGasto === "todos" ? "no período" : "nesta situação"}.</td></tr>`;
-    return `<div class="mkb-chips">${chips}</div>
+    const thSort = (col, rotulo, direita) => `<th onclick="MarketingBudgetApp.ordenarGasto('${col}')" style="cursor:pointer;user-select:none;${direita ? "text-align:right;" : ""}">${rotulo} <i data-lucide="chevrons-up-down" style="width:11px;vertical-align:middle;"></i></th>`;
+    const planos = view.planos.some(([id]) => String(id) === String(s.filtroPlano)) || !s.filtroPlano
+      ? view.planos
+      : view.planos.concat([[s.filtroPlano, s.filtroPlano]]);
+    return `<div class="mkb-gastos-bar">
+      <div class="mkb-chips">${chips}</div>
+      <input id="mkb-credor" class="mkb-busca" type="search" placeholder="Credor" value="${this.esc(s.buscaCredor)}" oninput="MarketingBudgetApp.setBuscaCredor(this.value)">
+      <select id="mkb-plano" class="mkb-plano" onchange="MarketingBudgetApp.setFiltroPlano(this.value)">
+        <option value="">Plano financeiro</option>
+        ${planos.map(([id, nome]) => `<option value="${this.esc(id)}"${String(s.filtroPlano) === String(id) ? " selected" : ""}>${this.esc(nome)}</option>`).join("")}
+      </select>
+      <div class="mkb-gastos-tools">
+        <div class="mkb-sel-val" id="mkb-sel-val">${this.gastosSelecaoHtml(view.lista)}</div>
+        <button type="button" class="btn btn-excel" onclick="MarketingBudgetApp.exportarGastos()" title="Exportar tabela atual para Excel">
+          <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
+        </button>
+      </div>
+    </div>
       <div class="mkb-tablewrap"><table class="mkb-table">
-        <colgroup><col style="width:9%"><col style="width:11%"><col style="width:9%"><col style="width:20%"><col style="width:10%"><col style="width:8%"><col style="width:20%"><col style="width:13%"></colgroup>
-        <thead><tr><th>Data</th><th>Situação</th><th>Título</th><th>Credor</th><th>Documento</th><th>Centro de custo</th><th>Plano financeiro</th><th style="text-align:right;">Valor</th></tr></thead>
-        <tbody>${linhas}</tbody>
+        <colgroup><col style="width:10%"><col style="width:12%"><col style="width:12%"><col style="width:22%"><col style="width:12%"><col style="width:20%"><col style="width:12%"></colgroup>
+        <thead><tr>${thSort("data", "Data")}<th>Situação</th><th>Título</th><th>Credor</th><th>Documento</th>${thSort("plano", "Plano financeiro")}<th style="text-align:right;">Valor</th></tr></thead>
+        <tbody id="mkb-gastos-body">${this.gastosLinhas(view.lista)}</tbody>
       </table></div>`;
   },
 
@@ -1111,10 +1296,10 @@ const MarketingBudgetApp = {
         <div id="mkb-gastos">${this.gastosHtml(r)}</div>
       </div>`;
     const vendas = `
-      <div class="mkb-kpis">
+      <div class="mkb-kpis mkb-kpis-3">
         ${this.kpi("Unidades vendidas", r.liquidas.toLocaleString("pt-BR"), `${r.brutas} contratos emitidos · ${r.distr} distratados no período`, "#6366f1")}
         ${this.kpi("Custo por unidade vendida", r.cac != null ? this.money(r.cac) : "—", "Só o que já foi pago de marketing, dividido pelas unidades", "#105436")}
-        ${this.kpi("Custo por unidade com o em aberto", r.cacTotal != null ? this.money(r.cacTotal) : "—", "Pago + comprometido, dividido pelas unidades", "#f37021")}
+        ${this.kpi("Custo por unidade com o em aberto", r.cacTotal != null ? this.money(r.cacTotal) : "—", "Marketing já pago e o que ainda está comprometido, dividido pelas unidades vendidas", "#f37021")}
       </div>
       <div class="mkb-card mkb-chart-full"><div class="mkb-card-h"><h3>Vendas e custo por unidade</h3><small>Quantas unidades venderam em cada mês e quanto de marketing cada uma consumiu</small></div><div class="mkb-canvas"><canvas id="mkb-ch-vendas"></canvas></div></div>
       <div class="mkb-card">
@@ -1213,12 +1398,11 @@ const MarketingBudgetApp = {
     if (!L.length) return `<div class="mkb-card">${escopo}<p class="mkb-vazio" style="margin:12px 0 0;">Nenhum contrato ativo com saldo a pagar ${todos ? "neste empreendimento" : "entre as vendas do período"}.</p></div>`;
     const emDia = L.filter((c) => c.pag.status === "adimplente");
     const atraso = L.filter((c) => c.pag.status === "inadimplente");
-    const devEntrada = L.filter((c) => c.pag.entrada && c.pag.entrada.vencida > 0.009);
-    const semEntrada = L.filter((c) => !(c.pag.entrada && c.pag.entrada.tem)).length;
     const risco = L.filter((c) => this.riscoDe(c).length)
       .sort((x, y) => (this.riscoDe(y).length - this.riscoDe(x).length) || ((y.pag.dias || 0) - (x.pag.dias || 0)));
-    const emRisco = risco.reduce((t, c) => t + (Number(c.pag.aberto) || 0), 0);
     const vencido = atraso.reduce((t, c) => t + (Number(c.pag.vencido) || 0), 0);
+    const lotes = this.lotesDoEmpreendimento();
+    const pctLotes = lotes.total ? Math.round((lotes.vendidos / lotes.total) * 1000) / 10 : 0;
     const tag = (m) => m === "nada" ? `<span class="mkb-st mkb-st-cancel">Não pagou nada</span>` : `<span class="mkb-st mkb-st-comprometido">Devendo a entrada</span>`;
     const linhas = risco.map((c) => `<tr>
         <td><strong>${this.esc(c.numero)}</strong></td>
@@ -1228,7 +1412,7 @@ const MarketingBudgetApp = {
         <td style="text-align:right;">${c.pag.pctPago.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</td>
         <td>${c.pag.entrada && c.pag.entrada.vencida > 0.009 ? `<span class="mkb-atraso">${this.money(c.pag.entrada.vencida)} <small>desde ${this.dataBr(c.pag.entrada.desde)}</small></span>` : this.esc(this.situacaoEntrada(c.pag))}</td>
         <td>${this.atrasoHtml({ id: c.id, situacao: "", pagDireto: c.pag })}</td>
-        <td class="mkb-tags">${this.riscoDe(c).map(tag).join(" ")}</td>
+        <td class="mkb-motivo">${this.riscoDe(c).map(tag).join(" ")}</td>
       </tr>`).join("");
     const qtdDistrato = risco.length.toLocaleString("pt-BR");
     const pagamento = `
@@ -1236,6 +1420,8 @@ const MarketingBudgetApp = {
         ${this.kpi("Contratos ativos", L.length.toLocaleString("pt-BR"), todos ? "Títulos a receber ainda em aberto neste empreendimento" : "Vendas do período que ainda têm saldo", "#6366f1")}
         ${this.kpi("Em dia", this.pct(emDia.length, L.length), `${emDia.length} contrato(s) sem parcela vencida`, "#105436")}
         ${this.kpi("Em atraso", this.pct(atraso.length, L.length), `${atraso.length} contrato(s) · ${this.money(vencido)} já vencido`, atraso.length ? "#b91c1c" : "#105436")}
+        ${this.kpi("Lotes vendidos", lotes.total ? lotes.vendidos.toLocaleString("pt-BR") : "—", lotes.total ? `${lotes.faltam.toLocaleString("pt-BR")} faltam · ${lotes.total.toLocaleString("pt-BR")} no empreendimento` : "Estoque deste empreendimento ainda não foi carregado", "#6366f1",
+          lotes.total ? `<div class="mkb-bar" title="${lotes.vendidos} vendidos · ${lotes.faltam} faltam"><i style="width:${pctLotes}%;background:#6366f1;"></i></div>` : "")}
       </div>
       <div class="mkb-charts mkb-charts-3">
         <div class="mkb-card"><div class="mkb-card-h"><h3>Em dia e em atraso</h3><small>Dos contratos ativos, quantos pagam no prazo</small></div><div class="mkb-canvas mkb-canvas-curto"><canvas id="mkb-ch-ctr-dia"></canvas></div></div>
@@ -1243,14 +1429,10 @@ const MarketingBudgetApp = {
         <div class="mkb-card"><div class="mkb-card-h"><h3>Há quanto tempo está vencido</h3><small>Conta a partir da parcela vencida mais antiga de cada contrato</small></div><div class="mkb-canvas mkb-canvas-curto"><canvas id="mkb-ch-ctr-atraso"></canvas></div></div>
       </div>`;
     const distrato = `
-      <div class="mkb-kpis">
-        ${this.kpi("Entrada vencida", devEntrada.length.toLocaleString("pt-BR"), this.pct(devEntrada.length, L.length) + " dos ativos" + (semEntrada ? ` · ${semEntrada} sem parcela de entrada no título` : ""), devEntrada.length ? "#f37021" : "#105436")}
-        ${this.kpi("Saldo desses títulos", this.moneyShort(emRisco), "Quanto ainda falta receber se esses contratos seguirem", "#f37021")}
-      </div>
       <div class="mkb-card">
         <div class="mkb-card-h"><h3>Lista dos ${qtdDistrato} título(s)</h3><small>Cada linha é um contrato que o marketing pode tratar como possível distrato</small></div>
         ${risco.length ? `<div class="mkb-tablewrap"><table class="mkb-table">
-          <colgroup><col style="width:16%"><col style="width:10%"><col style="width:24%"><col style="width:10%"><col style="width:8%"><col style="width:16%"><col style="width:10%"><col style="width:6%"></colgroup>
+          <colgroup><col style="width:13%"><col style="width:8%"><col style="width:18%"><col style="width:9%"><col style="width:6%"><col style="width:14%"><col style="width:11%"><col style="width:21%"></colgroup>
           <thead><tr><th>Contrato</th><th>Unidade</th><th>Cliente</th><th>Emissão</th><th style="text-align:right;">% pago</th><th>Entrada</th><th>Atrasado desde</th><th>Motivo</th></tr></thead>
           <tbody>${linhas}</tbody>
         </table></div>` : `<p class="mkb-muted" style="margin:0;">Nenhum contrato ativo sem pagamento ou com entrada vencida.</p>`}
@@ -1626,8 +1808,8 @@ const MarketingBudgetApp = {
         #marketing-budget-root .mkb-filtros { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; }
         #marketing-budget-root .mkb-filtros label { display:block; font-size:0.72rem; font-weight:700; color:#475569; text-transform:uppercase; margin-bottom:4px; }
         #marketing-budget-root .mkb-filtros input, #marketing-budget-root .mkb-filtros select { height:38px; padding:0 10px; border:1px solid #cbd5e1; border-radius:8px; font:inherit; font-size:0.85rem; box-sizing:border-box; background:#fff; }
-        #marketing-budget-root .mkb-filtros .mkb-f-cc { flex:1 1 360px; }
-        #marketing-budget-root .mkb-filtros .mkb-f-cc select { width:100%; cursor:pointer; }
+        #marketing-budget-root .mkb-filtros .mkb-f-cc { flex:1 1 720px; min-width:min(100%, 640px); }
+        #marketing-budget-root .mkb-filtros .mkb-f-cc select { width:100%; cursor:pointer; white-space:nowrap; }
         #marketing-budget-root .mkb-config { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:16px; }
         #marketing-budget-root .mkb-cfg-item span { display:block; font-size:0.72rem; font-weight:700; color:#64748b; text-transform:uppercase; }
         #marketing-budget-root .mkb-cfg-item strong { display:block; font-size:1.35rem; color:#0f172a; margin-top:4px; }
@@ -1643,6 +1825,7 @@ const MarketingBudgetApp = {
         #marketing-budget-root .mkb-qtd { display:inline-flex; align-items:center; justify-content:center; min-width:1.7rem; height:1.7rem; padding:0 8px; border-radius:999px; background:#b91c1c; color:#fff; font-size:0.95rem; }
         #marketing-budget-root .mkb-kpis { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:12px; }
         #marketing-budget-root .mkb-kpis-2 { grid-template-columns:repeat(2, minmax(0, 280px)); }
+        #marketing-budget-root .mkb-kpis.mkb-kpis-3 { grid-template-columns:repeat(3, minmax(0,1fr)); }
         #marketing-budget-root .mkb-par { display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:stretch; }
         #marketing-budget-root .mkb-par-sexo { grid-template-columns:minmax(280px, 0.85fr) minmax(0, 1.4fr); }
         #marketing-budget-root .mkb-canvas-alto { height:340px; }
@@ -1668,6 +1851,16 @@ const MarketingBudgetApp = {
         #marketing-budget-root .mkb-canvas { position:relative; height:260px; }
         #marketing-budget-root .mkb-canvas-curto { height:190px; }
         #marketing-budget-root .mkb-chart-full { grid-column:1 / -1; }
+        #marketing-budget-root .mkb-gastos-bar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+        #marketing-budget-root .mkb-gastos-bar .mkb-chips { margin:0; flex:0 1 auto; }
+        #marketing-budget-root .mkb-busca, #marketing-budget-root .mkb-plano { height:36px; border:1px solid #cbd5e1; border-radius:8px; background:#fff; color:#334155; font:inherit; font-size:0.8rem; box-sizing:border-box; }
+        #marketing-budget-root .mkb-busca { width:220px; padding:0 10px; }
+        #marketing-budget-root .mkb-plano { width:240px; padding:0 8px; }
+        #marketing-budget-root .mkb-gastos-tools { margin-left:auto; display:flex; align-items:center; gap:8px; }
+        #marketing-budget-root .mkb-sel-val { display:flex; align-items:baseline; gap:8px; min-height:36px; padding:0 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; box-sizing:border-box; }
+        #marketing-budget-root .mkb-sel-val span { font-size:0.68rem; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:0.02em; }
+        #marketing-budget-root .mkb-sel-val strong { color:#105436; font-size:1rem; }
+        #marketing-budget-root .mkb-sel-val small { color:#64748b; font-size:0.72rem; }
         #marketing-budget-root .mkb-chips { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
         #marketing-budget-root .mkb-chip { height:32px; padding:0 12px; border-radius:8px; border:1px solid #cbd5e1; background:#fff; color:#334155; font-size:0.8rem; font-weight:600; cursor:pointer; }
         #marketing-budget-root .mkb-chip.is-on { background:#105436; border-color:#105436; color:#fff; }
@@ -1690,6 +1883,8 @@ const MarketingBudgetApp = {
         #marketing-budget-root .mkb-charts-2 { grid-template-columns:repeat(2, minmax(0,1fr)); }
         #marketing-budget-root .mkb-ctr-top { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:10px 16px; }
         #marketing-budget-root .mkb-table td.mkb-tags { white-space:normal; }
+        #marketing-budget-root .mkb-table td.mkb-motivo { white-space:nowrap; overflow:visible; text-overflow:clip; }
+        #marketing-budget-root .mkb-table td.mkb-motivo .mkb-st { white-space:nowrap; }
         #marketing-budget-root .mkb-table td.mkb-tags .mkb-st { margin:1px 0; }
         #marketing-budget-root .mkb-table-perfil { min-width:640px; }
         #marketing-budget-root .mkb-grp td { background:#e7f6ee !important; color:#105436; font-weight:700; font-size:0.76rem; text-transform:uppercase; }
@@ -1699,7 +1894,7 @@ const MarketingBudgetApp = {
         #marketing-budget-root .mkb-canc { display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start; }
         @media (max-width: 1100px) {
           #marketing-budget-root .mkb-charts-3, #marketing-budget-root .mkb-charts-2, #marketing-budget-root .mkb-canc, #marketing-budget-root .mkb-par, #marketing-budget-root .mkb-par-sexo { grid-template-columns:1fr; }
-          #marketing-budget-root .mkb-kpis { grid-template-columns:repeat(2, minmax(0,1fr)); }
+          #marketing-budget-root .mkb-kpis, #marketing-budget-root .mkb-kpis.mkb-kpis-3 { grid-template-columns:1fr; }
           #marketing-budget-root .mkb-charts, #marketing-budget-root .mkb-config { grid-template-columns:1fr; }
         }
       </style>
@@ -1715,7 +1910,7 @@ const MarketingBudgetApp = {
           <div class="mkb-card mkb-filtros">
             <div class="mkb-f-cc">
               <label for="mkb-cc">Empreendimento</label>
-              <select id="mkb-cc" ${s.loading ? "disabled" : ""} onchange="MarketingBudgetApp.onCcSelect(this.value)">${this.empreendimentoOptions(cc ? cc.id : "")}</select>
+              <select id="mkb-cc" ${s.loading ? "disabled" : ""} onchange="MarketingBudgetApp.onCcSelect(this.value)">${this.empreendimentoOptions(cc ? cc.id : "", { somenteVerba: true })}</select>
             </div>
             <div>
               <label for="mkb-de">De (vencimento)</label>
@@ -1937,12 +2132,15 @@ const MarketingConfigApp = {
   verbaHtml() {
     const B = this.B;
     const s = this.state;
-    if (!s.obra) return `<span>VGV da obra</span><strong>…</strong><small>Lendo o cadastro da obra no Sienge</small>`;
+    const vazio = (tit, val, nota, verba) => `<div class="mkc-passo${verba ? " mkc-passo-verba" : " mkc-passo-fixo"}"><span>${tit}</span><strong${verba ? ' class="mkc-verba-v"' : ""}>${val}</strong><small>${nota}</small></div>`;
+    if (!s.obra) return `${vazio("VGV da obra", "…", "Lendo o cadastro da obra no Sienge")}<div class="mkc-op" aria-hidden="true">=</div>${vazio("Verba de marketing", "…", "Percentual × VGV", true)}`;
     const pct = this.pctNumero();
     const fonte = s.obra.fonte === "obra" ? "Cadastro da obra no Sienge" : (s.obra.fonte === "centro" ? "Digitado no centro de custo" : "Obra sem VGV no Sienge");
     const verba = s.obra.vgv > 0 && pct >= 0 ? s.obra.vgv * (pct / 100) : 0;
-    return `<span>VGV da obra</span><strong>${s.obra.vgv > 0 ? B.money(s.obra.vgv) : "—"}</strong><small>${fonte}</small>
-      <span style="margin-top:10px;">Verba de marketing</span><strong class="mkc-verba-v">${verba > 0 ? B.money(verba) : "—"}</strong><small>VGV × ${Number.isFinite(pct) ? String(pct).replace(".", ",") : "—"}%</small>`;
+    const pctTxt = Number.isFinite(pct) ? String(pct).replace(".", ",") : "—";
+    return `${vazio("VGV da obra", s.obra.vgv > 0 ? B.money(s.obra.vgv) : "—", fonte)}
+      <div class="mkc-op" aria-hidden="true">=</div>
+      ${vazio("Verba de marketing", verba > 0 ? B.money(verba) : "—", `${pctTxt}% do VGV`, true)}`;
   },
 
   /* ---------- seleção de centros de custo (padrão Marcar Todos / Desmarcar Todos) ---------- */
@@ -1954,7 +2152,7 @@ const MarketingConfigApp = {
     const s = this.state;
     return {
       id: this.FILTRO_ID,
-      label: "Centros de custo que compõem os gastos",
+      label: "Selecionar centros de custo",
       items: this.itensFiltro(),
       selectedIds: s.ccs,
       open: s.open,
@@ -2033,7 +2231,7 @@ const MarketingConfigApp = {
       const integral = B.ccTemMarketing(id, nome);
       return `<span class="mkc-chip${id === s.ccId ? " is-obra" : ""}${integral ? " is-mkt" : ""}" title="${B.esc(nome)}">
         ${integral ? `<em>100%</em>` : `<em>Grupo</em>`}
-        ${B.esc(nome)}
+        <b>${B.esc(nome)}</b>
         <button type="button" onclick="MarketingConfigApp.remover('${B.esc(id)}')" title="Tirar"><i data-lucide="x" style="width:12px;height:12px;"></i></button></span>`;
     }).join("");
   },
@@ -2100,25 +2298,32 @@ const MarketingConfigApp = {
     const cc = this.ccDe(s.ccId);
     this.bindFiltro();
     const form = s.ccId ? `
-          <div class="mkc-grid">
-            <div class="mkc-main">
-              <div class="mkc-campo mkc-pct-campo">
-                <label for="mkc-pct">% do VGV para marketing</label>
-                <div class="mkc-pct"><input id="mkc-pct" type="text" inputmode="decimal" placeholder="0,00" value="${B.esc(s.pct)}" oninput="MarketingConfigApp.onPct(this.value)"><em>%</em></div>
-              </div>
-              <div class="mkc-campo" id="mkc-ccs-slot">${MlEmpresaFilter.html(this.filtroOpts())}</div>
-              <div class="mkc-sel" id="mkc-sel">${this.selecaoHtml()}</div>
-              <small class="mkc-muted">Chip <em>100%</em>: o nome do centro tem MARKETING e todo o gasto entra. Chip <em>Grupo</em>: pago, em aberto e previsão nas contas do grupo 2.03.05 MARKETING.</small>
+          <div class="mkc-conta">
+            <div class="mkc-passo">
+              <label for="mkc-pct">% do VGV</label>
+              <div class="mkc-pct"><input id="mkc-pct" type="text" inputmode="decimal" placeholder="0,00" value="${B.esc(s.pct)}" oninput="MarketingConfigApp.onPct(this.value)"><em>%</em></div>
+              <small>De 0 a 100</small>
             </div>
-            <div class="mkc-lado">
-              <div class="mkc-verba" id="mkc-verba">${this.verbaHtml()}</div>
-              <div class="mkc-acoes">
-                ${s.salvoEm ? `<span class="mkc-ok"><i data-lucide="check-circle-2" style="width:14px;height:14px;"></i> Salvo às ${B.esc(s.salvoEm)}</span>` : `<span></span>`}
-                <button type="button" class="btn btn-primary" ${s.salvando ? "disabled" : ""} onclick="MarketingConfigApp.salvar()">
-                  ${s.salvando ? '<span class="btn-spin"></span> Salvando…' : '<i data-lucide="save" style="width:14px;height:14px;"></i> Salvar'}
-                </button>
-              </div>
+            <div class="mkc-op" aria-hidden="true">×</div>
+            <div class="mkc-resultados" id="mkc-verba">${this.verbaHtml()}</div>
+          </div>
+          <div class="mkc-bloco">
+            <div class="mkc-bloco-t">
+              <strong>Gastos que entram na verba</strong>
+              <span>Marque os centros de custo desta obra. Cada linha mostra se entra o gasto inteiro ou só o grupo de marketing.</span>
             </div>
+            <div class="mkc-campo" id="mkc-ccs-slot">${MlEmpresaFilter.html(this.filtroOpts())}</div>
+            <div class="mkc-sel" id="mkc-sel">${this.selecaoHtml()}</div>
+            <div class="mkc-legenda">
+              <span><em>100%</em> O nome tem MARKETING e todo o gasto entra.</span>
+              <span><em>Grupo</em> Só as contas 2.03.05: pago, em aberto e previsão.</span>
+            </div>
+          </div>
+          <div class="mkc-rodape">
+            ${s.salvoEm ? `<span class="mkc-ok"><i data-lucide="check-circle-2" style="width:14px;height:14px;"></i> Salvo às ${B.esc(s.salvoEm)}</span>` : `<span></span>`}
+            <button type="button" class="btn btn-primary" ${s.salvando ? "disabled" : ""} onclick="MarketingConfigApp.salvar()">
+              ${s.salvando ? '<span class="btn-spin"></span> Salvando…' : '<i data-lucide="save" style="width:14px;height:14px;"></i> Salvar'}
+            </button>
           </div>` : `<p class="mkc-muted" style="margin:12px 0 0;">Escolha o empreendimento para definir o percentual de marketing e os centros de custo.</p>`;
     root.innerHTML = `
       <style>
@@ -2130,41 +2335,49 @@ const MarketingConfigApp = {
         #marketing-config-root .mkc-card h3 { margin:0 0 10px; font-size:0.95rem; color:#105436; }
         #marketing-config-root .mkc-muted { color:#64748b; font-size:0.75rem; font-weight:400; }
         #marketing-config-root label, #marketing-config-root .ml-emp-filter-label { display:block; font-size:0.72rem; font-weight:700; color:#475569; text-transform:uppercase; margin-bottom:4px; }
-        #marketing-config-root .mkc-obra select { cursor:pointer; background:#fff; width:100%; height:38px; padding:0 10px; border:1px solid #cbd5e1; border-radius:8px; font:inherit; font-size:0.85rem; box-sizing:border-box; }
-        #marketing-config-root .mkc-grid { display:grid; grid-template-columns:minmax(0,1.7fr) minmax(260px,0.8fr); gap:16px; margin-top:16px; align-items:stretch; }
-        #marketing-config-root .mkc-main { display:flex; flex-direction:column; gap:12px; min-width:0; }
-        #marketing-config-root .mkc-pct-campo { max-width:220px; }
+        #marketing-config-root .mkc-obra select { cursor:pointer; background:#fff; width:100%; height:38px; padding:0 10px; border:1px solid #cbd5e1; border-radius:8px; font:inherit; font-size:0.85rem; box-sizing:border-box; white-space:nowrap; }
+        #marketing-config-root .mkc-conta { display:grid; grid-template-columns:200px 36px minmax(0,1fr); gap:8px; margin-top:16px; align-items:stretch; }
+        #marketing-config-root .mkc-resultados { display:grid; grid-template-columns:minmax(0,1fr) 36px minmax(0,1fr); gap:8px; align-items:stretch; min-width:0; }
+        #marketing-config-root .mkc-op { display:flex; align-items:center; justify-content:center; font-size:1.25rem; font-weight:800; color:#105436; }
+        #marketing-config-root .mkc-passo { background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:10px 12px; min-width:0; }
+        #marketing-config-root .mkc-passo-fixo { background:#f8fafc; }
+        #marketing-config-root .mkc-passo-verba { background:#e7f6ee; border-color:#9ed9b8; }
+        #marketing-config-root .mkc-passo > span, #marketing-config-root .mkc-passo > label { margin-bottom:4px; }
+        #marketing-config-root .mkc-passo strong { display:block; min-height:38px; line-height:38px; font-size:1.2rem; color:#0f172a; white-space:nowrap; }
+        #marketing-config-root .mkc-passo .mkc-verba-v { color:#105436; }
+        #marketing-config-root .mkc-passo small, #marketing-config-root .mkc-passo > small { display:block; margin-top:4px; color:#64748b; font-size:0.72rem; }
         #marketing-config-root .mkc-pct { display:flex; align-items:center; gap:6px; }
         #marketing-config-root .mkc-pct input { width:100%; height:38px; padding:0 10px; border:1px solid #cbd5e1; border-radius:8px; font-size:1rem; font-weight:700; text-align:right; box-sizing:border-box; }
         #marketing-config-root .mkc-pct em { font-style:normal; font-weight:700; color:#475569; }
+        #marketing-config-root .mkc-bloco { margin-top:16px; padding-top:14px; border-top:1px solid #e2e8f0; display:flex; flex-direction:column; gap:10px; }
+        #marketing-config-root .mkc-bloco-t strong { display:block; color:#105436; font-size:0.95rem; }
+        #marketing-config-root .mkc-bloco-t span { display:block; color:#64748b; font-size:0.78rem; margin-top:2px; }
         #marketing-config-root .ml-emp-filter { max-width:none; width:100%; }
         #marketing-config-root .ml-emp-filter-btn { height:38px; min-height:38px; width:100%; }
         #marketing-config-root .ml-emp-filter-list { max-height:320px; }
-        #marketing-config-root .mkc-sel { display:flex; flex-wrap:wrap; gap:6px; margin:0; }
-        #marketing-config-root .mkc-chip { display:inline-flex; align-items:center; gap:6px; max-width:100%; height:30px; padding:0 4px 0 6px; border-radius:999px; background:#e7f6ee; color:#105436; font-size:0.76rem; font-weight:600; }
-        #marketing-config-root .mkc-chip em { font-style:normal; font-size:0.62rem; font-weight:800; letter-spacing:0.02em; text-transform:uppercase; background:#fff; color:#105436; border-radius:999px; padding:2px 6px; flex:none; }
-        #marketing-config-root .mkc-chip.is-obra { background:#105436; color:#fff; }
+        #marketing-config-root .mkc-sel { display:flex; flex-direction:column; gap:6px; margin:0; }
+        #marketing-config-root .mkc-chip { display:flex; align-items:center; gap:8px; height:36px; padding:0 6px 0 8px; border-radius:8px; background:#f8fafc; border:1px solid #e2e8f0; color:#105436; font-size:0.8rem; font-weight:600; min-width:0; }
+        #marketing-config-root .mkc-chip em { font-style:normal; font-size:0.62rem; font-weight:800; letter-spacing:0.02em; text-transform:uppercase; background:#e7f6ee; color:#105436; border-radius:999px; padding:3px 7px; flex:none; }
+        #marketing-config-root .mkc-chip b { font-weight:600; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        #marketing-config-root .mkc-chip.is-obra { background:#105436; border-color:#105436; color:#fff; }
         #marketing-config-root .mkc-chip.is-obra em { background:rgba(255,255,255,0.18); color:#fff; }
-        #marketing-config-root .mkc-chip button { border:0; background:transparent; color:inherit; cursor:pointer; display:inline-flex; padding:2px; border-radius:50%; flex:none; }
-        #marketing-config-root .mkc-chip button:hover { background:rgba(0,0,0,0.1); }
-        #marketing-config-root .mkc-lado { display:flex; flex-direction:column; gap:12px; min-width:0; }
-        #marketing-config-root .mkc-verba { background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:14px 16px; flex:1; }
-        #marketing-config-root .mkc-verba span { display:block; font-size:0.72rem; font-weight:700; color:#64748b; text-transform:uppercase; }
-        #marketing-config-root .mkc-verba strong { display:block; font-size:1.35rem; color:#0f172a; margin-top:2px; }
-        #marketing-config-root .mkc-verba .mkc-verba-v { color:#105436; }
-        #marketing-config-root .mkc-verba small { display:block; color:#64748b; font-size:0.72rem; margin:0 0 12px; }
-        #marketing-config-root .mkc-acoes { display:flex; flex-direction:column; align-items:stretch; gap:8px; }
-        #marketing-config-root .mkc-acoes .btn { height:38px; width:100%; display:inline-flex; align-items:center; justify-content:center; gap:6px; }
-        #marketing-config-root .mkc-ok { display:inline-flex; align-items:center; justify-content:flex-end; gap:4px; color:#105436; font-size:0.8rem; font-weight:600; }
+        #marketing-config-root .mkc-chip button { border:0; background:transparent; color:inherit; cursor:pointer; display:inline-flex; padding:4px; border-radius:50%; flex:none; margin-left:auto; }
+        #marketing-config-root .mkc-chip button:hover { background:rgba(0,0,0,0.08); }
+        #marketing-config-root .mkc-legenda { display:flex; flex-wrap:wrap; gap:8px 18px; }
+        #marketing-config-root .mkc-legenda span { color:#64748b; font-size:0.75rem; }
+        #marketing-config-root .mkc-legenda em { font-style:normal; font-weight:800; color:#105436; }
+        #marketing-config-root .mkc-rodape { display:flex; align-items:center; justify-content:flex-end; gap:12px; margin-top:4px; padding-top:12px; border-top:1px solid #e2e8f0; }
+        #marketing-config-root .mkc-rodape .btn { height:38px; min-width:140px; display:inline-flex; align-items:center; justify-content:center; gap:6px; }
+        #marketing-config-root .mkc-ok { display:inline-flex; align-items:center; gap:4px; margin-right:auto; color:#105436; font-size:0.8rem; font-weight:600; }
         #marketing-config-root .mkc-tablewrap { max-height:50vh; overflow:auto; }
         #marketing-config-root .mkc-table { width:100%; min-width:760px; border-collapse:collapse; table-layout:fixed; font-size:0.82rem; }
         #marketing-config-root .mkc-table thead th { position:sticky; top:0; background:#1b8253; color:#fff; padding:10px; text-align:left; font-weight:600; z-index:1; }
         #marketing-config-root .mkc-table td { padding:8px 10px; border-bottom:1px solid #e2e8f0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:middle; }
         #marketing-config-root .mkc-table tbody tr:nth-child(even) { background:#f8faf9; }
         #marketing-config-root .mkc-table tr.is-sel td { background:#e7f6ee; }
-        @media (max-width: 1000px) {
-          #marketing-config-root .mkc-grid { grid-template-columns:1fr; }
-          #marketing-config-root .mkc-pct-campo { max-width:none; }
+        @media (max-width: 900px) {
+          #marketing-config-root .mkc-conta, #marketing-config-root .mkc-resultados { grid-template-columns:1fr; }
+          #marketing-config-root .mkc-op { height:28px; }
         }
       </style>
       <div class="mkc-wrap">

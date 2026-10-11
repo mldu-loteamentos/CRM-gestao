@@ -415,8 +415,10 @@ window.EnviarNotaApp = {
     s.formaManual = forma;
     if (pag.forma !== forma) pag.detalhe = "";
     pag.forma = forma;
+    if (forma === "Boleto" && s.linhaBoleto) pag.detalhe = s.linhaBoleto;
     this.ajustarDestino();
     this.render();
+    if (forma === "Boleto") this.lerBoletoAnexo();
   },
 
   /** Forma padrão do cadastro bancário do credor no Sienge (paymentForm). */
@@ -438,11 +440,56 @@ window.EnviarNotaApp = {
   },
 
   linhaBoleto(texto) {
-    const t = String(texto || "");
+    const t = String(texto || "").replace(/[^\d.\s]/g, " ").replace(/\s+/g, " ");
     const m = t.match(/\d{5}\.?\d{5}\s+\d{5}\.?\d{6}\s+\d{5}\.?\d{6}\s+\d\s+\d{14}/);
     if (m) return m[0].replace(/\s+/g, " ").trim();
-    const b = t.match(/\d{47,48}/);
-    return b ? b[0] : "";
+    const b = String(texto || "").replace(/\D/g, "");
+    const i = b.search(/(\d{47})/);
+    return i >= 0 ? b.slice(i, i + 47) : "";
+  },
+
+  async textoDeArquivo(file) {
+    if (!file) return "";
+    const buf = await file.arrayBuffer();
+    const inicio = new TextDecoder("latin1").decode(new Uint8Array(buf.slice(0, 64))).trim();
+    if (/^\uFEFF?</.test(inicio) || /\.xml$/i.test(file.name || "")) return new TextDecoder("utf-8").decode(buf);
+    if (/^%PDF/.test(inicio)) {
+      const itens = window.NotaFiscalCheck ? await NotaFiscalCheck.itensDoPdf(buf) : [];
+      let texto = itens.map((i) => i.s).join("\n");
+      if (!this.linhaBoleto(texto) && window.InserirNotaApp && typeof InserirNotaApp.pdfParaCanvas === "function") {
+        const canvas = await InserirNotaApp.pdfParaCanvas(buf);
+        const celulas = await this.ocr(canvas, this.state.leituraToken || 0);
+        texto = texto + "\n" + celulas.map((c) => c.s).join("\n");
+      }
+      return texto;
+    }
+    if (/^image\//.test(file.type || "") && window.InserirNotaApp && typeof InserirNotaApp.imagemParaCanvas === "function") {
+      const canvas = await InserirNotaApp.imagemParaCanvas(file);
+      const celulas = await this.ocr(canvas, this.state.leituraToken || 0);
+      return celulas.map((c) => c.s).join("\n");
+    }
+    return "";
+  },
+
+  /** Lê a linha digitável do anexo marcado como boleto e preenche o pagamento. */
+  lerBoletoAnexo() {
+    const s = this.state;
+    const token = (s.boletoToken || 0) + 1;
+    s.boletoToken = token;
+    const a = (s.anexos || []).find((x) => x.tipo === "boleto");
+    if (!a) return;
+    const pronto = a.file ? Promise.resolve(a.file) : FilaNotasFiscais.baixar(a);
+    pronto.then((file) => this.textoDeArquivo(file)).then((texto) => {
+      if (s.boletoToken !== token) return;
+      const linha = this.linhaBoleto(texto);
+      if (!linha) return;
+      s.linhaBoleto = linha;
+      if (!s.formaManual || s.formaManual === "Boleto" || s.pag.forma === "Boleto") {
+        s.pag.forma = "Boleto";
+        s.pag.detalhe = linha;
+      }
+      this.render();
+    }).catch((e) => console.warn("[Enviar nota] linha do boleto", e));
   },
 
   temBoleto() {
@@ -487,6 +534,7 @@ window.EnviarNotaApp = {
     if (input) input.value = "";
     this.agendarLeitura();
     this.sugerirForma();
+    this.lerBoletoAnexo();
     if (s.previewIdx < 0) {
       const i = s.anexos.findIndex((a) => a.tipo === "nota");
       if (i >= 0) { this.verAnexo(i); return; }
@@ -499,6 +547,7 @@ window.EnviarNotaApp = {
     if (a) a.tipo = tipo;
     this.agendarLeitura();
     this.sugerirForma();
+    this.lerBoletoAnexo();
     this.render();
   },
 
@@ -509,6 +558,7 @@ window.EnviarNotaApp = {
     else if (s.previewIdx > i) s.previewIdx--;
     this.agendarLeitura();
     this.sugerirForma();
+    this.lerBoletoAnexo();
     this.render();
   },
 
@@ -521,7 +571,7 @@ window.EnviarNotaApp = {
     if (!a) {
       s.lendoNota = "";
       s.leituraErro = "";
-      s.linhaBoleto = "";
+      if (!s.anexos.some((x) => x.tipo === "boleto")) s.linhaBoleto = "";
       s.fiscal = null;
       if (!s.editandoId) {
         s.numeroNota = "";
@@ -591,6 +641,7 @@ window.EnviarNotaApp = {
     }
     s.lendoNota = "";
     this.sugerirForma();
+    this.lerBoletoAnexo();
     this.render();
     if (s._fonteNota) this.analisarFiscal(token);
   },
@@ -1021,8 +1072,8 @@ window.EnviarNotaApp = {
           : `<input disabled class="env-sem-cad" value="Nenhuma ${pag.forma === "PIX" ? "chave PIX" : "conta"} cadastrada no credor">`);
       destino = `<label>${rot}</label>${destino}`;
     } else {
-      const rot = pag.forma === "Boleto" ? "Linha digitável (opcional)" : "Detalhe do pagamento";
-      destino = `<label>${rot}</label><input value="${this.esc(pag.detalhe)}" oninput="EnviarNotaApp.setPag('detalhe', this.value)">`;
+      const rot = pag.forma === "Boleto" ? "Linha digitável" : "Detalhe do pagamento";
+      destino = `<label>${rot}</label><input value="${this.esc(pag.detalhe)}" placeholder="${pag.forma === "Boleto" ? "Preenchida pelo boleto anexado" : ""}" oninput="EnviarNotaApp.setPag('detalhe', this.value)">`;
     }
     return `<div class="inf-form">
         <div><label>Data de pagamento</label><input type="date" value="${this.esc(pag.data)}" onchange="EnviarNotaApp.setPag('data', this.value)"></div>

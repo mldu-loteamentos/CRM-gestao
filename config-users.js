@@ -1896,43 +1896,37 @@ const ConfigUsersApp = {
     return { mod, subs, actions, level };
   },
 
+  /** No módulo ou no subitem inteiro, Sim só vale se todas as telas daquele nível tiverem a permissão. */
+  scopeFlagsAll(perms, actions) {
+    const out = { acessar: true, visualizar: true, editar: true };
+    (actions || []).forEach(({ sub, act }) => {
+      const f = this.actionAccess(perms, sub, act);
+      if (!f.acessar) out.acessar = false;
+      if (!f.visualizar) out.visualizar = false;
+      if (!f.editar) out.editar = false;
+    });
+    return out;
+  },
+
   scopeAccess(perms, isAdmin, scope) {
     const none = { acessar: false, visualizar: false, editar: false };
     if (!scope) return none;
     if (isAdmin) return { acessar: true, visualizar: true, editar: true };
     const modOn = !!(perms && perms[scope.mod.key]);
+    if (!modOn) return none;
     if (scope.level === "module") {
       if (!(scope.actions || []).length) {
-        return { acessar: modOn, visualizar: modOn, editar: modOn };
+        return { acessar: true, visualizar: true, editar: true };
       }
-      let visualizar = false;
-      let editar = false;
-      if (modOn) {
-        scope.actions.forEach(({ sub, act }) => {
-          if (!perms[sub.key]) return;
-          const f = this.actionAccess(perms, sub, act);
-          if (f.visualizar) visualizar = true;
-          if (f.editar) editar = true;
-        });
-      }
-      return { acessar: modOn, visualizar, editar };
+      return this.scopeFlagsAll(perms, scope.actions);
     }
     if (scope.level === "sub") {
       const sub = scope.subs[0];
-      const subOn = modOn && !!(sub && perms[sub.key]);
-      let visualizar = false;
-      let editar = false;
-      if (subOn) {
-        scope.actions.forEach(({ sub: s, act }) => {
-          const f = this.actionAccess(perms, s, act);
-          if (f.visualizar) visualizar = true;
-          if (f.editar) editar = true;
-        });
-      }
-      return { acessar: subOn, visualizar, editar };
+      if (!sub || !perms[sub.key] || !(scope.actions || []).length) return none;
+      return this.scopeFlagsAll(perms, scope.actions);
     }
     const one = scope.actions[0];
-    if (!one || !modOn || !perms[one.sub.key]) return none;
+    if (!one || !perms[one.sub.key]) return none;
     return this.actionAccess(perms, one.sub, one.act);
   },
 
