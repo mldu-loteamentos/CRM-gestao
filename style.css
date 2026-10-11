@@ -5726,7 +5726,11 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .cessao-ces-card { border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px; margin: 0; background: #fff; }
 .cessao-ces-lista { display: flex; flex-direction: column; gap: 14px; margin-bottom: 14px; }
 .cessao-ces-ordem { display: block; margin-bottom: 4px; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #105436; }
+.cessao-ces-toggle { display: flex; align-items: flex-start; gap: 8px; border: 0; background: transparent; padding: 0; text-align: left; cursor: pointer; color: inherit; min-width: 0; }
+.cessao-ces-toggle .cessao-ces-id { display: block; }
 .cessao-ces-top { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+.cessao-ces-card:not(.is-open) .cessao-ces-dados,
+.cessao-ces-card:not(.is-open) .cessao-ces-extra { display: none; }
 .cessao-ces-id { margin-top: 4px; color: #64748b; font-size: 0.8rem; }
 .cessao-ces-acoes { display: flex; align-items: flex-end; gap: 8px; flex-shrink: 0; }
 .cessao-ces-acoes label.cessao-pop-field .form-control { width: 96px; }

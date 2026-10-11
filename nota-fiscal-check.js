@@ -106,7 +106,13 @@ window.NotaFiscalCheck = {
 
   /* ---------- Sienge ---------- */
   async impostosDoTitulo(billId) {
-    const res = await window.siengeFetchWithRetry(`/bills/${encodeURIComponent(billId)}/taxes?limit=100`, 1);
+    let res;
+    try {
+      res = await window.siengeFetchWithRetry(`/bills/${encodeURIComponent(billId)}/taxes?limit=100`, 1);
+    } catch (e) {
+      if (Number(e && e.status) === 404 || /\b404\b/.test(String(e && e.message || ""))) return [];
+      throw e;
+    }
     const lista = Array.isArray(res) ? res : ((res && (res.results || res.data)) || []);
     const pick = (o, ks) => { for (const k of ks) if (o[k] != null && o[k] !== "") return o[k]; return null; };
     return lista.filter((t) => t && typeof t === "object").map((t) => {
@@ -424,7 +430,13 @@ window.NotaFiscalCheck = {
 
     const n = d.nota && !d.nota.semAnexo && !d.nota.ilegivel ? d.nota : null;
     if (d.nota && d.nota.semAnexo) r.infos.push("O título não tem nota fiscal anexada para conferir a retenção.");
-    else if (d.nota && d.nota.ilegivel) r.infos.push(`Não consegui ler o texto da nota "${d.nota.anexo || "anexo"}" (pode ser imagem escaneada): confira a retenção na nota.`);
+    else if (d.nota && d.nota.ilegivel) {
+      const motivo = String(d.nota.erro || "");
+      const nome = d.nota.anexo || "anexo";
+      if (/leitor de PDF/i.test(motivo)) r.infos.push("Não consegui abrir o leitor de PDF para ler a nota.");
+      else if (motivo) r.infos.push(`Não consegui ler a nota "${nome}": ${motivo}`);
+      else r.infos.push(`Não consegui ler o texto da nota "${nome}" (pode ser imagem escaneada): confira a retenção na nota.`);
+    }
 
     if (n) {
       const issNota = n.issRetido ? (n.valorIss || 0) : 0;
@@ -895,6 +907,7 @@ window.NotaFiscalCheck = {
         <td>${l.sienge ? this.money(l.sienge.valor) : "—"}</td><td>${n ? (l.nota ? this.money(l.nota.valor) : "—") : "não lida"}</td>
         <td style="font-weight:800;">${marca(l)}</td></tr>`).join("")}
       </tbody></table>` : "";
+    const nenhum = !r.impostos.length ? `<p><strong>Nenhum imposto retido lançado neste título no Sienge.</strong></p>` : "";
     const totais = r.bruto ? `<p><strong>Valor do título:</strong> ${this.money(r.bruto)} · <strong>Impostos retidos no Sienge:</strong> ${this.money(r.retido)} · <strong>Valor líquido a pagar:</strong> ${this.money(r.liquido)}</p>` : "";
     const nota = n ? `<p><strong>Nota${n.numero ? " " + this.esc(n.numero) : ""}</strong> (anexo ${this.esc(n.anexo || "")}):
         ${n.valorServico != null ? `serviço ${this.money(n.valorServico)}` : ""}${n.issRetido != null ? ` · ISS ${n.issRetido ? "retido pelo tomador" : "não retido"}` : ""}${n.aliquotaIss ? ` (${this.pct(n.aliquotaIss)} sobre ${this.money(n.baseIss)})` : ""}${r.retidoNota != null ? ` · retenções ${this.money(r.retidoNota)}` : ""}${n.liquido != null ? ` · líquido ${this.money(n.liquido)}` : ""}</p>
@@ -905,7 +918,7 @@ window.NotaFiscalCheck = {
       ${e.secundarios.length ? `<details class="nfchk-sec"><summary>${e.secundarios.length} CNAE(s) secundário(s)</summary>${e.secundarios.map((c) => `<div>${this.esc(this.cnaeFmt(c.codigo))} ${this.esc(c.descricao)}</div>`).join("")}</details>` : ""}`
       : (r.credorDoc && r.credorDoc.length === 11 ? `<p><strong>Prestador:</strong> pessoa física (${this.esc(this.docFmt(r.credorDoc))})</p>` : "");
     const cab = r.nivel === "ok" ? `<p style="margin:6px 0 0;color:#105436;font-weight:700;">✓ ${this.esc(r.resumo)}.</p>` : "";
-    return `${totais}${tabela}${nota}${prest}${cab}
+    return `${nenhum}${totais}${tabela}${nota}${prest}${cab}
       ${lista(r.erros, "#b91c1c", "✗")}
       ${lista(r.avisos, "#c2410c", "!")}
       ${lista(r.infos, "#0f766e", "ℹ")}`;

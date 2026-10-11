@@ -1028,7 +1028,31 @@ ComprasControleApp.abrirTituloRow = async function (row) {
     this._tituloDetalhe.attachments = attachments || [];
     this._tituloDetalhe.payment = payment;
     this._tituloDetalhe.impostos = Array.isArray(impostos) ? impostos : [];
+    const docIdFiscal = String(row.docId || (bill && bill.documentIdentificationId) || "").trim();
+    const docNomeFiscal = String(row.docNome || (bill && bill.documentIdentificationName) || "").trim();
+    const podeReter = window.NotaFiscalCheck && !NotaFiscalCheck.semRetencao(docIdFiscal, docNomeFiscal);
+    const fiscalVelho = row.fiscal && !(row.fiscal.infos || []).some((t) => /\b404\b/.test(String(t)));
+    this._tituloDetalhe.fiscal = podeReter && fiscalVelho ? row.fiscal : null;
+    this._tituloDetalhe.fiscalLoading = !!podeReter && !this._tituloDetalhe.fiscal;
     this.pintarTitulo();
+    if (podeReter) {
+      NotaFiscalCheck.analisar({
+        billId,
+        credorId: row.credorId || (bill && bill.creditorId) || "",
+        bruto: Number(row.valor) || Number(row.valorAjustado) || 0,
+        anexos: this._tituloDetalhe.attachments
+      }).then((fiscal) => {
+        if (this._tituloGen !== gen || !this._tituloDetalhe) return;
+        this._tituloDetalhe.fiscal = fiscal;
+        this._tituloDetalhe.fiscalLoading = false;
+        if (fiscal && Array.isArray(fiscal.impostos) && fiscal.impostos.length) this._tituloDetalhe.impostos = fiscal.impostos;
+        this.pintarTitulo();
+      }).catch(() => {
+        if (this._tituloGen !== gen || !this._tituloDetalhe) return;
+        this._tituloDetalhe.fiscalLoading = false;
+        this.pintarTitulo();
+      });
+    }
     const chaveFiscal = this.chaveEnvioFiscal(row);
     if (chaveFiscal) {
       if (typeof this.ouvirFilaFiscal === "function") this.ouvirFilaFiscal();
@@ -1109,6 +1133,27 @@ ComprasControleApp.irEtapa = function (id) {
   if (!this._tituloDetalhe || !id) return;
   this._tituloDetalhe.etapa = id;
   this.pintarTitulo();
+};
+
+ComprasControleApp.impostosRetidosHtml = function (det, row) {
+  if (det.fiscal && window.NotaFiscalCheck) return NotaFiscalCheck.html(det.fiscal);
+  if (det.fiscalLoading) return `<p class="cfin-titulo-wait">Lendo os impostos retidos no Sienge e na nota…</p>`;
+  const docId = String((row && row.docId) || "").trim();
+  const docNome = String((row && row.docNome) || "").trim();
+  if (window.NotaFiscalCheck && NotaFiscalCheck.semRetencao(docId, docNome)) {
+    return `<p>Este documento não tem retenção de imposto na fonte.</p>`;
+  }
+  const impostos = Array.isArray(det.impostos) ? det.impostos.filter((t) => t && Number(t.valor) > 0.009) : [];
+  if (!impostos.length) return `<p><strong>Nenhum imposto retido lançado neste título no Sienge.</strong></p>`;
+  const total = Math.round(impostos.reduce((s, t) => s + (Number(t.valor) || 0), 0) * 100) / 100;
+  const linhas = impostos.map((t) => `<tr>
+    <td>${this.esc(t.tipo || t.nome || "Imposto")}</td>
+    <td>${t.base != null ? this.esc(this.money(t.base)) : "—"}</td>
+    <td>${t.aliquota != null ? this.esc(String(t.aliquota).replace(".", ",") + "%") : "—"}</td>
+    <td>${this.esc(this.money(t.valor))}</td>
+  </tr>`).join("");
+  return `<p><strong>Impostos retidos no Sienge:</strong> ${this.esc(this.money(total))}</p>
+    <table class="nfchk-tab"><thead><tr><th>Imposto</th><th>Base</th><th>Alíquota</th><th>Valor retido</th></tr></thead><tbody>${linhas}</tbody></table>`;
 };
 
 ComprasControleApp.pintarTitulo = function () {
@@ -1213,7 +1258,7 @@ ComprasControleApp.pintarTitulo = function () {
     if (!aut) {
       autNivel = "espera";
       autBloco = bloco("badge-check", nome, "espera", "<p>Consultando a autorização no Sienge…</p>");
-      if (ped) { fiscalNivel = "espera"; fiscalBloco = bloco("clipboard-check", "Fiscal", "espera", "<p>Aguardando a leitura da autorização.</p>"); }
+      if (ped) { fiscalNivel = "espera"; fiscalBloco = bloco("clipboard-check", "Envio da nota", "espera", "<p>Aguardando a leitura da autorização.</p>"); }
     } else if (aut.limite) {
       autNivel = "aviso";
       autBloco = bloco("badge-check", nome, "aviso", "<p>O Sienge limitou as consultas (429). Consulte de novo em instantes.</p>");
@@ -1226,7 +1271,7 @@ ComprasControleApp.pintarTitulo = function () {
     } else if (!aut.ok) {
       autNivel = "negada";
       autBloco = bloco("badge-check", nome, "negada", `<p>${contrato ? "O contrato" : "O pedido"} ainda não está autorizado.</p>`);
-      if (ped) fiscalBloco = bloco("clipboard-check", "Fiscal", "", "<p>O envio da nota fica disponível depois da autorização.</p>");
+      if (ped) fiscalBloco = bloco("clipboard-check", "Envio da nota", "", "<p>O envio da nota fica disponível depois da autorização.</p>");
     } else if (contrato) {
       autNivel = "autorizada";
       autBloco = bloco("badge-check", nome, "autorizada", "<p>Contrato autorizado no Sienge.</p>");
@@ -1235,15 +1280,15 @@ ComprasControleApp.pintarTitulo = function () {
       autBloco = bloco("badge-check", nome, "autorizada", "<p>Pedido autorizado no Sienge.</p>");
       if (emAnalise) {
         fiscalNivel = "analise";
-        fiscalBloco = bloco("clipboard-check", "Fiscal", "analise", "<p>A nota deste pedido já está com o fiscal.</p>");
+        fiscalBloco = bloco("clipboard-check", "Envio da nota", "analise", "<p>A nota deste pedido já está com o fiscal.</p>");
       } else if (item && item.status === "devolvida") {
         fiscalNivel = "aviso";
-        fiscalBloco = bloco("clipboard-check", "Fiscal", "aviso", `<p>A nota foi devolvida${item.motivoDevolucao ? ": " + this.esc(item.motivoDevolucao) : "."}</p>${botaoEnvio("Corrigir envio", item.id)}`);
+        fiscalBloco = bloco("clipboard-check", "Envio da nota", "aviso", `<p>A nota foi devolvida${item.motivoDevolucao ? ": " + this.esc(item.motivoDevolucao) : "."}</p>${botaoEnvio("Corrigir envio", item.id)}`);
       } else if (item && item.status === "lancada") {
         fiscalNivel = "ok";
-        fiscalBloco = bloco("clipboard-check", "Fiscal", "ok", "<p>A nota já foi lançada no Sienge.</p>");
+        fiscalBloco = bloco("clipboard-check", "Envio da nota", "ok", "<p>A nota já foi lançada no Sienge.</p>");
       } else {
-        fiscalBloco = bloco("clipboard-check", "Fiscal", "", `<p>Este pedido ainda não tem nota no fiscal.</p>${botaoEnvio("Enviar nota para o fiscal")}`);
+        fiscalBloco = bloco("clipboard-check", "Envio da nota", "", `<p>Este pedido ainda não tem nota no fiscal.</p>${botaoEnvio("Enviar nota para o fiscal")}`);
       }
     }
   }
@@ -1254,10 +1299,19 @@ ComprasControleApp.pintarTitulo = function () {
   if (rateio) etapas.push({ id: "rateio", label: "Rateio", icon: "pie-chart", nivel: rateioNivel, html: bloco("pie-chart", "Rateio por centro de custo", rateioNivel, rateio) });
   if (!det.loading) {
     etapas.push({ id: "pagamento", label: "Pagamento", icon: "credit-card", nivel: formaNivel, html: bloco("credit-card", "Forma de pagamento programada", formaNivel, forma) });
+    const nivelImp = det.fiscalLoading && !det.fiscal ? "espera" : (det.fiscal ? (det.fiscal.nivel === "info" ? "aviso" : det.fiscal.nivel) : "");
+    const rank = { erro: 6, negada: 6, aviso: 5, sem: 5, info: 4, analise: 3, espera: 2, ok: 1 };
+    const nivelAba = (rank[nivelImp] || 0) >= (rank[fiscalNivel] || 0) ? nivelImp : fiscalNivel;
+    etapas.push({
+      id: "fiscal",
+      label: "Fiscal",
+      icon: "receipt",
+      nivel: nivelAba,
+      html: bloco("receipt", "Impostos retidos", nivelImp, this.impostosRetidosHtml(det, row)) + (fiscalBloco || "")
+    });
     const temAnexo = (det.attachments || []).length > 0;
     etapas.push({ id: "anexos", label: "Anexos", icon: "paperclip", nivel: temAnexo ? "ok" : "aviso", html: bloco("paperclip", "Anexos", temAnexo ? "ok" : "aviso", `<div class="cfin-titulo-files">${anexos || `<span>Este título não tem anexo.</span>`}</div>`) });
     if (autBloco) etapas.push({ id: "autorizacao", label: contrato ? "Contrato" : "Autorização", icon: "badge-check", nivel: autNivel, html: autBloco });
-    if (fiscalBloco) etapas.push({ id: "fiscal", label: "Fiscal", icon: "clipboard-check", nivel: fiscalNivel, html: fiscalBloco });
   }
   if (!etapas.some((e) => e.id === det.etapa)) det.etapa = etapas[0].id;
   const indice = Math.max(0, etapas.findIndex((e) => e.id === det.etapa));

@@ -1117,7 +1117,8 @@ const CessaoPopup = {
       sugestoes: [],
       valorPago: 0,
       testemunha1: "",
-      testemunha2: ""
+      testemunha2: "",
+      cesAberto: -1
     });
     this.montar();
     this.pintar();
@@ -1196,6 +1197,7 @@ const CessaoPopup = {
       } catch (e) {}
     }
     const liquidoRecebido = await this.liquidoRecebidoDoTitulo(ctx.customerId, billId);
+    const extrato = await this.parcelasDoExtrato(billId);
     const units = contract.salesContractUnits || contract.units || [];
     const u0 = units.find((u) => u && u.main) || units[0] || {};
     const unitName = String(u0.name || ctx.unidade || "").trim();
@@ -1271,7 +1273,7 @@ const CessaoPopup = {
       indexador = this.indiceDoContrato(condsApi, installments);
     }
     if (!condicoes.length) condicoes = [{ id: "c1", tipo: "Mensal", qtde: "", valor: "", vencimento: "" }];
-    const situacao = this.situacaoParcelas(installments);
+    const situacao = this.situacaoParcelas(extrato.length ? extrato : installments);
     const empName = typeof window.resolveLoteamentoName === "function" ? window.resolveLoteamentoName(unit, sale) : (ctx.empreendimento || "");
     let preamble = "";
     if (typeof window.getPreambleForContract === "function") preamble = window.getPreambleForContract(unit, sale) || "";
@@ -1300,9 +1302,12 @@ const CessaoPopup = {
       indexador: indexador,
       qtdPagas: situacao.pagas,
       qtdAbertas: situacao.abertas,
+      qtdAVencer: situacao.aVencer,
       valorParcelaAberta: situacao.valor,
       primeiroVencAberto: situacao.primeiro,
       saldoAberto: situacao.saldo,
+      saldoVencer: situacao.saldoVencer,
+      parcelasVencer: situacao.parcelasVencer,
       valorPago: liquidoRecebido > 0 ? liquidoRecebido : situacao.pago
     });
   },
@@ -1416,40 +1421,96 @@ const CessaoPopup = {
     return soma;
   },
 
+  async parcelasDoExtrato(billId) {
+    const svc = window.SiengeApiService;
+    const alvo = String(billId || "").replace(/^B-/, "").split("-")[0];
+    if (!alvo || !svc || typeof svc.getCustomerExtractHistoryByBill !== "function") return [];
+    let res = null;
+    try { res = await svc.getCustomerExtractHistoryByBill(alvo); } catch (e) { res = null; }
+    const rows = Array.isArray(res && res.data) ? res.data : (Array.isArray(res && res.results) ? res.results : []);
+    return rows.filter((row) => {
+      if (!row) return false;
+      const bid = String(row.billReceivableId || row.receivableBillId || "").replace(/^B-/, "").split("-")[0];
+      if (bid && bid !== alvo) return false;
+      if (typeof documentoExtratoEhCt === "function" && !documentoExtratoEhCt(row)) return false;
+      return true;
+    }).map((row) => ({
+      dueDate: row.dueDate || row.originalDueDate || row.installmentDueDate || "",
+      currentBalance: row.currentBalance,
+      receipts: row.receipts || [],
+      installmentSituation: row.installmentSituation
+    }));
+  },
+
+  saldoAtualDe(p) {
+    if (!p || p.currentBalance == null || p.currentBalance === "") return null;
+    const n = Number(p.currentBalance);
+    return Number.isFinite(n) ? n : null;
+  },
+
+  hojeIso() {
+    const n = new Date();
+    return n.getFullYear() + "-" + String(n.getMonth() + 1).padStart(2, "0") + "-" + String(n.getDate()).padStart(2, "0");
+  },
+
+  modaValor(valores) {
+    const bag = new Map();
+    (valores || []).forEach((v) => {
+      if (!(v > 0.009)) return;
+      const k = Math.round(v * 100);
+      bag.set(k, (bag.get(k) || 0) + 1);
+    });
+    let best = null;
+    bag.forEach((n, k) => { if (!best || n > best.n) best = { k: k, n: n }; });
+    return best ? best.k / 100 : 0;
+  },
+
   situacaoParcelas(installments) {
     const rel = window.RelacionamentoApp;
+    const hoje = this.hojeIso();
     let pagas = 0;
     let abertas = 0;
     let saldo = 0;
     let pago = 0;
     const abertos = [];
+    const vencer = [];
     (installments || []).forEach((p) => {
-      const paga = rel && typeof rel._installmentSettled === "function" ? rel._installmentSettled(p) : false;
-      const valor = Number(p.originalAmount != null ? p.originalAmount : (p.originalValue != null ? p.originalValue : (p.amount || 0))) || 0;
-      if (paga) pagas += 1;
+      const original = Number(p.originalAmount != null ? p.originalAmount : (p.originalValue != null ? p.originalValue : (p.amount || 0))) || 0;
+      const saldoAtual = this.saldoAtualDe(p);
+      const atual = saldoAtual != null ? saldoAtual : (Number(p.balanceDue != null ? p.balanceDue : original) || 0);
+      const pagaPeloSaldo = saldoAtual != null && saldoAtual <= 0.009;
+      const pagaPeloStatus = !pagaPeloSaldo && saldoAtual == null && rel && typeof rel._installmentSettled === "function" && rel._installmentSettled(p);
+      const paga = pagaPeloSaldo || pagaPeloStatus;
       const recibos = this.valorRecibos(p);
       if (recibos != null) pago += recibos;
-      else if (paga) pago += valor;
-      if (!paga) {
-        abertas += 1;
-        const atual = Number(p.currentBalance != null ? p.currentBalance : (p.balanceDue != null ? p.balanceDue : valor)) || 0;
-        saldo += atual;
-        abertos.push({
-          due: String(p.dueDate || p.originalDueDate || "").slice(0, 10),
-          valor: valor
-        });
+      else if (paga) pago += original;
+      if (paga) {
+        pagas += 1;
+        return;
       }
+      abertas += 1;
+      saldo += atual;
+      const due = String(p.dueDate || p.originalDueDate || "").slice(0, 10);
+      const item = { due: due, valor: atual > 0.009 ? atual : original };
+      abertos.push(item);
+      if (!due || due >= hoje) vencer.push(item);
     });
     abertos.sort((a, b) => String(a.due).localeCompare(String(b.due)));
-    const valores = abertos.map((x) => x.valor).filter((v) => v > 0);
-    const valor = valores.length ? valores.slice().sort((a, b) => a - b)[Math.floor(valores.length / 2)] : 0;
+    vencer.sort((a, b) => String(a.due).localeCompare(String(b.due)));
+    const baseValor = (vencer.length ? vencer : abertos).map((x) => x.valor);
+    const valor = this.modaValor(baseValor);
+    const saldoVencer = vencer.reduce((s, x) => s + (Number(x.valor) || 0), 0);
+    const primeiro = (vencer[0] && vencer[0].due) || (abertos[0] && abertos[0].due) || "";
     return {
       pagas: pagas,
       abertas: abertas,
+      aVencer: vencer.length,
       pago: Math.round(pago * 100) / 100,
       saldo: Math.round(saldo * 100) / 100,
+      saldoVencer: Math.round(saldoVencer * 100) / 100,
       valor: Math.round(valor * 100) / 100,
-      primeiro: (abertos[0] && abertos[0].due) || ""
+      primeiro: primeiro,
+      parcelasVencer: vencer
     };
   },
 
@@ -1627,6 +1688,7 @@ const CessaoPopup = {
     const conj = typeof window.legalSpouseRecord === "function" ? window.legalSpouseRecord(c) : null;
     const rep = row.representante;
     const civil = c.civilStatus || c.maritalStatus || "";
+    const aberto = Number(CessaoPopupState.cesAberto) === idx;
     const bloco = (titulo, pessoa) => {
       if (!pessoa) return "";
       const doc = this.docDe(pessoa);
@@ -1642,14 +1704,17 @@ const CessaoPopup = {
         </div>
       </div>`;
     };
-    return `<div class="cessao-ces-card">
+    return `<div class="cessao-ces-card${aberto ? " is-open" : ""}">
       <div class="cessao-ces-top">
-        <div>
-          <span class="cessao-ces-ordem">Cessionário ${idx + 1}</span>
-          <strong>${this.esc(c.name || "—")}</strong>
-          <span class="cessao-badge">${pj ? "Pessoa jurídica" : "Pessoa física"}</span>
-          <div class="cessao-ces-id">ID ${this.esc(c.id || row.customerId)}</div>
-        </div>
+        <button type="button" class="cessao-ces-toggle" onclick="CessaoPopup.toggleCes(${idx})" aria-expanded="${aberto ? "true" : "false"}">
+          <i data-lucide="${aberto ? "chevron-down" : "chevron-right"}" style="width:16px;height:16px;"></i>
+          <span>
+            <span class="cessao-ces-ordem">Cessionário ${idx + 1}</span>
+            <strong>${this.esc(c.name || "—")}</strong>
+            <span class="cessao-badge">${pj ? "Pessoa jurídica" : "Pessoa física"}</span>
+            <span class="cessao-ces-id">ID ${this.esc(c.id || row.customerId)}${conj && conj.name ? " · cônjuge " + this.esc(conj.name) : ""}</span>
+          </span>
+        </button>
         <div class="cessao-ces-acoes">
           <label class="cessao-pop-field">% adquirido
             <input class="form-control" type="number" min="0" step="0.01" value="${row.pct}" oninput="CessaoPopup.setCessionarioPct(${idx}, this.value)">
@@ -1660,7 +1725,7 @@ const CessaoPopup = {
           <button type="button" class="btn btn-outline btn-sm" onclick="CessaoPopup.removeCessionario(${idx})" title="Remover cessionário"><i data-lucide="trash-2" style="width:14px;height:14px;"></i></button>
         </div>
       </div>
-      <dl class="cessao-ces-dados">
+      ${aberto ? `<dl class="cessao-ces-dados">
         <div><dt>Documento</dt><dd>${this.esc(this.docDe(c) || "não informado")}</dd></div>
         <div><dt>Estado civil</dt><dd>${this.esc(civil || "não informado")}</dd></div>
         <div><dt>Telefone</dt><dd>${this.esc(this.foneDe(c) || "não consta")}</dd></div>
@@ -1668,7 +1733,7 @@ const CessaoPopup = {
         <div><dt>E-mail</dt><dd>${this.esc(this.emailDe(c) || "não consta")}</dd></div>
       </dl>
       ${bloco("Cônjuge", conj)}
-      ${bloco("Representante", rep)}
+      ${bloco("Representante", rep)}` : ""}
     </div>`;
   },
 
@@ -1794,7 +1859,14 @@ const CessaoPopup = {
 
   removeCessionario(idx) {
     CessaoPopupState.cessionarios.splice(idx, 1);
+    if (Number(CessaoPopupState.cesAberto) === idx) CessaoPopupState.cesAberto = CessaoPopupState.cessionarios.length - 1;
+    else if (Number(CessaoPopupState.cesAberto) > idx) CessaoPopupState.cesAberto -= 1;
     if (CessaoPopupState.buscaModo.tipo === "representante") CessaoPopupState.buscaModo = { tipo: "cessionario" };
+    this.pintar();
+  },
+
+  toggleCes(idx) {
+    CessaoPopupState.cesAberto = Number(CessaoPopupState.cesAberto) === idx ? -1 : idx;
     this.pintar();
   },
 
@@ -1896,6 +1968,7 @@ const CessaoPopup = {
         pct: Math.round(rem * 100) / 100,
         representante: null
       });
+      CessaoPopupState.cesAberto = CessaoPopupState.cessionarios.length - 1;
     }
     CessaoPopupState.busca = "";
     CessaoPopupState.sugestoes = [];
@@ -1997,16 +2070,27 @@ const CessaoPopup = {
   },
 
   clausulaSaldo() {
-    const qtd = Math.round(Number(CessaoPopupState.qtdAbertas) || 0);
-    const saldo = Number(CessaoPopupState.saldoAberto) || 0;
+    const lista = (CessaoPopupState.parcelasVencer || []).slice().sort((a, b) => String(a.due).localeCompare(String(b.due)));
+    const qtd = lista.length;
+    const saldo = lista.reduce((s, x) => s + (Number(x.valor) || 0), 0);
     if (qtd <= 0 || saldo <= 0.009) {
-      return "5. O(s) CESSIONÁRIO(S) não possuem saldo em aberto junto ao(s) PROMITENTE(S) VENDEDOR(ES), estando o contrato integralmente pago.";
+      return "5. O(s) CESSIONÁRIO(S) não possuem parcelas a vencer junto ao(s) PROMITENTE(S) VENDEDOR(ES).";
     }
-    const valor = Number(CessaoPopupState.valorParcelaAberta) || (qtd ? saldo / qtd : 0);
-    const quando = CessaoApp.fmtDate(CessaoPopupState.primeiroVencAberto);
-    return "5. Que o(s) CESSIONÁRIO(S) obrigam-se ao pagamento total da dívida junto ao(s) PROMITENTE(S) VENDEDOR(ES), no valor de " +
-      this.money(saldo) + " (" + this.extensoValor(saldo) + "), sendo " + qtd + " (" + this.extensoQtd(qtd) + ") parcelas mensais no valor de " +
-      this.money(valor) + " (" + this.extensoValor(valor) + ") com primeiro vencimento em " + quando +
+    const valor = Number(CessaoPopupState.valorParcelaAberta) || (saldo / qtd);
+    const primeiro = CessaoApp.fmtDate(lista[0].due);
+    const ultimo = CessaoApp.fmtDate(lista[lista.length - 1].due);
+    const iguais = lista.every((p) => Math.abs((Number(p.valor) || 0) - valor) < 0.02);
+    let detalhe;
+    if (iguais) {
+      detalhe = "sendo " + qtd + " (" + this.extensoQtd(qtd) + ") parcelas mensais a vencer, no valor de " +
+        this.money(valor) + " (" + this.extensoValor(valor) + ") cada, com vencimentos de " + primeiro +
+        (ultimo && ultimo !== primeiro ? " a " + ultimo : "");
+    } else {
+      const itens = lista.map((p) => CessaoApp.fmtDate(p.due) + " no valor de " + this.money(p.valor)).join("; ");
+      detalhe = "sendo as seguintes parcelas a vencer: " + itens;
+    }
+    return "5. Que o(s) CESSIONÁRIO(S) obrigam-se ao pagamento das parcelas a vencer junto ao(s) PROMITENTE(S) VENDEDOR(ES), no valor de " +
+      this.money(saldo) + " (" + this.extensoValor(saldo) + "), " + detalhe +
       "; serão pagas através de boletos bancários em nome do CESSIONÁRIO junto ao(s) PROMITENTE(S) VENDEDOR(ES).";
   },
 
@@ -2022,33 +2106,50 @@ const CessaoPopup = {
 
   assinaturaHtml() {
     const st = CessaoPopupState;
-    const linha = (nomes, papel) => `<div style="margin-top:12px;text-align:center;white-space:normal;"><div style="width:260px;margin:0 auto 2px;border-top:1px solid #111;"></div><strong>${nomes}</strong><br>${papel}</div>`;
-    const ced = (st.cedentes || []).filter((c) => c.cede && Number(c.cederPct) > 0).map((c) => String(c.name || "").toUpperCase());
-    const ces = [];
+    const campo = (nome, papel) => `<div style="height:64px;"></div>
+      <div style="border-top:1px solid #111;margin:0 10px 8px;"></div>
+      <div style="font-weight:bold;line-height:1.3;">${this.esc(String(nome || "").toUpperCase())}</div>
+      <div style="margin-top:2px;">${this.esc(papel)}</div>`;
+    const faixa = (campos) => {
+      if (!campos.length) return "";
+      if (campos.length === 1) {
+        return `<tr><td colspan="2" style="padding:40px 22% 0;text-align:center;white-space:normal;vertical-align:bottom;">${campo(campos[0].nome, campos[0].papel)}</td></tr>`;
+      }
+      return `<tr>${campos.slice(0, 2).map((c) => `<td style="width:50%;padding:40px 14px 0;text-align:center;white-space:normal;vertical-align:bottom;">${campo(c.nome, c.papel)}</td>`).join("")}</tr>`;
+    };
+    const grupoDe = (customer, papel) => {
+      const nome = customer && (customer.name || customer.nome);
+      if (!nome) return [];
+      const conj = !this.isPj(customer) && typeof window.legalSpouseRecord === "function" ? window.legalSpouseRecord(customer) : null;
+      const campos = [{ nome: nome, papel: papel }];
+      if (conj && conj.name) campos.push({ nome: conj.name, papel: "Cônjuge" });
+      return [campos];
+    };
+    const cedentes = (st.cedentes || []).filter((c) => c.cede && Number(c.cederPct) > 0);
+    const linhasCed = cedentes.flatMap((c) => grupoDe(c.customer || { name: c.name }, "Cedente"));
+    const linhasCes = [];
     (st.cessionarios || []).forEach((row) => {
-      if (row.customer) ces.push(String(row.customer.name || "").toUpperCase());
-      const conj = row.customer && typeof window.legalSpouseRecord === "function" ? window.legalSpouseRecord(row.customer) : null;
-      if (conj && conj.name) ces.push(String(conj.name).toUpperCase());
-      if (row.representante && row.representante.name) ces.push(String(row.representante.name).toUpperCase());
+      grupoDe(row.customer, "Cessionário").forEach((g) => linhasCes.push(g));
+      if (row.representante && row.representante.name) {
+        linhasCes.push([{ nome: row.representante.name, papel: "Representante" }]);
+      }
     });
     const users = typeof getDistratoWitnessUsers === "function" ? getDistratoWitnessUsers() : [];
     const w = (id) => users.find((u) => String(u.id) === String(id)) || {};
-    const w1 = w(st.testemunha1);
-    const w2 = w(st.testemunha2);
-    const rg = (u) => u.doc_rg || u.rg || "________________";
-    const nome = (u) => u.name || u.nome || "________________";
+    const testemunha = (u) => {
+      const nome = u.name || u.nome || "________________";
+      const rg = u.doc_rg || u.rg || "________________";
+      return `<td style="width:50%;padding:36px 16px 0;text-align:center;white-space:normal;">Nome: ${this.esc(nome)}<br>RG: ${this.esc(rg)}</td>`;
+    };
     const data = this.dataHoje();
-    const testemunha = (u) => `<div style="text-align:center;white-space:normal;min-width:200px;">Nome: ${this.esc(nome(u))}<br>RG: ${this.esc(rg(u))}</div>`;
-    return `<div style="font-family:'Times New Roman',serif;white-space:normal;line-height:1.25;">` +
-      `<p style="text-align:justify;margin:0;">${this.htmlTexto("E assim, por estarem justas e contratadas, assinam o presente em 03 (três) vias de igual teor, na presença das testemunhas abaixo.")}</p>` +
-      `<p style="text-align:center;margin:12px 0 0;">Botucatu, ${this.esc(data)}</p>` +
-      linha(this.esc(ced.join(" ")), "Cedente(s)") +
-      linha(this.esc(ces.join(" ")), "Cessionário(s)") +
-      linha(this.esc(String(st.empresaNome || "ANUENTE").toUpperCase()), "Anuente(s)") +
-      `<div style="margin-top:14px;text-align:center;white-space:normal;">` +
-      `<div style="font-weight:bold;">Testemunhas</div>` +
-      `<div style="display:flex;justify-content:center;gap:48px;margin-top:8px;">${testemunha(w1)}${testemunha(w2)}</div>` +
-      `</div></div>`;
+    return `<div style="font-family:'Times New Roman',serif;white-space:normal;line-height:1.35;">` +
+      `<p style="text-align:justify;margin:0 0 8px;">${this.htmlTexto("E assim, por estarem justas e contratadas, assinam o presente em 03 (três) vias de igual teor, na presença das testemunhas abaixo.")}</p>` +
+      `<p style="text-align:center;margin:28px 0 8px;">Botucatu, ${this.esc(data)}</p>` +
+      `<table style="width:100%;border-collapse:collapse;margin-top:8px;">${linhasCed.map(faixa).join("")}${linhasCes.map(faixa).join("")}` +
+      faixa([{ nome: st.empresaNome || "ANUENTE", papel: "Anuente" }]) +
+      `<tr><td colspan="2" style="padding-top:48px;text-align:center;font-weight:bold;">Testemunhas</td></tr>` +
+      `<tr>${testemunha(w(st.testemunha1))}${testemunha(w(st.testemunha2))}</tr>` +
+      `</table></div>`;
   },
 
   /** Cada palavra vira um bloco: o gerador de PDF apagava o espaço no texto justificado. */

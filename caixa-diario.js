@@ -1021,12 +1021,16 @@ const FluxoCaixaDiarioApp = {
       seen[key] = true;
       const cats = Array.isArray(r.receiptsCategories) ? r.receiptsCategories : (Array.isArray(r.paymentsCategories) ? r.paymentsCategories : []);
       const cat = cats.find((c) => c && (c.costCenterId != null || c.costCenterName)) || {};
+      let pagarId = this.idPagarDe(r);
+      if (pagarId === titulo) pagarId = "";
       out.push({
         outra: true,
         date: prev,
         deslocadoDe: prev !== due ? due : "",
         valor,
+        saldo: r.correctedBalanceAmount != null ? Number(r.correctedBalanceAmount) : (r.balanceAmount != null ? Number(r.balanceAmount) : null),
         cliente: r.clientName || "",
+        clientId: r.clientId != null ? String(r.clientId) : "",
         companyId,
         empresa: r.companyName || "",
         cc: cat.costCenterId != null ? String(cat.costCenterId) : "",
@@ -1037,6 +1041,8 @@ const FluxoCaixaDiarioApp = {
         docId: doc,
         documento: numero,
         vencimento: due,
+        emissao: String(r.issueDate || r.billDate || "").slice(0, 10),
+        pagarId,
         billId: titulo
       });
     });
@@ -1232,6 +1238,128 @@ const FluxoCaixaDiarioApp = {
     });
   },
 
+  idPagarDe(o) {
+    if (!o || typeof o !== "object") return "";
+    const keys = ["payableBillId", "billPayableId", "accountPayableBillId", "payableId", "originPayableBillId", "sourceBillId", "linkedPayableBillId", "billIdPayable"];
+    const vistos = [o];
+    Object.keys(o).forEach((k) => {
+      const v = o[k];
+      if (v && typeof v === "object" && !Array.isArray(v)) vistos.push(v);
+    });
+    for (let i = 0; i < vistos.length; i++) {
+      const obj = vistos[i];
+      for (let j = 0; j < keys.length; j++) {
+        const n = obj[keys[j]];
+        if (n != null && String(n).trim() && String(n) !== "0") return String(n).trim();
+      }
+    }
+    return "";
+  },
+
+  async anexosDe(billId, fonte) {
+    if (fonte === "pagar" && window.ComprasPrevisoesApp && typeof ComprasPrevisoesApp.anexosDoTitulo === "function") {
+      const lista = await ComprasPrevisoesApp.anexosDoTitulo(billId);
+      return (lista || []).map((a) => Object.assign({}, a, { billId: String(billId), fonte: "pagar" }));
+    }
+    const path = fonte === "receber"
+      ? "/accounts-receivable/receivable-bills/" + encodeURIComponent(billId) + "/attachments"
+      : "/bills/" + encodeURIComponent(billId) + "/attachments";
+    const data = await window.siengeFetchWithRetry(path, 1);
+    return ((data && data.results) || []).map((a) => ({
+      id: a.attachmentid != null ? a.attachmentid : a.attachmentId,
+      name: String(a.name || "anexo.pdf"),
+      description: String(a.description || "PDF").trim() || "PDF",
+      billId: String(billId),
+      fonte
+    })).filter((a) => a.id != null && a.id !== "");
+  },
+
+  async acharTituloPagar(item, bill) {
+    const titulo = String(item.titulo || "");
+    const direto = item.pagarId || this.idPagarDe(bill);
+    if (direto && direto !== titulo) {
+      try {
+        const b = await window.siengeFetchWithRetry("/bills/" + encodeURIComponent(direto), 1);
+        if (b && (b.id || b.creditorName || b.documentNumber)) return { id: String(b.id || direto), bill: b };
+      } catch (e) { /* segue pela busca do documento */ }
+    }
+    const doc = String((bill && bill.documentNumber) || item.documento || "").trim();
+    if (doc.length < 2) return null;
+    const empresa = String((bill && bill.companyId) || item.companyId || "");
+    const base = String(item.emissao || (bill && (bill.issueDate || bill.billDate)) || item.vencimento || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(base)) return null;
+    const largo = !item.emissao && !(bill && (bill.issueDate || bill.billDate));
+    const ini = caixaAddDays(base, largo ? -240 : -60);
+    const fim = caixaAddDays(base, largo ? 30 : 60);
+    const tipo = String(item.docId || (bill && (bill.documentId || bill.documentIdentificationId)) || "").toUpperCase();
+    const buscar = async (comEmpresa) => {
+      let q = "/bills?startDate=" + encodeURIComponent(ini) + "&endDate=" + encodeURIComponent(fim)
+        + "&documentNumber=" + encodeURIComponent(doc) + "&limit=50";
+      if (comEmpresa && empresa) q += "&debtorId=" + encodeURIComponent(empresa);
+      const data = await window.siengeFetchWithRetry(q, 1);
+      return (data && data.results) || [];
+    };
+    let rows = [];
+    try { rows = await buscar(true); } catch (e) { rows = []; }
+    if (!rows.length && empresa) {
+      try { rows = await buscar(false); } catch (e2) { rows = []; }
+    }
+    const docUp = doc.toUpperCase();
+    const hits = rows.filter((b) => b && String(b.documentNumber || "").trim().toUpperCase() === docUp && String(b.id) !== titulo);
+    const typed = tipo ? hits.filter((b) => String(b.documentIdentificationId || "").toUpperCase() === tipo) : hits;
+    const pool = typed.length === 1 ? typed : (typed.length ? [] : (hits.length === 1 ? hits : []));
+    if (!pool.length) return null;
+    return { id: String(pool[0].id), bill: pool[0] };
+  },
+
+  async openRecebimento(date, idx) {
+    const day = this.days.find((d) => d.date === date);
+    const item = day && day.itens[idx];
+    if (!item || !item.outra || !item.titulo) return;
+    const token = "rec:" + date + ":" + idx;
+    this.detail = { receber: true, token, loading: true, error: "", item, bill: null, parcela: null, pagar: null, attachments: [] };
+    this.render();
+    try {
+      const billId = item.titulo;
+      let bill = null;
+      try {
+        bill = await window.siengeFetchWithRetry("/accounts-receivable/receivable-bills/" + encodeURIComponent(billId), 1);
+      } catch (e) {
+        const st = Number(e && e.status) || 0;
+        const msg = String((e && e.message) || "");
+        if (st !== 404 && !/\b404\b/.test(msg)) throw e;
+      }
+      let inst = [];
+      try {
+        const res = await window.siengeFetchWithRetry("/accounts-receivable/receivable-bills/" + encodeURIComponent(billId) + "/installments?limit=200", 1);
+        inst = (res && res.results) || (Array.isArray(res) ? res : []);
+      } catch (e2) { inst = []; }
+      const parcelaId = String(item.parcela || "");
+      const parcela = inst.find((p) => String(p && (p.installmentId != null ? p.installmentId : p.installmentNumber)) === parcelaId) || null;
+      const pagar = await this.acharTituloPagar(item, bill);
+      let attachments = [];
+      if (pagar && pagar.id) {
+        try { attachments = await this.anexosDe(pagar.id, "pagar"); } catch (e3) { attachments = []; }
+      }
+      if (!attachments.length) {
+        try { attachments = await this.anexosDe(billId, "receber"); } catch (e4) { attachments = []; }
+      }
+      if (!this.detail || this.detail.token !== token) return;
+      this.detail.loading = false;
+      this.detail.bill = bill;
+      this.detail.parcela = parcela;
+      this.detail.pagar = pagar;
+      this.detail.attachments = attachments;
+      if (!bill && !parcela) this.detail.error = "Não encontrei o título a receber " + billId + " no Sienge.";
+      this.render();
+    } catch (e) {
+      if (!this.detail || this.detail.token !== token) return;
+      this.detail.loading = false;
+      this.detail.error = (e && e.message) ? e.message : "Não consegui abrir o título a receber.";
+      this.render();
+    }
+  },
+
   async openTitulo(key) {
     let item = null;
     this.days.some((d) => {
@@ -1268,9 +1396,10 @@ const FluxoCaixaDiarioApp = {
     this.render();
   },
 
-  async baixarAnexo(billId, attachmentId, name) {
+  async baixarAnexo(billId, attachmentId, name, fonte) {
     const base = (window.SIENGE_CONFIG && window.SIENGE_CONFIG.baseUrl) || "/api/sienge-proxy";
-    const path = "/bills/" + encodeURIComponent(billId) + "/attachments/" + encodeURIComponent(attachmentId);
+    const path = (fonte === "receber" ? "/accounts-receivable/receivable-bills/" : "/bills/")
+      + encodeURIComponent(billId) + "/attachments/" + encodeURIComponent(attachmentId);
     const headers = {};
     if (typeof getBasicAuthHeader === "function") headers.Authorization = getBasicAuthHeader();
     try {
@@ -1290,9 +1419,65 @@ const FluxoCaixaDiarioApp = {
     }
   },
 
+  detailReceberHtml(det) {
+    const item = det.item || {};
+    const bill = det.bill || {};
+    const parc = det.parcela || {};
+    const pagar = det.pagar;
+    const pagarBill = (pagar && pagar.bill) || {};
+    const cliente = item.cliente || bill.customerName || "—";
+    const doc = [item.docId || bill.documentId || bill.documentIdentificationId, item.documento || bill.documentNumber].filter(Boolean).join(" ");
+    const saldo = parc.currentBalance != null ? Number(parc.currentBalance) : (parc.balanceDue != null ? Number(parc.balanceDue) : (item.saldo != null ? Number(item.saldo) : null));
+    const quitado = !!(bill.payOffDate || bill.payoffDate);
+    const situacao = quitado ? "Quitado" : (saldo != null && saldo > 0.009 ? "Em aberto" : (saldo != null ? "Recebido" : "—"));
+    const valorParc = parc.originalValue != null ? Number(parc.originalValue) : (parc.originalAmount != null ? Number(parc.originalAmount) : item.valor);
+    const obs = bill.note || bill.notes || "";
+    const dePagar = (det.attachments || []).some((a) => a.fonte === "pagar");
+    const anexos = (det.attachments || []).map((a) => `
+      <button type="button" class="btn btn-outline btn-sm" style="height:32px;" onclick="FluxoCaixaDiarioApp.baixarAnexo('${caixaEsc(a.billId || item.titulo)}','${caixaEsc(a.id)}','${caixaEsc(a.name || "anexo.pdf")}','${caixaEsc(a.fonte || "pagar")}')">${caixaEsc(a.description || a.name || "Anexo")}</button>
+    `).join("");
+    const semAnexo = dePagar
+      ? "O título a pagar não tem anexo."
+      : (pagar
+        ? "Não há anexo no título a receber nem no contas a pagar de origem."
+        : "Não há anexo neste título a receber. Quando ele nasce de um contas a pagar, os anexos ficam naquele título.");
+    const origem = pagar ? `
+      <h4 style="margin:16px 0 6px;color:#105436;font-size:0.92rem;">Origem no contas a pagar</h4>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:0.86rem;">
+        Título ${caixaEsc(pagar.id)}${pagarBill.creditorName ? " · " + caixaEsc(pagarBill.creditorName) : ""}
+        <div style="color:#64748b;margin-top:4px;">Os anexos deste recebimento ficam no contas a pagar.</div>
+      </div>` : "";
+    return `<div style="position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:80;display:flex;align-items:center;justify-content:center;padding:16px;" onclick="if(event.target===this)FluxoCaixaDiarioApp.closeTitulo()">
+      <div style="background:#fff;border-radius:12px;width:min(720px,96vw);max-height:86vh;overflow:auto;padding:18px 20px;">
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;">
+          <h3 style="margin:0;color:#105436;">Título a receber ${caixaEsc(item.titulo)}${item.parcela ? " · parcela " + caixaEsc(item.parcela) : ""}</h3>
+          <button type="button" class="btn btn-cancel btn-sm" onclick="FluxoCaixaDiarioApp.closeTitulo()">Fechar</button>
+        </div>
+        ${det.loading ? `<p style="color:#64748b;">Abrindo o título a receber…</p>` : ""}
+        ${det.error ? `<p style="color:#b91c1c;">${caixaEsc(det.error)}</p>` : ""}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;margin-top:12px;font-size:0.86rem;">
+          <div><span style="color:#64748b;">Cliente</span><div style="font-weight:700;">${caixaEsc(cliente)}</div></div>
+          <div><span style="color:#64748b;">Documento</span><div style="font-weight:700;">${caixaEsc(doc || "—")}</div></div>
+          <div><span style="color:#64748b;">Empresa</span><div>${caixaEsc(item.empresa || this.companyName(item.companyId) || item.companyId || "—")}</div></div>
+          <div><span style="color:#64748b;">Vencimento</span><div>${caixaFmtDate(item.vencimento || (parc.dueDate || "").slice(0, 10) || item.date)}</div></div>
+          <div><span style="color:#64748b;">Valor</span><div style="font-weight:700;color:#105436;">${caixaMoney(valorParc)}</div></div>
+          <div><span style="color:#64748b;">Saldo</span><div>${saldo == null || !Number.isFinite(saldo) ? "—" : caixaMoney(saldo)}</div></div>
+          <div><span style="color:#64748b;">Situação</span><div>${situacao}</div></div>
+          <div><span style="color:#64748b;">Centro de custo</span><div>${caixaEsc(item.ccNome || "—")}</div></div>
+          ${item.unidade ? `<div><span style="color:#64748b;">Unidade</span><div>${caixaEsc(item.unidade)}</div></div>` : ""}
+        </div>
+        ${obs ? `<p style="margin:12px 0 0;font-size:0.84rem;"><strong>Observação:</strong> ${caixaEsc(obs)}</p>` : ""}
+        ${origem}
+        <h4 style="margin:16px 0 6px;color:#105436;font-size:0.92rem;">${dePagar ? "Anexos do contas a pagar" : "Anexos"}</h4>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">${det.loading ? "" : (anexos || `<span style="color:#64748b;font-size:0.84rem;">${semAnexo}</span>`)}</div>
+      </div>
+    </div>`;
+  },
+
   detailHtml() {
     const det = this.detail;
     if (!det) return "";
+    if (det.receber) return this.detailReceberHtml(det);
     const item = det.item || {};
     const bill = det.bill || {};
     const pago = item.natureza === "pago";
@@ -1624,7 +1809,8 @@ const FluxoCaixaDiarioApp = {
   /**
    * Sobra da conta corrente acima do saldo mínimo.
    * De 10 a 31 dias, a sugestão é compromissada. Acima de 31 dias, CDB, porque o IOF zera.
-   * O resgate é outro aviso: dia em que a conta corrente fica negativa e ainda há saldo aplicado.
+   * O resgate aponta o dia em que a conta corrente ficaria negativa e o valor
+   * para cobrir as despesas de 7 dias úteis a partir desse resgate.
    */
   aplicacaoHtml(linhas) {
     const hoje = this.hoje();
@@ -1673,13 +1859,76 @@ const FluxoCaixaDiarioApp = {
       const dias = diasDe(fim);
       msgs.push(`<p class="cxd-aplica-comp"><b>Aplicar na compromissada:</b> ${caixaMoney(comp)}. Esse valor pode ficar aplicado por ${dias} dias, até ${caixaFmtDate(fim)}, entre o prazo mínimo de ${par.prazo} dias e os 31 dias em que o IOF do CDB zera. Mantenha ${pisoTxt} na conta corrente.</p>`);
     }
-    const resgates = fut.filter((l) => l.acumCc < -0.5 && l.acumInv > 0.5);
-    if (resgates.length) {
-      const amostra = resgates.slice(0, 6).map((l) => `${caixaFmtDate(l.d.date)} (${caixaMoney(l.acumCc)})`).join(", ");
-      const resto = resgates.length > 6 ? ` e mais ${resgates.length - 6} dia(s)` : "";
-      msgs.push(`<p class="cxd-aplica-resgate"><b>Resgatar aplicação:</b> ${caixaEsc(amostra)}${resto}. Nessas datas a conta corrente fica negativa e o dinheiro está na aplicação.</p>`);
+    const plano = this.planoResgates(serie);
+    if (plano.length) {
+      const mostra = plano.slice(0, 6);
+      const resto = plano.length > mostra.length ? `<li>e mais ${plano.length - mostra.length} resgate(s) depois de ${caixaFmtDate(mostra[mostra.length - 1].fim)}</li>` : "";
+      const itens = mostra.map((r) => {
+        const cobre = r.uteis >= 7
+          ? `cobre as despesas de 7 dias úteis, até ${caixaFmtDate(r.fim)}`
+          : `cobre as despesas de ${r.uteis} dia${r.uteis === 1 ? " útil" : "s úteis"}, até ${caixaFmtDate(r.fim)}`;
+        const falta = r.falta > 0.5 ? ` O saldo da aplicação não alcança o restante (${caixaMoney(r.falta)}).` : "";
+        return `<li><b>Resgatar em ${caixaFmtDate(r.dia)}:</b> ${caixaMoney(r.valor)}. Esse valor ${cobre}.${falta}</li>`;
+      }).join("");
+      msgs.push(`<div class="cxd-aplica-resgate"><b>Resgate da aplicação</b><span>A conta corrente fica negativa e o dinheiro está na aplicação. Cada data abaixo é um resgate. O valor cobre as despesas de 7 dias úteis.</span><ul>${itens}${resto}</ul></div>`);
     }
     return msgs.length ? `<div class="cxd-aplica">${msgs.join("")}</div>` : "";
+  },
+
+  /** Próximos resgates: no dia em que a conta corrente ficaria negativa, o valor do buraco dos 7 dias úteis seguintes. */
+  planoResgates(serie) {
+    const out = [];
+    if (!serie.length) return out;
+    let retirado = 0;
+    let desde = 0;
+    const setimo = (iso) => {
+      let d = String(iso || "").slice(0, 10);
+      let n = 0;
+      for (let g = 0; g < 40 && n < 7; g++) {
+        if (caixaEhUtil(d)) n += 1;
+        if (n >= 7) return d;
+        d = caixaAddDays(d, 1);
+      }
+      return d;
+    };
+    for (let volta = 0; volta < 40; volta++) {
+      let i = -1;
+      for (let k = desde; k < serie.length; k++) {
+        if (serie[k].cc + retirado < -0.5 && serie[k].inv - retirado > 0.5) { i = k; break; }
+      }
+      if (i < 0) break;
+      const queda = serie[i].date;
+      let dia = caixaDiaUtil(queda, -1);
+      if (dia < serie[0].date) dia = caixaEhUtil(serie[0].date) ? serie[0].date : caixaDiaUtil(serie[0].date, 1);
+      const fimAlvo = setimo(dia);
+      const fimSerie = serie[serie.length - 1].date;
+      const fim = fimAlvo > fimSerie ? fimSerie : fimAlvo;
+      const inicio = queda < dia ? queda : dia;
+      let minCc = 0;
+      let uteis = 0;
+      for (let d = dia; d <= fim; d = caixaAddDays(d, 1)) {
+        if (caixaEhUtil(d)) uteis += 1;
+      }
+      serie.forEach((p) => {
+        if (p.date < inicio || p.date > fim) return;
+        minCc = Math.min(minCc, p.cc + retirado);
+      });
+      const precisa = Math.max(0, -minCc);
+      const disponivel = Math.max(0, serie[i].inv - retirado);
+      const valor = Math.min(precisa, disponivel);
+      if (!(valor > 0.5)) break;
+      out.push({
+        dia,
+        valor: Math.round(valor * 100) / 100,
+        fim,
+        uteis,
+        falta: Math.round(Math.max(0, precisa - valor) * 100) / 100
+      });
+      retirado += valor;
+      desde = i + 1;
+      if (valor + 0.5 < precisa) break;
+    }
+    return out;
   },
 
   linhaDetalhe(it, cls, click) {
@@ -1727,7 +1976,10 @@ const FluxoCaixaDiarioApp = {
     porEmp.sort((a, b) => a.rotulo.localeCompare(b.rotulo, "pt"));
     porEmp.forEach((g) => g.itens.sort((a, b) => String(a.it.unidade || "").localeCompare(String(b.it.unidade || ""), "pt") || String(a.it.cliente || "").localeCompare(String(b.it.cliente || ""), "pt")));
     const linhaIn = (x) => {
-      const abre = !x.it.outra && !!((x.it.customerId || x.it.clientId) && x.it.billId);
+      if (x.it.outra && (x.it.titulo || x.it.billId)) {
+        return this.linhaDetalhe(x.it, "cxd-det-in", `onclick="FluxoCaixaDiarioApp.openRecebimento('${d.date}',${x.i})" title="Abrir o título a receber"`);
+      }
+      const abre = !!((x.it.customerId || x.it.clientId) && x.it.billId);
       return this.linhaDetalhe(x.it, "cxd-det-in", abre ? `onclick="FluxoCaixaDiarioApp.openEntrada('${d.date}',${x.i})"` : "");
     };
     const subs = porEmp.map((g) => {
@@ -1967,7 +2219,10 @@ const FluxoCaixaDiarioApp = {
         #fluxo-caixa-diario-root .cxd-aplica p { margin:0; padding:8px 12px; border-radius:8px; font-size:.8rem; font-weight:600; }
         #fluxo-caixa-diario-root .cxd-aplica-cdb { background:#e7f6ee; color:#105436; }
         #fluxo-caixa-diario-root .cxd-aplica-comp { background:#eff6ff; color:#1e3a8a; }
-        #fluxo-caixa-diario-root .cxd-aplica-resgate { background:#fff7ed; color:#9a3412; }
+        #fluxo-caixa-diario-root .cxd-aplica-resgate { background:#fff7ed; color:#9a3412; padding:8px 12px; border-radius:8px; font-size:.8rem; font-weight:600; }
+        #fluxo-caixa-diario-root .cxd-aplica-resgate > span { display:block; margin-top:2px; font-weight:500; }
+        #fluxo-caixa-diario-root .cxd-aplica-resgate ul { margin:6px 0 0; padding-left:18px; }
+        #fluxo-caixa-diario-root .cxd-aplica-resgate li { margin:4px 0; }
         #fluxo-caixa-diario-root .cxd-org-outra { background:#ecfeff; color:#0e7490; }
         #fluxo-caixa-diario-root .cxd-analitico td.cxd-conta { white-space:normal; color:#334155 !important; font-size:.74rem; }
         #fluxo-caixa-diario-root .cxd-mx tr.cxd-row-dia td { font-weight:700; }

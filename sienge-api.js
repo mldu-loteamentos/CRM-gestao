@@ -822,6 +822,11 @@ const ApiUsage = {
     const tela = this.telaAtual();
     day.apis[apiKey].telas = day.apis[apiKey].telas || {};
     day.apis[apiKey].telas[tela] = (Number(day.apis[apiKey].telas[tela]) || 0) + 1;
+    day.apis[apiKey].quem = day.apis[apiKey].quem || {};
+    day.apis[apiKey].quem[actor.userKey] = day.apis[apiKey].quem[actor.userKey] || { label: actor.userLabel, kind: actor.source, rest: 0, bulk: 0 };
+    day.apis[apiKey].quem[actor.userKey][kind] = (Number(day.apis[apiKey].quem[actor.userKey][kind]) || 0) + 1;
+    day.apis[apiKey].quem[actor.userKey].label = actor.userLabel;
+    day.apis[apiKey].quem[actor.userKey].kind = actor.source;
     day.users = day.users || {};
     day.users[actor.userKey] = day.users[actor.userKey] || { rest: 0, bulk: 0, label: actor.userLabel, kind: actor.source };
     day.users[actor.userKey][kind] = (Number(day.users[actor.userKey][kind]) || 0) + 1;
@@ -858,6 +863,11 @@ const ApiUsage = {
     const tela = this.telaAtual();
     pend.apis[pk].telas = pend.apis[pk].telas || {};
     pend.apis[pk].telas[tela] = (pend.apis[pk].telas[tela] || 0) + 1;
+    pend.apis[pk].quem = pend.apis[pk].quem || {};
+    pend.apis[pk].quem[actor.userKey] = pend.apis[pk].quem[actor.userKey] || { label: actor.userLabel, kind: actor.source, rest: 0, bulk: 0 };
+    pend.apis[pk].quem[actor.userKey][info.kind] += 1;
+    pend.apis[pk].quem[actor.userKey].label = actor.userLabel;
+    pend.apis[pk].quem[actor.userKey].kind = actor.source;
     pend.users[actor.userKey] = pend.users[actor.userKey] || { label: actor.userLabel, kind: actor.source, rest: 0, bulk: 0 };
     pend.users[actor.userKey][info.kind] += 1;
     this.pending[date] = pend;
@@ -899,6 +909,18 @@ const ApiUsage = {
         if (a.telas && Object.keys(a.telas).length) {
           payload.apis[k].telas = {};
           Object.keys(a.telas).forEach((t) => { payload.apis[k].telas[t] = increment(a.telas[t] || 0); });
+        }
+        if (a.quem && Object.keys(a.quem).length) {
+          payload.apis[k].quem = {};
+          Object.keys(a.quem).forEach((u) => {
+            const q = a.quem[u] || {};
+            payload.apis[k].quem[u] = {
+              label: q.label || u,
+              kind: q.kind || "user",
+              rest: increment(q.rest || 0),
+              bulk: increment(q.bulk || 0)
+            };
+          });
         }
       });
       Object.keys(pend.users || {}).forEach((k) => {

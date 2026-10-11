@@ -39,7 +39,7 @@ const MarketingBudgetApp = {
     credorQuery: "",
     planoQuery: "",
     sortGasto: "data",
-    sortGastoDir: "desc",
+    sortGastoDir: "asc",
     lotesCache: null,
     ccsCfg: [],
     aba: "budget",
@@ -689,7 +689,7 @@ const MarketingBudgetApp = {
           cats[catId].total += valor;
         };
         if (previsao) {
-          if (retro) push("comprometido", original * fat, hoje, true);
+          if (retro) push("previsao_vencida", original * fat, hoje, true);
           else push("previsao", original * fat, venc);
         } else {
           push("realizado", realizado * fat, dataPg || venc);
@@ -993,7 +993,7 @@ const MarketingBudgetApp = {
     const soma = (st) => rows.filter((r) => r.status === st).reduce((t, r) => t + r.valor, 0);
     const verba = (Number(s.obra && s.obra.vgv) || 0) * ((Number(s.pct) || 0) / 100);
     const realizado = soma("realizado");
-    const previsto = soma("previsao");
+    const previsto = soma("previsao") + soma("previsao_vencida");
     const comprometido = soma("comprometido") + previsto;
     const brutas = s.vendas.reduce((t, v) => t + v.unidades, 0);
     const distr = s.distratos.reduce((t, v) => t + v.unidades, 0);
@@ -1036,13 +1036,13 @@ const MarketingBudgetApp = {
     if (s.sortGasto === col) s.sortGastoDir = s.sortGastoDir === "asc" ? "desc" : "asc";
     else {
       s.sortGasto = col;
-      s.sortGastoDir = (col === "data" || col === "valor") ? "desc" : "asc";
+      s.sortGastoDir = col === "valor" ? "desc" : "asc";
     }
     this.pintarGastos();
   },
 
   valorOrdenacaoGasto(x, col) {
-    const nomes = { realizado: "Realizado", comprometido: "Comprometido", previsao: "Previsão" };
+    const nomes = { realizado: "Realizado", comprometido: "Comprometido", previsao: "Previsão", previsao_vencida: "Previsão vencida" };
     if (col === "data") return this.dataGasto(x);
     if (col === "situacao") return nomes[x.status] || x.status || "";
     if (col === "titulo") return String(x.titulo || "") + "/" + String(x.parcela || "").padStart(6, "0");
@@ -1099,6 +1099,10 @@ const MarketingBudgetApp = {
         acc[x.status].n += 1;
         acc[x.status].v += v;
       }
+      if (x.status === "previsao_vencida") {
+        acc.previsao.n += 1;
+        acc.previsao.v += v;
+      }
     });
     return ["todos", "realizado", "comprometido", "previsao"].map((id) => {
       const on = this.state.filtroGasto === id;
@@ -1123,7 +1127,7 @@ const MarketingBudgetApp = {
     const credItems = [...credores.entries()].map(([id, label]) => ({ id, label })).sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
     const planItems = [...planos.entries()].map(([id, nome]) => ({ id, label: `${id} - ${nome}` })).sort((a, b) => a.label.localeCompare(b.label, "pt-BR", { numeric: true }));
     const recorte = this.gastosRecorte(r);
-    let lista = s.filtroGasto === "todos" ? recorte : recorte.filter((x) => x.status === s.filtroGasto);
+    let lista = s.filtroGasto === "todos" ? recorte : recorte.filter((x) => x.status === s.filtroGasto || (s.filtroGasto === "previsao" && x.status === "previsao_vencida"));
     const dir = s.sortGastoDir === "asc" ? 1 : -1;
     const col = s.sortGasto || "data";
     lista = lista.slice().sort((a, b) => {
@@ -1151,7 +1155,7 @@ const MarketingBudgetApp = {
 
   gastosLinhas(lista) {
     const s = this.state;
-    const nomes = { realizado: "Realizado", comprometido: "Comprometido", previsao: "Previsão" };
+    const nomes = { realizado: "Realizado", comprometido: "Comprometido", previsao: "Previsão", previsao_vencida: "Previsão vencida" };
     if (!lista.length) {
       const vazio = (s.credoresSel || []).length || (s.planosSel || []).length ? "com esse filtro" : (s.filtroGasto === "todos" ? "no período" : "nesta situação");
       return `<tr><td colspan="7" class="mkb-vazio">Nenhum gasto ${vazio}.</td></tr>`;
@@ -1179,7 +1183,7 @@ const MarketingBudgetApp = {
       alert("Não foi possível carregar a biblioteca de Excel. Recarregue a página.");
       return;
     }
-    const nomes = { realizado: "Realizado", comprometido: "Comprometido", previsao: "Previsão" };
+    const nomes = { realizado: "Realizado", comprometido: "Comprometido", previsao: "Previsão", previsao_vencida: "Previsão vencida" };
     const view = this.gastosView(this.resumo());
     const lista = view.lista;
     const cc = this.ccAtual();
@@ -1325,12 +1329,12 @@ const MarketingBudgetApp = {
       ccNome: x.ccNome,
       planoId: x.catId,
       plano: x.catNome,
-      natureza: pago ? "pago" : (x.status === "previsao" ? "previsao" : "programado"),
+      natureza: pago ? "pago" : ((x.status === "previsao" || x.status === "previsao_vencida") ? "previsao" : "programado"),
       dataPagamento: pago ? (x.dataPg || x.data) : "",
       valor: x.tOriginal,
       valorAjustado: pago ? x.tRealizado : x.tOriginal,
-      saldo: x.status === "comprometido" ? x.tAberto : 0,
-      situacaoTexto: pago ? "Pago" : (x.status === "previsao" ? "Previsão" : "Em aberto")
+      saldo: (x.status === "comprometido" || x.status === "previsao_vencida") ? x.tAberto : 0,
+      situacaoTexto: pago ? "Pago" : (x.status === "previsao_vencida" ? "Previsão vencida" : (x.status === "previsao" ? "Previsão" : "Em aberto"))
     });
   },
 
@@ -2244,6 +2248,7 @@ const MarketingBudgetApp = {
         #marketing-budget-root .mkb-st-realizado { background:#dcfce7; color:#105436; }
         #marketing-budget-root .mkb-st-comprometido { background:#ffedd5; color:#c2410c; }
         #marketing-budget-root .mkb-st-previsao { background:#e2e8f0; color:#334155; }
+        #marketing-budget-root .mkb-st-previsao_vencida { background:#fee2e2; color:#9a3412; }
         #marketing-budget-root .mkb-st-cancel { background:#fee2e2; color:#b91c1c; }
         #marketing-budget-root .mkb-vazio { text-align:center; color:#64748b; padding:24px; }
         #marketing-budget-root .mkb-tabs { margin-bottom:-4px; }
@@ -2328,7 +2333,7 @@ const MarketingBudgetApp = {
     const rot = meses.map((m) => ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"][Number(m.slice(5)) - 1] + "/" + m.slice(2, 4));
     const porMes = (st) => meses.map((m) => r.rows.filter((x) => x.status === st && String(x.data).slice(0, 7) === m).reduce((t, x) => t + x.valor, 0));
     const real = porMes("realizado");
-    const prev = porMes("previsao");
+    const prev = porMes("previsao").map((v, i) => v + porMes("previsao_vencida")[i]);
     const comp = porMes("comprometido").map((v, i) => v + prev[i]);
     let acc = 0;
     const acum = meses.map((_, i) => (acc += real[i] + comp[i]));
