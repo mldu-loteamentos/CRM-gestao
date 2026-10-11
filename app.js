@@ -6795,8 +6795,10 @@ async function loadAndApplyPermissions() {
 }
 
 function toggleNavMenu(event, submenuId) {
-  event.preventDefault();
-  
+  if (event) event.preventDefault();
+  const nav = document.querySelector(".nav-links");
+  const keepScroll = nav ? nav.scrollTop : 0;
+
   // Se a sidebar estiver recolhida, expande ela primeiro
   const sidebar = document.querySelector('.sidebar');
   if (sidebar && sidebar.classList.contains('collapsed')) {
@@ -6821,6 +6823,11 @@ function toggleNavMenu(event, submenuId) {
       if(parentGroup) parentGroup.classList.remove('active');
     }
   }
+  const restoreNavScroll = () => {
+    if (nav) nav.scrollTop = keepScroll;
+  };
+  restoreNavScroll();
+  requestAnimationFrame(restoreNavScroll);
 }
 
 function changeApiMode(mode) {
@@ -10758,6 +10765,16 @@ document.addEventListener("DOMContentLoaded", () => {
         if (e.target.closest("#sidebar-toggle-btn")) return;
         toggleSidebar();
       }
+    });
+  }
+  const navLinks = document.querySelector(".nav-links");
+  if (navLinks) {
+    navLinks.addEventListener("mousedown", (e) => {
+      const link = e.target.closest("a");
+      if (!link) return;
+      const action = link.getAttribute("onclick") || "";
+      if (action.indexOf("toggleNavMenu") === -1) return;
+      e.preventDefault();
     });
   }
 

@@ -2330,7 +2330,9 @@ circle.donut-segment {
 .nav-links {
   overflow-y: auto;
   overflow-x: hidden;
+  overflow-anchor: none;
   padding-right: 5px;
+  min-height: 0;
 }
 .nav-links::-webkit-scrollbar {
   width: 4px;
