@@ -438,14 +438,7 @@ const ConfigUsersApp = {
     {
       name: "Relacionamento", icon: "users", key: "mod_rel",
       submodules: [
-        { name: "Buscar Cliente", key: "sub_rel_busca", actions: [{ id: "buscar_cliente", label: "Buscar Cliente", permBase: "sub_rel_geral_buscar_cliente" }] },
-        { name: "Gerar documentos", key: "sub_rel_docs", actions: [
-          { id: "autorizacao_escritura", label: "Autorização de escritura", permBase: "sub_rel_docs_autorizacao_escritura" },
-          { id: "autorizacao_terceiros", label: "Autorização de terceiros", permBase: "sub_rel_docs_autorizacao_terceiros" },
-          { id: "alteracao_vencimento", label: "Alteração de vencimento", permBase: "sub_rel_docs_alteracao_vencimento" },
-          { id: "cessao_direitos", label: "Cessão de Direitos", permBase: "sub_rel_docs_cessao_direitos" },
-          { id: "termo_quitacao", label: "Termo de quitação", permBase: "sub_rel_docs_termo_quitacao" }
-        ] }
+        { name: "Buscar Cliente", key: "sub_rel_busca", actions: [{ id: "buscar_cliente", label: "Buscar Cliente", permBase: "sub_rel_geral_buscar_cliente" }] }
       ]
     },
     {
@@ -2407,7 +2400,10 @@ const ConfigUsersApp = {
     }
     const removed = Object.keys(incoming).filter((k) => existing[k] === true && incoming[k] !== true);
     if (removed.length) {
-      const ok = window.confirm("Você está tirando " + removed.length + " acesso(s) deste perfil. Permissão não é apagada sozinha. Confirma a retirada?");
+      const msg = "Você está tirando " + removed.length + " acesso(s) deste perfil. Permissão não é apagada sozinha. Confirma a retirada?";
+      const ok = typeof window.mouraConfirm === "function"
+        ? await window.mouraConfirm(msg)
+        : confirm(msg);
       if (!ok) return;
     }
     const perms = Object.assign({}, existing, incoming, { _savedAt: Date.now() });

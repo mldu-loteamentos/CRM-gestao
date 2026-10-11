@@ -697,6 +697,7 @@ const HonorariosReport = {
     if (!window.MlEmpresaFilter) return;
     const self = this;
     this.FILTERS.forEach((f) => {
+      if (f.key === "op" && this.soHonorarios()) return;
       const wid = "rhon-f-" + f.key;
       MlEmpresaFilter.bind(wid, {
         toggleOpen() { self.openF = self.openF === f.key ? "" : f.key; self.render(); },
@@ -719,7 +720,19 @@ const HonorariosReport = {
     });
   },
 
+  nomeTerceirizada() {
+    const u = this.terceirizadaUser();
+    return String((u && u.name) || "").trim();
+  },
+
   filterHtml(f) {
+    if (f.key === "op" && this.soHonorarios()) {
+      const nome = this.nomeTerceirizada();
+      return `<div class="ml-emp-filter">
+        <div class="ml-emp-filter-label">OPERADOR</div>
+        <div class="rhon-op-fixo" title="${rhonEsc(nome)}">${rhonEsc(nome)}</div>
+      </div>`;
+    }
     if (!window.MlEmpresaFilter) return "";
     return MlEmpresaFilter.html({
       id: "rhon-f-" + f.key,
@@ -1668,6 +1681,7 @@ const HonorariosReport = {
       #relatorios-cr-root .rhon-f-slot .ml-emp-filter-panel { width:max-content; min-width:100%; max-width:min(560px, 92vw); right:auto; }
       #relatorios-cr-root .rhon-f-slot .ml-emp-filter-list { max-height:340px; }
       #relatorios-cr-root .rhon-f-slot .ml-emp-filter-item span { white-space:nowrap; }
+      #relatorios-cr-root .rhon-op-fixo { height:38px; display:flex; align-items:center; padding:0 12px; border:1px solid #cbd5e1; border-radius:6px; background:#f8fafc; font-weight:700; color:#0f172a; font-size:.85rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
       #relatorios-cr-root .rhon-btn { height:38px; display:inline-flex; align-items:center; gap:6px; }
       #relatorios-cr-root .rhon-field { display:flex; flex-direction:column; gap:4px; }
       #relatorios-cr-root .rhon-field label { font-size:.8rem; font-weight:600; color:#475569; }
