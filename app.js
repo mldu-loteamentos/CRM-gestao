@@ -39330,7 +39330,6 @@ window.openGestaoDocumentoMenu = function(ctx) {
 
 /** Status vem da coluna Status da Gestão; vazio (ex.: aberto pela Cessão) não bloqueia aqui, a tela confere no Sienge. */
 window._gestaoDocBloqueio = function(tipo, status) {
-  if (tipo === "cessao") return "Cessão de direitos ainda não está disponível.";
   const s = String(status || "").trim().toLowerCase();
   if (!s) return "";
   const distratado = /distrat|cancel/.test(s);
@@ -39418,14 +39417,20 @@ window.escolherGestaoDocumento = function(tipo) {
   }
 
   if (tipo === "cessao") {
-    if (typeof switchTab === "function") switchTab("relacionamento_cessao", "Cessão de Direitos");
-    setTimeout(() => {
-      if (window.CessaoApp && typeof CessaoApp.abrirFluxo === "function" && customerId && contractId) {
-        CessaoApp.abrirFluxo(String(customerId), String(contractId), String(titulo || ""));
-      } else if (window.CessaoApp && typeof CessaoApp.init === "function") {
-        CessaoApp.init();
-      }
-    }, 180);
+    if (window.CessaoApp && typeof CessaoApp.abrirPopup === "function") {
+      CessaoApp.abrirPopup({
+        titulo: titulo && String(titulo) !== "—" ? (String(titulo).replace(/\D/g, "") || String(titulo)) : "",
+        contrato: contractNumber ? String(contractNumber).trim() : "",
+        nome: customerName ? String(customerName).trim() : "",
+        customerId: customerId,
+        contractId: contractId,
+        unidade: ctx.unidade || "",
+        empreendimento: ctx.empreendimento || "",
+        status: ctx.status || ""
+      });
+    } else {
+      alert("A tela de cessão ainda não carregou. Atualize a página e tente de novo.");
+    }
     return;
   }
 

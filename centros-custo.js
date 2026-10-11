@@ -155,6 +155,13 @@ const CentrosCustoApp = {
     }
     const tipoCcEl = document.getElementById(`edit-tipo-cc-${id}`);
     if (tipoCcEl) custom.tipo_cc = tipoCcEl.value;
+    const assocEl = document.getElementById(`edit-assoc-nome-${id}`);
+    if (String(custom.tipo_cc || "") === "Loteamento Fechado") {
+      custom.associacao_nome = assocEl ? String(assocEl.value || "").trim() : (custom.associacao_nome || "");
+      this.propagarLoteamentoFechado(id, custom);
+    } else {
+      custom.associacao_nome = "";
+    }
 
     const impostoPagoEl = document.getElementById(`edit-imposto-pago-${id}`);
     if (impostoPagoEl) custom.imposto_pago_empresa = impostoPagoEl.checked;
@@ -464,13 +471,62 @@ const CentrosCustoApp = {
     sel.dataset.loaded = "1";
   },
 
+  /** 17701, 17702 e 17703 são a mesma obra: o número é o código sem os dois últimos dígitos. */
+  obraDe(id) {
+    const s = String(id == null ? "" : id);
+    return s.length > 2 ? s.slice(0, -2) : s;
+  },
+
+  irmaosObra(id) {
+    const obra = this.obraDe(id);
+    if (!obra) return [];
+    const vistos = new Set();
+    const lista = [];
+    const add = (cc) => {
+      if (!cc || cc.id == null) return;
+      const key = String(cc.id);
+      if (this.obraDe(key) !== obra || vistos.has(key)) return;
+      vistos.add(key);
+      lista.push(cc);
+    };
+    (CentrosCustoState.costCenters || []).forEach(add);
+    Object.keys(CentrosCustoState.customFields || {}).forEach((key) => add({ id: key }));
+    return lista.sort((a, b) => String(a.id).localeCompare(String(b.id), "pt-BR", { numeric: true }));
+  },
+
+  associacaoHerdada(id) {
+    const propria = String(this.customOf(id).associacao_nome || "").trim();
+    if (propria) return propria;
+    const irmao = this.irmaosObra(id).find((c) => String(this.customOf(c.id).associacao_nome || "").trim());
+    return irmao ? String(this.customOf(irmao.id).associacao_nome || "").trim() : "";
+  },
+
+  propagarLoteamentoFechado(id, custom) {
+    this.irmaosObra(id).forEach((c) => {
+      if (String(c.id) === String(id)) return;
+      const key = String(c.id);
+      const outro = Object.assign({}, this.customOf(key), {
+        cc_id: key,
+        tipo_cc: "Loteamento Fechado",
+        associacao_nome: custom.associacao_nome || "",
+        updatedAt: Date.now()
+      });
+      CentrosCustoState.customFields[key] = outro;
+      CentrosCustoState.customFields[c.id] = outro;
+    });
+  },
+
   syncIncorporacaoUi(id) {
     const tipoEl = document.getElementById(`edit-tipo-cc-${id}`);
     const panel = document.getElementById(`edit-incorp-panel-${id}`);
-    if (!panel) return;
-    const isIncorp = tipoEl && String(tipoEl.value) === 'Incorporação';
-    panel.style.display = isIncorp ? 'block' : 'none';
-    if (isIncorp) this.syncIncorporacaoLotesSub(id);
+    const assoc = document.getElementById(`edit-assoc-panel-${id}`);
+    const tipo = tipoEl ? String(tipoEl.value) : "";
+    if (panel) {
+      const isIncorp = tipo === "Incorporação";
+      panel.style.display = isIncorp ? "block" : "none";
+      if (isIncorp) this.syncIncorporacaoLotesSub(id);
+    }
+    if (assoc) assoc.style.display = tipo === "Loteamento Fechado" ? "block" : "none";
   },
 
   syncIncorporacaoLotesSub(id) {
@@ -588,6 +644,9 @@ const CentrosCustoApp = {
     const incorpLotesProprios = custom.incorporacao_lotes_proprios === true;
     const incorpLotesTipo = custom.incorporacao_lotes_tipo || 'abertos';
     const showIncorp = tipo_cc === 'Incorporação';
+    const showAssoc = tipo_cc === 'Loteamento Fechado';
+    const assocNome = this.associacaoHerdada(id);
+    const irmaos = this.irmaosObra(id).map((c) => String(c.id)).filter((x) => x !== String(id));
     const parceiro = this.isParceiro(cc);
     const par = this.parDoRateio(cc);
     const parCustom = par ? this.customOf(par.outro.id) : {};
@@ -648,6 +707,15 @@ const CentrosCustoApp = {
                   <input type="number" id="edit-perc-terrenista-${id}" class="form-control" step="0.01" min="0" max="100" value="${valorTerr}" ${par && par.papel === 'ml' ? 'disabled' : ''} oninput="CentrosCustoApp.completarRateio(${id}, 'terrenista')">
                   ${par && par.papel === 'ml' ? `<small style="display:block;margin-top:4px;color:#64748b;">Fica no CC ${this.escHtml(parRotulo)}.</small>` : ''}
                 </div>
+            </div>
+            <div id="edit-assoc-panel-${id}" style="display:${showAssoc ? 'block' : 'none'}; padding:14px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px;">
+              <h4 style="margin:0 0 6px 0; color:#14532d; font-size:0.9rem;">Loteamento fechado</h4>
+              <label for="edit-assoc-nome-${id}" style="display:block; font-weight:bold; margin-bottom:5px; font-size:0.85rem;">Nome da associação</label>
+              <input type="text" id="edit-assoc-nome-${id}" class="form-control" value="${this.escHtml(assocNome)}" placeholder="Associação Mirante dos Ramos">
+              <p style="margin:8px 0 0; font-size:0.75rem; color:#166534; line-height:1.4;">
+                Usado na adesão gerada junto com a cessão de direitos.
+                ${irmaos.length ? `O mesmo tipo e o mesmo nome valem para os centros da obra ${this.escHtml(this.obraDe(id))}: ${this.escHtml(irmaos.join(", "))}.` : ""}
+              </p>
             </div>
             ${par ? `<p style="margin:-8px 0 0;padding:8px 12px;border-radius:6px;background:#f0fdf4;color:#14532d;font-size:0.8rem;line-height:1.4;">
               Centro de custo exclusivo ${par.papel === 'ml' ? 'da Moura Leite' : 'do parceiro'}: ele é 100% ${par.papel === 'ml' ? 'da Moura Leite' : 'do terrenista'}.

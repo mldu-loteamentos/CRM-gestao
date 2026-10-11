@@ -6,6 +6,7 @@ window.InserirNotaApp = {
   TESSERACT_URL: "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js",
   TOL: 0.05,
   DOCUMENTOS: ["NFS", "NFSE", "NF", "NFE", "RPA", "FAT"],
+  MOTIVOS_CANCELAMENTO_KEY: "crm_fiscal_motivos_cancelamento",
 
   state: null,
   aba: "fila",
@@ -35,7 +36,8 @@ window.InserirNotaApp = {
       criada: null,
       resultado: null,
       item: null,
-      itemAnexoNota: null
+      itemAnexoNota: null,
+      validado: false
     };
   },
 
@@ -308,6 +310,7 @@ window.InserirNotaApp = {
     const file = input && input.files && input.files[0];
     if (!file) return;
     const s = this.state;
+    if (!s._mantemValidacao) this.invalidarValidacao();
     s.arquivo = file;
     s.nota = null;
     s.leituraErro = "";
@@ -684,6 +687,7 @@ window.InserirNotaApp = {
   async inserir() {
     const s = this.state;
     if (!this.podeEditar()) { alert("Sem permissão para inserir notas no Sienge."); return; }
+    if (!s.validado) { alert("Clique em Validar antes de inserir a nota no Sienge."); return; }
     const c = this.conferir();
     if (c.erros.length) { alert(c.erros.join("\n")); return; }
     const f = s.form;
@@ -813,6 +817,7 @@ window.InserirNotaApp = {
   setCampo(campo, valor) {
     const f = this.state.form;
     f[campo] = typeof f[campo] === "boolean" ? !!valor : String(valor == null ? "" : valor);
+    if (["numero", "serie", "documento", "emissao", "companyId"].includes(campo)) this.invalidarValidacao();
     if (["numero", "serie", "documento"].includes(campo)) {
       if (campo !== "documento" && /^NF\b/.test(f.notes || "")) f.notes = this.observacaoPadrao();
       clearTimeout(this._dupT);
@@ -822,6 +827,7 @@ window.InserirNotaApp = {
   },
 
   setValorNota(v) {
+    this.invalidarValidacao();
     const s = this.state;
     s.nota = s.nota || { origem: "digitado" };
     s.nota.valor = this.num(v);
@@ -830,6 +836,7 @@ window.InserirNotaApp = {
   },
 
   setQtd(item, entrega, v) {
+    this.invalidarValidacao();
     const s = this.state;
     const it = s.itens.find((x) => String(x.itemNumber) === String(item));
     const e = it && it.entregas.find((x) => String(x.n) === String(entrega));
@@ -911,6 +918,7 @@ window.InserirNotaApp = {
     this.state = this.novoEstado();
     const s = this.state;
     s.item = item;
+    s.validado = !!item.validadoEm;
     s.pedidoId = item.pedido;
     if (item.numeroNota) s.form.numero = item.numeroNota;
     this.aba = "lancar";
@@ -924,8 +932,12 @@ window.InserirNotaApp = {
       try {
         const file = await FilaNotasFiscais.baixar(anexo);
         s.itemAnexoNota = anexo;
+        s._mantemValidacao = !!item.validadoEm;
         await this.lerArquivo({ files: [file] });
+        s._mantemValidacao = false;
+        s.validado = !!item.validadoEm;
       } catch (e) {
+        s._mantemValidacao = false;
         s.lendo = "";
         s.leituraErro = `${(e && e.message) || e}. Abra a nota no card do envio, salve e escolha o arquivo aqui.`;
       }
@@ -1048,7 +1060,7 @@ window.InserirNotaApp = {
   },
 
   /* ---------- tela ---------- */
-  /** Lupa sobre a imagem da nota: a lente mostra a mesma imagem ampliada em volta do ponteiro. */
+  /** Faixa retangular na largura da nota: acompanha o mouse e amplia a região. */
   lupa(ev, sair) {
     const area = ev.currentTarget;
     const lente = area && area.querySelector(".inf-lupa");
@@ -1063,14 +1075,17 @@ window.InserirNotaApp = {
       return;
     }
     const z = this._zoom || 2.5;
-    const L = lente.offsetWidth || 360;
+    const H = Math.max(120, Math.min(200, r.height * 0.32));
     if (!lente.style.backgroundImage) lente.style.backgroundImage = `url("${img.src}")`;
     lente.style.display = "block";
+    lente.style.width = `${r.width}px`;
+    lente.style.height = `${H}px`;
+    lente.style.left = "0px";
     area.classList.add("is-ativa");
-    lente.style.left = `${x - L / 2}px`;
-    lente.style.top = `${y - L / 2}px`;
+    const top = Math.max(0, Math.min(r.height - H, y - H / 2));
+    lente.style.top = `${top}px`;
     lente.style.backgroundSize = `${r.width * z}px ${r.height * z}px`;
-    lente.style.backgroundPosition = `${L / 2 - x * z}px ${L / 2 - y * z}px`;
+    lente.style.backgroundPosition = `${r.width / 2 - x * z}px ${H / 2 - y * z}px`;
   },
 
   zoomLupa(ev) {
@@ -1257,9 +1272,9 @@ window.InserirNotaApp = {
         .inf-acoes .btn i { width: 16px; height: 16px; }
         .inf-preview { position: sticky; top: 12px; }
         .inf-preview img { width: 100%; display: block; border: 1px solid #e2e8f0; border-radius: 8px; }
-        .inf-lupa-area { position: relative; overflow: hidden; border-radius: 8px; cursor: zoom-in; }
-        .inf-lupa-area.is-ativa { cursor: none; }
-        .inf-lupa { position: absolute; display: none; width: 360px; height: 360px; border-radius: 50%; border: 3px solid #105436; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.28); background-color: #fff; background-repeat: no-repeat; pointer-events: none; z-index: 5; }
+        .inf-lupa-area { position: relative; overflow: hidden; border-radius: 8px; cursor: crosshair; }
+        .inf-lupa-area.is-ativa { cursor: crosshair; }
+        .inf-lupa { position: absolute; display: none; left: 0; width: 100%; height: 160px; border-radius: 0; border-top: 3px solid #105436; border-bottom: 3px solid #105436; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.28); background-color: #fff; background-repeat: no-repeat; pointer-events: none; z-index: 5; }
         .inf-lupa-dica { display: flex; align-items: center; gap: 6px; margin: 8px 0 0; color: #64748b; font-size: 0.76rem; }
         .inf-lupa-dica i { width: 14px; height: 14px; }
         .inf-resultado { border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; font-size: 0.85rem; }
@@ -1349,7 +1364,7 @@ window.InserirNotaApp = {
             <h3><i data-lucide="image"></i> Nota anexada</h3>
             ${s.preview ? `<div class="inf-lupa-area" onmousemove="InserirNotaApp.lupa(event)" onmouseleave="InserirNotaApp.lupa(event, true)" onwheel="InserirNotaApp.zoomLupa(event)">
                 <img src="${s.preview}" alt="Nota fiscal" draggable="false"><div class="inf-lupa"></div></div>
-              <p class="inf-lupa-dica"><i data-lucide="zoom-in"></i> Passe o mouse para ampliar · role a roda do mouse sobre a nota para mudar o zoom: <strong class="inf-lupa-zoom">${(this._zoom || 2.5).toLocaleString("pt-BR")}x</strong></p>` : `<p class="inf-muted">${s.arquivo && /\.xml$/i.test(s.arquivo.name) ? "Nota em XML: os campos foram lidos direto do arquivo." : "A imagem da nota aparece aqui para conferir os campos."}</p>`}
+              <p class="inf-lupa-dica"><i data-lucide="zoom-in"></i> Passe o mouse: a faixa amplia a nota na largura da página · role a roda para o zoom: <strong class="inf-lupa-zoom">${(this._zoom || 2.5).toLocaleString("pt-BR")}x</strong></p>` : `<p class="inf-muted">${s.arquivo && /\.xml$/i.test(s.arquivo.name) ? "Nota em XML: os campos foram lidos direto do arquivo." : "A imagem da nota aparece aqui para conferir os campos."}</p>`}
           </div>
         </div>
       </div>`;

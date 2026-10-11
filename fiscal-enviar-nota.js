@@ -4,7 +4,7 @@
 window.FilaNotasFiscais = {
   COL: "fiscal_notas_envio",
   FORMAS: ["Boleto", "PIX", "Transferência (TED)", "Débito em conta", "Cartão de crédito", "Outra"],
-  TIPOS_ANEXO: { nota: "Nota fiscal", boleto: "Boleto", outro: "Outro" },
+  TIPOS_ANEXO: { nota: "Nota fiscal", boleto: "Boleto", cancelada: "Nota cancelada", carta: "Carta de correção", outro: "Outro" },
   MAX_MB: 20,
   STATUS: {
     pendente: { rot: "Aguardando fiscal", cls: "is-wait" },
@@ -86,7 +86,10 @@ window.FilaNotasFiscais = {
       return `<span class="cprev-fiscal-acoes">${tag}</span>`;
     }
     if (item && item.status === "devolvida") {
-      tag = `<span class="cprev-tag cprev-tag-previsao" title="${esc(item.motivoDevolucao || "Devolvida pelo fiscal")}">Nota devolvida</span>`;
+      const tit = item.devolucaoTipo === "cancelamento"
+        ? "Devolvida para cancelamento. Reenvie neste pedido a nota nova e a nota cancelada com a tarja."
+        : (item.devolucaoTipo === "carta" ? "Devolvida para carta de correção. O documento mostra o que foi informado e o que deveria ser." : (item.motivoDevolucao || "Devolvida pelo fiscal"));
+      tag = `<span class="cprev-tag cprev-tag-previsao" title="${esc(tit)}">Nota devolvida</span>`;
     }
     const rot = item && item.status === "devolvida" ? "Corrigir envio" : "Enviar ao fiscal";
     const id = item && item.status === "devolvida" ? item.id : "";
@@ -207,8 +210,62 @@ window.FilaNotasFiscais = {
     return `<span class="fnf-pill ${st.cls}">${esc(st.rot)}${extra}</span>`;
   },
 
+  iconeAnexo(tipo) {
+    if (tipo === "boleto") return "barcode";
+    if (tipo === "nota") return "file-text";
+    if (tipo === "cancelada") return "file-x";
+    if (tipo === "carta") return "file-diff";
+    return "paperclip";
+  },
+
+  motivoHtml(item, esc) {
+    if (!item || item.status !== "devolvida" || !item.motivoDevolucao) return "";
+    const rot = item.devolucaoTipo === "cancelamento" ? "Cancelar a nota" : (item.devolucaoTipo === "carta" ? "Carta de correção" : "Devolvida");
+    return `<small class="fnf-motivo"><b>${rot}.</b> ${esc(item.motivoDevolucao).replace(/\n/g, "<br>")}</small>`;
+  },
+
   anexosHtml(item, esc) {
-    return (item.anexos || []).map((a) => `<a class="fnf-anexo" href="${esc(a.url)}" target="_blank" rel="noopener" title="${esc(a.nome)}"><i data-lucide="${a.tipo === "boleto" ? "barcode" : (a.tipo === "nota" ? "file-text" : "paperclip")}"></i>${esc(this.TIPOS_ANEXO[a.tipo] || "Anexo")}</a>`).join(" ");
+    const lista = item.anexos || [];
+    if (!lista.length) return "—";
+    const id = esc(item.id);
+    const titulo = lista.length === 1
+      ? (lista[0].nome || this.TIPOS_ANEXO[lista[0].tipo] || "Abrir anexo")
+      : `${lista.length} anexos`;
+    if (lista.length === 1 && lista[0].url) {
+      return `<a class="fnf-anexo-ico" href="${esc(lista[0].url)}" target="_blank" rel="noopener" title="${esc(titulo)}"><i data-lucide="paperclip"></i></a>`;
+    }
+    return `<button type="button" class="fnf-anexo-ico" title="${esc(titulo)}" onclick="FilaNotasFiscais.abrirAnexos('${id}')"><i data-lucide="paperclip"></i></button>`;
+  },
+
+  acharEnvio(id) {
+    const listas = [];
+    if (window.EnviarNotaApp && EnviarNotaApp.state) listas.push(EnviarNotaApp.state.lista || []);
+    if (window.InserirNotaApp && InserirNotaApp.fila) listas.push(InserirNotaApp.fila.itens || []);
+    listas.push(this._ultimo || []);
+    return listas.reduce((achou, lista) => achou || (lista || []).find((x) => x && x.id === id), null);
+  },
+
+  abrirAnexos(id) {
+    const item = this.acharEnvio(id);
+    const lista = (item && item.anexos) || [];
+    if (lista.length === 1 && lista[0].url) {
+      window.open(lista[0].url, "_blank", "noopener");
+      return;
+    }
+    const velho = document.getElementById("fnf-anexos-pop");
+    if (velho) velho.remove();
+    if (!lista.length) return;
+    const esc = (v) => String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+    const pop = document.createElement("div");
+    pop.id = "fnf-anexos-pop";
+    pop.className = "fnf-pop";
+    pop.innerHTML = `<div class="fnf-pop-box" role="dialog" aria-label="Anexos">
+      <div class="fnf-pop-h"><b>Anexos</b><button type="button" class="fnf-pop-x" onclick="document.getElementById('fnf-anexos-pop').remove()" title="Fechar"><i data-lucide="x"></i></button></div>
+      <ul>${lista.map((a) => `<li><a href="${esc(a.url)}" target="_blank" rel="noopener"><i data-lucide="${this.iconeAnexo(a.tipo)}"></i><span>${esc(a.nome || this.TIPOS_ANEXO[a.tipo] || "Anexo")}</span><small>${esc(this.TIPOS_ANEXO[a.tipo] || "")}</small></a></li>`).join("")}</ul>
+    </div>`;
+    pop.addEventListener("click", (ev) => { if (ev.target === pop) pop.remove(); });
+    document.body.appendChild(pop);
+    if (window.lucide) lucide.createIcons();
   },
 
   pagamentoTxt(item, dataBr) {
@@ -225,15 +282,54 @@ window.FilaNotasFiscais = {
       .fnf-tab td small { display: block; color: #64748b; font-size: 0.74rem; margin-top: 2px; }
       .fnf-tab .num { text-align: right; white-space: nowrap; }
       .fnf-tab .fnf-acoes { white-space: nowrap; text-align: right; }
-      .fnf-tab .fnf-acoes .btn { height: 32px; min-width: 168px; justify-content: center; font-size: 0.76rem; display: inline-flex; align-items: center; gap: 5px; padding: 0 10px; margin-left: 4px; box-sizing: border-box; }
-      .fnf-tab .fnf-acoes .btn i { width: 13px; height: 13px; }
+      .fnf-tab .fnf-acoes .tvig-ico { margin-left: 2px; }
+      .fnf-anexo-ico { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; background: transparent; color: #64748b; border-radius: 6px; cursor: pointer; text-decoration: none; }
+      .fnf-anexo-ico:hover { background: #f1f5f9; color: #105436; }
+      .fnf-anexo-ico i { width: 15px; height: 15px; }
+      .fnf-pop { position: fixed; inset: 0; z-index: 1600; background: rgba(15, 23, 42, 0.35); display: flex; align-items: center; justify-content: center; padding: 24px; }
+      .fnf-pop-box { width: min(440px, 100%); background: #fff; border-radius: 12px; padding: 14px 16px 8px; box-shadow: 0 16px 40px rgba(15, 23, 42, 0.2); }
+      .fnf-pop-h { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+      .fnf-pop-h b { color: #105436; }
+      .fnf-pop-x { border: 0; background: transparent; color: #64748b; cursor: pointer; display: inline-flex; border-radius: 6px; padding: 4px; }
+      .fnf-pop-x:hover { background: #f1f5f9; }
+      .fnf-pop-x i { width: 16px; height: 16px; }
+      .fnf-pop ul { list-style: none; margin: 0; padding: 0; }
+      .fnf-pop li a { display: flex; align-items: center; gap: 8px; padding: 8px 4px; border-top: 1px solid #f1f5f9; color: #0f172a; text-decoration: none; font-size: 0.86rem; }
+      .fnf-pop li a:hover { color: #105436; }
+      .fnf-pop li a i { width: 16px; height: 16px; color: #105436; flex: 0 0 16px; }
+      .fnf-pop li small { margin-left: auto; color: #64748b; font-size: 0.72rem; }
+      .fnf-fila { display: flex; flex-direction: column; gap: 10px; }
+      .fnf-fila-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 18px; align-items: center; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; padding: 12px 14px; }
+      .fnf-fila-top { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+      .fnf-fila-top b { font-size: 0.95rem; color: #0f172a; }
+      .fnf-fila-top .fnf-forn { color: #334155; font-size: 0.84rem; }
+      .fnf-fila-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; color: #64748b; font-size: 0.75rem; align-items: center; }
+      .fnf-fila-lado { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+      .fnf-fila-acoes { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+      .fnf-fila-acoes .btn[disabled] { opacity: 0.45; cursor: not-allowed; }
+      .fnf-dev { position: fixed; inset: 0; z-index: 1700; background: rgba(15, 23, 42, 0.45); display: flex; align-items: center; justify-content: center; padding: 24px; }
+      .fnf-dev-box { width: min(740px, 100%); max-height: min(86vh, 860px); overflow: auto; background: #fff; border-radius: 14px; padding: 18px 18px 14px; box-shadow: 0 18px 50px rgba(15, 23, 42, 0.2); }
+      .fnf-dev-box h3 { margin: 0 0 4px; font-size: 1rem; color: #0f172a; }
+      .fnf-dev-ops { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0; }
+      .fnf-dev-op { text-align: left; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; padding: 10px 12px; cursor: pointer; }
+      .fnf-dev-op.is-on { border-color: #105436; background: #f0fdf4; }
+      .fnf-dev-op b { display: block; color: #0f172a; font-size: 0.88rem; }
+      .fnf-dev-op small { color: #64748b; font-size: 0.75rem; }
+      .fnf-motivos { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 10px; }
+      .fnf-motivos label { display: flex; gap: 8px; align-items: flex-start; font-size: 0.84rem; color: #334155; }
+      .fnf-carta-linhas { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
+      .fnf-carta-linhas .fnf-carta-linha { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 6px; }
+      .fnf-carta-linhas input, .fnf-dev-box textarea, .fnf-dev-box .fnf-campo { width: 100%; box-sizing: border-box; border: 1px solid #e2e8f0; border-radius: 8px; padding: 7px 8px; font: inherit; font-size: 0.84rem; }
+      .fnf-dev-box textarea { min-height: 72px; resize: vertical; }
+      .fnf-dev-acoes { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+      .fnf-carta-h { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 6px; color: #64748b; font-size: 0.7rem; text-transform: uppercase; margin-top: 8px; }
       .fnf-pill { display: inline-block; border-radius: 999px; padding: 2px 9px; font-size: 0.72rem; font-weight: 700; white-space: nowrap; }
       .fnf-pill.is-wait { background: #fff7ed; color: #c2410c; }
       .fnf-pill.is-info { background: #eff6ff; color: #1d4ed8; }
       .fnf-pill.is-ok { background: #ecfdf5; color: #105436; }
       .fnf-pill.is-erro { background: #fef2f2; color: #b91c1c; }
       .fnf-pill.is-off { background: #f1f5f9; color: #64748b; }
-      .fnf-anexo { display: inline-flex; align-items: center; gap: 4px; margin: 0 6px 2px 0; color: #105436; font-weight: 600; text-decoration: none; font-size: 0.78rem; }
+      .fnf-anexo { display: inline-flex; align-items: center; gap: 4px; margin: 0 6px 2px 0; color: #64748b; font-weight: 500; text-decoration: none; font-size: 0.78rem; }
       .fnf-anexo:hover { text-decoration: underline; }
       .fnf-anexo i { width: 13px; height: 13px; }
       .fnf-tab td small.fnf-motivo { color: #b91c1c; font-weight: 700; font-size: 0.78rem; }
@@ -283,8 +379,12 @@ window.EnviarNotaApp = {
     if (!s) return;
     s.lista = lista;
     s.listaCarregada = true;
+    s.abertas = (lista || []).filter((x) => FilaNotasFiscais.aberta(x) && String(x.pedidoApi) === String(s.pedidoApi) && x.id !== s.editandoId);
     if (s.aba === "minhas") this.render();
-    else this.pintarAbas();
+    else {
+      this.pintarAbas();
+      this.pintarConferencia();
+    }
   },
 
   async carregarEmpresas() {
@@ -371,15 +471,31 @@ window.EnviarNotaApp = {
       InserirNotaApp.get(`/creditors/${id}/pix-informations?limit=100`).catch((e) => { out.erro = out.erro || String((e && e.message) || e); return null; })
     ]);
     const padrao = (x) => ["S", "Y", "TRUE", "1"].includes(String(x && x.defaultFlag).toUpperCase());
+    const tipoConta = (b) => ({ C: "Conta corrente", CHECKING: "Conta corrente", P: "Poupança", SAVING: "Poupança", SAVINGS: "Poupança" }[String(b.accountType || "").toUpperCase()] || "");
     const bancos = InserirNotaApp.lista(contas);
     out.contas = bancos.filter((b) => b && (b.accountNumber || b.agency)).map((b) => ({
-      txt: this.contaTxt(b), padrao: padrao(b), favorecido: b.nameOfRecipient || "", doc: InserirNotaApp.digits(b.cpf || b.cnpj)
+      txt: this.contaTxt(b),
+      padrao: padrao(b),
+      favorecido: b.nameOfRecipient || "",
+      doc: InserirNotaApp.digits(b.cpf || b.cnpj),
+      banco: b.bank || "",
+      nomeBanco: b.nameOfBank || "",
+      agencia: b.agency || "",
+      agenciaNome: b.agencyName || b.nameOfAgency || "",
+      conta: `${b.accountNumber || ""}${b.checkDigit ? "-" + b.checkDigit : ""}`,
+      tipo: tipoConta(b),
+      forma: this.formaDoTexto(b.paymentForm || b.paymentTypeName)
     }));
     out.formas = bancos.filter((b) => b && (b.paymentForm || b.paymentTypeName)).map((b) => ({
       forma: String(b.paymentForm || b.paymentTypeName).trim(), padrao: padrao(b)
     }));
     out.pix = InserirNotaApp.lista(pix).filter((p) => p && (p.key || p.keyPix)).map((p) => ({
-      txt: `${String(p.type || p.keyPixType || "").trim().toUpperCase() || "Chave"}: ${String(p.key || p.keyPix).trim()}`, padrao: padrao(p)
+      txt: `${String(p.type || p.keyPixType || "").trim().toUpperCase() || "Chave"}: ${String(p.key || p.keyPix).trim()}`,
+      padrao: padrao(p),
+      tipoChave: String(p.type || p.keyPixType || "").trim(),
+      chave: String(p.key || p.keyPix).trim(),
+      favorecido: p.nameOfRecipient || p.beneficiaryName || p.name || "",
+      doc: InserirNotaApp.digits(p.cpf || p.cnpj || p.cpfCnpj || "")
     }));
     return out;
   },
@@ -421,6 +537,83 @@ window.EnviarNotaApp = {
     if (forma === "Boleto") this.lerBoletoAnexo();
   },
 
+  /** Lista da forma de pagamento: cadastro do credor, o que é principal, e boleto como opção complementar. */
+  opcoesPagamento() {
+    const b = this.state.banco || { contas: [], pix: [] };
+    const opts = [];
+    (b.pix || []).forEach((p) => opts.push({
+      forma: "PIX", detalhe: p.txt, tipo: "pix", item: p,
+      rotulo: `PIX · ${p.padrao ? "principal" : "cadastrada"} · ${p.txt}`
+    }));
+    (b.contas || []).forEach((c) => {
+      const forma = c.forma && c.forma !== "PIX" && c.forma !== "Boleto" ? c.forma : "Transferência (TED)";
+      opts.push({
+        forma, detalhe: c.txt, tipo: "conta", item: c,
+        rotulo: `${forma} · ${c.padrao ? "principal" : "cadastrada"} · ${c.txt}`
+      });
+    });
+    opts.push({ forma: "Boleto", detalhe: "", tipo: "boleto", item: null, rotulo: "Boleto · complementar" });
+    if (!opts.some((o) => o.forma === "Cartão de crédito")) opts.push({ forma: "Cartão de crédito", detalhe: "", tipo: "outra", item: null, rotulo: "Cartão de crédito" });
+    if (!opts.some((o) => o.forma === "Outra")) opts.push({ forma: "Outra", detalhe: "", tipo: "outra", item: null, rotulo: "Outra" });
+    return opts;
+  },
+
+  escolherPagamento(idx) {
+    const s = this.state;
+    if (idx === "" || idx == null) {
+      s.formaManual = "";
+      s.pag.forma = "";
+      s.pag.detalhe = "";
+      this.render();
+      return;
+    }
+    const o = this.opcoesPagamento()[Number(idx)];
+    if (!o) {
+      s.formaManual = "";
+      s.pag.forma = "";
+      s.pag.detalhe = "";
+      this.render();
+      return;
+    }
+    s.formaManual = o.forma;
+    s.pag.forma = o.forma;
+    s.pag.detalhe = o.forma === "Boleto" ? (s.linhaBoleto || "") : (o.detalhe || "");
+    this.render();
+    if (o.forma === "Boleto") this.lerBoletoAnexo();
+  },
+
+  fichaDestino() {
+    const pag = this.state.pag;
+    const b = this.state.banco || {};
+    const grade = (linhas) => `<div class="env-conta">${linhas.map(([k, v]) => `<b>${this.esc(k)}</b><span>${this.esc(v || "—")}</span>`).join("")}</div>`;
+    if (pag.forma === "PIX") {
+      const p = (b.pix || []).find((x) => x.txt === pag.detalhe);
+      if (!p) return "";
+      return grade([
+        ["Tipo de chave", p.tipoChave || "—"],
+        ["Chave PIX", p.chave || "—"],
+        ["Favorecido", p.favorecido || "—"],
+        ["CNPJ/CPF", p.doc ? InserirNotaApp.docFmt(p.doc) : "—"],
+        ["Principal", p.padrao ? "Sim" : "Não"]
+      ]);
+    }
+    if (pag.forma === "Transferência (TED)" || pag.forma === "Débito em conta") {
+      const c = (b.contas || []).find((x) => x.txt === pag.detalhe);
+      if (!c) return "";
+      const banco = [c.banco, c.nomeBanco].filter(Boolean).join(" · ");
+      return grade([
+        ["Banco", banco || "—"],
+        ["Agência", [c.agencia, c.agenciaNome].filter(Boolean).join(" · ") || "—"],
+        ["Conta", c.conta || "—"],
+        ["Tipo", c.tipo || "—"],
+        ["Favorecido", c.favorecido || "—"],
+        ["CNPJ/CPF", c.doc ? InserirNotaApp.docFmt(c.doc) : "—"],
+        ["Principal", c.padrao ? "Sim" : "Não"]
+      ]);
+    }
+    return "";
+  },
+
   /** Forma padrão do cadastro bancário do credor no Sienge (paymentForm). */
   formaDoTexto(txt) {
     const pf = String(txt || "").toUpperCase();
@@ -439,13 +632,38 @@ window.EnviarNotaApp = {
     return escolhida ? this.formaDoTexto(escolhida.forma) : "";
   },
 
+  /** Dígito da linha digitável (módulo 10). Junta números de campos diferentes da nota não passam. */
+  dvMod10(num) {
+    let soma = 0;
+    let mult = 2;
+    for (let i = String(num).length - 1; i >= 0; i--) {
+      let n = Number(String(num)[i]) * mult;
+      if (n > 9) n = (n % 10) + 1;
+      soma += n;
+      mult = mult === 2 ? 1 : 2;
+    }
+    return (10 - (soma % 10)) % 10;
+  },
+
+  linhaDigitavelValida(d) {
+    if (!/^\d{47}$/.test(d)) return false;
+    return this.dvMod10(d.slice(0, 9)) === Number(d[9])
+      && this.dvMod10(d.slice(10, 20)) === Number(d[20])
+      && this.dvMod10(d.slice(21, 31)) === Number(d[31]);
+  },
+
   linhaBoleto(texto) {
-    const t = String(texto || "").replace(/[^\d.\s]/g, " ").replace(/\s+/g, " ");
-    const m = t.match(/\d{5}\.?\d{5}\s+\d{5}\.?\d{6}\s+\d{5}\.?\d{6}\s+\d\s+\d{14}/);
-    if (m) return m[0].replace(/\s+/g, " ").trim();
-    const b = String(texto || "").replace(/\D/g, "");
-    const i = b.search(/(\d{47})/);
-    return i >= 0 ? b.slice(i, i + 47) : "";
+    const t = String(texto || "");
+    const formatada = t.match(/\d{5}\.?\d{5}\s+\d{5}\.?\d{6}\s+\d{5}\.?\d{6}\s+\d\s+\d{14}/);
+    if (formatada) {
+      const d = formatada[0].replace(/\D/g, "");
+      if (this.linhaDigitavelValida(d)) return formatada[0].replace(/\s+/g, " ").trim();
+    }
+    const pedacos = t.match(/\d{47}/g) || [];
+    for (let i = 0; i < pedacos.length; i++) {
+      if (this.linhaDigitavelValida(pedacos[i])) return pedacos[i];
+    }
+    return "";
   },
 
   async textoDeArquivo(file) {
@@ -493,8 +711,7 @@ window.EnviarNotaApp = {
   },
 
   temBoleto() {
-    const s = this.state;
-    return s.anexos.some((a) => a.tipo === "boleto") || !!s.linhaBoleto;
+    return (this.state.anexos || []).some((a) => a.tipo === "boleto");
   },
 
   /** Boleto no envio manda a forma. Sem boleto, usa a forma cadastrada no credor. */
@@ -630,7 +847,10 @@ window.EnviarNotaApp = {
       s.numeroNota = (nota && nota.numero) || "";
       s.serieNota = (nota && nota.serie) || "";
       s.valorNota = nota && nota.valor != null ? nota.valor : "";
-      s.linhaBoleto = this.linhaBoleto(texto);
+      if (!s.anexos.some((x) => x.tipo === "boleto")) {
+        s.linhaBoleto = "";
+        if (!s.formaManual && s.pag.forma === "Boleto") s.pag.detalhe = "";
+      }
       s.leituraErro = s.numeroNota ? "" : "Não consegui ler o número da nota no arquivo.";
       s._fonteNota = { xml: /^\s*</.test(texto) ? texto : "", texto, buf, nome: file.name || "", nota };
       s.fiscal = { carregando: true, erros: [], avisos: [], oks: [], infos: [], itens: [] };
@@ -692,9 +912,7 @@ window.EnviarNotaApp = {
   },
 
   pintarFiscal() {
-    const el = document.getElementById("env-fiscal");
-    if (!el || !window.NotaFiscalCheck) return;
-    el.innerHTML = NotaFiscalCheck.painelEnvio(this.state.fiscal);
+    this.pintarConferencia();
   },
 
   async ocr(canvas, token) {
@@ -734,6 +952,24 @@ window.EnviarNotaApp = {
     } finally {
       await worker.terminate();
     }
+  },
+
+  /** Devolução por cancelamento ainda prende este pedido até o operador reenviar a nota nova e a nota com tarja. */
+  devolucaoCancelamentoDoPedido() {
+    const s = this.state;
+    const alvos = [s.pedidoApi, s.pedidoNome, s.pedidoId].map((v) => String(v || "").replace(/\s/g, "")).filter(Boolean);
+    const digs = alvos.map((v) => v.replace(/\D/g, "")).filter((v) => v.length >= 3);
+    if (!alvos.length) return null;
+    return (s.lista || []).find((x) => {
+      if (!x || x.status !== "devolvida" || x.devolucaoTipo !== "cancelamento") return false;
+      return [x.pedido, x.pedidoApi].some((v) => {
+        const n = String(v || "").replace(/\s/g, "");
+        if (!n) return false;
+        if (alvos.includes(n)) return true;
+        const d = n.replace(/\D/g, "");
+        return d.length >= 3 && digs.includes(d);
+      });
+    }) || null;
   },
 
   mesmoNumero(a, b) {
@@ -816,6 +1052,16 @@ window.EnviarNotaApp = {
     const notas = s.anexos.filter((a) => a.tipo === "nota");
     if (!notas.length) erros.push("Anexe a nota fiscal (PDF, XML ou imagem) e marque o tipo \"Nota fiscal\".");
     else oks.push(`${notas.length === 1 ? "Nota fiscal anexada" : `${notas.length} arquivos de nota anexados`}${s.anexos.length > notas.length ? ` + ${s.anexos.length - notas.length} outro(s) anexo(s)` : ""}.`);
+    const amarrada = this.devolucaoCancelamentoDoPedido();
+    if (amarrada && amarrada.id !== s.editandoId) {
+      erros.push(`Este pedido está amarrado à nota devolvida para cancelamento${amarrada.numeroNota ? " (NF " + amarrada.numeroNota + ")" : ""}. Abra Corrigir envio neste mesmo pedido e anexe a nota nova junto com a nota cancelada, com a tarja de cancelada. Sem essa nota o sistema não libera outro envio.`);
+    } else if (amarrada) {
+      const nova = s.anexos.some((a) => a.tipo === "nota" && a.file);
+      const cancelada = s.anexos.some((a) => a.tipo === "cancelada");
+      if (!nova) erros.push("Anexe a nota nova neste mesmo pedido, no tipo Nota fiscal. A nota que já estava no envio não substitui a nota cancelada.");
+      if (!cancelada) erros.push("Anexe a nota cancelada, com a tarja de cancelada, no tipo Nota cancelada. Sem ela o pedido continua amarrado e o reenvio não segue.");
+      else if (nova) oks.push("Nota nova e nota cancelada com a tarja anexadas: o pedido pode ser reenviado.");
+    }
     if (s.lendoNota) erros.push(s.lendoNota);
     else if (notas.length && s.leituraErro) erros.push(s.leituraErro);
     else if (notas.length && s.numeroNota) {
@@ -834,7 +1080,7 @@ window.EnviarNotaApp = {
     if (!pag.data) erros.push("Confirme a data de pagamento.");
     else if (pag.data < this.hojeIso()) avisos.push(`A data de pagamento (${this.dataBr(pag.data)}) já passou.`);
     if (!pag.forma) erros.push(s.pedido && !this.temBoleto() ? "Escolha a forma de pagamento. O cadastro do credor não informa uma forma padrão." : "Escolha a forma de pagamento.");
-    else if (this.temBoleto()) oks.push(s.anexos.some((a) => a.tipo === "boleto") ? "Boleto anexado: pagamento em boleto." : "Boleto identificado na nota: pagamento em boleto.");
+    else if (this.temBoleto()) oks.push(s.linhaBoleto ? "Boleto anexado: linha digitável conferida." : "Boleto anexado: pagamento em boleto.");
     else if (!s.formaManual && pag.forma === this.formaDoCredor()) oks.push(`Forma de pagamento do cadastro do credor: ${pag.forma}.`);
     if (pag.forma === "Boleto" && !this.temBoleto()) avisos.push("Forma de pagamento boleto sem boleto anexado: anexe o boleto se ele não estiver no mesmo arquivo da nota.");
     const ops = this.destinos(pag.forma);
@@ -858,11 +1104,13 @@ window.EnviarNotaApp = {
     else if (fiscal) {
       (fiscal.erros || []).forEach((t) => erros.push(t));
       (fiscal.avisos || []).forEach((t) => avisos.push(t));
-      (fiscal.infos || []).forEach((t) => avisos.push(t));
       (fiscal.oks || []).forEach((t) => oks.push(t));
     }
     const outras = s.abertas.filter((x) => !dup || x.id !== dup.id);
-    if (outras.length) avisos.push(`Este pedido já tem ${outras.length} nota(s) na fila do fiscal (${outras.map((x) => `${x.numeroNota ? "NF " + x.numeroNota + " · " : ""}enviada por ${x.criadoPor || "?"} em ${new Date(x.criadoEm).toLocaleDateString("pt-BR")}`).join("; ")}).`);
+    if (outras.length) {
+      const n = outras.length;
+      avisos.push(`Este pedido já tem ${n} ${n === 1 ? "nota" : "notas"} na fila do fiscal (${outras.map((x) => `${x.numeroNota ? "NF " + x.numeroNota + " · " : ""}enviada por ${x.criadoPor || "?"} em ${new Date(x.criadoEm).toLocaleDateString("pt-BR")}`).join("; ")}).`);
+    }
     return { erros, avisos, oks };
   },
 
@@ -981,6 +1229,7 @@ window.EnviarNotaApp = {
     try {
       await FilaNotasFiscais.excluir(id);
       this.state.lista = this.state.lista.filter((x) => x.id !== id);
+      this.state.abertas = (this.state.abertas || []).filter((x) => x.id !== id);
       this.auditar(`Envio da nota do pedido ${item.pedido} excluído`, { id });
     } catch (e) {
       alert(`Não consegui excluir: ${(e && e.message) || e}`);
@@ -1022,8 +1271,29 @@ window.EnviarNotaApp = {
 
   conferenciaHtml() {
     const c = this.conferir();
-    const linha = (t, cls, ic) => `<li class="${cls}"><span>${ic}</span>${this.esc(t)}</li>`;
-    return `<ul class="inf-check">${c.erros.map((t) => linha(t, "is-erro", "✗")).join("")}${c.avisos.map((t) => linha(t, "is-aviso", "!")).join("")}${c.oks.map((t) => linha(t, "is-ok", "✓")).join("")}</ul>`;
+    const s = this.state;
+    const f = s.fiscal;
+    if (!window.NotaFiscalCheck || typeof NotaFiscalCheck.blocosHtml !== "function") {
+      const linha = (t, cls, ic) => `<li class="${cls}"><span>${ic}</span>${this.esc(t)}</li>`;
+      return `<ul class="inf-check">${c.erros.map((t) => linha(t, "is-erro", "✗")).join("")}${c.avisos.map((t) => linha(t, "is-aviso", "!")).join("")}${c.oks.map((t) => linha(t, "is-ok", "✓")).join("")}</ul>`;
+    }
+    const ja = new Set();
+    if (f && f.grupos) Object.keys(f.grupos).forEach((k) => (f.grupos[k] || []).forEach((it) => ja.add(it.texto)));
+    const soltos = []
+      .concat(c.erros.map((t) => ({ nivel: "erro", texto: t })))
+      .concat(c.avisos.map((t) => ({ nivel: "aviso", texto: t })))
+      .concat(c.oks.map((t) => ({ nivel: "ok", texto: t })))
+      .filter((it) => !ja.has(it.texto));
+    const servico = [];
+    const pedido = [];
+    soltos.forEach((it) => (/nota fiscal anexada|arquivos de nota|lendo o número|não consegui ler a nota|lida do arquivo/i.test(it.texto) ? servico : pedido).push(it));
+    const banco = s.banco || {};
+    const temBanco = !!((banco.contas || []).length || (banco.pix || []).length);
+    const emitente = s.pedido ? `<p class="inf-muted"><b>Dados bancários cadastrados:</b> ${temBanco ? "sim" : "não"}${banco.erro ? " · " + this.esc(banco.erro) : ""}</p>` : "";
+    const servicoHtml = servico.length ? `<ul class="inf-check">${servico.map((it) => `<li class="${it.nivel === "erro" ? "is-erro" : (it.nivel === "aviso" ? "is-aviso" : "is-ok")}"><span>${it.nivel === "erro" ? "✗" : (it.nivel === "aviso" ? "!" : "✓")}</span>${this.esc(it.texto)}</li>`).join("")}</ul>` : "";
+    const base = f && !f.carregando ? f : { grupos: { emitente: [], tomador: [], servico: [], impostos: [], cnae: [], pedido: [] }, itens: [], prestador: "", enderecoNota: "", enderecoCartao: "" };
+    const espera = f && f.carregando ? `<p class="inf-muted">Analisando itens, CNAE, retenções, alíquotas e endereço do tomador…</p>` : "";
+    return espera + NotaFiscalCheck.blocosHtml(base, { emitente: emitente, servico: servicoHtml, pedido: pedido });
   },
 
   pedidoHtml() {
@@ -1046,7 +1316,7 @@ window.EnviarNotaApp = {
     const s = this.state;
     const tipos = FilaNotasFiscais.TIPOS_ANEXO;
     const linhas = s.anexos.map((a, i) => `<li class="${s.previewIdx === i ? "is-sel" : ""}">
-        <i data-lucide="${a.tipo === "boleto" ? "barcode" : (a.tipo === "nota" ? "file-text" : "paperclip")}"></i>
+        <i data-lucide="${FilaNotasFiscais.iconeAnexo(a.tipo)}"></i>
         <button type="button" class="env-anexo-nome" onclick="EnviarNotaApp.verAnexo(${i})" title="Ver ao lado">${this.esc(a.nome)}</button>
         <small>${a.size ? `${(a.size / 1024 / 1024).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} MB` : ""}${a.file ? "" : " · já enviado"}</small>
         <select onchange="EnviarNotaApp.setTipoAnexo(${i}, this.value)">${Object.keys(tipos).map((k) => `<option value="${k}" ${a.tipo === k ? "selected" : ""}>${tipos[k]}</option>`).join("")}</select>
@@ -1060,27 +1330,27 @@ window.EnviarNotaApp = {
   pagamentoHtml() {
     const s = this.state;
     const pag = s.pag;
-    const formas = FilaNotasFiscais.FORMAS;
     const prev = s.previsao;
     const sug = prev && prev.parcelas.length ? `Previsão financeira do pedido: ${prev.parcelas.map((x) => `${this.dataBr(x.vencimento)} · ${this.money(x.valor)}`).join(" | ")}` : "";
+    const opts = this.opcoesPagamento();
+    const idx = opts.findIndex((o) => o.forma === pag.forma && (o.forma === "Boleto" || o.forma === "Cartão de crédito" || o.forma === "Outra" || (o.detalhe || "") === (pag.detalhe || "")));
     const ops = this.destinos(pag.forma);
-    let destino;
-    if (ops) {
-      const rot = pag.forma === "PIX" ? "Chave PIX do credor (cadastro no Sienge)" : "Conta do credor (cadastro no Sienge)";
-      destino = !s.pedido ? `<input disabled placeholder="Busque o pedido para trazer o cadastro do credor">`
-        : (ops.length ? `<select onchange="EnviarNotaApp.setPag('detalhe', this.value)"><option value="">Escolha…</option>${ops.map((o) => `<option value="${this.esc(o.txt)}" ${pag.detalhe === o.txt ? "selected" : ""}>${this.esc(o.txt)}${o.padrao ? " (padrão)" : ""}</option>`).join("")}</select>`
-          : `<input disabled class="env-sem-cad" value="Nenhuma ${pag.forma === "PIX" ? "chave PIX" : "conta"} cadastrada no credor">`);
-      destino = `<label>${rot}</label>${destino}`;
-    } else {
-      const rot = pag.forma === "Boleto" ? "Linha digitável" : "Detalhe do pagamento";
-      destino = `<label>${rot}</label><input value="${this.esc(pag.detalhe)}" placeholder="${pag.forma === "Boleto" ? "Preenchida pelo boleto anexado" : ""}" oninput="EnviarNotaApp.setPag('detalhe', this.value)">`;
+    let destino = "";
+    if (pag.forma === "Boleto") {
+      destino = `<label>Linha digitável</label><input value="${this.esc(pag.detalhe)}" placeholder="Preenchida somente quando houver boleto anexado" oninput="EnviarNotaApp.setPag('detalhe', this.value)">`;
+    } else if (ops && !pag.detalhe) {
+      destino = `<label>${pag.forma === "PIX" ? "Chave PIX" : "Conta"}</label><input disabled class="env-sem-cad" value="Escolha a chave ou a conta na lista">`;
     }
+    const banco = s.banco || { contas: [], pix: [] };
+    const temBanco = (banco.contas || []).length || (banco.pix || []).length;
+    const cadastro = !s.pedido ? "" : `<p class="inf-muted">Credor possui dados bancários cadastrados: <b>${temBanco ? "sim" : "não"}</b>${banco.erro ? ` · ${this.esc(banco.erro)}` : ""}</p>`;
     return `<div class="inf-form">
         <div><label>Data de pagamento</label><input type="date" value="${this.esc(pag.data)}" onchange="EnviarNotaApp.setPag('data', this.value)"></div>
-        <div><label>Forma de pagamento</label><select onchange="EnviarNotaApp.setForma(this.value)"><option value="">Escolha…</option>${formas.map((f) => `<option ${pag.forma === f ? "selected" : ""}>${this.esc(f)}</option>`).join("")}</select></div>
-        <div class="inf-span2">${destino}</div>
+        <div><label>Forma de pagamento</label><select onchange="EnviarNotaApp.escolherPagamento(this.value)"><option value="">Escolha…</option>${opts.map((o, i) => `<option value="${i}" ${i === idx ? "selected" : ""}>${this.esc(o.rotulo)}</option>`).join("")}</select></div>
+        <div class="inf-span2">${destino}${this.fichaDestino()}</div>
         <div class="inf-span2"><label>Observação para o fiscal</label><input value="${this.esc(s.obs)}" oninput="EnviarNotaApp.setCampo('obs', this.value)"></div>
       </div>
+      ${cadastro}
       ${sug ? `<p class="inf-muted">${this.esc(sug)}</p>` : ""}`;
   },
 
@@ -1093,7 +1363,7 @@ window.EnviarNotaApp = {
         <div>
           ${s.feito ? `<div class="inf-resultado is-ok"><b>${this.esc(s.feito)}</b></div>` : ""}
           ${this.devolvidasHtml()}
-          ${s.editandoId ? `<div class="inf-resultado is-erro"><b>Corrigindo envio devolvido pelo fiscal</b><p>Ajuste o que foi pedido e clique em <b>Reenviar ao fiscal</b>.</p></div>` : ""}
+          ${this.orientacaoDevolucaoHtml()}
           <div class="inf-card">
             <h3><i data-lucide="clipboard-list"></i> Pedido de compra</h3>
             <div class="inf-busca">
@@ -1114,7 +1384,6 @@ window.EnviarNotaApp = {
           <div class="inf-card">
             <h3><i data-lucide="list-checks"></i> Conferência</h3>
             <div id="env-conf">${this.conferenciaHtml()}</div>
-            <div id="env-fiscal">${window.NotaFiscalCheck ? NotaFiscalCheck.painelEnvio(s.fiscal) : ""}</div>
             <div class="inf-acoes">
               <button type="button" class="btn btn-outline" onclick="EnviarNotaApp.limpar()" ${s.enviando ? "disabled" : ""}><i data-lucide="rotate-ccw"></i> ${s.editandoId ? "Desistir da correção" : "Limpar"}</button>
               <button type="button" id="env-enviar" class="btn btn-primary" onclick="EnviarNotaApp.enviar()" ${bloqueado ? "disabled" : ""}
@@ -1129,11 +1398,34 @@ window.EnviarNotaApp = {
             ${s.previewLendo ? `<p class="inf-muted">${s.previewLendo.startsWith("Abrindo") ? `<span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;"></span> ` : ""}${this.esc(s.previewLendo)}</p>` : ""}
             ${s.preview ? `<div class="inf-lupa-area" onmousemove="InserirNotaApp.lupa(event)" onmouseleave="InserirNotaApp.lupa(event, true)" onwheel="InserirNotaApp.zoomLupa(event)">
                 <img src="${s.preview}" alt="Anexo" draggable="false"><div class="inf-lupa"></div></div>
-              <p class="inf-lupa-dica"><i data-lucide="zoom-in"></i> Passe o mouse para ampliar · role a roda do mouse sobre a nota para mudar o zoom: <strong class="inf-lupa-zoom">${(InserirNotaApp._zoom || 2.5).toLocaleString("pt-BR")}x</strong></p>`
+              <p class="inf-lupa-dica"><i data-lucide="zoom-in"></i> Passe o mouse: a faixa amplia a nota na largura da página · role a roda para o zoom: <strong class="inf-lupa-zoom">${(InserirNotaApp._zoom || 2.5).toLocaleString("pt-BR")}x</strong></p>`
               : (s.previewLendo ? "" : `<p class="inf-muted">Clique no nome de um anexo para ver aqui.</p>`)}
           </div>
         </div>
       </div>`;
+  },
+
+  orientacaoDevolucaoHtml() {
+    const s = this.state;
+    if (!s.editandoId) return "";
+    const item = (s.lista || []).find((x) => x.id === s.editandoId);
+    const esc = (v) => this.esc(v);
+    if (!item) return `<div class="inf-resultado is-erro"><b>Corrigindo envio devolvido pelo fiscal</b><p>Ajuste o que foi pedido e clique em <b>Reenviar ao fiscal</b>.</p></div>`;
+    if (item.devolucaoTipo === "cancelamento") {
+      const motivos = (item.motivosCancelamento || []).map((m) => `<li>${esc(m)}</li>`).join("");
+      return `<div class="inf-resultado is-erro"><b>O fiscal pediu o cancelamento desta nota</b>
+        ${motivos ? `<ul>${motivos}</ul>` : `<p>${esc(item.motivoDevolucao || "")}</p>`}
+        <p>Use este mesmo pedido. Anexe a <b>nota nova</b> (tipo Nota fiscal) e a <b>nota cancelada com a tarja de cancelada</b> (tipo Nota cancelada). Sem a nota cancelada o reenvio não segue: o pedido continua amarrado a esta devolução.</p></div>`;
+    }
+    if (item.devolucaoTipo === "carta") {
+      const linhas = (item.cartaLinhas || []).filter((l) => l && (l.informado || l.deveria)).map((l) => `<li><b>${esc(l.campo || "Campo")}:</b> informado “${esc(l.informado || "—")}” · deveria ser “${esc(l.deveria || "—")}”</li>`).join("");
+      const doc = (item.anexos || []).find((a) => a.tipo === "carta" && a.url);
+      return `<div class="inf-resultado is-erro"><b>O fiscal pediu carta de correção</b>
+        ${linhas ? `<ul>${linhas}</ul>` : ""}
+        ${doc ? `<p><a href="${esc(doc.url)}" target="_blank" rel="noopener">Abrir o documento: o que foi informado e o que deveria ser</a></p>` : ""}
+        <p>Emita a carta com esses dados, anexe e reenvie neste mesmo pedido.</p></div>`;
+    }
+    return `<div class="inf-resultado is-erro"><b>Corrigindo envio devolvido pelo fiscal</b><p>${esc(item.motivoDevolucao || "Ajuste o que foi pedido e clique em Reenviar ao fiscal.")}</p></div>`;
   },
 
   devolvidasHtml() {
@@ -1143,7 +1435,7 @@ window.EnviarNotaApp = {
     const dev = s.lista.filter((x) => x.status === "devolvida" && x.criadoPorEmail === u.email);
     if (!dev.length) return "";
     return `<div class="inf-resultado is-erro"><b>${dev.length === 1 ? "1 nota devolvida" : `${dev.length} notas devolvidas`} pelo fiscal para corrigir</b>
-      <ul>${dev.slice(0, 5).map((x) => `<li>Pedido ${this.esc(x.pedido)}: ${this.esc(x.motivoDevolucao || "sem motivo")}</li>`).join("")}</ul>
+      <ul>${dev.slice(0, 5).map((x) => `<li>Pedido ${this.esc(x.pedido)}: ${this.esc(x.devolucaoTipo === "cancelamento" ? "cancelar a nota e reenviar a nota nova com a nota cancelada (tarja)" : (x.devolucaoTipo === "carta" ? "carta de correção — o documento mostra o que foi informado e o que deveria ser" : (x.motivoDevolucao || "sem motivo")))}</li>`).join("")}</ul>
       <p><a href="javascript:void(0)" onclick="EnviarNotaApp.setAba('minhas')">Ver em Minhas notas enviadas</a></p></div>`;
   },
 
@@ -1171,11 +1463,11 @@ window.EnviarNotaApp = {
               <td>${esc(x.fornecedor ? x.fornecedor.nome : "")}${x.valorNota != null ? `<small>${this.money(x.valorNota)}</small>` : ""}</td>
               <td>${esc(FilaNotasFiscais.pagamentoTxt(x, (d) => this.dataBr(d)))}${x.pagamento && x.pagamento.detalhe ? `<small>${esc(x.pagamento.detalhe)}</small>` : ""}</td>
               <td>${FilaNotasFiscais.anexosHtml(x, esc)}</td>
-              <td>${FilaNotasFiscais.statusHtml(Object.assign({}, x, { assumidoPor: quem(x.assumidoPor, x.assumidoPorEmail, x.assumidoPorSienge) }), esc)}${x.status === "devolvida" && x.motivoDevolucao ? `<small class="fnf-motivo">${esc(x.motivoDevolucao)}${quem(x.devolvidoPor, x.devolvidoPorEmail, x.devolvidoPorSienge) ? ` · ${esc(quem(x.devolvidoPor, x.devolvidoPorEmail, x.devolvidoPorSienge))}` : ""}</small>` : ""}</td>
+              <td>${FilaNotasFiscais.statusHtml(Object.assign({}, x, { assumidoPor: quem(x.assumidoPor, x.assumidoPorEmail, x.assumidoPorSienge) }), esc)}${FilaNotasFiscais.motivoHtml(x, esc)}</td>
               <td class="fnf-acoes">
-                ${x.status === "devolvida" && this.podeEditar() ? `<button type="button" class="btn btn-primary" onclick="EnviarNotaApp.corrigir('${esc(x.id)}')"><i data-lucide="pencil"></i> Corrigir</button>` : ""}
-                ${x.status === "pendente" && this.podeEditar() ? `<button type="button" class="btn btn-cancel" onclick="EnviarNotaApp.cancelar('${esc(x.id)}')"><i data-lucide="x"></i> Cancelar</button>` : ""}
-                ${x.status !== "lancada" && this.podeEditar() ? `<button type="button" class="btn fnf-excluir" onclick="EnviarNotaApp.excluir('${esc(x.id)}')"><i data-lucide="trash-2"></i> Excluir</button>` : ""}
+                ${x.status === "devolvida" && this.podeEditar() ? `<button type="button" class="tvig-ico" title="Corrigir" onclick="EnviarNotaApp.corrigir('${esc(x.id)}')"><i data-lucide="pencil" style="width:15px;height:15px;"></i></button>` : ""}
+                ${x.status === "pendente" && this.podeEditar() ? `<button type="button" class="tvig-ico" title="Cancelar" onclick="EnviarNotaApp.cancelar('${esc(x.id)}')"><i data-lucide="x" style="width:15px;height:15px;"></i></button>` : ""}
+                ${x.status !== "lancada" && this.podeEditar() ? `<button type="button" class="tvig-ico is-danger" title="Excluir" onclick="EnviarNotaApp.excluir('${esc(x.id)}')"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button>` : ""}
               </td>
             </tr>`).join("")}</tbody></table>`));
     return `<div class="inf-card" style="margin:16px 20px;">
@@ -1232,10 +1524,11 @@ window.EnviarNotaApp = {
         .env-x i { width: 16px; height: 16px; }
         .ml-tab .env-tab-alerta, .ml-tab.is-active .env-tab-alerta { background: #fee2e2; color: #b91c1c; }
         .env-sem-cad { color: #b91c1c !important; background: #fef2f2 !important; }
-        #enviar-nota-root .fnf-tab .fnf-acoes .btn { height: 28px; min-width: 0; font-size: 0.72rem; padding: 0 8px; }
-        #enviar-nota-root .fnf-tab .fnf-acoes .fnf-excluir { background: #fff; color: #b91c1c; border: 1px solid #fecaca; }
-        #enviar-nota-root .fnf-tab .fnf-acoes .fnf-excluir:hover { background: #fef2f2; }
-        .env-voltar { margin: 16px 20px 0; }
+        .env-blocos { display: flex; flex-direction: column; gap: 10px; }
+        .env-bloco { border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 12px; background: #f8fafc; }
+        .env-bloco h4 { margin: 0 0 6px; font-size: 0.72rem; letter-spacing: 0.04em; text-transform: uppercase; color: #105436; }
+        .env-conta { display: grid; grid-template-columns: 120px 1fr; gap: 3px 10px; margin-top: 8px; padding: 8px 10px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.82rem; }
+        .env-conta b { color: #64748b; font-weight: 600; }
         .env-voltar .btn { height: 34px; display: inline-flex; align-items: center; gap: 6px; }
       </style>
       ${window._voltarBudget ? `<div class="env-voltar"><button type="button" class="btn btn-outline" onclick="EnviarNotaApp.voltarBudget()"><i data-lucide="arrow-left"></i> Voltar para o Budget</button></div>` : ""}
