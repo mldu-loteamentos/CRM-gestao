@@ -11,7 +11,8 @@ window.FilaNotasFiscais = {
     em_lancamento: { rot: "Em lançamento", cls: "is-info" },
     lancada: { rot: "Lançada no Sienge", cls: "is-ok" },
     devolvida: { rot: "Devolvida", cls: "is-erro" },
-    cancelada: { rot: "Cancelada", cls: "is-off" }
+    cancelada: { rot: "Cancelada", cls: "is-off" },
+    excluida: { rot: "Excluído", cls: "is-off" }
   },
 
   fb() {
@@ -64,7 +65,7 @@ window.FilaNotasFiscais = {
     if (!alvo) return null;
     const rank = { em_lancamento: 0, pendente: 1, devolvida: 2, lancada: 3 };
     const hits = (lista || []).filter((x) => {
-      if (!x || x.status === "cancelada") return false;
+      if (!x || x.status === "cancelada" || x.status === "excluida") return false;
       return [x.pedido, x.pedidoApi].some((v) => {
         const n = String(v || "").replace(/\s/g, "");
         return n && (n === alvo || n.replace(/\D/g, "") === dig);
@@ -157,6 +158,68 @@ window.FilaNotasFiscais = {
     const fb = this.fb();
     if (!fb) throw new Error("Firebase indisponível");
     await fb.f.setDoc(fb.f.doc(fb.db, this.COL, id), JSON.parse(JSON.stringify(dados)), { merge: true });
+  },
+
+  /** Cada devolução do fiscal vira um caso para as conferências seguintes do mesmo fornecedor. */
+  async aprender(item, patch) {
+    const fb = this.fb();
+    if (!fb) return;
+    const forn = item && item.fornecedor || {};
+    const id = `AP${Date.now()}${Math.random().toString(36).slice(2, 5)}`;
+    await fb.f.setDoc(fb.f.doc(fb.db, "fiscal_notas_aprendizado", id), {
+      em: Date.now(),
+      pedido: item.pedido || "",
+      fornecedorId: String(forn.id || ""),
+      fornecedorDoc: String(forn.doc || "").replace(/\D/g, ""),
+      fornecedorNome: forn.nome || "",
+      numeroNota: item.numeroNota || "",
+      tipo: patch.devolucaoTipo || "",
+      motivos: patch.motivosCancelamento || [],
+      cartaLinhas: patch.cartaLinhas || [],
+      motivo: String(patch.motivoDevolucao || "").slice(0, 2000)
+    });
+    this._casos = null;
+  },
+
+  async listarAprendizado() {
+    if (this._casos) return this._casos;
+    const fb = this.fb();
+    if (!fb || !fb.f.getDocs) return [];
+    const snap = await fb.f.getDocs(fb.f.query(fb.f.collection(fb.db, "fiscal_notas_aprendizado"), fb.f.limit(120)));
+    this._casos = snap.docs.map((d) => d.data());
+    return this._casos;
+  },
+
+  avisosAprendidos(doc) {
+    const d = String(doc || "").replace(/\D/g, "");
+    if (!d) return [];
+    if (!this._casos && !this._casosPedido) {
+      this._casosPedido = this.listarAprendizado().then(() => {
+        this._casosPedido = null;
+        if (window.EnviarNotaApp && EnviarNotaApp.pintarConferencia) EnviarNotaApp.pintarConferencia();
+        if (window.InserirNotaApp && InserirNotaApp.pintarConferencia) InserirNotaApp.pintarConferencia();
+      }).catch(() => { this._casosPedido = null; });
+    }
+    return (this._casos || []).filter((c) => c.fornecedorDoc === d).slice(0, 3).map((c) => {
+      const oque = c.tipo === "carta"
+        ? (c.cartaLinhas || []).map((l) => l.campo).filter(Boolean).slice(0, 3).join(", ")
+        : (c.motivos || []).slice(0, 2).join("; ");
+      return `Devolução anterior deste fornecedor${c.numeroNota ? " (NF " + c.numeroNota + ")" : ""}: ${oque || "confira os mesmos pontos"}.`;
+    });
+  },
+
+  telefoneCorporativo(email) {
+    const limpo = (v) => String(v || "").trim();
+    const eu = (window.AppState && AppState.currentUser) || {};
+    const mail = String(email || eu.email || "").toLowerCase();
+    if (!email || String(eu.email || "").toLowerCase() === mail) {
+      const direto = limpo(eu.telefone_corporativo || eu.telefoneCorporativo);
+      if (direto) return direto;
+    }
+    let users = [];
+    try { users = JSON.parse(localStorage.getItem("crm_users") || "[]") || []; } catch (e) { users = []; }
+    const u = users.find((x) => mail && String(x.email || "").toLowerCase() === mail);
+    return u ? limpo(u.telefone_corporativo || u.telefoneCorporativo) : "";
   },
 
   /** Muda o envio e registra no histórico quem fez o quê. */
@@ -282,7 +345,8 @@ window.FilaNotasFiscais = {
       .fnf-tab td small { display: block; color: #64748b; font-size: 0.74rem; margin-top: 2px; }
       .fnf-tab .num { text-align: right; white-space: nowrap; }
       .fnf-tab .fnf-acoes { white-space: nowrap; text-align: right; }
-      .fnf-tab .fnf-acoes .tvig-ico { margin-left: 2px; }
+      .fnf-tab .fnf-acoes .tvig-ico { margin-left: 2px; width: 32px; height: 32px; min-width: 32px; padding: 0; border-radius: 8px; }
+      .fnf-tab .fnf-acoes .tvig-ico i, .fnf-tab .fnf-acoes .tvig-ico svg { width: 15px; height: 15px; }
       .fnf-anexo-ico { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; background: transparent; color: #64748b; border-radius: 6px; cursor: pointer; text-decoration: none; }
       .fnf-anexo-ico:hover { background: #f1f5f9; color: #105436; }
       .fnf-anexo-ico i { width: 15px; height: 15px; }
@@ -319,7 +383,7 @@ window.FilaNotasFiscais = {
       .fnf-motivos label { display: flex; gap: 8px; align-items: flex-start; font-size: 0.84rem; color: #334155; }
       .fnf-carta-linhas { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
       .fnf-carta-linhas .fnf-carta-linha { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 6px; }
-      .fnf-carta-linhas input, .fnf-dev-box textarea, .fnf-dev-box .fnf-campo { width: 100%; box-sizing: border-box; border: 1px solid #e2e8f0; border-radius: 8px; padding: 7px 8px; font: inherit; font-size: 0.84rem; }
+      .fnf-carta-linhas input, .fnf-carta-linhas select, .fnf-dev-box textarea, .fnf-dev-box .fnf-campo { width: 100%; box-sizing: border-box; border: 1px solid #e2e8f0; border-radius: 8px; padding: 7px 8px; font: inherit; font-size: 0.84rem; background: #fff; }
       .fnf-dev-box textarea { min-height: 72px; resize: vertical; }
       .fnf-dev-acoes { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
       .fnf-carta-h { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 6px; color: #64748b; font-size: 0.7rem; text-transform: uppercase; margin-top: 8px; }
@@ -423,13 +487,21 @@ window.EnviarNotaApp = {
     const s = this.state;
     const digitado = String((document.getElementById("env-pedido") || {}).value || s.pedidoId || "").trim();
     const id = InserirNotaApp.idApi(digitado);
-    if (!id) return;
+    if (!id) { this._buscaAlvo = "enviar"; this.abrirBuscaPedidos(); return; }
+    this._buscaAlvo = "enviar";
     Object.assign(s, { pedidoId: digitado, pedidoApi: id, pedidoNome: digitado, pedido: null, credor: null, cc: null, empresaCc: "", previsao: null, erro: "", abertas: [], feito: "", banco: { contas: [], pix: [], formas: [], erro: "" } });
     s.carregando = "Buscando o pedido no Sienge…";
     this.render();
     try {
       const pedido = await InserirNotaApp.get(`/purchase-orders/${id}`);
       if (!pedido || typeof pedido !== "object" || pedido.id == null) throw new Error("pedido não encontrado");
+      if (!this.pedidoPermitido(pedido)) {
+        s.erro = "Esse pedido é de um departamento fora do seu acesso. Busque pelos pedidos em aberto do seu departamento.";
+        s.carregando = "";
+        this.render();
+        this.abrirBuscaPedidos();
+        return;
+      }
       s.pedido = pedido;
       s.pedidoApi = String(pedido.id);
       s.pedidoNome = String(pedido.formattedPurchaseOrderId || digitado);
@@ -459,11 +531,112 @@ window.EnviarNotaApp = {
       if (s._fonteNota) this.analisarFiscal(s.leituraToken);
     } catch (e) {
       const msg = String((e && e.message) || e || "");
-      s.erro = /404|não encontrado/i.test(msg) ? `Pedido ${id} não encontrado no Sienge.`
+      const sumiu = /404|não encontrado/i.test(msg);
+      s.erro = sumiu ? `Pedido ${id} não encontrado no seu acesso.`
         : (/403/.test(msg) ? "O usuário da API não tem permissão para consultar pedidos de compra." : `Não consegui buscar o pedido: ${msg}`);
+      s.carregando = "";
+      this.render();
+      if (sumiu) this.abrirBuscaPedidos();
+      return;
     }
     s.carregando = "";
     this.render();
+  },
+
+  departamentosAcesso() {
+    const app = window.ComprasPrevisoesApp;
+    if (!app || typeof app.accessibleDepartments !== "function") return null;
+    try { return app.accessibleDepartments(); } catch (e) { return null; }
+  },
+
+  pedidoPermitido(pedido) {
+    const access = this.departamentosAcesso();
+    if (!access) return true;
+    const nome = String(pedido.departmentName || pedido.departamentName || pedido.department || "").trim().toUpperCase();
+    const id = String(pedido.departmentId != null ? pedido.departmentId : (pedido.departamentId != null ? pedido.departamentId : ""));
+    if (!nome && !id) return true;
+    return access.some((a) => {
+      const aid = String(a.id || "");
+      const alabel = String(a.label || a.name || "").trim().toUpperCase();
+      return (id && aid === id) || (nome && alabel === nome);
+    });
+  },
+
+  abrirBuscaPedidos() {
+    const velho = document.getElementById("env-busca-ped");
+    if (velho) velho.remove();
+    const pop = document.createElement("div");
+    pop.id = "env-busca-ped";
+    pop.className = "fnf-pop";
+    pop.innerHTML = `<div class="fnf-pop-box" role="dialog" aria-modal="true" style="width:min(640px,100%)">
+      <div class="fnf-pop-h"><b>Pedidos em aberto</b><button type="button" class="fnf-pop-x" onclick="EnviarNotaApp.fecharBuscaPedidos()" title="Fechar"><i data-lucide="x"></i></button></div>
+      <p class="inf-muted">Pesquise pelo credor. A lista traz só pedidos em aberto dos departamentos do seu acesso.</p>
+      <div class="inf-busca">
+        <input id="env-busca-credor" placeholder="Nome ou CNPJ do credor" onkeydown="if(event.key==='Enter'){event.preventDefault();EnviarNotaApp.buscarPedidosCredor()}">
+        <button type="button" class="btn btn-primary inf-btn-sm" style="height:38px;" onclick="EnviarNotaApp.buscarPedidosCredor()"><i data-lucide="search"></i> Buscar</button>
+      </div>
+      <div id="env-busca-lista" style="margin-top:12px;max-height:320px;overflow:auto;"></div>
+    </div>`;
+    pop.addEventListener("click", (ev) => { if (ev.target === pop) this.fecharBuscaPedidos(); });
+    document.body.appendChild(pop);
+    if (window.lucide) lucide.createIcons();
+    const inp = document.getElementById("env-busca-credor");
+    if (inp) inp.focus();
+  },
+
+  fecharBuscaPedidos() {
+    const pop = document.getElementById("env-busca-ped");
+    if (pop) pop.remove();
+  },
+
+  async buscarPedidosCredor() {
+    const box = document.getElementById("env-busca-lista");
+    const q = String((document.getElementById("env-busca-credor") || {}).value || "").trim();
+    if (!box) return;
+    if (q.length < 2) { box.innerHTML = `<p class="inf-erro">Informe ao menos 2 caracteres do credor.</p>`; return; }
+    box.innerHTML = `<p class="inf-muted"><span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;"></span> Buscando credor e pedidos em aberto…</p>`;
+    try {
+      const dig = q.replace(/\D/g, "");
+      const path = dig.length >= 11 ? `/creditors?limit=15&cnpj=${encodeURIComponent(dig)}` : `/creditors?limit=15&name=${encodeURIComponent(q)}`;
+      const credores = InserirNotaApp.lista(await InserirNotaApp.get(path));
+      if (!credores.length) { box.innerHTML = `<p class="inf-muted">Nenhum credor encontrado.</p>`; return; }
+      const blocos = [];
+      for (const c of credores.slice(0, 5)) {
+        const id = c.id != null ? c.id : c.creditorId;
+        if (id == null) continue;
+        const nome = c.name || c.tradeName || `Credor ${id}`;
+        let pedidos = [];
+        try { pedidos = InserirNotaApp.lista(await InserirNotaApp.get(`/purchase-orders?supplierId=${encodeURIComponent(id)}&limit=40`)); } catch (e) { pedidos = []; }
+        const abertos = pedidos.filter((p) => {
+          const st = String(p.status || "").toUpperCase();
+          return st !== "CANCELED" && st !== "FULLY_DELIVERED" && this.pedidoPermitido(p);
+        });
+        if (!abertos.length) continue;
+        const linhas = abertos.slice(0, 12).map((p) => {
+          const num = this.esc(p.formattedPurchaseOrderId || p.id);
+          const api = this.esc(p.id);
+          return `<li><button type="button" class="env-anexo-nome" onclick="EnviarNotaApp.escolherPedidoBusca('${api}')"><b>${num}</b></button><small>${p.date ? this.dataBr(String(p.date).slice(0, 10)) : ""} ${p.totalAmount != null ? " · " + this.money(p.totalAmount) : ""}</small></li>`;
+        }).join("");
+        blocos.push(`<div style="margin-bottom:12px;"><b>${this.esc(nome)}</b><ul class="env-anexos">${linhas}</ul></div>`);
+      }
+      box.innerHTML = blocos.length ? blocos.join("") : `<p class="inf-muted">Nenhum pedido em aberto desse credor no seu departamento.</p>`;
+    } catch (e) {
+      box.innerHTML = `<p class="inf-erro">${this.esc((e && e.message) || e)}</p>`;
+    }
+  },
+
+  escolherPedidoBusca(id) {
+    this.fecharBuscaPedidos();
+    const alvo = this._buscaAlvo === "inserir" ? "inf-pedido" : "env-pedido";
+    const el = document.getElementById(alvo);
+    if (el) el.value = id;
+    if (this._buscaAlvo === "inserir" && window.InserirNotaApp) {
+      InserirNotaApp.state.pedidoId = id;
+      InserirNotaApp.buscarPedido();
+      return;
+    }
+    this.state.pedidoId = id;
+    this.buscarPedido();
   },
 
   /* ---------- dados bancários do credor (cadastro no Sienge) ---------- */
@@ -719,13 +892,32 @@ window.EnviarNotaApp = {
     pronto.then((file) => this.textoDeArquivo(file)).then((texto) => {
       if (s.boletoToken !== token) return;
       const linha = this.linhaBoleto(texto);
-      if (!linha) return;
+      if (!linha) {
+        if (s._compararLinha) { s._compararLinha = false; alert("Não encontrei a linha digitável no boleto anexado."); }
+        return;
+      }
       s.linhaBoleto = linha;
       s.formaManual = "";
       s.pag.forma = "Boleto";
-      if (!s.linhaTocada) s.pag.detalhe = linha;
+      if (s._compararLinha) {
+        s._compararLinha = false;
+        const dig = (v) => String(v || "").replace(/\D/g, "");
+        if (dig(s.pag.detalhe) && dig(s.pag.detalhe) !== dig(linha)) {
+          alert("A linha digitável não confere com o boleto anexado.");
+        }
+        this.pintarConferencia();
+        return;
+      }
+      s.pag.detalhe = linha;
+      s.linhaTocada = false;
       this.render();
     }).catch((e) => console.warn("[Enviar nota] linha do boleto", e));
+  },
+
+  conferirLinhaDigitada() {
+    if (!this.temBoleto()) { alert("Anexe o boleto para conferir a linha digitável."); return; }
+    this.state._compararLinha = true;
+    this.lerBoletoAnexo();
   },
 
   temBoleto() {
@@ -1054,7 +1246,7 @@ window.EnviarNotaApp = {
     const idCred = s.credor && String(s.credor.id || "");
     const serie = String(s.serieNota || "").trim().toUpperCase();
     return (s.lista || []).find((x) => {
-      if (!x || x.id === s.editandoId || x.status === "cancelada") return false;
+      if (!x || x.id === s.editandoId || x.status === "cancelada" || x.status === "excluida") return false;
       if (!this.mesmoNumero(x.numeroNota, s.numeroNota)) return false;
       const serieX = String(x.serieNota || "").trim().toUpperCase();
       if (serie && serieX && serie !== serieX) return false;
@@ -1107,7 +1299,7 @@ window.EnviarNotaApp = {
     const avisos = [];
     const oks = [];
     const p = s.pedido;
-    if (!p) return { erros: ["Busque o pedido de compra."], avisos, oks };
+    if (!p) return { erros: [], avisos, oks };
     const status = String(p.status || "").toUpperCase();
     if (status === "CANCELED") erros.push("O pedido está cancelado.");
     if (status === "FULLY_DELIVERED") erros.push("O pedido já foi totalmente atendido: não há saldo para lançar outra nota.");
@@ -1178,6 +1370,8 @@ window.EnviarNotaApp = {
       (fiscal.avisos || []).forEach((t) => avisos.push(t));
       (fiscal.oks || []).forEach((t) => oks.push(t));
     }
+    const docApr = s.credor && s.credor.doc;
+    FilaNotasFiscais.avisosAprendidos(docApr).forEach((t) => avisos.push(t));
     const outras = s.abertas.filter((x) => !dup || x.id !== dup.id);
     if (outras.length) {
       const n = outras.length;
@@ -1190,6 +1384,7 @@ window.EnviarNotaApp = {
   async enviar() {
     const s = this.state;
     if (!this.podeEditar()) { alert("Sem permissão para enviar notas ao fiscal."); return; }
+    if (!s.pedido) { alert("Informe o número do pedido e busque antes de enviar."); this.render(); return; }
     try {
       s.lista = await FilaNotasFiscais.listar();
       s.listaCarregada = true;
@@ -1301,7 +1496,7 @@ window.EnviarNotaApp = {
     const ok = typeof window.mouraConfirm === "function" ? await window.mouraConfirm(aviso) : confirm(aviso);
     if (!ok) return;
     try {
-      await FilaNotasFiscais.excluir(id);
+      await FilaNotasFiscais.atualizar(item, { status: "excluida" }, "excluída", "O operador retirou o envio. O fiscal acompanha como Excluído.");
       this.state.lista = this.state.lista.filter((x) => x.id !== id);
       this.state.abertas = (this.state.abertas || []).filter((x) => x.id !== id);
       this.auditar(`Envio da nota do pedido ${item.pedido} excluído`, { id });
@@ -1340,7 +1535,7 @@ window.EnviarNotaApp = {
     if (!el) return;
     el.innerHTML = this.conferenciaHtml();
     const btn = document.getElementById("env-enviar");
-    if (btn) btn.disabled = !!this.state.enviando || this.conferir().erros.length > 0 || !this.podeEditar();
+    if (btn) btn.disabled = !!this.state.enviando || !this.state.pedido || this.conferir().erros.length > 0 || !this.podeEditar();
   },
 
   conferenciaHtml() {
@@ -1409,7 +1604,7 @@ window.EnviarNotaApp = {
     const idx = opts.findIndex((o) => o.forma === pag.forma && (o.forma === "Boleto" || (o.detalhe || "") === (pag.detalhe || "")));
     let destino = "";
     if (pag.forma === "Boleto") {
-      destino = `<div class="inf-span4"><label>Linha digitável</label><input value="${this.esc(pag.detalhe)}" placeholder="Preenchida automaticamente ao anexar o boleto" oninput="EnviarNotaApp.setPag('detalhe', this.value)"></div>`;
+      destino = `<div class="inf-span4"><label>Linha digitável</label><input value="${this.esc(pag.detalhe)}" placeholder="Preenchida automaticamente ao anexar o boleto" oninput="EnviarNotaApp.setPag('detalhe', this.value)" onkeydown="if(event.key==='Enter'||event.key==='Tab'){event.preventDefault();EnviarNotaApp.conferirLinhaDigitada()}"></div>`;
     }
     const avisoBanco = this.erroBancoVisivel();
     return `<div class="inf-form">
@@ -1426,7 +1621,7 @@ window.EnviarNotaApp = {
   enviarHtml() {
     const s = this.state;
     const pode = this.podeEditar();
-    const bloqueado = !!s.enviando || this.conferir().erros.length > 0 || !pode;
+    const bloqueado = !!s.enviando || !s.pedido || this.conferir().erros.length > 0 || !pode;
     const prevAnexo = s.anexos[s.previewIdx];
     return `<div class="inf-wrap">
         <div>
@@ -1436,7 +1631,7 @@ window.EnviarNotaApp = {
           <div class="inf-card">
             <h3><i data-lucide="clipboard-list"></i> Pedido de compra</h3>
             <div class="inf-busca">
-              <input id="env-pedido" placeholder="Nº do pedido" value="${this.esc(s.pedidoId)}" onkeydown="if(event.key==='Enter')EnviarNotaApp.buscarPedido()">
+              <input id="env-pedido" placeholder="Nº do pedido" value="${this.esc(s.pedidoId)}" onkeydown="if(event.key==='Enter'||event.key==='Tab'){event.preventDefault();EnviarNotaApp.buscarPedido()}">
               <button type="button" class="btn btn-primary inf-btn-sm" style="height:38px;" onclick="EnviarNotaApp.buscarPedido()" ${s.carregando ? "disabled" : ""}><i data-lucide="search"></i> Buscar pedido</button>
               ${s.carregando ? `<span class="inf-muted"><span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;"></span> ${this.esc(s.carregando)}</span>` : ""}
             </div>
@@ -1480,8 +1675,10 @@ window.EnviarNotaApp = {
     if (!item) return `<div class="inf-resultado is-erro"><b>Corrigindo envio devolvido pelo fiscal</b><p>Ajuste o que foi pedido e clique em <b>Reenviar ao fiscal</b>.</p></div>`;
     if (item.devolucaoTipo === "cancelamento") {
       const motivos = (item.motivosCancelamento || []).map((m) => `<li>${esc(m)}</li>`).join("");
+      const doc = (item.anexos || []).find((a) => a.tipo === "carta" && a.url);
       return `<div class="inf-resultado is-erro"><b>O fiscal pediu o cancelamento desta nota</b>
         ${motivos ? `<ul>${motivos}</ul>` : `<p>${esc(item.motivoDevolucao || "")}</p>`}
+        ${doc ? `<p><a href="${esc(doc.url)}" target="_blank" rel="noopener">Abrir o documento da devolução</a></p>` : ""}
         <p>Use este mesmo pedido. Anexe a <b>nota nova</b> (tipo Nota fiscal) e a <b>nota cancelada com a tarja de cancelada</b> (tipo Nota cancelada). Sem a nota cancelada o reenvio não segue: o pedido continua amarrado a esta devolução.</p></div>`;
     }
     if (item.devolucaoTipo === "carta") {
@@ -1517,7 +1714,8 @@ window.EnviarNotaApp = {
     const s = this.state;
     const u = FilaNotasFiscais.usuario();
     const minhas = s.todos ? s.lista : s.lista.filter((x) => (u.email && x.criadoPorEmail === u.email) || (!u.email && x.criadoPor === u.nome));
-    const lista = s.verLancadas ? minhas : minhas.filter((x) => x.status !== "lancada");
+    const visiveis = minhas.filter((x) => x.status !== "excluida");
+    const lista = s.verLancadas ? visiveis : visiveis.filter((x) => x.status !== "lancada");
     const quem = (nome, email, gravado) => FilaNotasFiscais.usuarioSienge(nome, email, gravado);
     const esc = (v) => this.esc(v);
     const linha = (x) => `<tr class="${x.status === "devolvida" ? "fnf-devolvida" : ""}">
@@ -1525,15 +1723,14 @@ window.EnviarNotaApp = {
               <td><b>${esc(x.pedido)}</b>${x.numeroNota ? `<small>NF ${esc(x.numeroNota)}</small>` : ""}</td>
               <td>${esc(x.fornecedor ? x.fornecedor.nome : "")}${x.valorNota != null ? `<small>${this.money(x.valorNota)}</small>` : ""}</td>
               <td>${esc(FilaNotasFiscais.pagamentoTxt(x, (d) => this.dataBr(d)))}${x.pagamento && x.pagamento.detalhe ? `<small>${esc(x.pagamento.detalhe)}</small>` : ""}</td>
-              <td>${FilaNotasFiscais.anexosHtml(x, esc)}</td>
               <td>${FilaNotasFiscais.statusHtml(Object.assign({}, x, { assumidoPor: quem(x.assumidoPor, x.assumidoPorEmail, x.assumidoPorSienge) }), esc)}${FilaNotasFiscais.motivoHtml(x, esc)}</td>
               <td class="fnf-acoes">
-                ${x.status === "devolvida" && this.podeEditar() ? `<button type="button" class="tvig-ico" title="Corrigir" onclick="EnviarNotaApp.corrigir('${esc(x.id)}')"><i data-lucide="pencil" style="width:15px;height:15px;"></i></button>` : ""}
-                ${x.status === "pendente" && this.podeEditar() ? `<button type="button" class="tvig-ico" title="Cancelar" onclick="EnviarNotaApp.cancelar('${esc(x.id)}')"><i data-lucide="x" style="width:15px;height:15px;"></i></button>` : ""}
-                ${this.podeEditar() ? `<button type="button" class="tvig-ico is-danger" title="Excluir" onclick="EnviarNotaApp.excluir('${esc(x.id)}')"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button>` : ""}
+                ${FilaNotasFiscais.anexosHtml(x, esc)}
+                ${(x.status === "pendente" || x.status === "devolvida") && this.podeEditar() ? `<button type="button" class="tvig-ico" title="Editar" onclick="EnviarNotaApp.corrigir('${esc(x.id)}')"><i data-lucide="pencil"></i></button>` : ""}
+                ${this.podeEditar() ? `<button type="button" class="tvig-ico is-danger" title="Excluir" onclick="EnviarNotaApp.excluir('${esc(x.id)}')"><i data-lucide="trash-2"></i></button>` : ""}
               </td>
             </tr>`;
-    const tabela = (itens) => `<table class="fnf-tab"><thead><tr><th>Enviada em</th><th>Pedido</th><th>Fornecedor</th><th>Pagamento</th><th>Anexos</th><th>Situação</th><th></th></tr></thead><tbody>${itens.map(linha).join("")}</tbody></table>`;
+    const tabela = (itens) => `<table class="fnf-tab"><thead><tr><th>Enviada em</th><th>Pedido</th><th>Fornecedor</th><th>Pagamento</th><th>Situação</th><th>Ações</th></tr></thead><tbody>${itens.map(linha).join("")}</tbody></table>`;
     const ocultas = s.lista.filter((x) => x.status === "lancada" && !lista.some((y) => y.id === x.id)).slice(0, 30);
     const blocoOcultas = ocultas.length ? `<div class="env-lancadas">
           <h4>Notas já lançadas no Sienge</h4>

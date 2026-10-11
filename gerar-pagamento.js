@@ -297,43 +297,16 @@ const GerarPagamentoApp = {
 
   pintarProgresso() {
     const s = this.state;
+    const frases = this.FRASES_CARGA;
+    const pct = Math.max(0, Math.min(0.999, s.progressoPct || 0));
+    s.progresso = frases[Math.min(frases.length - 1, Math.floor(pct * frases.length))];
     const el = document.getElementById("gp-progresso");
     if (el) el.textContent = s.progresso || "";
     const bar = document.getElementById("gp-progresso-barra");
-    if (bar) bar.style.width = Math.max(2, Math.min(99, Math.round((s.progressoPct || 0) * 100))) + "%";
+    if (bar) bar.style.width = Math.max(2, Math.min(99, Math.round(pct * 100))) + "%";
   },
 
   FRASES_CARGA: ["Buscando títulos", "Checando lotes", "Conferindo boletos", "Analisando notas", "Conferindo rateios"],
-
-  iniciarFrases(gen) {
-    this.pararFrases();
-    const s = this.state;
-    s.fraseIdx = 0;
-    s.progresso = this.FRASES_CARGA[0];
-    const timer = setInterval(() => {
-      if (s._fraseTimer !== timer) {
-        clearInterval(timer);
-        return;
-      }
-      if (gen !== s.gen || !s.consultando) {
-        clearInterval(timer);
-        if (s._fraseTimer === timer) s._fraseTimer = null;
-        return;
-      }
-      s.fraseIdx = (s.fraseIdx + 1) % this.FRASES_CARGA.length;
-      s.progresso = this.FRASES_CARGA[s.fraseIdx];
-      this.pintarProgresso();
-    }, 2400);
-    s._fraseTimer = timer;
-  },
-
-  pararFrases() {
-    const s = this.state;
-    if (s && s._fraseTimer) {
-      clearInterval(s._fraseTimer);
-      s._fraseTimer = null;
-    }
-  },
 
   /* Círculo, frase da etapa e barra. Sem contagem de títulos e sem tempo decorrido. */
   carregandoHtml() {
@@ -374,7 +347,7 @@ const GerarPagamentoApp = {
     s.consultado = true;
     s.erroTitulos = "";
     s.progressoPct = 0;
-    this.iniciarFrases(gen);
+    this.pintarProgresso();
     s.titulos = [];
     s.previsoesIgnoradas = 0;
     s.sel = {};
@@ -413,7 +386,7 @@ const GerarPagamentoApp = {
         for (const emp of alvos) {
           if (gen !== s.gen) return;
           passo += 1;
-          s.progressoPct = ((passo - 1) / total) * 0.85;
+          s.progressoPct = (passo / Math.max(1, total)) * 0.4;
           this.pintarProgresso();
           const parte = await api.outcomeRange(faixa.start, faixa.end, emp);
           if (Array.isArray(parte)) bills.push.apply(bills, parte);
@@ -421,9 +394,11 @@ const GerarPagamentoApp = {
       }
       if (gen !== s.gen) return;
       this.montarTitulos(base, bills, parceiros);
-      s.progressoPct = 0.9;
+      s.progressoPct = 0.45;
       this.pintarProgresso();
       await this.carregarLotes();
+      s.progressoPct = 0.55;
+      this.pintarProgresso();
       await this.carregarLotesSienge(gen);
       if (window.DocumentosSiengeApp) {
         try { await DocumentosSiengeApp.garantirLista(false); } catch (e) { console.warn("[Gerar Pagamento] documentos do Sienge", e); }
@@ -434,7 +409,6 @@ const GerarPagamentoApp = {
       s.erroTitulos = (e && e.message) ? e.message : "Falha ao buscar os títulos a pagar no Sienge.";
     }
     if (gen !== s.gen) return;
-    this.pararFrases();
     s.consultando = false;
     s.progresso = "";
     this.render();
@@ -594,6 +568,8 @@ const GerarPagamentoApp = {
     const deLotes = s.lotes.filter((l) => this.loteNoSienge(l)).flatMap((l) => (l.itens || []).map((i) => String(i.titulo)));
     const abertos = [...new Set(s.titulos.filter((r) => !r.pago).map((r) => r.titulo).concat(deLotes))];
     const fila = abertos.slice();
+    const totalBills = fila.length;
+    let feitos = 0;
     const worker = async () => {
       while (fila.length && gen === s.gen) {
         const billId = fila.shift();
@@ -610,6 +586,11 @@ const GerarPagamentoApp = {
           });
         } catch (e) {
           // sem a informação, o título continua disponível para lote
+        }
+        feitos += 1;
+        if (gen === s.gen && totalBills) {
+          s.progressoPct = 0.55 + (feitos / totalBills) * 0.4;
+          this.pintarProgresso();
         }
       }
     };
@@ -991,6 +972,13 @@ const GerarPagamentoApp = {
       itens.forEach((it) => {
         it.ccs.sort((a, b) => Number(a.id) - Number(b.id));
         const t = this.resumoTitulo(it.chave);
+        if (t && t.aPagar > 0.009) {
+          it.aPagar = t.aPagar;
+          it.valor = t.valor;
+          if (t.ccs && t.ccs.length) {
+            it.ccs = t.ccs.map((c) => ({ id: c.id, nome: c.nome, parceria: !!c.parceria, rateio: c.rateio, planos: c.planos || [] }));
+          }
+        }
         it.rateio = t ? this.conferirRateio(t.ccs, t.valor, t.ctx) : null;
         it.loteIntegra = this.loteIntegraDe(it.chave);
         it.loteSienge = this.state.loteSienge[it.chave] || "";
@@ -1878,13 +1866,17 @@ const GerarPagamentoApp = {
   /** Primeira conferência: se o título tem rateio entre centros e se esse rateio passou na validação atual. */
   rateioResumo(it) {
     const conf = it && it.rateio;
-    const n = ((it && it.ccs) || []).filter((c) => c && (c.rateio == null || this.num(c.rateio) > 0.009)).length;
-    const temRateio = n > 1;
+    const ids = new Set();
+    if (conf && conf.obras) conf.obras.forEach((o) => (o.linhas || []).forEach((l) => { if (l && !l.ausente && l.id) ids.add(String(l.id)); }));
+    ((it && it.ccs) || []).forEach((c) => {
+      if (c && c.id && (c.rateio == null || this.num(c.rateio) > 0.009)) ids.add(String(c.id));
+    });
+    const temRateio = ids.size > 1;
     const tem = temRateio ? "Com rateio" : "Sem rateio";
     if (!conf) return { tem, validacao: "Não conferido", cls: "bchk-wait", dica: "O rateio ainda não foi conferido." };
     const validado = !!conf.ok;
     const dica = conf.problemas && conf.problemas.length ? conf.problemas.join("\n") : (validado ? tem + " e validado." : tem + " e não validado.");
-    return { tem, validacao: validado ? "Validado" : "Não validado", cls: validado ? "bchk-ok" : "bchk-erro", dica };
+    return { tem, validacao: validado ? "Validado ✓" : "Não validado", cls: validado ? "bchk-ok" : "bchk-erro", dica };
   },
 
   ccPopAbrir(el) {

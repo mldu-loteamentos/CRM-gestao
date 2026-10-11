@@ -15,6 +15,8 @@ const MarketingBudgetApp = {
   state: {
     costCenters: [],
     ccId: "",
+    ccOpen: false,
+    ccQuery: "",
     verbas: {},
     startDate: "",
     endDate: "",
@@ -467,8 +469,6 @@ const MarketingBudgetApp = {
 
   async consultar() {
     const s = this.state;
-    const input = document.getElementById("mkb-cc");
-    if (input) this.onCcSelect(input.value);
     const cc = this.ccAtual();
     if (!cc) { alert("Escolha o empreendimento (centro de custo)."); return; }
     if (!s.startDate || !s.endDate || s.startDate > s.endDate) { alert("Informe um período válido."); return; }
@@ -1329,6 +1329,7 @@ const MarketingBudgetApp = {
     }
     const pago = x.status === "realizado";
     app.abrirTituloRow({
+      semFiscal: true,
       titulo: x.titulo,
       parcela: x.parcela,
       credor: x.credor,
@@ -1816,7 +1817,6 @@ const MarketingBudgetApp = {
       </div>` : `<div class="mkb-card"><p class="mkb-vazio" style="margin:0;">Nenhum contrato ativo com saldo a pagar ${todos ? "neste empreendimento" : "entre as vendas do período"}.</p></div>`}`;
     return `<div class="mkb-card mkb-ctr-top">
         ${escopo}
-        <small class="mkb-muted">Contrato ativo é o que não foi cancelado e ainda tem saldo no Contas a Receber${todos ? "" : ", entre as vendas emitidas no período"}.</small>
       </div>
       ${this.secao("Situação de pagamento", "Quem está em dia, quem está atrasado e quanto do contrato já entrou.", pagamento)}
       ${listaContratos}`;
@@ -2091,7 +2091,7 @@ const MarketingBudgetApp = {
                 generateLabels: (chart) => {
                   const ds = chart.data.datasets[0];
                   return chart.data.labels.map((label, i) => ({
-                    text: `${label} · ${ds.data[i]} (${this.pct(ds.data[i], total)})`,
+                    text: `${label} - ${this.pct(ds.data[i], total)}`,
                     fillStyle: ds.backgroundColor[i],
                     strokeStyle: ds.backgroundColor[i],
                     index: i
@@ -2156,6 +2156,93 @@ const MarketingBudgetApp = {
     }
   },
 
+  empreendimentoItens() {
+    let lista = this.empreendimentos();
+    const ids = this.idsComVerba();
+    lista = lista.filter((c) => ids.has(String(c.id)));
+    const sel = String(this.state.ccId || "");
+    if (sel && !lista.some((c) => String(c.id) === sel)) {
+      const atual = this.state.costCenters.find((c) => String(c.id) === sel);
+      if (atual) lista = [atual].concat(lista);
+    }
+    return lista.map((c) => ({ id: String(c.id), name: String(c.name || c.nome || "").toUpperCase(), label: this.ccLabel(c) }));
+  },
+
+  empFiltroOpts() {
+    return {
+      id: "mkb-emp",
+      label: "Empreendimento",
+      items: this.empreendimentoItens(),
+      selectedIds: this.state.ccId ? [String(this.state.ccId)] : [],
+      open: !!this.state.ccOpen,
+      query: this.state.ccQuery || "",
+      emptyMeansAll: false,
+      single: true,
+      nouns: {
+        singular: "empreendimento",
+        plural: "empreendimentos",
+        none: "Nenhum empreendimento",
+        noMatch: "Nenhum empreendimento com verba cadastrada."
+      }
+    };
+  },
+
+  pintarEmpreendimento() {
+    const slot = document.getElementById("mkb-emp-slot");
+    if (!slot || !window.MlEmpresaFilter) return;
+    const opts = this.empFiltroOpts();
+    const lista = document.getElementById("mkb-emp-list");
+    const top = lista ? lista.scrollTop : 0;
+    slot.innerHTML = MlEmpresaFilter.html(opts);
+    const nova = document.getElementById("mkb-emp-list");
+    if (nova && top) nova.scrollTop = top;
+    if (!this.state.ccId) {
+      const rotulo = slot.querySelector(".ml-emp-filter-btn span");
+      if (rotulo) rotulo.textContent = opts.items.length ? "Selecione o empreendimento" : "Nenhum empreendimento com verba cadastrada";
+    }
+    if (window.lucide) lucide.createIcons();
+    if (opts.open) {
+      const q = document.getElementById("mkb-emp-search");
+      if (q) q.focus();
+    }
+  },
+
+  bindEmpreendimento() {
+    if (!window.MlEmpresaFilter || this._empFiltro) return;
+    this._empFiltro = true;
+    const self = this;
+    MlEmpresaFilter.bind("mkb-emp", {
+      toggleOpen() {
+        if (self.state.loading) return;
+        self.state.ccOpen = !self.state.ccOpen;
+        if (self.state.ccOpen) self.state.ccQuery = "";
+        self.pintarEmpreendimento();
+      },
+      close() {
+        if (!self.state.ccOpen) return;
+        self.state.ccOpen = false;
+        self.state.ccQuery = "";
+        self.pintarEmpreendimento();
+      },
+      setQuery(q) {
+        self.state.ccQuery = q || "";
+        const box = document.getElementById("mkb-emp-list");
+        if (box && window.MlEmpresaFilter) box.innerHTML = MlEmpresaFilter.listHtml(self.empFiltroOpts());
+      },
+      toggleId(itemId, on) {
+        self.state.ccId = on ? String(itemId) : "";
+        self.state.ccOpen = false;
+        self.state.ccQuery = "";
+        self.pintarEmpreendimento();
+      },
+      selectAll() {},
+      selectNone() {
+        self.state.ccId = "";
+        self.pintarEmpreendimento();
+      }
+    });
+  },
+
   render() {
     const root = document.getElementById("marketing-budget-root");
     if (!root) return;
@@ -2184,8 +2271,8 @@ const MarketingBudgetApp = {
         #marketing-budget-root .mkb-filtros { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; }
         #marketing-budget-root .mkb-filtros label { display:block; font-size:0.72rem; font-weight:700; color:#475569; text-transform:uppercase; margin-bottom:4px; }
         #marketing-budget-root .mkb-filtros input, #marketing-budget-root .mkb-filtros select { height:38px; padding:0 10px; border:1px solid #cbd5e1; border-radius:8px; font:inherit; font-size:0.85rem; box-sizing:border-box; background:#fff; }
-        #marketing-budget-root .mkb-filtros .mkb-f-cc { flex:1 1 720px; min-width:min(100%, 640px); }
-        #marketing-budget-root .mkb-filtros .mkb-f-cc select { width:100%; cursor:pointer; white-space:nowrap; }
+        #marketing-budget-root .mkb-filtros .mkb-f-cc { flex:1 1 420px; min-width:min(100%, 320px); }
+        #marketing-budget-root .mkb-f-cc .ml-emp-filter { width:100%; max-width:none; min-width:0; flex:1 1 auto; }
         #marketing-budget-root .mkb-config { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:16px; }
         #marketing-budget-root .mkb-cfg-item span { display:block; font-size:0.72rem; font-weight:700; color:#64748b; text-transform:uppercase; }
         #marketing-budget-root .mkb-cfg-item strong { display:block; font-size:1.35rem; color:#0f172a; margin-top:4px; }
@@ -2301,10 +2388,7 @@ const MarketingBudgetApp = {
         </div>
         <div class="mkb-body">
           <div class="mkb-card mkb-filtros">
-            <div class="mkb-f-cc">
-              <label for="mkb-cc">Empreendimento</label>
-              <select id="mkb-cc" ${s.loading ? "disabled" : ""} onchange="MarketingBudgetApp.onCcSelect(this.value)">${this.empreendimentoOptions(cc ? cc.id : "", { somenteVerba: true })}</select>
-            </div>
+            <div class="mkb-f-cc" id="mkb-emp-slot"></div>
             <div>
               <label for="mkb-de">De (vencimento)</label>
               <input id="mkb-de" type="date" value="${this.esc(s.startDate)}" ${s.loading ? "disabled" : ""} onchange="MarketingBudgetApp.onField('startDate', this.value)">
@@ -2322,6 +2406,8 @@ const MarketingBudgetApp = {
         </div>
       </div>`;
     if (window.lucide) lucide.createIcons();
+    this.bindEmpreendimento();
+    this.pintarEmpreendimento();
     this.bindCatFiltro();
     this.bindGastoFiltros();
     if (s.consultado && !s.loading && !s.error) {

@@ -4368,52 +4368,11 @@ window.expandCrmMenuPerms = function(perms) {
       if (k.indexOf("sub_rel_") === 0) copy[k] = false;
     });
   }
-  if (copy.sub_eng_geral_caucao_acessar == null && (
-    copy.mod_eng === true || copy.sub_eng_geral === true || copy.sub_eng_geral_engenharia_acessar === true
-  )) {
-    copy.sub_eng_geral_caucao_acessar = true;
-    if (copy.sub_eng_geral_caucao_visualizar == null) copy.sub_eng_geral_caucao_visualizar = true;
-    if (copy.sub_eng_geral_caucao_editar == null) {
-      copy.sub_eng_geral_caucao_editar = copy.sub_eng_geral_engenharia_editar === true;
-    }
-  }
-  if (copy.sub_eng_geral_config_acessar == null && (
-    copy.mod_eng === true || copy.sub_eng_geral === true || copy.sub_eng_geral_engenharia_acessar === true
-  )) {
-    copy.sub_eng_geral_config_acessar = true;
-    if (copy.sub_eng_geral_config_visualizar == null) copy.sub_eng_geral_config_visualizar = true;
-    if (copy.sub_eng_geral_config_editar == null) copy.sub_eng_geral_config_editar = true;
-  }
   if (copy.mod_gerencial == null && (
-    copy.mod_societario === true || copy.mod_participacoes === true
-    || copy.sub_soc_geral_estrutura_societaria_acessar === true
+    copy.sub_soc_geral_estrutura_societaria_acessar === true
     || copy.sub_part_geral_participacoes_acessar === true
   )) {
     copy.mod_gerencial = true;
-  }
-  if (copy.sub_compras_geral_previsoes_acessar == null
-    && copy.sub_compras_geral_previsoes_visualizar == null
-    && copy.sub_compras_geral_previsoes_editar == null
-    && (copy.mod_compras === true || copy.sub_compras_geral === true || copy.sub_compras_geral_compras_acessar === true)) {
-    copy.sub_compras_geral_previsoes_acessar = true;
-    copy.sub_compras_geral_previsoes_visualizar = true;
-    copy.sub_compras_geral_previsoes_editar = copy.sub_compras_geral_compras_editar === true;
-  }
-  if (copy.sub_compras_geral_dashboard_acessar == null
-    && copy.sub_compras_geral_dashboard_visualizar == null
-    && copy.sub_compras_geral_dashboard_editar == null
-    && (copy.mod_compras === true || copy.sub_compras_geral === true || copy.sub_compras_geral_compras_acessar === true || copy.sub_compras_geral_previsoes_acessar === true)) {
-    copy.sub_compras_geral_dashboard_acessar = true;
-    copy.sub_compras_geral_dashboard_visualizar = true;
-    copy.sub_compras_geral_dashboard_editar = copy.sub_compras_geral_compras_editar === true || copy.sub_compras_geral_previsoes_editar === true;
-  }
-  if (copy.sub_compras_geral_controle_financeiro_acessar == null
-    && copy.sub_compras_geral_controle_financeiro_visualizar == null
-    && copy.sub_compras_geral_controle_financeiro_editar == null
-    && (copy.mod_compras === true || copy.sub_compras_geral === true || copy.sub_compras_geral_compras_acessar === true || copy.sub_compras_geral_previsoes_acessar === true || copy.sub_compras_geral_dashboard_acessar === true)) {
-    copy.sub_compras_geral_controle_financeiro_acessar = true;
-    copy.sub_compras_geral_controle_financeiro_visualizar = true;
-    copy.sub_compras_geral_controle_financeiro_editar = copy.sub_compras_geral_compras_editar === true || copy.sub_compras_geral_previsoes_editar === true;
   }
   return copy;
 };
@@ -5424,78 +5383,7 @@ window.applyPermissions = function(profileName) {
           item.style.display = "none";
           return;
         }
-        const inheritedMkt = perms.mod_mkt === true || perms.sub_mkt_geral_marketing_acessar === true;
-        const mktAlias = (modKey === 'sub_mkt_geral_eventos_acessar' || modKey === 'sub_mkt_geral_budget_acessar' || modKey === 'sub_mkt_geral_config_acessar') && inheritedMkt;
-        const cpAlias = modKey === 'sub_fin_cp_parametrizacao_parceiro_acessar' && (
-          perms.sub_fin_cp === true || perms.sub_fin_cp_prestacao_contas_acessar === true || perms.sub_fin_cp_assistente_cp_acessar === true
-        );
-        const rydooAlias = modKey === 'sub_fin_cp_rydoo_acessar'
-          && perms.sub_fin_cp_rydoo_acessar == null
-          && (perms.sub_fin_cp === true || perms.sub_fin_cp_assistente_cp_acessar === true || perms.sub_fin_cp_prestacao_contas_acessar === true || perms.sub_fin_cp_parametrizacao_parceiro_acessar === true);
-        const incompletosAlias = modKey === 'sub_fin_cp_titulos_incompletos_acessar'
-          && perms.sub_fin_cp_titulos_incompletos_acessar == null
-          && (perms.sub_fin_cp === true || perms.sub_fin_cp_assistente_cp_acessar === true || perms.sub_fin_cp_prestacao_contas_acessar === true || perms.sub_fin_cp_parametrizacao_parceiro_acessar === true || perms.sub_fin_cp_gerar_pagamento_acessar === true);
-        const gerarPagAlias = modKey === 'sub_fin_cp_gerar_pagamento_acessar'
-          && perms.sub_fin_cp_gerar_pagamento_acessar == null
-          && (perms.sub_fin_cp === true || perms.sub_fin_cp_assistente_cp_acessar === true || perms.sub_fin_cp_prestacao_contas_acessar === true || perms.sub_fin_cp_parametrizacao_parceiro_acessar === true);
-        const orcAlias = modKey === "sub_fin_orc_orcamento_acessar"
-          && perms.sub_fin_orc_orcamento_acessar == null
-          && perms.sub_fin_orc_orcamento_visualizar == null
-          && perms.sub_fin_orc_orcamento_editar == null
-          && perms.mod_fin === true;
-        const cbAlias = (
-          modKey === 'sub_fin_cb_fluxo_caixa_acessar'
-          || modKey === 'sub_fin_cb_investimento_acessar'
-          || modKey === 'sub_fin_cb_fluxo_caixa_diario_acessar'
-          || modKey === 'sub_fin_cb_resultado_caixa_acessar'
-        ) && perms.sub_fin_cb === true;
-        const repacAlias = modKey === 'sub_fin_repac_repactuacao_acessar' && (perms.mod_fin === true || perms.sub_fin_repac === true);
-        const finanAlias = modKey === 'sub_fin_finan_financiamento_acessar' && (perms.mod_fin === true || perms.sub_fin_finan === true);
-        const relLegacy = perms.mod_rel === true
-          || perms.sub_rel_geral === true
-          || perms.sub_rel_geral_relacionamento_acessar === true;
-        const relAlias = (
-          (modKey === "sub_rel_geral_buscar_cliente_acessar" && relLegacy)
-          || ((modKey === "sub_rel_docs" || modKey === "sub_rel_docs_autorizacao_escritura_acessar" || modKey === "sub_rel_docs_cessao_direitos_acessar" || modKey === "sub_rel_docs_autorizacao_terceiros_acessar" || modKey === "sub_rel_docs_alteracao_vencimento_acessar" || modKey === "sub_rel_docs_termo_quitacao_acessar") && (
-            relLegacy
-            || perms.sub_rel_docs === true
-            || perms.sub_rel_docs_autorizacao_escritura_acessar === true
-            || perms.sub_rel_docs_autorizacao_escritura_visualizar === true
-            || perms.sub_rel_docs_autorizacao_escritura_editar === true
-            || perms.sub_rel_docs_autorizacao_terceiros_acessar === true
-            || perms.sub_rel_docs_autorizacao_terceiros_visualizar === true
-            || perms.sub_rel_docs_autorizacao_terceiros_editar === true
-            || perms.sub_rel_docs_alteracao_vencimento_acessar === true
-            || perms.sub_rel_docs_alteracao_vencimento_visualizar === true
-            || perms.sub_rel_docs_alteracao_vencimento_editar === true
-            || perms.sub_rel_docs_cessao_direitos_acessar === true
-            || perms.sub_rel_docs_cessao_direitos_visualizar === true
-            || perms.sub_rel_docs_cessao_direitos_editar === true
-            || perms.sub_rel_docs_termo_quitacao_acessar === true
-            || perms.sub_rel_docs_termo_quitacao_visualizar === true
-            || perms.sub_rel_docs_termo_quitacao_editar === true
-          ))
-        );
-        const suporteAlias = (modKey === "mod_suporte" || modKey === "sub_suporte_geral_chamados_acessar") && (
-          perms.mod_suporte === true
-          || perms.sub_suporte_geral === true
-          || perms.sub_suporte_geral_chamados_acessar === true
-          || perms.sub_suporte_geral_chamados_visualizar === true
-          || perms.sub_suporte_geral_chamados_editar === true
-        );
-        const tvigAlias = modKey === "sub_com_geral_tabelas_vigentes_acessar" && (
-          perms.mod_comercial === true
-          || perms.sub_com_geral_dashboard_acessar === true
-          || perms.sub_com_geral_estoque_acessar === true
-          || perms.sub_com_geral_condicoes_pagamento_acessar === true
-        );
-        const ccomAlias = modKey === "sub_com_geral_controle_comissao_acessar" && (
-          perms.mod_comercial === true
-          || perms.sub_com_geral_dashboard_acessar === true
-          || perms.sub_com_geral_estoque_acessar === true
-          || perms.sub_com_geral_tabelas_vigentes_acessar === true
-        );
-        if (perms[modKey] === true || mktAlias || cpAlias || rydooAlias || incompletosAlias || gerarPagAlias || cbAlias || orcAlias || finanAlias || repacAlias || relAlias || suporteAlias || tvigAlias || ccomAlias || window.permCoversMenuKey(perms, modKey)) {
+        if (window.permCoversMenuKey(perms, modKey)) {
           item.style.display = '';
         } else {
           item.style.display = 'none';
@@ -5775,30 +5663,15 @@ window.permCoversMenuKey = function(perms, modKey) {
     if (perms.sub_eng_geral_caucao_acessar === true
       || perms.sub_eng_geral_caucao_visualizar === true
       || perms.sub_eng_geral_caucao_editar === true) return true;
-    if (perms.sub_eng_geral_caucao_acessar == null
-      && perms.sub_eng_geral_caucao_visualizar == null
-      && perms.sub_eng_geral_caucao_editar == null) {
-      return perms.mod_eng === true
-        || perms.sub_eng_geral === true
-        || perms.sub_eng_geral_engenharia_acessar === true
-        || perms.sub_eng_geral_engenharia_visualizar === true
-        || perms.sub_eng_geral_engenharia_editar === true;
-    }
+    if (perms.sub_eng_geral_engenharia_acessar === true
+      || perms.sub_eng_geral_engenharia_visualizar === true
+      || perms.sub_eng_geral_engenharia_editar === true) return true;
     return false;
   }
   if (modKey === "sub_eng_geral_config_acessar") {
     if (perms.sub_eng_geral_config_acessar === true
       || perms.sub_eng_geral_config_visualizar === true
       || perms.sub_eng_geral_config_editar === true) return true;
-    if (perms.sub_eng_geral_config_acessar == null
-      && perms.sub_eng_geral_config_visualizar == null
-      && perms.sub_eng_geral_config_editar == null) {
-      return perms.mod_eng === true
-        || perms.sub_eng_geral === true
-        || perms.sub_eng_geral_engenharia_acessar === true
-        || perms.sub_eng_geral_engenharia_visualizar === true
-        || perms.sub_eng_geral_engenharia_editar === true;
-    }
     return false;
   }
   if (modKey === "sub_compras_geral_config_acessar") {
@@ -5810,103 +5683,46 @@ window.permCoversMenuKey = function(perms, modKey) {
     if (perms.sub_compras_geral_dashboard_acessar === true
       || perms.sub_compras_geral_dashboard_visualizar === true
       || perms.sub_compras_geral_dashboard_editar === true) return true;
-    if (perms.sub_compras_geral_dashboard_acessar == null
-      && perms.sub_compras_geral_dashboard_visualizar == null
-      && perms.sub_compras_geral_dashboard_editar == null) {
-      return perms.mod_compras === true
-        || perms.sub_compras_geral === true
-        || perms.sub_compras_geral_compras_acessar === true
-        || perms.sub_compras_geral_previsoes_acessar === true
-        || perms.sub_compras_geral_previsoes_visualizar === true;
-    }
     return false;
   }
   if (modKey === "sub_compras_geral_controle_financeiro_acessar") {
     if (perms.sub_compras_geral_controle_financeiro_acessar === true
       || perms.sub_compras_geral_controle_financeiro_visualizar === true
       || perms.sub_compras_geral_controle_financeiro_editar === true) return true;
-    if (perms.sub_compras_geral_controle_financeiro_acessar == null
-      && perms.sub_compras_geral_controle_financeiro_visualizar == null
-      && perms.sub_compras_geral_controle_financeiro_editar == null) {
-      return perms.mod_compras === true
-        || perms.sub_compras_geral === true
-        || perms.sub_compras_geral_compras_acessar === true
-        || perms.sub_compras_geral_previsoes_acessar === true
-        || perms.sub_compras_geral_previsoes_visualizar === true
-        || perms.sub_compras_geral_dashboard_acessar === true;
-    }
     return false;
   }
   if (modKey === "sub_compras_geral_previsoes_acessar") {
     if (perms.sub_compras_geral_previsoes_acessar === true
       || perms.sub_compras_geral_previsoes_visualizar === true
       || perms.sub_compras_geral_previsoes_editar === true) return true;
-    if (perms.sub_compras_geral_previsoes_acessar == null
-      && perms.sub_compras_geral_previsoes_visualizar == null
-      && perms.sub_compras_geral_previsoes_editar == null) {
-      return perms.mod_compras === true
-        || perms.sub_compras_geral === true
-        || perms.sub_compras_geral_compras_acessar === true
-        || perms.sub_compras_geral_compras_visualizar === true
-        || perms.sub_compras_geral_compras_editar === true;
-    }
     return false;
   }
   if (modKey === "sub_fin_cr_recebimentos_webro_acessar") {
     if (perms.sub_fin_cr_recebimentos_webro_acessar === true
       || perms.sub_fin_cr_recebimentos_webro_visualizar === true
       || perms.sub_fin_cr_recebimentos_webro_editar === true) return true;
-    if (perms.sub_fin_cr_recebimentos_webro_acessar == null
-      && perms.sub_fin_cr_recebimentos_webro_visualizar == null
-      && perms.sub_fin_cr_recebimentos_webro_editar == null) {
-      return perms.sub_fin_cr === true
-        || perms.sub_fin_cr_fila_cobranca_acessar === true
-        || perms.sub_fin_cr_fila_cobranca_visualizar === true
-        || perms.sub_fin_cr_fila_cobranca_editar === true;
-    }
     return false;
   }
   if (modKey === "sub_fin_cr_scod_acessar") {
     if (perms.sub_fin_cr_scod_acessar === true
       || perms.sub_fin_cr_scod_visualizar === true
       || perms.sub_fin_cr_scod_editar === true) return true;
-    if (perms.sub_fin_cr_scod_acessar == null
-      && perms.sub_fin_cr_scod_visualizar == null
-      && perms.sub_fin_cr_scod_editar == null) {
-      return perms.sub_fin_cr === true;
-    }
     return false;
   }
   if (modKey === "sub_fin_cr_dashboard_acessar") {
     if (perms.sub_fin_cr_dashboard_acessar === true
       || perms.sub_fin_cr_dashboard_visualizar === true
       || perms.sub_fin_cr_dashboard_editar === true) return true;
-    if (perms.sub_fin_cr_dashboard_acessar == null
-      && perms.sub_fin_cr_dashboard_visualizar == null
-      && perms.sub_fin_cr_dashboard_editar == null) {
-      return perms.sub_fin_cr === true
-        || perms.sub_fin_cr_fila_cobranca_acessar === true
-        || perms.sub_fin_cr_fila_cobranca_visualizar === true
-        || perms.sub_fin_cr_fila_cobranca_editar === true;
-    }
     return false;
   }
   if (modKey === "sub_seg_geral_consumo_api_acessar") {
     if (perms.sub_seg_geral_consumo_api_acessar === true
       || perms.sub_seg_geral_consumo_api_visualizar === true
       || perms.sub_seg_geral_consumo_api_editar === true) return true;
-    if (perms.sub_seg_geral_consumo_api_acessar == null
-      && perms.sub_seg_geral_consumo_api_visualizar == null
-      && perms.sub_seg_geral_consumo_api_editar == null) {
-      return perms.sub_seg_geral_auditoria_acessar === true
-        || perms.sub_seg_geral_auditoria_visualizar === true
-        || perms.sub_seg_geral_auditoria_editar === true;
-    }
     return false;
   }
   if (modKey === "sub_fiscal_geral_csll_acessar") {
-    return perms.sub_fiscal_geral_fiscal_acessar === true
-      || perms.sub_fiscal_geral_csll_acessar === true
+    return perms.sub_fiscal_geral_csll_acessar === true
       || perms.sub_fiscal_geral_csll_visualizar === true
       || perms.sub_fiscal_geral_csll_editar === true;
   }
@@ -5930,13 +5746,11 @@ window.permCoversMenuKey = function(perms, modKey) {
   }
   if (modKey === "mod_participacoes" || modKey === "sub_part_geral_participacoes_acessar") {
     return perms.mod_participacoes === true
-      || perms.sub_part_geral === true
       || perms.sub_part_geral_participacoes_acessar === true
       || perms.sub_part_geral_participacoes_visualizar === true;
   }
   if (modKey === "sub_soc_geral_estrutura_societaria_acessar") {
     return perms.mod_societario === true
-      || perms.sub_soc_geral === true
       || perms.sub_soc_geral_estrutura_societaria_visualizar === true
       || perms.sub_soc_geral_estrutura_societaria_editar === true;
   }
@@ -5944,35 +5758,9 @@ window.permCoversMenuKey = function(perms, modKey) {
     if (perms.mod_rel !== true) return false;
   }
   if (modKey === "sub_rel_geral_buscar_cliente_acessar") {
-    return perms.mod_rel === true
-      || perms.sub_rel_geral === true
-      || perms.sub_rel_geral_relacionamento_acessar === true
+    return perms.sub_rel_geral_relacionamento_acessar === true
       || perms.sub_rel_geral_relacionamento_visualizar === true
       || perms.sub_rel_geral_relacionamento_editar === true;
-  }
-  if (modKey === "sub_rel_docs" || modKey === "sub_rel_docs_autorizacao_escritura_acessar" || modKey === "sub_rel_docs_cessao_direitos_acessar" || modKey === "sub_rel_docs_autorizacao_terceiros_acessar" || modKey === "sub_rel_docs_alteracao_vencimento_acessar" || modKey === "sub_rel_docs_termo_quitacao_acessar") {
-    if (perms.mod_rel !== true) return false;
-    return perms.mod_rel === true
-      || perms.sub_rel_geral === true
-      || perms.sub_rel_geral_relacionamento_acessar === true
-      || perms.sub_rel_geral_relacionamento_visualizar === true
-      || perms.sub_rel_geral_relacionamento_editar === true
-      || perms.sub_rel_docs === true
-      || perms.sub_rel_docs_autorizacao_escritura_acessar === true
-      || perms.sub_rel_docs_autorizacao_escritura_visualizar === true
-      || perms.sub_rel_docs_autorizacao_escritura_editar === true
-      || perms.sub_rel_docs_autorizacao_terceiros_acessar === true
-      || perms.sub_rel_docs_autorizacao_terceiros_visualizar === true
-      || perms.sub_rel_docs_autorizacao_terceiros_editar === true
-      || perms.sub_rel_docs_alteracao_vencimento_acessar === true
-      || perms.sub_rel_docs_alteracao_vencimento_visualizar === true
-      || perms.sub_rel_docs_alteracao_vencimento_editar === true
-      || perms.sub_rel_docs_cessao_direitos_acessar === true
-      || perms.sub_rel_docs_cessao_direitos_visualizar === true
-      || perms.sub_rel_docs_cessao_direitos_editar === true
-      || perms.sub_rel_docs_termo_quitacao_acessar === true
-      || perms.sub_rel_docs_termo_quitacao_visualizar === true
-      || perms.sub_rel_docs_termo_quitacao_editar === true;
   }
   if (!String(modKey).endsWith("_acessar")) return false;
   const stem = String(modKey).slice(0, -"_acessar".length);

@@ -1044,15 +1044,20 @@
             ${adminView ? `
               <button type="button" class="btn btn-cancel" id="suporte-back-admin">Voltar</button>
               <div class="suporte-reply-actions-main">
-                <button type="button" class="btn btn-outline" id="suporte-ask-info">Solicitar mais informações</button>
-                <button type="button" class="btn btn-outline suporte-btn-done" id="suporte-mark-done">Marcar como atendido</button>
-                <button type="button" class="btn btn-primary suporte-btn-send" id="suporte-send-admin">Enviar resposta</button>
+                <button type="button" class="btn btn-outline" id="suporte-ask-info"><i data-lucide="message-circle"></i> Solicitar mais informações</button>
+                <button type="button" class="btn btn-primary suporte-btn-send" id="suporte-send-admin"><i data-lucide="send"></i> Enviar resposta</button>
               </div>
             ` : `
               <button type="button" class="btn btn-cancel" id="suporte-back-mine">Voltar</button>
-              ${canReplyUser && t.status !== "atendido" ? `<button type="button" class="btn btn-primary" id="suporte-send-user">Responder</button>` : ""}
+              ${canReplyUser && t.status !== "atendido" ? `<button type="button" class="btn btn-primary" id="suporte-send-user"><i data-lucide="send"></i> Responder</button>` : ""}
             `}
           </div>
+          ${adminView ? `
+            <div class="suporte-reply-close">
+              <p>Encerra o chamado. O texto acima só entra se você tiver escrito alguma coisa.</p>
+              <button type="button" class="btn btn-outline suporte-btn-done" id="suporte-mark-done"><i data-lucide="circle-check"></i> Marcar como atendido</button>
+            </div>
+          ` : ""}
         </div>`;
       document.getElementById("suporte-close-x").onclick = closeModal;
       const backAdmin = document.getElementById("suporte-back-admin");
@@ -1174,24 +1179,23 @@
     const pend = adminListCache.filter(t => pendingStatuses()[t.status]).length;
     const done = adminListCache.filter(t => t.status === "atendido").length;
     const shown = filterAdmin(adminListCache, adminFilter);
+    const abas = [
+      { id: "pendentes", label: "Pendentes", icon: "inbox", n: pend },
+      { id: "atendidos", label: "Atendidos", icon: "circle-check", n: done },
+      { id: "todos", label: "Todos", icon: "list", n: adminListCache.length }
+    ];
     root.innerHTML = `
-      <div class="suporte-admin-bar">
-        <div class="suporte-kpis">
-          <div class="est-kpi"><span>Pendentes</span><strong>${pend}</strong></div>
-          <div class="est-kpi"><span>Atendidos</span><strong>${done}</strong></div>
-          <div class="est-kpi"><span>Total</span><strong>${adminListCache.length}</strong></div>
+      <div class="suporte-admin-top">
+        <div class="ml-tabs" role="tablist">
+          ${abas.map((t) => `
+            <button type="button" role="tab" class="ml-tab${adminFilter === t.id ? " is-active" : ""}" data-f="${t.id}" aria-selected="${adminFilter === t.id}">
+              <i data-lucide="${t.icon}"></i> ${t.label} <span class="ml-tab-count">${t.n}</span>
+            </button>`).join("")}
         </div>
-        <div class="suporte-admin-actions">
-          <button type="button" class="btn btn-primary" id="suporte-admin-new">Novo chamado interno</button>
-        </div>
-      </div>
-      <div class="suporte-filters">
-        <button type="button" class="suporte-chip${adminFilter === "pendentes" ? " active" : ""}" data-f="pendentes">Pendentes</button>
-        <button type="button" class="suporte-chip${adminFilter === "atendidos" ? " active" : ""}" data-f="atendidos">Atendidos</button>
-        <button type="button" class="suporte-chip${adminFilter === "todos" ? " active" : ""}" data-f="todos">Todos</button>
+        <button type="button" class="btn btn-primary" id="suporte-admin-new"><i data-lucide="plus"></i> Novo chamado interno</button>
       </div>
       ${listHtml(shown, "Nenhum chamado neste filtro.")}`;
-    root.querySelectorAll(".suporte-chip").forEach(btn => {
+    root.querySelectorAll(".ml-tab").forEach(btn => {
       btn.addEventListener("click", () => {
         adminFilter = btn.getAttribute("data-f");
         renderAdmin();
@@ -1202,6 +1206,7 @@
     root.querySelectorAll(".suporte-card").forEach(el => {
       el.addEventListener("click", () => openDetail(el.getAttribute("data-id"), { admin: true }));
     });
+    if (window.lucide) lucide.createIcons();
   }
 
   function onMenuClick(action) {

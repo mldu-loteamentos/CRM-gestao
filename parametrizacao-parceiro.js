@@ -672,7 +672,6 @@ const ParametrizacaoParceiroApp = {
       alert("Escolha uma obra diferente da atual.");
       return;
     }
-    const cloneShares = JSON.parse(JSON.stringify(src.accountShares || {}));
     const cloneNaN = JSON.parse(JSON.stringify(src.naNodes || {}));
     const cloneNaA = JSON.parse(JSON.stringify(src.naAccounts || {}));
     const cloneInA = JSON.parse(JSON.stringify(src.inAccounts || {}));
@@ -682,14 +681,39 @@ const ParametrizacaoParceiroApp = {
       dest = this.makeObra(destCode, src.defaultPartnerShare, seed);
       p.obras.push(dest);
     }
-    dest.defaultPartnerShare = src.defaultPartnerShare;
-    dest.accountShares = cloneShares;
     dest.naNodes = cloneNaN;
     dest.naAccounts = cloneNaA;
     dest.inAccounts = cloneInA;
+    dest.accountShares = {};
     this.selectedObraCode = destCode;
     this.persist();
     this.render();
+  },
+
+  /** Copia só grupos e contas ligados ou desligados. O percentual de cada obra fica o da aba Obras. */
+  replicarLigacoes() {
+    const p = this.current();
+    const src = this.currentObra(p);
+    if (!p || !src) return;
+    const destinos = (p.obras || []).filter(o => String(o.code) !== String(src.code));
+    if (!destinos.length) {
+      alert("Não há outra obra deste parceiro para receber a configuração.");
+      return;
+    }
+    const lista = destinos.map(o => `obra ${o.code} (${o.defaultPartnerShare}%)`).join(", ");
+    const msg = `Replicar o que está ligado e desligado da obra ${src.code} para ${lista}?\n\nO percentual de cada obra continua o que está na aba Obras.`;
+    const ok = typeof window.mouraConfirm === "function" ? window.mouraConfirm(msg) : Promise.resolve(confirm(msg));
+    Promise.resolve(ok).then((sim) => {
+      if (!sim) return;
+      destinos.forEach((dest) => {
+        dest.naNodes = JSON.parse(JSON.stringify(src.naNodes || {}));
+        dest.naAccounts = JSON.parse(JSON.stringify(src.naAccounts || {}));
+        dest.inAccounts = JSON.parse(JSON.stringify(src.inAccounts || {}));
+        dest.accountShares = {};
+      });
+      this.persist();
+      this.render();
+    });
   },
 
   removeObra(code) {
@@ -1278,18 +1302,7 @@ const ParametrizacaoParceiroApp = {
     if (p && !this.selectedObraCode && p.obras[0]) this.selectedObraCode = p.obras[0].code;
     root.innerHTML = `
       <div style="display:flex;flex-direction:column;height:calc(100vh - 85px);font-family:inherit;">
-        <div style="background:#105436;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;border-radius:12px 12px 0 0;">
-          <div style="display:flex;align-items:center;gap:12px;">
-            <div style="width:36px;height:36px;background:rgba(255,255,255,0.2);border-radius:8px;display:flex;align-items:center;justify-content:center;">
-              <i data-lucide="handshake" style="width:18px;height:18px;color:#fff;"></i>
-            </div>
-            <div>
-              <h2 style="margin:0;color:#fff;font-size:1.15rem;font-weight:600;">Parametrização de Parceiro</h2>
-              <p style="margin:2px 0 0;color:rgba(255,255,255,0.75);font-size:0.75rem;">Prestação de contas · parceria com rateio ou sociedade (SPE) · credor para título a pagar</p>
-            </div>
-          </div>
-        </div>
-        <div style="display:flex;flex:1;min-height:0;background:#f8fafc;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 12px 12px;">
+        <div style="display:flex;flex:1;min-height:0;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;">
           <div style="width:260px;background:#fff;border-right:1px solid #e2e8f0;display:flex;flex-direction:column;flex-shrink:0;">
             <div style="padding:12px;border-bottom:1px solid #f1f5f9;">
               <button onclick="ParametrizacaoParceiroApp.startNew()" class="btn btn-primary" style="width:100%;height:34px;font-size:0.8rem;">
@@ -1365,8 +1378,8 @@ const ParametrizacaoParceiroApp = {
     const nObras = (p.obras || []).length;
     const nCc = (p.obras || []).reduce((acc, o) => acc + (o.costCenters || []).filter(c => c.inAccount).length, 0);
     const credOk = !!(p.creditor && p.creditor.id);
-    const btn = (id, label, extra) =>
-      `<button type="button" class="customer-tab-btn ${tab === id ? "active" : ""}" onclick="ParametrizacaoParceiroApp.setDetailTab('${id}')">${label}${extra || ""}</button>`;
+    const btn = (id, label, icon, count) =>
+      `<button type="button" role="tab" aria-selected="${tab === id}" class="ml-tab${tab === id ? " is-active" : ""}" onclick="ParametrizacaoParceiroApp.setDetailTab('${id}')"><i data-lucide="${icon}"></i> ${label}${count ? ` <span class="ml-tab-count">${count}</span>` : ""}</button>`;
     let body = "";
     if (tab === "credor") body = this.credorTabHtml(p);
     else if (tab === "obras") body = this.obrasTabHtml(p, obra, sociedade);
@@ -1382,12 +1395,12 @@ const ParametrizacaoParceiroApp = {
             <div style="font-size:0.78rem;color:#64748b;margin-top:2px;">${this.esc(p.partnerName)} · ${sociedade ? "Sociedade" : "Parceria"}</div>
           </div>
         </div>
-        <div class="ficha-tabs-menu" style="margin-bottom:14px;">
-          ${btn("geral", "Geral")}
-          ${btn("credor", "Credor", credOk ? ` <span style="opacity:0.85;font-size:0.7rem;">✓</span>` : "")}
-          ${btn("obras", "Obras", nObras ? ` <span style="opacity:0.85;font-size:0.7rem;">${nObras}</span>` : "")}
-          ${btn("centros", "Centros de custo", nCc ? ` <span style="opacity:0.85;font-size:0.7rem;">${nCc}</span>` : "")}
-          ${btn("rateio", sociedade ? "Sociedade" : "Rateio DFC")}
+        <div class="ml-tabs" role="tablist" style="margin-bottom:16px;">
+          ${btn("geral", "Geral", "sliders-horizontal")}
+          ${btn("credor", "Credor", "user", credOk ? "✓" : "")}
+          ${btn("obras", "Obras", "building-2", nObras || "")}
+          ${btn("centros", "Centros de custo", "layers", nCc || "")}
+          ${btn("rateio", sociedade ? "Sociedade" : "Rateio DFC", sociedade ? "users" : "pie-chart")}
         </div>
         ${body}
       </div>
@@ -1552,12 +1565,13 @@ const ParametrizacaoParceiroApp = {
           <button class="btn btn-primary" onclick="ParametrizacaoParceiroApp.addObraFromForm()" style="height:34px;font-size:0.78rem;">Incluir obra</button>
         </div>
         ${sociedade ? "" : `<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-top:10px;">
-          <label style="font-size:0.72rem;font-weight:700;color:#475569;min-width:180px;flex:1;">Duplicar rateio da obra ${this.esc(obra && obra.code)} para
+          <label style="font-size:0.72rem;font-weight:700;color:#475569;min-width:180px;flex:1;">Copiar ligações da obra ${this.esc(obra && obra.code)} para
             <input id="pp-dup-obra" placeholder="134 ou 13400" style="width:100%;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;box-sizing:border-box;">
           </label>
-          <button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.duplicateObra()" style="height:34px;font-size:0.78rem;">Duplicar parametrização</button>
+          <button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.duplicateObra()" style="height:34px;font-size:0.78rem;">Copiar ligações</button>
           ${p.obras.length > 1 ? `<button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.removeObra('${this.esc(obra && obra.code)}')" style="height:34px;font-size:0.78rem;color:#dc2626;">Remover obra</button>` : ""}
-        </div>`}
+        </div>
+        <p style="margin:8px 0 0;font-size:0.72rem;color:#94a3b8;">Copia só o que está ligado ou desligado em grupos e contas. O percentual da obra destino continua o desta aba.</p>`}
         ${sociedade && p.obras.length > 1 ? `<div style="margin-top:10px;"><button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.removeObra('${this.esc(obra && obra.code)}')" style="height:34px;font-size:0.78rem;color:#dc2626;">Remover obra</button></div>` : ""}
       </div>
     `;
@@ -1565,42 +1579,54 @@ const ParametrizacaoParceiroApp = {
 
   obraDetailHtml(p, obra, inAccount) {
     const sociedade = this.isSociedade(p);
+    const total = (obra.costCenters || []).length;
+    const field = "height:36px;border:1px solid #e2e8f0;border-radius:8px;padding:0 10px;box-sizing:border-box;background:#fff;font-size:0.82rem;";
     return `
-      <div class="crm-card" style="padding:16px;overflow:hidden;">
-        ${this.obraChipsHtml(p, sociedade)}
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+      <div class="crm-card" style="padding:0;overflow:hidden;">
+        <div style="padding:16px 16px 0;">${this.obraChipsHtml(p, sociedade)}</div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;padding:0 16px 14px;border-bottom:1px solid #f1f5f9;">
           <div>
-            <h3 style="margin:0;font-size:0.95rem;color:var(--color-primary);">Centros de custo da obra ${this.esc(obra.code)}</h3>
+            <div style="font-size:0.95rem;font-weight:800;color:#0f172a;">Obra ${this.esc(obra.code)}</div>
             <p style="margin:4px 0 0;font-size:0.78rem;color:#64748b;">${sociedade
-              ? "Sociedade: os centros entram na conta da SPE, sem rateio."
-              : "Marque os que entram na conta. " + inAccount.length + " ativo(s). Rateio padrão desta obra: " + obra.defaultPartnerShare + "%."}</p>
+              ? "Os centros entram na conta da SPE, sem rateio."
+              : inAccount.length + " de " + total + " entram na conta · rateio desta obra " + obra.defaultPartnerShare + "%"}</p>
           </div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            ${sociedade ? "" : `<label style="font-size:0.72rem;font-weight:700;color:#475569;">% padrão
+          <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+            ${sociedade ? "" : `<label style="font-size:0.72rem;font-weight:700;color:#475569;">Rateio da obra (%)
               <input type="number" min="0" max="100" step="0.01" value="${obra.defaultPartnerShare}"
                 onchange="ParametrizacaoParceiroApp.updateObraShare(this.value)"
-                style="width:80px;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;font-weight:800;">
+                style="width:88px;${field}font-weight:800;display:block;margin-top:4px;">
             </label>`}
-            <button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.importObraCenters()" style="height:34px;font-size:0.78rem;">Trazer irmãos da obra</button>
+            <button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.importObraCenters()" style="height:36px;font-size:0.78rem;">Trazer irmãos da obra</button>
           </div>
         </div>
-        <table class="custom-table" style="margin-top:12px;font-size:0.82rem;">
-          <thead><tr><th>C.C.</th><th>Nome</th><th style="text-align:center;">Entra na conta</th><th></th></tr></thead>
+        <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+          <thead>
+            <tr style="background:#f8fafc;color:#64748b;font-size:0.68rem;letter-spacing:0.04em;text-transform:uppercase;">
+              <th style="text-align:left;padding:10px 16px;font-weight:700;width:110px;">C.C.</th>
+              <th style="text-align:left;padding:10px 16px;font-weight:700;">Nome</th>
+              <th style="text-align:center;padding:10px 16px;font-weight:700;width:140px;">Entra na conta</th>
+              <th style="width:90px;"></th>
+            </tr>
+          </thead>
           <tbody>
-            ${(obra.costCenters || []).map(cc => `<tr>
-              <td style="font-weight:800;">${this.esc(cc.id)}</td>
-              <td>${this.esc(cc.name)}</td>
-              <td style="text-align:center;">
-                <input type="checkbox" ${cc.inAccount ? "checked" : ""} onchange="ParametrizacaoParceiroApp.setCcInAccount('${cc.id}', this.checked)">
+            ${(obra.costCenters || []).map(cc => `<tr style="border-top:1px solid #f1f5f9;">
+              <td style="padding:12px 16px;font-weight:800;color:#105436;font-variant-numeric:tabular-nums;">${this.esc(cc.id)}</td>
+              <td style="padding:12px 16px;color:#334155;">${this.esc(cc.name)}</td>
+              <td style="padding:12px 16px;text-align:center;">
+                <input type="checkbox" ${cc.inAccount ? "checked" : ""} onchange="ParametrizacaoParceiroApp.setCcInAccount('${cc.id}', this.checked)"
+                  style="width:18px;height:18px;accent-color:#105436;cursor:pointer;">
               </td>
-              <td style="text-align:right;"><button onclick="ParametrizacaoParceiroApp.removeCostCenter('${cc.id}')" style="border:none;background:transparent;color:#dc2626;cursor:pointer;">remover</button></td>
-            </tr>`).join("") || `<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:16px;">Nenhum centro de custo</td></tr>`}
+              <td style="padding:12px 16px;text-align:right;">
+                <button type="button" onclick="ParametrizacaoParceiroApp.removeCostCenter('${cc.id}')" style="border:none;background:transparent;color:#b91c1c;cursor:pointer;font-size:0.75rem;font-weight:700;">Remover</button>
+              </td>
+            </tr>`).join("") || `<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:28px;">Nenhum centro de custo nesta obra.</td></tr>`}
           </tbody>
         </table>
-        <div style="margin-top:10px;max-width:420px;">
+        <div style="padding:12px 16px;background:#f8fafc;border-top:1px solid #e2e8f0;">
           <input placeholder="Adicionar outro C.C. (ex. 13301)" value="${this.esc(this.ccSearch)}"
             oninput="ParametrizacaoParceiroApp.ccSearch=this.value;const b=document.getElementById('pp-cc-sugg');if(b)b.innerHTML=ParametrizacaoParceiroApp.ccSuggHtml();"
-            style="width:100%;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
+            style="width:100%;max-width:420px;${field}">
           <div id="pp-cc-sugg">${this.ccSuggHtml()}</div>
         </div>
       </div>
@@ -1721,12 +1747,13 @@ const ParametrizacaoParceiroApp = {
             <div style="font-size:0.72rem;color:#64748b;margin-top:3px;">
               Contas 1.xxx entram como receita (positivo) e 2.xxx como despesa (negativo) na prestação de contas. Campo em branco herda ${def}%.
               Desmarcar um grupo tira todas as contas; dá para incluir de volta uma a uma (o grupo fica Parcial) ou usar o ícone de check para incluir todas.
+              Replicar nas outras obras copia só o que está ligado ou desligado. O percentual de cada obra continua o da aba Obras.
             </div>
           </div>
-          <button type="button" onclick="ParametrizacaoParceiroApp.applyDefaultToAll()"
-            style="padding:4px 10px;background:#105436;color:#fff;border:none;border-radius:4px;font-size:0.75rem;cursor:pointer;white-space:nowrap;">
-            Usar padrão em todas
-          </button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
+            <button type="button" class="btn btn-outline" onclick="ParametrizacaoParceiroApp.applyDefaultToAll()" style="height:34px;font-size:0.75rem;white-space:nowrap;">Usar padrão em todas</button>
+            <button type="button" class="btn btn-primary" onclick="ParametrizacaoParceiroApp.replicarLigacoes()" style="height:34px;font-size:0.75rem;white-space:nowrap;">Replicar nas outras obras</button>
+          </div>
         </div>
         <div id="pp-tree-scroll" style="flex:1;overflow:auto;padding:15px;background:#fff;">
           ${body || `<div style="text-align:center;color:#94a3b8;padding:28px;font-size:0.85rem;">DFC Padrão sem nós. Configure em Plano Financeiro e Visões.</div>`}

@@ -181,170 +181,16 @@ const ConfigUsersApp = {
       const newKey = "sub_eng_geral_caucao_" + flag;
       if (savedPerms[newKey] == null && savedPerms[oldKey] === true) savedPerms[newKey] = true;
     });
-    if (savedPerms.sub_eng_geral_caucao_acessar == null && (
-      savedPerms.mod_eng || savedPerms.sub_eng_geral || savedPerms.sub_eng_geral_engenharia_acessar
-    )) {
-      savedPerms.sub_eng_geral_caucao_acessar = true;
-      savedPerms.sub_eng_geral_caucao_visualizar = true;
-      savedPerms.sub_eng_geral_caucao_editar = !!savedPerms.sub_eng_geral_engenharia_editar;
-    }
-    if (savedPerms.sub_eng_geral_config_acessar == null && (
-      savedPerms.mod_eng || savedPerms.sub_eng_geral || savedPerms.sub_eng_geral_engenharia_acessar
-    )) {
-      savedPerms.sub_eng_geral_config_acessar = true;
-      savedPerms.sub_eng_geral_config_visualizar = true;
-      savedPerms.sub_eng_geral_config_editar = true;
-    }
     ["acessar", "visualizar", "editar"].forEach((flag) => {
       const oldKey = "sub_rel_geral_relacionamento_" + flag;
       const newKey = "sub_rel_geral_buscar_cliente_" + flag;
-      if (savedPerms[newKey] == null && savedPerms[oldKey] === true) savedPerms[newKey] = true;
+      if (savedPerms.mod_rel === true && savedPerms[newKey] == null && savedPerms[oldKey] === true) savedPerms[newKey] = true;
     });
-    if (savedPerms.sub_fiscal_geral_fiscal_acessar && savedPerms.sub_fiscal_geral_csll_acessar == null) {
-      savedPerms.sub_fiscal_geral_csll_acessar = true;
-      savedPerms.sub_fiscal_geral_csll_visualizar = !!savedPerms.sub_fiscal_geral_fiscal_visualizar;
-      savedPerms.sub_fiscal_geral_csll_editar = !!savedPerms.sub_fiscal_geral_fiscal_editar;
-    }
     if (!savedPerms.mod_gerencial && (
-      savedPerms.mod_participacoes
-      || savedPerms.mod_societario
-      || savedPerms.sub_part_geral
-      || savedPerms.sub_soc_geral
-      || savedPerms.sub_part_geral_participacoes_acessar
-      || savedPerms.sub_soc_geral_estrutura_societaria_acessar
+      savedPerms.sub_part_geral_participacoes_acessar === true
+      || savedPerms.sub_soc_geral_estrutura_societaria_acessar === true
     )) {
       savedPerms.mod_gerencial = true;
-    }
-    if (savedPerms.sub_com_geral_tabelas_vigentes_acessar == null && (
-      savedPerms.mod_comercial
-      || savedPerms.sub_com_geral_dashboard_acessar
-      || savedPerms.sub_com_geral_estoque_acessar
-      || savedPerms.sub_com_geral_condicoes_pagamento_acessar
-    )) {
-      savedPerms.sub_com_geral_tabelas_vigentes_acessar = true;
-      savedPerms.sub_com_geral_tabelas_vigentes_visualizar = true;
-      savedPerms.sub_com_geral_tabelas_vigentes_editar = !!(
-        savedPerms.sub_com_geral_condicoes_pagamento_editar
-        || savedPerms.sub_com_geral_dashboard_editar
-        || savedPerms.sub_com_geral_estoque_editar
-      );
-    }
-    if (savedPerms.sub_compras_geral_previsoes_acessar == null && (
-      savedPerms.mod_compras
-      || savedPerms.sub_compras_geral_compras_acessar
-    )) {
-      savedPerms.sub_compras_geral_previsoes_acessar = true;
-      savedPerms.sub_compras_geral_previsoes_visualizar = true;
-      savedPerms.sub_compras_geral_previsoes_editar = !!savedPerms.sub_compras_geral_compras_editar;
-    }
-    if (savedPerms.sub_compras_geral_dashboard_acessar == null && (
-      savedPerms.mod_compras
-      || savedPerms.sub_compras_geral_compras_acessar
-      || savedPerms.sub_compras_geral_previsoes_acessar
-    )) {
-      savedPerms.sub_compras_geral_dashboard_acessar = true;
-      savedPerms.sub_compras_geral_dashboard_visualizar = true;
-      savedPerms.sub_compras_geral_dashboard_editar = !!(
-        savedPerms.sub_compras_geral_compras_editar
-        || savedPerms.sub_compras_geral_previsoes_editar
-      );
-    }
-    if (savedPerms.sub_compras_geral_controle_financeiro_acessar == null && (
-      savedPerms.mod_compras
-      || savedPerms.sub_compras_geral_compras_acessar
-      || savedPerms.sub_compras_geral_previsoes_acessar
-      || savedPerms.sub_compras_geral_dashboard_acessar
-    )) {
-      savedPerms.sub_compras_geral_controle_financeiro_acessar = true;
-      savedPerms.sub_compras_geral_controle_financeiro_visualizar = true;
-      savedPerms.sub_compras_geral_controle_financeiro_editar = !!(
-        savedPerms.sub_compras_geral_compras_editar
-        || savedPerms.sub_compras_geral_previsoes_editar
-      );
-    }
-    if (savedPerms.sub_fin_cp_rydoo_acessar == null && (
-      savedPerms.sub_fin_cp === true
-      || savedPerms.sub_fin_cp_assistente_cp_acessar
-      || savedPerms.sub_fin_cp_prestacao_contas_acessar
-      || savedPerms.sub_fin_cp_parametrizacao_parceiro_acessar
-    )) {
-      savedPerms.sub_fin_cp_rydoo_acessar = true;
-      savedPerms.sub_fin_cp_rydoo_visualizar = true;
-      savedPerms.sub_fin_cp_rydoo_editar = !!(
-        savedPerms.sub_fin_cp_assistente_cp_editar
-        || savedPerms.sub_fin_cp_prestacao_contas_editar
-      );
-    }
-    if (savedPerms.sub_fin_cp_titulos_incompletos_acessar == null && (
-      savedPerms.sub_fin_cp === true
-      || savedPerms.sub_fin_cp_assistente_cp_acessar
-      || savedPerms.sub_fin_cp_prestacao_contas_acessar
-      || savedPerms.sub_fin_cp_parametrizacao_parceiro_acessar
-      || savedPerms.sub_fin_cp_gerar_pagamento_acessar
-    )) {
-      savedPerms.sub_fin_cp_titulos_incompletos_acessar = true;
-      savedPerms.sub_fin_cp_titulos_incompletos_visualizar = true;
-      savedPerms.sub_fin_cp_titulos_incompletos_editar = !!(
-        savedPerms.sub_fin_cp_assistente_cp_editar
-        || savedPerms.sub_fin_cp_prestacao_contas_editar
-      );
-    }
-    if (savedPerms.sub_fin_cp_gerar_pagamento_acessar == null && (
-      savedPerms.sub_fin_cp === true
-      || savedPerms.sub_fin_cp_assistente_cp_acessar
-      || savedPerms.sub_fin_cp_prestacao_contas_acessar
-      || savedPerms.sub_fin_cp_parametrizacao_parceiro_acessar
-      || savedPerms.sub_fin_cp_rydoo_acessar
-    )) {
-      savedPerms.sub_fin_cp_gerar_pagamento_acessar = true;
-      savedPerms.sub_fin_cp_gerar_pagamento_visualizar = true;
-      savedPerms.sub_fin_cp_gerar_pagamento_editar = !!(
-        savedPerms.sub_fin_cp_assistente_cp_editar
-        || savedPerms.sub_fin_cp_prestacao_contas_editar
-        || savedPerms.sub_fin_cp_rydoo_editar
-      );
-    }
-    if (savedPerms.sub_fin_cr_recebimentos_webro_acessar == null && (
-      savedPerms.sub_fin_cr === true
-      || savedPerms.sub_fin_cr_fila_cobranca_acessar
-      || savedPerms.sub_fin_cr_fila_cobranca_visualizar
-      || savedPerms.sub_fin_cr_fila_cobranca_editar
-    )) {
-      savedPerms.sub_fin_cr_recebimentos_webro_acessar = true;
-      savedPerms.sub_fin_cr_recebimentos_webro_visualizar = true;
-      savedPerms.sub_fin_cr_recebimentos_webro_editar = !!(
-        savedPerms.sub_fin_cr_fila_cobranca_editar || savedPerms.sub_fin_cr === true
-      );
-    }
-    if (savedPerms.sub_fin_cr_dashboard_acessar == null && (
-      savedPerms.sub_fin_cr_fila_cobranca_acessar
-      || savedPerms.sub_fin_cr_fila_cobranca_visualizar
-      || savedPerms.sub_fin_cr_fila_cobranca_editar
-    )) {
-      savedPerms.sub_fin_cr_dashboard_acessar = !!savedPerms.sub_fin_cr_fila_cobranca_acessar;
-      savedPerms.sub_fin_cr_dashboard_visualizar = !!savedPerms.sub_fin_cr_fila_cobranca_visualizar;
-      savedPerms.sub_fin_cr_dashboard_editar = !!savedPerms.sub_fin_cr_fila_cobranca_editar;
-    }
-    if (savedPerms.sub_seg_geral_consumo_api_acessar == null && (
-      savedPerms.sub_seg_geral_auditoria_acessar
-      || savedPerms.sub_seg_geral_auditoria_visualizar
-      || savedPerms.sub_seg_geral_auditoria_editar
-    )) {
-      savedPerms.sub_seg_geral_consumo_api_acessar = !!savedPerms.sub_seg_geral_auditoria_acessar;
-      savedPerms.sub_seg_geral_consumo_api_visualizar = !!savedPerms.sub_seg_geral_auditoria_visualizar;
-      savedPerms.sub_seg_geral_consumo_api_editar = !!savedPerms.sub_seg_geral_auditoria_editar;
-    }
-    if (savedPerms.sub_com_geral_controle_comissao_acessar == null && (
-      savedPerms.mod_comercial
-      || savedPerms.sub_com_geral_dashboard_acessar
-      || savedPerms.sub_com_geral_tabelas_vigentes_acessar
-    )) {
-      savedPerms.sub_com_geral_controle_comissao_acessar = true;
-      savedPerms.sub_com_geral_controle_comissao_visualizar = true;
-      savedPerms.sub_com_geral_controle_comissao_editar = !!(
-        savedPerms.sub_com_geral_tabelas_vigentes_editar
-        || savedPerms.sub_com_geral_dashboard_editar
-      );
     }
     if (!savedPerms.mod_vistoria && (
       savedPerms.sub_vist_tela
@@ -964,21 +810,7 @@ const ConfigUsersApp = {
   },
 
   seedTerceirizadoPermsFromCobranca() {
-    const terc = (this.profiles || []).find(p => window.isOperadorCobrancaTerceirizadoProfile(p && p.name));
-    if (!terc) return false;
-    const hasTrue = (obj) => (typeof window.crmPermsHasAnyTrue === "function"
-      ? window.crmPermsHasAnyTrue(obj)
-      : Object.keys(obj || {}).some((k) => obj[k] === true));
-    const current = this.getProfilePermsObject(terc.id);
-    if (hasTrue(current)) return false;
-    const src = this.getProfilePermsObject(this.resolveCobrancaProfileId());
-    if (!hasTrue(src)) return false;
-    const copy = Object.assign({}, src);
-    delete copy.__mirror_of__;
-    delete copy._shrinkConfirmedAt;
-    const wrote = this.writePermissionPayload(terc.id, copy);
-    if (wrote) this.syncPermsToCloud();
-    return !!wrote;
+    return false;
   },
 
   breakSharedCobrancaMirrors() {
@@ -1592,6 +1424,10 @@ const ConfigUsersApp = {
                   <label style="display: block; font-weight: 600; color: #5f6368; margin-bottom: 6px; font-size: 0.85rem;">Celular</label>
                   <input type="text" id="umodal-phone" placeholder="(00) 00000-0000" maxlength="15" oninput="this.value = this.value.replace(/\\D/g, '').replace(/(\\d{2})(\\d)/, '($1) $2').replace(/(\\d{5})(\\d)/, '$1-$2').slice(0, 15);" value="${user ? (user.phone||'') : ''}" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='#105436'" onblur="this.style.borderColor='#e8eaed'">
                </div>
+               <div style="flex: 1;">
+                  <label style="display: block; font-weight: 600; color: #5f6368; margin-bottom: 6px; font-size: 0.85rem;">Telefone corporativo</label>
+                  <input type="text" id="umodal-fone-corp" placeholder="(00) 0000-0000" maxlength="14" oninput="this.value = this.value.replace(/\\D/g, '').replace(/(\\d{2})(\\d)/, '($1) $2').replace(/(\\d{4})(\\d)/, '$1-$2').slice(0, 14);" value="${user ? (user.telefone_corporativo||'') : ''}" style="width: 100%; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='#105436'" onblur="this.style.borderColor='#e8eaed'">
+               </div>
             </div>
 
             <div style="display: flex; gap: 16px; margin-bottom: 16px;">
@@ -1743,6 +1579,7 @@ const ConfigUsersApp = {
       const email = document.getElementById('umodal-email').value.trim();
       const sienge = document.getElementById('umodal-sienge').value.trim();
       const phone = document.getElementById('umodal-phone').value.trim();
+      const telefoneCorporativo = document.getElementById('umodal-fone-corp') ? document.getElementById('umodal-fone-corp').value.trim() : '';
       const profileName = document.getElementById('umodal-profile').value;
       const managerName = document.getElementById('umodal-manager-name').value.trim();
       const managerEmail = document.getElementById('umodal-manager-email').value.trim();
@@ -1779,6 +1616,7 @@ const ConfigUsersApp = {
           email: email,
           sienge_user: sienge,
           phone: phone,
+          telefone_corporativo: telefoneCorporativo,
           profile_name: profileName,
           operator_type: resolvedOperatorType,
           adv_companies: resolvedOperatorType === 'advogado' ? advCompanies : [],

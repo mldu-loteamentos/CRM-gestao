@@ -1076,7 +1076,7 @@ const CessaoPopup = {
     }
     if (tab === "taxa") {
       if (st.taxaStatus === "buscando") return "Consultando o título da taxa…";
-      if (st.taxaStatus !== "paga") return st.taxaMsg || "Informe o título da taxa de cessão e pressione Enter ou Tab.";
+      if (st.taxaStatus !== "paga") return st.taxaMsg || "Informe o título da taxa de cessão.";
       return "";
     }
     return "";
@@ -1290,6 +1290,7 @@ const CessaoPopup = {
       indexador = this.indiceDoContrato(condsApi, installments);
     }
     if (!condicoes.length) condicoes = [{ id: "c1", tipo: "Mensal", qtde: "", valor: "", vencimento: "" }];
+    condicoes.sort((a, b) => this.cmpVencimento(a, b));
     const situacao = this.situacaoParcelas(instFin.length ? instFin : (extrato.length ? extrato : installments));
     const empName = typeof window.resolveLoteamentoName === "function" ? window.resolveLoteamentoName(unit, sale) : (ctx.empreendimento || "");
     let preamble = "";
@@ -1593,9 +1594,13 @@ const CessaoPopup = {
 
   cedentesHtml() {
     const st = CessaoPopupState;
+    const principal = (st.cedentes || []).find((c) => c.main) || (st.cedentes || [])[0];
     const nota = st.faltaPct
-      ? `<p class="cessao-pop-nota">Há comprador secundário sem percentual no Sienge. O campo % Sienge fica como veio do cadastro. Informe quanto cada pessoa tem.</p>`
+      ? `<p class="cessao-pop-nota">Há comprador secundário sem percentual no Sienge. Informe quanto cada pessoa tem.</p>`
       : `<p class="cessao-pop-nota is-ok">Marque quem cede e quanto do percentual dela passa para o cessionário.</p>`;
+    const principalHtml = principal
+      ? `<p class="cessao-principal">Cliente principal do contrato: <strong>${this.esc(principal.name || "—")}</strong></p>`
+      : "";
     const linhas = (st.cedentes || []).map((row, idx) => `
       <div class="cessao-pop-pessoa">
         <div>
@@ -1603,9 +1608,6 @@ const CessaoPopup = {
           ${row.main ? '<span class="cessao-badge">Principal</span>' : (st.cedentes.length > 1 ? '<span class="cessao-badge">Secundário</span>' : '')}
           <div style="font-size:0.78rem;color:#64748b;margin-top:2px;">ID ${this.esc(row.id || "—")}</div>
         </div>
-        <label>% Sienge
-          <input class="form-control" value="${row.pctSienge == null ? "" : this.fmtPct(row.pctSienge)}" disabled>
-        </label>
         <label>% desta pessoa
           <input class="form-control" type="number" min="0" max="100" step="0.01" value="${row.participacao}" ${st.faltaPct ? "" : "disabled"}
             oninput="CessaoPopup.setParticipacao(${idx}, this)">
@@ -1620,12 +1622,22 @@ const CessaoPopup = {
             oninput="CessaoPopup.setCeder(${idx}, this)">
         </label>
       </div>`).join("");
-    return nota + (linhas || "<p>Nenhum comprador encontrado neste contrato.</p>") +
+    return nota + principalHtml + (linhas || "<p>Nenhum comprador encontrado neste contrato.</p>") +
       `<div style="text-align:right;font-weight:700;color:var(--color-primary);">Total cedido: <span id="cessao-pop-total-cedido">${this.fmtPct(this.totalCedido())}%</span></div>`;
+  },
+
+  cmpVencimento(a, b) {
+    const da = String((a && a.vencimento) || "");
+    const db = String((b && b.vencimento) || "");
+    if (!da && !db) return 0;
+    if (!da) return 1;
+    if (!db) return -1;
+    return da.localeCompare(db);
   },
 
   condicoesHtml() {
     const st = CessaoPopupState;
+    (st.condicoes || []).sort((a, b) => this.cmpVencimento(a, b));
     const quando = st.dataVenda ? CessaoApp.fmtDate(st.dataVenda) : "sem data de venda";
     const nota = st.recente
       ? `<p class="cessao-pop-nota is-ok">Venda de ${this.esc(quando)}. Ajuste as condições da compra se precisar. Juros, indexador, parcelas e saldo vêm do contrato e não podem ser editados.</p>`
@@ -1642,17 +1654,18 @@ const CessaoPopup = {
       </tr>`;
     }).join("");
     return `${nota}
-      <div class="cessao-cond-head">CONDIÇÕES DE PAGAMENTO DA COMPRA</div>
-      <div class="cessao-cond-scroll">
-        <table class="cessao-cond-table">
-          <thead><tr>
-            <th>Tipo</th><th>Qtde. parcelas</th><th>Valor da parcela</th><th>Total</th><th>1º vencimento</th><th></th>
-          </tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
-      <button type="button" class="btn btn-outline" onclick="CessaoPopup.addCond()"><i data-lucide="plus" style="width:14px;height:14px;"></i> Adicionar condição</button>
-      <div class="cessao-contrato-dados">
+      <div class="cessao-cond-box">
+        <div class="cessao-cond-head">CONDIÇÕES DE PAGAMENTO DA COMPRA</div>
+        <div class="cessao-cond-scroll">
+          <table class="cessao-cond-table">
+            <thead><tr>
+              <th>Tipo</th><th>Qtde. parcelas</th><th>Valor da parcela</th><th>Total</th><th>1º vencimento</th><th></th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <button type="button" class="btn btn-outline cessao-cond-add" onclick="CessaoPopup.addCond()"><i data-lucide="plus" style="width:14px;height:14px;"></i> Adicionar condição</button>
+        <div class="cessao-contrato-dados">
         ${this.campoContrato("Juros ao mês (%)", this.fmtPct(st.juros))}
         ${this.campoContrato("Indexador", st.indexador || "REAL")}
         ${this.campoContrato("Parcelas já pagas", String(st.qtdPagas || 0))}
@@ -1660,6 +1673,7 @@ const CessaoPopup = {
         ${this.campoContrato("Valor da próxima parcela", this.money(st.valorParcelaAberta), true)}
         ${this.campoContrato("Próximo vencimento", st.primeiroVencAberto ? CessaoApp.fmtDate(st.primeiroVencAberto) : "—", true)}
         ${this.campoContrato("Saldo com o vendedor", this.money(st.saldoAberto))}
+        </div>
       </div>`;
   },
 
@@ -1688,7 +1702,7 @@ const CessaoPopup = {
     const cards = (st.cessionarios || []).map((row, idx) => this.cardCessionario(row, idx)).join("");
     const cheio = !modoRep && this.cessionarioCheio();
     const busca = cheio
-      ? `<p class="cessao-pop-nota">O percentual cedido já soma com o cessionário. Ajuste o % adquirido para incluir outra pessoa.</p>`
+      ? ""
       : `<div class="cessao-ces-busca">
         <label class="cessao-pop-field">${modoRep ? "Representante" : "Nome do cliente"}
           <input id="cessao-pop-busca" class="form-control" placeholder="Digite para buscar..." value="${this.esc(st.busca)}"
@@ -1696,10 +1710,11 @@ const CessaoPopup = {
         </label>
         <div id="cessao-pop-sug" class="cessao-pop-sug" style="display:none;"></div>
       </div>`;
+    const nota = modoRep
+      ? `<p class="cessao-pop-nota">Selecione o representante de ${this.esc((alvo && alvo.customer && alvo.customer.name) || "o cessionário")}.</p>`
+      : (cheio ? `<p class="cessao-pop-nota">O percentual cedido já soma com o cessionário. Ajuste o % adquirido para incluir outra pessoa.</p>` : "");
     return `
-      <p class="cessao-pop-nota ${modoRep || cheio ? "" : "is-ok"}">${modoRep
-        ? "Selecione o representante de " + this.esc((alvo && alvo.customer && alvo.customer.name) || "o cessionário") + "."
-        : "Busque o cliente como na tela de Relacionamento. Confira os dados e o cônjuge, e informe o percentual que essa pessoa adquiriu."}</p>
+      ${nota}
       ${busca}
       <div class="cessao-ces-lista">${cards || `<p class="cessao-ces-vazio">Nenhum cessionário selecionado. Total cedido: ${this.fmtPct(this.totalCedido())}%.</p>`}</div>`;
   },
@@ -1723,15 +1738,18 @@ const CessaoPopup = {
 
   taxaHtml() {
     const st = CessaoPopupState;
-    const cls = st.taxaStatus === "paga" ? "is-ok" : (st.taxaStatus ? "" : "is-ok");
-    const msg = st.taxaMsg || "Digite o número do título da taxa e pressione Enter ou Tab.";
+    const cls = st.taxaStatus === "paga" ? "is-ok" : (st.taxaStatus && st.taxaStatus !== "buscando" ? "" : "is-ok");
+    const msg = st.taxaMsg || "Informe o título da taxa de cessão.";
     return `
       <p class="cessao-pop-nota ${cls}">${this.esc(msg)}</p>
-      <label class="cessao-pop-field" style="max-width:280px;">Título da taxa de cessão
-        <input id="cessao-taxa-titulo" class="form-control" inputmode="numeric" placeholder="Número do título" value="${this.esc(st.taxaTitulo || "")}"
-          oninput="CessaoPopup.aoDigitarTaxa(this.value)"
-          onkeydown="CessaoPopup.taxaTecla(event)">
-      </label>`;
+      <div class="cessao-taxa-row">
+        <label class="cessao-pop-field">Título da taxa de cessão
+          <input id="cessao-taxa-titulo" class="form-control" inputmode="numeric" placeholder="Número do título" value="${this.esc(st.taxaTitulo || "")}"
+            oninput="CessaoPopup.aoDigitarTaxa(this.value)"
+            onkeydown="CessaoPopup.taxaTecla(event)">
+        </label>
+        <button type="button" class="btn btn-outline" onclick="CessaoPopup.buscarTaxa()" ${st.taxaStatus === "buscando" ? "disabled" : ""}>Consultar pagamento</button>
+      </div>`;
   },
 
   cardCessionario(row, idx) {
@@ -1764,7 +1782,7 @@ const CessaoPopup = {
             <span class="cessao-ces-ordem">Cessionário ${idx + 1}</span>
             <strong>${this.esc(c.name || "—")}</strong>
             <span class="cessao-badge">${pj ? "Pessoa jurídica" : "Pessoa física"}</span>
-            <span class="cessao-ces-id">ID ${this.esc(c.id || row.customerId)}${conj && conj.name ? " · cônjuge " + this.esc(conj.name) : ""}</span>
+            ${conj && conj.name ? `<span class="cessao-ces-id">Cônjuge: ${this.esc(conj.name)}</span>` : ""}
           </span>
         </button>
         <div class="cessao-ces-acoes">
@@ -1871,6 +1889,10 @@ const CessaoPopup = {
     const row = (CessaoPopupState.condicoes || []).find((c) => c.id === id);
     if (!row) return;
     row[field] = value;
+    if (field === "vencimento") {
+      this.pintar();
+      return;
+    }
     if (field === "qtde" || field === "valor") {
       const el = document.getElementById("cessao-cond-total-" + id);
       if (el) el.textContent = this.money((Number(row.qtde) || 0) * this.parseValor(row.valor));
@@ -1930,7 +1952,7 @@ const CessaoPopup = {
     const prox = document.getElementById("cessao-popup-proximo");
     if (prox) prox.disabled = true;
     const aviso = document.getElementById("cessao-popup-aviso");
-    if (aviso) aviso.textContent = "Pressione Enter ou Tab para consultar o título da taxa.";
+    if (aviso) aviso.textContent = "Informe o título da taxa de cessão.";
   },
 
   taxaTecla(ev) {
@@ -1938,6 +1960,26 @@ const CessaoPopup = {
     if (ev.key === "Enter") ev.preventDefault();
     CessaoPopupState.taxaTitulo = ev.target ? ev.target.value : CessaoPopupState.taxaTitulo;
     this.buscarTaxa();
+  },
+
+  idsDoProcesso() {
+    const ids = new Set();
+    (CessaoPopupState.cedentes || []).forEach((c) => { if (c.id != null && c.id !== "") ids.add(String(c.id)); });
+    (CessaoPopupState.cessionarios || []).forEach((c) => { if (c.customerId != null && c.customerId !== "") ids.add(String(c.customerId)); });
+    return ids;
+  },
+
+  parcelaDaTaxaPaga(p) {
+    if (!p) return false;
+    const sit = [p.installmentSituation, p.situation, p.installmentStatus, p.status, p.situationDescription, p.installmentSituationDescription]
+      .filter((v) => v != null && v !== "")
+      .map((v) => String(v).trim().toUpperCase());
+    const pagas = ["2", "PG", "PAGO", "PAGA", "QUITADO", "QUITADA", "PAID", "LIQUIDADO", "LIQUIDADA"];
+    if (sit.some((s) => pagas.includes(s))) return true;
+    const recs = (p.receipts || []).filter((rec) => !(typeof window.isWriteOffReceipt === "function" && window.isWriteOffReceipt(rec)));
+    const recebido = recs.reduce((s, rec) => s + (Number(rec.receiptValue || rec.value || 0) || 0), 0);
+    const cb = Number(p.currentBalance != null ? p.currentBalance : p.balanceDue);
+    return Number.isFinite(cb) && cb <= 0.009 && recebido > 0.009;
   },
 
   async buscarTaxa() {
@@ -1969,26 +2011,28 @@ const CessaoPopup = {
       } catch (e) {
         inst = [];
       }
-      let aberto = 0;
-      let recebido = 0;
-      inst.forEach((p) => {
-        const cb = p && (p.currentBalance != null ? p.currentBalance : p.balanceDue);
-        aberto += Number(cb) || 0;
-        (p.receipts || []).forEach((rec) => {
-          if (typeof window.isWriteOffReceipt === "function" && window.isWriteOffReceipt(rec)) return;
-          recebido += Number(rec.receiptValue || rec.value || 0);
-        });
-      });
-      const quitado = !!(bill.payOffDate || bill.payoffDate);
-      const paga = inst.length > 0 && aberto <= 0.009 && (recebido > 0.009 || quitado);
       if (!inst.length) {
         CessaoPopupState.taxaStatus = "aberta";
         CessaoPopupState.taxaMsg = "Encontrei o título " + id + ", mas não consegui ler as parcelas para confirmar o pagamento.";
+      } else if (!inst.every((p) => this.parcelaDaTaxaPaga(p))) {
+        CessaoPopupState.taxaStatus = "aberta";
+        CessaoPopupState.taxaMsg = "Título " + id + " ainda tem saldo em aberto. A cessão só gera com a taxa paga.";
       } else {
-        CessaoPopupState.taxaStatus = paga ? "paga" : "aberta";
-        CessaoPopupState.taxaMsg = paga
-          ? "Título " + id + " está pago. Pode gerar a cessão."
-          : "Título " + id + " ainda tem saldo em aberto. A cessão só gera com a taxa paga.";
+        const bruto = bill.documentId || bill.documentIdentificationId || bill.documentsId || bill.documentIdentification || "";
+        const doc = String((bruto && (bruto.id || bruto.code)) || bruto).trim().toUpperCase();
+        const clienteId = String(bill.customerId || (bill.customer && bill.customer.id) || "");
+        const clienteNome = String(bill.customerName || (bill.customer && bill.customer.name) || "").trim();
+        const quem = clienteNome || (clienteId ? "ID " + clienteId : "não identificado");
+        if (doc !== "TC") {
+          CessaoPopupState.taxaStatus = "nao";
+          CessaoPopupState.taxaMsg = "Título " + id + " está pago, mas o documento é " + (doc || "outro") + ", não TC.";
+        } else if (!this.idsDoProcesso().has(clienteId)) {
+          CessaoPopupState.taxaStatus = "nao";
+          CessaoPopupState.taxaMsg = "Título " + id + " está pago, mas o cliente " + quem + " não é cedente nem cessionário deste processo.";
+        } else {
+          CessaoPopupState.taxaStatus = "paga";
+          CessaoPopupState.taxaMsg = "Título " + id + " é TC, está pago e o cliente confere. Pode gerar a cessão.";
+        }
       }
     } catch (e) {
       CessaoPopupState.taxaStatus = "nao";

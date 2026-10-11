@@ -1013,7 +1013,8 @@ ComprasControleApp.abrirTituloRow = async function (row) {
   try {
     if (typeof window.siengeFetchWithRetry !== "function") throw new Error("A API do Sienge não está disponível nesta tela.");
     const billId = row.titulo;
-    const impostosP = window.NotaFiscalCheck && typeof NotaFiscalCheck.impostosDoTitulo === "function"
+    const semFiscal = !!row.semFiscal;
+    const impostosP = !semFiscal && window.NotaFiscalCheck && typeof NotaFiscalCheck.impostosDoTitulo === "function"
       ? NotaFiscalCheck.impostosDoTitulo(billId).catch(() => [])
       : Promise.resolve([]);
     const [bill, attachments, payment, impostos] = await Promise.all([
@@ -1030,7 +1031,7 @@ ComprasControleApp.abrirTituloRow = async function (row) {
     this._tituloDetalhe.impostos = Array.isArray(impostos) ? impostos : [];
     const docIdFiscal = String(row.docId || (bill && bill.documentIdentificationId) || "").trim();
     const docNomeFiscal = String(row.docNome || (bill && bill.documentIdentificationName) || "").trim();
-    const podeReter = window.NotaFiscalCheck && !NotaFiscalCheck.semRetencao(docIdFiscal, docNomeFiscal);
+    const podeReter = !semFiscal && window.NotaFiscalCheck && !NotaFiscalCheck.semRetencao(docIdFiscal, docNomeFiscal);
     const fiscalVelho = row.fiscal && !(row.fiscal.infos || []).some((t) => /\b404\b/.test(String(t)));
     this._tituloDetalhe.fiscal = podeReter && fiscalVelho ? row.fiscal : null;
     this._tituloDetalhe.fiscalLoading = !!podeReter && !this._tituloDetalhe.fiscal;
@@ -1302,7 +1303,7 @@ ComprasControleApp.pintarTitulo = function () {
     const nivelImp = det.fiscalLoading && !det.fiscal ? "espera" : (det.fiscal ? (det.fiscal.nivel === "info" ? "aviso" : det.fiscal.nivel) : "");
     const rank = { erro: 6, negada: 6, aviso: 5, sem: 5, info: 4, analise: 3, espera: 2, ok: 1 };
     const nivelAba = (rank[nivelImp] || 0) >= (rank[fiscalNivel] || 0) ? nivelImp : fiscalNivel;
-    etapas.push({
+    if (!row.semFiscal) etapas.push({
       id: "fiscal",
       label: "Fiscal",
       icon: "receipt",

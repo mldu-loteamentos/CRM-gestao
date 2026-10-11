@@ -3,7 +3,12 @@ const CentrosCustoState = {
   companies: [],
   customFields: {},
   loading: false,
-  selectedFilterIds: [], // IDs of cost centers to show (empty = show all)
+  selectedFilterIds: [],
+  companyIds: [],
+  empOpen: false,
+  empQuery: "",
+  ccOpen: false,
+  ccQuery: "",
   somenteParceiros: false,
   contasPorEmpresa: {},
   tiposCc: [
@@ -880,6 +885,166 @@ const CentrosCustoApp = {
      }
   },
 
+  empresaItens() {
+    const map = new Map();
+    (CentrosCustoState.companies || []).forEach((c) => {
+      const id = String(c.id == null ? "" : c.id);
+      if (!id) return;
+      const nome = String(c.name || c.tradeName || c.corporateName || "").trim().toUpperCase();
+      map.set(id, { id: id, name: nome, label: id + " - " + nome });
+    });
+    (CentrosCustoState.costCenters || []).forEach((cc) => {
+      const id = String(cc.idCompany || cc.companyId || "");
+      if (id && !map.has(id)) map.set(id, { id: id, name: "", label: id });
+    });
+    return Array.from(map.values());
+  },
+
+  ccItens() {
+    const emp = (CentrosCustoState.companyIds || []).map(String);
+    return (CentrosCustoState.costCenters || []).filter((cc) => {
+      if (!emp.length) return true;
+      return emp.includes(String(cc.idCompany || cc.companyId || ""));
+    }).map((cc) => {
+      const id = String(cc.id);
+      const nome = String(cc.name || "").trim().toUpperCase();
+      return { id: id, name: nome, label: id + " - " + nome };
+    });
+  },
+
+  listaFiltrada() {
+    let lista = (CentrosCustoState.costCenters || []).slice();
+    const emp = (CentrosCustoState.companyIds || []).map(String);
+    const ccs = (CentrosCustoState.selectedFilterIds || []).map(String);
+    if (emp.length) lista = lista.filter((c) => emp.includes(String(c.idCompany || c.companyId || "")));
+    if (ccs.length) lista = lista.filter((c) => ccs.includes(String(c.id)));
+    if (CentrosCustoState.somenteParceiros) {
+      lista = lista.filter((c) => this.isParceiro(c) || this.customOf(c.id).conta_parceria);
+    }
+    lista.sort((a, b) => Number(a.id) - Number(b.id));
+    return lista;
+  },
+
+  bindFiltros() {
+    if (!window.MlEmpresaFilter) return;
+    const app = this;
+    MlEmpresaFilter.bind("cc-emp", {
+      toggleOpen() {
+        CentrosCustoState.empOpen = !CentrosCustoState.empOpen;
+        if (CentrosCustoState.empOpen) CentrosCustoState.ccOpen = false;
+        app.render();
+      },
+      setQuery(q) {
+        CentrosCustoState.empQuery = q || "";
+        app.atualizarListaFiltro("cc-emp");
+      },
+      toggleId(id, on) { app.alternarFiltro("companyIds", id, on, app.empresaItens()); },
+      selectAll() {
+        CentrosCustoState.companyIds = app.empresaItens().map((x) => x.id);
+        app.render();
+      },
+      selectNone() {
+        CentrosCustoState.companyIds = [];
+        app.render();
+      }
+    });
+    MlEmpresaFilter.bind("cc-cc", {
+      toggleOpen() {
+        CentrosCustoState.ccOpen = !CentrosCustoState.ccOpen;
+        if (CentrosCustoState.ccOpen) CentrosCustoState.empOpen = false;
+        app.render();
+      },
+      setQuery(q) {
+        CentrosCustoState.ccQuery = q || "";
+        app.atualizarListaFiltro("cc-cc");
+      },
+      toggleId(id, on) { app.alternarFiltro("selectedFilterIds", id, on, app.ccItens()); },
+      selectAll() {
+        CentrosCustoState.selectedFilterIds = app.ccItens().map((x) => x.id);
+        app.render();
+      },
+      selectNone() {
+        CentrosCustoState.selectedFilterIds = [];
+        app.render();
+      }
+    });
+  },
+
+  atualizarListaFiltro(id) {
+    const box = document.getElementById(id + "-list");
+    if (!box || !window.MlEmpresaFilter) return;
+    const emp = id === "cc-emp";
+    box.innerHTML = MlEmpresaFilter.listHtml({
+      id: id,
+      items: emp ? this.empresaItens() : this.ccItens(),
+      selectedIds: emp ? CentrosCustoState.companyIds : CentrosCustoState.selectedFilterIds,
+      query: emp ? CentrosCustoState.empQuery : CentrosCustoState.ccQuery,
+      nouns: emp ? null : { singular: "centro de custo", plural: "centros de custo", none: "Nenhum centro de custo", noMatch: "Nenhum centro de custo com esse nome." }
+    });
+  },
+
+  alternarFiltro(campo, id, on, itens) {
+    const sid = String(id);
+    let sel = (CentrosCustoState[campo] || []).map(String);
+    if (on) {
+      if (!sel.includes(sid)) sel.push(sid);
+    } else {
+      sel = sel.filter((x) => x !== sid);
+    }
+    const todos = (itens || []).map((x) => String(x.id));
+    if (sel.length && sel.length === todos.length) sel = [];
+    CentrosCustoState[campo] = sel;
+    this.render();
+  },
+
+  filtroHtml(id, label, itens, selected, open, query, nouns) {
+    if (!window.MlEmpresaFilter) return "";
+    return MlEmpresaFilter.html({
+      id: id,
+      label: label,
+      items: itens,
+      selectedIds: selected,
+      open: open,
+      query: query,
+      emptyMeansAll: true,
+      nouns: nouns || null
+    });
+  },
+
+  exportExcel() {
+    const rows = this.listaFiltrada();
+    if (!rows.length) {
+      alert("Não há centros de custo no filtro atual para exportar.");
+      return;
+    }
+    if (!window.XLSX) {
+      alert("A exportação para Excel não está disponível.");
+      return;
+    }
+    const preamblesList = (AppState && AppState.preamblesList) ? AppState.preamblesList : [];
+    const aoa = [["ID Empresa", "ID CC", "Centro de Custo", "Tipo", "Valor VGV", "ID Preâmbulo", "% Moura Leite", "% Terrenista", "Conta parceria"]];
+    rows.forEach((cc) => {
+      const custom = this.customOf(cc.id);
+      const v = this.vgvDe(cc.id);
+      const found = preamblesList.find((p) => p.centrosCustoIds && p.centrosCustoIds.includes(cc.id));
+      aoa.push([
+        cc.idCompany || cc.companyId || "",
+        cc.id,
+        cc.name || "",
+        custom.tipo_cc || "",
+        v.valor > 0 ? v.valor : "",
+        found ? found.id : "",
+        custom.perc_ml ? custom.perc_ml : "",
+        custom.perc_terrenista ? custom.perc_terrenista : "",
+        custom.conta_parceria ? this.contaLabel(custom.conta_parceria) : (this.isParceiro(cc) ? "Parceiro sem conta" : "")
+      ]);
+    });
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Centros de Custo");
+    XLSX.writeFile(wb, "centros-de-custo.xlsx");
+  },
+
   render() {
     const contentDiv = document.getElementById('centros-custo-content');
     if (!contentDiv) return;
@@ -896,87 +1061,47 @@ const CentrosCustoApp = {
       return;
     }
 
-    let filteredCCs = CentrosCustoState.costCenters;
-    if (CentrosCustoState.selectedFilterIds.length > 0) {
-        filteredCCs = filteredCCs.filter(c => CentrosCustoState.selectedFilterIds.includes(c.id));
-    }
-    if (CentrosCustoState.somenteParceiros) {
-        filteredCCs = filteredCCs.filter(c => this.isParceiro(c) || this.customOf(c.id).conta_parceria);
-    }
-    
-    // Sort by CC ID ASC
-    filteredCCs.sort((a, b) => a.id - b.id);
-
-    let unselectedOptions = CentrosCustoState.costCenters.filter(c => !CentrosCustoState.selectedFilterIds.includes(c.id));
-
-    let filterPills = CentrosCustoState.selectedFilterIds.map(fid => {
-        const cc = CentrosCustoState.costCenters.find(c => c.id === fid);
-        const name = cc ? cc.name : fid;
-        return `<div style="background: #e0e0e0; border-radius: 16px; padding: 4px 10px; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 6px; font-weight: bold; color: #555;">
-            ${fid} - ${name}
-            <span style="cursor: pointer; background: #999; color: white; border-radius: 50%; width: 16px; height: 16px; display: inline-flex; justify-content: center; align-items: center; font-size: 10px;" onclick="CentrosCustoApp.removeFilter(${fid})">&times;</span>
-        </div>`;
-    }).join('');
-
-    let optionsHtml = unselectedOptions.map(c => `<option value="${c.id} - ${c.name}"></option>`).join('');
+    const filteredCCs = this.listaFiltrada();
+    this.bindFiltros();
+    const nounsCc = { singular: "centro de custo", plural: "centros de custo", none: "Nenhum centro de custo", noMatch: "Nenhum centro de custo com esse nome." };
 
     let html = `
-      <style>
-        .empresas-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
-        .empresas-table thead th { position: sticky; top: 0; background-color: #1b8253; color: #ffffff; padding: 12px; text-align: left; font-weight: 600; z-index: 10; white-space: nowrap; }
-        .empresas-table tbody tr { border-bottom: 1px solid #e0e5e0; }
-        .empresas-table tbody tr:nth-child(even) { background-color: #f4f6f4; }
-        .empresas-table tbody tr:hover { background-color: #eef2ef; }
-        .empresas-table.cc-table tbody tr { transition: background-color .12s ease, box-shadow .12s ease; }
-        .empresas-table.cc-table tbody tr:hover { background-color: #d9f2e3; box-shadow: inset 4px 0 0 #105436; }
-        .empresas-table.cc-table tbody tr:hover td { color: #0f3d27; }
-        .empresas-table.cc-table tbody tr.cc-row-salvo { animation: ccRowSalvo 2.4s ease-out; }
-        @keyframes ccRowSalvo { 0%, 40% { background-color: #bbf7d0; } 100% { background-color: transparent; } }
-        .empresas-table td { padding: 10px 12px; vertical-align: middle; }
-        .cc-filter-container { border: 1px solid #ccc; border-radius: 6px; padding: 8px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: white; min-height: 42px; margin-bottom: 20px;}
-        .cc-filter-select { border: none; outline: none; background: transparent; font-size: 0.85rem; flex-grow: 1; min-width: 200px; color: #777;}
-      </style>
-
-      <div style="display: flex; justify-content: flex-end; align-items: center; gap: 16px; margin-bottom: 15px;">
-        <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; font-weight:600; color:#334155; cursor:pointer;">
-          <input type="checkbox" ${CentrosCustoState.somenteParceiros ? 'checked' : ''} onchange="CentrosCustoState.somenteParceiros=this.checked;CentrosCustoApp.render()" style="width:16px;height:16px;accent-color:#105436;">
-          Somente parceiros
-        </label>
-        <button class="btn btn-primary" style="display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 16px; font-weight: 600; border-radius: 6px; cursor: pointer; border: none;" onclick="CentrosCustoApp.loadData(true)">
-          <i data-lucide="refresh-cw" style="width: 16px;"></i> Atualizar
-        </button>
+      <div class="cc-toolbar">
+        <div class="cc-filters">
+          ${this.filtroHtml("cc-emp", "Empresas", this.empresaItens(), CentrosCustoState.companyIds, CentrosCustoState.empOpen, CentrosCustoState.empQuery)}
+          ${this.filtroHtml("cc-cc", "Centros de custo", this.ccItens(), CentrosCustoState.selectedFilterIds, CentrosCustoState.ccOpen, CentrosCustoState.ccQuery, nounsCc)}
+        </div>
+        <div class="cc-toolbar-actions">
+          <label class="cc-parceiros">
+            <input type="checkbox" ${CentrosCustoState.somenteParceiros ? "checked" : ""} onchange="CentrosCustoState.somenteParceiros=this.checked;CentrosCustoApp.render()">
+            Somente parceiros
+          </label>
+          <button type="button" class="btn btn-excel" onclick="CentrosCustoApp.exportExcel()" title="Exportar tabela atual para Excel">
+            <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
+          </button>
+          <button type="button" class="btn btn-primary cc-atualizar" onclick="CentrosCustoApp.loadData(true)">
+            <i data-lucide="refresh-cw" style="width:14px;height:14px;"></i> Atualizar
+          </button>
+        </div>
       </div>
 
-      <div class="cc-filter-container">
-        ${filterPills}
-        <input list="cc-datalist" class="cc-filter-select" placeholder="Pesquisar centro de custo ou empresa..." onchange="
-          const val = this.value; 
-          const match = CentrosCustoState.costCenters.find(c => (c.id + ' - ' + c.name) === val || c.id == val);
-          if (match) { CentrosCustoApp.addFilter(match.id); this.value=''; }
-        ">
-        <datalist id="cc-datalist">
-            ${optionsHtml}
-        </datalist>
-      </div>
-
-      <div class="card" style="overflow: hidden; border-radius: 8px;">
-        <div class="cc-scroll" style="max-height: 65vh; overflow-y: auto;">
-          <table class="empresas-table cc-table">
-            <thead>
-              <tr>
-                <th style="width: 80px;">ID Empresa</th>
-                <th style="width: 80px;">ID CC</th>
-                <th style="min-width: 250px;">Centro de Custo</th>
-                <th style="width: 150px;">Tipo</th>
-                <th style="width: 120px; text-align: right;">Valor VGV</th>
-                <th style="width: 150px; text-align: center;">ID Preâmbulo</th>
-                <th style="width: 120px; text-align: center;">% Moura Leite</th>
-                <th style="width: 120px; text-align: center;">% Terrenista</th>
-                <th style="min-width: 180px;">Conta parceria</th>
-                <th style="width: 100px; text-align: center;">Ações</th>
-              </tr>
-            </thead>
-            <tbody>
+      <div class="cc-scroll">
+        <table class="cc-table">
+          <thead>
+            <tr>
+              <th>ID Empresa</th>
+              <th>ID CC</th>
+              <th>Centro de Custo</th>
+              <th>Tipo</th>
+              <th class="is-right">Valor VGV</th>
+              <th class="is-center">ID Preâmbulo</th>
+              <th class="is-center">% Moura Leite</th>
+              <th class="is-center">% Terrenista</th>
+              <th>Conta parceria</th>
+              <th class="is-center">Ações</th>
+            </tr>
+          </thead>
+          <tbody>
     `;
 
     if (filteredCCs.length === 0) {
@@ -1001,26 +1126,24 @@ const CentrosCustoApp = {
       const exCount = (tipoCc === 'Incorporação' && Array.isArray(custom.incorporacao_lotes_excecao))
         ? custom.incorporacao_lotes_excecao.length
         : 0;
-      const tipoBadge = tipoCc === 'Incorporação'
-        ? `<span style="background:#ecfdf5;border:1px solid #86efac;padding:2px 6px;border-radius:4px;font-size:0.8rem;color:#166534;">${tipoCc}${exCount ? ` · ${exCount} exc.` : ''}</span>`
-        : `<span style="background: #f0f2f5; padding: 2px 6px; border-radius: 4px; font-size: 0.8rem; color: #555;">${tipoCc}</span>`;
+      const tipoTxt = this.escHtml(tipoCc) + (exCount ? " · " + exCount + " exc." : "");
 
       html += `
         <tr id="cc-row-${cc.id}">
-          <td>${cc.idCompany || cc.companyId || '-'}</td>
-          <td><strong>${cc.id}</strong></td>
-          <td>${cc.name}</td>
-          <td>${tipoBadge}</td>
-          <td id="cc-vgv-${cc.id}" style="text-align: right; font-weight: 500; color: #1b8253;">${vgv}</td>
-          <td style="text-align: center;">${preambulo}</td>
-          <td style="text-align: center;">${percMl}</td>
-          <td style="text-align: center;">${percTerr}</td>
-          <td style="font-size:0.8rem;">${custom.conta_parceria
-            ? `<span style="color:#105436;font-weight:600;">${this.contaLabel(custom.conta_parceria)}</span>`
-            : (this.isParceiro(cc) ? `<span style="color:#b91c1c;font-weight:700;">Parceiro sem conta</span>` : '-')}</td>
-          <td style="text-align: center;">
-             <button class="btn btn-outline btn-sm" onclick="CentrosCustoApp.openEditModal(${cc.id})" style="padding: 4px 10px; font-size: 0.75rem;">
-                <i data-lucide="edit-3" style="width: 14px;"></i> Editar
+          <td>${this.escHtml(cc.idCompany || cc.companyId || "-")}</td>
+          <td><strong>${this.escHtml(cc.id)}</strong></td>
+          <td>${this.escHtml(cc.name || "")}</td>
+          <td>${tipoTxt}</td>
+          <td id="cc-vgv-${cc.id}" class="is-right cc-vgv">${vgv}</td>
+          <td class="is-center">${this.escHtml(preambulo)}</td>
+          <td class="is-center">${this.escHtml(percMl)}</td>
+          <td class="is-center">${this.escHtml(percTerr)}</td>
+          <td class="${custom.conta_parceria ? "cc-conta" : (this.isParceiro(cc) ? "cc-sem-conta" : "")}">${custom.conta_parceria
+            ? this.escHtml(this.contaLabel(custom.conta_parceria))
+            : (this.isParceiro(cc) ? "Parceiro sem conta" : "-")}</td>
+          <td class="is-center">
+             <button type="button" class="tvig-ico" title="Editar" onclick="CentrosCustoApp.openEditModal(${cc.id})">
+                <i data-lucide="pencil" style="width:15px;height:15px;"></i>
              </button>
           </td>
         </tr>
@@ -1030,7 +1153,6 @@ const CentrosCustoApp = {
     html += `
             </tbody>
           </table>
-        </div>
       </div>
     `;
 
@@ -1092,7 +1214,7 @@ function initCentrosCustoModule() {
   if (!root) return;
 
   root.innerHTML = `
-    <div style="padding: 20px; max-width: 1400px; margin: 0 auto;">
+    <div class="cc-page">
       <div id="centros-custo-content">
         <div style="text-align: center; padding: 40px; color: var(--color-text-muted);">
           <div class="spinner" style="margin-bottom: 15px;"></div>

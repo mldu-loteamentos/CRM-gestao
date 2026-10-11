@@ -23,7 +23,7 @@ function caixaDiaUtil(iso, passo) {
 }
 
 function caixaMoney(v) {
-  return (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  return (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function caixaParseMoney(v) {
@@ -1240,20 +1240,45 @@ const FluxoCaixaDiarioApp = {
 
   idPagarDe(o) {
     if (!o || typeof o !== "object") return "";
-    const keys = ["payableBillId", "billPayableId", "accountPayableBillId", "payableId", "originPayableBillId", "sourceBillId", "linkedPayableBillId", "billIdPayable"];
+    const keys = ["payableBillId", "billPayableId", "accountPayableBillId", "payableId", "originPayableBillId", "sourceBillId", "linkedPayableBillId", "billIdPayable", "originBillId", "accountsPayableBillId"];
     const vistos = [o];
     Object.keys(o).forEach((k) => {
       const v = o[k];
       if (v && typeof v === "object" && !Array.isArray(v)) vistos.push(v);
     });
+    const parece = /payable|originbill|sourcebill|linkedbill/i;
     for (let i = 0; i < vistos.length; i++) {
       const obj = vistos[i];
       for (let j = 0; j < keys.length; j++) {
         const n = obj[keys[j]];
         if (n != null && String(n).trim() && String(n) !== "0") return String(n).trim();
       }
+      const nomes = Object.keys(obj);
+      for (let j = 0; j < nomes.length; j++) {
+        if (!parece.test(nomes[j])) continue;
+        const n = obj[nomes[j]];
+        if (n == null || typeof n === "object") continue;
+        const s = String(n).trim();
+        if (/^\d+$/.test(s) && s !== "0") return s;
+      }
     }
     return "";
+  },
+
+  normGrupo(s) {
+    return String(s || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^A-Z0-9 ]/g, " ")
+      .replace(/\b(LTDA|S A|SA|SPE|EIRELI|ME|EPP)\b/g, " ")
+      .replace(/\s+/g, " ").trim();
+  },
+
+  /** Cliente e empresa do mesmo grupo: o dinheiro só muda de conta. */
+  mesmoGrupo(a, b) {
+    const na = this.normGrupo(a);
+    const nb = this.normGrupo(b);
+    if (na.length < 4 || nb.length < 4) return false;
+    if (na === nb || na.indexOf(nb) >= 0 || nb.indexOf(na) >= 0) return true;
+    return na.indexOf("MOURA LEITE") >= 0 && nb.indexOf("MOURA LEITE") >= 0;
   },
 
   async anexosDe(billId, fonte) {
@@ -1275,6 +1300,9 @@ const FluxoCaixaDiarioApp = {
   },
 
   async acharTituloPagar(item, bill) {
+    const cliente = String((bill && (bill.customerName || bill.clientName)) || item.cliente || "").trim();
+    const empresaNome = String(item.empresa || (bill && bill.companyName) || this.companyName(item.companyId) || "").trim();
+    if (this.mesmoGrupo(cliente, empresaNome)) return { transferencia: true };
     const titulo = String(item.titulo || "");
     const direto = item.pagarId || this.idPagarDe(bill);
     if (direto && direto !== titulo) {
@@ -1284,32 +1312,92 @@ const FluxoCaixaDiarioApp = {
       } catch (e) { /* segue pela busca do documento */ }
     }
     const doc = String((bill && bill.documentNumber) || item.documento || "").trim();
-    if (doc.length < 2) return null;
-    const empresa = String((bill && bill.companyId) || item.companyId || "");
+    const empresaId = String((bill && bill.companyId) || item.companyId || "");
     const base = String(item.emissao || (bill && (bill.issueDate || bill.billDate)) || item.vencimento || "").slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(base)) return null;
-    const largo = !item.emissao && !(bill && (bill.issueDate || bill.billDate));
-    const ini = caixaAddDays(base, largo ? -240 : -60);
-    const fim = caixaAddDays(base, largo ? 30 : 60);
-    const tipo = String(item.docId || (bill && (bill.documentId || bill.documentIdentificationId)) || "").toUpperCase();
-    const buscar = async (comEmpresa) => {
-      let q = "/bills?startDate=" + encodeURIComponent(ini) + "&endDate=" + encodeURIComponent(fim)
-        + "&documentNumber=" + encodeURIComponent(doc) + "&limit=50";
-      if (comEmpresa && empresa) q += "&debtorId=" + encodeURIComponent(empresa);
-      const data = await window.siengeFetchWithRetry(q, 1);
-      return (data && data.results) || [];
-    };
-    let rows = [];
-    try { rows = await buscar(true); } catch (e) { rows = []; }
-    if (!rows.length && empresa) {
-      try { rows = await buscar(false); } catch (e2) { rows = []; }
+    if (doc.length >= 2 && /^\d{4}-\d{2}-\d{2}$/.test(base)) {
+      const largo = !item.emissao && !(bill && (bill.issueDate || bill.billDate));
+      const ini = caixaAddDays(base, largo ? -240 : -60);
+      const fim = caixaAddDays(base, largo ? 30 : 60);
+      const tipo = String(item.docId || (bill && (bill.documentId || bill.documentIdentificationId)) || "").toUpperCase();
+      const buscar = async (comEmpresa) => {
+        let q = "/bills?startDate=" + encodeURIComponent(ini) + "&endDate=" + encodeURIComponent(fim)
+          + "&documentNumber=" + encodeURIComponent(doc) + "&limit=50";
+        if (comEmpresa && empresaId) q += "&debtorId=" + encodeURIComponent(empresaId);
+        const data = await window.siengeFetchWithRetry(q, 1);
+        return (data && data.results) || [];
+      };
+      let rows = [];
+      try { rows = await buscar(true); } catch (e) { rows = []; }
+      if (!rows.length && empresaId) {
+        try { rows = await buscar(false); } catch (e2) { rows = []; }
+      }
+      const docUp = doc.toUpperCase();
+      const hits = rows.filter((b) => b && String(b.documentNumber || "").trim().toUpperCase() === docUp && String(b.id) !== titulo);
+      const typed = tipo ? hits.filter((b) => String(b.documentIdentificationId || "").toUpperCase() === tipo) : hits;
+      const pool = typed.length === 1 ? typed : (typed.length ? [] : (hits.length === 1 ? hits : []));
+      if (pool.length) return { id: String(pool[0].id), bill: pool[0] };
     }
-    const docUp = doc.toUpperCase();
-    const hits = rows.filter((b) => b && String(b.documentNumber || "").trim().toUpperCase() === docUp && String(b.id) !== titulo);
-    const typed = tipo ? hits.filter((b) => String(b.documentIdentificationId || "").toUpperCase() === tipo) : hits;
-    const pool = typed.length === 1 ? typed : (typed.length ? [] : (hits.length === 1 ? hits : []));
-    if (!pool.length) return null;
-    return { id: String(pool[0].id), bill: pool[0] };
+    const porCredor = await this.pagarDoCredor(cliente, item, bill);
+    if (porCredor) return porCredor;
+    return this.pagarDaOutraEmpresa(cliente, empresaNome, item, bill);
+  },
+
+  /** O contas a receber não traz o título de origem. O cliente é o credor: procura o contas a pagar dele. */
+  async pagarDoCredor(nome, item, bill) {
+    if (!nome || nome.length < 3 || typeof window.siengeFetchWithRetry !== "function") return null;
+    const alvo = this.normGrupo(nome);
+    let creds = [];
+    try {
+      const data = await window.siengeFetchWithRetry("/creditors?limit=15&name=" + encodeURIComponent(nome), 1);
+      creds = (data && data.results) || [];
+    } catch (e) { return null; }
+    const cred = creds.find((c) => {
+      const n = this.normGrupo(c.name || "");
+      return n && (n === alvo || n.indexOf(alvo) >= 0 || alvo.indexOf(n) >= 0);
+    });
+    if (!cred || cred.id == null) return null;
+    return this.escolherPagar(item, bill, "&creditorId=" + encodeURIComponent(cred.id));
+  },
+
+  /** O pagamento pode estar na empresa do cliente, com credor igual à empresa que recebe. */
+  async pagarDaOutraEmpresa(cliente, empresa, item, bill) {
+    if (!cliente || typeof window.siengeFetchWithRetry !== "function") return null;
+    const alvo = this.normGrupo(cliente);
+    const devedora = (this.companies || []).find((c) => {
+      const n = this.normGrupo(c.name);
+      return n && String(c.id) !== String(item.companyId || "") && (n === alvo || n.indexOf(alvo) >= 0 || alvo.indexOf(n) >= 0);
+    });
+    if (!devedora) return null;
+    const achado = await this.escolherPagar(item, bill, "&debtorId=" + encodeURIComponent(devedora.id));
+    if (!achado || !achado.bill) return achado;
+    const credor = this.normGrupo(achado.bill.creditorName || "");
+    const recebe = this.normGrupo(empresa);
+    if (recebe && credor && credor.indexOf(recebe) < 0 && recebe.indexOf(credor) < 0) return null;
+    return achado;
+  },
+
+  async escolherPagar(item, bill, filtro) {
+    const base = String(item.vencimento || item.emissao || item.date || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(base)) return null;
+    const ini = caixaAddDays(base, -120);
+    const fim = caixaAddDays(base, 45);
+    let rows = [];
+    try {
+      const data = await window.siengeFetchWithRetry(
+        "/bills?startDate=" + encodeURIComponent(ini) + "&endDate=" + encodeURIComponent(fim) + filtro + "&limit=50",
+        1
+      );
+      rows = (data && data.results) || [];
+    } catch (e) { return null; }
+    const titulo = String(item.titulo || "");
+    rows = rows.filter((b) => b && String(b.id) !== titulo);
+    const doc = String((bill && bill.documentNumber) || item.documento || "").trim().toUpperCase();
+    const porDoc = doc.length >= 2 ? rows.filter((b) => String(b.documentNumber || "").trim().toUpperCase() === doc) : [];
+    if (porDoc.length === 1) return { id: String(porDoc[0].id), bill: porDoc[0] };
+    const valor = Number(item.valor) || 0;
+    const porValor = valor > 0 ? rows.filter((b) => Math.abs((Number(b.totalInvoiceAmount) || 0) - valor) < 0.05) : [];
+    if (porValor.length === 1) return { id: String(porValor[0].id), bill: porValor[0] };
+    return null;
   },
 
   async openRecebimento(date, idx) {
@@ -1338,6 +1426,18 @@ const FluxoCaixaDiarioApp = {
       const parcela = inst.find((p) => String(p && (p.installmentId != null ? p.installmentId : p.installmentNumber)) === parcelaId) || null;
       const pagar = await this.acharTituloPagar(item, bill);
       let attachments = [];
+      if (pagar && pagar.transferencia) {
+        if (!this.detail || this.detail.token !== token) return;
+        this.detail.loading = false;
+        this.detail.bill = bill;
+        this.detail.parcela = parcela;
+        this.detail.transferencia = true;
+        this.detail.pagar = null;
+        this.detail.attachments = [];
+        if (!bill && !parcela) this.detail.error = "Não encontrei o título a receber " + billId + " no Sienge.";
+        this.render();
+        return;
+      }
       if (pagar && pagar.id) {
         try { attachments = await this.anexosDe(pagar.id, "pagar"); } catch (e3) { attachments = []; }
       }
@@ -1441,12 +1541,16 @@ const FluxoCaixaDiarioApp = {
       : (pagar
         ? "Não há anexo no título a receber nem no contas a pagar de origem."
         : "Não há anexo neste título a receber. Quando ele nasce de um contas a pagar, os anexos ficam naquele título.");
-    const origem = pagar ? `
+    const origem = det.transferencia ? `
+      <h4 style="margin:16px 0 6px;color:#105436;font-size:0.92rem;">Transferência entre contas</h4>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:0.86rem;color:#334155;">
+        O valor sai do cliente ${caixaEsc(cliente)} e entra na empresa ${caixaEsc(item.empresa || this.companyName(item.companyId) || "—")}. É transferência entre contas do mesmo grupo. Anexo não se aplica.
+      </div>` : (pagar ? `
       <h4 style="margin:16px 0 6px;color:#105436;font-size:0.92rem;">Origem no contas a pagar</h4>
       <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:0.86rem;">
         Título ${caixaEsc(pagar.id)}${pagarBill.creditorName ? " · " + caixaEsc(pagarBill.creditorName) : ""}
         <div style="color:#64748b;margin-top:4px;">Os anexos deste recebimento ficam no contas a pagar.</div>
-      </div>` : "";
+      </div>` : "");
     return `<div style="position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:80;display:flex;align-items:center;justify-content:center;padding:16px;" onclick="if(event.target===this)FluxoCaixaDiarioApp.closeTitulo()">
       <div style="background:#fff;border-radius:12px;width:min(720px,96vw);max-height:86vh;overflow:auto;padding:18px 20px;">
         <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;">
@@ -1468,8 +1572,8 @@ const FluxoCaixaDiarioApp = {
         </div>
         ${obs ? `<p style="margin:12px 0 0;font-size:0.84rem;"><strong>Observação:</strong> ${caixaEsc(obs)}</p>` : ""}
         ${origem}
-        <h4 style="margin:16px 0 6px;color:#105436;font-size:0.92rem;">${dePagar ? "Anexos do contas a pagar" : "Anexos"}</h4>
-        <div style="display:flex;flex-wrap:wrap;gap:8px;">${det.loading ? "" : (anexos || `<span style="color:#64748b;font-size:0.84rem;">${semAnexo}</span>`)}</div>
+        ${det.transferencia ? "" : `<h4 style="margin:16px 0 6px;color:#105436;font-size:0.92rem;">${dePagar ? "Anexos do contas a pagar" : "Anexos"}</h4>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">${det.loading ? "" : (anexos || `<span style="color:#64748b;font-size:0.84rem;">${semAnexo}</span>`)}</div>`}
       </div>
     </div>`;
   },
@@ -1809,8 +1913,8 @@ const FluxoCaixaDiarioApp = {
   /**
    * Sobra da conta corrente acima do saldo mínimo.
    * De 10 a 31 dias, a sugestão é compromissada. Acima de 31 dias, CDB, porque o IOF zera.
-   * O resgate aponta o dia em que a conta corrente ficaria negativa e o valor
-   * para cobrir as despesas de 7 dias úteis a partir desse resgate.
+   * O resgate olha só os próximos 30 dias corridos: o dia em que a conta corrente
+   * ficaria negativa e o valor para cobrir as despesas de 7 dias úteis.
    */
   aplicacaoHtml(linhas) {
     const hoje = this.hoje();
@@ -1859,18 +1963,16 @@ const FluxoCaixaDiarioApp = {
       const dias = diasDe(fim);
       msgs.push(`<p class="cxd-aplica-comp"><b>Aplicar na compromissada:</b> ${caixaMoney(comp)}. Esse valor pode ficar aplicado por ${dias} dias, até ${caixaFmtDate(fim)}, entre o prazo mínimo de ${par.prazo} dias e os 31 dias em que o IOF do CDB zera. Mantenha ${pisoTxt} na conta corrente.</p>`);
     }
-    const plano = this.planoResgates(serie);
+    const plano = this.planoResgates(serie.filter((p) => p.date <= caixaAddDays(hoje, 29)));
     if (plano.length) {
-      const mostra = plano.slice(0, 6);
-      const resto = plano.length > mostra.length ? `<li>e mais ${plano.length - mostra.length} resgate(s) depois de ${caixaFmtDate(mostra[mostra.length - 1].fim)}</li>` : "";
-      const itens = mostra.map((r) => {
+      const itens = plano.map((r) => {
         const cobre = r.uteis >= 7
           ? `cobre as despesas de 7 dias úteis, até ${caixaFmtDate(r.fim)}`
           : `cobre as despesas de ${r.uteis} dia${r.uteis === 1 ? " útil" : "s úteis"}, até ${caixaFmtDate(r.fim)}`;
         const falta = r.falta > 0.5 ? ` O saldo da aplicação não alcança o restante (${caixaMoney(r.falta)}).` : "";
         return `<li><b>Resgatar em ${caixaFmtDate(r.dia)}:</b> ${caixaMoney(r.valor)}. Esse valor ${cobre}.${falta}</li>`;
       }).join("");
-      msgs.push(`<div class="cxd-aplica-resgate"><b>Resgate da aplicação</b><span>A conta corrente fica negativa e o dinheiro está na aplicação. Cada data abaixo é um resgate. O valor cobre as despesas de 7 dias úteis.</span><ul>${itens}${resto}</ul></div>`);
+      msgs.push(`<div class="cxd-aplica-resgate"><b>Resgate da aplicação</b><span>Olha só os próximos 30 dias. A conta corrente fica negativa e o dinheiro está na aplicação. Cada data é o resgate daquele período.</span><ul>${itens}</ul></div>`);
     }
     return msgs.length ? `<div class="cxd-aplica">${msgs.join("")}</div>` : "";
   },
@@ -1973,8 +2075,8 @@ const FluxoCaixaDiarioApp = {
       empMap[key].itens.push(x);
       empMap[key].total += Number(x.it.valor) || 0;
     });
-    porEmp.sort((a, b) => a.rotulo.localeCompare(b.rotulo, "pt"));
-    porEmp.forEach((g) => g.itens.sort((a, b) => String(a.it.unidade || "").localeCompare(String(b.it.unidade || ""), "pt") || String(a.it.cliente || "").localeCompare(String(b.it.cliente || ""), "pt")));
+    porEmp.sort((a, b) => b.total - a.total);
+    porEmp.forEach((g) => g.itens.sort((a, b) => (Number(b.it.valor) || 0) - (Number(a.it.valor) || 0)));
     const linhaIn = (x) => {
       if (x.it.outra && (x.it.titulo || x.it.billId)) {
         return this.linhaDetalhe(x.it, "cxd-det-in", `onclick="FluxoCaixaDiarioApp.openRecebimento('${d.date}',${x.i})" title="Abrir o título a receber"`);
@@ -1999,18 +2101,36 @@ const FluxoCaixaDiarioApp = {
     const totalCarteira = carteira.reduce((s, x) => s + (Number(x.it.valor) || 0), 0);
     const totalOutros = outros.reduce((s, x) => s + (Number(x.it.valor) || 0), 0);
     const totalReais = reais.reduce((s, x) => s + (Number(x.it.valor) || 0), 0);
-    outros.sort((a, b) => this.resumoLinha(a.it).localeCompare(this.resumoLinha(b.it), "pt"));
+    const porValor = (a, b) => (Number(b.it.valor) || 0) - (Number(a.it.valor) || 0);
+    outros.sort(porValor);
+    reais.sort(porValor);
     const linhasOutros = outros.map(linhaIn).join("");
     const linhasReais = reais.map(linhaIn).join("");
-    const linhasSaida = (d.pagarItens || []).map((it) => {
+    const saidas = (d.pagarItens || []).slice().sort((a, b) => (Number(b.valor) || 0) - (Number(a.valor) || 0));
+    const linhaSaida = (it) => {
       const abre = !!it.titulo;
       return this.linhaDetalhe(it, "cxd-det-out", abre ? `onclick="FluxoCaixaDiarioApp.openTitulo('${caixaEsc(it.key)}')"` : "");
-    }).join("");
+    };
+    const grupoSaida = (rotulo, lista) => {
+      if (!lista.length) return "";
+      const total = lista.reduce((s, it) => s + (Number(it.valor) || 0), 0);
+      return `<div class="cxd-sub">
+        <div class="cxd-grp-head" style="cursor:default;">
+          <strong>${rotulo}</strong>
+          <span>${lista.length} lançamento(s)</span>
+          <b>${caixaMoney(total)}</b>
+        </div>
+        ${this.tabelaLinhas(lista.map(linhaSaida).join(""))}
+      </div>`;
+    };
+    const comprometidas = saidas.filter((it) => it.natureza !== "previsao");
+    const previsoes = saidas.filter((it) => it.natureza === "previsao");
+    const corpoSaidas = grupoSaida("Comprometido", comprometidas) + grupoSaida("Previsões", previsoes);
     const blocos = [];
     if (carteira.length) blocos.push(this.grupoDetalhe("carteira", "Carteira Prevista", carteira.length, totalCarteira, subs, "in"));
     if (outros.length) blocos.push(this.grupoDetalhe("outros", "Outros Recebimentos", outros.length, totalOutros, this.tabelaLinhas(linhasOutros), "outros"));
     if (reais.length) blocos.push(this.grupoDetalhe("reais", "Entradas", reais.length, totalReais, this.tabelaLinhas(linhasReais), "in"));
-    if ((d.pagarItens || []).length) blocos.push(this.grupoDetalhe("saidas", "Saídas", d.pagarItens.length, aberto.sair, this.tabelaLinhas(linhasSaida), "out"));
+    if (saidas.length) blocos.push(this.grupoDetalhe("saidas", "Saídas", saidas.length, aberto.sair, corpoSaidas, "out"));
     const al = this.alertasMov([d]);
     return `<div class="cxd-daydet">
       <div class="cxd-daydet-head">
@@ -2277,8 +2397,7 @@ const FluxoCaixaDiarioApp = {
       </style>
       <div class="cxd-page">
         <div class="cxd-head">
-          <h2>Fluxo de caixa diário</h2>
-          <p>Mês atual e os próximos 3 meses, de ${caixaEsc(this.rotuloPeriodo())}. Saldo inicial no 1º dia. Nos dias anteriores, o extrato das contas ligadas; de hoje em diante, a previsão. A grade rola para o lado.</p>
+          <p>Mês atual e os próximos 3 meses, de ${caixaEsc(this.rotuloPeriodo())}. Saldo inicial no 1º dia. Nos dias anteriores, o extrato das contas ligadas; de hoje em diante, a previsão.</p>
         </div>
         <div class="cxd-body">
           <div class="cxd-tools">

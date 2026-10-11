@@ -232,6 +232,7 @@ const TitulosIncompletosApp = {
     const app = window.ComprasControleApp;
     if (!app || typeof app.abrirTituloRow !== "function") return;
     app.abrirTituloRow({
+      semFiscal: true,
       titulo: r.titulo,
       parcela: r.parcela || "1",
       credor: r.credor,

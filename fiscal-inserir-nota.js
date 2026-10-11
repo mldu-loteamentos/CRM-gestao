@@ -146,13 +146,24 @@ window.InserirNotaApp = {
     const s = this.state;
     const digitado = String((document.getElementById("inf-pedido") || {}).value || s.pedidoId || "").trim();
     const id = this.idApi(digitado);
-    if (!id) return;
+    if (!id) {
+      if (window.EnviarNotaApp) { EnviarNotaApp._buscaAlvo = "inserir"; EnviarNotaApp.abrirBuscaPedidos(); }
+      return;
+    }
     Object.assign(s, { pedidoId: digitado, pedidoApi: id, pedidoNome: digitado, pedido: null, credor: null, itens: [], erro: "", empresaCc: "", cc: null, previsao: null, qtdEditada: false, duplicada: null, criada: null, resultado: null });
     s.carregando = "Buscando o pedido no Sienge…";
     this.render();
     try {
       const pedido = await this.get(`/purchase-orders/${id}`);
       if (!pedido || typeof pedido !== "object" || pedido.id == null) throw new Error("pedido não encontrado");
+      if (window.EnviarNotaApp && !EnviarNotaApp.pedidoPermitido(pedido)) {
+        s.carregando = "";
+        s.erro = "Esse pedido é de um departamento fora do seu acesso.";
+        this.render();
+        EnviarNotaApp._buscaAlvo = "inserir";
+        EnviarNotaApp.abrirBuscaPedidos();
+        return;
+      }
       s.pedido = pedido;
       s.pedidoApi = String(pedido.id);
       s.pedidoNome = String(pedido.formattedPurchaseOrderId || digitado);
@@ -202,9 +213,11 @@ window.InserirNotaApp = {
     } catch (e) {
       s.carregando = "";
       const msg = String((e && e.message) || e || "");
-      s.erro = /404|não encontrado/i.test(msg) ? `Pedido ${id} não encontrado no Sienge.`
+      const sumiu = /404|não encontrado/i.test(msg);
+      s.erro = sumiu ? `Pedido ${id} não encontrado no seu acesso.`
         : (/403/.test(msg) ? "O usuário da API não tem permissão para consultar pedidos de compra." : `Não consegui buscar o pedido: ${msg}`);
       this.render();
+      if (sumiu && window.EnviarNotaApp) { EnviarNotaApp._buscaAlvo = "inserir"; EnviarNotaApp.abrirBuscaPedidos(); }
     }
   },
 
@@ -667,6 +680,7 @@ window.InserirNotaApp = {
     const pag = s.item && s.item.pagamento;
     if (pag && (pag.data || pag.forma)) avisos.push(`Pagamento confirmado pelo operador: ${this.pagamentoTxt(pag)}. Lance esta condição ao finalizar a nota no Sienge.`);
 
+    if (s.credor && window.FilaNotasFiscais) FilaNotasFiscais.avisosAprendidos(s.credor.doc).forEach((t) => avisos.push(t));
     const dup = s.duplicada;
     if (dup && dup.achada) erros.push(`Esta nota já está cadastrada no Sienge (sequencial ${dup.achada.sequentialNumber}, emissão ${this.dataBr(dup.achada.issueDate)}).`);
     else if (dup && dup.conferindo) avisos.push("Conferindo se a nota já existe no Sienge…");
@@ -965,7 +979,9 @@ window.InserirNotaApp = {
     if (filtro === "todas") return itens;
     if (filtro !== "abertas") return itens.filter((x) => x.status === filtro);
     const dia = (x) => String((x.pagamento && x.pagamento.data) || "9999");
-    return itens.filter((x) => FilaNotasFiscais.aberta(x)).sort((a, b) => dia(a).localeCompare(dia(b)) || (a.criadoEm || 0) - (b.criadoEm || 0));
+    const abertas = itens.filter((x) => FilaNotasFiscais.aberta(x)).sort((a, b) => dia(a).localeCompare(dia(b)) || (a.criadoEm || 0) - (b.criadoEm || 0));
+    const acompanhamento = itens.filter((x) => x.status === "devolvida" || x.status === "excluida");
+    return abertas.concat(acompanhamento);
   },
 
   async confirmar(msg) {
@@ -1124,11 +1140,26 @@ window.InserirNotaApp = {
       <p class="inf-muted" style="margin-top:10px;">O operador usa o mesmo pedido, anexa a nota nova e a nota cancelada com a tarja de cancelada. Sem a nota cancelada o sistema não deixa começar outro envio nesse pedido.</p>`;
   },
 
+  camposCarta() {
+    return [
+      "Informações complementares",
+      "Endereço do tomador (logradouro, número ou complemento)",
+      "Bairro do tomador",
+      "CEP do tomador",
+      "E-mail do tomador",
+      "Telefone do tomador",
+      "Inscrição municipal",
+      "Discriminação complementar, sem alterar o serviço",
+      "Dados de transporte ou veículo",
+      "Grafia da razão social, sem trocar a pessoa"
+    ];
+  },
+
   cartaDevolucaoHtml() {
-    const linha = (campo) => `<div class="fnf-carta-linha"><input data-k="campo" placeholder="Campo" value="${this.esc(campo || "")}"><input data-k="informado" placeholder="O que foi informado"><input data-k="deveria" placeholder="O que deveria ser"></div>`;
-    return `<p class="inf-muted">Preencha o que saiu na nota e o que deveria constar. O sistema devolve um documento com essa comparação.</p>
+    const linha = () => `<div class="fnf-carta-linha"><select data-k="campo">${this.camposCarta().map((c) => `<option value="${this.esc(c)}">${this.esc(c)}</option>`).join("")}</select><input data-k="informado" placeholder="O que foi informado"><input data-k="deveria" placeholder="O que deveria ser"></div>`;
+    return `<p class="inf-muted">O campo já lista o que a carta de correção pode alterar. Valor, imposto, tomador, prestador e a descrição do serviço continuam no cancelamento.</p>
       <div class="fnf-carta-h"><span>Campo</span><span>Informado na nota</span><span>Deveria ser</span></div>
-      <div class="fnf-carta-linhas" id="fnf-carta-linhas">${linha("")}${linha("")}</div>
+      <div class="fnf-carta-linhas" id="fnf-carta-linhas">${linha()}${linha()}</div>
       <button type="button" class="btn btn-outline inf-btn-sm" onclick="InserirNotaApp.adicionarLinhaCarta()"><i data-lucide="plus"></i> Adicionar linha</button>`;
   },
 
@@ -1168,7 +1199,7 @@ window.InserirNotaApp = {
     if (!box) return;
     const div = document.createElement("div");
     div.className = "fnf-carta-linha";
-    div.innerHTML = `<input data-k="campo" placeholder="Campo"><input data-k="informado" placeholder="O que foi informado"><input data-k="deveria" placeholder="O que deveria ser">`;
+    div.innerHTML = `<select data-k="campo">${this.camposCarta().map((c) => `<option value="${this.esc(c)}">${this.esc(c)}</option>`).join("")}</select><input data-k="informado" placeholder="O que foi informado"><input data-k="deveria" placeholder="O que deveria ser">`;
     box.appendChild(div);
   },
 
@@ -1225,12 +1256,11 @@ window.InserirNotaApp = {
     if (btn) { btn.disabled = true; btn.textContent = "Devolvendo…"; }
     try {
       await FilaNotasFiscais.atualizar(item, patch, "devolvida", txt);
-      if (tipo === "carta") {
-        const file = this.cartaArquivo(item, patch.cartaLinhas, extra);
-        const [anexo] = await FilaNotasFiscais.subirAnexos(item.id, [{ file, tipo: "carta" }]);
-        const anexos = (item.anexos || []).filter((a) => a.tipo !== "carta").concat([anexo]);
-        await FilaNotasFiscais.atualizar(item, { anexos }, "carta-anexada", "Documento da carta de correção");
-      }
+      const file = await this.documentoDevolucao(item, patch, extra);
+      const [anexo] = await FilaNotasFiscais.subirAnexos(item.id, [{ file, tipo: "carta" }]);
+      const anexos = (item.anexos || []).filter((a) => a.tipo !== "carta").concat([anexo]);
+      await FilaNotasFiscais.atualizar(item, { anexos }, "carta-anexada", "Documento da devolução");
+      FilaNotasFiscais.aprender(item, patch).catch(() => {});
     } catch (e) {
       if (btn) { btn.disabled = false; btn.textContent = "Devolver ao operador"; }
       alert(`Não consegui devolver: ${(e && e.message) || e}`);
@@ -1246,44 +1276,74 @@ window.InserirNotaApp = {
     this.render();
   },
 
-  cartaArquivo(item, linhas, extra) {
+  async documentoDevolucao(item, patch, extra) {
     if (!window.jspdf || !window.jspdf.jsPDF) throw new Error("gerador de PDF indisponível");
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF({ unit: "mm", format: "a4" });
-    const m = 16;
+    const m = 18;
+    let y = 18;
+    let logo = null;
+    if (window.InvestimentoApp && typeof InvestimentoApp.logoDataUrl === "function") {
+      try { logo = await InvestimentoApp.logoDataUrl(); } catch (e) { logo = null; }
+    }
+    if (logo && logo.dataUrl) {
+      try { pdf.addImage(logo.dataUrl, logo.extension === "jpeg" ? "JPEG" : "PNG", m, 12, 22, 22); } catch (e) { /* segue sem a imagem */ }
+    }
+    const empId = item.empresa || "";
+    const emp = (this.state.empresas || []).find((c) => String(c.id) === String(empId));
+    const empresa = emp ? `${emp.id} - ${emp.nome}` : (empId ? `Empresa ${empId}` : "Moura Leite");
+    pdf.setFont("times", "bold");
+    pdf.setFontSize(13);
+    pdf.text(empresa, logo && logo.dataUrl ? m + 26 : m, 20);
+    pdf.setFont("times", "normal");
+    pdf.setFontSize(10);
+    pdf.text("Devolução de nota fiscal", logo && logo.dataUrl ? m + 26 : m, 26);
+    y = 42;
     const w = 210 - m * 2;
-    let y = 20;
     const bloco = (txt, size, style) => {
       pdf.setFont("times", style || "normal");
       pdf.setFontSize(size);
       pdf.splitTextToSize(String(txt || ""), w).forEach((ln) => {
-        if (y > 280) { pdf.addPage(); y = 20; }
+        if (y > 270) { pdf.addPage(); y = 20; }
         pdf.text(ln, m, y);
-        y += size * 0.45 + 2;
+        y += size * 0.42 + 1.6;
       });
     };
-    bloco("Orientação para carta de correção", 16, "bold");
+    const carta = patch.devolucaoTipo === "carta";
+    bloco(carta ? "Solicitação de carta de correção" : "Recusa da nota fiscal", 15, "bold");
     y += 2;
-    bloco(`Pedido ${item.pedido || "—"}    NF ${item.numeroNota || "—"}${item.serieNota ? "/" + item.serieNota : ""}`, 12, "normal");
-    if (item.fornecedor && item.fornecedor.nome) bloco(item.fornecedor.nome, 12, "normal");
-    const u = FilaNotasFiscais.usuario();
-    bloco(`Fiscal: ${u.nome || "—"}    ${new Date().toLocaleString("pt-BR")}`, 11, "italic");
+    const forn = item.fornecedor && item.fornecedor.nome ? item.fornecedor.nome : "—";
+    bloco(`Pedido ${item.pedido || "—"}`, 12, "normal");
+    bloco(`Nota fiscal ${item.numeroNota || "—"}${item.serieNota ? "/" + item.serieNota : ""}${item.valorNota != null ? " · " + this.money(item.valorNota) : ""}`, 12, "normal");
+    bloco(`Fornecedor: ${forn}`, 12, "normal");
     y += 3;
-    (linhas || []).forEach((l, i) => {
-      bloco(`${i + 1}. ${l.campo || "Campo"}`, 13, "bold");
-      bloco(`O que foi informado: ${l.informado || "—"}`, 12, "normal");
-      bloco(`O que deveria ser: ${l.deveria || "—"}`, 12, "normal");
-      y += 2;
-    });
-    if (extra) {
-      y += 2;
-      bloco("Orientação", 13, "bold");
-      bloco(extra, 12, "normal");
+    bloco(carta ? "O que a carta de correção deve alterar" : "Motivo da recusa", 13, "bold");
+    if (carta) {
+      (patch.cartaLinhas || []).forEach((l, i) => {
+        bloco(`${i + 1}. ${l.campo || "Campo"}`, 12, "bold");
+        bloco(`Informado na nota: ${l.informado || "—"}`, 11, "normal");
+        bloco(`Deveria ser: ${l.deveria || "—"}`, 11, "normal");
+        y += 1;
+      });
+    } else {
+      (patch.motivosCancelamento || []).forEach((motivo) => bloco(`• ${motivo}`, 12, "normal"));
     }
+    if (extra) { y += 2; bloco("Orientação", 13, "bold"); bloco(extra, 12, "normal"); }
+    y += 6;
+    const u = FilaNotasFiscais.usuario();
+    const dia = new Date().toLocaleDateString("pt-BR", { day: "numeric", month: "long", year: "numeric" });
+    bloco(`Botucatu, ${dia}.`, 12, "normal");
+    y += 10;
+    bloco("________________________________", 12, "normal");
+    bloco(u.nome || "Operador fiscal", 12, "bold");
+    bloco("Operador fiscal", 11, "italic");
+    const fone = FilaNotasFiscais.telefoneCorporativo(u.email);
     y += 4;
-    bloco("Emita a carta de correção com o que foi informado e o que deveria ser, e reenvie a nota neste mesmo pedido.", 11, "italic");
+    bloco(fone
+      ? `Se o fornecedor ou o contador precisar de apoio, o contato é o telefone corporativo ${fone}.`
+      : "Se o fornecedor ou o contador precisar de apoio, o contato é o telefone corporativo do operador fiscal.", 11, "normal");
     const blob = pdf.output("blob");
-    const nome = `carta-correcao-pedido-${String(item.pedido || "nota").replace(/[^\w.-]+/g, "_")}.pdf`;
+    const nome = `${carta ? "carta-correcao" : "devolucao"}-pedido-${String(item.pedido || "nota").replace(/[^\w.-]+/g, "_")}.pdf`;
     return new File([blob], nome, { type: "application/pdf" });
   },
 
@@ -1333,15 +1393,16 @@ window.InserirNotaApp = {
     const pode = this.podeEditar();
     const conta = (fn) => f.itens.filter(fn).length;
     const filtros = [
-      ["abertas", `Abertas (${conta((x) => FilaNotasFiscais.aberta(x))})`],
+      ["abertas", `Acompanhamento (${conta((x) => FilaNotasFiscais.aberta(x) || x.status === "devolvida" || x.status === "excluida")})`],
       ["lancada", `Lançadas (${conta((x) => x.status === "lancada")})`],
       ["devolvida", `Devolvidas (${conta((x) => x.status === "devolvida")})`],
+      ["excluida", `Excluídas (${conta((x) => x.status === "excluida")})`],
       ["cancelada", `Canceladas (${conta((x) => x.status === "cancelada")})`],
       ["todas", `Todas (${f.itens.length})`]
     ];
     const corpo = f.carregando && !f.itens.length ? `<p class="fnf-vazio"><span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;"></span> Carregando a fila…</p>`
       : (f.erro ? `<p class="inf-erro">${esc(f.erro)}</p>`
-        : (!lista.length ? `<p class="fnf-vazio">${f.filtro === "abertas" ? "Nenhuma nota esperando lançamento." : "Nenhuma nota nesta situação."}</p>`
+        : (!lista.length ? `<p class="fnf-vazio">${f.filtro === "abertas" ? "Nenhuma nota em aberto, devolvida ou excluída." : "Nenhuma nota nesta situação."}</p>`
           : `<div class="fnf-fila">${lista.map((x) => {
               const p = x.pagamento || {};
               const atrasado = FilaNotasFiscais.aberta(x) && p.data && p.data < hoje;
@@ -1388,7 +1449,7 @@ window.InserirNotaApp = {
   },
 
   /* ---------- tela ---------- */
-  /** Faixa retangular na largura da nota: acompanha o mouse e amplia a região. */
+  /** Lupa circular que acompanha o mouse e amplia a região da nota. */
   lupa(ev, sair) {
     const area = ev.currentTarget;
     const lente = area && area.querySelector(".inf-lupa");
@@ -1403,17 +1464,16 @@ window.InserirNotaApp = {
       return;
     }
     const z = this._zoom || 2.5;
-    const H = Math.max(120, Math.min(200, r.height * 0.32));
+    const D = 148;
     if (!lente.style.backgroundImage) lente.style.backgroundImage = `url("${img.src}")`;
     lente.style.display = "block";
-    lente.style.width = `${r.width}px`;
-    lente.style.height = `${H}px`;
-    lente.style.left = "0px";
+    lente.style.width = `${D}px`;
+    lente.style.height = `${D}px`;
     area.classList.add("is-ativa");
-    const top = Math.max(0, Math.min(r.height - H, y - H / 2));
-    lente.style.top = `${top}px`;
+    lente.style.left = `${Math.max(0, Math.min(r.width - D, x - D / 2))}px`;
+    lente.style.top = `${Math.max(0, Math.min(r.height - D, y - D / 2))}px`;
     lente.style.backgroundSize = `${r.width * z}px ${r.height * z}px`;
-    lente.style.backgroundPosition = `${r.width / 2 - x * z}px ${H / 2 - y * z}px`;
+    lente.style.backgroundPosition = `${D / 2 - x * z}px ${D / 2 - y * z}px`;
   },
 
   zoomLupa(ev) {
@@ -1438,7 +1498,7 @@ window.InserirNotaApp = {
     const s = this.state;
     const travado = !!s.enviando || c.erros.length > 0 || !this.podeEditar();
     const btn = document.getElementById("inf-inserir");
-    if (btn) btn.disabled = travado || !s.validado;
+    if (btn) btn.disabled = !!s.enviando;
     const v = document.getElementById("inf-validar");
     if (v) {
       v.disabled = travado || !!s.validado;
@@ -1564,6 +1624,7 @@ window.InserirNotaApp = {
   css() {
     return `
         .inf-wrap { padding: 20px; max-width: none; margin: 0 auto; display: grid; grid-template-columns: minmax(420px, 0.78fr) minmax(0, 1.55fr); gap: 16px; align-items: start; }
+        .inf-wrap > div { min-width: 0; }
         .inf-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
         .inf-card h3 { margin: 0 0 10px; font-size: 0.95rem; color: #105436; display: flex; align-items: center; gap: 8px; }
         .inf-card h3 i { width: 16px; height: 16px; }
@@ -1589,7 +1650,7 @@ window.InserirNotaApp = {
         .inf-file { display: flex; align-items: center; gap: 8px; border: 1px dashed #94a3b8; border-radius: 8px; padding: 10px 12px; cursor: pointer; color: #334155; font-size: 0.86rem; }
         .inf-file i { width: 18px; height: 18px; color: #105436; }
         .inf-file input { display: none; }
-        .inf-tab { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+        .inf-tab { width: 100%; border-collapse: collapse; font-size: 0.82rem; table-layout: fixed; }
         .inf-tab th { text-align: left; font-size: 0.7rem; text-transform: uppercase; color: #64748b; padding: 6px 8px; border-bottom: 1px solid #e2e8f0; }
         .inf-tab td { padding: 6px 8px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
         .inf-tab .num { text-align: right; white-space: nowrap; }
@@ -1597,7 +1658,7 @@ window.InserirNotaApp = {
         .inf-tab tfoot td { font-weight: 800; border-bottom: 0; }
         .inf-tab .is-ok { color: #105436; } .inf-tab .is-erro { color: #b91c1c; }
         .inf-tab tr.is-sem-saldo td { color: #94a3b8; }
-        .inf-qtd { width: 90px; height: 30px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 8px; text-align: right; }
+        .inf-qtd { width: 100%; max-width: 72px; height: 30px; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 6px; text-align: right; }
         .inf-linha-acoes { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
         .inf-chk { display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: #334155; }
         .inf-btn-sm { height: 32px; font-size: 0.78rem; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; }
@@ -1616,7 +1677,7 @@ window.InserirNotaApp = {
         .inf-preview img { width: 100%; display: block; border: 1px solid #e2e8f0; border-radius: 8px; }
         .inf-lupa-area { position: relative; overflow: hidden; border-radius: 8px; cursor: crosshair; }
         .inf-lupa-area.is-ativa { cursor: crosshair; }
-        .inf-lupa { position: absolute; display: none; left: 0; width: 100%; height: 160px; border-radius: 0; border-top: 3px solid #105436; border-bottom: 3px solid #105436; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.28); background-color: #fff; background-repeat: no-repeat; pointer-events: none; z-index: 5; }
+        .inf-lupa { position: absolute; display: none; width: 148px; height: 148px; border-radius: 50%; border: 3px solid #105436; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.28); background-color: #fff; background-repeat: no-repeat; pointer-events: none; z-index: 5; }
         .inf-lupa-dica { display: flex; align-items: center; gap: 6px; margin: 8px 0 0; color: #64748b; font-size: 0.76rem; }
         .inf-lupa-dica i { width: 14px; height: 14px; }
         .inf-resultado { border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; font-size: 0.85rem; }
@@ -1678,7 +1739,7 @@ window.InserirNotaApp = {
           <div class="inf-card">
             <h3><i data-lucide="clipboard-list"></i> Pedido de compra</h3>
             <div class="inf-busca">
-              <input id="inf-pedido" placeholder="Nº do pedido" title="Pode digitar como aparece no Sienge; no sequencial anual (123/26) o CRM converte para o id da API (26000123)." value="${this.esc(s.pedidoId)}" onkeydown="if(event.key==='Enter')InserirNotaApp.buscarPedido()">
+              <input id="inf-pedido" placeholder="Nº do pedido" title="Pode digitar como aparece no Sienge; no sequencial anual (123/26) o CRM converte para o id da API (26000123)." value="${this.esc(s.pedidoId)}" onkeydown="if(event.key==='Enter'||event.key==='Tab'){event.preventDefault();InserirNotaApp.buscarPedido()}">
               <button type="button" class="btn btn-primary inf-btn-sm" style="height:38px;" onclick="InserirNotaApp.buscarPedido()" ${s.carregando ? "disabled" : ""}><i data-lucide="search"></i> Buscar pedido</button>
               ${s.carregando ? `<span class="inf-muted"><span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;"></span> ${this.esc(s.carregando)}</span>` : ""}
             </div>
@@ -1698,7 +1759,7 @@ window.InserirNotaApp = {
             <div class="inf-acoes">
               <button type="button" class="btn btn-outline" onclick="InserirNotaApp.recomecar()" ${s.enviando ? "disabled" : ""}><i data-lucide="rotate-ccw"></i> Recomeçar</button>
               <button type="button" id="inf-validar" class="btn ${s.validado ? "btn-outline" : "btn-primary"}" onclick="InserirNotaApp.validar()" ${(travado || s.validado) ? "disabled" : ""}>${s.validado ? "Validada" : "Validar"}</button>
-              <button type="button" id="inf-inserir" class="btn btn-primary" onclick="InserirNotaApp.inserir()" ${bloqueado ? "disabled" : ""}
+              <button type="button" id="inf-inserir" class="btn btn-primary" onclick="InserirNotaApp.inserir()" ${s.enviando ? "disabled" : ""}
                 title="${pode ? (s.validado ? "" : "Valide a nota antes de inserir no Sienge") : "Sem permissão de edição em Fiscal › Inserir nota"}">
                 ${s.enviando ? `<span class="btn-spin"></span> ${this.esc(s.enviando)}` : `<i data-lucide="upload"></i> Inserir no Sienge`}</button>
             </div>
@@ -1709,7 +1770,7 @@ window.InserirNotaApp = {
             <h3><i data-lucide="image"></i> Nota anexada</h3>
             ${s.preview ? `<div class="inf-lupa-area" onmousemove="InserirNotaApp.lupa(event)" onmouseleave="InserirNotaApp.lupa(event, true)" onwheel="InserirNotaApp.zoomLupa(event)">
                 <img src="${s.preview}" alt="Nota fiscal" draggable="false"><div class="inf-lupa"></div></div>
-              <p class="inf-lupa-dica"><i data-lucide="zoom-in"></i> Passe o mouse: a faixa amplia a nota na largura da página · role a roda para o zoom: <strong class="inf-lupa-zoom">${(this._zoom || 2.5).toLocaleString("pt-BR")}x</strong></p>` : `<p class="inf-muted">${s.arquivo && /\.xml$/i.test(s.arquivo.name) ? "Nota em XML: os campos foram lidos direto do arquivo." : "A imagem da nota aparece aqui para conferir os campos."}</p>`}
+              <p class="inf-lupa-dica"><i data-lucide="zoom-in"></i> Passe o mouse: a lupa amplia a nota · role a roda para o zoom: <strong class="inf-lupa-zoom">${(this._zoom || 2.5).toLocaleString("pt-BR")}x</strong></p>` : `<p class="inf-muted">${s.arquivo && /\.xml$/i.test(s.arquivo.name) ? "Nota em XML: os campos foram lidos direto do arquivo." : "A imagem da nota aparece aqui para conferir os campos."}</p>`}
           </div>
         </div>
       </div>`;
