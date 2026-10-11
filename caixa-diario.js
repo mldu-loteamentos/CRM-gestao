@@ -229,7 +229,7 @@ const FluxoCaixaDiarioApp = {
   progress: "",
   detail: null,
   detOpen: {},
-  contasAbertas: { corrente: true, investimento: true },
+  contasAbertas: { corrente: false, investimento: false },
   mostrarNaoUteis: false,
   compAberto: false,
   flags: {},
@@ -256,14 +256,23 @@ const FluxoCaixaDiarioApp = {
     return n.getFullYear() + "-" + String(n.getMonth() + 1).padStart(2, "0") + "-" + String(n.getDate()).padStart(2, "0");
   },
 
+  /** Mês corrente e os três seguintes. A tela não escolhe competência. */
   monthBounds() {
-    const [y, m] = String(this.month || "").split("-").map(Number);
-    const last = new Date(y, m, 0).getDate();
-    return {
-      start: `${this.month}-01`,
-      end: `${this.month}-${String(last).padStart(2, "0")}`,
-      last
+    const n = new Date();
+    const startD = new Date(n.getFullYear(), n.getMonth(), 1);
+    const endD = new Date(n.getFullYear(), n.getMonth() + 4, 0);
+    const iso = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    return { start: iso(startD), end: iso(endD) };
+  },
+
+  rotuloPeriodo() {
+    const meses = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+    const b = this.monthBounds();
+    const nome = (iso) => {
+      const p = String(iso || "").split("-");
+      return (meses[Number(p[1]) - 1] || "") + " de " + p[0];
     };
+    return nome(b.start) + " a " + nome(b.end);
   },
 
   companyWanted(id) {
@@ -1046,8 +1055,7 @@ const FluxoCaixaDiarioApp = {
     (this.accounts || []).forEach((a) => { accByKey[this.accountKey(a)] = a; });
     const days = [];
     const byDay = {};
-    for (let d = 1; d <= b.last; d++) {
-      const iso = `${this.month}-${String(d).padStart(2, "0")}`;
+    for (let iso = b.start; iso <= b.end; iso = caixaAddDays(iso, 1)) {
       const day = { date: iso, real: iso < hoje, entrar: 0, pagar: 0, entrarCc: 0, sairCc: 0, entrarInv: 0, sairInv: 0, itens: [], pagarItens: [] };
       days.push(day);
       byDay[iso] = day;
@@ -1550,24 +1558,6 @@ const FluxoCaixaDiarioApp = {
     return { manuais, semConc, valorSemConc };
   },
 
-  /** Movimento previsto de conta corrente num dia que já passou do mês desenhado (janela do IOF). */
-  netPrevistoCc(date) {
-    const excl = this.excludedCcs();
-    let net = 0;
-    (this.recItems || []).forEach((it) => {
-      if (it.date === date && !excl.has(String(it.cc))) net += Number(it.valor) || 0;
-    });
-    (this.outras || []).forEach((it) => {
-      if (it.date === date) net += Number(it.valor) || 0;
-    });
-    (this.payItems || []).forEach((p) => {
-      if (p.date !== date) return;
-      const fora = (p.shares || []).reduce((s, x) => s + (excl.has(x.cc) ? x.share : 0), 0);
-      net -= (Number(p.valor) || 0) * (1 - fora);
-    });
-    return net;
-  },
-
   /** Prazo mínimo da compromissada e piso que fica na conta corrente. */
   parametrosComp() {
     let prazo = 10;
@@ -1632,26 +1622,17 @@ const FluxoCaixaDiarioApp = {
   },
 
   /**
-   * Folga da conta corrente.
-   * IOF de CDB zera aos 30 dias. A compromissada usa o prazo mínimo e deixa o piso na conta corrente.
+   * Sobra da conta corrente acima do saldo mínimo.
+   * De 10 a 31 dias, a sugestão é compromissada. Acima de 31 dias, CDB, porque o IOF zera.
+   * O resgate é outro aviso: dia em que a conta corrente fica negativa e ainda há saldo aplicado.
    */
   aplicacaoHtml(linhas) {
     const hoje = this.hoje();
     const fut = (linhas || []).filter((l) => l.d.date >= hoje);
     if (!fut.length) return "";
     const par = this.parametrosComp();
-    const by = {};
-    fut.forEach((l) => { by[l.d.date] = l; });
-    const serie = [];
-    let saldo = fut[0].acumCc;
-    const janela = Math.max(30, par.prazo);
-    serie.push({ date: fut[0].d.date, cc: saldo });
-    for (let i = 1; i < janela; i++) {
-      const date = caixaAddDays(fut[0].d.date, i);
-      const line = by[date];
-      saldo = line ? line.acumCc : saldo + this.netPrevistoCc(date);
-      serie.push({ date, cc: saldo });
-    }
+    const IOF = 31;
+    const serie = fut.map((l) => ({ date: l.d.date, cc: l.acumCc, inv: l.acumInv }));
     const minAte = (n) => {
       let m = Infinity;
       const fim = Math.min(n, serie.length);
@@ -1659,23 +1640,44 @@ const FluxoCaixaDiarioApp = {
       return m;
     };
     const cabe = (n) => {
+      if (n < 1 || !serie.length) return 0;
       const folga = minAte(n) - par.piso;
       return folga > 0.5 ? folga : 0;
     };
-    const cdb = cabe(30);
+    const cdb = cabe(IOF + 1);
     const comp = Math.max(0, cabe(par.prazo) - cdb);
-    const resgates = fut.filter((l) => l.acumCc < -0.5 && l.acumInv > 0.5);
-    const msgs = [];
+    const ate = (valor) => {
+      let last = "";
+      if (!(valor > 0.5)) return last;
+      for (let i = 0; i < serie.length; i++) {
+        if (serie[i].cc - par.piso + 0.05 < valor) break;
+        last = serie[i].date;
+      }
+      return last;
+    };
+    const diasDe = (iso) => {
+      if (!iso || !serie.length) return 0;
+      const a = new Date(serie[0].date + "T12:00:00");
+      const b = new Date(iso + "T12:00:00");
+      return Math.round((b - a) / 86400000) + 1;
+    };
     const pisoTxt = caixaMoney(par.piso);
+    const msgs = [];
     if (cdb > 0.5) {
-      msgs.push(`<p class="cxd-aplica-cdb">Há ${caixaMoney(cdb)} para aplicar em CDB, deixando ${pisoTxt} na conta corrente. Esse valor segue disponível pelos próximos 30 dias, prazo em que o IOF zera.</p>`);
+      const fim = ate(cdb);
+      const dias = diasDe(fim);
+      msgs.push(`<p class="cxd-aplica-cdb"><b>Aplicar em CDB:</b> ${caixaMoney(cdb)}. Esse valor fica acima do mínimo da conta corrente por ${dias} dias, até ${caixaFmtDate(fim)}, mais do que os 31 dias em que o IOF zera. Mantenha ${pisoTxt} na conta corrente.</p>`);
     }
     if (comp > 0.5) {
-      msgs.push(`<p class="cxd-aplica-comp">${caixaMoney(comp)} pode ser aplicado na compromissada. Prazo mínimo de ${par.prazo} dia(s), deixando ${pisoTxt} na conta corrente. Essa folga volta antes de completar 30 dias, então não zera o IOF do CDB.</p>`);
+      const fim = ate(comp);
+      const dias = diasDe(fim);
+      msgs.push(`<p class="cxd-aplica-comp"><b>Aplicar na compromissada:</b> ${caixaMoney(comp)}. Esse valor pode ficar aplicado por ${dias} dias, até ${caixaFmtDate(fim)}, entre o prazo mínimo de ${par.prazo} dias e os 31 dias em que o IOF do CDB zera. Mantenha ${pisoTxt} na conta corrente.</p>`);
     }
+    const resgates = fut.filter((l) => l.acumCc < -0.5 && l.acumInv > 0.5);
     if (resgates.length) {
-      const dias = resgates.slice(0, 6).map((l) => `${caixaFmtDate(l.d.date).slice(0, 5)} (${caixaMoney(l.acumCc)})`).join(", ");
-      msgs.push(`<p class="cxd-aplica-resgate">Em ${resgates.length} dia(s) a conta corrente fica negativa e há saldo na aplicação: resgatar. ${caixaEsc(dias)}${resgates.length > 6 ? "…" : ""}</p>`);
+      const amostra = resgates.slice(0, 6).map((l) => `${caixaFmtDate(l.d.date)} (${caixaMoney(l.acumCc)})`).join(", ");
+      const resto = resgates.length > 6 ? ` e mais ${resgates.length - 6} dia(s)` : "";
+      msgs.push(`<p class="cxd-aplica-resgate"><b>Resgatar aplicação:</b> ${caixaEsc(amostra)}${resto}. Nessas datas a conta corrente fica negativa e o dinheiro está na aplicação.</p>`);
     }
     return msgs.length ? `<div class="cxd-aplica">${msgs.join("")}</div>` : "";
   },
@@ -1865,19 +1867,17 @@ const FluxoCaixaDiarioApp = {
       countMode: true,
       nouns: { singular: "empreendimento", plural: "empreendimentos", none: "Nenhum empreendimento" }
     }) : "";
-    const b = this.monthBounds();
     const iniLabel = this.openingDate
       ? `Saldo inicial · contas ligadas em ${caixaFmtDate(this.openingDate)}`
-      : (b.start > hoje ? "Saldo inicial · mês futuro, parte do saldo de hoje" : "Saldo inicial · contas ligadas");
-    const qtdFora = this.excludedCcs().size;
+      : "Saldo inicial · contas ligadas";
     root.innerHTML = `
       <style>
         #fluxo-caixa-diario-root { color:#0f172a; }
-        #fluxo-caixa-diario-root .cxd-page { display:flex; flex-direction:column; height:calc(100vh - 85px); }
+        #fluxo-caixa-diario-root .cxd-page { display:flex; flex-direction:column; }
         #fluxo-caixa-diario-root .cxd-head { background:#105436; padding:16px 20px; border-radius:12px 12px 0 0; }
         #fluxo-caixa-diario-root .cxd-head h2 { margin:0; color:#fff; font-size:1.15rem; }
         #fluxo-caixa-diario-root .cxd-head p { margin:4px 0 0; color:rgba(255,255,255,.8); font-size:.75rem; }
-        #fluxo-caixa-diario-root .cxd-body { flex:1; background:#f8fafc; border:1px solid #e2e8f0; border-top:none; border-radius:0 0 12px 12px; padding:14px 16px; overflow:auto; }
+        #fluxo-caixa-diario-root .cxd-body { background:#f8fafc; border:1px solid #e2e8f0; border-top:none; border-radius:0 0 12px 12px; padding:14px 16px; }
         #fluxo-caixa-diario-root .cxd-tools { display:flex; gap:12px; align-items:flex-end; margin-bottom:12px; flex-wrap:nowrap; }
         #fluxo-caixa-diario-root .cxd-tools label { font-size:.75rem; font-weight:700; color:#475569; flex:0 0 auto; }
         #fluxo-caixa-diario-root .cxd-tools input[type=month] { display:block; height:34px; border:1px solid #e2e8f0; border-radius:6px; padding:0 8px; margin-top:4px; }
@@ -1890,7 +1890,7 @@ const FluxoCaixaDiarioApp = {
         #fluxo-caixa-diario-root .cxd-out { color:#c2410c; }
         #fluxo-caixa-diario-root .cxd-zero { color:#94a3b8; }
         #fluxo-caixa-diario-root .cxd-tag { margin-left:8px; background:#105436; color:#fff; border-radius:999px; padding:1px 7px; font-size:.66rem; font-weight:700; }
-        #fluxo-caixa-diario-root .cxd-wrap { border:1px solid #e2e8f0; border-radius:8px; overflow:auto; background:#fff; margin-bottom:14px; }
+        #fluxo-caixa-diario-root .cxd-wrap { border:1px solid #e2e8f0; border-radius:8px; overflow-x:auto; overflow-y:hidden; background:#fff; margin-bottom:14px; }
         #fluxo-caixa-diario-root .cxd-title { margin:0 0 6px; font-size:.78rem; font-weight:700; color:#105436; letter-spacing:.03em; }
         #fluxo-caixa-diario-root .cxd-title span { font-weight:500; color:#64748b; letter-spacing:0; }
         #fluxo-caixa-diario-root .cxd-vazio { padding:16px; color:#64748b; background:#fff; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:10px; font-size:.84rem; }
@@ -2023,16 +2023,12 @@ const FluxoCaixaDiarioApp = {
       <div class="cxd-page">
         <div class="cxd-head">
           <h2>Fluxo de caixa diário</h2>
-          <p>Saldo inicial no 1º dia do mês. Nos dias anteriores, o que entrou e saiu de fato das contas ligadas (extrato bancário); de hoje em diante, a previsão. Clique no dia para ver as entradas e as saídas.</p>
+          <p>Mês atual e os próximos 3 meses, de ${caixaEsc(this.rotuloPeriodo())}. Saldo inicial no 1º dia. Nos dias anteriores, o extrato das contas ligadas; de hoje em diante, a previsão. A grade rola para o lado.</p>
         </div>
         <div class="cxd-body">
           <div class="cxd-tools">
-            <label>Mês
-              <input type="month" value="${this.month}" onchange="FluxoCaixaDiarioApp.month=this.value;FluxoCaixaDiarioApp.openDay='';FluxoCaixaDiarioApp.load()">
-            </label>
             ${filtro}
             ${filtroCc}
-            ${qtdFora ? `<span class="cxd-fora" title="Contas a receber, contas a pagar, movimentos e conta de parceria desses empreendimentos não entram no caixa">${qtdFora} empreendimento(s) fora do caixa</span>` : ""}
           </div>
           <p id="cxd-progress" style="margin:0 0 10px;color:#105436;font-size:0.8rem;font-weight:600;" ${this.progress ? "" : "hidden"}>${caixaEsc(this.progress || "")}</p>
           ${this.error ? `<div style="margin-bottom:10px;padding:10px;background:#fff7ed;color:#9a3412;border-radius:8px;font-size:0.82rem;">${caixaEsc(this.error)}</div>` : ""}
@@ -2042,7 +2038,7 @@ const FluxoCaixaDiarioApp = {
           ${avisoAplicacao}
           ${this.loading ? `<p style="color:#64748b;">Montando o fluxo…</p>` : `
           <div class="cxd-mx-bar">
-            <p class="cxd-title">MOVIMENTO DO MÊS <span>· dias anteriores realizados, de hoje em diante previstos · clique no dia para ver entradas e saídas</span></p>
+            <p class="cxd-title">MOVIMENTO <span>· ${caixaEsc(this.rotuloPeriodo())} · dias anteriores realizados, de hoje em diante previstos · clique no dia para ver entradas e saídas</span></p>
             ${alMes.manuais ? `<span class="cxd-chip cxd-chip-cb" title="Lançamentos direto em Caixa e bancos, sem título do contas a pagar/receber. Abra o dia para conferir.">${alMes.manuais} lançamento(s) de caixa e bancos no mês</span>` : ""}
             ${alMes.semConc ? `<span class="cxd-chip cxd-chip-nc" title="Movimentos ainda não conciliados com o extrato do banco. Os dias com ponto vermelho têm movimento sem conciliação.">${alMes.semConc} sem conciliação · ${caixaMoney(alMes.valorSemConc)}</span>` : ""}
           </div>

@@ -1559,7 +1559,7 @@ window.InserirNotaApp = {
 
   css() {
     return `
-        .inf-wrap { padding: 20px; max-width: 1400px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, 1fr); gap: 16px; align-items: start; }
+        .inf-wrap { padding: 20px; max-width: none; margin: 0 auto; display: grid; grid-template-columns: minmax(420px, 0.78fr) minmax(0, 1.55fr); gap: 16px; align-items: start; }
         .inf-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
         .inf-card h3 { margin: 0 0 10px; font-size: 0.95rem; color: #105436; display: flex; align-items: center; gap: 8px; }
         .inf-card h3 i { width: 16px; height: 16px; }
@@ -1674,7 +1674,7 @@ window.InserirNotaApp = {
           <div class="inf-card">
             <h3><i data-lucide="clipboard-list"></i> Pedido de compra</h3>
             <div class="inf-busca">
-              <input id="inf-pedido" placeholder="Nº do pedido (ex.: 110540 ou 123/26)" title="Pode digitar como aparece no Sienge; no sequencial anual (123/26) o CRM converte para o id da API (26000123)." value="${this.esc(s.pedidoId)}" onkeydown="if(event.key==='Enter')InserirNotaApp.buscarPedido()">
+              <input id="inf-pedido" placeholder="Nº do pedido" title="Pode digitar como aparece no Sienge; no sequencial anual (123/26) o CRM converte para o id da API (26000123)." value="${this.esc(s.pedidoId)}" onkeydown="if(event.key==='Enter')InserirNotaApp.buscarPedido()">
               <button type="button" class="btn btn-primary inf-btn-sm" style="height:38px;" onclick="InserirNotaApp.buscarPedido()" ${s.carregando ? "disabled" : ""}><i data-lucide="search"></i> Buscar pedido</button>
               ${s.carregando ? `<span class="inf-muted"><span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;"></span> ${this.esc(s.carregando)}</span>` : ""}
             </div>

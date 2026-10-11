@@ -1073,7 +1073,7 @@ const CessaoPopup = {
     if (Math.abs(this.totalCedido() - this.totalAdquirido()) > 0.05) return "O percentual adquirido precisa fechar com o percentual cedido.";
     const semRep = st.cessionarios.find((c) => this.isPj(c.customer) && !c.representante);
     if (semRep) return "Pessoa jurídica precisa de representante: " + (semRep.customer.name || "cessionário") + ".";
-    if (!(Number(st.valorPago) > 0)) return "O contrato não tem valores pagos para a cláusula 4.";
+    if (!(Number(st.valorPago) > 0)) return "Não encontrei o líquido recebido deste título para a cláusula 4.";
     if (!st.testemunha1 || !st.testemunha2) return "Escolha as duas testemunhas.";
     if (String(st.testemunha1) === String(st.testemunha2)) return "As testemunhas precisam ser pessoas diferentes.";
     return "";
@@ -1195,6 +1195,7 @@ const CessaoPopup = {
         if (Array.isArray(rows)) installments = rows;
       } catch (e) {}
     }
+    const liquidoRecebido = await this.liquidoRecebidoDoTitulo(ctx.customerId, billId);
     const units = contract.salesContractUnits || contract.units || [];
     const u0 = units.find((u) => u && u.main) || units[0] || {};
     const unitName = String(u0.name || ctx.unidade || "").trim();
@@ -1302,7 +1303,7 @@ const CessaoPopup = {
       valorParcelaAberta: situacao.valor,
       primeiroVencAberto: situacao.primeiro,
       saldoAberto: situacao.saldo,
-      valorPago: situacao.pago
+      valorPago: liquidoRecebido > 0 ? liquidoRecebido : situacao.pago
     });
   },
 
@@ -1376,16 +1377,42 @@ const CessaoPopup = {
     return "REAL";
   },
 
+  async liquidoRecebidoDoTitulo(customerId, billId) {
+    const svc = window.SiengeApiService;
+    if (!customerId || !billId || !svc || typeof svc.getCustomerFinancialStatements !== "function") return 0;
+    let fs = null;
+    try { fs = await svc.getCustomerFinancialStatements(customerId); } catch (e) { fs = null; }
+    const bills = ((fs && fs.results) || []).flatMap((item) => item.billsReceivable || item.billReceivable || []);
+    const bill = bills.find((db) => String(db.billReceivableId || db.receivableBillId) === String(billId));
+    if (!bill) return 0;
+    const lista = Array.isArray(bill.installments) && bill.installments.length
+      ? bill.installments
+      : [].concat(bill.paidInstallments || [], bill.dueInstallments || []);
+    let pago = 0;
+    let desconto = 0;
+    lista.forEach((inst) => {
+      (inst.receipts || []).forEach((rec) => {
+        if (typeof window.isWriteOffReceipt === "function" && window.isWriteOffReceipt(rec)) return;
+        pago += Number(rec.receiptValue || 0);
+        desconto += Number(rec.discountValue || 0);
+      });
+    });
+    return Math.round(Math.max(0, pago - desconto) * 100) / 100;
+  },
+
   valorRecibos(p) {
     const recs = Array.isArray(p && p.receipts) ? p.receipts : [];
     const direta = Number(p && p.receiptValue);
     if (!recs.length && !(direta > 0)) return null;
     let soma = 0;
+    let desconto = 0;
     recs.forEach((r) => {
       if (typeof window.isWriteOffReceipt === "function" && window.isWriteOffReceipt(r)) return;
       soma += Number(r.receiptValue || 0);
+      desconto += Number(r.discountValue || 0);
     });
     if (!recs.length) soma = direta;
+    else soma = Math.max(0, soma - desconto);
     return soma;
   },
 
@@ -1572,15 +1599,15 @@ const CessaoPopup = {
     return `
       <p class="cessao-pop-nota ${modoRep ? "" : "is-ok"}">${modoRep
         ? "Selecione o representante de " + this.esc((alvo && alvo.customer && alvo.customer.name) || "o cessionário") + "."
-        : "Busque o cliente no Sienge. Confira estado civil, regime de casamento e cônjuge, e informe o percentual que essa pessoa adquiriu."}</p>
+        : "Busque o cliente como na tela de Relacionamento. Confira os dados e o cônjuge, e informe o percentual que essa pessoa adquiriu."}</p>
       <div class="cessao-ces-busca">
-        <label class="cessao-pop-field">${modoRep ? "Representante" : "Cessionário"}
-          <input id="cessao-pop-busca" class="form-control" placeholder="ID, nome ou CPF/CNPJ" value="${this.esc(st.busca)}"
+        <label class="cessao-pop-field">${modoRep ? "Representante" : "Nome do cliente"}
+          <input id="cessao-pop-busca" class="form-control" placeholder="Digite para buscar..." value="${this.esc(st.busca)}"
             oninput="CessaoPopup.aoDigitar(this.value)" autocomplete="off">
         </label>
-        <div id="cessao-pop-sug" class="cessao-sugestoes" style="display:none;"></div>
+        <div id="cessao-pop-sug" class="cessao-pop-sug" style="display:none;"></div>
       </div>
-      ${cards || `<p class="cessao-ces-vazio">Nenhum cessionário selecionado. Total cedido: ${this.fmtPct(this.totalCedido())}%.</p>`}
+      <div class="cessao-ces-lista">${cards || `<p class="cessao-ces-vazio">Nenhum cessionário selecionado. Total cedido: ${this.fmtPct(this.totalCedido())}%.</p>`}</div>
       <div class="cessao-ces-fechamento">
         <div class="cessao-cond-head">TESTEMUNHAS</div>
         <div class="cessao-ces-fechamento-grid">
@@ -1600,13 +1627,12 @@ const CessaoPopup = {
     const conj = typeof window.legalSpouseRecord === "function" ? window.legalSpouseRecord(c) : null;
     const rep = row.representante;
     const civil = c.civilStatus || c.maritalStatus || "";
-    const regime = c.matrimonialRegime || (conj && conj.matrimonialRegime) || "";
     const bloco = (titulo, pessoa) => {
       if (!pessoa) return "";
       const doc = this.docDe(pessoa);
       const docTipo = String(pessoa.cnpj || pessoa.cpfCnpj || pessoa.cpf || "").replace(/\D/g, "").length > 11 ? "CNPJ " : "CPF ";
       const rg = typeof window.pickCustomerRg === "function" ? window.pickCustomerRg(pessoa) : (pessoa.rg || "");
-      return `<div style="margin-top:8px;">
+      return `<div class="cessao-ces-extra">
         <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;">${titulo}</div>
         <strong>${this.esc(pessoa.name || "—")}</strong>
         <div style="font-size:0.8rem;color:#334155;margin-top:4px;">
@@ -1619,6 +1645,7 @@ const CessaoPopup = {
     return `<div class="cessao-ces-card">
       <div class="cessao-ces-top">
         <div>
+          <span class="cessao-ces-ordem">Cessionário ${idx + 1}</span>
           <strong>${this.esc(c.name || "—")}</strong>
           <span class="cessao-badge">${pj ? "Pessoa jurídica" : "Pessoa física"}</span>
           <div class="cessao-ces-id">ID ${this.esc(c.id || row.customerId)}</div>
@@ -1636,10 +1663,9 @@ const CessaoPopup = {
       <dl class="cessao-ces-dados">
         <div><dt>Documento</dt><dd>${this.esc(this.docDe(c) || "não informado")}</dd></div>
         <div><dt>Estado civil</dt><dd>${this.esc(civil || "não informado")}</dd></div>
-        <div><dt>Regime de casamento</dt><dd>${this.esc(regime || "não informado")}</dd></div>
         <div><dt>Telefone</dt><dd>${this.esc(this.foneDe(c) || "não consta")}</dd></div>
-        <div class="is-full"><dt>Endereço</dt><dd>${this.esc(typeof window.formatLegalCustomerAddress === "function" ? (window.formatLegalCustomerAddress(c) || "Endereço não informado") : "Endereço não informado")}</dd></div>
-        <div class="is-full"><dt>E-mail</dt><dd>${this.esc(this.emailDe(c) || "não consta")}</dd></div>
+        <div class="is-wide"><dt>Endereço</dt><dd>${this.esc(typeof window.formatLegalCustomerAddress === "function" ? (window.formatLegalCustomerAddress(c) || "Endereço não informado") : "Endereço não informado")}</dd></div>
+        <div><dt>E-mail</dt><dd>${this.esc(this.emailDe(c) || "não consta")}</dd></div>
       </dl>
       ${bloco("Cônjuge", conj)}
       ${bloco("Representante", rep)}
@@ -1785,7 +1811,7 @@ const CessaoPopup = {
     CessaoPopupState.busca = val;
     const termo = String(val || "").trim();
     clearTimeout(this._buscaTimer);
-    if (termo.length < 2) {
+    if (termo.length < 1) {
       this.pintarSugestoes([]);
       return;
     }
@@ -1806,7 +1832,7 @@ const CessaoPopup = {
       if (digits && digits.length <= 8 && String(c.id) === digits) return true;
       const nome = norm(c.name);
       return terms.length > 0 && terms.every((t) => nome.includes(t));
-    }).slice(0, 12);
+    }).sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "pt-BR")).slice(0, 12);
   },
 
   async buscarRemoto(termo) {
@@ -1825,11 +1851,14 @@ const CessaoPopup = {
     CessaoPopupState.sugestoes = hits || [];
     if (!hits || !hits.length) { box.style.display = "none"; box.innerHTML = ""; return; }
     box.style.display = "block";
-    box.innerHTML = hits.map((c) => {
-      const doc = c.cpf || c.cnpj || c.cpfCnpj || "";
-      return `<button type="button" class="cessao-sugestao-item" onclick="CessaoPopup.escolher('${String(c.id).replace(/\D/g, "")}')">
-        <strong>${this.esc(c.name)}</strong><span>${this.esc(doc || ("ID " + c.id))}</span>
-      </button>`;
+    const lista = hits.slice().sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "pt-BR"));
+    box.innerHTML = lista.map((c) => {
+      const doc = String(c.cpf || c.cnpj || c.cpfCnpj || "").replace(/\D/g, "");
+      const masked = doc.length === 14
+        ? doc.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5")
+        : (doc.length === 11 ? doc.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4") : doc);
+      const label = [c.id, c.name, masked].filter(Boolean).join(" - ");
+      return `<button type="button" class="cessao-sugestao-item" onclick="CessaoPopup.escolher('${String(c.id).replace(/\D/g, "")}')">${this.esc(label)}</button>`;
     }).join("");
   },
 

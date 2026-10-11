@@ -1942,8 +1942,7 @@ const MarketingBudgetApp = {
       </table></div>`;
     const taxa = (lista) => lista.map((g) => `<tr><td>${this.esc(g.nome)}</td><td style="text-align:right;">${g.cancelados}</td><td style="text-align:right;">${g.total}</td><td style="text-align:right;"><b style="color:${g.cancelados ? "#b91c1c" : "#64748b"};">${this.pct(g.cancelados, g.total)}</b></td></tr>`).join("");
     const quem = `
-      <div class="mkb-kpis">
-        ${this.kpi("Contratos ativos", ativos.length.toLocaleString("pt-BR"), `${canc.length} já cancelado(s) neste período`, "#6366f1")}
+      <div class="mkb-kpis mkb-kpis-3">
         ${this.kpi("Mulheres", this.pct(mulheres, pf.length), `${mulheres} contrato(s) de pessoa física`, "#db2777")}
         ${this.kpi("Homens", this.pct(homens, pf.length), `${homens} contrato(s) de pessoa física`, "#0ea5e9")}
         ${this.kpi("Idade média na venda", idadeMedia != null ? Math.round(idadeMedia) + " anos" : "—", `${comIdade.length} cliente(s) com data de nascimento`, "#0f766e")}

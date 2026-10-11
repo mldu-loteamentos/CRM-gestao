@@ -445,16 +445,17 @@ const FluxoCaixaApp = {
    * — 11.01 (-) DIVIDENDOS → negativo; 11.02 (+) DIVIDENDOS → positivo
    * Em geral usa módulo do valor (API costuma mandar saída positiva).
    *
-   * Reaprop. / ABATE: negativo no DFC na conta em que o movimento foi
-   * apropriado (repasse, obras, marketing, pessoas…).
-   * Conta de adiantamento (2.11.01 fornecedor, 2.11.03 parceiro) entra
-   * positiva no DFC mesmo sendo conta 2.x e mesmo com histórico ABATE.
+   * Reaprop. / ABATE em conta que não é adiantamento: negativo no DFC.
+   * Conta de adiantamento (2.11.01 fornecedor, 2.11.03 parceiro): sinal
+   * oposto ao do banco. O adiantamento (banco positivo) entra negativo e a
+   * reapropriação (banco negativo) entra positiva. Os dois se compensam.
+   * Set/2026, 2.11.01: banco −36.489,00 → DFC +36.489,00.
    */
   signedAmount(node, categoryId, categoryName, amount, reducerFlag, categoryType, mov) {
     const raw = Number(amount) || 0;
     if (!raw) return 0;
     const role = mov ? this.movAdvanceRole(mov) : "";
-    if (this.isAdiantamentoAccount(categoryId, categoryName)) return Math.abs(raw);
+    if (this.isAdiantamentoAccount(categoryId, categoryName)) return -raw;
     if (role === "adiantamento") return Math.abs(raw);
     if (this.isDescontoFolhaAccount(categoryId, categoryName)) return -Math.abs(raw);
     if (role === "abatimento") return -Math.abs(raw);
@@ -871,6 +872,12 @@ const FluxoCaixaApp = {
   render() {
     const root = document.getElementById("fluxo-caixa-root");
     if (!root) return;
+    const prevScroll = root.querySelector(".fc-tree-scroll");
+    const keepTop = prevScroll ? prevScroll.scrollTop : 0;
+    const keepLeft = prevScroll ? prevScroll.scrollLeft : 0;
+    const main = document.querySelector(".main-content");
+    const keepMain = main ? main.scrollTop : 0;
+    const keepWin = window.scrollY || document.documentElement.scrollTop || 0;
     const unmatched = this.unmatchedInfo || { total: 0, samples: [] };
     const hasUnmatched = Math.abs(Number(unmatched.total) || 0) > 0.005;
     const byLevel = this.expandableByLevel();
@@ -931,6 +938,20 @@ const FluxoCaixaApp = {
         </div>
       </div>
     `;
+    const nextScroll = root.querySelector(".fc-tree-scroll");
+    const restore = () => {
+      if (nextScroll) {
+        nextScroll.scrollTop = keepTop;
+        nextScroll.scrollLeft = keepLeft;
+      }
+      if (main) main.scrollTop = keepMain;
+      if (keepWin) window.scrollTo(0, keepWin);
+    };
+    restore();
+    requestAnimationFrame(() => {
+      restore();
+      requestAnimationFrame(restore);
+    });
     if (window.lucide) lucide.createIcons();
   },
 
@@ -1193,6 +1214,21 @@ const FluxoCaixaApp = {
   },
 
   openDrill(id, isAccount) {
+    const tree = document.querySelector("#fluxo-caixa-root .fc-tree-scroll");
+    const keepTop = tree ? tree.scrollTop : 0;
+    const keepLeft = tree ? tree.scrollLeft : 0;
+    const main = document.querySelector(".main-content");
+    const keepMain = main ? main.scrollTop : 0;
+    const keepWin = window.scrollY || document.documentElement.scrollTop || 0;
+    const hold = () => {
+      const box = document.querySelector("#fluxo-caixa-root .fc-tree-scroll");
+      if (box) {
+        box.scrollTop = keepTop;
+        box.scrollLeft = keepLeft;
+      }
+      if (main) main.scrollTop = keepMain;
+      if (keepWin) window.scrollTo(0, keepWin);
+    };
     const info = this.resolveDrill(id, !!isAccount);
     const items = [...(info.items || [])].sort((a, b) => {
       const da = this.cashDate(a.mov || {}) || String(a.month || "");
@@ -1337,7 +1373,10 @@ const FluxoCaixaApp = {
         <div style="padding:16px 18px 20px;overflow:auto;">${body}</div>
       </div>`;
     document.body.appendChild(overlay);
+    hold();
+    requestAnimationFrame(hold);
     try { if (window.lucide) lucide.createIcons({ nodes: [overlay] }); } catch (e) {}
+    hold();
   },
 
   esc(s) {

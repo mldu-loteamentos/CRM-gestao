@@ -3038,7 +3038,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
   if (tabId === 'estoque-comercial' && typeof window.permCoversMenuKey === 'function' && !window.isCrmSuperAdmin()) {
     let perms = {};
     try {
-      const profileName = (AppState.currentUser && AppState.currentUser.profile_name) || "";
+      const profileName = (window.crmUsuarioAcesso && window.crmUsuarioAcesso() && window.crmUsuarioAcesso().profile_name) || "";
       perms = typeof window.readCrmProfilePerms === "function"
         ? window.readCrmProfilePerms(profileName)
         : {};
@@ -4278,6 +4278,7 @@ function renderUserSession() {
   const appContainer = document.getElementById("app-container");
   
   if (AppState.currentUser) {
+    if (typeof window.crmSincronizarNomeTeste === "function") window.crmSincronizarNomeTeste();
     const safeName = AppState.currentUser.name || "Usuario";
     nameEl.textContent = safeName;
     emailEl.textContent = AppState.currentUser.email;
@@ -4299,6 +4300,8 @@ function renderUserSession() {
     }
     lucide.createIcons();
     applyMenuPermissions();
+    if (typeof window.crmIniciarTesteConta === "function") window.crmIniciarTesteConta();
+    if (typeof window.crmPintarTesteConta === "function") window.crmPintarTesteConta();
   }
 }
 
@@ -5359,17 +5362,23 @@ window.applyPermissions = function(profileName) {
   if (typeof window.ensureLuceliaBackOfficeProfile === "function") {
     window.ensureLuceliaBackOfficeProfile();
   }
+  const imp = window.crmImpersonacaoAtual && window.crmImpersonacaoAtual();
   const current = window.AppState && AppState.currentUser;
-  if (current && typeof window.isCobrancaBackOfficeUser === "function" && window.isCobrancaBackOfficeUser(current)) {
+  if (imp && imp.profile_name) {
+    profileName = imp.profile_name;
+  } else if (current && typeof window.isCobrancaBackOfficeUser === "function" && window.isCobrancaBackOfficeUser(current)) {
     profileName = window.CRM_BACK_OFFICE_PROFILE_NAME;
     current.profile_name = profileName;
   } else if (current && current.profile_name) {
     profileName = current.profile_name;
   }
   if (!profileName) return;
-  
-  // Administrador tem acesso a tudo
-  if (profileName.trim().toUpperCase() === "ADMINISTRADOR") return;
+
+  if (window.isCrmAdminProfileName(profileName)) {
+    document.querySelectorAll("li[data-module]").forEach((item) => { item.style.display = ""; });
+    document.querySelectorAll(".nav-group").forEach((group) => { group.style.display = ""; });
+    return;
+  }
 
   const perms = typeof window.readCrmProfilePerms === "function"
     ? window.readCrmProfilePerms(profileName)
@@ -5544,8 +5553,54 @@ window.findCrmRegisteredUser = function(userOrEmail) {
   }) || null;
 };
 
+window.CRM_TESTE_CONTA_KEY = "crm_teste_conta";
+
+window.crmAdministradorReal = function() {
+  const u = window.AppState && AppState.currentUser;
+  if (!u) return false;
+  return window.isCrmAdminProfileName(u.profile_name || u.profile || u.role);
+};
+
+window.crmImpersonacaoAtual = function() {
+  if (!window.crmAdministradorReal()) return null;
+  let raw = "";
+  try { raw = sessionStorage.getItem(window.CRM_TESTE_CONTA_KEY) || ""; } catch (e) { raw = ""; }
+  if (!raw) return null;
+  let salvo = null;
+  try { salvo = JSON.parse(raw); } catch (e) { salvo = null; }
+  const email = String((salvo && salvo.email) || "").toLowerCase();
+  if (!email) return null;
+  const lista = typeof window.getCrmUsersList === "function" ? window.getCrmUsersList() : [];
+  const alvo = lista.find((u) => String((u && u.email) || "").toLowerCase() === email);
+  if (!alvo || String(alvo.status || "ATIVO").toUpperCase() === "INATIVO") return null;
+  const meu = String((AppState.currentUser && AppState.currentUser.email) || "").toLowerCase();
+  if (meu && email === meu) return null;
+  return alvo;
+};
+
+window.crmUsuarioAcesso = function() {
+  return window.crmImpersonacaoAtual() || (window.AppState && AppState.currentUser) || null;
+};
+
+window.crmNomeReal = function() {
+  const u = window.AppState && AppState.currentUser;
+  if (!u) return "";
+  if (!u._nomeReal) u._nomeReal = String(u.name || "Administrador").replace(/ no usuário .+$/i, "");
+  return u._nomeReal;
+};
+
+window.crmSincronizarNomeTeste = function() {
+  const u = window.AppState && AppState.currentUser;
+  if (!u) return;
+  const real = window.crmNomeReal();
+  const imp = window.crmImpersonacaoAtual();
+  u.name = imp ? (real + " no usuário " + (imp.name || imp.email || "operador")) : real;
+};
+
 window.isCrmAdministrator = function(user) {
   if (!user) return false;
+  const imp = window.crmImpersonacaoAtual && window.crmImpersonacaoAtual();
+  if (imp && window.AppState && user === AppState.currentUser) user = imp;
   const rec = window.findCrmRegisteredUser(user);
   const status = String((rec && rec.status) || user.status || "ATIVO").toUpperCase();
   if (status === "INATIVO") return false;
@@ -5562,13 +5617,118 @@ window.listCrmAdministrators = function() {
 
 window.isCrmAgendaSupervisor = function(user) {
   if (!user) return false;
+  const imp = window.crmImpersonacaoAtual && window.crmImpersonacaoAtual();
+  if (imp && window.AppState && user === AppState.currentUser) user = imp;
   if (window.isCrmAdministrator(user)) return true;
   const profile = String(user.profile_name || user.profile || user.role || "").toUpperCase();
   return profile.includes("GESTOR") || profile.includes("GERENTE");
 };
 
 window.isCrmSuperAdmin = function() {
-  return window.isCrmAdministrator(window.AppState && AppState.currentUser);
+  return window.isCrmAdministrator(window.crmUsuarioAcesso());
+};
+
+window.crmAbrirTesteConta = function(email) {
+  if (!window.crmAdministradorReal()) return;
+  const lista = window.getCrmUsersList();
+  const alvo = lista.find((u) => String((u && u.email) || "").toLowerCase() === String(email || "").toLowerCase());
+  if (!alvo) return;
+  try {
+    sessionStorage.setItem(window.CRM_TESTE_CONTA_KEY, JSON.stringify({
+      email: alvo.email,
+      name: alvo.name || ""
+    }));
+  } catch (e) {}
+  window.crmSincronizarNomeTeste();
+  if (typeof window.applyMenuPermissions === "function") window.applyMenuPermissions();
+  if (typeof window.updateOperatorTabsUI === "function") {
+    try { window.updateOperatorTabsUI(); } catch (err) {}
+  }
+  window.crmPintarTesteConta();
+};
+
+window.crmEncerrarTesteConta = function() {
+  try { sessionStorage.removeItem(window.CRM_TESTE_CONTA_KEY); } catch (e) {}
+  window.crmSincronizarNomeTeste();
+  if (typeof window.applyMenuPermissions === "function") window.applyMenuPermissions();
+  if (typeof window.updateOperatorTabsUI === "function") {
+    try { window.updateOperatorTabsUI(); } catch (err) {}
+  }
+  window.crmPintarTesteConta();
+};
+
+window.crmPintarTesteConta = function() {
+  const widget = document.getElementById("teste-conta-widget");
+  const btn = document.getElementById("teste-conta-btn");
+  const menu = document.getElementById("teste-conta-menu");
+  if (!widget || !btn || !menu) return;
+  const admin = window.crmAdministradorReal();
+  widget.hidden = !admin;
+  if (!admin) {
+    menu.hidden = true;
+    return;
+  }
+  const imp = window.crmImpersonacaoAtual();
+  btn.classList.toggle("is-teste", !!imp);
+  btn.title = imp
+    ? ("Acessos de " + (imp.name || imp.email) + ". Você continua administrador.")
+    : "Trocar de conta";
+  if (menu.hidden) return;
+  const q = String(menu.dataset.q || "").trim().toLowerCase();
+  const eu = String((AppState.currentUser && AppState.currentUser.email) || "").toLowerCase();
+  const lista = window.getCrmUsersList().filter((u) => {
+    if (!u || String(u.status || "ATIVO").toUpperCase() !== "ATIVO") return false;
+    if (String(u.email || "").toLowerCase() === eu) return false;
+    const blob = (String(u.name || "") + " " + String(u.email || "") + " " + String(u.profile_name || "")).toLowerCase();
+    return !q || blob.indexOf(q) >= 0;
+  }).sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "pt-BR"));
+  const aviso = imp
+    ? `<button type="button" class="btn btn-cancel btn-sm teste-conta-encerrar" id="teste-conta-encerrar">Encerrar teste</button>
+       <p>Você continua <b>${window.crmNomeReal()}</b> e está com os acessos de <b>${imp.name || imp.email}</b>. O que for salvo fica como ${window.crmNomeReal()} no usuário ${imp.name || imp.email}. Ao fechar o navegador, a próxima entrada volta a ser só administrador.</p>`
+    : `<p>Escolha um operador para usar os acessos dele. Você continua administrador. Ao fechar o navegador, a próxima entrada volta a ser só administrador.</p>`;
+  menu.innerHTML = aviso +
+    `<input class="form-control" id="teste-conta-busca" placeholder="Buscar operador" value="${q.replace(/"/g, "&quot;")}">` +
+    (lista.length ? lista.map((u) => {
+      const on = imp && String(imp.email || "").toLowerCase() === String(u.email || "").toLowerCase();
+      return `<button type="button" class="teste-conta-item${on ? " is-on" : ""}" data-email="${String(u.email || "").replace(/"/g, "&quot;")}"><b>${String(u.name || u.email || "").replace(/</g, "")}</b><span>${String(u.profile_name || "Sem perfil").replace(/</g, "")}</span></button>`;
+    }).join("") : `<p>Nenhum operador encontrado.</p>`);
+  const busca = document.getElementById("teste-conta-busca");
+  if (busca) {
+    busca.focus();
+    const fim = busca.value.length;
+    try { busca.setSelectionRange(fim, fim); } catch (e) {}
+    busca.oninput = () => {
+      menu.dataset.q = busca.value;
+      window.crmPintarTesteConta();
+    };
+  }
+  const enc = document.getElementById("teste-conta-encerrar");
+  if (enc) enc.onclick = () => { menu.hidden = true; window.crmEncerrarTesteConta(); };
+  menu.querySelectorAll(".teste-conta-item").forEach((el) => {
+    el.onclick = () => {
+      menu.hidden = true;
+      window.crmAbrirTesteConta(el.getAttribute("data-email"));
+    };
+  });
+};
+
+window.crmIniciarTesteConta = function() {
+  if (window._testeContaPronto) return;
+  window._testeContaPronto = true;
+  const btn = document.getElementById("teste-conta-btn");
+  const menu = document.getElementById("teste-conta-menu");
+  if (!btn || !menu) return;
+  btn.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    if (!window.crmAdministradorReal()) return;
+    menu.hidden = !menu.hidden;
+    if (!menu.hidden) window.crmPintarTesteConta();
+  });
+  document.addEventListener("click", (ev) => {
+    const widget = document.getElementById("teste-conta-widget");
+    if (!widget || widget.contains(ev.target)) return;
+    menu.hidden = true;
+  });
 };
 
 window.permCoversMenuKey = function(perms, modKey) {
@@ -5780,7 +5940,7 @@ window.permCoversMenuKey = function(perms, modKey) {
 
 window.hasCrmPerm = function(key) {
   if (window.isCrmSuperAdmin()) return true;
-  const u = window.AppState && AppState.currentUser;
+  const u = window.crmUsuarioAcesso();
   if (u && Array.isArray(u.permissions) && u.permissions.includes(key)) return true;
   try {
     const profileName = u && u.profile_name ? String(u.profile_name) : "";
