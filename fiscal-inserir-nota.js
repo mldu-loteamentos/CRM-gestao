@@ -1103,7 +1103,7 @@ window.InserirNotaApp = {
     if (filtro !== "abertas") return itens.filter((x) => x.status === filtro);
     const dia = (x) => String((x.pagamento && x.pagamento.data) || "9999");
     const abertas = itens.filter((x) => FilaNotasFiscais.aberta(x)).sort((a, b) => dia(a).localeCompare(dia(b)) || (a.criadoEm || 0) - (b.criadoEm || 0));
-    const acompanhamento = itens.filter((x) => x.status === "devolvida" || x.status === "excluida");
+    const acompanhamento = itens.filter((x) => x.status === "devolvida");
     return abertas.concat(acompanhamento);
   },
 
@@ -1518,7 +1518,7 @@ window.InserirNotaApp = {
     const pode = this.podeEditar();
     const conta = (fn) => f.itens.filter(fn).length;
     const filtros = [
-      ["abertas", `Acompanhamento (${conta((x) => FilaNotasFiscais.aberta(x) || x.status === "devolvida" || x.status === "excluida")})`],
+      ["abertas", `Acompanhamento (${conta((x) => FilaNotasFiscais.aberta(x) || x.status === "devolvida")})`],
       ["lancada", `Lançadas (${conta((x) => x.status === "lancada")})`],
       ["devolvida", `Devolvidas (${conta((x) => x.status === "devolvida")})`],
       ["excluida", `Excluídas (${conta((x) => x.status === "excluida")})`],
@@ -1527,7 +1527,7 @@ window.InserirNotaApp = {
     ];
     const corpo = f.carregando && !f.itens.length ? `<p class="fnf-vazio"><span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;"></span> Carregando a fila…</p>`
       : (f.erro ? `<p class="inf-erro">${esc(f.erro)}</p>`
-        : (!lista.length ? `<p class="fnf-vazio">${f.filtro === "abertas" ? "Nenhuma nota em aberto, devolvida ou excluída." : "Nenhuma nota nesta situação."}</p>`
+        : (!lista.length ? `<p class="fnf-vazio">${f.filtro === "abertas" ? "Nenhuma nota em aberto ou devolvida." : "Nenhuma nota nesta situação."}</p>`
           : `<div class="fnf-fila">${lista.map((x) => {
               const p = x.pagamento || {};
               const atrasado = FilaNotasFiscais.aberta(x) && p.data && p.data < hoje;

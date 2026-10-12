@@ -649,36 +649,64 @@ const FluxoCaixaDiarioApp = {
 
   previsoesRecebimento(units, b, hoje) {
     const out = [];
+    // Um título com mais de uma unidade (lote + casa) vem repetido em cada unidade do estoque.
+    const vistos = {};
     (units || []).forEach((u) => {
       if (u.quitado || u.relFin === "quitado") return;
       const companyId = this._ccCompany[String(u.enterpriseId || "")] || "";
       if (!this.companyWanted(companyId)) return;
       const pmp = Number(u.pmp3m) || 0;
       const horizonte = b.end > caixaAddDays(hoje, 35) ? b.end : caixaAddDays(hoje, 35);
+      const titulo = u.receivableBillId != null ? String(u.receivableBillId) : "";
+      const local = {};
       (Array.isArray(u.openParcelas) ? u.openParcelas : []).forEach((p) => {
         if (!p || !p.due) return;
+        if (titulo) {
+          const k = [titulo, p.num || "", p.due, (Number(p.val) || 0).toFixed(2)].join("|");
+          local[k] = (local[k] || 0) + 1;
+          const ja = vistos[k];
+          if (ja && local[k] <= ja.n) {
+            const un = String(u.name || "").trim();
+            const item = ja.itens[local[k] - 1];
+            if (item && un && !item.unidades.includes(un)) {
+              item.unidades.push(un);
+              item.unidade = item.unidades.join(" + ");
+            }
+            return;
+          }
+        }
         // Ainda cabe no caixa enquanto o próximo dia útil do vencimento não passou.
         const vencEfetivo = caixaDiaUtil(p.due, 1);
         if (vencEfetivo < hoje) return;
         const bruto = caixaAddDays(p.due, pmp);
         const prev = caixaDiaUtil(bruto, 1);
-        if (prev < b.start || prev > horizonte || prev < hoje) return;
-        out.push({
+        const fora = prev < b.start || prev > horizonte || prev < hoje;
+        const un = String(u.name || "").trim();
+        const item = fora ? null : {
           date: prev,
           vencEfetivo,
           deslocadoDe: prev !== bruto ? bruto : "",
           valor: Number(p.val) || 0,
-          unidade: u.name || "",
+          unidade: un,
+          unidades: un ? [un] : [],
           cc: String(u.enterpriseId || ""),
           ccNome: u.enterpriseName || "",
-          titulo: u.receivableBillId != null ? String(u.receivableBillId) : "",
+          titulo,
+          parcela: p.num ? [p.tipo, p.num].filter(Boolean).join(" ") : "",
           cliente: u.customerName || "",
           cpf: u.customerDoc || "",
           vencimento: p.due,
           pmp,
           customerId: u.customerId != null ? String(u.customerId) : "",
-          billId: u.receivableBillId != null ? String(u.receivableBillId) : ""
-        });
+          billId: titulo
+        };
+        if (titulo) {
+          const k = [titulo, p.num || "", p.due, (Number(p.val) || 0).toFixed(2)].join("|");
+          const ja = vistos[k] || (vistos[k] = { n: 0, itens: [] });
+          ja.n = local[k];
+          ja.itens[local[k] - 1] = item;
+        }
+        if (item) out.push(item);
       });
     });
     return out;
@@ -1169,7 +1197,8 @@ const FluxoCaixaDiarioApp = {
     btn.dataset.customerId = customerId;
     btn.dataset.title = it.billId;
     btn.dataset.name = it.cliente || it.party || "Cliente";
-    btn.dataset.unit = it.unidade ? (it.cc + " - " + it.unidade) : "";
+    const unidade = (it.unidades && it.unidades[0]) || it.unidade;
+    btn.dataset.unit = unidade ? (it.cc + " - " + unidade) : "";
     btn.dataset.cc = it.cc || (it.shares && it.shares[0] && it.shares[0].cc) || "";
     const msg = "Abrindo o extrato do cliente…";
     this.progress = msg;
@@ -1689,7 +1718,10 @@ const FluxoCaixaDiarioApp = {
     }
     const emp = this.nomeEmp(it).toUpperCase() || String(it.cc || it.ccId || "").trim();
     const un = String(it.unidade || "").trim() || (it.outra ? String(it.documento || "").trim() : "");
-    const tit = [it.titulo || it.billId, it.parcela].filter(Boolean).join("/");
+    const prevista = !it.real && !it.outra && !!(it.titulo || it.billId);
+    const tit = prevista
+      ? ["Título " + (it.titulo || it.billId), it.parcela ? "Parcela " + it.parcela : (it.vencimento ? "venc. " + caixaFmtDate(it.vencimento) : "")].filter(Boolean).join(" · ")
+      : [it.titulo || it.billId, it.parcela].filter(Boolean).join("/");
     const nome = String(it.cliente || it.credor || it.party || "").trim().toUpperCase();
     if (it.real && !un && !tit) return nome || String(it.historico || "Movimento").trim() || "—";
     const corpo = [emp, un].filter(Boolean).join(" - ");
@@ -1702,6 +1734,9 @@ const FluxoCaixaDiarioApp = {
     if (!it || this.ehPagar(it)) return "";
     const linhas = [];
     if (it.vencimento) linhas.push("<b>Vencimento original</b> " + caixaEsc(caixaFmtDate(it.vencimento)));
+    if (it.unidades && it.unidades.length > 1) {
+      linhas.push("<b>Mesmo título</b> nas unidades " + caixaEsc(it.unidades.join(" e ")) + ". A parcela entra uma vez no caixa.");
+    }
     if (!it.real && !it.outra) {
       const pmp = Number(it.pmp) || 0;
       const quando = pmp > 0 ? pmp + " dia(s) depois do vencimento" : (pmp < 0 ? Math.abs(pmp) + " dia(s) antes do vencimento" : "no próprio vencimento");

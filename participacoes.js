@@ -318,11 +318,7 @@ const ParticipacoesApp = {
     try {
       const data = await this.fetchJson("/api/participacoes/companies");
       this.folderCompanies = data.companies || [];
-      if (data.missingRoot) {
-        this.hint = "Pasta local opcional. Selecione a empresa no cadastro e envie os PDFs pela tela.";
-      }
     } catch (e) {
-      this.hint = e.message || String(e);
       this.folderCompanies = [];
     }
     this.render();
@@ -1121,10 +1117,12 @@ const ParticipacoesApp = {
       parents.push({ el: el, top: el.scrollTop || 0 });
     }
     const matrix = document.getElementById("part-matrix-scroll");
+    const groupsBox = document.getElementById("part-groups-scroll");
     return {
       parents: parents,
       matrixTop: matrix ? matrix.scrollTop : 0,
       matrixLeft: matrix ? matrix.scrollLeft : 0,
+      groupsTop: groupsBox ? groupsBox.scrollTop : 0,
       win: window.scrollY || document.documentElement.scrollTop || 0
     };
   },
@@ -1140,6 +1138,8 @@ const ParticipacoesApp = {
         matrix.scrollTop = saved.matrixTop || 0;
         matrix.scrollLeft = saved.matrixLeft || 0;
       }
+      const groupsBox = document.getElementById("part-groups-scroll");
+      if (groupsBox) groupsBox.scrollTop = saved.groupsTop || 0;
       window.scrollTo(0, saved.win || 0);
     };
     apply();
@@ -1232,25 +1232,15 @@ const ParticipacoesApp = {
       `${this.periodLabel(c.periodo, c.periodo)}: lido ${this.fmt(c.got)} × Saldo Total PDF ${this.fmt(c.saldo)}`
     ).join(" · ");
     return `
-      <div class="crm-card" style="padding:0;margin-bottom:12px;overflow:hidden;">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e2e8f0;flex-wrap:wrap;">
-          <div>
-            <strong style="color:#14532d;">Matriz por credor × mês</strong>
-            <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">Clique no credor para ver todos os lançamentos. Clique no valor para ver só aquele mês.</div>
-            ${warn ? `<div style="font-size:0.75rem;color:#9a3412;margin-top:4px;">Conferência Saldo Total: ${this.esc(warn)}</div>` : ""}
-          </div>
-          <div style="display:flex;align-items:center;gap:10px;">
-            <button type="button" class="btn btn-outline" style="height:36px;" onclick="ParticipacoesApp.exportPpt()" ${mx.creditors.some((c) => this.avaliarEntry(c.groupKey)) ? "" : "disabled"} title="Gera um slide para cada mês dos credores marcados como Avaliar">
-              <i data-lucide="presentation" style="width:14px;height:14px;"></i> Gerar PPT
-            </button>
-            <div style="font-weight:800;color:#105436;">${this.fmt(mx.grand)} · ${mx.creditors.length} credor(es)</div>
-          </div>
-        </div>
-        <div id="part-matrix-scroll" style="overflow:auto;max-height:min(70vh,720px);">
+      ${warn ? `<div class="part-alert is-warn"><strong>Conferência Saldo Total:</strong> ${this.esc(warn)}</div>` : ""}
+      <div class="part-matrix-wrap">
+        <div id="part-matrix-scroll" class="part-matrix-scroll">
           <table class="part-matrix-table">
             <thead>
               <tr>
-                <th class="part-matrix-sticky">Credor</th>
+                <th class="part-matrix-sticky" title="Marque a caixa para incluir o credor no PPT. Clique no nome para ver todos os lançamentos e no valor para ver só aquele mês.">
+                  <span class="part-th-credor"><i data-lucide="presentation" style="width:12px;height:12px;"></i> Credor</span>
+                </th>
                 ${mx.months.map((m) => `<th title="${this.esc(this.periodLabel(m, m))}">${this.esc(shortMonth(m))}</th>`).join("")}
                 <th>Total</th>
               </tr>
@@ -1263,11 +1253,10 @@ const ParticipacoesApp = {
                 return `<tr class="${this.detail && this.detail.groupKey === c.groupKey ? "is-on" : ""}">
                   <td class="part-matrix-sticky part-matrix-credor" title="Ver todos os lançamentos de ${this.esc(c.credor)}">
                     <div class="part-credor-line">
-                      <label class="part-avaliar" title="Incluir este credor no PPT">
+                      <label class="part-avaliar" title="Avaliar: incluir este credor no PPT">
                         <input type="checkbox" ${flagged ? "checked" : ""} onclick="event.stopPropagation()" onchange="ParticipacoesApp.setAvaliar('${flagEnc}', this.checked)">
-                        Avaliar
                       </label>
-                      <button type="button" class="part-matrix-credor-btn" onclick="ParticipacoesApp.openMatrixDetail('${enc}','')">${this.esc(c.credor)}</button>
+                      <button type="button" class="part-matrix-credor-btn" title="${this.esc(c.credor)}" onclick="ParticipacoesApp.openMatrixDetail('${enc}','')">${this.esc(c.credor)}</button>
                     </div>
                     ${flagged ? `<input class="part-duvida" placeholder="Dúvida para o slide" value="${this.esc(flagged.duvida || "")}" oninput="ParticipacoesApp.setDuvida('${flagEnc}', this.value)">` : ""}
                   </td>
@@ -1406,6 +1395,12 @@ const ParticipacoesApp = {
     }
     this.parsing = false;
     this.render();
+  },
+
+  onPeriodoSelect(idx) {
+    const f = idx === "" ? null : this.files[Number(idx)];
+    if (f) this.onFile(f.name);
+    else this.onFileAll();
   },
 
   async onFileAll() {
@@ -1970,130 +1965,112 @@ const ParticipacoesApp = {
     const uploadDisabled = !this.companyId;
     const companyTitle = (crm && crm.name) || this.companyLabel(this.companyId) || "Selecione a empresa";
 
-    const segBtn = (id, label, icon) => {
-      const on = this.groupBy === id;
-      return `<button type="button" onclick="ParticipacoesApp.groupBy='${id}';ParticipacoesApp.detail=null;ParticipacoesApp.render()"
-        style="display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;border:1px solid ${on ? "#105436" : "#e2e8f0"};background:${on ? "#105436" : "#fff"};color:${on ? "#fff" : "#334155"};font-size:0.78rem;font-weight:700;cursor:pointer;">
-        ${icon ? `<i data-lucide="${icon}" style="width:13px;height:13px;"></i>` : ""}${label}
-      </button>`;
-    };
+    const views = [
+      { id: "matriz", label: "Matriz", icon: "table" },
+      { id: "periodo", label: "Por período", icon: "calendar" },
+      { id: "credor", label: "Por credor", icon: "building-2" },
+      { id: "categoria", label: "Por categoria", icon: "tags" },
+      { id: "data", label: "Por data", icon: "clock" }
+    ];
+    const isMatriz = this.groupBy === "matriz";
+    const mxInfo = this.companyId && isMatriz ? this.matrixData() : null;
+    const credCount = mxInfo ? mxInfo.creditors.length : 0;
+    const canPpt = !!(mxInfo && mxInfo.creditors.some((c) => this.avaliarEntry(c.groupKey)));
+    const cap = (s) => String(s || "").replace(/^\s*\S/, (ch) => ch.toUpperCase());
+    const alertBox = (cls, msg) => `<div class="part-alert ${cls}">${this.esc(msg)}</div>`;
 
     root.innerHTML = `
-      <div style="padding:14px 18px 28px;">
-        <div class="part-top">
-          <div>
-            <div style="font-size:1.2rem;font-weight:800;color:#0f172a;">Prestação de Contas Ellenceo</div>
-            <div style="font-size:0.8rem;color:#64748b;margin-top:3px;">DESPESAS PAGAS por empresa e período · PDF salvo no Firebase para consulta</div>
-          </div>
-          <div class="part-top-actions">
-            <select class="form-control" style="width:auto;min-width:180px;font-size:0.8rem;font-weight:600;"
-              onchange="ParticipacoesApp.exportScope=this.value">
+      <div class="part-page">
+        <div class="part-toolbar">
+          <div id="part-emp-box"></div>
+          <label class="part-field part-field-periodo">
+            <span class="ml-emp-filter-label">Período</span>
+            <select class="part-input" onchange="ParticipacoesApp.onPeriodoSelect(this.value)" ${this.files.length ? "" : "disabled"}>
+              <option value="" ${!this.fileName ? "selected" : ""}>${this.files.length ? `Todos os períodos (${this.files.length})` : "Nenhum PDF enviado"}</option>
+              ${this.files.map((f, i) => `<option value="${i}" ${f.name === this.fileName ? "selected" : ""}>${this.esc(cap(this.periodLabel(this.shownClosing(f), f.name)))}</option>`).join("")}
+            </select>
+          </label>
+          <label class="part-field part-search">
+            <span class="ml-emp-filter-label">Buscar nas despesas</span>
+            <input class="part-input" placeholder="Credor, detalhe, categoria, data..." value="${this.esc(this.q)}"
+              oninput="ParticipacoesApp.q=this.value;ParticipacoesApp.render()">
+          </label>
+          <div class="part-toolbar-actions">
+            <select class="part-input part-scope" onchange="ParticipacoesApp.exportScope=this.value" title="Abrangência da exportação">
               <option value="current" ${this.exportScope === "current" ? "selected" : ""}>Excel: empresa atual</option>
               <option value="all" ${this.exportScope === "all" ? "selected" : ""}>Excel: todas (1 aba cada)</option>
             </select>
             <button type="button" class="btn btn-excel" onclick="ParticipacoesApp.exportExcel()" ${!this.companyId && this.exportScope === "current" ? "disabled" : ""} title="Exportar tabela atual para Excel">
               <i data-lucide="download" style="width:14px;height:14px;"></i> Excel
             </button>
-            <label class="btn btn-secondary" style="cursor:${uploadDisabled ? "not-allowed" : "pointer"};opacity:${uploadDisabled ? 0.55 : 1};display:inline-flex;align-items:center;gap:6px;margin:0;height:40px;">
-              <i data-lucide="upload" style="width:15px;"></i> Enviar PDFs
+            <label class="btn btn-secondary part-upload ${uploadDisabled ? "is-disabled" : ""}" title="${uploadDisabled ? "Selecione a empresa para enviar PDFs" : "Enviar PDFs da prestação de contas"}">
+              <i data-lucide="upload" style="width:14px;height:14px;"></i> Enviar PDFs
               <input type="file" accept="application/pdf,.pdf" multiple ${uploadDisabled ? "disabled" : ""} style="display:none" onchange="ParticipacoesApp.onUpload(this)">
             </label>
           </div>
         </div>
 
-        <div class="crm-card part-filters" style="padding:12px 14px;margin-bottom:12px;">
-          <div id="part-emp-box"></div>
-          <label class="part-search">
-            <div style="font-size:0.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;">Buscar nas despesas</div>
-            <input class="form-control" placeholder="Credor, detalhe, categoria, data..." value="${this.esc(this.q)}"
-              oninput="ParticipacoesApp.q=this.value;ParticipacoesApp.render()" style="font-size:0.85rem;">
-          </label>
-        </div>
-
-        ${this.error ? `<div style="margin-bottom:12px;padding:10px 12px;border-radius:8px;background:#fef2f2;color:#991b1b;font-size:0.85rem;">${this.esc(this.error)}</div>` : ""}
-        ${this.hint && !this.error ? `<div style="margin-bottom:12px;padding:10px 12px;border-radius:8px;background:#fff7ed;color:#9a3412;font-size:0.82rem;">${this.esc(this.hint)}</div>` : ""}
-        ${this.uploadProgress ? `<div style="margin-bottom:12px;padding:10px 12px;border-radius:8px;background:#ecfdf5;color:#065f46;font-size:0.85rem;">${this.esc(this.uploadProgress)}</div>` : ""}
+        ${this.error ? alertBox("is-error", this.error) : ""}
+        ${this.hint && !this.error ? alertBox("is-warn", this.hint) : ""}
+        ${this.uploadProgress ? alertBox("is-ok", this.uploadProgress) : ""}
 
         ${this.companyId ? `
-          <div class="crm-card" style="padding:12px 14px;margin-bottom:12px;">
-            <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:flex-start;margin-bottom:10px;">
-              <div>
-                <div style="font-weight:800;color:#0f172a;font-size:1.05rem;">${this.esc(companyTitle)}</div>
-                <div style="font-size:0.8rem;color:#64748b;margin-top:2px;">
-                  Ellenceo · <strong style="text-transform:capitalize;">${this.esc(periodTitle)}</strong>
-                  · ${rows.length} despesa(s) · ${this.fmt(total)}
-                </div>
-              </div>
-              <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                ${this.fileName ? `<a class="btn btn-outline btn-sm" href="${this.fileLink(this.fileName)}" target="_blank" rel="noopener"
-                  style="display:inline-flex;align-items:center;gap:5px;"><i data-lucide="file-text" style="width:14px;"></i> Abrir PDF</a>` : ""}
-                ${!this.fileName && this.files.some((f) => f.pdfUrl) ? `<span style="font-size:0.75rem;color:#64748b;align-self:center;">PDFs no Firebase · selecione um período</span>` : ""}
-              </div>
+          <div class="part-summary">
+            <div class="part-summary-info">
+              <strong>${this.esc(companyTitle)}</strong>
+              <span>${this.esc(cap(periodTitle))} · ${rows.length} despesa(s)${mxInfo ? ` · ${credCount} credor(es)` : ""}</span>
             </div>
-
-            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
-              <button type="button" onclick="ParticipacoesApp.onFileAll()"
-                style="padding:6px 11px;border-radius:999px;border:1px solid ${!this.fileName && this.files.length ? "#105436" : "#e2e8f0"};background:${!this.fileName && this.files.length ? "#ecfdf5" : "#fff"};color:${!this.fileName && this.files.length ? "#105436" : "#475569"};font-size:0.75rem;font-weight:700;cursor:pointer;">
-                Todos (${this.files.length})
-              </button>
-              ${this.files.map((f) => {
-                const active = f.name === this.fileName;
-                const lab = this.periodLabel(this.shownClosing(f), f.name);
-                const cloud = f.pdfUrl ? " · nuvem" : "";
-                return `<button type="button" onclick="ParticipacoesApp.onFile(${JSON.stringify(f.name)})"
-                  style="padding:6px 11px;border-radius:999px;border:1px solid ${active ? "#1d4ed8" : "#e2e8f0"};background:${active ? "#eff6ff" : "#fff"};color:${active ? "#1d4ed8" : "#475569"};font-size:0.75rem;font-weight:700;cursor:pointer;text-transform:capitalize;"
-                  title="${this.esc(f.name)}${cloud}">
-                  ${this.esc(lab)}
-                </button>`;
-              }).join("")}
-              ${!this.files.length ? `<span style="font-size:0.8rem;color:#64748b;align-self:center;">Nenhum PDF ainda — use Enviar PDFs.</span>` : ""}
-            </div>
-
-            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-              ${segBtn("matriz", "Matriz", "table")}
-              ${segBtn("periodo", "Por período", "calendar")}
-              ${segBtn("credor", "Por credor", "building-2")}
-              ${segBtn("categoria", "Por categoria", "tags")}
-              ${segBtn("data", "Por data", "clock")}
+            <div class="part-summary-actions">
+              ${this.fileName ? `<a class="btn btn-outline part-btn-sm" href="${this.fileLink(this.fileName)}" target="_blank" rel="noopener"><i data-lucide="file-text" style="width:14px;height:14px;"></i> Abrir PDF</a>` : ""}
+              ${isMatriz ? `<button type="button" class="btn btn-outline part-btn-sm" onclick="ParticipacoesApp.exportPpt()" ${canPpt ? "" : "disabled"} title="${canPpt ? "Gera um slide para cada mês dos credores marcados" : "Marque credores na matriz para gerar o PPT"}"><i data-lucide="presentation" style="width:14px;height:14px;"></i> Gerar PPT</button>` : ""}
+              <span class="part-summary-total">${this.fmt(total)}</span>
             </div>
           </div>
-        ` : `<div class="crm-card" style="padding:22px;color:#64748b;">Selecione a empresa no topo para ver a matriz e enviar PDFs.</div>`}
+          <div class="ml-tabs part-tabs" role="tablist">
+            ${views.map((v) => `
+              <button type="button" role="tab" aria-selected="${this.groupBy === v.id}" class="ml-tab ${this.groupBy === v.id ? "is-active" : ""}"
+                onclick="ParticipacoesApp.groupBy='${v.id}';ParticipacoesApp.detail=null;ParticipacoesApp.render()"><i data-lucide="${v.icon}"></i> ${v.label}</button>
+            `).join("")}
+          </div>
+          ${!this.files.length ? `<div class="part-empty">Nenhum PDF ainda. Use <strong>Enviar PDFs</strong>.</div>` : ""}
+        ` : `<div class="part-empty">Selecione a empresa para ver a matriz e enviar PDFs.</div>`}
 
-        ${this.parsing || this.loading ? `<div class="crm-card" style="padding:20px;text-align:center;color:#64748b;">${this.esc(this.uploadProgress || "Processando...")}</div>` : ""}
+        ${this.parsing || this.loading ? `<div class="part-empty is-center">${this.esc(this.uploadProgress || "Processando...")}</div>` : ""}
         ${!this.parsing && !this.loading && this.companyId && this.groupBy === "matriz" ? this.matrixHtml() : ""}
-        ${!this.parsing && !this.loading && this.companyId && this.groupBy !== "matriz" ? groups.map((g) => `
-          <div class="crm-card" style="padding:0;margin-bottom:10px;overflow:hidden;">
-            <div style="display:flex;justify-content:space-between;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">
-              <strong style="text-transform:capitalize;">${this.esc(g.key)}</strong>
-              <span style="font-weight:800;color:#105436;">${this.fmt(g.total)} · ${g.rows.length}</span>
-            </div>
-            <div style="overflow:auto;">
-              <table class="part-expense-table" style="width:100%;border-collapse:collapse;font-size:0.8rem;min-width:720px;">
-                <thead>
-                  <tr style="background:#105436;color:#fff;">
-                    <th style="text-align:left;padding:6px 10px;">Data</th>
-                    ${this.groupBy === "periodo" ? "" : `<th style="text-align:left;padding:6px 10px;">Período</th>`}
-                    <th style="text-align:left;padding:6px 10px;">Credor</th>
-                    <th style="text-align:left;padding:6px 10px;">Detalhe</th>
-                    <th style="text-align:left;padding:6px 10px;">Categoria</th>
-                    <th style="text-align:right;padding:6px 10px;">Valor</th>
-                  </tr>
-                </thead>
+        ${!this.parsing && !this.loading && this.companyId && this.groupBy !== "matriz" && groups.length ? `
+          <div class="cc-scroll part-groups" id="part-groups-scroll">
+            <table class="cc-table part-expense-table">
+              <colgroup>
+                <col style="width:88px">
+                ${this.groupBy === "periodo" ? "" : `<col style="width:120px">`}
+                <col style="width:26%"><col><col style="width:18%"><col style="width:120px">
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  ${this.groupBy === "periodo" ? "" : `<th>Período</th>`}
+                  <th>Credor</th><th>Detalhe</th><th>Categoria</th><th class="is-right">Valor</th>
+                </tr>
+              </thead>
+              ${groups.map((g) => `
                 <tbody>
-                  ${g.rows.map((r) => `<tr style="border-bottom:1px solid #f1f5f9;">
-                    <td style="padding:6px 10px;white-space:nowrap;">${this.esc(r.date)}</td>
-                    ${this.groupBy === "periodo" ? "" : `<td style="padding:6px 10px;text-transform:capitalize;">${this.esc(this.periodLabel(r.periodo, "—"))}</td>`}
-                    <td style="padding:6px 10px;">${this.esc(r.credor)}</td>
-                    <td style="padding:6px 10px;">${this.esc(r.detalhe || "—")}</td>
-                    <td style="padding:6px 10px;">${this.esc(r.categoria)}</td>
-                    <td style="padding:6px 10px;text-align:right;font-weight:700;">${r.valor ? this.fmt(r.valor) : "—"}</td>
+                  <tr class="part-group-row">
+                    <td colspan="${this.groupBy === "periodo" ? 4 : 5}">${this.esc(cap(g.key))} <span>${g.rows.length} lançamento(s)</span></td>
+                    <td class="is-right">${this.fmt(g.total)}</td>
+                  </tr>
+                  ${g.rows.map((r) => `<tr>
+                    <td>${this.esc(r.date)}</td>
+                    ${this.groupBy === "periodo" ? "" : `<td>${this.esc(cap(this.periodLabel(r.periodo, "—")))}</td>`}
+                    <td title="${this.esc(r.credor)}">${this.esc(r.credor)}</td>
+                    <td title="${this.esc(r.detalhe || "")}">${this.esc(r.detalhe || "—")}</td>
+                    <td title="${this.esc(r.categoria)}">${this.esc(r.categoria)}</td>
+                    <td class="is-right part-valor">${r.valor ? this.fmt(r.valor) : "—"}</td>
                   </tr>`).join("")}
                 </tbody>
-              </table>
-            </div>
-          </div>
-        `).join("") : ""}
-        ${!this.parsing && !this.loading && this.companyId && this.files.length && !(this.groupBy === "matriz" ? this.matrixData().creditors.length : groups.length) ? `<div class="crm-card" style="padding:18px;color:#64748b;">Nenhuma linha do quadro <strong>DESPESAS PAGAS</strong> identificada neste filtro.</div>` : ""}
+              `).join("")}
+            </table>
+          </div>` : ""}
+        ${!this.parsing && !this.loading && this.companyId && this.files.length && !(this.groupBy === "matriz" ? this.matrixData().creditors.length : groups.length) ? `<div class="part-empty">Nenhuma linha do quadro <strong>DESPESAS PAGAS</strong> identificada neste filtro.</div>` : ""}
         ${this.detailModalHtml()}
       </div>
     `;

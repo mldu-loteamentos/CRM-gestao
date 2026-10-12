@@ -337,10 +337,10 @@ const CompromissarioApp = {
         : (cfg.email || 'Sem e-mail');
       return `
         <tr>
-          <td>${this.escHtml(city)}</td>
+          <td class="cc-nome"><strong>${this.escHtml(city)}</strong></td>
           <td><span class="comp-pref-pill ${ok ? 'is-ok' : 'is-warn'}">${this.escHtml(how)}</span></td>
-          <td>${this.escHtml(detail)}</td>
-          <td style="text-align:right;white-space:nowrap;">
+          <td class="${ok ? '' : 'comp-pref-sem'}" title="${this.escHtml(detail)}">${this.escHtml(detail)}</td>
+          <td class="is-right">
             <button type="button" class="tvig-ico" title="Visualizar" onclick="CompromissarioApp.openCityConfig('${this.escHtml(city)}','view')">
               <i data-lucide="eye" style="width:15px;height:15px;"></i>
             </button>
@@ -350,16 +350,18 @@ const CompromissarioApp = {
           </td>
         </tr>`;
     }).join('');
+    const okCount = cities.length - missing.length;
     host.innerHTML = `
-      <div class="search-filter-panel tvig-params">
-        <h3 class="tvig-section-title">Competência</h3>
-        <div class="tvig-filters">
-          <div class="tvig-filter-slot tvig-comp-slot">
-            <label class="tvig-comp-label" for="comp-pref-month">Mês de referência</label>
-            <input type="month" id="comp-pref-month" class="tvig-comp-input" value="${this.escHtml(month)}"
-              onchange="CompromissarioApp.onMonthChange()">
-          </div>
-          ${month ? `<div class="tvig-filter-actions"><button type="button" class="btn btn-primary" onclick="CompromissarioApp.setUiTab('cessoes')">Continuar para Cessões</button></div>` : ''}
+      <div class="cc-toolbar">
+        <div class="tvig-filter-slot tvig-comp-slot">
+          <label class="tvig-comp-label" for="comp-pref-month">Mês de referência</label>
+          <input type="month" id="comp-pref-month" class="tvig-comp-input" value="${this.escHtml(month)}"
+            onchange="CompromissarioApp.onMonthChange()">
+        </div>
+        <div class="cc-toolbar-actions">
+          ${cities.length ? `<span class="comp-pref-pill is-ok">${okCount} configurada(s)</span>` : ''}
+          ${missing.length ? `<span class="comp-pref-pill is-warn">${missing.length} sem configuração</span>` : ''}
+          ${month ? `<button type="button" class="btn btn-primary cc-atualizar" onclick="CompromissarioApp.setUiTab('cessoes')">Continuar para Cessões <i data-lucide="arrow-right" style="width:14px;height:14px;"></i></button>` : ''}
         </div>
       </div>
       ${missing.length ? `
@@ -367,16 +369,18 @@ const CompromissarioApp = {
           <strong>Cidades sem configuração:</strong> ${this.escHtml(missing.join(', '))}.
           Defina e-mail ou portal antes de notificar.
         </div>` : ''}
-      <h3 class="tvig-section-title">Cidades cadastradas</h3>
       ${cities.length ? `
-        <div class="crm-card" style="padding:0;overflow:hidden;">
-          <table class="custom-table tvig-list-table">
+        <div class="cc-scroll">
+          <table class="cc-table comp-pref-table">
+            <colgroup>
+              <col style="width:22%"><col style="width:150px"><col><col style="width:84px">
+            </colgroup>
             <thead>
               <tr>
                 <th>Cidade</th>
                 <th>Forma de notificar</th>
                 <th>Destino</th>
-                <th style="width:100px;text-align:right;">Ações</th>
+                <th class="is-right">Ações</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -440,38 +444,46 @@ const CompromissarioApp = {
       .sort((a, b) => String(b.notifiedAt || '').localeCompare(String(a.notifiedAt || '')));
     const body = rows.length ? rows.map((f) => {
       const done = f.status === 'concluido';
+      const unidade = f.unit || f.contractLabel || f.id;
       return `<tr>
         <td>${this.escHtml(this.formatCessaoDate((f.notifiedAt || '').slice(0, 10)) || '—')}</td>
-        <td>${this.escHtml(f.city || '—')}</td>
+        <td class="cc-nome"><strong>${this.escHtml(f.city || '—')}</strong></td>
         <td>${this.escHtml(f.type || '—')}</td>
-        <td>${this.escHtml(f.unit || f.contractLabel || f.id)}</td>
+        <td title="${this.escHtml(unidade)}">${this.escHtml(unidade)}</td>
         <td>${this.escHtml(f.channel === 'portal' ? 'Portal' : 'E-mail')}</td>
-        <td>
-          <input type="text" class="form-control" value="${this.escHtml(f.protocol || '')}"
-            placeholder="Nº protocolo" style="min-width:120px;padding:5px 8px;font-size:0.78rem;"
+        <td class="comp-fu-prot">
+          <input type="text" class="comp-fu-input" value="${this.escHtml(f.protocol || '')}" placeholder="Nº protocolo"
             onchange="CompromissarioApp.setMovementProtocol('${this.escHtml(f.id)}', this.value)">
         </td>
         <td><span class="comp-pref-pill ${done ? 'is-ok' : 'is-wait'}">${done ? 'Concluído' : 'Aguardando prefeitura'}</span></td>
-        <td style="text-align:right;">${done ? '' : `<button type="button" class="btn btn-primary" style="padding:6px 10px;font-size:0.78rem;" onclick="CompromissarioApp.markFollowupDone('${this.escHtml(f.id)}')">Concluído</button>`}</td>
+        <td class="is-right">${done ? '' : `<button type="button" class="tvig-ico" title="Marcar como concluído" onclick="CompromissarioApp.markFollowupDone('${this.escHtml(f.id)}')"><i data-lucide="circle-check" style="width:16px;height:16px;"></i></button>`}</td>
       </tr>`;
-    }).join('') : `<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:24px;">Nenhuma notificação neste mês.</td></tr>`;
+    }).join('') : `<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:24px;white-space:normal;">Nenhuma notificação neste mês.</td></tr>`;
+    const pendentes = rows.filter((f) => f.status !== 'concluido').length;
     host.innerHTML = `
-      <div class="comp-pref-card">
-        <h3>Follow-up das notificações</h3>
-        <p class="comp-pref-help">Quando a prefeitura confirmar, marque como concluído. Protocolo do portal fica registrado aqui.</p>
-        <div class="table-container" style="overflow:auto;">
-          <table class="custom-table" style="font-size:0.82rem;">
-            <thead>
-              <tr>
-                <th>Data</th><th>Cidade</th><th>Tipo</th><th>Unidade / contrato</th>
-                <th>Canal</th><th>Protocolo</th><th>Situação</th><th></th>
-              </tr>
-            </thead>
-            <tbody>${body}</tbody>
-          </table>
+      <div class="cc-toolbar comp-fu-toolbar">
+        <p class="comp-pref-help" style="margin:0;">Quando a prefeitura confirmar, marque como concluído. O protocolo do portal fica registrado aqui.</p>
+        <div class="cc-toolbar-actions">
+          ${rows.length ? `<span class="comp-pref-pill is-wait">${pendentes} aguardando</span><span class="comp-pref-pill is-ok">${rows.length - pendentes} concluída(s)</span>` : ''}
         </div>
       </div>
+      <div class="cc-scroll">
+        <table class="cc-table comp-fu-table">
+          <colgroup>
+            <col style="width:92px"><col style="width:15%"><col style="width:110px"><col>
+            <col style="width:80px"><col style="width:160px"><col style="width:150px"><col style="width:56px">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Data</th><th>Cidade</th><th>Tipo</th><th>Unidade / contrato</th>
+              <th>Canal</th><th>Protocolo</th><th>Situação</th><th class="is-right">Ações</th>
+            </tr>
+          </thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
     `;
+    if (window.lucide) window.lucide.createIcons();
   },
 
   ensureNotificarLoaded() {
@@ -1314,7 +1326,11 @@ const CompromissarioApp = {
       const tone = status === 'none' ? 'is-none' : (status === 'has' && hasFile ? 'is-has' : (status === 'has' ? 'is-wait' : 'is-pending'));
       const fileInput = `<input type="file" id="comp-cessao-file-${c.id}" accept=".xlsx,.xls,.csv,.txt,.pdf" ${uploadDisabled}
                 onchange="CompromissarioApp.onCessaoFile('${c.id}', event)">`;
-      let relHtml = fileInput;
+      let relHtml = `
+            <div class="comp-cessao-upload">
+              ${fileInput}
+              <span class="comp-cessao-nada">${status === 'none' ? '—' : 'Marque “Teve” para anexar'}</span>
+            </div>`;
       if (status === 'has' && hasFile) {
         relHtml = `
             <div class="comp-cessao-upload">
@@ -1323,7 +1339,9 @@ const CompromissarioApp = {
                 <i data-lucide="file-spreadsheet"></i>
                 <span>Excel</span>
               </button>
-              <button type="button" class="btn btn-cancel" style="padding:4px 10px;font-size:0.74rem;" onclick="CompromissarioApp.clearCessaoFile('${c.id}')">Remover</button>
+              <button type="button" class="tvig-ico is-danger" title="Remover relatório" onclick="CompromissarioApp.clearCessaoFile('${c.id}')">
+                <i data-lucide="trash-2" style="width:15px;height:15px;"></i>
+              </button>
             </div>`;
       } else if (status === 'has') {
         relHtml = `
@@ -1337,10 +1355,8 @@ const CompromissarioApp = {
       }
       return `
         <tr class="comp-cessao-row ${tone}">
-          <td class="comp-cessao-emp">
-            <span class="comp-cessao-emp-id">${c.id}</span>
-            <span class="comp-cessao-emp-name">${this.escHtml(c.name)}</span>
-          </td>
+          <td class="is-center"><strong>${c.id}</strong></td>
+          <td class="cc-nome comp-cessao-emp" title="${this.escHtml(c.name)}">${this.escHtml(c.name)}</td>
           <td class="comp-cessao-mes">
             <div class="comp-cessao-choice">
               <label><input type="radio" name="${radioName}" value="none" ${noneChecked} autocomplete="off"
@@ -1353,34 +1369,33 @@ const CompromissarioApp = {
         </tr>`;
     }).join('');
 
+    const [anoComp, mesComp] = String(month || '').split('-');
+    const compTxt = mesComp ? `${mesComp}/${anoComp}` : (monthLabel || '—');
     panel.innerHTML = `
-      <div class="search-filter-panel tvig-params">
-        <h3 class="tvig-section-title">Cessões · ${this.escHtml(month || monthLabel)}</h3>
-        <div class="comp-cessao-toolbar">
-          <div class="comp-cessao-stats">
-            ${pending ? `<span class="comp-pref-pill is-warn">${pending} empresa(s) sem declaração</span>` : `<span class="comp-pref-pill is-ok">Competência gravada</span>`}
-            ${totalMonth ? `<span class="comp-pref-pill is-ok">${totalMonth} cessão(ões) no mês${citySummary.length ? ' · ' + citySummary.map(([city, n]) => this.escHtml(city) + ' (' + n + ')').join(', ') : ''}</span>` : ''}
-          </div>
-          ${ready ? `<button type="button" class="btn btn-primary" onclick="CompromissarioApp.setUiTab('notificar')">Continuar para Notificar</button>` : ''}
+      <div class="cc-toolbar comp-cessao-toolbar">
+        <div class="comp-cessao-stats">
+          <span class="comp-pref-pill is-comp">Competência ${this.escHtml(compTxt)}</span>
+          ${pending ? `<span class="comp-pref-pill is-warn">${pending} empresa(s) sem declaração</span>` : `<span class="comp-pref-pill is-ok">Todas as empresas declaradas</span>`}
+          ${totalMonth ? `<span class="comp-pref-pill is-ok">${totalMonth} cessão(ões) no mês${citySummary.length ? ' · ' + citySummary.map(([city, n]) => this.escHtml(city) + ' (' + n + ')').join(', ') : ''}</span>` : ''}
         </div>
+        ${ready ? `<div class="cc-toolbar-actions"><button type="button" class="btn btn-primary cc-atualizar" onclick="CompromissarioApp.setUiTab('notificar')">Continuar para Notificar <i data-lucide="arrow-right" style="width:14px;height:14px;"></i></button></div>` : ''}
       </div>
-      <div class="crm-card" style="padding:0;overflow:hidden;" id="comp-cessao-list">
+      <div class="cc-scroll" id="comp-cessao-list">
         ${companies.length ? `
-          <table class="custom-table tvig-list-table comp-cessao-table">
+          <table class="cc-table comp-cessao-table">
             <colgroup>
-              <col class="comp-cessao-col-emp">
-              <col class="comp-cessao-col-mes">
-              <col class="comp-cessao-col-rel">
+              <col style="width:56px"><col><col style="width:190px"><col style="width:300px">
             </colgroup>
             <thead>
               <tr>
+                <th class="is-center">ID</th>
                 <th>Empresa</th>
                 <th>Neste mês</th>
                 <th>Relatório</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
-          </table>` : '<p style="color:#64748b;padding:16px;">Nenhuma empresa com carteira ativa.</p>'}
+          </table>` : '<p style="color:#64748b;padding:16px;margin:0;">Nenhuma empresa com carteira ativa.</p>'}
       </div>
     `;
     if (window.lucide) window.lucide.createIcons();

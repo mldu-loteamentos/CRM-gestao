@@ -2948,10 +2948,21 @@ const EstoqueComercialApp = {
       const cb = Number(inst.currentBalance != null ? inst.currentBalance : inst.balanceDue || 0);
       const due = String(inst.dueDate || inst.originalDueDate || "").slice(0, 10);
       if (cb <= 0.009 || !due || due > lim) return;
-      out.push({ due, val: cb, overdue: due < today });
+      out.push({ due, val: cb, overdue: due < today, ...this.parcelaIdent(inst) });
     });
     out.sort((a, b) => String(a.due).localeCompare(String(b.due)));
     return out.slice(0, 24);
+  },
+
+  /** Número e tipo da parcela no Sienge (PM 3, SN 1…), para o caixa mostrar qual parcela está provisionada. */
+  parcelaIdent(inst) {
+    const n = inst && (inst.installmentNumber != null ? inst.installmentNumber : (inst.installmentId != null ? inst.installmentId : inst.id));
+    const pt = inst && inst.paymentTerm;
+    const tipo = (pt && typeof pt === "object" ? (pt.id || pt.code) : pt) || (inst && (inst.conditionType || inst.paymentConditionType)) || "";
+    const out = {};
+    if (n != null && String(n).trim() !== "") out.num = String(n).trim();
+    if (tipo && typeof tipo !== "object") out.tipo = String(tipo).trim();
+    return out;
   },
 
   /** null = falhou no Sienge (o cliente continua pendente); [] = consultado e sem dados. */
@@ -3137,7 +3148,7 @@ const EstoqueComercialApp = {
             vencido += saldo;
             vencidoComAcrescimo += ps.reduce((t, p) => t + Math.max(Number(p.currentBalanceWithAddition) || 0, Number(p.currentBalance) || 0), 0);
           }
-          abertas.push({ due, val: saldo, overdue: atrasada });
+          abertas.push({ due, val: saldo, overdue: atrasada, ...this.parcelaIdent(ps[0]) });
         }
         ps.forEach((p) => (p.receipts || []).forEach((rc) => {
           if (/distrat|cancel|reparcel|repactu/i.test(String(rc && rc.type || ""))) return;

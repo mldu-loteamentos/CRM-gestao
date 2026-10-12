@@ -20,8 +20,10 @@ const PrestacaoContasApp = {
   accountIndex: {},
   unmatchedInfo: { total: 0, samples: [] },
   categories: [],
-  aba: "rateio",
+  aba: "receb",
   conferencias: null,
+  confFiltro: "",
+  confAberta: "",
 
   init() {
     if (this.month === 12 && new Date().getMonth() === 0) this.year = new Date().getFullYear() - 1;
@@ -32,7 +34,10 @@ const PrestacaoContasApp = {
     this.ensureDfcReady();
     this.ensureCategories();
     if (typeof ParametrizacaoParceiroApp !== "undefined" && (!ParametrizacaoParceiroApp.items || !ParametrizacaoParceiroApp.items.length)) {
-      ParametrizacaoParceiroApp.loadItems().then(() => this.render()).catch(() => {});
+      ParametrizacaoParceiroApp.loadItems().then(() => {
+        if (this.movements.length) this.conferencias = this.montarConferencia();
+        this.render();
+      }).catch(() => {});
     }
     this.render();
   },
@@ -187,8 +192,28 @@ const PrestacaoContasApp = {
   },
 
   setAba(id) {
-    this.aba = id === "dfc" ? "dfc" : "rateio";
+    this.aba = ["receb", "pag", "dfc"].includes(id) ? id : "receb";
+    this.confFiltro = "";
+    this.confAberta = "";
     this.render();
+  },
+
+  setConfFiltro(status) {
+    this.confFiltro = this.confFiltro === status ? "" : status;
+    this.confAberta = "";
+    this.render();
+  },
+
+  toggleConf(key) {
+    this.confAberta = this.confAberta === key ? "" : key;
+    this.render();
+  },
+
+  setCompetencia(v) {
+    const m = /^(\d{4})-(\d{2})$/.exec(String(v || ""));
+    if (!m) return;
+    this.year = Number(m[1]);
+    this.month = Number(m[2]);
   },
 
   esc(s) {
@@ -238,11 +263,76 @@ const PrestacaoContasApp = {
     return Object.keys(map).length ? map : null;
   },
 
+  /** O extrato do Sienge pode trazer o valor sempre positivo, com crédito/débito no tipo da operação. */
+  sinalMov(m) {
+    const raw = Number(m.bankMovementAmount) || 0;
+    if (raw < 0) return -1;
+    const norm = (v) => (v == null || typeof v === "object") ? "" : String(v).trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const tipo = norm(m.bankMovementOperationType || m.operationType);
+    if (/^(S|D)$/.test(tipo) || /DEBIT|SAIDA/.test(tipo)) return -1;
+    if (/^(E|C)$/.test(tipo) || /CREDIT|ENTRADA/.test(tipo)) return 1;
+    const op = norm(m.bankMovementOperationName);
+    if (/PAGAMENTO|PAGTO|DEBITO|TARIFA|SAIDA/.test(op)) return -1;
+    if (/RECEBIMENTO|CREDITO|ENTRADA/.test(op)) return 1;
+    if (norm(m.creditorName) && !norm(m.clientName)) return -1;
+    return 1;
+  },
+
+  /** Contas 1.xxx são recebimento e 2.xxx pagamento, como no Rateio DFC das Configurações. */
+  naturezaConta(conta, sinal) {
+    const d = String(conta || "").replace(/\D/g, "").charAt(0);
+    if (d === "1") return "receita";
+    if (d === "2") return "despesa";
+    return sinal < 0 ? "despesa" : "receita";
+  },
+
+  /** Parceria das Configurações que tem este centro de custo (a selecionada vale primeiro). */
+  parceriaDoCc(cc, cache) {
+    const PP = typeof ParametrizacaoParceiroApp !== "undefined" ? ParametrizacaoParceiroApp : null;
+    if (!PP || typeof PP.obraForCostCenter !== "function") return null;
+    const id = String(cc);
+    if (cache && Object.prototype.hasOwnProperty.call(cache, id)) return cache[id];
+    let hit = null;
+    const ativa = this.activePartnership();
+    if (ativa) {
+      const obra = PP.obraForCostCenter(ativa, id);
+      if (obra) hit = { part: ativa, obra };
+    }
+    if (!hit) {
+      for (const raw of (PP.items || [])) {
+        const part = PP.normalizeItem(raw);
+        const obra = part && PP.obraForCostCenter(part, id);
+        if (obra) { hit = { part, obra }; break; }
+      }
+    }
+    if (cache) cache[id] = hit;
+    return hit;
+  },
+
+  /** A conta do plano financeiro está amarrada nas Configurações? Sem amarração não há rateio a conferir. */
+  contaAmarrada(conta, cc, ctx) {
+    const PP = typeof ParametrizacaoParceiroApp !== "undefined" ? ParametrizacaoParceiroApp : null;
+    if (!PP) return { ok: true, motivo: "" };
+    if (ctx.temVisao && !PP.accountParentIdLoose(conta)) {
+      return { ok: false, motivo: "Conta fora da visão DFC" };
+    }
+    const hit = this.parceriaDoCc(cc, ctx.cache);
+    if (hit && !PP.accountEntersPartnership(hit.part, hit.obra, conta)) {
+      return { ok: false, motivo: `Conta fora da parceria ${hit.part.partnerName || ""}`.trim() };
+    }
+    return { ok: true, motivo: "" };
+  },
+
   montarConferencia() {
     const vazio = { receitas: [], despesas: [] };
     const wanted = new Set((this.costCenterIds || []).map(String));
     if (!wanted.size) return vazio;
     const fcApp = this.fc();
+    const PP = typeof ParametrizacaoParceiroApp !== "undefined" ? ParametrizacaoParceiroApp : null;
+    const temVisao = !!(PP && typeof PP.accountParentIdLoose === "function" && typeof PP.dfcGroups === "function"
+      && (PP.dfcGroups() || []).some(g => (g.accounts || []).length));
+    const ctx = { temVisao, cache: {} };
+    const txt = (v) => (v == null || typeof v === "object") ? "" : String(v).trim();
     const receitas = [];
     const despesas = [];
     (this.movements || []).forEach((mov, idx) => {
@@ -253,57 +343,86 @@ const PrestacaoContasApp = {
       const entries = (fcApp && typeof fcApp.categoryShareEntries === "function")
         ? fcApp.categoryShareEntries(cats)
         : cats.map(fc => ({ fc, share: 1 / cats.length }));
-      const nat = amount > 0 ? "receita" : "despesa";
+      const sinal = this.sinalMov(mov);
       const grupos = {};
       entries.forEach(({ fc, share }) => {
         if (!fc || fc.costCenterId == null || String(fc.costCenterId) === "") return;
         const cc = String(fc.costCenterId);
         const obra = this.obraDe(cc);
         if (!obra) return;
-        if (!grupos[obra]) grupos[obra] = { obra, nat, porCc: {} };
-        if (!grupos[obra].porCc[cc]) grupos[obra].porCc[cc] = 0;
-        grupos[obra].porCc[cc] += Math.abs(amount) * (Number(share) || 0);
+        const conta = String(fc.financialCategoryId || "").trim();
+        const nat = this.naturezaConta(conta, sinal);
+        const k = obra + "|" + nat;
+        const g = grupos[k] || (grupos[k] = { obra, nat, porCc: {}, contas: [], foraTotal: 0 });
+        const valor = Math.abs(amount) * (Number(share) || 0);
+        const amarra = this.contaAmarrada(conta, cc, ctx);
+        g.contas.push({
+          codigo: conta ? this.formatAccountCode(conta) : "—",
+          nome: fc.financialCategoryName || this.catName(conta) || "Sem nome",
+          cc,
+          ccNome: fc.costCenterName || this.ccNome(cc),
+          valor,
+          amarrada: amarra.ok,
+          motivo: amarra.motivo
+        });
+        if (amarra.ok) g.porCc[cc] = (g.porCc[cc] || 0) + valor;
+        else g.foraTotal += valor;
       });
       Object.values(grupos).forEach(g => {
+        if (!g.contas.some(c => wanted.has(c.cc))) return;
         const idsMov = Object.keys(g.porCc);
-        if (!idsMov.some(id => wanted.has(id))) return;
         const total = idsMov.reduce((s, id) => s + g.porCc[id], 0);
-        if (!(total > 0.004)) return;
-        const padrao = this.padraoObra(g.obra);
-        const todos = [...new Set(idsMov.concat(padrao ? Object.keys(padrao) : []))];
-        const linhas = todos.map(id => {
-          const valor = g.porCc[id] || 0;
-          return {
-            id,
-            nome: this.ccNome(id),
-            valor,
-            atual: total > 0 ? valor * 100 / total : 0,
-            esperado: padrao && padrao[id] != null ? padrao[id] : null
-          };
-        }).sort((a, b) => Number(a.id) - Number(b.id));
-        let status = "sem";
-        if (padrao) {
-          const ok = linhas.every(l => {
-            const esp = l.esperado == null ? 0 : l.esperado;
-            return Math.abs(l.atual - esp) < 0.06 || Math.abs(l.valor - total * esp / 100) < 0.02;
-          });
-          status = ok ? "ok" : "fora";
+        const totalGeral = total + g.foraTotal;
+        if (!(totalGeral > 0.004)) return;
+        let linhas = [];
+        let status = "na";
+        if (total > 0.004) {
+          const padrao = this.padraoObra(g.obra);
+          const todos = [...new Set(idsMov.concat(padrao ? Object.keys(padrao) : []))];
+          linhas = todos.map(id => {
+            const valor = g.porCc[id] || 0;
+            return {
+              id,
+              nome: this.ccNome(id),
+              valor,
+              atual: total > 0 ? valor * 100 / total : 0,
+              esperado: padrao && padrao[id] != null ? padrao[id] : null
+            };
+          }).sort((a, b) => Number(a.id) - Number(b.id));
+          status = "sem";
+          if (padrao) {
+            const ok = linhas.every(l => {
+              const esp = l.esperado == null ? 0 : l.esperado;
+              return Math.abs(l.atual - esp) < 0.06 || Math.abs(l.valor - total * esp / 100) < 0.02;
+            });
+            status = ok ? "ok" : "fora";
+          }
         }
+        const motivos = [...new Set(g.contas.filter(c => !c.amarrada).map(c => c.motivo))];
         const row = {
+          key: idx + "|" + g.obra + "|" + g.nat,
           data: String(mov.bankMovementDate || mov.paymentDate || "").slice(0, 10),
-          historico: mov.bankMovementHistoricName || mov.documentIdentificationName || "—",
-          pessoa: mov.clientName || mov.creditorName || "",
+          historico: txt(mov.bankMovementHistoricName) || txt(mov.documentIdentificationName) || "—",
+          pessoa: txt(mov.clientName) || txt(mov.creditorName),
+          titulo: txt(mov.billId || mov.billPayableId || mov.billReceivableId || mov.payableBillId || mov.receivableBillId || mov.titleId),
+          parcela: txt(mov.installmentId || mov.installmentNumber || mov.installment),
+          documento: [txt(mov.documentIdentificationId || mov.documentId), txt(mov.documentIdentificationNumber || mov.documentNumber)].filter(Boolean).join(" "),
+          contaBanco: txt(mov.accountNumber),
           obra: g.obra,
-          total,
+          total: totalGeral,
+          totalRateio: total,
+          foraTotal: g.foraTotal,
           linhas,
+          contas: g.contas,
+          motivo: motivos.join(" · "),
           status
         };
         (g.nat === "despesa" ? despesas : receitas).push(row);
       });
     });
     const ord = (a, b) => {
-      const rank = { fora: 0, sem: 1, ok: 2 };
-      const d = (rank[a.status] || 9) - (rank[b.status] || 9);
+      const rank = { fora: 0, sem: 1, ok: 2, na: 3 };
+      const d = (rank[a.status] == null ? 9 : rank[a.status]) - (rank[b.status] == null ? 9 : rank[b.status]);
       if (d) return d;
       return String(b.data).localeCompare(String(a.data));
     };
@@ -615,162 +734,142 @@ const PrestacaoContasApp = {
   render() {
     const root = document.getElementById("prestacao-contas-root");
     if (!root) return;
-    const { start, end, label } = this.periodBounds();
+    const prevScroll = document.getElementById("pc-conf-scroll");
+    const prevTop = prevScroll ? prevScroll.scrollTop : 0;
     const companies = (window.AppState && AppState.companies) || [];
-    const ccs = this.costCenters();
     const partnerships = (typeof ParametrizacaoParceiroApp !== "undefined" && ParametrizacaoParceiroApp.items) || [];
-    const monthLabel = label.charAt(0).toUpperCase() + label.slice(1);
-    const ccNames = this.costCenterIds.map(id => {
-      const cc = ccs.find(c => String(c.id) === String(id));
-      return cc ? `${id} - ${cc.name}` : id;
-    });
-    const visao = this.visao();
-    const unmatched = this.unmatchedInfo || { total: 0, samples: [] };
-    const hasUnmatched = Math.abs(Number(unmatched.total) || 0) > 0.005;
-    const part = this.activePartnership();
     const conf = this.conferencias || { receitas: [], despesas: [] };
-    const nFora = (conf.receitas || []).filter(r => r.status === "fora").length + (conf.despesas || []).filter(r => r.status === "fora").length;
+    const nFora = (rows) => (rows || []).filter(r => r.status === "fora").length;
+    const pad = n => String(n).padStart(2, "0");
+    const aba = this.aba;
+    const tab = (id, icon, txt, count) => `<button type="button" role="tab" aria-selected="${aba === id}" class="ml-tab${aba === id ? " is-active" : ""}" onclick="PrestacaoContasApp.setAba('${id}')"><i data-lucide="${icon}"></i> ${txt}${count ? ` <span class="ml-tab-count">${count}</span>` : ""}</button>`;
+    const ccs = this.costCenters();
 
     root.innerHTML = `
-      <div class="crm-card" style="padding: 1.2rem 1.4rem;">
-        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
-          <div>
-            <h2 style="margin:0;color:var(--color-primary);font-size:1.15rem;display:flex;align-items:center;gap:8px;">
-              <i data-lucide="receipt" style="width:20px;"></i> Prestação de Contas
-            </h2>
-            <p style="margin:6px 0 0;color:#64748b;font-size:0.82rem;">
-              Visão <strong>${visao.name || "DFC Padrão"}</strong> (cadastro de visões) · Realizado · caixa/banco Sienge
-              ${part ? ` · parceiro <strong>${part.partnerName || ""}</strong> (entra / não entra + %)` : ""}
-            </p>
-          </div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <button type="button" class="btn btn-outline" onclick="switchTab('plano-financeiro','Plano Financeiro e Visões')"
-              style="height:38px;display:inline-flex;align-items:center;gap:6px;font-size:0.8rem;">
-              <i data-lucide="settings-2" style="width:14px;"></i> Visões DFC
-            </button>
-            <button class="btn btn-primary" onclick="PrestacaoContasApp.load()" ${this.loading ? "disabled" : ""}
-              style="display:inline-flex;align-items:center;gap:8px;height:38px;">
-              ${this.loading
-                ? '<span style="width:14px;height:14px;border:2px solid rgba(255,255,255,0.35);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;display:inline-block;"></span> Consultando Sienge...'
-                : '<i data-lucide="refresh-cw" style="width:14px;"></i> Carregar DFC'}
-            </button>
-          </div>
-        </div>
-
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:16px;">
-          <label style="display:flex;flex-direction:column;gap:4px;font-size:0.75rem;font-weight:700;color:#475569;">
-            Mês
-            <select id="pc-month" onchange="PrestacaoContasApp.month=Number(this.value)"
-              style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;">
-              ${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}" ${this.month === i + 1 ? "selected" : ""}>${String(i + 1).padStart(2, "0")}</option>`).join("")}
+      <div class="pcx-page">
+        <div class="cc-toolbar pcx-toolbar">
+          ${partnerships.length ? `<label class="pcx-field pcx-field-parc">
+            <span class="ml-emp-filter-label">Parceria</span>
+            <select class="pcx-input" onchange="PrestacaoContasApp.applyPartnership(this.value)">
+              <option value="">Todas (opcional)</option>
+              ${partnerships.map(p => {
+                const obras = (p.obras && p.obras.map(o => o.code).filter(Boolean).join(", ")) || p.obraCode || "";
+                return `<option value="${this.esc(p.id)}" ${this.partnershipId === p.id ? "selected" : ""}>${this.esc(p.partnerName)}${obras ? " · obras " + this.esc(obras) : ""}</option>`;
+              }).join("")}
+            </select>
+          </label>` : ""}
+          <label class="pcx-field pcx-field-emp">
+            <span class="ml-emp-filter-label">Empresa</span>
+            <select class="pcx-input" onchange="PrestacaoContasApp.companyId=this.value;PrestacaoContasApp.render()">
+              ${companies.map(c => `<option value="${this.esc(c.id)}" ${String(c.id) === String(this.companyId) ? "selected" : ""}>${this.esc(c.id)} - ${this.esc(c.name)}</option>`).join("") || '<option value="1">1</option>'}
             </select>
           </label>
-          <label style="display:flex;flex-direction:column;gap:4px;font-size:0.75rem;font-weight:700;color:#475569;">
-            Ano
-            <input type="number" value="${this.year}" onchange="PrestacaoContasApp.year=Number(this.value)"
-              style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;">
-          </label>
-          <label style="display:flex;flex-direction:column;gap:4px;font-size:0.75rem;font-weight:700;color:#475569;grid-column:span 2;">
-            Empresa
-            <select onchange="PrestacaoContasApp.companyId=this.value;PrestacaoContasApp.render()"
-              style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;">
-              ${companies.map(c => `<option value="${c.id}" ${String(c.id) === String(this.companyId) ? "selected" : ""}>${c.id} — ${c.name}</option>`).join("") || '<option value="1">1</option>'}
-            </select>
-          </label>
-          <label style="display:flex;flex-direction:column;gap:4px;font-size:0.75rem;font-weight:700;color:#475569;grid-column:span 2;">
-            Seleção por data
-            <select onchange="PrestacaoContasApp.selectionType=this.value"
-              style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;">
+          <div class="tvig-filter-slot tvig-comp-slot">
+            <label class="tvig-comp-label" for="pc-comp">Mês de referência</label>
+            <input type="month" id="pc-comp" class="tvig-comp-input" value="${this.year}-${pad(this.month)}" onchange="PrestacaoContasApp.setCompetencia(this.value)">
+          </div>
+          <label class="pcx-field">
+            <span class="ml-emp-filter-label">Seleção por data</span>
+            <select class="pcx-input" onchange="PrestacaoContasApp.selectionType=this.value">
               <option value="M" ${this.selectionType === "M" ? "selected" : ""}>Movimento (caixa/banco)</option>
               <option value="P" ${this.selectionType === "P" ? "selected" : ""}>Pagamento / vencimento</option>
             </select>
           </label>
+          <div class="cc-toolbar-actions">
+            <button type="button" class="btn btn-outline cc-atualizar" onclick="switchTab('plano-financeiro','Plano Financeiro e Visões')" title="Cadastro de visões DFC">
+              <i data-lucide="settings-2"></i> Visões DFC
+            </button>
+            <button type="button" class="btn btn-primary cc-atualizar" onclick="PrestacaoContasApp.load()" ${this.loading ? "disabled" : ""}>
+              ${this.loading
+                ? '<span class="pcx-spin"></span> Consultando Sienge...'
+                : '<i data-lucide="refresh-cw"></i> Carregar'}
+            </button>
+          </div>
         </div>
 
-        <div style="margin-top:12px;">
-          ${partnerships.length ? `<label style="display:flex;flex-direction:column;gap:4px;font-size:0.75rem;font-weight:700;color:#475569;max-width:480px;margin-bottom:10px;">Parceria
-            <select onchange="PrestacaoContasApp.applyPartnership(this.value)" style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;">
-              <option value="">Selecionar parceria (opcional)</option>
-              ${partnerships.map(p => {
-                const obras = (p.obras && p.obras.map(o => o.code).filter(Boolean).join(", ")) || p.obraCode || "";
-                return `<option value="${p.id}" ${this.partnershipId === p.id ? "selected" : ""}>${p.partnerName}${obras ? " · obras " + obras : ""}</option>`;
-              }).join("")}
-            </select>
-          </label>` : ""}
-          <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:6px;">Obra / centros de custo</div>
-          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">
-            ${this.costCenterIds.map(id => `
-              <span style="display:inline-flex;align-items:center;gap:6px;background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;padding:4px 8px;border-radius:999px;font-size:0.78rem;font-weight:700;">
-                ${id}
-                <button onclick="PrestacaoContasApp.removeCostCenter('${id}')" style="border:none;background:transparent;cursor:pointer;color:#065f46;font-size:1rem;line-height:1;">×</button>
-              </span>`).join("") || '<span style="color:#94a3b8;font-size:0.8rem;">Nenhum centro selecionado</span>'}
+        <div class="pcx-ccs">
+          <span class="ml-emp-filter-label">Centros de custo</span>
+          <div class="pcx-cc-box">
+            ${this.costCenterIds.map(id => {
+              const cc = ccs.find(c => String(c.id) === String(id));
+              return `<span class="pcx-chip" title="${this.esc(cc ? cc.name : "")}">${this.esc(id)}
+                <button type="button" onclick="PrestacaoContasApp.removeCostCenter('${this.esc(id)}')" aria-label="Remover">×</button>
+              </span>`;
+            }).join("") || '<span class="pcx-mute">Nenhum centro selecionado</span>'}
+            <span class="pcx-cc-search">
+              <i data-lucide="search"></i>
+              <input type="text" placeholder="Adicionar centro de custo..." value="${this.esc(this.ccSearch || "")}" oninput="PrestacaoContasApp.onCcSearch(this.value)">
+            </span>
           </div>
-          <input type="text" placeholder="Buscar e adicionar centro de custo..." value="${this.ccSearch || ""}"
-            oninput="PrestacaoContasApp.onCcSearch(this.value)"
-            style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;width:100%;max-width:480px;font-size:0.85rem;">
           <div id="pc-cc-sugg">${this.ccSuggestionsHtml()}</div>
         </div>
 
-        <div class="ml-tabs" role="tablist" style="margin-top:16px;">
-          <button type="button" role="tab" aria-selected="${this.aba !== "dfc"}" class="ml-tab${this.aba !== "dfc" ? " is-active" : ""}" onclick="PrestacaoContasApp.setAba('rateio')"><i data-lucide="list-checks"></i> Conferência do rateio${nFora ? ` <span class="ml-tab-count">${nFora}</span>` : ""}</button>
-          <button type="button" role="tab" aria-selected="${this.aba === "dfc"}" class="ml-tab${this.aba === "dfc" ? " is-active" : ""}" onclick="PrestacaoContasApp.setAba('dfc')"><i data-lucide="line-chart"></i> DFC</button>
+        ${this.error ? `<div class="pcx-alert is-error">${this.esc(this.error)}</div>` : ""}
+
+        <div class="ml-tabs pcx-tabs" role="tablist">
+          ${tab("receb", "arrow-down-circle", "Recebimentos", nFora(conf.receitas))}
+          ${tab("pag", "arrow-up-circle", "Pagamentos", nFora(conf.despesas))}
+          ${tab("dfc", "line-chart", "DFC")}
         </div>
 
-        ${this.aba === "dfc" ? "" : this.conferirHtml()}
-
-        ${this.error ? `<div style="margin-top:12px;padding:10px 12px;border-radius:8px;background:#fef2f2;color:#991b1b;font-size:0.82rem;border:1px solid #fecaca;">${this.error}</div>` : ""}
-        ${this.aba === "dfc" && hasUnmatched ? `<div style="margin-top:12px;padding:10px 12px;border-radius:8px;background:#fffbeb;color:#92400e;font-size:0.82rem;border:1px solid #fde68a;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
-          <span><strong>${this.fmt(unmatched.total)}</strong> em contas ainda não alocadas na visão DFC Padrão.</span>
-          <button type="button" class="btn btn-outline" style="height:32px;font-size:0.75rem;" onclick="switchTab('plano-financeiro','Plano Financeiro e Visões')">Alocar no Apoio</button>
-        </div>` : ""}
-
-        ${this.aba === "dfc" ? `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px;">
-          ${this.kpi("Receitas", this.totals.receitas, "#16a34a")}
-          ${this.kpi("Custos e despesas", this.totals.custosDespesas, "#dc2626")}
-          ${this.kpi("GCO / Variação de caixa", this.totals.gco, "#0f172a")}
-          ${this.kpi("Movimentos", this.movements.length, "#0369a1", true)}
-        </div>
-
-        <div class="crm-card" style="margin-top:12px;padding:0;overflow:hidden;">
-          <div style="padding:12px 16px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-            <div>
-              <div style="font-weight:800;color:#0f172a;">Demonstrativo — ${visao.name || "DFC Padrão"}</div>
-              <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">
-                Agrupado por obra · ${ccNames.join(" | ") || "—"} · ${start.split("-").reverse().join("/")} a ${end.split("-").reverse().join("/")}
-              </div>
-            </div>
-            <div style="font-size:0.75rem;color:#64748b;text-transform:capitalize;">${monthLabel}</div>
-          </div>
-          <div class="table-container" style="max-height:calc(100vh - 280px);overflow:auto;box-shadow:none;">
-            <table class="custom-table" style="font-size:0.82rem;">
-              <thead>
-                <tr>
-                  <th style="width:140px;">Código</th>
-                  <th>Conta</th>
-                  <th style="text-align:right;">${monthLabel}</th>
-                  <th style="text-align:right;">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${this.lines.length ? this.lines.map(row => this.renderRow(row)).join("") : `
-                  <tr><td colspan="4" style="text-align:center;padding:28px;color:#94a3b8;">
-                    ${this.loading ? "Carregando movimentos de caixa..." : "Clique em Carregar DFC para consultar o Sienge."}
-                  </td></tr>`}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        ${this.selectedAccount ? this.renderAccountDetail() : ""}` : ""}
+        ${aba === "dfc" ? this.dfcHtml() : this.conferirHtml(aba === "pag" ? "despesas" : "receitas")}
       </div>
     `;
     if (window.lucide) lucide.createIcons();
+    const novoScroll = document.getElementById("pc-conf-scroll");
+    if (novoScroll && prevTop) novoScroll.scrollTop = prevTop;
   },
 
-  seloRateio(status) {
-    if (status === "ok") return `<span style="display:inline-block;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;border-radius:999px;padding:2px 8px;font-size:0.72rem;font-weight:800;">Conferido</span>`;
-    if (status === "fora") return `<span style="display:inline-block;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;border-radius:999px;padding:2px 8px;font-size:0.72rem;font-weight:800;">Fora do padrão</span>`;
-    return `<span style="display:inline-block;background:#fffbeb;color:#92400e;border:1px solid #fde68a;border-radius:999px;padding:2px 8px;font-size:0.72rem;font-weight:800;">Sem padrão no centro</span>`;
+  dfcHtml() {
+    const { start, end, label } = this.periodBounds();
+    const monthLabel = label.charAt(0).toUpperCase() + label.slice(1);
+    const visao = this.visao();
+    const unmatched = this.unmatchedInfo || { total: 0, samples: [] };
+    const hasUnmatched = Math.abs(Number(unmatched.total) || 0) > 0.005;
+    const part = this.activePartnership();
+    return `
+      <div class="pcx-resumo">
+        <div class="pcx-ajuda" style="margin:0;">
+          Visão <strong>${this.esc(visao.name || "DFC Padrão")}</strong> · realizado no caixa/banco Sienge
+          ${part ? ` · parceiro <strong>${this.esc(part.partnerName || "")}</strong>` : ""}
+          · ${start.split("-").reverse().join("/")} a ${end.split("-").reverse().join("/")}
+        </div>
+      </div>
+      ${hasUnmatched ? `<div class="pcx-alert is-warn">
+        <span><strong>${this.fmt(unmatched.total)}</strong> em contas ainda não alocadas na visão DFC Padrão.</span>
+        <button type="button" class="btn btn-outline" style="height:30px;font-size:0.75rem;" onclick="switchTab('plano-financeiro','Plano Financeiro e Visões')">Alocar no Apoio</button>
+      </div>` : ""}
+      <div class="pcx-kpis">
+        ${this.kpi("Receitas", this.totals.receitas, "#16a34a")}
+        ${this.kpi("Custos e despesas", this.totals.custosDespesas, "#dc2626")}
+        ${this.kpi("GCO / Variação de caixa", this.totals.gco, "#0f172a")}
+        ${this.kpi("Movimentos", this.movements.length, "#0369a1", true)}
+      </div>
+      <div class="cc-scroll pcx-scroll">
+        <table class="custom-table pcx-dfc-table">
+          <thead>
+            <tr>
+              <th style="width:140px;">Código</th>
+              <th>Conta</th>
+              <th style="text-align:right;">${monthLabel}</th>
+              <th style="text-align:right;">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${this.lines.length ? this.lines.map(row => this.renderRow(row)).join("") : `
+              <tr><td colspan="4" class="pcx-vazio">
+                ${this.loading ? "Carregando movimentos de caixa..." : "Clique em Carregar para consultar o Sienge."}
+              </td></tr>`}
+          </tbody>
+        </table>
+      </div>
+      ${this.selectedAccount ? this.renderAccountDetail() : ""}`;
+  },
+
+  seloRateio(status, motivo) {
+    const txt = { ok: "Conferido", fora: "Fora do padrão", sem: "Sem % no centro", na: "Sem rateio" }[status] || "—";
+    const tip = status === "na" ? (motivo || "Conta do plano financeiro sem amarração nas Configurações") : "";
+    return `<span class="pcx-selo is-${status}"${tip ? ` title="${this.esc(tip)}"` : ""}>${txt}</span>`;
   },
 
   textoCentros(linhas, campo) {
@@ -784,59 +883,136 @@ const PrestacaoContasApp = {
     return p.length === 3 && p[0].length === 4 ? `${p[2]}/${p[1]}/${p[0]}` : "—";
   },
 
-  conferirHtml() {
+  conferirHtml(lado) {
     const conf = this.conferencias || { receitas: [], despesas: [] };
-    const bloco = (titulo, rows, cor) => {
-      const ok = rows.filter(r => r.status === "ok").length;
-      const fora = rows.filter(r => r.status === "fora").length;
-      const sem = rows.filter(r => r.status === "sem").length;
-      const total = rows.reduce((s, r) => s + r.total, 0);
-      const corpo = rows.length ? rows.map(r => {
-        const bg = r.status === "fora" ? "#fef2f2" : (r.status === "sem" ? "#fffbeb" : "#fff");
-        return `<tr style="background:${bg};">
-          <td style="white-space:nowrap;">${this.dataBr(r.data)}</td>
-          <td>${this.esc(r.historico)}${r.pessoa ? `<div style="font-size:0.72rem;color:#64748b;">${this.esc(r.pessoa)}</div>` : ""}</td>
-          <td style="font-weight:800;color:#105436;">${this.esc(r.obra)}</td>
-          <td style="font-variant-numeric:tabular-nums;">${this.textoCentros(r.linhas, "atual")}</td>
-          <td style="font-variant-numeric:tabular-nums;">${this.textoCentros(r.linhas, "esperado")}</td>
-          <td style="text-align:right;font-weight:800;font-variant-numeric:tabular-nums;color:${cor};">${this.fmt(r.total)}</td>
-          <td>${this.seloRateio(r.status)}</td>
-        </tr>`;
-      }).join("") : `<tr><td colspan="7" style="text-align:center;padding:22px;color:#94a3b8;">${this.loading ? "Carregando movimentos de caixa..." : (this.movements.length ? "Nenhum lançamento neste grupo." : "Clique em Carregar DFC para conferir o rateio.")}</td></tr>`;
-      return `
-        <div class="crm-card" style="margin-top:12px;padding:0;overflow:hidden;">
-          <div style="padding:12px 16px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center;">
-            <div>
-              <div style="font-weight:800;color:#0f172a;">${titulo}</div>
-              <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">${ok} conferidos · ${fora} fora do padrão · ${sem} sem percentual no centro</div>
-            </div>
-            <div style="font-weight:800;color:${cor};font-variant-numeric:tabular-nums;">${this.fmt(total)}</div>
-          </div>
-          <div class="table-container" style="max-height:420px;overflow:auto;box-shadow:none;">
-            <table class="custom-table" style="font-size:0.8rem;">
-              <thead>
-                <tr>
-                  <th>Data</th>
-                  <th>Histórico</th>
-                  <th>Obra</th>
-                  <th>Lançado nos centros</th>
-                  <th>Padrão do centro</th>
-                  <th style="text-align:right;">Valor</th>
-                  <th>Situação</th>
-                </tr>
-              </thead>
-              <tbody>${corpo}</tbody>
-            </table>
-          </div>
-        </div>`;
+    const todas = conf[lado] || [];
+    const ehRec = lado === "receitas";
+    const cor = ehRec ? "#15803d" : "#b91c1c";
+    const filtro = this.confFiltro;
+    const rows = filtro ? todas.filter(r => r.status === filtro) : todas;
+    const total = rows.reduce((s, r) => s + r.total, 0);
+    const pill = (st, txt) => {
+      const n = todas.filter(r => r.status === st).length;
+      return `<button type="button" class="pcx-pill is-${st}${filtro === st ? " is-on" : ""}" onclick="PrestacaoContasApp.setConfFiltro('${st}')" ${n || filtro === st ? "" : "disabled"}>${n} ${txt}</button>`;
     };
+    const vazio = this.loading ? "Carregando movimentos de caixa..."
+      : (!this.movements.length ? "Clique em Carregar para consultar o Sienge."
+        : (filtro ? "Nenhum lançamento nesta situação."
+          : (ehRec ? "Nenhum recebimento nos centros selecionados." : "Nenhum pagamento nos centros selecionados.")));
+    const corpo = rows.length
+      ? rows.map(r => this.confLinhaHtml(r, cor)).join("")
+      : `<tr><td colspan="8" class="pcx-vazio">${vazio}</td></tr>`;
     return `
-      <p style="margin:14px 0 0;color:#64748b;font-size:0.82rem;line-height:1.45;">
-        Confere se cada valor recebido e cada despesa nos centros de custo segue o percentual cadastrado no centro (Moura Leite e terrenista).
+      <div class="pcx-resumo">
+        <div class="pcx-pills">
+          ${pill("fora", "fora do padrão")}
+          ${pill("sem", "sem % no centro")}
+          ${pill("ok", "conferidos")}
+          ${pill("na", "sem rateio")}
+        </div>
+        <div class="pcx-total">${rows.length} lançamento(s) · <strong style="color:${cor};">${this.fmt(total)}</strong></div>
+      </div>
+      <p class="pcx-ajuda">
+        Confere se cada ${ehRec ? "recebimento" : "pagamento"} foi lançado nos centros com o percentual cadastrado (Moura Leite e terrenista).
+        Contas do plano financeiro sem amarração nas Configurações ficam como <strong>Sem rateio</strong>. Clique na linha para ver título, parcela e contas.
       </p>
-      ${bloco("Valores recebidos", conf.receitas || [], "#16a34a")}
-      ${bloco("Despesas", conf.despesas || [], "#dc2626")}
-    `;
+      <div class="cc-scroll pcx-scroll" id="pc-conf-scroll">
+        <table class="cc-table pcx-table">
+          <colgroup>
+            <col style="width:84px"><col style="width:118px"><col><col style="width:60px">
+            <col style="width:18%"><col style="width:18%"><col style="width:112px"><col style="width:132px">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th>Título / parcela</th>
+              <th>Histórico</th>
+              <th class="is-center">Obra</th>
+              <th>Lançado nos centros</th>
+              <th>Padrão do centro</th>
+              <th class="is-right">Valor</th>
+              <th>Situação</th>
+            </tr>
+          </thead>
+          <tbody>${corpo}</tbody>
+        </table>
+      </div>`;
+  },
+
+  confLinhaHtml(r, cor) {
+    const aberta = this.confAberta === r.key;
+    const tit = r.titulo ? `${r.titulo}${r.parcela ? " / " + r.parcela : ""}` : "—";
+    const semRateio = r.status === "na";
+    const lancado = semRateio ? "—" : this.textoCentros(r.linhas, "atual");
+    const padrao = semRateio ? "—" : this.textoCentros(r.linhas, "esperado");
+    let html = `<tr class="pcx-row is-${r.status}${aberta ? " is-open" : ""}" onclick="PrestacaoContasApp.toggleConf('${this.esc(r.key)}')">
+      <td>${this.dataBr(r.data)}</td>
+      <td class="pcx-tit"><i data-lucide="${aberta ? "chevron-down" : "chevron-right"}" class="pcx-chev"></i>${this.esc(tit)}</td>
+      <td class="cc-nome">${this.esc(r.historico)}${r.pessoa ? `<div class="pcx-pessoa">${this.esc(r.pessoa)}</div>` : ""}</td>
+      <td class="is-center pcx-obra">${this.esc(r.obra)}</td>
+      <td title="${this.esc(lancado)}">${lancado}</td>
+      <td title="${this.esc(padrao)}">${padrao}</td>
+      <td class="is-right pcx-valor" style="color:${cor};">${this.fmt(r.total)}</td>
+      <td>${this.seloRateio(r.status, r.motivo)}</td>
+    </tr>`;
+    if (aberta) html += `<tr class="pcx-det-row"><td colspan="8">${this.confDetalheHtml(r)}</td></tr>`;
+    return html;
+  },
+
+  confDetalheHtml(r) {
+    const info = [
+      ["Data", this.dataBr(r.data)],
+      ["Título", r.titulo || "—"],
+      ["Parcela", r.parcela || "—"],
+      ["Documento", r.documento || "—"],
+      ["Cliente / credor", r.pessoa || "—"],
+      ["Conta bancária", r.contaBanco || "—"]
+    ];
+    const aviso = r.status === "na"
+      ? "Nenhuma conta deste lançamento está amarrada nas Configurações, por isso não há rateio a conferir."
+      : (r.foraTotal > 0.004 ? `${this.fmt(r.foraTotal)} em contas sem amarração ficaram fora da conferência.` : "");
+    const contas = (r.contas || []).map(c => `<tr>
+      <td class="pcx-cod">${this.esc(c.codigo)}</td>
+      <td>${this.esc(c.nome)}</td>
+      <td>${this.esc(c.cc)}${c.ccNome ? ` · ${this.esc(c.ccNome)}` : ""}</td>
+      <td class="is-right">${this.fmt(c.valor)}</td>
+      <td>${c.amarrada
+        ? '<span class="pcx-selo is-ok">Entra no rateio</span>'
+        : `<span class="pcx-selo is-na">${this.esc(c.motivo || "Fora da configuração")}</span>`}</td>
+    </tr>`).join("");
+    const centros = (r.linhas || []).map(l => {
+      const dif = l.esperado == null ? null : l.atual - l.esperado;
+      const ruim = dif != null && Math.abs(dif) >= 0.06;
+      return `<tr>
+        <td>${this.esc(l.id)}${l.nome ? ` · ${this.esc(l.nome)}` : ""}</td>
+        <td class="is-right">${this.fmt(l.valor)}</td>
+        <td class="is-right">${this.fmtPct(l.atual)}</td>
+        <td class="is-right">${l.esperado == null ? "—" : this.fmtPct(l.esperado)}</td>
+        <td class="is-right${ruim ? " pcx-dif" : ""}">${dif == null ? "—" : (dif > 0 ? "+" : "") + this.fmtPct(dif)}</td>
+      </tr>`;
+    }).join("");
+    return `<div class="pcx-det">
+      <div class="pcx-det-info">
+        ${info.map(([k, v]) => `<div><span>${k}</span><strong>${this.esc(v)}</strong></div>`).join("")}
+      </div>
+      ${aviso ? `<div class="pcx-det-aviso">${aviso}</div>` : ""}
+      <div class="pcx-det-grid">
+        <div>
+          <div class="pcx-det-tit">Plano financeiro</div>
+          <table class="pcx-mini">
+            <thead><tr><th>Código</th><th>Conta</th><th>Centro de custo</th><th class="is-right">Valor</th><th>Configuração</th></tr></thead>
+            <tbody>${contas || '<tr><td colspan="5" class="pcx-mute">Sem contas</td></tr>'}</tbody>
+          </table>
+        </div>
+        ${centros ? `<div>
+          <div class="pcx-det-tit">Rateio nos centros</div>
+          <table class="pcx-mini">
+            <thead><tr><th>Centro</th><th class="is-right">Valor</th><th class="is-right">Lançado</th><th class="is-right">Padrão</th><th class="is-right">Diferença</th></tr></thead>
+            <tbody>${centros}</tbody>
+          </table>
+        </div>` : ""}
+      </div>
+    </div>`;
   },
 
   kpi(label, value, color, raw) {

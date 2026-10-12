@@ -608,79 +608,249 @@ window.EnviarNotaApp = {
     const pop = document.createElement("div");
     pop.id = "env-busca-ped";
     pop.className = "fnf-pop";
+    this._credHits = [];
+    this._credEscolhido = null;
     pop.innerHTML = `<style>
-      #env-busca-ped .fnf-pop-box { width: min(1180px, 96vw); max-height: 92vh; display: flex; flex-direction: column; padding: 18px 20px 16px; }
-      #env-busca-lista { margin-top: 12px; overflow: auto; min-height: 420px; max-height: calc(92vh - 160px); }
-      .env-ped-tab { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-      .env-ped-tab th { position: sticky; top: 0; background: #fff; text-align: left; font-size: 0.68rem; text-transform: uppercase; color: #64748b; padding: 8px 10px; border-bottom: 1px solid #e2e8f0; }
-      .env-ped-tab td { padding: 10px; border-bottom: 1px solid #f1f5f9; }
+      #env-busca-ped .fnf-pop-box { width: min(1080px, 96vw); max-height: 92vh; display: flex; flex-direction: column; padding: 18px 20px 16px; }
+      #env-busca-ped .fnf-pop-h b { font-size: 1rem; }
+      .env-bp-help { margin: 0 0 12px; font-size: 0.78rem; color: #64748b; }
+      .env-bp-busca { position: relative; max-width: 620px; }
+      .env-bp-label { display: block; font-size: 0.7rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
+      .env-bp-campo { display: flex; align-items: center; gap: 8px; height: 38px; border: 1px solid #334155; border-radius: 6px; background: #fff; padding: 0 10px; }
+      .env-bp-campo:focus-within { border-color: #105436; box-shadow: 0 0 0 2px rgba(16, 84, 54, 0.15); }
+      .env-bp-campo i, .env-bp-campo svg { width: 16px; height: 16px; color: #64748b; flex: 0 0 16px; }
+      .env-bp-campo input { border: 0; outline: none; flex: 1; min-width: 0; height: 34px; font-size: 0.88rem; font-weight: 600; color: #0f172a; background: transparent; }
+      .env-bp-campo input::placeholder { color: #94a3b8; font-weight: 500; }
+      .env-bp-sugg { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 5; background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14); max-height: 300px; overflow-y: auto; }
+      .env-bp-sugg:empty { display: none; }
+      .env-bp-sugg button { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px; text-align: left; border: 0; border-bottom: 1px solid #f1f5f9; background: #fff; padding: 8px 12px; cursor: pointer; font: inherit; }
+      .env-bp-sugg button:hover, .env-bp-sugg button.is-hl { background: #e7f6ee; }
+      .env-bp-sugg strong { display: block; font-size: 0.82rem; color: #0f172a; }
+      .env-bp-sugg small { font-size: 0.72rem; color: #64748b; white-space: nowrap; }
+      .env-bp-msg { padding: 10px 12px; font-size: 0.78rem; color: #64748b; }
+      .env-bp-cred { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 14px; padding: 10px 14px; border: 1px solid #b7e0c8; background: #f0faf4; border-radius: 8px; }
+      .env-bp-cred-nome { font-weight: 800; color: #105436; font-size: 0.92rem; }
+      .env-bp-cred-doc { font-size: 0.74rem; color: #475569; margin-top: 2px; }
+      .env-bp-cred-res { display: flex; align-items: center; gap: 14px; font-size: 0.78rem; color: #334155; }
+      .env-bp-cred-res b { color: #105436; font-size: 0.95rem; }
+      .env-bp-trocar { border: 0; background: transparent; color: #f37021; font-weight: 700; font-size: 0.78rem; cursor: pointer; padding: 4px 6px; }
+      #env-busca-lista { margin-top: 12px; overflow: auto; min-height: 260px; max-height: calc(92vh - 250px); border: 1px solid #e2e8f0; border-radius: 8px; }
+      #env-busca-lista.is-vazio { display: flex; align-items: center; justify-content: center; border-style: dashed; background: #f8fafc; }
+      .env-bp-vazio { text-align: center; color: #94a3b8; font-size: 0.82rem; padding: 24px; }
+      .env-bp-vazio i, .env-bp-vazio svg { width: 28px; height: 28px; display: block; margin: 0 auto 8px; color: #cbd5e1; }
+      .env-ped-tab { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 0.78rem; }
+      .env-ped-tab th { position: sticky; top: 0; z-index: 1; background: #1b8253; color: #fff; text-align: left; font-weight: 700; padding: 7px 10px; }
+      .env-ped-tab td { padding: 6px 10px; border-bottom: 1px solid #e8eee9; color: #1c2e24; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .env-ped-tab tbody tr { cursor: pointer; }
+      .env-ped-tab tbody tr:nth-child(even) td { background: #f7faf8; }
       .env-ped-tab tbody tr:hover td { background: #e7f6ee; }
-      .env-ped-tab .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
-      .env-ped-tab tbody tr.env-ped-credor td { background: #f8fafc; font-weight: 700; color: #105436; cursor: default; }
-      .env-ped-tab tbody tr.env-ped-credor:hover td { background: #f8fafc; }
+      .env-ped-tab .num { text-align: right; font-variant-numeric: tabular-nums; }
+      .env-ped-tab .env-ped-num { font-weight: 800; color: #105436; }
+      .env-ped-tab td:last-child { overflow: visible; text-overflow: clip; }
+      .env-ped-st { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.68rem; font-weight: 700; background: #eff6ff; color: #1d4ed8; }
+      .env-ped-st.is-parcial { background: #fff7ed; color: #c2410c; }
+      .env-ped-sel { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 10px; border: 1px solid #105436; border-radius: 6px; background: #fff; color: #105436; font-size: 0.72rem; font-weight: 700; cursor: pointer; }
+      .env-ped-sel i, .env-ped-sel svg { width: 13px; height: 13px; }
+      .env-ped-tab tbody tr:hover .env-ped-sel { background: #105436; color: #fff; }
     </style>
     <div class="fnf-pop-box" role="dialog" aria-modal="true">
       <div class="fnf-pop-h"><b>Pedidos em aberto</b><button type="button" class="fnf-pop-x" onclick="EnviarNotaApp.fecharBuscaPedidos()" title="Fechar"><i data-lucide="x"></i></button></div>
-      <p class="inf-muted">${aviso}</p>
-      <div class="inf-busca">
-        <input id="env-busca-credor" placeholder="Nome ou CNPJ do credor" onkeydown="if(event.key==='Enter'){event.preventDefault();EnviarNotaApp.buscarPedidosCredor()}">
-        <button type="button" class="btn btn-primary inf-btn-sm" style="height:38px;" onclick="EnviarNotaApp.buscarPedidosCredor()"><i data-lucide="search"></i> Buscar</button>
+      <p class="env-bp-help">${aviso}</p>
+      <div class="env-bp-busca">
+        <label class="env-bp-label" for="env-busca-credor">Credor</label>
+        <div class="env-bp-campo">
+          <i data-lucide="search"></i>
+          <input id="env-busca-credor" autocomplete="off" placeholder="Buscar credor por nome, CPF ou CNPJ"
+            oninput="EnviarNotaApp.onBuscaCredor(this.value)"
+            onfocus="if((EnviarNotaApp._credHits||[]).length)EnviarNotaApp.pintarSugestoesCredor()"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();EnviarNotaApp.buscarPedidosCredor()}">
+        </div>
+        <div id="env-busca-sugg" class="env-bp-sugg"></div>
       </div>
-      <div id="env-busca-lista"></div>
+      <div id="env-busca-cred"></div>
+      <div id="env-busca-lista" class="is-vazio">${this.buscaVazioHtml("search", "Digite parte do nome, o CPF ou o CNPJ e escolha o credor na lista.")}</div>
     </div>`;
-    pop.addEventListener("click", (ev) => { if (ev.target === pop) this.fecharBuscaPedidos(); });
+    pop.addEventListener("click", (ev) => {
+      if (ev.target === pop) { this.fecharBuscaPedidos(); return; }
+      if (!ev.target.closest(".env-bp-busca")) this.pintarSugestoesCredor(true);
+    });
     document.body.appendChild(pop);
     if (window.lucide) lucide.createIcons();
     const inp = document.getElementById("env-busca-credor");
     if (inp) inp.focus();
+    this.baseCredores().catch(() => []);
   },
 
   fecharBuscaPedidos() {
+    clearTimeout(this._credTimer);
     const pop = document.getElementById("env-busca-ped");
     if (pop) pop.remove();
   },
 
-  async buscarPedidosCredor() {
-    const box = document.getElementById("env-busca-lista");
-    const q = String((document.getElementById("env-busca-credor") || {}).value || "").trim();
-    if (!box) return;
-    if (q.length < 2) { box.innerHTML = `<p class="inf-erro">Informe ao menos 2 caracteres do credor.</p>`; return; }
-    box.innerHTML = `<p class="inf-muted"><span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;"></span> Buscando credor e pedidos em aberto…</p>`;
-    try {
-      const dig = q.replace(/\D/g, "");
+  buscaVazioHtml(icon, texto) {
+    return `<div class="env-bp-vazio"><i data-lucide="${icon}"></i>${texto}</div>`;
+  },
+
+  /** Mesma base e mesma regra de busca do credor da Prestação de contas (Parametrização de parceiro). */
+  async baseCredores() {
+    const pp = window.ParametrizacaoParceiroApp;
+    if (pp && typeof pp.loadFirebaseCreditors === "function") return pp.loadFirebaseCreditors();
+    return [];
+  },
+
+  credorBate(c, q) {
+    const pp = window.ParametrizacaoParceiroApp;
+    if (pp && typeof pp.creditorMatches === "function") return pp.creditorMatches(c, q);
+    const norm = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    const termos = norm(q).split(/\s+/).filter(Boolean);
+    const dig = String(q || "").replace(/\D/g, "");
+    return (termos.length && termos.every((t) => norm(c.name).includes(t))) || (dig.length >= 3 && String(c.cpfCnpj || "").replace(/\D/g, "").includes(dig));
+  },
+
+  onBuscaCredor(val) {
+    clearTimeout(this._credTimer);
+    this._credTimer = setTimeout(() => this.procurarCredores(val), 250);
+  },
+
+  async procurarCredores(val) {
+    const q = String(val || "").trim();
+    const dig = q.replace(/\D/g, "");
+    const box = document.getElementById("env-busca-sugg");
+    if (!box) return [];
+    if (q.length < 2 && dig.length < 3) { this._credHits = []; box.innerHTML = ""; return []; }
+    const pp = window.ParametrizacaoParceiroApp;
+    if (!(pp && pp._creditorIndex && pp._creditorIndex.length)) box.innerHTML = `<div class="env-bp-msg">Carregando base de credores…</div>`;
+    const base = await this.baseCredores().catch(() => []);
+    let hits = [];
+    if (base.length) {
+      const norm = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+      const nq = norm(q);
+      hits = base.filter((c) => this.credorBate(c, q))
+        .sort((a, b) => (norm(a.name).startsWith(nq) ? 0 : 1) - (norm(b.name).startsWith(nq) ? 0 : 1) || String(a.name).localeCompare(String(b.name), "pt-BR"))
+        .slice(0, 15);
+    } else {
       const path = dig.length >= 11 ? `/creditors?limit=15&cnpj=${encodeURIComponent(dig)}` : `/creditors?limit=15&name=${encodeURIComponent(q)}`;
-      const credores = InserirNotaApp.lista(await InserirNotaApp.get(path));
-      if (!credores.length) { box.innerHTML = `<p class="inf-muted">Nenhum credor encontrado.</p>`; return; }
-      const todos = !this.departamentosAcesso();
-      const blocos = [];
-      for (const c of credores.slice(0, 15)) {
-        const id = c.id != null ? c.id : c.creditorId;
-        if (id == null) continue;
-        const nome = c.name || c.tradeName || `Credor ${id}`;
-        let pedidos = [];
-        try { pedidos = await this.pedidosAbertosDoCredor(id); } catch (e) { pedidos = []; }
-        const abertos = pedidos.filter((p) => this.pedidoPermitido(p));
-        if (!abertos.length) continue;
-        const linhas = abertos.map((p) => {
-          const num = this.esc(p.formattedPurchaseOrderId || p.id);
-          const api = this.esc(p.id);
-          const dep = this.esc(this.nomeDepartamento(p) || "—");
-          const data = p.date ? this.dataBr(String(p.date).slice(0, 10)) : "—";
-          const valor = p.totalAmount != null ? this.money(p.totalAmount) : "—";
-          return `<tr onclick="EnviarNotaApp.escolherPedidoBusca('${api}')"><td><b>${num}</b></td><td>${data}</td><td class="num">${valor}</td><td>${dep}</td></tr>`;
-        }).join("");
-        blocos.push(`<tr class="env-ped-credor"><td colspan="4">${this.esc(nome)}</td></tr>${linhas}`);
-      }
-      const vazio = todos
-        ? "Nenhum pedido em aberto desse credor."
-        : "Nenhum pedido em aberto desse credor no seu departamento.";
-      box.innerHTML = blocos.length
-        ? `<table class="env-ped-tab"><thead><tr><th>Pedido</th><th>Data</th><th class="num">Valor</th><th>Departamento</th></tr></thead><tbody>${blocos.join("")}</tbody></table>`
-        : `<p class="inf-muted">${vazio}</p>`;
-    } catch (e) {
-      box.innerHTML = `<p class="inf-erro">${this.esc((e && e.message) || e)}</p>`;
+      const lista = InserirNotaApp.lista(await InserirNotaApp.get(path).catch(() => null));
+      hits = lista.map((c) => ({ id: String(c.id != null ? c.id : c.creditorId), name: c.name || c.tradeName || "", cpfCnpj: c.cnpj || c.cpf || "" }));
     }
+    const atual = String((document.getElementById("env-busca-credor") || {}).value || "").trim();
+    if (atual !== q) return hits;
+    this._credHits = hits;
+    this.pintarSugestoesCredor();
+    return hits;
+  },
+
+  pintarSugestoesCredor(fechar) {
+    const box = document.getElementById("env-busca-sugg");
+    if (!box) return;
+    if (fechar) { box.innerHTML = ""; return; }
+    const hits = this._credHits || [];
+    box.innerHTML = hits.length
+      ? hits.map((c, i) => `<button type="button" onclick="EnviarNotaApp.escolherCredor(${i})">
+          <span><strong>${this.esc(c.name)}</strong><small>${this.esc(c.cpfCnpj || "sem CPF/CNPJ")}</small></span>
+          <small>ID ${this.esc(c.id)}</small>
+        </button>`).join("")
+      : `<div class="env-bp-msg">Nenhum credor encontrado.</div>`;
+  },
+
+  async buscarPedidosCredor() {
+    const inp = document.getElementById("env-busca-credor");
+    const q = String((inp || {}).value || "").trim();
+    if (q.length < 2) {
+      const box = document.getElementById("env-busca-sugg");
+      if (box) box.innerHTML = `<div class="env-bp-msg">Informe ao menos 2 caracteres do credor.</div>`;
+      return;
+    }
+    clearTimeout(this._credTimer);
+    const hits = await this.procurarCredores(q);
+    if (hits.length === 1) this.escolherCredor(0);
+  },
+
+  async escolherCredor(idx) {
+    const c = (this._credHits || [])[idx];
+    if (!c || !c.id) return;
+    this._credEscolhido = c;
+    this.pintarSugestoesCredor(true);
+    const inp = document.getElementById("env-busca-credor");
+    if (inp) inp.value = c.name || "";
+    const cred = document.getElementById("env-busca-cred");
+    const box = document.getElementById("env-busca-lista");
+    if (!box || !cred) return;
+    const cartao = (resumo) => `<div class="env-bp-cred">
+        <div>
+          <div class="env-bp-cred-nome">${this.esc(c.name)}</div>
+          <div class="env-bp-cred-doc">ID ${this.esc(c.id)} · ${this.esc(c.cpfCnpj || "sem CPF/CNPJ")}</div>
+        </div>
+        <div class="env-bp-cred-res">${resumo}<button type="button" class="env-bp-trocar" onclick="EnviarNotaApp.trocarCredor()">Trocar credor</button></div>
+      </div>`;
+    cred.innerHTML = cartao(`<span><span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;"></span> Buscando pedidos…</span>`);
+    box.className = "is-vazio";
+    box.innerHTML = this.buscaVazioHtml("loader", "Buscando os pedidos em aberto no Sienge…");
+    if (window.lucide) lucide.createIcons();
+    let pedidos = [];
+    try {
+      pedidos = await this.pedidosAbertosDoCredor(c.id);
+    } catch (e) {
+      if (this._credEscolhido !== c) return;
+      cred.innerHTML = cartao("");
+      box.innerHTML = `<p class="inf-erro" style="margin:12px;">${this.esc((e && e.message) || e)}</p>`;
+      return;
+    }
+    if (this._credEscolhido !== c) return;
+    const abertos = pedidos.filter((p) => this.pedidoPermitido(p))
+      .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+    const total = abertos.reduce((s, p) => s + (Number(p.totalAmount) || 0), 0);
+    cred.innerHTML = cartao(abertos.length
+      ? `<span><b>${abertos.length}</b> pedido(s) em aberto</span><span><b>${this.money(total)}</b></span>`
+      : `<span>Nenhum pedido em aberto</span>`);
+    if (!abertos.length) {
+      box.className = "is-vazio";
+      box.innerHTML = this.buscaVazioHtml("inbox", this.departamentosAcesso()
+        ? "Nenhum pedido em aberto desse credor nos departamentos do seu acesso."
+        : "Nenhum pedido em aberto desse credor.");
+      if (window.lucide) lucide.createIcons();
+      return;
+    }
+    const stTxt = (p) => {
+      const st = String(p.status || "").toUpperCase();
+      if (st === "PARTIALLY_DELIVERED") return `<span class="env-ped-st is-parcial">Parcialmente entregue</span>`;
+      if (st === "PENDING") return `<span class="env-ped-st">Pendente</span>`;
+      return st ? `<span class="env-ped-st">${this.esc(st.toLowerCase().replace(/_/g, " "))}</span>` : "—";
+    };
+    box.className = "";
+    box.innerHTML = `<table class="env-ped-tab">
+        <colgroup><col style="width:110px"><col style="width:100px"><col style="width:170px"><col><col style="width:140px"><col style="width:128px"></colgroup>
+        <thead><tr><th>Pedido</th><th>Data</th><th>Situação</th><th>Departamento</th><th class="num">Valor</th><th></th></tr></thead>
+        <tbody>${abertos.map((p) => {
+          const api = this.esc(p.id);
+          const dep = this.nomeDepartamento(p) || "—";
+          return `<tr onclick="EnviarNotaApp.escolherPedidoBusca('${api}')">
+            <td class="env-ped-num">${this.esc(p.formattedPurchaseOrderId || p.id)}</td>
+            <td>${p.date ? this.dataBr(String(p.date).slice(0, 10)) : "—"}</td>
+            <td>${stTxt(p)}</td>
+            <td title="${this.esc(dep)}">${this.esc(dep)}</td>
+            <td class="num"><b>${p.totalAmount != null ? this.money(p.totalAmount) : "—"}</b></td>
+            <td class="num"><button type="button" class="env-ped-sel" onclick="event.stopPropagation();EnviarNotaApp.escolherPedidoBusca('${api}')">Selecionar <i data-lucide="arrow-right"></i></button></td>
+          </tr>`;
+        }).join("")}</tbody>
+      </table>`;
+    if (window.lucide) lucide.createIcons();
+  },
+
+  trocarCredor() {
+    this._credEscolhido = null;
+    const cred = document.getElementById("env-busca-cred");
+    const box = document.getElementById("env-busca-lista");
+    if (cred) cred.innerHTML = "";
+    if (box) {
+      box.className = "is-vazio";
+      box.innerHTML = this.buscaVazioHtml("search", "Digite parte do nome, o CPF ou o CNPJ e escolha o credor na lista.");
+    }
+    const inp = document.getElementById("env-busca-credor");
+    if (inp) { inp.value = ""; inp.focus(); }
+    this._credHits = [];
+    this.pintarSugestoesCredor(true);
+    if (window.lucide) lucide.createIcons();
   },
 
   escolherPedidoBusca(id) {
