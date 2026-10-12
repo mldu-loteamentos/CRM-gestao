@@ -15,6 +15,7 @@ const FluxoCaixaApp = {
   companyDropOpen: false,
   companyQuery: "",
   loading: false,
+  drillRateioAberto: false,
   error: "",
   movements: [],
   months: [],
@@ -1172,12 +1173,17 @@ const FluxoCaixaApp = {
       return cols;
     }
     const cols = [];
-    ids.forEach(id => {
+    ids.forEach((id, idx) => {
+      if (idx > 0) cols.push({ type: "gap" });
+      const band = idx % 2 ? "fc-band-1" : "";
       const open = this.companyMonthsOpen && this.companyMonthsOpen.has(id);
-      if (open) this.months.forEach(m => cols.push({ type: "month", companyId: id, month: m }));
-      cols.push({ type: "co", companyId: id });
+      if (open) {
+        this.months.forEach((m, mi) => cols.push({ type: "month", companyId: id, month: m, band, edge: mi === 0 }));
+      }
+      cols.push({ type: "co", companyId: id, band, edge: !open });
     });
-    cols.push({ type: "total" });
+    cols.push({ type: "gap" });
+    cols.push({ type: "total", edge: true });
     return cols;
   },
 
@@ -1219,21 +1225,24 @@ const FluxoCaixaApp = {
       const span = anyOpen ? 2 : 1;
       const row1 = [`<th class="fc-th-name" rowspan="${span}">Estrutura</th>`];
       const row2 = [];
-      ids.forEach(id => {
+      ids.forEach((id, idx) => {
         const c = this.companyById(id);
         const open = this.companyMonthsOpen && this.companyMonthsOpen.has(id);
         const label = this.esc(this.columnHeader(c || { id, usual: "", fullName: "" }));
         const tip = this.esc((c && c.fullName) || label);
         const chev = open ? "▾" : "▸";
+        const band = idx % 2 ? " fc-band-1" : "";
+        if (idx > 0) row1.push(`<th class="fc-gap" rowspan="${span}"></th>`);
         if (open) {
-          row1.push(`<th class="fc-th-co" colspan="${this.months.length + 1}" title="${tip}" onclick="FluxoCaixaApp.toggleCompanyMonths('${id}')">${chev} ${label}</th>`);
-          this.months.forEach(m => row2.push(`<th class="fc-th-num">${this.esc(this.monthLabel(m))}</th>`));
-          row2.push(`<th class="fc-th-num">Total</th>`);
+          row1.push(`<th class="fc-th-co fc-co-edge${band}" colspan="${this.months.length + 1}" title="${tip}" onclick="FluxoCaixaApp.toggleCompanyMonths('${id}')">${chev} ${label}</th>`);
+          this.months.forEach((m, mi) => row2.push(`<th class="fc-th-num${mi === 0 ? " fc-co-edge" : ""}${band}">${this.esc(this.monthLabel(m))}</th>`));
+          row2.push(`<th class="fc-th-num${band}">Total</th>`);
         } else {
-          row1.push(`<th class="fc-th-co" rowspan="${span}" title="${tip}" onclick="FluxoCaixaApp.toggleCompanyMonths('${id}')">${chev} ${label}</th>`);
+          row1.push(`<th class="fc-th-co fc-co-edge${band}" rowspan="${span}" title="${tip}" onclick="FluxoCaixaApp.toggleCompanyMonths('${id}')">${chev} ${label}</th>`);
         }
       });
-      row1.push(`<th class="fc-th-total fc-th-num" rowspan="${span}">Total</th>`);
+      row1.push(`<th class="fc-gap" rowspan="${span}"></th>`);
+      row1.push(`<th class="fc-th-total fc-th-num fc-co-edge" rowspan="${span}">Total</th>`);
       head = `<thead><tr>${row1.join("")}</tr>${anyOpen ? `<tr class="fc-months">${row2.join("")}</tr>` : ""}</thead>`;
     }
     const body = (this.rows || []).map(r => this.gridRowHtml(r, cols)).join("");
@@ -1288,8 +1297,10 @@ const FluxoCaixaApp = {
     const ccArg = r.isCostCenter ? `'${String(r.ccId || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'` : "''";
     const isAccFlag = r.isAccount || r.isCostCenter;
     const cells = cols.map(col => {
+      if (col.type === "gap") return `<td class="fc-gap"></td>`;
       const v = this.valueOf(r, col);
       const strong = col.type !== "month";
+      const extra = `${col.band ? " " + col.band : ""}${col.edge ? " fc-co-edge" : ""}`;
       const co = col.companyId ? `'${String(col.companyId).replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'` : "''";
       const mo = col.type === "month" && col.month ? `'${col.month}'` : "''";
       let click = "";
@@ -1301,7 +1312,7 @@ const FluxoCaixaApp = {
         click = `onclick="FluxoCaixaApp.abrirCentrosVenda('${safeToggle}', ${r.isAccount ? "true" : "false"})"`;
         tip = "Abrir os centros de custo";
       }
-      return `<td class="${this.valClass(v, strong)}${click ? " is-cell" : ""}" ${click} title="${tip}">${this.fmt(v)}</td>`;
+      return `<td class="${this.valClass(v, strong)}${extra}${click ? " is-cell" : ""}" ${click} title="${tip}">${this.fmt(v)}</td>`;
     }).join("");
     return `<tr class="${this.rowClass(r)}">
       <td class="fc-td-name" style="padding-left:${6 + pad}px">${chevron}<span>${this.esc(r.name)}</span></td>
@@ -1461,6 +1472,13 @@ const FluxoCaixaApp = {
     if (el && el.parentNode) el.parentNode.removeChild(el);
   },
 
+  toggleDrillRateio() {
+    this.drillRateioAberto = !this.drillRateioAberto;
+    const args = this._drillReplay;
+    if (!args) return;
+    this.openDrill(args[0], args[1], args[2], args[3], args[4]);
+  },
+
   exportDrillExcel() {
     const ctx = this._drillExport;
     if (!ctx || !Array.isArray(ctx.items) || !ctx.items.length) {
@@ -1553,6 +1571,9 @@ const FluxoCaixaApp = {
   },
 
   openDrill(id, isAccount, ccId, companyId, month) {
+    this._drillReplay = [id, isAccount, ccId, companyId, month];
+    const prevDrill = document.querySelector("#fc-drill-modal .crm-scroll-table");
+    const keepDrill = prevDrill ? prevDrill.scrollTop : 0;
     const tree = document.querySelector("#fluxo-caixa-root .fc-tree-scroll");
     const keepTop = tree ? tree.scrollTop : 0;
     const keepLeft = tree ? tree.scrollLeft : 0;
@@ -1616,25 +1637,41 @@ const FluxoCaixaApp = {
       fileBase: `dfc_${info.title || "conta"}_${this.startDate}_${this.endDate}`
     };
 
-    const th = "padding:10px 12px;background:#105436;color:#fff;text-align:left;font-size:0.75rem;white-space:nowrap;";
-    const thr = "padding:10px 12px;background:#105436;color:#fff;text-align:right;font-size:0.75rem;white-space:nowrap;";
+    const rateioOn = !!this.drillRateioAberto;
+    const leadSpan = rateioOn ? 10 : 6;
+    const rateioHead = rateioOn
+      ? `<th class="fc-drill-num">Total título</th>
+                <th class="fc-drill-num">% rateio</th>
+                <th class="fc-drill-num">Valor rateado</th>
+                <th class="fc-drill-num">Fator MLDU</th>`
+      : "";
+    const rateioCols = rateioOn
+      ? `<col class="fc-drill-c-num"><col class="fc-drill-c-num"><col class="fc-drill-c-num"><col class="fc-drill-c-pct">`
+      : "";
 
     const body = items.length
       ? `<div style="overflow:auto;max-height:calc(88vh - 160px);" class="crm-scroll-table">
-          <table class="custom-table" style="width:100%;min-width:1380px;border-collapse:separate;border-spacing:0;font-size:0.8rem;">
+          <table class="custom-table fc-drill-table${rateioOn ? " is-wide" : ""}">
+            <colgroup>
+              <col class="fc-drill-c-data">
+              <col class="fc-drill-c-mov">
+              <col class="fc-drill-c-title">
+              <col class="fc-drill-c-emp">
+              <col class="fc-drill-c-cc">
+              <col class="fc-drill-c-hist">
+              ${rateioCols}
+              <col class="fc-drill-c-dfc">
+            </colgroup>
             <thead>
               <tr>
-                <th style="${th}">Data</th>
-                <th style="${th}">Nº mov.</th>
-                <th style="${th}">Título CP/CR</th>
-                <th style="${th}">Empresa</th>
-                <th style="${th}">C.C.</th>
-                <th style="${th}">Histórico</th>
-                <th style="${thr}">Total título</th>
-                <th style="${thr}">% rateio</th>
-                <th style="${thr}">Valor rateado</th>
-                <th style="${thr}">Fator MLDU</th>
-                <th style="${thr}">Valor no DFC</th>
+                <th>Data</th>
+                <th>Nº mov.</th>
+                <th>Título CP/CR</th>
+                <th>Empresa</th>
+                <th>C.C.</th>
+                <th>Histórico</th>
+                ${rateioHead}
+                <th class="fc-drill-num">Valor no DFC</th>
               </tr>
             </thead>
             <tbody>
@@ -1660,47 +1697,48 @@ const FluxoCaixaApp = {
                   : "#64748b";
                 const title = this.movTitleInfo(mov);
                 const titleHtml = title.billId
-                  ? `<button type="button" class="fc-title-btn" onclick="event.stopPropagation();FluxoCaixaApp.abrirTituloDrill(${idx})">${this.esc(title.label)}</button>`
-                  : `<span style="font-weight:700;color:#0f172a;">${this.esc(title.label)}</span>`;
+                  ? `<button type="button" class="fc-title-btn fc-drill-share" onclick="event.stopPropagation();FluxoCaixaApp.abrirTituloDrill(${idx})">${this.esc(title.label)}</button>`
+                  : `<span class="fc-drill-share">${this.esc(title.label)}</span>`;
                 const roleBadge = title.role === "adiantamento"
-                  ? `<span style="display:inline-block;margin-left:6px;padding:2px 7px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:0.68rem;font-weight:800;vertical-align:middle;">ADIANT.</span>`
+                  ? `<span class="fc-drill-badge is-adiant">ADIANT.</span>`
                   : (title.role === "abatimento"
-                    ? `<span style="display:inline-block;margin-left:6px;padding:2px 7px;border-radius:999px;background:#ffedd5;color:#c2410c;font-size:0.68rem;font-weight:800;vertical-align:middle;">ABATE</span>`
+                    ? `<span class="fc-drill-badge is-abate">ABATE</span>`
                     : "");
                 const pairMark = title.titleKey && pairedTitles.has(title.titleKey)
-                  ? `<span title="Mesmo título com adiantamento e abatimento" style="margin-left:4px;color:#ea580c;">↔</span>`
+                  ? `<span class="fc-drill-pair" title="Mesmo título com adiantamento e abatimento">↔</span>`
                   : "";
-                const partyLine = title.party
-                  ? `<div style="font-size:0.72rem;color:#64748b;margin-top:3px;line-height:1.35;">${this.esc(title.party)}</div>`
+                const partyHtml = title.party
+                  ? `<span class="fc-drill-party fc-drill-share">${this.esc(title.party)}</span>`
                   : "";
                 const ccTxt = [it.costCenterId, it.costCenterName].filter(Boolean).join(" — ") || "—";
+                const hist = this.movHistoric(mov);
+                const rateioCells = rateioOn
+                  ? `<td class="fc-drill-num" style="font-weight:600;color:${rawColor};" title="Valor integral do título/movimento na API">${Number.isFinite(raw) ? this.fmt(raw) : "—"}</td>
+                  <td class="fc-drill-num" title="${it.rateRaw != null ? "Percentual na API: " + this.esc(String(it.rateRaw)) : ""}">${shareTxt}%</td>
+                  <td class="fc-drill-num" style="font-weight:700;color:${rateadoColor};" title="Total título × % rateio do C.C.">${Number.isFinite(rateado) ? this.fmt(rateado) : "—"}</td>
+                  <td class="fc-drill-num">${factorPct.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%</td>`
+                  : "";
                 return `<tr class="fc-drill-row${title.billId ? " is-open" : ""}" ${title.billId ? `onclick="FluxoCaixaApp.abrirTituloDrill(${idx})" title="Abrir o título"` : ""}>
-                  <td style="padding:10px 12px;white-space:nowrap;vertical-align:top;">${this.esc(this.fmtDatePt(this.cashDate(mov)))}</td>
-                  <td style="padding:10px 12px;font-weight:700;color:#105436;white-space:nowrap;vertical-align:top;">${this.esc(this.movNumber(mov))}</td>
-                  <td style="padding:10px 12px;min-width:200px;max-width:280px;vertical-align:top;">
-                    <div style="line-height:1.35;">${titleHtml}${pairMark}</div>
-                    ${partyLine}
+                  <td class="fc-drill-fix">${this.esc(this.fmtDatePt(this.cashDate(mov)))}</td>
+                  <td class="fc-drill-fix fc-drill-mov">${this.esc(this.movNumber(mov))}</td>
+                  <td class="fc-drill-txt">
+                    <div class="fc-drill-line" title="${this.esc(title.label + (title.party ? " · " + title.party : ""))}">${titleHtml}${pairMark}${partyHtml}</div>
                   </td>
-                  <td style="padding:10px 12px;min-width:150px;max-width:200px;vertical-align:top;line-height:1.35;" title="${this.esc(this.companyLabel(it.companyId || mov.companyId))}">${this.esc(this.companyLabelShort(it.companyId || mov.companyId))}</td>
-                  <td style="padding:10px 12px;min-width:160px;max-width:220px;vertical-align:top;line-height:1.35;" title="${this.esc(ccTxt)}">${this.esc(ccTxt)}</td>
-                  <td style="padding:10px 12px;min-width:220px;max-width:320px;vertical-align:top;line-height:1.4;">
-                    <span>${this.esc(this.movHistoric(mov))}</span>${roleBadge}
-                  </td>
-                  <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top;font-weight:600;color:${rawColor};" title="Valor integral do título/movimento na API">${Number.isFinite(raw) ? this.fmt(raw) : "—"}</td>
-                  <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top;">${shareTxt}%${it.rateRaw != null ? `<div style="color:#94a3b8;font-size:0.7rem;">API ${this.esc(String(it.rateRaw))}</div>` : ""}</td>
-                  <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top;font-weight:700;color:${rateadoColor};" title="Total título × % rateio do C.C.">${Number.isFinite(rateado) ? this.fmt(rateado) : "—"}</td>
-                  <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top;">${factorPct.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%</td>
-                  <td style="padding:10px 12px;text-align:right;font-weight:800;color:${color};font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:top;">${this.fmt(amt)}</td>
+                  <td class="fc-drill-txt" title="${this.esc(this.companyLabel(it.companyId || mov.companyId))}"><div class="fc-drill-line"><span class="fc-drill-share">${this.esc(this.companyLabelShort(it.companyId || mov.companyId))}</span></div></td>
+                  <td class="fc-drill-txt" title="${this.esc(ccTxt)}"><div class="fc-drill-line"><span class="fc-drill-share">${this.esc(ccTxt)}</span></div></td>
+                  <td class="fc-drill-txt" title="${this.esc(hist)}"><div class="fc-drill-line"><span class="fc-drill-share">${this.esc(hist)}</span>${roleBadge}</div></td>
+                  ${rateioCells}
+                  <td class="fc-drill-num" style="font-weight:800;color:${color};">${this.fmt(amt)}</td>
                 </tr>`;
               }).join("")}
             </tbody>
             <tfoot>
               <tr>
-                <td colspan="10" style="padding:12px;font-weight:800;text-align:right;border-top:2px solid #e2e8f0;">Soma dos lançamentos (${items.length})</td>
+                <td colspan="${leadSpan}" style="padding:12px;font-weight:800;text-align:right;border-top:2px solid #e2e8f0;">Soma dos lançamentos (${items.length})</td>
                 <td style="padding:12px;text-align:right;font-weight:800;font-variant-numeric:tabular-nums;border-top:2px solid #e2e8f0;color:${sum < 0 ? "#b91c1c" : "#105436"};">${this.fmt(sum)}</td>
               </tr>
               <tr>
-                <td colspan="10" style="padding:4px 12px 12px;font-weight:700;text-align:right;color:#64748b;">Total exibido na linha</td>
+                <td colspan="${leadSpan}" style="padding:4px 12px 12px;font-weight:700;text-align:right;color:#64748b;">Total exibido na linha</td>
                 <td style="padding:4px 12px 12px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums;color:#64748b;">${this.fmt(info.total)}</td>
               </tr>
             </tfoot>
@@ -1721,6 +1759,10 @@ const FluxoCaixaApp = {
             <div style="font-size:0.8rem;opacity:.9;margin-top:3px;">${this.esc(info.subtitle)} · ${this.esc(this.startDate)} a ${this.esc(this.endDate)}</div>
           </div>
           <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+            <button type="button" class="fc-rateio-btn${this.drillRateioAberto ? " is-on" : ""}" onclick="event.stopPropagation();FluxoCaixaApp.toggleDrillRateio()" title="Total do título, % de rateio, valor rateado e fator MLDU">
+              <i data-lucide="${this.drillRateioAberto ? "chevrons-left" : "columns-3"}"></i>
+              ${this.drillRateioAberto ? "Fechar rateio" : "Colunas de rateio"}
+            </button>
             <button type="button" class="btn btn-sm btn-excel" onclick="event.stopPropagation();FluxoCaixaApp.exportDrillExcel()" ${items.length ? "" : "disabled"}
               title="Exportar quadro em Excel">
               <i data-lucide="download" style="width:14px;height:14px;"></i> Excel
@@ -1734,6 +1776,8 @@ const FluxoCaixaApp = {
     hold();
     requestAnimationFrame(hold);
     try { if (window.lucide) lucide.createIcons({ nodes: [overlay] }); } catch (e) {}
+    const drillBox = overlay.querySelector(".crm-scroll-table");
+    if (drillBox) drillBox.scrollTop = keepDrill;
     hold();
   },
 

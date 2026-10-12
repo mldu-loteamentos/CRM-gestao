@@ -4,7 +4,7 @@ window.RastrearPedidoApp = {
   state: null,
 
   novoEstado() {
-    return { arquivo: "", lendo: "", erro: "", nota: null, credor: null, linhas: [], mais: 0 };
+    return { arquivo: "", lendo: "", erro: "", nota: null, credor: null, linhas: [], mais: 0, buscou: false };
   },
 
   init() {
@@ -52,7 +52,7 @@ window.RastrearPedidoApp = {
 
   async ler(file) {
     const s = this.state || (this.state = this.novoEstado());
-    Object.assign(s, { arquivo: file.name || "nota", lendo: "Lendo a nota…", erro: "", nota: null, credor: null, linhas: [], mais: 0 });
+    Object.assign(s, { arquivo: file.name || "nota", lendo: "Lendo a nota…", erro: "", nota: null, credor: null, linhas: [], mais: 0, buscou: false });
     this.render();
     try {
       const nota = await this.lerArquivo(file);
@@ -194,18 +194,20 @@ window.RastrearPedidoApp = {
       const pedidos = await this.pedidosDoFornecedor(credor.id);
       const visiveis = pedidos.filter((p) => !window.EnviarNotaApp || EnviarNotaApp.pedidoPermitido(p));
       const ordenados = visiveis.slice().sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
-      const candidatos = ordenados.filter((p) => String(p.status || "").toUpperCase() !== "CANCELED").slice(0, 8);
-      s.lendo = candidatos.length ? "Comparando valor e saldo dos pedidos…" : "";
+      const abertos = ordenados.filter((p) => String(p.status || "").toUpperCase() !== "CANCELED");
+      const candidatos = abertos.slice(0, 40);
+      s.lendo = candidatos.length ? "Comparando tomador, valor e saldo dos pedidos…" : "";
       this.pintarStatus();
       const empresas = await this.empresas();
       const linhas = [];
       for (const p of candidatos) {
         const detalhe = await this.detalhePedido(p, nota, empresas);
-        linhas.push(detalhe);
+        if (detalhe && this.mostrar(detalhe)) linhas.push(detalhe);
       }
       linhas.sort((a, b) => b.pts - a.pts || String(b.data || "").localeCompare(String(a.data || "")));
       s.linhas = linhas;
-      s.mais = Math.max(0, visiveis.length - candidatos.length);
+      s.buscou = true;
+      s.mais = Math.max(0, abertos.length - candidatos.length);
       s.lendo = "";
       if (!visiveis.length) s.erro = "Este fornecedor não tem pedido de compra no seu acesso.";
     } catch (e) {
@@ -257,22 +259,24 @@ window.RastrearPedidoApp = {
     const App = window.InserirNotaApp;
     const id = String(p.id);
     const valorPedido = p.totalAmount != null ? Number(p.totalAmount) : null;
+    let cc = null;
+    let empresaOk = null;
+    const dig = (v) => String(v || "").replace(/\D/g, "");
+    if (nota.cnpjTomador && App.centroDeCusto) {
+      cc = await App.centroDeCusto(p).catch(() => null);
+      if (cc && cc.companyId) {
+        const emp = empresas.find((e) => e.id === String(cc.companyId));
+        if (emp && emp.cnpj) empresaOk = dig(emp.cnpj) === dig(nota.cnpjTomador);
+        if (emp) cc.empresaNome = emp.nome;
+      }
+    }
+    if (empresaOk === false) return null;
     let aberto = null;
     let descricoes = [];
     const precisaSaldo = !(valorPedido != null && (this.perto(nota.valor, valorPedido) || this.perto(nota.liquido, valorPedido)));
     if (precisaSaldo) {
       const saldo = await this.saldoAberto(id).catch(() => null);
       if (saldo) { aberto = saldo.aberto; descricoes = saldo.desc; }
-    }
-    let cc = null;
-    let empresaOk = null;
-    if (nota.cnpjTomador && App.centroDeCusto) {
-      cc = await App.centroDeCusto(p).catch(() => null);
-      if (cc && cc.companyId) {
-        const emp = empresas.find((e) => e.id === String(cc.companyId));
-        if (emp && emp.cnpj) empresaOk = emp.cnpj === nota.cnpjTomador;
-        if (emp) cc.empresaNome = emp.nome;
-      }
     }
     return this.pontuar(p, nota, { valorPedido, aberto, descricoes, cc, empresaOk });
   },
@@ -344,8 +348,18 @@ window.RastrearPedidoApp = {
       nivel,
       pts,
       motivos,
+      empresaOk: d.empresaOk,
+      valorOk: igualPedido || igualAberto,
+      cabeNoAberto: !!(cabe && d.aberto > 0),
       cc: d.cc && d.cc.id ? `${d.cc.id}${d.cc.nome ? " - " + d.cc.nome : ""}` : ""
     };
+  },
+
+  /* Outra empresa que não é o tomador fica de fora. Valor distante só entra se ainda couber no saldo em aberto. */
+  mostrar(l) {
+    if (!l || l.empresaOk === false) return false;
+    if (l.valorOk) return true;
+    return !!(l.cabeNoAberto && l.situacao !== "Atendido" && l.situacao !== "Cancelado");
   },
 
   itensParecem(daNota, doPedido) {
@@ -405,7 +419,7 @@ window.RastrearPedidoApp = {
   corpo(s) {
     const n = s.nota;
     return `
-      <p class="rpd-muted">Suba o PDF ou o XML da nota. A busca usa o fornecedor, o valor, a data e a empresa do tomador para achar um pedido de compra compatível.</p>
+      <p class="rpd-muted">Suba o PDF ou o XML da nota. A lista mostra pedido do mesmo fornecedor, da empresa do tomador, com valor próximo da nota ou com saldo em aberto que ainda comporte esse valor.</p>
       <div id="rpd-drop" class="rpd-drop" ondragover="event.preventDefault(); this.classList.add('is-over')" ondragleave="this.classList.remove('is-over')" ondrop="RastrearPedidoApp.soltar(event)">
         <button type="button" class="btn btn-primary" onclick="document.getElementById('rpd-file').click()"><i data-lucide="upload"></i> Subir nota fiscal</button>
         <input id="rpd-file" type="file" accept=".xml,.pdf,image/*" hidden onchange="RastrearPedidoApp.subir(this)">
@@ -414,6 +428,7 @@ window.RastrearPedidoApp = {
       </div>
       ${s.erro ? `<div class="rpd-erro">${this.esc(s.erro)}</div>` : ""}
       ${n ? this.notaHtml(n, s.credor) : ""}
+      ${n && s.buscou && !s.linhas.length && !s.lendo && !s.erro ? `<p class="rpd-muted">Nenhum pedido deste fornecedor combina com o tomador e o valor desta nota.</p>` : ""}
       ${s.linhas.length ? this.tabela(s) : ""}`;
   },
 

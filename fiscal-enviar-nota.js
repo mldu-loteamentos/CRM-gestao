@@ -295,9 +295,9 @@ window.FilaNotasFiscais = {
       ? (lista[0].nome || this.TIPOS_ANEXO[lista[0].tipo] || "Abrir anexo")
       : `${lista.length} anexos`;
     if (lista.length === 1 && lista[0].url) {
-      return `<a class="fnf-anexo-ico" href="${esc(lista[0].url)}" target="_blank" rel="noopener" title="${esc(titulo)}"><i data-lucide="paperclip"></i></a>`;
+      return `<a class="fnf-anexo-ico" href="${esc(lista[0].url)}" target="_blank" rel="noopener" title="${esc(titulo)}"><i data-lucide="paperclip" width="15" height="15"></i></a>`;
     }
-    return `<button type="button" class="fnf-anexo-ico" title="${esc(titulo)}" onclick="FilaNotasFiscais.abrirAnexos('${id}')"><i data-lucide="paperclip"></i></button>`;
+    return `<button type="button" class="fnf-anexo-ico" title="${esc(titulo)}" onclick="FilaNotasFiscais.abrirAnexos('${id}')"><i data-lucide="paperclip" width="15" height="15"></i></button>`;
   },
 
   acharEnvio(id) {
@@ -347,9 +347,9 @@ window.FilaNotasFiscais = {
       .fnf-tab .fnf-acoes { white-space: nowrap; text-align: right; }
       .fnf-tab .fnf-acoes .tvig-ico { margin-left: 2px; width: 32px; height: 32px; min-width: 32px; padding: 0; border-radius: 8px; }
       .fnf-tab .fnf-acoes .tvig-ico i, .fnf-tab .fnf-acoes .tvig-ico svg { width: 15px; height: 15px; }
-      .fnf-anexo-ico { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; background: transparent; color: #64748b; border-radius: 6px; cursor: pointer; text-decoration: none; }
+      .fnf-anexo-ico { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 0; background: transparent; color: #64748b; border-radius: 8px; cursor: pointer; text-decoration: none; vertical-align: middle; }
       .fnf-anexo-ico:hover { background: #f1f5f9; color: #105436; }
-      .fnf-anexo-ico i { width: 15px; height: 15px; }
+      .fnf-anexo-ico i, .fnf-anexo-ico svg { width: 15px; height: 15px; }
       .fnf-pop { position: fixed; inset: 0; z-index: 1600; background: rgba(15, 23, 42, 0.35); display: flex; align-items: center; justify-content: center; padding: 24px; }
       .fnf-pop-box { width: min(440px, 100%); background: #fff; border-radius: 12px; padding: 14px 16px 8px; box-shadow: 0 16px 40px rgba(15, 23, 42, 0.2); }
       .fnf-pop-h { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
@@ -549,6 +549,23 @@ window.EnviarNotaApp = {
     try { return app.accessibleDepartments(); } catch (e) { return null; }
   },
 
+  async pedidosAbertosDoCredor(id) {
+    const out = [];
+    let offset = 0;
+    for (let i = 0; i < 6; i++) {
+      const res = await InserirNotaApp.get(`/purchase-orders?supplierId=${encodeURIComponent(id)}&limit=50&offset=${offset}`);
+      const lista = InserirNotaApp.lista(res);
+      lista.forEach((p) => {
+        const st = String(p.status || "").toUpperCase();
+        if (st !== "CANCELED" && st !== "FULLY_DELIVERED") out.push(p);
+      });
+      const total = res && res.resultSetMetadata && Number(res.resultSetMetadata.count);
+      offset += lista.length;
+      if (!lista.length || lista.length < 50 || (total && offset >= total)) break;
+    }
+    return out;
+  },
+
   pedidoPermitido(pedido) {
     const access = this.departamentosAcesso();
     if (!access) return true;
@@ -562,20 +579,40 @@ window.EnviarNotaApp = {
     });
   },
 
+  nomeDepartamento(pedido) {
+    return String(pedido.departmentName || pedido.departamentName || pedido.department || "").trim();
+  },
+
   abrirBuscaPedidos() {
     const velho = document.getElementById("env-busca-ped");
     if (velho) velho.remove();
+    const todos = !this.departamentosAcesso();
+    const aviso = todos
+      ? "Pesquise pelo credor. A lista traz os pedidos em aberto de todos os departamentos."
+      : "Pesquise pelo credor. A lista traz os pedidos em aberto dos departamentos do seu acesso.";
     const pop = document.createElement("div");
     pop.id = "env-busca-ped";
     pop.className = "fnf-pop";
-    pop.innerHTML = `<div class="fnf-pop-box" role="dialog" aria-modal="true" style="width:min(640px,100%)">
+    pop.innerHTML = `<style>
+      #env-busca-ped .fnf-pop-box { width: min(1180px, 96vw); max-height: 92vh; display: flex; flex-direction: column; padding: 18px 20px 16px; }
+      #env-busca-lista { margin-top: 12px; overflow: auto; min-height: 420px; max-height: calc(92vh - 160px); }
+      .env-ped-tab { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+      .env-ped-tab th { position: sticky; top: 0; background: #fff; text-align: left; font-size: 0.68rem; text-transform: uppercase; color: #64748b; padding: 8px 10px; border-bottom: 1px solid #e2e8f0; }
+      .env-ped-tab td { padding: 10px; border-bottom: 1px solid #f1f5f9; }
+      .env-ped-tab tbody tr { cursor: pointer; }
+      .env-ped-tab tbody tr:hover td { background: #e7f6ee; }
+      .env-ped-tab .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+      .env-ped-tab tbody tr.env-ped-credor td { background: #f8fafc; font-weight: 700; color: #105436; cursor: default; }
+      .env-ped-tab tbody tr.env-ped-credor:hover td { background: #f8fafc; }
+    </style>
+    <div class="fnf-pop-box" role="dialog" aria-modal="true">
       <div class="fnf-pop-h"><b>Pedidos em aberto</b><button type="button" class="fnf-pop-x" onclick="EnviarNotaApp.fecharBuscaPedidos()" title="Fechar"><i data-lucide="x"></i></button></div>
-      <p class="inf-muted">Pesquise pelo credor. A lista traz só pedidos em aberto dos departamentos do seu acesso.</p>
+      <p class="inf-muted">${aviso}</p>
       <div class="inf-busca">
         <input id="env-busca-credor" placeholder="Nome ou CNPJ do credor" onkeydown="if(event.key==='Enter'){event.preventDefault();EnviarNotaApp.buscarPedidosCredor()}">
         <button type="button" class="btn btn-primary inf-btn-sm" style="height:38px;" onclick="EnviarNotaApp.buscarPedidosCredor()"><i data-lucide="search"></i> Buscar</button>
       </div>
-      <div id="env-busca-lista" style="margin-top:12px;max-height:320px;overflow:auto;"></div>
+      <div id="env-busca-lista"></div>
     </div>`;
     pop.addEventListener("click", (ev) => { if (ev.target === pop) this.fecharBuscaPedidos(); });
     document.body.appendChild(pop);
@@ -600,26 +637,32 @@ window.EnviarNotaApp = {
       const path = dig.length >= 11 ? `/creditors?limit=15&cnpj=${encodeURIComponent(dig)}` : `/creditors?limit=15&name=${encodeURIComponent(q)}`;
       const credores = InserirNotaApp.lista(await InserirNotaApp.get(path));
       if (!credores.length) { box.innerHTML = `<p class="inf-muted">Nenhum credor encontrado.</p>`; return; }
+      const todos = !this.departamentosAcesso();
       const blocos = [];
-      for (const c of credores.slice(0, 5)) {
+      for (const c of credores.slice(0, 15)) {
         const id = c.id != null ? c.id : c.creditorId;
         if (id == null) continue;
         const nome = c.name || c.tradeName || `Credor ${id}`;
         let pedidos = [];
-        try { pedidos = InserirNotaApp.lista(await InserirNotaApp.get(`/purchase-orders?supplierId=${encodeURIComponent(id)}&limit=40`)); } catch (e) { pedidos = []; }
-        const abertos = pedidos.filter((p) => {
-          const st = String(p.status || "").toUpperCase();
-          return st !== "CANCELED" && st !== "FULLY_DELIVERED" && this.pedidoPermitido(p);
-        });
+        try { pedidos = await this.pedidosAbertosDoCredor(id); } catch (e) { pedidos = []; }
+        const abertos = pedidos.filter((p) => this.pedidoPermitido(p));
         if (!abertos.length) continue;
-        const linhas = abertos.slice(0, 12).map((p) => {
+        const linhas = abertos.map((p) => {
           const num = this.esc(p.formattedPurchaseOrderId || p.id);
           const api = this.esc(p.id);
-          return `<li><button type="button" class="env-anexo-nome" onclick="EnviarNotaApp.escolherPedidoBusca('${api}')"><b>${num}</b></button><small>${p.date ? this.dataBr(String(p.date).slice(0, 10)) : ""} ${p.totalAmount != null ? " · " + this.money(p.totalAmount) : ""}</small></li>`;
+          const dep = this.esc(this.nomeDepartamento(p) || "—");
+          const data = p.date ? this.dataBr(String(p.date).slice(0, 10)) : "—";
+          const valor = p.totalAmount != null ? this.money(p.totalAmount) : "—";
+          return `<tr onclick="EnviarNotaApp.escolherPedidoBusca('${api}')"><td><b>${num}</b></td><td>${data}</td><td class="num">${valor}</td><td>${dep}</td></tr>`;
         }).join("");
-        blocos.push(`<div style="margin-bottom:12px;"><b>${this.esc(nome)}</b><ul class="env-anexos">${linhas}</ul></div>`);
+        blocos.push(`<tr class="env-ped-credor"><td colspan="4">${this.esc(nome)}</td></tr>${linhas}`);
       }
-      box.innerHTML = blocos.length ? blocos.join("") : `<p class="inf-muted">Nenhum pedido em aberto desse credor no seu departamento.</p>`;
+      const vazio = todos
+        ? "Nenhum pedido em aberto desse credor."
+        : "Nenhum pedido em aberto desse credor no seu departamento.";
+      box.innerHTML = blocos.length
+        ? `<table class="env-ped-tab"><thead><tr><th>Pedido</th><th>Data</th><th class="num">Valor</th><th>Departamento</th></tr></thead><tbody>${blocos.join("")}</tbody></table>`
+        : `<p class="inf-muted">${vazio}</p>`;
     } catch (e) {
       box.innerHTML = `<p class="inf-erro">${this.esc((e && e.message) || e)}</p>`;
     }

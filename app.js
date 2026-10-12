@@ -6839,9 +6839,15 @@ async function loadAndApplyPermissions() {
 }
 
 function toggleNavMenu(event, submenuId) {
-  if (event) event.preventDefault();
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
   const nav = document.querySelector(".nav-links");
-  const keepScroll = nav ? nav.scrollTop : 0;
+  const clicked = event && event.currentTarget && event.currentTarget.getBoundingClientRect
+    ? event.currentTarget
+    : null;
+  const topBefore = clicked ? clicked.getBoundingClientRect().top : 0;
 
   // Se a sidebar estiver recolhida, expande ela primeiro
   const sidebar = document.querySelector('.sidebar');
@@ -6861,17 +6867,33 @@ function toggleNavMenu(event, submenuId) {
     const parentGroup = submenu.closest('.nav-group');
     if (submenu.style.display === 'none') {
       submenu.style.display = 'block';
-      if(parentGroup) parentGroup.classList.add('active');
+      if (parentGroup) parentGroup.classList.add('active');
     } else {
       submenu.style.display = 'none';
-      if(parentGroup) parentGroup.classList.remove('active');
+      if (parentGroup) parentGroup.classList.remove('active');
     }
   }
-  const restoreNavScroll = () => {
-    if (nav) nav.scrollTop = keepScroll;
+  const pin = () => {
+    if (!nav || !clicked || !clicked.isConnected) return;
+    const drift = clicked.getBoundingClientRect().top - topBefore;
+    if (Math.abs(drift) > 0.5) nav.scrollTop += drift;
   };
-  restoreNavScroll();
-  requestAnimationFrame(restoreNavScroll);
+  pin();
+  requestAnimationFrame(() => {
+    pin();
+    requestAnimationFrame(pin);
+  });
+  if (nav) {
+    const until = performance.now() + 200;
+    const onScroll = () => {
+      if (performance.now() > until) {
+        nav.removeEventListener("scroll", onScroll);
+        return;
+      }
+      pin();
+    };
+    nav.addEventListener("scroll", onScroll);
+  }
 }
 
 function changeApiMode(mode) {

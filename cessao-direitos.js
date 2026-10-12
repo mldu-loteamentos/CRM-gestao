@@ -1979,8 +1979,49 @@ const CessaoPopup = {
     if (sit.some((s) => pagas.includes(s))) return true;
     const recs = (p.receipts || []).filter((rec) => !(typeof window.isWriteOffReceipt === "function" && window.isWriteOffReceipt(rec)));
     const recebido = recs.reduce((s, rec) => s + (Number(rec.receiptValue || rec.value || 0) || 0), 0);
-    const cb = Number(p.currentBalance != null ? p.currentBalance : p.balanceDue);
-    return Number.isFinite(cb) && cb <= 0.009 && recebido > 0.009;
+    const cb = Number(p.currentBalance != null ? p.currentBalance : (p.balanceDue != null ? p.balanceDue : p.correctedBalance));
+    const saldoZerado = Number.isFinite(cb) && cb <= 0.009;
+    if (saldoZerado && recebido > 0.009) return true;
+    const dataRec = p.receiptDate || p.paymentDate || p.payOffDate || p.lastReceiptDate;
+    if (dataRec && saldoZerado) return true;
+    const recebidoCampo = Number(p.receivedValue || p.totalReceived || p.receiptNetValue || 0);
+    return saldoZerado && recebidoCampo > 0.009;
+  },
+
+  textoSemAcento(s) {
+    return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+  },
+
+  contaEhTaxaCessao(id, nome) {
+    const dig = String(id || "").replace(/\D/g, "");
+    if (dig === "1020106") return true;
+    const t = this.textoSemAcento(nome);
+    return t.includes("TAXA") && t.includes("CESS");
+  },
+
+  categoriasDe(obj) {
+    if (!obj || typeof obj !== "object") return [];
+    return []
+      .concat(Array.isArray(obj.financialCategories) ? obj.financialCategories : [])
+      .concat(Array.isArray(obj.budgetCategories) ? obj.budgetCategories : []);
+  },
+
+  taxaPeloDfc(bill, inst) {
+    const bruto = bill.documentIdentificationId || bill.documentsId || bill.documentIdentification || "";
+    const codigo = String(bruto && typeof bruto === "object" ? (bruto.id || bruto.code || "") : bruto).trim().toUpperCase();
+    const nome = this.textoSemAcento(
+      bill.documentIdentificationName || bill.documentName || (bruto && typeof bruto === "object" ? bruto.name : "") || ""
+    );
+    if (codigo === "TC" || (nome.includes("TAXA") && nome.includes("CESS"))) return codigo === "TC" ? "TC" : "Receita de Taxa de Cessão";
+    const itens = this.categoriasDe(bill).concat((inst || []).reduce((acc, p) => acc.concat(this.categoriasDe(p)), []));
+    const hit = itens.find((c) => this.contaEhTaxaCessao(
+      c && (c.financialCategoryId || c.id || c.accountId),
+      c && (c.financialCategoryName || c.name || c.accountName)
+    ));
+    if (hit) return "Receita de Taxa de Cessão";
+    const notas = this.textoSemAcento([bill.notes, bill.historic, bill.history, bill.observation, bill.observations].filter(Boolean).join(" "));
+    if (notas.includes("TAXA") && notas.includes("CESS")) return "Receita de Taxa de Cessão";
+    return "";
   },
 
   tituloDaTaxaPago(bill, inst) {
@@ -2017,24 +2058,23 @@ const CessaoPopup = {
       } catch (e) {
         inst = [];
       }
-      const bruto = bill.documentId || bill.documentIdentificationId || bill.documentsId || bill.documentIdentification || "";
-      const doc = String((bruto && (bruto.id || bruto.code)) || bruto).trim().toUpperCase();
-      const clienteId = String(bill.customerId || (bill.customer && bill.customer.id) || "");
       const pago = this.tituloDaTaxaPago(bill, inst);
+      const como = this.taxaPeloDfc(bill, inst);
+      const clienteId = String(bill.customerId || (bill.customer && bill.customer.id) || "");
       if (!pago) {
         CessaoPopupState.taxaStatus = "aberta";
         CessaoPopupState.taxaMsg = inst.length
           ? "Título " + id + " ainda tem saldo em aberto. A cessão só gera com a taxa paga."
           : "Encontrei o título " + id + ", mas não consegui confirmar o pagamento.";
-      } else if (doc !== "TC") {
+      } else if (!como) {
         CessaoPopupState.taxaStatus = "nao";
-        CessaoPopupState.taxaMsg = "Título " + id + " está pago, mas o documento é " + (doc || "outro") + ", não TC.";
+        CessaoPopupState.taxaMsg = "Título " + id + " está pago, mas não é Receita de Taxa de Cessão (conta 1.02.01.06) nem documento TC.";
       } else if (!this.idsDoProcesso().has(clienteId)) {
         CessaoPopupState.taxaStatus = "nao";
         CessaoPopupState.taxaMsg = "A taxa não é compatível com as pessoas da cessão.";
       } else {
         CessaoPopupState.taxaStatus = "paga";
-        CessaoPopupState.taxaMsg = "Título " + id + " é TC, está pago e o cliente confere. Pode gerar a cessão.";
+        CessaoPopupState.taxaMsg = "Título " + id + " é taxa de cessão (" + como + "), está pago e o cliente confere. Pode gerar a cessão.";
       }
     } catch (e) {
       CessaoPopupState.taxaStatus = "nao";

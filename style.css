@@ -2370,6 +2370,7 @@ circle.donut-segment {
   padding-right: 5px;
   min-height: 0;
 }
+.nav-links * { overflow-anchor: none; }
 .nav-links::-webkit-scrollbar {
   width: 4px;
 }
@@ -3764,6 +3765,32 @@ circle.donut-segment {
   text-align: center;
 }
 .fc-grid thead th.fc-th-co:hover { background: #0e6a42; }
+.fc-grid thead th.fc-band-1 { background: #0c6b45; }
+.fc-grid thead th.fc-band-1:hover { background: #0a5a3a; }
+.fc-grid thead tr.fc-months th.fc-band-1 { background: #094e34; }
+.fc-grid .fc-gap {
+  width: 14px;
+  min-width: 14px;
+  max-width: 14px;
+  padding: 0;
+  background: #d5dee6;
+  border-bottom-color: #d5dee6;
+  box-shadow: none;
+}
+.fc-grid thead th.fc-gap {
+  background: #d5dee6;
+  cursor: default;
+}
+.fc-grid td.fc-num.fc-co-edge,
+.fc-grid thead th.fc-co-edge {
+  box-shadow: inset 3px 0 0 #fff;
+}
+.fc-grid td.fc-num.fc-band-1 {
+  box-shadow: inset 0 0 0 999px rgba(16, 84, 54, 0.045);
+}
+.fc-grid td.fc-num.fc-band-1.fc-co-edge {
+  box-shadow: inset 3px 0 0 #fff, inset 0 0 0 999px rgba(16, 84, 54, 0.045);
+}
 .fc-grid td.fc-td-name {
   position: sticky;
   left: 0;
@@ -3832,6 +3859,93 @@ circle.donut-segment {
   text-underline-offset: 2px;
   font-size: inherit;
 }
+.fc-rateio-btn {
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  background: transparent;
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.78rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.fc-rateio-btn i { width: 15px; height: 15px; }
+.fc-rateio-btn.is-on { background: #fff; color: #105436; border-color: #fff; }
+#fc-drill-modal .fc-drill-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.8rem;
+}
+#fc-drill-modal .fc-drill-table.is-wide { min-width: 1920px; }
+#fc-drill-modal .fc-drill-c-data { width: 7%; }
+#fc-drill-modal .fc-drill-c-mov { width: 7%; }
+#fc-drill-modal .fc-drill-c-title { width: 34%; }
+#fc-drill-modal .fc-drill-c-emp { width: 7%; }
+#fc-drill-modal .fc-drill-c-cc { width: 16%; }
+#fc-drill-modal .fc-drill-c-hist { width: 22%; }
+#fc-drill-modal .fc-drill-c-num { width: 7%; }
+#fc-drill-modal .fc-drill-c-pct { width: 6%; }
+#fc-drill-modal .fc-drill-c-dfc { width: 7%; }
+#fc-drill-modal .fc-drill-table th {
+  padding: 8px 10px;
+  background: #105436;
+  color: #fff;
+  text-align: left;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+#fc-drill-modal .fc-drill-table th.fc-drill-num,
+#fc-drill-modal .fc-drill-table td.fc-drill-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+#fc-drill-modal .fc-drill-table td {
+  padding: 7px 10px;
+  vertical-align: middle;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 0.8rem;
+}
+#fc-drill-modal .fc-drill-fix { white-space: nowrap; }
+#fc-drill-modal .fc-drill-mov { font-weight: 700; color: #105436; }
+#fc-drill-modal .fc-drill-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+#fc-drill-modal .fc-drill-share {
+  min-width: 0;
+  flex: 1 1 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#fc-drill-modal .fc-title-btn.fc-drill-share { flex: 0 0 auto; max-width: 72%; }
+#fc-drill-modal .fc-drill-party { flex: 1 1 auto; min-width: 0; color: #64748b; font-size: 0.75rem; font-weight: 600; }
+#fc-drill-modal .fc-drill-pair { flex: 0 0 auto; color: #ea580c; }
+#fc-drill-modal .fc-drill-badge {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+#fc-drill-modal .fc-drill-badge.is-abate { background: #ffedd5; color: #c2410c; }
+#fc-drill-modal .fc-drill-badge.is-adiant { background: #dbeafe; color: #1d4ed8; }
 .fc-receber-box {
   background: #fff;
   border-radius: 12px;
@@ -6045,11 +6159,11 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px 10px;
-  margin: 12px 0 0;
+  margin: 0;
   padding: 12px;
-  background: #fff7ed;
+  background: #fff;
   border: 0;
-  border-top: 1px solid #fed7aa;
+  border-top: 1px solid #e2e8f0;
   border-radius: 0;
 }
 .cessao-contrato-dados > label,

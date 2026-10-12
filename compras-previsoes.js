@@ -1232,6 +1232,8 @@ const ComprasPrevisoesApp = {
 
   /** null = pagadoria ou administrador, vê tudo. Lista vazia = sem departamento, não vê nada. */
   departmentWindows() {
+    const imp = typeof window.crmImpersonacaoAtual === "function" ? window.crmImpersonacaoAtual() : null;
+    if (!imp && typeof window.crmAdministradorReal === "function" && window.crmAdministradorReal()) return null;
     const u = this.sessionUser();
     if (!u) return [];
     const profile = u.profile_name || u.profile || u.role || "";
