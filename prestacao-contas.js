@@ -23,6 +23,9 @@ const PrestacaoContasApp = {
   conferencias: null,
   confFiltro: "",
   confAberta: "",
+  guias: {},
+  rastreio: null,
+  GUIAS_CACHE: "crm_pcx_guias_v1",
 
   init() {
     if (this.month === 12 && new Date().getMonth() === 0) this.year = new Date().getFullYear() - 1;
@@ -322,6 +325,193 @@ const PrestacaoContasApp = {
     return { ok: true, motivo: "" };
   },
 
+  /** Pagamento de guia de impostos retidos de terceiros (ISS, IR, PCC, INSS). */
+  ehMovGuia(mov) {
+    if (!mov || !mov.billId) return false;
+    const doc = String(mov.documentIdentificationId || "").trim().toUpperCase();
+    if (["GUIA", "GPS", "DARF", "DAM"].includes(doc)) return true;
+    return (mov.financialCategories || []).some(c =>
+      String(c.financialCategoryId || "").replace(/\D/g, "").startsWith("20903")
+      || /RECOLHIMENTO DE .*TERCEIROS/i.test(String(c.financialCategoryName || "")));
+  },
+
+  /** Notas de origem do imposto pago na guia, no centro de custo informado. */
+  origemGuia(mov, cc) {
+    if (!this.ehMovGuia(mov)) return null;
+    const g = this.guias && this.guias[String(mov.billId)];
+    if (!g || !g.itens) return null;
+    const itens = g.itens.filter(i => String(i.cc) === String(cc));
+    const soma = itens.reduce((s, i) => s + i.valor, 0);
+    return soma > 0.004 ? { guia: g, itens, soma } : null;
+  },
+
+  lerCacheGuias() {
+    try { return JSON.parse(localStorage.getItem(this.GUIAS_CACHE) || "{}") || {}; } catch (e) { return {}; }
+  },
+
+  gravarCacheGuias(mapa) {
+    const ids = Object.keys(mapa).sort((a, b) => (mapa[b].em || 0) - (mapa[a].em || 0)).slice(0, 300);
+    const out = {};
+    ids.forEach(k => { out[k] = mapa[k]; });
+    try { localStorage.setItem(this.GUIAS_CACHE, JSON.stringify(out)); } catch (e) {}
+  },
+
+  async mapLimit(itens, limite, fn) {
+    if (typeof window.siengeMapLimit === "function") return window.siengeMapLimit(itens, limite, fn);
+    const out = new Array(itens.length);
+    let i = 0;
+    await Promise.all(Array.from({ length: Math.max(1, Math.min(limite, itens.length)) }, async () => {
+      while (i < itens.length) { const k = i++; out[k] = await fn(itens[k], k); }
+    }));
+    return out;
+  },
+
+  /** Valor do pagamento por centro de custo, como o movimento foi rateado no Sienge. */
+  valorPorCc(mov) {
+    const fcApp = this.fc();
+    const cats = Array.isArray(mov.financialCategories) ? mov.financialCategories : [];
+    const entries = (fcApp && typeof fcApp.categoryShareEntries === "function")
+      ? fcApp.categoryShareEntries(cats)
+      : cats.map(fc => ({ fc, share: 1 / cats.length }));
+    const out = {};
+    entries.forEach(({ fc, share }) => {
+      if (!fc || fc.costCenterId == null) return;
+      const cc = String(fc.costCenterId);
+      out[cc] = (out[cc] || 0) + Math.abs(Number(mov.bankMovementAmount) || 0) * (Number(share) || 0);
+    });
+    return out;
+  },
+
+  /**
+   * Cada imposto retido numa nota aponta a guia em que foi recolhido (taxGuideBill em /bills/{id}/taxes).
+   * Quando a nota foi rateada entre centros com uma guia por centro, o Sienge repete o imposto cheio em cada guia:
+   * nesse caso vale só a parte do centro da guia.
+   */
+  async rastrearGuias() {
+    if (!window.siengeFetchWithRetry) return;
+    const wanted = new Set((this.costCenterIds || []).map(String));
+    const movs = (this.movements || []).filter(m => this.ehMovGuia(m)
+      && (m.financialCategories || []).some(c => wanted.has(String(c.costCenterId))));
+    if (!movs.length) return;
+    const cache = this.lerCacheGuias();
+    const guias = {};
+    const pendentes = [];
+    [...new Set(movs.map(m => String(m.billId)))].forEach(id => {
+      const c = cache[id];
+      const mov = movs.find(m => String(m.billId) === id);
+      const precisa = Object.keys(this.valorPorCc(mov)).filter(cc => wanted.has(cc));
+      if (c && c.itens && precisa.every(cc => (c.ccsAlvo || []).includes(cc))) guias[id] = c;
+      else pendentes.push(id);
+    });
+    this.guias = Object.assign({}, this.guias, guias);
+    if (!pendentes.length) return;
+
+    this.rastreio = { msg: `Rastreando a origem de ${pendentes.length} guia(s) de impostos…` };
+    this.render();
+    const lista = pendentes;
+    const cabecalhos = await this.mapLimit(lista, 3, async (id) => {
+      try { return await window.siengeFetchWithRetry(`/bills/${encodeURIComponent(id)}`, 3); } catch (e) { return null; }
+    });
+    const novas = {};
+    cabecalhos.forEach((b, i) => {
+      if (!b || String(b.originId || "").toUpperCase() !== "GI") return;
+      const mov = movs.find(m => String(m.billId) === lista[i]);
+      novas[lista[i]] = {
+        id: lista[i],
+        doc: [String(b.documentIdentificationId || "").trim(), String(b.documentNumber || "").trim()].filter(Boolean).join(" "),
+        emissao: String(b.issueDate || "").slice(0, 10),
+        total: Number(b.totalInvoiceAmount) || 0,
+        porCcPago: mov ? this.valorPorCc(mov) : {},
+        itens: []
+      };
+    });
+    const ids = Object.keys(novas);
+    if (!ids.length) { this.rastreio = null; return; }
+
+    ids.forEach(id => { novas[id].ccsAlvo = Object.keys(novas[id].porCcPago).filter(cc => wanted.has(cc)); });
+    const ccs = [...new Set(ids.flatMap(id => novas[id].ccsAlvo))];
+    if (!ccs.length) { this.rastreio = null; return; }
+    const emissoes = ids.map(id => novas[id].emissao).filter(Boolean).sort();
+    const fim = emissoes[emissoes.length - 1] || this.periodBounds().end;
+    const ini = new Date(Number(emissoes[0].slice(0, 4)), Number(emissoes[0].slice(5, 7)) - 5, 1);
+    const pad = n => String(n).padStart(2, "0");
+    const inicio = `${ini.getFullYear()}-${pad(ini.getMonth() + 1)}-01`;
+    const url = `/bulk-data/v1/outcome?startDate=${inicio}&endDate=${fim}&selectionType=I&correctionIndexerId=0&correctionDate=2023-01-01`
+      + `&companyId=${encodeURIComponent(this.companyId)}&costCentersId=${ccs.join(",")}`;
+    const res = await window.siengeFetchWithRetry(url, 4);
+    const linhas = (res && (res.data || res)) || [];
+    const notas = new Map();
+    (Array.isArray(linhas) ? linhas : []).forEach(b => {
+      if (!b || b.billId == null || notas.has(String(b.billId))) return;
+      if (!(Number(b.taxAmount) > 0.004)) return;
+      if (String(b.originId || "").toUpperCase() === "GI") return;
+      notas.set(String(b.billId), {
+        doc: [String(b.documentIdentificationId || "").trim(), String(b.documentNumber || "").trim()].filter(Boolean).join("/"),
+        credor: String(b.creditorName || "").trim(),
+        cats: (b.paymentsCategories || []).map(c => ({
+          cc: String(c.costCenterId),
+          conta: String(c.financialCategoryId || "").trim(),
+          nome: c.financialCategoryName || this.catName(c.financialCategoryId) || "",
+          rate: Number(c.financialCategoryRate) || 0
+        }))
+      });
+    });
+    const candidatas = [...notas.keys()];
+    let feitas = 0;
+    let falhou = false;
+    this.rastreio = { msg: `Rastreando a origem das guias: lendo os impostos de ${candidatas.length} nota(s)…` };
+    this.render();
+    const impostos = await this.mapLimit(candidatas, 4, async (billId) => {
+      let r = null;
+      try {
+        r = await window.siengeFetchWithRetry(`/bills/${encodeURIComponent(billId)}/taxes?limit=100`, 5);
+      } catch (e) {
+        if (!(Number(e && e.status) === 404 || /\b404\b/.test(String(e && e.message || "")))) falhou = true;
+        r = null;
+      }
+      feitas++;
+      if (feitas % 10 === 0) {
+        this.rastreio = { msg: `Rastreando a origem das guias: ${feitas} de ${candidatas.length} nota(s)…` };
+        const el = document.getElementById("pc-rastreio");
+        if (el) el.textContent = this.rastreio.msg;
+      }
+      return ((r && (r.results || r.data)) || []).filter(t => t && t.taxGuideBill != null);
+    });
+    candidatas.forEach((billId, i) => {
+      const nota = notas.get(billId);
+      const taxas = impostos[i] || [];
+      taxas.forEach(t => {
+        const g = novas[String(t.taxGuideBill)];
+        if (!g) return;
+        const valor = Number(t.amount) || 0;
+        if (!(valor > 0.004)) return;
+        const repetido = taxas.filter(x => x.taxId === t.taxId && Math.abs((Number(x.amount) || 0) - valor) < 0.005
+          && String(x.taxGuideBill) !== String(t.taxGuideBill)).length > 0;
+        const ccsGuia = new Set(g.ccsAlvo);
+        nota.cats.filter(c => ccsGuia.has(c.cc)).forEach(c => {
+          const parte = valor * c.rate / 100;
+          if (!(parte > 0.004)) return;
+          g.itens.push({
+            billId, doc: nota.doc, credor: nota.credor, imposto: String(t.taxId || "").toUpperCase(),
+            cc: c.cc, conta: c.conta, nome: c.nome, valor: parte, repetido
+          });
+        });
+      });
+    });
+    const agora = Date.now();
+    ids.forEach(id => {
+      const g = novas[id];
+      g.em = agora;
+      g.somaOrigens = g.itens.reduce((s, it) => s + it.valor, 0);
+      g.pagoAlvo = g.ccsAlvo.reduce((s, cc) => s + (g.porCcPago[cc] || 0), 0);
+      g.fechou = Math.abs(g.somaOrigens - g.pagoAlvo) <= 0.05;
+      if (g.itens.length && !falhou) cache[id] = g;
+    });
+    this.gravarCacheGuias(cache);
+    this.guias = Object.assign({}, this.guias, novas);
+    this.rastreio = null;
+  },
+
   montarConferencia() {
     const vazio = { receitas: [], despesas: [] };
     const wanted = new Set((this.costCenterIds || []).map(String));
@@ -352,8 +542,29 @@ const PrestacaoContasApp = {
         const conta = String(fc.financialCategoryId || "").trim();
         const nat = this.naturezaConta(conta, sinal);
         const k = obra + "|" + nat;
-        const g = grupos[k] || (grupos[k] = { obra, nat, porCc: {}, contas: [], foraTotal: 0 });
+        const g = grupos[k] || (grupos[k] = { obra, nat, porCc: {}, contas: [], foraTotal: 0, guia: null });
         const valor = Math.abs(amount) * (Number(share) || 0);
+        const og = this.origemGuia(mov, cc);
+        if (og) {
+          g.guia = og.guia;
+          og.itens.forEach(it => {
+            const parte = valor * it.valor / og.soma;
+            const am = this.contaAmarrada(it.conta, cc, ctx);
+            g.contas.push({
+              codigo: it.conta ? this.formatAccountCode(it.conta) : "—",
+              nome: it.nome || this.catName(it.conta) || "Sem nome",
+              cc,
+              ccNome: fc.costCenterName || this.ccNome(cc),
+              valor: parte,
+              amarrada: am.ok,
+              motivo: am.motivo,
+              origem: { doc: it.doc, credor: it.credor, imposto: it.imposto, billId: it.billId }
+            });
+            if (am.ok) g.porCc[cc] = (g.porCc[cc] || 0) + parte;
+            else g.foraTotal += parte;
+          });
+          return;
+        }
         const amarra = this.contaAmarrada(conta, cc, ctx);
         g.contas.push({
           codigo: conta ? this.formatAccountCode(conta) : "—",
@@ -413,6 +624,7 @@ const PrestacaoContasApp = {
           foraTotal: g.foraTotal,
           linhas,
           contas: g.contas,
+          guia: g.guia,
           motivo: motivos.join(" · "),
           status
         };
@@ -491,7 +703,11 @@ const PrestacaoContasApp = {
         const obra = PP.obraForCostCenter(part, fc.costCenterId)
           || (part.obras && part.obras[0])
           || null;
-        if (obra) {
+        const og = obra ? this.origemGuia(mov, fc.costCenterId) : null;
+        if (og) {
+          factor = og.itens.reduce((s, it) => s + it.valor * PP.partnershipAmountFactor(part, obra, it.conta), 0) / og.soma;
+          if (!(factor > 0)) return null;
+        } else if (obra) {
           if (!PP.accountEntersPartnership(part, obra, categoryId)) return null;
           factor = PP.partnershipAmountFactor(part, obra, categoryId);
           if (!factor) return null;
@@ -684,6 +900,7 @@ const PrestacaoContasApp = {
     }
     this.loading = true;
     this.error = "";
+    this.rastreio = null;
     this.selectedAccount = null;
     this.render();
     const { start, end } = this.periodBounds();
@@ -704,6 +921,13 @@ const PrestacaoContasApp = {
       } else if (this.unmatchedInfo && Math.abs(this.unmatchedInfo.total) > 0.005) {
         this.error = "";
       }
+      try {
+        await this.rastrearGuias();
+      } catch (e) {
+        console.warn("[Prestação de Contas] Origem das guias:", e);
+        this.rastreio = { msg: "Não foi possível rastrear a origem das guias de impostos. Elas seguem pela conta da própria guia.", erro: true };
+      }
+      this.rebuildFromMovements();
     } catch (err) {
       console.error("[Prestação de Contas]", err);
       this.error = err && err.message ? err.message : "Falha ao consultar a API de movimento bancário.";
@@ -797,6 +1021,7 @@ const PrestacaoContasApp = {
         </div>
 
         ${this.error ? `<div class="pcx-alert is-error">${this.esc(this.error)}</div>` : ""}
+        ${this.rastreio ? `<div class="pcx-alert ${this.rastreio.erro ? "is-warn" : "is-info"}">${this.rastreio.erro ? "" : '<span class="pcx-spin"></span>'}<span id="pc-rastreio">${this.esc(this.rastreio.msg)}</span></div>` : ""}
 
         <div class="ml-tabs pcx-tabs" role="tablist">
           ${tab("receb", "arrow-down-circle", "Recebimentos", nFora(conf.receitas))}
@@ -961,16 +1186,50 @@ const PrestacaoContasApp = {
       ["Conta bancária", r.contaBanco || "—"]
     ];
     const aviso = r.status === "na"
-      ? "Nenhuma conta deste lançamento está amarrada nas Configurações, por isso não há rateio a conferir."
-      : (r.foraTotal > 0.004 ? `${this.fmt(r.foraTotal)} em contas sem amarração ficaram fora da conferência.` : "");
-    const contas = (r.contas || []).map(c => `<tr>
+      ? (r.guia
+        ? "Nenhuma nota de origem desta guia tem plano financeiro amarrado nas Configurações, por isso o imposto não vai para o parceiro."
+        : "Nenhuma conta deste lançamento está amarrada nas Configurações, por isso não há rateio a conferir.")
+      : (r.foraTotal > 0.004
+        ? (r.guia
+          ? `${this.fmt(r.foraTotal)} do imposto vêm de notas cujo plano financeiro não entra no rateio e ficaram fora.`
+          : `${this.fmt(r.foraTotal)} em contas sem amarração ficaram fora da conferência.`)
+        : "");
+    const g = r.guia;
+    const configHtml = (c) => c.amarrada
+      ? '<span class="pcx-selo is-ok">Entra no rateio</span>'
+      : `<span class="pcx-selo is-na">${this.esc(c.motivo || "Fora da configuração")}</span>`;
+    let guiaHtml = "";
+    let guiaAviso = "";
+    if (g) {
+      const pago = Number(g.pagoAlvo) || 0;
+      const dif = (g.somaOrigens || 0) - pago;
+      const origens = (r.contas || []).filter(c => c.origem).map(c => `<tr>
+        <td class="pcx-orig-doc">${this.esc(c.origem.doc)}</td>
+        <td>${this.esc(c.origem.credor)}</td>
+        <td>${this.esc(c.origem.imposto)}</td>
+        <td><span class="pcx-cod">${this.esc(c.codigo)}</span> ${this.esc(c.nome)}</td>
+        <td>${this.esc(c.cc)}</td>
+        <td class="is-right">${this.fmt(c.valor)}</td>
+        <td>${configHtml(c)}</td>
+      </tr>`).join("");
+      guiaAviso = `
+        <div class="pcx-det-aviso">Guia unificada <strong>${this.esc(g.doc)}</strong>: o imposto foi distribuído pelas notas fiscais de origem. Vai para o parceiro só o imposto das notas cujo plano financeiro entra no rateio.</div>
+        ${Math.abs(dif) > 0.05 ? `<div class="pcx-det-aviso is-warn">As notas de origem somam ${this.fmt(g.somaOrigens)} e a guia pagou ${this.fmt(pago)} nestes centros. A diferença de ${this.fmt(Math.abs(dif))} foi distribuída na mesma proporção das notas. A guia pode ter sido ajustada à mão no Sienge.</div>` : ""}`;
+      guiaHtml = `
+        <div class="pcx-det-full">
+          <div class="pcx-det-tit">Origem do imposto</div>
+          <table class="pcx-mini">
+            <thead><tr><th>Nota</th><th>Credor</th><th>Imposto</th><th>Plano financeiro da nota</th><th>C.C.</th><th class="is-right">Valor nesta guia</th><th>Configuração</th></tr></thead>
+            <tbody>${origens}</tbody>
+          </table>
+        </div>`;
+    }
+    const contas = (r.contas || []).filter(c => !c.origem).map(c => `<tr>
       <td class="pcx-cod">${this.esc(c.codigo)}</td>
       <td>${this.esc(c.nome)}</td>
       <td>${this.esc(c.cc)}${c.ccNome ? ` · ${this.esc(c.ccNome)}` : ""}</td>
       <td class="is-right">${this.fmt(c.valor)}</td>
-      <td>${c.amarrada
-        ? '<span class="pcx-selo is-ok">Entra no rateio</span>'
-        : `<span class="pcx-selo is-na">${this.esc(c.motivo || "Fora da configuração")}</span>`}</td>
+      <td>${configHtml(c)}</td>
     </tr>`).join("");
     const centros = (r.linhas || []).map(l => {
       const dif = l.esperado == null ? null : l.atual - l.esperado;
@@ -987,15 +1246,17 @@ const PrestacaoContasApp = {
       <div class="pcx-det-info">
         ${info.map(([k, v]) => `<div><span>${k}</span><strong>${this.esc(v)}</strong></div>`).join("")}
       </div>
+      ${guiaAviso}
       ${aviso ? `<div class="pcx-det-aviso">${aviso}</div>` : ""}
-      <div class="pcx-det-grid">
-        <div>
+      ${guiaHtml}
+      <div class="pcx-det-grid${g ? " pcx-det-full" : ""}">
+        ${g && !contas ? "" : `<div>
           <div class="pcx-det-tit">Plano financeiro</div>
           <table class="pcx-mini">
             <thead><tr><th>Código</th><th>Conta</th><th>Centro de custo</th><th class="is-right">Valor</th><th>Configuração</th></tr></thead>
             <tbody>${contas || '<tr><td colspan="5" class="pcx-mute">Sem contas</td></tr>'}</tbody>
           </table>
-        </div>
+        </div>`}
         ${centros ? `<div>
           <div class="pcx-det-tit">Rateio nos centros</div>
           <table class="pcx-mini">

@@ -35421,13 +35421,66 @@ window.selectDocTemplate = function(type) {
   if (editorEl) editorEl.classList.add('active');
 };
 
+['focusin', 'click', 'keyup'].forEach(ev => document.addEventListener(ev, (e) => {
+  const t = e.target;
+  if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT') && t.closest && t.closest('#doc-editor-area')) {
+    window._docPadraoCampo = t;
+  }
+}));
+
 window.copyVar = function(el) {
-  const text = el.innerText;
-  navigator.clipboard.writeText(text).then(() => {
-    const oldText = el.innerText;
-    el.innerText = 'Copiado!';
-    setTimeout(() => { el.innerText = oldText; }, 1000);
+  if (!el.dataset.var) el.dataset.var = el.innerText.trim();
+  const text = el.dataset.var;
+  const form = document.querySelector('#tab-doc-padrao .doc-editor-form.active');
+  const alvo = window._docPadraoCampo;
+  let inserido = false;
+  if (alvo && form && form.contains(alvo) && typeof alvo.selectionStart === 'number') {
+    const ini = alvo.selectionStart;
+    const fim = alvo.selectionEnd;
+    alvo.value = alvo.value.slice(0, ini) + text + alvo.value.slice(fim);
+    alvo.focus();
+    alvo.setSelectionRange(ini + text.length, ini + text.length);
+    inserido = true;
+  }
+  if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
+  el.classList.add('is-feito');
+  el.innerText = inserido ? 'Inserido' : 'Copiado';
+  clearTimeout(el._docVarTimer);
+  el._docVarTimer = setTimeout(() => { el.innerText = text; el.classList.remove('is-feito'); }, 900);
+};
+
+window.filtrarVarsDocPadrao = function(q) {
+  const lista = document.getElementById('doc-variables-list');
+  if (!lista) return;
+  const termo = String(q || '').trim().toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[{}\s]/g, '_');
+  let titulo = null;
+  let visiveisNoGrupo = 0;
+  let total = 0;
+  const fecharGrupo = () => { if (titulo) titulo.style.display = visiveisNoGrupo ? '' : 'none'; };
+  Array.from(lista.children).forEach(el => {
+    if (el.classList.contains('var-pill-group-title')) {
+      fecharGrupo();
+      titulo = el;
+      visiveisNoGrupo = 0;
+    } else if (el.classList.contains('var-pill')) {
+      if (!el.dataset.var) el.dataset.var = el.innerText.trim();
+      const ok = !termo || el.dataset.var.includes(termo);
+      el.style.display = ok ? '' : 'none';
+      if (ok) { visiveisNoGrupo++; total++; }
+    }
   });
+  fecharGrupo();
+  let vazio = lista.querySelector('.doc-vars-vazio');
+  if (!total) {
+    if (!vazio) {
+      vazio = document.createElement('div');
+      vazio.className = 'doc-vars-vazio';
+      vazio.textContent = 'Nenhuma variável encontrada.';
+      lista.appendChild(vazio);
+    }
+  } else if (vazio) {
+    vazio.remove();
+  }
 };
 
 window.wrapDocPadraoBold = function(textareaId) {

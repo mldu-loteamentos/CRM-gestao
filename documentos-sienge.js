@@ -163,10 +163,22 @@ const DocumentosSiengeApp = {
   },
 
   renderStatus() {
-    const el = document.getElementById("dsg-status");
+    const el = document.getElementById("dsg-kpis");
     if (!el) return;
-    const n = this.items.filter((d) => this.exigeCiencia(d.id)).length;
-    el.textContent = this.loading ? "Carregando…" : (this.error || `${this.items.length} documento(s) · ${n} exige(m) ciência`);
+    const ajustes = this.ajustes().byId;
+    const ativos = this.items.filter((d) => d.ativo);
+    const exigem = ativos.filter((d) => this.exigeCiencia(d.id)).length;
+    const diferentes = ativos.filter((d) => ajustes[d.id] && typeof ajustes[d.id].ciencia === "boolean").length;
+    const kpi = (rot, val, cls) => `
+      <div class="ppcc-kpi">
+        <span class="ppcc-kpi-rot">${rot}</span>
+        <span class="ppcc-kpi-val${cls ? " " + cls : ""}">${val}</span>
+      </div>`;
+    el.innerHTML = this.loading && !this.items.length
+      ? kpi("Documentos", "…")
+      : kpi("Documentos ativos", ativos.length) +
+        kpi("Exigem ciência", exigem, "is-pos") +
+        kpi("Diferentes do Sienge", diferentes, diferentes ? "is-alerta" : "");
   },
 
   renderTable() {
@@ -177,20 +189,29 @@ const DocumentosSiengeApp = {
     tbody.innerHTML = rows.length ? rows.map((d) => {
       const on = this.exigeCiencia(d.id);
       const mudado = ajustes[d.id] && typeof ajustes[d.id].ciencia === "boolean";
-      return `<tr${d.ativo ? "" : ' style="opacity:.55"'}>
-        <td class="cpag-td-code">${this.esc(d.id)}</td>
-        <td><div class="cpag-name">${this.esc(d.nome)}</div>${d.ativo ? "" : `<div class="cpag-desc">Inativo no Sienge</div>`}</td>
-        <td><span class="cpag-desc">${d.soDosTitulos ? "Sem acesso à API" : (d.cienciaSienge ? "Exige ciência" : "Não exige")}</span></td>
+      const sienge = d.soDosTitulos
+        ? `<span class="dsg-tag">Sem acesso à API</span>`
+        : `<span class="dsg-tag${d.cienciaSienge ? " is-on" : ""}">${d.cienciaSienge ? "Exige ciência" : "Não exige"}</span>`;
+      const notas = [
+        d.ativo ? "" : "Inativo no Sienge",
+        d.soDosTitulos || d.pagamento ? "" : "Não usado em contas a pagar"
+      ].filter(Boolean).join(" · ");
+      return `<tr class="${d.ativo ? "" : "dsg-inativo"}">
+        <td class="dsg-cod">${this.esc(d.id)}</td>
+        <td class="dsg-nome">${this.esc(d.nome)}${notas ? `<small>${notas}</small>` : ""}</td>
+        <td>${sienge}</td>
         <td>
-          <label class="moura-switch" title="Exige ciência antes da autorização">
-            <input type="checkbox" ${on ? "checked" : ""} onchange="DocumentosSiengeApp.setCiencia('${this.esc(d.id)}', this.checked)">
-            <span class="moura-switch-track" aria-hidden="true"></span>
-            <span class="moura-switch-text">${on ? "Exige ciência" : "Não exige"}</span>
-          </label>
-          ${mudado ? `<div class="cpag-desc">Diferente do Sienge</div>` : ""}
+          <div class="dsg-ciencia">
+            <label class="moura-switch" title="Exige ciência antes da autorização">
+              <input type="checkbox" ${on ? "checked" : ""} onchange="DocumentosSiengeApp.setCiencia('${this.esc(d.id)}', this.checked)">
+              <span class="moura-switch-track" aria-hidden="true"></span>
+              <span class="moura-switch-text">${on ? "Exige ciência" : "Não exige"}</span>
+            </label>
+            ${mudado ? `<span class="dsg-mudado" title="Ajustado no CRM; o cadastro do Sienge está diferente">Diferente do Sienge</span>` : ""}
+          </div>
         </td>
       </tr>`;
-    }).join("") : `<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:28px;">${this.loading ? "Carregando…" : this.esc(this.error || "Nenhum documento encontrado.")}</td></tr>`;
+    }).join("") : `<tr><td colspan="4" class="dsg-vazio">${this.loading ? "Carregando…" : this.esc(this.error || "Nenhum documento encontrado.")}</td></tr>`;
     this.renderStatus();
   },
 
@@ -198,36 +219,49 @@ const DocumentosSiengeApp = {
     const root = document.getElementById("documentos-sienge-root");
     if (!root) return;
     root.innerHTML = `
-      <div class="cpag-page">
-        <div class="cpag-toolbar">
-          <input class="form-control cpag-search" placeholder="Filtrar por código ou nome…" value="${this.esc(this.q)}"
-            oninput="DocumentosSiengeApp.q=this.value;DocumentosSiengeApp.renderTable()">
-          <label class="cpag-status" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
-            <input type="checkbox" ${this.inativos ? "checked" : ""} onchange="DocumentosSiengeApp.inativos=this.checked;DocumentosSiengeApp.renderTable()"> Mostrar inativos
-          </label>
-          <span id="dsg-status" class="cpag-status"></span>
-          <button type="button" class="btn btn-primary cpag-refresh" onclick="DocumentosSiengeApp.reload()" ${this.loading ? "disabled" : ""}>
-            <i data-lucide="refresh-cw" style="width:14px;"></i> Atualizar do Sienge
-          </button>
-        </div>
-        <p class="cpag-desc" style="margin:0 0 10px;">A ciência é dada no Sienge antes da autorização do título. O padrão de cada documento vem do cadastro do Sienge; o que for alterado aqui vale para o Gerar Pagamento.</p>
-        ${this.semAcesso ? `<div class="crm-card" style="margin:0 0 10px;padding:10px 14px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:0.82rem;line-height:1.45;">
-          <b>O Sienge negou acesso à lista de documentos (erro 403).</b> O usuário de API do CRM não tem permissão no recurso
-          <b>Documentos</b> (<code>document-identifications</code>). Peça para liberar em Sienge &gt; Integrações &gt; Usuários de API &gt; editar o usuário &gt; recursos permitidos, e depois clique em Atualizar do Sienge.
-          ${this.items.length ? `<br>Enquanto isso, a lista abaixo traz os documentos que já apareceram nos títulos do Gerar Pagamento: marque à mão os que exigem ciência.` : `<br>Enquanto isso, abra o Gerar Pagamento uma vez: os documentos dos títulos aparecem aqui e você marca à mão os que exigem ciência.`}
-        </div>` : ""}
-        <div class="crm-card cpag-card">
-          <div class="crm-scroll-table cpag-table-wrap">
-            <table class="custom-table cpag-table">
-              <thead><tr>
-                <th class="cpag-col-code">Código</th>
-                <th>Documento</th>
-                <th class="cpag-col-flag">No Sienge</th>
-                <th class="cpag-col-flag">Ciência no título a pagar</th>
-              </tr></thead>
-              <tbody id="dsg-tbody"></tbody>
-            </table>
+      <div class="cc-page">
+        <div class="cc-toolbar ppcc-toolbar">
+          <div class="ppcc-busca">
+            <i data-lucide="search" class="ppcc-busca-ico"></i>
+            <input type="search" placeholder="Buscar por código ou nome" value="${this.esc(this.q)}" aria-label="Buscar documento"
+              oninput="DocumentosSiengeApp.q=this.value;DocumentosSiengeApp.renderTable()">
           </div>
+          <div class="cc-toolbar-actions">
+            <label class="cc-parceiros">
+              <input type="checkbox" ${this.inativos ? "checked" : ""} onchange="DocumentosSiengeApp.inativos=this.checked;DocumentosSiengeApp.renderTable()">
+              Mostrar inativos
+            </label>
+            <button type="button" class="btn btn-primary cc-atualizar" onclick="DocumentosSiengeApp.reload()" ${this.loading ? "disabled" : ""}>
+              <i data-lucide="refresh-cw" style="width:14px;height:14px;"></i> ${this.loading ? "Atualizando…" : "Atualizar do Sienge"}
+            </button>
+          </div>
+        </div>
+        <div class="ppcc-head">
+          <div>
+            <div class="ppcc-titulo">Ciência no título a pagar</div>
+            <div class="ppcc-sub">A ciência é dada no Sienge antes da autorização do título. O padrão de cada documento vem do cadastro do Sienge; o que for alterado aqui vale para o Gerar Pagamento.</div>
+          </div>
+          <div class="ppcc-kpis" id="dsg-kpis"></div>
+        </div>
+        ${this.semAcesso ? `<div class="dsg-aviso">
+          <i data-lucide="shield-alert" style="width:18px;height:18px;flex-shrink:0;"></i>
+          <div>
+            <b>O Sienge negou acesso à lista de documentos (erro 403).</b> O usuário de API do CRM não tem permissão no recurso
+            <b>Documentos</b> (<code>document-identifications</code>). Peça para liberar em Sienge &gt; Integrações &gt; Usuários de API &gt; editar o usuário &gt; recursos permitidos, e depois clique em Atualizar do Sienge.
+            ${this.items.length ? `<br>Enquanto isso, a lista abaixo traz os documentos que já apareceram nos títulos do Gerar Pagamento: marque à mão os que exigem ciência.` : `<br>Enquanto isso, abra o Gerar Pagamento uma vez: os documentos dos títulos aparecem aqui e você marca à mão os que exigem ciência.`}
+          </div>
+        </div>` : ""}
+        <div class="cc-scroll dsg-scroll">
+          <table class="cc-table dsg-table">
+            <colgroup><col class="dsg-c-cod"><col><col class="dsg-c-sienge"><col class="dsg-c-ciencia"></colgroup>
+            <thead><tr>
+              <th>Código</th>
+              <th>Documento</th>
+              <th>No Sienge</th>
+              <th>Ciência no título a pagar</th>
+            </tr></thead>
+            <tbody id="dsg-tbody"></tbody>
+          </table>
         </div>
       </div>`;
     this.renderTable();

@@ -20,7 +20,8 @@ const IndexadoresApp = {
     'INCC-DI': 192 // Can refine later if needed
   },
 
-  async loadData() {
+  async loadData(forcar = false) {
+    if (forcar) IndexadoresState.bcbData = {};
     IndexadoresState.loading = true;
     this.render();
 
@@ -116,7 +117,7 @@ const IndexadoresApp = {
       const isChecked = activeNames.includes(idx.name) ? 'checked' : '';
       return `
         <label style="display:flex; align-items:center; gap:8px; padding: 10px; border-bottom: 1px solid #f1f5f9; cursor:pointer; background: #fff; transition: background 0.2s;">
-          <input type="checkbox" value="${idx.name}" class="idx-setting-cb" ${isChecked} style="width:16px; height:16px; accent-color:#0f172a;">
+          <input type="checkbox" value="${idx.name}" class="idx-setting-cb" ${isChecked} style="width:16px; height:16px; accent-color:#105436;">
           <span style="font-size: 0.95rem; font-weight:500; color:#1e293b;">${idx.name} <span style="color:#94a3b8; font-size:0.75rem; font-weight:400;">(ID: ${idx.id})</span></span>
         </label>
       `;
@@ -231,112 +232,114 @@ const IndexadoresApp = {
     if (container) container.innerHTML = '';
   },
 
+  esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  },
+
+  serieBcb(name) {
+    const nameUpper = String(name || '').toUpperCase();
+    for (const key in this.bcbSeriesMapping) {
+      if (nameUpper === key || nameUpper.includes(key)) return this.bcbSeriesMapping[key];
+    }
+    return null;
+  },
+
+  /** Acrescenta a cada mês o acumulado no ano e o acumulado dos últimos 12 meses. */
+  enriquecer(data) {
+    let anoAtual = null;
+    let accAno = 1;
+    return (data || []).map((d, index) => {
+      const year = d.data.split('/')[2];
+      if (year !== anoAtual) {
+        anoAtual = year;
+        accAno = 1;
+      }
+      accAno *= 1 + parseFloat(d.valor) / 100;
+      let acc12 = 1;
+      for (let j = index; j >= 0 && j > index - 12; j--) acc12 *= 1 + parseFloat(data[j].valor) / 100;
+      return { ...d, year, accAno: ((accAno - 1) * 100).toFixed(4), acc12m: ((acc12 - 1) * 100).toFixed(4) };
+    });
+  },
+
+  sinal(v) {
+    return parseFloat(v) < 0 ? 'is-neg' : '';
+  },
+
+  /** Linhas do mais recente para o mais antigo, com uma faixa por ano mostrando o acumulado do ano. */
+  linhasHtml(lista) {
+    let ano = null;
+    return lista.map((r) => {
+      let faixa = '';
+      if (r.year !== ano) {
+        ano = r.year;
+        faixa = `
+          <tr class="idx-ano" data-year="${r.year}">
+            <td colspan="4">
+              <div class="idx-ano-linha">
+                <strong>${r.year}</strong>
+                <span>Acumulado no ano <b class="${this.sinal(r.accAno)}">${this.formatNumber(r.accAno)}%</b></span>
+              </div>
+            </td>
+          </tr>`;
+      }
+      return faixa + `
+          <tr data-year="${r.year}">
+            <td class="idx-mes">${this.formatDate(r.data)}</td>
+            <td class="is-right idx-taxa ${this.sinal(r.valor)}">${this.formatNumber(r.valor)}%</td>
+            <td class="is-right ${this.sinal(r.accAno)}">${this.formatNumber(r.accAno)}%</td>
+            <td class="is-right ${this.sinal(r.acc12m)}">${this.formatNumber(r.acc12m)}%</td>
+          </tr>`;
+    }).join('');
+  },
+
+  tabelaHtml(lista, tbodyId) {
+    return `
+      <table class="cc-table idx-table">
+        <colgroup><col class="idx-c-mes"><col><col><col></colgroup>
+        <thead>
+          <tr>
+            <th>Mês/ano</th>
+            <th class="is-right">Taxa do mês</th>
+            <th class="is-right">Acumulado no ano</th>
+            <th class="is-right">Acumulado 12 meses</th>
+          </tr>
+        </thead>
+        <tbody${tbodyId ? ` id="${tbodyId}"` : ''}>${this.linhasHtml(lista)}</tbody>
+      </table>`;
+  },
+
   renderHistoryModal() {
     const name = IndexadoresState.viewingHistory;
     if (!name) return;
 
-    const data = IndexadoresState.bcbData[name] || [];
-    let currentYearAcc = null;
-    let accYearVal = 1;
-    const enrichedData = data.map((d, index) => {
-      const year = d.data.split('/')[2];
-      if (year !== currentYearAcc) {
-        currentYearAcc = year;
-        accYearVal = 1;
-      }
-      accYearVal = accYearVal * (1 + (parseFloat(d.valor)/100));
-
-      let acc12mVal = 1;
-      let monthsCount = 0;
-      for (let j = index; j >= 0 && monthsCount < 12; j--) {
-        acc12mVal = acc12mVal * (1 + (parseFloat(data[j].valor)/100));
-        monthsCount++;
-      }
-      const acc12mStr = monthsCount > 0 ? ((acc12mVal - 1) * 100).toFixed(4) : "0.0000";
-
-      return {
-        ...d,
-        year,
-        accAno: ((accYearVal - 1) * 100).toFixed(4),
-        acc12m: acc12mStr
-      };
-    });
-
-    // Sort descending for display (newest first)
-    const reversedData = [...enrichedData].reverse();
-
-    let rowsHtml = '';
-    let currentYearTracking = null;
-    let yearTotal = '';
-
-    for (let i = 0; i < reversedData.length; i++) {
-      const d = reversedData[i];
-      if (currentYearTracking !== d.year) {
-        currentYearTracking = d.year;
-        yearTotal = d.accAno;
-      }
-
-      rowsHtml += `
-        <tr data-year="${d.year}">
-          <td style="padding: 8px 20px; text-align: center; border-bottom: 1px solid #e2e8f0;">${IndexadoresApp.formatDate(d.data)}</td>
-          <td style="padding: 8px 20px; text-align: center; border-bottom: 1px solid #e2e8f0; font-weight: bold;">${IndexadoresApp.formatNumber(d.valor)}%</td>
-          <td style="padding: 8px 20px; text-align: center; border-bottom: 1px solid #e2e8f0; color: #64748b; font-weight: 500;">${IndexadoresApp.formatNumber(d.accAno)}%</td>
-          <td style="padding: 8px 20px; text-align: center; border-bottom: 1px solid #e2e8f0; color: #64748b; font-weight: 500;">${IndexadoresApp.formatNumber(d.acc12m)}%</td>
-        </tr>
-      `;
-
-      const nextData = reversedData[i+1];
-      if (!nextData || nextData.year !== currentYearTracking) {
-         rowsHtml += `
-           <tr data-year="${currentYearTracking}" style="background-color: #f0fdf4; font-weight: bold; color: #166534;">
-             <td style="padding: 8px 20px; text-align: right; border-bottom: 2px solid #cbd5e1;">TOTAL ${currentYearTracking}:</td>
-             <td style="padding: 8px 20px; text-align: center; border-bottom: 2px solid #cbd5e1;"></td>
-             <td style="padding: 8px 20px; text-align: center; border-bottom: 2px solid #cbd5e1;">${IndexadoresApp.formatNumber(yearTotal)}%</td>
-             <td style="padding: 8px 20px; text-align: center; border-bottom: 2px solid #cbd5e1;"></td>
-           </tr>
-         `;
-      }
-    }
+    const lista = this.enriquecer(IndexadoresState.bcbData[name] || []).reverse();
+    const anos = [...new Set(lista.map((d) => d.year))];
+    const maisAntigo = lista.length ? this.formatDate(lista[lista.length - 1].data) : '';
 
     const modalHtml = `
-      <div id="idx-history-modal-overlay" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.6); z-index: 10000; display: flex; justify-content: center; align-items: center;">
-        <div style="background: white; border-radius: 8px; width: 650px; max-width: 90%; max-height: 90vh; box-shadow: 0 4px 15px rgba(0,0,0,0.3); display: flex; flex-direction: column;">
-          <div style="padding: 16px 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; background: #1b8253; color: white; border-radius: 8px 8px 0 0;">
-            <h3 style="margin: 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px;"><i data-lucide="line-chart"></i> Histórico Completo: ${name}</h3>
-            <button onclick="IndexadoresApp.closeHistoryModal()" style="background: none; border: none; cursor: pointer; font-size: 1.2rem; color: #fff;">&times;</button>
+      <div id="idx-history-modal-overlay" class="idx-modal-overlay" onclick="if (event.target === this) IndexadoresApp.closeHistoryModal()">
+        <div class="idx-modal" role="dialog" aria-label="Histórico completo">
+          <div class="idx-modal-head">
+            <h3><i data-lucide="line-chart" style="width:18px;height:18px;"></i> Histórico completo · ${this.esc(name)}</h3>
+            <button type="button" class="idx-modal-fechar" onclick="IndexadoresApp.closeHistoryModal()" title="Fechar">
+              <i data-lucide="x" style="width:18px;height:18px;"></i>
+            </button>
           </div>
-          
-          <div style="padding: 15px 20px; border-bottom: 1px solid #eee; display: flex; gap: 10px; align-items: center; background: #f9f9f9;">
-            <div>
-              <label style="font-size: 0.8rem; font-weight: bold; display: block;">Filtrar Ano</label>
-              <select id="idx-history-year-filter" class="form-control" onchange="IndexadoresApp.filterHistoryModal(this.value)" style="padding: 4px 8px; font-size: 0.9rem;">
-                <option value="ALL">Todos os Anos</option>
-                ${[...new Set(reversedData.map(d => d.year))].sort().reverse().map(y => `<option value="${y}">${y}</option>`).join('')}
+          <div class="idx-modal-tools">
+            <div class="idx-campo">
+              <label class="ml-emp-filter-label" for="idx-history-year-filter">Ano</label>
+              <select id="idx-history-year-filter" class="idx-select is-curto" onchange="IndexadoresApp.filterHistoryModal(this.value)">
+                <option value="ALL">Todos os anos</option>
+                ${anos.map((y) => `<option value="${y}">${y}</option>`).join('')}
               </select>
             </div>
-            <div style="flex: 1; text-align: right; font-size: 0.85rem; color: #666;">
-              Total de registros: <strong>${reversedData.length}</strong> meses.
-            </div>
+            <div class="idx-modal-info">${lista.length} meses${maisAntigo ? `, desde ${maisAntigo}` : ''}</div>
           </div>
-
-          <div style="flex: 1; overflow-y: auto; padding: 0;">
-            <table class="custom-table" style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
-              <thead style="position: sticky; top: 0; background: #f1f5f9; z-index: 1;">
-                <tr>
-                  <th style="padding: 10px 20px; border-bottom: 1px solid #cbd5e1; text-align: center;">Mês/Ano</th>
-                  <th style="padding: 10px 20px; border-bottom: 1px solid #cbd5e1; text-align: center;">Taxa (%)</th>
-                  <th style="padding: 10px 20px; border-bottom: 1px solid #cbd5e1; text-align: center;">Acum. no Ano (%)</th>
-                  <th style="padding: 10px 20px; border-bottom: 1px solid #cbd5e1; text-align: center;">Acum. 12 Meses (%)</th>
-                </tr>
-              </thead>
-              <tbody id="idx-history-tbody">
-                ${rowsHtml}
-              </tbody>
-            </table>
+          <div class="idx-modal-body">
+            ${this.tabelaHtml(lista, 'idx-history-tbody')}
           </div>
-          
-          <div style="padding: 15px 20px; background: #f9f9f9; border-top: 1px solid #eee; text-align: right; border-radius: 0 0 8px 8px;">
-            <button class="btn btn-outline" onclick="IndexadoresApp.closeHistoryModal()">Fechar</button>
+          <div class="idx-modal-foot">
+            <button type="button" class="btn btn-outline" onclick="IndexadoresApp.closeHistoryModal()">Fechar</button>
           </div>
         </div>
       </div>
@@ -344,9 +347,9 @@ const IndexadoresApp = {
 
     let container = document.getElementById('idx-history-modal-container');
     if (!container) {
-        container = document.createElement('div');
-        container.id = 'idx-history-modal-container';
-        document.body.appendChild(container);
+      container = document.createElement('div');
+      container.id = 'idx-history-modal-container';
+      document.body.appendChild(container);
     }
     container.innerHTML = modalHtml;
     if (window.lucide) window.lucide.createIcons();
@@ -355,14 +358,18 @@ const IndexadoresApp = {
   filterHistoryModal(year) {
     const tbody = document.getElementById('idx-history-tbody');
     if (!tbody) return;
-    const rows = tbody.querySelectorAll('tr');
-    rows.forEach(tr => {
-      if (year === 'ALL' || tr.dataset.year === year) {
-        tr.style.display = '';
-      } else {
-        tr.style.display = 'none';
-      }
+    tbody.querySelectorAll('tr').forEach((tr) => {
+      tr.style.display = (year === 'ALL' || tr.dataset.year === year) ? '' : 'none';
     });
+  },
+
+  kpiHtml(rotulo, valor) {
+    const cls = parseFloat(valor) < 0 ? 'is-neg' : 'is-pos';
+    return `
+      <div class="ppcc-kpi">
+        <span class="ppcc-kpi-rot">${rotulo}</span>
+        <span class="ppcc-kpi-val ${cls}">${this.formatNumber(valor)}%</span>
+      </div>`;
   },
 
   render() {
@@ -379,195 +386,69 @@ const IndexadoresApp = {
       return;
     }
 
-    let html = `
-      <style>
-        .idx-card {
-          background: #fff;
-          border-radius: 8px;
-          border: 1px solid #e2e8f0;
-          padding: 20px;
-          margin-bottom: 20px;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        }
-        .idx-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 15px;
-          padding-bottom: 10px;
-          border-bottom: 1px solid #f1f5f9;
-        }
-        .idx-title {
-          font-size: 1.2rem;
-          font-weight: 700;
-          color: #1e293b;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-        .idx-badge {
-          background: #e0e7ff;
-          color: #4338ca;
-          padding: 3px 8px;
-          border-radius: 12px;
-          font-size: 0.75rem;
-          font-weight: 600;
-        }
-        .idx-stats {
-          display: flex;
-          gap: 20px;
-          margin-bottom: 15px;
-        }
-        .idx-stat-box {
-          background: #f8fafc;
-          border-radius: 6px;
-          padding: 10px 15px;
-          flex: 1;
-          text-align: center;
-          border: 1px solid #e2e8f0;
-        }
-        .idx-stat-label {
-          font-size: 0.75rem;
-          color: #64748b;
-          text-transform: uppercase;
-          font-weight: 700;
-          margin-bottom: 5px;
-        }
-        .idx-stat-value {
-          font-size: 1.25rem;
-          font-weight: 800;
-          color: #0f172a;
-        }
-        .idx-stat-value.positive { color: #166534; }
-        .idx-stat-value.negative { color: #991b1b; }
-      </style>
+    const S = IndexadoresState;
+    const idx = S.siengeIndexers.find((i) => i.name === S.selectedIndexerName);
+    const dados = idx ? (S.bcbData[idx.name] || []) : [];
 
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-        <div style="display: flex; align-items: center; gap: 10px;">
-          <label style="font-weight: 600; color: #374151;">Selecione o Indexador:</label>
-          <select class="form-control" onchange="IndexadoresState.selectedIndexerName = this.value; IndexadoresApp.render()" style="padding: 6px 12px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 0.95rem; min-width: 250px; outline: none; background: #fff;">
-            ${IndexadoresState.siengeIndexers.map(idx => `<option value="${idx.name}" ${IndexadoresState.selectedIndexerName === idx.name ? 'selected' : ''}>${idx.name}</option>`).join('')}
-          </select>
-          <button class="btn btn-outline" style="padding: 6px 12px; display:flex; align-items:center; gap:5px;" onclick="IndexadoresApp.openSettingsModal()" title="Configurar Indexadores Exibidos">
-            <i data-lucide="settings" style="width:16px;"></i>
+    let html = `
+      <div class="cc-toolbar idx-toolbar">
+        <div class="cc-filters">
+          <div class="idx-campo">
+            <label class="ml-emp-filter-label" for="idx-sel">Indexador</label>
+            <div class="idx-sel-linha">
+              <select id="idx-sel" class="idx-select" onchange="IndexadoresState.selectedIndexerName = this.value; IndexadoresApp.render()">
+                ${S.siengeIndexers.map((i) => `<option value="${this.esc(i.name)}" ${S.selectedIndexerName === i.name ? 'selected' : ''}>${this.esc(i.name)}</option>`).join('')}
+              </select>
+              <button type="button" class="idx-config" onclick="IndexadoresApp.openSettingsModal()" title="Escolher os indexadores da lista">
+                <i data-lucide="settings-2"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="cc-toolbar-actions">
+          ${idx && dados.length ? `
+          <button type="button" class="ppcc-trazer" onclick="IndexadoresApp.openHistoryModal(IndexadoresState.selectedIndexerName)">
+            <i data-lucide="history" style="width:15px;height:15px;"></i> Histórico completo
+          </button>` : ''}
+          <button type="button" class="btn btn-primary cc-atualizar" onclick="IndexadoresApp.loadData(true)">
+            <i data-lucide="refresh-cw" style="width:14px;height:14px;"></i> Atualizar
           </button>
         </div>
-        <button class="btn btn-primary" style="display: flex; align-items: center; gap: 8px;" onclick="IndexadoresApp.loadData()">
-          <i data-lucide="refresh-cw" style="width: 16px;"></i> Atualizar Dados
-        </button>
       </div>
     `;
 
-    if (IndexadoresState.siengeIndexers.length === 0) {
-      html += `<div class="idx-card" style="text-align: center; padding: 40px; color: #64748b;">Nenhum indexador retornado pelo Sienge.</div>`;
-    } else {
-      const idx = IndexadoresState.siengeIndexers.find(i => i.name === IndexadoresState.selectedIndexerName);
-      if (idx) {
-        const bcbData = IndexadoresState.bcbData[idx.name];
-        
-        if (bcbData && bcbData.length > 0) {
-          let currentYearAcc = null;
-          let accYearVal = 1;
-          const enrichedBcb = bcbData.map((d, index) => {
-            const year = d.data.split('/')[2];
-            if (year !== currentYearAcc) {
-              currentYearAcc = year;
-              accYearVal = 1;
-            }
-            accYearVal = accYearVal * (1 + (parseFloat(d.valor)/100));
+    if (!S.siengeIndexers.length) {
+      html += `<div class="idx-vazio">Nenhum indexador retornado pelo Sienge.</div>`;
+    } else if (idx) {
+      const serie = this.serieBcb(idx.name);
+      const enriched = this.enriquecer(dados);
+      const ultimo = enriched[enriched.length - 1];
+      const sub = [`ID ${this.esc(idx.id)} no Sienge`];
+      if (serie) sub.push(`série ${serie} do Banco Central`);
+      if (ultimo) sub.push(`últimos 24 meses até ${this.formatDate(ultimo.data)}`);
 
-            let acc12mVal = 1;
-            let monthsCount = 0;
-            for (let j = index; j >= 0 && monthsCount < 12; j--) {
-              acc12mVal = acc12mVal * (1 + (parseFloat(bcbData[j].valor)/100));
-              monthsCount++;
-            }
-            const acc12mStr = monthsCount > 0 ? ((acc12mVal - 1) * 100).toFixed(4) : "0.0000";
-
-            return {
-              ...d,
-              year,
-              accAno: ((accYearVal - 1) * 100).toFixed(4),
-              acc12m: acc12mStr
-            };
-          });
-
-          const lastRate = enrichedBcb[enrichedBcb.length - 1];
-          const accYtd = this.calculateAccumulated(bcbData, 'YTD');
-          const acc12m = this.calculateAccumulated(bcbData, '12m');
-
-          const last24 = enrichedBcb.slice(-24).reverse();
-
-          statsHtml = `
-            <div class="idx-stats">
-              <div class="idx-stat-box">
-                <div class="idx-stat-label">Última Taxa (${IndexadoresApp.formatDate(lastRate.data)})</div>
-                <div class="idx-stat-value ${parseFloat(lastRate.valor) > 0 ? 'positive' : ''}">${IndexadoresApp.formatNumber(lastRate.valor)}%</div>
-              </div>
-              <div class="idx-stat-box">
-                <div class="idx-stat-label">Acumulado no Ano (YTD)</div>
-                <div class="idx-stat-value ${parseFloat(accYtd) > 0 ? 'positive' : ''}">${IndexadoresApp.formatNumber(accYtd)}%</div>
-              </div>
-              <div class="idx-stat-box">
-                <div class="idx-stat-label">Acumulado 12 Meses</div>
-                <div class="idx-stat-value ${parseFloat(acc12m) > 0 ? 'positive' : ''}">${IndexadoresApp.formatNumber(acc12m)}%</div>
-              </div>
-            </div>
-          `;
-
-          tableHtml = `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; background: #f8fafc; padding: 12px 20px; border-radius: 8px; border: 1px solid #e2e8f0; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
-              <h4 style="margin: 0; font-size: 1rem; color: #1e293b; display: flex; align-items: center; gap: 8px;">
-                <i data-lucide="calendar-days" style="width: 18px; color: var(--color-primary);"></i> Histórico Recente (Últimos 24 meses)
-              </h4>
-              <button class="btn btn-primary btn-sm" onclick="IndexadoresApp.openHistoryModal('${idx.name}')" style="display: flex; align-items: center; gap: 6px;">
-                <i data-lucide="history" style="width: 16px;"></i> Consultar Histórico Completo
-              </button>
-            </div>
-            <div style="overflow-y: auto; max-height: 400px; border: 1px solid #e2e8f0; border-radius: 8px;">
-              <table class="custom-table" style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
-                <thead style="position: sticky; top: 0; background: #f8fafc; z-index: 1;">
-                  <tr>
-                    <th style="padding: 8px 15px; border-bottom: 1px solid #cbd5e1; text-align: center;">Mês/Ano</th>
-                    <th style="padding: 8px 15px; border-bottom: 1px solid #cbd5e1; text-align: center;">Taxa (%)</th>
-                    <th style="padding: 8px 15px; border-bottom: 1px solid #cbd5e1; text-align: center;">Acum. no Ano (%)</th>
-                    <th style="padding: 8px 15px; border-bottom: 1px solid #cbd5e1; text-align: center;">Acum. 12 Meses (%)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${last24.map(r => `
-                    <tr>
-                      <td style="padding: 8px 15px; text-align: center; border-bottom: 1px solid #f1f5f9; color: #475569;">${IndexadoresApp.formatDate(r.data)}</td>
-                      <td style="padding: 8px 15px; text-align: center; border-bottom: 1px solid #f1f5f9; font-weight: 600; color: #0f172a;">${IndexadoresApp.formatNumber(r.valor)}%</td>
-                      <td style="padding: 8px 15px; text-align: center; border-bottom: 1px solid #f1f5f9; color: #64748b; font-weight: 500;">${IndexadoresApp.formatNumber(r.accAno)}%</td>
-                      <td style="padding: 8px 15px; text-align: center; border-bottom: 1px solid #f1f5f9; color: #64748b; font-weight: 500;">${IndexadoresApp.formatNumber(r.acc12m)}%</td>
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
-            </div>
-          `;
-        } else {
-          statsHtml = `
-            <div style="background: #fff8f1; border: 1px solid #fed7aa; color: #c2410c; padding: 15px; border-radius: 6px; font-size: 0.85rem; display: flex; align-items: center; gap: 10px;">
-              <i data-lucide="info" style="width: 18px; flex-shrink: 0;"></i>
-              Este indexador não possui uma série configurada ou mapeada no Banco Central para busca automática de taxas.
-            </div>
-          `;
-        }
-        html += `
-          <div class="idx-card">
-            <div class="idx-header">
-              <div class="idx-title">
-                ${idx.name}
-                <span class="idx-badge">ID: ${idx.id}</span>
-              </div>
-            </div>
-            ${statsHtml}
-            ${tableHtml}
+      html += `
+        <div class="ppcc-head idx-head">
+          <div>
+            <div class="ppcc-titulo">${this.esc(idx.name)}</div>
+            <div class="ppcc-sub">${sub.join(' · ')}</div>
           </div>
-        `;
-      }
+          ${ultimo ? `
+          <div class="ppcc-kpis">
+            ${this.kpiHtml(`Taxa de ${this.formatDate(ultimo.data)}`, ultimo.valor)}
+            ${this.kpiHtml(`Acumulado em ${ultimo.year}`, this.calculateAccumulated(dados, 'YTD'))}
+            ${this.kpiHtml('Acumulado 12 meses', this.calculateAccumulated(dados, '12m'))}
+          </div>` : ''}
+        </div>
+      `;
+
+      html += ultimo
+        ? `<div class="cc-scroll idx-scroll">${this.tabelaHtml(enriched.slice(-24).reverse())}</div>`
+        : `
+          <div class="idx-aviso">
+            <i data-lucide="info" style="width:18px;height:18px;flex-shrink:0;"></i>
+            Este indexador não tem série do Banco Central configurada para buscar as taxas automaticamente.
+          </div>`;
     }
 
     contentDiv.innerHTML = html;
@@ -580,7 +461,7 @@ function initIndexadoresModule() {
   if (!root) return;
 
   root.innerHTML = `
-    <div style="padding: 20px; max-width: 1000px; margin: 0 auto;">
+    <div class="cc-page">
       <div id="indexadores-content">
         <div style="text-align: center; padding: 40px; color: var(--color-text-muted);">
           <div class="spinner" style="margin-bottom: 15px;"></div>

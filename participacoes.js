@@ -1726,44 +1726,91 @@ const ParticipacoesApp = {
       x: 1.0, y: 0.72, w: 11.6, h: 1.15,
       fontFace: "Calibri", fontSize: 16, color: "0F172A", margin: 0
     });
-    const monthLab = this.periodLabel(ctx.month, ctx.month);
-    const nice = monthLab.charAt(0).toUpperCase() + monthLab.slice(1);
-    const monthTotal = ctx.allRows.reduce((s, r) => s + (Number(r.valor) || 0), 0);
-    const partNote = ctx.parts > 1 ? " · parte " + (ctx.part + 1) + "/" + ctx.parts : "";
+    slide.addText([
+      { text: "Resposta: ", options: { bold: true, color: "105436" } },
+      { text: " ", options: { color: "0F172A" } }
+    ], {
+      shape: pptx.ShapeType.roundRect,
+      x: 0.48, y: 1.98, w: 12.4, h: 1.05,
+      rectRadius: 0.06,
+      fill: { color: "FFFFFF" },
+      line: { color: "F37021", pt: 1.25, dashType: "dash" },
+      fontFace: "Calibri", fontSize: 14, color: "0F172A",
+      valign: "top", align: "left", margin: [8, 12, 8, 12]
+    });
+
+    const allRows = ctx.rows || [];
+    const total = allRows.reduce((s, r) => s + (Number(r.valor) || 0), 0);
+    const nomeMes = (m) => {
+      const lab = this.periodLabel(m, m);
+      return lab.charAt(0).toUpperCase() + lab.slice(1);
+    };
+    const meses = ctx.months || [];
+    const periodo = !meses.length ? "" : (meses.length === 1 ? nomeMes(meses[0]) : nomeMes(meses[0]) + " a " + nomeMes(meses[meses.length - 1]));
+
+    const CARD_Y = 3.2;
+    const TABLE_Y = CARD_Y + 0.72;
+    const TABLE_H = 7.18 - TABLE_Y;
+    const MIN_ROW_H = 0.16;
+    const maxLinhas = Math.floor(TABLE_H / MIN_ROW_H) - 1;
+
+    /* Uma página por credor: com muitos lançamentos, agrupa por mês e categoria (e depois só por mês) para caber. */
+    let linhas = allRows.map((r) => ({ data: r.date, detalhe: r.detalhe || "—", categoria: r.categoria || "Outras", valor: Number(r.valor) || 0 }));
+    let nota = "";
+    const agrupar = (chave) => {
+      const map = new Map();
+      allRows.forEach((r) => {
+        const k = chave(r);
+        const g = map.get(k) || { data: nomeMes(r._mes), detalhe: "", categoria: r.categoria || "Outras", valor: 0, qtd: 0 };
+        g.valor += Number(r.valor) || 0;
+        g.qtd += 1;
+        map.set(k, g);
+      });
+      return Array.from(map.values()).map((g) => Object.assign(g, { detalhe: g.qtd + " lançamento(s)" }));
+    };
+    if (linhas.length > maxLinhas) {
+      linhas = agrupar((r) => r._mes + "|" + (r.categoria || "Outras"));
+      nota = " · agrupado por mês e categoria";
+      if (linhas.length > maxLinhas) {
+        linhas = agrupar((r) => r._mes).map((g) => Object.assign(g, { categoria: "—" }));
+        nota = " · agrupado por mês";
+      }
+    }
+
     slide.addShape(pptx.ShapeType.roundRect, {
-      x: 0.48, y: 2.05, w: 12.4, h: 4.65,
+      x: 0.48, y: CARD_Y, w: 12.4, h: 7.3 - CARD_Y,
       fill: { color: "F0FDF4" },
       line: { color: "D1FAE5", pt: 1 },
-      rectRadius: 0.08
+      rectRadius: 0.06
     });
     slide.addText(ctx.credorName, {
-      x: 0.68, y: 2.16, w: 11.9, h: 0.3,
+      x: 0.68, y: CARD_Y + 0.1, w: 11.9, h: 0.3,
       fontFace: "Calibri", fontSize: 13, bold: true, color: "166534", margin: 0
     });
-    slide.addText(nice + " · " + ctx.allRows.length + " Lançamento(s) · " + this.fmt(monthTotal) + partNote, {
-      x: 0.68, y: 2.46, w: 11.9, h: 0.26,
+    slide.addText([periodo, allRows.length + " lançamento(s)", this.fmt(total)].filter(Boolean).join(" · ") + nota, {
+      x: 0.68, y: CARD_Y + 0.4, w: 11.9, h: 0.26,
       fontFace: "Calibri", fontSize: 11, color: "64748B", margin: 0
     });
+
+    const rowH = Math.min(0.3, TABLE_H / (linhas.length + 1));
+    const fonte = Math.max(7, Math.min(12, Math.round(rowH * 40)));
     const head = (text, align) => ({
       text: text,
-      options: { fill: { color: "F8FAFC" }, color: "64748B", bold: true, align: align || "left", fontSize: 10 }
+      options: { fill: { color: "F8FAFC" }, color: "64748B", bold: true, align: align || "left", fontSize: Math.min(10, fonte) }
     });
     const cell = (text, align, bold) => ({
       text: String(text || "—"),
-      options: { fill: { color: "FFFFFF" }, color: "0F172A", align: align || "left", bold: !!bold, fontSize: 12 }
+      options: { fill: { color: "FFFFFF" }, color: "0F172A", align: align || "left", bold: !!bold, fontSize: fonte }
     });
-    const tableRows = [[head("DATA"), head("DETALHE"), head("CATEGORIA"), head("VALOR", "right")]];
-    ctx.rows.forEach((r) => {
-      tableRows.push([
-        cell(r.date),
-        cell(r.detalhe || "—"),
-        cell(r.categoria || "Outras"),
-        cell(this.fmt(r.valor), "right", true)
-      ]);
+    const tableRows = [[head(nota ? "MÊS" : "DATA"), head("DETALHE"), head("CATEGORIA"), head("VALOR", "right")]];
+    linhas.forEach((r) => {
+      tableRows.push([cell(r.data), cell(r.detalhe), cell(r.categoria), cell(this.fmt(r.valor), "right", true)]);
     });
     slide.addTable(tableRows, {
-      x: 0.68, y: 2.82, w: 12.0,
+      x: 0.68, y: TABLE_Y, w: 12.0,
       colW: [1.7, 6.1, 2.2, 2.0],
+      rowH: rowH,
+      margin: rowH < 0.25 ? [1, 5, 1, 5] : [3, 6, 3, 6],
       border: [
         { pt: 0.4, color: "E2E8F0" },
         { pt: 0.4, color: "E2E8F0" },
@@ -1771,11 +1818,9 @@ const ParticipacoesApp = {
         { pt: 0.4, color: "E2E8F0" }
       ],
       fontFace: "Calibri",
-      valign: "middle"
+      valign: "middle",
+      autoPage: false
     });
-    if (ctx.logo && ctx.logo.dataUrl) {
-      slide.addImage({ data: ctx.logo.dataUrl, x: 11.2, y: 6.88, w: 1.7, h: 0.46 });
-    }
   },
 
   async exportPpt() {
