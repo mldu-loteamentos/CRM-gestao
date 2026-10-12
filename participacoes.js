@@ -1369,15 +1369,22 @@ const ParticipacoesApp = {
     this.refreshCompanyList();
     this.restoreCacheForCompany();
     this.loading = true;
+    this.uploadProgress = "Buscando os períodos…";
+    this._cargaPct = 18;
     this.render();
+    this.iniciarCarga();
     await this.mergeCloudPeriods(this.companyId);
     await this.loadFilesFromServer();
     this.loading = false;
     this.fileName = "";
     this.parsing = true;
+    this.uploadProgress = "Lendo os períodos…";
+    this._cargaPct = 62;
     this.render();
     await this.parseAllFiles();
     this.parsing = false;
+    this.uploadProgress = "";
+    this.pararCarga();
     this.render();
   },
 
@@ -1387,13 +1394,18 @@ const ParticipacoesApp = {
     if (!rec) return;
     this.parsing = true;
     this.error = "";
+    this.uploadProgress = "Lendo o período…";
+    this._cargaPct = 36;
     this.render();
+    this.iniciarCarga();
     try {
       await this.ensureFileParsed(rec);
     } catch (e) {
       this.error = "Não foi possível ler o PDF: " + (e.message || e);
     }
     this.parsing = false;
+    this.uploadProgress = "";
+    this.pararCarga();
     this.render();
   },
 
@@ -1407,9 +1419,14 @@ const ParticipacoesApp = {
     this.fileName = "";
     this.parsing = true;
     this.error = "";
+    this.uploadProgress = "Lendo os períodos…";
+    this._cargaPct = 32;
     this.render();
+    this.iniciarCarga();
     await this.parseAllFiles();
     this.parsing = false;
+    this.uploadProgress = "";
+    this.pararCarga();
     this.groupBy = "matriz";
     this.render();
   },
@@ -1442,8 +1459,10 @@ const ParticipacoesApp = {
     this.loading = true;
     this.parsing = true;
     this.error = "";
-    this.uploadProgress = `Enviando e lendo ${picked.length} PDF(s)...`;
+    this.uploadProgress = "Enviando os PDFs…";
+    this._cargaPct = 14;
     this.render();
+    this.iniciarCarga();
 
     let serverOk = false;
     try {
@@ -1456,8 +1475,7 @@ const ParticipacoesApp = {
     try {
       for (let i = 0; i < picked.length; i++) {
         const file = picked[i];
-        this.uploadProgress = `Lendo ${i + 1}/${picked.length}: ${file.name}`;
-        this.render();
+        this.setCarga("Lendo os PDFs…", 30 + (i / picked.length) * 36);
         const objectUrl = URL.createObjectURL(file);
         const text = await this.extractPdfText(objectUrl);
         let closing = this.periodFromPdfHeader(text) || this.periodFromFileName(file.name);
@@ -1486,8 +1504,7 @@ const ParticipacoesApp = {
         rec.fromUpload = true;
 
         this.cloudSyncing = true;
-        this.uploadProgress = `Salvando ${i + 1}/${picked.length} no Firebase...`;
-        this.render();
+        this.setCarga("Salvando no Firebase…", 70 + (i / picked.length) * 18);
         try {
           const up = await this.uploadPdfToFirebase(file, this.companyId, closing || "sem-periodo");
           rec.pdfUrl = up.url || "";
@@ -1511,6 +1528,7 @@ const ParticipacoesApp = {
     this.loading = false;
     this.parsing = false;
     this.uploadProgress = "";
+    this.pararCarga();
     if (input) input.value = "";
     this.render();
   },
@@ -1986,6 +2004,46 @@ const ParticipacoesApp = {
     }, 1000);
   },
 
+  cargaHtml() {
+    const pct = Math.max(8, Math.min(92, Number(this._cargaPct) || 18));
+    const texto = this.uploadProgress || "Carregando…";
+    return `<div class="part-load"><div class="ml-load" role="status" aria-live="polite">
+      <div class="loading-spinner" aria-hidden="true"></div>
+      <div class="loading-status-text" id="part-load-text">${this.esc(texto)}</div>
+      <div class="ml-load-track"><div class="loading-progress-bar" id="part-load-bar" style="width:${pct}%"></div></div>
+    </div></div>`;
+  },
+
+  iniciarCarga() {
+    if (this._cargaTimer) return;
+    if (!this._cargaPct) this._cargaPct = 12;
+    this._cargaTimer = setInterval(() => {
+      if (!this.loading && !this.parsing) {
+        this.pararCarga();
+        return;
+      }
+      const p = Number(this._cargaPct) || 12;
+      this._cargaPct = Math.min(90, p + (p < 45 ? 3 : 0.7));
+      const bar = document.getElementById("part-load-bar");
+      if (bar) bar.style.width = this._cargaPct + "%";
+    }, 420);
+  },
+
+  pararCarga() {
+    if (this._cargaTimer) clearInterval(this._cargaTimer);
+    this._cargaTimer = null;
+  },
+
+  setCarga(texto, pct) {
+    this.uploadProgress = texto || "Carregando…";
+    if (pct != null) this._cargaPct = pct;
+    const txt = document.getElementById("part-load-text");
+    const bar = document.getElementById("part-load-bar");
+    if (txt) txt.textContent = this.uploadProgress;
+    if (bar) bar.style.width = Math.max(8, Math.min(92, Number(this._cargaPct) || 18)) + "%";
+    if (!txt) this.render();
+  },
+
   render() {
     const root = document.getElementById("participacoes-root");
     if (!root) return;
@@ -2017,29 +2075,35 @@ const ParticipacoesApp = {
     const cap = (s) => String(s || "").replace(/^\s*\S/, (ch) => ch.toUpperCase());
     const alertBox = (cls, msg) => `<div class="part-alert ${cls}">${this.esc(msg)}</div>`;
 
+    const ocupado = this.parsing || this.loading;
     root.innerHTML = `
       <div class="part-page">
-        <div class="part-toolbar">
-          <div id="part-emp-box"></div>
-          <label class="part-field part-field-periodo">
-            <span class="ml-emp-filter-label">Período</span>
-            <select class="part-input" onchange="ParticipacoesApp.onPeriodoSelect(this.value)" ${this.files.length ? "" : "disabled"}>
-              <option value="" ${!this.fileName ? "selected" : ""}>${this.files.length ? `Todos os períodos (${this.files.length})` : "Nenhum PDF enviado"}</option>
-              ${this.files.map((f, i) => `<option value="${i}" ${f.name === this.fileName ? "selected" : ""}>${this.esc(cap(this.periodLabel(this.shownClosing(f), f.name)))}</option>`).join("")}
-            </select>
-          </label>
-          <label class="part-field part-search">
-            <span class="ml-emp-filter-label">Buscar nas despesas</span>
-            <input class="part-input" placeholder="Credor, detalhe, categoria, data..." value="${this.esc(this.q)}"
-              oninput="ParticipacoesApp.q=this.value;ParticipacoesApp.render()">
-          </label>
+        <div class="part-head">
+          <div class="part-toolbar-filters">
+            <div class="part-emp-box" id="part-emp-box"></div>
+            <label class="part-field">
+              <span class="ml-emp-filter-label">Período</span>
+              <select class="part-input" onchange="ParticipacoesApp.onPeriodoSelect(this.value)" ${this.files.length ? "" : "disabled"}>
+                <option value="" ${!this.fileName ? "selected" : ""}>${this.files.length ? `Todos os períodos (${this.files.length})` : "Nenhum PDF enviado"}</option>
+                ${this.files.map((f, i) => `<option value="${i}" ${f.name === this.fileName ? "selected" : ""}>${this.esc(cap(this.periodLabel(this.shownClosing(f), f.name)))}</option>`).join("")}
+              </select>
+            </label>
+            <label class="part-field">
+              <span class="ml-emp-filter-label">Buscar nas despesas</span>
+              <input class="part-input" placeholder="Credor, detalhe, categoria, data..." value="${this.esc(this.q)}"
+                oninput="ParticipacoesApp.q=this.value;ParticipacoesApp.render()">
+            </label>
+          </div>
           <div class="part-toolbar-actions">
-            <select class="part-input part-scope" onchange="ParticipacoesApp.exportScope=this.value" title="Abrangência da exportação">
-              <option value="current" ${this.exportScope === "current" ? "selected" : ""}>Excel: empresa atual</option>
-              <option value="all" ${this.exportScope === "all" ? "selected" : ""}>Excel: todas (1 aba cada)</option>
-            </select>
+            <label class="part-field part-field-excel">
+              <span class="ml-emp-filter-label">Excel</span>
+              <select class="part-input" onchange="ParticipacoesApp.exportScope=this.value" title="Abrangência da exportação">
+                <option value="current" ${this.exportScope === "current" ? "selected" : ""}>Empresa atual</option>
+                <option value="all" ${this.exportScope === "all" ? "selected" : ""}>Todas as empresas</option>
+              </select>
+            </label>
             <button type="button" class="btn btn-excel" onclick="ParticipacoesApp.exportExcel()" ${!this.companyId && this.exportScope === "current" ? "disabled" : ""} title="Exportar tabela atual para Excel">
-              <i data-lucide="download" style="width:14px;height:14px;"></i> Excel
+              <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
             </button>
             <label class="btn btn-secondary part-upload ${uploadDisabled ? "is-disabled" : ""}" title="${uploadDisabled ? "Selecione a empresa para enviar PDFs" : "Enviar PDFs da prestação de contas"}">
               <i data-lucide="upload" style="width:14px;height:14px;"></i> Enviar PDFs
@@ -2050,7 +2114,6 @@ const ParticipacoesApp = {
 
         ${this.error ? alertBox("is-error", this.error) : ""}
         ${this.hint && !this.error ? alertBox("is-warn", this.hint) : ""}
-        ${this.uploadProgress ? alertBox("is-ok", this.uploadProgress) : ""}
 
         ${this.companyId ? `
           <div class="part-summary">
@@ -2070,12 +2133,12 @@ const ParticipacoesApp = {
                 onclick="ParticipacoesApp.groupBy='${v.id}';ParticipacoesApp.detail=null;ParticipacoesApp.render()"><i data-lucide="${v.icon}"></i> ${v.label}</button>
             `).join("")}
           </div>
-          ${!this.files.length ? `<div class="part-empty">Nenhum PDF ainda. Use <strong>Enviar PDFs</strong>.</div>` : ""}
+          ${!ocupado && !this.files.length ? `<div class="part-empty">Nenhum PDF ainda. Use <strong>Enviar PDFs</strong>.</div>` : ""}
         ` : `<div class="part-empty">Selecione a empresa para ver a matriz e enviar PDFs.</div>`}
 
-        ${this.parsing || this.loading ? `<div class="part-empty is-center">${this.esc(this.uploadProgress || "Processando...")}</div>` : ""}
-        ${!this.parsing && !this.loading && this.companyId && this.groupBy === "matriz" ? this.matrixHtml() : ""}
-        ${!this.parsing && !this.loading && this.companyId && this.groupBy !== "matriz" && groups.length ? `
+        ${ocupado ? this.cargaHtml() : ""}
+        ${!ocupado && this.companyId && this.groupBy === "matriz" ? this.matrixHtml() : ""}
+        ${!ocupado && this.companyId && this.groupBy !== "matriz" && groups.length ? `
           <div class="cc-scroll part-groups" id="part-groups-scroll">
             <table class="cc-table part-expense-table">
               <colgroup>
@@ -2108,7 +2171,7 @@ const ParticipacoesApp = {
               `).join("")}
             </table>
           </div>` : ""}
-        ${!this.parsing && !this.loading && this.companyId && this.files.length && !(this.groupBy === "matriz" ? this.matrixData().creditors.length : groups.length) ? `<div class="part-empty">Nenhuma linha do quadro <strong>DESPESAS PAGAS</strong> identificada neste filtro.</div>` : ""}
+        ${!ocupado && this.companyId && this.files.length && !(this.groupBy === "matriz" ? this.matrixData().creditors.length : groups.length) ? `<div class="part-empty">Nenhuma linha do quadro <strong>DESPESAS PAGAS</strong> identificada neste filtro.</div>` : ""}
         ${this.detailModalHtml()}
       </div>
     `;
