@@ -20,6 +20,8 @@ const PrestacaoContasApp = {
   accountIndex: {},
   unmatchedInfo: { total: 0, samples: [] },
   categories: [],
+  aba: "rateio",
+  conferencias: null,
 
   init() {
     if (this.month === 12 && new Date().getMonth() === 0) this.year = new Date().getFullYear() - 1;
@@ -182,6 +184,132 @@ const PrestacaoContasApp = {
   removeCostCenter(id) {
     this.costCenterIds = this.costCenterIds.filter(x => String(x) !== String(id));
     this.render();
+  },
+
+  setAba(id) {
+    this.aba = id === "dfc" ? "dfc" : "rateio";
+    this.render();
+  },
+
+  esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  },
+
+  obraDe(id) {
+    const d = String(id || "").replace(/\D/g, "");
+    return d.length >= 5 ? d.slice(0, -2) : d;
+  },
+
+  ccNome(id) {
+    const all = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || [];
+    const cc = all.find(c => String(c.id) === String(id));
+    return (cc && cc.name) || "";
+  },
+
+  fmtPct(n) {
+    return (Number(n) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%";
+  },
+
+  /** Percentual cadastrado nos centros da obra: Moura Leite no CC da obra e terrenista no do parceiro. */
+  padraoObra(obra) {
+    const PP = typeof ParametrizacaoParceiroApp !== "undefined" ? ParametrizacaoParceiroApp : null;
+    if (!PP || typeof PP.centrosDaObra !== "function" || typeof PP.customCc !== "function") return null;
+    const lista = PP.centrosDaObra(obra);
+    if (!lista.length) return null;
+    const ehParc = (cc) => {
+      const terr = Number(PP.customCc(cc.id).perc_terrenista) || 0;
+      return (typeof PP.ehCcParceiro === "function" && PP.ehCcParceiro(cc)) || (terr > 0 && !String(cc.id).endsWith("00"));
+    };
+    const parceiros = lista.filter(ehParc);
+    const base = lista.find(cc => String(cc.id).replace(/\D/g, "") === String(obra) + "00" && !ehParc(cc))
+      || lista.find(cc => !parceiros.some(p => String(p.id) === String(cc.id)));
+    const map = {};
+    let terrSum = 0;
+    parceiros.forEach(cc => {
+      const t = Number(PP.customCc(cc.id).perc_terrenista) || 0;
+      if (t > 0 && t <= 100) {
+        map[String(cc.id)] = t;
+        terrSum += t;
+      }
+    });
+    let ml = base ? Number(PP.customCc(base.id).perc_ml) || 0 : 0;
+    if (!(ml > 0) && terrSum > 0 && terrSum < 100) ml = Number((100 - terrSum).toFixed(2));
+    if (base && ml > 0 && ml <= 100) map[String(base.id)] = ml;
+    return Object.keys(map).length ? map : null;
+  },
+
+  montarConferencia() {
+    const vazio = { receitas: [], despesas: [] };
+    const wanted = new Set((this.costCenterIds || []).map(String));
+    if (!wanted.size) return vazio;
+    const fcApp = this.fc();
+    const receitas = [];
+    const despesas = [];
+    (this.movements || []).forEach((mov, idx) => {
+      const amount = Number(mov.bankMovementAmount) || 0;
+      if (!amount) return;
+      const cats = Array.isArray(mov.financialCategories) ? mov.financialCategories : [];
+      if (!cats.length) return;
+      const entries = (fcApp && typeof fcApp.categoryShareEntries === "function")
+        ? fcApp.categoryShareEntries(cats)
+        : cats.map(fc => ({ fc, share: 1 / cats.length }));
+      const nat = amount > 0 ? "receita" : "despesa";
+      const grupos = {};
+      entries.forEach(({ fc, share }) => {
+        if (!fc || fc.costCenterId == null || String(fc.costCenterId) === "") return;
+        const cc = String(fc.costCenterId);
+        const obra = this.obraDe(cc);
+        if (!obra) return;
+        if (!grupos[obra]) grupos[obra] = { obra, nat, porCc: {} };
+        if (!grupos[obra].porCc[cc]) grupos[obra].porCc[cc] = 0;
+        grupos[obra].porCc[cc] += Math.abs(amount) * (Number(share) || 0);
+      });
+      Object.values(grupos).forEach(g => {
+        const idsMov = Object.keys(g.porCc);
+        if (!idsMov.some(id => wanted.has(id))) return;
+        const total = idsMov.reduce((s, id) => s + g.porCc[id], 0);
+        if (!(total > 0.004)) return;
+        const padrao = this.padraoObra(g.obra);
+        const todos = [...new Set(idsMov.concat(padrao ? Object.keys(padrao) : []))];
+        const linhas = todos.map(id => {
+          const valor = g.porCc[id] || 0;
+          return {
+            id,
+            nome: this.ccNome(id),
+            valor,
+            atual: total > 0 ? valor * 100 / total : 0,
+            esperado: padrao && padrao[id] != null ? padrao[id] : null
+          };
+        }).sort((a, b) => Number(a.id) - Number(b.id));
+        let status = "sem";
+        if (padrao) {
+          const ok = linhas.every(l => {
+            const esp = l.esperado == null ? 0 : l.esperado;
+            return Math.abs(l.atual - esp) < 0.06 || Math.abs(l.valor - total * esp / 100) < 0.02;
+          });
+          status = ok ? "ok" : "fora";
+        }
+        const row = {
+          data: String(mov.bankMovementDate || mov.paymentDate || "").slice(0, 10),
+          historico: mov.bankMovementHistoricName || mov.documentIdentificationName || "—",
+          pessoa: mov.clientName || mov.creditorName || "",
+          obra: g.obra,
+          total,
+          linhas,
+          status
+        };
+        (g.nat === "despesa" ? despesas : receitas).push(row);
+      });
+    });
+    const ord = (a, b) => {
+      const rank = { fora: 0, sem: 1, ok: 2 };
+      const d = (rank[a.status] || 9) - (rank[b.status] || 9);
+      if (d) return d;
+      return String(b.data).localeCompare(String(a.data));
+    };
+    receitas.sort(ord);
+    despesas.sort(ord);
+    return { receitas, despesas };
   },
 
   ignoredAccountKeys() {
@@ -427,6 +555,7 @@ const PrestacaoContasApp = {
       fcApp.settleAdvancesInAllocs(allocs, this.movements);
     }
     this.buildTree(allocs);
+    this.conferencias = this.montarConferencia();
   },
 
   async load() {
@@ -499,6 +628,8 @@ const PrestacaoContasApp = {
     const unmatched = this.unmatchedInfo || { total: 0, samples: [] };
     const hasUnmatched = Math.abs(Number(unmatched.total) || 0) > 0.005;
     const part = this.activePartnership();
+    const conf = this.conferencias || { receitas: [], despesas: [] };
+    const nFora = (conf.receitas || []).filter(r => r.status === "fora").length + (conf.despesas || []).filter(r => r.status === "fora").length;
 
     root.innerHTML = `
       <div class="crm-card" style="padding: 1.2rem 1.4rem;">
@@ -580,13 +711,20 @@ const PrestacaoContasApp = {
           <div id="pc-cc-sugg">${this.ccSuggestionsHtml()}</div>
         </div>
 
+        <div class="ml-tabs" role="tablist" style="margin-top:16px;">
+          <button type="button" role="tab" aria-selected="${this.aba !== "dfc"}" class="ml-tab${this.aba !== "dfc" ? " is-active" : ""}" onclick="PrestacaoContasApp.setAba('rateio')"><i data-lucide="list-checks"></i> Conferência do rateio${nFora ? ` <span class="ml-tab-count">${nFora}</span>` : ""}</button>
+          <button type="button" role="tab" aria-selected="${this.aba === "dfc"}" class="ml-tab${this.aba === "dfc" ? " is-active" : ""}" onclick="PrestacaoContasApp.setAba('dfc')"><i data-lucide="line-chart"></i> DFC</button>
+        </div>
+
+        ${this.aba === "dfc" ? "" : this.conferirHtml()}
+
         ${this.error ? `<div style="margin-top:12px;padding:10px 12px;border-radius:8px;background:#fef2f2;color:#991b1b;font-size:0.82rem;border:1px solid #fecaca;">${this.error}</div>` : ""}
-        ${hasUnmatched ? `<div style="margin-top:12px;padding:10px 12px;border-radius:8px;background:#fffbeb;color:#92400e;font-size:0.82rem;border:1px solid #fde68a;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+        ${this.aba === "dfc" && hasUnmatched ? `<div style="margin-top:12px;padding:10px 12px;border-radius:8px;background:#fffbeb;color:#92400e;font-size:0.82rem;border:1px solid #fde68a;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
           <span><strong>${this.fmt(unmatched.total)}</strong> em contas ainda não alocadas na visão DFC Padrão.</span>
           <button type="button" class="btn btn-outline" style="height:32px;font-size:0.75rem;" onclick="switchTab('plano-financeiro','Plano Financeiro e Visões')">Alocar no Apoio</button>
         </div>` : ""}
 
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px;">
+        ${this.aba === "dfc" ? `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px;">
           ${this.kpi("Receitas", this.totals.receitas, "#16a34a")}
           ${this.kpi("Custos e despesas", this.totals.custosDespesas, "#dc2626")}
           ${this.kpi("GCO / Variação de caixa", this.totals.gco, "#0f172a")}
@@ -623,10 +761,82 @@ const PrestacaoContasApp = {
           </div>
         </div>
 
-        ${this.selectedAccount ? this.renderAccountDetail() : ""}
+        ${this.selectedAccount ? this.renderAccountDetail() : ""}` : ""}
       </div>
     `;
     if (window.lucide) lucide.createIcons();
+  },
+
+  seloRateio(status) {
+    if (status === "ok") return `<span style="display:inline-block;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;border-radius:999px;padding:2px 8px;font-size:0.72rem;font-weight:800;">Conferido</span>`;
+    if (status === "fora") return `<span style="display:inline-block;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;border-radius:999px;padding:2px 8px;font-size:0.72rem;font-weight:800;">Fora do padrão</span>`;
+    return `<span style="display:inline-block;background:#fffbeb;color:#92400e;border:1px solid #fde68a;border-radius:999px;padding:2px 8px;font-size:0.72rem;font-weight:800;">Sem padrão no centro</span>`;
+  },
+
+  textoCentros(linhas, campo) {
+    const lista = (linhas || []).filter(l => campo === "atual" ? l.valor > 0.004 : l.esperado != null);
+    if (!lista.length) return campo === "esperado" ? "Não cadastrado" : "—";
+    return lista.map(l => `${this.esc(l.id)} ${this.fmtPct(l[campo])}`).join(" · ");
+  },
+
+  dataBr(iso) {
+    const p = String(iso || "").slice(0, 10).split("-");
+    return p.length === 3 && p[0].length === 4 ? `${p[2]}/${p[1]}/${p[0]}` : "—";
+  },
+
+  conferirHtml() {
+    const conf = this.conferencias || { receitas: [], despesas: [] };
+    const bloco = (titulo, rows, cor) => {
+      const ok = rows.filter(r => r.status === "ok").length;
+      const fora = rows.filter(r => r.status === "fora").length;
+      const sem = rows.filter(r => r.status === "sem").length;
+      const total = rows.reduce((s, r) => s + r.total, 0);
+      const corpo = rows.length ? rows.map(r => {
+        const bg = r.status === "fora" ? "#fef2f2" : (r.status === "sem" ? "#fffbeb" : "#fff");
+        return `<tr style="background:${bg};">
+          <td style="white-space:nowrap;">${this.dataBr(r.data)}</td>
+          <td>${this.esc(r.historico)}${r.pessoa ? `<div style="font-size:0.72rem;color:#64748b;">${this.esc(r.pessoa)}</div>` : ""}</td>
+          <td style="font-weight:800;color:#105436;">${this.esc(r.obra)}</td>
+          <td style="font-variant-numeric:tabular-nums;">${this.textoCentros(r.linhas, "atual")}</td>
+          <td style="font-variant-numeric:tabular-nums;">${this.textoCentros(r.linhas, "esperado")}</td>
+          <td style="text-align:right;font-weight:800;font-variant-numeric:tabular-nums;color:${cor};">${this.fmt(r.total)}</td>
+          <td>${this.seloRateio(r.status)}</td>
+        </tr>`;
+      }).join("") : `<tr><td colspan="7" style="text-align:center;padding:22px;color:#94a3b8;">${this.loading ? "Carregando movimentos de caixa..." : (this.movements.length ? "Nenhum lançamento neste grupo." : "Clique em Carregar DFC para conferir o rateio.")}</td></tr>`;
+      return `
+        <div class="crm-card" style="margin-top:12px;padding:0;overflow:hidden;">
+          <div style="padding:12px 16px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center;">
+            <div>
+              <div style="font-weight:800;color:#0f172a;">${titulo}</div>
+              <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">${ok} conferidos · ${fora} fora do padrão · ${sem} sem percentual no centro</div>
+            </div>
+            <div style="font-weight:800;color:${cor};font-variant-numeric:tabular-nums;">${this.fmt(total)}</div>
+          </div>
+          <div class="table-container" style="max-height:420px;overflow:auto;box-shadow:none;">
+            <table class="custom-table" style="font-size:0.8rem;">
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Histórico</th>
+                  <th>Obra</th>
+                  <th>Lançado nos centros</th>
+                  <th>Padrão do centro</th>
+                  <th style="text-align:right;">Valor</th>
+                  <th>Situação</th>
+                </tr>
+              </thead>
+              <tbody>${corpo}</tbody>
+            </table>
+          </div>
+        </div>`;
+    };
+    return `
+      <p style="margin:14px 0 0;color:#64748b;font-size:0.82rem;line-height:1.45;">
+        Confere se cada valor recebido e cada despesa nos centros de custo segue o percentual cadastrado no centro (Moura Leite e terrenista).
+      </p>
+      ${bloco("Valores recebidos", conf.receitas || [], "#16a34a")}
+      ${bloco("Despesas", conf.despesas || [], "#dc2626")}
+    `;
   },
 
   kpi(label, value, color, raw) {

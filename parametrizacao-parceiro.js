@@ -135,12 +135,53 @@ const ParametrizacaoParceiroApp = {
     return Number.isFinite(pct) && pct > 0 ? Number(pct.toFixed(2)) : null;
   },
 
+  percentualTravado(obra) {
+    if (!obra) return null;
+    const amostra = (obra.costCenters && obra.costCenters[0] && obra.costCenters[0].id) || (String(obra.code || "") + "00");
+    return this.rateioParceiroDoCc(amostra);
+  },
+
+  travarCampoRateio(el, pct) {
+    if (!el) return;
+    if (pct == null) {
+      el.readOnly = false;
+      el.type = "number";
+      el.style.background = "#fff";
+      el.style.cursor = "";
+      el.title = "";
+      return;
+    }
+    el.type = "text";
+    el.value = String(pct);
+    el.readOnly = true;
+    el.style.background = "#f1f5f9";
+    el.style.cursor = "default";
+    el.title = "Percentual cadastrado no centro de custo. Não pode ser alterado aqui.";
+  },
+
+  digitosCentro(raw) {
+    return String(raw || "").replace(/\D/g, "").slice(0, 5);
+  },
+
+  aoDigitarCentroObra(el) {
+    if (!el) return;
+    const digits = this.digitosCentro(el.value);
+    if (el.value !== digits) el.value = digits;
+    this.preencherRateioParceiro(digits);
+  },
+
   preencherRateioParceiro(raw) {
     const el = document.getElementById("pp-add-obra-share");
     if (!el) return;
-    const pct = this.rateioParceiroDoCc(raw);
-    if (pct == null) return;
-    el.value = String(pct);
+    const digits = String(raw || "").replace(/\D/g, "");
+    if (digits.length < 5) {
+      this.travarCampoRateio(el, null);
+      el.value = "";
+      return;
+    }
+    const pct = this.rateioParceiroDoCc(digits);
+    this.travarCampoRateio(el, pct);
+    if (pct == null) el.value = "";
   },
 
   companies() {
@@ -212,6 +253,16 @@ const ParametrizacaoParceiroApp = {
 
   temSocios(p) {
     return this.isSociedade(p) || this.isMista(p);
+  },
+
+  variosCredores(p) {
+    return this.temSocios(p) || this.kindOf(p) === "parceria";
+  },
+
+  rotuloCredor(p, plural) {
+    const socio = this.isSociedade(p) || this.isMista(p);
+    if (plural) return socio ? "Sócios" : "Parceiros";
+    return socio ? "sócio" : "parceiro";
   },
 
   VERCELLINO_SOCIOS: [
@@ -340,6 +391,9 @@ const ParametrizacaoParceiroApp = {
     const tinhaSocios = Array.isArray(p.socios);
     p.socios = tinhaSocios ? p.socios.map(s => this.blankSocio(s)) : [];
     if (this.temSocios(p) && !tinhaSocios && p.creditor.id) p.socios.push(this.blankSocio(p.creditor));
+    if (this.kindOf(p) === "parceria" && p.creditor && p.creditor.id && !(p.socios || []).some(s => s.id)) {
+      p.socios.push(this.blankSocio(p.creditor));
+    }
     p.obraCode = p.obras.map(o => o.code).filter(Boolean).join(", ");
     const first = p.obras[0];
     p.defaultPartnerShare = first ? first.defaultPartnerShare : (Number(p.defaultPartnerShare) || 0);
@@ -373,6 +427,21 @@ const ParametrizacaoParceiroApp = {
     this.detailTab = tab || "geral";
     this.render();
     if (this.detailTab === "credor") this.ensureCreditorBank();
+  },
+
+  centrosOrdenados(lista) {
+    return (lista || []).slice().sort((a, b) => {
+      const na = Number(String(a && a.id || "").replace(/\D/g, "")) || 0;
+      const nb = Number(String(b && b.id || "").replace(/\D/g, "")) || 0;
+      if (na !== nb) return na - nb;
+      return String(a.id || "").localeCompare(String(b.id || ""), "pt-BR", { numeric: true });
+    });
+  },
+
+  salvarCentros() {
+    this.persist();
+    this.ccSearch = "";
+    this.setDetailTab("obras");
   },
 
   partnerPct(part, key) {
@@ -864,11 +933,12 @@ const ParametrizacaoParceiroApp = {
   addObraFromForm() {
     const p = this.current();
     if (!p) return;
-    const ccId = (document.getElementById("pp-add-obra-cc") && document.getElementById("pp-add-obra-cc").value || "").trim();
+    const ccId = this.digitosCentro(document.getElementById("pp-add-obra-cc") && document.getElementById("pp-add-obra-cc").value);
     const shareEl = document.getElementById("pp-add-obra-share");
-    const share = this.isSociedade(p) ? 0 : Number((shareEl || {}).value);
-    if (!ccId) {
-      alert("Informe um centro de custo da nova obra.");
+    const doCentro = this.isSociedade(p) ? null : this.rateioParceiroDoCc(ccId);
+    const share = this.isSociedade(p) ? 0 : (doCentro != null ? doCentro : Number((shareEl || {}).value));
+    if (ccId.length !== 5) {
+      alert("Informe o centro de custo com 5 números.");
       return;
     }
     if (!this.isSociedade(p) && (!Number.isFinite(share) || share < 0 || share > 100)) {
@@ -926,7 +996,8 @@ const ParametrizacaoParceiroApp = {
     let dest = p.obras.find(o => String(o.code) === String(destCode));
     if (!dest) {
       const seed = this.seedCostCenters(destCode, p.companyId, destRaw);
-      dest = this.makeObra(destCode, src.defaultPartnerShare, seed);
+      const pctDest = this.rateioParceiroDoCc(destRaw);
+      dest = this.makeObra(destCode, pctDest != null ? pctDest : src.defaultPartnerShare, seed);
       p.obras.push(dest);
     }
     dest.naNodes = cloneNaN;
@@ -1009,7 +1080,7 @@ const ParametrizacaoParceiroApp = {
 
   updateObraShare(value) {
     const obra = this.currentObra();
-    if (!obra) return;
+    if (!obra || this.percentualTravado(obra) != null) return;
     const n = Number(value);
     obra.defaultPartnerShare = Number.isFinite(n) ? n : 0;
     this.persist();
@@ -1069,9 +1140,9 @@ const ParametrizacaoParceiroApp = {
   pickCreditor(id, name, doc) {
     const p = this.current();
     if (!p) return;
-    if (this.temSocios(p)) {
+    if (this.variosCredores(p)) {
       if ((p.socios || []).some(s => String(s.id) === String(id))) {
-        alert("Este sócio já está na lista.");
+        alert("Este " + this.rotuloCredor(p) + " já está na lista.");
         return;
       }
       p.socios = p.socios || [];
@@ -1269,7 +1340,7 @@ const ParametrizacaoParceiroApp = {
 
   async ensureCreditorBank() {
     const p = this.current();
-    if (p && this.temSocios(p)) return this.ensureSociosBanks();
+    if (p && this.variosCredores(p)) return this.ensureSociosBanks();
     if (!p || !p.creditor || !p.creditor.id) return;
     if (this._bankLoading) return;
     if (p.creditor.bankLoaded) return;
@@ -1301,7 +1372,7 @@ const ParametrizacaoParceiroApp = {
 
   refreshCreditorBank() {
     const p = this.current();
-    if (p && this.temSocios(p)) {
+    if (p && this.variosCredores(p)) {
       (p.socios || []).forEach(s => { s.bankLoaded = false; });
       this.ensureSociosBanks();
       return;
@@ -1313,7 +1384,7 @@ const ParametrizacaoParceiroApp = {
 
   async ensureSociosBanks() {
     const p = this.current();
-    if (!p || !this.temSocios(p)) return;
+    if (!p || !this.variosCredores(p)) return;
     const pending = (p.socios || []).filter(s => s.id && !s.bankLoaded);
     if (!pending.length || this._bankLoading) return;
     this._bankLoading = true;
@@ -1524,7 +1595,7 @@ const ParametrizacaoParceiroApp = {
     if (ccObra !== String(obra.code)) {
       if (!confirm(`O centro ${id} é da obra ${ccObra || "?"}. Incluir na obra ${obra.code}?`)) return;
     }
-    const cc = this.allCostCenters().find(c => String(c.id) === id);
+    const cc = permitido.cc;
     obra.costCenters.push({ id, name: (cc && cc.name) || id, inAccount: true });
     this.ccSearch = "";
     this.persist();
@@ -1603,11 +1674,13 @@ const ParametrizacaoParceiroApp = {
       const nCc = (p.obras || []).reduce((acc, o) => acc + (o.costCenters || []).filter(c => c.inAccount).length, 0);
       const obras = (p.obras || []).map(o => o.code).filter(Boolean).join(", ") || "—";
       const tipo = this.kindLabel(p);
+      const nPessoas = (p.socios || []).filter(s => s.id).length;
+      const rateioTxt = [...new Set((p.obras || []).map(o => o.defaultPartnerShare + "%"))].join(" / ") || "sem rateio";
       const shares = this.isSociedade(p)
-        ? ((p.socios || []).length + " sócios · " + this.fmtPct(this.totalSociosPct(p)) + "%")
+        ? (nPessoas + " sócios · " + this.fmtPct(this.totalSociosPct(p)) + "%")
         : (this.isMista(p)
-          ? ((p.socios || []).length + " sócios · " + ([...new Set((p.obras || []).map(o => o.defaultPartnerShare + "%"))].join(" / ") || "sem rateio"))
-          : ([...new Set((p.obras || []).map(o => o.defaultPartnerShare + "%"))].join(" / ") || "sem rateio"));
+          ? (nPessoas + " sócios · " + rateioTxt)
+          : (nPessoas + (nPessoas === 1 ? " parceiro · " : " parceiros · ") + rateioTxt));
       return `<button onclick="ParametrizacaoParceiroApp.select('${p.id}')"
         style="width:100%;text-align:left;border:1.5px solid ${active ? "#105436" : "#e5e7eb"};background:${active ? "#e8f5ee" : "#fff"};color:${active ? "#105436" : "#334155"};border-radius:8px;padding:10px;margin-bottom:6px;cursor:pointer;">
         <div style="font-weight:800;font-size:0.82rem;">${this.esc(p.partnerName)}</div>
@@ -1697,8 +1770,8 @@ const ParametrizacaoParceiroApp = {
       <h3 style="margin:0 0 6px;color:var(--color-primary);">Nova prestação de contas</h3>
       <p style="margin:0 0 16px;color:#64748b;font-size:0.82rem;line-height:1.45;">
         Informe a empresa (cobrança interna), o nome e se é <strong>parceria</strong>, <strong>sociedade</strong> ou <strong>mista</strong>.
-        Centro de custo e percentual de obra ficam para depois. Em sociedade os sócios entram na aba Credor, cada um com o seu percentual.
-        Mista junta os dois: sócios com participação e parceiros com rateio por obra.
+        Centro de custo e percentual de obra ficam para depois. Na aba Credor dá para cadastrar vários parceiros ou sócios, cada um com o seu percentual.
+        Mista junta os dois: sócios com participação e rateio por obra.
       </p>
       <div style="display:flex;flex-direction:column;gap:12px;min-width:0;">
         <label style="${field}">Empresa
@@ -1739,7 +1812,7 @@ const ParametrizacaoParceiroApp = {
     const nObras = (p.obras || []).length;
     const nCc = (p.obras || []).reduce((acc, o) => acc + (o.costCenters || []).filter(c => c.inAccount).length, 0);
     const nSocios = (p.socios || []).filter(s => s.id).length;
-    const credOk = this.temSocios(p) ? nSocios > 0 : !!(p.creditor && p.creditor.id);
+    const credOk = this.variosCredores(p) ? nSocios > 0 : !!(p.creditor && p.creditor.id);
     const btn = (id, label, icon, count) =>
       `<button type="button" role="tab" aria-selected="${tab === id}" class="ml-tab${tab === id ? " is-active" : ""}" onclick="ParametrizacaoParceiroApp.setDetailTab('${id}')"><i data-lucide="${icon}"></i> ${label}${count ? ` <span class="ml-tab-count">${count}</span>` : ""}</button>`;
     let body = "";
@@ -1759,7 +1832,7 @@ const ParametrizacaoParceiroApp = {
         </div>
         <div class="ml-tabs" role="tablist" style="margin-bottom:16px;">
           ${btn("geral", "Geral", "sliders-horizontal")}
-          ${btn("credor", "Credor", "user", this.temSocios(p) ? (nSocios || "") : (credOk ? "✓" : ""))}
+          ${btn("credor", "Credor", "user", this.variosCredores(p) ? (nSocios || "") : (credOk ? "✓" : ""))}
           ${btn("obras", "Obras", "building-2", nObras || "")}
           ${btn("centros", "Centros de custo", "layers", nCc || "")}
           ${btn("rateio", sociedade ? "Sociedade" : "Rateio DFC", sociedade ? "users" : "pie-chart")}
@@ -1822,7 +1895,7 @@ const ParametrizacaoParceiroApp = {
                 ? "Sociedade: não aplica rateio por obra. Cada sócio tem um percentual de participação e recebe pela distribuição de lucro."
                 : (p.kind === "mista"
                   ? "Mista: há sócios com percentual de participação e também parceiros com rateio por obra."
-                  : "Parceria: cada centro de custo pode ter rateio próprio. O percentual fica na obra, não neste cadastro.")}
+                  : "Parceria: pode ter vários parceiros, cada um com o seu percentual, como os sócios. O rateio por obra continua na aba Rateio DFC.")}
             </p>
           </div>
         </div>
@@ -1831,6 +1904,8 @@ const ParametrizacaoParceiroApp = {
   },
 
   sociosCredorHtml(p) {
+    const pessoa = this.rotuloCredor(p);
+    const pessoas = this.rotuloCredor(p, true);
     const cred = p.creditor || {};
     const day = cred.paymentDay == null ? "" : cred.paymentDay;
     const mode = cred.paymentDayMode === "businessDays" ? "businessDays" : "monthDay";
@@ -1898,11 +1973,11 @@ const ParametrizacaoParceiroApp = {
     };
     return `
       <div class="crm-card" style="padding:16px;">
-        <h3 style="margin:0 0 4px;font-size:0.95rem;color:var(--color-primary);">Sócios (credores)</h3>
-        <p style="margin:0 0 12px;font-size:0.78rem;color:#64748b;">Cada sócio é um credor do Sienge, com o percentual de participação no negócio. A busca acrescenta mais um, no mesmo agrupamento.</p>
+        <h3 style="margin:0 0 4px;font-size:0.95rem;color:var(--color-primary);">${pessoas} (credores)</h3>
+        <p style="margin:0 0 12px;font-size:0.78rem;color:#64748b;">Cada ${pessoa} é um credor do Sienge, com o percentual de participação. A busca acrescenta mais um, no mesmo agrupamento.</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
           <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;min-width:120px;">
-            <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;">Sócios</div>
+            <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;">${pessoas}</div>
             <strong style="color:#0f172a;">${socios.length}</strong>
           </div>
           <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;min-width:140px;">
@@ -1915,7 +1990,7 @@ const ParametrizacaoParceiroApp = {
           </div>
         </div>
         <div style="margin-bottom:14px;">
-          <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:8px;">Dia do pagamento dos sócios</div>
+          <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:8px;">Dia do pagamento dos ${pessoas.toLowerCase()}</div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
             ${modeBtn("monthDay", "Dia do mês")}
             ${modeBtn("businessDays", "Dias úteis após o fechamento")}
@@ -1935,20 +2010,20 @@ const ParametrizacaoParceiroApp = {
             </label>
           `}
         </div>
-        <label style="display:block;font-size:0.7rem;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:4px;">Adicionar sócio</label>
+        <label style="display:block;font-size:0.7rem;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:4px;">Adicionar ${pessoa}</label>
         <input placeholder="Buscar credor por nome, CPF ou CNPJ" value="${this.esc(this.creditorQuery)}"
           oninput="ParametrizacaoParceiroApp.onCreditorSearch(this.value)"
           style="width:100%;max-width:520px;height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
         <div id="pp-cred-sugg">${this.creditorSuggHtml()}</div>
         <div style="display:flex;flex-direction:column;gap:10px;margin-top:14px;">
-          ${socios.map(card).join("") || `<p style="color:#94a3b8;margin:0;">Nenhum sócio adicionado ainda.</p>`}
+          ${socios.map(card).join("") || `<p style="color:#94a3b8;margin:0;">Nenhum ${pessoa} adicionado ainda.</p>`}
         </div>
       </div>
     `;
   },
 
   credorTabHtml(p) {
-    if (this.temSocios(p)) return this.sociosCredorHtml(p);
+    if (this.variosCredores(p)) return this.sociosCredorHtml(p);
     const cred = p.creditor || {};
     const banks = cred.bankList || [];
     const bank = cred.bankInfo || null;
@@ -2042,10 +2117,10 @@ const ParametrizacaoParceiroApp = {
         ${this.obraChipsHtml(p, sociedade)}
         <div style="display:grid;grid-template-columns:${sociedade ? "minmax(0,1fr) 148px" : "minmax(0,1fr) 220px 148px"};gap:8px 10px;align-items:end;">
           <label style="font-size:0.72rem;font-weight:700;color:#475569;">Adicionar obra (C.C.)
-            <input id="pp-add-obra-cc" placeholder="Ex.: 13400" oninput="ParametrizacaoParceiroApp.preencherRateioParceiro(this.value)" style="width:100%;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;box-sizing:border-box;display:block;margin-top:4px;">
+            <input id="pp-add-obra-cc" inputmode="numeric" maxlength="5" placeholder="Ex.: 13400" oninput="ParametrizacaoParceiroApp.aoDigitarCentroObra(this)" style="width:100%;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;box-sizing:border-box;display:block;margin-top:4px;">
           </label>
           ${sociedade ? "" : `<label style="font-size:0.72rem;font-weight:700;color:#475569;">Rateio do parceiro desta obra (%)
-            <input id="pp-add-obra-share" type="number" min="0" max="100" step="0.01" value="${obra ? obra.defaultPartnerShare : 50}" style="width:100%;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;box-sizing:border-box;display:block;margin-top:4px;">
+            <input id="pp-add-obra-share" type="number" min="0" max="100" step="0.01" value="" placeholder="Vem do centro de custo" style="width:100%;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;box-sizing:border-box;display:block;margin-top:4px;background:#f8fafc;">
           </label>`}
           <button class="btn btn-primary" onclick="ParametrizacaoParceiroApp.addObraFromForm()" style="height:34px;width:148px;font-size:0.78rem;white-space:nowrap;">Incluir obra</button>
           ${sociedade ? "" : `<label style="grid-column:1 / 3;font-size:0.72rem;font-weight:700;color:#475569;">Copiar ligações da obra ${this.esc(obra && obra.code)} para
@@ -2062,6 +2137,11 @@ const ParametrizacaoParceiroApp = {
 
   obraDetailHtml(p, obra, inAccount) {
     const sociedade = this.isSociedade(p);
+    const travado = sociedade ? null : this.percentualTravado(obra);
+    if (travado != null && Number(obra.defaultPartnerShare) !== travado) {
+      obra.defaultPartnerShare = travado;
+      this.persist();
+    }
     const total = (obra.costCenters || []).length;
     const field = "height:36px;border:1px solid #e2e8f0;border-radius:8px;padding:0 10px;box-sizing:border-box;background:#fff;font-size:0.82rem;";
     return `
@@ -2076,9 +2156,9 @@ const ParametrizacaoParceiroApp = {
           </div>
           <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
             ${sociedade ? "" : `<label style="font-size:0.72rem;font-weight:700;color:#475569;">Rateio da obra (%)
-              <input type="number" min="0" max="100" step="0.01" value="${obra.defaultPartnerShare}"
-                onchange="ParametrizacaoParceiroApp.updateObraShare(this.value)"
-                style="width:88px;${field}font-weight:800;display:block;margin-top:4px;">
+              <input type="${travado != null ? "text" : "number"}" ${travado != null ? "" : `min="0" max="100" step="0.01"`} value="${obra.defaultPartnerShare}"
+                ${travado != null ? `readonly title="Percentual cadastrado no centro de custo. Não pode ser alterado aqui."` : `onchange="ParametrizacaoParceiroApp.updateObraShare(this.value)"`}
+                style="width:88px;${field}font-weight:800;display:block;margin-top:4px;${travado != null ? "background:#f1f5f9;cursor:default;" : ""}">
             </label>`}
             <button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.importObraCenters()" title="Busca no cadastro os outros centros de custo desta mesma obra, como o de parceria, e inclui na lista os que ainda não estão aqui." style="height:36px;font-size:0.78rem;white-space:nowrap;">Trazer outros centros de custo da obra</button>
           </div>
@@ -2093,7 +2173,7 @@ const ParametrizacaoParceiroApp = {
             </tr>
           </thead>
           <tbody>
-            ${(obra.costCenters || []).map(cc => `<tr style="border-top:1px solid #f1f5f9;">
+            ${this.centrosOrdenados(obra.costCenters).map(cc => `<tr style="border-top:1px solid #f1f5f9;">
               <td style="padding:12px 16px;font-weight:800;color:#105436;font-variant-numeric:tabular-nums;">${this.esc(cc.id)}</td>
               <td style="padding:12px 16px;color:#334155;">${this.esc(cc.name)}</td>
               <td style="padding:12px 16px;text-align:center;">
@@ -2106,11 +2186,14 @@ const ParametrizacaoParceiroApp = {
             </tr>`).join("") || `<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:28px;">Nenhum centro de custo nesta obra.</td></tr>`}
           </tbody>
         </table>
-        <div style="padding:12px 16px;background:#f8fafc;border-top:1px solid #e2e8f0;">
-          <input placeholder="Adicionar outro C.C. (ex. 13301)" value="${this.esc(this.ccSearch)}"
-            oninput="ParametrizacaoParceiroApp.ccSearch=this.value;const b=document.getElementById('pp-cc-sugg');if(b)b.innerHTML=ParametrizacaoParceiroApp.ccSuggHtml();"
-            style="width:100%;max-width:420px;${field}">
-          <div id="pp-cc-sugg">${this.ccSuggHtml()}</div>
+        <div style="padding:12px 16px;background:#f8fafc;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;">
+          <div style="flex:1;min-width:220px;">
+            <input placeholder="Adicionar outro C.C. (ex. 13301)" value="${this.esc(this.ccSearch)}"
+              oninput="ParametrizacaoParceiroApp.ccSearch=this.value;const b=document.getElementById('pp-cc-sugg');if(b)b.innerHTML=ParametrizacaoParceiroApp.ccSuggHtml();"
+              style="width:100%;max-width:420px;${field}">
+            <div id="pp-cc-sugg">${this.ccSuggHtml()}</div>
+          </div>
+          <button type="button" class="btn btn-primary" onclick="ParametrizacaoParceiroApp.salvarCentros()" title="Grava os centros desta obra e volta para a aba Obras" style="height:36px;min-width:120px;">Salvar</button>
         </div>
       </div>
     `;
