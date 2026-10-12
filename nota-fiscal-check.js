@@ -2,7 +2,7 @@
    Impostos: GET /bills/{id}/taxes. Nota: anexo PDF (DANFSe e layouts municipais com texto) ou XML, lido no navegador.
    CNAE e Simples Nacional: cadastro público do CNPJ (BrasilAPI). As regras de retenção por atividade só geram "atenção". */
 window.NotaFiscalCheck = {
-  CACHE_KEY: "crm_nf_check_v1",
+  CACHE_KEY: "crm_nf_check_v2",
   CNPJ_KEY: "crm_cnpj_receita_v1",
   TTL: 12 * 3600 * 1000,
   CNPJ_TTL: 30 * 86400 * 1000,
@@ -14,12 +14,38 @@ window.NotaFiscalCheck = {
      irrf: alíquota do IR na fonte; csrf: PIS/COFINS/CSLL 4,65% (Lei 10.833, art. 30). Simples: anexoIV indica INSS retido. */
   ATIVIDADES: [
     { id: "construcao", nome: "construção civil", cnae: /^4[123]/, desc: /constru[cç]|empreitada|terraplen|paviment|alvenar|edifica|reforma|drenagem pluvial|galeria/, inss: true, irrf: 0, csrf: false, anexoIV: true },
-    { id: "limpeza", nome: "limpeza, conservação e saneamento", cnae: /^(812|8130|3701|3702|3811|3812|3821|3822|3900)/, desc: /limpeza|conserva[cç][aã]o|desentup|hidrojat|dedetiz|desratiz|jardinag|ro[cç]ada|zeladori|varri[cç]|coleta de (lixo|res[ií]duo)/, inss: true, irrf: 1, csrf: true, anexoIV: true },
+    { id: "limpeza", nome: "limpeza, conservação e jardinagem", cnae: /^(812|8130|3701|3702|3811|3812|3821|3822|3900)/, desc: /limpeza|conserva[cç][aã]o|desentup|hidrojat|dedetiz|desratiz|jardin|jardim|paisag|poda|capina|ro[cç]ada|zeladori|varri[cç]|coleta de (lixo|res[ií]duo)/, inss: true, irrf: 1, csrf: true, anexoIV: true },
     { id: "vigilancia", nome: "vigilância e segurança", cnae: /^801/, desc: /vigil[aâ]ncia|seguran[cç]a patrimonial|portaria|monitoramento/, inss: true, irrf: 1, csrf: true, anexoIV: true },
     { id: "maodeobra", nome: "locação de mão de obra", cnae: /^78/, desc: /m[aã]o de obra|terceiriza/, inss: true, irrf: 1, csrf: true, anexoIV: false },
     { id: "profissional", nome: "serviço profissional (RIR, art. 714)", cnae: /^(62|69|702|711|712|7319|741|742|749|862|863|864)/, desc: /consultori|engenhari|arquitet|advoc|jur[ií]dic|contab|auditori|projeto|topograf|avalia[cç][aã]o|per[ií]cia|assessori/, inss: false, irrf: 1.5, csrf: true, anexoIV: false },
     { id: "manutencao", nome: "manutenção e reparação", cnae: /^(33|952)/, desc: /manuten[cç][aã]o|repara[cç][aã]o|conserto/, inss: false, irrf: 0, csrf: true, anexoIV: false }
   ],
+
+  /* Subitens da lista anexa à LC 116/2003 (4 primeiros dígitos do código de tributação nacional) ligados às atividades acima.
+     O código de serviço da nota vale mais que o texto livre da descrição. */
+  SERVICOS_LC116: {
+    "0701": ["profissional", "Engenharia, agronomia, arquitetura, urbanismo, paisagismo e congêneres"],
+    "0702": ["construcao", "Execução de obras de construção civil"],
+    "0703": ["profissional", "Elaboração de planos, estudos e projetos de engenharia"],
+    "0704": ["construcao", "Demolição"],
+    "0705": ["construcao", "Reparação, conservação e reforma de edifícios, estradas, pontes e congêneres"],
+    "0709": ["limpeza", "Varrição, coleta, remoção e tratamento de resíduos"],
+    "0710": ["limpeza", "Limpeza, manutenção e conservação de vias, imóveis, parques e jardins"],
+    "0711": ["limpeza", "Decoração e jardinagem, inclusive corte e poda de árvores"],
+    "0713": ["limpeza", "Dedetização, desinfecção, desratização e congêneres"],
+    "0717": ["construcao", "Escoramento, contenção de encostas e congêneres"],
+    "0719": ["profissional", "Acompanhamento e fiscalização de obras de engenharia e arquitetura"],
+    "0720": ["profissional", "Aerofotogrametria, cartografia, topografia e congêneres"],
+    "1102": ["vigilancia", "Vigilância, segurança ou monitoramento de bens e pessoas"],
+    "1401": ["manutencao", "Revisão, conserto e manutenção de máquinas, veículos e equipamentos"],
+    "1402": ["manutencao", "Assistência técnica"],
+    "1701": ["profissional", "Assessoria ou consultoria de qualquer natureza"],
+    "1705": ["maodeobra", "Fornecimento de mão de obra"],
+    "1714": ["profissional", "Advocacia"],
+    "1716": ["profissional", "Auditoria"],
+    "1719": ["profissional", "Contabilidade"],
+    "1720": ["profissional", "Consultoria e assessoria econômica ou financeira"]
+  },
 
   esc(v) {
     return String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -304,7 +330,7 @@ window.NotaFiscalCheck = {
       csll: valor([/^(valor )?(da )?csll( retid[oa])?( \(r\$\))?$/i]),
       totalRetencoes: valor([/^total das reten[cç][oõ]es/i, /^(valor )?(total )?(das )?reten[cç][oõ]es( federais)?$/i]),
       liquido: valor([/^valor l[ií]quido( da nfs-?e| da nota)?( \(r\$\))?$/i]),
-      codigo: campo([/^c[oó]digo de tributa[cç][aã]o nacional$/i, /^item da lista/i, /^c[oó]digo do servi[cç]o$/i], true),
+      codigo: campo([/^c[oó]digo de tributa[cç][aã]o nacional( ?\/ ?municipal)?$/i, /^item da lista/i, /^c[oó]digo do servi[cç]o$/i], true),
       descricao: campo([/^descri[cç][aã]o do servi[cç]o$/i, /^discrimina[cç][aã]o do(s)? servi[cç]o(s)?$/i], true),
       numero: campo([/^n[uú]mero da nfs-?e$/i, /^n[uú]mero da nota$/i], true)
     };
@@ -404,11 +430,43 @@ window.NotaFiscalCheck = {
     return this.avaliar(d, opts);
   },
 
-  atividadeDe(texto, cnaes) {
-    const f = this.fold(texto);
-    const pelaNota = f ? this.ATIVIDADES.find((a) => a.desc.test(f)) : null;
-    const pelosCnaes = (cnaes || []).map((c) => this.ATIVIDADES.find((a) => a.cnae.test(this.digits(c)))).filter(Boolean);
-    return { pelaNota, pelosCnaes, atividade: pelaNota || pelosCnaes[0] || null };
+  /** "07.11.02 / -", "071102", "7.11" → subitem 07.11 da LC 116 com a atividade correspondente. */
+  servicoLc116(codigo) {
+    const t = String(codigo || "").split("/")[0].trim();
+    const m = t.match(/^(\d{1,2})\.(\d{2})/);
+    let chave = m ? m[1].padStart(2, "0") + m[2] : "";
+    if (!chave) {
+      const d = this.digits(t);
+      if (d.length === 4 || d.length === 6) chave = d.slice(0, 4);
+    }
+    if (!chave) return null;
+    const s = this.SERVICOS_LC116[chave];
+    return {
+      item: `${chave.slice(0, 2)}.${chave.slice(2)}`,
+      nome: s ? s[1] : "",
+      atividade: s ? this.ATIVIDADES.find((a) => a.id === s[0]) || null : null
+    };
+  },
+
+  /** Atividade do serviço: código LC 116 da nota primeiro, depois a descrição; CNAEs comparados pelo código e pela descrição. */
+  atividadeDe(n, e) {
+    const servico = n ? this.servicoLc116(n.codigo) : null;
+    const pelaNotaCod = servico ? servico.atividade : null;
+    const f = this.fold(n ? n.descricao : "");
+    const pelaDesc = f ? this.ATIVIDADES.filter((a) => a.desc.test(f)) : [];
+    const cnaes = e ? [{ codigo: e.cnae, descricao: e.cnaeDesc }].concat(e.secundarios || []).filter((c) => c && c.codigo) : [];
+    const pelosCnaes = [];
+    cnaes.forEach((c) => {
+      const dg = this.digits(c.codigo);
+      const fd = this.fold(c.descricao);
+      this.ATIVIDADES.forEach((a) => {
+        if ((a.cnae.test(dg) || (fd && a.desc.test(fd))) && !pelosCnaes.includes(a)) pelosCnaes.push(a);
+      });
+    });
+    const candidatos = pelaNotaCod ? [pelaNotaCod] : pelaDesc;
+    const cabe = candidatos.find((a) => pelosCnaes.includes(a)) || null;
+    const conflito = cnaes.length && candidatos.length && !cabe ? (pelaNotaCod ? "codigo" : "descricao") : "";
+    return { servico, pelaNotaCod, pelaDesc, pelosCnaes, cnaes, conflito, atividade: cabe || pelaNotaCod || pelaDesc[0] || pelosCnaes[0] || null };
   },
 
   avaliar(d, opts) {
@@ -554,13 +612,16 @@ window.NotaFiscalCheck = {
   /** Retenções que a atividade e o regime do prestador costumam exigir (só alerta, não bloqueia). */
   avaliarAtividade(r, d, n) {
     const e = d.empresa;
-    const cnaes = e ? [e.cnae].concat(e.secundarios.map((c) => c.codigo)).filter(Boolean) : [];
-    const textoNota = n ? `${n.descricao || ""} ${n.codigo || ""}` : "";
-    const at = this.atividadeDe(textoNota, cnaes);
+    const at = this.atividadeDe(n, e);
     r.atividade = at.atividade ? at.atividade.nome : "";
+    r.servicoLc = at.servico && at.servico.nome ? `${at.servico.item} ${at.servico.nome}` : "";
+    r.atividadeConflito = at.conflito;
     if (e && e.situacao && !/ativa/i.test(e.situacao)) r.avisos.push(`CNPJ do prestador com situação "${e.situacao}" na Receita.`);
-    if (at.pelaNota && cnaes.length && !at.pelosCnaes.includes(at.pelaNota)) {
-      r.avisos.push(`O serviço da nota parece ser de ${at.pelaNota.nome}, mas nenhum CNAE do prestador é dessa atividade. Confira se ele pode emitir esse serviço.`);
+    const cnaesTxt = at.cnaes.slice(0, 4).map((c) => `${this.cnaeFmt(c.codigo)}${c.descricao ? " " + c.descricao : ""}`).join("; ") + (at.cnaes.length > 4 ? "; …" : "");
+    if (at.conflito === "codigo") {
+      r.avisos.push(`O código de serviço da nota (${at.servico.item} ${at.servico.nome}) é de ${at.pelaNotaCod.nome}, e nenhum CNAE do prestador é dessa atividade (${cnaesTxt}). Confira no cartão CNPJ se ele pode emitir esse serviço.`);
+    } else if (at.conflito === "descricao") {
+      r.infos.push(`A descrição da nota lembra ${at.pelaDesc.map((a) => a.nome).join(" ou ")}, e não identifiquei CNAE do prestador com essa atividade (${cnaesTxt}). Sem o código de serviço legível na nota, vale só como conferência visual.`);
     }
     const regime = (n && n.simples) || (e ? (e.mei ? "mei" : (e.simples === true ? "sim" : (e.simples === false ? "nao" : null))) : null);
     r.regime = regime;
@@ -568,6 +629,7 @@ window.NotaFiscalCheck = {
       r.infos.push(`Regime na nota (${n.simplesTexto}) diferente do cadastro público do CNPJ (${e.mei ? "MEI" : (e.simples ? "Simples Nacional" : "fora do Simples")}). Vale o que está na nota.`);
     }
     const a = at.atividade;
+    const dica = at.conflito === "descricao" ? r.infos : r.avisos;
     const tem = (t) => r.impostos.some((x) => x.tipo === t || (t === "CSRF" && ["PIS", "COFINS", "CSLL", "CSRF"].includes(x.tipo)))
       || (n && ((t === "IRRF" && n.irrf > 0) || (t === "INSS" && n.inss > 0) || (t === "CSRF" && ((n.csrf || 0) + (n.pis || 0) + (n.cofins || 0) + (n.csll || 0)) > 0)));
     const base = r.bruto || (n && n.valorServico) || 0;
@@ -579,14 +641,14 @@ window.NotaFiscalCheck = {
       if (tem("IRRF")) r.avisos.push("Prestador do Simples Nacional: em regra não há retenção de IR na fonte.");
       if (tem("CSRF")) r.avisos.push("Prestador do Simples Nacional: em regra não há retenção de PIS/COFINS/CSLL.");
       if (a && a.anexoIV && !tem("INSS")) {
-        r.avisos.push(`Atividade de ${a.nome} (anexo IV do Simples): se for cessão de mão de obra ou empreitada, há retenção de 11% de INSS (${this.money(base * 0.11)}). Confirme com o fiscal.`);
+        dica.push(`Atividade de ${a.nome} (anexo IV do Simples): se for cessão de mão de obra ou empreitada, há retenção de 11% de INSS (${this.money(base * 0.11)}). Confirme com o fiscal.`);
       }
       return;
     }
     if (!a || regime !== "nao") return;
-    if (a.csrf && !tem("CSRF") && base * 0.0465 > 10) r.avisos.push(`Atividade de ${a.nome}: costuma ter retenção de PIS/COFINS/CSLL de 4,65% (${this.money(base * 0.0465)}).`);
-    if (a.irrf && !tem("IRRF") && base * a.irrf / 100 > 10) r.avisos.push(`Atividade de ${a.nome}: costuma ter IR na fonte de ${this.pct(a.irrf)} (${this.money(base * a.irrf / 100)}).`);
-    if (a.inss && !tem("INSS")) r.avisos.push(`Atividade de ${a.nome}: com cessão de mão de obra ou empreitada, há retenção de 11% de INSS (${this.money(base * 0.11)}).`);
+    if (a.csrf && !tem("CSRF") && base * 0.0465 > 10) dica.push(`Atividade de ${a.nome}: costuma ter retenção de PIS/COFINS/CSLL de 4,65% (${this.money(base * 0.0465)}).`);
+    if (a.irrf && !tem("IRRF") && base * a.irrf / 100 > 10) dica.push(`Atividade de ${a.nome}: costuma ter IR na fonte de ${this.pct(a.irrf)} (${this.money(base * a.irrf / 100)}).`);
+    if (a.inss && !tem("INSS")) dica.push(`Atividade de ${a.nome}: com cessão de mão de obra ou empreitada, há retenção de 11% de INSS (${this.money(base * 0.11)}).`);
   },
 
   /* ---------- conferência na entrada da nota (pedido × nota × CNAE × endereço) ---------- */
@@ -731,7 +793,7 @@ window.NotaFiscalCheck = {
         const grupoMsg = (t) => /CNAE|atividade da nota/i.test(t) ? "cnae" : "impostos";
         falso.avisos.forEach((t) => add(grupoMsg(t), "aviso", t));
         falso.infos.forEach((t) => add(grupoMsg(t), "info", t));
-        if (r.atividade && !falso.avisos.some((t) => /CNAE/.test(t))) add("cnae", "ok", `Atividade da nota (${r.atividade}) cabe no CNAE do credor.`);
+        if (r.atividade && !falso.atividadeConflito) add("cnae", "ok", `Atividade da nota (${r.atividade}${falso.servicoLc ? `, item ${falso.servicoLc}` : ""}) cabe no CNAE do credor.`);
         else if (!r.atividade && empresa.cnae) add("cnae", "ok", `CNAE ${this.cnaeFmt(empresa.cnae)} (${empresa.cnaeDesc || "sem descrição"}). A descrição da nota não caiu numa atividade com retenção obrigatória.`);
       }
       if (nota.aliquotaIss != null && nota.aliquotaIss > 0 && (nota.aliquotaIss < 2 - 0.001 || nota.aliquotaIss > 5 + 0.001)) {
@@ -911,7 +973,7 @@ window.NotaFiscalCheck = {
     const totais = r.bruto ? `<p><strong>Valor do título:</strong> ${this.money(r.bruto)} · <strong>Impostos retidos no Sienge:</strong> ${this.money(r.retido)} · <strong>Valor líquido a pagar:</strong> ${this.money(r.liquido)}</p>` : "";
     const nota = n ? `<p><strong>Nota${n.numero ? " " + this.esc(n.numero) : ""}</strong> (anexo ${this.esc(n.anexo || "")}):
         ${n.valorServico != null ? `serviço ${this.money(n.valorServico)}` : ""}${n.issRetido != null ? ` · ISS ${n.issRetido ? "retido pelo tomador" : "não retido"}` : ""}${n.aliquotaIss ? ` (${this.pct(n.aliquotaIss)} sobre ${this.money(n.baseIss)})` : ""}${r.retidoNota != null ? ` · retenções ${this.money(r.retidoNota)}` : ""}${n.liquido != null ? ` · líquido ${this.money(n.liquido)}` : ""}</p>
-      ${n.codigo || n.descricao ? `<p><strong>Serviço:</strong> ${this.esc([n.codigo, n.descricao].filter(Boolean).join(" · ").slice(0, 220))}</p>` : ""}` : "";
+      ${n.codigo || n.descricao ? `<p><strong>Serviço:</strong> ${this.esc([n.codigo, n.descricao].filter(Boolean).join(" · ").slice(0, 220))}${r.servicoLc ? ` · <strong>Item LC 116:</strong> ${this.esc(r.servicoLc)}` : ""}</p>` : ""}` : "";
     const regimeTxt = { sim: "Simples Nacional", mei: "MEI", nao: "fora do Simples (Lucro Presumido ou Real)" }[r.regime] || "não identificado";
     const prest = e ? `<p><strong>Prestador:</strong> ${this.esc(e.razao || "")} · ${this.esc(this.docFmt(r.cnpj))}${e.cidade ? " · " + this.esc(e.cidade) : ""} · <strong>Regime:</strong> ${this.esc(regimeTxt)}</p>
       <p><strong>CNAE principal:</strong> ${this.esc(this.cnaeFmt(e.cnae))} ${this.esc(e.cnaeDesc)}${r.atividade ? ` · <strong>Atividade para retenção:</strong> ${this.esc(r.atividade)}` : ""}</p>

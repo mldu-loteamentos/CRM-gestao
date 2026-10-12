@@ -14,6 +14,7 @@ const ResultadoCaixaApp = {
   escala: "milhoes",
   agrupar: true,
   outrosAberto: false,
+  arqsAberto: false,
   SOLTOS: { "14703": 1, "14704": 1, "14304": 1, "14305": 1 },
   dfcLinhas: [],
   dfcLendo: false,
@@ -926,6 +927,16 @@ const ResultadoCaixaApp = {
     this.render();
   },
 
+  setAgrupar(v) {
+    this.agrupar = !!v;
+    this.render();
+  },
+
+  toggleArqs() {
+    this.arqsAberto = !this.arqsAberto;
+    this.render();
+  },
+
   pct(real, orc) {
     if (Math.abs(orc) < 0.5) return Math.abs(real) < 0.5 ? 0 : (real > 0 ? 100 : -100);
     return ((real - orc) / Math.abs(orc)) * 100;
@@ -942,7 +953,8 @@ const ResultadoCaixaApp = {
   },
 
   blocoNums(b, saida) {
-    return `<td class="rcx-num">${this.fmt(b.ant)}</td><td class="rcx-num">${this.fmt(b.orc)}</td><td class="rcx-num">${this.fmt(b.real)}</td>${this.celVar(b.real, b.orc, saida)}`;
+    const ant = this.dfcLendo ? "…" : this.fmt(b.ant);
+    return `<td class="rcx-num rcx-sep rcx-ant">${ant}</td><td class="rcx-num">${this.fmt(b.orc)}</td><td class="rcx-num rcx-real">${this.fmt(b.real)}</td>${this.celVar(b.real, b.orc, saida)}`;
   },
 
   somaBloco(lista, qual) {
@@ -974,96 +986,176 @@ const ResultadoCaixaApp = {
     });
   },
 
-  faixaHtml(lado, antH) {
+  faixaHtml(lado) {
     const anos = Object.keys(this.anos || {}).sort();
-    const mesOpts = this.MESES.map((n, i) => `<option value="${i + 1}" ${Number(this.mes) === i + 1 ? "selected" : ""}>${n}</option>`).join("");
+    const nomesMes = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+    const mesOpts = nomesMes.map((n, i) => `<option value="${i + 1}" ${Number(this.mes) === i + 1 ? "selected" : ""}>${n}</option>`).join("");
     const realOn = this.escala !== "milhoes";
     const atual = this.anoAtual();
     const antN = atual > 1900 ? atual - 1 : 0;
     const chipsAtual = atual ? this.chipsDoAno(atual) : "";
     const chipsAnt = antN ? this.chipsDoAno(antN) : "";
-    const agrupa = this.agrupar
-      ? " Agrupado: cada valor está no percentual da Moura Leite da empresa."
-      : "";
+    const qtdArq = [atual, antN].reduce((s, y) => {
+      const a = y ? this.anoDados(y) : null;
+      return s + (a ? Object.keys(a.arquivos || {}).length : 0);
+    }, 0);
+    const agrupa = this.agrupar ? " Com “% Moura Leite”, cada valor está no percentual da Moura Leite cadastrado na empresa." : "";
     const base = "Orçado e realizado vêm dos arquivos da competência atual (" + (atual || "—") + "). A coluna do ano anterior é o realizado dos arquivos da competência anterior" + (antN ? " (" + antN + ")" : "") + ".";
     const nota = lado === "entradas"
       ? base + " Livia, Livia I e Livia II aparecem como Central Parque. Empreendimentos com o mesmo nome ganham a sigla da cidade. MLDU aparece como Corporativo. Os quatro maiores desvios positivos e os quatro negativos do acumulado ficam à vista; o restante abre ao clicar em Outros." + agrupa
       : base + " As saídas seguem as contas do DFC e aparecem como saída. Gastar acima do orçado fica em vermelho. As contas de fora da lista principal abrem em Outros." + agrupa;
     const avisoRateio = lado === "saidas" && this.faltaCentroNasSaidas()
-      ? `<div class="rcx-erro">Para agrupar as saídas destes arquivos, suba o Excel de novo. O arquivo que já estava salvo não guarda o centro de custo de cada conta.</div>`
+      ? `<div class="rcx-erro">Para aplicar o % Moura Leite nas saídas destes arquivos, suba o Excel de novo. O arquivo que já estava salvo não guarda o centro de custo de cada conta.</div>`
       : "";
     const avisoAnt = atual && !chipsAnt
-      ? `<p class="rcx-muted">Nenhum arquivo de ${antN} ainda. A coluna do ano anterior fica zerada até você subir essa competência.</p>`
+      ? `<div class="rcx-aviso">Nenhum arquivo de ${antN} ainda. A coluna do ano anterior fica zerada até você subir essa competência.</div>`
       : "";
+    const seg = (on, txt, click, title) => `<button type="button" class="${on ? "is-on" : ""}" onclick="${click}"${title ? ` title="${title}"` : ""}>${txt}</button>`;
     return `
-      <div class="rcx-head">
-        <div class="rcx-tools">
-          <label class="rcx-file"><i data-lucide="upload"></i> Subir orçamento
+      <div class="cc-toolbar rcx-toolbar">
+        <label class="rcx-field">
+          <span class="ml-emp-filter-label">Mês</span>
+          <select class="rcx-select" onchange="ResultadoCaixaApp.setMes(this.value)">${mesOpts}</select>
+        </label>
+        <div class="rcx-field">
+          <span class="ml-emp-filter-label">Valores em</span>
+          <div class="rcx-escala">
+            ${seg(realOn, "R$", "ResultadoCaixaApp.setEscala('real')")}
+            ${seg(!realOn, "R$ milhões", "ResultadoCaixaApp.setEscala('milhoes')")}
+          </div>
+        </div>
+        <div class="rcx-field">
+          <span class="ml-emp-filter-label">Participação</span>
+          <div class="rcx-escala">
+            ${seg(!this.agrupar, "100%", "ResultadoCaixaApp.setAgrupar(false)", "Valores cheios dos arquivos")}
+            ${seg(this.agrupar, "% Moura Leite", "ResultadoCaixaApp.setAgrupar(true)", "Aplica o percentual da Moura Leite cadastrado na empresa")}
+          </div>
+        </div>
+        <div class="cc-toolbar-actions">
+          <button type="button" class="rcx-arq-btn${this.arqsAberto ? " is-on" : ""}" onclick="ResultadoCaixaApp.toggleArqs()">
+            <i data-lucide="files"></i> Arquivos <span class="ml-tab-count">${qtdArq}</span>
+            <i data-lucide="${this.arqsAberto ? "chevron-up" : "chevron-down"}"></i>
+          </button>
+          <label class="rcx-file">
+            <i data-lucide="upload"></i> Subir orçamento
             <input type="file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple onchange="ResultadoCaixaApp.subir(this)">
           </label>
-          <label class="rcx-field">Mês
-            <select onchange="ResultadoCaixaApp.setMes(this.value)">${mesOpts}</select>
-          </label>
-          <div class="rcx-field">Valor
-            <div class="rcx-escala">
-              <button type="button" class="${realOn ? "is-on" : ""}" onclick="ResultadoCaixaApp.setEscala('real')">Real</button>
-              <button type="button" class="${realOn ? "" : "is-on"}" onclick="ResultadoCaixaApp.setEscala('milhoes')">Milhões</button>
-            </div>
-          </div>
-          <div class="rcx-field">Participação
-            <button type="button" class="rcx-agrupar ${this.agrupar ? "is-on" : ""}" onclick="ResultadoCaixaApp.toggleAgrupar()" title="Aplica o percentual da Moura Leite cadastrado na empresa">${this.agrupar ? "Agrupado" : "Agrupar"}</button>
-          </div>
         </div>
-        <div class="rcx-arqs-box">
-          <div class="rcx-arqs-col">
-            <span class="rcx-arqs-label">Competência atual${atual ? " · " + atual : ""}</span>
-            <div class="rcx-arqs">${chipsAtual || `<span class="rcx-muted">Nenhum arquivo desta competência.</span>`}</div>
-          </div>
-          <div class="rcx-arqs-col">
-            <span class="rcx-arqs-label">Competência anterior${antN ? " · " + antN : ""}</span>
-            <div class="rcx-arqs">${chipsAnt || `<span class="rcx-muted">Nenhum arquivo desta competência.</span>`}</div>
-          </div>
-        </div>
-        <p class="rcx-nota">${nota}</p>
       </div>
+      ${this.arqsAberto ? `<div class="rcx-arqs-box">
+        <div class="rcx-arqs-col">
+          <span class="rcx-arqs-label">Competência atual${atual ? " · " + atual : ""}</span>
+          <div class="rcx-arqs">${chipsAtual || `<span class="rcx-muted">Nenhum arquivo desta competência.</span>`}</div>
+        </div>
+        <div class="rcx-arqs-col">
+          <span class="rcx-arqs-label">Competência anterior${antN ? " · " + antN : ""}</span>
+          <div class="rcx-arqs">${chipsAnt || `<span class="rcx-muted">Nenhum arquivo desta competência.</span>`}</div>
+        </div>
+      </div>` : ""}
       ${this.error ? `<div class="rcx-erro">${caixaEsc(this.error)}</div>` : ""}
       ${avisoRateio}
       ${avisoAnt}
       ${this.dfcErro ? `<div class="rcx-erro">${caixaEsc(this.dfcErro)}</div>` : ""}
-      ${anos.length ? "" : `<p class="rcx-vazio">Suba o Excel do comparativo orçado × realizado, visão DFC. Pode escolher o ano atual e o anterior juntos.</p>`}
+      ${anos.length ? `<details class="rcx-ajuda"><summary><i data-lucide="info"></i> Como ler esta tabela</summary><p>${nota}</p></details>` : `<p class="rcx-vazio">Suba o Excel do comparativo orçado × realizado, visão DFC. Pode escolher o ano atual e o anterior juntos.</p>`}
     `;
   },
 
-  gradeHtml(rotulo, body, total, totalA, saida) {
+  /** Cartões do mês, do acumulado e do ano anterior, acima da tabela. */
+  resumoHtml(total, totalA, saida) {
+    const atual = this.anoAtual();
+    const antN = atual > 1900 ? atual - 1 : 0;
+    const mesNome = this.MESES[(Number(this.mes) || 1) - 1] || "";
+    const unidade = this.escala === "milhoes" ? "R$ mi" : "R$";
+    const varTxt = (real, ref) => {
+      const v = real - ref;
+      const ruim = saida ? v > 0.5 : v < -0.5;
+      const bom = saida ? v < -0.5 : v > 0.5;
+      const p = this.pct(real, ref);
+      const pTxt = p.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
+      return `<span class="rcx-kpi-var ${ruim ? "is-neg" : (bom ? "is-pos" : "")}">${v > 0.5 ? "+" : ""}${this.fmt(v)} · ${pTxt}</span>`;
+    };
+    const card = (rotulo, valor, sub) => `<div class="rcx-kpi">
+      <span class="rcx-kpi-label">${rotulo}</span>
+      <strong>${this.fmt(valor)} <small>${unidade}</small></strong>
+      <div class="rcx-kpi-sub">${sub}</div>
+    </div>`;
+    return `<div class="rcx-kpis">
+      ${card(`Realizado em ${mesNome}/${atual || ""}`, total.real, `Orçado ${this.fmt(total.orc)} ${varTxt(total.real, total.orc)}`)}
+      ${card(`Acumulado até ${mesNome}/${atual || ""}`, totalA.real, `Orçado ${this.fmt(totalA.orc)} ${varTxt(totalA.real, totalA.orc)}`)}
+      ${card(`Acumulado ${antN || "ano anterior"}`, totalA.ant, this.dfcLendo ? "Carregando…" : `${atual || "Atual"} × ${antN || "anterior"} ${varTxt(totalA.real, totalA.ant)}`)}
+    </div>`;
+  },
+
+  /** Barras do mês selecionado: realizado do ano anterior, orçado e realizado do ano atual. */
+  graficoMesHtml(total) {
+    const atual = this.anoAtual();
+    const antN = atual > 1900 ? atual - 1 : 0;
+    const nomes = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+    const mesNome = nomes[(Number(this.mes) || 1) - 1] || "";
+    const barras = [
+      { cls: "is-ant", rotulo: antN ? String(antN) : "Ano ant.", valor: total.ant, espera: this.dfcLendo },
+      { cls: "is-orc", rotulo: "Orçado", valor: total.orc },
+      { cls: "is-real", rotulo: atual ? String(atual) : "Atual", valor: total.real }
+    ];
+    const maior = Math.max(...barras.map((b) => (b.espera ? 0 : Math.max(0, b.valor))), 1);
+    return `<div class="rcx-graf">
+      <div class="rcx-graf-tit">${caixaEsc(mesNome.toUpperCase())}/${atual || ""}</div>
+      <div class="rcx-graf-area">
+        ${barras.map((b) => {
+          const h = b.espera ? 0 : Math.max(0, b.valor) / maior * 100;
+          return `<div class="rcx-graf-col ${b.cls}">
+            <span class="rcx-graf-val">${b.espera ? "…" : this.fmt(b.valor)}</span>
+            <div class="rcx-graf-bar" style="height:calc((100% - 22px) * ${(h / 100).toFixed(4)})"></div>
+          </div>`;
+        }).join("")}
+      </div>
+      <div class="rcx-graf-eixo">${barras.map((b) => `<span>${caixaEsc(b.rotulo)}</span>`).join("")}</div>
+    </div>`;
+  },
+
+  gradeHtml(rotulo, body, total, totalA, saida, ordemAcumReal) {
     if (!body) return "";
-    const antH = this.anoAtual() > 1900 ? String(this.anoAtual() - 1) : "Ano ant.";
-    const headGrupo = (titulo) => `<th colspan="5">${titulo}</th>`;
-    const sub = `<th>${caixaEsc(antH)}</th><th>Orç.</th><th>Real</th><th>Var. R$</th><th>Var. %</th>`;
-    const blocoNumsEspera = (b) => this.dfcLendo
-      ? `<td class="rcx-num">…</td><td class="rcx-num">${this.fmt(b.orc)}</td><td class="rcx-num">${this.fmt(b.real)}</td>${this.celVar(b.real, b.orc, saida)}`
-      : this.blocoNums(b, saida);
-    return `<div class="rcx-scroll"><table class="rcx-grid">
-      <thead>
-        <tr><th rowspan="2">${caixaEsc(rotulo)}</th>${headGrupo("Mensal")}${headGrupo("Acumulado")}</tr>
-        <tr>${sub}${sub}</tr>
-      </thead>
-      <tbody>${body}</tbody>
-      <tfoot><tr>
-        <td>Total</td>
-        ${blocoNumsEspera(total)}
-        ${blocoNumsEspera(totalA)}
-      </tr></tfoot>
-    </table></div>`;
+    const atual = this.anoAtual();
+    const antH = atual > 1900 ? String(atual - 1) : "Ano ant.";
+    const mesNome = this.MESES[(Number(this.mes) || 1) - 1] || "";
+    const seta = `<i data-lucide="arrow-down" class="rcx-ordem"></i>`;
+    const sub = (acum) => `<th class="rcx-sep">${caixaEsc(antH)}</th><th>Orçado</th>${acum && ordemAcumReal
+      ? `<th class="rcx-th-ordem" title="Ordenado do maior para o menor pelo realizado acumulado">${seta} Real</th>`
+      : "<th>Real</th>"}<th>Var.</th><th>Var. %</th>`;
+    return `<div class="rcx-scroll">
+      <table class="rcx-grid">
+        <colgroup><col class="rcx-c-nome">${"<col>".repeat(10)}</colgroup>
+        <thead>
+          <tr class="rcx-h1">
+            <th rowspan="2" class="rcx-h-nome">${caixaEsc(rotulo)}</th>
+            <th colspan="5" class="rcx-sep">Mensal · ${mesNome}/${atual || ""}</th>
+            <th colspan="5" class="rcx-sep">Acumulado · Jan a ${mesNome}</th>
+          </tr>
+          <tr class="rcx-h2">${sub(false)}${sub(true)}</tr>
+        </thead>
+        <tbody>${body}</tbody>
+        <tfoot><tr>
+          <td class="rcx-nome">Total</td>
+          ${this.blocoNums(total, saida)}
+          ${this.blocoNums(totalA, saida)}
+        </tr></tfoot>
+      </table>
+    </div>`;
+  },
+
+  secaoHtml(icone, texto, cls) {
+    return `<tr class="rcx-secao ${cls || ""}"><td colspan="11"><i data-lucide="${icone}"></i> ${texto}</td></tr>`;
+  },
+
+  outrosNome(qtd) {
+    return `<i data-lucide="${this.outrosAberto ? "chevron-down" : "chevron-right"}"></i> Outros <span class="rcx-qtd">${qtd}</span>`;
   },
 
   linhaPronta(r, cls, nomeHtml, click, saida) {
-    const blocoNumsEspera = (b) => this.dfcLendo
-      ? `<td class="rcx-num">…</td><td class="rcx-num">${this.fmt(b.orc)}</td><td class="rcx-num">${this.fmt(b.real)}</td>${this.celVar(b.real, b.orc, saida)}`
-      : this.blocoNums(b, saida);
     return `<tr class="${cls || ""}"${click ? ` onclick="${click}"` : ""}>
-      <td class="rcx-nome">${nomeHtml || caixaEsc(r.nome)}</td>
-      ${blocoNumsEspera(r.mensal)}
-      ${blocoNumsEspera(r.acum)}
+      <td class="rcx-nome" title="${caixaEsc(r.nome)}">${nomeHtml || caixaEsc(r.nome)}</td>
+      ${this.blocoNums(r.mensal, saida)}
+      ${this.blocoNums(r.acum, saida)}
     </tr>`;
   },
 
@@ -1146,26 +1238,27 @@ const ResultadoCaixaApp = {
   },
 
   orcamentoHtml(lado) {
-    const antH = this.anoAtual() > 1900 ? String(this.anoAtual() - 1) : "Ano ant.";
-    const faixa = this.faixaHtml(lado, antH);
+    const faixa = this.faixaHtml(lado);
     if (this.lendo) return faixa + this.loaderHtml();
     if (!Object.keys(this.anos || {}).length) return faixa;
     if (lado === "saidas") return faixa + this.saidasHtml();
     const pack = this.linhasTabela(lado);
+    if (!pack.rows.length) return faixa + `<p class="rcx-vazio">Nenhum valor nesse mês para os grupos desta aba.</p>`;
     const vista = this.destacar(pack.rows);
-    const principais = vista.pos.concat(vista.neg).map((r) => this.linhaPronta(r, "", "", "", false)).join("");
-    const outrosSoma = { mensal: this.somaBloco(vista.outros, "mensal"), acum: this.somaBloco(vista.outros, "acum") };
-    const outros = vista.outros.length ? this.linhaPronta(
-      { nome: "OUTROS", mensal: outrosSoma.mensal, acum: outrosSoma.acum },
-      "rcx-outros",
-      "OUTROS",
-      "ResultadoCaixaApp.toggleOutros()",
-      false
-    ) + (this.outrosAberto ? vista.outros.map((r) => this.linhaPronta(r, "rcx-filho", "", "", false)).join("") : "") : "";
-    const vazio = !pack.rows.length ? `<p class="rcx-vazio">Nenhum valor nesse mês para os grupos desta aba.</p>` : "";
+    const linha = (r, cls) => this.linhaPronta(r, cls || "", "", "", false);
+    let corpo = "";
+    if (vista.pos.length) corpo += this.secaoHtml("trending-up", "Acima do orçado no acumulado", "is-pos") + vista.pos.map((r) => linha(r)).join("");
+    if (vista.neg.length) corpo += this.secaoHtml("trending-down", "Abaixo do orçado no acumulado", "is-neg") + vista.neg.map((r) => linha(r)).join("");
+    if (vista.outros.length) {
+      const soma = { nome: "Outros", mensal: this.somaBloco(vista.outros, "mensal"), acum: this.somaBloco(vista.outros, "acum") };
+      corpo += this.linhaPronta(soma, "rcx-outros", this.outrosNome(vista.outros.length), "ResultadoCaixaApp.toggleOutros()", false);
+      if (this.outrosAberto) corpo += vista.outros.map((r) => linha(r, "rcx-filho")).join("");
+    }
     const total = this.somaBloco(pack.rows, "mensal");
     const totalA = this.somaBloco(pack.rows, "acum");
-    return faixa + vazio + this.gradeHtml("Produto", principais + outros, total, totalA, false);
+    return faixa
+      + `<div class="rcx-topo">${this.graficoMesHtml(total)}${this.resumoHtml(total, totalA, false)}</div>`
+      + this.gradeHtml("Produto", corpo, total, totalA, false);
   },
 
   saidasHtml() {
@@ -1175,21 +1268,19 @@ const ResultadoCaixaApp = {
     }
     const pack = this.linhasSaida();
     const vivo = (r) => ["mensal", "acum"].some((b) => ["ant", "orc", "real"].some((k) => Math.abs(r[b][k]) > 0.5));
-    const destaque = pack.rows.filter((r) => r.destaque);
-    const miudos = pack.rows.filter((r) => !r.destaque && vivo(r));
-    const outrosSoma = { mensal: this.somaBloco(miudos, "mensal"), acum: this.somaBloco(miudos, "acum") };
-    const linhas = destaque.map((r) => this.linhaPronta(r, "", "", "", true)).join("");
-    const outros = miudos.length ? this.linhaPronta(
-      { nome: "OUTROS", mensal: outrosSoma.mensal, acum: outrosSoma.acum },
-      "rcx-outros",
-      "OUTROS",
-      "ResultadoCaixaApp.toggleOutros()",
-      true
-    ) + (this.outrosAberto ? miudos.map((r) => this.linhaPronta(r, "rcx-filho", "", "", true)).join("") : "") : "";
+    const porAcumReal = (a, b) => b.acum.real - a.acum.real || a.nome.localeCompare(b.nome, "pt");
+    const destaque = pack.rows.filter((r) => r.destaque).sort(porAcumReal);
+    const miudos = pack.rows.filter((r) => !r.destaque && vivo(r)).sort(porAcumReal);
+    let corpo = this.secaoHtml("list", "Principais contas") + destaque.map((r) => this.linhaPronta(r, "", "", "", true)).join("");
+    if (miudos.length) {
+      const soma = { nome: "Outros", mensal: this.somaBloco(miudos, "mensal"), acum: this.somaBloco(miudos, "acum") };
+      corpo += this.linhaPronta(soma, "rcx-outros", this.outrosNome(miudos.length), "ResultadoCaixaApp.toggleOutros()", true);
+      if (this.outrosAberto) corpo += miudos.map((r) => this.linhaPronta(r, "rcx-filho", "", "", true)).join("");
+    }
     const todos = destaque.concat(miudos);
     const total = this.somaBloco(todos, "mensal");
     const totalA = this.somaBloco(todos, "acum");
-    return this.gradeHtml("Conta", linhas + outros, total, totalA, true);
+    return this.resumoHtml(total, totalA, true) + this.gradeHtml("Conta", corpo, total, totalA, true, true);
   },
 
   async refresh() {
