@@ -247,6 +247,35 @@ const ResultadoCaixaApp = {
     return found;
   },
 
+  /** Percentual da Moura Leite da empresa dona do arquivo (1 sem agrupar). */
+  pctArquivo(arq, nome) {
+    if (!this.agrupar) return 1;
+    const emp = Number(arq && arq.empresa) || this.empresaId(nome);
+    return emp ? this.pctEmpresaId(emp) : 1;
+  },
+
+  /** Valor do centro de custo somando arquivo por arquivo, cada um no percentual da sua empresa. */
+  valorAgrupado(lado, ano, ccId, mes, campo, ate) {
+    if (!this.agrupar) return this.valor(lado, ano, ccId, mes, campo, ate);
+    const a = this.anoDados(ano);
+    if (!a) return 0;
+    const fim = Number(mes);
+    const ini = ate ? 1 : fim;
+    let s = 0;
+    Object.keys(a.arquivos || {}).forEach((nome) => {
+      const arq = a.arquivos[nome];
+      const bag = arq && arq[lado] && arq[lado][ccId];
+      if (!bag) return;
+      let v = 0;
+      for (let m = ini; m <= fim; m++) {
+        const cel = (bag.meses || {})[String(m)];
+        if (cel) v += Number(cel[campo]) || 0;
+      }
+      if (v) s += v * this.pctArquivo(arq, nome);
+    });
+    return s;
+  },
+
   pctMl(id) {
     if (!this.agrupar) return 1;
     const emp = this.empresaDoCc(id);
@@ -737,7 +766,7 @@ const ResultadoCaixaApp = {
         if (!valor) return;
         const ccId = String(a.costCenterId || "").replace(/\D/g, "");
         const nome = this.nomeCc(ccId, a.costCenterName);
-        out.push({ ccId, nome, mes: mm, valor, node: node.id });
+        out.push({ ccId, nome, mes: mm, valor, node: node.id, empresa: Number(mov.companyId) || 0 });
       });
     });
     return out;
@@ -814,7 +843,7 @@ const ResultadoCaixaApp = {
           porNome[this.fold(bruto.nome)] = row;
         }
       }
-      const fator = this.pctMl(id);
+      const fator = l.empresa ? this.pctEmpresaId(l.empresa) : this.pctMl(id);
       if (l.mes === mes) row.mensal.ant += l.valor * fator;
       if (l.mes >= 1 && l.mes <= mes) row.acum.ant += l.valor * fator;
     });
@@ -845,7 +874,7 @@ const ResultadoCaixaApp = {
       const g = grupos[key];
       const uniq = [...new Set(g.ids)];
       const rot = this.rotulo(key, g.nome, g.solto);
-      const soma = (y, campo, ate) => uniq.reduce((s, id) => s + this.valor(lado, y, id, mes, campo, ate) * this.pctMl(id), 0);
+      const soma = (y, campo, ate) => uniq.reduce((s, id) => s + this.valorAgrupado(lado, y, id, mes, campo, ate), 0);
       const rec = (ate) => ({ ant: soma(ant, "r", ate), orc: soma(ano, "o", ate), real: soma(ano, "r", ate) });
       return { key, nome: rot.nome, cidade: rot.cidade, ids: uniq, mensal: rec(false), acum: rec(true) };
     });
@@ -1071,14 +1100,14 @@ const ResultadoCaixaApp = {
     let s = 0;
     Object.keys(a.arquivos || {}).forEach((nome) => {
       const arq = a.arquivos[nome] || {};
+      const pct = this.pctArquivo(arq, nome);
       const porCc = arq.contasPorCc;
       if (porCc && Object.keys(porCc).length) {
         Object.keys(porCc).forEach((ccId) => {
-          s += this.somaCodigos(porCc[ccId].contas || {}, def, mes, campo, ate) * this.pctMl(ccId);
+          s += this.somaCodigos(porCc[ccId].contas || {}, def, mes, campo, ate) * pct;
         });
       } else if (arq.contas) {
-        const emp = Number(arq.empresa) || this.empresaId(nome);
-        s += this.somaCodigos(arq.contas, def, mes, campo, ate) * this.pctEmpresaId(emp);
+        s += this.somaCodigos(arq.contas, def, mes, campo, ate) * pct;
       }
     });
     return -s;

@@ -19,6 +19,24 @@ const CentrosCustoState = {
 window.CentrosCustoState = CentrosCustoState;
 
 const CentrosCustoApp = {
+  /** Centros 9xxxx são veículos (Frota). Os de sócios vêm da lista conferida pelo financeiro. */
+  RECLASSIFICAR: [
+    { tipo: 'Frota', marca: 'frota_9', casa: (id) => id.startsWith('9') },
+    {
+      tipo: 'Sócios',
+      marca: 'socios_7',
+      casa: (id) => [
+        '70101', '70102', '70103',
+        '70301', '70302', '70303', '70304',
+        '70401', '70402', '70403',
+        '70601', '70602', '70603',
+        '71201', '71202', '71203', '71204',
+        '71301', '71302', '71303', '71304', '71305', '71306', '71307',
+        '71308', '71309', '71310', '71311', '71312', '71313', '71314'
+      ].includes(id)
+    }
+  ],
+
   async loadData(forceRefresh = false) {
     CentrosCustoState.loading = true;
     this.render();
@@ -43,9 +61,9 @@ const CentrosCustoApp = {
         } catch(e) {}
       }
       if (!CentrosCustoState.tiposCc.includes('Incorporação')) {
-        CentrosCustoState.tiposCc.splice(2, 0, 'Incorporação');
-        localStorage.setItem('crm_centros_custo_tipos', JSON.stringify(CentrosCustoState.tiposCc));
+        CentrosCustoState.tiposCc.push('Incorporação');
       }
+      this.ordenarTipos();
 
       // Fetch Cost Centers
       let ccList = await SiengeApiService.getCostCenters(forceRefresh);
@@ -53,6 +71,7 @@ const CentrosCustoApp = {
       CentrosCustoState.costCenters = ccList;
       
       let customFieldsChanged = false;
+      let reclassificou = false;
       ccList.forEach(cc => {
           const idStr = String(cc.id);
           if (!CentrosCustoState.customFields[cc.id]) {
@@ -68,12 +87,25 @@ const CentrosCustoApp = {
                   custom.perc_ml = 100;
                   custom.perc_terrenista = 0;
                   customFieldsChanged = true;
-              } else if (idStr.startsWith('6') || idStr.startsWith('7') || idStr.startsWith('9')) {
+              } else if (idStr.startsWith('6') || idStr.startsWith('7')) {
                   custom.tipo_cc = 'Corporativo';
+                  custom.perc_ml = 100;
+                  customFieldsChanged = true;
+              } else if (idStr.startsWith('9')) {
+                  custom.tipo_cc = 'Frota';
                   custom.perc_ml = 100;
                   customFieldsChanged = true;
               }
           }
+          // Reclassificação feita uma vez por centro; depois vale o que o usuário salvar.
+          this.RECLASSIFICAR.forEach((r) => {
+              if (custom[r.marca] || !r.casa(idStr)) return;
+              custom.tipo_cc = r.tipo;
+              custom[r.marca] = 1;
+              custom.updatedAt = Date.now();
+              customFieldsChanged = true;
+              reclassificou = true;
+          });
           if (this.isParceiro(cc) && custom.imposto_pago_empresa) {
               custom.imposto_pago_empresa = false;
               customFieldsChanged = true;
@@ -82,6 +114,9 @@ const CentrosCustoApp = {
       
       if (customFieldsChanged) {
           this.gravarLocal(JSON.stringify(CentrosCustoState.customFields));
+      }
+      if (reclassificou && typeof window.persistCentrosCustoCustomToFirebase === "function") {
+          window.persistCentrosCustoCustomToFirebase().catch((e) => console.warn("[CentrosCusto] reclassificação na nuvem:", e));
       }
       
       // Load companies
@@ -877,9 +912,18 @@ const CentrosCustoApp = {
      const val = input.value.trim();
      if (val && !CentrosCustoState.tiposCc.includes(val)) {
         CentrosCustoState.tiposCc.push(val);
-        localStorage.setItem('crm_centros_custo_tipos', JSON.stringify(CentrosCustoState.tiposCc));
+        CentrosCustoApp.ordenarTipos();
         CentrosCustoApp.openManageTiposModal(currentCcId);
      }
+  },
+
+  ordenarTipos() {
+    const atual = JSON.stringify(CentrosCustoState.tiposCc);
+    CentrosCustoState.tiposCc.sort((a, b) => String(a).localeCompare(String(b), 'pt', { sensitivity: 'base' }));
+    const novo = JSON.stringify(CentrosCustoState.tiposCc);
+    if (novo !== atual || !localStorage.getItem('crm_centros_custo_tipos')) {
+      localStorage.setItem('crm_centros_custo_tipos', novo);
+    }
   },
 
   removeTipoCc(idx, currentCcId) {

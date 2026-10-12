@@ -679,8 +679,17 @@ const HomeDashboard = {
   init() {
     const user = (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo()) || window.AppState?.currentUser;
     const isOperador = this.showsOperadorHome(user);
-    
-    if (isOperador) {
+    const pagadoriaEl = document.getElementById('home-pagadoria-container');
+    const isPagadoria = !isOperador && !!pagadoriaEl && !!window.PagadoriaPainelApp && PagadoriaPainelApp.ehPagadoria(user);
+    if (pagadoriaEl) pagadoriaEl.style.display = isPagadoria ? 'block' : 'none';
+
+    if (isPagadoria) {
+      document.getElementById('home-em-construcao-container').style.display = 'none';
+      document.getElementById('home-operador-container').style.display = 'none';
+      document.getElementById('home-pet-container').style.display = 'none';
+      if (this.intervalId) clearInterval(this.intervalId);
+      PagadoriaPainelApp.mostrarHome();
+    } else if (isOperador) {
       document.getElementById('home-em-construcao-container').style.display = 'none';
       document.getElementById('home-operador-container').style.display = 'block';
       document.getElementById('home-pet-container').style.display = 'flex';

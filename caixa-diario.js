@@ -864,8 +864,12 @@ const FluxoCaixaDiarioApp = {
     return SEM_DESLOCAR.test(cod) || SEM_DESLOCAR.test(nome);
   },
 
+  apiPagar() {
+    return window.ComprasControleApp || window.ComprasPrevisoesApp;
+  },
+
   async loadPayables(gen, b, hoje) {
-    const app = window.ComprasControleApp || window.ComprasPrevisoesApp;
+    const app = this.apiPagar();
     if (!app || typeof app.outcomeRange !== "function" || typeof app.transform !== "function") {
       this.error = this.error || "O módulo de compras não está disponível para ler os títulos a pagar.";
       this.render();
@@ -1916,11 +1920,19 @@ const FluxoCaixaDiarioApp = {
    * O resgate olha só os próximos 30 dias corridos: o dia em que a conta corrente
    * ficaria negativa e o valor para cobrir as despesas de 7 dias úteis.
    */
-  aplicacaoHtml(linhas) {
+  DIAS_SEM_SALDO: 60,
+
+  /**
+   * Leitura dos próximos dias: quanto da conta corrente pode ir para CDB ou compromissada,
+   * os resgates dos próximos 30 dias e o primeiro dia, nos próximos 60, em que conta corrente
+   * e aplicação somadas ficam negativas.
+   */
+  analiseCaixa(linhas) {
     const hoje = this.hoje();
     const fut = (linhas || []).filter((l) => l.d.date >= hoje);
-    if (!fut.length) return "";
     const par = this.parametrosComp();
+    const vazio = { serie: [], par, cdb: 0, comp: 0, fimCdb: "", fimComp: "", diasCdb: 0, diasComp: 0, plano: [], semSaldo: null };
+    if (!fut.length) return vazio;
     const IOF = 31;
     const serie = fut.map((l) => ({ date: l.d.date, cc: l.acumCc, inv: l.acumInv }));
     const minAte = (n) => {
@@ -1951,19 +1963,48 @@ const FluxoCaixaDiarioApp = {
       const b = new Date(iso + "T12:00:00");
       return Math.round((b - a) / 86400000) + 1;
     };
+    const fimCdb = ate(cdb);
+    const fimComp = ate(comp);
+    const plano = this.planoResgates(serie.filter((p) => p.date <= caixaAddDays(hoje, 29)));
+    const limite = caixaAddDays(hoje, this.DIAS_SEM_SALDO - 1);
+    let semSaldo = null;
+    serie.forEach((p) => {
+      if (p.date > limite) return;
+      const total = p.cc + p.inv;
+      if (total >= -0.5) return;
+      if (!semSaldo) semSaldo = { date: p.date, valor: total, menor: total, menorData: p.date };
+      else if (total < semSaldo.menor) {
+        semSaldo.menor = total;
+        semSaldo.menorData = p.date;
+      }
+    });
+    return { serie, par, cdb, comp, fimCdb, fimComp, diasCdb: diasDe(fimCdb), diasComp: diasDe(fimComp), plano, semSaldo };
+  },
+
+  semSaldoHtml(s) {
+    if (!s) return "";
+    const pior = s.menorData !== s.date
+      ? ` O ponto mais baixo é ${caixaFmtDate(s.menorData)}, com ${caixaMoney(s.menor)}.`
+      : "";
+    return `<div class="cxd-sem-saldo" role="alert"><b>Sem dinheiro em ${caixaFmtDate(s.date)}</b>Nos próximos ${this.DIAS_SEM_SALDO} dias, a conta corrente e a aplicação somadas ficam negativas: ${caixaMoney(s.valor)} nesse dia.${pior}</div>`;
+  },
+
+  aplicacaoHtml(linhas) {
+    const a = this.analiseCaixa(linhas);
+    if (!a.serie.length) return "";
+    const par = a.par;
+    const cdb = a.cdb;
+    const comp = a.comp;
     const pisoTxt = caixaMoney(par.piso);
     const msgs = [];
+    if (a.semSaldo) msgs.push(this.semSaldoHtml(a.semSaldo));
     if (cdb > 0.5) {
-      const fim = ate(cdb);
-      const dias = diasDe(fim);
-      msgs.push(`<p class="cxd-aplica-cdb"><b>Aplicar em CDB:</b> ${caixaMoney(cdb)}. Esse valor fica acima do mínimo da conta corrente por ${dias} dias, até ${caixaFmtDate(fim)}, mais do que os 31 dias em que o IOF zera. Mantenha ${pisoTxt} na conta corrente.</p>`);
+      msgs.push(`<p class="cxd-aplica-cdb"><b>Aplicar em CDB:</b> ${caixaMoney(cdb)}. Esse valor fica acima do mínimo da conta corrente por ${a.diasCdb} dias, até ${caixaFmtDate(a.fimCdb)}, mais do que os 31 dias em que o IOF zera. Mantenha ${pisoTxt} na conta corrente.</p>`);
     }
     if (comp > 0.5) {
-      const fim = ate(comp);
-      const dias = diasDe(fim);
-      msgs.push(`<p class="cxd-aplica-comp"><b>Aplicar na compromissada:</b> ${caixaMoney(comp)}. Esse valor pode ficar aplicado por ${dias} dias, até ${caixaFmtDate(fim)}, entre o prazo mínimo de ${par.prazo} dias e os 31 dias em que o IOF do CDB zera. Mantenha ${pisoTxt} na conta corrente.</p>`);
+      msgs.push(`<p class="cxd-aplica-comp"><b>Aplicar na compromissada:</b> ${caixaMoney(comp)}. Esse valor pode ficar aplicado por ${a.diasComp} dias, até ${caixaFmtDate(a.fimComp)}, entre o prazo mínimo de ${par.prazo} dias e os 31 dias em que o IOF do CDB zera. Mantenha ${pisoTxt} na conta corrente.</p>`);
     }
-    const plano = this.planoResgates(serie.filter((p) => p.date <= caixaAddDays(hoje, 29)));
+    const plano = a.plano;
     if (plano.length) {
       const itens = plano.map((r) => {
         const cobre = r.uteis >= 7
@@ -2148,12 +2189,9 @@ const FluxoCaixaDiarioApp = {
     </div>`;
   },
 
-  render() {
-    const root = document.getElementById("fluxo-caixa-diario-root");
-    if (!root) return;
-    const hoje = this.hoje();
+  /** Saldo de cada dia: começa nas contas ligadas e soma entradas e saídas da conta corrente e da aplicação. */
+  linhasProjecao() {
     const saldoTipos = this.saldoPorTipo();
-    const saldoInicial = saldoTipos.total;
     let cc = saldoTipos.corrente;
     let inv = saldoTipos.investimento;
     const linhas = (this.days || []).map((d) => {
@@ -2170,9 +2208,63 @@ const FluxoCaixaDiarioApp = {
         acumCc: cc, acumInv: inv, acum: cc + inv, passado: d.real
       };
     });
-    const fim = cc + inv;
-    const fimCc = cc;
-    const fimInv = inv;
+    return { linhas, saldoTipos, fimCc: cc, fimInv: inv };
+  },
+
+  /** Caixa de uma empresa calculado sem desenhar a tela (painel da pagadoria). */
+  async projetarEmpresa(companyId) {
+    const id = String(companyId);
+    const app = Object.create(FluxoCaixaDiarioApp);
+    Object.assign(app, {
+      companyIds: [id],
+      days: [], accounts: [], recItems: [], outras: [], movs: [], payItems: [],
+      totals: { saldo: 0, entrar: 0, pagar: 0 },
+      openingDate: "", progress: "", error: "", loading: false,
+      detOpen: {}, flags: {}, tipos: {}, ccExcl: {},
+      _types: {}, _banks: {}, _nomes: {}, _gen: 0,
+      render() {},
+      paintProgress() {},
+      ensureCompany() {},
+      apiPagar() {
+        const base = FluxoCaixaDiarioApp.apiPagar();
+        if (!base) return base;
+        const api = Object.create(base);
+        api.noteProgress = () => {};
+        return api;
+      }
+    });
+    await app.load();
+    const hoje = app.hoje();
+    const proj = app.linhasProjecao();
+    const a = app.analiseCaixa(proj.linhas);
+    const agora = proj.linhas.find((l) => l.d.date === hoje);
+    return {
+      companyId: id,
+      nome: app.companyName(id),
+      contas: (app.accounts || []).filter((x) => app.accountIncluded(x)).length,
+      cc: agora ? agora.inicialCc : proj.saldoTipos.corrente,
+      inv: agora ? agora.inicialInv : proj.saldoTipos.investimento,
+      cdb: a.cdb,
+      comp: a.comp,
+      fimCdb: a.fimCdb,
+      fimComp: a.fimComp,
+      resgates: a.plano.map((r) => ({ dia: r.dia, valor: r.valor, falta: r.falta || 0 })),
+      semSaldo: a.semSaldo,
+      erro: app.error || ""
+    };
+  },
+
+  render() {
+    const root = document.getElementById("fluxo-caixa-diario-root");
+    if (!root) return;
+    const hoje = this.hoje();
+    const proj = this.linhasProjecao();
+    const saldoTipos = proj.saldoTipos;
+    const saldoInicial = saldoTipos.total;
+    const linhas = proj.linhas;
+    const fimCc = proj.fimCc;
+    const fimInv = proj.fimInv;
+    const fim = fimCc + fimInv;
     const visiveis = linhas.filter((l) => {
       const iso = l.d.date;
       if (caixaEhUtil(iso) || iso === hoje || iso === this.openDay) return true;
@@ -2342,6 +2434,8 @@ const FluxoCaixaDiarioApp = {
         #fluxo-caixa-diario-root .cxd-aplica p { margin:0; padding:8px 12px; border-radius:8px; font-size:.8rem; font-weight:600; }
         #fluxo-caixa-diario-root .cxd-aplica-cdb { background:#e7f6ee; color:#105436; }
         #fluxo-caixa-diario-root .cxd-aplica-comp { background:#eff6ff; color:#1e3a8a; }
+        #fluxo-caixa-diario-root .cxd-sem-saldo { background:#fee2e2; color:#991b1b; border:1px solid #fca5a5; border-left:4px solid #dc2626; padding:8px 12px; border-radius:8px; font-size:.8rem; font-weight:600; }
+        #fluxo-caixa-diario-root .cxd-sem-saldo b { display:block; color:#b91c1c; font-size:.84rem; margin-bottom:2px; }
         #fluxo-caixa-diario-root .cxd-aplica-resgate { background:#fff7ed; color:#9a3412; padding:8px 12px; border-radius:8px; font-size:.8rem; font-weight:600; }
         #fluxo-caixa-diario-root .cxd-aplica-resgate > span { display:block; margin-top:2px; font-weight:500; }
         #fluxo-caixa-diario-root .cxd-aplica-resgate ul { margin:6px 0 0; padding-left:18px; }
