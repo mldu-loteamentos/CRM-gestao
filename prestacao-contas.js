@@ -5,7 +5,6 @@ const PrestacaoContasApp = {
   month: new Date().getMonth() === 0 ? 12 : new Date().getMonth(),
   companyId: "1",
   costCenterIds: ["13600", "13601"],
-  selectionType: "M",
   partnershipId: "",
   ccSearch: "",
   loading: false,
@@ -695,7 +694,7 @@ const PrestacaoContasApp = {
         throw new Error("API de caixa e banco indisponível.");
       }
       this.movements = await SiengeApiService.getBankMovements(start, end, {
-        selectionType: this.selectionType || "M",
+        selectionType: "M",
         companyId: this.companyId,
         costCentersId: this.costCenterIds
       });
@@ -766,15 +765,8 @@ const PrestacaoContasApp = {
           </label>
           <div class="tvig-filter-slot tvig-comp-slot">
             <label class="tvig-comp-label" for="pc-comp">Mês de referência</label>
-            <input type="month" id="pc-comp" class="tvig-comp-input" value="${this.year}-${pad(this.month)}" onchange="PrestacaoContasApp.setCompetencia(this.value)">
+            <input type="month" id="pc-comp" class="tvig-comp-input" title="Consulta pela data de pagamento" value="${this.year}-${pad(this.month)}" onchange="PrestacaoContasApp.setCompetencia(this.value)">
           </div>
-          <label class="pcx-field">
-            <span class="ml-emp-filter-label">Seleção por data</span>
-            <select class="pcx-input" onchange="PrestacaoContasApp.selectionType=this.value">
-              <option value="M" ${this.selectionType === "M" ? "selected" : ""}>Movimento (caixa/banco)</option>
-              <option value="P" ${this.selectionType === "P" ? "selected" : ""}>Pagamento / vencimento</option>
-            </select>
-          </label>
           <div class="cc-toolbar-actions">
             <button type="button" class="btn btn-outline cc-atualizar" onclick="switchTab('plano-financeiro','Plano Financeiro e Visões')" title="Cadastro de visões DFC">
               <i data-lucide="settings-2"></i> Visões DFC

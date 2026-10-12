@@ -3830,10 +3830,34 @@ circle.donut-segment {
 .rcx-kpi-var { padding: 1px 8px; border-radius: 999px; background: #f1f5f9; color: #475569; font-weight: 800; }
 .rcx-kpi-var.is-pos { background: #ecfdf5; color: #065f46; }
 .rcx-kpi-var.is-neg { background: #fef2f2; color: #991b1b; }
-.rcx-topo { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 10px; margin-bottom: 10px; }
-.rcx-topo .rcx-kpis { grid-template-columns: 1fr; margin-bottom: 0; }
-.rcx-topo .rcx-kpi { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 4px 16px; }
-.rcx-topo .rcx-kpi-label { flex: 1 1 180px; }
+.rcx-topo { display: grid; grid-template-columns: 250px minmax(0, 1fr) 290px; gap: 10px; margin-bottom: 10px; align-items: stretch; }
+.rcx-topo .rcx-kpis { grid-template-columns: 1fr; grid-auto-rows: 1fr; margin-bottom: 0; }
+.rcx-topo .rcx-kpi { justify-content: center; }
+.rcx-topo .rcx-kpi strong { font-size: 1.15rem; }
+.rcx-fc-btn { position: relative; }
+.rcx-fc-btn input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+.rcx-linhas { display: flex; flex-direction: column; min-width: 0; padding: 12px 16px 10px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; }
+.rcx-ln-svg { display: block; width: 100%; height: auto; max-height: 290px; margin-top: 4px; overflow: visible; }
+.rcx-ln-grade { stroke: #e5e7eb; stroke-width: 1; }
+.rcx-ln-eixo-y { font-size: 12px; fill: #64748b; text-anchor: end; dominant-baseline: middle; }
+.rcx-ln-eixo-x { font-size: 13px; fill: #475569; text-anchor: middle; font-weight: 600; }
+.rcx-ln-eixo-x.is-sel { fill: #105436; font-weight: 800; }
+.rcx-ln-sel { stroke: #94a3b8; stroke-width: 1; stroke-dasharray: 3 3; }
+.rcx-ln { fill: none; stroke-width: 2.6; stroke-linejoin: round; stroke-linecap: round; }
+.rcx-ln.is-ant { stroke: #b0b0b0; }
+.rcx-ln.is-orc { stroke: #f37021; }
+.rcx-ln.is-fc { stroke: #22b04b; }
+.rcx-ln.is-real { stroke: #105436; }
+.rcx-ln-hit { fill: transparent; cursor: default; }
+.rcx-ln-hit:hover { fill: rgba(16, 84, 54, 0.15); }
+.rcx-ln-legenda { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px 18px; margin-top: 4px; }
+.rcx-ln-leg { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; font-weight: 600; color: #334155; }
+.rcx-ln-leg i { display: inline-block; width: 22px; height: 3px; border-radius: 2px; }
+.rcx-ln-leg.is-ant i { background: #b0b0b0; }
+.rcx-ln-leg.is-orc i { background: #f37021; }
+.rcx-ln-leg.is-fc i { background: #22b04b; }
+.rcx-ln-leg.is-real i { background: #105436; }
+.rcx-ln-nota { margin-top: 4px; font-size: 0.72rem; color: #92400e; text-align: center; }
 .rcx-graf { display: flex; flex-direction: column; padding: 12px 16px 10px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; }
 .rcx-graf-tit { font-size: 1.05rem; font-weight: 800; color: #105436; letter-spacing: 0.01em; }
 .rcx-graf-area { display: flex; align-items: flex-end; gap: 18px; height: 150px; margin-top: 8px; padding: 0 6px; border-bottom: 1px solid #cbd5e1; }
@@ -3892,8 +3916,13 @@ circle.donut-segment {
 @media (max-width: 1100px) {
   .rcx-kpis { grid-template-columns: 1fr; }
 }
+@media (max-width: 1280px) {
+  .rcx-topo { grid-template-columns: 250px minmax(0, 1fr); }
+  .rcx-topo .rcx-kpis { grid-column: 1 / -1; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
 @media (max-width: 760px) {
   .rcx-topo { grid-template-columns: 1fr; }
+  .rcx-topo .rcx-kpis { grid-template-columns: 1fr; }
 }
 .fc-stale {
   margin: 8px 16px 0;
@@ -9087,6 +9116,39 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
   .cc-toolbar-actions { margin-left: 0; }
   .cc-page .ml-emp-filter { max-width: none; }
 }
+
+/* Parametrização de parceiro · Centros de custo da obra */
+.ppcc { padding: 16px; }
+.ppcc-obras > div { margin-bottom: 14px !important; }
+.ppcc-head { display: flex; justify-content: space-between; align-items: stretch; gap: 16px; flex-wrap: wrap; padding: 14px 16px; margin-bottom: 14px; background: #f7faf8; border: 1px solid #e3eee7; border-radius: 10px; }
+.ppcc-titulo { font-size: 1.05rem; font-weight: 800; color: #105436; }
+.ppcc-sub { margin-top: 4px; font-size: 0.78rem; color: #64748b; }
+.ppcc-kpis { display: flex; gap: 10px; flex-wrap: wrap; }
+.ppcc-kpi { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 130px; padding: 8px 14px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; }
+.ppcc-kpi-rot { font-size: 0.66rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #64748b; }
+.ppcc-kpi-val { display: flex; align-items: center; gap: 6px; font-size: 1.15rem; font-weight: 800; color: #0f172a; font-variant-numeric: tabular-nums; }
+.ppcc-kpi-val small { font-size: 0.78rem; font-weight: 600; color: #64748b; margin-left: -3px; }
+.ppcc-kpi-ico { width: 13px; height: 13px; color: #94a3b8; }
+.ppcc-kpi-input { width: 100px; height: 30px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 8px; font-size: 0.95rem; font-weight: 800; color: #0f172a; }
+.ppcc-toolbar { align-items: center; }
+.ppcc-busca { position: relative; flex: 1 1 320px; max-width: 460px; }
+.ppcc-busca-ico { position: absolute; left: 10px; top: 10px; width: 16px; height: 16px; color: #94a3b8; pointer-events: none; }
+.ppcc-busca input { width: 100%; height: 36px; padding: 0 10px 0 34px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; font-size: 0.82rem; box-sizing: border-box; }
+.ppcc-busca input:focus { outline: none; border-color: #105436; box-shadow: 0 0 0 3px rgba(16, 84, 54, 0.12); }
+.ppcc-sugg { position: absolute; left: 0; right: 0; top: 100%; z-index: 20; box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12); border-radius: 8px; }
+.ppcc-sugg:empty { display: none; }
+.ppcc-trazer { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px; border: 1px solid #105436; border-radius: 8px; background: #fff; color: #105436; font-size: 0.78rem; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.ppcc-trazer:hover { background: #ecfdf3; }
+.ppcc-scroll { max-height: calc(100vh - 380px); min-height: 0; }
+.cc-table.ppcc-table { font-size: 0.8rem; }
+.cc-table.ppcc-table thead th { padding: 8px 12px; }
+.cc-table.ppcc-table td { height: 42px; padding: 4px 12px; }
+.cc-table.ppcc-table td.ppcc-id { font-weight: 800; color: #105436; font-variant-numeric: tabular-nums; }
+.cc-table.ppcc-table td.ppcc-nome { font-weight: 600; }
+.cc-table.ppcc-table td.ppcc-vazio { text-align: center; color: #94a3b8; padding: 26px; height: auto; }
+.cc-table.ppcc-table .moura-switch { justify-content: center; vertical-align: middle; }
+.ppcc-rodape { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; font-size: 0.76rem; color: #64748b; }
+.ppcc-rodape .btn { height: 36px; min-width: 120px; }
 
 /* Prestação de Contas */
 .pcx-page { padding: 4px 2px 12px; }

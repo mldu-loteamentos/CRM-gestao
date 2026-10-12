@@ -965,50 +965,6 @@ const ParametrizacaoParceiroApp = {
     this.render();
   },
 
-  duplicateObra() {
-    const p = this.current();
-    const src = this.currentObra(p);
-    if (!p || !src) return;
-    const destRaw = (document.getElementById("pp-dup-obra") && document.getElementById("pp-dup-obra").value || "").trim();
-    if (!destRaw) {
-      alert("Informe o código da obra destino (ex.: 134) ou um C.C. dela (ex.: 13400).");
-      return;
-    }
-    const destCode = destRaw.replace(/\D/g, "").length <= 3 ? destRaw.replace(/\D/g, "") : this.obraFromCc(destRaw);
-    if (!destCode) {
-      alert("Não foi possível identificar a obra destino.");
-      return;
-    }
-    if (String(destCode) === String(src.code)) {
-      alert("Escolha uma obra diferente da atual.");
-      return;
-    }
-    const permitido = this.checarCentroDaEmpresa(destRaw, p.companyId);
-    const obraOk = String(destRaw).replace(/\D/g, "").length <= 3
-      && this.costCentersOfObra(destCode, p.companyId).length > 0;
-    if (!permitido.ok && !obraOk) {
-      alert(permitido.msg);
-      return;
-    }
-    const cloneNaN = JSON.parse(JSON.stringify(src.naNodes || {}));
-    const cloneNaA = JSON.parse(JSON.stringify(src.naAccounts || {}));
-    const cloneInA = JSON.parse(JSON.stringify(src.inAccounts || {}));
-    let dest = p.obras.find(o => String(o.code) === String(destCode));
-    if (!dest) {
-      const seed = this.seedCostCenters(destCode, p.companyId, destRaw);
-      const pctDest = this.rateioParceiroDoCc(destRaw);
-      dest = this.makeObra(destCode, pctDest != null ? pctDest : src.defaultPartnerShare, seed);
-      p.obras.push(dest);
-    }
-    dest.naNodes = cloneNaN;
-    dest.naAccounts = cloneNaA;
-    dest.inAccounts = cloneInA;
-    dest.accountShares = {};
-    this.selectedObraCode = destCode;
-    this.persist();
-    this.render();
-  },
-
   copiarLigacoes(src, dest) {
     dest.naNodes = JSON.parse(JSON.stringify(src.naNodes || {}));
     dest.naAccounts = JSON.parse(JSON.stringify(src.naAccounts || {}));
@@ -1578,6 +1534,8 @@ const ParametrizacaoParceiroApp = {
     const row = obra.costCenters.find(c => String(c.id) === String(ccId));
     if (row) row.inAccount = !!checked;
     this.persist();
+    const qtd = document.getElementById("ppcc-qtd");
+    if (qtd) qtd.textContent = obra.costCenters.filter(c => c.inAccount).length;
   },
 
   addCostCenter(ccId) {
@@ -1602,9 +1560,12 @@ const ParametrizacaoParceiroApp = {
     this.render();
   },
 
-  removeCostCenter(ccId) {
+  async removeCostCenter(ccId) {
     const obra = this.currentObra();
     if (!obra) return;
+    const msg = `Tirar o C.C. ${ccId} da obra ${obra.code}?`;
+    const ok = typeof window.mouraConfirm === "function" ? await window.mouraConfirm(msg) : confirm(msg);
+    if (!ok) return;
     obra.costCenters = obra.costCenters.filter(c => String(c.id) !== String(ccId));
     this.persist();
     this.render();
@@ -1853,7 +1814,7 @@ const ParametrizacaoParceiroApp = {
     return `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;">
       ${(p.obras || []).map(o => {
         const on = String(o.code) === String(this.selectedObraCode);
-        const label = sociedade ? ("Obra " + o.code) : ("Obra " + o.code + " · " + o.defaultPartnerShare + "%");
+        const label = sociedade ? ("Obra " + o.code) : ("Obra " + o.code + " · " + String(o.defaultPartnerShare).replace(".", ",") + "%");
         return `<button type="button" onclick="ParametrizacaoParceiroApp.selectObra('${this.esc(o.code)}')"
           style="border:1.5px solid ${on ? "#105436" : "#e2e8f0"};background:${on ? "#105436" : "#fff"};color:${on ? "#fff" : "#334155"};border-radius:999px;padding:6px 12px;font-size:0.78rem;font-weight:800;cursor:pointer;">
           ${this.esc(label)}
@@ -2117,19 +2078,14 @@ const ParametrizacaoParceiroApp = {
         ${this.obraChipsHtml(p, sociedade)}
         <div style="display:grid;grid-template-columns:${sociedade ? "minmax(0,1fr) 148px" : "minmax(0,1fr) 220px 148px"};gap:8px 10px;align-items:end;">
           <label style="font-size:0.72rem;font-weight:700;color:#475569;">Adicionar obra (C.C.)
-            <input id="pp-add-obra-cc" inputmode="numeric" maxlength="5" placeholder="Ex.: 13400" oninput="ParametrizacaoParceiroApp.aoDigitarCentroObra(this)" style="width:100%;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;box-sizing:border-box;display:block;margin-top:4px;">
+            <input id="pp-add-obra-cc" inputmode="numeric" maxlength="5" oninput="ParametrizacaoParceiroApp.aoDigitarCentroObra(this)" style="width:100%;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;box-sizing:border-box;display:block;margin-top:4px;">
           </label>
           ${sociedade ? "" : `<label style="font-size:0.72rem;font-weight:700;color:#475569;">Rateio do parceiro desta obra (%)
             <input id="pp-add-obra-share" type="number" min="0" max="100" step="0.01" value="" placeholder="Vem do centro de custo" style="width:100%;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;box-sizing:border-box;display:block;margin-top:4px;background:#f8fafc;">
           </label>`}
           <button class="btn btn-primary" onclick="ParametrizacaoParceiroApp.addObraFromForm()" style="height:34px;width:148px;font-size:0.78rem;white-space:nowrap;">Incluir obra</button>
-          ${sociedade ? "" : `<label style="grid-column:1 / 3;font-size:0.72rem;font-weight:700;color:#475569;">Copiar ligações da obra ${this.esc(obra && obra.code)} para
-            <input id="pp-dup-obra" placeholder="134 ou 13400" style="width:100%;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;box-sizing:border-box;display:block;margin-top:4px;">
-          </label>
-          <button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.duplicateObra()" style="height:34px;width:148px;font-size:0.78rem;white-space:nowrap;">Copiar ligações</button>
-          ${p.obras.length > 1 ? `<button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.removeObra('${this.esc(obra && obra.code)}')" style="grid-column:3;height:34px;width:148px;font-size:0.78rem;color:#dc2626;">Remover obra</button>` : ""}`}
+          ${sociedade || p.obras.length <= 1 ? "" : `<button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.removeObra('${this.esc(obra && obra.code)}')" style="grid-column:3;height:34px;width:148px;font-size:0.78rem;color:#dc2626;">Remover obra</button>`}
         </div>
-        ${sociedade ? "" : `<p style="margin:8px 0 0;font-size:0.72rem;color:#94a3b8;">Copia só o que está ligado ou desligado em grupos e contas. O percentual da obra destino continua o desta aba.</p>`}
         ${sociedade && p.obras.length > 1 ? `<div style="margin-top:10px;"><button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.removeObra('${this.esc(obra && obra.code)}')" style="height:34px;font-size:0.78rem;color:#dc2626;">Remover obra</button></div>` : ""}
       </div>
     `;
@@ -2142,58 +2098,71 @@ const ParametrizacaoParceiroApp = {
       obra.defaultPartnerShare = travado;
       this.persist();
     }
-    const total = (obra.costCenters || []).length;
-    const field = "height:36px;border:1px solid #e2e8f0;border-radius:8px;padding:0 10px;box-sizing:border-box;background:#fff;font-size:0.82rem;";
+    const centros = this.centrosOrdenados(obra.costCenters || []);
+    const total = centros.length;
+    const rateio = sociedade ? "" : travado != null
+      ? `<div class="ppcc-kpi" title="Percentual cadastrado no centro de custo. Não pode ser alterado aqui.">
+          <span class="ppcc-kpi-rot">Rateio da obra</span>
+          <span class="ppcc-kpi-val">${this.esc(String(obra.defaultPartnerShare).replace(".", ","))}%<i data-lucide="lock" class="ppcc-kpi-ico"></i></span>
+        </div>`
+      : `<label class="ppcc-kpi">
+          <span class="ppcc-kpi-rot">Rateio da obra (%)</span>
+          <input class="ppcc-kpi-input" type="number" min="0" max="100" step="0.01" value="${obra.defaultPartnerShare}" onchange="ParametrizacaoParceiroApp.updateObraShare(this.value)">
+        </label>`;
+    const linhas = centros.map(cc => `<tr>
+        <td class="ppcc-id">${this.esc(cc.id)}</td>
+        <td class="ppcc-nome" title="${this.esc(cc.name)}">${this.esc(cc.name)}</td>
+        <td class="is-center">
+          <label class="moura-switch" title="Entra na conta">
+            <input type="checkbox" ${cc.inAccount ? "checked" : ""} onchange="ParametrizacaoParceiroApp.setCcInAccount('${cc.id}', this.checked)">
+            <span class="moura-switch-track" aria-hidden="true"></span>
+          </label>
+        </td>
+        <td class="is-right">
+          <button type="button" class="tvig-ico is-danger" title="Excluir" onclick="ParametrizacaoParceiroApp.removeCostCenter('${cc.id}')">
+            <i data-lucide="trash-2" style="width:15px;height:15px;"></i>
+          </button>
+        </td>
+      </tr>`).join("") || `<tr><td colspan="4" class="ppcc-vazio">Nenhum centro de custo nesta obra.</td></tr>`;
     return `
-      <div class="crm-card" style="padding:0;overflow:hidden;">
-        <div style="padding:16px 16px 0;">${this.obraChipsHtml(p, sociedade)}</div>
-        <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;padding:0 16px 14px;border-bottom:1px solid #f1f5f9;">
+      <div class="crm-card ppcc">
+        <div class="ppcc-obras">${this.obraChipsHtml(p, sociedade)}</div>
+        <div class="ppcc-head">
           <div>
-            <div style="font-size:0.95rem;font-weight:800;color:#0f172a;">Obra ${this.esc(obra.code)}</div>
-            <p style="margin:4px 0 0;font-size:0.78rem;color:#64748b;">${sociedade
-              ? "Os centros entram na conta da SPE, sem rateio."
-              : inAccount.length + " de " + total + " entram na conta · rateio desta obra " + obra.defaultPartnerShare + "%"}</p>
+            <div class="ppcc-titulo">Obra ${this.esc(obra.code)}</div>
+            <div class="ppcc-sub">${sociedade ? "Os centros entram na conta da SPE, sem rateio." : "Centros de custo que entram na prestação de contas desta obra."}</div>
           </div>
-          <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
-            ${sociedade ? "" : `<label style="font-size:0.72rem;font-weight:700;color:#475569;">Rateio da obra (%)
-              <input type="${travado != null ? "text" : "number"}" ${travado != null ? "" : `min="0" max="100" step="0.01"`} value="${obra.defaultPartnerShare}"
-                ${travado != null ? `readonly title="Percentual cadastrado no centro de custo. Não pode ser alterado aqui."` : `onchange="ParametrizacaoParceiroApp.updateObraShare(this.value)"`}
-                style="width:88px;${field}font-weight:800;display:block;margin-top:4px;${travado != null ? "background:#f1f5f9;cursor:default;" : ""}">
-            </label>`}
-            <button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.importObraCenters()" title="Busca no cadastro os outros centros de custo desta mesma obra, como o de parceria, e inclui na lista os que ainda não estão aqui." style="height:36px;font-size:0.78rem;white-space:nowrap;">Trazer outros centros de custo da obra</button>
+          <div class="ppcc-kpis">
+            <div class="ppcc-kpi">
+              <span class="ppcc-kpi-rot">Entram na conta</span>
+              <span class="ppcc-kpi-val"><span id="ppcc-qtd">${inAccount.length}</span><small> de ${total}</small></span>
+            </div>
+            ${rateio}
           </div>
         </div>
-        <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
-          <thead>
-            <tr style="background:#f8fafc;color:#64748b;font-size:0.68rem;letter-spacing:0.04em;text-transform:uppercase;">
-              <th style="text-align:left;padding:10px 16px;font-weight:700;width:110px;">C.C.</th>
-              <th style="text-align:left;padding:10px 16px;font-weight:700;">Nome</th>
-              <th style="text-align:center;padding:10px 16px;font-weight:700;width:140px;">Entra na conta</th>
-              <th style="width:90px;"></th>
-            </tr>
-          </thead>
-          <tbody>
-            ${this.centrosOrdenados(obra.costCenters).map(cc => `<tr style="border-top:1px solid #f1f5f9;">
-              <td style="padding:12px 16px;font-weight:800;color:#105436;font-variant-numeric:tabular-nums;">${this.esc(cc.id)}</td>
-              <td style="padding:12px 16px;color:#334155;">${this.esc(cc.name)}</td>
-              <td style="padding:12px 16px;text-align:center;">
-                <input type="checkbox" ${cc.inAccount ? "checked" : ""} onchange="ParametrizacaoParceiroApp.setCcInAccount('${cc.id}', this.checked)"
-                  style="width:18px;height:18px;accent-color:#105436;cursor:pointer;">
-              </td>
-              <td style="padding:12px 16px;text-align:right;">
-                <button type="button" onclick="ParametrizacaoParceiroApp.removeCostCenter('${cc.id}')" style="border:none;background:transparent;color:#b91c1c;cursor:pointer;font-size:0.75rem;font-weight:700;">Remover</button>
-              </td>
-            </tr>`).join("") || `<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:28px;">Nenhum centro de custo nesta obra.</td></tr>`}
-          </tbody>
-        </table>
-        <div style="padding:12px 16px;background:#f8fafc;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;">
-          <div style="flex:1;min-width:220px;">
-            <input placeholder="Adicionar outro C.C. (ex. 13301)" value="${this.esc(this.ccSearch)}"
-              oninput="ParametrizacaoParceiroApp.ccSearch=this.value;const b=document.getElementById('pp-cc-sugg');if(b)b.innerHTML=ParametrizacaoParceiroApp.ccSuggHtml();"
-              style="width:100%;max-width:420px;${field}">
-            <div id="pp-cc-sugg">${this.ccSuggHtml()}</div>
+        <div class="cc-toolbar ppcc-toolbar">
+          <div class="ppcc-busca">
+            <i data-lucide="search" class="ppcc-busca-ico"></i>
+            <input placeholder="Adicionar C.C. por código ou nome" value="${this.esc(this.ccSearch)}"
+              oninput="ParametrizacaoParceiroApp.ccSearch=this.value;const b=document.getElementById('pp-cc-sugg');if(b)b.innerHTML=ParametrizacaoParceiroApp.ccSuggHtml();">
+            <div id="pp-cc-sugg" class="ppcc-sugg">${this.ccSuggHtml()}</div>
           </div>
-          <button type="button" class="btn btn-primary" onclick="ParametrizacaoParceiroApp.salvarCentros()" title="Grava os centros desta obra e volta para a aba Obras" style="height:36px;min-width:120px;">Salvar</button>
+          <div class="cc-toolbar-actions">
+            <button type="button" class="ppcc-trazer" onclick="ParametrizacaoParceiroApp.importObraCenters()" title="Busca no cadastro os outros centros de custo desta mesma obra, como o de parceria, e inclui na lista os que ainda não estão aqui.">
+              <i data-lucide="list-plus" style="width:15px;height:15px;"></i>Trazer outros C.C. da obra
+            </button>
+          </div>
+        </div>
+        <div class="cc-scroll ppcc-scroll">
+          <table class="cc-table ppcc-table">
+            <colgroup><col style="width:96px"><col><col style="width:130px"><col style="width:64px"></colgroup>
+            <thead><tr><th>C.C.</th><th>Nome</th><th class="is-center">Entra na conta</th><th class="is-right">Ações</th></tr></thead>
+            <tbody>${linhas}</tbody>
+          </table>
+        </div>
+        <div class="ppcc-rodape">
+          <span>Desligue o C.C. para tirá-lo da conta sem perder o cadastro.</span>
+          <button type="button" class="btn btn-primary" onclick="ParametrizacaoParceiroApp.salvarCentros()" title="Grava os centros desta obra e volta para a aba Obras">Salvar</button>
         </div>
       </div>
     `;

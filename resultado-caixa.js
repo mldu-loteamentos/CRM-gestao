@@ -15,6 +15,7 @@ const ResultadoCaixaApp = {
   agrupar: true,
   outrosAberto: false,
   arqsAberto: false,
+  forecast: null,
   SOLTOS: { "14703": 1, "14704": 1, "14304": 1, "14305": 1 },
   dfcLinhas: [],
   dfcLendo: false,
@@ -88,6 +89,139 @@ const ResultadoCaixaApp = {
     } catch (e) {
       this.anos = {};
     }
+    try {
+      this.forecast = JSON.parse(localStorage.getItem("rc_forecast_v1") || "null");
+    } catch (e) {
+      this.forecast = null;
+    }
+  },
+
+  /** Relatório "Orçamento Empresarial Agrupado" do Sienge, por centro de custo, mensal. Guarda só as contas analíticas (tipo R). */
+  lerForecast(wb) {
+    const grid = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: null });
+    const mesRe = /^(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)[a-zç]*\/(\d{4})$/i;
+    const mesNum = { jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12 };
+    const txt = (v) => String(v == null ? "" : v).trim();
+    const contas = {};
+    const nomes = {};
+    let cc = null;
+    let meses = [];
+    let tipoCol = -1;
+    grid.forEach((row) => {
+      const r = row || [];
+      const c0 = txt(r[0]);
+      if (/^centro de custo$/i.test(c0)) {
+        cc = null;
+        meses = [];
+        r.slice(1).forEach((c) => {
+          const m = txt(c).match(/^(\d{4,6})\s*-\s*(.+)$/);
+          if (m && !cc) cc = { id: m[1], nome: txt(c) };
+        });
+        return;
+      }
+      if (/^c[oó]digo$/i.test(c0)) {
+        meses = [];
+        tipoCol = -1;
+        r.forEach((c, col) => {
+          const s = txt(c);
+          const m = s.toLowerCase().match(mesRe);
+          if (m) meses.push({ col, ym: m[2] + "-" + String(mesNum[m[1]]).padStart(2, "0") });
+          if (/^tipo$/i.test(s)) tipoCol = col;
+        });
+        return;
+      }
+      if (!cc || !meses.length || !/^\d+(\.\d+)*$/.test(c0)) return;
+      if (tipoCol >= 0 && txt(r[tipoCol]).toUpperCase() !== "R") return;
+      const bag = contas[cc.id] || (contas[cc.id] = {});
+      nomes[cc.id] = cc.nome;
+      const conta = bag[c0] || (bag[c0] = { nome: txt(r[1]), meses: {} });
+      meses.forEach((m) => {
+        const v = Number(r[m.col]) || 0;
+        if (v) conta.meses[m.ym] = (conta.meses[m.ym] || 0) + v;
+      });
+    });
+    Object.keys(contas).forEach((id) => {
+      const codes = Object.keys(contas[id]);
+      codes.forEach((c) => { if (codes.some((o) => o !== c && o.startsWith(c + "."))) delete contas[id][c]; });
+    });
+    return { contas, nomes };
+  },
+
+  async subirForecast(input) {
+    const file = input && input.files ? input.files[0] : null;
+    if (!file) return;
+    if (typeof XLSX === "undefined") {
+      this.error = "A biblioteca de Excel não carregou. Atualize a página.";
+      this.render();
+      return;
+    }
+    this.lendo = true;
+    this.error = "";
+    this.render();
+    try {
+      const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      const f = this.lerForecast(wb);
+      const ccs = Object.keys(f.contas);
+      if (!ccs.length) throw new Error("Não reconheci o forecast em " + file.name + ". Use o relatório Orçamento Empresarial Agrupado por centro de custo, com periodicidade mensal.");
+      const yms = new Set();
+      ccs.forEach((id) => Object.keys(f.contas[id]).forEach((c) => Object.keys(f.contas[id][c].meses).forEach((ym) => yms.add(ym))));
+      this.forecast = { arquivo: file.name, em: new Date().toISOString(), meses: Array.from(yms).sort(), contas: f.contas, nomes: f.nomes };
+      try {
+        localStorage.setItem("rc_forecast_v1", JSON.stringify(this.forecast));
+      } catch (e) {
+        this.error = "O forecast foi lido, mas não coube no navegador para ficar salvo. Ele vale até fechar a página.";
+      }
+    } catch (e) {
+      this.error = e.message || String(e);
+    }
+    this.lendo = false;
+    if (input) input.value = "";
+    this.render();
+  },
+
+  removerForecast() {
+    this.forecast = null;
+    try { localStorage.removeItem("rc_forecast_v1"); } catch (e) {}
+    this.render();
+  },
+
+  /** Forecast das entradas por mês do ano: contas do relatório passadas pela visão DFC (01 + 09.01), no % Moura Leite quando agrupado. */
+  forecastEntradas(ano) {
+    const f = this.forecast;
+    const out = {};
+    if (!f || !f.contas) return out;
+    const FC = window.FluxoCaixaApp;
+    let mapa = null;
+    try {
+      if (FC && typeof FC.visao === "function") {
+        mapa = this.mapaDfc(FC);
+        if (!Object.keys(mapa.accToNode).length) mapa = null;
+      }
+    } catch (e) {
+      mapa = null;
+    }
+    const aceita = this.noAceito("entradas");
+    Object.keys(f.contas).forEach((cc) => {
+      const fator = this.agrupar ? this.pctMl(cc) : 1;
+      Object.keys(f.contas[cc]).forEach((code) => {
+        let entra;
+        if (mapa) {
+          const node = this.noDaConta(FC, mapa, code);
+          entra = !!(node && aceita(node.id));
+        } else {
+          entra = /^1\.0[123](\.|$)/.test(code);
+        }
+        if (!entra) return;
+        const sinal = code.charAt(0) === "2" ? -1 : 1;
+        const meses = f.contas[cc][code].meses || {};
+        Object.keys(meses).forEach((ym) => {
+          if (Number(ym.slice(0, 4)) !== Number(ano)) return;
+          const mm = Number(ym.slice(5, 7));
+          out[mm] = (out[mm] || 0) + sinal * (Number(meses[ym]) || 0) * fator;
+        });
+      });
+    });
+    return out;
   },
 
   gravarLocal() {
@@ -998,11 +1132,19 @@ const ResultadoCaixaApp = {
     const qtdArq = [atual, antN].reduce((s, y) => {
       const a = y ? this.anoDados(y) : null;
       return s + (a ? Object.keys(a.arquivos || {}).length : 0);
-    }, 0);
+    }, 0) + (this.forecast ? 1 : 0);
+    const fcMeses = this.forecast && Array.isArray(this.forecast.meses) && this.forecast.meses.length
+      ? this.forecast.meses.map((ym) => (this.MESES[Number(ym.slice(5, 7)) - 1] || "") + "/" + ym.slice(0, 4))
+      : [];
+    const fcPeriodo = fcMeses.length ? (fcMeses.length > 1 ? fcMeses[0] + " a " + fcMeses[fcMeses.length - 1] : fcMeses[0]) : "";
+    const chipForecast = this.forecast
+      ? `<span class="rcx-arq" title="${caixaEsc(this.forecast.arquivo || "")}">${caixaEsc(this.forecast.arquivo || "forecast")}${fcPeriodo ? " · " + caixaEsc(fcPeriodo) : ""} <button type="button" onclick="ResultadoCaixaApp.removerForecast()">tirar</button></span>`
+      : `<span class="rcx-muted">Nenhum forecast. Use Subir forecast na aba Entradas.</span>`;
     const agrupa = this.agrupar ? " Com “% Moura Leite”, cada valor está no percentual da Moura Leite cadastrado na empresa." : "";
     const base = "Orçado e realizado vêm dos arquivos da competência atual (" + (atual || "—") + "). A coluna do ano anterior é o realizado dos arquivos da competência anterior" + (antN ? " (" + antN + ")" : "") + ".";
     const nota = lado === "entradas"
-      ? base + " Livia, Livia I e Livia II aparecem como Central Parque. Empreendimentos com o mesmo nome ganham a sigla da cidade. MLDU aparece como Corporativo. Os quatro maiores desvios positivos e os quatro negativos do acumulado ficam à vista; o restante abre ao clicar em Outros." + agrupa
+      ? base + " Livia, Livia I e Livia II aparecem como Central Parque. Empreendimentos com o mesmo nome ganham a sigla da cidade. MLDU aparece como Corporativo. Os quatro maiores desvios positivos e os quatro negativos do acumulado ficam à vista; o restante abre ao clicar em Outros."
+        + " No gráfico de linhas, a linha do ano atual é o realizado até o mês escolhido e o Forecast segue com a projeção do relatório de forecast até dezembro, pelas mesmas contas da visão DFC (Receitas e receitas financeiras)." + agrupa
       : base + " As saídas seguem as contas do DFC e aparecem como saída. Gastar acima do orçado fica em vermelho. As contas de fora da lista principal abrem em Outros." + agrupa;
     const avisoRateio = lado === "saidas" && this.faltaCentroNasSaidas()
       ? `<div class="rcx-erro">Para aplicar o % Moura Leite nas saídas destes arquivos, suba o Excel de novo. O arquivo que já estava salvo não guarda o centro de custo de cada conta.</div>`
@@ -1036,6 +1178,10 @@ const ResultadoCaixaApp = {
             <i data-lucide="files"></i> Arquivos <span class="ml-tab-count">${qtdArq}</span>
             <i data-lucide="${this.arqsAberto ? "chevron-up" : "chevron-down"}"></i>
           </button>
+          ${lado === "entradas" ? `<label class="rcx-arq-btn rcx-fc-btn" title="Relatório Orçamento Empresarial Agrupado por centro de custo, mensal">
+            <i data-lucide="trending-up"></i> ${this.forecast ? "Trocar forecast" : "Subir forecast"}
+            <input type="file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onchange="ResultadoCaixaApp.subirForecast(this)">
+          </label>` : ""}
           <label class="rcx-file">
             <i data-lucide="upload"></i> Subir orçamento
             <input type="file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple onchange="ResultadoCaixaApp.subir(this)">
@@ -1050,6 +1196,10 @@ const ResultadoCaixaApp = {
         <div class="rcx-arqs-col">
           <span class="rcx-arqs-label">Competência anterior${antN ? " · " + antN : ""}</span>
           <div class="rcx-arqs">${chipsAnt || `<span class="rcx-muted">Nenhum arquivo desta competência.</span>`}</div>
+        </div>
+        <div class="rcx-arqs-col">
+          <span class="rcx-arqs-label">Forecast</span>
+          <div class="rcx-arqs">${chipForecast}</div>
         </div>
       </div>` : ""}
       ${this.error ? `<div class="rcx-erro">${caixaEsc(this.error)}</div>` : ""}
@@ -1110,6 +1260,105 @@ const ResultadoCaixaApp = {
         }).join("")}
       </div>
       <div class="rcx-graf-eixo">${barras.map((b) => `<span>${caixaEsc(b.rotulo)}</span>`).join("")}</div>
+    </div>`;
+  },
+
+  /** Séries mensais das entradas (12 meses): ano anterior, orçado, realizado até o mês e forecast dali em diante. */
+  serieEntradas() {
+    const ano = this.anoAtual();
+    const ant = ano - 1;
+    const sel = Number(this.mes) || 1;
+    const bagAno = this.bagLado(ano, "entradas");
+    const bagAnt = this.bagLado(ant, "entradas");
+    const tem = (bag, m) => Object.keys(bag).some((id) => (bag[id].meses || {})[String(m)]);
+    const soma = (y, bag, m, campo) => Object.keys(bag).reduce((s, id) => s + this.valorAgrupado("entradas", y, id, m, campo, false), 0);
+    const fc = this.forecastEntradas(ano);
+    const meses = Array.from({ length: 12 }, (_, i) => i + 1);
+    const real = meses.map((m) => (m <= sel && tem(bagAno, m) ? soma(ano, bagAno, m, "r") : null));
+    const orc = meses.map((m) => (tem(bagAno, m) ? soma(ano, bagAno, m, "o") : null));
+    const semForecast = [];
+    const forecast = meses.map((m, i) => {
+      if (m <= sel) return real[i];
+      if (fc[m] != null) return fc[m];
+      if (!this.forecast) return null;
+      semForecast.push(m);
+      return orc[i];
+    });
+    return {
+      ant: meses.map((m) => (tem(bagAnt, m) ? soma(ant, bagAnt, m, "r") : null)),
+      orc,
+      real,
+      forecast,
+      semForecast
+    };
+  },
+
+  passoEixo(bruto) {
+    if (!(bruto > 0)) return 1;
+    const p = Math.pow(10, Math.floor(Math.log10(bruto)));
+    const n = bruto / p;
+    return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p;
+  },
+
+  graficoLinhasHtml() {
+    const s = this.serieEntradas();
+    const ano = this.anoAtual();
+    const antN = ano > 1900 ? ano - 1 : 0;
+    const sel = Number(this.mes) || 1;
+    const milhoes = this.escala === "milhoes";
+    const div = milhoes ? 1000000 : 1;
+    const valores = [].concat(s.ant, s.orc, s.real, s.forecast).filter((v) => v != null).map((v) => v / div);
+    const maxV = Math.max(0, ...valores);
+    const minV = Math.min(0, ...valores);
+    const passo = this.passoEixo((maxV - minV) / 6);
+    const topo = Math.max(passo, Math.ceil(maxV / passo) * passo);
+    const base = Math.floor(minV / passo) * passo;
+    const W = 640, H = 240, L = milhoes ? 48 : 64, R = 10, T = 10, B = 28;
+    const x = (m) => L + (m - 0.5) * (W - L - R) / 12;
+    const y = (v) => T + (topo - v / div) / (topo - base) * (H - T - B);
+    const eixoTxt = (t) => milhoes
+      ? t.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : (Math.abs(t) >= 1000000 ? (t / 1000000).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + " mi" : (t / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 0 }) + " mil");
+    const caminho = (serie) => {
+      let d = "";
+      let aberto = false;
+      serie.forEach((v, i) => {
+        if (v == null) { aberto = false; return; }
+        d += (aberto ? " L" : " M") + x(i + 1).toFixed(1) + " " + y(v).toFixed(1);
+        aberto = true;
+      });
+      return d.trim();
+    };
+    const grade = [];
+    for (let t = base, i = 0; t <= topo + passo / 1000 && i < 30; t += passo, i++) {
+      const yy = y(t * div).toFixed(1);
+      grade.push(`<line x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}" class="rcx-ln-grade"></line><text x="${L - 6}" y="${yy}" class="rcx-ln-eixo-y">${eixoTxt(t)}</text>`);
+    }
+    const letras = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
+    const series = [
+      { k: "ant", cls: "is-ant", nome: antN ? String(antN) : "Ano anterior" },
+      { k: "orc", cls: "is-orc", nome: "Orçado" },
+      { k: "forecast", cls: "is-fc", nome: "Forecast" },
+      { k: "real", cls: "is-real", nome: ano ? String(ano) : "Realizado" }
+    ];
+    const pontos = series.map((se) => s[se.k].map((v, i) => (v == null || (se.k === "forecast" && i + 1 <= sel)) ? ""
+      : `<circle cx="${x(i + 1).toFixed(1)}" cy="${y(v).toFixed(1)}" r="7" class="rcx-ln-hit"><title>${se.nome} · ${this.MESES[i]}: ${this.fmt(v)}</title></circle>`).join("")).join("");
+    const legenda = series.filter((se) => s[se.k].some((v) => v != null)).map((se) => `<span class="rcx-ln-leg ${se.cls}"><i></i>${caixaEsc(se.nome)}</span>`).join("");
+    const nomesMes = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+    let nota = "";
+    if (!this.forecast) nota = "Suba o forecast para projetar os meses seguintes até dezembro.";
+    else if (s.semForecast.length) nota = `O forecast não tem ${s.semForecast.map((m) => nomesMes[m - 1]).join(", ")}: nesses meses a linha usa o orçado.`;
+    return `<div class="rcx-linhas">
+      <div class="rcx-graf-tit">EVOLUÇÃO MENSAL/${ano || ""}</div>
+      <svg viewBox="0 0 ${W} ${H}" class="rcx-ln-svg" role="img" aria-label="Entradas por mês: ano anterior, orçado, realizado e forecast">
+        ${grade.join("")}
+        <line x1="${x(sel).toFixed(1)}" x2="${x(sel).toFixed(1)}" y1="${T}" y2="${H - B}" class="rcx-ln-sel"></line>
+        ${letras.map((l, i) => `<text x="${x(i + 1).toFixed(1)}" y="${H - 8}" class="rcx-ln-eixo-x${i + 1 === sel ? " is-sel" : ""}">${l}</text>`).join("")}
+        ${series.map((se) => `<path d="${caminho(s[se.k])}" class="rcx-ln ${se.cls}"></path>`).join("")}
+        ${pontos}
+      </svg>
+      <div class="rcx-ln-legenda">${legenda}</div>
+      ${nota ? `<div class="rcx-ln-nota">${caixaEsc(nota)}</div>` : ""}
     </div>`;
   },
 
@@ -1257,7 +1506,7 @@ const ResultadoCaixaApp = {
     const total = this.somaBloco(pack.rows, "mensal");
     const totalA = this.somaBloco(pack.rows, "acum");
     return faixa
-      + `<div class="rcx-topo">${this.graficoMesHtml(total)}${this.resumoHtml(total, totalA, false)}</div>`
+      + `<div class="rcx-topo">${this.graficoMesHtml(total)}${this.graficoLinhasHtml()}${this.resumoHtml(total, totalA, false)}</div>`
       + this.gradeHtml("Produto", corpo, total, totalA, false);
   },
 
