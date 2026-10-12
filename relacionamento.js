@@ -2126,7 +2126,7 @@ const RelacionamentoApp = {
         corpo = (ta && ta.defaultValue) || corpo;
       }
       if (!corpo) {
-        alert("O modelo de autorização não está preenchido. Salve-o em Configurações → Documentos padrões.");
+        alert("O modelo de autorização não está preenchido. Salve-o em Configurações gerais → Documentos padrões.");
         return;
       }
       if (!(await this._garantirMatricula(ctx))) {
@@ -2411,7 +2411,7 @@ const RelacionamentoApp = {
       // O cabeçalho "Título | Unidade" já sai acima do título; a linha do modelo duplicaria.
       corpo = corpo.replace(/^\s*(?:<[^>]+>\s*|[*_]+\s*)*t[ií]tulo\s*:[^\n]*\n*/i, "");
       if (!corpo) {
-        alert("O modelo do termo de quitação não está preenchido. Salve-o em Configurações → Documentos padrões.");
+        alert("O modelo do termo de quitação não está preenchido. Salve-o em Configurações gerais → Documentos padrões.");
         return;
       }
       if (!(await this._garantirMatricula(ctx))) {
@@ -3364,7 +3364,7 @@ const RelacionamentoApp = {
       const docTitle = (titleEl && titleEl.value && (titleEl.value !== titleEl.defaultValue || !titleSalvo) ? titleEl.value : titleSalvo) || cfg.defaultTitle;
       let corpo = this._resolveDocCorpo(cfg, corpoEl);
       if (!corpo) {
-        alert("O modelo não está preenchido. Salve-o em Configurações → Documentos padrões.");
+        alert("O modelo não está preenchido. Salve-o em Configurações gerais → Documentos padrões.");
         return;
       }
       const { customer, sale, unit, bill, empName, cidadeLote, block, lot } = ctx;

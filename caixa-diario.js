@@ -235,12 +235,19 @@ const FluxoCaixaDiarioApp = {
   _nomes: {},
   _custom: null,
   _gen: 0,
+  avisoCaixa: null,
+  _avisoDisparado: false,
+  _avisoToken: 0,
 
   init() {
     if (!this.month) {
       const n = new Date();
       this.month = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}`;
     }
+    this.companyIds = [];
+    this.avisoCaixa = null;
+    this._avisoDisparado = false;
+    this._avisoToken = (this._avisoToken || 0) + 1;
     this.render();
     this.load();
   },
@@ -314,13 +321,22 @@ const FluxoCaixaDiarioApp = {
     this._ccAll = all;
   },
 
+  /** Empresa 1, ou a primeira gerida cujo nome é Moura Leite. */
+  empresaPadrao(ids) {
+    const lista = ids || this.empresasGeridas().map((c) => String(c.id));
+    if (lista.indexOf("1") >= 0) return "1";
+    const porNome = this.empresasGeridas()
+      .filter((c) => lista.indexOf(String(c.id)) >= 0 && /moura\s+leite/i.test(c.name || ""))
+      .sort((a, b) => Number(a.id) - Number(b.id));
+    if (porNome.length) return String(porNome[0].id);
+    const sorted = lista.slice().sort((a, b) => Number(a) - Number(b) || String(a).localeCompare(String(b)));
+    return sorted[0] || "";
+  },
+
   ensureCompany() {
     const ids = this.empresasGeridas().map((c) => String(c.id));
     if (this.companyIds.length === 1 && ids.indexOf(this.companyIds[0]) >= 0) return;
-    let saved = "";
-    try { saved = localStorage.getItem("cxd_company") || ""; } catch (e) {}
-    const sorted = ids.slice().sort((a, b) => Number(a) - Number(b) || a.localeCompare(b));
-    const pick = ids.indexOf(saved) >= 0 ? saved : (sorted[0] || "");
+    const pick = this.empresaPadrao(ids);
     this.companyIds = pick ? [pick] : [];
     if (pick) {
       try { localStorage.setItem("cxd_company", pick); } catch (e) {}
@@ -632,6 +648,7 @@ const FluxoCaixaDiarioApp = {
       if (this._gen !== gen) return;
       this.progress = "";
       this.render();
+      this.avisarCaixa();
     } catch (e) {
       if (this._gen !== gen) return;
       this.error = e.message || String(e);
@@ -915,7 +932,7 @@ const FluxoCaixaDiarioApp = {
       const bills = [];
       for (let i = 0; i < targets.length; i++) {
         if (this._gen !== gen) return;
-        this.progress = "Buscando contas a pagar · " + (i + 1) + " de " + targets.length;
+        this.progress = "Buscando contas a pagar…";
         this.paintProgress();
         const part = await app.outcomeRange(buscaIni, buscaFim, targets[i]);
         if (Array.isArray(part)) bills.push.apply(bills, part);
@@ -1920,6 +1937,124 @@ const FluxoCaixaDiarioApp = {
     this.render();
   },
 
+  resumoAlertaCaixa(a, limite) {
+    const sem = a && a.semSaldo;
+    const falta = sem && sem.date && sem.date <= limite ? sem : null;
+    const cdb = a && a.cdb > 0.5 ? a.cdb : 0;
+    const comp = a && a.comp > 0.5 ? a.comp : 0;
+    if (!falta && !(cdb > 0.5) && !(comp > 0.5)) return null;
+    return {
+      falta,
+      cdb,
+      comp,
+      fimCdb: (a && a.fimCdb) || "",
+      fimComp: (a && a.fimComp) || ""
+    };
+  },
+
+  /** Ao entrar na tela, avisa falta de caixa ou sobra para aplicar nas empresas geridas, nos próximos 30 dias. */
+  async avisarCaixa() {
+    if (this._avisoDisparado) return;
+    this._avisoDisparado = true;
+    const token = this._avisoToken;
+    const hoje = this.hoje();
+    const limite = caixaAddDays(hoje, 29);
+    const empresas = this.empresasGeridas();
+    const atual = this.companyKey();
+    const itens = [];
+    const guardar = (id, nome, a) => {
+      const r = this.resumoAlertaCaixa(a, limite);
+      if (!r) return;
+      itens.push(Object.assign({ id: String(id), nome: nome || this.companyName(id) }, r));
+    };
+    if (atual) guardar(atual, this.companyName(atual), this.analiseCaixa(this.linhasProjecao().linhas));
+    const outros = empresas.map((c) => String(c.id)).filter((id) => id !== atual);
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < outros.length) {
+        if (this._avisoToken !== token) return;
+        const id = outros[cursor++];
+        try {
+          const r = await this.projetarEmpresa(id);
+          if (this._avisoToken !== token) return;
+          if (r && r.erro) continue;
+          guardar(id, r && r.nome, r);
+        } catch (e) {
+          console.warn("[Caixa diário] aviso de caixa", id, e);
+        }
+      }
+    };
+    await Promise.all([worker(), worker()]);
+    if (this._avisoToken !== token || !itens.length) return;
+    itens.sort((a, b) => {
+      const fa = a.falta ? 0 : 1;
+      const fb = b.falta ? 0 : 1;
+      if (fa !== fb) return fa - fb;
+      if (a.falta && b.falta && a.falta.date !== b.falta.date) return String(a.falta.date).localeCompare(String(b.falta.date));
+      return String(a.nome).localeCompare(String(b.nome), "pt");
+    });
+    this.avisoCaixa = itens;
+    this.render();
+  },
+
+  fecharAviso() {
+    this.avisoCaixa = null;
+    this.render();
+  },
+
+  abrirEmpresaAviso(id) {
+    const sid = String(id || "");
+    this.avisoCaixa = null;
+    if (!sid || this.companyIds[0] === sid) {
+      this.render();
+      return;
+    }
+    this.companyIds = [sid];
+    try { localStorage.setItem("cxd_company", sid); } catch (e) {}
+    this.openEmp = false;
+    this.qEmp = "";
+    this.openDay = "";
+    this.load();
+  },
+
+  avisoHtml() {
+    const itens = this.avisoCaixa;
+    if (!itens || !itens.length) return "";
+    const n = itens.length;
+    const cards = itens.map((it) => {
+      const blocos = [];
+      if (it.falta) {
+        const pior = it.falta.menorData && it.falta.menorData !== it.falta.date
+          ? ` O ponto mais baixo é ${caixaFmtDate(it.falta.menorData)}, com ${caixaMoney(it.falta.menor)}.`
+          : "";
+        blocos.push(`<p class="cxd-sem-saldo"><b>Falta caixa em ${caixaFmtDate(it.falta.date)}</b>Conta corrente e aplicação somadas: ${caixaMoney(it.falta.valor)}.${pior}</p>`);
+      }
+      if (it.cdb > 0.5) {
+        blocos.push(`<p class="cxd-aplica-cdb"><b>Aplicar em CDB:</b> ${caixaMoney(it.cdb)}${it.fimCdb ? `, até ${caixaFmtDate(it.fimCdb)}` : ""}.</p>`);
+      }
+      if (it.comp > 0.5) {
+        blocos.push(`<p class="cxd-aplica-comp"><b>Aplicar na compromissada:</b> ${caixaMoney(it.comp)}${it.fimComp ? `, até ${caixaFmtDate(it.fimComp)}` : ""}.</p>`);
+      }
+      return `<article class="cxd-aviso-emp">
+        <header>
+          <strong>${caixaEsc(it.id)} - ${caixaEsc(it.nome)}</strong>
+          <button type="button" class="btn btn-outline" onclick="FluxoCaixaDiarioApp.abrirEmpresaAviso('${caixaEsc(it.id)}')">Abrir</button>
+        </header>
+        ${blocos.join("")}
+      </article>`;
+    }).join("");
+    return `<div class="cxd-aviso-modal" onclick="if(event.target===this)FluxoCaixaDiarioApp.fecharAviso()">
+      <div class="cxd-aviso-dialog" role="dialog" aria-label="Caixa nos próximos 30 dias">
+        <h3>Caixa nos próximos 30 dias</h3>
+        <p>${n === 1 ? "1 empresa" : n + " empresas"} com falta de caixa ou dinheiro parado para aplicar.</p>
+        <div class="cxd-aviso-lista">${cards}</div>
+        <div class="cxd-comp-actions">
+          <button type="button" class="btn btn-cancel" onclick="FluxoCaixaDiarioApp.fecharAviso()">Fechar</button>
+        </div>
+      </div>
+    </div>`;
+  },
+
   compModalHtml() {
     if (!this.compAberto) return "";
     const p = this.parametrosComp();
@@ -2453,6 +2588,16 @@ const FluxoCaixaDiarioApp = {
         #fluxo-caixa-diario-root .cxd-comp-dialog small { display:block; margin-top:2px; font-weight:600; color:#64748b; text-transform:none; }
         #fluxo-caixa-diario-root .cxd-comp-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:4px; }
         #fluxo-caixa-diario-root .cxd-comp-actions .btn { height:36px; }
+        #fluxo-caixa-diario-root .cxd-aviso-modal { position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:90; display:flex; align-items:center; justify-content:center; padding:16px; }
+        #fluxo-caixa-diario-root .cxd-aviso-dialog { background:#fff; border-radius:12px; width:min(640px, 96vw); max-height:min(78vh, 720px); display:flex; flex-direction:column; padding:18px 20px; box-shadow:0 16px 40px rgba(15,23,42,.18); }
+        #fluxo-caixa-diario-root .cxd-aviso-dialog h3 { margin:0; color:#105436; font-size:1.05rem; }
+        #fluxo-caixa-diario-root .cxd-aviso-dialog > p { margin:4px 0 12px; color:#64748b; font-size:.82rem; }
+        #fluxo-caixa-diario-root .cxd-aviso-lista { overflow:auto; display:flex; flex-direction:column; gap:10px; min-height:0; }
+        #fluxo-caixa-diario-root .cxd-aviso-emp { border:1px solid #e2e8f0; border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:6px; }
+        #fluxo-caixa-diario-root .cxd-aviso-emp header { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+        #fluxo-caixa-diario-root .cxd-aviso-emp header strong { color:#0f172a; font-size:.86rem; }
+        #fluxo-caixa-diario-root .cxd-aviso-emp header .btn { height:32px; padding:0 12px; }
+        #fluxo-caixa-diario-root .cxd-aviso-emp p { margin:0; }
         #fluxo-caixa-diario-root .cxd-mx .cxd-col-tot { background:#f1f5f9; font-weight:800; border-left:1px solid #cbd5e1; cursor:default; }
         #fluxo-caixa-diario-root .cxd-mx th.cxd-col-tot { background:#0c3d28; }
         #fluxo-caixa-diario-root .cxd-mx tr.cxd-row-cc td { background:#f8fafc; }
@@ -2563,7 +2708,8 @@ const FluxoCaixaDiarioApp = {
         </div>
       </div>
       ${this.detailHtml()}
-      ${this.compModalHtml()}`;
+      ${this.compModalHtml()}
+      ${this.avisoHtml()}`;
     const wrap = root.querySelector(".cxd-wrap-mx");
     if (wrap) {
       if (prevScroll != null) wrap.scrollLeft = prevScroll;

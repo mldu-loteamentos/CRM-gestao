@@ -23,6 +23,7 @@ const PrestacaoContasApp = {
   conferencias: null,
   confFiltro: "",
   confAberta: "",
+  gruposAbertos: new Set(),
   guias: {},
   rastreio: null,
   GUIAS_CACHE: "crm_pcx_guias_v2",
@@ -197,12 +198,21 @@ const PrestacaoContasApp = {
     this.aba = id === "pag" ? "pag" : "receb";
     this.confFiltro = "";
     this.confAberta = "";
+    this.gruposAbertos = new Set();
     this.render();
   },
 
   setConfFiltro(status) {
     this.confFiltro = this.confFiltro === status ? "" : status;
     this.confAberta = "";
+    this.gruposAbertos = new Set();
+    this.render();
+  },
+
+  toggleGrupo(id) {
+    const k = String(id || "");
+    if (this.gruposAbertos.has(k)) this.gruposAbertos.delete(k);
+    else this.gruposAbertos.add(k);
     this.render();
   },
 
@@ -472,7 +482,7 @@ const PrestacaoContasApp = {
       }
       feitas++;
       if (feitas % 10 === 0) {
-        this.rastreio = { msg: `Rastreando a origem das guias: ${feitas} de ${candidatas.length} nota(s)…` };
+        this.rastreio = { msg: "Rastreando a origem das guias…" };
         const el = document.getElementById("pc-rastreio");
         if (el) el.textContent = this.rastreio.msg;
       }
@@ -956,6 +966,7 @@ const PrestacaoContasApp = {
 
     root.innerHTML = `
       <div class="pcx-page">
+        <div class="pcx-head">
         <div class="cc-toolbar pcx-toolbar">
           ${partnerships.length ? `<label class="pcx-field pcx-field-parc">
             <span class="ml-emp-filter-label">Parceria</span>
@@ -1001,6 +1012,7 @@ const PrestacaoContasApp = {
             </span>
           </div>
           <div id="pc-cc-sugg">${this.ccSuggestionsHtml()}</div>
+        </div>
         </div>
 
         ${this.error ? `<div class="pcx-alert is-error">${this.esc(this.error)}</div>` : ""}
@@ -1052,8 +1064,9 @@ const PrestacaoContasApp = {
       : (!this.movements.length ? "Clique em Carregar para consultar o Sienge."
         : (filtro ? "Nenhum lançamento nesta situação."
           : (ehRec ? "Nenhum recebimento nos centros selecionados." : "Nenhum pagamento nos centros selecionados.")));
-    const corpo = rows.length
-      ? rows.map(r => this.confLinhaHtml(r, cor)).join("")
+    const arvore = rows.length ? this.arvorePlano(rows) : null;
+    const corpo = arvore
+      ? arvore.raizes.map(n => this.grupoHtml(n, arvore.nos, 0, cor)).join("")
       : `<tr><td colspan="8" class="pcx-vazio">${vazio}</td></tr>`;
     return `
       <div class="pcx-resumo">
@@ -1066,8 +1079,7 @@ const PrestacaoContasApp = {
         <div class="pcx-total">${rows.length} lançamento(s) · <strong style="color:${cor};">${this.fmt(total)}</strong></div>
       </div>
       <p class="pcx-ajuda">
-        Confere se cada ${ehRec ? "recebimento" : "pagamento"} foi lançado nos centros com o percentual cadastrado (Moura Leite e terrenista).
-        Lançamentos em contas que não entram no rateio da parceria (como repasses ao parceiro) aparecem como <strong>Não se aplica rateio</strong> e não precisam de conferência. Clique na linha para ver título, parcela e contas.
+        ${ehRec ? "Recebimentos" : "Pagamentos"} agrupados pelo plano financeiro. Abra o nível para ver as contas e os lançamentos.
       </p>
       <div class="cc-scroll pcx-scroll" id="pc-conf-scroll">
         <table class="cc-table pcx-table">
@@ -1090,6 +1102,156 @@ const PrestacaoContasApp = {
           <tbody>${corpo}</tbody>
         </table>
       </div>`;
+  },
+
+  chaveConta(codigo) {
+    const dotted = this.formatAccountCode(codigo);
+    const partes = String(dotted || "").split(".").map(p => String(p).replace(/\D/g, "")).filter(Boolean);
+    if (!partes.length) return "";
+    return partes.map(p => String(Number(p))).join(".");
+  },
+
+  codigoDoNo(g) {
+    const m = String((g && (g.code || g.name)) || "").match(/^(\d+(?:\.\d+)*)/);
+    return m ? m[1] : "";
+  },
+
+  mapaContaNo() {
+    const accToNode = {};
+    const prefixos = [];
+    ((this.visao().groups) || []).forEach(g => {
+      if (!g || g.type === "formula") return;
+      const cod = this.codigoDoNo(g);
+      const chave = this.chaveConta(cod);
+      if (chave) prefixos.push({ chave, id: g.id });
+      (g.accounts || []).forEach(id => {
+        const sid = String(id || "").trim();
+        if (!sid) return;
+        accToNode[sid] = g.id;
+        const nk = this.normAccountKey(sid);
+        if (nk) accToNode[nk] = g.id;
+        const dotted = this.formatAccountCode(sid);
+        if (dotted) accToNode[dotted] = g.id;
+      });
+    });
+    prefixos.sort((a, b) => b.chave.length - a.chave.length);
+    return { accToNode, prefixos };
+  },
+
+  arvorePlano(rows) {
+    const groups = ((this.visao().groups) || []).filter(g => g && g.type !== "formula").map(g => ({
+      id: g.id,
+      parentId: g.parentId || "",
+      code: this.codigoDoNo(g),
+      name: g.name || "",
+      contas: {}
+    }));
+    const byId = Object.fromEntries(groups.map(g => [g.id, g]));
+    const mapa = this.mapaContaNo();
+    const achar = (codigo) => {
+      const raw = String(codigo || "").trim();
+      if (!raw || raw === "—") return "";
+      const nk = this.normAccountKey(raw);
+      const direto = mapa.accToNode[raw] || (nk && mapa.accToNode[nk]) || "";
+      if (direto) return direto;
+      const chave = this.chaveConta(raw);
+      if (!chave) return "";
+      const hit = mapa.prefixos.find(p => chave === p.chave || chave.startsWith(p.chave + "."));
+      return hit ? hit.id : "";
+    };
+    const soltas = { id: "_soltas", parentId: "", code: "", name: "Sem conta no plano", contas: {} };
+    (rows || []).forEach(r => {
+      const principal = (r.contas || []).filter(c => c && c.codigo && c.codigo !== "—")
+        .slice().sort((a, b) => (Number(b.valor) || 0) - (Number(a.valor) || 0))[0];
+      const nid = principal ? achar(principal.codigo) : "";
+      const node = (nid && byId[nid]) || soltas;
+      const cod = principal ? String(principal.codigo) : "—";
+      const bucket = node.contas[cod] || (node.contas[cod] = {
+        codigo: cod, nome: principal ? (principal.nome || "") : "", rows: [], amount: 0, fora: 0
+      });
+      if (principal && principal.nome) bucket.nome = principal.nome;
+      bucket.rows.push(r);
+      bucket.amount += Number(r.total) || 0;
+      if (r.status === "fora") bucket.fora += 1;
+    });
+    const keep = new Set();
+    groups.forEach(g => {
+      if (!Object.keys(g.contas).length) return;
+      keep.add(g.id);
+      let cur = g;
+      while (cur && cur.parentId && byId[cur.parentId]) {
+        keep.add(cur.parentId);
+        cur = byId[cur.parentId];
+      }
+    });
+    const nos = groups.filter(g => keep.has(g.id));
+    if (Object.keys(soltas.contas).length) nos.push(soltas);
+    const roll = (node) => {
+      const kids = nos.filter(c => c.parentId === node.id);
+      let amount = 0, n = 0, fora = 0;
+      Object.values(node.contas).forEach(b => {
+        amount += b.amount;
+        n += b.rows.length;
+        fora += b.fora;
+      });
+      kids.forEach(ch => {
+        const t = roll(ch);
+        amount += t.amount;
+        n += t.n;
+        fora += t.fora;
+      });
+      node.amount = amount;
+      node.n = n;
+      node.fora = fora;
+      return { amount, n, fora };
+    };
+    const ordem = (a, b) => String(a.code || a.codigo || "").localeCompare(String(b.code || b.codigo || ""), "pt-BR", { numeric: true });
+    const raizes = nos.filter(g => !g.parentId || !nos.some(x => x.id === g.parentId)).sort(ordem);
+    raizes.forEach(roll);
+    return { nos, raizes };
+  },
+
+  grupoHtml(node, nos, level, cor) {
+    const aberto = this.gruposAbertos.has(node.id);
+    const kids = nos.filter(c => c.parentId === node.id)
+      .sort((a, b) => String(a.code).localeCompare(String(b.code), "pt-BR", { numeric: true }));
+    const contas = Object.values(node.contas)
+      .sort((a, b) => String(a.codigo).localeCompare(String(b.codigo), "pt-BR", { numeric: true }));
+    const pad = level * 16;
+    const fora = node.fora
+      ? `<span class="pcx-selo is-fora">${node.fora} fora</span>`
+      : "";
+    let html = `<tr class="pcx-grupo" onclick="PrestacaoContasApp.toggleGrupo('${this.esc(node.id)}')">
+      <td colspan="6">
+        <span class="pcx-grupo-nome" style="padding-left:${pad}px">
+          <i data-lucide="${aberto ? "chevron-down" : "chevron-right"}" class="pcx-chev"></i>
+          <strong>${this.esc(node.name)}</strong>
+          <span class="pcx-mute">${node.n} lançamento(s)</span>
+        </span>
+      </td>
+      <td class="is-right pcx-valor" style="color:${cor};">${this.fmt(node.amount)}</td>
+      <td>${fora}</td>
+    </tr>`;
+    if (!aberto) return html;
+    kids.forEach(ch => { html += this.grupoHtml(ch, nos, level + 1, cor); });
+    contas.forEach(b => {
+      const cid = node.id + "|" + b.codigo;
+      const a2 = this.gruposAbertos.has(cid);
+      html += `<tr class="pcx-grupo is-conta" onclick="PrestacaoContasApp.toggleGrupo('${this.esc(cid)}')">
+        <td colspan="6">
+          <span class="pcx-grupo-nome" style="padding-left:${pad + 16}px">
+            <i data-lucide="${a2 ? "chevron-down" : "chevron-right"}" class="pcx-chev"></i>
+            <span class="pcx-cod">${this.esc(b.codigo)}</span>
+            <strong>${this.esc(b.nome || "Conta")}</strong>
+            <span class="pcx-mute">${b.rows.length}</span>
+          </span>
+        </td>
+        <td class="is-right pcx-valor" style="color:${cor};">${this.fmt(b.amount)}</td>
+        <td>${b.fora ? `<span class="pcx-selo is-fora">${b.fora} fora</span>` : ""}</td>
+      </tr>`;
+      if (a2) b.rows.forEach(r => { html += this.confLinhaHtml(r, cor); });
+    });
+    return html;
   },
 
   confLinhaHtml(r, cor) {

@@ -139,22 +139,6 @@ const DocumentosSiengeApp = {
     return this.items.filter((d) => (this.inativos || d.ativo) && (!q || fold(`${d.id} ${d.nome}`).includes(q)));
   },
 
-  renderStatus() {
-    const el = document.getElementById("dsg-kpis");
-    if (!el) return;
-    const ativos = this.items.filter((d) => d.ativo);
-    const exigem = ativos.filter((d) => this.exigeCiencia(d.id)).length;
-    const kpi = (rot, val, cls) => `
-      <div class="ppcc-kpi">
-        <span class="ppcc-kpi-rot">${rot}</span>
-        <span class="ppcc-kpi-val${cls ? " " + cls : ""}">${val}</span>
-      </div>`;
-    el.innerHTML = this.loading && !this.items.length
-      ? kpi("Documentos", "…")
-      : kpi("Documentos ativos", ativos.length) +
-        kpi("Exigem ciência", exigem, "is-pos");
-  },
-
   renderTable() {
     const tbody = document.getElementById("dsg-tbody");
     if (!tbody) return;
@@ -173,7 +157,6 @@ const DocumentosSiengeApp = {
         <td>${sienge}</td>
       </tr>`;
     }).join("") : `<tr><td colspan="3" class="dsg-vazio">${this.loading ? "Carregando…" : this.esc(this.error || "Nenhum documento encontrado.")}</td></tr>`;
-    this.renderStatus();
   },
 
   render() {
@@ -197,13 +180,6 @@ const DocumentosSiengeApp = {
             </button>
           </div>
         </div>
-        <div class="ppcc-head">
-          <div>
-            <div class="ppcc-titulo">Ciência no título a pagar</div>
-            <div class="ppcc-sub">A ciência é dada no Sienge antes da autorização do título. Quais documentos exigem ciência vem do cadastro de documentos do Sienge e vale para o Gerar Pagamento.</div>
-          </div>
-          <div class="ppcc-kpis" id="dsg-kpis"></div>
-        </div>
         ${this.semAcesso ? `<div class="dsg-aviso">
           <i data-lucide="shield-alert" style="width:18px;height:18px;flex-shrink:0;"></i>
           <div>
@@ -218,7 +194,7 @@ const DocumentosSiengeApp = {
             <thead><tr>
               <th>Código</th>
               <th>Documento</th>
-              <th>Ciência no título a pagar</th>
+              <th>Exige ciência</th>
             </tr></thead>
             <tbody id="dsg-tbody"></tbody>
           </table>

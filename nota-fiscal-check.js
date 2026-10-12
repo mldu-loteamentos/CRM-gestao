@@ -115,7 +115,93 @@ window.NotaFiscalCheck = {
   },
 
   ehServico(docId, docNome) {
-    return /^(nfs|nfse|nfts|nfsa|rpa|nfps)/i.test(String(docId || "").trim()) || /servi[cç]o/i.test(String(docNome || ""));
+    const id = String(docId || "").trim();
+    if (/^nfj$/i.test(id) || /colaboradores?\s+pj/i.test(String(docNome || ""))) return true;
+    return /^(nfs|nfse|nfts|nfsa|rpa|nfps)/i.test(id) || /servi[cç]o/i.test(String(docNome || ""));
+  },
+
+  /** NFS e NFJ (nota interna de colaborador PJ). As outras espécies não entram nessa aba. */
+  ehNfsOuNfj(docId, docNome) {
+    const id = String(docId || "").replace(/[^a-z0-9]/gi, "").toUpperCase();
+    if (id === "NFS" || id === "NFSE" || id === "NFJ") return true;
+    const nome = String(docNome || "");
+    return /colaboradores?\s+pj/i.test(nome) || /nota fiscal de servi/i.test(nome);
+  },
+
+  flagSim(v) {
+    return v === true || v === 1 || v === "1" || v === "S" || v === "s" || v === "true" || v === "SIM";
+  },
+
+  /** Credor pessoa jurídica marcado como colaborador (ou funcionário) no Sienge. */
+  ehColaboradorPj(c) {
+    if (!c || typeof c !== "object") return false;
+    const tipo = String(c.personType || c.type || "").toUpperCase();
+    const doc = String(c.cnpj || c.cpf || c.registerNumber || c.cpfCnpj || "").replace(/\D/g, "");
+    const pj = tipo === "J" || tipo.includes("JUR") || doc.length === 14;
+    if (!pj) return false;
+    const tipos = JSON.stringify(c.types || c.creditorTypes || c.typeDescriptions || "").toLowerCase();
+    if (/colabor/.test(tipos)) return true;
+    if (this.flagSim(c.collaborator) || this.flagSim(c.colaborador) || this.flagSim(c.isCollaborator)) return true;
+    if (this.flagSim(c.employee) || this.flagSim(c.funcionario) || this.flagSim(c.isEmployee)) return true;
+    return false;
+  },
+
+  normNumeroNota(v) {
+    return String(v || "").replace(/\D/g, "").replace(/^0+/, "");
+  },
+
+  /** NFE fica à parte. NFS, NFSE e NFJ são a mesma nota de serviço. */
+  especieNota(id) {
+    const d = String(id || "").replace(/[^a-z0-9]/gi, "").toUpperCase();
+    if (d === "NFE") return "NFE";
+    if (d === "NFS" || d === "NFSE" || d === "NFJ" || d === "NFTS" || d === "NFPS") return "NFS";
+    return "";
+  },
+
+  escolherNotaExistente(lista, o) {
+    const companyId = String(o.companyId || "");
+    const supplierId = String(o.supplierId || "");
+    const alvo = o.alvo;
+    return (lista || []).find((n) => {
+      if (!n) return false;
+      if (String(n.companyId || "") !== companyId) return false;
+      if (String(n.supplierId || "") !== supplierId) return false;
+      if (this.normNumeroNota(n.number) !== alvo) return false;
+      if (n.documentId && !this.especieNota(n.documentId)) return false;
+      return true;
+    }) || null;
+  },
+
+  textoNotaExistente(n, extra) {
+    const x = extra || {};
+    const doc = String((n && n.documentId) || x.documento || "Nota").toUpperCase();
+    const num = (n && n.number) || x.numero || "";
+    const emp = (n && n.companyId) || x.companyId || "";
+    const seq = n && n.sequentialNumber ? `, sequencial ${n.sequentialNumber}` : "";
+    const tit = n && n.billId ? `, título ${n.billId}` : "";
+    return `A ${doc} ${num} já está no Sienge para a empresa ${emp} e este credor${seq}${tit}. O envio foi recusado.`;
+  },
+
+  /** Nota já lançada: mesma empresa tomadora, mesmo credor e mesmo número de NFE, NFS ou NFJ. */
+  async notaExistente(o) {
+    const companyId = String((o && o.companyId) || "").trim();
+    const supplierId = String((o && o.supplierId) || "").trim();
+    const numero = String((o && o.numero) || "").trim();
+    const alvo = this.normNumeroNota(numero);
+    if (!companyId || !supplierId || !alvo) return null;
+    if (typeof window.siengeFetchWithRetry !== "function") throw new Error("API do Sienge indisponível");
+    const pedidos = [numero];
+    if (alvo !== numero) pedidos.push(alvo);
+    const vistos = [];
+    for (const n of pedidos) {
+      const path = `/purchase-invoices?companyId=${encodeURIComponent(companyId)}&supplierId=${encodeURIComponent(supplierId)}&number=${encodeURIComponent(n)}&limit=50`;
+      const res = await window.siengeFetchWithRetry(path, 1);
+      const rows = Array.isArray(res) ? res : ((res && (res.results || res.data)) || []);
+      vistos.push.apply(vistos, rows);
+      const hit = this.escolherNotaExistente(vistos, { companyId, supplierId, alvo, documento: o.documento });
+      if (hit) return hit;
+    }
+    return null;
   },
 
   /* ---------- cache ---------- */
@@ -780,6 +866,15 @@ window.NotaFiscalCheck = {
     const mercadoria = /<infNFe[\s>]/i.test(xml);
 
     const credorDoc = this.digits(o.credorDoc);
+    if (o.cadastro) r.cadastro = true;
+    const prestDoc = this.digits(nota.cnpjPrestador || (Array.isArray(nota.cnpjs) ? nota.cnpjs[0] : ""));
+    if (credorDoc.length >= 11 && prestDoc.length >= 11 && prestDoc !== credorDoc) {
+      add("emitente", "erro", `O prestador da nota é ${this.docFmt(prestDoc)}, e o credor do pedido é ${this.docFmt(credorDoc)}${o.credorNome ? " (" + o.credorNome + ")" : ""}.`);
+    } else if (credorDoc.length >= 11 && prestDoc.length >= 11) {
+      add("emitente", "ok", `CNPJ do prestador confere com o credor do pedido (${this.docFmt(credorDoc)}${o.credorNome ? ", " + o.credorNome : ""}).`);
+    } else if (o.cadastro && credorDoc.length >= 11 && !prestDoc) {
+      add("emitente", "aviso", "Não li o CNPJ do prestador na nota. Confira o cadastro do credor ao lado do arquivo.");
+    }
     if (servico && !mercadoria && credorDoc.length === 14) {
       let empresa = null;
       try { empresa = await this.receita(credorDoc); } catch (e) {
@@ -790,27 +885,33 @@ window.NotaFiscalCheck = {
         const falso = { impostos: [], avisos: [], erros: [], infos: [], bruto: Number(nota.valorServico != null ? nota.valorServico : nota.valor) || 0, regime: null, atividade: "" };
         this.avaliarAtividade(falso, { empresa }, nota.descricao || nota.codigo ? nota : null);
         r.atividade = falso.atividade || "";
+        if (o.cadastro) {
+          falso.avisos = falso.avisos.filter((t) => /CNAE|atividade|situa/i.test(t));
+          falso.infos = falso.infos.filter((t) => /CNAE|atividade|regime/i.test(t));
+        }
         const grupoMsg = (t) => /CNAE|atividade da nota/i.test(t) ? "cnae" : "impostos";
         falso.avisos.forEach((t) => add(grupoMsg(t), "aviso", t));
         falso.infos.forEach((t) => add(grupoMsg(t), "info", t));
         if (r.atividade && !falso.atividadeConflito) add("cnae", "ok", `Atividade da nota (${r.atividade}${falso.servicoLc ? `, item ${falso.servicoLc}` : ""}) cabe no CNAE do credor.`);
-        else if (!r.atividade && empresa.cnae) add("cnae", "ok", `CNAE ${this.cnaeFmt(empresa.cnae)} (${empresa.cnaeDesc || "sem descrição"}). A descrição da nota não caiu numa atividade com retenção obrigatória.`);
+        else if (!r.atividade && empresa.cnae) add("cnae", "ok", `CNAE ${this.cnaeFmt(empresa.cnae)} (${empresa.cnaeDesc || "sem descrição"}).`);
       }
-      if (nota.aliquotaIss != null && nota.aliquotaIss > 0 && (nota.aliquotaIss < 2 - 0.001 || nota.aliquotaIss > 5 + 0.001)) {
+      if (!o.cadastro && nota.aliquotaIss != null && nota.aliquotaIss > 0 && (nota.aliquotaIss < 2 - 0.001 || nota.aliquotaIss > 5 + 0.001)) {
         add("impostos", "aviso", `Alíquota de ISS ${this.pct(nota.aliquotaIss)} fora do intervalo legal de 2% a 5%.`);
-      } else if (nota.aliquotaIss != null && nota.aliquotaIss > 0) {
+      } else if (!o.cadastro && nota.aliquotaIss != null && nota.aliquotaIss > 0) {
         add("impostos", "ok", `Alíquota de ISS ${this.pct(nota.aliquotaIss)} dentro de 2% a 5%.`);
       }
-      if (nota.baseIss && nota.aliquotaIss && nota.valorIss != null && Math.abs(nota.baseIss * nota.aliquotaIss / 100 - nota.valorIss) > this.TOL) {
+      if (!o.cadastro && nota.baseIss && nota.aliquotaIss && nota.valorIss != null && Math.abs(nota.baseIss * nota.aliquotaIss / 100 - nota.valorIss) > this.TOL) {
         add("impostos", "aviso", `ISS da nota não fecha: base ${this.money(nota.baseIss)} × ${this.pct(nota.aliquotaIss)} = ${this.money(nota.baseIss * nota.aliquotaIss / 100)}, e a nota mostra ${this.money(nota.valorIss)}.`);
       }
-      const pcc = (nota.csrf || 0) > 0 ? nota.csrf : (nota.pis || 0) + (nota.cofins || 0) + (nota.csll || 0);
-      const ret = nota.totalRetencoes != null ? nota.totalRetencoes : Math.round((((nota.issRetido ? nota.valorIss : 0) || 0) + (nota.irrf || 0) + (nota.inss || 0) + pcc) * 100) / 100;
-      if (ret > this.TOL) add("impostos", "ok", `Retenções lidas na nota: ${this.money(ret)}.`);
-      if (nota.valorServico != null && nota.liquido != null && ret != null && Math.abs(nota.valorServico - ret - nota.liquido) > this.TOL) {
-        add("impostos", "aviso", `Serviço ${this.money(nota.valorServico)} − retenções ${this.money(ret)} não fecha com o líquido ${this.money(nota.liquido)}.`);
+      if (!o.cadastro) {
+        const pcc = (nota.csrf || 0) > 0 ? nota.csrf : (nota.pis || 0) + (nota.cofins || 0) + (nota.csll || 0);
+        const ret = nota.totalRetencoes != null ? nota.totalRetencoes : Math.round((((nota.issRetido ? nota.valorIss : 0) || 0) + (nota.irrf || 0) + (nota.inss || 0) + pcc) * 100) / 100;
+        if (ret > this.TOL) add("impostos", "ok", `Retenções lidas na nota: ${this.money(ret)}.`);
+        if (nota.valorServico != null && nota.liquido != null && ret != null && Math.abs(nota.valorServico - ret - nota.liquido) > this.TOL) {
+          add("impostos", "aviso", `Serviço ${this.money(nota.valorServico)} − retenções ${this.money(ret)} não fecha com o líquido ${this.money(nota.liquido)}.`);
+        }
       }
-    } else if (mercadoria) {
+    } else if (mercadoria && !o.cadastro) {
       add("servico", "info", "Nota de mercadoria: a retenção de serviço e o CNAE do prestador não se aplicam. A conciliação é item a item com o pedido.");
     }
     if (nota.descricao) add("servico", "info", `Descrição: ${String(nota.descricao).replace(/\s+/g, " ").trim().slice(0, 220)}`);
@@ -853,11 +954,23 @@ window.NotaFiscalCheck = {
     }
     r.enderecoNota = this.fmtEndereco(endNota);
 
-    let itensNota = xml ? this.itensDoXml(xml) : [];
-    if (!itensNota.length && (nota.descricao || nota.valorServico != null || nota.valor != null)) {
+    const pedido = (o.itensPedido || []).filter((it) => it && (it.descricao || it.valor));
+    if (o.cadastro) {
+      const soma = pedido.reduce((acc, p) => acc + (Number(p.valor) || 0), 0);
+      const vNota = nota.valorServico != null ? nota.valorServico : nota.valor;
+      if (vNota != null && soma > 0 && Math.abs(vNota - soma) > Math.max(0.05, soma * 0.01)) {
+        add("pedido", "aviso", `Valor da nota (${this.money(vNota)}) diferente do total do pedido (${this.money(soma)}).`);
+      } else if (vNota != null && soma > 0) {
+        add("pedido", "ok", `Valor da nota confere com o pedido (${this.money(vNota)}).`);
+      }
+      if (nota.numero) add("servico", "ok", `Número da nota: ${nota.numero}.`);
+      if (nota.emissao) add("servico", "info", `Emissão: ${nota.emissao}.`);
+      if (nota.serie) add("servico", "info", `Série: ${nota.serie}.`);
+    }
+    let itensNota = o.cadastro ? [] : (xml ? this.itensDoXml(xml) : []);
+    if (!o.cadastro && !itensNota.length && (nota.descricao || nota.valorServico != null || nota.valor != null)) {
       itensNota = [{ descricao: nota.descricao || "Serviço da nota", qtd: 1, valor: nota.valorServico != null ? nota.valorServico : nota.valor, unidade: "" }];
     }
-    const pedido = (o.itensPedido || []).filter((it) => it && (it.descricao || it.valor));
     const usados = new Set();
     itensNota.forEach((n) => {
       let melhor = -1;
@@ -891,9 +1004,9 @@ window.NotaFiscalCheck = {
       }
       r.itens.push(linha);
     });
-    if (itensNota.length && r.itens.every((l) => l.ok)) add("pedido", "ok", `${r.itens.length} item(ns) da nota conciliado(s) com o pedido.`);
-    else if (!itensNota.length) add("pedido", "info", "Não li itens discriminados na nota para cruzar com o pedido.");
-    pedido.forEach((p, i) => {
+    if (!o.cadastro && itensNota.length && r.itens.every((l) => l.ok)) add("pedido", "ok", `${r.itens.length} item(ns) da nota conciliado(s) com o pedido.`);
+    else if (!o.cadastro && !itensNota.length) add("pedido", "info", "Não li itens discriminados na nota para cruzar com o pedido.");
+    if (!o.cadastro) pedido.forEach((p, i) => {
       if (!usados.has(i)) add("pedido", "info", `Item do pedido sem correspondente nesta nota: ${(p.descricao || "item").slice(0, 80)}.`);
     });
 
@@ -905,7 +1018,7 @@ window.NotaFiscalCheck = {
 
   painelEnvio(r) {
     if (!r) return "";
-    if (r.carregando) return `<p class="inf-muted">Analisando itens, CNAE, retenções, alíquotas e endereço do tomador…</p>`;
+    if (r.carregando) return `<p class="inf-muted">${r.cadastro ? "Conferindo o cadastro da nota, do pedido, do tomador e do prestador…" : "Analisando itens, CNAE, retenções, alíquotas e endereço do tomador…"}</p>`;
     return this.blocosHtml(r, {});
   },
 
@@ -929,7 +1042,7 @@ window.NotaFiscalCheck = {
       ${bloco("Dados do emitente", grupos.emitente, emitenteExtra)}
       ${bloco("Dados do tomador", grupos.tomador, tomadorEnd)}
       ${bloco("Dados do serviço", grupos.servico, x.servico || "")}
-      ${bloco("Validação de impostos", grupos.impostos, "")}
+      ${r && r.cadastro ? "" : bloco("Validação de impostos", grupos.impostos, "")}
       ${bloco("Validação de CNAE", grupos.cnae, "")}
       ${bloco("Validação do pedido", [].concat(grupos.pedido || [], x.pedido || []), tabela)}
     </div>`;

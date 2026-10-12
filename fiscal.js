@@ -422,6 +422,264 @@ const FiscalApp = {
     });
   },
 
+  /* ---------- bases do plano (mesma marcação do DFC) ---------- */
+  basesPadrao() {
+    return [
+      { id: "Base para Vendas de Lote", titulo: "Base de receita de venda de lotes" },
+      { id: "Base para Receita de Serviços", titulo: "Base para receita de serviços" },
+      { id: "Base para Aplicações Financeiras", titulo: "Base para aplicações financeiras" },
+      { id: "Base de Dedução", titulo: "Base de deduções" }
+    ];
+  },
+
+  listaBases() {
+    const out = this.basesPadrao().slice();
+    const seen = new Set(out.map((b) => b.id));
+    const extras = [];
+    try {
+      const custom = JSON.parse(localStorage.getItem("crm_impostos_custom") || "null");
+      if (Array.isArray(custom)) extras.push(...custom);
+    } catch (e) {}
+    if (window.PlanoFinanceiroApp && Array.isArray(PlanoFinanceiroApp.taxBases)) extras.push(...PlanoFinanceiroApp.taxBases);
+    Object.values(this.taxConfig()).forEach((tag) => extras.push(tag));
+    extras.forEach((nome) => {
+      const id = String(nome || "").trim();
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      out.push({ id, titulo: id });
+    });
+    return out;
+  },
+
+  normConta(id) {
+    const FC = window.FluxoCaixaApp;
+    if (FC && typeof FC.normAccountKey === "function") return FC.normAccountKey(id);
+    return String(id || "").replace(/\D/g, "");
+  },
+
+  codigoConta(catOrId) {
+    const PF = window.PlanoFinanceiroApp;
+    const FC = window.FluxoCaixaApp;
+    if (catOrId && typeof catOrId === "object" && PF && typeof PF.formatAccountCode === "function" && PF.categories && PF.categories.length) {
+      return PF.formatAccountCode(catOrId);
+    }
+    const id = catOrId && typeof catOrId === "object" ? catOrId.id : catOrId;
+    if (FC && typeof FC.formatAccountCode === "function") return FC.formatAccountCode(id);
+    return String(id || "");
+  },
+
+  async garantirContasDfc() {
+    const PF = window.PlanoFinanceiroApp;
+    const FC = window.FluxoCaixaApp;
+    if (PF && PF.categories && PF.categories.length) {
+      if (FC) FC.categories = PF.categories;
+      return PF.categories;
+    }
+    if (FC && FC.categories && FC.categories.length) {
+      if (PF) {
+        PF.categories = FC.categories;
+        if (typeof PF.buildAccountTreeMeta === "function") PF.buildAccountTreeMeta();
+      }
+      return PF && PF.categories ? PF.categories : FC.categories;
+    }
+    if (!window.SiengeApiService || typeof SiengeApiService.getPaymentCategories !== "function") return [];
+    const cats = await SiengeApiService.getPaymentCategories();
+    const list = (cats || []).map((c) => ({
+      ...c,
+      name: c.name || c.description || c.financialCategoryName || "",
+      tpConta: c.tpConta || c.type || c.financialCategoryType || ""
+    }));
+    if (FC) FC.categories = list;
+    if (PF) {
+      PF.categories = list;
+      if (typeof PF.buildAccountTreeMeta === "function") PF.buildAccountTreeMeta();
+    }
+    return (PF && PF.categories && PF.categories.length) ? PF.categories : list;
+  },
+
+  contasAnaliticas() {
+    const cats = this._contasDfc || [];
+    const pais = new Set(cats.map((c) => c._parentId).filter((id) => id != null && String(id) !== "").map(String));
+    return cats.filter((c) => {
+      const t = String(c.tpConta || c.type || "").toLowerCase();
+      if (t === "t" || t.includes("total") || t.includes("sintet")) return false;
+      if (t === "r" || t.includes("result") || t.includes("analit")) return true;
+      return !pais.has(String(c.id));
+    });
+  },
+
+  contaPorChave(key) {
+    const nk = this.normConta(key);
+    return (this._contasDfc || []).find((c) => String(c.id) === String(key) || (nk && this.normConta(c.id) === nk)) || null;
+  },
+
+  contasDaBase(baseId) {
+    const cfg = this.taxConfig();
+    return Object.keys(cfg).filter((k) => cfg[k] === baseId).map((k) => {
+      const cat = this.contaPorChave(k);
+      return {
+        key: k,
+        code: this.codigoConta(cat || k),
+        name: (cat && (cat.name || cat.description)) || ""
+      };
+    }).sort((a, b) => a.code.localeCompare(b.code, "pt-BR", { numeric: true }));
+  },
+
+  baseDaConta(id) {
+    const cfg = this.taxConfig();
+    const nk = this.normConta(id);
+    const hit = Object.keys(cfg).find((k) => String(k) === String(id) || (nk && this.normConta(k) === nk));
+    return hit ? cfg[hit] : "";
+  },
+
+  sugestoesBase(baseId, q) {
+    const termo = String(q || "").trim().toLowerCase();
+    if (termo.length < 1) return [];
+    const nkQ = this.normConta(termo);
+    return this.contasAnaliticas().filter((c) => {
+      if (this.baseDaConta(c.id) === baseId) return false;
+      const code = this.codigoConta(c).toLowerCase();
+      const nome = String(c.name || "").toLowerCase();
+      const id = String(c.id || "").toLowerCase();
+      if (code.includes(termo) || nome.includes(termo) || id.includes(termo)) return true;
+      return !!(nkQ && this.normConta(c.id).includes(nkQ));
+    }).slice(0, 8);
+  },
+
+  sincronizarPlano(cfg) {
+    localStorage.setItem("crm_plano_impostos", JSON.stringify(cfg));
+    const PF = window.PlanoFinanceiroApp;
+    if (!PF) return;
+    PF.taxConfig = cfg;
+    if (document.getElementById("pf-table-wrapper") && typeof PF.renderTable === "function") {
+      try { PF.renderTable(); } catch (e) {}
+    }
+  },
+
+  gravarBase(cfg) {
+    this.sincronizarPlano(cfg);
+    if (FiscalState.consultou) {
+      FiscalState.aviso = "Bases atualizadas no DFC. Clique em Calcular para refazer os números.";
+      this.render();
+    }
+    this.pintarBases();
+  },
+
+  incluirContaBase(baseId, accountId) {
+    const cfg = this.taxConfig();
+    const nk = this.normConta(accountId);
+    Object.keys(cfg).forEach((k) => {
+      if (String(k) === String(accountId) || (nk && this.normConta(k) === nk)) delete cfg[k];
+    });
+    cfg[String(accountId)] = baseId;
+    if (!this._basesQ) this._basesQ = {};
+    this._basesQ[baseId] = "";
+    this.gravarBase(cfg);
+  },
+
+  removerContaBase(accountKey) {
+    const cfg = this.taxConfig();
+    const nk = this.normConta(accountKey);
+    Object.keys(cfg).forEach((k) => {
+      if (String(k) === String(accountKey) || (nk && this.normConta(k) === nk)) delete cfg[k];
+    });
+    this.gravarBase(cfg);
+  },
+
+  tituloBase(id) {
+    const hit = (this._listaBases || this.listaBases()).find((b) => b.id === id);
+    return hit ? hit.titulo : id;
+  },
+
+  htmlBase(base) {
+    const contas = this.contasDaBase(base.id);
+    const q = (this._basesQ && this._basesQ[base.id]) || "";
+    const itens = contas.length
+      ? contas.map((c) => `<div class="fim-base-item"><span><b class="fim-cod">${this.esc(c.code)}</b> ${this.esc(c.name)}</span><button type="button" class="tvig-ico is-danger" title="Remover" data-fim-rem="${this.esc(c.key)}"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button></div>`).join("")
+      : `<p class="fim-base-vazio">Nenhuma conta nesta base.</p>`;
+    const sug = this.sugestoesBase(base.id, q).map((c) => {
+      const onde = this.baseDaConta(c.id);
+      const nota = onde ? `<span class="fim-base-onde">Está em ${this.esc(this.tituloBase(onde))}. Incluir move para cá.</span>` : "";
+      return `<button type="button" class="fim-base-hit" data-fim-add="${this.esc(c.id)}" data-fim-base="${this.esc(base.id)}"><span><b class="fim-cod">${this.esc(this.codigoConta(c))}</b> ${this.esc(c.name || "")}${nota}</span><em>${onde ? "Mover" : "Incluir"}</em></button>`;
+    }).join("");
+    return `<section class="fim-base">
+      <div class="fim-base-h"><span>${this.esc(base.titulo)}</span><span class="fim-base-n">${contas.length}</span></div>
+      <div class="fim-base-lista">${itens}</div>
+      <div class="fim-base-busca">
+        <input type="text" data-fim-q="${this.esc(base.id)}" value="${this.esc(q)}" placeholder="Buscar conta do DFC pelo código ou pelo nome" autocomplete="off">
+        <div class="fim-base-sug">${sug}</div>
+      </div>
+    </section>`;
+  },
+
+  pintarBases() {
+    const box = document.getElementById("fim-bases-corpo");
+    if (!box) return;
+    const ativo = document.activeElement;
+    const ativoBase = ativo && ativo.getAttribute && ativo.getAttribute("data-fim-q");
+    const pos = ativoBase ? ativo.selectionStart : 0;
+    const lista = this._listaBases || this.listaBases();
+    const aviso = this._contasDfc && this._contasDfc.length ? "" : `<p class="fim-erro">Não encontrei as contas do DFC para a busca. As bases abaixo continuam valendo. Abra o Fluxo de Caixa e tente de novo.</p>`;
+    box.innerHTML = aviso + lista.map((b) => this.htmlBase(b)).join("");
+    if (ativoBase) {
+      const el = [...box.querySelectorAll("[data-fim-q]")].find((n) => n.getAttribute("data-fim-q") === ativoBase);
+      if (el) {
+        el.focus();
+        const p = Math.min(pos || 0, el.value.length);
+        el.setSelectionRange(p, p);
+      }
+    }
+    if (window.lucide) lucide.createIcons();
+  },
+
+  async abrirBases() {
+    const velho = document.getElementById("fim-bases-pop");
+    if (velho) velho.remove();
+    this._basesQ = {};
+    this._listaBases = this.listaBases();
+    const pop = document.createElement("div");
+    pop.id = "fim-bases-pop";
+    pop.className = "fim-pop";
+    pop.innerHTML = `<div class="fim-pop-box fim-bases-box" role="dialog" aria-modal="true">
+      <div class="fim-pop-h"><b>Contas do plano</b><button type="button" class="fim-pop-x" data-fim-fechar="1">×</button></div>
+      <p class="fim-muted" style="margin:0;">As mesmas bases do DFC. Incluir ou remover uma conta aqui atualiza a marcação fiscal do plano.</p>
+      <div id="fim-bases-corpo"><p class="fim-bases-aviso">Buscando as contas do DFC…</p></div>
+    </div>`;
+    pop.addEventListener("click", (ev) => {
+      if (ev.target === pop || ev.target.closest("[data-fim-fechar]")) {
+        this.fecharBases();
+        return;
+      }
+      const add = ev.target.closest("[data-fim-add]");
+      if (add) {
+        this.incluirContaBase(add.getAttribute("data-fim-base"), add.getAttribute("data-fim-add"));
+        return;
+      }
+      const rem = ev.target.closest("[data-fim-rem]");
+      if (rem) this.removerContaBase(rem.getAttribute("data-fim-rem"));
+    });
+    pop.addEventListener("input", (ev) => {
+      const q = ev.target.getAttribute && ev.target.getAttribute("data-fim-q");
+      if (!q) return;
+      this._basesQ[q] = ev.target.value;
+      this.pintarBases();
+    });
+    document.body.appendChild(pop);
+    try {
+      this._contasDfc = await this.garantirContasDfc();
+    } catch (e) {
+      this._contasDfc = [];
+    }
+    const corpo = document.getElementById("fim-bases-corpo");
+    if (!corpo) return;
+    this.pintarBases();
+  },
+
+  fecharBases() {
+    const pop = document.getElementById("fim-bases-pop");
+    if (pop) pop.remove();
+  },
+
   /* ---------- alíquotas ---------- */
   abrirAliquotas() {
     const velho = document.getElementById("fim-ali-pop");
@@ -612,6 +870,22 @@ const FiscalApp = {
       .fim-ali-l input, .fim-ali-l select { height: 36px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0 8px; font-weight: 600; color: #0f172a; }
       .fim-chk { display: flex; gap: 8px; align-items: center; margin: 12px 0; font-size: 0.84rem; color: #0f172a; font-weight: 600; }
       .fim-pop-acoes { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+      .fim-bases-box { width: min(920px, 100%); }
+      .fim-base { border: 1px solid #e2e8f0; border-radius: 10px; margin-top: 12px; overflow: hidden; }
+      .fim-base-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; background: #f7faf8; color: #105436; font-weight: 800; font-size: 0.82rem; }
+      .fim-base-n { font-size: 0.72rem; font-weight: 700; color: #64748b; }
+      .fim-base-lista { display: flex; flex-direction: column; }
+      .fim-base-item, .fim-base-hit { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px 6px 12px; font-size: 0.8rem; color: #1c2e24; }
+      .fim-base-item + .fim-base-item, .fim-base-hit + .fim-base-hit { border-top: 1px solid #eef2f1; }
+      .fim-base-vazio { margin: 0; padding: 8px 12px; color: #94a3b8; font-size: 0.78rem; }
+      .fim-base-busca { padding: 8px 12px 10px; border-top: 1px solid #e8eee9; }
+      .fim-base-busca input { width: 100%; height: 34px; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0 10px; font-size: 0.8rem; color: #0f172a; }
+      .fim-base-busca input:focus { outline: none; border-color: #105436; }
+      .fim-base-hit { width: 100%; border: 0; background: #fff; cursor: pointer; text-align: left; font: inherit; }
+      .fim-base-hit:hover { background: #e7f6ee; }
+      .fim-base-hit em { font-style: normal; font-size: 0.72rem; font-weight: 800; color: #105436; white-space: nowrap; }
+      .fim-base-onde { display: block; font-size: 0.68rem; color: #64748b; font-weight: 600; }
+      .fim-bases-aviso { margin: 8px 0 0; font-size: 0.78rem; color: #64748b; }
       .fim-acao input[type="file"] { display: none; }
       @media (max-width: 900px) { .fim-cards, .fim-ali-grid, .fim-form { grid-template-columns: 1fr; } }`;
   },
@@ -659,7 +933,7 @@ const FiscalApp = {
         </div>
         <div class="cc-toolbar-actions">
           <button type="button" class="btn btn-outline fim-btn" onclick="FiscalApp.abrirAliquotas()"><i data-lucide="sliders-horizontal"></i> Alíquotas</button>
-          <button type="button" class="btn btn-outline fim-btn" onclick="switchTab('plano-financeiro')"><i data-lucide="list-tree"></i> Contas do plano</button>
+          <button type="button" class="btn btn-outline fim-btn" onclick="FiscalApp.abrirBases()"><i data-lucide="list-tree"></i> Contas do plano</button>
           <button type="button" class="btn btn-outline fim-btn" onclick="FiscalApp.gerarPdf()" ${FiscalState.consultou ? "" : "disabled"}><i data-lucide="file-down"></i> Resumo em PDF</button>
           <button type="button" class="btn btn-excel fim-btn-excel" onclick="FiscalApp.exportarExcel()" ${FiscalState.consultou ? "" : "disabled"} title="Exportar a memória de cálculo para Excel">
             <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel

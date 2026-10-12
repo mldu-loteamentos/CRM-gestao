@@ -214,6 +214,30 @@ ComprasControleApp.autorizacaoRotulo = function (aut) {
   return { texto: "Sim", title: "Autorizado no Sienge", cls: "cprev-tag-pago" };
 };
 
+/** Nota já lançada no Sienge (a inserção é a validação fiscal) ligada a este título. */
+ComprasControleApp.notaValidadaDoTitulo = function (row) {
+  const lista = this._filaFiscal || [];
+  if (!row || !lista.length) return null;
+  const titulo = String(row.titulo || "");
+  const num = String(row.documento || "").replace(/\D/g, "");
+  const servico = !!(window.NotaFiscalCheck && NotaFiscalCheck.ehNfsOuNfj(row.docId, row.docNome));
+  return lista.find((x) => {
+    if (!x || x.status !== "lancada") return false;
+    if (x.billId && titulo && String(x.billId) === titulo) return true;
+    if (servico && num && String(x.numeroNota || "").replace(/\D/g, "") === num) return true;
+    return false;
+  }) || null;
+};
+
+ComprasControleApp.notaValidadaHtml = function (item) {
+  const quem = item.validadoPor || item.lancadoPor || "fiscal";
+  const quando = item.validadoEm || item.lancadoEm;
+  const data = quando ? new Date(quando).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "";
+  const nota = item.numeroNota ? `NF ${item.numeroNota}` : "A nota";
+  return `<p><strong>${this.esc(nota)}</strong> validada por <strong>${this.esc(quem)}</strong>${data ? " em " + this.esc(data) : ""}.</p>
+    <p>Lançada no Sienge${item.seqSienge ? " · sequencial " + this.esc(item.seqSienge) : ""}${item.billId ? " · título " + this.esc(item.billId) : ""}.</p>`;
+};
+
 /** PPC em aberto ou em previsão pode ir ao fiscal quando o pedido está autorizado. */
 ComprasControleApp.chaveEnvioFiscal = function (row) {
   if (!row || this.statusDe(row) === "pago") return "";
@@ -463,6 +487,7 @@ ComprasControleApp.noteProgress = function (text, ratio) {
   let wrap = box.querySelector(".cfin-load");
   if (!wrap || wrap.getAttribute("data-phase") !== text) {
     box.innerHTML = '<div class="tvig-empty"><div class="cfin-load" data-phase="' + this.esc(text) + '" style="display:flex;flex-direction:column;align-items:center;gap:12px;width:100%;max-width:400px;margin:0 auto;">'
+      + '<div class="loading-spinner" aria-hidden="true"></div>'
       + '<span class="loading-status-text" style="font-weight:500;">' + this.esc(text) + '</span>'
       + '<div style="width:100%;background:#e2e8f0;border-radius:8px;height:10px;overflow:hidden;margin-top:5px;">'
       + '<div class="loading-progress-bar" style="width:0%;height:100%;background:#10b981;transition:width 0.25s linear;"></div>'
@@ -490,7 +515,7 @@ ComprasControleApp.paintBanco = function () {
     text = el.querySelector(".cfin-banco-text");
     fill = el.querySelector(".cfin-banco-fill");
   }
-  text.textContent = "Processamento bancário · " + b.done + " de " + b.total;
+  text.textContent = "Processando o banco…";
   fill.style.width = pct + "%";
 };
 
@@ -1007,7 +1032,13 @@ ComprasControleApp.abrirTituloRow = async function (row) {
     if (typeof window.siengeFetchWithRetry !== "function") throw new Error("A API do Sienge não está disponível nesta tela.");
     const billId = row.titulo;
     const semFiscal = !!row.semFiscal;
-    const impostosP = !semFiscal && window.NotaFiscalCheck && typeof NotaFiscalCheck.impostosDoTitulo === "function"
+    const pago = this.statusDe(row) === "pago";
+    const docIdRow = String(row.docId || "").trim();
+    const docNomeRow = String(row.docNome || "").trim();
+    const pareceServico = !!(window.NotaFiscalCheck && NotaFiscalCheck.ehNfsOuNfj(docIdRow, docNomeRow));
+    if (window.FilaNotasFiscais && typeof this.ouvirFilaFiscal === "function") this.ouvirFilaFiscal();
+    const jaValidada = !pago && pareceServico && this.notaValidadaDoTitulo(row);
+    const impostosP = !semFiscal && !pago && pareceServico && !jaValidada && window.NotaFiscalCheck && typeof NotaFiscalCheck.impostosDoTitulo === "function"
       ? NotaFiscalCheck.impostosDoTitulo(billId).catch(() => [])
       : Promise.resolve([]);
     const [bill, attachments, payment, impostos] = await Promise.all([
@@ -1024,12 +1055,20 @@ ComprasControleApp.abrirTituloRow = async function (row) {
     this._tituloDetalhe.impostos = Array.isArray(impostos) ? impostos : [];
     const docIdFiscal = String(row.docId || (bill && bill.documentIdentificationId) || "").trim();
     const docNomeFiscal = String(row.docNome || (bill && bill.documentIdentificationName) || "").trim();
-    const podeReter = !semFiscal && window.NotaFiscalCheck && !NotaFiscalCheck.semRetencao(docIdFiscal, docNomeFiscal);
+    const notaServico = !!(window.NotaFiscalCheck && NotaFiscalCheck.ehNfsOuNfj(docIdFiscal, docNomeFiscal));
+    const notaValidada = !pago && notaServico && this.notaValidadaDoTitulo(Object.assign({}, row, {
+      documento: row.documento || (bill && bill.documentNumber) || "",
+      docId: docIdFiscal,
+      docNome: docNomeFiscal
+    }));
+    const mostraFiscal = !semFiscal && !pago && notaServico;
+    this._tituloDetalhe.mostraFiscal = mostraFiscal;
+    this._tituloDetalhe.notaValidada = notaValidada;
     const fiscalVelho = row.fiscal && !(row.fiscal.infos || []).some((t) => /\b404\b/.test(String(t)));
-    this._tituloDetalhe.fiscal = podeReter && fiscalVelho ? row.fiscal : null;
-    this._tituloDetalhe.fiscalLoading = !!podeReter && !this._tituloDetalhe.fiscal;
+    this._tituloDetalhe.fiscal = mostraFiscal && !notaValidada && fiscalVelho ? row.fiscal : null;
+    this._tituloDetalhe.fiscalLoading = !!mostraFiscal && !notaValidada && !this._tituloDetalhe.fiscal;
     this.pintarTitulo();
-    if (podeReter) {
+    if (mostraFiscal && !notaValidada) {
       NotaFiscalCheck.analisar({
         billId,
         credorId: row.credorId || (bill && bill.creditorId) || "",
@@ -1298,17 +1337,33 @@ ComprasControleApp.pintarTitulo = function () {
   ];
   if (rateio) etapas.push({ id: "rateio", label: "Rateio", icon: "pie-chart", nivel: rateioNivel, html: bloco("pie-chart", "Rateio por centro de custo", rateioNivel, rateio) });
   if (!det.loading) {
-    etapas.push({ id: "pagamento", label: "Pagamento", icon: "credit-card", nivel: formaNivel, html: bloco("credit-card", "Forma de pagamento programada", formaNivel, forma) });
+    const docIdAba = String(row.docId || (det.bill && det.bill.documentIdentificationId) || "").trim();
+    const docNomeAba = String(row.docNome || (det.bill && det.bill.documentIdentificationName) || "").trim();
+    const mostraFiscal = det.mostraFiscal != null
+      ? !!det.mostraFiscal
+      : (!row.semFiscal && this.statusDe(row) !== "pago" && !!(window.NotaFiscalCheck && NotaFiscalCheck.ehNfsOuNfj(docIdAba, docNomeAba)));
+    const validada = this.statusDe(row) === "pago" ? null : (det.notaValidada || this.notaValidadaDoTitulo(Object.assign({}, row, {
+      docId: docIdAba,
+      docNome: docNomeAba
+    })));
     const nivelImp = det.fiscalLoading && !det.fiscal ? "espera" : (det.fiscal ? (det.fiscal.nivel === "info" ? "aviso" : det.fiscal.nivel) : "");
     const rank = { erro: 6, negada: 6, aviso: 5, sem: 5, info: 4, analise: 3, espera: 2, ok: 1 };
-    const nivelAba = (rank[nivelImp] || 0) >= (rank[fiscalNivel] || 0) ? nivelImp : fiscalNivel;
-    if (!row.semFiscal) etapas.push({
+    const nivelAba = validada ? "ok" : ((rank[nivelImp] || 0) >= (rank[fiscalNivel] || 0) ? nivelImp : fiscalNivel);
+    if (mostraFiscal && validada) etapas.push({
+      id: "fiscal",
+      label: "Validado",
+      icon: "badge-check",
+      nivel: "ok",
+      html: bloco("badge-check", "Validado", "ok", this.notaValidadaHtml(validada))
+    });
+    else if (mostraFiscal) etapas.push({
       id: "fiscal",
       label: "Fiscal",
       icon: "receipt",
       nivel: nivelAba,
       html: bloco("receipt", "Impostos retidos", nivelImp, this.impostosRetidosHtml(det, row)) + (fiscalBloco || "")
     });
+    etapas.push({ id: "pagamento", label: "Pagamento", icon: "credit-card", nivel: formaNivel, html: bloco("credit-card", "Forma de pagamento programada", formaNivel, forma) });
     const temAnexo = (det.attachments || []).length > 0;
     etapas.push({ id: "anexos", label: "Anexos", icon: "paperclip", nivel: temAnexo ? "ok" : "aviso", html: bloco("paperclip", "Anexos", temAnexo ? "ok" : "aviso", `<div class="cfin-titulo-files">${anexos || `<span>Este título não tem anexo.</span>`}</div>`) });
     if (autBloco) etapas.push({ id: "autorizacao", label: contrato ? "Contrato" : "Autorização", icon: "badge-check", nivel: autNivel, html: autBloco });

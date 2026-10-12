@@ -276,7 +276,7 @@ const RecebimentosWebroApp = {
     for (let i = 0; i < jobs.length; i++) {
       const job = jobs[i];
       done += 1;
-      if (onStep) onStep("Buscando recebimentos " + done + " de " + jobs.length + "…");
+      if (onStep) onStep("Buscando recebimentos…");
       let data = [];
       try {
         const res = await window.SiengeApiService.getBulkIncome(job.start, job.end, job.id);
@@ -423,7 +423,7 @@ const RecebimentosWebroApp = {
       const cache = new Map();
       for (let i = 0; i < income.length; i++) {
         if (i % 8 === 0) {
-          this.state.status = "Conferindo parcelas Webro " + (i + 1) + " de " + income.length + "…";
+          this.state.status = "Conferindo parcelas Webro…";
           this.render();
         }
         const row = income[i];

@@ -971,7 +971,7 @@
         const docTitle = (titleEl && titleEl.value && (titleEl.value !== titleEl.defaultValue || !titleSalvo) ? titleEl.value : titleSalvo) || cfg.defaultTitle;
         let corpo = this._resolveDocCorpo(cfg, document.getElementById(cfg.corpoId));
         if (!corpo) {
-          alert("O modelo do aditamento não está preenchido. Salve-o em Configurações → Documentos padrões.");
+          alert("O modelo do aditamento não está preenchido. Salve-o em Configurações gerais → Documentos padrões.");
           return;
         }
         corpo = corpo.replace(/^\s*(?:<[^>]+>\s*|[*_]+\s*)*t[ií]tulo\s*:[^\n]*\n*/i, "");

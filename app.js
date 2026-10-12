@@ -3170,7 +3170,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     agenda: "Agenda do Operador",
     zeropaid: "Clientes 0% Pago (Sem Receita)",
     wesend: "Notificações",
-    preambles: "Preâmbulos & Configurações",
+    preambles: "Preâmbulos",
     anexos: "Assistente de Anexos",
     "contas-pagar": "Assistente de Contas a Pagar",
     "gerar-pagamento": "Gerar Pagamento",
@@ -3499,6 +3499,7 @@ function auditActionMeta(action, summary, module) {
   if (key === "LOTE_APROVADO") return { group: "lote", label: "Lote aprovado no Sienge" };
   if (key === "LOTE_ERRO") return { group: "lote", label: "Falha no lote (robô do Sienge)" };
   if (key === "LOTE_EXCLUIDO") return { group: "lote", label: "Lote de pagamento excluído" };
+  if (key === "Validar nota") return { group: "nota", label: "Nota validada pelo fiscal" };
   if (key === "Inserir nota" || key === "NOTA_SIENGE" || /purchase-invoices/.test(blob)) {
     if (/erro|falha/.test(blob)) return { group: "nota", label: "Falha ao lançar nota no Sienge" };
     if (/criada/.test(blob)) return { group: "nota", label: "Nota criada no Sienge" };
@@ -3509,7 +3510,25 @@ function auditActionMeta(action, summary, module) {
     if (/exclu/.test(blob)) return { group: "nota", label: "Envio de nota excluído" };
     return { group: "nota", label: "Nota enviada ao fiscal" };
   }
-  if (key === "Gerar título") return { group: "sienge", label: "Título gerado no Sienge" };
+  if (key === "Gerar título" || key === "Atualizar título" || key === "Excluir título") {
+    const falha = /erro|falha/.test(blob) || String(summary || "").toLowerCase().indexOf("não enviad") !== -1;
+    if (key === "Excluir título") {
+      return { group: "titulo", label: falha ? "Falha ao excluir título no Sienge" : "Título excluído no Sienge" };
+    }
+    if (key === "Atualizar título" || /dados banc|payment-information|forma de pagamento/.test(blob)) {
+      return { group: "titulo", label: falha ? "Falha ao atualizar título no Sienge" : "Título atualizado no Sienge" };
+    }
+    return { group: "titulo", label: falha ? "Falha ao gerar título no Sienge" : "Título gerado no Sienge" };
+  }
+  if (key === "HTTP") {
+    const verbo = blob.match(/\b(post|put|patch|delete)\b/);
+    const tituloPagar = /\/bills\b/.test(blob) && !/attachment|purchase-invoices|overdue-receivable/.test(blob);
+    if (verbo && tituloPagar) {
+      if (verbo[1] === "delete") return { group: "titulo", label: "Título excluído no Sienge" };
+      if (verbo[1] === "patch" || verbo[1] === "put") return { group: "titulo", label: "Título atualizado no Sienge" };
+      return { group: "titulo", label: "Título gerado no Sienge" };
+    }
+  }
   if (key === "ANEXO_ENVIADO") return { group: "anexo", label: "Envio de Anexo" };
   if (key === "ANEXO_ERRO") return { group: "anexo", label: "Falha no envio de anexo" };
   if (key === "CAUCAO_VENCIMENTO" || /vencimento da cau[cç][aã]o/.test(blob)) return { group: "caucao", label: "Vencimento de caução" };
@@ -3893,6 +3912,7 @@ window.renderAuditLogs = async function(forceReload) {
     if (actionFilter === "caucao" && meta.group !== "caucao") return false;
     if (actionFilter === "lote" && meta.group !== "lote") return false;
     if (actionFilter === "nota" && meta.group !== "nota") return false;
+    if (actionFilter === "titulo" && meta.group !== "titulo") return false;
     if (actionFilter === "sienge" && meta.group !== "sienge") return false;
     if (userQ && !auditUserMatches(row, userQ)) return false;
     if (fromTs && !isNaN(fromTs)) {
@@ -9095,23 +9115,12 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
           const el = Math.floor((Date.now() - _st)/1000);
           const _avg = _cTotal * 9; // ~9s por empresa
           
-          const statusText = `Buscando clientes inadimplentes da empresa ${_cName}`;
           const timeText = `Tempo decorrido: ${el}s (Média esperada: ~${_avg}s)`;
           
           const s1 = document.querySelector("#defaulters-table-body .loading-status-text");
           const t1 = document.querySelector("#defaulters-table-body .loading-time-text");
-          if(s1) s1.textContent = statusText;
+          if(s1) s1.textContent = `Buscando clientes inadimplentes · ${_cIdx} de ${_cTotal}`;
           if(t1) t1.textContent = timeText;
-          
-          const s2 = document.querySelector("#subjudice-table-body .loading-status-text");
-          const t2 = document.querySelector("#subjudice-table-body .loading-time-text");
-          if(s2) s2.textContent = statusText;
-          if(t2) t2.textContent = timeText;
-          
-          const s3 = document.querySelector("#zeropaid-table-body .loading-status-text");
-          const t3 = document.querySelector("#zeropaid-table-body .loading-time-text");
-          if(s3) s3.textContent = statusText;
-          if(t3) t3.textContent = timeText;
           
           if (window._loadingProgressData) {
               const ld = window._loadingProgressData;
@@ -26645,13 +26654,12 @@ async function _loadZeroPaidTab_Impl() {
          let pct = _cTotal > 0 ? (Math.max(_cIdx, 1) / _cTotal) * 100 : 0;
          pct = Math.min(Math.round(pct), 99);
          
-         const statusText = `Buscando clientes inadimplentes da empresa ${_cName}`;
          const timeText = `Tempo decorrido: ${el}s (Média esperada: ~${_avg}s)`;
          
          const span = document.querySelector("#zeropaid-table-body .loading-status-text");
          const timeSpan = document.querySelector("#zeropaid-table-body .loading-time-text");
          
-         if (span) span.textContent = statusText;
+         if (span) span.textContent = "Buscando clientes 0% pago…";
          if (timeSpan) timeSpan.textContent = timeText;
          if (timeSpan) timeSpan.textContent = timeText;
          if (searchInput) searchInput.placeholder = `Pesquisando: ${_cName}`;
@@ -43193,7 +43201,7 @@ window.mergeEmpresasCustom = function(localStr, cloudStr) {
         return v === 0 || v === 1 || v === true || v === false || v === "0" || v === "1" || v === "true" || v === "false";
       };
       const newerTouched = Number(newer.updatedAt || 0) > 0;
-      ["spe_socios", "consolidacao_padrao", "gerida_pelo_grupo"].forEach((key) => {
+      ["spe_socios", "consolidacao_padrao", "gerida_pelo_grupo", "gestao_elenco"].forEach((key) => {
         if (flagSet(newer, key) && (newerTouched || !flagSet(older, key))) merged[key] = flagBit(newer[key]);
         else if (flagSet(older, key)) merged[key] = flagBit(older[key]);
       });

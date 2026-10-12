@@ -133,9 +133,7 @@ const ConfigTagsApp = {
 
     root.innerHTML = `
       <style>
-        .tags-page .cc-toolbar { justify-content: space-between; align-items: center; }
-        .tags-page .tags-info { color: #475569; font-size: 0.8rem; margin: 0; max-width: 760px; line-height: 1.45; display: flex; gap: 6px; align-items: flex-start; }
-        .tags-page .tags-info svg { width: 15px; height: 15px; flex: 0 0 15px; color: var(--color-primary); margin-top: 1px; }
+        .tags-page .cc-toolbar { justify-content: flex-end; align-items: center; }
         .tags-page .tags-novo { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px; }
         .tags-page .tags-novo svg { width: 16px; height: 16px; }
         .tags-details-block { margin-bottom: 12px; }
@@ -155,10 +153,6 @@ const ConfigTagsApp = {
       </style>
       <div class="cc-page tags-page">
         <div class="cc-toolbar">
-          <p class="tags-info">
-            <i data-lucide="info"></i>
-            <span>Crie e gerencie as tags que classificam os documentos salvos no cadastro do cliente ou da unidade.</span>
-          </p>
           <button class="btn btn-primary tags-novo" onclick="ConfigTagsApp.showTagModal()"><i data-lucide="plus"></i> Criar TAG</button>
         </div>
 

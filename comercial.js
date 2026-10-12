@@ -160,6 +160,8 @@ const ComercialApp = {
     const btn = document.getElementById('comercial-btn-search');
     if (load) load.style.display = on && !this.state.loaded ? 'flex' : 'none';
     if (content && this.state.loaded) content.style.display = 'block';
+    if (on) this.setLoadProgress(4);
+    else this.stopLoadTicker();
     if (btn) {
       btn.disabled = !!on;
       btn.innerHTML = on
@@ -167,6 +169,31 @@ const ComercialApp = {
         : '<i data-lucide="refresh-cw" style="width:15px;"></i> Atualizar';
       if (window.lucide) window.lucide.createIcons();
     }
+  },
+
+  setLoadProgress(pct) {
+    const bar = document.getElementById('comercial-load-bar');
+    if (!bar) return;
+    const w = Math.max(2, Math.min(100, Number(pct) || 0));
+    bar.style.width = w + '%';
+  },
+
+  startLoadTicker() {
+    this.stopLoadTicker();
+    let pct = 4;
+    this._loadCap = Math.max(this._loadCap || 8, 8);
+    this.setLoadProgress(pct);
+    this._loadTicker = setInterval(() => {
+      const cap = this._loadCap || 8;
+      if (pct >= cap) return;
+      pct = Math.min(cap, pct + Math.max(0.35, (cap - pct) * 0.08));
+      this.setLoadProgress(pct);
+    }, 280);
+  },
+
+  stopLoadTicker() {
+    if (this._loadTicker) clearInterval(this._loadTicker);
+    this._loadTicker = null;
   },
 
   async fetchData(force) {
@@ -179,7 +206,9 @@ const ComercialApp = {
     }
 
     this.state.loading = true;
+    this._loadCap = 8;
     this.setLoading(true);
+    this.startLoadTicker();
 
     try {
       const monthsNeeded = [];
@@ -206,25 +235,32 @@ const ComercialApp = {
         return allResults;
       };
 
+      const totalMeses = Math.max(monthsToFetch.length, 1);
+      let mesesProntos = 0;
       const results = await Promise.all(monthsToFetch.map(async (m) => {
-        const firstDay = `${m.year}-${String(m.month).padStart(2, '0')}-01`;
-        const lastDayObj = new Date(m.year, m.month, 0);
-        const lastDay = `${m.year}-${String(m.month).padStart(2, '0')}-${String(lastDayObj.getDate()).padStart(2, '0')}`;
-        const [vAtivas, vCanceladas, vQuitadas, distratos] = await Promise.all([
-          fetchAllPages(`/sales-contracts?situation=2&initialIssueDate=${firstDay}&finalIssueDate=${lastDay}`),
-          fetchAllPages(`/sales-contracts?situation=3&initialIssueDate=${firstDay}&finalIssueDate=${lastDay}`),
-          fetchAllPages(`/sales-contracts?situation=4&initialIssueDate=${firstDay}&finalIssueDate=${lastDay}`),
-          fetchAllPages(`/sales-contracts?situation=3&initialCancelDate=${firstDay}&finalCancelDate=${lastDay}`)
-        ]);
-        const seen = new Set();
-        const vendas = [];
-        vAtivas.concat(vCanceladas).concat(vQuitadas).forEach((c) => {
-          const id = String(c && c.id != null ? c.id : '');
-          if (!id || seen.has(id)) return;
-          seen.add(id);
-          vendas.push(c);
-        });
-        return { year: m.year, month: m.month, vendas, distratos };
+        try {
+          const firstDay = `${m.year}-${String(m.month).padStart(2, '0')}-01`;
+          const lastDayObj = new Date(m.year, m.month, 0);
+          const lastDay = `${m.year}-${String(m.month).padStart(2, '0')}-${String(lastDayObj.getDate()).padStart(2, '0')}`;
+          const [vAtivas, vCanceladas, vQuitadas, distratos] = await Promise.all([
+            fetchAllPages(`/sales-contracts?situation=2&initialIssueDate=${firstDay}&finalIssueDate=${lastDay}`),
+            fetchAllPages(`/sales-contracts?situation=3&initialIssueDate=${firstDay}&finalIssueDate=${lastDay}`),
+            fetchAllPages(`/sales-contracts?situation=4&initialIssueDate=${firstDay}&finalIssueDate=${lastDay}`),
+            fetchAllPages(`/sales-contracts?situation=3&initialCancelDate=${firstDay}&finalCancelDate=${lastDay}`)
+          ]);
+          const seen = new Set();
+          const vendas = [];
+          vAtivas.concat(vCanceladas).concat(vQuitadas).forEach((c) => {
+            const id = String(c && c.id != null ? c.id : '');
+            if (!id || seen.has(id)) return;
+            seen.add(id);
+            vendas.push(c);
+          });
+          return { year: m.year, month: m.month, vendas, distratos };
+        } finally {
+          mesesProntos += 1;
+          this._loadCap = Math.min(96, 8 + (mesesProntos / totalMeses) * 88);
+        }
       }));
 
       const byKey = new Map((force ? [] : (this.state.rawMonths || [])).map((r) => [`${r.year}-${r.month}`, r]));
@@ -232,6 +268,8 @@ const ComercialApp = {
       this.state.rawMonths = [...byKey.values()].sort((a, b) => a.year - b.year || a.month - b.month);
       this.state.loaded = true;
       this.state.updatedAt = new Date();
+      this.stopLoadTicker();
+      this.setLoadProgress(100);
       this.updateDashboardUI();
     } catch (e) {
       console.error('[ComercialApp] Erro ao buscar dados do dashboard', e);
@@ -288,7 +326,7 @@ const ComercialApp = {
     const selected = new Set(months);
     const produtos = {};
     const cidades = {};
-    const serie = [];
+    const chartSlots = new Map();
     const selectedProd = this.state.selectedProduct || '';
     let vendasPeriodo = 0;
     let distratosPeriodo = 0;
@@ -376,7 +414,7 @@ const ComercialApp = {
       });
 
       if (inChart) {
-        serie.push({
+        chartSlots.set(res.year + '-' + res.month, {
           year: res.year,
           month: res.month,
           label: `${COM_MESES[res.month - 1]}/${String(res.year).slice(2)}`,
@@ -387,6 +425,19 @@ const ComercialApp = {
         });
       }
     });
+
+    const serie = [];
+    const emptySlot = (y, m) => ({
+      year: y,
+      month: m,
+      label: `${COM_MESES[m - 1]}/${String(y).slice(2)}`,
+      vendas: 0,
+      distratos: 0,
+      variacao: 0,
+      produtos: {}
+    });
+    for (let m = 1; m <= 12; m++) serie.push(chartSlots.get((year - 1) + '-' + m) || emptySlot(year - 1, m));
+    for (let m = 1; m <= maxMonth; m++) serie.push(chartSlots.get(year + '-' + m) || emptySlot(year, m));
 
     return {
       year, months, maxMonth, produtos, cidades, serie,
@@ -770,7 +821,7 @@ const ComercialApp = {
   thSort(key, label, cls, rowspan) {
     const on = this.state.sortKey === key;
     const dir = on ? (this.state.sortDir === 'asc' ? ' is-asc' : ' is-desc') : '';
-    return `<th ${rowspan ? 'rowspan="2"' : ''} class="${cls} com-th-sort${on ? ' is-sorted' : ''}${dir}" onclick="ComercialApp.sortProdutos('${key}')" title="Ordenar por ${label}"><span class="com-th-label">${label}</span><span class="com-sort-mark" aria-hidden="true"></span></th>`;
+    return `<th ${rowspan ? 'rowspan="2"' : ''} class="${cls} com-th-sort${on ? ' is-sorted' : ''}${dir}" onclick="ComercialApp.sortProdutos('${key}')" title="Ordenar por ${label}"><span class="com-th-label">${label}</span><i data-lucide="chevrons-up-down" class="com-sort-ico" style="width:11px;height:11px;vertical-align:middle;"></i></th>`;
   },
 
   renderProdutoTable(agg) {
@@ -822,6 +873,7 @@ const ComercialApp = {
     };
     if (!rows.length) {
       tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:#64748b;">Nenhum dado no período.</td></tr>';
+      if (window.lucide) window.lucide.createIcons();
       return;
     }
     let totV = 0, totD = 0, totVY = 0, totDY = 0;
@@ -842,6 +894,7 @@ const ComercialApp = {
         ${num(totV, 'venda')}${num(totD, 'distrato')}${num(totV - totD, 'var')}
         ${num(totVY, 'venda')}${num(totDY, 'distrato')}${num(totVY - totDY, 'var')}
       </tr>`;
+    if (window.lucide) window.lucide.createIcons();
   }
 };
 

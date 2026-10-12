@@ -262,16 +262,18 @@ const SocietarioApp = {
     const kind = ent.kind === "pf" ? "PF" : "PJ";
     const bg = this.nodeColor(ent);
     const kindBg = this.darkenHex(bg, 0.22);
-    const sel = this.selectedId === ent.id ? "box-shadow:0 0 0 3px #f59e0b,0 4px 12px rgba(0,0,0,0.2);" : "box-shadow:0 2px 8px rgba(0,0,0,0.18);";
+    const sel = this.selectedId === ent.id ? " is-selected" : "";
     const x = Number(ent.x) || 40;
     const y = Number(ent.y) || 40;
-    return `<div class="soc-node" data-id="${ent.id}" style="position:absolute;left:${x}px;top:${y}px;width:${this.NODE_W}px;z-index:2;cursor:grab;user-select:none;${sel}">
-      <div class="soc-port" data-id="${ent.id}" title="Arraste até outra caixa para ligar" style="position:absolute;left:50%;top:-8px;transform:translateX(-50%);width:16px;height:16px;border-radius:50%;background:#fff;border:2px solid #105436;cursor:crosshair;z-index:3;"></div>
-      <div class="soc-node-body" style="border-radius:6px;background:${bg};color:#fff;font-weight:800;letter-spacing:0.03em;text-transform:uppercase;padding:${hub ? "12px 10px" : "10px 10px 8px"};font-size:${hub ? "0.92rem" : "0.72rem"};text-align:center;line-height:1.25;">
-        ${this.esc(ent.name)}
-        ${hub ? `<div style="margin-top:4px;font-size:0.6rem;font-weight:700;opacity:0.85;">CENTRO</div>` : `<div style="margin-top:5px;font-size:0.6rem;font-weight:700;opacity:0.9;background:${kindBg};display:inline-block;padding:1px 6px;border-radius:3px;">${kind}</div>`}
+    return `<div class="soc-node${hub ? " is-hub" : ""}${sel}" data-id="${ent.id}" style="left:${x}px;top:${y}px;width:${this.NODE_W}px;">
+      <div class="soc-port" data-id="${ent.id}" title="Arraste até outra caixa para ligar"></div>
+      <div class="soc-node-body" style="background:${bg};">
+        <span class="soc-node-name">${this.esc(ent.name)}</span>
+        ${hub
+          ? `<span class="soc-node-tag">Centro</span>`
+          : `<span class="soc-node-kind" style="background:${kindBg};">${kind}</span>`}
       </div>
-      <div class="soc-port" data-id="${ent.id}" title="Arraste até outra caixa para ligar" style="position:absolute;left:50%;bottom:-8px;transform:translateX(-50%);width:16px;height:16px;border-radius:50%;background:#fff;border:2px solid #105436;cursor:crosshair;z-index:3;"></div>
+      <div class="soc-port soc-port-bottom" data-id="${ent.id}" title="Arraste até outra caixa para ligar"></div>
     </div>`;
   },
 
@@ -301,7 +303,7 @@ const SocietarioApp = {
       parts.push(`<path d="M ${p1.x} ${p1.y} C ${p1.x} ${c1y}, ${p2.x} ${c2y}, ${p2.x} ${p2.y}" fill="none" stroke="${stroke}" stroke-width="${sel ? 3.5 : 2.2}" marker-end="url(#soc-arrow)"/>`);
       const bg = sel ? "#f59e0b" : "#fff";
       const color = sel ? "#1c1917" : "#105436";
-      labelHtml.push(`<button type="button" class="soc-edge-pct" data-link="${link.id}" style="position:absolute;left:${mx}px;top:${my}px;transform:translate(-50%,-50%);z-index:4;border:1px solid #105436;border-radius:12px;padding:2px 8px;font-size:0.72rem;font-weight:800;cursor:pointer;background:${bg};color:${color};pointer-events:auto;">${this.fmtPct(link.pct)}</button>`);
+      labelHtml.push(`<button type="button" class="soc-edge-pct${sel ? " is-selected" : ""}" data-link="${link.id}" style="left:${mx}px;top:${my}px;background:${bg};color:${color};">${this.fmtPct(link.pct)}</button>`);
     });
     if (this._tempLine) {
       parts.push(`<path d="M ${this._tempLine.x1} ${this._tempLine.y1} L ${this._tempLine.x2} ${this._tempLine.y2}" fill="none" stroke="#ea580c" stroke-width="2" stroke-dasharray="6 4"/>`);
@@ -452,21 +454,18 @@ const SocietarioApp = {
     const fromLinks = (this.graph.links || []).filter(l => (l.note || "").trim());
     const list = (this.graph.notes || []).filter(n => n.text);
     if (!fromEntities.length && !fromLinks.length && !list.length) {
-      return `<div style="font-size:0.82rem;color:#64748b;">Nenhuma nota. Clique numa empresa ou use “+ Nota”.</div>`;
+      return `<p class="soc-notes-empty">Nenhuma nota ainda. Clique numa empresa ou em Nota.</p>`;
     }
     const cards = [
-      ...fromEntities.map(e => `<div style="background:#f8fafc;border-left:3px solid #105436;padding:8px 10px;border-radius:4px;font-size:0.8rem;color:#334155;"><strong>${this.esc(e.name)}:</strong> ${this.esc(e.note)}</div>`),
+      ...fromEntities.map(e => `<article class="soc-note soc-note-ent"><strong>${this.esc(e.name)}</strong><span>${this.esc(e.note)}</span></article>`),
       ...fromLinks.map(l => {
         const a = this.entity(l.from);
         const b = this.entity(l.to);
-        return `<div style="background:#f0fdf4;border-left:3px solid #166534;padding:8px 10px;border-radius:4px;font-size:0.8rem;color:#334155;"><strong>${this.esc(a && a.name)} → ${this.esc(b && b.name)} (${this.fmtPct(l.pct)}):</strong> ${this.esc(l.note)}</div>`;
+        return `<article class="soc-note soc-note-link"><strong>${this.esc(a && a.name)} → ${this.esc(b && b.name)} (${this.fmtPct(l.pct)})</strong><span>${this.esc(l.note)}</span></article>`;
       }),
-      ...list.map(n => `<div style="background:#fff7ed;border-left:3px solid #ea580c;padding:8px 10px;border-radius:4px;font-size:0.8rem;color:#334155;display:flex;justify-content:space-between;gap:8px;">
-        <span>${this.esc(n.text)}</span>
-        <button type="button" onclick="SocietarioApp.removeNote('${n.id}')" style="border:none;background:none;color:#9a3412;cursor:pointer;font-weight:700;">×</button>
-      </div>`)
+      ...list.map(n => `<article class="soc-note soc-note-free"><span>${this.esc(n.text)}</span><button type="button" class="soc-note-x" title="Excluir nota" onclick="SocietarioApp.removeNote('${n.id}')">×</button></article>`)
     ];
-    return `<div style="display:grid;gap:8px;">${cards.join("")}</div>`;
+    return `<div class="soc-notes-grid">${cards.join("")}</div>`;
   },
 
   companyOptions(selected) {
@@ -564,16 +563,7 @@ const SocietarioApp = {
         <button type="button" class="btn btn-primary" style="margin-top:8px;" onclick="SocietarioApp.saveNote()">Salvar nota</button>
       `);
     }
-    return `<div style="padding:16px;color:#64748b;font-size:0.85rem;line-height:1.45;">
-      <strong style="color:#105436;">Organograma dinâmico</strong>
-      <ul style="margin:8px 0 0 16px;padding:0;">
-        <li>Arraste as caixas para posicionar.</li>
-        <li>Arraste o pontinho de uma caixa até outra para traçar a ligação.</li>
-        <li>Clique no percentual para editar a participação.</li>
-        <li>Clique na caixa (sem arrastar) para editar a empresa, o tipo PF/PJ e a cor.</li>
-      </ul>
-      <p style="margin:12px 0 0;font-size:0.75rem;color:#94a3b8;">Passe o mouse nos botões do topo para ver o que cada um faz.</p>
-    </div>`;
+    return "";
   },
 
   lbl: "display:flex;flex-direction:column;gap:4px;font-size:0.75rem;font-weight:700;color:#334155;margin-bottom:10px;",
@@ -641,10 +631,10 @@ const SocietarioApp = {
   },
 
   panelWrap(title, inner) {
-    return `<div style="padding:14px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-        <strong style="color:#105436;">${this.esc(title)}</strong>
-        <button type="button" onclick="SocietarioApp.closePanel()" style="border:none;background:none;cursor:pointer;font-size:1.1rem;color:#64748b;">×</button>
+    return `<div class="soc-panel">
+      <div class="soc-panel-head">
+        <strong>${this.esc(title)}</strong>
+        <button type="button" class="soc-panel-x" title="Fechar" onclick="SocietarioApp.closePanel()">×</button>
       </div>
       ${inner}
     </div>`;
@@ -658,46 +648,42 @@ const SocietarioApp = {
     const sx = wrap ? wrap.scrollLeft : 0;
     const sy = wrap ? wrap.scrollTop : 0;
     const size = this.canvasSize();
-    const linkBtn = this.linkMode
-      ? "background:#ea580c;color:#fff;"
-      : "background:#fff;color:#105436;";
+    const linkBtn = this.linkMode ? " is-on" : "";
+    const editing = this.panel && this.panel !== "none";
     root.innerHTML = `
-      <div style="display:flex;flex-direction:column;height:calc(100vh - 120px);min-height:520px;background:#f4f6f4;border-radius:8px;overflow:hidden;border:1px solid #d1e3d6;">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 16px;background:#105436;color:#fff;">
-          <div>
-            <div style="font-size:1.05rem;font-weight:800;letter-spacing:0.06em;">ORGANOGRAMA SOCIETÁRIO</div>
-            <div style="font-size:0.75rem;opacity:0.85;">Arraste as caixas · trace ligações pelos pontinhos · clique no % para editar</div>
-          </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <button type="button" class="btn btn-secondary btn-sm" onclick="SocietarioApp.openNewEntity()" title="Cria um quadradinho novo no organograma: empresa (PJ, verde) ou pessoa física (PF, azul). Depois dá para mudar a cor." style="background:#fff;color:#105436;font-weight:700;">+ Empresa / pessoa</button>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="SocietarioApp.openNewLink()" title="Cria a seta de participação entre duas caixas (quem detém quanto de quem). Também dá para arrastar o pontinho branco de uma caixa até a outra." style="${linkBtn}font-weight:700;">+ Interligação</button>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="SocietarioApp.resetLayout()" title="Reposiciona todas as caixas automaticamente. As ligações e os percentuais permanecem." style="background:#fff;color:#105436;font-weight:700;">Reorganizar</button>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="SocietarioApp.openNewNote()" title="Inclui um texto livre na lista de notas, embaixo do organograma." style="background:#fff;color:#105436;font-weight:700;">+ Nota</button>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="SocietarioApp.importPartners()" title="Traz sócios e sociedades já cadastrados em Parametrização de Parceiros e cria as caixas e ligações." style="background:#ea580c;border:none;color:#fff;font-weight:700;">Vincular parametrização</button>
+      <div class="soc-page">
+        <div class="soc-toolbar">
+          <p class="soc-help">Arraste as caixas, ligue pelos pontos e clique no percentual para editar a participação.</p>
+          <div class="soc-toolbar-actions">
+            <button type="button" class="btn btn-primary btn-sm" onclick="SocietarioApp.openNewEntity()" title="Cria uma caixa nova: empresa (PJ) ou pessoa física (PF).">Empresa / pessoa</button>
+            <button type="button" class="btn btn-outline btn-sm soc-btn-link${linkBtn}" onclick="SocietarioApp.openNewLink()" title="Cria a participação entre duas caixas. Também dá para arrastar o ponto de uma caixa até a outra.">Interligação</button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="SocietarioApp.resetLayout()" title="Reposiciona as caixas. As ligações e os percentuais permanecem.">Reorganizar</button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="SocietarioApp.openNewNote()" title="Inclui um texto livre na lista de notas.">Nota</button>
+            <button type="button" class="btn btn-sm soc-btn-import" onclick="SocietarioApp.importPartners()" title="Traz sócios e sociedades da Parametrização de Parceiros.">Vincular parametrização</button>
           </div>
         </div>
-        <div style="display:flex;flex:1;min-height:0;">
-          <div style="flex:1;display:flex;flex-direction:column;min-width:0;">
-            <div id="soc-canvas-wrap" style="flex:1;overflow:auto;background-image:radial-gradient(#c5d9cc 1px, transparent 1px);background-size:18px 18px;background-color:#eef6f1;">
-              <div id="soc-canvas" style="position:relative;width:${size.w}px;height:${size.h}px;">
-                <svg id="soc-edges" style="position:absolute;left:0;top:0;z-index:1;pointer-events:none;"></svg>
-                <div id="soc-edge-labels" style="position:absolute;left:0;top:0;right:0;bottom:0;z-index:4;pointer-events:none;"></div>
+        <div class="soc-body">
+          <div class="soc-stage">
+            <div id="soc-canvas-wrap" class="soc-canvas-wrap">
+              <div id="soc-canvas" class="soc-canvas" style="width:${size.w}px;height:${size.h}px;">
+                <svg id="soc-edges" class="soc-edges"></svg>
+                <div id="soc-edge-labels" class="soc-edge-labels"></div>
                 ${(this.graph.entities || []).map(e => this.canvasNode(e)).join("")}
               </div>
             </div>
-            <div style="padding:8px 16px 12px;background:#fff;border-top:1px solid #d1e3d6;max-height:28%;overflow:auto;">
-              <div style="display:flex;gap:10px;align-items:center;font-size:0.72rem;font-weight:700;color:#334155;margin-bottom:8px;flex-wrap:wrap;">
-                <span style="background:#166534;color:#fff;padding:3px 8px;border-radius:4px;">PJ — Pessoa jurídica</span>
-                <span style="background:#1d4ed8;color:#fff;padding:3px 8px;border-radius:4px;">PF — Pessoa física</span>
-                <span style="color:#64748b;font-weight:600;">A cor padrão segue o tipo. Clique na caixa para escolher outra.</span>
+            <div class="soc-foot">
+              <div class="soc-legend">
+                <span class="soc-chip is-pj">PJ Pessoa jurídica</span>
+                <span class="soc-chip is-pf">PF Pessoa física</span>
+                <span class="soc-legend-note">A cor padrão segue o tipo. Clique na caixa para escolher outra.</span>
               </div>
-              <div style="font-size:0.75rem;font-weight:800;color:#105436;text-transform:uppercase;">Notas</div>
-              <div style="margin-top:8px;">${this.renderNotes()}</div>
+              <div class="soc-notes">
+                <div class="soc-notes-title">Notas</div>
+                ${this.renderNotes()}
+              </div>
             </div>
           </div>
-          <aside style="width:320px;max-width:40%;background:#fff;border-left:1px solid #d1e3d6;overflow:auto;">
-            ${this.renderPanel()}
-          </aside>
+          ${editing ? `<aside class="soc-aside">${this.renderPanel()}</aside>` : ""}
         </div>
       </div>`;
     if (window.lucide) lucide.createIcons();

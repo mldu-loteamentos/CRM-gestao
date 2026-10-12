@@ -640,6 +640,17 @@ const TabelasVigentesApp = {
     this.renderList();
   },
 
+  siengeAuthorName() {
+    const u = (window.AppState && AppState.currentUser) || {};
+    const sienge = String(u.sienge_user || "").trim();
+    if (sienge) return sienge;
+    return String(u.name || "").trim();
+  },
+
+  criadoPorLabel(t) {
+    return String((t && t.createdBy) || "").trim() || "—";
+  },
+
   renderList() {
     const box = document.getElementById("tvig-results");
     if (!box) return;
@@ -653,23 +664,32 @@ const TabelasVigentesApp = {
       return;
     }
     box.innerHTML = `
-      <div class="crm-card" style="padding:0;overflow:hidden;">
-        <table class="custom-table tvig-list-table">
+      <div class="cc-scroll">
+        <table class="cc-table tvig-cc-table">
+          <colgroup>
+            <col style="width:108px"><col style="width:16%"><col><col style="width:180px"><col class="tvig-c-acao">
+          </colgroup>
           <thead>
             <tr>
               <th>Competência</th>
               <th>Cidade</th>
               <th>Empreendimento</th>
-              <th style="width:176px;text-align:right;">Ações</th>
+              <th>Criado por</th>
+              <th class="is-right">Ações</th>
             </tr>
           </thead>
           <tbody>
-            ${rows.map((t) => `
+            ${rows.map((t) => {
+              const autor = this.criadoPorLabel(t);
+              const cidade = t.city || t.cityId || "—";
+              const emp = (t.enterpriseId ? t.enterpriseId + " - " : "") + (t.enterpriseName || "—");
+              return `
               <tr>
                 <td>${this.esc(this.competenciaLabel(t.competencia))}</td>
-                <td>${this.esc(t.city || t.cityId || "—")}</td>
-                <td>${this.esc((t.enterpriseId ? t.enterpriseId + " - " : "") + (t.enterpriseName || "—"))}</td>
-                <td style="text-align:right;white-space:nowrap;">
+                <td class="cc-nome" title="${this.esc(cidade)}">${this.esc(cidade)}</td>
+                <td class="cc-nome" title="${this.esc(emp)}">${this.esc(emp)}</td>
+                <td title="${this.esc(autor)}">${this.esc(autor)}</td>
+                <td class="is-right tvig-acoes">
                   <button type="button" class="tvig-ico" title="Visualizar" onclick="TabelasVigentesApp.openViewer('${this.esc(t.id)}')">
                     <i data-lucide="eye" style="width:15px;height:15px;"></i>
                   </button>
@@ -683,7 +703,8 @@ const TabelasVigentesApp = {
                     <i data-lucide="trash-2" style="width:15px;height:15px;"></i>
                   </button>
                 </td>
-              </tr>`).join("")}
+              </tr>`;
+            }).join("")}
           </tbody>
         </table>
       </div>`;
@@ -747,6 +768,7 @@ const TabelasVigentesApp = {
       if (mode === "copy") {
         draft.id = this.uid();
         draft.createdAt = new Date().toISOString();
+        draft.createdBy = "";
         draft.competencia = "";
       }
     } else {
@@ -1795,6 +1817,7 @@ const TabelasVigentesApp = {
     }
     d.updatedAt = new Date().toISOString();
     const idx = this.state.tables.findIndex((t) => String(t.id) === String(d.id));
+    if (idx < 0) d.createdBy = this.siengeAuthorName();
     if (idx >= 0) this.state.tables[idx] = d;
     else this.state.tables.push(d);
     await this.persistOne(d);

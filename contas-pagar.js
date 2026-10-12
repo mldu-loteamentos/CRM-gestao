@@ -19,6 +19,30 @@ const ContasPagarApp = {
     this.render();
   },
 
+  auditarTitulo(status, summary, details) {
+    if (!window.AuditService || typeof AuditService.logEvent !== "function") return;
+    const u = (window.AppState && AppState.currentUser) || {};
+    const d = details || {};
+    const method = d.method || "POST";
+    const action = d.action || (method === "DELETE" ? "Excluir título" : (method === "PATCH" || method === "PUT" ? "Atualizar título" : "Gerar título"));
+    try {
+      AuditService.logEvent({
+        module: "Contas a Pagar",
+        action,
+        status,
+        summary,
+        user: u.name || u.nome || "",
+        userEmail: u.email || "",
+        customerLabel: d.credor || "",
+        enterpriseId: d.empresa != null ? String(d.empresa) : "",
+        titleId: d.billId ? String(d.billId).replace(/^SIM_ID_/, "") : "",
+        endpoint: d.endpoint || "/bills",
+        method,
+        details: d
+      });
+    } catch (e) {}
+  },
+
   resetState() {
     ContasPagarState.step = 1;
     ContasPagarState.excelFile = null;
@@ -969,8 +993,11 @@ const ContasPagarApp = {
              }
            }
            
-           t.siengeId = billId; // Salva o ID real
+           t.siengeId = billId;
            addLog(`> Título Criado com Sucesso! Sienge ID: ${billId}`);
+           this.auditarTitulo("ok", `Título ${billId} gerado no Sienge · doc ${t.documentNumber} · ${t.creditorName || t.creditorId}`, {
+             method: "POST", endpoint: "/bills", billId, credor: t.creditorName || "", empresa: t.enterpriseId, documento: t.documentNumber
+           });
         } else {
            let errText = req.statusText;
            const textErr = await req.text();
@@ -984,6 +1011,9 @@ const ContasPagarApp = {
            }
            t.errorMessage = errText;
            addLog(`> Erro POST /bills: ${errText}`);
+           this.auditarTitulo("erro", `Falha ao gerar título ${t.documentNumber} de ${t.creditorName || t.creditorId}: ${errText}`, {
+             method: "POST", endpoint: "/bills", credor: t.creditorName || "", empresa: t.enterpriseId, documento: t.documentNumber, erro: errText
+           });
         }
          
          if (pBar) pBar.style.width = '50%';
@@ -1056,6 +1086,11 @@ const ContasPagarApp = {
                       });
                       if (pReq.ok) {
                         addLog(`> Forma de pagamento atualizada para Transferência.`);
+                        this.auditarTitulo("ok", `Forma de pagamento (transferência) gravada no título ${billId} · ${t.creditorName || t.creditorId}`, {
+                          action: "Atualizar título", method: "PATCH",
+                          endpoint: `/bills/${billId}/installments/${installmentId}/payment-information/bank-transfer`,
+                          billId, credor: t.creditorName || "", empresa: t.enterpriseId
+                        });
                       } else {
                         let errStr = pReq.statusText;
                         try { 
@@ -1063,6 +1098,11 @@ const ContasPagarApp = {
                           errStr = JSON.stringify(j, null, 2); 
                         } catch(e) {}
                         addLog(`> Erro PATCH Transferência: ${pReq.status} - ${errStr}`);
+                        this.auditarTitulo("erro", `Falha ao gravar transferência no título ${billId}: ${errStr}`, {
+                          action: "Atualizar título", method: "PATCH",
+                          endpoint: `/bills/${billId}/installments/${installmentId}/payment-information/bank-transfer`,
+                          billId, credor: t.creditorName || "", empresa: t.enterpriseId, erro: errStr
+                        });
                       }
                     } else if (pForm === 'pix') {
                         addLog(`> PATCH PIX na parcela ${installmentId}...`);
@@ -1081,6 +1121,11 @@ const ContasPagarApp = {
                         
                         if (pReq.ok) {
                           addLog(`> Forma de pagamento atualizada para PIX.`);
+                          this.auditarTitulo("ok", `Forma de pagamento (PIX) gravada no título ${billId} · ${t.creditorName || t.creditorId}`, {
+                            action: "Atualizar título", method: "PATCH",
+                            endpoint: `/bills/${billId}/installments/${installmentId}/payment-information/pix`,
+                            billId, credor: t.creditorName || "", empresa: t.enterpriseId
+                          });
                         } else {
                           let errStr = pReq.statusText;
                           try { 
@@ -1088,6 +1133,11 @@ const ContasPagarApp = {
                             errStr = JSON.stringify(j, null, 2); 
                           } catch(e) {}
                           addLog(`> Erro PATCH PIX: ${pReq.status} - ${errStr}`);
+                          this.auditarTitulo("erro", `Falha ao gravar PIX no título ${billId}: ${errStr}`, {
+                            action: "Atualizar título", method: "PATCH",
+                            endpoint: `/bills/${billId}/installments/${installmentId}/payment-information/pix`,
+                            billId, credor: t.creditorName || "", empresa: t.enterpriseId, erro: errStr
+                          });
                         }
                      }
                      else if (pForm === 'boleto-bancario' || pForm === 'boleto-concessionaria') {
@@ -1179,6 +1229,9 @@ const ContasPagarApp = {
       } catch(e) {
         t.errorMessage = e.message;
         addLog(`> ERRO GERAL NO TÍTULO ${t.documentNumber}: ${e.message}`);
+        this.auditarTitulo("erro", `Falha ao gerar título ${t.documentNumber} de ${t.creditorName || t.creditorId}: ${e.message}`, {
+          method: "POST", endpoint: "/bills", credor: t.creditorName || "", empresa: t.enterpriseId, documento: t.documentNumber, erro: e.message
+        });
         
         const pBar = document.getElementById(`cp-progress-bar-${t.id}`);
         const pText = document.getElementById(`cp-progress-text-${t.id}`);

@@ -121,6 +121,65 @@ const EmpresasApp = {
     return cf[id] || cf[String(id)] || cf[Number(id)] || null;
   },
 
+  flagOn(custom, field) {
+    const v = custom && custom[field];
+    return v === 1 || v === true || v === "1";
+  },
+
+  rowLocked(custom) {
+    return this.flagOn(custom, "spe_socios") || this.flagOn(custom, "gestao_elenco");
+  },
+
+  activeLock(custom) {
+    if (this.flagOn(custom, "gestao_elenco")) return "gestao_elenco";
+    if (this.flagOn(custom, "spe_socios")) return "spe_socios";
+    return "";
+  },
+
+  parsePct(value) {
+    const raw = String(value == null ? "" : value).trim().replace(/\s/g, "").replace(",", ".");
+    if (raw === "" || raw === ".") return { empty: true };
+    if (!/^\d+(\.\d+)?$/.test(raw)) return { invalid: true };
+    let n = Number(raw);
+    if (!Number.isFinite(n)) return { invalid: true };
+    n = Math.min(100, Math.max(0, n));
+    n = Math.round((n + Number.EPSILON) * 10000) / 10000;
+    return { n: n };
+  },
+
+  fmtPct(n) {
+    const x = Number(n);
+    if (!Number.isFinite(x)) return "0";
+    const rounded = Math.round((x + Number.EPSILON) * 10000) / 10000;
+    return rounded.toFixed(4).replace(/0+$/, "").replace(/\.$/, "").replace(".", ",");
+  },
+
+  commitPct(input, companyId) {
+    const parsed = this.parsePct(input.value);
+    if (parsed.invalid) {
+      const cur = this.customOf(companyId);
+      input.value = this.fmtPct(cur && cur.percentual_mldu);
+      return;
+    }
+    input.value = parsed.empty ? "0" : this.fmtPct(parsed.n);
+    input.dataset.userEdited = "1";
+    this.saveInline(companyId, "percentual_mldu", input.value);
+  },
+
+  clearOtherFlags(custom, keep) {
+    const fields = ["consolidacao_padrao", "gerida_pelo_grupo", "cobranca_interna", "spe_socios", "gestao_elenco"];
+    let cobrancaCleared = false;
+    fields.forEach((field) => {
+      if (field === keep) return;
+      if (field === "cobranca_interna" && this.flagOn(custom, field)) cobrancaCleared = true;
+      custom[field] = 0;
+    });
+    if (cobrancaCleared && window.AppState) {
+      window.AppState.dashboardRendered = false;
+      window.AppState.defaultersLoaded = false;
+    }
+  },
+
   flushRowInputs(id, custom) {
     const tr = document.querySelector('#empresas-content tr[data-company-id="' + id + '"]');
     const rec = custom || this.customOf(id);
@@ -139,18 +198,18 @@ const EmpresasApp = {
     }
     if (!perc || perc.disabled) return;
     const typedPerc = perc.dataset.userEdited === "1";
-    const raw = String(perc.value || "").trim().replace(/\s/g, "").replace(",", ".");
-    if (raw === "") {
+    const parsed = this.parsePct(perc.value);
+    if (parsed.invalid) return;
+    if (parsed.empty) {
       if (typedPerc && Number(rec.percentual_mldu) !== 0) {
         rec.percentual_mldu = 0;
         rec.percentual_mldu_edited = 1;
       }
       return;
     }
-    const n = Number(raw);
-    if (!Number.isFinite(n) || Number(rec.percentual_mldu) === n) return;
-    if (!typedPerc && n === 0 && Number(rec.percentual_mldu) > 0) return;
-    rec.percentual_mldu = n;
+    if (Number(rec.percentual_mldu) === parsed.n) return;
+    if (!typedPerc && parsed.n === 0 && Number(rec.percentual_mldu) > 0) return;
+    rec.percentual_mldu = parsed.n;
     if (typedPerc) rec.percentual_mldu_edited = 1;
   },
 
@@ -197,20 +256,21 @@ const EmpresasApp = {
 
   paintRowState(id) {
     const custom = this.customOf(id) || {};
-    const speOn = custom.spe_socios === 1 || custom.spe_socios === true || custom.spe_socios === "1";
+    const locked = this.rowLocked(custom);
+    const active = this.activeLock(custom);
     const tr = document.querySelector('#empresas-content tr[data-company-id="' + id + '"]');
     if (tr) {
-      tr.classList.toggle("is-spe-locked", speOn);
-      tr.querySelectorAll(".inline-input").forEach((input) => { input.disabled = speOn; });
+      tr.classList.toggle("is-spe-locked", locked);
+      tr.querySelectorAll(".inline-input").forEach((input) => { input.disabled = locked; });
+      tr.querySelectorAll(".emp-lock-cell").forEach((td) => {
+        td.classList.toggle("is-lock-on", td.dataset.lock === active);
+      });
     }
-    ["consolidacao_padrao", "gerida_pelo_grupo", "cobranca_interna", "spe_socios"].forEach((field) => {
+    ["consolidacao_padrao", "gerida_pelo_grupo", "cobranca_interna", "spe_socios", "gestao_elenco"].forEach((field) => {
       const checkbox = document.getElementById("chk-" + field + "-" + id);
       if (!checkbox) return;
-      const on = field === "spe_socios"
-        ? speOn
-        : (custom[field] === 1 || custom[field] === true || custom[field] === "1");
-      checkbox.checked = !!on;
-      checkbox.disabled = field !== "spe_socios" && speOn;
+      checkbox.checked = this.flagOn(custom, field);
+      checkbox.disabled = locked && field !== active;
     });
   },
 
@@ -259,8 +319,9 @@ const EmpresasApp = {
       gerida_pelo_grupo: 0
     };
     const isText = field === "nome_usual" || field === "percentual_mldu";
-    const speOn = custom.spe_socios === 1 || custom.spe_socios === true || custom.spe_socios === "1";
-    if (speOn && !isText && field !== "spe_socios") {
+    const locked = this.rowLocked(custom);
+    const active = this.activeLock(custom);
+    if (locked && !isText && field !== active) {
       this.schedulePaint(id);
       return;
     }
@@ -282,21 +343,19 @@ const EmpresasApp = {
       custom.nome_usual_edited = 1;
     }
     if (field === "percentual_mldu") {
-      const raw = String(value == null ? "" : value).trim().replace(/\s/g, "").replace(",", ".");
-      if (raw === "") {
-        if (Number(custom.percentual_mldu) === 0) return;
-        custom.percentual_mldu = 0;
-      } else {
-        const n = Number(raw);
-        if (!Number.isFinite(n)) return;
-        if (Number(custom.percentual_mldu) === n) return;
-        custom.percentual_mldu = n;
-      }
+      const parsed = this.parsePct(value);
+      if (parsed.invalid) return;
+      const n = parsed.empty ? 0 : parsed.n;
+      if (Number(custom.percentual_mldu) === n) return;
+      custom.percentual_mldu = n;
       custom.percentual_mldu_edited = 1;
     }
     if (field === "consolidacao_padrao") custom.consolidacao_padrao = value ? 1 : 0;
     if (field === "gerida_pelo_grupo") custom.gerida_pelo_grupo = value ? 1 : 0;
-    if (field === "spe_socios") custom.spe_socios = value ? 1 : 0;
+    if (field === "spe_socios" || field === "gestao_elenco") {
+      if (value) this.clearOtherFlags(custom, field);
+      custom[field] = value ? 1 : 0;
+    }
     if (field === "cobranca_interna") {
       custom.cobranca_interna = value ? 1 : 0;
       if (window.AppState) {
@@ -386,7 +445,7 @@ const EmpresasApp = {
         <table class="emp-table">
           <colgroup>
             <col class="emp-c-id"><col class="emp-c-nome"><col class="emp-c-cnpj"><col class="emp-c-usual">
-            <col class="emp-c-pct"><col class="emp-c-flag"><col class="emp-c-flag"><col class="emp-c-flag"><col class="emp-c-flag">
+            <col class="emp-c-pct"><col class="emp-c-flag"><col class="emp-c-flag"><col class="emp-c-flag"><col class="emp-c-flag"><col class="emp-c-flag">
           </colgroup>
           <thead>
             <tr>
@@ -399,44 +458,50 @@ const EmpresasApp = {
               <th class="is-center">Gerida pelo grupo</th>
               <th class="is-center">Cobrança interna</th>
               <th class="is-center">SPE sócios</th>
+              <th class="is-center">Gestão Ellenco</th>
             </tr>
           </thead>
           <tbody>
     `;
 
     if (filteredCompanies.length === 0) {
-      html += `<tr><td colspan="9" style="text-align: center; padding: 30px;">Nenhuma empresa corresponde ao filtro.</td></tr>`;
+      html += `<tr><td colspan="10" style="text-align: center; padding: 30px;">Nenhuma empresa corresponde ao filtro.</td></tr>`;
     }
 
     filteredCompanies.forEach(company => {
       const custom = this.customOf(company.id) || {};
       const usualName = custom.nome_usual || '';
-      const percMldu = custom.percentual_mldu || 0;
-      
-      const speOn = custom.spe_socios === 1 || custom.spe_socios === true || custom.spe_socios === "1";
-      const lock = speOn ? "disabled" : "";
-      const checkedCons = custom.consolidacao_padrao ? 'checked' : '';
-      const checkedGerida = custom.gerida_pelo_grupo ? 'checked' : '';
-      const checkedCobInt = custom.cobranca_interna ? 'checked' : '';
-      const checkedSpe = speOn ? "checked" : "";
-      
-      const interruptor = (field, checked) => `<label class="moura-switch"><input type="checkbox" id="chk-${field}-${company.id}" ${checked} ${field === "spe_socios" ? "" : lock} onchange="EmpresasApp.saveInline(${company.id}, '${field}', this.checked)"><span class="moura-switch-track" aria-hidden="true"></span></label>`;
+      const percMldu = this.fmtPct(custom.percentual_mldu || 0);
+      const locked = this.rowLocked(custom);
+      const active = this.activeLock(custom);
+      const lock = locked ? "disabled" : "";
+      const checkedCons = this.flagOn(custom, "consolidacao_padrao") ? "checked" : "";
+      const checkedGerida = this.flagOn(custom, "gerida_pelo_grupo") ? "checked" : "";
+      const checkedCobInt = this.flagOn(custom, "cobranca_interna") ? "checked" : "";
+      const checkedSpe = this.flagOn(custom, "spe_socios") ? "checked" : "";
+      const checkedEllenco = this.flagOn(custom, "gestao_elenco") ? "checked" : "";
+
+      const interruptor = (field, checked) => {
+        const dis = locked && field !== active ? "disabled" : "";
+        return `<label class="moura-switch"><input type="checkbox" id="chk-${field}-${company.id}" ${checked} ${dis} onchange="EmpresasApp.saveInline(${company.id}, '${field}', this.checked)"><span class="moura-switch-track" aria-hidden="true"></span></label>`;
+      };
 
       html += `
-        <tr data-company-id="${company.id}" class="${speOn ? "is-spe-locked" : ""}">
+        <tr data-company-id="${company.id}" class="${locked ? "is-spe-locked" : ""}">
           <td><strong>${company.id}</strong></td>
           <td class="emp-nome" title="${this.escAttr(company.name)}">${this.escAttr(company.name)}</td>
-          <td>${this.escAttr(company.cnpj || "-")}</td>
+          <td class="emp-cnpj">${this.escAttr(company.cnpj || "-")}</td>
           <td>
             <input type="text" class="inline-input" value="${this.escAttr(usualName)}" placeholder="Nome usual" ${lock} oninput="this.dataset.userEdited='1'; EmpresasApp.saveInline(${company.id}, 'nome_usual', this.value)" onblur="EmpresasApp.saveInline(${company.id}, 'nome_usual', this.value)">
           </td>
           <td class="is-center">
-            <input type="text" inputmode="decimal" class="inline-input emp-pct" value="${this.escAttr(percMldu)}" ${lock} oninput="this.dataset.userEdited='1'; EmpresasApp.saveInline(${company.id}, 'percentual_mldu', this.value)" onblur="EmpresasApp.saveInline(${company.id}, 'percentual_mldu', this.value)">
+            <input type="text" inputmode="decimal" class="inline-input emp-pct" value="${this.escAttr(percMldu)}" ${lock} oninput="this.dataset.userEdited='1'; EmpresasApp.saveInline(${company.id}, 'percentual_mldu', this.value)" onblur="EmpresasApp.commitPct(this, ${company.id})">
           </td>
           <td class="is-center">${interruptor("consolidacao_padrao", checkedCons)}</td>
           <td class="is-center">${interruptor("gerida_pelo_grupo", checkedGerida)}</td>
           <td class="is-center">${interruptor("cobranca_interna", checkedCobInt)}</td>
-          <td class="is-center emp-spe-cell">${interruptor("spe_socios", checkedSpe)}</td>
+          <td class="is-center emp-lock-cell${active === "spe_socios" ? " is-lock-on" : ""}" data-lock="spe_socios">${interruptor("spe_socios", checkedSpe)}</td>
+          <td class="is-center emp-lock-cell${active === "gestao_elenco" ? " is-lock-on" : ""}" data-lock="gestao_elenco">${interruptor("gestao_elenco", checkedEllenco)}</td>
         </tr>
       `;
     });

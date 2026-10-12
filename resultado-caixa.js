@@ -10,6 +10,7 @@ const ResultadoCaixaApp = {
   compare: [],
   dates: [],
   anos: {},
+  acervo: { anterior: {}, meses: {} },
   lendo: false,
   escala: "milhoes",
   agrupar: true,
@@ -54,10 +55,10 @@ const ResultadoCaixaApp = {
 
   loaderHtml() {
     const pct = Math.max(8, Math.min(92, Number(this._cargaPct) || 8));
-    return `<div class="rcx-load" role="status" aria-live="polite">
-      <div class="rcx-spin"></div>
-      <div class="rcx-load-title" id="rcx-load-text">${this.fraseCarga()}</div>
-      <div class="rcx-load-track"><div class="rcx-load-fill" id="rcx-load-bar" style="width:${pct}%"></div></div>
+    return `<div class="ml-load" role="status" aria-live="polite">
+      <div class="loading-spinner" aria-hidden="true"></div>
+      <div class="loading-status-text" id="rcx-load-text">${this.fraseCarga()}</div>
+      <div class="ml-load-track"><div class="loading-progress-bar" id="rcx-load-bar" style="width:${pct}%"></div></div>
     </div>`;
   },
   MESES: ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"],
@@ -66,11 +67,16 @@ const ResultadoCaixaApp = {
     if (!this.date) this.date = new Date().toISOString().slice(0, 10);
     if (!this._ok) {
       this._ok = true;
-      this.lerLocal();
       if (!this.mes) this.mes = new Date().getMonth() + 1;
+      this.lerLocal();
+      this.montarVista();
     }
     this.render();
     if (this.aba === "posicao" && !this.rows.length && !this.loading) this.refresh();
+    if (!this._nuvemPedida) {
+      this._nuvemPedida = true;
+      this.carregarNuvem();
+    }
   },
 
   setAba(id) {
@@ -83,11 +89,17 @@ const ResultadoCaixaApp = {
   },
 
   lerLocal() {
-    try {
-      const raw = localStorage.getItem("rc_orc_v1");
-      this.anos = raw ? JSON.parse(raw) : {};
-    } catch (e) {
-      this.anos = {};
+    this.acervo = { anterior: {}, meses: {} };
+    let novo = null;
+    try { novo = JSON.parse(localStorage.getItem("rc_orc_v2") || "null"); } catch (e) { novo = null; }
+    if (novo && (novo.anterior || novo.meses)) {
+      this.acervo.anterior = novo.anterior || {};
+      this.acervo.meses = novo.meses || {};
+    } else {
+      try {
+        const legado = JSON.parse(localStorage.getItem("rc_orc_v1") || "null");
+        if (legado && typeof legado === "object") this.migrarLegado(legado);
+      } catch (e) {}
     }
     try {
       this.forecast = JSON.parse(localStorage.getItem("rc_forecast_v1") || "null");
@@ -226,15 +238,81 @@ const ResultadoCaixaApp = {
 
   gravarLocal() {
     try {
-      localStorage.setItem("rc_orc_v1", JSON.stringify(this.anos || {}));
+      localStorage.setItem("rc_orc_v2", JSON.stringify(this.acervo || { anterior: {}, meses: {} }));
     } catch (e) {
-      this.error = "Não coube no navegador guardar o orçamento. Suba um arquivo por vez.";
+      if (!this._nuvemOk) this.error = "Não coube no navegador guardar o orçamento. Ele fica na nuvem quando o envio concluir.";
     }
   },
 
+  anoBase() {
+    const ys = [];
+    Object.keys((this.acervo && this.acervo.meses) || {}).forEach((k) => {
+      const y = Number(String(k).slice(0, 4));
+      if (y > 1900) ys.push(y);
+    });
+    Object.keys((this.acervo && this.acervo.anterior) || {}).forEach((k) => {
+      const y = Number(k);
+      if (y > 1900) ys.push(y + 1);
+    });
+    if (ys.length) return Math.max.apply(null, ys);
+    return new Date().getFullYear();
+  },
+
   anoAtual() {
-    const ys = Object.keys(this.anos || {}).map(Number).filter((n) => n > 1900).sort((a, b) => a - b);
-    return ys.length ? ys[ys.length - 1] : 0;
+    return this.anoBase();
+  },
+
+  chaveMes(ano, mes) {
+    const y = Number(ano) || this.anoBase();
+    const m = Number(mes != null ? mes : this.mes) || 1;
+    return y + "-" + String(m).padStart(2, "0");
+  },
+
+  migrarLegado(anos) {
+    const base = new Date().getFullYear();
+    const mes = String(Number(this.mes) || (new Date().getMonth() + 1)).padStart(2, "0");
+    Object.keys(anos || {}).forEach((y) => {
+      const ano = Number(y);
+      const arquivos = (anos[y] && anos[y].arquivos) || {};
+      if (!ano || !Object.keys(arquivos).length) return;
+      if (ano < base) this.acervo.anterior[String(ano)] = { arquivos: arquivos };
+      else this.acervo.meses[ano + "-" + mes] = { arquivos: arquivos };
+    });
+  },
+
+  temAcervo() {
+    const ant = this.acervo && this.acervo.anterior;
+    const mes = this.acervo && this.acervo.meses;
+    const cheio = (bag) => Object.keys(bag || {}).some((k) => Object.keys((bag[k] && bag[k].arquivos) || {}).length);
+    return cheio(ant) || cheio(mes);
+  },
+
+  montarVista() {
+    const ano = this.anoBase();
+    const vista = {};
+    const ant = this.acervo && this.acervo.anterior && this.acervo.anterior[String(ano - 1)];
+    if (ant && ant.arquivos && Object.keys(ant.arquivos).length) vista[String(ano - 1)] = ant;
+    const cur = this.acervo && this.acervo.meses && this.acervo.meses[this.chaveMes(ano)];
+    if (cur && cur.arquivos && Object.keys(cur.arquivos).length) vista[String(ano)] = cur;
+    this.anos = vista;
+  },
+
+  slotDoAno(ano) {
+    const y = Number(ano);
+    const base = this.anoBase();
+    if (y && y < base) return { tipo: "anterior", chave: String(y), id: "ant-" + y };
+    const chave = this.chaveMes(y || base);
+    return { tipo: "mes", chave: chave, id: chave };
+  },
+
+  pegarSlot(slot) {
+    if (!this.acervo) this.acervo = { anterior: {}, meses: {} };
+    if (slot.tipo === "anterior") {
+      if (!this.acervo.anterior[slot.chave]) this.acervo.anterior[slot.chave] = { arquivos: {} };
+      return this.acervo.anterior[slot.chave];
+    }
+    if (!this.acervo.meses[slot.chave]) this.acervo.meses[slot.chave] = { arquivos: {} };
+    return this.acervo.meses[slot.chave];
   },
 
   grupoCc(id) {
@@ -635,17 +713,10 @@ const ResultadoCaixaApp = {
       }
       if (head < 0) continue;
       const labels = grid[head + 1] || [];
-      const meses = [];
-      (grid[head] || []).forEach((c, col) => {
-        const m = String(c == null ? "" : c).trim().toLowerCase().match(mesRe);
-        if (!m) return;
-        let realCol = col;
-        const ate = col + 5;
-        for (let k = col; k < ate && k < labels.length; k++) {
-          if (/realizado/i.test(String(labels[k] == null ? "" : labels[k]))) { realCol = k; break; }
-        }
-        const mm = mesNum[m[1].slice(0, 3)];
-        meses.push({ ym: m[2] + "-" + String(mm).padStart(2, "0"), colOrc: col, colReal: realCol });
+      const meses = this.mesesDoCabecalho(grid[head], labels, mesRe, mesNum);
+      let tipoCol = -1;
+      labels.forEach((c, col) => {
+        if (/^tipo$/i.test(String(c == null ? "" : c).trim())) tipoCol = col;
       });
       const linhas = [];
       for (let j = head + 2; j < grid.length; j++) {
@@ -660,6 +731,7 @@ const ResultadoCaixaApp = {
         linhas.push({
           code,
           nome: String(r[1] == null ? "" : r[1]).trim(),
+          tipo: tipoCol >= 0 ? String(r[tipoCol] == null ? "" : r[tipoCol]).trim().toUpperCase() : "",
           months: meses.map((mes) => ({
             ym: mes.ym,
             orc: Number(r[mes.colOrc]) || 0,
@@ -672,13 +744,179 @@ const ResultadoCaixaApp = {
     return blocos;
   },
 
+  mesesDoCabecalho(head, labels, mesRe, mesNum) {
+    const nomes = [];
+    (head || []).forEach((c, col) => {
+      const bruto = String(c == null ? "" : c).trim();
+      if (/total/i.test(bruto)) return;
+      const m = bruto.toLowerCase().match(mesRe);
+      if (!m) return;
+      const mm = mesNum[m[1].slice(0, 3)];
+      nomes.push({ ym: m[2] + "-" + String(mm).padStart(2, "0"), col: col });
+    });
+    const pares = [];
+    const labs = labels || [];
+    for (let k = 0; k < labs.length; k++) {
+      const s = String(labs[k] == null ? "" : labs[k]).trim();
+      if (!/^or[cç]ado$/i.test(s)) continue;
+      let realCol = -1;
+      for (let j = k + 1; j < Math.min(labs.length, k + 6); j++) {
+        const t = String(labs[j] == null ? "" : labs[j]).trim();
+        if (/^or[cç]ado$/i.test(t)) break;
+        if (/realizado/i.test(t)) { realCol = j; break; }
+      }
+      if (realCol >= 0) pares.push({ colOrc: k, colReal: realCol });
+    }
+    if (pares.length && pares.length >= nomes.length && nomes.length) {
+      return nomes.map((m, i) => ({ ym: m.ym, colOrc: pares[i].colOrc, colReal: pares[i].colReal }));
+    }
+    return nomes.map((m) => {
+      let realCol = m.col;
+      for (let k = m.col; k < m.col + 6 && k < labs.length; k++) {
+        if (/realizado/i.test(String(labs[k] == null ? "" : labs[k]))) { realCol = k; break; }
+      }
+      return { ym: m.ym, colOrc: m.col, colReal: realCol };
+    });
+  },
+
+  ehAnalitico(linhas) {
+    return (linhas || []).some((l) => {
+      const seg = String(l.code || "").split(".")[0];
+      return seg.length === 1 && /^\d$/.test(seg);
+    });
+  },
+
+  noPorId(gid) {
+    const FC = window.FluxoCaixaApp;
+    let groups = [];
+    try { groups = ((FC && FC.visao && FC.visao()) || {}).groups || []; } catch (e) { groups = []; }
+    return (groups || []).find((g) => g.id === gid) || null;
+  },
+
+  noDaLinha(FC, mapa, linha) {
+    let node = null;
+    if (mapa && FC && typeof this.noDaConta === "function") node = this.noDaConta(FC, mapa, linha.code);
+    const plano = (typeof PlanoFinanceiroApp !== "undefined" ? PlanoFinanceiroApp : null);
+    if (!node && plano && typeof plano.suggestGroup === "function") {
+      const gid = plano.suggestGroup({ id: linha.code, name: linha.nome || "" });
+      if (gid) node = this.noPorId(gid);
+    }
+    if (!node && plano && typeof plano.lookupDfcByCode === "function") {
+      const gid = plano.lookupDfcByCode(linha.code);
+      if (gid) node = this.noPorId(gid);
+    }
+    return node;
+  },
+
+  codigoVisao(node) {
+    if (!node) return "";
+    const m = String(node.name || "").match(/^(\d{2}(?:\.\d{2})*)\b/);
+    if (m) return m[1];
+    const id = String(node.id || "");
+    const p = id.match(/^g_(\d{2})(?:_(\d{2}))?(?:_(\d{2}))?/);
+    if (!p) return "";
+    return [p[1], p[2], p[3]].filter(Boolean).join(".");
+  },
+
+  folhasAnaliticas(linhas) {
+    const comTipo = (linhas || []).some((l) => l.tipo);
+    if (comTipo) return (linhas || []).filter((l) => l.tipo === "R");
+    return (linhas || []).filter((l) => !(linhas || []).some((o) => o.code !== l.code && String(o.code).indexOf(l.code + ".") === 0));
+  },
+
+  async mapaPronto() {
+    const FC = window.FluxoCaixaApp;
+    if (!FC || typeof FC.visao !== "function") return null;
+    let mapa = null;
+    try { mapa = this.mapaDfc(FC); } catch (e) { mapa = null; }
+    if (mapa && Object.keys(mapa.accToNode || {}).length) return mapa;
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    const plano = (typeof PlanoFinanceiroApp !== "undefined" ? PlanoFinanceiroApp : null);
+    if (!fx || !db || !fx.getDoc || !plano) return mapa;
+    try {
+      const snap = await fx.getDoc(fx.doc(db, "config", "global"));
+      const exists = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+      if (!exists) return mapa;
+      const raw = (snap.data() || {}).crm_plano_visoes_v2;
+      if (!raw) return mapa;
+      const visoes = JSON.parse(raw);
+      if (!Array.isArray(visoes) || !visoes.length) return mapa;
+      const prev = plano.visoes;
+      plano.visoes = visoes;
+      let novo = null;
+      try { novo = this.mapaDfc(FC); } catch (e) { novo = null; }
+      if (!novo || !Object.keys(novo.accToNode || {}).length) plano.visoes = prev;
+      return novo || mapa;
+    } catch (e) {
+      return mapa;
+    }
+  },
+
+  paraVisao(linhas) {
+    if (!this.ehAnalitico(linhas)) return { linhas: linhas || [], fora: [] };
+    const folhas = this.folhasAnaliticas(linhas);
+    const FC = window.FluxoCaixaApp;
+    let mapa = this._mapa || null;
+    if (!mapa) {
+      try {
+        if (FC && typeof FC.visao === "function") mapa = this.mapaDfc(FC);
+      } catch (e) {
+        mapa = null;
+      }
+    }
+    const plano = (typeof PlanoFinanceiroApp !== "undefined" ? PlanoFinanceiroApp : null);
+    const temMapa = !!(mapa && Object.keys(mapa.accToNode || {}).length);
+    const temPrefixo = !!(plano && typeof plano.suggestGroup === "function");
+    if (!temMapa && !temPrefixo) {
+      throw new Error("A visão DFC ainda não tem as contas financeiras. Abra o Fluxo de Caixa uma vez para carregar o plano e suba o arquivo de novo.");
+    }
+    const fora = [];
+    const porCodigo = {};
+    folhas.forEach((l) => {
+      const node = this.noDaLinha(FC, mapa, l);
+      const cod = this.codigoVisao(node);
+      const temValor = (l.months || []).some((m) => Math.abs(Number(m.orc) || 0) > 0.5 || Math.abs(Number(m.real) || 0) > 0.5);
+      if (!cod) {
+        if (temValor && fora.indexOf(l.code) < 0) fora.push(l.code + (l.nome ? " " + l.nome : ""));
+        return;
+      }
+      if (!temValor) return;
+      if (!porCodigo[cod]) porCodigo[cod] = { code: cod, nome: node.name || cod, months: {} };
+      const sinal = (valor) => {
+        const n = Number(valor) || 0;
+        if (!n || !FC || typeof FC.signedAmount !== "function") return n;
+        return FC.signedAmount(node, l.code, l.nome || "", n, "", "", null);
+      };
+      (l.months || []).forEach((m) => {
+        const cel = porCodigo[cod].months[m.ym] || { ym: m.ym, orc: 0, real: 0 };
+        cel.orc += sinal(m.orc);
+        cel.real += sinal(m.real);
+        porCodigo[cod].months[m.ym] = cel;
+      });
+    });
+    const out = Object.keys(porCodigo).map((c) => ({
+      code: c,
+      nome: porCodigo[c].nome,
+      months: Object.keys(porCodigo[c].months).map((ym) => porCodigo[c].months[ym])
+    }));
+    return { linhas: out, fora: fora };
+  },
+
   aplicarBlocos(nomeArquivo, blocos) {
+    const fora = [];
+    const prontos = (blocos || []).map((b) => {
+      const conv = this.paraVisao(b.linhas);
+      (conv.fora || []).forEach((item) => { if (fora.indexOf(item) < 0) fora.push(item); });
+      return { id: b.id, nome: b.nome, linhas: conv.linhas };
+    }).filter((b) => b.linhas.length);
+    if (!prontos.length) throw new Error("Nenhuma conta de " + nomeArquivo + " entrou na visão DFC.");
     const porAno = {};
     const slot = (ano) => {
       if (!porAno[ano]) porAno[ano] = { entradas: {}, contas: {}, contasPorCc: {} };
       return porAno[ano];
     };
-    blocos.forEach((b) => {
+    prontos.forEach((b) => {
       const mapa = this.somarLinhas(b.linhas, "entradas");
       Object.keys(mapa).forEach((ym) => {
         const ano = ym.slice(0, 4);
@@ -713,20 +951,31 @@ const ResultadoCaixaApp = {
     const empresa = this.empresaId(nomeArquivo);
     const rotulo = this.nomeEmpresaArquivo(nomeArquivo);
     Object.keys(porAno).forEach((ano) => {
-      const atual = this.garantirAno(ano);
+      const destino = this.slotDoAno(ano);
+      const atual = this.pegarSlot(destino);
+      const docId = this.docCaixa(destino.id, empresa, nomeArquivo);
+      Object.keys(atual.arquivos || {}).forEach((nome) => {
+        const outro = atual.arquivos[nome];
+        if (nome !== nomeArquivo && empresa && Number(outro && outro.empresa) === empresa) {
+          if (outro && outro._doc && outro._doc !== docId) this.apagarNuvem(outro._doc);
+          delete atual.arquivos[nome];
+        }
+      });
       atual.arquivos[nomeArquivo] = {
         empresa: empresa,
         rotulo: rotulo,
         entradas: porAno[ano].entradas,
         contas: porAno[ano].contas,
-        contasPorCc: porAno[ano].contasPorCc
+        contasPorCc: porAno[ano].contasPorCc,
+        _pendente: true,
+        _slot: destino.id,
+        _doc: docId
       };
-      delete atual.file;
-      delete atual.entradas;
-      delete atual.saidas;
     });
     this._dfcKey = "";
     this._dfcPedido = "";
+    this._fora = fora;
+    this.montarVista();
     this.gravarLocal();
   },
 
@@ -740,27 +989,53 @@ const ResultadoCaixaApp = {
     }
     this.lendo = true;
     this.error = "";
+    this.aviso = "";
     this.render();
     try {
+      this._mapa = await this.mapaPronto();
       for (let i = 0; i < files.length; i++) {
         const buf = await files[i].arrayBuffer();
         const wb = XLSX.read(buf, { type: "array" });
         const blocos = this.lerPlanilha(wb);
-        if (!blocos.length) throw new Error("Não reconheci centros de custo em " + files[i].name + ". Use o comparativo orçado × realizado da visão DFC.");
+        if (!blocos.length) throw new Error("Não reconheci centros de custo em " + files[i].name + ". Use o comparativo orçado × realizado por centro de custo.");
         this.aplicarBlocos(files[i].name, blocos);
       }
+      const fora = this._fora || [];
+      if (fora.length) {
+        const amostra = fora.slice(0, 6).join(", ");
+        this.aviso = fora.length + " contas com valor ficaram de fora da visão DFC: " + amostra + (fora.length > 6 ? "…" : ".");
+      } else {
+        this.aviso = "";
+      }
+      await this.enviarPendentes();
     } catch (e) {
       this.error = e.message || String(e);
     }
+    this._mapa = null;
     this.lendo = false;
     if (input) input.value = "";
     this.render();
   },
 
   removerAno(ano) {
-    delete this.anos[String(ano)];
+    const y = Number(ano);
+    const base = this.anoBase();
+    if (y === base) {
+      const chave = this.chaveMes(base);
+      const bag = this.acervo.meses[chave];
+      Object.keys((bag && bag.arquivos) || {}).forEach((nome) => {
+        const arq = bag.arquivos[nome];
+        this.apagarNuvem(arq && arq._doc);
+      });
+      delete this.acervo.meses[chave];
+    } else if (this.acervo.anterior[String(y)]) {
+      const bag = this.acervo.anterior[String(y)];
+      Object.keys(bag.arquivos || {}).forEach((nome) => this.apagarNuvem(bag.arquivos[nome] && bag.arquivos[nome]._doc));
+      delete this.acervo.anterior[String(y)];
+    }
     this._dfcKey = "";
     this._dfcPedido = "";
+    this.montarVista();
     this.gravarLocal();
     this.render();
   },
@@ -768,17 +1043,188 @@ const ResultadoCaixaApp = {
   removerArquivo(ano, chave) {
     let nome = chave;
     try { nome = decodeURIComponent(chave); } catch (e) {}
-    const a = this.anos[String(ano)];
-    if (!a || !a.arquivos || !a.arquivos[nome]) {
+    const y = Number(ano);
+    const base = this.anoBase();
+    const bolsa = y === base ? (this.acervo.meses[this.chaveMes(base)] || null) : (this.acervo.anterior[String(y)] || null);
+    if (!bolsa || !bolsa.arquivos || !bolsa.arquivos[nome]) {
       this.removerAno(ano);
       return;
     }
-    delete a.arquivos[nome];
-    if (!Object.keys(a.arquivos).length) delete this.anos[String(ano)];
+    const docId = bolsa.arquivos[nome]._doc;
+    delete bolsa.arquivos[nome];
+    if (!Object.keys(bolsa.arquivos).length) {
+      if (y === base) delete this.acervo.meses[this.chaveMes(base)];
+      else delete this.acervo.anterior[String(y)];
+    }
+    this.apagarNuvem(docId);
     this._dfcKey = "";
     this._dfcPedido = "";
+    this.montarVista();
     this.gravarLocal();
     this.render();
+  },
+
+  docCaixa(slot, empresa, nome) {
+    const emp = Number(empresa) || 0;
+    const base = emp ? String(emp) : String(nome || "arq").replace(/[^a-zA-Z0-9]+/g, "_").slice(0, 48);
+    return String(slot || "slot") + "_" + base;
+  },
+
+  enxugarMeses(meses) {
+    const out = {};
+    Object.keys(meses || {}).forEach((mm) => {
+      const cel = meses[mm] || {};
+      if (Math.abs(Number(cel.o) || 0) < 0.005 && Math.abs(Number(cel.r) || 0) < 0.005) return;
+      out[mm] = { o: Number(cel.o) || 0, r: Number(cel.r) || 0 };
+    });
+    return out;
+  },
+
+  enxugarArq(arq) {
+    const entradas = {};
+    Object.keys(arq.entradas || {}).forEach((id) => {
+      const meses = this.enxugarMeses(arq.entradas[id].meses);
+      if (Object.keys(meses).length) entradas[id] = { nome: arq.entradas[id].nome || "", meses: meses };
+    });
+    const contas = {};
+    Object.keys(arq.contas || {}).forEach((code) => {
+      const meses = this.enxugarMeses(arq.contas[code].meses);
+      if (Object.keys(meses).length) contas[code] = { nome: arq.contas[code].nome || code, meses: meses };
+    });
+    const contasPorCc = {};
+    Object.keys(arq.contasPorCc || {}).forEach((id) => {
+      const dono = arq.contasPorCc[id] || {};
+      const bag = {};
+      Object.keys(dono.contas || {}).forEach((code) => {
+        const meses = this.enxugarMeses(dono.contas[code].meses);
+        if (Object.keys(meses).length) bag[code] = { nome: dono.contas[code].nome || code, meses: meses };
+      });
+      if (Object.keys(bag).length) contasPorCc[id] = { nome: dono.nome || "", contas: bag };
+    });
+    return { entradas: entradas, contas: contas, contasPorCc: contasPorCc };
+  },
+
+  async salvarArquivoNuvem(slot, nome, arq) {
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (!fx || !db || !arq) return false;
+    const id = arq._doc || this.docCaixa(slot, arq.empresa, nome);
+    const limpo = this.enxugarArq(arq);
+    await fx.setDoc(fx.doc(db, "resultado_caixa", id), {
+      slot: slot,
+      nome: nome,
+      empresa: Number(arq.empresa) || 0,
+      rotulo: arq.rotulo || "",
+      entradas: limpo.entradas,
+      contas: limpo.contas,
+      contasPorCc: limpo.contasPorCc,
+      em: new Date().toISOString()
+    });
+    arq._doc = id;
+    arq._pendente = false;
+    this._nuvemOk = true;
+    return true;
+  },
+
+  async enviarPendentes() {
+    const tarefas = [];
+    const visitar = (slot, bag) => {
+      Object.keys((bag && bag.arquivos) || {}).forEach((nome) => {
+        const arq = bag.arquivos[nome];
+        if (arq && arq._pendente) tarefas.push(this.salvarArquivoNuvem(arq._slot || slot, nome, arq));
+      });
+    };
+    Object.keys(this.acervo.anterior || {}).forEach((ano) => visitar("ant-" + ano, this.acervo.anterior[ano]));
+    Object.keys(this.acervo.meses || {}).forEach((chave) => visitar(chave, this.acervo.meses[chave]));
+    if (!tarefas.length) return;
+    this._nuvemToken = (this._nuvemToken || 0) + 1;
+    try {
+      await Promise.all(tarefas);
+      this.gravarLocal();
+    } catch (e) {
+      this.error = "O arquivo entrou na tela, mas não ficou salvo na nuvem: " + ((e && e.message) || e);
+    }
+  },
+
+  async enviarAcervo() {
+    const tarefas = [];
+    const visitar = (slot, bag) => {
+      Object.keys((bag && bag.arquivos) || {}).forEach((nome) => {
+        const arq = bag.arquivos[nome];
+        if (arq) tarefas.push(this.salvarArquivoNuvem(slot, nome, arq));
+      });
+    };
+    Object.keys(this.acervo.anterior || {}).forEach((ano) => visitar("ant-" + ano, this.acervo.anterior[ano]));
+    Object.keys(this.acervo.meses || {}).forEach((chave) => visitar(chave, this.acervo.meses[chave]));
+    if (!tarefas.length) return;
+    this._nuvemToken = (this._nuvemToken || 0) + 1;
+    await Promise.all(tarefas);
+    this.gravarLocal();
+  },
+
+  apagarNuvem(docId) {
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (!docId || !fx || !db) return;
+    this._nuvemToken = (this._nuvemToken || 0) + 1;
+    fx.deleteDoc(fx.doc(db, "resultado_caixa", docId)).catch(() => {});
+  },
+
+  aplicarDoc(acervo, id, x) {
+    const nome = x.nome || id;
+    const arq = {
+      empresa: Number(x.empresa) || 0,
+      rotulo: x.rotulo || "",
+      entradas: x.entradas || {},
+      contas: x.contas || {},
+      contasPorCc: x.contasPorCc || {},
+      _doc: id,
+      _slot: x.slot || ""
+    };
+    const slot = String(x.slot || "");
+    if (slot.indexOf("ant-") === 0) {
+      const ano = slot.slice(4);
+      if (!acervo.anterior[ano]) acervo.anterior[ano] = { arquivos: {} };
+      acervo.anterior[ano].arquivos[nome] = arq;
+      return;
+    }
+    if (/^\d{4}-\d{2}$/.test(slot)) {
+      if (!acervo.meses[slot]) acervo.meses[slot] = { arquivos: {} };
+      acervo.meses[slot].arquivos[nome] = arq;
+    }
+  },
+
+  async carregarNuvem() {
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (!fx || !db) return;
+    const token = this._nuvemToken || 0;
+    const vazio = !this.temAcervo();
+    if (vazio) {
+      this.lendo = true;
+      this.render();
+    }
+    try {
+      const snap = await fx.getDocs(fx.collection(db, "resultado_caixa"));
+      if ((this._nuvemToken || 0) !== token) return;
+      if (snap.empty) {
+        if (this.temAcervo()) await this.enviarAcervo();
+        this.lendo = false;
+        if ((this._nuvemToken || 0) === token) this.render();
+        return;
+      }
+      const acervo = { anterior: {}, meses: {} };
+      snap.forEach((docSnap) => this.aplicarDoc(acervo, docSnap.id, docSnap.data() || {}));
+      if ((this._nuvemToken || 0) !== token) return;
+      this.acervo = acervo;
+      this._nuvemOk = true;
+      this.montarVista();
+      this.gravarLocal();
+    } catch (e) {
+      if (!this.temAcervo()) this.error = "Não consegui ler os arquivos salvos: " + ((e && e.message) || e);
+    }
+    this.lendo = false;
+    if ((this._nuvemToken || 0) === token) this.render();
   },
 
   bagLado(ano, lado) {
@@ -1048,6 +1494,9 @@ const ResultadoCaixaApp = {
 
   setMes(v) {
     this.mes = Number(v) || 1;
+    this.montarVista();
+    this._dfcKey = "";
+    this._dfcPedido = "";
     this.render();
   },
 
@@ -1141,7 +1590,8 @@ const ResultadoCaixaApp = {
       ? `<span class="rcx-arq" title="${caixaEsc(this.forecast.arquivo || "")}">${caixaEsc(this.forecast.arquivo || "forecast")}${fcPeriodo ? " · " + caixaEsc(fcPeriodo) : ""} <button type="button" onclick="ResultadoCaixaApp.removerForecast()">tirar</button></span>`
       : `<span class="rcx-muted">Nenhum forecast. Use Subir forecast na aba Entradas.</span>`;
     const agrupa = this.agrupar ? " Com “% Moura Leite”, cada valor está no percentual da Moura Leite cadastrado na empresa." : "";
-    const base = "Orçado e realizado vêm dos arquivos da competência atual (" + (atual || "—") + "). A coluna do ano anterior é o realizado dos arquivos da competência anterior" + (antN ? " (" + antN + ")" : "") + ".";
+    const mesNomeFaixa = nomesMes[(Number(this.mes) || 1) - 1] || "";
+    const base = "Orçado e realizado de " + (atual || "—") + " vêm do arquivo enviado para " + mesNomeFaixa + ". A coluna do ano anterior é o realizado do arquivo de " + (antN || "o ano anterior") + ", o mesmo em todos os meses.";
     const nota = lado === "entradas"
       ? base + " Livia, Livia I e Livia II aparecem como Central Parque. Empreendimentos com o mesmo nome ganham a sigla da cidade. MLDU aparece como Corporativo. Os quatro maiores desvios positivos e os quatro negativos do acumulado ficam à vista; o restante abre ao clicar em Outros."
         + " No gráfico de linhas, a linha do ano atual é o realizado até o mês escolhido e o Forecast segue com a projeção do relatório de forecast até dezembro, pelas mesmas contas da visão DFC (Receitas e receitas financeiras)." + agrupa
@@ -1149,8 +1599,12 @@ const ResultadoCaixaApp = {
     const avisoRateio = lado === "saidas" && this.faltaCentroNasSaidas()
       ? `<div class="rcx-erro">Para aplicar o % Moura Leite nas saídas destes arquivos, suba o Excel de novo. O arquivo que já estava salvo não guarda o centro de custo de cada conta.</div>`
       : "";
-    const avisoAnt = atual && !chipsAnt
-      ? `<div class="rcx-aviso">Nenhum arquivo de ${antN} ainda. A coluna do ano anterior fica zerada até você subir essa competência.</div>`
+    const avisoAnt = chipsAtual && !chipsAnt
+      ? `<div class="rcx-aviso">Nenhum arquivo de ${antN} ainda. A coluna do ano anterior fica zerada até você subir essa competência. Ela vale para todos os meses.</div>`
+      : "";
+    const outrosMeses = Object.keys((this.acervo && this.acervo.meses) || {}).some((k) => k !== this.chaveMes(atual) && Object.keys((((this.acervo.meses || {})[k] || {}).arquivos) || {}).length);
+    const avisoMes = atual && !chipsAtual && (chipsAnt || outrosMeses)
+      ? `<div class="rcx-aviso">Nenhum arquivo de ${mesNomeFaixa}/${atual}. Suba o comparativo desta competência. O de ${antN || "o ano anterior"} permanece salvo.</div>`
       : "";
     const seg = (on, txt, click, title) => `<button type="button" class="${on ? "is-on" : ""}" onclick="${click}"${title ? ` title="${title}"` : ""}>${txt}</button>`;
     return `
@@ -1190,11 +1644,11 @@ const ResultadoCaixaApp = {
       </div>
       ${this.arqsAberto ? `<div class="rcx-arqs-box">
         <div class="rcx-arqs-col">
-          <span class="rcx-arqs-label">Competência atual${atual ? " · " + atual : ""}</span>
+          <span class="rcx-arqs-label">Competência atual${atual ? " · " + mesNomeFaixa + "/" + atual : ""}</span>
           <div class="rcx-arqs">${chipsAtual || `<span class="rcx-muted">Nenhum arquivo desta competência.</span>`}</div>
         </div>
         <div class="rcx-arqs-col">
-          <span class="rcx-arqs-label">Competência anterior${antN ? " · " + antN : ""}</span>
+          <span class="rcx-arqs-label">Ano anterior${antN ? " · " + antN : ""}</span>
           <div class="rcx-arqs">${chipsAnt || `<span class="rcx-muted">Nenhum arquivo desta competência.</span>`}</div>
         </div>
         <div class="rcx-arqs-col">
@@ -1203,10 +1657,12 @@ const ResultadoCaixaApp = {
         </div>
       </div>` : ""}
       ${this.error ? `<div class="rcx-erro">${caixaEsc(this.error)}</div>` : ""}
+      ${this.aviso ? `<div class="rcx-aviso">${caixaEsc(this.aviso)}</div>` : ""}
       ${avisoRateio}
+      ${avisoMes}
       ${avisoAnt}
       ${this.dfcErro ? `<div class="rcx-erro">${caixaEsc(this.dfcErro)}</div>` : ""}
-      ${anos.length ? `<details class="rcx-ajuda"><summary><i data-lucide="info"></i> Como ler esta tabela</summary><p>${nota}</p></details>` : `<p class="rcx-vazio">Suba o Excel do comparativo orçado × realizado, visão DFC. Pode escolher o ano atual e o anterior juntos.</p>`}
+      ${anos.length ? `<details class="rcx-ajuda"><summary><i data-lucide="info"></i> Como ler esta tabela</summary><p>${nota}</p></details>` : `<p class="rcx-vazio">Suba o comparativo orçado × realizado por centro de custo. Pode ser o arquivo analítico das contas financeiras: ele entra na visão DFC. O de ${antN || "o ano anterior"} fica salvo para todos os meses. O de ${atual || "o ano corrente"} vale só para o mês selecionado.</p>`}
     `;
   },
 

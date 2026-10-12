@@ -5,12 +5,12 @@
 window.InserirNotaApp = {
   TESSERACT_URL: "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js",
   TOL: 0.05,
-  DOCUMENTOS: ["NFS", "NFSE", "NF", "NFE", "RPA", "FAT"],
+  DOCUMENTOS: ["NFS", "NFJ", "NFSE", "NF", "NFE", "RPA", "FAT"],
   MOTIVOS_CANCELAMENTO_KEY: "crm_fiscal_motivos_cancelamento",
 
   state: null,
   aba: "fila",
-  fila: { itens: [], carregando: false, carregada: false, erro: "", filtro: "abertas" },
+  fila: { itens: [], carregando: false, carregada: false, erro: "", situacao: ["devolvida"], situacaoAberta: false, situacaoBusca: "" },
 
   novoEstado() {
     const hoje = this.hojeIso();
@@ -31,6 +31,7 @@ window.InserirNotaApp = {
       preview: "",
       form: { documento: "NFS", numero: "", serie: "", emissao: "", movimento: hoje, companyId: "", notes: "", manterSaldo: true, anexar: true },
       qtdEditada: false,
+      documentoManual: false,
       duplicada: null,
       enviando: "",
       criada: null,
@@ -177,8 +178,9 @@ window.InserirNotaApp = {
         this.carregarEmpresas()
       ]);
       s.credor = credor && typeof credor === "object"
-        ? { id: pedido.supplierId, nome: credor.name || credor.tradeName || `Fornecedor ${pedido.supplierId}`, doc: this.digits(credor.cnpj || credor.cpf) }
-        : { id: pedido.supplierId, nome: `Fornecedor ${pedido.supplierId}`, doc: "" };
+        ? { id: pedido.supplierId, nome: credor.name || credor.tradeName || `Fornecedor ${pedido.supplierId}`, doc: this.digits(credor.cnpj || credor.cpf), pjColab: !!(window.NotaFiscalCheck && NotaFiscalCheck.ehColaboradorPj(credor)) }
+        : { id: pedido.supplierId, nome: `Fornecedor ${pedido.supplierId}`, doc: "", pjColab: false };
+      if (s.credor.pjColab && !s.documentoManual) s.form.documento = "NFJ";
       s.cc = cc;
       s.empresaCc = cc.companyId;
       s.previsao = previsao;
@@ -300,17 +302,19 @@ window.InserirNotaApp = {
 
   async verificarDuplicada() {
     const s = this.state;
-    const numero = s.form.numero;
-    if (!s.pedido || !numero) { s.duplicada = null; return; }
-    const chave = `${s.pedido.supplierId}|${numero}|${s.form.serie}|${s.form.documento}`;
+    const numero = String(s.form.numero || "").trim();
+    const companyId = s.form.companyId;
+    if (!s.pedido || !numero || !companyId) { s.duplicada = null; return; }
+    const documento = s.form.documento || "";
+    const chave = `${companyId}|${s.pedido.supplierId}|${numero}|${documento}`;
     if (s.duplicada && s.duplicada.chave === chave) return;
     s.duplicada = { chave, conferindo: true };
     this.pintarConferencia();
     try {
-      const res = await this.get(`/purchase-invoices?supplierId=${encodeURIComponent(s.pedido.supplierId)}&number=${encodeURIComponent(numero)}&limit=20`);
+      const achada = window.NotaFiscalCheck
+        ? await NotaFiscalCheck.notaExistente({ companyId, supplierId: s.pedido.supplierId, numero, documento })
+        : null;
       if (!s.duplicada || s.duplicada.chave !== chave) return;
-      const achada = this.lista(res).find((n) => String(n.number) === String(numero)
-        && (!s.form.serie || !n.series || String(n.series).trim().toUpperCase() === s.form.serie.trim().toUpperCase()));
       s.duplicada = { chave, achada: achada || null };
     } catch (e) {
       if (s.duplicada && s.duplicada.chave === chave) s.duplicada = { chave, erro: String((e && e.message) || e) };
@@ -682,10 +686,11 @@ window.InserirNotaApp = {
 
     if (s.credor && window.FilaNotasFiscais) FilaNotasFiscais.avisosAprendidos(s.credor.doc).forEach((t) => avisos.push(t));
     const dup = s.duplicada;
-    if (dup && dup.achada) erros.push(`Esta nota já está cadastrada no Sienge (sequencial ${dup.achada.sequentialNumber}, emissão ${this.dataBr(dup.achada.issueDate)}).`);
-    else if (dup && dup.conferindo) avisos.push("Conferindo se a nota já existe no Sienge…");
-    else if (dup && dup.erro) avisos.push("Não consegui conferir se a nota já existe no Sienge.");
-    else if (dup) oks.push("Nota ainda não cadastrada no Sienge.");
+    if (f.numero && f.companyId && s.pedido && !dup) erros.push("Ainda falta conferir no Sienge se esta nota já existe para esta empresa e este credor.");
+    else if (dup && dup.achada) erros.push(window.NotaFiscalCheck ? NotaFiscalCheck.textoNotaExistente(dup.achada, { companyId: f.companyId, numero: f.numero, documento: f.documento }) : "Esta nota já está no Sienge para esta empresa e este credor. O lançamento foi recusado.");
+    else if (dup && dup.conferindo) erros.push("Conferindo no Sienge se esta nota já existe para esta empresa e este credor.");
+    else if (dup && dup.erro) avisos.push("Não consegui conferir no Sienge se esta nota já foi lançada.");
+    else if (dup) oks.push(`A ${f.documento || "nota"} ${f.numero} ainda não está no Sienge para a empresa ${f.companyId} e este credor.`);
     const fiscal = s.fiscal;
     if (fiscal && fiscal.carregando) erros.push("Ainda estou cruzando a nota com o pedido, o CNAE e o endereço da empresa.");
     else if (fiscal) {
@@ -701,7 +706,6 @@ window.InserirNotaApp = {
   async inserir() {
     const s = this.state;
     if (!this.podeEditar()) { alert("Sem permissão para inserir notas no Sienge."); return; }
-    if (!s.validado) { alert("Clique em Validar antes de inserir a nota no Sienge."); return; }
     const c = this.conferir();
     if (c.erros.length) { alert(c.erros.join("\n")); return; }
     const f = s.form;
@@ -755,14 +759,19 @@ window.InserirNotaApp = {
       s.duplicada = Object.assign({}, s.duplicada, { achada: { sequentialNumber: s.criada.seq, issueDate: f.emissao } });
       if (s.item) {
         const u = FilaNotasFiscais.usuario();
+        const quando = Date.now();
         try {
-          await FilaNotasFiscais.atualizar(s.item, { status: "lancada", seqSienge: s.criada.seq, numeroNota: String(f.numero), lancadoPor: u.nome, lancadoPorEmail: u.email, lancadoEm: Date.now() },
-            "lançada", `sequencial ${s.criada.seq}`);
-          log.push("Nota marcada como lançada na fila do fiscal.");
+          await FilaNotasFiscais.atualizar(s.item, {
+            status: "lancada", seqSienge: s.criada.seq, numeroNota: String(f.numero), billId: s.billId || "",
+            lancadoPor: u.nome, lancadoPorEmail: u.email, lancadoEm: quando,
+            validadoEm: quando, validadoPor: u.nome, validadoPorEmail: u.email
+          }, "lançada", `sequencial ${s.criada.seq}`);
+          log.push("Nota marcada como lançada e validada na fila do fiscal.");
         } catch (e) {
           log.push(`A nota entrou no Sienge, mas não consegui marcar como lançada na fila: ${e.message}`);
         }
       }
+      this.auditarValidacao();
       s.criada = null;
     } catch (e) {
       const m = (e && e.message) || String(e);
@@ -848,9 +857,18 @@ window.InserirNotaApp = {
     this.render();
     try {
       const aviso = await this.consistirParcelas(billId, valor, venc);
-      if (aviso) log.push(aviso);
+      if (aviso && aviso.aviso) log.push(aviso.aviso);
+      if (aviso && aviso.gravou) {
+        this.auditarTitulo("ok", `Parcelas do título ${billId} ajustadas no Sienge${aviso.excluidas ? " · " + aviso.excluidas + " parcela(s) excluída(s)" : ""}`, {
+          action: "Atualizar título", method: aviso.excluidas ? "DELETE" : "PATCH", billId,
+          endpoint: "/bills/" + billId + "/installments"
+        });
+      }
     } catch (e) {
       log.push(`Não consegui ajustar as parcelas do título ${billId}: ${e.message}`);
+      this.auditarTitulo("erro", `Falha ao ajustar as parcelas do título ${billId}: ${e.message}`, {
+        action: "Atualizar título", method: "PATCH", billId, endpoint: "/bills/" + billId + "/installments", erro: e.message
+      });
     }
     if (pag && pag.forma) {
       s.enviando = "Gravando a forma de pagamento no título…";
@@ -858,8 +876,16 @@ window.InserirNotaApp = {
       try {
         const msg = await this.informarPagamento(billId, pag);
         if (msg) log.push(msg);
+        this.auditarTitulo("ok", `Forma de pagamento (${pag.forma}) gravada no título ${billId}`, {
+          action: "Atualizar título", method: "PATCH", billId,
+          endpoint: "/bills/" + billId + "/installments/payment-information"
+        });
       } catch (e) {
         log.push(`Não consegui gravar a forma de pagamento no título ${billId}: ${e.message}`);
+        this.auditarTitulo("erro", `Falha ao gravar a forma de pagamento no título ${billId}: ${e.message}`, {
+          action: "Atualizar título", method: "PATCH", billId,
+          endpoint: "/bills/" + billId + "/installments/payment-information", erro: e.message
+        });
       }
     }
   },
@@ -878,13 +904,13 @@ window.InserirNotaApp = {
       inst = await ler();
       if (!inst.length) await new Promise((r) => setTimeout(r, 800));
     }
-    if (!inst.length) return "O título ainda não tem parcela. Abra a aba Título no Sienge e salve para o sistema reconhecer o título.";
+    if (!inst.length) return { aviso: "O título ainda não tem parcela. Abra a aba Título no Sienge e salve para o sistema reconhecer o título.", gravou: false };
     const valorDe = (p) => Number(p.originalAmount != null ? p.originalAmount : p.amount) || 0;
     const idDe = (p, i) => (p.installmentNumber != null ? p.installmentNumber : (p.installmentId != null ? p.installmentId : i + 1));
     const soma = inst.reduce((t, p) => t + valorDe(p), 0);
     const fecha = alvo == null || Math.abs(soma - alvo) <= 0.02;
     const dataOk = !vencimento || inst.every((p) => String(p.dueDate || "").slice(0, 10) === vencimento);
-    if (fecha && dataOk && inst.length === 1) return "";
+    if (fecha && dataOk && inst.length === 1) return { aviso: "", gravou: false };
     if (inst.length > 1 && alvo != null) {
       await this.enviar(`/bills/${encodeURIComponent(billId)}`, {
         method: "PATCH",
@@ -905,6 +931,7 @@ window.InserirNotaApp = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
     });
+    const excluidas = Math.max(0, inst.length - 1);
     for (let i = 1; i < inst.length; i++) {
       const id = idDe(inst[i], i);
       const path = `/bills/${encodeURIComponent(billId)}/installments/${encodeURIComponent(id)}`;
@@ -917,7 +944,7 @@ window.InserirNotaApp = {
         }).catch(() => {});
       }
     }
-    return "";
+    return { aviso: "", gravou: true, excluidas };
   },
 
   contaDaTransferencia(pag) {
@@ -1005,6 +1032,29 @@ window.InserirNotaApp = {
     return [pag.data ? this.dataBr(pag.data) : "", pag.forma || "", pag.detalhe || ""].filter(Boolean).join(" · ");
   },
 
+  auditarValidacao() {
+    if (!window.AuditService || typeof AuditService.logEvent !== "function") return;
+    const s = this.state;
+    const u = this.usuario();
+    const f = s.form || {};
+    const nota = [f.documento, f.numero].filter(Boolean).join(" ");
+    try {
+      AuditService.logEvent({
+        module: "Fiscal",
+        action: "Validar nota",
+        status: "ok",
+        summary: `Nota ${nota || "fiscal"} validada por ${u.nome || "fiscal"}${s.billId ? ", título " + s.billId : ""} · pedido ${s.pedidoNome || ""}`,
+        user: u.nome, userEmail: u.email,
+        customerLabel: s.credor ? s.credor.nome : "",
+        customerId: s.pedido && s.pedido.supplierId != null ? String(s.pedido.supplierId) : "",
+        enterpriseId: f.companyId != null ? String(f.companyId) : "",
+        titleId: s.billId || "",
+        endpoint: "/purchase-invoices", method: "POST",
+        details: { pedido: s.pedidoNome, pedidoApi: s.pedidoApi, documento: f.documento, numero: f.numero, serie: f.serie, sequencial: s.criada && s.criada.seq, validadoPor: u.nome }
+      });
+    } catch (e) {}
+  },
+
   auditar(status, summary, details) {
     if (!window.AuditService || typeof AuditService.logEvent !== "function") return;
     const s = this.state;
@@ -1023,16 +1073,41 @@ window.InserirNotaApp = {
     } catch (e) {}
   },
 
+  auditarTitulo(status, summary, details) {
+    if (!window.AuditService || typeof AuditService.logEvent !== "function") return;
+    const s = this.state;
+    const u = this.usuario();
+    const d = details || {};
+    try {
+      AuditService.logEvent({
+        module: "Fiscal",
+        action: d.action || "Atualizar título",
+        status,
+        summary,
+        user: u.nome,
+        userEmail: u.email,
+        customerLabel: s.credor ? s.credor.nome : "",
+        enterpriseId: s.form && s.form.companyId != null ? String(s.form.companyId) : "",
+        titleId: d.billId ? String(d.billId) : (s.billId || ""),
+        endpoint: d.endpoint || "/bills",
+        method: d.method || "PATCH",
+        details: d
+      });
+    } catch (e) {}
+  },
+
   /* ---------- eventos ---------- */
   setCampo(campo, valor) {
     const f = this.state.form;
     f[campo] = typeof f[campo] === "boolean" ? !!valor : String(valor == null ? "" : valor);
     if (["numero", "serie", "documento", "emissao", "companyId"].includes(campo)) this.invalidarValidacao();
-    if (["numero", "serie", "documento"].includes(campo)) {
-      if (campo !== "documento" && /^NF\b/.test(f.notes || "")) f.notes = this.observacaoPadrao();
+    if (campo === "documento") this.state.documentoManual = true;
+    if (["numero", "documento", "companyId"].includes(campo)) {
+      this.state.duplicada = null;
       clearTimeout(this._dupT);
-      this._dupT = setTimeout(() => this.verificarDuplicada(), 600);
+      this._dupT = setTimeout(() => this.verificarDuplicada(), 400);
     }
+    if (["numero", "serie", "documento"].includes(campo) && campo !== "documento" && /^NF\b/.test(f.notes || "")) f.notes = this.observacaoPadrao();
     this.pintarConferencia();
   },
 
@@ -1092,19 +1167,14 @@ window.InserirNotaApp = {
     this.render();
   },
 
-  setFiltroFila(v) {
-    this.fila.filtro = v;
-    this.render();
-  },
-
   filaFiltrada() {
-    const { itens, filtro } = this.fila;
-    if (filtro === "todas") return itens;
-    if (filtro !== "abertas") return itens.filter((x) => x.status === filtro);
+    const itens = this.fila.itens || [];
+    const extras = new Set(this.fila.situacao || []);
+    const sempre = new Set(["pendente", "em_lancamento"]);
     const dia = (x) => String((x.pagamento && x.pagamento.data) || "9999");
-    const abertas = itens.filter((x) => FilaNotasFiscais.aberta(x)).sort((a, b) => dia(a).localeCompare(dia(b)) || (a.criadoEm || 0) - (b.criadoEm || 0));
-    const acompanhamento = itens.filter((x) => x.status === "devolvida");
-    return abertas.concat(acompanhamento);
+    return itens
+      .filter((x) => sempre.has(x.status) || extras.has(x.status))
+      .sort((a, b) => dia(a).localeCompare(dia(b)) || (a.criadoEm || 0) - (b.criadoEm || 0));
   },
 
   async confirmar(msg) {
@@ -1516,18 +1586,10 @@ window.InserirNotaApp = {
     const lista = this.filaFiltrada();
     const hoje = this.hojeIso();
     const pode = this.podeEditar();
-    const conta = (fn) => f.itens.filter(fn).length;
-    const filtros = [
-      ["abertas", `Acompanhamento (${conta((x) => FilaNotasFiscais.aberta(x) || x.status === "devolvida")})`],
-      ["lancada", `Lançadas (${conta((x) => x.status === "lancada")})`],
-      ["devolvida", `Devolvidas (${conta((x) => x.status === "devolvida")})`],
-      ["excluida", `Excluídas (${conta((x) => x.status === "excluida")})`],
-      ["cancelada", `Canceladas (${conta((x) => x.status === "cancelada")})`],
-      ["todas", `Todas (${f.itens.length})`]
-    ];
+    const conta = (st) => f.itens.filter((x) => x.status === st).length;
     const corpo = f.carregando && !f.itens.length ? `<p class="fnf-vazio"><span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;"></span> Carregando a fila…</p>`
       : (f.erro ? `<p class="inf-erro">${esc(f.erro)}</p>`
-        : (!lista.length ? `<p class="fnf-vazio">${f.filtro === "abertas" ? "Nenhuma nota em aberto ou devolvida." : "Nenhuma nota nesta situação."}</p>`
+        : (!lista.length ? `<p class="fnf-vazio">Nenhuma nota nesta situação.</p>`
           : `<div class="fnf-fila">${lista.map((x) => {
               const p = x.pagamento || {};
               const atrasado = FilaNotasFiscais.aberta(x) && p.data && p.data < hoje;
@@ -1557,16 +1619,49 @@ window.InserirNotaApp = {
                 <div class="fnf-fila-lado">
                   ${aberta && pode ? `<div class="fnf-fila-acoes">
                     <button type="button" class="btn btn-outline inf-btn-sm" onclick="InserirNotaApp.lancarDaFila('${esc(x.id)}')"><i data-lucide="list-checks"></i> Abrir</button>
-                    <button type="button" class="btn btn-primary inf-btn-sm" ${validada ? "" : "disabled"} title="${validada ? "Abrir o lançamento" : "Valide a nota antes de lançar no Sienge"}" onclick="InserirNotaApp.lancarDaFila('${esc(x.id)}')"><i data-lucide="file-up"></i> ${x.status === "em_lancamento" && validada ? "Continuar" : "Lançar"}</button>
                     <button type="button" class="btn btn-outline inf-btn-sm" onclick="InserirNotaApp.devolver('${esc(x.id)}')"><i data-lucide="corner-up-left"></i> Devolver</button>
                   </div>` : ""}
                 </div>
               </article>`;
             }).join("")}</div>`));
+    const situacao = Array.isArray(f.situacao) ? f.situacao : ["devolvida"];
+    const filtro = window.MlEmpresaFilter ? MlEmpresaFilter.html({
+      id: "inf-fila-sit",
+      label: "Situação",
+      items: [
+        { id: "devolvida", label: `Devolvidas (${conta("devolvida")})` },
+        { id: "lancada", label: `Lançadas (${conta("lancada")})` },
+        { id: "excluida", label: `Excluídas (${conta("excluida")})` },
+        { id: "cancelada", label: `Canceladas (${conta("cancelada")})` }
+      ],
+      selectedIds: situacao,
+      open: !!f.situacaoAberta,
+      query: f.situacaoBusca || "",
+      emptyMeansAll: false,
+      emptyLabel: "Em aberto",
+      keepOrder: true,
+      nouns: { singular: "situação", plural: "situações", noMatch: "Nenhuma situação com esse nome." }
+    }) : "";
+    if (window.MlEmpresaFilter) {
+      MlEmpresaFilter.bind("inf-fila-sit", {
+        toggleOpen() { f.situacaoAberta = !f.situacaoAberta; InserirNotaApp.render(); },
+        close() { f.situacaoAberta = false; InserirNotaApp.render(); },
+        setQuery(q) { f.situacaoBusca = q; f.situacaoAberta = true; InserirNotaApp.render(); },
+        toggleId(id, on) {
+          const set = new Set(f.situacao || []);
+          if (on) set.add(id); else set.delete(id);
+          f.situacao = [...set];
+          f.situacaoAberta = true;
+          InserirNotaApp.render();
+        },
+        selectAll() { f.situacao = ["devolvida", "lancada", "excluida", "cancelada"]; f.situacaoAberta = true; InserirNotaApp.render(); },
+        selectNone() { f.situacao = []; f.situacaoAberta = true; InserirNotaApp.render(); }
+      });
+    }
     return `<div class="inf-card" style="margin:16px 20px;">
         <div class="fnf-barra">
-          <select onchange="InserirNotaApp.setFiltroFila(this.value)">${filtros.map(([v, t]) => `<option value="${v}" ${f.filtro === v ? "selected" : ""}>${t}</option>`).join("")}</select>
-          <span class="inf-muted">Por data de pagamento. Abra a nota, confira e clique em <b>Validar</b>. <b>Lançar</b> só libera depois dessa confirmação.</span>
+          ${filtro}
+          <span class="inf-muted">Em aberto entra sempre. Marque outras situações para vê-las junto. Abra a nota e insira no Sienge: esse envio é a validação.</span>
           <button type="button" class="btn btn-outline inf-btn-sm" onclick="InserirNotaApp.carregarFila(true)" ${f.carregando ? "disabled" : ""}><i data-lucide="refresh-cw"></i> Atualizar</button>
         </div>
         ${corpo}
@@ -1623,18 +1718,7 @@ window.InserirNotaApp = {
     const s = this.state;
     const travado = !!s.enviando || c.erros.length > 0 || !this.podeEditar();
     const btn = document.getElementById("inf-inserir");
-    if (btn) btn.disabled = !!s.enviando;
-    const v = document.getElementById("inf-validar");
-    if (v) {
-      v.disabled = travado || !!s.validado;
-      v.textContent = s.validado ? "Validada" : "Validar";
-      v.classList.toggle("btn-primary", !s.validado);
-      v.classList.toggle("btn-outline", !!s.validado);
-    }
-    const h = document.getElementById("inf-validacao");
-    if (h) h.textContent = s.validado
-      ? "Nota validada. Pode inserir no Sienge."
-      : "Clique em Validar depois de conferir. Inserir no Sienge só libera depois dessa confirmação.";
+    if (btn) btn.disabled = travado;
   },
 
   conferenciaHtml() {
@@ -1681,12 +1765,14 @@ window.InserirNotaApp = {
     if (f.companyId && !s.empresas.some((c) => c.id === String(f.companyId))) empOpts.push(`<option value="${this.esc(f.companyId)}" selected>${this.esc(f.companyId)}</option>`);
     const docs = this.DOCUMENTOS.includes(f.documento) ? this.DOCUMENTOS : this.DOCUMENTOS.concat([f.documento]);
     const lido = n ? `<p class="inf-muted">Lido por ${this.esc(n.origem || "")}${n.cnpjPrestador ? ` · prestador ${this.esc(this.docFmt(n.cnpjPrestador))}` : ""}${n.cnpjTomador ? ` · tomador ${this.esc(this.docFmt(n.cnpjTomador))}` : ""}${n.retencoes != null ? ` · retenções ${this.money(n.retencoes)}` : ""}${n.liquido != null ? ` · líquido ${this.money(n.liquido)}` : ""}. Confira os campos com a nota ao lado.</p>` : "";
+    const nfj = s.credor && s.credor.pjColab ? `<p class="inf-muted">Credor colaborador PJ: o documento deste lançamento é <b>NFJ</b>.</p>` : "";
     return `
       <label class="inf-file"><i data-lucide="file-up"></i><span>${s.arquivo ? this.esc(s.arquivo.name) : "Escolher a nota (PDF, XML ou imagem)"}</span>
         <input type="file" accept=".pdf,.xml,image/*" onchange="InserirNotaApp.lerArquivo(this)"></label>
       ${s.lendo ? `<p class="inf-muted"><span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;"></span> <span id="inf-lendo">${this.esc(s.lendo)}</span></p>` : ""}
       ${s.leituraErro ? `<p class="inf-erro">${this.esc(s.leituraErro)}</p>` : ""}
       ${lido}
+      ${nfj}
       <div class="inf-form">
         <div><label>Documento</label><select onchange="InserirNotaApp.setCampo('documento', this.value)">${docs.map((d) => `<option ${d === f.documento ? "selected" : ""}>${this.esc(d)}</option>`).join("")}</select></div>
         <div><label>Número</label><input value="${this.esc(f.numero)}" oninput="InserirNotaApp.setCampo('numero', this.value)"></div>
@@ -1755,7 +1841,7 @@ window.InserirNotaApp = {
 
   css() {
     return `
-        .inf-wrap { padding: 20px; max-width: none; margin: 0 auto; display: grid; grid-template-columns: minmax(420px, 0.78fr) minmax(0, 1.55fr); gap: 16px; align-items: start; }
+        .inf-wrap { padding: 20px; max-width: none; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 16px; align-items: start; }
         .inf-wrap > div { min-width: 0; }
         .inf-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
         .inf-card h3 { margin: 0 0 10px; font-size: 0.95rem; color: #105436; display: flex; align-items: center; gap: 8px; }
@@ -1872,7 +1958,6 @@ window.InserirNotaApp = {
     const s = this.state;
     const pode = this.podeEditar();
     const travado = !!s.enviando || this.conferir().erros.length > 0 || !pode;
-    const bloqueado = travado || !s.validado;
     return `
       <div class="inf-wrap">
         <div>
@@ -1897,12 +1982,11 @@ window.InserirNotaApp = {
             <div id="inf-conf">${this.conferenciaHtml()}</div>
             <div id="inf-fiscal">${window.NotaFiscalCheck ? NotaFiscalCheck.painelEnvio(s.fiscal) : ""}</div>
             <label class="inf-chk" style="margin-top:10px;"><input type="checkbox" ${s.form.anexar ? "checked" : ""} onchange="InserirNotaApp.setCampo('anexar', this.checked)"> Anexar ${s.item && (s.item.anexos || []).length > 1 ? "a nota e os outros anexos do envio" : "o arquivo da nota"} no título do contas a pagar</label>
-            <p id="inf-validacao" class="inf-muted">${s.validado ? "Nota validada. Pode inserir no Sienge." : "Clique em Validar depois de conferir. Inserir no Sienge só libera depois dessa confirmação."}</p>
+            <p class="inf-muted">Inserir no Sienge valida a nota e registra quem conferiu.</p>
             <div class="inf-acoes">
               <button type="button" class="btn btn-outline" onclick="InserirNotaApp.recomecar()" ${s.enviando ? "disabled" : ""}><i data-lucide="rotate-ccw"></i> Recomeçar</button>
-              <button type="button" id="inf-validar" class="btn ${s.validado ? "btn-outline" : "btn-primary"}" onclick="InserirNotaApp.validar()" ${(travado || s.validado) ? "disabled" : ""}>${s.validado ? "Validada" : "Validar"}</button>
-              <button type="button" id="inf-inserir" class="btn btn-primary" onclick="InserirNotaApp.inserir()" ${s.enviando ? "disabled" : ""}
-                title="${pode ? (s.validado ? "" : "Valide a nota antes de inserir no Sienge") : "Sem permissão de edição em Fiscal › Validar nota"}">
+              <button type="button" id="inf-inserir" class="btn btn-primary" onclick="InserirNotaApp.inserir()" ${travado ? "disabled" : ""}
+                title="${pode ? (this.conferir().erros.length ? "A conferência ainda tem pendência." : "Insere no Sienge e registra a validação") : "Sem permissão de edição em Fiscal › Validar nota"}">
                 ${s.enviando ? `<span class="btn-spin"></span> ${this.esc(s.enviando)}` : `<i data-lucide="upload"></i> Inserir no Sienge`}</button>
             </div>
           </div>

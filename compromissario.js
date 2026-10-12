@@ -98,7 +98,8 @@ const CompromissarioApp = {
     cessaoByCompany: {},
     cessaoMonth: '',
     searchMonth: '',
-    cessaoBlobs: {}
+    cessaoBlobs: {},
+    analisando: false
   },
 
   normalizeCityKey(city) {
@@ -265,6 +266,103 @@ const CompromissarioApp = {
     if (this.state.uiTab === 'notificar') this.ensureNotificarLoaded();
   },
 
+  avancarBuscarLancamentos() {
+    const el = document.getElementById('comp-pref-month');
+    const month = String((el && el.value) || '').slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(month)) {
+      alert('Informe a competência antes de buscar os lançamentos.');
+      return;
+    }
+    if (this.state.cessaoMonth !== month || this.state.searchMonth !== month) {
+      this.state.searchMonth = month;
+      this.state.contracts = [];
+      this.state.files = {};
+      this.invalidateVendasPrefetch();
+      this.ensureCessaoMonth(month);
+    } else {
+      this.state.searchMonth = month;
+    }
+    const cur = this._vendasPrefetch;
+    if (!cur || cur.month !== month || cur.status === 'error' || cur.status === 'cancelled') {
+      this.prefetchVendasDistratos(month);
+    }
+    this.setUiTab('cessoes');
+  },
+
+  analisarMovimentacoes() {
+    if (!this.competenciaValue()) {
+      alert('Informe a competência na aba Parâmetros.');
+      return;
+    }
+    if (!this.isCessaoGateReady()) {
+      this.assertCessaoGate('analisar as movimentações');
+      return;
+    }
+    this.state.analisando = true;
+    this.setUiTab('notificar');
+  },
+
+  invalidateVendasPrefetch() {
+    this._vendasPrefetchGen = (this._vendasPrefetchGen || 0) + 1;
+    this._vendasPrefetch = null;
+    this.syncPrefetchStatus();
+  },
+
+  prefetchStatusHtml() {
+    const cur = this._vendasPrefetch;
+    const month = this.competenciaValue();
+    if (!cur || cur.month !== month) return '';
+    if (cur.status === 'running') return '<span class="comp-pref-pill is-wait">Buscando vendas e distratos…</span>';
+    if (cur.status === 'done') return '<span class="comp-pref-pill is-ok">Vendas e distratos prontos</span>';
+    if (cur.status === 'error') return '<span class="comp-pref-pill is-warn">Falha ao buscar vendas e distratos</span>';
+    return '';
+  },
+
+  syncPrefetchStatus() {
+    const el = document.getElementById('comp-prefetch-status');
+    if (el) el.innerHTML = this.prefetchStatusHtml();
+  },
+
+  prefetchVendasDistratos(monthVal, force) {
+    const cur = this._vendasPrefetch;
+    if (!force && cur && cur.month === monthVal && cur.promise && cur.status !== 'error' && cur.status !== 'cancelled') {
+      return cur.promise;
+    }
+    const gen = (this._vendasPrefetchGen = (this._vendasPrefetchGen || 0) + 1);
+    const [year, month] = String(monthVal).split('-');
+    const firstDay = year + '-' + month + '-01';
+    const lastDay = new Date(year, parseInt(month, 10), 0).getDate();
+    const finalDay = year + '-' + month + '-' + lastDay;
+    const promise = (async () => {
+      const [vendas, distratos] = await Promise.all([
+        this.fetchContractPages('/sales-contracts?situation=2&initialIssueDate=' + firstDay + '&finalIssueDate=' + finalDay),
+        this.fetchContractPages('/sales-contracts?situation=3&initialCancelDate=' + firstDay + '&finalCancelDate=' + finalDay)
+      ]);
+      if (this._vendasPrefetchGen !== gen) {
+        const err = new Error('cancelled');
+        err.cancelled = true;
+        throw err;
+      }
+      if (this._vendasPrefetch && this._vendasPrefetch.gen === gen) {
+        this._vendasPrefetch.status = 'done';
+        this._vendasPrefetch.vendas = vendas;
+        this._vendasPrefetch.distratos = distratos;
+      }
+      this.syncPrefetchStatus();
+      return { month: monthVal, vendas: vendas, distratos: distratos };
+    })();
+    promise.catch((e) => {
+      if (this._vendasPrefetch && this._vendasPrefetch.gen === gen) {
+        this._vendasPrefetch.status = e && e.cancelled ? 'cancelled' : 'error';
+        this._vendasPrefetch.error = e;
+      }
+      this.syncPrefetchStatus();
+    });
+    this._vendasPrefetch = { month: monthVal, gen: gen, status: 'running', promise: promise };
+    this.syncPrefetchStatus();
+    return promise;
+  },
+
   unconfiguredCities() {
     const configs = this.loadConfigs();
     return this.getCitiesWithAssignedOperator().filter((city) => !this.cityIsConfigured(configs[this.normalizeCityKey(city)]));
@@ -358,10 +456,13 @@ const CompromissarioApp = {
           <input type="month" id="comp-pref-month" class="tvig-comp-input" value="${this.escHtml(month)}"
             onchange="CompromissarioApp.onMonthChange()">
         </div>
+        <button type="button" class="btn btn-primary cc-atualizar" ${month ? '' : 'disabled'}
+          onclick="CompromissarioApp.avancarBuscarLancamentos()">
+          Avançar buscar lançamentos <i data-lucide="arrow-right" style="width:14px;height:14px;"></i>
+        </button>
         <div class="cc-toolbar-actions">
           ${cities.length ? `<span class="comp-pref-pill is-ok">${okCount} configurada(s)</span>` : ''}
           ${missing.length ? `<span class="comp-pref-pill is-warn">${missing.length} sem configuração</span>` : ''}
-          ${month ? `<button type="button" class="btn btn-primary cc-atualizar" onclick="CompromissarioApp.setUiTab('cessoes')">Continuar para Cessões <i data-lucide="arrow-right" style="width:14px;height:14px;"></i></button>` : ''}
         </div>
       </div>
       ${missing.length ? `
@@ -428,11 +529,13 @@ const CompromissarioApp = {
           <span id="comp-pref-count" style="font-size:0.78rem;color:#64748b;">0 encontrados</span>
         </div>
         <div id="comp-pref-tbody" class="comp-pref-mov-body">
-          <div style="text-align:center;padding:32px;color:#94a3b8;">Clique em Carregar movimentos.</div>
+          ${this.notificarBodyInicial()}
         </div>
       </div>
     `;
-    if (this.state.contracts && this.state.contracts.length) this.renderTable();
+    if (!this.state.analisando && this.state.searchMonth === this.competenciaValue() && this.state.contracts && this.state.contracts.length) {
+      this.renderTable();
+    }
   },
 
   renderFollowupTab() {
@@ -488,11 +591,69 @@ const CompromissarioApp = {
 
   ensureNotificarLoaded() {
     if (!this.competenciaValue() || !this.isCessaoGateReady()) return;
-    if (this.state.contracts && this.state.contracts.length) {
+    if (this.state.loading) return;
+    const sameMonth = this.state.searchMonth === this.competenciaValue();
+    if (sameMonth && this.state.contracts && this.state.contracts.length && !this.state.analisando) {
       this.renderTable();
       return;
     }
-    this.fetchContracts();
+    this.concluirMovimentos(false);
+  },
+
+  notificarLoadingMarkup(text, pct) {
+    const w = Math.max(2, Math.min(100, Math.round(Number(pct) || 0)));
+    return `<div id="comp-pref-load" class="comp-pref-load">
+      <div class="loading-spinner" aria-hidden="true"></div>
+      <p id="comp-pref-load-text">${this.escHtml(text || 'Carregando…')}</p>
+      <div class="comp-pref-load-track"><div id="comp-pref-load-bar" style="width:${w}%"></div></div>
+    </div>`;
+  },
+
+  notificarBodyInicial() {
+    const sameMonth = this.state.searchMonth === this.competenciaValue();
+    if (sameMonth && this.state.contracts && this.state.contracts.length && !this.state.analisando) return '';
+    const pronto = this.prefetchPronto(this.competenciaValue());
+    return this.notificarLoadingMarkup(
+      pronto ? 'Processando arquivos das cessões…' : 'Buscando vendas e distratos…',
+      pronto ? 62 : 8
+    );
+  },
+
+  prefetchPronto(monthVal) {
+    const cur = this._vendasPrefetch;
+    return !!(cur && cur.month === monthVal && cur.status === 'done');
+  },
+
+  paintNotificarLoading(text, pct) {
+    const tbody = document.getElementById('comp-pref-tbody');
+    const countLabel = document.getElementById('comp-pref-count');
+    if (countLabel) countLabel.textContent = 'Carregando…';
+    if (!tbody) return;
+    const w = Math.max(2, Math.min(100, Number(pct) || 0));
+    const bar = document.getElementById('comp-pref-load-bar');
+    const label = document.getElementById('comp-pref-load-text');
+    if (!bar || !label) {
+      tbody.innerHTML = this.notificarLoadingMarkup(text, w);
+      return;
+    }
+    label.textContent = text;
+    bar.style.width = w + '%';
+  },
+
+  startLoadTicker(from, to, text) {
+    this.stopLoadTicker();
+    let pct = from;
+    this.paintNotificarLoading(text, pct);
+    this._loadTicker = setInterval(() => {
+      if (pct >= to) return;
+      pct = Math.min(to, pct + Math.max(0.35, (to - pct) * 0.08));
+      this.paintNotificarLoading(text, pct);
+    }, 280);
+  },
+
+  stopLoadTicker() {
+    if (this._loadTicker) clearInterval(this._loadTicker);
+    this._loadTicker = null;
   },
 
   normalizeUnitKey(name) {
@@ -996,7 +1157,14 @@ const CompromissarioApp = {
   },
 
   async reparseStoredCessaoFiles() {
-    if (this._reparseCessaoBusy) return;
+    if (this._reparseCessaoPromise) return this._reparseCessaoPromise;
+    let resolveGate;
+    let rejectGate;
+    const gate = new Promise((resolve, reject) => {
+      resolveGate = resolve;
+      rejectGate = reject;
+    });
+    this._reparseCessaoPromise = gate;
     this._reparseCessaoBusy = true;
     let changed = false;
     try {
@@ -1035,8 +1203,13 @@ const CompromissarioApp = {
       }
       await this.hydrateCessaoUnits();
       this.renderCessaoPanel();
+      resolveGate();
+    } catch (e) {
+      rejectGate(e);
+      throw e;
     } finally {
       this._reparseCessaoBusy = false;
+      this._reparseCessaoPromise = null;
     }
   },
 
@@ -1221,6 +1394,7 @@ const CompromissarioApp = {
     this.state.searchMonth = month;
     this.state.contracts = [];
     this.state.files = {};
+    this.invalidateVendasPrefetch();
     if (month) this.ensureCessaoMonth(month);
     else this.state.cessaoMonth = '';
     this.renderPrefeituraShell();
@@ -1377,8 +1551,9 @@ const CompromissarioApp = {
           <span class="comp-pref-pill is-comp">Competência ${this.escHtml(compTxt)}</span>
           ${pending ? `<span class="comp-pref-pill is-warn">${pending} empresa(s) sem declaração</span>` : `<span class="comp-pref-pill is-ok">Todas as empresas declaradas</span>`}
           ${totalMonth ? `<span class="comp-pref-pill is-ok">${totalMonth} cessão(ões) no mês${citySummary.length ? ' · ' + citySummary.map(([city, n]) => this.escHtml(city) + ' (' + n + ')').join(', ') : ''}</span>` : ''}
+          <span id="comp-prefetch-status">${this.prefetchStatusHtml()}</span>
         </div>
-        ${ready ? `<div class="cc-toolbar-actions"><button type="button" class="btn btn-primary cc-atualizar" onclick="CompromissarioApp.setUiTab('notificar')">Continuar para Notificar <i data-lucide="arrow-right" style="width:14px;height:14px;"></i></button></div>` : ''}
+        ${ready ? `<div class="cc-toolbar-actions"><button type="button" class="btn btn-primary cc-atualizar" onclick="CompromissarioApp.analisarMovimentacoes()">Analisar movimentações <i data-lucide="arrow-right" style="width:14px;height:14px;"></i></button></div>` : ''}
       </div>
       <div class="cc-scroll" id="comp-cessao-list">
         ${companies.length ? `
@@ -2450,35 +2625,40 @@ const CompromissarioApp = {
   },
 
   async fetchContracts() {
+    const already = this.state.searchMonth === this.competenciaValue()
+      && this.state.contracts && this.state.contracts.length;
+    await this.concluirMovimentos(!!already);
+  },
+
+  async concluirMovimentos(force) {
     if (this.state.loading) return;
-    if (!this.assertCessaoGate('buscar vendas e distratos')) return;
-    
-    const monthEl = document.getElementById('comp-pref-month');
-    const monthVal = (monthEl && monthEl.value) || this.competenciaValue();
+    if (!this.assertCessaoGate('analisar as movimentações')) {
+      this.state.analisando = false;
+      return;
+    }
+    const monthVal = this.competenciaValue();
     if (!monthVal) {
-      alert("Por favor, selecione um mês de referência.");
+      this.state.analisando = false;
+      alert('Por favor, selecione um mês de referência.');
       return;
     }
     this.state.searchMonth = monthVal;
     this.ensureCessaoMonth(monthVal);
     this.persistCessaoMonth();
-
-    // Parse month to first and last day
-    const [year, month] = monthVal.split('-');
-    const firstDay = `${year}-${month}-01`;
-    const lastDay = new Date(year, parseInt(month), 0).getDate();
-    const finalDay = `${year}-${month}-${lastDay}`;
-
-    const btn = document.getElementById('comp-pref-btn-search');
-    if (btn) btn.innerHTML = '<i data-lucide="loader" class="spin" style="width: 16px;"></i> <span>Buscando...</span>';
     this.state.loading = true;
+    this.state.analisando = true;
+
+    const jaPronto = !force && this.prefetchPronto(monthVal);
+    const btn = document.getElementById('comp-pref-btn-search');
+    if (btn) btn.disabled = true;
+    if (jaPronto) this.startLoadTicker(62, 88, 'Processando arquivos das cessões…');
+    else this.startLoadTicker(8, 58, 'Buscando vendas e distratos…');
 
     try {
-      const [vendas, distratos] = await Promise.all([
-        this.fetchContractPages(`/sales-contracts?situation=2&initialIssueDate=${firstDay}&finalIssueDate=${finalDay}`),
-        this.fetchContractPages(`/sales-contracts?situation=3&initialCancelDate=${firstDay}&finalCancelDate=${finalDay}`)
-      ]);
-
+      const pack = await this.prefetchVendasDistratos(monthVal, !!force);
+      if (this.competenciaValue() !== monthVal) return;
+      const vendas = (pack && pack.vendas) || [];
+      const distratos = (pack && pack.distratos) || [];
       vendas.forEach((v) => { v._operationType = 'Venda'; });
       distratos.forEach((d) => { d._operationType = 'Distrato'; });
 
@@ -2487,26 +2667,43 @@ const CompromissarioApp = {
       const vendaRaw = vendas.filter((v) => !destIds.has(String(v.id)));
       this.state._skippedIncorporacao = destRaw.filter((d) => !this.shouldNotifyContract(d)).length
         + vendaRaw.filter((v) => !this.shouldNotifyContract(v)).length;
+
+      this.stopLoadTicker();
+      this.paintNotificarLoading('Processando arquivos das cessões…', jaPronto ? 78 : 64);
       if (this._cessaoReparseTimer) {
         clearTimeout(this._cessaoReparseTimer);
         this._cessaoReparseTimer = null;
       }
       await this.reparseStoredCessaoFiles();
-      await this.hydrateCessaoUnits();
+      if (this.competenciaValue() !== monthVal) return;
+      this.paintNotificarLoading('Processando arquivos das cessões…', 92);
+
       const movements = this.buildMovements(vendas, distratos, monthVal);
       const cessaoMoves = this.buildCessaoMovements(monthVal);
       this.state.contracts = movements.concat(cessaoMoves);
-
+      this.paintNotificarLoading('Montando movimentos…', 100);
+      this.state.analisando = false;
       this.renderTable();
       this.hydrateTermosFromAnexos().catch((e) => console.warn('[Compromissario] hydrate termos', e));
-
     } catch (e) {
-      console.error("[Compromissario] Erro ao buscar contratos", e);
-      alert("Falha ao buscar os contratos no Sienge.");
+      if (e && e.cancelled) return;
+      console.error('[Compromissario] Erro ao buscar contratos', e);
+      this.state.analisando = false;
+      const tbody = document.getElementById('comp-pref-tbody');
+      if (tbody) {
+        tbody.innerHTML = '<div style="text-align:center;padding:32px;color:#b91c1c;">Falha ao buscar os movimentos. Tente carregar de novo.</div>';
+      }
+      alert('Falha ao buscar os contratos no Sienge.');
     } finally {
+      this.stopLoadTicker();
       this.state.loading = false;
-      if (btn) btn.innerHTML = '<i data-lucide="search" style="width: 16px;"></i> <span>Carregar movimentos</span>';
+      this.state.analisando = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="search" style="width: 16px;"></i> <span>Carregar movimentos</span>';
+      }
       if (window.lucide) window.lucide.createIcons();
+      this.syncCessaoGateUi();
     }
   },
 
@@ -2551,6 +2748,7 @@ const CompromissarioApp = {
   renderTable() {
     const tbody = document.getElementById('comp-pref-tbody');
     const countLabel = document.getElementById('comp-pref-count');
+    if (!tbody || !countLabel) return;
 
     if (!this.state.contracts || this.state.contracts.length === 0) {
       tbody.innerHTML = `

@@ -108,7 +108,7 @@ window.MlEmpresaFilter = {
     return id ? `${id} - ${name}` : name;
   },
 
-  buttonLabel(items, selectedIds, emptyMeansAll, countMode, nouns) {
+  buttonLabel(items, selectedIds, emptyMeansAll, countMode, nouns, emptyLabel) {
     const all = items || [];
     const sel = (selectedIds || []).map(String);
     const n = sel.length;
@@ -116,11 +116,11 @@ window.MlEmpresaFilter = {
     const plural = (nouns && nouns.plural) || "empresas";
     if (!all.length) return (nouns && nouns.none) || (singular === "empresa" ? "Nenhuma empresa" : ("Nenhum " + singular));
     if (countMode) {
-      if (!n) return emptyMeansAll ? `Todos (${all.length})` : ("Selecione " + plural);
+      if (!n) return emptyLabel || (emptyMeansAll ? `Todos (${all.length})` : ("Selecione " + plural));
       if (n === all.length) return `Todos (${all.length})`;
       return `${n} de ${all.length} ${plural}`;
     }
-    if (!n) return emptyMeansAll ? "Todos" : ("Selecione " + plural);
+    if (!n) return emptyLabel || (emptyMeansAll ? "Todos" : ("Selecione " + plural));
     if (n === 1) {
       const it = all.find((x) => String(x.id) === sel[0]);
       return it ? this.formatItemLabel(it) : "1 selecionado";
@@ -130,7 +130,7 @@ window.MlEmpresaFilter = {
   },
 
   listHtml(opts) {
-    const items = this.sortByIdAsc(opts.items || []);
+    const items = opts.keepOrder ? (opts.items || []).slice() : this.sortByIdAsc(opts.items || []);
     const selected = new Set((opts.selectedIds || []).map(String));
     const q = String(opts.query || "").toLowerCase().trim();
     const nouns = opts.nouns || null;
@@ -165,7 +165,7 @@ window.MlEmpresaFilter = {
     const open = !!opts.open;
     const label = opts.label || "Empresas";
     const extra = opts.extraClass ? ` ${opts.extraClass}` : "";
-    const btn = this.buttonLabel(items, opts.selectedIds, !!opts.emptyMeansAll, !!opts.countMode, opts.nouns || null);
+    const btn = this.buttonLabel(items, opts.selectedIds, !!opts.emptyMeansAll, !!opts.countMode, opts.nouns || null, opts.emptyLabel || "");
     return `<div class="ml-emp-filter${extra}${open ? " is-open" : ""}" id="${this.esc(id)}" onmousedown="event.stopPropagation()">
       <div class="ml-emp-filter-label">${this.esc(label)}</div>
       <button type="button" class="ml-emp-filter-btn" onclick="event.preventDefault();event.stopPropagation();${opts.toggleJs || `MlEmpresaFilter.toggleOpen(${this.jsArg(id)})`}">

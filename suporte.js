@@ -119,18 +119,18 @@
       { id: "usuarios_online", label: "Usuários online" }
     ]},
     { id: "suporte", label: "Suporte" },
-    { id: "configuracoes", label: "Configurações", subs: [
-      { id: "preambulos", label: "Preâmbulos" },
-      { id: "tags", label: "Tags de Anexos" },
-      { id: "usuarios", label: "Usuários e Perfis" },
-      { id: "empresas", label: "Empresas" },
+    { id: "configuracoes", label: "Configurações gerais", subs: [
       { id: "centro_custo", label: "Centro de Custo" },
-      { id: "plano_financeiro", label: "Plano Financeiro e Visões" },
       { id: "doc_padrao", label: "Documentos Padrões" },
-      { id: "upload_kmz", label: "Upload de KMZ" },
-      { id: "upload_mapa", label: "Projeto Urbanístico" },
+      { id: "empresas", label: "Empresas" },
       { id: "indexadores", label: "Indexadores" },
-      { id: "documentos", label: "Tipos de Documento" }
+      { id: "plano_financeiro", label: "Plano Financeiro e Visões" },
+      { id: "preambulos", label: "Preâmbulos" },
+      { id: "upload_mapa", label: "Projeto Urbanístico" },
+      { id: "tags", label: "Tags de Anexos" },
+      { id: "documentos", label: "Tipos de Documento" },
+      { id: "upload_kmz", label: "Upload de KMZ" },
+      { id: "usuarios", label: "Usuários e Perfis" }
     ]},
     { id: "outro", label: "Outro / Geral" }
   ];
