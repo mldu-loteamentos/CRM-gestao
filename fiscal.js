@@ -265,7 +265,24 @@ const FiscalApp = {
               : (tag === "Base para Aplicações Financeiras" ? "financeiras" : ""));
           const noReceita = node && (FC.isRevenueGroup(node.id) || node.id === "g_09_01" || String(node.id).startsWith("g_09_01"));
           const reduz = tag === "Base de Dedução" || !!(noReceita && (node.redutora || FC.isReducingAccount(a.categoryId, a.categoryName, node)));
-          if (!base && !reduz) return;
+          if (!base && !reduz) {
+            if (noReceita && signed) {
+              linhas.push({
+                companyId: Number(mov.companyId),
+                companyName: this.nomeEmpresa(mov.companyId, mov),
+                month: FC.movMonth(mov),
+                ccId: a.costCenterId != null && String(a.costCenterId).trim() !== "" ? String(a.costCenterId) : "—",
+                ccName: String(a.costCenterName || "").trim(),
+                bucket: this.grupoDaRedutora(node),
+                papel: "base",
+                semMarca: true,
+                categoryId: FC.formatAccountCode(a.categoryId) || String(a.categoryId),
+                categoryName: a.categoryName || "",
+                valor: signed
+              });
+            }
+            return;
+          }
           const signed = node
             ? FC.signedAmount(node, a.categoryId, a.categoryName, a.amount, a.reducer, a.categoryType, a.mov)
             : (reduz ? -Math.abs(Number(a.amount) || 0) : (Number(a.amount) || 0));
@@ -318,8 +335,8 @@ const FiscalApp = {
     const contas = {};
     linhas.forEach((l) => {
       const c = empresas[l.companyId] || (empresas[l.companyId] = this.empresaVazia(l.companyId, l.companyName));
-      const entra = this.entraNaEmpresa(l.ccId, l.ccName);
-      const k = `${l.categoryId}|${l.papel}|${l.bucket}`;
+      const entra = l.semMarca ? false : this.entraNaEmpresa(l.ccId, l.ccName);
+      const k = `${l.categoryId}|${l.papel}|${l.bucket}${l.semMarca ? "|fora" : ""}`;
       const acc = c.contas[k] || (c.contas[k] = Object.assign(this.empresaVazia(l.categoryId, l.categoryName || l.categoryId), {
         papel: l.papel, bucket: l.bucket, ccs: {}
       }));
@@ -329,6 +346,13 @@ const FiscalApp = {
       const cc = acc.ccs[l.ccId] || (acc.ccs[l.ccId] = this.empresaVazia(l.ccId, l.ccName || l.ccId));
       cc.name = l.ccName || cc.name || l.ccId;
       cc.entra = entra;
+      cc.semMarca = !!l.semMarca;
+      acc.semMarca = !!l.semMarca;
+      if (l.semMarca) {
+        acc.aviso = (acc.aviso || 0) + l.valor;
+        cc.aviso = (cc.aviso || 0) + l.valor;
+        return;
+      }
       this.somar(cc, l);
       if (!entra) return;
       this.somar(c, l);
@@ -348,7 +372,8 @@ const FiscalApp = {
       const emp = this.fechar(c, ali, qual, apuracao);
       emp.contas = contasEmp;
       return emp;
-    }).sort((a, b) => Number(a.id) - Number(b.id));
+    }).filter((emp) => this.temMovimento(emp, qual) || (emp.contas || []).some((acc) => Math.abs(Number(acc.aviso) || 0) > 0.004))
+      .sort((a, b) => Number(a.id) - Number(b.id));
     return {
       ali,
       aba: qual,
@@ -840,15 +865,24 @@ const FiscalApp = {
       .fim-head { background: #1b8253; color: #fff; padding: 8px 12px; font-size: 0.72rem; font-weight: 700; }
       .fim-emp { border-bottom: 1px solid #e2e8f0; }
       .fim-linha { padding: 8px 12px; }
-      .fim-linha:hover { background: #e7f6ee; }
       .fim-head:hover { background: #1b8253; }
-      .fim-emp:nth-child(odd) > .fim-linha { background: #f7faf8; }
-      .fim-emp > .fim-linha:hover { background: #e7f6ee; }
-      .fim-grid tbody tr:hover td { background: #e7f6ee; }
+      .fim-emp > .fim-linha,
+      .fim-emp:nth-child(odd) > .fim-linha { background: #105436; color: #fff; }
+      .fim-emp > .fim-linha:hover { background: #0c3f28; }
+      .fim-emp > .fim-linha .btn-primary { background: #fff; color: #105436; border-color: #fff; }
+      .fim-emp > .fim-linha .btn-outline { background: transparent; color: #fff; border-color: rgba(255,255,255,0.7); }
+      .fim-emp > .fim-linha .fim-arquivo { color: #d1fae5; }
+      .fim-conta > .fim-linha { background: #d1fae5; color: #14532d; }
+      .fim-conta > .fim-linha:hover { background: #a7f3d0; }
+      .fim-cc > .fim-linha { background: #fff; color: #1e293b; }
+      .fim-cc > .fim-linha:hover { background: #f1f5f9; }
+      .fim-grid tbody tr:hover td { background: #f1f5f9; }
       .fim-abre { display: flex; align-items: center; gap: 6px; border: 0; background: transparent; padding: 0; cursor: pointer; text-align: left; color: inherit; font: inherit; min-width: 0; }
       .fim-abre b, .fim-abre span { min-width: 0; }
-      .fim-filhos { background: #f8fafc; }
+      .fim-filhos { background: #fff; }
+      .fim-conta { border-top: 1px solid #a7f3d0; }
       .fim-conta .fim-linha { padding-left: 28px; }
+      .fim-cc { border-top: 1px solid #e2e8f0; }
       .fim-cc .fim-linha { padding-left: 48px; }
       .fim-fora { color: #94a3b8; }
       .fim-fora .fim-nome, .fim-fora .fim-val { text-decoration: line-through; }
@@ -1055,6 +1089,14 @@ const FiscalApp = {
       (p.aba === "irpj" ? kpi("Adicional", this.money(t.adi)) : kpi("Empresas", p.empresas.length));
   },
 
+  temMovimento(item, aba) {
+    if (Math.abs(Number(item && item.aviso) || 0) > 0.004) return true;
+    const base = Math.abs(Number(this.valorAba(item, aba)) || 0);
+    const imp = Math.abs(Number(this.impostoAba(item, aba)) || 0);
+    const adi = aba === "irpj" ? Math.abs(Number(item && item.adicional) || 0) : 0;
+    return base > 0.004 || imp > 0.004 || adi > 0.004;
+  },
+
   valorAba(item, aba) {
     if (aba === "irpj") return item.lucroIrpj;
     if (aba === "csll") return item.lucroCsll;
@@ -1138,37 +1180,42 @@ const FiscalApp = {
       const empKey = "e-" + c.id;
       const aberto = !!FiscalState.abertos[empKey];
       const acao = `<div class="fim-acao">
-        <label class="btn btn-outline">Carregar a guia
+        <label class="btn btn-outline" title="O recibo de entrega é obrigatório antes do envio">Recibo de entrega
           <input type="file" id="file-${aba}-${c.id}" accept=".pdf,.png,.jpg" onchange="FiscalApp.nomeGuia(this)">
         </label>
         <button type="button" id="btn-${aba}-${c.id}" class="btn btn-primary" onclick="FiscalApp.sendToSienge(${c.id}, '${aba}')">Gerar título</button>
         <span class="fim-arquivo" id="nome-${aba}-${c.id}"></span>
       </div>`;
       const contas = (c.contas || []).map((acc) => {
-        const accKey = "a-" + c.id + "-" + this.slug(`${acc.id}-${acc.papel}-${acc.bucket}`);
+        const accKey = "a-" + c.id + "-" + this.slug(`${acc.id}-${acc.papel}-${acc.bucket}${acc.semMarca ? "-fora" : ""}`);
         const accAberto = !!FiscalState.abertos[accKey];
-        const papel = acc.papel === "redutora" ? "Redutora" : this.nomeBase(acc.bucket);
-        const ccs = (acc.ccs || []).map((cc) => {
-          const motivo = cc.entra ? "" : (/parce(ir|ri)/i.test(String(cc.name || "")) ? "Parceiro — não entra na soma" : "Sem imposto pago pela empresa — não entra na soma");
+        const papel = acc.semMarca ? "Sem marca fiscal — fora do cálculo" : (acc.papel === "redutora" ? "Redutora" : this.nomeBase(acc.bucket));
+        const ccs = (acc.ccs || []).filter((cc) => this.temMovimento(cc, aba)).map((cc) => {
+          const motivo = cc.semMarca
+            ? "Sem marca fiscal no plano — não entra na soma"
+            : (cc.entra ? "" : (/parce(ir|ri)/i.test(String(cc.name || "")) ? "Parceiro — não entra na soma" : "Sem imposto pago pela empresa — não entra na soma"));
+          const baseCc = cc.semMarca ? cc.aviso : this.valorAba(cc, aba);
           return `<div class="fim-cc${cc.entra ? "" : " fim-fora"}">
             <div class="fim-linha" style="${estilo}">
               <span class="fim-nome">${this.esc(cc.id)} ${this.esc(cc.name || "")}${motivo ? ` <small>${this.esc(motivo)}</small>` : ""}</span>
-              ${cel(this.valorAba(cc, aba))}
-              ${cel(cc[aba] || 0)}
+              ${cel(baseCc)}
+              ${cc.semMarca ? `<span class="fim-val">—</span>` : cel(cc[aba] || 0)}
               ${aba === "irpj" ? `<span class="fim-val">${cc.entra ? this.money(cc.adicional) : "—"}</span>` : ""}
               ${comProv ? cel(provCc(c.id, acc, cc)) : ""}
               <span></span>
             </div>
           </div>`;
         }).join("");
-        return `<div class="fim-conta">
+        if (!ccs && !this.temMovimento(acc, aba)) return "";
+        const baseAcc = acc.semMarca ? acc.aviso : this.valorAba(acc, aba);
+        return `<div class="fim-conta${acc.semMarca ? " fim-fora" : ""}">
           <div class="fim-linha" style="${estilo}">
-            <button type="button" class="fim-abre" id="fim-abre-${accKey}" aria-expanded="${accAberto ? "true" : "false"}" onclick="FiscalApp.toggle('a', '${c.id}-${this.slug(`${acc.id}-${acc.papel}-${acc.bucket}`)}')">
+            <button type="button" class="fim-abre" id="fim-abre-${accKey}" aria-expanded="${accAberto ? "true" : "false"}" onclick="FiscalApp.toggle('a', '${c.id}-${this.slug(`${acc.id}-${acc.papel}-${acc.bucket}${acc.semMarca ? "-fora" : ""}`)}')">
               <i data-lucide="${accAberto ? "chevron-down" : "chevron-right"}" style="width:14px;height:14px;"></i>
               <span class="fim-nome">${this.esc(acc.id)} ${this.esc(acc.name || "")} <small>${this.esc(papel)}</small></span>
             </button>
-            ${cel(this.valorAba(acc, aba))}
-            ${cel(acc[aba] || 0)}
+            ${cel(baseAcc)}
+            ${acc.semMarca ? `<span class="fim-val">—</span>` : cel(acc[aba] || 0)}
             ${aba === "irpj" ? cel(acc.adicional) : ""}
             ${comProv ? cel(provAcc(c.id, acc)) : ""}
             <span></span>
@@ -1176,6 +1223,7 @@ const FiscalApp = {
           <div class="fim-filhos" id="fim-box-${accKey}" ${accAberto ? "" : "hidden"}>${ccs}</div>
         </div>`;
       }).join("");
+      if (!contas && !this.temMovimento(c, aba)) return "";
       return `<div class="fim-emp">
         <div class="fim-linha" style="${estilo}">
           <button type="button" class="fim-abre" id="fim-abre-${empKey}" aria-expanded="${aberto ? "true" : "false"}" onclick="FiscalApp.toggle('e', '${c.id}')">
@@ -1191,7 +1239,7 @@ const FiscalApp = {
         <div class="fim-filhos" id="fim-box-${empKey}" ${aberto ? "" : "hidden"}>${contas}</div>
       </div>`;
     }).join("");
-    return `<p class="fim-muted">A empresa abre as contas financeiras. A conta abre o centro de custo. Parceiro, ou centro sem a marca de imposto pago pela empresa, fica riscado e fora da soma.</p><div class="fim-scroll">
+    return `<p class="fim-muted">A empresa abre as contas financeiras. A conta abre o centro de custo. Linha zerada fica de fora. Parceiro, centro sem imposto pago pela empresa e conta de receita sem marca no plano ficam riscados e fora da soma.</p><div class="fim-scroll">
       <div class="fim-head" style="${estilo}"><span>Empresa / conta / centro de custo</span><span>${headBase}</span><span>${colImp}</span>${aba === "irpj" ? "<span>Adicional</span>" : ""}${comProv ? "<span>Provisão de janeiro</span>" : ""}<span></span></div>
       ${linhas}
     </div>`;
@@ -1205,6 +1253,40 @@ const FiscalApp = {
       csll: { doc: "CSLL", nome: "CSLL", conta: null }
     };
     return map[type] || map.pis;
+  },
+
+  siglaEmpresa(id, nome) {
+    const fixas = {
+      1: "ML", 3: "TER AR", 6: "ARA", 13: "VERCE", 28: "RAMOS", 32: "NV", 36: "TAGUAI"
+    };
+    if (fixas[Number(id)]) return fixas[Number(id)];
+    const limpa = String(nome || "").replace(/\b(ltda|spe|eireli|s\/a|sa)\b/ig, "").replace(/[^A-Za-zÀ-ú0-9 ]/g, " ").trim();
+    const palavra = limpa.split(/\s+/).filter(Boolean)[0] || "EMP";
+    return palavra.slice(0, 10).toUpperCase();
+  },
+
+  numeroDocumento(meta, comp) {
+    const mes = String(FiscalState.month).padStart(2, "0");
+    const ano = FiscalState.year;
+    if ((meta.doc === "IRPJ" || meta.doc === "CSLL") && this.ehMesDeApuracao()) {
+      const tri = FiscalState.month === 4 ? 1 : (FiscalState.month === 7 ? 2 : (FiscalState.month === 10 ? 3 : 4));
+      const anoTri = FiscalState.month === 1 ? ano - 1 : ano;
+      return `${meta.doc} ${tri} TRIM ${anoTri}`;
+    }
+    return `${meta.nome} ${this.siglaEmpresa(comp.id, comp.name)} ${mes}/${ano}`;
+  },
+
+  observacaoTitulo(meta) {
+    const bruto = this.MESES[FiscalState.month - 1] || "";
+    const mesNome = bruto.charAt(0).toUpperCase() + bruto.slice(1);
+    const ano = FiscalState.year;
+    if ((meta.doc === "IRPJ" || meta.doc === "CSLL") && this.ehMesDeApuracao()) {
+      const tri = FiscalState.month === 4 ? 1 : (FiscalState.month === 7 ? 2 : (FiscalState.month === 10 ? 3 : 4));
+      const anoTri = FiscalState.month === 1 ? ano - 1 : ano;
+      const ord = ["", "1º", "2º", "3º", "4º"][tri];
+      return `Recolhimento de ${meta.nome} - ${ord} trimestre de ${anoTri}`;
+    }
+    return `Recolhimento mensal de ${meta.nome} - ${mesNome} ${ano}`;
   },
 
   vencimentoTitulo(type) {
@@ -1253,15 +1335,20 @@ const FiscalApp = {
     }
     const fileInput = document.getElementById(`file-${type}-${companyId}`);
     const file = fileInput && fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
-    if (!file && !confirm(`Você não anexou a guia de ${meta.nome}. Deseja criar o título sem anexo?`)) return;
+    if (!file) {
+      alert("Anexe o recibo de entrega antes de enviar o título.");
+      return;
+    }
     const btn = document.getElementById(`btn-${type}-${companyId}`);
     if (!btn) return;
-    btn.innerHTML = `<div class="spinner" style="width: 14px; height: 14px; border-width: 2px;"></div> Enviando...`;
-    btn.disabled = true;
     const monthStr = String(FiscalState.month).padStart(2, "0");
     const yearStr = FiscalState.year;
     const venc = this.vencimentoTitulo(type);
     const modo = (type === "irpj" || type === "csll") ? (this.ehMesDeApuracao() ? "Apuração" : "Provisão") : "Recolhimento mensal";
+    const documento = this.numeroDocumento(meta, comp);
+    const notes = this.observacaoTitulo(meta);
+    alert("A geração de títulos no Sienge está pausada. Nenhum título foi enviado.");
+    return;
     try {
       const corporativoId = Number(`7${String(comp.id).padStart(2, "0")}00`);
       const issueDate = new Date().toISOString().split("T")[0];
@@ -1271,10 +1358,10 @@ const FiscalApp = {
         debtorId: comp.id,
         creditorId: 229,
         documentIdentificationId: meta.doc,
-        documentNumber: `${meta.nome} ML ${monthStr}/${yearStr}`,
+        documentNumber: documento,
         issueDate, installmentsNumber: 1, baseDate, dueDate, billDate: baseDate,
         totalInvoiceAmount: parseFloat(amount.toFixed(2)),
-        notes: `${modo} de ${meta.nome} - ${monthStr}/${yearStr}`,
+        notes,
         discount: 0, indexId: 0,
         budgetCategories: [Object.assign({ costCenterId: corporativoId, rate: 100 }, meta.conta != null ? { financialCategoryId: meta.conta } : {})],
         departmentsCost: [{ id: 37, rate: 100 }],
