@@ -751,7 +751,7 @@ window.InserirNotaApp = {
       log.push(`${itens.length || entregas.length} item(ns) incluído(s).`);
       await this.completarTitulo(s.criada.seq, log);
       s.resultado = { ok: true, seq: s.criada.seq, log, itens };
-      this.auditar("ok", `Itens do pedido ${s.pedidoNome} incluídos na nota sequencial ${s.criada.seq} · ${this.money(total)}`, { entregas, log });
+      this.auditar("ok", `Nota ${f.documento} ${f.numero} enviada ao Sienge (sequencial ${s.criada.seq})${s.billId ? ", título " + s.billId : ""} · pedido ${s.pedidoNome}`, { entregas, log });
       s.duplicada = Object.assign({}, s.duplicada, { achada: { sequentialNumber: s.criada.seq, issueDate: f.emissao } });
       if (s.item) {
         const u = FilaNotasFiscais.usuario();
@@ -774,6 +774,14 @@ window.InserirNotaApp = {
     }
     s.enviando = "";
     this.render();
+    if (s.resultado && s.resultado.ok) this.subir();
+  },
+
+  subir() {
+    const main = document.querySelector(".main-content");
+    const root = document.getElementById("inserir-nota-root");
+    if (main) main.scrollTo({ top: 0, behavior: "smooth" });
+    if (root) root.scrollIntoView({ behavior: "smooth", block: "start" });
   },
 
   /** O título nasce junto com os itens da nota. O Sienge pode demorar um instante para devolver o billId. */
@@ -834,15 +842,111 @@ window.InserirNotaApp = {
       }
     }
     const pag = s.item && s.item.pagamento;
+    const venc = pag && pag.data ? String(pag.data).slice(0, 10) : "";
+    const valor = this.valorNota() != null ? this.valorNota() : this.totalItens();
+    s.enviando = "Ajustando as parcelas do título…";
+    this.render();
+    try {
+      const aviso = await this.consistirParcelas(billId, valor, venc);
+      if (aviso) log.push(aviso);
+    } catch (e) {
+      log.push(`Não consegui ajustar as parcelas do título ${billId}: ${e.message}`);
+    }
     if (pag && pag.forma) {
       s.enviando = "Gravando a forma de pagamento no título…";
       this.render();
       try {
-        log.push(await this.informarPagamento(billId, pag));
+        const msg = await this.informarPagamento(billId, pag);
+        if (msg) log.push(msg);
       } catch (e) {
         log.push(`Não consegui gravar a forma de pagamento no título ${billId}: ${e.message}`);
       }
     }
+  },
+
+  /**
+   * O Sienge deixa o título incompleto por soma de parcelas enquanto as parcelas
+   * (vindas da previsão do pedido) não fecham o valor da nota. Abrir a aba Título
+   * e salvar faz essa conta na tela. Aqui a parcela única recebe o valor da nota
+   * e o vencimento confirmado pelo operador.
+   */
+  async consistirParcelas(billId, valor, vencimento) {
+    const alvo = Number.isFinite(Number(valor)) ? Number(Number(valor).toFixed(2)) : null;
+    const ler = () => this.get(`/bills/${encodeURIComponent(billId)}/installments`).then((r) => this.lista(r)).catch(() => []);
+    let inst = [];
+    for (let i = 0; i < 3 && !inst.length; i++) {
+      inst = await ler();
+      if (!inst.length) await new Promise((r) => setTimeout(r, 800));
+    }
+    if (!inst.length) return "O título ainda não tem parcela. Abra a aba Título no Sienge e salve para o sistema reconhecer o título.";
+    const valorDe = (p) => Number(p.originalAmount != null ? p.originalAmount : p.amount) || 0;
+    const idDe = (p, i) => (p.installmentNumber != null ? p.installmentNumber : (p.installmentId != null ? p.installmentId : i + 1));
+    const soma = inst.reduce((t, p) => t + valorDe(p), 0);
+    const fecha = alvo == null || Math.abs(soma - alvo) <= 0.02;
+    const dataOk = !vencimento || inst.every((p) => String(p.dueDate || "").slice(0, 10) === vencimento);
+    if (fecha && dataOk && inst.length === 1) return "";
+    if (inst.length > 1 && alvo != null) {
+      await this.enviar(`/bills/${encodeURIComponent(billId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(Object.assign({ installmentsNumber: 1, totalInvoiceAmount: alvo }, vencimento ? { dueDate: vencimento } : {}))
+      }).catch(() => {});
+      const deNovo = await ler();
+      if (deNovo.length) inst = deNovo;
+    }
+    const body = {};
+    if (vencimento) body.dueDate = vencimento;
+    if (alvo != null) {
+      body.originalAmount = alvo;
+      body.amount = alvo;
+    }
+    await this.enviar(`/bills/${encodeURIComponent(billId)}/installments/${encodeURIComponent(idDe(inst[0], 0))}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    for (let i = 1; i < inst.length; i++) {
+      const id = idDe(inst[i], i);
+      const path = `/bills/${encodeURIComponent(billId)}/installments/${encodeURIComponent(id)}`;
+      const apagou = await this.enviar(path, { method: "DELETE" }).then(() => true).catch(() => false);
+      if (!apagou) {
+        await this.enviar(path, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ originalAmount: 0, amount: 0 })
+        }).catch(() => {});
+      }
+    }
+    return "";
+  },
+
+  contaDaTransferencia(pag) {
+    const c = pag && pag.conta;
+    const partida = (txt) => {
+      const m = String(txt || "").match(/^(\d+)[^\d](\w+)$/);
+      return m ? { numero: m[1], digito: m[2] } : { numero: String(txt || "").replace(/\D/g, ""), digito: "" };
+    };
+    if (c && (c.banco || c.agencia || c.conta)) {
+      const conta = partida(c.conta);
+      return {
+        banco: String(c.banco || "").replace(/\D/g, ""),
+        agencia: (String(c.agencia || "").match(/\d+/) || [""])[0],
+        numero: conta.numero,
+        digito: conta.digito,
+        tipo: /poup/i.test(c.tipo || "") ? "P" : "C",
+        favorecido: c.favorecido || ""
+      };
+    }
+    const t = String((pag && pag.detalhe) || "");
+    const conta = t.match(/Conta\s+(\d+)\s*-\s*(\w+)/i);
+    return {
+      banco: (t.match(/\((\d{3})\)/) || [])[1] || "",
+      agencia: (String((t.match(/Ag\.?\s*([\d.\-]+)/i) || [])[1] || "").match(/\d+/) || [""])[0],
+      numero: conta ? conta[1] : "",
+      digito: conta ? conta[2] : "",
+      tipo: /poup/i.test(t) ? "P" : "C",
+      favorecido: ""
+    };
   },
 
   async informarPagamento(billId, pag) {
@@ -862,7 +966,7 @@ window.InserirNotaApp = {
       };
       if (codigo && codigo.length === 44) body.boletoBancarioBarCodeNumber = codigo;
       await json(`${base}/boleto-bancario`, body);
-      return `Boleto gravado na parcela ${parcela} do título ${billId}.`;
+      return "";
     }
     if (/pix/i.test(forma)) {
       await json(`${base}/pix`, {
@@ -870,12 +974,31 @@ window.InserirNotaApp = {
         isUsingCreditorData: "S",
         notes: pag.detalhe ? `PIX: ${pag.detalhe}` : "Pagamento via PIX (chave do credor)"
       });
-      return `PIX gravado na parcela ${parcela} do título ${billId}.`;
+      return "";
     }
     if (/transf|ted|d[eé]bito/i.test(forma)) {
-      return `A forma ${forma} foi confirmada pelo operador${pag.detalhe ? ` (${pag.detalhe})` : ""}. O título não recebeu a conta: a transferência pede banco, agência e conta separados, e o envio guarda só o texto.`;
+      const conta = this.contaDaTransferencia(pag);
+      if (!conta.banco || !conta.agencia || !conta.numero) {
+        throw new Error("a transferência precisa de banco, agência e conta separados");
+      }
+      const body = {
+        beneficiaryBankCode: conta.banco,
+        beneficiaryBankBranchNumber: conta.agencia,
+        beneficiaryAccountNumber: conta.numero,
+        beneficiaryAccountType: conta.tipo,
+        notes: `Pagamento em ${this.dataBr(pag.data)} · ${forma}`
+      };
+      if (conta.digito) body.beneficiaryAccountDigit = conta.digito;
+      if (conta.favorecido) body.beneficiaryName = conta.favorecido;
+      const path = `${base}/bank-transfer`;
+      try {
+        await this.enviar(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      } catch (e) {
+        await json(path, body);
+      }
+      return "";
     }
-    return `A forma ${forma} foi confirmada pelo operador. O título não recebeu um tipo de pagamento correspondente.`;
+    throw new Error(`a forma ${forma} não tem um tipo de pagamento correspondente no título`);
   },
 
   pagamentoTxt(pag) {
@@ -1159,7 +1282,7 @@ window.InserirNotaApp = {
     const linha = () => `<div class="fnf-carta-linha"><select data-k="campo">${this.camposCarta().map((c) => `<option value="${this.esc(c)}">${this.esc(c)}</option>`).join("")}</select><input data-k="informado" placeholder="O que foi informado"><input data-k="deveria" placeholder="O que deveria ser"></div>`;
     return `<p class="inf-muted">O campo já lista o que a carta de correção pode alterar. Valor, imposto, tomador, prestador e a descrição do serviço continuam no cancelamento.</p>
       <div class="fnf-carta-h"><span>Campo</span><span>Informado na nota</span><span>Deveria ser</span></div>
-      <div class="fnf-carta-linhas" id="fnf-carta-linhas">${linha()}${linha()}</div>
+      <div class="fnf-carta-linhas" id="fnf-carta-linhas">${linha()}</div>
       <button type="button" class="btn btn-outline inf-btn-sm" onclick="InserirNotaApp.adicionarLinhaCarta()"><i data-lucide="plus"></i> Adicionar linha</button>`;
   },
 
@@ -1240,8 +1363,8 @@ window.InserirNotaApp = {
         campo: campo(row, "campo"),
         informado: campo(row, "informado"),
         deveria: campo(row, "deveria")
-      })).filter((l) => l.campo || l.informado || l.deveria);
-      if (!linhas.length || linhas.some((l) => !l.informado || !l.deveria)) { alert("Em cada linha, informe o que foi lançado na nota e o que deveria ser."); return; }
+      })).filter((l) => l.informado || l.deveria);
+      if (!linhas.length) { alert("Preencha pelo menos um campo: o que foi informado ou o que deveria ser. As outras linhas você adiciona depois."); return; }
       txt = [
         "Emita carta de correção. O documento em anexo mostra o que foi informado e o que deveria ser.",
         ...linhas.map((l) => `• ${l.campo || "Campo"}: informado “${l.informado}” · deveria ser “${l.deveria}”`),
@@ -1578,32 +1701,34 @@ window.InserirNotaApp = {
     const s = this.state;
     if (!s.pedido) return "";
     if (!s.itens.length) return `<p class="inf-muted">O pedido não tem itens.</p>`;
-    const linhas = [];
-    s.itens.forEach((it) => {
+    const blocos = s.itens.map((it) => {
+      const preco = `${this.money(it.preco)}${it.unidade ? `/${this.esc(it.unidade)}` : ""}`;
       if (!it.entregas.length) {
-        linhas.push(`<tr><td>${it.itemNumber}</td><td>${this.esc(it.descricao)}</td><td colspan="6" class="inf-muted">${it.semEntregas ? "Não consegui ler as entregas deste item." : "Sem entregas programadas."}</td></tr>`);
-        return;
+        return `<article class="inf-entrega">
+          <header><b>Item ${this.esc(it.itemNumber)}</b><span>${this.esc(it.descricao)}</span><small>${preco}</small></header>
+          <p class="inf-muted">${it.semEntregas ? "Não consegui ler as entregas deste item." : "Sem entregas programadas."}</p>
+        </article>`;
       }
-      it.entregas.forEach((e, i) => {
+      const linhas = it.entregas.map((e) => {
         const valor = (Number(e.qtd) || 0) * it.preco;
-        linhas.push(`<tr class="${e.saldo <= 0 ? "is-sem-saldo" : ""}">
-          <td>${i === 0 ? it.itemNumber : ""}</td>
-          <td>${i === 0 ? this.esc(it.descricao) : ""}</td>
-          <td>${e.n}${e.data ? ` · ${this.dataBr(e.data)}` : ""}</td>
-          <td class="num">${this.money(it.preco)}${it.unidade ? `<small>/${this.esc(it.unidade)}</small>` : ""}</td>
+        return `<tr class="${e.saldo <= 0 ? "is-sem-saldo" : ""}">
+          <td>Entrega ${this.esc(e.n)}${e.data ? `<small>${this.dataBr(e.data)}</small>` : ""}</td>
           <td class="num">${this.qtdFmt(e.saldo)}</td>
           <td class="num"><input class="inf-qtd" value="${this.esc(e.qtd ? String(e.qtd).replace(".", ",") : "")}" ${e.saldo <= 0 ? "disabled" : ""}
             onchange="InserirNotaApp.setQtd('${it.itemNumber}', '${e.n}', this.value)"></td>
           <td class="num">${this.money(valor)}</td>
-        </tr>`);
-      });
-    });
+        </tr>`;
+      }).join("");
+      return `<article class="inf-entrega">
+        <header><b>Item ${this.esc(it.itemNumber)}</b><span>${this.esc(it.descricao)}</span><small>Preço líquido ${preco}</small></header>
+        <table class="inf-tab"><thead><tr><th>Entrega</th><th class="num">Saldo</th><th class="num">Qtd. a faturar</th><th class="num">Valor</th></tr></thead><tbody>${linhas}</tbody></table>
+      </article>`;
+    }).join("");
     const total = this.totalItens();
     const valor = this.valorNota();
     const fecha = valor != null && Math.abs(total - valor) <= this.TOL;
-    return `<table class="inf-tab"><thead><tr><th>Item</th><th>Insumo</th><th>Entrega</th><th class="num">Preço líquido</th><th class="num">Saldo</th><th class="num">Qtd. a faturar</th><th class="num">Valor</th></tr></thead>
-      <tbody>${linhas.join("")}</tbody>
-      <tfoot><tr><td colspan="6">Total dos itens${valor != null ? ` · nota ${this.money(valor)}` : ""}</td><td class="num ${valor == null ? "" : (fecha ? "is-ok" : "is-erro")}">${this.money(total)}</td></tr></tfoot></table>
+    return `<div class="inf-entregas">${blocos}</div>
+      <div class="inf-entrega-total"><span>Total dos itens${valor != null ? ` · nota ${this.money(valor)}` : ""}</span><b class="${valor == null ? "" : (fecha ? "is-ok" : "is-erro")}">${this.money(total)}</b></div>
       <div class="inf-linha-acoes">
         <label class="inf-chk"><input type="checkbox" ${s.form.manterSaldo ? "checked" : ""} onchange="InserirNotaApp.setCampo('manterSaldo', this.checked)"> Manter o saldo restante do pedido em aberto</label>
         ${s.qtdEditada ? `<button type="button" class="btn btn-outline inf-btn-sm" onclick="InserirNotaApp.redistribuir()"><i data-lucide="rotate-ccw"></i> Recalcular pelo valor da nota</button>` : ""}
@@ -1613,12 +1738,17 @@ window.InserirNotaApp = {
   resultadoHtml() {
     const r = this.state.resultado;
     if (!r) return "";
-    return `<div class="inf-resultado ${r.ok ? "is-ok" : "is-erro"}">
-      <b>${r.ok ? `Nota inserida no Sienge · sequencial ${this.esc(r.seq)}` : (r.seq ? `A nota foi criada (sequencial ${this.esc(r.seq)}), mas os itens não entraram` : "A nota não foi criada")}</b>
-      <ul>${r.log.map((t) => `<li>${this.esc(t)}</li>`).join("")}</ul>
-      ${r.ok ? `<p>O título foi para o contas a pagar. Confira no Sienge os impostos e consista a nota${this.state.item && this.state.item.pagamento ? `. Pagamento confirmado pelo operador: <b>${this.esc(this.pagamentoTxt(this.state.item.pagamento))}</b>` : ""}.</p>`
-        : (r.seq ? `<p>Corrija o motivo acima e clique em <b>Inserir no Sienge</b> de novo: o CRM tenta incluir os itens na mesma nota ${this.esc(r.seq)}, sem criar outra.</p>` : "")}
-    </div>`;
+    if (r.ok) {
+      const nfs = /^nfs/i.test(String(this.state.form.documento || ""));
+      const titulo = this.state.billId ? ` Título ${this.state.billId}` : "";
+      const txt = nfs
+        ? `Sucesso!. Nota enviada ao Sienge. Confira os impostos retidos.${titulo}`
+        : `Sucesso!. Nota enviada ao Sienge.${titulo}`;
+      const falhas = (r.log || []).filter((t) => /não consegui|não entrou|não recebeu|ainda não tem parcela|falha/i.test(t));
+      return `<div class="inf-resultado is-ok"><b>${this.esc(txt)}</b>${falhas.length ? `<ul>${falhas.map((t) => `<li>${this.esc(t)}</li>`).join("")}</ul>` : ""}</div>`;
+    }
+    const motivo = r.erro || (r.log || []).slice(-1)[0] || "A nota não foi criada.";
+    return `<div class="inf-resultado is-erro"><b>${r.seq ? `A nota foi criada (sequencial ${this.esc(r.seq)}), mas os itens não entraram.` : "A nota não foi criada."}</b><p>${this.esc(motivo)}</p></div>`;
   },
 
   css() {
@@ -1650,7 +1780,17 @@ window.InserirNotaApp = {
         .inf-file { display: flex; align-items: center; gap: 8px; border: 1px dashed #94a3b8; border-radius: 8px; padding: 10px 12px; cursor: pointer; color: #334155; font-size: 0.86rem; }
         .inf-file i { width: 18px; height: 18px; color: #105436; }
         .inf-file input { display: none; }
-        .inf-tab { width: 100%; border-collapse: collapse; font-size: 0.82rem; table-layout: fixed; }
+        .inf-entregas { display: flex; flex-direction: column; gap: 10px; }
+        .inf-entrega { border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; background: #fff; }
+        .inf-entrega header { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding: 10px 12px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
+        .inf-entrega header b { color: #105436; white-space: nowrap; }
+        .inf-entrega header span { flex: 1; min-width: 160px; color: #0f172a; }
+        .inf-entrega header small, .inf-entrega > .inf-muted { color: #64748b; }
+        .inf-entrega > .inf-muted { margin: 0; padding: 10px 12px; }
+        .inf-entrega .inf-tab td small { display: block; color: #64748b; }
+        .inf-entrega-total { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 10px; padding: 8px 2px 0; font-weight: 800; }
+        .inf-entrega-total .is-ok { color: #105436; } .inf-entrega-total .is-erro { color: #b91c1c; }
+        .inf-tab { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
         .inf-tab th { text-align: left; font-size: 0.7rem; text-transform: uppercase; color: #64748b; padding: 6px 8px; border-bottom: 1px solid #e2e8f0; }
         .inf-tab td { padding: 6px 8px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
         .inf-tab .num { text-align: right; white-space: nowrap; }

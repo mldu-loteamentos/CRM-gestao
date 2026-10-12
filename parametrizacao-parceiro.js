@@ -16,6 +16,7 @@ const ParametrizacaoParceiroApp = {
   _creditorIndex: null,
   _bankLoading: false,
   expanded: null,
+  socioAberto: "",
 
   obraFromCc(id) {
     const digits = String(id || "").replace(/\D/g, "");
@@ -28,11 +29,43 @@ const ParametrizacaoParceiroApp = {
       (window.MOCK_DATA && window.MOCK_DATA.COST_CENTERS) || [];
   },
 
+  empresaDoCentro(cc) {
+    if (!cc) return "";
+    const id = cc.idCompany != null && cc.idCompany !== "" ? cc.idCompany : cc.companyId;
+    return id == null || id === "" ? "" : String(id);
+  },
+
+  catalogoCentros() {
+    const vistos = new Map();
+    const add = (cc) => {
+      if (!cc || cc.id == null || cc.id === "") return;
+      const id = String(cc.id).replace(/\D/g, "") || String(cc.id);
+      const prev = vistos.get(id);
+      if (!prev || (!this.empresaDoCentro(prev) && this.empresaDoCentro(cc))) vistos.set(id, cc);
+    };
+    this.allCostCenters().forEach(add);
+    if (window.CentrosCustoState) (CentrosCustoState.costCenters || []).forEach(add);
+    return vistos;
+  },
+
+  checarCentroDaEmpresa(ccId, companyId) {
+    const id = String(ccId || "").replace(/\D/g, "");
+    const emp = String(companyId || "");
+    if (!id) return { ok: false, msg: "Informe um centro de custo." };
+    const cc = this.catalogoCentros().get(id);
+    if (!cc || this.empresaDoCentro(cc) !== emp) {
+      const dono = cc ? this.empresaDoCentro(cc) : "";
+      const onde = dono ? ` Ele pertence à empresa ${dono}.` : ` Ele não pertence à empresa ${emp}.`;
+      return { ok: false, msg: `Centro de custo ${id} não é permitido.${onde}` };
+    }
+    return { ok: true, cc };
+  },
+
   costCentersOfObra(obra, companyId) {
     const prefix = String(obra || "");
     if (!prefix) return [];
-    return this.allCostCenters().filter(cc => {
-      if (companyId && cc.companyId != null && String(cc.companyId) !== String(companyId)) return false;
+    return [...this.catalogoCentros().values()].filter(cc => {
+      if (companyId && this.empresaDoCentro(cc) !== String(companyId)) return false;
       return this.obraFromCc(cc.id) === prefix;
     });
   },
@@ -114,6 +147,29 @@ const ParametrizacaoParceiroApp = {
     return (window.AppState && AppState.companies) || [];
   },
 
+  nomeEmpresa(id) {
+    const c = this.companies().find(x => String(x.id) === String(id));
+    return (c && (c.name || c.tradeName)) || ("Empresa " + id);
+  },
+
+  corrigirEmpresaEllenco(p) {
+    const fold = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    const nome = fold(p && p.partnerName);
+    if (nome.indexOf("ELLENCO") < 0 || nome.indexOf("MLDU") < 0) return false;
+    if (String(p.companyId) === "12") {
+      const oficial = this.nomeEmpresa("12");
+      if (oficial !== "Empresa 12" && p.companyName !== oficial) {
+        p.companyName = oficial;
+        return true;
+      }
+      return false;
+    }
+    if (String(p.companyId) !== "1") return false;
+    p.companyId = "12";
+    p.companyName = this.nomeEmpresa("12");
+    return true;
+  },
+
   cobrancaInternaIds() {
     if (typeof getConfiguredInternalCompanyIds === "function") {
       return getConfiguredInternalCompanyIds().map(String);
@@ -192,6 +248,18 @@ const ParametrizacaoParceiroApp = {
 
   totalSociosPct(p) {
     return (p && p.socios || []).reduce((sum, s) => sum + (Number(s.sharePct) || 0), 0);
+  },
+
+  sociosOrdenados(lista) {
+    const pct = (s) => {
+      const n = Number(s && s.sharePct);
+      return Number.isFinite(n) ? n : 0;
+    };
+    return (lista || []).slice().sort((a, b) => {
+      const diff = pct(b) - pct(a);
+      if (diff) return diff;
+      return String(a.name || "").localeCompare(String(b.name || ""), "pt-BR", { sensitivity: "base" });
+    });
   },
 
   fmtPct(n) {
@@ -673,6 +741,7 @@ const ParametrizacaoParceiroApp = {
     this.items.forEach(p => this.normalizeItem(p));
     let semeou = false;
     this.items.forEach(p => { if (this.aplicarSociosVercellino(p)) semeou = true; });
+    this.items.forEach(p => { if (this.corrigirEmpresaEllenco(p)) semeou = true; });
     if (semeou) this.persist();
     if (this.items.length && !this.selectedId) this.selectedId = this.items[0].id;
     const cur = this.current();
@@ -729,7 +798,10 @@ const ParametrizacaoParceiroApp = {
 
   seedCostCenters(obra, companyId, ccId) {
     const siblings = this.costCentersOfObra(obra, companyId);
-    return (siblings.length ? siblings : [{ id: ccId, name: ccId }]).map(cc => ({
+    const lista = siblings.slice();
+    const check = this.checarCentroDaEmpresa(ccId, companyId);
+    if (check.ok && !lista.some(cc => String(cc.id) === String(check.cc.id))) lista.push(check.cc);
+    return lista.map(cc => ({
       id: String(cc.id),
       name: cc.name || String(cc.id),
       inAccount: true
@@ -803,6 +875,11 @@ const ParametrizacaoParceiroApp = {
       alert("O rateio da obra deve estar entre 0 e 100%.");
       return;
     }
+    const permitido = this.checarCentroDaEmpresa(ccId, p.companyId);
+    if (!permitido.ok) {
+      alert(permitido.msg);
+      return;
+    }
     const obra = this.obraFromCc(ccId);
     if (p.obras.some(o => String(o.code) === String(obra))) {
       alert(`A obra ${obra} já está nesta parceria.`);
@@ -836,6 +913,13 @@ const ParametrizacaoParceiroApp = {
       alert("Escolha uma obra diferente da atual.");
       return;
     }
+    const permitido = this.checarCentroDaEmpresa(destRaw, p.companyId);
+    const obraOk = String(destRaw).replace(/\D/g, "").length <= 3
+      && this.costCentersOfObra(destCode, p.companyId).length > 0;
+    if (!permitido.ok && !obraOk) {
+      alert(permitido.msg);
+      return;
+    }
     const cloneNaN = JSON.parse(JSON.stringify(src.naNodes || {}));
     const cloneNaA = JSON.parse(JSON.stringify(src.naAccounts || {}));
     const cloneInA = JSON.parse(JSON.stringify(src.inAccounts || {}));
@@ -859,49 +943,6 @@ const ParametrizacaoParceiroApp = {
     dest.naAccounts = JSON.parse(JSON.stringify(src.naAccounts || {}));
     dest.inAccounts = JSON.parse(JSON.stringify(src.inAccounts || {}));
     dest.accountShares = {};
-  },
-
-  /** Obras de outros parceiros, para copiar o perfil de contas ligadas e desligadas. */
-  fontesRateio() {
-    const atual = this.current();
-    const out = [];
-    (this.items || []).forEach((raw) => {
-      const p = this.normalizeItem(raw);
-      if (!p || this.isSociedade(p) || (atual && p.id === atual.id)) return;
-      (p.obras || []).forEach((o) => {
-        if (!o || o.code == null || o.code === "") return;
-        out.push({ id: p.id, code: String(o.code), nome: p.partnerName || "Parceiro", obra: o });
-      });
-    });
-    return out.sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR") || String(a.code).localeCompare(String(b.code), "pt-BR", { numeric: true }));
-  },
-
-  importarRateio() {
-    const p = this.current();
-    const dest = this.currentObra(p);
-    const sel = document.getElementById("pp-import-rateio");
-    const valor = sel ? String(sel.value || "") : "";
-    if (!p || !dest) return;
-    if (!valor) {
-      alert("Escolha a obra de outro parceiro para importar o rateio.");
-      return;
-    }
-    const sep = valor.indexOf("|");
-    const id = valor.slice(0, sep);
-    const code = valor.slice(sep + 1);
-    const fonte = this.fontesRateio().find((f) => f.id === id && f.code === code);
-    if (!fonte || !fonte.obra) {
-      alert("Não encontrei essa obra para importar.");
-      return;
-    }
-    const msg = `Importar o que está ligado e desligado da obra ${fonte.code} de ${fonte.nome} para a obra ${dest.code}?\n\nO percentual desta obra continua o da aba Obras.`;
-    const ok = typeof window.mouraConfirm === "function" ? window.mouraConfirm(msg) : Promise.resolve(confirm(msg));
-    Promise.resolve(ok).then((sim) => {
-      if (!sim) return;
-      this.copiarLigacoes(fonte.obra, dest);
-      this.persist();
-      this.render();
-    });
   },
 
   /** Copia só grupos e contas ligados ou desligados. O percentual de cada obra fica o da aba Obras. */
@@ -947,7 +988,14 @@ const ParametrizacaoParceiroApp = {
     this.creditorQuery = "";
     this.creditorHits = [];
     this.detailTab = "geral";
+    this.socioAberto = "";
     this.render();
+  },
+
+  toggleSocio(id) {
+    const sid = String(id || "");
+    this.socioAberto = this.socioAberto === sid ? "" : sid;
+    this.renderKeepScroll();
   },
 
   updateField(field, value) {
@@ -996,15 +1044,7 @@ const ParametrizacaoParceiroApp = {
       row.sharePct = Math.max(0, Math.min(100, n));
     }
     this.persist();
-    const totalEl = document.getElementById("pp-socios-total");
-    const restoEl = document.getElementById("pp-socios-resto");
-    const total = this.totalSociosPct(p);
-    const resto = Math.round((100 - total) * 1000) / 1000;
-    if (totalEl) totalEl.textContent = this.fmtPct(total) + "%";
-    if (restoEl) {
-      restoEl.textContent = this.fmtPct(resto) + "%";
-      restoEl.style.color = Math.abs(resto) < 0.001 ? "#105436" : "#b45309";
-    }
+    this.renderKeepScroll();
   },
 
   async removeSocio(id) {
@@ -1036,6 +1076,7 @@ const ParametrizacaoParceiroApp = {
       }
       p.socios = p.socios || [];
       p.socios.push(this.blankSocio({ id, name, cpfCnpj: doc, sharePct: "" }));
+      this.socioAberto = String(id);
       this.creditorQuery = "";
       this.creditorHits = [];
       this.persist();
@@ -1472,8 +1513,13 @@ const ParametrizacaoParceiroApp = {
     const p = this.current();
     const obra = this.currentObra(p);
     if (!p || !obra) return;
-    const id = String(ccId);
+    const id = String(ccId).replace(/\D/g, "") || String(ccId);
     if (obra.costCenters.some(c => String(c.id) === id)) return;
+    const permitido = this.checarCentroDaEmpresa(id, p.companyId);
+    if (!permitido.ok) {
+      alert(permitido.msg);
+      return;
+    }
     const ccObra = this.obraFromCc(id);
     if (ccObra !== String(obra.code)) {
       if (!confirm(`O centro ${id} é da obra ${ccObra || "?"}. Incluir na obra ${obra.code}?`)) return;
@@ -1804,8 +1850,9 @@ const ParametrizacaoParceiroApp = {
     };
     const total = this.totalSociosPct(p);
     const resto = Math.round((100 - total) * 1000) / 1000;
-    const socios = p.socios || [];
+    const socios = this.sociosOrdenados(p.socios);
     const card = (s) => {
+      const aberto = String(this.socioAberto || "") === String(s.id);
       const banks = s.bankList || [];
       const bank = s.bankInfo || null;
       const banksHtml = banks.map((b) => {
@@ -1821,24 +1868,32 @@ const ParametrizacaoParceiroApp = {
           </span>
         </label>`;
       }).join("");
-      return `<div style="border:1px solid #d1fae5;background:#f0fdf4;border-radius:10px;padding:12px 14px;">
-        <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-end;flex-wrap:wrap;">
-          <div style="min-width:0;flex:1;">
-            <div style="font-weight:800;color:#065f46;">${this.esc(s.name)}</div>
-            <div style="font-size:0.75rem;color:#047857;margin-top:2px;">ID ${this.esc(s.id)}${s.cpfCnpj ? " · " + this.esc(s.cpfCnpj) : ""}</div>
+      const pctTxt = s.sharePct === "" || s.sharePct == null ? "sem %" : this.fmtPct(s.sharePct) + "%";
+      return `<div style="border:1px solid #d1fae5;background:#f0fdf4;border-radius:10px;overflow:hidden;">
+        <button type="button" onclick="ParametrizacaoParceiroApp.toggleSocio('${this.esc(s.id)}')"
+          style="width:100%;display:flex;align-items:center;gap:10px;text-align:left;border:none;background:transparent;padding:12px 14px;cursor:pointer;">
+          <span style="width:16px;color:#065f46;font-weight:800;">${aberto ? "▾" : "▸"}</span>
+          <span style="min-width:0;flex:1;">
+            <span style="display:block;font-weight:800;color:#065f46;">${this.esc(s.name)}</span>
+            <span style="display:block;font-size:0.75rem;color:#047857;margin-top:2px;">ID ${this.esc(s.id)}${s.cpfCnpj ? " · " + this.esc(s.cpfCnpj) : ""}</span>
+          </span>
+          <span style="font-weight:800;color:#105436;font-variant-numeric:tabular-nums;">${this.esc(pctTxt)}</span>
+        </button>
+        ${aberto ? `<div style="padding:0 14px 12px;border-top:1px solid #d1fae5;">
+          <div style="display:flex;justify-content:flex-end;gap:12px;align-items:flex-end;flex-wrap:wrap;padding-top:10px;">
+            <label style="display:flex;flex-direction:column;gap:4px;width:150px;font-size:0.68rem;font-weight:700;color:#475569;text-transform:uppercase;">% de participação
+              <input type="number" min="0" max="100" step="0.001" value="${s.sharePct === "" ? "" : s.sharePct}"
+                onchange="ParametrizacaoParceiroApp.setSocioPct('${this.esc(s.id)}', this.value)"
+                style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;font-weight:800;background:#fff;">
+            </label>
+            <button type="button" onclick="ParametrizacaoParceiroApp.removeSocio('${this.esc(s.id)}')" style="height:36px;border:none;background:transparent;color:#dc2626;cursor:pointer;font-size:0.78rem;font-weight:700;">Remover</button>
           </div>
-          <label style="display:flex;flex-direction:column;gap:4px;width:150px;font-size:0.68rem;font-weight:700;color:#475569;text-transform:uppercase;">% de participação
-            <input type="number" min="0" max="100" step="0.001" value="${s.sharePct === "" ? "" : s.sharePct}"
-              onchange="ParametrizacaoParceiroApp.setSocioPct('${this.esc(s.id)}', this.value)"
-              style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;font-weight:800;background:#fff;">
-          </label>
-          <button type="button" onclick="ParametrizacaoParceiroApp.removeSocio('${this.esc(s.id)}')" style="height:36px;border:none;background:transparent;color:#dc2626;cursor:pointer;font-size:0.78rem;font-weight:700;">Remover</button>
-        </div>
-        <div style="margin-top:8px;">
-          ${this._bankLoading && !s.bankLoaded ? `<div style="font-size:0.75rem;color:#64748b;">Buscando dados bancários no Sienge…</div>` : ""}
-          ${!this._bankLoading && s.bankLoaded && !banks.length ? `<div style="font-size:0.75rem;color:#b45309;">Nenhuma conta bancária neste credor no Sienge.</div>` : ""}
-          ${banksHtml}
-        </div>
+          <div style="margin-top:8px;">
+            ${this._bankLoading && !s.bankLoaded ? `<div style="font-size:0.75rem;color:#64748b;">Buscando dados bancários no Sienge…</div>` : ""}
+            ${!this._bankLoading && s.bankLoaded && !banks.length ? `<div style="font-size:0.75rem;color:#b45309;">Nenhuma conta bancária neste credor no Sienge.</div>` : ""}
+            ${banksHtml}
+          </div>
+        </div>` : ""}
       </div>`;
     };
     return `
@@ -2065,8 +2120,8 @@ const ParametrizacaoParceiroApp = {
     const p = this.current();
     const q = (this.ccSearch || "").toLowerCase().trim();
     if (!q || !p) return "";
-    const sugg = this.allCostCenters().filter(cc =>
-      (!p.companyId || cc.companyId == null || String(cc.companyId) === String(p.companyId)) &&
+    const sugg = [...this.catalogoCentros().values()].filter(cc =>
+      this.empresaDoCentro(cc) === String(p.companyId) &&
       (String(cc.id).includes(q) || String(cc.name || "").toLowerCase().includes(q))
     ).slice(0, 10);
     if (!sugg.length) return "";
@@ -2146,16 +2201,6 @@ const ParametrizacaoParceiroApp = {
     </div>`;
   },
 
-  importarRateioHtml() {
-    const fontes = this.fontesRateio();
-    if (!fontes.length) return "";
-    const opts = fontes.map((f) => `<option value="${this.esc(f.id)}|${this.esc(f.code)}">${this.esc(f.nome)} · obra ${this.esc(f.code)}</option>`).join("");
-    return `<select id="pp-import-rateio" class="form-control" style="height:36px;max-width:280px;font-size:0.78rem;border-radius:8px;" title="Escolha a obra de outro parceiro. O botão ao lado copia para esta obra o que está ligado ou desligado lá. O percentual desta obra não muda.">
-      <option value="">Importar de outro parceiro</option>${opts}
-    </select>
-    <button type="button" class="btn btn-outline" onclick="ParametrizacaoParceiroApp.importarRateio()" title="Copia para esta obra o que está ligado ou desligado na obra escolhida ao lado. O percentual desta obra continua o da aba Obras." style="height:36px;font-size:0.78rem;white-space:nowrap;">Importar rateio</button>`;
-  },
-
   matrixHtml(p) {
     if (this.isSociedade(p)) {
       return `<div class="crm-card" style="padding:18px;background:#f8fafc;">
@@ -2187,9 +2232,7 @@ const ParametrizacaoParceiroApp = {
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px;">
             <button type="button" class="btn btn-outline" title="Apaga o percentual digitado em cada conta. Todas voltam a usar o percentual padrão desta obra." onclick="ParametrizacaoParceiroApp.applyDefaultToAll()" style="height:36px;font-size:0.78rem;white-space:nowrap;">Usar padrão em todas</button>
-            <button type="button" class="btn btn-primary" title="Copia para as outras obras deste parceiro só o que está ligado ou desligado. O percentual de cada obra continua o da aba Obras." onclick="ParametrizacaoParceiroApp.replicarLigacoes()" style="height:36px;font-size:0.78rem;white-space:nowrap;">Replicar nas outras obras</button>
-            <span style="width:1px;height:24px;background:#e2e8f0;margin:0 4px;"></span>
-            ${this.importarRateioHtml()}
+            <button type="button" class="btn btn-primary" title="Copia as contas ligadas e desligadas desta obra para as outras obras deste parceiro. O percentual de cada obra não muda." onclick="ParametrizacaoParceiroApp.replicarLigacoes()" style="height:36px;font-size:0.78rem;white-space:nowrap;">Replicar nas outras obras</button>
           </div>
         </div>
         <div id="pp-tree-scroll" style="flex:1;overflow:auto;padding:15px;background:#fff;">

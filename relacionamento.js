@@ -919,17 +919,6 @@ const RelacionamentoApp = {
     const sub = document.getElementById(p + "-modal-sub");
     if (sub) sub.textContent = partes.join(" · ");
     modal.style.display = "flex";
-    if (!this._docModalKeyBound) {
-      this._docModalKeyBound = true;
-      document.addEventListener("keydown", (ev) => {
-        if (ev.key !== "Escape") return;
-        if (document.getElementById("pdf-view-overlay")?.classList.contains("active")) return;
-        ["terceiros", "vencimento", "aditamento"].forEach((k) => {
-          const m = document.getElementById(this._docCfg(k).p + "-modal");
-          if (m && m.style.display !== "none") this.fecharDocModal(k);
-        });
-      });
-    }
     if (kind === "terceiros") {
       this._atualizarBtnGerarTerceiro();
       setTimeout(() => document.getElementById("ter-nome")?.focus(), 50);
@@ -1427,14 +1416,6 @@ const RelacionamentoApp = {
     this.fillCartorioSelect("");
     this.atualizarCartoriosDaNuvem();
     modal.style.display = "flex";
-    if (!this._escModalKeyBound) {
-      this._escModalKeyBound = true;
-      document.addEventListener("keydown", (ev) => {
-        if (ev.key !== "Escape" || this._escrituraBusy) return;
-        const m = document.getElementById("esc-modal");
-        if (m && m.style.display !== "none") this.fecharEscrituraModal();
-      });
-    }
     this._travarFiltrosDocOrigem("escritura", { titulo, contrato, nome });
     if (dados.customerId) {
       window.SelectedDynamicCustomerId = dados.customerId;
@@ -2336,8 +2317,8 @@ const RelacionamentoApp = {
     ov.addEventListener("click", (e) => {
       if (ov.classList.contains("is-gerando")) return;
       const b = e.target.closest("[data-r]");
-      if (!b && e.target !== ov) return;
-      const r = b ? b.getAttribute("data-r") : "";
+      if (!b) return;
+      const r = b.getAttribute("data-r");
       if (r === "sim" || r === "nao") {
         ov.querySelector(".qui-rub-escolha").textContent = r === "sim"
           ? "Ok, gerando com rubrica e canais de atendimento"

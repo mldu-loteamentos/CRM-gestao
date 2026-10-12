@@ -14,6 +14,7 @@ const ResultadoCaixaApp = {
   escala: "milhoes",
   agrupar: true,
   outrosAberto: false,
+  SOLTOS: { "14703": 1, "14704": 1, "14304": 1, "14305": 1 },
   dfcLinhas: [],
   dfcLendo: false,
   dfcErro: "",
@@ -103,7 +104,7 @@ const ResultadoCaixaApp = {
 
   grupoCc(id) {
     const s = String(id || "").replace(/\D/g, "");
-    if (this.SOLTOS[s]) return s;
+    if (this.SOLTOS && this.SOLTOS[s]) return s;
     if (s.length >= 5) return s.slice(0, 3) + "00";
     return s;
   },
@@ -781,7 +782,7 @@ const ResultadoCaixaApp = {
     const grupos = {};
     fontes.forEach((f) => {
       const key = this.grupoCc(f.id);
-      if (!grupos[key]) grupos[key] = { key, nome: "", solto: !!this.SOLTOS[key], ids: [] };
+      if (!grupos[key]) grupos[key] = { key, nome: "", solto: !!(this.SOLTOS && this.SOLTOS[key]), ids: [] };
       const g = grupos[key];
       g.ids.push(f.id);
       if (f.id === key || !g.nome) g.nome = f.nome;
@@ -1207,7 +1208,14 @@ const ResultadoCaixaApp = {
     if (!root) return;
     const aba = this.aba || "entradas";
     const tab = (id, label, icon) => `<button type="button" role="tab" aria-selected="${aba === id}" class="ml-tab${aba === id ? " is-active" : ""}" onclick="ResultadoCaixaApp.setAba('${id}')"><i data-lucide="${icon}"></i> ${label}</button>`;
-    const corpo = aba === "posicao" ? this.posicaoHtml() : this.orcamentoHtml(aba);
+    let corpo = "";
+    try {
+      corpo = aba === "posicao" ? this.posicaoHtml() : this.orcamentoHtml(aba);
+    } catch (e) {
+      console.error("[Resultado de caixa]", e);
+      const msg = String((e && e.message) || e || "erro ao montar a tela");
+      corpo = `<div class="rcx-erro">${msg.replace(/[&<>]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[ch]))}</div>`;
+    }
     root.innerHTML = `
       <div class="rcx-page">
         <div class="ml-tabs rcx-tabs" role="tablist">

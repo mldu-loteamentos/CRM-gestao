@@ -39559,9 +39559,6 @@ window.openGestaoDocumentoMenu = function(ctx) {
           <button type="button" class="btn btn-cancel" onclick="closeGestaoDocumentoMenu()">Cancelar</button>
         </footer>
       </div>`;
-    overlay.addEventListener("click", function(e) {
-      if (e.target === overlay) closeGestaoDocumentoMenu();
-    });
     document.body.appendChild(overlay);
   }
   overlay._ctx = ctx || {};

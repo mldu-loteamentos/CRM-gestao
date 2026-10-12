@@ -221,7 +221,7 @@ const FiscalApp = {
       FiscalState.consultou = true;
       FiscalState.linhas = [];
       FiscalState.aviso = "Nenhuma empresa está marcada como gerida pelo grupo.";
-      this.render();
+    this.render();
       return;
     }
     const meses = this.mesesParaLer();
@@ -237,7 +237,7 @@ const FiscalApp = {
         try {
           const data = await SiengeApiService.getBankMovements(start, end, { selectionType: "M", companyId: id });
           return (data || []).map((m) => Object.assign({}, m, { companyId: m.companyId || id }));
-        } catch (e) {
+      } catch (e) {
           return [];
         } finally {
           lidos += 1;
@@ -965,18 +965,18 @@ const FiscalApp = {
       });
       let billId = `SIMULADO_${Math.floor(Math.random() * 1000)}`;
       if (!req.ok) throw new Error(await req.text());
-      const textResp = await req.text();
-      if (textResp) {
+        const textResp = await req.text();
+        if (textResp) {
         try { billId = JSON.parse(textResp).id || billId; } catch (e) {}
-      }
+        }
       if (file && !String(billId).startsWith("SIMULADO_")) {
-        try {
+          try {
           const attUrl = `http://${host}:3001/sienge-proxy/bills/${billId}/attachments?description=Guia_${type.toUpperCase()}`;
-          const formData = new FormData();
+            const formData = new FormData();
           formData.append("file", file);
           await fetch(attUrl, { method: "POST", headers: { Authorization: authHeader }, body: formData });
-        } catch (errAtt) {
-          alert("O título foi criado, mas houve uma falha ao enviar o anexo da guia.");
+          } catch (errAtt) {
+            alert("O título foi criado, mas houve uma falha ao enviar o anexo da guia.");
         }
       }
       btn.innerHTML = `Gerado: #${billId}`;

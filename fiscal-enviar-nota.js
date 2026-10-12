@@ -281,23 +281,35 @@ window.FilaNotasFiscais = {
     return "paperclip";
   },
 
+  clipCarta(item, esc) {
+    const carta = ((item && item.anexos) || []).find((a) => a && a.tipo === "carta" && a.url);
+    if (!carta) return "";
+    return `<a class="fnf-anexo-ico" href="${esc(carta.url)}" target="_blank" rel="noopener" title="Carta de correção"><i data-lucide="paperclip" width="12" height="12"></i></a>`;
+  },
+
   motivoHtml(item, esc) {
-    if (!item || item.status !== "devolvida" || !item.motivoDevolucao) return "";
-    const rot = item.devolucaoTipo === "cancelamento" ? "Cancelar a nota" : (item.devolucaoTipo === "carta" ? "Carta de correção" : "Devolvida");
-    return `<small class="fnf-motivo"><b>${rot}.</b> ${esc(item.motivoDevolucao).replace(/\n/g, "<br>")}</small>`;
+    if (!item || item.status !== "devolvida") return "";
+    if (item.devolucaoTipo === "carta") return `<span class="fnf-sit"><span class="fnf-sit-carta">Solicitado carta de correção</span>${this.clipCarta(item, esc)}</span>`;
+    if (item.devolucaoTipo === "cancelamento") return `<small class="fnf-motivo">Solicitado cancelamento da nota</small>`;
+    return "";
+  },
+
+  situacaoHtml(item, esc) {
+    if (item && item.status === "devolvida" && item.devolucaoTipo === "carta") return this.motivoHtml(item, esc);
+    return this.statusHtml(item, esc) + this.motivoHtml(item, esc);
   },
 
   anexosHtml(item, esc) {
-    const lista = item.anexos || [];
+    const lista = (item.anexos || []).filter((a) => !(item.devolucaoTipo === "carta" && a && a.tipo === "carta"));
     if (!lista.length) return "—";
     const id = esc(item.id);
     const titulo = lista.length === 1
       ? (lista[0].nome || this.TIPOS_ANEXO[lista[0].tipo] || "Abrir anexo")
       : `${lista.length} anexos`;
     if (lista.length === 1 && lista[0].url) {
-      return `<a class="fnf-anexo-ico" href="${esc(lista[0].url)}" target="_blank" rel="noopener" title="${esc(titulo)}"><i data-lucide="paperclip" width="15" height="15"></i></a>`;
+      return `<a class="fnf-anexo-ico" href="${esc(lista[0].url)}" target="_blank" rel="noopener" title="${esc(titulo)}"><i data-lucide="paperclip" width="12" height="12"></i></a>`;
     }
-    return `<button type="button" class="fnf-anexo-ico" title="${esc(titulo)}" onclick="FilaNotasFiscais.abrirAnexos('${id}')"><i data-lucide="paperclip" width="15" height="15"></i></button>`;
+    return `<button type="button" class="fnf-anexo-ico" title="${esc(titulo)}" onclick="FilaNotasFiscais.abrirAnexos('${id}')"><i data-lucide="paperclip" width="12" height="12"></i></button>`;
   },
 
   acharEnvio(id) {
@@ -349,7 +361,10 @@ window.FilaNotasFiscais = {
       .fnf-tab .fnf-acoes .tvig-ico i, .fnf-tab .fnf-acoes .tvig-ico svg { width: 15px; height: 15px; }
       .fnf-anexo-ico { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 0; background: transparent; color: #64748b; border-radius: 8px; cursor: pointer; text-decoration: none; vertical-align: middle; }
       .fnf-anexo-ico:hover { background: #f1f5f9; color: #105436; }
-      .fnf-anexo-ico i, .fnf-anexo-ico svg { width: 15px; height: 15px; }
+      .fnf-anexo-ico i, .fnf-anexo-ico svg { width: 12px; height: 12px; }
+      .fnf-sit { display: inline-flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+      .fnf-sit-carta { font-weight: 700; color: #9a3412; }
+      .fnf-barra .fnf-arq.is-on { background: #105436; color: #fff; border-color: #105436; }
       .fnf-pop { position: fixed; inset: 0; z-index: 1600; background: rgba(15, 23, 42, 0.35); display: flex; align-items: center; justify-content: center; padding: 24px; }
       .fnf-pop-box { width: min(440px, 100%); background: #fff; border-radius: 12px; padding: 14px 16px 8px; box-shadow: 0 16px 40px rgba(15, 23, 42, 0.2); }
       .fnf-pop-h { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
@@ -426,7 +441,7 @@ window.EnviarNotaApp = {
       lendoNota: "", leituraErro: "", leituraToken: 0, fiscal: null,
       obs: "",
       enviando: "", feito: "", editandoId: "",
-      lista: ant.lista || [], listaCarregada: !!ant.listaCarregada, listaErro: "", listaCarregando: false, todos: !!ant.todos, verLancadas: !!ant.verLancadas
+      lista: ant.lista || [], listaCarregada: !!ant.listaCarregada, listaErro: "", listaCarregando: false, todos: !!ant.todos, verArquivo: !!ant.verArquivo
     };
   },
 
@@ -1461,7 +1476,7 @@ window.EnviarNotaApp = {
         numeroNota: String(s.numeroNota || "").trim(),
         serieNota: String(s.serieNota || "").trim(),
         valorNota: this.num(s.valorNota),
-        pagamento: { data: s.pag.data, forma: s.pag.forma, detalhe: String(s.pag.detalhe || "").trim() },
+        pagamento: { data: s.pag.data, forma: s.pag.forma, detalhe: String(s.pag.detalhe || "").trim(), conta: this.contaGravada() },
         observacao: String(s.obs || "").trim(),
         anexos,
         motivoDevolucao: "", assumidoPor: "", assumidoPorEmail: ""
@@ -1469,7 +1484,7 @@ window.EnviarNotaApp = {
       if (!s.editandoId) Object.assign(dados, { criadoEm: Date.now(), criadoPor: u.nome, criadoPorEmail: u.email, criadoPorSienge: u.sienge });
       await FilaNotasFiscais.atualizar(Object.assign(antigo, s.editandoId ? {} : { historico: [] }), dados, s.editandoId ? "reenviada" : "enviada");
       this.auditar(`Nota do pedido ${s.pedidoNome} ${s.editandoId ? "reenviada" : "enviada"} ao fiscal · pagamento ${this.dataBr(s.pag.data)} ${s.pag.forma}`, { id, pedido: s.pedidoNome, anexos: anexos.length });
-      const feito = `Nota do pedido ${s.pedidoNome} ${s.editandoId ? "reenviada" : "enviada"} ao fiscal. Acompanhe em "Minhas notas enviadas".`;
+      const feito = `Sucesso! Nota do pedido ${s.pedidoNome} ${s.editandoId ? "reenviada" : "enviada"} ao fiscal. Acompanhe em "Minhas notas enviadas".`;
       this.state = this.novoEstado();
       this.state.feito = feito;
       this.state.listaCarregada = false;
@@ -1478,6 +1493,22 @@ window.EnviarNotaApp = {
       alert(`Não consegui enviar a nota ao fiscal: ${(e && e.message) || e}`);
     }
     this.render();
+    if (this.state.feito) this.subir();
+  },
+
+  contaGravada() {
+    const pag = this.state.pag || {};
+    if (pag.forma !== "Transferência (TED)" && pag.forma !== "Débito em conta") return null;
+    const c = ((this.state.banco && this.state.banco.contas) || []).find((x) => x.txt === pag.detalhe);
+    if (!c) return null;
+    return { banco: c.banco, nomeBanco: c.nomeBanco, agencia: c.agencia, conta: c.conta, tipo: c.tipo, favorecido: c.favorecido, doc: c.doc };
+  },
+
+  subir() {
+    const main = document.querySelector(".main-content");
+    const root = document.getElementById("enviar-nota-root");
+    if (main) main.scrollTo({ top: 0, behavior: "smooth" });
+    if (root) root.scrollIntoView({ behavior: "smooth", block: "start" });
   },
 
   auditar(summary, details) {
@@ -1510,8 +1541,8 @@ window.EnviarNotaApp = {
     this.render();
   },
 
-  setVerLancadas(v) {
-    this.state.verLancadas = !!v;
+  setVerArquivo(v) {
+    this.state.verArquivo = !!v;
     this.render();
   },
 
@@ -1757,8 +1788,8 @@ window.EnviarNotaApp = {
     const s = this.state;
     const u = FilaNotasFiscais.usuario();
     const minhas = s.todos ? s.lista : s.lista.filter((x) => (u.email && x.criadoPorEmail === u.email) || (!u.email && x.criadoPor === u.nome));
-    const visiveis = minhas.filter((x) => x.status !== "excluida");
-    const lista = s.verLancadas ? visiveis : visiveis.filter((x) => x.status !== "lancada");
+    const ocultar = new Set(["excluida", "cancelada", "lancada"]);
+    const lista = s.verArquivo ? minhas : minhas.filter((x) => !ocultar.has(x.status));
     const quem = (nome, email, gravado) => FilaNotasFiscais.usuarioSienge(nome, email, gravado);
     const esc = (v) => this.esc(v);
     const linha = (x) => `<tr class="${x.status === "devolvida" ? "fnf-devolvida" : ""}">
@@ -1766,7 +1797,7 @@ window.EnviarNotaApp = {
               <td><b>${esc(x.pedido)}</b>${x.numeroNota ? `<small>NF ${esc(x.numeroNota)}</small>` : ""}</td>
               <td>${esc(x.fornecedor ? x.fornecedor.nome : "")}${x.valorNota != null ? `<small>${this.money(x.valorNota)}</small>` : ""}</td>
               <td>${esc(FilaNotasFiscais.pagamentoTxt(x, (d) => this.dataBr(d)))}${x.pagamento && x.pagamento.detalhe ? `<small>${esc(x.pagamento.detalhe)}</small>` : ""}</td>
-              <td>${FilaNotasFiscais.statusHtml(Object.assign({}, x, { assumidoPor: quem(x.assumidoPor, x.assumidoPorEmail, x.assumidoPorSienge) }), esc)}${FilaNotasFiscais.motivoHtml(x, esc)}</td>
+              <td>${FilaNotasFiscais.situacaoHtml(Object.assign({}, x, { assumidoPor: quem(x.assumidoPor, x.assumidoPorEmail, x.assumidoPorSienge) }), esc)}</td>
               <td class="fnf-acoes">
                 ${FilaNotasFiscais.anexosHtml(x, esc)}
                 ${(x.status === "pendente" || x.status === "devolvida") && this.podeEditar() ? `<button type="button" class="tvig-ico" title="Editar" onclick="EnviarNotaApp.corrigir('${esc(x.id)}')"><i data-lucide="pencil"></i></button>` : ""}
@@ -1774,23 +1805,13 @@ window.EnviarNotaApp = {
               </td>
             </tr>`;
     const tabela = (itens) => `<table class="fnf-tab"><thead><tr><th>Enviada em</th><th>Pedido</th><th>Fornecedor</th><th>Pagamento</th><th>Situação</th><th>Ações</th></tr></thead><tbody>${itens.map(linha).join("")}</tbody></table>`;
-    const ocultas = s.lista.filter((x) => x.status === "lancada" && !lista.some((y) => y.id === x.id)).slice(0, 30);
-    const blocoOcultas = ocultas.length ? `<div class="env-lancadas">
-          <h4>Notas já lançadas no Sienge</h4>
-          <p>Estas notas ficam de fora da lista com os filtros desligados, inclusive quando o envio foi de outro operador. Exclua o registro para enviar a mesma nota de novo neste teste. A exclusão não desfaz o lançamento no Sienge.</p>
-          ${tabela(ocultas)}
-        </div>` : "";
     const corpo = s.listaCarregando ? `<p class="fnf-vazio"><span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;"></span> Carregando…</p>`
       : (s.listaErro ? `<p class="inf-erro">${esc(s.listaErro)}</p>`
-        : `${!lista.length ? `<p class="fnf-vazio">Nenhuma nota enviada${s.todos ? "" : " por você"}.</p>` : tabela(lista)}${blocoOcultas}`);
+        : (!lista.length ? `<p class="fnf-vazio">Nenhuma nota enviada${s.todos ? "" : " por você"}.</p>` : tabela(lista)));
     return `<div class="inf-card" style="margin:16px 20px;">
         <div class="fnf-barra">
           <label class="inf-chk"><input type="checkbox" ${s.todos ? "checked" : ""} onchange="EnviarNotaApp.setTodos(this.checked)"> Mostrar envios de todos os operadores</label>
-          <label class="moura-switch" title="Desligado, as notas que o fiscal já lançou no Sienge ficam de fora. Ligue para vê-las de novo.">
-            <input type="checkbox" ${s.verLancadas ? "checked" : ""} onchange="EnviarNotaApp.setVerLancadas(this.checked)">
-            <span class="moura-switch-track" aria-hidden="true"></span>
-            <span class="moura-switch-text">Mostrar notas já lançadas no Sienge</span>
-          </label>
+          <button type="button" class="btn btn-outline inf-btn-sm fnf-arq ${s.verArquivo ? "is-on" : ""}" onclick="EnviarNotaApp.setVerArquivo(${s.verArquivo ? "false" : "true"})">Mostrar excluídos, cancelados e finalizados</button>
           <button type="button" class="btn btn-outline inf-btn-sm" onclick="EnviarNotaApp.carregarLista(true)" ${s.listaCarregando ? "disabled" : ""}><i data-lucide="refresh-cw"></i> Atualizar</button>
         </div>
         ${corpo}

@@ -1362,7 +1362,7 @@ const HonorariosReport = {
   },
 
   planilhasPorEmpresa(desc) {
-    const rows = this.filtered();
+      const rows = this.filtered();
     if (!rows.length) { alert("Não há boletos para exportar neste filtro."); return null; }
     const linha = desc ? (r) => this.linhaDesconto(r) : (r) => this.linhaHonorarios(r);
     const soma = desc ? (nome, list) => this.somaDesconto(nome, list) : (nome, list) => this.somaHonorarios(nome, list);

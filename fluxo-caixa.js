@@ -12,6 +12,8 @@ const FluxoCaixaApp = {
   loadedEnd: "",
   consolidacaoAtiva: true,
   companyMonthsOpen: null,
+  agrupamento: "mes",
+  grupoAberto: "",
   companyDropOpen: false,
   companyQuery: "",
   loading: false,
@@ -157,6 +159,79 @@ const FluxoCaixaApp = {
     const [y, m] = key.split("-");
     const names = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
     return `${names[Number(m) - 1]}/${y}`;
+  },
+
+  rotuloPeriodo(months) {
+    const list = months || [];
+    if (!list.length) return "";
+    if (list.length === 1) return this.monthLabel(list[0]);
+    const a = this.monthLabel(list[0]).split("/");
+    const b = this.monthLabel(list[list.length - 1]).split("/");
+    if (a[1] === b[1] && list.length === 12) return a[1];
+    if (a[1] === b[1]) return `${a[0]}–${b[0]}/${a[1]}`;
+    return `${a[0]}/${a[1]}–${b[0]}/${b[1]}`;
+  },
+
+  periodos() {
+    const months = this.months || [];
+    const modo = this.agrupamento || "mes";
+    if (modo === "mes") {
+      return months.map(m => ({ key: m, label: this.monthLabel(m), months: [m] }));
+    }
+    const buckets = new Map();
+    months.forEach(m => {
+      const [ys, ms] = m.split("-");
+      const y = Number(ys);
+      const mi = Number(ms);
+      let key = String(y);
+      if (modo === "bimestre") key = y + "-B" + (Math.floor((mi - 1) / 2) + 1);
+      else if (modo === "trimestre") key = y + "-T" + (Math.floor((mi - 1) / 3) + 1);
+      else if (modo === "semestre") key = y + "-S" + (mi <= 6 ? 1 : 2);
+      if (!buckets.has(key)) buckets.set(key, { key, months: [] });
+      buckets.get(key).months.push(m);
+    });
+    return [...buckets.values()].map(p => ({ key: p.key, months: p.months, label: this.rotuloPeriodo(p.months) }));
+  },
+
+  tempoCols() {
+    const agrupado = (this.agrupamento || "mes") !== "mes";
+    const cols = [];
+    this.periodos().forEach((p, pi) => {
+      const aberto = agrupado && this.grupoAberto === p.key;
+      if (!agrupado || aberto) {
+        p.months.forEach((m, i) => cols.push({ type: "month", month: m, edge: pi === 0 && i === 0 }));
+      } else {
+        cols.push({ type: "periodo", key: p.key, label: p.label, months: p.months.slice(), edge: pi === 0 });
+      }
+    });
+    return cols;
+  },
+
+  setAgrupamento(modo) {
+    const ok = ["mes", "bimestre", "trimestre", "semestre", "anual"];
+    this.agrupamento = ok.indexOf(modo) >= 0 ? modo : "mes";
+    this.grupoAberto = "";
+    this.render();
+  },
+
+  toggleGrupo(key) {
+    const k = String(key || "");
+    this.grupoAberto = this.grupoAberto === k ? "" : k;
+    this.render();
+  },
+
+  agrupaBotoesHtml() {
+    const itens = [
+      ["mes", "Mês"],
+      ["bimestre", "Bimestre"],
+      ["trimestre", "Trimestre"],
+      ["semestre", "Semestre"],
+      ["anual", "Anual"]
+    ];
+    return itens.map(([id, nome]) => {
+      const on = (this.agrupamento || "mes") === id ? " is-on" : "";
+      return `<button type="button" class="fc-agrupa-btn${on}" onclick="FluxoCaixaApp.setAgrupamento('${id}')">${nome}</button>`;
+    }).join("");
   },
 
   factorForCompany(companyId) {
@@ -791,6 +866,7 @@ const FluxoCaixaApp = {
     this.render();
     await this.ensureCategories();
     this.months = this.monthKeys(this.startDate, this.endDate);
+    if (this.grupoAberto && !this.periodos().some(p => p.key === this.grupoAberto)) this.grupoAberto = "";
     try {
       const chunks = await Promise.all(this.selectedCompanyIds.map(async id => {
         const data = await SiengeApiService.getBankMovements(this.startDate, this.endDate, {
@@ -1126,8 +1202,17 @@ const FluxoCaixaApp = {
               <div class="fc-tree-toolbar">
                 <strong>Estrutura DFC Padrão</strong>
                 <div class="fc-tree-actions">
+                  <div class="fc-agrupa" role="group" aria-label="Agrupar colunas do período">
+                    ${this.agrupaBotoesHtml()}
+                  </div>
                   <button type="button" class="btn btn-outline fc-mini" onclick="FluxoCaixaApp.expandAll()" ${canExpand ? "" : "disabled"}>Expandir todos</button>
                   <button type="button" class="btn btn-outline fc-mini" onclick="FluxoCaixaApp.collapseAll()" ${canCollapse ? "" : "disabled"}>Recolher todos</button>
+                  <button type="button" class="btn fc-insights-btn" onclick="FluxoCaixaApp.gerarInsights()" ${(this.rows || []).length && !this.loading ? "" : "disabled"} title="Variações, receitas, serviços, aplicações e saídas">
+                    <i data-lucide="lightbulb" style="width:14px;height:14px;"></i> Gerar insights
+                  </button>
+                  <button type="button" class="btn btn-excel" onclick="FluxoCaixaApp.exportGridExcel()" ${(this.rows || []).length && !this.loading ? "" : "disabled"} title="Exportar tabela atual para Excel">
+                    <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
+                  </button>
                 </div>
               </div>
               ${hasUnmatched ? `
@@ -1166,9 +1251,10 @@ const FluxoCaixaApp = {
 
   visibleColumns() {
     const ids = this.gridCompanyIds();
+    const tempo = this.tempoCols();
     if (ids.length <= 1) {
       const id = ids[0] || "";
-      const cols = this.months.map(m => ({ type: "month", companyId: id, month: m }));
+      const cols = tempo.map(c => Object.assign({ companyId: id }, c));
       cols.push({ type: "total", companyId: id });
       return cols;
     }
@@ -1178,7 +1264,7 @@ const FluxoCaixaApp = {
       const band = idx % 2 ? "fc-band-1" : "";
       const open = this.companyMonthsOpen && this.companyMonthsOpen.has(id);
       if (open) {
-        this.months.forEach((m, mi) => cols.push({ type: "month", companyId: id, month: m, band, edge: mi === 0 }));
+        tempo.forEach(c => cols.push(Object.assign({ companyId: id, band }, c)));
       }
       cols.push({ type: "co", companyId: id, band, edge: !open });
     });
@@ -1190,12 +1276,16 @@ const FluxoCaixaApp = {
   valueOf(row, col) {
     if (!col) return Number(row.total) || 0;
     if (col.type === "total" && !col.companyId) return Number(row.total) || 0;
-    if (col.type === "total" && this.gridCompanyIds().length <= 1) return Number(row.total) || 0;
-    const bag = row.byCompany && row.byCompany[String(col.companyId)];
-    if (col.type === "total") return bag ? (Number(bag.total) || 0) : 0;
-    if (!bag) return 0;
-    if (col.type === "month") return Number(bag.months && bag.months[col.month]) || 0;
-    return Number(bag.total) || 0;
+    const uma = this.gridCompanyIds().length <= 1;
+    const bag = col.companyId && row.byCompany ? row.byCompany[String(col.companyId)] : null;
+    const monthsBag = (bag && bag.months) || (uma ? row.months : null);
+    if (col.type === "periodo") {
+      return (col.months || []).reduce((s, m) => s + (Number(monthsBag && monthsBag[m]) || 0), 0);
+    }
+    if (col.type === "month") return Number(monthsBag && monthsBag[col.month]) || 0;
+    if (col.type === "total" && uma) return Number(row.total) || 0;
+    if (col.type === "total" || col.type === "co") return bag ? (Number(bag.total) || 0) : 0;
+    return Number(row.total) || 0;
   },
 
   valClass(n, strong) {
@@ -1213,40 +1303,100 @@ const FluxoCaixaApp = {
     return "fc-r-node";
   },
 
+  thPeriodo(p, extra, aberto) {
+    const mark = String(extra || "");
+    const cls = `fc-th-num fc-th-periodo${mark.replace(" row2", "")}`;
+    if (aberto) {
+      return `<th class="${cls} is-open" colspan="${p.months.length}" title="Fechar os meses. Os outros períodos continuam fechados." onclick="FluxoCaixaApp.toggleGrupo('${p.key}')">▾ ${this.esc(p.label)}</th>`;
+    }
+    const span = mark.indexOf("row2") >= 0 ? ` rowspan="2"` : "";
+    return `<th class="${cls}"${span} title="Abrir os meses deste período" onclick="FluxoCaixaApp.toggleGrupo('${p.key}')">▸ ${this.esc(p.label)}</th>`;
+  },
+
   gridHtml() {
     const cols = this.visibleColumns();
     const ids = this.gridCompanyIds();
-    let head;
-    if (ids.length <= 1) {
-      const months = this.months.map(m => `<th class="fc-th-num">${this.esc(this.monthLabel(m))}</th>`).join("");
-      head = `<thead><tr><th class="fc-th-name">Estrutura</th>${months}<th class="fc-th-num fc-th-total">Total</th></tr></thead>`;
-    } else {
-      const anyOpen = ids.some(id => this.companyMonthsOpen && this.companyMonthsOpen.has(id));
-      const span = anyOpen ? 2 : 1;
-      const row1 = [`<th class="fc-th-name" rowspan="${span}">Estrutura</th>`];
-      const row2 = [];
-      ids.forEach((id, idx) => {
-        const c = this.companyById(id);
-        const open = this.companyMonthsOpen && this.companyMonthsOpen.has(id);
-        const label = this.esc(this.columnHeader(c || { id, usual: "", fullName: "" }));
-        const tip = this.esc((c && c.fullName) || label);
-        const chev = open ? "▾" : "▸";
-        const band = idx % 2 ? " fc-band-1" : "";
-        if (idx > 0) row1.push(`<th class="fc-gap" rowspan="${span}"></th>`);
-        if (open) {
-          row1.push(`<th class="fc-th-co fc-co-edge${band}" colspan="${this.months.length + 1}" title="${tip}" onclick="FluxoCaixaApp.toggleCompanyMonths('${id}')">${chev} ${label}</th>`);
-          this.months.forEach((m, mi) => row2.push(`<th class="fc-th-num${mi === 0 ? " fc-co-edge" : ""}${band}">${this.esc(this.monthLabel(m))}</th>`));
-          row2.push(`<th class="fc-th-num${band}">Total</th>`);
-        } else {
-          row1.push(`<th class="fc-th-co fc-co-edge${band}" rowspan="${span}" title="${tip}" onclick="FluxoCaixaApp.toggleCompanyMonths('${id}')">${chev} ${label}</th>`);
-        }
-      });
-      row1.push(`<th class="fc-gap" rowspan="${span}"></th>`);
-      row1.push(`<th class="fc-th-total fc-th-num fc-co-edge" rowspan="${span}">Total</th>`);
-      head = `<thead><tr>${row1.join("")}</tr>${anyOpen ? `<tr class="fc-months">${row2.join("")}</tr>` : ""}</thead>`;
-    }
+    const head = ids.length <= 1 ? this.headUmaEmpresa() : this.headVariasEmpresas(ids);
     const body = (this.rows || []).map(r => this.gridRowHtml(r, cols)).join("");
     return `<table class="fc-grid">${head}<tbody>${body}</tbody></table>`;
+  },
+
+  headUmaEmpresa() {
+    const agrupado = (this.agrupamento || "mes") !== "mes";
+    const periodos = this.periodos();
+    const abertoKey = agrupado ? this.grupoAberto : "";
+    const aberto = periodos.some(p => p.key === abertoKey);
+    if (!aberto) {
+      const cells = periodos.map(p => (
+        agrupado
+          ? this.thPeriodo(p, "", false).replace(' rowspan="2"', "")
+          : `<th class="fc-th-num">${this.esc(p.label)}</th>`
+      )).join("");
+      return `<thead><tr><th class="fc-th-name">Estrutura</th>${cells}<th class="fc-th-num fc-th-total">Total</th></tr></thead>`;
+    }
+    const row1 = [`<th class="fc-th-name" rowspan="2">Estrutura</th>`];
+    const row2 = [];
+    periodos.forEach(p => {
+      if (p.key === abertoKey) {
+        row1.push(this.thPeriodo(p, "", true));
+        p.months.forEach((m, i) => row2.push(`<th class="fc-th-num${i === 0 ? " fc-co-edge" : ""}">${this.esc(this.monthLabel(m))}</th>`));
+      } else {
+        row1.push(this.thPeriodo(p, " row2", false));
+      }
+    });
+    row1.push(`<th class="fc-th-num fc-th-total" rowspan="2">Total</th>`);
+    return `<thead><tr>${row1.join("")}</tr><tr class="fc-months">${row2.join("")}</tr></thead>`;
+  },
+
+  headVariasEmpresas(ids) {
+    const agrupado = (this.agrupamento || "mes") !== "mes";
+    const periodos = this.periodos();
+    const abertoKey = agrupado ? this.grupoAberto : "";
+    const periodoAberto = periodos.some(p => p.key === abertoKey);
+    const anyOpen = ids.some(id => this.companyMonthsOpen && this.companyMonthsOpen.has(id));
+    const span = 1 + (anyOpen ? 1 : 0) + (anyOpen && periodoAberto ? 1 : 0);
+    const row1 = [`<th class="fc-th-name" rowspan="${span}">Estrutura</th>`];
+    const row2 = [];
+    const row3 = [];
+    ids.forEach((id, idx) => {
+      const c = this.companyById(id);
+      const open = this.companyMonthsOpen && this.companyMonthsOpen.has(id);
+      const label = this.esc(this.columnHeader(c || { id, usual: "", fullName: "" }));
+      const tip = this.esc((c && c.fullName) || label);
+      const chev = open ? "▾" : "▸";
+      const band = idx % 2 ? " fc-band-1" : "";
+      if (idx > 0) row1.push(`<th class="fc-gap" rowspan="${span}"></th>`);
+      if (!open) {
+        row1.push(`<th class="fc-th-co fc-co-edge${band}" rowspan="${span}" title="${tip}" onclick="FluxoCaixaApp.toggleCompanyMonths('${id}')">${chev} ${label}</th>`);
+        return;
+      }
+      const tempo = this.tempoCols();
+      row1.push(`<th class="fc-th-co fc-co-edge${band}" colspan="${tempo.length + 1}" title="${tip}" onclick="FluxoCaixaApp.toggleCompanyMonths('${id}')">${chev} ${label}</th>`);
+      if (!periodoAberto) {
+        periodos.forEach((p, i) => {
+          const edge = i === 0 ? " fc-co-edge" : "";
+          if (!agrupado) row2.push(`<th class="fc-th-num${edge}${band}">${this.esc(p.label)}</th>`);
+          else row2.push(this.thPeriodo(p, edge + band, false).replace(' rowspan="2"', ""));
+        });
+        row2.push(`<th class="fc-th-num${band}">Total</th>`);
+      } else {
+        periodos.forEach((p, i) => {
+          const edge = i === 0 ? " fc-co-edge" : "";
+          if (p.key === abertoKey) {
+            row2.push(this.thPeriodo(p, edge + band, true));
+            p.months.forEach((m, mi) => row3.push(`<th class="fc-th-num${mi === 0 ? " fc-co-edge" : ""}${band}">${this.esc(this.monthLabel(m))}</th>`));
+          } else {
+            row2.push(this.thPeriodo(p, " row2" + band, false));
+          }
+        });
+        row2.push(`<th class="fc-th-num${band}" rowspan="2">Total</th>`);
+      }
+    });
+    row1.push(`<th class="fc-gap" rowspan="${span}"></th>`);
+    row1.push(`<th class="fc-th-total fc-th-num fc-co-edge" rowspan="${span}">Total</th>`);
+    const r2 = anyOpen ? `<tr class="fc-months">${row2.join("")}</tr>` : "";
+    const r3 = anyOpen && periodoAberto ? `<tr class="fc-months fc-months-2">${row3.join("")}</tr>` : "";
+    return `<thead><tr>${row1.join("")}</tr>${r2}${r3}</thead>`;
   },
 
   ehVendaImoveis(r) {
@@ -1302,7 +1452,9 @@ const FluxoCaixaApp = {
       const strong = col.type !== "month";
       const extra = `${col.band ? " " + col.band : ""}${col.edge ? " fc-co-edge" : ""}`;
       const co = col.companyId ? `'${String(col.companyId).replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'` : "''";
-      const mo = col.type === "month" && col.month ? `'${col.month}'` : "''";
+      const mo = col.type === "month" && col.month
+        ? `'${col.month}'`
+        : (col.type === "periodo" && col.months && col.months.length ? `'${col.months.join(",")}'` : "''");
       let click = "";
       let tip = "";
       if (canDrill) {
@@ -1591,12 +1743,15 @@ const FluxoCaixaApp = {
     };
     const info = this.resolveDrill(id, !!isAccount, ccId);
     const wantCo = companyId != null && String(companyId) !== "" ? String(companyId) : "";
-    const wantMonth = month != null && String(month) !== "" ? String(month).slice(0, 7) : "";
+    const wantMonths = String(month == null ? "" : month)
+      .split(",")
+      .map(s => s.trim().slice(0, 7))
+      .filter(s => /^\d{4}-\d{2}$/.test(s));
     let items = [...(info.items || [])].filter((it) => {
       if (wantCo && String(it.companyId || "") !== wantCo) return false;
-      if (wantMonth) {
+      if (wantMonths.length) {
         const mk = String(it.month || this.cashDate(it.mov || {}) || "").slice(0, 7);
-        if (mk !== wantMonth) return false;
+        if (wantMonths.indexOf(mk) < 0) return false;
       }
       return true;
     });
@@ -1608,7 +1763,8 @@ const FluxoCaixaApp = {
     const sum = items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
     const partes = [];
     if (wantCo) partes.push(this.companyLabelShort(wantCo));
-    if (wantMonth) partes.push(this.monthLabel(wantMonth));
+    if (wantMonths.length === 1) partes.push(this.monthLabel(wantMonths[0]));
+    else if (wantMonths.length > 1) partes.push(this.rotuloPeriodo(wantMonths));
     if (partes.length) info.subtitle = `${info.subtitle} · ${partes.join(" · ")}`;
     info.total = sum;
 
@@ -1872,6 +2028,608 @@ const FluxoCaixaApp = {
 
   esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+  },
+
+  rotuloColuna(col) {
+    if (!col || col.type === "gap") return "";
+    if (col.type === "total" && !col.companyId) return "Total";
+    if (col.type === "co" || (col.type === "total" && col.companyId && this.gridCompanyIds().length > 1 && col.type === "co")) {
+      const c = this.companyById(col.companyId);
+      return this.columnHeader(c || { id: col.companyId, usual: "", fullName: "" });
+    }
+    let base = "Total";
+    if (col.type === "month") base = this.monthLabel(col.month);
+    else if (col.type === "periodo") base = col.label || this.rotuloPeriodo(col.months);
+    else if (col.type === "total") base = "Total";
+    if (this.gridCompanyIds().length > 1 && col.companyId && col.type !== "co") {
+      const c = this.companyById(col.companyId);
+      const nome = this.columnHeader(c || { id: col.companyId, usual: "", fullName: "" });
+      return `${nome} · ${base}`;
+    }
+    return base;
+  },
+
+  textoEmpresas() {
+    const ids = this.gridCompanyIds();
+    if (this.consolidacaoAtiva) return `Consolidação padrão · ${ids.length} ${ids.length === 1 ? "empresa" : "empresas"}`;
+    if (ids.length <= 1) {
+      const c = this.companyById(ids[0] || "");
+      return c ? this.columnHeader(c) : "Empresa selecionada";
+    }
+    return `${ids.length} empresas`;
+  },
+
+  nomeGrupo(id) {
+    const g = (((this.visao() || {}).groups) || []).find(x => x.id === id);
+    return (g && g.name) || String(id || "");
+  },
+
+  contasVivas() {
+    return Object.values(this.accountIndex || {}).filter(a => a && Math.abs(Number(a.total) || 0) > 0.5);
+  },
+
+  valsConta(a) {
+    return (this.months || []).map(m => Number(a.months && a.months[m]) || 0);
+  },
+
+  metades(vals) {
+    const mid = Math.max(1, Math.floor((vals || []).length / 2));
+    return {
+      mid,
+      antes: vals.slice(0, mid).reduce((s, v) => s + v, 0),
+      depois: vals.slice(mid).reduce((s, v) => s + v, 0)
+    };
+  },
+
+  fichaConta(a) {
+    const vals = this.valsConta(a);
+    return {
+      kind: "acc",
+      id: a.id,
+      nome: `${a.displayId || a.id} ${a.name || ""}`.trim(),
+      grupo: this.nomeGrupo(a.parentId),
+      parentId: a.parentId,
+      total: Number(a.total) || 0,
+      variacao: vals.length ? vals[vals.length - 1] - vals[0] : 0,
+      primeiro: vals[0] || 0,
+      ultimo: vals.length ? vals[vals.length - 1] : 0,
+      vals
+    };
+  },
+
+  papelReceita(parentId) {
+    if (parentId === "g_01_01") return "Produto";
+    if (parentId === "g_01_02") return "Serviço";
+    if (parentId === "g_01_03") return "Não operacional";
+    if (parentId === "g_01_04") return "Cancelamento";
+    return "Receita";
+  },
+
+  ehSaidaConta(parentId) {
+    return this.isCashOutflowGroup(parentId) || parentId === "g_11_01";
+  },
+
+  ehAplicacao(c) {
+    if (c.parentId === "g_09_01" || c.parentId === "g_09_03") return true;
+    const n = String(c.nome || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    return /APLICAC|FUNDO DE INVEST|CDI|RENDIMENTO/.test(n);
+  },
+
+  mesBcb(data) {
+    const s = String(data || "").trim();
+    const br = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (br) return `${br[3]}-${String(br[2]).padStart(2, "0")}`;
+    const iso = s.match(/^(\d{4})-(\d{1,2})/);
+    if (iso) return `${iso[1]}-${String(iso[2]).padStart(2, "0")}`;
+    return "";
+  },
+
+  async cdiDoPeriodo() {
+    const months = this.months || [];
+    this._cdiByMonth = this._cdiByMonth || {};
+    if (window.InvestimentoApp && InvestimentoApp.cdiByMonth) {
+      months.forEach(m => {
+        const n = Number(InvestimentoApp.cdiByMonth[m]);
+        if (n > 0) this._cdiByMonth[m] = n;
+      });
+    }
+    const missing = months.filter(m => !(Number(this._cdiByMonth[m]) > 0));
+    if (missing.length && months.length) {
+      const [ys, ms] = months[0].split("-");
+      const [ye, me] = months[months.length - 1].split("-");
+      const dataInicial = `01/${ms}/${ys}`;
+      const last = new Date(Number(ye), Number(me), 0);
+      const dataFinal = `${String(last.getDate()).padStart(2, "0")}/${String(last.getMonth() + 1).padStart(2, "0")}/${last.getFullYear()}`;
+      const q = `code=4391&dataInicial=${encodeURIComponent(dataInicial)}&dataFinal=${encodeURIComponent(dataFinal)}`;
+      const urls = [
+        `/api/bcb-sgs?${q}`,
+        `https://api.bcb.gov.br/dados/serie/bcdata.sgs.4391/dados?formato=json&dataInicial=${encodeURIComponent(dataInicial)}&dataFinal=${encodeURIComponent(dataFinal)}`
+      ];
+      for (let i = 0; i < urls.length; i++) {
+        try {
+          const res = await fetch(urls[i]);
+          if (!res.ok) continue;
+          const json = await res.json();
+          if (!Array.isArray(json) || !json.length) continue;
+          json.forEach(r => {
+            const key = this.mesBcb(r && r.data);
+            if (!key) return;
+            const n = Number(String(r.valor == null ? "" : r.valor).replace(",", ".").replace("%", ""));
+            if (Number.isFinite(n) && n !== 0) this._cdiByMonth[key] = n;
+          });
+          break;
+        } catch (e) { /* tenta a próxima fonte */ }
+      }
+    }
+    const vals = months.map(m => ({ m, n: Number(this._cdiByMonth[m]) || 0 })).filter(x => x.n > 0);
+    const fmt = n => n.toFixed(2).replace(".", ",");
+    if (!vals.length) {
+      return { texto: "O CDI do período não veio da série 4391 do Banco Central.", media: null, meses: [] };
+    }
+    const media = vals.reduce((s, x) => s + x.n, 0) / vals.length;
+    const lista = vals.map(x => `${this.monthLabel(x.m)} ${fmt(x.n)}%`).join(" · ");
+    return {
+      media,
+      meses: vals,
+      texto: `CDI médio ${fmt(media)}% a.m. (${vals.length} ${vals.length === 1 ? "mês" : "meses"}, série 4391 do Banco Central). ${lista}.`
+    };
+  },
+
+  montarInsights(cdi) {
+    const meses = (this.months || []).length;
+    const contas = this.contasVivas().map(a => this.fichaConta(a));
+    const porVar = contas.filter(c => meses >= 2 && Math.abs(c.variacao) > 0.5);
+    const positivas = porVar.filter(c => c.variacao > 0).sort((a, b) => b.variacao - a.variacao).slice(0, 8);
+    const negativas = porVar.filter(c => c.variacao < 0).sort((a, b) => a.variacao - b.variacao).slice(0, 8);
+    const receitas = contas
+      .filter(c => this.isRevenueGroup(c.parentId) && c.total > 0.5)
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 10)
+      .map(c => Object.assign({ papel: this.papelReceita(c.parentId) }, c));
+    const quedas = [];
+    if (meses >= 2) {
+      contas.filter(c => this.isRevenueGroup(c.parentId) && c.total > 0.5).forEach(c => {
+        const h = this.metades(c.vals);
+        const queda = h.antes - h.depois;
+        if (h.antes > 500 && queda > 0 && queda / h.antes >= 0.15) {
+          quedas.push(Object.assign({ antes: h.antes, depois: h.depois, queda }, c));
+        }
+      });
+      quedas.sort((a, b) => b.queda - a.queda);
+    }
+    const servicos = contas
+      .filter(c => c.parentId === "g_01_02" && Math.abs(c.total) > 0.5)
+      .sort((a, b) => b.total - a.total);
+    const aplicacoes = contas.filter(c => this.ehAplicacao(c)).sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
+    const aumentos = [];
+    if (meses >= 2) {
+      contas.filter(c => this.ehSaidaConta(c.parentId)).forEach(c => {
+        const h = this.metades(c.vals);
+        const gasto = v => (v < 0 ? -v : 0);
+        const antes = c.vals.slice(0, h.mid).reduce((s, v) => s + gasto(v), 0);
+        const depois = c.vals.slice(h.mid).reduce((s, v) => s + gasto(v), 0);
+        const aumento = depois - antes;
+        if (aumento > 500) aumentos.push(Object.assign({ antes, depois, aumento }, c));
+      });
+      aumentos.sort((a, b) => b.aumento - a.aumento);
+    }
+    const lineares = [];
+    if (meses >= 4) {
+      contas.filter(c => this.ehSaidaConta(c.parentId)).forEach(c => {
+        const vals = c.vals;
+        const media = vals.reduce((s, v) => s + v, 0) / vals.length;
+        if (Math.abs(media) < 500) return;
+        const variance = vals.reduce((s, v) => s + (v - media) * (v - media), 0) / vals.length;
+        const std = Math.sqrt(variance);
+        if (std / Math.abs(media) > 0.22) return;
+        let worst = null;
+        vals.forEach((v, i) => {
+          const dev = Math.abs(v - media);
+          const lim = Math.max(Math.abs(media) * 0.45, std * 2, 1500);
+          if (dev >= lim && (!worst || dev > worst.dev)) worst = { i, v, dev };
+        });
+        if (!worst) return;
+        lineares.push(Object.assign({
+          media,
+          desvio: worst.dev,
+          mes: this.monthLabel(this.months[worst.i]),
+          mesKey: this.months[worst.i],
+          valorMes: worst.v
+        }, c));
+      });
+      lineares.sort((a, b) => b.desvio - a.desvio);
+    }
+    return {
+      meses,
+      periodo: `${this.startDate} a ${this.endDate}`,
+      positivas,
+      negativas,
+      receitas,
+      quedas: quedas.slice(0, 8),
+      servicos: servicos.slice(0, 8),
+      aplicacoes: aplicacoes.slice(0, 8),
+      cdi: cdi || { texto: "", media: null, meses: [] },
+      aumentos: aumentos.slice(0, 8),
+      lineares: lineares.slice(0, 8)
+    };
+  },
+
+  insightBtn(it, meta) {
+    const id = encodeURIComponent(String(it.id || ""));
+    const month = encodeURIComponent(String(it.mesKey || ""));
+    const kind = it.kind === "node" ? "node" : "acc";
+    return `<button type="button" class="fc-ins-item" onclick="FluxoCaixaApp.abrirInsight('${kind}','${id}','${month}')">
+      <span>${this.esc(it.nome)}</span>
+      <small>${this.esc(meta)}</small>
+    </button>`;
+  },
+
+  listaInsights(itens, vazio, metaFn) {
+    if (!itens || !itens.length) return `<p class="fc-ins-vazio">${this.esc(vazio)}</p>`;
+    return `<div class="fc-ins-lista">${itens.map(it => this.insightBtn(it, metaFn(it))).join("")}</div>`;
+  },
+
+  async gerarInsights() {
+    if (this.loading || !(this.rows || []).length) {
+      alert("Consulte o fluxo antes de gerar os insights.");
+      return;
+    }
+    const btn = document.querySelector("#fluxo-caixa-root .fc-insights-btn");
+    if (btn) btn.disabled = true;
+    try {
+      const cdi = await this.cdiDoPeriodo();
+      this._insights = this.montarInsights(cdi);
+      this.abrirInsights();
+    } catch (e) {
+      console.warn("[Fluxo de Caixa] insights", e);
+      alert("Não consegui montar os insights.");
+    } finally {
+      if (btn && btn.isConnected) btn.disabled = false;
+    }
+  },
+
+  abrirInsight(kind, idEnc, monthEnc) {
+    let id = "";
+    let month = "";
+    try { id = decodeURIComponent(idEnc || ""); } catch (e) { id = String(idEnc || ""); }
+    try { month = decodeURIComponent(monthEnc || ""); } catch (e) { month = String(monthEnc || ""); }
+    this.openDrill(id, kind === "acc", "", "", month);
+  },
+
+  fecharInsights() {
+    const el = document.getElementById("fc-insights-modal");
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  },
+
+  abrirInsights() {
+    const ins = this._insights;
+    if (!ins) return;
+    this.fecharInsights();
+    const produtos = ins.receitas.filter(c => c.papel === "Produto").slice(0, 3).map(c => c.nome);
+    const fraseProdutos = produtos.length
+      ? `Os produtos com mais recebimento são ${produtos.join(", ")}.`
+      : "Nenhuma conta de venda de imóveis entrou entre as receitas do período.";
+    const fraseServicos = ins.servicos.length
+      ? `Houve recebimento de serviços em ${ins.servicos.length} ${ins.servicos.length === 1 ? "conta" : "contas"}.`
+      : "Não houve recebimento classificado em 01.02 Receita de serviços.";
+    const somaAplic = ins.aplicacoes.reduce((s, c) => s + c.total, 0);
+    const fraseAplic = ins.aplicacoes.length
+      ? `O caixa das aplicações e receitas financeiras somou ${this.fmt(somaAplic)}. ${ins.cdi.texto}`
+      : `O DFC não tem movimentação classificada em aplicações ou receitas financeiras. ${ins.cdi.texto}`;
+    const avisoMes = ins.meses < 2
+      ? "O período tem um mês só. A variação, a queda e o desvio aparecem quando há pelo menos dois meses. O perfil linear pede quatro."
+      : "Variação monetária = valor do último mês menos o valor do primeiro mês.";
+    const overlay = document.createElement("div");
+    overlay.id = "fc-insights-modal";
+    overlay.innerHTML = `
+      <div class="fc-ins-box" role="dialog" aria-label="Insights do fluxo de caixa">
+        <div class="fc-ins-head">
+          <div>
+            <strong>Insights do fluxo de caixa</strong>
+            <span>${this.esc(ins.periodo)} · ${this.esc(this.textoEmpresas())}</span>
+          </div>
+          <div class="fc-ins-actions">
+            <button type="button" class="btn btn-outline fc-ins-pdf" onclick="FluxoCaixaApp.exportInsightsPdf()">PDF para a diretoria</button>
+            <button type="button" class="btn btn-outline fc-ins-pdf" onclick="FluxoCaixaApp.fecharInsights()">Fechar</button>
+            <button type="button" class="fc-ins-x" onclick="FluxoCaixaApp.fecharInsights()" aria-label="Fechar">×</button>
+          </div>
+        </div>
+        <div class="fc-ins-body">
+          <p class="fc-ins-lead">${this.esc(avisoMes)} Clique em um item para abrir os lançamentos.</p>
+          <section class="fc-ins-sec">
+            <h3>Maiores variações positivas</h3>
+            ${this.listaInsights(ins.positivas, "Nenhuma conta melhorou o caixa de forma relevante.", c => `Variação ${this.fmt(c.variacao)} · ${c.grupo}`)}
+          </section>
+          <section class="fc-ins-sec">
+            <h3>Maiores variações negativas</h3>
+            ${this.listaInsights(ins.negativas, "Nenhuma conta piorou o caixa de forma relevante.", c => `Variação ${this.fmt(c.variacao)} · ${c.grupo}`)}
+          </section>
+          <section class="fc-ins-sec">
+            <h3>Dez receitas mais relevantes</h3>
+            <p>${this.esc(fraseProdutos)}</p>
+            ${this.listaInsights(ins.receitas, "Não houve receita no período.", c => `${c.papel} · Total ${this.fmt(c.total)} · Variação ${this.fmt(c.variacao)}`)}
+          </section>
+          <section class="fc-ins-sec">
+            <h3>Queda no recebimento</h3>
+            <p>Segunda metade do período pelo menos 15% abaixo da primeira, em contas de receita.</p>
+            ${this.listaInsights(ins.quedas, "Nenhuma receita teve queda relevante entre as duas metades.", c => `1ª metade ${this.fmt(c.antes)} · 2ª metade ${this.fmt(c.depois)} · Queda ${this.fmt(c.queda)}`)}
+          </section>
+          <section class="fc-ins-sec">
+            <h3>Serviços</h3>
+            <p>${this.esc(fraseServicos)}</p>
+            ${ins.servicos.length ? this.listaInsights(ins.servicos, "", c => `Total ${this.fmt(c.total)}`) : ""}
+          </section>
+          <section class="fc-ins-sec">
+            <h3>Aplicações e CDI</h3>
+            <p>${this.esc(fraseAplic)}</p>
+            ${ins.aplicacoes.length ? this.listaInsights(ins.aplicacoes, "", c => `${c.grupo} · Total ${this.fmt(c.total)}`) : ""}
+          </section>
+          <section class="fc-ins-sec">
+            <h3>Aumento de gastos</h3>
+            <p>Saídas em que a segunda metade gastou mais que a primeira.</p>
+            ${this.listaInsights(ins.aumentos, "Nenhuma conta de saída aumentou o gasto de forma relevante.", c => `1ª metade ${this.fmt(c.antes)} · 2ª metade ${this.fmt(c.depois)} · Aumento ${this.fmt(c.aumento)}`)}
+          </section>
+          <section class="fc-ins-sec">
+            <h3>Perfil linear com desvio</h3>
+            <p>Conta de saída estável no período e um mês fora dessa média.</p>
+            ${this.listaInsights(ins.lineares, ins.meses < 4 ? "São necessários pelo menos quatro meses para ler um perfil linear." : "Nenhuma conta de saída teve perfil linear com um mês fora da média.", c => `${c.mes} em ${this.fmt(c.valorMes)} · média ${this.fmt(c.media)}`)}
+          </section>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+  },
+
+  exportInsightsPdf() {
+    const ins = this._insights;
+    if (!ins) return;
+    const lib = window.jspdf;
+    if (!lib || typeof lib.jsPDF !== "function") {
+      alert("O gerador de PDF não carregou. Atualize a página com Ctrl+F5.");
+      return;
+    }
+    const pdf = new lib.jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const desenhaTopo = (titulo, pagina) => {
+      pdf.setFillColor(16, 84, 54);
+      pdf.rect(0, 0, 210, 16, "F");
+      pdf.setTextColor(255, 255, 255);
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(13);
+      pdf.text(titulo, 14, 10.5);
+      pdf.setTextColor(71, 85, 105);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(8);
+      pdf.text(`${ins.periodo}  ·  ${this.textoEmpresas()}`, 14, 22);
+      pdf.text(`Moura Leite  ·  diretoria  ·  ${pagina}`, 14, 290);
+    };
+    const bloco = (y, titulo, linhas) => {
+      let cursor = y;
+      if (cursor > 276) return cursor;
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(11);
+      pdf.setTextColor(16, 84, 54);
+      pdf.text(titulo, 14, cursor);
+      cursor += 5;
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(8);
+      pdf.setTextColor(15, 23, 42);
+      (linhas || []).forEach(linha => {
+        pdf.splitTextToSize(String(linha || ""), 182).forEach(parte => {
+          if (cursor > 282) return;
+          pdf.text(parte, 14, cursor);
+          cursor += 4;
+        });
+      });
+      return cursor + 3;
+    };
+    desenhaTopo("Fluxo de caixa — Entradas", "página 1 de 2");
+    let y = 30;
+    const positivasEnt = ins.positivas.filter(c => this.isRevenueGroup(c.parentId) || c.parentId === "g_09_01" || c.parentId === "g_09_03" || c.parentId === "g_11_02" || c.parentId === "g_11_03");
+    y = bloco(y, "Variação positiva no recebimento", positivasEnt.length
+      ? positivasEnt.map(c => `${c.nome} — variação ${this.fmt(c.variacao)} (${c.grupo})`)
+      : ["Nenhuma conta de entrada melhorou o caixa de forma relevante."]);
+    const produtos = ins.receitas.filter(c => c.papel === "Produto").slice(0, 3).map(c => c.nome);
+    y = bloco(y, "Receitas mais relevantes", [
+      produtos.length ? `Produtos com mais recebimento: ${produtos.join(", ")}.` : "Nenhuma conta de venda de imóveis entre as dez receitas.",
+      ...ins.receitas.map(c => `${c.papel} · ${c.nome} — total ${this.fmt(c.total)} · variação ${this.fmt(c.variacao)}`)
+    ].concat(ins.receitas.length ? [] : ["Não houve receita no período."]));
+    y = bloco(y, "Queda no recebimento", ins.quedas.length
+      ? ins.quedas.map(c => `${c.nome} — 1ª metade ${this.fmt(c.antes)} · 2ª metade ${this.fmt(c.depois)} · queda ${this.fmt(c.queda)}`)
+      : ["Nenhuma receita caiu 15% ou mais da primeira para a segunda metade."]);
+    y = bloco(y, "Serviços", ins.servicos.length
+      ? ins.servicos.map(c => `${c.nome} — ${this.fmt(c.total)}`)
+      : ["Não houve recebimento classificado em 01.02 Receita de serviços."]);
+    const somaAplic = ins.aplicacoes.reduce((s, c) => s + c.total, 0);
+    bloco(y, "Aplicações e CDI", [
+      ins.aplicacoes.length ? `Caixa das aplicações e receitas financeiras: ${this.fmt(somaAplic)}.` : "Sem movimentação classificada em aplicações ou receitas financeiras.",
+      ...ins.aplicacoes.map(c => `${c.nome} — ${this.fmt(c.total)}`),
+      ins.cdi.texto
+    ]);
+
+    pdf.addPage();
+    desenhaTopo("Fluxo de caixa — Saídas", "página 2 de 2");
+    y = 30;
+    const negativasSai = ins.negativas.filter(c => this.ehSaidaConta(c.parentId));
+    y = bloco(y, "Variação negativa nas saídas", negativasSai.length
+      ? negativasSai.map(c => `${c.nome} — variação ${this.fmt(c.variacao)} (${c.grupo})`)
+      : ["Nenhuma conta de saída piorou o caixa de forma relevante."]);
+    y = bloco(y, "Aumento de gastos ao longo do período", ins.aumentos.length
+      ? ins.aumentos.map(c => `${c.nome} — 1ª metade ${this.fmt(c.antes)} · 2ª metade ${this.fmt(c.depois)} · aumento ${this.fmt(c.aumento)}`)
+      : ["Nenhuma conta de saída aumentou o gasto entre as duas metades."]);
+    bloco(y, "Perfil linear com desvio no mês", ins.lineares.length
+      ? ins.lineares.map(c => `${c.nome} — ${c.mes} em ${this.fmt(c.valorMes)} · média do período ${this.fmt(c.media)}`)
+      : [ins.meses < 4 ? "São necessários pelo menos quatro meses para ler um perfil linear." : "Nenhuma conta de saída teve perfil linear com um mês fora da média."]);
+    pdf.save(`insights-fluxo-${this.startDate}-a-${this.endDate}.pdf`);
+  },
+
+  excelLetra(i) {
+    if (window.InvestimentoApp && typeof InvestimentoApp.excelColLetter === "function") return InvestimentoApp.excelColLetter(i);
+    let n = i;
+    let s = "";
+    while (n > 0) {
+      const m = (n - 1) % 26;
+      s = String.fromCharCode(65 + m) + s;
+      n = Math.floor((n - 1) / 26);
+    }
+    return s;
+  },
+
+  excelPinta(cell, opts) {
+    if (window.InvestimentoApp && typeof InvestimentoApp.excelPaint === "function") {
+      InvestimentoApp.excelPaint(cell, opts);
+    }
+  },
+
+  async exportGridExcel() {
+    if (this.loading || !(this.rows || []).length) {
+      alert("Consulte o fluxo antes de exportar.");
+      return;
+    }
+    const ExcelJS = window.ExcelJS;
+    if (!ExcelJS) {
+      alert("A biblioteca de Excel não carregou. Atualize a página com Ctrl+F5.");
+      return;
+    }
+    const btn = document.querySelector("#fluxo-caixa-root .btn-excel");
+    if (btn) btn.disabled = true;
+    try {
+      const cols = this.visibleColumns().filter(c => c.type !== "gap");
+      const headers = ["Estrutura"].concat(cols.map(c => this.rotuloColuna(c)));
+      const colCount = Math.max(headers.length, 8);
+      const moneyFmt = "#,##0.00";
+      const wb = new ExcelJS.Workbook();
+      wb.creator = "CRM Moura Leite";
+      const ws = wb.addWorksheet("Fluxo de caixa", {
+        views: [{ state: "frozen", xSplit: 1, ySplit: 4, topLeftCell: "B5", activeCell: "B5", showGridLines: false }]
+      });
+      ws.properties.showGridLines = false;
+      const widths = [{ width: 46 }];
+      for (let i = 1; i < colCount; i++) widths.push({ width: 16 });
+      ws.columns = widths;
+
+      let imgId = null;
+      if (window.InvestimentoApp && typeof InvestimentoApp.logoDataUrl === "function") {
+        try {
+          const logo = await InvestimentoApp.logoDataUrl();
+          if (logo && logo.dataUrl) imgId = wb.addImage({ base64: logo.dataUrl, extension: logo.extension || "png" });
+        } catch (e) { /* segue sem logo */ }
+      }
+      const modo = { mes: "Mês", bimestre: "Bimestre", trimestre: "Trimestre", semestre: "Semestre", anual: "Anual" }[this.agrupamento || "mes"] || "Mês";
+      ws.mergeCells("A1:A2");
+      ws.getRow(1).height = 28;
+      ws.getRow(2).height = 22;
+      const titleCell = ws.getCell("A1");
+      titleCell.value = {
+        richText: [
+          { font: { name: "Calibri", size: 14, bold: true, color: { argb: "FF475569" } }, text: "Fluxo de caixa (DFC)\n" },
+          { font: { name: "Calibri", size: 9, color: { argb: "FF64748B" } }, text: `${this.startDate} a ${this.endDate} · ${modo} · ${this.textoEmpresas()}` }
+        ]
+      };
+      this.excelPinta(titleCell, {
+        fill: "FFFFFFFF",
+        align: { vertical: "middle", horizontal: "left", wrapText: true, indent: 8 }
+      });
+      if (imgId != null) {
+        try {
+          const logoPx = Math.round(1.54 * 96 / 2.54);
+          ws.addImage(imgId, { tl: { col: 0.04, row: 0.08 }, ext: { width: logoPx, height: logoPx } });
+        } catch (e) { /* logo opcional */ }
+      }
+      const kpis = [
+        { label: "Período", value: `${this.startDate} a ${this.endDate}`, money: false },
+        { label: "Agrupamento", value: modo, money: false },
+        { label: "Empresas", value: this.textoEmpresas(), money: false }
+      ];
+      kpis.forEach((k, i) => {
+        const col = 4 + i;
+        const top = ws.getRow(1).getCell(col);
+        const val = ws.getRow(2).getCell(col);
+        top.value = k.label;
+        val.value = k.value;
+        this.excelPinta(top, {
+          fill: "FFFFFFFF",
+          font: { bold: true, size: 8, color: { argb: "FF94A3B8" } },
+          align: { horizontal: "right", vertical: "bottom" }
+        });
+        this.excelPinta(val, {
+          fill: "FFFFFFFF",
+          font: { bold: true, size: 12, color: { argb: "FF0F172A" } },
+          align: { horizontal: "right", vertical: "middle", wrapText: true }
+        });
+      });
+      ws.getRow(3).height = 8;
+      const head = ws.getRow(4);
+      head.height = 20;
+      headers.forEach((h, i) => {
+        const cell = head.getCell(i + 1);
+        cell.value = h;
+        this.excelPinta(cell, {
+          fill: "FF334155",
+          font: { bold: true, size: 9, color: { argb: "FFFFFFFF" } },
+          align: { horizontal: i === 0 ? "left" : "right", vertical: "middle" },
+          border: true
+        });
+      });
+      let rowIndex = 5;
+      (this.rows || []).forEach(r => {
+        const linha = ws.getRow(rowIndex);
+        linha.height = 18;
+        const escuro = r.type === "formula" || r.type === "total_n1";
+        const resultado = r.type === "resultado";
+        const fill = escuro ? "FF0C3D28" : (resultado ? "FFE7F6EE" : (r.isCostCenter ? "FFF8FAFC" : "FFFFFFFF"));
+        const baseColor = escuro ? "FFFFFFFF" : (resultado ? "FF105436" : "FF0F172A");
+        const nome = linha.getCell(1);
+        nome.value = r.name || "";
+        this.excelPinta(nome, {
+          fill,
+          font: { bold: !r.isAccount && !r.isCostCenter, size: 9, color: { argb: baseColor } },
+          align: { horizontal: "left", vertical: "middle", indent: Math.min(r.level || 0, 8) },
+          border: true
+        });
+        cols.forEach((col, i) => {
+          const cell = linha.getCell(i + 2);
+          const n = this.valueOf(r, col);
+          cell.value = n;
+          let color = baseColor;
+          if (!escuro) {
+            if (Math.abs(n) < 0.005) color = "FF94A3B8";
+            else if (n < 0) color = "FFB91C1C";
+          }
+          this.excelPinta(cell, {
+            fill,
+            font: { bold: col.type !== "month" || escuro || resultado, size: 9, color: { argb: color } },
+            align: { horizontal: "right", vertical: "middle" },
+            border: true,
+            numFmt: moneyFmt
+          });
+        });
+        rowIndex += 1;
+      });
+      const foot = ws.getRow(rowIndex + 1);
+      const quando = window.InvestimentoApp && typeof InvestimentoApp.generatedAtLabel === "function"
+        ? InvestimentoApp.generatedAtLabel(new Date())
+        : "Relatório gerado pelo CRM Moura Leite";
+      foot.getCell(1).value = quando;
+      this.excelPinta(foot.getCell(1), {
+        font: { italic: true, size: 8, color: { argb: "FF64748B" } },
+        align: { horizontal: "left", vertical: "middle" }
+      });
+      const buf = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `fluxo-de-caixa-${this.startDate}-a-${this.endDate}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        URL.revokeObjectURL(a.href);
+        if (a.parentNode) a.parentNode.removeChild(a);
+      }, 1000);
+    } catch (e) {
+      console.warn("[Fluxo de Caixa] excel", e);
+      alert("Não consegui gerar o Excel.");
+    } finally {
+      if (btn && btn.isConnected) btn.disabled = !(this.rows || []).length;
+    }
   }
 };
 

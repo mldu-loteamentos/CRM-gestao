@@ -393,11 +393,8 @@
         pop.className = "doc-modal adi-pop";
         pop.setAttribute("role", "dialog");
         pop.setAttribute("aria-modal", "true");
-        pop.addEventListener("mousedown", (e) => { if (e.target === pop) this.adiFecharParcelas(); });
         document.body.appendChild(pop);
       }
-      this._adiPopKey = this._adiPopKey || ((e) => { if (e.key === "Escape") this.adiFecharParcelas(); });
-      document.addEventListener("keydown", this._adiPopKey);
       this._adiPopRender(ctx);
     },
 

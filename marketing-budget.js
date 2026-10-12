@@ -1974,10 +1974,10 @@ const MarketingBudgetApp = {
       </div>
       <div class="mkb-par mkb-par-pag">
         <div class="mkb-card"><div class="mkb-card-h"><h3>Em dia e em atraso por idade</h3></div><div class="mkb-canvas mkb-canvas-alto"><canvas id="mkb-ch-pag"></canvas></div></div>
-        <div class="mkb-card">
+      <div class="mkb-card">
           <div class="mkb-card-h"><small>Em dia inclui quem já quitou · em atraso é quem tem parcela vencida</small></div>
-          ${tabelaPag}
-        </div>
+        ${tabelaPag}
+      </div>
       </div>`;
     const cancelou = `
       <div class="mkb-kpis mkb-kpis-2">
@@ -1985,7 +1985,7 @@ const MarketingBudgetApp = {
         ${this.kpi("Tempo até cancelar", mediaMeses == null ? "—" : (mediaMeses < 1 ? "menos de 1 mês" : mediaMeses + (mediaMeses === 1 ? " mês" : " meses")), "Média de meses entre a venda e o cancelamento", "#64748b")}
       </div>
       ${canc.length ? `<div class="mkb-par mkb-par-pag mkb-par-canc">
-        <div class="mkb-card">
+      <div class="mkb-card">
           <div class="mkb-card-h"><h3>Perfil de quem cancelou</h3><small>Taxa = cancelados do grupo ÷ contratos do grupo no período</small></div>
           <div class="mkb-canvas mkb-canvas-alto"><canvas id="mkb-ch-canc"></canvas></div>
         </div>
@@ -2795,7 +2795,7 @@ const MarketingConfigApp = {
               <span>Marque os centros de custo desta obra. Cada linha mostra se entra o gasto inteiro ou só o grupo de marketing.</span>
             </div>
             <div class="mkc-campo" id="mkc-ccs-slot">${MlEmpresaFilter.html(this.filtroOpts())}</div>
-            <div class="mkc-sel" id="mkc-sel">${this.selecaoHtml()}</div>
+              <div class="mkc-sel" id="mkc-sel">${this.selecaoHtml()}</div>
             <div class="mkc-legenda">
               <span><em>100%</em> O nome tem MARKETING e todo o gasto entra.</span>
               <span><em>Grupo</em> Só as contas 2.03.05: pago, em aberto e previsão.</span>

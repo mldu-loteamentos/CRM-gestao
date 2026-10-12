@@ -1172,15 +1172,7 @@ const CessaoPopup = {
           <button type="button" class="btn btn-primary" id="cessao-popup-proximo" onclick="CessaoPopup.proximo()"></button>
         </footer>
       </div>`;
-    ov.addEventListener("click", (e) => { if (e.target === ov) this.fechar(); });
     document.body.appendChild(ov);
-    if (!this._tecla) {
-      this._tecla = true;
-      document.addEventListener("keydown", (ev) => {
-        const box = document.getElementById("cessao-popup");
-        if (ev.key === "Escape" && box && box.style.display === "flex" && !CessaoPopupState.gerando) this.fechar();
-      });
-    }
   },
 
   fechar() {
@@ -2006,13 +1998,90 @@ const CessaoPopup = {
       .concat(Array.isArray(obj.budgetCategories) ? obj.budgetCategories : []);
   },
 
+  codigoDocumento(bill) {
+    const bruto = bill && (bill.documentIdentificationId || bill.documentsId || bill.documentId || bill.documentIdentification || "");
+    return String(bruto && typeof bruto === "object" ? (bruto.id || bruto.code || "") : bruto).trim().toUpperCase();
+  },
+
+  centrosDoTitulo(bill) {
+    const cru = []
+      .concat((bill && bill.costCenterId) || [])
+      .concat((bill && bill.costCentersId) || [])
+      .concat((bill && bill.enterpriseId) || []);
+    return cru.map((v) => String(v && typeof v === "object" ? (v.id || v.costCenterId || "") : v).replace(/\D/g, "")).filter(Boolean);
+  },
+
+  /** Taxa de cessão entra no centro corporativo. O teste 18341 está no 70100, documento TC. */
+  centrosDaTaxa() {
+    const ids = ["70100"];
+    const emp = CessaoPopupState.contract && CessaoPopupState.contract.companyId;
+    if (emp != null && String(emp) !== "") {
+      const corp = "7" + String(emp).padStart(2, "0") + "00";
+      if (!ids.includes(corp)) ids.push(corp);
+    }
+    return ids;
+  },
+
+  pareceTitulo(bill) {
+    return !!(bill && typeof bill === "object" && !Array.isArray(bill) && (
+      bill.receivableBillId != null || bill.billReceivableId != null || bill.customerId != null || bill.documentIdentificationId || bill.documentsId
+    ));
+  },
+
+  tituloBate(bill, id) {
+    return [bill.receivableBillId, bill.billReceivableId, bill.id, bill.documentNumber, bill.documentIdentificationNumber]
+      .some((v) => String(v == null ? "" : v).replace(/\D/g, "") === id);
+  },
+
+  async listarTitulosReceber(path) {
+    const res = await window.siengeFetchWithRetry(path, 1);
+    return (res && res.results) || (Array.isArray(res) ? res : []);
+  },
+
+  async acharTituloReceber(id) {
+    const fetchFn = window.siengeFetchWithRetry;
+    try {
+      const bill = await fetchFn("/accounts-receivable/receivable-bills/" + encodeURIComponent(id), 1);
+      if (this.pareceTitulo(bill)) return bill;
+    } catch (e) {}
+    const caminhos = [];
+    this.centrosDaTaxa().forEach((cc) => {
+      caminhos.push("/accounts-receivable/receivable-bills?documentsId=TC&costCentersId=" + encodeURIComponent(cc) + "&documentNumber=" + encodeURIComponent(id) + "&limit=50");
+      caminhos.push("/accounts-receivable/receivable-bills?documentsId=TC&costCenterId=" + encodeURIComponent(cc) + "&documentNumber=" + encodeURIComponent(id) + "&limit=50");
+      caminhos.push("/accounts-receivable/receivable-bills?documentsId=TC&costCentersId=" + encodeURIComponent(cc) + "&limit=200");
+    });
+    this.idsDoProcesso().forEach((cid) => {
+      caminhos.push("/accounts-receivable/receivable-bills?customerId=" + encodeURIComponent(cid) + "&documentsId=TC&limit=200");
+    });
+    for (const path of caminhos) {
+      let lista = [];
+      try { lista = await this.listarTitulosReceber(path); } catch (e) { continue; }
+      const hit = lista.find((b) => b && this.tituloBate(b, id));
+      if (!hit) continue;
+      hit._documentoTc = true;
+      const real = hit.receivableBillId || hit.billReceivableId;
+      if (real && String(real).replace(/\D/g, "") !== id) {
+        try {
+          const cheio = await fetchFn("/accounts-receivable/receivable-bills/" + encodeURIComponent(real), 1);
+          if (this.pareceTitulo(cheio)) {
+            cheio._documentoTc = true;
+            return cheio;
+          }
+        } catch (e) {}
+      }
+      return hit;
+    }
+    return null;
+  },
+
   taxaPeloDfc(bill, inst) {
-    const bruto = bill.documentIdentificationId || bill.documentsId || bill.documentIdentification || "";
-    const codigo = String(bruto && typeof bruto === "object" ? (bruto.id || bruto.code || "") : bruto).trim().toUpperCase();
+    const bruto = bill.documentIdentificationId || bill.documentsId || bill.documentId || bill.documentIdentification || "";
+    const codigo = this.codigoDocumento(bill);
     const nome = this.textoSemAcento(
       bill.documentIdentificationName || bill.documentName || (bruto && typeof bruto === "object" ? bruto.name : "") || ""
     );
-    if (codigo === "TC" || (nome.includes("TAXA") && nome.includes("CESS"))) return codigo === "TC" ? "TC" : "Receita de Taxa de Cessão";
+    if (bill._documentoTc || codigo === "TC" || (nome.includes("TAXA") && nome.includes("CESS"))) return codigo === "TC" || bill._documentoTc ? "TC" : "Receita de Taxa de Cessão";
+    if (this.centrosDoTitulo(bill).includes("70100") && codigo === "TC") return "TC";
     const itens = this.categoriasDe(bill).concat((inst || []).reduce((acc, p) => acc.concat(this.categoriasDe(p)), []));
     const hit = itens.find((c) => this.contaEhTaxaCessao(
       c && (c.financialCategoryId || c.id || c.accountId),
@@ -2049,11 +2118,12 @@ const CessaoPopup = {
       return;
     }
     try {
-      const bill = await fetchFn("/accounts-receivable/receivable-bills/" + encodeURIComponent(id), 1);
-      if (!bill || typeof bill !== "object") throw new Error("ausente");
+      const bill = await this.acharTituloReceber(id);
+      if (!bill) throw new Error("ausente");
+      const billId = String(bill.receivableBillId || bill.billReceivableId || id).replace(/\D/g, "") || id;
       let inst = [];
       try {
-        const res = await fetchFn("/accounts-receivable/receivable-bills/" + encodeURIComponent(id) + "/installments?limit=200", 1);
+        const res = await fetchFn("/accounts-receivable/receivable-bills/" + encodeURIComponent(billId) + "/installments?limit=200", 1);
         inst = (res && res.results) || (Array.isArray(res) ? res : []);
       } catch (e) {
         inst = [];
@@ -2078,7 +2148,7 @@ const CessaoPopup = {
       }
     } catch (e) {
       CessaoPopupState.taxaStatus = "nao";
-      CessaoPopupState.taxaMsg = "Não encontrei o título " + id + " no contas a receber.";
+      CessaoPopupState.taxaMsg = "Não encontrei o título " + id + " no contas a receber. Procurei o documento TC no centro de custo 70100.";
     }
     this.pintar();
   },

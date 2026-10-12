@@ -211,8 +211,6 @@ const EmpresasApp = {
         : (custom[field] === 1 || custom[field] === true || custom[field] === "1");
       checkbox.checked = !!on;
       checkbox.disabled = field !== "spe_socios" && speOn;
-      const td = checkbox.closest("td");
-      if (td) td.style.backgroundColor = on ? "#e8f5e9" : "transparent";
     });
   },
 
@@ -350,172 +348,60 @@ const EmpresasApp = {
       filteredCompanies = filteredCompanies.filter(c => c.id === EmpresasState.selectedFilterId);
     }
 
-    const filterBtnText = EmpresasState.filterManagedOnly ? "Mostrar Todas" : "Mostrar Apenas Geridas pelo Grupo";
-    const filterBtnIcon = EmpresasState.filterManagedOnly ? "list" : "filter";
-
-    let html = `
-      <style>
-        /* Hide number arrows */
-        input[type=number]::-webkit-inner-spin-button, 
-        input[type=number]::-webkit-outer-spin-button { 
-          -webkit-appearance: none; 
-          margin: 0; 
-        }
-        input[type=number] {
-          -moz-appearance: textfield;
-        }
-        .empresas-table {
-          width: 100%;
-          border-collapse: collapse;
-          font-size: 0.95rem;
-        }
-        .empresas-table thead th {
-          position: sticky;
-          top: 0;
-          background-color: #1b8253;
-          color: #ffffff;
-          padding: 12px;
-          text-align: left;
-          font-weight: 600;
-          z-index: 10;
-          white-space: nowrap;
-        }
-        .empresas-table tbody tr {
-          border-bottom: 1px solid #e0e5e0;
-        }
-        .empresas-table tbody tr:nth-child(even) {
-          background-color: #f4f6f4;
-        }
-        .empresas-table tbody tr:hover {
-          background-color: #eef2ef;
-        }
-        .empresas-table td {
-          padding: 10px 12px;
-          vertical-align: middle;
-        }
-        .inline-input {
-          border: 1px solid #d1d5db;
-          border-radius: 4px;
-          padding: 6px 10px;
-          font-size: 0.9rem;
-          width: 100%;
-          transition: border-color 0.2s;
-        }
-        .inline-input:focus {
-          outline: none;
-          border-color: #1b8253;
-        }
-        .switch {
-          position: relative;
-          display: inline-block;
-          width: 44px;
-          height: 24px;
-        }
-        .switch input {
-          opacity: 0;
-          width: 0;
-          height: 0;
-        }
-        .slider {
-          position: absolute;
-          cursor: pointer;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background-color: #ccc;
-          transition: .4s;
-          border-radius: 24px;
-        }
-        .slider:before {
-          position: absolute;
-          content: "";
-          height: 18px;
-          width: 18px;
-          left: 3px;
-          bottom: 3px;
-          background-color: white;
-          transition: .4s;
-          border-radius: 50%;
-        }
-        input:checked + .slider {
-          background-color: #1b8253;
-        }
-        input:focus + .slider {
-          box-shadow: 0 0 1px #1b8253;
-        }
-        input:checked + .slider:before {
-          transform: translateX(20px);
-        }
-        .empresas-table th.emp-spe-head {
-          white-space: normal;
-          text-align: center;
-          line-height: 1.25;
-          width: 150px;
-        }
-        .empresas-table tr.is-spe-locked td:not(.emp-spe-cell) .inline-input {
-          background: #f1f5f9;
-          color: #64748b;
-          pointer-events: none;
-        }
-        .empresas-table tr.is-spe-locked td:not(.emp-spe-cell) .switch {
-          pointer-events: none;
-          opacity: 0.45;
-        }
-      </style>
-    `;
-
-    let searchPill = '';
+    let searchPill = "";
     if (EmpresasState.selectedFilterId !== null) {
-        const emp = EmpresasState.companies.find(c => c.id === EmpresasState.selectedFilterId);
-        searchPill = `<div style="background: #e0e0e0; border-radius: 16px; padding: 4px 10px; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 6px; font-weight: bold; color: #555; margin-right: 10px; max-width: 250px;">
-            <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${emp ? emp.id + ' - ' + emp.name : EmpresasState.selectedFilterId}</span>
-            <span style="cursor: pointer; background: #999; color: white; border-radius: 50%; width: 16px; min-width: 16px; height: 16px; display: inline-flex; justify-content: center; align-items: center; font-size: 10px;" onclick="EmpresasApp.clearSearchFilter()">&times;</span>
-        </div>`;
+      const emp = EmpresasState.companies.find(c => c.id === EmpresasState.selectedFilterId);
+      searchPill = `<span class="emp-pill"><span>${this.escAttr(emp ? emp.id + " - " + emp.name : EmpresasState.selectedFilterId)}</span><button type="button" onclick="EmpresasApp.clearSearchFilter()" title="Limpar">&times;</button></span>`;
     }
 
-    let optionsHtml = EmpresasState.companies.map(c => `<option value="${c.id} - ${c.name}"></option>`).join('');
+    const optionsHtml = EmpresasState.companies.map(c => `<option value="${this.escAttr(c.id + " - " + c.name)}"></option>`).join("");
+    const geridasOn = EmpresasState.filterManagedOnly ? "checked" : "";
 
-    html += `
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; gap: 15px; flex-wrap: wrap;">
-        <div style="flex-grow: 1; max-width: 500px; display: flex; align-items: center; background: white; border: 1px solid #ccc; border-radius: 6px; padding: 0 10px; height: 42px;">
-           ${searchPill}
-           <input list="emp-datalist" type="text" style="border: none; outline: none; background: transparent; width: 100%; font-size: 0.9rem; color: #555;" placeholder="Pesquisar por ID ou Nome..." onchange="
-             const val = this.value;
-             const match = EmpresasState.companies.find(c => (c.id + ' - ' + c.name) === val || c.id == val);
-             if (match) { EmpresasApp.setSearchFilter(match.id); }
-           ">
-           <datalist id="emp-datalist">
-              ${optionsHtml}
-           </datalist>
+    let html = `
+      <div class="emp-toolbar">
+        <div class="emp-busca">
+          <div class="ml-emp-filter-label">Empresa</div>
+          <div class="emp-busca-campo">
+            ${searchPill}
+            <input list="emp-datalist" type="text" placeholder="Pesquisar por ID ou nome" onchange="
+              const val = this.value;
+              const match = EmpresasState.companies.find(c => (c.id + ' - ' + c.name) === val || String(c.id) === val);
+              if (match) EmpresasApp.setSearchFilter(match.id);
+            ">
+            <datalist id="emp-datalist">${optionsHtml}</datalist>
+          </div>
         </div>
-        <div style="display: flex; align-items: center; gap: 15px;">
-          <button class="btn btn-primary" style="display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 16px; font-weight: 600; white-space: nowrap; border-radius: 6px; cursor: pointer; border: none;" onclick="EmpresasApp.loadData()">
-            <i data-lucide="refresh-cw" style="width: 16px;"></i> Atualizar
-          </button>
-          <button class="btn btn-outline" onclick="EmpresasApp.toggleFilter()" style="display: flex; align-items: center; justify-content: center; gap: 8px; width: 280px; padding: 0 16px; height: 42px;">
-            <i data-lucide="${filterBtnIcon}" style="width: 16px;"></i> ${filterBtnText}
+        <div class="cc-toolbar-actions">
+          <label class="cc-parceiros">
+            <input type="checkbox" ${geridasOn} onchange="EmpresasApp.toggleFilter()">
+            Somente geridas pelo grupo
+          </label>
+          <button type="button" class="btn btn-primary cc-atualizar" onclick="EmpresasApp.loadData()">
+            <i data-lucide="refresh-cw" style="width:14px;height:14px;"></i> Atualizar
           </button>
         </div>
       </div>
 
-      <div class="card" style="overflow: hidden; border-radius: 8px;">
-        <div id="empresas-scroll" style="max-height: 65vh; overflow-y: auto;">
-          <table class="empresas-table">
-            <thead>
-              <tr>
-                <th style="width: 60px;">ID</th>
-                <th style="min-width: 250px;">Empresa</th>
-                <th style="white-space: nowrap;">CNPJ</th>
-                <th style="width: 200px;">Nome Usual</th>
-                <th style="width: 100px; text-align: center;">% MLDU</th>
-                <th style="width: 130px; text-align: center;">Consolidação Padrão</th>
-                <th style="width: 130px; text-align: center;">Gerida pelo Grupo</th>
-                <th style="width: 130px; text-align: center;">Cobrança Interna</th>
-                <th class="emp-spe-head">SPE Sócios/Parceiros</th>
-              </tr>
-            </thead>
-            <tbody>
+      <div id="empresas-scroll" class="emp-scroll">
+        <table class="emp-table">
+          <colgroup>
+            <col class="emp-c-id"><col class="emp-c-nome"><col class="emp-c-cnpj"><col class="emp-c-usual">
+            <col class="emp-c-pct"><col class="emp-c-flag"><col class="emp-c-flag"><col class="emp-c-flag"><col class="emp-c-flag">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Empresa</th>
+              <th>CNPJ</th>
+              <th>Nome usual</th>
+              <th class="is-center">% MLDU</th>
+              <th class="is-center">Consolidação</th>
+              <th class="is-center">Gerida pelo grupo</th>
+              <th class="is-center">Cobrança interna</th>
+              <th class="is-center">SPE sócios</th>
+            </tr>
+          </thead>
+          <tbody>
     `;
 
     if (filteredCompanies.length === 0) {
@@ -534,46 +420,23 @@ const EmpresasApp = {
       const checkedCobInt = custom.cobranca_interna ? 'checked' : '';
       const checkedSpe = speOn ? "checked" : "";
       
-      const bgCons = custom.consolidacao_padrao ? 'background-color: #e8f5e9;' : '';
-      const bgGerida = custom.gerida_pelo_grupo ? 'background-color: #e8f5e9;' : '';
-      const bgCobInt = custom.cobranca_interna ? 'background-color: #e8f5e9;' : '';
-      const bgSpe = speOn ? "background-color: #e8f5e9;" : "";
+      const interruptor = (field, checked) => `<label class="moura-switch"><input type="checkbox" id="chk-${field}-${company.id}" ${checked} ${field === "spe_socios" ? "" : lock} onchange="EmpresasApp.saveInline(${company.id}, '${field}', this.checked)"><span class="moura-switch-track" aria-hidden="true"></span></label>`;
 
       html += `
         <tr data-company-id="${company.id}" class="${speOn ? "is-spe-locked" : ""}">
           <td><strong>${company.id}</strong></td>
-          <td>${this.escAttr(company.name)}</td>
-          <td style="white-space: nowrap;">${this.escAttr(company.cnpj || "-")}</td>
+          <td class="emp-nome" title="${this.escAttr(company.name)}">${this.escAttr(company.name)}</td>
+          <td>${this.escAttr(company.cnpj || "-")}</td>
           <td>
-            <input type="text" class="inline-input" value="${this.escAttr(usualName)}" placeholder="Nome usual..." ${lock} oninput="this.dataset.userEdited='1'; EmpresasApp.saveInline(${company.id}, 'nome_usual', this.value)" onblur="EmpresasApp.saveInline(${company.id}, 'nome_usual', this.value)">
+            <input type="text" class="inline-input" value="${this.escAttr(usualName)}" placeholder="Nome usual" ${lock} oninput="this.dataset.userEdited='1'; EmpresasApp.saveInline(${company.id}, 'nome_usual', this.value)" onblur="EmpresasApp.saveInline(${company.id}, 'nome_usual', this.value)">
           </td>
-          <td style="text-align: center;">
-            <input type="text" inputmode="decimal" class="inline-input" style="text-align: center;" value="${this.escAttr(percMldu)}" ${lock} oninput="this.dataset.userEdited='1'; EmpresasApp.saveInline(${company.id}, 'percentual_mldu', this.value)" onblur="EmpresasApp.saveInline(${company.id}, 'percentual_mldu', this.value)">
+          <td class="is-center">
+            <input type="text" inputmode="decimal" class="inline-input emp-pct" value="${this.escAttr(percMldu)}" ${lock} oninput="this.dataset.userEdited='1'; EmpresasApp.saveInline(${company.id}, 'percentual_mldu', this.value)" onblur="EmpresasApp.saveInline(${company.id}, 'percentual_mldu', this.value)">
           </td>
-          <td style="text-align: center; ${bgCons} transition: background-color 0.3s;">
-            <label class="switch">
-              <input type="checkbox" id="chk-consolidacao_padrao-${company.id}" ${checkedCons} ${lock} onchange="EmpresasApp.saveInline(${company.id}, 'consolidacao_padrao', this.checked)">
-              <span class="slider"></span>
-            </label>
-          </td>
-          <td style="text-align: center; ${bgGerida} transition: background-color 0.3s;">
-            <label class="switch">
-              <input type="checkbox" id="chk-gerida_pelo_grupo-${company.id}" ${checkedGerida} ${lock} onchange="EmpresasApp.saveInline(${company.id}, 'gerida_pelo_grupo', this.checked)">
-              <span class="slider"></span>
-            </label>
-          </td>
-          <td style="text-align: center; ${bgCobInt} transition: background-color 0.3s;">
-            <label class="switch">
-              <input type="checkbox" id="chk-cobranca_interna-${company.id}" ${checkedCobInt} ${lock} onchange="EmpresasApp.saveInline(${company.id}, 'cobranca_interna', this.checked)">
-              <span class="slider"></span>
-            </label>
-          </td>
-          <td class="emp-spe-cell" style="text-align: center; ${bgSpe} transition: background-color 0.3s;">
-            <label class="moura-switch" style="justify-content: center;">
-              <input type="checkbox" id="chk-spe_socios-${company.id}" ${checkedSpe} onchange="EmpresasApp.saveInline(${company.id}, 'spe_socios', this.checked)">
-              <span class="moura-switch-track" aria-hidden="true"></span>
-            </label>
-          </td>
+          <td class="is-center">${interruptor("consolidacao_padrao", checkedCons)}</td>
+          <td class="is-center">${interruptor("gerida_pelo_grupo", checkedGerida)}</td>
+          <td class="is-center">${interruptor("cobranca_interna", checkedCobInt)}</td>
+          <td class="is-center emp-spe-cell">${interruptor("spe_socios", checkedSpe)}</td>
         </tr>
       `;
     });
@@ -581,7 +444,6 @@ const EmpresasApp = {
     html += `
             </tbody>
           </table>
-        </div>
       </div>
     `;
 
@@ -766,9 +628,7 @@ function initEmpresasModule() {
   if (!root) return;
 
   root.innerHTML = `
-    <div style="padding: 20px; max-width: 1400px; margin: 0 auto;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-      </div>
+    <div class="emp-page">
       <div id="empresas-content">
         <div style="text-align: center; padding: 40px; color: var(--color-text-muted);">
           <div class="spinner" style="margin-bottom: 15px;"></div>
