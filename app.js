@@ -17058,21 +17058,30 @@ function renegPricePmt(principal, monthlyRate, n) {
   return base * (rate * fator) / (fator - 1);
 }
 
+/** Taxa mensal de juros do contrato; 0 quando o contrato é sem juros (1% a.m. é mora, como na Quitação). */
 function renegContractMonthlyRate(sale, bills) {
-  let rate = 0;
-  if (typeof quitacaoGetMonthlyInterestRate === "function") {
-    rate = Number(quitacaoGetMonthlyInterestRate(sale)) || 0;
-  }
-  if (!(rate > 0)) {
-    (bills || []).some((b) => {
-      const raw = b && (b.interestRate != null ? b.interestRate : b.interestPercentage);
-      const n = Number(raw);
-      if (!Number.isFinite(n) || n <= 0) return false;
-      rate = n > 0.05 ? n / 100 : n;
-      return true;
-    });
-  }
-  return rate > 0 ? rate : 0;
+  const fontes = [];
+  if (sale) fontes.push(sale.interestPercentage, sale.interestRate);
+  ((window.AppState && AppState.currentContractInstallments) || []).forEach((i) => i && fontes.push(i.interestPercentage, i.interestRate));
+  (bills || []).forEach((b) => b && fontes.push(b.interestPercentage, b.interestRate));
+  const taxas = fontes.map((v) => quitacaoNormalizeMonthlyRate(v)).filter((r) => r != null);
+  const priceLike = taxas.filter((r) => r >= 0.005 && r <= 0.0095);
+  if (priceLike.length) return quitacaoRateMode(priceLike);
+  const semMora = taxas.filter((r) => Math.abs(r - 0.01) > 0.0004);
+  if (semMora.length) return quitacaoRateMode(semMora);
+  return 0;
+}
+
+/** Contrato sem juros: todo acordo interno usa 0,9489% ao mês. */
+const RENEG_TAXA_CONTRATO_SEM_JUROS = 0.009489;
+
+function renegTaxaAcordo(sale, bills) {
+  const rate = renegContractMonthlyRate(sale, bills);
+  return rate > 0 ? rate : RENEG_TAXA_CONTRATO_SEM_JUROS;
+}
+
+function renegFormatTaxa(rate) {
+  return (rate * 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 4 }) + "%";
 }
 
 function renegCenarioAtual() {
@@ -17084,7 +17093,7 @@ function renegCenarioAtual() {
 const RENEG_MODALIDADES = {
   diluir: "As parcelas marcadas, vencidas ou a vencer, viram um saldo. Depois do sinal, esse saldo é dividido entre todas as outras parcelas a vencer do contrato, pela Tabela Price com a taxa do contrato. O cliente fica sem parcelas novas: cada parcela a vencer recebe um acréscimo.",
   somar: "As parcelas marcadas, vencidas ou a vencer, viram um saldo. Depois do sinal, esse saldo vira N parcelas pela Tabela Price com a taxa do contrato. Cada uma é somada a uma das próximas parcelas a vencer, no mesmo vencimento; as demais seguem com o valor original. N vai até a quantidade de parcelas a vencer.",
-  deslocar: "Depois do sinal, o saldo das parcelas marcadas vira um acordo à parte em N parcelas, pela Tabela Price com a taxa da regra de renegociação, a partir do 1º vencimento escolhido. As parcelas a vencer do contrato passam para depois da última parcela do acordo.",
+  deslocar: "Depois do sinal, o saldo das parcelas marcadas vira um acordo à parte em N parcelas, pela Tabela Price com a taxa do contrato, a partir do 1º vencimento escolhido. As parcelas a vencer do contrato passam para depois da última parcela do acordo.",
   cartao: "O saldo das parcelas marcadas vai para o cartão de crédito, em até 12 vezes e sem sinal. A taxa depende da bandeira e é repassada ao cliente ou absorvida pela empresa, conforme a configuração. O Integra gera o link de pagamento."
 };
 
@@ -17309,7 +17318,7 @@ function calculateRenegotiation() {
   const paymentMethod = cenario === "cartao" ? "cartao" : "interno";
   const cardBrand = document.getElementById("reneg-card-brand")?.value || "masterVisa";
   const isCartao = cenario === "cartao";
-  const usaTaxaContrato = cenario === "diluir" || cenario === "somar";
+  const usaTaxaContrato = !isCartao;
   const futuras = renegFuturasOrdenadas(g_renegBills);
   const billKey = (b) => String((b && (b.installmentId || b.installmentNum)) || "");
   const futurasDestino = futuras.filter((b) => !selectedIds.includes(billKey(b)));
@@ -17337,12 +17346,15 @@ function calculateRenegotiation() {
       : (cenario === "somar"
         ? "Depois do sinal, as parcelas selecionadas — vencidas ou não — viram N parcelas com a taxa do contrato, somadas às próximas parcelas a vencer."
         : (cenario === "deslocar"
-          ? "O saldo vencido vira um acordo à parte. As parcelas a vencer continuam depois dele."
+          ? "Depois do sinal, as parcelas selecionadas viram um acordo à parte, com a taxa do contrato. As parcelas a vencer continuam depois dele."
           : "O saldo vai para o cartão, na bandeira e no número de parcelas escolhidos."));
   }
 
   const contractRate = renegContractMonthlyRate(g_renegSale, g_renegBills);
-  const interestRate = isCartao ? 0 : (usaTaxaContrato ? contractRate : (ruleTaxa / 100));
+  const interestRate = isCartao ? 0 : renegTaxaAcordo(g_renegSale, g_renegBills);
+  const taxaTxt = contractRate > 0
+    ? `${renegFormatTaxa(interestRate)} a.m. do contrato`
+    : `${renegFormatTaxa(interestRate)} a.m. (contrato sem juros)`;
   let sinalPct = isCartao ? 0 : (Number(document.getElementById("reneg-sinal-pct")?.value) || ruleSinalMin);
   if (isCartao) {
     const sinalInput = document.getElementById("reneg-sinal-pct");
@@ -17416,7 +17428,7 @@ function calculateRenegotiation() {
     }
   }
   
-  // Price: diluir e somar usam a taxa do contrato; deslocar usa a taxa da regra.
+  // Price: diluir, somar e deslocar usam a taxa do contrato (0,9489% a.m. quando o contrato é sem juros).
   const installmentValue = instQty > 0 ? renegPricePmt(amountToFinance, interestRate, instQty) : 0;
 
   // Preencher resumo
@@ -17425,9 +17437,7 @@ function calculateRenegotiation() {
   
   const interestLabelEl = document.getElementById("reneg-interest-label");
   if (interestLabelEl) {
-    interestLabelEl.textContent = usaTaxaContrato
-      ? `(Tabela Price - taxa do contrato ${(interestRate * 100).toFixed(2)}% a.m.)`
-      : `(Tabela Price - Juros ${(interestRate * 100).toFixed(1)}% a.m.)`;
+    interestLabelEl.textContent = usaTaxaContrato ? `(Tabela Price - ${taxaTxt})` : "(Tabela Price)";
   }
   
   const totalRenegHeaderEl = document.getElementById("reneg-total-renegociar");
@@ -17462,10 +17472,8 @@ function calculateRenegotiation() {
     }
     if (mathTaxaSuffixEl) mathTaxaSuffixEl.textContent = "";
   } else {
-    if (mathTaxaLabelEl) mathTaxaLabelEl.textContent = usaTaxaContrato
-      ? `${(interestRate * 100).toFixed(2)}% do contrato`
-      : `${(interestRate * 100).toFixed(1)}%`;
-    if (mathTaxaSuffixEl) mathTaxaSuffixEl.textContent = usaTaxaContrato ? "" : " a.m.";
+    if (mathTaxaLabelEl) mathTaxaLabelEl.textContent = taxaTxt;
+    if (mathTaxaSuffixEl) mathTaxaSuffixEl.textContent = "";
   }
   
   if (mathCustoOperacaoEl) mathCustoOperacaoEl.textContent = fmt(financingCost);
@@ -17513,7 +17521,7 @@ function calculateRenegotiation() {
   if (mathNoInterestEl && mathWithInterestEl) {
     if (instQty > 0 && selectedCount > 0) {
       mathNoInterestEl.textContent = `${fmt(grossDebt)} - ${fmt(sinalValue)} = ${instQty} parcelas de ${fmt(remainingAfterSinal / instQty)} (sem encargo)`;
-      mathWithInterestEl.textContent = `${fmt(grossDebt)} - ${fmt(sinalValue)} = ${instQty} parcelas de ${fmt(installmentValue)} (com encargo de ${(interestRate * 100).toFixed(1)}% a.m.)`;
+      mathWithInterestEl.textContent = `${fmt(grossDebt)} - ${fmt(sinalValue)} = ${instQty} parcelas de ${fmt(installmentValue)} (com encargo de ${renegFormatTaxa(interestRate)} a.m.)`;
     } else {
       mathNoInterestEl.textContent = 'Selecione as condições para simular.';
       mathWithInterestEl.textContent = '';
@@ -17794,7 +17802,7 @@ function calculateRenegotiation() {
   if (greenSinalLabelEl) greenSinalLabelEl.textContent = (sinalPct > 0 && sinalValue > 0) ? "1 Sinal" : "0 Sinal";
   if (greenSinalValEl) greenSinalValEl.textContent = (sinalPct > 0 && sinalValue > 0) ? fmt(sinalValue) : "R$ 0,00";
   
-  const acordoQtd = cenario === "diluir" ? futurasDestino.length : (cenario === "somar" ? Math.min(instQty, futuras.length) : instQty);
+  const acordoQtd = cenario === "diluir" ? futurasDestino.length : (cenario === "somar" ? Math.min(instQty, futurasDestino.length) : instQty);
   if (greenAcordoLabelEl) {
     greenAcordoLabelEl.textContent = cenario === "diluir"
       ? `${acordoQtd} parcela${acordoQtd !== 1 ? "s" : ""} diluída${acordoQtd !== 1 ? "s" : ""}`
@@ -17805,32 +17813,45 @@ function calculateRenegotiation() {
   if (greenAcordoValEl) greenAcordoValEl.textContent = acordoQtd > 0 ? fmt(installmentValue) : "R$ 0,00";
 
   const mantidaRef = cenario === "somar"
-    ? (futuras[acordoQtd] || null)
+    ? (futurasDestino[acordoQtd] || null)
     : (unselectedBills[0] || null);
   if (greenMantidasLabelEl) greenMantidasLabelEl.textContent = `${greenMantidasCount} Parcela${greenMantidasCount !== 1 ? "s" : ""} Mantida${greenMantidasCount !== 1 ? "s" : ""}`;
   if (greenMantidasValEl) greenMantidasValEl.textContent = greenMantidasCount > 0 && mantidaRef ? fmt(mantidaRef.value || 0) : "R$ 0,00";
 
-  // Diluir: o resumo mostra o contrato novo (sinal, parcelas com período e valor, composição de cada parcela).
-  if (cenario === "diluir" && diluidasResumo.length) {
+  // Diluir e somar: o resumo mostra o contrato novo (sinal, parcelas com período e valor, composição de cada parcela).
+  const greenExtraRowEl = document.getElementById("reneg-green-extra-row");
+  const greenExtraLabelEl = document.getElementById("reneg-green-extra-label");
+  const greenExtraValEl = document.getElementById("reneg-green-extra-val");
+  if (greenExtraRowEl) greenExtraRowEl.style.display = "none";
+  if ((cenario === "diluir" || cenario === "somar") && diluidasResumo.length) {
     const faixa = (vals) => {
       const mi = Math.min(...vals);
       const ma = Math.max(...vals);
       return Math.abs(ma - mi) < 0.005 ? fmt(mi) : `${fmt(mi)} a ${fmt(ma)}`;
     };
-    const n = diluidasResumo.length;
-    const totais = diluidasResumo.map((d) => d.total);
-    const iguais = Math.abs(Math.max(...totais) - Math.min(...totais)) < 0.005;
+    const periodo = (lista, nome) => {
+      const n = lista.length;
+      return n > 1
+        ? `${n} parcelas ${nome}s de ${lista[0].data} a ${lista[n - 1].data}`
+        : `1 parcela ${nome} em ${lista[0].data}`;
+    };
+    const valorCada = (vals) => {
+      const iguais = Math.abs(Math.max(...vals) - Math.min(...vals)) < 0.005;
+      return `${faixa(vals)}${vals.length > 1 && iguais ? " cada" : ""}`;
+    };
+    const nome = cenario === "diluir" ? "diluída" : "somada";
     if (greenSinalLabelEl && sinalPct > 0 && sinalValue > 0 && sinalDueStr) {
       greenSinalLabelEl.textContent = `1 Sinal em ${new Date(sinalDueStr + "T12:00:00").toLocaleDateString("pt-BR")}`;
     }
-    if (greenAcordoLabelEl) {
-      greenAcordoLabelEl.textContent = n > 1
-        ? `${n} parcelas de ${diluidasResumo[0].data} a ${diluidasResumo[n - 1].data}`
-        : `1 parcela em ${diluidasResumo[0].data}`;
-    }
-    if (greenAcordoValEl) greenAcordoValEl.textContent = `${faixa(totais)}${n > 1 && iguais ? " cada" : ""}`;
-    if (greenMantidasLabelEl) greenMantidasLabelEl.textContent = "Cada parcela: original + acréscimo";
+    if (greenAcordoLabelEl) greenAcordoLabelEl.textContent = periodo(diluidasResumo, nome);
+    if (greenAcordoValEl) greenAcordoValEl.textContent = valorCada(diluidasResumo.map((d) => d.total));
+    if (greenMantidasLabelEl) greenMantidasLabelEl.textContent = `Cada ${nome}: original + acréscimo`;
     if (greenMantidasValEl) greenMantidasValEl.textContent = `${faixa(diluidasResumo.map((d) => d.original))} + ${fmt(installmentValue)}`;
+    if (cenario === "somar" && mantidasResumo.length && greenExtraRowEl) {
+      greenExtraRowEl.style.display = "flex";
+      if (greenExtraLabelEl) greenExtraLabelEl.textContent = periodo(mantidasResumo, "mantida");
+      if (greenExtraValEl) greenExtraValEl.textContent = valorCada(mantidasResumo.map((d) => d.original));
+    }
   }
 
   const greenTotalParcelasEl = document.getElementById("reneg-green-total-parcelas");
@@ -18265,6 +18286,7 @@ async function showDistratoView(customer, sale, bills) {
   toggleDistratoPaymentFields();
   if (typeof window.loadDistratoBanksList === "function") window.loadDistratoBanksList();
   if (typeof window.toggleDistratoPermuta === "function") window.toggleDistratoPermuta();
+  window.setDistratoAba("resumo");
 }
 
 window.resetDistratoEditableFields = function(opts) {
@@ -19228,6 +19250,53 @@ window.syncDistratoPermutaUi = function() {
     label.style.borderColor = on ? "#c2410c" : "#fdba74";
     label.title = on ? "Permuta ligada — clique para desligar" : "Ligar cálculo de permuta";
   }
+  if (typeof window.syncDistratoTipoUi === "function") window.syncDistratoTipoUi();
+};
+
+const DIST_ABAS = ["resumo", "calculo", "negociacao", "bancarios", "testemunhas"];
+
+window.setDistratoAba = function(aba) {
+  if (!DIST_ABAS.includes(aba)) aba = "resumo";
+  window._distAba = aba;
+  document.querySelectorAll("#dist-abas .ml-tab").forEach((b) => {
+    const on = b.dataset.aba === aba;
+    b.classList.toggle("is-active", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
+  });
+  document.querySelectorAll("#dist-layout-container .dist-aba-pane").forEach((p) => {
+    p.hidden = p.dataset.distAba !== aba;
+  });
+  const abas = document.getElementById("dist-abas");
+  if (abas && abas.getBoundingClientRect().top < 0) abas.scrollIntoView({ block: "start" });
+};
+
+window.distratoAbaPasso = function(delta) {
+  const i = DIST_ABAS.indexOf(window._distAba || "resumo");
+  window.setDistratoAba(DIST_ABAS[Math.max(0, Math.min(DIST_ABAS.length - 1, i + delta))]);
+};
+
+/** Empresa / cliente / permuta: alimenta dist-iniciativa e dist-permuta-toggle, lidos pelo cálculo e pelo termo. */
+window.setDistratoTipo = function(tipo) {
+  const ini = document.getElementById("dist-iniciativa");
+  if (ini) ini.value = tipo === "empresa" ? "empresa" : "cliente";
+  const perm = document.getElementById("dist-permuta-toggle");
+  const querPermuta = tipo === "permuta";
+  if (perm && perm.checked !== querPermuta) {
+    perm.checked = querPermuta;
+    window.toggleDistratoPermuta();
+  }
+  window.syncDistratoTipoUi();
+};
+
+window.syncDistratoTipoUi = function() {
+  const perm = document.getElementById("dist-permuta-toggle");
+  const ini = document.getElementById("dist-iniciativa");
+  const tipo = perm && perm.checked ? "permuta" : (ini && ini.value === "empresa" ? "empresa" : "cliente");
+  document.querySelectorAll('input[name="dist-tipo"]').forEach((r) => {
+    r.checked = r.value === tipo;
+    const op = r.closest(".dist-tipo-op");
+    if (op) op.classList.toggle("is-sel", r.checked);
+  });
 };
 
 function flattenCustomerDebtBalance(res) {
@@ -20796,6 +20865,8 @@ window.syncDistratoPermutaAbatimentoUi = function() {
   const needsPayout = distratoNeedsClientPayout();
   const showSchedule = needsPayout && (!on || cash > 0.009);
   if (payBlock) payBlock.style.display = needsPayout ? "" : "none";
+  const semDevolucao = document.getElementById("dist-sem-devolucao");
+  if (semDevolucao) semDevolucao.hidden = needsPayout;
   if (refundStep) refundStep.style.display = showSchedule ? "" : "none";
   if (scheduleWrap) scheduleWrap.style.display = showSchedule ? "flex" : "none";
   if (estimateWrap) estimateWrap.style.display = showSchedule ? "block" : "none";
@@ -21240,21 +21311,7 @@ function renegPickIndexerName(bills) {
 }
 
 function renegFormatJurosContrato(sale, bills) {
-  let rate = null;
-  if (typeof quitacaoGetMonthlyInterestRate === "function") {
-    rate = quitacaoGetMonthlyInterestRate(sale);
-  }
-  if (!(rate > 0) && bills && bills.length) {
-    for (let i = 0; i < bills.length; i++) {
-      const b = bills[i];
-      const raw = b.interestRate != null ? b.interestRate : b.interestPercentage;
-      const n = Number(raw);
-      if (!Number.isFinite(n) || n <= 0) continue;
-      rate = n > 0.05 ? n / 100 : n;
-      break;
-    }
-  }
-  if (!(rate > 0)) return "____";
+  const rate = renegTaxaAcordo(sale, bills);
   return (rate * 100).toLocaleString("pt-BR", { minimumFractionDigits: 4, maximumFractionDigits: 4 }) + "% ao mês";
 }
 
@@ -22059,6 +22116,7 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
   const comissaoInfo = (results.extraDebits && results.extraDebits.comissao) || 0;
   
   if (comissaoAplicavel && saleDate && !isNaN(saleDate.getTime()) && saleDate <= dataLimite && comissaoInfo <= 0) {
+    window.setDistratoAba("calculo");
     alert("Preencha a comissão deste contrato.");
     return;
   }
@@ -22067,6 +22125,7 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
     if (typeof window.syncDistratoExpenseDocs === "function") window.syncDistratoExpenseDocs();
     const missDocs = typeof window.validateDistratoExpenseDocs === "function" ? window.validateDistratoExpenseDocs() : "";
     if (missDocs) {
+      window.setDistratoAba("calculo");
       alert(missDocs);
       return;
     }
@@ -22074,6 +22133,7 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
       if (typeof window.uploadDistratoExpenseDocs === "function") await window.uploadDistratoExpenseDocs();
     } catch (e) {
       console.error(e);
+      window.setDistratoAba("calculo");
       alert("Não foi possível gravar os anexos de IPTU / água / energia no cadastro do cliente. Verifique os arquivos e tente de novo.");
       return;
     }
@@ -22109,10 +22169,12 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
     const sel = (window._distPermutaState && window._distPermutaState.selection) || {};
     const insts = (sel.installments && sel.installments.length) ? sel.installments : [];
     if (!loteSel) {
+      window.setDistratoAba("negociacao");
       alert("Na permuta, selecione o lote/contrato para abatimento e as parcelas a serem baixadas.");
       return;
     }
     if (!insts.length) {
+      window.setDistratoAba("negociacao");
       alert("Na permuta, selecione as parcelas a serem baixadas no lote escolhido.");
       return;
     }
@@ -22137,16 +22199,19 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
     beneficiaryCpf = (typeof formatCpfCnpj === "function") ? formatCpfCnpj(beneficiaryCpfRaw) : beneficiaryCpfRaw;
     const beneficiaryDigits = String(beneficiaryCpfRaw || "").replace(/\D/g, "");
     if (!beneficiaryName || beneficiaryDigits.length < 11) {
+      window.setDistratoAba("bancarios");
       alert("Informe os dados bancários: beneficiário e CPF/CNPJ.");
       return;
     }
     payType = distVal("dist-bank-transfer-type") || "PIX";
     if (payType === "TED") {
       if (!distVal("dist-bank-name") || !distVal("dist-bank-agency") || !distVal("dist-bank-account")) {
+        window.setDistratoAba("bancarios");
         alert("Preencha banco, agência e conta para gerar o termo.");
         return;
       }
     } else if (!distVal("dist-bank-pix-key")) {
+      window.setDistratoAba("bancarios");
       alert("Informe a chave PIX para gerar o termo.");
       return;
     }
@@ -22154,6 +22219,7 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
     const fileEl = document.getElementById("dist-bank-card-file");
     const bankFile = fileEl && fileEl.files && fileEl.files[0];
     if (!window._distBankCardUploaded && !bankFile) {
+      window.setDistratoAba("bancarios");
       alert("Selecione o print ou a cópia do cartão com os dados bancários do cliente antes de gerar o documento.");
       return;
     }

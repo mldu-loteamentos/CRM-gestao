@@ -1842,23 +1842,23 @@ const ConfigUsersApp = {
     }
     return `
       <div class="cfg-panel">
-        <div class="cfg-filters" style="grid-template-columns: 1fr 1fr 1fr auto;">
+        <div class="cfg-filters">
           <div>
-            <label for="cfg-mod-modulo">Módulo</label>
+            <label for="cfg-mod-modulo" class="ml-emp-filter-label">Módulo</label>
             <select id="cfg-mod-modulo" class="form-control" onchange="ConfigUsersApp.setModPick('module', this.value)">
               ${opt("", "Selecione", !pick.module)}
               ${(this.modules || []).map((m) => opt(m.key, m.name, pick.module === m.key)).join("")}
             </select>
           </div>
           <div>
-            <label for="cfg-mod-sub">Subitem</label>
+            <label for="cfg-mod-sub" class="ml-emp-filter-label">Subitem</label>
             <select id="cfg-mod-sub" class="form-control" ${mod ? "" : "disabled"} onchange="ConfigUsersApp.setModPick('sub', this.value)">
               ${opt("", "Todo o módulo", !pick.sub)}
               ${subs.map((s) => opt(s.key, s.name, pick.sub === s.key)).join("")}
             </select>
           </div>
           <div>
-            <label for="cfg-mod-item">Item</label>
+            <label for="cfg-mod-item" class="ml-emp-filter-label">Item</label>
             <select id="cfg-mod-item" class="form-control" ${sub ? "" : "disabled"} onchange="ConfigUsersApp.setModPick('action', this.value)">
               ${opt("", "Todo o subitem", !pick.action)}
               ${actions.map((a) => opt(sub.key + "|" + a.id, a.label, pick.action === (sub.key + "|" + a.id))).join("")}
@@ -1928,36 +1928,41 @@ const ConfigUsersApp = {
     let trs = shownUsers.map(u => {
       const isActive = u.status === 'ATIVO';
       const isPending = String(u.status || '').toUpperCase() === 'PENDENTE';
-      const statusSwitch = `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-             ${isPending ? '<span style="background: #fef7e0; color: #f29900; padding: 4px 10px; border-radius: 12px; font-size: 0.7rem; font-weight: 700;">PENDENTE</span>' : ''}
-             <label class="ml-switch" title="${isActive ? 'Desativar' : 'Ativar'}">
-             <input type="checkbox" ${isActive ? 'checked' : ''} onchange="ConfigUsersApp.toggleUserStatus(${this.attrArg(u.id)}, ${this.attrArg(u.email || '')})">
-             <span class="ml-slider"></span>
-           </label>
+      const statusSwitch = `<div class="cfg-st">
+             ${isPending ? '<span class="cfg-pend">PENDENTE</span>' : ''}
+             <label class="moura-switch" title="${isActive ? 'Desativar' : 'Ativar'}">
+               <input type="checkbox" ${isActive ? 'checked' : ''} onchange="ConfigUsersApp.toggleUserStatus(${this.attrArg(u.id)}, ${this.attrArg(u.email || '')})">
+               <span class="moura-switch-track" aria-hidden="true"></span>
+             </label>
            </div>`;
+      const tipoOperador = (window.crmOperatorType(u) && window.isOperadorCobrancaProfile(u.profile_name))
+        ? (window.crmOperatorType(u) === 'interno' ? 'Cobrança Interna' : (window.crmOperatorType(u) === 'externo' ? 'Terceirizada' : (window.crmOperatorType(u) === 'advogado' ? 'Advogado (Jurídico)' : 'Apoio Jurídico')))
+        : '';
 
       return `
-        <tr style="border-bottom: 1px solid #f0f0f0;">
-          <td style="padding: 16px 15px;">
-            <div style="font-weight: 700; color: #202124;">${u.name}</div>
-            <div style="font-size: 0.85rem; color: #80868b; margin-top: 4px;">${u.email}</div>
+        <tr>
+          <td class="cfg-nome">
+            <strong>${this.esc(u.name)}</strong>
             ${this.deptUserLine(u)}
           </td>
-          <td style="padding: 16px 15px; color: #202124; font-size: 0.9rem;">${u.sienge_user || '-'}</td>
-          <td style="padding: 16px 15px; color: #202124; font-size: 0.9rem;">${u.phone || '-'}</td>
-          <td style="padding: 16px 15px; color: #202124; font-weight: 700; font-size: 0.85rem;">
-             ${u.profile_name}
-             ${(window.crmOperatorType(u) && window.isOperadorCobrancaProfile(u.profile_name)) ? `<div style="font-size: 0.75rem; color: #80868b; font-weight: 500; margin-top: 4px; text-transform: uppercase;">${window.crmOperatorType(u) === 'interno' ? 'Cobrança Interna' : (window.crmOperatorType(u) === 'externo' ? 'Terceirizada' : (window.crmOperatorType(u) === 'advogado' ? 'Advogado (Jurídico)' : 'Apoio Jurídico'))}</div>` : ''}
+          <td class="cfg-email" title="${this.esc(u.email || '')}">${this.esc(u.email || '-')}</td>
+          <td>${this.esc(u.sienge_user || '-')}</td>
+          <td>${this.esc(u.phone || '-')}</td>
+          <td class="cfg-perfil">
+            <strong>${this.esc(u.profile_name || '-')}</strong>
+            ${tipoOperador ? `<small>${tipoOperador}</small>` : ''}
           </td>
-          <td style="padding: 16px 15px;">${statusSwitch}</td>
-          <td style="padding: 16px 15px;">
-             <button onclick="ConfigUsersApp.openUserModal(${this.attrArg(u.id)}, ${this.attrArg(u.email || '')})" class="btn btn-outline" style="padding: 6px; border-radius: 8px; border-color: #105436; color: #105436;" title="Editar Dados"><i data-lucide="edit" style="width:18px;height:18px;"></i></button>
+          <td class="is-center">${statusSwitch}</td>
+          <td class="is-right cfg-acoes">
+            <button type="button" class="tvig-ico" title="Editar" onclick="ConfigUsersApp.openUserModal(${this.attrArg(u.id)}, ${this.attrArg(u.email || '')})">
+              <i data-lucide="pencil" style="width:15px;height:15px;"></i>
+            </button>
           </td>
         </tr>
       `;
     }).join('');
     if (!trs) {
-      trs = `<tr><td colspan="6" style="padding:28px 16px;text-align:center;color:#64748b;">Nenhum usuário neste filtro.</td></tr>`;
+      trs = `<tr><td colspan="7" style="padding:28px 16px;text-align:center;color:#64748b;">Nenhum usuário neste filtro.</td></tr>`;
     }
 
     const filters = this.userFilters || { nome: "", perfil: "", email: "", status: "todos" };
@@ -1984,17 +1989,15 @@ const ConfigUsersApp = {
     
     const adminHidden = this.selectedProfile === 'admin' ? 'visibility: hidden;' : '';
     const actionBtns = `
-      <div style="display: flex; gap: 6px;">
-         <button onclick="ConfigUsersApp.editProfile('${this.selectedProfile}')" style="${adminHidden} padding: 8px; background: transparent; border: 1px solid #e8eaed; border-radius: 8px; cursor: pointer; color: #5f6368; display: inline-flex; align-items: center; justify-content: center; transition: all 0.2s; flex-shrink: 0;" title="Editar Nome">
-            <i data-lucide="edit-2" style="width: 16px; height: 16px;"></i>
+      <div style="display: flex; gap: 2px;">
+         <button type="button" class="tvig-ico" onclick="ConfigUsersApp.duplicateProfile('${this.selectedProfile}')" title="Duplicar perfil (copiar permissões)">
+            <i data-lucide="copy" style="width:15px;height:15px;"></i>
          </button>
-         
-         <button onclick="ConfigUsersApp.duplicateProfile('${this.selectedProfile}')" style="padding: 8px; background: transparent; border: 1px solid #e8eaed; border-radius: 8px; cursor: pointer; color: #1a73e8; display: inline-flex; align-items: center; justify-content: center; transition: all 0.2s; flex-shrink: 0;" title="Duplicar Perfil (Copiar Permissões)">
-            <i data-lucide="copy" style="width: 16px; height: 16px;"></i>
+         <button type="button" class="tvig-ico" onclick="ConfigUsersApp.editProfile('${this.selectedProfile}')" style="${adminHidden}" title="Editar nome">
+            <i data-lucide="pencil" style="width:15px;height:15px;"></i>
          </button>
-         
-         <button onclick="ConfigUsersApp.deleteProfile('${this.selectedProfile}')" style="${adminHidden} padding: 8px; background: transparent; border: 1px solid #e8eaed; border-radius: 8px; cursor: pointer; color: #d93025; display: inline-flex; align-items: center; justify-content: center; transition: all 0.2s; flex-shrink: 0;" title="Excluir Perfil">
-            <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
+         <button type="button" class="tvig-ico is-danger" onclick="ConfigUsersApp.deleteProfile('${this.selectedProfile}')" style="${adminHidden}" title="Excluir perfil">
+            <i data-lucide="trash-2" style="width:15px;height:15px;"></i>
          </button>
       </div>
     `;
@@ -2134,62 +2137,86 @@ const ConfigUsersApp = {
         .ml-slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background: #fff; transition: .25s; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.25); }
         .ml-switch input:checked + .ml-slider { background: #105436; }
         .ml-switch input:checked + .ml-slider:before { transform: translateX(20px); }
-        .cfg-page { padding: 22px; max-width: 1140px; margin: 0 auto; }
-        .cfg-tabs { margin: 0 0 16px; }
-        .cfg-panel { background: #fff; border: 1px solid #cbd5e1; border-radius: 16px; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08); padding: 16px; }
-        .cfg-filters { display: grid; grid-template-columns: 1.3fr 1.1fr 1.2fr 0.9fr auto; gap: 12px; align-items: end; margin-bottom: 14px; }
-        .cfg-filters label { display: block; font-size: 0.75rem; font-weight: 800; color: #1e293b; margin-bottom: 6px; }
-        .cfg-filters .form-control { height: 40px; border: 1px solid #475569; border-radius: 8px; background: #fff; color: #0f172a; padding: 0 12px; width: 100%; font-size: 0.9rem; }
-        .cfg-filters .form-control:focus { outline: 2px solid #105436; border-color: #105436; }
-        .cfg-count { height: 40px; display: flex; align-items: center; padding: 0 12px; border-radius: 8px; background: #ecfdf5; color: #064e3b; font-weight: 800; font-size: 0.85rem; white-space: nowrap; }
-        .cfg-table-wrap { border: 1px solid #cbd5e1; border-radius: 12px; overflow: auto; }
-        .cfg-table { width: 100%; border-collapse: collapse; text-align: left; background: #fff; }
-        .cfg-table th { padding: 12px 14px; color: #fff; background: #105436; font-weight: 800; font-size: 0.82rem; }
-        .cfg-table td { padding: 14px; border-bottom: 1px solid #e2e8f0; color: #0f172a; }
-        .cfg-table tr:last-child td { border-bottom: 0; }
+        .cfg-page { padding: 4px 2px 12px; }
+        .cfg-head { display: flex; align-items: flex-end; gap: 12px; margin-bottom: 12px; }
+        .cfg-head .ml-tabs { flex: 1; min-width: 0; }
+        .cfg-head .btn { flex-shrink: 0; height: 36px; display: inline-flex; align-items: center; gap: 6px; padding: 0 16px; border-radius: 6px; margin-bottom: 4px; font-weight: 700; background: #105436; border-color: #105436; }
+        .cfg-head .btn svg { width: 16px; height: 16px; }
+        .cfg-panel { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; }
+        .cfg-filters { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+        .cfg-filters > div { flex: 1 1 180px; min-width: 160px; }
+        .cfg-filters > .cfg-f-nome, .cfg-filters > .cfg-f-email { flex: 1.4 1 240px; }
+        .cfg-filters .form-control { height: 36px; border: 1px solid #334155; border-radius: 6px; background: #fff; color: #0f172a; padding: 0 10px; width: 100%; box-sizing: border-box; font-size: 0.85rem; font-weight: 600; }
+        .cfg-filters .form-control:focus { outline: none; border-color: #105436; box-shadow: 0 0 0 2px rgba(16, 84, 54, 0.15); }
+        .cfg-filters > .cfg-count { flex: 0 0 auto; min-width: 0; height: 36px; display: flex; align-items: center; padding: 0 12px; border-radius: 6px; background: #e7f6ee; color: #105436; font-weight: 800; font-size: 0.82rem; white-space: nowrap; }
+        .cfg-table-wrap { border: 1px solid #e2e8f0; border-radius: 8px; overflow: auto; }
+        .cfg-table { width: 100%; border-collapse: collapse; text-align: left; background: #fff; font-size: 0.82rem; }
+        .cfg-table th { padding: 8px 10px; color: #fff; background: #1b8253; font-weight: 700; font-size: 0.78rem; }
+        .cfg-table td { padding: 8px 10px; border-bottom: 1px solid #e8eee9; color: #1c2e24; }
+        .cfg-table tbody tr:nth-child(even) { background: #f7faf8; }
+        .cfg-scroll { overflow: auto; max-height: calc(100vh - 230px); border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
+        .cfg-utable { width: 100%; min-width: 1040px; table-layout: fixed; border-collapse: collapse; text-align: left; font-size: 0.8rem; }
+        .cfg-utable col.c-nome { width: 22%; }
+        .cfg-utable col.c-email { width: 22%; }
+        .cfg-utable col.c-sienge { width: 13%; }
+        .cfg-utable col.c-cel { width: 130px; }
+        .cfg-utable col.c-perfil { width: 18%; }
+        .cfg-utable col.c-st { width: 110px; }
+        .cfg-utable col.c-acao { width: 64px; }
+        .cfg-utable thead th { position: sticky; top: 0; z-index: 2; background: #1b8253; color: #fff; padding: 8px 10px; font-weight: 700; font-size: 0.78rem; }
+        .cfg-utable td { padding: 6px 10px; border-bottom: 1px solid #e8eee9; color: #1c2e24; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .cfg-utable tbody tr:nth-child(even) { background: #f7faf8; }
+        .cfg-utable tbody tr:hover { background: #e7f6ee; }
+        .cfg-utable .is-center { text-align: center; }
+        .cfg-utable .is-right { text-align: right; }
+        .cfg-utable td.cfg-nome, .cfg-utable td.cfg-perfil { white-space: normal; }
+        .cfg-utable td.cfg-nome strong { color: #0f172a; }
+        .cfg-utable td.cfg-nome > div { font-size: 0.72rem !important; margin-top: 2px !important; }
+        .cfg-utable td.cfg-email { color: #475569; }
+        .cfg-utable td.cfg-perfil strong { font-size: 0.76rem; }
+        .cfg-utable td.cfg-perfil small { display: block; font-size: 0.68rem; color: #64748b; text-transform: uppercase; margin-top: 2px; }
+        .cfg-utable .cfg-st { display: inline-flex; align-items: center; gap: 6px; }
+        .cfg-utable .cfg-pend { background: #fef7e0; color: #b45309; padding: 2px 8px; border-radius: 999px; font-size: 0.66rem; font-weight: 700; }
+        .cfg-utable td.cfg-acoes { overflow: visible; }
         .cfg-prof-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #e2e8f0; }
         .cfg-prof-bar select { height: 40px; min-width: 280px; border: 1px solid #475569; border-radius: 8px; padding: 0 12px; font-weight: 700; color: #0f172a; background: #fff; }
-        @media (max-width: 900px) { .cfg-filters { grid-template-columns: 1fr 1fr; } }
       </style>
       <div class="cfg-page">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; gap: 12px; flex-wrap: wrap;">
-          <h2 style="display: flex; align-items: center; gap: 10px; font-size: 1.5rem; margin: 0; color: #202124;">
-            <i data-lucide="users" style="width: 24px; height: 24px;"></i> Usuários e Perfis
-          </h2>
+        <div class="cfg-head">
+          <div class="ml-tabs" role="tablist">
+            <button type="button" role="tab" aria-selected="${this.view === "usuarios"}" class="ml-tab ${this.view === "usuarios" ? "is-active" : ""}" onclick="ConfigUsersApp.setView('usuarios')"><i data-lucide="users"></i> Usuários</button>
+            <button type="button" role="tab" aria-selected="${this.view === "perfis"}" class="ml-tab ${this.view === "perfis" ? "is-active" : ""}" onclick="ConfigUsersApp.setView('perfis')"><i data-lucide="shield"></i> Perfis</button>
+            <button type="button" role="tab" aria-selected="${this.view === "modulos"}" class="ml-tab ${this.view === "modulos" ? "is-active" : ""}" onclick="ConfigUsersApp.setView('modulos')"><i data-lucide="layout-grid"></i> Módulos</button>
+          </div>
           ${this.view === "usuarios" ? `
-          <button class="btn btn-primary" style="background-color: #105436; border-color: #105436; font-weight: 600; padding: 10px 20px; border-radius: 8px;" onclick="ConfigUsersApp.openUserModal()">
-            <i data-lucide="user-plus" style="width: 18px; margin-right: 6px;"></i> Convidar Usuário
+          <button type="button" class="btn btn-primary" onclick="ConfigUsersApp.openUserModal()">
+            <i data-lucide="user-plus"></i> Convidar Usuário
           </button>` : this.view === "perfis" ? `
-          <button class="btn btn-primary" style="background-color: #105436; border-color: #105436; font-weight: 600; padding: 10px 20px; border-radius: 8px;" onclick="ConfigUsersApp.savePermissions()">
-            <i data-lucide="save" style="width: 18px; margin-right: 6px;"></i> Salvar Permissões
+          <button type="button" class="btn btn-primary" onclick="ConfigUsersApp.savePermissions()">
+            <i data-lucide="save"></i> Salvar Permissões
           </button>` : ""}
-        </div>
-        <div class="ml-tabs cfg-tabs" role="tablist">
-          <button type="button" role="tab" aria-selected="${this.view === "usuarios"}" class="ml-tab ${this.view === "usuarios" ? "is-active" : ""}" onclick="ConfigUsersApp.setView('usuarios')"><i data-lucide="users"></i> Usuários</button>
-          <button type="button" role="tab" aria-selected="${this.view === "perfis"}" class="ml-tab ${this.view === "perfis" ? "is-active" : ""}" onclick="ConfigUsersApp.setView('perfis')"><i data-lucide="shield"></i> Perfis</button>
-          <button type="button" role="tab" aria-selected="${this.view === "modulos"}" class="ml-tab ${this.view === "modulos" ? "is-active" : ""}" onclick="ConfigUsersApp.setView('modulos')"><i data-lucide="layout-grid"></i> Módulos</button>
         </div>
 
         ${this.view === "modulos" ? this.modulosPanelHtml() : this.view === "usuarios" ? `
-        <div class="cfg-panel">
+        <div>
           <div class="cfg-filters">
-            <div>
-              <label for="cfg-user-nome">Nome</label>
+            <div class="cfg-f-nome">
+              <label for="cfg-user-nome" class="ml-emp-filter-label">Nome</label>
               <input id="cfg-user-nome" class="form-control" type="search" placeholder="Nome do usuário" value="${this.esc(filters.nome)}" oninput="ConfigUsersApp.onUserFilter('nome', this.value)">
             </div>
             <div>
-              <label for="cfg-user-perfil">Perfil</label>
+              <label for="cfg-user-perfil" class="ml-emp-filter-label">Perfil</label>
               <select id="cfg-user-perfil" class="form-control" onchange="ConfigUsersApp.onUserFilter('perfil', this.value)">
                 <option value="">Todos</option>
                 ${profileChoices.map((name) => `<option value="${this.esc(name)}" ${filters.perfil === name ? "selected" : ""}>${this.esc(name)}</option>`).join("")}
               </select>
             </div>
-            <div>
-              <label for="cfg-user-email">E-mail</label>
+            <div class="cfg-f-email">
+              <label for="cfg-user-email" class="ml-emp-filter-label">E-mail</label>
               <input id="cfg-user-email" class="form-control" type="search" placeholder="E-mail" value="${this.esc(filters.email)}" oninput="ConfigUsersApp.onUserFilter('email', this.value)">
             </div>
             <div>
-              <label for="cfg-user-status">Situação</label>
+              <label for="cfg-user-status" class="ml-emp-filter-label">Situação</label>
               <select id="cfg-user-status" class="form-control" onchange="ConfigUsersApp.onUserFilter('status', this.value)">
                 <option value="todos" ${filters.status === "todos" ? "selected" : ""}>Todos</option>
                 <option value="ativos" ${filters.status === "ativos" ? "selected" : ""}>Somente ativos</option>
@@ -2198,16 +2225,21 @@ const ConfigUsersApp = {
             </div>
             <div class="cfg-count">${shownUsers.length} usuário(s)</div>
           </div>
-          <div class="cfg-table-wrap">
-          <table class="cfg-table">
+          <div class="cfg-scroll">
+          <table class="cfg-utable">
+            <colgroup>
+              <col class="c-nome"><col class="c-email"><col class="c-sienge"><col class="c-cel">
+              <col class="c-perfil"><col class="c-st"><col class="c-acao">
+            </colgroup>
             <thead>
               <tr>
-                <th>Nome Completo / E-mail</th>
+                <th>Nome completo</th>
+                <th>E-mail</th>
                 <th>Usuário Sienge</th>
                 <th>Celular</th>
-                <th>Perfil de Acesso</th>
-                <th>Status</th>
-                <th>Ações</th>
+                <th>Perfil de acesso</th>
+                <th class="is-center">Status</th>
+                <th class="is-right">Ações</th>
               </tr>
             </thead>
             <tbody>
