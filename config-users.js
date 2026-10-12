@@ -1241,7 +1241,7 @@ const ConfigUsersApp = {
          if (!user) return;
       }
       
-      const userProfileOptions = this.profiles.map(p => 
+      const userProfileOptions = this.profilesOrdenados().map(p => 
           `<option value="${p.name}" ${user && p.name === user.profile_name ? 'selected' : (!user && p.name === 'OPERADOR COBRANÇA' ? 'selected' : '')}>${p.name}</option>`
       ).join('');
 
@@ -1982,7 +1982,7 @@ const ConfigUsersApp = {
     });
     profileChoices.sort((a, b) => a.localeCompare(b, "pt-BR"));
 
-    const optionsHtml = this.profiles.map(p => {
+    const optionsHtml = this.profilesOrdenados().map(p => {
        const isSelected = p.id === this.selectedProfile;
        return `<option value="${p.id}" ${isSelected ? 'selected' : ''}>${p.name}</option>`;
     }).join('');
@@ -2267,6 +2267,10 @@ const ConfigUsersApp = {
     `;
 
     lucide.createIcons();
+  },
+
+  profilesOrdenados() {
+    return [...(this.profiles || [])].sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "pt-BR"));
   },
 
   selectProfile(profileId) {
