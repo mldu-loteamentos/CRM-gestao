@@ -3793,10 +3793,11 @@ circle.donut-segment {
 }
 .fc-consult-btn.is-dirty { box-shadow: 0 0 0 2px #f59e0b; }
 .rcx-page { padding: 4px 2px 24px; min-width: 0; max-width: 100%; }
-.rcx-tabs { margin-bottom: 14px; max-width: 100%; }
-.rcx-toolbar { margin-bottom: 10px; }
-.rcx-field { display: flex; flex-direction: column; gap: 4px; }
-.rcx-select { height: 36px; min-width: 150px; border: 1px solid #334155; border-radius: 6px; background: #fff; padding: 0 10px; font-size: 0.82rem; font-weight: 600; color: #0f172a; }
+.rcx-tabs { margin-bottom: 18px; max-width: 100%; }
+.rcx-toolbar { gap: 14px 18px; margin-bottom: 14px; padding: 12px 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; }
+.rcx-toolbar .cc-toolbar-actions { gap: 10px; }
+.rcx-field { display: flex; flex-direction: column; gap: 0; }
+.rcx-select { height: 36px; min-width: 150px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; padding: 0 10px; font-size: 0.82rem; font-weight: 600; color: #0f172a; }
 .rcx-select:focus { outline: none; border-color: var(--color-primary); }
 .rcx-escala { display: inline-flex; height: 36px; border: 1px solid #cbd5e1; border-radius: 6px; overflow: hidden; background: #fff; }
 .rcx-escala button { border: 0; background: transparent; padding: 0 14px; font-weight: 700; font-size: 0.78rem; color: #64748b; cursor: pointer; }
@@ -3816,7 +3817,7 @@ circle.donut-segment {
 .rcx-arq { font-size: 0.74rem; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 999px; padding: 3px 4px 3px 10px; }
 .rcx-arq button { border: 0; background: transparent; color: #b91c1c; font-weight: 700; cursor: pointer; font-size: 0.72rem; }
 .rcx-aviso { margin-bottom: 10px; padding: 8px 12px; background: #fffbeb; color: #92400e; border: 1px solid #fde68a; border-radius: 8px; font-size: 0.8rem; }
-.rcx-ajuda { margin-bottom: 10px; font-size: 0.76rem; color: #64748b; }
+.rcx-ajuda { margin: 0 0 14px 2px; font-size: 0.76rem; color: #64748b; }
 .rcx-ajuda summary { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; font-weight: 700; color: #475569; list-style: none; }
 .rcx-ajuda summary::-webkit-details-marker { display: none; }
 .rcx-ajuda summary svg { width: 14px; height: 14px; color: var(--color-primary); }
@@ -3870,6 +3871,21 @@ circle.donut-segment {
 .rcx-graf-col.is-orc .rcx-graf-val { color: #f37021; }
 .rcx-graf-col.is-real .rcx-graf-bar { background: #105436; }
 .rcx-graf-col.is-real .rcx-graf-val { color: #105436; }
+.rcx-tot-area { height: 190px; }
+.rcx-tot-pilha { width: 100%; max-width: 64px; min-height: 2px; display: flex; flex-direction: column; }
+.rcx-tot-seg { min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.rcx-tot-seg span { font-size: 0.66rem; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rcx-tot-seg[data-curto] span { display: none; }
+.rcx-tot-seg.is-escuro span { color: #fff; }
+.rcx-tot-seg.is-claro span { color: #334155; }
+.rcx-graf-col.is-ant .rcx-tot-seg.is-escuro { background: #a6a6a6; }
+.rcx-graf-col.is-ant .rcx-tot-seg.is-claro { background: #d9d9d9; }
+.rcx-graf-col.is-orc .rcx-tot-seg.is-escuro { background: #f37021; }
+.rcx-graf-col.is-orc .rcx-tot-seg.is-claro { background: #fbd5bd; }
+.rcx-graf-col.is-fc .rcx-tot-seg.is-escuro { background: #105436; }
+.rcx-graf-col.is-fc .rcx-tot-seg.is-claro { background: #c9ecd3; }
+.rcx-graf-col.is-fc .rcx-graf-val { color: #1b8253; }
+.rcx-tot-nota { margin-top: 8px; font-size: 0.68rem; line-height: 1.35; color: #64748b; }
 .rcx-graf-eixo { display: flex; gap: 18px; padding: 6px 6px 0; }
 .rcx-graf-eixo span { flex: 1; text-align: center; font-size: 0.8rem; font-weight: 600; color: #334155; }
 .rcx-outros { cursor: pointer; }
@@ -3917,12 +3933,14 @@ circle.donut-segment {
   .rcx-kpis { grid-template-columns: 1fr; }
 }
 @media (max-width: 1280px) {
-  .rcx-topo { grid-template-columns: 250px minmax(0, 1fr); }
-  .rcx-topo .rcx-kpis { grid-column: 1 / -1; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .rcx-topo { grid-template-columns: 220px minmax(0, 1fr) 250px; }
+}
+@media (max-width: 1000px) {
+  .rcx-topo { grid-template-columns: 1fr 1fr; }
+  .rcx-topo .rcx-linhas { grid-column: 1 / -1; order: 3; }
 }
 @media (max-width: 760px) {
   .rcx-topo { grid-template-columns: 1fr; }
-  .rcx-topo .rcx-kpis { grid-template-columns: 1fr; }
 }
 .fc-stale {
   margin: 8px 16px 0;
@@ -9149,6 +9167,46 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .cc-table.ppcc-table .moura-switch { justify-content: center; vertical-align: middle; }
 .ppcc-rodape { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; font-size: 0.76rem; color: #64748b; }
 .ppcc-rodape .btn { height: 36px; min-width: 120px; }
+
+/* Vistoria (Verificar Construção) */
+.vc-page { padding: 14px 16px; }
+.vc-filtros { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.vc-filtros .cc-atualizar svg, .vc-wpp svg { width: 16px; height: 16px; }
+.vc-filtros .moura-switch { margin-left: 4px; }
+.vc-wpp { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 16px; font-weight: 700; white-space: nowrap; }
+.vc-wpp:disabled { opacity: 0.5; cursor: not-allowed; }
+.vc-loading { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 24px; color: #64748b; font-size: 0.85rem; }
+.vc-loading svg { width: 18px; height: 18px; }
+.vc-spin { animation: vcGira 0.9s linear infinite; }
+@keyframes vcGira { to { transform: rotate(360deg); } }
+.vc-scroll { max-height: calc(100vh - 300px); }
+.cc-table.vc-table { font-size: 0.78rem; }
+.cc-table.vc-table thead th { padding: 8px 8px; }
+.cc-table.vc-table thead th:first-child, .cc-table.vc-table td:first-child { padding-left: 4px; padding-right: 4px; }
+.cc-table.vc-table td { height: 32px; padding: 3px 8px; }
+.cc-table.vc-table input[type="checkbox"] { width: 15px; height: 15px; margin: 0; accent-color: #105436; vertical-align: middle; }
+.cc-table.vc-table tbody tr.vc-cidade, .cc-table.vc-table tbody tr.vc-cidade:hover { background: #105436; }
+.cc-table.vc-table tr.vc-cidade td { height: 30px; color: #fff; font-weight: 800; font-size: 0.74rem; letter-spacing: 0.05em; text-transform: uppercase; border-bottom: none; }
+.cc-table.vc-table tr.vc-cidade input[type="checkbox"] { accent-color: #86efac; }
+.cc-table.vc-table tbody tr.vc-emp, .cc-table.vc-table tbody tr.vc-emp:hover { background: #e7f6ee; }
+.cc-table.vc-table tr.vc-emp td { height: 30px; color: #105436; font-weight: 700; border-bottom: 1px solid #c6e6d2; }
+.vc-table tr.vc-cidade svg, .vc-table tr.vc-emp svg { width: 14px; height: 14px; vertical-align: -2px; margin-right: 4px; }
+.cc-table.vc-table tbody tr.vc-dispensa, .cc-table.vc-table tbody tr.vc-dispensa:hover { background: #fffbeb; }
+.cc-table.vc-table tr.vc-dispensa td { text-align: center; color: #92400e; font-style: italic; height: 38px; }
+.cc-table.vc-table td.vc-unidade { font-weight: 800; color: #0f172a; font-variant-numeric: tabular-nums; }
+.cc-table.vc-table td.vc-vazio { text-align: center; color: #94a3b8; padding: 26px; height: auto; }
+.vc-pill { display: inline-block; padding: 1px 9px; border-radius: 999px; font-weight: 700; font-size: 0.72rem; line-height: 1.5; }
+.vc-pill.is-neg { background: #fef2f2; color: #b91c1c; }
+.vc-pill.is-pos { background: #ecfdf3; color: #166534; }
+.vc-tag { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 4px; font-size: 0.66rem; font-weight: 700; letter-spacing: 0; text-transform: none; vertical-align: 1px; }
+.vc-tag.is-obra { background: #fef08a; color: #854d0e; }
+.vc-tag.is-sj { background: #fef3c7; color: #92400e; }
+.vc-data { font-weight: 600; color: #334155; }
+.vc-ha { color: #c2410c; font-size: 0.7rem; font-weight: 600; }
+.vc-nunca { color: #94a3b8; }
+.vc-validar { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 10px; border: none; border-radius: 6px; background: #105436; color: #fff; font-size: 0.72rem; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.vc-validar:hover { background: #0d4630; }
+.vc-validar svg { width: 13px; height: 13px; }
 
 /* Tipos de Documento */
 .ppcc-kpi-val.is-alerta { color: #c2410c; }

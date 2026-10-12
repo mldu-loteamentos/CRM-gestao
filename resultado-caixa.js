@@ -1263,6 +1263,51 @@ const ResultadoCaixaApp = {
     </div>`;
   },
 
+  /** Totais do ano em colunas empilhadas: a parte escura vai de janeiro até o mês escolhido e a clara segue até dezembro. */
+  graficoTotaisHtml() {
+    const s = this.serieEntradas();
+    const ano = this.anoAtual();
+    const antN = ano > 1900 ? ano - 1 : 0;
+    const sel = Number(this.mes) || 1;
+    const soma = (serie, de, ate) => serie.slice(de - 1, ate).reduce((t, v) => t + (Number(v) || 0), 0);
+    const colunas = [
+      { cls: "is-ant", rotulo: antN ? String(antN) : "Ano ant.", escuro: soma(s.ant, 1, sel), claro: soma(s.ant, sel + 1, 12) },
+      { cls: "is-orc", rotulo: "Orçado", escuro: soma(s.orc, 1, sel), claro: soma(s.orc, sel + 1, 12) },
+      { cls: "is-fc", rotulo: "Forecast", escuro: soma(s.real, 1, sel), claro: sel < 12 ? soma(s.forecast, sel + 1, 12) : 0, marca: sel < 12 && (!this.forecast || s.semForecast.length) }
+    ];
+    colunas.forEach((c) => {
+      c.escuro = Math.max(0, c.escuro);
+      c.claro = Math.max(0, c.claro);
+      c.total = c.escuro + c.claro;
+    });
+    const maior = Math.max(...colunas.map((c) => c.total), 1);
+    const pedaco = (valor, total, cls) => {
+      if (!(valor > 0)) return "";
+      const p = valor / total;
+      return `<div class="rcx-tot-seg ${cls}" style="flex:${p.toFixed(4)} 1 0"${p >= 0.14 ? "" : " data-curto"}><span>${this.fmt(valor)}</span></div>`;
+    };
+    const mesCurto = (this.MESES[sel - 1] || "").toLowerCase();
+    const proximo = sel < 12 ? (this.MESES[sel] || "").toLowerCase() : "";
+    let nota = sel < 12
+      ? `Escuro: jan a ${mesCurto} (realizado ${antN || "anterior"}, orçado e realizado ${ano || ""}). Claro: ${proximo} a dez (realizado ${antN || "anterior"}, orçado e previsão do forecast).`
+      : `Ano fechado em dezembro: as colunas mostram só o acumulado.`;
+    if (sel < 12 && !this.forecast) nota += " * Sem forecast: suba o relatório para preencher a parte clara.";
+    else if (sel < 12 && s.semForecast.length) nota += ` * O forecast não tem ${s.semForecast.map((m) => (this.MESES[m - 1] || "").toLowerCase()).join(", ")}: nesses meses entra o orçado.`;
+    return `<div class="rcx-graf rcx-tot">
+      <div class="rcx-graf-tit">TOTAIS/${ano || ""}</div>
+      <div class="rcx-graf-area rcx-tot-area">
+        ${colunas.map((c) => `<div class="rcx-graf-col ${c.cls}">
+          <span class="rcx-graf-val">${this.fmt(c.total)}${c.marca ? " *" : ""}</span>
+          <div class="rcx-tot-pilha" style="height:calc((100% - 22px) * ${(c.total / maior).toFixed(4)})" title="${caixaEsc(c.rotulo)}: ${this.fmt(c.escuro)} até ${mesCurto} + ${this.fmt(c.claro)} até dezembro">
+            ${pedaco(c.claro, c.total, "is-claro")}${pedaco(c.escuro, c.total, "is-escuro")}
+          </div>
+        </div>`).join("")}
+      </div>
+      <div class="rcx-graf-eixo">${colunas.map((c) => `<span>${caixaEsc(c.rotulo)}</span>`).join("")}</div>
+      <div class="rcx-tot-nota">${caixaEsc(nota)}</div>
+    </div>`;
+  },
+
   /** Séries mensais das entradas (12 meses): ano anterior, orçado, realizado até o mês e forecast dali em diante. */
   serieEntradas() {
     const ano = this.anoAtual();
@@ -1506,7 +1551,7 @@ const ResultadoCaixaApp = {
     const total = this.somaBloco(pack.rows, "mensal");
     const totalA = this.somaBloco(pack.rows, "acum");
     return faixa
-      + `<div class="rcx-topo">${this.graficoMesHtml(total)}${this.graficoLinhasHtml()}${this.resumoHtml(total, totalA, false)}</div>`
+      + `<div class="rcx-topo">${this.graficoMesHtml(total)}${this.graficoLinhasHtml()}${this.graficoTotaisHtml()}</div>`
       + this.gradeHtml("Produto", corpo, total, totalA, false);
   },
 

@@ -947,19 +947,16 @@ window.VerificarConstrucaoApp = {
 
         const thresholdDays = _vcGetThreshold();
 
+        const recurrenceDays = _vcGetRecurrenceDays();
         root.innerHTML = `
-            <div class="crm-card" style="padding: 14px 16px;">
-                <h3 style="font-size: 1.05rem; color: var(--color-primary); margin: 0 0 10px; display: flex; align-items: center; gap: 8px;">
-                    <i data-lucide="camera" style="width: 20px;"></i> Verificar Construção (Atraso >= ${thresholdDays} dias)
-                </h3>
-
-                <div style="margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: nowrap;">
-                    <div style="display: flex; gap: 10px; align-items: center;">
-                        <button class="btn btn-outline" style="border-color: #94a3b8; color: #475569;" onclick="window.VerificarConstrucaoApp.abrirModalObrasAndamento()">
-                            <i data-lucide="building" style="width: 16px;"></i> Obras em andamento
+            <div class="crm-card cc-page vc-page">
+                <div class="cc-toolbar ppcc-toolbar">
+                    <div class="vc-filtros">
+                        <button type="button" class="btn btn-outline cc-atualizar" onclick="window.VerificarConstrucaoApp.abrirModalObrasAndamento()">
+                            <i data-lucide="building-2"></i> Obras em andamento
                         </button>
-                        <button class="btn btn-outline" style="border-color: #0f766e; color: #0f766e;" onclick="window.openVistoriaRecurrenceModal()">
-                            <i data-lucide="refresh-cw" style="width: 16px;"></i> Recorrência de Vistoria
+                        <button type="button" class="btn btn-outline cc-atualizar" onclick="window.openVistoriaRecurrenceModal()">
+                            <i data-lucide="refresh-cw"></i> Recorrência de vistoria
                         </button>
                         <label class="moura-switch" id="vc-include-subjudice-label">
                             <input type="checkbox" id="vc-include-subjudice">
@@ -967,40 +964,46 @@ window.VerificarConstrucaoApp = {
                             <span class="moura-switch-text">Incluir Sub Judice</span>
                         </label>
                     </div>
-                    <div>
-                        <button onclick="window.VerificarConstrucaoApp.solicitarWhatsApp()" id="btn-solicitar-wpp" disabled style="padding:10px 24px; border:none; background:linear-gradient(135deg, #16a34a 0%, #15803d 100%); color:#fff; border-radius:8px; cursor:pointer; font-weight:bold; font-size:1rem; display:inline-flex; align-items:center; gap:8px; box-shadow:0 4px 12px rgba(22,163,74,0.4); opacity:0.5; transition:all 0.2s;" onmouseover="if(!this.disabled) { this.style.opacity='1'; this.style.transform='translateY(-1px)'; this.style.boxShadow='0 6px 16px rgba(22,163,74,0.5)'; }" onmouseout="if(!this.disabled) { this.style.opacity='1'; this.style.transform='none'; this.style.boxShadow='0 4px 12px rgba(22,163,74,0.4)'; } else { this.style.opacity='0.5'; this.style.transform='none'; this.style.boxShadow='0 4px 12px rgba(22,163,74,0.4)'; }">
-                            <i data-lucide="message-circle" style="width: 20px; height: 20px;"></i> Solicitar Vistoria (WhatsApp)
+                    <div class="cc-toolbar-actions">
+                        <button type="button" class="btn btn-primary vc-wpp" onclick="window.VerificarConstrucaoApp.solicitarWhatsApp()" id="btn-solicitar-wpp" disabled>
+                            <i data-lucide="message-circle"></i> Solicitar Vistoria (WhatsApp)
                         </button>
                     </div>
                 </div>
 
-                <div id="vc-loading" style="display: none; text-align: center; padding: 20px; color: #666;">
-                    Analisando fila de clientes...
+                <div class="ppcc-head">
+                    <div>
+                        <div class="ppcc-titulo">Clientes para vistoria</div>
+                        <div class="ppcc-sub">Atraso a partir de ${thresholdDays} dias. Quem foi vistoriado há menos de ${recurrenceDays} dias fica fora da lista.</div>
+                    </div>
+                    <div class="ppcc-kpis" id="vc-kpis"></div>
+                </div>
+
+                <div id="vc-loading" class="vc-loading" style="display: none;">
+                    <i data-lucide="loader-2" class="vc-spin"></i> Analisando fila de clientes...
                 </div>
 
                 <div id="vc-results" style="display: none;">
-                    <div style="max-height: calc(100vh - 196px); overflow: auto; border-radius: 8px; border: 1px solid #e2e8f0;">
-                        <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.8rem; table-layout: fixed; white-space: nowrap;" id="vc-table">
+                    <div class="cc-scroll vc-scroll">
+                        <table class="cc-table vc-table" id="vc-table">
                             <colgroup>
-                                <col style="width: 34px;">
-                                <col style="width: 8%;">
+                                <col style="width: 38px;">
+                                <col style="width: 72px;">
                                 <col>
-                                <col style="width: 68px;">
-                                <col style="width: 112px;">
-                                <col style="width: 168px;">
-                                <col style="width: 34%;">
+                                <col style="width: 64px;">
+                                <col style="width: 108px;">
+                                <col style="width: 150px;">
+                                <col style="width: 272px;">
                             </colgroup>
-                            <thead style="position: sticky; top: 0; background: linear-gradient(135deg, #2e6b3e 0%, #3d7a4a 100%); z-index: 10;">
+                            <thead>
                                 <tr>
-                                    <th style="padding: 7px 6px; text-align: center; color: rgba(255,255,255,0.8);">
-                                        <input type="checkbox" onchange="window.VerificarConstrucaoApp.toggleAll(this)">
-                                    </th>
-                                    <th style="padding: 7px 8px; color: #fff; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em;">UNIDADE</th>
-                                    <th style="padding: 7px 8px; color: #fff; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em;">CLIENTE</th>
-                                    <th style="padding: 7px 8px; color: #fff; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em;">TÍTULO</th>
-                                    <th style="padding: 7px 6px; color: #fff; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.02em; text-align: center;">PARC. VENCIDAS</th>
-                                    <th style="padding: 7px 8px; color: #fff; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.02em; text-align: left;">ÚLTIMA VISTORIA</th>
-                                    <th style="padding: 7px 8px; color: #fff; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em;">STATUS</th>
+                                    <th class="is-center"><input type="checkbox" onchange="window.VerificarConstrucaoApp.toggleAll(this)"></th>
+                                    <th>Unidade</th>
+                                    <th>Cliente</th>
+                                    <th>Título</th>
+                                    <th class="is-center">Parc. vencidas</th>
+                                    <th>Última vistoria</th>
+                                    <th>Status</th>
                                 </tr>
                             </thead>
                             <tbody id="vc-tbody"></tbody>
@@ -1650,9 +1653,11 @@ window.VerificarConstrucaoApp = {
         });
 
         this.renderedRows = filtered;
+        const obrasState = _vcReadObrasState();
+        this.renderKpis(filtered.filter(r => !_vcResolveObraEntry(obrasState, r.costCenterId, r.empreendimento).isOn));
 
         if (filtered.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="7" style="padding: 30px; text-align: center; color: #666;">Nenhum título encontrado com os filtros atuais.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7" class="vc-vazio">Nenhum título encontrado com os filtros atuais.</td></tr>`;
             return;
         }
 
@@ -1673,13 +1678,11 @@ window.VerificarConstrucaoApp = {
 
             // City Header Row
             html += `
-                <tr style="background: linear-gradient(135deg, #2e6b3e 0%, #3d7a4a 100%);">
-                    <td style="padding: 5px 6px; text-align: center;">
-                        <input type="checkbox" class="vc-city-cb" data-city="${safeCidade}" onchange="window.VerificarConstrucaoApp.toggleCity(this, '${safeCidade}')" style="accent-color: #86efac;">
+                <tr class="vc-cidade">
+                    <td class="is-center">
+                        <input type="checkbox" class="vc-city-cb" data-city="${safeCidade}" onchange="window.VerificarConstrucaoApp.toggleCity(this, '${safeCidade}')">
                     </td>
-                    <td colspan="6" style="padding: 5px 8px; font-weight: 700; font-size: 0.78rem; color: #fff; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap;">
-                        📍 ${cidade}
-                    </td>
+                    <td colspan="6"><i data-lucide="map-pin"></i> ${cidade}</td>
                 </tr>
             `;
 
@@ -1696,54 +1699,45 @@ window.VerificarConstrucaoApp = {
 
                 // Empreendimento Header Row
                 html += `
-                    <tr style="background: #eaf4ee; border-bottom: 1px solid #a7d4b4;">
-                        <td style="padding: 4px 6px; text-align: center;">
-                            <input type="checkbox" class="vc-emp-cb city-${safeCidade}" data-city="${safeCidade}" data-emp="${safeEmp}" onchange="window.VerificarConstrucaoApp.toggleEmp(this, '${safeCidade}', '${safeEmp}')" ${isObraAndamento ? 'disabled' : ''} style="accent-color: #3d7a4a;">
+                    <tr class="vc-emp">
+                        <td class="is-center">
+                            <input type="checkbox" class="vc-emp-cb city-${safeCidade}" data-city="${safeCidade}" data-emp="${safeEmp}" onchange="window.VerificarConstrucaoApp.toggleEmp(this, '${safeCidade}', '${safeEmp}')" ${isObraAndamento ? 'disabled' : ''}>
                         </td>
-                        <td colspan="6" style="padding: 4px 8px; font-weight: 700; color: #2e6b3e; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                            🏗️ ${empLabelDisplay}
-                            ${isObraAndamento ? '<span style="background:#fef08a; color:#854d0e; padding:1px 6px; border-radius:4px; font-size:0.68rem; margin-left:8px; font-weight:600;">⚠ Obra em Andamento</span>' : ''}
-                        </td>
+                        <td colspan="6"><i data-lucide="building-2"></i> ${empLabelDisplay}${isObraAndamento ? '<span class="vc-tag is-obra">Obra em andamento</span>' : ''}</td>
                     </tr>
                 `;
 
                 if (isObraAndamento) {
                     html += `
-                        <tr style="border-bottom: 1px solid #f1f5f9; background: #fffbeb;">
-                            <td colspan="7" style="padding: 12px 20px; text-align: center; color: #92400e; font-style: italic; font-size: 0.82rem;">
-                                Vistoria dispensada — obras do empreendimento em andamento.
-                            </td>
+                        <tr class="vc-dispensa">
+                            <td colspan="7">Vistoria dispensada — obras do empreendimento em andamento.</td>
                         </tr>
                     `;
                 } else {
                     const unidades = empData.items.sort((a, b) => a.unidade.localeCompare(b.unidade));
-                    unidades.forEach((u, uIdx) => {
-                        const rowBg = uIdx % 2 === 0 ? '#fff' : '#f9fafb';
+                    unidades.forEach((u) => {
                         const validAction = u.statusLabel === 'Aguardando Validação'
-                            ? `<button onclick="window.VerificarConstrucaoApp.validarVistoria(${u.currentIdx})" style="padding:3px 10px; font-size:0.75rem; border:none; background:linear-gradient(135deg, #2e6b3e 0%, #3d7a4a 100%); color:#fff; border-radius:6px; cursor:pointer; font-weight:600; white-space:nowrap;">Validar Vistoria</button>`
-                            : `<span style="${u.statusColor} white-space:nowrap;">${u.statusLabel}</span>${u.solicitadoHa ? ` <span style="color:#d97706; font-size:0.72rem; font-weight:600; white-space:nowrap;">${u.solicitadoHa}</span>` : ''}`;
+                            ? `<button type="button" class="vc-validar" onclick="window.VerificarConstrucaoApp.validarVistoria(${u.currentIdx})"><i data-lucide="check-circle-2"></i> Validar vistoria</button>`
+                            : `<span style="${u.statusColor}">${u.statusLabel}</span>${u.solicitadoHa ? ` <span class="vc-ha">${u.solicitadoHa}</span>` : ''}`;
 
-                        const valorFmt = u.valorVencido > 0
-                            ? u.valorVencido.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-                            : '-';
                         const parcelasDisplay = u.parcelasVencidas > 0
-                            ? `<span style="background:#fef2f2; color:#dc2626; padding:2px 8px; border-radius:12px; font-weight:700; font-size:0.78rem;">${u.parcelasVencidas}</span>`
-                            : '<span style="background:#ecfdf5; color:#166534; padding:2px 8px; border-radius:12px; font-weight:700; font-size:0.72rem;">Adimplente</span>';
+                            ? `<span class="vc-pill is-neg">${u.parcelasVencidas}</span>`
+                            : '<span class="vc-pill is-pos">Adimplente</span>';
                         const lastVistoriaHtml = u.lastCheckDateStr !== '-'
-                            ? `<span style="font-size:0.78rem; font-weight:600; color:#334155; white-space:nowrap;">${u.lastCheckDateStr}</span> <span style="color:#ea580c; font-size:0.7rem; font-weight:600; white-space:nowrap;">Há ${u.lastCheckDays}</span>`
-                            : '<span style="color:#94a3b8; font-weight:400; font-size:0.78rem; white-space:nowrap;">Nunca</span>';
+                            ? `<span class="vc-data">${u.lastCheckDateStr}</span> <span class="vc-ha">Há ${u.lastCheckDays}</span>`
+                            : '<span class="vc-nunca">Nunca</span>';
 
                         html += `
-                            <tr style="border-bottom: 1px solid #f1f5f9; background:${rowBg}; transition: background 0.15s;" onmouseover="this.style.background='#f0fdf4'" onmouseout="this.style.background='${rowBg}'">
-                                <td style="padding: 4px 6px; text-align: center;">
-                                    <input type="checkbox" class="vc-row-checkbox city-${safeCidade} emp-${safeEmp}" value="${u.currentIdx}" onchange="window.VerificarConstrucaoApp.updateBtn()" ${u.hasConstruction ? 'disabled' : ''} style="accent-color: #16a34a;">
+                            <tr class="vc-linha">
+                                <td class="is-center">
+                                    <input type="checkbox" class="vc-row-checkbox city-${safeCidade} emp-${safeEmp}" value="${u.currentIdx}" onchange="window.VerificarConstrucaoApp.updateBtn()" ${u.hasConstruction ? 'disabled' : ''}>
                                 </td>
-                                <td style="padding: 4px 8px; font-weight: 700; color: #1e293b; font-size: 0.8rem; white-space: nowrap;">${u.unidade}</td>
-                                <td style="padding: 4px 8px; color: #334155; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${String(u.clienteName || '').replace(/"/g, '&quot;')}">${u.clienteName}${_vcRowIsSubjudice(u) ? ' <span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:4px;font-size:0.68rem;font-weight:700;margin-left:4px;">Sub Judice</span>' : ''}</td>
-                                <td style="padding: 4px 8px; color: #475569; font-size: 0.78rem; white-space: nowrap;">${u.titulo}</td>
-                                <td style="padding: 4px 6px; text-align: center; white-space: nowrap;">${parcelasDisplay}</td>
-                                <td style="padding: 4px 8px; text-align: left; vertical-align: middle; white-space: nowrap;">${lastVistoriaHtml}</td>
-                                <td style="padding: 4px 8px; white-space: nowrap;">${validAction}</td>
+                                <td class="vc-unidade">${u.unidade}</td>
+                                <td title="${String(u.clienteName || '').replace(/"/g, '&quot;')}">${u.clienteName}${_vcRowIsSubjudice(u) ? '<span class="vc-tag is-sj">Sub Judice</span>' : ''}</td>
+                                <td>${u.titulo}</td>
+                                <td class="is-center">${parcelasDisplay}</td>
+                                <td>${lastVistoriaHtml}</td>
+                                <td>${validAction}</td>
                             </tr>
                         `;
                     });
@@ -1774,10 +1768,21 @@ window.VerificarConstrucaoApp = {
     updateBtn() {
         const cbs = document.querySelectorAll('.vc-row-checkbox:checked');
         const btn = document.getElementById('btn-solicitar-wpp');
-        if (btn) {
-            btn.disabled = cbs.length === 0;
-            btn.style.opacity = btn.disabled ? '0.5' : '1';
-        }
+        if (btn) btn.disabled = cbs.length === 0;
+        const sel = document.getElementById('vc-kpi-sel');
+        if (sel) sel.textContent = cbs.length.toLocaleString('pt-BR');
+    },
+
+    renderKpis(rows) {
+        const box = document.getElementById('vc-kpis');
+        if (!box) return;
+        const conta = (label) => rows.filter(r => r.statusLabel === label).length;
+        const kpi = (rot, val, cls, id) => `<div class="ppcc-kpi"><span class="ppcc-kpi-rot">${rot}</span><span class="ppcc-kpi-val${cls ? ' ' + cls : ''}"${id ? ` id="${id}"` : ''}>${Number(val).toLocaleString('pt-BR')}</span></div>`;
+        box.innerHTML = kpi('Unidades', rows.length)
+            + kpi('Pendentes de vistoria', conta('Pendente de Vistoria'), 'is-neg')
+            + kpi('Aguardando fotos', conta('Link Enviado – Aguardando Fotos'), 'is-alerta')
+            + kpi('Aguardando validação', conta('Aguardando Validação'))
+            + kpi('Selecionadas', document.querySelectorAll('.vc-row-checkbox:checked').length, 'is-pos', 'vc-kpi-sel');
     },
 
     abrirModalObrasAndamento() {

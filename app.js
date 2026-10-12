@@ -3292,7 +3292,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "construcao-engenharia": "shield-check",
     "construcao-compras": "clipboard-list",
     "construcao-marketing": "calendar",
-    "construcao-fiscal": "percent",
+    "construcao-fiscal": "landmark",
     "marketing-eventos": "calendar",
     "marketing-budget": "wallet",
     "marketing-config": "settings",
@@ -3318,7 +3318,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
   if (titleEl) {
     let finalTitle = titleOverride || titleMap[tabId] || 'CRM Moura Leite';
     let finalIcon = iconMap[tabId] || 'layout-dashboard';
-    if (tabId.startsWith('construcao-') && tabId !== 'construcao-marketing') {
+    if (tabId.startsWith('construcao-') && tabId !== 'construcao-marketing' && tabId !== 'construcao-fiscal') {
       finalIcon = 'hammer';
     }
     titleEl.innerHTML = `<i data-lucide="${finalIcon}"></i> ${finalTitle}`;

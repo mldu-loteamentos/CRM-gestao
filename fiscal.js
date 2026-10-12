@@ -494,19 +494,25 @@ const FiscalApp = {
     this.abrirAliquotas();
   },
 
+  competenciaDoCampo() {
+    const el = document.getElementById("fim-comp");
+    const m = /^(\d{4})-(\d{2})$/.exec(String((el && el.value) || ""));
+    return m
+      ? { month: parseInt(m[2], 10), year: parseInt(m[1], 10) }
+      : { month: FiscalState.month, year: FiscalState.year };
+  },
+
   calcular() {
-    const m = document.getElementById("fim-month");
-    const y = document.getElementById("fim-year");
-    if (m) FiscalState.month = parseInt(m.value, 10) || FiscalState.month;
-    if (y) FiscalState.year = parseInt(y.value, 10) || FiscalState.year;
+    const c = this.competenciaDoCampo();
+    FiscalState.month = c.month;
+    FiscalState.year = c.year;
     this.loadData();
   },
 
   setCompetencia() {
-    const m = document.getElementById("fim-month");
-    const y = document.getElementById("fim-year");
-    const nm = m ? (parseInt(m.value, 10) || FiscalState.month) : FiscalState.month;
-    const ny = y ? (parseInt(y.value, 10) || FiscalState.year) : FiscalState.year;
+    const c = this.competenciaDoCampo();
+    const nm = c.month;
+    const ny = c.year;
     if (nm === FiscalState.month && ny === FiscalState.year) return;
     FiscalState.month = nm;
     FiscalState.year = ny;
@@ -531,6 +537,28 @@ const FiscalApp = {
       .fim-mes { display: flex; align-items: center; gap: 6px; height: 38px; padding: 0 10px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; }
       .fim-mes select { border: 0; background: transparent; font-weight: 650; color: #0f172a; }
       .fim-tabs { margin-bottom: 14px; }
+      .fim-toolbar { align-items: flex-end; }
+      .fim-btn, .fim-btn-excel { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px; font-weight: 600; white-space: nowrap; }
+      .fim-btn svg { width: 15px; height: 15px; }
+      .fim-btn:disabled, .fim-btn-excel:disabled { opacity: 0.5; cursor: not-allowed; }
+      .fim-topo .ppcc-sub { max-width: 640px; line-height: 1.45; }
+      .fim-topo .ppcc-kpi { min-width: 160px; }
+      .fim-rac-scroll { max-height: none; margin-top: 10px; }
+      .cc-table.fim-rac-table { font-size: 0.8rem; }
+      .cc-table.fim-rac-table col.fim-c-val { width: 180px; }
+      .cc-table.fim-rac-table col.fim-c-papel { width: 160px; }
+      .cc-table.fim-rac-table thead th { position: static; padding: 8px 12px; }
+      .cc-table.fim-rac-table td { height: 34px; padding: 4px 12px; white-space: normal; }
+      .cc-table.fim-rac-table td.is-right { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+      .cc-table.fim-rac-table td.is-neg { color: #b91c1c; }
+      .cc-table.fim-rac-table tr.is-fora td { color: #94a3b8; }
+      .cc-table.fim-rac-table tbody tr.is-base,
+      .cc-table.fim-rac-table tbody tr.is-base:hover { background: #e8f5ee; }
+      .cc-table.fim-rac-table tr.is-base td { font-weight: 800; color: #105436; border-top: 1px solid #cfe8da; }
+      .cc-table.fim-rac-table tbody tr.is-imposto,
+      .cc-table.fim-rac-table tbody tr.is-imposto:hover { background: #105436; }
+      .cc-table.fim-rac-table tr.is-imposto td { font-weight: 800; color: #fff; }
+      .fim-cod { color: #105436; font-weight: 800; margin-right: 4px; }
       .fim-racional { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
       .fim-racional h3 { margin: 0 0 8px; font-size: 0.92rem; color: #105436; }
       .fim-form { display: grid; grid-template-columns: 220px 1fr auto; gap: 4px 12px; font-size: 0.84rem; margin: 8px 0 0; }
@@ -551,11 +579,13 @@ const FiscalApp = {
       .fim-num { text-align: left; font-variant-numeric: tabular-nums; white-space: nowrap; }
       .fim-grid th.fim-num, .fim-grid td.fim-num { text-align: left; }
       .fim-head, .fim-linha { display: grid; gap: 8px; align-items: center; text-align: left; }
-      .fim-head { background: #105436; color: #fff; padding: 8px 12px; font-size: 0.68rem; font-weight: 700; }
+      .fim-head { background: #1b8253; color: #fff; padding: 8px 12px; font-size: 0.72rem; font-weight: 700; }
       .fim-emp { border-bottom: 1px solid #e2e8f0; }
       .fim-linha { padding: 8px 12px; }
       .fim-linha:hover { background: #e7f6ee; }
-      .fim-head:hover { background: #105436; }
+      .fim-head:hover { background: #1b8253; }
+      .fim-emp:nth-child(odd) > .fim-linha { background: #f7faf8; }
+      .fim-emp > .fim-linha:hover { background: #e7f6ee; }
       .fim-grid tbody tr:hover td { background: #e7f6ee; }
       .fim-abre { display: flex; align-items: center; gap: 6px; border: 0; background: transparent; padding: 0; cursor: pointer; text-align: left; color: inherit; font: inherit; min-width: 0; }
       .fim-abre b, .fim-abre span { min-width: 0; }
@@ -609,10 +639,9 @@ const FiscalApp = {
   },
 
   corpo(p) {
-    const months = this.MESES.map((nome, i) => `<option value="${i + 1}" ${FiscalState.month === i + 1 ? "selected" : ""}>${nome.charAt(0).toUpperCase() + nome.slice(1)}</option>`).join("");
+    const comp = `${FiscalState.year}-${String(FiscalState.month).padStart(2, "0")}`;
     const ano = new Date().getFullYear();
-    let anos = "";
-    for (let y = 2024; y <= ano + 1; y++) anos += `<option value="${y}" ${FiscalState.year === y ? "selected" : ""}>${y}</option>`;
+    const nomeMes = this.MESES[FiscalState.month - 1] || "";
     const tabs = [
       { id: "pis", label: "PIS", icon: "percent" },
       { id: "cofins", label: "COFINS", icon: "coins" },
@@ -621,20 +650,34 @@ const FiscalApp = {
     ];
     const abas = tabs.map((t) => `<button type="button" role="tab" aria-selected="${p.aba === t.id}" class="ml-tab ${p.aba === t.id ? "is-active" : ""}" onclick="FiscalApp.setAba('${t.id}')"><i data-lucide="${t.icon}"></i> ${t.label}</button>`).join("");
     return `
-      <p class="fim-lead">Lucro presumido do loteamento. A base é a do DFC: contas marcadas no plano, menos as redutoras da visão.</p>
-      <div class="fim-tools">
-        <div class="fim-mes"><i data-lucide="calendar" style="width:16px;height:16px;color:#64748b;"></i>
-          <select id="fim-month" onchange="FiscalApp.setCompetencia()">${months}</select><span>/</span><select id="fim-year" onchange="FiscalApp.setCompetencia()">${anos}</select>
+      <div class="cc-toolbar fim-toolbar">
+        <div class="cc-filters">
+          <div class="ml-comp-slot">
+            <label class="ml-comp-label" for="fim-comp">Competência</label>
+            <input type="month" id="fim-comp" class="ml-comp-input" value="${comp}" min="2024-01" max="${ano + 1}-12" onchange="FiscalApp.setCompetencia()">
+          </div>
         </div>
-        <button type="button" class="btn btn-outline" style="height:38px;" onclick="FiscalApp.abrirAliquotas()"><i data-lucide="sliders-horizontal"></i> Alíquotas</button>
-        <button type="button" class="btn btn-outline" style="height:38px;" onclick="switchTab('plano-financeiro')"><i data-lucide="settings-2"></i> Contas do plano</button>
-        <button type="button" class="btn btn-primary" style="height:38px;" onclick="FiscalApp.calcular()"><i data-lucide="search"></i> Calcular</button>
-        <button type="button" class="btn btn-outline" style="height:38px;" onclick="FiscalApp.gerarPdf()"><i data-lucide="download"></i> Resumo em PDF</button>
+        <div class="cc-toolbar-actions">
+          <button type="button" class="btn btn-outline fim-btn" onclick="FiscalApp.abrirAliquotas()"><i data-lucide="sliders-horizontal"></i> Alíquotas</button>
+          <button type="button" class="btn btn-outline fim-btn" onclick="switchTab('plano-financeiro')"><i data-lucide="list-tree"></i> Contas do plano</button>
+          <button type="button" class="btn btn-outline fim-btn" onclick="FiscalApp.gerarPdf()" ${FiscalState.consultou ? "" : "disabled"}><i data-lucide="file-down"></i> Resumo em PDF</button>
+          <button type="button" class="btn btn-excel fim-btn-excel" onclick="FiscalApp.exportarExcel()" ${FiscalState.consultou ? "" : "disabled"} title="Exportar a memória de cálculo para Excel">
+            <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
+          </button>
+          <button type="button" class="btn btn-primary fim-btn" onclick="FiscalApp.calcular()"><i data-lucide="calculator"></i> Calcular</button>
+        </div>
+      </div>
+      <div class="ppcc-head fim-topo">
+        <div>
+          <div class="ppcc-titulo">Lucro presumido do loteamento</div>
+          <div class="ppcc-sub">A base é a do DFC: contas marcadas no plano, menos as redutoras da visão. Competência ${this.esc(nomeMes)} de ${FiscalState.year}.</div>
+        </div>
+        ${FiscalState.consultou ? `<div class="ppcc-kpis">${this.cards(p)}</div>` : ""}
       </div>
       ${FiscalState.erro ? `<div class="fim-erro">${this.esc(FiscalState.erro)}</div>` : ""}
       ${FiscalState.aviso ? `<div class="fim-aviso">${this.esc(FiscalState.aviso)}</div>` : ""}
       <div class="ml-tabs fim-tabs" role="tablist">${abas}</div>
-      ${FiscalState.consultou ? `${this.racional(p)}${this.cards(p)}${this.tabela(p)}` : `<div class="fim-racional"><p class="fim-muted" style="margin:0;">Escolha o mês e o ano da competência e clique em Calcular.</p></div>`}`;
+      ${FiscalState.consultou ? `${this.racional(p)}${this.tabela(p)}` : `<div class="fim-racional"><p class="fim-muted" style="margin:0;">Escolha a competência e clique em Calcular.</p></div>`}`;
   },
 
   racional(p) {
@@ -647,41 +690,54 @@ const FiscalApp = {
       s.pis += c.pis; s.cofins += c.cofins; s.ir += c.ir; s.adicional += c.adicional; s.csll += c.csll;
       return s;
     }, { vendas: 0, servicos: 0, financeiras: 0, bv: 0, bs: 0, bf: 0, rv: 0, rs: 0, rf: 0, basePis: 0, lucroIrpj: 0, lucroCsll: 0, pis: 0, cofins: 0, ir: 0, adicional: 0, csll: 0 });
-    const linha = (nome, valor) => `<span>${nome}</span><b class="fim-num">${this.money(valor)}</b><span></span>`;
-    let formula = "";
+    const linhas = [];
+    const linha = (nome, valor, tipo) => linhas.push({ nome, valor, tipo: tipo || "" });
     if (p.aba === "pis" || p.aba === "cofins") {
       const aliq = p.aba === "pis" ? a.pis : a.cofins;
       const imposto = p.aba === "pis" ? t.pis : t.cofins;
-      formula = `
-        ${linha("Vendas de lote (contas de base)", t.bv)}
-        ${linha("Redutoras de vendas", t.rv)}
-        ${linha("Serviços (contas de base)", t.bs)}
-        ${linha("Redutoras de serviços", t.rs)}
-        ${linha(a.financNoPis ? "Aplicações financeiras" : "Aplicações (fora do PIS e da COFINS)", t.financeiras)}
-        <span>Base do ${p.aba === "pis" ? "PIS" : "COFINS"}</span><b class="fim-num">${this.money(t.basePis)}</b><span></span>
-        <span>× ${this.pct(aliq)}</span><b class="fim-num">${this.money(imposto)}</b><span></span>`;
+      linha("Vendas de lote (contas de base)", t.bv);
+      linha("Redutoras de vendas", t.rv, "redutora");
+      linha("Serviços (contas de base)", t.bs);
+      linha("Redutoras de serviços", t.rs, "redutora");
+      linha(a.financNoPis ? "Aplicações financeiras" : "Aplicações (fora do PIS e da COFINS)", t.financeiras, a.financNoPis ? "" : "fora");
+      linha(`Base do ${p.aba === "pis" ? "PIS" : "COFINS"}`, t.basePis, "base");
+      linha(`${p.aba === "pis" ? "PIS" : "COFINS"} (× ${this.pct(aliq)})`, imposto, "imposto");
     } else if (p.aba === "irpj") {
-      formula = `
-        ${linha(`Vendas de lote × ${this.pct(a.vendasIrpj)}`, t.vendas * a.vendasIrpj / 100)}
-        ${linha(`Serviços × ${this.pct(a.servicosIrpj)}`, t.servicos * a.servicosIrpj / 100)}
-        ${linha(`Aplicações × ${this.pct(a.financIrpj)}`, t.financeiras * a.financIrpj / 100)}
-        <span>Lucro presumido</span><b class="fim-num">${this.money(t.lucroIrpj)}</b><span></span>
-        <span>× ${this.pct(a.irpj)}</span><b class="fim-num">${this.money(t.ir)}</b><span></span>
-        <span>Adicional ${this.pct(a.adicional)} acima de ${this.money(a.limiteMensal * (p.apuracao ? 3 : 1))}</span><b class="fim-num">${this.money(t.adicional)}</b><span></span>`;
+      linha(`Vendas de lote × ${this.pct(a.vendasIrpj)}`, t.vendas * a.vendasIrpj / 100);
+      linha(`Serviços × ${this.pct(a.servicosIrpj)}`, t.servicos * a.servicosIrpj / 100);
+      linha(`Aplicações × ${this.pct(a.financIrpj)}`, t.financeiras * a.financIrpj / 100);
+      linha("Lucro presumido", t.lucroIrpj, "base");
+      linha(`IRPJ (× ${this.pct(a.irpj)})`, t.ir, "imposto");
+      linha(`Adicional ${this.pct(a.adicional)} acima de ${this.money(a.limiteMensal * (p.apuracao ? 3 : 1))}`, t.adicional, "imposto");
     } else {
-      formula = `
-        ${linha(`Vendas de lote × ${this.pct(a.vendasCsll)}`, t.vendas * a.vendasCsll / 100)}
-        ${linha(`Serviços × ${this.pct(a.servicosCsll)}`, t.servicos * a.servicosCsll / 100)}
-        ${linha(`Aplicações × ${this.pct(a.financCsll)}`, t.financeiras * a.financCsll / 100)}
-        <span>Base da CSLL</span><b class="fim-num">${this.money(t.lucroCsll)}</b><span></span>
-        <span>× ${this.pct(a.csll)}</span><b class="fim-num">${this.money(t.csll)}</b><span></span>`;
+      linha(`Vendas de lote × ${this.pct(a.vendasCsll)}`, t.vendas * a.vendasCsll / 100);
+      linha(`Serviços × ${this.pct(a.servicosCsll)}`, t.servicos * a.servicosCsll / 100);
+      linha(`Aplicações × ${this.pct(a.financCsll)}`, t.financeiras * a.financCsll / 100);
+      linha("Base da CSLL", t.lucroCsll, "base");
+      linha(`CSLL (× ${this.pct(a.csll)})`, t.csll, "imposto");
     }
     const texto = this.textoRacional(p, a);
+    const formula = `
+      <div class="cc-scroll fim-rac-scroll">
+        <table class="cc-table fim-rac-table">
+          <colgroup><col><col class="fim-c-val"></colgroup>
+          <thead><tr><th>Composição</th><th class="is-right">Valor</th></tr></thead>
+          <tbody>
+            ${linhas.map((l) => `<tr class="${l.tipo ? "is-" + l.tipo : ""}"><td>${this.esc(l.nome)}</td><td class="is-right${l.valor < 0 ? " is-neg" : ""}">${this.money(l.valor)}</td></tr>`).join("")}
+          </tbody>
+        </table>
+      </div>`;
     const contas = p.contas.length ? `<details class="fim-contas"><summary>Contas que formaram a base (${p.contas.length})</summary>
-      <table class="fim-grid" style="margin-top:8px;"><thead><tr><th>Conta</th><th>Papel</th><th class="fim-num">Valor no DFC</th></tr></thead><tbody>
-      ${p.contas.map((c) => `<tr><td>${this.esc(c.id)} ${this.esc(c.name)}</td><td>${c.papel === "redutora" ? "Redutora" : this.esc(this.nomeBase(c.bucket))}</td><td class="fim-num">${this.money(c.valor)}</td></tr>`).join("")}
-      </tbody></table></details>` : "";
-    return `<div class="fim-racional"><h3>Racional · ${this.esc(p.periodo)}</h3><p class="fim-muted">${texto}</p><div class="fim-form">${formula}</div>${contas}</div>`;
+      <div class="cc-scroll fim-rac-scroll">
+        <table class="cc-table fim-rac-table">
+          <colgroup><col><col class="fim-c-papel"><col class="fim-c-val"></colgroup>
+          <thead><tr><th>Conta</th><th>Papel</th><th class="is-right">Valor no DFC</th></tr></thead>
+          <tbody>
+            ${p.contas.map((c) => `<tr class="${c.papel === "redutora" ? "is-redutora" : ""}"><td><b class="fim-cod">${this.esc(c.id)}</b> ${this.esc(c.name)}</td><td>${c.papel === "redutora" ? "Redutora" : this.esc(this.nomeBase(c.bucket))}</td><td class="is-right${c.valor < 0 ? " is-neg" : ""}">${this.money(c.valor)}</td></tr>`).join("")}
+          </tbody>
+        </table>
+      </div></details>` : "";
+    return `<div class="fim-racional"><h3>Racional · ${this.esc(p.periodo)}</h3><p class="fim-muted">${texto}</p>${formula}${contas}</div>`;
   },
 
   nomeBase(bucket) {
@@ -719,14 +775,10 @@ const FiscalApp = {
     const nomeImp = p.modo === "provisao"
       ? "Provisão do mês"
       : (p.aba === "irpj" ? "IRPJ a recolher" : (p.modo === "apuracao" ? `${p.aba.toUpperCase()} a recolher` : p.aba.toUpperCase()));
-    const terceiro = p.aba === "irpj"
-      ? `<div class="fim-card"><span>Adicional</span><strong>${this.money(t.adi)}</strong></div>`
-      : `<div class="fim-card"><span>Empresas</span><strong>${p.empresas.length}</strong></div>`;
-    return `<div class="fim-cards">
-      <div class="fim-card"><span>${nomeBase}</span><strong>${this.money(t.base)}</strong></div>
-      <div class="fim-card"><span>${nomeImp}</span><strong>${this.money(t.imp)}</strong></div>
-      ${terceiro}
-    </div>`;
+    const kpi = (rot, val, cls) => `<div class="ppcc-kpi"><span class="ppcc-kpi-rot">${rot}</span><span class="ppcc-kpi-val${cls ? " " + cls : ""}">${val}</span></div>`;
+    return kpi(nomeBase, this.money(t.base)) +
+      kpi(nomeImp, this.money(t.imp), "is-pos") +
+      (p.aba === "irpj" ? kpi("Adicional", this.money(t.adi)) : kpi("Empresas", p.empresas.length));
   },
 
   valorAba(item, aba) {
@@ -996,6 +1048,372 @@ const FiscalApp = {
     }
   },
 
+  /** Por empresa: os números do PIS/COFINS (mês) e do IRPJ/CSLL (provisão ou trimestre), já fechados com as alíquotas. */
+  memoria() {
+    const pis = this.pacote("pis");
+    const ir = this.pacote("irpj");
+    const cs = this.pacote("csll");
+    const ids = [];
+    const nomes = {};
+    [pis, ir, cs].forEach((p) => p.empresas.forEach((c) => {
+      if (!nomes[c.id]) { nomes[c.id] = c.name; ids.push(c.id); }
+    }));
+    ids.sort((a, b) => Number(a) - Number(b));
+    const pegar = (p, id) => p.empresas.find((e) => Number(e.id) === Number(id))
+      || this.fechar(this.empresaVazia(id, nomes[id]), p.ali, p.aba, p.apuracao);
+    return {
+      ali: pis.ali,
+      pis, ir, cs,
+      comp: `${this.MESES[FiscalState.month - 1]} de ${FiscalState.year}`,
+      empresas: ids.map((id) => ({ id, nome: nomes[id] || "", pis: pegar(pis, id), ir: pegar(ir, id), cs: pegar(cs, id) }))
+    };
+  },
+
+  textoAliquotas(a) {
+    return `PIS ${this.pct(a.pis)} · COFINS ${this.pct(a.cofins)} · IRPJ ${this.pct(a.irpj)} + adicional ${this.pct(a.adicional)} acima de ${this.money(a.limiteMensal)} por mês · CSLL ${this.pct(a.csll)}. ` +
+      `Presunção IRPJ: vendas ${this.pct(a.vendasIrpj)}, serviços ${this.pct(a.servicosIrpj)}, aplicações ${this.pct(a.financIrpj)}. ` +
+      `Presunção CSLL: vendas ${this.pct(a.vendasCsll)}, serviços ${this.pct(a.servicosCsll)}, aplicações ${this.pct(a.financCsll)}.`;
+  },
+
+  pdfMemoria(pdf, m) {
+    const a = m.ali;
+    const soma = (lista, f) => lista.reduce((s, x) => s + (Number(f(x)) || 0), 0);
+    const tabela = (titulo, sub, head, linhas, total) => {
+      pdf.addPage();
+      pdf.setFontSize(12);
+      pdf.text(titulo, 10, 13);
+      pdf.setFontSize(8);
+      pdf.text(sub, 10, 18, { maxWidth: 277 });
+      pdf.autoTable({
+        head: [head],
+        body: linhas.concat([total]),
+        startY: 23,
+        margin: { left: 8, right: 8 },
+        styles: { fontSize: 6.5, halign: "right", cellPadding: 1.2 },
+        columnStyles: { 0: { halign: "left", cellWidth: 52 } },
+        headStyles: { fillColor: [16, 84, 54], halign: "center", valign: "middle" },
+        didParseCell: (hook) => {
+          if (hook.section === "body" && hook.row.index === linhas.length) hook.cell.styles.fontStyle = "bold";
+        }
+      });
+    };
+    const nome = (e) => `${e.id} ${e.nome}`;
+    const mo = (v) => this.money(v);
+    const fin = (c) => (c.bruto.financeiras || 0) + (c.red.financeiras || 0);
+
+    const lp = m.empresas.map((e) => e.pis);
+    tabela(
+      `PIS e COFINS · ${m.pis.periodo}`,
+      `Base = vendas de lote + serviços, já descontadas as deduções (redutoras do DFC)${a.financNoPis ? " + aplicações financeiras" : ". As aplicações financeiras ficam fora da base"}. PIS ${this.pct(a.pis)} e COFINS ${this.pct(a.cofins)} sobre a base.`,
+      ["Empresa", "Vendas de lote", "(-) Deduções vendas", "Serviços", "(-) Deduções serviços", a.financNoPis ? "Aplicações" : "Aplicações (fora)", "Base", `PIS ${this.pct(a.pis)}`, `COFINS ${this.pct(a.cofins)}`],
+      m.empresas.map((e) => {
+        const c = e.pis;
+        return [nome(e), mo(c.bruto.vendas), mo(c.red.vendas), mo(c.bruto.servicos), mo(c.red.servicos), mo(fin(c)), mo(c.basePis), mo(c.pis), mo(c.cofins)];
+      }),
+      ["Total", mo(soma(lp, (c) => c.bruto.vendas)), mo(soma(lp, (c) => c.red.vendas)), mo(soma(lp, (c) => c.bruto.servicos)), mo(soma(lp, (c) => c.red.servicos)), mo(soma(lp, fin)), mo(soma(lp, (c) => c.basePis)), mo(soma(lp, (c) => c.pis)), mo(soma(lp, (c) => c.cofins))]
+    );
+
+    const blocoLucro = (qual) => {
+      const ehIr = qual === "irpj";
+      const p = ehIr ? m.ir : m.cs;
+      const lista = m.empresas.map((e) => (ehIr ? e.ir : e.cs));
+      const pv = ehIr ? a.vendasIrpj : a.vendasCsll;
+      const ps = ehIr ? a.servicosIrpj : a.servicosCsll;
+      const pf = ehIr ? a.financIrpj : a.financCsll;
+      const bruto = (c) => (c.bruto.vendas || 0) + (c.bruto.servicos || 0) + (c.bruto.financeiras || 0);
+      const deducoes = (c) => (c.red.vendas || 0) + (c.red.servicos || 0) + (c.red.financeiras || 0);
+      const base = (c) => (ehIr ? c.lucroIrpj : c.lucroCsll);
+      const limite = lista.length ? lista[0].limite : a.limiteMensal;
+      const head = ["Empresa", "Receita bruta", "(-) Deduções", "Vendas líquidas", `× ${this.pct(pv)}`, "Serviços líquidos", `× ${this.pct(ps)}`, "Aplicações", `× ${this.pct(pf)}`, ehIr ? "Lucro presumido" : "Base da CSLL"];
+      if (ehIr) head.push(`IRPJ ${this.pct(a.irpj)}`, `Adicional ${this.pct(a.adicional)}`, "IRPJ a recolher");
+      else head.push(`CSLL ${this.pct(a.csll)}`);
+      const linhaDe = (rot, c) => {
+        const l = [rot, mo(bruto(c)), mo(deducoes(c)), mo(c.vendas), mo(c.vendas * pv / 100), mo(c.servicos), mo(c.servicos * ps / 100), mo(c.financeiras), mo(c.financeiras * pf / 100), mo(base(c))];
+        if (ehIr) l.push(mo(c.ir), mo(c.adicional), mo(c.irpj));
+        else l.push(mo(c.csll));
+        return l;
+      };
+      const tot = ["Total", mo(soma(lista, bruto)), mo(soma(lista, deducoes)), mo(soma(lista, (c) => c.vendas)), mo(soma(lista, (c) => c.vendas * pv / 100)), mo(soma(lista, (c) => c.servicos)), mo(soma(lista, (c) => c.servicos * ps / 100)), mo(soma(lista, (c) => c.financeiras)), mo(soma(lista, (c) => c.financeiras * pf / 100)), mo(soma(lista, base))];
+      if (ehIr) tot.push(mo(soma(lista, (c) => c.ir)), mo(soma(lista, (c) => c.adicional)), mo(soma(lista, (c) => c.irpj)));
+      else tot.push(mo(soma(lista, (c) => c.csll)));
+      tabela(
+        `${ehIr ? "IRPJ" : "CSLL"} · ${p.periodo}`,
+        ehIr
+          ? `Lucro presumido = vendas líquidas × ${this.pct(pv)} + serviços líquidos × ${this.pct(ps)} + aplicações × ${this.pct(pf)}. IRPJ ${this.pct(a.irpj)} sobre o lucro presumido. Adicional ${this.pct(a.adicional)} sobre o que passar de ${mo(limite)} por empresa.`
+          : `Base da CSLL = vendas líquidas × ${this.pct(pv)} + serviços líquidos × ${this.pct(ps)} + aplicações × ${this.pct(pf)}. CSLL ${this.pct(a.csll)} sobre a base.`,
+        head,
+        m.empresas.map((e) => linhaDe(nome(e), ehIr ? e.ir : e.cs)),
+        tot
+      );
+    };
+    blocoLucro("irpj");
+    blocoLucro("csll");
+  },
+
+  /* ---------- Excel (formato Aplicações e Investimentos) ---------- */
+  async exportarExcel() {
+    if (!FiscalState.consultou || FiscalState.loading) {
+      alert("Calcule a competência antes de exportar.");
+      return;
+    }
+    const Inv = window.InvestimentoApp;
+    let ExcelJS = window.ExcelJS;
+    try {
+      if (!ExcelJS && Inv && typeof Inv.ensureExcelJS === "function") ExcelJS = await Inv.ensureExcelJS();
+    } catch (e) { ExcelJS = null; }
+    if (!ExcelJS) {
+      alert("Não foi possível carregar a biblioteca de Excel. Recarregue a página.");
+      return;
+    }
+    const m = this.memoria();
+    if (!m.empresas.length) {
+      alert("Nenhuma empresa com base nesta competência.");
+      return;
+    }
+    const a = m.ali;
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "CRM Moura Leite";
+    wb.created = new Date();
+    let imgId = null;
+    try {
+      if (Inv && typeof Inv.logoDataUrl === "function") {
+        const logo = await Inv.logoDataUrl();
+        imgId = wb.addImage({ base64: logo.dataUrl, extension: logo.extension || "png" });
+      }
+    } catch (e) { imgId = null; }
+
+    const fill = (argb) => ({ type: "pattern", pattern: "solid", fgColor: { argb } });
+    const lado = { style: "thin", color: { argb: "FFE2E8F0" } };
+    const borda = { top: lado, bottom: lado, left: lado, right: lado };
+    const MONEY = "#,##0.00";
+    const PCT = "0.00%";
+    const geradoEm = (() => {
+      const d = new Date();
+      const p2 = (n) => String(n).padStart(2, "0");
+      return `Relatório gerado em ${p2(d.getDate())}/${p2(d.getMonth() + 1)}/${d.getFullYear()} às ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
+    })();
+    const corValor = (v) => (Math.abs(Number(v) || 0) < 0.005 ? "FF94A3B8" : (Number(v) < 0 ? "FFB91C1C" : "FF0F172A"));
+
+    const cabecalho = (ws, titulo, subtitulo, kpis) => {
+      ws.properties.showGridLines = false;
+      ws.views = [{ state: "frozen", xSplit: 1, ySplit: 4, topLeftCell: "B5", activeCell: "B5", showGridLines: false }];
+      ws.mergeCells("A1:A2");
+      ws.getRow(1).height = 28;
+      ws.getRow(2).height = 22;
+      const t = ws.getCell("A1");
+      t.value = {
+        richText: [
+          { font: { name: "Calibri", size: 14, bold: true, color: { argb: "FF475569" } }, text: titulo + "\n" },
+          { font: { name: "Calibri", size: 9, color: { argb: "FF64748B" } }, text: subtitulo }
+        ]
+      };
+      t.alignment = { vertical: "middle", horizontal: "left", wrapText: true, indent: 8 };
+      if (imgId != null) {
+        const px = Math.round(1.54 * 96 / 2.54);
+        try { ws.addImage(imgId, { tl: { col: 0.04, row: 0.08 }, ext: { width: px, height: px } }); } catch (e) {}
+      }
+      kpis.forEach((k, i) => {
+        const l = ws.getRow(1).getCell(4 + i);
+        const v = ws.getRow(2).getCell(4 + i);
+        l.value = k.rotulo;
+        l.font = { name: "Calibri", size: 8, bold: true, color: { argb: "FF94A3B8" } };
+        l.alignment = { horizontal: "right", vertical: "bottom" };
+        v.value = k.valor;
+        v.font = { name: "Calibri", size: 12, bold: true, color: { argb: k.cor || "FF0F172A" } };
+        v.alignment = { horizontal: "right", vertical: "middle" };
+        v.numFmt = MONEY;
+      });
+      ws.getRow(3).height = 8;
+    };
+    const cabecalhoTabela = (ws, titulos) => {
+      const row = ws.getRow(4);
+      row.height = 20;
+      titulos.forEach((h, i) => {
+        const c = row.getCell(i + 1);
+        c.value = h;
+        c.fill = fill("FF334155");
+        c.font = { name: "Calibri", size: 9, bold: true, color: { argb: "FFFFFFFF" } };
+        c.alignment = { horizontal: i === 0 ? "left" : "right", vertical: "middle" };
+        c.border = borda;
+      });
+    };
+    const rodape = (ws, linha, ultimaCol) => {
+      const c = ws.getRow(linha + 1).getCell(1);
+      c.value = geradoEm;
+      c.font = { name: "Calibri", size: 8, italic: true, color: { argb: "FF64748B" } };
+      ws.mergeCells(linha + 1, 1, linha + 1, ultimaCol);
+    };
+    const nomeAba = (() => {
+      const usados = new Set(["resumo"]);
+      return (id, nome) => {
+        let base = `${id}-${String(nome || "EMPRESA").replace(/[:\\/?*\[\]]/g, " ").replace(/\s+/g, " ").trim()}`.slice(0, 31);
+        let n = base;
+        let i = 2;
+        while (usados.has(n.toLowerCase())) {
+          const suf = `-${i++}`;
+          n = base.slice(0, 31 - suf.length) + suf;
+        }
+        usados.add(n.toLowerCase());
+        return n;
+      };
+    })();
+    const ref = (aba, cel) => `'${aba.replace(/'/g, "''")}'!${cel}`;
+
+    const resumo = wb.addWorksheet("Resumo", { properties: { showGridLines: false } });
+    const refs = [];
+
+    /* Uma aba por empresa com a memória de cálculo em fórmulas: valor × alíquota = resultado. */
+    m.empresas.forEach((e) => {
+      const aba = nomeAba(e.id, e.nome);
+      const ws = wb.addWorksheet(aba, { properties: { showGridLines: false } });
+      ws.columns = [{ width: 50 }, { width: 18 }, { width: 14 }, { width: 18 }, { width: 14 }, { width: 14 }, { width: 14 }];
+      cabecalho(ws, "Memória de cálculo dos impostos", `${e.id} ${e.nome} · competência ${m.comp}`, [
+        { rotulo: "PIS", valor: e.pis.pis },
+        { rotulo: "COFINS", valor: e.pis.cofins },
+        { rotulo: "IRPJ", valor: e.ir.irpj },
+        { rotulo: "CSLL", valor: e.cs.csll }
+      ]);
+      cabecalhoTabela(ws, ["Item", "Valor", "Alíquota", "Resultado"]);
+      let r = 5;
+      const faixa = (texto) => {
+        ws.mergeCells(r, 1, r, 4);
+        const c = ws.getRow(r).getCell(1);
+        c.value = texto;
+        c.fill = fill("FF0C3D28");
+        c.font = { name: "Calibri", size: 9, bold: true, color: { argb: "FFFFFFFF" } };
+        c.border = borda;
+        ws.getRow(r).height = 18;
+        r++;
+      };
+      /* tipo: "" linha comum, "sub" subtotal (faixa verde clara), "total" imposto a recolher (faixa cinza). */
+      const item = (rotulo, valor, aliq, resultado, tipo) => {
+        const row = ws.getRow(r);
+        const cels = [row.getCell(1), row.getCell(2), row.getCell(3), row.getCell(4)];
+        cels[0].value = rotulo;
+        if (valor != null) cels[1].value = valor;
+        if (aliq != null) cels[2].value = aliq;
+        if (resultado != null) cels[3].value = resultado;
+        cels.forEach((c, i) => {
+          c.border = borda;
+          const cache = c.value && typeof c.value === "object" && "result" in c.value ? c.value.result : c.value;
+          const cor = tipo === "total" ? "FFFFFFFF" : (tipo === "sub" ? "FF105436" : (i === 0 ? "FF0F172A" : corValor(cache)));
+          c.font = { name: "Calibri", size: 9, bold: tipo === "sub" || tipo === "total", color: { argb: cor } };
+          if (tipo === "sub") c.fill = fill("FFE7F6EE");
+          if (tipo === "total") c.fill = fill("FF475569");
+          if (i > 0) {
+            c.alignment = { horizontal: "right" };
+            c.numFmt = i === 2 ? PCT : MONEY;
+          }
+        });
+        return r++;
+      };
+      const f = (formula, result) => ({ formula, result: Number(result) || 0 });
+
+      const P = e.pis;
+      const finP = (P.bruto.financeiras || 0) + (P.red.financeiras || 0);
+      faixa(`PIS e COFINS · ${m.pis.periodo}`);
+      const rV = item("Vendas de lote (contas de base)", P.bruto.vendas || 0);
+      const rVd = item("(−) Deduções de vendas (redutoras do DFC)", P.red.vendas || 0);
+      const rS = item("Serviços (contas de base)", P.bruto.servicos || 0);
+      const rSd = item("(−) Deduções de serviços (redutoras do DFC)", P.red.servicos || 0);
+      const rF = item(a.financNoPis ? "Aplicações financeiras" : "Aplicações financeiras (fora da base do PIS e da COFINS)", finP);
+      const rBase = item("Base do PIS e da COFINS", f(`B${rV}+B${rVd}+B${rS}+B${rSd}${a.financNoPis ? `+B${rF}` : ""}`, P.basePis), null, null, "sub");
+      const rPis = item("PIS", f(`MAX(0,B${rBase})`, Math.max(0, P.basePis)), a.pis / 100, f(`B${r}*C${r}`, P.pis), "total");
+      const rCof = item("COFINS", f(`MAX(0,B${rBase})`, Math.max(0, P.basePis)), a.cofins / 100, f(`B${r}*C${r}`, P.cofins), "total");
+
+      const blocoLucro = (qual) => {
+        const ehIr = qual === "irpj";
+        const c = ehIr ? e.ir : e.cs;
+        const p = ehIr ? m.ir : m.cs;
+        const pv = (ehIr ? a.vendasIrpj : a.vendasCsll) / 100;
+        const ps = (ehIr ? a.servicosIrpj : a.servicosCsll) / 100;
+        const pf = (ehIr ? a.financIrpj : a.financCsll) / 100;
+        r++;
+        faixa(`${ehIr ? "IRPJ" : "CSLL"} · ${p.periodo}`);
+        const v1 = item("Vendas de lote (contas de base)", c.bruto.vendas || 0);
+        const v2 = item("(−) Deduções de vendas", c.red.vendas || 0);
+        const vl = item("Vendas líquidas × presunção", f(`B${v1}+B${v2}`, c.vendas), pv, f(`B${r}*C${r}`, c.vendas * pv));
+        const s1 = item("Serviços (contas de base)", c.bruto.servicos || 0);
+        const s2 = item("(−) Deduções de serviços", c.red.servicos || 0);
+        const sl = item("Serviços líquidos × presunção", f(`B${s1}+B${s2}`, c.servicos), ps, f(`B${r}*C${r}`, c.servicos * ps));
+        const fl = item("Aplicações financeiras × presunção", c.financeiras || 0, pf, f(`B${r}*C${r}`, c.financeiras * pf));
+        const base = ehIr ? c.lucroIrpj : c.lucroCsll;
+        const rb = item(ehIr ? "Lucro presumido" : "Base da CSLL", null, null, f(`D${vl}+D${sl}+D${fl}`, base), "sub");
+        if (ehIr) {
+          const ri = item(`IRPJ`, f(`MAX(0,D${rb})`, Math.max(0, base)), a.irpj / 100, f(`B${r}*C${r}`, c.ir));
+          const ra = item(`Adicional (lucro acima de ${this.money(c.limite)})`, f(`MAX(0,D${rb}-${c.limite})`, Math.max(0, base - c.limite)), a.adicional / 100, f(`B${r}*C${r}`, c.adicional));
+          return item("IRPJ a recolher", null, null, f(`D${ri}+D${ra}`, c.irpj), "total");
+        }
+        return item("CSLL a recolher", f(`MAX(0,D${rb})`, Math.max(0, base)), a.csll / 100, f(`B${r}*C${r}`, c.csll), "total");
+      };
+      const rIr = blocoLucro("irpj");
+      const rCs = blocoLucro("csll");
+      rodape(ws, r, 4);
+      refs.push({ e, aba, base: `B${rBase}`, pis: `D${rPis}`, cofins: `D${rCof}`, irpj: `D${rIr}`, csll: `D${rCs}` });
+    });
+
+    /* Resumo: puxa os resultados das abas, então uma correção feita na aba da empresa recalcula o total. */
+    const tot = (campo) => m.empresas.reduce((s, e) => s + (Number(campo(e)) || 0), 0);
+    resumo.columns = [{ width: 56 }, { width: 18 }, { width: 16 }, { width: 16 }, { width: 16 }, { width: 16 }, { width: 18 }];
+    cabecalho(resumo, "Resumo de impostos", `Competência ${m.comp} · PIS e COFINS: ${m.pis.periodo} · IRPJ e CSLL: ${m.ir.periodo}`, [
+      { rotulo: "PIS", valor: tot((e) => e.pis.pis) },
+      { rotulo: "COFINS", valor: tot((e) => e.pis.cofins) },
+      { rotulo: "IRPJ", valor: tot((e) => e.ir.irpj) },
+      { rotulo: "CSLL", valor: tot((e) => e.cs.csll) }
+    ]);
+    cabecalhoTabela(resumo, ["Empresa", "Base PIS/COFINS", "PIS", "COFINS", "IRPJ", "CSLL", "Total"]);
+    let r = 5;
+    refs.forEach((x) => {
+      const row = resumo.getRow(r);
+      const vals = [x.e.pis.basePis, x.e.pis.pis, x.e.pis.cofins, x.e.ir.irpj, x.e.cs.csll];
+      row.getCell(1).value = `${x.e.id} ${x.e.nome}`;
+      [x.base, x.pis, x.cofins, x.irpj, x.csll].forEach((cel, i) => {
+        row.getCell(i + 2).value = { formula: ref(x.aba, cel), result: Number(vals[i]) || 0 };
+      });
+      row.getCell(7).value = { formula: `C${r}+D${r}+E${r}+F${r}`, result: vals[1] + vals[2] + vals[3] + vals[4] };
+      for (let i = 1; i <= 7; i++) {
+        const c = row.getCell(i);
+        const cache = i === 1 ? null : (c.value && c.value.result);
+        c.border = borda;
+        c.font = { name: "Calibri", size: 9, bold: i === 7, color: { argb: i === 1 ? "FF0F172A" : corValor(cache) } };
+        if (i > 1) { c.alignment = { horizontal: "right" }; c.numFmt = MONEY; }
+      }
+      r++;
+    });
+    const totRow = resumo.getRow(r);
+    totRow.getCell(1).value = "Total";
+    const somas = [tot((e) => e.pis.basePis), tot((e) => e.pis.pis), tot((e) => e.pis.cofins), tot((e) => e.ir.irpj), tot((e) => e.cs.csll)];
+    for (let i = 2; i <= 7; i++) {
+      const L = String.fromCharCode(64 + i);
+      const cache = i === 7 ? somas[1] + somas[2] + somas[3] + somas[4] : somas[i - 2];
+      totRow.getCell(i).value = { formula: `SUM(${L}5:${L}${r - 1})`, result: cache };
+    }
+    for (let i = 1; i <= 7; i++) {
+      const c = totRow.getCell(i);
+      c.fill = fill("FF475569");
+      c.font = { name: "Calibri", size: 9, bold: true, color: { argb: "FFFFFFFF" } };
+      c.border = borda;
+      if (i > 1) { c.alignment = { horizontal: "right" }; c.numFmt = MONEY; }
+    }
+    r += 2;
+    const nota = resumo.getRow(r).getCell(1);
+    nota.value = this.textoAliquotas(a);
+    nota.font = { name: "Calibri", size: 8, color: { argb: "FF64748B" } };
+    nota.alignment = { wrapText: true, vertical: "top" };
+    resumo.mergeCells(r, 1, r, 7);
+    resumo.getRow(r).height = 30;
+    rodape(resumo, r + 1, 7);
+
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `impostos-${FiscalState.year}-${monthPad(FiscalState.month)}.xlsx`;
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => { URL.revokeObjectURL(link.href); link.remove(); }, 1000);
+  },
+
   gerarPdf() {
     if (!FiscalState.consultou || FiscalState.loading) {
       alert("Calcule a competência antes de gerar o PDF.");
@@ -1023,15 +1441,15 @@ const FiscalApp = {
       const c = (p.empresas || []).find((e) => Number(e.id) === Number(id));
       return c ? (Number(c[campo]) || 0) : 0;
     };
-    const head = ["Empresa", "PIS", "COFINS", "IRPJ", "CSLL"];
+    const head = ["Empresa", "Base PIS/COFINS", "PIS", "COFINS", "IRPJ", "CSLL", "Total"];
     if (janeiro) head.push("Provisão IRPJ", "Provisão CSLL");
     const body = ids.map((id) => {
+      const vals = [achar(pis, id, "pis"), achar(cof, id, "cofins"), achar(ir, id, "irpj"), achar(cs, id, "csll")];
       const linha = [
         `${id} ${nomes[id] || ""}`,
-        this.money(achar(pis, id, "pis")),
-        this.money(achar(cof, id, "cofins")),
-        this.money(achar(ir, id, "irpj")),
-        this.money(achar(cs, id, "csll"))
+        this.money(achar(pis, id, "basePis")),
+        ...vals.map((v) => this.money(v)),
+        this.money(vals.reduce((s, v) => s + v, 0))
       ];
       if (janeiro) {
         linha.push(this.money(achar(provIr, id, "irpj")), this.money(achar(provCs, id, "csll")));
@@ -1039,7 +1457,8 @@ const FiscalApp = {
       return linha;
     });
     const soma = (p, campo) => p.empresas.reduce((s, c) => s + (Number(c[campo]) || 0), 0);
-    const total = ["Total", this.money(soma(pis, "pis")), this.money(soma(cof, "cofins")), this.money(soma(ir, "irpj")), this.money(soma(cs, "csll"))];
+    const total = ["Total", this.money(soma(pis, "basePis")), this.money(soma(pis, "pis")), this.money(soma(cof, "cofins")), this.money(soma(ir, "irpj")), this.money(soma(cs, "csll")),
+      this.money(soma(pis, "pis") + soma(cof, "cofins") + soma(ir, "irpj") + soma(cs, "csll"))];
     if (janeiro) total.push(this.money(soma(provIr, "irpj")), this.money(soma(provCs, "csll")));
     body.push(total);
     const comp = `${this.MESES[FiscalState.month - 1]} de ${FiscalState.year}`;
@@ -1049,10 +1468,14 @@ const FiscalApp = {
     pdf.setFontSize(9);
     pdf.text(`Competência ${comp}`, 14, 20);
     pdf.text(`PIS e COFINS do mês. IRPJ e CSLL: ${modo}.`, 14, 25);
+    pdf.setFontSize(7.5);
+    pdf.setTextColor(100, 116, 139);
+    pdf.text(this.textoAliquotas(pis.ali) + " A memória de cálculo de cada imposto está nas páginas seguintes.", 14, 30, { maxWidth: 269 });
+    pdf.setTextColor(0, 0, 0);
     pdf.autoTable({
       head: [head],
       body,
-      startY: 30,
+      startY: 39,
       styles: { fontSize: 8, halign: "right" },
       columnStyles: { 0: { halign: "left" } },
       headStyles: { fillColor: [16, 84, 54], halign: "center" },
@@ -1060,6 +1483,7 @@ const FiscalApp = {
         if (hook.section === "body" && hook.row.index === body.length - 1) hook.cell.styles.fontStyle = "bold";
       }
     });
+    this.pdfMemoria(pdf, this.memoria());
     pdf.save(`impostos-${FiscalState.year}-${monthPad(FiscalState.month)}.pdf`);
   }
 };

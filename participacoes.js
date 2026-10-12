@@ -1843,34 +1843,27 @@ const ParticipacoesApp = {
     pptx.author = "CRM Moura Leite";
     pptx.title = "Prestação de contas — avaliar";
     const company = String((this.crmCompany(this.companyId) && this.crmCompany(this.companyId).name) || this.companyLabel(this.companyId) || "Empresa").toUpperCase();
-    let logo = null;
-    try {
-      if (window.InvestimentoApp && typeof InvestimentoApp.logoDataUrl === "function") {
-        logo = await InvestimentoApp.logoDataUrl();
-      }
-    } catch (e) { logo = null; }
+    const dataNum = (d) => {
+      const p = String(d || "").split("/");
+      return p.length === 3 ? p[2] + p[1].padStart(2, "0") + p[0].padStart(2, "0") : String(d || "");
+    };
     picked.forEach((c) => {
       const entry = this.avaliarEntry(c.groupKey) || {};
       const months = mx.months.filter((m) => c.cells[m] && (c.cells[m].rows || []).length);
+      const rows = [];
       months.forEach((month) => {
-        const allRows = (c.cells[month].rows || []).slice().sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
-        const chunks = [];
-        for (let i = 0; i < allRows.length; i += 10) chunks.push(allRows.slice(i, i + 10));
-        if (!chunks.length) chunks.push([]);
-        chunks.forEach((rows, part) => {
-          this.addAvaliarSlide(pptx, {
-            company: company,
-            credorName: c.credor,
-            totalCredor: c.total,
-            duvida: entry.duvida || "",
-            month: month,
-            allRows: allRows,
-            rows: rows,
-            part: part,
-            parts: chunks.length,
-            logo: logo
-          });
-        });
+        (c.cells[month].rows || [])
+          .slice()
+          .sort((a, b) => dataNum(a.date).localeCompare(dataNum(b.date)))
+          .forEach((r) => rows.push(Object.assign({}, r, { _mes: month })));
+      });
+      this.addAvaliarSlide(pptx, {
+        company: company,
+        credorName: c.credor,
+        totalCredor: c.total,
+        duvida: entry.duvida || "",
+        months: months,
+        rows: rows
       });
     });
     const stamp = new Date().toISOString().slice(0, 10);
