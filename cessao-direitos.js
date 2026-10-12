@@ -1074,16 +1074,12 @@ const CessaoPopup = {
       if (String(st.testemunha1) === String(st.testemunha2)) return "As testemunhas precisam ser pessoas diferentes.";
       return "";
     }
-    if (tab === "taxa") {
-      if (st.taxaStatus === "buscando") return "Consultando o título da taxa…";
-      if (st.taxaStatus !== "paga") return st.taxaMsg || "Informe o título da taxa de cessão.";
-      return "";
-    }
+    if (tab === "taxa") return "";
     return "";
   },
 
   pendenciaPdf() {
-    const aba = this.pendenciaAba("cedentes") || this.pendenciaAba("condicoes") || this.pendenciaAba("cessionario") || this.pendenciaAba("testemunhas") || this.pendenciaAba("taxa");
+    const aba = this.pendenciaAba("cedentes") || this.pendenciaAba("condicoes") || this.pendenciaAba("cessionario") || this.pendenciaAba("testemunhas");
     if (aba) return aba;
     if (!(Number(CessaoPopupState.valorPago) > 0)) return "Não encontrei o líquido recebido deste título para a cláusula 4.";
     return "";
@@ -1546,8 +1542,7 @@ const CessaoPopup = {
       { id: "cedentes", label: "Cedentes", icon: "users" },
       { id: "condicoes", label: "Condições da compra", icon: "wallet" },
       { id: "cessionario", label: "Cessionário", icon: "user-plus" },
-      { id: "testemunhas", label: "Testemunhas", icon: "pen-line" },
-      { id: "taxa", label: "Taxa de cessão", icon: "receipt" }
+      { id: "testemunhas", label: "Testemunhas", icon: "pen-line" }
     ];
     const box = document.getElementById("cessao-popup-tabs");
     if (box) {
@@ -1566,13 +1561,13 @@ const CessaoPopup = {
     const prox = document.getElementById("cessao-popup-proximo");
     if (voltar) voltar.style.display = st.tab === "cedentes" ? "none" : "";
     if (prox) {
-      prox.innerHTML = st.tab === "taxa"
+      prox.innerHTML = st.tab === "testemunhas"
         ? (st.gerando ? `<span class="btn-spin"></span> Gerando...` : `<i data-lucide="file-down" style="width:16px;height:16px;"></i> Gerar cessão`)
         : "Avançar";
-      prox.disabled = !!st.loading || !!st.gerando || (st.tab === "taxa" && (st.taxaStatus !== "paga" || !!this.pendenciaPdf()));
+      prox.disabled = !!st.loading || !!st.gerando || (st.tab === "testemunhas" && !!this.pendenciaPdf());
     }
     const aviso = document.getElementById("cessao-popup-aviso");
-    if (aviso) aviso.textContent = st.loading ? "" : (st.tab === "taxa" ? this.pendenciaPdf() : this.pendenciaAba(st.tab));
+    if (aviso) aviso.textContent = st.loading ? "" : (st.tab === "testemunhas" ? this.pendenciaPdf() : this.pendenciaAba(st.tab));
     if (window.lucide) lucide.createIcons();
   },
 
@@ -1799,7 +1794,7 @@ const CessaoPopup = {
   },
 
   ordemAbas() {
-    return ["cedentes", "condicoes", "cessionario", "testemunhas", "taxa"];
+    return ["cedentes", "condicoes", "cessionario", "testemunhas"];
   },
 
   ir(tab) {
@@ -1823,7 +1818,7 @@ const CessaoPopup = {
 
   proximo() {
     const st = CessaoPopupState;
-    if (st.tab === "taxa") {
+    if (st.tab === "testemunhas") {
       this.gerarPdf();
       return;
     }
@@ -1872,7 +1867,7 @@ const CessaoPopup = {
   atualizarAviso() {
     const aviso = document.getElementById("cessao-popup-aviso");
     if (!aviso || CessaoPopupState.loading) return;
-    aviso.textContent = CessaoPopupState.tab === "taxa" ? this.pendenciaPdf() : this.pendenciaAba(CessaoPopupState.tab);
+    aviso.textContent = CessaoPopupState.tab === "testemunhas" ? this.pendenciaPdf() : this.pendenciaAba(CessaoPopupState.tab);
     const tot = document.getElementById("cessao-pop-total-cedido");
     if (tot) tot.textContent = this.fmtPct(this.totalCedido()) + "%";
   },

@@ -174,30 +174,84 @@ const ResultadoCaixaApp = {
     return rows;
   },
 
-  customCc() {
-    try { return JSON.parse(localStorage.getItem("crm_centros_custo_custom") || "{}") || {}; }
-    catch (e) { return {}; }
+  empresasCustom() {
+    try {
+      if (typeof EmpresasState !== "undefined" && EmpresasState.customFields) return EmpresasState.customFields;
+      return JSON.parse(localStorage.getItem("crm_empresas_custom") || "{}") || {};
+    } catch (e) { return {}; }
+  },
+
+  parceriasSalvas() {
+    const PP = window.ParametrizacaoParceiroApp;
+    if (PP && Array.isArray(PP.items) && PP.items.length) return PP.items;
+    try { return JSON.parse(localStorage.getItem("crm_parcerias_v1") || "[]") || []; }
+    catch (e) { return []; }
+  },
+
+  /* Sociedade sem percentual na empresa: usa a fatia dos sócios Moura Leite / MLDU. */
+  pctSocioMoura(empId) {
+    const id = String(empId || "");
+    if (!id) return 0;
+    let melhor = 0;
+    this.parceriasSalvas().forEach((p) => {
+      if (!p || String(p.companyId) !== id || String(p.kind || "") !== "sociedade") return;
+      const vistos = {};
+      let pct = 0;
+      const pessoas = (p.socios || []).concat(p.creditor ? [p.creditor] : []);
+      pessoas.forEach((s) => {
+        if (!s) return;
+        const chave = String(s.id || s.name || "");
+        if (chave && vistos[chave]) return;
+        if (chave) vistos[chave] = 1;
+        const n = this.fold(s.name || s.nome || "");
+        if (n.indexOf("MOURA") < 0 && n.indexOf("MLDU") < 0) return;
+        const v = Number(s.sharePct);
+        if (v > 0) pct += v;
+      });
+      if (pct > melhor) melhor = pct;
+    });
+    if (!(melhor > 0)) return 0;
+    return melhor > 1 ? Math.min(melhor, 100) / 100 : melhor;
+  },
+
+  pctEmpresaId(empId) {
+    if (!this.agrupar) return 1;
+    const id = Number(empId) || 0;
+    if (!id) return 1;
+    const custom = this.empresasCustom();
+    const cfg = custom[id] || custom[String(id)] || {};
+    const bruto = cfg.percentual_mldu;
+    const pct = typeof bruto === "string" ? Number(String(bruto).replace(/\s/g, "").replace(",", ".")) : Number(bruto);
+    if (pct > 0 && pct <= 100) return pct / 100;
+    const socio = this.pctSocioMoura(id);
+    if (socio > 0) return socio;
+    return 1;
+  },
+
+  empresaDoCc(ccId) {
+    const id = String(ccId || "").replace(/\D/g, "");
+    if (!id) return 0;
+    let found = 0;
+    Object.keys(this.anos || {}).forEach((y) => {
+      const a = this.anos[y];
+      if (!a || !a.arquivos) return;
+      Object.keys(a.arquivos).forEach((nome) => {
+        const arq = a.arquivos[nome];
+        if (!arq) return;
+        const tem = (arq.entradas && arq.entradas[id]) || (arq.contasPorCc && arq.contasPorCc[id]);
+        if (!tem) return;
+        const emp = Number(arq.empresa) || this.empresaId(nome);
+        if (emp) found = emp;
+      });
+    });
+    return found;
   },
 
   pctMl(id) {
     if (!this.agrupar) return 1;
-    const map = this.customCc();
-    const s = String(id || "").replace(/\D/g, "");
-    const base = this.grupoCc(s);
-    const pick = (k) => (k && (map[k] || map[String(Number(k))] || map[String(k)])) || null;
-    const c = pick(base) || pick(s) || {};
-    let p = Number(c.perc_ml) || 0;
-    if (!(p > 0)) {
-      const terr = Number(c.perc_terrenista) || 0;
-      if (terr > 0 && terr < 100) p = 100 - terr;
-    }
-    if (!(p > 0) && base.length >= 4) {
-      const irmao = pick(base.slice(0, -2) + "01");
-      const terr = irmao ? Number(irmao.perc_terrenista) || 0 : 0;
-      if (terr > 0 && terr < 100) p = 100 - terr;
-    }
-    if (!(p > 0)) p = 100;
-    return p / 100;
+    const emp = this.empresaDoCc(id);
+    if (!emp) return 1;
+    return this.pctEmpresaId(emp);
   },
 
   normCode(v) {
@@ -900,7 +954,7 @@ const ResultadoCaixaApp = {
     const chipsAtual = atual ? this.chipsDoAno(atual) : "";
     const chipsAnt = antN ? this.chipsDoAno(antN) : "";
     const agrupa = this.agrupar
-      ? " Agrupado: cada valor está na participação da Moura Leite do centro de custo."
+      ? " Agrupado: cada valor está no percentual da Moura Leite da empresa."
       : "";
     const base = "Orçado e realizado vêm dos arquivos da competência atual (" + (atual || "—") + "). A coluna do ano anterior é o realizado dos arquivos da competência anterior" + (antN ? " (" + antN + ")" : "") + ".";
     const nota = lado === "entradas"
@@ -928,7 +982,7 @@ const ResultadoCaixaApp = {
             </div>
           </div>
           <div class="rcx-field">Participação
-            <button type="button" class="rcx-agrupar ${this.agrupar ? "is-on" : ""}" onclick="ResultadoCaixaApp.toggleAgrupar()" title="Aplica o percentual de participação da Moura Leite de cada centro de custo">${this.agrupar ? "Agrupado" : "Agrupar"}</button>
+            <button type="button" class="rcx-agrupar ${this.agrupar ? "is-on" : ""}" onclick="ResultadoCaixaApp.toggleAgrupar()" title="Aplica o percentual da Moura Leite cadastrado na empresa">${this.agrupar ? "Agrupado" : "Agrupar"}</button>
           </div>
         </div>
         <div class="rcx-arqs-box">
@@ -1023,7 +1077,8 @@ const ResultadoCaixaApp = {
           s += this.somaCodigos(porCc[ccId].contas || {}, def, mes, campo, ate) * this.pctMl(ccId);
         });
       } else if (arq.contas) {
-        s += this.somaCodigos(arq.contas, def, mes, campo, ate);
+        const emp = Number(arq.empresa) || this.empresaId(nome);
+        s += this.somaCodigos(arq.contas, def, mes, campo, ate) * this.pctEmpresaId(emp);
       }
     });
     return -s;

@@ -1689,6 +1689,22 @@ const GerarPagamentoApp = {
     return /distrat/i.test([ctx && ctx.docId, ctx && ctx.docNome].concat(planos).join(" "));
   },
 
+  /** Obra cadastrada como sociedade não tem rateio. O lote não pode ser barrado por isso. */
+  obraEhSociedade(obra, ids) {
+    const PP = window.ParametrizacaoParceiroApp;
+    if (!PP || typeof PP.normalizeItem !== "function" || typeof PP.isSociedade !== "function") return false;
+    const lista = Array.isArray(PP.items) && PP.items.length
+      ? PP.items
+      : (() => { try { return JSON.parse(localStorage.getItem("crm_parcerias_v1") || "[]") || []; } catch (e) { return []; } })();
+    const set = new Set((ids || []).map((id) => String(id || "")).filter(Boolean));
+    const code = String(obra || "");
+    return (lista || []).some((raw) => {
+      const p = PP.normalizeItem(raw);
+      if (!p || !PP.isSociedade(p)) return false;
+      return (p.obras || []).some((o) => String(o.code) === code || (o.costCenters || []).some((c) => set.has(String(c.id))));
+    });
+  },
+
   parceriasRateio() {
     const PP = window.ParametrizacaoParceiroApp;
     if (!PP || typeof PP.normalizeItem !== "function") return [];
@@ -1766,6 +1782,15 @@ const GerarPagamentoApp = {
         erroPlano = true;
         comPlano.forEach((l) => { l.planoErro = true; });
         problemas.push(`Plano financeiro diferente na obra ${o.rotulo}: ${comPlano.map((l) => `${l.id} em ${this.planosTexto(l.planos)}`).join("; ")}. O CC da obra e o do parceiro devem usar o mesmo plano.`);
+      }
+      if (this.obraEhSociedade(o.obra, o.linhas.map((l) => l.id))) {
+        o.sociedade = true;
+        o.linhas.forEach((l) => {
+          l.padrao = null;
+          l.esperado = l.valor;
+          l.ok = !l.planoErro;
+        });
+        return;
       }
       // O CC da obra também pode ter conta de parceria cadastrada; o par do rateio é decidido pelo nome.
       const ehParc = (l) => this.ccDeParceriaPeloNome(l.id, l.nome);
@@ -1920,6 +1945,10 @@ const GerarPagamentoApp = {
       if (c && c.id && (c.rateio == null || this.num(c.rateio) > 0.009)) ids.add(String(c.id));
     });
     const temRateio = ids.size > 1;
+    const soSociedade = conf && conf.obras && conf.obras.length && conf.obras.every((o) => o.sociedade);
+    if (soSociedade && !(conf && conf.ok === false)) {
+      return { texto: "Não se aplica", cls: "bchk-info", dica: "Sociedade não tem rateio entre centros de custo." };
+    }
     if (conf && conf.ok === false) {
       const dica = conf.problemas && conf.problemas.length ? conf.problemas.join("\n") : "Não validado.";
       return { texto: "Não validado", cls: "bchk-erro", dica };
@@ -1970,11 +1999,13 @@ const GerarPagamentoApp = {
   rateioHtml(conf) {
     if (!conf || !conf.obras.length) return "";
     const corpo = conf.obras.map((o) => `
-      <tr class="gp-rateio-obra"><td colspan="7">Obra ${this.esc(o.rotulo || o.obra)} · ${this.pct(o.pct)} do título · ${this.money(o.valor)}${o.exclusivo
+      <tr class="gp-rateio-obra"><td colspan="7">Obra ${this.esc(o.rotulo || o.obra)} · ${this.pct(o.pct)} do título · ${this.money(o.valor)}${o.sociedade
+        ? ` <span>· sociedade, sem rateio</span>`
+        : (o.exclusivo
         ? ` <span>· ${o.exclusivo === "ml" ? "CC exclusivo da Moura Leite: 100% Moura Leite, sem rateio" : `distrato emitido até ${this.dataBr(this.DISTRATO_PARCEIRO_ATE)}: 100% no CC do parceiro, sem rateio`}</span>`
         : (o.padrao
           ? ` <span>· padrão ${this.pct(o.padrao.ml)} Moura Leite${o.padrao.terr ? ` / ${this.pct(o.padrao.terr)} terrenista` : ""}</span>`
-          : ` <span class="gp-rateio-x">· sem rateio padrão no cadastro</span>`)}</td></tr>
+          : ` <span class="gp-rateio-x">· sem rateio padrão no cadastro</span>`))}</td></tr>
       ${o.linhas.map((l) => `<tr class="${l.ok === false || l.planoErro ? "is-bad" : ""}">
         <td><strong>${this.esc(l.id)}</strong> <span class="gp-rateio-nome">${this.esc(l.nome)}</span></td>
         <td class="gp-rateio-plano${l.planoErro ? " is-bad" : ""}">${l.planos.length
@@ -1982,12 +2013,14 @@ const GerarPagamentoApp = {
           : "—"}</td>
         <td class="num">${this.pct(l.pct)}</td>
         <td class="num">${this.money(l.valor)}</td>
-        <td class="num">${o.exclusivo ? "exclusivo" : (l.padrao != null ? this.pct(l.padrao) + " da obra" : "—")}</td>
+        <td class="num">${o.sociedade ? "sem rateio" : (o.exclusivo ? "exclusivo" : (l.padrao != null ? this.pct(l.padrao) + " da obra" : "—"))}</td>
         <td class="num">${l.esperado != null ? this.money(l.esperado) : "—"}</td>
         <td class="ic">${l.ok == null && !l.planoErro ? "" : (l.ok && !l.planoErro ? `<span class="gp-rateio-ok">✓</span>` : `<span class="gp-rateio-x">✗</span>`)}</td>
       </tr>`).join("")}`).join("");
     const rodape = (conf.ok
-      ? `<p class="gp-rateio-msg is-ok">O rateio e o plano financeiro conferem com o padrão cadastrado em Centros de Custo.</p>`
+      ? (conf.obras.every((o) => o.sociedade)
+        ? `<p class="gp-rateio-msg is-ok">Sociedade: não há rateio entre os centros. O título pode ir para o lote.</p>`
+        : `<p class="gp-rateio-msg is-ok">O rateio e o plano financeiro conferem com o padrão cadastrado em Centros de Custo.</p>`)
       : `<div class="gp-rateio-msg is-bad"><strong>Título bloqueado para lote até corrigir:</strong>${conf.problemas.map((p) => `<div>${this.esc(p)}</div>`).join("")}</div>`)
       + (conf.avisos.length ? `<div class="gp-rateio-msg is-warn">${conf.avisos.map((p) => `<div>${this.esc(p)}</div>`).join("")}</div>` : "");
     return `<h4>Rateio por centro de custo</h4>

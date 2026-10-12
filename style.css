@@ -302,12 +302,17 @@ body {
 .main-content {
   margin-left: 280px;
   width: calc(100% - 280px);
+  min-width: 0;
   min-height: 100vh;
   padding: 2rem;
   display: flex;
   flex-direction: column;
   gap: 2rem;
   transition: var(--transition-smooth);
+}
+.main-content > .tab-pane {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .main-content.expanded {
@@ -3596,6 +3601,18 @@ circle.donut-segment {
   padding: 0 8px;
   margin-top: 4px;
 }
+.fc-field select.fc-comparar {
+  display: block;
+  height: 34px;
+  min-width: 168px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 0 8px;
+  margin-top: 4px;
+  background: #fff;
+  font-weight: 600;
+  color: #0f172a;
+}
 .fc-cons-btn {
   height: 34px;
   padding: 0 12px;
@@ -3775,12 +3792,12 @@ circle.donut-segment {
   max-width: min(720px, 70vw);
 }
 .fc-consult-btn.is-dirty { box-shadow: 0 0 0 2px #f59e0b; }
-.rcx-page { padding: 4px 2px 24px; }
-.rcx-tabs { margin-bottom: 14px; }
-.rcx-head { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
-.rcx-tools { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-end; }
-.rcx-arqs-box { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-start; padding: 10px 12px; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; }
-.rcx-arqs-col { display: flex; flex-direction: column; gap: 6px; min-width: 240px; flex: 1; }
+.rcx-page { padding: 4px 2px 24px; min-width: 0; max-width: 100%; }
+.rcx-tabs { margin-bottom: 14px; max-width: 100%; }
+.rcx-head { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; min-width: 0; max-width: 100%; }
+.rcx-tools { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-end; max-width: 100%; }
+.rcx-arqs-box { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-start; padding: 10px 12px; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; max-width: 100%; min-width: 0; }
+.rcx-arqs-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1 1 240px; }
 .rcx-arqs-label { font-size: 0.68rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: #64748b; }
 .rcx-field { display: flex; flex-direction: column; gap: 4px; font-size: 0.72rem; font-weight: 700; color: #475569; }
 .rcx-field select { height: 38px; min-width: 92px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; padding: 0 10px; font-weight: 650; color: #0f172a; }
@@ -3808,9 +3825,12 @@ circle.donut-segment {
 .rcx-muted { color: #94a3b8; font-size: 0.8rem; }
 .rcx-vazio { padding: 18px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; color: #64748b; }
 .rcx-erro { margin-bottom: 10px; padding: 10px; background: #fef2f2; color: #b91c1c; border-radius: 8px; font-size: 0.82rem; }
-.rcx-scroll { overflow: auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; }
-.rcx-grid { border-collapse: collapse; font-size: 0.78rem; min-width: 920px; }
-.rcx-grid th, .rcx-grid td { padding: 7px 8px; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+.rcx-scroll { overflow: auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; max-width: 100%; min-width: 0; }
+.rcx-grid { border-collapse: collapse; font-size: 0.72rem; width: 100%; }
+.rcx-grid th, .rcx-grid td { padding: 6px 4px; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+.rcx-grid thead tr:first-child th:first-child,
+.rcx-grid td.rcx-nome,
+.rcx-grid tfoot td:first-child { white-space: normal; max-width: 200px; overflow-wrap: anywhere; }
 .rcx-grid thead th { background: #105436; color: #fff; font-size: 0.68rem; text-align: right; }
 .rcx-grid thead th[colspan] { text-align: center; }
 .rcx-grid thead tr:first-child th:first-child, .rcx-grid td.rcx-nome, .rcx-grid tfoot td:first-child { text-align: left; }
@@ -3927,6 +3947,22 @@ circle.donut-segment {
 .fc-grid td.fc-num.is-neg { color: #b91c1c; }
 .fc-grid td.fc-num.is-zero { color: #94a3b8; font-weight: 500; }
 .fc-grid td.fc-num.is-strong { font-weight: 800; }
+.fc-grid thead th.fc-th-cmp { background: #334155; }
+.fc-grid td.fc-num.fc-var { padding-top: 2px; padding-bottom: 2px; }
+.fc-var-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 100%;
+  padding: 2px 6px;
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+.fc-var-pill b { font-size: 0.6rem; }
+.fc-var-pill.is-up { background: #dcfce7; color: #105436; }
+.fc-var-pill.is-down { background: #fee2e2; color: #b91c1c; }
+.fc-var-pill.is-flat { color: #94a3b8; font-weight: 500; }
 .fc-grid tr.fc-r-n1 td,
 .fc-grid tr.fc-r-n1 td.fc-td-name { background: #f1f5f9; font-weight: 800; }
 .fc-grid tr.fc-r-formula td,
@@ -6269,7 +6305,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .cessao-contrato-dados > label,
 .cessao-contrato-dados > label.is-wide { grid-column: auto; min-width: 0; }
 .cessao-contrato-dados input:disabled { background: #fff; color: #0f172a; opacity: 1; cursor: default; }
-.cessao-popup-panel .cessao-cond-scroll { max-height: 240px; overflow-x: hidden; overflow-y: auto; }
+.cessao-popup-panel .cessao-cond-scroll { max-height: calc(36px + 46px * 4); overflow-x: hidden; overflow-y: auto; }
 .cessao-popup-panel .cessao-cond-table { table-layout: fixed; width: 100%; }
 .cessao-popup-panel .cessao-cond-table th:nth-child(1) { width: 24%; }
 .cessao-popup-panel .cessao-cond-table th:nth-child(2) { width: 13%; }
@@ -6339,10 +6375,25 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
   vertical-align: middle;
 }
 .cessao-cond-box .cessao-cond-scroll {
-  border: 0;
-  border-radius: 0;
-  max-height: 240px;
+  margin: 10px 12px 0;
+  border: 1px solid #fdba74;
+  border-radius: 8px;
+  max-height: calc(36px + 46px * 4);
+  overflow-x: hidden;
   overflow-y: auto;
+  background: #fff;
+}
+.cessao-cond-box .cessao-cond-table thead th {
+  height: 36px;
+  box-sizing: border-box;
+}
+.cessao-cond-box .cessao-cond-table tbody td {
+  height: 46px;
+  box-sizing: border-box;
+}
+.cessao-cond-box .cessao-cond-table .form-control {
+  height: 34px;
+  padding: 0 8px;
 }
 .cessao-cond-scroll thead th { position: sticky; top: 0; background: #ffedd5; z-index: 1; }
 .cessao-kpi-row {

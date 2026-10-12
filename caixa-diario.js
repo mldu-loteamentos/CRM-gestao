@@ -1972,7 +1972,7 @@ const FluxoCaixaDiarioApp = {
         const falta = r.falta > 0.5 ? ` O saldo da aplicação não alcança o restante (${caixaMoney(r.falta)}).` : "";
         return `<li><b>Resgatar em ${caixaFmtDate(r.dia)}:</b> ${caixaMoney(r.valor)}. Esse valor ${cobre}.${falta}</li>`;
       }).join("");
-      msgs.push(`<div class="cxd-aplica-resgate"><b>Resgate da aplicação</b><span>Olha só os próximos 30 dias. A conta corrente fica negativa e o dinheiro está na aplicação. Cada data é o resgate daquele período.</span><ul>${itens}</ul></div>`);
+      msgs.push(`<div class="cxd-aplica-resgate"><b>Resgate da aplicação</b><ul>${itens}</ul></div>`);
     }
     return msgs.length ? `<div class="cxd-aplica">${msgs.join("")}</div>` : "";
   },
@@ -2111,21 +2111,24 @@ const FluxoCaixaDiarioApp = {
       const abre = !!it.titulo;
       return this.linhaDetalhe(it, "cxd-det-out", abre ? `onclick="FluxoCaixaDiarioApp.openTitulo('${caixaEsc(it.key)}')"` : "");
     };
-    const grupoSaida = (rotulo, lista) => {
+    const grupoSaida = (chave, rotulo, lista) => {
       if (!lista.length) return "";
       const total = lista.reduce((s, it) => s + (Number(it.valor) || 0), 0);
+      const id = "saida:" + chave;
+      const abertoGrp = this.detOpen[id] === true;
       return `<div class="cxd-sub">
-        <div class="cxd-grp-head" style="cursor:default;">
+        <button type="button" class="cxd-grp-head" onclick="FluxoCaixaDiarioApp.toggleGrupo('${id}')">
+          <i data-lucide="${abertoGrp ? "chevron-down" : "chevron-right"}" style="width:16px;height:16px;"></i>
           <strong>${rotulo}</strong>
           <span>${lista.length} lançamento(s)</span>
           <b>${caixaMoney(total)}</b>
-        </div>
-        ${this.tabelaLinhas(lista.map(linhaSaida).join(""))}
+        </button>
+        ${abertoGrp ? this.tabelaLinhas(lista.map(linhaSaida).join("")) : ""}
       </div>`;
     };
     const comprometidas = saidas.filter((it) => it.natureza !== "previsao");
     const previsoes = saidas.filter((it) => it.natureza === "previsao");
-    const corpoSaidas = grupoSaida("Comprometido", comprometidas) + grupoSaida("Previsões", previsoes);
+    const corpoSaidas = grupoSaida("comprometido", "Comprometido", comprometidas) + grupoSaida("previsao", "Previsões", previsoes);
     const blocos = [];
     if (carteira.length) blocos.push(this.grupoDetalhe("carteira", "Carteira Prevista", carteira.length, totalCarteira, subs, "in"));
     if (outros.length) blocos.push(this.grupoDetalhe("outros", "Outros Recebimentos", outros.length, totalOutros, this.tabelaLinhas(linhasOutros), "outros"));

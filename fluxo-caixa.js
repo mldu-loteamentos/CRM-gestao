@@ -10,6 +10,11 @@ const FluxoCaixaApp = {
   loadedCompanyIds: null,
   loadedStart: "",
   loadedEnd: "",
+  compararAno: "",
+  loadedComparar: "",
+  compMovements: [],
+  compMonths: [],
+  compMap: null,
   consolidacaoAtiva: true,
   companyMonthsOpen: null,
   agrupamento: "mes",
@@ -867,47 +872,132 @@ const FluxoCaixaApp = {
     await this.ensureCategories();
     this.months = this.monthKeys(this.startDate, this.endDate);
     if (this.grupoAberto && !this.periodos().some(p => p.key === this.grupoAberto)) this.grupoAberto = "";
+    const comp = this.periodoComparado();
     try {
-      const chunks = await Promise.all(this.selectedCompanyIds.map(async id => {
-        const data = await SiengeApiService.getBankMovements(this.startDate, this.endDate, {
-          selectionType: "M",
-          companyId: id
-        });
-        return (data || []).map(m => ({ ...m, companyId: m.companyId || id }));
-      }));
-      this.movements = chunks.flat();
-      // Dedupe entre empresas (API às vezes ignora companyId e devolve o mesmo movimento N vezes)
-      if (typeof siengeDedupeBankMovements === "function") {
-        this.movements = siengeDedupeBankMovements(this.movements);
-      }
-      // Garante período pelo data de caixa (não confiar só no filtro da API)
-      this.movements = this.movements.filter((m) => {
-        const d = this.cashDate(m);
-        return d && d >= this.startDate && d <= this.endDate;
-      });
-      const selected = new Set(this.selectedCompanyIds.map(String));
-      const allocs = [];
-      this.movements.forEach(mov => {
-        if (selected.size && !selected.has(String(mov.companyId))) return;
-        const factor = this.factorForCompany(mov.companyId);
-        if (factor <= 0) return;
-        this.allocate(mov, factor).forEach(a => allocs.push(a));
-      });
-      this.settleAdvancesInAllocs(allocs, this.movements);
-      this.build(allocs);
+      const [atual, anterior] = await Promise.all([
+        this.buscarMovimentos(this.startDate, this.endDate),
+        comp ? this.buscarMovimentos(comp.start, comp.end) : Promise.resolve([])
+      ]);
+      this.movements = atual;
+      this.compMovements = anterior;
+      this.compMonths = comp ? this.monthKeys(comp.start, comp.end) : [];
+      const ids = this.selectedCompanyIds.map(String);
+      this.build(this.alocar(this.movements, ids));
+      this.montarComparacao(ids);
       if (!this.movements.length) this.error = "Nenhum movimento de caixa/banco no período para as empresas selecionadas.";
     } catch (err) {
       console.error("[Fluxo de Caixa]", err);
       this.error = err && err.message ? err.message : "Falha ao consultar a API de caixa e banco.";
       this.rows = [];
+      this.compMap = null;
     } finally {
       this.loadedCompanyIds = this.selectedCompanyIds.map(String);
       this.loadedStart = this.startDate;
       this.loadedEnd = this.endDate;
+      this.loadedComparar = this.compararAno;
       this.noteCompanySet(true);
       this.loading = false;
       this.render();
     }
+  },
+
+  async buscarMovimentos(start, end) {
+    const chunks = await Promise.all(this.selectedCompanyIds.map(async id => {
+      const data = await SiengeApiService.getBankMovements(start, end, {
+        selectionType: "M",
+        companyId: id
+      });
+      return (data || []).map(m => ({ ...m, companyId: m.companyId || id }));
+    }));
+    let movs = chunks.flat();
+    // Dedupe entre empresas (API às vezes ignora companyId e devolve o mesmo movimento N vezes)
+    if (typeof siengeDedupeBankMovements === "function") movs = siengeDedupeBankMovements(movs);
+    // Garante período pela data de caixa (não confiar só no filtro da API)
+    return movs.filter((m) => {
+      const d = this.cashDate(m);
+      return d && d >= start && d <= end;
+    });
+  },
+
+  alocar(movs, ids) {
+    const selected = new Set((ids || []).map(String));
+    const allocs = [];
+    (movs || []).forEach(mov => {
+      if (selected.size && !selected.has(String(mov.companyId))) return;
+      const factor = this.factorForCompany(mov.companyId);
+      if (factor <= 0) return;
+      this.allocate(mov, factor).forEach(a => allocs.push(a));
+    });
+    this.settleAdvancesInAllocs(allocs, movs);
+    return allocs;
+  },
+
+  /* 29/02 vira 28/02 quando o ano de comparação não é bissexto. */
+  deslocarData(iso, anos) {
+    const [y, m, d] = String(iso || "").split("-").map(Number);
+    if (!y || !m || !d) return "";
+    const ny = y + anos;
+    const ultimo = new Date(ny, m, 0).getDate();
+    return `${ny}-${String(m).padStart(2, "0")}-${String(Math.min(d, ultimo)).padStart(2, "0")}`;
+  },
+
+  periodoComparado() {
+    const alvo = Number(this.compararAno) || 0;
+    const base = Number(String(this.startDate || "").slice(0, 4)) || 0;
+    if (!alvo || !base || alvo === base || !this.endDate) return null;
+    const anos = alvo - base;
+    return { start: this.deslocarData(this.startDate, anos), end: this.deslocarData(this.endDate, anos) };
+  },
+
+  anosComparacao() {
+    const base = Number(String(this.startDate || "").slice(0, 4)) || new Date().getFullYear();
+    const anos = [];
+    for (let y = base - 1; y >= base - 6; y--) anos.push(String(y));
+    if (this.compararAno && anos.indexOf(String(this.compararAno)) < 0) anos.unshift(String(this.compararAno));
+    return anos;
+  },
+
+  setComparar(ano) {
+    this.compararAno = String(ano || "");
+    this.paintConsultDirty();
+  },
+
+  rowKey(r) {
+    if (r.isCostCenter) return `c:${this.normAccountKey(r.parentAccountId) || r.parentAccountId}:${r.ccId}`;
+    if (r.isAccount) return `a:${this.normAccountKey(r.id) || r.id}`;
+    return `n:${r.id}`;
+  },
+
+  /* Monta a mesma árvore com os movimentos do período comparado e guarda o total de cada linha. */
+  montarComparacao(ids) {
+    this.compMap = null;
+    if (!(this.compMonths || []).length) return;
+    const guarda = {
+      months: this.months,
+      rows: this.rows,
+      unmatchedInfo: this.unmatchedInfo,
+      accountIndex: this.accountIndex,
+      nodeItems: this.nodeItems,
+      lastAllocs: this.lastAllocs,
+      treeNodes: this.treeNodes
+    };
+    const map = {};
+    try {
+      this.months = this.compMonths.slice();
+      this.build(this.alocar(this.compMovements, ids || this.gridCompanyIds()));
+      (this.rows || []).forEach(r => { map[this.rowKey(r)] = Number(r.total) || 0; });
+    } finally {
+      Object.assign(this, guarda);
+    }
+    this.compMap = map;
+  },
+
+  rotuloComparado() {
+    return this.rotuloPeriodo(this.compMonths || []);
+  },
+
+  totalRepetido() {
+    return this.gridCompanyIds().length <= 1 && this.tempoCols().length === 1;
   },
 
   toggle(id) {
@@ -972,7 +1062,8 @@ const FluxoCaixaApp = {
     if (!this.loadedCompanyIds) return false;
     const loaded = this.loadedCompanyIds.map(String).slice().sort((a, b) => Number(a) - Number(b)).join(",");
     const now = this.selectedCompanyIds.map(String).slice().sort((a, b) => Number(a) - Number(b)).join(",");
-    return loaded !== now || this.loadedStart !== this.startDate || this.loadedEnd !== this.endDate;
+    return loaded !== now || this.loadedStart !== this.startDate || this.loadedEnd !== this.endDate
+      || String(this.loadedComparar || "") !== String(this.compararAno || "");
   },
 
   paintConsultDirty() {
@@ -1120,16 +1211,9 @@ const FluxoCaixaApp = {
   },
 
   rebuildFromCache() {
-    const selected = new Set(this.gridCompanyIds());
-    const allocs = [];
-    this.movements.forEach(mov => {
-      if (selected.size && !selected.has(String(mov.companyId))) return;
-      const factor = this.factorForCompany(mov.companyId);
-      if (factor <= 0) return;
-      this.allocate(mov, factor).forEach(a => allocs.push(a));
-    });
-    this.settleAdvancesInAllocs(allocs, this.movements);
-    this.build(allocs);
+    const ids = this.gridCompanyIds();
+    this.build(this.alocar(this.movements, ids));
+    this.montarComparacao(ids);
     this.render();
   },
 
@@ -1173,7 +1257,7 @@ const FluxoCaixaApp = {
             <div class="fc-head-icon"><i data-lucide="git-branch"></i></div>
             <div>
               <h2>Fluxo de caixa (DFC)</h2>
-              <p>Estrutura <strong>DFC Padrão</strong> · ${this.esc(modo)}</p>
+              <p>Estrutura <strong>DFC Padrão</strong> · ${this.esc(modo)}${this.compMap ? ` · comparado com ${this.esc(this.rotuloComparado())}` : ""}</p>
             </div>
           </div>
           <button type="button" class="btn btn-outline fc-link-visoes" onclick="switchTab('plano-financeiro','Plano Financeiro e Visões')">
@@ -1187,6 +1271,12 @@ const FluxoCaixaApp = {
             </label>
             <label class="fc-field">Fim
               <input type="date" value="${this.endDate}" onchange="FluxoCaixaApp.setPeriod('end', this.value)">
+            </label>
+            <label class="fc-field">Comparar com
+              <select class="fc-comparar" onchange="FluxoCaixaApp.setComparar(this.value)">
+                <option value="">Sem comparação</option>
+                ${this.anosComparacao().map(y => `<option value="${y}" ${String(this.compararAno) === y ? "selected" : ""}>Mesmo período de ${y}</option>`).join("")}
+              </select>
             </label>
             ${this.companyDropHtml()}
             <button type="button" class="btn ${this.consolidacaoAtiva ? "btn-primary" : "btn-outline"} fc-cons-btn" onclick="FluxoCaixaApp.aplicarConsolidacao()" ${this.loading ? "disabled" : ""} title="Empresas marcadas como consolidação padrão, pelo percentual da Moura Leite">
@@ -1252,11 +1342,14 @@ const FluxoCaixaApp = {
   visibleColumns() {
     const ids = this.gridCompanyIds();
     const tempo = this.tempoCols();
+    const comparacao = () => (this.compMap
+      ? [{ type: "cmp", edge: true }, { type: "var" }, { type: "varpct" }]
+      : []);
     if (ids.length <= 1) {
       const id = ids[0] || "";
       const cols = tempo.map(c => Object.assign({ companyId: id }, c));
-      cols.push({ type: "total", companyId: id });
-      return cols;
+      if (!this.totalRepetido()) cols.push({ type: "total", companyId: id });
+      return cols.concat(comparacao());
     }
     const cols = [];
     ids.forEach((id, idx) => {
@@ -1270,11 +1363,27 @@ const FluxoCaixaApp = {
     });
     cols.push({ type: "gap" });
     cols.push({ type: "total", edge: true });
-    return cols;
+    return cols.concat(comparacao());
+  },
+
+  valorComparado(row) {
+    if (!this.compMap) return 0;
+    return Number(this.compMap[this.rowKey(row)]) || 0;
+  },
+
+  /* Variação % sobre o módulo do comparado: a seta segue o efeito no caixa, inclusive nas saídas. */
+  variacaoPct(row) {
+    const antes = this.valorComparado(row);
+    const agora = Number(row.total) || 0;
+    if (Math.abs(antes) < 0.005) return null;
+    return (agora - antes) / Math.abs(antes) * 100;
   },
 
   valueOf(row, col) {
     if (!col) return Number(row.total) || 0;
+    if (col.type === "cmp") return this.valorComparado(row);
+    if (col.type === "var") return (Number(row.total) || 0) - this.valorComparado(row);
+    if (col.type === "varpct") return this.variacaoPct(row);
     if (col.type === "total" && !col.companyId) return Number(row.total) || 0;
     const uma = this.gridCompanyIds().length <= 1;
     const bag = col.companyId && row.byCompany ? row.byCompany[String(col.companyId)] : null;
@@ -1326,13 +1435,14 @@ const FluxoCaixaApp = {
     const periodos = this.periodos();
     const abertoKey = agrupado ? this.grupoAberto : "";
     const aberto = periodos.some(p => p.key === abertoKey);
+    const total = (span) => (this.totalRepetido() ? "" : `<th class="fc-th-num fc-th-total"${span}>Total</th>`);
     if (!aberto) {
       const cells = periodos.map(p => (
         agrupado
           ? this.thPeriodo(p, "", false).replace(' rowspan="2"', "")
           : `<th class="fc-th-num">${this.esc(p.label)}</th>`
       )).join("");
-      return `<thead><tr><th class="fc-th-name">Estrutura</th>${cells}<th class="fc-th-num fc-th-total">Total</th></tr></thead>`;
+      return `<thead><tr><th class="fc-th-name">Estrutura</th>${cells}${total("")}${this.thComparacao("")}</tr></thead>`;
     }
     const row1 = [`<th class="fc-th-name" rowspan="2">Estrutura</th>`];
     const row2 = [];
@@ -1344,8 +1454,17 @@ const FluxoCaixaApp = {
         row1.push(this.thPeriodo(p, " row2", false));
       }
     });
-    row1.push(`<th class="fc-th-num fc-th-total" rowspan="2">Total</th>`);
+    row1.push(total(` rowspan="2"`));
+    row1.push(this.thComparacao(` rowspan="2"`));
     return `<thead><tr>${row1.join("")}</tr><tr class="fc-months">${row2.join("")}</tr></thead>`;
+  },
+
+  thComparacao(span) {
+    if (!this.compMap) return "";
+    const rot = this.esc(this.rotuloComparado());
+    return `<th class="fc-th-num fc-th-cmp fc-co-edge"${span} title="Mesmo período em ${rot}">${rot}</th>`
+      + `<th class="fc-th-num fc-th-cmp"${span} title="Período atual menos ${rot}. Verde melhora o caixa, vermelho piora.">Var. R$</th>`
+      + `<th class="fc-th-num fc-th-cmp"${span} title="Variação sobre ${rot}. Verde melhora o caixa, vermelho piora.">Var. %</th>`;
   },
 
   headVariasEmpresas(ids) {
@@ -1394,6 +1513,7 @@ const FluxoCaixaApp = {
     });
     row1.push(`<th class="fc-gap" rowspan="${span}"></th>`);
     row1.push(`<th class="fc-th-total fc-th-num fc-co-edge" rowspan="${span}">Total</th>`);
+    row1.push(this.thComparacao(` rowspan="${span}"`));
     const r2 = anyOpen ? `<tr class="fc-months">${row2.join("")}</tr>` : "";
     const r3 = anyOpen && periodoAberto ? `<tr class="fc-months fc-months-2">${row3.join("")}</tr>` : "";
     return `<thead><tr>${row1.join("")}</tr>${r2}${r3}</thead>`;
@@ -1448,6 +1568,7 @@ const FluxoCaixaApp = {
     const isAccFlag = r.isAccount || r.isCostCenter;
     const cells = cols.map(col => {
       if (col.type === "gap") return `<td class="fc-gap"></td>`;
+      if (col.type === "cmp" || col.type === "var" || col.type === "varpct") return this.celulaComparacao(r, col);
       const v = this.valueOf(r, col);
       const strong = col.type !== "month";
       const extra = `${col.band ? " " + col.band : ""}${col.edge ? " fc-co-edge" : ""}`;
@@ -1470,6 +1591,29 @@ const FluxoCaixaApp = {
       <td class="fc-td-name" style="padding-left:${6 + pad}px">${chevron}<span>${this.esc(r.name)}</span></td>
       ${cells}
     </tr>`;
+  },
+
+  fmtPct(n) {
+    return (Number(n) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
+  },
+
+  celulaComparacao(r, col) {
+    const edge = col.edge ? " fc-co-edge" : "";
+    if (col.type === "cmp") {
+      const v = this.valorComparado(r);
+      return `<td class="${this.valClass(v, true)} fc-cmp${edge}">${this.fmt(v)}</td>`;
+    }
+    const delta = (Number(r.total) || 0) - this.valorComparado(r);
+    const tom = Math.abs(delta) < 0.005 ? "is-flat" : (delta > 0 ? "is-up" : "is-down");
+    const seta = tom === "is-up" ? "▲" : (tom === "is-down" ? "▼" : "");
+    let texto = "";
+    if (col.type === "var") {
+      texto = this.fmt(delta);
+    } else {
+      const pct = this.variacaoPct(r);
+      texto = pct == null ? (tom === "is-flat" ? "0,0%" : "novo") : this.fmtPct(pct);
+    }
+    return `<td class="fc-num is-strong fc-var${edge}"><span class="fc-var-pill ${tom}">${seta ? `<b>${seta}</b>` : ""}${texto}</span></td>`;
   },
 
   collectNodeItems(nodeId) {
@@ -2032,6 +2176,9 @@ const FluxoCaixaApp = {
 
   rotuloColuna(col) {
     if (!col || col.type === "gap") return "";
+    if (col.type === "cmp") return this.rotuloComparado();
+    if (col.type === "var") return "Var. R$";
+    if (col.type === "varpct") return "Var. %";
     if (col.type === "total" && !col.companyId) return "Total";
     if (col.type === "co" || (col.type === "total" && col.companyId && this.gridCompanyIds().length > 1 && col.type === "co")) {
       const c = this.companyById(col.companyId);
@@ -2537,6 +2684,7 @@ const FluxoCaixaApp = {
       const kpis = [
         { label: "Período", value: `${this.startDate} a ${this.endDate}`, money: false },
         { label: "Agrupamento", value: modo, money: false },
+        ...(this.compMap ? [{ label: "Comparado com", value: this.rotuloComparado(), money: false }] : []),
         { label: "Empresas", value: this.textoEmpresas(), money: false }
       ];
       kpis.forEach((k, i) => {
@@ -2587,6 +2735,20 @@ const FluxoCaixaApp = {
         });
         cols.forEach((col, i) => {
           const cell = linha.getCell(i + 2);
+          if (col.type === "var" || col.type === "varpct") {
+            const delta = (Number(r.total) || 0) - this.valorComparado(r);
+            const pct = col.type === "varpct" ? this.variacaoPct(r) : null;
+            cell.value = col.type === "var" ? delta : (pct == null ? (Math.abs(delta) < 0.005 ? 0 : "novo") : pct / 100);
+            const cor = Math.abs(delta) < 0.005 ? "FF94A3B8" : (delta > 0 ? "FF105436" : "FFB91C1C");
+            this.excelPinta(cell, {
+              fill: Math.abs(delta) < 0.005 ? fill : (delta > 0 ? "FFDCFCE7" : "FFFEE2E2"),
+              font: { bold: true, size: 9, color: { argb: cor } },
+              align: { horizontal: "right", vertical: "middle" },
+              border: true,
+              numFmt: col.type === "var" ? moneyFmt : "0.0%"
+            });
+            return;
+          }
           const n = this.valueOf(r, col);
           cell.value = n;
           let color = baseColor;
