@@ -401,7 +401,7 @@ const ConfigUsersApp = {
       ]
     },
     {
-      name: "Fiscal", icon: "calculator", key: "mod_fiscal",
+      name: "Fiscal", icon: "receipt", key: "mod_fiscal",
       submodules: [
         { name: "Calcular impostos", key: "sub_fiscal_pis", actions: [{ id: "fiscal", label: "Calcular impostos", permBase: "sub_fiscal_geral_fiscal" }] },
         { name: "Enviar nota", key: "sub_fiscal_enviar_nota", actions: [{ id: "enviar_nota", label: "Enviar nota ao fiscal", permBase: "sub_fiscal_geral_enviar_nota" }] },

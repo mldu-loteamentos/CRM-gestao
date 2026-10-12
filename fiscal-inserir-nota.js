@@ -1461,10 +1461,12 @@ window.InserirNotaApp = {
     bloco(u.nome || "Operador fiscal", 12, "bold");
     bloco("Operador fiscal", 11, "italic");
     const fone = FilaNotasFiscais.telefoneCorporativo(u.email);
+    const mail = String(u.email || "").trim();
+    const meios = [fone ? `telefone ${fone}` : "", mail ? `e-mail ${mail}` : ""].filter(Boolean);
     y += 4;
-    bloco(fone
-      ? `Se o fornecedor ou o contador precisar de apoio, o contato é o telefone corporativo ${fone}.`
-      : "Se o fornecedor ou o contador precisar de apoio, o contato é o telefone corporativo do operador fiscal.", 11, "normal");
+    bloco(meios.length
+      ? `Caso seu contador tenha alguma dúvida, entre em contato pelo ${meios.join(" ou ")}.`
+      : "Caso seu contador tenha alguma dúvida, entre em contato com o operador fiscal.", 11, "normal");
     const blob = pdf.output("blob");
     const nome = `${carta ? "carta-correcao" : "devolucao"}-pedido-${String(item.pedido || "nota").replace(/[^\w.-]+/g, "_")}.pdf`;
     return new File([blob], nome, { type: "application/pdf" });

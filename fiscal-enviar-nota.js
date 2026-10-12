@@ -1035,6 +1035,24 @@ window.EnviarNotaApp = {
     this.render();
   },
 
+  /** Carta emitida pelo fornecedor, no reenvio pedido pelo fiscal. Não substitui o documento da devolução. */
+  adicionarCarta(input) {
+    const s = this.state;
+    const file = input && input.files && input.files[0];
+    if (input) input.value = "";
+    if (!file) return;
+    if (file.size > FilaNotasFiscais.MAX_MB * 1024 * 1024) {
+      alert(`Arquivo acima de ${FilaNotasFiscais.MAX_MB} MB não entra: ${file.name}`);
+      return;
+    }
+    s.anexos = s.anexos.filter((a) => !(a.tipo === "carta" && a.file));
+    const item = { file, nome: file.name, tipo: "carta", size: file.size, contentType: file.type || "application/pdf" };
+    s.anexos.push(item);
+    this.render();
+    const i = s.anexos.indexOf(item);
+    if (i >= 0) this.verAnexo(i);
+  },
+
   /** Um PDF ou imagem extra, sem "boleto" no nome, vira boleto quando a linha digitável está no arquivo. */
   classificarBoletos(itens) {
     const s = this.state;
@@ -1376,6 +1394,12 @@ window.EnviarNotaApp = {
       if (!cancelada) erros.push("Anexe a nota cancelada, com a tarja de cancelada, no tipo Nota cancelada. Sem ela o pedido continua amarrado e o reenvio não segue.");
       else if (nova) oks.push("Nota nova e nota cancelada com a tarja anexadas: o pedido pode ser reenviado.");
     }
+    const editada = s.editandoId ? (s.lista || []).find((x) => x.id === s.editandoId) : null;
+    if (editada && editada.devolucaoTipo === "carta") {
+      const cartaNova = s.anexos.some((a) => a.tipo === "carta" && a.file);
+      if (!cartaNova) erros.push("Anexe a carta de correção emitida. Sem ela o reenvio não segue.");
+      else oks.push("Carta de correção anexada.");
+    }
     if (s.lendoNota) erros.push(s.lendoNota);
     else if (notas.length && s.leituraErro) erros.push(s.leituraErro);
     else if (notas.length && s.numeroNota) {
@@ -1657,6 +1681,14 @@ window.EnviarNotaApp = {
   anexosHtml() {
     const s = this.state;
     const tipos = FilaNotasFiscais.TIPOS_ANEXO;
+    const editada = s.editandoId ? (s.lista || []).find((x) => x.id === s.editandoId) : null;
+    const pedeCarta = !!(editada && editada.devolucaoTipo === "carta");
+    const cartaNova = (s.anexos || []).find((a) => a.tipo === "carta" && a.file);
+    const campoCarta = pedeCarta ? `<label class="inf-file" style="margin-bottom:10px;border-color:${cartaNova ? "#86efac" : "#f37021"};background:${cartaNova ? "#f0fdf4" : "#fff7ed"};">
+        <i data-lucide="file-diff"></i>
+        <span>${cartaNova ? this.esc(cartaNova.nome) : "Anexar a carta de correção · PDF"}</span>
+        <input type="file" accept=".pdf,application/pdf" onchange="EnviarNotaApp.adicionarCarta(this)">
+      </label>` : "";
     const linhas = s.anexos.map((a, i) => `<li class="${s.previewIdx === i ? "is-sel" : ""}">
         <i data-lucide="${FilaNotasFiscais.iconeAnexo(a.tipo)}"></i>
         <button type="button" class="env-anexo-nome" onclick="EnviarNotaApp.verAnexo(${i})" title="Ver ao lado">${this.esc(a.nome)}</button>
@@ -1664,7 +1696,7 @@ window.EnviarNotaApp = {
         <select onchange="EnviarNotaApp.setTipoAnexo(${i}, this.value)">${Object.keys(tipos).map((k) => `<option value="${k}" ${a.tipo === k ? "selected" : ""}>${tipos[k]}</option>`).join("")}</select>
         <button type="button" class="env-x" onclick="EnviarNotaApp.removerAnexo(${i})" title="Remover"><i data-lucide="x"></i></button>
       </li>`).join("");
-    return `<label class="inf-file"><i data-lucide="paperclip"></i><span>Adicionar anexos (nota fiscal, boleto e outros) · PDF, XML ou imagem</span>
+    return `${campoCarta}<label class="inf-file"><i data-lucide="paperclip"></i><span>Adicionar anexos (nota fiscal, boleto e outros) · PDF, XML ou imagem</span>
         <input type="file" multiple accept=".pdf,.xml,image/*" onchange="EnviarNotaApp.adicionarArquivos(this)"></label>
       ${linhas ? `<ul class="env-anexos">${linhas}</ul>` : ""}`;
   },
@@ -1761,7 +1793,7 @@ window.EnviarNotaApp = {
       return `<div class="inf-resultado is-erro"><b>O fiscal pediu carta de correção</b>
         ${linhas ? `<ul>${linhas}</ul>` : ""}
         ${doc ? `<p><a href="${esc(doc.url)}" target="_blank" rel="noopener">Abrir o documento: o que foi informado e o que deveria ser</a></p>` : ""}
-        <p>Emita a carta com esses dados, anexe e reenvie neste mesmo pedido.</p></div>`;
+        <p>Emita a carta com esses dados e anexe no campo <b>Carta de correção</b>, neste mesmo pedido.</p></div>`;
     }
     return `<div class="inf-resultado is-erro"><b>Corrigindo envio devolvido pelo fiscal</b><p>${esc(item.motivoDevolucao || "Ajuste o que foi pedido e clique em Reenviar ao fiscal.")}</p></div>`;
   },
