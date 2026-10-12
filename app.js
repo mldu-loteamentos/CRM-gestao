@@ -999,6 +999,7 @@ function switchCustomerTab(tabId) {
     btn.classList.remove('is-active');
     btn.setAttribute('aria-selected', 'false');
   });
+  if (typeof window.ajustarAbasContrato === "function") window.ajustarAbasContrato();
   
   // Mostrar o painel selecionado
   const selectedPane = document.getElementById(tabId);
@@ -17080,6 +17081,148 @@ function renegCenarioAtual() {
   return "deslocar";
 }
 
+const RENEG_MODALIDADES = {
+  diluir: "As parcelas marcadas, vencidas ou a vencer, viram um saldo. Depois do sinal, esse saldo é dividido entre todas as outras parcelas a vencer do contrato, pela Tabela Price com a taxa do contrato. O cliente fica sem parcelas novas: cada parcela a vencer recebe um acréscimo.",
+  somar: "As parcelas marcadas, vencidas ou a vencer, viram um saldo. Depois do sinal, esse saldo vira N parcelas pela Tabela Price com a taxa do contrato. Cada uma é somada a uma das próximas parcelas a vencer, no mesmo vencimento; as demais seguem com o valor original. N vai até a quantidade de parcelas a vencer.",
+  deslocar: "Depois do sinal, o saldo das parcelas marcadas vira um acordo à parte em N parcelas, pela Tabela Price com a taxa da regra de renegociação, a partir do 1º vencimento escolhido. As parcelas a vencer do contrato passam para depois da última parcela do acordo.",
+  cartao: "O saldo das parcelas marcadas vai para o cartão de crédito, em até 12 vezes e sem sinal. A taxa depende da bandeira e é repassada ao cliente ou absorvida pela empresa, conforme a configuração. O Integra gera o link de pagamento."
+};
+
+/** Lista própria sobre o select nativo: ao passar o mouse em cada modalidade, uma caixa explica o que ela faz. */
+window.montarSeletorModalidade = function() {
+  const sel = document.getElementById("reneg-payment-method");
+  if (!sel || sel._rmod) return;
+  sel._rmod = true;
+  const wrap = document.createElement("div");
+  wrap.className = "rmod";
+  sel.parentNode.insertBefore(wrap, sel);
+  wrap.appendChild(sel);
+  sel.classList.add("rmod-nativo");
+  sel.tabIndex = -1;
+  sel.setAttribute("aria-hidden", "true");
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "form-control rmod-btn";
+  btn.setAttribute("aria-haspopup", "listbox");
+  btn.setAttribute("aria-expanded", "false");
+  const lista = document.createElement("ul");
+  lista.className = "rmod-lista";
+  lista.setAttribute("role", "listbox");
+  lista.hidden = true;
+  const dica = document.createElement("div");
+  dica.className = "rmod-dica";
+  dica.hidden = true;
+  wrap.appendChild(btn);
+  document.body.appendChild(lista);
+  document.body.appendChild(dica);
+
+  const posicionarLista = () => {
+    const r = btn.getBoundingClientRect();
+    lista.style.left = r.left + "px";
+    lista.style.minWidth = r.width + "px";
+    const alto = lista.offsetHeight;
+    lista.style.top = (r.bottom + 2 + alto > window.innerHeight ? Math.max(4, r.top - 2 - alto) : r.bottom + 2) + "px";
+  };
+  const mostrarDica = (li) => {
+    const txt = RENEG_MODALIDADES[li.dataset.value];
+    if (!txt) { dica.hidden = true; return; }
+    dica.innerHTML = `<b></b><p></p>`;
+    dica.querySelector("b").textContent = li.textContent;
+    dica.querySelector("p").textContent = txt;
+    dica.hidden = false;
+    const rl = lista.getBoundingClientRect();
+    const ri = li.getBoundingClientRect();
+    const larg = dica.offsetWidth;
+    const alto = dica.offsetHeight;
+    const cabeDireita = rl.right + 8 + larg <= window.innerWidth - 4;
+    dica.style.left = (cabeDireita ? rl.right + 8 : Math.max(4, rl.left - 8 - larg)) + "px";
+    dica.style.top = Math.max(4, Math.min(ri.top, window.innerHeight - alto - 4)) + "px";
+  };
+  const fechar = () => {
+    lista.hidden = true;
+    dica.hidden = true;
+    btn.setAttribute("aria-expanded", "false");
+  };
+  const escolher = (v) => {
+    fechar();
+    if (sel.value === v) return;
+    sel.value = v;
+    sel.dispatchEvent(new Event("change", { bubbles: true }));
+    window.sincronizarSeletorModalidade();
+  };
+
+  Array.from(sel.options).forEach((o) => {
+    const li = document.createElement("li");
+    li.setAttribute("role", "option");
+    li.dataset.value = o.value;
+    li.textContent = o.textContent;
+    li.addEventListener("mouseenter", () => {
+      lista.querySelectorAll("li.is-foco").forEach((x) => x.classList.remove("is-foco"));
+      li.classList.add("is-foco");
+      mostrarDica(li);
+    });
+    li.addEventListener("mousedown", (e) => e.preventDefault());
+    li.addEventListener("click", () => escolher(o.value));
+    lista.appendChild(li);
+  });
+  lista.addEventListener("mouseleave", () => { dica.hidden = true; });
+
+  const abrir = () => {
+    window.sincronizarSeletorModalidade();
+    lista.querySelectorAll("li.is-foco").forEach((x) => x.classList.remove("is-foco"));
+    lista.hidden = false;
+    posicionarLista();
+    btn.setAttribute("aria-expanded", "true");
+  };
+  btn.addEventListener("click", () => {
+    if (!lista.hidden) { fechar(); return; }
+    abrir();
+  });
+  btn.addEventListener("keydown", (e) => {
+    const itens = Array.from(lista.children);
+    let i = itens.findIndex((x) => x.classList.contains("is-foco"));
+    if (e.key === "Escape") { fechar(); return; }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (lista.hidden) { abrir(); i = -1; }
+      if (i < 0) i = Math.max(0, itens.findIndex((x) => x.dataset.value === sel.value));
+      else i = (i + (e.key === "ArrowDown" ? 1 : itens.length - 1)) % itens.length;
+      itens.forEach((x, k) => x.classList.toggle("is-foco", k === i));
+      mostrarDica(itens[i]);
+    } else if ((e.key === "Enter" || e.key === " ") && !lista.hidden && i >= 0) {
+      e.preventDefault();
+      escolher(itens[i].dataset.value);
+    }
+  });
+  btn.addEventListener("blur", fechar);
+  document.addEventListener("mousedown", (e) => {
+    if (!wrap.contains(e.target) && !lista.contains(e.target)) fechar();
+  });
+  window.addEventListener("scroll", (e) => { if (!lista.hidden && !lista.contains(e.target)) fechar(); }, true);
+  window.addEventListener("resize", fechar);
+  window.sincronizarSeletorModalidade();
+};
+
+window.sincronizarSeletorModalidade = function() {
+  const sel = document.getElementById("reneg-payment-method");
+  const wrap = sel && sel.closest(".rmod");
+  if (!wrap) return;
+  const btn = wrap.querySelector(".rmod-btn");
+  const opt = sel.options[sel.selectedIndex];
+  if (btn) {
+    btn.textContent = opt ? opt.textContent : "";
+    btn.title = RENEG_MODALIDADES[sel.value] || "";
+  }
+  wrap.querySelectorAll(".rmod-lista li").forEach((li) => {
+    const on = li.dataset.value === sel.value;
+    li.classList.toggle("is-sel", on);
+    li.setAttribute("aria-selected", on ? "true" : "false");
+  });
+};
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => window.montarSeletorModalidade());
+else window.montarSeletorModalidade();
+
 function renegFuturasOrdenadas(bills) {
   return (bills || []).filter((b) => b && !b.isOverdue).slice().sort((a, b) => String(a.dueDate || "").localeCompare(String(b.dueDate || "")));
 }
@@ -17168,7 +17311,6 @@ function calculateRenegotiation() {
   const isCartao = cenario === "cartao";
   const usaTaxaContrato = cenario === "diluir" || cenario === "somar";
   const futuras = renegFuturasOrdenadas(g_renegBills);
-  const vencidasBase = (g_renegBills || []).filter((b) => b && b.isOverdue);
   const billKey = (b) => String((b && (b.installmentId || b.installmentNum)) || "");
   const futurasDestino = futuras.filter((b) => !selectedIds.includes(billKey(b)));
 
@@ -17181,6 +17323,7 @@ function calculateRenegotiation() {
   const cardBrandWrap = document.getElementById("reneg-card-brand-wrap");
   const mathSinalRow = document.getElementById("reneg-math-sinal-row");
   const cenarioHint = document.getElementById("reneg-cenario-hint");
+  if (typeof window.sincronizarSeletorModalidade === "function") window.sincronizarSeletorModalidade();
   if (cardBrandWrap) cardBrandWrap.style.display = isCartao ? "" : "none";
   if (sinalPctWrap) sinalPctWrap.style.display = isCartao ? "none" : "";
   if (sinalDueWrap) sinalDueWrap.style.display = isCartao ? "none" : "";
@@ -17192,7 +17335,7 @@ function calculateRenegotiation() {
     cenarioHint.textContent = cenario === "diluir"
       ? "Depois do sinal, as parcelas selecionadas — vencidas ou não — se diluem nas demais não vencidas, com a taxa do contrato."
       : (cenario === "somar"
-        ? "Depois do sinal, o saldo vencido vira N parcelas com a taxa do contrato e soma nas próximas parcelas a vencer."
+        ? "Depois do sinal, as parcelas selecionadas — vencidas ou não — viram N parcelas com a taxa do contrato, somadas às próximas parcelas a vencer."
         : (cenario === "deslocar"
           ? "O saldo vencido vira um acordo à parte. As parcelas a vencer continuam depois dele."
           : "O saldo vai para o cartão, na bandeira e no número de parcelas escolhidos."));
@@ -17213,7 +17356,7 @@ function calculateRenegotiation() {
   const maxInstallmentsCalc = Math.floor(selectedCount + (selectedCount * (sinalPct / 100)));
   // Cartão: no máximo 12x. Somar: no máximo as parcelas a vencer. Diluir: todas elas.
   let maxInstallments = Math.min(maxInstallmentsCalc, ruleMaxParcelas, isCartao ? 12 : 9999);
-  if (cenario === "somar") maxInstallments = Math.min(ruleMaxParcelas, Math.max(1, futuras.length));
+  if (cenario === "somar") maxInstallments = Math.min(ruleMaxParcelas, Math.max(1, futurasDestino.length));
   if (cenario === "diluir") maxInstallments = Math.max(1, futurasDestino.length);
   
   const qtySelect = document.getElementById("reneg-installments-qty");
@@ -17232,7 +17375,7 @@ function calculateRenegotiation() {
   }
   const instQty = cenario === "diluir" ? futurasDestino.length : (Number(qtySelect.value) || 1);
 
-  const debtBills = cenario === "diluir" ? selectedBills : (cenario === "somar" ? vencidasBase : selectedBills);
+  const debtBills = selectedBills;
   const principal = debtBills.reduce((acc, b) => acc + (b.value || 0), 0);
   const updatedTotal = debtBills.reduce((acc, b) => acc + (b.computedCorrected || b.value || 0), 0);
   const charges = updatedTotal - principal;
@@ -17444,9 +17587,11 @@ function calculateRenegotiation() {
   let greenTotalPagar = 0;
   let greenLastDate = '--/--/----';
   let greenMantidasCount = 0;
+  const diluidasResumo = [];
+  const mantidasResumo = [];
 
   // --- GERAR CRONOGRAMA ---
-  const diluirCols = cenario === "diluir";
+  const diluirCols = cenario === "diluir" || cenario === "somar";
   const scheduleHead = document.getElementById("reneg-schedule-head");
   if (scheduleHead) {
     const th = "padding:6px; color:#1b5e20;";
@@ -17523,6 +17668,7 @@ function calculateRenegotiation() {
           greenTotalParcelas++;
           greenTotalPagar += total;
           greenLastDate = dataParcela(bill);
+          diluidasResumo.push({ original, total, data: dataParcela(bill) });
           const tr = document.createElement("tr");
           tr.innerHTML = `
             <td style="padding:5px 8px;">${rowNum}</td>
@@ -17536,19 +17682,39 @@ function calculateRenegotiation() {
         });
       }
     } else if (cenario === "somar") {
-      if (!futuras.length) {
+      if (!futurasDestino.length) {
         const tr = document.createElement("tr");
-        tr.innerHTML = `<td colspan="${colSpan}" style="text-align:center; color:var(--color-text-muted); padding:16px; font-size:0.78rem;">Não há parcelas a vencer para somar o saldo.</td>`;
+        tr.innerHTML = `<td colspan="${colSpan}" style="text-align:center; color:var(--color-text-muted); padding:16px; font-size:0.78rem;">Não há parcelas a vencer fora da seleção para somar o saldo.</td>`;
         scheduleBody.appendChild(tr);
       } else {
-        const limite = Math.min(instQty, futuras.length);
-        futuras.forEach((bill, i) => {
-          const mensal = Number(bill.value) || 0;
+        const limite = Math.min(instQty, futurasDestino.length);
+        futurasDestino.forEach((bill, i) => {
+          const original = Number(bill.value) || 0;
           const soma = i < limite && installmentValue > 0;
-          const valor = soma ? mensal + installmentValue : mensal;
-          if (!soma) greenMantidasCount++;
-          const title = soma ? `Parcela ${fmt(mensal)} + acordo ${fmt(installmentValue)}` : "";
-          pushAgenda(soma ? "SOMADA" : "MANTIDA", dataParcela(bill), valor, title);
+          const acrescimo = soma ? installmentValue : 0;
+          const total = original + acrescimo;
+          rowNum++;
+          greenTotalParcelas++;
+          greenTotalPagar += total;
+          greenLastDate = dataParcela(bill);
+          if (soma) diluidasResumo.push({ original, total, data: dataParcela(bill) });
+          else {
+            greenMantidasCount++;
+            mantidasResumo.push({ original, data: dataParcela(bill) });
+          }
+          const badge = soma
+            ? "background:rgba(239,68,68,0.1);color:var(--color-danger);"
+            : "background:rgba(107,114,128,0.1);color:#6b7280;";
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td style="padding:5px 8px;">${rowNum}</td>
+            <td style="padding:5px 8px;"><span style="${badge}border-radius:4px;padding:1px 6px;font-size:0.7rem;font-weight:700;">${soma ? "SOMADA" : "MANTIDA"}</span></td>
+            <td style="padding:5px 8px;">${dataParcela(bill)}</td>
+            <td style="padding:5px 8px; text-align:right;">${fmt(original)}</td>
+            <td style="padding:5px 8px; text-align:right; ${soma ? "color:var(--color-danger); font-weight:600;" : "color:var(--color-text-muted);"}">${soma ? fmt(acrescimo) : "—"}</td>
+            <td style="padding:5px 8px; text-align:right; font-weight:700;">${fmt(total)}</td>
+          `;
+          scheduleBody.appendChild(tr);
         });
       }
     } else if (instQty > 0 && amountToFinance > 0) {
@@ -17643,6 +17809,29 @@ function calculateRenegotiation() {
     : (unselectedBills[0] || null);
   if (greenMantidasLabelEl) greenMantidasLabelEl.textContent = `${greenMantidasCount} Parcela${greenMantidasCount !== 1 ? "s" : ""} Mantida${greenMantidasCount !== 1 ? "s" : ""}`;
   if (greenMantidasValEl) greenMantidasValEl.textContent = greenMantidasCount > 0 && mantidaRef ? fmt(mantidaRef.value || 0) : "R$ 0,00";
+
+  // Diluir: o resumo mostra o contrato novo (sinal, parcelas com período e valor, composição de cada parcela).
+  if (cenario === "diluir" && diluidasResumo.length) {
+    const faixa = (vals) => {
+      const mi = Math.min(...vals);
+      const ma = Math.max(...vals);
+      return Math.abs(ma - mi) < 0.005 ? fmt(mi) : `${fmt(mi)} a ${fmt(ma)}`;
+    };
+    const n = diluidasResumo.length;
+    const totais = diluidasResumo.map((d) => d.total);
+    const iguais = Math.abs(Math.max(...totais) - Math.min(...totais)) < 0.005;
+    if (greenSinalLabelEl && sinalPct > 0 && sinalValue > 0 && sinalDueStr) {
+      greenSinalLabelEl.textContent = `1 Sinal em ${new Date(sinalDueStr + "T12:00:00").toLocaleDateString("pt-BR")}`;
+    }
+    if (greenAcordoLabelEl) {
+      greenAcordoLabelEl.textContent = n > 1
+        ? `${n} parcelas de ${diluidasResumo[0].data} a ${diluidasResumo[n - 1].data}`
+        : `1 parcela em ${diluidasResumo[0].data}`;
+    }
+    if (greenAcordoValEl) greenAcordoValEl.textContent = `${faixa(totais)}${n > 1 && iguais ? " cada" : ""}`;
+    if (greenMantidasLabelEl) greenMantidasLabelEl.textContent = "Cada parcela: original + acréscimo";
+    if (greenMantidasValEl) greenMantidasValEl.textContent = `${faixa(diluidasResumo.map((d) => d.original))} + ${fmt(installmentValue)}`;
+  }
 
   const greenTotalParcelasEl = document.getElementById("reneg-green-total-parcelas");
   const greenTotalPagarEl = document.getElementById("reneg-green-total-pagar");
@@ -31153,6 +31342,41 @@ window.triggerCorreiosNotification = function(customerId, saleId, value) {
 // ----------------------------------------------------
 // 11. PREÃ‚MBULOS & CONFIGURAÇÃO AZURE: AÇÃ•ES REDESENHADAS
 // ----------------------------------------------------
+window.ajustarAbasContrato = function() {
+  const bar = document.querySelector(".ficha-contrato-tabs");
+  if (!bar) return;
+  const visiveis = Array.from(bar.querySelectorAll(".ml-tab")).filter((b) => b.style.display !== "none" && !b.hidden).length;
+  const porLinha = String(Math.max(1, Math.ceil(visiveis / 2)));
+  if (bar.style.getPropertyValue("--abas-por-linha") !== porLinha) bar.style.setProperty("--abas-por-linha", porLinha);
+  if (!bar._abasObs && typeof MutationObserver === "function") {
+    bar._abasObs = new MutationObserver(() => window.ajustarAbasContrato());
+    bar._abasObs.observe(bar, { subtree: true, childList: true, attributes: true, attributeFilter: ["style", "hidden"] });
+  }
+};
+document.addEventListener("DOMContentLoaded", () => window.ajustarAbasContrato());
+
+window.filtrarPreambulos = function(q) {
+  const body = document.getElementById("preambles-list-body");
+  if (!body) return;
+  const termos = String(q || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().split(/\s+/).filter(Boolean);
+  let visiveis = 0;
+  body.querySelectorAll("tr").forEach((tr) => {
+    const alvo = tr.dataset.busca || "";
+    const ok = termos.every((t) => alvo.indexOf(t) >= 0);
+    tr.hidden = !ok;
+    if (ok) visiveis += 1;
+  });
+  const vazio = document.getElementById("preambles-vazio");
+  if (vazio) vazio.hidden = visiveis > 0;
+};
+
+window.togglePreambuloTexto = function(btn) {
+  const cell = btn && btn.closest(".pre-cell");
+  if (!cell) return;
+  const aberto = cell.classList.toggle("is-aberto");
+  btn.textContent = aberto ? "Mostrar menos" : "Ver texto completo";
+};
+
 function loadPreamblesConfigTab() {
   const body = document.getElementById("preambles-list-body");
   if (!body) return;
@@ -31182,30 +31406,49 @@ function loadPreamblesConfigTab() {
   if (typeof window.tombstoneDraftTlmPreamble3 === "function") window.tombstoneDraftTlmPreamble3();
   if (typeof window.rebuildPreambleIndex === "function") window.rebuildPreambleIndex();
   
+  const preEsc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const preFold = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   AppState.preamblesList.forEach(p => {
     if (p && p.deleted) return;
     const statusText = p.status || "Ativo";
-    const badgeClass = statusText === 'Ativo' ? "badge-success" : "badge-danger";
-    const ccs = (p.centrosCustoIds || []).join(", ") || "—";
-    const vinculo = p.empresaId ? `Emp. ${p.empresaId}<br><span style="font-size:0.75rem;color:#64748b;">CC ${ccs}</span>` : `CC ${ccs}`;
-    
+    const ativo = statusText === "Ativo";
+    const plano = String(p.text || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    const nome = (plano.split(",")[0] || "").trim() || `Preâmbulo ${p.id}`;
+    const resp = String(p.responsibles || "").split(/\n+/)
+      .map((l) => l.replace(/^\s*RESPONS[^:]*:\s*/i, "").trim())
+      .filter((l) => l && preFold(l) !== preFold(nome));
+    const ccList = (p.centrosCustoIds || []).map(String).filter(Boolean);
+    const VISIVEIS = 6;
+    const ccChips = ccList.slice(0, VISIVEIS).map((c) => `<span class="pre-chip">${preEsc(c)}</span>`).join("")
+      + (ccList.length > VISIVEIS ? `<span class="pre-chip is-mais" title="${preEsc(ccList.join(", "))}">+${ccList.length - VISIVEIS}</span>` : "");
+    const vinculo = (p.empresaId ? `<div class="pre-emp">Empresa ${preEsc(p.empresaId)}</div>` : "")
+      + (ccList.length ? `<div class="pre-ccs">${ccChips}</div>` : `<span class="pre-sem">Sem C.C.</span>`);
+
     const row = document.createElement("tr");
+    row.dataset.busca = preFold([p.id, plano, p.responsibles, p.empresaId ? "empresa " + p.empresaId : "", ccList.join(" ")].join(" "));
     row.innerHTML = `
-      <td style="text-align: center;"><strong>${p.id}</strong></td>
-      <td style="white-space: pre-wrap;">${p.text}</td>
-      <td style="text-align: center; font-size: 0.8rem;">${vinculo}</td>
-      <td style="text-align: center;"><span class="badge ${badgeClass}">${statusText}</span></td>
-      <td style="text-align: center;">
-        <button class="btn btn-outline btn-sm" onclick="selectPreambleForEdit(${p.id})">
-          <i data-lucide="edit" style="width:12px; height:12px;"></i> Editar
+      <td class="is-center pre-id">${preEsc(p.id)}</td>
+      <td class="pre-cell">
+        <div class="pre-nome">${preEsc(nome)}</div>
+        ${resp.length ? `<div class="pre-resp">${resp.map((r) => `<span class="pre-pessoa"><i data-lucide="user"></i>${preEsc(r)}</span>`).join("")}</div>` : ""}
+        <div class="pre-texto">${p.text}</div>
+        <button type="button" class="pre-mais" onclick="togglePreambuloTexto(this)">Ver texto completo</button>
+      </td>
+      <td class="pre-vinc">${vinculo}</td>
+      <td class="is-center"><span class="pre-st ${ativo ? "is-on" : "is-off"}">${preEsc(statusText)}</span></td>
+      <td class="is-right pre-acoes">
+        <button type="button" class="tvig-ico" title="Editar" onclick="selectPreambleForEdit(${p.id})">
+          <i data-lucide="pencil" style="width:15px;height:15px;"></i>
         </button>
-        <button class="btn btn-danger btn-sm" style="margin-left:6px;" onclick="deletePreamble(${p.id})">
-          <i data-lucide="trash-2" style="width:12px; height:12px;"></i> Excluir
+        <button type="button" class="tvig-ico is-danger" title="Excluir" onclick="deletePreamble(${p.id})">
+          <i data-lucide="trash-2" style="width:15px;height:15px;"></i>
         </button>
       </td>
     `;
     body.appendChild(row);
   });
+  const buscaPre = document.getElementById("preambles-busca");
+  window.filtrarPreambulos(buscaPre ? buscaPre.value : "");
   
   checkAdminPermissions();
   renderRulesSettingsTable();

@@ -8824,6 +8824,79 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
   background: transparent;
   color: #64748b;
 }
+/* Abas do contrato: sempre duas linhas, mesma posição em qualquer zoom (colunas = metade das abas visíveis). */
+.ficha-contrato-tabs {
+  display: grid;
+  grid-template-columns: repeat(var(--abas-por-linha, 7), minmax(0, 1fr));
+  gap: 0 4px;
+  overflow: visible;
+  padding: 2px 8px;
+}
+.ficha-contrato-tabs .ml-tab {
+  min-width: 0;
+  white-space: normal;
+  line-height: 1.2;
+  text-align: left;
+  padding: 4px 8px;
+  font-size: 0.78rem;
+}
+
+/* Forma de pagamento da renegociação: lista com explicação de cada modalidade ao passar o mouse. */
+.rmod { position: relative; }
+.rmod .rmod-nativo { display: none; }
+.rmod-btn {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  font-size: 0.85rem;
+  padding: 6px 28px 6px 8px;
+  text-align: left;
+  cursor: pointer;
+  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 9px center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rmod-lista {
+  position: fixed;
+  z-index: 100010;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
+}
+.rmod-lista[hidden], .rmod-dica[hidden] { display: none; }
+.rmod-lista li {
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: #1e293b;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rmod-lista li.is-foco { background: #e8f3ee; color: #105436; }
+.rmod-lista li.is-sel { font-weight: 700; color: #105436; }
+.rmod-dica {
+  position: fixed;
+  z-index: 100011;
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #105436;
+  border-left-width: 4px;
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.2);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: #334155;
+  pointer-events: none;
+}
+.rmod-dica b { display: block; margin-bottom: 4px; color: #105436; font-size: 0.82rem; }
+.rmod-dica p { margin: 0; }
 
 /* Segurança · Auditoria do Login Sienge */
 .alog-page { padding: 16px 18px 28px; display: flex; flex-direction: column; gap: 12px; }
@@ -8924,6 +8997,42 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
   .cc-toolbar-actions { margin-left: 0; }
   .cc-page .ml-emp-filter { max-width: none; }
 }
+
+/* Apoio · Preâmbulos */
+.pre-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.pre-info { display: flex; gap: 6px; align-items: flex-start; margin: 0; max-width: 620px; font-size: 0.8rem; line-height: 1.45; color: #475569; }
+.pre-info svg { width: 15px; height: 15px; flex: 0 0 15px; margin-top: 1px; color: var(--color-primary); }
+.pre-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pre-busca { display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 10px; min-width: 280px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; }
+.pre-busca svg { width: 15px; height: 15px; color: #94a3b8; flex: 0 0 15px; }
+.pre-busca input { border: none; outline: none; flex: 1; font-size: 0.8rem; background: transparent; min-width: 0; }
+.pre-busca:focus-within { border-color: var(--color-primary); }
+.pre-novo { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px; }
+.pre-novo svg { width: 16px; height: 16px; }
+.pre-scroll { max-height: calc(100vh - 240px); }
+.pre-table col.pre-c-id { width: 48px; }
+.pre-table col.pre-c-emp { width: 220px; }
+.pre-table col.pre-c-st { width: 80px; }
+.pre-table col.pre-c-acao { width: 84px; }
+.pre-table td { white-space: normal; vertical-align: top; padding: 10px 8px; }
+.pre-table td.pre-id { font-weight: 800; color: #105436; }
+.pre-table td.pre-acoes { white-space: nowrap; padding-top: 4px; }
+.pre-nome { font-weight: 800; font-size: 0.78rem; color: #0f3d27; text-transform: uppercase; margin-bottom: 4px; }
+.pre-resp { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.pre-pessoa { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 99px; background: #f1f5f9; color: #334155; font-size: 0.68rem; font-weight: 600; }
+.pre-pessoa svg { width: 11px; height: 11px; color: #64748b; }
+.pre-texto { color: #475569; line-height: 1.5; white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.pre-cell.is-aberto .pre-texto { display: block; -webkit-line-clamp: unset; overflow: visible; }
+.pre-mais { margin-top: 4px; padding: 0; border: none; background: none; font: inherit; font-size: 0.7rem; font-weight: 700; color: #105436; cursor: pointer; text-decoration: underline; }
+.pre-emp { font-weight: 700; color: #105436; margin-bottom: 4px; }
+.pre-ccs { display: flex; flex-wrap: wrap; gap: 3px; }
+.pre-chip { padding: 0 6px; border-radius: 4px; background: #e7f6ee; color: #105436; font-size: 0.66rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pre-chip.is-mais { background: #105436; color: #fff; cursor: help; }
+.pre-sem { color: #94a3b8; }
+.pre-st { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 0.68rem; font-weight: 700; }
+.pre-st.is-on { background: #dcfce7; color: #105436; }
+.pre-st.is-off { background: #fee2e2; color: #b91c1c; }
+.pre-vazio { margin: 12px 0 0; text-align: center; font-size: 0.8rem; color: #64748b; }
 
 .emp-page { padding: 4px 2px 12px; }
 .emp-toolbar { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }

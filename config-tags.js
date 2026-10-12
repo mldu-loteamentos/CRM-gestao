@@ -87,39 +87,40 @@ const ConfigTagsApp = {
         const idArg = JSON.stringify(String(t.id));
         return `
           <tr>
-            <td><strong style="font-size: 0.85rem;">${esc(t.name || "(sem nome)")}</strong></td>
-            <td>${t.destino === "Cliente" ? '<span class="badge badge-primary">Cliente</span>' : '<span class="badge badge-secondary">Unidade</span>'}</td>
-            <td>${t.status === "Ativa" ? '<span class="badge badge-success">ATIVA</span>' : '<span class="badge badge-danger">INATIVA</span>'}</td>
-            <td>
-               <button class="btn btn-outline btn-sm" onclick='ConfigTagsApp.showTagModal(${idArg})' style="padding: 4px 10px; font-size: 0.75rem;">
-                 <i data-lucide="edit-3" style="width: 14px;"></i> Editar
-               </button>
-               <button class="btn btn-outline btn-sm btn-danger" onclick='ConfigTagsApp.deleteTag(${idArg})' style="padding: 4px 10px; font-size: 0.75rem; color: #dc3545; border-color: #dc3545; margin-left: 5px;">
-                 <i data-lucide="trash-2" style="width: 14px;"></i> Excluir
-               </button>
+            <td class="tag-nome" title="${esc(t.name || "")}">${esc(t.name || "(sem nome)")}</td>
+            <td>${t.destino === "Cliente" ? "Cliente" : "Unidade"}</td>
+            <td>${t.status === "Ativa" ? '<span class="tag-st is-on">Ativa</span>' : '<span class="tag-st is-off">Inativa</span>'}</td>
+            <td class="is-right">
+              <button type="button" class="tvig-ico" title="Editar" onclick='ConfigTagsApp.showTagModal(${idArg})'>
+                <i data-lucide="pencil" style="width:15px;height:15px;"></i>
+              </button>
+              <button type="button" class="tvig-ico is-danger" title="Excluir" onclick='ConfigTagsApp.deleteTag(${idArg})'>
+                <i data-lucide="trash-2" style="width:15px;height:15px;"></i>
+              </button>
             </td>
           </tr>
         `;
       }).join("");
 
       return `
-        <details class="tags-details-block" ${isOpen ? "open" : ""} style="margin-bottom: 15px; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; background: white;">
-          <summary style="padding: 15px 20px; font-size: 1.1rem; font-weight: bold; color: var(--color-bg-dark); cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; background: #f9fafa; border-bottom: 1px solid #eee;">
-            <span>${esc(title)} <span style="font-size: 0.8rem; font-weight: normal; color: #777; margin-left: 10px;">(${tagList.length})</span></span>
-            <i data-lucide="chevron-down" class="details-icon" style="width: 20px;"></i>
+        <details class="tags-details-block" ${isOpen ? "open" : ""}>
+          <summary>
+            <span>${esc(title)} <small>${tagList.length}</small></span>
+            <i data-lucide="chevron-down" class="details-icon"></i>
           </summary>
-          <div style="padding: 0; max-height: 65vh; overflow-y: auto;">
-            <table class="empresas-table">
+          <div class="cc-scroll tags-scroll">
+            <table class="cc-table">
+              <colgroup><col><col class="tag-c-dest"><col class="tag-c-st"><col class="tag-c-acao"></colgroup>
               <thead>
                 <tr>
                   <th>Nome da TAG</th>
                   <th>Destino</th>
                   <th>Status</th>
-                  <th>Ações</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
-                ${trs.length > 0 ? trs : '<tr><td colspan="4" style="text-align:center; padding: 30px; color: var(--color-text-muted);">Nenhuma TAG encontrada.</td></tr>'}
+                ${trs.length > 0 ? trs : '<tr><td colspan="4" class="is-center" style="padding: 24px; color: var(--color-text-muted);">Nenhuma TAG encontrada.</td></tr>'}
               </tbody>
             </table>
           </div>
@@ -132,52 +133,33 @@ const ConfigTagsApp = {
 
     root.innerHTML = `
       <style>
-        .empresas-table {
-          width: 100%;
-          border-collapse: collapse;
-          font-size: 0.95rem;
-        }
-        .empresas-table thead th {
-          position: sticky;
-          top: 0;
-          background-color: #1b8253;
-          color: #ffffff;
-          padding: 12px;
-          text-align: left;
-          font-weight: 600;
-          z-index: 10;
-          white-space: nowrap;
-        }
-        .empresas-table tbody tr {
-          border-bottom: 1px solid #e0e5e0;
-        }
-        .empresas-table tbody tr:nth-child(even) {
-          background-color: #f4f6f4;
-        }
-        .empresas-table tbody tr:hover {
-          background-color: #eef2ef;
-        }
-        .empresas-table td {
-          padding: 10px 12px;
-          vertical-align: middle;
-        }
-        .tags-details-block summary::marker {
-          display: none;
-        }
-        .tags-details-block[open] summary .details-icon {
-          transform: rotate(180deg);
-        }
-        .tags-details-block summary .details-icon {
-          transition: transform 0.2s ease;
-        }
+        .tags-page .cc-toolbar { justify-content: space-between; align-items: center; }
+        .tags-page .tags-info { color: #475569; font-size: 0.8rem; margin: 0; max-width: 760px; line-height: 1.45; display: flex; gap: 6px; align-items: flex-start; }
+        .tags-page .tags-info svg { width: 15px; height: 15px; flex: 0 0 15px; color: var(--color-primary); margin-top: 1px; }
+        .tags-page .tags-novo { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px; }
+        .tags-page .tags-novo svg { width: 16px; height: 16px; }
+        .tags-details-block { margin-bottom: 12px; }
+        .tags-details-block summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; padding: 6px 2px; font-size: 0.8rem; font-weight: 700; color: #105436; text-transform: uppercase; letter-spacing: 0.03em; }
+        .tags-details-block summary::-webkit-details-marker { display: none; }
+        .tags-details-block summary small { margin-left: 6px; padding: 1px 7px; border-radius: 99px; background: #e7f6ee; color: #105436; font-size: 0.7rem; }
+        .tags-details-block summary .details-icon { width: 16px; height: 16px; transition: transform 0.2s ease; }
+        .tags-details-block[open] summary .details-icon { transform: rotate(180deg); }
+        .tags-page .tags-scroll { max-height: 60vh; }
+        .tags-page .cc-table col.tag-c-dest { width: 110px; }
+        .tags-page .cc-table col.tag-c-st { width: 90px; }
+        .tags-page .cc-table col.tag-c-acao { width: 84px; }
+        .tags-page .cc-table td.is-right { padding-top: 0; padding-bottom: 0; }
+        .tags-page .tag-st { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 0.68rem; font-weight: 700; }
+        .tags-page .tag-st.is-on { background: #dcfce7; color: #105436; }
+        .tags-page .tag-st.is-off { background: #fee2e2; color: #b91c1c; }
       </style>
-      <div style="padding: 20px; max-width: 960px; margin: 0 auto;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
-          <p style="color: #555; font-size: 0.9rem; margin: 0; max-width: 700px; line-height: 1.5;">
-            <i data-lucide="info" style="width: 16px; margin-right: 4px; vertical-align: text-bottom; color: var(--color-primary);"></i>
-            Utilize esta tela para criar e gerenciar as tags que classificam os documentos a serem salvos no cadastro do cliente ou cadastro da unidade.
+      <div class="cc-page tags-page">
+        <div class="cc-toolbar">
+          <p class="tags-info">
+            <i data-lucide="info"></i>
+            <span>Crie e gerencie as tags que classificam os documentos salvos no cadastro do cliente ou da unidade.</span>
           </p>
-          <button class="btn btn-primary" onclick="ConfigTagsApp.showTagModal()"><i data-lucide="plus"></i> Criar TAG</button>
+          <button class="btn btn-primary tags-novo" onclick="ConfigTagsApp.showTagModal()"><i data-lucide="plus"></i> Criar TAG</button>
         </div>
 
         ${renderTable(tagsCliente, "Tags de Clientes", true)}
