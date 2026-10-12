@@ -247,6 +247,69 @@ const PrestacaoContasApp = {
     return (Number(n) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%";
   },
 
+  /** Distrato e distrato/permuta: o nome do documento ou do plano financeiro traz "distrato". */
+  ehDistratoMov(mov) {
+    const cats = (mov && mov.financialCategories) || [];
+    const txt = [mov && mov.documentIdentificationId, mov && mov.documentIdentificationName, mov && mov.documentNumber]
+      .concat(cats.map((c) => (c && (c.financialCategoryName || c.financialCategoryId)) || ""))
+      .join(" ");
+    return /distrat/i.test(txt);
+  },
+
+  emissaoDireta(mov) {
+    const s = String((mov && (mov.issueDate || mov.billDate || mov.documentIssueDate)) || "").slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : "";
+  },
+
+  emissaoDoMov(mov) {
+    return this.emissaoDireta(mov) || (this.emissaoDistrato && this.emissaoDistrato[String((mov && mov.billId) || "")]) || "";
+  },
+
+  /** Emissão dos títulos de distrato que o extrato não traz. O corte é 01/01/2026 pela emissão, não pelo pagamento. */
+  async carregarEmissoesDistrato() {
+    this.emissaoDistrato = this.emissaoDistrato || {};
+    if (typeof window.siengeFetchWithRetry !== "function") return;
+    const ids = [...new Set((this.movements || []).filter((m) => this.ehDistratoMov(m) && m.billId && !this.emissaoDireta(m)).map((m) => String(m.billId)))]
+      .filter((id) => !Object.prototype.hasOwnProperty.call(this.emissaoDistrato, id));
+    await this.mapLimit(ids, 2, async (id) => {
+      try {
+        const b = await window.siengeFetchWithRetry("/bills/" + encodeURIComponent(id), 2);
+        this.emissaoDistrato[id] = String((b && b.issueDate) || "").slice(0, 10);
+      } catch (e) {
+        this.emissaoDistrato[id] = "";
+      }
+    });
+  },
+
+  /**
+   * Distrato emitido a partir de 01/01/2026 sai 100% no CC da obra.
+   * A prestação mostra o rateio padrão (parte do parceiro) para descontar dos recebimentos.
+   * Devolve as linhas virtuais ou null quando a regra não se aplica.
+   */
+  rateioDistratoNovo(g) {
+    const emissao = g.emissao || "";
+    if (!emissao || emissao < "2026-01-01") return null;
+    const padrao = this.padraoObra(g.obra);
+    if (!padrao) return null;
+    const baseId = String(g.obra) + "00";
+    const ids = Object.keys(g.porCc || {});
+    if (ids.length !== 1 || ids[0] !== baseId || padrao[baseId] == null) return null;
+    const parceiros = Object.keys(padrao).filter((id) => id !== baseId);
+    if (!parceiros.length) return null;
+    const total = g.porCc[baseId];
+    const linhas = Object.keys(padrao).map((id) => ({
+      id,
+      nome: this.ccNome(id),
+      valor: id === baseId ? total : 0,
+      atual: id === baseId ? 100 : 0,
+      esperado: padrao[id]
+    })).sort((a, b) => Number(a.id) - Number(b.id));
+    return {
+      linhas,
+      nota: `Distrato emitido em ${this.dataBr(emissao)}: lançado 100% no ${baseId}. A prestação de contas aplica o rateio padrão e desconta ${parceiros.map((id) => this.fmtPct(padrao[id]) + " no " + id).join(", ")} dos valores do parceiro.`
+    };
+  },
+
   /** Percentual cadastrado nos centros da obra: Moura Leite no CC da obra e terrenista no do parceiro. */
   padraoObra(obra) {
     const PP = typeof ParametrizacaoParceiroApp !== "undefined" ? ParametrizacaoParceiroApp : null;
@@ -597,6 +660,8 @@ const PrestacaoContasApp = {
         if (!(totalGeral > 0.004)) return;
         let linhas = [];
         let status = "na";
+        let distratoNota = "";
+        if (this.ehDistratoMov(mov)) g.emissao = this.emissaoDoMov(mov);
         if (total > 0.004) {
           const padrao = this.padraoObra(g.obra);
           const todos = [...new Set(idsMov.concat(padrao ? Object.keys(padrao) : []))];
@@ -618,6 +683,12 @@ const PrestacaoContasApp = {
             });
             status = ok ? "ok" : "fora";
           }
+          const virtual = this.rateioDistratoNovo(g);
+          if (virtual) {
+            linhas = virtual.linhas;
+            status = "ok";
+            distratoNota = virtual.nota;
+          }
         }
         const motivos = [...new Set(g.contas.filter(c => !c.amarrada).map(c => c.motivo))];
         const row = {
@@ -636,7 +707,8 @@ const PrestacaoContasApp = {
           linhas,
           contas: g.contas,
           guia: g.guia,
-          motivo: motivos.join(" · "),
+          motivo: distratoNota || motivos.join(" · "),
+          distratoNota,
           status
         };
         (g.nat === "despesa" ? despesas : receitas).push(row);
@@ -926,6 +998,7 @@ const PrestacaoContasApp = {
         companyId: this.companyId,
         costCentersId: this.costCenterIds
       });
+      await this.carregarEmissoesDistrato();
       this.rebuildFromMovements();
       if (!this.movements.length) {
         this.error = "Nenhum movimento de caixa/banco no período para os filtros selecionados.";
@@ -1031,10 +1104,11 @@ const PrestacaoContasApp = {
     if (novoScroll && prevTop) novoScroll.scrollTop = prevTop;
   },
 
-  seloRateio(status, motivo) {
-    const txt = { ok: "Conferido", fora: "Fora do padrão", sem: "Sem % no centro", na: "Não se aplica rateio" }[status] || "—";
-    const tip = status === "na" ? (motivo || "Conta do plano financeiro que não entra no rateio da parceria") : "";
-    return `<span class="pcx-selo is-${status}"${tip ? ` title="${this.esc(tip)}"` : ""}>${txt}</span>`;
+  seloRateio(status, motivo, prestacao) {
+    const txt = prestacao ? "Rateio da prestação" : ({ ok: "Conferido", fora: "Fora do padrão", sem: "Sem % no centro", na: "Não se aplica rateio" }[status] || "—");
+    const tip = prestacao ? motivo : (status === "na" ? (motivo || "Conta do plano financeiro que não entra no rateio da parceria") : "");
+    const cls = prestacao ? "ok" : status;
+    return `<span class="pcx-selo is-${cls}"${tip ? ` title="${this.esc(tip)}"` : ""}>${txt}</span>`;
   },
 
   textoCentros(linhas, campo) {
@@ -1268,7 +1342,7 @@ const PrestacaoContasApp = {
       <td title="${this.esc(lancado)}">${lancado}</td>
       <td title="${this.esc(padrao)}">${padrao}</td>
       <td class="is-right pcx-valor" style="color:${cor};">${this.fmt(r.total)}</td>
-      <td>${this.seloRateio(r.status, r.motivo)}</td>
+      <td>${this.seloRateio(r.status, r.motivo, !!r.distratoNota)}</td>
     </tr>`;
     if (aberta) html += `<tr class="pcx-det-row"><td colspan="8">${this.confDetalheHtml(r)}</td></tr>`;
     return html;
@@ -1283,7 +1357,9 @@ const PrestacaoContasApp = {
       ["Cliente / credor", r.pessoa || "—"],
       ["Conta bancária", r.contaBanco || "—"]
     ];
-    const aviso = r.status === "na"
+    const aviso = r.distratoNota
+      ? r.distratoNota
+      : (r.status === "na"
       ? (r.guia
         ? "Nenhuma nota de origem desta guia tem plano financeiro que entra no rateio da parceria, por isso o imposto não vai para o parceiro."
         : "Este lançamento não entra no rateio da parceria: nenhuma conta dele está amarrada nas Configurações. Não há nada a conferir.")
@@ -1291,7 +1367,7 @@ const PrestacaoContasApp = {
         ? (r.guia
           ? `${this.fmt(r.foraTotal)} do imposto vêm de notas cujo plano financeiro não entra no rateio e ficaram fora.`
           : `${this.fmt(r.foraTotal)} em contas que não entram no rateio ficaram fora da conferência.`)
-        : "");
+        : ""));
     const g = r.guia;
     const configHtml = (c) => c.amarrada
       ? '<span class="pcx-selo is-ok">Entra no rateio</span>'

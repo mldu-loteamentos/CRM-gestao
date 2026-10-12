@@ -77,8 +77,8 @@ const ResultadoCaixaApp = {
       this.lerLocal();
       this.montarVista();
     }
+    if (this.aba === "posicao") this.aba = "entradas";
     this.render();
-    if (this.aba === "posicao" && !this.rows.length && !this.loading) this.refresh();
     if (!this._nuvemPedida) {
       this._nuvemPedida = true;
       this.carregarNuvem();
@@ -88,9 +88,8 @@ const ResultadoCaixaApp = {
   setAba(id) {
     const prox = id || "entradas";
     if (prox !== this.aba) this.outrosAberto = false;
-    this.aba = prox;
+    this.aba = prox === "posicao" ? "entradas" : prox;
     this.render();
-    if (this.aba === "posicao" && !this.dates.length && !this.loading) this.refresh();
     if (this.aba === "caixa") this.carregarMl();
     if (window.lucide) lucide.createIcons();
   },
@@ -115,7 +114,7 @@ const ResultadoCaixaApp = {
     }
   },
 
-  /** Relatório "Orçamento Empresarial Agrupado" do Sienge, por centro de custo, mensal. Guarda só as contas analíticas (tipo R). */
+  /** Relatório "Orçamento Empresarial Agrupado" do Sienge, por centro de custo, mensal. Guarda só as contas analíticas (tipo R). A empresa 1 detalha o plano um nível abaixo (2.02.02.04.03); o valor continua na conta do DFC. */
   lerForecast(wb) {
     const grid = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: null });
     const mesRe = /^(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)[a-zç]*\/(\d{4})$/i;
@@ -149,11 +148,12 @@ const ResultadoCaixaApp = {
         });
         return;
       }
-      if (!cc || !meses.length || !/^\d+(\.\d+)*$/.test(c0)) return;
+      const code = c0.replace(/\s/g, "");
+      if (!cc || !meses.length || !/^\d+(\.\d+)*$/.test(code)) return;
       if (tipoCol >= 0 && txt(r[tipoCol]).toUpperCase() !== "R") return;
       const bag = contas[cc.id] || (contas[cc.id] = {});
       nomes[cc.id] = cc.nome;
-      const conta = bag[c0] || (bag[c0] = { nome: txt(r[1]), meses: {} });
+      const conta = bag[code] || (bag[code] = { nome: txt(r[1]), meses: {} });
       meses.forEach((m) => {
         const v = Number(r[m.col]) || 0;
         if (v) conta.meses[m.ym] = (conta.meses[m.ym] || 0) + v;
@@ -204,8 +204,8 @@ const ResultadoCaixaApp = {
     this.render();
   },
 
-  /** Forecast das entradas por mês do ano: contas do relatório passadas pela visão DFC (01 + 09.01), no % Moura Leite quando agrupado. */
-  forecastEntradas(ano) {
+  /** Forecast do ano pelas contas da visão DFC do lado (entradas ou saídas), no % Moura Leite quando agrupado. */
+  forecastLado(ano, lado) {
     const f = this.forecast;
     const out = {};
     if (!f || !f.contas) return out;
@@ -219,14 +219,17 @@ const ResultadoCaixaApp = {
     } catch (e) {
       mapa = null;
     }
-    const aceita = this.noAceito("entradas");
+    const aceita = this.noAceito(lado);
+    const ajuste = lado === "saidas" ? -1 : 1;
     Object.keys(f.contas).forEach((cc) => {
       const fator = this.agrupar ? this.pctMl(cc) : 1;
       Object.keys(f.contas[cc]).forEach((code) => {
         let entra;
         if (mapa) {
-          const node = this.noDaConta(FC, mapa, code);
+          const node = this.noDaLinha(FC, mapa, { code: code, nome: (f.contas[cc][code] && f.contas[cc][code].nome) || "" });
           entra = !!(node && aceita(node.id));
+        } else if (lado === "saidas") {
+          entra = /^2\./.test(code);
         } else {
           entra = /^1\.0[123](\.|$)/.test(code);
         }
@@ -236,11 +239,15 @@ const ResultadoCaixaApp = {
         Object.keys(meses).forEach((ym) => {
           if (Number(ym.slice(0, 4)) !== Number(ano)) return;
           const mm = Number(ym.slice(5, 7));
-          out[mm] = (out[mm] || 0) + sinal * (Number(meses[ym]) || 0) * fator;
+          out[mm] = (out[mm] || 0) + ajuste * sinal * (Number(meses[ym]) || 0) * fator;
         });
       });
     });
     return out;
+  },
+
+  forecastEntradas(ano) {
+    return this.forecastLado(ano, "entradas");
   },
 
   gravarLocal() {
@@ -804,12 +811,12 @@ const ResultadoCaixaApp = {
     let node = null;
     if (mapa && FC && typeof this.noDaConta === "function") node = this.noDaConta(FC, mapa, linha.code);
     const plano = (typeof PlanoFinanceiroApp !== "undefined" ? PlanoFinanceiroApp : null);
-    if (!node && plano && typeof plano.suggestGroup === "function") {
-      const gid = plano.suggestGroup({ id: linha.code, name: linha.nome || "" });
-      if (gid) node = this.noPorId(gid);
-    }
     if (!node && plano && typeof plano.lookupDfcByCode === "function") {
       const gid = plano.lookupDfcByCode(linha.code);
+      if (gid) node = this.noPorId(gid);
+    }
+    if (!node && plano && typeof plano.suggestGroup === "function") {
+      const gid = plano.suggestGroup({ id: linha.code, name: linha.nome || "" });
       if (gid) node = this.noPorId(gid);
     }
     return node;
@@ -823,6 +830,21 @@ const ResultadoCaixaApp = {
     const p = id.match(/^g_(\d{2})(?:_(\d{2}))?(?:_(\d{2}))?/);
     if (!p) return "";
     return [p[1], p[2], p[3]].filter(Boolean).join(".");
+  },
+
+  codigoPlano(code) {
+    const bruto = String(code || "").trim().replace(/\s/g, "");
+    const FC = window.FluxoCaixaApp;
+    if (!bruto || !FC || typeof FC.formatAccountCode !== "function") return bruto;
+    try {
+      return FC.formatAccountCode(bruto) || bruto;
+    } catch (e) {
+      return bruto;
+    }
+  },
+
+  ehContaFinanceira(code) {
+    return /^\d\.\d{2}(\.\d{2})*$/.test(this.codigoPlano(code));
   },
 
   folhasAnaliticas(linhas) {
@@ -880,6 +902,7 @@ const ResultadoCaixaApp = {
     }
     const fora = [];
     const porCodigo = {};
+    const planos = [];
     folhas.forEach((l) => {
       const node = this.noDaLinha(FC, mapa, l);
       const cod = this.codigoVisao(node);
@@ -895,19 +918,26 @@ const ResultadoCaixaApp = {
         if (!n || !FC || typeof FC.signedAmount !== "function") return n;
         return FC.signedAmount(node, l.code, l.nome || "", n, "", "", null);
       };
+      const mesesPlano = [];
       (l.months || []).forEach((m) => {
         const cel = porCodigo[cod].months[m.ym] || { ym: m.ym, orc: 0, real: 0 };
-        cel.orc += sinal(m.orc);
-        cel.real += sinal(m.real);
+        const orc = sinal(m.orc);
+        const real = sinal(m.real);
+        cel.orc += orc;
+        cel.real += real;
         porCodigo[cod].months[m.ym] = cel;
+        if (Math.abs(orc) > 0.005 || Math.abs(real) > 0.005) mesesPlano.push({ ym: m.ym, orc: orc, real: real });
       });
+      if (mesesPlano.length && this.ehContaFinanceira(l.code)) {
+        planos.push({ code: this.codigoPlano(l.code), nome: l.nome || "", nodeId: node.id, months: mesesPlano });
+      }
     });
     const out = Object.keys(porCodigo).map((c) => ({
       code: c,
       nome: porCodigo[c].nome,
       months: Object.keys(porCodigo[c].months).map((ym) => porCodigo[c].months[ym])
     }));
-    return { linhas: out, fora: fora };
+    return { linhas: out, fora: fora, planos: planos };
   },
 
   aplicarBlocos(nomeArquivo, blocos) {
@@ -915,12 +945,12 @@ const ResultadoCaixaApp = {
     const prontos = (blocos || []).map((b) => {
       const conv = this.paraVisao(b.linhas);
       (conv.fora || []).forEach((item) => { if (fora.indexOf(item) < 0) fora.push(item); });
-      return { id: b.id, nome: b.nome, linhas: conv.linhas };
+      return { id: b.id, nome: b.nome, linhas: conv.linhas, planos: conv.planos || [] };
     }).filter((b) => b.linhas.length);
     if (!prontos.length) throw new Error("Nenhuma conta de " + nomeArquivo + " entrou na visão DFC.");
     const porAno = {};
     const slot = (ano) => {
-      if (!porAno[ano]) porAno[ano] = { entradas: {}, contas: {}, contasPorCc: {} };
+      if (!porAno[ano]) porAno[ano] = { entradas: {}, contas: {}, contasPorCc: {}, planosPorCc: {} };
       return porAno[ano];
     };
     prontos.forEach((b) => {
@@ -954,6 +984,19 @@ const ResultadoCaixaApp = {
           dono[b.id].contas[l.code].meses[mm] = celCc;
         });
       });
+      (b.planos || []).forEach((p) => {
+        (p.months || []).forEach((m) => {
+          const ano = m.ym.slice(0, 4);
+          const mm = String(Number(m.ym.slice(5, 7)));
+          const dono = slot(ano).planosPorCc;
+          if (!dono[b.id]) dono[b.id] = { nome: b.nome, contas: {} };
+          if (!dono[b.id].contas[p.code]) dono[b.id].contas[p.code] = { nome: p.nome || p.code, node: p.nodeId || "", meses: {} };
+          const cel = dono[b.id].contas[p.code].meses[mm] || { o: 0, r: 0 };
+          cel.o += Number(m.orc) || 0;
+          cel.r += Number(m.real) || 0;
+          dono[b.id].contas[p.code].meses[mm] = cel;
+        });
+      });
     });
     const empresa = this.empresaId(nomeArquivo);
     const rotulo = this.nomeEmpresaArquivo(nomeArquivo);
@@ -974,6 +1017,7 @@ const ResultadoCaixaApp = {
         entradas: porAno[ano].entradas,
         contas: porAno[ano].contas,
         contasPorCc: porAno[ano].contasPorCc,
+        planosPorCc: porAno[ano].planosPorCc,
         _pendente: true,
         _slot: destino.id,
         _doc: docId
@@ -1108,7 +1152,17 @@ const ResultadoCaixaApp = {
       });
       if (Object.keys(bag).length) contasPorCc[id] = { nome: dono.nome || "", contas: bag };
     });
-    return { entradas: entradas, contas: contas, contasPorCc: contasPorCc };
+    const planosPorCc = {};
+    Object.keys(arq.planosPorCc || {}).forEach((id) => {
+      const dono = arq.planosPorCc[id] || {};
+      const bag = {};
+      Object.keys(dono.contas || {}).forEach((code) => {
+        const meses = this.enxugarMeses(dono.contas[code].meses);
+        if (Object.keys(meses).length) bag[code] = { nome: dono.contas[code].nome || code, node: dono.contas[code].node || "", meses: meses };
+      });
+      if (Object.keys(bag).length) planosPorCc[id] = { nome: dono.nome || "", contas: bag };
+    });
+    return { entradas: entradas, contas: contas, contasPorCc: contasPorCc, planosPorCc: planosPorCc };
   },
 
   async salvarArquivoNuvem(slot, nome, arq) {
@@ -1125,6 +1179,7 @@ const ResultadoCaixaApp = {
       entradas: limpo.entradas,
       contas: limpo.contas,
       contasPorCc: limpo.contasPorCc,
+      planosPorCc: limpo.planosPorCc,
       em: new Date().toISOString()
     });
     arq._doc = id;
@@ -1185,6 +1240,7 @@ const ResultadoCaixaApp = {
       entradas: x.entradas || {},
       contas: x.contas || {},
       contasPorCc: x.contasPorCc || {},
+      planosPorCc: x.planosPorCc || {},
       _doc: id,
       _slot: x.slot || ""
     };
@@ -1299,11 +1355,33 @@ const ResultadoCaixaApp = {
   },
 
   noDaConta(FC, mapa, id) {
-    const sid = String(id || "").trim();
-    const nk = FC.normAccountKey(sid);
-    const dotted = FC.formatAccountCode(sid);
-    const nid = mapa.accToNode[sid] || (nk && mapa.accToNode[nk]) || (dotted && mapa.accToNode[dotted]) || "";
-    return nid ? mapa.nodes[nid] : null;
+    const achar = (code) => {
+      if (!code) return null;
+      const nk = FC.normAccountKey(code);
+      const dotted = FC.formatAccountCode(code);
+      const nid = mapa.accToNode[code] || (nk && mapa.accToNode[nk]) || (dotted && mapa.accToNode[dotted]) || "";
+      return nid && mapa.nodes[nid] ? mapa.nodes[nid] : null;
+    };
+    let sid = String(id || "").trim().replace(/\s/g, "");
+    const original = sid;
+    const visto = {};
+    while (sid && !visto[sid]) {
+      visto[sid] = true;
+      const node = achar(sid);
+      if (node) return node;
+      const partes = sid.split(".").filter(Boolean);
+      if (partes.length <= 2) break;
+      sid = partes.slice(0, -1).join(".");
+    }
+    const plano = (typeof PlanoFinanceiroApp !== "undefined" ? PlanoFinanceiroApp : null);
+    if (original && plano && typeof plano.lookupDfcByCode === "function") {
+      const gid = plano.lookupDfcByCode(original);
+      if (gid) {
+        const node = this.noPorId(gid);
+        if (node) return node;
+      }
+    }
+    return null;
   },
 
   nomeCc(id, nomeApi) {
@@ -1596,14 +1674,15 @@ const ResultadoCaixaApp = {
     const fcPeriodo = fcMeses.length ? (fcMeses.length > 1 ? fcMeses[0] + " a " + fcMeses[fcMeses.length - 1] : fcMeses[0]) : "";
     const chipForecast = this.forecast
       ? `<span class="rcx-arq" title="${caixaEsc(this.forecast.arquivo || "")}">${caixaEsc(this.forecast.arquivo || "forecast")}${fcPeriodo ? " · " + caixaEsc(fcPeriodo) : ""} <button type="button" onclick="ResultadoCaixaApp.removerForecast()">tirar</button></span>`
-      : `<span class="rcx-muted">Nenhum forecast. Use Subir forecast na aba Entradas.</span>`;
+      : `<span class="rcx-muted">Nenhum forecast.</span>`;
     const agrupa = this.agrupar ? " Com “% Moura Leite”, cada valor está no percentual da Moura Leite cadastrado na empresa." : "";
     const mesNomeFaixa = nomesMes[(Number(this.mes) || 1) - 1] || "";
     const base = "Orçado e realizado de " + (atual || "—") + " vêm do arquivo enviado para " + mesNomeFaixa + ". A coluna do ano anterior é o realizado do arquivo de " + (antN || "o ano anterior") + ", o mesmo em todos os meses.";
     const nota = lado === "entradas"
       ? base + " Livia, Livia I e Livia II aparecem como Central Parque. Empreendimentos com o mesmo nome ganham a sigla da cidade. MLDU aparece como Corporativo. Os quatro maiores desvios positivos e os quatro negativos do acumulado ficam à vista; o restante abre ao clicar em Outros."
         + " No gráfico de linhas, a linha do ano atual é o realizado até o mês escolhido e o Forecast segue com a projeção do relatório de forecast até dezembro, pelas mesmas contas da visão DFC (Receitas e receitas financeiras)." + agrupa
-      : base + " As saídas seguem as contas do DFC e aparecem como saída. Gastar acima do orçado fica em vermelho. As contas de fora da lista principal abrem em Outros." + agrupa;
+      : base + " As saídas seguem as contas do DFC e aparecem como saída. Gastar acima do orçado fica em vermelho. As contas de fora da lista principal abrem em Outros."
+        + " No gráfico de linhas, a linha do ano atual é o realizado até o mês escolhido e o Forecast segue com a projeção do relatório de forecast até dezembro, pelas mesmas contas da visão DFC das saídas." + agrupa;
     const avisoRateio = lado === "saidas" && this.faltaCentroNasSaidas()
       ? `<div class="rcx-erro">Para aplicar o % Moura Leite nas saídas destes arquivos, suba o Excel de novo. O arquivo que já estava salvo não guarda o centro de custo de cada conta.</div>`
       : "";
@@ -1640,7 +1719,7 @@ const ResultadoCaixaApp = {
             <i data-lucide="files"></i> Arquivos <span class="ml-tab-count">${qtdArq}</span>
             <i data-lucide="${this.arqsAberto ? "chevron-up" : "chevron-down"}"></i>
           </button>
-          ${lado === "entradas" ? `<label class="rcx-arq-btn rcx-fc-btn" title="Relatório Orçamento Empresarial Agrupado por centro de custo, mensal">
+          ${lado === "entradas" || lado === "saidas" ? `<label class="rcx-arq-btn rcx-fc-btn" title="Relatório Orçamento Empresarial Agrupado por centro de custo, mensal">
             <i data-lucide="trending-up"></i> ${this.forecast ? "Trocar forecast" : "Subir forecast"}
             <input type="file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onchange="ResultadoCaixaApp.subirForecast(this)">
           </label>` : ""}
@@ -1674,32 +1753,6 @@ const ResultadoCaixaApp = {
     `;
   },
 
-  /** Cartões do mês, do acumulado e do ano anterior, acima da tabela. */
-  resumoHtml(total, totalA, saida) {
-    const atual = this.anoAtual();
-    const antN = atual > 1900 ? atual - 1 : 0;
-    const mesNome = this.MESES[(Number(this.mes) || 1) - 1] || "";
-    const unidade = this.escala === "milhoes" ? "R$ mi" : "R$";
-    const varTxt = (real, ref) => {
-      const v = real - ref;
-      const ruim = saida ? v > 0.5 : v < -0.5;
-      const bom = saida ? v < -0.5 : v > 0.5;
-      const p = this.pct(real, ref);
-      const pTxt = p.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
-      return `<span class="rcx-kpi-var ${ruim ? "is-neg" : (bom ? "is-pos" : "")}">${v > 0.5 ? "+" : ""}${this.fmt(v)} · ${pTxt}</span>`;
-    };
-    const card = (rotulo, valor, sub) => `<div class="rcx-kpi">
-      <span class="rcx-kpi-label">${rotulo}</span>
-      <strong>${this.fmt(valor)} <small>${unidade}</small></strong>
-      <div class="rcx-kpi-sub">${sub}</div>
-    </div>`;
-    return `<div class="rcx-kpis">
-      ${card(`Realizado em ${mesNome}/${atual || ""}`, total.real, `Orçado ${this.fmt(total.orc)} ${varTxt(total.real, total.orc)}`)}
-      ${card(`Acumulado até ${mesNome}/${atual || ""}`, totalA.real, `Orçado ${this.fmt(totalA.orc)} ${varTxt(totalA.real, totalA.orc)}`)}
-      ${card(`Acumulado ${antN || "ano anterior"}`, totalA.ant, this.dfcLendo ? "Carregando…" : `${atual || "Atual"} × ${antN || "anterior"} ${varTxt(totalA.real, totalA.ant)}`)}
-    </div>`;
-  },
-
   /** Barras do mês selecionado: realizado do ano anterior, orçado e realizado do ano atual. */
   graficoMesHtml(total) {
     const atual = this.anoAtual();
@@ -1728,8 +1781,8 @@ const ResultadoCaixaApp = {
   },
 
   /** Totais do ano em colunas empilhadas: a parte escura vai de janeiro até o mês escolhido e a clara segue até dezembro. */
-  graficoTotaisHtml() {
-    const s = this.serieEntradas();
+  graficoTotaisHtml(lado) {
+    const s = lado === "saidas" ? this.serieSaidas() : this.serieEntradas();
     const ano = this.anoAtual();
     const antN = ano > 1900 ? ano - 1 : 0;
     const sel = Number(this.mes) || 1;
@@ -1802,6 +1855,51 @@ const ResultadoCaixaApp = {
     };
   },
 
+  temMesConta(ano, m) {
+    const a = this.anoDados(ano);
+    if (!a) return false;
+    const chave = String(m);
+    return Object.keys(a.arquivos || {}).some((nome) => {
+      const arq = a.arquivos[nome] || {};
+      const listas = [];
+      if (arq.contasPorCc && Object.keys(arq.contasPorCc).length) {
+        Object.keys(arq.contasPorCc).forEach((id) => listas.push((arq.contasPorCc[id] || {}).contas || {}));
+      } else if (arq.contas) listas.push(arq.contas);
+      return listas.some((contas) => Object.keys(contas).some((code) => {
+        const meses = (contas[code] && contas[code].meses) || {};
+        return !!meses[chave];
+      }));
+    });
+  },
+
+  /** Séries mensais das saídas, no mesmo desenho das entradas: realizado até o mês e forecast até dezembro. */
+  serieSaidas() {
+    const ano = this.anoAtual();
+    const ant = ano - 1;
+    const sel = Number(this.mes) || 1;
+    const defs = this.contasSaida();
+    const soma = (y, m, campo) => defs.reduce((s, def) => s + this.somaSaidaDef(y, def, m, campo, false), 0);
+    const fc = this.forecastLado(ano, "saidas");
+    const meses = Array.from({ length: 12 }, (_, i) => i + 1);
+    const real = meses.map((m) => (m <= sel && this.temMesConta(ano, m) ? soma(ano, m, "r") : null));
+    const orc = meses.map((m) => (this.temMesConta(ano, m) ? soma(ano, m, "o") : null));
+    const semForecast = [];
+    const forecast = meses.map((m, i) => {
+      if (m <= sel) return real[i];
+      if (fc[m] != null) return fc[m];
+      if (!this.forecast) return null;
+      semForecast.push(m);
+      return orc[i];
+    });
+    return {
+      ant: meses.map((m) => (this.temMesConta(ant, m) ? soma(ant, m, "r") : null)),
+      orc,
+      real,
+      forecast,
+      semForecast
+    };
+  },
+
   passoEixo(bruto) {
     if (!(bruto > 0)) return 1;
     const p = Math.pow(10, Math.floor(Math.log10(bruto)));
@@ -1809,8 +1907,8 @@ const ResultadoCaixaApp = {
     return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p;
   },
 
-  graficoLinhasHtml() {
-    const s = this.serieEntradas();
+  graficoLinhasHtml(lado) {
+    const s = lado === "saidas" ? this.serieSaidas() : this.serieEntradas();
     const ano = this.anoAtual();
     const antN = ano > 1900 ? ano - 1 : 0;
     const sel = Number(this.mes) || 1;
@@ -1859,7 +1957,7 @@ const ResultadoCaixaApp = {
     else if (s.semForecast.length) nota = `O forecast não tem ${s.semForecast.map((m) => nomesMes[m - 1]).join(", ")}: nesses meses a linha usa o orçado.`;
     return `<div class="rcx-linhas">
       <div class="rcx-graf-tit">EVOLUÇÃO MENSAL/${ano || ""}</div>
-      <svg viewBox="0 0 ${W} ${H}" class="rcx-ln-svg" role="img" aria-label="Entradas por mês: ano anterior, orçado, realizado e forecast">
+      <svg viewBox="0 0 ${W} ${H}" class="rcx-ln-svg" role="img" aria-label="${lado === "saidas" ? "Saídas" : "Entradas"} por mês: ano anterior, orçado, realizado e forecast">
         ${grade.join("")}
         <line x1="${x(sel).toFixed(1)}" x2="${x(sel).toFixed(1)}" y1="${T}" y2="${H - B}" class="rcx-ln-sel"></line>
         ${letras.map((l, i) => `<text x="${x(i + 1).toFixed(1)}" y="${H - 8}" class="rcx-ln-eixo-x${i + 1 === sel ? " is-sel" : ""}">${l}</text>`).join("")}
@@ -2015,7 +2113,7 @@ const ResultadoCaixaApp = {
     const total = this.somaBloco(pack.rows, "mensal");
     const totalA = this.somaBloco(pack.rows, "acum");
     return faixa
-      + `<div class="rcx-topo">${this.graficoMesHtml(total)}${this.graficoLinhasHtml()}${this.graficoTotaisHtml()}</div>`
+      + `<div class="rcx-topo">${this.graficoMesHtml(total)}${this.graficoLinhasHtml("entradas")}${this.graficoTotaisHtml("entradas")}</div>`
       + this.gradeHtml("Produto", corpo, total, totalA, false);
   },
 
@@ -2038,102 +2136,8 @@ const ResultadoCaixaApp = {
     const todos = destaque.concat(miudos);
     const total = this.somaBloco(todos, "mensal");
     const totalA = this.somaBloco(todos, "acum");
-    return this.resumoHtml(total, totalA, true) + this.gradeHtml("Conta", corpo, total, totalA, true, true);
-  },
-
-  async refresh() {
-    this.loading = true;
-    this.error = "";
-    this.render();
-    try {
-      this.dates = await CaixaPosicaoStore.listDates();
-      this.rows = await CaixaPosicaoStore.loadDate(this.date);
-      this.compare = this.compareDate ? await CaixaPosicaoStore.loadDate(this.compareDate) : [];
-    } catch (e) {
-      this.error = e.message || String(e);
-    }
-    this.loading = false;
-    this.render();
-  },
-
-  async gravarHoje() {
-    this.saving = true;
-    this.error = "";
-    this.render();
-    try {
-      const units = await CaixaPosicaoStore.loadEstoqueUnits();
-      const today = (window.EstoqueComercialApp && typeof EstoqueComercialApp.todayStr === "function")
-        ? EstoqueComercialApp.todayStr()
-        : new Date().toISOString().slice(0, 10);
-      await CaixaPosicaoStore.saveFromUnits(units, today);
-      this.date = today;
-      await this.refresh();
-    } catch (e) {
-      this.error = e.message || String(e);
-      this.saving = false;
-      this.render();
-    }
-  },
-
-  sum(list, k) {
-    return (list || []).reduce((s, r) => s + (Number(r[k]) || 0), 0);
-  },
-
-  posicaoHtml() {
-    const rec = this.sum(this.rows, "rec");
-    const ven = this.sum(this.rows, "ven");
-    const av = this.sum(this.rows, "av");
-    const vp = this.sum(this.rows, "vp");
-    const rec2 = this.sum(this.compare, "rec");
-    const ven2 = this.sum(this.compare, "ven");
-    const av2 = this.sum(this.compare, "av");
-    const vp2 = this.sum(this.compare, "vp");
-    const dateOpts = this.dates.map((d) => `<option value="${d}" ${d === this.compareDate ? "selected" : ""}>${caixaFmtDate(d)}</option>`).join("");
-    const body = this.rows.slice(0, 400).map((r) => `
-      <tr>
-        <td>${caixaEsc(r.cc)} / ${caixaEsc(r.un)}</td>
-        <td>${caixaEsc(r.nome || "—")}</td>
-        <td>${caixaEsc(r.cpf || "—")}</td>
-        <td style="text-align:right;">${caixaMoney(r.rec)}</td>
-        <td style="text-align:right;">${caixaMoney(r.ven)}</td>
-        <td style="text-align:right;">${caixaMoney(r.av)}</td>
-        <td style="text-align:right;">${caixaMoney(r.vp)}</td>
-        <td style="text-align:right;">${r.pmp} d</td>
-      </tr>`).join("");
-    return `
-      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px;">
-        <label style="font-size:0.75rem;font-weight:700;color:#475569;">Posição
-          <input type="date" value="${this.date}" onchange="ResultadoCaixaApp.date=this.value;ResultadoCaixaApp.refresh()"
-            style="display:block;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;margin-top:4px;">
-        </label>
-        <label style="font-size:0.75rem;font-weight:700;color:#475569;">Comparar com
-          <select onchange="ResultadoCaixaApp.compareDate=this.value;ResultadoCaixaApp.refresh()"
-            style="display:block;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;margin-top:4px;">
-            <option value="">Nenhuma</option>${dateOpts}
-          </select>
-        </label>
-        <button class="btn btn-primary" onclick="ResultadoCaixaApp.gravarHoje()" ${this.saving ? "disabled" : ""}>${this.saving ? "Gravando…" : "Gravar posição de hoje"}</button>
-      </div>
-      <p class="rcx-nota">Posição diária gravada: unidade, cliente, recebido, vencido, a vencer e valor presente.</p>
-      ${this.error && this.aba === "posicao" ? `<div class="rcx-erro">${caixaEsc(this.error)}</div>` : ""}
-      <div class="est-stock-kpis" style="margin-bottom:12px;">
-        <div class="est-fin-card is-ok"><label>Recebido</label><strong>${caixaMoney(rec)}</strong>${this.compare.length ? `<small>vs ${caixaMoney(rec2)}</small>` : ""}</div>
-        <div class="est-fin-card is-warn"><label>Vencido</label><strong>${caixaMoney(ven)}</strong>${this.compare.length ? `<small>vs ${caixaMoney(ven2)}</small>` : ""}</div>
-        <div class="est-fin-card"><label>A vencer / a pagar</label><strong>${caixaMoney(av)}</strong>${this.compare.length ? `<small>vs ${caixaMoney(av2)}</small>` : ""}</div>
-        <div class="est-fin-card"><label>Valor presente</label><strong>${caixaMoney(vp)}</strong>${this.compare.length ? `<small>vs ${caixaMoney(vp2)}</small>` : ""}</div>
-      </div>
-      ${this.loading ? `<p style="color:#64748b;">Carregando posição…</p>` : `
-      <div class="table-container crm-scroll-table" style="max-height:52vh;background:#fff;border-radius:8px;">
-        <table class="custom-table">
-          <thead><tr>
-            <th>Unidade</th><th>Cliente</th><th>CPF</th>
-            <th>Recebido</th><th>Vencido</th><th>A vencer</th><th>Valor presente</th><th>PMP 3m</th>
-          </tr></thead>
-          <tbody>${body || `<tr><td colspan="8" style="text-align:center;padding:24px;color:#94a3b8;">Sem posição nesta data.</td></tr>`}</tbody>
-        </table>
-      </div>
-      ${this.rows.length > 400 ? `<p style="font-size:0.8rem;color:#64748b;">Exibindo 400 de ${this.rows.length} contratos.</p>` : ""}`}
-    `;
+    return `<div class="rcx-topo">${this.graficoMesHtml(total)}${this.graficoLinhasHtml("saidas")}${this.graficoTotaisHtml("saidas")}</div>`
+      + this.gradeHtml("Conta", corpo, total, totalA, true, true);
   },
 
   arquivoMl() {
@@ -2230,12 +2234,26 @@ const ResultadoCaixaApp = {
     const groups = (FC.visao().groups || []).slice();
     const byId = {};
     groups.forEach((g) => {
-      byId[g.id] = { id: g.id, nome: g.name || g.id, tipo: g.type || "", parentId: g.parentId || "", meses: this.bagMes(), ccs: {} };
+      byId[g.id] = { id: g.id, nome: g.name || g.id, tipo: g.type || "", parentId: g.parentId || "", meses: this.bagMes(), ccs: {}, planos: {} };
     });
     const porCod = this.porCodigoVisao(groups);
     const porCc = (node, ccId, nome) => {
       const id = String(ccId || "—");
       const bag = node.ccs[id] || (node.ccs[id] = { nome: nome || id, meses: this.bagMes() });
+      if (nome) bag.nome = nome;
+      return bag;
+    };
+    const planoDe = (node, code, nome) => {
+      const key = this.codigoPlano(code);
+      if (!node || !this.ehContaFinanceira(key)) return null;
+      const bag = node.planos[key] || (node.planos[key] = { code: key, nome: nome || key, meses: this.bagMes(), ccs: {} });
+      if (nome && nome !== key) bag.nome = nome;
+      return bag;
+    };
+    const ccDoPlano = (plano, ccId, nome) => {
+      if (!plano) return null;
+      const id = String(ccId || "—").replace(/\D/g, "") || String(ccId || "—");
+      const bag = plano.ccs[id] || (plano.ccs[id] = { nome: nome || id, meses: this.bagMes() });
       if (nome) bag.nome = nome;
       return bag;
     };
@@ -2258,6 +2276,23 @@ const ResultadoCaixaApp = {
         });
       });
     }
+    Object.keys((arq && arq.planosPorCc) || {}).forEach((cc) => {
+      const bloco = arq.planosPorCc[cc] || {};
+      Object.keys(bloco.contas || {}).forEach((code) => {
+        const info = bloco.contas[code] || {};
+        const alvo = info.node && byId[info.node];
+        if (!alvo || alvo.tipo === "formula") return;
+        const plano = planoDe(alvo, code, info.nome);
+        const ccBag = ccDoPlano(plano, cc, bloco.nome);
+        Object.keys(info.meses || {}).forEach((mm) => {
+          const i = Number(mm) - 1;
+          if (i < 0 || i > 11) return;
+          const o = Number(info.meses[mm].o) || 0;
+          if (plano) plano.meses[i].o += o;
+          if (ccBag) ccBag.meses[i].o += o;
+        });
+      });
+    });
     const ccMl = new Set(Object.keys((arq && arq.contasPorCc) || {}));
     const mapa = await this.mapaPronto();
     if (this.forecast && this.forecast.contas) {
@@ -2268,7 +2303,9 @@ const ResultadoCaixaApp = {
           const conta = this.forecast.contas[cc][code];
           const node = this.noDaLinha(FC, mapa, { code: code, nome: conta.nome || "" });
           if (!node || !byId[node.id]) return;
+          const plano = planoDe(byId[node.id], code, conta.nome || "");
           const bag = porCc(byId[node.id], cc, nomeCc);
+          const ccPlano = ccDoPlano(plano, cc, nomeCc);
           Object.keys(conta.meses || {}).forEach((ym) => {
             if (Number(ym.slice(0, 4)) !== Number(ano)) return;
             const i = Number(ym.slice(5, 7)) - 1;
@@ -2279,6 +2316,8 @@ const ResultadoCaixaApp = {
             }
             byId[node.id].meses[i].f += valor;
             bag.meses[i].f += valor;
+            if (plano) plano.meses[i].f += valor;
+            if (ccPlano) ccPlano.meses[i].f += valor;
           });
         });
       });
@@ -2303,8 +2342,12 @@ const ResultadoCaixaApp = {
           if (!node || !byId[node.id]) return;
           const signed = FC.signedAmount(node, a.categoryId, a.categoryName, a.amount, a.reducer, a.categoryType, a.mov);
           if (!signed || mi < 0) return;
+          const plano = planoDe(byId[node.id], a.categoryId, a.categoryName || "");
+          const ccPlano = ccDoPlano(plano, a.costCenterId, a.costCenterName);
           byId[node.id].meses[mi].r += signed;
           porCc(byId[node.id], a.costCenterId, a.costCenterName).meses[mi].r += signed;
+          if (plano) plano.meses[mi].r += signed;
+          if (ccPlano) ccPlano.meses[mi].r += signed;
         });
         const valor = this.sinalMovimento(mov);
         if (!valor) return;
@@ -2374,7 +2417,16 @@ const ResultadoCaixaApp = {
       const filhos = groups.filter((g) => g.parentId === node.id);
       const item = byId[node.id];
       if (!item) return;
-      linhas.push({ id: item.id, nome: item.nome, tipo: item.tipo, level: level, hasKids: filhos.length > 0, meses: item.meses, ccs: item.ccs });
+      const vivo = (meses) => (meses || []).some((m) => Math.abs(m.o) > 0.5 || Math.abs(m.r) > 0.5 || Math.abs(m.f) > 0.5);
+      const planos = Object.keys(item.planos || {}).map((k) => {
+        const p = item.planos[k];
+        const ccs = Object.keys(p.ccs || {}).map((id) => ({ id: id, nome: p.ccs[id].nome || id, meses: p.ccs[id].meses }))
+          .filter((c) => vivo(c.meses))
+          .sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt"));
+        return { code: p.code, nome: p.nome || p.code, meses: p.meses, ccs: ccs };
+      }).filter((p) => vivo(p.meses) || p.ccs.length)
+        .sort((a, b) => String(a.code).localeCompare(String(b.code), "pt", { numeric: true }));
+      linhas.push({ id: item.id, nome: item.nome, tipo: item.tipo, level: level, hasKids: filhos.length > 0, planos: filhos.length ? [] : planos, meses: item.meses, ccs: item.ccs });
       filhos.forEach((ch) => walk(ch, level + 1));
     };
     groups.filter((g) => !g.parentId).forEach((g) => walk(g, 0));
@@ -2521,11 +2573,29 @@ const ResultadoCaixaApp = {
       ocultar = 0;
       if (!this.mlVisivel(linha)) return;
       const aberto = !!abertos[linha.id];
+      const temPlano = !linha.hasKids && (linha.planos || []).length > 0;
       if (linha.hasKids && !aberto) ocultar = linha.level;
-      const nome = linha.hasKids
+      const nome = (linha.hasKids || temPlano)
         ? `<button type="button" class="rcx-ml-no" onclick="ResultadoCaixaApp.toggleNoMl('${linha.id}')">${aberto ? "▾" : "▸"} ${caixaEsc(linha.nome)}</button>`
         : `<span class="rcx-ml-no">${caixaEsc(linha.nome)}</span>`;
       linhas.push(`<tr class="is-n${linha.level}${linha.tipo === "formula" ? " is-formula" : ""}"><th>${nome}</th>${bloco(linha.meses)}</tr>`);
+      if (!(aberto && temPlano)) return;
+      (linha.planos || []).forEach((p) => {
+        const pid = linha.id + "||" + p.code;
+        const pAberto = !!abertos[pid];
+        const temCc = (p.ccs || []).length > 0;
+        const rotulo = p.code + (p.nome && p.nome !== p.code ? " - " + p.nome : "");
+        const nomeP = temCc
+          ? `<button type="button" class="rcx-ml-no" onclick="ResultadoCaixaApp.toggleNoMl('${pid}')">${pAberto ? "▾" : "▸"} ${caixaEsc(rotulo)}</button>`
+          : `<span class="rcx-ml-no">${caixaEsc(rotulo)}</span>`;
+        linhas.push(`<tr class="is-plano"><th>${nomeP}</th>${bloco(p.meses)}</tr>`);
+        if (!pAberto) return;
+        (p.ccs || []).forEach((cc) => {
+          const bruto = String(cc.nome || "").trim();
+          const rotuloCc = !bruto || bruto === cc.id ? cc.id : (bruto.indexOf(String(cc.id)) === 0 ? bruto : cc.id + " — " + bruto);
+          linhas.push(`<tr class="is-cc"><th><span class="rcx-ml-no">${caixaEsc(rotuloCc)}</span></th>${bloco(cc.meses)}</tr>`);
+        });
+      });
     });
     const span = cols.reduce((s, c) => s + (c.futuro ? 2 : 4), 0) + 4;
     let painel = "";
@@ -2618,7 +2688,7 @@ const ResultadoCaixaApp = {
     const tab = (id, label, icon) => `<button type="button" role="tab" aria-selected="${aba === id}" class="ml-tab${aba === id ? " is-active" : ""}" onclick="ResultadoCaixaApp.setAba('${id}')"><i data-lucide="${icon}"></i> ${label}</button>`;
     let corpo = "";
     try {
-      corpo = aba === "posicao" ? this.posicaoHtml() : (aba === "caixa" ? this.caixaHtml() : this.orcamentoHtml(aba));
+      corpo = aba === "caixa" ? this.caixaHtml() : this.orcamentoHtml(aba);
     } catch (e) {
       console.error("[Resultado de caixa]", e);
       const msg = String((e && e.message) || e || "erro ao montar a tela");
@@ -2630,7 +2700,6 @@ const ResultadoCaixaApp = {
           ${tab("entradas", "Entradas", "trending-up")}
           ${tab("saidas", "Saídas", "trending-down")}
           ${tab("caixa", "Caixa ML", "landmark")}
-          ${tab("posicao", "Posição", "scale")}
         </div>
         ${corpo}
       </div>`;

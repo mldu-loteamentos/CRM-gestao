@@ -961,8 +961,14 @@ ComprasControleApp.temDadosForma = function (data) {
   return !!window.BoletoCheck && BoletoCheck.temDadosForma(data);
 };
 
+ComprasControleApp.textoErroSienge = function (msg) {
+  const m = String(msg || "").trim();
+  if (/\b429\b/.test(m)) return "O Sienge limitou as consultas (429). A leitura parou por excesso de chamadas. Feche e abra o título de novo em instantes.";
+  return m || "O Sienge não respondeu.";
+};
+
 ComprasControleApp.formaFalhaHtml = function (payment) {
-  return `<p style="color:#b45309;"><strong>Não foi possível consultar a forma de pagamento.</strong> ${this.esc(payment.erro)} Feche e abra o título de novo.</p>`;
+  return `<p style="color:#b45309;"><strong>Não foi possível consultar a forma de pagamento.</strong> ${this.esc(this.textoErroSienge(payment.erro))}</p>`;
 };
 
 ComprasControleApp.formaHtml = function (payment, row) {
@@ -1080,9 +1086,10 @@ ComprasControleApp.abrirTituloRow = async function (row) {
         this._tituloDetalhe.fiscalLoading = false;
         if (fiscal && Array.isArray(fiscal.impostos) && fiscal.impostos.length) this._tituloDetalhe.impostos = fiscal.impostos;
         this.pintarTitulo();
-      }).catch(() => {
+      }).catch((e) => {
         if (this._tituloGen !== gen || !this._tituloDetalhe) return;
         this._tituloDetalhe.fiscalLoading = false;
+        this._tituloDetalhe.fiscalErro = this.textoErroSienge(e && e.message);
         this.pintarTitulo();
       });
     }
@@ -1094,7 +1101,7 @@ ComprasControleApp.abrirTituloRow = async function (row) {
   } catch (e) {
     if (this._tituloGen !== gen) return;
     this._tituloDetalhe.loading = false;
-    this._tituloDetalhe.error = (e && e.message) ? e.message : "Não consegui abrir o título.";
+    this._tituloDetalhe.error = this.textoErroSienge((e && e.message) || "Não consegui abrir o título.");
     this.pintarTitulo();
   }
 };
@@ -1170,6 +1177,7 @@ ComprasControleApp.irEtapa = function (id) {
 
 ComprasControleApp.impostosRetidosHtml = function (det, row) {
   if (det.fiscal && window.NotaFiscalCheck) return NotaFiscalCheck.html(det.fiscal);
+  if (det.fiscalErro) return `<p style="color:#b45309;"><strong>A conferência fiscal parou.</strong> ${this.esc(det.fiscalErro)}</p>`;
   if (det.fiscalLoading) return `<p class="cfin-titulo-wait">Lendo os impostos retidos no Sienge e na nota…</p>`;
   const docId = String((row && row.docId) || "").trim();
   const docNome = String((row && row.docNome) || "").trim();
@@ -1346,7 +1354,7 @@ ComprasControleApp.pintarTitulo = function () {
       docId: docIdAba,
       docNome: docNomeAba
     })));
-    const nivelImp = det.fiscalLoading && !det.fiscal ? "espera" : (det.fiscal ? (det.fiscal.nivel === "info" ? "aviso" : det.fiscal.nivel) : "");
+    const nivelImp = det.fiscalErro ? "aviso" : (det.fiscalLoading && !det.fiscal ? "espera" : (det.fiscal ? (det.fiscal.nivel === "info" ? "aviso" : det.fiscal.nivel) : ""));
     const rank = { erro: 6, negada: 6, aviso: 5, sem: 5, info: 4, analise: 3, espera: 2, ok: 1 };
     const nivelAba = validada ? "ok" : ((rank[nivelImp] || 0) >= (rank[fiscalNivel] || 0) ? nivelImp : fiscalNivel);
     if (mostraFiscal && validada) etapas.push({

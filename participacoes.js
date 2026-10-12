@@ -2109,7 +2109,7 @@ const ParticipacoesApp = {
     root.innerHTML = `
       <div class="part-page">
         <div class="part-head">
-          <div class="part-toolbar-filters">
+          <div class="part-toolbar">
             <div class="part-emp-box" id="part-emp-box"></div>
             <label class="part-field">
               <span class="ml-emp-filter-label">Período</span>
@@ -2123,22 +2123,25 @@ const ParticipacoesApp = {
               <input class="part-input" placeholder="Credor, detalhe, categoria, data..." value="${this.esc(this.q)}"
                 oninput="ParticipacoesApp.q=this.value;ParticipacoesApp.render()">
             </label>
-          </div>
-          <div class="part-toolbar-actions">
-            <label class="part-field part-field-excel">
+            <label class="part-field">
               <span class="ml-emp-filter-label">Excel</span>
               <select class="part-input" onchange="ParticipacoesApp.exportScope=this.value" title="Abrangência da exportação">
                 <option value="current" ${this.exportScope === "current" ? "selected" : ""}>Empresa atual</option>
                 <option value="all" ${this.exportScope === "all" ? "selected" : ""}>Todas as empresas</option>
               </select>
             </label>
-            <button type="button" class="btn btn-excel" onclick="ParticipacoesApp.exportExcel()" ${!this.companyId && this.exportScope === "current" ? "disabled" : ""} title="Exportar tabela atual para Excel">
-              <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
-            </button>
-            <label class="btn btn-secondary part-upload ${uploadDisabled ? "is-disabled" : ""}" title="${uploadDisabled ? "Selecione a empresa para enviar PDFs" : "Enviar PDFs da prestação de contas"}">
-              <i data-lucide="upload" style="width:14px;height:14px;"></i> Enviar PDFs
-              <input type="file" accept="application/pdf,.pdf" multiple ${uploadDisabled ? "disabled" : ""} style="display:none" onchange="ParticipacoesApp.onUpload(this)">
-            </label>
+            <div class="part-field part-field-actions">
+              <span class="ml-emp-filter-label">Ações</span>
+              <div class="part-action-row">
+                <button type="button" class="btn btn-excel" onclick="ParticipacoesApp.exportExcel()" ${!this.companyId && this.exportScope === "current" ? "disabled" : ""} title="Exportar tabela atual para Excel">
+                  <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
+                </button>
+                <label class="btn btn-primary part-upload ${uploadDisabled ? "is-disabled" : ""}" title="${uploadDisabled ? "Selecione a empresa para enviar PDFs" : "Enviar PDFs da prestação de contas"}">
+                  <i data-lucide="upload" style="width:14px;height:14px;"></i> Enviar PDFs
+                  <input type="file" accept="application/pdf,.pdf" multiple ${uploadDisabled ? "disabled" : ""} style="display:none" onchange="ParticipacoesApp.onUpload(this)">
+                </label>
+              </div>
+            </div>
           </div>
         </div>
 

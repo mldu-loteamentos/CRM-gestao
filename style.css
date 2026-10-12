@@ -1671,8 +1671,6 @@ circle.donut-segment {
   background: linear-gradient(90deg, #bbf7d0 0%, #16a34a 46%, #105436 100%) !important;
   transition: width 0.3s ease;
 }
-.ml-load-pct { font-size: 12px; font-weight: 700; color: #475569; font-variant-numeric: tabular-nums; }
-
 /* Custom Delay Badges for Overdue Aging Scale */
 .delay-badge {
   display: inline-flex;
@@ -6659,39 +6657,28 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
   background: #fff;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
-  padding: 16px 18px 14px;
+  padding: 14px 16px;
   margin-bottom: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
 }
-.part-toolbar-filters {
+.part-toolbar {
   display: grid;
-  grid-template-columns: minmax(280px, 1.5fr) minmax(200px, 0.75fr) minmax(240px, 1.1fr);
-  gap: 16px 20px;
+  grid-template-columns: minmax(220px, 1.7fr) minmax(160px, 0.85fr) minmax(180px, 1.15fr) minmax(148px, 0.7fr) auto;
+  gap: 12px 14px;
   align-items: end;
 }
-.part-toolbar-actions {
-  display: flex;
-  align-items: flex-end;
-  justify-content: flex-end;
-  gap: 12px;
-  margin: 0;
-  padding-top: 12px;
-  border-top: 1px solid #f1f5f9;
-  flex-wrap: wrap;
-}
 #participacoes-root .part-emp-box { min-width: 0; }
-#participacoes-root .ml-emp-filter { width: 100%; max-width: none; min-width: 0; }
-#participacoes-root .ml-emp-filter-btn { height: 38px; min-height: 38px; width: 100%; }
+#participacoes-root .part-toolbar .ml-emp-filter { width: 100%; max-width: none; min-width: 0; flex: none; }
+#participacoes-root .part-toolbar .ml-emp-filter-btn { height: 36px; min-height: 36px; width: 100%; border-radius: 6px; }
 .part-field { display: flex; flex-direction: column; gap: 6px; margin: 0; min-width: 0; }
-.part-field .ml-emp-filter-label { display: block; }
-.part-field-excel { flex: 0 1 240px; min-width: 200px; }
+.part-toolbar .ml-emp-filter-label { display: block; margin-bottom: 0; }
+#participacoes-root .part-toolbar .ml-emp-filter .ml-emp-filter-label { margin-bottom: 6px; }
+.part-field-actions { min-width: max-content; }
+.part-action-row { display: flex; align-items: center; gap: 8px; }
 .part-input {
-  height: 38px;
+  height: 36px;
   width: 100%;
   border: 1px solid #cbd5e1;
-  border-radius: 8px;
+  border-radius: 6px;
   background: #fff;
   padding: 0 12px;
   font-size: 0.84rem;
@@ -6702,9 +6689,20 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .part-input::placeholder { color: #94a3b8; }
 .part-input:focus { outline: none; border-color: #105436; box-shadow: 0 0 0 2px rgba(16, 84, 54, 0.15); }
 .part-input:disabled { background: #f8fafc; color: #94a3b8; border-color: #cbd5e1; }
-.part-toolbar-actions .btn,
-.part-toolbar-actions .btn-excel { height: 38px; white-space: nowrap; }
-.part-upload { display: inline-flex; align-items: center; gap: 6px; margin: 0; cursor: pointer; padding: 0 16px; }
+.part-toolbar .btn,
+.part-toolbar .btn-excel,
+.part-upload {
+  height: 36px;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+.part-toolbar .btn-excel { border-radius: 4px; }
+.part-upload { display: inline-flex; align-items: center; gap: 6px; margin: 0; cursor: pointer; }
 .part-upload.is-disabled { opacity: 0.55; cursor: not-allowed; }
 .part-alert { margin-bottom: 10px; padding: 7px 12px; border-radius: 8px; font-size: 0.76rem; line-height: 1.4; }
 .part-alert.is-error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
@@ -6724,9 +6722,13 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .part-btn-sm { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; font-size: 0.78rem; font-weight: 600; }
 .part-summary-total { font-size: 1.05rem; font-weight: 800; color: #105436; margin-left: 4px; white-space: nowrap; }
 .part-tabs { margin-bottom: 12px; }
-@media (max-width: 980px) {
-  .part-toolbar-filters { grid-template-columns: 1fr; }
-  .part-toolbar-actions { justify-content: flex-start; }
+@media (max-width: 1180px) {
+  .part-toolbar { grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.8fr) minmax(0, 1fr); }
+  .part-field-actions { grid-column: 1 / -1; min-width: 0; }
+}
+@media (max-width: 760px) {
+  .part-toolbar { grid-template-columns: 1fr; }
+  .part-action-row { flex-wrap: wrap; }
 }
 .part-empty { padding: 18px; color: #64748b; font-size: 0.85rem; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 12px; }
 .part-empty.is-center { text-align: center; }
@@ -9288,8 +9290,8 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .vc-spin { animation: vcGira 0.9s linear infinite; }
 @keyframes vcGira { to { transform: rotate(360deg); } }
 .vc-scroll { max-height: calc(100vh - 300px); }
-.cc-table.vc-table { font-size: 0.78rem; }
-.cc-table.vc-table thead th { padding: 8px 8px; }
+.cc-table.vc-table { font-size: 0.78rem; border-collapse: separate; border-spacing: 0; }
+.cc-table.vc-table thead th { padding: 8px 8px; z-index: 4; background: #1b8253; background-clip: padding-box; box-shadow: inset 0 -1px 0 #146b42; }
 .cc-table.vc-table thead th:first-child, .cc-table.vc-table td:first-child { padding-left: 4px; padding-right: 4px; }
 .cc-table.vc-table td { height: 32px; padding: 3px 8px; }
 .cc-table.vc-table input[type="checkbox"] { width: 15px; height: 15px; margin: 0; accent-color: #105436; vertical-align: middle; }
@@ -9560,7 +9562,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
   .emp-busca { max-width: none; }
 }
 
-.soc-page { display: flex; flex-direction: column; height: calc(100vh - 154px); min-height: 480px; }
+.soc-page { display: flex; flex-direction: column; height: calc(100vh - 174px); min-height: 0; }
 .soc-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 0 2px 12px; }
 .soc-help { margin: 0; max-width: 460px; font-size: 0.8rem; line-height: 1.45; color: #64748b; }
 .soc-toolbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -9570,7 +9572,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .soc-btn-import:hover { background: #d85f16; color: #fff; }
 .soc-body { display: flex; flex: 1; min-height: 0; gap: 12px; }
 .soc-stage { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; }
-.soc-canvas-wrap { flex: 1; overflow: auto; background-color: #f7faf8; background-image: radial-gradient(#d5e5db 1.1px, transparent 1.1px); background-size: 20px 20px; }
+.soc-canvas-wrap { flex: 1; min-height: 0; overflow: auto; display: flex; justify-content: center; align-items: flex-start; background-color: #f7faf8; background-image: radial-gradient(#d5e5db 1.1px, transparent 1.1px); background-size: 20px 20px; }
 .soc-canvas { position: relative; }
 .soc-edges { position: absolute; left: 0; top: 0; z-index: 1; pointer-events: none; }
 .soc-edge-labels { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
@@ -9584,7 +9586,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .soc-node-tag { background: rgba(255, 255, 255, 0.18); }
 .soc-port { position: absolute; left: 50%; top: -7px; transform: translateX(-50%); width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 2px solid #105436; cursor: crosshair; z-index: 3; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12); }
 .soc-port-bottom { top: auto; bottom: -7px; }
-.soc-foot { border-top: 1px solid #e8eee9; background: #fff; padding: 10px 14px 12px; max-height: 30%; overflow: auto; }
+.soc-foot { border-top: 1px solid #e8eee9; background: #fff; padding: 8px 12px 10px; max-height: 24%; overflow: auto; }
 .soc-legend { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
 .soc-chip { font-size: 0.68rem; font-weight: 800; color: #fff; border-radius: 999px; padding: 3px 8px; }
 .soc-chip.is-pj { background: #166534; }
@@ -9613,15 +9615,19 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .rcx-ml-scroll { overflow: auto; max-height: 62vh; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; margin-bottom: 14px; }
 .rcx-ml { border-collapse: separate; border-spacing: 0; font-size: 0.78rem; min-width: 100%; }
 .rcx-ml th, .rcx-ml td { padding: 6px 8px; border-bottom: 1px solid #e2e8f0; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.rcx-ml thead th { position: sticky; top: 0; background: #105436; color: #fff; z-index: 2; font-size: 0.68rem; }
-.rcx-ml thead tr:nth-child(2) th { top: 28px; background: #1b8253; }
-.rcx-ml tbody th { text-align: left; position: sticky; left: 0; background: #fff; z-index: 1; min-width: 220px; font-weight: 650; }
-.rcx-ml tr.is-n0 th, .rcx-ml tr.is-n0 td { background: #105436; color: #fff; font-weight: 800; }
-.rcx-ml tr.is-n1 th, .rcx-ml tr.is-n1 td { background: #d1fae5; color: #14532d; }
-.rcx-ml tr.is-n2 th, .rcx-ml tr.is-n2 td { background: #fff; color: #1e293b; }
-.rcx-ml tr.is-formula th, .rcx-ml tr.is-formula td { background: #ecfdf5; color: #105436; font-weight: 800; }
-.rcx-ml td.is-neg { color: #b91c1c; }
-.rcx-ml td.is-fc { color: #1d4ed8; }
+.rcx-ml thead th { position: sticky; top: 0; background: #e7f3eb; color: #1e4d38; z-index: 2; font-size: 0.68rem; }
+.rcx-ml thead tr:nth-child(2) th { top: 28px; background: #f4faf6; color: #245c42; }
+.rcx-ml tbody th { text-align: left; position: sticky; left: 0; background: #fff; z-index: 1; min-width: 240px; font-weight: 650; }
+.rcx-ml tr.is-n0 th, .rcx-ml tr.is-n0 td { background: #e5f2ea; color: #1e4d38; font-weight: 700; }
+.rcx-ml tr.is-n1 th, .rcx-ml tr.is-n1 td { background: #f3faf6; color: #243028; }
+.rcx-ml tr.is-n2 th, .rcx-ml tr.is-n2 td { background: #fff; color: #334155; }
+.rcx-ml tr.is-plano th, .rcx-ml tr.is-plano td { background: #fff; color: #3d4a42; font-weight: 600; }
+.rcx-ml tr.is-plano th { padding-left: 28px; }
+.rcx-ml tr.is-cc th, .rcx-ml tr.is-cc td { background: #f7faf8; color: #5c6b63; font-weight: 500; }
+.rcx-ml tr.is-cc th { padding-left: 48px; }
+.rcx-ml tr.is-formula th, .rcx-ml tr.is-formula td { background: #f6fbf8; color: #2a6248; font-weight: 700; }
+.rcx-ml td.is-neg { color: #b45353; }
+.rcx-ml td.is-fc { color: #3d6f99; }
 .rcx-ml td.is-tot { font-weight: 800; }
 .rcx-ml-abre, .rcx-ml-no { border: 0; background: transparent; color: inherit; font: inherit; font-weight: 800; cursor: pointer; text-align: left; }
 .rcx-ml-abre.is-on { text-decoration: underline; }

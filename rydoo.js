@@ -418,23 +418,22 @@ const RydooApp = {
         #rydoo-root .rydoo-why { margin-top:4px; color:#475569; font-size:12px; }
         #rydoo-root .rydoo-empty, #rydoo-root .rydoo-error { padding:22px; color:#64748b; }
         #rydoo-root .rydoo-error { color:#b91c1c; }
-        #rydoo-root .rydoo-tree { display:flex; flex-direction:column; background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:10px; }
-        #rydoo-root .rydoo-node { display:flex; align-items:center; gap:8px; padding:8px 12px; margin-bottom:5px; border:1px solid #e2e8f0; border-left:4px solid #cbd5e1; border-radius:6px; background:#fff; }
+        #rydoo-root .rydoo-tree { display:flex; flex-direction:column; gap:8px; background:transparent; border:0; padding:0; }
+        #rydoo-root .rydoo-node { display:flex; align-items:center; gap:10px; padding:10px 14px; margin:0; border:0; border-radius:0; background:#fff; }
         #rydoo-root .rydoo-node-toggle { cursor:pointer; }
-        #rydoo-root .rydoo-node-toggle:hover { box-shadow:inset 0 0 0 9999px rgba(16,84,54,.06); }
-        #rydoo-root .rydoo-n0 { background:#f8fafc; border-left-color:#cbd5e1; margin-top:6px; }
-        #rydoo-root .rydoo-n0.rydoo-done { background:#ecfdf5; border-left-color:#105436; }
-        #rydoo-root .rydoo-n0.rydoo-blocked { background:#fef2f2; border-color:#fecaca; border-left-color:#dc2626; }
-        #rydoo-root .rydoo-ugroup { margin-top:8px; border:1px solid transparent; border-radius:10px; }
-        #rydoo-root .rydoo-ugroup > .rydoo-n0 { margin-top:0; }
-        #rydoo-root .rydoo-ugroup.is-open { border-color:#d7e6de; background:#f8fafc; padding:6px; margin:8px 0; }
-        #rydoo-root .rydoo-ugroup.is-open > .rydoo-n0 { background:#fff; border-left-color:#105436; }
-        #rydoo-root .rydoo-nest { margin:6px 4px 2px 18px; padding-left:12px; border-left:2px solid #d7e6de; display:flex; flex-direction:column; gap:4px; }
-        #rydoo-root .rydoo-n1 { background:#fff; border-left-color:#0f766e; }
-        #rydoo-root .rydoo-n2 { background:#fff; border-left-color:#94a3b8; }
-        #rydoo-root .rydoo-n3 { background:#f8fafc; border-left-color:#cbd5e1; align-items:flex-start; }
-        #rydoo-root .rydoo-n3.rydoo-row-revisar { border-left-color:#f37021; background:#fffaf3; }
-        #rydoo-root .rydoo-n3.rydoo-row-divergente { border-left-color:#dc2626; background:#fff7f7; }
+        #rydoo-root .rydoo-node-toggle:hover { background:#f4fbf7; }
+        #rydoo-root .rydoo-n0 { align-items:center; padding:12px 14px; }
+        #rydoo-root .rydoo-n0.rydoo-done { background:#f4fbf7; }
+        #rydoo-root .rydoo-n0.rydoo-blocked { background:#fff7f7; }
+        #rydoo-root .rydoo-ugroup { border:1px solid #e2e8f0; border-radius:10px; background:#fff; overflow:hidden; }
+        #rydoo-root .rydoo-ugroup.is-open { border-color:#c5ddd0; }
+        #rydoo-root .rydoo-ugroup.is-open > .rydoo-n0 { border-bottom:1px solid #e7f0eb; }
+        #rydoo-root .rydoo-nest { margin:0; padding:0; border:0; display:flex; flex-direction:column; gap:0; }
+        #rydoo-root .rydoo-n1 { padding-left:42px; border-top:1px solid #f1f5f9; }
+        #rydoo-root .rydoo-n2 { padding-left:64px; background:#fafafa; border-top:1px solid #f1f5f9; }
+        #rydoo-root .rydoo-n3 { padding-left:64px; align-items:flex-start; background:#fff; border-top:1px solid #f1f5f9; }
+        #rydoo-root .rydoo-n3.rydoo-row-revisar { background:#fffaf3; }
+        #rydoo-root .rydoo-n3.rydoo-row-divergente { background:#fff7f7; }
         #rydoo-root .rydoo-chev { width:16px; height:16px; flex:none; display:inline-flex; align-items:center; justify-content:center; color:#64748b; }
         #rydoo-root .rydoo-chev svg { width:14px; height:14px; }
         #rydoo-root .rydoo-ico { width:14px; height:14px; flex:none; }
@@ -443,8 +442,11 @@ const RydooApp = {
         #rydoo-root .rydoo-n1 .rydoo-ico { color:#0f766e; }
         #rydoo-root .rydoo-n2 .rydoo-ico { color:#ca8a04; }
         #rydoo-root .rydoo-n3 .rydoo-ico { color:#94a3b8; margin-top:2px; }
-        #rydoo-root .rydoo-user-main { display:flex; flex-direction:column; gap:2px; min-width:0; flex:1; }
+        #rydoo-root .rydoo-user-main { display:flex; flex-direction:column; gap:1px; min-width:0; flex:1; }
         #rydoo-root .rydoo-name { font-size:13.5px; color:#1e293b; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        #rydoo-root .rydoo-credor { color:#64748b; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        #rydoo-root .rydoo-titulo { border:0; background:#dcfce7; color:#166534; font-weight:700; font-size:12px; border-radius:999px; padding:4px 10px; cursor:pointer; white-space:nowrap; }
+        #rydoo-root .rydoo-titulo:hover { background:#bbf7d0; }
         #rydoo-root .rydoo-n0 .rydoo-name { font-weight:800; color:#334155; font-size:14.5px; }
         #rydoo-root .rydoo-n0.rydoo-done .rydoo-name { color:#105436; }
         #rydoo-root .rydoo-n1 .rydoo-name { font-weight:700; }
@@ -556,7 +558,6 @@ const RydooApp = {
           <div class="loading-status-text">Analisando os dados do Rydoo</div>
           <div class="rydoo-hint" id="rydoo-prep-msg" style="margin:0;">${this.esc(this.state.prepMsg || "")}</div>
           <div class="ml-load-track"><div class="loading-progress-bar" id="rydoo-prep-bar" style="width:${pct}%"></div></div>
-          <div class="ml-load-pct" id="rydoo-prep-pct">${pct}%</div>
         </div>
       </div>`;
       return;
@@ -582,8 +583,6 @@ const RydooApp = {
     if (msg) msg.textContent = s.prepMsg || "";
     const bar = document.getElementById("rydoo-prep-bar");
     if (bar) bar.style.width = (s.prepPct || 0) + "%";
-    const pct = document.getElementById("rydoo-prep-pct");
-    if (pct) pct.textContent = (s.prepPct || 0) + "%";
     ["rydoo-btn-marcar", "rydoo-btn-gerar"].forEach((id) => {
       const b = document.getElementById(id);
       if (b) b.disabled = !s.rows.length || s.preparing;
@@ -605,6 +604,24 @@ const RydooApp = {
     if (!this.state[bag]) this.state[bag] = {};
     this.state[bag][key] = !this.state[bag][key];
     this.renderList();
+  },
+
+  abrirTitulo(pessoa) {
+    const g = (this.state.groups || []).find((x) => x.pessoa === pessoa);
+    if (!g || !g.billId) return;
+    if (!window.ComprasControleApp || typeof ComprasControleApp.abrirTituloRow !== "function") return;
+    const rows = (g.rows && g.rows.length) ? g.rows : this.state.rows.filter((r) => (r.pessoa || "(sem nome)") === pessoa);
+    ComprasControleApp.abrirTituloRow({
+      titulo: g.billId,
+      parcela: 1,
+      credor: (g.creditor && g.creditor.name) || pessoa,
+      credorId: g.creditor && g.creditor.id,
+      documento: "Reembolso " + (this.competencia(rows) || ""),
+      docId: "REEM",
+      valor: this.somaReembolso(rows),
+      valorAjustado: this.somaReembolso(rows),
+      semFiscal: true
+    });
   },
 
   chevHtml(open) {
@@ -637,11 +654,8 @@ const RydooApp = {
     const pick = `<input type="checkbox" class="rydoo-pick" ${podeGerar ? "" : "disabled"} ${marcado ? "checked" : ""} title="${podeGerar ? "Incluir na geração em massa" : "Revise os alertas antes de gerar o título"}" onclick="event.stopPropagation()" onchange="event.stopPropagation(); RydooApp.marcar(decodeURIComponent('${arg}'), this.checked)">`;
     let acao = "";
     if (g && g.billId) {
-      let banco = "";
-      if (g.bankBusy) banco = `<span class="rydoo-tag rydoo-tag-revisar rydoo-bank-tag">Enviando dados bancários…</span>`;
-      else if (g.bankError && !g.bankSent) banco = `<span class="rydoo-tag rydoo-tag-divergente rydoo-bank-tag" title="${this.esc(g.bankError)}">Banco não enviado</span>`;
       const pago = g.reemPago ? `<span class="rydoo-tag rydoo-tag-ok">Já pago</span>` : "";
-      acao = `<span class="rydoo-tag rydoo-tag-ok">Título ${this.esc(g.billId)}</span>${pago}${banco}`;
+      acao = `<button type="button" class="rydoo-titulo" title="Abrir o analítico do título" onclick="event.stopPropagation(); RydooApp.abrirTitulo(decodeURIComponent('${arg}'))">Título ${this.esc(g.billId)}</button>${pago}`;
     } else if (pronto) {
       const off = alertas || g.billBusy ? "disabled" : "";
       const title = alertas ? "Revise os alertas antes de gerar o título" : "Gerar título REEM no Sienge";
@@ -666,7 +680,6 @@ const RydooApp = {
     return `<div class="rydoo-ugroup${open ? " is-open" : ""}"><div class="rydoo-node rydoo-n0 rydoo-node-toggle${g && g.billId ? " rydoo-done" : ""}${bloqueado ? " rydoo-blocked" : ""}" onclick="RydooApp.toggleNode('user', decodeURIComponent('${arg}'))">
         ${this.chevHtml(open)}
         ${pick}
-        <i data-lucide="user" class="rydoo-ico"></i>
         <span class="rydoo-user-main">
           <span class="rydoo-name">${this.esc(pessoa)}</span>
           <span class="rydoo-why">${n === 1 ? "1 lançamento" : n + " lançamentos"} · ${this.esc(this.competencia(rows) || "")}</span>
@@ -701,7 +714,7 @@ const RydooApp = {
       if (g.bankStatus === "loading") banco = "Lendo dados bancários…";
       else if (g.bankStatus === "erro") banco = "Não consegui ler os dados bancários.";
       else if (g.bank) banco = this.bancoTexto(g.bank);
-      html += `<span class="rydoo-why">${this.esc(c.id + " — " + c.name)} ${tag} · ${this.esc(banco)}</span>`;
+      html += `<span class="rydoo-credor">${this.esc(c.id + " — " + c.name)} ${tag} · ${this.esc(banco)}</span>`;
     }
     return html;
   },
@@ -726,7 +739,6 @@ const RydooApp = {
     const alerta = rows.some((r) => r.reembolsa !== false && r.level !== "ok");
     return `<div class="rydoo-node rydoo-n1 rydoo-node-toggle" onclick="RydooApp.toggleNode('cc', decodeURIComponent('${arg}'))">
         ${this.chevHtml(open)}
-        <i data-lucide="building-2" class="rydoo-ico"></i>
         <span class="rydoo-user-main"><span class="rydoo-name">${this.esc(cc)}</span></span>
         ${alerta ? `<span class="rydoo-tag rydoo-tag-revisar">Revisar</span>` : ""}
         <span class="rydoo-sum">${this.esc(this.money(this.somaReembolso(rows)))}</span>
@@ -753,7 +765,6 @@ const RydooApp = {
       const lines = rows.slice()
         .sort((a, b) => this.dateKey(a.data).localeCompare(this.dateKey(b.data)))
         .map((r) => `<div class="rydoo-node rydoo-n3 rydoo-row-${r.level}">
-            <i data-lucide="hash" class="rydoo-ico"></i>
             <div class="rydoo-line">
               <div>${this.esc(r.data)}</div>
               <div title="${this.esc(r.estabelecimento || "")}">${this.esc(r.estabelecimento || "—")}</div>
@@ -769,7 +780,6 @@ const RydooApp = {
     }
     return `<div class="rydoo-node rydoo-n2 rydoo-node-toggle" onclick="RydooApp.toggleNode('plano', decodeURIComponent('${arg}'))">
         ${this.chevHtml(open)}
-        <i data-lucide="file-text" class="rydoo-ico"></i>
         <span class="rydoo-user-main"><span class="rydoo-name">${this.esc(head.conta || conta)} — ${this.esc(nome)}</span></span>
         ${alerta ? `<span class="rydoo-tag rydoo-tag-revisar">Revisar</span>` : ""}
         <span class="rydoo-sum">${this.esc(this.money(this.somaReembolso(rows)))}</span>
@@ -851,7 +861,6 @@ const RydooApp = {
       this.paintHint();
       this.renderKpis();
       this.renderList();
-      this.enviarBancosPendentes();
     } catch (e) {
       if (this._prepGen !== gen) return;
       this.state.preparing = false;

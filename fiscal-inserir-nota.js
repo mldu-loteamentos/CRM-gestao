@@ -143,6 +143,85 @@ window.InserirNotaApp = {
     return this.digits(t);
   },
 
+  /** Mesma consulta do follow-up: a nota e o título saem do pedido, sem precisar do número da NF. */
+  async notasLancadasDoPedido(pedidoId) {
+    const id = this.idApi(pedidoId);
+    if (!id) return [];
+    const data = await this.get("/purchase-invoices/deliveries-attended?purchaseOrderId=" + encodeURIComponent(id) + "&limit=200");
+    const rows = this.lista(data);
+    const seqs = [];
+    rows.forEach((row) => {
+      const seq = row && row.sequentialNumber;
+      if (seq == null || seq === "") return;
+      const key = String(seq);
+      if (seqs.indexOf(key) < 0) seqs.push(key);
+    });
+    const notas = [];
+    const seen = new Set();
+    for (const seq of seqs) {
+      const inv = await this.get("/purchase-invoices/" + encodeURIComponent(seq)).catch(() => null);
+      if (!inv || inv.number == null || String(inv.number).trim() === "") continue;
+      const doc = String(inv.documentId || inv.documentIdentificationId || "NF").trim() || "NF";
+      const number = String(inv.number).trim();
+      const series = String(inv.series || "").trim();
+      const key = doc + "|" + number + "|" + series;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      notas.push({
+        seq,
+        number,
+        series,
+        doc,
+        billId: inv.billId != null && inv.billId !== "" ? String(inv.billId) : "",
+        issueDate: inv.issueDate ? String(inv.issueDate).slice(0, 10) : ""
+      });
+    }
+    return notas;
+  },
+
+  textoNotaDoPedido(notas) {
+    const partes = (notas || []).map((n) => {
+      const nf = (n.doc || "NF") + " " + n.number + (n.series ? "/" + n.series : "");
+      return n.billId ? nf + " (título " + n.billId + ")" : nf;
+    });
+    if (!partes.length) return "O pedido já foi totalmente atendido: não há saldo para lançar outra nota.";
+    return "Este pedido já tem nota no Sienge: " + partes.join("; ") + ". Não há saldo para lançar outra nota.";
+  },
+
+  async saldoAbertoDoPedido(pedidoId) {
+    const id = this.idApi(pedidoId);
+    if (!id) return { leu: false, aberto: 0 };
+    const itens = this.lista(await this.get("/purchase-orders/" + encodeURIComponent(id) + "/items?limit=200"));
+    let aberto = 0;
+    let leu = false;
+    for (const it of itens) {
+      const ent = await this.get("/purchase-orders/" + encodeURIComponent(id) + "/items/" + encodeURIComponent(it.itemNumber) + "/delivery-schedules?limit=200").catch(() => null);
+      this.lista(ent).forEach((e) => {
+        leu = true;
+        aberto += Math.max(0, Number(e.openQuantity) || 0);
+      });
+    }
+    return { leu, aberto };
+  },
+
+  /** Recusa o pedido quando ele está sem saldo e a nota já existe no Sienge. */
+  async bloqueioPedidoFaturado(pedidoId) {
+    const id = this.idApi(pedidoId);
+    if (!id) return "";
+    let pedido = null;
+    try { pedido = await this.get("/purchase-orders/" + encodeURIComponent(id)); } catch (e) { pedido = null; }
+    const status = String(pedido && pedido.status || "").toUpperCase();
+    const notas = await this.notasLancadasDoPedido(id);
+    if (status === "FULLY_DELIVERED" && !notas.length) return this.textoNotaDoPedido([]);
+    if (!notas.length) return "";
+    let semSaldo = status === "FULLY_DELIVERED";
+    if (!semSaldo) {
+      const saldo = await this.saldoAbertoDoPedido(id);
+      semSaldo = saldo.leu && saldo.aberto <= 0.00001;
+    }
+    return semSaldo ? this.textoNotaDoPedido(notas) : "";
+  },
+
   async buscarPedido() {
     const s = this.state;
     const digitado = String((document.getElementById("inf-pedido") || {}).value || s.pedidoId || "").trim();
@@ -151,7 +230,7 @@ window.InserirNotaApp = {
       if (window.EnviarNotaApp) { EnviarNotaApp._buscaAlvo = "inserir"; EnviarNotaApp.abrirBuscaPedidos(); }
       return;
     }
-    Object.assign(s, { pedidoId: digitado, pedidoApi: id, pedidoNome: digitado, pedido: null, credor: null, itens: [], erro: "", empresaCc: "", cc: null, previsao: null, qtdEditada: false, duplicada: null, criada: null, resultado: null });
+    Object.assign(s, { pedidoId: digitado, pedidoApi: id, pedidoNome: digitado, pedido: null, credor: null, itens: [], erro: "", pedidoBloqueado: "", empresaCc: "", cc: null, previsao: null, qtdEditada: false, duplicada: null, criada: null, resultado: null });
     s.carregando = "Buscando o pedido no Sienge…";
     this.render();
     try {
@@ -206,6 +285,11 @@ window.InserirNotaApp = {
         });
       }
       s.itens = out;
+      const statusPedido = String(pedido.status || "").toUpperCase();
+      const semSaldo = statusPedido === "FULLY_DELIVERED" || !out.some((it) => (it.entregas || []).some((e) => Number(e.saldo) > 0.00001));
+      let notasPedido = [];
+      try { notasPedido = await this.notasLancadasDoPedido(s.pedidoApi); } catch (e) { notasPedido = []; }
+      s.pedidoBloqueado = semSaldo && (notasPedido.length || statusPedido === "FULLY_DELIVERED") ? this.textoNotaDoPedido(notasPedido) : "";
       this.escolherEmpresa();
       this.distribuir();
       s.carregando = "";
@@ -637,7 +721,8 @@ window.InserirNotaApp = {
     if (status === "CANCELED") erros.push("O pedido está cancelado.");
     if (p.authorized === false) erros.push("O pedido ainda não foi autorizado no Sienge.");
     else if (p.authorized === true) oks.push("Pedido autorizado.");
-    if (status === "FULLY_DELIVERED") erros.push("O pedido já foi totalmente atendido: não há saldo para faturar.");
+    if (s.pedidoBloqueado) erros.push(s.pedidoBloqueado);
+    else if (status === "FULLY_DELIVERED") erros.push("O pedido já foi totalmente atendido: não há saldo para faturar.");
 
     if (!f.documento || !f.numero) erros.push("Informe o documento e o número da nota.");
     if (!f.companyId) erros.push("Escolha a empresa da nota.");
@@ -1739,6 +1824,7 @@ window.InserirNotaApp = {
       <div><span>Situação</span><div><b>${this.esc(sit)}</b>${p.authorized || p.authorized === false ? `<small>${p.authorized ? "autorizado" : "não autorizado"}</small>` : ""}</div></div>
       <div><span>Total do pedido</span><div><b>${p.totalAmount != null ? this.money(p.totalAmount) : "—"}</b></div></div>
     </div>
+    ${s.pedidoBloqueado ? `<p class="inf-erro">${this.esc(s.pedidoBloqueado)}</p>` : ""}
     ${this.previsaoHtml()}`;
   },
 

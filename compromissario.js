@@ -458,7 +458,7 @@ const CompromissarioApp = {
         </div>
         <button type="button" class="btn btn-primary cc-atualizar" ${month ? '' : 'disabled'}
           onclick="CompromissarioApp.avancarBuscarLancamentos()">
-          Avançar buscar lançamentos <i data-lucide="arrow-right" style="width:14px;height:14px;"></i>
+          Avançar <i data-lucide="arrow-right" style="width:14px;height:14px;"></i>
         </button>
         <div class="cc-toolbar-actions">
           ${cities.length ? `<span class="comp-pref-pill is-ok">${okCount} configurada(s)</span>` : ''}

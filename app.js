@@ -3193,7 +3193,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "repactuacao-lote": "Repactuação",
     "parametrizacao-parceiro": "Configurações",
     "estrutura-societaria": "Organograma Societário",
-    "participacoes": "Prestação Contas Ellenceo",
+    "participacoes": "Prestação contas Ellenco",
     "parametrizacoes": "Gestão de Empresas",
     "centros-custo": "Gestão de Centros de Custo",
     "kmz": "Upload de Mapeamento (KMZ)",

@@ -232,9 +232,41 @@ const SocietarioApp = {
 
   canvasSize() {
     const ents = this.graph.entities || [];
-    const maxX = Math.max(900, ...ents.map(e => (Number(e.x) || 0) + this.NODE_W + 80));
-    const maxY = Math.max(700, ...ents.map(e => (Number(e.y) || 0) + this.NODE_H + 120));
+    let maxX = 520;
+    let maxY = 280;
+    ents.forEach((e) => {
+      maxX = Math.max(maxX, (Number(e.x) || 0) + this.NODE_W + 40);
+      maxY = Math.max(maxY, (Number(e.y) || 0) + this.NODE_H + 52);
+    });
     return { w: maxX, h: maxY };
+  },
+
+  fitCanvas() {
+    if (this._drag || this._connect) return;
+    const wrap = document.getElementById("soc-canvas-wrap");
+    const canvas = document.getElementById("soc-canvas");
+    if (!wrap || !canvas) return;
+    const size = this.canvasSize();
+    canvas.style.width = size.w + "px";
+    canvas.style.height = size.h + "px";
+    const availW = Math.max(240, wrap.clientWidth - 20);
+    const availH = Math.max(180, wrap.clientHeight - 20);
+    let scale = Math.min(availW / size.w, availH / size.h, 1);
+    if (!Number.isFinite(scale) || scale <= 0) scale = 1;
+    scale = Math.round(scale * 1000) / 1000;
+    this.fitScale = scale;
+    canvas.style.zoom = String(scale);
+  },
+
+  bindFit() {
+    const wrap = document.getElementById("soc-canvas-wrap");
+    if (this._fitObs) {
+      this._fitObs.disconnect();
+      this._fitObs = null;
+    }
+    if (!wrap || typeof ResizeObserver === "undefined") return;
+    this._fitObs = new ResizeObserver(() => this.fitCanvas());
+    this._fitObs.observe(wrap);
   },
 
   nodeCenter(ent) {
@@ -322,7 +354,12 @@ const SocietarioApp = {
     const canvas = document.getElementById("soc-canvas");
     if (!canvas) return { x: 0, y: 0 };
     const r = canvas.getBoundingClientRect();
-    return { x: ev.clientX - r.left, y: ev.clientY - r.top };
+    const sx = r.width / (canvas.offsetWidth || r.width || 1);
+    const sy = r.height / (canvas.offsetHeight || r.height || 1);
+    return {
+      x: (ev.clientX - r.left) / (sx || 1),
+      y: (ev.clientY - r.top) / (sy || 1)
+    };
   },
 
   bindCanvas() {
@@ -380,8 +417,10 @@ const SocietarioApp = {
           const draggedId = this._drag.id;
           const moved = this._moved;
           this._drag = null;
-          if (moved) this.persist();
-          else this.selectEntity(draggedId, true);
+          if (moved) {
+            this.persist();
+            this.fitCanvas();
+          } else this.selectEntity(draggedId, true);
         }
       };
       document.addEventListener("mousemove", onMove);
@@ -697,6 +736,8 @@ const SocietarioApp = {
       if (labels) labels.style.pointerEvents = "none";
       this.redrawEdges();
       this.bindCanvas();
+      this.fitCanvas();
+      this.bindFit();
     });
   },
 

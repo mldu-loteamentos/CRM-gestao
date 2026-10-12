@@ -101,27 +101,37 @@ window.FilaNotasFiscais = {
   abrirEnvio(pedido, idEnvio) {
     const ped = String(pedido || "").trim();
     if (!ped) return;
-    if (window.ComprasControleApp && typeof ComprasControleApp.fecharTitulo === "function") ComprasControleApp.fecharTitulo();
-    if (typeof window.switchTab === "function") window.switchTab("fiscal-enviar-nota", "Enviar nota ao fiscal");
-    const abrir = () => {
-      const app = window.EnviarNotaApp;
-      if (!app) return;
-      const item = idEnvio && (app.state && app.state.lista || []).concat(this._ultimo || []).find((x) => x && x.id === idEnvio);
-      if (item && item.status === "devolvida") {
-        if (!app.state || !app.state.lista || !app.state.lista.some((x) => x.id === idEnvio)) {
-          app.state = app.novoEstado();
-          app.state.lista = (this._ultimo || []).slice();
-          app.state.listaCarregada = true;
+    const seguir = () => {
+      if (window.ComprasControleApp && typeof ComprasControleApp.fecharTitulo === "function") ComprasControleApp.fecharTitulo();
+      if (typeof window.switchTab === "function") window.switchTab("fiscal-enviar-nota", "Enviar nota ao fiscal");
+      const abrir = () => {
+        const app = window.EnviarNotaApp;
+        if (!app) return;
+        const item = idEnvio && (app.state && app.state.lista || []).concat(this._ultimo || []).find((x) => x && x.id === idEnvio);
+        if (item && item.status === "devolvida") {
+          if (!app.state || !app.state.lista || !app.state.lista.some((x) => x.id === idEnvio)) {
+            app.state = app.novoEstado();
+            app.state.lista = (this._ultimo || []).slice();
+            app.state.listaCarregada = true;
+          }
+          app.corrigir(idEnvio);
+          return;
         }
-        app.corrigir(idEnvio);
-        return;
-      }
-      app.state = app.novoEstado();
-      app.state.pedidoId = ped;
-      app.init();
-      app.buscarPedido();
+        app.state = app.novoEstado();
+        app.state.pedidoId = ped;
+        app.init();
+        app.buscarPedido();
+      };
+      setTimeout(abrir, 40);
     };
-    setTimeout(abrir, 40);
+    if (idEnvio || !window.InserirNotaApp || typeof InserirNotaApp.bloqueioPedidoFaturado !== "function") {
+      seguir();
+      return;
+    }
+    InserirNotaApp.bloqueioPedidoFaturado(ped).then((msg) => {
+      if (msg) { alert(msg); return; }
+      seguir();
+    }).catch(() => seguir());
   },
 
   async listar() {
@@ -433,7 +443,7 @@ window.EnviarNotaApp = {
     return {
       aba: ant.aba || "enviar",
       pedidoId: "", pedidoApi: "", pedidoNome: "", pedido: null, credor: null, cc: null, empresaCc: "", previsao: null,
-      carregando: "", erro: "", abertas: [],
+      carregando: "", erro: "", pedidoBloqueado: "", abertas: [],
       banco: { contas: [], pix: [], formas: [], erro: "" },
       anexos: [], previewIdx: -1, preview: "", previewLendo: "",
       pag: { data: "", forma: "", detalhe: "" },
@@ -507,7 +517,7 @@ window.EnviarNotaApp = {
     const id = InserirNotaApp.idApi(digitado);
     if (!id) { this._buscaAlvo = "enviar"; this.abrirBuscaPedidos(); return; }
     this._buscaAlvo = "enviar";
-    Object.assign(s, { pedidoId: digitado, pedidoApi: id, pedidoNome: digitado, pedido: null, credor: null, cc: null, empresaCc: "", previsao: null, erro: "", abertas: [], feito: "", banco: { contas: [], pix: [], formas: [], erro: "" } });
+    Object.assign(s, { pedidoId: digitado, pedidoApi: id, pedidoNome: digitado, pedido: null, credor: null, cc: null, empresaCc: "", previsao: null, erro: "", pedidoBloqueado: "", abertas: [], feito: "", banco: { contas: [], pix: [], formas: [], erro: "" } });
     s.carregando = "Buscando o pedido no Sienge…";
     this.render();
     try {
@@ -539,6 +549,22 @@ window.EnviarNotaApp = {
       s.cc = cc;
       s.empresaCc = cc.companyId;
       s.previsao = previsao;
+      if (!s.editandoId) {
+        s.carregando = "Conferindo se este pedido já tem nota no Sienge…";
+        this.render();
+        try {
+          const notasPedido = await InserirNotaApp.notasLancadasDoPedido(s.pedidoApi);
+          const statusPedido = String(pedido.status || "").toUpperCase();
+          let semSaldo = statusPedido === "FULLY_DELIVERED";
+          if (notasPedido.length && !semSaldo) {
+            const saldo = await InserirNotaApp.saldoAbertoDoPedido(s.pedidoApi);
+            semSaldo = saldo.leu && saldo.aberto <= 0.00001;
+          }
+          s.pedidoBloqueado = semSaldo && (notasPedido.length || statusPedido === "FULLY_DELIVERED") ? InserirNotaApp.textoNotaDoPedido(notasPedido) : "";
+        } catch (e) {
+          s.pedidoBloqueado = "";
+        }
+      }
       s.abertas = s.lista.filter((x) => FilaNotasFiscais.aberta(x) && String(x.pedidoApi) === s.pedidoApi && x.id !== s.editandoId);
       if (!s.pag.data && previsao && previsao.parcelas.length) {
         const hoje = this.hojeIso();
@@ -1585,7 +1611,8 @@ window.EnviarNotaApp = {
     if (!p) return { erros: [], avisos, oks };
     const status = String(p.status || "").toUpperCase();
     if (status === "CANCELED") erros.push("O pedido está cancelado.");
-    if (status === "FULLY_DELIVERED") erros.push("O pedido já foi totalmente atendido: não há saldo para lançar outra nota.");
+    if (s.pedidoBloqueado) erros.push(s.pedidoBloqueado);
+    else if (status === "FULLY_DELIVERED") erros.push("O pedido já foi totalmente atendido: não há saldo para lançar outra nota.");
     if (p.authorized === false) avisos.push("O pedido ainda não foi autorizado no Sienge: o fiscal só consegue lançar depois da autorização.");
 
     const notas = s.anexos.filter((a) => a.tipo === "nota");
@@ -1885,6 +1912,7 @@ window.EnviarNotaApp = {
       <div><span>Situação</span><div><b>${this.esc(sit)}</b>${p.authorized || p.authorized === false ? `<small>${p.authorized ? "autorizado" : "não autorizado"}</small>` : ""}</div></div>
       <div><span>Total do pedido</span><div><b>${p.totalAmount != null ? this.money(p.totalAmount) : "—"}</b></div></div>
     </div>
+    ${s.pedidoBloqueado ? `<p class="inf-erro">${this.esc(s.pedidoBloqueado)}</p>` : ""}
     ${InserirNotaApp.previsaoHtml(s.previsao)}`;
   },
 

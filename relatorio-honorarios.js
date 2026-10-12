@@ -140,6 +140,7 @@ const HonorariosReport = {
   qF: { emp: "", city: "", ent: "", op: "" },
   status: "todos",
   search: "",
+  openLevels: {},
   rankSort: { key: "recebido", dir: -1 },
   sync: null,
 
@@ -862,14 +863,58 @@ const HonorariosReport = {
   },
 
   groupRowsHtml(rows, lineHtml, sumHtml, lead, tail) {
-    return this.grouped(rows).map((e) => {
-      const ccHtml = e.ccs.map((c) => {
-        const lines = c.rows.map(lineHtml).join("");
-        return `<tr class="rhon-cc"><td colspan="${lead}">${rhonEsc([c.id, c.name].filter(Boolean).join(" - ") || "Sem centro de custo")}</td>${sumHtml(c.rows)}<td colspan="${tail}"></td></tr>${lines}`;
+    const byOp = {};
+    rows.forEach((r) => {
+      const ok = r.opKey || "-";
+      if (!byOp[ok]) byOp[ok] = { key: ok, name: r.opName || "Sem operador", rows: [] };
+      byOp[ok].rows.push(r);
+    });
+    return Object.values(byOp)
+      .sort((a, b) => String(a.name).localeCompare(String(b.name), "pt-BR"))
+      .map((op) => {
+        const opId = "op:" + op.key;
+        const openOp = this.nivelAberto(opId);
+        let html = this.nivelRow("rhon-op", opId, openOp, op.name, op.rows, sumHtml, lead, tail);
+        if (!openOp) return html;
+        html += this.grouped(op.rows).map((e) => {
+          const empId = opId + "|emp:" + (e.id || "-");
+          const openEmp = this.nivelAberto(empId);
+          const all = e.ccs.flatMap((c) => c.rows);
+          const nomeEmp = [e.id, e.name].filter(Boolean).join(" - ") || "Sem empresa";
+          let bloco = this.nivelRow("rhon-emp", empId, openEmp, nomeEmp, all, sumHtml, lead, tail);
+          if (!openEmp) return bloco;
+          bloco += e.ccs.map((c) => {
+            const ccId = empId + "|cc:" + (c.id || "-");
+            const openCc = this.nivelAberto(ccId);
+            const nomeCc = [c.id, c.name].filter(Boolean).join(" - ") || "Sem centro de custo";
+            let cc = this.nivelRow("rhon-cc", ccId, openCc, nomeCc, c.rows, sumHtml, lead, tail);
+            if (openCc) cc += c.rows.map(lineHtml).join("");
+            return cc;
+          }).join("");
+          return bloco;
+        }).join("");
+        return html;
       }).join("");
-      const all = e.ccs.flatMap((c) => c.rows);
-      return `<tr class="rhon-emp"><td colspan="${lead}">${rhonEsc([e.id, e.name].filter(Boolean).join(" - ") || "Sem empresa")}</td>${sumHtml(all)}<td colspan="${tail}"></td></tr>${ccHtml}`;
-    }).join("");
+  },
+
+  nivelAberto(key) {
+    return !!(this.openLevels && this.openLevels[key]);
+  },
+
+  toggleNivel(key) {
+    const k = String(key || "");
+    this.openLevels = this.openLevels || {};
+    this.openLevels[k] = !this.openLevels[k];
+    this.render();
+  },
+
+  nivelRow(cls, id, open, label, list, sumHtml, lead, tail) {
+    const ico = open ? "chevron-down" : "chevron-right";
+    const chave = encodeURIComponent(id);
+    return `<tr class="${cls} rhon-nivel">
+      <td colspan="${lead}"><button type="button" class="rhon-abre" onclick="HonorariosReport.toggleNivel(decodeURIComponent('${chave}'))"><i data-lucide="${ico}"></i><span>${rhonEsc(label)}</span></button></td>
+      ${sumHtml(list)}<td colspan="${tail}"></td>
+    </tr>`;
   },
 
   honTableHtml(rows) {
@@ -894,7 +939,7 @@ const HonorariosReport = {
       <td>${this.statusHtml(r)}</td>
       <td><div>${rhonBr(rhonIso(r.generatedAt))}</div><div class="rhon-sub">${rhonEsc(r.author)}</div></td>
     </tr>`;
-    return `<div class="rhon-wrap"><table class="rhon-table">
+    return `<div class="rhon-wrap rhon-wrap-fix"><table class="rhon-table">
       <thead><tr>
         <th>Cliente</th><th>Título</th><th>Parcela</th><th>Vencimento</th><th>Venc. boleto</th>
         <th class="rhon-num">Valor original</th><th class="rhon-num">Multa</th><th class="rhon-num">Juros</th><th class="rhon-num">Honorários</th>
@@ -933,7 +978,7 @@ const HonorariosReport = {
       <td>${this.statusHtml(r)}</td>
       <td><div>${rhonBr(rhonIso(r.generatedAt))}</div><div class="rhon-sub">${rhonEsc(r.author)}</div></td>
     </tr>`;
-    return `<div class="rhon-wrap"><table class="rhon-table">
+    return `<div class="rhon-wrap rhon-wrap-fix"><table class="rhon-table">
       <thead><tr>
         <th>Cliente</th><th>Título</th><th>Parcela</th><th>Vencimento</th><th class="rhon-num">Dias atraso</th>
         <th class="rhon-num">Valor original</th><th class="rhon-num">Multa devida</th><th class="rhon-num">Juros devido</th>
@@ -1697,14 +1742,23 @@ const HonorariosReport = {
       #relatorios-cr-root .rhon-card-main strong { color:#105436; }
       #relatorios-cr-root .rhon-card-warn { border-left:4px solid #f37021; }
       #relatorios-cr-root .rhon-card-warn strong { color:#c2410c; }
+      #relatorios-cr-root .rhon-page:has(.rhon-wrap-fix) { height: auto; min-height: calc(100vh - 160px); }
+      #relatorios-cr-root .rhon-page:has(.rhon-wrap-fix) .rhon-body,
+      #relatorios-cr-root .rhon-page:has(.rhon-wrap-fix) .rhon-content { flex: none; overflow: visible; }
       #relatorios-cr-root .rhon-wrap { flex:1; min-height:0; overflow:auto; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
+      #relatorios-cr-root .rhon-wrap-fix { flex: none; height: 732px; min-height: 732px; max-height: 732px; overflow: auto; }
       #relatorios-cr-root .rhon-table { width:100%; border-collapse:separate; border-spacing:0; font-size:.8rem; font-variant-numeric:tabular-nums; }
       #relatorios-cr-root .rhon-table th { background:#105436; color:#fff; font-weight:600; text-align:left; padding:8px 10px; position:sticky; top:0; z-index:2; white-space:nowrap; }
       #relatorios-cr-root .rhon-table th.rhon-sort { cursor:pointer; user-select:none; }
       #relatorios-cr-root .rhon-table td { padding:7px 10px; border-bottom:1px solid #eef2f6; vertical-align:top; }
       #relatorios-cr-root .rhon-num { text-align:right !important; white-space:nowrap; }
+      #relatorios-cr-root .rhon-op td { background:#105436; color:#fff; font-weight:800; }
       #relatorios-cr-root .rhon-emp td { background:#0c3d28; color:#fff; font-weight:700; }
       #relatorios-cr-root .rhon-cc td { background:#e7f6ee; color:#105436; font-weight:700; }
+      #relatorios-cr-root .rhon-abre { display:inline-flex; align-items:center; gap:6px; border:0; background:transparent; color:inherit; font:inherit; font-weight:700; cursor:pointer; padding:0; text-align:left; }
+      #relatorios-cr-root .rhon-abre svg { width:16px; height:16px; flex:none; }
+      #relatorios-cr-root .rhon-emp .rhon-abre { padding-left:16px; }
+      #relatorios-cr-root .rhon-cc .rhon-abre { padding-left:32px; }
       #relatorios-cr-root .rhon-table tfoot td { background:#0c3d28; color:#fff; font-weight:800; position:sticky; bottom:0; }
       #relatorios-cr-root .rhon-cli { font-weight:600; }
       #relatorios-cr-root .rhon-pos { font-weight:800; color:#105436; width:36px; }

@@ -604,6 +604,15 @@ function _vcGetEmpLabel(costCenterId) {
     return `${costCenterId} - ${ccName.trim().toUpperCase()}`;
 }
 
+function _vcEmpLabelOf(costCenterId, empreendimento) {
+    if (costCenterId) {
+        const fromCc = _vcGetEmpLabel(costCenterId);
+        if (fromCc && fromCc !== '-') return fromCc;
+    }
+    const name = String(empreendimento || '').trim();
+    return name && name !== '-' ? name : '-';
+}
+
 function _vcEmpNameFromCc(costCenterId) {
     const ccName = _vcGetCostCenterName(costCenterId);
     if (!ccName || ccName === '-') return '';
@@ -687,7 +696,7 @@ function _vcBillMatchesRow(bill, row) {
         .map(_vcTitleKey)
         .filter(Boolean);
     if (titles.some(t => ids.includes(t))) return true;
-    const unit = _vcNormUnitName(row.unidade);
+    const unit = _vcPlaceholderUnit(row.unidade) ? "" : _vcNormUnitName(row.unidade);
     const billUnit = _vcNormUnitName(bill.units || bill.unitName || bill.unityName);
     const cc = _vcNormalizeKey(row.costCenterId);
     const billCc = _vcNormalizeKey(bill.costCenterId || (Array.isArray(bill.costCentersId) ? bill.costCentersId[0] : bill.costCentersId));
@@ -702,7 +711,7 @@ function _vcFindPortfolioClient(row) {
         .map(_vcTitleKey)
         .filter(Boolean);
     const customerId = _vcNormalizeKey(row.customerId);
-    const unit = _vcNormUnitName(row.unidade);
+    const unit = _vcPlaceholderUnit(row.unidade) ? "" : _vcNormUnitName(row.unidade);
     const cc = _vcNormalizeKey(row.costCenterId);
     let byUnit = null;
     let byCustomer = null;
@@ -737,6 +746,28 @@ function _vcApplyPortfolioFinance(row) {
         }
     });
     const client = _vcFindPortfolioClient(row);
+    if (client) {
+        if (_vcPlaceholderName(row.clienteName)) {
+            const name = client.customerName || client.name || client.nome || "";
+            if (name && !_vcPlaceholderName(name)) row.clienteName = name;
+        }
+        if (_vcPlaceholderUnit(row.unidade)) {
+            const unit = client.unitName || client.unit || client.unidade || "";
+            if (unit && !_vcPlaceholderUnit(unit)) row.unidade = String(unit).replace(/^Quadra-Lote:\s*/i, "").trim();
+        }
+        if (!row.costCenterId) {
+            const cc = _vcExtractCostCenterId(client);
+            if (cc) {
+                row.costCenterId = cc;
+                row.cidade = _vcGetCity(cc) || row.cidade;
+                row.empreendimento = _vcEmpNameFromCc(cc) || row.empreendimento;
+                row.empLabel = _vcEmpLabelOf(cc, row.empreendimento);
+            }
+        }
+    }
+    if ((!row.empLabel || row.empLabel === '-') && row.empreendimento) {
+        row.empLabel = _vcEmpLabelOf(row.costCenterId, row.empreendimento);
+    }
     if (client && (typeof window.clientIsSubjudice === 'function' ? window.clientIsSubjudice(client) : (client.subjudice === 'S' || client.subjudice === true))) {
         sub = true;
     }
@@ -790,11 +821,20 @@ function _vcNormUnitName(name) {
         .toUpperCase();
 }
 
+function _vcPlaceholderUnit(unit) {
+    const s = String(unit || "").replace(/^Quadra-Lote:\s*/i, "").trim();
+    return !s || /^n\/d$/i.test(s) || /^unidade\s*n\/d$/i.test(s) || s === "-" || s === "—";
+}
+
+function _vcPlaceholderName(name) {
+    const s = String(name || "").trim();
+    return !s || s === "-" || s === "—" || /^cliente$/i.test(s);
+}
+
 function _vcMissingClientRef(r) {
     if (!r) return false;
-    const name = String(r.clienteName || '').trim();
-    const titulo = String(r.titulo || r.tituloKey || '').trim();
-    return !name || name === '-' || !titulo || titulo === '-';
+    const titulo = String(r.titulo || r.tituloKey || "").trim();
+    return _vcPlaceholderName(r.clienteName) || _vcPlaceholderUnit(r.unidade) || !r.costCenterId || !titulo || titulo === "-";
 }
 
 function _vcExtractContractCustomerId(sc) {
@@ -988,7 +1028,7 @@ window.VerificarConstrucaoApp = {
                         <table class="cc-table vc-table" id="vc-table">
                             <colgroup>
                                 <col style="width: 38px;">
-                                <col style="width: 72px;">
+                                <col style="width: 96px;">
                                 <col>
                                 <col style="width: 64px;">
                                 <col style="width: 108px;">
@@ -1363,7 +1403,7 @@ window.VerificarConstrucaoApp = {
                 const costCenterId = v.costCenterId || (client && _vcExtractCostCenterId(client)) || '';
                 const city = v.cidade || (costCenterId && _vcGetCity(costCenterId)) || '-';
                 const empreendimento = v.empreendimento || _vcEmpNameFromCc(costCenterId) || '-';
-                const empLabel = _vcGetEmpLabel(costCenterId) || ((costCenterId ? costCenterId + ' - ' : '') + empreendimento);
+                const empLabel = _vcEmpLabelOf(costCenterId, empreendimento);
                 let statusLabel = 'Aguardando Validação';
                 let statusColor = 'color: #7c3aed; font-weight: 600;';
                 let solicitadoHa = '';
@@ -1451,21 +1491,64 @@ window.VerificarConstrucaoApp = {
         }
     },
 
+    async _fillRowFromTitulo(row) {
+        const titulo = String(row.titulo || row.tituloKey || "").trim();
+        if (!titulo || titulo === "-" || typeof window.siengeFetchWithRetry !== "function") return false;
+        let bill = null;
+        try {
+            bill = await window.siengeFetchWithRetry("/accounts-receivable/receivable-bills/" + encodeURIComponent(titulo));
+        } catch (e) {
+            return false;
+        }
+        if (!bill || typeof bill !== "object") return false;
+        const unit = bill.unityName || bill.unitName || "";
+        const cc = bill.enterpriseCode || bill.enterpriseId || "";
+        if (_vcPlaceholderUnit(row.unidade) && unit && !_vcPlaceholderUnit(unit)) {
+            row.unidade = String(unit).replace(/^Quadra-Lote:\s*/i, "").trim();
+        }
+        if (!row.costCenterId && cc && String(cc) !== "N/D") {
+            row.costCenterId = String(cc);
+            const cidade = _vcGetCity(row.costCenterId);
+            if (cidade && cidade !== "-") row.cidade = cidade;
+            const emp = _vcEmpNameFromCc(row.costCenterId);
+            if (emp) row.empreendimento = emp;
+            else if (bill.enterpriseName) row.empreendimento = bill.enterpriseName;
+            row.empLabel = _vcGetEmpLabel(row.costCenterId);
+        }
+        if (bill.customerId && !row.customerId) row.customerId = String(bill.customerId);
+        if (_vcPlaceholderName(row.clienteName)) {
+            let name = bill.customerName || bill.clientName || (bill.customer && bill.customer.name) || "";
+            if (_vcPlaceholderName(name) && row.customerId) name = _vcNameFromCustomerCache(row.customerId);
+            if (_vcPlaceholderName(name) && row.customerId && window.SiengeApiService && typeof window.SiengeApiService.getCustomer === "function") {
+                try {
+                    const cust = await window.SiengeApiService.getCustomer(row.customerId);
+                    name = (cust && (cust.name || cust.customerName)) || "";
+                } catch (e) {}
+            }
+            if (name && !_vcPlaceholderName(name)) row.clienteName = name;
+        }
+        return true;
+    },
+
     async _fillRowFromSienge(row) {
+        if (_vcPlaceholderUnit(row.unidade) || _vcPlaceholderName(row.clienteName) || !row.costCenterId) {
+            await this._fillRowFromTitulo(row);
+            if (!_vcMissingClientRef(row)) return;
+        }
         if (row.customerId && (_vcMissingClientRef(row))) {
             await this._fillRowFromCustomerId(row);
             if (!_vcMissingClientRef(row)) return;
         }
 
         const empId = row.costCenterId;
-        const unidade = row.unidade;
-        if (!empId || !unidade || unidade === '-') return;
+        const unidade = _vcPlaceholderUnit(row.unidade) ? "" : row.unidade;
+        if (!empId || !unidade) return;
 
         const lookup = await this._lookupContractByEmpUnit(empId, unidade);
         if (!lookup) return;
 
         if (lookup.customerId) row.customerId = lookup.customerId;
-        if (lookup.customerName && (!row.clienteName || row.clienteName === '-')) {
+        if (lookup.customerName && _vcPlaceholderName(row.clienteName)) {
             row.clienteName = lookup.customerName;
         }
         if (lookup.titulo && (!row.titulo || row.titulo === '-')) {
@@ -1486,7 +1569,7 @@ window.VerificarConstrucaoApp = {
         const customerId = row.customerId;
         if (!customerId) return;
 
-        if (!row.clienteName || row.clienteName === '-') {
+        if (_vcPlaceholderName(row.clienteName)) {
             let name = _vcNameFromCustomerCache(customerId);
             if (!name && window.SiengeApiService && typeof window.SiengeApiService.getCustomer === 'function') {
                 try {
@@ -1494,20 +1577,35 @@ window.VerificarConstrucaoApp = {
                     name = (cust && cust.name) || '';
                 } catch (e) {}
             }
-            if (name) row.clienteName = name;
+            if (name && !_vcPlaceholderName(name)) row.clienteName = name;
         }
 
-        if ((!row.titulo || row.titulo === '-') && window.SiengeApiService && typeof window.SiengeApiService.getSales === 'function') {
+        if (window.SiengeApiService && typeof window.SiengeApiService.getSales === 'function' && (_vcPlaceholderUnit(row.unidade) || !row.costCenterId || !row.titulo || row.titulo === '-')) {
             try {
                 const sales = await window.SiengeApiService.getSales(customerId);
-                const match = (sales || []).find(s => _vcSaleMatchesUnit(s, row.costCenterId, row.unidade)) || (sales || [])[0];
+                const titles = [row.titulo, row.tituloKey, row.contractId, row.contractNumberStr].concat(row.contractKeys || []).map(v => String(v || '').trim()).filter(Boolean);
+                const match = (sales || []).find(s => {
+                    const keys = [s.id, s.receivableBillId, s.contractNumber, s.number].map(v => String(v || '').trim());
+                    return keys.some(k => k && titles.includes(k));
+                }) || ((sales || []).length === 1 ? sales[0] : null);
                 if (match) {
-                    if (match.receivableBillId) {
+                    if (_vcPlaceholderUnit(row.unidade) && match.unitName && !_vcPlaceholderUnit(match.unitName)) {
+                        row.unidade = String(match.unitName).replace(/^Quadra-Lote:\s*/i, '').trim();
+                    }
+                    if (!row.costCenterId && match.enterpriseId) {
+                        row.costCenterId = String(match.enterpriseId);
+                        const cidade = _vcGetCity(row.costCenterId);
+                        if (cidade && cidade !== '-') row.cidade = cidade;
+                        const emp = _vcEmpNameFromCc(row.costCenterId);
+                        if (emp) row.empreendimento = emp;
+                        row.empLabel = _vcEmpLabelOf(row.costCenterId, row.empreendimento);
+                    }
+                    if ((!row.titulo || row.titulo === '-') && match.receivableBillId) {
                         row.titulo = match.receivableBillId;
                         row.tituloKey = match.receivableBillId;
                     }
-                    if (match.id) row.contractId = match.id;
-                    if (match.contractNumber || match.number) {
+                    if (!row.contractId && match.id) row.contractId = match.id;
+                    if (!row.contractNumberStr && (match.contractNumber || match.number)) {
                         row.contractNumberStr = String(match.contractNumber || match.number);
                     }
                 }
@@ -1621,18 +1719,27 @@ window.VerificarConstrucaoApp = {
 
     _persistRecoveredRow(row) {
         if (!row || !row.vistoriaAtiva || !row.vistoriaAtiva.id) return;
-        if (_vcMissingClientRef(row)) return;
+        const nameOk = !_vcPlaceholderName(row.clienteName);
+        const unitOk = !_vcPlaceholderUnit(row.unidade);
+        const ccOk = !!row.costCenterId;
+        if (!nameOk && !unitOk && !ccOk) return;
         if (!window.firebaseDb || !window.firebaseCollections) return;
         try {
             const { doc, updateDoc } = window.firebaseCollections;
-            updateDoc(doc(window.firebaseDb, 'vistorias', row.vistoriaAtiva.id), {
-                clienteName: row.clienteName || '',
-                customerId: row.customerId || '',
-                titulo: row.titulo || '',
-                tituloKey: row.tituloKey || row.titulo || '',
-                contractId: row.contractId || '',
-                contractKeys: row.contractKeys || []
-            }).catch(err => console.warn('[Vistoria] Falha ao gravar dados recuperados:', err));
+            const patch = {};
+            if (nameOk) patch.clienteName = row.clienteName;
+            if (row.customerId) patch.customerId = String(row.customerId);
+            if (unitOk) patch.unidade = row.unidade;
+            if (ccOk) {
+                patch.costCenterId = String(row.costCenterId);
+                if (row.cidade) patch.cidade = row.cidade;
+                if (row.empreendimento) patch.empreendimento = row.empreendimento;
+            }
+            if (row.titulo) patch.titulo = row.titulo;
+            if (row.tituloKey || row.titulo) patch.tituloKey = row.tituloKey || row.titulo;
+            if (row.contractId) patch.contractId = String(row.contractId);
+            if (row.contractKeys && row.contractKeys.length) patch.contractKeys = row.contractKeys;
+            updateDoc(doc(window.firebaseDb, 'vistorias', row.vistoriaAtiva.id), patch).catch(err => console.warn('[Vistoria] Falha ao gravar dados recuperados:', err));
         } catch (e) {}
     },
 
@@ -1727,13 +1834,15 @@ window.VerificarConstrucaoApp = {
                             ? `<span class="vc-data">${u.lastCheckDateStr}</span> <span class="vc-ha">Há ${u.lastCheckDays}</span>`
                             : '<span class="vc-nunca">Nunca</span>';
 
+                        const unidadeTxt = _vcPlaceholderUnit(u.unidade) ? "—" : u.unidade;
+                        const nomeTxt = _vcPlaceholderName(u.clienteName) ? "—" : u.clienteName;
                         html += `
                             <tr class="vc-linha">
                                 <td class="is-center">
                                     <input type="checkbox" class="vc-row-checkbox city-${safeCidade} emp-${safeEmp}" value="${u.currentIdx}" onchange="window.VerificarConstrucaoApp.updateBtn()" ${u.hasConstruction ? 'disabled' : ''}>
                                 </td>
-                                <td class="vc-unidade">${u.unidade}</td>
-                                <td title="${String(u.clienteName || '').replace(/"/g, '&quot;')}">${u.clienteName}${_vcRowIsSubjudice(u) ? '<span class="vc-tag is-sj">Sub Judice</span>' : ''}</td>
+                                <td class="vc-unidade">${unidadeTxt}</td>
+                                <td title="${String(nomeTxt).replace(/"/g, '&quot;')}">${nomeTxt}${_vcRowIsSubjudice(u) ? '<span class="vc-tag is-sj">Sub Judice</span>' : ''}</td>
                                 <td>${u.titulo}</td>
                                 <td class="is-center">${parcelasDisplay}</td>
                                 <td>${lastVistoriaHtml}</td>

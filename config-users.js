@@ -412,7 +412,7 @@ const ConfigUsersApp = {
     {
       name: "Gerencial", icon: "briefcase", key: "mod_gerencial",
       submodules: [
-        { name: "Prestação Contas Ellenceo", key: "sub_part_geral", actions: [{ id: "participacoes", label: "Prestação Contas Ellenceo" }] },
+        { name: "Prestação contas Ellenco", key: "sub_part_geral", actions: [{ id: "participacoes", label: "Prestação contas Ellenco" }] },
         { name: "Organograma Societário", key: "sub_soc_geral", actions: [{ id: "estrutura_societaria", label: "Organograma Societário" }] }
       ]
     },
