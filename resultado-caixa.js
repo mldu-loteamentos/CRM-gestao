@@ -21,6 +21,12 @@ const ResultadoCaixaApp = {
   dfcLinhas: [],
   dfcLendo: false,
   dfcErro: "",
+  mlAbertos: {},
+  mlFatia: "",
+  mlDados: null,
+  mlLendo: false,
+  mlErro: "",
+  _mlSel: null,
 
   FRASES_CARGA: ["Analisando resultados", "Cruzando informações", "Consolidando empresas"],
 
@@ -85,6 +91,7 @@ const ResultadoCaixaApp = {
     this.aba = prox;
     this.render();
     if (this.aba === "posicao" && !this.dates.length && !this.loading) this.refresh();
+    if (this.aba === "caixa") this.carregarMl();
     if (window.lucide) lucide.createIcons();
   },
 
@@ -1498,6 +1505,7 @@ const ResultadoCaixaApp = {
     this._dfcKey = "";
     this._dfcPedido = "";
     this.render();
+    if (this.aba === "caixa") this.carregarMl();
   },
 
   toggleOutros() {
@@ -2128,6 +2136,481 @@ const ResultadoCaixaApp = {
     `;
   },
 
+  arquivoMl() {
+    const ano = String(this.anoBase());
+    const meses = (this.acervo && this.acervo.meses) || {};
+    const chaves = Object.keys(meses).filter((k) => k.indexOf(ano + "-") === 0).sort();
+    const pref = this.chaveMes(ano);
+    const ordem = chaves.filter((k) => k === pref).concat(chaves.filter((k) => k !== pref).reverse());
+    for (let i = 0; i < ordem.length; i++) {
+      const arquivos = (meses[ordem[i]] && meses[ordem[i]].arquivos) || {};
+      const nomes = Object.keys(arquivos);
+      for (let j = 0; j < nomes.length; j++) {
+        const arq = arquivos[nomes[j]];
+        if (Number(arq && arq.empresa) === 1) return arq;
+      }
+    }
+    return null;
+  },
+
+  bagMes() {
+    const meses = [];
+    for (let i = 0; i < 12; i++) meses.push({ o: 0, r: 0, f: 0 });
+    return meses;
+  },
+
+  somaMeses(dest, src) {
+    for (let i = 0; i < 12; i++) {
+      dest[i].o += Number(src[i].o) || 0;
+      dest[i].r += Number(src[i].r) || 0;
+      dest[i].f += Number(src[i].f) || 0;
+    }
+  },
+
+  juntarNo(dest, src) {
+    this.somaMeses(dest.meses, src.meses);
+    Object.keys(src.ccs || {}).forEach((id) => {
+      const de = src.ccs[id];
+      const para = dest.ccs[id] || (dest.ccs[id] = { nome: de.nome || id, meses: this.bagMes() });
+      if (de.nome) para.nome = de.nome;
+      this.somaMeses(para.meses, de.meses);
+    });
+  },
+
+  porCodigoVisao(groups) {
+    const map = {};
+    (groups || []).forEach((g) => {
+      const cod = this.codigoVisao(g);
+      if (cod && !map[cod]) map[cod] = g;
+    });
+    return map;
+  },
+
+  somarGuardado(node, meses, campo) {
+    Object.keys(meses || {}).forEach((mm) => {
+      const i = Number(mm) - 1;
+      if (i < 0 || i > 11) return;
+      node.meses[i][campo] += Number(meses[mm].o) || 0;
+    });
+  },
+
+  async carregarMl(forcar) {
+    const ano = this.anoBase();
+    const mes = Number(this.mes) || 1;
+    const arq = this.arquivoMl();
+    const key = [ano, mes, (arq && arq._doc) || "", (this.forecast && this.forecast.em) || ""].join("|");
+    if (!forcar && this.mlDados && this.mlDados.key === key) return;
+    const token = (this._mlToken || 0) + 1;
+    this._mlToken = token;
+    this.mlLendo = true;
+    this.mlErro = "";
+    this.render();
+    try {
+      const dados = await this.lerCaixaMl(ano, mes, arq);
+      if (this._mlToken !== token) return;
+      dados.key = key;
+      this.mlDados = dados;
+      if (!this._mlExpand) {
+        (dados.linhas || []).forEach((n) => { if (n.level === 0 && n.hasKids) this.mlAbertos[n.id] = true; });
+        this._mlExpand = true;
+      }
+    } catch (e) {
+      if (this._mlToken !== token) return;
+      this.mlErro = (e && e.message) || String(e);
+    }
+    this.mlLendo = false;
+    if (this._mlToken === token && this.aba === "caixa") this.render();
+  },
+
+  async lerCaixaMl(ano, mes, arq) {
+    const FC = window.FluxoCaixaApp;
+    if (!FC || typeof FC.visao !== "function" || typeof FC.allocate !== "function") {
+      throw new Error("A visão do DFC não está disponível nesta tela.");
+    }
+    const groups = (FC.visao().groups || []).slice();
+    const byId = {};
+    groups.forEach((g) => {
+      byId[g.id] = { id: g.id, nome: g.name || g.id, tipo: g.type || "", parentId: g.parentId || "", meses: this.bagMes(), ccs: {} };
+    });
+    const porCod = this.porCodigoVisao(groups);
+    const porCc = (node, ccId, nome) => {
+      const id = String(ccId || "—");
+      const bag = node.ccs[id] || (node.ccs[id] = { nome: nome || id, meses: this.bagMes() });
+      if (nome) bag.nome = nome;
+      return bag;
+    };
+    if (arq && arq.contas) {
+      Object.keys(arq.contas).forEach((code) => {
+        const g = porCod[code];
+        if (!g || !byId[g.id] || g.type === "formula") return;
+        this.somarGuardado(byId[g.id], arq.contas[code].meses, "o");
+      });
+      Object.keys(arq.contasPorCc || {}).forEach((cc) => {
+        const bloco = arq.contasPorCc[cc] || {};
+        Object.keys(bloco.contas || {}).forEach((code) => {
+          const g = porCod[code];
+          if (!g || !byId[g.id] || g.type === "formula") return;
+          const bag = porCc(byId[g.id], cc, bloco.nome);
+          Object.keys(bloco.contas[code].meses || {}).forEach((mm) => {
+            const i = Number(mm) - 1;
+            if (i >= 0 && i < 12) bag.meses[i].o += Number(bloco.contas[code].meses[mm].o) || 0;
+          });
+        });
+      });
+    }
+    const ccMl = new Set(Object.keys((arq && arq.contasPorCc) || {}));
+    const mapa = await this.mapaPronto();
+    if (this.forecast && this.forecast.contas) {
+      Object.keys(this.forecast.contas).forEach((cc) => {
+        if (ccMl.size && !ccMl.has(String(cc))) return;
+        const nomeCc = (this.forecast.nomes && this.forecast.nomes[cc]) || cc;
+        Object.keys(this.forecast.contas[cc] || {}).forEach((code) => {
+          const conta = this.forecast.contas[cc][code];
+          const node = this.noDaLinha(FC, mapa, { code: code, nome: conta.nome || "" });
+          if (!node || !byId[node.id]) return;
+          const bag = porCc(byId[node.id], cc, nomeCc);
+          Object.keys(conta.meses || {}).forEach((ym) => {
+            if (Number(ym.slice(0, 4)) !== Number(ano)) return;
+            const i = Number(ym.slice(5, 7)) - 1;
+            if (i < 0 || i > 11) return;
+            let valor = Number(conta.meses[ym]) || 0;
+            if (valor && typeof FC.signedAmount === "function") {
+              valor = FC.signedAmount(node, code, conta.nome || "", valor, "", "", null);
+            }
+            byId[node.id].meses[i].f += valor;
+            bag.meses[i].f += valor;
+          });
+        });
+      });
+    }
+    const fimMes = new Date(ano, mes, 0).getDate();
+    const start = ano + "-01-01";
+    const end = ano + "-" + String(mes).padStart(2, "0") + "-" + String(fimMes).padStart(2, "0");
+    let movimentos = [];
+    let contas = [];
+    if (window.SiengeApiService && typeof SiengeApiService.getBankMovements === "function") {
+      let movs = await SiengeApiService.getBankMovements(start, end, { selectionType: "M", companyId: 1 });
+      movs = movs || [];
+      if (typeof window.siengeDedupeBankMovements === "function") movs = siengeDedupeBankMovements(movs);
+      movs.forEach((mov) => {
+        const d = FC.cashDate(mov);
+        if (!d || d < start || d > end || Number(mov.companyId || 1) !== 1) return;
+        const ym = d.slice(0, 7);
+        const mi = Number(ym.slice(5, 7)) - 1;
+        FC.allocate(mov, 1).forEach((a) => {
+          if (a.month && String(a.month).slice(0, 7) !== ym) return;
+          const node = this.noDaLinha(FC, mapa, { code: a.categoryId, nome: a.categoryName || "" });
+          if (!node || !byId[node.id]) return;
+          const signed = FC.signedAmount(node, a.categoryId, a.categoryName, a.amount, a.reducer, a.categoryType, a.mov);
+          if (!signed || mi < 0) return;
+          byId[node.id].meses[mi].r += signed;
+          porCc(byId[node.id], a.costCenterId, a.costCenterName).meses[mi].r += signed;
+        });
+        const valor = this.sinalMovimento(mov);
+        if (!valor) return;
+        movimentos.push({
+          conta: String(mov.accountNumber || mov.account || "").trim(),
+          mes: mi + 1,
+          valor: valor
+        });
+      });
+    }
+    if (window.SiengeApiService && typeof SiengeApiService.getCheckingAccounts === "function") {
+      const res = await SiengeApiService.getCheckingAccounts(1, { allStatuses: true });
+      const bals = typeof SiengeApiService.getAccountBalances === "function"
+        ? await SiengeApiService.getAccountBalances(start, { companyId: 1, showLast: true })
+        : [];
+      const abertura = {};
+      (bals || []).forEach((b) => {
+        const num = String(b.accountNumber || b.number || "").trim();
+        const dt = String(b.balanceDate || "").slice(0, 10);
+        if (!num || (dt && dt > start)) return;
+        const valor = this.valorSaldo(b);
+        if (valor == null) return;
+        const prev = abertura[num];
+        if (!prev || (dt && dt >= prev.dt)) abertura[num] = { valor: valor, dt: dt || start };
+      });
+      contas = ((res && res.results) || []).map((raw) => {
+        const type = raw && raw.accountType;
+        const typeId = String((type && typeof type === "object" ? type.id : raw.accountTypeId) || "").trim().toUpperCase();
+        const desc = String((type && typeof type === "object" ? (type.description || type.name) : type) || "");
+        const invest = typeId === "I" || typeId === "A" || /invest|aplic/i.test(desc);
+        if (invest) return null;
+        const numero = String(raw.accountNumber || raw.number || "").trim();
+        if (!numero) return null;
+        const ab = abertura[numero];
+        return {
+          numero: numero,
+          nome: String(raw.accountName || raw.name || numero).trim(),
+          abertura: ab ? ab.valor : 0,
+          desdeInicio: !!(ab && (!ab.dt || ab.dt <= start))
+        };
+      }).filter(Boolean);
+    }
+    const depthOf = (g) => {
+      let d = 0;
+      let cur = g;
+      while (cur && cur.parentId && byId[cur.parentId]) { d += 1; cur = byId[cur.parentId]; }
+      return d;
+    };
+    groups.filter((g) => g.type !== "formula").sort((a, b) => depthOf(b) - depthOf(a)).forEach((g) => {
+      groups.filter((c) => c.parentId === g.id && c.type !== "formula").forEach((ch) => {
+        if (byId[g.id] && byId[ch.id]) this.juntarNo(byId[g.id], byId[ch.id]);
+      });
+    });
+    const aplicar = (id, partes) => {
+      if (!byId[id]) return;
+      byId[id].meses = this.bagMes();
+      byId[id].ccs = {};
+      partes.forEach((pid) => { if (byId[pid]) this.juntarNo(byId[id], byId[pid]); });
+    };
+    aplicar("g_03", ["g_04", "g_05"]);
+    aplicar("g_06", ["g_01", "g_02", "g_03"]);
+    aplicar("g_08", ["g_06", "g_07"]);
+    aplicar("g_10", ["g_08", "g_09"]);
+    aplicar("g_12", ["g_10", "g_11"]);
+    const linhas = [];
+    const walk = (node, level) => {
+      const filhos = groups.filter((g) => g.parentId === node.id);
+      const item = byId[node.id];
+      if (!item) return;
+      linhas.push({ id: item.id, nome: item.nome, tipo: item.tipo, level: level, hasKids: filhos.length > 0, meses: item.meses, ccs: item.ccs });
+      filhos.forEach((ch) => walk(ch, level + 1));
+    };
+    groups.filter((g) => !g.parentId).forEach((g) => walk(g, 0));
+    const padrao = contas.filter((c) => c.desdeInicio).map((c) => c.numero);
+    return { ano: ano, mes: mes, linhas: linhas, contas: contas, movimentos: movimentos, padrao: padrao, temArquivo: !!arq, temForecast: !!(this.forecast && this.forecast.contas) };
+  },
+
+  sinalMovimento(m) {
+    const CD = window.CaixaDiarioApp;
+    if (CD && typeof CD.valorMov === "function") return CD.valorMov(m);
+    const raw = Number(m.bankMovementAmount) || 0;
+    const tipo = String(m.bankMovementOperationType || m.operationType || "").toUpperCase();
+    if (/^(S|D)$/.test(tipo) || /DEBIT|SAIDA/.test(tipo)) return -Math.abs(raw);
+    if (/^(E|C)$/.test(tipo) || /CREDIT|ENTRADA/.test(tipo)) return Math.abs(raw);
+    return raw;
+  },
+
+  valorSaldo(b) {
+    const list = [b.amount, b.balance, b.balanceAmount, b.currentBalance, b.lastBalance, b.lastBalanceAmount, b.availableAmount, b.availableBalance, b.value];
+    for (let i = 0; i < list.length; i++) {
+      const n = Number(list[i]);
+      if (Number.isFinite(n)) return n;
+    }
+    return null;
+  },
+
+  mlSelecionadas(dados) {
+    if (!this._mlSel) {
+      try { this._mlSel = JSON.parse(localStorage.getItem("rc_ml_contas_v1") || "null"); } catch (e) { this._mlSel = null; }
+    }
+    if (Array.isArray(this._mlSel)) return this._mlSel;
+    return (dados && dados.padrao) || [];
+  },
+
+  toggleContaMl(num, on) {
+    const set = new Set(this.mlSelecionadas(this.mlDados));
+    if (on) set.add(String(num));
+    else set.delete(String(num));
+    this._mlSel = Array.from(set);
+    try { localStorage.setItem("rc_ml_contas_v1", JSON.stringify(this._mlSel)); } catch (e) {}
+    this.render();
+  },
+
+  toggleNoMl(id) {
+    this.mlAbertos[id] = !this.mlAbertos[id];
+    this.render();
+  },
+
+  toggleFatia(id) {
+    this.mlFatia = this.mlFatia === id ? "" : id;
+    this.render();
+  },
+
+  mlVisivel(linha) {
+    if (!linha) return false;
+    if (linha.tipo === "formula" || linha.level === 0) return true;
+    return (linha.meses || []).some((m) => Math.abs(m.o) > 0.5 || Math.abs(m.r) > 0.5 || Math.abs(m.f) > 0.5);
+  },
+
+  mlNum(v) {
+    const n = Number(v) || 0;
+    const x = this.escala === "milhoes" ? n / 1000000 : n;
+    return x.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  },
+
+  mlPct(o, b) {
+    if (Math.abs(o) < 0.5) return "—";
+    return ((b - o) / Math.abs(o) * 100).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
+  },
+
+  fatiaMl(meses, id, sel) {
+    if (id === "acum") {
+      let o = 0;
+      let b = 0;
+      for (let i = 0; i < sel - 1; i++) { o += meses[i].o; b += meses[i].r; }
+      return { a: o, b: b, futuro: false };
+    }
+    const i = Number(id) - 1;
+    if (i < 0 || i > 11) return { a: 0, b: 0, futuro: false };
+    if (i + 1 > sel) return { a: meses[i].o, b: meses[i].f, futuro: true };
+    return { a: meses[i].o, b: meses[i].r, futuro: false };
+  },
+
+  totaisMl(meses, sel) {
+    let oAno = 0;
+    let real = 0;
+    let com = 0;
+    for (let i = 0; i < 12; i++) {
+      oAno += meses[i].o;
+      if (i + 1 <= sel) { real += meses[i].r; com += meses[i].r; }
+      else com += meses[i].f;
+    }
+    return { oAno: oAno, real: real, com: com };
+  },
+
+  caixaHtml() {
+    const ano = this.anoBase();
+    const sel = Number(this.mes) || 1;
+    const mesOpts = this.MESES.map((nome, i) => `<option value="${i + 1}"${i + 1 === sel ? " selected" : ""}>${nome}</option>`).join("");
+    const realOn = this.escala !== "milhoes";
+    const seg = (on, rotulo, acao) => `<button type="button" class="${on ? "is-on" : ""}" onclick="${acao}">${rotulo}</button>`;
+    const barra = `<div class="rcx-toolbar">
+      <label class="rcx-field">Competência
+        <select class="rcx-select" onchange="ResultadoCaixaApp.setMes(this.value)">${mesOpts}</select>
+        <span class="rcx-ml-ano">${ano}</span>
+      </label>
+      <div class="rcx-escala" role="group">
+        ${seg(realOn, "R$", "ResultadoCaixaApp.setEscala('real')")}
+        ${seg(!realOn, "R$ milhões", "ResultadoCaixaApp.setEscala('milhoes')")}
+      </div>
+      <button type="button" class="rcx-arq-btn" onclick="ResultadoCaixaApp.carregarMl(true)">Atualizar</button>
+    </div>
+    <p class="rcx-ajuda">Moura Leite, exercício ${ano}. Até ${this.MESES[sel - 1]} o realizado sai da API. O acumulado anterior compara o orçado dos relatórios com esse realizado. Os meses seguintes comparam o orçado com o forecast.</p>`;
+    if (this.mlLendo) return barra + this.loaderHtml();
+    if (this.mlErro) return barra + `<div class="rcx-erro">${caixaEsc(this.mlErro)}</div>`;
+    const dados = this.mlDados;
+    if (!dados) return barra;
+    const avisos = [];
+    if (!dados.temArquivo) avisos.push("Ainda não há relatório orçado da Moura Leite neste exercício.");
+    if (sel < 12 && !dados.temForecast) avisos.push("Sem forecast: os meses seguintes ficam só com o orçado.");
+    const cols = [];
+    if (sel > 1) cols.push({ id: "acum", nome: "Acumulado jan–" + this.MESES[sel - 2].toLowerCase(), futuro: false });
+    cols.push({ id: String(sel), nome: this.MESES[sel - 1], futuro: false });
+    for (let m = sel + 1; m <= 12; m++) cols.push({ id: String(m), nome: this.MESES[m - 1], futuro: true });
+    const head1 = cols.map((c) => `<th colspan="${c.futuro ? 2 : 4}"><button type="button" class="rcx-ml-abre${this.mlFatia === c.id ? " is-on" : ""}" onclick="ResultadoCaixaApp.toggleFatia('${c.id}')">${caixaEsc(c.nome)}</button></th>`).join("");
+    const head2 = cols.map((c) => c.futuro
+      ? `<th>Orçado</th><th>Forecast</th>`
+      : `<th>Orçado</th><th>Realizado</th><th>Var. %</th><th>Var. R$</th>`).join("");
+    const cel = (v, cls) => `<td class="${cls || ""}">${this.mlNum(v)}</td>`;
+    const bloco = (meses) => {
+      const pedacos = cols.map((c) => {
+        const f = this.fatiaMl(meses, c.id, sel);
+        if (c.futuro) return cel(f.a) + cel(f.b, "is-fc");
+        return cel(f.a) + cel(f.b) + `<td>${this.mlPct(f.a, f.b)}</td>` + cel(f.b - f.a, (f.b - f.a) < -0.5 ? "is-neg" : "");
+      }).join("");
+      const t = this.totaisMl(meses, sel);
+      return pedacos + cel(t.oAno, "is-tot") + cel(t.real, "is-tot") + cel(t.com, "is-tot");
+    };
+    const abertos = this.mlAbertos || {};
+    const linhas = [];
+    let ocultar = 0;
+    (dados.linhas || []).forEach((linha) => {
+      if (ocultar && linha.level > ocultar) return;
+      ocultar = 0;
+      if (!this.mlVisivel(linha)) return;
+      const aberto = !!abertos[linha.id];
+      if (linha.hasKids && !aberto) ocultar = linha.level;
+      const nome = linha.hasKids
+        ? `<button type="button" class="rcx-ml-no" onclick="ResultadoCaixaApp.toggleNoMl('${linha.id}')">${aberto ? "▾" : "▸"} ${caixaEsc(linha.nome)}</button>`
+        : `<span class="rcx-ml-no">${caixaEsc(linha.nome)}</span>`;
+      linhas.push(`<tr class="is-n${linha.level}${linha.tipo === "formula" ? " is-formula" : ""}"><th>${nome}</th>${bloco(linha.meses)}</tr>`);
+    });
+    const span = cols.reduce((s, c) => s + (c.futuro ? 2 : 4), 0) + 4;
+    let painel = "";
+    if (this.mlFatia) {
+      const col = cols.find((c) => c.id === this.mlFatia);
+      const mapa = {};
+      (dados.linhas || []).filter((l) => l.tipo !== "formula" && !l.hasKids).forEach((l) => {
+        Object.keys(l.ccs || {}).forEach((id) => {
+          const cc = l.ccs[id];
+          const alvo = mapa[id] || (mapa[id] = { nome: cc.nome || id, meses: this.bagMes() });
+          this.somaMeses(alvo.meses, cc.meses);
+        });
+      });
+      const corpoCc = Object.keys(mapa).map((id) => ({ id: id, nome: mapa[id].nome, fatia: this.fatiaMl(mapa[id].meses, this.mlFatia, sel) }))
+        .filter((r) => Math.abs(r.fatia.a) > 0.5 || Math.abs(r.fatia.b) > 0.5)
+        .sort((a, b) => Math.abs(b.fatia.b) - Math.abs(a.fatia.b))
+        .map((r) => `<tr><td>${caixaEsc(r.id)} ${caixaEsc(r.nome)}</td>${cel(r.fatia.a)}${cel(r.fatia.b)}<td>${this.mlPct(r.fatia.a, r.fatia.b)}</td>${cel(r.fatia.b - r.fatia.a, (r.fatia.b - r.fatia.a) < -0.5 ? "is-neg" : "")}</tr>`)
+        .join("");
+      painel = `<h3 class="rcx-ml-tit">${caixaEsc(col ? col.nome : "")} por centro de custo</h3>
+        <div class="rcx-ml-scroll"><table class="rcx-ml">
+          <thead><tr><th>Centro de custo</th><th>${col && col.futuro ? "Orçado" : "Orçado"}</th><th>${col && col.futuro ? "Forecast" : "Realizado"}</th><th>Var. %</th><th>Var. R$</th></tr></thead>
+          <tbody>${corpoCc || `<tr><td colspan="5">Nenhum centro de custo com valor neste período.</td></tr>`}</tbody>
+        </table></div>`;
+    }
+    const escolhidas = new Set(this.mlSelecionadas(dados).map(String));
+    const checks = (dados.contas || []).map((c) => {
+      const on = escolhidas.has(String(c.numero));
+      return `<label class="rcx-ml-conta"><input type="checkbox" ${on ? "checked" : ""} onchange="ResultadoCaixaApp.toggleContaMl('${caixaEsc(c.numero)}', this.checked)"> ${caixaEsc(c.numero)} ${caixaEsc(c.nome)}</label>`;
+    }).join("");
+    const movs = (dados.movimentos || []).filter((m) => escolhidas.has(String(m.conta)));
+    const abertura = (dados.contas || []).reduce((s, c) => s + (escolhidas.has(String(c.numero)) ? (Number(c.abertura) || 0) : 0), 0);
+    const varOrc = (dados.linhas || []).find((l) => l.id === "g_12");
+    const mesesConta = [];
+    for (let m = 1; m <= sel; m++) {
+      const realizado = movs.filter((mv) => mv.mes === m).reduce((s, mv) => s + mv.valor, 0);
+      mesesConta.push(realizado);
+    }
+    let corrido = abertura;
+    const headMes = mesesConta.map((_, i) => `<th colspan="2">${this.MESES[i]}</th>`).join("");
+    const headSub = mesesConta.map(() => `<th>Mês</th><th>Acumulado</th>`).join("");
+    const linhasConta = (dados.contas || []).filter((c) => escolhidas.has(String(c.numero))).map((c) => {
+      let acum = Number(c.abertura) || 0;
+      const tds = [];
+      for (let m = 1; m <= sel; m++) {
+        const mesValor = (dados.movimentos || []).filter((mv) => mv.mes === m && String(mv.conta) === String(c.numero)).reduce((s, mv) => s + mv.valor, 0);
+        acum += mesValor;
+        tds.push(cel(mesValor) + cel(acum));
+      }
+      return `<tr><th>${caixaEsc(c.numero)} ${caixaEsc(c.nome)}</th>${tds.join("")}</tr>`;
+    }).join("");
+    const totReal = [];
+    const totOrc = [];
+    corrido = abertura;
+    let corridoOrc = abertura;
+    for (let i = 0; i < mesesConta.length; i++) {
+      corrido += mesesConta[i];
+      const o = varOrc ? varOrc.meses[i].o : 0;
+      corridoOrc += o;
+      totReal.push(cel(mesesConta[i], "is-tot") + cel(corrido, "is-tot"));
+      totOrc.push(cel(o, "is-tot") + cel(corridoOrc, "is-tot"));
+    }
+    const caixaContas = `<h3 class="rcx-ml-tit">Contas que já existiam em 01/01/${ano}</h3>
+      <div class="rcx-ml-checks">${checks || `<span class="rcx-muted">Nenhuma conta corrente da empresa 1 voltou da API.</span>`}</div>
+      <p class="rcx-ajuda">O mês é o movimento da conta. O acumulado soma o saldo de 01/01/${ano}. A linha orçada usa a variação de caixa do relatório.</p>
+      <div class="rcx-ml-scroll"><table class="rcx-ml">
+        <thead><tr><th>Conta</th>${headMes}</tr><tr><th></th>${headSub}</tr></thead>
+        <tbody>
+          ${linhasConta || `<tr><td colspan="${sel * 2 + 1}">Escolha ao menos uma conta.</td></tr>`}
+          <tr class="is-formula"><th>Realizado das contas</th>${totReal.join("")}</tr>
+          <tr class="is-formula"><th>Orçado da variação de caixa</th>${totOrc.join("")}</tr>
+        </tbody>
+      </table></div>`;
+    return `${barra}
+      ${avisos.map((t) => `<div class="rcx-aviso">${caixaEsc(t)}</div>`).join("")}
+      <div class="rcx-ml-scroll"><table class="rcx-ml">
+        <thead>
+          <tr><th>Conta</th>${head1}<th colspan="3">Total do ano</th></tr>
+          <tr><th></th>${head2}<th>Orçado</th><th>Realizado</th><th>Com forecast</th></tr>
+        </thead>
+        <tbody>${linhas.join("") || `<tr><td colspan="${span}">Sem linhas da visão DFC.</td></tr>`}</tbody>
+      </table></div>
+      ${painel}
+      ${caixaContas}`;
+  },
+
   render() {
     const root = document.getElementById("resultado-caixa-root");
     if (!root) return;
@@ -2135,7 +2618,7 @@ const ResultadoCaixaApp = {
     const tab = (id, label, icon) => `<button type="button" role="tab" aria-selected="${aba === id}" class="ml-tab${aba === id ? " is-active" : ""}" onclick="ResultadoCaixaApp.setAba('${id}')"><i data-lucide="${icon}"></i> ${label}</button>`;
     let corpo = "";
     try {
-      corpo = aba === "posicao" ? this.posicaoHtml() : this.orcamentoHtml(aba);
+      corpo = aba === "posicao" ? this.posicaoHtml() : (aba === "caixa" ? this.caixaHtml() : this.orcamentoHtml(aba));
     } catch (e) {
       console.error("[Resultado de caixa]", e);
       const msg = String((e && e.message) || e || "erro ao montar a tela");
@@ -2146,12 +2629,13 @@ const ResultadoCaixaApp = {
         <div class="ml-tabs rcx-tabs" role="tablist">
           ${tab("entradas", "Entradas", "trending-up")}
           ${tab("saidas", "Saídas", "trending-down")}
+          ${tab("caixa", "Caixa ML", "landmark")}
           ${tab("posicao", "Posição", "scale")}
         </div>
         ${corpo}
       </div>`;
     if (window.lucide) lucide.createIcons();
-    if (this.dfcLendo || this.lendo || this.loading) this.iniciarCarga(false);
+    if (this.dfcLendo || this.lendo || this.loading || this.mlLendo) this.iniciarCarga(false);
     else this.pararCarga();
   }
 };

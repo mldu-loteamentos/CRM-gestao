@@ -3,6 +3,7 @@ const {
   getFirestore, doc, setDoc, getDoc, deleteDoc
 } = require("firebase/firestore");
 const { isBusinessDaySP, todayIsoSP } = require("../lib/br-calendar");
+const caucaoHandler = require("../lib/caucao-batimento");
 
 const SIENGE_DOMAIN = "mouraleite";
 const SIENGE_USER = "mouraleite-contas-a-pagar";
@@ -497,6 +498,7 @@ async function saveState(state) {
 }
 
 module.exports = async function handler(req, res) {
+  if (String(req.url || "").indexOf("caucao-batimento") >= 0) return caucaoHandler(req, res);
   if (req.method === "OPTIONS") {
     res.setHeader("Access-Control-Allow-Origin", "*");
     return res.status(204).end();

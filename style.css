@@ -9609,3 +9609,22 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
   .soc-body { flex-direction: column; }
   .soc-aside { width: 100%; max-width: none; max-height: 42%; }
 }
+.rcx-ml-ano { font-weight: 800; color: #105436; margin-left: 8px; }
+.rcx-ml-scroll { overflow: auto; max-height: 62vh; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; margin-bottom: 14px; }
+.rcx-ml { border-collapse: separate; border-spacing: 0; font-size: 0.78rem; min-width: 100%; }
+.rcx-ml th, .rcx-ml td { padding: 6px 8px; border-bottom: 1px solid #e2e8f0; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rcx-ml thead th { position: sticky; top: 0; background: #105436; color: #fff; z-index: 2; font-size: 0.68rem; }
+.rcx-ml thead tr:nth-child(2) th { top: 28px; background: #1b8253; }
+.rcx-ml tbody th { text-align: left; position: sticky; left: 0; background: #fff; z-index: 1; min-width: 220px; font-weight: 650; }
+.rcx-ml tr.is-n0 th, .rcx-ml tr.is-n0 td { background: #105436; color: #fff; font-weight: 800; }
+.rcx-ml tr.is-n1 th, .rcx-ml tr.is-n1 td { background: #d1fae5; color: #14532d; }
+.rcx-ml tr.is-n2 th, .rcx-ml tr.is-n2 td { background: #fff; color: #1e293b; }
+.rcx-ml tr.is-formula th, .rcx-ml tr.is-formula td { background: #ecfdf5; color: #105436; font-weight: 800; }
+.rcx-ml td.is-neg { color: #b91c1c; }
+.rcx-ml td.is-fc { color: #1d4ed8; }
+.rcx-ml td.is-tot { font-weight: 800; }
+.rcx-ml-abre, .rcx-ml-no { border: 0; background: transparent; color: inherit; font: inherit; font-weight: 800; cursor: pointer; text-align: left; }
+.rcx-ml-abre.is-on { text-decoration: underline; }
+.rcx-ml-tit { margin: 8px 0; font-size: 0.92rem; color: #105436; }
+.rcx-ml-checks { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-bottom: 8px; }
+.rcx-ml-conta { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; color: #0f172a; }

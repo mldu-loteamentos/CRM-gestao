@@ -50,6 +50,11 @@ git checkout main        ← volta ao atual
 
 ---
 
-## ❌ Arquivos removidos (não usar)
-- `deploy_vercel.bat` — removido (substituído por deploy.bat)
-- `deploy_vercel_direto.bat` — removido (substituído por deploy_emergencia.bat)
+## Publicação na Vercel
+O deploy usa só o que está na raiz, em `api/` e em `lib/`. A pasta `arquivo/` guarda cópia antiga, script avulso e imagem de referência. Ela não entra na publicação.
+
+Para publicar, use `deploy.bat` na raiz. O envio de emergência continua em `deploy_emergencia.bat`.
+
+## Cópias antigas de deploy
+- `arquivo/legado/deploy_vercel.bat` — substituído por `deploy.bat`
+- `arquivo/legado/deploy_vercel_direto.bat` — substituído por `deploy_emergencia.bat`

@@ -53,6 +53,36 @@ const ParticipacoesApp = {
     return (list || []).slice().sort((a, b) => Number(a.id) - Number(b.id));
   },
 
+  empresasCustomMap() {
+    const fromState = (window.EmpresasState && EmpresasState.customFields) || null;
+    if (fromState && Object.keys(fromState).length) return fromState;
+    try {
+      const data = JSON.parse(localStorage.getItem("crm_empresas_custom") || "{}") || {};
+      const map = {};
+      Object.keys(data).forEach((k) => {
+        if (k === "_v2") return;
+        const item = data[k];
+        if (!item || typeof item !== "object") return;
+        const id = item.company_id != null ? item.company_id : k;
+        map[id] = item;
+      });
+      return map;
+    } catch (e) {
+      return {};
+    }
+  },
+
+  gestaoEllencoOn(id) {
+    const map = this.empresasCustomMap();
+    const custom = map[id] || map[String(id)] || map[Number(id)] || null;
+    const v = custom && custom.gestao_elenco;
+    return v === 1 || v === true || v === "1";
+  },
+
+  elencoCompanies() {
+    return this.crmCompanies().filter((c) => this.gestaoEllencoOn(c.id));
+  },
+
   crmCompany(id) {
     return this.crmCompanies().find((c) => String(c.id) === String(id)) || null;
   },
@@ -68,7 +98,7 @@ const ParticipacoesApp = {
 
   filteredCompanies() {
     const q = String(this.companyQ || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    return this.crmCompanies().filter((c) => {
+    return this.elencoCompanies().filter((c) => {
       if (!q) return true;
       const blob = `${c.id} ${c.name || ""}`.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       return blob.includes(q);
@@ -295,7 +325,7 @@ const ParticipacoesApp = {
   },
 
   refreshCompanyList() {
-    this.companies = this.crmCompanies().map((c) => ({
+    this.companies = this.elencoCompanies().map((c) => ({
       companyId: String(c.id),
       label: this.companyLabel(c.id) || c.name || String(c.id)
     }));
@@ -1893,7 +1923,7 @@ const ParticipacoesApp = {
     const scope = this.exportScope || "current";
     let companyIds = [];
     if (scope === "all") {
-      const fromCrm = this.crmCompanies().map((c) => String(c.id));
+      const fromCrm = this.elencoCompanies().map((c) => String(c.id));
       const withData = new Set();
       try {
         const raw = localStorage.getItem("crm_participacoes_cache_v9") || "{}";
@@ -2181,7 +2211,7 @@ const ParticipacoesApp = {
   },
 
   companyItems() {
-    return this.crmCompanies().map((c) => ({
+    return this.elencoCompanies().map((c) => ({
       id: String(c.id),
       label: String(c.id) + " - " + String(this.companyLabel(c.id) || c.name || "").toUpperCase()
     }));

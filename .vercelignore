@@ -1,0 +1,13 @@
+node_modules
+uploads
+sienge-browser-data
+scratch
+scripts-antigos
+arquivo
+.git
+*.log
+*.bak
+antigravity.db
+.env
+.env*
+.vercel
