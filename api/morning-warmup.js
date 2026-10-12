@@ -43,6 +43,24 @@ function originFromReq(req) {
   return `${proto}://${host}`;
 }
 
+/**
+ * O plano da Vercel tem duas rotinas agendadas e as duas já estão em uso: o batimento da
+ * caução sai daqui. A chamada é abandonada depois de enviada; a função da caução segue sozinha.
+ */
+async function dispararCaucao(req) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 2500);
+  try {
+    await fetch(`${originFromReq(req)}/api/caucao-batimento`, {
+      headers: { Authorization: req.headers.authorization || "" },
+      signal: ctrl.signal
+    });
+  } catch (e) {
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function siengeFetch(url, retries = 5) {
   let last;
   for (let i = 0; i < retries; i++) {
@@ -486,6 +504,8 @@ module.exports = async function handler(req, res) {
   if (!authorized(req)) {
     return res.status(401).json({ error: "unauthorized" });
   }
+
+  await dispararCaucao(req);
 
   const force = !!(req.query && (req.query.force === "1" || req.query.force === "true"));
   const day = isBusinessDaySP();

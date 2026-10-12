@@ -1,11 +1,9 @@
 /**
  * Configurações · Apoio · Tipos de Documento
- * Lista os documentos do Sienge (GET /document-identifications) e define quais exigem ciência
- * no título a pagar antes da autorização. O padrão vem do cadastro do Sienge
- * (requireAcknowledgementOnPayableBill); o que for alterado aqui fica em crm_documentos_ciencia.
+ * Lista os documentos do Sienge (GET /document-identifications) e mostra quais exigem ciência
+ * no título a pagar antes da autorização, conforme o cadastro do Sienge (requireAcknowledgementOnPayableBill).
  */
 const DocumentosSiengeApp = {
-  STORAGE_KEY: "crm_documentos_ciencia",
   CACHE_KEY: "crm_documentos_sienge_cache",
   VISTOS_KEY: "crm_documentos_vistos",
   CACHE_HORAS: 24,
@@ -20,15 +18,6 @@ const DocumentosSiengeApp = {
   esc(s) {
     return String(s == null ? "" : s)
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  },
-
-  ajustes() {
-    try {
-      const v = JSON.parse(localStorage.getItem(this.STORAGE_KEY) || "{}");
-      return v && typeof v.byId === "object" ? v : { byId: {}, updatedAt: 0 };
-    } catch (e) {
-      return { byId: {}, updatedAt: 0 };
-    }
   },
 
   cache() {
@@ -140,20 +129,8 @@ const DocumentosSiengeApp = {
   exigeCiencia(docId) {
     const id = String(docId || "").trim().toUpperCase();
     if (!id) return false;
-    const aj = this.ajustes().byId[id];
-    if (aj && typeof aj.ciencia === "boolean") return aj.ciencia;
     const doc = (this.items.length ? this.items : this.cache().items).find((d) => d.id.toUpperCase() === id);
     return !!(doc && doc.cienciaSienge);
-  },
-
-  setCiencia(id, on) {
-    const doc = this.items.find((d) => d.id === id);
-    const aj = this.ajustes();
-    if (doc && doc.cienciaSienge === !!on) delete aj.byId[id];
-    else aj.byId[id] = { ciencia: !!on, updatedAt: Date.now() };
-    aj.updatedAt = Date.now();
-    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(aj));
-    this.renderTable();
   },
 
   filtrados() {
@@ -165,10 +142,8 @@ const DocumentosSiengeApp = {
   renderStatus() {
     const el = document.getElementById("dsg-kpis");
     if (!el) return;
-    const ajustes = this.ajustes().byId;
     const ativos = this.items.filter((d) => d.ativo);
     const exigem = ativos.filter((d) => this.exigeCiencia(d.id)).length;
-    const diferentes = ativos.filter((d) => ajustes[d.id] && typeof ajustes[d.id].ciencia === "boolean").length;
     const kpi = (rot, val, cls) => `
       <div class="ppcc-kpi">
         <span class="ppcc-kpi-rot">${rot}</span>
@@ -177,18 +152,14 @@ const DocumentosSiengeApp = {
     el.innerHTML = this.loading && !this.items.length
       ? kpi("Documentos", "…")
       : kpi("Documentos ativos", ativos.length) +
-        kpi("Exigem ciência", exigem, "is-pos") +
-        kpi("Diferentes do Sienge", diferentes, diferentes ? "is-alerta" : "");
+        kpi("Exigem ciência", exigem, "is-pos");
   },
 
   renderTable() {
     const tbody = document.getElementById("dsg-tbody");
     if (!tbody) return;
     const rows = this.filtrados();
-    const ajustes = this.ajustes().byId;
     tbody.innerHTML = rows.length ? rows.map((d) => {
-      const on = this.exigeCiencia(d.id);
-      const mudado = ajustes[d.id] && typeof ajustes[d.id].ciencia === "boolean";
       const sienge = d.soDosTitulos
         ? `<span class="dsg-tag">Sem acesso à API</span>`
         : `<span class="dsg-tag${d.cienciaSienge ? " is-on" : ""}">${d.cienciaSienge ? "Exige ciência" : "Não exige"}</span>`;
@@ -200,18 +171,8 @@ const DocumentosSiengeApp = {
         <td class="dsg-cod">${this.esc(d.id)}</td>
         <td class="dsg-nome">${this.esc(d.nome)}${notas ? `<small>${notas}</small>` : ""}</td>
         <td>${sienge}</td>
-        <td>
-          <div class="dsg-ciencia">
-            <label class="moura-switch" title="Exige ciência antes da autorização">
-              <input type="checkbox" ${on ? "checked" : ""} onchange="DocumentosSiengeApp.setCiencia('${this.esc(d.id)}', this.checked)">
-              <span class="moura-switch-track" aria-hidden="true"></span>
-              <span class="moura-switch-text">${on ? "Exige ciência" : "Não exige"}</span>
-            </label>
-            ${mudado ? `<span class="dsg-mudado" title="Ajustado no CRM; o cadastro do Sienge está diferente">Diferente do Sienge</span>` : ""}
-          </div>
-        </td>
       </tr>`;
-    }).join("") : `<tr><td colspan="4" class="dsg-vazio">${this.loading ? "Carregando…" : this.esc(this.error || "Nenhum documento encontrado.")}</td></tr>`;
+    }).join("") : `<tr><td colspan="3" class="dsg-vazio">${this.loading ? "Carregando…" : this.esc(this.error || "Nenhum documento encontrado.")}</td></tr>`;
     this.renderStatus();
   },
 
@@ -239,7 +200,7 @@ const DocumentosSiengeApp = {
         <div class="ppcc-head">
           <div>
             <div class="ppcc-titulo">Ciência no título a pagar</div>
-            <div class="ppcc-sub">A ciência é dada no Sienge antes da autorização do título. O padrão de cada documento vem do cadastro do Sienge; o que for alterado aqui vale para o Gerar Pagamento.</div>
+            <div class="ppcc-sub">A ciência é dada no Sienge antes da autorização do título. Quais documentos exigem ciência vem do cadastro de documentos do Sienge e vale para o Gerar Pagamento.</div>
           </div>
           <div class="ppcc-kpis" id="dsg-kpis"></div>
         </div>
@@ -248,16 +209,15 @@ const DocumentosSiengeApp = {
           <div>
             <b>O Sienge negou acesso à lista de documentos (erro 403).</b> O usuário de API do CRM não tem permissão no recurso
             <b>Documentos</b> (<code>document-identifications</code>). Peça para liberar em Sienge &gt; Integrações &gt; Usuários de API &gt; editar o usuário &gt; recursos permitidos, e depois clique em Atualizar do Sienge.
-            ${this.items.length ? `<br>Enquanto isso, a lista abaixo traz os documentos que já apareceram nos títulos do Gerar Pagamento: marque à mão os que exigem ciência.` : `<br>Enquanto isso, abra o Gerar Pagamento uma vez: os documentos dos títulos aparecem aqui e você marca à mão os que exigem ciência.`}
+            ${this.items.length ? `<br>Enquanto isso, a lista abaixo traz os documentos que já apareceram nos títulos do Gerar Pagamento, sem a informação de ciência.` : `<br>Enquanto isso, os documentos aparecem aqui depois que o Gerar Pagamento for aberto uma vez, sem a informação de ciência.`}
           </div>
         </div>` : ""}
         <div class="cc-scroll dsg-scroll">
           <table class="cc-table dsg-table">
-            <colgroup><col class="dsg-c-cod"><col><col class="dsg-c-sienge"><col class="dsg-c-ciencia"></colgroup>
+            <colgroup><col class="dsg-c-cod"><col><col class="dsg-c-sienge"></colgroup>
             <thead><tr>
               <th>Código</th>
               <th>Documento</th>
-              <th>No Sienge</th>
               <th>Ciência no título a pagar</th>
             </tr></thead>
             <tbody id="dsg-tbody"></tbody>
@@ -284,6 +244,7 @@ const DocumentosSiengeApp = {
   },
 
   init() {
+    try { localStorage.removeItem("crm_documentos_ciencia"); } catch (e) {}
     if (this.items.length) this.render();
     this.reload(!this.cache().items.length);
   }

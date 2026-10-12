@@ -922,33 +922,26 @@ ComprasControleApp.paintFilters = function () {
   if (window.lucide) lucide.createIcons();
 };
 
+/** { kind, data } da forma programada, null sem forma, ou { erro } quando o Sienge não respondeu. */
 ComprasControleApp.formaPagamento = async function (billId, parcela) {
-  if (typeof window.siengeFetchWithRetry !== "function") return null;
-  const id = parcela || 1;
-  const kinds = ["bank-transfer", "pix", "boleto-bancario", "boleto-concessionaria"];
-  for (let i = 0; i < kinds.length; i++) {
-    try {
-      const data = await window.siengeFetchWithRetry(
-        "/bills/" + encodeURIComponent(billId) + "/installments/" + encodeURIComponent(id) + "/payment-information/" + kinds[i],
-        1
-      );
-      if (this.temDadosForma(data)) return { kind: kinds[i], data: data };
-    } catch (e) {}
+  if (typeof window.siengeFetchWithRetry !== "function" || !window.BoletoCheck) return null;
+  try {
+    return await BoletoCheck.lerForma(billId, parcela || 1);
+  } catch (e) {
+    return { erro: (e && e.message) || "O Sienge não respondeu à consulta da forma de pagamento." };
   }
-  return null;
 };
 
-/** O Sienge responde vazio (200 sem corpo ou campos nulos) para a forma que não está programada na parcela. */
 ComprasControleApp.temDadosForma = function (data) {
-  if (!data || typeof data !== "object") return false;
-  return Object.keys(data).some((k) => {
-    const v = data[k];
-    if (v == null || v === "") return false;
-    return typeof v !== "object" || Object.keys(v).length > 0;
-  });
+  return !!window.BoletoCheck && BoletoCheck.temDadosForma(data);
+};
+
+ComprasControleApp.formaFalhaHtml = function (payment) {
+  return `<p style="color:#b45309;"><strong>Não foi possível consultar a forma de pagamento.</strong> ${this.esc(payment.erro)} Feche e abra o título de novo.</p>`;
 };
 
 ComprasControleApp.formaHtml = function (payment, row) {
+  if (payment && payment.erro) return this.formaFalhaHtml(payment);
   if (payment && payment.data) {
     const d = payment.data;
     if (payment.kind === "pix") {
@@ -1020,7 +1013,7 @@ ComprasControleApp.abrirTituloRow = async function (row) {
     const [bill, attachments, payment, impostos] = await Promise.all([
       window.siengeFetchWithRetry("/bills/" + encodeURIComponent(billId), 1),
       this.anexosDoTitulo(billId).catch(() => []),
-      row.pagPayment !== undefined ? Promise.resolve(row.pagPayment) : this.formaPagamento(billId, row.parcela || 1),
+      row.pagPayment && !row.pagPayment.erro ? Promise.resolve(row.pagPayment) : this.formaPagamento(billId, row.parcela || 1),
       impostosP
     ]);
     if (this._tituloGen !== gen) return;
@@ -1191,7 +1184,12 @@ ComprasControleApp.pintarTitulo = function () {
   const retido = !pago && retidoCheio > 0.009 && !jaLiquido && casaComBruto ? retidoCheio : 0;
   const aPagar = pago ? valor : (retido > 0.009 ? Math.round((aberto - retido) * 100) / 100 : aberto);
   const obs = bill.notes || bill.observation || bill.historic || bill.history || bill.complement || "";
-  const conferir = Object.assign({}, row, { valorConferir: pago ? null : aberto, descontoTitulo: Number(bill.discount) || 0, retido });
+  const conferir = Object.assign({}, row, {
+    valorConferir: pago ? null : aberto,
+    descontoTitulo: Number(bill.discount) || 0,
+    retido,
+    pagCheck: row.pagPayment && row.pagPayment === det.payment ? row.pagCheck : undefined
+  });
   const forma = typeof caixaFormaHtml === "function"
     ? caixaFormaHtml(det.payment, conferir)
     : this.formaHtml(det.payment, conferir);
@@ -1200,8 +1198,9 @@ ComprasControleApp.pintarTitulo = function () {
   `).join("");
 
   let formaNivel = "";
-  if (det.payment && window.BoletoCheck) {
-    const v = det.payment.kind === "pix" ? row.pagCheck
+  if (det.payment && det.payment.erro) formaNivel = "aviso";
+  else if (det.payment && window.BoletoCheck) {
+    const v = det.payment.kind === "pix" ? conferir.pagCheck
       : (BoletoCheck.ehBoleto(det.payment) ? BoletoCheck.validar(det.payment, { valor: conferir.valorConferir, vencimento: row.vencimento, descontoTitulo: conferir.descontoTitulo, retido: conferir.retido }) : null);
     formaNivel = v ? v.nivel : "";
   }

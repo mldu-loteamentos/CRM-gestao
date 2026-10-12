@@ -430,76 +430,7 @@ window.EngenhariaCaucaoApp = {
   },
 
   transform(payload) {
-    const bills = (payload && payload.data) || (Array.isArray(payload) ? payload : []);
-    const rows = [];
-    (bills || []).forEach((bill) => {
-      if (!bill || bill.billId == null) return;
-      if (!this.isCauDoc(bill.documentIdentificationId, bill.documentIdentificationName)) return;
-      this.listOrNull(bill.paymentsCategories).forEach((cat) => {
-        this.listOrNull(bill.payments).forEach((pay) => {
-          this.listOrNull(pay && pay.bankMovements).forEach((bm) => {
-            this.listOrNull(bill.departamentsCosts).forEach((dep) => {
-              this.listOrNull(bill.buildingsCosts).forEach((bld) => {
-                const operacao = (bm && bm.operationName) || "";
-                const conta = (bm && bm.accountNumber) || "";
-                if (this.SKIP_OPS[operacao]) return;
-                if (this.SKIP_ACCOUNTS[conta]) return;
-                const titulo = String(bill.billId);
-                const parcela = bill.installmentId != null ? String(bill.installmentId) : "";
-                const rateio = cat && cat.financialCategoryRate != null ? Number(cat.financialCategoryRate) : 100;
-                const valor = Number(bill.originalAmount) || 0;
-                rows.push({
-                  companyId: String(bill.companyId || ""),
-                  credor: String(bill.creditorName || "").trim(),
-                  creditorId: bill.creditorId != null ? String(bill.creditorId) : "",
-                  titulo,
-                  documento: String(bill.documentNumber || ""),
-                  vencimento: String(bill.dueDate || "").slice(0, 10),
-                  emissao: String(bill.issueDate || "").slice(0, 10),
-                  parcela,
-                  installmentId: bill.installmentId,
-                  docId: this.docCode(bill.documentIdentificationId) || "CAU",
-                  docNome: this.firstWord(bill.documentIdentificationName) || "CAU",
-                  valor,
-                  planoId: cat && cat.financialCategoryId != null ? String(cat.financialCategoryId) : "",
-                  plano: (cat && cat.financialCategoryName) || "",
-                  ccId: cat && cat.costCenterId != null ? String(cat.costCenterId) : "",
-                  ccNome: (cat && cat.costCenterName) || "",
-                  rateio,
-                  dataPagamento: this.paymentDateOf(bill, pay, bm),
-                  pago: this.isPago(bill, pay, bm),
-                  saldo: this.billBalance(bill),
-                  situacao: this.billSituation(bill, pay),
-                  departamento: (dep && dep.name) || "",
-                  idObra: bld && bld.buildingId != null ? String(bld.buildingId) : "",
-                  valorAjustado: valor * ((Number.isFinite(rateio) ? rateio : 100) / 100)
-                });
-              });
-            });
-          });
-        });
-      });
-    });
-    const slices = new Map();
-    rows.forEach((r) => {
-      const sliceKey = [r.titulo, r.parcela, r.departamento, r.ccId, r.planoId].join("|");
-      if (!slices.has(sliceKey)) slices.set(sliceKey, r);
-    });
-    const grouped = new Map();
-    slices.forEach((r) => {
-      const k = [r.titulo, r.parcela, r.departamento, r.ccId].join("|");
-      const prev = grouped.get(k);
-      if (!prev) {
-        grouped.set(k, Object.assign({}, r));
-        return;
-      }
-      prev.rateio = (Number(prev.rateio) || 0) + (Number(r.rateio) || 0);
-      prev.valorAjustado = (Number(prev.valorAjustado) || 0) + (Number(r.valorAjustado) || 0);
-      const cheio = Number(prev.valor) || 0;
-      if (cheio && Math.abs(prev.rateio - 100) <= 0.05) prev.valorAjustado = cheio;
-      else prev.valorAjustado = Math.round(prev.valorAjustado * 100) / 100;
-    });
-    return Array.from(grouped.values());
+    return window.CaucaoCore.transform(payload);
   },
 
   uniqueItems(rows, idFn, labelFn) {
@@ -967,7 +898,7 @@ window.EngenhariaCaucaoApp = {
     }
   },
 
-  async consultar() {
+  async consultar(aoVivo) {
     const start = this.state.startDate;
     const end = this.state.endDate;
     if (!start || !end) {
@@ -978,8 +909,6 @@ window.EngenhariaCaucaoApp = {
       alert("A data inicial não pode ser maior que a final.");
       return;
     }
-    this.loadLiberated();
-    await this.pullLiberated();
     this.state.loading = true;
     this.state.error = "";
     this.state.consulted = true;
@@ -988,20 +917,31 @@ window.EngenhariaCaucaoApp = {
     this.state.openCred = false;
     this.state.openCc = false;
     this.state.openSit = false;
+    this.iniciarCarga();
     this.renderPage();
     try {
-      let endpoint = "/bulk-data/v1/outcome?startDate=" + encodeURIComponent(start)
-        + "&endDate=" + encodeURIComponent(end)
-        + "&selectionType=D&correctionIndexerId=0&correctionDate=2023-01-01&withAuthorizations=false";
-      if ((this.state.companyIds || []).length === 1) {
-        endpoint += "&companyId=" + encodeURIComponent(this.state.companyIds[0]);
+      this.loadLiberated();
+      await this.pullLiberated();
+      const base = aoVivo === true ? null : await this.lerBaseDoDia(start, end);
+      if (base) {
+        this.state.allRows = base.rows;
+        this.state.fonte = { tipo: "base", meta: base.meta };
+        this.state.billsByTitulo = {};
+      } else {
+        let endpoint = "/bulk-data/v1/outcome?startDate=" + encodeURIComponent(start)
+          + "&endDate=" + encodeURIComponent(end)
+          + "&selectionType=D&correctionIndexerId=0&correctionDate=2023-01-01&withAuthorizations=false";
+        if ((this.state.companyIds || []).length === 1) {
+          endpoint += "&companyId=" + encodeURIComponent(this.state.companyIds[0]);
+        }
+        if (typeof window.siengeFetchWithRetry !== "function") {
+          throw new Error("API Sienge indisponível.");
+        }
+        const payload = await window.siengeFetchWithRetry(endpoint, 2);
+        this.indexBills(payload);
+        this.state.allRows = this.transform(payload);
+        this.state.fonte = { tipo: "sienge", at: new Date().toISOString() };
       }
-      if (typeof window.siengeFetchWithRetry !== "function") {
-        throw new Error("API Sienge indisponível.");
-      }
-      const payload = await window.siengeFetchWithRetry(endpoint, 2);
-      this.indexBills(payload);
-      this.state.allRows = this.transform(payload);
       this.state.updatedAt = new Date().toISOString();
       this.applyFilters();
     } catch (e) {
@@ -1009,10 +949,148 @@ window.EngenhariaCaucaoApp = {
       this.state.allRows = [];
       this.state.shown = [];
       this.state.billsByTitulo = {};
+      this.state.fonte = null;
     }
     this.state.loading = false;
+    this.pararCarga();
     this.renderPage();
     if (!this.state.error) this.avisarPagamentosProximos().catch(function () {});
+  },
+
+  FRASES_CARGA: ["Consultando contratos…", "Verificando cauções dos credores…"],
+
+  iniciarCarga() {
+    this.pararCarga();
+    this._cargaPct = 6;
+    this._cargaTimer = setInterval(() => {
+      const p = Number(this._cargaPct) || 6;
+      this._cargaPct = Math.min(94, p + (p < 40 ? 4 : p < 75 ? 1.6 : 0.5));
+      const bar = document.getElementById("ecau-load-bar");
+      const txt = document.getElementById("ecau-load-text");
+      if (bar) bar.style.width = this._cargaPct + "%";
+      if (txt) txt.textContent = this.fraseCarga();
+    }, 450);
+  },
+
+  pararCarga() {
+    if (this._cargaTimer) clearInterval(this._cargaTimer);
+    this._cargaTimer = null;
+  },
+
+  fraseCarga() {
+    return this.FRASES_CARGA[(Number(this._cargaPct) || 0) < 45 ? 0 : 1];
+  },
+
+  loaderHtml() {
+    const pct = Math.max(6, Math.min(94, Number(this._cargaPct) || 6));
+    return `<div class="rcx-load" role="status" aria-live="polite">
+      <div class="rcx-spin"></div>
+      <div class="rcx-load-title" id="ecau-load-text">${this.fraseCarga()}</div>
+      <div class="rcx-load-track"><div class="rcx-load-fill" id="ecau-load-bar" style="width:${pct}%"></div></div>
+    </div>`;
+  },
+
+  /** 06:30 de segunda a sexta: horário em que a rotina do servidor gera a base do dia. */
+  baseJaDeveriaExistir() {
+    const d = new Date();
+    const dia = d.getDay();
+    return dia >= 1 && dia <= 5 && d.getHours() * 60 + d.getMinutes() >= 6 * 60 + 30;
+  },
+
+  async lerMetaBase() {
+    const fc = window.firebaseCollections;
+    if (!fc || !fc.getDoc || !window.firebaseDb) return null;
+    const snap = await fc.getDoc(fc.doc(window.firebaseDb, "caucao_base", "_meta"));
+    const exists = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+    return exists ? (snap.data() || null) : null;
+  },
+
+  /** Pede ao servidor a base de hoje e espera ela ficar pronta (a leitura no Sienge leva ~40s). */
+  async gerarBaseHoje() {
+    const hoje = this.isoToday();
+    let resp = null;
+    try {
+      resp = await fetch("/api/caucao-batimento");
+    } catch (e) { /* a rotina pode seguir rodando mesmo se a resposta cair */ }
+    if (resp && (resp.status === 401 || resp.status === 404 || resp.status === 405)) return null;
+    for (let i = 0; i < 20; i++) {
+      const meta = await this.lerMetaBase().catch(function () { return null; });
+      if (meta && meta.date === hoje && meta.done && !meta.running) return meta;
+      if (meta && !meta.running && meta.erroEm && String(meta.erroEm).slice(0, 10) === hoje) return null;
+      await new Promise((r) => setTimeout(r, 4000));
+    }
+    return null;
+  },
+
+  /**
+   * Base gerada pela rotina das 06:30 (caucao_base). Só serve se cobrir o período pedido.
+   * Antes das 06:30 e no fim de semana vale a última base gerada.
+   */
+  async lerBaseDoDia(start, end) {
+    const fc = window.firebaseCollections;
+    if (!fc || !fc.getDoc || !window.firebaseDb) return null;
+    let meta = null;
+    try { meta = await this.lerMetaBase(); } catch (e) { return null; }
+    const hoje = this.isoToday();
+    const atual = meta && meta.date === hoje && meta.done;
+    if (!atual && this.baseJaDeveriaExistir()) meta = await this.gerarBaseHoje();
+    if (!meta || !meta.done || !meta.range) return null;
+    if (start < meta.range.startDate || end > meta.range.endDate) return null;
+    const rows = [];
+    for (let i = 0; i < (Number(meta.chunks) || 0); i++) {
+      const snap = await fc.getDoc(fc.doc(window.firebaseDb, "caucao_base", meta.date + "_" + i));
+      const exists = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+      if (!exists) return null;
+      rows.push.apply(rows, (snap.data() || {}).rows || []);
+    }
+    await this.aplicarAjustes(rows, meta);
+    return { rows, meta };
+  },
+
+  /** Vencimentos alterados pela tela depois da base: valem até a próxima base. */
+  async aplicarAjustes(rows, meta) {
+    const fc = window.firebaseCollections;
+    try {
+      const snap = await fc.getDoc(fc.doc(window.firebaseDb, "caucao_base", "_ajustes"));
+      const exists = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+      if (!exists) return;
+      const map = snap.data() || {};
+      const desde = String(meta.geradoEm || "");
+      rows.forEach((r) => {
+        const a = map[this.rowKey(r)];
+        if (a && a.vencimento && String(a.at || "") > desde) r.vencimento = a.vencimento;
+      });
+    } catch (e) { /* sem ajustes, vale a base */ }
+  },
+
+  registrarAjustes(rows) {
+    const fc = window.firebaseCollections;
+    if (!fc || !fc.setDoc || !window.firebaseDb || !rows || !rows.length) return;
+    const at = new Date().toISOString();
+    const patch = {};
+    rows.forEach((r) => { patch[this.rowKey(r)] = { vencimento: r.vencimento, at }; });
+    fc.setDoc(fc.doc(window.firebaseDb, "caucao_base", "_ajustes"), patch, { merge: true }).catch(function () {});
+  },
+
+  fonteHtml() {
+    const f = this.state.fonte;
+    if (!f || this.state.loading || this.state.error) return "";
+    const hora = (iso) => {
+      const d = new Date(iso);
+      return isNaN(d) ? "" : d.toLocaleDateString("pt-BR") + " às " + d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    };
+    let txt;
+    if (f.tipo === "base") {
+      const m = f.meta || {};
+      const prorr = Number(m.prorrogadas) || 0;
+      txt = "Base do dia gerada em " + hora(m.geradoEm)
+        + (prorr ? " · " + prorr + " caução(ões) prorrogada(s) automaticamente por falta de liberação" : " · nenhuma prorrogação automática");
+      if ((m.falhas || []).length) txt += " · " + m.falhas.length + " falha(s) na prorrogação (veja a Auditoria)";
+    } else {
+      txt = "Consulta direta no Sienge em " + hora(f.at);
+    }
+    return `<div class="ecau-fonte"><i data-lucide="database"></i><span>${this.esc(txt)}</span>
+      <button type="button" class="ecau-fonte-btn" onclick="EngenhariaCaucaoApp.consultar(true)"><i data-lucide="refresh-cw"></i> Atualizar do Sienge</button></div>`;
   },
 
   limpar() {
@@ -1031,6 +1109,7 @@ window.EngenhariaCaucaoApp = {
     this.state.shown = [];
     this.state.allRows = [];
     this.state.billsByTitulo = {};
+    this.state.fonte = null;
     this.state.selected = {};
     this.state.sortCol = "";
     this.state.sortDir = "desc";
@@ -1183,8 +1262,13 @@ window.EngenhariaCaucaoApp = {
     const box = document.getElementById("ecau-results");
     const kpi = document.getElementById("ecau-kpis");
     if (!box) return;
+    const fonte = document.getElementById("ecau-fonte");
+    if (fonte) {
+      fonte.innerHTML = this.fonteHtml();
+      if (fonte.innerHTML && window.lucide) lucide.createIcons();
+    }
     if (this.state.loading) {
-      box.innerHTML = `<div class="tvig-empty">Buscando cauções no Sienge…</div>`;
+      box.innerHTML = this.loaderHtml();
       if (kpi) kpi.innerHTML = "";
       this.paintSelectionBar();
       return;
@@ -1490,12 +1574,14 @@ window.EngenhariaCaucaoApp = {
     });
     let ok = 0;
     const errors = [];
+    const ajustados = [];
     for (const [billId, list] of byBill.entries()) {
       try {
         await this.patchBillInstallments(billId, list.map((r) => this.installmentPayload(r, due)));
         list.forEach((r) => {
           const anterior = r.vencimento;
           r.vencimento = due;
+          ajustados.push(r);
           ok += 1;
           this.logCaucao(
             "CAUCAO_VENCIMENTO",
@@ -1519,6 +1605,7 @@ window.EngenhariaCaucaoApp = {
         });
       }
     }
+    this.registrarAjustes(ajustados);
     this.state.busy = false;
     this.closeModal();
     this.applyFilters();
@@ -1622,6 +1709,7 @@ window.EngenhariaCaucaoApp = {
     } catch (e) {
       errors.push("A liberação não ficou salva. Não atualize a página antes de tentar de novo.");
     }
+    this.registrarAjustes(prorrogar.filter((r) => this.isLiberated(r)));
     if (avisosProrroga.length) {
       this.enqueueAviso("prorrogacao", avisosProrroga);
       this.flushAvisos().catch(function () {});
@@ -1919,6 +2007,7 @@ window.EngenhariaCaucaoApp = {
           </div>
         </div>
         <div class="ccom-kpis cprev-kpis" id="ecau-kpis"></div>
+        <div id="ecau-fonte"></div>
         <div id="ecau-results" class="cprev-results"></div>
         <div id="ecau-modal"></div>
       </div>`;

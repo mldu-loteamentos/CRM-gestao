@@ -112,6 +112,78 @@ window.BoletoCheck = {
     return !!payment && /^boleto-/.test(String(payment.kind || ""));
   },
 
+  /** O Sienge devolve estes campos em toda forma consultada, mesmo quando a parcela usa outra forma (as observações saem iguais em todas). */
+  CAMPOS_FORMA_COMUNS: ["paymentTypeId", "notes", "links", "beneficiaryAccountType", "isUsingCreditorData", "discountDueDate",
+    "tedFinalityCode", "docFinalityCode", "boletoConcessionariaPaymentType", "taxPayerType"],
+
+  temDadosForma(data) {
+    if (!data || typeof data !== "object") return false;
+    if (String(data.isUsingCreditorData || "").trim().toUpperCase() === "S") return true;
+    return Object.keys(data).some((k) => {
+      if (this.CAMPOS_FORMA_COMUNS.includes(k)) return false;
+      const v = data[k];
+      if (v == null) return false;
+      if (typeof v === "object") return Object.keys(v).length > 0;
+      return String(v).trim() !== "";
+    });
+  },
+
+  /** Endpoints de payment-information na ordem provável para a forma da parcela; especifico = a forma do Sienge aponta um endpoint. */
+  tiposForma(tipo) {
+    const t = String(tipo || "");
+    if (/pix/i.test(t)) return { kinds: ["pix"], especifico: true };
+    if (/transf|ted\b|doc\b|cr[eé]dito em conta|dep[oó]sito/i.test(t)) return { kinds: ["bank-transfer"], especifico: true };
+    if (/concession|consumo|arrecad|tribut|guia|darf|gps|fgts|imposto/i.test(t)) return { kinds: ["boleto-concessionaria", "boleto-tax", "boleto-bancario"], especifico: true };
+    if (/boleto|bloqueto|cobran/i.test(t)) return { kinds: ["boleto-bancario", "boleto-concessionaria"], especifico: true };
+    return { kinds: ["boleto-bancario", "bank-transfer", "pix", "boleto-concessionaria"], especifico: false };
+  },
+
+  /**
+   * Forma de pagamento programada na parcela: { kind, data } ou null quando não há forma.
+   * tipo = nome da forma na parcela (paymentType); sem ele, lê as parcelas do título.
+   * Lança erro quando o Sienge não respondeu, para a tela não confundir falha de consulta com título sem forma.
+   */
+  async lerForma(billId, parcela, tipo) {
+    const get = (path) => window.siengeFetchWithRetry(path, 4);
+    const enc = encodeURIComponent;
+    const num = parcela || 1;
+    const nao404 = (e) => !(Number(e && e.status) === 404 || /\b404\b/.test(String((e && e.message) || "")));
+    let nome = tipo;
+    if (nome == null) {
+      try {
+        const res = await get(`/bills/${enc(billId)}/installments`);
+        const lista = (res && (res.results || res.data)) || (Array.isArray(res) ? res : []);
+        const p = lista.find((x) => String(x.installmentNumber != null ? x.installmentNumber : x.installmentId) === String(num));
+        nome = p ? String(p.paymentType || "") : "";
+      } catch (e) {
+        nome = "";
+      }
+    }
+    const { kinds, especifico } = this.tiposForma(nome);
+    let falhou = false;
+    let principal = null;
+    for (let i = 0; i < kinds.length; i++) {
+      let data;
+      try {
+        data = await get(`/bills/${enc(billId)}/installments/${enc(num)}/payment-information/${kinds[i]}`);
+      } catch (e) {
+        if (nao404(e)) falhou = true;
+        continue;
+      }
+      if (this.temDadosForma(data)) return { kind: kinds[i], data };
+      if (i === 0 && data && typeof data === "object") principal = { kind: kinds[i], data };
+    }
+    if (especifico && principal) return principal;
+    if (falhou) throw new Error("O Sienge não respondeu à consulta da forma de pagamento.");
+    return null;
+  },
+
+  /** Resultado da conferência quando a forma de pagamento não pôde ser consultada. */
+  checkFalhaConsulta(msg) {
+    const texto = (msg || "O Sienge não respondeu à consulta da forma de pagamento.") + " Atualize para consultar de novo.";
+    return { nivel: "aviso", falhaConsulta: true, forma: "Não consultada", resumo: "Forma de pagamento não consultada no Sienge", erros: [], avisos: [texto], infos: [], desconto: false, linhaFmt: "", valorBoleto: null, vencBoleto: "" };
+  },
+
   /**
    * ctx: { valor, vencimento, descontoTitulo }
    * Retorna { nivel: "ok"|"erro"|"aviso"|"info"|"sem", forma, resumo, erros[], avisos[], infos[], desconto, linhaFmt, valorBoleto, vencBoleto }.
@@ -217,17 +289,25 @@ window.BoletoCheck = {
       }
     }
     if (out.vencBoleto && ctx.vencimento && out.vencBoleto !== String(ctx.vencimento).slice(0, 10)) {
-      out.avisos.push(`Vencimento no boleto ${this.dataBr(out.vencBoleto)} diferente do vencimento do título ${this.dataBr(ctx.vencimento)}.`);
+      const vt = this.dataBr(ctx.vencimento);
+      out.avisos.push(out.vencBoleto < String(ctx.vencimento).slice(0, 10)
+        ? `A linha digitável cadastrada no Sienge é de um boleto que vence em ${this.dataBr(out.vencBoleto)}, e a parcela vence em ${vt}. O boleto deve ter sido reemitido ou o vencimento foi alterado sem trocar a linha digitável: cadastre no Sienge a linha do boleto de ${vt}.`
+        : `A linha digitável cadastrada no Sienge é de um boleto que vence em ${this.dataBr(out.vencBoleto)}, depois do vencimento da parcela (${vt}). Confira o vencimento do título no Sienge.`);
     }
     const limite = String(d.discountDueDate || "").slice(0, 10);
     const vencTitulo = String(ctx.vencimento || "").slice(0, 10);
     const valorDesconto = Object.keys(d).filter((k) => /discount/i.test(k) && !/date/i.test(k))
       .map((k) => Number(d[k])).find((n) => Number.isFinite(n) && n > 0.009);
     // O Sienge costuma preencher a data limite do desconto com o próprio vencimento, sem desconto nenhum.
+    // Com o prazo vencido e sem valor de desconto, paga-se o valor cheio: a data costuma ser o vencimento antigo que ficou no Sienge.
     if (limite && (valorDesconto || !vencTitulo || limite < vencTitulo)) {
-      out.desconto = true;
-      if (limite < this.hoje()) out.avisos.push(`Instrução de desconto até ${this.dataBr(limite)}: o prazo do desconto já passou.`);
-      else out.infos.push(`Instrução de desconto${valorDesconto ? ` de ${this.money(valorDesconto)}` : ""}: pagar até ${this.dataBr(limite)} para ter o desconto.`);
+      if (limite < this.hoje() && !valorDesconto) {
+        out.infos.push(`Data limite de desconto ${this.dataBr(limite)} no Sienge, sem valor de desconto: paga-se o valor cheio.`);
+      } else {
+        out.desconto = true;
+        if (limite < this.hoje()) out.avisos.push(`Instrução de desconto de ${this.money(valorDesconto)} até ${this.dataBr(limite)}: o prazo do desconto já passou.`);
+        else out.infos.push(`Instrução de desconto${valorDesconto ? ` de ${this.money(valorDesconto)}` : ""}: pagar até ${this.dataBr(limite)} para ter o desconto.`);
+      }
     }
     if (Number(ctx.descontoTitulo) > 0) {
       out.desconto = true;
@@ -370,7 +450,7 @@ window.BoletoCheck = {
   seloHtml(v) {
     if (!v) return `<span class="bchk bchk-wait">Conferindo…</span>`;
     const cls = { ok: "bchk-ok", erro: "bchk-erro", aviso: "bchk-aviso", info: "bchk-info", sem: "bchk-aviso" }[v.nivel] || "bchk-info";
-    const txt = v.nivel === "ok" ? `${v.forma} ✓` : (v.nivel === "erro" ? `${v.forma}: erro` : (v.nivel === "sem" ? "Sem forma" : (v.nivel === "aviso" ? `${v.forma}: atenção` : v.forma)));
+    const txt = v.falhaConsulta ? "Forma não consultada" : v.nivel === "ok" ? `${v.forma} ✓` : (v.nivel === "erro" ? `${v.forma}: erro` : (v.nivel === "sem" ? "Sem forma" : (v.nivel === "aviso" ? `${v.forma}: atenção` : v.forma)));
     const dica = [].concat(v.erros, v.avisos, v.infos).join("\n") || v.resumo;
     return `<span class="bchk ${cls}" title="${this.esc(dica)}">${this.esc(txt)}</span>${v.desconto ? ` <span class="bchk bchk-desc" title="${this.esc(v.infos.concat(v.avisos).filter((x) => /descont/i.test(x)).join("\n"))}">Desconto</span>` : ""}`;
   },

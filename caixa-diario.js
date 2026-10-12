@@ -52,24 +52,18 @@ function caixaBalance(b) {
 }
 
 async function caixaFormaPagamento(billId, parcela) {
-  if (typeof window.siengeFetchWithRetry !== "function") return null;
-  const id = parcela || 1;
-  const kinds = ["bank-transfer", "pix", "boleto-bancario", "boleto-concessionaria"];
-  for (let i = 0; i < kinds.length; i++) {
-    try {
-      const data = await window.siengeFetchWithRetry(
-        "/bills/" + encodeURIComponent(billId) + "/installments/" + encodeURIComponent(id) + "/payment-information/" + kinds[i],
-        1
-      );
-      const temDados = window.ComprasControleApp && typeof ComprasControleApp.temDadosForma === "function"
-        ? ComprasControleApp.temDadosForma(data) : !!(data && typeof data === "object" && Object.keys(data).length);
-      if (temDados) return { kind: kinds[i], data: data };
-    } catch (e) {}
+  if (typeof window.siengeFetchWithRetry !== "function" || !window.BoletoCheck) return null;
+  try {
+    return await BoletoCheck.lerForma(billId, parcela || 1);
+  } catch (e) {
+    return { erro: (e && e.message) || "O Sienge não respondeu à consulta da forma de pagamento." };
   }
-  return null;
 }
 
 function caixaFormaHtml(payment, item) {
+  if (payment && payment.erro) {
+    return `<p style="color:#b45309;"><strong>Não foi possível consultar a forma de pagamento.</strong> ${caixaEsc(payment.erro)} Feche e abra o título de novo.</p>`;
+  }
   if (payment && payment.data) {
     const d = payment.data;
     if (payment.kind === "pix") {

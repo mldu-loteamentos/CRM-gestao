@@ -33,6 +33,8 @@ const GerarPagamentoApp = {
     gerandoLote: "",
     roboLote: "",
     lotesAbertos: {},
+    diaRetro: "",
+    retroTodos: false,
     credores: {},
     gen: 0
   },
@@ -357,6 +359,8 @@ const GerarPagamentoApp = {
     s.formaSienge = {};
     s.pagInfo = {};
     s.credores = {};
+    s.diaRetro = "";
+    s.retroTodos = false;
     s.validacao = { feitos: 0, total: 0, rodando: false };
     this.render();
 
@@ -632,27 +636,8 @@ const GerarPagamentoApp = {
   },
 
   /* ---------- forma de pagamento: boleto conferido (código, valor, vencimento, desconto) ---------- */
-  tiposPagamento(tipo) {
-    const t = String(tipo || "");
-    if (/pix/i.test(t)) return ["pix"];
-    if (/transf|ted\b|doc\b|cr[eé]dito em conta|dep[oó]sito/i.test(t)) return ["bank-transfer"];
-    if (/concession|consumo|arrecad|tribut|guia|darf|gps|fgts|imposto/i.test(t)) return ["boleto-concessionaria", "boleto-tax", "boleto-bancario"];
-    if (/boleto|bloqueto|cobran/i.test(t)) return ["boleto-bancario", "boleto-concessionaria"];
-    return ["boleto-bancario", "bank-transfer", "pix", "boleto-concessionaria"];
-  },
-
-  async lerFormaPagamento(titulo, parcela, tipo) {
-    const kinds = this.tiposPagamento(tipo);
-    for (let i = 0; i < kinds.length; i++) {
-      try {
-        const data = await window.siengeFetchWithRetry(
-          `/bills/${encodeURIComponent(titulo)}/installments/${encodeURIComponent(parcela || 1)}/payment-information/${kinds[i]}`, 1);
-        const temDados = window.ComprasControleApp && typeof ComprasControleApp.temDadosForma === "function"
-          ? ComprasControleApp.temDadosForma(data) : !!(data && typeof data === "object" && Object.keys(data).length);
-        if (temDados) return { kind: kinds[i], data };
-      } catch (e) {}
-    }
-    return null;
+  lerFormaPagamento(titulo, parcela, tipo) {
+    return window.BoletoCheck.lerForma(titulo, parcela, tipo);
   },
 
   /** Cadastro do credor para conferir o titular da chave PIX: CPF/CNPJ, telefones, e-mails e chaves PIX cadastradas. */
@@ -718,7 +703,7 @@ const GerarPagamentoApp = {
   },
 
   /**
-   * Selo da coluna Autorização. Quando o documento exige ciência (Configurações → Apoio → Tipos de Documento),
+   * Selo da coluna Autorização. Quando o documento exige ciência (cadastro de documentos do Sienge),
    * mostra a ciência antes. A API do Sienge não informa a ciência; ela é dada antes da autorização,
    * então título com autorização (completa ou parcial) já teve ciência.
    */
@@ -804,7 +789,18 @@ const GerarPagamentoApp = {
         if (!t) continue;
         const r = t.rows[0];
         const forma = s.formaSienge[chave] || {};
-        const payment = await this.lerFormaPagamento(r.titulo, r.parcela, forma.tipo);
+        let payment;
+        try {
+          payment = await this.lerFormaPagamento(r.titulo, r.parcela, forma.tipo);
+        } catch (e) {
+          if (gen !== s.gen) return;
+          s.pagInfo[chave] = { payment: undefined, check: BoletoCheck.checkFalhaConsulta(e && e.message), fiscal: null, tipoSienge: forma.tipo || "" };
+          Object.keys(s.sel).forEach((k) => {
+            if (k.endsWith("|" + chave)) s.sel[k] = false;
+          });
+          s.validacao.feitos += 1;
+          continue;
+        }
         if (gen !== s.gen) return;
         const credor = payment && payment.kind === "pix" ? await this.carregarCredor(r.credorId) : undefined;
         if (gen !== s.gen) return;
@@ -1022,6 +1018,73 @@ const GerarPagamentoApp = {
   setAbaLotes(v) {
     this.state.abaLotes = v;
     this.paintTitulos();
+  },
+
+  /** Abre (ou fecha) os lotes pendentes de um dia anterior ao período buscado. */
+  setDiaRetro(dia) {
+    this.state.diaRetro = this.state.diaRetro === dia ? "" : String(dia || "");
+    this.state.abaLotes = "gerar";
+    this.paintTitulos();
+  },
+
+  toggleRetroTodos() {
+    this.state.retroTodos = !this.state.retroTodos;
+    this.paintTitulos();
+  },
+
+  noPeriodoBuscado(dia) {
+    const s = this.state;
+    return !s.startDate || !s.endDate || (dia >= s.startDate && dia <= s.endDate);
+  },
+
+  /** Mantém nos grupos só os títulos cujo dia passa no filtro (o grupo sem conta mistura dias, então filtra pelo vencimento). */
+  recortarGrupos(grupos, filtroDia) {
+    return grupos.map((g) => ({
+      ...g,
+      itens: g.itens.filter((it) => filtroDia(g.key === "__sem" ? String(it.vencimento || "").slice(0, 10) : g.dia))
+    })).filter((g) => g.itens.length);
+  },
+
+  /** Dias antes do período com títulos ainda fora de lote: { dia, titulos, total, divergentes }, do mais recente ao mais antigo. */
+  diasRetroPendentes(aGerarTodos) {
+    const ini = this.state.startDate;
+    if (!ini) return [];
+    const dias = {};
+    aGerarTodos.forEach((g) => g.itens.forEach((it) => {
+      const dia = g.key === "__sem" ? String(it.vencimento || "").slice(0, 10) : g.dia;
+      if (!dia || dia >= ini) return;
+      const d = dias[dia] || (dias[dia] = { dia, chaves: new Set(), total: 0, divergentes: 0 });
+      if (d.chaves.has(it.chave)) return;
+      d.chaves.add(it.chave);
+      d.total += this.valorPagar(it);
+      if (this.bloqueioVisivel(it)) d.divergentes += 1;
+    }));
+    return Object.values(dias)
+      .map((d) => ({ dia: d.dia, titulos: d.chaves.size, total: d.total, divergentes: d.divergentes }))
+      .sort((a, b) => b.dia.localeCompare(a.dia));
+  },
+
+  retroAlertaHtml(dias) {
+    const s = this.state;
+    if (!dias.length) return "";
+    const LIMITE = 6;
+    const visiveis = s.retroTodos ? dias : dias.slice(0, LIMITE);
+    const nTitulos = dias.reduce((t, d) => t + d.titulos, 0);
+    const chips = visiveis.map((d) => `<button type="button" class="gp-retro-dia${s.diaRetro === d.dia ? " is-on" : ""}${d.divergentes ? " has-bad" : ""}"
+        onclick="GerarPagamentoApp.setDiaRetro('${this.esc(d.dia)}')" title="${this.esc(`${d.titulos} título(s) · ${this.money(d.total)}${d.divergentes ? ` · ${d.divergentes} com divergência` : ""}`)}">
+        <i data-lucide="calendar" style="width:13px;height:13px;"></i> ${this.dataBr(d.dia)} <b>${d.titulos}</b>
+      </button>`).join("");
+    const mais = dias.length > LIMITE
+      ? `<button type="button" class="gp-retro-mais" onclick="GerarPagamentoApp.toggleRetroTodos()">${s.retroTodos ? "Mostrar menos" : `+${dias.length - LIMITE} dia(s)`}</button>`
+      : "";
+    return `<div class="gp-retro" role="alert">
+      <i data-lucide="alert-triangle" class="gp-retro-ic"></i>
+      <div class="gp-retro-corpo">
+        <div class="gp-retro-txt"><strong>Há lotes de dias anteriores para analisar.</strong>
+          ${nTitulos} título(s) com vencimento antes de ${this.dataBr(s.startDate)} ainda não entraram em lote. Clique no dia para ver os lotes.</div>
+        <div class="gp-retro-dias">${chips}${mais}</div>
+      </div>
+    </div>`;
   },
 
   toggleLote(key) {
@@ -1579,8 +1642,15 @@ const GerarPagamentoApp = {
         </div>
       </div>`;
     };
-    const aGerar = grupos.map((g) => ({ ...g, itens: g.itens.filter((it) => !it.emLote) })).filter((g) => g.itens.length);
-    const emLote = grupos.map((g) => ({ ...g, key: g.key + "#lote", itens: g.itens.filter((it) => it.emLote) })).filter((g) => g.itens.length);
+    const noPeriodo = (dia) => this.noPeriodoBuscado(dia);
+    const aGerarTodos = grupos.map((g) => ({ ...g, itens: g.itens.filter((it) => !it.emLote) })).filter((g) => g.itens.length);
+    const diasRetro = this.diasRetroPendentes(aGerarTodos);
+    if (s.diaRetro && !diasRetro.some((d) => d.dia === s.diaRetro)) s.diaRetro = "";
+    const aGerar = this.recortarGrupos(aGerarTodos, noPeriodo);
+    const aGerarRetro = s.diaRetro ? this.recortarGrupos(aGerarTodos, (dia) => dia === s.diaRetro) : [];
+    const emLote = this.recortarGrupos(
+      grupos.map((g) => ({ ...g, key: g.key + "#lote", itens: g.itens.filter((it) => it.emLote) })).filter((g) => g.itens.length),
+      noPeriodo);
     const nAGerar = aGerar.reduce((t, g) => t + g.itens.length, 0);
     const nEmLote = emLote.reduce((t, g) => t + g.itens.length, 0);
     const aba = s.abaLotes === "lote" ? "lote" : "gerar";
@@ -1589,7 +1659,7 @@ const GerarPagamentoApp = {
         <button type="button" role="tab" aria-selected="${aba === "lote"}" class="ml-tab ${aba === "lote" ? "is-active" : ""}" onclick="GerarPagamentoApp.setAbaLotes('lote')"><i data-lucide="check-circle-2"></i> Já em lote <span class="ml-tab-count">${nEmLote}</span></button>
       </div>`;
     const vazio = (txt) => `<div style="padding:22px 20px;color:#64748b;font-size:0.85rem;">${txt}</div>`;
-    const chaves = new Set(s.titulos.map((r) => this.chaveTitulo(r.titulo, r.parcela)));
+    const chaves = new Set(s.titulos.filter((r) => noPeriodo(String(r.vencimento || "").slice(0, 10))).map((r) => this.chaveTitulo(r.titulo, r.parcela)));
     const gerados = s.lotes
       .filter((l) => (l.itens || []).some((i) => chaves.has(this.chaveTitulo(i.titulo, i.parcela))))
       .sort((a, b) => String(b.criadoEm).localeCompare(String(a.criadoEm)));
@@ -1617,7 +1687,20 @@ const GerarPagamentoApp = {
     if (aba === "lote") {
       return `${abas}<p class="gp-nota">Lotes gerados e títulos deste período que já estão em lote no Integra ou no Sienge. Eles não entram em outro lote. Clique na linha para ver o resumo do título.</p>${geradosHtml}${emLote.length ? emLote.map(card).join("") : (gerados.length ? "" : vazio("Nenhum título deste período está em lote."))}`;
     }
-    return `${abas}${aGerar.length ? aGerar.map(card).join("") : vazio("Nenhum título a gerar lote no período: todos já estão em lote.")}`;
+    const alerta = this.retroAlertaHtml(diasRetro);
+    if (s.diaRetro) {
+      const d = diasRetro.find((x) => x.dia === s.diaRetro);
+      return `${abas}${alerta}
+        <div class="gp-retro-vendo">
+          <span><i data-lucide="history" style="width:15px;height:15px;"></i> Pendências de <strong>${this.dataBr(s.diaRetro)}</strong>, antes do período buscado · ${d ? d.titulos : 0} título(s) · ${this.money(d ? d.total : 0)}</span>
+          <button type="button" class="btn btn-outline btn-sm" onclick="GerarPagamentoApp.setDiaRetro('')"><i data-lucide="arrow-left" style="width:14px;height:14px;"></i> Voltar ao período ${this.dataBr(s.startDate)}${s.endDate !== s.startDate ? " a " + this.dataBr(s.endDate) : ""}</button>
+        </div>
+        ${aGerarRetro.map(card).join("")}`;
+    }
+    const vazioPeriodo = this.state.titulos.some((r) => noPeriodo(String(r.vencimento || "").slice(0, 10)) && !r.pago && r.aPagar > 0.009)
+      ? "Nenhum título a gerar lote no período: todos já estão em lote."
+      : "Nenhum título em aberto com vencimento no período buscado.";
+    return `${abas}${alerta}${aGerar.length ? aGerar.map(card).join("") : vazio(vazioPeriodo)}`;
   },
 
   grupoStatus(r) {
@@ -2061,7 +2144,8 @@ const GerarPagamentoApp = {
       return `<div style="padding:22px 20px;color:#64748b;font-size:0.85rem;">Escolha o período e clique em <strong>Buscar títulos</strong> para conferir em qual conta os títulos dos centros de custo de parceiro foram pagos.</div>`;
     }
     this.reclassificar();
-    const nAbertos = new Set(s.titulos.filter((r) => !r.pago && r.aPagar > 0.009).map((r) => this.chaveTitulo(r.titulo, r.parcela))).size;
+    const nAbertos = new Set(s.titulos.filter((r) => !r.pago && r.aPagar > 0.009 && this.noPeriodoBuscado(String(r.vencimento || "").slice(0, 10)))
+      .map((r) => this.chaveTitulo(r.titulo, r.parcela))).size;
     const visoes = `<div class="gp-visoes">
         <button type="button" class="gp-visao${s.visao !== "lotes" ? " is-active" : ""}" onclick="GerarPagamentoApp.setVisao('titulos')"><i data-lucide="list" style="width:14px;"></i> Títulos</button>
         <button type="button" class="gp-visao${s.visao === "lotes" ? " is-active" : ""}" onclick="GerarPagamentoApp.setVisao('lotes')"><i data-lucide="layers" style="width:14px;"></i> Lotes por conta e dia <b>${nAbertos}</b></button>
@@ -2149,6 +2233,20 @@ const GerarPagamentoApp = {
           #gerar-pagamento-root .gp-alerta-conta ul { margin:0; padding-left:18px; }
           #gerar-pagamento-root .gp-alerta-conta li { margin:2px 0; }
           #gerar-pagamento-root .gp-abas-lote { margin:6px 20px 4px; }
+          #gerar-pagamento-root .gp-retro { display:flex; gap:10px; align-items:flex-start; margin:12px 20px 4px; padding:12px 14px; border:1px solid #fed7aa; border-left:4px solid #f37021; border-radius:10px; background:#fff7ed; color:#7c2d12; font-size:0.82rem; line-height:1.45; }
+          #gerar-pagamento-root .gp-retro-ic { width:18px; height:18px; color:#ea580c; flex-shrink:0; margin-top:1px; }
+          #gerar-pagamento-root .gp-retro-corpo { display:flex; flex-direction:column; gap:8px; min-width:0; }
+          #gerar-pagamento-root .gp-retro-txt strong { color:#9a3412; }
+          #gerar-pagamento-root .gp-retro-dias { display:flex; flex-wrap:wrap; gap:6px; }
+          #gerar-pagamento-root .gp-retro-dia { display:inline-flex; align-items:center; gap:5px; height:28px; padding:0 10px; border-radius:999px; border:1px solid #fdba74; background:#fff; color:#9a3412; font-size:0.78rem; font-weight:700; cursor:pointer; }
+          #gerar-pagamento-root .gp-retro-dia b { display:inline-flex; align-items:center; justify-content:center; min-width:20px; height:18px; padding:0 5px; border-radius:999px; background:#ffedd5; color:#9a3412; font-size:0.7rem; }
+          #gerar-pagamento-root .gp-retro-dia.has-bad b { background:#fee2e2; color:#b91c1c; }
+          #gerar-pagamento-root .gp-retro-dia:hover { background:#ffedd5; }
+          #gerar-pagamento-root .gp-retro-dia.is-on { background:#f37021; border-color:#f37021; color:#fff; }
+          #gerar-pagamento-root .gp-retro-dia.is-on b { background:#fff; color:#c2410c; }
+          #gerar-pagamento-root .gp-retro-mais { height:28px; padding:0 10px; border:0; background:transparent; color:#9a3412; font-size:0.78rem; font-weight:700; text-decoration:underline; cursor:pointer; }
+          #gerar-pagamento-root .gp-retro-vendo { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin:10px 20px 0; padding:8px 12px; border-radius:8px; background:#f1f5f9; color:#334155; font-size:0.82rem; }
+          #gerar-pagamento-root .gp-retro-vendo span { display:inline-flex; align-items:center; gap:6px; }
           #gerar-pagamento-root .gp-warn { background:#ffedd5; color:#c2410c; }
           #gerar-pagamento-root .btn:disabled { opacity:0.55; cursor:not-allowed; }
           #gerar-pagamento-root .gp-visoes { display:flex; gap:8px; padding:14px 20px 0; }
