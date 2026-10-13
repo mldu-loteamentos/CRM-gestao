@@ -5,6 +5,7 @@
     }
   },
   "rewrites": [
+    { "source": "/api/cnpj", "destination": "/api/bcb-sgs" },
     { "source": "/api/caucao-batimento", "destination": "/api/morning-warmup" },
     { "source": "/api/sienge-proxy/:path*", "destination": "/api/sienge-proxy" },
     { "source": "/api/cvcrm-proxy/:path*", "destination": "/api/cvcrm-proxy" },

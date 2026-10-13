@@ -270,6 +270,7 @@ window.InserirNotaApp = {
         out.push({
           itemNumber: it.itemNumber,
           descricao: [it.resourceCode, it.resourceDescription, it.detailDescription].filter(Boolean).join(" · ") || `Item ${it.itemNumber}`,
+          observacao: this.textoObs(it.notes || it.note || it.observation || it.observations),
           unidade: it.unitOfMeasure || "",
           quantidade: Number(it.quantity) || 0,
           preco: Number(it.netPrice) || Number(it.unitPrice) || 0,
@@ -433,6 +434,7 @@ window.InserirNotaApp = {
         const itens = window.NotaFiscalCheck ? await NotaFiscalCheck.itensDoPdf(buf) : [];
         if (itens.length >= 20) {
           nota = this.extrair(this.celulasPdf(itens));
+          if (window.NotaFiscalCheck) this.completarValor(nota, NotaFiscalCheck.lerPdfItens(itens));
           nota.origem = "texto do PDF";
         } else {
           nota = this.extrair(await this.ocr(canvas));
@@ -496,7 +498,25 @@ window.InserirNotaApp = {
       s.fiscal = { carregando: false, erros: [], oks: [], infos: [], itens: [], avisos: [`Não consegui concluir a análise fiscal: ${(e && e.message) || e}`] };
     }
     if (s._fiscalToken !== token) return;
+    if (this.aplicarValorConfiavel(s.fiscal) && !s.qtdEditada) this.distribuir();
     this.render();
+  },
+
+  /** A leitura geométrica às vezes gruda num R$ 0,00 de outra coluna. O valor do serviço já lido na nota prevalece. */
+  completarValor(nota, campos) {
+    if (!nota || !campos) return nota;
+    const positivo = [campos.valorServico, campos.liquido].find((v) => v != null && Number(v) > 0.004);
+    if (positivo != null && !(Number(nota.valor) > 0.004)) nota.valor = Number(positivo);
+    if (!(Number(nota.liquido) > 0.004) && campos.liquido != null) nota.liquido = campos.liquido;
+    if (nota.retencoes == null && campos.totalRetencoes != null) nota.retencoes = campos.totalRetencoes;
+    return nota;
+  },
+
+  aplicarValorConfiavel(fiscal) {
+    const n = this.state.nota;
+    if (!n || !fiscal || Number(n.valor) > 0.004) return false;
+    this.completarValor(n, fiscal);
+    return Number(n.valor) > 0.004;
   },
 
   observacaoPadrao() {
@@ -679,6 +699,20 @@ window.InserirNotaApp = {
     n.valor = positivos.length ? positivos[0] : (totalNf != null ? totalNf : (n.liquido != null ? n.liquido : n.valorServico));
     n.retencoes = valor([/^reten[cç][oõ]es\s*\(r\$\)/i, /total (das )?reten[cç][oõ]es/i, /valor total das reten[cç][oõ]es/i]);
     if ((n.valor == null || n.valor === 0) && n.liquido > 0) n.valor = n.liquido;
+    if (!(Number(n.valor) > 0.004)) {
+      const noTexto = (re) => {
+        const m = texto.match(new RegExp(re.source + "(?:[^\\d\\n]{0,24}\\n){0,2}[^\\d]{0,16}(\\d{1,3}(?:\\.\\d{3})*,\\d{2})", "i"));
+        const v = m ? this.num(m[1]) : null;
+        return v != null && v > 0.004 ? v : null;
+      };
+      const achado = [
+        /valor da opera[cç][aã]o\s*\/\s*servi[cç]o/i,
+        /valor (?:total )?d[oa]s? servi[cç]os?/i,
+        /valor l[ií]quido da nfs-?e/i,
+        /valor total da nfs-?e/i
+      ].map(noTexto).find((v) => v != null);
+      if (achado != null) n.valor = achado;
+    }
     return n;
   },
 
@@ -766,7 +800,7 @@ window.InserirNotaApp = {
     const valor = this.valorNota();
     if (valor != null && entregas.length) {
       if (Math.abs(total - valor) <= this.TOL) oks.push(`Itens somam ${this.money(total)}, igual ao valor da nota.`);
-      else erros.push(`Os itens somam ${this.money(total)}, mas a nota é de ${this.money(valor)}.`);
+      else avisos.push(`Os itens somam ${this.money(total)}, mas a nota é de ${this.money(valor)}.`);
     } else if (entregas.length) avisos.push("Valor da nota não lido: confira o total dos itens com a nota.");
     if (n && n.retencoes > 0.009) avisos.push(`A nota tem ${this.money(n.retencoes)} de retenções: lance os impostos ao finalizar a nota no Sienge.`);
     const pag = s.item && s.item.pagamento;
@@ -782,7 +816,7 @@ window.InserirNotaApp = {
     const fiscal = s.fiscal;
     if (fiscal && fiscal.carregando) erros.push("Ainda estou cruzando a nota com o pedido, o CNAE e o endereço da empresa.");
     else if (fiscal) {
-      (fiscal.erros || []).forEach((t) => erros.push(t));
+      (fiscal.erros || []).forEach((t) => avisos.push(t));
       (fiscal.avisos || []).forEach((t) => avisos.push(t));
       (fiscal.infos || []).forEach((t) => avisos.push(t));
       (fiscal.oks || []).forEach((t) => oks.push(t));
@@ -804,7 +838,8 @@ window.InserirNotaApp = {
     const total = this.totalItens();
     const msg = `Inserir no Sienge a nota ${f.documento} ${f.numero}${f.serie ? "/" + f.serie : ""} de ${s.credor ? s.credor.nome : ""}, `
       + `no valor de ${this.money(total)}, com ${entregas.length} entrega(s) do pedido ${s.pedidoNome}?\n\n`
-      + "A nota gera o título no contas a pagar. O CRM envia o anexo e a forma de pagamento nesse título. Impostos e a consistência da nota continuam no Sienge.";
+      + "A nota gera o título no contas a pagar. O CRM envia o anexo e a forma de pagamento nesse título. Impostos e a consistência da nota continuam no Sienge."
+      + (c.avisos.length ? `\n\nHá ${c.avisos.length} apontamento(s) na conferência. Eles não impedem o envio enquanto a validação está sendo refinada.` : "");
     const ok = typeof window.mouraConfirm === "function" ? await window.mouraConfirm(msg) : confirm(msg);
     if (!ok) return;
 
@@ -1809,10 +1844,52 @@ window.InserirNotaApp = {
     if (btn) btn.disabled = travado;
   },
 
+  textoObs(v) {
+    if (v == null || typeof v === "object") return "";
+    return String(v).replace(/\r\n/g, "\n").trim();
+  },
+
+  /* Observação impressa e observação interna do pedido de compra no Sienge. */
+  observacoesDoPedido(p, itens) {
+    if (!p) return [];
+    const rotulo = {
+      notes: "Observação do pedido",
+      note: "Observação do pedido",
+      observation: "Observação do pedido",
+      observations: "Observação do pedido",
+      externalNotes: "Observação do pedido",
+      externalNote: "Observação do pedido",
+      internalNotes: "Observação interna",
+      internalNote: "Observação interna",
+      internalObservation: "Observação interna"
+    };
+    const vistos = new Set();
+    const out = [];
+    const por = (titulo, texto) => {
+      const t = this.textoObs(texto);
+      if (!t || vistos.has(t)) return;
+      vistos.add(t);
+      out.push({ titulo, texto: t });
+    };
+    Object.keys(rotulo).forEach((k) => por(rotulo[k], p[k]));
+    Object.keys(p).forEach((k) => {
+      if (rotulo[k] || !/note|observ|comment/i.test(k)) return;
+      por("Observação do pedido", p[k]);
+    });
+    if (!out.length && Array.isArray(itens)) {
+      itens.forEach((it) => por("Observação do pedido", it && (it.observacao || it.notes || it.note || it.observation)));
+    }
+    return out;
+  },
+
   conferenciaHtml() {
     const c = this.conferir();
     const linha = (t, cls, ic) => `<li class="${cls}"><span>${ic}</span>${this.esc(t)}</li>`;
-    return `<ul class="inf-check">${c.erros.map((t) => linha(t, "is-erro", "✗")).join("")}${c.avisos.map((t) => linha(t, "is-aviso", "!")).join("")}${c.oks.map((t) => linha(t, "is-ok", "✓")).join("")}</ul>`;
+    const obs = this.observacoesDoPedido(this.state.pedido, this.state.itens);
+    const bloco = obs.length
+      ? `<div class="inf-obs">${obs.map((l) => `<p><b>${this.esc(l.titulo)}</b><span>${this.esc(l.texto)}</span></p>`).join("")}</div>`
+      : (this.state.pedido ? `<p class="inf-muted inf-obs-vazia">Este pedido não tem observação no Sienge.</p>` : "");
+    return `${bloco}<ul class="inf-check">${c.erros.map((t) => linha(t, "is-erro", "✗")).join("")}${c.avisos.map((t) => linha(t, "is-aviso", "!")).join("")}${c.oks.map((t) => linha(t, "is-ok", "✓")).join("")}</ul>`;
   },
 
   pedidoHtml() {
@@ -1984,6 +2061,12 @@ window.InserirNotaApp = {
         .inf-check li { display: flex; gap: 8px; padding: 4px 0; }
         .inf-check li span { font-weight: 800; width: 14px; flex: 0 0 14px; }
         .inf-check .is-erro { color: #b91c1c; } .inf-check .is-aviso { color: #c2410c; } .inf-check .is-ok { color: #105436; } .inf-check .is-info { color: #0f766e; }
+        .inf-obs { margin: 0 0 10px; padding: 10px 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-left: 3px solid #105436; border-radius: 8px; }
+        .inf-obs p { margin: 0 0 8px; }
+        .inf-obs p:last-child { margin: 0; }
+        .inf-obs b { display: block; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: #64748b; margin-bottom: 2px; }
+        .inf-obs span { display: block; white-space: pre-wrap; line-height: 1.4; color: #0f172a; font-size: 0.84rem; }
+        .inf-obs-vazia { margin: 0 0 8px; }
         .nfchk-tab { width: 100%; border-collapse: collapse; font-size: 0.78rem; margin-top: 8px; }
         .nfchk-tab th, .nfchk-tab td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
         .nfchk-tab th { font-size: 0.68rem; text-transform: uppercase; color: #64748b; }
@@ -2075,7 +2158,7 @@ window.InserirNotaApp = {
             <div class="inf-acoes">
               <button type="button" class="btn btn-outline" onclick="InserirNotaApp.recomecar()" ${s.enviando ? "disabled" : ""}><i data-lucide="rotate-ccw"></i> Recomeçar</button>
               <button type="button" id="inf-inserir" class="btn btn-primary" onclick="InserirNotaApp.inserir()" ${travado ? "disabled" : ""}
-                title="${pode ? (this.conferir().erros.length ? "A conferência ainda tem pendência." : "Insere no Sienge e registra a validação") : "Sem permissão de edição em Fiscal › Validar nota"}">
+                title="${pode ? (this.conferir().erros.length ? "A conferência ainda tem uma pendência que impede o envio." : (this.conferir().avisos.length ? "Há apontamentos para conferir. O envio segue liberado." : "Insere no Sienge e registra a validação")) : "Sem permissão de edição em Fiscal › Validar nota"}">
                 ${s.enviando ? `<span class="btn-spin"></span> ${this.esc(s.enviando)}` : `<i data-lucide="upload"></i> Inserir no Sienge`}</button>
             </div>
           </div>

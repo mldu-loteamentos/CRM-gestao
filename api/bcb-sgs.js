@@ -101,12 +101,90 @@ async function fetchIpea(code, dataInicial) {
   return parseIpea(r.body, dataInicial);
 }
 
+function simOptante(v) {
+  const t = String(v || "").toLowerCase();
+  if (t === "sim" || t === "true") return true;
+  if (t === "não" || t === "nao" || t === "false") return false;
+  return null;
+}
+
+function cnpjDaPublica(j) {
+  const e = j && j.estabelecimento;
+  if (!e) return null;
+  const principal = e.atividade_principal || {};
+  const cidade = e.cidade || {};
+  const uf = e.estado || {};
+  return {
+    razao: j.razao_social || "",
+    cnae: principal.id != null ? String(principal.id) : "",
+    cnaeDesc: principal.descricao || "",
+    secundarios: (Array.isArray(e.atividades_secundarias) ? e.atividades_secundarias : [])
+      .filter((c) => c && c.id).map((c) => ({ codigo: String(c.id), descricao: c.descricao || "" })),
+    simples: j.simples ? simOptante(j.simples.simples) : null,
+    mei: !!(j.simples && simOptante(j.simples.mei)),
+    situacao: e.situacao_cadastral || "",
+    cidade: [cidade.nome, uf.sigla].filter(Boolean).join("/"),
+    logradouro: [e.tipo_logradouro, e.logradouro].filter(Boolean).join(" "),
+    numero: e.numero != null ? String(e.numero) : "",
+    bairro: e.bairro || "",
+    municipio: cidade.nome || "",
+    uf: uf.sigla || "",
+    cep: e.cep != null ? String(e.cep) : ""
+  };
+}
+
+function cnpjDaBrasil(j) {
+  if (!j || !j.razao_social) return null;
+  return {
+    razao: j.razao_social || "",
+    cnae: j.cnae_fiscal != null ? String(j.cnae_fiscal) : "",
+    cnaeDesc: j.cnae_fiscal_descricao || "",
+    secundarios: (Array.isArray(j.cnaes_secundarios) ? j.cnaes_secundarios : [])
+      .filter((c) => c && Number(c.codigo)).map((c) => ({ codigo: String(c.codigo), descricao: c.descricao || "" })),
+    simples: j.opcao_pelo_simples === true ? true : (j.opcao_pelo_simples === false ? false : null),
+    mei: j.opcao_pelo_mei === true,
+    situacao: j.descricao_situacao_cadastral || "",
+    cidade: [j.municipio, j.uf].filter(Boolean).join("/"),
+    logradouro: j.logradouro || "",
+    numero: j.numero != null ? String(j.numero) : "",
+    bairro: j.bairro || "",
+    municipio: j.municipio || "",
+    uf: j.uf || "",
+    cep: j.cep != null ? String(j.cep) : ""
+  };
+}
+
+async function consultarCnpj(res, cnpj) {
+  if (cnpj.length !== 14) return send(res, 400, { erro: "CNPJ inválido" }, true);
+  try {
+    const pub = await httpsGet("publica.cnpj.ws", "/cnpj/" + cnpj, 12000);
+    if (pub.status === 200) {
+      const d = cnpjDaPublica(JSON.parse(pub.body));
+      if (d) return send(res, 200, d, true);
+    }
+    if (pub.status === 404) return send(res, 404, { erro: "CNPJ não encontrado no cadastro da Receita" }, true);
+  } catch (e) {}
+  try {
+    const br = await httpsGet("brasilapi.com.br", "/api/cnpj/v1/" + cnpj, 12000);
+    if (br.status === 200) {
+      const d = cnpjDaBrasil(JSON.parse(br.body));
+      if (d) return send(res, 200, d, true);
+    }
+    if (br.status === 404) return send(res, 404, { erro: "CNPJ não encontrado no cadastro da Receita" }, true);
+    return send(res, 502, { erro: "consulta do CNPJ falhou (" + br.status + ")" }, true);
+  } catch (e) {
+    return send(res, 502, { erro: "consulta do CNPJ falhou" }, true);
+  }
+}
+
 module.exports = async function handler(req, res) {
   if (req.method === "OPTIONS") {
     send(res, 204, "");
     return;
   }
   const url = new URL(req.url || "", "http://localhost");
+  const cnpj = String((req.query && req.query.cnpj) || url.searchParams.get("cnpj") || "").replace(/\D/g, "");
+  if (cnpj || /\/cnpj\b/.test(url.pathname)) return consultarCnpj(res, cnpj);
   const code = String(url.searchParams.get("code") || "4391").replace(/\D/g, "") || "4391";
   const dataInicial = url.searchParams.get("dataInicial") || "01/01/2015";
   const dataFinal = url.searchParams.get("dataFinal") || "";

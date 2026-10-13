@@ -897,6 +897,9 @@ window.NotaFiscalCheck = {
       } catch (e) {}
     }
     const nota = Object.assign({}, o.nota || {}, campos || {});
+    r.valorServico = nota.valorServico != null ? nota.valorServico : null;
+    r.liquido = nota.liquido != null ? nota.liquido : null;
+    r.totalRetencoes = nota.totalRetencoes != null ? nota.totalRetencoes : null;
     const servico = /infNFSe|<DPS|CompNfse|nfs-?e/i.test(xml) || this.ehServico("", texto) || (!/<infNFe[\s>]/i.test(xml) && !!(nota.codigo || nota.descricao || nota.aliquotaIss));
     const mercadoria = /<infNFe[\s>]/i.test(xml);
 
