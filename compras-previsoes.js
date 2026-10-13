@@ -620,6 +620,7 @@ const ComprasPrevisoesApp = {
     const id = String(titulo || "");
     if (this.state.openTitulo === id) this.state.parcelas = (this.state.parcelas || []).map(stamp);
     if (this.state.parcelasCache[id]) this.state.parcelasCache[id] = this.state.parcelasCache[id].map(stamp);
+    this.relerFormasComNota(id);
   },
 
   docNumButton(r) {
@@ -684,6 +685,7 @@ const ComprasPrevisoesApp = {
     const id = String(titulo || "");
     if (this.state.openTitulo === id) this.state.parcelas = (this.state.parcelas || []).map(stamp);
     if (this.state.parcelasCache[id]) this.state.parcelasCache[id] = this.state.parcelasCache[id].map(stamp);
+    this.relerFormasComNota(id);
   },
 
   async titulosDoContrato(creditorId, contract, start, end, selfId) {
@@ -1025,6 +1027,63 @@ const ComprasPrevisoesApp = {
     }
   },
 
+  fontesForma(p, titulo) {
+    const out = [];
+    const push = (bill, parcela) => {
+      const b = String(bill || "").trim();
+      if (!b || out.some((x) => x.bill === b)) return;
+      out.push({ bill: b, parcela: String(parcela || "1") });
+    };
+    (p && p.notas || []).forEach((n) => { if (n && n.billId) push(n.billId, "1"); });
+    if (p && p.anexoSubstituto && p.anexoSubstituto.billId) push(p.anexoSubstituto.billId, "1");
+    if (p && p.tituloSubstituto) push(p.tituloSubstituto, "1");
+    push(titulo, p && p.parcela);
+    return out;
+  },
+
+  async formaNoTitulo(billId, parcela) {
+    if (!window.BoletoCheck || typeof BoletoCheck.lerForma !== "function" || !billId) return "";
+    let num = String(parcela || "1");
+    let tipo = null;
+    if (typeof window.siengeFetchWithRetry === "function") {
+      try {
+        const res = await window.siengeFetchWithRetry("/bills/" + encodeURIComponent(billId) + "/installments", 1);
+        const lista = (res && (res.results || res.data)) || (Array.isArray(res) ? res : []);
+        const escolhida = lista.find((x) => String(x.installmentId) === num || String(x.installmentNumber) === num)
+          || lista.find((x) => x && x.paymentType)
+          || lista[0];
+        if (escolhida) {
+          const idParc = escolhida.installmentId != null ? escolhida.installmentId : escolhida.installmentNumber;
+          if (idParc != null && idParc !== "") num = String(idParc);
+          tipo = String(escolhida.paymentType || "").trim() || null;
+        }
+      } catch (e) {}
+    }
+    const payment = await BoletoCheck.lerForma(billId, num, tipo);
+    return this.rotuloKindForma(payment && payment.kind) || this.rotuloForma(tipo);
+  },
+
+  relerFormasComNota(titulo) {
+    const id = String(titulo || "");
+    if (!id || this.state.openTitulo !== id) return;
+    const cache = (this.state.formasByTitulo || {})[id] || {};
+    let mudou = false;
+    const stamp = (p) => {
+      const temNota = (p.notas || []).some((n) => n && n.billId) || !!(p.anexoSubstituto && p.anexoSubstituto.billId);
+      if (!temNota || this.formaDaParcela(p) || !p.pago) return p;
+      const key = String(p.parcela || "");
+      if (!p.formaConsultada && !Object.prototype.hasOwnProperty.call(cache, key)) return p;
+      delete cache[key];
+      mudou = true;
+      return Object.assign({}, p, { forma: "", formaConsultada: false, formaLoading: false });
+    };
+    this.state.parcelas = (this.state.parcelas || []).map(stamp);
+    if (this.state.parcelasCache && this.state.parcelasCache[id]) {
+      this.state.parcelasCache[id] = this.state.parcelasCache[id].map(stamp);
+    }
+    if (mudou) this.carregarFormasPagas(id);
+  },
+
   async carregarFormasPagas(titulo) {
     const id = String(titulo || "");
     if (!id || this.state.openTitulo !== id) return;
@@ -1052,16 +1111,20 @@ const ComprasPrevisoesApp = {
           continue;
         }
         let forma = "";
-        let consultada = false;
-        try {
-          const payment = await BoletoCheck.lerForma(id, num, p.paymentType || "");
-          forma = this.rotuloKindForma(payment && payment.kind) || this.rotuloForma(p.paymentType);
-          consultada = true;
-          salvo[num] = forma;
-        } catch (e) {
-          forma = "";
-          consultada = false;
+        let consultou = false;
+        let falhou = false;
+        const fontes = this.fontesForma(p, id);
+        for (let i = 0; i < fontes.length && !forma; i++) {
+          try {
+            forma = await this.formaNoTitulo(fontes[i].bill, fontes[i].parcela);
+            consultou = true;
+          } catch (e) {
+            falhou = true;
+          }
+          if (this._formaGen !== gen || this.state.openTitulo !== id) return;
         }
+        const consultada = !!forma || (consultou && !falhou);
+        if (consultada) salvo[num] = forma;
         if (this._formaGen !== gen || this.state.openTitulo !== id) return;
         this.aplicarForma(id, num, forma, consultada);
         this.paintParcelasModal();

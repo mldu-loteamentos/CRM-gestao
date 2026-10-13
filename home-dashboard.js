@@ -113,9 +113,12 @@ const HomeDashboard = {
   },
 
   isBackOfficeUser(user) {
-    const p = String(user?.profile_name || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const rec = typeof window.findCrmRegisteredUser === 'function' ? window.findCrmRegisteredUser(user) : null;
+    if (rec && typeof window.isCrmAdminProfileName === 'function' && window.isCrmAdminProfileName(rec.profile_name)) return false;
+    const p = String((rec && rec.profile_name) || user?.profile_name || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     if (p.includes('BACK OFFICE') || p.includes('BACKOFFICE')) return true;
-    const blob = String(user?.name || '') + ' ' + String(user?.sienge_user || '');
+    const nome = typeof window.crmNomeSemTeste === 'function' ? window.crmNomeSemTeste(user?.name) : String(user?.name || '').replace(/ no usuário .+$/i, '');
+    const blob = nome + ' ' + String(user?.sienge_user || '');
     return /LUCELIA/i.test(blob);
   },
 

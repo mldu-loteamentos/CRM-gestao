@@ -3184,7 +3184,7 @@ circle.donut-segment {
   position: relative;
 }
 .suporte-widget { position: relative; }
-.teste-conta-widget { position: relative; margin-right: 8px; }
+.teste-conta-widget { position: relative; margin-right: 8px; display: inline-flex; align-items: center; }
 .teste-conta-widget[hidden] { display: none !important; }
 .suporte-fab.is-teste { color: #fff; background: #105436; border-color: #105436; }
 .teste-conta-menu {
@@ -3220,6 +3220,11 @@ circle.donut-segment {
 .teste-conta-encerrar {
   width: 100%;
   margin-bottom: 8px;
+}
+.teste-conta-encerrar-topo {
+  height: 34px;
+  margin-right: 8px;
+  white-space: nowrap;
 }
 .suporte-fab {
   width: 34px;

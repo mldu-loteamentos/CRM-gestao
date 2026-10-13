@@ -328,16 +328,23 @@ window.installmentsOpenBalance = function(installments) {
   return installments.reduce((acc, inst) => acc + (Number(inst && inst.currentBalance) || 0), 0);
 };
 
+window.crmNomeSemTeste = function(name) {
+  return String(name || "").replace(/ no usuário .+$/i, "").trim();
+};
+
 window.isCobrancaBackOfficeUser = function(u) {
   if (!u || u.status === "INATIVO") return false;
+  const rec = typeof window.findCrmRegisteredUser === "function" ? window.findCrmRegisteredUser(u) : null;
+  if (rec && typeof window.isCrmAdminProfileName === "function" && window.isCrmAdminProfileName(rec.profile_name)) return false;
   if (u.operator_type === "apoio_juridico") return true;
-  const p = String(u.profile_name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const p = String((rec && rec.profile_name) || u.profile_name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   if (p.includes("BACK OFFICE") || p.includes("BACKOFFICE")) return true;
   const email = String(u.email || "").toLowerCase();
   if (email.includes("lucelia")) return true;
+  const nome = typeof window.crmNomeSemTeste === "function" ? window.crmNomeSemTeste(u.name) : u.name;
   const n = (typeof window.normalizeOperatorName === "function")
-    ? (window.normalizeOperatorName(u.name || "") + " " + window.normalizeOperatorName(u.sienge_user || ""))
-    : String(u.name || "").toUpperCase();
+    ? (window.normalizeOperatorName(nome || "") + " " + window.normalizeOperatorName(u.sienge_user || ""))
+    : String(nome || "").toUpperCase();
   return n.includes("LUCELIA");
 };
 
@@ -4161,8 +4168,10 @@ function validateAndLoadCrmUser(user) {
     throw new Error("Seu acesso está pendente de aprovação. Peça ao administrador para ativar você em Usuários e Perfis.");
   }
 
-  const luceliaBlob = String(matchedUser.name || "") + " " + String(matchedUser.sienge_user || "") + " " + String(matchedUser.email || "") + " " + String(user.name || "") + " " + String(user.email || "");
-  if (/LUCELIA/i.test(luceliaBlob)) {
+  const nomeLogin = typeof window.crmNomeSemTeste === "function" ? window.crmNomeSemTeste(user.name) : String(user.name || "");
+  const luceliaBlob = String(matchedUser.name || "") + " " + String(matchedUser.sienge_user || "") + " " + String(matchedUser.email || "") + " " + nomeLogin + " " + String(user.email || "");
+  const perfilAdmin = typeof window.isCrmAdminProfileName === "function" && window.isCrmAdminProfileName(matchedUser.profile_name);
+  if (/LUCELIA/i.test(luceliaBlob) && !perfilAdmin) {
     const backName = window.CRM_BACK_OFFICE_PROFILE_NAME || "OPERADOR COBRANÇA BACK OFFICE";
     if (matchedUser.profile_name !== backName) {
       matchedUser.profile_name = backName;
@@ -5357,7 +5366,9 @@ window.ensureLuceliaBackOfficeProfile = function() {
     const targetName = window.CRM_BACK_OFFICE_PROFILE_NAME || "OPERADOR COBRANÇA BACK OFFICE";
     const isLuceliaUser = (u) => {
       if (!u) return false;
-      const blob = [u.name, u.sienge_user, u.email].map((v) => String(v || "")).join(" ");
+      if (typeof window.isCrmAdminProfileName === "function" && window.isCrmAdminProfileName(u.profile_name)) return false;
+      const nome = typeof window.crmNomeSemTeste === "function" ? window.crmNomeSemTeste(u.name) : u.name;
+      const blob = [nome, u.sienge_user, u.email].map((v) => String(v || "")).join(" ");
       return /LUCELIA/i.test(blob);
     };
     const usersRaw = localStorage.getItem("crm_users");
@@ -5375,6 +5386,12 @@ window.ensureLuceliaBackOfficeProfile = function() {
       }
     });
     const cu = window.AppState && AppState.currentUser;
+    if (cu && cu.email) {
+      const salvo = users.find((u) => String((u && u.email) || "").toLowerCase() === String(cu.email).toLowerCase());
+      if (salvo && typeof window.isCrmAdminProfileName === "function" && window.isCrmAdminProfileName(salvo.profile_name) && cu.profile_name !== salvo.profile_name) {
+        cu.profile_name = salvo.profile_name;
+      }
+    }
     if (cu && isLuceliaUser(cu) && window.normalizeCrmProfileName(cu.profile_name) !== window.normalizeCrmProfileName(targetName)) {
       cu.profile_name = targetName;
       changed = true;
@@ -5533,7 +5550,9 @@ window.CRM_TESTE_CONTA_KEY = "crm_teste_conta";
 window.crmAdministradorReal = function() {
   const u = window.AppState && AppState.currentUser;
   if (!u) return false;
-  return window.isCrmAdminProfileName(u.profile_name || u.profile || u.role);
+  if (window.isCrmAdminProfileName(u.profile_name || u.profile || u.role)) return true;
+  const rec = typeof window.findCrmRegisteredUser === "function" ? window.findCrmRegisteredUser(u) : null;
+  return !!(rec && window.isCrmAdminProfileName(rec.profile_name));
 };
 
 window.crmImpersonacaoAtual = function() {
@@ -5672,6 +5691,21 @@ window.crmPintarTesteConta = function() {
     return;
   }
   const imp = window.crmImpersonacaoAtual();
+  let sair = document.getElementById("teste-conta-encerrar-topo");
+  if (imp) {
+    if (!sair) {
+      sair = document.createElement("button");
+      sair.type = "button";
+      sair.id = "teste-conta-encerrar-topo";
+      sair.className = "btn btn-cancel btn-sm teste-conta-encerrar-topo";
+      sair.textContent = "Encerrar teste";
+      widget.insertBefore(sair, btn);
+    }
+    sair.hidden = false;
+    sair.onclick = () => { menu.hidden = true; window.crmEncerrarTesteConta(); };
+  } else if (sair) {
+    sair.hidden = true;
+  }
   btn.classList.toggle("is-teste", !!imp);
   btn.title = imp
     ? ("Acessos de " + (imp.name || imp.email) + ". Você continua administrador.")
@@ -14256,20 +14290,17 @@ function formatCpfCnpj(val) {
                if (usable) {
                   simInst.isActiveBoleto = true;
                   const barcode = slip.results[0].digitableLine || slip.results[0].digitableNumber || "";
-                  let dtFebraban = null;
-                  if (barcode) {
-                    const clean = barcode.replace(/\D/g, '');
-                    if (clean.length >= 47) {
-                      const factorStr = clean.substring(33, 37);
-                      const factor = parseInt(factorStr, 10);
-                      if (!isNaN(factor) && factor >= 1000) {
-                        dtFebraban = typeof window.decodeFebrabanDueFactor === "function"
-                          ? window.decodeFebrabanDueFactor(factor, simInst.due)
-                          : new Date(new Date('1997-10-07T12:00:00Z').getTime() + (factor * 24 * 60 * 60 * 1000));
-                      }
-                    }
-                  }
-                  if (dtFebraban) {
+                  const dtFebraban = typeof window.boletoDataDaLinha === "function"
+                    ? window.boletoDataDaLinha(barcode, simInst.due)
+                    : null;
+                  const linhaEstranha = dtFebraban && typeof window.boletoVencimentoCompativel === "function"
+                    && !window.boletoVencimentoCompativel(dtFebraban, simInst.due);
+                  if (linhaEstranha) {
+                    simInst.isActiveBoleto = false;
+                    simInst.boletoBaixado = false;
+                    simInst.dtFebraban = null;
+                    simInst.slipValue = null;
+                  } else if (dtFebraban) {
                     simInst.dtFebraban = dtFebraban;
                     const diffDaysFebraban = Math.round((new Date() - dtFebraban) / (1000 * 60 * 60 * 24));
                     if (diffDaysFebraban > 28) {
@@ -14280,7 +14311,7 @@ function formatCpfCnpj(val) {
                     }
                   }
                   const barcodeVal = (slip.results[0].digitableNumber || slip.results[0].digitableLine || "").replace(/\D/g, "");
-                  if (barcodeVal.length >= 47) {
+                  if (!linhaEstranha && barcodeVal.length >= 47) {
                     const valueCents = parseInt(barcodeVal.substring(37, 47), 10);
                     if (!isNaN(valueCents) && valueCents > 0) simInst.slipValue = valueCents / 100;
                   }
@@ -35088,6 +35119,36 @@ window.siengePaymentSlipIsUsable = function(slip) {
   return digits.length >= 47;
 };
 
+/** Data do boleto lida do fator Febraban da linha digitável. */
+window.boletoDataDaLinha = function(digitable, hintDate) {
+  const clean = String(digitable || "").replace(/\D/g, "");
+  if (clean.length < 47 || typeof window.decodeFebrabanDueFactor !== "function") return null;
+  const factor = parseInt(clean.substring(33, 37), 10);
+  if (!Number.isFinite(factor) || factor < 1000) return null;
+  const hint = hintDate instanceof Date
+    ? hintDate
+    : (hintDate ? new Date(String(hintDate).slice(0, 10) + "T12:00:00") : null);
+  return window.decodeFebrabanDueFactor(factor, hint && !isNaN(hint.getTime()) ? hint : null);
+};
+
+/**
+ * Boleto desta parcela: o vencimento da linha fica perto do vencimento da parcela ou de hoje.
+ * Uma data anos à frente (ex.: 2036 numa parcela de 2026) é linha sem boleto gerado.
+ */
+window.boletoVencimentoCompativel = function(boletoDate, hintDate) {
+  if (!(boletoDate instanceof Date) || isNaN(boletoDate.getTime())) return false;
+  const limite = 180 * 24 * 60 * 60 * 1000;
+  const boleto = new Date(boletoDate.getTime());
+  boleto.setHours(12, 0, 0, 0);
+  const perto = (outra) => !!(outra && !isNaN(outra.getTime()) && Math.abs(boleto.getTime() - outra.getTime()) <= limite);
+  const hint = hintDate instanceof Date
+    ? hintDate
+    : (hintDate ? new Date(String(hintDate).slice(0, 10) + "T12:00:00") : null);
+  const hoje = new Date();
+  hoje.setHours(12, 0, 0, 0);
+  return perto(hint) || perto(hoje);
+};
+
 window.refreshBoletosTabIfEmpty = function(container, customerId, saleId) {
   if (!container) return;
   const rows = container.querySelectorAll("tbody tr[id^='row-inst-']");
@@ -35252,6 +35313,23 @@ async function loadCustomerBoletos(customerId, saleId) {
               ? window.siengePaymentSlipIsUsable(slip)
               : !!(slip && slip.results && slip.results.length);
             const row = document.getElementById(`row-inst-${inst.installmentId}`);
+            const hintIso = typeof window.installmentDueIsoDate === "function"
+              ? window.installmentDueIsoDate(inst)
+              : String(inst.dueDate || "").slice(0, 10);
+            const hintDate = hintIso ? new Date(hintIso + "T12:00:00") : null;
+            const linha = hasSlip && slip.results && slip.results[0]
+              ? (slip.results[0].digitableNumber || slip.results[0].digitableLine || "")
+              : "";
+            const vencLinha = typeof window.boletoDataDaLinha === "function"
+              ? window.boletoDataDaLinha(linha, hintDate)
+              : null;
+            const linhaEstranha = !!(vencLinha && typeof window.boletoVencimentoCompativel === "function"
+              && !window.boletoVencimentoCompativel(vencLinha, hintDate));
+            if (linhaEstranha && row) {
+              row.remove();
+              window.refreshBoletosTabIfEmpty(container, customerId, saleId);
+              continue;
+            }
             if (!hasSlip) {
               if (isRecentGen && row) {
                 const tdDate = document.getElementById(`true-due-date-${inst.installmentId}`);
