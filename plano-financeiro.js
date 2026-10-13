@@ -1197,6 +1197,11 @@ const PlanoFinanceiroApp = {
     localStorage.setItem('crm_plano_impostos', JSON.stringify(this.taxConfig));
     document.getElementById('pf-tax-overlay').remove();
     this.renderTable();
+    window._planoImpostosWriting = true;
+    const done = () => { window._planoImpostosWriting = false; };
+    if (typeof window.forceUploadLocalConfig === "function") {
+      window.forceUploadLocalConfig(true).then(done, done);
+    } else done();
   },
 
   // ─── DFC Drag&Drop & Estrutura Hierárquica ─────────────────────────────────

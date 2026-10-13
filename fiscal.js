@@ -144,7 +144,11 @@ const FiscalApp = {
   },
 
   taxConfig() {
-    try { return JSON.parse(localStorage.getItem("crm_plano_impostos") || "{}") || {}; } catch (e) { return {}; }
+    let cfg = {};
+    try { cfg = JSON.parse(localStorage.getItem("crm_plano_impostos") || "{}") || {}; } catch (e) { cfg = {}; }
+    const mem = window.PlanoFinanceiroApp && PlanoFinanceiroApp.taxConfig;
+    if (mem && typeof mem === "object") cfg = Object.assign({}, cfg, mem);
+    return cfg;
   },
 
   tagDaConta(cfg, id) {
@@ -574,11 +578,17 @@ const FiscalApp = {
   sincronizarPlano(cfg) {
     localStorage.setItem("crm_plano_impostos", JSON.stringify(cfg));
     const PF = window.PlanoFinanceiroApp;
-    if (!PF) return;
-    PF.taxConfig = cfg;
-    if (document.getElementById("pf-table-wrapper") && typeof PF.renderTable === "function") {
-      try { PF.renderTable(); } catch (e) {}
+    if (PF) {
+      PF.taxConfig = cfg;
+      if (document.getElementById("pf-table-wrapper") && typeof PF.renderTable === "function") {
+        try { PF.renderTable(); } catch (e) {}
+      }
     }
+    window._planoImpostosWriting = true;
+    const done = () => { window._planoImpostosWriting = false; };
+    if (typeof window.forceUploadLocalConfig === "function") {
+      window.forceUploadLocalConfig(true).then(done, done);
+    } else done();
   },
 
   gravarBase(cfg) {

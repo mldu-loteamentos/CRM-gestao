@@ -43413,6 +43413,16 @@ window.mergeCityAssignmentRules = function(localStr, cloudStr) {
   return JSON.stringify(merged);
 };
 
+window.mergePlanoImpostos = function(localStr, cloudStr) {
+  const ler = (s) => {
+    try {
+      const o = JSON.parse(s || "{}");
+      return o && typeof o === "object" && !Array.isArray(o) ? o : {};
+    } catch (e) { return {}; }
+  };
+  return JSON.stringify(Object.assign({}, ler(cloudStr), ler(localStr)));
+};
+
 // Função que baixa configurações na inicialização
 window.syncGlobalConfigFromFirebase = async function() {
     try {
@@ -43656,6 +43666,32 @@ window.syncGlobalConfigFromFirebase = async function() {
                         try { window._vistoriaSendConfigMem = JSON.parse(chosen); } catch (e) {}
                     }
                     if (chosen && chosen !== cloudCanon && window.forceUploadLocalConfig) {
+                        setTimeout(() => window.forceUploadLocalConfig(true), 1500);
+                    }
+                    return;
+                }
+                if (k === "crm_plano_impostos") {
+                    if (window._planoImpostosWriting) return;
+                    let base = localStorage.getItem(k) || "";
+                    try {
+                      const mem = window.PlanoFinanceiroApp && PlanoFinanceiroApp.taxConfig;
+                      if (mem && typeof mem === "object" && Object.keys(mem).length && typeof window.mergePlanoImpostos === "function") {
+                        base = window.mergePlanoImpostos(JSON.stringify(mem), base || "{}");
+                      }
+                    } catch (e) {}
+                    const cloudRaw = globalData[k] || "";
+                    if (!base && !cloudRaw) return;
+                    const merged = typeof window.mergePlanoImpostos === "function"
+                      ? window.mergePlanoImpostos(base || "{}", cloudRaw || "{}")
+                      : (base || cloudRaw || "{}");
+                    if (merged && merged !== (localStorage.getItem(k) || "")) {
+                        _originalSetItem.call(localStorage, k, merged);
+                        changed = true;
+                    }
+                    try {
+                      if (window.PlanoFinanceiroApp) PlanoFinanceiroApp.taxConfig = JSON.parse(merged || "{}");
+                    } catch (e) {}
+                    if (merged && merged !== (cloudRaw || "") && window.forceUploadLocalConfig) {
                         setTimeout(() => window.forceUploadLocalConfig(true), 1500);
                     }
                     return;
