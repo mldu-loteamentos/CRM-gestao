@@ -265,6 +265,9 @@ const FiscalApp = {
               : (tag === "Base para Aplicações Financeiras" ? "financeiras" : ""));
           const noReceita = node && (FC.isRevenueGroup(node.id) || node.id === "g_09_01" || String(node.id).startsWith("g_09_01"));
           const reduz = tag === "Base de Dedução" || !!(noReceita && (node.redutora || FC.isReducingAccount(a.categoryId, a.categoryName, node)));
+          const signed = node
+            ? FC.signedAmount(node, a.categoryId, a.categoryName, a.amount, a.reducer, a.categoryType, a.mov)
+            : (reduz ? -Math.abs(Number(a.amount) || 0) : (Number(a.amount) || 0));
           if (!base && !reduz) {
             if (noReceita && signed) {
               linhas.push({
@@ -283,9 +286,6 @@ const FiscalApp = {
             }
             return;
           }
-          const signed = node
-            ? FC.signedAmount(node, a.categoryId, a.categoryName, a.amount, a.reducer, a.categoryType, a.mov)
-            : (reduz ? -Math.abs(Number(a.amount) || 0) : (Number(a.amount) || 0));
           if (!signed) return;
           const bucket = base || this.grupoDaRedutora(node);
           let valor = signed;

@@ -5691,21 +5691,8 @@ window.crmPintarTesteConta = function() {
     return;
   }
   const imp = window.crmImpersonacaoAtual();
-  let sair = document.getElementById("teste-conta-encerrar-topo");
-  if (imp) {
-    if (!sair) {
-      sair = document.createElement("button");
-      sair.type = "button";
-      sair.id = "teste-conta-encerrar-topo";
-      sair.className = "btn btn-cancel btn-sm teste-conta-encerrar-topo";
-      sair.textContent = "Encerrar teste";
-      widget.insertBefore(sair, btn);
-    }
-    sair.hidden = false;
-    sair.onclick = () => { menu.hidden = true; window.crmEncerrarTesteConta(); };
-  } else if (sair) {
-    sair.hidden = true;
-  }
+  const sairTopo = document.getElementById("teste-conta-encerrar-topo");
+  if (sairTopo) sairTopo.remove();
   btn.classList.toggle("is-teste", !!imp);
   btn.title = imp
     ? ("Acessos de " + (imp.name || imp.email) + ". Você continua administrador.")
