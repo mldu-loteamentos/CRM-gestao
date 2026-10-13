@@ -166,9 +166,24 @@ const ResultadoCaixaApp = {
     return { contas, nomes };
   },
 
+  juntarForecast(dest, f) {
+    Object.keys((f && f.contas) || {}).forEach((cc) => {
+      const bag = dest.contas[cc] || (dest.contas[cc] = {});
+      if (f.nomes && f.nomes[cc]) dest.nomes[cc] = f.nomes[cc];
+      Object.keys(f.contas[cc] || {}).forEach((code) => {
+        const de = f.contas[cc][code] || {};
+        const para = bag[code] || (bag[code] = { nome: de.nome || "", meses: {} });
+        if (de.nome) para.nome = de.nome;
+        Object.keys(de.meses || {}).forEach((ym) => {
+          para.meses[ym] = (Number(para.meses[ym]) || 0) + (Number(de.meses[ym]) || 0);
+        });
+      });
+    });
+  },
+
   async subirForecast(input) {
-    const file = input && input.files ? input.files[0] : null;
-    if (!file) return;
+    const files = input && input.files ? Array.from(input.files) : [];
+    if (!files.length) return;
     if (typeof XLSX === "undefined") {
       this.error = "A biblioteca de Excel não carregou. Atualize a página.";
       this.render();
@@ -176,15 +191,33 @@ const ResultadoCaixaApp = {
     }
     this.lendo = true;
     this.error = "";
+    this.aviso = "";
     this.render();
     try {
-      const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
-      const f = this.lerForecast(wb);
-      const ccs = Object.keys(f.contas);
-      if (!ccs.length) throw new Error("Não reconheci o forecast em " + file.name + ". Use o relatório Orçamento Empresarial Agrupado por centro de custo, com periodicidade mensal.");
+      const contas = {};
+      const nomes = {};
+      const lidos = [];
+      const falhas = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        try {
+          const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+          const f = this.lerForecast(wb);
+          if (!Object.keys(f.contas || {}).length) {
+            falhas.push(file.name);
+            continue;
+          }
+          this.juntarForecast({ contas: contas, nomes: nomes }, f);
+          lidos.push(file.name);
+        } catch (e) {
+          falhas.push(file.name);
+        }
+      }
+      if (!lidos.length) throw new Error("Não reconheci o forecast. Use o relatório Orçamento Empresarial Agrupado por centro de custo, com periodicidade mensal.");
       const yms = new Set();
-      ccs.forEach((id) => Object.keys(f.contas[id]).forEach((c) => Object.keys(f.contas[id][c].meses).forEach((ym) => yms.add(ym))));
-      this.forecast = { arquivo: file.name, em: new Date().toISOString(), meses: Array.from(yms).sort(), contas: f.contas, nomes: f.nomes };
+      Object.keys(contas).forEach((id) => Object.keys(contas[id]).forEach((c) => Object.keys(contas[id][c].meses || {}).forEach((ym) => yms.add(ym))));
+      this.forecast = { arquivo: lidos.join(", "), arquivos: lidos, em: new Date().toISOString(), meses: Array.from(yms).sort(), contas: contas, nomes: nomes };
+      if (falhas.length) this.aviso = "Não reconheci " + falhas.length + " arquivo(s): " + falhas.join(", ") + ".";
       try {
         localStorage.setItem("rc_forecast_v1", JSON.stringify(this.forecast));
       } catch (e) {
@@ -1165,6 +1198,46 @@ const ResultadoCaixaApp = {
     return { entradas: entradas, contas: contas, contasPorCc: contasPorCc, planosPorCc: planosPorCc };
   },
 
+  empacotarPlanos(planosPorCc) {
+    const out = {};
+    Object.keys(planosPorCc || {}).forEach((id) => {
+      const dono = planosPorCc[id] || {};
+      const contas = {};
+      Object.keys(dono.contas || {}).forEach((code) => {
+        const info = dono.contas[code] || {};
+        const meses = {};
+        Object.keys(info.meses || {}).forEach((mm) => {
+          const o = Math.round((Number(info.meses[mm].o) || 0) * 100) / 100;
+          if (Math.abs(o) >= 0.005) meses[mm] = o;
+        });
+        if (Object.keys(meses).length) contas[code] = { nome: info.nome || "", node: info.node || "", meses: meses };
+      });
+      if (Object.keys(contas).length) out[id] = { nome: dono.nome || "", contas: contas };
+    });
+    try { return JSON.stringify(out); } catch (e) { return ""; }
+  },
+
+  abrirPlanos(texto) {
+    let cru = null;
+    try { cru = JSON.parse(texto || ""); } catch (e) { cru = null; }
+    const out = {};
+    Object.keys(cru || {}).forEach((id) => {
+      const dono = cru[id] || {};
+      const contas = {};
+      Object.keys(dono.contas || {}).forEach((code) => {
+        const info = dono.contas[code] || {};
+        const meses = {};
+        Object.keys(info.meses || {}).forEach((mm) => {
+          const o = Number(info.meses[mm]) || 0;
+          if (Math.abs(o) >= 0.005) meses[mm] = { o: o, r: 0 };
+        });
+        if (Object.keys(meses).length) contas[code] = { nome: info.nome || code, node: info.node || "", meses: meses };
+      });
+      if (Object.keys(contas).length) out[id] = { nome: dono.nome || "", contas: contas };
+    });
+    return out;
+  },
+
   async salvarArquivoNuvem(slot, nome, arq) {
     const fx = window.firebaseCollections;
     const db = window.firebaseDb;
@@ -1179,7 +1252,7 @@ const ResultadoCaixaApp = {
       entradas: limpo.entradas,
       contas: limpo.contas,
       contasPorCc: limpo.contasPorCc,
-      planosPorCc: limpo.planosPorCc,
+      planosJson: this.empacotarPlanos(limpo.planosPorCc),
       em: new Date().toISOString()
     });
     arq._doc = id;
@@ -1240,7 +1313,7 @@ const ResultadoCaixaApp = {
       entradas: x.entradas || {},
       contas: x.contas || {},
       contasPorCc: x.contasPorCc || {},
-      planosPorCc: x.planosPorCc || {},
+      planosPorCc: (x.planosPorCc && Object.keys(x.planosPorCc).length) ? x.planosPorCc : this.abrirPlanos(x.planosJson),
       _doc: id,
       _slot: x.slot || ""
     };
@@ -1667,13 +1740,15 @@ const ResultadoCaixaApp = {
     const qtdArq = [atual, antN].reduce((s, y) => {
       const a = y ? this.anoDados(y) : null;
       return s + (a ? Object.keys(a.arquivos || {}).length : 0);
-    }, 0) + (this.forecast ? 1 : 0);
+    }, 0) + ((this.forecast && this.forecast.arquivos && this.forecast.arquivos.length) || (this.forecast ? 1 : 0));
     const fcMeses = this.forecast && Array.isArray(this.forecast.meses) && this.forecast.meses.length
       ? this.forecast.meses.map((ym) => (this.MESES[Number(ym.slice(5, 7)) - 1] || "") + "/" + ym.slice(0, 4))
       : [];
     const fcPeriodo = fcMeses.length ? (fcMeses.length > 1 ? fcMeses[0] + " a " + fcMeses[fcMeses.length - 1] : fcMeses[0]) : "";
+    const listaFc = this.forecast ? ((this.forecast.arquivos && this.forecast.arquivos.length) ? this.forecast.arquivos : [this.forecast.arquivo || "forecast"]) : [];
+    const rotuloFc = listaFc.length > 1 ? (listaFc.length + " forecasts") : (listaFc[0] || "forecast");
     const chipForecast = this.forecast
-      ? `<span class="rcx-arq" title="${caixaEsc(this.forecast.arquivo || "")}">${caixaEsc(this.forecast.arquivo || "forecast")}${fcPeriodo ? " · " + caixaEsc(fcPeriodo) : ""} <button type="button" onclick="ResultadoCaixaApp.removerForecast()">tirar</button></span>`
+      ? `<span class="rcx-arq" title="${caixaEsc(listaFc.join(", "))}">${caixaEsc(rotuloFc)}${fcPeriodo ? " · " + caixaEsc(fcPeriodo) : ""} <button type="button" onclick="ResultadoCaixaApp.removerForecast()">tirar</button></span>`
       : `<span class="rcx-muted">Nenhum forecast.</span>`;
     const agrupa = this.agrupar ? " Com “% Moura Leite”, cada valor está no percentual da Moura Leite cadastrado na empresa." : "";
     const mesNomeFaixa = nomesMes[(Number(this.mes) || 1) - 1] || "";
@@ -1719,9 +1794,9 @@ const ResultadoCaixaApp = {
             <i data-lucide="files"></i> Arquivos <span class="ml-tab-count">${qtdArq}</span>
             <i data-lucide="${this.arqsAberto ? "chevron-up" : "chevron-down"}"></i>
           </button>
-          ${lado === "entradas" || lado === "saidas" ? `<label class="rcx-arq-btn rcx-fc-btn" title="Relatório Orçamento Empresarial Agrupado por centro de custo, mensal">
+          ${lado === "entradas" || lado === "saidas" ? `<label class="rcx-arq-btn rcx-fc-btn" title="Pode escolher vários relatórios de uma vez. Orçamento Empresarial Agrupado por centro de custo, mensal.">
             <i data-lucide="trending-up"></i> ${this.forecast ? "Trocar forecast" : "Subir forecast"}
-            <input type="file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onchange="ResultadoCaixaApp.subirForecast(this)">
+            <input type="file" multiple accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onchange="ResultadoCaixaApp.subirForecast(this)">
           </label>` : ""}
           <label class="rcx-file">
             <i data-lucide="upload"></i> Subir orçamento
@@ -2625,47 +2700,50 @@ const ResultadoCaixaApp = {
       const on = escolhidas.has(String(c.numero));
       return `<label class="rcx-ml-conta"><input type="checkbox" ${on ? "checked" : ""} onchange="ResultadoCaixaApp.toggleContaMl('${caixaEsc(c.numero)}', this.checked)"> ${caixaEsc(c.numero)} ${caixaEsc(c.nome)}</label>`;
     }).join("");
-    const movs = (dados.movimentos || []).filter((m) => escolhidas.has(String(m.conta)));
-    const abertura = (dados.contas || []).reduce((s, c) => s + (escolhidas.has(String(c.numero)) ? (Number(c.abertura) || 0) : 0), 0);
+    const contasSel = (dados.contas || []).filter((c) => escolhidas.has(String(c.numero)));
+    const abertura = contasSel.reduce((s, c) => s + (Number(c.abertura) || 0), 0);
     const varOrc = (dados.linhas || []).find((l) => l.id === "g_12");
-    const mesesConta = [];
+    const traco = `<td>—</td>`;
+    const celS = (v) => cel(v, Number(v) < -0.5 ? "is-neg" : "");
+    const headMes = [];
+    const headSub = [];
+    const tdsVar = [traco];
+    const tdsSaldo = [celS(abertura)];
+    let saldoO = abertura;
+    let saldoR = abertura;
+    const fimConta = contasSel.map((c) => ({ c: c, saldo: Number(c.abertura) || 0 }));
     for (let m = 1; m <= sel; m++) {
-      const realizado = movs.filter((mv) => mv.mes === m).reduce((s, mv) => s + mv.valor, 0);
-      mesesConta.push(realizado);
+      headMes.push(`<th colspan="2">${this.MESES[m - 1]}</th>`);
+      headSub.push(`<th>Orçado</th><th>Realizado</th>`);
+      const o = varOrc && varOrc.meses ? (Number(varOrc.meses[m - 1].o) || 0) : 0;
+      const doMes = (dados.movimentos || []).filter((mv) => mv.mes === m && escolhidas.has(String(mv.conta)));
+      const r = doMes.reduce((s, mv) => s + mv.valor, 0);
+      saldoO += o;
+      saldoR += r;
+      tdsVar.push(celS(o) + celS(r));
+      tdsSaldo.push(celS(saldoO) + celS(saldoR));
+      fimConta.forEach((item) => {
+        const mov = doMes.filter((mv) => String(mv.conta) === String(item.c.numero)).reduce((s, mv) => s + mv.valor, 0);
+        item.saldo += mov;
+        item.cel = (item.cel || "") + traco + celS(item.saldo);
+      });
     }
-    let corrido = abertura;
-    const headMes = mesesConta.map((_, i) => `<th colspan="2">${this.MESES[i]}</th>`).join("");
-    const headSub = mesesConta.map(() => `<th>Mês</th><th>Acumulado</th>`).join("");
-    const linhasConta = (dados.contas || []).filter((c) => escolhidas.has(String(c.numero))).map((c) => {
-      let acum = Number(c.abertura) || 0;
-      const tds = [];
-      for (let m = 1; m <= sel; m++) {
-        const mesValor = (dados.movimentos || []).filter((mv) => mv.mes === m && String(mv.conta) === String(c.numero)).reduce((s, mv) => s + mv.valor, 0);
-        acum += mesValor;
-        tds.push(cel(mesValor) + cel(acum));
-      }
-      return `<tr><th>${caixaEsc(c.numero)} ${caixaEsc(c.nome)}</th>${tds.join("")}</tr>`;
-    }).join("");
-    const totReal = [];
-    const totOrc = [];
-    corrido = abertura;
-    let corridoOrc = abertura;
-    for (let i = 0; i < mesesConta.length; i++) {
-      corrido += mesesConta[i];
-      const o = varOrc ? varOrc.meses[i].o : 0;
-      corridoOrc += o;
-      totReal.push(cel(mesesConta[i], "is-tot") + cel(corrido, "is-tot"));
-      totOrc.push(cel(o, "is-tot") + cel(corridoOrc, "is-tot"));
-    }
-    const caixaContas = `<h3 class="rcx-ml-tit">Contas que já existiam em 01/01/${ano}</h3>
+    const abertoSaldo = !!(abertos["ml-saldo"]);
+    const nomeSaldo = contasSel.length
+      ? `<button type="button" class="rcx-ml-no" onclick="ResultadoCaixaApp.toggleNoMl('ml-saldo')">${abertoSaldo ? "▾" : "▸"} Saldo no fim do mês</button>`
+      : `<span class="rcx-ml-no">Saldo no fim do mês</span>`;
+    const linhasConta = abertoSaldo ? fimConta.map((item) => {
+      return `<tr class="is-cc"><th>${caixaEsc(item.c.numero)} ${caixaEsc(item.c.nome)}</th>${celS(item.c.abertura)}${item.cel || ""}</tr>`;
+    }).join("") : "";
+    const caixaContas = `<h3 class="rcx-ml-tit">Saldo de caixa</h3>
       <div class="rcx-ml-checks">${checks || `<span class="rcx-muted">Nenhuma conta corrente da empresa 1 voltou da API.</span>`}</div>
-      <p class="rcx-ajuda">O mês é o movimento da conta. O acumulado soma o saldo de 01/01/${ano}. A linha orçada usa a variação de caixa do relatório.</p>
+      <p class="rcx-ajuda">O saldo parte do caixa em 01/01/${ano}. Cada mês soma a variação de caixa: o orçado vem do relatório e o realizado vem das contas marcadas. Ao abrir o saldo, cada conta mostra o caixa realizado no fim do mês.</p>
       <div class="rcx-ml-scroll"><table class="rcx-ml">
-        <thead><tr><th>Conta</th>${headMes}</tr><tr><th></th>${headSub}</tr></thead>
+        <thead><tr><th>Conta</th><th>01/01</th>${headMes.join("")}</tr><tr><th></th><th></th>${headSub.join("")}</tr></thead>
         <tbody>
-          ${linhasConta || `<tr><td colspan="${sel * 2 + 1}">Escolha ao menos uma conta.</td></tr>`}
-          <tr class="is-formula"><th>Realizado das contas</th>${totReal.join("")}</tr>
-          <tr class="is-formula"><th>Orçado da variação de caixa</th>${totOrc.join("")}</tr>
+          <tr class="is-formula"><th>Variação do mês</th>${tdsVar.join("")}</tr>
+          <tr class="is-formula"><th>${nomeSaldo}</th>${tdsSaldo.join("")}</tr>
+          ${linhasConta}
         </tbody>
       </table></div>`;
     return `${barra}

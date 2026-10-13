@@ -4,6 +4,9 @@ const PrestacaoContasApp = {
   year: new Date().getFullYear(),
   month: new Date().getMonth() === 0 ? 12 : new Date().getMonth(),
   companyId: "1",
+  companyIds: ["1"],
+  empOpen: false,
+  empQuery: "",
   costCenterIds: ["13600", "13601"],
   partnershipId: "",
   ccSearch: "",
@@ -34,6 +37,7 @@ const PrestacaoContasApp = {
     if (companies.length && !companies.some(c => String(c.id) === String(this.companyId))) {
       this.companyId = String(companies[0].id);
     }
+    this.companyIds = this.companyId ? [String(this.companyId)] : [];
     this.ensureDfcReady();
     this.ensureCategories();
     if (typeof ParametrizacaoParceiroApp !== "undefined" && (!ParametrizacaoParceiroApp.items || !ParametrizacaoParceiroApp.items.length)) {
@@ -132,10 +136,170 @@ const PrestacaoContasApp = {
     const p = (ParametrizacaoParceiroApp.items || []).find(x => x.id === id);
     if (!p) { this.render(); return; }
     const part = ParametrizacaoParceiroApp.normalizeItem(p);
-    this.companyId = String(part.companyId);
+    const emp = this.empresaDaParceria(part);
+    this.companyId = emp || String(part.companyId || "");
+    this.companyIds = this.companyId ? [this.companyId] : [];
+    this.empOpen = false;
     const obras = Array.isArray(part.obras) && part.obras.length ? part.obras : [];
     this.costCenterIds = [...new Set(obras.flatMap(o => (o.costCenters || []).filter(c => c.inAccount).map(c => String(c.id))))];
     this.render();
+  },
+
+  empresaDaParceria(part) {
+    if (!part || typeof ParametrizacaoParceiroApp === "undefined") return "";
+    const p = ParametrizacaoParceiroApp.normalizeItem ? ParametrizacaoParceiroApp.normalizeItem(part) : part;
+    const empresas = new Set();
+    (p.obras || []).forEach((o) => {
+      (o.costCenters || []).forEach((c) => {
+        const cat = ParametrizacaoParceiroApp.catalogoCentros && ParametrizacaoParceiroApp.catalogoCentros();
+        const cc = cat && cat.get(String(c.id).replace(/\D/g, ""));
+        const emp = ParametrizacaoParceiroApp.empresaDoCentro ? ParametrizacaoParceiroApp.empresaDoCentro(cc) : "";
+        if (emp) empresas.add(emp);
+      });
+    });
+    if (empresas.size === 1) return [...empresas][0];
+    if (p.companyId) return String(p.companyId);
+    return [...empresas][0] || "";
+  },
+
+  empresasCatalogo() {
+    return (window.AppState && AppState.companies) || [];
+  },
+
+  empresasPermitidas() {
+    const todas = this.empresasCatalogo();
+    const part = this.activePartnership();
+    if (!part) return todas;
+    const emp = this.empresaDaParceria(part);
+    const daObra = todas.filter((c) => String(c.id) === String(emp));
+    if (daObra.length) return daObra;
+    if (!emp) return [];
+    return [{ id: emp, name: part.companyName || ("Empresa " + emp) }];
+  },
+
+  parceriasVisiveis() {
+    const todas = (typeof ParametrizacaoParceiroApp !== "undefined" && ParametrizacaoParceiroApp.items) || [];
+    const ids = new Set((this.companyIds || []).map(String).filter(Boolean));
+    if (!ids.size) return [];
+    return todas.filter((p) => ids.has(this.empresaDaParceria(p)));
+  },
+
+  sincronizarEmpresa() {
+    const ids = (this.companyIds || []).map(String).filter(Boolean);
+    this.companyId = ids.length === 1 ? ids[0] : "";
+    const part = this.activePartnership();
+    if (part && this.empresaDaParceria(part) !== this.companyId) {
+      this.partnershipId = "";
+      this.costCenterIds = [];
+    }
+  },
+
+  toggleEmpresa(id, on) {
+    const permitidas = new Set(this.empresasPermitidas().map((c) => String(c.id)));
+    const item = String(id);
+    if (!permitidas.has(item)) return;
+    if (this.activePartnership()) {
+      const emp = this.empresaDaParceria(this.activePartnership());
+      this.companyIds = emp ? [emp] : [];
+      this.sincronizarEmpresa();
+      this.render();
+      return;
+    }
+    const set = new Set((this.companyIds || []).map(String));
+    if (on) set.add(item);
+    else set.delete(item);
+    this.companyIds = this.empresasPermitidas().map((c) => String(c.id)).filter((x) => set.has(x));
+    this.sincronizarEmpresa();
+    this.render();
+  },
+
+  marcarEmpresas() {
+    const part = this.activePartnership();
+    if (part) {
+      const emp = this.empresaDaParceria(part);
+      this.companyIds = emp ? [emp] : [];
+    } else {
+      this.companyIds = this.empresasPermitidas().map((c) => String(c.id));
+    }
+    this.sincronizarEmpresa();
+    this.render();
+  },
+
+  desmarcarEmpresas() {
+    const part = this.activePartnership();
+    if (part) {
+      const emp = this.empresaDaParceria(part);
+      this.companyIds = emp ? [emp] : [];
+      this.sincronizarEmpresa();
+      this.render();
+      return;
+    }
+    this.companyIds = [];
+    this.companyId = "";
+    this.partnershipId = "";
+    this.costCenterIds = [];
+    this.render();
+  },
+
+  pintarEmpresas() {
+    const list = document.getElementById("pc-emp-list");
+    if (!list || !window.MlEmpresaFilter) return;
+    list.innerHTML = MlEmpresaFilter.listHtml({
+      id: "pc-emp",
+      items: this.empresasFiltroItens(),
+      selectedIds: this.companyIds || [],
+      query: this.empQuery || ""
+    });
+  },
+
+  empresasFiltroItens() {
+    return this.empresasPermitidas().map((c) => ({
+      id: String(c.id),
+      label: String(c.id) + " - " + String(c.name || c.tradeName || "").toUpperCase()
+    }));
+  },
+
+  empresaFiltroHtml() {
+    if (!window.MlEmpresaFilter) {
+      const companies = this.empresasPermitidas();
+      return `<label class="pcx-field pcx-field-emp">
+        <span class="ml-emp-filter-label">Empresa</span>
+        <select class="pcx-input" onchange="PrestacaoContasApp.toggleEmpresa(this.value, true)">
+          ${companies.map((c) => `<option value="${this.esc(c.id)}" ${String(c.id) === String(this.companyId) ? "selected" : ""}>${this.esc(c.id)} - ${this.esc(c.name)}</option>`).join("")}
+        </select>
+      </label>`;
+    }
+    return `<div class="pcx-field pcx-field-emp">${MlEmpresaFilter.html({
+      id: "pc-emp",
+      label: "Empresa",
+      items: this.empresasFiltroItens(),
+      selectedIds: this.companyIds || [],
+      open: !!this.empOpen,
+      query: this.empQuery || "",
+      emptyMeansAll: false
+    })}</div>`;
+  },
+
+  ligarEmpresaFiltro() {
+    if (!window.MlEmpresaFilter) return;
+    const self = this;
+    MlEmpresaFilter.bind("pc-emp", {
+      toggleOpen() {
+        self.empOpen = !self.empOpen;
+        self.render();
+      },
+      close() {
+        self.empOpen = false;
+        self.render();
+      },
+      setQuery(q) {
+        self.empQuery = q;
+        self.pintarEmpresas();
+      },
+      toggleId(id, on) { self.toggleEmpresa(id, on); },
+      selectAll() { self.marcarEmpresas(); },
+      selectNone() { self.desmarcarEmpresas(); }
+    });
   },
 
   periodBounds() {
@@ -157,7 +321,12 @@ const PrestacaoContasApp = {
   costCenters() {
     const all = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) ||
       (window.MOCK_DATA && window.MOCK_DATA.COST_CENTERS) || [];
-    return all.filter(cc => !this.companyId || String(cc.companyId) === String(this.companyId) || cc.companyId == null);
+    const escolhidas = new Set((this.companyIds || []).map(String).filter(Boolean));
+    return all.filter(cc => {
+      const emp = String(cc.companyId == null ? "" : cc.companyId);
+      if (!escolhidas.size) return false;
+      return escolhidas.has(emp) || cc.companyId == null;
+    });
   },
 
   ccSuggestionsHtml() {
@@ -195,7 +364,7 @@ const PrestacaoContasApp = {
   },
 
   setAba(id) {
-    this.aba = id === "pag" ? "pag" : "receb";
+    this.aba = id === "repasse" ? "repasse" : "obra";
     this.confFiltro = "";
     this.confAberta = "";
     this.gruposAbertos = new Set();
@@ -232,9 +401,49 @@ const PrestacaoContasApp = {
     return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   },
 
+  SOLTOS: { "14703": 1, "14704": 1, "14304": 1, "14305": 1 },
+
   obraDe(id) {
     const d = String(id || "").replace(/\D/g, "");
     return d.length >= 5 ? d.slice(0, -2) : d;
+  },
+
+  /** Centros irmãos (12900 e 12901) ficam na mesma obra. 14304, 14305, 14703 e 14704 seguem separados. */
+  chaveObra(id) {
+    const s = String(id || "").replace(/\D/g, "");
+    if (this.SOLTOS[s]) return s;
+    if (s.length >= 5) return s.slice(0, 3) + "00";
+    return s;
+  },
+
+  rotuloObra(id) {
+    const bruto = String(this.ccNome(id) || "").trim().replace(/\s*-\s*PARCERIA\b.*$/i, "").trim();
+    if (!bruto) return String(id);
+    const semId = bruto.replace(new RegExp("^" + id + "\\s*[-–]\\s*"), "").trim();
+    return id + " - " + (semId || bruto);
+  },
+
+  noDfc(codigo, nome) {
+    const plano = typeof PlanoFinanceiroApp !== "undefined" ? PlanoFinanceiroApp : null;
+    if (!plano) return "";
+    const cod = this.formatAccountCode(codigo) || String(codigo || "");
+    let gid = "";
+    try {
+      if (typeof plano.lookupDfcByCode === "function") gid = plano.lookupDfcByCode(cod) || "";
+    } catch (e) { gid = ""; }
+    if (!gid && typeof plano.suggestGroup === "function") {
+      try { gid = plano.suggestGroup({ id: cod, name: nome || "" }) || ""; } catch (e) { gid = ""; }
+    }
+    return String(gid || "");
+  },
+
+  classeConta(conta, nome, sinal) {
+    const cod = String(this.formatAccountCode(conta) || conta || "").replace(/\s/g, "");
+    const gid = this.noDfc(cod, nome);
+    const sob = (raiz) => gid === raiz || gid.indexOf(raiz + "_") === 0;
+    if (sob("g_04_01") || /REPASSE|DISTRIBUICAO DE LUCRO|DISTRIBUIÇÃO DE LUCRO/i.test(nome || "")) return "repasse";
+    if (sob("g_01") || cod === "2.05.01.03" || /DESCONTO DE JUROS CONTRAT/i.test(nome || "")) return "receita";
+    return this.naturezaConta(conta, sinal);
   },
 
   ccNome(id) {
@@ -587,7 +796,7 @@ const PrestacaoContasApp = {
   },
 
   montarConferencia() {
-    const vazio = { receitas: [], despesas: [] };
+    const vazio = { receitas: [], despesas: [], repasses: [] };
     const wanted = new Set((this.costCenterIds || []).map(String));
     if (!wanted.size) return vazio;
     const fcApp = this.fc();
@@ -598,6 +807,7 @@ const PrestacaoContasApp = {
     const txt = (v) => (v == null || typeof v === "object") ? "" : String(v).trim();
     const receitas = [];
     const despesas = [];
+    const repasses = [];
     (this.movements || []).forEach((mov, idx) => {
       const amount = Number(mov.bankMovementAmount) || 0;
       if (!amount) return;
@@ -612,11 +822,13 @@ const PrestacaoContasApp = {
         if (!fc || fc.costCenterId == null || String(fc.costCenterId) === "") return;
         const cc = String(fc.costCenterId);
         const obra = this.obraDe(cc);
-        if (!obra) return;
+        const grupo = this.chaveObra(cc);
+        if (!obra || !grupo) return;
         const conta = String(fc.financialCategoryId || "").trim();
-        const nat = this.naturezaConta(conta, sinal);
-        const k = obra + "|" + nat;
-        const g = grupos[k] || (grupos[k] = { obra, nat, porCc: {}, contas: [], foraTotal: 0, guia: null });
+        const nomeConta = fc.financialCategoryName || this.catName(conta) || "";
+        const classe = this.classeConta(conta, nomeConta, sinal);
+        const k = grupo + "|" + classe;
+        const g = grupos[k] || (grupos[k] = { obra, grupo, classe, porCc: {}, contas: [], foraTotal: 0, guia: null });
         const valor = Math.abs(amount) * (Number(share) || 0);
         const og = this.origemGuia(mov, cc);
         if (og) {
@@ -662,7 +874,7 @@ const PrestacaoContasApp = {
         let status = "na";
         let distratoNota = "";
         if (this.ehDistratoMov(mov)) g.emissao = this.emissaoDoMov(mov);
-        if (total > 0.004) {
+        if (total > 0.004 && !this.SOLTOS[g.grupo]) {
           const padrao = this.padraoObra(g.obra);
           const todos = [...new Set(idsMov.concat(padrao ? Object.keys(padrao) : []))];
           linhas = todos.map(id => {
@@ -692,15 +904,19 @@ const PrestacaoContasApp = {
         }
         const motivos = [...new Set(g.contas.filter(c => !c.amarrada).map(c => c.motivo))];
         const row = {
-          key: idx + "|" + g.obra + "|" + g.nat,
+          key: idx + "|" + g.grupo + "|" + g.classe,
           data: String(mov.bankMovementDate || mov.paymentDate || "").slice(0, 10),
           historico: txt(mov.bankMovementHistoricName) || txt(mov.documentIdentificationName) || "—",
           pessoa: txt(mov.clientName) || txt(mov.creditorName),
           titulo: txt(mov.billId || mov.billPayableId || mov.billReceivableId || mov.payableBillId || mov.receivableBillId || mov.titleId),
           parcela: txt(mov.installmentId || mov.installmentNumber || mov.installment),
           documento: [txt(mov.documentIdentificationId || mov.documentId), txt(mov.documentIdentificationNumber || mov.documentNumber)].filter(Boolean).join(" "),
-          contaBanco: txt(mov.accountNumber),
+          contaBanco: txt(mov.accountNumber || mov.account || ""),
+          contaNome: txt(mov.accountName || mov.checkingAccountName || ""),
           obra: g.obra,
+          grupo: g.grupo,
+          classe: g.classe,
+          redutora: g.classe === "receita" && g.contas.every((c) => String(c.codigo || "").replace(/\D/g, "").charAt(0) === "2"),
           total: totalGeral,
           totalRateio: total,
           foraTotal: g.foraTotal,
@@ -711,7 +927,7 @@ const PrestacaoContasApp = {
           distratoNota,
           status
         };
-        (g.nat === "despesa" ? despesas : receitas).push(row);
+        (g.classe === "repasse" ? repasses : g.classe === "despesa" ? despesas : receitas).push(row);
       });
     });
     const ord = (a, b) => {
@@ -722,7 +938,8 @@ const PrestacaoContasApp = {
     };
     receitas.sort(ord);
     despesas.sort(ord);
-    return { receitas, despesas };
+    repasses.sort(ord);
+    return { receitas, despesas, repasses };
   },
 
   ignoredAccountKeys() {
@@ -981,6 +1198,11 @@ const PrestacaoContasApp = {
       this.render();
       return;
     }
+    if ((this.companyIds || []).length !== 1 || !this.companyId) {
+      this.error = "Selecione uma empresa. A prestação consulta uma empresa por vez, a da obra do parceiro.";
+      this.render();
+      return;
+    }
     this.loading = true;
     this.error = "";
     this.rastreio = null;
@@ -1028,12 +1250,11 @@ const PrestacaoContasApp = {
     if (!root) return;
     const prevScroll = document.getElementById("pc-conf-scroll");
     const prevTop = prevScroll ? prevScroll.scrollTop : 0;
-    const companies = (window.AppState && AppState.companies) || [];
-    const partnerships = (typeof ParametrizacaoParceiroApp !== "undefined" && ParametrizacaoParceiroApp.items) || [];
-    const conf = this.conferencias || { receitas: [], despesas: [] };
+    const partnerships = this.parceriasVisiveis();
+    const conf = this.conferencias || { receitas: [], despesas: [], repasses: [] };
     const nFora = (rows) => (rows || []).filter(r => r.status === "fora").length;
     const pad = n => String(n).padStart(2, "0");
-    const aba = this.aba;
+    const aba = this.aba === "repasse" ? "repasse" : "obra";
     const tab = (id, icon, txt, count) => `<button type="button" role="tab" aria-selected="${aba === id}" class="ml-tab${aba === id ? " is-active" : ""}" onclick="PrestacaoContasApp.setAba('${id}')"><i data-lucide="${icon}"></i> ${txt}${count ? ` <span class="ml-tab-count">${count}</span>` : ""}</button>`;
     const ccs = this.costCenters();
 
@@ -1041,7 +1262,7 @@ const PrestacaoContasApp = {
       <div class="pcx-page">
         <div class="pcx-head">
         <div class="cc-toolbar pcx-toolbar">
-          ${partnerships.length ? `<label class="pcx-field pcx-field-parc">
+          ${partnerships.length || this.companyIds.length ? `<label class="pcx-field pcx-field-parc">
             <span class="ml-emp-filter-label">Parceria</span>
             <select class="pcx-input" onchange="PrestacaoContasApp.applyPartnership(this.value)">
               <option value="">Todas (opcional)</option>
@@ -1050,13 +1271,11 @@ const PrestacaoContasApp = {
                 return `<option value="${this.esc(p.id)}" ${this.partnershipId === p.id ? "selected" : ""}>${this.esc(p.partnerName)}${obras ? " · obras " + this.esc(obras) : ""}</option>`;
               }).join("")}
             </select>
-          </label>` : ""}
-          <label class="pcx-field pcx-field-emp">
-            <span class="ml-emp-filter-label">Empresa</span>
-            <select class="pcx-input" onchange="PrestacaoContasApp.companyId=this.value;PrestacaoContasApp.render()">
-              ${companies.map(c => `<option value="${this.esc(c.id)}" ${String(c.id) === String(this.companyId) ? "selected" : ""}>${this.esc(c.id)} - ${this.esc(c.name)}</option>`).join("") || '<option value="1">1</option>'}
-            </select>
-          </label>
+          </label>` : `<label class="pcx-field pcx-field-parc">
+            <span class="ml-emp-filter-label">Parceria</span>
+            <select class="pcx-input" disabled><option>Selecione a empresa</option></select>
+          </label>`}
+          ${this.empresaFiltroHtml()}
           <div class="tvig-filter-slot tvig-comp-slot">
             <label class="tvig-comp-label" for="pc-comp">Mês de referência</label>
             <input type="month" id="pc-comp" class="tvig-comp-input" title="Consulta pela data de pagamento" value="${this.year}-${pad(this.month)}" onchange="PrestacaoContasApp.setCompetencia(this.value)">
@@ -1092,23 +1311,32 @@ const PrestacaoContasApp = {
         ${this.rastreio ? `<div class="pcx-alert ${this.rastreio.erro ? "is-warn" : "is-info"}">${this.rastreio.erro ? "" : '<span class="pcx-spin"></span>'}<span id="pc-rastreio">${this.esc(this.rastreio.msg)}</span></div>` : ""}
 
         <div class="ml-tabs pcx-tabs" role="tablist">
-          ${tab("receb", "arrow-down-circle", "Recebimentos", nFora(conf.receitas))}
-          ${tab("pag", "arrow-up-circle", "Pagamentos", nFora(conf.despesas))}
+          ${tab("obra", "building-2", "Por obra", nFora(conf.receitas) + nFora(conf.despesas))}
+          ${tab("repasse", "split", "Repasse anterior", nFora(conf.repasses))}
         </div>
 
-        ${this.conferirHtml(aba === "pag" ? "despesas" : "receitas")}
+        ${this.conferirHtml(aba)}
       </div>
     `;
     if (window.lucide) lucide.createIcons();
+    this.ligarEmpresaFiltro();
     const novoScroll = document.getElementById("pc-conf-scroll");
     if (novoScroll && prevTop) novoScroll.scrollTop = prevTop;
   },
 
   seloRateio(status, motivo, prestacao) {
+    const ok = status === "ok" || prestacao;
     const txt = prestacao ? "Rateio da prestação" : ({ ok: "Conferido", fora: "Fora do padrão", sem: "Sem % no centro", na: "Não se aplica rateio" }[status] || "—");
     const tip = prestacao ? motivo : (status === "na" ? (motivo || "Conta do plano financeiro que não entra no rateio da parceria") : "");
     const cls = prestacao ? "ok" : status;
-    return `<span class="pcx-selo is-${cls}"${tip ? ` title="${this.esc(tip)}"` : ""}>${txt}</span>`;
+    const ico = ok ? `<i data-lucide="check"></i>` : "";
+    return `<span class="pcx-selo is-${cls}"${tip ? ` title="${this.esc(tip)}"` : ""}>${ico}${txt}</span>`;
+  },
+
+  seloGrupo(fora, n) {
+    if (fora) return `<span class="pcx-selo is-fora">${fora} fora</span>`;
+    if (!n) return "";
+    return `<span class="pcx-selo is-ok"><i data-lucide="check"></i> Conferido</span>`;
   },
 
   textoCentros(linhas, campo) {
@@ -1122,14 +1350,17 @@ const PrestacaoContasApp = {
     return p.length === 3 && p[0].length === 4 ? `${p[2]}/${p[1]}/${p[0]}` : "—";
   },
 
-  conferirHtml(lado) {
-    const conf = this.conferencias || { receitas: [], despesas: [] };
-    const todas = conf[lado] || [];
-    const ehRec = lado === "receitas";
-    const cor = ehRec ? "#15803d" : "#b91c1c";
+  conferirHtml(aba) {
+    const conf = this.conferencias || { receitas: [], despesas: [], repasses: [] };
+    const repasse = aba === "repasse";
+    const todas = repasse ? (conf.repasses || []) : (conf.receitas || []).concat(conf.despesas || []);
     const filtro = this.confFiltro;
     const rows = filtro ? todas.filter(r => r.status === filtro) : todas;
-    const total = rows.reduce((s, r) => s + r.total, 0);
+    const resultado = rows.reduce((s, r) => {
+      const v = Number(r.total) || 0;
+      if (r.classe === "despesa") return s - v;
+      return s + (r.redutora ? -v : v);
+    }, 0);
     const pill = (st, txt) => {
       const n = todas.filter(r => r.status === st).length;
       return `<button type="button" class="pcx-pill is-${st}${filtro === st ? " is-on" : ""}" onclick="PrestacaoContasApp.setConfFiltro('${st}')" ${n || filtro === st ? "" : "disabled"}>${n} ${txt}</button>`;
@@ -1137,11 +1368,9 @@ const PrestacaoContasApp = {
     const vazio = this.loading ? "Carregando movimentos de caixa..."
       : (!this.movements.length ? "Clique em Carregar para consultar o Sienge."
         : (filtro ? "Nenhum lançamento nesta situação."
-          : (ehRec ? "Nenhum recebimento nos centros selecionados." : "Nenhum pagamento nos centros selecionados.")));
-    const arvore = rows.length ? this.arvorePlano(rows) : null;
-    const corpo = arvore
-      ? arvore.raizes.map(n => this.grupoHtml(n, arvore.nos, 0, cor)).join("")
-      : `<tr><td colspan="8" class="pcx-vazio">${vazio}</td></tr>`;
+          : (repasse ? "Nenhum repasse pago nesta competência." : "Nenhum lançamento nos centros selecionados.")));
+    const corpo = rows.length ? this.obrasHtml(rows, repasse) : `<tr><td colspan="8" class="pcx-vazio">${vazio}</td></tr>`;
+    const corTotal = resultado < -0.004 ? "#b91c1c" : "#15803d";
     return `
       <div class="pcx-resumo">
         <div class="pcx-pills">
@@ -1150,23 +1379,25 @@ const PrestacaoContasApp = {
           ${pill("ok", "conferidos")}
           ${pill("na", "não se aplica rateio")}
         </div>
-        <div class="pcx-total">${rows.length} lançamento(s) · <strong style="color:${cor};">${this.fmt(total)}</strong></div>
+        <div class="pcx-total">${rows.length} lançamento(s) · <strong style="color:${corTotal};">${this.fmt(resultado)}</strong></div>
       </div>
       <p class="pcx-ajuda">
-        ${ehRec ? "Recebimentos" : "Pagamentos"} agrupados pelo plano financeiro. Abra o nível para ver as contas e os lançamentos.
+        ${repasse
+          ? "Pago neste mês, mas é a distribuição do mês anterior. Não entra nas despesas da obra."
+          : "Cada obra começa fechada. Centros irmãos, como a parceria, ficam na mesma obra. 14304, 14305, 14703 e 14704 aparecem separados. O desconto de juros contratuais entra em Venda de imóveis, nas receitas."}
       </p>
       <div class="cc-scroll pcx-scroll" id="pc-conf-scroll">
         <table class="cc-table pcx-table">
           <colgroup>
-            <col style="width:84px"><col style="width:118px"><col><col style="width:60px">
-            <col style="width:18%"><col style="width:18%"><col style="width:112px"><col style="width:150px">
+            <col style="width:84px"><col style="width:118px"><col><col style="width:150px">
+            <col style="width:16%"><col style="width:16%"><col style="width:112px"><col style="width:150px">
           </colgroup>
           <thead>
             <tr>
               <th>Data</th>
               <th>Título / parcela</th>
               <th>Histórico</th>
-              <th class="is-center">Obra</th>
+              <th>Conta corrente</th>
               <th>Lançado nos centros</th>
               <th>Padrão do centro</th>
               <th class="is-right">Valor</th>
@@ -1176,6 +1407,83 @@ const PrestacaoContasApp = {
           <tbody>${corpo}</tbody>
         </table>
       </div>`;
+  },
+
+  somaLado(rows, despesa) {
+    return (rows || []).reduce((s, r) => {
+      const v = Number(r.total) || 0;
+      if (despesa) return s + v;
+      return s + (r.redutora ? -v : v);
+    }, 0);
+  },
+
+  obrasHtml(rows, repasse) {
+    const map = {};
+    (rows || []).forEach((r) => {
+      const id = r.grupo || r.obra || "—";
+      const g = map[id] || (map[id] = { id, receitas: [], despesas: [], repasses: [] });
+      if (r.classe === "despesa") g.despesas.push(r);
+      else if (r.classe === "repasse") g.repasses.push(r);
+      else g.receitas.push(r);
+    });
+    return Object.keys(map).sort((a, b) => Number(a) - Number(b)).map((id) => {
+      const g = map[id];
+      const lista = repasse ? g.repasses : g.receitas.concat(g.despesas);
+      const fora = lista.filter((r) => r.status === "fora").length;
+      const rec = this.somaLado(g.receitas, false);
+      const desp = this.somaLado(g.despesas, true);
+      const resultado = repasse ? this.somaLado(g.repasses, true) : rec - desp;
+      const cor = resultado < -0.004 ? "#b91c1c" : "#15803d";
+      const oid = "obra|" + id;
+      const aberto = this.gruposAbertos.has(oid);
+      let html = `<tr class="pcx-grupo" onclick="PrestacaoContasApp.toggleGrupo('${this.esc(oid)}')">
+        <td colspan="6">
+          <span class="pcx-grupo-nome">
+            <i data-lucide="${aberto ? "chevron-down" : "chevron-right"}" class="pcx-chev"></i>
+            <strong>${this.esc(this.rotuloObra(id))}</strong>
+            <span class="pcx-mute">${lista.length} lançamento(s)</span>
+          </span>
+        </td>
+        <td class="is-right pcx-valor" style="color:${cor};">${this.fmt(resultado)}</td>
+        <td>${this.seloGrupo(fora, lista.length)}</td>
+      </tr>`;
+      if (!aberto) return html;
+      if (repasse) {
+        html += this.arvoreHtml(g.repasses, "#b91c1c", oid);
+        return html;
+      }
+      html += this.faixaObra(oid + "|rec", "Receitas", rec, g.receitas, "#15803d", false);
+      html += this.faixaObra(oid + "|desp", "Despesas", desp, g.despesas, "#b91c1c", true);
+      html += `<tr class="pcx-grupo is-conta">
+        <td colspan="6"><span class="pcx-grupo-nome" style="padding-left:16px"><strong>Resultado financeiro</strong></span></td>
+        <td class="is-right pcx-valor" style="color:${cor};">${this.fmt(resultado)}</td>
+        <td>${this.seloGrupo(fora, lista.length)}</td>
+      </tr>`;
+      return html;
+    }).join("");
+  },
+
+  faixaObra(id, nome, valor, rows, cor, despesa) {
+    const aberto = this.gruposAbertos.has(id);
+    const fora = (rows || []).filter((r) => r.status === "fora").length;
+    let html = `<tr class="pcx-grupo is-conta" onclick="PrestacaoContasApp.toggleGrupo('${this.esc(id)}')">
+      <td colspan="6">
+        <span class="pcx-grupo-nome" style="padding-left:16px">
+          <i data-lucide="${aberto ? "chevron-down" : "chevron-right"}" class="pcx-chev"></i>
+          <strong>${nome}</strong>
+          <span class="pcx-mute">${(rows || []).length} lançamento(s)</span>
+        </span>
+      </td>
+      <td class="is-right pcx-valor" style="color:${cor};">${this.fmt(despesa ? valor : valor)}</td>
+      <td>${this.seloGrupo(fora, (rows || []).length)}</td>
+    </tr>`;
+    if (aberto && (rows || []).length) html += this.arvoreHtml(rows, cor, id);
+    return html;
+  },
+
+  arvoreHtml(rows, cor, prefix) {
+    const arvore = this.arvorePlano(rows);
+    return (arvore.raizes || []).map((n) => this.grupoHtml(n, arvore.nos, 1, cor, prefix)).join("");
   },
 
   chaveConta(codigo) {
@@ -1222,22 +1530,24 @@ const PrestacaoContasApp = {
     }));
     const byId = Object.fromEntries(groups.map(g => [g.id, g]));
     const mapa = this.mapaContaNo();
-    const achar = (codigo) => {
+    const achar = (codigo, nome) => {
+      const gid = this.noDfc(codigo, nome);
+      if (gid && byId[gid]) return gid;
       const raw = String(codigo || "").trim();
       if (!raw || raw === "—") return "";
       const nk = this.normAccountKey(raw);
       const direto = mapa.accToNode[raw] || (nk && mapa.accToNode[nk]) || "";
-      if (direto) return direto;
+      if (direto && byId[direto]) return direto;
       const chave = this.chaveConta(raw);
       if (!chave) return "";
       const hit = mapa.prefixos.find(p => chave === p.chave || chave.startsWith(p.chave + "."));
-      return hit ? hit.id : "";
+      return hit && byId[hit.id] ? hit.id : "";
     };
     const soltas = { id: "_soltas", parentId: "", code: "", name: "Sem conta no plano", contas: {} };
     (rows || []).forEach(r => {
       const principal = (r.contas || []).filter(c => c && c.codigo && c.codigo !== "—")
         .slice().sort((a, b) => (Number(b.valor) || 0) - (Number(a.valor) || 0))[0];
-      const nid = principal ? achar(principal.codigo) : "";
+      const nid = principal ? achar(principal.codigo, principal.nome) : "";
       const node = (nid && byId[nid]) || soltas;
       const cod = principal ? String(principal.codigo) : "—";
       const bucket = node.contas[cod] || (node.contas[cod] = {
@@ -1245,7 +1555,8 @@ const PrestacaoContasApp = {
       });
       if (principal && principal.nome) bucket.nome = principal.nome;
       bucket.rows.push(r);
-      bucket.amount += Number(r.total) || 0;
+      const sinal = r.redutora ? -1 : 1;
+      bucket.amount += (Number(r.total) || 0) * sinal;
       if (r.status === "fora") bucket.fora += 1;
     });
     const keep = new Set();
@@ -1285,17 +1596,15 @@ const PrestacaoContasApp = {
     return { nos, raizes };
   },
 
-  grupoHtml(node, nos, level, cor) {
-    const aberto = this.gruposAbertos.has(node.id);
+  grupoHtml(node, nos, level, cor, prefix) {
+    const gid = (prefix ? prefix + ">" : "") + node.id;
+    const aberto = this.gruposAbertos.has(gid);
     const kids = nos.filter(c => c.parentId === node.id)
       .sort((a, b) => String(a.code).localeCompare(String(b.code), "pt-BR", { numeric: true }));
     const contas = Object.values(node.contas)
       .sort((a, b) => String(a.codigo).localeCompare(String(b.codigo), "pt-BR", { numeric: true }));
-    const pad = level * 16;
-    const fora = node.fora
-      ? `<span class="pcx-selo is-fora">${node.fora} fora</span>`
-      : "";
-    let html = `<tr class="pcx-grupo" onclick="PrestacaoContasApp.toggleGrupo('${this.esc(node.id)}')">
+    const pad = 16 + level * 16;
+    let html = `<tr class="pcx-grupo" onclick="PrestacaoContasApp.toggleGrupo('${this.esc(gid)}')">
       <td colspan="6">
         <span class="pcx-grupo-nome" style="padding-left:${pad}px">
           <i data-lucide="${aberto ? "chevron-down" : "chevron-right"}" class="pcx-chev"></i>
@@ -1304,12 +1613,12 @@ const PrestacaoContasApp = {
         </span>
       </td>
       <td class="is-right pcx-valor" style="color:${cor};">${this.fmt(node.amount)}</td>
-      <td>${fora}</td>
+      <td>${this.seloGrupo(node.fora, node.n)}</td>
     </tr>`;
     if (!aberto) return html;
-    kids.forEach(ch => { html += this.grupoHtml(ch, nos, level + 1, cor); });
+    kids.forEach(ch => { html += this.grupoHtml(ch, nos, level + 1, cor, prefix); });
     contas.forEach(b => {
-      const cid = node.id + "|" + b.codigo;
+      const cid = gid + "|" + b.codigo;
       const a2 = this.gruposAbertos.has(cid);
       html += `<tr class="pcx-grupo is-conta" onclick="PrestacaoContasApp.toggleGrupo('${this.esc(cid)}')">
         <td colspan="6">
@@ -1321,7 +1630,7 @@ const PrestacaoContasApp = {
           </span>
         </td>
         <td class="is-right pcx-valor" style="color:${cor};">${this.fmt(b.amount)}</td>
-        <td>${b.fora ? `<span class="pcx-selo is-fora">${b.fora} fora</span>` : ""}</td>
+        <td>${this.seloGrupo(b.fora, b.rows.length)}</td>
       </tr>`;
       if (a2) b.rows.forEach(r => { html += this.confLinhaHtml(r, cor); });
     });
@@ -1334,14 +1643,16 @@ const PrestacaoContasApp = {
     const semRateio = r.status === "na";
     const lancado = semRateio ? "—" : this.textoCentros(r.linhas, "atual");
     const padrao = semRateio ? "—" : this.textoCentros(r.linhas, "esperado");
+    const contaTxt = [r.contaBanco, r.contaNome].filter(Boolean).join(" · ") || "—";
+    const valor = (Number(r.total) || 0) * (r.redutora ? -1 : 1);
     let html = `<tr class="pcx-row is-${r.status}${aberta ? " is-open" : ""}" onclick="PrestacaoContasApp.toggleConf('${this.esc(r.key)}')">
       <td>${this.dataBr(r.data)}</td>
       <td class="pcx-tit"><i data-lucide="${aberta ? "chevron-down" : "chevron-right"}" class="pcx-chev"></i>${this.esc(tit)}</td>
       <td class="cc-nome">${this.esc(r.historico)}${r.pessoa ? `<div class="pcx-pessoa">${this.esc(r.pessoa)}</div>` : ""}</td>
-      <td class="is-center pcx-obra">${this.esc(r.obra)}</td>
+      <td>${this.esc(contaTxt)}</td>
       <td title="${this.esc(lancado)}">${lancado}</td>
       <td title="${this.esc(padrao)}">${padrao}</td>
-      <td class="is-right pcx-valor" style="color:${cor};">${this.fmt(r.total)}</td>
+      <td class="is-right pcx-valor" style="color:${cor};">${this.fmt(valor)}</td>
       <td>${this.seloRateio(r.status, r.motivo, !!r.distratoNota)}</td>
     </tr>`;
     if (aberta) html += `<tr class="pcx-det-row"><td colspan="8">${this.confDetalheHtml(r)}</td></tr>`;
