@@ -594,6 +594,28 @@ window.EnviarNotaApp = {
     try { return app.accessibleDepartments(); } catch (e) { return null; }
   },
 
+  /* O operador fiscal acompanha nota de qualquer área. Quem só envia nota continua no próprio departamento. */
+  operadorVeTodosPedidos() {
+    const u = (typeof window.crmUsuarioAcesso === "function" && window.crmUsuarioAcesso())
+      || (window.AppState && AppState.currentUser)
+      || null;
+    const profile = String((u && (u.profile_name || u.profile || u.role)) || "")
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    if (profile.includes("FISCAL")) return true;
+    if (typeof window.hasCrmPerm !== "function") return false;
+    return [
+      "sub_fiscal_geral_inserir_nota_acessar",
+      "sub_fiscal_geral_inserir_nota_visualizar",
+      "sub_fiscal_geral_inserir_nota_editar",
+      "sub_fiscal_geral_rastrear_pedido_acessar",
+      "sub_fiscal_geral_rastrear_pedido_visualizar",
+      "sub_fiscal_geral_rastrear_pedido_editar",
+      "sub_fiscal_geral_fiscal_acessar",
+      "sub_fiscal_geral_fiscal_visualizar",
+      "sub_fiscal_geral_fiscal_editar"
+    ].some((k) => window.hasCrmPerm(k));
+  },
+
   async pedidosAbertosDoCredor(id) {
     const out = [];
     let offset = 0;
@@ -612,6 +634,7 @@ window.EnviarNotaApp = {
   },
 
   pedidoPermitido(pedido) {
+    if (this.operadorVeTodosPedidos()) return true;
     const access = this.departamentosAcesso();
     if (!access) return true;
     const nome = String(pedido.departmentName || pedido.departamentName || pedido.department || "").trim().toUpperCase();
@@ -631,7 +654,7 @@ window.EnviarNotaApp = {
   abrirBuscaPedidos() {
     const velho = document.getElementById("env-busca-ped");
     if (velho) velho.remove();
-    const todos = !this.departamentosAcesso();
+    const todos = !this.departamentosAcesso() || this.operadorVeTodosPedidos();
     const aviso = todos
       ? "Pesquise pelo credor. A lista traz os pedidos em aberto de todos os departamentos."
       : "Pesquise pelo credor. A lista traz os pedidos em aberto dos departamentos do seu acesso.";
