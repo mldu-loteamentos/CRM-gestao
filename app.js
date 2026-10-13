@@ -5333,7 +5333,19 @@ window.readCrmProfilePerms = function(profileNameOrId) {
     });
     if (hit && hit.perms && typeof hit.perms === "object") payloads.push(JSON.stringify(hit.perms));
   } catch (e) {}
-  const best = window.expandCrmMenuPerms(window.pickBestCrmPermsObject(payloads));
+  // Junta as cópias (chave atual, backup e perfil salvo). Escolher só a que tem
+  // mais itens marcados escondia um acesso novo, como o Dashboard, quando uma
+  // cópia antiga era maior e ainda não tinha essa chave.
+  let mergedRaw = null;
+  payloads.forEach((raw) => {
+    if (!raw || (typeof window.crmPermsPayloadHasTrue === "function" && !window.crmPermsPayloadHasTrue(raw))) return;
+    mergedRaw = mergedRaw && typeof window.mergeCrmPermPayloads === "function"
+      ? window.mergeCrmPermPayloads(mergedRaw, raw)
+      : raw;
+  });
+  const best = window.expandCrmMenuPerms(
+    (typeof window.parseCrmPermsPayload === "function" && window.parseCrmPermsPayload(mergedRaw)) || {}
+  );
   if (window.crmPermsHasAnyTrue(best)) return best;
   let obj = window.expandCrmMenuPerms(window.materializeCrmProfilePerms(id));
   if (obj && Object.keys(obj).length) return obj;
