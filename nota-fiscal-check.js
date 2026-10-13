@@ -93,6 +93,13 @@ window.NotaFiscalCheck = {
     return Number.isFinite(n) ? n : null;
   },
 
+  /** NFS-e do Simples imprime a alíquota municipal e deixa o ISS apurado zerado: o recolhimento é pelo DAS. */
+  issZeradoNoSimples(nota) {
+    if (!nota) return false;
+    if (Number(nota.valorIss) > 0.004) return false;
+    return nota.simples === "sim" || nota.simples === "mei";
+  },
+
   difere(a, b) {
     return a != null && b != null && Math.abs(Number(a) - Number(b)) > this.TOL;
   },
@@ -284,32 +291,58 @@ window.NotaFiscalCheck = {
     if (cache[cnpj] && cache[cnpj].d && cache[cnpj].d.cep != null && Date.now() - cache[cnpj].em < this.CNPJ_TTL) return Promise.resolve(cache[cnpj].d);
     if (this._cnpjVoo[cnpj]) return this._cnpjVoo[cnpj];
     this._cnpjVoo[cnpj] = (async () => {
-      const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpj}`);
-      if (!res.ok) throw new Error(res.status === 404 ? "CNPJ não encontrado no cadastro da Receita" : `consulta do CNPJ falhou (${res.status})`);
-      const j = await res.json();
-      const d = {
-        razao: j.razao_social || "",
-        cnae: j.cnae_fiscal != null ? String(j.cnae_fiscal) : "",
-        cnaeDesc: j.cnae_fiscal_descricao || "",
-        secundarios: (Array.isArray(j.cnaes_secundarios) ? j.cnaes_secundarios : [])
-          .filter((c) => c && Number(c.codigo)).map((c) => ({ codigo: String(c.codigo), descricao: c.descricao || "" })),
-        simples: j.opcao_pelo_simples === true ? true : (j.opcao_pelo_simples === false ? false : null),
-        mei: j.opcao_pelo_mei === true,
-        situacao: j.descricao_situacao_cadastral || "",
-        cidade: [j.municipio, j.uf].filter(Boolean).join("/"),
-        logradouro: j.logradouro || "",
-        numero: j.numero != null ? String(j.numero) : "",
-        bairro: j.bairro || "",
-        municipio: j.municipio || "",
-        uf: j.uf || "",
-        cep: j.cep != null ? String(j.cep) : ""
-      };
+      const d = await this.consultarCnpj(cnpj);
       const c = this.lerCache(this.CNPJ_KEY);
       c[cnpj] = { em: Date.now(), d };
       this.gravarCache(this.CNPJ_KEY, c, 400);
       return d;
     })().finally(() => { delete this._cnpjVoo[cnpj]; });
     return this._cnpjVoo[cnpj];
+  },
+
+  async consultarCnpj(cnpj) {
+    const fontes = [() => this.cnpjPeloProxy(cnpj), () => this.cnpjPelaBrasil(cnpj)];
+    let ultimo = "consulta do CNPJ falhou";
+    for (const fonte of fontes) {
+      try {
+        const d = await fonte();
+        if (d && (d.razao || d.cnae || d.cep)) return d;
+      } catch (e) {
+        ultimo = (e && e.message) || ultimo;
+      }
+    }
+    throw new Error(ultimo);
+  },
+
+  async cnpjPeloProxy(cnpj) {
+    const res = await fetch("/api/cnpj?cnpj=" + encodeURIComponent(cnpj));
+    if (!res.ok) throw new Error(res.status === 404 ? "CNPJ não encontrado no cadastro da Receita" : `consulta do CNPJ falhou (${res.status})`);
+    const j = await res.json();
+    if (!j || j.erro) throw new Error((j && j.erro) || "consulta do CNPJ falhou");
+    return j;
+  },
+
+  async cnpjPelaBrasil(cnpj) {
+    const res = await fetch("https://brasilapi.com.br/api/cnpj/v1/" + cnpj);
+    if (!res.ok) throw new Error(res.status === 404 ? "CNPJ não encontrado no cadastro da Receita" : `consulta do CNPJ falhou (${res.status})`);
+    const j = await res.json();
+    return {
+      razao: j.razao_social || "",
+      cnae: j.cnae_fiscal != null ? String(j.cnae_fiscal) : "",
+      cnaeDesc: j.cnae_fiscal_descricao || "",
+      secundarios: (Array.isArray(j.cnaes_secundarios) ? j.cnaes_secundarios : [])
+        .filter((c) => c && Number(c.codigo)).map((c) => ({ codigo: String(c.codigo), descricao: c.descricao || "" })),
+      simples: j.opcao_pelo_simples === true ? true : (j.opcao_pelo_simples === false ? false : null),
+      mei: j.opcao_pelo_mei === true,
+      situacao: j.descricao_situacao_cadastral || "",
+      cidade: [j.municipio, j.uf].filter(Boolean).join("/"),
+      logradouro: j.logradouro || "",
+      numero: j.numero != null ? String(j.numero) : "",
+      bairro: j.bairro || "",
+      municipio: j.municipio || "",
+      uf: j.uf || "",
+      cep: j.cep != null ? String(j.cep) : ""
+    };
   },
 
   /* ---------- leitura da nota ---------- */
@@ -423,6 +456,8 @@ window.NotaFiscalCheck = {
     n.issRetido = retIss == null ? null : (/n[aã]o/i.test(retIss) ? false : /retid|sim|tomador|intermedi/i.test(retIss));
     n.simplesTexto = simples || "";
     n.simples = this.lerSimples(simples);
+    if (n.simples == null && /simples nacional na data de compet[eê]ncia[\s\S]{0,60}\bsim\b/i.test(texto)) n.simples = "sim";
+    if (n.simples == null && /simples nacional na data de compet[eê]ncia[\s\S]{0,60}\bn[aã]o\b/i.test(texto)) n.simples = "nao";
     n.cnpjs = [...new Set((texto.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/g) || []).map((c) => this.digits(c)))];
     return n;
   },
@@ -589,7 +624,7 @@ window.NotaFiscalCheck = {
       const retNota = n.totalRetencoes != null ? n.totalRetencoes : somaNota;
       r.retidoNota = retNota;
 
-      if (n.baseIss && n.aliquotaIss && n.valorIss != null && Math.abs(n.baseIss * n.aliquotaIss / 100 - n.valorIss) > T) {
+      if (n.baseIss && n.aliquotaIss && n.valorIss != null && Math.abs(n.baseIss * n.aliquotaIss / 100 - n.valorIss) > T && !this.issZeradoNoSimples(n)) {
         r.avisos.push(`Na nota, o ISS não fecha: base ${this.money(n.baseIss)} × ${this.pct(n.aliquotaIss)} = ${this.money(n.baseIss * n.aliquotaIss / 100)}, mas a nota mostra ${this.money(n.valorIss)}.`);
       }
       if (n.valorServico != null && n.liquido != null && Math.abs(n.valorServico - retNota - n.liquido) > T) {
@@ -900,8 +935,10 @@ window.NotaFiscalCheck = {
       } else if (!o.cadastro && nota.aliquotaIss != null && nota.aliquotaIss > 0) {
         add("impostos", "ok", `Alíquota de ISS ${this.pct(nota.aliquotaIss)} dentro de 2% a 5%.`);
       }
-      if (!o.cadastro && nota.baseIss && nota.aliquotaIss && nota.valorIss != null && Math.abs(nota.baseIss * nota.aliquotaIss / 100 - nota.valorIss) > this.TOL) {
+      if (!o.cadastro && nota.baseIss && nota.aliquotaIss && nota.valorIss != null && Math.abs(nota.baseIss * nota.aliquotaIss / 100 - nota.valorIss) > this.TOL && !this.issZeradoNoSimples(nota)) {
         add("impostos", "aviso", `ISS da nota não fecha: base ${this.money(nota.baseIss)} × ${this.pct(nota.aliquotaIss)} = ${this.money(nota.baseIss * nota.aliquotaIss / 100)}, e a nota mostra ${this.money(nota.valorIss)}.`);
+      } else if (!o.cadastro && this.issZeradoNoSimples(nota) && nota.aliquotaIss > 0) {
+        add("impostos", "info", `Optante pelo Simples: a nota mostra ${this.pct(nota.aliquotaIss)} e o ISS apurado zerado. O recolhimento é pelo DAS, não nesta NFS-e.`);
       }
       if (!o.cadastro) {
         const pcc = (nota.csrf || 0) > 0 ? nota.csrf : (nota.pis || 0) + (nota.cofins || 0) + (nota.csll || 0);

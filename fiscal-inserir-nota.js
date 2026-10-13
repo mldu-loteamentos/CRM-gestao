@@ -672,10 +672,13 @@ window.InserirNotaApp = {
     n.cnpjPrestador = depoisDe(/prestador|emitente/i) || (cnpjs[0] && cnpjs[0].d) || "";
     n.cnpjTomador = depoisDe(/tomador/i) || (cnpjs.find((c) => c.d !== n.cnpjPrestador) || {}).d || "";
 
-    n.valor = valor([/valor total da (nfs-?e|nota)/i, /valor (total )?d[oa]s? servi[cç]os?/i, /valor da opera[cç][aã]o/i, /valor bruto/i, /total da nota/i, /valor total/i]);
-    n.liquido = valor([/valor l[ií]quido/i]);
-    n.retencoes = valor([/^reten[cç][oõ]es\s*\(r\$\)/i, /total (das )?reten[cç][oõ]es/i, /valor (total )?(das )?reten[cç][oõ]es/i]);
-    if (n.valor == null && n.liquido != null) n.valor = Math.round((n.liquido + (n.retencoes || 0)) * 100) / 100;
+    n.valorServico = valor([/valor da opera[cç][aã]o\s*\/\s*servi[cç]o/i, /valor (total )?d[oa]s? servi[cç]os?/i]);
+    n.liquido = valor([/valor l[ií]quido da nfs-?e/i, /valor l[ií]quido da nota/i, /valor l[ií]quido/i]);
+    const totalNf = valor([/valor total da nfs-?e/i, /valor total da nota/i, /total da nota/i]);
+    const positivos = [n.valorServico, totalNf, n.liquido].filter((v) => v != null && v > 0.004);
+    n.valor = positivos.length ? positivos[0] : (totalNf != null ? totalNf : (n.liquido != null ? n.liquido : n.valorServico));
+    n.retencoes = valor([/^reten[cç][oõ]es\s*\(r\$\)/i, /total (das )?reten[cç][oõ]es/i, /valor total das reten[cç][oõ]es/i]);
+    if ((n.valor == null || n.valor === 0) && n.liquido > 0) n.valor = n.liquido;
     return n;
   },
 
