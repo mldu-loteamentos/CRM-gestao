@@ -42,7 +42,8 @@ ComprasControleApp.state = {
   notasByPedido: {},
   parcelasCache: {},
   openTitulo: "",
-  banco: null
+  banco: null,
+  agrupados: {}
 };
 
 ComprasControleApp.ehPrevisao = function (docId, docName, bill) {
@@ -129,7 +130,9 @@ ComprasControleApp.transform = function (payload) {
   });
   const map = new Map();
   rows.forEach((r) => {
-    const k = [r.titulo, r.emissao, r.parcela, r.departamento].join("|");
+    // Cada centro de custo do título é uma fatia do valor. Juntar só pelo
+    // departamento deixava uma fração e escondia o restante do rateio.
+    const k = [r.titulo, r.parcela, r.ccId, r.planoId, r.rateio].join("|");
     const prev = map.get(k);
     if (!prev) {
       map.set(k, r);
@@ -452,6 +455,75 @@ ComprasControleApp.sortShown = function () {
   });
 };
 
+ComprasControleApp.gruposDaLista = function (rows) {
+  const lista = rows || [];
+  const map = new Map();
+  const order = [];
+  lista.forEach((r, i) => {
+    const key = String(r.titulo || "") + "|" + String(r.parcela || "");
+    let g = map.get(key);
+    if (!g) {
+      g = { key: key, idx: i, partes: [] };
+      map.set(key, g);
+      order.push(g);
+    }
+    g.partes.push(r);
+  });
+  return order;
+};
+
+ComprasControleApp.valorGrupo = function (g) {
+  const n = (g && g.partes || []).reduce((s, r) => s + (Number(r.valorAjustado) || 0), 0);
+  return Math.round(n * 100) / 100;
+};
+
+ComprasControleApp.rotuloUnico = function (partes, campo) {
+  const vals = [];
+  (partes || []).forEach((r) => {
+    const v = String((r && r[campo]) || "").trim();
+    if (v && vals.indexOf(v) < 0) vals.push(v);
+  });
+  if (vals.length === 1) return vals[0];
+  return vals.length ? vals.join(" · ") : "—";
+};
+
+ComprasControleApp.valorOrdenacaoGrupo = function (g, key) {
+  const r = (g && g.partes && g.partes[0]) || {};
+  if (key === "valor") return this.valorGrupo(g);
+  if (key === "cc") {
+    return (g.partes || []).map((p) => (p.ccId ? p.ccId + " " : "") + (p.ccNome || "")).join(" ");
+  }
+  if (key === "dept") return this.rotuloUnico(g.partes, "departamento");
+  return this.sortValue(r, key);
+};
+
+ComprasControleApp.ordenarGrupos = function (grupos) {
+  const key = this.state.sortKey || "data";
+  const dir = this.state.sortDir === "desc" ? -1 : 1;
+  const numeric = key === "emp" || key === "titulo" || key === "parc" || key === "valor";
+  (grupos || []).sort((a, b) => {
+    const va = this.valorOrdenacaoGrupo(a, key);
+    const vb = this.valorOrdenacaoGrupo(b, key);
+    let cmp = 0;
+    if (numeric) cmp = (Number(va) || 0) - (Number(vb) || 0);
+    else cmp = String(va).localeCompare(String(vb), "pt-BR", { numeric: true });
+    if (cmp === 0) {
+      const ta = String((a.partes[0] && a.partes[0].titulo) || "");
+      const tb = String((b.partes[0] && b.partes[0].titulo) || "");
+      cmp = ta.localeCompare(tb, "pt-BR", { numeric: true });
+    }
+    return cmp * dir;
+  });
+  return grupos;
+};
+
+ComprasControleApp.toggleAgrupamento = function (key) {
+  if (!this.state.agrupados) this.state.agrupados = {};
+  if (this.state.agrupados[key]) delete this.state.agrupados[key];
+  else this.state.agrupados[key] = true;
+  this.renderListKeepingScroll();
+};
+
 ComprasControleApp.toggleSort = function (key) {
   if (this.state.loading || !this.state.consulted) return;
   if (this.state.sortKey === key) {
@@ -465,18 +537,19 @@ ComprasControleApp.toggleSort = function (key) {
 };
 
 ComprasControleApp.kpis = function () {
-  const rows = this.state.shown || [];
-  const out = { qtd: rows.length, total: 0, pago: 0, programado: 0, processamento: 0, previsao: 0, vencido: 0 };
-  rows.forEach((r) => {
-    const v = Number(r.valorAjustado) || 0;
+  const grupos = this.gruposDaLista(this.state.shown || []);
+  const out = { qtd: grupos.length, total: 0, pago: 0, programado: 0, processamento: 0, previsao: 0, vencido: 0 };
+  grupos.forEach((g) => {
+    const v = this.valorGrupo(g);
     out.total += v;
-    const st = this.statusDe(r);
+    const st = this.statusDe(g.partes[0]);
     if (st === "pago") out.pago += v;
     else if (st === "processamento") out.processamento += v;
     else if (st === "previsao") out.previsao += v;
     else if (st === "vencido") out.vencido += v;
     else out.programado += v;
   });
+  out.total = Math.round(out.total * 100) / 100;
   return out;
 };
 
@@ -550,12 +623,12 @@ ComprasControleApp.paintKpis = function () {
 };
 
 ComprasControleApp.patchStatuses = function () {
-  const rows = this.state.shown || [];
+  const grupos = this.ordenarGrupos(this.gruposDaLista(this.state.shown || []));
   const trs = document.querySelectorAll("#cfin-table tbody tr.cprev-row");
-  if (!trs.length || trs.length !== rows.length) return false;
+  if (!trs.length || trs.length !== grupos.length) return false;
   trs.forEach((tr, i) => {
     const cell = tr.querySelector("td.cprev-col-tipo");
-    const r = rows[i];
+    const r = grupos[i] && grupos[i].partes[0];
     if (!cell || !r) return;
     const sig = this.statusDe(r) + "|" + (r.lote || "");
     if (cell.getAttribute("data-st") === sig) return;
@@ -1487,31 +1560,62 @@ ComprasControleApp.renderList = function () {
     box.innerHTML = '<div class="tvig-empty">Nenhum título neste filtro.</div>';
     return;
   }
+  const grupos = this.ordenarGrupos(this.gruposDaLista(rows));
   const th = (key, label, cls) => `<th class="${cls || ""}" onclick="ComprasControleApp.toggleSort('${key}')" style="cursor:pointer;user-select:none;">${label} <i data-lucide="chevrons-up-down" style="width:11px;vertical-align:middle;"></i></th>`;
-  const body = rows.map((r) => {
+  const body = grupos.map((g) => {
+    const r = g.partes[0];
     const subst = r.substituido
       ? `<span class="cprev-tag cprev-tag-subst">Substituído${r.tituloSubstituto ? " · " + this.esc(r.tituloSubstituto) : ""}</span>`
       : "";
-    const ccLabel = (r.ccId ? r.ccId + " - " : "") + (r.ccNome || "—");
+    const varios = g.partes.length > 1;
+    const aberto = !!(this.state.agrupados && this.state.agrupados[g.key]);
+    let ccCell;
+    if (!varios) {
+      const ccLabel = (r.ccId ? r.ccId + " - " : "") + (r.ccNome || "—");
+      ccCell = `<td class="cprev-col-cc" title="${this.esc(ccLabel)}">${this.esc(ccLabel)}</td>`;
+    } else {
+      ccCell = `<td class="cprev-col-cc"><button type="button" class="cfin-agrupado${aberto ? " is-open" : ""}" data-k="${this.esc(g.key)}" title="${aberto ? "Ocultar o rateio por centro de custo" : "Ver o rateio por centro de custo"}" onclick="event.stopPropagation(); ComprasControleApp.toggleAgrupamento(this.getAttribute('data-k'))"><i data-lucide="${aberto ? "chevron-up" : "layers"}" style="width:13px;height:13px;"></i> Agrupado · ${g.partes.length}</button></td>`;
+    }
+    const dept = this.rotuloUnico(g.partes, "departamento");
     const pago = r.natureza === "pago" && r.dataPagamento;
     const dataRaw = pago ? r.dataPagamento : r.vencimento;
     const dataTitle = pago ? "Pagamento " + this.fmtDate(dataRaw) : "Vencimento " + this.fmtDate(dataRaw);
     const sig = this.statusDe(r) + "|" + (r.lote || "");
-    return `<tr class="cprev-row" title="Abrir título, anexos e forma de pagamento" onclick="ComprasControleApp.abrirTitulo(${rows.indexOf(r)})">
-      <td class="cprev-col-id" title="${this.esc(r.companyId)}">${this.esc(r.companyId)}</td>
-      <td class="cprev-col-cc" title="${this.esc(ccLabel)}">${this.esc(ccLabel)}</td>
-      <td class="cprev-col-dept" title="${this.esc(r.departamento || "—")}">${this.esc(r.departamento || "—")}</td>
-      <td class="cprev-col-cred" title="${this.esc(r.credor || "—")}">${this.esc(r.credor || "—")}</td>
+    const detalhe = aberto && varios ? g.partes.map((p) => {
+      const nome = (p.ccId ? p.ccId + " - " : "") + (p.ccNome || "—");
+      const pct = Number(p.rateio);
+      const pctTxt = Number.isFinite(pct) ? " · " + pct.toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "%" : "";
+      return `<tr class="cfin-rateio" onclick="event.stopPropagation()">
+        <td class="cprev-col-tit"></td>
+        <td class="cprev-col-parc"></td>
+        <td class="cprev-col-id"></td>
+        <td class="cprev-col-cc" title="${this.esc(nome)}">${this.esc(nome + pctTxt)}</td>
+        <td class="cprev-col-dept" title="${this.esc(p.departamento || "—")}">${this.esc(p.departamento || "—")}</td>
+        <td class="cprev-col-cred"></td>
+        <td class="cprev-col-doc"></td>
+        <td class="cprev-col-ndoc"></td>
+        <td class="cprev-col-venc"></td>
+        <td class="cprev-col-tipo"></td>
+        <td class="cprev-col-aut"></td>
+        <td class="cprev-col-fiscal"></td>
+        <td class="cprev-col-val">${this.esc(this.money(p.valorAjustado))}</td>
+      </tr>`;
+    }).join("") : "";
+    return `<tr class="cprev-row" title="Abrir título, anexos e forma de pagamento" onclick="ComprasControleApp.abrirTitulo(${g.idx})">
       <td class="cprev-col-tit" title="${this.esc(r.titulo)}">${this.esc(r.titulo)}${subst}</td>
       <td class="cprev-col-parc">${this.esc(r.parcela || "—")}</td>
+      <td class="cprev-col-id" title="${this.esc(r.companyId)}">${this.esc(r.companyId)}</td>
+      ${ccCell}
+      <td class="cprev-col-dept" title="${this.esc(dept)}">${this.esc(dept)}</td>
+      <td class="cprev-col-cred" title="${this.esc(r.credor || "—")}">${this.esc(r.credor || "—")}</td>
       <td class="cprev-col-doc">${this.esc(r.docId || "—")}</td>
       <td class="cprev-col-ndoc">${this.esc(r.documento || "—")}</td>
       <td class="cprev-col-venc" title="${this.esc(dataTitle)}">${this.esc(this.fmtDate(dataRaw))}</td>
       <td class="cprev-col-tipo" data-st="${this.esc(sig)}">${this.tipoTag(r)}</td>
       <td class="cprev-col-aut">${this.autorizacaoHtml(r)}</td>
       <td class="cprev-col-fiscal">${this.fiscalHtml(r)}</td>
-      <td class="cprev-col-val">${this.esc(this.money(r.valorAjustado))}</td>
-    </tr>`;
+      <td class="cprev-col-val">${this.esc(this.money(this.valorGrupo(g)))}</td>
+    </tr>${detalhe}`;
   }).join("");
   box.innerHTML = `
     <style>
@@ -1521,17 +1625,23 @@ ComprasControleApp.renderList = function () {
       #cfin-table th.cprev-col-tipo,
       #cfin-table td.cprev-col-tipo { text-align: center; }
       #cfin-table td.cprev-col-tipo .cprev-tag { margin-left: 0; margin-right: 0; }
+      #cfin-table td.cprev-col-cc { overflow: visible; }
+      #cfin-table button.cfin-agrupado { display:inline-flex; align-items:center; gap:4px; height:26px; padding:0 8px; border:1px solid #105436; border-radius:6px; background:#f3faf6; color:#105436; font-size:0.72rem; font-weight:700; cursor:pointer; white-space:nowrap; }
+      #cfin-table button.cfin-agrupado.is-open { background:#105436; color:#fff; }
+      #cfin-table tr.cfin-rateio td { background:#f8fafc; color:#334155; font-size:0.72rem; }
+      #cfin-table tr.cfin-rateio td.cprev-col-cc { box-shadow: inset 3px 0 0 #105436; }
     </style>
     <div class="table-container cprev-table-wrap">
       <table class="custom-table cprev-table" id="cfin-table">
         <colgroup>
-          <col class="cprev-col-id"><col class="cprev-col-cc"><col class="cprev-col-dept"><col class="cprev-col-cred">
-          <col class="cprev-col-tit"><col class="cprev-col-parc"><col class="cprev-col-doc"><col class="cprev-col-ndoc">
+          <col class="cprev-col-tit"><col class="cprev-col-parc"><col class="cprev-col-id"><col class="cprev-col-cc">
+          <col class="cprev-col-dept"><col class="cprev-col-cred"><col class="cprev-col-doc"><col class="cprev-col-ndoc">
           <col class="cprev-col-venc"><col class="cprev-col-tipo"><col class="cprev-col-aut"><col class="cprev-col-fiscal"><col class="cprev-col-val">
         </colgroup>
         <thead><tr>
-          <th class="cprev-col-id" title="Id. da empresa" onclick="ComprasControleApp.toggleSort('emp')" style="cursor:pointer;user-select:none;text-align:center;"><div class="cfin-id-head">Id. <i data-lucide="info" style="width:11px;height:11px;cursor:help;color:#64748b;"></i> <i data-lucide="chevrons-up-down" style="width:11px;vertical-align:middle;"></i></div></th>${th("cc", "Centro de custo")}${th("dept", "Depto")}${th("credor", "Credor")}${th("titulo", "Título")}
-          ${th("parc", "Parc.", "cprev-col-parc")}${th("doc", "Doc.")}${th("ndoc", "Nº doc.")}${th("data", "Venc./Pagto")}${th("tipo", "Status", "cprev-col-tipo")}${th("aut", "Autorizado", "cprev-col-aut")}${th("fiscal", "Fiscal", "cprev-col-fiscal")}${th("valor", "Valor", "cprev-col-val")}
+          ${th("titulo", "Título", "cprev-col-tit")}${th("parc", "Parc.", "cprev-col-parc")}
+          <th class="cprev-col-id" title="Id. da empresa" onclick="ComprasControleApp.toggleSort('emp')" style="cursor:pointer;user-select:none;text-align:center;"><div class="cfin-id-head">Id. <i data-lucide="info" style="width:11px;height:11px;cursor:help;color:#64748b;"></i> <i data-lucide="chevrons-up-down" style="width:11px;vertical-align:middle;"></i></div></th>${th("cc", "Centro de custo")}${th("dept", "Depto")}${th("credor", "Credor")}
+          ${th("doc", "Doc.")}${th("ndoc", "Nº doc.")}${th("data", "Venc./Pagto")}${th("tipo", "Status", "cprev-col-tipo")}${th("aut", "Autorizado", "cprev-col-aut")}${th("fiscal", "Fiscal", "cprev-col-fiscal")}${th("valor", "Valor", "cprev-col-val")}
         </tr></thead>
         <tbody>${body}</tbody>
       </table>
@@ -1546,23 +1656,31 @@ ComprasControleApp.exportExcel = function () {
     alert("Não há títulos para exportar. Consulte antes.");
     return;
   }
-  const head = ["Empresa", "Centro de custo", "Departamento", "Credor", "Título", "Parcela", "Documento", "Nº documento", "Venc./Pagto", "Status", "Autorizado", "Fiscal", "Valor"];
+  const head = ["Título", "Parcela", "Empresa", "Centro de custo", "Departamento", "Credor", "Documento", "Nº documento", "Venc./Pagto", "Status", "Autorizado", "Fiscal", "Valor"];
   const tipo = { pago: "Pago", processamento: "Processamento bancário", programado: "Programado", previsao: "Previsão", vencido: "Vencido", rastreando: "Rastreando banco" };
-  const aoa = [head].concat(rows.map((r) => [
-    r.companyId,
-    (r.ccId ? r.ccId + " - " : "") + (r.ccNome || ""),
-    r.departamento || "",
-    r.credor || "",
-    r.titulo,
-    r.parcela || "",
-    r.docId || "",
-    r.documento || "",
-    this.fmtDate(this.dataRef(r)),
-    tipo[this.statusDe(r)] || r.natureza,
-    this.autorizacaoTexto(r),
-    this.fiscalTexto(r),
-    Number(r.valorAjustado) || 0
-  ]));
+  const grupos = this.ordenarGrupos(this.gruposDaLista(rows));
+  const aoa = [head].concat(grupos.map((g) => {
+    const r = g.partes[0];
+    const centros = g.partes.map((p) => {
+      const nome = (p.ccId ? p.ccId + " - " : "") + (p.ccNome || "");
+      return g.partes.length > 1 ? nome + " (" + this.money(p.valorAjustado) + ")" : nome;
+    }).join(" | ");
+    return [
+      r.titulo,
+      r.parcela || "",
+      r.companyId,
+      centros,
+      this.rotuloUnico(g.partes, "departamento"),
+      r.credor || "",
+      r.docId || "",
+      r.documento || "",
+      this.fmtDate(this.dataRef(r)),
+      tipo[this.statusDe(r)] || r.natureza,
+      this.autorizacaoTexto(r),
+      this.fiscalTexto(r),
+      this.valorGrupo(g)
+    ];
+  }));
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Controle financeiro");
@@ -1628,7 +1746,7 @@ ComprasControleApp.renderPage = function () {
             </div>
           </div>
         </div>
-        <p class="cprev-hint">A consulta manda para a API a <strong>empresa</strong> e o <strong>vencimento</strong>. Empreendimento, credor, título, tipo e departamento ficam liberados depois e só filtram a lista. O processamento bancário segue em segundo plano e só atualiza o status na tabela. Clique na linha para ver o título, os anexos e a forma de pagamento programada.</p>
+        <p class="cprev-hint">A consulta manda para a API a <strong>empresa</strong> e o <strong>vencimento</strong>. Empreendimento, credor, título, tipo e departamento ficam liberados depois e só filtram a lista. O processamento bancário segue em segundo plano e só atualiza o status na tabela. Cada título aparece uma vez, com o valor inteiro. Se houver vários centros de custo, use <strong>Agrupado</strong> para ver o rateio. Clique na linha para ver o título, os anexos e a forma de pagamento programada.</p>
         ${this.departmentScopeNote() ? `<p class="cprev-hint">${this.esc(this.departmentScopeNote())}</p>` : ""}
       </div>
       <div id="cfin-kpis" class="ccom-kpis cprev-kpis"></div>

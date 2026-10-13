@@ -3363,6 +3363,10 @@ circle.donut-segment {
   align-items: center;
   gap: 8px;
 }
+.suporte-modal-head .btn-cancel {
+  height: 36px;
+  padding: 0 16px;
+}
 .suporte-modal-body { padding: 16px 18px; overflow: auto; }
 .suporte-modal-foot {
   padding: 12px 18px;
@@ -7497,7 +7501,45 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .cprev-table-wrap #cfin-table .cprev-col-tipo { width: 118px; }
 .cprev-table-wrap #cfin-table .cprev-col-aut { width: 118px; }
 .cprev-table-wrap #cfin-table .cprev-col-fiscal { width: 168px; }
+.qui-assina-nota {
+  margin: 8px 0 0;
+  text-align: right;
+  font-size: 0.78rem;
+  color: #64748b;
+}
+#qui-btn-assinar:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 .cprev-table-wrap #cfin-table .cprev-col-val { width: 90px; }
+.cprev-table-wrap #cfin-table td.cprev-col-cc { overflow: visible; }
+.cprev-table-wrap #cfin-table button.cfin-agrupado {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid #105436;
+  border-radius: 6px;
+  background: #f3faf6;
+  color: #105436;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cprev-table-wrap #cfin-table button.cfin-agrupado.is-open {
+  background: #105436;
+  color: #fff;
+}
+.cprev-table-wrap #cfin-table tr.cfin-rateio td {
+  background: #f8fafc;
+  color: #334155;
+  font-size: 0.72rem;
+}
+.cprev-table-wrap #cfin-table tr.cfin-rateio td.cprev-col-cc {
+  box-shadow: inset 3px 0 0 #105436;
+}
 .cprev-table-wrap #cfin-table th.cprev-col-id,
 .cprev-table-wrap #cfin-table td.cprev-col-id { text-align: center; }
 .cprev-table-wrap #cfin-table .cfin-id-head {
@@ -7852,6 +7894,26 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
   white-space: nowrap;
 }
 .cprev-tag-pago { background: #dcfce7; color: #166534; }
+.cprev-forma {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  background: #ecfdf3;
+  color: #105436;
+  border: 1px solid #bbf7d0;
+  white-space: nowrap;
+}
+.cprev-forma.is-wait,
+.cprev-forma.is-empty {
+  background: #f8fafc;
+  color: #64748b;
+  border-color: #e2e8f0;
+  font-weight: 600;
+}
 .cprev-tag-aberto { background: #fff7ed; color: #9a3412; }
 .cprev-tag-liberado { background: #dbeafe; color: #1d4ed8; }
 .cprev-tag-nota { background: #dbeafe; color: #1d4ed8; }

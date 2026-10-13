@@ -797,6 +797,37 @@ const ComprasPrevisoesApp = {
     if (this.state.consulted && !this.state.loading) this.renderList();
   },
 
+  rotuloForma(texto) {
+    const t = this.fold(texto);
+    if (!t) return "";
+    if (/\bPIX\b/.test(t)) return "PIX";
+    if (/\bTED\b/.test(t)) return "TED";
+    if (/\bDOC\b/.test(t)) return "DOC";
+    if (/TRANSFER|CREDITO EM CONTA|DEPOSITO/.test(t)) return "TED";
+    if (/BOLETO|BLOQUETO|COBRAN/.test(t)) return "Boleto";
+    return "";
+  },
+
+  rotuloKindForma(kind) {
+    if (kind === "pix") return "PIX";
+    if (kind === "bank-transfer") return "TED";
+    if (kind && String(kind).indexOf("boleto") === 0) return "Boleto";
+    return "";
+  },
+
+  formaDaParcela(p) {
+    if (!p) return "";
+    return p.forma || this.rotuloForma([p.paymentType, p.operacao, p.tipoBaixa].filter(Boolean).join(" "));
+  },
+
+  formaChipHtml(p) {
+    const forma = this.formaDaParcela(p);
+    if (forma) return `<span class="cprev-forma" title="Pago por ${this.esc(forma)}">${this.esc(forma)}</span>`;
+    if (p.formaLoading) return `<span class="cprev-forma is-wait">Buscando forma…</span>`;
+    if (p.formaConsultada) return `<span class="cprev-forma is-empty" title="O Sienge não informou PIX, TED ou boleto nesta parcela">Não informada</span>`;
+    return "";
+  },
+
   situacaoCellHtml(p) {
     if (p.baixasLoading) return `<span class="cprev-anexo-vazio">Buscando baixa…</span>`;
     if (p.substituido) {
@@ -811,7 +842,8 @@ const ComprasPrevisoesApp = {
       return `<span class="cprev-tag cprev-tag-cancel" title="${this.esc(title)}">Cancelada${quando}</span>`;
     }
     if (p.pago) {
-      return `<span class="cprev-tag cprev-tag-pago">Paga${p.dataPagamento ? " · " + this.esc(this.fmtDate(p.dataPagamento)) : ""}</span>`;
+      const quando = p.dataPagamento ? " · " + this.esc(this.fmtDate(p.dataPagamento)) : "";
+      return `<span class="cprev-tag cprev-tag-pago">Paga${quando}</span>${this.formaChipHtml(p)}`;
     }
     return `<span class="cprev-tag cprev-tag-aberto">Em aberto</span>`;
   },
@@ -894,9 +926,12 @@ const ComprasPrevisoesApp = {
       const op = this.fold(baixa.op);
       const substituido = /SUBSTITU/.test(op);
       const cancelado = /CANCEL/.test(op);
+      const forma = p.forma || this.rotuloForma([baixa.operacao, baixa.op, p.paymentType].filter(Boolean).join(" "));
       return Object.assign({}, p, {
         baixasLoading: false,
         tipoBaixa: baixa.op || "",
+        operacao: baixa.operacao || p.operacao || "",
+        forma,
         dataPagamento: baixa.date || p.dataPagamento || "",
         baixaMotivo: baixa.auth || "",
         substituido,
@@ -949,8 +984,10 @@ const ComprasPrevisoesApp = {
           if (!pay) return;
           const parcela = String(row.installmentId != null ? row.installmentId : "");
           if (!parcela || map[parcela]) return;
+          const bm = (pay.bankMovements || [])[0] || null;
           map[parcela] = {
             op: pay.operationTypeName || "",
+            operacao: (bm && (bm.operationName || bm.operationTypeName || bm.historic)) || "",
             date: pay.paymentDate ? String(pay.paymentDate).slice(0, 10) : "",
             amount: pay.netAmount != null ? pay.netAmount : pay.grossAmount,
             auth: String(pay.paymentAuthentication || "").trim(),
@@ -970,6 +1007,67 @@ const ComprasPrevisoesApp = {
     this.aplicarBaixas(id, map);
     await this.carregarAnexosSubstitutos(id);
     this.paintParcelasModal();
+  },
+
+  aplicarForma(titulo, parcela, forma, consultada) {
+    const id = String(titulo || "");
+    const stamp = (p) => {
+      if (String(p.parcela) !== String(parcela)) return p;
+      return Object.assign({}, p, {
+        forma: forma || p.forma || "",
+        formaLoading: false,
+        formaConsultada: !!consultada
+      });
+    };
+    if (this.state.openTitulo === id) this.state.parcelas = (this.state.parcelas || []).map(stamp);
+    if (this.state.parcelasCache && this.state.parcelasCache[id]) {
+      this.state.parcelasCache[id] = this.state.parcelasCache[id].map(stamp);
+    }
+  },
+
+  async carregarFormasPagas(titulo) {
+    const id = String(titulo || "");
+    if (!id || this.state.openTitulo !== id) return;
+    if (!window.BoletoCheck || typeof BoletoCheck.lerForma !== "function") return;
+    const gen = (this._formaGen = (this._formaGen || 0) + 1);
+    const pendentes = (this.state.parcelas || []).filter((p) => p && p.pago && !p.substituido && !p.cancelado && !this.formaDaParcela(p) && !p.formaConsultada);
+    if (!pendentes.length) return;
+    const marcar = (p) => {
+      if (!pendentes.some((x) => String(x.parcela) === String(p.parcela))) return p;
+      return Object.assign({}, p, { formaLoading: true });
+    };
+    this.state.parcelas = (this.state.parcelas || []).map(marcar);
+    this.paintParcelasModal();
+    const cache = this.state.formasByTitulo || (this.state.formasByTitulo = {});
+    const salvo = cache[id] || (cache[id] = {});
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < pendentes.length && this._formaGen === gen && this.state.openTitulo === id) {
+        const p = pendentes[cursor++];
+        const num = String(p.parcela || "");
+        if (!num) continue;
+        if (Object.prototype.hasOwnProperty.call(salvo, num)) {
+          this.aplicarForma(id, num, salvo[num], true);
+          this.paintParcelasModal();
+          continue;
+        }
+        let forma = "";
+        let consultada = false;
+        try {
+          const payment = await BoletoCheck.lerForma(id, num, p.paymentType || "");
+          forma = this.rotuloKindForma(payment && payment.kind) || this.rotuloForma(p.paymentType);
+          consultada = true;
+          salvo[num] = forma;
+        } catch (e) {
+          forma = "";
+          consultada = false;
+        }
+        if (this._formaGen !== gen || this.state.openTitulo !== id) return;
+        this.aplicarForma(id, num, forma, consultada);
+        this.paintParcelasModal();
+      }
+    };
+    await Promise.all([worker(), worker()]);
   },
 
   async carregarAnexosSubstitutos(titulo) {
@@ -1194,11 +1292,16 @@ const ComprasPrevisoesApp = {
       next.dataPagamento = "";
       if (b.tituloSubstituto) next.tituloSubstituto = b.tituloSubstituto;
       if (b.tipoBaixa) next.tipoBaixa = b.tipoBaixa;
+      if (b.forma && !next.forma) next.forma = b.forma;
+      if (b.paymentType && !next.paymentType) next.paymentType = b.paymentType;
     } else if (!next.substituido && b.pago) {
       next.pago = true;
       if (b.dataPagamento && !next.dataPagamento) next.dataPagamento = b.dataPagamento;
     }
     if (b.situacao && !next.situacao) next.situacao = b.situacao;
+    if (!next.forma && b.forma) next.forma = b.forma;
+    if (!next.paymentType && b.paymentType) next.paymentType = b.paymentType;
+    if (b.formaConsultada) next.formaConsultada = true;
     if (b.virouNota) next.virouNota = true;
     if (b.tituloSubstituto && !next.tituloSubstituto) next.tituloSubstituto = b.tituloSubstituto;
     if (this.isSituacaoAberta({ situation: b.situacao }, null) && !next.substituido) next.pago = false;
@@ -1971,6 +2074,9 @@ const ComprasPrevisoesApp = {
     const docName = inst.documentIdentificationName || inst.documentName || (inst.document && inst.document.name) || "";
     const substituido = this.isSubstituicao(inst, firstPay, null, docId, docName);
     const pago = this.isPago(inst, firstPay, null, docId, docName);
+    const bm = firstPay && (Array.isArray(firstPay.bankMovements) ? firstPay.bankMovements[0] : null);
+    const paymentType = String(inst.paymentType || inst.paymentTypeName || (firstPay && (firstPay.paymentType || firstPay.paymentTypeName)) || "");
+    const operacao = String((bm && (bm.operationName || bm.operationTypeName || bm.historic)) || (firstPay && (firstPay.operationName || firstPay.operationTypeName)) || "");
     return {
       titulo: String(titulo),
       parcela: inst.installmentId != null ? String(inst.installmentId) : (inst.installmentNumber != null ? String(inst.installmentNumber) : ""),
@@ -1985,6 +2091,9 @@ const ComprasPrevisoesApp = {
       dataPagamento: substituido ? "" : this.paymentDateOf(inst, firstPay, null),
       saldo: this.billBalance(inst),
       situacao: this.billSituation(inst, firstPay),
+      paymentType,
+      operacao,
+      forma: this.rotuloForma([paymentType, operacao].filter(Boolean).join(" ")),
       virouNota: this.isNotaDoc(docId, docName, inst) || this.titleHasNota(titulo)
     };
   },
@@ -2016,6 +2125,10 @@ const ComprasPrevisoesApp = {
         dataPagamento: r.dataPagamento || "",
         saldo: r.saldo,
         situacao: r.situacao,
+        paymentType: r.paymentType || "",
+        operacao: r.operacao || "",
+        tipoBaixa: r.tipoBaixa || "",
+        forma: this.rotuloForma([r.operacao, r.tipoBaixa, r.paymentType].filter(Boolean).join(" ")),
         virouNota: !!r.virouNota || this.isNotaDoc(r.docId, r.docNome, null)
       };
       if (!prev) map.set(key, next);
@@ -2052,6 +2165,7 @@ const ComprasPrevisoesApp = {
       this.paintParcelasModal();
       await this.carregarDocumentosDoTitulo(id);
       await this.carregarBaixasPrevisao(id);
+      await this.carregarFormasPagas(id);
       return;
     }
     try {
@@ -2093,6 +2207,7 @@ const ComprasPrevisoesApp = {
     this.paintParcelasModal();
     await this.carregarDocumentosDoTitulo(id);
     await this.carregarBaixasPrevisao(id);
+    await this.carregarFormasPagas(id);
   },
 
   closeParcelas() {

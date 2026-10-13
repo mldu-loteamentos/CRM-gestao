@@ -2285,6 +2285,11 @@ const RelacionamentoApp = {
     }
     const btn = document.getElementById("qui-btn-gerar");
     if (btn) btn.disabled = !info.quitado;
+    const assinar = document.getElementById("qui-btn-assinar");
+    if (assinar) {
+      assinar.disabled = true;
+      assinar.setAttribute("aria-disabled", "true");
+    }
     if (RelacionamentoState.quitacaoAutoGerar) {
       RelacionamentoState.quitacaoAutoGerar = false;
       if (info.quitado) this.gerarQuitacaoPdf("quitacao");

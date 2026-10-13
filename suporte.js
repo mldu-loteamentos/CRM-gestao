@@ -548,9 +548,6 @@
     wrap.className = "suporte-overlay";
     wrap.style.display = "none";
     wrap.innerHTML = `<div class="suporte-modal" id="suporte-modal-box" role="dialog" aria-modal="true"></div>`;
-    wrap.addEventListener("click", (e) => {
-      if (e.target === wrap) closeModal();
-    });
     document.body.appendChild(wrap);
   }
 
@@ -1023,7 +1020,7 @@
       box.innerHTML = `
         <div class="suporte-modal-head">
           <h2><i data-lucide="message-square"></i> Chamado</h2>
-          <button type="button" class="modal-close" id="suporte-close-x"><i data-lucide="x"></i></button>
+          <button type="button" class="btn btn-cancel" id="suporte-close-x">Fechar</button>
         </div>
         <div class="suporte-modal-body" id="suporte-detail-body">${threadHtml(t)}</div>
         <div class="suporte-modal-foot suporte-reply-foot">
@@ -1043,13 +1040,11 @@
           ` : ""}
           <div class="suporte-reply-actions">
             ${adminView ? `
-              <button type="button" class="btn btn-cancel" id="suporte-back-admin">Voltar</button>
               <div class="suporte-reply-actions-main">
                 <button type="button" class="btn btn-outline" id="suporte-ask-info"><i data-lucide="message-circle"></i> Solicitar mais informações</button>
                 <button type="button" class="btn btn-primary suporte-btn-send" id="suporte-send-admin"><i data-lucide="send"></i> Enviar resposta</button>
               </div>
             ` : `
-              <button type="button" class="btn btn-cancel" id="suporte-back-mine">Voltar</button>
               ${canReplyUser && t.status !== "atendido" ? `<button type="button" class="btn btn-primary" id="suporte-send-user"><i data-lucide="send"></i> Responder</button>` : ""}
             `}
           </div>
@@ -1061,10 +1056,6 @@
           ` : ""}
         </div>`;
       document.getElementById("suporte-close-x").onclick = closeModal;
-      const backAdmin = document.getElementById("suporte-back-admin");
-      if (backAdmin) backAdmin.onclick = () => { box.classList.remove("is-detail"); closeModal(); };
-      const backMine = document.getElementById("suporte-back-mine");
-      if (backMine) backMine.onclick = () => { box.classList.remove("is-detail"); openMine(); };
       if (canAttach) {
         bindFileInput({
           inputId: "suporte-reply-files",
