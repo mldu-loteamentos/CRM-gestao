@@ -95,8 +95,8 @@ const OrcamentoDfcApp = {
   },
 
   montar() {
-    const plano = window.PlanoFinanceiroApp;
-    const fluxo = window.FluxoCaixaApp;
+    const plano = typeof PlanoFinanceiroApp !== "undefined" ? PlanoFinanceiroApp : null;
+    const fluxo = typeof FluxoCaixaApp !== "undefined" ? FluxoCaixaApp : null;
     const tpl = (plano && typeof plano.dfcTemplateGroups === "function" ? plano.dfcTemplateGroups() : []).map((g) => ({
       ...g,
       months: Array(12).fill(0),

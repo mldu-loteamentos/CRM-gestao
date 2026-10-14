@@ -9730,6 +9730,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
   font-weight: 800; padding: 0 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem;
 }
 .orc-dfc-up:hover, .orc-dfc-base:hover { background: #d1fae5; }
+.orc-dfc-base[hidden] { display: none; }
 .orc-dfc-up svg, .orc-dfc-up i { width: 14px; height: 14px; }
 .orc-dfc-meta { color: #64748b; font-size: 0.78rem; padding-bottom: 6px; }
 .orc-dfc-layout { display: flex; gap: 12px; align-items: flex-start; }

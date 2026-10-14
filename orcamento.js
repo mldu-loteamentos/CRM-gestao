@@ -135,7 +135,7 @@ const OrcamentoApp = {
     const root = document.getElementById("orcamento-root");
     if (!root) return;
     if ((this.aba || "receitas") === "dfc") {
-      if (window.OrcamentoDfcApp) OrcamentoDfcApp.render(root);
+      if (typeof OrcamentoDfcApp !== "undefined") OrcamentoDfcApp.render(root);
       return;
     }
     root.innerHTML = `

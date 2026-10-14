@@ -431,13 +431,70 @@ const FluxoCaixaDiarioApp = {
     return this.ccItems().map((c) => c.id).filter((id) => !excl.has(id));
   },
 
-  /** Conta de parceria (cadastro do centro de custo) dos empreendimentos fora do caixa. */
+  /**
+   * Avaré na empresa 1: 13700/13800/13900/14000 são da Moura Leite e
+   * 13701/13801/13901/14001 são do parceiro. Plano com rateio sai pela conta do parceiro.
+   * Obra exclusiva sai pela 99391-6 e permanece no caixa.
+   */
+  paresAvare() {
+    return [["13700", "13701"], ["13800", "13801"], ["13900", "13901"], ["14000", "14001"]];
+  },
+
+  ccBaseAvare(id) {
+    const cc = String(id || "");
+    return this.paresAvare().some((p) => p[0] === cc);
+  },
+
+  contaExclusiva(num) {
+    const d = String(num || "").replace(/\D/g, "");
+    return d === "993916" || d === "0993916";
+  },
+
+  ehRepasse(item) {
+    const nomes = [];
+    if (item && item.plano) nomes.push(item.plano);
+    if (item && item.planos) nomes.push.apply(nomes, item.planos);
+    const n = nomes.join(" ").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    return /\bREPASSE/.test(n) && !/ADIANTAMENTO/.test(n);
+  },
+
+  /**
+   * Parte do título que fica fora do caixa.
+   * Repasse nesses quatro empreendimentos sai inteiro do contas a pagar da empresa 1,
+   * mesmo lançado só no centro da Moura Leite. Despesa exclusiva (obra na 99391-6),
+   * só nesse centro, continua. Rateio (os dois centros, ou pago na conta do parceiro) sai.
+   */
+  shareFora(shares, excl, item) {
+    let lista = (Array.isArray(shares) ? shares : []).filter((x) => x && x.cc);
+    if (!lista.length && item && item.ccId) lista = [{ cc: String(item.ccId), share: 1 }];
+    const ccs = new Set(lista.map((x) => String(x.cc)));
+    if (item && item.ccId) ccs.add(String(item.ccId));
+    const empresa1 = !item || item.companyId == null || item.companyId === "" || String(item.companyId) === "1";
+    if (empresa1 && this.ehRepasse(item) && [...ccs].some((cc) => this.ccBaseAvare(cc))) return 1;
+    const rateio = this.paresAvare().some(([a, b]) => ccs.has(a) && ccs.has(b));
+    return lista.reduce((s, x) => {
+      const cc = String(x.cc || "");
+      if (!excl.has(cc)) return s;
+      if (empresa1 && this.ccBaseAvare(cc) && !rateio && !this.ehRepasse(item)) {
+        const conta = item && item.conta;
+        if (conta && !this.contaExclusiva(conta)) return s + (Number(x.share) || 0);
+        return s;
+      }
+      return s + (Number(x.share) || 0);
+    }, 0);
+  },
+
+  /** Conta de parceria dos empreendimentos fora do caixa. A 99391-6 não entra: paga a obra exclusiva. */
   contasBloqueadas() {
     const custom = this._custom || {};
     const set = new Set();
     this.excludedCcs().forEach((id) => {
+      if (this.ccBaseAvare(id)) return;
       const cp = custom[id] && custom[id].conta_parceria;
-      if (cp && cp.numero) set.add(this.normNum(cp.numero));
+      if (!cp || !cp.numero) return;
+      const n = this.normNum(cp.numero);
+      if (this.contaExclusiva(n)) return;
+      set.add(n);
     });
     return set;
   },
@@ -1150,7 +1207,7 @@ const FluxoCaixaDiarioApp = {
         const ok = acc ? this.accountIncluded(acc) : (!this._bloq.has(this.normNum(m.conta)) && this.flags[key] !== false);
         if (!ok) return;
       }
-      const fora = m.shares.reduce((s, x) => s + (excl.has(x.cc) ? x.share : 0), 0);
+      const fora = this.shareFora(m.shares, excl, m);
       const v = m.valor * (1 - fora);
       if (Math.abs(v) < 0.005) return;
       const inv = this.ladoConta(m.companyId, m.conta) === "investimento";
@@ -1172,7 +1229,7 @@ const FluxoCaixaDiarioApp = {
     this.payItems.forEach((p) => {
       const day = byDay[p.date];
       if (!day || day.real) return;
-      const fora = (p.shares || []).reduce((s, x) => s + (excl.has(x.cc) ? x.share : 0), 0);
+      const fora = this.shareFora(p.shares, excl, p);
       const v = p.valor * (1 - fora);
       if (v < 0.005) return;
       const lado = this.ladoConta(p.companyId, p.conta);
