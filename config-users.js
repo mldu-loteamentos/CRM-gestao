@@ -573,6 +573,8 @@ const ConfigUsersApp = {
     
     // Aqui no futuro poderia fazer um fetch para a API de usuários
     this.render();
+    if (typeof window.applyMenuPermissions === "function") window.applyMenuPermissions();
+    if (typeof window.crmPintarTesteConta === "function") window.crmPintarTesteConta();
   },
 
   prunePermissionStorage(keepKey) {

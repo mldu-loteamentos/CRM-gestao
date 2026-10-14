@@ -4226,10 +4226,10 @@ function persistCrmUsersList(crmUsers) {
 }
 
 function validateAndLoadCrmUser(user) {
-  let crmUsers = [];
-  try {
-    crmUsers = JSON.parse(localStorage.getItem('crm_users')) || [];
-  } catch(e) {}
+  let crmUsers = typeof window.getCrmUsersList === "function" ? window.getCrmUsersList() : [];
+  if (!crmUsers.length) {
+    try { crmUsers = JSON.parse(localStorage.getItem("crm_users")) || []; } catch (e) { crmUsers = []; }
+  }
   if (!Array.isArray(crmUsers)) crmUsers = [];
   
   let matchedUser = crmUsers.find(u => String(u.email || "").toLowerCase() === String(user.email || "").toLowerCase());
@@ -4266,6 +4266,15 @@ async function processSuccessfulLogin(loggedUser) {
     window._crmLoginSync = true;
     if (window.syncGlobalConfigFromFirebase) {
        await window.syncGlobalConfigFromFirebase();
+    }
+    if (window.ConfigUsersApp && typeof window.syncCrmUsersFromFirebase === "function") {
+      try {
+        const rawUsers = await window.syncCrmUsersFromFirebase();
+        const lista = typeof rawUsers === "string" ? JSON.parse(rawUsers) : rawUsers;
+        if (Array.isArray(lista) && lista.length) window.ConfigUsersApp.users = lista;
+      } catch (e) {
+        console.warn("[crm_users] sync no login:", e);
+      }
     }
     const validatedUser = validateAndLoadCrmUser(loggedUser);
     AppState.currentUser = validatedUser;
@@ -4922,8 +4931,9 @@ window.mergeCrmUsers = function(localStr, cloudStr) {
       byKey.set(key, next);
       return;
     }
-    const prevNewer = window.crmUserEditedAt(prev) > window.crmUserEditedAt(next);
-    const merged = prevNewer ? Object.assign({}, next, prev) : Object.assign({}, prev, next);
+    const prevAt = window.crmUserEditedAt(prev);
+    const nextAt = window.crmUserEditedAt(next);
+    const merged = nextAt > prevAt ? Object.assign({}, prev, next) : Object.assign({}, next, prev);
     if (rankStatus(prev.status) || rankStatus(next.status) || statusAt(prev) || statusAt(next)) {
       merged.status = pickStatus(prev, next);
       const winnerAt = statusAt(prev) >= statusAt(next) ? statusAt(prev) : statusAt(next);
@@ -4931,7 +4941,11 @@ window.mergeCrmUsers = function(localStr, cloudStr) {
     }
     const prevProf = String(prev.profile_name || "").trim();
     const nextProf = String(next.profile_name || "").trim();
-    if (prevProf && (!nextProf || nextProf.toUpperCase() === "OPERADOR") && prevProf.toUpperCase() !== "OPERADOR") {
+    if (nextProf && nextAt > prevAt) merged.profile_name = nextProf;
+    else if (prevProf && prevAt > nextAt) merged.profile_name = prevProf;
+    else if ((!nextProf || nextProf.toUpperCase() === "OPERADOR") && prevProf && prevProf.toUpperCase() !== "OPERADOR") {
+      merged.profile_name = prevProf;
+    } else if (prevProf) {
       merged.profile_name = prevProf;
     }
     if (prev.sienge_user && !next.sienge_user) merged.sienge_user = prev.sienge_user;
@@ -5496,6 +5510,11 @@ window.applyPermissions = function(profileName) {
   }
   const imp = window.crmImpersonacaoAtual && window.crmImpersonacaoAtual();
   const current = window.AppState && AppState.currentUser;
+  const recAtual = current && typeof window.findCrmRegisteredUser === "function" ? window.findCrmRegisteredUser(current) : null;
+  if (recAtual && recAtual.profile_name && current.profile_name !== recAtual.profile_name) {
+    current.profile_name = recAtual.profile_name;
+    if (recAtual.operator_type) current.operator_type = recAtual.operator_type;
+  }
   if (imp && imp.profile_name) {
     profileName = imp.profile_name;
   } else if (current && typeof window.isCobrancaBackOfficeUser === "function" && window.isCobrancaBackOfficeUser(current)) {
@@ -5602,25 +5621,13 @@ window.applyPermissions = function(profileName) {
 }
 
 window.getCrmUsersList = function() {
-  let stored = [];
-  try { stored = JSON.parse(localStorage.getItem("crm_users") || "[]") || []; } catch (e) { stored = []; }
-  if (!Array.isArray(stored)) stored = [];
   const live = (window.ConfigUsersApp && Array.isArray(window.ConfigUsersApp.users))
     ? window.ConfigUsersApp.users.filter(Boolean)
     : [];
-  if (!live.length) return stored;
-  if (!stored.length) return live.slice();
-  const byKey = new Map();
-  const put = (u) => {
-    if (!u) return;
-    const email = String(u.email || "").toLowerCase().trim();
-    const key = email || ("id:" + String(u.id || ""));
-    if (!key || key === "id:") return;
-    byKey.set(key, u);
-  };
-  stored.forEach(put);
-  live.forEach(put);
-  return Array.from(byKey.values());
+  if (live.length) return live.slice();
+  let stored = [];
+  try { stored = JSON.parse(localStorage.getItem("crm_users") || "[]") || []; } catch (e) { stored = []; }
+  return Array.isArray(stored) ? stored : [];
 };
 
 window.isCrmAdminProfileName = function(name) {
@@ -5792,7 +5799,7 @@ window.crmPintarTesteConta = function() {
   const q = String(menu.dataset.q || "").trim().toLowerCase();
   const eu = String((AppState.currentUser && AppState.currentUser.email) || "").toLowerCase();
   const lista = window.getCrmUsersList().filter((u) => {
-    if (!u || String(u.status || "ATIVO").trim().toUpperCase() !== "ATIVO") return false;
+    if (!u || String(u.status || "ATIVO").trim().toUpperCase() === "INATIVO") return false;
     if (String(u.email || "").toLowerCase().trim() === eu) return false;
     const blob = (String(u.name || "") + " " + String(u.email || "") + " " + String(u.profile_name || "")).toLowerCase();
     return !q || blob.indexOf(q) >= 0;
