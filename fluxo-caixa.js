@@ -18,6 +18,7 @@ const FluxoCaixaApp = {
   consolidacaoAtiva: true,
   companyMonthsOpen: null,
   agrupamento: "mes",
+  escala: "nominal",
   grupoAberto: "",
   companyDropOpen: false,
   companyQuery: "",
@@ -53,6 +54,10 @@ const FluxoCaixaApp = {
       this.consolidacaoAtiva = false;
     }
     if (!this.companyMonthsOpen) this.companyMonthsOpen = new Set();
+    try {
+      const escala = localStorage.getItem("fc_escala");
+      if (escala === "inteiro" || escala === "milhoes" || escala === "nominal") this.escala = escala;
+    } catch (e) {}
     this.noteCompanySet(true);
     this.render();
     this.ensureCategories();
@@ -143,8 +148,39 @@ const FluxoCaixaApp = {
     return (c && (c.name || c.description)) || "";
   },
 
-  fmt(n) {
+  fmtCheio(n) {
     return (Number(n) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  },
+
+  fmt(n) {
+    let v = Number(n) || 0;
+    if (this.escala === "milhoes") {
+      v = v / 1000000;
+      return v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    if (this.escala === "inteiro") {
+      const sinal = v < 0 ? -1 : 1;
+      return (sinal * Math.round(Math.abs(v))).toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+    }
+    return this.fmtCheio(v);
+  },
+
+  setEscala(id) {
+    this.escala = id === "milhoes" || id === "inteiro" ? id : "nominal";
+    try { localStorage.setItem("fc_escala", this.escala); } catch (e) {}
+    this.render();
+  },
+
+  escalaHtml() {
+    const itens = [
+      ["nominal", "Nominal", "Valor completo, com centavos"],
+      ["inteiro", "Sem centavos", "Valor arredondado, sem centavos"],
+      ["milhoes", "Milhões", "Valor em milhões de reais"]
+    ];
+    return `<div class="fc-agrupa" role="group" aria-label="Escala dos valores">${itens.map(([id, nome, title]) => {
+      const on = (this.escala || "nominal") === id ? " is-on" : "";
+      return `<button type="button" class="fc-agrupa-btn${on}" title="${title}" onclick="FluxoCaixaApp.setEscala('${id}')">${nome}</button>`;
+    }).join("")}</div>`;
   },
 
   monthKeys(start, end) {
@@ -1292,6 +1328,7 @@ const FluxoCaixaApp = {
               <div class="fc-tree-toolbar">
                 <strong>Estrutura DFC Padrão</strong>
                 <div class="fc-tree-actions">
+                  ${this.escalaHtml()}
                   <div class="fc-agrupa" role="group" aria-label="Agrupar colunas do período">
                     ${this.agrupaBotoesHtml()}
                   </div>
@@ -1462,9 +1499,10 @@ const FluxoCaixaApp = {
   thComparacao(span) {
     if (!this.compMap) return "";
     const rot = this.esc(this.rotuloComparado());
+    const unidade = this.escala === "milhoes" ? " mi" : "";
     return `<th class="fc-th-num fc-th-cmp fc-co-edge"${span} title="Mesmo período em ${rot}">${rot}</th>`
-      + `<th class="fc-th-num fc-th-cmp"${span} title="Período atual menos ${rot}. Verde melhora o caixa, vermelho piora.">Var. R$</th>`
-      + `<th class="fc-th-num fc-th-cmp"${span} title="Variação sobre ${rot}. Verde melhora o caixa, vermelho piora.">Var. %</th>`;
+      + `<th class="fc-th-num fc-th-cmp fc-th-var"${span} title="Período atual menos ${rot}. Verde melhora o caixa, vermelho piora.">Var.${unidade}</th>`
+      + `<th class="fc-th-num fc-th-cmp fc-th-varpct"${span} title="Variação sobre ${rot}. Verde melhora o caixa, vermelho piora.">%</th>`;
   },
 
   headVariasEmpresas(ids) {
@@ -1578,9 +1616,10 @@ const FluxoCaixaApp = {
         : (col.type === "periodo" && col.months && col.months.length ? `'${col.months.join(",")}'` : "''");
       let click = "";
       let tip = "";
+      if (this.escala !== "nominal") tip = this.fmtCheio(v);
       if (canDrill) {
         click = `onclick="FluxoCaixaApp.openDrill('${safeId}', ${isAccFlag ? "true" : "false"}, ${r.isCostCenter ? ccArg : "''"}, ${co}, ${mo})"`;
-        tip = "Ver lançamentos desta célula";
+        tip = (tip ? tip + " · " : "") + "Ver lançamentos desta célula";
       } else if (venda && !r.isCostCenter) {
         click = `onclick="FluxoCaixaApp.abrirCentrosVenda('${safeToggle}', ${r.isAccount ? "true" : "false"})"`;
         tip = "Abrir os centros de custo";
@@ -1601,19 +1640,24 @@ const FluxoCaixaApp = {
     const edge = col.edge ? " fc-co-edge" : "";
     if (col.type === "cmp") {
       const v = this.valorComparado(r);
-      return `<td class="${this.valClass(v, true)} fc-cmp${edge}">${this.fmt(v)}</td>`;
+      const dica = this.escala !== "nominal" ? ` title="${this.fmtCheio(v)}"` : "";
+      return `<td class="${this.valClass(v, true)} fc-cmp${edge}"${dica}>${this.fmt(v)}</td>`;
     }
     const delta = (Number(r.total) || 0) - this.valorComparado(r);
     const tom = Math.abs(delta) < 0.005 ? "is-flat" : (delta > 0 ? "is-up" : "is-down");
     const seta = tom === "is-up" ? "▲" : (tom === "is-down" ? "▼" : "");
     let texto = "";
+    let dica = "";
+    let tipo = "fc-var-pct";
     if (col.type === "var") {
       texto = this.fmt(delta);
+      tipo = "fc-var-rs";
+      if (this.escala !== "nominal") dica = ` title="${this.fmtCheio(delta)}"`;
     } else {
       const pct = this.variacaoPct(r);
       texto = pct == null ? (tom === "is-flat" ? "0,0%" : "novo") : this.fmtPct(pct);
     }
-    return `<td class="fc-num is-strong fc-var${edge}"><span class="fc-var-pill ${tom}">${seta ? `<b>${seta}</b>` : ""}${texto}</span></td>`;
+    return `<td class="fc-num is-strong fc-var ${tipo}${edge}"${dica}><span class="fc-var-pill ${tom}">${seta ? `<b>${seta}</b>` : ""}${texto}</span></td>`;
   },
 
   collectNodeItems(nodeId) {

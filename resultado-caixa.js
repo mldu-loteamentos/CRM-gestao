@@ -17,6 +17,7 @@ const ResultadoCaixaApp = {
   outrosAberto: false,
   arqsAberto: false,
   forecast: null,
+  forecasts: {},
   SOLTOS: { "14703": 1, "14704": 1, "14304": 1, "14305": 1 },
   dfcLinhas: [],
   dfcLendo: false,
@@ -107,11 +108,14 @@ const ResultadoCaixaApp = {
         if (legado && typeof legado === "object") this.migrarLegado(legado);
       } catch (e) {}
     }
+    this.forecasts = {};
     try {
-      this.forecast = JSON.parse(localStorage.getItem("rc_forecast_v1") || "null");
+      const salvo = JSON.parse(localStorage.getItem("rc_forecast_comp") || "null");
+      if (salvo && typeof salvo === "object") this.forecasts = salvo;
     } catch (e) {
-      this.forecast = null;
+      this.forecasts = {};
     }
+    this.aplicarForecastVista();
   },
 
   /** Relatório "Orçamento Empresarial Agrupado" do Sienge, por centro de custo, mensal. Guarda só as contas analíticas (tipo R). A empresa 1 detalha o plano um nível abaixo (2.02.02.04.03); o valor continua na conta do DFC. */
@@ -214,14 +218,21 @@ const ResultadoCaixaApp = {
         }
       }
       if (!lidos.length) throw new Error("Não reconheci o forecast. Use o relatório Orçamento Empresarial Agrupado por centro de custo, com periodicidade mensal.");
-      const yms = new Set();
-      Object.keys(contas).forEach((id) => Object.keys(contas[id]).forEach((c) => Object.keys(contas[id][c].meses || {}).forEach((ym) => yms.add(ym))));
-      this.forecast = { arquivo: lidos.join(", "), arquivos: lidos, em: new Date().toISOString(), meses: Array.from(yms).sort(), contas: contas, nomes: nomes };
+      const chave = this.competenciaAtual();
+      const recorte = this.recortarForecast(contas, chave);
+      if (!Object.keys(recorte).length) {
+        const nomeMes = this.MESES[Number(chave.slice(5, 7)) - 1] || chave;
+        throw new Error("Esses arquivos não têm a competência de " + nomeMes + "/" + chave.slice(0, 4) + ". O forecast de " + nomeMes.toLowerCase() + " vale só para " + nomeMes.toLowerCase() + ".");
+      }
+      const doc = { arquivos: lidos, em: new Date().toISOString(), contas: recorte, nomes: nomes };
+      this.forecasts[chave] = doc;
+      this.aplicarForecastVista();
       if (falhas.length) this.aviso = "Não reconheci " + falhas.length + " arquivo(s): " + falhas.join(", ") + ".";
+      this.gravarForecastLocal();
       try {
-        localStorage.setItem("rc_forecast_v1", JSON.stringify(this.forecast));
-      } catch (e) {
-        this.error = "O forecast foi lido, mas não coube no navegador para ficar salvo. Ele vale até fechar a página.";
+        await this.salvarForecastNuvem(chave, doc);
+      } catch (err) {
+        this.aviso = ((this.aviso ? this.aviso + " " : "") + "O forecast de " + chave + " ficou neste navegador, mas a nuvem não guardou: " + ((err && err.message) || err)).trim();
       }
     } catch (e) {
       this.error = e.message || String(e);
@@ -232,16 +243,151 @@ const ResultadoCaixaApp = {
   },
 
   removerForecast() {
-    this.forecast = null;
-    try { localStorage.removeItem("rc_forecast_v1"); } catch (e) {}
+    const chave = this.competenciaAtual();
+    delete this.forecasts[chave];
+    this.aplicarForecastVista();
+    this.gravarForecastLocal();
+    this.apagarForecastNuvem(chave);
     this.render();
+  },
+
+  competenciaAtual() {
+    return this.chaveMes(this.anoAtual(), this.mes);
+  },
+
+  recortarForecast(contas, chave) {
+    const out = {};
+    Object.keys(contas || {}).forEach((cc) => {
+      Object.keys(contas[cc] || {}).forEach((code) => {
+        const de = contas[cc][code] || {};
+        const v = Number((de.meses || {})[chave]) || 0;
+        if (!v) return;
+        const bag = out[cc] || (out[cc] = {});
+        bag[code] = { nome: de.nome || "", meses: { [chave]: v } };
+      });
+    });
+    return out;
+  },
+
+  aplicarForecastVista() {
+    const doc = this.forecasts[this.competenciaAtual()];
+    if (!doc || !doc.contas || !Object.keys(doc.contas).length) {
+      this.forecast = null;
+      return;
+    }
+    const ym = this.competenciaAtual();
+    this.forecast = {
+      arquivo: (doc.arquivos || []).join(", "),
+      arquivos: doc.arquivos || [],
+      em: doc.em || "",
+      meses: [ym],
+      contas: doc.contas,
+      nomes: doc.nomes || {}
+    };
+  },
+
+  gravarForecastLocal() {
+    try { localStorage.setItem("rc_forecast_comp", JSON.stringify(this.forecasts || {})); } catch (e) {}
+  },
+
+  docForecast(ym) {
+    return "fc-" + ym;
+  },
+
+  async salvarForecastNuvem(ym, doc) {
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (!fx || !db || !doc) return false;
+    await fx.setDoc(fx.doc(db, "resultado_caixa", this.docForecast(ym)), {
+      tipo: "forecast",
+      slot: "fc-" + ym,
+      competencia: ym,
+      arquivos: doc.arquivos || [],
+      nomes: doc.nomes || {},
+      contas: doc.contas || {},
+      em: doc.em || new Date().toISOString()
+    });
+    return true;
+  },
+
+  apagarForecastNuvem(ym) {
+    this.apagarNuvem(this.docForecast(ym));
+  },
+
+  async carregarForecasts() {
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (!fx || !db) return;
+    try {
+      const snap = await fx.getDocs(fx.collection(db, "resultado_caixa"));
+      const nuvem = {};
+      snap.forEach((docSnap) => {
+        const id = docSnap.id || "";
+        const x = docSnap.data() || {};
+        if (x.tipo !== "forecast" && id.indexOf("fc-") !== 0) return;
+        const ym = String(x.competencia || id.replace(/^fc-/, ""));
+        if (!/^\d{4}-\d{2}$/.test(ym)) return;
+        nuvem[ym] = {
+          arquivos: x.arquivos || [],
+          em: x.em || "",
+          contas: x.contas || {},
+          nomes: x.nomes || {}
+        };
+      });
+      if (Object.keys(nuvem).length) {
+        this.forecasts = nuvem;
+        this.gravarForecastLocal();
+      }
+      this.aplicarForecastVista();
+    } catch (e) {}
+  },
+
+  empresaDoForecast(cc, nome) {
+    const peloArquivo = this.empresaDoCc(cc);
+    if (peloArquivo) return peloArquivo;
+    return this.empresaId(nome || "");
+  },
+
+  /* Bases de PIS/COFINS e lucro presumido de uma competência, por empresa, a partir do forecast daquele mês. */
+  basesForecast(ym) {
+    const doc = this.forecasts && this.forecasts[ym];
+    if (!doc || !doc.contas) return null;
+    const est = typeof OrcEst !== "undefined" ? OrcEst : null;
+    if (!est) return null;
+    const cfg = est.taxConfig();
+    const porEmp = {};
+    Object.keys(doc.contas).forEach((cc) => {
+      const emp = this.empresaDoForecast(cc, (doc.nomes || {})[cc]);
+      if (!emp) return;
+      const row = porEmp[emp] || (porEmp[emp] = { vendas: 0, servicos: 0, financeiras: 0 });
+      Object.keys(doc.contas[cc] || {}).forEach((code) => {
+        const info = doc.contas[cc][code] || {};
+        const valor = Number((info.meses || {})[ym]) || 0;
+        if (!valor) return;
+        const cl = est.classe({ conta: code, cn: info.nome || "" }, cfg);
+        if (!cl) return;
+        let s = est.sinal(est.grupo(code, info.nome || ""), code, info.nome || "", valor);
+        if (cl.red && s > 0) s = -Math.abs(s);
+        row[cl.bucket] += s;
+      });
+    });
+    return Object.keys(porEmp).length ? porEmp : null;
   },
 
   /** Forecast do ano pelas contas da visão DFC do lado (entradas ou saídas), no % Moura Leite quando agrupado. */
   forecastLado(ano, lado) {
-    const f = this.forecast;
     const out = {};
-    if (!f || !f.contas) return out;
+    for (let m = 1; m <= 12; m++) {
+      const chave = Number(ano) + "-" + String(m).padStart(2, "0");
+      const f = this.forecasts && this.forecasts[chave];
+      if (!f || !f.contas) continue;
+      const parcial = this.somarForecastMes(f, ano, lado, chave);
+      if (parcial != null) out[m] = parcial;
+    }
+    return out;
+  },
+
+  somarForecastMes(f, ano, lado, chave) {
     const FC = window.FluxoCaixaApp;
     let mapa = null;
     try {
@@ -254,6 +400,8 @@ const ResultadoCaixaApp = {
     }
     const aceita = this.noAceito(lado);
     const ajuste = lado === "saidas" ? -1 : 1;
+    let total = 0;
+    let algum = false;
     Object.keys(f.contas).forEach((cc) => {
       const fator = this.agrupar ? this.pctMl(cc) : 1;
       Object.keys(f.contas[cc]).forEach((code) => {
@@ -268,15 +416,13 @@ const ResultadoCaixaApp = {
         }
         if (!entra) return;
         const sinal = code.charAt(0) === "2" ? -1 : 1;
-        const meses = f.contas[cc][code].meses || {};
-        Object.keys(meses).forEach((ym) => {
-          if (Number(ym.slice(0, 4)) !== Number(ano)) return;
-          const mm = Number(ym.slice(5, 7));
-          out[mm] = (out[mm] || 0) + ajuste * sinal * (Number(meses[ym]) || 0) * fator;
-        });
+        const v = Number((f.contas[cc][code].meses || {})[chave]) || 0;
+        if (!v || Number(chave.slice(0, 4)) !== Number(ano)) return;
+        algum = true;
+        total += ajuste * sinal * v * fator;
       });
     });
-    return out;
+    return algum ? total : null;
   },
 
   forecastEntradas(ano) {
@@ -1356,6 +1502,7 @@ const ResultadoCaixaApp = {
       this._nuvemOk = true;
       this.montarVista();
       this.gravarLocal();
+      await this.carregarForecasts();
     } catch (e) {
       if (!this.temAcervo()) this.error = "Não consegui ler os arquivos salvos: " + ((e && e.message) || e);
     }
@@ -1652,6 +1799,7 @@ const ResultadoCaixaApp = {
 
   setMes(v) {
     this.mes = Number(v) || 1;
+    this.aplicarForecastVista();
     this.montarVista();
     this._dfcKey = "";
     this._dfcPedido = "";
@@ -1755,9 +1903,9 @@ const ResultadoCaixaApp = {
     const base = "Orçado e realizado de " + (atual || "—") + " vêm do arquivo enviado para " + mesNomeFaixa + ". A coluna do ano anterior é o realizado do arquivo de " + (antN || "o ano anterior") + ", o mesmo em todos os meses.";
     const nota = lado === "entradas"
       ? base + " Livia, Livia I e Livia II aparecem como Central Parque. Empreendimentos com o mesmo nome ganham a sigla da cidade. MLDU aparece como Corporativo. Os quatro maiores desvios positivos e os quatro negativos do acumulado ficam à vista; o restante abre ao clicar em Outros."
-        + " No gráfico de linhas, a linha do ano atual é o realizado até o mês escolhido e o Forecast segue com a projeção do relatório de forecast até dezembro, pelas mesmas contas da visão DFC (Receitas e receitas financeiras)." + agrupa
+        + " No gráfico de linhas, a linha do ano atual é o realizado até o mês escolhido. Cada mês seguinte usa o forecast enviado na competência daquele mês, pelas mesmas contas da visão DFC (Receitas e receitas financeiras)." + agrupa
       : base + " As saídas seguem as contas do DFC e aparecem como saída. Gastar acima do orçado fica em vermelho. As contas de fora da lista principal abrem em Outros."
-        + " No gráfico de linhas, a linha do ano atual é o realizado até o mês escolhido e o Forecast segue com a projeção do relatório de forecast até dezembro, pelas mesmas contas da visão DFC das saídas." + agrupa;
+        + " No gráfico de linhas, a linha do ano atual é o realizado até o mês escolhido. Cada mês seguinte usa o forecast enviado na competência daquele mês, pelas mesmas contas da visão DFC das saídas." + agrupa;
     const avisoRateio = lado === "saidas" && this.faltaCentroNasSaidas()
       ? `<div class="rcx-erro">Para aplicar o % Moura Leite nas saídas destes arquivos, suba o Excel de novo. O arquivo que já estava salvo não guarda o centro de custo de cada conta.</div>`
       : "";
@@ -1917,7 +2065,8 @@ const ResultadoCaixaApp = {
     const forecast = meses.map((m, i) => {
       if (m <= sel) return real[i];
       if (fc[m] != null) return fc[m];
-      if (!this.forecast) return null;
+      const algum = meses.some((mm) => mm > sel && fc[mm] != null);
+      if (!algum) return null;
       semForecast.push(m);
       return orc[i];
     });
@@ -1962,7 +2111,8 @@ const ResultadoCaixaApp = {
     const forecast = meses.map((m, i) => {
       if (m <= sel) return real[i];
       if (fc[m] != null) return fc[m];
-      if (!this.forecast) return null;
+      const algum = meses.some((mm) => mm > sel && fc[mm] != null);
+      if (!algum) return null;
       semForecast.push(m);
       return orc[i];
     });
@@ -2370,12 +2520,14 @@ const ResultadoCaixaApp = {
     });
     const ccMl = new Set(Object.keys((arq && arq.contasPorCc) || {}));
     const mapa = await this.mapaPronto();
-    if (this.forecast && this.forecast.contas) {
-      Object.keys(this.forecast.contas).forEach((cc) => {
+    const forecastsAno = Object.keys(this.forecasts || {}).filter((ym) => Number(ym.slice(0, 4)) === Number(ano)).map((ym) => this.forecasts[ym]);
+    forecastsAno.forEach((fcDoc) => {
+      if (!fcDoc || !fcDoc.contas) return;
+      Object.keys(fcDoc.contas).forEach((cc) => {
         if (ccMl.size && !ccMl.has(String(cc))) return;
-        const nomeCc = (this.forecast.nomes && this.forecast.nomes[cc]) || cc;
-        Object.keys(this.forecast.contas[cc] || {}).forEach((code) => {
-          const conta = this.forecast.contas[cc][code];
+        const nomeCc = (fcDoc.nomes && fcDoc.nomes[cc]) || cc;
+        Object.keys(fcDoc.contas[cc] || {}).forEach((code) => {
+          const conta = fcDoc.contas[cc][code];
           const node = this.noDaLinha(FC, mapa, { code: code, nome: conta.nome || "" });
           if (!node || !byId[node.id]) return;
           const plano = planoDe(byId[node.id], code, conta.nome || "");
@@ -2396,7 +2548,7 @@ const ResultadoCaixaApp = {
           });
         });
       });
-    }
+    });
     const fimMes = new Date(ano, mes, 0).getDate();
     const start = ano + "-01-01";
     const end = ano + "-" + String(mes).padStart(2, "0") + "-" + String(fimMes).padStart(2, "0");

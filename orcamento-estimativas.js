@@ -216,6 +216,7 @@ const OrcamentoImpostosApp = {
         irpj: this.trimestrePago(row),
         csll: this.trimestrePago(row, "csll")
       };
+      this.aplicarJaneiro(row);
       row.leitura = {
         pis: this.lerLinha("PIS", row.pagar.pis, row.pis, row.ap.pis),
         cofins: this.lerLinha("COFINS", row.pagar.cofins, row.cofins, row.ap.cofins),
@@ -226,8 +227,74 @@ const OrcamentoImpostosApp = {
     return emp;
   },
 
-  /* Índice 0 é janeiro de 2027: paga a competência de dezembro de 2026, que este orçamento não tem.
-     Índice 12 é janeiro de 2028. */
+  /* Índice 0 é janeiro de 2027. PIS e COFINS vêm do forecast de dezembro de 2026.
+     IRPJ e CSLL vêm do forecast de outubro, novembro e dezembro de 2026. */
+  bases2026() {
+    const app = window.ResultadoCaixaApp;
+    if (!app || typeof app.basesForecast !== "function") return {};
+    const out = {};
+    ["2026-10", "2026-11", "2026-12"].forEach((ym) => {
+      const bag = app.basesForecast(ym);
+      if (bag) out[ym] = bag;
+    });
+    return out;
+  },
+
+  impostoMes(base, ali) {
+    if (!base) return null;
+    const v = Number(base.vendas) || 0;
+    const s = Number(base.servicos) || 0;
+    const f = Number(base.financeiras) || 0;
+    const basePis = v + s + (ali.financNoPis ? f : 0);
+    return {
+      pis: basePis > 0 ? basePis * ali.pis / 100 : 0,
+      cofins: basePis > 0 ? basePis * ali.cofins / 100 : 0,
+      vendas: v,
+      servicos: s,
+      financeiras: f
+    };
+  },
+
+  trimestreDe(bases, ali) {
+    let v = 0;
+    let s = 0;
+    let f = 0;
+    let meses = 0;
+    bases.forEach((b) => {
+      if (!b) return;
+      meses += 1;
+      v += Number(b.vendas) || 0;
+      s += Number(b.servicos) || 0;
+      f += Number(b.financeiras) || 0;
+    });
+    if (!meses) return null;
+    const lucroI = v * ali.vendasIrpj / 100 + s * ali.servicosIrpj / 100 + f * ali.financIrpj / 100;
+    const lucroC = v * ali.vendasCsll / 100 + s * ali.servicosCsll / 100 + f * ali.financCsll / 100;
+    const limite = ali.limiteMensal * 3;
+    const ir = lucroI > 0 ? lucroI * ali.irpj / 100 : 0;
+    const ad = lucroI > limite ? (lucroI - limite) * ali.adicional / 100 : 0;
+    const csll = lucroC > 0 ? lucroC * ali.csll / 100 : 0;
+    return { irpj: ir + ad, csll: csll, meses: meses };
+  },
+
+  aplicarJaneiro(row) {
+    const ali = OrcEst.aliquotas();
+    const prev = this.bases2026();
+    const dez = prev["2026-12"] && prev["2026-12"][Number(row.id)];
+    const pis = this.impostoMes(dez, ali);
+    if (pis) {
+      row.pagar.pis[0] = pis.pis;
+      row.pagar.cofins[0] = pis.cofins;
+    }
+    const tri = this.trimestreDe(["2026-10", "2026-11", "2026-12"].map((ym) => prev[ym] && prev[ym][Number(row.id)]), ali);
+    if (tri) {
+      row.pagar.irpj[0] = tri.irpj;
+      row.pagar.csll[0] = tri.csll;
+      row.forecastMeses = tri.meses;
+    }
+    row.forecastDez = !!pis;
+  },
+
   desloca(accrual) {
     const out = Array(13).fill(null);
     out[0] = null;
@@ -253,7 +320,7 @@ const OrcamentoImpostosApp = {
     const comp = [];
     for (let i = 0; i < 12; i++) {
       comp.push({ est: competencia[i], orc: orcamento[i] });
-      if (pagamento[i] != null) pag.push({ est: pagamento[i], orc: orcamento[i] });
+      if (i > 0 && pagamento[i] != null) pag.push({ est: pagamento[i], orc: orcamento[i] });
     }
     const score = (pares) => pares.reduce((s, p) => s + Math.abs(p.est - p.orc), 0);
     const sp = score(pag);
@@ -325,10 +392,13 @@ const OrcamentoImpostosApp = {
 
   totalPago(row) {
     const out = Array(13).fill(0);
-    out[0] = null;
     for (let i = 0; i < 13; i++) {
-      if (i === 0) continue;
-      out[i] = (row.pagar.pis[i] || 0) + (row.pagar.cofins[i] || 0) + (row.pagar.irpj[i] || 0) + (row.pagar.csll[i] || 0);
+      const partes = [row.pagar.pis[i], row.pagar.cofins[i], row.pagar.irpj[i], row.pagar.csll[i]];
+      if (partes.every((v) => v == null)) {
+        out[i] = null;
+        continue;
+      }
+      out[i] = partes.reduce((s, v) => s + (Number(v) || 0), 0);
     }
     return out;
   },
@@ -369,7 +439,22 @@ const OrcamentoImpostosApp = {
       </div>`;
     this.paintFiltro();
     this.paintCorpo();
+    this.carregarForecast();
     if (window.lucide && lucide.createIcons) lucide.createIcons();
+  },
+
+  async carregarForecast() {
+    const app = window.ResultadoCaixaApp;
+    if (!app) return;
+    const token = (this._fcToken = (this._fcToken || 0) + 1);
+    try {
+      if (!app.acervo) app.lerLocal();
+      if (typeof app.carregarNuvem === "function" && !app._nuvemOk) await app.carregarNuvem();
+      if (typeof app.carregarForecasts === "function") await app.carregarForecasts();
+    } catch (e) {}
+    if (token !== this._fcToken) return;
+    const body = document.getElementById("orc-imp-body");
+    if (body) this.paintCorpo();
   },
 
   paintFiltro() {
@@ -440,7 +525,7 @@ const OrcamentoImpostosApp = {
       const chip = this.chip(row);
       const aberto = !!this.abertos[row.id];
       const nome = OrcEst.esc(row.id + " - " + OrcEst.norm(row.nome));
-      const celulas = pago.slice(0, 12).map((v, i) => this.td(v, i === 0 ? "Competência de 2026, fora deste orçamento" : "")).join("");
+      const celulas = pago.slice(0, 12).map((v, i) => this.td(v, i === 0 ? "PIS e COFINS do forecast de dezembro de 2026 e trimestre de outubro a dezembro" : "")).join("");
       const extra = aberto ? this.detalhe(row) : "";
       return `<tr data-est-id="${OrcEst.esc(row.id)}" onclick="OrcamentoImpostosApp.toggle('${OrcEst.esc(row.id)}')">
         <td><i data-lucide="${aberto ? "chevron-down" : "chevron-right"}"></i>${nome} <span class="${chip.cls}">${chip.txt}</span></td>
@@ -449,7 +534,7 @@ const OrcamentoImpostosApp = {
         <td>${this.tdTxt(pago[12])}</td>
       </tr>${extra}`;
     }).join("");
-    const totCel = tot.slice(0, 12).map((v, i) => `<td>${i === 0 ? "—" : OrcEst.money(v)}</td>`).join("");
+    const totCel = tot.slice(0, 12).map((v) => `<td>${v == null ? "—" : OrcEst.money(v)}</td>`).join("");
     body.innerHTML = `
       <div class="orc-dfc-scroll">
         <table class="orc-dfc-table orc-est-table">
@@ -458,7 +543,7 @@ const OrcamentoImpostosApp = {
           <tfoot><tr class="orc-dfc-formula"><td>Total</td>${totCel}<td>${OrcEst.money(this.somaAte(tot, 12))}</td><td>${OrcEst.money(tot[12])}</td></tr></tfoot>
         </table>
       </div>
-      <p class="orc-est-nota">Janeiro de 2027 paga PIS, COFINS e o trimestre de 2026. Essa competência não está no orçamento de 2027, por isso a coluna fica em branco. A marca ao lado da empresa diz se a linha que já veio no Excel fecha com esta conta.</p>`;
+      <p class="orc-est-nota">Janeiro de 2027 paga o PIS e a COFINS do forecast de dezembro de 2026 e o IRPJ e a CSLL do forecast de outubro a dezembro. Cada arquivo de forecast vale só para a competência em que foi enviado e fica salvo na nuvem. Sem o arquivo daquele mês, a parte correspondente continua em branco. A marca ao lado da empresa diz se a linha de 2027 fecha com esta conta.</p>`;
     if (window.lucide && lucide.createIcons) lucide.createIcons();
   },
 
