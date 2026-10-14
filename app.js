@@ -3119,6 +3119,10 @@ window.bootEngenhariaCaucao = function () {
 };
 
 function switchTab(tabId, titleOverride, showLoader = false) {
+  if (window._crmAcessoSoHome && tabId !== "construcao-home") {
+    tabId = "construcao-home";
+    titleOverride = "Home";
+  }
   if (String(tabId || "").indexOf("relacionamento") === 0 && typeof window.isCrmSuperAdmin === "function" && !window.isCrmSuperAdmin()) {
     let relPerms = {};
     try {
@@ -4362,6 +4366,8 @@ async function processSuccessfulLogin(loggedUser) {
       if (overlay) overlay.classList.remove("active");
       try { renderUserSession(); } catch (e) {}
       try { if (window.UsuariosOnline) UsuariosOnline.start(AppState.currentUser); } catch (e) {}
+      window._crmAcessoSoHome = true;
+      try { if (typeof window.crmRestringirMenuAoHome === "function") window.crmRestringirMenuAoHome(); } catch (e) {}
       try { switchTab("construcao-home", "Home"); } catch (e) {}
       return;
     }
@@ -5525,6 +5531,32 @@ window.ensureLuceliaBackOfficeProfile = function() {
   } catch (e) {}
 };
 
+window._crmAcessoSoHome = true;
+
+window.crmOcultarModulos = function() {
+  document.querySelectorAll("li[data-module]").forEach((item) => { item.style.display = "none"; });
+  document.querySelectorAll(".nav-group").forEach((group) => { group.style.display = "none"; });
+};
+
+window.crmRestringirMenuAoHome = function() {
+  window._crmAcessoSoHome = true;
+  window.crmOcultarModulos();
+  const activeNav = document.querySelector("li.nav-item.active[data-tab]");
+  const tab = activeNav && activeNav.getAttribute("data-tab");
+  if (tab && tab !== "construcao-home" && typeof switchTab === "function") {
+    switchTab("construcao-home", "Home");
+  }
+};
+
+window.crmPerfilCadastrado = function(user) {
+  if (!user || typeof window.findCrmRegisteredUser !== "function") return "";
+  const rec = window.findCrmRegisteredUser(user);
+  if (!rec) return "";
+  const status = String(rec.status || "ATIVO").toUpperCase();
+  if (status === "INATIVO" || status === "PENDENTE") return "";
+  return String(rec.profile_name || "").trim();
+};
+
 function applyMenuPermissions() {
   if (!AppState.currentUser) return;
   const profileName = AppState.currentUser.profile_name || "";
@@ -5533,33 +5565,34 @@ function applyMenuPermissions() {
 window.applyMenuPermissions = applyMenuPermissions;
 
 window.applyPermissions = function(profileName) {
+  window._crmAcessoSoHome = true;
+  if (typeof window.crmOcultarModulos === "function") window.crmOcultarModulos();
+  try {
   if (typeof window.ensureLuceliaBackOfficeProfile === "function") {
     window.ensureLuceliaBackOfficeProfile();
   }
   const imp = window.crmImpersonacaoAtual && window.crmImpersonacaoAtual();
   const current = window.AppState && AppState.currentUser;
   const recAtual = current && typeof window.findCrmRegisteredUser === "function" ? window.findCrmRegisteredUser(current) : null;
-  if (recAtual && recAtual.profile_name && current.profile_name !== recAtual.profile_name) {
+  if (recAtual && recAtual.profile_name && current && current.profile_name !== recAtual.profile_name) {
     current.profile_name = recAtual.profile_name;
     if (recAtual.operator_type) current.operator_type = recAtual.operator_type;
   }
-  if (imp) {
-    profileName = String(imp.profile_name || "").trim();
-  } else if (current && typeof window.isCobrancaBackOfficeUser === "function" && window.isCobrancaBackOfficeUser(current)) {
+  const alvo = imp || current;
+  const perfilCadastrado = typeof window.crmPerfilCadastrado === "function" ? window.crmPerfilCadastrado(alvo) : "";
+  if (perfilCadastrado) profileName = perfilCadastrado;
+  else if (imp) profileName = "";
+  else if (current && typeof window.isCobrancaBackOfficeUser === "function" && window.isCobrancaBackOfficeUser(current)) {
     profileName = window.CRM_BACK_OFFICE_PROFILE_NAME;
     current.profile_name = profileName;
-  } else if (current && current.profile_name) {
-    profileName = current.profile_name;
-  }
+  } else profileName = "";
   if (!profileName) {
-    if (imp) {
-      document.querySelectorAll("li[data-module]").forEach((item) => { item.style.display = "none"; });
-      document.querySelectorAll(".nav-group").forEach((group) => { group.style.display = "none"; });
-    }
+    if (typeof window.crmRestringirMenuAoHome === "function") window.crmRestringirMenuAoHome();
     return;
   }
 
   if (window.isCrmAdminProfileName(profileName)) {
+    window._crmAcessoSoHome = false;
     document.querySelectorAll("li[data-module]").forEach((item) => { item.style.display = ""; });
     document.querySelectorAll(".nav-group").forEach((group) => { group.style.display = ""; });
     return;
@@ -5588,13 +5621,13 @@ window.applyPermissions = function(profileName) {
       });
     } catch (e) {
       console.error("Erro ao aplicar permissões do menu", e);
+      if (typeof window.crmRestringirMenuAoHome === "function") window.crmRestringirMenuAoHome();
+      return;
     }
+    window._crmAcessoSoHome = false;
   } else {
-    // Se não tiver permissões salvas para o perfil (novo perfil sem salvar), oculta os restritos
-    const moduleItems = document.querySelectorAll('li[data-module]');
-    moduleItems.forEach(item => {
-      item.style.display = 'none';
-    });
+    if (typeof window.crmRestringirMenuAoHome === "function") window.crmRestringirMenuAoHome();
+    return;
   }
 
   // --- SOBREPOSIÇÃ•ES POR TIPO DE OPERADOR (Advogado, Externo, etc) ---
@@ -5632,11 +5665,6 @@ window.applyPermissions = function(profileName) {
     });
   }
 
-  if (window.isCrmSuperAdmin && window.isCrmSuperAdmin()) {
-    const suporteMenu = document.querySelector('li[data-module="mod_suporte"]');
-    if (suporteMenu) suporteMenu.style.display = '';
-  }
-
   const navGroups = Array.from(document.querySelectorAll(".nav-group"));
   for (let i = navGroups.length - 1; i >= 0; i--) {
     const group = navGroups[i];
@@ -5651,6 +5679,10 @@ window.applyPermissions = function(profileName) {
   const activeNav = document.querySelector("li.nav-item.active[data-tab]");
   if (activeNav && activeNav.style.display === "none" && typeof switchTab === "function") {
     switchTab("construcao-home", "Home");
+  }
+  } catch (e) {
+    console.error("Falha ao identificar o perfil. O acesso fica só na Home.", e);
+    if (typeof window.crmRestringirMenuAoHome === "function") window.crmRestringirMenuAoHome();
   }
 }
 
@@ -5721,7 +5753,6 @@ window.CRM_TESTE_CONTA_KEY = "crm_teste_conta";
 window.crmAdministradorReal = function() {
   const u = window.AppState && AppState.currentUser;
   if (!u) return false;
-  if (window.isCrmAdminProfileName(u.profile_name || u.profile || u.role)) return true;
   const rec = typeof window.findCrmRegisteredUser === "function" ? window.findCrmRegisteredUser(u) : null;
   return !!(rec && window.isCrmAdminProfileName(rec.profile_name));
 };
@@ -5769,7 +5800,7 @@ window.isCrmAdministrator = function(user) {
   const rec = window.findCrmRegisteredUser(user);
   const status = String((rec && rec.status) || user.status || "ATIVO").toUpperCase();
   if (status === "INATIVO") return false;
-  return window.isCrmAdminProfileName((rec && rec.profile_name) || user.profile_name || user.profile || user.role);
+  return !!(rec && window.isCrmAdminProfileName(rec.profile_name));
 };
 
 window.listCrmAdministrators = function() {
@@ -6055,9 +6086,10 @@ window.permCoversMenuKey = function(perms, modKey) {
 window.hasCrmPerm = function(key) {
   if (window.isCrmSuperAdmin()) return true;
   const u = window.crmUsuarioAcesso();
-  if (u && Array.isArray(u.permissions) && u.permissions.includes(key)) return true;
   try {
-    const profileName = u && u.profile_name ? String(u.profile_name) : "";
+    const profileName = typeof window.crmPerfilCadastrado === "function"
+      ? window.crmPerfilCadastrado(u)
+      : (u && u.profile_name ? String(u.profile_name) : "");
     if (!profileName) return false;
     const perms = typeof window.readCrmProfilePerms === "function"
       ? window.readCrmProfilePerms(profileName)
@@ -7035,25 +7067,23 @@ async function loadAndApplyPermissions() {
         : {};
          if (permsObj && permsObj.__mirror_of__) permsObj = {};
       
-      if (permsObj && Object.keys(permsObj).length) {
-         AppState.currentUser.permissions = Object.keys(permsObj).filter(k => permsObj[k] === true);
-         
-         if (window.isCrmSuperAdmin && window.isCrmSuperAdmin()) {
-             AppState.currentUser.permissions = ['anexos', 'config', 'config.tags', 'config.usuarios', 'contas.pagar'];
-         }
-      } else {
-         console.warn("Permissões não encontradas no localStorage para o perfil:", profileName, "Aplicando padrão.");
+      if (window.isCrmSuperAdmin && window.isCrmSuperAdmin()) {
          AppState.currentUser.permissions = ['anexos', 'config', 'config.tags', 'config.usuarios', 'contas.pagar'];
+      } else if (permsObj && Object.keys(permsObj).length) {
+         AppState.currentUser.permissions = Object.keys(permsObj).filter(k => permsObj[k] === true);
+      } else {
+         console.warn("Permissões não encontradas para o perfil:", profileName, "Acesso limitado à Home.");
+         AppState.currentUser.permissions = [];
       }
     } catch (e) {
       console.error("Erro ao carregar permissões:", e);
-      AppState.currentUser.permissions = ['anexos', 'config', 'config.tags', 'config.usuarios', 'contas.pagar'];
+      AppState.currentUser.permissions = [];
     }
   } else {
-    // Mock para testar localmente caso sem login real
     AppState.currentUser = AppState.currentUser || {};
-    AppState.currentUser.permissions = ['anexos', 'config', 'config.tags', 'config.usuarios', 'contas.pagar'];
+    AppState.currentUser.permissions = [];
   }
+  if (typeof window.applyMenuPermissions === "function") window.applyMenuPermissions();
 
   // Aplicar permissões no Menu
   document.querySelectorAll('[data-permission]').forEach(el => {

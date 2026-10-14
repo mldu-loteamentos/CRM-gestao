@@ -10,6 +10,7 @@ window.MutuoApp = {
   pct: 0,
   error: "",
   grupos: [],
+  abertos: {},
   sortAcc: { key: "nome", dir: "asc" },
   sortMov: { key: "data", dir: "desc" },
   _gen: 0,
@@ -223,6 +224,12 @@ window.MutuoApp = {
     this.render();
   },
 
+  toggleGrupo(id) {
+    const key = String(id);
+    this.abertos[key] = !this.abertos[key];
+    this.render();
+  },
+
   toggleSort(scope, key) {
     const st = scope === "mov" ? this.sortMov : this.sortAcc;
     if (st.key === key) st.dir = st.dir === "asc" ? "desc" : "asc";
@@ -254,6 +261,36 @@ window.MutuoApp = {
 
   th(scope, key, label) {
     return `<th onclick="MutuoApp.toggleSort('${scope}','${key}')" style="cursor:pointer;user-select:none;">${this.esc(label)} <i data-lucide="chevrons-up-down" style="width:11px;vertical-align:middle;"></i></th>`;
+  },
+
+  corpoEmpresa(g) {
+    const contas = this.ordenar(g.contas, "acc");
+    const movs = this.ordenar(g.movs, "mov");
+    const linhas = contas.map((c) => `<tr>
+      <td>${this.esc(c.nome)}</td>
+      <td>${this.esc(c.numero || "—")}</td>
+      <td>${c.banco ? this.esc(c.banco) : "—"}</td>
+      <td class="${c.saldo < 0 ? "mut-neg" : ""}">${this.money(c.saldo)}</td>
+    </tr>`).join("");
+    const dets = movs.length ? movs.map((m) => `<tr>
+      <td>${this.fmtDate(m.data)}</td>
+      <td>${this.esc(m.nome || m.conta || "—")}</td>
+      <td>${this.esc(m.historico || "—")}</td>
+      <td class="${m.valor < 0 ? "mut-neg" : ""}">${this.money(m.valor)}</td>
+    </tr>`).join("") : `<tr><td colspan="4" class="mut-vazio">Sem movimento em ${this.esc(this.mesLabel())}.</td></tr>`;
+    return `<div class="mut-corpo">
+      <table class="mut-tab">
+        <thead><tr>${this.th("acc", "nome", "Conta")}${this.th("acc", "numero", "C/C")}${this.th("acc", "banco", "Banco")}${this.th("acc", "saldo", "Saldo hoje")}</tr></thead>
+        <tbody>${linhas}</tbody>
+      </table>
+      <h3>Movimento de ${this.esc(this.mesLabel())}</h3>
+      <div class="mut-movs">
+        <table class="mut-tab">
+          <thead><tr>${this.th("mov", "data", "Data")}${this.th("mov", "conta", "Conta")}${this.th("mov", "historico", "Histórico")}${this.th("mov", "valor", "Valor")}</tr></thead>
+          <tbody>${dets}</tbody>
+        </table>
+      </div>
+    </div>`;
   },
 
   mesLabel() {
@@ -290,43 +327,23 @@ window.MutuoApp = {
       ? `<p class="mut-vazio">${this.picked && !this.companyIds.length ? "Selecione ao menos uma empresa." : "Nenhuma conta de mútuo nas empresas selecionadas."}</p>`
       : "";
     const cards = this.grupos.map((g) => {
-      const contas = this.ordenar(g.contas, "acc");
-      const movs = this.ordenar(g.movs, "mov");
-      const linhas = contas.map((c) => `<tr>
-        <td>${this.esc(c.nome)}</td>
-        <td>${this.esc(c.numero || "—")}</td>
-        <td>${c.banco ? this.esc(c.banco) : "—"}</td>
-        <td class="${c.saldo < 0 ? "mut-neg" : ""}">${this.money(c.saldo)}</td>
-      </tr>`).join("");
-      const dets = movs.length ? movs.map((m) => `<tr>
-        <td>${this.fmtDate(m.data)}</td>
-        <td>${this.esc(m.nome || m.conta || "—")}</td>
-        <td>${this.esc(m.historico || "—")}</td>
-        <td class="${m.valor < 0 ? "mut-neg" : ""}">${this.money(m.valor)}</td>
-      </tr>`).join("") : `<tr><td colspan="4" class="mut-vazio">Sem movimento em ${this.esc(this.mesLabel())}.</td></tr>`;
-      return `<section class="mut-card">
-        <header>
-          <div>
+      const aberto = !!this.abertos[g.id];
+      const nConta = g.contas.length;
+      const corpo = aberto ? this.corpoEmpresa(g) : "";
+      return `<section class="mut-card${aberto ? " mut-aberto" : ""}">
+        <button type="button" class="mut-emp" aria-expanded="${aberto ? "true" : "false"}" onclick="MutuoApp.toggleGrupo('${this.esc(g.id)}')">
+          <i data-lucide="${aberto ? "chevron-down" : "chevron-right"}"></i>
+          <span class="mut-emp-nome">
             <strong>${this.esc(g.id + " - " + g.nome.toUpperCase())}</strong>
-            <span>${g.contas.length} conta(s)</span>
-          </div>
+            <span>${nConta} ${nConta === 1 ? "conta" : "contas"}</span>
+          </span>
           <b class="${g.saldo < 0 ? "mut-neg" : ""}">${this.money(g.saldo)}</b>
-        </header>
-        <table class="mut-tab">
-          <thead><tr>${this.th("acc", "nome", "Conta")}${this.th("acc", "numero", "C/C")}${this.th("acc", "banco", "Banco")}${this.th("acc", "saldo", "Saldo hoje")}</tr></thead>
-          <tbody>${linhas}</tbody>
-        </table>
-        <h3>Detalhamento · ${this.esc(this.mesLabel())}</h3>
-        <div class="mut-movs">
-          <table class="mut-tab">
-            <thead><tr>${this.th("mov", "data", "Data")}${this.th("mov", "conta", "Conta")}${this.th("mov", "historico", "Histórico")}${this.th("mov", "valor", "Valor")}</tr></thead>
-            <tbody>${dets}</tbody>
-          </table>
-        </div>
+        </button>
+        ${corpo}
       </section>`;
     }).join("");
     root.innerHTML = `<div class="mut-page">
-      <p class="mut-nota">Saldo de hoje das contas de mútuo das empresas geridas pelo grupo. Essas contas não entram no fluxo de caixa diário. O detalhamento é o movimento de ${this.esc(this.mesLabel())}.</p>
+      <p class="mut-nota">Saldo de hoje das contas de mútuo das empresas geridas pelo grupo. Essas contas não entram no fluxo de caixa diário. Abra a empresa para ver as contas e o movimento de ${this.esc(this.mesLabel())}.</p>
       ${filtro}
       ${this.error ? `<p class="mut-erro">${this.esc(this.error)}</p>` : ""}
       ${carga}
@@ -336,7 +353,7 @@ window.MutuoApp = {
         <div><span>Contas</span><strong>${nContas}</strong></div>
       </div>` : ""}
       ${vazio}
-      ${cards}
+      ${cards ? `<div class="mut-grupo">${cards}</div>` : ""}
     </div>`;
     if (window.MlEmpresaFilter) {
       MlEmpresaFilter.bind("mut-emp", {

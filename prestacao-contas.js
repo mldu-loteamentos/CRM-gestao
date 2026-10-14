@@ -42,9 +42,12 @@ const PrestacaoContasApp = {
     this.ensureCategories();
     if (typeof ParametrizacaoParceiroApp !== "undefined" && (!ParametrizacaoParceiroApp.items || !ParametrizacaoParceiroApp.items.length)) {
       ParametrizacaoParceiroApp.loadItems().then(() => {
+        this.restringirEmpresas();
         if (this.movements.length) this.conferencias = this.montarConferencia();
         this.render();
       }).catch(() => {});
+    } else {
+      this.restringirEmpresas();
     }
     this.render();
   },
@@ -166,15 +169,66 @@ const PrestacaoContasApp = {
     return (window.AppState && AppState.companies) || [];
   },
 
+  temParceiroOuSocio(p) {
+    if (!p) return false;
+    if (String(p.partnerName || "").trim()) return true;
+    if (p.creditor && (p.creditor.id || String(p.creditor.name || "").trim())) return true;
+    return (p.socios || []).some((s) => s && (s.id || String(s.name || "").trim()));
+  },
+
+  empresasComCadastro() {
+    const app = window.ParametrizacaoParceiroApp;
+    const items = (app && app.items) || [];
+    const ids = new Set();
+    const nomes = {};
+    items.forEach((raw) => {
+      const p = app && app.normalizeItem ? app.normalizeItem(raw) : raw;
+      if (!this.temParceiroOuSocio(p)) return;
+      [String(p.companyId || ""), String(this.empresaDaParceria(p) || "")].forEach((emp) => {
+        if (!emp) return;
+        ids.add(emp);
+        if (p.companyName && !nomes[emp]) nomes[emp] = p.companyName;
+      });
+    });
+    return { ids, nomes };
+  },
+
+  restringirEmpresas() {
+    const ok = this.empresasComCadastro().ids;
+    const ids = (this.companyIds || []).map(String).filter((id) => ok.has(id));
+    this.companyIds = ids;
+    this.companyId = ids.length === 1 ? ids[0] : "";
+    const part = this.activePartnership();
+    if (part && !ok.has(String(this.empresaDaParceria(part) || part.companyId || ""))) {
+      this.partnershipId = "";
+      this.costCenterIds = [];
+    }
+  },
+
   empresasPermitidas() {
     const todas = this.empresasCatalogo();
+    const cad = this.empresasComCadastro();
+    const base = [];
+    const visto = new Set();
+    todas.forEach((c) => {
+      const id = String(c.id);
+      if (!cad.ids.has(id) || visto.has(id)) return;
+      visto.add(id);
+      base.push(c);
+    });
+    cad.ids.forEach((id) => {
+      if (visto.has(id)) return;
+      visto.add(id);
+      base.push({ id, name: cad.nomes[id] || ("Empresa " + id) });
+    });
+    base.sort((a, b) => Number(a.id) - Number(b.id) || String(a.name || "").localeCompare(String(b.name || ""), "pt-BR"));
     const part = this.activePartnership();
-    if (!part) return todas;
-    const emp = this.empresaDaParceria(part);
-    const daObra = todas.filter((c) => String(c.id) === String(emp));
+    if (!part) return base;
+    const emp = String(this.empresaDaParceria(part) || part.companyId || "");
+    const daObra = base.filter((c) => String(c.id) === emp);
     if (daObra.length) return daObra;
     if (!emp) return [];
-    return [{ id: emp, name: part.companyName || ("Empresa " + emp) }];
+    return [{ id: emp, name: part.companyName || cad.nomes[emp] || ("Empresa " + emp) }];
   },
 
   parceriasVisiveis() {
@@ -1262,6 +1316,7 @@ const PrestacaoContasApp = {
       <div class="pcx-page">
         <div class="pcx-head">
         <div class="cc-toolbar pcx-toolbar">
+          ${this.empresaFiltroHtml()}
           ${partnerships.length || this.companyIds.length ? `<label class="pcx-field pcx-field-parc">
             <span class="ml-emp-filter-label">Parceria</span>
             <select class="pcx-input" onchange="PrestacaoContasApp.applyPartnership(this.value)">
@@ -1275,7 +1330,6 @@ const PrestacaoContasApp = {
             <span class="ml-emp-filter-label">Parceria</span>
             <select class="pcx-input" disabled><option>Selecione a empresa</option></select>
           </label>`}
-          ${this.empresaFiltroHtml()}
           <div class="tvig-filter-slot tvig-comp-slot">
             <label class="tvig-comp-label" for="pc-comp">Mês de referência</label>
             <input type="month" id="pc-comp" class="tvig-comp-input" title="Consulta pela data de pagamento" value="${this.year}-${pad(this.month)}" onchange="PrestacaoContasApp.setCompetencia(this.value)">

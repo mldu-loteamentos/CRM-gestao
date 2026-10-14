@@ -9707,11 +9707,19 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .mut-kpis > div { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px 14px; min-width: 140px; }
 .mut-kpis span { display: block; color: #64748b; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; }
 .mut-kpis strong { font-size: 1.05rem; color: #0f172a; }
-.mut-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 14px; }
-.mut-card header { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 8px; }
-.mut-card header strong { display: block; color: #105436; }
-.mut-card header span { color: #64748b; font-size: 0.78rem; }
-.mut-card header b { font-size: 1rem; }
+.mut-grupo { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; }
+.mut-card { border-bottom: 1px solid #e2e8f0; }
+.mut-card:last-child { border-bottom: 0; }
+.mut-emp { width: 100%; display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: #fff; border: 0; cursor: pointer; text-align: left; font: inherit; color: inherit; }
+.mut-emp:hover { background: #f8faf8; }
+.mut-aberto > .mut-emp { background: #f3f8f5; }
+.mut-emp svg { width: 16px; height: 16px; color: #105436; flex: none; }
+.mut-emp-nome { flex: 1; min-width: 0; }
+.mut-emp-nome strong { display: block; color: #105436; }
+.mut-emp-nome span { color: #64748b; font-size: 0.78rem; }
+.mut-emp b { font-size: 1rem; color: #0f172a; white-space: nowrap; }
+.mut-emp b.mut-neg { color: #c2410c; }
+.mut-corpo { padding: 0 14px 14px; }
 .mut-card h3 { margin: 14px 0 6px; font-size: 0.78rem; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
 .mut-tab { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
 .mut-tab th { text-align: left; color: #105436; font-size: 0.75rem; padding: 6px 8px; border-bottom: 1px solid #e2e8f0; }

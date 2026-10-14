@@ -226,6 +226,8 @@ const FluxoCaixaDiarioApp = {
   contasAbertas: { corrente: false, investimento: false },
   mostrarNaoUteis: false,
   compAberto: false,
+  semConcAberto: false,
+  semConcDia: "",
   flags: {},
   tipos: {},
   ccExcl: {},
@@ -1968,6 +1970,85 @@ const FluxoCaixaDiarioApp = {
     return { manuais, semConc, valorSemConc };
   },
 
+  listaSemConc(dias) {
+    const out = [];
+    (dias || []).forEach((d) => {
+      (d.itens || []).forEach((it) => {
+        if (!it.real || it.conciliado !== false) return;
+        out.push({ it, data: d.date, valor: Number(it.valor) || 0 });
+      });
+      (d.pagarItens || []).forEach((it) => {
+        if (!it.real || it.conciliado !== false) return;
+        out.push({ it, data: d.date, valor: -Math.abs(Number(it.valor) || 0) });
+      });
+    });
+    out.sort((a, b) => String(a.data).localeCompare(String(b.data)) || Math.abs(b.valor) - Math.abs(a.valor));
+    return out;
+  },
+
+  abrirSemConc(date) {
+    this.semConcDia = date || "";
+    this.semConcAberto = true;
+    this.render();
+  },
+
+  fecharSemConc() {
+    this.semConcAberto = false;
+    this.semConcDia = "";
+    this.render();
+  },
+
+  irDiaSemConc(iso) {
+    this.semConcAberto = false;
+    this.semConcDia = "";
+    if (this.openDay !== iso) {
+      this.openDay = iso;
+      this.detOpen = {};
+    }
+    this.render();
+    const det = document.querySelector("#fluxo-caixa-diario-root .cxd-daydet");
+    if (det) det.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  },
+
+  semConcHtml() {
+    if (!this.semConcAberto) return "";
+    const dias = this.semConcDia
+      ? (this.days || []).filter((d) => d.date === this.semConcDia)
+      : (this.days || []);
+    const lista = this.listaSemConc(dias);
+    const abs = lista.reduce((s, r) => s + Math.abs(r.valor), 0);
+    const linhas = lista.map((r) => {
+      const it = r.it;
+      const resumo = this.resumoLinha(it);
+      const hist = String(it.historico || "").trim();
+      const extra = hist && hist.toUpperCase() !== String(resumo).toUpperCase() ? hist : "";
+      const plano = [it.plano, it.ccNome].filter(Boolean).join(" · ");
+      const origem = (it.origem && it.origem.rotulo) || "—";
+      return `<tr>
+        <td>${caixaFmtDate(r.data)}</td>
+        <td>${caixaEsc(this.contaLabel(it))}</td>
+        <td>${caixaEsc(resumo)}${extra ? `<div class="cxd-muted">${caixaEsc(extra)}</div>` : ""}${plano ? `<div class="cxd-muted">${caixaEsc(plano)}</div>` : ""}</td>
+        <td>${caixaEsc(origem)}</td>
+        <td class="cxd-num ${r.valor < 0 ? "cxd-out" : "cxd-in"}">${caixaMoney(r.valor)}</td>
+        <td><button type="button" class="btn btn-outline btn-sm" onclick="FluxoCaixaDiarioApp.irDiaSemConc('${r.data}')">Abrir o dia</button></td>
+      </tr>`;
+    }).join("");
+    const titulo = this.semConcDia ? "Sem conciliação em " + caixaFmtDate(this.semConcDia) : "Sem conciliação no período";
+    return `<div style="position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:80;display:flex;align-items:center;justify-content:center;padding:16px;" onclick="if(event.target===this)FluxoCaixaDiarioApp.fecharSemConc()">
+      <div style="background:#fff;border-radius:12px;width:min(920px,96vw);max-height:86vh;overflow:auto;padding:18px 20px;" role="dialog" aria-label="${caixaEsc(titulo)}">
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;">
+          <h3 style="margin:0;color:#b91c1c;">${caixaEsc(titulo)}</h3>
+          <button type="button" class="btn btn-cancel btn-sm" onclick="FluxoCaixaDiarioApp.fecharSemConc()">Fechar</button>
+        </div>
+        <p style="margin:8px 0 12px;color:#64748b;font-size:0.84rem;">Movimento realizado que o Sienge ainda não conciliou com o extrato do banco. A soma dos valores absolutos é ${caixaMoney(abs)}.</p>
+        <table class="cxd-sheet cxd-analitico">
+          <thead><tr><th>Data</th><th>Conta</th><th>Lançamento</th><th>Origem</th><th class="cxd-num">Valor</th><th></th></tr></thead>
+          <tbody>${linhas || `<tr><td colspan="6">Nenhum movimento sem conciliação neste recorte.</td></tr>`}</tbody>
+        </table>
+      </div>
+    </div>`;
+  },
+
   /** Prazo mínimo da compromissada e piso que fica na conta corrente. */
   parametrosComp() {
     let prazo = 10;
@@ -2416,7 +2497,7 @@ const FluxoCaixaDiarioApp = {
         <strong>${caixaFmtDate(d.date)}</strong>
         <span class="cxd-chip ${d.real ? "cxd-chip-real" : "cxd-chip-prev"}">${d.real ? "Realizado · extrato bancário" : "Previsto"}</span>
         ${al.manuais ? `<span class="cxd-chip cxd-chip-cb" title="Lançamentos direto em Caixa e bancos, sem título do contas a pagar/receber">${al.manuais} lançamento(s) de caixa e bancos</span>` : ""}
-        ${al.semConc ? `<span class="cxd-chip cxd-chip-nc" title="Movimentos ainda não conciliados com o extrato do banco">${al.semConc} sem conciliação · ${caixaMoney(al.valorSemConc)}</span>` : ""}
+        ${al.semConc ? `<button type="button" class="cxd-chip cxd-chip-nc cxd-chip-btn" title="Clique para ver os movimentos sem conciliação" onclick="FluxoCaixaDiarioApp.abrirSemConc('${d.date}')">${al.semConc} sem conciliação · ${caixaMoney(al.valorSemConc)}</button>` : ""}
         <span class="cxd-daydet-res">Saldo do dia <b class="${aberto.movimento < 0 ? "cxd-out" : "cxd-in"}">${caixaMoney(aberto.movimento)}</b></span>
         <button type="button" class="btn btn-cancel btn-sm" onclick="FluxoCaixaDiarioApp.toggle('${d.date}')">Fechar</button>
       </div>
@@ -2721,6 +2802,8 @@ const FluxoCaixaDiarioApp = {
         #fluxo-caixa-diario-root .cxd-dot-nc { background:#dc2626; box-shadow:0 0 0 2px rgba(255,255,255,.7); }
         #fluxo-caixa-diario-root .cxd-chip-cb { background:#ffedd5; color:#9a3412; }
         #fluxo-caixa-diario-root .cxd-chip-nc { background:#fee2e2; color:#b91c1c; }
+        #fluxo-caixa-diario-root .cxd-chip-btn { border:0; cursor:pointer; font-family:inherit; }
+        #fluxo-caixa-diario-root .cxd-chip-btn:hover { filter:brightness(.96); }
         #fluxo-caixa-diario-root .cxd-analitico { table-layout:fixed; }
         #fluxo-caixa-diario-root .cxd-analitico thead th { background:#f1f5f9; color:#475569; font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.03em; text-align:left; padding:6px 10px; border-bottom:1px solid #e2e8f0; }
         #fluxo-caixa-diario-root .cxd-analitico thead th.cxd-num { text-align:right; }
@@ -2756,7 +2839,7 @@ const FluxoCaixaDiarioApp = {
           <div class="cxd-mx-bar">
             <p class="cxd-title">MOVIMENTO <span>· ${caixaEsc(this.rotuloPeriodo())} · dias anteriores realizados, de hoje em diante previstos · clique no dia para ver entradas e saídas</span></p>
             ${alMes.manuais ? `<span class="cxd-chip cxd-chip-cb" title="Lançamentos direto em Caixa e bancos, sem título do contas a pagar/receber. Abra o dia para conferir.">${alMes.manuais} lançamento(s) de caixa e bancos no mês</span>` : ""}
-            ${alMes.semConc ? `<span class="cxd-chip cxd-chip-nc" title="Movimentos ainda não conciliados com o extrato do banco. Os dias com ponto vermelho têm movimento sem conciliação.">${alMes.semConc} sem conciliação · ${caixaMoney(alMes.valorSemConc)}</span>` : ""}
+            ${alMes.semConc ? `<button type="button" class="cxd-chip cxd-chip-nc cxd-chip-btn" title="Clique para ver de quais movimentos é esse valor" onclick="FluxoCaixaDiarioApp.abrirSemConc()">${alMes.semConc} sem conciliação · ${caixaMoney(alMes.valorSemConc)}</button>` : ""}
           </div>
           <div class="cxd-wrap cxd-wrap-mx">
             <table class="cxd-mx">
@@ -2780,6 +2863,7 @@ const FluxoCaixaDiarioApp = {
       </div>
       ${this.detailHtml()}
       ${this.compModalHtml()}
+      ${this.semConcHtml()}
       ${this.avisoHtml()}`;
     const wrap = root.querySelector(".cxd-wrap-mx");
     if (wrap) {
