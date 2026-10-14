@@ -3598,6 +3598,121 @@ const AnexosApp = {
     }
   },
 
+  lerQrIntegra(text) {
+    const t = String(text || "").trim();
+    if (t.indexOf("INTEGRA|") === 0) {
+      const p = t.split("|");
+      if (!p[1]) return null;
+      return { codigo: p[1], tipo: p[2] || "", titulo: p[3] || "", unidade: p[4] || "", cliente: p[5] || "" };
+    }
+    if (t.indexOf("INTEGRA:") === 0) {
+      const codigo = t.slice(8).trim();
+      return codigo ? { codigo } : null;
+    }
+    return null;
+  },
+
+  async carregarJsQr() {
+    if (typeof window.jsQR === "function") return window.jsQR;
+    if (this._jsQr) return this._jsQr;
+    this._jsQr = new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js";
+      s.onload = () => (typeof window.jsQR === "function" ? resolve(window.jsQR) : reject(new Error("leitor")));
+      s.onerror = () => reject(new Error("leitor"));
+      document.head.appendChild(s);
+    });
+    this._jsQr.catch(() => { this._jsQr = null; });
+    return this._jsQr;
+  },
+
+  async sha256Arquivo(buf) {
+    const data = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+    const dig = await crypto.subtle.digest("SHA-256", data);
+    return Array.from(new Uint8Array(dig)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  },
+
+  async lerCodigoPdf(buf) {
+    const pdfjsLib = window["pdfjs-dist/build/pdf"];
+    if (!pdfjsLib) return null;
+    const pdf = await pdfjsLib.getDocument({ data: buf.slice(0) }).promise;
+    let lido = null;
+    try {
+      const meta = await pdf.getMetadata();
+      const subject = meta && meta.info && meta.info.Subject;
+      lido = this.lerQrIntegra(subject);
+    } catch (e) {}
+    try {
+      const jsQR = await this.carregarJsQr();
+      const page = await pdf.getPage(pdf.numPages);
+      const viewport = page.getViewport({ scale: 2 });
+      const canvas = document.createElement("canvas");
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+      const img = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(img.data, img.width, img.height);
+      const doQr = code && this.lerQrIntegra(code.data);
+      if (doQr) lido = doQr;
+    } catch (e) {}
+    try { pdf.destroy(); } catch (e) {}
+    return lido;
+  },
+
+  async provaAutenticacao(codigo) {
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (!fx || !db || !fx.getDoc) return null;
+    const snap = await fx.getDoc(fx.doc(db, "documentos_autenticados", codigo));
+    if (!snap || !snap.exists || !snap.exists()) return null;
+    return snap.data() || null;
+  },
+
+  enfileirarAuth(fileObj) {
+    if (!fileObj || fileObj.ext !== "pdf") return;
+    fileObj.autenticacao = { estado: "conferindo" };
+    this._authQueue = (this._authQueue || Promise.resolve()).then(() => this.checarAutenticacao(fileObj)).catch(() => {});
+  },
+
+  async checarAutenticacao(fileObj) {
+    if (!fileObj || fileObj.ext !== "pdf" || !fileObj.file) return;
+    try {
+      const buf = new Uint8Array(await fileObj.file.arrayBuffer());
+      const hash = await this.sha256Arquivo(buf);
+      const lido = await this.lerCodigoPdf(buf);
+      if (!lido || !lido.codigo) {
+        fileObj.autenticacao = null;
+        this.renderFilesList();
+        return;
+      }
+      const prova = await this.provaAutenticacao(lido.codigo);
+      if (!prova || !prova.hash) {
+        fileObj.autenticacao = Object.assign({ estado: "sem-prova" }, lido);
+      } else if (String(prova.hash) === hash) {
+        fileObj.autenticacao = {
+          estado: "original",
+          codigo: lido.codigo,
+          tipo: prova.tipoNome || lido.tipo || "Cessão de direitos",
+          titulo: prova.titulo || lido.titulo || "",
+          unidade: prova.unidade || lido.unidade || "",
+          cliente: prova.cliente || lido.cliente || ""
+        };
+      } else {
+        fileObj.autenticacao = {
+          estado: "alterado",
+          codigo: lido.codigo,
+          tipo: prova.tipoNome || lido.tipo || "Cessão de direitos",
+          titulo: prova.titulo || lido.titulo || "",
+          unidade: prova.unidade || lido.unidade || "",
+          cliente: prova.cliente || lido.cliente || ""
+        };
+      }
+    } catch (e) {
+      fileObj.autenticacao = { estado: "erro", detalhe: e && e.message ? e.message : "" };
+    }
+    this.renderFilesList();
+  },
+
   async handleFiles(filesArray) {
     const isModal = window.anexosTargetId === 'anexos-cliente-root';
 
@@ -3647,6 +3762,7 @@ const AnexosApp = {
         if (['jpg', 'jpeg', 'png', 'pdf'].includes(ext)) {
           fileObj.previewUrl = URL.createObjectURL(file);
         }
+        if (ext === 'pdf') this.enfileirarAuth(fileObj);
 
         try {
           await AnexosApp.applyTagFromOcrOrName(fileObj, file.name);
@@ -3822,6 +3938,16 @@ const AnexosApp = {
           </div>
           
           <div class="anexos-file-row-side">
+            ${(() => {
+              const a = f.autenticacao;
+              if (!a) return "";
+              const linha = [a.tipo, a.titulo ? "Título " + a.titulo : "", a.unidade, a.cliente].filter(Boolean).map(escTag).join(" · ");
+              if (a.estado === "conferindo") return `<span class="badge" style="background:#e2e8f0;color:#334155;white-space:nowrap;">Conferindo autenticidade</span>`;
+              if (a.estado === "original") return `<span class="badge badge-success" style="white-space:nowrap;">Original do Integra</span>${linha ? `<div style="font-size:0.72rem;color:#105436;text-align:right;max-width:240px;">${linha}</div>` : ""}`;
+              if (a.estado === "alterado") return `<span class="badge badge-danger" style="white-space:nowrap;">Arquivo alterado</span>${linha ? `<div style="font-size:0.72rem;color:#991b1b;text-align:right;max-width:240px;">${linha}</div>` : ""}`;
+              if (a.estado === "sem-prova") return `<span class="badge badge-warning" style="white-space:nowrap;">QR do Integra sem prova salva</span>`;
+              return `<span class="badge badge-warning" style="white-space:nowrap;">Não foi possível conferir o QR</span>`;
+            })()}
             <span class="badge ${badgeClass}" style="white-space: nowrap; display: inline-block;">${f.status}</span>
             <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end;">
               ${isModal ? '' : `

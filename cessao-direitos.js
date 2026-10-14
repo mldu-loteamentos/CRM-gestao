@@ -2899,7 +2899,7 @@ const CessaoPopup = {
     if (this._qrLib) return this._qrLib;
     this._qrLib = new Promise((resolve, reject) => {
       const s = document.createElement("script");
-      s.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.3/qrcode.min.js";
+      s.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.4.4/qrcode.min.js";
       s.onload = () => (window.QRCode && window.QRCode.toDataURL ? resolve(window.QRCode) : reject(new Error("O gerador de QR Code não carregou.")));
       s.onerror = () => reject(new Error("O gerador de QR Code não carregou."));
       document.head.appendChild(s);
@@ -2913,17 +2913,32 @@ const CessaoPopup = {
     return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
   },
 
-  async guardarAutenticacao(codigo, hash, arquivo) {
+  dadosAutenticacao() {
+    const st = CessaoPopupState || {};
+    const ces = (st.cessionarios && st.cessionarios[0] && st.cessionarios[0].customer) || {};
+    const unidade = [st.unit && st.unit.costCenterId, st.quadraLote].filter((x) => x && x !== "—").join(" - ");
+    return {
+      tipo: "Cessão de direitos",
+      titulo: String(st.titulo || ""),
+      unidade,
+      cliente: ces.name || (st.customer && st.customer.name) || ""
+    };
+  },
+
+  async guardarAutenticacao(codigo, hash, arquivo, info) {
     const fx = window.firebaseCollections;
     const db = window.firebaseDb;
     if (!fx || !db) throw new Error("O Firebase não está disponível para guardar a prova do documento.");
-    const st = CessaoPopupState;
+    const dados = info || this.dadosAutenticacao();
     await fx.setDoc(fx.doc(db, "documentos_autenticados", codigo), {
       tipo: "cessao",
+      tipoNome: dados.tipo,
       codigo,
       hash,
       arquivo: arquivo || "",
-      titulo: st.titulo || "",
+      titulo: dados.titulo || "",
+      unidade: dados.unidade || "",
+      cliente: dados.cliente || "",
       em: new Date().toISOString()
     });
   },
@@ -2935,22 +2950,30 @@ const CessaoPopup = {
       const PDFLib = await rel._carregarPdfLib();
       const { PDFDocument, StandardFonts, rgb } = PDFLib;
       const qr = await this.carregarQrLib();
-      const dataUrl = await qr.toDataURL("INTEGRA:" + codigo, { margin: 0, width: 280, errorCorrectionLevel: "M" });
+      const info = this.dadosAutenticacao();
+      const limpo = (s) => String(s || "").replace(/[|\r\n]/g, " ").trim().slice(0, 80);
+      const payload = ["INTEGRA", codigo, limpo(info.tipo), limpo(info.titulo), limpo(info.unidade), limpo(info.cliente)].join("|");
+      const dataUrl = await qr.toDataURL(payload, { margin: 1, width: 320, errorCorrectionLevel: "M" });
       const cru = Uint8Array.from(atob(String(dataUrl).split(",")[1] || ""), (c) => c.charCodeAt(0));
       const pdf = await PDFDocument.load(bytes);
       const png = await pdf.embedPng(cru);
       const font = await pdf.embedFont(StandardFonts.Helvetica);
+      const semAcento = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7E]/g, "");
       const page = pdf.addPage([595.28, 841.89]);
+      pdf.setSubject("INTEGRA|" + codigo);
+      pdf.setKeywords(["INTEGRA", codigo]);
       page.drawText("Autenticacao do documento", { x: 48, y: 760, size: 16, font, color: rgb(0.06, 0.2, 0.13) });
       page.drawText("Codigo " + codigo, { x: 48, y: 732, size: 12, font, color: rgb(0.12, 0.16, 0.2) });
-      page.drawText("Este codigo identifica o arquivo gerado pelo Integra.", { x: 48, y: 708, size: 11, font, color: rgb(0.2, 0.25, 0.3) });
-      page.drawText("A prova do arquivo original fica guardada para consulta.", { x: 48, y: 692, size: 11, font, color: rgb(0.2, 0.25, 0.3) });
-      page.drawImage(png, { x: 48, y: 520, width: 150, height: 150 });
+      page.drawText(semAcento(info.tipo), { x: 48, y: 708, size: 12, font, color: rgb(0.12, 0.16, 0.2) });
+      page.drawText("Titulo: " + semAcento(info.titulo || "-").slice(0, 70), { x: 48, y: 686, size: 11, font, color: rgb(0.2, 0.25, 0.3) });
+      page.drawText("Unidade: " + semAcento(info.unidade || "-").slice(0, 70), { x: 48, y: 668, size: 11, font, color: rgb(0.2, 0.25, 0.3) });
+      page.drawText("Cliente: " + semAcento(info.cliente || "-").slice(0, 70), { x: 48, y: 650, size: 11, font, color: rgb(0.2, 0.25, 0.3) });
+      page.drawImage(png, { x: 48, y: 460, width: 168, height: 168 });
       const out = new Uint8Array(await pdf.save());
       let aviso = "";
       try {
         const hash = await this.sha256Hex(out);
-        await this.guardarAutenticacao(codigo, hash, arquivo);
+        await this.guardarAutenticacao(codigo, hash, arquivo, info);
       } catch (e) {
         aviso = "O QR Code foi impresso, mas a prova não ficou salva no Firebase. " + (e && e.message ? e.message : "");
       }

@@ -1382,14 +1382,14 @@ const ComprasPrevisoesApp = {
   },
 
   sessionUser() {
-    const cu = (window.AppState && AppState.currentUser) || null;
+    const acesso = typeof window.crmUsuarioAcesso === "function" ? window.crmUsuarioAcesso() : null;
+    const cu = acesso || (window.AppState && AppState.currentUser) || null;
     if (!cu) return null;
-    let list = [];
-    try { list = JSON.parse(localStorage.getItem("crm_users") || "[]"); } catch (e) { list = []; }
-    if (!Array.isArray(list)) list = [];
-    const email = String(cu.email || "").toLowerCase().trim();
-    const found = email ? list.find((u) => String(u.email || "").toLowerCase().trim() === email) : null;
-    return found || cu;
+    if (typeof window.findCrmRegisteredUser === "function") {
+      const found = window.findCrmRegisteredUser(cu);
+      if (found) return found;
+    }
+    return cu;
   },
 
   isPagadoriaProfile(name) {
