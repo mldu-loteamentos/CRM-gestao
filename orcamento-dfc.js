@@ -94,6 +94,46 @@ const OrcamentoDfcApp = {
     this.selectedCcIds = this.selectedCcIds.filter((id) => vivos.has(String(id)));
   },
 
+  visaoDfc() {
+    if (typeof FluxoCaixaApp !== "undefined" && typeof FluxoCaixaApp.visao === "function") {
+      return FluxoCaixaApp.visao() || { groups: [] };
+    }
+    let visoes = [];
+    try { visoes = JSON.parse(localStorage.getItem("crm_plano_visoes_v2") || "[]") || []; } catch (e) { visoes = []; }
+    return visoes.find((v) => v.id === "dfc_default") || { groups: [] };
+  },
+
+  /** Nó da visão DFC em que a conta está alocada. A alocação salva vale antes do palpite pelo nome. */
+  grupoDaConta(conta, nome) {
+    const dotted = String(conta || "").trim();
+    const key = dotted.replace(/\D/g, "");
+    const visao = this.visaoDfc();
+    const ignored = new Set();
+    (visao.ignoredAccounts || []).forEach((id) => {
+      const sid = String(id || "").trim();
+      if (!sid) return;
+      ignored.add(sid);
+      const nk = sid.replace(/\D/g, "");
+      if (nk) ignored.add(nk);
+    });
+    if (ignored.has(dotted) || (key && ignored.has(key))) return null;
+    let found = null;
+    (visao.groups || []).forEach((g) => {
+      if (!g || g.type !== "resultado") return;
+      (g.accounts || []).forEach((id) => {
+        const sid = String(id || "").trim();
+        const nk = sid.replace(/\D/g, "");
+        if (sid === dotted || (key && nk && nk === key)) found = g.id;
+      });
+    });
+    if (found) return found;
+    const plano = typeof PlanoFinanceiroApp !== "undefined" ? PlanoFinanceiroApp : null;
+    if (plano && typeof plano.suggestGroup === "function") {
+      return plano.suggestGroup({ id: dotted, name: nome });
+    }
+    return null;
+  },
+
   montar() {
     const plano = typeof PlanoFinanceiroApp !== "undefined" ? PlanoFinanceiroApp : null;
     const fluxo = typeof FluxoCaixaApp !== "undefined" ? FluxoCaixaApp : null;
@@ -106,9 +146,7 @@ const OrcamentoDfcApp = {
     tpl.forEach((g) => { byId[g.id] = g; });
     const fora = new Map();
     this.linhasFiltradas().forEach((l) => {
-      const gid = plano && typeof plano.suggestGroup === "function"
-        ? plano.suggestGroup({ id: l.conta, name: l.cn })
-        : null;
+      const gid = this.grupoDaConta(l.conta, l.cn);
       const g = gid ? byId[gid] : null;
       if (!g || g.type !== "resultado") {
         const key = String(l.conta || "") + "|" + String(l.cn || "");
@@ -119,8 +157,16 @@ const OrcamentoDfcApp = {
       }
       let acc = g.accs.get(l.conta);
       if (!acc) {
-        acc = { conta: l.conta, cn: l.cn, months: Array(12).fill(0) };
+        acc = { conta: l.conta, cn: l.cn, months: Array(12).fill(0), ccs: new Map() };
         g.accs.set(l.conta, acc);
+      }
+      const ccId = String(l.cc || "").trim() || "—";
+      let cc = acc.ccs.get(ccId);
+      if (!cc) {
+        cc = { id: ccId, name: String(l.en || "").trim(), months: Array(12).fill(0) };
+        acc.ccs.set(ccId, cc);
+      } else if (!cc.name && l.en) {
+        cc.name = String(l.en).trim();
       }
       (l.m || []).forEach((v, i) => {
         if (i > 11) return;
@@ -128,6 +174,7 @@ const OrcamentoDfcApp = {
           ? fluxo.signedAmount(g, l.conta, l.cn, v)
           : (Number(v) || 0);
         acc.months[i] += s;
+        cc.months[i] += s;
         g.months[i] += s;
       });
     });
@@ -190,15 +237,35 @@ const OrcamentoDfcApp = {
       if (!this.expanded.has(node.id)) return;
       children.forEach((ch) => walk(ch, level + 1));
       accs.forEach((a) => {
+        const accId = "acc:" + node.id + ":" + a.conta;
+        const ccs = [...(a.ccs ? a.ccs.values() : [])]
+          .filter((c) => c.months.some((v) => Math.abs(v) >= 0.005))
+          .sort((x, y) => String(x.id).localeCompare(String(y.id), "pt-BR", { numeric: true }));
         rows.push({
-          id: "acc:" + node.id + ":" + a.conta,
+          id: accId,
           name: a.conta + " " + (a.cn || ""),
           type: "conta",
           level: level + 1,
-          hasKids: false,
+          hasKids: ccs.length > 0,
           isAccount: true,
+          isCc: false,
           months: a.months,
           total: a.months.reduce((x, y) => x + y, 0)
+        });
+        if (!ccs.length || !this.expanded.has(accId)) return;
+        ccs.forEach((c) => {
+          const label = c.id === "—" ? "Sem centro de custo" : (c.name ? c.id + " - " + c.name : c.id);
+          rows.push({
+            id: accId + ":" + c.id,
+            name: label,
+            type: "cc",
+            level: level + 2,
+            hasKids: false,
+            isAccount: false,
+            isCc: true,
+            months: c.months,
+            total: c.months.reduce((x, y) => x + y, 0)
+          });
         });
       });
     };
@@ -421,6 +488,7 @@ const OrcamentoDfcApp = {
     const trs = rows.map((r) => {
       const cls = [
         r.isAccount ? "orc-dfc-acc" : "",
+        r.isCc ? "orc-dfc-cc" : "",
         r.type === "formula" ? "orc-dfc-formula" : "",
         r.type === "total_n1" ? "orc-dfc-n1" : ""
       ].filter(Boolean).join(" ");

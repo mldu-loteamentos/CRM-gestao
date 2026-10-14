@@ -9755,6 +9755,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .orc-dfc-n1 td { background: #f8fafc; font-weight: 800; }
 .orc-dfc-formula td { background: #ecfdf5; font-weight: 800; color: #064e3b; }
 .orc-dfc-acc td { font-weight: 600; }
+.orc-dfc-cc td { background: #f8fafc; font-weight: 500; color: #334155; }
 .orc-dfc-neg { color: #991b1b; }
 .orc-dfc-formula .orc-dfc-neg { color: #991b1b; }
 .orc-dfc-erro { margin-bottom: 10px; padding: 10px 12px; border-radius: 8px; background: #fff7ed; color: #9a3412; border: 1px solid #fdba74; }

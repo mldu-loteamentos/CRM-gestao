@@ -931,6 +931,7 @@ const CessaoPopupState = {
   tab: "cedentes",
   loading: false,
   gerando: false,
+  enviandoClick: false,
   ctx: null,
   customer: null,
   contract: {},
@@ -1117,6 +1118,7 @@ const CessaoPopup = {
       tab: "cedentes",
       loading: true,
       gerando: false,
+      enviandoClick: false,
       ctx: ctx,
       customer: null,
       contract: {},
@@ -1187,6 +1189,7 @@ const CessaoPopup = {
           <span class="cessao-pop-aviso" id="cessao-popup-aviso"></span>
           <button type="button" class="btn btn-cancel" onclick="CessaoPopup.fechar()">Cancelar</button>
           <button type="button" class="btn btn-outline" id="cessao-popup-voltar" onclick="CessaoPopup.voltar()">Voltar</button>
+          <button type="button" class="btn btn-outline" id="cessao-popup-clicksign" onclick="CessaoPopup.enviarClickSign()" style="display:none;">Enviar para ClickSign</button>
           <button type="button" class="btn btn-primary" id="cessao-popup-proximo" onclick="CessaoPopup.proximo()"></button>
         </footer>
       </div>`;
@@ -1677,7 +1680,16 @@ const CessaoPopup = {
       prox.innerHTML = st.tab === "testemunhas"
         ? (st.gerando ? `<span class="btn-spin"></span> Gerando...` : `<i data-lucide="file-down" style="width:16px;height:16px;"></i> Gerar cessão`)
         : "Avançar";
-      prox.disabled = !!st.loading || !!st.gerando || (st.tab === "testemunhas" && !!this.pendenciaPdf());
+      prox.disabled = !!st.loading || !!st.gerando || !!st.enviandoClick || (st.tab === "testemunhas" && !!this.pendenciaPdf());
+    }
+    const click = document.getElementById("cessao-popup-clicksign");
+    if (click) {
+      const mostra = st.tab === "testemunhas" && !st.loading;
+      click.style.display = mostra ? "" : "none";
+      click.disabled = !mostra || !!st.gerando || !!st.enviandoClick || !!this.pendenciaPdf();
+      click.innerHTML = st.enviandoClick
+        ? `<span class="btn-spin"></span> Enviando...`
+        : `<i data-lucide="pen-line" style="width:16px;height:16px;"></i> Enviar para ClickSign`;
     }
     const aviso = document.getElementById("cessao-popup-aviso");
     if (aviso) aviso.textContent = st.loading ? "" : (st.tab === "testemunhas" ? this.pendenciaPdf() : this.pendenciaAba(st.tab));
@@ -2657,13 +2669,7 @@ const CessaoPopup = {
     return `<div style="font-family:'Times New Roman',serif;line-height:1.55;margin-top:8px;">${linhas.map((l) => `<div>${this.htmlTexto(l)}</div>`).join("")}</div>`;
   },
 
-  async baixarJunto(rel, pdfA, pdfB, fileName) {
-    const { PDFDocument } = await rel._carregarPdfLib();
-    const out = await PDFDocument.load(pdfA.output("arraybuffer"));
-    const extra = await PDFDocument.load(pdfB.output("arraybuffer"));
-    const pages = await out.copyPages(extra, extra.getPageIndices());
-    pages.forEach((p) => out.addPage(p));
-    const bytes = await out.save();
+  baixarBytes(bytes, fileName) {
     const blob = new Blob([bytes], { type: "application/pdf" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -2674,99 +2680,196 @@ const CessaoPopup = {
     setTimeout(() => URL.revokeObjectURL(a.href), 30000);
   },
 
+  async juntarPdfs(rel, pdfA, pdfB) {
+    const { PDFDocument } = await rel._carregarPdfLib();
+    const out = await PDFDocument.load(pdfA.output("arraybuffer"));
+    const extra = await PDFDocument.load(pdfB.output("arraybuffer"));
+    const pages = await out.copyPages(extra, extra.getPageIndices());
+    pages.forEach((p) => out.addPage(p));
+    return out.save();
+  },
+
+  base64De(bytes) {
+    const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    let bin = "";
+    const passo = 0x8000;
+    for (let i = 0; i < u8.length; i += passo) {
+      bin += String.fromCharCode.apply(null, u8.subarray(i, i + passo));
+    }
+    return btoa(bin);
+  },
+
+  signatariosClick() {
+    const st = CessaoPopupState;
+    const lista = [];
+    const add = (nome, email, papel) => {
+      const e = String(email || "").trim();
+      const n = String(nome || "").trim();
+      if (!e || !n || !e.includes("@")) return;
+      if (lista.some((x) => x.email.toLowerCase() === e.toLowerCase())) return;
+      lista.push({ nome: n, email: e, papel });
+    };
+    (st.cedentes || []).filter((c) => c.cede && Number(c.cederPct) > 0).forEach((c) => {
+      add((c.customer && c.customer.name) || c.name, this.emailDe(c.customer), "Cedente");
+    });
+    (st.cessionarios || []).forEach((row) => {
+      add(row.customer && row.customer.name, this.emailDe(row.customer), "Cessionário");
+      if (row.representante) add(row.representante.name, this.emailDe(row.representante), "Representante");
+    });
+    const users = typeof getDistratoWitnessUsers === "function" ? getDistratoWitnessUsers() : [];
+    const w = (id) => users.find((u) => String(u.id) === String(id)) || {};
+    [w(st.testemunha1), w(st.testemunha2)].forEach((u) => {
+      add(u.name || u.nome, u.email || u.mail, "Testemunha");
+    });
+    return lista;
+  },
+
+  async montarPacotePdf() {
+    const rel = window.RelacionamentoApp;
+    if (!rel || typeof rel._baixarPaginasPdf !== "function" || typeof rel._paginarDoc !== "function") {
+      throw new Error("O gerador de PDF dos documentos não está disponível.");
+    }
+    const st = CessaoPopupState;
+    if (!st.preamble || /NÃO CADASTRADO/i.test(String(st.preamble))) {
+      throw new Error("Preâmbulo não cadastrado para o centro de custo deste contrato. Cadastre-o antes de gerar a cessão.");
+    }
+    const ud = st.unitDetails || {};
+    const matriculaRaw = ud.legalRegistrationNumber || ud.legalregistrationnumber || "";
+    const matriculaNum = String(matriculaRaw || "").replace(/\D/g, "");
+    const matricula = matriculaNum ? Number(matriculaNum).toLocaleString("pt-BR") : (matriculaRaw || "____");
+    const areaNum = typeof window.parseAreaNumber === "function"
+      ? window.parseAreaNumber(ud.privateArea || ud.Privatearea || ud.terrainArea)
+      : Number(ud.privateArea || 0);
+    const areaTxt = areaNum
+      ? areaNum.toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + " (" + this.extensoQtd(Math.round(areaNum)) + " metros quadrados)"
+      : "____";
+    const lote = st.quadraLote && st.quadraLote !== "—" ? st.quadraLote : "____";
+    const emp = st.empName || "____";
+    const data = st.dataVenda ? CessaoApp.fmtDate(st.dataVenda) : "____";
+    const pct = this.totalCedido();
+    const pctTxt = Math.abs(pct - Math.round(pct)) < 0.001 ? String(Math.round(pct)) : this.fmtPct(pct);
+    const preco = Number(st.valorPago) || 0;
+    const cedentes = (st.cedentes || []).filter((c) => c.cede && Number(c.cederPct) > 0);
+    const ces = st.cessionarios || [];
+    const paragrafos = [
+      "Por este instrumento particular de cessão de direitos sobre imóveis, de um lado " + this.blocoPessoas(cedentes.map((c) => ({ customer: c.customer, representante: null })), "chamado(s) simplesmente CEDENTE(S)."),
+      "De outro lado, " + this.blocoPessoas(ces, "denominado(s) simplesmente CESSIONÁRIO(S), têm entre si como justo e contratado o que segue:"),
+      "1. Por força de contrato de promessa de compra e venda, firmado em " + data + ", o(s) CEDENTE(S) tornou-se (tornaram-se) titular(es) dos direitos aquisitivos do imóvel Lote-Quadra " + lote + ", do loteamento " + emp + ", matrícula nº " + matricula + ", com " + areaTxt + "; livre e desembaraçado de todos e quaisquer ônus com o PROMITENTE(S) VENDEDOR(ES) " + String(st.preamble).trim().replace(/[.;,\s]+$/, "") + ". De ora em diante denominado(s) ANUENTE(S).",
+      "1.1. Para pagamento do contrato em comento, o(s) CEDENTE(S) aceitou(aram) o pagamento da " + this.textoCondicoes() + ".",
+      this.clausulaReajuste(),
+      this.clausulaJuros(),
+      "1.4. No caso de inadimplemento no pagamento de qualquer parcela, incidem juros de 1% ao mês e multa moratória de 2%, além da correção monetária.",
+      this.clausulaPagas(),
+      "2. Pelo presente instrumento, o(s) CEDENTE(S) cede(m) e transfere(m) ao(s) CESSIONÁRIO(S) os seus direitos e obrigações para adquirir(em) referido imóvel, pelo preço estipulado na cláusula 4.",
+      "3. O ora CESSIONÁRIO(S) sub-roga-se em todas as cláusulas e condições daquele compromisso, obrigando-se a cumprir fielmente as estipulações contratuais nele avençadas.",
+      "4. O preço certo e ajustado para a presente cessão é de " + this.money(preco) + " (" + this.extensoValor(preco) + "), pago pelo(s) CESSIONÁRIO(S) neste ato, do qual o(s) CEDENTE(S) outorga(m) a mais geral e irrevogável quitação.",
+      this.clausulaSaldo(),
+      "5.1. Em caso de atraso no pagamento de qualquer parcela acarretará ao(s) CESSIONÁRIO(S) as sanções descritas no contrato acerca do inadimplemento, notadamente a atualização do valor, juros de mora, multa, honorários advocatícios e a inclusão no cadastro de inadimplentes (SCPC/SERASA), além de todas as outras cominações consignadas, nas formas estabelecidas no contrato particular de compromisso de compra e venda.",
+      "6. Todos os impostos e taxas que incidam ou venham a incidir sobre o imóvel, a partir da presente data, correrão por conta exclusiva do(s) CESSIONÁRIO(S), sendo que o(s) CEDENTE(S) apresenta(m) nesta ocasião a certidão negativa de débitos.",
+      "7. O presente instrumento é feito em caráter irrevogável e irretratável, obrigando não só as partes contratantes como também seus herdeiros e sucessores.",
+      "8. O(s) CESSIONÁRIO(S) arcará(ão) com o pagamento de todas as despesas necessárias para a efetivação desta cessão, inclusive tributos que onerem ou venham onerar a presente transação.",
+      "9. O(s) ANUENTE(S) declara(m) nada ter a opor à presente cessão, desobrigando assim o(s) CEDENTE(S) de quaisquer responsabilidades e obrigações decorrentes do compromisso celebrado, as quais, por força deste contrato, passam a constituir único e exclusivo encargo do(s) CESSIONÁRIO(S).",
+      "10. O(s) CESSIONÁRIO(S) declara(m) e confessa(m) ter plena ciência do contrato original firmado entre o(s) CEDENTE(S) e o(s) ANUENTE(S), ratificando todos seus termos nesta ocasião, sendo que o mesmo segue encartado à presente cessão como anexo.",
+      this.clausulaContato(),
+      "11.1. O(s) CESSIONÁRIO(S) se obriga(m) a comunicar imediatamente, por escrito, o(s) ANUENTE(S), qualquer eventual mudança de seu endereço e domicílio, sob pena de não o fazendo, considerarem-se regularmente recebidos os avisos e comunicações enviados para o último endereço comunicado. Nesta hipótese, nenhuma responsabilidade poderá ser imputada ao(s) PROMITENTE(S) VENDEDOR(ES), pelas consequências do desconhecimento de tais avisos e comunicações.",
+      "12. A escritura definitiva será outorgada diretamente ao(s) CESSIONÁRIO(S), a que tudo se dará por firme e valioso, em conformidade e mantendo-se os termos contratuais, uma vez estando integralizados os pagamentos das prestações aqui convencionadas, além de cumpridas todas as demais cláusulas e condições do contrato de compromisso de venda e compra.",
+      "13. A presente cessão é assinada nos termos da lei 6.766/79 com as alterações dadas pela lei nº 13.786/2018 (lei do distrato), cuja aplicação concordam as partes.",
+      "14. As partes elegem o foro da Comarca de Botucatu-SP para dirimir eventuais litígios decorrentes do presente."
+    ];
+    const blocos = paragrafos.map((p) => this.htmlTexto(p));
+    blocos.push(this.assinaturaHtml());
+    const cod = st.unit.costCenterId || st.contract.enterpriseId || "";
+    const unidade = [cod, st.quadraLote].filter((x) => x && x !== "—").join(" - ");
+    const titulo = st.titulo || "____";
+    const topo = `<div style="font-family:'Times New Roman',serif;font-size:11pt;color:#111;margin:0 0 24px;">Título: ${this.esc(titulo)} | Unidade: ${this.esc(unidade || "____")}</div>
+      <h2 style="text-align:center;color:#111;font-size:13pt;font-weight:bold;letter-spacing:0.02em;margin:0 0 22px;font-family:'Times New Roman',serif;">CESSÃO DE DIREITOS ${this.esc(pctTxt)}% SOBRE INSTRUMENTO PARTICULAR DE COMPROMISSO DE COMPRA E VENDA DE TERRENO URBANO</h2>`;
+    const corpoCss = "font-family:'Times New Roman',serif;font-size:11pt;line-height:1.45;text-align:justify;white-space:pre-wrap;color:#111;";
+    const paginas = rel._paginarDoc(topo, blocos, corpoCss);
+    const nome = (ces[0] && ces[0].customer && ces[0].customer.name) || "";
+    const fileName = typeof window.buildFichaPdfFilename === "function"
+      ? window.buildFichaPdfFilename("Cessão de direitos", { contrato: unidade, costCenterId: cod, titulo: titulo, nome: nome })
+      : "Cessão de direitos | Título " + titulo + ".pdf";
+    const pdfCessao = await rel._baixarPaginasPdf(paginas, fileName, { retornar: true });
+    const assoc = this.loteamentoFechado(cod);
+    let avisoAdesao = "";
+    let bytes;
+    if (assoc.fechado && assoc.nome) {
+      const adesao = this.paginasAdesao(rel, { cod, unidade, titulo, pctTxt, nomeAssoc: assoc.nome });
+      const pdfAdesao = await rel._baixarPaginasPdf(adesao, fileName, { retornar: true });
+      bytes = await this.juntarPdfs(rel, pdfCessao, pdfAdesao);
+    } else {
+      if (assoc.fechado) avisoAdesao = "Este loteamento é fechado e ainda não tem o nome da associação no centro de custo. A cessão foi gerada sem o termo de adesão.";
+      bytes = new Uint8Array(pdfCessao.output("arraybuffer"));
+    }
+    return { bytes, fileName, avisoAdesao };
+  },
+
   async gerarPdf() {
     const erro = this.pendenciaPdf();
     if (erro) {
       alert(erro);
       return;
     }
-    const rel = window.RelacionamentoApp;
-    if (!rel || typeof rel._baixarPaginasPdf !== "function" || typeof rel._paginarDoc !== "function") {
-      alert("O gerador de PDF dos documentos não está disponível.");
-      return;
-    }
-    const st = CessaoPopupState;
-    if (!st.preamble || /NÃO CADASTRADO/i.test(String(st.preamble))) {
-      alert("Preâmbulo não cadastrado para o centro de custo deste contrato. Cadastre-o antes de gerar a cessão.");
-      return;
-    }
     CessaoPopupState.gerando = true;
     this.pintar();
     try {
-      const ud = st.unitDetails || {};
-      const matriculaRaw = ud.legalRegistrationNumber || ud.legalregistrationnumber || "";
-      const matriculaNum = String(matriculaRaw || "").replace(/\D/g, "");
-      const matricula = matriculaNum ? Number(matriculaNum).toLocaleString("pt-BR") : (matriculaRaw || "____");
-      const areaNum = typeof window.parseAreaNumber === "function"
-        ? window.parseAreaNumber(ud.privateArea || ud.Privatearea || ud.terrainArea)
-        : Number(ud.privateArea || 0);
-      const areaTxt = areaNum
-        ? areaNum.toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + " (" + this.extensoQtd(Math.round(areaNum)) + " metros quadrados)"
-        : "____";
-      const lote = st.quadraLote && st.quadraLote !== "—" ? st.quadraLote : "____";
-      const emp = st.empName || "____";
-      const data = st.dataVenda ? CessaoApp.fmtDate(st.dataVenda) : "____";
-      const pct = this.totalCedido();
-      const pctTxt = Math.abs(pct - Math.round(pct)) < 0.001 ? String(Math.round(pct)) : this.fmtPct(pct);
-      const preco = Number(st.valorPago) || 0;
-      const cedentes = (st.cedentes || []).filter((c) => c.cede && Number(c.cederPct) > 0);
-      const ces = st.cessionarios || [];
-      const paragrafos = [
-        "Por este instrumento particular de cessão de direitos sobre imóveis, de um lado " + this.blocoPessoas(cedentes.map((c) => ({ customer: c.customer, representante: null })), "chamado(s) simplesmente CEDENTE(S)."),
-        "De outro lado, " + this.blocoPessoas(ces, "denominado(s) simplesmente CESSIONÁRIO(S), têm entre si como justo e contratado o que segue:"),
-        "1. Por força de contrato de promessa de compra e venda, firmado em " + data + ", o(s) CEDENTE(S) tornou-se (tornaram-se) titular(es) dos direitos aquisitivos do imóvel Lote-Quadra " + lote + ", do loteamento " + emp + ", matrícula nº " + matricula + ", com " + areaTxt + "; livre e desembaraçado de todos e quaisquer ônus com o PROMITENTE(S) VENDEDOR(ES) " + String(st.preamble).trim().replace(/[.;,\s]+$/, "") + ". De ora em diante denominado(s) ANUENTE(S).",
-        "1.1. Para pagamento do contrato em comento, o(s) CEDENTE(S) aceitou(aram) o pagamento da " + this.textoCondicoes() + ".",
-        this.clausulaReajuste(),
-        this.clausulaJuros(),
-        "1.4. No caso de inadimplemento no pagamento de qualquer parcela, incidem juros de 1% ao mês e multa moratória de 2%, além da correção monetária.",
-        this.clausulaPagas(),
-        "2. Pelo presente instrumento, o(s) CEDENTE(S) cede(m) e transfere(m) ao(s) CESSIONÁRIO(S) os seus direitos e obrigações para adquirir(em) referido imóvel, pelo preço estipulado na cláusula 4.",
-        "3. O ora CESSIONÁRIO(S) sub-roga-se em todas as cláusulas e condições daquele compromisso, obrigando-se a cumprir fielmente as estipulações contratuais nele avençadas.",
-        "4. O preço certo e ajustado para a presente cessão é de " + this.money(preco) + " (" + this.extensoValor(preco) + "), pago pelo(s) CESSIONÁRIO(S) neste ato, do qual o(s) CEDENTE(S) outorga(m) a mais geral e irrevogável quitação.",
-        this.clausulaSaldo(),
-        "5.1. Em caso de atraso no pagamento de qualquer parcela acarretará ao(s) CESSIONÁRIO(S) as sanções descritas no contrato acerca do inadimplemento, notadamente a atualização do valor, juros de mora, multa, honorários advocatícios e a inclusão no cadastro de inadimplentes (SCPC/SERASA), além de todas as outras cominações consignadas, nas formas estabelecidas no contrato particular de compromisso de compra e venda.",
-        "6. Todos os impostos e taxas que incidam ou venham a incidir sobre o imóvel, a partir da presente data, correrão por conta exclusiva do(s) CESSIONÁRIO(S), sendo que o(s) CEDENTE(S) apresenta(m) nesta ocasião a certidão negativa de débitos.",
-        "7. O presente instrumento é feito em caráter irrevogável e irretratável, obrigando não só as partes contratantes como também seus herdeiros e sucessores.",
-        "8. O(s) CESSIONÁRIO(S) arcará(ão) com o pagamento de todas as despesas necessárias para a efetivação desta cessão, inclusive tributos que onerem ou venham onerar a presente transação.",
-        "9. O(s) ANUENTE(S) declara(m) nada ter a opor à presente cessão, desobrigando assim o(s) CEDENTE(S) de quaisquer responsabilidades e obrigações decorrentes do compromisso celebrado, as quais, por força deste contrato, passam a constituir único e exclusivo encargo do(s) CESSIONÁRIO(S).",
-        "10. O(s) CESSIONÁRIO(S) declara(m) e confessa(m) ter plena ciência do contrato original firmado entre o(s) CEDENTE(S) e o(s) ANUENTE(S), ratificando todos seus termos nesta ocasião, sendo que o mesmo segue encartado à presente cessão como anexo.",
-        this.clausulaContato(),
-        "11.1. O(s) CESSIONÁRIO(S) se obriga(m) a comunicar imediatamente, por escrito, o(s) ANUENTE(S), qualquer eventual mudança de seu endereço e domicílio, sob pena de não o fazendo, considerarem-se regularmente recebidos os avisos e comunicações enviados para o último endereço comunicado. Nesta hipótese, nenhuma responsabilidade poderá ser imputada ao(s) PROMITENTE(S) VENDEDOR(ES), pelas consequências do desconhecimento de tais avisos e comunicações.",
-        "12. A escritura definitiva será outorgada diretamente ao(s) CESSIONÁRIO(S), a que tudo se dará por firme e valioso, em conformidade e mantendo-se os termos contratuais, uma vez estando integralizados os pagamentos das prestações aqui convencionadas, além de cumpridas todas as demais cláusulas e condições do contrato de compromisso de venda e compra.",
-        "13. A presente cessão é assinada nos termos da lei 6.766/79 com as alterações dadas pela lei nº 13.786/2018 (lei do distrato), cuja aplicação concordam as partes.",
-        "14. As partes elegem o foro da Comarca de Botucatu-SP para dirimir eventuais litígios decorrentes do presente."
-      ];
-      const blocos = paragrafos.map((p) => this.htmlTexto(p));
-      blocos.push(this.assinaturaHtml());
-      const cod = st.unit.costCenterId || st.contract.enterpriseId || "";
-      const unidade = [cod, st.quadraLote].filter((x) => x && x !== "—").join(" - ");
-      const titulo = st.titulo || "____";
-      const topo = `<div style="font-family:'Times New Roman',serif;font-size:11pt;color:#111;margin:0 0 24px;">Título: ${this.esc(titulo)} | Unidade: ${this.esc(unidade || "____")}</div>
-        <h2 style="text-align:center;color:#111;font-size:13pt;font-weight:bold;letter-spacing:0.02em;margin:0 0 22px;font-family:'Times New Roman',serif;">CESSÃO DE DIREITOS ${this.esc(pctTxt)}% SOBRE INSTRUMENTO PARTICULAR DE COMPROMISSO DE COMPRA E VENDA DE TERRENO URBANO</h2>`;
-      const corpoCss = "font-family:'Times New Roman',serif;font-size:11pt;line-height:1.45;text-align:justify;white-space:pre-wrap;color:#111;";
-      const paginas = rel._paginarDoc(topo, blocos, corpoCss);
-      const nome = (ces[0] && ces[0].customer && ces[0].customer.name) || "";
-      const fileName = typeof window.buildFichaPdfFilename === "function"
-        ? window.buildFichaPdfFilename("Cessão de direitos", { contrato: unidade, costCenterId: cod, titulo: titulo, nome: nome })
-        : "Cessão de direitos | Título " + titulo + ".pdf";
-      const pdfCessao = await rel._baixarPaginasPdf(paginas, fileName, { retornar: true });
-      const assoc = this.loteamentoFechado(cod);
-      if (assoc.fechado && assoc.nome) {
-        const adesao = this.paginasAdesao(rel, { cod, unidade, titulo, pctTxt, nomeAssoc: assoc.nome });
-        const pdfAdesao = await rel._baixarPaginasPdf(adesao, fileName, { retornar: true });
-        await this.baixarJunto(rel, pdfCessao, pdfAdesao, fileName);
-      } else {
-        if (assoc.fechado) {
-          alert("Este loteamento é fechado e ainda não tem o nome da associação no centro de custo. A cessão foi gerada sem o termo de adesão.");
-        }
-        pdfCessao.save(fileName);
-      }
+      const pack = await this.montarPacotePdf();
+      if (pack.avisoAdesao) alert(pack.avisoAdesao);
+      this.baixarBytes(pack.bytes, pack.fileName);
       this.fechar();
     } catch (e) {
       console.error("[Cessão] PDF", e);
-      alert("Não foi possível gerar o PDF da cessão.");
+      alert(e && e.message ? e.message : "Não foi possível gerar o PDF da cessão.");
     } finally {
       CessaoPopupState.gerando = false;
+      const ov = document.getElementById("cessao-popup");
+      if (ov && ov.style.display === "flex") this.pintar();
+    }
+  },
+
+  async enviarClickSign() {
+    const erro = this.pendenciaPdf();
+    if (erro) {
+      alert(erro);
+      return;
+    }
+    const signatarios = this.signatariosClick();
+    if (!signatarios.length) {
+      alert("Nenhuma pessoa desta cessão tem e-mail para a ClickSign. O documento não foi enviado.");
+      return;
+    }
+    CessaoPopupState.enviandoClick = true;
+    this.pintar();
+    try {
+      const pack = await this.montarPacotePdf();
+      const res = await fetch("/api/clicksign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: pack.fileName,
+          nome: String(pack.fileName || "Cessão de direitos").replace(/\.pdf$/i, ""),
+          contentBase64: this.base64De(pack.bytes),
+          signatarios
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data || !data.ok) {
+        throw new Error((data && data.error) || "A ClickSign não recebeu o documento.");
+      }
+      const linhas = [
+        "O documento de teste foi criado na ClickSign, em rascunho.",
+        "Nenhum e-mail de assinatura foi disparado.",
+        "",
+        "Procure por: " + (data.nome || pack.fileName),
+        data.onde || ""
+      ].filter((x) => x !== undefined);
+      if (pack.avisoAdesao) linhas.push("", pack.avisoAdesao);
+      alert(linhas.join("\n"));
+    } catch (e) {
+      console.error("[Cessão] ClickSign", e);
+      alert(e && e.message ? e.message : "Não foi possível enviar para a ClickSign.");
+    } finally {
+      CessaoPopupState.enviandoClick = false;
       const ov = document.getElementById("cessao-popup");
       if (ov && ov.style.display === "flex") this.pintar();
     }

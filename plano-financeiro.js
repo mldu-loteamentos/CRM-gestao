@@ -383,6 +383,7 @@ const PlanoFinanceiroApp = {
       ['2.03.05', 'g_05_03'],
       ['2.09.03', 'g_05_09'],
       ['2.09.01', 'g_05_09'],
+      ['2.10.01', 'g_05_06'],
       ['2.11.03', 'g_04_01'],
       ['2.11.00', 'g_04_01'],
       ['2.11.01', 'g_05_08'],
@@ -430,7 +431,8 @@ const PlanoFinanceiroApp = {
     if (/JUROS ATIVOS|DESCONTO DE JUROS CONTRAT/.test(name)) return 'g_01_01';
     if (/RECEITA DE (ADMINISTRACAO|SERVICOS TECNICOS|TAXA DE CESSAO|LOCAC|COMISSAO)/.test(name)) return 'g_01_02';
     if (/VENDA DE (AREA|EQUIPAMENTO|SUCATA|VEICULO)/.test(name)) return 'g_01_03';
-    if (/RECEBIMENTO EM DUPLIC|DEPOSITOS NAO IDENT|REEMBOLSO/.test(name)) return 'g_01_03';
+    if (/RECEBIMENTO EM DUPLIC|DEPOSITOS NAO IDENT/.test(name)) return 'g_01_03';
+    if (/REEMBOLSO/.test(name) && !/DESPESA/.test(name)) return 'g_01_03';
     if (/^PIS$|^COFINS$/.test(name)) return 'g_02_01';
     if (/^IRPJ$|^CSLL$/.test(name)) return 'g_02_02';
     if (/DESPESA DE ADMINISTRACAO DE EMPREEND/.test(name)) return 'g_04_04';
