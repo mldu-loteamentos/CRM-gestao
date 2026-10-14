@@ -791,62 +791,48 @@ const MarketingBudgetApp = {
     this.state.categorias = cats;
   },
 
-  /* PPC atendido vira nota. Se a nota já está nesta consulta, o pedido sai da lista para o valor não entrar duas vezes. */
+  /* PPC e PCT que já viraram nota saem da verba inteira. O realizado deles é a nota. */
+  chavePedido(row, app) {
+    const code = app.docCode(row && row.docId);
+    if (code === "PCT") return row && row.titulo ? "PCT:" + row.titulo : "";
+    if (code !== "PPC") return "";
+    const key = typeof app.pedidoKey === "function" ? app.pedidoKey(row && row.docNum) : "";
+    return key ? "PPC:" + key : "";
+  },
+
   async tirarPpcQueVirouNota(gen) {
     const app = window.ComprasPrevisoesApp || window.ComprasControleApp;
     const s = this.state;
     if (!app || typeof app.docCode !== "function" || typeof window.siengeFetchWithRetry !== "function") return;
-    const pedidoDe = (row) => (typeof app.pedidoKey === "function" ? app.pedidoKey(row && row.docNum) : "");
-    const pedidos = [];
+    const grupos = {};
     (s.rows || []).forEach((row) => {
-      if (app.docCode(row.docId) !== "PPC") return;
-      const key = pedidoDe(row);
-      if (key && pedidos.indexOf(key) < 0) pedidos.push(key);
+      const chave = this.chavePedido(row, app);
+      if (!chave) return;
+      const g = grupos[chave] || (grupos[chave] = { realizado: false, ppc: "", pct: "" });
+      if (row.status === "realizado") g.realizado = true;
+      if (chave.indexOf("PPC:") === 0) g.ppc = chave.slice(4);
+      if (chave.indexOf("PCT:") === 0) g.pct = chave.slice(4);
     });
-    if (!pedidos.length) return;
-    const notasPorPedido = {};
-    const lote = 4;
-    for (let i = 0; i < pedidos.length; i += lote) {
-      if (gen !== s.gen) return;
-      const fatia = pedidos.slice(i, i + lote);
-      const feito = Math.min(pedidos.length, i + fatia.length);
-      this.setProgress("Conferindo pedidos que já viraram nota…", 0.88 + 0.05 * (feito / pedidos.length));
-      const achadas = await Promise.all(fatia.map((pedido) => this.notasDoPedido(pedido)));
-      fatia.forEach((pedido, idx) => { notasPorPedido[pedido] = achadas[idx] || []; });
-    }
-    if (gen !== s.gen) return;
-    const numDe = (v) => {
-      const t = String(v == null ? "" : v).trim();
-      return /^\d+$/.test(t) ? String(Number(t)) : "";
-    };
-    const fold = (v) => (typeof app.fold === "function" ? app.fold(v) : String(v || "").trim().toUpperCase());
+    const chaves = Object.keys(grupos);
+    if (!chaves.length) return;
     const cobertos = {};
-    pedidos.forEach((pedido) => {
-      const notas = notasPorPedido[pedido] || [];
-      if (!notas.length) return;
-      const ppcRows = (s.rows || []).filter((row) => app.docCode(row.docId) === "PPC" && pedidoDe(row) === pedido);
-      const credores = {};
-      ppcRows.forEach((row) => { credores[fold(row.credor)] = 1; });
-      const billIds = {};
-      const nums = {};
-      notas.forEach((n) => {
-        if (n.billId) billIds[String(n.billId)] = 1;
-        const num = numDe(n.number);
-        if (num) nums[num] = 1;
-      });
-      const aparece = (s.rows || []).some((row) => {
-        if (app.docCode(row.docId) === "PPC") return false;
-        if (billIds[String(row.titulo)]) return true;
-        if (typeof app.isNotaDoc !== "function" || !app.isNotaDoc(row.docId, row.documento, null)) return false;
-        return !!nums[numDe(row.docNum)] && !!credores[fold(row.credor)];
-      });
-      if (aparece) cobertos[pedido] = 1;
-    });
-    if (!Object.keys(cobertos).length) return;
-    const rows = (s.rows || []).filter((row) => {
-      if (app.docCode(row.docId) !== "PPC") return true;
-      return !cobertos[pedidoDe(row)];
-    });
+    chaves.forEach((chave) => { if (grupos[chave].realizado) cobertos[chave] = 1; });
+    const ppcAbertos = chaves.filter((chave) => grupos[chave].ppc && !cobertos[chave]);
+    const pctAbertos = chaves.filter((chave) => grupos[chave].pct && !cobertos[chave]);
+    const lote = 4;
+    const conferir = ppcAbertos.concat(pctAbertos);
+    for (let i = 0; i < conferir.length; i += lote) {
+      if (gen !== s.gen) return;
+      const fatia = conferir.slice(i, i + lote);
+      const feito = Math.min(conferir.length, i + fatia.length);
+      this.setProgress("Conferindo pedidos que já viraram nota…", 0.88 + 0.05 * (feito / conferir.length));
+      const achadas = await Promise.all(fatia.map((chave) => grupos[chave].ppc
+        ? this.notasDoPedido(grupos[chave].ppc)
+        : this.notasDoPct(grupos[chave].pct)));
+      fatia.forEach((chave, idx) => { if ((achadas[idx] || []).length) cobertos[chave] = 1; });
+    }
+    if (gen !== s.gen || !Object.keys(cobertos).length) return;
+    const rows = (s.rows || []).filter((row) => !cobertos[this.chavePedido(row, app)]);
     rows.forEach((row, i) => { row.idx = i; });
     const cats = {};
     rows.forEach((row) => {
@@ -897,6 +883,30 @@ const MarketingBudgetApp = {
       seen[key] = 1;
       return true;
     });
+  },
+
+  async notasDoPct(titulo) {
+    const app = window.ComprasPrevisoesApp || window.ComprasControleApp;
+    const bill = await window.siengeFetchWithRetry("/bills/" + encodeURIComponent(titulo), 1).catch(() => null);
+    const contract = String(bill && bill.contractNumber || "").trim();
+    const companyId = bill && (bill.companyId || bill.debtorId);
+    const creditorId = bill && bill.creditorId;
+    if (!contract || !companyId || !creditorId || !app || typeof app.titulosDoContrato !== "function") return [];
+    const med = await window.siengeFetchWithRetry(
+      "/supply-contracts/measurements/all?documentId=CT&contractNumber=" + encodeURIComponent(contract) + "&companyId=" + encodeURIComponent(companyId) + "&limit=200",
+      1
+    ).catch(() => null);
+    const measurements = (med && med.results) || [];
+    const dates = measurements.map((m) => String(m && m.measurementDate || "").slice(0, 10)).filter(Boolean).sort();
+    const start = dates[0] || String(bill.issueDate || "").slice(0, 10);
+    if (!start) return [];
+    const fim = new Date();
+    const end = fim.getFullYear() + "-" + String(fim.getMonth() + 1).padStart(2, "0") + "-" + String(fim.getDate()).padStart(2, "0");
+    const linked = await app.titulosDoContrato(creditorId, contract, start, end, titulo).catch(() => []);
+    return (linked || []).filter((item) => app.isNotaDoc(item.documentIdentificationId, item.documentIdentificationName || item.documentNumber, item)).map((item) => ({
+      number: String(item.documentNumber || "").trim(),
+      billId: item.id != null ? String(item.id) : ""
+    }));
   },
 
   async buscarVendas(cc, gen) {
@@ -1871,7 +1881,7 @@ const MarketingBudgetApp = {
       </div>
       <div class="mkb-card mkb-chart-full"><div class="mkb-card-h"><h3>Verba e gastos mês a mês</h3><small>Barras = o que foi pago e o que está comprometido · linha = acumulado comparado com a verba</small></div><div class="mkb-canvas"><canvas id="mkb-ch-mes"></canvas></div></div>
       <div class="mkb-card">
-        <div class="mkb-card-h"><h3>Títulos que compõem a verba</h3><small>A baixa entra no realizado no dia do pagamento, pelo líquido mais os impostos retidos. Em aberto entra no comprometido. Previsão ou nota vencida antes de hoje não fica no mês passado: entra no comprometido de hoje, porque será prorrogada ou cancelada. Pedido de compra já atendido sai da lista quando a nota dele já está aqui.</small></div>
+        <div class="mkb-card-h"><h3>Títulos que compõem a verba</h3><small>A baixa entra no realizado no dia do pagamento, pelo líquido mais os impostos retidos. Em aberto entra no comprometido. Previsão ou nota vencida antes de hoje não fica no mês passado: entra no comprometido de hoje, porque será prorrogada ou cancelada. PPC e PCT que já foram pagos, ou que já viraram nota, saem da verba. O valor fica na nota.</small></div>
         <div id="mkb-gastos">${this.gastosHtml(r)}</div>
       </div>`;
     const vendas = `
