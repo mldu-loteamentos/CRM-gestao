@@ -1994,6 +1994,8 @@ window.VerificarConstrucaoApp = {
             }, { merge: true }).catch(err => console.error('[Vistoria] Falha ao sincronizar obras em andamento:', err));
         }
         document.getElementById('modal-obras-andamento').style.display = 'none';
+        const viewDistrato = document.getElementById('view-distrato');
+        if (viewDistrato && viewDistrato.style.display !== 'none' && typeof calculateDistrato === 'function') calculateDistrato();
         this.renderTable();
         if (typeof window._vcUpdateSprintCountsFromRows === 'function') {
             window._vcUpdateSprintCountsFromRows(this.allRows);

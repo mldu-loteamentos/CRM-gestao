@@ -225,6 +225,12 @@ const FluxoCaixaDiarioApp = {
   detOpen: {},
   contasAbertas: { corrente: false, investimento: false },
   mostrarNaoUteis: false,
+  aba: "movimento",
+  radarYm: "",
+  radar: null,
+  histEntradas: null,
+  histCarregando: false,
+  _histChave: "",
   compAberto: false,
   semConcAberto: false,
   semConcDia: "",
@@ -266,6 +272,425 @@ const FluxoCaixaDiarioApp = {
     const endD = new Date(n.getFullYear(), n.getMonth() + 4, 0);
     const iso = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
     return { start: iso(startD), end: iso(endD) };
+  },
+
+  mesRadar() {
+    return this.radarYm || this.hoje().slice(0, 7);
+  },
+
+  setAba(id) {
+    this.aba = id === "receber" || id === "pagar" ? id : "movimento";
+    this.render();
+    if (this.aba === "receber") this.carregarHistorico();
+  },
+
+  setRadarYm(ym) {
+    if (!/^\d{4}-\d{2}$/.test(String(ym || ""))) return;
+    this.radarYm = ym;
+    this.radar = null;
+    this.render();
+    this.carregarRadar();
+  },
+
+  radarDocId() {
+    const co = (this.companyIds && this.companyIds[0]) || "0";
+    return String(co) + "-" + this.mesRadar();
+  },
+
+  nomeMes(ym) {
+    const meses = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+    const p = String(ym || "").split("-");
+    return (meses[Number(p[1]) - 1] || ym) + " de " + (p[0] || "");
+  },
+
+  mesesDaTela() {
+    const b = this.monthBounds();
+    const out = [];
+    let ym = b.start.slice(0, 7);
+    const fim = b.end.slice(0, 7);
+    while (ym <= fim && out.length < 6) {
+      out.push(ym);
+      const [y, m] = ym.split("-").map(Number);
+      const d = new Date(y, m, 1);
+      ym = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+    }
+    return out;
+  },
+
+  diasUteisDoMes(ym) {
+    const [y, m] = String(ym).split("-").map(Number);
+    const ultimo = new Date(y, m, 0).getDate();
+    const dias = [];
+    for (let d = 1; d <= ultimo; d++) {
+      const iso = ym + "-" + String(d).padStart(2, "0");
+      if (caixaEhUtil(iso)) dias.push(iso);
+    }
+    return dias;
+  },
+
+  grupoRecebimento(vencimento, pmp) {
+    const lag = Math.round(Number(pmp) || 0);
+    if (lag >= 29) return "G3";
+    const due = String(vencimento || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) return "G1";
+    const cash = caixaDiaUtil(caixaAddDays(due, lag), lag < 0 ? -1 : 1);
+    if (cash.slice(0, 7) === due.slice(0, 7)) return "G1";
+    if (lag <= 28) return "G2";
+    return "G3";
+  },
+
+  mesDoRecebimento(vencimento, pmp) {
+    const lag = Math.round(Number(pmp) || 0);
+    const due = String(vencimento || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) return "";
+    return caixaDiaUtil(caixaAddDays(due, lag), lag < 0 ? -1 : 1).slice(0, 7);
+  },
+
+  planoReceberVivo(ym) {
+    const itens = [];
+    const incerto = [];
+    (this.recItems || []).forEach((it) => {
+      const grupo = this.grupoRecebimento(it.vencimento, it.pmp);
+      const mes = this.mesDoRecebimento(it.vencimento, it.pmp);
+      const row = {
+        key: [it.titulo, it.parcela, it.vencimento].join("|"),
+        grupo,
+        valor: Number(it.valor) || 0,
+        cliente: it.cliente || "",
+        titulo: it.titulo || "",
+        vencimento: it.vencimento || "",
+        previsto: it.date || ""
+      };
+      if (grupo === "G3" && String(it.vencimento || "").slice(0, 7) === ym) incerto.push(row);
+      else if (grupo !== "G3" && mes === ym) itens.push(row);
+    });
+    return { itens, incerto };
+  },
+
+  planoPagarVivo(ym) {
+    const itens = [];
+    (this.payItems || []).forEach((p) => {
+      if (String(p.date || p.vencimento || "").slice(0, 7) !== ym) return;
+      itens.push({
+        key: p.key || [p.titulo, p.parcela, p.vencimento].join("|"),
+        departamento: p.departamento || p.ccNome || "Sem departamento",
+        valor: Number(p.valor) || 0,
+        credor: p.credor || "",
+        titulo: p.titulo || "",
+        natureza: p.natureza || "",
+        vencimento: p.vencimento || ""
+      });
+    });
+    return itens;
+  },
+
+  realizadoMes(ym) {
+    let entrar = 0;
+    let sair = 0;
+    const saidas = [];
+    (this.days || []).forEach((d) => {
+      if (!d || !d.real || String(d.date || "").slice(0, 7) !== ym) return;
+      entrar += Number(d.entrar) || 0;
+      (d.pagarItens || []).forEach((p) => {
+        const v = Math.abs(Number(p.valor) || 0);
+        sair += v;
+        saidas.push(p);
+      });
+    });
+    return { entrar, sair, saidas };
+  },
+
+  async carregarRadar() {
+    const id = this.radarDocId();
+    const pedido = id;
+    let local = null;
+    try { local = JSON.parse(localStorage.getItem("cxd_radar_" + id) || "null"); } catch (e) { local = null; }
+    if (this.radarDocId() !== pedido) return;
+    this.radar = local && local.ym === this.mesRadar() ? local : null;
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (!fx || !db || !fx.getDoc) return;
+    try {
+      const snap = await fx.getDoc(fx.doc(db, "caixa_radar", id));
+      if (this.radarDocId() !== pedido) return;
+      if (snap && typeof snap.exists === "function" && snap.exists()) {
+        const nuvem = snap.data() || null;
+        if (nuvem && (!this.radar || String(nuvem.em || "") >= String(this.radar.em || ""))) this.radar = nuvem;
+      }
+    } catch (e) {}
+    if (this.aba !== "movimento") this.render();
+  },
+
+  async gravarRadar() {
+    const ym = this.mesRadar();
+    const receber = this.planoReceberVivo(ym);
+    const pagar = this.planoPagarVivo(ym);
+    if (!receber.itens.length && !pagar.length) {
+      alert("Ainda não há previsão de recebimento nem de pagamento para " + this.nomeMes(ym) + ".");
+      return;
+    }
+    const pergunta = "Gravar o radar de " + this.nomeMes(ym) + "? Ele fica como a foto do que já estava previsto. O que surgir depois aparece como aconteceu no mês.";
+    const ok = typeof window.mouraConfirm === "function" ? await window.mouraConfirm(pergunta) : confirm(pergunta);
+    if (!ok) return;
+    const doc = {
+      ym,
+      companyId: (this.companyIds && this.companyIds[0]) || "",
+      em: new Date().toISOString(),
+      receber: receber.itens,
+      incerto: receber.incerto,
+      pagar
+    };
+    this.radar = doc;
+    try { localStorage.setItem("cxd_radar_" + this.radarDocId(), JSON.stringify(doc)); } catch (e) {}
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (fx && db && fx.setDoc) {
+      try {
+        await fx.setDoc(fx.doc(db, "caixa_radar", this.radarDocId()), doc);
+      } catch (e) {
+        alert("O radar ficou gravado neste navegador. O Firebase não guardou esta cópia.");
+      }
+    }
+    this.render();
+  },
+
+  mesesComparacao() {
+    const hojeYm = this.hoje().slice(0, 7);
+    const [y, m] = hojeYm.split("-").map(Number);
+    const out = [];
+    for (let i = 3; i >= 0; i--) {
+      const d = new Date(y, m - 1 - i, 1);
+      out.push(d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"));
+    }
+    return out;
+  },
+
+  siglaMes(ym) {
+    const s = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+    return s[Number(String(ym || "").split("-")[1]) - 1] || ym;
+  },
+
+  movContaEntra(m) {
+    if (m.conta && this.ladoConta(m.companyId, m.conta) === "mutuo") return false;
+    if (!m.conta) return true;
+    const key = this.accountKey({ companyId: m.companyId, number: m.conta });
+    const acc = (this.accounts || []).find((a) => this.accountKey(a) === key);
+    if (acc) return this.accountIncluded(acc);
+    return !(this._bloq && this._bloq.has(this.normNum(m.conta))) && this.flags[key] !== false;
+  },
+
+  async carregarHistorico() {
+    const meses = this.mesesComparacao();
+    const inicio = meses[0] + "-01";
+    const ontem = caixaAddDays(this.hoje(), -1);
+    if (ontem < inicio || !window.SiengeApiService || typeof SiengeApiService.getBankMovements !== "function") return;
+    const chave = ((this.companyIds && this.companyIds[0]) || "0") + "|" + inicio + "|" + ontem;
+    if (this._histChave === chave && (this.histEntradas || this.histCarregando)) return;
+    this._histChave = chave;
+    this.histEntradas = null;
+    this.histCarregando = true;
+    const gen = this._gen;
+    if (this.aba === "receber") this.render();
+    try {
+      const targets = this.companyIds.length ? this.companyIds.slice() : [""];
+      const list = [];
+      for (const co of targets) {
+        const part = await SiengeApiService.getBankMovements(inicio, ontem, co ? { companyId: co } : {});
+        if (this._gen !== gen || this._histChave !== chave) return;
+        if (Array.isArray(part)) list.push.apply(list, part);
+      }
+      const porMes = {};
+      meses.forEach((ym) => { porMes[ym] = {}; });
+      list.forEach((raw, i) => {
+        const m = this.normMov(raw, i);
+        if (!m.date || m.valor <= 0) return;
+        if (!m.origem || m.origem.tipo !== "cr") return;
+        const ym = m.date.slice(0, 7);
+        if (!porMes[ym] || !this.movContaEntra(m)) return;
+        porMes[ym][m.date] = (porMes[ym][m.date] || 0) + m.valor;
+      });
+      if (this._gen !== gen || this._histChave !== chave) return;
+      this.histEntradas = porMes;
+    } catch (e) {
+      if (this._histChave === chave) this._histChave = "";
+    }
+    this.histCarregando = false;
+    if (this.aba === "receber") this.render();
+  },
+
+  comparacaoHtml(planoSelecionado) {
+    const meses = this.mesesComparacao();
+    const atual = meses[meses.length - 1];
+    const plano = this.mesRadar() === atual
+      ? planoSelecionado
+      : this.planoReceberVivo(atual).itens.reduce((s, it) => s + (Number(it.valor) || 0), 0);
+    const diasAtual = this.diasUteisDoMes(atual);
+    const hoje = this.hoje();
+    const n = diasAtual.filter((d) => d <= hoje).length;
+    if (!n) return "";
+    if (!this.histEntradas) {
+      return `<p class="cxd-radar-nota">${this.histCarregando ? "Lendo o recebimento dos três meses anteriores…" : "A comparação com os meses anteriores entra quando o extrato desses meses estiver carregado."}</p>`;
+    }
+    const serie = (ym) => {
+      const dias = this.diasUteisDoMes(ym);
+      let s = 0;
+      const out = [];
+      dias.forEach((d) => {
+        s += Number((this.histEntradas[ym] || {})[d]) || 0;
+        out.push(s);
+      });
+      return out;
+    };
+    const colunas = meses.map((ym) => ({ ym, acum: serie(ym) }));
+    const fatia = diasAtual.length ? plano / diasAtual.length : 0;
+    const cab = colunas.map((c) => `<th class="cxd-num">${caixaEsc(this.siglaMes(c.ym))}</th>`).join("");
+    const linhas = [];
+    for (let i = 0; i < n; i++) {
+      const celulas = colunas.map((c) => `<td class="cxd-num">${caixaMoney(c.acum[i] || 0)}</td>`).join("");
+      linhas.push(`<tr><td>${i + 1}º</td>${celulas}<td class="cxd-num">${caixaMoney(fatia * (i + 1))}</td></tr>`);
+    }
+    const notaPlano = this.mesRadar() === atual ? "A última coluna é o ritmo do plano deste mês, espalhado por igual." : "A última coluna é o ritmo do plano de " + this.nomeMes(atual) + ".";
+    return `<p class="cxd-radar-nota">No mesmo número de dias úteis, quanto entrou de contas a receber nas contas ligadas. ${caixaEsc(notaPlano)}</p>
+      <div class="cxd-wrap">
+        <table class="cxd-analitico">
+          <thead><tr><th>Dia útil</th>${cab}<th class="cxd-num">Plano</th></tr></thead>
+          <tbody>${linhas.join("")}</tbody>
+        </table>
+      </div>`;
+  },
+
+  abasHtml() {
+    const itens = [
+      ["movimento", "Movimento", "calendar-range"],
+      ["receber", "A receber", "arrow-down-left"],
+      ["pagar", "A pagar", "arrow-up-right"]
+    ];
+    return `<div class="ml-tabs cxd-abas" role="tablist">${itens.map(([id, nome, icon]) => {
+      const on = this.aba === id;
+      return `<button type="button" role="tab" class="ml-tab${on ? " is-active" : ""}" aria-selected="${on}" onclick="FluxoCaixaDiarioApp.setAba('${id}')"><i data-lucide="${icon}"></i> ${nome}</button>`;
+    }).join("")}</div>`;
+  },
+
+  mesesRadarHtml() {
+    return `<div class="cxd-radar-meses">${this.mesesDaTela().map((ym) => {
+      const on = ym === this.mesRadar();
+      return `<button type="button" class="cxd-radar-mes${on ? " is-on" : ""}" onclick="FluxoCaixaDiarioApp.setRadarYm('${ym}')">${caixaEsc(this.nomeMes(ym))}</button>`;
+    }).join("")}</div>`;
+  },
+
+  receberHtml() {
+    const ym = this.mesRadar();
+    const vivo = this.planoReceberVivo(ym);
+    const radar = this.radar && this.radar.ym === ym ? this.radar : null;
+    const base = radar && Array.isArray(radar.receber) ? radar.receber : vivo.itens;
+    const incerto = radar && Array.isArray(radar.incerto) ? radar.incerto : vivo.incerto;
+    const soma = (lista, grupo) => (lista || []).reduce((s, it) => s + (grupo && it.grupo !== grupo ? 0 : (Number(it.valor) || 0)), 0);
+    const plano = soma(base);
+    const g1 = soma(base, "G1");
+    const g2 = soma(base, "G2");
+    const g3 = soma(incerto, "G3") || soma(incerto);
+    const dias = this.diasUteisDoMes(ym);
+    const hoje = this.hoje();
+    const passados = dias.filter((d) => d <= hoje);
+    const fatia = dias.length ? plano / dias.length : 0;
+    const previstoAteHoje = fatia * (ym < hoje.slice(0, 7) ? dias.length : passados.length);
+    const real = this.realizadoMes(ym).entrar;
+    const gap = real - previstoAteHoje;
+    const ritmo = ym > hoje.slice(0, 7)
+      ? "Este mês ainda não começou. Grave o radar neste fechamento para congelar o que já está previsto."
+      : "Com " + passados.length + " de " + dias.length + " dias úteis, a média do plano era " + caixaMoney(previstoAteHoje) + ". Entrou no caixa " + caixaMoney(real) + ". " + (gap >= 0 ? "Está " + caixaMoney(gap) + " à frente do ritmo." : "Falta " + caixaMoney(-gap) + " para o ritmo do plano.");
+    const card = (rotulo, valor, cor) => `<div class="cxd-radar-card"><span>${rotulo}</span><strong style="color:${cor}">${caixaMoney(valor)}</strong></div>`;
+    const linhas = dias.map((d, i) => {
+      const previstoAcum = fatia * (i + 1);
+      let realizado = 0;
+      (this.days || []).forEach((day) => {
+        if (day && day.date === d && day.real) realizado = Number(day.entrar) || 0;
+      });
+      if (d > hoje) return "";
+      return `<tr><td>${caixaFmtDate(d)}</td><td class="cxd-num">${caixaMoney(fatia)}</td><td class="cxd-num">${caixaMoney(previstoAcum)}</td><td class="cxd-num">${caixaMoney(realizado)}</td></tr>`;
+    }).join("");
+    const aviso = radar
+      ? "Radar gravado em " + caixaFmtDate(String(radar.em || "").slice(0, 10)) + ". A comparação usa essa foto, não o que foi aberto depois."
+      : "Esta ainda é a visão de agora. Grave o radar no último dia útil antes do mês para congelar o que já estava previsto.";
+    return `<div class="cxd-radar">
+      ${this.mesesRadarHtml()}
+      <p class="cxd-radar-nota">G1 paga dentro do mês do vencimento. G2 paga até 28 dias depois, mesmo no mês seguinte. G3 paga depois de 29 dias e fica fora do plano firme. O valor do mês é espalhado por igual nos dias úteis, como a média diária do antigo PRV.</p>
+      <p class="cxd-radar-nota">${caixaEsc(aviso)}</p>
+      <div class="cxd-radar-cards">
+        ${card("G1 no plano", g1, "#105436")}
+        ${card("G2 no plano", g2, "#c2410c")}
+        ${card("G3 fora do plano", g3, "#64748b")}
+        ${card("Plano do mês", plano, "#0f172a")}
+        ${card("Previsto até hoje", previstoAteHoje, "#0f172a")}
+        ${card("Recebido no mês", real, gap < -0.5 ? "#b91c1c" : "#105436")}
+      </div>
+      <p class="cxd-radar-nota">${caixaEsc(ritmo)}</p>
+      ${this.comparacaoHtml(plano)}
+      <div style="display:flex;justify-content:flex-end;margin:0 0 10px;">
+        <button type="button" class="btn btn-primary" onclick="FluxoCaixaDiarioApp.gravarRadar()">${radar ? "Atualizar radar" : "Gravar radar"}</button>
+      </div>
+      <div class="cxd-wrap">
+        <table class="cxd-analitico">
+          <thead><tr><th>Dia útil</th><th class="cxd-num">Média do dia</th><th class="cxd-num">Plano acumulado</th><th class="cxd-num">Recebido no dia</th></tr></thead>
+          <tbody>${linhas || `<tr><td colspan="4">Nenhum dia útil passado neste mês.</td></tr>`}</tbody>
+        </table>
+      </div>
+    </div>`;
+  },
+
+  pagarHtml() {
+    const ym = this.mesRadar();
+    const vivo = this.planoPagarVivo(ym);
+    const radar = this.radar && this.radar.ym === ym ? this.radar : null;
+    const base = radar && Array.isArray(radar.pagar) ? radar.pagar : vivo;
+    const porDept = {};
+    const garantir = (nome) => porDept[nome] || (porDept[nome] = { radar: 0, pagoRadar: 0, soMes: 0 });
+    base.forEach((p) => {
+      const nome = p.departamento || "Sem departamento";
+      garantir(nome).radar += Number(p.valor) || 0;
+    });
+    const real = this.realizadoMes(ym);
+    const deptDoTitulo = {};
+    base.forEach((p) => {
+      if (p.titulo) deptDoTitulo[String(p.titulo)] = p.departamento || "Sem departamento";
+    });
+    real.saidas.forEach((p) => {
+      const titulo = String(p.titulo || "");
+      const valor = Math.abs(Number(p.valor) || 0);
+      if (titulo && deptDoTitulo[titulo]) garantir(deptDoTitulo[titulo]).pagoRadar += valor;
+      else garantir(p.departamento || p.plano || p.ccNome || "Sem departamento").soMes += valor;
+    });
+    const linhas = Object.keys(porDept).sort((a, b) => a.localeCompare(b, "pt")).map((nome) => {
+      const r = porDept[nome];
+      return `<tr><td>${caixaEsc(nome)}</td><td class="cxd-num">${caixaMoney(r.radar)}</td><td class="cxd-num">${caixaMoney(r.pagoRadar)}</td><td class="cxd-num">${caixaMoney(r.soMes)}</td></tr>`;
+    }).join("");
+    const tot = Object.values(porDept).reduce((s, r) => ({
+      radar: s.radar + r.radar,
+      pagoRadar: s.pagoRadar + r.pagoRadar,
+      soMes: s.soMes + r.soMes
+    }), { radar: 0, pagoRadar: 0, soMes: 0 });
+    const aviso = radar
+      ? "Radar gravado em " + caixaFmtDate(String(radar.em || "").slice(0, 10)) + ". Pagamento com título que não estava nessa foto entra como só aconteceu no mês."
+      : "Sem radar gravado, a coluna do plano é o que está previsto agora. Grave no último dia útil antes do mês para separar o que já estava no controle.";
+    return `<div class="cxd-radar">
+      ${this.mesesRadarHtml()}
+      <p class="cxd-radar-nota">Por departamento: o que já estava previsto para pagar, o que desse plano já foi baixado e o que só apareceu durante o mês.</p>
+      <p class="cxd-radar-nota">${caixaEsc(aviso)}</p>
+      <div class="cxd-radar-cards">
+        <div class="cxd-radar-card"><span>No radar</span><strong>${caixaMoney(tot.radar)}</strong></div>
+        <div class="cxd-radar-card"><span>Pago do radar</span><strong style="color:#105436">${caixaMoney(tot.pagoRadar)}</strong></div>
+        <div class="cxd-radar-card"><span>Só aconteceu no mês</span><strong style="color:#b91c1c">${caixaMoney(tot.soMes)}</strong></div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin:0 0 10px;">
+        <button type="button" class="btn btn-primary" onclick="FluxoCaixaDiarioApp.gravarRadar()">${radar ? "Atualizar radar" : "Gravar radar"}</button>
+      </div>
+      <div class="cxd-wrap">
+        <table class="cxd-analitico">
+          <thead><tr><th>Departamento</th><th class="cxd-num">No radar</th><th class="cxd-num">Pago do radar</th><th class="cxd-num">Só no mês</th></tr></thead>
+          <tbody>${linhas || `<tr><td colspan="4">Nenhuma previsão de pagamento neste mês.</td></tr>`}</tbody>
+        </table>
+      </div>
+    </div>`;
   },
 
   rotuloPeriodo() {
@@ -717,6 +1142,8 @@ const FluxoCaixaDiarioApp = {
       this.progress = "";
       this.render();
       this.avisarCaixa();
+      this.carregarRadar();
+      if (this.aba === "receber") this.carregarHistorico();
     } catch (e) {
       if (this._gen !== gen) return;
       this.error = e.message || String(e);
@@ -1050,6 +1477,7 @@ const FluxoCaixaDiarioApp = {
         docNome: r.docNome || "",
         companyId: r.companyId || "",
         plano: r.plano || "",
+        departamento: r.departamento || "",
         ccId: r.ccId || "",
         ccNome: r.ccNome || "",
         natureza: r.natureza,
@@ -2819,11 +3247,21 @@ const FluxoCaixaDiarioApp = {
         #fluxo-caixa-diario-root .cxd-org-outro, #fluxo-caixa-diario-root .cxd-org-prev { background:#f1f5f9; color:#64748b; }
         #fluxo-caixa-diario-root .cxd-conc-ok { background:#e7f6ee; color:#105436; }
         #fluxo-caixa-diario-root .cxd-conc-no { background:#fee2e2; color:#b91c1c; }
+        #fluxo-caixa-diario-root .cxd-abas { margin:0 0 16px; }
+        #fluxo-caixa-diario-root .cxd-radar-meses { display:flex; gap:6px; flex-wrap:wrap; margin:0 0 10px; }
+        #fluxo-caixa-diario-root .cxd-radar-mes { border:1px solid #e2e8f0; background:#fff; color:#334155; border-radius:999px; padding:6px 12px; font-weight:700; font-size:.78rem; cursor:pointer; }
+        #fluxo-caixa-diario-root .cxd-radar-mes.is-on { background:#105436; color:#fff; border-color:#105436; }
+        #fluxo-caixa-diario-root .cxd-radar-nota { margin:0 0 8px; color:#64748b; font-size:.8rem; max-width:820px; }
+        #fluxo-caixa-diario-root .cxd-radar-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin:0 0 10px; }
+        #fluxo-caixa-diario-root .cxd-radar-card { background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:10px 12px; }
+        #fluxo-caixa-diario-root .cxd-radar-card span { display:block; color:#64748b; font-size:.72rem; font-weight:700; }
+        #fluxo-caixa-diario-root .cxd-radar-card strong { font-size:1.05rem; }
       </style>
       <div class="cxd-page">
         <div class="cxd-head">
           <p>Mês atual e os próximos 3 meses, de ${caixaEsc(this.rotuloPeriodo())}. Saldo inicial no 1º dia. Nos dias anteriores, o extrato das contas ligadas; de hoje em diante, a previsão.</p>
         </div>
+        ${this.abasHtml()}
         <div class="cxd-body">
           <div class="cxd-tools">
             ${filtro}
@@ -2831,6 +3269,9 @@ const FluxoCaixaDiarioApp = {
           </div>
           <p id="cxd-progress" style="margin:0 0 10px;color:#105436;font-size:0.8rem;font-weight:600;" ${this.progress ? "" : "hidden"}>${caixaEsc(this.progress || "")}</p>
           ${this.error ? `<div style="margin-bottom:10px;padding:10px;background:#fff7ed;color:#9a3412;border-radius:8px;font-size:0.82rem;">${caixaEsc(this.error)}</div>` : ""}
+          ${this.aba === "receber" ? this.receberHtml() : ""}
+          ${this.aba === "pagar" ? this.pagarHtml() : ""}
+          <div class="cxd-miolo-mov" style="${this.aba === "movimento" ? "" : "display:none"}">
           <p class="cxd-title">CONTAS COM SALDO <span>· ligue as contas que entram no caixa</span></p>
           ${this.contasHtml()}
           <div class="cxd-saldo-ini"><span>${iniLabel}</span><span>${caixaMoney(saldoInicial)}</span></div>
@@ -2859,6 +3300,7 @@ const FluxoCaixaDiarioApp = {
             </table>
           </div>
           ${detalheDia}`}
+          </div>
         </div>
       </div>
       ${this.detailHtml()}

@@ -18668,27 +18668,133 @@ window.isDistratoLoteamentoFechado = function() {
   return /loteamento\s*fechado/i.test(window.distratoCcTipo());
 };
 
-window.isDistratoObraEmAndamento = function() {
-  if (typeof window.resolveDistratoAlcada === "function") {
-    try {
-      const rule = window.resolveDistratoAlcada();
-      if (rule && rule.kind === "work_in_progress") return true;
-      if (rule && rule.kind === "with_tvo") return false;
-    } catch (e) { /* segue para o cadastro local */ }
-  }
+window.distratoFoldEmp = function(value) {
+  return String(value == null ? "" : value)
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/^C\.C\.\s*/, "")
+    .replace(/^\d+\s*-\s*/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+window.distratoObrasMap = function() {
   try {
     const raw = JSON.parse(localStorage.getItem("crm_obras_andamento") || "{}");
-    const sale = (typeof g_distSale !== "undefined" && g_distSale) || {};
-    const unit = (window.AppState && AppState.units && sale.unitId && AppState.units[sale.unitId]) || {};
-    const ccId = String(unit.costCenterId || sale.costCenterId || sale.enterpriseId || (window.AppState && AppState.currentCostCenterId) || "");
-    const name = String(unit.enterpriseName || unit.projectName || sale.enterpriseName || "");
-    const entry = (ccId && raw[ccId]) || (name && raw[name]) || null;
-    if (!entry) return false;
-    if (typeof entry === "boolean") return entry;
-    return !!entry.isOn;
+    const out = {};
+    Object.keys(raw || {}).forEach((k) => {
+      const v = raw[k];
+      if (typeof v === "boolean") out[String(k)] = { isOn: v, previsao: "" };
+      else if (v && typeof v === "object") out[String(k)] = { isOn: !!v.isOn, previsao: v.previsao || "" };
+    });
+    return out;
   } catch (e) {
-    return false;
+    return {};
   }
+};
+
+window.distratoCcCandidates = function() {
+  const sale = (typeof g_distSale !== "undefined" && g_distSale) || {};
+  const customer = (typeof g_distCustomer !== "undefined" && g_distCustomer) || {};
+  const unit = (window.AppState && AppState.units && sale.unitId && AppState.units[sale.unitId]) || {};
+  const ids = [];
+  const names = [];
+  const addId = (v) => {
+    const raw = Array.isArray(v) ? v[0] : v;
+    const s = String(raw == null ? "" : raw).trim();
+    if (!s || s === "N/D" || s === "undefined" || s === "null") return;
+    const m = s.match(/\d{4,6}/);
+    if (m && ids.indexOf(m[0]) < 0) ids.push(m[0]);
+  };
+  const addName = (v) => {
+    const folded = window.distratoFoldEmp(v);
+    if (folded.length >= 8 && names.indexOf(folded) < 0) names.push(folded);
+  };
+  addId(unit.costCenterId);
+  addId(unit.enterpriseId);
+  addId(sale.costCenterId);
+  addId(sale.enterpriseId);
+  addId(customer.costCenterId);
+  addId(customer.costCentersId);
+  addId(window.AppState && AppState.currentCostCenterId);
+  const unitParts = String(sale.unitId || unit.id || "").split("-");
+  if (unitParts.length >= 2) addId(unitParts[1]);
+  addName(unit.enterpriseName);
+  addName(unit.projectName);
+  addName(sale.enterpriseName);
+  addName(sale.costCenterName);
+  const ctx = document.getElementById("ctx-empreend-val");
+  if (ctx) addName(ctx.textContent);
+  const customerId = String(customer.id || customer.customerId || sale.customerId || sale.queriedCustomerId || "");
+  const unidadeVenda = window.distratoFoldEmp(sale.unitName || unit.unitName || unit.lot || "");
+  [window.rawClientList, window.clientList].forEach((list) => {
+    (list || []).forEach((c) => {
+      if (!c) return;
+      const cid = String(c.customerId || c.id || "");
+      if (!customerId || cid !== customerId) return;
+      const unidadeCliente = window.distratoFoldEmp(String(c.unitName || c.unit || c.unidade || "").replace(/^Quadra-Lote:\s*/i, ""));
+      if (unidadeVenda && unidadeCliente && unidadeVenda !== unidadeCliente && unidadeCliente.indexOf(unidadeVenda) < 0 && unidadeVenda.indexOf(unidadeCliente) < 0) return;
+      addId(c.costCenterId);
+      addId(c.costCentersId);
+      if (c.unitId) addId(String(c.unitId).split("-")[1]);
+      addName(c.enterpriseName || c.empreendimento || c.projectName);
+    });
+  });
+  ids.forEach((id) => {
+    if (typeof window.knownCostCenterName === "function") addName(window.knownCostCenterName(id));
+    if (typeof getCostCenterName === "function") addName(getCostCenterName(id));
+  });
+  return { ids: ids, names: names };
+};
+
+window.ensureDistratoObrasCloud = function() {
+  if (window._distObrasCloudTried) return;
+  window._distObrasCloudTried = true;
+  const fx = window.firebaseCollections;
+  const db = window.firebaseDb;
+  if (!fx || !db || !fx.getDoc) return;
+  fx.getDoc(fx.doc(db, "config", "global")).then((snap) => {
+    if (!snap || typeof snap.exists !== "function" || !snap.exists()) return;
+    const data = snap.data() || {};
+    const cloudRaw = data.crm_obras_andamento;
+    if (!cloudRaw) return;
+    const cloud = typeof cloudRaw === "string" ? cloudRaw : JSON.stringify(cloudRaw);
+    const local = localStorage.getItem("crm_obras_andamento") || "";
+    if (cloud === local) return;
+    localStorage.setItem("crm_obras_andamento", cloud);
+    const view = document.getElementById("view-distrato");
+    if (view && view.style.display !== "none" && typeof calculateDistrato === "function") {
+      try { calculateDistrato(); } catch (e) {}
+    }
+  }).catch(() => {});
+};
+
+window.isDistratoObraEmAndamento = function() {
+  const obras = window.distratoObrasMap();
+  const cand = window.distratoCcCandidates();
+  const keys = Object.keys(obras);
+  for (let i = 0; i < keys.length; i++) {
+    const entry = obras[keys[i]];
+    const on = entry === true || !!(entry && entry.isOn);
+    if (!on) continue;
+    if (cand.ids.indexOf(String(keys[i])) >= 0) return true;
+    let obraNome = window.distratoFoldEmp(keys[i]);
+    if (typeof window.knownCostCenterName === "function") {
+      const known = window.distratoFoldEmp(window.knownCostCenterName(keys[i]));
+      if (known) obraNome = known;
+    }
+    if ((!obraNome || obraNome.length < 8) && typeof getCostCenterName === "function") {
+      const ccNome = window.distratoFoldEmp(getCostCenterName(keys[i]));
+      if (ccNome && !/^C\.C\./.test(ccNome)) obraNome = ccNome;
+    }
+    if (obraNome.length >= 12 && cand.names.some((n) => {
+      if (n === obraNome) return true;
+      const curto = n.length < obraNome.length ? n : obraNome;
+      const longo = n.length < obraNome.length ? obraNome : n;
+      return curto.length >= 18 && longo.indexOf(curto) >= 0;
+    })) return true;
+  }
+  return false;
 };
 
 window.distratoSemInstalacaoAguaELuz = function() {
@@ -18734,13 +18840,15 @@ window.onDistratoExpenseFile = function(key) {
 };
 
 window.syncDistratoExpenseDocs = function() {
+  if (typeof window.ensureDistratoObrasCloud === "function") window.ensureDistratoObrasCloud();
   const fechado = window.isDistratoLoteamentoFechado();
+  const obraAndamentoTopo = typeof window.isDistratoObraEmAndamento === "function" && window.isDistratoObraEmAndamento();
   const taxaRow = document.getElementById("dist-row-taxa-assoc");
   if (taxaRow) {
     const permutaOn = !!(document.getElementById("dist-permuta-toggle") && document.getElementById("dist-permuta-toggle").checked);
-    taxaRow.style.display = (!permutaOn && fechado) ? "flex" : "none";
+    taxaRow.style.display = (!permutaOn && fechado && !obraAndamentoTopo) ? "flex" : "none";
   }
-  if (!fechado) {
+  if (!fechado || obraAndamentoTopo) {
     const el = document.getElementById("dist-taxa-assoc");
     if (el && window.parseDistratoCurrencyInput("dist-taxa-assoc") > 0.009) el.value = "0,00";
   }
@@ -18920,8 +19028,8 @@ function calculateDistrato() {
   const restituicaoTotal = Math.max(0, totalPaid - totalMulta);
   
   // 2. Despesas
-  const taxaAssoc = (isPermuta || !window.isDistratoLoteamentoFechado()) ? 0 : parseCurrencyInput("dist-taxa-assoc");
   const obraAndamento = typeof window.isDistratoObraEmAndamento === "function" && window.isDistratoObraEmAndamento();
+  const taxaAssoc = (isPermuta || obraAndamento || !window.isDistratoLoteamentoFechado()) ? 0 : parseCurrencyInput("dist-taxa-assoc");
   const iptuDispensado = obraAndamento;
   const iptu = (isPermuta || iptuDispensado) ? 0 : parseCurrencyInput("dist-iptu");
   const agua = (isPermuta || obraAndamento) ? 0 : parseCurrencyInput("dist-agua");

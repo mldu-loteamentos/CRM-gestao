@@ -1319,7 +1319,7 @@ const CessaoPopup = {
     let juros = 0;
     let indexador = "REAL";
     if (recente) {
-      condicoes = this.condicoesDoContrato(condsApi, installments);
+      condicoes = this.condicoesDoContrato(condsApi, installments, contract);
       const daTela = (window.AppState && window.AppState.currentContractInstallments) || [];
       juros = this.jurosDoContrato(contract, condsApi, []
         .concat(installments || [])
@@ -1370,13 +1370,32 @@ const CessaoPopup = {
     });
   },
 
-  condicoesDoContrato(conds, installments) {
+  /** totalValue do Sienge é o valor presente. Com juros, a parcela do contrato é a prestação da Tabela Price. */
+  valorNominalCondicao(c, qtde, total, contract) {
+    const fatia = qtde > 0 && total > 0 ? Math.round((total / qtde) * 100) / 100 : 0;
+    const explicito = Number(c.installmentValue || c.installmentAmount || c.installmentBaseValue) || 0;
+    if (explicito > 0.009 && explicito + 0.02 < total && explicito > fatia + 0.05) return explicito;
+    const tipo = String(c.interestType || "").trim().toUpperCase();
+    const semPrice = tipo === "S" || tipo === "N";
+    let juros = this.taxaMensalPct(c.interestPercentage);
+    if (juros == null && contract) juros = this.taxaMensalPct(contract.interestPercentage);
+    if (!semPrice && juros > 0 && qtde > 1 && total > 0) {
+      const i = juros / 100;
+      const pot = Math.pow(1 + i, qtde);
+      if (pot > 1) {
+        const pmt = Math.round((total * i * pot / (pot - 1)) * 100) / 100;
+        if (pmt > fatia + 0.02) return pmt;
+      }
+    }
+    if (explicito > 0.009) return explicito;
+    return fatia;
+  },
+
+  condicoesDoContrato(conds, installments, contract) {
     const rows = (conds || []).map((c, i) => {
       const qtde = Number(c.installmentsNumber || c.numberOfInstallments || c.quantity || c.installments) || 0;
       const total = Number(c.totalValue || c.totalAmount || c.value) || 0;
-      const valor = qtde > 0 && total > 0
-        ? total / qtde
-        : (Number(c.installmentValue || c.installmentAmount || c.amount) || 0);
+      const valor = this.valorNominalCondicao(c, qtde, total, contract);
       const venc = String(c.firstPayment || c.firstDueDate || c.baseDate || c.dueDate || "").slice(0, 10);
       const tipo = c.conditionTypeName || c.description || c.conditionType || "Mensal";
       if (!(qtde > 0) || !(valor > 0)) return null;
