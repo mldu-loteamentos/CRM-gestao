@@ -1971,8 +1971,7 @@ const MarketingBudgetApp = {
         chartArea: { fill: { color: "FFFFFF" } }, plotArea: { fill: { color: "FFFFFF" } },
         valGridLine: { color: "E2E8F0", size: 0.5 }, catGridLine: { style: "none" }
       }, box.opt || {});
-      if (Array.isArray(desenho)) slide.addChart(desenho, opt);
-      else slide.addChart(desenho.tipo, desenho.data, Object.assign(opt, desenho.opt || {}));
+      slide.addChart(desenho.tipo, desenho.data, Object.assign(opt, desenho.opt || {}));
     };
     const nomesMes = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
     const meses = this.meses();
@@ -2017,13 +2016,15 @@ const MarketingBudgetApp = {
     const labels1 = serie.map((p) => p.rot);
     const linhasVerba = serie.length ? [{ name: "Acumulado", labels: labels1, values: serie.map((p) => Math.round(p.acc)) }] : [];
     if (r.verba > 0 && serie.length) linhasVerba.push({ name: "Verba", labels: labels1, values: labels1.map(() => Math.round(r.verba)) });
-    grafico(s1, serie.length ? [
-      { type: tipo.bar, data: [
+    if (!serie.length) {
+      grafico(s1, null, { x: 0.28, y: 2.2, w: 12.77, h: hChart1, titulo: "Verba mês a mês", vazio: "Nenhum mês com gasto acumulado neste período." });
+    } else {
+      grafico(s1, { tipo: tipo.bar, data: [
         { name: "Realizado", labels: labels1, values: serie.map((p) => Math.round(p.real)) },
         { name: "Comprometido", labels: labels1, values: serie.map((p) => Math.round(p.comp)) }
-      ], options: { chartColors: ["105436", "F37021"], barGrouping: "stacked" } },
-      { type: tipo.line, data: linhasVerba, options: { chartColors: r.verba > 0 ? ["0284C7", "B91C1C"] : ["0284C7"], secondaryValAxis: true } }
-    ] : null, { x: 0.28, y: 2.2, w: 12.77, h: hChart1, titulo: "Verba mês a mês", vazio: "Nenhum mês com gasto acumulado neste período." });
+      ], opt: { chartColors: ["105436", "F37021"], barGrouping: "stacked" } }, { x: 0.28, y: 2.2, w: 6.28, h: hChart1, titulo: "Realizado e comprometido" });
+      grafico(s1, { tipo: tipo.line, data: linhasVerba, opt: { chartColors: r.verba > 0 ? ["0284C7", "B91C1C"] : ["0284C7"] } }, { x: 6.72, y: 2.2, w: 6.33, h: hChart1, titulo: "Acumulado e verba" });
+    }
     if (serie.length) {
       const linhasMes = [[cab("Mês"), cab("Realizado"), cab("Comprometido"), cab("Acumulado"), cab("Vendas acum."), cab("CAC mkt")]];
       serie.forEach((p, i) => {
@@ -2054,13 +2055,15 @@ const MarketingBudgetApp = {
     const yTab2 = 7.28 - hTab2;
     const hChart2 = Math.max(1.7, (serie.length ? yTab2 - 0.1 : 7.28) - 2.2);
     const labels2 = serie.map((p) => p.rot);
-    grafico(s2, serie.length ? [
-      { type: tipo.bar, data: [
+    if (!serie.length) {
+      grafico(s2, null, { x: 0.28, y: 2.2, w: 12.77, h: hChart2, titulo: "Vendas, distratos e CAC", vazio: "Nenhum mês com gasto acumulado neste período." });
+    } else {
+      grafico(s2, { tipo: tipo.bar, data: [
         { name: "Vendas", labels: labels2, values: serie.map((p) => p.vend) },
         { name: "Distratos", labels: labels2, values: serie.map((p) => p.dist) }
-      ], options: { chartColors: ["6366F1", "F87171"], barGrouping: "clustered" } },
-      { type: tipo.line, data: [{ name: "CAC de marketing", labels: labels2, values: serie.map((p) => p.cac != null ? Math.round(p.cac) : 0) }], options: { chartColors: ["105436"], secondaryValAxis: true } }
-    ] : null, { x: 0.28, y: 2.2, w: 12.77, h: hChart2, titulo: "Vendas, distratos e CAC", vazio: "Nenhum mês com gasto acumulado neste período." });
+      ], opt: { chartColors: ["6366F1", "F87171"], barGrouping: "clustered" } }, { x: 0.28, y: 2.2, w: 6.28, h: hChart2, titulo: "Vendas e distratos" });
+      grafico(s2, { tipo: tipo.line, data: [{ name: "CAC de marketing", labels: labels2, values: serie.map((p) => p.cac != null ? Math.round(p.cac) : 0) }], opt: { chartColors: ["105436"] } }, { x: 6.72, y: 2.2, w: 6.33, h: hChart2, titulo: "CAC de marketing" });
+    }
     if (serie.length) {
       const linhasVenda = [[cab("Mês"), cab("Vendas"), cab("Distratos"), cab("Vendas acum."), cab("CAC mkt")]];
       serie.forEach((p, i) => {
@@ -2100,8 +2103,8 @@ const MarketingBudgetApp = {
       const qPago = this.FAIXAS_PAGO.map((f) => L.filter((c) => this.faixaPago(c.pag) === f.nome).length);
       const faixasAtraso = ["Em dia"].concat(this.FAIXAS_ATRASO);
       const qAtraso = faixasAtraso.map((nomeFaixa, i) => i === 0 ? emDia.length : atraso.filter((c) => this.faixaAtraso(c.pag.dias || 0) === nomeFaixa).length);
-      grafico(s3, L.length ? { tipo: tipo.bar, data: [{ name: "Contratos", labels: rotPago, values: qPago }], opt: { chartColors: ["105436"], barGrouping: "clustered", showValue: true, showLegend: false, dataLabelFontSize: 11, dataLabelColor: "0F172A", dataLabelPosition: "outEnd" } } : null, { x: 0.28, y: 2.2, w: 6.28, h: 4.95, titulo: "Quanto do contrato já foi pago", vazio: "Nenhum contrato ativo neste recorte." });
-      grafico(s3, L.length ? { tipo: tipo.bar, data: [{ name: "Contratos", labels: faixasAtraso, values: qAtraso }], opt: { chartColors: ["F37021"], barGrouping: "clustered", showValue: true, showLegend: false, dataLabelFontSize: 11, dataLabelColor: "0F172A", dataLabelPosition: "outEnd" } } : null, { x: 6.72, y: 2.2, w: 6.33, h: 4.95, titulo: "Há quanto tempo está vencido", vazio: "Nenhum contrato ativo neste recorte." });
+      grafico(s3, L.length ? { tipo: tipo.bar, data: [{ name: "Contratos", labels: rotPago, values: qPago }], opt: { chartColors: ["105436"], barGrouping: "clustered", showValue: true, showLegend: false, dataLabelFontSize: 11, dataLabelColor: "0F172A", dataLabelPosition: "inEnd" } } : null, { x: 0.28, y: 2.2, w: 6.28, h: 4.95, titulo: "Quanto do contrato já foi pago", vazio: "Nenhum contrato ativo neste recorte." });
+      grafico(s3, L.length ? { tipo: tipo.bar, data: [{ name: "Contratos", labels: faixasAtraso, values: qAtraso }], opt: { chartColors: ["F37021"], barGrouping: "clustered", showValue: true, showLegend: false, dataLabelFontSize: 11, dataLabelColor: "0F172A", dataLabelPosition: "inEnd" } } : null, { x: 6.72, y: 2.2, w: 6.33, h: 4.95, titulo: "Há quanto tempo está vencido", vazio: "Nenhum contrato ativo neste recorte." });
     }
     const s4 = pptx.addSlide();
     faixa(s4, "Perfil da venda");
@@ -2147,7 +2150,7 @@ const MarketingBudgetApp = {
       });
       const faixas = this.ordemFaixas().filter((f) => ativos.some((x) => x.faixa === f));
       grafico(s4, sexVals.length ? { tipo: tipo.doughnut, data: [{ name: "Sexo", labels: sexLabels, values: sexVals }], opt: { chartColors: sexCores, showPercent: true, showLegend: true, legendPos: "b" } } : null, { x: 0.28, y: 2.2, w: 5.5, h: 3.35, titulo: "Vendas por sexo", vazio: "Sem sexo informado nos contratos ativos." });
-      grafico(s4, faixas.length ? { tipo: tipo.bar, data: [{ name: "Contratos", labels: faixas, values: faixas.map((f) => ativos.filter((x) => x.faixa === f).length) }], opt: { chartColors: ["0F766E"], barGrouping: "clustered", showValue: true, showLegend: false, dataLabelFontSize: 11, dataLabelColor: "0F172A", dataLabelPosition: "outEnd" } } : null, { x: 5.94, y: 2.2, w: 7.11, h: 3.35, titulo: "Vendas por faixa etária", vazio: "Sem idade informada nos contratos ativos." });
+      grafico(s4, faixas.length ? { tipo: tipo.bar, data: [{ name: "Contratos", labels: faixas, values: faixas.map((f) => ativos.filter((x) => x.faixa === f).length) }], opt: { chartColors: ["0F766E"], barGrouping: "clustered", showValue: true, showLegend: false, dataLabelFontSize: 11, dataLabelColor: "0F172A", dataLabelPosition: "inEnd" } } : null, { x: 5.94, y: 2.2, w: 7.11, h: 3.35, titulo: "Vendas por faixa etária", vazio: "Sem idade informada nos contratos ativos." });
       const fundo = { fill: { color: "FFFFFF" } };
       s4.addTable([
         [cab("Situação"), cab("Quantidade"), cab("Detalhe")],
