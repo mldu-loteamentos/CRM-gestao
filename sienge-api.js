@@ -1747,10 +1747,199 @@ const SiengeApiService = {
     return this._entVoo;
   },
 
+  // Movimentos até 31/12/2025 ficam no Firebase. 2026 em diante sai sempre do Sienge.
+  _caixaBaseAte: "2025-12-31",
+  _caixaBaseDe: "2017-01-01",
+  _caixaMesPromessas: {},
+  _baseCaixaStatus: "",
+  _baseCaixaRodando: false,
+  _baseCaixaChave: "",
+
+  _avisarBaseCaixa() {
+    const el = document.getElementById("fc-base-caixa");
+    const txt = this._baseCaixaStatus || "";
+    if (!el) return;
+    el.textContent = txt;
+    el.style.display = txt ? "" : "none";
+  },
+
+  _mesesCaixa(start, end) {
+    const out = [];
+    let ym = String(start || "").slice(0, 7);
+    const fim = String(end || "").slice(0, 7);
+    while (ym && fim && ym <= fim && out.length < 240) {
+      out.push(ym);
+      const [y, m] = ym.split("-").map(Number);
+      const d = new Date(y, m, 1);
+      ym = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+    }
+    return out;
+  },
+
+  _fimDoMes(ym) {
+    const [y, m] = String(ym).split("-").map(Number);
+    return ym + "-" + String(new Date(y, m, 0).getDate()).padStart(2, "0");
+  },
+
+  _dataMovCaixa(m) {
+    return String((m && (m.bankMovementDate || m.paymentDate || m.date)) || "").slice(0, 10);
+  },
+
+  _movNoCentro(m, costCentersId) {
+    if (!costCentersId) return true;
+    const wanted = String(Array.isArray(costCentersId) ? costCentersId.join(",") : costCentersId).split(",").map((s) => s.trim()).filter(Boolean);
+    if (!wanted.length) return true;
+    const cats = (m && m.financialCategories) || [];
+    return cats.some((fc) => wanted.includes(String(fc && fc.costCenterId))) || wanted.includes(String((m && m.costCenterId) || ""));
+  },
+
+  async _lerMesCaixa(companyId, ym) {
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (!fx || !db || !fx.getDoc) return null;
+    const id = String(companyId) + "_" + ym;
+    try {
+      const snap = await fx.getDoc(fx.doc(db, "caixa_movimentos", id));
+      if (!snap || typeof snap.exists !== "function" || !snap.exists()) return null;
+      const data = snap.data() || {};
+      const partes = Math.max(1, Number(data.partes) || 1);
+      let rows = Array.isArray(data.movimentos) ? data.movimentos.slice() : [];
+      for (let i = 2; i <= partes; i++) {
+        const pedaco = await fx.getDoc(fx.doc(db, "caixa_movimentos", id + "_p" + i));
+        if (pedaco && typeof pedaco.exists === "function" && pedaco.exists()) {
+          const extra = pedaco.data() || {};
+          if (Array.isArray(extra.movimentos)) rows = rows.concat(extra.movimentos);
+        }
+      }
+      return rows;
+    } catch (e) {
+      return null;
+    }
+  },
+
+  async _gravarMesCaixa(companyId, ym, rows) {
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (!fx || !db || !fx.setDoc || ym > "2025-12") return;
+    const lista = Array.isArray(rows) ? rows : [];
+    const fatias = [];
+    let atual = [];
+    let tamanho = 2;
+    lista.forEach((row) => {
+      const pedaco = JSON.stringify(row || {});
+      if (atual.length && tamanho + pedaco.length > 700000) {
+        fatias.push(atual);
+        atual = [];
+        tamanho = 2;
+      }
+      atual.push(row);
+      tamanho += pedaco.length + 1;
+    });
+    if (atual.length || !fatias.length) fatias.push(atual);
+    const id = String(companyId) + "_" + ym;
+    const em = new Date().toISOString();
+    await fx.setDoc(fx.doc(db, "caixa_movimentos", id), {
+      companyId: String(companyId),
+      ym: ym,
+      n: lista.length,
+      partes: fatias.length,
+      em: em,
+      movimentos: fatias[0] || []
+    });
+    for (let i = 1; i < fatias.length; i++) {
+      await fx.setDoc(fx.doc(db, "caixa_movimentos", id + "_p" + (i + 1)), {
+        companyId: String(companyId),
+        ym: ym,
+        parte: i + 1,
+        movimentos: fatias[i]
+      });
+    }
+  },
+
+  async _lerOuBuscarMesCaixa(companyId, ym, opts) {
+    const key = String(companyId) + "_" + ym;
+    if (this._caixaMesPromessas[key]) return this._caixaMesPromessas[key];
+    const promessa = (async () => {
+      const salvo = await this._lerMesCaixa(companyId, ym);
+      if (salvo) return salvo;
+      const start = ym + "-01";
+      const end = this._fimDoMes(ym);
+      const rows = await this._bankMovementsSienge(start, end, {
+        selectionType: "M",
+        companyId: companyId,
+        skipBase: true,
+        onChunk: opts && opts.onChunk
+      });
+      const noMes = (rows || []).filter((m) => this._dataMovCaixa(m).slice(0, 7) === ym);
+      try { await this._gravarMesCaixa(companyId, ym, noMes); } catch (e) {}
+      return noMes;
+    })().finally(() => { delete this._caixaMesPromessas[key]; });
+    this._caixaMesPromessas[key] = promessa;
+    return promessa;
+  },
+
+  async _bankMovementsBase(startDate, endDate, opts) {
+    const meses = this._mesesCaixa(startDate, endDate);
+    const blocos = await siengeMapLimit(meses, 2, (ym) => this._lerOuBuscarMesCaixa(opts.companyId, ym, opts));
+    return (blocos || []).flat().filter((m) => {
+      const d = this._dataMovCaixa(m);
+      return d && d >= startDate && d <= endDate && this._movNoCentro(m, opts.costCentersId);
+    });
+  },
+
+  async prepararBaseMovimentosCaixa(companyIds) {
+    if (s_apiMode === "simulado" || !window.firebaseDb || !window.firebaseCollections) return;
+    const ids = (companyIds || []).map((id) => String(id)).filter(Boolean);
+    const chave = ids.slice().sort((a, b) => Number(a) - Number(b)).join(",");
+    if (!chave || this._baseCaixaRodando || this._baseCaixaChave === chave) return;
+    this._baseCaixaRodando = true;
+    this._baseCaixaChave = chave;
+    const meses = this._mesesCaixa(this._caixaBaseDe, this._caixaBaseAte);
+    try {
+      for (let c = 0; c < ids.length; c++) {
+        for (let i = 0; i < meses.length; i++) {
+          this._baseCaixaStatus = "Gravando movimentos até 31/12/2025 · empresa " + ids[c] + " · " + meses[i];
+          this._avisarBaseCaixa();
+          await this._lerOuBuscarMesCaixa(ids[c], meses[i], { companyId: ids[c] });
+        }
+      }
+    } catch (e) {
+      console.warn("[Caixa] base de movimentos", e);
+      this._baseCaixaChave = "";
+    } finally {
+      this._baseCaixaStatus = "";
+      this._baseCaixaRodando = false;
+      this._avisarBaseCaixa();
+    }
+  },
+
   // 1.6. Movimentos Bancários (Fiscal / Prestação de Contas)
   // selectionType M = data do movimento/pagamento (caixa real).
   // P (vencimento) não é válido neste endpoint (Sienge 422) e não reflete o caixa.
+  // Até 31/12/2025 a consulta lê o Firebase. De 01/01/2026 em diante, sempre o Sienge.
   async getBankMovements(startDate, endDate, opts = {}) {
+    const start = String(startDate || "").slice(0, 10);
+    const end = String(endDate || "").slice(0, 10);
+    const usarBase = !opts.skipBase && s_apiMode !== "simulado" && opts.companyId && window.firebaseDb && window.firebaseCollections;
+    if (!usarBase || !start || !end || start > end) return this._bankMovementsSienge(start, end, opts);
+    const partes = [];
+    if (start < this._caixaBaseDe) {
+      const antigoFim = end < "2016-12-31" ? end : "2016-12-31";
+      partes.push(await this._bankMovementsSienge(start, antigoFim, Object.assign({}, opts, { skipBase: true })));
+    }
+    if (start <= this._caixaBaseAte && end >= this._caixaBaseDe) {
+      const hStart = start < this._caixaBaseDe ? this._caixaBaseDe : start;
+      const hEnd = end < this._caixaBaseAte ? end : this._caixaBaseAte;
+      partes.push(await this._bankMovementsBase(hStart, hEnd, opts));
+    }
+    if (end >= "2026-01-01") {
+      const vStart = start > "2026-01-01" ? start : "2026-01-01";
+      partes.push(await this._bankMovementsSienge(vStart, end, Object.assign({}, opts, { skipBase: true })));
+    }
+    return siengeDedupeBankMovements(partes.flat());
+  },
+
+  async _bankMovementsSienge(startDate, endDate, opts = {}) {
     const selectionType = opts.selectionType === "P" ? "M" : (opts.selectionType || "M");
     if (s_apiMode === "simulado") {
       const all = window.MOCK_DATA && window.MOCK_DATA.BANK_MOVEMENTS ? window.MOCK_DATA.BANK_MOVEMENTS : [];

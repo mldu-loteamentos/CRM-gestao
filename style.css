@@ -4027,7 +4027,8 @@ circle.donut-segment {
   left: 0;
   z-index: 5;
   text-align: left;
-  min-width: 220px;
+  min-width: 176px;
+  width: 176px;
 }
 .fc-grid thead th.fc-th-co {
   cursor: pointer;
@@ -4038,9 +4039,9 @@ circle.donut-segment {
 .fc-grid thead th.fc-band-1:hover { background: #0a5a3a; }
 .fc-grid thead tr.fc-months th.fc-band-1 { background: #094e34; }
 .fc-grid .fc-gap {
-  width: 14px;
-  min-width: 14px;
-  max-width: 14px;
+  width: 8px;
+  min-width: 8px;
+  max-width: 8px;
   padding: 0;
   background: #d5dee6;
   border-bottom-color: #d5dee6;
@@ -4065,7 +4066,9 @@ circle.donut-segment {
   left: 0;
   z-index: 2;
   text-align: left;
-  max-width: 340px;
+  width: 176px;
+  min-width: 176px;
+  max-width: 176px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4074,11 +4077,12 @@ circle.donut-segment {
 .fc-grid thead th.fc-th-num,
 .fc-grid thead tr.fc-months th,
 .fc-grid td.fc-num {
-  width: 124px;
-  min-width: 124px;
+  width: 96px;
+  min-width: 96px;
+  max-width: 96px;
   box-sizing: border-box;
-  padding-left: 4px;
-  padding-right: 4px;
+  padding-left: 2px;
+  padding-right: 2px;
 }
 .fc-grid td.fc-num {
   text-align: right;
@@ -4103,8 +4107,9 @@ circle.donut-segment {
 .fc-grid td.fc-num.fc-var-pct {
   width: auto;
   min-width: 0;
-  padding-left: 3px;
-  padding-right: 3px;
+  max-width: none;
+  padding-left: 2px;
+  padding-right: 2px;
 }
 .fc-grid td.fc-num.fc-var { padding-top: 1px; padding-bottom: 1px; }
 .fc-var-pill {

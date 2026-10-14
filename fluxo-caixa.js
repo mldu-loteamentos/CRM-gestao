@@ -61,6 +61,10 @@ const FluxoCaixaApp = {
     this.noteCompanySet(true);
     this.render();
     this.ensureCategories();
+    if (window.SiengeApiService && typeof SiengeApiService.prepararBaseMovimentosCaixa === "function") {
+      const ids = (this.selectedCompanyIds || []).slice();
+      setTimeout(() => SiengeApiService.prepararBaseMovimentosCaixa(ids), 1200);
+    }
     if (!window._fcEmpDropBound) {
       window._fcEmpDropBound = true;
       document.addEventListener("mousedown", (e) => {
@@ -1322,6 +1326,7 @@ const FluxoCaixaApp = {
               Consultar
             </button>
           </div>
+          <p id="fc-base-caixa" class="fc-stale" style="${(window.SiengeApiService && SiengeApiService._baseCaixaStatus) ? "" : "display:none"}">${this.esc((window.SiengeApiService && SiengeApiService._baseCaixaStatus) || "")}</p>
           ${this.error ? `<div class="fc-error">${this.esc(this.error)}</div>` : ""}
           <div class="fc-board">
             <div class="fc-tree-pane">
@@ -2670,6 +2675,24 @@ const FluxoCaixaApp = {
     }
   },
 
+  linhasParaExcel() {
+    const guarda = new Set(this.expanded || []);
+    try {
+      const visao = this.visao();
+      (visao.groups || []).forEach((g) => { if (g && g.id) this.expanded.add(g.id); });
+      this.build(this.lastAllocs || []);
+      (this.rows || []).forEach((r) => {
+        if (r && r.id) this.expanded.add(r.id);
+        if (r && r.toggleId) this.expanded.add(r.toggleId);
+      });
+      this.build(this.lastAllocs || []);
+      return (this.rows || []).slice();
+    } finally {
+      this.expanded = guarda;
+      this.build(this.lastAllocs || []);
+    }
+  },
+
   async exportGridExcel() {
     if (this.loading || !(this.rows || []).length) {
       alert("Consulte o fluxo antes de exportar.");
@@ -2693,6 +2716,10 @@ const FluxoCaixaApp = {
         views: [{ state: "frozen", xSplit: 1, ySplit: 4, topLeftCell: "B5", activeCell: "B5", showGridLines: false }]
       });
       ws.properties.showGridLines = false;
+      ws.properties.outlineProperties = { summaryBelow: false, summaryRight: false };
+      const linhasExcel = this.linhasParaExcel();
+      const nivelMax = linhasExcel.reduce((m, r) => Math.max(m, Number(r.level) || 0), 0);
+      ws.properties.outlineLevelRow = Math.min(nivelMax, 7);
       const widths = [{ width: 46 }];
       for (let i = 1; i < colCount; i++) widths.push({ width: 16 });
       ws.columns = widths;
@@ -2762,9 +2789,10 @@ const FluxoCaixaApp = {
         });
       });
       let rowIndex = 5;
-      (this.rows || []).forEach(r => {
+      linhasExcel.forEach(r => {
         const linha = ws.getRow(rowIndex);
         linha.height = 18;
+        linha.outlineLevel = Math.min(Number(r.level) || 0, 7);
         const escuro = r.type === "formula" || r.type === "total_n1";
         const resultado = r.type === "resultado";
         const fill = escuro ? "FF0C3D28" : (resultado ? "FFE7F6EE" : (r.isCostCenter ? "FFF8FAFC" : "FFFFFFFF"));
