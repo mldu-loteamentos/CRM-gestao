@@ -22,7 +22,7 @@ const PrestacaoContasApp = {
   accountIndex: {},
   unmatchedInfo: { total: 0, samples: [] },
   categories: [],
-  aba: "receb",
+  aba: "obra",
   conferencias: null,
   confFiltro: "",
   confAberta: "",
@@ -421,7 +421,7 @@ const PrestacaoContasApp = {
   },
 
   setAba(id) {
-    const ok = { obra: 1, repasse: 1, resumo: 1, vendas: 1, estoque: 1, carteira: 1, inad: 1 };
+    const ok = { obra: 1, repasse: 1, vendas: 1, estoque: 1, carteira: 1, inad: 1 };
     this.aba = ok[id] ? id : "obra";
     this.confFiltro = "";
     this.confAberta = "";
@@ -1322,7 +1322,7 @@ const PrestacaoContasApp = {
     const conf = this.conferencias || { receitas: [], despesas: [], repasses: [] };
     const nFora = (rows) => (rows || []).filter(r => r.status === "fora").length;
     const pad = n => String(n).padStart(2, "0");
-    const abas = { obra: 1, repasse: 1, resumo: 1, vendas: 1, estoque: 1, carteira: 1, inad: 1 };
+    const abas = { obra: 1, repasse: 1, vendas: 1, estoque: 1, carteira: 1, inad: 1 };
     const aba = abas[this.aba] ? this.aba : "obra";
     const tab = (id, icon, txt, count) => `<button type="button" role="tab" aria-selected="${aba === id}" class="ml-tab${aba === id ? " is-active" : ""}" onclick="PrestacaoContasApp.setAba('${id}')"><i data-lucide="${icon}"></i> ${txt}${count ? ` <span class="ml-tab-count">${count}</span>` : ""}</button>`;
     const ccs = this.costCenters();
@@ -1380,12 +1380,11 @@ const PrestacaoContasApp = {
         ${this.rastreio ? `<div class="pcx-alert ${this.rastreio.erro ? "is-warn" : "is-info"}">${this.rastreio.erro ? "" : '<span class="pcx-spin"></span>'}<span id="pc-rastreio">${this.esc(this.rastreio.msg)}</span></div>` : ""}
 
         <div class="ml-tabs pcx-tabs" role="tablist">
-          ${tab("resumo", "layout-dashboard", "Resumo")}
+          ${tab("obra", "clipboard-check", "Validação", nFora(conf.receitas) + nFora(conf.despesas))}
           ${tab("vendas", "handshake", "Vendas e distratos")}
           ${tab("estoque", "warehouse", "Estoque")}
           ${tab("carteira", "wallet", "Carteira")}
           ${tab("inad", "alert-circle", "Inadimplência")}
-          ${tab("obra", "building-2", "Por obra", nFora(conf.receitas) + nFora(conf.despesas))}
           ${tab("repasse", "split", "Repasse anterior", nFora(conf.repasses))}
         </div>
 
@@ -1910,7 +1909,6 @@ const PrestacaoContasApp = {
     if (!this.costCenterIds.length) {
       return `<div class="pcx-alert is-warn">Selecione ao menos um centro de custo.</div>`;
     }
-    if (aba === "resumo") return this.resumoHtml();
     const d = this.dash;
     const chave = this.chaveDash();
     const campo = aba === "inad" ? "carteira" : aba;
@@ -1926,105 +1924,6 @@ const PrestacaoContasApp = {
     if (aba === "estoque") return this.estoqueHtml(d.estoque);
     if (aba === "carteira") return this.carteiraHtml(d.carteira);
     return this.inadHtml(d.carteira);
-  },
-
-  resumoHtml() {
-    const conf = this.conferencias || { receitas: [], despesas: [] };
-    const rec = conf.receitas || [];
-    const desp = conf.despesas || [];
-    if (!this.movements.length) {
-      return `<div class="pcx-alert is-info">Clique em Carregar para montar entradas, saídas e saldo do mês.</div>`;
-    }
-    const entradas = this.somaLado(rec, false);
-    const saidas = this.somaLado(desp, true);
-    const saldo = entradas - saidas;
-    const cor = saldo < -0.004 ? "is-out" : "is-in";
-    const porObra = {};
-    const porConta = {};
-    const porCc = {};
-    const porBanco = {};
-    const somar = (rows, saida) => {
-      rows.forEach((r) => {
-        const v = (Number(r.total) || 0) * (saida ? 1 : (r.redutora ? -1 : 1));
-        const oid = r.grupo || r.obra || "—";
-        const o = porObra[oid] || (porObra[oid] = { id: oid, nome: this.rotuloObra(oid), entradas: 0, saidas: 0, n: 0 });
-        if (saida) o.saidas += v; else o.entradas += v;
-        o.n += 1;
-        const principal = (r.contas || []).slice().sort((a, b) => (Number(b.valor) || 0) - (Number(a.valor) || 0))[0];
-        const cod = principal && principal.codigo ? principal.codigo : "—";
-        const c = porConta[cod] || (porConta[cod] = { codigo: cod, nome: (principal && principal.nome) || "Sem conta", entradas: 0, saidas: 0, n: 0 });
-        if (saida) c.saidas += v; else c.entradas += v;
-        c.n += 1;
-        const cc = (principal && principal.cc) || r.obra || "—";
-        const ccRow = porCc[cc] || (porCc[cc] = { id: cc, nome: (principal && principal.ccNome) || this.ccNome(cc), entradas: 0, saidas: 0, n: 0 });
-        if (saida) ccRow.saidas += v; else ccRow.entradas += v;
-        ccRow.n += 1;
-        const banco = [r.contaBanco, r.contaNome].filter(Boolean).join(" · ") || "Sem conta corrente";
-        const b = porBanco[banco] || (porBanco[banco] = { nome: banco, entradas: 0, saidas: 0, n: 0 });
-        if (saida) b.saidas += v; else b.entradas += v;
-        b.n += 1;
-      });
-    };
-    somar(rec, false);
-    somar(desp, true);
-    const obras = this.ordenarLista(Object.values(porObra), "obra", {
-      "obra.nome": (x) => x.nome,
-      "obra.entradas": (x) => x.entradas,
-      "obra.saidas": (x) => x.saidas,
-      "obra.saldo": (x) => x.entradas - x.saidas,
-      "obra.n": (x) => x.n
-    });
-    const contas = this.ordenarLista(Object.values(porConta), "conta", {
-      "conta.codigo": (x) => x.codigo,
-      "conta.nome": (x) => x.nome,
-      "conta.entradas": (x) => x.entradas,
-      "conta.saidas": (x) => x.saidas,
-      "conta.saldo": (x) => x.entradas - x.saidas,
-      "conta.n": (x) => x.n
-    });
-    const centros = this.ordenarLista(Object.values(porCc), "cc", {
-      "cc.id": (x) => x.id,
-      "cc.entradas": (x) => x.entradas,
-      "cc.saidas": (x) => x.saidas,
-      "cc.saldo": (x) => x.entradas - x.saidas,
-      "cc.n": (x) => x.n
-    });
-    const bancos = this.ordenarLista(Object.values(porBanco), "banco", {
-      "banco.nome": (x) => x.nome,
-      "banco.entradas": (x) => x.entradas,
-      "banco.saidas": (x) => x.saidas,
-      "banco.saldo": (x) => x.entradas - x.saidas,
-      "banco.n": (x) => x.n
-    });
-    const lancs = this.ordenarLista(rec.concat(desp), "lanc", {
-      "lanc.data": (x) => x.data || "",
-      "lanc.obra": (x) => this.rotuloObra(x.grupo || x.obra || ""),
-      "lanc.hist": (x) => x.historico || "",
-      "lanc.valor": (x) => (Number(x.total) || 0) * (x.classe === "despesa" ? -1 : (x.redutora ? -1 : 1))
-    });
-    const linhaFluxo = (nome, ent, sai, n) => {
-      const sld = ent - sai;
-      return `<tr><td>${this.esc(nome)}</td><td class="is-right pcx-valor is-in">${this.fmt(ent)}</td><td class="is-right pcx-valor is-out">${this.fmt(sai)}</td><td class="is-right pcx-valor ${sld < -0.004 ? "is-out" : "is-in"}">${this.fmt(sld)}</td><td class="is-right">${n}</td></tr>`;
-    };
-    const tabela = (head, body) => `<div class="cc-scroll pcx-dash-scroll"><table class="cc-table pcx-table"><thead><tr>${head}</tr></thead><tbody>${body || `<tr><td colspan="8" class="pcx-vazio">Sem movimento neste mês.</td></tr>`}</tbody></table></div>`;
-    const headFluxo = (p) => this.thDash("Nome", p + ".nome") + this.thDash("Entradas", p + ".entradas", true) + this.thDash("Saídas", p + ".saidas", true) + this.thDash("Saldo", p + ".saldo", true) + this.thDash("Lançamentos", p + ".n", true);
-    return `
-      ${this.kpisHtml([
-        { rot: "Entradas", val: this.fmt(entradas), nota: rec.length + " lançamento(s)", cls: "is-in" },
-        { rot: "Saídas", val: this.fmt(saidas), nota: desp.length + " lançamento(s)", cls: "is-out" },
-        { rot: "Saldo", val: this.fmt(saldo), nota: "Entradas menos saídas do mês", cls: cor },
-        { rot: "Obras", val: String(Object.keys(porObra).length), nota: Object.keys(porConta).length + " contas do plano" }
-      ])}
-      <p class="pcx-ajuda">Caixa do mês de referência, nos centros selecionados. Repasse anterior fica de fora deste saldo.</p>
-      ${this.blocoHtml("Por obra", "", tabela(this.thDash("Obra", "obra.nome") + this.thDash("Entradas", "obra.entradas", true) + this.thDash("Saídas", "obra.saidas", true) + this.thDash("Saldo", "obra.saldo", true) + this.thDash("Lançamentos", "obra.n", true), obras.map((o) => linhaFluxo(o.nome, o.entradas, o.saidas, o.n)).join("")))}
-      ${this.blocoHtml("Por centro de custo", "", tabela(this.thDash("Centro", "cc.id") + this.thDash("Nome", "cc.nome") + this.thDash("Entradas", "cc.entradas", true) + this.thDash("Saídas", "cc.saidas", true) + this.thDash("Saldo", "cc.saldo", true) + this.thDash("Lançamentos", "cc.n", true), centros.map((o) => `<tr><td>${this.esc(o.id)}</td><td>${this.esc(o.nome)}</td><td class="is-right pcx-valor is-in">${this.fmt(o.entradas)}</td><td class="is-right pcx-valor is-out">${this.fmt(o.saidas)}</td><td class="is-right pcx-valor ${(o.entradas - o.saidas) < -0.004 ? "is-out" : "is-in"}">${this.fmt(o.entradas - o.saidas)}</td><td class="is-right">${o.n}</td></tr>`).join("")))}
-      ${this.blocoHtml("Por conta do plano financeiro", "último nível", tabela(this.thDash("Código", "conta.codigo") + this.thDash("Conta", "conta.nome") + this.thDash("Entradas", "conta.entradas", true) + this.thDash("Saídas", "conta.saidas", true) + this.thDash("Saldo", "conta.saldo", true) + this.thDash("Lançamentos", "conta.n", true), contas.map((o) => `<tr><td><span class="pcx-cod">${this.esc(o.codigo)}</span></td><td>${this.esc(o.nome)}</td><td class="is-right pcx-valor is-in">${this.fmt(o.entradas)}</td><td class="is-right pcx-valor is-out">${this.fmt(o.saidas)}</td><td class="is-right pcx-valor ${(o.entradas - o.saidas) < -0.004 ? "is-out" : "is-in"}">${this.fmt(o.entradas - o.saidas)}</td><td class="is-right">${o.n}</td></tr>`).join("")))}
-      ${this.blocoHtml("Por conta corrente", "", tabela(headFluxo("banco"), bancos.map((o) => linhaFluxo(o.nome, o.entradas, o.saidas, o.n)).join("")))}
-      ${this.blocoHtml("Lançamentos", lancs.length + " linhas", `<div class="cc-scroll pcx-dash-scroll"><table class="cc-table pcx-table"><thead><tr>${this.thDash("Data", "lanc.data")}${this.thDash("Obra", "lanc.obra")}${this.thDash("Histórico", "lanc.hist")}${this.thDash("Valor", "lanc.valor", true)}</tr></thead><tbody>${lancs.map((r) => {
-        const v = (Number(r.total) || 0) * (r.classe === "despesa" ? -1 : (r.redutora ? -1 : 1));
-        return `<tr><td>${this.dataBr(r.data)}</td><td>${this.esc(this.rotuloObra(r.grupo || r.obra || ""))}</td><td>${this.esc(r.historico || "—")}${r.pessoa ? `<div class="pcx-pessoa">${this.esc(r.pessoa)}</div>` : ""}</td><td class="is-right pcx-valor ${v < -0.004 ? "is-out" : "is-in"}">${this.fmt(v)}</td></tr>`;
-      }).join("") || `<tr><td colspan="4" class="pcx-vazio">Sem lançamento.</td></tr>`}</tbody></table></div>`)}
-    `;
   },
 
   async paginarSienge(base) {
@@ -2250,36 +2149,121 @@ const PrestacaoContasApp = {
     this.render();
   },
 
-  carteiraHtml(bills) {
-    const lista0 = bills || [];
-    const aberto = lista0.reduce((s, b) => s + (Number(b.aberto) || 0), 0);
-    const vencido = lista0.reduce((s, b) => s + (Number(b.vencido) || 0), 0);
-    const recebido = lista0.reduce((s, b) => s + (Number(b.recebido) || 0), 0);
-    const comSaldo = lista0.filter((b) => (Number(b.aberto) || 0) > 0.009).length;
-    const pick = {
-      "cart.id": (x) => x.id,
-      "cart.cliente": (x) => (x.cliente && x.cliente.name) || "",
-      "cart.un": (x) => (x.units || []).map((u) => u.name).join(", "),
-      "cart.aberto": (x) => Number(x.aberto) || 0,
-      "cart.vencido": (x) => Number(x.vencido) || 0,
-      "cart.recebido": (x) => Number(x.recebido) || 0,
-      "cart.parc": (x) => Number(x.nParcelas) || 0,
-      "cart.baixa": (x) => x.ultimaBaixa || ""
+  nomeObra(id) {
+    const rot = this.rotuloObra(id || "");
+    return String(rot).replace(/^\d+\s*[-–]\s*/, "") || rot || "Sem obra";
+  },
+
+  medirTitulo(b) {
+    const p = this.periodoMes();
+    let recebidoMes = 0;
+    const ccs = [];
+    Object.values(b.parcelas || {}).forEach((partes) => {
+      Object.keys(partes || {}).forEach((cc) => {
+        if (cc && ccs.indexOf(cc) < 0) ccs.push(cc);
+        const parc = partes[cc];
+        ((parc && parc.receipts) || []).forEach((rc) => {
+          if (/distrat|cancel|reparcel|repactu/i.test(String(rc && rc.type || ""))) return;
+          const d = String((rc && (rc.date || rc.receiptDate || rc.paymentDate)) || "").slice(0, 10);
+          if (d >= p.start && d <= p.end) recebidoMes += Number(rc.netReceipt != null ? rc.netReceipt : rc.value) || 0;
+        });
+      });
+    });
+    const cc = ccs[0] || "";
+    const obra = cc ? this.chaveObra(cc) : "";
+    const aberto = Number(b.aberto) || 0;
+    const vencido = Number(b.vencido) || 0;
+    const unidade = (b.units || []).map((u) => u.name).filter(Boolean).sort((a, c) => a.localeCompare(c, "pt-BR", { numeric: true })).join(", ");
+    return {
+      cc,
+      obra,
+      obraNome: obra ? this.nomeObra(obra) : "Sem obra",
+      unidade,
+      status: aberto > 0.009 ? "Ativo" : "Quitado",
+      recebidoMes,
+      aVencer: Math.max(0, aberto - vencido),
+      vencido
     };
-    const lista = this.ordenarLista(lista0, "cart", pick);
+  },
+
+  graficoCarteiraHtml(grupos) {
+    const cores = ["#105436", "#f37021", "#c2410c", "#14532d"];
+    const cards = grupos.map((g, i) => {
+      const ativos = g.rows.filter((r) => r.status === "Ativo").length;
+      const quitados = g.rows.length - ativos;
+      const total = g.rows.length;
+      const pAt = total ? (ativos / total) * 100 : 0;
+      const pQ = total ? Math.round((quitados / total) * 100) : 0;
+      const pA = total ? Math.round(pAt) : 0;
+      const cor = cores[i % cores.length];
+      return `<article class="pcx-don">
+        <h3>${this.esc(g.obraNome)}</h3>
+        <div class="pcx-don-anel">
+          <div class="pcx-don-ring" style="background:conic-gradient(${cor} 0 ${pAt.toFixed(2)}%, #c5cdd6 ${pAt.toFixed(2)}% 100%)"></div>
+          ${ativos ? `<span class="pcx-don-tag is-ativo">${ativos} (${pA}%)</span>` : ""}
+          ${quitados ? `<span class="pcx-don-tag is-quit">${quitados} (${pQ}%)</span>` : ""}
+          <div class="pcx-don-hole"><strong>${total}</strong><span>Contratos</span></div>
+        </div>
+        <div class="pcx-don-leg">
+          <span><i style="background:#c5cdd6"></i>Quitados</span>
+          <span><i style="background:${cor}"></i>Ativos</span>
+        </div>
+      </article>`;
+    }).join("");
+    if (!cards) return "";
+    return `<div class="pcx-don-titulo">Contratos Ativos e Quitados</div><div class="pcx-dons">${cards}</div>`;
+  },
+
+  carteiraHtml(bills) {
+    const lista0 = (bills || []).map((b) => Object.assign({}, b, this.medirTitulo(b)));
+    const ativos = lista0.filter((b) => b.status === "Ativo").length;
+    const quitados = lista0.length - ativos;
+    const recebido = lista0.reduce((s, b) => s + (Number(b.recebido) || 0), 0);
+    const recebidoMes = lista0.reduce((s, b) => s + (Number(b.recebidoMes) || 0), 0);
+    const aVencer = lista0.reduce((s, b) => s + (Number(b.aVencer) || 0), 0);
+    const vencido = lista0.reduce((s, b) => s + (Number(b.vencido) || 0), 0);
+    const pick = {
+      "cart.un": (x) => x.unidade || "",
+      "cart.cliente": (x) => (x.cliente && x.cliente.name) || "",
+      "cart.id": (x) => x.id,
+      "cart.sit": (x) => x.status || "",
+      "cart.recebido": (x) => Number(x.recebido) || 0,
+      "cart.mes": (x) => Number(x.recebidoMes) || 0,
+      "cart.avencer": (x) => Number(x.aVencer) || 0,
+      "cart.vencido": (x) => Number(x.vencido) || 0
+    };
+    const gruposMap = {};
+    lista0.forEach((b) => {
+      const id = b.obra || "—";
+      const g = gruposMap[id] || (gruposMap[id] = { id, obraNome: b.obraNome, rows: [] });
+      g.rows.push(b);
+    });
+    const grupos = Object.values(gruposMap).sort((a, b) => a.obraNome.localeCompare(b.obraNome, "pt-BR", { numeric: true }));
+    const ordenado = this.dashSort.key && this.dashSort.key.indexOf("cart.") === 0;
+    grupos.forEach((g) => {
+      g.rows = ordenado
+        ? this.ordenarLista(g.rows, "cart", pick)
+        : g.rows.slice().sort((a, b) => String(a.unidade || "").localeCompare(String(b.unidade || ""), "pt-BR", { numeric: true }));
+    });
+    const head = this.thDash("Unidade", "cart.un") + this.thDash("Cliente", "cart.cliente") + this.thDash("Título", "cart.id") + this.thDash("Status", "cart.sit") + this.thDash("Recebido acumulado", "cart.recebido", true) + this.thDash("Recebido no mês", "cart.mes", true) + this.thDash("Em aberto", "cart.avencer", true) + this.thDash("Vencido", "cart.vencido", true);
+    const linha = (b) => {
+      const cli = (b.cliente && (b.cliente.name || b.cliente.id)) || "—";
+      const sit = b.status === "Ativo" ? "is-ativo" : "is-quit";
+      return `<tr><td>${this.esc(b.unidade || "—")}</td><td>${this.esc(cli)}</td><td>${this.esc(b.id)}</td><td><span class="pcx-sit ${sit}">${this.esc(b.status)}</span></td><td class="is-right pcx-valor is-in">${this.fmt(b.recebido)}</td><td class="is-right pcx-valor is-in">${this.fmt(b.recebidoMes)}</td><td class="is-right pcx-valor">${this.fmt(b.aVencer)}</td><td class="is-right pcx-valor is-out">${this.fmt(b.vencido)}</td></tr>`;
+    };
+    const tabelas = grupos.map((g) => this.blocoHtml(g.obraNome, g.rows.length + " contrato(s)", `<div class="cc-scroll pcx-dash-scroll"><table class="cc-table pcx-table"><thead><tr>${head}</tr></thead><tbody>${g.rows.map(linha).join("")}</tbody></table></div>`)).join("");
+    const p = this.periodoMes();
     return `
       ${this.kpisHtml([
-        { rot: "Títulos", val: String(lista0.length), nota: comSaldo + " com saldo" },
-        { rot: "Em aberto", val: this.fmt(aberto), nota: "Saldo atual", cls: "is-out" },
-        { rot: "Vencido", val: this.fmt(vencido), nota: "Parcela com vencimento passado", cls: "is-out" },
-        { rot: "Recebido", val: this.fmt(recebido), nota: "Baixas do contrato", cls: "is-in" }
+        { rot: "Contratos", val: String(lista0.length), nota: ativos + " ativos · " + quitados + " quitados" },
+        { rot: "Recebido acumulado", val: this.fmt(recebido), nota: "Baixas do contrato", cls: "is-in" },
+        { rot: "Recebido no mês", val: this.fmt(recebidoMes), nota: this.dataBr(p.start) + " a " + this.dataBr(p.end), cls: "is-in" },
+        { rot: "Em aberto", val: this.fmt(aVencer), nota: "Saldo que ainda não venceu" },
+        { rot: "Vencido", val: this.fmt(vencido), nota: "Saldo com vencimento passado", cls: "is-out" }
       ])}
-      <p class="pcx-ajuda">Carteira de contratos de venda (CT) dos centros selecionados, posição de hoje. Cada linha é um título.</p>
-      ${this.blocoHtml("Títulos", lista0.length + " título(s)", `<div class="cc-scroll pcx-dash-scroll"><table class="cc-table pcx-table"><thead><tr>${this.thDash("Título", "cart.id")}${this.thDash("Cliente", "cart.cliente")}${this.thDash("Unidades", "cart.un")}${this.thDash("Parcelas", "cart.parc", true)}${this.thDash("Em aberto", "cart.aberto", true)}${this.thDash("Vencido", "cart.vencido", true)}${this.thDash("Recebido", "cart.recebido", true)}${this.thDash("Última baixa", "cart.baixa")}</tr></thead><tbody>${lista.map((b) => {
-        const cli = (b.cliente && (b.cliente.name || b.cliente.id)) || "—";
-        const uns = (b.units || []).map((u) => u.name).filter(Boolean).join(", ") || "—";
-        return `<tr><td>${this.esc(b.id)}</td><td>${this.esc(cli)}</td><td>${this.esc(uns)}</td><td class="is-right">${b.nParcelas || 0}</td><td class="is-right pcx-valor">${this.fmt(b.aberto)}</td><td class="is-right pcx-valor is-out">${this.fmt(b.vencido)}</td><td class="is-right pcx-valor is-in">${this.fmt(b.recebido)}</td><td>${this.dataBr(b.ultimaBaixa)}</td></tr>`;
-      }).join("") || `<tr><td colspan="8" class="pcx-vazio">Nenhum título de venda nestes centros.</td></tr>`}</tbody></table></div>`)}
+      <p class="pcx-ajuda">Posição de hoje dos contratos de venda. O anel separa ativos e quitados por obra. Recebido no mês usa a data da baixa dentro do mês de referência. Em aberto é o saldo a vencer; vencido é o saldo atrasado.</p>
+      ${this.graficoCarteiraHtml(grupos)}
+      ${tabelas || `<div class="pcx-alert is-info">Nenhum título de venda nestes centros.</div>`}
     `;
   },
 

@@ -9633,6 +9633,23 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .pcx-bloco-tit { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px; font-size: 0.82rem; font-weight: 800; color: #105436; }
 .pcx-bloco-tit span { font-weight: 600; color: #64748b; font-size: 0.74rem; }
 .pcx-dash-scroll { max-height: 360px; }
+.pcx-don-titulo { text-align: center; margin: 12px 0 8px; padding: 8px 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; color: #475569; font-weight: 600; font-size: 0.92rem; }
+.pcx-dons { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.pcx-don { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 12px 16px; text-align: center; }
+.pcx-don h3 { margin: 0; font-size: 1rem; font-weight: 600; color: #334155; }
+.pcx-don-anel { position: relative; width: 188px; height: 188px; margin: 6px auto 2px; }
+.pcx-don-ring { width: 188px; height: 188px; border-radius: 50%; }
+.pcx-don-hole { position: absolute; width: 118px; height: 118px; left: 35px; top: 35px; border-radius: 50%; background: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.pcx-don-hole strong { font-size: 1.7rem; font-weight: 700; color: #334155; line-height: 1; }
+.pcx-don-hole span { margin-top: 2px; font-size: 0.78rem; color: #64748b; }
+.pcx-don-tag { position: absolute; font-size: 0.75rem; font-weight: 700; color: #1e293b; white-space: nowrap; }
+.pcx-don-tag.is-ativo { top: 28px; left: 58%; }
+.pcx-don-tag.is-quit { right: 6px; bottom: 34px; }
+.pcx-don-leg { display: flex; justify-content: center; gap: 16px; margin-top: 6px; font-size: 0.75rem; color: #64748b; }
+.pcx-don-leg i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+.pcx-sit { font-size: 0.75rem; font-weight: 700; }
+.pcx-sit.is-ativo { color: #105436; }
+.pcx-sit.is-quit { color: #64748b; }
 .pcx-resumo { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
 .pcx-pills { display: flex; gap: 6px; flex-wrap: wrap; }
 .pcx-pill { border: 1px solid #e2e8f0; background: #fff; color: #475569; border-radius: 999px; padding: 3px 10px; font-size: 0.74rem; font-weight: 700; cursor: pointer; }

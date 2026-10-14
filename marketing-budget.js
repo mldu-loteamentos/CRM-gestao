@@ -737,7 +737,7 @@ const MarketingBudgetApp = {
         const bms = lista(p && p.bankMovements);
         return bms.length ? bms : [null];
       };
-      if (pays.some((p) => movsDe(p).some((bm) => app.isSubstituicao(bill, p, bm, docId, docNome)))) return;
+      const teveSubst = pays.some((p) => movsDe(p).some((bm) => app.isSubstituicao(bill, p, bm, docId, docNome)));
       const previsao = app.ehPrevisao(docId, docNome, bill);
       let dataPg = "";
       const original = Number(bill.originalAmount) || 0;
@@ -793,7 +793,7 @@ const MarketingBudgetApp = {
           }
         } else {
           baixas.fatias.forEach((b, i) => push("realizado", b.valor * fat, b.data, false, i));
-          push("comprometido", aberto * fat, (nota && retro) ? hoje : venc, nota && retro);
+          if (!teveSubst) push("comprometido", aberto * fat, (nota && retro) ? hoje : venc, nota && retro);
         }
       });
     });
@@ -2922,16 +2922,16 @@ const MarketingBudgetApp = {
           labels: rot,
           datasets: [
             { type: "bar", label: "Unidades vendidas", data: vend, backgroundColor: "#6366f1", yAxisID: "u", order: 2 },
-            { type: "bar", label: "Distratos", data: dist.map((d) => -d), backgroundColor: "#fca5a5", yAxisID: "u", order: 2 },
+            { type: "bar", label: "Distratos", data: dist, backgroundColor: "#fca5a5", yAxisID: "u", order: 2 },
             { type: "line", label: "Custo por unidade (acumulado)", data: cac, borderColor: "#105436", backgroundColor: "#105436", tension: 0.25, pointRadius: 2, spanGaps: true, yAxisID: "cac", order: 1 }
           ]
         },
         options: {
           responsive: true, maintainAspectRatio: false,
-          plugins: { legend: { position: "bottom" }, tooltip: { callbacks: { label: (c) => c.dataset.yAxisID === "cac" ? `${c.dataset.label}: ${this.money(c.parsed.y)}` : `${c.dataset.label}: ${Math.abs(c.parsed.y)}` } } },
+          plugins: { legend: { position: "bottom" }, tooltip: { callbacks: { label: (c) => c.dataset.yAxisID === "cac" ? `${c.dataset.label}: ${this.money(c.parsed.y)}` : `${c.dataset.label}: ${c.parsed.y}` } } },
           scales: {
-            u: { type: "linear", position: "left", beginAtZero: true, ticks: { precision: 0, callback: (v) => Math.abs(v) } },
-            cac: { type: "linear", position: "right", beginAtZero: true, grid: { drawOnChartArea: false }, ticks: tick }
+            u: { type: "linear", position: "left", min: 0, ticks: { precision: 0 } },
+            cac: { type: "linear", position: "right", min: 0, grid: { drawOnChartArea: false }, ticks: tick }
           }
         }
       });
