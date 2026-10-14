@@ -1093,7 +1093,6 @@ const ComercialApp = {
     const ja = this.state.velCache[id];
     if (ja && ja.pronto) {
       this.renderVelocidade();
-      if (!ja.cacPronto) this.carregarCac(id, gen);
       return;
     }
     this.state.velCache[id] = { pronto: false, status: 'Lendo lotes e contratos…', unidades: [], contratos: [] };
@@ -1107,7 +1106,6 @@ const ComercialApp = {
       listas.flat().forEach((c) => { if (c && c.id != null) byId.set(String(c.id), c); });
       this.state.velCache[id] = { pronto: true, unidades: unidades, contratos: [...byId.values()], status: '', cac: null, cacPronto: false };
       this.renderVelocidade();
-      this.carregarCac(id, gen);
     } catch (e) {
       if (gen !== this.state.velGen) return;
       this.state.velCache[id] = { pronto: true, erro: 'Não foi possível ler este empreendimento no Sienge.', unidades: [], contratos: [], cacPronto: true };
@@ -1266,7 +1264,7 @@ const ComercialApp = {
     root.innerHTML = `
       <div class="com-vel-top">
         ${filtro}
-        <p class="com-vel-nota">A lista traz só empreendimentos com unidades vinculadas. A escolha é de um por vez. Lotes vendidos contam cada venda, inclusive quando o mesmo lote volta ao estoque. Plano curto vai até 48 parcelas. O CAC divide a despesa do mês pelas vendas do mês. Comercial não inclui comissão.</p>
+        <p class="com-vel-nota">A lista traz só empreendimentos com unidades vinculadas. A escolha é de um por vez. Lotes vendidos contam cada venda, inclusive quando o mesmo lote volta ao estoque. Plano curto vai até 48 parcelas.</p>
       </div>
       ${miolo}`;
     this.bindVelEmp();
@@ -1284,20 +1282,7 @@ const ComercialApp = {
   htmlVelocidade(pack) {
     const m = this.modeloVel(pack);
     const base = m.vendaveis || m.lotes;
-    const velTotal = base > 0 ? (m.vendas / base) * 100 : null;
     const vezes = m.lotes > 0 ? (m.vendas / m.lotes) * 100 : null;
-    const cac = pack.cac || {};
-    const somaLado = (de, ate, lado) => {
-      let t = 0;
-      Object.keys(cac).forEach((ym) => {
-        if (ym < de || ym > ate) return;
-        t += Number(cac[ym] && cac[ym][lado]) || 0;
-      });
-      return t;
-    };
-    const comercial = somaLado('0000-00', '9999-99', 'comercial');
-    const marketing = somaLado('0000-00', '9999-99', 'marketing');
-    const cacCard = m.vendas > 0 && pack.cacPronto ? (comercial + marketing) / m.vendas : null;
     const comPlano = m.curto + m.longo;
     const pct = (n) => comPlano > 0 ? (n / comPlano) * 100 : 0;
     const anel = Math.max(0, Math.min(100, vezes || 0));
@@ -1307,12 +1292,7 @@ const ComercialApp = {
     }).join('');
     const anos = [...new Set(Object.keys(m.meses).map((k) => k.slice(0, 4)))].sort();
     if (anos.length && !Object.keys(this.state.velAberto).length) this.state.velAberto[anos[anos.length - 1]] = true;
-    const cacCel = (v, de, ate, lado) => {
-      const gasto = somaLado(de, ate, lado);
-      const unit = v > 0 && pack.cacPronto ? gasto / v : null;
-      return `<td>${pack.cacPronto ? this.fmtCac(unit) : (pack.status ? '…' : '—')}</td>`;
-    };
-    const linha = (rotulo, v, d, cls, anoMesDe, anoMesAte, clique) => {
+    const linha = (rotulo, v, d, cls, clique) => {
       const saldo = v - d;
       const parte = m.vendas > 0 ? (v / m.vendas) * 100 : null;
       const vel = base > 0 ? (v / base) * 100 : null;
@@ -1320,7 +1300,6 @@ const ComercialApp = {
         <td>${this.esc(rotulo)}</td>
         <td>${this.fmtInt(v)}</td><td>${this.fmtInt(d)}</td><td>${this.fmtInt(saldo)}</td>
         <td>${this.fmtPctVel(parte)}</td><td>${this.fmtPctVel(vel)}</td>
-        ${cacCel(v, anoMesDe, anoMesAte, 'comercial')}${cacCel(v, anoMesDe, anoMesAte, 'marketing')}
       </tr>`;
     };
     let corpo = '';
@@ -1329,21 +1308,20 @@ const ComercialApp = {
       let d = 0;
       const chaves = Object.keys(m.meses).filter((k) => k.slice(0, 4) === ano).sort();
       chaves.forEach((k) => { v += m.meses[k].v; d += m.meses[k].d; });
-      corpo += linha(ano, v, d, 'com-vel-ano', ano + '-01', ano + '-12', true);
+      corpo += linha(ano, v, d, 'com-vel-ano', true);
       if (this.state.velAberto[ano]) {
         chaves.forEach((k) => {
           const mes = COM_MESES[Number(k.slice(5, 7)) - 1] || k;
-          corpo += linha(mes, m.meses[k].v, m.meses[k].d, 'com-vel-mes', k, k, false);
+          corpo += linha(mes, m.meses[k].v, m.meses[k].d, 'com-vel-mes', false);
         });
       }
     });
-    corpo += linha('Total', m.vendas, m.distratos, 'com-vel-total', '0000-00', '9999-99', false);
+    corpo += linha('Total', m.vendas, m.distratos, 'com-vel-total', false);
     return `
       <div class="com-vel-kpis">
         <article class="com-vel-kpi"><span>Total de lotes</span><strong>${m.lotes ? this.fmtInt(m.lotes) : '—'}</strong><small>${this.fmtInt(m.vendaveis)} vendáveis, fora permuta, mútuo e reserva técnica</small></article>
         <article class="com-vel-kpi"><span>Lotes vendidos</span><strong>${this.fmtInt(m.vendas)}</strong><small>${this.fmtPctVel(vezes)} em relação aos lotes</small></article>
         <article class="com-vel-kpi"><span>Estoque de lotes</span><strong>${m.lotes ? this.fmtInt(m.estoque) : '—'}</strong><small>Disponíveis agora</small></article>
-        <article class="com-vel-kpi"><span>CAC</span><strong>${this.fmtCac(cacCard)}</strong><small>Comercial sem comissão + marketing, dividido pelas vendas. Velocidade ${this.fmtPctVel(velTotal)}</small></article>
       </div>
       <div class="com-vel-grid">
         <div class="com-vel-card">
@@ -1369,11 +1347,11 @@ const ComercialApp = {
         </div>
       </div>
       <div class="com-vel-card">
-        <p>${this.esc(pack.status || pack.cacNota || 'Clique no ano para abrir os meses. A velocidade do mês é as vendas daquele mês divididas pelos lotes vendáveis. CAC comercial e CAC marketing ficam lado a lado.')}</p>
+        <p>Clique no ano para abrir os meses. A velocidade do mês é as vendas daquele mês divididas pelos lotes vendáveis.</p>
         <div class="com-vel-scroll">
           <table class="cc-table com-vel-table">
-            <thead><tr><th>Ano</th><th>Vendas</th><th>Distratos</th><th>Saldo</th><th>% do vendido</th><th>Velocidade</th><th>CAC comercial</th><th>CAC marketing</th></tr></thead>
-            <tbody>${corpo || '<tr><td colspan="8">Nenhum contrato neste empreendimento.</td></tr>'}</tbody>
+            <thead><tr><th>Ano</th><th>Vendas</th><th>Distratos</th><th>Saldo</th><th>% do vendido</th><th>Velocidade</th></tr></thead>
+            <tbody>${corpo || '<tr><td colspan="6">Nenhum contrato neste empreendimento.</td></tr>'}</tbody>
           </table>
         </div>
       </div>`;
