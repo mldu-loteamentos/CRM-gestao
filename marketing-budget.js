@@ -1896,6 +1896,126 @@ const MarketingBudgetApp = {
       + this.secao("Vendas do período", "As unidades vendidas servem para ver quanto de marketing cada venda consumiu.", vendas);
   },
 
+  escXml(s) {
+    return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  },
+
+  trocarTextosSlide(xml, textos) {
+    let i = 0;
+    const out = String(xml).replace(/<a:t(\s[^>]*)?>([^<]*)<\/a:t>/g, (full, attrs) => {
+      if (i >= textos.length) return full;
+      const novo = this.escXml(textos[i]);
+      i += 1;
+      return "<a:t" + (attrs || "") + ">" + novo + "</a:t>";
+    });
+    if (i !== textos.length) throw new Error("O modelo de 30 anos mudou e os slides não fecharam.");
+    return out;
+  },
+
+  async exportarPpt() {
+    const s = this.state;
+    if (!s.consultado || s.loading || s.error) {
+      alert("Consulte o empreendimento antes de exportar a apresentação.");
+      return;
+    }
+    if (typeof JSZip === "undefined") {
+      alert("Não foi possível montar o PowerPoint neste navegador.");
+      return;
+    }
+    const cc = this.ccAtual();
+    const r = this.resumo();
+    const nome = this.ccLabel(cc) || "Empreendimento";
+    const periodo = this.dataBr(s.startDate) + " a " + this.dataBr(s.endDate);
+    const pct = String(s.pct || 0).replace(".", ",") + "%";
+    const vgv = (s.obra && s.obra.vgv) || 0;
+    const consumo = r.verba > 0 ? r.consumo.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%" : "—";
+    const n = (v) => Number(v || 0).toLocaleString("pt-BR");
+    const capa = [
+      "Budget de marketing",
+      nome,
+      "Baixas de " + periodo,
+      "Verba pelo VGV da obra, gastos realizados e comprometidos.",
+      "Custo por unidade vendida no período."
+    ];
+    const origem = [
+      "De onde vem a verba",
+      periodo,
+      "A verba nasce do VGV da obra",
+      "O VGV do empreendimento é " + this.money(vgv) + ". O marketing fica com " + pct + " desse VGV. A verba é " + this.money(r.verba) + ", formada por VGV × percentual."
+    ];
+    const uso = [
+      "Uso da verba",
+      periodo,
+      "Quanto já foi pago e quanto ainda está comprometido",
+      this.moneyShort(r.realizado),
+      "realizado no período",
+      this.moneyShort(r.comprometido),
+      "em aberto e",
+      "previsão",
+      this.moneyShort(r.saldo),
+      r.saldo < 0 ? "verba" : "saldo da verba",
+      r.saldo < 0 ? "ultrapassada" : "o que ainda cabe",
+      this.moneyShort(r.previsto),
+      "só a previsão",
+      "ainda não paga",
+      consumo,
+      "consumo da verba",
+      "pago + comprometido"
+    ];
+    const cacPago = r.cac != null ? this.money(r.cac) : "—";
+    const cacAberto = r.cacTotal != null ? this.money(r.cacTotal) : "—";
+    const vendas = [
+      "Vendas do período",
+      periodo,
+      "Quanto de marketing cada venda consumiu",
+      n(r.liquidas) + " unidades vendidas, em " + n(r.brutas) + " contratos emitidos e " + n(r.distr) + " distratos. O marketing já pago dá " + cacPago + " por unidade. Somando o que ainda está comprometido, o custo vai a " + cacAberto + " por unidade."
+    ];
+    try {
+      if (!this._modeloPpt) {
+        const res = await fetch("modelo-30-anos.pptx");
+        if (!res.ok) throw new Error("modelo");
+        this._modeloPpt = await res.arrayBuffer();
+      }
+      const zip = await JSZip.loadAsync(this._modeloPpt.slice(0));
+      const ler = async (caminho) => zip.file(caminho).async("string");
+      const capaXml = this.trocarTextosSlide(await ler("ppt/slides/slide1.xml"), capa);
+      const origemXml = this.trocarTextosSlide(await ler("ppt/slides/slide2.xml"), origem);
+      const numerosXml = await ler("ppt/slides/slide7.xml");
+      const numerosRels = await ler("ppt/slides/_rels/slide7.xml.rels");
+      const origemRels = await ler("ppt/slides/_rels/slide2.xml.rels");
+      const usoXml = this.trocarTextosSlide(numerosXml, uso);
+      const vendasXml = this.trocarTextosSlide(await ler("ppt/slides/slide2.xml"), vendas);
+      zip.file("ppt/slides/slide1.xml", capaXml);
+      zip.file("ppt/slides/slide2.xml", origemXml);
+      zip.file("ppt/slides/slide3.xml", usoXml);
+      zip.file("ppt/slides/_rels/slide3.xml.rels", numerosRels);
+      zip.file("ppt/slides/slide4.xml", vendasXml);
+      zip.file("ppt/slides/_rels/slide4.xml.rels", origemRels);
+      let pres = await ler("ppt/presentation.xml");
+      pres = pres.replace(/<p:sldId id="256"[^/]*\/>/, "").replace(/<p:sldId id="270"[^/]*\/>/, "").replace(/<p:sldId id="271"[^/]*\/>/, "").replace(/<p:sldId id="272"[^/]*\/>/, "");
+      if (pres.indexOf('id="256"') >= 0 || pres.indexOf('id="272"') >= 0) throw new Error("modelo");
+      zip.file("ppt/presentation.xml", pres);
+      let presRels = await ler("ppt/_rels/presentation.xml.rels");
+      presRels = presRels.replace(/<Relationship Id="rId1[5-8]"[^>]*\/>/g, "");
+      zip.file("ppt/_rels/presentation.xml.rels", presRels);
+      let app = await ler("docProps/app.xml");
+      app = app.replace("<Slides>8</Slides>", "<Slides>4</Slides>");
+      zip.file("docProps/app.xml", app);
+      const blob = await zip.generateAsync({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation" });
+      const a = document.createElement("a");
+      const arquivo = "Budget de marketing - " + nome.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim() + ".pptx";
+      a.href = URL.createObjectURL(blob);
+      a.download = arquivo;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    } catch (e) {
+      console.warn("[Budget] ppt", e);
+      alert("Não foi possível gerar a apresentação no modelo de 30 anos.");
+    }
+  },
+
   /* ---------- aba Perfil da venda ---------- */
   setAba(aba) {
     if (this.state.aba === aba) return;
@@ -2596,6 +2716,9 @@ const MarketingBudgetApp = {
             <button type="button" class="btn btn-primary" ${s.loading ? "disabled" : ""} onclick="MarketingBudgetApp.consultar()"
               style="height:38px;width:140px;justify-content:center;display:inline-flex;align-items:center;gap:6px;">
               <i data-lucide="search" style="width:14px;"></i> Consultar
+            </button>
+            <button type="button" class="btn btn-ppt" ${s.consultado && !s.loading && !s.error ? "" : "disabled"} onclick="MarketingBudgetApp.exportarPpt()" title="Exportar a consulta em 4 slides, no modelo de 30 anos" style="height:38px;">
+              <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em PPT
             </button>
           </div>
           ${corpo}

@@ -7479,6 +7479,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
   padding: 0 16px;
 }
 .btn-excel,
+.btn-ppt,
 .cprev-excel-btn {
   background-color: #f8fafc !important;
   border: 1px solid #cbd5e1 !important;
@@ -7497,11 +7498,13 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
   width: auto;
 }
 .btn-excel:hover:not(:disabled),
+.btn-ppt:hover:not(:disabled),
 .cprev-excel-btn:hover:not(:disabled) {
   background-color: #e2e8f0 !important;
   color: #334155 !important;
 }
 .btn-excel:disabled,
+.btn-ppt:disabled,
 .cprev-excel-btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
