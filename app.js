@@ -33498,10 +33498,9 @@ window.renderTimeline = function() {
   const container = document.getElementById('interactive-timeline-container');
   if (!container) return;
 
-  container.style.minHeight = '100px';
-  container.style.marginTop = '60px'; 
-  container.style.marginLeft = '60px';
-  container.style.marginRight = '60px';
+  container.style.marginTop = '12px';
+  container.style.marginLeft = '28px';
+  container.style.marginRight = '28px';
 
   Array.from(container.children).forEach(child => {
     if (child.tagName !== 'DIV' || !child.style.height || child.style.height !== '4px') {
@@ -33509,6 +33508,11 @@ window.renderTimeline = function() {
     }
   });
 
+  if (Array.isArray(window.TimelineState) && typeof window.collapseOfficialTimelineDuplicates === "function") {
+    const collapsed = window.collapseOfficialTimelineDuplicates(window.TimelineState);
+    if (collapsed.changed) window.TimelineState = collapsed.nodes;
+  }
+  if (!Array.isArray(window.TimelineState)) window.TimelineState = [];
   window.TimelineState.sort((a, b) => a.dias - b.dias);
   
   let actualMax = Math.max(0, ...window.TimelineState.map(n => n.dias));
@@ -33531,13 +33535,65 @@ window.renderTimeline = function() {
   
   const range = renderMax - renderMin;
   const zeroPct = (Math.abs(renderMin) / range) * 100; // Será sempre 20%
+  const boardWidth = Math.max(320, container.getBoundingClientRect().width || 960);
+  const laid = (window.TimelineState || []).map((node, index) => {
+    const acaoObj = window.TimelineAcoesList && window.TimelineAcoesList.find(a => a.id === node.acao);
+    const acaoLabel = (node.label && (!acaoObj || node.acao === "custom")) ? node.label : (acaoObj ? acaoObj.label : (node.label || node.acao));
+    const color = (node.acao === "custom" && node.customColor) ? node.customColor : (acaoObj ? (acaoObj.color || "#94a3b8") : (node.customColor || "#94a3b8"));
+    const leftPct = ((node.dias - renderMin) / range) * 100;
+    const x = (leftPct / 100) * boardWidth;
+    const estW = Math.min(150, Math.max(68, String(acaoLabel || "").length * 6.2 + 16));
+    return { node, index, acaoLabel, color, leftPct, x, estW, shift: 0, side: "above", labelLevel: 0 };
+  });
+  const circleOccupied = [];
+  laid.forEach(item => {
+    let lane = 0;
+    while ((circleOccupied[lane] || []).some(x => Math.abs(x - item.x) < 30)) lane++;
+    if (!circleOccupied[lane]) circleOccupied[lane] = [];
+    circleOccupied[lane].push(item.x);
+    const level = Math.ceil(lane / 2);
+    item.shift = lane === 0 ? 0 : (lane % 2 === 1 ? -1 : 1) * level * 36;
+    item.side = item.shift < 0 ? "above" : item.shift > 0 ? "below" : (item.index % 2 === 0 ? "above" : "below");
+  });
+  const zeroX = (zeroPct / 100) * boardWidth;
+  laid.forEach(item => {
+    if (item.side === "above" && Math.abs(item.x - zeroX) < 96) item.side = "below";
+  });
+  const bySide = { above: [], below: [] };
+  laid.forEach(item => bySide[item.side].push(item));
+  Object.keys(bySide).forEach(side => {
+    const levels = [];
+    if (side === "above") {
+      levels[0] = [{ left: zeroX - 96, right: zeroX + 96 }];
+    }
+    bySide[side].sort((a, b) => a.x - b.x).forEach(item => {
+      const left = item.x - item.estW / 2;
+      const right = item.x + item.estW / 2;
+      let level = 0;
+      while ((levels[level] || []).some(box => left < box.right + 8 && right > box.left - 8)) level++;
+      if (!levels[level]) levels[level] = [];
+      levels[level].push({ left, right });
+      item.labelLevel = level;
+    });
+  });
+  const labelReach = (item) => 22 + item.labelLevel * 42 + Math.abs(item.shift);
+  const maxUp = Math.max(72, ...laid.filter(item => item.side === "above").map(labelReach), 0);
+  const maxDown = Math.max(36, ...laid.filter(item => item.side === "below").map(labelReach), 0);
+  const axis = maxUp + 6;
+  container.style.height = (axis + maxDown + 14) + "px";
+  container.style.minHeight = container.style.height;
+  const track = Array.from(container.children).find(child => child.tagName === "DIV" && child.style.height === "4px");
+  if (track) {
+    track.style.top = axis + "px";
+    track.style.transform = "translateY(-50%)";
+  }
 
   // Marcador do Dia 0 (Vencimento)
   const zeroMarker = document.createElement('div');
   zeroMarker.style.cssText = `
     position: absolute;
     left: ${zeroPct}%;
-    top: 50%;
+    top: ${axis}px;
     transform: translate(-50%, -50%);
     width: 6px;
     height: 48px;
@@ -33553,7 +33609,7 @@ window.renderTimeline = function() {
     bottom: 100%;
     left: 50%;
     transform: translateX(-50%);
-    margin-bottom: 26px;
+    margin-bottom: 8px;
     font-size: 0.8rem;
     font-weight: 800;
     color: #dc2626;
@@ -33566,14 +33622,19 @@ window.renderTimeline = function() {
   zeroMarker.appendChild(zeroLabel);
   container.appendChild(zeroMarker);
 
-  window.TimelineState.forEach((node, index) => {
+  laid.forEach((item) => {
+    const node = item.node;
     const nodeEl = document.createElement('div');
-    const leftPct = ((node.dias - renderMin) / range) * 100;
+    const acaoLabel = item.acaoLabel;
+    const color = item.color;
+    const labelAbove = item.side === "above";
+    const labelGap = 8 + item.labelLevel * 42;
+    const shift = item.shift;
     
     nodeEl.style.cssText = `
       position: absolute;
-      left: ${leftPct}%;
-      top: 50%;
+      left: ${item.leftPct}%;
+      top: ${axis}px;
       transform: translate(-50%, -50%);
       display: flex;
       flex-direction: column;
@@ -33581,19 +33642,16 @@ window.renderTimeline = function() {
       cursor: grab;
       z-index: 10;
     `;
-    
-    const acaoObj = window.TimelineAcoesList && window.TimelineAcoesList.find(a => a.id === node.acao);
-    let acaoLabel = (node.label && (!acaoObj || node.acao === 'custom')) ? node.label : (acaoObj ? acaoObj.label : (node.label || node.acao));
-    let color = (node.acao === 'custom' && node.customColor) ? node.customColor : (acaoObj ? (acaoObj.color || '#94a3b8') : (node.customColor || '#94a3b8'));
-    const labelAbove = index % 2 === 0;
 
+    const labelHtml = `<div class="timeline-node-label" style="margin-${labelAbove ? "bottom" : "top"}:${labelGap}px; font-size:0.72rem; font-weight:700; color:#334155; text-align:center; line-height:1.15; max-width:142px; background:rgba(255,255,255,0.94); border-radius:6px; padding:2px 4px; pointer-events:none;">${acaoLabel}<br><span class="node-dias-text" style="color:${color}; font-size:0.82rem;">${node.dias} dias</span></div>`;
+    const stem = shift ? `<div style="position:absolute; left:50%; top:50%; width:2px; height:${Math.abs(shift)}px; background:${color}; opacity:0.45; transform:translate(-50%, ${shift < 0 ? "-100%" : "0"}); pointer-events:none;"></div>` : "";
     nodeEl.innerHTML = `
-      <div class="timeline-node-connector" style="position: absolute; ${labelAbove ? 'bottom: 100%;' : 'top: 100%;'} left: 50%; transform: translateX(-50%); width: 2px; height: 8px; background: ${color}; opacity: 0.75; pointer-events: none;"></div>
-      <div class="timeline-node-label" data-side="${labelAbove ? 'above' : 'below'}" style="position: absolute; ${labelAbove ? 'bottom: 100%; margin-bottom: 8px;' : 'top: 100%; margin-top: 8px;'} font-size: 0.75rem; font-weight: 700; color: #475569; text-align: center; line-height: 1.1; width: max-content; pointer-events: none;">
-        ${acaoLabel}<br>
-        <span class="node-dias-text" style="color: ${color}; font-size: 0.9rem;">${node.dias} dias</span>
+      ${stem}
+      <div style="transform: translateY(${shift}px); display:flex; flex-direction:column; align-items:center;">
+        ${labelAbove ? labelHtml : ""}
+        <div class="timeline-circle" style="width: 22px; height: 22px; border-radius: 50%; background: ${color}; border: 3px solid #fff; box-shadow: 0 0 0 2px ${color}, 0 4px 6px rgba(0,0,0,0.1); transition: transform 0.2s;"></div>
+        ${labelAbove ? "" : labelHtml}
       </div>
-      <div class="timeline-circle" style="width: 24px; height: 24px; border-radius: 50%; background: ${color}; border: 3px solid #fff; box-shadow: 0 0 0 2px ${color}, 0 4px 6px rgba(0,0,0,0.1); transition: transform 0.2s;"></div>
     `;
     
     let isDragging = false;
@@ -33662,26 +33720,6 @@ window.renderTimeline = function() {
     };
 
     container.appendChild(nodeEl);
-  });
-
-  // Quando rótulos próximos se sobrepõem, cria níveis verticais e alonga os conectores.
-  const labelsBySide = { above: [], below: [] };
-  container.querySelectorAll('.timeline-node-label').forEach(label => {
-    labelsBySide[label.dataset.side].push(label);
-  });
-  Object.values(labelsBySide).forEach(labels => {
-    labels.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
-    for (let i = 1; i < labels.length; i++) {
-      const previous = labels[i - 1];
-      const current = labels[i];
-      if (current.getBoundingClientRect().left < previous.getBoundingClientRect().right) {
-        const node = current.parentElement;
-        const connector = node.querySelector('.timeline-node-connector');
-        const isAbove = current.dataset.side === 'above';
-        current.style[isAbove ? 'marginBottom' : 'marginTop'] = '28px';
-        if (connector) connector.style.height = '28px';
-      }
-    }
   });
 };
 
@@ -33795,6 +33833,39 @@ window.parseTimelineJsonArray = function(str) {
   }
 };
 
+window.collapseOfficialTimelineDuplicates = function(nodes) {
+  if (!Array.isArray(nodes)) return { nodes: [], changed: false };
+  const official = new Set((window.TIMELINE_ACOES_OFICIAIS || []).map(a => a && a.id).filter(Boolean));
+  const kept = [];
+  const seen = new Map();
+  let changed = false;
+  nodes.forEach(n => {
+    if (!n || typeof n !== "object") {
+      changed = true;
+      return;
+    }
+    const acao = String(n.acao || "");
+    if (!official.has(acao)) {
+      kept.push(n);
+      return;
+    }
+    const prev = seen.get(acao);
+    if (!prev) {
+      seen.set(acao, n);
+      kept.push(n);
+      return;
+    }
+    changed = true;
+    if (!prev.label && n.label) prev.label = n.label;
+    if (!prev.explicacao && n.explicacao) prev.explicacao = n.explicacao;
+    if ((!Array.isArray(prev.gatilhos) || !prev.gatilhos.length) && Array.isArray(n.gatilhos) && n.gatilhos.length) {
+      prev.gatilhos = n.gatilhos.slice();
+    }
+    if (!Number.isFinite(Number(prev.dias)) && Number.isFinite(Number(n.dias))) prev.dias = Number(n.dias);
+  });
+  return { nodes: kept, changed };
+};
+
 window.mergeTimelineNodes = function(localStr, cloudStr) {
   const local = window.parseTimelineJsonArray(localStr);
   const cloud = window.parseTimelineJsonArray(cloudStr);
@@ -33812,7 +33883,11 @@ window.mergeTimelineNodes = function(localStr, cloudStr) {
   };
   cloud.forEach(add);
   local.forEach(add);
-  return JSON.stringify(Array.from(map.values()));
+  let list = Array.from(map.values());
+  if (typeof window.collapseOfficialTimelineDuplicates === "function") {
+    list = window.collapseOfficialTimelineDuplicates(list).nodes;
+  }
+  return JSON.stringify(list);
 };
 
 window.mergeTimelineAcoes = function(localStr, cloudStr) {
@@ -34019,6 +34094,14 @@ window.ensureTimelineReguaDefaults = function() {
       explicacao: "Notificação Extrajudicial para demais clientes (já houve algum pagamento). A lista Demais clientes elegíveis segue este ponto da régua."
     });
     changed = true;
+  }
+
+  if (typeof window.collapseOfficialTimelineDuplicates === "function") {
+    const collapsed = window.collapseOfficialTimelineDuplicates(nodes);
+    if (collapsed.changed) {
+      window.TimelineState = collapsed.nodes;
+      changed = true;
+    }
   }
 
   if (changed) {

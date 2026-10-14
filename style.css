@@ -9102,6 +9102,21 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .ml-tab.is-active { color: var(--color-primary, #105436); border-bottom-color: var(--color-primary, #105436); }
 .ml-tab i, .ml-tab svg { width: 14px; height: 14px; flex-shrink: 0; }
 .ml-tab:disabled, .ml-tab.is-locked { opacity: 0.45; cursor: not-allowed; color: #64748b; border-bottom-color: transparent; }
+/* Régua de cobrança: as dez abas cabem na tela do notebook, sem faixa cortada. */
+#regras-tabs-menu.ml-tabs {
+  flex-wrap: wrap;
+  overflow: visible;
+  gap: 0 2px;
+  padding: 0 6px;
+}
+#regras-tabs-menu .ml-tab {
+  flex: 1 1 auto;
+  justify-content: center;
+  min-width: max-content;
+  white-space: nowrap;
+  padding: 8px 10px;
+  font-size: 0.74rem;
+}
 .ml-tab .ml-tab-count { font-size: 0.7rem; font-weight: 700; background: #e2e8f0; color: #475569; border-radius: 999px; padding: 1px 7px; }
 .ml-tab.is-active .ml-tab-count { background: #e7f6ee; color: var(--color-primary, #105436); }
 .ficha-tabs,

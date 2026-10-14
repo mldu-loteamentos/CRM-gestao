@@ -980,9 +980,16 @@ const CessaoPopup = {
     return v.toLocaleString("pt-BR", { maximumFractionDigits: 4 });
   },
 
-  fmtJuros(n) {
+  jurosConsiderado(n) {
     const v = Number(n);
-    const seguro = Number.isFinite(v) ? v : 0;
+    if (!Number.isFinite(v) || v <= 0) return 0;
+    const quatro = Number(v.toFixed(4));
+    if (quatro <= 0.0001) return 0;
+    return quatro;
+  },
+
+  fmtJuros(n) {
+    const seguro = this.jurosConsiderado(n);
     return seguro.toLocaleString("pt-BR", { minimumFractionDigits: 4, maximumFractionDigits: 4 });
   },
 
@@ -1490,7 +1497,7 @@ const CessaoPopup = {
     const positivas = taxas.filter((n) => n > 0.0000001);
     if (!positivas.length) return 0;
     const semMora = positivas.filter((n) => Math.abs(n - 1) > 0.05);
-    return this.modaTaxa(semMora.length ? semMora : positivas);
+    return this.jurosConsiderado(this.modaTaxa(semMora.length ? semMora : positivas));
   },
 
   indiceDoContrato(conds, installments) {
@@ -2420,7 +2427,7 @@ const CessaoPopup = {
   },
 
   clausulaJuros() {
-    const juros = Number(CessaoPopupState.juros) || 0;
+    const juros = this.jurosConsiderado(CessaoPopupState.juros);
     const presente = Number(CessaoPopupState.valorPresente);
     const divida = Number.isFinite(presente) ? presente : (Number(CessaoPopupState.saldoAberto) || 0);
     if (juros <= 0.000001) return "1.3. O contrato não possui juros de parcelamento.";
