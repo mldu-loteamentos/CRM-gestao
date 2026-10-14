@@ -6403,6 +6403,18 @@ circle.donut-segment {
 }
 .cessao-tab-panel { overflow: hidden; }
 #cessao-popup { position: fixed; inset: 0; z-index: 100000; display: none; align-items: center; justify-content: center; background: rgba(12, 41, 29, 0.55); padding: 16px; }
+#cessao-click-ordem { position: fixed; inset: 0; z-index: 100050; display: none; align-items: center; justify-content: center; background: rgba(12, 41, 29, 0.45); padding: 16px; }
+.cessao-ordem-panel { background: #fff; width: min(520px, calc(100vw - 32px)); border-radius: 14px; padding: 18px 18px 16px; box-shadow: 0 18px 40px rgba(0, 0, 0, 0.22); }
+.cessao-ordem-panel h3 { margin: 0 0 10px; color: var(--color-primary); font-size: 1.05rem; }
+.cessao-ordem-tit { margin: 10px 0 4px; font-size: 0.82rem; font-weight: 800; color: #105436; }
+.cessao-ordem-panel ol { margin: 0 0 8px 1.1rem; padding: 0; color: #1e293b; font-size: 0.9rem; }
+.cessao-ordem-panel li { margin: 2px 0; }
+.cessao-ordem-data { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; font-size: 0.82rem; font-weight: 700; color: #334155; }
+.cessao-ordem-data input { height: 38px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0 10px; font-size: 0.92rem; font-weight: 600; color: #0f172a; }
+.cessao-ordem-max { margin: 8px 0 0; font-size: 0.8rem; color: #475569; line-height: 1.4; }
+.cessao-ordem-erro { margin: 8px 0 0; min-height: 1.1em; font-size: 0.8rem; font-weight: 700; color: #b91c1c; }
+.cessao-ordem-nota { margin: 8px 0 0; font-size: 0.8rem; color: #64748b; }
+.cessao-ordem-acoes { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .cessao-popup-panel { background: #fff; width: min(1180px, calc(100vw - 32px)); height: min(820px, calc(100vh - 32px)); max-height: calc(100vh - 32px); border-radius: 14px; display: flex; flex-direction: column; box-shadow: 0 18px 40px rgba(0, 0, 0, 0.22); overflow: hidden; }
 .cessao-popup-panel header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 16px 18px 10px; }
 .cessao-popup-panel header h3 { margin: 0; color: var(--color-primary); font-size: 1.05rem; }

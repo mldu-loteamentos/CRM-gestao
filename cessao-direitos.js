@@ -1201,11 +1201,32 @@ const CessaoPopup = {
         </footer>
       </div>`;
     document.body.appendChild(ov);
+    if (!document.getElementById("cessao-click-ordem")) {
+      const ordem = document.createElement("div");
+      ordem.id = "cessao-click-ordem";
+      ordem.innerHTML = `
+        <div class="cessao-ordem-panel" role="dialog" aria-modal="true" aria-labelledby="cessao-ordem-titulo">
+          <h3 id="cessao-ordem-titulo">Ordem de assinatura</h3>
+          <div id="cessao-ordem-lista"></div>
+          <label class="cessao-ordem-data" for="cessao-click-prazo">Data limite para assinar
+            <input type="date" id="cessao-click-prazo">
+          </label>
+          <p id="cessao-ordem-max" class="cessao-ordem-max"></p>
+          <p id="cessao-ordem-erro" class="cessao-ordem-erro"></p>
+          <p class="cessao-ordem-nota">O envelope fica em rascunho. Nenhum e-mail de assinatura é enviado.</p>
+          <div class="cessao-ordem-acoes">
+            <button type="button" class="btn btn-cancel" onclick="CessaoPopup.fecharOrdemClick()">Cancelar</button>
+            <button type="button" class="btn btn-primary" id="cessao-ordem-ok" onclick="CessaoPopup.confirmarEnvioClick()">Criar rascunho</button>
+          </div>
+        </div>`;
+      document.body.appendChild(ordem);
+    }
   },
 
   fechar() {
     const ov = document.getElementById("cessao-popup");
     if (ov) ov.style.display = "none";
+    this.fecharOrdemClick();
   },
 
   async carregar(ctx) {
@@ -2808,7 +2829,139 @@ const CessaoPopup = {
       if (assoc.fechado) avisoAdesao = "Este loteamento é fechado e ainda não tem o nome da associação no centro de custo. A cessão foi gerada sem o termo de adesão.";
       bytes = new Uint8Array(pdfCessao.output("arraybuffer"));
     }
-    return { bytes, fileName, avisoAdesao };
+    const auth = await this.carimbarAutenticacao(bytes, fileName);
+    return { bytes: auth.bytes, fileName, avisoAdesao, codigo: auth.codigo, avisoAuth: auth.aviso };
+  },
+
+  isoDia(data) {
+    const z = (n) => String(n).padStart(2, "0");
+    return data.getFullYear() + "-" + z(data.getMonth() + 1) + "-" + z(data.getDate());
+  },
+
+  diaMais(dias) {
+    const d = new Date();
+    d.setHours(12, 0, 0, 0);
+    d.setDate(d.getDate() + dias);
+    return this.isoDia(d);
+  },
+
+  fmtDia(iso) {
+    const p = String(iso || "").split("-");
+    if (p.length !== 3) return "";
+    return p[2] + "/" + p[1] + "/" + p[0];
+  },
+
+  grupoAssinatura(papel) {
+    return /testemunha/i.test(String(papel || "")) ? 2 : 1;
+  },
+
+  validarPrazo(iso) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso || ""))) return "Informe a data limite da assinatura.";
+    const quando = new Date(iso + "T12:00:00-03:00");
+    if (Number.isNaN(quando.getTime())) return "A data limite da assinatura é inválida.";
+    const agora = Date.now();
+    if (quando.getTime() <= agora) return "A data limite precisa ser futura.";
+    if (quando.getTime() > agora + 90 * 24 * 60 * 60 * 1000) return "A data máxima é " + this.fmtDia(this.diaMais(89)) + ".";
+    return "";
+  },
+
+  fecharOrdemClick() {
+    const el = document.getElementById("cessao-click-ordem");
+    if (el) el.style.display = "none";
+  },
+
+  abrirOrdemClick() {
+    const el = document.getElementById("cessao-click-ordem");
+    const lista = document.getElementById("cessao-ordem-lista");
+    const prazo = document.getElementById("cessao-click-prazo");
+    const max = document.getElementById("cessao-ordem-max");
+    const erro = document.getElementById("cessao-ordem-erro");
+    if (!el || !lista || !prazo) return;
+    const pessoas = this.signatariosClick();
+    const bloco = (grupo, titulo) => {
+      const itens = pessoas.filter((s) => this.grupoAssinatura(s.papel) === grupo);
+      if (!itens.length) return "";
+      return `<p class="cessao-ordem-tit">${titulo}</p><ol>` + itens.map((s) => `<li><b>${this.esc(s.nome)}</b> · ${this.esc(s.papel)}</li>`).join("") + "</ol>";
+    };
+    lista.innerHTML = bloco(1, "1º grupo — assinam primeiro") + bloco(2, "2º grupo — somente depois que o 1º grupo concluir");
+    const padrao = this.diaMais(30);
+    const teto = this.diaMais(89);
+    prazo.min = this.diaMais(1);
+    prazo.max = teto;
+    prazo.value = padrao;
+    if (max) max.textContent = "A data máxima para assinatura é " + this.fmtDia(teto) + ". A ClickSign aceita até 90 dias a partir de hoje.";
+    if (erro) erro.textContent = "";
+    el.style.display = "flex";
+  },
+
+  async carregarQrLib() {
+    if (window.QRCode && typeof window.QRCode.toDataURL === "function") return window.QRCode;
+    if (this._qrLib) return this._qrLib;
+    this._qrLib = new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.3/qrcode.min.js";
+      s.onload = () => (window.QRCode && window.QRCode.toDataURL ? resolve(window.QRCode) : reject(new Error("O gerador de QR Code não carregou.")));
+      s.onerror = () => reject(new Error("O gerador de QR Code não carregou."));
+      document.head.appendChild(s);
+    });
+    this._qrLib.catch(() => { this._qrLib = null; });
+    return this._qrLib;
+  },
+
+  async sha256Hex(bytes) {
+    const buf = await crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  },
+
+  async guardarAutenticacao(codigo, hash, arquivo) {
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (!fx || !db) throw new Error("O Firebase não está disponível para guardar a prova do documento.");
+    const st = CessaoPopupState;
+    await fx.setDoc(fx.doc(db, "documentos_autenticados", codigo), {
+      tipo: "cessao",
+      codigo,
+      hash,
+      arquivo: arquivo || "",
+      titulo: st.titulo || "",
+      em: new Date().toISOString()
+    });
+  },
+
+  async carimbarAutenticacao(bytes, arquivo) {
+    const codigo = "cs-" + (window.crypto && crypto.randomUUID ? crypto.randomUUID().replace(/-/g, "").slice(0, 12) : Date.now().toString(36));
+    try {
+      const rel = window.RelacionamentoApp;
+      const PDFLib = await rel._carregarPdfLib();
+      const { PDFDocument, StandardFonts, rgb } = PDFLib;
+      const qr = await this.carregarQrLib();
+      const dataUrl = await qr.toDataURL("INTEGRA:" + codigo, { margin: 0, width: 280, errorCorrectionLevel: "M" });
+      const cru = Uint8Array.from(atob(String(dataUrl).split(",")[1] || ""), (c) => c.charCodeAt(0));
+      const pdf = await PDFDocument.load(bytes);
+      const png = await pdf.embedPng(cru);
+      const font = await pdf.embedFont(StandardFonts.Helvetica);
+      const page = pdf.addPage([595.28, 841.89]);
+      page.drawText("Autenticacao do documento", { x: 48, y: 760, size: 16, font, color: rgb(0.06, 0.2, 0.13) });
+      page.drawText("Codigo " + codigo, { x: 48, y: 732, size: 12, font, color: rgb(0.12, 0.16, 0.2) });
+      page.drawText("Este codigo identifica o arquivo gerado pelo Integra.", { x: 48, y: 708, size: 11, font, color: rgb(0.2, 0.25, 0.3) });
+      page.drawText("A prova do arquivo original fica guardada para consulta.", { x: 48, y: 692, size: 11, font, color: rgb(0.2, 0.25, 0.3) });
+      page.drawImage(png, { x: 48, y: 520, width: 150, height: 150 });
+      const out = new Uint8Array(await pdf.save());
+      let aviso = "";
+      try {
+        const hash = await this.sha256Hex(out);
+        await this.guardarAutenticacao(codigo, hash, arquivo);
+      } catch (e) {
+        aviso = "O QR Code foi impresso, mas a prova não ficou salva no Firebase. " + (e && e.message ? e.message : "");
+      }
+      return { bytes: out, codigo, aviso };
+    } catch (e) {
+      return {
+        bytes,
+        codigo: "",
+        aviso: "O PDF foi gerado sem o QR Code de autenticação. " + (e && e.message ? e.message : "")
+      };
+    }
   },
 
   registrarAssinatura(arquivo) {
@@ -2835,7 +2988,8 @@ const CessaoPopup = {
     this.pintar();
     try {
       const pack = await this.montarPacotePdf();
-      if (pack.avisoAdesao) alert(pack.avisoAdesao);
+      const avisos = [pack.avisoAdesao, pack.codigo ? "Código de autenticação " + pack.codigo + "." : "", pack.avisoAuth].filter(Boolean);
+      if (avisos.length) alert(avisos.join("\n"));
       this.baixarBytes(pack.bytes, pack.fileName);
       this.registrarAssinatura(pack.fileName);
       this.fechar();
@@ -2860,6 +3014,20 @@ const CessaoPopup = {
       alert("Nenhuma pessoa desta cessão tem e-mail para a ClickSign. O documento não foi enviado.");
       return;
     }
+    this.abrirOrdemClick();
+  },
+
+  async confirmarEnvioClick() {
+    const prazoEl = document.getElementById("cessao-click-prazo");
+    const erroEl = document.getElementById("cessao-ordem-erro");
+    const prazo = prazoEl ? prazoEl.value : "";
+    const invalido = this.validarPrazo(prazo);
+    if (invalido) {
+      if (erroEl) erroEl.textContent = invalido;
+      return;
+    }
+    const signatarios = this.signatariosClick();
+    this.fecharOrdemClick();
     CessaoPopupState.enviandoClick = true;
     this.pintar();
     try {
@@ -2871,20 +3039,26 @@ const CessaoPopup = {
           filename: pack.fileName,
           nome: String(pack.fileName || "Cessão de direitos").replace(/\.pdf$/i, ""),
           contentBase64: this.base64De(pack.bytes),
-          signatarios
+          signatarios,
+          prazo
         })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data || !data.ok) {
         throw new Error((data && data.error) || "A ClickSign não recebeu o documento.");
       }
+      const ordemTxt = (data.ordem || []).map((s) => (s.grupo === 2 ? "2º" : "1º") + " · " + s.nome + " · " + s.papel);
       const linhas = [
         "O documento de teste foi criado na ClickSign, em rascunho.",
         "Nenhum e-mail de assinatura foi disparado.",
+        "Data limite: " + this.fmtDia(data.prazo || prazo) + ".",
+        ordemTxt.length ? "Ordem: " + ordemTxt.join("; ") : "",
+        pack.codigo ? "Código de autenticação " + pack.codigo + "." : "",
+        pack.avisoAuth || "",
         "",
         "Procure por: " + (data.nome || pack.fileName),
         data.onde || ""
-      ].filter((x) => x !== undefined);
+      ].filter((x) => x !== undefined && x !== "");
       if (pack.avisoAdesao) linhas.push("", pack.avisoAdesao);
       this.registrarAssinatura(pack.fileName);
       alert(linhas.join("\n"));

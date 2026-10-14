@@ -7,7 +7,9 @@ const UsuariosOnline = {
   COLLECTION: "usuarios_online",
   BEAT_MS: 60000,
   ONLINE_MS: 3 * 60000,
+  IDLE_MS: 5 * 60000,
   RECENT_MS: 24 * 3600000,
+  lastUse: 0,
   user: null,
   tab: "",
   timer: null,
@@ -82,6 +84,7 @@ const UsuariosOnline = {
         tab: this.tab || "",
         tabLabel: this.tabLabel(this.tab),
         agent: this.agent(),
+        lastUse: this.lastUse || Date.now(),
         online: true
       }, { merge: true });
     } catch (e) {
@@ -89,9 +92,24 @@ const UsuariosOnline = {
     }
   },
 
+  markUse() {
+    this.lastUse = Date.now();
+  },
+
+  bindUse() {
+    if (this._useBound) return;
+    this._useBound = true;
+    const mark = () => { this.lastUse = Date.now(); };
+    ["click", "keydown", "scroll", "touchstart", "wheel"].forEach((ev) => {
+      document.addEventListener(ev, mark, { capture: true, passive: true });
+    });
+  },
+
   start(user) {
     if (!user || !user.email) return;
     this.user = user;
+    this.bindUse();
+    if (!this.lastUse) this.markUse();
     if (this.timer) clearInterval(this.timer);
     this.timer = setInterval(() => this.beat(), this.BEAT_MS);
     this.beat();
@@ -141,6 +159,17 @@ const UsuariosOnline = {
     const s = Math.floor(Math.max(0, ms) / 1000);
     if (s < 60) return "agora";
     return "há " + this.duration(ms);
+  },
+
+  usoDe(row, now) {
+    const ts = Number(row && row.lastUse) || 0;
+    if (!ts) return { texto: "—", ocioso: false };
+    const passou = now - ts;
+    const ocioso = passou >= this.IDLE_MS;
+    return {
+      texto: ocioso ? "sem uso há " + this.duration(passou) : this.ago(passou),
+      ocioso
+    };
   },
 
   when(ts) {
@@ -197,6 +226,7 @@ const UsuariosOnline = {
     const me = this.docId(this.user && this.user.email);
     const online = this.rows.filter((r) => this.isOnline(r, now))
       .sort((a, b) => (Number(a.since) || now) - (Number(b.since) || now));
+    const ociosos = online.filter((r) => this.usoDe(r, now).ocioso).length;
     const recent = this.rows.filter((r) => !this.isOnline(r, now) && now - this.seenAt(r) <= this.RECENT_MS)
       .sort((a, b) => this.seenAt(b) - this.seenAt(a));
     const longest = online.length ? now - (Number(online[0].since) || now) : 0;
@@ -216,6 +246,11 @@ const UsuariosOnline = {
         </div>
       </td>`;
 
+    const usoCell = (r) => {
+      const uso = this.usoDe(r, now);
+      const cor = uso.ocioso ? "#b45309" : "#64748b";
+      return `<td style="padding:9px 12px;text-align:right;color:${cor};font-weight:${uso.ocioso ? 800 : 500};white-space:nowrap;">${this.esc(uso.texto)}</td>`;
+    };
     const onlineRows = online.map((r) => `<tr style="border-top:1px solid #eef2f6;">
         ${userCell(r, true)}
         <td style="padding:9px 12px;color:#334155;">${this.esc(r.profile || "—")}</td>
@@ -223,6 +258,7 @@ const UsuariosOnline = {
         <td style="padding:9px 12px;text-align:right;font-weight:800;color:#105436;white-space:nowrap;">${this.duration(now - (Number(r.since) || now))}</td>
         <td style="padding:9px 12px;text-align:right;color:#334155;white-space:nowrap;">${this.when(Number(r.since))}</td>
         <td style="padding:9px 12px;text-align:right;color:#64748b;white-space:nowrap;">${this.ago(now - this.seenAt(r))}</td>
+        ${usoCell(r)}
         <td style="padding:9px 12px;color:#64748b;white-space:nowrap;">${this.esc(r.agent || "—")}</td>
       </tr>`).join("");
 
@@ -230,6 +266,7 @@ const UsuariosOnline = {
         ${userCell(r, false)}
         <td style="padding:9px 12px;color:#334155;">${this.esc(r.profile || "—")}</td>
         <td style="padding:9px 12px;text-align:right;color:#334155;white-space:nowrap;">${this.ago(now - this.seenAt(r))}</td>
+        ${usoCell(r)}
         <td style="padding:9px 12px;text-align:right;color:#64748b;white-space:nowrap;">${r.online === false ? "Saiu pelo botão Sair" : "Fechou o navegador"}</td>
       </tr>`).join("");
 
@@ -241,22 +278,17 @@ const UsuariosOnline = {
 
     root.innerHTML = `
       <div style="padding:16px 18px 28px;">
-        <div style="margin-bottom:14px;">
-          <h2 style="margin:0 0 4px;display:flex;align-items:center;gap:8px;font-size:1.15rem;font-weight:800;color:#0f172a;">
-            <i data-lucide="users" style="width:22px;color:var(--color-primary);"></i>
-            Usuários online
-          </h2>
-          <p style="margin:0;font-size:0.82rem;color:#64748b;max-width:760px;">
-            Quem está com o CRM aberto agora e há quanto tempo. Cada navegador envia um sinal por minuto;
-            sem sinal por 3 minutos, o usuário sai da lista. Atualiza sozinho.
-          </p>
-        </div>
+        <p style="margin:0 0 14px;font-size:0.82rem;color:#64748b;max-width:760px;">
+          Último sinal é a página aberta: o navegador avisa a cada minuto e, sem aviso por 3 minutos, a pessoa sai da lista.
+          Último uso é o último clique, tecla ou rolagem. Sem isso por 5 minutos, a linha fica como sem uso.
+        </p>
 
         ${this.error ? `<div class="crm-card" style="padding:12px 14px;margin-bottom:12px;color:#991b1b;background:#fef2f2;">${this.esc(this.error)}</div>` : ""}
 
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:14px;">
           ${card("Online agora", this.loaded ? online.length : "…", "#105436")}
           ${card("Há mais tempo online", online.length ? this.esc(this.duration(longest)) : "—", "#0f172a")}
+          ${card("Na tela, sem uso", this.loaded ? ociosos : "…", "#b45309")}
           ${card("Saíram nas últimas 24 h", this.loaded ? recent.length : "…", "#64748b")}
         </div>
 
@@ -265,9 +297,9 @@ const UsuariosOnline = {
           <div style="overflow:auto;">
             <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
               <thead><tr style="background:#f8fafc;color:#64748b;">
-                ${th("Usuário")}${th("Perfil")}${th("Tela atual")}${th("Online há", true)}${th("Desde", true)}${th("Último sinal", true)}${th("Navegador")}
+                ${th("Usuário")}${th("Perfil")}${th("Tela atual")}${th("Online há", true)}${th("Desde", true)}${th("Último sinal", true)}${th("Último uso", true)}${th("Navegador")}
               </tr></thead>
-              <tbody>${onlineRows || `<tr><td colspan="7" style="padding:18px;color:#94a3b8;text-align:center;">${this.loaded ? "Ninguém online agora." : "Carregando…"}</td></tr>`}</tbody>
+              <tbody>${onlineRows || `<tr><td colspan="8" style="padding:18px;color:#94a3b8;text-align:center;">${this.loaded ? "Ninguém online agora." : "Carregando…"}</td></tr>`}</tbody>
             </table>
           </div>
         </div>
@@ -277,9 +309,9 @@ const UsuariosOnline = {
           <div style="overflow:auto;">
             <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
               <thead><tr style="background:#f8fafc;color:#64748b;">
-                ${th("Usuário")}${th("Perfil")}${th("Visto por último", true)}${th("Como saiu", true)}
+                ${th("Usuário")}${th("Perfil")}${th("Visto por último", true)}${th("Último uso", true)}${th("Como saiu", true)}
               </tr></thead>
-              <tbody>${recentRows || `<tr><td colspan="4" style="padding:18px;color:#94a3b8;text-align:center;">${this.loaded ? "Ninguém saiu nas últimas 24 horas." : "Carregando…"}</td></tr>`}</tbody>
+              <tbody>${recentRows || `<tr><td colspan="5" style="padding:18px;color:#94a3b8;text-align:center;">${this.loaded ? "Ninguém saiu nas últimas 24 horas." : "Carregando…"}</td></tr>`}</tbody>
             </table>
           </div>
         </div>
@@ -301,7 +333,10 @@ document.addEventListener("tabChanged", (e) => {
   if (id !== "usuarios-online") UsuariosOnline.unlisten();
   if (id === UsuariosOnline.tab) return;
   UsuariosOnline.tab = id;
-  if (UsuariosOnline.user) UsuariosOnline.beat();
+  if (UsuariosOnline.user) {
+    UsuariosOnline.markUse();
+    UsuariosOnline.beat();
+  }
 });
 
 document.addEventListener("visibilitychange", () => {
