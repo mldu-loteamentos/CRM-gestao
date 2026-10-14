@@ -520,6 +520,8 @@ const MarketingBudgetApp = {
         bills.push.apply(bills, parte);
       }
       this.montarGastos(bills, s.ccsCfg);
+      await this.tirarPpcQueVirouNota(gen);
+      if (gen !== s.gen) return;
       this.setProgress("Buscando as vendas do empreendimento…", 0.94);
       await this.buscarVendas(cc, gen);
     } catch (e) {
@@ -713,6 +715,114 @@ const MarketingBudgetApp = {
     rows.forEach((r, i) => { r.idx = i; });
     this.state.rows = rows;
     this.state.categorias = cats;
+  },
+
+  /* PPC atendido vira nota. Se a nota já está nesta consulta, o pedido sai da lista para o valor não entrar duas vezes. */
+  async tirarPpcQueVirouNota(gen) {
+    const app = window.ComprasPrevisoesApp || window.ComprasControleApp;
+    const s = this.state;
+    if (!app || typeof app.docCode !== "function" || typeof window.siengeFetchWithRetry !== "function") return;
+    const pedidoDe = (row) => (typeof app.pedidoKey === "function" ? app.pedidoKey(row && row.docNum) : "");
+    const pedidos = [];
+    (s.rows || []).forEach((row) => {
+      if (app.docCode(row.docId) !== "PPC") return;
+      const key = pedidoDe(row);
+      if (key && pedidos.indexOf(key) < 0) pedidos.push(key);
+    });
+    if (!pedidos.length) return;
+    const notasPorPedido = {};
+    const lote = 4;
+    for (let i = 0; i < pedidos.length; i += lote) {
+      if (gen !== s.gen) return;
+      const fatia = pedidos.slice(i, i + lote);
+      const feito = Math.min(pedidos.length, i + fatia.length);
+      this.setProgress("Conferindo pedidos que já viraram nota…", 0.88 + 0.05 * (feito / pedidos.length));
+      const achadas = await Promise.all(fatia.map((pedido) => this.notasDoPedido(pedido)));
+      fatia.forEach((pedido, idx) => { notasPorPedido[pedido] = achadas[idx] || []; });
+    }
+    if (gen !== s.gen) return;
+    const numDe = (v) => {
+      const t = String(v == null ? "" : v).trim();
+      return /^\d+$/.test(t) ? String(Number(t)) : "";
+    };
+    const fold = (v) => (typeof app.fold === "function" ? app.fold(v) : String(v || "").trim().toUpperCase());
+    const cobertos = {};
+    pedidos.forEach((pedido) => {
+      const notas = notasPorPedido[pedido] || [];
+      if (!notas.length) return;
+      const ppcRows = (s.rows || []).filter((row) => app.docCode(row.docId) === "PPC" && pedidoDe(row) === pedido);
+      const credores = {};
+      ppcRows.forEach((row) => { credores[fold(row.credor)] = 1; });
+      const billIds = {};
+      const nums = {};
+      notas.forEach((n) => {
+        if (n.billId) billIds[String(n.billId)] = 1;
+        const num = numDe(n.number);
+        if (num) nums[num] = 1;
+      });
+      const aparece = (s.rows || []).some((row) => {
+        if (app.docCode(row.docId) === "PPC") return false;
+        if (billIds[String(row.titulo)]) return true;
+        if (typeof app.isNotaDoc !== "function" || !app.isNotaDoc(row.docId, row.documento, null)) return false;
+        return !!nums[numDe(row.docNum)] && !!credores[fold(row.credor)];
+      });
+      if (aparece) cobertos[pedido] = 1;
+    });
+    if (!Object.keys(cobertos).length) return;
+    const rows = (s.rows || []).filter((row) => {
+      if (app.docCode(row.docId) !== "PPC") return true;
+      return !cobertos[pedidoDe(row)];
+    });
+    rows.forEach((row, i) => { row.idx = i; });
+    const cats = {};
+    rows.forEach((row) => {
+      if (!cats[row.catId]) cats[row.catId] = { id: row.catId, nome: row.catNome, total: 0 };
+      cats[row.catId].total += row.valor;
+    });
+    s.rows = rows;
+    s.categorias = cats;
+  },
+
+  async notasDoPedido(pedido) {
+    const app = window.ComprasPrevisoesApp;
+    const cache = app && app.state && app.state.notasByPedido && app.state.notasByPedido[pedido];
+    if (cache && cache.done && !cache.error && Array.isArray(cache.notas) && cache.notas.length) {
+      return cache.notas.map((n) => ({
+        number: String(n.number || "").trim(),
+        billId: n.billId != null && n.billId !== "" ? String(n.billId) : ""
+      })).filter((n) => n.number || n.billId);
+    }
+    const data = await window.siengeFetchWithRetry(
+      "/purchase-invoices/deliveries-attended?purchaseOrderId=" + encodeURIComponent(pedido) + "&limit=200",
+      1
+    ).catch(() => null);
+    const deliveries = (data && data.results) || (Array.isArray(data) ? data : []);
+    const daEntrega = app && typeof app.notasFromDeliveries === "function"
+      ? app.notasFromDeliveries(data, pedido).map((n) => ({ number: String(n.number || "").trim(), billId: "" }))
+      : [];
+    const seqs = [];
+    deliveries.forEach((row) => {
+      const seq = row && row.sequentialNumber;
+      if (seq == null || seq === "") return;
+      const key = String(seq);
+      if (seqs.indexOf(key) < 0) seqs.push(key);
+    });
+    const notas = daEntrega.slice();
+    const lidas = await Promise.all(seqs.map(async (seq) => {
+      const inv = await window.siengeFetchWithRetry("/purchase-invoices/" + encodeURIComponent(seq), 1).catch(() => null);
+      const number = String(inv && inv.number || "").trim();
+      const billId = inv && inv.billId != null && inv.billId !== "" ? String(inv.billId) : "";
+      return number || billId ? { number, billId } : null;
+    }));
+    lidas.forEach((n) => { if (n) notas.push(n); });
+    const seen = {};
+    return notas.filter((n) => {
+      if (!n) return false;
+      const key = n.billId + "|" + n.number;
+      if (seen[key]) return false;
+      seen[key] = 1;
+      return true;
+    });
   },
 
   async buscarVendas(cc, gen) {
@@ -1687,7 +1797,7 @@ const MarketingBudgetApp = {
       </div>
       <div class="mkb-card mkb-chart-full"><div class="mkb-card-h"><h3>Verba e gastos mês a mês</h3><small>Barras = o que foi pago e o que está comprometido · linha = acumulado comparado com a verba</small></div><div class="mkb-canvas"><canvas id="mkb-ch-mes"></canvas></div></div>
       <div class="mkb-card">
-        <div class="mkb-card-h"><h3>Títulos que compõem a verba</h3><small>Pago entra no realizado. Em aberto entra no comprometido. Previsão ou nota vencida antes de hoje não fica no mês passado: entra no comprometido de hoje, porque será prorrogada ou cancelada.</small></div>
+        <div class="mkb-card-h"><h3>Títulos que compõem a verba</h3><small>Pago entra no realizado. Em aberto entra no comprometido. Previsão ou nota vencida antes de hoje não fica no mês passado: entra no comprometido de hoje, porque será prorrogada ou cancelada. Pedido de compra já atendido sai da lista quando a nota dele já está aqui.</small></div>
         <div id="mkb-gastos">${this.gastosHtml(r)}</div>
       </div>`;
     const vendas = `
