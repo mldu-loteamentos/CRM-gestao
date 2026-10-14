@@ -1189,14 +1189,7 @@ const CessaoPopup = {
       customer = await window.enrichCustomerForLegalDocs(customer);
     }
     const billId = ctx.titulo || contract.receivableBillId || contract.billReceivableId || "";
-    let installments = [];
-    if (billId && typeof svc.getBillInstallments === "function") {
-      try {
-        const inst = await svc.getBillInstallments(billId);
-        const rows = (inst && inst.results) || inst || [];
-        if (Array.isArray(rows)) installments = rows;
-      } catch (e) {}
-    }
+    const installments = await this.parcelasCompletas(billId);
     const billFin = await this.billFinanceiro(ctx.customerId, billId);
     const liquidoRecebido = this.liquidoDe(billFin);
     const instFin = billFin && Array.isArray(billFin.installments) && billFin.installments.length
@@ -1274,7 +1267,10 @@ const CessaoPopup = {
     let indexador = "REAL";
     if (recente) {
       condicoes = this.condicoesDoContrato(condsApi, installments);
-      juros = this.jurosDoContrato(contract, condsApi, installments);
+      juros = this.jurosDoContrato(contract, condsApi, []
+        .concat(installments || [])
+        .concat(instFin || [])
+        .concat(extrato || []));
       indexador = this.indiceDoContrato(condsApi, installments);
     }
     if (!condicoes.length) condicoes = [{ id: "c1", tipo: "Mensal", qtde: "", valor: "", vencimento: "" }];
@@ -1368,13 +1364,102 @@ const CessaoPopup = {
     return out;
   },
 
-  jurosDoContrato(contract, conds, installments) {
-    const lista = [contract && contract.interestPercentage].concat((conds || []).map((c) => c && c.interestPercentage));
-    for (const v of lista) {
-      const n = Number(v);
-      if (v != null && v !== "" && Number.isFinite(n)) return n;
+  async parcelasCompletas(billId) {
+    const alvo = String(billId || "").replace(/^B-/, "").split("-")[0];
+    const fetchFn = window.siengeFetchWithRetry;
+    if (!alvo || typeof fetchFn !== "function") {
+      const svc = window.SiengeApiService;
+      if (!alvo || !svc || typeof svc.getBillInstallments !== "function") return [];
+      try {
+        const inst = await svc.getBillInstallments(alvo);
+        const rows = (inst && inst.results) || inst || [];
+        return Array.isArray(rows) ? rows : [];
+      } catch (e) {
+        return [];
+      }
     }
-    return 0;
+    const todas = [];
+    const limit = 200;
+    try {
+      for (let offset = 0; offset < 4000; offset += limit) {
+        const res = await fetchFn("/accounts-receivable/receivable-bills/" + encodeURIComponent(alvo) + "/installments?limit=" + limit + "&offset=" + offset, 1);
+        const rows = (res && res.results) || (Array.isArray(res) ? res : []);
+        if (!rows.length) break;
+        todas.push.apply(todas, rows);
+        const total = res && res.resultSetMetadata && Number(res.resultSetMetadata.count);
+        if (rows.length < limit) break;
+        if (Number.isFinite(total) && todas.length >= total) break;
+      }
+    } catch (e) {
+      if (todas.length) return todas;
+      const svc = window.SiengeApiService;
+      if (!svc || typeof svc.getBillInstallments !== "function") return [];
+      try {
+        const inst = await svc.getBillInstallments(alvo);
+        const rows = (inst && inst.results) || inst || [];
+        return Array.isArray(rows) ? rows : [];
+      } catch (err) {
+        return [];
+      }
+    }
+    return todas;
+  },
+
+  taxaMensalPct(v) {
+    if (v == null || v === "") return null;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0) return null;
+    if (n === 0) return 0;
+    if (n <= 0.05) return Math.round(n * 100 * 10000) / 10000;
+    if (n <= 20) return Math.round(n * 10000) / 10000;
+    return null;
+  },
+
+  taxasDeItem(o) {
+    if (!o || typeof o !== "object") return [];
+    const chaves = ["interestPercentage", "interestRate", "interestPct", "monthlyInterestPercentage", "monthlyInterest"];
+    const out = [];
+    chaves.forEach((k) => {
+      const n = this.taxaMensalPct(o[k]);
+      if (n != null) out.push(n);
+    });
+    const aninhado = o.paymentCondition || o.condition;
+    if (aninhado && typeof aninhado === "object" && aninhado !== o) {
+      this.taxasDeItem(aninhado).forEach((n) => out.push(n));
+    }
+    return out;
+  },
+
+  modaTaxa(lista) {
+    const bag = new Map();
+    lista.forEach((n) => {
+      const k = Number(n).toFixed(4);
+      bag.set(k, (bag.get(k) || 0) + 1);
+    });
+    let best = Number(lista[0]) || 0;
+    let qtd = 0;
+    bag.forEach((n, k) => {
+      if (n > qtd) {
+        qtd = n;
+        best = Number(k);
+      }
+    });
+    return best;
+  },
+
+  jurosDoContrato(contract, conds, installments) {
+    const taxas = [];
+    [].concat(installments || [], conds || []).forEach((o) => {
+      this.taxasDeItem(o).forEach((n) => taxas.push(n));
+    });
+    const positivas = taxas.filter((n) => n > 0.000001);
+    if (positivas.length) {
+      const semMora = positivas.filter((n) => Math.abs(n - 1) > 0.05);
+      return this.modaTaxa(semMora.length ? semMora : positivas);
+    }
+    if (taxas.length) return 0;
+    const header = this.taxaMensalPct(contract && (contract.interestPercentage != null ? contract.interestPercentage : contract.interestRate));
+    return header != null ? header : 0;
   },
 
   indiceDoContrato(conds, installments) {

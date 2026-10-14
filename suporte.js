@@ -558,6 +558,7 @@
     if (box) box.classList.remove("is-detail");
     draftFiles = [];
     replyDraftFiles = [];
+    pasteOpts = null;
   }
 
   function openModal() {
@@ -661,33 +662,79 @@
     });
   }
 
+  let pasteOpts = null;
+
+  function clipboardImages(e) {
+    const cd = e && e.clipboardData;
+    if (!cd) return [];
+    const out = [];
+    const items = cd.items ? Array.from(cd.items) : [];
+    items.forEach((item) => {
+      if (!item || item.kind !== "file") return;
+      const file = item.getAsFile();
+      if (!file) return;
+      const type = String(file.type || item.type || "");
+      if (!type.startsWith("image/")) return;
+      out.push(file);
+    });
+    if (out.length) return out;
+    return Array.from(cd.files || []).filter((f) => String(f.type || "").startsWith("image/"));
+  }
+
+  function printFileName(file, index) {
+    const type = String((file && file.type) || "image/png");
+    const given = String((file && file.name) || "");
+    if (given && !/^(image|blob|screenshot)(\.[a-z0-9]+)?$/i.test(given)) return file;
+    const ext = /jpeg|jpg/i.test(type) ? "jpg" : /webp/i.test(type) ? "webp" : /gif/i.test(type) ? "gif" : "png";
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, "0");
+    const stamp = d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "-" + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+    return new File([file], "print-" + stamp + (index ? "-" + (index + 1) : "") + "." + ext, { type: type || "image/png" });
+  }
+
+  function pushDraftFiles(list, added, opts) {
+    let changed = false;
+    for (let i = 0; i < added.length; i++) {
+      const f = printFileName(added[i], list.length);
+      const isImg = String(f.type || "").startsWith("image/");
+      const isPdf = String(f.type || "") === "application/pdf" || /\.pdf$/i.test(f.name || "");
+      if (!isImg && !(opts.allowDocs && isPdf)) continue;
+      if (f.size > MAX_BYTES) {
+        alert("O arquivo \"" + (f.name || "print") + "\" passa de 6 MB.");
+        continue;
+      }
+      if (list.length >= MAX_IMAGES) {
+        alert("Limite de " + MAX_IMAGES + " anexos por envio.");
+        break;
+      }
+      list.push(f);
+      changed = true;
+    }
+    if (changed) renderPreviews(opts);
+  }
+
   function bindFileInput(opts) {
     opts = opts || {};
     const inputId = opts.inputId || "suporte-files";
     const files = opts.files || draftFiles;
     const allowDocs = !!opts.allowDocs;
+    pasteOpts = opts;
     const input = document.getElementById(inputId);
     if (!input) return;
     input.addEventListener("change", () => {
-      const added = Array.from(input.files || []);
-      added.forEach(f => {
-        const isImg = String(f.type || "").startsWith("image/");
-        const isPdf = String(f.type || "") === "application/pdf" || /\.pdf$/i.test(f.name || "");
-        if (!isImg && !(allowDocs && isPdf)) return;
-        if (f.size > MAX_BYTES) {
-          alert("O arquivo \"" + f.name + "\" passa de 6 MB.");
-          return;
-        }
-        if (files.length >= MAX_IMAGES) {
-          alert("Limite de " + MAX_IMAGES + " anexos por envio.");
-          return;
-        }
-        files.push(f);
-      });
+      pushDraftFiles(files, Array.from(input.files || []), opts);
       input.value = "";
-      renderPreviews(opts);
     });
   }
+
+  document.addEventListener("paste", (e) => {
+    const ov = document.getElementById("suporte-overlay");
+    if (!ov || ov.style.display === "none" || !pasteOpts) return;
+    const imgs = clipboardImages(e);
+    if (!imgs.length) return;
+    e.preventDefault();
+    pushDraftFiles(pasteOpts.files || draftFiles, imgs, pasteOpts);
+  });
 
   function formHtml(opts) {
     const title = opts.tipo === "melhoria" ? "Sugerir uma melhoria"
@@ -717,7 +764,7 @@
           <label>Prints / imagens ${imgReq ? "*" : "(opcional)"}</label>
           <input type="file" id="suporte-files" class="form-control" accept="image/*" multiple>
           <div id="suporte-preview-list" class="suporte-preview-list"></div>
-          <small class="suporte-hint">Pode selecionar vários arquivos de uma vez (até ${MAX_IMAGES}). ${imgReq ? "Pelo menos um print é obrigatório." : ""}</small>
+          <small class="suporte-hint">Pode selecionar vários arquivos (até ${MAX_IMAGES}) ou colar um print com Ctrl+V. ${imgReq ? "Pelo menos um print é obrigatório." : ""}</small>
         </div>
         <div class="form-group">
           <label>${opts.tipo === "melhoria" ? "Descreva a melhoria *" : "Descreva o problema *"}</label>
@@ -1033,7 +1080,7 @@
                   ${adminView ? "Anexar prints ou PDF" : "Anexar mais prints"}
                 </label>
                 <input type="file" id="suporte-reply-files" accept="${adminView ? "image/*,application/pdf" : "image/*"}" multiple hidden>
-                <small class="suporte-hint">Até ${MAX_IMAGES} arquivos · máx. 6 MB cada</small>
+                <small class="suporte-hint">Até ${MAX_IMAGES} arquivos · máx. 6 MB cada · Ctrl+V cola o print</small>
               </div>
               <div id="suporte-reply-preview" class="suporte-preview-list"></div>
             </div>
