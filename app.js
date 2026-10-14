@@ -5007,6 +5007,12 @@ window.syncCrmUsersFromFirebase = async function() {
     const data = dSnap.data() || {};
     dedicated = data.list || data.crm_users || "[]";
     window.noteCrmUsersRemoved(data.removedEmails);
+    let nuvem = [];
+    if (Array.isArray(dedicated)) nuvem = dedicated;
+    else {
+      try { nuvem = JSON.parse(dedicated || "[]") || []; } catch (e) { nuvem = []; }
+    }
+    if (Array.isArray(nuvem)) window._crmUsersNuvem = nuvem;
   }
   const gSnap = await fc.getDoc(fc.doc(window.firebaseDb, "config", "global"));
   if (window.crmUsersDocExists(gSnap)) {
@@ -5620,14 +5626,48 @@ window.applyPermissions = function(profileName) {
   }
 }
 
+window.crmUnirListasDeUsuarios = function(listas) {
+  const byKey = new Map();
+  (listas || []).forEach((lista) => {
+    (Array.isArray(lista) ? lista : []).forEach((u) => {
+      if (!u) return;
+      const email = String(u.email || "").toLowerCase().trim();
+      if (email && window._crmUsersRemoved && window._crmUsersRemoved.has(email)) return;
+      const key = email || ("id:" + String(u.id || ""));
+      if (!key || key === "id:") return;
+      const prev = byKey.get(key);
+      if (!prev) {
+        byKey.set(key, Object.assign({}, u, { email: email || u.email }));
+        return;
+      }
+      const prevAt = window.crmUserEditedAt(prev);
+      const nextAt = window.crmUserEditedAt(u);
+      const newer = nextAt >= prevAt ? u : prev;
+      const older = newer === u ? prev : u;
+      const merged = Object.assign({}, older, newer);
+      const status = String(newer.status || older.status || "ATIVO").trim();
+      if (status) merged.status = status;
+      const perfil = String(newer.profile_name || older.profile_name || "").trim();
+      if (perfil) merged.profile_name = perfil;
+      merged.name = window.pickCrmUserName(prev, u);
+      byKey.set(key, merged);
+    });
+  });
+  return Array.from(byKey.values());
+};
+
 window.getCrmUsersList = function() {
   const live = (window.ConfigUsersApp && Array.isArray(window.ConfigUsersApp.users))
     ? window.ConfigUsersApp.users.filter(Boolean)
     : [];
-  if (live.length) return live.slice();
   let stored = [];
   try { stored = JSON.parse(localStorage.getItem("crm_users") || "[]") || []; } catch (e) { stored = []; }
-  return Array.isArray(stored) ? stored : [];
+  if (!Array.isArray(stored)) stored = [];
+  const nuvem = Array.isArray(window._crmUsersNuvem) ? window._crmUsersNuvem : [];
+  const unidos = window.crmUnirListasDeUsuarios([nuvem, stored, live]);
+  if (unidos.length) return unidos;
+  if (live.length) return live.slice();
+  return stored;
 };
 
 window.isCrmAdminProfileName = function(name) {
@@ -5844,7 +5884,12 @@ window.crmIniciarTesteConta = function() {
     ev.stopPropagation();
     if (!window.crmAdministradorReal()) return;
     menu.hidden = !menu.hidden;
-    if (!menu.hidden) window.crmPintarTesteConta();
+    if (menu.hidden) return;
+    window.crmPintarTesteConta();
+    if (typeof window.syncCrmUsersFromFirebase !== "function") return;
+    window.syncCrmUsersFromFirebase().then(() => {
+      if (!menu.hidden) window.crmPintarTesteConta();
+    }).catch(() => {});
   });
   document.addEventListener("click", (ev) => {
     const widget = document.getElementById("teste-conta-widget");

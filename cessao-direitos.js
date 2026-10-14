@@ -1037,7 +1037,21 @@ const CessaoPopup = {
 
   emailDe(c) {
     const e = c && c.email;
-    return e && e !== "N/D" && e !== "undefined" ? String(e) : "";
+    return e && e !== "N/D" && e !== "undefined" ? String(e).trim() : "";
+  },
+
+  cessionariosSemEmail() {
+    return (CessaoPopupState.cessionarios || []).filter((row) => !this.emailDe(row && row.customer));
+  },
+
+  pendenciaEmailCessionarios() {
+    const sem = this.cessionariosSemEmail();
+    if (!sem.length) return "";
+    const nomes = sem.map((row) => (row.customer && row.customer.name) || "cessionário").join(", ");
+    const quem = sem.length === 1
+      ? "O cessionário " + nomes + " não tem e-mail."
+      : "Estes cessionários não têm e-mail: " + nomes + ".";
+    return quem + " Os boletos são enviados por e-mail, então o e-mail é obrigatório. Atualize o cadastro do cliente antes de gerar a cessão.";
   },
 
   totalCedido() {
@@ -1073,6 +1087,8 @@ const CessaoPopup = {
       if (Math.abs(this.totalCedido() - this.totalAdquirido()) > 0.05) return "O percentual adquirido precisa fechar com o percentual cedido.";
       const semRep = (st.cessionarios || []).find((c) => this.isPj(c.customer) && !c.representante);
       if (semRep) return "Pessoa jurídica precisa de representante: " + (semRep.customer.name || "cessionário") + ".";
+      const semEmail = this.pendenciaEmailCessionarios();
+      if (semEmail) return semEmail;
       return "";
     }
     if (tab === "testemunhas") {
@@ -1884,7 +1900,7 @@ const CessaoPopup = {
         <div><dt>Estado civil</dt><dd>${this.esc(civil || "não informado")}</dd></div>
         <div><dt>Telefone</dt><dd>${this.esc(this.foneDe(c) || "não consta")}</dd></div>
         <div class="is-wide"><dt>Endereço</dt><dd>${this.esc(typeof window.formatLegalCustomerAddress === "function" ? (window.formatLegalCustomerAddress(c) || "Endereço não informado") : "Endereço não informado")}</dd></div>
-        <div><dt>E-mail</dt><dd>${this.esc(this.emailDe(c) || "não consta")}</dd></div>
+        <div><dt>E-mail</dt><dd${this.emailDe(c) ? "" : " style=\"color:#b45309;font-weight:700;\""}>${this.esc(this.emailDe(c) || "não consta — obrigatório para o boleto")}</dd></div>
       </dl>
       ${bloco("Representante", rep)}` : ""}
     </div>`;
@@ -1923,6 +1939,7 @@ const CessaoPopup = {
     if (erro) {
       const aviso = document.getElementById("cessao-popup-aviso");
       if (aviso) aviso.textContent = erro;
+      if (erro === this.pendenciaEmailCessionarios()) alert(erro);
       return;
     }
     const ordem = this.ordemAbas();
