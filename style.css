@@ -8611,10 +8611,23 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 }
 .tvig-ico:hover { background: #ecfdf3; }
 .tvig-ico:disabled { opacity: 0.35; cursor: default; }
-.docs-cc-bloco { margin-top: 14px; }
-.docs-cc-bloco:first-child { margin-top: 0; }
-.docs-cc { margin: 0 0 6px; font-size: 0.82rem; font-weight: 800; color: #105436; }
-.docs-cc span { margin-left: 8px; font-weight: 600; color: #64748b; }
+.docs-aviso { margin: 0 0 10px; color: #9a3412; font-size: 0.82rem; }
+.docs-bar { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.docs-bar .ml-tabs { flex: 1 1 auto; margin-bottom: 0; }
+.docs-filtro { margin-left: auto; display: flex; flex-direction: column; gap: 4px; font-size: 0.78rem; font-weight: 700; color: #64748b; }
+.docs-filtro select { min-width: 220px; height: 36px; }
+.docs-wrap { overflow: auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; }
+.docs-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.docs-table th { position: sticky; top: 0; z-index: 1; background: #f8faf8; color: #105436; font-size: 0.72rem; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; text-align: left; padding: 8px 10px; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+.docs-table td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; color: #0f172a; vertical-align: middle; }
+.docs-table tbody tr:hover td { background: #f8fafc; }
+.docs-obra td { background: #f0fdf4; color: #105436; font-weight: 800; font-size: 0.78rem; }
+.docs-obra:hover td { background: #f0fdf4; }
+.docs-obra span { margin-left: 6px; font-weight: 600; color: #64748b; }
+.docs-voce { margin-left: 6px; font-size: 0.68rem; font-weight: 700; color: #105436; background: #ecfdf5; border-radius: 999px; padding: 1px 6px; }
+.docs-sit { display: inline-block; font-size: 0.72rem; font-weight: 700; color: #92400e; background: #fffbeb; border-radius: 999px; padding: 2px 8px; white-space: nowrap; }
+.docs-acoes { width: 76px; text-align: right; white-space: nowrap; }
+.docs-vazio { margin: 8px 0 0; color: #64748b; }
 .tvig-ico.is-danger { color: #b91c1c; }
 .tvig-ico.is-danger:hover { background: #fef2f2; }
 .tvig-editor-overlay { z-index: 1400; padding: 18px; box-sizing: border-box; }
@@ -9637,14 +9650,14 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .pcx-dons { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
 .pcx-don { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 12px 16px; text-align: center; }
 .pcx-don h3 { margin: 0; font-size: 1rem; font-weight: 600; color: #334155; }
-.pcx-don-anel { position: relative; width: 188px; height: 188px; margin: 6px auto 2px; }
-.pcx-don-ring { width: 188px; height: 188px; border-radius: 50%; }
-.pcx-don-hole { position: absolute; width: 118px; height: 118px; left: 35px; top: 35px; border-radius: 50%; background: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.pcx-don-anel { position: relative; width: 200px; height: 200px; margin: 8px auto 2px; }
+.pcx-don-ring { width: 200px; height: 200px; border-radius: 50%; }
+.pcx-don-hole { position: absolute; width: 118px; height: 118px; left: 41px; top: 41px; border-radius: 50%; background: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .pcx-don-hole strong { font-size: 1.7rem; font-weight: 700; color: #334155; line-height: 1; }
 .pcx-don-hole span { margin-top: 2px; font-size: 0.78rem; color: #64748b; }
-.pcx-don-tag { position: absolute; font-size: 0.75rem; font-weight: 700; color: #1e293b; white-space: nowrap; }
-.pcx-don-tag.is-ativo { top: 28px; left: 58%; }
-.pcx-don-tag.is-quit { right: 6px; bottom: 34px; }
+.pcx-don-tag { position: absolute; z-index: 1; font-size: 0.72rem; font-weight: 700; line-height: 1; color: #1e293b; white-space: nowrap; background: #fff; border-radius: 4px; padding: 1px 3px; }
+.pcx-don-tag.is-ativo { top: 16px; right: 34px; }
+.pcx-don-tag.is-quit { left: 10px; bottom: 22px; }
 .pcx-don-leg { display: flex; justify-content: center; gap: 16px; margin-top: 6px; font-size: 0.75rem; color: #64748b; }
 .pcx-don-leg i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
 .pcx-sit { font-size: 0.75rem; font-weight: 700; }

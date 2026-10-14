@@ -2205,8 +2205,8 @@ const PrestacaoContasApp = {
           <div class="pcx-don-hole"><strong>${total}</strong><span>Contratos</span></div>
         </div>
         <div class="pcx-don-leg">
-          <span><i style="background:#c5cdd6"></i>Quitados</span>
-          <span><i style="background:${cor}"></i>Ativos</span>
+          <span><i style="background:#c5cdd6"></i>Quitados ${quitados} (${pQ}%)</span>
+          <span><i style="background:${cor}"></i>Ativos ${ativos} (${pA}%)</span>
         </div>
       </article>`;
     }).join("");

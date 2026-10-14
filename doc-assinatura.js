@@ -180,6 +180,32 @@ const DocAssinaturaApp = {
     alert("Este PDF não ficou salvo para consulta. Ele foi gerado só no computador de quem criou. Os próximos documentos ficam disponíveis neste botão.");
   },
 
+  async remover(id) {
+    const chave = decodeURIComponent(String(id || ""));
+    const row = (this.itens || []).find((r) => String(r.id) === chave);
+    if (!row) return;
+    const msg = "Remover " + this.tipoLabel(row.tipo) + " de " + (row.cliente || "este cliente") + " da lista?";
+    const ok = typeof window.mouraConfirm === "function" ? await window.mouraConfirm(msg) : confirm(msg);
+    if (!ok) return;
+    this.itens = this.itens.filter((r) => String(r.id) !== chave);
+    this.gravarLocal(this.lerLocal().filter((r) => String(r.id) !== chave));
+    this.pintar();
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (!fx || !db || chave.indexOf("local-") === 0) return;
+    try {
+      if (fx.deleteDoc && fx.doc) await fx.deleteDoc(fx.doc(db, this.COL, chave));
+    } catch (e) {
+      console.error("[Assinatura] excluir", e);
+    }
+    try {
+      if (fx.deleteObject && fx.ref && window.firebaseStorage) {
+        const path = "assinaturas/" + chave.replace(/[^\w\-]+/g, "_") + ".pdf";
+        await fx.deleteObject(fx.ref(window.firebaseStorage, path));
+      }
+    } catch (e) {}
+  },
+
   async carregar() {
     this.carregando = true;
     this.aviso = "";
@@ -286,7 +312,7 @@ const DocAssinaturaApp = {
     }).join("")}</div>`;
     const opts = `<option value="">Todos os documentos</option>` + this.TIPOS.map((t) => `<option value="${t.id}"${this.tipo === t.id ? " selected" : ""}>${this.esc(t.label)}</option>`).join("");
     const rows = this.ordenar(this.visiveis());
-    const aviso = this.aviso ? `<p style="margin:0 0 12px;color:#9a3412;font-size:0.85rem;">${this.esc(this.aviso)}</p>` : "";
+    const aviso = this.aviso ? `<p class="docs-aviso">${this.esc(this.aviso)}</p>` : "";
     const grupos = new Map();
     rows.forEach((r) => {
       const id = this.centroDe(r) || "";
@@ -296,47 +322,45 @@ const DocAssinaturaApp = {
     const ordem = [...grupos.keys()].sort((a, b) => String(a || "￿").localeCompare(String(b || "￿"), "pt-BR", { numeric: true }));
     const linha = (r) => {
       const tem = !!r.pdfUrl;
+      const chave = encodeURIComponent(String(r.id));
       return `<tr>
             <td>${this.esc(this.quando(r.createdAt))}</td>
             <td>${this.esc(this.tipoLabel(r.tipo))}</td>
             <td>${this.esc(r.cliente || "—")}</td>
             <td>${this.esc(r.titulo || "—")}</td>
             <td>${this.esc(r.unidade || "—")}</td>
-            <td>${this.esc(r.userName || "—")}${this.mesmoUsuario(r) ? " <span style=\"color:#105436;font-weight:700;\">você</span>" : ""}</td>
-            <td>Aguardando assinatura</td>
-            <td class="is-right"><button type="button" class="tvig-ico" title="${tem ? "Consultar documento" : "PDF não salvo para consulta"}" style="${tem ? "" : "opacity:.35"}" onclick="DocAssinaturaApp.consultar('${encodeURIComponent(String(r.id))}')"><i data-lucide="paperclip" style="width:15px;height:15px;"></i></button></td>
+            <td>${this.esc(r.userName || "—")}${this.mesmoUsuario(r) ? ` <span class="docs-voce">você</span>` : ""}</td>
+            <td><span class="docs-sit">Aguardando</span></td>
+            <td class="docs-acoes"><button type="button" class="tvig-ico" title="${tem ? "Consultar documento" : "PDF não salvo para consulta"}" style="${tem ? "" : "opacity:.35"}" onclick="DocAssinaturaApp.consultar('${chave}')"><i data-lucide="paperclip" style="width:15px;height:15px;"></i></button><button type="button" class="tvig-ico is-danger" title="Remover" onclick="DocAssinaturaApp.remover('${chave}')"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button></td>
           </tr>`;
     };
+    const corpo = ordem.map((id) => {
+      const lista = grupos.get(id) || [];
+      const nome = id ? this.nomeCentro(id) : "";
+      const rotulo = id ? (nome ? id + " - " + nome : id) : "Sem centro de custo";
+      return `<tr class="docs-obra"><td colspan="8">${this.esc(rotulo)} <span>${lista.length}</span></td></tr>${lista.map(linha).join("")}`;
+    }).join("");
     const tabela = rows.length
-      ? ordem.map((id) => {
-          const lista = grupos.get(id) || [];
-          const nome = id ? this.nomeCentro(id) : "";
-          const rotulo = id ? (nome ? id + " - " + nome : id) : "Sem centro de custo";
-          return `<section class="docs-cc-bloco">
-            <div class="docs-cc">${this.esc(rotulo)} <span>${lista.length} documento(s)</span></div>
-            <div style="overflow:auto;"><table class="custom-table" style="font-size:0.85rem;min-width:920px;">
-              <thead><tr>
-                ${this.th("quando", "Quando")}
-                ${this.th("tipo", "Documento")}
-                ${this.th("cliente", "Cliente")}
-                ${this.th("titulo", "Título")}
-                ${this.th("unidade", "Unidade")}
-                ${this.th("quem", "Gerado por")}
-                <th>Situação</th>
-                <th class="is-right" style="width:64px;">Ações</th>
-              </tr></thead>
-              <tbody>${lista.map(linha).join("")}</tbody>
-            </table></div>
-          </section>`;
-        }).join("")
-      : `<p style="margin:8px 0 0;color:#64748b;">Nenhum documento nesta visão.</p>`;
+      ? `<div class="docs-wrap"><table class="docs-table">
+          <thead><tr>
+            ${this.th("quando", "Quando")}
+            ${this.th("tipo", "Documento")}
+            ${this.th("cliente", "Cliente")}
+            ${this.th("titulo", "Título")}
+            ${this.th("unidade", "Unidade")}
+            ${this.th("quem", "Gerado por")}
+            <th>Situação</th>
+            <th class="docs-acoes">Ações</th>
+          </tr></thead>
+          <tbody>${corpo}</tbody>
+        </table></div>`
+      : `<p class="docs-vazio">Nenhum documento nesta visão.</p>`;
     body.innerHTML = `
-      <p style="margin:0 0 14px;color:#64748b;font-size:0.9rem;">Distrato, cessão de direitos, aditamento, alteração de vencimento e autorização de terceiros entram aqui quando o PDF é gerado. A lista é de todos os clientes: cada pessoa vê o que gerou e o que os demais geraram.</p>
       ${aviso}
-      <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;">
+      <div class="docs-bar">
         ${tabs}
-        <label style="margin-left:auto;font-size:0.78rem;font-weight:700;color:#64748b;">Documento
-          <select class="form-control" style="min-width:220px;margin-top:4px;" onchange="DocAssinaturaApp.setTipo(this.value)">${opts}</select>
+        <label class="docs-filtro">Documento
+          <select class="form-control" onchange="DocAssinaturaApp.setTipo(this.value)">${opts}</select>
         </label>
       </div>
       ${tabela}`;
