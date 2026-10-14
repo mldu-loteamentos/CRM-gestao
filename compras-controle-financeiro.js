@@ -1625,7 +1625,7 @@ ComprasControleApp.renderList = function () {
       #cfin-table th.cprev-col-tipo,
       #cfin-table td.cprev-col-tipo { text-align: center; }
       #cfin-table td.cprev-col-tipo .cprev-tag { margin-left: 0; margin-right: 0; }
-      #cfin-table td.cprev-col-cc { overflow: visible; }
+      #cfin-table td.cprev-col-cc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       #cfin-table button.cfin-agrupado { display:inline-flex; align-items:center; gap:4px; height:26px; padding:0 8px; border:1px solid #105436; border-radius:6px; background:#f3faf6; color:#105436; font-size:0.72rem; font-weight:700; cursor:pointer; white-space:nowrap; }
       #cfin-table button.cfin-agrupado.is-open { background:#105436; color:#fff; }
       #cfin-table tr.cfin-rateio td { background:#f8fafc; color:#334155; font-size:0.72rem; }
