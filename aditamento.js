@@ -1021,14 +1021,19 @@
         const fileName = typeof window.buildFichaPdfFilename === "function"
           ? window.buildFichaPdfFilename(cfg.title, { contrato: unidade, costCenterId: codEmp, titulo, nome })
           : cfg.title + " | Título " + titulo + ".pdf";
-        await this._baixarPaginasPdf(paginas, fileName);
+        const pdf = await this._baixarPaginasPdf(paginas, fileName, { retornar: true });
+        if (pdf && typeof pdf.save === "function") pdf.save(fileName);
+        let bytes = null;
+        try { bytes = pdf && pdf.output ? pdf.output("arraybuffer") : null; } catch (e) { bytes = null; }
         if (window.DocAssinaturaApp && typeof DocAssinaturaApp.registrar === "function") {
           DocAssinaturaApp.registrar({
             tipo: "aditamento",
             cliente: nome,
             titulo,
             unidade,
-            arquivo: fileName
+            arquivo: fileName,
+            centroId: codEmp,
+            bytes
           });
         }
       } catch (err) {

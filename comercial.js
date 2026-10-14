@@ -1136,6 +1136,7 @@ const ComercialApp = {
     const ja = this.state.velCache[id];
     if (ja && ja.pronto) {
       this.renderVelocidade();
+      if (!ja.atrasoPronto) this.carregarAtraso(id, this.state.velGen);
       return;
     }
     this.state.velCache[id] = { pronto: false, status: 'Lendo lotes e contratos…', unidades: [], contratos: [] };
@@ -1147,8 +1148,9 @@ const ComercialApp = {
       if (gen !== this.state.velGen) return;
       const byId = new Map();
       listas.flat().forEach((c) => { if (c && c.id != null) byId.set(String(c.id), c); });
-      this.state.velCache[id] = { pronto: true, unidades: unidades, contratos: [...byId.values()], status: '', cac: null, cacPronto: false };
+      this.state.velCache[id] = { pronto: true, unidades: unidades, contratos: [...byId.values()], status: '', cac: null, cacPronto: false, atrasoPronto: false, atrasoIds: null };
       this.renderVelocidade();
+      this.carregarAtraso(id, gen);
     } catch (e) {
       if (gen !== this.state.velGen) return;
       this.state.velCache[id] = { pronto: true, erro: 'Não foi possível ler este empreendimento no Sienge.', unidades: [], contratos: [], cacPronto: true };
@@ -1266,7 +1268,70 @@ const ComercialApp = {
     let vendas = 0;
     let distratos = 0;
     Object.keys(meses).forEach((k) => { vendas += meses[k].v; distratos += meses[k].d; });
-    return { lotes: lotes, estoque: estoque, vendaveis: vendaveis || lotes, vendas: vendas, distratos: distratos, curto: curto, longo: longo, semPlano: semPlano, faixas: faixas, rotulos: rotulos, meses: meses };
+    const atual = {};
+    contratos.forEach((c) => {
+      const sit = String(c && c.situation == null ? '' : c.situation);
+      if (sit !== '2' && sit !== '4') return;
+      const units = (c.salesContractUnits || c.units || []);
+      const lista = units.length ? units : (c.unitId ? [{ id: c.unitId, name: '' }] : []);
+      lista.forEach((u) => {
+        const uid = String(u && (u.id != null ? u.id : '') || '').trim();
+        if (!uid) return;
+        const nome = String((u && u.name) || '').trim().toUpperCase();
+        const prev = atual[uid];
+        if (!prev || sit === '2') atual[uid] = { sit: sit, nome: nome || (prev && prev.nome) || '' };
+      });
+    });
+    const atrasoIds = pack && pack.atrasoIds;
+    const atrasoPronto = !!(pack && pack.atrasoPronto);
+    let ativos = 0;
+    let quitados = 0;
+    let atraso = 0;
+    Object.keys(atual).forEach((uid) => {
+      const item = atual[uid];
+      if (item.sit === '4') { quitados += 1; return; }
+      const tarde = atrasoPronto && atrasoIds && (atrasoIds.has(uid) || (item.nome && atrasoIds.has('n:' + item.nome)));
+      if (tarde) atraso += 1;
+      else ativos += 1;
+    });
+    return {
+      lotes: lotes, estoque: estoque, vendaveis: vendaveis || lotes, vendas: vendas, distratos: distratos,
+      curto: curto, longo: longo, semPlano: semPlano, faixas: faixas, rotulos: rotulos, meses: meses,
+      ativos: ativos, quitados: quitados, atraso: atraso, atrasoPronto: atrasoPronto
+    };
+  },
+
+  async carregarAtraso(empId, gen) {
+    const pack = this.state.velCache[empId];
+    if (!pack || !pack.pronto || pack.atrasoPronto || pack._atrasoLoading) return;
+    const est = window.EstoqueComercialApp;
+    if (!est || typeof est.fetchExtratoCc !== 'function' || typeof est.agruparExtratoCc !== 'function') {
+      pack.atrasoPronto = true;
+      pack.atrasoIds = new Set();
+      this.renderVelocidade();
+      return;
+    }
+    pack._atrasoLoading = true;
+    try {
+      const rows = await est.fetchExtratoCc(empId);
+      if (gen !== this.state.velGen) return;
+      const bills = est.agruparExtratoCc((rows || []).map((r) => Object.assign({}, r, { _cc: String(empId) })));
+      const ids = new Set();
+      bills.forEach((b) => {
+        if (!((Number(b.vencido) || 0) > 0.009)) return;
+        (b.units || []).forEach((u) => {
+          if (u && u.id != null) ids.add(String(u.id));
+          if (u && u.name) ids.add('n:' + String(u.name).trim().toUpperCase());
+        });
+      });
+      pack.atrasoIds = ids;
+    } catch (e) {
+      pack.atrasoIds = new Set();
+      pack.atrasoNota = 'Não deu para ler as parcelas em atraso.';
+    }
+    pack._atrasoLoading = false;
+    pack.atrasoPronto = true;
+    if (gen === this.state.velGen) this.renderVelocidade();
   },
 
   fmtPctVel(n) {
@@ -1301,6 +1366,13 @@ const ComercialApp = {
       }
     }) : '';
     const pack = this.state.velEmp ? this.state.velCache[this.state.velEmp] : null;
+    const modelo = pack && pack.pronto && !pack.erro ? this.modeloVel(pack) : null;
+    const sit = modelo ? `
+      <div class="com-vel-sit">
+        <div><span>Lotes ativos</span><strong>${this.fmtInt(modelo.ativos)}</strong><small>${modelo.atrasoPronto ? 'contrato em dia' : 'contrato em aberto'}</small></div>
+        <div><span>Quitados</span><strong>${this.fmtInt(modelo.quitados)}</strong><small>contrato quitado</small></div>
+        <div class="is-late"><span>Em atraso</span><strong>${modelo.atrasoPronto ? this.fmtInt(modelo.atraso) : '…'}</strong><small>${this.esc(pack.atrasoNota || 'parcela vencida')}</small></div>
+      </div>` : '';
     let miolo = '<p class="com-vel-nota">Escolha um empreendimento que já tem contrato de venda. A velocidade usa toda a história dele.</p>';
     if (pack && !pack.pronto) miolo = `<p class="com-vel-status">${this.esc(pack.status || 'Carregando…')}</p>`;
     else if (pack && pack.erro) miolo = `<p class="com-vel-status">${this.esc(pack.erro)}</p>`;
@@ -1308,6 +1380,7 @@ const ComercialApp = {
     root.innerHTML = `
       <div class="com-vel-top">
         ${filtro}
+        ${sit}
       </div>
       ${miolo}`;
     this.bindVelEmp();
@@ -1369,7 +1442,7 @@ const ComercialApp = {
       <div class="com-vel-grid">
         <div class="com-vel-card">
           <h3>Quantas vezes o lote foi vendido</h3>
-          <p>100% é o total de lotes. Acima disso, o mesmo lote entrou em mais de um contrato.</p>
+          <p>A barra de cima é a quantidade de lotes. A de baixo é a quantidade de vendas. ${this.fmtPctVel(vezes)} significa que o mesmo lote entrou em mais de um contrato.</p>
           <div class="com-vel-vezes">
             <div class="com-vel-donut" style="--p:${anel.toFixed(2)}">
               <div class="com-vel-donut-miolo">
@@ -1378,8 +1451,8 @@ const ComercialApp = {
               </div>
             </div>
             <div class="com-vel-vezes-lado">
-              <div class="com-vel-bloco"><span>Lotes</span><i><b style="width:100%"></b></i><em>${this.fmtInt(m.lotes)}</em></div>
-              <div class="com-vel-bloco"><span>Vendas</span><i><b style="width:${anel.toFixed(1)}%"></b></i><em>${this.fmtPctVel(vezes)}</em></div>
+              <div class="com-vel-bloco"><span>Lotes</span><i><b style="width:${(m.lotes / Math.max(m.lotes, m.vendas, 1) * 100).toFixed(1)}%"></b></i><em>${this.fmtInt(m.lotes)}</em></div>
+              <div class="com-vel-bloco"><span>Vendas</span><i><b style="width:${(m.vendas / Math.max(m.lotes, m.vendas, 1) * 100).toFixed(1)}%"></b></i><em>${this.fmtInt(m.vendas)}</em></div>
             </div>
           </div>
         </div>

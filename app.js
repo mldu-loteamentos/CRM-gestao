@@ -22842,12 +22842,14 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
   if (window.DocAssinaturaApp && typeof DocAssinaturaApp.registrar === "function") {
     const sale = g_distSale || {};
     const cli = g_distCustomer || {};
+    const ccDist = String((unit && (unit.costCenterId || unit.enterpriseId)) || (sale.costCenterId || sale.enterpriseId) || "").replace(/\D/g, "");
     DocAssinaturaApp.registrar({
       tipo: "distrato",
       cliente: cli.name || "",
       titulo: sale.receivableBillId || sale.id || "",
       unidade: sale.unitId || "",
-      arquivo: docTitle || "Distrato"
+      arquivo: docTitle || "Distrato",
+      centroId: ccDist
     });
   }
   document.getElementById("pdf-modal-title").textContent = "Termo de Rescisão e Distrato - PDF";

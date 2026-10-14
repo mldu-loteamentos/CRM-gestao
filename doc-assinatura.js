@@ -80,6 +80,9 @@ const DocAssinaturaApp = {
       titulo: String((dados && dados.titulo) || "").trim() || "—",
       unidade: String((dados && dados.unidade) || "").trim() || "—",
       arquivo: String((dados && dados.arquivo) || "").trim(),
+      centroId: String((dados && dados.centroId) || "").replace(/\D/g, ""),
+      centroNome: String((dados && dados.centroNome) || "").trim(),
+      pdfUrl: "",
       userId: eu.userId,
       userName: eu.userName,
       userEmail: eu.userEmail,
@@ -105,6 +108,9 @@ const DocAssinaturaApp = {
         titulo: row.titulo,
         unidade: row.unidade,
         arquivo: row.arquivo,
+        centroId: row.centroId,
+        centroNome: row.centroNome,
+        pdfUrl: "",
         userId: row.userId,
         userName: row.userName,
         userEmail: row.userEmail,
@@ -114,9 +120,64 @@ const DocAssinaturaApp = {
       row.id = ref.id;
       const atual = this.lerLocal().map((x) => (x.createdAt === row.createdAt && x.userId === row.userId && x.tipo === row.tipo ? row : x));
       this.gravarLocal(atual);
+      await this.guardarPdf(row, dados && dados.bytes);
     } catch (e) {
       console.error("[Assinatura] registro", e);
     }
+  },
+
+  async guardarPdf(row, bytes) {
+    if (!row || !bytes) return;
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (!window.firebaseStorage || !fx || !fx.ref || !fx.uploadBytes || !fx.getDownloadURL) return;
+    try {
+      const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+      const blob = new Blob([u8], { type: "application/pdf" });
+      const path = "assinaturas/" + String(row.id).replace(/[^\w\-]+/g, "_") + ".pdf";
+      const storageRef = fx.ref(window.firebaseStorage, path);
+      await fx.uploadBytes(storageRef, blob, { contentType: "application/pdf" });
+      row.pdfUrl = await fx.getDownloadURL(storageRef);
+      const atual = this.lerLocal().map((x) => (String(x.id) === String(row.id) ? row : x));
+      this.gravarLocal(atual);
+      const item = this.itens.find((x) => String(x.id) === String(row.id));
+      if (item) item.pdfUrl = row.pdfUrl;
+      if (db && fx.doc && fx.updateDoc && !String(row.id).startsWith("local-")) {
+        await fx.updateDoc(fx.doc(db, this.COL, row.id), { pdfUrl: row.pdfUrl });
+      }
+      if (document.getElementById("docs-ass-body")) this.pintar();
+    } catch (e) {
+      console.error("[Assinatura] anexo", e);
+    }
+  },
+
+  centroDe(row) {
+    const salvo = String((row && row.centroId) || "").replace(/\D/g, "");
+    if (salvo) return salvo;
+    const u = String((row && row.unidade) || "");
+    const direto = u.match(/^(\d{4,6})\b/);
+    if (direto) return direto[1];
+    const unidade = u.match(/U-(\d{4,6})/i);
+    if (unidade) return unidade[1];
+    return "";
+  },
+
+  nomeCentro(id) {
+    const salvo = (this.itens || []).find((r) => this.centroDe(r) === String(id) && r.centroNome);
+    if (salvo && salvo.centroNome) return String(salvo.centroNome);
+    const lista = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || [];
+    const cc = lista.find((c) => String(c.id) === String(id));
+    return cc && cc.name ? String(cc.name).toUpperCase() : "";
+  },
+
+  consultar(id) {
+    const chave = decodeURIComponent(String(id || ""));
+    const row = (this.itens || []).find((r) => String(r.id) === chave);
+    if (row && row.pdfUrl) {
+      window.open(row.pdfUrl, "_blank", "noopener");
+      return;
+    }
+    alert("Este PDF não ficou salvo para consulta. Ele foi gerado só no computador de quem criou. Os próximos documentos ficam disponíveis neste botão.");
   },
 
   async carregar() {
@@ -226,18 +287,16 @@ const DocAssinaturaApp = {
     const opts = `<option value="">Todos os documentos</option>` + this.TIPOS.map((t) => `<option value="${t.id}"${this.tipo === t.id ? " selected" : ""}>${this.esc(t.label)}</option>`).join("");
     const rows = this.ordenar(this.visiveis());
     const aviso = this.aviso ? `<p style="margin:0 0 12px;color:#9a3412;font-size:0.85rem;">${this.esc(this.aviso)}</p>` : "";
-    const tabela = rows.length
-      ? `<div style="overflow:auto;"><table class="custom-table" style="font-size:0.85rem;min-width:860px;">
-          <thead><tr>
-            ${this.th("quando", "Quando")}
-            ${this.th("tipo", "Documento")}
-            ${this.th("cliente", "Cliente")}
-            ${this.th("titulo", "Título")}
-            ${this.th("unidade", "Unidade")}
-            ${this.th("quem", "Gerado por")}
-            <th>Situação</th>
-          </tr></thead>
-          <tbody>${rows.map((r) => `<tr>
+    const grupos = new Map();
+    rows.forEach((r) => {
+      const id = this.centroDe(r) || "";
+      if (!grupos.has(id)) grupos.set(id, []);
+      grupos.get(id).push(r);
+    });
+    const ordem = [...grupos.keys()].sort((a, b) => String(a || "￿").localeCompare(String(b || "￿"), "pt-BR", { numeric: true }));
+    const linha = (r) => {
+      const tem = !!r.pdfUrl;
+      return `<tr>
             <td>${this.esc(this.quando(r.createdAt))}</td>
             <td>${this.esc(this.tipoLabel(r.tipo))}</td>
             <td>${this.esc(r.cliente || "—")}</td>
@@ -245,8 +304,31 @@ const DocAssinaturaApp = {
             <td>${this.esc(r.unidade || "—")}</td>
             <td>${this.esc(r.userName || "—")}${this.mesmoUsuario(r) ? " <span style=\"color:#105436;font-weight:700;\">você</span>" : ""}</td>
             <td>Aguardando assinatura</td>
-          </tr>`).join("")}</tbody>
-        </table></div>`
+            <td class="is-right"><button type="button" class="tvig-ico" title="${tem ? "Consultar documento" : "PDF não salvo para consulta"}" style="${tem ? "" : "opacity:.35"}" onclick="DocAssinaturaApp.consultar('${encodeURIComponent(String(r.id))}')"><i data-lucide="paperclip" style="width:15px;height:15px;"></i></button></td>
+          </tr>`;
+    };
+    const tabela = rows.length
+      ? ordem.map((id) => {
+          const lista = grupos.get(id) || [];
+          const nome = id ? this.nomeCentro(id) : "";
+          const rotulo = id ? (nome ? id + " - " + nome : id) : "Sem centro de custo";
+          return `<section class="docs-cc-bloco">
+            <div class="docs-cc">${this.esc(rotulo)} <span>${lista.length} documento(s)</span></div>
+            <div style="overflow:auto;"><table class="custom-table" style="font-size:0.85rem;min-width:920px;">
+              <thead><tr>
+                ${this.th("quando", "Quando")}
+                ${this.th("tipo", "Documento")}
+                ${this.th("cliente", "Cliente")}
+                ${this.th("titulo", "Título")}
+                ${this.th("unidade", "Unidade")}
+                ${this.th("quem", "Gerado por")}
+                <th>Situação</th>
+                <th class="is-right" style="width:64px;">Ações</th>
+              </tr></thead>
+              <tbody>${lista.map(linha).join("")}</tbody>
+            </table></div>
+          </section>`;
+        }).join("")
       : `<p style="margin:8px 0 0;color:#64748b;">Nenhum documento nesta visão.</p>`;
     body.innerHTML = `
       <p style="margin:0 0 14px;color:#64748b;font-size:0.9rem;">Distrato, cessão de direitos, aditamento, alteração de vencimento e autorização de terceiros entram aqui quando o PDF é gerado. A lista é de todos os clientes: cada pessoa vê o que gerou e o que os demais geraram.</p>

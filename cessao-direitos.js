@@ -3076,17 +3076,20 @@ const CessaoPopup = {
     }
   },
 
-  registrarAssinatura(arquivo) {
+  registrarAssinatura(arquivo, bytes) {
     if (!window.DocAssinaturaApp || typeof DocAssinaturaApp.registrar !== "function") return;
     const st = CessaoPopupState;
     const ces = (st.cessionarios && st.cessionarios[0] && st.cessionarios[0].customer) || {};
     const unidade = [st.unit && st.unit.costCenterId, st.quadraLote].filter((x) => x && x !== "—").join(" - ");
+    const cc = String((st.unit && st.unit.costCenterId) || (st.contract && st.contract.enterpriseId) || "").replace(/\D/g, "");
     DocAssinaturaApp.registrar({
       tipo: "cessao",
       cliente: ces.name || (st.customer && st.customer.name) || "",
       titulo: st.titulo || "",
       unidade,
-      arquivo: arquivo || ""
+      arquivo: arquivo || "",
+      centroId: cc,
+      bytes: bytes || null
     });
   },
 
@@ -3103,7 +3106,7 @@ const CessaoPopup = {
       const avisos = [pack.avisoAdesao, pack.codigo ? "Código de autenticação " + pack.codigo + "." : "", pack.avisoAuth].filter(Boolean);
       if (avisos.length) alert(avisos.join("\n"));
       this.baixarBytes(pack.bytes, pack.fileName);
-      this.registrarAssinatura(pack.fileName);
+      this.registrarAssinatura(pack.fileName, pack.bytes);
       this.fechar();
     } catch (e) {
       console.error("[Cessão] PDF", e);
