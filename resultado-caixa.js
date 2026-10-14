@@ -2706,12 +2706,20 @@ const ResultadoCaixaApp = {
     return null;
   },
 
+  contaCorrenteMl(c) {
+    const nome = this.fold(((c && c.nome) || "") + " " + ((c && c.numero) || ""));
+    if (/MUTUO|JUDICIAL|BLOQUEIO|BLOQ|CHEQUE|EMISSAO|TRANSITOR|REAPROP|ADIANTAMENTO/.test(nome)) return false;
+    return /\bC C\b|CONTA CORRENTE/.test(nome);
+  },
+
   mlSelecionadas(dados) {
     if (!this._mlSel) {
-      try { this._mlSel = JSON.parse(localStorage.getItem("rc_ml_contas_v1") || "null"); } catch (e) { this._mlSel = null; }
+      try { this._mlSel = JSON.parse(localStorage.getItem("rc_ml_contas_v2") || "null"); } catch (e) { this._mlSel = null; }
     }
     if (Array.isArray(this._mlSel)) return this._mlSel;
-    return (dados && dados.padrao) || [];
+    const base = (dados && dados.contas) || [];
+    const cc = base.filter((c) => this.contaCorrenteMl(c)).map((c) => c.numero);
+    return cc.length ? cc : ((dados && dados.padrao) || []);
   },
 
   toggleContaMl(num, on) {
@@ -2719,7 +2727,7 @@ const ResultadoCaixaApp = {
     if (on) set.add(String(num));
     else set.delete(String(num));
     this._mlSel = Array.from(set);
-    try { localStorage.setItem("rc_ml_contas_v1", JSON.stringify(this._mlSel)); } catch (e) {}
+    try { localStorage.setItem("rc_ml_contas_v2", JSON.stringify(this._mlSel)); } catch (e) {}
     this.render();
   },
 
@@ -2820,10 +2828,10 @@ const ResultadoCaixaApp = {
     };
     const abertos = this.mlAbertos || {};
     const linhas = [];
-    let ocultar = 0;
+    let ocultar = -1;
     (dados.linhas || []).forEach((linha) => {
-      if (ocultar && linha.level > ocultar) return;
-      ocultar = 0;
+      if (ocultar >= 0 && linha.level > ocultar) return;
+      ocultar = -1;
       if (!this.mlVisivel(linha)) return;
       const aberto = !!abertos[linha.id];
       const temPlano = !linha.hasKids && (linha.planos || []).length > 0;
@@ -2874,56 +2882,55 @@ const ResultadoCaixaApp = {
         </table></div>`;
     }
     const escolhidas = new Set(this.mlSelecionadas(dados).map(String));
-    const checks = (dados.contas || []).map((c) => {
+    const contasOrd = (dados.contas || []).slice().sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt"));
+    const checks = contasOrd.map((c) => {
       const on = escolhidas.has(String(c.numero));
-      return `<label class="rcx-ml-conta"><input type="checkbox" ${on ? "checked" : ""} onchange="ResultadoCaixaApp.toggleContaMl('${caixaEsc(c.numero)}', this.checked)"> ${caixaEsc(c.numero)} ${caixaEsc(c.nome)}</label>`;
+      const ruim = !this.contaCorrenteMl(c);
+      return `<label class="rcx-ml-conta${ruim ? " is-fora" : ""}"><input type="checkbox" ${on ? "checked" : ""} onchange="ResultadoCaixaApp.toggleContaMl('${caixaEsc(c.numero)}', this.checked)"> <b>${caixaEsc(c.numero)}</b> ${caixaEsc(c.nome)}</label>`;
     }).join("");
     const contasSel = (dados.contas || []).filter((c) => escolhidas.has(String(c.numero)));
     const abertura = contasSel.reduce((s, c) => s + (Number(c.abertura) || 0), 0);
     const varOrc = (dados.linhas || []).find((l) => l.id === "g_12");
-    const traco = `<td>—</td>`;
     const celS = (v) => cel(v, Number(v) < -0.5 ? "is-neg" : "");
-    const headMes = [];
-    const headSub = [];
-    const tdsVar = [traco];
-    const tdsSaldo = [celS(abertura)];
-    let saldoO = abertura;
-    let saldoR = abertura;
-    const fimConta = contasSel.map((c) => ({ c: c, saldo: Number(c.abertura) || 0 }));
+    const snaps = [];
+    let iniO = abertura;
+    let iniR = abertura;
     for (let m = 1; m <= sel; m++) {
-      headMes.push(`<th colspan="2">${this.MESES[m - 1]}</th>`);
-      headSub.push(`<th>Orçado</th><th>Realizado</th>`);
       const o = varOrc && varOrc.meses ? (Number(varOrc.meses[m - 1].o) || 0) : 0;
-      const doMes = (dados.movimentos || []).filter((mv) => mv.mes === m && escolhidas.has(String(mv.conta)));
-      const r = doMes.reduce((s, mv) => s + mv.valor, 0);
-      saldoO += o;
-      saldoR += r;
-      tdsVar.push(celS(o) + celS(r));
-      tdsSaldo.push(celS(saldoO) + celS(saldoR));
-      fimConta.forEach((item) => {
-        const mov = doMes.filter((mv) => String(mv.conta) === String(item.c.numero)).reduce((s, mv) => s + mv.valor, 0);
-        item.saldo += mov;
-        item.cel = (item.cel || "") + traco + celS(item.saldo);
-      });
+      const r = (dados.movimentos || []).filter((mv) => mv.mes === m && escolhidas.has(String(mv.conta))).reduce((s, mv) => s + mv.valor, 0);
+      const fimO = iniO + o;
+      const fimR = iniR + r;
+      snaps.push({ nome: this.MESES[m - 1], iniO: iniO, iniR: iniR, fimO: fimO, fimR: fimR, varO: fimO - iniO, varR: fimR - iniR });
+      iniO = fimO;
+      iniR = fimR;
     }
-    const abertoSaldo = !!(abertos["ml-saldo"]);
-    const nomeSaldo = contasSel.length
-      ? `<button type="button" class="rcx-ml-no" onclick="ResultadoCaixaApp.toggleNoMl('ml-saldo')">${abertoSaldo ? "▾" : "▸"} Saldo no fim do mês</button>`
-      : `<span class="rcx-ml-no">Saldo no fim do mês</span>`;
-    const linhasConta = abertoSaldo ? fimConta.map((item) => {
-      return `<tr class="is-cc"><th>${caixaEsc(item.c.numero)} ${caixaEsc(item.c.nome)}</th>${celS(item.c.abertura)}${item.cel || ""}</tr>`;
-    }).join("") : "";
-    const caixaContas = `<h3 class="rcx-ml-tit">Saldo de caixa</h3>
-      <div class="rcx-ml-checks">${checks || `<span class="rcx-muted">Nenhuma conta corrente da empresa 1 voltou da API.</span>`}</div>
-      <p class="rcx-ajuda">O saldo parte do caixa em 01/01/${ano}. Cada mês soma a variação de caixa: o orçado vem do relatório e o realizado vem das contas marcadas. Ao abrir o saldo, cada conta mostra o caixa realizado no fim do mês.</p>
-      <div class="rcx-ml-scroll"><table class="rcx-ml">
-        <thead><tr><th>Conta</th><th>01/01</th>${headMes.join("")}</tr><tr><th></th><th></th>${headSub.join("")}</tr></thead>
+    const atual = snaps[snaps.length - 1] || { iniO: abertura, iniR: abertura, fimO: abertura, fimR: abertura, varO: 0, varR: 0, nome: "" };
+    const par = (a, b) => celS(a) + celS(b);
+    const trilha = snaps.map((s) => `<th colspan="2">${s.nome}</th>`).join("");
+    const trilhaSub = snaps.map(() => `<th>Orçado</th><th>Realizado</th>`).join("");
+    const linhaSnap = (rotulo, chaveO, chaveR) => `<tr class="is-formula"><th>${rotulo}</th>${snaps.map((s) => par(s[chaveO], s[chaveR])).join("")}</tr>`;
+    const caixaContas = `<h3 class="rcx-ml-tit">Variação de caixa · ${caixaEsc(atual.nome)}/${ano}</h3>
+      <div class="rcx-ml-scroll"><table class="rcx-ml rcx-ml-var">
+        <thead><tr><th></th><th>Orçado</th><th>Realizado</th></tr></thead>
         <tbody>
-          <tr class="is-formula"><th>Variação do mês</th>${tdsVar.join("")}</tr>
-          <tr class="is-formula"><th>${nomeSaldo}</th>${tdsSaldo.join("")}</tr>
-          ${linhasConta}
+          <tr class="is-formula"><th>Saldo inicial</th>${par(atual.iniO, atual.iniR)}</tr>
+          <tr class="is-formula"><th>Saldo final</th>${par(atual.fimO, atual.fimR)}</tr>
+          <tr class="is-formula"><th>Variação</th>${par(atual.varO, atual.varR)}</tr>
         </tbody>
-      </table></div>`;
+      </table></div>
+      <p class="rcx-ajuda">Variação = saldo final − saldo inicial. O saldo inicial de janeiro é o caixa das contas correntes em 01/01. O orçado soma a linha 12 do DFC. O realizado soma o extrato das contas marcadas.</p>
+      <div class="rcx-ml-scroll"><table class="rcx-ml">
+        <thead><tr><th>Mês</th>${trilha}</tr><tr><th></th>${trilhaSub}</tr></thead>
+        <tbody>
+          ${linhaSnap("Saldo inicial", "iniO", "iniR")}
+          ${linhaSnap("Saldo final", "fimO", "fimR")}
+          ${linhaSnap("Variação", "varO", "varR")}
+        </tbody>
+      </table></div>
+      <details class="rcx-ml-contas">
+        <summary>Contas correntes do saldo <span class="rcx-qtd">${contasSel.length}</span></summary>
+        <div class="rcx-ml-checks">${checks || `<span class="rcx-muted">Nenhuma conta corrente da empresa 1 voltou da API.</span>`}</div>
+      </details>`;
     return `${barra}
       ${avisos.map((t) => `<div class="rcx-aviso">${caixaEsc(t)}</div>`).join("")}
       <div class="rcx-ml-scroll"><table class="rcx-ml">

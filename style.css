@@ -9813,7 +9813,10 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .rcx-ml tbody th { text-align: left; position: sticky; left: 0; background: #fff; z-index: 1; min-width: 240px; font-weight: 650; }
 .rcx-ml tr.is-n0 th, .rcx-ml tr.is-n0 td { background: #e5f2ea; color: #1e4d38; font-weight: 700; }
 .rcx-ml tr.is-n1 th, .rcx-ml tr.is-n1 td { background: #f3faf6; color: #243028; }
+.rcx-ml tr.is-n1 th { padding-left: 22px; }
 .rcx-ml tr.is-n2 th, .rcx-ml tr.is-n2 td { background: #fff; color: #334155; }
+.rcx-ml tr.is-n2 th { padding-left: 38px; }
+.rcx-ml tr.is-n3 th { padding-left: 54px; }
 .rcx-ml tr.is-plano th, .rcx-ml tr.is-plano td { background: #fff; color: #3d4a42; font-weight: 600; }
 .rcx-ml tr.is-plano th { padding-left: 28px; }
 .rcx-ml tr.is-cc th, .rcx-ml tr.is-cc td { background: #f7faf8; color: #5c6b63; font-weight: 500; }
@@ -9825,8 +9828,12 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .rcx-ml-abre, .rcx-ml-no { border: 0; background: transparent; color: inherit; font: inherit; font-weight: 800; cursor: pointer; text-align: left; }
 .rcx-ml-abre.is-on { text-decoration: underline; }
 .rcx-ml-tit { margin: 8px 0; font-size: 0.92rem; color: #105436; }
-.rcx-ml-checks { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-bottom: 8px; }
-.rcx-ml-conta { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; color: #0f172a; }
+.rcx-ml-var { max-width: 520px; }
+.rcx-ml-contas { margin: 0 0 16px; }
+.rcx-ml-contas summary { cursor: pointer; color: #105436; font-weight: 700; }
+.rcx-ml-checks { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; margin-top: 8px; padding: 8px 10px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; }
+.rcx-ml-conta { display: flex; align-items: center; gap: 8px; font-size: 0.78rem; color: #0f172a; }
+.rcx-ml-conta.is-fora { color: #64748b; }
 
 .mut-page { display: flex; flex-direction: column; gap: 12px; }
 .mut-nota { margin: 0; color: #64748b; font-size: 0.86rem; }

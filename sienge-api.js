@@ -1754,6 +1754,8 @@ const SiengeApiService = {
   _baseCaixaStatus: "",
   _baseCaixaRodando: false,
   _baseCaixaChave: "",
+  _caixaConsulta: 0,
+  _caixaMesMem: {},
 
   _avisarBaseCaixa() {
     const el = document.getElementById("fc-base-caixa");
@@ -1761,6 +1763,17 @@ const SiengeApiService = {
     if (!el) return;
     el.textContent = txt;
     el.style.display = txt ? "" : "none";
+  },
+
+  _statusCaixa(txt) {
+    this._baseCaixaStatus = txt || "";
+    this._avisarBaseCaixa();
+  },
+
+  async _esperarConsultaCaixa() {
+    while (this._caixaConsulta > 0) {
+      await new Promise((r) => setTimeout(r, 300));
+    }
   },
 
   _mesesCaixa(start, end) {
@@ -1858,10 +1871,14 @@ const SiengeApiService = {
 
   async _lerOuBuscarMesCaixa(companyId, ym, opts) {
     const key = String(companyId) + "_" + ym;
+    if (this._caixaMesMem[key]) return this._caixaMesMem[key];
     if (this._caixaMesPromessas[key]) return this._caixaMesPromessas[key];
     const promessa = (async () => {
       const salvo = await this._lerMesCaixa(companyId, ym);
-      if (salvo) return salvo;
+      if (salvo) {
+        this._caixaMesMem[key] = salvo;
+        return salvo;
+      }
       const start = ym + "-01";
       const end = this._fimDoMes(ym);
       const rows = await this._bankMovementsSienge(start, end, {
@@ -1872,6 +1889,7 @@ const SiengeApiService = {
       });
       const noMes = (rows || []).filter((m) => this._dataMovCaixa(m).slice(0, 7) === ym);
       try { await this._gravarMesCaixa(companyId, ym, noMes); } catch (e) {}
+      this._caixaMesMem[key] = noMes;
       return noMes;
     })().finally(() => { delete this._caixaMesPromessas[key]; });
     this._caixaMesPromessas[key] = promessa;
@@ -1880,7 +1898,26 @@ const SiengeApiService = {
 
   async _bankMovementsBase(startDate, endDate, opts) {
     const meses = this._mesesCaixa(startDate, endDate);
-    const blocos = await siengeMapLimit(meses, 2, (ym) => this._lerOuBuscarMesCaixa(opts.companyId, ym, opts));
+    const companyId = opts.companyId;
+    const faltam = [];
+    for (let i = 0; i < meses.length; i++) {
+      const key = String(companyId) + "_" + meses[i];
+      if (this._caixaMesMem[key]) continue;
+      const salvo = await this._lerMesCaixa(companyId, meses[i]);
+      if (salvo) {
+        this._caixaMesMem[key] = salvo;
+        continue;
+      }
+      faltam.push(meses[i]);
+    }
+    const de = String(startDate || "").slice(0, 7);
+    const ate = String(endDate || "").slice(0, 7);
+    if (!faltam.length) {
+      this._statusCaixa("Lendo " + de + " a " + ate + " no Firebase. Essa consulta não chama a API.");
+    } else {
+      this._statusCaixa("A base até 31/12/2025 ainda não tem " + faltam[0] + (faltam.length > 1 ? " e mais " + (faltam.length - 1) + " mês(es)" : "") + ". Baixando só o que falta neste período.");
+    }
+    const blocos = await siengeMapLimit(meses, 2, (ym) => this._lerOuBuscarMesCaixa(companyId, ym, opts));
     return (blocos || []).flat().filter((m) => {
       const d = this._dataMovCaixa(m);
       return d && d >= startDate && d <= endDate && this._movNoCentro(m, opts.costCentersId);
@@ -1924,10 +1961,13 @@ const SiengeApiService = {
         if (await this._baseCaixaPronta(ids[c])) continue;
         let falhou = false;
         for (let i = 0; i < meses.length; i++) {
-          const jaSalvo = await this._lerMesCaixa(ids[c], meses[i]);
-          if (jaSalvo) continue;
-          this._baseCaixaStatus = "Baixando da API os movimentos até 31/12/2025 · empresa " + ids[c] + " · " + meses[i] + ". Esta varredura é só agora; o mês salvo não volta para a API.";
-          this._avisarBaseCaixa();
+          await this._esperarConsultaCaixa();
+          const jaSalvo = this._caixaMesMem[String(ids[c]) + "_" + meses[i]] || await this._lerMesCaixa(ids[c], meses[i]);
+          if (jaSalvo) {
+            this._caixaMesMem[String(ids[c]) + "_" + meses[i]] = jaSalvo;
+            continue;
+          }
+          this._statusCaixa("A base até 31/12/2025 ainda não fechou · empresa " + ids[c] + " · gravando " + meses[i] + ". Mês já salvo não volta para a API.");
           await this._lerOuBuscarMesCaixa(ids[c], meses[i], { companyId: ids[c] });
           const conferido = await this._lerMesCaixa(ids[c], meses[i]);
           if (!conferido) { falhou = true; break; }
@@ -1941,9 +1981,11 @@ const SiengeApiService = {
       console.warn("[Caixa] base de movimentos", e);
       this._baseCaixaChave = "";
     } finally {
-      this._baseCaixaStatus = "";
       this._baseCaixaRodando = false;
-      this._avisarBaseCaixa();
+      if (!this._caixaConsulta) {
+        this._baseCaixaStatus = "";
+        this._avisarBaseCaixa();
+      }
     }
   },
 
@@ -1956,21 +1998,28 @@ const SiengeApiService = {
     const end = String(endDate || "").slice(0, 10);
     const usarBase = !opts.skipBase && s_apiMode !== "simulado" && opts.companyId && window.firebaseDb && window.firebaseCollections;
     if (!usarBase || !start || !end || start > end) return this._bankMovementsSienge(start, end, opts);
-    const partes = [];
-    if (start < this._caixaBaseDe) {
-      const antigoFim = end < "2016-12-31" ? end : "2016-12-31";
-      partes.push(await this._bankMovementsSienge(start, antigoFim, Object.assign({}, opts, { skipBase: true })));
+    this._caixaConsulta += 1;
+    try {
+      const partes = [];
+      if (start < this._caixaBaseDe) {
+        const antigoFim = end < "2016-12-31" ? end : "2016-12-31";
+        partes.push(await this._bankMovementsSienge(start, antigoFim, Object.assign({}, opts, { skipBase: true })));
+      }
+      if (start <= this._caixaBaseAte && end >= this._caixaBaseDe) {
+        const hStart = start < this._caixaBaseDe ? this._caixaBaseDe : start;
+        const hEnd = end < this._caixaBaseAte ? end : this._caixaBaseAte;
+        partes.push(await this._bankMovementsBase(hStart, hEnd, opts));
+      }
+      if (end >= "2026-01-01") {
+        const vStart = start > "2026-01-01" ? start : "2026-01-01";
+        this._statusCaixa("2026 segue ao vivo na API. O período até 31/12/2025 entra pelo Firebase.");
+        partes.push(await this._bankMovementsSienge(vStart, end, Object.assign({}, opts, { skipBase: true })));
+      }
+      return siengeDedupeBankMovements(partes.flat());
+    } finally {
+      this._caixaConsulta = Math.max(0, this._caixaConsulta - 1);
+      if (!this._caixaConsulta && !this._baseCaixaRodando) this._statusCaixa("");
     }
-    if (start <= this._caixaBaseAte && end >= this._caixaBaseDe) {
-      const hStart = start < this._caixaBaseDe ? this._caixaBaseDe : start;
-      const hEnd = end < this._caixaBaseAte ? end : this._caixaBaseAte;
-      partes.push(await this._bankMovementsBase(hStart, hEnd, opts));
-    }
-    if (end >= "2026-01-01") {
-      const vStart = start > "2026-01-01" ? start : "2026-01-01";
-      partes.push(await this._bankMovementsSienge(vStart, end, Object.assign({}, opts, { skipBase: true })));
-    }
-    return siengeDedupeBankMovements(partes.flat());
   },
 
   async _bankMovementsSienge(startDate, endDate, opts = {}) {
