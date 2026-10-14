@@ -1,11 +1,11 @@
 {
   "functions": {
-    "api/r/[...path].js": {
+    "api/gateway.js": {
       "maxDuration": 60
     }
   },
   "rewrites": [
-    { "source": "/api/:path*", "destination": "/api/r/:path*" },
+    { "source": "/api/:path*", "destination": "/api/gateway?path=:path*" },
     { "source": "/proxy-storage/:path*", "destination": "https://firebasestorage.googleapis.com/v0/b/crm-gestao-mldu.firebasestorage.app/o/:path*" }
   ],
   "crons": [
