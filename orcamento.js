@@ -117,7 +117,9 @@ const OrcamentoApp = {
     const atual = this.aba || "receitas";
     const tabs = [
       { id: "receitas", label: "Receitas", icon: "trending-up" },
-      { id: "dfc", label: "DFC 2027", icon: "git-branch" }
+      { id: "dfc", label: "DFC 2027", icon: "git-branch" },
+      { id: "impostos", label: "Calcular impostos", icon: "calculator" },
+      { id: "repasses", label: "Repasses", icon: "hand-coins" }
     ];
     return `<div class="ml-tabs orc-abas" role="tablist">${tabs.map((t) => `
       <button type="button" role="tab" aria-selected="${atual === t.id ? "true" : "false"}"
@@ -127,15 +129,24 @@ const OrcamentoApp = {
   },
 
   setAba(id) {
-    this.aba = id === "dfc" ? "dfc" : "receitas";
+    const ok = { dfc: 1, impostos: 1, repasses: 1 };
+    this.aba = ok[id] ? id : "receitas";
     this.render();
   },
 
   render() {
     const root = document.getElementById("orcamento-root");
     if (!root) return;
-    if ((this.aba || "receitas") === "dfc") {
-      if (typeof OrcamentoDfcApp !== "undefined") OrcamentoDfcApp.render(root);
+    if (this.aba === "dfc" && typeof OrcamentoDfcApp !== "undefined") {
+      OrcamentoDfcApp.render(root);
+      return;
+    }
+    if (this.aba === "impostos" && typeof OrcamentoImpostosApp !== "undefined") {
+      OrcamentoImpostosApp.render(root);
+      return;
+    }
+    if (this.aba === "repasses" && typeof OrcamentoRepassesApp !== "undefined") {
+      OrcamentoRepassesApp.render(root);
       return;
     }
     root.innerHTML = `

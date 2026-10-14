@@ -785,6 +785,12 @@ body {
   text-overflow: ellipsis;
   vertical-align: middle;
 }
+.fila-fit-table td.fila-load-cell {
+  text-align: center;
+  white-space: normal;
+  overflow: visible;
+  padding: 32px 16px !important;
+}
 .fila-fit-table tbody tr:not(.fila-group-header) td {
   white-space: nowrap;
 }
@@ -1656,6 +1662,7 @@ circle.donut-segment {
   padding: 28px 16px;
 }
 .ml-load .loading-status-text { font-weight: 700; font-size: 15px; color: #105436; }
+.ml-load .loading-time-text { font-size: 0.85rem; color: #64748b; font-weight: 500; }
 .ml-load-track,
 .loading-progress-track {
   width: 100%;
@@ -9772,3 +9779,16 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
   .orc-dfc-layout { flex-direction: column; }
   .orc-dfc-alerta { width: 100%; }
 }
+
+.orc-est-page .ml-emp-filter { flex: 0 0 340px; width: 340px; max-width: 420px; height: auto; }
+.orc-est-ok { color: #15803d; font-weight: 700; font-size: 0.72rem; margin-left: 8px; }
+.orc-est-alerta { color: #c2410c; font-weight: 700; font-size: 0.72rem; margin-left: 8px; }
+.orc-est-mudo { color: #64748b; font-weight: 700; font-size: 0.72rem; margin-left: 8px; }
+.orc-est-tipo { color: #105436; font-weight: 700; font-size: 0.72rem; margin-left: 6px; }
+.orc-est-nota { margin: 8px 0 0; color: #64748b; font-size: 0.78rem; max-width: 920px; line-height: 1.4; }
+.orc-est-sub td { background: #f8fafc; font-weight: 500; color: #334155; }
+.orc-est-det > td { background: #fff; padding: 8px 10px 12px; }
+.orc-est-mini { margin-top: 4px; }
+.orc-est-leituras { margin: 8px 0 0; padding-left: 18px; font-size: 0.78rem; color: #334155; }
+.orc-est-leituras li { margin: 4px 0; }
+.orc-est-table tfoot td { font-weight: 800; background: #ecfdf5; }

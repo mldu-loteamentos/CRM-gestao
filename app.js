@@ -9258,14 +9258,12 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
   if (!dataAlreadyLoaded) {
     // Exibir indicador de carregamento APENAS se for buscar na API
     if (body) {
-      body.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:40px; color:var(--color-text-muted);">
-        <div style="display:flex; flex-direction:column; align-items:center; gap:12px; width: 100%; max-width: 400px; margin: 0 auto;">
-          <div class="loading-spinner" style="width:32px; height:32px; border:3px solid rgba(16,84,54,0.15); border-top-color:var(--color-primary); border-radius:50%; animation:spin 0.8s linear infinite;"></div>
-          <span class="loading-status-text" style="font-weight: 500;">Buscando clientes inadimplentes no Sienge...</span>
-          <div style="width: 100%; background: #e2e8f0; border-radius: 8px; height: 10px; overflow: hidden; margin-top: 5px;">
-            <div class="loading-progress-bar" style="width: 0%; height: 100%; background: #10b981; transition: width 1s linear;"></div>
-          </div>
-          <span class="loading-time-text" style="font-size: 0.85rem; color: #64748b; margin-top: 4px;"></span>
+      body.innerHTML = `<tr><td class="fila-load-cell" colspan="13">
+        <div class="ml-load">
+          <div class="loading-spinner" aria-hidden="true"></div>
+          <span class="loading-status-text">Buscando clientes inadimplentes…</span>
+          <div class="ml-load-track"><div class="loading-progress-bar" style="width:0%"></div></div>
+          <span class="loading-time-text"></span>
         </div>
       </td></tr>`;
     }
@@ -9360,7 +9358,10 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
           
           const s1 = document.querySelector("#defaulters-table-body .loading-status-text");
           const t1 = document.querySelector("#defaulters-table-body .loading-time-text");
-          if(s1) s1.textContent = `Buscando clientes inadimplentes · ${_cIdx} de ${_cTotal}`;
+          const nomeEmpresa = String(_cName || "").split(" · ")[0].trim();
+          if (s1) s1.textContent = nomeEmpresa && nomeEmpresa !== "Iniciando..."
+            ? `Buscando clientes inadimplentes ${nomeEmpresa}`
+            : "Buscando clientes inadimplentes…";
           if(t1) t1.textContent = timeText;
           
           if (window._loadingProgressData) {
