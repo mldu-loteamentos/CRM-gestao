@@ -632,8 +632,43 @@ const ConfigUsersApp = {
     return this.profiles;
   },
 
+  async ensureProfileNamed(profileName) {
+    const name = String(profileName || "").trim().toUpperCase();
+    if (!name) return null;
+    if (!Array.isArray(this.profiles)) this.profiles = [];
+    const norm = (s) => (typeof window.normalizeCrmProfileName === "function"
+      ? window.normalizeCrmProfileName(s)
+      : String(s || "").toUpperCase());
+    const key = norm(name);
+    const existing = this.profiles.find((p) => p && norm(p.name) === key);
+    if (existing) return existing;
+    const id = this.profileIdFromName(name);
+    if (!id || this.profiles.some((p) => String(p && p.id) === id)) return null;
+    if (typeof window.forgetRemovedCrmProfile === "function") window.forgetRemovedCrmProfile(id);
+    const profile = { id, name };
+    this.profiles.push(profile);
+    this.safeLocalSet("crm_moura_profiles", JSON.stringify(this.profiles));
+    try { await this.persistProfilesCloud(); } catch (e) {
+      console.warn("[ConfigUsers] perfil do usuário:", e);
+    }
+    return profile;
+  },
+
   async ensureProfilesReferencedByUsers() {
-    return;
+    if (!Array.isArray(this.profiles)) this.profiles = [];
+    const cited = [];
+    (this.users || []).forEach((u) => {
+      const name = String(u && u.profile_name || "").trim();
+      if (name) cited.push(name);
+    });
+    let added = false;
+    for (let i = 0; i < cited.length; i++) {
+      const before = this.profiles.length;
+      const profile = await this.ensureProfileNamed(cited[i]);
+      if (profile && this.profiles.length > before) added = true;
+    }
+    if (!added) return;
+    this.safeLocalSet("crm_moura_profiles", JSON.stringify(this.profiles));
   },
 
   writePermissionPayload(profileId, perms) {
@@ -1033,7 +1068,11 @@ const ConfigUsersApp = {
          }
 
          this.profiles.push({ id: newId, name: profileName.trim().toUpperCase() });
+         if (typeof window.forgetRemovedCrmProfile === "function") window.forgetRemovedCrmProfile(newId);
          this.safeLocalSet("crm_moura_profiles", JSON.stringify(this.profiles));
+         this.persistProfilesCloud().catch((e) => {
+           alert("A cópia ficou nesta tela, mas não gravou na nuvem. " + (e && e.message ? e.message : ""));
+         });
 
          // Espelho leve das permissões (evita estourar localStorage)
          this.seedPermsAsMirror(newId, sourceId);
@@ -1053,7 +1092,10 @@ const ConfigUsersApp = {
      const profile = this.profiles.find(p => p.id === id);
      if (!profile) return;
 
-     const inUse = this.users.some(u => u.profile_name === profile.name);
+     const normName = (s) => (typeof window.normalizeCrmProfileName === "function"
+       ? window.normalizeCrmProfileName(s)
+       : String(s || "").trim().toUpperCase());
+     const inUse = this.users.some(u => normName(u && u.profile_name) === normName(profile.name));
      if (inUse) {
          alert(`Não é possível excluir o perfil "${profile.name}", pois existem usuários vinculados a ele.`);
          return;
@@ -1069,6 +1111,9 @@ const ConfigUsersApp = {
      localStorage.setItem("crm_moura_profiles", JSON.stringify(this.profiles));
      localStorage.removeItem(`crm_perms_${id}`);
      this.selectedProfile = "admin";
+     try { await this.persistProfilesCloud(); } catch (e) {
+       alert("O perfil saiu desta tela, mas continuou na nuvem. " + (e && e.message ? e.message : ""));
+     }
      this.render();
   },
 
@@ -1244,9 +1289,25 @@ const ConfigUsersApp = {
          if (!user) return;
       }
       
-      const userProfileOptions = this.profilesOrdenados().map(p => 
-          `<option value="${p.name}" ${user && p.name === user.profile_name ? 'selected' : (!user && p.name === 'OPERADOR COBRANÇA' ? 'selected' : '')}>${p.name}</option>`
-      ).join('');
+      const profileChoices = this.profilesOrdenados().slice();
+      if (user && user.profile_name) {
+        const normName = (s) => (typeof window.normalizeCrmProfileName === "function"
+          ? window.normalizeCrmProfileName(s)
+          : String(s || "").trim().toUpperCase());
+        const wanted = normName(user.profile_name);
+        if (wanted && !profileChoices.some((p) => normName(p && p.name) === wanted)) {
+          profileChoices.unshift({ id: this.profileIdFromName(user.profile_name), name: String(user.profile_name).trim().toUpperCase() });
+        }
+      }
+      const userProfileOptions = profileChoices.map(p => {
+          const normName = (s) => (typeof window.normalizeCrmProfileName === "function"
+            ? window.normalizeCrmProfileName(s)
+            : String(s || "").trim().toUpperCase());
+          const selected = user
+            ? normName(p.name) === normName(user.profile_name)
+            : p.name === "OPERADOR COBRANÇA";
+          return `<option value="${this.esc(p.name)}" ${selected ? "selected" : ""}>${this.esc(p.name)}</option>`;
+      }).join('');
 
       let companies = [];
       let cities = [];
@@ -1587,6 +1648,9 @@ const ConfigUsersApp = {
       const phone = document.getElementById('umodal-phone').value.trim();
       const telefoneCorporativo = document.getElementById('umodal-fone-corp') ? document.getElementById('umodal-fone-corp').value.trim() : '';
       const profileName = document.getElementById('umodal-profile').value;
+      if (profileName) {
+        try { await this.ensureProfileNamed(profileName); } catch (e) {}
+      }
       const managerName = document.getElementById('umodal-manager-name').value.trim();
       const managerEmail = document.getElementById('umodal-manager-email').value.trim();
       const operatorTypeEl = document.getElementById('umodal-operator-type');
@@ -1634,6 +1698,7 @@ const ConfigUsersApp = {
           manager_name: managerName,
           manager_email: managerEmail,
           editedAt: Date.now(),
+          profileChosenAt: Date.now(),
           badge_color: badgeColor,
           resend_billet: resendBillet,
           assina_testemunha: assinaTestemunha,

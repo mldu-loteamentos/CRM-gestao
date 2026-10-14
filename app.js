@@ -4945,7 +4945,12 @@ window.mergeCrmUsers = function(localStr, cloudStr) {
     }
     const prevProf = String(prev.profile_name || "").trim();
     const nextProf = String(next.profile_name || "").trim();
-    if (nextProf && nextAt > prevAt) merged.profile_name = nextProf;
+    const nomeAdmin = (nome) => String(nome || "").trim().toUpperCase() === "ADMINISTRADOR";
+    if (nextProf && nextAt > prevAt) {
+      const escolheuAdmin = Number(next.profileChosenAt) > prevAt;
+      if (nomeAdmin(nextProf) && prevProf && !nomeAdmin(prevProf) && !escolheuAdmin) merged.profile_name = prevProf;
+      else merged.profile_name = nextProf;
+    }
     else if (prevProf && prevAt > nextAt) merged.profile_name = prevProf;
     else if ((!nextProf || nextProf.toUpperCase() === "OPERADOR") && prevProf && prevProf.toUpperCase() !== "OPERADOR") {
       merged.profile_name = prevProf;
@@ -5054,7 +5059,8 @@ window.syncCrmProfilesFromFirebase = async function() {
   } catch (e) {
     if (typeof window.freeCrmLocalStorage === "function") window.freeCrmLocalStorage();
   }
-  try { return JSON.parse(merged); } catch (e) { return []; }
+  try { window._crmProfilesCache = JSON.parse(merged); } catch (e) { window._crmProfilesCache = []; }
+  return window._crmProfilesCache;
 };
 
 window.freeCrmLocalStorage = function() {
@@ -5444,6 +5450,18 @@ window.readCrmProfilePerms = function(profileNameOrId) {
     });
     if (hit && hit.perms && typeof hit.perms === "object") payloads.push(JSON.stringify(hit.perms));
   } catch (e) {}
+  try {
+    const extras = [];
+    if (window.ConfigUsersApp && Array.isArray(window.ConfigUsersApp.profiles)) extras.push(window.ConfigUsersApp.profiles);
+    if (Array.isArray(window._crmProfilesCache)) extras.push(window._crmProfilesCache);
+    const wanted = window.normalizeCrmProfileName(profileNameOrId);
+    extras.forEach((lista) => {
+      const hit = lista.find((p) => {
+        return String(p && p.id) === String(id) || window.normalizeCrmProfileName(p && p.name) === wanted;
+      });
+      if (hit && hit.perms && typeof hit.perms === "object") payloads.push(JSON.stringify(hit.perms));
+    });
+  } catch (e) {}
   // Junta as cópias (chave atual, backup e perfil salvo). Escolher só a que tem
   // mais itens marcados escondia um acesso novo, como o Dashboard, quando uma
   // cópia antiga era maior e ainda não tinha essa chave.
@@ -5525,15 +5543,21 @@ window.applyPermissions = function(profileName) {
     current.profile_name = recAtual.profile_name;
     if (recAtual.operator_type) current.operator_type = recAtual.operator_type;
   }
-  if (imp && imp.profile_name) {
-    profileName = imp.profile_name;
+  if (imp) {
+    profileName = String(imp.profile_name || "").trim();
   } else if (current && typeof window.isCobrancaBackOfficeUser === "function" && window.isCobrancaBackOfficeUser(current)) {
     profileName = window.CRM_BACK_OFFICE_PROFILE_NAME;
     current.profile_name = profileName;
   } else if (current && current.profile_name) {
     profileName = current.profile_name;
   }
-  if (!profileName) return;
+  if (!profileName) {
+    if (imp) {
+      document.querySelectorAll("li[data-module]").forEach((item) => { item.style.display = "none"; });
+      document.querySelectorAll(".nav-group").forEach((group) => { group.style.display = "none"; });
+    }
+    return;
+  }
 
   if (window.isCrmAdminProfileName(profileName)) {
     document.querySelectorAll("li[data-module]").forEach((item) => { item.style.display = ""; });
@@ -5651,7 +5675,12 @@ window.crmUnirListasDeUsuarios = function(listas) {
       const merged = Object.assign({}, older, newer);
       const status = String(newer.status || older.status || "ATIVO").trim();
       if (status) merged.status = status;
-      const perfil = String(newer.profile_name || older.profile_name || "").trim();
+      const perfilNewer = String(newer.profile_name || "").trim();
+      const perfilOlder = String(older.profile_name || "").trim();
+      const ehAdmin = (nome) => typeof window.isCrmAdminProfileName === "function" && window.isCrmAdminProfileName(nome);
+      let perfil = perfilNewer || perfilOlder;
+      const escolheuAdmin = Number(newer.profileChosenAt) > prevAt;
+      if (ehAdmin(perfilNewer) && perfilOlder && !ehAdmin(perfilOlder) && !escolheuAdmin) perfil = perfilOlder;
       if (perfil) merged.profile_name = perfil;
       merged.name = window.pickCrmUserName(prev, u);
       byKey.set(key, merged);
@@ -43797,6 +43826,19 @@ window.syncGlobalConfigFromFirebase = async function() {
                         _originalSetItem.call(localStorage, k, merged);
                         changed = true;
                     }
+                    try { window._crmProfilesCache = JSON.parse(merged || "[]"); } catch (e) {}
+                    try {
+                      const appPerfis = window.ConfigUsersApp;
+                      const lista = window._crmProfilesCache;
+                      if (appPerfis && Array.isArray(lista) && lista.length && appPerfis.view !== "perfis") {
+                        appPerfis.profiles = lista;
+                      } else if (appPerfis && Array.isArray(appPerfis.profiles) && Array.isArray(lista)) {
+                        lista.forEach((p) => {
+                          if (!p || !p.id) return;
+                          if (!appPerfis.profiles.some((x) => String(x && x.id) === String(p.id))) appPerfis.profiles.push(p);
+                        });
+                      }
+                    } catch (e) {}
                     if (merged && merged !== (globalData[k] || "") && window.forceUploadLocalConfig) {
                         setTimeout(() => window.forceUploadLocalConfig(true), 1500);
                     }
