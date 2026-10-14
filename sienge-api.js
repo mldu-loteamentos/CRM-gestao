@@ -1887,6 +1887,30 @@ const SiengeApiService = {
     });
   },
 
+  async _baseCaixaPronta(companyId) {
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (!fx || !db || !fx.getDoc) return false;
+    try {
+      const snap = await fx.getDoc(fx.doc(db, "caixa_movimentos", String(companyId) + "_base"));
+      if (!snap || typeof snap.exists !== "function" || !snap.exists()) return false;
+      return String((snap.data() || {}).ate || "") >= "2025-12";
+    } catch (e) {
+      return false;
+    }
+  },
+
+  async _marcarBaseCaixa(companyId) {
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (!fx || !db || !fx.setDoc) return;
+    await fx.setDoc(fx.doc(db, "caixa_movimentos", String(companyId) + "_base"), {
+      companyId: String(companyId),
+      ate: "2025-12",
+      em: new Date().toISOString()
+    });
+  },
+
   async prepararBaseMovimentosCaixa(companyIds) {
     if (s_apiMode === "simulado" || !window.firebaseDb || !window.firebaseCollections) return;
     const ids = (companyIds || []).map((id) => String(id)).filter(Boolean);
@@ -1897,11 +1921,21 @@ const SiengeApiService = {
     const meses = this._mesesCaixa(this._caixaBaseDe, this._caixaBaseAte);
     try {
       for (let c = 0; c < ids.length; c++) {
+        if (await this._baseCaixaPronta(ids[c])) continue;
+        let falhou = false;
         for (let i = 0; i < meses.length; i++) {
-          this._baseCaixaStatus = "Gravando movimentos até 31/12/2025 · empresa " + ids[c] + " · " + meses[i];
+          const jaSalvo = await this._lerMesCaixa(ids[c], meses[i]);
+          if (jaSalvo) continue;
+          this._baseCaixaStatus = "Baixando da API os movimentos até 31/12/2025 · empresa " + ids[c] + " · " + meses[i] + ". Esta varredura é só agora; o mês salvo não volta para a API.";
           this._avisarBaseCaixa();
           await this._lerOuBuscarMesCaixa(ids[c], meses[i], { companyId: ids[c] });
+          const conferido = await this._lerMesCaixa(ids[c], meses[i]);
+          if (!conferido) { falhou = true; break; }
         }
+        if (!falhou) {
+          try { await this._marcarBaseCaixa(ids[c]); } catch (e) { falhou = true; }
+        }
+        if (falhou) this._baseCaixaChave = "";
       }
     } catch (e) {
       console.warn("[Caixa] base de movimentos", e);

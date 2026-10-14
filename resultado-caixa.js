@@ -218,21 +218,36 @@ const ResultadoCaixaApp = {
         }
       }
       if (!lidos.length) throw new Error("Não reconheci o forecast. Use o relatório Orçamento Empresarial Agrupado por centro de custo, com periodicidade mensal.");
-      const chave = this.competenciaAtual();
-      const recorte = this.recortarForecast(contas, chave);
-      if (!Object.keys(recorte).length) {
-        const nomeMes = this.MESES[Number(chave.slice(5, 7)) - 1] || chave;
-        throw new Error("Esses arquivos não têm a competência de " + nomeMes + "/" + chave.slice(0, 4) + ". O forecast de " + nomeMes.toLowerCase() + " vale só para " + nomeMes.toLowerCase() + ".");
+      const seguintes = this.mesesSeguintes();
+      const nomesMes = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+      const sel = Number(this.mes) || 1;
+      const ano = this.anoAtual();
+      if (!seguintes.length) {
+        throw new Error("Dezembro fecha o ano: o realizado já vai até o fim. Escolha o mês até onde o realizado entra e suba o forecast dos meses seguintes.");
       }
-      const doc = { arquivos: lidos, em: new Date().toISOString(), contas: recorte, nomes: nomes };
-      this.forecasts[chave] = doc;
+      const em = new Date().toISOString();
+      const gravados = [];
+      seguintes.forEach((ym) => {
+        const fatia = this.recortarForecast(contas, ym);
+        if (!Object.keys(fatia).length) return;
+        gravados.push({ ym: ym, doc: { arquivos: lidos, em: em, contas: fatia, nomes: nomes } });
+      });
+      if (!gravados.length) {
+        const de = nomesMes[sel] || seguintes[0];
+        throw new Error("O mês escolhido é o realizado acumulado até " + (nomesMes[sel - 1] || "") + "/" + ano + ". O forecast precisa dos meses seguintes, de " + de + " a dezembro/" + ano + ".");
+      }
+      seguintes.forEach((ym) => {
+        delete this.forecasts[ym];
+        this.apagarForecastNuvem(ym);
+      });
+      gravados.forEach((item) => { this.forecasts[item.ym] = item.doc; });
       this.aplicarForecastVista();
       if (falhas.length) this.aviso = "Não reconheci " + falhas.length + " arquivo(s): " + falhas.join(", ") + ".";
       this.gravarForecastLocal();
       try {
-        await this.salvarForecastNuvem(chave, doc);
+        for (let i = 0; i < gravados.length; i++) await this.salvarForecastNuvem(gravados[i].ym, gravados[i].doc);
       } catch (err) {
-        this.aviso = ((this.aviso ? this.aviso + " " : "") + "O forecast de " + chave + " ficou neste navegador, mas a nuvem não guardou: " + ((err && err.message) || err)).trim();
+        this.aviso = ((this.aviso ? this.aviso + " " : "") + "O forecast ficou neste navegador, mas a nuvem não guardou: " + ((err && err.message) || err)).trim();
       }
     } catch (e) {
       this.error = e.message || String(e);
@@ -243,16 +258,26 @@ const ResultadoCaixaApp = {
   },
 
   removerForecast() {
-    const chave = this.competenciaAtual();
-    delete this.forecasts[chave];
+    this.mesesSeguintes().forEach((ym) => {
+      delete this.forecasts[ym];
+      this.apagarForecastNuvem(ym);
+    });
     this.aplicarForecastVista();
     this.gravarForecastLocal();
-    this.apagarForecastNuvem(chave);
     this.render();
   },
 
   competenciaAtual() {
     return this.chaveMes(this.anoAtual(), this.mes);
+  },
+
+  /** Meses depois do escolhido, até dezembro. O mês da tela é realizado; o forecast começa no seguinte. */
+  mesesSeguintes() {
+    const ano = this.anoAtual();
+    const sel = Number(this.mes) || 1;
+    const out = [];
+    for (let m = sel + 1; m <= 12; m++) out.push(this.chaveMes(ano, m));
+    return out;
   },
 
   recortarForecast(contas, chave) {
@@ -270,19 +295,30 @@ const ResultadoCaixaApp = {
   },
 
   aplicarForecastVista() {
-    const doc = this.forecasts[this.competenciaAtual()];
-    if (!doc || !doc.contas || !Object.keys(doc.contas).length) {
+    const contas = {};
+    const nomes = {};
+    const arquivos = [];
+    const meses = [];
+    let em = "";
+    this.mesesSeguintes().forEach((ym) => {
+      const doc = this.forecasts[ym];
+      if (!doc || !doc.contas || !Object.keys(doc.contas).length) return;
+      meses.push(ym);
+      if (doc.em && doc.em > em) em = doc.em;
+      (doc.arquivos || []).forEach((nome) => { if (arquivos.indexOf(nome) < 0) arquivos.push(nome); });
+      this.juntarForecast({ contas: contas, nomes: nomes }, doc);
+    });
+    if (!meses.length) {
       this.forecast = null;
       return;
     }
-    const ym = this.competenciaAtual();
     this.forecast = {
-      arquivo: (doc.arquivos || []).join(", "),
-      arquivos: doc.arquivos || [],
-      em: doc.em || "",
-      meses: [ym],
-      contas: doc.contas,
-      nomes: doc.nomes || {}
+      arquivo: arquivos.join(", "),
+      arquivos: arquivos,
+      em: em,
+      meses: meses,
+      contas: contas,
+      nomes: nomes
     };
   },
 
@@ -1903,9 +1939,9 @@ const ResultadoCaixaApp = {
     const base = "Orçado e realizado de " + (atual || "—") + " vêm do arquivo enviado para " + mesNomeFaixa + ". A coluna do ano anterior é o realizado do arquivo de " + (antN || "o ano anterior") + ", o mesmo em todos os meses.";
     const nota = lado === "entradas"
       ? base + " Livia, Livia I e Livia II aparecem como Central Parque. Empreendimentos com o mesmo nome ganham a sigla da cidade. MLDU aparece como Corporativo. Os quatro maiores desvios positivos e os quatro negativos do acumulado ficam à vista; o restante abre ao clicar em Outros."
-        + " No gráfico de linhas, a linha do ano atual é o realizado até o mês escolhido. Cada mês seguinte usa o forecast enviado na competência daquele mês, pelas mesmas contas da visão DFC (Receitas e receitas financeiras)." + agrupa
+        + " No gráfico de linhas, a linha do ano atual é o realizado até o mês escolhido. Cada mês seguinte, até dezembro, usa o forecast enviado nesta tela, pelas mesmas contas da visão DFC (Receitas e receitas financeiras)." + agrupa
       : base + " As saídas seguem as contas do DFC e aparecem como saída. Gastar acima do orçado fica em vermelho. As contas de fora da lista principal abrem em Outros."
-        + " No gráfico de linhas, a linha do ano atual é o realizado até o mês escolhido. Cada mês seguinte usa o forecast enviado na competência daquele mês, pelas mesmas contas da visão DFC das saídas." + agrupa;
+        + " No gráfico de linhas, a linha do ano atual é o realizado até o mês escolhido. Cada mês seguinte, até dezembro, usa o forecast enviado nesta tela, pelas mesmas contas da visão DFC das saídas." + agrupa;
     const avisoRateio = lado === "saidas" && this.faltaCentroNasSaidas()
       ? `<div class="rcx-erro">Para aplicar o % Moura Leite nas saídas destes arquivos, suba o Excel de novo. O arquivo que já estava salvo não guarda o centro de custo de cada conta.</div>`
       : "";
@@ -1942,7 +1978,7 @@ const ResultadoCaixaApp = {
             <i data-lucide="files"></i> Arquivos <span class="ml-tab-count">${qtdArq}</span>
             <i data-lucide="${this.arqsAberto ? "chevron-up" : "chevron-down"}"></i>
           </button>
-          ${lado === "entradas" || lado === "saidas" ? `<label class="rcx-arq-btn rcx-fc-btn" title="Pode escolher vários relatórios de uma vez. Orçamento Empresarial Agrupado por centro de custo, mensal.">
+          ${lado === "entradas" || lado === "saidas" ? `<label class="rcx-arq-btn rcx-fc-btn" title="Pode escolher vários relatórios de uma vez. Orçamento Empresarial Agrupado por centro de custo, mensal. O mês escolhido é o realizado; o arquivo entra como forecast dos meses seguintes, até dezembro.">
             <i data-lucide="trending-up"></i> ${this.forecast ? "Trocar forecast" : "Subir forecast"}
             <input type="file" multiple accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onchange="ResultadoCaixaApp.subirForecast(this)">
           </label>` : ""}
