@@ -979,6 +979,12 @@ const CessaoPopup = {
     return v.toLocaleString("pt-BR", { maximumFractionDigits: 4 });
   },
 
+  fmtJuros(n) {
+    const v = Number(n);
+    const seguro = Number.isFinite(v) ? v : 0;
+    return seguro.toLocaleString("pt-BR", { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+  },
+
   money(n) {
     return (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   },
@@ -1267,10 +1273,12 @@ const CessaoPopup = {
     let indexador = "REAL";
     if (recente) {
       condicoes = this.condicoesDoContrato(condsApi, installments);
+      const daTela = (window.AppState && window.AppState.currentContractInstallments) || [];
       juros = this.jurosDoContrato(contract, condsApi, []
         .concat(installments || [])
         .concat(instFin || [])
-        .concat(extrato || []));
+        .concat(extrato || [])
+        .concat(daTela));
       indexador = this.indiceDoContrato(condsApi, installments);
     }
     if (!condicoes.length) condicoes = [{ id: "c1", tipo: "Mensal", qtde: "", valor: "", vencimento: "" }];
@@ -1407,7 +1415,12 @@ const CessaoPopup = {
 
   taxaMensalPct(v) {
     if (v == null || v === "") return null;
-    const n = Number(v);
+    let raw = v;
+    if (typeof raw === "string") {
+      raw = raw.trim().replace("%", "").replace(/\s/g, "");
+      if (raw.indexOf(",") >= 0) raw = raw.replace(/\./g, "").replace(",", ".");
+    }
+    const n = Number(raw);
     if (!Number.isFinite(n) || n < 0) return null;
     if (n === 0) return 0;
     if (n <= 0.05) return Math.round(n * 100 * 10000) / 10000;
@@ -1415,18 +1428,21 @@ const CessaoPopup = {
     return null;
   },
 
-  taxasDeItem(o) {
-    if (!o || typeof o !== "object") return [];
-    const chaves = ["interestPercentage", "interestRate", "interestPct", "monthlyInterestPercentage", "monthlyInterest"];
+  taxasDeItem(o, profundidade, paiTaxa) {
+    if (!o || typeof o !== "object" || (profundidade || 0) > 3) return [];
     const out = [];
-    chaves.forEach((k) => {
-      const n = this.taxaMensalPct(o[k]);
-      if (n != null) out.push(n);
+    Object.keys(o).forEach((k) => {
+      const v = o[k];
+      const nome = String(k || "").toLowerCase();
+      const contexto = (/juros|interest/.test(nome) || paiTaxa) && !/late|mora|fine|multa|daily|dias|amount|value/.test(nome);
+      const pareceTaxa = contexto && (/percent|pct|rate|taxa|percentage/.test(nome) || paiTaxa && /percent|pct|rate|taxa|percentage/.test(nome));
+      if (pareceTaxa && (typeof v === "number" || typeof v === "string")) {
+        const n = this.taxaMensalPct(v);
+        if (n != null) out.push(n);
+        return;
+      }
+      if (v && typeof v === "object") this.taxasDeItem(v, (profundidade || 0) + 1, contexto).forEach((n) => out.push(n));
     });
-    const aninhado = o.paymentCondition || o.condition;
-    if (aninhado && typeof aninhado === "object" && aninhado !== o) {
-      this.taxasDeItem(aninhado).forEach((n) => out.push(n));
-    }
     return out;
   },
 
@@ -1449,17 +1465,13 @@ const CessaoPopup = {
 
   jurosDoContrato(contract, conds, installments) {
     const taxas = [];
-    [].concat(installments || [], conds || []).forEach((o) => {
+    [].concat(installments || [], conds || [], contract ? [contract] : []).forEach((o) => {
       this.taxasDeItem(o).forEach((n) => taxas.push(n));
     });
-    const positivas = taxas.filter((n) => n > 0.000001);
-    if (positivas.length) {
-      const semMora = positivas.filter((n) => Math.abs(n - 1) > 0.05);
-      return this.modaTaxa(semMora.length ? semMora : positivas);
-    }
-    if (taxas.length) return 0;
-    const header = this.taxaMensalPct(contract && (contract.interestPercentage != null ? contract.interestPercentage : contract.interestRate));
-    return header != null ? header : 0;
+    const positivas = taxas.filter((n) => n > 0.0000001);
+    if (!positivas.length) return 0;
+    const semMora = positivas.filter((n) => Math.abs(n - 1) > 0.05);
+    return this.modaTaxa(semMora.length ? semMora : positivas);
   },
 
   indiceDoContrato(conds, installments) {
@@ -1738,7 +1750,7 @@ const CessaoPopup = {
         </div>
         <button type="button" class="btn btn-outline cessao-cond-add" onclick="CessaoPopup.addCond()"><i data-lucide="plus" style="width:14px;height:14px;"></i> Adicionar condição</button>
         <div class="cessao-contrato-dados">
-        ${this.campoContrato("Juros ao mês (%)", this.fmtPct(st.juros))}
+        ${this.campoContrato("Juros ao mês (%)", this.fmtJuros(st.juros))}
         ${this.campoContrato("Indexador", st.indexador || "REAL")}
         ${this.campoContrato("Parcelas já pagas", String(st.qtdPagas || 0))}
         ${this.campoContrato("Parcelas a pagar", String(st.qtdAbertas || 0))}
@@ -2384,7 +2396,7 @@ const CessaoPopup = {
     const divida = Number.isFinite(presente) ? presente : (Number(CessaoPopupState.saldoAberto) || 0);
     if (juros <= 0.000001) return "1.3. O contrato não possui juros de parcelamento.";
     if (divida <= 0.009) return "1.3. O contrato está quitado.";
-    return "1.3. O contrato possui juros de parcelamento de " + this.fmtPct(juros) + "% ao mês.";
+    return "1.3. O contrato possui juros de parcelamento de " + this.fmtJuros(juros) + "% ao mês.";
   },
 
   clausulaPagas() {
