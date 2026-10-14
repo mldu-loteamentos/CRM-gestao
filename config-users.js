@@ -383,6 +383,7 @@ const ConfigUsersApp = {
             { id: "investimento", label: "Aplicações e Investimentos" },
             { id: "fluxo_caixa", label: "Fluxo de caixa (DFC)" },
             { id: "fluxo_caixa_diario", label: "Fluxo de caixa diário" },
+            { id: "mutuo", label: "Mútuo" },
             { id: "resultado_caixa", label: "Resultado de caixa" }
           ]
         },

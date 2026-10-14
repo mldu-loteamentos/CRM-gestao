@@ -3271,6 +3271,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "prestacao-contas": "Nova prestação",
     "fluxo-caixa": "Fluxo de caixa (DFC)",
     "fluxo-caixa-diario": "Fluxo de caixa diário",
+    mutuo: "Mútuo",
     "relatorios-cr": "Relatórios",
     "resultado-caixa": "Resultado de caixa",
     "investimento": "Aplicações e Investimentos",
@@ -3346,6 +3347,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "prestacao-contas": "receipt",
     "fluxo-caixa": "git-branch",
     "fluxo-caixa-diario": "calendar-clock",
+    mutuo: "handshake",
     "relatorios-cr": "file-bar-chart",
     "resultado-caixa": "scale",
     "investimento": "trending-up",
@@ -3517,6 +3519,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (typeof OrcamentoApp !== "undefined") OrcamentoApp.init();
   } else if (tabId === "fluxo-caixa-diario") {
     if (typeof FluxoCaixaDiarioApp !== "undefined") FluxoCaixaDiarioApp.init();
+  } else if (tabId === "mutuo") {
+    if (typeof MutuoApp !== "undefined") MutuoApp.init();
   } else if (tabId === "resultado-caixa") {
     if (typeof ResultadoCaixaApp !== "undefined") ResultadoCaixaApp.init();
   } else if (tabId === "investimento") {

@@ -459,6 +459,7 @@ const FluxoCaixaDiarioApp = {
   },
 
   accountIncluded(a) {
+    if (a && a.tipo === "mutuo") return false;
     return !this.accountBlocked(a) && this.flags[this.accountKey(a)] !== false;
   },
 
@@ -501,10 +502,15 @@ const FluxoCaixaDiarioApp = {
           const typeId = String((type && typeof type === "object" ? type.id : raw.accountTypeId) || "").trim().toUpperCase();
           const desc = String((type && typeof type === "object" ? (type.description || type.name) : type) || raw.accountKind || "")
             .normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
-          const invest = typeId === "I" || typeId === "A" || raw.investment === true || raw.isInvestment === true || /INVEST|APLIC|POUP/.test(desc);
+          const nomeTipo = [raw.accountName, raw.name, raw.description, raw.accountDescription]
+            .map((s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase())
+            .join(" ");
+          const mutuo = typeId === "M" || /MUTUO/.test(desc) || /MUTUO/.test(nomeTipo);
+          const invest = !mutuo && (typeId === "I" || typeId === "A" || raw.investment === true || raw.isInvestment === true || /INVEST|APLIC|POUP/.test(desc));
+          const tipo = mutuo ? "mutuo" : (invest ? "investimento" : "corrente");
           [raw.accountNumber, raw.number, raw.accountName, raw.name].forEach((k) => {
             const key = this.normNum(k);
-            if (key && !map[key]) map[key] = invest ? "investimento" : "corrente";
+            if (key && !map[key]) map[key] = tipo;
           });
           const num = this.normNum(raw.accountNumber || raw.number);
           const nome = [raw.accountName, raw.name, raw.description, raw.accountDescription]
@@ -528,20 +534,23 @@ const FluxoCaixaDiarioApp = {
 
   accountTipo(types, number, name) {
     const sienge = types[this.normNum(number)] || types[this.normNum(name)] || "";
-    if (sienge === "investimento") return sienge;
+    if (sienge === "mutuo" || sienge === "investimento") return sienge;
     const txt = String(number + " " + name).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    if (/MUTUO/.test(txt)) return "mutuo";
     if (/CDB|APLIC|INVEST|FUNDO|^FI[-\s]|\bFI\b|RENDA FIXA|\bRF\b|\bLCI\b|\bLCA\b|\bRDB\b|COMPROMISS|POUP/.test(txt)) return "investimento";
     return sienge || "corrente";
   },
 
-  /** Conta do movimento: investimento ou conta corrente. Sem conta identificada, o previsto cai na corrente. */
+  /** Conta do movimento: mútuo, investimento ou conta corrente. Sem conta identificada, o previsto cai na corrente. */
   ladoConta(companyId, number) {
     if (!number) return "corrente";
     const key = this.accountKey({ companyId: companyId || "", number });
     const acc = (this.accounts || []).find((a) => this.accountKey(a) === key);
-    if (acc && acc.tipo === "investimento") return "investimento";
+    if (acc && (acc.tipo === "mutuo" || acc.tipo === "investimento")) return acc.tipo;
     const types = (this._types && this._types[String(companyId || "")]) || {};
-    return this.accountTipo(types, number, (acc && acc.name) || "") === "investimento" ? "investimento" : "corrente";
+    const tipo = this.accountTipo(types, number, (acc && acc.name) || "");
+    if (tipo === "mutuo" || tipo === "investimento") return tipo;
+    return "corrente";
   },
 
   saldoPorTipo() {
@@ -767,7 +776,8 @@ const FluxoCaixaDiarioApp = {
     for (const acc of accounts) {
       if (!typesByCo[acc.companyId]) typesByCo[acc.companyId] = await this.loadAccountTypes(acc.companyId);
       const key = this.accountKey(acc);
-      acc.tipo = this.tipos[key] || this.accountTipo(typesByCo[acc.companyId] || {}, acc.number, acc.name);
+      const detectado = this.accountTipo(typesByCo[acc.companyId] || {}, acc.number, acc.name);
+      acc.tipo = detectado === "mutuo" ? "mutuo" : (this.tipos[key] || detectado);
       const bank = this.bankInfo(acc.companyId, acc.number);
       acc.banco = bank.bancoLabel || "";
       acc.agencia = bank.agencia || "";
@@ -1133,6 +1143,7 @@ const FluxoCaixaDiarioApp = {
     this.movs.forEach((m) => {
       const day = byDay[m.date];
       if (!day || !day.real) return;
+      if (m.conta && this.ladoConta(m.companyId, m.conta) === "mutuo") return;
       if (m.conta) {
         const key = this.accountKey({ companyId: m.companyId, number: m.conta });
         const acc = accByKey[key];
@@ -1164,7 +1175,9 @@ const FluxoCaixaDiarioApp = {
       const fora = (p.shares || []).reduce((s, x) => s + (excl.has(x.cc) ? x.share : 0), 0);
       const v = p.valor * (1 - fora);
       if (v < 0.005) return;
-      const inv = this.ladoConta(p.companyId, p.conta) === "investimento";
+      const lado = this.ladoConta(p.companyId, p.conta);
+      if (lado === "mutuo") return;
+      const inv = lado === "investimento";
       day.pagar += v;
       lanca(day, v, inv, true);
       const item = fora > 0 ? Object.assign({}, p, { valor: v }) : p;
@@ -1668,7 +1681,8 @@ const FluxoCaixaDiarioApp = {
       { id: "investimento", name: "Investimento", rows: [], total: 0, marcado: 0, ligadas: 0 }
     ];
     (this.accounts || []).forEach((a) => {
-      if (!a || (Math.abs(Number(a.amount) || 0) < 0.005 && Math.abs(Number(a.opening) || 0) < 0.005)) return;
+      if (!a || a.tipo === "mutuo") return;
+      if ((Math.abs(Number(a.amount) || 0) < 0.005 && Math.abs(Number(a.opening) || 0) < 0.005)) return;
       const g = a.tipo === "investimento" ? tipos[1] : tipos[0];
       const v = Number(a.amount) || 0;
       g.rows.push(a);

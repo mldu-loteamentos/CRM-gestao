@@ -9698,3 +9698,24 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .rcx-ml-tit { margin: 8px 0; font-size: 0.92rem; color: #105436; }
 .rcx-ml-checks { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-bottom: 8px; }
 .rcx-ml-conta { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; color: #0f172a; }
+
+.mut-page { display: flex; flex-direction: column; gap: 14px; }
+.mut-nota { margin: 0; color: #64748b; font-size: 0.86rem; }
+.mut-erro { margin: 0; color: #b91c1c; font-weight: 650; }
+.mut-vazio { margin: 0; color: #64748b; }
+.mut-kpis { display: flex; flex-wrap: wrap; gap: 10px; }
+.mut-kpis > div { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px 14px; min-width: 140px; }
+.mut-kpis span { display: block; color: #64748b; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; }
+.mut-kpis strong { font-size: 1.05rem; color: #0f172a; }
+.mut-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 14px; }
+.mut-card header { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 8px; }
+.mut-card header strong { display: block; color: #105436; }
+.mut-card header span { color: #64748b; font-size: 0.78rem; }
+.mut-card header b { font-size: 1rem; }
+.mut-card h3 { margin: 14px 0 6px; font-size: 0.78rem; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
+.mut-tab { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+.mut-tab th { text-align: left; color: #105436; font-size: 0.75rem; padding: 6px 8px; border-bottom: 1px solid #e2e8f0; }
+.mut-tab td { padding: 7px 8px; border-bottom: 1px solid #f1f5f9; color: #0f172a; }
+.mut-tab td:last-child, .mut-tab th:last-child { text-align: right; }
+.mut-movs { max-height: 320px; overflow: auto; }
+.mut-neg { color: #c2410c; font-weight: 700; }
