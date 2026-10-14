@@ -342,16 +342,19 @@ window.MutuoApp = {
         ${corpo}
       </section>`;
     }).join("");
-    root.innerHTML = `<div class="mut-page">
-      <p class="mut-nota">Saldo de hoje das contas de mútuo das empresas geridas pelo grupo. Essas contas não entram no fluxo de caixa diário. Abra a empresa para ver as contas e o movimento de ${this.esc(this.mesLabel())}.</p>
-      ${filtro}
-      ${this.error ? `<p class="mut-erro">${this.esc(this.error)}</p>` : ""}
-      ${carga}
-      ${this.grupos.length ? `<div class="mut-kpis">
+    const kpis = this.grupos.length ? `<div class="mut-kpis">
         <div><span>Saldo de mútuo</span><strong class="${total < 0 ? "mut-neg" : ""}">${this.money(total)}</strong></div>
         <div><span>Empresas</span><strong>${this.grupos.length}</strong></div>
         <div><span>Contas</span><strong>${nContas}</strong></div>
-      </div>` : ""}
+      </div>` : "";
+    root.innerHTML = `<div class="mut-page">
+      <p class="mut-nota">Saldo de hoje das contas de mútuo das empresas geridas pelo grupo. Essas contas não entram no fluxo de caixa diário. Abra a empresa para ver as contas e o movimento de ${this.esc(this.mesLabel())}.</p>
+      <div class="mut-tools">
+        ${filtro}
+        ${kpis}
+      </div>
+      ${this.error ? `<p class="mut-erro">${this.esc(this.error)}</p>` : ""}
+      ${carga}
       ${vazio}
       ${cards ? `<div class="mut-grupo">${cards}</div>` : ""}
     </div>`;

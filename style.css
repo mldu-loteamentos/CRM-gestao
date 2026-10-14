@@ -9699,11 +9699,13 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .rcx-ml-checks { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-bottom: 8px; }
 .rcx-ml-conta { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; color: #0f172a; }
 
-.mut-page { display: flex; flex-direction: column; gap: 14px; }
+.mut-page { display: flex; flex-direction: column; gap: 12px; }
 .mut-nota { margin: 0; color: #64748b; font-size: 0.86rem; }
+.mut-tools { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.mut-page .ml-emp-filter { flex: 0 0 320px; width: 320px; max-width: 360px; height: auto; align-self: flex-end; }
 .mut-erro { margin: 0; color: #b91c1c; font-weight: 650; }
 .mut-vazio { margin: 0; color: #64748b; }
-.mut-kpis { display: flex; flex-wrap: wrap; gap: 10px; }
+.mut-kpis { display: flex; flex-wrap: wrap; gap: 10px; margin-left: auto; }
 .mut-kpis > div { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px 14px; min-width: 140px; }
 .mut-kpis span { display: block; color: #64748b; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; }
 .mut-kpis strong { font-size: 1.05rem; color: #0f172a; }
