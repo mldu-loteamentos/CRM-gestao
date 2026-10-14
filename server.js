@@ -857,19 +857,19 @@ Sua resposta deve conter APENAS o nome da tag, sem pontuação, aspas ou texto e
       // Rota para baixar/visualizar PDF do Sienge com nome customizado
       // --- PARTICIPAÇÕES / PRESTAÇÃO ELLENCO ---
       if (pathRoute === '/api/participacoes/companies' && req.method === 'GET') {
-        const part = require('./api/participacoes-fs');
+        const part = require('./api/_lib/participacoes-fs');
         const data = part.listCompanyFolders(__dirname);
         return sendJson(res, 200, data);
       }
       if (pathRoute === '/api/participacoes/files' && req.method === 'GET') {
-        const part = require('./api/participacoes-fs');
+        const part = require('./api/_lib/participacoes-fs');
         const u = new URL(req.url, 'http://localhost');
         const companyId = u.searchParams.get('companyId');
         if (!companyId) return sendJson(res, 400, { error: 'companyId obrigatório' });
         return sendJson(res, 200, part.listPdfFiles(__dirname, companyId));
       }
       if (pathRoute === '/api/participacoes/file' && req.method === 'GET') {
-        const part = require('./api/participacoes-fs');
+        const part = require('./api/_lib/participacoes-fs');
         const u = new URL(req.url, 'http://localhost');
         try {
           const { full } = part.filePath(__dirname, u.searchParams.get('companyId'), u.searchParams.get('file'));
@@ -887,7 +887,7 @@ Sua resposta deve conter APENAS o nome da tag, sem pontuação, aspas ou texto e
         return;
       }
       if (pathRoute === '/api/participacoes/upload' && req.method === 'POST') {
-        const part = require('./api/participacoes-fs');
+        const part = require('./api/_lib/participacoes-fs');
         try {
           const mp = await part.parseMultipart(req);
           const companyId = (mp.fields && mp.fields.companyId) || '';
@@ -902,22 +902,22 @@ Sua resposta deve conter APENAS o nome da tag, sem pontuação, aspas ou texto e
       }
 
       if (pathRoute === '/api/bcb-sgs' && req.method === 'GET') {
-        const handler = require('./api/bcb-sgs');
+        const handler = require('./api/_lib/bcb-sgs');
         return handler(req, res);
       }
 
       if (pathRoute === '/api/controle-comissao' && req.method === 'GET') {
-        const handler = require('./api/controle-comissao');
+        const handler = require('./api/_lib/controle-comissao');
         return handler(req, res);
       }
 
       if (pathRoute.startsWith('/api/cvcrm-proxy')) {
-        const handler = require('./api/cvcrm-proxy');
+        const handler = require('./api/_lib/cvcrm-proxy');
         return handler(req, res);
       }
 
       if (pathRoute.startsWith('/api/scod-proxy')) {
-        const handler = require('./api/scod-proxy');
+        const handler = require('./api/_lib/scod-proxy');
         return handler(req, res);
       }
 

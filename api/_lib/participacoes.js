@@ -5,7 +5,7 @@ const part = require("./participacoes-fs");
 module.exports.config = { api: { bodyParser: false } };
 
 function projectDir() {
-  return path.join(__dirname, "..");
+  return path.join(__dirname, "..", "..");
 }
 
 function sendJson(res, status, data) {

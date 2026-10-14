@@ -2,8 +2,8 @@ const { initializeApp } = require("firebase/app");
 const {
   getFirestore, doc, setDoc, getDoc, deleteDoc
 } = require("firebase/firestore");
-const { isBusinessDaySP, todayIsoSP } = require("../lib/br-calendar");
-const caucaoHandler = require("../lib/caucao-batimento");
+const { isBusinessDaySP, todayIsoSP } = require("../../lib/br-calendar");
+const caucaoHandler = require("../../lib/caucao-batimento");
 
 const SIENGE_DOMAIN = "mouraleite";
 const SIENGE_USER = "mouraleite-contas-a-pagar";

@@ -4,7 +4,7 @@ const {
   stripCrmProfileHeader,
   takeSiengeSlot,
   sendSiengeQueueBusy
-} = require('../lib/api-request-queue');
+} = require('../../lib/api-request-queue');
 
 // Desabilitar o bodyParser da Vercel para suportar envio de binários (multipart/form-data)
 module.exports.config = {

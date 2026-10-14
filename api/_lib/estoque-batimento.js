@@ -2,8 +2,8 @@ const { initializeApp } = require("firebase/app");
 const {
   getFirestore, doc, setDoc, getDoc, getDocs, collection, deleteDoc
 } = require("firebase/firestore");
-const { isBusinessDaySP, todayIsoSP } = require("../lib/br-calendar");
-const { slimCaixaRow, isFinanceLike } = require("../lib/caixa-snapshot");
+const { isBusinessDaySP, todayIsoSP } = require("../../lib/br-calendar");
+const { slimCaixaRow, isFinanceLike } = require("../../lib/caixa-snapshot");
 const {
   isFinanceUnit,
   isSettledUnit,
@@ -14,7 +14,7 @@ const {
   stampInadimplenteFromFila,
   filaOverdueForUnit,
   needsCensus
-} = require("../lib/estoque-batimento-core");
+} = require("../../lib/estoque-batimento-core");
 
 const SIENGE_DOMAIN = "mouraleite";
 const SIENGE_USER = "mouraleite-contas-a-pagar";

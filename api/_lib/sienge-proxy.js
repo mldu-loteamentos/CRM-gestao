@@ -4,7 +4,7 @@ const {
   stripCrmProfileHeader,
   takeSiengeSlot,
   sendSiengeQueueBusy
-} = require('../lib/api-request-queue');
+} = require('../../lib/api-request-queue');
 
 function encodeLatin1Query(str) {
   let out = '';
