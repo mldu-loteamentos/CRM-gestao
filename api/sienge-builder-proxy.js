@@ -1,4 +1,10 @@
 const https = require('https');
+const {
+  CORS_ALLOW_HEADERS,
+  stripCrmProfileHeader,
+  takeSiengeSlot,
+  sendSiengeQueueBusy
+} = require('../lib/api-request-queue');
 
 // Desabilitar o bodyParser da Vercel para suportar envio de binários (multipart/form-data)
 module.exports.config = {
@@ -7,7 +13,7 @@ module.exports.config = {
   },
 };
 
-module.exports = function handler(req, res) {
+module.exports = async function handler(req, res) {
   const SIENGE_HOST = 'api.sienge.com.br';
   const SIENGE_BUILDER_PATH_PREFIX = '/mouraleite/builder/api/v1';
 
@@ -15,7 +21,7 @@ module.exports = function handler(req, res) {
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Headers', CORS_ALLOW_HEADERS);
     return res.status(204).end();
   }
 
@@ -26,6 +32,15 @@ module.exports = function handler(req, res) {
   delete proxyHeaders.referer;
   delete proxyHeaders.host;
   delete proxyHeaders.connection;
+  stripCrmProfileHeader(proxyHeaders);
+
+  let releaseSlot = function() {};
+  try {
+    releaseSlot = await takeSiengeSlot(req, res);
+  } catch (e) {
+    if (!e || e.status === 499) return;
+    return sendSiengeQueueBusy(res);
+  }
 
   const options = {
     hostname: SIENGE_HOST,
@@ -37,6 +52,9 @@ module.exports = function handler(req, res) {
       host: SIENGE_HOST
     }
   };
+
+  delete options.headers.host;
+  delete options.headers.connection;
 
   const proxyReq = https.request(options, (proxyRes) => {
     // Tratar redirecionamento (caso aplicável na API Builder)
@@ -57,7 +75,7 @@ module.exports = function handler(req, res) {
     const headers = { ...proxyRes.headers };
     headers['access-control-allow-origin'] = '*';
     headers['access-control-allow-methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
-    headers['access-control-allow-headers'] = 'Content-Type, Authorization';
+    headers['access-control-allow-headers'] = CORS_ALLOW_HEADERS;
     
     delete headers['Access-Control-Allow-Origin'];
     delete headers['Access-Control-Allow-Methods'];
@@ -70,7 +88,10 @@ module.exports = function handler(req, res) {
 
   proxyReq.on('error', (err) => {
     console.error('Erro no upload proxy Sienge Builder Vercel:', err);
-    res.status(500).json({ error: 'Falha ao conectar', details: err.message });
+    releaseSlot();
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Falha ao conectar', details: err.message });
+    }
   });
 
   // Repassar stream do arquivo

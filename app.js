@@ -55,6 +55,65 @@ window.persistLargeCacheIfRoom = function(key, value) {
 };
 
 (function() {
+  let crmReadingProfile = false;
+
+  function crmApiProfileHeader() {
+    if (crmReadingProfile) return "";
+    crmReadingProfile = true;
+    try {
+      const u = (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo())
+        || (typeof window.crmUsuarioAcesso === "function" && window.crmUsuarioAcesso())
+        || (window.AppState && window.AppState.currentUser)
+        || null;
+      const name = u && (u.profile_name || u.profile || "");
+      return String(name || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^\x20-\x7E]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 120);
+    } catch (e) {
+      return "";
+    } finally {
+      crmReadingProfile = false;
+    }
+  }
+
+  function crmRequestUrl(input) {
+    if (!input) return "";
+    if (typeof input === "string") return input;
+    if (typeof URL !== "undefined" && input instanceof URL) return String(input.href || "");
+    if (typeof input.url === "string") return input.url;
+    return "";
+  }
+
+  function crmIsSiengeProxyUrl(url) {
+    return /sienge-proxy|sienge-builder-proxy/i.test(String(url || ""));
+  }
+
+  function crmStampApiProfile(args) {
+    const url = crmRequestUrl(args[0]);
+    if (!crmIsSiengeProxyUrl(url)) return;
+    const profile = crmApiProfileHeader();
+    if (!profile) return;
+    const init = (args[1] && typeof args[1] === "object") ? args[1] : {};
+    let headers;
+    try {
+      headers = new Headers(init.headers || undefined);
+      if (!init.headers && args[0] && typeof args[0] !== "string" && args[0].headers && typeof args[0].headers.forEach === "function") {
+        args[0].headers.forEach(function(value, key) {
+          if (!headers.has(key)) headers.set(key, value);
+        });
+      }
+      headers.set("X-Crm-Profile", profile);
+    } catch (e) {
+      return;
+    }
+    init.headers = headers;
+    args[1] = init;
+  }
+
   const _origFetch = window.fetch;
   window.fetch = async function() {
     var args = Array.prototype.slice.call(arguments);
@@ -68,8 +127,27 @@ window.persistLargeCacheIfRoom = function(key, value) {
         if (args[0].startsWith('/sienge-proxy')) args[0] = '/api' + args[0];
       }
     }
+    try { crmStampApiProfile(args); } catch (e) {}
     return _origFetch.apply(this, args);
   };
+
+  if (typeof XMLHttpRequest !== "undefined") {
+    const _xhrOpen = XMLHttpRequest.prototype.open;
+    const _xhrSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.open = function(method, url) {
+      try { this._crmApiUrl = url; } catch (e) {}
+      return _xhrOpen.apply(this, arguments);
+    };
+    XMLHttpRequest.prototype.send = function() {
+      try {
+        if (crmIsSiengeProxyUrl(this._crmApiUrl)) {
+          const profile = crmApiProfileHeader();
+          if (profile) this.setRequestHeader("X-Crm-Profile", profile);
+        }
+      } catch (e) {}
+      return _xhrSend.apply(this, arguments);
+    };
+  }
 })();
 
 (function installMouraDialogs() {

@@ -1,4 +1,10 @@
 const https = require('https');
+const {
+  CORS_ALLOW_HEADERS,
+  stripCrmProfileHeader,
+  takeSiengeSlot,
+  sendSiengeQueueBusy
+} = require('../lib/api-request-queue');
 
 function encodeLatin1Query(str) {
   let out = '';
@@ -63,7 +69,7 @@ module.exports = async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Headers', CORS_ALLOW_HEADERS);
     return res.status(204).end();
   }
 
@@ -87,11 +93,20 @@ module.exports = async function handler(req, res) {
   delete proxyHeaders['Transfer-Encoding'];
   delete proxyHeaders['accept-encoding'];
   delete proxyHeaders['content-encoding'];
+  stripCrmProfileHeader(proxyHeaders);
 
   const method = (req.method || 'GET').toUpperCase();
   const body = (method === 'GET' || method === 'HEAD') ? Buffer.alloc(0) : await collectRawBody(req);
   if (body.length) {
     proxyHeaders['content-length'] = String(body.length);
+  }
+
+  let releaseSlot = function() {};
+  try {
+    releaseSlot = await takeSiengeSlot(req, res);
+  } catch (e) {
+    if (!e || e.status === 499) return;
+    return sendSiengeQueueBusy(res);
   }
 
   const options = {
@@ -124,7 +139,7 @@ module.exports = async function handler(req, res) {
     const headers = { ...proxyRes.headers };
     headers['access-control-allow-origin'] = '*';
     headers['access-control-allow-methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
-    headers['access-control-allow-headers'] = 'Content-Type, Authorization';
+    headers['access-control-allow-headers'] = CORS_ALLOW_HEADERS;
     headers['access-control-expose-headers'] = 'Location, location, X-Pagination-Total-Count';
     
     // Cleanup uppercase duplicate headers that Node might combine awkwardly
@@ -140,7 +155,10 @@ module.exports = async function handler(req, res) {
 
   proxyReq.on('error', (err) => {
     console.error('Erro no proxy de conexão Sienge Vercel:', err);
-    res.status(500).json({ error: 'Falha ao conectar ao servidor Sienge', details: err.message });
+    releaseSlot();
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Falha ao conectar ao servidor Sienge', details: err.message });
+    }
   });
 
   if (body.length) proxyReq.write(body);

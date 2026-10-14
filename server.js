@@ -10,6 +10,13 @@ const { exec } = require('child_process');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
 const siengeScraper = require('./siengeScraper');
+const {
+  CORS_ALLOW_HEADERS,
+  stripCrmProfileHeader,
+  takeSiengeSlot,
+  sendSiengeQueueBusy,
+  writeSiengePreflight
+} = require('./lib/api-request-queue');
 require('dotenv').config();
 
 // Se o DB falhar ao inicializar, podemos ignorar erro para não travar o proxy original
@@ -57,7 +64,7 @@ function sendJson(res, statusCode, data) {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+    'Access-Control-Allow-Headers': CORS_ALLOW_HEADERS
   });
   res.end(JSON.stringify(data));
 }
@@ -124,6 +131,10 @@ const server = http.createServer(async (req, res) => {
 
   // 1. ROTA DE PROXY PARA O SIENGE ERP
   if (req.url.startsWith('/sienge-proxy/')) {
+    if ((req.method || '').toUpperCase() === 'OPTIONS') {
+      writeSiengePreflight(res);
+      return;
+    }
     let targetPath;
     if (req.url.startsWith('/sienge-proxy/bulk-data/')) {
       targetPath = '/mouraleite/public/api' + req.url.replace('/sienge-proxy', '');
@@ -135,6 +146,16 @@ const server = http.createServer(async (req, res) => {
     const proxyHeaders = { ...req.headers };
     delete proxyHeaders.origin;
     delete proxyHeaders.referer;
+    stripCrmProfileHeader(proxyHeaders);
+
+    let releaseSlot = function() {};
+    try {
+      releaseSlot = await takeSiengeSlot(req, res);
+    } catch (e) {
+      if (!e || e.status === 499) return;
+      sendSiengeQueueBusy(res);
+      return;
+    }
     
     const options = {
       hostname: SIENGE_HOST,
@@ -172,7 +193,7 @@ const server = http.createServer(async (req, res) => {
       const headers = { ...proxyRes.headers };
       headers['access-control-allow-origin'] = '*';
       headers['access-control-allow-methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
-      headers['access-control-allow-headers'] = 'Content-Type, Authorization';
+      headers['access-control-allow-headers'] = CORS_ALLOW_HEADERS;
       headers['access-control-expose-headers'] = 'Location, location, X-Pagination-Total-Count';
       
       // Remove any uppercase versions to avoid Node.js combining them into '*, *'
@@ -197,6 +218,8 @@ const server = http.createServer(async (req, res) => {
 
     proxyReq.on('error', (err) => {
       console.error('Erro no proxy de conexão Sienge:', err);
+      releaseSlot();
+      if (res.headersSent) return;
       res.writeHead(500, { 
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*'
@@ -210,7 +233,26 @@ const server = http.createServer(async (req, res) => {
 
   // 1.5 ROTA DE PROXY PARA UPLOAD SIENGE BUILDER API
   if (req.url.startsWith('/sienge-builder-proxy/')) {
+    if ((req.method || '').toUpperCase() === 'OPTIONS') {
+      writeSiengePreflight(res);
+      return;
+    }
     const targetPath = '/mouraleite/builder/api/v1' + req.url.replace('/sienge-builder-proxy', '');
+    const proxyHeaders = { ...req.headers };
+    delete proxyHeaders.host;
+    delete proxyHeaders.connection;
+    delete proxyHeaders.origin;
+    delete proxyHeaders.referer;
+    stripCrmProfileHeader(proxyHeaders);
+
+    let releaseSlot = function() {};
+    try {
+      releaseSlot = await takeSiengeSlot(req, res);
+    } catch (e) {
+      if (!e || e.status === 499) return;
+      sendSiengeQueueBusy(res);
+      return;
+    }
     
     const options = {
       hostname: SIENGE_HOST,
@@ -218,13 +260,12 @@ const server = http.createServer(async (req, res) => {
       path: targetPath,
       method: req.method,
       headers: {
-        ...req.headers,
+        ...proxyHeaders,
         host: SIENGE_HOST,
         'Authorization': req.headers['authorization'] || ''
       }
     };
     
-    // Opcionalmente podemos remover os headers do host original pra não dar conflito
     delete options.headers.host;
     delete options.headers.connection;
 
@@ -232,7 +273,7 @@ const server = http.createServer(async (req, res) => {
       const headers = { ...proxyRes.headers };
       headers['access-control-allow-origin'] = '*';
       headers['access-control-allow-methods'] = 'GET, POST, OPTIONS';
-      headers['access-control-allow-headers'] = 'Content-Type, Authorization';
+      headers['access-control-allow-headers'] = CORS_ALLOW_HEADERS;
       
       delete headers['Access-Control-Allow-Origin'];
       delete headers['Access-Control-Allow-Methods'];
@@ -244,7 +285,8 @@ const server = http.createServer(async (req, res) => {
 
     proxyReq.on('error', (err) => {
       console.error('Erro no upload proxy Sienge:', err);
-      sendJson(res, 500, { error: 'Falha ao conectar', details: err.message });
+      releaseSlot();
+      if (!res.headersSent) sendJson(res, 500, { error: 'Falha ao conectar', details: err.message });
     });
 
     req.pipe(proxyReq);
@@ -258,7 +300,7 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(204, {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+        'Access-Control-Allow-Headers': CORS_ALLOW_HEADERS
       });
       res.end();
       return;
@@ -921,7 +963,7 @@ Sua resposta deve conter APENAS o nome da tag, sem pontuação, aspas ou texto e
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+      'Access-Control-Allow-Headers': CORS_ALLOW_HEADERS
     });
     res.end();
     return;
