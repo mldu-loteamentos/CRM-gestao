@@ -5602,12 +5602,25 @@ window.applyPermissions = function(profileName) {
 }
 
 window.getCrmUsersList = function() {
-  let users = [];
-  try { users = JSON.parse(localStorage.getItem("crm_users") || "[]") || []; } catch (e) { users = []; }
-  if ((!users || !users.length) && window.ConfigUsersApp && Array.isArray(ConfigUsersApp.users)) {
-    users = ConfigUsersApp.users;
-  }
-  return Array.isArray(users) ? users : [];
+  let stored = [];
+  try { stored = JSON.parse(localStorage.getItem("crm_users") || "[]") || []; } catch (e) { stored = []; }
+  if (!Array.isArray(stored)) stored = [];
+  const live = (window.ConfigUsersApp && Array.isArray(window.ConfigUsersApp.users))
+    ? window.ConfigUsersApp.users.filter(Boolean)
+    : [];
+  if (!live.length) return stored;
+  if (!stored.length) return live.slice();
+  const byKey = new Map();
+  const put = (u) => {
+    if (!u) return;
+    const email = String(u.email || "").toLowerCase().trim();
+    const key = email || ("id:" + String(u.id || ""));
+    if (!key || key === "id:") return;
+    byKey.set(key, u);
+  };
+  stored.forEach(put);
+  live.forEach(put);
+  return Array.from(byKey.values());
 };
 
 window.isCrmAdminProfileName = function(name) {
@@ -5779,8 +5792,8 @@ window.crmPintarTesteConta = function() {
   const q = String(menu.dataset.q || "").trim().toLowerCase();
   const eu = String((AppState.currentUser && AppState.currentUser.email) || "").toLowerCase();
   const lista = window.getCrmUsersList().filter((u) => {
-    if (!u || String(u.status || "ATIVO").toUpperCase() !== "ATIVO") return false;
-    if (String(u.email || "").toLowerCase() === eu) return false;
+    if (!u || String(u.status || "ATIVO").trim().toUpperCase() !== "ATIVO") return false;
+    if (String(u.email || "").toLowerCase().trim() === eu) return false;
     const blob = (String(u.name || "") + " " + String(u.email || "") + " " + String(u.profile_name || "")).toLowerCase();
     return !q || blob.indexOf(q) >= 0;
   }).sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "pt-BR"));

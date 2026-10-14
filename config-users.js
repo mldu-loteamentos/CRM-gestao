@@ -1687,6 +1687,7 @@ const ConfigUsersApp = {
       const overlay = document.getElementById('user-modal-overlay');
       if (overlay) overlay.remove();
       this.render();
+      if (typeof window.crmPintarTesteConta === "function") window.crmPintarTesteConta();
       } catch (e) {
           console.error("[ConfigUsers] save", e);
           alert("Não foi possível salvar o usuário no Firebase. " + (e && e.message ? e.message : "Tente de novo."));
