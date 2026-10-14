@@ -1940,71 +1940,149 @@ const MarketingBudgetApp = {
       slide.addText(titulo, { x: 0.46, y: 0.24, w: 7.2, h: 0.32, fontFace: "Calibri", fontSize: 18, bold: true, color: "FFFFFF", margin: 0 });
       slide.addText(nome + "   ·   " + periodo, { x: 0.46, y: 0.52, w: 12.3, h: 0.26, fontFace: "Calibri", fontSize: 12, color: "D1FAE5", margin: 0 });
     };
-    const secao = (slide, texto, y) => {
-      slide.addText(texto, { x: 0.32, y: y, w: 12.4, h: 0.28, fontFace: "Calibri", fontSize: 14, bold: true, color: "105436", margin: 0 });
-    };
-    const cards = (slide, y, h, itens) => {
-      const x0 = 0.28;
-      const largura = 12.77;
+    const kpis = (slide, itens) => {
+      const y = 0.98;
+      const h = 1.08;
       const gap = 0.12;
-      const w = (largura - gap * (itens.length - 1)) / itens.length;
-      itens.forEach((it, i) => {
-        const x = x0 + i * (w + gap);
+      const lista = itens.slice(0, 4);
+      const w = (12.77 - gap * (lista.length - 1)) / lista.length;
+      lista.forEach((it, i) => {
+        const x = 0.28 + i * (w + gap);
         slide.addShape("roundRect", { x: x, y: y, w: w, h: h, fill: { color: "FFFFFF" }, line: { color: "E2E8F0", pt: 1 }, rectRadius: 0.06 });
-        slide.addShape("rect", { x: x, y: y, w: w, h: 0.07, fill: { color: it.cor } });
-        slide.addText(it.rotulo.toUpperCase(), { x: x + 0.12, y: y + 0.14, w: w - 0.24, h: 0.28, fontFace: "Calibri", fontSize: 10, bold: true, color: "64748B", margin: 0 });
-        slide.addText(it.valor, { x: x + 0.12, y: y + 0.42, w: w - 0.24, h: 0.42, fontFace: "Calibri", fontSize: 20, bold: true, color: "0F172A", margin: 0 });
-        slide.addText(it.nota, { x: x + 0.12, y: y + 0.88, w: w - 0.24, h: h - 1.02, fontFace: "Calibri", fontSize: 11, color: "64748B", margin: 0 });
+        slide.addShape("rect", { x: x, y: y, w: w, h: 0.06, fill: { color: it.cor } });
+        slide.addText(String(it.rotulo || "").toUpperCase(), { x: x + 0.12, y: y + 0.12, w: w - 0.24, h: 0.22, fontFace: "Calibri", fontSize: 10, bold: true, color: "64748B", margin: 0 });
+        slide.addText(String(it.valor || "—"), { x: x + 0.12, y: y + 0.34, w: w - 0.24, h: 0.36, fontFace: "Calibri", fontSize: 18, bold: true, color: "0F172A", margin: 0 });
+        slide.addText(String(it.nota || ""), { x: x + 0.12, y: y + 0.72, w: w - 0.24, h: 0.28, fontFace: "Calibri", fontSize: 10, color: "64748B", margin: 0 });
       });
     };
-    const s1 = pptx.addSlide();
-    faixa(s1, "Budget");
-    secao(s1, "De onde vem a verba", 1.08);
-    cards(s1, 1.4, 1.55, [
-      { rotulo: "VGV do empreendimento", valor: vgv > 0 ? self.money(vgv) : "—", nota: "Base da verba de marketing", cor: "105436" },
-      { rotulo: "% do VGV para marketing", valor: s.pct > 0 ? pctTxt : "—", nota: "Percentual definido na configuração", cor: "105436" },
-      { rotulo: "Verba de marketing", valor: self.money(r.verba), nota: "VGV × " + pctTxt, cor: "105436" }
-    ]);
-    secao(s1, "Uso da verba", 3.14);
-    cards(s1, 3.46, 1.7, [
-      { rotulo: "Realizado", valor: self.money(r.realizado), nota: "Baixas do período, pelo líquido mais os impostos retidos", cor: "105436" },
-      { rotulo: "Comprometido", valor: self.money(r.comprometido), nota: "Em aberto e previsão, ainda não pagos", cor: "F37021" },
-      { rotulo: "Saldo da verba", valor: self.money(r.saldo), nota: r.saldo < 0 ? "A verba já foi ultrapassada" : "O que ainda cabe na verba", cor: r.saldo < 0 ? "B91C1C" : "0EA5E9" },
-      { rotulo: "Consumo da verba", valor: consumo, nota: "Pago + comprometido, em relação à verba", cor: corConsumo }
-    ]);
-    const s2 = pptx.addSlide();
-    faixa(s2, "Budget");
-    secao(s2, "Vendas do período", 1.08);
-    cards(s2, 1.4, 1.5, [
-      { rotulo: "Unidades vendidas", valor: nTxt(r.liquidas), nota: nTxt(r.brutas) + " contratos emitidos · " + nTxt(r.distr) + " distratados", cor: "6366F1" },
-      { rotulo: "Custo por unidade vendida", valor: r.cac != null ? self.money(r.cac) : "—", nota: "Só o que já foi pago de marketing, dividido pelas unidades", cor: "105436" },
-      { rotulo: "Custo por unidade com o em aberto", valor: r.cacTotal != null ? self.money(r.cacTotal) : "—", nota: "Pago e comprometido, dividido pelas unidades vendidas", cor: "F37021" }
-    ]);
-    secao(s2, "Verba e gastos mês a mês", 3.08);
+    const tipo = pptx.ChartType || pptx.charts || {};
+    const grafico = (slide, desenho, box) => {
+      slide.addShape("roundRect", { x: box.x, y: box.y, w: box.w, h: box.h, fill: { color: "FFFFFF" }, line: { color: "E2E8F0", pt: 1 }, rectRadius: 0.06 });
+      slide.addText(box.titulo, { x: box.x + 0.16, y: box.y + 0.08, w: box.w - 0.32, h: 0.26, fontFace: "Calibri", fontSize: 13, bold: true, color: "105436", margin: 0 });
+      if (!desenho) {
+        slide.addText(box.vazio || "Sem dados neste recorte.", { x: box.x + 0.16, y: box.y + 0.5, w: box.w - 0.32, h: 0.4, fontFace: "Calibri", fontSize: 13, color: "64748B", margin: 0 });
+        return;
+      }
+      const opt = Object.assign({
+        x: box.x + 0.1, y: box.y + 0.38, w: box.w - 0.2, h: box.h - 0.5,
+        showLegend: true, legendPos: "b", legendFontSize: 10, legendFontFace: "Calibri",
+        catAxisLabelFontSize: 10, catAxisLabelFontFace: "Calibri",
+        valAxisLabelFontSize: 9, valAxisLabelFontFace: "Calibri",
+        chartArea: { fill: { color: "FFFFFF" } }, plotArea: { fill: { color: "FFFFFF" } },
+        valGridLine: { color: "E2E8F0", size: 0.5 }, catGridLine: { style: "none" }
+      }, box.opt || {});
+      if (Array.isArray(desenho)) slide.addChart(desenho, opt);
+      else slide.addChart(desenho.tipo, desenho.data, Object.assign(opt, desenho.opt || {}));
+    };
+    const nomesMes = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
     const meses = this.meses();
     const porMes = (st) => meses.map((m) => r.rows.filter((x) => x.status === st && String(x.data).slice(0, 7) === m).reduce((t, x) => t + x.valor, 0));
     const realM = porMes("realizado");
     const prevM = porMes("previsao").map((v, i) => v + porMes("previsao_vencida")[i]);
     const compM = porMes("comprometido").map((v, i) => v + prevM[i]);
-    let acc = 0;
-    const nomesMes = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
-    const cel = (texto, opt) => ({ text: texto, options: Object.assign({ align: "center", valign: "middle", fontFace: "Calibri", fontSize: meses.length > 12 ? 10 : 12 }, opt || {}) });
-    const cab = (t) => cel(t, { fill: { color: "105436" }, color: "FFFFFF", bold: true });
-    const linhasMes = [ [cab("Mês"), cab("Realizado"), cab("Comprometido"), cab("Acumulado")] ];
+    const vendM = meses.map((m) => s.vendas.filter((v) => String(v.data || "").slice(0, 7) === m).reduce((t, v) => t + (Number(v.unidades) || 0), 0));
+    const distM = meses.map((m) => s.distratos.filter((v) => String(v.dataCancel || v.data || "").slice(0, 7) === m).reduce((t, v) => t + (Number(v.unidades) || 0), 0));
+    let accGasto = 0;
+    let accReal = 0;
+    let accVenda = 0;
+    const serie = [];
     meses.forEach((m, i) => {
-      acc += realM[i] + compM[i];
-      const fundo = i % 2 ? "F8FAFC" : "FFFFFF";
-      const rot = (nomesMes[Number(m.slice(5)) - 1] || m) + "/" + m.slice(2, 4);
-      linhasMes.push([cel(rot, { fill: { color: fundo } }), cel(self.money(realM[i]), { fill: { color: fundo } }), cel(self.money(compM[i]), { fill: { color: fundo } }), cel(self.money(acc), { fill: { color: fundo } })]);
+      accGasto += realM[i] + compM[i];
+      accReal += realM[i];
+      accVenda += vendM[i] - distM[i];
+      if (accGasto <= 0.004) return;
+      serie.push({
+        rot: (nomesMes[Number(m.slice(5)) - 1] || m) + "/" + m.slice(2, 4),
+        real: realM[i], comp: compM[i], acc: accGasto,
+        vend: vendM[i], dist: distM[i], accVenda: accVenda,
+        cac: accVenda > 0 ? accReal / accVenda : null
+      });
     });
-    linhasMes.push([cab("Total"), cab(self.money(realM.reduce((t, v) => t + v, 0))), cab(self.money(compM.reduce((t, v) => t + v, 0))), cab(self.money(acc))]);
-    s2.addTable(linhasMes, { x: 0.28, y: 3.4, w: 12.77, colW: [2.2, 3.52, 3.52, 3.53], border: [{ pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }], fontFace: "Calibri", valign: "middle" });
+    const fonte = serie.length > 8 ? 10 : 11;
+    const cel = (texto, opt) => ({ text: String(texto), options: Object.assign({ align: "center", valign: "middle", fontFace: "Calibri", fontSize: fonte }, opt || {}) });
+    const cab = (t) => cel(t, { fill: { color: "105436" }, color: "FFFFFF", bold: true });
+    const s1 = pptx.addSlide();
+    faixa(s1, "Budget");
+    kpis(s1, [
+      { rotulo: "Verba de marketing", valor: self.money(r.verba), nota: vgv > 0 ? "VGV " + self.money(vgv) + " × " + pctTxt : "VGV × " + pctTxt, cor: "105436" },
+      { rotulo: "Realizado", valor: self.money(r.realizado), nota: "Baixas do período, líquido + impostos retidos", cor: "105436" },
+      { rotulo: "Comprometido", valor: self.money(r.comprometido), nota: "Em aberto e previsão, ainda não pagos", cor: "F37021" },
+      { rotulo: "Saldo da verba", valor: self.money(r.saldo), nota: "Consumo " + consumo, cor: r.saldo < 0 ? "B91C1C" : "0EA5E9" }
+    ]);
+    const n1 = serie.length;
+    const row1 = n1 ? Math.min(0.28, 3.05 / (n1 + 2)) : 0.28;
+    const hTab1 = serie.length ? row1 * (serie.length + 2) : 0;
+    const yTab1 = 7.28 - hTab1;
+    const hChart1 = Math.max(1.7, (serie.length ? yTab1 - 0.1 : 7.28) - 2.2);
+    const labels1 = serie.map((p) => p.rot);
+    const linhasVerba = serie.length ? [{ name: "Acumulado", labels: labels1, values: serie.map((p) => Math.round(p.acc)) }] : [];
+    if (r.verba > 0 && serie.length) linhasVerba.push({ name: "Verba", labels: labels1, values: labels1.map(() => Math.round(r.verba)) });
+    grafico(s1, serie.length ? [
+      { type: tipo.bar, data: [
+        { name: "Realizado", labels: labels1, values: serie.map((p) => Math.round(p.real)) },
+        { name: "Comprometido", labels: labels1, values: serie.map((p) => Math.round(p.comp)) }
+      ], options: { chartColors: ["105436", "F37021"], barGrouping: "stacked" } },
+      { type: tipo.line, data: linhasVerba, options: { chartColors: r.verba > 0 ? ["0284C7", "B91C1C"] : ["0284C7"], secondaryValAxis: true } }
+    ] : null, { x: 0.28, y: 2.2, w: 12.77, h: hChart1, titulo: "Verba mês a mês", vazio: "Nenhum mês com gasto acumulado neste período." });
+    if (serie.length) {
+      const linhasMes = [[cab("Mês"), cab("Realizado"), cab("Comprometido"), cab("Acumulado"), cab("Vendas acum."), cab("CAC mkt")]];
+      serie.forEach((p, i) => {
+        const fundo = i % 2 ? "F8FAFC" : "FFFFFF";
+        const base = { fill: { color: fundo } };
+        linhasMes.push([
+          cel(p.rot, base), cel(self.money(p.real), base), cel(self.money(p.comp), base), cel(self.money(p.acc), base),
+          cel(nTxt(p.accVenda), base), cel(p.cac != null ? self.money(p.cac) : "—", base)
+        ]);
+      });
+      const totReal = serie.reduce((t, p) => t + p.real, 0);
+      const totComp = serie.reduce((t, p) => t + p.comp, 0);
+      const fim = serie[serie.length - 1];
+      linhasMes.push([cab("Total"), cab(self.money(totReal)), cab(self.money(totComp)), cab(self.money(fim.acc)), cab(nTxt(fim.accVenda)), cab(fim.cac != null ? self.money(fim.cac) : "—")]);
+      s1.addTable(linhasMes, { x: 0.28, y: yTab1, w: 12.77, h: hTab1, colW: [1.35, 2.28, 2.28, 2.28, 2.14, 2.44], rowH: row1, border: [{ pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }], fontFace: "Calibri", valign: "middle" });
+    }
+    const s2 = pptx.addSlide();
+    faixa(s2, "Vendas");
+    kpis(s2, [
+      { rotulo: "Unidades vendidas", valor: nTxt(r.liquidas), nota: nTxt(r.brutas) + " emitidos · " + nTxt(r.distr) + " distratados", cor: "6366F1" },
+      { rotulo: "Distratos", valor: nTxt(r.distr), nota: "Unidades canceladas no período", cor: "B91C1C" },
+      { rotulo: "CAC de marketing", valor: r.cac != null ? self.money(r.cac) : "—", nota: "Realizado dividido pelas unidades vendidas", cor: "105436" },
+      { rotulo: "CAC com em aberto", valor: r.cacTotal != null ? self.money(r.cacTotal) : "—", nota: "Pago e comprometido, por unidade", cor: "F37021" }
+    ]);
+    const n2 = serie.length;
+    const row2 = n2 ? Math.min(0.28, 3.05 / (n2 + 2)) : 0.28;
+    const hTab2 = serie.length ? row2 * (serie.length + 2) : 0;
+    const yTab2 = 7.28 - hTab2;
+    const hChart2 = Math.max(1.7, (serie.length ? yTab2 - 0.1 : 7.28) - 2.2);
+    const labels2 = serie.map((p) => p.rot);
+    grafico(s2, serie.length ? [
+      { type: tipo.bar, data: [
+        { name: "Vendas", labels: labels2, values: serie.map((p) => p.vend) },
+        { name: "Distratos", labels: labels2, values: serie.map((p) => p.dist) }
+      ], options: { chartColors: ["6366F1", "F87171"], barGrouping: "clustered" } },
+      { type: tipo.line, data: [{ name: "CAC de marketing", labels: labels2, values: serie.map((p) => p.cac != null ? Math.round(p.cac) : 0) }], options: { chartColors: ["105436"], secondaryValAxis: true } }
+    ] : null, { x: 0.28, y: 2.2, w: 12.77, h: hChart2, titulo: "Vendas, distratos e CAC", vazio: "Nenhum mês com gasto acumulado neste período." });
+    if (serie.length) {
+      const linhasVenda = [[cab("Mês"), cab("Vendas"), cab("Distratos"), cab("Vendas acum."), cab("CAC mkt")]];
+      serie.forEach((p, i) => {
+        const fundo = i % 2 ? "F8FAFC" : "FFFFFF";
+        const base = { fill: { color: fundo } };
+        linhasVenda.push([cel(p.rot, base), cel(nTxt(p.vend), base), cel(nTxt(p.dist), base), cel(nTxt(p.accVenda), base), cel(p.cac != null ? self.money(p.cac) : "—", base)]);
+      });
+      const fim = serie[serie.length - 1];
+      linhasVenda.push([cab("Total"), cab(nTxt(serie.reduce((t, p) => t + p.vend, 0))), cab(nTxt(serie.reduce((t, p) => t + p.dist, 0))), cab(nTxt(fim.accVenda)), cab(fim.cac != null ? self.money(fim.cac) : "—")]);
+      s2.addTable(linhasVenda, { x: 0.28, y: yTab2, w: 12.77, h: hTab2, colW: [1.7, 2.5, 2.5, 2.9, 3.17], rowH: row2, border: [{ pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }], fontFace: "Calibri", valign: "middle" });
+    }
     const s3 = pptx.addSlide();
     faixa(s3, "Contratos");
     const adOk = s.adimpl.status === "ok" || s.adimpl.status === "vazio";
     if (!adOk) {
-      secao(s3, "Situação de pagamento", 1.2);
-      s3.addText(s.adimpl.status === "erro" ? "Não foi possível ler o Contas a Receber desta consulta." : "A situação de pagamento ainda não fechou. Espere a aba Contratos carregar e exporte de novo.", { x: 0.32, y: 1.7, w: 12, h: 0.6, fontFace: "Calibri", fontSize: 16, color: "64748B" });
+      kpis(s3, [
+        { rotulo: "Vendas líquidas", valor: nTxt(r.liquidas), nota: nTxt(r.brutas) + " vendidos · " + nTxt(r.distr) + " cancelados", cor: "6366F1" },
+        { rotulo: "Pagamentos em dia", valor: "—", nota: "Aguardando o Contas a Receber", cor: "105436" },
+        { rotulo: "Pagamentos em atraso", valor: "—", nota: "Aguardando o Contas a Receber", cor: "B91C1C" },
+        { rotulo: "Lotes disponíveis", valor: "—", nota: "Aguardando o Contas a Receber", cor: "6366F1" }
+      ]);
+      s3.addText(s.adimpl.status === "erro" ? "Não foi possível ler o Contas a Receber desta consulta." : "A situação de pagamento ainda não fechou. Espere a aba Contratos carregar e exporte de novo.", { x: 0.4, y: 2.6, w: 12, h: 0.5, fontFace: "Calibri", fontSize: 16, color: "64748B" });
     } else {
       const L = this.contratosAtivos();
       const emDia = L.filter((c) => c.pag.status === "adimplente");
@@ -2012,31 +2090,30 @@ const MarketingBudgetApp = {
       const vencido = atraso.reduce((t, c) => t + (Number(c.pag.vencido) || 0), 0);
       const lotes = this.lotesDoEmpreendimento();
       const disponiveis = lotes.total ? lotes.total - r.liquidas : null;
-      secao(s3, "Situação de pagamento", 1.05);
-      cards(s3, 1.36, 1.55, [
-        { rotulo: "Vendas líquidas", valor: nTxt(r.liquidas), nota: nTxt(r.brutas) + " vendidos · " + nTxt(r.distr) + " cancelados no período", cor: "6366F1" },
+      kpis(s3, [
+        { rotulo: "Vendas líquidas", valor: nTxt(r.liquidas), nota: nTxt(r.brutas) + " vendidos · " + nTxt(r.distr) + " cancelados", cor: "6366F1" },
         { rotulo: "Pagamentos em dia", valor: this.pct(emDia.length, L.length), nota: emDia.length + " contrato(s) sem parcela vencida", cor: "105436" },
-        { rotulo: "Pagamentos em atraso", valor: this.pct(atraso.length, L.length), nota: atraso.length + " contrato(s) · " + this.money(vencido) + " já vencido", cor: atraso.length ? "B91C1C" : "105436" },
-        { rotulo: "Lotes disponíveis", valor: disponiveis == null ? "—" : nTxt(disponiveis), nota: lotes.total ? nTxt(lotes.total) + " lotes · " + nTxt(r.liquidas) + " vendas líquidas" : "Sem lotes na posição de estoque", cor: "6366F1" }
+        { rotulo: "Pagamentos em atraso", valor: this.pct(atraso.length, L.length), nota: atraso.length + " contrato(s) · " + this.money(vencido) + " vencido", cor: atraso.length ? "B91C1C" : "105436" },
+        { rotulo: "Lotes disponíveis", valor: disponiveis == null ? "—" : nTxt(disponiveis), nota: lotes.total ? nTxt(lotes.total) + " lotes no empreendimento" : "Sem lotes na posição de estoque", cor: "6366F1" }
       ]);
-      secao(s3, "Quanto do contrato já foi pago", 3.1);
-      cards(s3, 3.4, 1.35, this.FAIXAS_PAGO.map((f, i) => {
-        const q = L.filter((c) => this.faixaPago(c.pag) === f.nome).length;
-        return { rotulo: f.nome, valor: nTxt(q), nota: this.pct(q, L.length) + " dos contratos ativos", cor: i === 0 ? "B91C1C" : (i === 1 ? "F37021" : "105436") };
-      }));
-      secao(s3, "Há quanto tempo está vencido", 4.92);
+      const rotPago = ["Nada pago", "Até 10%", "10% a 25%", "25% a 50%", "50% a 75%", "Acima de 75%"];
+      const qPago = this.FAIXAS_PAGO.map((f) => L.filter((c) => this.faixaPago(c.pag) === f.nome).length);
       const faixasAtraso = ["Em dia"].concat(this.FAIXAS_ATRASO);
-      cards(s3, 5.22, 1.35, faixasAtraso.map((nomeFaixa, i) => {
-        const q = i === 0 ? emDia.length : atraso.filter((c) => this.faixaAtraso(c.pag.dias || 0) === nomeFaixa).length;
-        return { rotulo: nomeFaixa, valor: nTxt(q), nota: this.pct(q, L.length), cor: i === 0 ? "105436" : (i === 1 ? "EAB308" : (i === 2 ? "F37021" : "B91C1C")) };
-      }));
+      const qAtraso = faixasAtraso.map((nomeFaixa, i) => i === 0 ? emDia.length : atraso.filter((c) => this.faixaAtraso(c.pag.dias || 0) === nomeFaixa).length);
+      grafico(s3, L.length ? { tipo: tipo.bar, data: [{ name: "Contratos", labels: rotPago, values: qPago }], opt: { chartColors: ["105436"], barGrouping: "clustered", showValue: true, showLegend: false, dataLabelFontSize: 11, dataLabelColor: "0F172A", dataLabelPosition: "outEnd" } } : null, { x: 0.28, y: 2.2, w: 6.28, h: 4.95, titulo: "Quanto do contrato já foi pago", vazio: "Nenhum contrato ativo neste recorte." });
+      grafico(s3, L.length ? { tipo: tipo.bar, data: [{ name: "Contratos", labels: faixasAtraso, values: qAtraso }], opt: { chartColors: ["F37021"], barGrouping: "clustered", showValue: true, showLegend: false, dataLabelFontSize: 11, dataLabelColor: "0F172A", dataLabelPosition: "outEnd" } } : null, { x: 6.72, y: 2.2, w: 6.33, h: 4.95, titulo: "Há quanto tempo está vencido", vazio: "Nenhum contrato ativo neste recorte." });
     }
     const s4 = pptx.addSlide();
     faixa(s4, "Perfil da venda");
     const linhas = this.linhasPerfil();
     if (!linhas.length) {
-      secao(s4, "Quem comprou", 1.2);
-      s4.addText("Nenhuma venda nem distrato deste empreendimento no período.", { x: 0.32, y: 1.7, w: 12, h: 0.5, fontFace: "Calibri", fontSize: 16, color: "64748B" });
+      kpis(s4, [
+        { rotulo: "Mulheres", valor: "—", nota: "Sem vendas no período", cor: "DB2777" },
+        { rotulo: "Homens", valor: "—", nota: "Sem vendas no período", cor: "0EA5E9" },
+        { rotulo: "Idade média", valor: "—", nota: "Sem vendas no período", cor: "0F766E" },
+        { rotulo: "Cancelamentos", valor: "0", nota: "Nenhum distrato no período", cor: "B91C1C" }
+      ]);
+      s4.addText("Nenhuma venda nem distrato deste empreendimento no período.", { x: 0.4, y: 2.6, w: 12, h: 0.5, fontFace: "Calibri", fontSize: 16, color: "64748B" });
     } else {
       const ativos = linhas.filter((x) => !x.cancelado);
       const canc = linhas.filter((x) => x.cancelado);
@@ -2052,22 +2129,32 @@ const MarketingBudgetApp = {
       const mediaMeses = cancMeses.length ? Math.round(cancMeses.reduce((t, x) => t + x.meses, 0) / cancMeses.length) : null;
       const tempo = mediaMeses == null ? "—" : (mediaMeses < 1 ? "menos de 1 mês" : mediaMeses + (mediaMeses === 1 ? " mês" : " meses"));
       const perfilPronto = s.perfis.status === "ok" || s.perfis.status === "vazio";
-      secao(s4, "Quem comprou", 1.02);
-      cards(s4, 1.32, 1.42, [
+      kpis(s4, [
         { rotulo: "Mulheres", valor: perfilPronto ? this.pct(mulheres, pf.length) : "—", nota: mulheres + " contrato(s) de pessoa física", cor: "DB2777" },
         { rotulo: "Homens", valor: perfilPronto ? this.pct(homens, pf.length) : "—", nota: homens + " contrato(s) de pessoa física", cor: "0EA5E9" },
-        { rotulo: "Idade média na venda", valor: perfilPronto && idadeMedia != null ? idadeMedia + " anos" : "—", nota: comIdade.length + " cliente(s) com data de nascimento", cor: "0F766E" }
+        { rotulo: "Idade média", valor: perfilPronto && idadeMedia != null ? idadeMedia + " anos" : "—", nota: comIdade.length + " cliente(s) com nascimento", cor: "0F766E" },
+        { rotulo: "Cancelamentos", valor: nTxt(canc.length), nota: this.pct(canc.length, linhas.length) + " dos contratos do período", cor: "B91C1C" }
       ]);
-      secao(s4, "Quem está pagando", 2.88);
-      cards(s4, 3.16, 1.42, [
-        { rotulo: "Pagamentos em atraso", valor: this.pct(atrasoP.length, comPag.length), nota: atrasoP.length + " de " + comPag.length + " contrato(s) com parcela vencida", cor: atrasoP.length ? "B91C1C" : "105436" },
-        { rotulo: "Valor vencido", valor: this.money(vencidoP), nota: "Parcelas vencidas e ainda não pagas", cor: "F37021" }
-      ]);
-      secao(s4, "Quem cancelou", 4.72);
-      cards(s4, 5.02, 1.42, [
-        { rotulo: "Cancelamentos", valor: nTxt(canc.length), nota: this.pct(canc.length, linhas.length) + " dos contratos do período", cor: "B91C1C" },
-        { rotulo: "Tempo até cancelar", valor: tempo, nota: "Média entre a venda e o cancelamento", cor: "64748B" }
-      ]);
+      const sexLabels = [];
+      const sexVals = [];
+      const sexCores = [];
+      [["F", "Feminino", "DB2777"], ["M", "Masculino", "0EA5E9"], ["PJ", "Pessoa jurídica", "6366F1"], ["?", "Não informado", "94A3B8"]].forEach((par) => {
+        const q = ativos.filter((x) => x.sexo === par[0]).length;
+        if (!q) return;
+        sexLabels.push(par[1]);
+        sexVals.push(q);
+        sexCores.push(par[2]);
+      });
+      const faixas = this.ordemFaixas().filter((f) => ativos.some((x) => x.faixa === f));
+      grafico(s4, sexVals.length ? { tipo: tipo.doughnut, data: [{ name: "Sexo", labels: sexLabels, values: sexVals }], opt: { chartColors: sexCores, showPercent: true, showLegend: true, legendPos: "b" } } : null, { x: 0.28, y: 2.2, w: 5.5, h: 3.35, titulo: "Vendas por sexo", vazio: "Sem sexo informado nos contratos ativos." });
+      grafico(s4, faixas.length ? { tipo: tipo.bar, data: [{ name: "Contratos", labels: faixas, values: faixas.map((f) => ativos.filter((x) => x.faixa === f).length) }], opt: { chartColors: ["0F766E"], barGrouping: "clustered", showValue: true, showLegend: false, dataLabelFontSize: 11, dataLabelColor: "0F172A", dataLabelPosition: "outEnd" } } : null, { x: 5.94, y: 2.2, w: 7.11, h: 3.35, titulo: "Vendas por faixa etária", vazio: "Sem idade informada nos contratos ativos." });
+      const fundo = { fill: { color: "FFFFFF" } };
+      s4.addTable([
+        [cab("Situação"), cab("Quantidade"), cab("Detalhe")],
+        [cel("Em atraso", fundo), cel(nTxt(atrasoP.length) + " de " + nTxt(comPag.length), fundo), cel(this.money(vencidoP) + " vencido", fundo)],
+        [cel("Em dia", { fill: { color: "F8FAFC" } }), cel(nTxt(comPag.length - atrasoP.length), { fill: { color: "F8FAFC" } }), cel(this.pct(comPag.length - atrasoP.length, comPag.length) + " dos contratos com título", { fill: { color: "F8FAFC" } })],
+        [cel("Cancelados", fundo), cel(nTxt(canc.length), fundo), cel("Tempo médio até cancelar: " + tempo, fundo)]
+      ], { x: 0.28, y: 5.7, w: 12.77, colW: [2.4, 3.4, 6.97], rowH: 0.36, border: [{ pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }], fontFace: "Calibri", valign: "middle" });
     }
     try {
       const arquivo = "Budget de marketing - " + nome.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
@@ -2779,7 +2866,7 @@ const MarketingBudgetApp = {
               style="height:38px;width:140px;justify-content:center;display:inline-flex;align-items:center;gap:6px;">
               <i data-lucide="search" style="width:14px;"></i> Consultar
             </button>
-            <button type="button" class="btn btn-ppt" ${s.consultado && !s.loading && !s.error ? "" : "disabled"} onclick="MarketingBudgetApp.exportarPpt()" title="Exportar Budget, Contratos e Perfil da venda em cartões, como na tela" style="height:38px;">
+            <button type="button" class="btn btn-ppt" ${s.consultado && !s.loading && !s.error ? "" : "disabled"} onclick="MarketingBudgetApp.exportarPpt()" title="Exportar a apresentação: 4 indicadores no topo, tabelas e gráficos" style="height:38px;">
               <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em PPT
             </button>
           </div>

@@ -3815,6 +3815,25 @@ circle.donut-segment {
   padding: 0 10px !important;
   font-size: 0.75rem !important;
 }
+.fc-fold {
+  height: 36px;
+  padding: 0 10px;
+  background: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.fc-fold i, .fc-fold svg { width: 14px; height: 14px; }
+.fc-fold-open { border: 1px solid #105436; color: #105436; }
+.fc-fold-open:hover:not(:disabled) { background: #e7f6ee; }
+.fc-fold-shut { border: 1px solid #cbd5e1; color: #475569; }
+.fc-fold-shut:hover:not(:disabled) { background: #f8fafc; }
+.fc-fold:disabled { opacity: 0.45; cursor: not-allowed; }
 .fc-tree-scroll {
   flex: 1;
   overflow: auto;

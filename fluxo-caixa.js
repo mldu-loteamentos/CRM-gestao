@@ -1337,8 +1337,12 @@ const FluxoCaixaApp = {
                   <div class="fc-agrupa" role="group" aria-label="Agrupar colunas do período">
                     ${this.agrupaBotoesHtml()}
                   </div>
-                  <button type="button" class="btn btn-outline fc-mini" onclick="FluxoCaixaApp.expandAll()" ${canExpand ? "" : "disabled"}>Expandir todos</button>
-                  <button type="button" class="btn btn-outline fc-mini" onclick="FluxoCaixaApp.collapseAll()" ${canCollapse ? "" : "disabled"}>Recolher todos</button>
+                  <button type="button" class="fc-fold fc-fold-open" onclick="FluxoCaixaApp.expandAll()" ${canExpand ? "" : "disabled"} title="Expandir todos os níveis">
+                    <i data-lucide="chevrons-down"></i> Expandir todos
+                  </button>
+                  <button type="button" class="fc-fold fc-fold-shut" onclick="FluxoCaixaApp.collapseAll()" ${canCollapse ? "" : "disabled"} title="Recolher todos os níveis">
+                    <i data-lucide="chevrons-up"></i> Recolher todos
+                  </button>
                   <button type="button" class="btn fc-insights-btn" onclick="FluxoCaixaApp.gerarInsights()" ${(this.rows || []).length && !this.loading ? "" : "disabled"} title="Variações, receitas, serviços, aplicações e saídas">
                     <i data-lucide="lightbulb" style="width:14px;height:14px;"></i> Gerar insights
                   </button>
