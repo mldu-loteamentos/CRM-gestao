@@ -56,6 +56,7 @@ function click(method, path, token, body) {
 function papelApi(papel) {
   const p = String(papel || "");
   if (/testemunha/i.test(p)) return "witness";
+  if (/anuente/i.test(p)) return "intervening";
   if (/representante/i.test(p)) return "legal_representative";
   if (/cession/i.test(p)) return "transferee";
   if (/cedente/i.test(p)) return "transferor";

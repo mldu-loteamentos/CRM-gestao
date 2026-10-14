@@ -257,7 +257,6 @@ const UsuariosOnline = {
         <td style="padding:9px 12px;color:#334155;">${this.esc(r.tabLabel || r.tab || "—")}</td>
         <td style="padding:9px 12px;text-align:right;font-weight:800;color:#105436;white-space:nowrap;">${this.duration(now - (Number(r.since) || now))}</td>
         <td style="padding:9px 12px;text-align:right;color:#334155;white-space:nowrap;">${this.when(Number(r.since))}</td>
-        <td style="padding:9px 12px;text-align:right;color:#64748b;white-space:nowrap;">${this.ago(now - this.seenAt(r))}</td>
         ${usoCell(r)}
         <td style="padding:9px 12px;color:#64748b;white-space:nowrap;">${this.esc(r.agent || "—")}</td>
       </tr>`).join("");
@@ -279,7 +278,7 @@ const UsuariosOnline = {
     root.innerHTML = `
       <div style="padding:16px 18px 28px;">
         <p style="margin:0 0 14px;font-size:0.82rem;color:#64748b;max-width:760px;">
-          Último sinal é a página aberta: o navegador avisa a cada minuto e, sem aviso por 3 minutos, a pessoa sai da lista.
+          Quem está com a página aberta entra na lista. Sem aviso do navegador por 3 minutos, a pessoa sai.
           Último uso é o último clique, tecla ou rolagem. Sem isso por 5 minutos, a linha fica como sem uso.
         </p>
 
@@ -297,9 +296,9 @@ const UsuariosOnline = {
           <div style="overflow:auto;">
             <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
               <thead><tr style="background:#f8fafc;color:#64748b;">
-                ${th("Usuário")}${th("Perfil")}${th("Tela atual")}${th("Online há", true)}${th("Desde", true)}${th("Último sinal", true)}${th("Último uso", true)}${th("Navegador")}
+                ${th("Usuário")}${th("Perfil")}${th("Tela atual")}${th("Online há", true)}${th("Desde", true)}${th("Último uso", true)}${th("Navegador")}
               </tr></thead>
-              <tbody>${onlineRows || `<tr><td colspan="8" style="padding:18px;color:#94a3b8;text-align:center;">${this.loaded ? "Ninguém online agora." : "Carregando…"}</td></tr>`}</tbody>
+              <tbody>${onlineRows || `<tr><td colspan="7" style="padding:18px;color:#94a3b8;text-align:center;">${this.loaded ? "Ninguém online agora." : "Carregando…"}</td></tr>`}</tbody>
             </table>
           </div>
         </div>

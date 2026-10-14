@@ -2763,6 +2763,11 @@ const CessaoPopup = {
       add(row.customer && row.customer.name, this.emailDe(row.customer), "Cessionário");
       if (row.representante) add(row.representante.name, this.emailDe(row.representante), "Representante");
     });
+    this.anuentesClick().forEach((a) => {
+      if (lista.some((x) => this.foldNome(x.nome) === this.foldNome(a.nome))) return;
+      if (a.email && lista.some((x) => x.email.toLowerCase() === a.email.toLowerCase())) return;
+      lista.push({ nome: a.nome, email: a.email || "", papel: "Anuente" });
+    });
     const users = typeof getDistratoWitnessUsers === "function" ? getDistratoWitnessUsers() : [];
     const w = (id) => users.find((u) => String(u.id) === String(id)) || {};
     [w(st.testemunha1), w(st.testemunha2)].forEach((u) => {
@@ -2870,6 +2875,71 @@ const CessaoPopup = {
     return p[2] + "/" + p[1] + "/" + p[0];
   },
 
+  foldNome(s) {
+    return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+  },
+
+  pareceEmpresa(nome) {
+    return /\b(LTDA|EIRELI|SPE|EMPREEND|PARTICIPA|INCORPOR|LOTEAMENT|S\.?A\.?)\b/i.test(String(nome || ""));
+  },
+
+  /* Quem assina pela empresa anuente: procurador, sócio ou administrador citados no preâmbulo. */
+  quemAssinaPelaEmpresa(texto) {
+    const t = String(texto || "").replace(/\s+/g, " ");
+    const nomes = [];
+    const push = (bruto) => {
+      let nome = String(bruto || "").replace(/\s+/g, " ").trim();
+      nome = nome.split(/\s+(?:brasileir|portador|inscrit|casad|solteir|divorci|vi[uú]v|empres|advogad|do lar)/i)[0].trim();
+      nome = nome.replace(/[,.;:]+$/, "").trim();
+      if (this.pareceEmpresa(nome)) return;
+      if (nome.split(/\s+/).filter(Boolean).length < 2) return;
+      const key = this.foldNome(nome);
+      if (!key || nomes.some((n) => this.foldNome(n) === key)) return;
+      nomes.push(nome);
+    };
+    const cargo = /(?:bastante procurador|procurador|s[oó]cio|administrador(?:a)?|representante legal)\s+([A-ZÁÉÍÓÚÂÊÔÃÕÇÜ][^,]{5,140})/gi;
+    let m;
+    while ((m = cargo.exec(t))) push(m[1]);
+    const junto = /\be\s+([A-ZÁÉÍÓÚÂÊÔÃÕÇÜ][A-ZÁÉÍÓÚÂÊÔÃÕÇÜ\s]{8,80}?),/g;
+    while ((m = junto.exec(t))) push(m[1]);
+    return nomes.slice(0, 3);
+  },
+
+  emailDeUsuario(nome) {
+    const alvo = this.foldNome(nome);
+    const partes = alvo.split(" ").filter((p) => p.length > 2);
+    if (partes.length < 2) return "";
+    const users = typeof window.getCrmUsersList === "function" ? window.getCrmUsersList() : [];
+    const ativo = (u) => u && String(u.status || "ATIVO").toUpperCase() !== "INATIVO" && String(u.email || "").includes("@");
+    const palavras = (u) => this.foldNome(u.name).split(" ").filter((p) => p.length > 2);
+    const igual = users.find((u) => ativo(u) && this.foldNome(u.name) === alvo);
+    if (igual) return String(igual.email).trim();
+    const hit = users.find((u) => {
+      if (!ativo(u)) return false;
+      const np = palavras(u);
+      if (np.length < 2) return false;
+      const primeiro = np[0];
+      const ultimo = np[np.length - 1];
+      return partes.includes(primeiro) && partes.includes(ultimo);
+    });
+    return hit ? String(hit.email).trim() : "";
+  },
+
+  anuentesClick() {
+    const st = CessaoPopupState;
+    const rec = typeof window.getPreambleRecordForContract === "function"
+      ? window.getPreambleRecordForContract(st.unit, st.contract)
+      : null;
+    const texto = String((rec && rec.text) || st.preamble || "");
+    let nomes = this.quemAssinaPelaEmpresa(texto);
+    if (!nomes.length && rec && typeof window.parsePreambleResponsibles === "function") {
+      nomes = window.parsePreambleResponsibles(rec).filter((n) => !this.pareceEmpresa(n));
+    }
+    const empresa = String(st.empresaNome || "").trim();
+    if (!nomes.length && empresa) return [{ nome: empresa, email: "", papel: "Anuente" }];
+    return nomes.map((nome) => ({ nome: nome, email: this.emailDeUsuario(nome), papel: "Anuente" }));
+  },
+
   grupoAssinatura(papel) {
     return /testemunha/i.test(String(papel || "")) ? 2 : 1;
   },
@@ -2900,7 +2970,7 @@ const CessaoPopup = {
     const bloco = (grupo, titulo) => {
       const itens = pessoas.filter((s) => this.grupoAssinatura(s.papel) === grupo);
       if (!itens.length) return "";
-      return `<p class="cessao-ordem-tit">${titulo}</p><ol>` + itens.map((s) => `<li><b>${this.esc(s.nome)}</b> · ${this.esc(s.papel)}</li>`).join("") + "</ol>";
+      return `<p class="cessao-ordem-tit">${titulo}</p><ol>` + itens.map((s) => `<li><b>${this.esc(s.nome)}</b> · ${this.esc(s.papel)}${s.email ? "" : " · sem e-mail no cadastro de usuários"}</li>`).join("") + "</ol>";
     };
     lista.innerHTML = bloco(1, "1º grupo — assinam primeiro") + bloco(2, "2º grupo — somente depois que o 1º grupo concluir");
     const padrao = this.diaMais(30);
@@ -3069,6 +3139,16 @@ const CessaoPopup = {
       return;
     }
     const signatarios = this.signatariosClick();
+    const anuentes = signatarios.filter((s) => s.papel === "Anuente");
+    if (!anuentes.length) {
+      if (erroEl) erroEl.textContent = "Falta o anuente: não encontrei no preâmbulo quem assina pela empresa.";
+      return;
+    }
+    const semEmail = anuentes.filter((s) => !String(s.email || "").includes("@"));
+    if (semEmail.length) {
+      if (erroEl) erroEl.textContent = "Quem assina pela empresa anuente não tem e-mail no cadastro de usuários: " + semEmail.map((s) => s.nome).join(", ") + ".";
+      return;
+    }
     this.fecharOrdemClick();
     CessaoPopupState.enviandoClick = true;
     this.pintar();
