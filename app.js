@@ -3303,6 +3303,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "relacionamento_terceiros": "Autorização de terceiros",
     "relacionamento_vencimento": "Alteração de vencimento",
     "relacionamento_cessao": "Cessão de Direitos",
+    "relacionamento_assinaturas": "Documentos para assinar",
     "relacionamento_quitacao": "Termo de quitação",
     "condicoes-pagamento": "Condições de Pagamento",
     "tabelas-vigentes": "Tabelas vigentes",
@@ -3370,6 +3371,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "relacionamento_terceiros": "user-plus",
     "relacionamento_vencimento": "calendar-clock",
     "relacionamento_cessao": "handshake",
+    "relacionamento_assinaturas": "pen-line",
     "relacionamento_quitacao": "badge-check",
     "condicoes-pagamento": "file-text",
     "tabelas-vigentes": "table",
@@ -22720,6 +22722,17 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
     docHtml = docHtmlOld;
   }
 
+  if (window.DocAssinaturaApp && typeof DocAssinaturaApp.registrar === "function") {
+    const sale = g_distSale || {};
+    const cli = g_distCustomer || {};
+    DocAssinaturaApp.registrar({
+      tipo: "distrato",
+      cliente: cli.name || "",
+      titulo: sale.receivableBillId || sale.id || "",
+      unidade: sale.unitId || "",
+      arquivo: docTitle || "Distrato"
+    });
+  }
   document.getElementById("pdf-modal-title").textContent = "Termo de Rescisão e Distrato - PDF";
   document.getElementById("pdf-document-content").innerHTML = docHtml;
   if (typeof setPdfPrintLogo === "function") setPdfPrintLogo(false);

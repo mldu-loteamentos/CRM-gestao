@@ -1022,6 +1022,15 @@
           ? window.buildFichaPdfFilename(cfg.title, { contrato: unidade, costCenterId: codEmp, titulo, nome })
           : cfg.title + " | Título " + titulo + ".pdf";
         await this._baixarPaginasPdf(paginas, fileName);
+        if (window.DocAssinaturaApp && typeof DocAssinaturaApp.registrar === "function") {
+          DocAssinaturaApp.registrar({
+            tipo: "aditamento",
+            cliente: nome,
+            titulo,
+            unidade,
+            arquivo: fileName
+          });
+        }
       } catch (err) {
         console.error("Erro ao gerar aditamento", err);
         alert("Não foi possível gerar o aditamento. Verifique o modelo em Documentos padrões e tente de novo.");

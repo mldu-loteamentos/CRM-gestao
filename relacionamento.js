@@ -3493,6 +3493,15 @@ const RelacionamentoApp = {
         ? window.buildFichaPdfFilename(cfg.title, { contrato: legalBase.UNIDADE, costCenterId: codEmp, titulo, nome })
         : cfg.title + " | Título " + titulo + ".pdf";
       await this._baixarPaginasPdf(paginas, fileName);
+      if ((kind === "vencimento" || kind === "terceiros") && window.DocAssinaturaApp && typeof DocAssinaturaApp.registrar === "function") {
+        DocAssinaturaApp.registrar({
+          tipo: kind,
+          cliente: nome,
+          titulo,
+          unidade: legalBase.UNIDADE || "",
+          arquivo: fileName
+        });
+      }
       this.fecharDocModal(kind);
     } finally {
       this._docPdfBusy[kind] = false;

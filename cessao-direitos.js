@@ -2804,6 +2804,20 @@ const CessaoPopup = {
     return { bytes, fileName, avisoAdesao };
   },
 
+  registrarAssinatura(arquivo) {
+    if (!window.DocAssinaturaApp || typeof DocAssinaturaApp.registrar !== "function") return;
+    const st = CessaoPopupState;
+    const ces = (st.cessionarios && st.cessionarios[0] && st.cessionarios[0].customer) || {};
+    const unidade = [st.unit && st.unit.costCenterId, st.quadraLote].filter((x) => x && x !== "—").join(" - ");
+    DocAssinaturaApp.registrar({
+      tipo: "cessao",
+      cliente: ces.name || (st.customer && st.customer.name) || "",
+      titulo: st.titulo || "",
+      unidade,
+      arquivo: arquivo || ""
+    });
+  },
+
   async gerarPdf() {
     const erro = this.pendenciaPdf();
     if (erro) {
@@ -2816,6 +2830,7 @@ const CessaoPopup = {
       const pack = await this.montarPacotePdf();
       if (pack.avisoAdesao) alert(pack.avisoAdesao);
       this.baixarBytes(pack.bytes, pack.fileName);
+      this.registrarAssinatura(pack.fileName);
       this.fechar();
     } catch (e) {
       console.error("[Cessão] PDF", e);
@@ -2864,6 +2879,7 @@ const CessaoPopup = {
         data.onde || ""
       ].filter((x) => x !== undefined);
       if (pack.avisoAdesao) linhas.push("", pack.avisoAdesao);
+      this.registrarAssinatura(pack.fileName);
       alert(linhas.join("\n"));
     } catch (e) {
       console.error("[Cessão] ClickSign", e);
