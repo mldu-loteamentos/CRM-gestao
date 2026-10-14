@@ -1896,20 +1896,16 @@ const MarketingBudgetApp = {
       + this.secao("Vendas do período", "As unidades vendidas servem para ver quanto de marketing cada venda consumiu.", vendas);
   },
 
-  escXml(s) {
-    return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  },
-
-  trocarTextosSlide(xml, textos) {
-    let i = 0;
-    const out = String(xml).replace(/<a:t(\s[^>]*)?>([^<]*)<\/a:t>/g, (full, attrs) => {
-      if (i >= textos.length) return full;
-      const novo = this.escXml(textos[i]);
-      i += 1;
-      return "<a:t" + (attrs || "") + ">" + novo + "</a:t>";
-    });
-    if (i !== textos.length) throw new Error("O modelo de 30 anos mudou e os slides não fecharam.");
-    return out;
+  async esperarComplementos() {
+    const s = this.state;
+    if (!s.vendas.length && !s.distratos.length) return;
+    const t0 = Date.now();
+    while (Date.now() - t0 < 12000) {
+      const ad = s.adimpl.status;
+      const pf = s.perfis.status;
+      if (ad && ad !== "carregando" && pf && pf !== "carregando") return;
+      await new Promise((r) => setTimeout(r, 300));
+    }
   },
 
   async exportarPpt() {
@@ -1918,101 +1914,167 @@ const MarketingBudgetApp = {
       alert("Consulte o empreendimento antes de exportar a apresentação.");
       return;
     }
-    if (typeof JSZip === "undefined") {
-      alert("Não foi possível montar o PowerPoint neste navegador.");
+    if (typeof window.PptxGenJS !== "function") {
+      alert("Não foi possível montar o PowerPoint neste navegador. Atualize a página com Ctrl+F5.");
       return;
     }
+    await this.esperarComplementos();
     const cc = this.ccAtual();
     const r = this.resumo();
     const nome = this.ccLabel(cc) || "Empreendimento";
     const periodo = this.dataBr(s.startDate) + " a " + this.dataBr(s.endDate);
-    const pct = String(s.pct || 0).replace(".", ",") + "%";
+    const pctTxt = String(s.pct || 0).replace(".", ",") + "%";
     const vgv = (s.obra && s.obra.vgv) || 0;
-    const consumo = r.verba > 0 ? r.consumo.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%" : "—";
-    const n = (v) => Number(v || 0).toLocaleString("pt-BR");
-    const capa = [
-      "Budget de marketing",
-      nome,
-      "Baixas de " + periodo,
-      "Verba pelo VGV da obra, gastos realizados e comprometidos.",
-      "Custo por unidade vendida no período."
-    ];
-    const origem = [
-      "De onde vem a verba",
-      periodo,
-      "A verba nasce do VGV da obra",
-      "O VGV do empreendimento é " + this.money(vgv) + ". O marketing fica com " + pct + " desse VGV. A verba é " + this.money(r.verba) + ", formada por VGV × percentual."
-    ];
-    const uso = [
-      "Uso da verba",
-      periodo,
-      "Quanto já foi pago e quanto ainda está comprometido",
-      this.moneyShort(r.realizado),
-      "realizado no período",
-      this.moneyShort(r.comprometido),
-      "em aberto e",
-      "previsão",
-      this.moneyShort(r.saldo),
-      r.saldo < 0 ? "verba" : "saldo da verba",
-      r.saldo < 0 ? "ultrapassada" : "o que ainda cabe",
-      this.moneyShort(r.previsto),
-      "só a previsão",
-      "ainda não paga",
-      consumo,
-      "consumo da verba",
-      "pago + comprometido"
-    ];
-    const cacPago = r.cac != null ? this.money(r.cac) : "—";
-    const cacAberto = r.cacTotal != null ? this.money(r.cacTotal) : "—";
-    const vendas = [
-      "Vendas do período",
-      periodo,
-      "Quanto de marketing cada venda consumiu",
-      n(r.liquidas) + " unidades vendidas, em " + n(r.brutas) + " contratos emitidos e " + n(r.distr) + " distratos. O marketing já pago dá " + cacPago + " por unidade. Somando o que ainda está comprometido, o custo vai a " + cacAberto + " por unidade."
-    ];
+    const consumo = r.verba > 0 ? r.consumo.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "%" : "—";
+    const corConsumo = r.consumo > 100 ? "B91C1C" : (r.consumo >= 80 ? "F37021" : "105436");
+    const nTxt = (v) => Number(v || 0).toLocaleString("pt-BR");
+    const pptx = new window.PptxGenJS();
+    pptx.defineLayout({ name: "TELA", width: 13.333, height: 7.5 });
+    pptx.layout = "TELA";
+    pptx.author = "CRM Gestão";
+    pptx.title = "Budget de marketing — " + nome;
+    const self = this;
+    const faixa = (slide, titulo) => {
+      slide.background = { color: "F4F7F5" };
+      slide.addShape("roundRect", { x: 0.28, y: 0.18, w: 12.77, h: 0.72, fill: { color: "105436" }, rectRadius: 0.08 });
+      slide.addText(titulo, { x: 0.46, y: 0.24, w: 7.2, h: 0.32, fontFace: "Calibri", fontSize: 18, bold: true, color: "FFFFFF", margin: 0 });
+      slide.addText(nome + "   ·   " + periodo, { x: 0.46, y: 0.52, w: 12.3, h: 0.26, fontFace: "Calibri", fontSize: 12, color: "D1FAE5", margin: 0 });
+    };
+    const secao = (slide, texto, y) => {
+      slide.addText(texto, { x: 0.32, y: y, w: 12.4, h: 0.28, fontFace: "Calibri", fontSize: 14, bold: true, color: "105436", margin: 0 });
+    };
+    const cards = (slide, y, h, itens) => {
+      const x0 = 0.28;
+      const largura = 12.77;
+      const gap = 0.12;
+      const w = (largura - gap * (itens.length - 1)) / itens.length;
+      itens.forEach((it, i) => {
+        const x = x0 + i * (w + gap);
+        slide.addShape("roundRect", { x: x, y: y, w: w, h: h, fill: { color: "FFFFFF" }, line: { color: "E2E8F0", pt: 1 }, rectRadius: 0.06 });
+        slide.addShape("rect", { x: x, y: y, w: w, h: 0.07, fill: { color: it.cor } });
+        slide.addText(it.rotulo.toUpperCase(), { x: x + 0.12, y: y + 0.14, w: w - 0.24, h: 0.28, fontFace: "Calibri", fontSize: 10, bold: true, color: "64748B", margin: 0 });
+        slide.addText(it.valor, { x: x + 0.12, y: y + 0.42, w: w - 0.24, h: 0.42, fontFace: "Calibri", fontSize: 20, bold: true, color: "0F172A", margin: 0 });
+        slide.addText(it.nota, { x: x + 0.12, y: y + 0.88, w: w - 0.24, h: h - 1.02, fontFace: "Calibri", fontSize: 11, color: "64748B", margin: 0 });
+      });
+    };
+    const s1 = pptx.addSlide();
+    faixa(s1, "Budget");
+    secao(s1, "De onde vem a verba", 1.08);
+    cards(s1, 1.4, 1.55, [
+      { rotulo: "VGV do empreendimento", valor: vgv > 0 ? self.money(vgv) : "—", nota: "Base da verba de marketing", cor: "105436" },
+      { rotulo: "% do VGV para marketing", valor: s.pct > 0 ? pctTxt : "—", nota: "Percentual definido na configuração", cor: "105436" },
+      { rotulo: "Verba de marketing", valor: self.money(r.verba), nota: "VGV × " + pctTxt, cor: "105436" }
+    ]);
+    secao(s1, "Uso da verba", 3.14);
+    cards(s1, 3.46, 1.7, [
+      { rotulo: "Realizado", valor: self.money(r.realizado), nota: "Baixas do período, pelo líquido mais os impostos retidos", cor: "105436" },
+      { rotulo: "Comprometido", valor: self.money(r.comprometido), nota: "Em aberto e previsão, ainda não pagos", cor: "F37021" },
+      { rotulo: "Saldo da verba", valor: self.money(r.saldo), nota: r.saldo < 0 ? "A verba já foi ultrapassada" : "O que ainda cabe na verba", cor: r.saldo < 0 ? "B91C1C" : "0EA5E9" },
+      { rotulo: "Consumo da verba", valor: consumo, nota: "Pago + comprometido, em relação à verba", cor: corConsumo }
+    ]);
+    const s2 = pptx.addSlide();
+    faixa(s2, "Budget");
+    secao(s2, "Vendas do período", 1.08);
+    cards(s2, 1.4, 1.5, [
+      { rotulo: "Unidades vendidas", valor: nTxt(r.liquidas), nota: nTxt(r.brutas) + " contratos emitidos · " + nTxt(r.distr) + " distratados", cor: "6366F1" },
+      { rotulo: "Custo por unidade vendida", valor: r.cac != null ? self.money(r.cac) : "—", nota: "Só o que já foi pago de marketing, dividido pelas unidades", cor: "105436" },
+      { rotulo: "Custo por unidade com o em aberto", valor: r.cacTotal != null ? self.money(r.cacTotal) : "—", nota: "Pago e comprometido, dividido pelas unidades vendidas", cor: "F37021" }
+    ]);
+    secao(s2, "Verba e gastos mês a mês", 3.08);
+    const meses = this.meses();
+    const porMes = (st) => meses.map((m) => r.rows.filter((x) => x.status === st && String(x.data).slice(0, 7) === m).reduce((t, x) => t + x.valor, 0));
+    const realM = porMes("realizado");
+    const prevM = porMes("previsao").map((v, i) => v + porMes("previsao_vencida")[i]);
+    const compM = porMes("comprometido").map((v, i) => v + prevM[i]);
+    let acc = 0;
+    const nomesMes = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+    const cel = (texto, opt) => ({ text: texto, options: Object.assign({ align: "center", valign: "middle", fontFace: "Calibri", fontSize: meses.length > 12 ? 10 : 12 }, opt || {}) });
+    const cab = (t) => cel(t, { fill: { color: "105436" }, color: "FFFFFF", bold: true });
+    const linhasMes = [ [cab("Mês"), cab("Realizado"), cab("Comprometido"), cab("Acumulado")] ];
+    meses.forEach((m, i) => {
+      acc += realM[i] + compM[i];
+      const fundo = i % 2 ? "F8FAFC" : "FFFFFF";
+      const rot = (nomesMes[Number(m.slice(5)) - 1] || m) + "/" + m.slice(2, 4);
+      linhasMes.push([cel(rot, { fill: { color: fundo } }), cel(self.money(realM[i]), { fill: { color: fundo } }), cel(self.money(compM[i]), { fill: { color: fundo } }), cel(self.money(acc), { fill: { color: fundo } })]);
+    });
+    linhasMes.push([cab("Total"), cab(self.money(realM.reduce((t, v) => t + v, 0))), cab(self.money(compM.reduce((t, v) => t + v, 0))), cab(self.money(acc))]);
+    s2.addTable(linhasMes, { x: 0.28, y: 3.4, w: 12.77, colW: [2.2, 3.52, 3.52, 3.53], border: [{ pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }], fontFace: "Calibri", valign: "middle" });
+    const s3 = pptx.addSlide();
+    faixa(s3, "Contratos");
+    const adOk = s.adimpl.status === "ok" || s.adimpl.status === "vazio";
+    if (!adOk) {
+      secao(s3, "Situação de pagamento", 1.2);
+      s3.addText(s.adimpl.status === "erro" ? "Não foi possível ler o Contas a Receber desta consulta." : "A situação de pagamento ainda não fechou. Espere a aba Contratos carregar e exporte de novo.", { x: 0.32, y: 1.7, w: 12, h: 0.6, fontFace: "Calibri", fontSize: 16, color: "64748B" });
+    } else {
+      const L = this.contratosAtivos();
+      const emDia = L.filter((c) => c.pag.status === "adimplente");
+      const atraso = L.filter((c) => c.pag.status === "inadimplente");
+      const vencido = atraso.reduce((t, c) => t + (Number(c.pag.vencido) || 0), 0);
+      const lotes = this.lotesDoEmpreendimento();
+      const disponiveis = lotes.total ? lotes.total - r.liquidas : null;
+      secao(s3, "Situação de pagamento", 1.05);
+      cards(s3, 1.36, 1.55, [
+        { rotulo: "Vendas líquidas", valor: nTxt(r.liquidas), nota: nTxt(r.brutas) + " vendidos · " + nTxt(r.distr) + " cancelados no período", cor: "6366F1" },
+        { rotulo: "Pagamentos em dia", valor: this.pct(emDia.length, L.length), nota: emDia.length + " contrato(s) sem parcela vencida", cor: "105436" },
+        { rotulo: "Pagamentos em atraso", valor: this.pct(atraso.length, L.length), nota: atraso.length + " contrato(s) · " + this.money(vencido) + " já vencido", cor: atraso.length ? "B91C1C" : "105436" },
+        { rotulo: "Lotes disponíveis", valor: disponiveis == null ? "—" : nTxt(disponiveis), nota: lotes.total ? nTxt(lotes.total) + " lotes · " + nTxt(r.liquidas) + " vendas líquidas" : "Sem lotes na posição de estoque", cor: "6366F1" }
+      ]);
+      secao(s3, "Quanto do contrato já foi pago", 3.1);
+      cards(s3, 3.4, 1.35, this.FAIXAS_PAGO.map((f, i) => {
+        const q = L.filter((c) => this.faixaPago(c.pag) === f.nome).length;
+        return { rotulo: f.nome, valor: nTxt(q), nota: this.pct(q, L.length) + " dos contratos ativos", cor: i === 0 ? "B91C1C" : (i === 1 ? "F37021" : "105436") };
+      }));
+      secao(s3, "Há quanto tempo está vencido", 4.92);
+      const faixasAtraso = ["Em dia"].concat(this.FAIXAS_ATRASO);
+      cards(s3, 5.22, 1.35, faixasAtraso.map((nomeFaixa, i) => {
+        const q = i === 0 ? emDia.length : atraso.filter((c) => this.faixaAtraso(c.pag.dias || 0) === nomeFaixa).length;
+        return { rotulo: nomeFaixa, valor: nTxt(q), nota: this.pct(q, L.length), cor: i === 0 ? "105436" : (i === 1 ? "EAB308" : (i === 2 ? "F37021" : "B91C1C")) };
+      }));
+    }
+    const s4 = pptx.addSlide();
+    faixa(s4, "Perfil da venda");
+    const linhas = this.linhasPerfil();
+    if (!linhas.length) {
+      secao(s4, "Quem comprou", 1.2);
+      s4.addText("Nenhuma venda nem distrato deste empreendimento no período.", { x: 0.32, y: 1.7, w: 12, h: 0.5, fontFace: "Calibri", fontSize: 16, color: "64748B" });
+    } else {
+      const ativos = linhas.filter((x) => !x.cancelado);
+      const canc = linhas.filter((x) => x.cancelado);
+      const pf = ativos.filter((x) => x.sexo === "F" || x.sexo === "M");
+      const mulheres = pf.filter((x) => x.sexo === "F").length;
+      const homens = pf.length - mulheres;
+      const comIdade = ativos.filter((x) => x.idade != null);
+      const idadeMedia = comIdade.length ? Math.round(comIdade.reduce((t, x) => t + x.idade, 0) / comIdade.length) : null;
+      const comPag = ativos.filter((x) => ["adimplente", "inadimplente", "quitado"].includes(x.pag));
+      const atrasoP = comPag.filter((x) => x.pag === "inadimplente");
+      const vencidoP = atrasoP.reduce((t, x) => t + x.vencido, 0);
+      const cancMeses = canc.filter((x) => x.meses != null);
+      const mediaMeses = cancMeses.length ? Math.round(cancMeses.reduce((t, x) => t + x.meses, 0) / cancMeses.length) : null;
+      const tempo = mediaMeses == null ? "—" : (mediaMeses < 1 ? "menos de 1 mês" : mediaMeses + (mediaMeses === 1 ? " mês" : " meses"));
+      const perfilPronto = s.perfis.status === "ok" || s.perfis.status === "vazio";
+      secao(s4, "Quem comprou", 1.02);
+      cards(s4, 1.32, 1.42, [
+        { rotulo: "Mulheres", valor: perfilPronto ? this.pct(mulheres, pf.length) : "—", nota: mulheres + " contrato(s) de pessoa física", cor: "DB2777" },
+        { rotulo: "Homens", valor: perfilPronto ? this.pct(homens, pf.length) : "—", nota: homens + " contrato(s) de pessoa física", cor: "0EA5E9" },
+        { rotulo: "Idade média na venda", valor: perfilPronto && idadeMedia != null ? idadeMedia + " anos" : "—", nota: comIdade.length + " cliente(s) com data de nascimento", cor: "0F766E" }
+      ]);
+      secao(s4, "Quem está pagando", 2.88);
+      cards(s4, 3.16, 1.42, [
+        { rotulo: "Pagamentos em atraso", valor: this.pct(atrasoP.length, comPag.length), nota: atrasoP.length + " de " + comPag.length + " contrato(s) com parcela vencida", cor: atrasoP.length ? "B91C1C" : "105436" },
+        { rotulo: "Valor vencido", valor: this.money(vencidoP), nota: "Parcelas vencidas e ainda não pagas", cor: "F37021" }
+      ]);
+      secao(s4, "Quem cancelou", 4.72);
+      cards(s4, 5.02, 1.42, [
+        { rotulo: "Cancelamentos", valor: nTxt(canc.length), nota: this.pct(canc.length, linhas.length) + " dos contratos do período", cor: "B91C1C" },
+        { rotulo: "Tempo até cancelar", valor: tempo, nota: "Média entre a venda e o cancelamento", cor: "64748B" }
+      ]);
+    }
     try {
-      if (!this._modeloPpt) {
-        const res = await fetch("modelo-30-anos.pptx");
-        if (!res.ok) throw new Error("modelo");
-        this._modeloPpt = await res.arrayBuffer();
-      }
-      const zip = await JSZip.loadAsync(this._modeloPpt.slice(0));
-      const ler = async (caminho) => zip.file(caminho).async("string");
-      const capaXml = this.trocarTextosSlide(await ler("ppt/slides/slide1.xml"), capa);
-      const origemXml = this.trocarTextosSlide(await ler("ppt/slides/slide2.xml"), origem);
-      const numerosXml = await ler("ppt/slides/slide7.xml");
-      const numerosRels = await ler("ppt/slides/_rels/slide7.xml.rels");
-      const origemRels = await ler("ppt/slides/_rels/slide2.xml.rels");
-      const usoXml = this.trocarTextosSlide(numerosXml, uso);
-      const vendasXml = this.trocarTextosSlide(await ler("ppt/slides/slide2.xml"), vendas);
-      zip.file("ppt/slides/slide1.xml", capaXml);
-      zip.file("ppt/slides/slide2.xml", origemXml);
-      zip.file("ppt/slides/slide3.xml", usoXml);
-      zip.file("ppt/slides/_rels/slide3.xml.rels", numerosRels);
-      zip.file("ppt/slides/slide4.xml", vendasXml);
-      zip.file("ppt/slides/_rels/slide4.xml.rels", origemRels);
-      let pres = await ler("ppt/presentation.xml");
-      pres = pres.replace(/<p:sldId id="256"[^/]*\/>/, "").replace(/<p:sldId id="270"[^/]*\/>/, "").replace(/<p:sldId id="271"[^/]*\/>/, "").replace(/<p:sldId id="272"[^/]*\/>/, "");
-      if (pres.indexOf('id="256"') >= 0 || pres.indexOf('id="272"') >= 0) throw new Error("modelo");
-      zip.file("ppt/presentation.xml", pres);
-      let presRels = await ler("ppt/_rels/presentation.xml.rels");
-      presRels = presRels.replace(/<Relationship Id="rId1[5-8]"[^>]*\/>/g, "");
-      zip.file("ppt/_rels/presentation.xml.rels", presRels);
-      let app = await ler("docProps/app.xml");
-      app = app.replace("<Slides>8</Slides>", "<Slides>4</Slides>");
-      zip.file("docProps/app.xml", app);
-      const blob = await zip.generateAsync({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation" });
-      const a = document.createElement("a");
-      const arquivo = "Budget de marketing - " + nome.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim() + ".pptx";
-      a.href = URL.createObjectURL(blob);
-      a.download = arquivo;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      const arquivo = "Budget de marketing - " + nome.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
+      await pptx.writeFile({ fileName: arquivo });
     } catch (e) {
       console.warn("[Budget] ppt", e);
-      alert("Não foi possível gerar a apresentação no modelo de 30 anos.");
+      alert("Não foi possível gerar a apresentação.");
     }
   },
 
@@ -2717,7 +2779,7 @@ const MarketingBudgetApp = {
               style="height:38px;width:140px;justify-content:center;display:inline-flex;align-items:center;gap:6px;">
               <i data-lucide="search" style="width:14px;"></i> Consultar
             </button>
-            <button type="button" class="btn btn-ppt" ${s.consultado && !s.loading && !s.error ? "" : "disabled"} onclick="MarketingBudgetApp.exportarPpt()" title="Exportar a consulta em 4 slides, no modelo de 30 anos" style="height:38px;">
+            <button type="button" class="btn btn-ppt" ${s.consultado && !s.loading && !s.error ? "" : "disabled"} onclick="MarketingBudgetApp.exportarPpt()" title="Exportar Budget, Contratos e Perfil da venda em cartões, como na tela" style="height:38px;">
               <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em PPT
             </button>
           </div>

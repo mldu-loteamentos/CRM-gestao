@@ -20,6 +20,7 @@ const ComercialApp = {
     velEmpOpen: false,
     velEmpQuery: '',
     velUnidadeIds: null,
+    velVendaIds: null,
     velAberto: {},
     velCache: {},
     velGen: 0
@@ -166,7 +167,7 @@ const ComercialApp = {
     const load = document.getElementById('comercial-loading');
     const content = document.getElementById('comercial-dashboard-content');
     const btn = document.getElementById('comercial-btn-search');
-    if (load) load.style.display = on && !this.state.loaded ? 'flex' : 'none';
+    if (load) load.style.display = on && !this.state.loaded && this.state.aba !== 'velocidade' ? 'flex' : 'none';
     if (content && this.state.loaded && this.state.aba !== 'velocidade') content.style.display = 'block';
     if (on) this.setLoadProgress(4);
     else this.stopLoadTicker();
@@ -916,8 +917,10 @@ const ComercialApp = {
     const resumo = document.getElementById('comercial-dashboard-content');
     const vel = document.getElementById('comercial-velocidade');
     const head = document.querySelector('#tab-dashboard-comercial .com-dash-head');
+    const load = document.getElementById('comercial-loading');
     const naVel = this.state.aba === 'velocidade';
     if (head) head.hidden = naVel;
+    if (load) load.style.display = !naVel && this.state.loading && !this.state.loaded ? 'flex' : 'none';
     if (resumo) resumo.style.display = !naVel && this.state.loaded ? 'block' : 'none';
     if (vel) vel.hidden = !naVel;
     if (naVel) this.abrirVelocidade();
@@ -926,9 +929,17 @@ const ComercialApp = {
   },
 
   abrirVelocidade() {
+    this.renderVelocidade();
+    if (!this.state.velUnidadeIds) {
+      this.carregarIdsUnidade();
+      return;
+    }
+    if (!this.state.velVendaIds) {
+      this.carregarIdsVenda();
+      return;
+    }
     this.aplicarEmpDoResumo();
     this.renderVelocidade();
-    this.carregarIdsUnidade();
     if (this.state.velEmp) this.carregarVelocidade(this.state.velEmp);
   },
 
@@ -1002,10 +1013,8 @@ const ComercialApp = {
     this._velUnidadeLoading = false;
     this.state.velUnidadeIds = ids;
     if (this.state.velEmp && !ids.has(String(this.state.velEmp))) this.state.velEmp = '';
-    this.aplicarEmpDoResumo();
-    if (this.state.aba !== 'velocidade') return;
-    this.renderVelocidade();
-    if (this.state.velEmp) this.carregarVelocidade(this.state.velEmp);
+    if (this.state.aba === 'velocidade') this.renderVelocidade();
+    this.carregarIdsVenda();
   },
 
   toggleAnoVel(ano) {
@@ -1014,7 +1023,7 @@ const ComercialApp = {
     this.renderVelocidade();
   },
 
-  empreendimentosVel() {
+  empreendimentosBase() {
     const E = window.EstoqueComercialApp;
     const ccs = (window.AppState && AppState.cachedCostCenters) || [];
     let custom = {};
@@ -1027,13 +1036,47 @@ const ComercialApp = {
       return !(E && typeof E.isDeptOnlyCc === 'function' && E.isDeptOnlyCc(c));
     });
     const tipados = base.filter((c) => tipos.includes((custom[c.id] || custom[String(c.id)] || {}).tipo_cc || ''));
-    const lista = (tipados.length ? tipados : base);
+    return tipados.length ? tipados : base;
+  },
+
+  empreendimentosVel() {
     const unidades = this.state.velUnidadeIds;
-    const comUnidade = unidades ? lista.filter((c) => unidades.has(String(c.id))) : [];
-    return comUnidade.map((c) => ({
+    const vendas = this.state.velVendaIds;
+    const comUnidade = unidades ? this.empreendimentosBase().filter((c) => unidades.has(String(c.id))) : [];
+    const lista = vendas ? comUnidade.filter((c) => vendas.has(String(c.id))) : [];
+    return lista.map((c) => ({
       id: String(c.id),
       label: String(c.id) + ' - ' + String(c.name || '').trim().toUpperCase()
     }));
+  },
+
+  async temContratoAtivo(id) {
+    for (const sit of [2, 4]) {
+      const res = await siengeFetchWithRetry('/sales-contracts?enterpriseId=' + encodeURIComponent(id) + '&situation=' + sit + '&limit=1').catch(() => null);
+      if (((res && res.results) || []).length) return true;
+    }
+    return false;
+  },
+
+  async carregarIdsVenda() {
+    if (this._velVendaLoading || this.state.velVendaIds) return;
+    if (!this.state.velUnidadeIds) return;
+    this._velVendaLoading = true;
+    const candidatos = this.empreendimentosBase().filter((c) => this.state.velUnidadeIds.has(String(c.id))).map((c) => String(c.id));
+    const ids = new Set();
+    const lote = 4;
+    for (let i = 0; i < candidatos.length; i += lote) {
+      const fatia = candidatos.slice(i, i + lote);
+      const achou = await Promise.all(fatia.map((id) => this.temContratoAtivo(id)));
+      fatia.forEach((id, idx) => { if (achou[idx]) ids.add(id); });
+    }
+    this._velVendaLoading = false;
+    this.state.velVendaIds = ids;
+    if (this.state.velEmp && !ids.has(String(this.state.velEmp))) this.state.velEmp = '';
+    this.aplicarEmpDoResumo();
+    if (this.state.aba !== 'velocidade') return;
+    this.renderVelocidade();
+    if (this.state.velEmp) this.carregarVelocidade(this.state.velEmp);
   },
 
   async paginarSienge(base) {
@@ -1249,22 +1292,22 @@ const ComercialApp = {
       query: this.state.velEmpQuery,
       single: true,
       emptyMeansAll: false,
+      emptyLabel: 'Selecione o empreendimento',
       nouns: {
         singular: 'empreendimento',
         plural: 'empreendimentos',
-        none: this.state.velUnidadeIds ? 'Nenhum empreendimento com unidades' : 'Lendo empreendimentos…',
+        none: this.state.velVendaIds ? 'Nenhum empreendimento com venda' : 'Lendo empreendimentos…',
         noMatch: 'Nenhum empreendimento com esse nome.'
       }
     }) : '';
     const pack = this.state.velEmp ? this.state.velCache[this.state.velEmp] : null;
-    let miolo = '<p class="com-vel-nota">Escolha um empreendimento com unidades. A velocidade usa toda a história dele.</p>';
+    let miolo = '<p class="com-vel-nota">Escolha um empreendimento que já tem contrato de venda. A velocidade usa toda a história dele.</p>';
     if (pack && !pack.pronto) miolo = `<p class="com-vel-status">${this.esc(pack.status || 'Carregando…')}</p>`;
     else if (pack && pack.erro) miolo = `<p class="com-vel-status">${this.esc(pack.erro)}</p>`;
     else if (pack && pack.pronto) miolo = this.htmlVelocidade(pack);
     root.innerHTML = `
       <div class="com-vel-top">
         ${filtro}
-        <p class="com-vel-nota">A lista traz só empreendimentos com unidades vinculadas. A escolha é de um por vez. Lotes vendidos contam cada venda, inclusive quando o mesmo lote volta ao estoque. Plano curto vai até 48 parcelas.</p>
       </div>
       ${miolo}`;
     this.bindVelEmp();
