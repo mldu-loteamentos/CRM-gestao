@@ -14,7 +14,13 @@ const ComercialApp = {
     sortKey: 'var',
     sortDir: 'desc',
     updatedAt: null,
-    charts: {}
+    charts: {},
+    aba: 'resumo',
+    velEmp: '',
+    velLado: 'comercial',
+    velAberto: {},
+    velCache: {},
+    velGen: 0
   },
 
   todayParts() {
@@ -159,7 +165,7 @@ const ComercialApp = {
     const content = document.getElementById('comercial-dashboard-content');
     const btn = document.getElementById('comercial-btn-search');
     if (load) load.style.display = on && !this.state.loaded ? 'flex' : 'none';
-    if (content && this.state.loaded) content.style.display = 'block';
+    if (content && this.state.loaded && this.state.aba !== 'velocidade') content.style.display = 'block';
     if (on) this.setLoadProgress(4);
     else this.stopLoadTicker();
     if (btn) {
@@ -782,8 +788,9 @@ const ComercialApp = {
     }
 
     const content = document.getElementById('comercial-dashboard-content');
-    if (content) content.style.display = 'block';
-    this.renderCharts(agg);
+    if (content) content.style.display = this.state.aba === 'velocidade' ? 'none' : 'block';
+    if (this.state.aba === 'velocidade') this.renderVelocidade();
+    else this.renderCharts(agg);
     if (window.lucide) window.lucide.createIcons();
   },
 
@@ -895,6 +902,380 @@ const ComercialApp = {
         ${num(totVY, 'venda')}${num(totDY, 'distrato')}${num(totVY - totDY, 'var')}
       </tr>`;
     if (window.lucide) window.lucide.createIcons();
+  },
+
+  setAba(id) {
+    this.state.aba = id === 'velocidade' ? 'velocidade' : 'resumo';
+    document.querySelectorAll('#comercial-abas .ml-tab').forEach((btn, i) => {
+      const on = (i === 0 && this.state.aba === 'resumo') || (i === 1 && this.state.aba === 'velocidade');
+      btn.classList.toggle('is-active', on);
+      btn.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    const resumo = document.getElementById('comercial-dashboard-content');
+    const vel = document.getElementById('comercial-velocidade');
+    const naVel = this.state.aba === 'velocidade';
+    if (resumo) resumo.style.display = !naVel && this.state.loaded ? 'block' : 'none';
+    if (vel) vel.hidden = !naVel;
+    if (naVel) this.abrirVelocidade();
+    else if (this.state.loaded) this.renderCharts(this.aggregate());
+    if (window.lucide) window.lucide.createIcons();
+  },
+
+  abrirVelocidade() {
+    if (!this.state.velEmp && this.state.selectedProduct) {
+      const hit = this.empreendimentosVel().find((e) => e.name === this.state.selectedProduct);
+      if (hit) this.state.velEmp = hit.id;
+    }
+    this.renderVelocidade();
+    if (this.state.velEmp) this.carregarVelocidade(this.state.velEmp);
+  },
+
+  setVelEmp(id) {
+    this.state.velEmp = String(id || '');
+    this.state.velAberto = {};
+    this.renderVelocidade();
+    if (this.state.velEmp) this.carregarVelocidade(this.state.velEmp);
+  },
+
+  setVelLado(lado) {
+    this.state.velLado = lado === 'marketing' ? 'marketing' : 'comercial';
+    this.renderVelocidade();
+  },
+
+  toggleAnoVel(ano) {
+    const y = String(ano);
+    this.state.velAberto[y] = !this.state.velAberto[y];
+    this.renderVelocidade();
+  },
+
+  empreendimentosVel() {
+    const map = new Map();
+    const ccs = (window.AppState && AppState.cachedCostCenters) || [];
+    ccs.forEach((c) => {
+      if (!c || c.id == null) return;
+      const nome = String(c.name || '').trim();
+      if (!nome) return;
+      map.set(String(c.id), nome.toUpperCase());
+    });
+    if (this.state.loaded) {
+      Object.keys(this.aggregate().produtos || {}).forEach((name) => {
+        const id = String((this.aggregate().produtos[name] || {}).id || '');
+        if (id && !map.has(id)) map.set(id, name);
+      });
+    }
+    return [...map.entries()].map(([id, name]) => ({ id: id, name: name })).sort((a, b) => a.name.localeCompare(b.name, 'pt'));
+  },
+
+  async paginarSienge(base) {
+    const all = [];
+    let offset = 0;
+    while (offset < 20000) {
+      const url = base + (base.indexOf('?') >= 0 ? '&' : '?') + 'limit=200&offset=' + offset;
+      const res = await siengeFetchWithRetry(url).catch(() => ({ results: [] }));
+      const results = (res && res.results) || [];
+      all.push.apply(all, results);
+      if (results.length < 200) break;
+      offset += 200;
+    }
+    return all;
+  },
+
+  foldVel(s) {
+    return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+  },
+
+  parcelasContrato(c) {
+    const conds = Array.isArray(c && c.paymentConditions) ? c.paymentConditions : [];
+    let mensal = 0;
+    let todas = 0;
+    conds.forEach((cond) => {
+      const q = Number(cond.installmentsNumber || cond.numberOfInstallments || cond.quantity || cond.installments) || 0;
+      if (!(q > 0)) return;
+      todas += q;
+      const nome = this.foldVel(cond.conditionTypeName || cond.conditionType || cond.description || '');
+      if (/SINAL|ENTRADA|\bATO\b|CHAVES|INTERMEDIAR|BALAO|REFORCO/.test(nome) && q <= 4) return;
+      mensal += q;
+    });
+    if (mensal > 0) return mensal;
+    if (todas > 0) return todas;
+    const n = Number(c && (c.numberOfInstallments || c.installmentsNumber)) || 0;
+    return n > 0 ? n : 0;
+  },
+
+  ladoCac(id, nome) {
+    const code = String(id || '');
+    const fold = this.foldVel(nome);
+    if (/COMISS|CORRETAG/.test(fold)) return '';
+    const dig = code.replace(/\D/g, '');
+    if (code === '2.03.05' || code.indexOf('2.03.05.') === 0 || (dig && dig.indexOf('20305') === 0) || fold.indexOf('MARKETING') >= 0) return 'marketing';
+    const PF = window.PlanoFinanceiroApp;
+    let g = null;
+    if (PF && typeof PF.suggestGroup === 'function') g = PF.suggestGroup({ id: code, name: nome || '' });
+    if (g === 'g_05_02') return 'marketing';
+    if (g === 'g_05_01') return 'comercial';
+    return '';
+  },
+
+  async carregarVelocidade(empId) {
+    const id = String(empId || '');
+    if (!id) return;
+    const gen = (this.state.velGen += 1);
+    const ja = this.state.velCache[id];
+    if (ja && ja.pronto) {
+      this.renderVelocidade();
+      if (!ja.cacPronto) this.carregarCac(id, gen);
+      return;
+    }
+    this.state.velCache[id] = { pronto: false, status: 'Lendo lotes e contratos…', unidades: [], contratos: [] };
+    this.renderVelocidade();
+    try {
+      const unidades = await this.paginarSienge('/units?enterpriseId=' + encodeURIComponent(id) + '&additionalData=NONE');
+      if (gen !== this.state.velGen) return;
+      const listas = await Promise.all([2, 3, 4].map((s) => this.paginarSienge('/sales-contracts?enterpriseId=' + encodeURIComponent(id) + '&situation=' + s)));
+      if (gen !== this.state.velGen) return;
+      const byId = new Map();
+      listas.flat().forEach((c) => { if (c && c.id != null) byId.set(String(c.id), c); });
+      this.state.velCache[id] = { pronto: true, unidades: unidades, contratos: [...byId.values()], status: '', cac: null, cacPronto: false };
+      this.renderVelocidade();
+      this.carregarCac(id, gen);
+    } catch (e) {
+      if (gen !== this.state.velGen) return;
+      this.state.velCache[id] = { pronto: true, erro: 'Não foi possível ler este empreendimento no Sienge.', unidades: [], contratos: [], cacPronto: true };
+      this.renderVelocidade();
+    }
+  },
+
+  somarCac(bills, empId, porMes) {
+    (bills || []).forEach((bill) => {
+      const cats = (Array.isArray(bill && bill.paymentsCategories) ? bill.paymentsCategories : []).filter((c) => c && String(c.costCenterId) === String(empId));
+      if (!cats.length) return;
+      const pays = Array.isArray(bill.payments) ? bill.payments : [];
+      pays.forEach((p) => {
+        const dia = String((p && (p.paymentDate || p.payOffDate)) || '').slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dia)) return;
+        const liquido = Number(p.netAmount != null ? p.netAmount : (p.grossAmount != null ? p.grossAmount : 0)) || 0;
+        const valor = Math.abs(liquido) + Math.abs(Number(p.taxAmount) || 0);
+        if (!(valor > 0.009)) return;
+        const ym = dia.slice(0, 7);
+        cats.forEach((cat) => {
+          const lado = this.ladoCac(cat.financialCategoryId, cat.financialCategoryName);
+          if (!lado) return;
+          const rate = cat.financialCategoryRate != null ? Number(cat.financialCategoryRate) / 100 : 1;
+          const bag = porMes[ym] || (porMes[ym] = { comercial: 0, marketing: 0 });
+          bag[lado] += valor * (Number.isFinite(rate) ? rate : 1);
+        });
+      });
+    });
+  },
+
+  async carregarCac(empId, gen) {
+    const pack = this.state.velCache[empId];
+    if (!pack || !pack.pronto || pack.cacPronto) return;
+    const ccs = (window.AppState && AppState.cachedCostCenters) || [];
+    const cc = ccs.find((c) => String(c.id) === String(empId));
+    const companyId = cc && (cc.idCompany != null ? cc.idCompany : cc.companyId);
+    const base = window.ComprasPrevisoesApp;
+    if (!companyId || !base || typeof base.outcomeRange !== 'function') {
+      pack.cacPronto = true;
+      pack.cacNota = 'O centro não tem empresa para somar as despesas do CAC.';
+      this.renderVelocidade();
+      return;
+    }
+    const anos = [];
+    (pack.contratos || []).forEach((c) => {
+      const y = Number(String(c.issueDate || c.contractDate || '').slice(0, 4));
+      if (y > 1990 && anos.indexOf(y) < 0) anos.push(y);
+    });
+    anos.sort((a, b) => a - b);
+    const porMes = {};
+    const api = Object.create(base);
+    api.outcomeEndpoint = (start, end, emp) => '/bulk-data/v1/outcome?startDate=' + encodeURIComponent(start)
+      + '&endDate=' + encodeURIComponent(end)
+      + '&selectionType=P&correctionIndexerId=0&correctionDate=2023-01-01&withAuthorizations=false&withBankMovements=true'
+      + '&costCentersId=' + encodeURIComponent(empId)
+      + (emp ? '&companyId=' + encodeURIComponent(emp) : '');
+    try {
+      for (let i = 0; i < anos.length; i++) {
+        if (gen !== this.state.velGen) return;
+        pack.status = 'Somando despesas de ' + anos[i] + '…';
+        this.renderVelocidade();
+        const bills = await api.outcomeRange(anos[i] + '-01-01', anos[i] + '-12-31', String(companyId));
+        this.somarCac(bills, empId, porMes);
+      }
+    } catch (e) {
+      pack.cacNota = 'As despesas do CAC não fecharam nesta consulta.';
+    }
+    if (gen !== this.state.velGen) return;
+    pack.cac = porMes;
+    pack.cacPronto = true;
+    pack.status = '';
+    this.renderVelocidade();
+  },
+
+  modeloVel(pack) {
+    const unidades = (pack && pack.unidades) || [];
+    const contratos = (pack && pack.contratos) || [];
+    const fora = { E: 1, M: 1, R: 1 };
+    let lotes = 0;
+    let estoque = 0;
+    let vendaveis = 0;
+    unidades.forEach((u) => {
+      lotes += 1;
+      const code = String((u && u.commercialStock) || '').toUpperCase();
+      if (code === 'D') estoque += 1;
+      if (!fora[code]) vendaveis += 1;
+    });
+    const limites = [6, 12, 24, 36, 48, 60, 120, 156, 180];
+    const rotulos = ['Até 6x', 'Até 12x', 'Até 24x', 'Até 36x', 'Até 48x', 'Até 60x', 'Até 120x', 'Até 156x', 'Até 180x'];
+    const faixas = limites.map(() => 0);
+    let curto = 0;
+    let longo = 0;
+    let semPlano = 0;
+    const meses = {};
+    contratos.forEach((c) => {
+      const qty = this.contractQty(c);
+      const venda = String(c.issueDate || c.contractDate || '').slice(0, 7);
+      if (/^\d{4}-\d{2}$/.test(venda)) {
+        const slot = meses[venda] || (meses[venda] = { v: 0, d: 0 });
+        slot.v += qty;
+      }
+      const cancel = String(c.cancellationDate || '').slice(0, 7);
+      if (/^\d{4}-\d{2}$/.test(cancel)) {
+        const slot = meses[cancel] || (meses[cancel] = { v: 0, d: 0 });
+        slot.d += qty;
+      }
+      const n = this.parcelasContrato(c);
+      if (!(n > 0)) { semPlano += 1; return; }
+      if (n <= 48) curto += 1;
+      else longo += 1;
+      let i = limites.findIndex((l) => n <= l);
+      if (i < 0) i = limites.length - 1;
+      faixas[i] += 1;
+    });
+    let vendas = 0;
+    let distratos = 0;
+    Object.keys(meses).forEach((k) => { vendas += meses[k].v; distratos += meses[k].d; });
+    return { lotes: lotes, estoque: estoque, vendaveis: vendaveis || lotes, vendas: vendas, distratos: distratos, curto: curto, longo: longo, semPlano: semPlano, faixas: faixas, rotulos: rotulos, meses: meses };
+  },
+
+  fmtPctVel(n) {
+    if (n == null || !Number.isFinite(n)) return '—';
+    return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
+  },
+
+  fmtCac(n) {
+    if (n == null || !Number.isFinite(n)) return '—';
+    return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
+  },
+
+  renderVelocidade() {
+    const root = document.getElementById('comercial-velocidade');
+    if (!root || this.state.aba !== 'velocidade') return;
+    const emps = this.empreendimentosVel();
+    const opts = '<option value="">Escolha o empreendimento</option>' + emps.map((e) => `<option value="${this.esc(e.id)}"${e.id === this.state.velEmp ? ' selected' : ''}>${this.esc(e.id + ' - ' + e.name)}</option>`).join('');
+    const pack = this.state.velEmp ? this.state.velCache[this.state.velEmp] : null;
+    let miolo = '<p class="com-vel-nota">Escolha o empreendimento. A velocidade usa toda a história dele, não só o ano do resumo.</p>';
+    if (pack && !pack.pronto) miolo = `<p class="com-vel-status">${this.esc(pack.status || 'Carregando…')}</p>`;
+    else if (pack && pack.erro) miolo = `<p class="com-vel-status">${this.esc(pack.erro)}</p>`;
+    else if (pack && pack.pronto) miolo = this.htmlVelocidade(pack);
+    root.innerHTML = `
+      <div class="com-vel-top">
+        <label>Empreendimento
+          <select onchange="ComercialApp.setVelEmp(this.value)">${opts}</select>
+        </label>
+        <p class="com-vel-nota">Lotes vendidos contam cada venda, inclusive quando o mesmo lote volta ao estoque e é vendido de novo. Plano curto vai até 48 parcelas. Plano longo começa em 49. O CAC divide a despesa do mês pelo número de vendas do mês. Comercial não inclui comissão.</p>
+      </div>
+      ${miolo}`;
+    if (window.lucide) window.lucide.createIcons();
+  },
+
+  htmlVelocidade(pack) {
+    const m = this.modeloVel(pack);
+    const base = m.vendaveis || m.lotes;
+    const velTotal = base > 0 ? (m.vendas / base) * 100 : null;
+    const vezes = m.lotes > 0 ? (m.vendas / m.lotes) * 100 : null;
+    const cac = pack.cac || {};
+    const somaLado = (de, ate, lado) => {
+      let t = 0;
+      Object.keys(cac).forEach((ym) => {
+        if (ym < de || ym > ate) return;
+        t += Number(cac[ym] && cac[ym][lado]) || 0;
+      });
+      return t;
+    };
+    const comercial = somaLado('0000-00', '9999-99', 'comercial');
+    const marketing = somaLado('0000-00', '9999-99', 'marketing');
+    const cacCard = m.vendas > 0 && pack.cacPronto ? (comercial + marketing) / m.vendas : null;
+    const lado = this.state.velLado;
+    const comPlano = m.curto + m.longo;
+    const pct = (n) => comPlano > 0 ? (n / comPlano) * 100 : 0;
+    const barras = m.rotulos.map((nome, i) => {
+      const p = pct(m.faixas[i]);
+      return `<div class="com-vel-bar"><span>${nome}</span><i><b style="width:${p.toFixed(1)}%"></b></i><em>${this.fmtPctVel(comPlano ? p : null)}</em></div>`;
+    }).join('');
+    const anos = [...new Set(Object.keys(m.meses).map((k) => k.slice(0, 4)))].sort();
+    if (anos.length && !Object.keys(this.state.velAberto).length) this.state.velAberto[anos[anos.length - 1]] = true;
+    const linha = (rotulo, v, d, cls, anoMesDe, anoMesAte, clique) => {
+      const saldo = v - d;
+      const parte = m.vendas > 0 ? (v / m.vendas) * 100 : null;
+      const vel = base > 0 ? (v / base) * 100 : null;
+      const gasto = somaLado(anoMesDe, anoMesAte, lado);
+      const unit = v > 0 && pack.cacPronto ? gasto / v : null;
+      return `<tr class="${cls}"${clique ? ` onclick="ComercialApp.toggleAnoVel('${rotulo}')"` : ''}>
+        <td>${this.esc(rotulo)}</td>
+        <td>${this.fmtInt(v)}</td><td>${this.fmtInt(d)}</td><td>${this.fmtInt(saldo)}</td>
+        <td>${this.fmtPctVel(parte)}</td><td>${this.fmtPctVel(vel)}</td>
+        <td>${pack.cacPronto ? this.fmtCac(unit) : (pack.status ? '…' : '—')}</td>
+      </tr>`;
+    };
+    let corpo = '';
+    anos.forEach((ano) => {
+      let v = 0;
+      let d = 0;
+      const chaves = Object.keys(m.meses).filter((k) => k.slice(0, 4) === ano).sort();
+      chaves.forEach((k) => { v += m.meses[k].v; d += m.meses[k].d; });
+      corpo += linha(ano, v, d, 'com-vel-ano', ano + '-01', ano + '-12', true);
+      if (this.state.velAberto[ano]) {
+        chaves.forEach((k) => {
+          const mes = COM_MESES[Number(k.slice(5, 7)) - 1] || k;
+          corpo += linha(mes, m.meses[k].v, m.meses[k].d, '', k, k, false);
+        });
+      }
+    });
+    corpo += linha('Total', m.vendas, m.distratos, 'com-vel-total', '0000-00', '9999-99', false);
+    return `
+      <div class="com-vel-kpis">
+        <article class="com-vel-kpi"><span>Total de lotes</span><strong>${m.lotes ? this.fmtInt(m.lotes) : '—'}</strong><small>${this.fmtInt(m.vendaveis)} vendáveis, fora permuta, mútuo e reserva técnica</small></article>
+        <article class="com-vel-kpi"><span>Lotes vendidos</span><strong>${this.fmtInt(m.vendas)}</strong><small>${this.fmtPctVel(vezes)} em relação aos lotes</small></article>
+        <article class="com-vel-kpi"><span>Estoque de lotes</span><strong>${m.lotes ? this.fmtInt(m.estoque) : '—'}</strong><small>Disponíveis agora</small></article>
+        <article class="com-vel-kpi"><span>CAC</span><strong>${this.fmtCac(cacCard)}</strong><small>Comercial sem comissão + marketing, dividido pelas vendas. Velocidade ${this.fmtPctVel(velTotal)}</small></article>
+      </div>
+      <div class="com-vel-grid">
+        <div class="com-vel-card">
+          <h3>Quantas vezes o lote foi vendido</h3>
+          <p>100% é o total de lotes. Acima disso, o mesmo lote entrou em mais de um contrato.</p>
+          <div class="com-vel-bar"><span>Lotes</span><i><b style="width:100%"></b></i><em>${this.fmtInt(m.lotes)}</em></div>
+          <div class="com-vel-bar"><span>Vendas</span><i><b style="width:${Math.min(100, vezes || 0).toFixed(1)}%"></b></i><em>${this.fmtPctVel(vezes)}</em></div>
+        </div>
+        <div class="com-vel-card">
+          <h3>Planos contratados</h3>
+          <p>Curto ${this.fmtInt(m.curto)} · ${this.fmtPctVel(pct(m.curto))}. Longo ${this.fmtInt(m.longo)} · ${this.fmtPctVel(pct(m.longo))}.${m.semPlano ? ' ' + this.fmtInt(m.semPlano) + ' contratos sem a quantidade de parcelas.' : ''}</p>
+          ${barras}
+        </div>
+      </div>
+      <div class="com-vel-card">
+        <div class="ml-tabs" role="tablist">
+          <button type="button" class="ml-tab${lado === 'comercial' ? ' is-active' : ''}" onclick="ComercialApp.setVelLado('comercial')"><i data-lucide="briefcase"></i> Comercial</button>
+          <button type="button" class="ml-tab${lado === 'marketing' ? ' is-active' : ''}" onclick="ComercialApp.setVelLado('marketing')"><i data-lucide="megaphone"></i> Marketing</button>
+        </div>
+        <p>${this.esc(pack.status || pack.cacNota || 'Clique no ano para abrir os meses. A velocidade do mês é as vendas daquele mês divididas pelos lotes vendáveis.')}</p>
+        <div style="overflow-x:auto;">
+          <table class="com-vel-table">
+            <thead><tr><th>Ano</th><th>Vendas</th><th>Distratos</th><th>Saldo</th><th>% do vendido</th><th>Velocidade</th><th>CAC</th></tr></thead>
+            <tbody>${corpo || '<tr><td colspan="7">Nenhum contrato neste empreendimento.</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>`;
   }
 };
 

@@ -1,7 +1,8 @@
 /* Marketing · Budget
    Verba = VGV da obra (Sienge) × % de marketing (definido em Configurações).
    Centro de custo com MARKETING no nome: 100% das despesas entram no budget.
-   Centro sem MARKETING no nome: títulos pagos, em aberto e previsões nas contas do grupo 2.03.05 MARKETING
+   Centro sem MARKETING no nome: baixas, em aberto e previsões nas contas do grupo 2.03.05 MARKETING
+   Realizado: data da baixa, valor líquido mais os impostos retidos.
    (a conta, as filhas e as contas alocadas em 05.02 MARKETING na visão DFC).
    Previsão entra no comprometido junto com o título em aberto.
    A aba Contratos mostra quem está em dia, quem não pagou nada e quem deve a entrada (possíveis cancelamentos).
@@ -505,17 +506,10 @@ const MarketingBudgetApp = {
       this.setProgress("Lendo o grupo de marketing do plano financeiro…", 0.16);
       await this.carregarGrupoMarketing();
       if (gen !== s.gen) return;
-      const faixas = typeof siengeSplitDateRange === "function"
-        ? siengeSplitDateRange(s.startDate, s.endDate)
-        : [{ start: s.startDate, end: s.endDate }];
-      const totalPassos = Math.max(1, s.ccsCfg.length * faixas.length);
       const bills = [];
       for (let i = 0; i < s.ccsCfg.length; i++) {
         const alvo = s.costCenters.find((c) => String(c.id) === s.ccsCfg[i]) || { id: s.ccsCfg[i] };
-        const parte = await this.buscarTitulos(alvo, gen, "", (idx) => {
-          const passo = i * faixas.length + idx + 1;
-          this.setProgress("Buscando os títulos a pagar…", 0.16 + 0.72 * (passo / totalPassos));
-        });
+        const parte = await this.buscarTitulos(alvo, gen);
         if (gen !== s.gen) return;
         bills.push.apply(bills, parte);
       }
@@ -597,24 +591,120 @@ const MarketingBudgetApp = {
     if (!base || typeof base.outcomeRange !== "function") throw new Error("O módulo de contas a pagar não está disponível.");
     const s = this.state;
     const api = Object.create(base);
-    api.outcomeEndpoint = (start, end, companyId) => "/bulk-data/v1/outcome?startDate=" + encodeURIComponent(start)
-      + "&endDate=" + encodeURIComponent(end)
-      + "&selectionType=D&correctionIndexerId=0&correctionDate=2023-01-01&withAuthorizations=false&withBankMovements=true"
-      + "&costCentersId=" + encodeURIComponent(cc.id)
-      + (companyId ? "&companyId=" + encodeURIComponent(companyId) : "");
-    const fase = "Buscando os títulos a pagar…";
-    api.noteProgress = () => { if (gen === s.gen) this.setProgress(fase); };
     const companyId = String(cc.idCompany != null ? cc.idCompany : (cc.companyId != null ? cc.companyId : ""));
     const faixas = typeof siengeSplitDateRange === "function" ? siengeSplitDateRange(s.startDate, s.endDate) : [{ start: s.startDate, end: s.endDate }];
+    const tipos = [
+      { tipo: "P", fase: "Buscando as baixas do período…" },
+      { tipo: "D", fase: "Buscando os títulos em aberto…" }
+    ];
     const bills = [];
-    for (let i = 0; i < faixas.length; i++) {
-      if (gen !== s.gen) return [];
-      if (typeof onStep === "function") onStep(i, faixas.length);
-      else this.setProgress(fase);
-      const parte = await api.outcomeRange(faixas[i].start, faixas[i].end, companyId);
-      if (Array.isArray(parte)) bills.push.apply(bills, parte);
+    for (let t = 0; t < tipos.length; t++) {
+      api.outcomeEndpoint = (start, end, emp) => "/bulk-data/v1/outcome?startDate=" + encodeURIComponent(start)
+        + "&endDate=" + encodeURIComponent(end)
+        + "&selectionType=" + tipos[t].tipo + "&correctionIndexerId=0&correctionDate=2023-01-01&withAuthorizations=false&withBankMovements=true"
+        + "&costCentersId=" + encodeURIComponent(cc.id)
+        + (emp ? "&companyId=" + encodeURIComponent(emp) : "");
+      api.noteProgress = () => { if (gen === s.gen) this.setProgress(tipos[t].fase); };
+      for (let i = 0; i < faixas.length; i++) {
+        if (gen !== s.gen) return [];
+        if (typeof onStep === "function") onStep(t * faixas.length + i, tipos.length * faixas.length);
+        else this.setProgress(tipos[t].fase);
+        const parte = await api.outcomeRange(faixas[i].start, faixas[i].end, companyId);
+        if (Array.isArray(parte)) bills.push.apply(bills, parte);
+      }
     }
-    return bills;
+    return this.mesclarTitulos(bills);
+  },
+
+  mesclarTitulos(bills) {
+    const map = new Map();
+    (bills || []).forEach((bill) => {
+      if (!bill || bill.billId == null) return;
+      const k = String(bill.billId) + "|" + String(bill.installmentId != null ? bill.installmentId : "");
+      const prev = map.get(k);
+      const n = (b) => (b && Array.isArray(b.payments) ? b.payments.length : 0);
+      if (!prev || n(bill) >= n(prev)) map.set(k, bill);
+    });
+    return [...map.values()];
+  },
+
+  numBaixa(v) {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  },
+
+  dataBaixa(pay, bm) {
+    const iso = (v) => String(v || "").slice(0, 10);
+    const p = iso(pay && (pay.paymentDate || pay.payOffDate || pay.date));
+    if (/^\d{4}-\d{2}-\d{2}$/.test(p)) return p;
+    const b = iso(bm && bm.bankMovementDate);
+    return /^\d{4}-\d{2}-\d{2}$/.test(b) ? b : "";
+  },
+
+  /** Líquido pago ao credor mais o imposto retido dessa baixa. */
+  valorLiquidoComRetencao(pay, bill, pays) {
+    const abs = (v) => Math.abs(this.numBaixa(v) || 0);
+    const liquido = this.numBaixa(pay && pay.netAmount);
+    const corrigido = this.numBaixa(pay && pay.correctedNetAmount);
+    const base = liquido != null ? Math.abs(liquido) : (corrigido != null ? Math.abs(corrigido) : null);
+    const impostoPag = this.numBaixa(pay && pay.taxAmount);
+    if (base != null) {
+      if (impostoPag != null) return base + Math.abs(impostoPag);
+      const lista = pays || [];
+      if (lista.some((p) => this.numBaixa(p && p.taxAmount) != null)) return base;
+      const impostoTitulo = abs(bill && bill.taxAmount);
+      const pesos = lista.map((p) => Math.abs(this.numBaixa(p && p.netAmount) || this.numBaixa(p && p.correctedNetAmount) || 0));
+      const soma = pesos.reduce((t, v) => t + v, 0);
+      const meu = Math.abs(liquido != null ? liquido : (corrigido || 0));
+      const fatia = soma > 0.009 ? impostoTitulo * (meu / soma) : (lista.length === 1 ? impostoTitulo : 0);
+      return base + fatia;
+    }
+    const bruto = this.numBaixa(pay && pay.grossAmount);
+    if (bruto != null) {
+      return Math.max(0, Math.abs(bruto) - abs(pay.discountAmount) + abs(pay.interestAmount) + abs(pay.fineAmount) + abs(pay.monetaryCorrectionAmount));
+    }
+    const movs = (pay && pay.bankMovements) || [];
+    return movs.reduce((t, bm) => t + abs(bm && bm.bankMovementAmount), 0) + (impostoPag != null ? Math.abs(impostoPag) : 0);
+  },
+
+  baixasDoTitulo(bill, pays, app, docId, docNome) {
+    const lista = (x) => (Array.isArray(x) ? x : (x ? [x] : []));
+    const reais = [];
+    lista(pays).forEach((p) => {
+      const movs = lista(p && p.bankMovements);
+      const uteis = (movs.length ? movs : [null]).filter((bm) => {
+        if (bm && app.SKIP_OPS[bm.operationName || ""]) return false;
+        if (app.isSubstituicao(bill, p, bm, docId, docNome)) return false;
+        return true;
+      });
+      if (!uteis.length) return;
+      const data = uteis.map((bm) => this.dataBaixa(p, bm)).filter(Boolean).sort()[0] || "";
+      if (!data) return;
+      reais.push(p);
+    });
+    const s = this.state;
+    let noPeriodo = 0;
+    let total = 0;
+    let data = "";
+    const fatias = [];
+    reais.forEach((p) => {
+      const movs = lista(p && p.bankMovements);
+      const uteis = (movs.length ? movs : [null]).filter((bm) => {
+        if (bm && app.SKIP_OPS[bm.operationName || ""]) return false;
+        if (app.isSubstituicao(bill, p, bm, docId, docNome)) return false;
+        return true;
+      });
+      const dia = uteis.map((bm) => this.dataBaixa(p, bm)).filter(Boolean).sort()[0] || "";
+      const valor = this.valorLiquidoComRetencao(p, bill, reais);
+      if (!(valor > 0.009)) return;
+      total += valor;
+      if (dia && (!s.startDate || dia >= s.startDate) && (!s.endDate || dia <= s.endDate)) {
+        noPeriodo += valor;
+        if (dia > data) data = dia;
+        fatias.push({ data: dia, valor: valor });
+      }
+    });
+    return { noPeriodo: noPeriodo, total: total, data: data, fatias: fatias };
   },
 
   montarGastos(bills, ccIds) {
@@ -637,31 +727,15 @@ const MarketingBudgetApp = {
       };
       if (pays.some((p) => movsDe(p).some((bm) => app.isSubstituicao(bill, p, bm, docId, docNome)))) return;
       const previsao = app.ehPrevisao(docId, docNome, bill);
-      let pago = false;
       let dataPg = "";
-      pays.forEach((p) => {
-        movsDe(p).forEach((bm) => {
-          if (bm && app.SKIP_OPS[bm.operationName || ""]) return;
-          if (app.isPago(bill, p, bm, docId, docNome)) {
-            pago = true;
-            const d = app.paymentDateOf(bill, p, bm);
-            if (d && d > dataPg) dataPg = d;
-          }
-        });
-      });
       const original = Number(bill.originalAmount) || 0;
       const saldo = app.billBalance(bill);
       const aberta = typeof app.isSituacaoAberta === "function" && app.isSituacaoAberta(bill, null);
-      if (aberta) pago = false;
-      const quitado = !aberta && original > 0.009 && (
-        (saldo != null && saldo <= 0.009) ||
-        (pago && (saldo == null || saldo <= 0.009))
-      );
-      let realizado = 0;
-      if (quitado) realizado = original;
-      else if (pago && saldo != null && saldo > 0.009) realizado = Math.max(0, original - saldo);
-      else if (!previsao && pago) realizado = original;
-      const aberto = Math.max(0, original - realizado);
+      const quitado = !aberta && original > 0.009 && saldo != null && saldo <= 0.009;
+      const baixas = this.baixasDoTitulo(bill, pays, app, docId, docNome);
+      const realizado = baixas.noPeriodo;
+      dataPg = baixas.data || dataPg;
+      const aberto = quitado ? 0 : (saldo != null ? Math.max(0, saldo) : Math.max(0, original - baixas.total));
       const titulo = String(bill.billId);
       const parcela = bill.installmentId != null ? String(bill.installmentId) : "";
       const venc = String(bill.dueDate || "").slice(0, 10);
@@ -680,9 +754,9 @@ const MarketingBudgetApp = {
         const rate = cat.financialCategoryRate != null ? Number(cat.financialCategoryRate) / 100 : 1;
         const fat = Number.isFinite(rate) ? rate : 1;
         const ccId = String(cat.costCenterId);
-        const push = (status, valor, data, prorrogado) => {
+        const push = (status, valor, data, prorrogado, seq) => {
           if (!(valor > 0.009)) return;
-          const key = [titulo, parcela, ccId, catId, status].join("|");
+          const key = [titulo, parcela, ccId, catId, status, data, seq || 0].join("|");
           if (vistos[key]) return;
           vistos[key] = true;
           rows.push({
@@ -700,13 +774,13 @@ const MarketingBudgetApp = {
           if (retro) push("previsao_vencida", original * fat, hoje, true);
           else push("previsao", original * fat, venc);
         } else if (previsao) {
-          push("realizado", realizado * fat, dataPg || venc);
+          baixas.fatias.forEach((b, i) => push("realizado", b.valor * fat, b.data, false, i));
           if (aberto > 0.009) {
             if (retro) push("previsao_vencida", aberto * fat, hoje, true);
             else push("previsao", aberto * fat, venc);
           }
         } else {
-          push("realizado", realizado * fat, dataPg || venc);
+          baixas.fatias.forEach((b, i) => push("realizado", b.valor * fat, b.data, false, i));
           push("comprometido", aberto * fat, (nota && retro) ? hoje : venc, nota && retro);
         }
       });
@@ -1789,7 +1863,7 @@ const MarketingBudgetApp = {
       </div>`;
     const uso = `
       <div class="mkb-kpis">
-        ${this.kpi("Realizado", this.money(r.realizado), "Títulos de marketing já pagos no período", "#105436")}
+        ${this.kpi("Realizado", this.money(r.realizado), "Baixas do período, pelo líquido mais os impostos retidos", "#105436")}
         ${this.kpi("Comprometido", this.money(r.comprometido), "Em aberto e previsão, ainda não pagos", "#f37021")}
         ${this.kpi("Saldo da verba", this.money(r.saldo), r.saldo < 0 ? "A verba já foi ultrapassada" : "O que ainda cabe na verba", r.saldo < 0 ? "#b91c1c" : "#0ea5e9")}
         ${this.kpi("Consumo da verba", r.verba > 0 ? r.consumo.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "%" : "—", "Pago + comprometido, em relação à verba", corConsumo,
@@ -1797,7 +1871,7 @@ const MarketingBudgetApp = {
       </div>
       <div class="mkb-card mkb-chart-full"><div class="mkb-card-h"><h3>Verba e gastos mês a mês</h3><small>Barras = o que foi pago e o que está comprometido · linha = acumulado comparado com a verba</small></div><div class="mkb-canvas"><canvas id="mkb-ch-mes"></canvas></div></div>
       <div class="mkb-card">
-        <div class="mkb-card-h"><h3>Títulos que compõem a verba</h3><small>Pago entra no realizado. Em aberto entra no comprometido. Previsão ou nota vencida antes de hoje não fica no mês passado: entra no comprometido de hoje, porque será prorrogada ou cancelada. Pedido de compra já atendido sai da lista quando a nota dele já está aqui.</small></div>
+        <div class="mkb-card-h"><h3>Títulos que compõem a verba</h3><small>A baixa entra no realizado no dia do pagamento, pelo líquido mais os impostos retidos. Em aberto entra no comprometido. Previsão ou nota vencida antes de hoje não fica no mês passado: entra no comprometido de hoje, porque será prorrogada ou cancelada. Pedido de compra já atendido sai da lista quando a nota dele já está aqui.</small></div>
         <div id="mkb-gastos">${this.gastosHtml(r)}</div>
       </div>`;
     const vendas = `
@@ -2502,7 +2576,7 @@ const MarketingBudgetApp = {
           <div class="mkb-card mkb-filtros">
             <div class="mkb-f-cc" id="mkb-emp-slot"></div>
             <div>
-              <label for="mkb-de">De (vencimento)</label>
+              <label for="mkb-de">De (baixa)</label>
               <input id="mkb-de" type="date" value="${this.esc(s.startDate)}" ${s.loading ? "disabled" : ""} onchange="MarketingBudgetApp.onField('startDate', this.value)">
             </div>
             <div>
