@@ -8621,8 +8621,8 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .docs-table th { position: sticky; top: 0; z-index: 1; background: #f8faf8; color: #105436; font-size: 0.72rem; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; text-align: left; padding: 8px 10px; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
 .docs-table td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; color: #0f172a; vertical-align: middle; }
 .docs-table tbody tr:hover td { background: #f8fafc; }
-.docs-obra td { background: #f0fdf4; color: #105436; font-weight: 800; font-size: 0.78rem; }
-.docs-obra:hover td { background: #f0fdf4; }
+.docs-table tbody tr.docs-obra td,
+.docs-table tbody tr.docs-obra:hover td { background: #f0fdf4; color: #105436; font-weight: 800; font-size: 0.78rem; }
 .docs-obra span { margin-left: 6px; font-weight: 600; color: #64748b; }
 .docs-voce { margin-left: 6px; font-size: 0.68rem; font-weight: 700; color: #105436; background: #ecfdf5; border-radius: 999px; padding: 1px 6px; }
 .docs-sit { display: inline-block; font-size: 0.72rem; font-weight: 700; color: #92400e; background: #fffbeb; border-radius: 999px; padding: 2px 8px; white-space: nowrap; }

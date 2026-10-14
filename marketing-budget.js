@@ -545,7 +545,11 @@ const MarketingBudgetApp = {
   /** Depois do budget na tela: situação de pagamento das vendas e perfil dos clientes. */
   async carregarComplementos(cc, gen) {
     const s = this.state;
-    if (!s.vendas.length && !s.distratos.length) return;
+    if (!s.vendas.length && !s.distratos.length) {
+      s.adimpl.status = "vazio";
+      s.perfis.status = "vazio";
+      return;
+    }
     try {
       await this.carregarAdimplencia(cc, gen);
     } catch (e) {
@@ -2221,9 +2225,14 @@ const MarketingBudgetApp = {
     return "Entrada paga";
   },
 
+  SEM_CONTRATO: "Nenhuma venda nem distrato deste empreendimento no período.",
+
   contratosHtml() {
     const s = this.state;
     const a = s.adimpl;
+    if (!s.vendas.length && !s.distratos.length) {
+      return `<div class="mkb-card mkb-vazio">${this.SEM_CONTRATO}</div>`;
+    }
     if (a.status === "carregando" || a.status === "") {
       return `<div class="mkb-card mkb-perfil-aviso"><div class="spinner" style="width:18px;height:18px;border-width:3px;margin:0;"></div><span>Lendo o Contas a Receber para saber quem paga em dia…</span></div>`;
     }
@@ -2247,8 +2256,6 @@ const MarketingBudgetApp = {
     const fmtN = (n) => Number(n || 0).toLocaleString("pt-BR");
     const lotes = this.lotesDoEmpreendimento();
     const disponiveis = lotes.total ? lotes.total - liquidas : null;
-    const pctVendido = lotes.total ? Math.max(0, Math.min(100, Math.round((liquidas / lotes.total) * 1000) / 10)) : 0;
-    const pctVendidoTxt = pctVendido.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "%";
     const subLotes = lotes.total
       ? `${fmtN(lotes.total)} lotes no empreendimento - ${fmtN(liquidas)} venda${liquidas === 1 ? "" : "s"} líquida${liquidas === 1 ? "" : "s"}`
       : (lotes.status === "lendo" ? "Lendo a posição de estoque…" : "Este empreendimento não tem lotes na posição de estoque");
@@ -2257,13 +2264,19 @@ const MarketingBudgetApp = {
         ${this.kpi("Vendas líquidas", fmtN(liquidas), `${fmtN(vendidos)} vendidos - ${fmtN(cancelados)} já cancelado${cancelados === 1 ? "" : "s"} neste período`, "#6366f1")}
         ${this.kpi("Pagamentos em dia", this.pct(emDia.length, L.length), `${emDia.length} contrato(s) sem parcela vencida`, "#105436")}
         ${this.kpi("Pagamentos em atraso", this.pct(atraso.length, L.length), `${atraso.length} contrato(s) · ${this.money(vencido)} já vencido`, atraso.length ? "#b91c1c" : "#105436")}
-        ${this.kpi("Lotes disponíveis", disponiveis == null ? "—" : fmtN(disponiveis), subLotes, "#6366f1",
-          lotes.total ? `<div class="mkb-pbar" title="${fmtN(liquidas)} vendidos de ${fmtN(lotes.total)} lotes"><div class="mkb-bar"><i style="width:${pctVendido}%;background:#6366f1;"></i></div><b style="color:#6366f1;">${pctVendidoTxt} vendido</b></div>` : "")}
+        ${this.kpi("Lotes disponíveis", disponiveis == null ? "—" : fmtN(disponiveis), subLotes, "#6366f1")}
       </div>
-      ${L.length ? `<div class="mkb-charts mkb-charts-3">
-        <div class="mkb-card"><div class="mkb-card-h"><h3>Em dia e em atraso</h3><small>Dos contratos ativos, quantos pagam no prazo</small></div><div class="mkb-canvas mkb-canvas-curto"><canvas id="mkb-ch-ctr-dia"></canvas></div></div>
+      ${L.length ? `<div class="mkb-charts mkb-charts-2">
         <div class="mkb-card"><div class="mkb-card-h"><h3>Quanto do contrato já foi pago</h3><small>0% significa que nenhuma parcela entrou</small></div><div class="mkb-canvas mkb-canvas-curto"><canvas id="mkb-ch-ctr-pago"></canvas></div></div>
-        <div class="mkb-card"><div class="mkb-card-h"><h3>Há quanto tempo está vencido</h3><small>Conta a partir da parcela vencida mais antiga de cada contrato</small></div><div class="mkb-canvas mkb-canvas-curto"><canvas id="mkb-ch-ctr-atraso"></canvas></div></div>
+        <div class="mkb-card"><div class="mkb-card-h"><h3>Tempo em atraso</h3><small>A partir da parcela vencida mais antiga de cada contrato</small></div>
+          <div class="mkb-tablewrap mkb-tablewrap-livre"><table class="mkb-table">
+            <thead><tr><th>Faixa</th><th style="text-align:right;">Contratos</th></tr></thead>
+            <tbody>${["Em dia"].concat(this.FAIXAS_ATRASO).map((nome) => {
+              const q = nome === "Em dia" ? emDia.length : atraso.filter((c) => this.faixaAtraso(c.pag.dias || 0) === nome).length;
+              return `<tr><td>${nome}</td><td style="text-align:right;">${fmtN(q)}</td></tr>`;
+            }).join("")}</tbody>
+          </table></div>
+        </div>
       </div>` : `<div class="mkb-card"><p class="mkb-vazio" style="margin:0;">Nenhum contrato ativo com saldo a pagar ${todos ? "neste empreendimento" : "entre as vendas do período"}.</p></div>`}`;
     return `<div class="mkb-card mkb-ctr-top">
         ${escopo}
@@ -2309,23 +2322,11 @@ const MarketingBudgetApp = {
         }
       }]
     });
-    const elD = document.getElementById("mkb-ch-ctr-dia");
-    if (elD) {
-      const emDia = L.filter((c) => c.pag.status === "adimplente").length;
-      this.charts.ctrDia = barras(elD, ["Em dia", "Em atraso"], [emDia, n - emDia], ["#105436", "#b91c1c"], true);
-    }
     const elP = document.getElementById("mkb-ch-ctr-pago");
     if (elP) {
       const nomes = this.FAIXAS_PAGO.map((f) => f.nome);
       const data = nomes.map((nm) => L.filter((c) => this.faixaPago(c.pag) === nm).length);
       this.charts.ctrPago = barras(elP, nomes, data, nomes.map((_, i) => (i === 0 ? "#b91c1c" : (i === 1 ? "#f37021" : "#105436"))), false);
-    }
-    const elA = document.getElementById("mkb-ch-ctr-atraso");
-    if (elA) {
-      const atr = L.filter((c) => c.pag.status === "inadimplente");
-      const nomes = ["Em dia"].concat(this.FAIXAS_ATRASO);
-      const data = [L.length - atr.length].concat(this.FAIXAS_ATRASO.map((f) => atr.filter((c) => this.faixaAtraso(c.pag.dias || 0) === f).length));
-      this.charts.ctrAtraso = barras(elA, nomes, data, ["#105436", "#eab308", "#f37021", "#dc2626", "#7f1d1d"], false);
     }
   },
 
@@ -2374,7 +2375,7 @@ const MarketingBudgetApp = {
     const L = this.linhasPerfil();
     const ativos = L.filter((x) => !x.cancelado);
     const canc = L.filter((x) => x.cancelado);
-    if (!L.length) return `<div class="mkb-card mkb-vazio">Nenhuma venda nem distrato deste empreendimento no período.</div>`;
+    if (!L.length) return `<div class="mkb-card mkb-vazio">${this.SEM_CONTRATO}</div>`;
     const carregando = [];
     if (s.adimpl.status === "carregando" || s.adimpl.status === "") carregando.push("Lendo o Contas a Receber para saber quem paga em dia…");
     if (s.perfis.status === "carregando" || s.perfis.status === "") carregando.push(`Lendo o cadastro dos clientes · ${s.perfis.feitos} de ${s.perfis.total}`);
@@ -2413,21 +2414,15 @@ const MarketingBudgetApp = {
         ${this.kpi("Homens", this.pct(homens, pf.length), `${homens} contrato(s) de pessoa física`, "#0ea5e9")}
         ${this.kpi("Idade média na venda", idadeMedia != null ? Math.round(idadeMedia) + " anos" : "—", `${comIdade.length} cliente(s) com data de nascimento`, "#0f766e")}
       </div>
-      <div class="mkb-par mkb-par-sexo">
-        <div class="mkb-card"><div class="mkb-card-h"><h3>Vendas por sexo</h3><small>Quantidade de contratos ativos em cada grupo</small></div><div class="mkb-canvas"><canvas id="mkb-ch-sexo"></canvas></div></div>
-        <div class="mkb-card"><div class="mkb-card-h"><h3>Vendas por faixa etária</h3><small>Idade na data da venda · o número em cada cor é a quantidade, e o de cima é o total</small></div><div class="mkb-canvas mkb-canvas-alto"><canvas id="mkb-ch-faixa"></canvas></div></div>
-      </div>`;
+      <div class="mkb-card"><div class="mkb-card-h"><h3>Vendas por faixa etária</h3><small>Idade na data da venda · o número em cada cor é a quantidade, e o de cima é o total</small></div><div class="mkb-canvas mkb-canvas-alto"><canvas id="mkb-ch-faixa"></canvas></div></div>`;
     const pagando = `
       <div class="mkb-kpis mkb-kpis-2">
         ${this.kpi("Pagamentos em atraso", this.pct(atraso.length, comPag.length), `${atraso.length} de ${comPag.length} contrato(s) com parcela vencida${semTitulo ? ` · ${semTitulo} sem título no Contas a Receber` : ""}`, atraso.length ? "#b91c1c" : "#105436")}
         ${this.kpi("Valor vencido", this.money(vencido), "Soma das parcelas vencidas e ainda não pagas", "#f37021")}
       </div>
-      <div class="mkb-par mkb-par-pag">
-        <div class="mkb-card"><div class="mkb-card-h"><h3>Em dia e em atraso por idade</h3></div><div class="mkb-canvas mkb-canvas-alto"><canvas id="mkb-ch-pag"></canvas></div></div>
       <div class="mkb-card">
           <div class="mkb-card-h"><small>Em dia inclui quem já quitou · em atraso é quem tem parcela vencida</small></div>
         ${tabelaPag}
-      </div>
       </div>`;
     const cancelou = `
       <div class="mkb-kpis mkb-kpis-2">
@@ -2523,37 +2518,6 @@ const MarketingBudgetApp = {
     const eixoX = { stacked: true, ticks: { font: { size: 11 }, maxRotation: 0, minRotation: 0, autoSkip: false } };
     const eixoY = { stacked: true, beginAtZero: true, ticks: { precision: 0 }, grace: "12%" };
     const numeros = this.pluginNumeros();
-    const elS = document.getElementById("mkb-ch-sexo");
-    if (elS) {
-      const ks = ["F", "M", "PJ", "?"].filter((k) => ativos.some((x) => x.sexo === k));
-      const data = ks.map((k) => ativos.filter((x) => x.sexo === k).length);
-      const total = data.reduce((t, n) => t + n, 0);
-      this.charts.sexo = new Chart(elS, {
-        type: "doughnut",
-        data: { labels: ks.map((k) => this.SEXOS[k]), datasets: [{ data, backgroundColor: ks.map((k) => corSexo[k]) }] },
-        options: {
-          responsive: true, maintainAspectRatio: false, cutout: "58%",
-          plugins: {
-            legend: {
-              ...legenda,
-              labels: {
-                ...legenda.labels,
-                generateLabels: (chart) => {
-                  const ds = chart.data.datasets[0];
-                  return chart.data.labels.map((label, i) => ({
-                    text: `${label} - ${this.pct(ds.data[i], total)}`,
-                    fillStyle: ds.backgroundColor[i],
-                    strokeStyle: ds.backgroundColor[i],
-                    index: i
-                  }));
-                }
-              }
-            }
-          }
-        },
-        plugins: [numeros]
-      });
-    }
     const faixas = this.ordemFaixas().filter((f) => ativos.some((x) => x.faixa === f));
     const elF = document.getElementById("mkb-ch-faixa");
     if (elF) {
@@ -2561,28 +2525,6 @@ const MarketingBudgetApp = {
       this.charts.faixa = new Chart(elF, {
         type: "bar",
         data: { labels: faixas, datasets: ks.map((k) => ({ label: this.SEXOS[k], data: faixas.map((f) => ativos.filter((x) => x.faixa === f && x.sexo === k).length), backgroundColor: corSexo[k], stack: "s" })) },
-        options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 16 } }, plugins: { legend: legenda }, scales: { x: eixoX, y: eixoY } },
-        plugins: [numeros]
-      });
-    }
-    const elP = document.getElementById("mkb-ch-pag");
-    if (elP) {
-      const tabela = document.querySelector("#marketing-budget-root .mkb-par-pag .mkb-tablewrap-livre");
-      const box = elP.parentElement;
-      if (tabela && box) {
-        const h = Math.round(tabela.getBoundingClientRect().height);
-        if (h > 160) box.style.height = h + "px";
-      }
-      const g = this.grupos(ativos, (x) => x.faixa, faixas);
-      this.charts.pag = new Chart(elP, {
-        type: "bar",
-        data: {
-          labels: g.map((x) => x.nome),
-          datasets: [
-            { label: "Em dia", data: g.map((x) => x.emDia), backgroundColor: "#105436", stack: "p" },
-            { label: "Em atraso", data: g.map((x) => x.atraso), backgroundColor: "#f37021", stack: "p" }
-          ]
-        },
         options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 16 } }, plugins: { legend: legenda }, scales: { x: eixoX, y: eixoY } },
         plugins: [numeros]
       });
