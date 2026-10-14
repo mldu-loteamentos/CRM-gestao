@@ -9600,6 +9600,17 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .pcx-det-aviso.is-warn { background: #fffbeb; color: #92400e; }
 .cc-table .pcx-mini td.pcx-orig-doc { font-weight: 700; color: #105436; white-space: nowrap; }
 .pcx-tabs { margin-bottom: 10px; }
+.pcx-kpis { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; }
+.pcx-kpi { flex: 1 1 160px; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; min-width: 140px; }
+.pcx-kpi span { display: block; color: #64748b; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; }
+.pcx-kpi strong { display: block; margin-top: 2px; font-size: 1.15rem; font-variant-numeric: tabular-nums; color: #0f172a; }
+.pcx-kpi strong.is-in, .pcx-valor.is-in { color: #15803d; }
+.pcx-kpi strong.is-out, .pcx-valor.is-out { color: #b91c1c; }
+.pcx-kpi small { display: block; margin-top: 2px; color: #94a3b8; font-size: 0.72rem; }
+.pcx-bloco { margin: 12px 0 0; }
+.pcx-bloco-tit { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px; font-size: 0.82rem; font-weight: 800; color: #105436; }
+.pcx-bloco-tit span { font-weight: 600; color: #64748b; font-size: 0.74rem; }
+.pcx-dash-scroll { max-height: 360px; }
 .pcx-resumo { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
 .pcx-pills { display: flex; gap: 6px; flex-wrap: wrap; }
 .pcx-pill { border: 1px solid #e2e8f0; background: #fff; color: #475569; border-radius: 999px; padding: 3px 10px; font-size: 0.74rem; font-weight: 700; cursor: pointer; }

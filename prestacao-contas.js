@@ -30,6 +30,9 @@ const PrestacaoContasApp = {
   guias: {},
   rastreio: null,
   GUIAS_CACHE: "crm_pcx_guias_v2",
+  dash: null,
+  dashGen: 0,
+  dashSort: { key: "", dir: 1 },
 
   init() {
     if (this.month === 12 && new Date().getMonth() === 0) this.year = new Date().getFullYear() - 1;
@@ -418,10 +421,21 @@ const PrestacaoContasApp = {
   },
 
   setAba(id) {
-    this.aba = id === "repasse" ? "repasse" : "obra";
+    const ok = { obra: 1, repasse: 1, resumo: 1, vendas: 1, estoque: 1, carteira: 1, inad: 1 };
+    this.aba = ok[id] ? id : "obra";
     this.confFiltro = "";
     this.confAberta = "";
     this.gruposAbertos = new Set();
+    this.dashSort = { key: "", dir: 1 };
+    this.render();
+    if (this.aba === "vendas" || this.aba === "estoque" || this.aba === "carteira" || this.aba === "inad") {
+      this.carregarPainel(this.aba);
+    }
+  },
+
+  ordenarDash(key) {
+    if (this.dashSort.key === key) this.dashSort.dir *= -1;
+    else this.dashSort = { key, dir: key === "valor" || key.endsWith(".valor") || key.endsWith(".n") ? -1 : 1 };
     this.render();
   },
 
@@ -1308,7 +1322,8 @@ const PrestacaoContasApp = {
     const conf = this.conferencias || { receitas: [], despesas: [], repasses: [] };
     const nFora = (rows) => (rows || []).filter(r => r.status === "fora").length;
     const pad = n => String(n).padStart(2, "0");
-    const aba = this.aba === "repasse" ? "repasse" : "obra";
+    const abas = { obra: 1, repasse: 1, resumo: 1, vendas: 1, estoque: 1, carteira: 1, inad: 1 };
+    const aba = abas[this.aba] ? this.aba : "obra";
     const tab = (id, icon, txt, count) => `<button type="button" role="tab" aria-selected="${aba === id}" class="ml-tab${aba === id ? " is-active" : ""}" onclick="PrestacaoContasApp.setAba('${id}')"><i data-lucide="${icon}"></i> ${txt}${count ? ` <span class="ml-tab-count">${count}</span>` : ""}</button>`;
     const ccs = this.costCenters();
 
@@ -1365,11 +1380,16 @@ const PrestacaoContasApp = {
         ${this.rastreio ? `<div class="pcx-alert ${this.rastreio.erro ? "is-warn" : "is-info"}">${this.rastreio.erro ? "" : '<span class="pcx-spin"></span>'}<span id="pc-rastreio">${this.esc(this.rastreio.msg)}</span></div>` : ""}
 
         <div class="ml-tabs pcx-tabs" role="tablist">
+          ${tab("resumo", "layout-dashboard", "Resumo")}
+          ${tab("vendas", "handshake", "Vendas e distratos")}
+          ${tab("estoque", "warehouse", "Estoque")}
+          ${tab("carteira", "wallet", "Carteira")}
+          ${tab("inad", "alert-circle", "Inadimplência")}
           ${tab("obra", "building-2", "Por obra", nFora(conf.receitas) + nFora(conf.despesas))}
           ${tab("repasse", "split", "Repasse anterior", nFora(conf.repasses))}
         </div>
 
-        ${this.conferirHtml(aba)}
+        ${aba === "obra" || aba === "repasse" ? this.conferirHtml(aba) : this.painelHtml(aba)}
       </div>
     `;
     if (window.lucide) lucide.createIcons();
@@ -1431,7 +1451,6 @@ const PrestacaoContasApp = {
           ${pill("fora", "fora do padrão")}
           ${pill("sem", "sem % no centro")}
           ${pill("ok", "conferidos")}
-          ${pill("na", "não se aplica rateio")}
         </div>
         <div class="pcx-total">${rows.length} lançamento(s) · <strong style="color:${corTotal};">${this.fmt(resultado)}</strong></div>
       </div>
@@ -1537,7 +1556,31 @@ const PrestacaoContasApp = {
 
   arvoreHtml(rows, cor, prefix) {
     const arvore = this.arvorePlano(rows);
-    return (arvore.raizes || []).map((n) => this.grupoHtml(n, arvore.nos, 1, cor, prefix)).join("");
+    const contas = [];
+    const visita = (node) => {
+      Object.values(node.contas || {}).forEach((b) => contas.push(b));
+      (arvore.nos || []).filter((c) => c.parentId === node.id).forEach(visita);
+    };
+    (arvore.raizes || []).forEach(visita);
+    contas.sort((a, b) => String(a.codigo).localeCompare(String(b.codigo), "pt-BR", { numeric: true }));
+    return contas.map((b) => {
+      const cid = (prefix ? prefix + ">" : "") + "conta|" + b.codigo;
+      const aberto = this.gruposAbertos.has(cid);
+      let html = `<tr class="pcx-grupo is-conta" onclick="PrestacaoContasApp.toggleGrupo('${this.esc(cid)}')">
+        <td colspan="6">
+          <span class="pcx-grupo-nome" style="padding-left:32px">
+            <i data-lucide="${aberto ? "chevron-down" : "chevron-right"}" class="pcx-chev"></i>
+            <span class="pcx-cod">${this.esc(b.codigo)}</span>
+            <strong>${this.esc(b.nome || "Conta")}</strong>
+            <span class="pcx-mute">${b.rows.length}</span>
+          </span>
+        </td>
+        <td class="is-right pcx-valor" style="color:${cor};">${this.fmt(b.amount)}</td>
+        <td>${this.seloGrupo(b.fora, b.rows.length)}</td>
+      </tr>`;
+      if (aberto) b.rows.forEach((r) => { html += this.confLinhaHtml(r, cor); });
+      return html;
+    }).join("");
   },
 
   chaveConta(codigo) {
@@ -1823,6 +1866,457 @@ const PrestacaoContasApp = {
       ${guiaHtml}
       ${blocoContas || blocoCentros ? `<div class="pcx-det-grid pcx-det-sec${blocoContas && blocoCentros ? "" : " is-uma"}">${blocoContas}${blocoCentros}</div>` : ""}
     </div>`;
+  },
+
+  chaveDash() {
+    const pad = (n) => String(n).padStart(2, "0");
+    return [this.companyIds.join(","), this.costCenterIds.join(","), this.year + "-" + pad(this.month)].join("|");
+  },
+
+  periodoMes() {
+    const y = this.year;
+    const m = this.month;
+    const pad = (n) => String(n).padStart(2, "0");
+    const last = new Date(y, m, 0).getDate();
+    return { start: y + "-" + pad(m) + "-01", end: y + "-" + pad(m) + "-" + pad(last) };
+  },
+
+  thDash(rot, key, right) {
+    return `<th class="${right ? "is-right" : ""}" onclick="PrestacaoContasApp.ordenarDash('${key}')" style="cursor:pointer;user-select:none;">${rot} <i data-lucide="chevrons-up-down" style="width:11px;vertical-align:middle;"></i></th>`;
+  },
+
+  ordenarLista(lista, prefix, pick) {
+    const key = this.dashSort.key;
+    if (!key || key.indexOf(prefix + ".") !== 0 || !pick[key]) return lista;
+    const dir = this.dashSort.dir || 1;
+    const fn = pick[key];
+    return lista.slice().sort((a, b) => {
+      const va = fn(a);
+      const vb = fn(b);
+      if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
+      return String(va == null ? "" : va).localeCompare(String(vb == null ? "" : vb), "pt-BR", { numeric: true }) * dir;
+    });
+  },
+
+  kpisHtml(itens) {
+    return `<div class="pcx-kpis">${itens.map((k) => `<div class="pcx-kpi"><span>${k.rot}</span><strong class="${k.cls || ""}">${k.val}</strong><small>${k.nota || ""}</small></div>`).join("")}</div>`;
+  },
+
+  blocoHtml(titulo, nota, corpo) {
+    return `<section class="pcx-bloco"><div class="pcx-bloco-tit">${titulo}${nota ? `<span>${nota}</span>` : ""}</div>${corpo}</section>`;
+  },
+
+  painelHtml(aba) {
+    if (!this.costCenterIds.length) {
+      return `<div class="pcx-alert is-warn">Selecione ao menos um centro de custo.</div>`;
+    }
+    if (aba === "resumo") return this.resumoHtml();
+    const d = this.dash;
+    const chave = this.chaveDash();
+    const campo = aba === "inad" ? "carteira" : aba;
+    const pronto = d && d.chave === chave && d[campo] && d.loading !== aba;
+    if (!pronto) {
+      if (d && d.chave === chave && d.erro && !d.loading) {
+        return `<div class="pcx-alert is-error">${this.esc(d.erro)}</div>`;
+      }
+      const msg = (d && d.chave === chave && d.msg) || "Consultando o Sienge…";
+      return `<div class="pcx-alert is-info"><span class="pcx-spin"></span><span id="pc-dash-msg">${this.esc(msg)}</span></div>`;
+    }
+    if (aba === "vendas") return this.vendasHtml(d.vendas);
+    if (aba === "estoque") return this.estoqueHtml(d.estoque);
+    if (aba === "carteira") return this.carteiraHtml(d.carteira);
+    return this.inadHtml(d.carteira);
+  },
+
+  resumoHtml() {
+    const conf = this.conferencias || { receitas: [], despesas: [] };
+    const rec = conf.receitas || [];
+    const desp = conf.despesas || [];
+    if (!this.movements.length) {
+      return `<div class="pcx-alert is-info">Clique em Carregar para montar entradas, saídas e saldo do mês.</div>`;
+    }
+    const entradas = this.somaLado(rec, false);
+    const saidas = this.somaLado(desp, true);
+    const saldo = entradas - saidas;
+    const cor = saldo < -0.004 ? "is-out" : "is-in";
+    const porObra = {};
+    const porConta = {};
+    const porCc = {};
+    const porBanco = {};
+    const somar = (rows, saida) => {
+      rows.forEach((r) => {
+        const v = (Number(r.total) || 0) * (saida ? 1 : (r.redutora ? -1 : 1));
+        const oid = r.grupo || r.obra || "—";
+        const o = porObra[oid] || (porObra[oid] = { id: oid, nome: this.rotuloObra(oid), entradas: 0, saidas: 0, n: 0 });
+        if (saida) o.saidas += v; else o.entradas += v;
+        o.n += 1;
+        const principal = (r.contas || []).slice().sort((a, b) => (Number(b.valor) || 0) - (Number(a.valor) || 0))[0];
+        const cod = principal && principal.codigo ? principal.codigo : "—";
+        const c = porConta[cod] || (porConta[cod] = { codigo: cod, nome: (principal && principal.nome) || "Sem conta", entradas: 0, saidas: 0, n: 0 });
+        if (saida) c.saidas += v; else c.entradas += v;
+        c.n += 1;
+        const cc = (principal && principal.cc) || r.obra || "—";
+        const ccRow = porCc[cc] || (porCc[cc] = { id: cc, nome: (principal && principal.ccNome) || this.ccNome(cc), entradas: 0, saidas: 0, n: 0 });
+        if (saida) ccRow.saidas += v; else ccRow.entradas += v;
+        ccRow.n += 1;
+        const banco = [r.contaBanco, r.contaNome].filter(Boolean).join(" · ") || "Sem conta corrente";
+        const b = porBanco[banco] || (porBanco[banco] = { nome: banco, entradas: 0, saidas: 0, n: 0 });
+        if (saida) b.saidas += v; else b.entradas += v;
+        b.n += 1;
+      });
+    };
+    somar(rec, false);
+    somar(desp, true);
+    const obras = this.ordenarLista(Object.values(porObra), "obra", {
+      "obra.nome": (x) => x.nome,
+      "obra.entradas": (x) => x.entradas,
+      "obra.saidas": (x) => x.saidas,
+      "obra.saldo": (x) => x.entradas - x.saidas,
+      "obra.n": (x) => x.n
+    });
+    const contas = this.ordenarLista(Object.values(porConta), "conta", {
+      "conta.codigo": (x) => x.codigo,
+      "conta.nome": (x) => x.nome,
+      "conta.entradas": (x) => x.entradas,
+      "conta.saidas": (x) => x.saidas,
+      "conta.saldo": (x) => x.entradas - x.saidas,
+      "conta.n": (x) => x.n
+    });
+    const centros = this.ordenarLista(Object.values(porCc), "cc", {
+      "cc.id": (x) => x.id,
+      "cc.entradas": (x) => x.entradas,
+      "cc.saidas": (x) => x.saidas,
+      "cc.saldo": (x) => x.entradas - x.saidas,
+      "cc.n": (x) => x.n
+    });
+    const bancos = this.ordenarLista(Object.values(porBanco), "banco", {
+      "banco.nome": (x) => x.nome,
+      "banco.entradas": (x) => x.entradas,
+      "banco.saidas": (x) => x.saidas,
+      "banco.saldo": (x) => x.entradas - x.saidas,
+      "banco.n": (x) => x.n
+    });
+    const lancs = this.ordenarLista(rec.concat(desp), "lanc", {
+      "lanc.data": (x) => x.data || "",
+      "lanc.obra": (x) => this.rotuloObra(x.grupo || x.obra || ""),
+      "lanc.hist": (x) => x.historico || "",
+      "lanc.valor": (x) => (Number(x.total) || 0) * (x.classe === "despesa" ? -1 : (x.redutora ? -1 : 1))
+    });
+    const linhaFluxo = (nome, ent, sai, n) => {
+      const sld = ent - sai;
+      return `<tr><td>${this.esc(nome)}</td><td class="is-right pcx-valor is-in">${this.fmt(ent)}</td><td class="is-right pcx-valor is-out">${this.fmt(sai)}</td><td class="is-right pcx-valor ${sld < -0.004 ? "is-out" : "is-in"}">${this.fmt(sld)}</td><td class="is-right">${n}</td></tr>`;
+    };
+    const tabela = (head, body) => `<div class="cc-scroll pcx-dash-scroll"><table class="cc-table pcx-table"><thead><tr>${head}</tr></thead><tbody>${body || `<tr><td colspan="8" class="pcx-vazio">Sem movimento neste mês.</td></tr>`}</tbody></table></div>`;
+    const headFluxo = (p) => this.thDash("Nome", p + ".nome") + this.thDash("Entradas", p + ".entradas", true) + this.thDash("Saídas", p + ".saidas", true) + this.thDash("Saldo", p + ".saldo", true) + this.thDash("Lançamentos", p + ".n", true);
+    return `
+      ${this.kpisHtml([
+        { rot: "Entradas", val: this.fmt(entradas), nota: rec.length + " lançamento(s)", cls: "is-in" },
+        { rot: "Saídas", val: this.fmt(saidas), nota: desp.length + " lançamento(s)", cls: "is-out" },
+        { rot: "Saldo", val: this.fmt(saldo), nota: "Entradas menos saídas do mês", cls: cor },
+        { rot: "Obras", val: String(Object.keys(porObra).length), nota: Object.keys(porConta).length + " contas do plano" }
+      ])}
+      <p class="pcx-ajuda">Caixa do mês de referência, nos centros selecionados. Repasse anterior fica de fora deste saldo.</p>
+      ${this.blocoHtml("Por obra", "", tabela(this.thDash("Obra", "obra.nome") + this.thDash("Entradas", "obra.entradas", true) + this.thDash("Saídas", "obra.saidas", true) + this.thDash("Saldo", "obra.saldo", true) + this.thDash("Lançamentos", "obra.n", true), obras.map((o) => linhaFluxo(o.nome, o.entradas, o.saidas, o.n)).join("")))}
+      ${this.blocoHtml("Por centro de custo", "", tabela(this.thDash("Centro", "cc.id") + this.thDash("Nome", "cc.nome") + this.thDash("Entradas", "cc.entradas", true) + this.thDash("Saídas", "cc.saidas", true) + this.thDash("Saldo", "cc.saldo", true) + this.thDash("Lançamentos", "cc.n", true), centros.map((o) => `<tr><td>${this.esc(o.id)}</td><td>${this.esc(o.nome)}</td><td class="is-right pcx-valor is-in">${this.fmt(o.entradas)}</td><td class="is-right pcx-valor is-out">${this.fmt(o.saidas)}</td><td class="is-right pcx-valor ${(o.entradas - o.saidas) < -0.004 ? "is-out" : "is-in"}">${this.fmt(o.entradas - o.saidas)}</td><td class="is-right">${o.n}</td></tr>`).join("")))}
+      ${this.blocoHtml("Por conta do plano financeiro", "último nível", tabela(this.thDash("Código", "conta.codigo") + this.thDash("Conta", "conta.nome") + this.thDash("Entradas", "conta.entradas", true) + this.thDash("Saídas", "conta.saidas", true) + this.thDash("Saldo", "conta.saldo", true) + this.thDash("Lançamentos", "conta.n", true), contas.map((o) => `<tr><td><span class="pcx-cod">${this.esc(o.codigo)}</span></td><td>${this.esc(o.nome)}</td><td class="is-right pcx-valor is-in">${this.fmt(o.entradas)}</td><td class="is-right pcx-valor is-out">${this.fmt(o.saidas)}</td><td class="is-right pcx-valor ${(o.entradas - o.saidas) < -0.004 ? "is-out" : "is-in"}">${this.fmt(o.entradas - o.saidas)}</td><td class="is-right">${o.n}</td></tr>`).join("")))}
+      ${this.blocoHtml("Por conta corrente", "", tabela(headFluxo("banco"), bancos.map((o) => linhaFluxo(o.nome, o.entradas, o.saidas, o.n)).join("")))}
+      ${this.blocoHtml("Lançamentos", lancs.length + " linhas", `<div class="cc-scroll pcx-dash-scroll"><table class="cc-table pcx-table"><thead><tr>${this.thDash("Data", "lanc.data")}${this.thDash("Obra", "lanc.obra")}${this.thDash("Histórico", "lanc.hist")}${this.thDash("Valor", "lanc.valor", true)}</tr></thead><tbody>${lancs.map((r) => {
+        const v = (Number(r.total) || 0) * (r.classe === "despesa" ? -1 : (r.redutora ? -1 : 1));
+        return `<tr><td>${this.dataBr(r.data)}</td><td>${this.esc(this.rotuloObra(r.grupo || r.obra || ""))}</td><td>${this.esc(r.historico || "—")}${r.pessoa ? `<div class="pcx-pessoa">${this.esc(r.pessoa)}</div>` : ""}</td><td class="is-right pcx-valor ${v < -0.004 ? "is-out" : "is-in"}">${this.fmt(v)}</td></tr>`;
+      }).join("") || `<tr><td colspan="4" class="pcx-vazio">Sem lançamento.</td></tr>`}</tbody></table></div>`)}
+    `;
+  },
+
+  async paginarSienge(base) {
+    const fn = window.siengeFetchWithRetry;
+    if (typeof fn !== "function") throw new Error("Consulta ao Sienge indisponível.");
+    let out = [];
+    let offset = 0;
+    for (let g = 0; g < 40; g++) {
+      const sep = base.indexOf("?") >= 0 ? "&" : "?";
+      const res = await fn(base + sep + "limit=200&offset=" + offset);
+      const rs = (res && res.results) || [];
+      out = out.concat(rs);
+      if (rs.length < 200) break;
+      offset += 200;
+    }
+    return out;
+  },
+
+  avisoDash(txt) {
+    this.dash.msg = txt;
+    const el = document.getElementById("pc-dash-msg");
+    if (el) el.textContent = txt;
+  },
+
+  async carregarPainel(qual) {
+    if (!this.costCenterIds.length) return;
+    const chave = this.chaveDash();
+    const pronto = this.dash && this.dash.chave === chave && !this.dash.loading;
+    if (pronto && qual === "vendas" && this.dash.vendas) return;
+    if (pronto && qual === "estoque" && this.dash.estoque) return;
+    if (pronto && (qual === "carteira" || qual === "inad") && this.dash.carteira) return;
+    const gen = ++this.dashGen;
+    const anterior = this.dash && this.dash.chave === chave ? this.dash : { chave };
+    this.dash = Object.assign({}, anterior, { chave, loading: qual, erro: "", msg: "Consultando o Sienge…" });
+    this.render();
+    try {
+      if (qual === "vendas") await this.buscarVendasPainel(gen);
+      else if (qual === "estoque") await this.buscarEstoquePainel(gen);
+      else await this.buscarCarteiraPainel(gen);
+    } catch (e) {
+      if (gen !== this.dashGen) return;
+      this.dash.loading = "";
+      this.dash.erro = (e && e.message) || "Falha ao consultar o Sienge.";
+      this.render();
+    }
+  },
+
+  async buscarVendasPainel(gen) {
+    const p = this.periodoMes();
+    const slim = (c) => {
+      if (window.MarketingBudgetApp && typeof MarketingBudgetApp.slimVenda === "function") return MarketingBudgetApp.slimVenda(c);
+      const units = c.salesContractUnits || c.units || [];
+      const cust = (c.salesContractCustomers || [])[0] || {};
+      return {
+        id: String(c.id),
+        numero: c.number || c.contractNumber || String(c.id),
+        data: String(c.issueDate || "").slice(0, 10),
+        dataCancel: String(c.cancellationDate || "").slice(0, 10),
+        unidadeNomes: units.map((u) => u.name).filter(Boolean).join(", "),
+        cliente: cust.name || "",
+        valor: Number(c.totalSellingValue || c.value || 0) || 0,
+        situacao: String(c.situation) === "3" ? "Cancelado" : (String(c.situation) === "4" ? "Quitado" : "Emitido")
+      };
+    };
+    const vendas = [];
+    const distratos = [];
+    const vistos = new Set();
+    const dVistos = new Set();
+    for (const cc of this.costCenterIds) {
+      if (gen !== this.dashGen) return;
+      this.avisoDash("Lendo vendas de " + cc + "…");
+      const q = "enterpriseId=" + encodeURIComponent(cc);
+      const [emitidos, cancelados, quitados, dist] = await Promise.all([
+        this.paginarSienge("/sales-contracts?" + q + "&situation=2&initialIssueDate=" + p.start + "&finalIssueDate=" + p.end),
+        this.paginarSienge("/sales-contracts?" + q + "&situation=3&initialIssueDate=" + p.start + "&finalIssueDate=" + p.end),
+        this.paginarSienge("/sales-contracts?" + q + "&situation=4&initialIssueDate=" + p.start + "&finalIssueDate=" + p.end),
+        this.paginarSienge("/sales-contracts?" + q + "&situation=3&initialCancelDate=" + p.start + "&finalCancelDate=" + p.end)
+      ]);
+      emitidos.concat(cancelados, quitados).forEach((c) => {
+        const id = String(c && c.id != null ? c.id : "");
+        if (!id || vistos.has(id)) return;
+        if (c.enterpriseId && String(c.enterpriseId) !== String(cc)) return;
+        vistos.add(id);
+        vendas.push(Object.assign(slim(c), { cc }));
+      });
+      dist.forEach((c) => {
+        const id = String(c && c.id != null ? c.id : "");
+        if (!id || dVistos.has(id)) return;
+        if (c.enterpriseId && String(c.enterpriseId) !== String(cc)) return;
+        dVistos.add(id);
+        distratos.push(Object.assign(slim(c), { cc }));
+      });
+    }
+    if (gen !== this.dashGen) return;
+    this.dash.vendas = { vendas, distratos, periodo: p };
+    this.dash.loading = "";
+    this.render();
+  },
+
+  vendasHtml(pack) {
+    const vendas = (pack && pack.vendas) || [];
+    const distratos = (pack && pack.distratos) || [];
+    const vgv = vendas.reduce((s, v) => s + (Number(v.valor) || 0), 0);
+    const vgvD = distratos.reduce((s, v) => s + (Number(v.valor) || 0), 0);
+    const liq = vgv - vgvD;
+    const p = (pack && pack.periodo) || this.periodoMes();
+    const pick = {
+      "venda.numero": (x) => x.numero,
+      "venda.data": (x) => x.data || "",
+      "venda.cliente": (x) => x.cliente || "",
+      "venda.unidade": (x) => x.unidadeNomes || "",
+      "venda.cc": (x) => x.cc || "",
+      "venda.valor": (x) => Number(x.valor) || 0,
+      "venda.sit": (x) => x.situacao || ""
+    };
+    const lista = this.ordenarLista(vendas, "venda", pick);
+    const dist = this.ordenarLista(distratos, "dist", {
+      "dist.numero": (x) => x.numero,
+      "dist.data": (x) => x.dataCancel || x.data || "",
+      "dist.cliente": (x) => x.cliente || "",
+      "dist.unidade": (x) => x.unidadeNomes || "",
+      "dist.cc": (x) => x.cc || "",
+      "dist.valor": (x) => Number(x.valor) || 0
+    });
+    const linha = (v, cancel) => `<tr>
+      <td>${this.esc(v.numero)}</td>
+      <td>${this.dataBr(cancel ? (v.dataCancel || v.data) : v.data)}</td>
+      <td>${this.esc(v.cliente || "—")}</td>
+      <td>${this.esc(v.unidadeNomes || "—")}</td>
+      <td>${this.esc(v.cc || "—")}</td>
+      <td class="is-right pcx-valor">${this.fmt(v.valor)}</td>
+      ${cancel ? "" : `<td>${this.esc(v.situacao || "—")}</td>`}
+    </tr>`;
+    const head = (pref, cancel) => this.thDash("Contrato", pref + ".numero") + this.thDash(cancel ? "Cancelamento" : "Emissão", pref + ".data") + this.thDash("Cliente", pref + ".cliente") + this.thDash("Unidade", pref + ".unidade") + this.thDash("Centro", pref + ".cc") + this.thDash("Valor", pref + ".valor", true) + (cancel ? "" : this.thDash("Situação", pref + ".sit"));
+    return `
+      ${this.kpisHtml([
+        { rot: "Vendas", val: String(vendas.length), nota: "Emitidas no mês", cls: "is-in" },
+        { rot: "Distratos", val: String(distratos.length), nota: "Cancelados no mês", cls: "is-out" },
+        { rot: "VGV das vendas", val: this.fmt(vgv), nota: "Valor de venda" },
+        { rot: "VGV líquido", val: this.fmt(liq), nota: "Vendas menos distratos", cls: liq < -0.004 ? "is-out" : "is-in" }
+      ])}
+      <p class="pcx-ajuda">Contratos dos centros selecionados com emissão ou cancelamento entre ${this.dataBr(p.start)} e ${this.dataBr(p.end)}.</p>
+      ${this.blocoHtml("Vendas", vendas.length + " contrato(s)", `<div class="cc-scroll pcx-dash-scroll"><table class="cc-table pcx-table"><thead><tr>${head("venda", false)}</tr></thead><tbody>${lista.map((v) => linha(v, false)).join("") || `<tr><td colspan="7" class="pcx-vazio">Nenhuma venda neste mês.</td></tr>`}</tbody></table></div>`)}
+      ${this.blocoHtml("Distratos", distratos.length + " contrato(s)", `<div class="cc-scroll pcx-dash-scroll"><table class="cc-table pcx-table"><thead><tr>${head("dist", true)}</tr></thead><tbody>${dist.map((v) => linha(v, true)).join("") || `<tr><td colspan="6" class="pcx-vazio">Nenhum distrato neste mês.</td></tr>`}</tbody></table></div>`)}
+    `;
+  },
+
+  async buscarEstoquePainel(gen) {
+    const est = window.EstoqueComercialApp;
+    const units = [];
+    for (const cc of this.costCenterIds) {
+      if (gen !== this.dashGen) return;
+      this.avisoDash("Lendo estoque de " + cc + "…");
+      const nome = this.ccNome(cc);
+      const pagina = await this.paginarSienge("/units?enterpriseId=" + encodeURIComponent(cc) + "&additionalData=NONE");
+      pagina.forEach((u) => {
+        if (u && u.enterpriseId && String(u.enterpriseId) !== String(cc)) return;
+        const slim = est && typeof est.slimUnit === "function" ? est.slimUnit(u, nome) : {
+          id: u.id,
+          name: u.name || "",
+          enterpriseId: String(cc),
+          commercialStock: String(u.commercialStock || "").toUpperCase(),
+          contractNumber: u.contractNumber || u.currentSalesContractNumber || "",
+          outstandingBalance: Number(u.outstandingBalance) || 0
+        };
+        units.push(slim);
+      });
+    }
+    if (gen !== this.dashGen) return;
+    this.dash.estoque = units;
+    this.dash.loading = "";
+    this.render();
+  },
+
+  estoqueHtml(units) {
+    const lista0 = units || [];
+    const est = window.EstoqueComercialApp;
+    const rotulo = (code) => (est && typeof est.mapStock === "function" ? est.mapStock(code) : (code || "Sem status"));
+    const contagem = {};
+    lista0.forEach((u) => {
+      const r = rotulo(u.commercialStock);
+      contagem[r] = (contagem[r] || 0) + 1;
+    });
+    const n = (nome) => contagem[nome] || 0;
+    const pick = {
+      "un.id": (x) => x.id,
+      "un.nome": (x) => x.name || "",
+      "un.cc": (x) => x.enterpriseId || "",
+      "un.sit": (x) => rotulo(x.commercialStock),
+      "un.contrato": (x) => x.contractNumber || "",
+      "un.saldo": (x) => Number(x.outstandingBalance) || 0
+    };
+    const lista = this.ordenarLista(lista0, "un", pick);
+    const saldo = lista0.reduce((s, u) => s + (Number(u.outstandingBalance) || 0), 0);
+    return `
+      ${this.kpisHtml([
+        { rot: "Unidades", val: String(lista0.length), nota: "Cadastro atual" },
+        { rot: "Disponíveis", val: String(n("Disponível")), nota: "Prontas para venda", cls: "is-in" },
+        { rot: "Vendidas", val: String(n("Vendida") + n("Vendida em pré-contrato")), nota: "Inclui pré-contrato" },
+        { rot: "Reservadas", val: String(n("Reservada") + n("Reserva técnica") + n("Proposta")), nota: "Reserva, técnica e proposta" },
+        { rot: "Saldo em aberto", val: this.fmt(saldo), nota: "Outstanding das unidades", cls: saldo > 0.004 ? "is-out" : "" }
+      ])}
+      <p class="pcx-ajuda">Posição atual do estoque comercial. ${Object.keys(contagem).map((k) => k + ": " + contagem[k]).join(" · ") || "Nenhuma unidade."}</p>
+      ${this.blocoHtml("Unidades", lista0.length + " linha(s)", `<div class="cc-scroll pcx-dash-scroll"><table class="cc-table pcx-table"><thead><tr>${this.thDash("Id", "un.id")}${this.thDash("Unidade", "un.nome")}${this.thDash("Centro", "un.cc")}${this.thDash("Situação", "un.sit")}${this.thDash("Contrato", "un.contrato")}${this.thDash("Saldo", "un.saldo", true)}</tr></thead><tbody>${lista.map((u) => `<tr><td>${this.esc(u.id)}</td><td>${this.esc(u.name || "—")}</td><td>${this.esc(u.enterpriseId || "—")}</td><td>${this.esc(rotulo(u.commercialStock))}</td><td>${this.esc(u.contractNumber || "—")}</td><td class="is-right pcx-valor">${u.outstandingBalance ? this.fmt(u.outstandingBalance) : "—"}</td></tr>`).join("") || `<tr><td colspan="6" class="pcx-vazio">Nenhuma unidade nestes centros.</td></tr>`}</tbody></table></div>`)}
+    `;
+  },
+
+  async buscarCarteiraPainel(gen) {
+    const est = window.EstoqueComercialApp;
+    if (!est || typeof est.fetchExtratoCc !== "function" || typeof est.agruparExtratoCc !== "function") {
+      throw new Error("O extrato de contas a receber não está disponível nesta sessão.");
+    }
+    const rows = [];
+    for (const cc of this.costCenterIds) {
+      if (gen !== this.dashGen) return;
+      this.avisoDash("Lendo carteira de " + cc + "…");
+      const parte = await est.fetchExtratoCc(cc);
+      (parte || []).forEach((r) => rows.push(Object.assign({}, r, { _cc: String(cc) })));
+    }
+    if (gen !== this.dashGen) return;
+    this.dash.carteira = est.agruparExtratoCc(rows);
+    this.dash.loading = "";
+    this.render();
+  },
+
+  carteiraHtml(bills) {
+    const lista0 = bills || [];
+    const aberto = lista0.reduce((s, b) => s + (Number(b.aberto) || 0), 0);
+    const vencido = lista0.reduce((s, b) => s + (Number(b.vencido) || 0), 0);
+    const recebido = lista0.reduce((s, b) => s + (Number(b.recebido) || 0), 0);
+    const comSaldo = lista0.filter((b) => (Number(b.aberto) || 0) > 0.009).length;
+    const pick = {
+      "cart.id": (x) => x.id,
+      "cart.cliente": (x) => (x.cliente && x.cliente.name) || "",
+      "cart.un": (x) => (x.units || []).map((u) => u.name).join(", "),
+      "cart.aberto": (x) => Number(x.aberto) || 0,
+      "cart.vencido": (x) => Number(x.vencido) || 0,
+      "cart.recebido": (x) => Number(x.recebido) || 0,
+      "cart.parc": (x) => Number(x.nParcelas) || 0,
+      "cart.baixa": (x) => x.ultimaBaixa || ""
+    };
+    const lista = this.ordenarLista(lista0, "cart", pick);
+    return `
+      ${this.kpisHtml([
+        { rot: "Títulos", val: String(lista0.length), nota: comSaldo + " com saldo" },
+        { rot: "Em aberto", val: this.fmt(aberto), nota: "Saldo atual", cls: "is-out" },
+        { rot: "Vencido", val: this.fmt(vencido), nota: "Parcela com vencimento passado", cls: "is-out" },
+        { rot: "Recebido", val: this.fmt(recebido), nota: "Baixas do contrato", cls: "is-in" }
+      ])}
+      <p class="pcx-ajuda">Carteira de contratos de venda (CT) dos centros selecionados, posição de hoje. Cada linha é um título.</p>
+      ${this.blocoHtml("Títulos", lista0.length + " título(s)", `<div class="cc-scroll pcx-dash-scroll"><table class="cc-table pcx-table"><thead><tr>${this.thDash("Título", "cart.id")}${this.thDash("Cliente", "cart.cliente")}${this.thDash("Unidades", "cart.un")}${this.thDash("Parcelas", "cart.parc", true)}${this.thDash("Em aberto", "cart.aberto", true)}${this.thDash("Vencido", "cart.vencido", true)}${this.thDash("Recebido", "cart.recebido", true)}${this.thDash("Última baixa", "cart.baixa")}</tr></thead><tbody>${lista.map((b) => {
+        const cli = (b.cliente && (b.cliente.name || b.cliente.id)) || "—";
+        const uns = (b.units || []).map((u) => u.name).filter(Boolean).join(", ") || "—";
+        return `<tr><td>${this.esc(b.id)}</td><td>${this.esc(cli)}</td><td>${this.esc(uns)}</td><td class="is-right">${b.nParcelas || 0}</td><td class="is-right pcx-valor">${this.fmt(b.aberto)}</td><td class="is-right pcx-valor is-out">${this.fmt(b.vencido)}</td><td class="is-right pcx-valor is-in">${this.fmt(b.recebido)}</td><td>${this.dataBr(b.ultimaBaixa)}</td></tr>`;
+      }).join("") || `<tr><td colspan="8" class="pcx-vazio">Nenhum título de venda nestes centros.</td></tr>`}</tbody></table></div>`)}
+    `;
+  },
+
+  inadHtml(bills) {
+    const hoje = (window.EstoqueComercialApp && EstoqueComercialApp.todayStr) ? EstoqueComercialApp.todayStr() : "";
+    const lista0 = (bills || []).filter((b) => (Number(b.vencido) || 0) > 0.009);
+    const vencido = lista0.reduce((s, b) => s + (Number(b.vencido) || 0), 0);
+    const acres = lista0.reduce((s, b) => s + (Number(b.vencidoComAcrescimo) || 0), 0);
+    const maisAntiga = lista0.reduce((m, b) => {
+      const d = ((b.abertas || []).find((p) => p.overdue) || {}).due || "";
+      return d && (!m || d < m) ? d : m;
+    }, "");
+    const pick = {
+      "inad.cliente": (x) => (x.cliente && x.cliente.name) || "",
+      "inad.id": (x) => x.id,
+      "inad.vencido": (x) => Number(x.vencido) || 0,
+      "inad.acres": (x) => Number(x.vencidoComAcrescimo) || 0,
+      "inad.aberto": (x) => Number(x.aberto) || 0,
+      "inad.antiga": (x) => ((x.abertas || []).find((p) => p.overdue) || {}).due || "",
+      "inad.un": (x) => (x.units || []).map((u) => u.name).join(", ")
+    };
+    const lista = this.ordenarLista(lista0, "inad", pick);
+    return `
+      ${this.kpisHtml([
+        { rot: "Contratos em atraso", val: String(lista0.length), nota: "Com parcela vencida", cls: "is-out" },
+        { rot: "Valor vencido", val: this.fmt(vencido), nota: "Saldo das parcelas atrasadas", cls: "is-out" },
+        { rot: "Com acréscimo", val: this.fmt(acres), nota: "Saldo corrigido", cls: "is-out" },
+        { rot: "Vencimento mais antigo", val: maisAntiga ? this.dataBr(maisAntiga) : "—", nota: hoje ? "Posição " + this.dataBr(hoje) : "Posição de hoje" }
+      ])}
+      <p class="pcx-ajuda">Inadimplência dos contratos de venda dos centros selecionados. O valor vencido é o saldo da parcela; o acréscimo é o saldo corrigido do Sienge.</p>
+      ${this.blocoHtml("Em atraso", lista0.length + " título(s)", `<div class="cc-scroll pcx-dash-scroll"><table class="cc-table pcx-table"><thead><tr>${this.thDash("Título", "inad.id")}${this.thDash("Cliente", "inad.cliente")}${this.thDash("Unidades", "inad.un")}${this.thDash("Mais antiga", "inad.antiga")}${this.thDash("Vencido", "inad.vencido", true)}${this.thDash("Com acréscimo", "inad.acres", true)}${this.thDash("Em aberto", "inad.aberto", true)}</tr></thead><tbody>${lista.map((b) => {
+        const cli = (b.cliente && (b.cliente.name || b.cliente.id)) || "—";
+        const uns = (b.units || []).map((u) => u.name).filter(Boolean).join(", ") || "—";
+        const antiga = ((b.abertas || []).find((p) => p.overdue) || {}).due || "";
+        return `<tr><td>${this.esc(b.id)}</td><td>${this.esc(cli)}</td><td>${this.esc(uns)}</td><td>${this.dataBr(antiga)}</td><td class="is-right pcx-valor is-out">${this.fmt(b.vencido)}</td><td class="is-right pcx-valor is-out">${this.fmt(b.vencidoComAcrescimo)}</td><td class="is-right pcx-valor">${this.fmt(b.aberto)}</td></tr>`;
+      }).join("") || `<tr><td colspan="7" class="pcx-vazio">Nenhum contrato em atraso nestes centros.</td></tr>`}</tbody></table></div>`)}
+    `;
   }
 };
 

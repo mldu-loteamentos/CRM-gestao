@@ -115,6 +115,7 @@ const ResultadoCaixaApp = {
     } catch (e) {
       this.forecasts = {};
     }
+    this.normalizarForecastsMemoria();
     this.aplicarForecastVista();
   },
 
@@ -198,8 +199,6 @@ const ResultadoCaixaApp = {
     this.aviso = "";
     this.render();
     try {
-      const contas = {};
-      const nomes = {};
       const lidos = [];
       const falhas = [];
       for (let i = 0; i < files.length; i++) {
@@ -211,8 +210,7 @@ const ResultadoCaixaApp = {
             falhas.push(file.name);
             continue;
           }
-          this.juntarForecast({ contas: contas, nomes: nomes }, f);
-          lidos.push(file.name);
+          lidos.push({ nome: file.name, empresa: this.empresaId(file.name) || 0, contas: f.contas, nomes: f.nomes || {} });
         } catch (e) {
           falhas.push(file.name);
         }
@@ -226,21 +224,49 @@ const ResultadoCaixaApp = {
         throw new Error("Dezembro fecha o ano: o realizado já vai até o fim. Escolha o mês até onde o realizado entra e suba o forecast dos meses seguintes.");
       }
       const em = new Date().toISOString();
-      const gravados = [];
-      seguintes.forEach((ym) => {
-        const fatia = this.recortarForecast(contas, ym);
-        if (!Object.keys(fatia).length) return;
-        gravados.push({ ym: ym, doc: { arquivos: lidos, em: em, contas: fatia, nomes: nomes } });
+      const planos = [];
+      lidos.forEach((arq) => {
+        seguintes.forEach((ym) => {
+          const fatia = this.recortarForecast(arq.contas, ym);
+          if (!Object.keys(fatia).length) return;
+          planos.push({ ym: ym, nome: arq.nome, empresa: arq.empresa, rotulo: this.nomeEmpresaArquivo(arq.nome), contas: fatia, nomes: arq.nomes });
+        });
       });
-      if (!gravados.length) {
+      if (!planos.length) {
         const de = nomesMes[sel] || seguintes[0];
         throw new Error("O mês escolhido é o realizado acumulado até " + (nomesMes[sel - 1] || "") + "/" + ano + ". O forecast precisa dos meses seguintes, de " + de + " a dezembro/" + ano + ".");
       }
-      seguintes.forEach((ym) => {
-        delete this.forecasts[ym];
-        this.apagarForecastNuvem(ym);
+      const substituir = {};
+      lidos.forEach((arq) => {
+        substituir[arq.nome] = 1;
+        if (!arq.empresa) return;
+        Object.keys(this.forecasts || {}).forEach((ym) => {
+          const por = (this.forecasts[ym] && this.forecasts[ym].porArquivo) || {};
+          Object.keys(por).forEach((nome) => {
+            const emp = Number(por[nome].empresa) || this.empresaId(nome) || this.empresaId(por[nome].rotulo);
+            if (emp && emp === arq.empresa) substituir[nome] = 1;
+          });
+        });
       });
-      gravados.forEach((item) => { this.forecasts[item.ym] = item.doc; });
+      seguintes.forEach((ym) => {
+        const doc = this.garantirForecast(ym);
+        Object.keys(substituir).forEach((nome) => { delete doc.porArquivo[nome]; });
+      });
+      const mesesGravados = {};
+      planos.forEach((p) => {
+        const doc = this.garantirForecast(p.ym);
+        doc.em = em;
+        doc.porArquivo[p.nome] = { rotulo: p.rotulo, empresa: p.empresa || 0, contas: p.contas, nomes: p.nomes, em: em };
+        mesesGravados[p.ym] = 1;
+      });
+      seguintes.forEach((ym) => {
+        const doc = this.forecasts[ym];
+        if (doc && doc.porArquivo && !Object.keys(doc.porArquivo).length) {
+          delete this.forecasts[ym];
+          this.apagarForecastNuvem(ym);
+        }
+      });
+      const gravados = Object.keys(mesesGravados).map((ym) => ({ ym: ym, doc: this.forecasts[ym] }));
       this.aplicarForecastVista();
       if (falhas.length) this.aviso = "Não reconheci " + falhas.length + " arquivo(s): " + falhas.join(", ") + ".";
       this.gravarForecastLocal();
@@ -258,13 +284,117 @@ const ResultadoCaixaApp = {
   },
 
   removerForecast() {
-    this.mesesSeguintes().forEach((ym) => {
+    Object.keys(this.forecasts || {}).forEach((ym) => {
       delete this.forecasts[ym];
       this.apagarForecastNuvem(ym);
     });
     this.aplicarForecastVista();
     this.gravarForecastLocal();
     this.render();
+  },
+
+  removerForecastArquivo(chave) {
+    let nome = chave;
+    try { nome = decodeURIComponent(chave); } catch (e) {}
+    Object.keys(this.forecasts || {}).forEach((ym) => {
+      const doc = this.forecasts[ym];
+      if (!doc || !doc.porArquivo || !doc.porArquivo[nome]) return;
+      delete doc.porArquivo[nome];
+      if (!Object.keys(doc.porArquivo).length) {
+        delete this.forecasts[ym];
+        this.apagarForecastNuvem(ym);
+      } else {
+        this.salvarForecastNuvem(ym, doc);
+      }
+    });
+    this.aplicarForecastVista();
+    this.gravarForecastLocal();
+    this.render();
+  },
+
+  garantirForecast(ym) {
+    const doc = this.forecasts[ym] || (this.forecasts[ym] = { em: "", porArquivo: {} });
+    if (!doc.porArquivo || typeof doc.porArquivo !== "object" || Array.isArray(doc.porArquivo)) {
+      doc.porArquivo = this.partirForecast(doc);
+    }
+    return doc;
+  },
+
+  /** Separa um forecast antigo (contas juntas) em um arquivo por empresa. */
+  partirForecast(doc) {
+    const contas = (doc && doc.contas) || {};
+    const nomesCc = (doc && doc.nomes) || {};
+    const nomesArquivo = Array.isArray(doc && doc.arquivos) ? doc.arquivos.filter(Boolean) : [];
+    if (doc && doc.porArquivo && typeof doc.porArquivo === "object" && !Array.isArray(doc.porArquivo) && Object.keys(doc.porArquivo).length) {
+      return doc.porArquivo;
+    }
+    const porEmp = {};
+    const solto = { contas: {}, nomes: {} };
+    Object.keys(contas).forEach((cc) => {
+      const emp = this.empresaDoCentro(cc, nomesCc[cc]);
+      const dest = emp ? (porEmp[emp] || (porEmp[emp] = { contas: {}, nomes: {} })) : solto;
+      dest.contas[cc] = contas[cc];
+      if (nomesCc[cc]) dest.nomes[cc] = nomesCc[cc];
+    });
+    const por = {};
+    const usados = {};
+    const listaNomes = nomesArquivo.length ? nomesArquivo : ["forecast"];
+    listaNomes.forEach((nome) => {
+      const emp = this.empresaId(nome);
+      if (!emp || !porEmp[emp] || usados[emp]) return;
+      usados[emp] = nome;
+      por[nome] = {
+        rotulo: this.nomeEmpresaArquivo(nome),
+        empresa: emp,
+        contas: porEmp[emp].contas,
+        nomes: porEmp[emp].nomes,
+        em: (doc && doc.em) || ""
+      };
+    });
+    Object.keys(porEmp).forEach((emp) => {
+      if (usados[emp]) return;
+      const nome = "empresa-" + emp;
+      por[nome] = {
+        rotulo: "Empresa " + emp,
+        empresa: Number(emp),
+        contas: porEmp[emp].contas,
+        nomes: porEmp[emp].nomes,
+        em: (doc && doc.em) || ""
+      };
+    });
+    if (Object.keys(solto.contas).length) {
+      const jaTem = Object.keys(por).length;
+      const unico = !jaTem && nomesArquivo.length === 1;
+      const nome = jaTem ? "sem-empresa" : (unico ? (nomesArquivo[0] || "forecast") : "forecast");
+      por[nome] = {
+        rotulo: jaTem ? "Sem empresa" : (unico ? this.nomeEmpresaArquivo(nome) : "Forecast"),
+        empresa: unico ? (this.empresaId(nome) || 0) : 0,
+        contas: solto.contas,
+        nomes: solto.nomes,
+        em: (doc && doc.em) || ""
+      };
+    }
+    if (!Object.keys(por).length && Object.keys(contas).length) {
+      const nome = nomesArquivo[0] || "forecast";
+      por[nome] = { rotulo: this.nomeEmpresaArquivo(nome), empresa: this.empresaId(nome) || 0, contas: contas, nomes: nomesCc, em: (doc && doc.em) || "" };
+    }
+    return por;
+  },
+
+  normalizarForecastsMemoria() {
+    Object.keys(this.forecasts || {}).forEach((ym) => {
+      const doc = this.forecasts[ym];
+      if (!doc) return;
+      if (!doc.porArquivo || Array.isArray(doc.porArquivo) || !Object.keys(doc.porArquivo).length) {
+        doc.porArquivo = this.partirForecast(doc);
+      }
+      Object.keys(doc.porArquivo).forEach((nome) => {
+        const arq = doc.porArquivo[nome];
+        if (!arq) return;
+        if (!arq.rotulo) arq.rotulo = this.nomeEmpresaArquivo(nome);
+        if (!arq.empresa) arq.empresa = this.empresaId(nome) || this.empresaId(arq.rotulo) || 0;
+      });
+    });
   },
 
   competenciaAtual() {
@@ -301,12 +431,13 @@ const ResultadoCaixaApp = {
     const meses = [];
     let em = "";
     this.mesesSeguintes().forEach((ym) => {
-      const doc = this.forecasts[ym];
-      if (!doc || !doc.contas || !Object.keys(doc.contas).length) return;
+      const fatia = this.contasMesForecast(ym);
+      if (!fatia) return;
+      const doc = this.forecasts[ym] || {};
       meses.push(ym);
       if (doc.em && doc.em > em) em = doc.em;
-      (doc.arquivos || []).forEach((nome) => { if (arquivos.indexOf(nome) < 0) arquivos.push(nome); });
-      this.juntarForecast({ contas: contas, nomes: nomes }, doc);
+      Object.keys(doc.porArquivo || {}).forEach((nome) => { if (arquivos.indexOf(nome) < 0) arquivos.push(nome); });
+      this.juntarForecast({ contas: contas, nomes: nomes }, fatia);
     });
     if (!meses.length) {
       this.forecast = null;
@@ -334,13 +465,18 @@ const ResultadoCaixaApp = {
     const fx = window.firebaseCollections;
     const db = window.firebaseDb;
     if (!fx || !db || !doc) return false;
+    const por = doc.porArquivo || {};
+    const nomes = {};
+    const contas = {};
+    Object.keys(por).forEach((nome) => this.juntarForecast({ contas: contas, nomes: nomes }, por[nome]));
     await fx.setDoc(fx.doc(db, "resultado_caixa", this.docForecast(ym)), {
       tipo: "forecast",
       slot: "fc-" + ym,
       competencia: ym,
-      arquivos: doc.arquivos || [],
-      nomes: doc.nomes || {},
-      contas: doc.contas || {},
+      arquivos: Object.keys(por),
+      nomes: nomes,
+      contas: contas,
+      porArquivo: por,
       em: doc.em || new Date().toISOString()
     });
     return true;
@@ -357,22 +493,31 @@ const ResultadoCaixaApp = {
     try {
       const snap = await fx.getDocs(fx.collection(db, "resultado_caixa"));
       const nuvem = {};
+      const semParte = {};
       snap.forEach((docSnap) => {
         const id = docSnap.id || "";
         const x = docSnap.data() || {};
         if (x.tipo !== "forecast" && id.indexOf("fc-") !== 0) return;
         const ym = String(x.competencia || id.replace(/^fc-/, ""));
         if (!/^\d{4}-\d{2}$/.test(ym)) return;
+        const jaPartido = x.porArquivo && typeof x.porArquivo === "object" && !Array.isArray(x.porArquivo) && Object.keys(x.porArquivo).length;
+        if (!jaPartido) semParte[ym] = 1;
         nuvem[ym] = {
           arquivos: x.arquivos || [],
           em: x.em || "",
           contas: x.contas || {},
-          nomes: x.nomes || {}
+          nomes: x.nomes || {},
+          porArquivo: jaPartido ? x.porArquivo : null
         };
       });
       if (Object.keys(nuvem).length) {
         this.forecasts = nuvem;
+        this.normalizarForecastsMemoria();
         this.gravarForecastLocal();
+        Object.keys(semParte).forEach((ym) => {
+          const doc = this.forecasts[ym];
+          if (doc && doc.porArquivo && Object.keys(doc.porArquivo).length) this.salvarForecastNuvem(ym, doc);
+        });
       }
       this.aplicarForecastVista();
     } catch (e) {}
@@ -385,26 +530,50 @@ const ResultadoCaixaApp = {
   },
 
   /* Bases de PIS/COFINS e lucro presumido de uma competência, por empresa, a partir do forecast daquele mês. */
+  contasMesForecast(ym) {
+    const doc = this.forecasts && this.forecasts[ym];
+    if (!doc) return null;
+    const contas = {};
+    const nomes = {};
+    const por = doc.porArquivo;
+    if (por && typeof por === "object" && !Array.isArray(por) && Object.keys(por).length) {
+      Object.keys(por).forEach((nome) => this.juntarForecast({ contas: contas, nomes: nomes }, por[nome]));
+    } else if (doc.contas) {
+      this.juntarForecast({ contas: contas, nomes: nomes }, doc);
+    }
+    return Object.keys(contas).length ? { contas: contas, nomes: nomes } : null;
+  },
+
   basesForecast(ym) {
     const doc = this.forecasts && this.forecasts[ym];
-    if (!doc || !doc.contas) return null;
+    if (!doc) return null;
     const est = typeof OrcEst !== "undefined" ? OrcEst : null;
     if (!est) return null;
     const cfg = est.taxConfig();
+    const lista = [];
+    const por = doc.porArquivo;
+    if (por && typeof por === "object" && !Array.isArray(por) && Object.keys(por).length) {
+      Object.keys(por).forEach((nome) => lista.push(Object.assign({ nome: nome }, por[nome])));
+    } else if (doc.contas) {
+      lista.push({ nome: "", empresa: 0, contas: doc.contas, nomes: doc.nomes || {} });
+    }
     const porEmp = {};
-    Object.keys(doc.contas).forEach((cc) => {
-      const emp = this.empresaDoForecast(cc, (doc.nomes || {})[cc]);
-      if (!emp) return;
-      const row = porEmp[emp] || (porEmp[emp] = { vendas: 0, servicos: 0, financeiras: 0 });
-      Object.keys(doc.contas[cc] || {}).forEach((code) => {
-        const info = doc.contas[cc][code] || {};
-        const valor = Number((info.meses || {})[ym]) || 0;
-        if (!valor) return;
-        const cl = est.classe({ conta: code, cn: info.nome || "" }, cfg);
-        if (!cl) return;
-        let s = est.sinal(est.grupo(code, info.nome || ""), code, info.nome || "", valor);
-        if (cl.red && s > 0) s = -Math.abs(s);
-        row[cl.bucket] += s;
+    lista.forEach((arq) => {
+      const empArq = Number(arq.empresa) || this.empresaId(arq.nome) || this.empresaId(arq.rotulo) || 0;
+      Object.keys(arq.contas || {}).forEach((cc) => {
+        const emp = empArq || this.empresaDoCentro(cc, (arq.nomes || {})[cc]);
+        if (!emp) return;
+        const row = porEmp[emp] || (porEmp[emp] = { vendas: 0, servicos: 0, financeiras: 0 });
+        Object.keys(arq.contas[cc] || {}).forEach((code) => {
+          const info = arq.contas[cc][code] || {};
+          const valor = Number((info.meses || {})[ym]) || 0;
+          if (!valor) return;
+          const cl = est.classe({ conta: code, cn: info.nome || "" }, cfg);
+          if (!cl) return;
+          let s = est.sinal(est.grupoEfetivo ? est.grupoEfetivo(code, info.nome || "") : est.grupo(code, info.nome || ""), code, info.nome || "", valor);
+          if (cl.red && s > 0) s = -Math.abs(s);
+          row[cl.bucket] += s;
+        });
       });
     });
     return Object.keys(porEmp).length ? porEmp : null;
@@ -415,7 +584,7 @@ const ResultadoCaixaApp = {
     const out = {};
     for (let m = 1; m <= 12; m++) {
       const chave = Number(ano) + "-" + String(m).padStart(2, "0");
-      const f = this.forecasts && this.forecasts[chave];
+      const f = this.contasMesForecast(chave);
       if (!f || !f.contas) continue;
       const parcial = this.somarForecastMes(f, ano, lado, chave);
       if (parcial != null) out[m] = parcial;
@@ -671,22 +840,39 @@ const ResultadoCaixaApp = {
   },
 
   empresaDoCc(ccId) {
+    return this.empresaDoCentro(ccId, "");
+  },
+
+  /** Empresa do centro de custo: cadastro, arquivo da competência que já tem esse centro, ou o nome. */
+  empresaDoCentro(ccId, nomeCc) {
     const id = String(ccId || "").replace(/\D/g, "");
-    if (!id) return 0;
-    let found = 0;
-    Object.keys(this.anos || {}).forEach((y) => {
-      const a = this.anos[y];
-      if (!a || !a.arquivos) return;
-      Object.keys(a.arquivos).forEach((nome) => {
-        const arq = a.arquivos[nome];
-        if (!arq) return;
+    if (!id && !nomeCc) return 0;
+    const app = window.AppState;
+    const listas = app ? [app.cachedCostCenters, app.costCenters] : [];
+    for (let i = 0; i < listas.length; i++) {
+      const lista = listas[i];
+      if (!Array.isArray(lista)) continue;
+      const hit = lista.find((c) => c && String(c.id || "").replace(/\D/g, "") === id);
+      const emp = hit ? (Number(hit.idCompany || hit.companyId) || 0) : 0;
+      if (emp) return emp;
+    }
+    const bolsas = [];
+    Object.keys((this.acervo && this.acervo.meses) || {}).forEach((k) => bolsas.push(this.acervo.meses[k]));
+    Object.keys((this.acervo && this.acervo.anterior) || {}).forEach((k) => bolsas.push(this.acervo.anterior[k]));
+    Object.keys(this.anos || {}).forEach((y) => bolsas.push(this.anos[y]));
+    for (let i = 0; i < bolsas.length; i++) {
+      const arquivos = (bolsas[i] && bolsas[i].arquivos) || {};
+      const nomes = Object.keys(arquivos);
+      for (let j = 0; j < nomes.length; j++) {
+        const arq = arquivos[nomes[j]];
+        if (!arq) continue;
         const tem = (arq.entradas && arq.entradas[id]) || (arq.contasPorCc && arq.contasPorCc[id]);
-        if (!tem) return;
-        const emp = Number(arq.empresa) || this.empresaId(nome);
-        if (emp) found = emp;
-      });
-    });
-    return found;
+        if (!tem) continue;
+        const emp = Number(arq.empresa) || this.empresaId(nomes[j]);
+        if (emp) return emp;
+      }
+    }
+    return this.empresaId(nomeCc || "");
   },
 
   /** Percentual da Moura Leite da empresa dona do arquivo (1 sem agrupar). */
@@ -765,11 +951,16 @@ const ResultadoCaixaApp = {
     if (!rot) return 0;
     const aliases = [
       ["ELLENCO", 12],
-      ["ARACARI SPE", 6],
       ["TERRA DO ARACARI", 3],
+      ["ARACARI SPE", 6],
       ["TERRAS DE ITU", 4],
       ["VERCELLINO", 13],
       ["PIRAPITINGUI", 14],
+      ["JARDIM DOS IPES", 36],
+      ["JARDIM IPES", 36],
+      ["TAGUAI", 36],
+      ["NOVO HORIZONTE", 32],
+      ["CHACARA", 2],
       ["RAMOS", 28],
       ["MLDU", 1],
       ["ITATINGA", 32],
@@ -1887,6 +2078,28 @@ const ResultadoCaixaApp = {
     return t;
   },
 
+  chipsForecast() {
+    const mapa = new Map();
+    Object.keys(this.forecasts || {}).forEach((ym) => {
+      const por = (this.forecasts[ym] && this.forecasts[ym].porArquivo) || {};
+      Object.keys(por).forEach((nome) => {
+        if (!mapa.has(nome)) {
+          const arq = por[nome] || {};
+          mapa.set(nome, { rotulo: arq.rotulo || this.nomeEmpresaArquivo(nome) || nome, meses: [] });
+        }
+        mapa.get(nome).meses.push(ym);
+      });
+    });
+    if (!mapa.size) return `<span class="rcx-muted">Nenhum forecast.</span>`;
+    return Array.from(mapa.entries()).sort((a, b) => String(a[1].rotulo).localeCompare(String(b[1].rotulo), "pt")).map(([nome, info]) => {
+      const meses = info.meses.slice().sort();
+      const faixa = meses.map((ym) => (this.MESES[Number(ym.slice(5, 7)) - 1] || ym) + "/" + ym.slice(0, 4));
+      const periodo = faixa.length > 1 ? (faixa[0] + " a " + faixa[faixa.length - 1]) : (faixa[0] || "");
+      const chave = encodeURIComponent(nome);
+      return `<span class="rcx-arq" title="${caixaEsc(nome)}">${caixaEsc(info.rotulo)}${periodo ? " · " + caixaEsc(periodo) : ""} <button type="button" onclick="ResultadoCaixaApp.removerForecastArquivo('${chave}')">tirar</button></span>`;
+    }).join("");
+  },
+
   chipsDoAno(y) {
     const a = this.anoDados(y);
     const arquivos = (a && a.arquivos) || {};
@@ -1919,19 +2132,15 @@ const ResultadoCaixaApp = {
     const antN = atual > 1900 ? atual - 1 : 0;
     const chipsAtual = atual ? this.chipsDoAno(atual) : "";
     const chipsAnt = antN ? this.chipsDoAno(antN) : "";
+    const nomesFc = {};
+    Object.keys(this.forecasts || {}).forEach((ym) => {
+      Object.keys((this.forecasts[ym] && this.forecasts[ym].porArquivo) || {}).forEach((nome) => { nomesFc[nome] = 1; });
+    });
     const qtdArq = [atual, antN].reduce((s, y) => {
       const a = y ? this.anoDados(y) : null;
       return s + (a ? Object.keys(a.arquivos || {}).length : 0);
-    }, 0) + ((this.forecast && this.forecast.arquivos && this.forecast.arquivos.length) || (this.forecast ? 1 : 0));
-    const fcMeses = this.forecast && Array.isArray(this.forecast.meses) && this.forecast.meses.length
-      ? this.forecast.meses.map((ym) => (this.MESES[Number(ym.slice(5, 7)) - 1] || "") + "/" + ym.slice(0, 4))
-      : [];
-    const fcPeriodo = fcMeses.length ? (fcMeses.length > 1 ? fcMeses[0] + " a " + fcMeses[fcMeses.length - 1] : fcMeses[0]) : "";
-    const listaFc = this.forecast ? ((this.forecast.arquivos && this.forecast.arquivos.length) ? this.forecast.arquivos : [this.forecast.arquivo || "forecast"]) : [];
-    const rotuloFc = listaFc.length > 1 ? (listaFc.length + " forecasts") : (listaFc[0] || "forecast");
-    const chipForecast = this.forecast
-      ? `<span class="rcx-arq" title="${caixaEsc(listaFc.join(", "))}">${caixaEsc(rotuloFc)}${fcPeriodo ? " · " + caixaEsc(fcPeriodo) : ""} <button type="button" onclick="ResultadoCaixaApp.removerForecast()">tirar</button></span>`
-      : `<span class="rcx-muted">Nenhum forecast.</span>`;
+    }, 0) + Object.keys(nomesFc).length;
+    const chipForecast = this.chipsForecast();
     const agrupa = this.agrupar ? " Com “% Moura Leite”, cada valor está no percentual da Moura Leite cadastrado na empresa." : "";
     const mesNomeFaixa = nomesMes[(Number(this.mes) || 1) - 1] || "";
     const base = "Orçado e realizado de " + (atual || "—") + " vêm do arquivo enviado para " + mesNomeFaixa + ". A coluna do ano anterior é o realizado do arquivo de " + (antN || "o ano anterior") + ", o mesmo em todos os meses.";

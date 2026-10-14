@@ -167,10 +167,14 @@ const MarketingBudgetApp = {
   idsComUnidade() {
     const ids = new Set(this.state.ccsComUnidade || []);
     const E = window.EstoqueComercialApp;
-    ((E && E.state && E.state.units) || []).forEach((u) => { if (u && u.enterpriseId) ids.add(String(u.enterpriseId)); });
+    const marcar = (u) => {
+      const id = u && (u.enterpriseId || u.costCenterId);
+      if (id) ids.add(String(id));
+    };
+    ((E && E.state && E.state.units) || []).forEach(marcar);
     try {
       const raw = JSON.parse(localStorage.getItem("crm_estoque_posicao_v1") || "null");
-      ((raw && (raw.units || (raw.data && raw.data.units))) || []).forEach((u) => { if (u && u.enterpriseId) ids.add(String(u.enterpriseId)); });
+      ((raw && (raw.units || (raw.data && raw.data.units))) || []).forEach(marcar);
     } catch (e) {}
     try {
       const salvos = JSON.parse(localStorage.getItem("crm_cc_ids_com_unidade") || "[]");
@@ -331,7 +335,7 @@ const MarketingBudgetApp = {
   /** Sem estoque nem carteira carregados nesta sessão, lê do Firebase quais empreendimentos têm unidades. */
   async carregarUnidades() {
     const s = this.state;
-    if (s.ccsComUnidade || this.idsComUnidade().size || this.idsComCarteira().size) return false;
+    if (s.unidadesLidas || s.ccsComUnidade || this.idsComUnidade().size) return false;
     const fc = window.firebaseCollections;
     if (!(window.firebaseDb && fc && fc.getDocs)) return false;
     try {
@@ -339,13 +343,21 @@ const MarketingBudgetApp = {
       const ids = new Set();
       snap.forEach((d) => {
         const data = d.data() || {};
-        if (d.id !== "_meta" && data.enterpriseId && Array.isArray(data.units) && data.units.length) ids.add(String(data.enterpriseId));
+        if (d.id === "_meta") return;
+        const units = Array.isArray(data.units) ? data.units : [];
+        if (data.enterpriseId && units.length) ids.add(String(data.enterpriseId));
+        units.forEach((u) => {
+          const id = u && (u.enterpriseId || u.costCenterId);
+          if (id) ids.add(String(id));
+        });
       });
       s.ccsComUnidade = [...ids];
+      s.unidadesLidas = true;
       return ids.size > 0;
     } catch (e) {
       console.warn("[Budget] unidades por empreendimento", e);
       s.ccsComUnidade = [];
+      s.unidadesLidas = true;
       return false;
     }
   },
@@ -1973,33 +1985,42 @@ const MarketingBudgetApp = {
       }, box.opt || {});
       slide.addChart(desenho.tipo, desenho.data, Object.assign(opt, desenho.opt || {}));
     };
+    const meio = { y: 2.22, h: 5.05, esq: 0.28, dir: 6.72, w: 6.28, wDir: 6.33 };
     const nomesMes = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
     const meses = this.meses();
     const porMes = (st) => meses.map((m) => r.rows.filter((x) => x.status === st && String(x.data).slice(0, 7) === m).reduce((t, x) => t + x.valor, 0));
     const realM = porMes("realizado");
     const prevM = porMes("previsao").map((v, i) => v + porMes("previsao_vencida")[i]);
     const compM = porMes("comprometido").map((v, i) => v + prevM[i]);
-    const vendM = meses.map((m) => s.vendas.filter((v) => String(v.data || "").slice(0, 7) === m).reduce((t, v) => t + (Number(v.unidades) || 0), 0));
-    const distM = meses.map((m) => s.distratos.filter((v) => String(v.dataCancel || v.data || "").slice(0, 7) === m).reduce((t, v) => t + (Number(v.unidades) || 0), 0));
     let accGasto = 0;
-    let accReal = 0;
-    let accVenda = 0;
     const serie = [];
     meses.forEach((m, i) => {
       accGasto += realM[i] + compM[i];
-      accReal += realM[i];
-      accVenda += vendM[i] - distM[i];
       if (accGasto <= 0.004) return;
       serie.push({
         rot: (nomesMes[Number(m.slice(5)) - 1] || m) + "/" + m.slice(2, 4),
-        real: realM[i], comp: compM[i], acc: accGasto,
-        vend: vendM[i], dist: distM[i], accVenda: accVenda,
-        cac: accVenda > 0 ? accReal / accVenda : null
+        real: realM[i], comp: compM[i], acc: accGasto
       });
     });
-    const fonte = serie.length > 8 ? 10 : 11;
+    const fonte = serie.length > 10 ? 9 : 11;
     const cel = (texto, opt) => ({ text: String(texto), options: Object.assign({ align: "center", valign: "middle", fontFace: "Calibri", fontSize: fonte }, opt || {}) });
     const cab = (t) => cel(t, { fill: { color: "105436" }, color: "FFFFFF", bold: true });
+    const borda = [{ pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }];
+    const tabela = (slide, linhas, box) => {
+      if (!linhas.length) return;
+      const rowH = Math.min(0.32, (box.h - 0.5) / linhas.length);
+      slide.addTable(linhas, {
+        x: box.x + 0.12, y: box.y + 0.4, w: box.w - 0.24, h: rowH * linhas.length,
+        colW: box.cols, rowH: rowH, border: borda, fontFace: "Calibri", valign: "middle"
+      });
+    };
+    const capa = pptx.addSlide();
+    capa.background = { color: "105436" };
+    capa.addShape("rect", { x: 0, y: 0, w: 0.28, h: 7.5, fill: { color: "F37021" } });
+    capa.addText("BUDGET DE MARKETING", { x: 0.85, y: 1.85, w: 11, h: 0.36, fontFace: "Calibri", fontSize: 16, bold: true, color: "D1FAE5", margin: 0 });
+    capa.addText(nome, { x: 0.85, y: 2.3, w: 11.5, h: 1.3, fontFace: "Calibri", fontSize: 36, bold: true, color: "FFFFFF", margin: 0 });
+    capa.addText(periodo, { x: 0.85, y: 3.75, w: 11, h: 0.4, fontFace: "Calibri", fontSize: 18, color: "D1FAE5", margin: 0 });
+    capa.addText("Budget    ·    Contratos    ·    Perfil da venda", { x: 0.85, y: 6.45, w: 11, h: 0.32, fontFace: "Calibri", fontSize: 14, color: "FFFFFF", margin: 0 });
     const s1 = pptx.addSlide();
     faixa(s1, "Budget");
     kpis(s1, [
@@ -2008,72 +2029,23 @@ const MarketingBudgetApp = {
       { rotulo: "Comprometido", valor: self.money(r.comprometido), nota: "Em aberto e previsão, ainda não pagos", cor: "F37021" },
       { rotulo: "Saldo da verba", valor: self.money(r.saldo), nota: "Consumo " + consumo, cor: r.saldo < 0 ? "B91C1C" : "0EA5E9" }
     ]);
-    const n1 = serie.length;
-    const row1 = n1 ? Math.min(0.28, 3.05 / (n1 + 2)) : 0.28;
-    const hTab1 = serie.length ? row1 * (serie.length + 2) : 0;
-    const yTab1 = 7.28 - hTab1;
-    const hChart1 = Math.max(1.7, (serie.length ? yTab1 - 0.1 : 7.28) - 2.2);
     const labels1 = serie.map((p) => p.rot);
-    const linhasVerba = serie.length ? [{ name: "Acumulado", labels: labels1, values: serie.map((p) => Math.round(p.acc)) }] : [];
-    if (r.verba > 0 && serie.length) linhasVerba.push({ name: "Verba", labels: labels1, values: labels1.map(() => Math.round(r.verba)) });
-    if (!serie.length) {
-      grafico(s1, null, { x: 0.28, y: 2.2, w: 12.77, h: hChart1, titulo: "Verba mês a mês", vazio: "Nenhum mês com gasto acumulado neste período." });
-    } else {
-      grafico(s1, { tipo: tipo.bar, data: [
-        { name: "Realizado", labels: labels1, values: serie.map((p) => Math.round(p.real)) },
-        { name: "Comprometido", labels: labels1, values: serie.map((p) => Math.round(p.comp)) }
-      ], opt: { chartColors: ["105436", "F37021"], barGrouping: "stacked" } }, { x: 0.28, y: 2.2, w: 6.28, h: hChart1, titulo: "Realizado e comprometido" });
-      grafico(s1, { tipo: tipo.line, data: linhasVerba, opt: { chartColors: r.verba > 0 ? ["0284C7", "B91C1C"] : ["0284C7"] } }, { x: 6.72, y: 2.2, w: 6.33, h: hChart1, titulo: "Acumulado e verba" });
-    }
+    grafico(s1, serie.length ? { tipo: tipo.bar, data: [
+      { name: "Realizado", labels: labels1, values: serie.map((p) => Math.round(p.real)) },
+      { name: "Comprometido", labels: labels1, values: serie.map((p) => Math.round(p.comp)) }
+    ], opt: { chartColors: ["105436", "F37021"], barGrouping: "stacked" } } : null, { x: meio.esq, y: meio.y, w: meio.w, h: meio.h, titulo: "Realizado e comprometido", vazio: "Nenhum mês com gasto acumulado neste período." });
+    const caixaTab = { x: meio.dir, y: meio.y, w: meio.wDir, h: meio.h };
+    s1.addShape("roundRect", { x: caixaTab.x, y: caixaTab.y, w: caixaTab.w, h: caixaTab.h, fill: { color: "FFFFFF" }, line: { color: "E2E8F0", pt: 1 }, rectRadius: 0.06 });
+    s1.addText("Gasto mês a mês", { x: caixaTab.x + 0.16, y: caixaTab.y + 0.08, w: caixaTab.w - 0.32, h: 0.26, fontFace: "Calibri", fontSize: 13, bold: true, color: "105436", margin: 0 });
     if (serie.length) {
-      const linhasMes = [[cab("Mês"), cab("Realizado"), cab("Comprometido"), cab("Acumulado"), cab("Vendas acum."), cab("CAC mkt")]];
+      const linhasMes = [[cab("Mês"), cab("Realizado"), cab("Comprometido"), cab("Acumulado")]];
       serie.forEach((p, i) => {
-        const fundo = i % 2 ? "F8FAFC" : "FFFFFF";
-        const base = { fill: { color: fundo } };
-        linhasMes.push([
-          cel(p.rot, base), cel(self.money(p.real), base), cel(self.money(p.comp), base), cel(self.money(p.acc), base),
-          cel(nTxt(p.accVenda), base), cel(p.cac != null ? self.money(p.cac) : "—", base)
-        ]);
-      });
-      const totReal = serie.reduce((t, p) => t + p.real, 0);
-      const totComp = serie.reduce((t, p) => t + p.comp, 0);
-      const fim = serie[serie.length - 1];
-      linhasMes.push([cab("Total"), cab(self.money(totReal)), cab(self.money(totComp)), cab(self.money(fim.acc)), cab(nTxt(fim.accVenda)), cab(fim.cac != null ? self.money(fim.cac) : "—")]);
-      s1.addTable(linhasMes, { x: 0.28, y: yTab1, w: 12.77, h: hTab1, colW: [1.35, 2.28, 2.28, 2.28, 2.14, 2.44], rowH: row1, border: [{ pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }], fontFace: "Calibri", valign: "middle" });
-    }
-    const s2 = pptx.addSlide();
-    faixa(s2, "Vendas");
-    kpis(s2, [
-      { rotulo: "Unidades vendidas", valor: nTxt(r.liquidas), nota: nTxt(r.brutas) + " emitidos · " + nTxt(r.distr) + " distratados", cor: "6366F1" },
-      { rotulo: "Distratos", valor: nTxt(r.distr), nota: "Unidades canceladas no período", cor: "B91C1C" },
-      { rotulo: "CAC de marketing", valor: r.cac != null ? self.money(r.cac) : "—", nota: "Realizado dividido pelas unidades vendidas", cor: "105436" },
-      { rotulo: "CAC com em aberto", valor: r.cacTotal != null ? self.money(r.cacTotal) : "—", nota: "Pago e comprometido, por unidade", cor: "F37021" }
-    ]);
-    const n2 = serie.length;
-    const row2 = n2 ? Math.min(0.28, 3.05 / (n2 + 2)) : 0.28;
-    const hTab2 = serie.length ? row2 * (serie.length + 2) : 0;
-    const yTab2 = 7.28 - hTab2;
-    const hChart2 = Math.max(1.7, (serie.length ? yTab2 - 0.1 : 7.28) - 2.2);
-    const labels2 = serie.map((p) => p.rot);
-    if (!serie.length) {
-      grafico(s2, null, { x: 0.28, y: 2.2, w: 12.77, h: hChart2, titulo: "Vendas, distratos e CAC", vazio: "Nenhum mês com gasto acumulado neste período." });
-    } else {
-      grafico(s2, { tipo: tipo.bar, data: [
-        { name: "Vendas", labels: labels2, values: serie.map((p) => p.vend) },
-        { name: "Distratos", labels: labels2, values: serie.map((p) => p.dist) }
-      ], opt: { chartColors: ["6366F1", "F87171"], barGrouping: "clustered" } }, { x: 0.28, y: 2.2, w: 6.28, h: hChart2, titulo: "Vendas e distratos" });
-      grafico(s2, { tipo: tipo.line, data: [{ name: "CAC de marketing", labels: labels2, values: serie.map((p) => p.cac != null ? Math.round(p.cac) : 0) }], opt: { chartColors: ["105436"] } }, { x: 6.72, y: 2.2, w: 6.33, h: hChart2, titulo: "CAC de marketing" });
-    }
-    if (serie.length) {
-      const linhasVenda = [[cab("Mês"), cab("Vendas"), cab("Distratos"), cab("Vendas acum."), cab("CAC mkt")]];
-      serie.forEach((p, i) => {
-        const fundo = i % 2 ? "F8FAFC" : "FFFFFF";
-        const base = { fill: { color: fundo } };
-        linhasVenda.push([cel(p.rot, base), cel(nTxt(p.vend), base), cel(nTxt(p.dist), base), cel(nTxt(p.accVenda), base), cel(p.cac != null ? self.money(p.cac) : "—", base)]);
+        const base = { fill: { color: i % 2 ? "F8FAFC" : "FFFFFF" } };
+        linhasMes.push([cel(p.rot, base), cel(self.money(p.real), base), cel(self.money(p.comp), base), cel(self.money(p.acc), base)]);
       });
       const fim = serie[serie.length - 1];
-      linhasVenda.push([cab("Total"), cab(nTxt(serie.reduce((t, p) => t + p.vend, 0))), cab(nTxt(serie.reduce((t, p) => t + p.dist, 0))), cab(nTxt(fim.accVenda)), cab(fim.cac != null ? self.money(fim.cac) : "—")]);
-      s2.addTable(linhasVenda, { x: 0.28, y: yTab2, w: 12.77, h: hTab2, colW: [1.7, 2.5, 2.5, 2.9, 3.17], rowH: row2, border: [{ pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }], fontFace: "Calibri", valign: "middle" });
+      linhasMes.push([cab("Total"), cab(self.money(serie.reduce((t, p) => t + p.real, 0))), cab(self.money(serie.reduce((t, p) => t + p.comp, 0))), cab(self.money(fim.acc))]);
+      tabela(s1, linhasMes, Object.assign({ cols: [1.1, 1.66, 1.72, 1.61] }, caixaTab));
     }
     const s3 = pptx.addSlide();
     faixa(s3, "Contratos");
@@ -2085,7 +2057,9 @@ const MarketingBudgetApp = {
         { rotulo: "Pagamentos em atraso", valor: "—", nota: "Aguardando o Contas a Receber", cor: "B91C1C" },
         { rotulo: "Lotes disponíveis", valor: "—", nota: "Aguardando o Contas a Receber", cor: "6366F1" }
       ]);
-      s3.addText(s.adimpl.status === "erro" ? "Não foi possível ler o Contas a Receber desta consulta." : "A situação de pagamento ainda não fechou. Espere a aba Contratos carregar e exporte de novo.", { x: 0.4, y: 2.6, w: 12, h: 0.5, fontFace: "Calibri", fontSize: 16, color: "64748B" });
+      grafico(s3, null, { x: meio.esq, y: meio.y, w: meio.w, h: meio.h, titulo: "Quanto do contrato já foi pago", vazio: s.adimpl.status === "erro" ? "Não foi possível ler o Contas a Receber." : "Espere a aba Contratos carregar e exporte de novo." });
+      s3.addShape("roundRect", { x: meio.dir, y: meio.y, w: meio.wDir, h: meio.h, fill: { color: "FFFFFF" }, line: { color: "E2E8F0", pt: 1 }, rectRadius: 0.06 });
+      s3.addText("Tempo em atraso", { x: meio.dir + 0.16, y: meio.y + 0.08, w: meio.wDir - 0.32, h: 0.26, fontFace: "Calibri", fontSize: 13, bold: true, color: "105436", margin: 0 });
     } else {
       const L = this.contratosAtivos();
       const emDia = L.filter((c) => c.pag.status === "adimplente");
@@ -2103,8 +2077,17 @@ const MarketingBudgetApp = {
       const qPago = this.FAIXAS_PAGO.map((f) => L.filter((c) => this.faixaPago(c.pag) === f.nome).length);
       const faixasAtraso = ["Em dia"].concat(this.FAIXAS_ATRASO);
       const qAtraso = faixasAtraso.map((nomeFaixa, i) => i === 0 ? emDia.length : atraso.filter((c) => this.faixaAtraso(c.pag.dias || 0) === nomeFaixa).length);
-      grafico(s3, L.length ? { tipo: tipo.bar, data: [{ name: "Contratos", labels: rotPago, values: qPago }], opt: { chartColors: ["105436"], barGrouping: "clustered", showValue: true, showLegend: false, dataLabelFontSize: 11, dataLabelColor: "0F172A", dataLabelPosition: "inEnd" } } : null, { x: 0.28, y: 2.2, w: 6.28, h: 4.95, titulo: "Quanto do contrato já foi pago", vazio: "Nenhum contrato ativo neste recorte." });
-      grafico(s3, L.length ? { tipo: tipo.bar, data: [{ name: "Contratos", labels: faixasAtraso, values: qAtraso }], opt: { chartColors: ["F37021"], barGrouping: "clustered", showValue: true, showLegend: false, dataLabelFontSize: 11, dataLabelColor: "0F172A", dataLabelPosition: "inEnd" } } : null, { x: 6.72, y: 2.2, w: 6.33, h: 4.95, titulo: "Há quanto tempo está vencido", vazio: "Nenhum contrato ativo neste recorte." });
+      grafico(s3, L.length ? { tipo: tipo.bar, data: [{ name: "Contratos", labels: rotPago, values: qPago }], opt: { chartColors: ["105436"], barGrouping: "clustered", showValue: true, showLegend: false, dataLabelFontSize: 11, dataLabelColor: "0F172A", dataLabelPosition: "inEnd" } } : null, { x: meio.esq, y: meio.y, w: meio.w, h: meio.h, titulo: "Quanto do contrato já foi pago", vazio: "Nenhum contrato ativo neste recorte." });
+      s3.addShape("roundRect", { x: meio.dir, y: meio.y, w: meio.wDir, h: meio.h, fill: { color: "FFFFFF" }, line: { color: "E2E8F0", pt: 1 }, rectRadius: 0.06 });
+      s3.addText("Tempo em atraso", { x: meio.dir + 0.16, y: meio.y + 0.08, w: meio.wDir - 0.32, h: 0.26, fontFace: "Calibri", fontSize: 13, bold: true, color: "105436", margin: 0 });
+      if (L.length) {
+        const linhasAtraso = [[cab("Faixa"), cab("Contratos")]];
+        faixasAtraso.forEach((nomeFaixa, i) => {
+          const base = { fill: { color: i % 2 ? "F8FAFC" : "FFFFFF" } };
+          linhasAtraso.push([cel(nomeFaixa, base), cel(nTxt(qAtraso[i]), base)]);
+        });
+        tabela(s3, linhasAtraso, { x: meio.dir, y: meio.y, w: meio.wDir, h: meio.h, cols: [4.2, 1.89] });
+      }
     }
     const s4 = pptx.addSlide();
     faixa(s4, "Perfil da venda");
@@ -2116,7 +2099,9 @@ const MarketingBudgetApp = {
         { rotulo: "Idade média", valor: "—", nota: "Sem vendas no período", cor: "0F766E" },
         { rotulo: "Cancelamentos", valor: "0", nota: "Nenhum distrato no período", cor: "B91C1C" }
       ]);
-      s4.addText("Nenhuma venda nem distrato deste empreendimento no período.", { x: 0.4, y: 2.6, w: 12, h: 0.5, fontFace: "Calibri", fontSize: 16, color: "64748B" });
+      grafico(s4, null, { x: meio.esq, y: meio.y, w: meio.w, h: meio.h, titulo: "Vendas por sexo", vazio: "Nenhuma venda nem distrato neste período." });
+      s4.addShape("roundRect", { x: meio.dir, y: meio.y, w: meio.wDir, h: meio.h, fill: { color: "FFFFFF" }, line: { color: "E2E8F0", pt: 1 }, rectRadius: 0.06 });
+      s4.addText("Faixa etária", { x: meio.dir + 0.16, y: meio.y + 0.08, w: meio.wDir - 0.32, h: 0.26, fontFace: "Calibri", fontSize: 13, bold: true, color: "105436", margin: 0 });
     } else {
       const ativos = linhas.filter((x) => !x.cancelado);
       const canc = linhas.filter((x) => x.cancelado);
@@ -2125,9 +2110,6 @@ const MarketingBudgetApp = {
       const homens = pf.length - mulheres;
       const comIdade = ativos.filter((x) => x.idade != null);
       const idadeMedia = comIdade.length ? Math.round(comIdade.reduce((t, x) => t + x.idade, 0) / comIdade.length) : null;
-      const comPag = ativos.filter((x) => ["adimplente", "inadimplente", "quitado"].includes(x.pag));
-      const atrasoP = comPag.filter((x) => x.pag === "inadimplente");
-      const vencidoP = atrasoP.reduce((t, x) => t + x.vencido, 0);
       const cancMeses = canc.filter((x) => x.meses != null);
       const mediaMeses = cancMeses.length ? Math.round(cancMeses.reduce((t, x) => t + x.meses, 0) / cancMeses.length) : null;
       const tempo = mediaMeses == null ? "—" : (mediaMeses < 1 ? "menos de 1 mês" : mediaMeses + (mediaMeses === 1 ? " mês" : " meses"));
@@ -2136,7 +2118,7 @@ const MarketingBudgetApp = {
         { rotulo: "Mulheres", valor: perfilPronto ? this.pct(mulheres, pf.length) : "—", nota: mulheres + " contrato(s) de pessoa física", cor: "DB2777" },
         { rotulo: "Homens", valor: perfilPronto ? this.pct(homens, pf.length) : "—", nota: homens + " contrato(s) de pessoa física", cor: "0EA5E9" },
         { rotulo: "Idade média", valor: perfilPronto && idadeMedia != null ? idadeMedia + " anos" : "—", nota: comIdade.length + " cliente(s) com nascimento", cor: "0F766E" },
-        { rotulo: "Cancelamentos", valor: nTxt(canc.length), nota: this.pct(canc.length, linhas.length) + " dos contratos do período", cor: "B91C1C" }
+        { rotulo: "Cancelamentos", valor: nTxt(canc.length), nota: this.pct(canc.length, linhas.length) + " do período · " + tempo + " até cancelar", cor: "B91C1C" }
       ]);
       const sexLabels = [];
       const sexVals = [];
@@ -2149,15 +2131,17 @@ const MarketingBudgetApp = {
         sexCores.push(par[2]);
       });
       const faixas = this.ordemFaixas().filter((f) => ativos.some((x) => x.faixa === f));
-      grafico(s4, sexVals.length ? { tipo: tipo.doughnut, data: [{ name: "Sexo", labels: sexLabels, values: sexVals }], opt: { chartColors: sexCores, showPercent: true, showLegend: true, legendPos: "b" } } : null, { x: 0.28, y: 2.2, w: 5.5, h: 3.35, titulo: "Vendas por sexo", vazio: "Sem sexo informado nos contratos ativos." });
-      grafico(s4, faixas.length ? { tipo: tipo.bar, data: [{ name: "Contratos", labels: faixas, values: faixas.map((f) => ativos.filter((x) => x.faixa === f).length) }], opt: { chartColors: ["0F766E"], barGrouping: "clustered", showValue: true, showLegend: false, dataLabelFontSize: 11, dataLabelColor: "0F172A", dataLabelPosition: "inEnd" } } : null, { x: 5.94, y: 2.2, w: 7.11, h: 3.35, titulo: "Vendas por faixa etária", vazio: "Sem idade informada nos contratos ativos." });
-      const fundo = { fill: { color: "FFFFFF" } };
-      s4.addTable([
-        [cab("Situação"), cab("Quantidade"), cab("Detalhe")],
-        [cel("Em atraso", fundo), cel(nTxt(atrasoP.length) + " de " + nTxt(comPag.length), fundo), cel(this.money(vencidoP) + " vencido", fundo)],
-        [cel("Em dia", { fill: { color: "F8FAFC" } }), cel(nTxt(comPag.length - atrasoP.length), { fill: { color: "F8FAFC" } }), cel(this.pct(comPag.length - atrasoP.length, comPag.length) + " dos contratos com título", { fill: { color: "F8FAFC" } })],
-        [cel("Cancelados", fundo), cel(nTxt(canc.length), fundo), cel("Tempo médio até cancelar: " + tempo, fundo)]
-      ], { x: 0.28, y: 5.7, w: 12.77, colW: [2.4, 3.4, 6.97], rowH: 0.36, border: [{ pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }, { pt: 0.4, color: "E8EEE9" }], fontFace: "Calibri", valign: "middle" });
+      grafico(s4, sexVals.length ? { tipo: tipo.doughnut, data: [{ name: "Sexo", labels: sexLabels, values: sexVals }], opt: { chartColors: sexCores, showPercent: true, showLegend: true, legendPos: "b" } } : null, { x: meio.esq, y: meio.y, w: meio.w, h: meio.h, titulo: "Vendas por sexo", vazio: "Sem sexo informado nos contratos ativos." });
+      s4.addShape("roundRect", { x: meio.dir, y: meio.y, w: meio.wDir, h: meio.h, fill: { color: "FFFFFF" }, line: { color: "E2E8F0", pt: 1 }, rectRadius: 0.06 });
+      s4.addText("Faixa etária", { x: meio.dir + 0.16, y: meio.y + 0.08, w: meio.wDir - 0.32, h: 0.26, fontFace: "Calibri", fontSize: 13, bold: true, color: "105436", margin: 0 });
+      if (faixas.length) {
+        const linhasFaixa = [[cab("Faixa"), cab("Contratos")]];
+        faixas.forEach((f, i) => {
+          const base = { fill: { color: i % 2 ? "F8FAFC" : "FFFFFF" } };
+          linhasFaixa.push([cel(f, base), cel(nTxt(ativos.filter((x) => x.faixa === f).length), base)]);
+        });
+        tabela(s4, linhasFaixa, { x: meio.dir, y: meio.y, w: meio.wDir, h: meio.h, cols: [4.2, 1.89] });
+      }
     }
     try {
       const arquivo = "Budget de marketing - " + nome.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
@@ -2869,7 +2853,7 @@ const MarketingBudgetApp = {
               style="height:38px;width:140px;justify-content:center;display:inline-flex;align-items:center;gap:6px;">
               <i data-lucide="search" style="width:14px;"></i> Consultar
             </button>
-            <button type="button" class="btn btn-ppt" ${s.consultado && !s.loading && !s.error ? "" : "disabled"} onclick="MarketingBudgetApp.exportarPpt()" title="Exportar a apresentação: 4 indicadores no topo, tabelas e gráficos" style="height:38px;">
+            <button type="button" class="btn btn-ppt" ${s.consultado && !s.loading && !s.error ? "" : "disabled"} onclick="MarketingBudgetApp.exportarPpt()" title="Exportar a apresentação: capa, budget, contratos e perfil da venda" style="height:38px;">
               <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em PPT
             </button>
           </div>
@@ -2962,6 +2946,7 @@ window.MarketingBudgetApp = MarketingBudgetApp;
    Grava em marketing_budget_config/{empreendimento} = { pct, ccs }. */
 const MarketingConfigApp = {
   FILTRO_ID: "mkc-ccs",
+  OBRA_ID: "mkc-obra",
 
   state: {
     ccId: "",
@@ -2969,6 +2954,8 @@ const MarketingConfigApp = {
     ccs: [],
     open: false,
     query: "",
+    obraOpen: false,
+    obraQuery: "",
     lista: {},
     carregando: false,
     salvando: false,
@@ -3036,8 +3023,87 @@ const MarketingConfigApp = {
     this.state.lista = lista;
   },
 
-  onObraSelect(id) {
-    this.selecionar(String(id || ""));
+  obrasComUnidade() {
+    const B = this.B;
+    const ids = B.idsComUnidade();
+    const E = window.EstoqueComercialApp;
+    let custom = {};
+    try { custom = JSON.parse(localStorage.getItem("crm_centros_custo_custom") || "{}") || {}; } catch (e) {}
+    const tipos = ["Loteamento Aberto", "Loteamento Fechado", "Incorporação"];
+    const base = this.ccs().filter((c) => {
+      const id = String((c && c.id) || "").trim();
+      if (!id || !ids.has(id)) return false;
+      if (!(E && E.isEmpreendimentoCcId ? E.isEmpreendimentoCcId(id) : /^[12]/.test(id))) return false;
+      return !(E && E.isDeptOnlyCc && E.isDeptOnlyCc(c));
+    });
+    const tipados = base.filter((c) => tipos.includes((custom[c.id] || custom[String(c.id)] || {}).tipo_cc || ""));
+    const lista = tipados.length ? tipados : base;
+    return lista.map((c) => ({ id: String(c.id), label: B.ccLabel(c) }));
+  },
+
+  obraOpts() {
+    const s = this.state;
+    const pronto = !!(this.B.state.unidadesLidas || this.B.state.ccsComUnidade || this.B.idsComUnidade().size);
+    return {
+      id: this.OBRA_ID,
+      label: "Empreendimento",
+      items: this.obrasComUnidade(),
+      selectedIds: s.ccId ? [String(s.ccId)] : [],
+      open: s.obraOpen,
+      query: s.obraQuery,
+      single: true,
+      emptyMeansAll: false,
+      emptyLabel: "Selecione o empreendimento",
+      nouns: {
+        singular: "empreendimento",
+        plural: "empreendimentos",
+        none: pronto && !s.carregando ? "Nenhum empreendimento com unidade" : "Lendo empreendimentos…",
+        noMatch: "Nenhum empreendimento com esse nome."
+      }
+    };
+  },
+
+  bindObra() {
+    if (!window.MlEmpresaFilter) return;
+    const self = this;
+    MlEmpresaFilter.bind(this.OBRA_ID, {
+      toggleOpen() {
+        self.state.obraOpen = !self.state.obraOpen;
+        if (self.state.obraOpen) self.state.obraQuery = "";
+        self.pintarObra();
+      },
+      close() {
+        if (!self.state.obraOpen) return;
+        self.state.obraOpen = false;
+        self.pintarObra();
+      },
+      setQuery(q) {
+        self.state.obraQuery = q || "";
+        self.pintarObraLista();
+      },
+      toggleId(id, on) {
+        if (!on) return;
+        self.state.obraOpen = false;
+        self.state.obraQuery = "";
+        self.selecionar(String(id || ""));
+      }
+    });
+  },
+
+  pintarObra() {
+    const slot = document.getElementById("mkc-obra-slot");
+    if (!slot || !window.MlEmpresaFilter) return;
+    slot.innerHTML = MlEmpresaFilter.html(this.obraOpts());
+    if (window.lucide) lucide.createIcons();
+    if (this.state.obraOpen) {
+      const q = document.getElementById(this.OBRA_ID + "-search");
+      if (q) q.focus();
+    }
+  },
+
+  pintarObraLista() {
+    const el = document.getElementById(this.OBRA_ID + "-list");
+    if (el && window.MlEmpresaFilter) el.innerHTML = MlEmpresaFilter.listHtml(this.obraOpts());
   },
 
   async selecionar(id) {
@@ -3248,6 +3314,7 @@ const MarketingConfigApp = {
     const s = this.state;
     const cc = this.ccDe(s.ccId);
     this.bindFiltro();
+    this.bindObra();
     const form = s.ccId ? `
           <div class="mkc-conta">
             <div class="mkc-passo">
@@ -3341,10 +3408,7 @@ const MarketingConfigApp = {
         </div>
         <div class="mkc-body">
           <div class="mkc-card">
-            <div class="mkc-obra">
-              <label for="mkc-obra">Empreendimento</label>
-              <select id="mkc-obra" ${s.carregando ? "disabled" : ""} onchange="MarketingConfigApp.onObraSelect(this.value)">${B.empreendimentoOptions(s.ccId)}</select>
-            </div>
+            <div class="mkc-obra" id="mkc-obra-slot">${window.MlEmpresaFilter ? MlEmpresaFilter.html(this.obraOpts()) : ""}</div>
             ${s.carregando ? `<p class="mkc-muted" style="margin:12px 0 0;">Carregando…</p>` : form}
           </div>
           <div class="mkc-card">

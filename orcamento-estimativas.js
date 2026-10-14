@@ -52,6 +52,15 @@ const OrcEst = {
       .sort((a, b) => Number(a.id) - Number(b.id));
   },
 
+  grupoEfetivo(conta, nome) {
+    const cadeia = this.cadeiaConta(conta);
+    for (let i = 0; i < cadeia.length; i++) {
+      const g = this.grupo(cadeia[i], nome);
+      if (g) return g;
+    }
+    return "";
+  },
+
   grupo(conta, nome) {
     const app = typeof OrcamentoDfcApp !== "undefined" ? OrcamentoDfcApp : null;
     if (app && typeof app.grupoDaConta === "function") return app.grupoDaConta(conta, nome);
@@ -91,10 +100,27 @@ const OrcEst = {
 
   /* Conta da base fiscal. Sem marca no plano, a visão DFC define venda, serviço ou dedução.
      Lucro recebido e aporte ficam de fora: não são base de PIS nem de lucro presumido. */
+  cadeiaConta(conta) {
+    const out = [];
+    let code = String(conta || "").trim();
+    while (code && out.indexOf(code) < 0) {
+      out.push(code);
+      const i = code.lastIndexOf(".");
+      if (i <= 0) break;
+      code = code.slice(0, i);
+    }
+    return out;
+  },
+
   classe(l, cfg) {
-    const gid = this.grupo(l.conta, l.cn) || "";
+    const cadeia = this.cadeiaConta(l.conta);
+    let gid = "";
+    let tag = "";
+    cadeia.forEach((code) => {
+      if (!gid) gid = this.grupo(code, l.cn) || "";
+      if (!tag) tag = this.tag(cfg, code);
+    });
     const nome = this.norm(l.cn);
-    const tag = this.tag(cfg, l.conta);
     const fora = /LUCRO RECEB|DIVIDEND|APORTE/.test(nome);
     if (tag === "Base para Vendas de Lote") return { bucket: "vendas", red: false };
     if (tag === "Base para Receita de Serviços") return { bucket: "servicos", red: false };
@@ -448,9 +474,13 @@ const OrcamentoImpostosApp = {
     if (!app) return;
     const token = (this._fcToken = (this._fcToken || 0) + 1);
     try {
-      if (!app.acervo) app.lerLocal();
+      const semForecast = !app.forecasts || !Object.keys(app.forecasts).length;
+      const semAcervo = typeof app.temAcervo === "function" ? !app.temAcervo() : false;
+      if (semForecast && semAcervo && typeof app.lerLocal === "function") app.lerLocal();
       if (typeof app.carregarNuvem === "function" && !app._nuvemOk) await app.carregarNuvem();
       if (typeof app.carregarForecasts === "function") await app.carregarForecasts();
+      if (typeof app.normalizarForecastsMemoria === "function") app.normalizarForecastsMemoria();
+      if (typeof app.montarVista === "function") app.montarVista();
     } catch (e) {}
     if (token !== this._fcToken) return;
     const body = document.getElementById("orc-imp-body");
@@ -518,10 +548,14 @@ const OrcamentoImpostosApp = {
     }
     const head = OrcEst.MESES.map((m) => `<th>${m}</th>`).join("") + `<th>Total 2027</th><th title="PIS e COFINS de dezembro e o trimestre de outubro a dezembro">JAN/28</th>`;
     const tot = Array(13).fill(0);
-    tot[0] = null;
+    const temTot = Array(13).fill(false);
     const linhas = lista.map((row) => {
       const pago = this.totalPago(row);
-      for (let i = 1; i < 13; i++) tot[i] += pago[i] || 0;
+      for (let i = 0; i < 13; i++) {
+        if (pago[i] == null) continue;
+        temTot[i] = true;
+        tot[i] += pago[i];
+      }
       const chip = this.chip(row);
       const aberto = !!this.abertos[row.id];
       const nome = OrcEst.esc(row.id + " - " + OrcEst.norm(row.nome));
@@ -534,7 +568,7 @@ const OrcamentoImpostosApp = {
         <td>${this.tdTxt(pago[12])}</td>
       </tr>${extra}`;
     }).join("");
-    const totCel = tot.slice(0, 12).map((v) => `<td>${v == null ? "—" : OrcEst.money(v)}</td>`).join("");
+    const totCel = tot.slice(0, 12).map((v, i) => `<td>${temTot[i] ? OrcEst.money(v) : "—"}</td>`).join("");
     body.innerHTML = `
       <div class="orc-dfc-scroll">
         <table class="orc-dfc-table orc-est-table">
