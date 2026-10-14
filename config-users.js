@@ -432,7 +432,6 @@ const ConfigUsersApp = {
       name: "Marketing", icon: "megaphone", key: "mod_mkt",
       submodules: [
         { name: "Budget", key: "sub_mkt_budget", actions: [{ id: "budget", label: "Budget", permBase: "sub_mkt_geral_budget" }] },
-        { name: "Eventos", key: "sub_mkt_eventos", actions: [{ id: "eventos", label: "Eventos", permBase: "sub_mkt_geral_eventos" }] },
         { name: "Configurações", key: "sub_mkt_config", actions: [{ id: "config", label: "Configurações", permBase: "sub_mkt_geral_config" }] }
       ]
     },
@@ -551,6 +550,7 @@ const ConfigUsersApp = {
     try { this.unifyBackOfficeProfiles(); } catch (e) { console.warn("[ConfigUsers] unify back-office:", e); }
     try { this.breakSharedCobrancaMirrors(); } catch (e) { console.warn("[ConfigUsers] break mirrors:", e); }
     try { this.seedTerceirizadoPermsFromCobranca(); } catch (e) { console.warn("[ConfigUsers] seed terceirizado:", e); }
+    try { await this.retirarPermsDeMenu(); } catch (e) { console.warn("[ConfigUsers] permissões retiradas do menu:", e); }
     try { this.migrateLuceliaToBackOffice(); } catch (e) { console.warn("[ConfigUsers] migrate lucelia:", e); }
     if (!window._crmCloudIdentitySaved) {
       window._crmCloudIdentitySaved = true;
@@ -576,6 +576,54 @@ const ConfigUsersApp = {
     this.render();
     if (typeof window.applyMenuPermissions === "function") window.applyMenuPermissions();
     if (typeof window.crmPintarTesteConta === "function") window.crmPintarTesteConta();
+  },
+
+  tirarChavesPerm(obj) {
+    const mortas = window.CRM_MENU_PERMS_RETIRADAS || [];
+    if (!obj || typeof obj !== "object" || !mortas.length) return false;
+    let mudou = false;
+    mortas.forEach((k) => {
+      if (Object.prototype.hasOwnProperty.call(obj, k)) {
+        delete obj[k];
+        mudou = true;
+      }
+    });
+    return mudou;
+  },
+
+  async retirarPermsDeMenu() {
+    const ids = new Set();
+    (this.profiles || []).forEach((p) => { if (p && p.id) ids.add(String(p.id)); });
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.indexOf("crm_perms_") === 0 && k.indexOf("crm_perms_bak_") !== 0) ids.add(k.slice("crm_perms_".length));
+      }
+    } catch (e) {}
+    const gravar = [];
+    ids.forEach((id) => {
+      let raw = "";
+      try { raw = localStorage.getItem("crm_perms_" + id) || ""; } catch (e) { raw = ""; }
+      if (!raw) return;
+      let obj = null;
+      try { obj = JSON.parse(raw); } catch (e) { obj = null; }
+      if (!obj || obj.__mirror_of__ || !this.tirarChavesPerm(obj)) return;
+      obj._savedAt = Date.now();
+      obj._shrinkConfirmedAt = Date.now();
+      this.safeLocalSet("crm_perms_" + id, JSON.stringify(obj));
+      try { localStorage.removeItem("crm_perms_bak_" + id); } catch (e) {}
+      try { sessionStorage.removeItem("crm_perms_bak_" + id); } catch (e) {}
+      gravar.push({ id: id, obj: obj });
+    });
+    let listaMudou = false;
+    (this.profiles || []).forEach((p) => {
+      if (p && p.perms && this.tirarChavesPerm(p.perms)) listaMudou = true;
+    });
+    if (listaMudou) this.safeLocalSet("crm_moura_profiles", JSON.stringify(this.profiles));
+    for (const item of gravar) {
+      if (typeof window.persistCrmProfilePermsNow !== "function") continue;
+      await window.persistCrmProfilePermsNow(item.id, item.obj);
+    }
   },
 
   prunePermissionStorage(keepKey) {

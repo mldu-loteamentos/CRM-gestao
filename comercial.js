@@ -17,7 +17,9 @@ const ComercialApp = {
     charts: {},
     aba: 'resumo',
     velEmp: '',
-    velLado: 'comercial',
+    velEmpOpen: false,
+    velEmpQuery: '',
+    velUnidadeIds: null,
     velAberto: {},
     velCache: {},
     velGen: 0
@@ -913,7 +915,9 @@ const ComercialApp = {
     });
     const resumo = document.getElementById('comercial-dashboard-content');
     const vel = document.getElementById('comercial-velocidade');
+    const head = document.querySelector('#tab-dashboard-comercial .com-dash-head');
     const naVel = this.state.aba === 'velocidade';
+    if (head) head.hidden = naVel;
     if (resumo) resumo.style.display = !naVel && this.state.loaded ? 'block' : 'none';
     if (vel) vel.hidden = !naVel;
     if (naVel) this.abrirVelocidade();
@@ -922,12 +926,17 @@ const ComercialApp = {
   },
 
   abrirVelocidade() {
-    if (!this.state.velEmp && this.state.selectedProduct) {
-      const hit = this.empreendimentosVel().find((e) => e.name === this.state.selectedProduct);
-      if (hit) this.state.velEmp = hit.id;
-    }
+    this.aplicarEmpDoResumo();
     this.renderVelocidade();
+    this.carregarIdsUnidade();
     if (this.state.velEmp) this.carregarVelocidade(this.state.velEmp);
+  },
+
+  aplicarEmpDoResumo() {
+    if (this.state.velEmp || !this.state.selectedProduct) return;
+    const alvo = String(this.state.selectedProduct).toUpperCase();
+    const hit = this.empreendimentosVel().find((e) => e.label.endsWith(alvo) || e.label.indexOf(' - ' + alvo) >= 0);
+    if (hit) this.state.velEmp = hit.id;
   },
 
   setVelEmp(id) {
@@ -937,9 +946,66 @@ const ComercialApp = {
     if (this.state.velEmp) this.carregarVelocidade(this.state.velEmp);
   },
 
-  setVelLado(lado) {
-    this.state.velLado = lado === 'marketing' ? 'marketing' : 'comercial';
+  bindVelEmp() {
+    if (!window.MlEmpresaFilter) return;
+    const self = this;
+    MlEmpresaFilter.bind('com-vel-emp', {
+      toggleOpen() {
+        self.state.velEmpOpen = !self.state.velEmpOpen;
+        if (self.state.velEmpOpen) self.state.velEmpQuery = '';
+        self.renderVelocidade();
+      },
+      close() {
+        self.state.velEmpOpen = false;
+        self.renderVelocidade();
+      },
+      setQuery(q) {
+        self.state.velEmpQuery = q || '';
+        self.renderVelocidade();
+      },
+      toggleId(id, on) {
+        if (!on) return;
+        self.state.velEmpOpen = false;
+        self.state.velEmpQuery = '';
+        self.setVelEmp(id);
+      }
+    });
+  },
+
+  async carregarIdsUnidade() {
+    if (this._velUnidadeLoading) return;
+    if (this.state.velUnidadeIds && this.state.velUnidadeIds.size) return;
+    this._velUnidadeLoading = true;
+    const ids = new Set();
+    const porUnidade = (lista) => {
+      (lista || []).forEach((u) => {
+        const id = u && (u.enterpriseId || u.costCenterId);
+        if (id) ids.add(String(id));
+      });
+    };
+    const E = window.EstoqueComercialApp;
+    porUnidade(E && E.state && E.state.units);
+    try {
+      const raw = JSON.parse(localStorage.getItem('crm_estoque_posicao_v1') || 'null');
+      porUnidade(raw && (raw.units || (raw.data && raw.data.units)));
+    } catch (e) {}
+    const fc = window.firebaseCollections;
+    if (window.firebaseDb && fc && fc.getDocs) {
+      try {
+        const snap = await fc.getDocs(fc.collection(window.firebaseDb, 'estoque_comercial'));
+        snap.forEach((d) => {
+          const data = d.data() || {};
+          if (d.id !== '_meta' && data.enterpriseId && Array.isArray(data.units) && data.units.length) ids.add(String(data.enterpriseId));
+        });
+      } catch (e) {}
+    }
+    this._velUnidadeLoading = false;
+    this.state.velUnidadeIds = ids;
+    if (this.state.velEmp && !ids.has(String(this.state.velEmp))) this.state.velEmp = '';
+    this.aplicarEmpDoResumo();
+    if (this.state.aba !== 'velocidade') return;
     this.renderVelocidade();
+    if (this.state.velEmp) this.carregarVelocidade(this.state.velEmp);
   },
 
   toggleAnoVel(ano) {
@@ -949,21 +1015,25 @@ const ComercialApp = {
   },
 
   empreendimentosVel() {
-    const map = new Map();
+    const E = window.EstoqueComercialApp;
     const ccs = (window.AppState && AppState.cachedCostCenters) || [];
-    ccs.forEach((c) => {
-      if (!c || c.id == null) return;
-      const nome = String(c.name || '').trim();
-      if (!nome) return;
-      map.set(String(c.id), nome.toUpperCase());
+    let custom = {};
+    try { custom = JSON.parse(localStorage.getItem('crm_centros_custo_custom') || '{}') || {}; } catch (e) {}
+    const tipos = ['Loteamento Aberto', 'Loteamento Fechado', 'Incorporação'];
+    const base = ccs.filter((c) => {
+      const id = String((c && c.id) || '').trim();
+      if (!id || !String(c.name || '').trim()) return false;
+      if (!(E && typeof E.isEmpreendimentoCcId === 'function' ? E.isEmpreendimentoCcId(id) : /^[12]/.test(id))) return false;
+      return !(E && typeof E.isDeptOnlyCc === 'function' && E.isDeptOnlyCc(c));
     });
-    if (this.state.loaded) {
-      Object.keys(this.aggregate().produtos || {}).forEach((name) => {
-        const id = String((this.aggregate().produtos[name] || {}).id || '');
-        if (id && !map.has(id)) map.set(id, name);
-      });
-    }
-    return [...map.entries()].map(([id, name]) => ({ id: id, name: name })).sort((a, b) => a.name.localeCompare(b.name, 'pt'));
+    const tipados = base.filter((c) => tipos.includes((custom[c.id] || custom[String(c.id)] || {}).tipo_cc || ''));
+    const lista = (tipados.length ? tipados : base);
+    const unidades = this.state.velUnidadeIds;
+    const comUnidade = unidades ? lista.filter((c) => unidades.has(String(c.id))) : [];
+    return comUnidade.map((c) => ({
+      id: String(c.id),
+      label: String(c.id) + ' - ' + String(c.name || '').trim().toUpperCase()
+    }));
   },
 
   async paginarSienge(base) {
@@ -1172,20 +1242,42 @@ const ComercialApp = {
     const root = document.getElementById('comercial-velocidade');
     if (!root || this.state.aba !== 'velocidade') return;
     const emps = this.empreendimentosVel();
-    const opts = '<option value="">Escolha o empreendimento</option>' + emps.map((e) => `<option value="${this.esc(e.id)}"${e.id === this.state.velEmp ? ' selected' : ''}>${this.esc(e.id + ' - ' + e.name)}</option>`).join('');
+    const filtro = window.MlEmpresaFilter ? MlEmpresaFilter.html({
+      id: 'com-vel-emp',
+      label: 'Empreendimento',
+      items: emps,
+      selectedIds: this.state.velEmp ? [this.state.velEmp] : [],
+      open: this.state.velEmpOpen,
+      query: this.state.velEmpQuery,
+      single: true,
+      emptyMeansAll: false,
+      nouns: {
+        singular: 'empreendimento',
+        plural: 'empreendimentos',
+        none: this.state.velUnidadeIds ? 'Nenhum empreendimento com unidades' : 'Lendo empreendimentos…',
+        noMatch: 'Nenhum empreendimento com esse nome.'
+      }
+    }) : '';
     const pack = this.state.velEmp ? this.state.velCache[this.state.velEmp] : null;
-    let miolo = '<p class="com-vel-nota">Escolha o empreendimento. A velocidade usa toda a história dele, não só o ano do resumo.</p>';
+    let miolo = '<p class="com-vel-nota">Escolha um empreendimento com unidades. A velocidade usa toda a história dele.</p>';
     if (pack && !pack.pronto) miolo = `<p class="com-vel-status">${this.esc(pack.status || 'Carregando…')}</p>`;
     else if (pack && pack.erro) miolo = `<p class="com-vel-status">${this.esc(pack.erro)}</p>`;
     else if (pack && pack.pronto) miolo = this.htmlVelocidade(pack);
     root.innerHTML = `
       <div class="com-vel-top">
-        <label>Empreendimento
-          <select onchange="ComercialApp.setVelEmp(this.value)">${opts}</select>
-        </label>
-        <p class="com-vel-nota">Lotes vendidos contam cada venda, inclusive quando o mesmo lote volta ao estoque e é vendido de novo. Plano curto vai até 48 parcelas. Plano longo começa em 49. O CAC divide a despesa do mês pelo número de vendas do mês. Comercial não inclui comissão.</p>
+        ${filtro}
+        <p class="com-vel-nota">A lista traz só empreendimentos com unidades vinculadas. A escolha é de um por vez. Lotes vendidos contam cada venda, inclusive quando o mesmo lote volta ao estoque. Plano curto vai até 48 parcelas. O CAC divide a despesa do mês pelas vendas do mês. Comercial não inclui comissão.</p>
       </div>
       ${miolo}`;
+    this.bindVelEmp();
+    if (this.state.velEmpOpen) {
+      const q = document.getElementById('com-vel-emp-search');
+      if (q) {
+        q.focus();
+        const n = q.value.length;
+        q.setSelectionRange(n, n);
+      }
+    }
     if (window.lucide) window.lucide.createIcons();
   },
 
@@ -1206,26 +1298,29 @@ const ComercialApp = {
     const comercial = somaLado('0000-00', '9999-99', 'comercial');
     const marketing = somaLado('0000-00', '9999-99', 'marketing');
     const cacCard = m.vendas > 0 && pack.cacPronto ? (comercial + marketing) / m.vendas : null;
-    const lado = this.state.velLado;
     const comPlano = m.curto + m.longo;
     const pct = (n) => comPlano > 0 ? (n / comPlano) * 100 : 0;
+    const anel = Math.max(0, Math.min(100, vezes || 0));
     const barras = m.rotulos.map((nome, i) => {
       const p = pct(m.faixas[i]);
-      return `<div class="com-vel-bar"><span>${nome}</span><i><b style="width:${p.toFixed(1)}%"></b></i><em>${this.fmtPctVel(comPlano ? p : null)}</em></div>`;
+      return `<div class="com-vel-bar"><span>${nome}</span><i><b style="width:${p.toFixed(1)}%"></b></i><em>${this.fmtInt(m.faixas[i])} · ${this.fmtPctVel(comPlano ? p : null)}</em></div>`;
     }).join('');
     const anos = [...new Set(Object.keys(m.meses).map((k) => k.slice(0, 4)))].sort();
     if (anos.length && !Object.keys(this.state.velAberto).length) this.state.velAberto[anos[anos.length - 1]] = true;
+    const cacCel = (v, de, ate, lado) => {
+      const gasto = somaLado(de, ate, lado);
+      const unit = v > 0 && pack.cacPronto ? gasto / v : null;
+      return `<td>${pack.cacPronto ? this.fmtCac(unit) : (pack.status ? '…' : '—')}</td>`;
+    };
     const linha = (rotulo, v, d, cls, anoMesDe, anoMesAte, clique) => {
       const saldo = v - d;
       const parte = m.vendas > 0 ? (v / m.vendas) * 100 : null;
       const vel = base > 0 ? (v / base) * 100 : null;
-      const gasto = somaLado(anoMesDe, anoMesAte, lado);
-      const unit = v > 0 && pack.cacPronto ? gasto / v : null;
       return `<tr class="${cls}"${clique ? ` onclick="ComercialApp.toggleAnoVel('${rotulo}')"` : ''}>
         <td>${this.esc(rotulo)}</td>
         <td>${this.fmtInt(v)}</td><td>${this.fmtInt(d)}</td><td>${this.fmtInt(saldo)}</td>
         <td>${this.fmtPctVel(parte)}</td><td>${this.fmtPctVel(vel)}</td>
-        <td>${pack.cacPronto ? this.fmtCac(unit) : (pack.status ? '…' : '—')}</td>
+        ${cacCel(v, anoMesDe, anoMesAte, 'comercial')}${cacCel(v, anoMesDe, anoMesAte, 'marketing')}
       </tr>`;
     };
     let corpo = '';
@@ -1238,7 +1333,7 @@ const ComercialApp = {
       if (this.state.velAberto[ano]) {
         chaves.forEach((k) => {
           const mes = COM_MESES[Number(k.slice(5, 7)) - 1] || k;
-          corpo += linha(mes, m.meses[k].v, m.meses[k].d, '', k, k, false);
+          corpo += linha(mes, m.meses[k].v, m.meses[k].d, 'com-vel-mes', k, k, false);
         });
       }
     });
@@ -1254,25 +1349,31 @@ const ComercialApp = {
         <div class="com-vel-card">
           <h3>Quantas vezes o lote foi vendido</h3>
           <p>100% é o total de lotes. Acima disso, o mesmo lote entrou em mais de um contrato.</p>
-          <div class="com-vel-bar"><span>Lotes</span><i><b style="width:100%"></b></i><em>${this.fmtInt(m.lotes)}</em></div>
-          <div class="com-vel-bar"><span>Vendas</span><i><b style="width:${Math.min(100, vezes || 0).toFixed(1)}%"></b></i><em>${this.fmtPctVel(vezes)}</em></div>
+          <div class="com-vel-vezes">
+            <div class="com-vel-donut" style="--p:${anel.toFixed(2)}">
+              <div class="com-vel-donut-miolo">
+                <strong>${this.fmtPctVel(vezes)}</strong>
+                <span>${this.fmtInt(m.vendas)} vendas<br>${this.fmtInt(m.lotes)} lotes</span>
+              </div>
+            </div>
+            <div class="com-vel-vezes-lado">
+              <div class="com-vel-bloco"><span>Lotes</span><i><b style="width:100%"></b></i><em>${this.fmtInt(m.lotes)}</em></div>
+              <div class="com-vel-bloco"><span>Vendas</span><i><b style="width:${anel.toFixed(1)}%"></b></i><em>${this.fmtPctVel(vezes)}</em></div>
+            </div>
+          </div>
         </div>
         <div class="com-vel-card">
           <h3>Planos contratados</h3>
           <p>Curto ${this.fmtInt(m.curto)} · ${this.fmtPctVel(pct(m.curto))}. Longo ${this.fmtInt(m.longo)} · ${this.fmtPctVel(pct(m.longo))}.${m.semPlano ? ' ' + this.fmtInt(m.semPlano) + ' contratos sem a quantidade de parcelas.' : ''}</p>
-          ${barras}
+          <div class="com-vel-planos">${barras}</div>
         </div>
       </div>
       <div class="com-vel-card">
-        <div class="ml-tabs" role="tablist">
-          <button type="button" class="ml-tab${lado === 'comercial' ? ' is-active' : ''}" onclick="ComercialApp.setVelLado('comercial')"><i data-lucide="briefcase"></i> Comercial</button>
-          <button type="button" class="ml-tab${lado === 'marketing' ? ' is-active' : ''}" onclick="ComercialApp.setVelLado('marketing')"><i data-lucide="megaphone"></i> Marketing</button>
-        </div>
-        <p>${this.esc(pack.status || pack.cacNota || 'Clique no ano para abrir os meses. A velocidade do mês é as vendas daquele mês divididas pelos lotes vendáveis.')}</p>
-        <div style="overflow-x:auto;">
-          <table class="com-vel-table">
-            <thead><tr><th>Ano</th><th>Vendas</th><th>Distratos</th><th>Saldo</th><th>% do vendido</th><th>Velocidade</th><th>CAC</th></tr></thead>
-            <tbody>${corpo || '<tr><td colspan="7">Nenhum contrato neste empreendimento.</td></tr>'}</tbody>
+        <p>${this.esc(pack.status || pack.cacNota || 'Clique no ano para abrir os meses. A velocidade do mês é as vendas daquele mês divididas pelos lotes vendáveis. CAC comercial e CAC marketing ficam lado a lado.')}</p>
+        <div class="com-vel-scroll">
+          <table class="cc-table com-vel-table">
+            <thead><tr><th>Ano</th><th>Vendas</th><th>Distratos</th><th>Saldo</th><th>% do vendido</th><th>Velocidade</th><th>CAC comercial</th><th>CAC marketing</th></tr></thead>
+            <tbody>${corpo || '<tr><td colspan="8">Nenhum contrato neste empreendimento.</td></tr>'}</tbody>
           </table>
         </div>
       </div>`;

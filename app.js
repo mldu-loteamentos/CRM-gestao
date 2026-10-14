@@ -4647,6 +4647,13 @@ window.parseCrmPermsPayload = function(raw) {
   }
 };
 
+window.CRM_MENU_PERMS_RETIRADAS = [
+  "sub_mkt_eventos",
+  "sub_mkt_geral_eventos_acessar",
+  "sub_mkt_geral_eventos_visualizar",
+  "sub_mkt_geral_eventos_editar"
+];
+
 window.crmPermShrinkConfirmed = function(obj) {
   const at = Number(obj && obj._shrinkConfirmedAt);
   return Number.isFinite(at) && at > 0;
@@ -4662,8 +4669,9 @@ window.mergeCrmPermPayloads = function(aRaw, bRaw) {
   const newerShrink = window.crmPermShrinkConfirmed(newer);
   const keys = new Set(Object.keys(a).concat(Object.keys(b)));
   const out = {};
+  const retiradas = new Set(window.CRM_MENU_PERMS_RETIRADAS || []);
   keys.forEach((k) => {
-    if (k === "__mirror_of__" || k === "_savedAt" || k === "_shrinkConfirmedAt") return;
+    if (k === "__mirror_of__" || k === "_savedAt" || k === "_shrinkConfirmedAt" || retiradas.has(k)) return;
     const nv = newer[k];
     const ov = older[k];
     if (nv === true || ov === true) {
