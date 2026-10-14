@@ -113,9 +113,31 @@ const OrcamentoApp = {
     try { localStorage.setItem(this.CART_LS, JSON.stringify(payload)); } catch (e) {}
   },
 
+  abasHtml() {
+    const atual = this.aba || "receitas";
+    const tabs = [
+      { id: "receitas", label: "Receitas", icon: "trending-up" },
+      { id: "dfc", label: "DFC 2027", icon: "git-branch" }
+    ];
+    return `<div class="ml-tabs orc-abas" role="tablist">${tabs.map((t) => `
+      <button type="button" role="tab" aria-selected="${atual === t.id ? "true" : "false"}"
+        class="ml-tab${atual === t.id ? " is-active" : ""}"
+        onclick="OrcamentoApp.setAba('${t.id}')"><i data-lucide="${t.icon}"></i> ${t.label}</button>`).join("")}
+    </div>`;
+  },
+
+  setAba(id) {
+    this.aba = id === "dfc" ? "dfc" : "receitas";
+    this.render();
+  },
+
   render() {
     const root = document.getElementById("orcamento-root");
     if (!root) return;
+    if ((this.aba || "receitas") === "dfc") {
+      if (window.OrcamentoDfcApp) OrcamentoDfcApp.render(root);
+      return;
+    }
     root.innerHTML = `
       <style>
         #orcamento-root { font-family: inherit; color: #0f172a; }
@@ -224,6 +246,7 @@ const OrcamentoApp = {
         .orc-cart-tip tr.orc-cart-total td { border-top: 1px solid #e2e8f0; font-weight: 800; color: #0f172a; padding-top: 4px; }
         .orc-cart-tip .orc-cart-note { margin: 4px 2px 0; font-size: 0.66rem; color: #64748b; }
       </style>
+      ${this.abasHtml()}
       <div class="orc-head">
         <div>
           <h2>Orçamento 2026 × 2027</h2>
