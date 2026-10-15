@@ -23544,26 +23544,35 @@ window.generateDemonstrativoDistratoPDF = function() {
   }
   if (!results.extraDebits) results.extraDebits = {};
   const txt = (s) => (typeof window.fixUtf8Mojibake === "function" ? window.fixUtf8Mojibake(s) : String(s == null ? "" : s));
+  const money = (v) => {
+    const n = Number(v);
+    return (Number.isFinite(n) ? n : 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+  const brl = (v) => "R$ " + money(v);
 
   const unit = (AppState.units && g_distSale.unitId && AppState.units[g_distSale.unitId]) || {};
   const dataGeracao = new Date().toLocaleString('pt-BR');
   
-  const contractValStr = g_distSale.distratoContractValue ? g_distSale.distratoContractValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : 'R$ 0,00';
+  const contractValStr = brl(g_distSale.distratoContractValue);
   const totalQty = (g_distSale.calculatedPaidQty || 0) + (g_distSale.calculatedUnpaidQty || 0);
   const paidQty = g_distSale.calculatedPaidQty || 0;
   const unpaidQty = g_distSale.calculatedUnpaidQty || 0;
-  const unpaidTotalStr = g_distSale.calculatedUnpaidTotal ? g_distSale.calculatedUnpaidTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : 'R$ 0,00';
+  const unpaidTotalStr = brl(g_distSale.calculatedUnpaidTotal);
   
   const cabecalho = window.cabecalhoCalculoDistrato(g_distSale, unit);
   const companyName = txt(cabecalho.companyName);
   const enterpriseName = txt(cabecalho.enterpriseName);
 
-  const refundText = results.instQty > 1 ?
-    `R$ ${results.baseRefund.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} em ${results.instQty} parcelas de R$ ${results.refundInstallment.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` :
-    `R$ ${results.baseRefund.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const parcelas = Number(results.instQty) || 1;
+  const refundText = parcelas > 1
+    ? `${brl(results.baseRefund)} em ${parcelas} parcelas de ${brl(results.refundInstallment)}`
+    : brl(results.baseRefund);
 
-  const cleanUnitId = (unit.id || "").replace('U-', '');
-  const titleUnitId = cleanUnitId.replace('-', ' - ');
+  const chaveUnidade = String(g_distSale.unitId || "");
+  const idTexto = typeof unit.id === "string" ? unit.id : "";
+  const nomeUnidade = String(g_distSale.unitName || unit.name || "");
+  const cleanUnitId = (chaveUnidade || idTexto || nomeUnidade).replace(/^U-/i, "");
+  const titleUnitId = cleanUnitId.replace("-", " - ");
   const pageTitle = `C\u00E1lculo Distrato - ${txt(g_distCustomer.name)} - T\u00EDtulo ${g_distSale.id} (${titleUnitId})`;
   
   const docHtml = `
@@ -23588,7 +23597,7 @@ window.generateDemonstrativoDistratoPDF = function() {
         </tr>
         <tr>
           <td style="padding: 5px 0; border-bottom: 1px solid #ddd;">Recebido:</td>
-          <td style="padding: 5px 0; text-align: right; border-bottom: 1px solid #ddd;">${results.totalPaid.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} <span style="font-weight:normal; color:#555; margin-left: 8px;">| ${paidQty} parcelas</span></td>
+          <td style="padding: 5px 0; text-align: right; border-bottom: 1px solid #ddd;">${brl(results.totalPaid)} <span style="font-weight:normal; color:#555; margin-left: 8px;">| ${paidQty} parcelas</span></td>
         </tr>
         <tr>
           <td style="padding: 5px 0; border-bottom: 1px solid #ddd;">A Receber:</td>
@@ -23602,49 +23611,49 @@ window.generateDemonstrativoDistratoPDF = function() {
       <table style="width: 100%; border-collapse: collapse; font-size: 11pt;">
         <tr style="background-color: #f1f5f9;">
           <td style="padding: 8px 5px; font-weight: bold; border-bottom: 1px solid #000; border-top: 1px solid #000;">Valor Total Pago (Recebido):</td>
-          <td style="padding: 8px 5px; text-align: right; border-bottom: 1px solid #000; border-top: 1px solid #000; font-weight: bold;">R$ ${results.totalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td style="padding: 8px 5px; text-align: right; border-bottom: 1px solid #000; border-top: 1px solid #000; font-weight: bold;">${brl(results.totalPaid)}</td>
         </tr>
         <tr>
           <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">Multa por Rescisão (10%):</td>
-          <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- R$ ${results.penalty.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- ${brl(results.penalty)}</td>
         </tr>
         <tr>
           <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">Fruição (0,75%):</td>
-          <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- R$ ${results.fruition.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- ${brl(results.fruition)}</td>
         </tr>
         <tr>
           <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">Homologação do Acordo:</td>
-          <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- R$ ${(results.extraDebits.homolog || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- ${brl(results.extraDebits.homolog)}</td>
         </tr>
         <tr>
           <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">Comissão:</td>
-          <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- R$ ${(results.extraDebits.comissao || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- ${brl(results.extraDebits.comissao)}</td>
         </tr>
         <tr>
           <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">IPTU:</td>
           ${(results.extraDebits && results.extraDebits.iptuDispensado)
             ? '<td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #166534; font-weight: 700;">Dispensado</td>'
-            : `<td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- R$ ${(results.extraDebits.iptu || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>`}
+            : `<td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- ${brl(results.extraDebits.iptu)}</td>`}
         </tr>
         <tr>
           <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">\u00C1gua:</td>
           ${(results.extraDebits && results.extraDebits.utilidadesDispensadas)
             ? '<td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #166534; font-weight: 700;">Dispensado</td>'
-            : `<td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- R$ ${(results.extraDebits.agua || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>`}
+            : `<td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- ${brl(results.extraDebits.agua)}</td>`}
         </tr>
         <tr>
           <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">Energia (Luz):</td>
           ${(results.extraDebits && results.extraDebits.utilidadesDispensadas)
             ? '<td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #166534; font-weight: 700;">Dispensado</td>'
-            : `<td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- R$ ${(results.extraDebits.luz || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>`}
+            : `<td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- ${brl(results.extraDebits.luz)}</td>`}
         </tr>
         <tr>
           <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">Taxa associativa:</td>
-          <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- R$ ${(results.extraDebits.taxaAssoc || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- ${brl(results.extraDebits.taxaAssoc)}</td>
         </tr>
         <tr>
           <td style="padding: 5px 5px; border-bottom: 1px solid #000;">Outras despesas:</td>
-          <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #000; color: #b91c1c;">- R$ ${(results.extraDebits.outros || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #000; color: #b91c1c;">- ${brl(results.extraDebits.outros)}</td>
         </tr>
         <tr style="font-weight: bold; font-size: 12pt; background-color: #f1f5f9;">
           <td style="padding: 12px 5px; border-bottom: 1px solid #000;">Restituição Líquida (Lei do Distrato)</td>
