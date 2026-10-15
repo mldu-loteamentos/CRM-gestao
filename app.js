@@ -2552,7 +2552,7 @@ window.computeLateCharges = function(baseVal, diasAtraso, taxaMultiplier) {
   };
 };
 
-/** Administrador e operador de cobrança terceirizado negociam honorários no boleto. */
+/** Só a cobrança terceirizada negocia honorários no boleto. */
 window.crmUsuarioEhTerceirizada = function() {
   const u = (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo())
     || (typeof AppState !== "undefined" && AppState.currentUser)
@@ -2568,10 +2568,8 @@ window.userCanSetHonorarios = function() {
     || (window.AppState && window.AppState.currentUser)
     || null;
   if (!u) return false;
-  if (typeof window.isOperadorCobrancaTerceirizadoProfile === "function"
-    && window.isOperadorCobrancaTerceirizadoProfile(u.profile_name)) return true;
-  if (typeof window.isCrmAdministrator === "function" && window.isCrmAdministrator(u)) return true;
-  return false;
+  return typeof window.isOperadorCobrancaTerceirizadoProfile === "function"
+    && window.isOperadorCobrancaTerceirizadoProfile(u.profile_name);
 };
 
 window.clampHonorariosPct = function(v) {
@@ -23531,11 +23529,23 @@ window.cabecalhoCalculoDistrato = function(sale, unit) {
 };
 
 window.generateDemonstrativoDistratoPDF = function() {
+  try {
+  if (!AppState.currentDistratoResult && typeof calculateDistrato === "function") {
+    try { calculateDistrato(); } catch (e) { console.error(e); }
+  }
   const results = AppState.currentDistratoResult;
-  if (!results) return;
+  if (!results) {
+    alert("Calcule o distrato antes de gerar o demonstrativo.");
+    return;
+  }
+  if (!g_distSale || !g_distCustomer) {
+    alert("Abra o simulador de distrato a partir de um contrato.");
+    return;
+  }
+  if (!results.extraDebits) results.extraDebits = {};
   const txt = (s) => (typeof window.fixUtf8Mojibake === "function" ? window.fixUtf8Mojibake(s) : String(s == null ? "" : s));
 
-  const unit = AppState.units[g_distSale.unitId] || {};
+  const unit = (AppState.units && g_distSale.unitId && AppState.units[g_distSale.unitId]) || {};
   const dataGeracao = new Date().toLocaleString('pt-BR');
   
   const contractValStr = g_distSale.distratoContractValue ? g_distSale.distratoContractValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : 'R$ 0,00';
@@ -23657,7 +23667,22 @@ window.generateDemonstrativoDistratoPDF = function() {
     </p>
   `;
 
+  const content = document.getElementById("pdf-document-content");
+  const overlay = document.getElementById("pdf-view-overlay");
+  const titleEl = document.getElementById("pdf-modal-title");
+  if (content && overlay) {
+    if (titleEl) titleEl.textContent = "Demonstrativo de Cálculo de Distrato";
+    if (typeof setPdfPrintLogo === "function") setPdfPrintLogo(false);
+    content.innerHTML = docHtml;
+    overlay.classList.add("active");
+    try { if (window.lucide) lucide.createIcons(); } catch (e) {}
+    return;
+  }
   const printWindow = window.open('', '_blank', 'width=800,height=900');
+  if (!printWindow) {
+    alert("O navegador bloqueou a janela do demonstrativo. Permita pop-ups deste site e clique de novo em Gerar Cálculo.");
+    return;
+  }
   printWindow.document.write(`
     <!DOCTYPE html>
     <html lang="pt-BR">
@@ -23695,8 +23720,12 @@ window.generateDemonstrativoDistratoPDF = function() {
   printWindow.document.close();
   printWindow.focus();
   setTimeout(() => {
-    printWindow.print();
+    try { printWindow.print(); } catch (e) {}
   }, 500);
+  } catch (err) {
+    console.error("Erro ao gerar demonstrativo de distrato", err);
+    alert("Não foi possível gerar o demonstrativo de cálculo.");
+  }
 }
 
 window.openBoletoPdf = async function(billId, instId, btnElement, opts) {
@@ -31473,6 +31502,170 @@ window.filaHouseSignalHtml = function(client) {
   return `<span class="fila-signal" data-kind="house" onmouseenter="window.showFilaSignalTip(event, this)" onmouseleave="window.hideFilaSignalTip()"><i data-lucide="house" style="width:14px;height:14px;color:${houseColor};"></i></span>`;
 };
 
+window.relFotoEntries = function(data) {
+  const out = [];
+  const seen = new Set();
+  const add = (url, label) => {
+    const u = String(url || "").trim();
+    if (!u || seen.has(u)) return;
+    seen.add(u);
+    out.push({ url: u, label: label || "Foto" });
+  };
+  if (!data) return out;
+  add(data.fotoFrente, "Frente");
+  add(data.fotoMeioFundo, "Meio / Fundo");
+  add(data.fotoFundoFrente, "Fundo / Frente");
+  add(data.fileUrl, data.fileName ? String(data.fileName) : "Foto");
+  (Array.isArray(data.fileUrls) ? data.fileUrls : []).forEach((url, i) => add(url, "Foto " + (i + 1)));
+  return out;
+};
+
+window.relDataBr = function(data) {
+  const raw = data && (data.date || data.enviadoEm || data.closedAt || data.createdAt || data.updatedAt || data._sortDate);
+  if (!raw) return "";
+  let d = null;
+  if (typeof raw.toDate === "function") d = raw.toDate();
+  else if (raw && raw.seconds) d = new Date(raw.seconds * 1000);
+  else d = new Date(raw);
+  if (!d || Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("pt-BR");
+};
+
+window.relCollectAlbum = function(client) {
+  const empty = { photos: [], vistorias: [], checks: [], show: false };
+  const idx = window._filaSignals;
+  if (!idx || !idx.albums || !client) return empty;
+  const keys = window.filaClientSignalKeys(client);
+  const seen = new Set();
+  const docs = [];
+  keys.forEach((k) => {
+    (idx.albums.byKey[k] || []).forEach((i) => {
+      if (seen.has(i)) return;
+      seen.add(i);
+      const doc = idx.albums.docs[i];
+      if (doc) docs.push(doc);
+    });
+  });
+  const vistorias = docs.filter((d) => d._collection === "vistorias");
+  const checks = docs.filter((d) => d._collection !== "vistorias");
+  const photos = [];
+  const photoSeen = new Set();
+  docs.forEach((d) => {
+    window.relFotoEntries(d).forEach((p) => {
+      if (photoSeen.has(p.url)) return;
+      photoSeen.add(p.url);
+      photos.push(p);
+    });
+  });
+  vistorias.sort((a, b) => String(b.date || b.enviadoEm || b.createdAt || "").localeCompare(String(a.date || a.enviadoEm || a.createdAt || "")));
+  return { photos: photos, vistorias: vistorias, checks: checks, show: !!(photos.length || vistorias.length || checks.length) };
+};
+
+window.relHouseSignalHtml = function(client) {
+  const album = window.relCollectAlbum(client);
+  if (!album.show) return "";
+  const color = album.photos.length ? "#105436" : "#c2410c";
+  return `<button type="button" class="fila-signal" title="Ver fotos da construção" onclick="window.openRelConstrucaoAlbum(this)" style="border:0;background:transparent;padding:0;cursor:pointer;"><i data-lucide="house" style="width:14px;height:14px;color:${color};"></i></button>`;
+};
+
+window.closeRelConstrucaoAlbum = function() {
+  const modal = document.getElementById("rel-construcao-modal");
+  if (modal) modal.remove();
+  window._relAlbumPhotos = [];
+};
+
+window.baixarFotoConstrucao = async function(index) {
+  const photo = (window._relAlbumPhotos || [])[index];
+  if (!photo || !photo.url) return;
+  const safe = String(photo.label || "foto").toLowerCase().replace(/[^\w]+/g, "-").replace(/^-|-$/g, "") || "foto";
+  const name = "construcao-" + safe + ".jpg";
+  try {
+    const res = await fetch(photo.url);
+    if (!res.ok) throw new Error("foto");
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+  } catch (e) {
+    const a = document.createElement("a");
+    a.href = photo.url;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+};
+
+window.baixarTodasFotosConstrucao = async function() {
+  const list = window._relAlbumPhotos || [];
+  for (let i = 0; i < list.length; i++) {
+    await window.baixarFotoConstrucao(i);
+    if (i < list.length - 1) await new Promise((r) => setTimeout(r, 400));
+  }
+};
+
+window.openRelConstrucaoAlbum = function(el) {
+  const td = el && el.closest ? el.closest("td") : null;
+  const client = td ? window.filaClientFromKey(td.getAttribute("data-fila-key")) : null;
+  const album = window.relCollectAlbum(client);
+  window.closeRelConstrucaoAlbum();
+  window._relAlbumPhotos = album.photos;
+  const esc = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  const vistoria = album.vistorias[0] || null;
+  let vistoriaTxt = "";
+  if (vistoria) {
+    const st = String(vistoria.status || "").toLowerCase();
+    const quando = window.relDataBr(vistoria);
+    const estagio = vistoria.respostasFormulario && vistoria.respostasFormulario.estagioObra
+      ? String(vistoria.respostasFormulario.estagioObra)
+      : "";
+    if (st === "concluida") vistoriaTxt = "Vistoria feita" + (quando ? " em " + quando : "");
+    else if (st === "aguardando_validacao") vistoriaTxt = "Vistoria recebida" + (quando ? " em " + quando : "") + " — aguardando validação";
+    else if (st === "aguardando_fotos") vistoriaTxt = "Vistoria solicitada" + (quando ? " em " + quando : "") + " — aguardando fotos";
+    else vistoriaTxt = "Vistoria" + (st ? ": " + st : "") + (quando ? " em " + quando : "");
+    if (estagio) vistoriaTxt += " · " + estagio;
+  }
+  const check = album.checks.slice().sort((a, b) => String(b.date || b.createdAt || "").localeCompare(String(a.date || a.createdAt || "")))[0];
+  const stage = check && check.stage ? String(check.stage) : "";
+  const photosHtml = album.photos.length
+    ? album.photos.map((p, i) => `
+        <figure style="margin:0;display:flex;flex-direction:column;gap:8px;">
+          <img src="${p.url.replace(/"/g, "&quot;")}" alt="${esc(p.label)}" style="width:100%;height:220px;object-fit:cover;border-radius:10px;border:1px solid #e2e8f0;background:#f8fafc;">
+          <figcaption style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+            <span style="font-size:0.82rem;font-weight:700;color:#334155;">${esc(p.label)}</span>
+            <button type="button" class="btn btn-outline btn-sm" onclick="window.baixarFotoConstrucao(${i})">Baixar</button>
+          </figcaption>
+        </figure>`).join("")
+    : `<p style="margin:0;color:#64748b;">Não há fotos desta construção.</p>`;
+  const baixarTodas = album.photos.length > 1
+    ? `<button type="button" class="btn btn-primary btn-sm" onclick="window.baixarTodasFotosConstrucao()">Baixar todas</button>`
+    : "";
+  const modal = document.createElement("div");
+  modal.id = "rel-construcao-modal";
+  modal.style.cssText = "position:fixed;inset:0;z-index:100000;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;padding:24px;";
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:12px;max-width:920px;width:100%;max-height:90vh;overflow:auto;padding:20px;box-shadow:0 16px 40px rgba(15,23,42,.2);">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;">
+        <h3 style="margin:0;color:#105436;font-size:1.15rem;">Construção</h3>
+        <button type="button" class="btn btn-fechar" onclick="window.closeRelConstrucaoAlbum()">Fechar</button>
+      </div>
+      ${vistoriaTxt ? `<p style="margin:0 0 8px;font-weight:700;color:#105436;">${esc(vistoriaTxt)}</p>` : ""}
+      ${stage ? `<p style="margin:0 0 14px;color:#334155;">Estágio: <strong>${esc(stage)}</strong></p>` : ""}
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;">${photosHtml}</div>
+      ${baixarTodas ? `<div style="margin-top:16px;display:flex;justify-content:flex-end;">${baixarTodas}</div>` : ""}
+    </div>`;
+  modal.addEventListener("click", (ev) => {
+    if (ev.target === modal) window.closeRelConstrucaoAlbum();
+  });
+  document.body.appendChild(modal);
+};
+
 window.filaSignalHtml = function(client) {
   const letter = window.nexLetterForClient(client);
   const house = window.filaHouseSignalHtml(client);
@@ -31485,7 +31678,7 @@ window.paintFilaSignalCells = function() {
     const client = window.filaClientFromKey(td.getAttribute("data-fila-key"));
     if (!client) return;
     td.innerHTML = td.getAttribute("data-signal") === "house"
-      ? window.filaHouseSignalHtml(client)
+      ? window.relHouseSignalHtml(client)
       : window.filaSignalHtml(client);
   });
   if (window.lucide) lucide.createIcons();
@@ -31504,7 +31697,7 @@ window.ensureFilaSignalsIndex = function() {
       })
       .catch(() => {});
   }
-  if (window._filaSignals && window._filaSignals.ready && Date.now() - window._filaSignals.at < 120000) {
+  if (window._filaSignals && window._filaSignals.ready && window._filaSignals.albums && Date.now() - window._filaSignals.at < 120000) {
     window.paintFilaSignalCells();
     return Promise.resolve(window._filaSignals);
   }
@@ -31520,26 +31713,45 @@ window.ensureFilaSignalsIndex = function() {
         if (!prev || !preferNewer || stamp(value) >= stamp(prev)) bucket[k] = value;
       });
     };
+    const albums = { docs: [], byKey: {} };
+    const pushAlbum = (data, keys) => {
+      const idx = albums.docs.length;
+      albums.docs.push(data);
+      const extra = [];
+      const cc = String(data.costCenterId || "").trim();
+      const bits = String(data.unidade || data.unitName || data.unit || "").split(/\s+-\s+/).map((s) => s.trim()).filter(Boolean);
+      if (cc && bits.length > 1) extra.push("unit:" + cc + ":" + bits[bits.length - 1].toUpperCase());
+      keys.concat(extra).forEach((k) => {
+        const key = String(k || "").trim();
+        if (!key) return;
+        if (!albums.byKey[key]) albums.byKey[key] = [];
+        albums.byKey[key].push(idx);
+      });
+    };
+    const stageForaDaFila = (stage) => {
+      const s = String(stage || "").trim().toUpperCase();
+      return !s || s === "SEM CONSTRUÇÃO" || s === "SEM CONSTRUCAO" || s === "TERRAPLANAGEM";
+    };
     if (window.firebaseDb && window.firebaseCollections) {
-      const { collection, getDocs, query, where } = window.firebaseCollections;
-      const snap = await getDocs(query(collection(window.firebaseDb, "vistorias"), where("status", "!=", "concluida")));
+      const { collection, getDocs } = window.firebaseCollections;
+      const snap = await getDocs(collection(window.firebaseDb, "vistorias"));
       snap.forEach((docSnap) => {
-        const data = Object.assign({ id: docSnap.id }, docSnap.data() || {});
+        const data = Object.assign({ id: docSnap.id, _collection: "vistorias" }, docSnap.data() || {});
         if (data.isTest) return;
         const keys = typeof _vcDocIdentityKeys === "function" ? _vcDocIdentityKeys(data) : [];
         data._sortDate = typeof _vcPendingRequestDate === "function" ? _vcPendingRequestDate(data) : "";
-        remember(pending, keys, data, true);
+        if (String(data.status || "") !== "concluida") remember(pending, keys, data, true);
+        pushAlbum(data, keys);
       });
       const checks = await getDocs(collection(window.firebaseDb, "construction_checks"));
       checks.forEach((docSnap) => {
-        const data = docSnap.data() || {};
-        const stage = String(data.stage || "").trim().toUpperCase();
-        if (!stage || stage === "SEM CONSTRUÇÃO" || stage === "SEM CONSTRUCAO" || stage === "TERRAPLANAGEM") return;
+        const data = Object.assign({ id: docSnap.id, _collection: "construction_checks" }, docSnap.data() || {});
         const keys = typeof _vcDocIdentityKeys === "function" ? _vcDocIdentityKeys(data) : [];
-        remember(construction, keys, data, true);
+        if (!stageForaDaFila(data.stage)) remember(construction, keys, data, true);
+        if (!stageForaDaFila(data.stage) || window.relFotoEntries(data).length) pushAlbum(data, keys);
       });
     }
-    window._filaSignals = { ready: true, at: Date.now(), pending: pending, construction: construction };
+    window._filaSignals = { ready: true, at: Date.now(), pending: pending, construction: construction, albums: albums };
     window._filaSignalsPromise = null;
     window.paintFilaSignalCells();
     return window._filaSignals;
@@ -41189,7 +41401,7 @@ window.searchRelacionamento = async function() {
           <td style="border-bottom: 1px solid var(--color-border); padding: 10px 10px; color: #1e293b; font-weight: 500; text-align: left; font-size: 0.75rem;">${r.empreendimento}</td>
           <td style="border-bottom: 1px solid var(--color-border); padding: 10px 10px; color: #1e293b; font-weight: 500; text-align: left; font-size: 0.75rem;">${r.unidade}</td>
           <td style="border-bottom: 1px solid var(--color-border); padding: 10px 10px; color: #1e293b; font-weight: 500; text-align: left; font-size: 0.75rem;">${r.dataVenda}</td>
-          <td class="fila-signal-cell" data-signal="house" data-fila-key="${signalKey}" title="Construção" style="border-bottom: 1px solid var(--color-border); text-align: center; padding: 10px 6px; overflow: visible;">${typeof window.filaHouseSignalHtml === "function" ? window.filaHouseSignalHtml(window._relSignalClients[signalKey]) : ""}</td>
+          <td class="fila-signal-cell" data-signal="house" data-fila-key="${signalKey}" title="Construção" style="border-bottom: 1px solid var(--color-border); text-align: center; padding: 10px 6px; overflow: visible;">${typeof window.relHouseSignalHtml === "function" ? window.relHouseSignalHtml(window._relSignalClients[signalKey]) : ""}</td>
           <td style="border-bottom: 1px solid var(--color-border); text-align: center; padding: 10px 10px;">${r.statusHTML.replace('font-size: 1rem;', 'font-size: 0.75rem;').replace('padding: 6px 14px;', 'padding: 4px 10px;')}</td>
           <td style="border-bottom: 1px solid var(--color-border); text-align: center; padding: 10px 10px; white-space: nowrap;">
             <button type="button" class="btn btn-primary btn-sm" onclick="openGestaoDocumentoMenu({customerId:'${r.openCustomerId || customerId}',contractId:'${r.contractId || ''}',titulo:'${String(r.titulo || '').replace(/'/g, "\\'")}',contractNumber:'${String(r.contrato || '').replace(/'/g, "\\'")}',customerName:'${String(r.nome || '').replace(/'/g, "\\'")}',unidade:'${String(r.unidade || '').replace(/'/g, "\\'")}',empreendimento:'${String(r.empreendimento || '').replace(/'/g, "\\'")}',status:'${String(r.statusText || '').replace(/'/g, "\\'")}'})" style="margin-right: 6px; padding: 6px 12px; font-size: 0.75rem; font-weight: 700; display: inline-flex; justify-content: center; align-items: center; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; border-radius: 6px;">

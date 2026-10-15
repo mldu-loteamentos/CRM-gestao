@@ -11,6 +11,7 @@ const MarketingBudgetApp = {
   CONFIG_COLLECTION: "marketing_budget_config",
   CACHE_TITULOS_COL: "marketing_budget_titulos",
   CACHE_TITULOS_MS: 30 * 60 * 1000,
+  CACHE_CURTO_MS: 5 * 60 * 1000,
   _cacheTitulos: {},
   CONFIG_LOCAL: "crm_marketing_budget_config",
   CAT_DOC: "_categorias",
@@ -520,6 +521,11 @@ const MarketingBudgetApp = {
     if (!s.startDate || !s.endDate || s.startDate > s.endDate) { alert("Informe um período válido."); return; }
     const gen = (s.gen += 1);
     s.consultaChave = this.consultaChave();
+    const salva = this.consultaRecenteServe(cc);
+    if (salva) {
+      this.aplicarConsultaSalva(salva, cc, gen);
+      return;
+    }
     s.consultaPronta = false;
     s.loading = true;
     s.error = "";
@@ -574,8 +580,102 @@ const MarketingBudgetApp = {
     s.loading = false;
     s.progress = "";
     s.consultaPronta = !s.error;
+    if (!s.error) this.guardarConsultaRecente(cc, gen);
     this.render();
     if (!s.error) this.carregarComplementos(cc, gen);
+  },
+
+  /** Período pedido cabe numa consulta do mesmo empreendimento feita há menos de 5 minutos. */
+  consultaRecenteServe(cc) {
+    const s = this.state;
+    const salva = this._consultaRecente;
+    if (!salva || !cc) return null;
+    if (String(salva.ccId) !== String(cc.id)) return null;
+    if (Date.now() - Number(salva.savedAt) > this.CACHE_CURTO_MS) return null;
+    if (s.startDate < salva.start || s.endDate > salva.end) return null;
+    const ids = salva.ccsCfg && salva.ccsCfg.length ? salva.ccsCfg : [cc.id];
+    const cobre = ids.every((id) => {
+      const item = this._cacheTitulos[String(id)];
+      return this.cacheTitulosValido(item) && s.startDate >= item.start && s.endDate <= item.end;
+    });
+    return cobre ? salva : null;
+  },
+
+  guardarConsultaRecente(cc, gen) {
+    const s = this.state;
+    this._consultaRecente = {
+      savedAt: Date.now(),
+      gen: gen,
+      ccId: String(cc.id),
+      start: s.startDate,
+      end: s.endDate,
+      ccsCfg: (s.ccsCfg || []).slice(),
+      obra: s.obra,
+      pct: s.pct,
+      catSel: s.catSel ? s.catSel.slice() : null,
+      eventos: (s.eventos || []).slice(),
+      vendas: (s.vendas || []).slice(),
+      distratos: (s.distratos || []).slice(),
+      adimpl: s.adimpl,
+      perfis: s.perfis,
+      ppcCobertos: this._ppcCobertos || null
+    };
+  },
+
+  aplicarConsultaSalva(salva, cc, gen) {
+    const s = this.state;
+    s.consultado = true;
+    s.credoresSel = [];
+    s.planosSel = [];
+    s.credorOpen = false;
+    s.planoOpen = false;
+    s.obra = salva.obra;
+    s.pct = salva.pct;
+    s.ccsCfg = (salva.ccsCfg || []).slice();
+    s.catSel = salva.catSel ? salva.catSel.slice() : null;
+    s.eventos = (salva.eventos || []).slice();
+    const bills = [];
+    (s.ccsCfg.length ? s.ccsCfg : [cc.id]).forEach((id) => {
+      const item = this._cacheTitulos[String(id)];
+      const lista = item && Array.isArray(item.bills) ? item.bills : [];
+      lista.forEach((bill) => {
+        if (this.billEntraNoPeriodo(bill, s.startDate, s.endDate)) bills.push(bill);
+      });
+    });
+    this.setProgress("Usando a consulta recente…", 0.9);
+    this.montarGastos(this.mesclarTitulos(bills), s.ccsCfg);
+    const app = window.ComprasPrevisoesApp || window.ComprasControleApp;
+    if (salva.ppcCobertos && app) {
+      const rows = (s.rows || []).filter((row) => !salva.ppcCobertos[this.chavePedido(row, app)]);
+      rows.forEach((row, i) => { row.idx = i; });
+      const cats = {};
+      rows.forEach((row) => {
+        if (!cats[row.catId]) cats[row.catId] = { id: row.catId, nome: row.catNome, total: 0 };
+        cats[row.catId].total += row.valor;
+      });
+      s.rows = rows;
+      s.categorias = cats;
+    }
+    const dentro = (iso) => {
+      const d = String(iso || "").slice(0, 10);
+      return !!(d && d >= s.startDate && d <= s.endDate);
+    };
+    s.vendas = (salva.vendas || []).filter((v) => dentro(v.data));
+    s.distratos = (salva.distratos || []).filter((v) => dentro(v.dataCancel || v.data));
+    s.adimpl = salva.adimpl && salva.adimpl.status === "ok"
+      ? salva.adimpl
+      : { status: "", porVenda: {} };
+    s.perfis = salva.perfis && salva.perfis.status === "ok"
+      ? salva.perfis
+      : { status: "", map: {}, feitos: 0, total: 0 };
+    s.loading = false;
+    s.progress = "";
+    s.error = "";
+    s.consultaPronta = true;
+    this.render();
+    if (gen === s.gen && (s.adimpl.status !== "ok" || s.perfis.status !== "ok")) {
+      this.carregarComplementos(cc, gen);
+    }
   },
 
   /** Depois do budget na tela: situação de pagamento das vendas e perfil dos clientes. */
@@ -602,6 +702,11 @@ const MarketingBudgetApp = {
       if (gen === s.gen) s.perfis.status = "erro";
     }
     if (gen === s.gen && s.aba === "perfil") this.render();
+    const salva = this._consultaRecente;
+    if (salva && salva.gen === gen) {
+      salva.adimpl = s.adimpl;
+      salva.perfis = s.perfis;
+    }
   },
 
   async lerVgv(cc) {
@@ -1017,7 +1122,10 @@ const MarketingBudgetApp = {
       if (chave.indexOf("PCT:") === 0) g.pct = chave.slice(4);
     });
     const chaves = Object.keys(grupos);
-    if (!chaves.length) return;
+    if (!chaves.length) {
+      this._ppcCobertos = {};
+      return;
+    }
     const cobertos = {};
     chaves.forEach((chave) => { if (grupos[chave].realizado) cobertos[chave] = 1; });
     const ppcAbertos = chaves.filter((chave) => grupos[chave].ppc && !cobertos[chave]);
@@ -1034,7 +1142,9 @@ const MarketingBudgetApp = {
         : this.notasDoPct(grupos[chave].pct)));
       fatia.forEach((chave, idx) => { if ((achadas[idx] || []).length) cobertos[chave] = 1; });
     }
-    if (gen !== s.gen || !Object.keys(cobertos).length) return;
+    if (gen !== s.gen) return;
+    this._ppcCobertos = cobertos;
+    if (!Object.keys(cobertos).length) return;
     const rows = (s.rows || []).filter((row) => !cobertos[this.chavePedido(row, app)]);
     rows.forEach((row, i) => { row.idx = i; });
     const cats = {};
