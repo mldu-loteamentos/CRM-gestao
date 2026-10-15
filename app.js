@@ -23423,6 +23423,99 @@ window.fixUtf8Mojibake = function(s) {
   });
 };
 
+window.cabecalhoCalculoDistrato = function(sale, unit) {
+  const limpo = (v) => {
+    const s = String(v == null ? "" : v).trim();
+    if (!s || s === "N/D" || s === "undefined" || s === "null" || s === "—" || s === "-") return "";
+    return s;
+  };
+  const ccDe = (raw) => {
+    const parts = String(raw || "").split("-").filter(Boolean);
+    if (!parts.length) return "";
+    const start = /^u$/i.test(parts[0]) ? 1 : 0;
+    const cc = parts[start] || "";
+    return /^\d{4,6}$/.test(cc) ? cc : "";
+  };
+  const saleObj = sale || {};
+  const unitObj = unit || {};
+  const ccId = limpo(unitObj.costCenterId)
+    || limpo(unitObj.enterpriseId)
+    || limpo(saleObj.costCenterId)
+    || limpo(saleObj.enterpriseId)
+    || ccDe(saleObj.unitId)
+    || ccDe(unitObj.id)
+    || limpo(window.AppState && AppState.currentCostCenterId)
+    || "";
+  const listasCc = [];
+  if (window.AppState) {
+    if (Array.isArray(AppState.cachedCostCenters)) listasCc.push(AppState.cachedCostCenters);
+    if (Array.isArray(AppState.costCenters)) listasCc.push(AppState.costCenters);
+  }
+  let cc = null;
+  for (let i = 0; i < listasCc.length && !cc; i++) {
+    cc = listasCc[i].find((x) => x && (String(x.id) === ccId || String(x.code) === ccId)) || null;
+  }
+  const companyId = limpo(saleObj.companyId)
+    || limpo(unitObj.companyId)
+    || limpo(cc && cc.companyId)
+    || limpo(window.AppState && AppState.currentCompanyId)
+    || "";
+  const listasEmp = [];
+  if (window.AppState) {
+    if (Array.isArray(AppState.companies)) listasEmp.push(AppState.companies);
+    if (Array.isArray(AppState.cachedCompanies)) listasEmp.push(AppState.cachedCompanies);
+  }
+  if (window.MOCK_DATA && Array.isArray(window.MOCK_DATA.COMPANIES)) listasEmp.push(window.MOCK_DATA.COMPANIES);
+  let companyName = "";
+  if (companyId) {
+    for (let i = 0; i < listasEmp.length && !companyName; i++) {
+      const co = listasEmp[i].find((c) => c && String(c.id) === String(companyId));
+      if (co) companyName = co.name || co.tradeName || "";
+    }
+  }
+  if (!companyName && companyId && typeof getCompanyName === "function") {
+    const nome = getCompanyName(companyId);
+    if (nome && !/^Empresa #/.test(nome)) companyName = nome;
+  }
+  const cacheCc = (window.AppState && Array.isArray(AppState.cachedCostCenters)) ? AppState.cachedCostCenters : [];
+  const ccCache = ccId ? (cacheCc.find((x) => x && (String(x.id) === ccId || String(x.code) === ccId)) || null) : null;
+  const nomeConhecido = typeof window.knownCostCenterName === "function" ? window.knownCostCenterName(ccId) : "";
+  const unitHead = Object.assign({}, unitObj, ccId ? { costCenterId: limpo(unitObj.costCenterId) || ccId } : {});
+  const saleHead = Object.assign({}, saleObj, ccId ? { enterpriseId: limpo(saleObj.enterpriseId) || limpo(saleObj.costCenterId) || ccId } : {});
+  const nomeBase = (ccCache && ccCache.name)
+    || nomeConhecido
+    || limpo(saleObj.enterpriseName)
+    || limpo(saleObj.costCenterName)
+    || limpo(unitObj.enterpriseName)
+    || (cc && cc.name)
+    || "";
+  let cidade = "";
+  if (typeof window.extractCityDisplayName === "function") {
+    cidade = window.extractCityDisplayName(ccId, nomeBase) || "";
+  }
+  if (!cidade && ccCache) cidade = ccCache.city || ccCache.cidade || "";
+  if (!cidade && typeof window.resolveCidadeLoteamento === "function") {
+    const resolvida = window.resolveCidadeLoteamento(unitHead, saleHead);
+    if (resolvida && resolvida !== "Botucatu-SP") cidade = resolvida;
+  }
+  let produto = typeof window.stripCidadeEmpreendimento === "function"
+    ? window.stripCidadeEmpreendimento(nomeBase, ccId, cidade)
+    : nomeBase;
+  if (!produto && typeof window.resolveLoteamentoName === "function") {
+    produto = window.resolveLoteamentoName(unitHead, saleHead);
+  }
+  cidade = String(cidade || "").trim();
+  produto = String(produto || "").replace(/^(?:C\.C\.\s*)?(?:\d+\s*-\s*)+/i, "").trim();
+  const fold = (v) => String(v || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+  let enterpriseName = "";
+  if (cidade && produto && fold(produto).indexOf(fold(cidade)) !== 0) enterpriseName = cidade + " - " + produto;
+  else enterpriseName = produto || cidade;
+  return {
+    companyName: String(companyName || "").trim().toUpperCase(),
+    enterpriseName: String(enterpriseName || "").trim().toUpperCase()
+  };
+};
+
 window.generateDemonstrativoDistratoPDF = function() {
   const results = AppState.currentDistratoResult;
   if (!results) return;
@@ -23437,17 +23530,9 @@ window.generateDemonstrativoDistratoPDF = function() {
   const unpaidQty = g_distSale.calculatedUnpaidQty || 0;
   const unpaidTotalStr = g_distSale.calculatedUnpaidTotal ? g_distSale.calculatedUnpaidTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : 'R$ 0,00';
   
-  const costCenter = (AppState.costCenters || []).find(c => c.id == unit.costCenterId);
-  const companyId = costCenter ? costCenter.companyId : 2;
-  const company = window.MOCK_DATA && window.MOCK_DATA.COMPANIES ? window.MOCK_DATA.COMPANIES.find(c => c.id == companyId) : null;
-  const companyName = txt(company ? company.name : "Moura Leite Loteamentos");
-  
-  let enterpriseName = "CERQUEIRA C\u00C9SAR - CH\u00C1CARA MOURA LEITE";
-  if (costCenter) {
-    const city = txt(costCenter.city || "").toUpperCase();
-    const ccName = txt(costCenter.name || "").toUpperCase();
-    enterpriseName = city ? city + " - " + ccName : ccName;
-  }
+  const cabecalho = window.cabecalhoCalculoDistrato(g_distSale, unit);
+  const companyName = txt(cabecalho.companyName);
+  const enterpriseName = txt(cabecalho.enterpriseName);
 
   const refundText = results.instQty > 1 ?
     `R$ ${results.baseRefund.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} em ${results.instQty} parcelas de R$ ${results.refundInstallment.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` :
