@@ -3667,6 +3667,13 @@ circle.donut-segment {
   flex: 0 0 auto;
   white-space: nowrap;
 }
+.fc-filter-actions {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
 .fc-consult-btn {
   height: 34px;
   min-width: 118px;
@@ -3699,18 +3706,19 @@ circle.donut-segment {
 }
 .fc-tree-toolbar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  align-items: flex-end;
   flex-wrap: wrap;
-  gap: 10px;
-  padding: 6px 10px;
+  gap: 14px 18px;
+  padding: 8px 12px;
   border-bottom: 1px solid #e2e8f0;
   background: #f8fafc;
   max-width: 100%;
   min-width: 0;
 }
-.fc-tree-toolbar strong { font-size: 0.75rem; color: #0f172a; }
-.fc-tree-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; justify-content: flex-end; flex: 1 1 280px; min-width: 0; }
+.fc-tool-group { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; min-width: 0; }
+.fc-tool-label { font-size: 0.68rem; font-weight: 700; color: #64748b; line-height: 1; }
+.fc-tool-row { display: flex; gap: 6px; align-items: center; }
+.fc-tool-end { margin-left: auto; flex-direction: row; align-items: center; align-self: flex-end; gap: 8px; }
 .fc-agrupa {
   display: inline-flex;
   height: 36px;
@@ -5285,10 +5293,20 @@ circle.donut-segment {
 .com-vel-card { background: #fff; border-radius: 12px; padding: 14px 16px 16px; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06); display: flex; flex-direction: column; }
 .com-vel-card h3 { margin: 0 0 4px; font-size: 0.95rem; color: #105436; }
 .com-vel-card p { margin: 0 0 12px; font-size: 0.75rem; color: #64748b; }
-.com-vel-vezes { display: grid; grid-template-columns: 220px 1fr; gap: 22px; align-items: center; flex: 1; min-height: 230px; }
-.com-vel-gauge { width: 240px; position: relative; }
+.com-vel-vezes { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 28px; align-items: center; flex: 1; }
+.com-vel-gauge { width: 220px; }
 .com-vel-gauge svg { width: 100%; height: auto; display: block; }
-.com-vel-gauge strong { display: block; margin-top: -36px; text-align: center; font-size: 1.55rem; font-weight: 800; line-height: 1; }
+.com-vel-load { padding: 36px 16px 28px; }
+.com-vel-load .loading-progress-bar { width: 8%; animation: com-vel-carga 14s ease-out forwards; }
+@keyframes com-vel-carga { from { width: 8%; } to { width: 92%; } }
+.com-vel-metros { display: flex; flex-direction: column; justify-content: center; gap: 22px; min-width: 0; }
+.com-vel-metro-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.com-vel-metro-top span { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #64748b; }
+.com-vel-metro-top strong { font-size: 1.35rem; font-weight: 800; color: #105436; line-height: 1; font-variant-numeric: tabular-nums; }
+.com-vel-metro i { display: block; height: 12px; border-radius: 999px; background: #e7efe9; overflow: hidden; }
+.com-vel-metro i b { display: block; height: 100%; border-radius: inherit; background: #105436; }
+.com-vel-metro.is-over .com-vel-metro-top strong { color: #f37021; }
+.com-vel-metro.is-over i b { background: #f37021; }
 .com-vel-donut { width: 210px; height: 210px; border-radius: 50%; background: conic-gradient(#105436 calc(var(--p) * 1%), #dbe7df 0); display: grid; place-items: center; }
 .com-vel-donut-miolo { width: 136px; height: 136px; border-radius: 50%; background: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
 .com-vel-donut-miolo strong { font-size: 1.35rem; font-weight: 800; color: #105436; line-height: 1; }
@@ -9667,7 +9685,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .pcx-don-tag { position: absolute; z-index: 1; font-size: 0.72rem; font-weight: 700; line-height: 1; color: #1e293b; white-space: nowrap; background: #fff; border-radius: 4px; padding: 1px 3px; }
 .pcx-don-tag.is-ativo { top: 16px; right: 34px; }
 .pcx-don-tag.is-quit { left: 10px; bottom: 22px; }
-.pcx-don-leg { display: flex; justify-content: center; gap: 16px; margin-top: 6px; font-size: 0.75rem; color: #64748b; }
+.pcx-don-leg { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 16px; margin-top: 6px; font-size: 0.75rem; color: #64748b; }
 .pcx-don-leg i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
 .pcx-sit { font-size: 0.75rem; font-weight: 700; }
 .pcx-sit.is-ativo { color: #105436; }

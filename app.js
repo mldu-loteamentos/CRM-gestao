@@ -334,7 +334,12 @@ window.getOperatorsNamedInCityRules = function() {
 
 window.getCrmUsersCached = function() {
   try {
-    return JSON.parse(localStorage.getItem("crm_users") || "[]") || [];
+    const raw = localStorage.getItem("crm_users") || "[]";
+    if (window._crmUsersCacheRaw === raw && Array.isArray(window._crmUsersCache)) return window._crmUsersCache;
+    const parsed = JSON.parse(raw) || [];
+    window._crmUsersCache = Array.isArray(parsed) ? parsed : [];
+    window._crmUsersCacheRaw = raw;
+    return window._crmUsersCache;
   } catch (e) {
     return [];
   }
@@ -3433,7 +3438,19 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     }
   } else if (tabId === "dashboard") {
     if (!AppState.dashboardRendered) {
-      loadDashboardData();
+      const filaBody = document.getElementById("defaulters-table-body");
+      if (filaBody && !filaBody.querySelector(".loading-spinner")) {
+        filaBody.innerHTML = `<tr><td class="fila-load-cell" colspan="13">
+          <div class="ml-load">
+            <div class="loading-spinner" aria-hidden="true"></div>
+            <span class="loading-status-text">Abrindo a fila de cobrança…</span>
+            <div class="ml-load-track"><div class="loading-progress-bar" style="width:12%"></div></div>
+          </div>
+        </td></tr>`;
+      }
+      setTimeout(() => {
+        if (!AppState.dashboardRendered) loadDashboardData();
+      }, 0);
     } else if (typeof window.updateFilaCacheStatusIndicator === "function") {
       window.updateFilaCacheStatusIndicator();
     }
@@ -5085,10 +5102,37 @@ window.freeCrmLocalStorage = function() {
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
       if (!k) continue;
-      if (k.startsWith("crm_perms_bak_") || k.indexOf("__mirror") >= 0) drop.push(k);
+      if (k.startsWith("crm_perms_bak_") || k.indexOf("__mirror") >= 0 || k === "crm_api_consumo_v1") drop.push(k);
     }
     drop.forEach((k) => { try { localStorage.removeItem(k); } catch (e) {} });
   } catch (e) {}
+};
+
+window.ensureCrmStorageRoom = function() {
+  const native = window._nativeLocalStorageSetItem;
+  try {
+    const uso = localStorage.getItem("crm_api_consumo_v1");
+    if (uso && uso.length > 80000) localStorage.removeItem("crm_api_consumo_v1");
+  } catch (e) {}
+  if (typeof native !== "function") return;
+  const probe = "__crm_quota_probe__";
+  const cabe = function() {
+    try {
+      native.call(localStorage, probe, "1");
+      localStorage.removeItem(probe);
+      window._storageQuotaFull = false;
+      return true;
+    } catch (e) {
+      return false;
+    }
+  };
+  if (cabe()) return;
+  window.freeCrmLocalStorage();
+  if (cabe()) return;
+  ["crm_moura_notes", "crm_moura_jud_notes"].forEach(function(k) {
+    try { localStorage.removeItem(k); } catch (e) {}
+  });
+  if (!cabe()) window._storageQuotaFull = true;
 };
 
 window.persistCrmProfilesNow = async function(profiles) {
@@ -5395,11 +5439,32 @@ window.commitCrmGlobalConfig = async function(payload) {
       next[kCart] = window.mergeCartoriosList(localCart, cloud[kCart] || "[]");
       window._cartoriosAposCommit = next[kCart];
     }
+    if (typeof window.mergePlanoImpostos === "function") {
+      const kImp = "crm_plano_impostos";
+      let localImp = next[kImp] || "{}";
+      try {
+        const storedImp = localStorage.getItem(kImp);
+        if (storedImp) localImp = window.mergePlanoImpostos(storedImp, localImp);
+      } catch (e) {}
+      const memImp = window.PlanoFinanceiroApp && PlanoFinanceiroApp.taxConfig;
+      if (memImp && typeof memImp === "object" && Object.keys(memImp).length) {
+        localImp = window.mergePlanoImpostos(JSON.stringify(memImp), localImp);
+      }
+      next[kImp] = window.mergePlanoImpostos(localImp, cloud[kImp] || "{}");
+      window._impostosAposCommit = next[kImp];
+    }
     tx.set(docRef, next, { merge: true });
   });
   if (window._cartoriosAposCommit) {
     try { _originalSetItem.call(localStorage, "crm_moura_cartorios_list", window._cartoriosAposCommit); } catch (e) {}
     window._cartoriosAposCommit = null;
+  }
+  if (window._impostosAposCommit) {
+    try { _originalSetItem.call(localStorage, "crm_plano_impostos", window._impostosAposCommit); } catch (e) {}
+    try {
+      if (window.PlanoFinanceiroApp) PlanoFinanceiroApp.taxConfig = JSON.parse(window._impostosAposCommit || "{}");
+    } catch (e) {}
+    window._impostosAposCommit = null;
   }
 };
 
@@ -6252,8 +6317,10 @@ window.switchRegrasTab = function(tabId) {
 // 4. INICIALIZAÇÃO DA APLICAÇÃO E DADOS
 // ----------------------------------------------------
 async function initializeApplication() {
+  if (typeof window.ensureCrmStorageRoom === "function") window.ensureCrmStorageRoom();
   // Sincronizar configurações globais do Firebase para a memória local (Recarrega se precisar)
-  if (window.syncGlobalConfigFromFirebase) {
+  const syncRecente = window._globalConfigSyncedAt && (Date.now() - window._globalConfigSyncedAt) < 20000;
+  if (!syncRecente && window.syncGlobalConfigFromFirebase) {
       await window.syncGlobalConfigFromFirebase();
   }
   if (window.EmpresasApp && typeof EmpresasApp.ensureDefaultCobrancaFlags === "function") {
@@ -6343,22 +6410,19 @@ async function initializeApplication() {
   window.getCustomerNotesList = function(store, customerId) {
       if (!store) return [];
       const target = String(customerId == null ? "" : customerId);
-      const norm = window.normalizeCustomerNotesKey(target);
-      const rawKeys = new Set([
-        target,
-        norm,
-        String(Number(target) || target),
-        target.replace(/^B-/i, ""),
-        norm.replace(/^B-/i, "")
-      ]);
-      const candidates = Object.keys(store || {}).filter(k => rawKeys.has(String(k)) || rawKeys.has(String(k).replace(/^B-/i, "")) || String(Number(k)) === String(Number(target)));
+      const norm = typeof window.normalizeCustomerNotesKey === "function" ? window.normalizeCustomerNotesKey(target) : target;
+      const n = Number(target);
+      const num = target !== "" && Number.isFinite(n) ? String(n) : "";
+      const keys = [target, norm, num !== "NaN" && num !== "" ? num : "", target.replace(/^B-/i, ""), norm.replace(/^B-/i, "")];
+      const seen = new Set();
       const merged = [];
-      candidates.forEach(k => {
-        const arr = Array.isArray(store[k]) ? store[k] : [];
-        arr.forEach(n => merged.push(n));
+      keys.forEach((k) => {
+        if (!k || seen.has(k)) return;
+        seen.add(k);
+        const arr = store[k];
+        if (Array.isArray(arr) && arr.length) arr.forEach((n) => merged.push(n));
       });
-      const list = merged.length ? merged : (store[norm] || store[target] || []);
-      return Array.isArray(list) ? list : [];
+      return merged;
   };
 
   window.normalizeContractIdToken = function(value) {
@@ -6458,83 +6522,84 @@ async function initializeApplication() {
   // Strategy: merge Firebase (source of truth for cloud) with localStorage (local fallback)
   // Firebase wins on a per-customer basis if the customer exists in Firebase.
   try {
-     const localNotes = JSON.parse(localStorage.getItem("crm_moura_notes")) || {};
-     AppState.notes = Object.keys(localNotes).length > 0 ? localNotes : (window.MOCK_DATA.INITIAL_MOCK_NOTES || {});
+     const lerNotasLocais = function(chave) {
+       let raw = null;
+       try { raw = localStorage.getItem(chave); } catch (e) { raw = null; }
+       if (raw && raw.length > 250000) {
+         try { localStorage.removeItem(chave); } catch (e) {}
+         console.info("[storage] " + chave + " saiu do navegador e volta do Firebase.");
+         return {};
+       }
+       if (!raw) return {};
+       try { return JSON.parse(raw) || {}; } catch (e) { return {}; }
+     };
+     const firebaseOn = !!(window.firebaseDb && window.firebaseCollections);
+     const localNotes = lerNotasLocais("crm_moura_notes");
+     AppState.notes = Object.keys(localNotes).length > 0 ? localNotes : (firebaseOn ? {} : (window.MOCK_DATA.INITIAL_MOCK_NOTES || {}));
      window.stripExactTesteFromStore(AppState.notes);
-     window._isNotesHydrating = true;
-     try { localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes)); } catch (e) {}
-     if (!(window.firebaseDb && window.firebaseCollections)) window._isNotesHydrating = false;
-     
-     const localJudNotes = JSON.parse(localStorage.getItem("crm_moura_jud_notes")) || {};
-     AppState.judNotes = localJudNotes;
+     window._isNotesHydrating = firebaseOn;
+     AppState.judNotes = lerNotasLocais("crm_moura_jud_notes");
      
      // Disparar carga assíncrona única dos shards para ter Último Contato atualizado sem onSnapshot caros
      if (window.firebaseDb && window.firebaseCollections) {
-         setTimeout(async () => {
+         const aplicarNotasEmFatias = function(entries, store, modo) {
+             return new Promise(function(resolve) {
+                 let i = 0;
+                 const passo = 80;
+                 const lote = function() {
+                     const fim = Math.min(i + passo, entries.length);
+                     for (; i < fim; i++) {
+                         const key = String(entries[i][0]);
+                         const remote = Array.isArray(entries[i][1]) ? entries[i][1] : [];
+                         const local = Array.isArray(store[key]) ? store[key] : [];
+                         store[key] = modo === "jud"
+                             ? window.mergeOccurrenceLists(local, remote)
+                             : window.applyRemoteNotes(local, remote, key);
+                     }
+                     if (i < entries.length) {
+                         setTimeout(lote, 16);
+                         return;
+                     }
+                     resolve();
+                 };
+                 lote();
+             });
+         };
+         const entradasDoSnap = function(snap) {
+             const entries = [];
+             snap.forEach(function(doc) {
+                 const data = doc.data() || {};
+                 Object.keys(data).forEach(function(key) { entries.push([key, data[key]]); });
+             });
+             return entries;
+         };
+         const carregarNotas = async function() {
              try {
                  window._isNotesHydrating = true;
                  console.log("[Firebase RT] Sincronizando todos os shards iniciais (Cobrança)...");
                  const { collection, getDocs } = window.firebaseCollections;
-                 
                  const notesSnap = await getDocs(collection(window.firebaseDb, 'customer_notes_shards'));
-                 let hasUpdates = false;
-                 notesSnap.forEach(doc => {
-                     const data = doc.data();
-                     for (const [key, val] of Object.entries(data)) {
-                         const remote = Array.isArray(val) ? val : [];
-                         const local = window.getCustomerNotesList(AppState.notes, key);
-                         AppState.notes[String(key)] = window.applyRemoteNotes(local, remote, key);
-                         hasUpdates = true;
-                     }
-                 });
-                 if (hasUpdates) {
-                     window.persistLargeCacheIfRoom("crm_moura_notes", AppState.notes);
-                 }
-                 
+                 await aplicarNotasEmFatias(entradasDoSnap(notesSnap), AppState.notes, "cob");
+
                  console.log("[Firebase RT] Sincronizando todos os shards iniciais (Jurídico)...");
                  const judNotesSnap = await getDocs(collection(window.firebaseDb, 'customer_jud_notes_shards'));
-                 let judHasUpdates = false;
-                 judNotesSnap.forEach(doc => {
-                     const data = doc.data();
-                     for (const [key, val] of Object.entries(data)) {
-                         const remote = Array.isArray(val) ? val : [];
-                         const local = window.getCustomerNotesList(AppState.judNotes, key);
-                         AppState.judNotes[String(key)] = window.mergeOccurrenceLists(local, remote);
-                         judHasUpdates = true;
-                     }
-                 });
-                 if (judHasUpdates) {
-                     window.persistLargeCacheIfRoom("crm_moura_jud_notes", AppState.judNotes);
-                 }
-                 
+                 await aplicarNotasEmFatias(entradasDoSnap(judNotesSnap), AppState.judNotes, "jud");
                  try {
                      const judNotesSnapAlt = await getDocs(collection(window.firebaseDb, 'jud_notes_shards'));
-                     judNotesSnapAlt.forEach(doc => {
-                         const data = doc.data() || {};
-                         for (const [key, val] of Object.entries(data)) {
-                             const remote = Array.isArray(val) ? val : [];
-                             const local = window.getCustomerNotesList(AppState.judNotes, key);
-                             AppState.judNotes[String(key)] = window.mergeOccurrenceLists(local, remote);
-                             judHasUpdates = true;
-                         }
-                     });
-                     if (judHasUpdates) {
-                         window.persistLargeCacheIfRoom("crm_moura_jud_notes", AppState.judNotes);
-                     }
+                     await aplicarNotasEmFatias(entradasDoSnap(judNotesSnapAlt), AppState.judNotes, "jud");
                  } catch (judAltErr) {
                      console.warn("[Firebase RT] Shard jud_notes_shards indisponível:", judAltErr);
                  }
-                 
+
                  console.log("[Firebase RT] Carga inicial unificada concluída com sucesso!");
                  if (typeof window.ensureBoletoNotesTitulo4868Removed === "function") {
                    window.ensureBoletoNotesTitulo4868Removed();
                  }
-                 
-                 if (typeof renderTabelaInadimplencia === 'function') renderTabelaInadimplencia();
-                 if (typeof updateDashboardHeader === 'function') updateDashboardHeader();
+                 const agendaPainel = document.getElementById("tab-agenda");
+                 const agendaAberta = agendaPainel && agendaPainel.style.display !== "none";
                  window.agendaItemsCache = {};
-                 if (typeof renderAgendaCalendar === 'function') renderAgendaCalendar();
-                 if (typeof loadAgendaDayTasks === 'function' && window.lastSelectedAgendaDate) {
+                 if (agendaAberta && typeof renderAgendaCalendar === "function") renderAgendaCalendar();
+                 if (agendaAberta && typeof loadAgendaDayTasks === "function" && window.lastSelectedAgendaDate) {
                    loadAgendaDayTasks(window.lastSelectedAgendaDate);
                  }
              } catch(e) {
@@ -6542,7 +6607,12 @@ async function initializeApplication() {
              } finally {
                  window._isNotesHydrating = false;
              }
-         }, 1500);
+         };
+         if (typeof window.requestIdleCallback === "function") {
+             window.requestIdleCallback(function() { carregarNotas(); }, { timeout: 7000 });
+         } else {
+             setTimeout(carregarNotas, 4000);
+         }
      }
   } catch (e) {
      console.error("Erro ao iniciar listener de notas do Firebase:", e);
@@ -8960,7 +9030,7 @@ async function loadDashboardData(forceRefresh = false) {
     }
 }
 const defaultAdvFilterState = {
-    lotes: [], aging: [], parcelas: [], dueday: [], idade: [],
+    lotes: [], aging: [], pmp: [], parcelas: [], dueday: [], idade: [],
     cidade: [], empresa: [], ccusto: [], operador: [],
     contato: '', statusJuridico: 'TODOS', retroMeses: '90', zeropaid: 'TODOS', webro: 'TODOS', pagamentoRecente: [],
     faseProcessual: [], dataFase: [], dataFaseNDias: '', queueGroups: []
@@ -9012,6 +9082,25 @@ window.applyAdvFiltersTo = (sourceList) => {
                     if (val === '120') return delay > 90 && delay <= 120;
                     if (val === '>120') return delay > 120;
                     return false;
+                });
+            });
+        }
+
+        if (window.advFilters.pmp && window.advFilters.pmp.length > 0) {
+            filteredList = filteredList.filter(c => {
+                const info = typeof window.filaPmpLookup === "function" ? window.filaPmpLookup(c) : null;
+                const known = !!(info && info.known && info.pmp != null && Number.isFinite(Number(info.pmp)));
+                const pmp = known ? Math.round(Number(info.pmp)) : null;
+                return window.advFilters.pmp.some(val => {
+                    if (val === 'none') return !known;
+                    if (!known) return false;
+                    if (val === '0-4') return pmp <= 4;
+                    if (val === '>100') return pmp > 100;
+                    const partes = String(val).split('-');
+                    if (partes.length !== 2) return false;
+                    const ini = Number(partes[0]);
+                    const fim = Number(partes[1]);
+                    return pmp >= ini && pmp <= fim;
                 });
             });
         }
@@ -9486,14 +9575,22 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
     }
   }
   const consolidated = {};
-  let subjudiceMemory = JSON.parse(localStorage.getItem('subjudiceHistory') || '{}');
+  let subjudiceMemory = {};
+  try { subjudiceMemory = JSON.parse(localStorage.getItem('subjudiceHistory') || '{}') || {}; } catch (e) { subjudiceMemory = {}; }
   const todayStr = new Date().toISOString().split('T')[0];
+  const filaPausa = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-  bills.forEach(bill => {
+  for (let bi = 0; bi < bills.length; bi++) {
+    const bill = bills[bi];
+    if (bi > 0 && bi % 400 === 0) {
+      const sFila = document.querySelector("#defaulters-table-body .loading-status-text");
+      if (sFila) sFila.textContent = "Montando a fila de cobrança…";
+      await filaPausa();
+    }
     const openSum = (typeof window.summarizeOpenDefaulterBill === "function")
       ? window.summarizeOpenDefaulterBill(bill)
       : null;
-    if (openSum && openSum.skip) return;
+    if (openSum && openSum.skip) continue;
 
     const customerId = bill.customerId;
     const saleId = bill.saleId;
@@ -9690,19 +9787,25 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
           consolidated[key].dueDay = dueDay;
       }
     }
-  });
+  }
 
   const salesForZero = (window.AppState && AppState.sales) || [];
   if (salesForZero.length) {
+    const saleByBill = new Map();
+    salesForZero.forEach((s) => {
+      if (!s) return;
+      if (s.receivableBillId != null) saleByBill.set(String(s.receivableBillId), s);
+      if (s.id != null && !saleByBill.has(String(s.id))) saleByBill.set(String(s.id), s);
+    });
     Object.values(consolidated).forEach(c => {
-      const sale = salesForZero.find(s =>
-        String(s.receivableBillId) === String(c.saleId) ||
-        String(s.id) === String(c.saleId) ||
-        (c.billIds || []).some(id => {
-          const t = String(id || "").replace(/^B-/, "").split("-")[0];
-          return String(s.receivableBillId) === t || String(s.id) === t;
-        })
-      );
+      let sale = saleByBill.get(String(c.saleId)) || null;
+      if (!sale) {
+        const ids = c.billIds || [];
+        for (let si = 0; si < ids.length && !sale; si++) {
+          const t = String(ids[si] || "").replace(/^B-/, "").split("-")[0];
+          sale = saleByBill.get(t) || saleByBill.get(String(ids[si])) || null;
+        }
+      }
       if (!sale || sale.percPaid == null) return;
       c.percPaid = Number(sale.percPaid);
       const pct = Number(sale.percPaid) > 1.5 ? Number(sale.percPaid) : Number(sale.percPaid) * 100;
@@ -9802,24 +9905,24 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
     }
   });
 
-  // Limpeza de dados corrompidos (Bug de reentrada com aging baixo)
+  const atrasoPorCliente = new Map();
+  Object.values(consolidated).forEach((c) => {
+    const id = Number(c.customerId);
+    const prev = atrasoPorCliente.get(id);
+    if (prev == null || c.maxDaysDelay > prev) atrasoPorCliente.set(id, c.maxDaysDelay);
+  });
   Object.keys(subjudiceMemory).forEach(cIdStr => {
       const mem = subjudiceMemory[cIdStr];
-      if (mem.exitDate) {
-          const cId = Number(cIdStr);
-          const relatedConsolidated = Object.values(consolidated).filter(c => c.customerId === cId);
-          if (relatedConsolidated.length > 0) {
-              const maxDelay = Math.max(...relatedConsolidated.map(c => c.maxDaysDelay));
-              // Se a dívida é nova (aging baixo) e não tem lastSeen, foi corrompido
-              // O bug ocorreu em datas passadas recentes, então limpamos tudo sem lastSeen
-              if (maxDelay < 90 && !mem.lastSeen) {
-                  mem.exitDate = "2024-01-01";
-              }
-          }
+      if (mem && mem.exitDate && !mem.lastSeen) {
+          const maxDelay = atrasoPorCliente.get(Number(cIdStr));
+          if (maxDelay != null && maxDelay < 90) mem.exitDate = "2024-01-01";
       }
   });
 
-  localStorage.setItem('subjudiceHistory', JSON.stringify(subjudiceMemory));
+  const memoriaSub = subjudiceMemory;
+  setTimeout(() => {
+    try { localStorage.setItem('subjudiceHistory', JSON.stringify(memoriaSub)); } catch (e) {}
+  }, 0);
 
   applyCollectionOperatorRegua(consolidated, subjudiceMemory);
 
@@ -10277,7 +10380,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
     if (clientList.length === 0) {
       body.innerHTML = `<tr><td colspan="13" style="text-align:center; padding:30px; color:var(--color-text-muted);">Nenhum cliente inadimplente encontrado com os filtros ativos.</td></tr>`;
     } else {
-      const subjudiceHistory = JSON.parse(localStorage.getItem('subjudiceHistory') || '{}');
+      const subjudiceHistory = subjudiceMemory;
 
       const groupTotals = {};
       clientList.forEach(client => {
@@ -10288,7 +10391,8 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
       });
 
       let lastQueueGroup = null;
-      clientList.forEach(client => {
+      for (let _filaI = 0; _filaI < clientList.length; _filaI++) {
+        const client = clientList[_filaI];
         const queueGroup = window.getFilaQueueGroup(client, thresholdJuridico);
         if (queueGroup !== lastQueueGroup) {
           lastQueueGroup = queueGroup;
@@ -10466,10 +10570,10 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
           </td>
         `;
         body.appendChild(row);
-      });
+        if ((_filaI + 1) % 60 === 0) await filaPausa();
+      }
       if (typeof window.ensureFilaSignalsIndex === "function") window.ensureFilaSignalsIndex();
       if (typeof window.ensureFilaPmpIndex === "function") window.ensureFilaPmpIndex();
-      if (window.lucide) lucide.createIcons();
     }
   }
 
@@ -10860,7 +10964,12 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
   }
 
   AppState.dashboardRendered = true;
-  lucide.createIcons();
+  if (window.lucide) {
+    ["tab-dashboard", "tab-subjudice", "tab-zeropaid"].forEach((id) => {
+      const root = document.getElementById(id);
+      if (root) lucide.createIcons({ root: root });
+    });
+  }
   
   // Habilita o botão de Filtros Avançados
   const btnAdv = document.getElementById("btn-adv-filters");
@@ -24219,9 +24328,7 @@ async function loadAgendaTab(showLoader = false) {
 
   if (selectedOperator !== "Todos") {
       agendaCustomerIds = agendaCustomerIds.filter(id => {
-          const occList = window.getCustomerNotesList
-            ? window.getCustomerNotesList(AppState.notes, id)
-            : (AppState.notes[id] || []);
+          const occList = AppState.notes[id] || AppState.notes[String(id)] || [];
           return occList.some(occ => window.occurrenceAuthorMatchesOperator
             ? window.occurrenceAuthorMatchesOperator(occ.author, selectedOperator)
             : normalizeStr(occ.author || "OUTROS") === selOp);
@@ -40711,25 +40818,21 @@ window.openCustomerFromAgenda = function(customerId, saleId) {
   });
 };
 
-// Iniciar a carga de clientes em background assim que o script for carregado
-setTimeout(() => {
-    if (window.startCustomerBackgroundSync) {
-        window.startCustomerBackgroundSync();
-    }
-}, 1000);
+// A base de clientes e a agenda esperam a Home pintar. A agenda completa abre na própria aba.
+function crmQuandoOcioso(fn, timeoutMs) {
+    const run = function() { try { fn(); } catch (e) {} };
+    if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(run, { timeout: timeoutMs });
+    else setTimeout(run, timeoutMs);
+}
+crmQuandoOcioso(function() {
+    if (window.startCustomerBackgroundSync) window.startCustomerBackgroundSync();
+}, 8000);
 
-setTimeout(() => {
+crmQuandoOcioso(function() {
     if (window.EmpresasApp && typeof EmpresasApp.syncCompaniesDaily === "function") {
         EmpresasApp.syncCompaniesDaily(false).catch(() => {});
     }
-}, 1800);
-
-// Iniciar o carregamento da agenda do operador em background
-setTimeout(() => {
-    if (typeof window.loadAgendaTab === 'function') {
-        window.loadAgendaTab(false);
-    }
-}, 2000);
+}, 10000);
 
 // --- GERENCIAMENTO DE OPÇÃ•ES (CANAL E LEMBRETE) ---
 function getCanonicalOptionList(type) {
@@ -42063,6 +42166,7 @@ document.addEventListener("DOMContentLoaded", () => {
 window.advFilters = {
     lotes: [],
     aging: [],
+    pmp: [],
     dueday: [],
     parcelas: [],
     cidade: [],
@@ -42102,7 +42206,7 @@ window.initAdvFiltersUI = function() {
             const pill = e.target.closest('.adv-pill');
             if (!pill) return;
             
-            const isMulti = ['adv-pills-lotes', 'adv-pills-aging', 'adv-pills-parcelas', 'adv-pills-dueday', 'adv-pills-idade', 'adv-pills-pagamento-recente', 'adv-pills-fase-processual', 'adv-pills-data-fase', 'adv-pills-queue-groups'].includes(group.id);
+            const isMulti = ['adv-pills-lotes', 'adv-pills-aging', 'adv-pills-pmp', 'adv-pills-parcelas', 'adv-pills-dueday', 'adv-pills-idade', 'adv-pills-pagamento-recente', 'adv-pills-fase-processual', 'adv-pills-data-fase', 'adv-pills-queue-groups'].includes(group.id);
             const val = pill.dataset.value;
 
             if (isMulti) {
@@ -42505,6 +42609,7 @@ window.applyAdvFilters = async function(keepOpen = false) {
     
     window.advFilters.lotes = getPills('adv-pills-lotes');
     window.advFilters.aging = getPills('adv-pills-aging');
+    window.advFilters.pmp = getPills('adv-pills-pmp');
     window.advFilters.parcelas = getPills('adv-pills-parcelas');
     window.advFilters.dueday = getPills('adv-pills-dueday');
     window.advFilters.idade = getPills('adv-pills-idade');
@@ -42581,7 +42686,7 @@ window.applyAdvFilters = async function(keepOpen = false) {
         }
     }
 
-    let count = window.advFilters.lotes.length + window.advFilters.aging.length + window.advFilters.parcelas.length + 
+    let count = window.advFilters.lotes.length + window.advFilters.aging.length + (window.advFilters.pmp || []).length + window.advFilters.parcelas.length + 
                 window.advFilters.dueday.length + window.advFilters.idade.length + window.advFilters.cidade.length + window.advFilters.empresa.length + window.advFilters.ccusto.length;
     if (window.advFilters.contato) count++;
     if (window.advFilters.zeropaid && window.advFilters.zeropaid !== 'TODOS') count++;
@@ -42683,7 +42788,7 @@ window.prefetchRecentPayments = async function() {
 };
 window.clearAdvFilters = function() {
     const defaultState = {
-        lotes: [], aging: [], parcelas: [], dueday: [], idade: [],
+        lotes: [], aging: [], pmp: [], parcelas: [], dueday: [], idade: [],
         cidade: [], empresa: [], ccusto: [], operador: [],
         contato: '', statusJuridico: 'TODOS', retroMeses: '90', zeropaid: 'TODOS', webro: 'TODOS', pagamentoRecente: [],
         faseProcessual: [], dataFase: [], dataFaseNDias: '', queueGroups: []
@@ -43847,6 +43952,7 @@ window.mergePlanoImpostos = function(localStr, cloudStr) {
 // Função que baixa configurações na inicialização
 window.syncGlobalConfigFromFirebase = async function() {
     try {
+        if (typeof window.ensureCrmStorageRoom === "function") window.ensureCrmStorageRoom();
         if (!window.firebaseDb || !window.firebaseCollections) return;
         const snap = await window.firebaseCollections.getDocs(window.firebaseCollections.collection(window.firebaseDb, "config"));
         let globalData = null;
@@ -44286,12 +44392,18 @@ window.syncGlobalConfigFromFirebase = async function() {
                 }
             } catch (e) {}
         }
+        window._globalConfigSyncedAt = Date.now();
     } catch(e) {
         console.error("Erro na sincronização:", e);
     }
 };
 
 window.forceUploadLocalConfig = async function(silent = true) {
+    if (window._forceUploadBusy) {
+        window._forceUploadAgain = true;
+        return;
+    }
+    window._forceUploadBusy = true;
     try {
         let payload = {};
         window.SYNC_KEYS.forEach(key => {
@@ -44480,6 +44592,14 @@ window.forceUploadLocalConfig = async function(silent = true) {
     } catch(e) {
         if (!silent) alert("Erro ao enviar: " + e.message);
         else console.error("Erro ao enviar (forceUploadLocalConfig):", e);
+    } finally {
+        window._forceUploadBusy = false;
+        if (window._forceUploadAgain) {
+            window._forceUploadAgain = false;
+            setTimeout(function() {
+                if (typeof window.forceUploadLocalConfig === "function") window.forceUploadLocalConfig(true);
+            }, 1200);
+        }
     }
 };
 
@@ -44566,16 +44686,35 @@ window.syncAllNotesToFirebase = async function() {
 
 // --- INTERCEPTADOR PARA FIREBASE ---
 // Captura as chamadas de localStorage.setItem e envia pro Firebase
-const _originalSetItem = window._nativeLocalStorageSetItem || localStorage.setItem;
+const _nativeSetItem = window._nativeLocalStorageSetItem || localStorage.setItem;
+function _originalSetItem(key, value) {
+    const cachePesado = key === "crm_moura_notes" || key === "crm_moura_jud_notes" || key === "crm_api_consumo_v1";
+    try {
+        _nativeSetItem.call(localStorage, key, value);
+        return true;
+    } catch (e) {
+        window._storageQuotaFull = true;
+        if (!window._crmStorageFreed && typeof window.ensureCrmStorageRoom === "function") {
+            window._crmStorageFreed = true;
+            window.ensureCrmStorageRoom();
+            if (!cachePesado) {
+                try {
+                    _nativeSetItem.call(localStorage, key, value);
+                    window._storageQuotaFull = false;
+                    return true;
+                } catch (e2) {}
+            }
+        }
+        if (!window._crmStorageWarned) {
+            window._crmStorageWarned = true;
+            console.warn("[storage] armazenamento local cheio; o sistema segue pela nuvem.", key);
+        }
+        return false;
+    }
+}
 window._originalSetItem = _originalSetItem;
 localStorage.setItem = function(key, value) {
-    try {
-    _originalSetItem.call(localStorage, key, value);
-    } catch (e) {
-      window._storageQuotaFull = true;
-      console.warn("[storage] setItem falhou", key, e && e.name);
-      return;
-    }
+    if (!_originalSetItem(key, value)) return;
     
     // Tratamento exclusivo de anotações (mantém a lógica anterior)
     if (key === "crm_moura_notes" && window.saveNotesToFirebase && !window._isFirebaseSyncing && !window._isNotesHydrating) {

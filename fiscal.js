@@ -589,13 +589,12 @@ const FiscalApp = {
   },
 
   sincronizarPlano(cfg) {
-    localStorage.setItem("crm_plano_impostos", JSON.stringify(cfg));
+    const json = JSON.stringify(cfg && typeof cfg === "object" ? cfg : {});
     const PF = window.PlanoFinanceiroApp;
-    if (PF) {
-      PF.taxConfig = cfg;
-      if (document.getElementById("pf-table-wrapper") && typeof PF.renderTable === "function") {
-        try { PF.renderTable(); } catch (e) {}
-      }
+    if (PF) PF.taxConfig = cfg && typeof cfg === "object" ? cfg : {};
+    try { localStorage.setItem("crm_plano_impostos", json); } catch (e) {}
+    if (document.getElementById("pf-table-wrapper") && PF && typeof PF.renderTable === "function") {
+      try { PF.renderTable(); } catch (e) {}
     }
     window._planoImpostosWriting = true;
     const done = () => { window._planoImpostosWriting = false; };

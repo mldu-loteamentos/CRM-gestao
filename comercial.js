@@ -928,19 +928,55 @@ const ComercialApp = {
     if (window.lucide) window.lucide.createIcons();
   },
 
+  idsEstoqueLocal() {
+    const unidades = new Set();
+    const vendas = new Set();
+    const marcar = (lista) => {
+      (lista || []).forEach((u) => {
+        const id = String((u && (u.enterpriseId || u.costCenterId)) || "");
+        if (!id) return;
+        unidades.add(id);
+        const stock = String(u.commercialStock || "").toUpperCase();
+        if (stock === "V" || stock === "O" || u.contractId || u.contractNumber || u.quitado) vendas.add(id);
+      });
+    };
+    const E = window.EstoqueComercialApp;
+    marcar(E && E.state && E.state.units);
+    try {
+      const raw = JSON.parse(localStorage.getItem("crm_estoque_posicao_v1") || "null");
+      marcar(raw && (raw.units || (raw.data && raw.data.units)));
+    } catch (e) {}
+    return { unidades, vendas };
+  },
+
+  prepararListaVel() {
+    if (this.state.velVendaIds && this.state.velVendaIds.size) return;
+    const local = this.idsEstoqueLocal();
+    if (local.vendas.size) {
+      this.state.velUnidadeIds = local.unidades;
+      this.state.velVendaIds = local.vendas;
+      this.state.velListaAmpla = false;
+      return;
+    }
+    if (local.unidades.size) {
+      this.state.velUnidadeIds = local.unidades;
+      this.state.velVendaIds = local.unidades;
+      this.state.velListaAmpla = true;
+      return;
+    }
+    const base = this.empreendimentosBase().map((c) => String(c.id));
+    if (!base.length) return;
+    this.state.velUnidadeIds = new Set(base);
+    this.state.velVendaIds = new Set(base);
+    this.state.velListaAmpla = true;
+  },
+
   abrirVelocidade() {
-    this.renderVelocidade();
-    if (!this.state.velUnidadeIds) {
-      this.carregarIdsUnidade();
-      return;
-    }
-    if (!this.state.velVendaIds) {
-      this.carregarIdsVenda();
-      return;
-    }
+    this.prepararListaVel();
     this.aplicarEmpDoResumo();
     this.renderVelocidade();
     if (this.state.velEmp) this.carregarVelocidade(this.state.velEmp);
+    this.carregarIdsUnidade();
   },
 
   aplicarEmpDoResumo() {
@@ -1000,21 +1036,39 @@ const ComercialApp = {
       const raw = JSON.parse(localStorage.getItem('crm_estoque_posicao_v1') || 'null');
       porUnidade(raw && (raw.units || (raw.data && raw.data.units)));
     } catch (e) {}
+    const vendas = new Set();
     const fc = window.firebaseCollections;
     if (window.firebaseDb && fc && fc.getDocs) {
       try {
         const snap = await fc.getDocs(fc.collection(window.firebaseDb, 'estoque_comercial'));
         snap.forEach((d) => {
           const data = d.data() || {};
-          if (d.id !== '_meta' && data.enterpriseId && Array.isArray(data.units) && data.units.length) ids.add(String(data.enterpriseId));
+          if (d.id === '_meta' || !data.enterpriseId || !Array.isArray(data.units) || !data.units.length) return;
+          const id = String(data.enterpriseId);
+          ids.add(id);
+          const teveVenda = data.units.some((u) => {
+            const stock = String((u && u.commercialStock) || '').toUpperCase();
+            return stock === 'V' || stock === 'O' || !!(u && (u.contractId || u.contractNumber || u.quitado));
+          });
+          if (teveVenda) vendas.add(id);
         });
       } catch (e) {}
     }
     this._velUnidadeLoading = false;
-    this.state.velUnidadeIds = ids;
-    if (this.state.velEmp && !ids.has(String(this.state.velEmp))) this.state.velEmp = '';
-    if (this.state.aba === 'velocidade') this.renderVelocidade();
-    this.carregarIdsVenda();
+    if (!this.state.velUnidadeIds || !this.state.velUnidadeIds.size) this.state.velUnidadeIds = ids;
+    else ids.forEach((id) => this.state.velUnidadeIds.add(id));
+    if (vendas.size) {
+      if (this.state.velEmp) vendas.add(String(this.state.velEmp));
+      if (this.state.velListaAmpla || !this.state.velVendaIds || !this.state.velVendaIds.size) this.state.velVendaIds = vendas;
+      else vendas.forEach((id) => this.state.velVendaIds.add(id));
+      this.state.velListaAmpla = false;
+    } else if (!this.state.velVendaIds || !this.state.velVendaIds.size) {
+      this.state.velVendaIds = this.state.velUnidadeIds;
+    }
+    if (this.state.aba !== 'velocidade') return;
+    this.aplicarEmpDoResumo();
+    this.renderVelocidade();
+    if (this.state.velEmp) this.carregarVelocidade(this.state.velEmp);
   },
 
   toggleAnoVel(ano) {
@@ -1139,7 +1193,7 @@ const ComercialApp = {
       if (!ja.atrasoPronto) this.carregarAtraso(id, this.state.velGen);
       return;
     }
-    this.state.velCache[id] = { pronto: false, status: 'Lendo lotes e contratos…', unidades: [], contratos: [] };
+    this.state.velCache[id] = { pronto: false, unidades: [], contratos: [] };
     this.renderVelocidade();
     try {
       const unidades = await this.paginarSienge('/units?enterpriseId=' + encodeURIComponent(id) + '&additionalData=NONE');
@@ -1359,33 +1413,37 @@ const ComercialApp = {
     const tem = Number.isFinite(valor);
     const max = !tem ? 100 : (valor <= 100 ? 100 : Math.ceil(valor / 50) * 50);
     const t = tem ? Math.max(0, Math.min(1, valor / max)) : 0;
-    const cx = 110;
+    const cx = 120;
     const cy = 108;
-    const r = 78;
-    const pt = (p) => {
+    const r = 72;
+    const pt = (p, rad) => {
       const a = Math.PI * (1 - p);
-      return [cx + r * Math.cos(a), cy - r * Math.sin(a)];
+      const rr = rad == null ? r : rad;
+      return [cx + rr * Math.cos(a), cy - rr * Math.sin(a)];
     };
     const arco = (ate) => {
       const ini = pt(0);
       const fim = pt(Math.max(0.001, ate));
       return 'M ' + ini[0].toFixed(1) + ' ' + ini[1].toFixed(1) + ' A ' + r + ' ' + r + ' 0 0 1 ' + fim[0].toFixed(1) + ' ' + fim[1].toFixed(1);
     };
-    const ponta = pt(t);
+    const ponta = pt(t, r - 16);
     const cor = tem && valor > 100 ? '#f37021' : '#105436';
-    const marcas = [0, max / 2, max].map((n) => {
-      const p = pt(n / max);
-      return '<text x="' + p[0].toFixed(1) + '" y="' + (p[1] - 8).toFixed(1) + '" text-anchor="middle" font-size="9" fill="#94a3b8">' + Math.round(n) + '</text>';
+    const marcas = [0, 0.5, 1].map((p) => {
+      const n = Math.round(p * max);
+      const loc = pt(p, r + 18);
+      const anchor = p === 0 ? 'end' : (p === 1 ? 'start' : 'middle');
+      const dy = p === 0.5 ? -4 : 4;
+      return '<text x="' + loc[0].toFixed(1) + '" y="' + (loc[1] + dy).toFixed(1) + '" text-anchor="' + anchor + '" font-size="11" fill="#94a3b8">' + n + '</text>';
     }).join('');
     return `<div class="com-vel-gauge">
-      <svg viewBox="0 0 220 128" aria-hidden="true">
-        <path d="${arco(1)}" fill="none" stroke="#e2e8f0" stroke-width="14" stroke-linecap="round"></path>
+      <svg viewBox="0 0 240 158" role="img" aria-label="${this.esc(this.fmtPctVel(tem ? valor : null))}">
+        <path d="${arco(1)}" fill="none" stroke="#e7efe9" stroke-width="14" stroke-linecap="round"></path>
         <path d="${arco(t)}" fill="none" stroke="${cor}" stroke-width="14" stroke-linecap="round"></path>
         ${marcas}
-        <line x1="${cx}" y1="${cy}" x2="${ponta[0].toFixed(1)}" y2="${ponta[1].toFixed(1)}" stroke="#0f172a" stroke-width="3" stroke-linecap="round"></line>
-        <circle cx="${cx}" cy="${cy}" r="5" fill="#0f172a"></circle>
+        <line x1="${cx}" y1="${cy}" x2="${ponta[0].toFixed(1)}" y2="${ponta[1].toFixed(1)}" stroke="#1e293b" stroke-width="2.5" stroke-linecap="round"></line>
+        <circle cx="${cx}" cy="${cy}" r="4.5" fill="#1e293b"></circle>
+        <text x="${cx}" y="${cy + 30}" text-anchor="middle" font-size="22" font-weight="800" fill="${cor}">${this.esc(this.fmtPctVel(tem ? valor : null))}</text>
       </svg>
-      <strong style="color:${cor}">${this.fmtPctVel(tem ? valor : null)}</strong>
     </div>`;
   },
 
@@ -1416,7 +1474,7 @@ const ComercialApp = {
       nouns: {
         singular: 'empreendimento',
         plural: 'empreendimentos',
-        none: this.state.velVendaIds ? 'Nenhum empreendimento com venda' : 'Lendo empreendimentos…',
+        none: 'Nenhum empreendimento com venda',
         noMatch: 'Nenhum empreendimento com esse nome.'
       }
     }) : '';
@@ -1430,8 +1488,14 @@ const ComercialApp = {
         <div><span>Quitados</span><strong>${nPos(pos && pos.quitados)}</strong><small>posição de estoque</small></div>
         <div class="is-late"><span>Ativos inadimplentes</span><strong>${nPos(pos && pos.inadimplentes)}</strong><small>posição de estoque</small></div>
       </div>` : '';
+    const rastreio = `<div class="ml-load com-vel-load">
+        <div class="loading-spinner" aria-hidden="true"></div>
+        <div class="loading-status-text">Rastreando vendas e distratos</div>
+        <div class="ml-load-track"><div class="loading-progress-bar"></div></div>
+      </div>`;
     let miolo = '<p class="com-vel-nota">Escolha um empreendimento que já tem contrato de venda. A velocidade usa toda a história dele.</p>';
-    if (pack && !pack.pronto) miolo = `<p class="com-vel-status">${this.esc(pack.status || 'Carregando…')}</p>`;
+    if (!this.state.velVendaIds) miolo = rastreio;
+    else if (pack && !pack.pronto) miolo = rastreio;
     else if (pack && pack.erro) miolo = `<p class="com-vel-status">${this.esc(pack.erro)}</p>`;
     else if (pack && pack.pronto) miolo = this.htmlVelocidade(pack);
     root.innerHTML = `
@@ -1502,9 +1566,15 @@ const ComercialApp = {
           <p>A barra de cima é a quantidade de lotes. A de baixo é a quantidade de vendas. ${this.fmtPctVel(vezes)} significa que o mesmo lote entrou em mais de um contrato.</p>
           <div class="com-vel-vezes">
             ${this.gaugeVel(vezes)}
-            <div class="com-vel-vezes-lado">
-              <div class="com-vel-bloco"><span>Lotes</span><i><b style="width:${(m.lotes / Math.max(m.lotes, m.vendas, 1) * 100).toFixed(1)}%"></b></i><em>${this.fmtInt(m.lotes)}</em></div>
-              <div class="com-vel-bloco"><span>Vendas</span><i><b style="width:${(m.vendas / Math.max(m.lotes, m.vendas, 1) * 100).toFixed(1)}%"></b></i><em>${this.fmtInt(m.vendas)}</em></div>
+            <div class="com-vel-metros">
+              <div class="com-vel-metro">
+                <div class="com-vel-metro-top"><span>Lotes</span><strong>${this.fmtInt(m.lotes)}</strong></div>
+                <i><b style="width:${(m.lotes / Math.max(m.lotes, m.vendas, 1) * 100).toFixed(1)}%"></b></i>
+              </div>
+              <div class="com-vel-metro${m.vendas > m.lotes ? ' is-over' : ''}">
+                <div class="com-vel-metro-top"><span>Vendas</span><strong>${this.fmtInt(m.vendas)}</strong></div>
+                <i><b style="width:${(m.vendas / Math.max(m.lotes, m.vendas, 1) * 100).toFixed(1)}%"></b></i>
+              </div>
             </div>
           </div>
         </div>

@@ -1425,7 +1425,7 @@ const PrestacaoContasApp = {
         </div>
 
         ${this.error ? `<div class="pcx-alert is-error">${this.esc(this.error)}</div>` : ""}
-        ${this.rastreio ? `<div class="pcx-alert ${this.rastreio.erro ? "is-warn" : "is-info"}">${this.rastreio.erro ? "" : '<span class="pcx-spin"></span>'}<span id="pc-rastreio">${this.esc(this.rastreio.msg)}</span></div>` : ""}
+        ${this.rastreio && this.rastreio.erro ? `<div class="pcx-alert is-warn"><span>${this.esc(this.rastreio.msg)}</span></div>` : ""}
 
         <div class="ml-tabs pcx-tabs" role="tablist">
           ${tab("obra", "clipboard-check", "Validação", nFora(conf.receitas) + nFora(conf.despesas))}
@@ -2389,14 +2389,45 @@ const PrestacaoContasApp = {
     };
   },
 
-  graficoCarteiraHtml(grupos) {
+  loteTransferido(u) {
+    const code = String((u && u.commercialStock) || "").trim().toUpperCase();
+    if (code === "T") return true;
+    const est = window.EstoqueComercialApp;
+    const rot = est && typeof est.mapStock === "function" ? est.mapStock(code) : "";
+    return /transfer/i.test(String(rot || ""));
+  },
+
+  anelLotes(bills) {
+    const ativosIds = new Set();
+    const titulosAtivos = new Set();
+    (bills || []).forEach((b) => {
+      if ((Number(b.aberto) || 0) <= 0.009) return;
+      titulosAtivos.add(String(b.id));
+      (b.units || []).forEach((u) => {
+        if (u && u.id != null) ativosIds.add(String(u.id));
+      });
+    });
+    const grupos = {};
+    ((this.dash && this.dash.estoque) || []).forEach((u) => {
+      if (!u || this.loteTransferido(u)) return;
+      const obra = this.chaveObra(u.enterpriseId);
+      const g = grupos[obra] || (grupos[obra] = { obraNome: this.nomeObra(obra), total: 0, ativos: 0 });
+      g.total += 1;
+      const saldo = Number(u.outstandingBalance) > 0.009;
+      const noTitulo = ativosIds.has(String(u.id)) || (u.receivableBillId && titulosAtivos.has(String(u.receivableBillId)));
+      if (saldo || noTitulo) g.ativos += 1;
+    });
+    return Object.values(grupos).sort((a, b) => a.obraNome.localeCompare(b.obraNome, "pt-BR", { numeric: true }));
+  },
+
+  graficoCarteiraHtml(bills) {
     const cores = ["#105436", "#f37021", "#c2410c", "#14532d"];
-    const cards = grupos.map((g, i) => {
-      const ativos = g.rows.filter((r) => r.status === "Ativo").length;
-      const quitados = g.rows.length - ativos;
-      const total = g.rows.length;
+    const cards = this.anelLotes(bills).map((g, i) => {
+      const ativos = g.ativos;
+      const demais = g.total - ativos;
+      const total = g.total;
       const pAt = total ? (ativos / total) * 100 : 0;
-      const pQ = total ? Math.round((quitados / total) * 100) : 0;
+      const pQ = total ? Math.round((demais / total) * 100) : 0;
       const pA = total ? Math.round(pAt) : 0;
       const cor = cores[i % cores.length];
       return `<article class="pcx-don">
@@ -2404,17 +2435,17 @@ const PrestacaoContasApp = {
         <div class="pcx-don-anel">
           <div class="pcx-don-ring" style="background:conic-gradient(${cor} 0 ${pAt.toFixed(2)}%, #c5cdd6 ${pAt.toFixed(2)}% 100%)"></div>
           ${ativos ? `<span class="pcx-don-tag is-ativo">${ativos} (${pA}%)</span>` : ""}
-          ${quitados ? `<span class="pcx-don-tag is-quit">${quitados} (${pQ}%)</span>` : ""}
-          <div class="pcx-don-hole"><strong>${total}</strong><span>Contratos</span></div>
+          ${demais ? `<span class="pcx-don-tag is-quit">${demais} (${pQ}%)</span>` : ""}
+          <div class="pcx-don-hole"><strong>${total}</strong><span>Lotes</span></div>
         </div>
         <div class="pcx-don-leg">
-          <span><i style="background:#c5cdd6"></i>Quitados ${quitados} (${pQ}%)</span>
-          <span><i style="background:${cor}"></i>Ativos ${ativos} (${pA}%)</span>
+          <span><i style="background:#c5cdd6"></i>Sem parcela a pagar ${demais} (${pQ}%)</span>
+          <span><i style="background:${cor}"></i>Carteira ativa ${ativos} (${pA}%)</span>
         </div>
       </article>`;
     }).join("");
     if (!cards) return "";
-    return `<div class="pcx-don-titulo">Contratos Ativos e Quitados</div><div class="pcx-dons">${cards}</div>`;
+    return `<div class="pcx-don-titulo">Lotes vendáveis</div><div class="pcx-dons">${cards}</div>`;
   },
 
   graficoTempoHtml() {
@@ -2476,9 +2507,9 @@ const PrestacaoContasApp = {
         { rot: "Em aberto", val: this.fmt(aVencer), nota: "Saldo que ainda não venceu" },
         { rot: "Vencido", val: this.fmt(vencido), nota: "Saldo com vencimento passado", cls: "is-out" }
       ])}
-      <p class="pcx-ajuda">Posição de hoje dos contratos de venda. O anel separa ativos e quitados por obra. Recebido no mês usa a data da baixa dentro do mês de referência. Em aberto é o saldo a vencer; vencido é o saldo atrasado.</p>
+      <p class="pcx-ajuda">Posição de hoje dos contratos de venda. O anel conta os lotes de cada obra, menos os transferidos. Os demais status entram como vendáveis. Carteira ativa é o lote vendável que ainda tem parcela a pagar. Recebido no mês usa a data da baixa dentro do mês de referência. Em aberto é o saldo a vencer; vencido é o saldo atrasado.</p>
       ${this.graficoTempoHtml()}
-      ${this.graficoCarteiraHtml(grupos)}
+      ${this.graficoCarteiraHtml(lista0)}
       ${tabelas || `<div class="pcx-alert is-info">Nenhum título de venda nestes centros.</div>`}
     `;
   },

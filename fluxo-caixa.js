@@ -62,8 +62,7 @@ const FluxoCaixaApp = {
     this.render();
     this.ensureCategories();
     if (window.SiengeApiService && typeof SiengeApiService.prepararBaseMovimentosCaixa === "function") {
-      const ids = (this.selectedCompanyIds || []).slice();
-      setTimeout(() => SiengeApiService.prepararBaseMovimentosCaixa(ids), 1200);
+      setTimeout(() => SiengeApiService.prepararBaseMovimentosCaixa(), 1200);
     }
     if (!window._fcEmpDropBound) {
       window._fcEmpDropBound = true;
@@ -930,6 +929,8 @@ const FluxoCaixaApp = {
       this.error = err && err.message ? err.message : "Falha ao consultar a API de caixa e banco.";
       this.rows = [];
       this.compMap = null;
+      this.compAccountIndex = null;
+      this.compNodeItems = null;
     } finally {
       this.loadedCompanyIds = this.selectedCompanyIds.map(String);
       this.loadedStart = this.startDate;
@@ -1002,6 +1003,35 @@ const FluxoCaixaApp = {
     this.paintConsultDirty();
   },
 
+  baseCaixaAtualizada(companyId, ym) {
+    const comp = this.periodoComparado();
+    if (!comp || this.loading) return;
+    const ini = String(comp.start || "").slice(0, 7);
+    const fim = String(comp.end || "").slice(0, 7);
+    if (!ym || ym < ini || ym > fim) return;
+    if (this.selectedCompanyIds.map(String).indexOf(String(companyId)) < 0) return;
+    if (this._compBaseTimer) clearTimeout(this._compBaseTimer);
+    this._compBaseTimer = setTimeout(() => {
+      this._compBaseTimer = null;
+      this.atualizarComparativoDaBase();
+    }, 800);
+  },
+
+  async atualizarComparativoDaBase() {
+    if (this.loading || this._compRefresh) return;
+    const comp = this.periodoComparado();
+    if (!comp || !(this.rows || []).length) return;
+    this._compRefresh = true;
+    try {
+      const anterior = await this.buscarMovimentos(comp.start, comp.end);
+      this.compMovements = anterior;
+      this.compMonths = this.monthKeys(comp.start, comp.end);
+      this.montarComparacao(this.selectedCompanyIds.map(String));
+      this.render();
+    } catch (e) {}
+    this._compRefresh = false;
+  },
+
   rowKey(r) {
     if (r.isCostCenter) return `c:${this.normAccountKey(r.parentAccountId) || r.parentAccountId}:${r.ccId}`;
     if (r.isAccount) return `a:${this.normAccountKey(r.id) || r.id}`;
@@ -1011,6 +1041,8 @@ const FluxoCaixaApp = {
   /* Monta a mesma árvore com os movimentos do período comparado e guarda o total de cada linha. */
   montarComparacao(ids) {
     this.compMap = null;
+    this.compAccountIndex = null;
+    this.compNodeItems = null;
     if (!(this.compMonths || []).length) return;
     const guarda = {
       months: this.months,
@@ -1025,6 +1057,8 @@ const FluxoCaixaApp = {
     try {
       this.months = this.compMonths.slice();
       this.build(this.alocar(this.compMovements, ids || this.gridCompanyIds()));
+      this.compAccountIndex = this.accountIndex;
+      this.compNodeItems = this.nodeItems;
       (this.rows || []).forEach(r => { map[this.rowKey(r)] = Number(r.total) || 0; });
     } finally {
       Object.assign(this, guarda);
@@ -1319,30 +1353,42 @@ const FluxoCaixaApp = {
               </select>
             </label>
             ${this.companyDropHtml()}
-            <button type="button" class="btn ${this.consolidacaoAtiva ? "btn-primary" : "btn-outline"} fc-cons-btn" onclick="FluxoCaixaApp.aplicarConsolidacao()" ${this.loading ? "disabled" : ""} title="Empresas marcadas como consolidação padrão, pelo percentual da Moura Leite">
-              Consolidação padrão
-            </button>
-            <button type="button" class="btn btn-primary fc-consult-btn${this.filtersDirty() ? " is-dirty" : ""}" onclick="FluxoCaixaApp.load()" ${this.loading ? "disabled" : ""} title="${this.filtersDirty() ? "A seleção ou o período mudou. Consulte de novo para atualizar a grade." : ""}">
-              Consultar
-            </button>
+            <div class="fc-filter-actions">
+              <button type="button" class="btn ${this.consolidacaoAtiva ? "btn-primary" : "btn-outline"} fc-cons-btn" onclick="FluxoCaixaApp.aplicarConsolidacao()" ${this.loading ? "disabled" : ""} title="Empresas marcadas como consolidação padrão, pelo percentual da Moura Leite">
+                Consolidação padrão
+              </button>
+              <button type="button" class="btn btn-primary fc-consult-btn${this.filtersDirty() ? " is-dirty" : ""}" onclick="FluxoCaixaApp.load()" ${this.loading ? "disabled" : ""} title="${this.filtersDirty() ? "A seleção ou o período mudou. Consulte de novo para atualizar a grade." : ""}">
+                Consultar
+              </button>
+            </div>
           </div>
           <p id="fc-base-caixa" class="fc-stale" style="${(window.SiengeApiService && SiengeApiService._baseCaixaStatus) ? "" : "display:none"}">${this.esc((window.SiengeApiService && SiengeApiService._baseCaixaStatus) || "")}</p>
           ${this.error ? `<div class="fc-error">${this.esc(this.error)}</div>` : ""}
           <div class="fc-board">
             <div class="fc-tree-pane">
               <div class="fc-tree-toolbar">
-                <strong>Estrutura DFC Padrão</strong>
-                <div class="fc-tree-actions">
+                <div class="fc-tool-group">
+                  <span class="fc-tool-label">Valores</span>
                   ${this.escalaHtml()}
+                </div>
+                <div class="fc-tool-group">
+                  <span class="fc-tool-label">Colunas</span>
                   <div class="fc-agrupa" role="group" aria-label="Agrupar colunas do período">
                     ${this.agrupaBotoesHtml()}
                   </div>
-                  <button type="button" class="fc-fold fc-fold-open" onclick="FluxoCaixaApp.expandAll()" ${canExpand ? "" : "disabled"} title="Expandir todos os níveis">
-                    <i data-lucide="chevrons-down"></i> Expandir todos
-                  </button>
-                  <button type="button" class="fc-fold fc-fold-shut" onclick="FluxoCaixaApp.collapseAll()" ${canCollapse ? "" : "disabled"} title="Recolher todos os níveis">
-                    <i data-lucide="chevrons-up"></i> Recolher todos
-                  </button>
+                </div>
+                <div class="fc-tool-group">
+                  <span class="fc-tool-label">Níveis</span>
+                  <div class="fc-tool-row">
+                    <button type="button" class="fc-fold fc-fold-open" onclick="FluxoCaixaApp.expandAll()" ${canExpand ? "" : "disabled"} title="Expandir todos os níveis">
+                      <i data-lucide="chevrons-down"></i> Expandir todos
+                    </button>
+                    <button type="button" class="fc-fold fc-fold-shut" onclick="FluxoCaixaApp.collapseAll()" ${canCollapse ? "" : "disabled"} title="Recolher todos os níveis">
+                      <i data-lucide="chevrons-up"></i> Recolher todos
+                    </button>
+                  </div>
+                </div>
+                <div class="fc-tool-group fc-tool-end">
                   <button type="button" class="btn fc-insights-btn" onclick="FluxoCaixaApp.gerarInsights()" ${(this.rows || []).length && !this.loading ? "" : "disabled"} title="Variações, receitas, serviços, aplicações e saídas">
                     <i data-lucide="lightbulb" style="width:14px;height:14px;"></i> Gerar insights
                   </button>
@@ -1645,12 +1691,43 @@ const FluxoCaixaApp = {
     return (Number(n) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
   },
 
+  cliqueComparado(r) {
+    const drillId = r.isCostCenter ? (r.parentAccountId || "") : (r.id || "");
+    const venda = this.ehVendaImoveis(r);
+    const canDrill = !venda && !!(drillId && (r.isAccount || r.isCostCenter || r.type === "resultado" || r.type === "total_n1" || r.type === "formula"));
+    const safeId = String(drillId).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    const ccArg = r.isCostCenter ? `'${String(r.ccId || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'` : "''";
+    const isAccFlag = r.isAccount || r.isCostCenter;
+    const ids = this.gridCompanyIds();
+    const co = ids.length === 1 ? `'${String(ids[0]).replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'` : "''";
+    const mo = (this.compMonths || []).join(",");
+    if (canDrill) {
+      return {
+        click: `onclick="FluxoCaixaApp.openDrill('${safeId}', ${isAccFlag ? "true" : "false"}, ${r.isCostCenter ? ccArg : "''"}, ${co}, '${mo}', true)"`,
+        tip: "Ver lançamentos desta célula"
+      };
+    }
+    if (venda && !r.isCostCenter) {
+      const toggleId = r.toggleId || r.id;
+      const safeToggle = String(toggleId || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+      return {
+        click: `onclick="FluxoCaixaApp.abrirCentrosVenda('${safeToggle}', ${r.isAccount ? "true" : "false"})"`,
+        tip: "Abrir os centros de custo"
+      };
+    }
+    return { click: "", tip: "" };
+  },
+
   celulaComparacao(r, col) {
     const edge = col.edge ? " fc-co-edge" : "";
     if (col.type === "cmp") {
       const v = this.valorComparado(r);
-      const dica = this.escala !== "nominal" ? ` title="${this.fmtCheio(v)}"` : "";
-      return `<td class="${this.valClass(v, true)} fc-cmp${edge}"${dica}>${this.fmt(v)}</td>`;
+      const drill = this.cliqueComparado(r);
+      const partes = [];
+      if (this.escala !== "nominal") partes.push(this.fmtCheio(v));
+      if (drill.tip) partes.push(drill.tip);
+      const dica = partes.length ? ` title="${this.esc(partes.join(" · "))}"` : "";
+      return `<td class="${this.valClass(v, true)} fc-cmp${edge}${drill.click ? " is-cell" : ""}" ${drill.click}${dica}>${this.fmt(v)}</td>`;
     }
     const delta = (Number(r.total) || 0) - this.valorComparado(r);
     const tom = Math.abs(delta) < 0.005 ? "is-flat" : (delta > 0 ? "is-up" : "is-down");
@@ -1669,26 +1746,30 @@ const FluxoCaixaApp = {
     return `<td class="fc-num is-strong fc-var ${tipo}${edge}"${dica}><span class="fc-var-pill ${tom}">${seta ? `<b>${seta}</b>` : ""}${texto}</span></td>`;
   },
 
-  collectNodeItems(nodeId) {
+  collectNodeItems(nodeId, store) {
+    const bag = store || this.nodeItems;
     const visao = this.visao();
     const groups = visao.groups || [];
     const byId = Object.fromEntries(groups.map(g => [g.id, g]));
     const items = [];
     const walk = (id) => {
-      const direct = this.nodeItems[id] || [];
+      const direct = bag[id] || [];
       direct.forEach(it => items.push(it));
       groups.filter(g => g.parentId === id).forEach(ch => walk(ch.id));
     };
-    if (byId[nodeId] || this.nodeItems[nodeId]) walk(nodeId);
+    if (byId[nodeId] || bag[nodeId]) walk(nodeId);
     return items;
   },
 
   resolveDrill(id, isAccount, ccId) {
     const sid = String(id || "");
     const nk = this.normAccountKey(sid);
+    const comparado = !!this._drillComparado;
+    const accIndex = comparado ? (this.compAccountIndex || {}) : this.accountIndex;
+    const nodeStore = comparado ? (this.compNodeItems || {}) : this.nodeItems;
     let info;
     if (isAccount) {
-      const acc = this.accountIndex[sid] || this.accountIndex[nk] || null;
+      const acc = accIndex[sid] || accIndex[nk] || null;
       if (!acc) info = { title: sid, subtitle: "Conta", items: [], total: 0 };
       else info = {
         title: `${acc.displayId || acc.id} ${acc.name || ""}`.trim(),
@@ -1698,7 +1779,7 @@ const FluxoCaixaApp = {
       };
     } else {
       const row = (this.rows || []).find(r => !r.isAccount && !r.isCostCenter && String(r.id) === sid);
-      const items = this.collectNodeItems(sid);
+      const items = this.collectNodeItems(sid, nodeStore);
       const total = items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
       info = {
         title: (row && row.name) || sid,
@@ -1825,7 +1906,7 @@ const FluxoCaixaApp = {
     this.drillRateioAberto = !this.drillRateioAberto;
     const args = this._drillReplay;
     if (!args) return;
-    this.openDrill(args[0], args[1], args[2], args[3], args[4]);
+    this.openDrill(args[0], args[1], args[2], args[3], args[4], args[5]);
   },
 
   exportDrillExcel() {
@@ -1919,8 +2000,9 @@ const FluxoCaixaApp = {
     }
   },
 
-  openDrill(id, isAccount, ccId, companyId, month) {
-    this._drillReplay = [id, isAccount, ccId, companyId, month];
+  openDrill(id, isAccount, ccId, companyId, month, comparado) {
+    this._drillComparado = !!comparado;
+    this._drillReplay = [id, isAccount, ccId, companyId, month, !!comparado];
     const prevDrill = document.querySelector("#fc-drill-modal .crm-scroll-table");
     const keepDrill = prevDrill ? prevDrill.scrollTop : 0;
     const tree = document.querySelector("#fluxo-caixa-root .fc-tree-scroll");
@@ -1978,16 +2060,19 @@ const FluxoCaixaApp = {
     );
 
     this._drillItems = items;
+    const compPeriodo = this._drillComparado ? this.periodoComparado() : null;
+    const periodoIni = compPeriodo && compPeriodo.start ? compPeriodo.start : this.startDate;
+    const periodoFim = compPeriodo && compPeriodo.end ? compPeriodo.end : this.endDate;
     this._drillExport = {
       items,
       sum,
       lineTotal: info.total,
       title: info.title,
       subtitle: info.subtitle,
-      startDate: this.startDate,
-      endDate: this.endDate,
+      startDate: periodoIni,
+      endDate: periodoFim,
       sheetName: "Lancamentos",
-      fileBase: `dfc_${info.title || "conta"}_${this.startDate}_${this.endDate}`
+      fileBase: `dfc_${info.title || "conta"}_${periodoIni}_${periodoFim}`
     };
 
     const rateioOn = !!this.drillRateioAberto;
