@@ -2553,14 +2553,24 @@ window.computeLateCharges = function(baseVal, diasAtraso, taxaMultiplier) {
 };
 
 /** Administrador e operador de cobrança terceirizado negociam honorários no boleto. */
+window.crmUsuarioEhTerceirizada = function() {
+  const u = (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo())
+    || (typeof AppState !== "undefined" && AppState.currentUser)
+    || (window.AppState && window.AppState.currentUser)
+    || null;
+  return !!(u && typeof window.isOperadorCobrancaTerceirizadoProfile === "function"
+    && window.isOperadorCobrancaTerceirizadoProfile(u.profile_name));
+};
+
 window.userCanSetHonorarios = function() {
-  const u = (typeof AppState !== "undefined" && AppState.currentUser)
+  const u = (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo())
+    || (typeof AppState !== "undefined" && AppState.currentUser)
     || (window.AppState && window.AppState.currentUser)
     || null;
   if (!u) return false;
-  if (typeof window.isCrmAdministrator === "function" && window.isCrmAdministrator(u)) return true;
   if (typeof window.isOperadorCobrancaTerceirizadoProfile === "function"
     && window.isOperadorCobrancaTerceirizadoProfile(u.profile_name)) return true;
+  if (typeof window.isCrmAdministrator === "function" && window.isCrmAdministrator(u)) return true;
   return false;
 };
 
@@ -2662,7 +2672,9 @@ window.reprocessInstallmentRows = function(instIds, dueDateStr) {
 
 /** Terceirizada só isenta multa e juros com honorários zerados. */
 window.syncTaxaLockForHonorarios = function() {
-  const u = (typeof AppState !== "undefined" && AppState.currentUser) || null;
+  const u = (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo())
+    || (typeof AppState !== "undefined" && AppState.currentUser)
+    || null;
   const isAdmin = !!(u && typeof window.isCrmAdministrator === "function" && window.isCrmAdministrator(u));
   const isTerc = !!(u && !isAdmin && typeof window.isOperadorCobrancaTerceirizadoProfile === "function"
     && window.isOperadorCobrancaTerceirizadoProfile(u.profile_name));
@@ -5965,6 +5977,7 @@ window.crmAtualizarTelasDoAcesso = function() {
     try { window.DashboardInadimplencia.render(); } catch (e) {}
   }
   if (typeof window.syncQuitacaoAdvogadoVista === "function") window.syncQuitacaoAdvogadoVista();
+  if (typeof window.applyFichaPerfilVista === "function") window.applyFichaPerfilVista(true);
 };
 
 window.crmEncerrarTesteConta = function() {
@@ -12182,6 +12195,7 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
     const btn = document.getElementById(id);
     if (btn) btn.style.display = isAdvogado ? 'none' : '';
   });
+  if (typeof window.applyFichaPerfilVista === "function") window.applyFichaPerfilVista(false);
   if (typeof window.syncQuitacaoAdvogadoVista === "function") window.syncQuitacaoAdvogadoVista();
   
   // Abas judiciais: menu Sub Judice, advogado, ou contrato/cliente já sub judice (ex.: fila de cobrança)
@@ -30536,6 +30550,14 @@ window.shortOperatorName = function(name) {
   return cap(parts[0]) + " " + cap(parts[parts.length - 1]);
 };
 
+window.nexHistoryLoadingHtml = function() {
+  return `<div class="ml-load">
+    <div class="loading-spinner" aria-hidden="true"></div>
+    <div class="loading-status-text">Procurando NEX</div>
+    <div class="ml-load-track"><div class="loading-progress-bar" style="width:18%"></div></div>
+  </div>`;
+};
+
 window.renderNexHistory = async function() {
   const root = document.getElementById("nex-history-root");
   if (!root) return;
@@ -30546,7 +30568,11 @@ window.renderNexHistory = async function() {
     window.syncCecButton([]);
     return;
   }
+  window._nexHistoryRenderSeq = (window._nexHistoryRenderSeq || 0) + 1;
+  const seq = window._nexHistoryRenderSeq;
+  root.innerHTML = window.nexHistoryLoadingHtml();
   const items = await window.loadNexHistory(customerId, saleId);
+  if (seq !== window._nexHistoryRenderSeq) return;
   const tituloAtual = AppState.currentReceivableBillId || AppState.selectedTitulo || saleId;
   window.syncCecButton(items);
   if (!items.length) {
@@ -31400,7 +31426,10 @@ window.nexLetterForClient = function(client) {
 
 window.filaClientFromKey = function(key) {
   const want = String(key || "");
-  return (window.clientList || []).find(c => c && String(c.customerId) + "-" + String(c.saleId) === want) || null;
+  const fromFila = (window.clientList || []).find(c => c && String(c.customerId) + "-" + String(c.saleId) === want);
+  if (fromFila) return fromFila;
+  const bag = window._relSignalClients || {};
+  return bag[want] || null;
 };
 
 window.filaClientSignalKeys = function(client) {
@@ -31434,26 +31463,30 @@ window.filaLookupSignals = function(client) {
   return { pending: pending, construction: construction, ready: !!(idx && idx.ready) };
 };
 
-window.filaSignalHtml = function(client) {
-  const letter = window.nexLetterForClient(client);
+window.filaHouseSignalHtml = function(client) {
   const sig = window.filaLookupSignals(client);
   const photo = (sig.construction && (sig.construction.fotoFrente || sig.construction.fileUrl))
     || (sig.pending && sig.pending.fotoFrente)
     || "";
-  const showHouse = !!(sig.pending || sig.construction);
+  if (!(sig.pending || sig.construction)) return "";
   const houseColor = photo ? "#105436" : "#c2410c";
-  const house = showHouse
-    ? `<span class="fila-signal" data-kind="house" onmouseenter="window.showFilaSignalTip(event, this)" onmouseleave="window.hideFilaSignalTip()"><i data-lucide="house" style="width:14px;height:14px;color:${houseColor};"></i></span>`
-    : "";
+  return `<span class="fila-signal" data-kind="house" onmouseenter="window.showFilaSignalTip(event, this)" onmouseleave="window.hideFilaSignalTip()"><i data-lucide="house" style="width:14px;height:14px;color:${houseColor};"></i></span>`;
+};
+
+window.filaSignalHtml = function(client) {
+  const letter = window.nexLetterForClient(client);
+  const house = window.filaHouseSignalHtml(client);
   const mailColor = letter ? "#105436" : "#cbd5e1";
   return `<span class="fila-signal" data-kind="mail" onmouseenter="window.showFilaSignalTip(event, this)" onmouseleave="window.hideFilaSignalTip()"><i data-lucide="mail" style="width:14px;height:14px;color:${mailColor};"></i></span>${house}`;
 };
 
 window.paintFilaSignalCells = function() {
-  document.querySelectorAll("#defaulters-table-body td.fila-signal-cell").forEach((td) => {
+  document.querySelectorAll("td.fila-signal-cell").forEach((td) => {
     const client = window.filaClientFromKey(td.getAttribute("data-fila-key"));
     if (!client) return;
-    td.innerHTML = window.filaSignalHtml(client);
+    td.innerHTML = td.getAttribute("data-signal") === "house"
+      ? window.filaHouseSignalHtml(client)
+      : window.filaSignalHtml(client);
   });
   if (window.lucide) lucide.createIcons();
 };
@@ -40183,7 +40216,7 @@ window.searchRelacionamento = async function() {
   
   if (customerCard) customerCard.style.display = 'none';
   if (resultsCard) resultsCard.style.display = 'none';
-  if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:40px; color:var(--color-text-muted);">
+  if (tbody) tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:40px; color:var(--color-text-muted);">
     <div style="display:flex; flex-direction:column; align-items:center; gap:12px;">
       <div class="loading-spinner" style="width:32px; height:32px; border:3px solid rgba(16,84,54,0.15); border-top-color:var(--color-primary); border-radius:50%; animation:spin 0.8s linear infinite; margin: 0 auto;"></div>
       <span>Buscando histórico financeiro detalhado do cliente...</span>
@@ -40394,13 +40427,13 @@ window.searchRelacionamento = async function() {
          }
       }
     } else {
-      if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 30px;">Preencha pelo menos um campo para buscar (Título, CPF/CNPJ ou Unidade).</td></tr>';
+      if (tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding: 30px;">Preencha pelo menos um campo para buscar (Título, CPF/CNPJ ou Unidade).</td></tr>';
       return;
     }
 
     customerId = String(customerId == null ? "" : customerId).trim();
     if (!/^\d+$/.test(customerId)) {
-      if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 30px;">Nenhum cliente ou contrato encontrado com os dados informados.</td></tr>';
+      if (tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding: 30px;">Nenhum cliente ou contrato encontrado com os dados informados.</td></tr>';
       return;
     }
 
@@ -41118,12 +41151,26 @@ window.searchRelacionamento = async function() {
     });
 
     if (results.length === 0) {
-      if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 30px;">O cliente não possui contratos registrados.</td></tr>';
+      if (tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding: 30px;">O cliente não possui contratos registrados.</td></tr>';
       return;
     }
 
+    window._relSignalClients = {};
     if (tbody) {
-      tbody.innerHTML = results.map((r, index) => `
+      tbody.innerHTML = results.map((r, index) => {
+        const ccId = String((r.unidade || "").split(" - ")[0] || "").trim();
+        const unitName = String(r.unidade || "").split(" - ").slice(1).join(" - ").trim();
+        const signalKey = "rel-" + String(r.contractId || r.titulo || index);
+        window._relSignalClients[signalKey] = {
+          saleId: r.contractId || r.titulo,
+          contractId: r.contractId,
+          contractNumber: r.contrato,
+          titulo: r.titulo,
+          billIds: r.titulo ? [String(r.titulo)] : [],
+          costCenterId: ccId,
+          unitName: unitName
+        };
+        return `
         <tr style="transition: background-color 0.2s;">
           <td style="border-bottom: 1px solid var(--color-border); padding: 10px 10px; color: #1e293b; font-weight: 700; font-size: 0.75rem; text-align: left; font-variant-numeric: tabular-nums;">
             <div style="display: flex; flex-direction: column; gap: 4px;">
@@ -41142,6 +41189,7 @@ window.searchRelacionamento = async function() {
           <td style="border-bottom: 1px solid var(--color-border); padding: 10px 10px; color: #1e293b; font-weight: 500; text-align: left; font-size: 0.75rem;">${r.empreendimento}</td>
           <td style="border-bottom: 1px solid var(--color-border); padding: 10px 10px; color: #1e293b; font-weight: 500; text-align: left; font-size: 0.75rem;">${r.unidade}</td>
           <td style="border-bottom: 1px solid var(--color-border); padding: 10px 10px; color: #1e293b; font-weight: 500; text-align: left; font-size: 0.75rem;">${r.dataVenda}</td>
+          <td class="fila-signal-cell" data-signal="house" data-fila-key="${signalKey}" title="Construção" style="border-bottom: 1px solid var(--color-border); text-align: center; padding: 10px 6px; overflow: visible;">${typeof window.filaHouseSignalHtml === "function" ? window.filaHouseSignalHtml(window._relSignalClients[signalKey]) : ""}</td>
           <td style="border-bottom: 1px solid var(--color-border); text-align: center; padding: 10px 10px;">${r.statusHTML.replace('font-size: 1rem;', 'font-size: 0.75rem;').replace('padding: 6px 14px;', 'padding: 4px 10px;')}</td>
           <td style="border-bottom: 1px solid var(--color-border); text-align: center; padding: 10px 10px; white-space: nowrap;">
             <button type="button" class="btn btn-primary btn-sm" onclick="openGestaoDocumentoMenu({customerId:'${r.openCustomerId || customerId}',contractId:'${r.contractId || ''}',titulo:'${String(r.titulo || '').replace(/'/g, "\\'")}',contractNumber:'${String(r.contrato || '').replace(/'/g, "\\'")}',customerName:'${String(r.nome || '').replace(/'/g, "\\'")}',unidade:'${String(r.unidade || '').replace(/'/g, "\\'")}',empreendimento:'${String(r.empreendimento || '').replace(/'/g, "\\'")}',status:'${String(r.statusText || '').replace(/'/g, "\\'")}'})" style="margin-right: 6px; padding: 6px 12px; font-size: 0.75rem; font-weight: 700; display: inline-flex; justify-content: center; align-items: center; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; border-radius: 6px;">
@@ -41155,19 +41203,21 @@ window.searchRelacionamento = async function() {
             </button>
           </td>
         </tr>
-      `).join('');
+      `;
+      }).join('');
       lucide.createIcons();
+      if (typeof window.ensureFilaSignalsIndex === "function") window.ensureFilaSignalsIndex();
     }
 
   } catch(e) {
     console.error(e);
-    if (tbody) tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--color-danger); padding: 30px;"><i data-lucide="alert-triangle" style="margin-bottom:10px;"></i><br>${e.message}</td></tr>`;
+    if (tbody) tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color: var(--color-danger); padding: 30px;"><i data-lucide="alert-triangle" style="margin-bottom:10px;"></i><br>${e.message}</td></tr>`;
     try { lucide.createIcons(); } catch(err) {}
   } finally {
     // Timeout catch-all to clear spinner if still present
     setTimeout(() => {
         if (tbody && (tbody.innerHTML.includes('lucide-spin') || tbody.innerHTML.includes('loading-spinner'))) {
-            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--color-danger); padding: 30px;"><i data-lucide="alert-triangle" style="margin-bottom:10px;"></i><br>A busca demorou muito e foi cancelada (Timeout).</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color: var(--color-danger); padding: 30px;"><i data-lucide="alert-triangle" style="margin-bottom:10px;"></i><br>A busca demorou muito e foi cancelada (Timeout).</td></tr>`;
             try { lucide.createIcons(); } catch(err) {}
         }
     }, 15000);
@@ -46029,6 +46079,41 @@ async function saveWhatsappAlerts() {
     localStorage.setItem("whatsapp_alerts_data", JSON.stringify(window.whatsappAlertsData));
 }
 
+window.applyFichaPerfilVista = function(refreshSim) {
+  const u = (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo())
+    || (typeof AppState !== "undefined" && AppState.currentUser)
+    || null;
+  const opType = u
+    ? ((typeof window.crmOperatorType === "function" && window.crmOperatorType(u)) || u.operator_type || "")
+    : "";
+  const isAdvogado = opType === "advogado"
+    || (u && typeof window.isAdvogadoCobrancaUser === "function" && window.isAdvogadoCobrancaUser(u));
+  const isInternoOuApoio = opType === "interno" || opType === "apoio_juridico";
+  const isTerc = typeof window.crmUsuarioEhTerceirizada === "function" && window.crmUsuarioEhTerceirizada();
+  const origin = (typeof window.activeAppTab !== "undefined" && window.activeAppTab) || sessionStorage.getItem("currentTab");
+  const isSubjudice = origin === "subjudice";
+  const show = function(el, on) { if (el) el.style.display = on ? "" : "none"; };
+  show(document.getElementById("btn-renegotiate-page"), !isAdvogado && !isTerc);
+  show(document.getElementById("btn-distrato-page"), !isAdvogado && !isTerc);
+  if (isAdvogado || isTerc) show(document.getElementById("btn-toggle-whatsapp-alert"), false);
+  const showInterno = !isAdvogado && !isTerc && (isInternoOuApoio || !isSubjudice);
+  show(document.querySelector('button[data-target="ficha-score"]'), showInterno);
+  show(document.getElementById("btn-informe-rendimentos"), showInterno);
+  if (!showInterno) {
+    const scorePane = document.getElementById("ficha-score");
+    if (scorePane && scorePane.classList.contains("active") && typeof switchFichaTab === "function") {
+      switchFichaTab("ficha-cadastro");
+    }
+    const irPane = document.getElementById("tab-informe-rendimentos");
+    if (irPane && irPane.style.display !== "none" && typeof switchCustomerTab === "function") {
+      switchCustomerTab("tab-contrato");
+    }
+  }
+  if (refreshSim && typeof window.recalcularSimulador === "function") {
+    try { window.recalcularSimulador(); } catch (e) {}
+  }
+};
+
 window.userCanToggleWhatsappAlert = function(user) {
     let logged = user || (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo()) || (window.AppState && AppState.currentUser) || null;
     if (!logged) {
@@ -46039,6 +46124,8 @@ window.userCanToggleWhatsappAlert = function(user) {
     if (typeof window.crmOperatorType === "function" && window.crmOperatorType(logged) === "advogado") return false;
     const rec = (typeof window.crmImpersonacaoAtual === "function" && window.crmImpersonacaoAtual()) ? logged : (typeof window.findCrmRegisteredUser === "function" ? window.findCrmRegisteredUser(logged) : null);
     const profile = (rec && rec.profile_name) || logged.profile_name || logged.profile || "";
+    if (typeof window.isOperadorCobrancaTerceirizadoProfile === "function"
+      && window.isOperadorCobrancaTerceirizadoProfile(profile)) return false;
     if (typeof window.crmOperatorType === "function" && window.crmOperatorType(rec || logged) === "advogado") return false;
     if (typeof window.crmProfileKind === "function" && window.crmProfileKind(profile) === "back_office") return true;
     if (typeof window.isCrmAdministrator === "function" && window.isCrmAdministrator(logged)) return true;
