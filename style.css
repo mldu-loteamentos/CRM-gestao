@@ -2896,6 +2896,7 @@ circle.donut-segment {
   box-shadow: 0 1px 2px rgba(16, 84, 54, 0.04);
 }
 .est-stock-filters { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.est-stock-filters .ml-emp-filter { flex: 1 1 280px; width: auto; max-width: 420px; min-width: 240px; }
 .est-stock-action-btns { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-bottom: 1px; }
 .est-btn-ghost {
   height: 36px;
@@ -5285,6 +5286,9 @@ circle.donut-segment {
 .com-vel-card h3 { margin: 0 0 4px; font-size: 0.95rem; color: #105436; }
 .com-vel-card p { margin: 0 0 12px; font-size: 0.75rem; color: #64748b; }
 .com-vel-vezes { display: grid; grid-template-columns: 220px 1fr; gap: 22px; align-items: center; flex: 1; min-height: 230px; }
+.com-vel-gauge { width: 240px; position: relative; }
+.com-vel-gauge svg { width: 100%; height: auto; display: block; }
+.com-vel-gauge strong { display: block; margin-top: -36px; text-align: center; font-size: 1.55rem; font-weight: 800; line-height: 1; }
 .com-vel-donut { width: 210px; height: 210px; border-radius: 50%; background: conic-gradient(#105436 calc(var(--p) * 1%), #dbe7df 0); display: grid; place-items: center; }
 .com-vel-donut-miolo { width: 136px; height: 136px; border-radius: 50%; background: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
 .com-vel-donut-miolo strong { font-size: 1.35rem; font-weight: 800; color: #105436; line-height: 1; }
@@ -9606,18 +9610,23 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .pcx-head { display: flex; flex-direction: column; gap: 10px; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
 .pcx-head .pcx-toolbar { margin-bottom: 0; }
 .pcx-head .pcx-ccs { margin-bottom: 0; }
-.pcx-head .pcx-field-parc,
 .pcx-head .pcx-field-emp { max-width: none; }
+.pcx-head .pcx-field-parc { flex: 0 1 300px; max-width: 300px; min-width: 0; }
 .pcx-head .tvig-comp-slot { flex: 0 0 170px; }
 .pcx-toolbar { margin-bottom: 10px; }
 .pcx-field { display: flex; flex-direction: column; gap: 4px; min-width: 180px; }
-.pcx-field-parc { flex: 1 1 260px; max-width: 340px; }
+.pcx-field-parc { flex: 0 1 300px; max-width: 300px; }
 .pcx-field-emp { flex: 1 1 280px; max-width: 360px; }
 .pcx-field-emp .ml-emp-filter { flex: none; width: 100%; height: auto; max-width: none; min-width: 0; }
 .pcx-input { height: 38px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 8px; background: #fff; font-size: 0.82rem; color: #0f172a; }
 .pcx-input:focus { outline: none; border-color: var(--color-primary); }
-.pcx-toolbar .cc-atualizar { display: inline-flex; align-items: center; gap: 6px; height: 38px; font-size: 0.8rem; }
+.pcx-toolbar .cc-atualizar { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 132px; min-width: 132px; max-width: 132px; height: 38px; flex: 0 0 132px; box-sizing: border-box; font-size: 0.8rem; }
+.pcx-toolbar .pcx-limpar { height: 38px; flex: 0 0 auto; white-space: nowrap; }
 .pcx-toolbar .cc-atualizar svg { width: 15px; height: 15px; }
+.pcx-load { margin: 28px auto 12px; max-width: 420px; }
+.pcx-tempo { margin: 4px 0 16px; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px 16px 8px; }
+.pcx-tempo h3 { margin: 0; font-size: 0.95rem; font-weight: 600; color: #64748b; text-align: center; }
+.pcx-tempo-canvas { height: 340px; position: relative; }
 .pcx-spin { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.35); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block; }
 .pcx-ccs { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
 .pcx-cc-box { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 38px; padding: 4px 8px; background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; }
@@ -9870,9 +9879,15 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .rcx-ml-ano { font-weight: 800; color: #105436; margin-left: 8px; }
 .rcx-ml-scroll { overflow: auto; max-height: 62vh; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; margin-bottom: 14px; }
 .rcx-ml { border-collapse: separate; border-spacing: 0; font-size: 0.78rem; min-width: 100%; }
-.rcx-ml th, .rcx-ml td { padding: 6px 8px; border-bottom: 1px solid #e2e8f0; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.rcx-ml thead th { position: sticky; top: 0; background: #e7f3eb; color: #1e4d38; z-index: 2; font-size: 0.68rem; }
-.rcx-ml thead tr:nth-child(2) th { top: 28px; background: #f4faf6; color: #245c42; }
+.rcx-ml th, .rcx-ml td { padding: 6px 10px; border-bottom: 1px solid #e2e8f0; text-align: center; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rcx-ml thead th { position: sticky; top: 0; background: #e7f3eb; color: #1e4d38; z-index: 2; font-size: 0.68rem; text-align: center; min-width: 84px; }
+.rcx-ml thead tr:nth-child(2) th { top: 30px; background: #f4faf6; color: #245c42; font-weight: 700; }
+.rcx-ml thead th:first-child { text-align: left; min-width: 240px; }
+.rcx-ml thead th.is-futuro { background: #e7f1f8; color: #1e4a6e; }
+.rcx-ml thead tr:nth-child(2) th.is-futuro { background: #f4f8fb; color: #24506e; }
+.rcx-ml thead th.is-ano { background: #d7eadf; color: #14532d; }
+.rcx-ml thead tr:nth-child(2) th.is-ano { background: #e8f5ee; color: #14532d; }
+.rcx-ml th.is-sep, .rcx-ml td.is-sep { box-shadow: inset 2px 0 0 #b7d4c4; }
 .rcx-ml tbody th { text-align: left; position: sticky; left: 0; background: #fff; z-index: 1; min-width: 240px; font-weight: 650; }
 .rcx-ml tr.is-n0 th, .rcx-ml tr.is-n0 td { background: #e5f2ea; color: #1e4d38; font-weight: 700; }
 .rcx-ml tr.is-n1 th, .rcx-ml tr.is-n1 td { background: #f3faf6; color: #243028; }
@@ -9889,6 +9904,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .rcx-ml td.is-fc { color: #3d6f99; }
 .rcx-ml td.is-tot { font-weight: 800; }
 .rcx-ml-abre, .rcx-ml-no { border: 0; background: transparent; color: inherit; font: inherit; font-weight: 800; cursor: pointer; text-align: left; }
+.rcx-ml thead .rcx-ml-abre { display: block; width: 100%; text-align: center; }
 .rcx-ml-abre.is-on { text-decoration: underline; }
 .rcx-ml-tit { margin: 8px 0; font-size: 0.92rem; color: #105436; }
 .rcx-ml-var { max-width: 520px; }

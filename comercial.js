@@ -1334,6 +1334,61 @@ const ComercialApp = {
     if (gen === this.state.velGen) this.renderVelocidade();
   },
 
+  async carregarPosicao(empId, gen) {
+    const pack = this.state.velCache[empId];
+    if (!pack || pack.posicao || pack._posicaoLoading) return;
+    const est = window.EstoqueComercialApp;
+    if (!est || typeof est.contagemFinanceira !== 'function') {
+      pack.posicao = { pronto: false };
+      return;
+    }
+    pack._posicaoLoading = true;
+    try {
+      if (typeof est.init === 'function' && !(est.state.units || []).length) await est.init();
+      if (gen !== this.state.velGen) return;
+      pack.posicao = est.contagemFinanceira(empId);
+    } catch (e) {
+      pack.posicao = { pronto: false };
+    }
+    pack._posicaoLoading = false;
+    if (gen === this.state.velGen) this.renderVelocidade();
+  },
+
+  gaugeVel(pct) {
+    const valor = Number(pct);
+    const tem = Number.isFinite(valor);
+    const max = !tem ? 100 : (valor <= 100 ? 100 : Math.ceil(valor / 50) * 50);
+    const t = tem ? Math.max(0, Math.min(1, valor / max)) : 0;
+    const cx = 110;
+    const cy = 108;
+    const r = 78;
+    const pt = (p) => {
+      const a = Math.PI * (1 - p);
+      return [cx + r * Math.cos(a), cy - r * Math.sin(a)];
+    };
+    const arco = (ate) => {
+      const ini = pt(0);
+      const fim = pt(Math.max(0.001, ate));
+      return 'M ' + ini[0].toFixed(1) + ' ' + ini[1].toFixed(1) + ' A ' + r + ' ' + r + ' 0 0 1 ' + fim[0].toFixed(1) + ' ' + fim[1].toFixed(1);
+    };
+    const ponta = pt(t);
+    const cor = tem && valor > 100 ? '#f37021' : '#105436';
+    const marcas = [0, max / 2, max].map((n) => {
+      const p = pt(n / max);
+      return '<text x="' + p[0].toFixed(1) + '" y="' + (p[1] - 8).toFixed(1) + '" text-anchor="middle" font-size="9" fill="#94a3b8">' + Math.round(n) + '</text>';
+    }).join('');
+    return `<div class="com-vel-gauge">
+      <svg viewBox="0 0 220 128" aria-hidden="true">
+        <path d="${arco(1)}" fill="none" stroke="#e2e8f0" stroke-width="14" stroke-linecap="round"></path>
+        <path d="${arco(t)}" fill="none" stroke="${cor}" stroke-width="14" stroke-linecap="round"></path>
+        ${marcas}
+        <line x1="${cx}" y1="${cy}" x2="${ponta[0].toFixed(1)}" y2="${ponta[1].toFixed(1)}" stroke="#0f172a" stroke-width="3" stroke-linecap="round"></line>
+        <circle cx="${cx}" cy="${cy}" r="5" fill="#0f172a"></circle>
+      </svg>
+      <strong style="color:${cor}">${this.fmtPctVel(tem ? valor : null)}</strong>
+    </div>`;
+  },
+
   fmtPctVel(n) {
     if (n == null || !Number.isFinite(n)) return '—';
     return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
@@ -1367,11 +1422,13 @@ const ComercialApp = {
     }) : '';
     const pack = this.state.velEmp ? this.state.velCache[this.state.velEmp] : null;
     const modelo = pack && pack.pronto && !pack.erro ? this.modeloVel(pack) : null;
+    const pos = pack && pack.posicao;
+    const nPos = (v) => pos && pos.pronto ? this.fmtInt(v) : '…';
     const sit = modelo ? `
       <div class="com-vel-sit">
-        <div><span>Lotes ativos</span><strong>${this.fmtInt(modelo.ativos)}</strong><small>${modelo.atrasoPronto ? 'contrato em dia' : 'contrato em aberto'}</small></div>
-        <div><span>Quitados</span><strong>${this.fmtInt(modelo.quitados)}</strong><small>contrato quitado</small></div>
-        <div class="is-late"><span>Em atraso</span><strong>${modelo.atrasoPronto ? this.fmtInt(modelo.atraso) : '…'}</strong><small>${this.esc(pack.atrasoNota || 'parcela vencida')}</small></div>
+        <div><span>Ativos adimplentes</span><strong>${nPos(pos && pos.adimplentes)}</strong><small>posição de estoque</small></div>
+        <div><span>Quitados</span><strong>${nPos(pos && pos.quitados)}</strong><small>posição de estoque</small></div>
+        <div class="is-late"><span>Ativos inadimplentes</span><strong>${nPos(pos && pos.inadimplentes)}</strong><small>posição de estoque</small></div>
       </div>` : '';
     let miolo = '<p class="com-vel-nota">Escolha um empreendimento que já tem contrato de venda. A velocidade usa toda a história dele.</p>';
     if (pack && !pack.pronto) miolo = `<p class="com-vel-status">${this.esc(pack.status || 'Carregando…')}</p>`;
@@ -1393,6 +1450,7 @@ const ComercialApp = {
       }
     }
     if (window.lucide) window.lucide.createIcons();
+    if (pack && pack.pronto && !pack.posicao && !pack._posicaoLoading) this.carregarPosicao(this.state.velEmp, this.state.velGen);
   },
 
   htmlVelocidade(pack) {
@@ -1401,7 +1459,6 @@ const ComercialApp = {
     const vezes = m.lotes > 0 ? (m.vendas / m.lotes) * 100 : null;
     const comPlano = m.curto + m.longo;
     const pct = (n) => comPlano > 0 ? (n / comPlano) * 100 : 0;
-    const anel = Math.max(0, Math.min(100, vezes || 0));
     const barras = m.rotulos.map((nome, i) => {
       const p = pct(m.faixas[i]);
       return `<div class="com-vel-bar"><span>${nome}</span><i><b style="width:${p.toFixed(1)}%"></b></i><em>${this.fmtInt(m.faixas[i])} · ${this.fmtPctVel(comPlano ? p : null)}</em></div>`;
@@ -1444,12 +1501,7 @@ const ComercialApp = {
           <h3>Quantas vezes o lote foi vendido</h3>
           <p>A barra de cima é a quantidade de lotes. A de baixo é a quantidade de vendas. ${this.fmtPctVel(vezes)} significa que o mesmo lote entrou em mais de um contrato.</p>
           <div class="com-vel-vezes">
-            <div class="com-vel-donut" style="--p:${anel.toFixed(2)}">
-              <div class="com-vel-donut-miolo">
-                <strong>${this.fmtPctVel(vezes)}</strong>
-                <span>${this.fmtInt(m.vendas)} vendas<br>${this.fmtInt(m.lotes)} lotes</span>
-              </div>
-            </div>
+            ${this.gaugeVel(vezes)}
             <div class="com-vel-vezes-lado">
               <div class="com-vel-bloco"><span>Lotes</span><i><b style="width:${(m.lotes / Math.max(m.lotes, m.vendas, 1) * 100).toFixed(1)}%"></b></i><em>${this.fmtInt(m.lotes)}</em></div>
               <div class="com-vel-bloco"><span>Vendas</span><i><b style="width:${(m.vendas / Math.max(m.lotes, m.vendas, 1) * 100).toFixed(1)}%"></b></i><em>${this.fmtInt(m.vendas)}</em></div>

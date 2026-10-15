@@ -3021,19 +3021,26 @@ const ResultadoCaixaApp = {
     if (sel > 1) cols.push({ id: "acum", nome: "Acumulado jan–" + this.MESES[sel - 2].toLowerCase(), futuro: false });
     cols.push({ id: String(sel), nome: this.MESES[sel - 1], futuro: false });
     for (let m = sel + 1; m <= 12; m++) cols.push({ id: String(m), nome: this.MESES[m - 1], futuro: true });
-    const head1 = cols.map((c) => `<th colspan="${c.futuro ? 2 : 4}"><button type="button" class="rcx-ml-abre${this.mlFatia === c.id ? " is-on" : ""}" onclick="ResultadoCaixaApp.toggleFatia('${c.id}')">${caixaEsc(c.nome)}</button></th>`).join("");
-    const head2 = cols.map((c) => c.futuro
-      ? `<th>Orçado</th><th>Forecast</th>`
-      : `<th>Orçado</th><th>Realizado</th><th>Var. %</th><th>Var. R$</th>`).join("");
+    const tom = (c) => c.futuro ? " is-futuro" : "";
+    const head1 = cols.map((c, i) => `<th colspan="${c.futuro ? 2 : 4}" class="rcx-ml-grupo${tom(c)}${i ? " is-sep" : ""}"><button type="button" class="rcx-ml-abre${this.mlFatia === c.id ? " is-on" : ""}" onclick="ResultadoCaixaApp.toggleFatia('${c.id}')">${caixaEsc(c.nome)}</button></th>`).join("");
+    const head2 = cols.map((c, i) => {
+      const sep = i ? " is-sep" : "";
+      const cor = tom(c);
+      return c.futuro
+        ? `<th class="${sep}${cor}">Orçado</th><th class="${cor}">Forecast</th>`
+        : `<th class="${sep}${cor}">Orçado</th><th class="${cor}">Realizado</th><th class="${cor}">Var. %</th><th class="${cor}">Var. R$</th>`;
+    }).join("");
     const cel = (v, cls) => `<td class="${cls || ""}">${this.mlNum(v)}</td>`;
     const bloco = (meses) => {
-      const pedacos = cols.map((c) => {
+      const pedacos = cols.map((c, i) => {
         const f = this.fatiaMl(meses, c.id, sel);
-        if (c.futuro) return cel(f.a) + cel(f.b, "is-fc");
-        return cel(f.a) + cel(f.b) + `<td>${this.mlPct(f.a, f.b)}</td>` + cel(f.b - f.a, (f.b - f.a) < -0.5 ? "is-neg" : "");
+        const sep = i ? "is-sep" : "";
+        if (c.futuro) return cel(f.a, sep) + cel(f.b, "is-fc");
+        const neg = (f.b - f.a) < -0.5 ? "is-neg" : "";
+        return cel(f.a, sep) + cel(f.b) + `<td>${this.mlPct(f.a, f.b)}</td>` + cel(f.b - f.a, neg);
       }).join("");
       const t = this.totaisMl(meses, sel);
-      return pedacos + cel(t.oAno, "is-tot") + cel(t.real, "is-tot") + cel(t.com, "is-tot");
+      return pedacos + cel(t.oAno, "is-tot is-sep") + cel(t.real, "is-tot") + cel(t.com, "is-tot");
     };
     const abertos = this.mlAbertos || {};
     const linhas = [];
@@ -3144,8 +3151,8 @@ const ResultadoCaixaApp = {
       ${avisos.map((t) => `<div class="rcx-aviso">${caixaEsc(t)}</div>`).join("")}
       <div class="rcx-ml-scroll"><table class="rcx-ml">
         <thead>
-          <tr><th>Conta</th>${head1}<th colspan="3">Total do ano</th></tr>
-          <tr><th></th>${head2}<th>Orçado</th><th>Realizado</th><th>Com forecast</th></tr>
+          <tr><th>Conta</th>${head1}<th colspan="3" class="rcx-ml-grupo is-ano is-sep">Total do ano</th></tr>
+          <tr><th></th>${head2}<th class="is-sep is-ano">Orçado</th><th class="is-ano">Realizado</th><th class="is-ano">Com forecast</th></tr>
         </thead>
         <tbody>${linhas.join("") || `<tr><td colspan="${span}">Sem linhas da visão DFC.</td></tr>`}</tbody>
       </table></div>

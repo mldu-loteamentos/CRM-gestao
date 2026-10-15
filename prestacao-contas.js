@@ -11,6 +11,8 @@ const PrestacaoContasApp = {
   partnershipId: "",
   ccSearch: "",
   loading: false,
+  loadMsg: "Carregando títulos…",
+  loadPct: 8,
   error: "",
   movements: [],
   lines: [],
@@ -428,6 +430,7 @@ const PrestacaoContasApp = {
     this.gruposAbertos = new Set();
     this.dashSort = { key: "", dir: 1 };
     this.render();
+    if (this.loading) return;
     if (this.aba === "vendas" || this.aba === "estoque" || this.aba === "carteira" || this.aba === "inad") {
       this.carregarPainel(this.aba);
     }
@@ -1272,9 +1275,12 @@ const PrestacaoContasApp = {
       return;
     }
     this.loading = true;
+    this.loadMsg = "Carregando títulos…";
+    this.loadPct = 12;
     this.error = "";
     this.rastreio = null;
     this.selectedAccount = null;
+    this.dashGen++;
     this.render();
     const { start, end } = this.periodBounds();
     try {
@@ -1307,10 +1313,53 @@ const PrestacaoContasApp = {
       this.error = err && err.message ? err.message : "Falha ao consultar a API de movimento bancário.";
       this.movements = [];
       this.lines = [];
+    }
+    try {
+      await this.carregarPaineis();
+    } catch (err) {
+      console.error("[Prestação de Contas] Painéis:", err);
+      if (this.dash) this.dash.erro = (err && err.message) || "Falha ao consultar o Sienge.";
     } finally {
       this.loading = false;
       this.render();
     }
+  },
+
+  limpar() {
+    if (this.loading) return;
+    this.dashGen++;
+    this.movements = [];
+    this.lines = [];
+    this.conferencias = { receitas: [], despesas: [], repasses: [] };
+    this.totals = { receitas: 0, custos: 0, despesas: 0, custosDespesas: 0, gco: 0 };
+    this.error = "";
+    this.rastreio = null;
+    this.selectedAccount = null;
+    this.dash = null;
+    this.gruposAbertos = new Set();
+    if (this._chartTempo) {
+      this._chartTempo.destroy();
+      this._chartTempo = null;
+    }
+    this.render();
+  },
+
+  setLoad(txt, pct) {
+    this.loadMsg = txt;
+    this.loadPct = pct;
+    const t = document.getElementById("pc-load-txt");
+    const b = document.getElementById("pc-load-bar");
+    if (t) t.textContent = txt;
+    if (b) b.style.width = pct + "%";
+  },
+
+  loadHtml() {
+    const pct = Math.max(4, Math.min(100, Number(this.loadPct) || 8));
+    return `<div class="ml-load pcx-load">
+      <div class="loading-spinner" aria-hidden="true"></div>
+      <div class="loading-status-text" id="pc-load-txt">${this.esc(this.loadMsg || "Carregando títulos…")}</div>
+      <div class="ml-load-track"><div class="loading-progress-bar" id="pc-load-bar" style="width:${pct}%"></div></div>
+    </div>`;
   },
 
   render() {
@@ -1350,10 +1399,9 @@ const PrestacaoContasApp = {
             <input type="month" id="pc-comp" class="tvig-comp-input" title="Consulta pela data de pagamento" value="${this.year}-${pad(this.month)}" onchange="PrestacaoContasApp.setCompetencia(this.value)">
           </div>
           <div class="cc-toolbar-actions">
+            <button type="button" class="btn btn-cancel pcx-limpar" onclick="PrestacaoContasApp.limpar()" ${this.loading ? "disabled" : ""}>Limpar</button>
             <button type="button" class="btn btn-primary cc-atualizar" onclick="PrestacaoContasApp.load()" ${this.loading ? "disabled" : ""}>
-              ${this.loading
-                ? '<span class="pcx-spin"></span> Consultando Sienge...'
-                : '<i data-lucide="refresh-cw"></i> Carregar'}
+              <i data-lucide="refresh-cw"></i> Carregar
             </button>
           </div>
         </div>
@@ -1388,11 +1436,12 @@ const PrestacaoContasApp = {
           ${tab("repasse", "split", "Repasse anterior", nFora(conf.repasses))}
         </div>
 
-        ${aba === "obra" || aba === "repasse" ? this.conferirHtml(aba) : this.painelHtml(aba)}
+        ${this.loading ? this.loadHtml() : (aba === "obra" || aba === "repasse" ? this.conferirHtml(aba) : this.painelHtml(aba))}
       </div>
     `;
     if (window.lucide) lucide.createIcons();
     this.ligarEmpresaFiltro();
+    if (!this.loading && aba === "carteira") this.desenharTempo();
     const novoScroll = document.getElementById("pc-conf-scroll");
     if (novoScroll && prevTop) novoScroll.scrollTop = prevTop;
   },
@@ -2020,7 +2069,7 @@ const PrestacaoContasApp = {
     if (gen !== this.dashGen) return;
     this.dash.vendas = { vendas, distratos, periodo: p };
     this.dash.loading = "";
-    this.render();
+    if (!this.loading) this.render();
   },
 
   vendasHtml(pack) {
@@ -2095,7 +2144,7 @@ const PrestacaoContasApp = {
     if (gen !== this.dashGen) return;
     this.dash.estoque = units;
     this.dash.loading = "";
-    this.render();
+    if (!this.loading) this.render();
   },
 
   estoqueHtml(units) {
@@ -2146,7 +2195,161 @@ const PrestacaoContasApp = {
     if (gen !== this.dashGen) return;
     this.dash.carteira = est.agruparExtratoCc(rows);
     this.dash.loading = "";
-    this.render();
+    if (!this.loading) this.render();
+  },
+
+  async carregarPaineis() {
+    if (!this.costCenterIds.length) return;
+    const gen = this.dashGen;
+    const chave = this.chaveDash();
+    this.dash = { chave, loading: "todos", erro: "", msg: "" };
+    const etapas = [
+      ["Carregando títulos…", 36, () => this.buscarVendasPainel(gen)],
+      ["Consultando estoque…", 62, () => this.buscarEstoquePainel(gen)],
+      ["Analisando carteira…", 84, () => this.buscarCarteiraPainel(gen)]
+    ];
+    for (const [txt, pct, fn] of etapas) {
+      if (gen !== this.dashGen) return;
+      this.setLoad(txt, pct);
+      try {
+        await fn();
+      } catch (e) {
+        if (gen !== this.dashGen) return;
+        console.error("[Prestação de Contas]", txt, e);
+        if (this.dash) {
+          this.dash.loading = "";
+          this.dash.erro = (e && e.message) || "Falha ao consultar o Sienge.";
+        }
+      }
+    }
+    if (gen !== this.dashGen || !this.dash) return;
+    this.dash.loading = "";
+    this.setLoad("Analisando carteira…", 100);
+  },
+
+  ccsDoParceiro() {
+    const ids = (this.costCenterIds || []).map(String);
+    const cat = this.costCenters();
+    const app = window.CentrosCustoApp;
+    const marcados = ids.filter((id) => {
+      const cc = cat.find((c) => String(c.id) === id);
+      if (!cc) return false;
+      if (app && typeof app.isParceiro === "function") return app.isParceiro(cc);
+      return /parce(ir|ri)/i.test(String(cc.name || ""));
+    });
+    if (marcados.length) return marcados;
+    const irmaos = ids.filter((id) => !/00$/.test(id));
+    return irmaos.length ? irmaos : ids;
+  },
+
+  nomeCurtoObra(obra) {
+    const nome = this.nomeObra(obra);
+    const pedacos = String(nome).split(/\s[-–]\s/);
+    return pedacos[pedacos.length - 1] || nome || "Obra";
+  },
+
+  serieTempo() {
+    const pack = this.dash && this.dash.carteira;
+    if (!pack) return null;
+    const parceiro = new Set(this.ccsDoParceiro());
+    const porAno = new Map();
+    const obras = new Map();
+    (pack.bills || []).forEach((b) => {
+      Object.values(b.parcelas || {}).forEach((partes) => {
+        const base = Object.values(partes || {})[0] || {};
+        const ano = String(base.dueDate || "").slice(0, 4);
+        if (!/^\d{4}$/.test(ano)) return;
+        Object.entries(partes || {}).forEach(([cc, inst]) => {
+          if (!parceiro.has(String(cc))) return;
+          const saldo = Number(inst && inst.currentBalance != null ? inst.currentBalance : 0) || 0;
+          if (saldo <= 0.009) return;
+          const obra = this.chaveObra(cc);
+          if (!obras.has(obra)) obras.set(obra, this.nomeCurtoObra(obra));
+          if (!porAno.has(ano)) porAno.set(ano, new Map());
+          const m = porAno.get(ano);
+          m.set(obra, (m.get(obra) || 0) + saldo);
+        });
+      });
+    });
+    const anosNum = [...porAno.keys()].map(Number).sort((a, b) => a - b);
+    if (!anosNum.length) return { anos: [], obras: [] };
+    const anos = [];
+    for (let y = anosNum[0]; y <= anosNum[anosNum.length - 1]; y++) anos.push(String(y));
+    const lista = [...obras.entries()].sort((a, b) => a[1].localeCompare(b[1], "pt-BR"));
+    return {
+      anos,
+      obras: lista.map(([id, nome]) => ({
+        id,
+        nome,
+        valores: anos.map((ano) => (porAno.get(ano) && porAno.get(ano).get(id)) || 0)
+      }))
+    };
+  },
+
+  desenharTempo() {
+    const canvas = document.getElementById("pc-chart-tempo");
+    if (!canvas || typeof Chart === "undefined") return;
+    if (this._chartTempo) {
+      this._chartTempo.destroy();
+      this._chartTempo = null;
+    }
+    const serie = this.serieTempo();
+    if (!serie || !serie.anos.length) return;
+    const cores = ["#105436", "#dc2626", "#f37021", "#14532d", "#0f766e", "#b45309"];
+    const fmtMi = (v) => (Number(v) / 1e6).toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + " Mi";
+    this._chartTempo = new Chart(canvas, {
+      type: "bar",
+      data: {
+        labels: serie.anos,
+        datasets: serie.obras.map((o, i) => ({
+          label: o.nome,
+          data: o.valores,
+          backgroundColor: cores[i % cores.length],
+          stack: "receber",
+          maxBarThickness: 46
+        }))
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        layout: { padding: { top: 22 } },
+        plugins: {
+          legend: { position: "bottom", labels: { boxWidth: 12, boxHeight: 12 } },
+          tooltip: { callbacks: { label: (c) => " " + c.dataset.label + ": " + fmtMi(c.parsed.y || 0) } }
+        },
+        scales: {
+          x: { stacked: true, grid: { display: false } },
+          y: {
+            stacked: true,
+            ticks: { callback: (v) => (Number(v) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + " Mi" }
+          }
+        }
+      },
+      plugins: [{
+        id: "pcxTopo",
+        afterDatasetsDraw(chart) {
+          const { ctx } = chart;
+          ctx.save();
+          ctx.fillStyle = "#334155";
+          ctx.font = "600 11px sans-serif";
+          ctx.textAlign = "center";
+          serie.anos.forEach((_, i) => {
+            let soma = 0;
+            let y = null;
+            let x = null;
+            serie.obras.forEach((_, di) => {
+              soma += Number(chart.data.datasets[di].data[i]) || 0;
+              const bar = chart.getDatasetMeta(di).data[i];
+              if (!bar) return;
+              if (y == null || bar.y < y) y = bar.y;
+              x = bar.x;
+            });
+            if (soma > 0.5 && y != null && x != null) ctx.fillText(fmtMi(soma), x, y - 6);
+          });
+          ctx.restore();
+        }
+      }]
+    });
   },
 
   nomeObra(id) {
@@ -2214,6 +2417,18 @@ const PrestacaoContasApp = {
     return `<div class="pcx-don-titulo">Contratos Ativos e Quitados</div><div class="pcx-dons">${cards}</div>`;
   },
 
+  graficoTempoHtml() {
+    const serie = this.serieTempo();
+    if (!serie || !serie.anos.length) {
+      return `<section class="pcx-tempo"><h3>Distribuição da carteira no tempo</h3><p class="pcx-ajuda">Sem saldo a receber nos centros de custo do parceiro.</p></section>`;
+    }
+    return `<section class="pcx-tempo">
+      <h3>Distribuição da carteira no tempo</h3>
+      <p class="pcx-ajuda">Quanto o centro de custo do parceiro tem a receber em cada ano, até a última parcela.</p>
+      <div class="pcx-tempo-canvas"><canvas id="pc-chart-tempo"></canvas></div>
+    </section>`;
+  },
+
   carteiraHtml(bills) {
     const lista0 = (bills || []).map((b) => Object.assign({}, b, this.medirTitulo(b)));
     const ativos = lista0.filter((b) => b.status === "Ativo").length;
@@ -2262,6 +2477,7 @@ const PrestacaoContasApp = {
         { rot: "Vencido", val: this.fmt(vencido), nota: "Saldo com vencimento passado", cls: "is-out" }
       ])}
       <p class="pcx-ajuda">Posição de hoje dos contratos de venda. O anel separa ativos e quitados por obra. Recebido no mês usa a data da baixa dentro do mês de referência. Em aberto é o saldo a vencer; vencido é o saldo atrasado.</p>
+      ${this.graficoTempoHtml()}
       ${this.graficoCarteiraHtml(grupos)}
       ${tabelas || `<div class="pcx-alert is-info">Nenhum título de venda nestes centros.</div>`}
     `;

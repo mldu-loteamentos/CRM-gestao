@@ -294,7 +294,8 @@ const FiscalApp = {
           const bucket = base || this.grupoDaRedutora(node);
           let valor = signed;
           let papel = (!base || signed < 0) ? "redutora" : "base";
-          if (papel === "redutora" && valor > 0 && node && !FC.isRevenueGroup(node.id) && !FC.isEstornoName(a.categoryName)) valor = -Math.abs(valor);
+          if (tag === "Base de Dedução") papel = "redutora";
+          if (papel === "redutora" && valor > 0 && !FC.isEstornoName(a.categoryName) && (tag === "Base de Dedução" || !(node && FC.isRevenueGroup(node.id)))) valor = -Math.abs(valor);
           linhas.push({
             companyId: Number(mov.companyId),
             companyName: this.nomeEmpresa(mov.companyId, mov),
@@ -561,15 +562,27 @@ const FiscalApp = {
     return hit ? cfg[hit] : "";
   },
 
+  foldBusca(s) {
+    return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  },
+
+  contasBuscaveis() {
+    const cats = this._contasDfc || [];
+    return cats.filter((c) => {
+      const t = String(c.tpConta || c.type || "").toLowerCase();
+      return !(t === "t" || t.includes("total") || t.includes("sintet"));
+    });
+  },
+
   sugestoesBase(baseId, q) {
-    const termo = String(q || "").trim().toLowerCase();
+    const termo = this.foldBusca(String(q || "").trim());
     if (termo.length < 1) return [];
     const nkQ = this.normConta(termo);
-    return this.contasAnaliticas().filter((c) => {
+    return this.contasBuscaveis().filter((c) => {
       if (this.baseDaConta(c.id) === baseId) return false;
-      const code = this.codigoConta(c).toLowerCase();
-      const nome = String(c.name || "").toLowerCase();
-      const id = String(c.id || "").toLowerCase();
+      const code = this.foldBusca(this.codigoConta(c));
+      const nome = this.foldBusca(c.name || c.description || "");
+      const id = this.foldBusca(c.id);
       if (code.includes(termo) || nome.includes(termo) || id.includes(termo)) return true;
       return !!(nkQ && this.normConta(c.id).includes(nkQ));
     }).slice(0, 8);
@@ -595,9 +608,9 @@ const FiscalApp = {
     this.sincronizarPlano(cfg);
     if (FiscalState.consultou) {
       FiscalState.aviso = "Bases atualizadas no DFC. Clique em Calcular para refazer os números.";
-      this.render();
     }
-    this.pintarBases();
+    if (document.getElementById("fim-bases-pop")) this.pintarBases();
+    else this.render();
   },
 
   incluirContaBase(baseId, accountId) {
@@ -676,12 +689,15 @@ const FiscalApp = {
     pop.id = "fim-bases-pop";
     pop.className = "fim-pop";
     pop.innerHTML = `<div class="fim-pop-box fim-bases-box" role="dialog" aria-modal="true">
-      <div class="fim-pop-h"><b>Contas do plano</b><button type="button" class="fim-pop-x" data-fim-fechar="1">×</button></div>
-      <p class="fim-muted" style="margin:0;">As mesmas bases do DFC. Incluir ou remover uma conta aqui atualiza a marcação fiscal do plano.</p>
+      <div class="fim-pop-h"><b>Contas do plano</b><button type="button" class="btn btn-fechar" data-fim-fechar="1">Fechar</button></div>
+      <p class="fim-muted" style="margin:0;">As mesmas bases do DFC. Incluir ou remover uma conta aqui atualiza a marcação fiscal do plano. Desconto de juros contratuais entra na base de deduções.</p>
       <div id="fim-bases-corpo"><p class="fim-bases-aviso">Buscando as contas do DFC…</p></div>
     </div>`;
+    pop.addEventListener("mousedown", (ev) => {
+      if (ev.target.closest("[data-fim-add]")) ev.preventDefault();
+    });
     pop.addEventListener("click", (ev) => {
-      if (ev.target === pop || ev.target.closest("[data-fim-fechar]")) {
+      if (ev.target.closest("[data-fim-fechar]")) {
         this.fecharBases();
         return;
       }

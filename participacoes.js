@@ -1759,10 +1759,6 @@ const ParticipacoesApp = {
       x: 0.48, y: 0.18, w: 10.6, h: 0.42,
       fontFace: "Calibri", fontSize: 22, bold: true, color: "F37021", margin: 0
     });
-    slide.addShape(pptx.ShapeType.rect, {
-      x: 0.48, y: 0.78, w: 0.38, h: 0.38,
-      fill: { color: "F8FAFC" }, line: { color: "CBD5E1", pt: 1 }
-    });
     slide.addText([
       { text: "Fornecedor: ", options: { bold: true } },
       { text: ctx.credorName, options: { bold: true, breakLine: true } },
@@ -1771,7 +1767,7 @@ const ParticipacoesApp = {
       { text: "Dúvida: ", options: { bold: true } },
       { text: ctx.duvida || "—", options: { bold: true } }
     ], {
-      x: 1.0, y: 0.72, w: 11.6, h: 1.15,
+      x: 0.48, y: 0.72, w: 12.1, h: 1.15,
       fontFace: "Calibri", fontSize: 16, color: "0F172A", margin: 0
     });
     slide.addText([

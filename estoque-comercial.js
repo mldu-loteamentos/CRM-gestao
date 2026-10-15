@@ -70,7 +70,13 @@ const EstoqueComercialApp = {
     _autoFinanceRanFor: null,
     tablePage: 0,
     sortKey: "emp",
-    sortDir: "asc"
+    sortDir: "asc",
+    empCompanyIds: [],
+    empCompanyOpen: false,
+    empCompanyQuery: "",
+    empCcIds: [],
+    empCcOpen: false,
+    empCcQuery: ""
   },
 
   PAGE: 60,
@@ -219,17 +225,178 @@ const EstoqueComercialApp = {
   },
 
   paintEmpSelect() {
-    const sel = document.getElementById("est-filter-emp");
-    if (!sel) return;
-    const keep = sel.value;
-    sel.innerHTML = '<option value="">Todos os empreendimentos</option>';
-    this.enterprisesForFilter().forEach(cc => {
-      const opt = document.createElement("option");
-      opt.value = String(cc.id);
-      opt.textContent = this.ccLabel(cc);
-      sel.appendChild(opt);
+    this.pintarFiltros();
+  },
+
+  listaEmpresas() {
+    const cat = (window.AppState && AppState.companies) || [];
+    const nome = (id) => {
+      const c = cat.find((x) => String(x.id) === String(id));
+      return c ? String(c.name || c.tradeName || c.legalName || "").toUpperCase() : ("EMPRESA " + id);
+    };
+    const ids = [];
+    this.enterprisesForFilter().forEach((cc) => {
+      const id = this.companyIdOfCc(cc.id);
+      if (id && ids.indexOf(String(id)) < 0) ids.push(String(id));
     });
-    if (keep && this.enterprisesForFilter().some(cc => String(cc.id) === keep)) sel.value = keep;
+    return ids.sort((a, b) => Number(a) - Number(b)).map((id) => ({ id: id, label: id + " - " + nome(id) }));
+  },
+
+  ccsDoFiltro() {
+    const empresas = new Set((this.state.empCompanyIds || []).map(String));
+    return this.enterprisesForFilter().filter((cc) => {
+      if (!empresas.size) return true;
+      return empresas.has(String(this.companyIdOfCc(cc.id)));
+    });
+  },
+
+  listaCcFiltro() {
+    return this.ccsDoFiltro().map((cc) => ({ id: String(cc.id), label: this.ccLabel(cc) }));
+  },
+
+  idsCcAtivos() {
+    const disponiveis = this.listaCcFiltro().map((c) => c.id);
+    const sel = (this.state.empCcIds || []).map(String).filter((id) => disponiveis.indexOf(id) >= 0);
+    return sel.length ? sel : disponiveis;
+  },
+
+  syncEmpHidden() {
+    const el = document.getElementById("est-filter-emp");
+    if (!el) return;
+    const sel = this.state.empCcIds || [];
+    el.value = sel.length === 1 ? String(sel[0]) : "";
+  },
+
+  optsEmpresa() {
+    return {
+      id: "est-co",
+      label: "Empresas",
+      items: this.listaEmpresas(),
+      selectedIds: this.state.empCompanyIds || [],
+      open: !!this.state.empCompanyOpen,
+      query: this.state.empCompanyQuery || "",
+      emptyMeansAll: true,
+      countMode: true,
+      nouns: { singular: "empresa", plural: "empresas", none: "Nenhuma empresa", noMatch: "Nenhuma empresa com esse nome." }
+    };
+  },
+
+  optsCc() {
+    return {
+      id: "est-cc",
+      label: "Centros de custo",
+      items: this.listaCcFiltro(),
+      selectedIds: this.state.empCcIds || [],
+      open: !!this.state.empCcOpen,
+      query: this.state.empCcQuery || "",
+      emptyMeansAll: true,
+      countMode: true,
+      nouns: { singular: "centro de custo", plural: "centros de custo", none: "Nenhum centro de custo", noMatch: "Nenhum centro de custo com esse nome." }
+    };
+  },
+
+  pintarFiltros() {
+    const co = document.getElementById("est-filtro-empresa");
+    const cc = document.getElementById("est-filtro-cc");
+    if (!co || !cc || !window.MlEmpresaFilter) return;
+    this.bindFiltros();
+    co.innerHTML = MlEmpresaFilter.html(this.optsEmpresa());
+    cc.innerHTML = MlEmpresaFilter.html(this.optsCc());
+    this.syncEmpHidden();
+    if (window.lucide) window.lucide.createIcons();
+  },
+
+  aplicarFiltroEmp() {
+    this.syncEmpHidden();
+    this.pintarFiltros();
+    this.onEmpChange();
+  },
+
+  bindFiltros() {
+    if (!window.MlEmpresaFilter || this._filtrosBind) return;
+    this._filtrosBind = true;
+    const self = this;
+    MlEmpresaFilter.bind("est-co", {
+      toggleOpen() {
+        self.state.empCompanyOpen = !self.state.empCompanyOpen;
+        if (self.state.empCompanyOpen) self.state.empCompanyQuery = "";
+        self.state.empCcOpen = false;
+        self.pintarFiltros();
+      },
+      close() {
+        if (!self.state.empCompanyOpen) return;
+        self.state.empCompanyOpen = false;
+        self.state.empCompanyQuery = "";
+        self.pintarFiltros();
+      },
+      setQuery(q) {
+        self.state.empCompanyQuery = q || "";
+        const box = document.getElementById("est-co-list");
+        if (box) box.innerHTML = MlEmpresaFilter.listHtml(self.optsEmpresa());
+      },
+      toggleId(itemId, on) {
+        const set = new Set((self.state.empCompanyIds || []).map(String));
+        if (on) set.add(String(itemId)); else set.delete(String(itemId));
+        self.state.empCompanyIds = [...set];
+        const ok = new Set(self.listaCcFiltro().map((c) => c.id));
+        self.state.empCcIds = (self.state.empCcIds || []).filter((id) => ok.has(String(id)));
+        self.aplicarFiltroEmp();
+      },
+      selectAll() {
+        self.state.empCompanyIds = self.listaEmpresas().map((x) => x.id);
+        self.aplicarFiltroEmp();
+      },
+      selectNone() {
+        self.state.empCompanyIds = [];
+        self.state.empCcIds = [];
+        self.aplicarFiltroEmp();
+      }
+    });
+    MlEmpresaFilter.bind("est-cc", {
+      toggleOpen() {
+        self.state.empCcOpen = !self.state.empCcOpen;
+        if (self.state.empCcOpen) self.state.empCcQuery = "";
+        self.state.empCompanyOpen = false;
+        self.pintarFiltros();
+      },
+      close() {
+        if (!self.state.empCcOpen) return;
+        self.state.empCcOpen = false;
+        self.state.empCcQuery = "";
+        self.pintarFiltros();
+      },
+      setQuery(q) {
+        self.state.empCcQuery = q || "";
+        const box = document.getElementById("est-cc-list");
+        if (box) box.innerHTML = MlEmpresaFilter.listHtml(self.optsCc());
+      },
+      toggleId(itemId, on) {
+        const set = new Set((self.state.empCcIds || []).map(String));
+        if (on) set.add(String(itemId)); else set.delete(String(itemId));
+        self.state.empCcIds = [...set];
+        self.aplicarFiltroEmp();
+      },
+      selectAll() {
+        self.state.empCcIds = self.listaCcFiltro().map((x) => x.id);
+        self.aplicarFiltroEmp();
+      },
+      selectNone() {
+        self.state.empCcIds = [];
+        self.aplicarFiltroEmp();
+      }
+    });
+  },
+
+  contagemFinanceira(ccId) {
+    const rows = (this.state.units || []).filter((u) => !ccId || String(u.enterpriseId) === String(ccId));
+    const n = (fin) => rows.filter((u) => this.financialStatus(u) === fin).length;
+    return {
+      total: rows.length,
+      adimplentes: n("Ativo adimplente"),
+      inadimplentes: n("Ativo inadimplente"),
+      quitados: n("Quitado"),
+      pronto: rows.length > 0
+    };
   },
 
   esc(v) {
@@ -1129,8 +1296,6 @@ const EstoqueComercialApp = {
   },
 
   async loadEnterprises() {
-    const sel = document.getElementById("est-filter-emp");
-    const keep = sel ? sel.value : "";
     let list = [];
     try {
       if (window.SiengeApiService && typeof SiengeApiService.getCostCenters === "function") {
@@ -1142,10 +1307,7 @@ const EstoqueComercialApp = {
     this.state.enterprises = (list || [])
       .filter(cc => this.isObraCc(cc.id))
       .sort((a, b) => Number(a.id) - Number(b.id));
-
-    if (!sel) return;
     this.paintEmpSelect();
-    if (keep && this.enterprisesForFilter().some(cc => String(cc.id) === keep)) sel.value = keep;
   },
 
   empName(id) {
@@ -1156,8 +1318,7 @@ const EstoqueComercialApp = {
   renderPills() {
     const wrap = document.getElementById("est-stock-pills");
     if (!wrap) return;
-    const emp = (document.getElementById("est-filter-emp") || {}).value || "";
-    const base = emp ? this.state.units.filter(u => String(u.enterpriseId) === String(emp)) : this.state.units;
+    const base = this.filteredByEmp(this.state.units);
     const counts = { all: base.length };
     base.forEach(u => {
       const code = String(u.commercialStock || "").toUpperCase() || "none";
@@ -1217,18 +1378,20 @@ const EstoqueComercialApp = {
   },
 
   filteredByEmp(units) {
-    const emp = (document.getElementById("est-filter-emp") || {}).value || "";
-    if (!emp) return units;
-    return units.filter(u => String(u.enterpriseId) === String(emp));
+    const temEmpresa = (this.state.empCompanyIds || []).length > 0;
+    const temCc = (this.state.empCcIds || []).length > 0;
+    if (!temEmpresa && !temCc) return units || [];
+    const ids = new Set(this.idsCcAtivos());
+    return (units || []).filter((u) => ids.has(String(u.enterpriseId)));
   },
 
   fillUnitSelect() {
     const sel = document.getElementById("est-filter-unit");
     if (!sel) return;
-    const emp = (document.getElementById("est-filter-emp") || {}).value || "";
+    const umCc = (this.state.empCcIds || []).length === 1;
     const keep = sel.value;
     sel.innerHTML = '<option value="">Todas as unidades</option>';
-    if (!emp) return;
+    if (!umCc) return;
     const list = this.filteredByEmp(this.state.units).slice().sort((a, b) =>
       String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: "base" })
     );
@@ -1491,11 +1654,9 @@ const EstoqueComercialApp = {
   },
 
   selectedUnits() {
-    const emp = (document.getElementById("est-filter-emp") || {}).value || "";
     const unitId = (document.getElementById("est-filter-unit") || {}).value || "";
     const q = String((document.getElementById("est-stock-search") || {}).value || "").trim().toLowerCase();
-    let rows = this.state.units;
-    if (emp) rows = rows.filter(u => String(u.enterpriseId) === String(emp));
+    let rows = this.filteredByEmp(this.state.units);
     if (unitId) rows = rows.filter(u => String(u.id) === String(unitId));
     if (this.state.status && this.state.status !== "all") {
       const want = String(this.state.status).toUpperCase();
@@ -2475,7 +2636,7 @@ const EstoqueComercialApp = {
   companyIdOfCc(ccId) {
     const cc = (this.state.enterprises || []).find(c => String(c.id) === String(ccId));
     if (cc && cc.companyId != null && cc.companyId !== "") return String(cc.companyId);
-    const all = (window.AppState && AppState.cachedCostCenters) || [];
+    const all = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || [];
     const found = all.find(x => String(x.id) === String(ccId));
     return found && found.companyId != null ? String(found.companyId) : "";
   },
