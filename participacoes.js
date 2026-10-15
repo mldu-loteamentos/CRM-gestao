@@ -3,6 +3,8 @@ const ParticipacoesApp = {
   folderCompanies: [],
   files: [],
   companyId: "",
+  companyIds: [],
+  _empGen: 0,
   companyQ: "",
   fileName: "",
   groupBy: "matriz",
@@ -218,8 +220,10 @@ const ParticipacoesApp = {
 
   removeFilesForPeriod(closing, keepName) {
     const key = String(closing || "");
+    const cid = String(this.companyId || "");
     if (!key) return;
     this.files = this.files.filter((f) => {
+      if (cid && String(f.companyId || "") !== cid) return true;
       const pk = this.periodKeyOfFile(f);
       if (pk !== key) return true;
       if (keepName && f.name === keepName) return true;
@@ -298,12 +302,24 @@ const ParticipacoesApp = {
     return out;
   },
 
+  chosenCompanyIds() {
+    const ids = (this.companyIds || []).map(String).filter(Boolean);
+    if (ids.length) return ids;
+    return this.companyId ? [String(this.companyId)] : [];
+  },
+
+  fileKey(f) {
+    if (!f) return "";
+    return String(f.companyId || "") + "|" + String(f.name || "");
+  },
+
   async mergeCloudPeriods(companyId) {
     try {
       const cloud = await this.loadPeriodsFromFirebase(companyId);
       cloud.forEach((c) => {
+        c.companyId = String(companyId);
         const pk = this.periodKeyOfFile(c);
-        const existing = this.files.find((f) => this.periodKeyOfFile(f) === pk || f.name === c.name);
+        const existing = this.files.find((f) => String(f.companyId) === String(companyId) && (this.periodKeyOfFile(f) === pk || f.name === c.name));
         if (existing) {
           if ((!existing.expenses || !existing.expenses.length) && c.expenses && c.expenses.length) {
             existing.expenses = c.expenses;
@@ -354,13 +370,14 @@ const ParticipacoesApp = {
     this.render();
   },
 
-  async loadFilesFromServer() {
-    if (!this.companyId) return;
+  async loadFilesFromServer(companyId) {
+    const cid = String(companyId || this.companyId || "");
+    if (!cid) return;
     try {
-      const data = await this.fetchJson("/api/participacoes/files?companyId=" + encodeURIComponent(this.companyId));
+      const data = await this.fetchJson("/api/participacoes/files?companyId=" + encodeURIComponent(cid));
       const remote = data.files || [];
       remote.forEach((f) => {
-        const existing = this.files.find((x) => x.name === f.name);
+        const existing = this.files.find((x) => String(x.companyId) === cid && x.name === f.name);
         if (existing) {
           existing.size = f.size;
           existing.mtime = f.mtime;
@@ -371,6 +388,7 @@ const ParticipacoesApp = {
         } else {
           this.files.push({
             name: f.name,
+            companyId: cid,
             size: f.size,
             mtime: f.mtime,
             year: f.year,
@@ -388,13 +406,17 @@ const ParticipacoesApp = {
     }
   },
 
-  fileLink(name) {
-    const local = this.files.find((f) => f.name === name);
-    if (local && local.objectUrl) return local.objectUrl;
-    if (local && local.pdfUrl) return local.pdfUrl;
-    const byPeriod = this.files.find((f) => this.periodKeyOfFile(f) === this.periodFromFileName(name) && f.pdfUrl);
+  fileLink(nameOrFile) {
+    const rec = nameOrFile && typeof nameOrFile === "object"
+      ? nameOrFile
+      : this.files.find((f) => this.fileKey(f) === nameOrFile || f.name === nameOrFile);
+    const name = rec ? rec.name : nameOrFile;
+    if (rec && rec.objectUrl) return rec.objectUrl;
+    if (rec && rec.pdfUrl) return rec.pdfUrl;
+    const cid = String((rec && rec.companyId) || this.companyId || "");
+    const byPeriod = this.files.find((f) => String(f.companyId) === cid && this.periodKeyOfFile(f) === this.periodFromFileName(name) && f.pdfUrl);
     if (byPeriod && byPeriod.pdfUrl) return byPeriod.pdfUrl;
-    return this.apiUrl("/api/participacoes/file?companyId=" + encodeURIComponent(this.companyId) + "&file=" + encodeURIComponent(name));
+    return this.apiUrl("/api/participacoes/file?companyId=" + encodeURIComponent(cid) + "&file=" + encodeURIComponent(name));
   },
 
   parseMoney(s) {
@@ -918,7 +940,7 @@ const ParticipacoesApp = {
       fileRec.expenses = fileRec.expenses.map((r) => this.repairExpenseRow(r)).filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor) && !this.isBankStatementNoise(r.credor, r.detalhe));
       if (!this.expensesMostlyBroken(fileRec.expenses) && !this.expensesMismatchSaldo(fileRec)) return;
     }
-    const url = this.fileLink(fileRec.name);
+    const url = this.fileLink(fileRec);
     const text = await this.extractPdfText(url);
     const headerPeriod = this.periodFromPdfHeader(text);
     const fromName = this.periodFromFileName(fileRec.name);
@@ -933,7 +955,8 @@ const ParticipacoesApp = {
     try {
       const key = "crm_participacoes_cache_v9";
       const all = JSON.parse(localStorage.getItem(key) || "{}");
-      all[this.companyId + "|" + fileRec.name] = {
+      const cid = String(fileRec.companyId || this.companyId || "");
+      all[cid + "|" + fileRec.name] = {
         at: Date.now(),
         cacheVer: 9,
         closing: fileRec.closing,
@@ -944,7 +967,9 @@ const ParticipacoesApp = {
     } catch (e) {}
   },
 
-  restoreCacheForCompany() {
+  restoreCacheForCompany(companyId) {
+    const cid = String(companyId || this.companyId || "");
+    if (!cid) return;
     try {
       const keys = ["crm_participacoes_cache_v9", "crm_participacoes_cache_v8", "crm_participacoes_cache_v7", "crm_participacoes_cache_v6", "crm_participacoes_cache_v5", "crm_participacoes_cache_v4", "crm_participacoes_cache_v3", "crm_participacoes_cache_v2"];
       let all = {};
@@ -957,8 +982,8 @@ const ParticipacoesApp = {
         } catch (e) {}
       });
       Object.keys(all).forEach((k) => {
-        if (!k.startsWith(String(this.companyId) + "|")) return;
-        const name = k.slice(String(this.companyId).length + 1);
+        if (!k.startsWith(cid + "|")) return;
+        const name = k.slice(cid.length + 1);
         const hit = all[k];
         if (!hit || !Array.isArray(hit.expenses)) return;
         // Só aceita cache v9 íntegro — versões antigas forçam reparse (dd/mm/aa + Saldo Total)
@@ -968,10 +993,11 @@ const ParticipacoesApp = {
         const closing = hit.closing || this.periodFromFileName(name);
         const probe = { expenses: repaired, saldoTotal: hit.saldoTotal, closing };
         if (this.expensesMismatchSaldo(probe)) return;
-        let rec = this.files.find((f) => f.name === name);
+        let rec = this.files.find((f) => String(f.companyId) === cid && f.name === name);
         if (!rec) {
           rec = {
             name,
+            companyId: cid,
             closing,
             saldoTotal: hit.saldoTotal || null,
             expenses: repaired,
@@ -984,7 +1010,9 @@ const ParticipacoesApp = {
           rec.saldoTotal = hit.saldoTotal || rec.saldoTotal;
           rec.cacheVer = 9;
           if (!rec.closing) rec.closing = closing;
+          rec.companyId = cid;
         } else {
+          rec.companyId = cid;
           rec.expenses = (rec.expenses || []).map((r) => this.repairExpenseRow(r)).filter((r) => Number(r.valor) > 0 && !this.isNoiseCredor(r.credor));
         }
       });
@@ -999,7 +1027,7 @@ const ParticipacoesApp = {
         const fixed = this.repairExpenseRow(r);
         if (!(Number(fixed.valor) > 0) || this.isNoiseCredor(fixed.credor) || this.isBankStatementNoise(fixed.credor, fixed.detalhe)) return;
         const sourceFile = fixed.sourceFile || f.name;
-        const row = Object.assign({}, fixed, { sourceFile });
+        const row = Object.assign({}, fixed, { sourceFile, companyId: String(f.companyId || "") });
         row.periodo = this.expensePeriodKey(row) || filePeriod || "";
         list.push(row);
       });
@@ -1009,11 +1037,12 @@ const ParticipacoesApp = {
 
   activeExpenses() {
     if (this.fileName) {
-      const f = this.files.find((x) => x.name === this.fileName);
+      const f = this.files.find((x) => this.fileKey(x) === this.fileName || x.name === this.fileName);
       const filePeriod = f && (f.closing || this.periodFromFileName(f.name));
       return (f && f.expenses) ? f.expenses.map((r) => {
         const row = Object.assign({}, this.repairExpenseRow(r), {
-          sourceFile: r.sourceFile || (f && f.name) || ""
+          sourceFile: r.sourceFile || (f && f.name) || "",
+          companyId: String((f && f.companyId) || "")
         });
         row.periodo = this.expensePeriodKey(row) || filePeriod || "";
         return row;
@@ -1187,7 +1216,7 @@ const ParticipacoesApp = {
   },
 
   avaliarStorageKey(groupKey) {
-    return String(this.companyId || "") + "|" + String(groupKey || "");
+    return this.chosenCompanyIds().join(",") + "|" + String(groupKey || "");
   },
 
   avaliarEntry(groupKey) {
@@ -1386,8 +1415,19 @@ const ParticipacoesApp = {
   },
 
   async onCompany(id) {
-    this.companyId = String(id || "");
     this.companyPickerOpen = false;
+    await this.setCompanies(id ? [id] : []);
+  },
+
+  async setCompanies(ids) {
+    const allowed = new Set(this.elencoCompanies().map((c) => String(c.id)));
+    const next = [];
+    (ids || []).forEach((id) => {
+      const s = String(id || "");
+      if (s && allowed.has(s) && next.indexOf(s) < 0) next.push(s);
+    });
+    this.companyIds = next;
+    this.companyId = next.length === 1 ? next[0] : "";
     this.fileName = "";
     this.files.forEach((f) => {
       if (f.objectUrl) {
@@ -1397,14 +1437,28 @@ const ParticipacoesApp = {
     this.files = [];
     this.error = "";
     this.refreshCompanyList();
-    this.restoreCacheForCompany();
+    if (!next.length) {
+      this.loading = false;
+      this.parsing = false;
+      this.uploadProgress = "";
+      this.pararCarga();
+      this.render();
+      return;
+    }
+    const gen = (this._empGen = (this._empGen || 0) + 1);
     this.loading = true;
-    this.uploadProgress = "Buscando os períodos…";
+    this.uploadProgress = next.length > 1 ? "Buscando os períodos das empresas…" : "Buscando os períodos…";
     this._cargaPct = 18;
     this.render();
     this.iniciarCarga();
-    await this.mergeCloudPeriods(this.companyId);
-    await this.loadFilesFromServer();
+    for (let i = 0; i < next.length; i++) {
+      if (gen !== this._empGen) return;
+      this.restoreCacheForCompany(next[i]);
+      await this.mergeCloudPeriods(next[i]);
+      await this.loadFilesFromServer(next[i]);
+      this._cargaPct = 18 + Math.round(40 * ((i + 1) / next.length));
+    }
+    if (gen !== this._empGen) return;
     this.loading = false;
     this.fileName = "";
     this.parsing = true;
@@ -1412,15 +1466,16 @@ const ParticipacoesApp = {
     this._cargaPct = 62;
     this.render();
     await this.parseAllFiles();
+    if (gen !== this._empGen) return;
     this.parsing = false;
     this.uploadProgress = "";
     this.pararCarga();
     this.render();
   },
 
-  async onFile(name) {
-    this.fileName = name;
-    const rec = this.files.find((f) => f.name === name);
+  async onFile(key) {
+    this.fileName = key;
+    const rec = this.files.find((f) => this.fileKey(f) === key || f.name === key);
     if (!rec) return;
     this.parsing = true;
     this.error = "";
@@ -1441,7 +1496,7 @@ const ParticipacoesApp = {
 
   onPeriodoSelect(idx) {
     const f = idx === "" ? null : this.files[Number(idx)];
-    if (f) this.onFile(f.name);
+    if (f) this.onFile(this.fileKey(f));
     else this.onFileAll();
   },
 
@@ -1515,14 +1570,15 @@ const ParticipacoesApp = {
         // Reenvio do mesmo período: sobrescreve
         if (closing) this.removeFilesForPeriod(closing, file.name);
 
-        let rec = this.files.find((f) => f.name === file.name);
+        let rec = this.files.find((f) => String(f.companyId) === String(this.companyId) && f.name === file.name);
         if (rec && rec.objectUrl && rec.objectUrl !== objectUrl) {
           try { URL.revokeObjectURL(rec.objectUrl); } catch (e) {}
         }
         if (!rec) {
-          rec = { name: file.name };
+          rec = { name: file.name, companyId: String(this.companyId) };
           this.files.push(rec);
         }
+        rec.companyId = String(this.companyId);
         rec.size = file.size;
         rec.closing = closing;
         rec.year = ym[0] ? Number(ym[0]) : null;
@@ -1886,11 +1942,15 @@ const ParticipacoesApp = {
     pptx.layout = "WIDE";
     pptx.author = "CRM Moura Leite";
     pptx.title = "Prestação de contas — avaliar";
-    const company = String((this.crmCompany(this.companyId) && this.crmCompany(this.companyId).name) || this.companyLabel(this.companyId) || "Empresa").toUpperCase();
+    const escolhidas = this.chosenCompanyIds();
+    const company = escolhidas.length === 1
+      ? String((this.crmCompany(escolhidas[0]) && this.crmCompany(escolhidas[0]).name) || this.companyLabel(escolhidas[0]) || "Empresa").toUpperCase()
+      : "TODAS AS EMPRESAS";
     const dataNum = (d) => {
       const p = String(d || "").split("/");
       return p.length === 3 ? p[2] + p[1].padStart(2, "0") + p[0].padStart(2, "0") : String(d || "");
     };
+    const nomeEmpresa = (cid) => String((this.crmCompany(cid) && this.crmCompany(cid).name) || this.companyLabel(cid) || company).toUpperCase();
     picked.forEach((c) => {
       const entry = this.avaliarEntry(c.groupKey) || {};
       const months = mx.months.filter((m) => c.cells[m] && (c.cells[m].rows || []).length);
@@ -1901,13 +1961,39 @@ const ParticipacoesApp = {
           .sort((a, b) => dataNum(a.date).localeCompare(dataNum(b.date)))
           .forEach((r) => rows.push(Object.assign({}, r, { _mes: month })));
       });
-      this.addAvaliarSlide(pptx, {
-        company: company,
-        credorName: c.credor,
-        totalCredor: c.total,
-        duvida: entry.duvida || "",
-        months: months,
-        rows: rows
+      const porNota = new Map();
+      rows.forEach((r) => {
+        const doc = String(r.doc || "").trim();
+        if (!porNota.has(doc)) porNota.set(doc, []);
+        porNota.get(doc).push(r);
+      });
+      const notas = [...porNota.keys()].filter(Boolean);
+      const grupos = notas.length > 1
+        ? notas
+          .slice()
+          .sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true }))
+          .map((doc) => ({ doc, rows: porNota.get(doc) }))
+          .concat((porNota.get("") || []).length ? [{ doc: "", rows: porNota.get("") }] : [])
+        : [{ doc: "", rows }];
+      grupos.forEach((g) => {
+        const meses = [];
+        g.rows.forEach((r) => {
+          if (r._mes && meses.indexOf(r._mes) < 0) meses.push(r._mes);
+        });
+        const totalNota = g.rows.reduce((s, r) => s + (Number(r.valor) || 0), 0);
+        const cids = [...new Set(g.rows.map((r) => String(r.companyId || "")).filter(Boolean))];
+        const emp = cids.length === 1 ? nomeEmpresa(cids[0]) : company;
+        const nome = notas.length > 1
+          ? (c.credor + (g.doc ? " · Nota " + g.doc : " · Sem nota"))
+          : c.credor;
+        this.addAvaliarSlide(pptx, {
+          company: emp,
+          credorName: nome,
+          totalCredor: notas.length > 1 ? totalNota : c.total,
+          duvida: entry.duvida || "",
+          months: meses.length ? meses : months,
+          rows: g.rows
+        });
       });
     });
     const stamp = new Date().toISOString().slice(0, 10);
@@ -1929,15 +2015,15 @@ const ParticipacoesApp = {
           if (cid) withData.add(cid);
         });
       } catch (e) { /* ignore */ }
-      if (this.companyId) withData.add(String(this.companyId));
+      if (this.chosenCompanyIds().length) this.chosenCompanyIds().forEach((id) => withData.add(String(id)));
       companyIds = fromCrm.filter((id) => withData.has(id));
-      if (!companyIds.length && this.companyId) companyIds = [String(this.companyId)];
+      if (!companyIds.length) companyIds = this.chosenCompanyIds().slice();
     } else {
-      if (!this.companyId) {
+      companyIds = this.chosenCompanyIds().slice();
+      if (!companyIds.length) {
         alert("Selecione uma empresa para exportar.");
         return;
       }
-      companyIds = [String(this.companyId)];
     }
 
     let ExcelJS;
@@ -1957,7 +2043,12 @@ const ParticipacoesApp = {
     const currentFileName = this.fileName;
 
     for (const cid of companyIds) {
-      if (String(cid) !== currentId) {
+      const naTela = currentFiles.filter((f) => String(f.companyId || "") === String(cid));
+      const usaTela = naTela.length && (scope !== "all" || String(cid) === currentId);
+      if (usaTela && String(cid) !== currentId) {
+        this.files = naTela;
+        this.fileName = "";
+      } else if (String(cid) !== currentId) {
         // carrega cache local da outra empresa sem trocar a UI inteira
         const snapFiles = [];
         try {
@@ -2076,16 +2167,22 @@ const ParticipacoesApp = {
     this.ensureAvaliar();
     const scroll = this.captureScroll();
     this.refreshCompanyList();
-    const crm = this.crmCompany(this.companyId);
+    const escolhidas = this.chosenCompanyIds();
+    const temEmpresa = escolhidas.length > 0;
+    const crm = escolhidas.length === 1 ? this.crmCompany(escolhidas[0]) : null;
     const groups = this.grouped();
     const rows = this.filtered();
     const total = rows.reduce((s, r) => s + (Number(r.valor) || 0), 0);
-    const selectedFile = this.files.find((f) => f.name === this.fileName);
+    const selectedFile = this.files.find((f) => this.fileKey(f) === this.fileName || f.name === this.fileName);
     const periodTitle = this.fileName
-      ? this.periodLabel(selectedFile ? this.shownClosing(selectedFile) : "", this.fileName)
+      ? this.periodLabel(selectedFile ? this.shownClosing(selectedFile) : "", selectedFile ? selectedFile.name : this.fileName)
       : (this.files.length ? "Todos os períodos" : "—");
-    const uploadDisabled = !this.companyId;
-    const companyTitle = (crm && crm.name) || this.companyLabel(this.companyId) || "Selecione a empresa";
+    const uploadDisabled = escolhidas.length !== 1;
+    const companyTitle = !temEmpresa
+      ? "Selecione a empresa"
+      : (escolhidas.length === 1
+        ? ((crm && crm.name) || this.companyLabel(escolhidas[0]) || "Selecione a empresa")
+        : (escolhidas.length === this.elencoCompanies().length ? "Todas as empresas" : escolhidas.length + " empresas"));
 
     const views = [
       { id: "matriz", label: "Matriz", icon: "table" },
@@ -2095,7 +2192,7 @@ const ParticipacoesApp = {
       { id: "data", label: "Por data", icon: "clock" }
     ];
     const isMatriz = this.groupBy === "matriz";
-    const mxInfo = this.companyId && isMatriz ? this.matrixData() : null;
+    const mxInfo = temEmpresa && isMatriz ? this.matrixData() : null;
     const credCount = mxInfo ? mxInfo.creditors.length : 0;
     const canPpt = !!(mxInfo && mxInfo.creditors.some((c) => this.avaliarEntry(c.groupKey)));
     const cap = (s) => String(s || "").replace(/^\s*\S/, (ch) => ch.toUpperCase());
@@ -2111,7 +2208,7 @@ const ParticipacoesApp = {
               <span class="ml-emp-filter-label">Período</span>
               <select class="part-input" onchange="ParticipacoesApp.onPeriodoSelect(this.value)" ${this.files.length ? "" : "disabled"}>
                 <option value="" ${!this.fileName ? "selected" : ""}>${this.files.length ? `Todos os períodos (${this.files.length})` : "Nenhum PDF enviado"}</option>
-                ${this.files.map((f, i) => `<option value="${i}" ${f.name === this.fileName ? "selected" : ""}>${this.esc(cap(this.periodLabel(this.shownClosing(f), f.name)))}</option>`).join("")}
+                ${this.files.map((f, i) => `<option value="${i}" ${this.fileKey(f) === this.fileName ? "selected" : ""}>${escolhidas.length > 1 ? this.esc(String(f.companyId || "")) + " · " : ""}${this.esc(cap(this.periodLabel(this.shownClosing(f), f.name)))}</option>`).join("")}
               </select>
             </label>
             <label class="part-field">
@@ -2129,10 +2226,10 @@ const ParticipacoesApp = {
             <div class="part-field part-field-actions">
               <span class="ml-emp-filter-label">Ações</span>
               <div class="part-action-row">
-                <button type="button" class="btn btn-excel" onclick="ParticipacoesApp.exportExcel()" ${!this.companyId && this.exportScope === "current" ? "disabled" : ""} title="Exportar tabela atual para Excel">
+                <button type="button" class="btn btn-excel" onclick="ParticipacoesApp.exportExcel()" ${!temEmpresa && this.exportScope === "current" ? "disabled" : ""} title="Exportar tabela atual para Excel">
                   <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
                 </button>
-                <label class="btn btn-primary part-upload ${uploadDisabled ? "is-disabled" : ""}" title="${uploadDisabled ? "Selecione a empresa para enviar PDFs" : "Enviar PDFs da prestação de contas"}">
+                <label class="btn btn-primary part-upload ${uploadDisabled ? "is-disabled" : ""}" title="${uploadDisabled ? (temEmpresa ? "Envie os PDFs com uma empresa selecionada" : "Selecione a empresa para enviar PDFs") : "Enviar PDFs da prestação de contas"}">
                   <i data-lucide="upload" style="width:14px;height:14px;"></i> Enviar PDFs
                   <input type="file" accept="application/pdf,.pdf" multiple ${uploadDisabled ? "disabled" : ""} style="display:none" onchange="ParticipacoesApp.onUpload(this)">
                 </label>
@@ -2144,7 +2241,7 @@ const ParticipacoesApp = {
         ${this.error ? alertBox("is-error", this.error) : ""}
         ${this.hint && !this.error ? alertBox("is-warn", this.hint) : ""}
 
-        ${this.companyId ? `
+        ${temEmpresa ? `
           <div class="part-summary">
             <div class="part-summary-info">
               <strong>${this.esc(companyTitle)}</strong>
@@ -2152,7 +2249,7 @@ const ParticipacoesApp = {
             </div>
             <div class="part-summary-actions">
               ${this.fileName ? `<a class="btn btn-outline part-btn-sm" href="${this.fileLink(this.fileName)}" target="_blank" rel="noopener"><i data-lucide="file-text" style="width:14px;height:14px;"></i> Abrir PDF</a>` : ""}
-              ${isMatriz ? `<button type="button" class="btn btn-outline part-btn-sm" onclick="ParticipacoesApp.exportPpt()" ${canPpt ? "" : "disabled"} title="${canPpt ? "Gera um slide para cada mês dos credores marcados" : "Marque credores na matriz para gerar o PPT"}"><i data-lucide="presentation" style="width:14px;height:14px;"></i> Gerar PPT</button>` : ""}
+              ${isMatriz ? `<button type="button" class="btn btn-outline part-btn-sm" onclick="ParticipacoesApp.exportPpt()" ${canPpt ? "" : "disabled"} title="${canPpt ? "Um slide por credor. Se o credor tiver mais de uma nota, cada nota sai em um slide." : "Marque credores na matriz para gerar o PPT"}"><i data-lucide="presentation" style="width:14px;height:14px;"></i> Gerar PPT</button>` : ""}
               <span class="part-summary-total">${this.fmt(total)}</span>
             </div>
           </div>
@@ -2166,8 +2263,8 @@ const ParticipacoesApp = {
         ` : `<div class="part-empty">Selecione a empresa para ver a matriz e enviar PDFs.</div>`}
 
         ${ocupado ? this.cargaHtml() : ""}
-        ${!ocupado && this.companyId && this.groupBy === "matriz" ? this.matrixHtml() : ""}
-        ${!ocupado && this.companyId && this.groupBy !== "matriz" && groups.length ? `
+        ${!ocupado && temEmpresa && this.groupBy === "matriz" ? this.matrixHtml() : ""}
+        ${!ocupado && temEmpresa && this.groupBy !== "matriz" && groups.length ? `
           <div class="cc-scroll part-groups" id="part-groups-scroll">
             <table class="cc-table part-expense-table">
               <colgroup>
@@ -2200,7 +2297,7 @@ const ParticipacoesApp = {
               `).join("")}
             </table>
           </div>` : ""}
-        ${!ocupado && this.companyId && this.files.length && !(this.groupBy === "matriz" ? this.matrixData().creditors.length : groups.length) ? `<div class="part-empty">Nenhuma linha do quadro <strong>DESPESAS PAGAS</strong> identificada neste filtro.</div>` : ""}
+        ${!ocupado && temEmpresa && this.files.length && !(this.groupBy === "matriz" ? this.matrixData().creditors.length : groups.length) ? `<div class="part-empty">Nenhuma linha do quadro <strong>DESPESAS PAGAS</strong> identificada neste filtro.</div>` : ""}
         ${this.detailModalHtml()}
       </div>
     `;
@@ -2219,7 +2316,7 @@ const ParticipacoesApp = {
   paintCompany() {
     const box = document.getElementById("part-emp-box");
     if (!box || !window.MlEmpresaFilter) return;
-    const selected = this.companyId ? [String(this.companyId)] : [];
+    const selected = this.chosenCompanyIds();
     box.innerHTML = MlEmpresaFilter.html({
       id: "part-emp",
       label: "Empresas",
@@ -2245,19 +2342,24 @@ const ParticipacoesApp = {
         list.innerHTML = MlEmpresaFilter.listHtml({
           id: "part-emp",
           items: this.companyItems(),
-          selectedIds: this.companyId ? [String(this.companyId)] : [],
+          selectedIds: this.chosenCompanyIds(),
           query: this.companyQ
         });
       },
       toggleId: (id, on) => {
-        this.companyPickerOpen = false;
-        if (on) this.onCompany(id);
-        else if (String(this.companyId) === String(id)) this.onCompany("");
+        const cur = new Set(this.chosenCompanyIds());
+        if (on) cur.add(String(id));
+        else cur.delete(String(id));
+        this.companyPickerOpen = true;
+        this.setCompanies([...cur]);
       },
-      selectAll: () => {},
+      selectAll: () => {
+        this.companyPickerOpen = true;
+        this.setCompanies(this.elencoCompanies().map((c) => String(c.id)));
+      },
       selectNone: () => {
-        this.companyPickerOpen = false;
-        this.onCompany("");
+        this.companyPickerOpen = true;
+        this.setCompanies([]);
       }
     });
     if (window.lucide) lucide.createIcons();

@@ -3183,6 +3183,17 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     }
   }
   const leavingTab = window.activeAppTab;
+  if (leavingTab && leavingTab !== tabId) {
+    if (leavingTab === "prestacao-contas" && window.PrestacaoContasApp && typeof PrestacaoContasApp.reiniciar === "function") {
+      PrestacaoContasApp.reiniciar();
+    }
+    if (leavingTab === "dashboard" && typeof window.reiniciarFilaAoSair === "function") {
+      window.reiniciarFilaAoSair();
+    }
+    if (leavingTab === "relacionamento_gestao" && typeof window.clearRelacionamento === "function") {
+      window.clearRelacionamento();
+    }
+  }
   window._voltarBudget = tabId === "fiscal-enviar-nota" && leavingTab === "marketing-budget";
   // Guardar aba ativa para o voltar (sem session storage para não persistir no F5)
   window.activeAppTab = tabId;
@@ -3632,6 +3643,10 @@ function auditActionMeta(action, summary, module) {
     }
     return { group: "titulo", label: falha ? "Falha ao gerar título no Sienge" : "Título gerado no Sienge" };
   }
+  if (key === "Cancelar contrato") {
+    const falha = /erro|falha|não envi/.test(blob);
+    return { group: "cancelamento", label: falha ? "Falha ao cancelar contrato no Sienge" : "Contrato cancelado no Sienge" };
+  }
   if (key === "HTTP") {
     const verbo = blob.match(/\b(post|put|patch|delete)\b/);
     const tituloPagar = /\/bills\b/.test(blob) && !/attachment|purchase-invoices|overdue-receivable/.test(blob);
@@ -4026,6 +4041,7 @@ window.renderAuditLogs = async function(forceReload) {
     if (actionFilter === "nota" && meta.group !== "nota") return false;
     if (actionFilter === "titulo" && meta.group !== "titulo") return false;
     if (actionFilter === "sienge" && meta.group !== "sienge") return false;
+    if (actionFilter === "cancelamento" && meta.group !== "cancelamento") return false;
     if (userQ && !auditUserMatches(row, userQ)) return false;
     if (fromTs && !isNaN(fromTs)) {
       const t = auditParseTs(row.timestamp);
@@ -4692,6 +4708,13 @@ window.mergeCrmPermPayloads = function(aRaw, bRaw) {
     const nv = newer[k];
     const ov = older[k];
     if (nv === true || ov === true) {
+      // O Dashboard de Contas a Receber já sumiu quando uma cópia antiga,
+      // com a chave falsa e redução confirmada, era mais nova que a cópia
+      // em que o acesso foi marcado. Marcado numa cópia, o acesso fica.
+      if (k.indexOf("sub_fin_cr_dashboard_") === 0) {
+        out[k] = true;
+        return;
+      }
       out[k] = (nv === false && newerShrink) ? false : true;
       return;
     }
@@ -7271,7 +7294,8 @@ window.FILA_QUEUE_GROUPS = {
   ENVIAR_JURIDICO: 8,
   SEM_CATEGORIA_SEM_PAGTO: 9,
   SEM_CATEGORIA_COM_PAGTO: 10,
-  SEM_CATEGORIA: 9
+  SEM_CATEGORIA: 9,
+  NEX_CUMPRIDA: -1
 };
 
 window.clientLastPaymentDays = function(client) {
@@ -7358,6 +7382,9 @@ window.clientIsAnaliseInternaJuridico = function(client, thresholdJuridico) {
 window.getFilaQueueGroup = function(client, thresholdJuridico) {
   const cutoff = Number.isFinite(Number(thresholdJuridico)) ? Number(thresholdJuridico) : 151;
   const G = window.FILA_QUEUE_GROUPS;
+  if (typeof window.clientHasNexCumprida === "function" && window.clientHasNexCumprida(client)) {
+    return G.NEX_CUMPRIDA;
+  }
   if (typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(client) : (client && (client.subjudice === "S" || client.subjudice === true))) {
     return G.SUBJUDICE;
   }
@@ -7393,6 +7420,7 @@ window.getFilaQueueGroup = function(client, thresholdJuridico) {
 window.getFilaQueueGroupMeta = function(group) {
   const G = window.FILA_QUEUE_GROUPS;
   const map = {
+    [G.NEX_CUMPRIDA]: { label: 'Nex cumprida', bg: '#ecfdf5', color: '#105436' },
     [G.ACORDO_INTERNO_QUEBRADO]: { label: 'Acordo Interno Quebrado', bg: '#ffedd5', color: '#9a3412' },
     [G.ZERO_PAGO]: { label: '0% Pago', bg: '#fee2e2', color: '#991b1b' },
     [G.ENTRADA_WEBRO]: { label: 'Pagamento de entrada Webro', bg: '#fff7ed', color: '#c2410c' },
@@ -7449,6 +7477,352 @@ window.getExecutarAcordoQuebradoAgingHtml = function(client) {
   return `<span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #fb7185; background-color: #ffe4e6; color: #9f1239; font-weight: 600;" title="Acordo judicial quebrado há 61 dias ou mais. Encaminhar para execução (Apoio Jurídico).">
     <i data-lucide="gavel" style="width: 14px; height: 14px;"></i> Executar Acordo Quebrado - ${dayLabel}
   </span>`;
+};
+
+window.rebuildNexCumpridaIndex = function() {
+  const set = new Set();
+  if (typeof window.nexCollectAll === "function" && typeof window.nexIsLegallyValid === "function") {
+    window.nexCollectAll().forEach(function(it) {
+      if (!it || !window.nexIsLegallyValid(it).ok) return;
+      const cid = String(it.customerId || "");
+      const titulo = String(it.titulo || it.saleId || "").replace(/^B-/i, "").split("-")[0];
+      if (cid && titulo) set.add(cid + "|" + titulo);
+    });
+  }
+  window._nexCumpridaSet = set;
+  return set;
+};
+
+window.clientHasNexCumprida = function(client) {
+  if (!client) return false;
+  const set = window._nexCumpridaSet || (typeof window.rebuildNexCumpridaIndex === "function" ? window.rebuildNexCumpridaIndex() : null);
+  if (!set || !set.size) return false;
+  const cid = String(client.customerId || "");
+  const ids = [];
+  const add = function(v) {
+    const s = String(v || "").replace(/^B-/i, "").split("-")[0];
+    if (s) ids.push(s);
+  };
+  add(client.saleId);
+  (client.billIds || []).forEach(add);
+  return ids.some(function(id) { return set.has(cid + "|" + id); });
+};
+
+window.CANCEL_MOTIVOS_KEY = "crm_cancelamento_motivos";
+window.CANCEL_MOTIVOS_PADRAO = [
+  { codigo: "01", nome: "Desemprego" },
+  { codigo: "02", nome: "Motivo de saúde" },
+  { codigo: "03", nome: "Mudança de cidade" },
+  { codigo: "04", nome: "Falecimento" },
+  { codigo: "05", nome: "Padrão construtivo" },
+  { codigo: "06", nome: "Separação do casal" },
+  { codigo: "07", nome: "Prazo entrega" },
+  { codigo: "08", nome: "Redução salarial" },
+  { codigo: "09", nome: "Compra por impulso" },
+  { codigo: "10", nome: "Permuta" },
+  { codigo: "11", nome: "Não informado" },
+  { codigo: "12", nome: "Sem retorno do cliente" },
+  { codigo: "13", nome: "Não cumpriu acordo" },
+  { codigo: "14", nome: "Não aceitou negociação" },
+  { codigo: "15", nome: "Reintegração de posse" },
+  { codigo: "16", nome: "Contrato Reemitido" },
+  { codigo: "17", nome: "Distrato via Judicial" },
+  { codigo: "18", nome: "ADM Ellenco" },
+  { codigo: "20", nome: "Topografia do Lote" },
+  { codigo: "21", nome: "Divergência na Negociação" },
+  { codigo: "22", nome: "Optou por casa pronta" },
+  { codigo: "23", nome: "Lei Arrependimento 7 dias" }
+];
+
+window.cancelMotivosExtras = function() {
+  try {
+    const lista = JSON.parse(localStorage.getItem(window.CANCEL_MOTIVOS_KEY) || "[]");
+    return Array.isArray(lista) ? lista : [];
+  } catch (e) {
+    return [];
+  }
+};
+
+window.cancelMotivosLista = function() {
+  const map = {};
+  window.CANCEL_MOTIVOS_PADRAO.forEach(function(m) {
+    map[m.codigo] = { codigo: m.codigo, nome: m.nome, padrao: true };
+  });
+  window.cancelMotivosExtras().forEach(function(m) {
+    const codigo = String(m && m.codigo || "").replace(/\D/g, "").padStart(2, "0").slice(-2);
+    const nome = String(m && m.nome || "").trim();
+    if (!/^\d{2}$/.test(codigo) || codigo === "00" || nome.length < 2) return;
+    if (map[codigo] && map[codigo].padrao) return;
+    map[codigo] = { codigo: codigo, nome: nome, padrao: false };
+  });
+  return Object.keys(map).sort().map(function(k) { return map[k]; });
+};
+
+window.cancelMotivoRotulo = function(iniciativa, motivo) {
+  const prefixo = String(iniciativa) === "2" ? "2" : "1";
+  const quem = prefixo === "2" ? "da empresa" : "do cliente";
+  const codigo = String(motivo && motivo.codigo || "").padStart(2, "0");
+  const nome = String(motivo && motivo.nome || "").trim();
+  const codigoCheio = prefixo + codigo;
+  return {
+    codigo: codigoCheio,
+    texto: codigoCheio + " - iniciativa " + quem + " por " + nome.toLowerCase()
+  };
+};
+
+window.tituloTemZeroRestituicao = function(client) {
+  return !!(client && typeof window.clientIsZeroPercentPaid === "function" && window.clientIsZeroPercentPaid(client));
+};
+
+window.cancelContratoEsc = function(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+};
+
+window.cancelMotivosSincronizar = async function() {
+  const key = window.CANCEL_MOTIVOS_KEY;
+  const norm = function(lista) {
+    const map = {};
+    (lista || []).forEach(function(m) {
+      const codigo = String(m && m.codigo || "").replace(/\D/g, "").padStart(2, "0").slice(-2);
+      const nome = String(m && m.nome || "").trim();
+      if (!/^\d{2}$/.test(codigo) || codigo === "00" || nome.length < 2) return;
+      if (window.CANCEL_MOTIVOS_PADRAO.some(function(p) { return p.codigo === codigo; })) return;
+      map[codigo] = { codigo: codigo, nome: nome };
+    });
+    return Object.keys(map).sort().map(function(k) { return map[k]; });
+  };
+  const local = norm(window.cancelMotivosExtras());
+  if (!window.firebaseDb || !window.firebaseCollections) {
+    localStorage.setItem(key, JSON.stringify(local));
+    return local;
+  }
+  try {
+    const fc = window.firebaseCollections;
+    const ref = fc.doc(window.firebaseDb, "config", "global");
+    const snap = await fc.getDoc(ref);
+    const exists = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+    let cloud = [];
+    if (exists) {
+      try { cloud = JSON.parse((snap.data() || {})[key] || "[]") || []; } catch (e) { cloud = []; }
+    }
+    const merged = norm(cloud.concat(local));
+    localStorage.setItem(key, JSON.stringify(merged));
+    if (JSON.stringify(merged) !== JSON.stringify(norm(cloud))) {
+      const payload = {};
+      payload[key] = JSON.stringify(merged);
+      await fc.setDoc(ref, payload, { merge: true });
+    }
+    return merged;
+  } catch (e) {
+    localStorage.setItem(key, JSON.stringify(local));
+    return local;
+  }
+};
+
+window.cancelMotivoAdicionar = async function() {
+  const codigoEl = document.getElementById("cancel-motivo-novo-cod");
+  const nomeEl = document.getElementById("cancel-motivo-novo-nome");
+  const aviso = document.getElementById("cancel-contrato-aviso");
+  const codigo = String(codigoEl && codigoEl.value || "").replace(/\D/g, "").padStart(2, "0").slice(-2);
+  const nome = String(nomeEl && nomeEl.value || "").trim();
+  const falha = function(msg) { if (aviso) aviso.textContent = msg; };
+  if (!/^\d{2}$/.test(codigo) || codigo === "00") {
+    falha("Informe um código de dois dígitos.");
+    return;
+  }
+  if (nome.length < 3) {
+    falha("Informe o nome do motivo.");
+    return;
+  }
+  if (window.cancelMotivosLista().some(function(m) { return m.codigo === codigo; })) {
+    falha("Esse código já existe.");
+    return;
+  }
+  const extra = window.cancelMotivosExtras().concat([{ codigo: codigo, nome: nome }]);
+  localStorage.setItem(window.CANCEL_MOTIVOS_KEY, JSON.stringify(extra));
+  await window.cancelMotivosSincronizar();
+  if (codigoEl) codigoEl.value = "";
+  if (nomeEl) nomeEl.value = "";
+  window.cancelContratoPintarMotivos(codigo);
+  if (aviso) aviso.textContent = "Motivo " + codigo + " incluído.";
+};
+
+window.cancelContratoPintarMotivos = function(selecionado) {
+  const sel = document.getElementById("cancel-motivo");
+  if (!sel) return;
+  const atual = selecionado || sel.value;
+  sel.innerHTML = window.cancelMotivosLista().map(function(m) {
+    return `<option value="${m.codigo}"${m.codigo === atual ? " selected" : ""}>${m.codigo} — ${window.cancelContratoEsc(m.nome)}</option>`;
+  }).join("");
+  window.cancelContratoAtualizarRotulo();
+};
+
+window.cancelContratoAtualizarRotulo = function() {
+  const ini = (document.querySelector("input[name='cancel-iniciativa']:checked") || {}).value || "1";
+  const sel = document.getElementById("cancel-motivo");
+  const motivo = window.cancelMotivosLista().find(function(m) { return m.codigo === (sel && sel.value); });
+  const rot = window.cancelMotivoRotulo(ini, motivo || { codigo: "00", nome: "" });
+  const el = document.getElementById("cancel-motivo-rotulo");
+  if (el) el.textContent = rot.texto;
+};
+
+window.abrirCancelamentoContrato = function(customerId, saleId) {
+  const client = (window.clientList || []).find(function(c) {
+    return c && String(c.customerId) === String(customerId) && String(c.saleId) === String(saleId);
+  });
+  if (!client || !window.tituloTemZeroRestituicao(client)) {
+    const aviso = "O cancelamento pela API só vale para título com 0% de restituição.";
+    if (window.showToast) window.showToast(aviso, "warning");
+    return;
+  }
+  const velho = document.getElementById("cancel-contrato-pop");
+  if (velho) velho.remove();
+  const hoje = new Date();
+  const iso = hoje.getFullYear() + "-" + String(hoje.getMonth() + 1).padStart(2, "0") + "-" + String(hoje.getDate()).padStart(2, "0");
+  const pop = document.createElement("div");
+  pop.id = "cancel-contrato-pop";
+  pop.style.cssText = "position:fixed;inset:0;background:rgba(12,41,29,0.55);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px;";
+  pop.innerHTML = `
+    <div style="background:#fff;border-radius:12px;width:min(560px,100%);max-height:min(88vh,760px);overflow:auto;box-shadow:0 18px 40px rgba(0,0,0,0.22);border:1px solid rgba(16,84,54,0.12);">
+      <div style="background:#105436;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px;">
+        <div>
+          <div style="color:#fff;font-size:0.95rem;font-weight:800;">Cancelar contrato</div>
+          <div style="color:rgba(255,255,255,0.82);font-size:0.75rem;margin-top:2px;">${window.cancelContratoEsc(client.customerName || "")} · título ${window.cancelContratoEsc(client.saleId)}</div>
+        </div>
+        <button type="button" class="btn btn-fechar" onclick="window.fecharCancelamentoContrato()">Fechar</button>
+      </div>
+      <div style="padding:18px;display:flex;flex-direction:column;gap:12px;">
+        <p style="margin:0;font-size:0.8rem;color:#475569;line-height:1.45;">Título com 0% de restituição. O código 1 é iniciativa do cliente e o 2 é iniciativa da empresa. Exemplo: 101 - iniciativa do cliente por desemprego.</p>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;">Data
+          <input id="cancel-data" type="date" value="${iso}" style="height:38px;border:1px solid #cbd5e1;border-radius:8px;padding:0 10px;font-size:0.88rem;color:#0f172a;text-transform:none;font-weight:600;">
+        </label>
+        <div style="display:flex;gap:16px;font-size:0.84rem;color:#0f172a;font-weight:600;">
+          <label style="display:flex;align-items:center;gap:6px;"><input type="radio" name="cancel-iniciativa" value="1" checked onchange="window.cancelContratoAtualizarRotulo()"> Iniciativa do cliente</label>
+          <label style="display:flex;align-items:center;gap:6px;"><input type="radio" name="cancel-iniciativa" value="2" onchange="window.cancelContratoAtualizarRotulo()"> Iniciativa da empresa</label>
+        </div>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;">Motivo
+          <select id="cancel-motivo" onchange="window.cancelContratoAtualizarRotulo()" style="height:38px;border:1px solid #cbd5e1;border-radius:8px;padding:0 10px;font-size:0.88rem;color:#0f172a;text-transform:none;font-weight:600;"></select>
+        </label>
+        <div id="cancel-motivo-rotulo" style="background:#ecfdf5;color:#105436;border-radius:8px;padding:8px 10px;font-size:0.82rem;font-weight:700;"></div>
+        <div style="display:flex;gap:8px;align-items:flex-end;">
+          <label style="display:flex;flex-direction:column;gap:4px;font-size:0.72rem;font-weight:700;color:#64748b;width:88px;text-transform:uppercase;">Novo código
+            <input id="cancel-motivo-novo-cod" maxlength="2" inputmode="numeric" placeholder="24" style="height:38px;border:1px solid #cbd5e1;border-radius:8px;padding:0 10px;font-size:0.88rem;text-transform:none;font-weight:600;">
+          </label>
+          <label style="display:flex;flex-direction:column;gap:4px;font-size:0.72rem;font-weight:700;color:#64748b;flex:1;text-transform:uppercase;">Novo motivo
+            <input id="cancel-motivo-novo-nome" placeholder="Nome do motivo" style="height:38px;border:1px solid #cbd5e1;border-radius:8px;padding:0 10px;font-size:0.88rem;text-transform:none;font-weight:600;">
+          </label>
+          <button type="button" class="btn btn-outline" onclick="window.cancelMotivoAdicionar()">Incluir</button>
+        </div>
+        <p id="cancel-contrato-aviso" style="margin:0;min-height:1.1em;font-size:0.8rem;color:#b91c1c;"></p>
+      </div>
+      <div style="padding:0 18px 16px;display:flex;justify-content:flex-end;gap:8px;">
+        <button type="button" class="btn btn-cancel" onclick="window.fecharCancelamentoContrato()">Cancelar</button>
+        <button type="button" id="cancel-contrato-enviar" class="btn btn-primary" onclick="window.enviarCancelamentoContrato()">Enviar cancelamento</button>
+      </div>
+    </div>`;
+  pop._cliente = client;
+  document.body.appendChild(pop);
+  window.cancelContratoPintarMotivos("01");
+  window.cancelMotivosSincronizar().then(function() {
+    if (document.getElementById("cancel-motivo")) window.cancelContratoPintarMotivos();
+  }).catch(function() {});
+};
+
+window.fecharCancelamentoContrato = function() {
+  const pop = document.getElementById("cancel-contrato-pop");
+  if (pop) pop.remove();
+};
+
+window.cancelContratoRegistrar = function(client, status, summary, extra) {
+  if (!window.AuditService || typeof AuditService.logEvent !== "function") return;
+  const u = AuditService.currentUser();
+  AuditService.logEvent({
+    module: "Cobrança",
+    action: "Cancelar contrato",
+    status: status,
+    summary: summary,
+    user: u.name,
+    userEmail: u.email,
+    customerId: client && client.customerId,
+    customerLabel: client ? ((client.customerId || "") + " — " + (client.customerName || "")) : "",
+    titleId: client && client.saleId,
+    enterpriseId: client && client.costCenterId,
+    unitName: client && client.unitName,
+    details: extra || {}
+  });
+};
+
+window.enviarCancelamentoContrato = async function() {
+  const pop = document.getElementById("cancel-contrato-pop");
+  const client = pop && pop._cliente;
+  const aviso = document.getElementById("cancel-contrato-aviso");
+  const btn = document.getElementById("cancel-contrato-enviar");
+  const falha = function(msg) { if (aviso) { aviso.style.color = "#b91c1c"; aviso.textContent = msg; } };
+  if (!client || !window.tituloTemZeroRestituicao(client)) {
+    falha("O cancelamento pela API só vale para título com 0% de restituição.");
+    return;
+  }
+  const data = String((document.getElementById("cancel-data") || {}).value || "").slice(0, 10);
+  const ini = (document.querySelector("input[name='cancel-iniciativa']:checked") || {}).value || "";
+  const sel = document.getElementById("cancel-motivo");
+  const motivo = window.cancelMotivosLista().find(function(m) { return m.codigo === (sel && sel.value); });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) { falha("Informe a data do cancelamento."); return; }
+  if (ini !== "1" && ini !== "2") { falha("Escolha de quem foi a iniciativa."); return; }
+  if (!motivo) { falha("Escolha o motivo."); return; }
+  const rot = window.cancelMotivoRotulo(ini, motivo);
+  if (btn) btn.disabled = true;
+  if (aviso) { aviso.style.color = "#475569"; aviso.textContent = "Buscando o contrato de vendas…"; }
+  let contract = null;
+  try {
+    if (!window.SiengeApiService || typeof SiengeApiService.findSalesContract !== "function") {
+      throw new Error("A consulta de contrato não está disponível.");
+    }
+    contract = await SiengeApiService.findSalesContract({
+      customerId: client.customerId,
+      receivableBillId: client.saleId,
+      enterpriseId: client.costCenterId,
+      unitName: client.unitName
+    });
+    if (!contract || contract.id == null) throw new Error("Não encontrei o contrato de vendas deste título.");
+    if (aviso) aviso.textContent = "Enviando o cancelamento…";
+    await SiengeApiService.cancelSalesContract(contract.id, {
+      date: data,
+      reason: rot.texto,
+      subType: rot.codigo
+    });
+    const resumo = "Contrato " + contract.id + " cancelado no Sienge, motivo " + rot.texto + ", título " + client.saleId + " · " + (client.customerName || "");
+    window.cancelContratoRegistrar(client, "ok", resumo, { contractId: contract.id, reason: rot.texto, subType: rot.codigo, date: data });
+    if (window.showToast) window.showToast("Contrato cancelado no Sienge.", "success");
+    window.fecharCancelamentoContrato();
+  } catch (e) {
+    const msg = (e && e.message) ? String(e.message) : "Falha ao cancelar o contrato.";
+    falha(msg);
+    window.cancelContratoRegistrar(client, "erro", "Falha ao cancelar o contrato do título " + client.saleId + " · " + (client.customerName || "") + ". " + msg, {
+      contractId: contract && contract.id,
+      reason: rot.texto,
+      subType: rot.codigo,
+      date: data
+    });
+    if (btn) btn.disabled = false;
+  }
+};
+
+window.getNexCumpridaAgingHtml = function(client) {
+  const days = Number(client && client.maxDaysDelay) || 0;
+  const dayLabel = days + " dia" + (days === 1 ? "" : "s");
+  const zero = window.tituloTemZeroRestituicao(client);
+  const estilo = "padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #105436; background-color: #ecfdf5; color: #105436; font-weight: 700;";
+  if (!zero) {
+    return `<span style="${estilo}" title="NEX com validade jurídica (${dayLabel}). O cancelamento pela API só vale para título com 0% de restituição.">
+      <i data-lucide="file-warning" style="width: 14px; height: 14px;"></i> Avaliar Cancelamento
+    </span>`;
+  }
+  const cid = Number(client && client.customerId) || 0;
+  const sale = String(client && client.saleId || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  return `<button type="button" onclick="event.stopPropagation(); window.abrirCancelamentoContrato(${cid}, '${sale}')" style="${estilo} cursor: pointer;" title="0% de restituição (${dayLabel}). Abrir o cancelamento do contrato no Sienge.">
+    <i data-lucide="file-warning" style="width: 14px; height: 14px;"></i> Avaliar Cancelamento
+  </button>`;
 };
 
 window.getAcordoQuebradoAgingHtml = function(client) {
@@ -8969,6 +9343,34 @@ window.openSecondaryBuyerPopup = async function(customerId) {
   </div>`;
 };
 
+window.reiniciarFilaAoSair = function() {
+  const input = document.getElementById("dashboard-search-input");
+  if (input) input.value = "";
+  window.homeInsightFilter = null;
+  const banner = document.getElementById("home-insight-banner");
+  if (banner) banner.style.display = "none";
+  const fresh = JSON.parse(JSON.stringify(defaultAdvFilterState));
+  fresh.paidMap = (window.advFiltersFila && window.advFiltersFila.paidMap) || new Map();
+  window.advFiltersFila = fresh;
+  if (!window.currentAdvFilterContext || window.currentAdvFilterContext === "fila") {
+    window.advFilters = window.advFiltersFila;
+  }
+  const badge = document.getElementById("adv-filters-badge");
+  if (badge) badge.style.display = "none";
+  const locked = typeof window.userSeesOnlyAssignedClients === "function" && window.userSeesOnlyAssignedClients();
+  if (!locked) {
+    activeOperatorFilter = "TODOS";
+    window.activeOperatorFilter = "TODOS";
+  }
+  if (typeof window.updateOperatorTabsUI === "function") window.updateOperatorTabsUI();
+  if (window.currentAdvFilterContext === "fila" && typeof window.closeAdvFiltersModal === "function") {
+    window.closeAdvFiltersModal();
+  }
+  if (AppState.dashboardRendered && typeof loadDashboardData === "function") {
+    setTimeout(function() { loadDashboardData(false); }, 0);
+  }
+};
+
 window.scheduleFilaTextSearch = function(which) {
   clearTimeout(window._filaSearchTimer);
   window._filaSearchTimer = setTimeout(() => {
@@ -10056,6 +10458,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
     clientList = clientList.filter(c => window.homeInsightFilter.keys.has(String(c.customerId) + "-" + String(c.saleId)));
   }
 
+  if (typeof window.rebuildNexCumpridaIndex === "function") window.rebuildNexCumpridaIndex();
   const originalAdvFilters = window.advFilters;
   window.advFilters = window.advFiltersFila || {};
   clientList = window.applyAdvFiltersTo(clientList);
@@ -10492,7 +10895,9 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
           <td style="white-space: nowrap; text-align: center; width: 1%;">
             <div style="display: flex; align-items: center; justify-content: center;">
               ${(() => {
-                  const agingInner = (typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(client) : client.subjudice === "S") ? `
+                  const agingInner = (typeof window.clientHasNexCumprida === "function" && window.clientHasNexCumprida(client) && typeof window.getNexCumpridaAgingHtml === "function")
+                  ? window.getNexCumpridaAgingHtml(client)
+                  : (typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(client) : client.subjudice === "S") ? `
               <span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #9ca3af; background-color: #f3f4f6; color: #374151; font-weight: 600;">
                 <i data-lucide="scale" style="width: 14px; height: 14px;"></i> Sub judice - ${client.maxDaysDelay} dia${client.maxDaysDelay === 1 ? '' : 's'}
               </span>
@@ -24574,6 +24979,7 @@ async function loadAgendaTab(showLoader = false) {
 }
 
 async function renderAgendaCalendar() {
+  window._agendaSigCache = null;
   const grid = document.getElementById("calendar-days-grid");
   const monthYearEl = document.getElementById("calendar-month-year");
   if (!grid || !monthYearEl) return;
@@ -24739,6 +25145,8 @@ window.occurrenceDueDateKey = function(occ) {
 };
 
 window.agendaNotesSignature = function() {
+    const now = Date.now();
+    if (window._agendaSigCache && (now - window._agendaSigCache.at) < 1500) return window._agendaSigCache.sig;
     const store = (window.AppState && AppState.notes) || {};
     let notes = 0;
     let due = 0;
@@ -24747,7 +25155,9 @@ window.agendaNotesSignature = function() {
       notes += list.length;
       list.forEach(o => { if (o && window.occurrenceDueDateKey(o)) due += 1; });
     });
-    return notes + ':' + due;
+    const sig = notes + ':' + due;
+    window._agendaSigCache = { at: now, sig: sig };
+    return sig;
 };
 
 window.isRealContactOccurrence = function(occ) {
@@ -24775,6 +25185,20 @@ window.occurrenceHandledByLaterContact = function(occ, occList) {
     });
 };
 
+window.agendaSaleIndexes = function(salesList) {
+    const byId = new Map();
+    const byBill = new Map();
+    const byCustomer = new Map();
+    (salesList || []).forEach(s => {
+      if (!s) return;
+      if (s.id != null && !byId.has(String(s.id))) byId.set(String(s.id), s);
+      if (s.receivableBillId != null && !byBill.has(String(s.receivableBillId))) byBill.set(String(s.receivableBillId), s);
+      const cid = s.customerId != null ? String(s.customerId) : '';
+      if (cid && !byCustomer.has(cid)) byCustomer.set(cid, s);
+    });
+    return { byId, byBill, byCustomer };
+};
+
 window.collectAgendaDueItems = function(dateStr, opts) {
     opts = opts || {};
     const dateKey = window.promiseDateKey(dateStr);
@@ -24783,17 +25207,28 @@ window.collectAgendaDueItems = function(dateStr, opts) {
     const searchFilter = String(opts.searchFilter || '').toLowerCase().trim();
     const typeFilter = opts.typeFilter || 'todas';
     const pendingOnly = !!opts.pendingOnly;
-    const customers = (typeof getSiengeApiMode === 'function' && getSiengeApiMode() === 'simulado')
-      ? ((window.MOCK_DATA && window.MOCK_DATA.CUSTOMERS) || {})
-      : ((window.AppState && AppState.customers) || {});
+    const notesSig = typeof window.agendaNotesSignature === 'function' ? window.agendaNotesSignature() : '';
     const salesList = (typeof getSiengeApiMode === 'function' && getSiengeApiMode() === 'simulado')
       ? ((window.MOCK_DATA && window.MOCK_DATA.SALES) || [])
       : ((window.AppState && AppState.sales) || []);
+    const cacheKey = [notesSig, salesList.length, (salesList[0] && salesList[0].id) || "", selectedOperator, searchFilter, typeFilter].join('|');
+    const take = (map) => {
+      const rows = (map && map.get(dateKey)) || [];
+      if (!pendingOnly) return rows.slice();
+      return rows.filter(it => it && it.promiseStatus === 'Pendente' && !it.isResolved);
+    };
+    if (window._agendaDueCache && window._agendaDueCache.key === cacheKey) return take(window._agendaDueCache.map);
+
+    const customers = (typeof getSiengeApiMode === 'function' && getSiengeApiMode() === 'simulado')
+      ? ((window.MOCK_DATA && window.MOCK_DATA.CUSTOMERS) || {})
+      : ((window.AppState && AppState.customers) || {});
     const mockSales = (window.MOCK_DATA && window.MOCK_DATA.SALES) || [];
+    const saleIdx = window.agendaSaleIndexes(salesList);
+    const mockIdx = window.agendaSaleIndexes(mockSales);
     const store = (window.AppState && AppState.notes) || {};
     const visited = new Set();
     const seenOcc = new Set();
-    const items = [];
+    const buckets = new Map();
 
     Object.keys(store).forEach(custIdStr => {
       const norm = window.normalizeCustomerNotesKey ? window.normalizeCustomerNotesKey(custIdStr) : String(custIdStr);
@@ -24804,13 +25239,32 @@ window.collectAgendaDueItems = function(dateStr, opts) {
         : (Array.isArray(store[custIdStr]) ? store[custIdStr] : []);
       const customer = customers[custIdStr] || customers[Number(custIdStr)] || customers[norm] || null;
 
+      const laterContacts = [];
+      occList.forEach(o => {
+        if (!window.isRealContactOccurrence(o)) return;
+        const t = o.date ? new Date(o.date).getTime() : NaN;
+        if (!Number.isFinite(t)) return;
+        const tok = (typeof window.normalizeContractIdToken === 'function')
+          ? window.normalizeContractIdToken(o.saleId || o.contractId)
+          : String((o.saleId || o.contractId) == null ? '' : (o.saleId || o.contractId));
+        laterContacts.push({ t: t, sale: tok, ref: o });
+      });
       occList.forEach((occ, index) => {
         if (!occ || occ.status === 'Cancelada') return;
         const due = window.occurrenceDueDateKey(occ);
-        if (due !== dateKey) return;
-        if (pendingOnly && occ.promiseStatus !== 'Pendente') return;
-        const handledLater = window.occurrenceHandledByLaterContact(occ, occList);
-        if (pendingOnly && handledLater) return;
+        if (!due) return;
+        const baseTime = occ.date ? new Date(occ.date).getTime() : NaN;
+        const baseSale = (typeof window.normalizeContractIdToken === 'function')
+          ? window.normalizeContractIdToken(occ.saleId || occ.contractId)
+          : String((occ.saleId || occ.contractId) == null ? '' : (occ.saleId || occ.contractId));
+        let handledLater = false;
+        if (Number.isFinite(baseTime)) {
+          for (let ci = 0; ci < laterContacts.length; ci++) {
+            const c = laterContacts[ci];
+            if (c.ref === occ || c.t <= baseTime) continue;
+            if (!baseSale || !c.sale || c.sale === baseSale) { handledLater = true; break; }
+          }
+        }
         if (selectedOperator !== 'Todos' && typeof window.occurrenceAuthorMatchesOperator === 'function'
             && !window.occurrenceAuthorMatchesOperator(occ.author, selectedOperator)) return;
         if (typeFilter !== 'todas') {
@@ -24819,9 +25273,10 @@ window.collectAgendaDueItems = function(dateStr, opts) {
         }
 
         let occSaleId = occ.saleId || occ.contractId || '';
-        let sale = salesList.find(s => String(s.id) === String(occSaleId) || String(s.receivableBillId) === String(occSaleId));
-        if (!sale) sale = salesList.find(s => String(s.customerId) === String(custIdStr) || String(s.customerId) === String(norm));
-        if (!sale) sale = mockSales.find(s => String(s.id) === String(occSaleId) || String(s.customerId) === String(custIdStr)) || { id: null, unitId: '' };
+        const saleKey = String(occSaleId);
+        let sale = saleIdx.byId.get(saleKey) || saleIdx.byBill.get(saleKey)
+          || saleIdx.byCustomer.get(String(custIdStr)) || saleIdx.byCustomer.get(String(norm));
+        if (!sale) sale = mockIdx.byId.get(saleKey) || mockIdx.byCustomer.get(String(custIdStr)) || { id: null, unitId: '' };
         if (!occSaleId) occSaleId = sale.id || 'N/D';
 
         let rawUnitId = occ.unitId || sale.unitId || 'N/D';
@@ -24868,7 +25323,7 @@ window.collectAgendaDueItems = function(dateStr, opts) {
         const cpfRaw = (customer && (customer.cpf || customer.cnpj)) || '';
         const cpfMasked = cpfRaw ? String(cpfRaw).replace(/^(\d{3})\.(\d{3})\.(\d{3})-(\d{2})$/, '***.***.$3-$4') : '***.***.***-**';
 
-        items.push({
+        const row = {
           customerId: customer && customer.id != null ? customer.id : (Number(norm) || norm),
           customerName: (customer && customer.name) || occ.customerName || ('Cliente ' + norm),
           cpf: cpfMasked,
@@ -24884,10 +25339,14 @@ window.collectAgendaDueItems = function(dateStr, opts) {
           agendaAlert: occ.agendaAlert,
           isResolved: handledLater,
           isFila: false
-        });
+        };
+        const bucket = buckets.get(due);
+        if (bucket) bucket.push(row);
+        else buckets.set(due, [row]);
       });
     });
-    return items;
+    window._agendaDueCache = { key: cacheKey, map: buckets };
+    return take(buckets);
 };
 
 window.recordBarrigaSeal = function(operator, dateStr) {
@@ -25253,9 +25712,16 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
       }
 
       try {
-          let currentSale = (AppState.sales || []).find(s => String(s.id) === String(item.saleId) || String(s.receivableBillId) === String(item.saleId));
+          let currentSale = (window._filaSaleIdx && (window._filaSaleIdx.byId.get(String(item.saleId)) || window._filaSaleIdx.byBill.get(String(item.saleId))))
+            || (AppState.sales || []).find(s => String(s.id) === String(item.saleId) || String(s.receivableBillId) === String(item.saleId));
           let realCustomerId = currentSale && currentSale.customerId ? currentSale.customerId : item.customerId;
-          const data = await SiengeApiService.getCustomerFinancialStatements(realCustomerId);
+          window._filaStmtCache = window._filaStmtCache || new Map();
+          const stmtHit = window._filaStmtCache.get(String(realCustomerId));
+          let data = stmtHit && (Date.now() - stmtHit.at) < 10 * 60 * 1000 ? stmtHit.data : null;
+          if (!data) {
+              data = await SiengeApiService.getCustomerFinancialStatements(realCustomerId);
+              window._filaStmtCache.set(String(realCustomerId), { at: Date.now(), data: data || { results: [] } });
+          }
           if (data && data.results && data.results.length > 0) {
               const billsReceivable = data.results[0].billsReceivable || [];
               let billIdToMatch = currentSale ? (currentSale.receivableBillId || item.saleId) : item.saleId;
@@ -25299,6 +25765,7 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
       return true;
   };
 
+  window._filaSaleIdx = window.agendaSaleIndexes(AppState.sales || []);
   const selectedQueue = [];
   const selectedIds = new Set();
 
@@ -25322,7 +25789,11 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
                   selectedQueue.push(res.item);
               }
           }
-          await new Promise(resolve => setTimeout(resolve, 500));
+          const precisaEsperar = batch.some(item => {
+              const hit = window._filaStmtCache && window._filaStmtCache.get(String(item.customerId));
+              return hit && (Date.now() - hit.at) < 400;
+          });
+          if (precisaEsperar) await new Promise(resolve => setTimeout(resolve, 120));
       }
   };
 
@@ -25396,6 +25867,7 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
 };
 
 async function loadAgendaDayTasks(dateStr) {
+  window._agendaSigCache = null;
   window.currentSelectedAgendaDate = dateStr;
   const dateHeader = document.getElementById("selected-agenda-date-str");
   const body = document.getElementById("agenda-selected-day-body");
@@ -29239,6 +29711,8 @@ window.nexPaymentDatesAfter = function(isoDate) {
 };
 
 window.nexReceiptDatesForSale = function(saleId) {
+  const look = window._nexLook;
+  if (look && look.receipts) return look.receipts.get(String(saleId || "")) || [];
   const dates = [];
   const addFrom = (arr) => {
     (arr || []).forEach(b => {
@@ -29258,6 +29732,8 @@ window.nexReceiptDatesForSale = function(saleId) {
 
 window.nexLostValidityByPayment = function(item) {
   if (!item) return { lost: false };
+  const memo = window._nexLook && window._nexLook.lost;
+  if (memo && memo.has(item)) return memo.get(item);
   const gen = window.nexParseIso(item.date || item.createdAt);
   if (!gen) return { lost: false };
   const sameFicha = String((AppState && AppState.selectedCustomerId) || "") === String(item.customerId || "")
@@ -29271,8 +29747,9 @@ window.nexLostValidityByPayment = function(item) {
   const salePays = window.nexReceiptDatesForSale(item.titulo || item.saleId).filter(d => d > gen);
   pays = pays.concat(salePays);
   pays = pays.filter(Boolean).sort();
-  if (pays.length) return { lost: true, pay: pays[0] };
-  return { lost: false };
+  const result = pays.length ? { lost: true, pay: pays[0] } : { lost: false };
+  if (memo) memo.set(item, result);
+  return result;
 };
 
 window.nexIsLegallyValid = function(item) {
@@ -29347,6 +29824,8 @@ window.purgeNexItems = async function(shouldRemove, opts) {
       const rows = Array.isArray(window._nexHistory[k]) ? window._nexHistory[k] : [];
       window._nexHistory[k] = rows.filter(it => !drop(it, k));
     });
+    window._nexHistStamp = (window._nexHistStamp || 0) + 1;
+    window._nexCollectCache = null;
   }
   if (!localOnly && window.firebaseDb && window.firebaseCollections) {
     try {
@@ -29696,6 +30175,12 @@ window.ensureAllNexCleared = async function() {
 
 window.nexClientIsZeroPaid = function(customerId, saleId) {
   const key = String(customerId) + "-" + String(saleId);
+  const look = window._nexLook;
+  if (look) {
+    if (look.zero.has(key)) return true;
+    const sale = window.nexSaleFromLook(saleId);
+    return !!(sale && sale.percPaid != null && Number(sale.percPaid) === 0);
+  }
   const lists = [window.zeroPaidList, window.clientList, window.rawClientList];
   for (const list of lists) {
     if (!Array.isArray(list)) continue;
@@ -29871,6 +30356,8 @@ window.loadNexHistory = async function(customerId, saleId) {
   }));
   const key = window.nexHistoryKey(customerId, titulo);
   window._nexHistory[key] = merged;
+  window._nexHistStamp = (window._nexHistStamp || 0) + 1;
+  window._nexCollectCache = null;
   try {
     const bag = JSON.parse(localStorage.getItem("crm_nex_history") || "{}") || {};
     bag[key] = merged.map(it => {
@@ -29888,6 +30375,8 @@ window.saveNexHistory = async function(customerId, saleId, items) {
   const key = window.nexHistoryKey(customerId, titulo);
   window._nexHistory = window._nexHistory || {};
   window._nexHistory[key] = items;
+  window._nexHistStamp = (window._nexHistStamp || 0) + 1;
+  window._nexCollectCache = null;
   try {
     const bag = JSON.parse(localStorage.getItem("crm_nex_history") || "{}") || {};
     bag[key] = items.map(it => {
@@ -30213,10 +30702,18 @@ window.hydrateNexHistoryBag = async function() {
       const local = Array.isArray(bag[key]) ? bag[key] : [];
       const byId = {};
       local.concat(items).forEach(it => { if (it && it.id) byId[String(it.id)] = it; });
-      bag[key] = Object.values(byId);
-      window._nexHistory[key] = bag[key];
+      const full = Object.values(byId);
+      window._nexHistory[key] = full;
+      bag[key] = full.map(it => {
+        if (!it || !it.html) return it;
+        const copy = Object.assign({}, it);
+        delete copy.html;
+        return copy;
+      });
     });
     localStorage.setItem("crm_nex_history", JSON.stringify(bag));
+    window._nexHistStamp = (window._nexHistStamp || 0) + 1;
+    window._nexCollectCache = null;
     window._nexBagHydrated = true;
   } catch (e) {
     console.warn("[NEX] Falha ao sincronizar follow-up", e);
@@ -30294,34 +30791,114 @@ window.nexDedupeItems = function(items) {
   return out;
 };
 
-window.nexCollectAll = function() {
-  let bag = {};
-  try { bag = JSON.parse(localStorage.getItem("crm_nex_history") || "{}") || {}; } catch (e) { bag = {}; }
-  if (window._nexHistory) {
-    Object.keys(window._nexHistory).forEach(k => {
-      const mem = Array.isArray(window._nexHistory[k]) ? window._nexHistory[k] : [];
-      if (!mem.length) return;
-      const local = Array.isArray(bag[k]) ? bag[k] : [];
-      const byId = {};
-      local.forEach(it => { if (it && it.id) byId[String(it.id)] = it; });
-      mem.forEach(it => { if (it && it.id) byId[String(it.id)] = { ...(byId[String(it.id)] || {}), ...it }; });
-      bag[k] = Object.values(byId);
+window.nexEnsureLookups = function(force) {
+  const sales = ((typeof getSiengeApiMode === "function" && getSiengeApiMode() === "simulado")
+    ? (window.MOCK_DATA && window.MOCK_DATA.SALES)
+    : (AppState && AppState.sales)) || [];
+  const lists = [window.clientList, window.rawClientList, window.zeroPaidList];
+  const billsA = (AppState && AppState.defaultersBills) || [];
+  const billsB = (AppState && AppState.paidBills) || [];
+  const sig = [sales.length, lists.map(l => (l && l.length) || 0).join(","), billsA.length, billsB.length].join("|");
+  if (!force && window._nexLook && window._nexLook.sig === sig) return window._nexLook;
+  const byId = new Map();
+  const byBill = new Map();
+  sales.forEach(s => {
+    if (!s) return;
+    if (s.id != null && !byId.has(String(s.id))) byId.set(String(s.id), s);
+    if (s.receivableBillId != null && !byBill.has(String(s.receivableBillId))) byBill.set(String(s.receivableBillId), s);
+  });
+  const zero = new Set();
+  const filaByCustomer = new Map();
+  lists.forEach(list => {
+    if (!Array.isArray(list)) return;
+    list.forEach(c => {
+      if (!c) return;
+      const cid = String(c.customerId);
+      if (!filaByCustomer.has(cid)) filaByCustomer.set(cid, []);
+      filaByCustomer.get(cid).push(c);
+      if (list === window.zeroPaidList || c.isZeroPaid || (c.percPaid != null && Number(c.percPaid) === 0)) {
+        zero.add(cid + "-" + String(c.saleId));
+      }
     });
+  });
+  const receipts = new Map();
+  const pushDates = (key, dates) => {
+    if (key == null || key === "") return;
+    const k = String(key);
+    const cur = receipts.get(k);
+    if (cur) dates.forEach(d => cur.push(d));
+    else receipts.set(k, dates.slice());
+  };
+  const addBill = (b) => {
+    if (!b) return;
+    const dates = [];
+    const d = window.nexParseIso(b.receiptDate || b.payOffDate || b.paymentDate);
+    if (d) dates.push(d);
+    (b.receipts || []).forEach(r => {
+      const d2 = window.nexParseIso(r.receiptDate || r.date);
+      if (d2) dates.push(d2);
+    });
+    if (!dates.length) return;
+    const keys = [];
+    [b.saleId, b.receivableBillId, b.id].forEach(v => {
+      if (v == null || v === "") return;
+      const s = String(v);
+      if (keys.indexOf(s) < 0) keys.push(s);
+    });
+    keys.forEach(k => pushDates(k, dates));
+  };
+  billsA.forEach(addBill);
+  billsB.forEach(addBill);
+  window._nexLook = { sig, byId, byBill, zero, filaByCustomer, receipts, lost: new WeakMap() };
+  return window._nexLook;
+};
+
+window.nexSaleFromLook = function(saleId) {
+  const look = window._nexLook;
+  if (!look) return null;
+  const key = String(saleId || "");
+  return look.byBill.get(key) || look.byId.get(key) || null;
+};
+
+window.nexCollectAll = function() {
+  const stamp = window._nexHistStamp || 0;
+  if (window._nexCollectCache && window._nexCollectCache.stamp === stamp && stamp) {
+    return window._nexCollectCache.items;
+  }
+  let bag = null;
+  if (window._nexHistory && stamp) bag = window._nexHistory;
+  if (!bag) {
+    try { bag = JSON.parse(localStorage.getItem("crm_nex_history") || "{}") || {}; } catch (e) { bag = {}; }
+    if (window._nexHistory) {
+      Object.keys(window._nexHistory).forEach(k => {
+        const mem = Array.isArray(window._nexHistory[k]) ? window._nexHistory[k] : [];
+        if (!mem.length) return;
+        const local = Array.isArray(bag[k]) ? bag[k] : [];
+        const byId = {};
+        local.forEach(it => { if (it && it.id) byId[String(it.id)] = it; });
+        mem.forEach(it => { if (it && it.id) byId[String(it.id)] = { ...(byId[String(it.id)] || {}), ...it }; });
+        bag[k] = Object.values(byId);
+      });
+    }
   }
   const items = [];
   Object.keys(bag).forEach(k => {
     (Array.isArray(bag[k]) ? bag[k] : []).forEach(it => {
       if (!it) return;
       const parts = String(k).split("_");
-      items.push({
-        ...it,
+      const copy = Object.assign({}, it);
+      if (copy.html) delete copy.html;
+      items.push(Object.assign(copy, {
         customerId: String(it.customerId || parts[0] || ""),
         titulo: String(it.titulo || parts.slice(1).join("_") || ""),
         _key: k
-      });
+      }));
     });
   });
-  return window.nexDedupeItems(items);
+  const out = window.nexDedupeItems(items);
+  window._nexHistStamp = stamp || 1;
+  window._nexCollectCache = { stamp: window._nexHistStamp, items: out };
+  return out;
 };
 
 window.nexResolveItem = async function(id) {
@@ -30763,7 +31340,14 @@ window.paintFilaSignalCells = function() {
 window.ensureFilaSignalsIndex = function() {
   if (!window._nexBagHydrated && typeof window.hydrateNexHistoryBag === "function") {
     Promise.resolve(window.hydrateNexHistoryBag())
-      .then(() => window.paintFilaSignalCells())
+      .then(() => {
+        if (typeof window.rebuildNexCumpridaIndex === "function") window.rebuildNexCumpridaIndex();
+        window.paintFilaSignalCells();
+        const pane = document.getElementById("tab-dashboard");
+        if (pane && pane.style.display !== "none" && AppState.dashboardRendered && typeof loadDashboardData === "function") {
+          loadDashboardData(false);
+        }
+      })
       .catch(() => {});
   }
   if (window._filaSignals && window._filaSignals.ready && Date.now() - window._filaSignals.at < 120000) {
@@ -31315,13 +31899,19 @@ window.checkNexDueAlerts = function(isTest) {
 window.nexFindFilaClient = function(customerId, saleId) {
   const cid = String(customerId || "");
   const sid = String(saleId || "").replace(/^B-/, "").split("-")[0];
-  const lists = [window.clientList, window.rawClientList, window.zeroPaidList].filter(Array.isArray);
   const saleMatch = (c) => {
     if (!sid) return true;
     if (String(c.saleId) === sid || String(c.receivableBillId) === sid) return true;
     const bills = c.billIds || [];
     return bills.some(id => String(id) === sid || String(id).replace(/^B-/, "").split("-")[0] === sid);
   };
+  const look = window._nexLook;
+  if (look && look.filaByCustomer) {
+    const rows = look.filaByCustomer.get(cid) || [];
+    const exact = rows.find(saleMatch);
+    return exact || rows[0] || null;
+  }
+  const lists = [window.clientList, window.rawClientList, window.zeroPaidList].filter(Array.isArray);
   for (let i = 0; i < lists.length; i++) {
     const hit = lists[i].find(c => String(c.customerId) === cid && saleMatch(c));
     if (hit) return hit;
@@ -31353,7 +31943,7 @@ window.nexResolveCustomerName = function(customerId, saleId, item) {
   const sales = ((typeof getSiengeApiMode === "function" && getSiengeApiMode() === "simulado")
     ? (window.MOCK_DATA && window.MOCK_DATA.SALES)
     : (AppState && AppState.sales)) || [];
-  const sale = sales.find(s => String(s.receivableBillId) === String(saleId) || String(s.id) === String(saleId));
+  const sale = window.nexSaleFromLook(saleId) || sales.find(s => String(s.receivableBillId) === String(saleId) || String(s.id) === String(saleId));
   if (sale && (sale.customerName || sale.clientName) && !window.nexIsPlaceholderName(sale.customerName || sale.clientName)) {
     return sale.customerName || sale.clientName;
   }
@@ -31376,7 +31966,7 @@ window.nexUnitLabelForSale = function(customerId, saleId, item) {
   const sales = ((typeof getSiengeApiMode === "function" && getSiengeApiMode() === "simulado")
     ? (window.MOCK_DATA && window.MOCK_DATA.SALES)
     : (AppState && AppState.sales)) || [];
-  const sale = sales.find(s => String(s.receivableBillId) === String(saleId) || String(s.id) === String(saleId));
+  const sale = window.nexSaleFromLook(saleId || (item && item.titulo)) || sales.find(s => String(s.receivableBillId) === String(saleId) || String(s.id) === String(saleId));
   const unit = sale && AppState.units ? AppState.units[sale.unitId] : null;
   const ccId = (unit && unit.costCenterId) || (sale && (sale.costCenterId || sale.enterpriseId)) || "";
   const unitName = (unit && (unit.name || unit.units)) || (sale && (sale.unitName || sale.units || sale.unityName)) || "";
@@ -31531,6 +32121,7 @@ window.nexStampLetterMeta = function(rec, customerId, saleId) {
 window.renderNexFollowup = function() {
   const body = document.getElementById("nex-followup-body");
   if (!body) return;
+  if (typeof window.nexEnsureLookups === "function") window.nexEnsureLookups(true);
   const zeroOnlyChk = document.getElementById("nex-followup-zero-only");
   const zeroOnly = window.getNexFollowupZeroOnly();
   if (zeroOnlyChk) zeroOnlyChk.checked = zeroOnly;
@@ -31618,7 +32209,7 @@ window.updateNexTrackingFollowup = async function(id, value) {
 
 window.nexEmpNameForSale = function(saleId) {
   const sales = (getSiengeApiMode() === "simulado" ? (window.MOCK_DATA && window.MOCK_DATA.SALES) : AppState.sales) || [];
-  const sale = sales.find(s => String(s.receivableBillId) === String(saleId) || String(s.id) === String(saleId));
+  const sale = window.nexSaleFromLook(saleId) || sales.find(s => String(s.receivableBillId) === String(saleId) || String(s.id) === String(saleId));
   const unit = sale && AppState.units ? AppState.units[sale.unitId] : null;
   const ccId = unit && unit.costCenterId;
   const ccs = (AppState.cachedCostCenters || (window.MOCK_DATA && window.MOCK_DATA.COST_CENTERS) || []);
@@ -39287,6 +39878,15 @@ window.clearRelacionamento = function() {
   if (customerCard) customerCard.style.display = 'none';
   if (resultsCard) resultsCard.style.display = 'none';
   if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 30px; color: var(--color-text-muted);">Faça uma busca para ver os contratos do cliente.</td></tr>';
+  ["nome", "telefone", "email"].forEach(function(type) {
+    const dd = document.getElementById("custom-dropdown-" + type);
+    if (dd) dd.style.display = "none";
+  });
+  if (window.RelEmpPicker) {
+    RelEmpPicker.open = false;
+    RelEmpPicker.query = "";
+    if (typeof RelEmpPicker.render === "function") RelEmpPicker.render();
+  }
 };
 
 window.maskCpfCnpj = function(input) {
@@ -42482,6 +43082,7 @@ window.openAdvFiltersModal = function(context = 'fila') {
         if (dataFaseGroup) dataFaseGroup.style.display = isSubjudiceCtx ? 'block' : 'none';
         if (webroGroup) webroGroup.style.display = isZeropaidCtx ? 'block' : 'none';
         if (queueGroupsWrap) queueGroupsWrap.style.display = isFilaCtx ? 'block' : 'none';
+        if (typeof window.syncAdvFilterPills === "function") window.syncAdvFilterPills(window.advFilters);
         if (!isZeropaidCtx && window.advFilters) window.advFilters.webro = 'TODOS';
         if (!isFilaCtx && window.advFilters) window.advFilters.queueGroups = [];
 
@@ -42576,6 +43177,31 @@ window.openAdvFiltersModal = function(context = 'fila') {
     modal.style.display = 'flex';
     modal.classList.add('active');
     document.body.style.overflow = 'hidden';
+};
+
+window.syncAdvFilterPills = function(filters) {
+  const f = filters || {};
+  [
+    ["adv-pills-lotes", f.lotes],
+    ["adv-pills-aging", f.aging],
+    ["adv-pills-pmp", f.pmp],
+    ["adv-pills-parcelas", f.parcelas],
+    ["adv-pills-dueday", f.dueday],
+    ["adv-pills-idade", f.idade],
+    ["adv-pills-pagamento-recente", f.pagamentoRecente],
+    ["adv-pills-queue-groups", f.queueGroups]
+  ].forEach(function(pair) {
+    const group = document.getElementById(pair[0]);
+    if (!group) return;
+    const selected = (pair[1] || []).map(String);
+    group.querySelectorAll(".adv-pill").forEach(function(p) {
+      const val = p.dataset.value || "";
+      if (!val) p.classList.toggle("active", selected.length === 0);
+      else p.classList.toggle("active", selected.indexOf(val) >= 0);
+    });
+  });
+  const jur = document.getElementById("adv-select-juridico");
+  if (jur) jur.value = f.statusJuridico || "TODOS";
 };
 
 window.closeAdvFiltersModal = function() {
@@ -43946,7 +44572,24 @@ window.mergePlanoImpostos = function(localStr, cloudStr) {
       return o && typeof o === "object" && !Array.isArray(o) ? o : {};
     } catch (e) { return {}; }
   };
-  return JSON.stringify(Object.assign({}, ler(cloudStr), ler(localStr)));
+  const norm = (k) => String(k || "").replace(/\D/g, "");
+  const cloud = ler(cloudStr);
+  const local = ler(localStr);
+  const out = {};
+  const index = {};
+  const por = (k, v, overwrite) => {
+    const nk = norm(k);
+    const prev = nk && index[nk];
+    if (prev) {
+      if (!overwrite) return;
+      delete out[prev];
+    }
+    out[k] = v;
+    if (nk) index[nk] = k;
+  };
+  Object.keys(cloud).forEach((k) => por(k, cloud[k], false));
+  Object.keys(local).forEach((k) => por(k, local[k], true));
+  return JSON.stringify(out);
 };
 
 // Função que baixa configurações na inicialização
@@ -44326,8 +44969,18 @@ window.syncGlobalConfigFromFirebase = async function() {
                 if (k && k.startsWith("crm_perms_")) permKeys.add(k);
             }
             permKeys.forEach((k) => {
-                const localPerms = localStorage.getItem(k);
+                if (k.indexOf("crm_perms_bak_") === 0) return;
+                let localPerms = localStorage.getItem(k);
                 const cloudPerms = globalData[k];
+                const permId = k.slice("crm_perms_".length);
+                let bakPerms = "";
+                try { bakPerms = localStorage.getItem("crm_perms_bak_" + permId) || ""; } catch (e) {}
+                if (!bakPerms) {
+                    try { bakPerms = sessionStorage.getItem("crm_perms_bak_" + permId) || ""; } catch (e) {}
+                }
+                if (bakPerms && typeof window.pickPreferredCrmPerms === "function") {
+                    localPerms = window.pickPreferredCrmPerms(localPerms, bakPerms);
+                }
                 if (window._crmPermsLocalLockUntil && Date.now() < window._crmPermsLocalLockUntil && window.crmPermsPayloadHasTrue(localPerms)) {
                     if (localPerms && cloudPerms && localPerms !== cloudPerms && window.forceUploadLocalConfig) {
                         setTimeout(() => window.forceUploadLocalConfig(true), 1500);

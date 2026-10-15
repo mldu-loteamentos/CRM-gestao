@@ -3047,6 +3047,20 @@ const SiengeApiService = {
     }
   },
 
+  async cancelSalesContract(contractId, body) {
+    const id = String(contractId || "").trim();
+    if (!/^\d+$/.test(id)) throw new Error("Id do contrato de vendas inválido.");
+    const payload = {
+      date: String((body && body.date) || "").slice(0, 10),
+      reason: String((body && body.reason) || "").trim(),
+      subType: String((body && body.subType) || "").trim()
+    };
+    if (!payload.date || !payload.reason || !payload.subType) {
+      throw new Error("Data, motivo e subtipo são obrigatórios.");
+    }
+    return siengePost("/sales-contracts/" + encodeURIComponent(id) + "/cancellation", payload);
+  },
+
   // 9. Centro de Custo
   async getCostCenter(costCenterId) {
     if (s_apiMode === "simulado") {

@@ -9,6 +9,9 @@
    A aba Perfil da venda cruza sexo e idade dos clientes com a situação de pagamento e os cancelamentos. */
 const MarketingBudgetApp = {
   CONFIG_COLLECTION: "marketing_budget_config",
+  CACHE_TITULOS_COL: "marketing_budget_titulos",
+  CACHE_TITULOS_MS: 30 * 60 * 1000,
+  _cacheTitulos: {},
   CONFIG_LOCAL: "crm_marketing_budget_config",
   CAT_DOC: "_categorias",
   CAT_PADRAO: /MARKET|PUBLICI|PROPAGAND|M[IÍ]DIA|EVENTO|BRINDE|PATROCIN|STAND|PANFLET|OUTDOOR|ANUNCI|DIVULGA/i,
@@ -26,6 +29,8 @@ const MarketingBudgetApp = {
     progressRatio: 0,
     error: "",
     consultado: false,
+    consultaChave: "",
+    consultaPronta: false,
     obra: null,
     pct: 0,
     catSel: null,
@@ -453,7 +458,35 @@ const MarketingBudgetApp = {
   },
 
   onField(key, value) {
+    if (this.state[key] === value) return;
     this.state[key] = value;
+    if (key === "startDate" || key === "endDate") this.aplicarFiltroConsulta();
+  },
+
+  consultaChave() {
+    const s = this.state;
+    return [s.ccId || "", s.startDate || "", s.endDate || ""].join("|");
+  },
+
+  aplicarFiltroConsulta() {
+    const s = this.state;
+    const mesma = !!(s.consultaChave && s.consultaChave === this.consultaChave());
+    if (mesma) {
+      if (s.consultaPronta && !s.consultado && !s.loading) {
+        s.consultado = true;
+        s.error = "";
+        this.render();
+      }
+      return;
+    }
+    if (!s.consultado && !s.loading && !s.error) return;
+    s.gen += 1;
+    s.consultado = false;
+    s.loading = false;
+    s.error = "";
+    s.progress = "";
+    s.progressRatio = 0;
+    this.render();
   },
 
   textoProgresso(text) {
@@ -486,6 +519,8 @@ const MarketingBudgetApp = {
     if (!cc) { alert("Escolha o empreendimento (centro de custo)."); return; }
     if (!s.startDate || !s.endDate || s.startDate > s.endDate) { alert("Informe um período válido."); return; }
     const gen = (s.gen += 1);
+    s.consultaChave = this.consultaChave();
+    s.consultaPronta = false;
     s.loading = true;
     s.error = "";
     s.consultado = true;
@@ -538,6 +573,7 @@ const MarketingBudgetApp = {
     if (gen !== s.gen) return;
     s.loading = false;
     s.progress = "";
+    s.consultaPronta = !s.error;
     this.render();
     if (!s.error) this.carregarComplementos(cc, gen);
   },
@@ -602,19 +638,135 @@ const MarketingBudgetApp = {
     return list.filter((b) => String(b.costCenterId) === String(ccId));
   },
 
+  deslocarDia(iso, delta) {
+    const d = new Date(String(iso || "").slice(0, 10) + "T12:00:00");
+    if (Number.isNaN(d.getTime())) return "";
+    d.setDate(d.getDate() + delta);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  },
+
+  /* Trechos do período pedido que a consulta recente ainda não cobre. */
+  periodosFaltantes(cache, inicio, fim) {
+    if (!cache || !cache.start || !cache.end || inicio > cache.end || fim < cache.start) {
+      return [{ start: inicio, end: fim }];
+    }
+    const faltam = [];
+    if (inicio < cache.start) faltam.push({ start: inicio, end: this.deslocarDia(cache.start, -1) });
+    if (fim > cache.end) faltam.push({ start: this.deslocarDia(cache.end, 1), end: fim });
+    return faltam.filter((f) => f.start && f.end && f.start <= f.end);
+  },
+
+  cacheTitulosValido(item) {
+    if (!item || !item.savedAt || !Array.isArray(item.bills)) return false;
+    return Date.now() - Number(item.savedAt) <= this.CACHE_TITULOS_MS;
+  },
+
+  async lerCacheTitulos(ccId) {
+    const id = String(ccId || "");
+    const mem = this._cacheTitulos[id];
+    if (this.cacheTitulosValido(mem)) return mem;
+    if (!window.firebaseDb || !window.firebaseCollections) return null;
+    try {
+      const { doc, getDoc } = window.firebaseCollections;
+      const snap = await getDoc(doc(window.firebaseDb, this.CACHE_TITULOS_COL, id));
+      const existe = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+      if (!existe) return null;
+      const data = snap.data() || {};
+      if (Date.now() - Number(data.savedAt) > this.CACHE_TITULOS_MS) return null;
+      const n = Number(data.partes) || 0;
+      let json = "";
+      for (let i = 0; i < n; i++) {
+        const ped = await getDoc(doc(window.firebaseDb, this.CACHE_TITULOS_COL, id + "_" + i));
+        const ok = ped && (typeof ped.exists === "function" ? ped.exists() : ped.exists);
+        const pedaco = ok ? (ped.data() || {}) : {};
+        if (Number(pedaco.savedAt) !== Number(data.savedAt)) return null;
+        json += String(pedaco.texto || "");
+      }
+      const bills = JSON.parse(json || "[]");
+      if (!Array.isArray(bills)) return null;
+      const item = { start: String(data.start || ""), end: String(data.end || ""), savedAt: Number(data.savedAt), bills: bills };
+      if (!this.cacheTitulosValido(item)) return null;
+      this._cacheTitulos[id] = item;
+      return item;
+    } catch (e) {
+      console.warn("[Budget] cache", e);
+      return null;
+    }
+  },
+
+  async gravarCacheTitulos(ccId, start, end, bills) {
+    const id = String(ccId || "");
+    const savedAt = Date.now();
+    const item = { start: start, end: end, savedAt: savedAt, bills: bills || [] };
+    this._cacheTitulos[id] = item;
+    if (!window.firebaseDb || !window.firebaseCollections) return;
+    try {
+      const { doc, setDoc } = window.firebaseCollections;
+      const json = JSON.stringify(item.bills);
+      const pedacos = [];
+      const tamanho = 700000;
+      for (let i = 0; i < json.length; i += tamanho) pedacos.push(json.slice(i, i + tamanho));
+      if (!pedacos.length) pedacos.push("[]");
+      await setDoc(doc(window.firebaseDb, this.CACHE_TITULOS_COL, id), {
+        start: start, end: end, savedAt: savedAt, partes: pedacos.length
+      });
+      for (let i = 0; i < pedacos.length; i++) {
+        await setDoc(doc(window.firebaseDb, this.CACHE_TITULOS_COL, id + "_" + i), {
+          i: i, texto: pedacos[i], savedAt: savedAt
+        });
+      }
+    } catch (e) {
+      console.warn("[Budget] não gravei o cache", e);
+    }
+  },
+
+  billEntraNoPeriodo(bill, inicio, fim) {
+    const datas = [];
+    const add = (v) => {
+      const d = String(v || "").slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(d)) datas.push(d);
+    };
+    add(bill && bill.dueDate);
+    add(bill && bill.issueDate);
+    const pays = (bill && bill.payments) || [];
+    (Array.isArray(pays) ? pays : [pays]).forEach((p) => {
+      if (!p) return;
+      add(p.paymentDate);
+      add(p.payOffDate);
+      add(p.date);
+      const movs = p.bankMovements || [];
+      (Array.isArray(movs) ? movs : [movs]).forEach((bm) => add(bm && bm.bankMovementDate));
+    });
+    if (!datas.length) return true;
+    return datas.some((d) => d >= inicio && d <= fim);
+  },
+
   async buscarTitulos(cc, gen, rotulo, onStep) {
     const base = window.ComprasControleApp || window.ComprasPrevisoesApp;
     if (!base || typeof base.outcomeRange !== "function") throw new Error("O módulo de contas a pagar não está disponível.");
     const s = this.state;
     const api = Object.create(base);
     const companyId = String(cc.idCompany != null ? cc.idCompany : (cc.companyId != null ? cc.companyId : ""));
-    const faixas = typeof siengeSplitDateRange === "function" ? siengeSplitDateRange(s.startDate, s.endDate) : [{ start: s.startDate, end: s.endDate }];
+    const inicio = s.startDate;
+    const fim = s.endDate;
+    let cache = null;
+    try { cache = await this.lerCacheTitulos(cc.id); } catch (e) { cache = null; }
+    if (gen !== s.gen) return [];
+    const recente = this.cacheTitulosValido(cache) ? cache : null;
+    const faltam = recente ? this.periodosFaltantes(recente, inicio, fim) : [{ start: inicio, end: fim }];
+    const reaproveita = !!(recente && !(inicio > recente.end || fim < recente.start));
+    const faixas = [];
+    faltam.forEach((f) => {
+      const pedacos = typeof siengeSplitDateRange === "function" ? siengeSplitDateRange(f.start, f.end) : [f];
+      pedacos.forEach((p) => faixas.push(p));
+    });
     const tipos = [
-      { tipo: "P", fase: "Buscando as baixas do período…" },
-      { tipo: "D", fase: "Buscando os títulos em aberto…" }
+      { tipo: "P", fase: faixas.length && reaproveita ? "Buscando as baixas do período que ainda não foi carregado…" : "Buscando as baixas do período…" },
+      { tipo: "D", fase: faixas.length && reaproveita ? "Buscando os títulos em aberto que ainda não foram carregados…" : "Buscando os títulos em aberto…" }
     ];
-    const bills = [];
-    for (let t = 0; t < tipos.length; t++) {
+    const bills = reaproveita ? recente.bills.slice() : [];
+    if (!faixas.length) this.setProgress("Usando a consulta recente…", 0.7);
+    for (let t = 0; t < tipos.length && faixas.length; t++) {
       api.outcomeEndpoint = (start, end, emp) => "/bulk-data/v1/outcome?startDate=" + encodeURIComponent(start)
         + "&endDate=" + encodeURIComponent(end)
         + "&selectionType=" + tipos[t].tipo + "&correctionIndexerId=0&correctionDate=2023-01-01&withAuthorizations=false&withBankMovements=true"
@@ -629,7 +781,40 @@ const MarketingBudgetApp = {
         if (Array.isArray(parte)) bills.push.apply(bills, parte);
       }
     }
-    return this.mesclarTitulos(bills);
+    if (gen !== s.gen) return [];
+    const todos = this.mesclarTitulos(bills);
+    if (faixas.length) {
+      const gravarInicio = reaproveita ? (inicio < recente.start ? inicio : recente.start) : inicio;
+      const gravarFim = reaproveita ? (fim > recente.end ? fim : recente.end) : fim;
+      await this.gravarCacheTitulos(cc.id, gravarInicio, gravarFim, todos);
+    }
+    if (gen !== s.gen) return [];
+    const cacheInteiro = reaproveita && inicio <= recente.start && fim >= recente.end;
+    if (!reaproveita || cacheInteiro) return todos;
+    return todos.filter((bill) => this.billEntraNoPeriodo(bill, inicio, fim));
+  },
+
+  chaveBaixa(pay) {
+    if (!pay || typeof pay !== "object") return "";
+    if (pay.id != null && pay.id !== "") return "id:" + pay.id;
+    if (pay.paymentId != null && pay.paymentId !== "") return "pid:" + pay.paymentId;
+    const movs = pay.bankMovements || [];
+    const lista = Array.isArray(movs) ? movs : [movs];
+    const mov = lista.map((bm) => String(bm && (bm.id || bm.bankMovementId || bm.bankMovementDate) || "")).join(",");
+    return ["d", pay.paymentDate || pay.payOffDate || pay.date || "", pay.netAmount, pay.correctedNetAmount, pay.grossAmount, mov].join("|");
+  },
+
+  unirBaixas(a, b) {
+    const lista = (x) => (Array.isArray(x) ? x : (x ? [x] : []));
+    const out = [];
+    const vistos = {};
+    lista(a).concat(lista(b)).forEach((p) => {
+      const k = this.chaveBaixa(p) || ("i:" + out.length);
+      if (vistos[k]) return;
+      vistos[k] = true;
+      out.push(p);
+    });
+    return out;
   },
 
   mesclarTitulos(bills) {
@@ -638,8 +823,10 @@ const MarketingBudgetApp = {
       if (!bill || bill.billId == null) return;
       const k = String(bill.billId) + "|" + String(bill.installmentId != null ? bill.installmentId : "");
       const prev = map.get(k);
-      const n = (b) => (b && Array.isArray(b.payments) ? b.payments.length : 0);
-      if (!prev || n(bill) >= n(prev)) map.set(k, bill);
+      if (!prev) { map.set(k, bill); return; }
+      const pays = this.unirBaixas(prev.payments, bill.payments);
+      const base = pays.length >= (Array.isArray(bill.payments) ? bill.payments.length : 0) ? prev : bill;
+      map.set(k, Object.assign({}, base, { payments: pays }));
     });
     return [...map.values()];
   },
@@ -2622,15 +2809,21 @@ const MarketingBudgetApp = {
         if (box && window.MlEmpresaFilter) box.innerHTML = MlEmpresaFilter.listHtml(self.empFiltroOpts());
       },
       toggleId(itemId, on) {
-        self.state.ccId = on ? String(itemId) : "";
+        const next = on ? String(itemId) : "";
         self.state.ccOpen = false;
         self.state.ccQuery = "";
-        self.pintarEmpreendimento();
+        if (next === String(self.state.ccId || "")) {
+          self.pintarEmpreendimento();
+          return;
+        }
+        self.state.ccId = next;
+        self.aplicarFiltroConsulta();
       },
       selectAll() {},
       selectNone() {
         self.state.ccId = "";
-        self.pintarEmpreendimento();
+        self.state.ccOpen = false;
+        self.aplicarFiltroConsulta();
       }
     });
   },

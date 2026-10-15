@@ -3,11 +3,11 @@
 const PrestacaoContasApp = {
   year: new Date().getFullYear(),
   month: new Date().getMonth() === 0 ? 12 : new Date().getMonth(),
-  companyId: "1",
-  companyIds: ["1"],
+  companyId: "",
+  companyIds: [],
   empOpen: false,
   empQuery: "",
-  costCenterIds: ["13600", "13601"],
+  costCenterIds: [],
   partnershipId: "",
   ccSearch: "",
   loading: false,
@@ -36,13 +36,23 @@ const PrestacaoContasApp = {
   dashGen: 0,
   dashSort: { key: "", dir: 1 },
 
+  competenciaPadrao() {
+    const now = new Date();
+    if (now.getMonth() === 0) return { year: now.getFullYear() - 1, month: 12 };
+    return { year: now.getFullYear(), month: now.getMonth() };
+  },
+
   init() {
-    if (this.month === 12 && new Date().getMonth() === 0) this.year = new Date().getFullYear() - 1;
-    const companies = (window.AppState && AppState.companies) || [];
-    if (companies.length && !companies.some(c => String(c.id) === String(this.companyId))) {
-      this.companyId = String(companies[0].id);
-    }
-    this.companyIds = this.companyId ? [String(this.companyId)] : [];
+    const comp = this.competenciaPadrao();
+    this.year = comp.year;
+    this.month = comp.month;
+    this.companyId = "";
+    this.companyIds = [];
+    this.costCenterIds = [];
+    this.partnershipId = "";
+    this.ccSearch = "";
+    this.empOpen = false;
+    this.empQuery = "";
     this.ensureDfcReady();
     this.ensureCategories();
     if (typeof ParametrizacaoParceiroApp !== "undefined" && (!ParametrizacaoParceiroApp.items || !ParametrizacaoParceiroApp.items.length)) {
@@ -1280,7 +1290,7 @@ const PrestacaoContasApp = {
     this.error = "";
     this.rastreio = null;
     this.selectedAccount = null;
-    this.dashGen++;
+    const gen = ++this.dashGen;
     this.render();
     const { start, end } = this.periodBounds();
     try {
@@ -1289,12 +1299,15 @@ const PrestacaoContasApp = {
       if (!window.SiengeApiService || typeof SiengeApiService.getBankMovements !== "function") {
         throw new Error("API de caixa e banco indisponível.");
       }
-      this.movements = await SiengeApiService.getBankMovements(start, end, {
+      const movimentos = await SiengeApiService.getBankMovements(start, end, {
         selectionType: "M",
         companyId: this.companyId,
         costCentersId: this.costCenterIds
       });
+      if (gen !== this.dashGen) return;
+      this.movements = movimentos;
       await this.carregarEmissoesDistrato();
+      if (gen !== this.dashGen) return;
       this.rebuildFromMovements();
       if (!this.movements.length) {
         this.error = "Nenhum movimento de caixa/banco no período para os filtros selecionados.";
@@ -1307,27 +1320,44 @@ const PrestacaoContasApp = {
         console.warn("[Prestação de Contas] Origem das guias:", e);
         this.rastreio = { msg: "Não foi possível rastrear a origem das guias de impostos. Elas seguem pela conta da própria guia.", erro: true };
       }
+      if (gen !== this.dashGen) return;
       this.rebuildFromMovements();
     } catch (err) {
+      if (gen !== this.dashGen) return;
       console.error("[Prestação de Contas]", err);
       this.error = err && err.message ? err.message : "Falha ao consultar a API de movimento bancário.";
       this.movements = [];
       this.lines = [];
     }
+    if (gen !== this.dashGen) return;
     try {
       await this.carregarPaineis();
     } catch (err) {
       console.error("[Prestação de Contas] Painéis:", err);
       if (this.dash) this.dash.erro = (err && err.message) || "Falha ao consultar o Sienge.";
     } finally {
+      if (gen !== this.dashGen) return;
       this.loading = false;
       this.render();
     }
   },
 
-  limpar() {
-    if (this.loading) return;
+  reiniciar() {
+    const comp = this.competenciaPadrao();
     this.dashGen++;
+    this.loading = false;
+    this.year = comp.year;
+    this.month = comp.month;
+    this.companyId = "";
+    this.companyIds = [];
+    this.partnershipId = "";
+    this.costCenterIds = [];
+    this.ccSearch = "";
+    this.empOpen = false;
+    this.empQuery = "";
+    this.aba = "obra";
+    this.confFiltro = "";
+    this.confAberta = "";
     this.movements = [];
     this.lines = [];
     this.conferencias = { receitas: [], despesas: [], repasses: [] };
@@ -1342,6 +1372,11 @@ const PrestacaoContasApp = {
       this._chartTempo = null;
     }
     this.render();
+  },
+
+  limpar() {
+    if (this.loading) return;
+    this.reiniciar();
   },
 
   setLoad(txt, pct) {

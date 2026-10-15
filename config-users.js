@@ -608,11 +608,10 @@ const ConfigUsersApp = {
       let obj = null;
       try { obj = JSON.parse(raw); } catch (e) { obj = null; }
       if (!obj || obj.__mirror_of__ || !this.tirarChavesPerm(obj)) return;
-      obj._savedAt = Date.now();
-      obj._shrinkConfirmedAt = Date.now();
+      // Tirar chave de menu que saiu não confirma redução do perfil.
+      // Uma redução confirmada com data nova apagava acesso marcado
+      // noutra cópia, como o Dashboard de Contas a Receber.
       this.safeLocalSet("crm_perms_" + id, JSON.stringify(obj));
-      try { localStorage.removeItem("crm_perms_bak_" + id); } catch (e) {}
-      try { sessionStorage.removeItem("crm_perms_bak_" + id); } catch (e) {}
       gravar.push({ id: id, obj: obj });
     });
     let listaMudou = false;
@@ -744,13 +743,12 @@ const ConfigUsersApp = {
       return window.persistBackOfficePermsObject(toSave);
     }
     const keys = new Set();
+    keys.add(String(profileId || ""));
     if (kind === "terceirizado") {
       keys.add("operador_cobranca_terceirizado");
     } else if (kind === "cobranca") {
       keys.add("operador_cobranca");
       keys.add("operador_cobrança");
-    } else {
-      keys.add(String(profileId || ""));
     }
     let ok = true;
     keys.forEach((k) => {

@@ -148,7 +148,67 @@ const FiscalApp = {
     try { cfg = JSON.parse(localStorage.getItem("crm_plano_impostos") || "{}") || {}; } catch (e) { cfg = {}; }
     const mem = window.PlanoFinanceiroApp && PlanoFinanceiroApp.taxConfig;
     if (mem && typeof mem === "object") cfg = Object.assign({}, cfg, mem);
+    this.fixarDescontoJurosNaBaseVendas(cfg);
     return cfg;
+  },
+
+  ehDescontoJuros(id, nome) {
+    if (this.normConta(id) === "2050103") return true;
+    const n = String(nome || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    return /DESCONTO DE JUROS CONTRAT/.test(n);
+  },
+
+  /* 2.05.01.03 reduz a receita de venda de lotes. A marca antiga em deduções não vale. */
+  fixarDescontoJurosNaBaseVendas(cfg) {
+    if (!cfg || typeof cfg !== "object" || this._descontoVendasOk) return;
+    const base = "Base para Vendas de Lote";
+    const cats = (this._contasDfc && this._contasDfc.length)
+      ? this._contasDfc
+      : ((window.PlanoFinanceiroApp && PlanoFinanceiroApp.categories) || []);
+    const ids = new Set();
+    (cats || []).forEach((c) => {
+      if (c && this.ehDescontoJuros(c.id, c.name || c.description || "")) ids.add(String(c.id));
+    });
+    Object.keys(cfg).forEach((k) => {
+      if (this.ehDescontoJuros(k, "")) ids.add(String(k));
+    });
+    const temCatalogo = !!(cats && cats.length);
+    if (!ids.size) {
+      if (!temCatalogo) {
+        if (cfg["2.05.01.03"] === base) return;
+        cfg["2.05.01.03"] = base;
+        this.gravarMarcaDesconto(cfg);
+        return;
+      }
+      ids.add("2.05.01.03");
+    }
+    let mudou = false;
+    ids.forEach((id) => {
+      const nk = this.normConta(id);
+      Object.keys(cfg).forEach((k) => {
+        const mesma = String(k) === id || (nk && this.normConta(k) === nk);
+        if (!mesma) return;
+        if (String(k) !== id || cfg[k] !== base) mudou = true;
+        if (String(k) !== id) delete cfg[k];
+      });
+      if (cfg[id] !== base) {
+        mudou = true;
+        cfg[id] = base;
+      }
+    });
+    if (temCatalogo) this._descontoVendasOk = true;
+    if (mudou) this.gravarMarcaDesconto(cfg);
+  },
+
+  gravarMarcaDesconto(cfg) {
+    const PF = window.PlanoFinanceiroApp;
+    if (PF) PF.taxConfig = cfg;
+    try { localStorage.setItem("crm_plano_impostos", JSON.stringify(cfg)); } catch (e) {}
+    window._planoImpostosWriting = true;
+    const done = () => { window._planoImpostosWriting = false; };
+    if (typeof window.forceUploadLocalConfig === "function") {
+      window.forceUploadLocalConfig(true).then(done, done);
+    } else done();
   },
 
   tagDaConta(cfg, id) {
@@ -263,7 +323,8 @@ const FiscalApp = {
       movements.forEach((mov) => {
         FC.allocate(mov, 1).forEach((a) => {
           const node = this.noDaConta(mapa, a.categoryId);
-          const tag = this.tagDaConta(cfg, a.categoryId);
+          let tag = this.tagDaConta(cfg, a.categoryId);
+          if (this.ehDescontoJuros(a.categoryId, a.categoryName)) tag = "Base para Vendas de Lote";
           const base = tag === "Base para Vendas de Lote" ? "vendas"
             : (tag === "Base para Receita de Serviços" ? "servicos"
               : (tag === "Base para Aplicações Financeiras" ? "financeiras" : ""));
@@ -295,6 +356,10 @@ const FiscalApp = {
           let valor = signed;
           let papel = (!base || signed < 0) ? "redutora" : "base";
           if (tag === "Base de Dedução") papel = "redutora";
+          if (tag === "Base para Vendas de Lote" && this.ehDescontoJuros(a.categoryId, a.categoryName)) {
+            papel = "base";
+            if (valor > 0 && !FC.isEstornoName(a.categoryName)) valor = -Math.abs(valor);
+          }
           if (papel === "redutora" && valor > 0 && !FC.isEstornoName(a.categoryName) && (tag === "Base de Dedução" || !(node && FC.isRevenueGroup(node.id)))) valor = -Math.abs(valor);
           linhas.push({
             companyId: Number(mov.companyId),
@@ -689,7 +754,7 @@ const FiscalApp = {
     pop.className = "fim-pop";
     pop.innerHTML = `<div class="fim-pop-box fim-bases-box" role="dialog" aria-modal="true">
       <div class="fim-pop-h"><b>Contas do plano</b><button type="button" class="btn btn-fechar" data-fim-fechar="1">Fechar</button></div>
-      <p class="fim-muted" style="margin:0;">As mesmas bases do DFC. Incluir ou remover uma conta aqui atualiza a marcação fiscal do plano. Desconto de juros contratuais entra na base de deduções.</p>
+      <p class="fim-muted" style="margin:0;">As mesmas bases do DFC. Incluir ou remover uma conta aqui atualiza a marcação fiscal do plano. Desconto de juros contratuais entra na base de receita de venda de lotes e reduz essa base.</p>
       <div id="fim-bases-corpo"><p class="fim-bases-aviso">Buscando as contas do DFC…</p></div>
     </div>`;
     pop.addEventListener("mousedown", (ev) => {

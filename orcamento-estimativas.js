@@ -122,6 +122,9 @@ const OrcEst = {
     });
     const nome = this.norm(l.cn);
     const fora = /LUCRO RECEB|DIVIDEND|APORTE/.test(nome);
+    if (/DESCONTO DE JUROS CONTRAT/.test(nome) || String(l.conta || "").replace(/\D/g, "") === "2050103") {
+      return { bucket: "vendas", red: true };
+    }
     if (tag === "Base para Vendas de Lote") return { bucket: "vendas", red: false };
     if (tag === "Base para Receita de Serviços") return { bucket: "servicos", red: false };
     if (tag === "Base para Aplicações Financeiras") return { bucket: "financeiras", red: false };
