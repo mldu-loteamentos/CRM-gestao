@@ -763,7 +763,7 @@ const FluxoCaixaApp = {
       }
       this.addInto(accIndex[idxKey], a.month, amount, a.companyId);
       accIndex[idxKey].name = a.categoryName || accIndex[idxKey].name;
-      const item = { ...a, amount, signedAmount: amount };
+      const item = { ...a, amount, signedAmount: amount, nodeId: nid };
       accIndex[idxKey].items.push(item);
       if (!nodeItems[nid]) nodeItems[nid] = [];
       nodeItems[nid].push(item);
@@ -1909,6 +1909,40 @@ const FluxoCaixaApp = {
     this.openDrill(args[0], args[1], args[2], args[3], args[4], args[5]);
   },
 
+  grupoVisaoDoItem(it) {
+    if (!it) return "—";
+    let nid = it.nodeId || "";
+    if (!nid) {
+      const rawId = String(it.categoryId || "").trim();
+      const nk = this.normAccountKey(rawId);
+      const comparado = !!this._drillComparado;
+      const accIndex = comparado ? (this.compAccountIndex || {}) : (this.accountIndex || {});
+      const acc = accIndex[nk] || accIndex[rawId] || null;
+      if (acc && acc.parentId) nid = acc.parentId;
+    }
+    if (!nid) {
+      const rawId = String(it.categoryId || "").trim();
+      const nk = this.normAccountKey(rawId);
+      const dotted = this.formatAccountCode(rawId);
+      const groups = ((this.visao() || {}).groups) || [];
+      const hit = groups.find((g) => (g.accounts || []).some((id) => {
+        const sid = String(id || "").trim();
+        return sid === rawId || sid === dotted || (nk && this.normAccountKey(sid) === nk);
+      }));
+      if (hit) nid = hit.id;
+    }
+    const nome = nid ? this.nomeGrupo(nid) : "";
+    return nome || "—";
+  },
+
+  planoDoItem(it) {
+    if (!it) return "—";
+    const code = this.formatAccountCode(it.categoryId);
+    const name = it.categoryName || this.catName(it.categoryId) || "";
+    const txt = [code, name].filter(Boolean).join(" ").trim();
+    return txt || "—";
+  },
+
   exportDrillExcel() {
     const ctx = this._drillExport;
     if (!ctx || !Array.isArray(ctx.items) || !ctx.items.length) {
@@ -1939,6 +1973,8 @@ const FluxoCaixaApp = {
         "Tipo (adiant./abate)": role,
         "Empresa": this.companyLabel(it.companyId || mov.companyId),
         "C.C.": [it.costCenterId, it.costCenterName].filter(Boolean).join(" - ") || "",
+        "Grupo da visão": this.grupoVisaoDoItem(it),
+        "Plano financeiro": this.planoDoItem(it),
         "Histórico": this.movHistoric(mov),
         "Total título (API)": Number.isFinite(raw) ? raw : "",
         "% rateio C.C.": sharePct,
@@ -1955,6 +1991,8 @@ const FluxoCaixaApp = {
       "Tipo (adiant./abate)": "",
       "Empresa": "",
       "C.C.": "",
+      "Grupo da visão": "",
+      "Plano financeiro": "",
       "Histórico": `Soma dos lançamentos (${ctx.items.length})`,
       "Total título (API)": "",
       "% rateio C.C.": "",
@@ -1970,6 +2008,8 @@ const FluxoCaixaApp = {
       "Tipo (adiant./abate)": "",
       "Empresa": "",
       "C.C.": "",
+      "Grupo da visão": "",
+      "Plano financeiro": "",
       "Histórico": "Total exibido na linha",
       "Total título (API)": "",
       "% rateio C.C.": "",
@@ -1982,8 +2022,8 @@ const FluxoCaixaApp = {
       const ws = XLSX.utils.json_to_sheet(rows);
       ws["!cols"] = [
         { wch: 12 }, { wch: 12 }, { wch: 42 }, { wch: 36 }, { wch: 14 },
-        { wch: 42 }, { wch: 32 }, { wch: 40 }, { wch: 16 }, { wch: 12 },
-        { wch: 22 }, { wch: 12 }, { wch: 14 }
+        { wch: 42 }, { wch: 32 }, { wch: 36 }, { wch: 42 }, { wch: 40 },
+        { wch: 16 }, { wch: 12 }, { wch: 22 }, { wch: 12 }, { wch: 14 }
       ];
       const wb = XLSX.utils.book_new();
       const sheetName = String(ctx.sheetName || "Lancamentos").slice(0, 31);
@@ -2076,7 +2116,7 @@ const FluxoCaixaApp = {
     };
 
     const rateioOn = !!this.drillRateioAberto;
-    const leadSpan = rateioOn ? 10 : 6;
+    const leadSpan = rateioOn ? 12 : 8;
     const rateioHead = rateioOn
       ? `<th class="fc-drill-num">Total título</th>
                 <th class="fc-drill-num">% rateio</th>
@@ -2096,6 +2136,8 @@ const FluxoCaixaApp = {
               <col class="fc-drill-c-title">
               <col class="fc-drill-c-emp">
               <col class="fc-drill-c-cc">
+              <col class="fc-drill-c-grupo">
+              <col class="fc-drill-c-plano">
               <col class="fc-drill-c-hist">
               ${rateioCols}
               <col class="fc-drill-c-dfc">
@@ -2107,6 +2149,8 @@ const FluxoCaixaApp = {
                 <th>Título CP/CR</th>
                 <th>Empresa</th>
                 <th>C.C.</th>
+                <th>Grupo da visão</th>
+                <th>Plano financeiro</th>
                 <th>Histórico</th>
                 ${rateioHead}
                 <th class="fc-drill-num">Valor no DFC</th>
@@ -2149,6 +2193,8 @@ const FluxoCaixaApp = {
                   ? `<span class="fc-drill-party fc-drill-share">${this.esc(title.party)}</span>`
                   : "";
                 const ccTxt = [it.costCenterId, it.costCenterName].filter(Boolean).join(" — ") || "—";
+                const grupoTxt = this.grupoVisaoDoItem(it);
+                const planoTxt = this.planoDoItem(it);
                 const hist = this.movHistoric(mov);
                 const rateioCells = rateioOn
                   ? `<td class="fc-drill-num" style="font-weight:600;color:${rawColor};" title="Valor integral do título/movimento na API">${Number.isFinite(raw) ? this.fmt(raw) : "—"}</td>
@@ -2164,6 +2210,8 @@ const FluxoCaixaApp = {
                   </td>
                   <td class="fc-drill-txt" title="${this.esc(this.companyLabel(it.companyId || mov.companyId))}"><div class="fc-drill-line"><span class="fc-drill-share">${this.esc(this.companyLabelShort(it.companyId || mov.companyId))}</span></div></td>
                   <td class="fc-drill-txt" title="${this.esc(ccTxt)}"><div class="fc-drill-line"><span class="fc-drill-share">${this.esc(ccTxt)}</span></div></td>
+                  <td class="fc-drill-txt" title="${this.esc(grupoTxt)}"><div class="fc-drill-line"><span class="fc-drill-share">${this.esc(grupoTxt)}</span></div></td>
+                  <td class="fc-drill-txt" title="${this.esc(planoTxt)}"><div class="fc-drill-line"><span class="fc-drill-share">${this.esc(planoTxt)}</span></div></td>
                   <td class="fc-drill-txt" title="${this.esc(hist)}"><div class="fc-drill-line"><span class="fc-drill-share">${this.esc(hist)}</span>${roleBadge}</div></td>
                   ${rateioCells}
                   <td class="fc-drill-num" style="font-weight:800;color:${color};">${this.fmt(amt)}</td>

@@ -4209,18 +4209,21 @@ circle.donut-segment {
 .fc-rateio-btn.is-on { background: #fff; color: #105436; border-color: #fff; }
 #fc-drill-modal .fc-drill-table {
   width: 100%;
+  min-width: 1480px;
   table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 0.8rem;
 }
-#fc-drill-modal .fc-drill-table.is-wide { min-width: 1920px; }
-#fc-drill-modal .fc-drill-c-data { width: 7%; }
-#fc-drill-modal .fc-drill-c-mov { width: 7%; }
-#fc-drill-modal .fc-drill-c-title { width: 34%; }
-#fc-drill-modal .fc-drill-c-emp { width: 7%; }
-#fc-drill-modal .fc-drill-c-cc { width: 16%; }
-#fc-drill-modal .fc-drill-c-hist { width: 22%; }
+#fc-drill-modal .fc-drill-table.is-wide { min-width: 2100px; }
+#fc-drill-modal .fc-drill-c-data { width: 6%; }
+#fc-drill-modal .fc-drill-c-mov { width: 6%; }
+#fc-drill-modal .fc-drill-c-title { width: 16%; }
+#fc-drill-modal .fc-drill-c-emp { width: 6%; }
+#fc-drill-modal .fc-drill-c-cc { width: 12%; }
+#fc-drill-modal .fc-drill-c-grupo { width: 14%; }
+#fc-drill-modal .fc-drill-c-plano { width: 16%; }
+#fc-drill-modal .fc-drill-c-hist { width: 16%; }
 #fc-drill-modal .fc-drill-c-num { width: 7%; }
 #fc-drill-modal .fc-drill-c-pct { width: 6%; }
 #fc-drill-modal .fc-drill-c-dfc { width: 7%; }

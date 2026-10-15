@@ -22436,30 +22436,62 @@ window.resolveUnitPrivateArea = async function(unit, sale) {
   const unitObj = unit || {};
   const saleObj = sale || {};
   const pick = (row) => {
-    if (!row) return null;
-    return window.parseAreaNumber(row.privateArea) || window.parseAreaNumber(row.Privatearea) || null;
-  };
-  const numeric = (v) => v != null && /^\d+$/.test(String(v));
-  try {
-    let full = null;
-    if (window.SiengeApiService && typeof SiengeApiService.getUnitRaw === "function") {
-      if (numeric(unitObj.id)) full = await SiengeApiService.getUnitRaw(unitObj.id);
-      if (!pick(full) && numeric(saleObj.unitId)) full = await SiengeApiService.getUnitRaw(saleObj.unitId);
+    if (!row || typeof row !== "object") return null;
+    const direto = window.parseAreaNumber(row.privateArea)
+      || window.parseAreaNumber(row.Privatearea)
+      || window.parseAreaNumber(row.PrivateArea);
+    if (direto) return direto;
+    const keys = Object.keys(row);
+    for (let i = 0; i < keys.length; i++) {
+      if (String(keys[i]).replace(/[^a-z]/gi, "").toLowerCase() !== "privatearea") continue;
+      const n = window.parseAreaNumber(row[keys[i]]);
+      if (n) return n;
     }
+    return null;
+  };
+  const numeric = (v) => v != null && /^\d+$/.test(String(v).trim());
+  const chave = (s) => String(s || "").replace(/[\s-]/g, "").toUpperCase();
+  const carregar = async (id) => {
+    if (!numeric(id) || !window.SiengeApiService || typeof SiengeApiService.getUnitRaw !== "function") return null;
+    try { return await SiengeApiService.getUnitRaw(String(id).trim()); } catch (e) { return null; }
+  };
+  try {
+    let full = await carregar(saleObj.siengeUnitId);
+    if (!pick(full)) full = await carregar(unitObj.siengeUnitId);
+    if (!pick(full) && numeric(unitObj.id)) full = await carregar(unitObj.id);
+
+    if (!pick(full) && window.SiengeApiService && typeof SiengeApiService.getContractRaw === "function") {
+      const contractId = saleObj.id || saleObj.contractId;
+      if (numeric(contractId)) {
+        try {
+          const sc = await SiengeApiService.getContractRaw(contractId);
+          const unidades = (sc && (sc.salesContractUnits || sc.units)) || [];
+          const su = unidades.find((u) => u && (u.main === true || u.main === "S")) || unidades[0];
+          if (pick(su)) full = su;
+          else if (su && numeric(su.id)) full = await carregar(su.id);
+        } catch (e) {}
+      }
+    }
+
     if (!pick(full) && window.SiengeApiService && typeof SiengeApiService.getUnitDetails === "function") {
       const unitParts = String(saleObj.unitId || unitObj.id || "").split("-");
       const fromParts = unitParts.length > 2 ? unitParts.slice(2).join("-") : "";
-      const unitName = String(unitObj.name || unitObj.units || fromParts || [unitObj.block, unitObj.lot].filter(Boolean).join("-") || "").trim();
+      const unitName = String(saleObj.unitName || unitObj.name || unitObj.units || fromParts || [unitObj.block, unitObj.lot].filter(Boolean).join("-") || "").trim();
       const enterpriseId = unitObj.costCenterId || saleObj.enterpriseId || saleObj.costCenterId || (unitParts.length > 1 ? unitParts[1] : "") || "";
-      if (enterpriseId && unitName && unitName !== "N/D") {
-        const det = await SiengeApiService.getUnitDetails(enterpriseId, unitName);
-        const lista = (det && det.results) || [];
-        const chave = (s) => String(s || "").replace(/\s+/g, "").toUpperCase();
-        const row = lista.find((u) => chave(u.name) === chave(unitName)) || null;
-        if (pick(row)) full = row;
-        else if (row && numeric(row.id) && SiengeApiService.getUnitRaw) full = await SiengeApiService.getUnitRaw(row.id);
+      const nomes = [unitName, unitName.replace(/-/g, "- "), unitName.replace(/-/g, " - ")].filter((n, i, a) => n && n !== "N/D" && a.indexOf(n) === i);
+      if (enterpriseId && nomes.length) {
+        for (let i = 0; i < nomes.length && !pick(full); i++) {
+          const det = await SiengeApiService.getUnitDetails(enterpriseId, nomes[i]);
+          const lista = (det && det.results) || [];
+          const alvo = chave(unitName);
+          const row = lista.find((u) => chave(u.name) === alvo) || (lista.length === 1 ? lista[0] : null);
+          if (!row) continue;
+          if (numeric(row.id)) full = await carregar(row.id);
+          if (!pick(full) && pick(row)) full = row;
+        }
       }
     }
+
     const n = pick(full);
     if (n) {
       if (window.AppState && AppState.units && saleObj.unitId) {
@@ -22467,6 +22499,7 @@ window.resolveUnitPrivateArea = async function(unit, sale) {
         AppState.units[saleObj.unitId] = Object.assign({}, prev, {
           privateArea: n,
           area: n,
+          siengeUnitId: (full && numeric(full.id) ? String(full.id) : (prev.siengeUnitId || saleObj.siengeUnitId || "")),
           id: (full && numeric(full.id) ? full.id : prev.id)
         });
       }
