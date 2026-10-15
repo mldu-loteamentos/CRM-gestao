@@ -13018,16 +13018,10 @@ function formatCpfCnpj(val) {
 
   const municipalReg = unitDetails?.realEstateRegistration || unitDetails?.realestateRegistration || "N/D";
   const matricula = unitDetails?.legalRegistrationNumber || unitDetails?.legalregistrationnumber || "N/D";
-  const privateArea = unitDetails?.privateArea || unitDetails?.Privatearea || unit.indexedPrivateArea || unit.privateArea || unit.area || "N/D";
-  if (AppState.units && sale.unitId) {
-    const n = typeof window.parseAreaNumber === "function" ? window.parseAreaNumber(privateArea) : (Number(privateArea) || null);
-    const cached = AppState.units[sale.unitId] || unit;
-    AppState.units[sale.unitId] = {
-      ...cached,
-      privateArea: n || cached.privateArea || null,
-      area: n || cached.area || unit.area || 0
-    };
-    unit = AppState.units[sale.unitId];
+  let privateArea = "N/D";
+  if (typeof window.resolveUnitPrivateArea === "function") {
+    const nArea = await window.resolveUnitPrivateArea(unit, sale);
+    if (nArea) privateArea = nArea;
   }
   let contractNum = unitDetails?.contractNumber || unitDetails?.contractnumber || sale.contractNumber || sale.id || "N/D";
   if (contractNum !== "N/D" && typeof contractNum === "string") {
@@ -13344,7 +13338,7 @@ function formatCpfCnpj(val) {
     document.getElementById("det-matricula").textContent = matricula;
   }
 
-  document.getElementById("det-area").textContent = typeof privateArea === "number" ? `${privateArea} mÂ²` : privateArea;
+  document.getElementById("det-area").textContent = typeof privateArea === "number" ? `${privateArea} m²` : privateArea;
   
   const saleDateRaw = sale.saleDate || sale.contractDate || sale.date || sale.createdAt || sale.issueDate;
   const detSaleDateEl = document.getElementById("det-sale-date");
@@ -22441,38 +22435,47 @@ window.formatAreaLoteLabel = function(areaNum) {
 window.resolveUnitPrivateArea = async function(unit, sale) {
   const unitObj = unit || {};
   const saleObj = sale || {};
-  const pick = (...vals) => {
-    for (let i = 0; i < vals.length; i++) {
-      const n = window.parseAreaNumber(vals[i]);
-      if (n) return n;
-    }
-    return null;
+  const pick = (row) => {
+    if (!row) return null;
+    return window.parseAreaNumber(row.privateArea) || window.parseAreaNumber(row.Privatearea) || null;
   };
-  let n = pick(unitObj.privateArea, unitObj.Privatearea, unitObj.indexedPrivateArea);
-  if (n) return n;
-  const detEl = document.getElementById("det-area");
-  n = pick(detEl && detEl.textContent);
-  if (n) return n;
+  const numeric = (v) => v != null && /^\d+$/.test(String(v));
   try {
-    const unitParts = String(saleObj.unitId || unitObj.id || "").split("-");
-    const unitName = String(unitObj.name || unitObj.units || unitParts.slice(2).join("-") || [unitObj.block, unitObj.lot].filter(Boolean).join("-") || "").trim();
-    const enterpriseId = unitObj.costCenterId || saleObj.enterpriseId || saleObj.costCenterId || unitParts[1] || "";
-    if (window.SiengeApiService && typeof SiengeApiService.getUnitDetails === "function" && enterpriseId && unitName && unitName !== "N/D") {
-      const det = await SiengeApiService.getUnitDetails(enterpriseId, unitName);
-      const row = det && Array.isArray(det.results) ? det.results[0] : null;
-      n = pick(row && (row.privateArea || row.Privatearea || row.indexedPrivateArea));
-      if (n) return n;
-    }
+    let full = null;
     if (window.SiengeApiService && typeof SiengeApiService.getUnitRaw === "function") {
-      const rawId = (unitObj.id && /^\d+$/.test(String(unitObj.id))) ? unitObj.id : saleObj.unitId;
-      const raw = rawId ? await SiengeApiService.getUnitRaw(rawId) : null;
-      n = pick(raw && (raw.privateArea || raw.Privatearea || raw.indexedPrivateArea));
-      if (n) return n;
+      if (numeric(unitObj.id)) full = await SiengeApiService.getUnitRaw(unitObj.id);
+      if (!pick(full) && numeric(saleObj.unitId)) full = await SiengeApiService.getUnitRaw(saleObj.unitId);
+    }
+    if (!pick(full) && window.SiengeApiService && typeof SiengeApiService.getUnitDetails === "function") {
+      const unitParts = String(saleObj.unitId || unitObj.id || "").split("-");
+      const fromParts = unitParts.length > 2 ? unitParts.slice(2).join("-") : "";
+      const unitName = String(unitObj.name || unitObj.units || fromParts || [unitObj.block, unitObj.lot].filter(Boolean).join("-") || "").trim();
+      const enterpriseId = unitObj.costCenterId || saleObj.enterpriseId || saleObj.costCenterId || (unitParts.length > 1 ? unitParts[1] : "") || "";
+      if (enterpriseId && unitName && unitName !== "N/D") {
+        const det = await SiengeApiService.getUnitDetails(enterpriseId, unitName);
+        const lista = (det && det.results) || [];
+        const chave = (s) => String(s || "").replace(/\s+/g, "").toUpperCase();
+        const row = lista.find((u) => chave(u.name) === chave(unitName)) || null;
+        if (pick(row)) full = row;
+        else if (row && numeric(row.id) && SiengeApiService.getUnitRaw) full = await SiengeApiService.getUnitRaw(row.id);
+      }
+    }
+    const n = pick(full);
+    if (n) {
+      if (window.AppState && AppState.units && saleObj.unitId) {
+        const prev = AppState.units[saleObj.unitId] || unitObj;
+        AppState.units[saleObj.unitId] = Object.assign({}, prev, {
+          privateArea: n,
+          area: n,
+          id: (full && numeric(full.id) ? full.id : prev.id)
+        });
+      }
+      return n;
     }
   } catch (e) {
     console.warn("[Distrato] área privativa da unidade", e);
   }
-  return pick(unitObj.area) || "";
+  return pick(unitObj) || "";
 };
 
 window.upgradeCredorPlaceholdersToPreamble = function(text) {
@@ -23162,7 +23165,7 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
     const cidadeLote = window.resolveCidadeLoteamento(unit, g_distSale);
     const areaNum = typeof window.resolveUnitPrivateArea === "function"
       ? await window.resolveUnitPrivateArea(unit, g_distSale)
-      : (unit.privateArea || unit.Privatearea || unit.indexedPrivateArea || unit.area || "");
+      : (unit.privateArea || unit.Privatearea || "");
     const areaLabel = typeof window.formatAreaLoteLabel === "function"
       ? window.formatAreaLoteLabel(areaNum)
       : (areaNum === "" || areaNum == null ? "____" : (String(areaNum).match(/m/) ? String(areaNum) : (areaNum + " m²")));
