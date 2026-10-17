@@ -882,6 +882,62 @@ const ResultadoCaixaApp = {
     return emp ? this.pctEmpresaId(emp) : 1;
   },
 
+  codigoNoLado(code, lado) {
+    const c = String(code || "");
+    return this.grupos(lado).some((g) => c === g.pai || (g.filhos && g.filhos.test(c)));
+  },
+
+  /** Soma o centro pelas contas da visão já salvas. Null se o arquivo não guardou esse detalhe. */
+  valorContas(arq, lado, ccId, mes, campo, ate) {
+    const dono = arq && arq.contasPorCc && arq.contasPorCc[ccId];
+    if (!dono || !dono.contas) return null;
+    const codes = Object.keys(dono.contas);
+    const usar = [];
+    this.grupos(lado).forEach((g) => {
+      const pai = codes.filter((c) => c === g.pai);
+      const filhos = g.filhos ? codes.filter((c) => c !== g.pai && g.filhos.test(c)) : [];
+      (pai.length ? pai : filhos).forEach((c) => { if (usar.indexOf(c) < 0) usar.push(c); });
+    });
+    const fim = Number(mes);
+    const ini = ate ? 1 : fim;
+    let s = 0;
+    usar.forEach((code) => {
+      const meses = (dono.contas[code] && dono.contas[code].meses) || {};
+      for (let m = ini; m <= fim; m++) {
+        const cel = meses[String(m)];
+        if (cel) s += Number(cel[campo]) || 0;
+      }
+    });
+    const fundoNaVisao = usar.some((c) => c === "09.03" || String(c).indexOf("09.03.") === 0);
+    if (lado === "entradas" && !fundoNaVisao) s += this.valorFundoInvestimento(arq, ccId, mes, campo, ate);
+    return s;
+  },
+
+  /** 09.03 entra na receita mesmo quando a visão DFC guarda o fundo junto do capex. */
+  ehFundoInvestimento(code) {
+    const limpo = String(code || "").replace(/\s/g, "");
+    if (/^0?9\.03(\.|$)/.test(limpo)) return true;
+    const digitos = limpo.replace(/\D/g, "");
+    return digitos.indexOf("903") === 0;
+  },
+
+  valorFundoInvestimento(arq, ccId, mes, campo, ate) {
+    const dono = arq && arq.planosPorCc && arq.planosPorCc[ccId];
+    if (!dono || !dono.contas) return 0;
+    const fim = Number(mes);
+    const ini = ate ? 1 : fim;
+    let s = 0;
+    Object.keys(dono.contas).forEach((code) => {
+      if (!this.ehFundoInvestimento(code)) return;
+      const meses = (dono.contas[code] && dono.contas[code].meses) || {};
+      for (let m = ini; m <= fim; m++) {
+        const cel = meses[String(m)];
+        if (cel) s += Number(cel[campo]) || 0;
+      }
+    });
+    return s;
+  },
+
   /** Valor do centro de custo somando arquivo por arquivo, cada um no percentual da sua empresa. */
   valorAgrupado(lado, ano, ccId, mes, campo, ate) {
     if (!this.agrupar) return this.valor(lado, ano, ccId, mes, campo, ate);
@@ -892,14 +948,23 @@ const ResultadoCaixaApp = {
     let s = 0;
     Object.keys(a.arquivos || {}).forEach((nome) => {
       const arq = a.arquivos[nome];
-      const bag = arq && arq[lado] && arq[lado][ccId];
-      if (!bag) return;
-      let v = 0;
-      for (let m = ini; m <= fim; m++) {
-        const cel = (bag.meses || {})[String(m)];
-        if (cel) v += Number(cel[campo]) || 0;
+      if (!arq) return;
+      const pelasContas = this.valorContas(arq, lado, ccId, mes, campo, ate);
+      if (pelasContas != null) {
+        if (pelasContas) s += pelasContas * this.pctArquivo(arq, nome);
+        return;
       }
-      if (v) s += v * this.pctArquivo(arq, nome);
+      const bag = arq[lado] && arq[lado][ccId];
+      if (bag) {
+        for (let m = ini; m <= fim; m++) {
+          const cel = (bag.meses || {})[String(m)];
+          if (cel) s += (Number(cel[campo]) || 0) * this.pctArquivo(arq, nome);
+        }
+      }
+      if (lado === "entradas") {
+        const fundo = this.valorFundoInvestimento(arq, ccId, mes, campo, ate);
+        if (fundo) s += fundo * this.pctArquivo(arq, nome);
+      }
     });
     return s;
   },
@@ -1077,8 +1142,9 @@ const ResultadoCaixaApp = {
   grupos(lado) {
     if (lado === "entradas") {
       return [
-        { pai: "01", filhos: /^01\.\d+$/ },
-        { pai: "09.01", filhos: null }
+        { pai: "01", filhos: /^01(\.\d+)+$/ },
+        { pai: "09.01", filhos: /^09\.01(\.\d+)*$/ },
+        { pai: "09.03", filhos: /^09\.03(\.\d+)*$/ }
       ];
     }
     return [
@@ -1740,7 +1806,23 @@ const ResultadoCaixaApp = {
     const out = {};
     if (!a) return out;
     Object.keys(a.arquivos || {}).forEach((nome) => {
-      const bag = (a.arquivos[nome] && a.arquivos[nome][lado]) || {};
+      const arq = a.arquivos[nome] || {};
+      const extra = arq.contasPorCc || {};
+      Object.keys(extra).forEach((id) => {
+        const contas = (extra[id] && extra[id].contas) || {};
+        const fundo = lado === "entradas" && this.valorFundoInvestimento(arq, id, 12, "r", true) + this.valorFundoInvestimento(arq, id, 12, "o", true);
+        if (!Object.keys(contas).some((code) => this.codigoNoLado(code, lado)) && !(fundo > 0.5 || fundo < -0.5)) return;
+        if (!out[id]) out[id] = { nome: extra[id].nome || id, meses: {} };
+      });
+      if (lado === "entradas") {
+        Object.keys(arq.planosPorCc || {}).forEach((id) => {
+          if (out[id]) return;
+          const fundo = this.valorFundoInvestimento(arq, id, 12, "r", true) + this.valorFundoInvestimento(arq, id, 12, "o", true);
+          if (!(fundo > 0.5 || fundo < -0.5)) return;
+          out[id] = { nome: (arq.planosPorCc[id] && arq.planosPorCc[id].nome) || id, meses: {} };
+        });
+      }
+      const bag = arq[lado] || {};
       Object.keys(bag).forEach((id) => {
         if (!out[id]) out[id] = { nome: bag[id].nome, meses: {} };
         const meses = bag[id].meses || {};
@@ -1757,13 +1839,23 @@ const ResultadoCaixaApp = {
 
   valor(lado, ano, ccId, mes, campo, ate) {
     const bag = this.bagLado(ano, lado)[ccId];
-    if (!bag) return 0;
     let s = 0;
     const fim = ate ? Number(mes) : Number(mes);
     const ini = ate ? 1 : fim;
-    for (let m = ini; m <= fim; m++) {
-      const cel = bag.meses[String(m)];
-      if (cel) s += Number(cel[campo]) || 0;
+    if (bag) {
+      for (let m = ini; m <= fim; m++) {
+        const cel = bag.meses[String(m)];
+        if (cel) s += Number(cel[campo]) || 0;
+      }
+    }
+    if (lado === "entradas") {
+      const a = this.anoDados(ano);
+      Object.keys((a && a.arquivos) || {}).forEach((nome) => {
+        const arq = a.arquivos[nome];
+        const contas = arq && arq.contasPorCc && arq.contasPorCc[ccId] && arq.contasPorCc[ccId].contas;
+        const ja = contas && Object.keys(contas).some((c) => c === "09.03" || String(c).indexOf("09.03.") === 0);
+        if (!ja) s += this.valorFundoInvestimento(arq, ccId, mes, campo, ate);
+      });
     }
     return s;
   },
@@ -1771,7 +1863,7 @@ const ResultadoCaixaApp = {
   noAceito(lado) {
     return (id) => {
       const s = String(id || "");
-      if (lado === "entradas") return s === "g_01" || s.startsWith("g_01_") || s === "g_09_01" || s.startsWith("g_09_01_");
+      if (lado === "entradas") return s === "g_01" || s.startsWith("g_01_") || s === "g_09_01" || s.startsWith("g_09_01_") || s === "g_09_03" || s.startsWith("g_09_03_");
       return this.contasSaida().some((def) => this.casaNo(s, def));
     };
   },
@@ -2007,7 +2099,7 @@ const ResultadoCaixaApp = {
     const neg = rows.filter((r) => variacao(r) < -0.5).sort((a, b) => variacao(a) - variacao(b)).slice(0, 4)
       .sort((a, b) => variacao(b) - variacao(a));
     const escolhidos = new Set(pos.concat(neg));
-    const outros = rows.filter((r) => !escolhidos.has(r)).sort((a, b) => Math.abs(variacao(b)) - Math.abs(variacao(a)) || a.nome.localeCompare(b.nome, "pt"));
+    const outros = rows.filter((r) => !escolhidos.has(r)).sort((a, b) => (b.acum.real - a.acum.real) || (b.mensal.real - a.mensal.real) || a.nome.localeCompare(b.nome, "pt"));
     return { pos, neg, outros };
   },
 
@@ -2237,8 +2329,10 @@ const ResultadoCaixaApp = {
         ${barras.map((b) => {
           const h = b.espera ? 0 : Math.max(0, b.valor) / maior * 100;
           return `<div class="rcx-graf-col ${b.cls}">
-            <span class="rcx-graf-val">${b.espera ? "…" : this.fmt(b.valor)}</span>
-            <div class="rcx-graf-track"><div class="rcx-graf-bar" style="height:${h.toFixed(2)}%"></div></div>
+            <div class="rcx-graf-track">
+              <span class="rcx-graf-val" style="bottom:${h.toFixed(2)}%">${b.espera ? "…" : this.fmt(b.valor)}</span>
+              <div class="rcx-graf-bar" style="height:${h.toFixed(2)}%"></div>
+            </div>
           </div>`;
         }).join("")}
       </div>
@@ -2279,12 +2373,16 @@ const ResultadoCaixaApp = {
     return `<div class="rcx-graf rcx-tot">
       <div class="rcx-graf-tit">TOTAIS</div>
       <div class="rcx-graf-area rcx-tot-area">
-        ${colunas.map((c) => `<div class="rcx-graf-col ${c.cls}">
-          <span class="rcx-graf-val">${this.fmt(c.total)}${c.marca ? " *" : ""}</span>
-          <div class="rcx-graf-track"><div class="rcx-tot-pilha" style="height:${(c.total / maior * 100).toFixed(2)}%" title="${caixaEsc(c.rotulo)}: ${this.fmt(c.escuro)} até ${mesCurto} + ${this.fmt(c.claro)} até dezembro">
+        ${colunas.map((c) => {
+          const h = (c.total / maior * 100).toFixed(2);
+          return `<div class="rcx-graf-col ${c.cls}">
+          <div class="rcx-graf-track">
+          <span class="rcx-graf-val" style="bottom:${h}%">${this.fmt(c.total)}${c.marca ? " *" : ""}</span>
+          <div class="rcx-tot-pilha" style="height:${h}%" title="${caixaEsc(c.rotulo)}: ${this.fmt(c.escuro)} até ${mesCurto} + ${this.fmt(c.claro)} até dezembro">
             ${pedaco(c.claro, c.total, "is-claro")}${pedaco(c.escuro, c.total, "is-escuro")}
           </div></div>
-        </div>`).join("")}
+        </div>`;
+        }).join("")}
       </div>
       <div class="rcx-graf-eixo">${colunas.map((c) => `<span>${caixaEsc(c.rotulo)}</span>`).join("")}</div>
       <div class="rcx-tot-tip" role="tooltip">${caixaEsc(nota)}</div>

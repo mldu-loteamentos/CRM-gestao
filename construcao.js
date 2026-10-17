@@ -441,6 +441,114 @@ window.ConstrucaoApp = {
         await uploadBytesFunc(storageRef, file);
         const url = await getDownloadURLFunc(storageRef);
         return { url, name: file.name };
+    },
+
+    vistoriaArquivos: [],
+
+    escHtml(value) {
+        return String(value == null ? "" : value).replace(/[&<>"']/g, (ch) => ({
+            "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+        }[ch]));
+    },
+
+    arquivoVistoriaAceito(file) {
+        if (!file) return false;
+        const tipo = String(file.type || "");
+        const nome = String(file.name || "");
+        return /^image\//.test(tipo) || tipo === "application/pdf" || /\.pdf$/i.test(nome);
+    },
+
+    nomeArquivoVistoria(file) {
+        const bruto = String((file && file.name) || "").trim();
+        const generico = !bruto || /^(image|blob|arquivo)(\.\w+)?$/i.test(bruto);
+        const tipo = String((file && file.type) || "");
+        let ext = "jpg";
+        if (tipo === "application/pdf" || /\.pdf$/i.test(bruto)) ext = "pdf";
+        else if (/^image\//.test(tipo)) ext = tipo.split("/")[1].replace("jpeg", "jpg").split("+")[0] || "jpg";
+        else {
+            const m = bruto.match(/\.([a-z0-9]{1,5})$/i);
+            if (m) ext = m[1].toLowerCase();
+        }
+        if (!generico) return bruto;
+        const seq = this.vistoriaArquivos.filter(item => /^Foto colada /i.test(item.name || "")).length + 1;
+        return "Foto colada " + seq + "." + ext;
+    },
+
+    limparPreviewsVistoria() {
+        (this.vistoriaArquivos || []).forEach((item) => {
+            if (item.preview) URL.revokeObjectURL(item.preview);
+        });
+        this.vistoriaArquivos = [];
+    },
+
+    addVistoriaArquivos(lista) {
+        const arquivos = Array.from(lista || []).filter(file => this.arquivoVistoriaAceito(file));
+        arquivos.forEach((file) => {
+            const repetido = this.vistoriaArquivos.some(item =>
+                item.file && item.file.name === file.name && item.file.size === file.size && item.file.lastModified === file.lastModified
+            );
+            if (repetido) return;
+            const imagem = /^image\//.test(file.type || "") || /\.(png|jpe?g|gif|webp|bmp)$/i.test(file.name || "");
+            this.vistoriaArquivos.push({
+                id: "novo-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8),
+                file: file,
+                url: "",
+                name: this.nomeArquivoVistoria(file),
+                preview: imagem ? URL.createObjectURL(file) : ""
+            });
+        });
+        this.renderVistoriaArquivos();
+    },
+
+    renderVistoriaArquivos() {
+        const lista = document.getElementById("vistoria-arquivos-lista");
+        const vazio = document.getElementById("vistoria-arquivos-vazio");
+        if (!lista) return;
+        const itens = this.vistoriaArquivos || [];
+        if (vazio) vazio.style.display = "block";
+        lista.innerHTML = itens.map((item) => {
+            const nome = this.escHtml(item.name || "Arquivo");
+            const src = item.preview || item.url || "";
+            const ehPdf = /\.pdf$/i.test(item.name || "") || (item.file && item.file.type === "application/pdf");
+            const corpo = (!ehPdf && src)
+                ? `<img src="${this.escHtml(src)}" alt="" style="width:100%; height:72px; object-fit:cover; display:block; background:#e2e8f0;">`
+                : `<div style="height:72px; display:flex; align-items:center; justify-content:center; background:#f1f5f9; color:#475569;"><i data-lucide="file-text" style="width:22px; height:22px;"></i></div>`;
+            return `<div style="width:108px; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden; background:#fff;">
+                ${corpo}
+                <div style="display:flex; align-items:center; gap:2px; padding:2px 2px 2px 6px;">
+                    <span title="${nome}" style="flex:1; min-width:0; font-size:0.68rem; color:#334155; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${nome}</span>
+                    <button type="button" class="tvig-ico is-danger" title="Excluir" onclick="window.ConstrucaoApp.removerVistoriaArquivo('${item.id}')">
+                        <i data-lucide="trash-2" style="width:15px; height:15px;"></i>
+                    </button>
+                </div>
+            </div>`;
+        }).join("");
+        if (window.lucide) window.lucide.createIcons();
+    },
+
+    removerVistoriaArquivo(id) {
+        const item = (this.vistoriaArquivos || []).find(entry => entry.id === id);
+        if (item && item.preview) URL.revokeObjectURL(item.preview);
+        this.vistoriaArquivos = (this.vistoriaArquivos || []).filter(entry => entry.id !== id);
+        this.renderVistoriaArquivos();
+    },
+
+    arquivosDoClipboard(evento) {
+        const dt = evento && evento.clipboardData;
+        if (!dt) return [];
+        const saida = [];
+        if (dt.files && dt.files.length) {
+            for (let i = 0; i < dt.files.length; i++) saida.push(dt.files[i]);
+        }
+        if (!saida.length && dt.items) {
+            for (let i = 0; i < dt.items.length; i++) {
+                if (dt.items[i].kind === "file") {
+                    const file = dt.items[i].getAsFile();
+                    if (file) saida.push(file);
+                }
+            }
+        }
+        return saida.filter(file => this.arquivoVistoriaAceito(file));
     }
 };
 
@@ -630,6 +738,14 @@ window.loadConstrucoes = async function() {
         }
 
         for (const check of display) {
+            const ownUrls = [];
+            const pushOwn = (u) => { if (u && ownUrls.indexOf(u) < 0) ownUrls.push(u); };
+            if (Array.isArray(check.fileUrls)) check.fileUrls.forEach(pushOwn);
+            pushOwn(check.fileUrl);
+            check._ownFileUrls = ownUrls;
+            check._ownFileNames = Array.isArray(check.fileNames) && check.fileNames.length
+                ? check.fileNames.slice()
+                : (check.fileName ? [check.fileName] : []);
             const urls = window.ConstrucaoApp.collectPhotoUrls(check, results);
             if (urls.length < 3) {
                 const extra = await window.ConstrucaoApp.fetchStoragePhotos(check, results);
@@ -984,7 +1100,7 @@ window.openNewConstrucaoModal = function(editId = null) {
 
         const modalHtml = `
         <div id="modal-nova-vistoria" class="modal-overlay active" style="display: flex; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 99999; align-items: center; justify-content: center; opacity: 1 !important; visibility: visible !important; pointer-events: auto !important;">
-            <div class="modal-box" style="background: white; padding: 25px; border-radius: 12px; width: 100%; max-width: 750px; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
+            <div class="modal-box" style="background: white; padding: 25px; border-radius: 12px; width: 100%; max-width: 750px; max-height: 92vh; overflow: auto; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
                 <h3 style="margin-top: 0; margin-bottom: 20px; color: #1e293b; font-size: 1.2rem; display: flex; align-items: center; gap: 8px;">
                     <i data-lucide="${editCheck ? 'edit' : 'plus-circle'}" style="width: 20px;"></i> ${editCheck ? 'Editar Vistoria Manual' : 'Inserir Vistoria Manual'}
                 </h3>
@@ -1015,24 +1131,28 @@ window.openNewConstrucaoModal = function(editId = null) {
                 </div>
 
                 <div style="margin-bottom: 20px;">
-                    <label style="display: block; font-weight: 600; font-size: 0.85rem; color: #475569; margin-bottom: 6px;">Arquivo (Foto ou PDF) ${editCheck && editCheck.fileUrl ? '- <i>(Deixe em branco para manter a foto atual)</i>' : ''}</label>
-                    <input type="file" id="vistoria-file" accept="image/*,.pdf" class="form-control" style="width: 100%; padding: 8px;">
+                    <label style="display: block; font-weight: 600; font-size: 0.85rem; color: #475569; margin-bottom: 6px;">Arquivos (fotos ou PDF)</label>
+                    <input type="file" id="vistoria-file" accept="image/*,.pdf" multiple style="display:none;">
+                    <div id="vistoria-arquivos-zona" tabindex="0" style="border: 1px dashed #94a3b8; border-radius: 8px; background: #f8fafc; padding: 14px; text-align: center; cursor: pointer;">
+                        <div style="font-weight: 600; color: #1e293b; font-size: 0.9rem;">Escolher arquivos</div>
+                        <div id="vistoria-arquivos-vazio" style="color: #64748b; font-size: 0.8rem; margin-top: 4px;">Vários de uma vez. Cole as fotos com Ctrl+V.</div>
+                        <div id="vistoria-arquivos-lista" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; text-align: left;"></div>
+                    </div>
                 </div>
 
-                <div style="margin-bottom: 20px; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; display: flex; align-items: center; justify-content: space-between;">
+                <div style="margin-bottom: 20px; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
                     <div>
                         <strong style="display: block; color: #1e293b; font-size: 0.9rem;">Enviar para o Sienge</strong>
-                        <span style="color: #64748b; font-size: 0.8rem;">Anexar a foto selecionada ao contrato no Sienge</span>
+                        <span style="color: #64748b; font-size: 0.8rem;">Anexar os arquivos selecionados ao contrato no Sienge</span>
                     </div>
-                    <label style="position: relative; display: inline-block; width: 44px; height: 24px; cursor: pointer;">
-                        <input type="checkbox" id="vistoria-send-sienge" ${siengeOn ? "checked" : ""} style="opacity: 0; width: 0; height: 0; position: absolute;" onchange="document.getElementById('send-sienge-track').style.backgroundColor = this.checked ? '#16a34a' : '#cbd5e1'; document.getElementById('send-sienge-thumb').style.transform = this.checked ? 'translateX(20px)' : 'translateX(0)';">
-                        <span id="send-sienge-track" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: ${siengeOn ? "#16a34a" : "#cbd5e1"}; transition: .4s; border-radius: 24px; pointer-events: none;"></span>
-                        <span id="send-sienge-thumb" style="position: absolute; height: 20px; width: 20px; left: 2px; bottom: 2px; background-color: white; transition: .4s; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.3); pointer-events: none; transform: ${siengeOn ? "translateX(20px)" : "translateX(0)"};"></span>
+                    <label class="moura-switch" title="Enviar para o Sienge">
+                        <input type="checkbox" id="vistoria-send-sienge" ${siengeOn ? "checked" : ""}>
+                        <span class="moura-switch-track" aria-hidden="true"></span>
                     </label>
                 </div>
 
                 <div style="display: flex; justify-content: flex-end; gap: 10px;">
-                    <button type="button" class="btn btn-cancel" onclick="document.getElementById('modal-nova-vistoria').remove()">Cancelar</button>
+                    <button type="button" class="btn btn-cancel" onclick="window.fecharModalVistoria()">Cancelar</button>
                     <button type="button" class="btn btn-primary" onclick="window.saveNovaVistoria()" id="btn-salvar-vistoria">Salvar Vistoria</button>
                 </div>
             </div>
@@ -1040,6 +1160,62 @@ window.openNewConstrucaoModal = function(editId = null) {
         `;
 
         document.body.insertAdjacentHTML('beforeend', modalHtml);
+        window.ConstrucaoApp.limparPreviewsVistoria();
+        const proprios = (editCheck && editCheck._ownFileUrls) || [];
+        const nomesProprios = (editCheck && editCheck._ownFileNames) || [];
+        window.ConstrucaoApp.vistoriaArquivos = proprios.map((url, idx) => ({
+            id: "salvo-" + idx,
+            file: null,
+            url: url,
+            name: nomesProprios[idx] || ("Arquivo " + (idx + 1)),
+            preview: ""
+        }));
+        window.ConstrucaoApp.renderVistoriaArquivos();
+        const zona = document.getElementById("vistoria-arquivos-zona");
+        const inputArquivos = document.getElementById("vistoria-file");
+        if (zona && inputArquivos) {
+            zona.addEventListener("click", (ev) => {
+                if (ev.target.closest("button")) return;
+                inputArquivos.click();
+            });
+            zona.addEventListener("keydown", (ev) => {
+                if (ev.key === "Enter" || ev.key === " ") {
+                    ev.preventDefault();
+                    inputArquivos.click();
+                }
+            });
+            inputArquivos.addEventListener("change", () => {
+                window.ConstrucaoApp.addVistoriaArquivos(inputArquivos.files);
+                inputArquivos.value = "";
+            });
+            zona.addEventListener("dragover", (ev) => {
+                ev.preventDefault();
+                zona.style.borderColor = "#105436";
+                zona.style.background = "#ecfdf3";
+            });
+            zona.addEventListener("dragleave", () => {
+                zona.style.borderColor = "#94a3b8";
+                zona.style.background = "#f8fafc";
+            });
+            zona.addEventListener("drop", (ev) => {
+                ev.preventDefault();
+                zona.style.borderColor = "#94a3b8";
+                zona.style.background = "#f8fafc";
+                window.ConstrucaoApp.addVistoriaArquivos(ev.dataTransfer && ev.dataTransfer.files);
+            });
+        }
+        if (window._vistoriaPaste) document.removeEventListener("paste", window._vistoriaPaste);
+        window._vistoriaPaste = function(ev) {
+            if (!document.getElementById("modal-nova-vistoria")) {
+                document.removeEventListener("paste", window._vistoriaPaste);
+                return;
+            }
+            const arquivos = window.ConstrucaoApp.arquivosDoClipboard(ev);
+            if (!arquivos.length) return;
+            ev.preventDefault();
+            window.ConstrucaoApp.addVistoriaArquivos(arquivos);
+        };
+        document.addEventListener("paste", window._vistoriaPaste);
         if (window.lucide) lucide.createIcons();
     } catch(err) {
         console.error("Erro ao abrir modal:", err);
@@ -1192,13 +1368,21 @@ window.solicitarWhatsAppFromClient = async function() {
     }
 };
 
+window.fecharModalVistoria = function() {
+    const modal = document.getElementById("modal-nova-vistoria");
+    if (window._vistoriaPaste) document.removeEventListener("paste", window._vistoriaPaste);
+    if (window.ConstrucaoApp && typeof window.ConstrucaoApp.limparPreviewsVistoria === "function") {
+        window.ConstrucaoApp.limparPreviewsVistoria();
+    }
+    if (modal) modal.remove();
+};
+
 window.saveNovaVistoria = async function() {
     const btn = document.getElementById('btn-salvar-vistoria');
     const date = document.getElementById('vistoria-data').value;
     const responsible = document.getElementById('vistoria-resp').value;
     const stage = document.getElementById('vistoria-stage').value;
     const obs = document.getElementById('vistoria-obs').value;
-    const fileInput = document.getElementById('vistoria-file');
     const editId = document.getElementById('vistoria-edit-id').value;
 
     if (!date || !stage) {
@@ -1245,50 +1429,98 @@ window.saveNovaVistoria = async function() {
     btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px; animation: vc-spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg><style>@keyframes vc-spin { 100% { transform: rotate(360deg); } }</style> Salvando...';
 
     try {
-        let fileUrl = null;
-        let fileName = null;
+        const listaArquivos = (window.ConstrucaoApp.vistoriaArquivos || []).slice();
+        const fileUrls = [];
+        const fileNames = [];
         const sendToSienge = document.getElementById('vistoria-send-sienge') && document.getElementById('vistoria-send-sienge').checked;
-        let photoBlob = null;
-        
-        if (fileInput.files.length > 0) {
-            const file = fileInput.files[0];
-            photoBlob = file;
-            const uploadRes = await window.ConstrucaoApp.uploadFile(file, customerId);
-            fileUrl = uploadRes.url;
-            fileName = uploadRes.name;
-        } else if (editId) {
-            const editCheck = window.ConstrucaoApp.currentChecks.find(c => c.id === editId);
-            if (editCheck) {
-                fileUrl = editCheck.fileUrl;
-                fileName = editCheck.fileName;
+
+        for (let i = 0; i < listaArquivos.length; i++) {
+            const item = listaArquivos[i];
+            if (item.file) {
+                btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px; animation: vc-spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg><style>@keyframes vc-spin { 100% { transform: rotate(360deg); } }</style> Enviando arquivo ' + (i + 1) + ' de ' + listaArquivos.length + '...';
+                const uploadRes = await window.ConstrucaoApp.uploadFile(item.file, customerId);
+                fileUrls.push(uploadRes.url);
+                fileNames.push(item.name || uploadRes.name);
+                item.url = uploadRes.url;
+            } else if (item.url) {
+                fileUrls.push(item.url);
+                fileNames.push(item.name || ("Arquivo " + (i + 1)));
             }
         }
+        const fileUrl = fileUrls[0] || "";
+        const fileName = fileNames[0] || "";
 
         let siengeSent = false;
         let siengeErr = "";
+        const siengeFalhas = [];
         if (sendToSienge) {
-            btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px; animation: vc-spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg> Enviando ao Sienge...';
-            try {
-                if (!photoBlob && fileUrl) {
-                    const imgRes = await fetch(fileUrl);
-                    if (!imgRes.ok) throw new Error("Não foi possível ler a foto salva para enviar ao Sienge.");
-                    photoBlob = await imgRes.blob();
-                }
-                if (!photoBlob) throw new Error("Anexe a foto da vistoria para enviar ao Sienge.");
+            if (!listaArquivos.length) {
+                siengeErr = "Anexe ao menos um arquivo da vistoria para enviar ao Sienge.";
+                siengeFalhas.push(siengeErr);
+            } else try {
                 const siengeUnitId = await window.ConstrucaoApp.findSiengeUnitId(contractObj);
-                const ccId = window.ConstrucaoApp.extractCostCenterId(contractObj);
+                const ccIdSienge = window.ConstrucaoApp.extractCostCenterId(contractObj);
                 const unitNameNorm = window.ConstrucaoApp.extractUnitName(contractObj);
                 const dateObj = new Date();
                 const dateStrFileName = dateObj.toLocaleDateString("pt-BR").replace(/\//g, "-");
                 const dateStrDesc = dateObj.toLocaleDateString("pt-BR").split("/").reverse().join(".");
                 const unitFormatted = String(unitNameNorm || "").replace(/-/g, " ");
-                const baseName = `${ccId} ${unitFormatted} - FOTO VISTORIA MANUAL - ${dateStrFileName}`.toUpperCase();
-                const nomeFinal = `${baseName}.jpg`;
+                const baseName = `${ccIdSienge} ${unitFormatted} - FOTO VISTORIA MANUAL - ${dateStrFileName}`.toUpperCase();
                 const descricaoSienge = `${dateStrDesc} - FOTO DE VISTORIA MANUAL`;
-                await window.ConstrucaoApp.postUnitAttachment(siengeUnitId, photoBlob, nomeFinal, descricaoSienge);
-                siengeSent = true;
+                const clienteNome = contractObj.customerName || (typeof AppState !== "undefined" && AppState.selectedCustomerName) || "";
+                let enviados = 0;
+                for (let i = 0; i < listaArquivos.length; i++) {
+                    const item = listaArquivos[i];
+                    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px; animation: vc-spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg> Enviando ao Sienge ' + (i + 1) + ' de ' + listaArquivos.length + '...';
+                    const extMatch = String(item.name || "").match(/\.([a-z0-9]{1,5})$/i);
+                    const ext = extMatch ? extMatch[1].toLowerCase() : "jpg";
+                    const sufixo = listaArquivos.length > 1 ? " " + (i + 1) : "";
+                    const nomeFinal = `${baseName}${sufixo}.${ext}`;
+                    try {
+                        let blob = item.file;
+                        if (!blob && item.url) {
+                            const imgRes = await fetch(item.url);
+                            if (!imgRes.ok) throw new Error("Não foi possível ler o arquivo salvo para enviar ao Sienge.");
+                            blob = await imgRes.blob();
+                        }
+                        if (!blob) throw new Error("Arquivo vazio.");
+                        await window.ConstrucaoApp.postUnitAttachment(siengeUnitId, blob, nomeFinal, descricaoSienge);
+                        enviados += 1;
+                        if (typeof window.logCrmAudit === "function") {
+                            window.logCrmAudit({
+                                action: "ANEXO_ENVIADO",
+                                module: "Construção",
+                                status: "ok",
+                                customerId: String(customerId),
+                                customerLabel: clienteNome,
+                                enterpriseId: String(companyId || ""),
+                                summary: "Foto de vistoria manual · " + nomeFinal + " → unidade " + (unitNameNorm || ""),
+                                details: { fileName: nomeFinal, destino: "Unidade", context: "vistoria-manual" }
+                            });
+                        }
+                    } catch (err) {
+                        const msg = (item.name || nomeFinal) + ": " + ((err && err.message) || String(err));
+                        siengeFalhas.push(msg);
+                        console.error("[Vistoria] envio Sienge", err);
+                        if (typeof window.logCrmAudit === "function") {
+                            window.logCrmAudit({
+                                action: "ANEXO_ERRO",
+                                module: "Construção",
+                                status: "erro",
+                                customerId: String(customerId),
+                                customerLabel: clienteNome,
+                                enterpriseId: String(companyId || ""),
+                                summary: "Falha na foto de vistoria manual · " + nomeFinal,
+                                details: { fileName: nomeFinal, destino: "Unidade", context: "vistoria-manual", erro: (err && err.message) || String(err) }
+                            });
+                        }
+                    }
+                }
+                siengeSent = enviados === listaArquivos.length && enviados > 0;
+                siengeErr = siengeFalhas.join("\n");
             } catch (err) {
                 siengeErr = (err && err.message) || String(err);
+                siengeFalhas.push(siengeErr);
                 console.error("[Vistoria] envio Sienge", err);
             }
         }
@@ -1328,6 +1560,8 @@ window.saveNovaVistoria = async function() {
             observations: obs,
             fileUrl: fileUrl,
             fileName: fileName,
+            fileUrls: fileUrls,
+            fileNames: fileNames,
             sendToSienge: !!sendToSienge,
             siengeSent: !!siengeSent,
             siengeError: siengeErr || "",
@@ -1345,10 +1579,10 @@ window.saveNovaVistoria = async function() {
             await window.closePendingLinkVistorias(Array.from(allKeys), 'vistoria_interna');
         }
         
-        document.getElementById('modal-nova-vistoria').remove();
+        window.fecharModalVistoria();
         window.loadConstrucoes();
         if (sendToSienge && !siengeSent) {
-            alert("A vistoria foi salva no CRM, mas a foto NÃO foi enviada ao Sienge.\n\n" + (siengeErr || "Tente de novo em Editar vistoria, com a opção Enviar para o Sienge ligada."));
+            alert("A vistoria foi salva no CRM, mas nem todos os arquivos foram enviados ao Sienge.\n\n" + (siengeErr || "Tente de novo em Editar vistoria, com a opção Enviar para o Sienge ligada."));
         }
 
     } catch(e) {
