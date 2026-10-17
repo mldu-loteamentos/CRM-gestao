@@ -3,6 +3,7 @@
    Centro de custo com MARKETING no nome: 100% das despesas entram no budget.
    Centro sem MARKETING no nome: baixas, em aberto e previsões nas contas do grupo 2.03.05 MARKETING
    Realizado: data da baixa, valor líquido mais os impostos retidos.
+   Só entram baixas tipo 1 (pagamento) e tipo 10 (adiantamento). Abatimento de adiantamento, cancelamento e as outras baixas ficam de fora, como no relatório do Sienge.
    (a conta, as filhas e as contas alocadas em 05.02 MARKETING na visão DFC).
    Previsão entra no comprometido junto com o título em aberto.
    A aba Contratos mostra quem está em dia, quem não pagou nada e quem deve a entrada (possíveis cancelamentos).
@@ -941,6 +942,36 @@ const MarketingBudgetApp = {
     return Number.isFinite(n) ? n : null;
   },
 
+  idTipoBaixa(v) {
+    if (v == null || v === "") return "";
+    const n = Number(v);
+    return Number.isFinite(n) ? String(Math.trunc(n)) : "";
+  },
+
+  foldTipoBaixa(s) {
+    return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+  },
+
+  /** Nome da baixa, sem confundir adiantamento com abatimento de adiantamento. */
+  nomeEhPagamentoOuAdiantamento(nome) {
+    if (!nome) return false;
+    if (nome.indexOf("ABATIMENTO") >= 0 || nome.indexOf("CANCEL") >= 0 || nome.indexOf("SUBSTITU") >= 0 || nome.indexOf("ESTORNO") >= 0) return false;
+    if (nome.indexOf("POR BENS") >= 0 || nome === "BENS" || nome.indexOf("OUTROS") >= 0) return false;
+    if (nome === "PAGAMENTO" || nome.indexOf("PAGAMENTO") === 0) return true;
+    if (nome === "ADIANTAMENTO" || nome.indexOf("ADIANTAMENTO") === 0) return true;
+    return false;
+  },
+
+  /** Verba de marketing: tipo 1 pagamento e tipo 10 adiantamento. */
+  baixaContaNaVerba(pay) {
+    if (!pay || typeof pay !== "object") return false;
+    const id = this.idTipoBaixa(pay.operationTypeId);
+    if (id) return id === "1" || id === "10";
+    const nome = this.foldTipoBaixa(pay.operationTypeName || pay.operationName || "");
+    if (nome) return this.nomeEhPagamentoOuAdiantamento(nome);
+    return true;
+  },
+
   dataBaixa(pay, bm) {
     const iso = (v) => String(v || "").slice(0, 10);
     const p = iso(pay && (pay.paymentDate || pay.payOffDate || pay.date));
@@ -979,6 +1010,7 @@ const MarketingBudgetApp = {
     const lista = (x) => (Array.isArray(x) ? x : (x ? [x] : []));
     const reais = [];
     lista(pays).forEach((p) => {
+      if (!this.baixaContaNaVerba(p)) return;
       const movs = lista(p && p.bankMovements);
       const uteis = (movs.length ? movs : [null]).filter((bm) => {
         if (bm && app.SKIP_OPS[bm.operationName || ""]) return false;
@@ -2186,7 +2218,7 @@ const MarketingBudgetApp = {
       </div>`;
     const uso = `
       <div class="mkb-kpis">
-        ${this.kpi("Realizado", this.money(r.realizado), "Baixas do período, pelo líquido mais os impostos retidos", "#105436")}
+        ${this.kpi("Realizado", this.money(r.realizado), "Pagamento e adiantamento do período, pelo líquido mais os impostos retidos", "#105436")}
         ${this.kpi("Comprometido", this.money(r.comprometido), "Em aberto e previsão, ainda não pagos", "#f37021")}
         ${this.kpi("Saldo da verba", this.money(r.saldo), r.saldo < 0 ? "A verba já foi ultrapassada" : "O que ainda cabe na verba", r.saldo < 0 ? "#b91c1c" : "#0ea5e9")}
         ${this.kpi("Consumo da verba", r.verba > 0 ? r.consumo.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "%" : "—", "Pago + comprometido, em relação à verba", corConsumo,
@@ -2194,7 +2226,7 @@ const MarketingBudgetApp = {
       </div>
       <div class="mkb-card mkb-chart-full"><div class="mkb-card-h"><h3>Verba e gastos mês a mês</h3><small>Barras = o que foi pago e o que está comprometido · linha = acumulado comparado com a verba</small></div><div class="mkb-canvas"><canvas id="mkb-ch-mes"></canvas></div></div>
       <div class="mkb-card">
-        <div class="mkb-card-h"><h3>Títulos que compõem a verba</h3><small>A baixa entra no realizado no dia do pagamento, pelo líquido mais os impostos retidos. Em aberto entra no comprometido. Previsão ou nota vencida antes de hoje não fica no mês passado: entra no comprometido de hoje, porque será prorrogada ou cancelada. PPC e PCT que já foram pagos, ou que já viraram nota, saem da verba. O valor fica na nota.</small></div>
+        <div class="mkb-card-h"><h3>Títulos que compõem a verba</h3><small>Entra no realizado só a baixa de pagamento ou de adiantamento, no dia do pagamento, pelo líquido mais os impostos retidos. Abatimento de adiantamento, cancelamento e as outras baixas ficam de fora. Em aberto entra no comprometido. Previsão ou nota vencida antes de hoje não fica no mês passado: entra no comprometido de hoje, porque será prorrogada ou cancelada. PPC e PCT que já foram pagos, ou que já viraram nota, saem da verba. O valor fica na nota.</small></div>
         <div id="mkb-gastos">${this.gastosHtml(r)}</div>
       </div>`;
     const vendas = `
