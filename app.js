@@ -24724,11 +24724,19 @@ window.submitReprocessBoleto = async function() {
 
     const finalPromessaText = userText ? `${userText}\n[SISTEMA]: ${boletoText}` : `[SISTEMA]: ${boletoText}`;
 
+    const listaFila = window.clientList || [];
+    const filaHit = listaFila.find((cl) => cl && String(cl.customerId) === String(customerId) && AppState.selectedSaleId && String(cl.saleId) === String(AppState.selectedSaleId))
+      || listaFila.find((cl) => cl && String(cl.customerId) === String(customerId))
+      || null;
+    const custSalvo = (AppState.customers && (AppState.customers[customerId] || AppState.customers[String(customerId)])) || null;
     const occurrence = {
       id: (window.crypto && typeof window.crypto.randomUUID === 'function') ? window.crypto.randomUUID() : `prom_${Date.now()}-${Math.random().toString(36).slice(2)}`,
       date: new Date().toISOString(),
       author: AppState.currentUser ? AppState.currentUser.name : (window.LOGGED_USER_NAME || "Operador"),
       saleId: AppState.selectedSaleId || billId || null,
+      customerName: (custSalvo && custSalvo.name) || (filaHit && filaHit.customerName) || "",
+      unitLabel: filaHit ? [filaHit.costCenterId, filaHit.unitName].filter((v) => v && v !== "N/D").join(" - ") : "",
+      valorAtualizado: filaHit ? ((Number(filaHit.overdueValue) || 0) + (Number(filaHit.overdueCharges) || 0)) : null,
       text: finalPromessaText,
       boletoDueDate: dueDate,
       checkPaymentDate: checkDate,
@@ -25448,6 +25456,77 @@ window.agendaSaleIndexes = function(salesList) {
     return { byId, byBill, byCustomer };
 };
 
+window.agendaIdentidade = function(item) {
+  const cid = String(item && item.customerId != null ? item.customerId : "");
+  const sid = String(item && item.saleId != null ? item.saleId : "");
+  const generico = (n) => !n || /^Cliente\s+#?\d+$/i.test(String(n).trim());
+  const lista = window.clientList || [];
+  let hit = null;
+  if (cid && sid) hit = lista.find((cl) => cl && String(cl.customerId) === cid && String(cl.saleId) === sid) || null;
+  if (!hit && cid) hit = lista.find((cl) => cl && String(cl.customerId) === cid) || null;
+  if (!hit && sid) hit = lista.find((cl) => cl && String(cl.saleId) === sid) || null;
+
+  const bills = (window.AppState && AppState.defaultersBills) || [];
+  let bill = null;
+  if (sid) {
+    bill = bills.find((b) => b && [b.receivableBillId, b.id, b.billId, b.saleId].some((v) => String(v == null ? "" : v) === sid)) || null;
+  }
+  if (!bill && cid) bill = bills.find((b) => b && String(b.customerId) === cid) || null;
+
+  const customers = (window.AppState && AppState.customers) || {};
+  const cust = customers[cid] || customers[Number(cid)] || null;
+  let cacheNome = "";
+  const cache = (window.GlobalCustomerCache && GlobalCustomerCache.data) || [];
+  if (cid && cache.length) {
+    const achou = cache.find((p) => p && (String(p.id) === cid || String(p.customerId) === cid));
+    if (achou) cacheNome = achou.name || achou.customerName || "";
+  }
+  const nomeBill = bill && (bill.clientName || bill.customerName || (bill.client && bill.client.name));
+  let nome = "";
+  if (hit && !generico(hit.customerName)) nome = hit.customerName;
+  else if (nomeBill && !generico(nomeBill)) nome = nomeBill;
+  else if (cust && cust.name) nome = cust.name;
+  else if (cacheNome) nome = cacheNome;
+  else if (item && item.customerName && !generico(item.customerName)) nome = item.customerName;
+  else nome = (item && item.customerName) || ("Cliente " + cid);
+
+  let unidade = item && item.unitId;
+  const unidadeVazia = !unidade || unidade === "N/D" || unidade === "undefined" || unidade === "null";
+  if (unidadeVazia) {
+    if (item && item.unitLabel) unidade = item.unitLabel;
+    else if (hit && (hit.costCenterId || hit.unitName)) unidade = [hit.costCenterId, hit.unitName].filter((v) => v && v !== "N/D").join(" - ");
+    else if (bill) {
+      const ccRaw = bill.costCentersId || bill.costCenterId;
+      const cc = Array.isArray(ccRaw) ? ccRaw[0] : ccRaw;
+      const un = bill.units || bill.unityName || bill.unitName || "";
+      unidade = [cc, un].filter((v) => v && v !== "N/D").join(" - ");
+    }
+  }
+  if (!unidade || unidade === "N/D") {
+    const sales = (window.AppState && AppState.sales) || [];
+    const sale = sales.find((s) => s && (sid && (String(s.receivableBillId) === sid || String(s.id) === sid) || (cid && String(s.customerId) === cid))) || null;
+    if (sale) {
+      const un = sale.unitName || sale.unitId || "";
+      const cc = sale.costCenterId || sale.enterpriseId || "";
+      const rotulo = [cc, un].filter((v) => v && v !== "N/D" && !/^U-/i.test(String(v))).join(" - ");
+      if (rotulo) unidade = rotulo;
+    }
+  }
+  if (!unidade) unidade = "N/D";
+
+  let valorNum = null;
+  if (hit) valorNum = (Number(hit.overdueValue) || 0) + (Number(hit.overdueCharges) || 0);
+  else if (item && item.valorAtualizado != null && item.valorAtualizado !== "") valorNum = Number(item.valorAtualizado) || 0;
+  else if (bill) {
+    const inst = bill.defaulterInstallments || [];
+    if (inst.length) valorNum = inst.reduce((s, i) => s + (Number(i && i.correctedValueWithAdditions) || Number(i && i.value) || 0), 0);
+    else if (bill.correctedValueWithAdditions != null) valorNum = Number(bill.correctedValueWithAdditions) || 0;
+    else if (bill.totalValue != null) valorNum = Number(bill.totalValue) || 0;
+  }
+  const valor = valorNum == null ? "N/D" : valorNum.toLocaleString("pt-BR", { minimumFractionDigits: 2 });
+  return { nome: nome, unidade: unidade, valor: valor };
+};
+
 window.collectAgendaDueItems = function(dateStr, opts) {
     opts = opts || {};
     const dateKey = window.promiseDateKey(dateStr);
@@ -25577,7 +25656,9 @@ window.collectAgendaDueItems = function(dateStr, opts) {
           customerName: (customer && customer.name) || occ.customerName || ('Cliente ' + norm),
           cpf: cpfMasked,
           saleId: (sale && sale.receivableBillId) ? sale.receivableBillId : occSaleId,
-          unitId: displayUnit,
+          unitId: (displayUnit && displayUnit !== "N/D") ? displayUnit : (occ.unitLabel || displayUnit),
+          unitLabel: occ.unitLabel || "",
+          valorAtualizado: occ.valorAtualizado != null ? occ.valorAtualizado : null,
           promiseDate: occ.promiseDate || occ.checkPaymentDate || occ.prazo,
           promiseStatus: occ.promiseStatus || 'Pendente',
           reminder: occ.reminder || (occ.checkPayment ? 'Checar pagamento' : 'Retorno de Cobrança'),
@@ -26284,6 +26365,7 @@ window.fireConfetti = function() {
       return true;
   });
   const unresolvedCount = unresolvedItems.length;
+  const teveFila = originalItems.some(item => item && item.isFila);
   const todayStr = window.getActiveQueueDate ? window.getActiveQueueDate() : (window.localDateStr ? window.localDateStr() : new Date().toISOString().split('T')[0]);
   const filaTrackKey = `${String(selectedOperator || 'Todos')}|${todayStr}`;
   if (!window._filaHadPendingInSession) window._filaHadPendingInSession = {};
@@ -26302,7 +26384,7 @@ window.fireConfetti = function() {
           summaryDiv.className = 'agenda-queue-summary';
           table.parentNode.insertBefore(summaryDiv, table);
       }
-  } else if (originalItems.length > 0 && unresolvedCount === 0) {
+  } else if (teveFila && unresolvedCount === 0) {
       const table = body.closest('table');
       if (table && table.parentNode) {
           const oldSummary = table.parentNode.querySelector('.agenda-queue-summary');
@@ -26400,6 +26482,11 @@ window.fireConfetti = function() {
       `;
     }
 
+    const ident = (typeof window.agendaIdentidade === "function") ? window.agendaIdentidade(item) : null;
+    const nomeLinha = ident ? ident.nome : item.customerName;
+    const unidadeLinha = ident ? ident.unidade : item.unitId;
+    const valorLinha = ident ? ident.valor : "N/D";
+
     const row = document.createElement("tr");
     row.style.borderBottom = "1px solid #e2e8f0";
     
@@ -26414,10 +26501,10 @@ window.fireConfetti = function() {
       </td>
       <td style="font-size: 0.8rem; vertical-align: middle; padding-top: 8px; padding-bottom: 8px;">
         <a href="#" onclick="window.openCustomerFromAgenda(${item.customerId}, ${item.saleId}); return false;" style="font-weight:700; color:var(--color-primary); text-decoration:none; display: block; margin-bottom: 2px;">
-          ${item.customerName}
+          ${nomeLinha}
         </a>
         <div style="color:var(--color-text-muted); font-size: 0.75rem;">
-          Título: ${item.saleId} | Unidade: ${item.unitId}
+          Título: ${item.saleId} | Unidade: ${unidadeLinha}
         </div>
       </td>
       <td style="font-size: 0.8rem; vertical-align: middle; padding-top: 8px; padding-bottom: 8px;">
@@ -26429,11 +26516,7 @@ window.fireConfetti = function() {
         ${actionHtml}
       </td>
       <td style="font-size: 0.8rem; vertical-align: middle; text-align: right; font-weight: 600; color: var(--color-text-dark);">
-        ${(() => {
-          const c = (window.clientList || []).find(cl => String(cl.customerId) === String(item.customerId));
-          if(c) return (c.overdueValue + (c.overdueCharges||0)).toLocaleString('pt-BR', {minimumFractionDigits: 2});
-          return 'N/D';
-        })()}
+        ${valorLinha}
       </td>
       <td style="font-size: 0.8rem; vertical-align: middle; text-align: center; color: var(--color-text-dark);">
         ${lastContactStr}
