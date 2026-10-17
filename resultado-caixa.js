@@ -908,33 +908,6 @@ const ResultadoCaixaApp = {
         if (cel) s += Number(cel[campo]) || 0;
       }
     });
-    const fundoNaVisao = usar.some((c) => c === "09.03" || String(c).indexOf("09.03.") === 0);
-    if (lado === "entradas" && !fundoNaVisao) s += this.valorFundoInvestimento(arq, ccId, mes, campo, ate);
-    return s;
-  },
-
-  /** 09.03 entra na receita mesmo quando a visão DFC guarda o fundo junto do capex. */
-  ehFundoInvestimento(code) {
-    const limpo = String(code || "").replace(/\s/g, "");
-    if (/^0?9\.03(\.|$)/.test(limpo)) return true;
-    const digitos = limpo.replace(/\D/g, "");
-    return digitos.indexOf("903") === 0;
-  },
-
-  valorFundoInvestimento(arq, ccId, mes, campo, ate) {
-    const dono = arq && arq.planosPorCc && arq.planosPorCc[ccId];
-    if (!dono || !dono.contas) return 0;
-    const fim = Number(mes);
-    const ini = ate ? 1 : fim;
-    let s = 0;
-    Object.keys(dono.contas).forEach((code) => {
-      if (!this.ehFundoInvestimento(code)) return;
-      const meses = (dono.contas[code] && dono.contas[code].meses) || {};
-      for (let m = ini; m <= fim; m++) {
-        const cel = meses[String(m)];
-        if (cel) s += Number(cel[campo]) || 0;
-      }
-    });
     return s;
   },
 
@@ -960,10 +933,6 @@ const ResultadoCaixaApp = {
           const cel = (bag.meses || {})[String(m)];
           if (cel) s += (Number(cel[campo]) || 0) * this.pctArquivo(arq, nome);
         }
-      }
-      if (lado === "entradas") {
-        const fundo = this.valorFundoInvestimento(arq, ccId, mes, campo, ate);
-        if (fundo) s += fundo * this.pctArquivo(arq, nome);
       }
     });
     return s;
@@ -1810,18 +1779,9 @@ const ResultadoCaixaApp = {
       const extra = arq.contasPorCc || {};
       Object.keys(extra).forEach((id) => {
         const contas = (extra[id] && extra[id].contas) || {};
-        const fundo = lado === "entradas" && this.valorFundoInvestimento(arq, id, 12, "r", true) + this.valorFundoInvestimento(arq, id, 12, "o", true);
-        if (!Object.keys(contas).some((code) => this.codigoNoLado(code, lado)) && !(fundo > 0.5 || fundo < -0.5)) return;
+        if (!Object.keys(contas).some((code) => this.codigoNoLado(code, lado))) return;
         if (!out[id]) out[id] = { nome: extra[id].nome || id, meses: {} };
       });
-      if (lado === "entradas") {
-        Object.keys(arq.planosPorCc || {}).forEach((id) => {
-          if (out[id]) return;
-          const fundo = this.valorFundoInvestimento(arq, id, 12, "r", true) + this.valorFundoInvestimento(arq, id, 12, "o", true);
-          if (!(fundo > 0.5 || fundo < -0.5)) return;
-          out[id] = { nome: (arq.planosPorCc[id] && arq.planosPorCc[id].nome) || id, meses: {} };
-        });
-      }
       const bag = arq[lado] || {};
       Object.keys(bag).forEach((id) => {
         if (!out[id]) out[id] = { nome: bag[id].nome, meses: {} };
@@ -1847,15 +1807,6 @@ const ResultadoCaixaApp = {
         const cel = bag.meses[String(m)];
         if (cel) s += Number(cel[campo]) || 0;
       }
-    }
-    if (lado === "entradas") {
-      const a = this.anoDados(ano);
-      Object.keys((a && a.arquivos) || {}).forEach((nome) => {
-        const arq = a.arquivos[nome];
-        const contas = arq && arq.contasPorCc && arq.contasPorCc[ccId] && arq.contasPorCc[ccId].contas;
-        const ja = contas && Object.keys(contas).some((c) => c === "09.03" || String(c).indexOf("09.03.") === 0);
-        if (!ja) s += this.valorFundoInvestimento(arq, ccId, mes, campo, ate);
-      });
     }
     return s;
   },
