@@ -1936,8 +1936,12 @@ const SiengeApiService = {
     if (!faltam.length) {
       this._statusCaixa("Lendo " + de + " a " + ate + " no Firebase.");
     } else {
-      this._statusCaixa("O comparativo " + de + " a " + ate + " usa o Firebase. Ainda falta gravar " + faltam[0] + (faltam.length > 1 ? " e mais " + (faltam.length - 1) + " mês(es)" : "") + ".");
-      this.prepararBaseMovimentosCaixa();
+      for (let i = 0; i < faltam.length; i++) {
+        this._statusCaixa("Gravando " + (i + 1) + " de " + faltam.length + " mês(es) até 31/12/2025 da empresa " + companyId + ".");
+        const got = await this._lerOuBuscarMesCaixa(companyId, faltam[i], opts);
+        if (got && got.length) rows.push.apply(rows, got);
+      }
+      this._statusCaixa("Meses até 31/12/2025 da empresa " + companyId + " lidos no Firebase. 2026 segue na API.");
     }
     return rows.filter((m) => {
       const d = this._dataMovCaixa(m);

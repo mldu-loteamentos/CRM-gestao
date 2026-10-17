@@ -2,7 +2,7 @@ const { initializeApp } = require("firebase/app");
 const {
   getFirestore, doc, setDoc, getDoc, deleteDoc
 } = require("firebase/firestore");
-const { isBusinessDaySP, todayIsoSP } = require("../../lib/br-calendar");
+const { todayIsoSP } = require("../../lib/br-calendar");
 const caucaoHandler = require("../../lib/caucao-batimento");
 
 const SIENGE_DOMAIN = "mouraleite";
@@ -497,6 +497,251 @@ async function saveState(state) {
   await setDoc(doc(db, "sienge_defaulters_history", STATE_ID), state);
 }
 
+const CFIN_STATE_ID = "_cfin_state";
+const CFIN_META_ID = "_cfin_meta";
+const CFIN_JSON_MAX = 700000;
+
+function isoDate(d) {
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+
+function parseIso(iso) {
+  return new Date(String(iso).slice(0, 10) + "T12:00:00");
+}
+
+function shiftDays(iso, days) {
+  const d = parseIso(iso);
+  d.setDate(d.getDate() + days);
+  return isoDate(d);
+}
+
+/** Mês corrente, mais 6 meses para trás e 6 para a frente, em meses cheios. */
+function cfinWindow(today) {
+  const d = parseIso(today);
+  const start = new Date(d.getFullYear(), d.getMonth() - 6, 1);
+  const end = new Date(d.getFullYear(), d.getMonth() + 7, 0);
+  return { start: isoDate(start), end: isoDate(end) };
+}
+
+function cfinMonths(startIso, endIso) {
+  const out = [];
+  let d = parseIso(startIso);
+  const last = parseIso(endIso);
+  while (d <= last) {
+    const monthStart = isoDate(new Date(d.getFullYear(), d.getMonth(), 1));
+    const monthEnd = isoDate(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+    out.push({
+      start: monthStart < startIso ? startIso : monthStart,
+      end: monthEnd > endIso ? endIso : monthEnd
+    });
+    d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+  }
+  return out;
+}
+
+function outcomeUrl(start, end, companyId) {
+  let url = `${SIENGE_BULK_BASE}/bulk-data/v1/outcome?startDate=${encodeURIComponent(start)}`
+    + `&endDate=${encodeURIComponent(end)}`
+    + "&selectionType=D&correctionIndexerId=0&correctionDate=2023-01-01&withAuthorizations=false";
+  if (companyId) url += "&companyId=" + encodeURIComponent(companyId);
+  return url;
+}
+
+function isTooBig(err) {
+  return /\b507\b/.test(String((err && err.message) || ""));
+}
+
+async function continuarWarmup(req) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 2500);
+  try {
+    await fetch(`${originFromReq(req)}/api/morning-warmup`, {
+      headers: { Authorization: req.headers.authorization || "" },
+      signal: ctrl.signal
+    });
+  } catch (e) {
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function loadCfinState(today) {
+  const snap = await getDoc(doc(db, "sienge_defaulters_history", CFIN_STATE_ID));
+  if (!snap.exists()) return null;
+  const s = snap.data() || {};
+  if (s.date !== today) return null;
+  return s;
+}
+
+async function saveCfinState(state) {
+  await setDoc(doc(db, "sienge_defaulters_history", CFIN_STATE_ID), state);
+}
+
+async function writeCfinParts(state, pair, bills) {
+  const list = Array.isArray(bills) ? bills : [];
+  const whole = JSON.stringify(list);
+  const parts = [];
+  if (whole.length <= CFIN_JSON_MAX) parts.push(list);
+  else {
+    const n = Math.max(2, Math.ceil(whole.length / CFIN_JSON_MAX));
+    const size = Math.ceil(list.length / n);
+    for (let i = 0; i < list.length; i += size) parts.push(list.slice(i, i + size));
+  }
+  const companyId = pair.companyId ? String(pair.companyId) : "";
+  for (let i = 0; i < parts.length; i++) {
+    const id = "cfin_" + state.date + "_" + (companyId || "all") + "_" + pair.start + "_" + pair.end + (parts.length > 1 ? "_p" + i : "");
+    await setDoc(doc(db, "sienge_defaulters_history", id), {
+      kind: "cfin",
+      date: state.date,
+      companyId: companyId,
+      start: pair.start,
+      end: pair.end,
+      data: JSON.stringify(parts[i])
+    });
+    state.chunkIds.push({ id: id, companyId: companyId, start: pair.start, end: pair.end });
+  }
+}
+
+async function fetchOutcomeBills(start, end, companyId) {
+  const res = await siengeFetch(outcomeUrl(start, end, companyId), 3);
+  return (res && res.data) || [];
+}
+
+/**
+ * Uma fatia da base do Controle financeiro: 6 meses antes e 6 depois.
+ * Cada chamada diária faz o que cabe no tempo e chama a próxima até fechar a janela.
+ */
+async function advanceControleFinanceiro(req, res, today, started, log) {
+  let state = await loadCfinState(today);
+  if (state && state.ready) {
+    if (state.cleanup && state.cleanup.length) {
+      const batch = state.cleanup.splice(0, 30);
+      for (const id of batch) {
+        try { await deleteDoc(doc(db, "sienge_defaulters_history", id)); } catch (e) {}
+      }
+      await saveCfinState(state);
+      if (state.cleanup.length) await continuarWarmup(req);
+    }
+    return res.status(200).json({
+      done: !(state.cleanup && state.cleanup.length),
+      filaPronta: true,
+      date: today,
+      step: "cfin",
+      ready: true,
+      message: "Base do controle financeiro já gerada.",
+      log
+    });
+  }
+  if (!state) {
+    const win = cfinWindow(today);
+    let companies = [];
+    try {
+      const list = await fetchAllPages("/companies");
+      companies = [...new Set(list.map((c) => String(c.id || c.companyId || "")).filter(Boolean))];
+    } catch (e) {
+      log.push("empresas: " + e.message);
+    }
+    state = {
+      date: today,
+      start: win.start,
+      end: win.end,
+      companies: companies,
+      pairs: cfinMonths(win.start, win.end).map((m) => ({ start: m.start, end: m.end, companyId: "" })),
+      index: 0,
+      chunkIds: [],
+      failed: 0,
+      ready: false
+    };
+    log.push("janela " + win.start + " a " + win.end + " · " + state.pairs.length + " meses");
+  }
+  if (!Array.isArray(state.pairs)) state.pairs = [];
+  if (!Array.isArray(state.chunkIds)) state.chunkIds = [];
+
+  while (state.index < state.pairs.length && Date.now() - started < BUDGET_MS - 8000) {
+    const pair = state.pairs[state.index];
+    try {
+      const bills = await fetchOutcomeBills(pair.start, pair.end, pair.companyId);
+      await writeCfinParts(state, pair, bills);
+      log.push((pair.companyId || "todas") + " " + pair.start + ".." + pair.end + ": " + bills.length);
+      state.index += 1;
+    } catch (e) {
+      if (isTooBig(e) && pair.start < pair.end) {
+        const s = parseIso(pair.start);
+        const en = parseIso(pair.end);
+        const mid = new Date(s.getTime() + Math.floor((en - s) / 2));
+        const midIso = isoDate(mid);
+        const next = shiftDays(midIso, 1);
+        if (midIso >= pair.start && midIso < pair.end && next <= pair.end) {
+          state.pairs.splice(state.index, 1,
+            { start: pair.start, end: midIso, companyId: pair.companyId || "" },
+            { start: next, end: pair.end, companyId: pair.companyId || "" }
+          );
+          log.push("divide " + pair.start + ".." + pair.end);
+          continue;
+        }
+      }
+      if (isTooBig(e) && !pair.companyId && state.companies && state.companies.length) {
+        state.pairs.splice(state.index, 1, ...state.companies.map((cid) => ({
+          start: pair.start, end: pair.end, companyId: String(cid)
+        })));
+        log.push("divide empresas " + pair.start);
+        continue;
+      }
+      state.failed = (Number(state.failed) || 0) + 1;
+      state.index += 1;
+      log.push("falha " + (pair.companyId || "todas") + " " + pair.start + ": " + e.message);
+    }
+  }
+
+  if (state.index >= state.pairs.length) {
+    let previous = [];
+    try {
+      const prevSnap = await getDoc(doc(db, "sienge_defaulters_history", CFIN_META_ID));
+      if (prevSnap.exists()) previous = ((prevSnap.data() || {}).chunks || []).map((c) => c.id).filter(Boolean);
+    } catch (e) {}
+    const keep = new Set(state.chunkIds.map((c) => c.id));
+    state.cleanup = previous.filter((id) => id && !keep.has(id));
+    await setDoc(doc(db, "sienge_defaulters_history", CFIN_META_ID), {
+      kind: "cfin-meta",
+      ready: true,
+      date: today,
+      start: state.start,
+      end: state.end,
+      companies: state.companies || [],
+      chunks: state.chunkIds,
+      failed: Number(state.failed) || 0,
+      updatedAt: new Date().toISOString()
+    });
+    state.ready = true;
+    await saveCfinState(state);
+    log.push("base pronta: " + state.chunkIds.length + " blocos");
+  } else {
+    await saveCfinState(state);
+    log.push("segue " + state.index + "/" + state.pairs.length);
+  }
+
+  if (state.ready && state.cleanup && state.cleanup.length) {
+    const batch = state.cleanup.splice(0, 30);
+    for (const id of batch) {
+      try { await deleteDoc(doc(db, "sienge_defaulters_history", id)); } catch (e) {}
+    }
+    await saveCfinState(state);
+  }
+
+  const finished = !!(state.ready && !(state.cleanup && state.cleanup.length));
+  if (!finished) await continuarWarmup(req);
+  return res.status(200).json({
+    done: finished,
+    filaPronta: true,
+    date: today,
+    step: "cfin",
+    ready: !!state.ready,
+    index: state.index,
+    total: state.pairs.length,
+    log
+  });
+}
+
 module.exports = async function handler(req, res) {
   if (String(req.url || "").indexOf("caucao-batimento") >= 0) return caucaoHandler(req, res);
   if (req.method === "OPTIONS") {
@@ -510,16 +755,6 @@ module.exports = async function handler(req, res) {
   await dispararCaucao(req);
 
   const force = !!(req.query && (req.query.force === "1" || req.query.force === "true"));
-  const day = isBusinessDaySP();
-  if (!force && !day.ok) {
-    return res.status(200).json({
-      skipped: true,
-      reason: day.reason,
-      date: todayIsoSP(),
-      message: "Fim de semana ou feriado: warmup só roda se alguém acessar o CRM."
-    });
-  }
-
   const today = todayIsoSP();
   const started = Date.now();
   const log = [];
@@ -527,7 +762,7 @@ module.exports = async function handler(req, res) {
   try {
     const metaToday = await getDoc(doc(db, "sienge_defaulters_history", today));
     if (!force && metaToday.exists() && metaToday.data() && metaToday.data().warmupDone) {
-      return res.status(200).json({ done: true, skipped: false, date: today, message: "Cache do dia já gerado pelo warmup." });
+      return advanceControleFinanceiro(req, res, today, started, log);
     }
 
     let state = await loadState(today);
@@ -556,11 +791,12 @@ module.exports = async function handler(req, res) {
       const companies = internalCompanyIds(customRaw);
       state.companies = companies;
       const costCenters = await fetchAllPages("/cost-centers");
-      const cId = companies[state.companyIndex];
-      if (cId == null) {
-        state.step = "income";
-        await saveState(state);
-      } else {
+      while (state.step === "defaulters" && Date.now() - started < BUDGET_MS - 8000) {
+        const cId = companies[state.companyIndex];
+        if (cId == null) {
+          state.step = "income";
+          break;
+        }
         const companyCcs = costCenters
           .filter((cc) => Number(cc.companyId) === Number(cId))
           .map((cc) => String(cc.id || cc.costCenterId || "").trim())
@@ -617,9 +853,10 @@ module.exports = async function handler(req, res) {
         }
         if (state.companyIndex >= companies.length) state.step = "income";
         await saveState(state);
-        if (Date.now() - started > BUDGET_MS || state.step === "defaulters") {
-          return res.status(200).json({ done: false, date: today, step: state.step, companyIndex: state.companyIndex, batchIndex: state.batchIndex, log });
-        }
+      }
+      await saveState(state);
+      if (state.step === "defaulters") {
+        return res.status(200).json({ done: false, filaPronta: false, date: today, step: state.step, companyIndex: state.companyIndex, batchIndex: state.batchIndex, log });
       }
     }
 
@@ -637,11 +874,12 @@ module.exports = async function handler(req, res) {
       }
       const pairs = [];
       companies.forEach((cid) => chunks.forEach((ch) => pairs.push({ cid, ...ch })));
-      const idx = state.incomeIndex || 0;
-      if (idx >= pairs.length) {
-        state.step = "finalize";
-        await saveState(state);
-      } else {
+      while (state.step === "income" && Date.now() - started < BUDGET_MS - 8000) {
+        const idx = state.incomeIndex || 0;
+        if (idx >= pairs.length) {
+          state.step = "finalize";
+          break;
+        }
         const p = pairs[idx];
         let paidEntries = [];
         try {
@@ -661,9 +899,10 @@ module.exports = async function handler(req, res) {
         if (state.incomeIndex >= pairs.length) state.step = "finalize";
         await saveState(state);
         log.push(`income ${idx + 1}/${pairs.length}`);
-        if (state.step !== "finalize") {
-          return res.status(200).json({ done: false, date: today, step: state.step, incomeIndex: state.incomeIndex, log });
-        }
+      }
+      await saveState(state);
+      if (state.step === "income") {
+        return res.status(200).json({ done: false, filaPronta: false, date: today, step: state.step, incomeIndex: state.incomeIndex, log });
       }
     }
 
@@ -706,6 +945,7 @@ module.exports = async function handler(req, res) {
         chunks: numChunks,
         timestampStr,
         paidMap: JSON.stringify(paidMap.filter((x) => x && x[0])),
+        companyIds: state.companies || [],
         warmupDone: true,
         cacheRev: DEFAULTERS_CACHE_REV,
         createdAt: new Date().toISOString()
@@ -716,7 +956,7 @@ module.exports = async function handler(req, res) {
       state.step = "done";
       await saveState({ date: today, step: "done" });
       log.push(`finalize: ${bills.length} títulos, ${numChunks} chunks`);
-      return res.status(200).json({ done: true, date: today, bills: bills.length, log });
+      return advanceControleFinanceiro(req, res, today, started, log);
     }
 
     return res.status(200).json({ done: state.step === "done", date: today, step: state.step, log });

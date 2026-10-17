@@ -15,7 +15,7 @@ const FluxoCaixaApp = {
   compMovements: [],
   compMonths: [],
   compMap: null,
-  consolidacaoAtiva: true,
+  consolidacaoAtiva: false,
   companyMonthsOpen: null,
   agrupamento: "mes",
   escala: "nominal",
@@ -46,13 +46,7 @@ const FluxoCaixaApp = {
     }
     // Sempre a visão DFC Padrão do cadastro de visões (Apoio / Integra)
     this.visao();
-    const cons = this.consolidacaoCompanies();
-    if (!this.selectedCompanyIds.length && cons.length) {
-      this.selectedCompanyIds = cons.map(c => String(c.id));
-      this.consolidacaoAtiva = true;
-    } else if (!cons.length) {
-      this.consolidacaoAtiva = false;
-    }
+    if (!this.selectedCompanyIds.length) this.consolidacaoAtiva = false;
     if (!this.companyMonthsOpen) this.companyMonthsOpen = new Set();
     try {
       const escala = localStorage.getItem("fc_escala");
@@ -61,9 +55,6 @@ const FluxoCaixaApp = {
     this.noteCompanySet(true);
     this.render();
     this.ensureCategories();
-    if (window.SiengeApiService && typeof SiengeApiService.prepararBaseMovimentosCaixa === "function") {
-      setTimeout(() => SiengeApiService.prepararBaseMovimentosCaixa(), 1200);
-    }
     if (!window._fcEmpDropBound) {
       window._fcEmpDropBound = true;
       document.addEventListener("mousedown", (e) => {
@@ -1389,9 +1380,6 @@ const FluxoCaixaApp = {
                   </div>
                 </div>
                 <div class="fc-tool-group fc-tool-end">
-                  <button type="button" class="btn fc-insights-btn" onclick="FluxoCaixaApp.gerarInsights()" ${(this.rows || []).length && !this.loading ? "" : "disabled"} title="Variações, receitas, serviços, aplicações e saídas">
-                    <i data-lucide="lightbulb" style="width:14px;height:14px;"></i> Gerar insights
-                  </button>
                   <button type="button" class="btn btn-excel" onclick="FluxoCaixaApp.exportGridExcel()" ${(this.rows || []).length && !this.loading ? "" : "disabled"} title="Exportar tabela atual para Excel">
                     <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
                   </button>
@@ -1519,7 +1507,8 @@ const FluxoCaixaApp = {
     const ids = this.gridCompanyIds();
     const head = ids.length <= 1 ? this.headUmaEmpresa() : this.headVariasEmpresas(ids);
     const body = (this.rows || []).map(r => this.gridRowHtml(r, cols)).join("");
-    return `<table class="fc-grid">${head}<tbody>${body}</tbody></table>`;
+    const escala = this.escala === "milhoes" ? "milhoes" : (this.escala === "inteiro" ? "inteiro" : "nominal");
+    return `<table class="fc-grid is-${escala}">${head}<tbody>${body}</tbody></table>`;
   },
 
   headUmaEmpresa() {

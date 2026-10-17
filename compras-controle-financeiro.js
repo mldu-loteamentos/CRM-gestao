@@ -791,6 +791,100 @@ ComprasControleApp.carregarLotes = async function () {
   }
 };
 
+ComprasControleApp.isoShiftDay = function (iso, days) {
+  const d = new Date(String(iso).slice(0, 10) + "T12:00:00");
+  d.setDate(d.getDate() + days);
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+};
+
+ComprasControleApp.baseCobre = function (chunks, start, end, companyIds) {
+  const req = (companyIds || []).map(String).filter(Boolean);
+  const needed = req.length ? req : [""];
+  let cursor = start;
+  while (cursor && cursor <= end) {
+    const ok = needed.every((cid) => (chunks || []).some((c) => {
+      if (!c || c.start > cursor || c.end < cursor) return false;
+      if (!c.companyId) return true;
+      return !!cid && String(c.companyId) === cid;
+    }));
+    if (!ok) return false;
+    cursor = this.isoShiftDay(cursor, 1);
+  }
+  return true;
+};
+
+ComprasControleApp.lerMetaBase = async function () {
+  const fx = window.firebaseCollections;
+  const db = window.firebaseDb;
+  if (!fx || !db || typeof fx.getDoc !== "function" || typeof fx.doc !== "function") return null;
+  const snap = await fx.getDoc(fx.doc(db, "sienge_defaulters_history", "_cfin_meta"));
+  if (!snap || !snap.exists || !snap.exists()) return null;
+  const meta = snap.data() || {};
+  if (!meta.ready || !meta.start || !meta.end || !Array.isArray(meta.chunks) || !meta.chunks.length) return null;
+  return meta;
+};
+
+ComprasControleApp.lerBlocoBase = async function (id) {
+  if (!id) return [];
+  this._cfinBlocos = this._cfinBlocos || {};
+  if (this._cfinBlocos[id]) return this._cfinBlocos[id];
+  const fx = window.firebaseCollections;
+  const db = window.firebaseDb;
+  const snap = await fx.getDoc(fx.doc(db, "sienge_defaulters_history", id));
+  let bills = [];
+  if (snap && snap.exists && snap.exists()) {
+    try { bills = JSON.parse((snap.data() || {}).data || "[]"); } catch (e) { bills = []; }
+  }
+  if (!Array.isArray(bills)) bills = [];
+  this._cfinBlocos[id] = bills;
+  return bills;
+};
+
+ComprasControleApp.billsDaBase = async function (start, end) {
+  let meta;
+  try {
+    meta = await this.lerMetaBase();
+  } catch (e) {
+    return null;
+  }
+  if (!meta || start < meta.start || end > meta.end) return null;
+  const companies = (this.state.companyIds || []).map(String).filter(Boolean);
+  let required = companies;
+  if (!required.length) {
+    required = (meta.companies || []).map(String).filter(Boolean);
+    if (!required.length) required = [""];
+  }
+  const chunks = meta.chunks.filter((c) => c && c.end >= start && c.start <= end && (
+    !companies.length || !c.companyId || companies.indexOf(String(c.companyId)) >= 0
+  ));
+  if (!this.baseCobre(chunks, start, end, required)) return null;
+  const bills = [];
+  const seen = {};
+  let done = 0;
+  for (const chunk of chunks) {
+    done += 1;
+    this.noteProgress("Carregando contas a pagar da base…", done / chunks.length);
+    let rows = [];
+    try {
+      rows = await this.lerBlocoBase(chunk.id);
+    } catch (e) {
+      return null;
+    }
+    rows.forEach((bill) => {
+      if (!bill || bill.billId == null) return;
+      const due = String(bill.dueDate || "").slice(0, 10);
+      if (due && (due < start || due > end)) return;
+      if (companies.length && companies.indexOf(String(bill.companyId || "")) < 0) return;
+      const key = String(bill.billId) + ":" + String(bill.installmentId || "") + ":" + due;
+      if (seen[key]) return;
+      seen[key] = true;
+      bills.push(bill);
+    });
+  }
+  this.state.baseEm = meta.updatedAt || meta.date || "";
+  return bills;
+};
+
 ComprasControleApp.fetchOutcome = async function (start, end) {
   const chunks = typeof siengeSplitDateRange === "function"
     ? siengeSplitDateRange(start, end)
@@ -811,6 +905,173 @@ ComprasControleApp.fetchOutcome = async function (start, end) {
   return { data: data };
 };
 
+ComprasControleApp._cfinHistDe = "2017-01-01";
+ComprasControleApp._cfinHistAte = "2025-12-31";
+
+ComprasControleApp.noteProgress = function (text, ratio) {
+  const box = document.getElementById("cfin-results");
+  if (!box) return;
+  if (!document.getElementById("cfin-load-style")) {
+    const st = document.createElement("style");
+    st.id = "cfin-load-style";
+    st.textContent = ".cfin-load{background:#fff;border:1px dashed #cbd5e1;border-radius:8px;padding:36px 20px;display:flex;flex-direction:column;align-items:center;gap:14px;color:#64748b;text-align:center;}"
+      + ".cfin-load p{margin:0;font-size:.9rem;font-weight:600;color:#105436;}"
+      + ".cfin-load-track{width:100%;max-width:420px;height:8px;background:#e2e8f0;border-radius:99px;overflow:hidden;}"
+      + ".cfin-load-bar{height:100%;width:0;background:#105436;border-radius:99px;transition:width .25s linear;}";
+    document.head.appendChild(st);
+  }
+  const clean = this.textoProgresso(text) || "Carregando contas a pagar…";
+  let wrap = box.querySelector(".cfin-load");
+  if (!wrap) {
+    box.innerHTML = '<div class="cfin-load"><div class="loading-spinner"></div><p class="cfin-load-text"></p><div class="cfin-load-track"><div class="cfin-load-bar"></div></div></div>';
+    wrap = box.querySelector(".cfin-load");
+  }
+  const label = wrap.querySelector(".cfin-load-text");
+  if (label) label.textContent = clean;
+  const bar = wrap.querySelector(".cfin-load-bar");
+  if (bar && Number.isFinite(Number(ratio))) bar.style.width = Math.max(0, Math.min(100, Math.round(Number(ratio) * 100))) + "%";
+};
+
+ComprasControleApp._mesesHist = function (start, end) {
+  const out = [];
+  let ym = String(start || "").slice(0, 7);
+  const fim = String(end || "").slice(0, 7);
+  while (ym && fim && ym <= fim && out.length < 240) {
+    out.push(ym);
+    const parts = ym.split("-").map(Number);
+    const d = new Date(parts[0], parts[1], 1);
+    ym = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+  }
+  return out;
+};
+
+ComprasControleApp._fimMes = function (ym) {
+  const parts = String(ym).split("-").map(Number);
+  return ym + "-" + String(new Date(parts[0], parts[1], 0).getDate()).padStart(2, "0");
+};
+
+ComprasControleApp._lerMesPago = async function (companyId, ym) {
+  const fx = window.firebaseCollections;
+  const db = window.firebaseDb;
+  if (!fx || !db || !fx.getDoc) return null;
+  const id = String(companyId || "todas") + "_" + ym;
+  try {
+    const snap = await fx.getDoc(fx.doc(db, "cfin_pagos", id));
+    if (!snap || typeof snap.exists !== "function" || !snap.exists()) return null;
+    const data = snap.data() || {};
+    const partes = Math.max(1, Number(data.partes) || 1);
+    let bills = Array.isArray(data.bills) ? data.bills.slice() : [];
+    for (let i = 2; i <= partes; i++) {
+      const pedaco = await fx.getDoc(fx.doc(db, "cfin_pagos", id + "_p" + i));
+      if (pedaco && typeof pedaco.exists === "function" && pedaco.exists()) {
+        const extra = pedaco.data() || {};
+        if (Array.isArray(extra.bills)) bills = bills.concat(extra.bills);
+      }
+    }
+    return bills;
+  } catch (e) {
+    return null;
+  }
+};
+
+ComprasControleApp._gravarMesPago = async function (companyId, ym, bills) {
+  const fx = window.firebaseCollections;
+  const db = window.firebaseDb;
+  if (!fx || !db || !fx.setDoc || ym > "2025-12") return;
+  const lista = Array.isArray(bills) ? bills : [];
+  const fatias = [];
+  let atual = [];
+  let tamanho = 2;
+  lista.forEach((row) => {
+    const pedaco = JSON.stringify(row || {});
+    if (atual.length && tamanho + pedaco.length > 700000) {
+      fatias.push(atual);
+      atual = [];
+      tamanho = 2;
+    }
+    atual.push(row);
+    tamanho += pedaco.length + 1;
+  });
+  if (atual.length || !fatias.length) fatias.push(atual);
+  const id = String(companyId || "todas") + "_" + ym;
+  await fx.setDoc(fx.doc(db, "cfin_pagos", id), {
+    companyId: String(companyId || "todas"),
+    ym: ym,
+    n: lista.length,
+    partes: fatias.length,
+    em: new Date().toISOString(),
+    bills: fatias[0] || []
+  });
+  for (let i = 1; i < fatias.length; i++) {
+    await fx.setDoc(fx.doc(db, "cfin_pagos", id + "_p" + (i + 1)), {
+      companyId: String(companyId || "todas"),
+      ym: ym,
+      parte: i + 1,
+      bills: fatias[i]
+    });
+  }
+};
+
+ComprasControleApp._billNoPeriodo = function (bill, start, end) {
+  const datas = [];
+  const add = (v) => {
+    const d = String(v || "").slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) datas.push(d);
+  };
+  add(bill && bill.dueDate);
+  add(bill && bill.issueDate);
+  (bill && bill.installments || []).forEach((inst) => add(inst && inst.dueDate));
+  (bill && bill.payments || []).forEach((pay) => {
+    add(pay && pay.dueDate);
+    add(pay && pay.paymentDate);
+  });
+  if (!datas.length) return true;
+  return datas.some((d) => d >= start && d <= end);
+};
+
+ComprasControleApp.contasHistoricas = async function (start, end) {
+  const ini = start < this._cfinHistDe ? this._cfinHistDe : start;
+  const fim = end > this._cfinHistAte ? this._cfinHistAte : end;
+  if (!ini || !fim || ini > fim) return [];
+  const selecionadas = (this.state.companyIds || []).map(String).filter(Boolean);
+  const targets = selecionadas.length ? selecionadas : [""];
+  const meses = this._mesesHist(ini, fim);
+  const out = [];
+  const vistos = new Set();
+  let step = 0;
+  const total = Math.max(1, meses.length * targets.length);
+  for (let c = 0; c < targets.length; c++) {
+    const companyId = targets[c];
+    for (let i = 0; i < meses.length; i++) {
+      step += 1;
+      const ym = meses[i];
+      const chave = String(companyId || "todas") + "_" + ym;
+      let bills = this._cfinMesMem && this._cfinMesMem[chave];
+      if (!bills) bills = await this._lerMesPago(companyId || "todas", ym);
+      if (!bills) {
+        this.noteProgress("Gravando contas até 31/12/2025 · " + (companyId || "empresas") + " · " + ym, step / total);
+        const mesIni = ym + "-01";
+        const mesFim = this._fimMes(ym);
+        bills = await this.outcomeRange(mesIni, mesFim, companyId);
+        try { await this._gravarMesPago(companyId || "todas", ym, bills || []); } catch (e) {}
+      } else if (step === 1 || step % 6 === 0) {
+        this.noteProgress("Lendo contas até 31/12/2025 no Firebase · " + ym, step / total);
+      }
+      if (!this._cfinMesMem) this._cfinMesMem = {};
+      this._cfinMesMem[chave] = bills || [];
+      (bills || []).forEach((bill) => {
+        if (!bill) return;
+        const id = bill.billId != null ? String(companyId || bill.companyId || "") + "|" + String(bill.billId) : "";
+        if (id && vistos.has(id)) return;
+        if (!this._billNoPeriodo(bill, ini, fim)) return;
+        if (id) vistos.add(id);
+        out.push(bill);
+      });
+    }
+  }
+  return out;
+};
+
 ComprasControleApp.consultar = async function () {
   const start = this.state.startDate;
   const end = this.state.endDate;
@@ -823,6 +1084,8 @@ ComprasControleApp.consultar = async function () {
     return;
   }
   this.state.loading = true;
+  this.state.loadingMsg = "Carregando contas a pagar da base…";
+  this.state.fonte = "";
   this.state.rastreando = false;
   this.state.banco = null;
   this.state.error = "";
@@ -831,7 +1094,32 @@ ComprasControleApp.consultar = async function () {
   this.fecharTitulo();
   this.renderPage();
   try {
-    const payload = await this.fetchOutcome(start, end);
+    const contas = [];
+    let fonte = "";
+    if (start <= this._cfinHistAte) {
+      this.state.loadingMsg = "Lendo contas até 31/12/2025 no Firebase…";
+      this.noteProgress(this.state.loadingMsg, 0);
+      const hist = await this.contasHistoricas(start, end < this._cfinHistAte ? end : this._cfinHistAte);
+      contas.push.apply(contas, hist);
+      fonte = "base";
+    }
+    if (end >= "2026-01-01") {
+      const vivoIni = start > "2026-01-01" ? start : "2026-01-01";
+      const daBase = start > this._cfinHistAte ? await this.billsDaBase(vivoIni, end) : null;
+      if (daBase) {
+        contas.push.apply(contas, daBase);
+        fonte = fonte ? "mista" : "base";
+      } else {
+        this.state.fonte = fonte ? "mista" : "sienge";
+        this.state.loadingMsg = "Buscando contas a pagar de " + vivoIni.split("-").reverse().join("/") + " no Sienge…";
+        this.noteProgress(this.state.loadingMsg, 0);
+        const live = await this.fetchOutcome(vivoIni, end);
+        contas.push.apply(contas, (live && live.data) || []);
+        fonte = fonte ? "mista" : "sienge";
+      }
+    }
+    const payload = { data: contas };
+    this.state.fonte = fonte || "base";
     this.indexBills(payload);
     this.state.allRows = this.transform(payload);
     this.state.updatedAt = new Date().toISOString();
@@ -1541,7 +1829,7 @@ ComprasControleApp.renderList = function () {
   if (!box) return;
   if (this.state.loading) {
     if (kpi) kpi.innerHTML = "";
-    this.noteProgress("Buscando contas a pagar no Sienge…", 0);
+    this.noteProgress(this.state.loadingMsg || "Carregando contas a pagar da base…", 0);
     return;
   }
   if (this.state.error) {
@@ -1746,7 +2034,7 @@ ComprasControleApp.renderPage = function () {
             </div>
           </div>
         </div>
-        <p class="cprev-hint">A consulta manda para a API a <strong>empresa</strong> e o <strong>vencimento</strong>. Empreendimento, credor, título, tipo e departamento ficam liberados depois e só filtram a lista. O processamento bancário segue em segundo plano e só atualiza o status na tabela. Cada título aparece uma vez, com o valor inteiro. Se houver vários centros de custo, use <strong>Agrupado</strong> para ver o rateio. Clique na linha para ver o título, os anexos e a forma de pagamento programada.</p>
+        <p class="cprev-hint">A lista sai da base diária, com 6 meses antes e 6 meses depois de hoje. O mês atual abre junto com a tela; outro vencimento dentro dessa janela também vem da base, sem nova consulta ao Sienge. Empreendimento, credor, título, tipo e departamento só filtram a lista. O processamento bancário segue em segundo plano. Cada título aparece uma vez, com o valor inteiro. Se houver vários centros de custo, use <strong>Agrupado</strong> para ver o rateio. Clique na linha para ver o título, os anexos e a forma de pagamento programada.</p>
         ${this.departmentScopeNote() ? `<p class="cprev-hint">${this.esc(this.departmentScopeNote())}</p>` : ""}
       </div>
       <div id="cfin-kpis" class="ccom-kpis cprev-kpis"></div>
@@ -1762,6 +2050,12 @@ ComprasControleApp.renderPage = function () {
 ComprasControleApp.init = async function () {
   const root = document.getElementById("compras-controle-root");
   if (!root) return;
+  if (this.state.consulted && !this.state.loading) {
+    this.applyFilters();
+    this.renderPage();
+  }
+  if (this._boot) return;
+  this._boot = true;
   if (!this.state.inited) {
     const range = this.defaultRange();
     this.state.startDate = range.startDate;
@@ -1770,9 +2064,9 @@ ComprasControleApp.init = async function () {
     this.renderPage();
     this.ouvirFilaFiscal();
     await this.loadCompanies();
+    this.renderPage();
   }
-  if (this.state.consulted) this.applyFilters();
-  this.renderPage();
+  if (!this.state.consulted && !this.state.loading) await this.consultar();
 };
 
 ComprasControleApp.ouvirFilaFiscal = function () {

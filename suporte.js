@@ -226,6 +226,7 @@
   let replyDraftFiles = [];
   let adminFilter = "pendentes";
   let adminListCache = [];
+  let mineFilter = "abertos";
 
   function esc(s) {
     return String(s == null ? "" : s)
@@ -460,29 +461,140 @@
     refreshUnreadBadge();
   }
 
-  function applyUnreadUi(count) {
+  function adminSeenStorageKey() {
+    return "crm_suporte_admin_seen_" + (userKey() || "anon");
+  }
+
+  function loadAdminSeenMap() {
+    try {
+      return JSON.parse(localStorage.getItem(adminSeenStorageKey()) || "{}") || {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function saveAdminSeenMap(map) {
+    try { localStorage.setItem(adminSeenStorageKey(), JSON.stringify(map || {})); } catch (e) {}
+  }
+
+  function ensureAdminSeenBaseline(tickets) {
+    const flag = "crm_suporte_admin_baseline_" + (userKey() || "anon");
+    try {
+      if (localStorage.getItem(flag) === "1") return;
+      const map = loadAdminSeenMap();
+      (tickets || []).forEach((t) => {
+        if (!t || !t.id || map[t.id]) return;
+        map[t.id] = t.createdAt || t.updatedAt || new Date().toISOString();
+      });
+      saveAdminSeenMap(map);
+      localStorage.setItem(flag, "1");
+    } catch (e) {}
+  }
+
+  function ticketIsNewForAdmin(t) {
+    if (!t || t.createdByAdmin || t.status !== "pendente") return false;
+    const key = userKey();
+    if (key && (String(t.userId || "").toLowerCase() === key || String(t.userEmail || "").toLowerCase() === key)) return false;
+    const seen = ticketTime(loadAdminSeenMap()[t.id]);
+    if (!seen) return true;
+    return ticketTime(t.createdAt) > seen;
+  }
+
+  function markAdminTicketSeen(t) {
+    if (!t || !t.id) return;
+    const map = loadAdminSeenMap();
+    map[t.id] = new Date().toISOString();
+    saveAdminSeenMap(map);
+    refreshUnreadBadge();
+  }
+
+  function isTicketArquivado(t) {
+    return !!(t && t.arquivadoAt) && t.status === "atendido";
+  }
+
+  function unreadPill(n) {
+    return n > 9 ? "9+" : String(n);
+  }
+
+  function ensureAdminInboxButton() {
+    const menu = document.getElementById("suporte-menu");
+    if (!menu) return null;
+    let btn = menu.querySelector('button[data-action="recebidos"]');
+    if (!isAdmin()) {
+      if (btn) btn.remove();
+      return null;
+    }
+    if (!btn) {
+      btn = document.createElement("button");
+      btn.type = "button";
+      btn.setAttribute("data-action", "recebidos");
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        onMenuClick("recebidos");
+      });
+      menu.insertBefore(btn, menu.firstChild);
+    }
+    return btn;
+  }
+
+  function applyAdminNavBadge(count) {
     const n = Number(count) || 0;
+    const li = document.querySelector('.nav-item[data-tab="suporte"]');
+    if (!li) return;
+    const link = li.querySelector("a");
+    if (!link) return;
+    li.classList.toggle("has-new-tickets", n > 0);
+    let badge = link.querySelector(".suporte-nav-badge");
+    if (n <= 0) {
+      if (badge) badge.remove();
+      link.setAttribute("title", "Suporte");
+      return;
+    }
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = "suporte-nav-badge";
+      link.appendChild(badge);
+    }
+    badge.textContent = unreadPill(n);
+    link.setAttribute("title", `Suporte — ${n} chamado${n === 1 ? " novo" : "s novos"}`);
+  }
+
+  function applyUnreadUi(userCount, adminCount) {
+    const u = Number(userCount) || 0;
+    const a = Number(adminCount) || 0;
+    const n = u + a;
     const btn = document.getElementById("suporte-btn");
     const badge = document.getElementById("suporte-fab-badge");
     const meus = document.querySelector('#suporte-menu button[data-action="meus"]');
+    const recebidos = ensureAdminInboxButton();
     if (btn) {
       btn.classList.toggle("has-unread", n > 0);
-      btn.setAttribute("title", n > 0
-        ? `Suporte — ${n} chamado${n === 1 ? "" : "s"} com nova mensagem`
-        : "Suporte");
-      btn.setAttribute("aria-label", btn.getAttribute("title"));
+      const parts = [];
+      if (a > 0) parts.push(`${a} chamado${a === 1 ? " novo" : "s novos"}`);
+      if (u > 0) parts.push(`${u} com nova mensagem`);
+      const title = parts.length ? `Suporte — ${parts.join(" · ")}` : "Suporte";
+      btn.setAttribute("title", title);
+      btn.setAttribute("aria-label", title);
     }
     if (badge) {
       badge.hidden = n <= 0;
-      badge.textContent = n > 9 ? "9+" : String(n);
+      badge.textContent = unreadPill(n);
     }
     if (meus) {
-      meus.classList.toggle("has-unread", n > 0);
+      meus.classList.toggle("has-unread", u > 0);
       const label = "Acompanhar meus chamados";
-      meus.innerHTML = n > 0
-        ? `${label}<span class="suporte-menu-unread">${n > 9 ? "9+" : n}</span>`
+      meus.innerHTML = u > 0
+        ? `${label}<span class="suporte-menu-unread">${unreadPill(u)}</span>`
         : label;
     }
+    if (recebidos) {
+      recebidos.classList.toggle("has-unread", a > 0);
+      const label = "Chamados recebidos";
+      recebidos.innerHTML = a > 0
+        ? `${label}<span class="suporte-menu-unread">${unreadPill(a)}</span>`
+        : label;
+    }
+    applyAdminNavBadge(a);
   }
 
   let unreadRefreshSeq = 0;
@@ -493,9 +605,19 @@
       return;
     }
     try {
-      const mine = await listMine();
+      const all = await listAll();
       if (seq !== unreadRefreshSeq) return;
-      applyUnreadUi(mine.filter(ticketHasUnread).length);
+      if (isAdmin()) ensureAdminSeenBaseline(all);
+      const key = userKey();
+      const mine = all.filter(t => String(t.userId || "").toLowerCase() === key || String(t.userEmail || "").toLowerCase() === key);
+      applyUnreadUi(mine.filter(ticketHasUnread).length, isAdmin() ? all.filter(ticketIsNewForAdmin).length : 0);
+      if (isAdmin() && window.activeAppTab === "suporte") {
+        const ov = document.getElementById("suporte-overlay");
+        if (!ov || ov.style.display === "none") {
+          adminListCache = all;
+          paintAdmin();
+        }
+      }
     } catch (e) {
       if (seq !== unreadRefreshSeq) return;
     }
@@ -559,6 +681,7 @@
     draftFiles = [];
     replyDraftFiles = [];
     pasteOpts = null;
+    if (userKey() && window.firebaseDb) refreshUnreadBadge();
   }
 
   function openModal() {
@@ -962,26 +1085,73 @@
   function listHtml(tickets, emptyMsg, opts) {
     if (!tickets.length) return `<p class="suporte-empty">${esc(emptyMsg)}</p>`;
     const markUnread = !!(opts && opts.unread);
+    const markAdminNew = !!(opts && opts.adminNew);
+    const archiveMode = (opts && opts.archiveMode) || "";
     return `<div class="suporte-list">${tickets.map(t => {
       const unread = markUnread && ticketHasUnread(t);
+      const isNew = markAdminNew && ticketIsNewForAdmin(t);
+      const arquivar = archiveMode === "archive" && t.status === "atendido" && !t.arquivadoAt;
+      const desarquivar = archiveMode === "unarchive" && !!t.arquivadoAt;
+      const flag = unread
+        ? `<span class="suporte-badge new">Nova mensagem</span>`
+        : isNew ? `<span class="suporte-badge new">Novo</span>` : "";
+      const action = arquivar || desarquivar ? `
+        <div class="suporte-card-actions">
+          <button type="button" class="btn btn-outline suporte-arquivar" data-id="${esc(t.id)}" data-on="${arquivar ? "1" : "0"}">
+            <i data-lucide="${arquivar ? "archive" : "archive-restore"}"></i> ${arquivar ? "Arquivar" : "Desarquivar"}
+          </button>
+        </div>` : "";
       return `
-      <button type="button" class="suporte-card${unread ? " has-unread" : ""}" data-id="${esc(t.id)}">
-        <div class="suporte-card-top">
-          <strong>${esc(TIPO_LABEL[t.tipo] || t.tipo)} · ${esc(localPathOf(t))}</strong>
-          <span style="display:inline-flex;align-items:center;gap:6px;">
-            ${unread ? `<span class="suporte-badge new">Nova mensagem</span>` : ""}
-            ${statusBadge(t.status)}
-          </span>
-        </div>
-        <p>${esc((t.descricao || "").slice(0, 160))}${(t.descricao || "").length > 160 ? "…" : ""}</p>
-        <small>${esc(t.userName || t.userEmail || "")} · ${esc(fmtDate(t.updatedAt || t.createdAt))}</small>
-      </button>`;
+      <div class="suporte-card${unread || isNew ? " has-unread" : ""}">
+        <button type="button" class="suporte-card-hit" data-id="${esc(t.id)}">
+          <div class="suporte-card-top">
+            <strong>${esc(TIPO_LABEL[t.tipo] || t.tipo)} · ${esc(localPathOf(t))}</strong>
+            <span style="display:inline-flex;align-items:center;gap:6px;">
+              ${flag}
+              ${statusBadge(t.status)}
+            </span>
+          </div>
+          <p>${esc((t.descricao || "").slice(0, 160))}${(t.descricao || "").length > 160 ? "…" : ""}</p>
+          <small>${esc(t.userName || t.userEmail || "")} · ${esc(fmtDate(t.updatedAt || t.createdAt))}</small>
+        </button>
+        ${action}
+      </div>`;
     }).join("")}</div>`;
+  }
+
+  function bindTicketCards(root, ctx) {
+    if (!root) return;
+    root.querySelectorAll(".suporte-card-hit").forEach(el => {
+      el.addEventListener("click", () => openDetail(el.getAttribute("data-id"), ctx));
+    });
+    root.querySelectorAll(".suporte-arquivar").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (btn.disabled) return;
+        btn.disabled = true;
+        try {
+          await setArquivado(btn.getAttribute("data-id"), btn.getAttribute("data-on") === "1");
+          await paintMine();
+        } catch (err) {
+          btn.disabled = false;
+          alert("Não foi possível atualizar o chamado: " + (err.message || err));
+        }
+      });
+    });
+  }
+
+  async function setArquivado(id, arquivar) {
+    const { db, c } = fb();
+    await c.updateDoc(c.doc(db, COLLECTION, id), {
+      arquivadoAt: arquivar ? new Date().toISOString() : null,
+      arquivadoPor: arquivar ? userKey() : ""
+    });
   }
 
   async function openMine() {
     ensureShell();
     const box = document.getElementById("suporte-modal-box");
+    box.classList.remove("is-detail");
     box.innerHTML = `
       <div class="suporte-modal-head">
         <h2><i data-lucide="ticket"></i> Meus chamados</h2>
@@ -989,23 +1159,49 @@
       </div>
       <div class="suporte-modal-body" id="suporte-mine-body"><p class="suporte-hint">Carregando…</p></div>
       <div class="suporte-modal-foot">
-        <button type="button" class="btn btn-cancel" id="suporte-cancel">Fechar</button>
+        <button type="button" class="btn btn-fechar" id="suporte-cancel">Fechar</button>
       </div>`;
     openModal();
     document.getElementById("suporte-close-x").onclick = closeModal;
     document.getElementById("suporte-cancel").onclick = closeModal;
+    await paintMine();
+  }
+
+  async function paintMine() {
+    const body = document.getElementById("suporte-mine-body");
+    if (!body) return;
     try {
       const tickets = await listMine();
-      const body = document.getElementById("suporte-mine-body");
-      body.innerHTML = listHtml(tickets, "Você ainda não abriu chamados.", { unread: true });
-      body.querySelectorAll(".suporte-card").forEach(el => {
-        el.addEventListener("click", () => openDetail(el.getAttribute("data-id"), { mine: true }));
+      const abertos = tickets.filter(t => !isTicketArquivado(t));
+      const arquivados = tickets.filter(isTicketArquivado);
+      const atual = mineFilter === "arquivados" ? "arquivados" : "abertos";
+      const shown = atual === "arquivados" ? arquivados : abertos;
+      const abas = [
+        { id: "abertos", label: "Chamados", icon: "inbox", n: abertos.length },
+        { id: "arquivados", label: "Arquivados", icon: "archive", n: arquivados.length }
+      ];
+      const empty = atual === "arquivados"
+        ? "Nenhum chamado arquivado."
+        : (tickets.length ? "Nenhum chamado em aberto." : "Você ainda não abriu chamados.");
+      body.innerHTML = `
+        <div class="ml-tabs suporte-mine-tabs" role="tablist">
+          ${abas.map((t) => `
+            <button type="button" role="tab" class="ml-tab${atual === t.id ? " is-active" : ""}" data-mine="${t.id}" aria-selected="${atual === t.id}">
+              <i data-lucide="${t.icon}"></i> ${t.label} <span class="ml-tab-count">${t.n}</span>
+            </button>`).join("")}
+        </div>
+        ${listHtml(shown, empty, { unread: true, archiveMode: atual === "arquivados" ? "unarchive" : "archive" })}`;
+      body.querySelectorAll(".ml-tab").forEach(btn => {
+        btn.addEventListener("click", () => {
+          mineFilter = btn.getAttribute("data-mine") || "abertos";
+          paintMine();
+        });
       });
-      applyUnreadUi(tickets.filter(ticketHasUnread).length);
+      bindTicketCards(body, { mine: true });
+      if (window.lucide) lucide.createIcons();
     } catch (err) {
-      document.getElementById("suporte-mine-body").innerHTML = `<p class="suporte-empty">${esc(err.message)}</p>`;
+      body.innerHTML = `<p class="suporte-empty">${esc(err.message)}</p>`;
     }
-    if (window.lucide) lucide.createIcons();
   }
 
   function anexosHtml(imgs) {
@@ -1062,8 +1258,10 @@
       const mine = !!(ctx && ctx.mine);
       const adminView = !!(ctx && ctx.admin) || (isAdmin() && !mine);
       const canReplyUser = mine || userKey() === String(t.userId || "").toLowerCase() || userKey() === String(t.userEmail || "").toLowerCase();
-      if (canReplyUser && !adminView) markTicketSeen(t);
+      if (adminView) markAdminTicketSeen(t);
+      else if (canReplyUser) markTicketSeen(t);
       const canAttach = adminView || (canReplyUser && t.status !== "atendido");
+      const canArchiveOwn = canReplyUser && !adminView && t.status === "atendido";
       box.innerHTML = `
         <div class="suporte-modal-head">
           <h2><i data-lucide="message-square"></i> Chamado</h2>
@@ -1092,6 +1290,7 @@
                 <button type="button" class="btn btn-primary suporte-btn-send" id="suporte-send-admin"><i data-lucide="send"></i> Enviar resposta</button>
               </div>
             ` : `
+              ${canArchiveOwn ? `<button type="button" class="btn btn-outline" id="suporte-archive"><i data-lucide="${t.arquivadoAt ? "archive-restore" : "archive"}"></i> ${t.arquivadoAt ? "Desarquivar" : "Arquivar"}</button>` : ""}
               ${canReplyUser && t.status !== "atendido" ? `<button type="button" class="btn btn-primary" id="suporte-send-user"><i data-lucide="send"></i> Responder</button>` : ""}
             `}
           </div>
@@ -1125,6 +1324,8 @@
       if (ask) ask.onclick = () => replyTicket(id, { asAdmin: true, status: "aguardando_usuario", requireText: true });
       const done = document.getElementById("suporte-mark-done");
       if (done) done.onclick = () => replyTicket(id, { asAdmin: true, status: "atendido", allowEmpty: true });
+      const arch = document.getElementById("suporte-archive");
+      if (arch) arch.onclick = () => archiveFromDetail(id, !t.arquivadoAt);
       if (window.lucide) lucide.createIcons();
     } catch (err) {
       box.classList.remove("is-detail");
@@ -1168,12 +1369,18 @@
       }
       const imagens = (Array.isArray(t.imagens) ? t.imagens.slice() : []).concat(anexosMsg);
       const { db, c } = fb();
-      await c.updateDoc(c.doc(db, COLLECTION, id), {
+      const nextStatus = opts.status || t.status;
+      const patch = {
         mensagens,
         imagens,
-        status: opts.status || t.status,
+        status: nextStatus,
         updatedAt: new Date().toISOString()
-      });
+      };
+      if (opts.asAdmin && nextStatus !== "atendido") {
+        patch.arquivadoAt = null;
+        patch.arquivadoPor = "";
+      }
+      await c.updateDoc(c.doc(db, COLLECTION, id), patch);
       replyDraftFiles = [];
       if (opts.asAdmin) {
         const box = document.getElementById("suporte-modal-box");
@@ -1201,20 +1408,9 @@
     return list;
   }
 
-  async function renderAdmin() {
+  function paintAdmin() {
     const root = document.getElementById("suporte-admin-root");
-    if (!root) return;
-    if (!isAdmin()) {
-      root.innerHTML = `<p class="suporte-empty">Sem permissão para o módulo de suporte.</p>`;
-      return;
-    }
-    root.innerHTML = `<p class="suporte-hint">Carregando chamados…</p>`;
-    try {
-      adminListCache = await listAll();
-    } catch (err) {
-      root.innerHTML = `<p class="suporte-empty">${esc(err.message)}</p>`;
-      return;
-    }
+    if (!root || !isAdmin()) return;
     const pend = adminListCache.filter(t => pendingStatuses()[t.status]).length;
     const done = adminListCache.filter(t => t.status === "atendido").length;
     const shown = filterAdmin(adminListCache, adminFilter);
@@ -1233,26 +1429,62 @@
         </div>
         <button type="button" class="btn btn-primary" id="suporte-admin-new"><i data-lucide="plus"></i> Novo chamado interno</button>
       </div>
-      ${listHtml(shown, "Nenhum chamado neste filtro.")}`;
+      ${listHtml(shown, "Nenhum chamado neste filtro.", { adminNew: true })}`;
     root.querySelectorAll(".ml-tab").forEach(btn => {
       btn.addEventListener("click", () => {
         adminFilter = btn.getAttribute("data-f");
-        renderAdmin();
+        paintAdmin();
       });
     });
     const neu = document.getElementById("suporte-admin-new");
     if (neu) neu.onclick = () => openForm("interno");
-    root.querySelectorAll(".suporte-card").forEach(el => {
-      el.addEventListener("click", () => openDetail(el.getAttribute("data-id"), { admin: true }));
-    });
+    bindTicketCards(root, { admin: true });
     if (window.lucide) lucide.createIcons();
+  }
+
+  async function renderAdmin() {
+    const root = document.getElementById("suporte-admin-root");
+    if (!root) return;
+    if (!isAdmin()) {
+      root.innerHTML = `<p class="suporte-empty">Sem permissão para o módulo de suporte.</p>`;
+      return;
+    }
+    if (!adminListCache.length) root.innerHTML = `<p class="suporte-hint">Carregando chamados…</p>`;
+    try {
+      adminListCache = await listAll();
+    } catch (err) {
+      root.innerHTML = `<p class="suporte-empty">${esc(err.message)}</p>`;
+      return;
+    }
+    ensureAdminSeenBaseline(adminListCache);
+    paintAdmin();
+    const key = userKey();
+    const mine = adminListCache.filter(t => String(t.userId || "").toLowerCase() === key || String(t.userEmail || "").toLowerCase() === key);
+    applyUnreadUi(mine.filter(ticketHasUnread).length, adminListCache.filter(ticketIsNewForAdmin).length);
+  }
+
+  async function archiveFromDetail(id, arquivar) {
+    const btn = document.getElementById("suporte-archive");
+    if (btn) btn.disabled = true;
+    try {
+      await setArquivado(id, arquivar);
+      await openMine();
+    } catch (err) {
+      if (btn) btn.disabled = false;
+      alert("Não foi possível atualizar o chamado: " + (err.message || err));
+    }
   }
 
   function onMenuClick(action) {
     toggleMenu(false);
     if (action === "problema") openForm("problema");
     else if (action === "melhoria") openForm("melhoria");
-    else if (action === "meus") openMine();
+    else if (action === "meus") {
+      mineFilter = "abertos";
+      openMine();
+    } else if (action === "recebidos") {
+      if (typeof switchTab === "function") switchTab("suporte", "Suporte");
+    }
   }
 
   function initWidget() {

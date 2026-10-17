@@ -7492,9 +7492,11 @@ window.getExecutarAcordoQuebradoAgingHtml = function(client) {
 
 window.rebuildNexCumpridaIndex = function() {
   const set = new Set();
+  if (typeof window.nexEnsureLookups === "function") window.nexEnsureLookups();
   if (typeof window.nexCollectAll === "function" && typeof window.nexIsLegallyValid === "function") {
     window.nexCollectAll().forEach(function(it) {
       if (!it || !window.nexIsLegallyValid(it).ok) return;
+      if (typeof window.nexPayEvidenceReady === "function" && !window.nexPayEvidenceReady(it)) return;
       const cid = String(it.customerId || "");
       const titulo = String(it.titulo || it.saleId || "").replace(/^B-/i, "").split("-")[0];
       if (cid && titulo) set.add(cid + "|" + titulo);
@@ -10470,6 +10472,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
   }
 
   if (typeof window.rebuildNexCumpridaIndex === "function") window.rebuildNexCumpridaIndex();
+  if (typeof window.nexScheduleCumpridaCheck === "function") window.nexScheduleCumpridaCheck();
   const originalAdvFilters = window.advFilters;
   window.advFilters = window.advFiltersFila || {};
   clientList = window.applyAdvFiltersTo(clientList);
@@ -12199,6 +12202,16 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   // Abas judiciais: menu Sub Judice, advogado, ou contrato/cliente já sub judice (ex.: fila de cobrança)
   syncCobrancaJudicialTabs(isSubjudice, isAdvogado);
 
+  const avisoSub = document.getElementById("ficha-subjudice-alerta");
+  if (avisoSub) {
+    if (isSubjudice) {
+      avisoSub.style.display = "block";
+      avisoSub.textContent = "Cliente sub judice. O Integra não gera boleto deste contrato. Mesmo com pagamento integral, a emissão fica com o advogado da Moura Leite.";
+    } else {
+      avisoSub.style.display = "none";
+      avisoSub.textContent = "";
+    }
+  }
   if (isSubjudice) {
     switchCustomerTab('tab-cobranca-judicial');
     if (typeof renderJudicialTimeline === 'function') {
@@ -14426,6 +14439,13 @@ function formatCpfCnpj(val) {
     }
     
     AppState.currentContractInstallments = currentContractInstallments;
+    if (typeof window.nexRememberInstallmentPayments === "function") {
+      window.nexRememberInstallmentPayments(
+        AppState.selectedCustomerId,
+        AppState.selectedSaleId || AppState.currentReceivableBillId,
+        currentContractInstallments
+      );
+    }
     if (typeof window.syncQuitacaoSiTypesToFila === "function") {
       try {
         window.syncQuitacaoSiTypesToFila(
@@ -18895,6 +18915,45 @@ function closePdfModal() {
   overlay.classList.remove("active");
   overlay.classList.remove("no-print-logo");
 }
+
+window.nomeArquivoDemonstrativoDistrato = function() {
+  const sale = (typeof g_distSale !== "undefined" && g_distSale) || {};
+  const cli = (typeof g_distCustomer !== "undefined" && g_distCustomer) || {};
+  const unit = (window.AppState && AppState.units && sale.unitId && AppState.units[sale.unitId]) || {};
+  const chave = String(sale.unitId || (typeof unit.id === "string" ? unit.id : "") || sale.unitName || unit.name || "").replace(/^U-/i, "");
+  const cc = String(unit.costCenterId || unit.enterpriseId || sale.costCenterId || sale.enterpriseId || "").replace(/\D/g, "")
+    || ((String(chave).match(/^(\d{4,6})/) || [])[1] || "");
+  const titulo = sale.receivableBillId || sale.id || "";
+  if (typeof window.buildFichaPdfFilename === "function") {
+    return window.buildFichaPdfFilename("Demonstrativo de cálculo de distrato", {
+      contrato: chave,
+      costCenterId: cc,
+      titulo: titulo,
+      nome: cli.name || ""
+    });
+  }
+  return "Demonstrativo de cálculo de distrato.pdf";
+};
+
+(function() {
+  let tituloAntes = "";
+  function demonstrativoAberto() {
+    const overlay = document.getElementById("pdf-view-overlay");
+    const titleEl = document.getElementById("pdf-modal-title");
+    if (!overlay || !overlay.classList.contains("active") || !titleEl) return false;
+    return /demonstrativo de c[aá]lculo de distrato/i.test(titleEl.textContent || "");
+  }
+  window.addEventListener("beforeprint", function() {
+    if (!demonstrativoAberto() || typeof window.nomeArquivoDemonstrativoDistrato !== "function") return;
+    tituloAntes = document.title;
+    document.title = String(window.nomeArquivoDemonstrativoDistrato()).replace(/\.pdf$/i, "");
+  });
+  window.addEventListener("afterprint", function() {
+    if (!tituloAntes) return;
+    document.title = tituloAntes;
+    tituloAntes = "";
+  });
+})();
 
 // ----------------------------------------------------
 // 8. SIMULADOR DE DISTRATO (RESCISÃO E DEVOLUÇÃO)
@@ -23572,8 +23631,7 @@ window.generateDemonstrativoDistratoPDF = function() {
   const idTexto = typeof unit.id === "string" ? unit.id : "";
   const nomeUnidade = String(g_distSale.unitName || unit.name || "");
   const cleanUnitId = (chaveUnidade || idTexto || nomeUnidade).replace(/^U-/i, "");
-  const titleUnitId = cleanUnitId.replace("-", " - ");
-  const pageTitle = `C\u00E1lculo Distrato - ${txt(g_distCustomer.name)} - T\u00EDtulo ${g_distSale.id} (${titleUnitId})`;
+  const pageTitle = String(window.nomeArquivoDemonstrativoDistrato()).replace(/\.pdf$/i, "");
   
   const docHtml = `
     <div style="text-align: center; margin-bottom: 2rem;">
@@ -23737,7 +23795,21 @@ window.generateDemonstrativoDistratoPDF = function() {
   }
 }
 
+window.boletoBloqueadoSubJudice = function() {
+  if (AppState && AppState.isSubjudiceMode) return true;
+  const cid = AppState && AppState.selectedCustomerId;
+  if (!cid) return false;
+  const lista = (window.rawClientList || []).concat(window.clientList || []);
+  return lista.some((c) => c && String(c.customerId) === String(cid) && (
+    typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(c) : c.subjudice === "S"
+  ));
+};
+
 window.openBoletoPdf = async function(billId, instId, btnElement, opts) {
+  if (window.boletoBloqueadoSubJudice()) {
+    alert("Cliente sub judice. O Integra não gera boleto. Mesmo com pagamento integral, a emissão fica com o advogado da Moura Leite.");
+    return;
+  }
   opts = opts || {};
   let originalHtml = "";
   if (btnElement) {
@@ -24286,6 +24358,10 @@ window.renderReprocessChargesSummary = function(instIds, dueDateStr, taxaMultipl
 };
 
 window.reprocessBoleto = async function(billId, instId, costCenterId, source = 'avulso') {
+  if (window.boletoBloqueadoSubJudice()) {
+    alert("Cliente sub judice. O Integra não gera boleto. Mesmo com pagamento integral, a emissão fica com o advogado da Moura Leite.");
+    return;
+  }
   currentReprocessBillId = billId;
   currentReprocessInstId = instId;
   currentReprocessCostCenterId = window.resolveBoletoCostCenterId(costCenterId);
@@ -29859,28 +29935,62 @@ window.nexCurrentUserName = function() {
   return u.name || u.email || "Operador";
 };
 
-window.nexPaymentDatesAfter = function(isoDate) {
-  const cut = window.nexParseIso(isoDate);
-  if (!cut) return [];
-  const insts = (window.AppState && AppState.currentContractInstallments) || [];
+window.nexPayKey = function(customerId, titulo) {
+  const cid = String(customerId || "");
+  const t = String(titulo || "").replace(/^B-/i, "").split("-")[0];
+  return cid && t ? cid + "|" + t : "";
+};
+
+window.nexPayStore = function() {
+  if (!window._nexPayDates) window._nexPayDates = new Map();
+  return window._nexPayDates;
+};
+
+window.nexInstallmentPayIsos = function(installments) {
   const dates = [];
-  insts.forEach(inst => {
+  (installments || []).forEach(inst => {
     const receipts = Array.isArray(inst.receipts) ? inst.receipts : [];
     if (receipts.length) {
       receipts.forEach(r => {
-        const type = String(r.type || r.receiptType || r.receiptTypeId || r.typeId || r.receiptId || "").toLowerCase();
+        const type = String(r.type || r.receiptType || r.receiptTypeId || r.typeId || r.receiptId || r.operationTypeId || "").toLowerCase();
         if (type && type !== "2" && !type.includes("recebimento")) return;
-        const val = Number(r.receiptValue || r.value || 0);
-        if (!(val > 0.01) && inst.installmentSituation !== 2) return;
+        const val = Number(r.receiptValue || r.value || r.netReceiptValue || 0);
+        if (!(val > 0.01) && inst.installmentSituation !== 2 && String(inst.installmentSituation) !== "2") return;
         const d = window.nexParseIso(r.receiptDate || r.date || r.paymentDate);
-        if (d && d > cut) dates.push(d);
+        if (d) dates.push(d);
       });
-    } else if (inst.installmentSituation === 2 || inst.status === "PAID" || inst.status === "Quitado") {
-      const d = window.nexParseIso(inst.receiptDate || inst.payOffDate);
-      if (d && d > cut) dates.push(d);
+    } else if (inst.installmentSituation === 2 || String(inst.installmentSituation) === "2" || inst.status === "PAID" || inst.status === "Quitado") {
+      const d = window.nexParseIso(inst.receiptDate || inst.payOffDate || inst.paymentDate);
+      if (d) dates.push(d);
     }
   });
   return dates;
+};
+
+window.nexPaymentDatesAfter = function(isoDate, installments) {
+  const cut = window.nexParseIso(isoDate);
+  if (!cut) return [];
+  const insts = installments || ((window.AppState && AppState.currentContractInstallments) || []);
+  return window.nexInstallmentPayIsos(insts).filter(d => d > cut);
+};
+
+window.nexRememberInstallmentPayments = function(customerId, titulo, installments) {
+  const key = window.nexPayKey(customerId, titulo);
+  if (!key) return;
+  window.nexPayStore().set(key, { dates: window.nexInstallmentPayIsos(installments), checked: true });
+  window._nexCumpridaSet = null;
+  if (window._nexLook && window._nexLook.lost) window._nexLook.lost = new WeakMap();
+};
+
+window.nexPayEvidenceReady = function(item) {
+  if (!item) return false;
+  if (window.nexParseIso(item.lostPayIso)) return true;
+  const key = window.nexPayKey(item.customerId, item.titulo || item.saleId);
+  const stored = key ? window.nexPayStore().get(key) : null;
+  if (stored && stored.checked) return true;
+  const sameFicha = String((AppState && AppState.selectedCustomerId) || "") === String(item.customerId || "")
+    && [AppState.selectedSaleId, AppState.selectedTitulo, AppState.currentReceivableBillId].some(v => v != null && String(v).replace(/^B-/i, "").split("-")[0] === String(item.titulo || item.saleId || "").replace(/^B-/i, "").split("-")[0]);
+  return !!(sameFicha && AppState.currentContractInstallments && AppState.currentContractInstallments.length);
 };
 
 window.nexReceiptDatesForSale = function(saleId) {
@@ -29903,24 +30013,83 @@ window.nexReceiptDatesForSale = function(saleId) {
   return dates;
 };
 
+window.nexRecentPayAfter = function(item, cutIso) {
+  const cut = window.nexParseIso(cutIso);
+  const map = typeof window.getRecentPaidMap === "function" ? window.getRecentPaidMap() : null;
+  if (!cut || !map || typeof map.get !== "function" || !map.size || !item) return "";
+  const keys = [];
+  const add = (v) => {
+    const s = String(v == null ? "" : v).replace(/^B-/i, "").split("-")[0].trim();
+    if (s && keys.indexOf(s) < 0) keys.push(s);
+  };
+  add(item.titulo);
+  add(item.saleId);
+  const titulo = String(item.titulo || item.saleId || "").replace(/^B-/i, "").split("-")[0];
+  const look = window._nexLook;
+  if (look && look.filaByCustomer && item.customerId && titulo) {
+    (look.filaByCustomer.get(String(item.customerId)) || []).forEach((c) => {
+      const ids = [c && c.saleId].concat((c && c.billIds) || []);
+      if (!ids.some((id) => String(id || "").replace(/^B-/i, "").split("-")[0] === titulo)) return;
+      ids.forEach(add);
+    });
+  }
+  let found = "";
+  keys.forEach((k) => {
+    if (!map.has(String(k))) return;
+    const days = Number(map.get(String(k)));
+    if (!Number.isFinite(days) || days < 0) return;
+    const pay = window.nexAddDays(window.nexTodayIso(), -days);
+    if (pay && pay > cut && (!found || pay < found)) found = pay;
+  });
+  return found;
+};
+
+window.nexMarkLostPayment = function(item, payIso) {
+  const iso = window.nexParseIso(payIso);
+  if (!item || !iso || item.lostPayIso === iso) return;
+  item.lostPayIso = iso;
+  const cid = String(item.customerId || "");
+  const titulo = String(item.titulo || item.saleId || "");
+  const key = item._key || (cid && titulo ? window.nexHistoryKey(cid, titulo) : "");
+  const rows = window._nexHistory && key ? window._nexHistory[key] : null;
+  if (!Array.isArray(rows)) return;
+  const live = rows.find((x) => x && String(x.id) === String(item.id));
+  if (!live || live.lostPayIso === iso) return;
+  live.lostPayIso = iso;
+  window._nexHistStamp = (window._nexHistStamp || 0) + 1;
+  window._nexCollectCache = null;
+  window._nexCumpridaSet = null;
+  window.saveNexHistory(cid, titulo, rows).catch(() => {});
+};
+
 window.nexLostValidityByPayment = function(item) {
   if (!item) return { lost: false };
-  const memo = window._nexLook && window._nexLook.lost;
-  if (memo && memo.has(item)) return memo.get(item);
   const gen = window.nexParseIso(item.date || item.createdAt);
   if (!gen) return { lost: false };
+  const memo = window._nexLook && window._nexLook.lost;
+  if (memo && memo.has(item)) {
+    const prev = memo.get(item);
+    if (prev && prev.lost) return prev;
+  }
   const sameFicha = String((AppState && AppState.selectedCustomerId) || "") === String(item.customerId || "")
     && [AppState.selectedSaleId, AppState.selectedTitulo, AppState.currentReceivableBillId].some(v => v != null && String(v) === String(item.titulo || ""));
   let pays = [];
+  const stamped = window.nexParseIso(item.lostPayIso);
+  if (stamped && stamped > gen) pays.push(stamped);
   if (sameFicha && typeof window.nexPaymentDatesAfter === "function") {
-    pays = window.nexPaymentDatesAfter(gen).slice();
+    pays = pays.concat(window.nexPaymentDatesAfter(gen));
     const delivered = window.nexParseIso(item.deliveredAt);
     if (delivered) pays = pays.concat(window.nexPaymentDatesAfter(delivered));
   }
   const salePays = window.nexReceiptDatesForSale(item.titulo || item.saleId).filter(d => d > gen);
   pays = pays.concat(salePays);
+  const storedPays = window.nexPayStore().get(window.nexPayKey(item.customerId, item.titulo || item.saleId));
+  if (storedPays && storedPays.dates) pays = pays.concat(storedPays.dates.filter(d => d > gen));
+  const mapPay = window.nexRecentPayAfter(item, gen);
+  if (mapPay) pays.push(mapPay);
   pays = pays.filter(Boolean).sort();
   const result = pays.length ? { lost: true, pay: pays[0] } : { lost: false };
+  if (result.lost) window.nexMarkLostPayment(item, result.pay);
   if (memo) memo.set(item, result);
   return result;
 };
@@ -29947,6 +30116,65 @@ window.nexIsLegallyValid = function(item) {
     return { ok: false, reason: "Prazo de 30 dias para manifestação em curso. Mora em " + window.nexFmtBr(moraIso) + " (faltam " + left + " dia" + (left === 1 ? "" : "s") + ")." };
   }
   return { ok: true, reason: "Rito cumprido: ENTREGUE em " + window.nexFmtBr(delivered) + ", AR Digital anexado, 30 dias sem regularização, constituído em mora em " + window.nexFmtBr(moraIso) + "." };
+};
+
+window.nexScheduleCumpridaCheck = function() {
+  if (window._nexCumpridaChecking || typeof window.nexCollectAll !== "function") return;
+  if (!window.SiengeApiService || typeof SiengeApiService.getCustomerFinancialStatements !== "function") return;
+  if (!window._nexPayAttempted) window._nexPayAttempted = new Set();
+  const pending = window.nexCollectAll().filter(function(it) {
+    if (!it || !window.nexIsEntregue(it.status) || !it.arDigital) return false;
+    const delivered = window.nexParseIso(it.deliveredAt);
+    if (!delivered || window.nexTodayIso() < window.nexAddDays(delivered, 30)) return false;
+    if (window.nexLostValidityByPayment(it).lost) return false;
+    if (window.nexPayEvidenceReady(it)) return false;
+    const key = window.nexPayKey(it.customerId, it.titulo || it.saleId);
+    return key && !window._nexPayAttempted.has(key);
+  });
+  if (!pending.length) return;
+  const byCustomer = new Map();
+  pending.forEach(function(it) {
+    const cid = String(it.customerId || "");
+    const titulo = String(it.titulo || it.saleId || "").replace(/^B-/i, "").split("-")[0];
+    const key = window.nexPayKey(cid, titulo);
+    if (!cid || !key) return;
+    window._nexPayAttempted.add(key);
+    if (!byCustomer.has(cid)) byCustomer.set(cid, []);
+    byCustomer.get(cid).push(titulo);
+  });
+  if (!byCustomer.size) return;
+  window._nexCumpridaChecking = true;
+  Promise.all(Array.from(byCustomer.entries()).map(async function(pair) {
+    const cid = pair[0];
+    const titulos = pair[1];
+    try {
+      const res = await SiengeApiService.getCustomerFinancialStatements(cid);
+      const bills = [];
+      (res && res.results || []).forEach(function(item) {
+        if (item && Array.isArray(item.billsReceivable)) bills.push.apply(bills, item.billsReceivable);
+        else if (item && Array.isArray(item.installments)) bills.push(item);
+      });
+      const seen = new Set();
+      bills.forEach(function(bill) {
+        const id = String(bill.billReceivableId || bill.receivableBillId || bill.id || "").replace(/^B-/i, "").split("-")[0];
+        if (!id || titulos.indexOf(id) < 0) return;
+        seen.add(id);
+        window.nexRememberInstallmentPayments(cid, id, bill.installments || []);
+      });
+      titulos.forEach(function(id) {
+        if (!seen.has(id)) window.nexRememberInstallmentPayments(cid, id, []);
+      });
+    } catch (e) {
+      console.warn("[NEX] pagamentos da carta", e);
+    }
+  })).then(function() {
+    window._nexCumpridaChecking = false;
+    window._nexCumpridaSet = null;
+    const tab = document.getElementById("tab-dashboard");
+    if (tab && tab.style.display !== "none" && window.AppState && AppState.defaultersLoaded && !window._isDefaultersLoading && typeof loadDashboardData === "function") {
+      loadDashboardData(false);
+    }
+  });
 };
 
 window.nexCecReadyItem = function(items) {
@@ -30649,6 +30877,7 @@ window.renderNexHistory = async function() {
             const entregue = window.nexIsEntregue(it.status);
             const author = window.shortOperatorName(it.author);
             const canDelete = window.nexCanDeleteItem(it);
+            const deleteTitle = window.nexDeleteBlockReason(it);
             const moraIso = entregue && it.deliveredAt ? window.nexAddDays(it.deliveredAt, 30) : "";
             const left = moraIso ? window.nexDaysBetween(window.nexTodayIso(), moraIso) : null;
             let prazoTxt = "—";
@@ -30657,6 +30886,16 @@ window.renderNexHistory = async function() {
             else if (moraIso && left !== null && left <= 0) prazoTxt = "Mora em " + window.nexFmtBr(moraIso);
             const trackingVal = String(it.tracking || "").trim().toUpperCase() === "AA123456789BR" ? "" : (it.tracking || "");
             const lostPay = window.nexLostValidityByPayment(it);
+            if (typeof window.nexScheduleArDate === "function") window.nexScheduleArDate(it);
+            const pdfIso = window.nexParseIso(it.arDigital && it.arDigital.pdfDate);
+            const entregaIso = window.nexParseIso(it.deliveredAt);
+            const entregaTravada = !!(entregue && pdfIso && entregaIso && pdfIso === entregaIso);
+            const entregaCell = !entregue
+              ? "—"
+              : (entregaTravada
+                ? `<span title="Esta data é a mesma do AR Digital. Não pode ser alterada." style="font-weight:700;color:#166534;white-space:nowrap;">${window.nexFmtBr(entregaIso)}</span>`
+                : `<input type="date" value="${entregaIso}" onchange="window.updateNexDeliveredAt('${it.id}', this.value)" style="height:30px;border:1px solid #e2e8f0;border-radius:6px;padding:0 6px;font-size:0.8rem;">`
+                  + (pdfIso && entregaIso && pdfIso !== entregaIso ? `<div style="font-size:0.68rem;color:#b45309;margin-top:2px;">No AR: ${window.nexFmtBr(pdfIso)}</div>` : ""));
             const arCell = lostPay.lost
               ? "—"
               : (it.arDigital
@@ -30684,10 +30923,7 @@ window.renderNexHistory = async function() {
                 </button>
               </td>
               <td>${window.nexStatusSelectHtml(it)}</td>
-              <td>
-                ${entregue ? `<input type="date" value="${window.nexParseIso(it.deliveredAt)}" onchange="window.updateNexDeliveredAt('${it.id}', this.value)"
-                  style="height:30px;border:1px solid #e2e8f0;border-radius:6px;padding:0 6px;font-size:0.8rem;">` : "—"}
-              </td>
+              <td>${entregaCell}</td>
               <td style="white-space:nowrap;font-size:0.78rem;color:#475569;">${prazoTxt}</td>
               <td>
                 <span title="${valid.reason.replace(/"/g, "&quot;")}" style="display:inline-block;padding:4px 8px;border-radius:4px;font-size:0.8rem;font-weight:600;${valid.ok ? "background:#dcfce7;color:#166534;" : "background:#fee2e2;color:#991b1b;"}">
@@ -30699,14 +30935,14 @@ window.renderNexHistory = async function() {
                 ${canDelete ? `<button type="button" title="Excluir esta NEX" onclick="window.deleteNexItem('${it.id}')"
                   style="border:1px solid #fecaca;background:#fef2f2;color:#b91c1c;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:0.75rem;font-weight:700;display:inline-flex;align-items:center;gap:4px;">
                   <i data-lucide="trash-2" style="width:14px;height:16px;"></i> Excluir
-                </button>` : `<span title="Somente o autor da NEX ou o administrador pode excluir" style="color:#64748b;font-size:0.75rem;">—</span>`}
+                </button>` : `<span title="${String(deleteTitle).replace(/"/g, "&quot;")}" style="color:#64748b;font-size:0.75rem;">—</span>`}
               </td>
             </tr>`;
           }).join("")}
         </tbody>
       </table>
     </div>
-    <p style="margin:10px 0 0;font-size:0.75rem;color:#64748b;">O <strong>status da carta</strong> só libera depois de informar o <strong>objeto de rastreio</strong> e anexar o <strong>AR Digital</strong> (mesmo comportamento do Follow-up). ENTREGUE também pede a data da entrega. Se o cliente pagou depois do envio, a carta perde validade.</p>
+    <p style="margin:10px 0 0;font-size:0.75rem;color:#64748b;">O <strong>status da carta</strong> só libera depois de informar o <strong>objeto de rastreio</strong> e anexar o <strong>AR Digital</strong> (mesmo comportamento do Follow-up). ENTREGUE pede a data da entrega. Se essa data for a mesma do PDF do AR, ela fica travada. NEX entregue não pode ser excluída. Se o cliente pagou depois do envio, a carta perde validade e sai do grupo Nex cumprida.</p>
   `;
   const lostAny = sorted.some(it => window.nexLostValidityByPayment(it).lost);
   if (lostAny) {
@@ -30729,12 +30965,101 @@ window.nexCurrentUserName = function() {
   return String((user && user.name) || "").trim() || "Operador";
 };
 
-window.nexCanDeleteItem = function(item) {
-  if (!item) return false;
-  if (typeof window.isCrmAdministrator === "function" && window.isCrmAdministrator(window.AppState && AppState.currentUser)) return true;
+window.nexBrToIso = function(br) {
+  const m = String(br || "").match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!m) return "";
+  const iso = m[3] + "-" + m[2] + "-" + m[1];
+  return window.nexParseIso(iso) === iso ? iso : "";
+};
+
+window.nexDateFromArText = function(text) {
+  const t = String(text || "").replace(/(\d{2})[.\-](\d{2})[.\-](\d{4})/g, "$1/$2/$3").replace(/\s+/g, " ");
+  const br = "(\\d{2}/\\d{2}/\\d{4})";
+  const labeled = [
+    new RegExp("data\\s+d[ae]\\s+entrega[^\\d]{0,40}" + br, "i"),
+    new RegExp("entregue\\s+em[^\\d]{0,40}" + br, "i"),
+    new RegExp("entrega[^\\d]{0,30}" + br, "i"),
+    new RegExp("baixa[^\\d]{0,30}" + br, "i")
+  ];
+  for (let i = 0; i < labeled.length; i++) {
+    const hit = t.match(labeled[i]);
+    if (hit) {
+      const iso = window.nexBrToIso(hit[1]);
+      if (iso) return iso;
+    }
+  }
+  return "";
+};
+
+window.nexReadArPdfDate = async function(dataUrl) {
+  const lib = window["pdfjs-dist/build/pdf"] || window.pdfjsLib;
+  if (!lib || !dataUrl) return "";
+  const raw = String(dataUrl);
+  const comma = raw.indexOf(",");
+  const b64 = comma >= 0 ? raw.slice(comma + 1) : raw;
+  if (!b64) return "";
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const pdf = await lib.getDocument({ data: bytes }).promise;
+  let text = "";
+  const pages = Math.min(pdf.numPages || 1, 3);
+  for (let p = 1; p <= pages; p++) {
+    const page = await pdf.getPage(p);
+    const tc = await page.getTextContent();
+    text += "\n" + (tc.items || []).map((it) => it.str || "").join(" ");
+  }
+  return window.nexDateFromArText(text);
+};
+
+window.nexApplyArDate = function(item, iso) {
+  if (!item || !item.arDigital) return;
+  item.arDigital.pdfDate = iso || "";
+  item.arDigital.pdfDateChecked = true;
+  if (iso && window.nexIsEntregue(item.status) && !window.nexParseIso(item.deliveredAt)) {
+    item.deliveredAt = iso;
+  }
+};
+
+window.nexScheduleArDate = function(it) {
+  if (!it || !it.id) return;
+  const ctx = typeof window.nexFindItem === "function" ? window.nexFindItem(it.id) : null;
+  const live = (ctx && ctx.item) || it;
+  const ar = live.arDigital;
+  if (!ar || !ar.dataUrl || ar.pdfDate || ar.pdfDateChecked || ar._pdfDateBusy) return;
+  ar._pdfDateBusy = true;
+  window.nexReadArPdfDate(ar.dataUrl).then((iso) => {
+    const again = window.nexFindItem(it.id);
+    const row = again && again.item;
+    if (!row || !row.arDigital) return;
+    window.nexApplyArDate(row, iso);
+    window.saveNexHistory(again.customerId, again.saleId, again.items).then(() => {
+      if (typeof window.renderNexHistory === "function") window.renderNexHistory();
+    }).catch(() => {});
+  }).catch(() => {
+    if (ar) ar.pdfDateChecked = true;
+  });
+};
+
+window.nexDeliveryLocked = function(item) {
+  if (!item || !window.nexIsEntregue(item.status)) return false;
+  const pdf = window.nexParseIso(item.arDigital && item.arDigital.pdfDate);
+  const typed = window.nexParseIso(item.deliveredAt);
+  return !!(pdf && typed && pdf === typed);
+};
+
+window.nexDeleteBlockReason = function(item) {
+  if (!item) return "NEX não encontrada.";
+  if (window.nexIsEntregue(item.status)) return "NEX entregue não pode ser excluída.";
+  if (typeof window.isCrmAdministrator === "function" && window.isCrmAdministrator(window.AppState && AppState.currentUser)) return "";
   const current = window.nexNormalizeName(window.nexCurrentUserName());
   const author = window.nexNormalizeName(item.author || "");
-  return current && author && current === author;
+  if (current && author && current === author) return "";
+  return "Somente o autor da NEX ou o administrador pode excluir.";
+};
+
+window.nexCanDeleteItem = function(item) {
+  return !window.nexDeleteBlockReason(item);
 };
 
 window.nexFindItem = function(id) {
@@ -30803,7 +31128,12 @@ window.updateNexStatus = async function(id, value) {
     return;
   }
   ctx.item.status = window.nexIsEntregue(value) ? "ENTREGUE" : value;
-  if (!window.nexIsEntregue(ctx.item.status)) ctx.item.deliveredAt = "";
+  if (window.nexIsEntregue(ctx.item.status)) {
+    const pdf = window.nexParseIso(ctx.item.arDigital && ctx.item.arDigital.pdfDate);
+    if (pdf && !window.nexParseIso(ctx.item.deliveredAt)) ctx.item.deliveredAt = pdf;
+  } else {
+    ctx.item.deliveredAt = "";
+  }
   await window.saveNexHistory(ctx.customerId, ctx.saleId, ctx.items);
   window.syncNexOccurrenceNote(ctx.customerId, ctx.item);
   window.nexRefreshViews();
@@ -30812,6 +31142,11 @@ window.updateNexStatus = async function(id, value) {
 window.updateNexDeliveredAt = async function(id, value) {
   const ctx = window.nexFindItem(id);
   if (!ctx.item) return;
+  if (window.nexDeliveryLocked(ctx.item)) {
+    alert("A data da entrega é a mesma do PDF do AR Digital e não pode ser alterada.");
+    window.renderNexHistory();
+    return;
+  }
   ctx.item.deliveredAt = window.nexParseIso(value);
   await window.saveNexHistory(ctx.customerId, ctx.saleId, ctx.items);
   window.syncNexOccurrenceNote(ctx.customerId, ctx.item);
@@ -30826,10 +31161,10 @@ window.deleteNexItem = async function(id, opts) {
     return;
   }
   if (!window.nexCanDeleteItem(ctx.item)) {
-    alert("Só o usuário que gerou a NEX e o administrador podem excluir esta NEX.");
-    return;
+    if (!(opts && opts.silent)) alert(window.nexDeleteBlockReason(ctx.item));
+    return false;
   }
-  if (!(opts && opts.silent) && !confirm("Excluir esta NEX do histórico? Esta ação não pode ser desfeita.")) return;
+  if (!(opts && opts.silent) && !confirm("Excluir esta NEX do histórico? Esta ação não pode ser desfeita.")) return false;
   await window.purgeNexItems((it) => String(it.id) === String(id));
   if (ctx.customerId) {
     const next = (ctx.items || []).filter(x => String(x.id) !== String(id));
@@ -30838,6 +31173,7 @@ window.deleteNexItem = async function(id, opts) {
   }
   if (typeof window.renderNexHistory === "function") window.renderNexHistory();
   if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
+  return true;
 };
 
 window.deleteNexFollowupSelected = async function() {
@@ -30847,9 +31183,12 @@ window.deleteNexFollowupSelected = async function() {
     return;
   }
   if (!confirm("Excluir " + chks.length + " NEX selecionada(s)? Esta ação não pode ser desfeita.")) return;
+  let bloqueadas = 0;
   for (const chk of chks) {
-    await window.deleteNexItem(chk.getAttribute("data-nex-id"), { silent: true });
+    const ok = await window.deleteNexItem(chk.getAttribute("data-nex-id"), { silent: true });
+    if (ok === false) bloqueadas += 1;
   }
+  if (bloqueadas) alert(bloqueadas + " NEX entregue não foi excluída.");
 };
 
 window.viewNexPdf = async function(id) {
@@ -30983,7 +31322,8 @@ window.nexEnsureLookups = function(force) {
   const lists = [window.clientList, window.rawClientList, window.zeroPaidList];
   const billsA = (AppState && AppState.defaultersBills) || [];
   const billsB = (AppState && AppState.paidBills) || [];
-  const sig = [sales.length, lists.map(l => (l && l.length) || 0).join(","), billsA.length, billsB.length].join("|");
+  const paidN = (typeof window.getRecentPaidMap === "function" && window.getRecentPaidMap() && window.getRecentPaidMap().size) || 0;
+  const sig = [sales.length, lists.map(l => (l && l.length) || 0).join(","), billsA.length, billsB.length, paidN].join("|");
   if (!force && window._nexLook && window._nexLook.sig === sig) return window._nexLook;
   const byId = new Map();
   const byBill = new Map();
@@ -31114,6 +31454,12 @@ window.uploadNexAr = function(id, required) {
         const ctx = (window.nexFindItem(id).item ? window.nexFindItem(id) : await window.nexResolveItem(id));
         if (!ctx.item) { resolve(false); return; }
         ctx.item.arDigital = { fileName: file.name, dataUrl: String(reader.result || ""), uploadedAt: Date.now() };
+        try {
+          const iso = await window.nexReadArPdfDate(ctx.item.arDigital.dataUrl);
+          window.nexApplyArDate(ctx.item, iso);
+        } catch (e) {
+          ctx.item.arDigital.pdfDateChecked = true;
+        }
         await window.saveNexHistory(ctx.customerId, ctx.saleId, ctx.items);
         window.syncNexOccurrenceNote(ctx.customerId, ctx.item);
         if (typeof window.renderNexHistory === "function") window.renderNexHistory();
@@ -31487,28 +31833,47 @@ window.filaClientSignalKeys = function(client) {
   return keys;
 };
 
+window.filaStageVazio = function(stage) {
+  const s = String(stage || "").trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return !s || s === "SEM CONSTRUCAO";
+};
+
+window.filaDocPhoto = function(data) {
+  const photos = typeof window.relFotoEntries === "function" ? window.relFotoEntries(data) : [];
+  return photos.length ? photos[0].url : "";
+};
+
 window.filaLookupSignals = function(client) {
   const idx = window._filaSignals;
   const keys = window.filaClientSignalKeys(client);
   let pending = null;
   let construction = null;
+  let vazio = null;
   keys.forEach((k) => {
     if (!idx) return;
     if (!pending && idx.pending && idx.pending[k]) pending = idx.pending[k];
     const built = idx.construction && idx.construction[k];
-    if (built && (!construction || String(built.date || "") > String(construction.date || ""))) construction = built;
+    if (built && (!construction || String(built.date || built.createdAt || "") > String(construction.date || construction.createdAt || ""))) construction = built;
+    const empty = idx.vazio && idx.vazio[k];
+    if (empty && (!vazio || String(empty.date || empty.createdAt || "") > String(vazio.date || vazio.createdAt || ""))) vazio = empty;
   });
-  return { pending: pending, construction: construction, ready: !!(idx && idx.ready) };
+  return { pending: pending, construction: construction, vazio: vazio, ready: !!(idx && idx.ready) };
 };
 
 window.filaHouseSignalHtml = function(client) {
   const sig = window.filaLookupSignals(client);
-  const photo = (sig.construction && (sig.construction.fotoFrente || sig.construction.fileUrl))
-    || (sig.pending && sig.pending.fotoFrente)
-    || "";
-  if (!(sig.pending || sig.construction)) return "";
-  const houseColor = photo ? "#105436" : "#c2410c";
-  return `<span class="fila-signal" data-kind="house" onmouseenter="window.showFilaSignalTip(event, this)" onmouseleave="window.hideFilaSignalTip()"><i data-lucide="house" style="width:14px;height:14px;color:${houseColor};"></i></span>`;
+  const photo = window.filaDocPhoto(sig.construction) || window.filaDocPhoto(sig.vazio) || window.filaDocPhoto(sig.pending);
+  if (!(sig.pending || sig.construction || sig.vazio)) return "";
+  let houseColor = "#c2410c";
+  let title = "Vistoria em andamento";
+  if (sig.construction) {
+    houseColor = photo ? "#105436" : "#c2410c";
+    title = "Lote com construção";
+  } else if (sig.vazio) {
+    houseColor = "#64748b";
+    title = "Foto do lote sem construção";
+  }
+  return `<button type="button" class="fila-signal" data-kind="house" title="${title}" onclick="window.openRelConstrucaoAlbum(this)" onmouseenter="window.showFilaSignalTip(event, this)" onmouseleave="window.hideFilaSignalTip()" style="border:0;background:transparent;padding:0;cursor:pointer;"><i data-lucide="house" style="width:14px;height:14px;color:${houseColor};"></i></button>`;
 };
 
 window.relFotoEntries = function(data) {
@@ -31571,10 +31936,11 @@ window.relCollectAlbum = function(client) {
 };
 
 window.relHouseSignalHtml = function(client) {
-  const album = window.relCollectAlbum(client);
-  if (!album.show) return "";
-  const color = album.photos.length ? "#105436" : "#c2410c";
-  return `<button type="button" class="fila-signal" title="Ver fotos da construção" onclick="window.openRelConstrucaoAlbum(this)" style="border:0;background:transparent;padding:0;cursor:pointer;"><i data-lucide="house" style="width:14px;height:14px;color:${color};"></i></button>`;
+  const sig = window.filaLookupSignals(client);
+  if (!(sig.construction || sig.vazio)) return "";
+  const color = window.relFotoEntries(sig.construction).length || window.relFotoEntries(sig.vazio).length ? "#105436" : "#c2410c";
+  const title = sig.construction ? "Lote com construção" : "Foto do lote sem construção";
+  return `<button type="button" class="fila-signal" data-kind="house" title="${title}" onclick="window.openRelConstrucaoAlbum(this)" style="border:0;background:transparent;padding:0;cursor:pointer;"><i data-lucide="house" style="width:14px;height:14px;color:${color};"></i></button>`;
 };
 
 window.closeRelConstrucaoAlbum = function() {
@@ -31698,6 +32064,7 @@ window.ensureFilaSignalsIndex = function() {
     Promise.resolve(window.hydrateNexHistoryBag())
       .then(() => {
         if (typeof window.rebuildNexCumpridaIndex === "function") window.rebuildNexCumpridaIndex();
+        if (typeof window.nexScheduleCumpridaCheck === "function") window.nexScheduleCumpridaCheck();
         window.paintFilaSignalCells();
         const pane = document.getElementById("tab-dashboard");
         if (pane && pane.style.display !== "none" && AppState.dashboardRendered && typeof loadDashboardData === "function") {
@@ -31706,7 +32073,7 @@ window.ensureFilaSignalsIndex = function() {
       })
       .catch(() => {});
   }
-  if (window._filaSignals && window._filaSignals.ready && window._filaSignals.albums && Date.now() - window._filaSignals.at < 120000) {
+  if (window._filaSignals && window._filaSignals.ready && window._filaSignals.albums && window._filaSignals.vazio && Date.now() - window._filaSignals.at < 120000) {
     window.paintFilaSignalCells();
     return Promise.resolve(window._filaSignals);
   }
@@ -31714,6 +32081,7 @@ window.ensureFilaSignalsIndex = function() {
   window._filaSignalsPromise = (async () => {
     const pending = {};
     const construction = {};
+    const vazio = {};
     const remember = (bucket, keys, value, preferNewer) => {
       const stamp = (item) => String((item && (item._sortDate || item.date || item.createdAt)) || "");
       (keys || []).forEach((k) => {
@@ -31741,6 +32109,21 @@ window.ensureFilaSignalsIndex = function() {
       const s = String(stage || "").trim().toUpperCase();
       return !s || s === "SEM CONSTRUÇÃO" || s === "SEM CONSTRUCAO" || s === "TERRAPLANAGEM";
     };
+    const chavesComUnidade = (data, keys) => {
+      const extra = [];
+      const cc = String(data.costCenterId || "").trim();
+      const bits = String(data.unidade || data.unitName || data.unit || "").split(/\s+-\s+/).map((s) => s.trim()).filter(Boolean);
+      if (cc && bits.length) extra.push("unit:" + cc + ":" + bits[bits.length - 1].toUpperCase());
+      return (keys || []).concat(extra);
+    };
+    const estagioDoc = (data) => (data.respostasFormulario && data.respostasFormulario.estagioObra) || data.stage || data.estagioObra || "";
+    const guardarCasa = (data, keys) => {
+      const chaves = chavesComUnidade(data, keys);
+      const estagio = estagioDoc(data);
+      if (!stageForaDaFila(estagio)) remember(construction, chaves, data, true);
+      else if (window.filaStageVazio(estagio) && window.relFotoEntries(data).length) remember(vazio, chaves, data, true);
+      return chaves;
+    };
     if (window.firebaseDb && window.firebaseCollections) {
       const { collection, getDocs } = window.firebaseCollections;
       const snap = await getDocs(collection(window.firebaseDb, "vistorias"));
@@ -31749,18 +32132,20 @@ window.ensureFilaSignalsIndex = function() {
         if (data.isTest) return;
         const keys = typeof _vcDocIdentityKeys === "function" ? _vcDocIdentityKeys(data) : [];
         data._sortDate = typeof _vcPendingRequestDate === "function" ? _vcPendingRequestDate(data) : "";
-        if (String(data.status || "") !== "concluida") remember(pending, keys, data, true);
-        pushAlbum(data, keys);
+        const chaves = chavesComUnidade(data, keys);
+        if (String(data.status || "") !== "concluida") remember(pending, chaves, data, true);
+        else guardarCasa(data, keys);
+        pushAlbum(data, chaves);
       });
       const checks = await getDocs(collection(window.firebaseDb, "construction_checks"));
       checks.forEach((docSnap) => {
         const data = Object.assign({ id: docSnap.id, _collection: "construction_checks" }, docSnap.data() || {});
         const keys = typeof _vcDocIdentityKeys === "function" ? _vcDocIdentityKeys(data) : [];
-        if (!stageForaDaFila(data.stage)) remember(construction, keys, data, true);
-        if (!stageForaDaFila(data.stage) || window.relFotoEntries(data).length) pushAlbum(data, keys);
+        const chaves = guardarCasa(data, keys);
+        if (!stageForaDaFila(estagioDoc(data)) || window.relFotoEntries(data).length) pushAlbum(data, chaves);
       });
     }
-    window._filaSignals = { ready: true, at: Date.now(), pending: pending, construction: construction, albums: albums };
+    window._filaSignals = { ready: true, at: Date.now(), pending: pending, construction: construction, vazio: vazio, albums: albums };
     window._filaSignalsPromise = null;
     window.paintFilaSignalCells();
     return window._filaSignals;
@@ -31822,12 +32207,12 @@ window.showFilaSignalTip = function(event, el) {
     }
   } else {
     const sig = window.filaLookupSignals(client);
-    const photo = (sig.construction && (sig.construction.fotoFrente || sig.construction.fileUrl))
-      || (sig.pending && sig.pending.fotoFrente)
-      || "";
-    const status = sig.pending
-      ? (sig.pending.status === "aguardando_validacao" ? "Vistoria em andamento — aguardando validação" : "Vistoria em andamento")
-      : (sig.construction && sig.construction.stage ? "Construção: " + sig.construction.stage : "Construção registrada");
+    const photo = window.filaDocPhoto(sig.construction) || window.filaDocPhoto(sig.vazio) || window.filaDocPhoto(sig.pending);
+    const status = sig.construction
+      ? ("Construção: " + (sig.construction.stage || "registrada"))
+      : (sig.vazio
+        ? "Sem construção. A foto mostra que não há obra no lote."
+        : (sig.pending && sig.pending.status === "aguardando_validacao" ? "Vistoria em andamento — aguardando validação" : "Vistoria em andamento"));
     const linkIso = sig.pending && typeof _vcPendingRequestDate === "function" ? _vcPendingRequestDate(sig.pending) : "";
     const linkLine = linkIso
       ? `<div style="margin-top:4px;font-weight:600;color:#334155;">Link enviado em ${esc(window.nexFmtBr(linkIso))}</div>`
@@ -32559,7 +32944,7 @@ window.renderNexFollowup = function() {
       <td onclick="event.stopPropagation()">${window.nexStatusSelectHtml(it)}</td>
       <td style="text-align:center;" onclick="event.stopPropagation()">${arCell}</td>
       <td><span title="${valid.reason.replace(/"/g, "&quot;")}" style="display:inline-block;padding:4px 8px;border-radius:4px;font-size:0.78rem;font-weight:600;${valid.ok ? "background:#dcfce7;color:#166534;" : "background:#fee2e2;color:#991b1b;"}">${valid.ok ? "Válida" : "Sem validade"}</span></td>
-      <td style="text-align:center;" onclick="event.stopPropagation()">${canDelete ? `<button type="button" class="btn btn-outline btn-sm" onclick="window.deleteNexItem('${it.id}')" style="border-color:#fecaca;color:#b91c1c;padding:2px 8px;">Excluir</button>` : `<span title="Somente o autor da NEX ou o administrador pode excluir" style="color:#64748b;font-size:0.75rem;">—</span>`}</td>
+      <td style="text-align:center;" onclick="event.stopPropagation()">${canDelete ? `<button type="button" class="btn btn-outline btn-sm" onclick="window.deleteNexItem('${it.id}')" style="border-color:#fecaca;color:#b91c1c;padding:2px 8px;">Excluir</button>` : `<span title="${String(window.nexDeleteBlockReason(it)).replace(/"/g, "&quot;")}" style="color:#64748b;font-size:0.75rem;">—</span>`}</td>
     </tr>`;
   };
   const section = (title, items, tone) => {
@@ -41384,6 +41769,7 @@ window.searchRelacionamento = async function() {
         const signalKey = "rel-" + String(r.contractId || r.titulo || index);
         window._relSignalClients[signalKey] = {
           saleId: r.contractId || r.titulo,
+          customerId: r.openCustomerId || customerId,
           contractId: r.contractId,
           contractNumber: r.contrato,
           titulo: r.titulo,

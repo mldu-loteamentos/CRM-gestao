@@ -2232,13 +2232,13 @@ const ResultadoCaixaApp = {
     ];
     const maior = Math.max(...barras.map((b) => (b.espera ? 0 : Math.max(0, b.valor))), 1);
     return `<div class="rcx-graf">
-      <div class="rcx-graf-tit">${caixaEsc(mesNome.toUpperCase())}/${atual || ""}</div>
+      <div class="rcx-graf-tit">${caixaEsc(mesNome.toUpperCase())}</div>
       <div class="rcx-graf-area">
         ${barras.map((b) => {
           const h = b.espera ? 0 : Math.max(0, b.valor) / maior * 100;
           return `<div class="rcx-graf-col ${b.cls}">
             <span class="rcx-graf-val">${b.espera ? "…" : this.fmt(b.valor)}</span>
-            <div class="rcx-graf-bar" style="height:calc((100% - 22px) * ${(h / 100).toFixed(4)})"></div>
+            <div class="rcx-graf-track"><div class="rcx-graf-bar" style="height:${h.toFixed(2)}%"></div></div>
           </div>`;
         }).join("")}
       </div>
@@ -2277,17 +2277,17 @@ const ResultadoCaixaApp = {
     if (sel < 12 && !this.forecast) nota += " * Sem forecast: suba o relatório para preencher a parte clara.";
     else if (sel < 12 && s.semForecast.length) nota += ` * O forecast não tem ${s.semForecast.map((m) => (this.MESES[m - 1] || "").toLowerCase()).join(", ")}: nesses meses entra o orçado.`;
     return `<div class="rcx-graf rcx-tot">
-      <div class="rcx-graf-tit">TOTAIS/${ano || ""}</div>
+      <div class="rcx-graf-tit">TOTAIS</div>
       <div class="rcx-graf-area rcx-tot-area">
         ${colunas.map((c) => `<div class="rcx-graf-col ${c.cls}">
           <span class="rcx-graf-val">${this.fmt(c.total)}${c.marca ? " *" : ""}</span>
-          <div class="rcx-tot-pilha" style="height:calc((100% - 22px) * ${(c.total / maior).toFixed(4)})" title="${caixaEsc(c.rotulo)}: ${this.fmt(c.escuro)} até ${mesCurto} + ${this.fmt(c.claro)} até dezembro">
+          <div class="rcx-graf-track"><div class="rcx-tot-pilha" style="height:${(c.total / maior * 100).toFixed(2)}%" title="${caixaEsc(c.rotulo)}: ${this.fmt(c.escuro)} até ${mesCurto} + ${this.fmt(c.claro)} até dezembro">
             ${pedaco(c.claro, c.total, "is-claro")}${pedaco(c.escuro, c.total, "is-escuro")}
-          </div>
+          </div></div>
         </div>`).join("")}
       </div>
       <div class="rcx-graf-eixo">${colunas.map((c) => `<span>${caixaEsc(c.rotulo)}</span>`).join("")}</div>
-      <div class="rcx-tot-nota">${caixaEsc(nota)}</div>
+      <div class="rcx-tot-tip" role="tooltip">${caixaEsc(nota)}</div>
     </div>`;
   },
 
@@ -2407,7 +2407,7 @@ const ResultadoCaixaApp = {
     const grade = [];
     for (let t = base, i = 0; t <= topo + passo / 1000 && i < 30; t += passo, i++) {
       const yy = y(t * div).toFixed(1);
-      grade.push(`<line x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}" class="rcx-ln-grade"></line><text x="${L - 6}" y="${yy}" class="rcx-ln-eixo-y">${eixoTxt(t)}</text>`);
+      grade.push(`<text x="${L - 6}" y="${yy}" class="rcx-ln-eixo-y">${eixoTxt(t)}</text>`);
     }
     const letras = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
     const series = [

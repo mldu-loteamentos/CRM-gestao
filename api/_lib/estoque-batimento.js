@@ -2,7 +2,7 @@ const { initializeApp } = require("firebase/app");
 const {
   getFirestore, doc, setDoc, getDoc, getDocs, collection, deleteDoc
 } = require("firebase/firestore");
-const { isBusinessDaySP, todayIsoSP } = require("../../lib/br-calendar");
+const { todayIsoSP } = require("../../lib/br-calendar");
 const { slimCaixaRow, isFinanceLike } = require("../../lib/caixa-snapshot");
 const {
   isFinanceUnit,
@@ -179,7 +179,6 @@ module.exports = async function handler(req, res) {
   }
 
   const force = !!(req.query && (req.query.force === "1" || req.query.force === "true"));
-  const day = isBusinessDaySP();
   if (!force && BATIMENTO_PAUSED) {
     return res.status(200).json({
       skipped: true,
@@ -189,18 +188,22 @@ module.exports = async function handler(req, res) {
       message: "Batimento automático pausado (BATIMENTO_PAUSED=1)."
     });
   }
-  if (!force && !day.ok) {
-    return res.status(200).json({
-      skipped: true,
-      reason: day.reason,
-      date: todayIsoSP(),
-      message: "Fim de semana ou feriado: batimento de estoque só em dia útil (ou force=1)."
-    });
-  }
-
   const today = todayIsoSP();
   const started = Date.now();
   const log = [];
+
+  if (!force) {
+    const filaMeta = await getDoc(doc(db, "sienge_defaulters_history", today));
+    const filaPronta = filaMeta.exists() && !!(filaMeta.data() || {}).warmupDone;
+    if (!filaPronta) {
+      return res.status(200).json({
+        done: false,
+        waiting: "fila",
+        date: today,
+        message: "A fila de cobrança ainda está fechando inadimplentes e último pagamento. O PMP começa em seguida."
+      });
+    }
+  }
 
   try {
     const stateSnap = await getDoc(doc(db, FB_COL, STATE_ID));
