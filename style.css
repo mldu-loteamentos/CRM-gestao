@@ -3933,6 +3933,9 @@ circle.donut-segment {
   overflow-anchor: none;
   padding: 0;
   background: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
 }
 .fc-filters .ml-emp-filter {
   flex: 1 1 240px;
@@ -4114,7 +4117,9 @@ circle.donut-segment {
 }
 .fc-grid {
   width: max-content;
+  max-width: max-content;
   min-width: 0;
+  flex: 0 0 auto;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 0.72rem;
@@ -4145,8 +4150,34 @@ circle.donut-segment {
   left: 0;
   z-index: 5;
   text-align: left;
-  min-width: 176px;
-  width: 176px;
+  width: var(--fc-nome, 260px);
+  min-width: var(--fc-nome, 260px);
+  max-width: var(--fc-nome, 260px);
+}
+.fc-name-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 10px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 6;
+}
+.fc-name-resize::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  right: 3px;
+  width: 2px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.55);
+}
+body.fc-nome-dragging,
+body.fc-nome-dragging * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 .fc-grid thead th.fc-th-co {
   cursor: pointer;
@@ -4184,9 +4215,9 @@ circle.donut-segment {
   left: 0;
   z-index: 2;
   text-align: left;
-  width: 176px;
-  min-width: 176px;
-  max-width: 176px;
+  width: var(--fc-nome, 260px);
+  min-width: var(--fc-nome, 260px);
+  max-width: var(--fc-nome, 260px);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4195,33 +4226,33 @@ circle.donut-segment {
 .fc-grid thead th.fc-th-num,
 .fc-grid thead tr.fc-months th,
 .fc-grid td.fc-num {
-  width: 118px;
-  min-width: 118px;
-  max-width: 118px;
+  width: 86px;
+  min-width: 86px;
+  max-width: 86px;
   box-sizing: border-box;
-  padding-left: 2px;
-  padding-right: 2px;
+  padding-left: 4px;
+  padding-right: 6px;
 }
 .fc-grid.is-nominal thead th.fc-th-num,
 .fc-grid.is-nominal thead tr.fc-months th,
 .fc-grid.is-nominal td.fc-num {
-  width: 148px;
-  min-width: 148px;
-  max-width: 148px;
+  width: 92px;
+  min-width: 92px;
+  max-width: 92px;
 }
 .fc-grid.is-inteiro thead th.fc-th-num,
 .fc-grid.is-inteiro thead tr.fc-months th,
 .fc-grid.is-inteiro td.fc-num {
-  width: 112px;
-  min-width: 112px;
-  max-width: 112px;
+  width: 76px;
+  min-width: 76px;
+  max-width: 76px;
 }
 .fc-grid.is-milhoes thead th.fc-th-num,
 .fc-grid.is-milhoes thead tr.fc-months th,
 .fc-grid.is-milhoes td.fc-num {
-  width: 78px;
-  min-width: 78px;
-  max-width: 78px;
+  width: 54px;
+  min-width: 54px;
+  max-width: 54px;
 }
 .fc-grid td.fc-num {
   text-align: right;
@@ -4241,14 +4272,34 @@ circle.donut-segment {
 .fc-grid td.fc-num.is-strong { font-weight: 800; }
 .fc-grid thead th.fc-th-cmp { background: #334155; }
 .fc-grid thead th.fc-th-var,
-.fc-grid td.fc-num.fc-var-rs,
+.fc-grid td.fc-num.fc-var-rs {
+  width: 86px;
+  min-width: 86px;
+  max-width: 86px;
+}
 .fc-grid thead th.fc-th-varpct,
 .fc-grid td.fc-num.fc-var-pct {
-  width: auto;
-  min-width: 0;
-  max-width: none;
-  padding-left: 2px;
-  padding-right: 2px;
+  width: 58px;
+  min-width: 58px;
+  max-width: 58px;
+}
+.fc-grid.is-nominal thead th.fc-th-var,
+.fc-grid.is-nominal td.fc-num.fc-var-rs {
+  width: 92px;
+  min-width: 92px;
+  max-width: 92px;
+}
+.fc-grid.is-inteiro thead th.fc-th-var,
+.fc-grid.is-inteiro td.fc-num.fc-var-rs {
+  width: 76px;
+  min-width: 76px;
+  max-width: 76px;
+}
+.fc-grid.is-milhoes thead th.fc-th-var,
+.fc-grid.is-milhoes td.fc-num.fc-var-rs {
+  width: 54px;
+  min-width: 54px;
+  max-width: 54px;
 }
 .fc-grid td.fc-num.fc-var { padding-top: 1px; padding-bottom: 1px; }
 .fc-var-pill {
@@ -4540,6 +4591,8 @@ circle.donut-segment {
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  align-self: stretch;
+  width: 100%;
   gap: 12px;
   min-height: 180px;
   padding: 48px 16px;

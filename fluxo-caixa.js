@@ -19,6 +19,9 @@ const FluxoCaixaApp = {
   companyMonthsOpen: null,
   agrupamento: "mes",
   escala: "nominal",
+  nomeLargura: 260,
+  nomeLarguraMin: 180,
+  nomeLarguraMax: 420,
   grupoAberto: "",
   companyDropOpen: false,
   companyQuery: "",
@@ -51,6 +54,8 @@ const FluxoCaixaApp = {
     try {
       const escala = localStorage.getItem("fc_escala");
       if (escala === "inteiro" || escala === "milhoes" || escala === "nominal") this.escala = escala;
+      const largura = Number(localStorage.getItem("fc_nome_largura"));
+      if (largura >= this.nomeLarguraMin && largura <= this.nomeLarguraMax) this.nomeLargura = largura;
     } catch (e) {}
     this.noteCompanySet(true);
     this.render();
@@ -163,6 +168,44 @@ const FluxoCaixaApp = {
     this.escala = id === "milhoes" || id === "inteiro" ? id : "nominal";
     try { localStorage.setItem("fc_escala", this.escala); } catch (e) {}
     this.render();
+  },
+
+  aplicarLarguraNome() {
+    const root = document.getElementById("fluxo-caixa-root");
+    if (root) root.style.setProperty("--fc-nome", this.nomeLargura + "px");
+  },
+
+  alcaNomeHtml() {
+    return `<span class="fc-name-resize" title="Arraste para ajustar a largura dos centros de custo" onpointerdown="FluxoCaixaApp.iniciarLarguraNome(event)"></span>`;
+  },
+
+  iniciarLarguraNome(ev) {
+    if (!ev || ev.button) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    const alca = ev.currentTarget;
+    const startX = ev.clientX;
+    const startW = this.nomeLargura;
+    const mover = (e) => {
+      const w = Math.round(Math.min(this.nomeLarguraMax, Math.max(this.nomeLarguraMin, startW + e.clientX - startX)));
+      if (w === this.nomeLargura) return;
+      this.nomeLargura = w;
+      this.aplicarLarguraNome();
+    };
+    const soltar = () => {
+      alca.removeEventListener("pointermove", mover);
+      alca.removeEventListener("pointerup", soltar);
+      alca.removeEventListener("pointercancel", soltar);
+      document.body.classList.remove("fc-nome-dragging");
+      try { localStorage.setItem("fc_nome_largura", String(this.nomeLargura)); } catch (e) {}
+    };
+    document.body.classList.add("fc-nome-dragging");
+    alca.addEventListener("pointermove", mover);
+    alca.addEventListener("pointerup", soltar);
+    alca.addEventListener("pointercancel", soltar);
+    if (alca.setPointerCapture) {
+      try { alca.setPointerCapture(ev.pointerId); } catch (e) {}
+    }
   },
 
   escalaHtml() {
@@ -1299,6 +1342,7 @@ const FluxoCaixaApp = {
   render() {
     const root = document.getElementById("fluxo-caixa-root");
     if (!root) return;
+    this.aplicarLarguraNome();
     const prevScroll = root.querySelector(".fc-tree-scroll");
     const keepTop = prevScroll ? prevScroll.scrollTop : 0;
     const keepLeft = prevScroll ? prevScroll.scrollLeft : 0;
@@ -1523,9 +1567,9 @@ const FluxoCaixaApp = {
           ? this.thPeriodo(p, "", false).replace(' rowspan="2"', "")
           : `<th class="fc-th-num">${this.esc(p.label)}</th>`
       )).join("");
-      return `<thead><tr><th class="fc-th-name">Estrutura</th>${cells}${total("")}${this.thComparacao("")}</tr></thead>`;
+      return `<thead><tr><th class="fc-th-name">Estrutura${this.alcaNomeHtml()}</th>${cells}${total("")}${this.thComparacao("")}</tr></thead>`;
     }
-    const row1 = [`<th class="fc-th-name" rowspan="2">Estrutura</th>`];
+    const row1 = [`<th class="fc-th-name" rowspan="2">Estrutura${this.alcaNomeHtml()}</th>`];
     const row2 = [];
     periodos.forEach(p => {
       if (p.key === abertoKey) {
@@ -1556,7 +1600,7 @@ const FluxoCaixaApp = {
     const periodoAberto = periodos.some(p => p.key === abertoKey);
     const anyOpen = ids.some(id => this.companyMonthsOpen && this.companyMonthsOpen.has(id));
     const span = 1 + (anyOpen ? 1 : 0) + (anyOpen && periodoAberto ? 1 : 0);
-    const row1 = [`<th class="fc-th-name" rowspan="${span}">Estrutura</th>`];
+    const row1 = [`<th class="fc-th-name" rowspan="${span}">Estrutura${this.alcaNomeHtml()}</th>`];
     const row2 = [];
     const row3 = [];
     ids.forEach((id, idx) => {
@@ -1671,7 +1715,7 @@ const FluxoCaixaApp = {
       return `<td class="${this.valClass(v, strong)}${extra}${click ? " is-cell" : ""}" ${click} title="${tip}">${this.fmt(v)}</td>`;
     }).join("");
     return `<tr class="${this.rowClass(r)}">
-      <td class="fc-td-name" style="padding-left:${6 + pad}px">${chevron}<span>${this.esc(r.name)}</span></td>
+      <td class="fc-td-name" style="padding-left:${6 + pad}px" title="${this.esc(r.name)}">${chevron}<span>${this.esc(r.name)}</span></td>
       ${cells}
     </tr>`;
   },

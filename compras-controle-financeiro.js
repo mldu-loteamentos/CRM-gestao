@@ -745,7 +745,8 @@ ComprasControleApp.carregarLotes = async function () {
     while (queue.length && !stop()) {
       const id = queue.shift();
       try {
-        const data = await window.siengeFetchWithRetry("/bills/" + encodeURIComponent(id) + "/installments", 1);
+        const data = await window.siengeFetchWithRetry("/bills/" + encodeURIComponent(id) + "/installments", 4);
+        await new Promise((r) => setTimeout(r, 350));
         if (stop()) return;
         const map = {};
         ((data && data.results) || []).forEach((inst) => {
@@ -773,7 +774,7 @@ ComprasControleApp.carregarLotes = async function () {
     }
   };
   const jobs = [];
-  const workers = Math.min(3, total);
+  const workers = 1;
   for (let i = 0; i < workers; i++) jobs.push(worker());
   try {
     await Promise.all(jobs);
@@ -906,7 +907,27 @@ ComprasControleApp.fetchOutcome = async function (start, end) {
 };
 
 ComprasControleApp._cfinHistDe = "2017-01-01";
-ComprasControleApp._cfinHistAte = "2025-12-31";
+
+// O ano fechado vai para o Firebase. Em 2026 o corte é 31/12/2025; em 2027 passa a 31/12/2026.
+ComprasControleApp.histAte = function () {
+  return (new Date().getFullYear() - 1) + "-12-31";
+};
+
+ComprasControleApp.histVivoDe = function () {
+  return this.isoShift(this.histAte(), 1);
+};
+
+ComprasControleApp.fmtDataBr = function (iso) {
+  const p = String(iso || "").slice(0, 10).split("-");
+  return p.length >= 3 ? p[2] + "/" + p[1] + "/" + p[0] : String(iso || "");
+};
+
+ComprasControleApp.empresasDoHistorico = async function () {
+  const selecionadas = (this.state.companyIds || []).map(String).filter(Boolean);
+  if (selecionadas.length) return selecionadas;
+  if (!this.state.companies || !this.state.companies.length) await this.loadCompanies();
+  return (this.state.companies || []).map((c) => String(c && c.id != null ? c.id : "")).filter(Boolean);
+};
 
 ComprasControleApp.noteProgress = function (text, ratio) {
   const box = document.getElementById("cfin-results");
@@ -977,7 +998,8 @@ ComprasControleApp._lerMesPago = async function (companyId, ym) {
 ComprasControleApp._gravarMesPago = async function (companyId, ym, bills) {
   const fx = window.firebaseCollections;
   const db = window.firebaseDb;
-  if (!fx || !db || !fx.setDoc || ym > "2025-12") return;
+  if (!fx || !db || !fx.setDoc || !companyId) return;
+  if (ym > this.histAte().slice(0, 7)) return;
   const lista = Array.isArray(bills) ? bills : [];
   const fatias = [];
   let atual = [];
@@ -1030,32 +1052,56 @@ ComprasControleApp._billNoPeriodo = function (bill, start, end) {
 };
 
 ComprasControleApp.contasHistoricas = async function (start, end) {
+  const ate = this.histAte();
+  const rotulo = this.fmtDataBr(ate);
   const ini = start < this._cfinHistDe ? this._cfinHistDe : start;
-  const fim = end > this._cfinHistAte ? this._cfinHistAte : end;
+  const fim = end > ate ? ate : end;
   if (!ini || !fim || ini > fim) return [];
-  const selecionadas = (this.state.companyIds || []).map(String).filter(Boolean);
-  const targets = selecionadas.length ? selecionadas : [""];
+  const targets = await this.empresasDoHistorico();
+  if (!targets.length) throw new Error("Nenhuma empresa disponível para gravar as contas pagas.");
   const meses = this._mesesHist(ini, fim);
   const out = [];
   const vistos = new Set();
+  const falhas = [];
   let step = 0;
   const total = Math.max(1, meses.length * targets.length);
+  const siengeCheio = (e) => {
+    const st = Number(e && e.status) || 0;
+    return st === 429 || st === 504 || st >= 500 || /429|504/.test(String((e && e.message) || ""));
+  };
   for (let c = 0; c < targets.length; c++) {
     const companyId = targets[c];
     for (let i = 0; i < meses.length; i++) {
       step += 1;
       const ym = meses[i];
-      const chave = String(companyId || "todas") + "_" + ym;
+      const chave = String(companyId) + "_" + ym;
       let bills = this._cfinMesMem && this._cfinMesMem[chave];
-      if (!bills) bills = await this._lerMesPago(companyId || "todas", ym);
+      if (!bills) bills = await this._lerMesPago(companyId, ym);
       if (!bills) {
-        this.noteProgress("Gravando contas até 31/12/2025 · " + (companyId || "empresas") + " · " + ym, step / total);
         const mesIni = ym + "-01";
         const mesFim = this._fimMes(ym);
-        bills = await this.outcomeRange(mesIni, mesFim, companyId);
-        try { await this._gravarMesPago(companyId || "todas", ym, bills || []); } catch (e) {}
+        let ok = false;
+        for (let t = 0; t < 4 && !ok; t++) {
+          this.noteProgress((t ? "Sienge ocupado, tentando de novo · " : "Gravando contas até " + rotulo + " · ") + "empresa " + companyId + " · " + ym, step / total);
+          try {
+            bills = await this.outcomeRange(mesIni, mesFim, companyId);
+            ok = true;
+          } catch (e) {
+            if (!siengeCheio(e) || t === 3) break;
+            await new Promise((r) => setTimeout(r, 5000 * (t + 1)));
+          }
+        }
+        if (!ok) {
+          falhas.push("empresa " + companyId + " " + ym);
+          continue;
+        }
+        try { await this._gravarMesPago(companyId, ym, bills || []); } catch (e) {
+          falhas.push("empresa " + companyId + " " + ym);
+          continue;
+        }
+        await new Promise((r) => setTimeout(r, 400));
       } else if (step === 1 || step % 6 === 0) {
-        this.noteProgress("Lendo contas até 31/12/2025 no Firebase · " + ym, step / total);
+        this.noteProgress("Lendo contas até " + rotulo + " no Firebase · empresa " + companyId + " · " + ym, step / total);
       }
       if (!this._cfinMesMem) this._cfinMesMem = {};
       this._cfinMesMem[chave] = bills || [];
@@ -1069,6 +1115,7 @@ ComprasControleApp.contasHistoricas = async function (start, end) {
       });
     }
   }
+  this._cfinFalhas = falhas;
   return out;
 };
 
@@ -1089,6 +1136,7 @@ ComprasControleApp.consultar = async function () {
   this.state.rastreando = false;
   this.state.banco = null;
   this.state.error = "";
+  this.state.falhaHist = "";
   this.state.consulted = true;
   this.state.loteGen = (this.state.loteGen || 0) + 1;
   this.fecharTitulo();
@@ -1096,16 +1144,22 @@ ComprasControleApp.consultar = async function () {
   try {
     const contas = [];
     let fonte = "";
-    if (start <= this._cfinHistAte) {
-      this.state.loadingMsg = "Lendo contas até 31/12/2025 no Firebase…";
+    const ate = this.histAte();
+    const vivoDe = this.histVivoDe();
+    if (start <= ate) {
+      this.state.loadingMsg = "Lendo contas até " + this.fmtDataBr(ate) + " no Firebase…";
       this.noteProgress(this.state.loadingMsg, 0);
-      const hist = await this.contasHistoricas(start, end < this._cfinHistAte ? end : this._cfinHistAte);
+      const hist = await this.contasHistoricas(start, end < ate ? end : ate);
       contas.push.apply(contas, hist);
       fonte = "base";
+      const falhas = this._cfinFalhas || [];
+      this.state.falhaHist = falhas.length
+        ? ("O Sienge não devolveu " + falhas.length + " mês(es). O que já foi gravado continua no Firebase. Consulte de novo para completar. " + falhas.slice(0, 4).join(", ") + (falhas.length > 4 ? "…" : ""))
+        : "";
     }
-    if (end >= "2026-01-01") {
-      const vivoIni = start > "2026-01-01" ? start : "2026-01-01";
-      const daBase = start > this._cfinHistAte ? await this.billsDaBase(vivoIni, end) : null;
+    if (end >= vivoDe) {
+      const vivoIni = start > vivoDe ? start : vivoDe;
+      const daBase = start > ate ? await this.billsDaBase(vivoIni, end) : null;
       if (daBase) {
         contas.push.apply(contas, daBase);
         fonte = fonte ? "mista" : "base";
@@ -1842,10 +1896,13 @@ ComprasControleApp.renderList = function () {
     if (kpi) kpi.innerHTML = "";
     return;
   }
+  const avisoHist = this.state.falhaHist
+    ? '<div class="tvig-empty" style="margin-bottom:10px;color:#9a3412;border-color:#fdba74;">' + this.esc(this.state.falhaHist) + "</div>"
+    : "";
   const rows = this.state.shown || [];
   this.paintKpis();
   if (!rows.length) {
-    box.innerHTML = '<div class="tvig-empty">Nenhum título neste filtro.</div>';
+    box.innerHTML = avisoHist + '<div class="tvig-empty">Nenhum título neste filtro.</div>';
     return;
   }
   const grupos = this.ordenarGrupos(this.gruposDaLista(rows));
@@ -1905,7 +1962,7 @@ ComprasControleApp.renderList = function () {
       <td class="cprev-col-val">${this.esc(this.money(this.valorGrupo(g)))}</td>
     </tr>${detalhe}`;
   }).join("");
-  box.innerHTML = `
+  box.innerHTML = avisoHist + `
     <style>
       #cfin-table thead th { white-space: nowrap; }
       #cfin-table tbody tr.cprev-row { cursor: pointer; }
