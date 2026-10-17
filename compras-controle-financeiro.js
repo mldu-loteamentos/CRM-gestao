@@ -841,6 +841,47 @@ ComprasControleApp.lerBlocoBase = async function (id) {
   return bills;
 };
 
+ComprasControleApp.idsGeridasPeloGrupo = function () {
+  let raw = "";
+  if (typeof window.empresasCustomPayload === "function") raw = window.empresasCustomPayload() || "";
+  if (!raw) {
+    try { raw = localStorage.getItem("crm_empresas_custom") || "{}"; } catch (e) { raw = "{}"; }
+  }
+  let custom = {};
+  try { custom = JSON.parse(raw) || {}; } catch (e) { custom = {}; }
+  const ids = [];
+  const seen = {};
+  Object.keys(custom).forEach((k) => {
+    if (k === "_v2") return;
+    const cfg = custom[k];
+    if (!cfg || typeof cfg !== "object") return;
+    const v = cfg.gerida_pelo_grupo != null ? cfg.gerida_pelo_grupo : cfg.gerida_grupo;
+    const ligada = v === 1 || v === true || v === "1" || Number(v) === 1;
+    if (!ligada) return;
+    const id = cfg.company_id != null ? cfg.company_id : k;
+    const sid = String(id);
+    if (!/^\d+$/.test(sid) || seen[sid]) return;
+    seen[sid] = true;
+    ids.push(sid);
+  });
+  return ids;
+};
+
+// Vazio ou "Marcar Todos" consulta só as empresas com Gerida pelo grupo.
+// Uma escolha explícita de algumas empresas continua valendo, mesmo sem a flag.
+ComprasControleApp.empresasDaConsulta = async function () {
+  const selecionadas = (this.state.companyIds || []).map(String).filter(Boolean);
+  const geridas = this.idsGeridasPeloGrupo();
+  if (!selecionadas.length) return geridas;
+  if (!this.state.companies || !this.state.companies.length) {
+    try { await this.loadCompanies(); } catch (e) {}
+  }
+  const catalogo = (this.state.companies || []).map((c) => String(c && c.id != null ? c.id : "")).filter(Boolean);
+  const setSel = new Set(selecionadas);
+  if (catalogo.length && catalogo.every((id) => setSel.has(id))) return geridas;
+  return selecionadas;
+};
+
 ComprasControleApp.billsDaBase = async function (start, end) {
   let meta;
   try {
@@ -849,12 +890,9 @@ ComprasControleApp.billsDaBase = async function (start, end) {
     return null;
   }
   if (!meta || start < meta.start || end > meta.end) return null;
-  const companies = (this.state.companyIds || []).map(String).filter(Boolean);
-  let required = companies;
-  if (!required.length) {
-    required = (meta.companies || []).map(String).filter(Boolean);
-    if (!required.length) required = [""];
-  }
+  const companies = await this.empresasDaConsulta();
+  if (!companies.length) return [];
+  const required = companies;
   const chunks = meta.chunks.filter((c) => c && c.end >= start && c.start <= end && (
     !companies.length || !c.companyId || companies.indexOf(String(c.companyId)) >= 0
   ));
@@ -890,8 +928,8 @@ ComprasControleApp.fetchOutcome = async function (start, end) {
   const chunks = typeof siengeSplitDateRange === "function"
     ? siengeSplitDateRange(start, end)
     : [{ start: start, end: end }];
-  const ids = (this.state.companyIds || []).map(String).filter(Boolean);
-  const targets = ids.length ? ids : [""];
+  const targets = await this.empresasDaConsulta();
+  if (!targets.length) return { data: [] };
   const data = [];
   let step = 0;
   const total = Math.max(1, chunks.length * targets.length);
@@ -923,10 +961,7 @@ ComprasControleApp.fmtDataBr = function (iso) {
 };
 
 ComprasControleApp.empresasDoHistorico = async function () {
-  const selecionadas = (this.state.companyIds || []).map(String).filter(Boolean);
-  if (selecionadas.length) return selecionadas;
-  if (!this.state.companies || !this.state.companies.length) await this.loadCompanies();
-  return (this.state.companies || []).map((c) => String(c && c.id != null ? c.id : "")).filter(Boolean);
+  return this.empresasDaConsulta();
 };
 
 ComprasControleApp.noteProgress = function (text, ratio) {
@@ -1137,6 +1172,14 @@ ComprasControleApp.consultar = async function () {
   this.state.banco = null;
   this.state.error = "";
   this.state.falhaHist = "";
+  const alvos = await this.empresasDaConsulta();
+  if (!alvos.length) {
+    this.state.loading = false;
+    this.state.error = "Nenhuma empresa com Gerida pelo grupo ligada no cadastro de empresas.";
+    this.state.consulted = true;
+    this.renderPage();
+    return;
+  }
   this.state.consulted = true;
   this.state.loteGen = (this.state.loteGen || 0) + 1;
   this.fecharTitulo();
@@ -2091,7 +2134,7 @@ ComprasControleApp.renderPage = function () {
             </div>
           </div>
         </div>
-        <p class="cprev-hint">A lista sai da base diária, com 6 meses antes e 6 meses depois de hoje. O mês atual abre junto com a tela; outro vencimento dentro dessa janela também vem da base, sem nova consulta ao Sienge. Empreendimento, credor, título, tipo e departamento só filtram a lista. O processamento bancário segue em segundo plano. Cada título aparece uma vez, com o valor inteiro. Se houver vários centros de custo, use <strong>Agrupado</strong> para ver o rateio. Clique na linha para ver o título, os anexos e a forma de pagamento programada.</p>
+        <p class="cprev-hint">Com Empresas em Todos, a consulta usa só as que estão com Gerida pelo grupo ligada. A lista sai da base diária, com 6 meses antes e 6 meses depois de hoje. O mês atual abre junto com a tela; outro vencimento dentro dessa janela também vem da base, sem nova consulta ao Sienge. Empreendimento, credor, título, tipo e departamento só filtram a lista. O processamento bancário segue em segundo plano. Cada título aparece uma vez, com o valor inteiro. Se houver vários centros de custo, use <strong>Agrupado</strong> para ver o rateio. Clique na linha para ver o título, os anexos e a forma de pagamento programada.</p>
         ${this.departmentScopeNote() ? `<p class="cprev-hint">${this.esc(this.departmentScopeNote())}</p>` : ""}
       </div>
       <div id="cfin-kpis" class="ccom-kpis cprev-kpis"></div>
