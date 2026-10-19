@@ -3475,6 +3475,22 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     } else if (typeof window.updateFilaCacheStatusIndicator === "function") {
       window.updateFilaCacheStatusIndicator();
     }
+  } else if (tabId === "subjudice") {
+    if (!AppState.dashboardRendered) {
+      const subBody = document.getElementById("subjudice-table-body");
+      if (subBody && !subBody.querySelector(".loading-spinner")) {
+        subBody.innerHTML = `<tr><td class="fila-load-cell" colspan="11">
+          <div class="ml-load">
+            <div class="loading-spinner" aria-hidden="true"></div>
+            <span class="loading-status-text">Abrindo Sub Judice…</span>
+            <div class="ml-load-track"><div class="loading-progress-bar" style="width:12%"></div></div>
+          </div>
+        </td></tr>`;
+      }
+      setTimeout(() => {
+        if (!AppState.dashboardRendered) loadDashboardData();
+      }, 0);
+    }
   } else if (tabId === "configuracoes" || tabId === "regras-negociacao" || tabId === "regras-cobranca") {
     if (typeof renderRulesSettingsTable === "function") renderRulesSettingsTable();
     if (typeof loadRegrasNegociacao === "function") loadRegrasNegociacao();
@@ -9995,7 +10011,12 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
     if (body) {
       body.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:30px; color:var(--color-text-muted);">Nenhum cliente inadimplente encontrado.</td></tr>`;
     }
+    const subBodyVazio = document.getElementById("subjudice-table-body");
+    if (subBodyVazio) {
+      subBodyVazio.innerHTML = `<tr><td colspan="11" style="text-align:center; padding:30px; color:var(--color-text-muted);">Nenhum cliente sub judice encontrado.</td></tr>`;
+    }
     renderDashboardKPIs([], []);
+    AppState.dashboardRendered = true;
     return;
   }
 
@@ -10547,6 +10568,409 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
   window.clientList = clientList;
   window._subjudiceList = filteredSubjudice;
 
+  // --- SUB JUDICE KPIs ---
+  let subTotalOverdue = 0;
+  let subTotalClients = new Set();
+  let subBillIds = new Set();
+  let subMaxDelay = 0;
+  let subSumDelay = 0;
+
+  subjudiceList.forEach(c => {
+    subTotalOverdue += (c.overdueValue + c.overdueCharges);
+    subTotalClients.add(c.customerId);
+    if (c.billIds) c.billIds.forEach(id => subBillIds.add(id));
+    if (c.maxDaysDelay > subMaxDelay) subMaxDelay = c.maxDaysDelay;
+    subSumDelay += c.maxDaysDelay;
+  });
+
+  const subTotalBills = subBillIds.size;
+  const subAvgDelay = subjudiceList.length > 0 ? Math.round(subSumDelay / subjudiceList.length) : 0;
+
+  const kpiContainer = document.getElementById("subjudice-kpi-grid");
+  if (kpiContainer) {
+    kpiContainer.removeAttribute('style');
+    kpiContainer.innerHTML = `
+      <div class="kpi-card total-delay">
+        <div class="kpi-info">
+          <h3>Valor em Atraso</h3>
+          <div class="kpi-value">${subTotalOverdue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>
+        </div>
+        <div class="kpi-icon-wrapper"><i data-lucide="alert-triangle"></i></div>
+      </div>
+      <div class="kpi-card clients-crit">
+        <div class="kpi-info">
+          <h3>Clientes em Atraso</h3>
+          <div class="kpi-value">${subTotalClients.size}</div>
+        </div>
+        <div class="kpi-icon-wrapper"><i data-lucide="users"></i></div>
+      </div>
+      <div class="kpi-card promises">
+        <div class="kpi-info">
+          <h3>Títulos Vencidos</h3>
+          <div class="kpi-value">${subTotalBills}</div>
+        </div>
+        <div class="kpi-icon-wrapper"><i data-lucide="file-text"></i></div>
+      </div>
+      <div class="kpi-card subjudice">
+        <div class="kpi-info">
+          <h3>Atraso Médio</h3>
+          <div class="kpi-value">${subAvgDelay} dias</div>
+        </div>
+        <div class="kpi-icon-wrapper"><i data-lucide="clock"></i></div>
+      </div>
+    `;
+    if (window.lucide) lucide.createIcons();
+  }
+
+  const subCompSummaryBody = document.getElementById("subjudice-company-summary-body");
+  if (subCompSummaryBody) {
+    subCompSummaryBody.innerHTML = "";
+    
+    const subjudiceCompanySummary = {};
+    if (AppState.companies) {
+      AppState.companies.forEach(comp => {
+        subjudiceCompanySummary[comp.id] = {
+          id: comp.id, name: getCompanyName(comp.id), totalOverdue: 0,
+          bracket30: 0, bracket60: 0, bracket90: 0, bracket120: 0, bracketAbove120: 0,
+          clientIds: new Set(),
+          billIds: new Set(),
+          costCenters: {}
+        };
+      });
+    }
+
+    subjudiceList.forEach(c => {
+      const compId = c.companyId || 2;
+      if (!subjudiceCompanySummary[compId]) {
+        subjudiceCompanySummary[compId] = {
+          id: compId, name: getCompanyName(compId), totalOverdue: 0,
+          bracket30: 0, bracket60: 0, bracket90: 0, bracket120: 0, bracketAbove120: 0,
+          clientIds: new Set(),
+          billIds: new Set(),
+          costCenters: {}
+        };
+      }
+      const summary = subjudiceCompanySummary[compId];
+      const ccId = c.costCenterId || 'N/D';
+      
+      if (!summary.costCenters) summary.costCenters = {};
+      if (!summary.costCenters[ccId]) {
+        summary.costCenters[ccId] = {
+          id: ccId,
+          name: getCostCenterName(ccId),
+          totalOverdue: 0,
+          bracket30: 0, bracket60: 0, bracket90: 0, bracket120: 0, bracketAbove120: 0,
+          clientIds: new Set(),
+          billIds: new Set()
+        };
+      }
+      const ccSummary = summary.costCenters[ccId];
+
+      summary.clientIds.add(c.customerId);
+      ccSummary.clientIds.add(c.customerId);
+      if (c.billIds) {
+        c.billIds.forEach(id => {
+          summary.billIds.add(id);
+          ccSummary.billIds.add(id);
+        });
+      }
+      
+      const value = c.overdueValue + c.overdueCharges;
+      summary.totalOverdue += value;
+      ccSummary.totalOverdue += value;
+      
+      if (c.maxDaysDelay <= 30) { summary.bracket30 += value; ccSummary.bracket30 += value; }
+      else if (c.maxDaysDelay <= 60) { summary.bracket60 += value; ccSummary.bracket60 += value; }
+      else if (c.maxDaysDelay <= 90) { summary.bracket90 += value; ccSummary.bracket90 += value; }
+      else if (c.maxDaysDelay <= 120) { summary.bracket120 += value; ccSummary.bracket120 += value; }
+      else { summary.bracketAbove120 += value; ccSummary.bracketAbove120 += value; }
+    });
+
+    // Formatar valor inteiro (sem centavos)
+    const fmtNum = v => Math.round(v).toLocaleString('pt-BR');
+    const fmtCur = v => 'R$ ' + fmtNum(v);
+
+    let sumTitles = 0, sumTotal = 0;
+    let sumBracket30 = 0, sumBracket60 = 0, sumBracket90 = 0, sumBracket120 = 0, sumBracketAbove120 = 0;
+
+    Object.values(subjudiceCompanySummary).forEach(summary => {
+      const clientCount = summary.clientIds.size;
+      if (clientCount === 0) return;
+      sumTitles += summary.billIds.size;
+      sumTotal += summary.totalOverdue;
+      sumBracket30 += summary.bracket30;
+      sumBracket60 += summary.bracket60;
+      sumBracket90 += summary.bracket90;
+      sumBracket120 += summary.bracket120;
+      sumBracketAbove120 += summary.bracketAbove120;
+
+      const calcPct = (val, total) => total > 0 ? (val / total * 100).toFixed(1) : 0;
+      const pct30 = calcPct(summary.bracket30, summary.totalOverdue);
+      const pct60 = calcPct(summary.bracket60, summary.totalOverdue);
+      const pct90 = calcPct(summary.bracket90, summary.totalOverdue);
+      const pct120 = calcPct(summary.bracket120, summary.totalOverdue);
+      const pctAbove120 = calcPct(summary.bracketAbove120, summary.totalOverdue);
+      const fmtMoney = (val) => val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+      const renderCell = (val, pct, color) => {
+        if (val === 0) return `<div style="text-align: center; color: #cbd5e1; font-weight: 500; font-size: 0.9rem;">-</div>`;
+        return `
+          <div style="text-align: center; display: flex; flex-direction: column; align-items: center;">
+            <div style="font-weight: 600; color: #334155; font-size: 0.85rem; margin-bottom: 3px;">${fmtMoney(val)}</div>
+            <div style="display: flex; align-items: center; justify-content: center; gap: 4px;">
+              <div style="width: 8px; height: 8px; border-radius: 50%; background-color: ${color}; opacity: 0.8;"></div>
+              <span style="font-size: 0.7rem; color: #64748b; font-weight: 500; text-align: left;">${pct}%</span>
+            </div>
+          </div>
+        `;
+      };
+      
+      const renderPlainCell = (val) => {
+        if (val === 0) return `<div style="text-align: center; color: #cbd5e1; font-weight: 500; font-size: 0.9rem;">-</div>`;
+        return `
+          <div style="text-align: center; display: flex; flex-direction: column; align-items: center;">
+            <div style="font-weight: 600; color: #64748b; font-size: 0.85rem; margin-bottom: 3px;">${fmtMoney(val)}</div>
+          </div>
+        `;
+      };
+
+      const hasCostCenters = Object.keys(summary.costCenters).length > 0;
+      const toggleHtml = hasCostCenters
+        ? `<span class="cost-center-toggle" onclick="toggleCostCenters('scc-rows-${summary.id}', this)" title="Expandir Empreendimentos" style="cursor:pointer; margin-right: 6px;"><i data-lucide="chevron-right" style="width: 14px;"></i></span>`
+        : '';
+
+      const tr = document.createElement("tr");
+      tr.style.transition = "background-color 0.2s";
+      tr.style.backgroundColor = "#f1f5f9";
+      tr.style.cursor = hasCostCenters ? 'pointer' : 'default';
+      if (hasCostCenters) {
+        tr.onclick = (e) => { if (!e.target.closest('.cost-center-toggle')) { const btn = tr.querySelector('.cost-center-toggle'); if (btn) btn.click(); } };
+      }
+      tr.onmouseenter = () => tr.style.backgroundColor = "#e2e8f0";
+      tr.onmouseleave = () => tr.style.backgroundColor = "#f1f5f9";
+      tr.innerHTML = `
+        <td style="text-align: center; color: #64748b; font-weight: 500;">${summary.id}</td>
+        <td style="text-align: left; display: flex; align-items: center;">
+            ${toggleHtml}
+            <div style="font-weight: 700; color: var(--color-primary); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">${summary.name}</div>
+        </td>
+        <td style="text-align: center;">
+            <div style="display: inline-flex; align-items: center; justify-content: center; background: #f1f5f9; color: #475569; font-weight: 700; padding: 2px 10px; border-radius: 12px; font-size: 0.8rem;">
+                ${summary.billIds.size}
+            </div>
+        </td>
+        <td style="text-align: center;">
+            <strong style="font-size: 0.9rem; color: #0f172a;">R$ ${fmtMoney(summary.totalOverdue)}</strong>
+        </td>
+        <td style="padding: 10px 4px;">${renderCell(summary.bracket30, pct30, '#10b981')}</td>
+        <td style="padding: 10px 4px;">${renderCell(summary.bracket60, pct60, '#f59e0b')}</td>
+        <td style="padding: 10px 4px;">${renderCell(summary.bracket90, pct90, '#f97316')}</td>
+        <td style="padding: 10px 4px;">${renderCell(summary.bracket120, pct120, '#ef4444')}</td>
+        <td style="padding: 10px 4px;">${renderCell(summary.bracketAbove120, pctAbove120, '#b91c1c')}</td>
+      `;
+      subCompSummaryBody.appendChild(tr);
+
+      if (hasCostCenters) {
+        Object.values(summary.costCenters).sort((a, b) => b.totalOverdue - a.totalOverdue).forEach(cc => {
+            const ccRow = document.createElement("tr");
+            ccRow.className = `cost-center-row scc-rows-${summary.id}`;
+            ccRow.style.display = "none";
+            ccRow.style.backgroundColor = '#fafafa';
+            ccRow.innerHTML = `
+              <td style="text-align: center; color: #64748b; font-size: 0.75rem; font-weight: 600;">${cc.id}</td>
+              <td style="text-align: left; padding-left: 36px;">
+                  <div style="font-weight: 600; color: #334155; font-size: 0.8rem; text-transform: uppercase;">${cc.name}</div>
+              </td>
+              <td style="text-align: center; color: #64748b;">
+                  ${cc.billIds.size}
+              </td>
+              <td style="text-align: center;">
+                  <strong style="color: #334155;">R$ ${fmtMoney(cc.totalOverdue)}</strong>
+              </td>
+              <td style="padding: 6px 4px;">${renderPlainCell(cc.bracket30)}</td>
+              <td style="padding: 6px 4px;">${renderPlainCell(cc.bracket60)}</td>
+              <td style="padding: 6px 4px;">${renderPlainCell(cc.bracket90)}</td>
+              <td style="padding: 6px 4px;">${renderPlainCell(cc.bracket120)}</td>
+              <td style="padding: 6px 4px;">${renderPlainCell(cc.bracketAbove120)}</td>
+            `;
+            subCompSummaryBody.appendChild(ccRow);
+        });
+      }
+    });
+
+    if (sumTitles > 0) {
+      const calcPctTotal = (val, total) => total > 0 ? (val / total * 100).toFixed(1) : 0;
+      const totalPct30 = calcPctTotal(sumBracket30, sumTotal);
+      const totalPct60 = calcPctTotal(sumBracket60, sumTotal);
+      const totalPct90 = calcPctTotal(sumBracket90, sumTotal);
+      const totalPct120 = calcPctTotal(sumBracket120, sumTotal);
+      const totalPctAbove120 = calcPctTotal(sumBracketAbove120, sumTotal);
+      const renderTotalCell = (val, pct, color) => {
+        if (val === 0) return `<div style="text-align: center; color: #cbd5e1; font-weight: 500;">-</div>`;
+        return `
+          <div style="text-align: center; display: flex; flex-direction: column; align-items: center;">
+            <div style="font-weight: 700; color: #0f172a; font-size: 0.9rem; margin-bottom: 3px;">${val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+            <div style="display: flex; align-items: center; justify-content: center; gap: 4px;">
+              <div style="width: 8px; height: 8px; border-radius: 50%; background-color: ${color}; opacity: 0.8;"></div>
+              <span style="font-size: 0.75rem; color: #475569; font-weight: 600; text-align: left;">${pct}%</span>
+            </div>
+          </div>
+        `;
+      };
+      const tFoot = document.createElement("tr");
+      tFoot.style.backgroundColor = "#fff7ed";
+      tFoot.innerHTML = `
+        <td style="border-top: 2px solid #f97316;"></td>
+        <td style="text-align: right; border-top: 2px solid #f97316; color: #ea580c; padding-right: 15px;">
+            <div style="display: flex; justify-content: flex-end; align-items: center; gap: 6px; font-weight: 800; font-size: 0.9rem;">
+                TOTAL GERAL
+            </div>
+        </td>
+        <td style="text-align: center; border-top: 2px solid #f97316;">
+          <span style="background-color: #ea580c; padding: 3px 10px; border-radius: 12px; font-weight: 700; font-size: 0.8rem; color: white;">
+            ${sumTitles}
+          </span>
+        </td>
+        <td style="text-align: center; border-top: 2px solid #f97316;">
+            <strong style="font-size: 1rem; color: #c2410c;">R$ ${sumTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+        </td>
+        <td style="padding: 12px 4px; border-top: 2px solid #f97316;">${renderTotalCell(sumBracket30, totalPct30, '#10b981')}</td>
+        <td style="padding: 12px 4px; border-top: 2px solid #f97316;">${renderTotalCell(sumBracket60, totalPct60, '#f59e0b')}</td>
+        <td style="padding: 12px 4px; border-top: 2px solid #f97316;">${renderTotalCell(sumBracket90, totalPct90, '#f97316')}</td>
+        <td style="padding: 12px 4px; border-top: 2px solid #f97316;">${renderTotalCell(sumBracket120, totalPct120, '#ef4444')}</td>
+        <td style="padding: 12px 4px; border-top: 2px solid #f97316;">${renderTotalCell(sumBracketAbove120, totalPctAbove120, '#b91c1c')}</td>
+      `;
+      subCompSummaryBody.appendChild(tFoot);
+    }
+    if (window.lucide) lucide.createIcons();
+  }
+  // --- FIM SUB JUDICE KPIs ---
+
+  // Renderizar Tabela do Sub Judice
+  const subjudiceBody = document.getElementById("subjudice-table-body");
+  if (subjudiceBody) {
+    subjudiceBody.innerHTML = "";
+    if (filteredSubjudice.length === 0) {
+      subjudiceBody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding:30px; color:var(--color-text-muted);">Nenhum cliente sub judice encontrado.</td></tr>`;
+    } else {
+      const partesSubjudice = [
+        { nome: "Sub Judice", lista: filteredSubjudice.filter(c => c.subjudice === "S") },
+        { nome: "Sub judice no Integra", lista: filteredSubjudice.filter(c => c.subjudice !== "S") }
+      ];
+      partesSubjudice.forEach(parte => {
+        if (!parte.lista.length) return;
+        const headerRow = document.createElement("tr");
+        headerRow.className = "fila-group-header";
+        const integraGrupo = parte.nome.indexOf("Integra") >= 0;
+        const bg = integraGrupo ? "#fdf4ff" : "#f3f4f6";
+        const color = integraGrupo ? "#86198f" : "#334155";
+        const qtd = parte.lista.length === 1 ? "1 título" : parte.lista.length + " títulos";
+        headerRow.innerHTML = `<td colspan="11" style="background:${bg};color:${color};font-weight:700;font-size:0.75rem;letter-spacing:0.04em;text-transform:uppercase;padding:8px 12px;border:none;">${parte.nome}<span style="margin-left:8px;letter-spacing:0;text-transform:none;background:rgba(255,255,255,0.7);border:1px solid rgba(0,0,0,0.08);border-radius:999px;padding:2px 8px;font-size:0.72rem;">${qtd}</span></td>`;
+        subjudiceBody.appendChild(headerRow);
+      parte.lista.forEach(client => {
+        const formattedVal = (client.overdueValue + client.overdueCharges).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        
+        const billIds = client.billIds || [];
+        const rawTitleNumber = String(billIds[0] || "").replace(/^B-/, '').split('-')[0];
+
+        const row = document.createElement("tr");
+        row.className = client.subjudice === "S" ? "table-row-hover" : "table-row-hover subjudice-integra-highlight";
+        row.innerHTML = `
+          <td style="text-align: center; width: 1%; white-space: nowrap;"><span>${client.companyId}</span></td>
+          <td style="${client._searchBuyerHit ? 'max-width: 280px; white-space: normal;' : 'white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis;'}" title="${client._searchBuyerHit ? ('Principal: ' + (client._searchBuyerHit.mainName || client.customerName) + ' | Pesquisado: ' + client._searchBuyerHit.searchedName) : client.customerName}">
+            ${typeof window.filaCustomerNameCellHtml === "function" ? window.filaCustomerNameCellHtml(client) : `<span style="text-transform:uppercase;">${client.customerName}</span>`}
+          </td>
+          <td>
+            <span>
+              ${rawTitleNumber}
+            </span>
+          </td>
+          <td style="white-space: nowrap;">
+            <span>${getPrimaryCostCenter(client.costCenterId)} - ${client.unitName || 'N/D'}</span>
+          </td>
+          <td style="white-space: nowrap; text-align: left; width: 1%;" title="Fase Processual">
+            <span style="font-weight: 500; font-size: 0.75rem; text-transform: uppercase;">${(() => {
+                if (client.subjudice !== "S") return "Sub judice no Integra";
+                const info = typeof window.getClientJudicialPhaseInfo === 'function' ? window.getClientJudicialPhaseInfo(client) : null;
+                return (info && info.faseLabel) ? info.faseLabel : "Sem Fase";
+            })()}</span>
+          </td>
+          <td style="white-space: nowrap; text-align: center; width: 1%;" title="Data da Fase">
+            ${(() => {
+                const cid = String(client.customerId);
+                const customerNotes = (AppState.judNotes && AppState.judNotes[cid]) ? AppState.judNotes[cid] : [];
+                const validJudNotes = customerNotes.filter(n => n.type === "Judicial" && n.fase !== "Nota Interna" && n.status !== "Cancelada");
+                if (validJudNotes.length > 0) {
+                    validJudNotes.sort((a,b) => new Date(b.date) - new Date(a.date));
+                    const lastNote = validJudNotes[0];
+                    if (lastNote.prazo) {
+                        const prazoParts = lastNote.prazo.split('-');
+                        const prazoFormatted = prazoParts.length === 3 ? `${prazoParts[2]}/${prazoParts[1]}/${prazoParts[0]}` : lastNote.prazo;
+                        
+                        let style = 'font-weight: 600; font-size: 0.75rem; padding: 2px 6px; border-radius: 4px;';
+                        if (prazoParts.length === 3) {
+                            const pDate = new Date(parseInt(prazoParts[0]), parseInt(prazoParts[1])-1, parseInt(prazoParts[2]));
+                            const today = new Date();
+                            today.setHours(0,0,0,0);
+                            const diff = (pDate - today) / (1000 * 60 * 60 * 24);
+                            if (diff < 0) {
+                                style += ' color: #7f1d1d; background: #fef2f2; border: 1px solid #fecaca;';
+                            } else if (diff <= 7) {
+                                style += ' color: #854d0e; background: #fefce8; border: 1px solid #fef08a;';
+                            }
+                        }
+                        
+                        return `<span style="${style}">${prazoFormatted}</span>`;
+                    }
+                }
+                return '<span style="color: var(--color-text-muted); font-size: 0.8rem;">-</span>';
+            })()}
+          </td>
+          <td style="white-space: nowrap; text-align: center; width: 1%;">
+            ${getDelayBadgeHtml(client.maxDaysDelay)}
+          </td>
+          <td style="white-space: nowrap; text-align: center; width: 1%;">
+            <span>${client.billCount}</span>
+          </td>
+          <td>
+            <span>${formattedVal}</span>
+          </td>
+          ${(() => {
+              const judNotesList = AppState.judNotes && AppState.judNotes[client.customerId] ? AppState.judNotes[client.customerId] : [];
+              let latestNote = null;
+              let latestIndex = -1;
+              judNotesList.forEach((n, idx) => {
+                  if (!latestNote || new Date(n.date) > new Date(latestNote.date)) {
+                      latestNote = n;
+                      latestIndex = idx;
+                  }
+              });
+              if (latestNote) {
+                  const dateStr = new Date(latestNote.date).toLocaleDateString('pt-BR');
+                  return `<td style="white-space: nowrap; text-align: center; font-size: 0.75rem;" 
+                            onmouseenter="if(window.showJudTooltip) window.showJudTooltip(event, ${client.customerId}, ${latestIndex})" 
+                            onmouseleave="if(window.hideJudTooltip) window.hideJudTooltip()">
+                            <span style="border-bottom: 1px dashed var(--color-primary); cursor: help;">${dateStr}</span>
+                          </td>`;
+              }
+              return `<td style="text-align: center; color: var(--color-text-muted); font-size: 0.75rem;">-</td>`;
+          })()}
+          <td style="white-space: nowrap; text-align: center;">
+            <button class="btn btn-secondary btn-sm" data-customer-id="${client.customerId}" data-title="${rawTitleNumber}" data-name="${(client.customerName || '').replace(/"/g, '&quot;')}" data-unit="${(client.unitName || '').replace(/"/g, '&quot;')}" data-cc="${String(typeof getPrimaryCostCenter === 'function' ? getPrimaryCostCenter(client.costCenterId) : (client.costCenterId || '')).replace(/"/g, '&quot;')}" onclick="visualizarExtratoDireto(this)" style="margin-right: 4px; padding: 2px 6px; font-size: 0.7rem; line-height: 1.2;">
+              <i data-lucide="file-text" style="width: 14px; height: 14px; margin-right: 2px; vertical-align: middle;"></i> Extrato
+            </button>
+            <button class="btn btn-primary btn-sm" onclick="viewCustomerCard(${client.customerId}, ${client.saleId})" style="padding: 2px 6px; font-size: 0.7rem; line-height: 1.2;">
+              <i data-lucide="eye" style="width: 14px; height: 14px; margin-right: 2px; vertical-align: middle;"></i> Detalhes
+            </button>
+          </td>
+        `;
+        subjudiceBody.appendChild(row);
+      });
+      });
+    }
+  }
+
+
   // Renderizar KPIs do topo (usando baseClientList ativa de cobrança)
   renderDashboardKPIs(baseClientList, bills);
 
@@ -11029,408 +11453,6 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
     }
   }
 
-  // --- SUB JUDICE KPIs ---
-  let subTotalOverdue = 0;
-  let subTotalClients = new Set();
-  let subBillIds = new Set();
-  let subMaxDelay = 0;
-  let subSumDelay = 0;
-
-  subjudiceList.forEach(c => {
-    subTotalOverdue += (c.overdueValue + c.overdueCharges);
-    subTotalClients.add(c.customerId);
-    if (c.billIds) c.billIds.forEach(id => subBillIds.add(id));
-    if (c.maxDaysDelay > subMaxDelay) subMaxDelay = c.maxDaysDelay;
-    subSumDelay += c.maxDaysDelay;
-  });
-
-  const subTotalBills = subBillIds.size;
-  const subAvgDelay = subjudiceList.length > 0 ? Math.round(subSumDelay / subjudiceList.length) : 0;
-
-  const kpiContainer = document.getElementById("subjudice-kpi-grid");
-  if (kpiContainer) {
-    kpiContainer.removeAttribute('style');
-    kpiContainer.innerHTML = `
-      <div class="kpi-card total-delay">
-        <div class="kpi-info">
-          <h3>Valor em Atraso</h3>
-          <div class="kpi-value">${subTotalOverdue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>
-        </div>
-        <div class="kpi-icon-wrapper"><i data-lucide="alert-triangle"></i></div>
-      </div>
-      <div class="kpi-card clients-crit">
-        <div class="kpi-info">
-          <h3>Clientes em Atraso</h3>
-          <div class="kpi-value">${subTotalClients.size}</div>
-        </div>
-        <div class="kpi-icon-wrapper"><i data-lucide="users"></i></div>
-      </div>
-      <div class="kpi-card promises">
-        <div class="kpi-info">
-          <h3>Títulos Vencidos</h3>
-          <div class="kpi-value">${subTotalBills}</div>
-        </div>
-        <div class="kpi-icon-wrapper"><i data-lucide="file-text"></i></div>
-      </div>
-      <div class="kpi-card subjudice">
-        <div class="kpi-info">
-          <h3>Atraso Médio</h3>
-          <div class="kpi-value">${subAvgDelay} dias</div>
-        </div>
-        <div class="kpi-icon-wrapper"><i data-lucide="clock"></i></div>
-      </div>
-    `;
-    if (window.lucide) lucide.createIcons();
-  }
-
-  const subCompSummaryBody = document.getElementById("subjudice-company-summary-body");
-  if (subCompSummaryBody) {
-    subCompSummaryBody.innerHTML = "";
-    
-    const subjudiceCompanySummary = {};
-    if (AppState.companies) {
-      AppState.companies.forEach(comp => {
-        subjudiceCompanySummary[comp.id] = {
-          id: comp.id, name: getCompanyName(comp.id), totalOverdue: 0,
-          bracket30: 0, bracket60: 0, bracket90: 0, bracket120: 0, bracketAbove120: 0,
-          clientIds: new Set(),
-          billIds: new Set(),
-          costCenters: {}
-        };
-      });
-    }
-
-    subjudiceList.forEach(c => {
-      const compId = c.companyId || 2;
-      if (!subjudiceCompanySummary[compId]) {
-        subjudiceCompanySummary[compId] = {
-          id: compId, name: getCompanyName(compId), totalOverdue: 0,
-          bracket30: 0, bracket60: 0, bracket90: 0, bracket120: 0, bracketAbove120: 0,
-          clientIds: new Set(),
-          billIds: new Set(),
-          costCenters: {}
-        };
-      }
-      const summary = subjudiceCompanySummary[compId];
-      const ccId = c.costCenterId || 'N/D';
-      
-      if (!summary.costCenters) summary.costCenters = {};
-      if (!summary.costCenters[ccId]) {
-        summary.costCenters[ccId] = {
-          id: ccId,
-          name: getCostCenterName(ccId),
-          totalOverdue: 0,
-          bracket30: 0, bracket60: 0, bracket90: 0, bracket120: 0, bracketAbove120: 0,
-          clientIds: new Set(),
-          billIds: new Set()
-        };
-      }
-      const ccSummary = summary.costCenters[ccId];
-
-      summary.clientIds.add(c.customerId);
-      ccSummary.clientIds.add(c.customerId);
-      if (c.billIds) {
-        c.billIds.forEach(id => {
-          summary.billIds.add(id);
-          ccSummary.billIds.add(id);
-        });
-      }
-      
-      const value = c.overdueValue + c.overdueCharges;
-      summary.totalOverdue += value;
-      ccSummary.totalOverdue += value;
-      
-      if (c.maxDaysDelay <= 30) { summary.bracket30 += value; ccSummary.bracket30 += value; }
-      else if (c.maxDaysDelay <= 60) { summary.bracket60 += value; ccSummary.bracket60 += value; }
-      else if (c.maxDaysDelay <= 90) { summary.bracket90 += value; ccSummary.bracket90 += value; }
-      else if (c.maxDaysDelay <= 120) { summary.bracket120 += value; ccSummary.bracket120 += value; }
-      else { summary.bracketAbove120 += value; ccSummary.bracketAbove120 += value; }
-    });
-
-    // Formatar valor inteiro (sem centavos)
-    const fmtNum = v => Math.round(v).toLocaleString('pt-BR');
-    const fmtCur = v => 'R$ ' + fmtNum(v);
-
-    let sumTitles = 0, sumTotal = 0;
-    let sumBracket30 = 0, sumBracket60 = 0, sumBracket90 = 0, sumBracket120 = 0, sumBracketAbove120 = 0;
-
-    Object.values(subjudiceCompanySummary).forEach(summary => {
-      const clientCount = summary.clientIds.size;
-      if (clientCount === 0) return;
-      sumTitles += summary.billIds.size;
-      sumTotal += summary.totalOverdue;
-      sumBracket30 += summary.bracket30;
-      sumBracket60 += summary.bracket60;
-      sumBracket90 += summary.bracket90;
-      sumBracket120 += summary.bracket120;
-      sumBracketAbove120 += summary.bracketAbove120;
-
-      const calcPct = (val, total) => total > 0 ? (val / total * 100).toFixed(1) : 0;
-      const pct30 = calcPct(summary.bracket30, summary.totalOverdue);
-      const pct60 = calcPct(summary.bracket60, summary.totalOverdue);
-      const pct90 = calcPct(summary.bracket90, summary.totalOverdue);
-      const pct120 = calcPct(summary.bracket120, summary.totalOverdue);
-      const pctAbove120 = calcPct(summary.bracketAbove120, summary.totalOverdue);
-      const fmtMoney = (val) => val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-      const renderCell = (val, pct, color) => {
-        if (val === 0) return `<div style="text-align: center; color: #cbd5e1; font-weight: 500; font-size: 0.9rem;">-</div>`;
-        return `
-          <div style="text-align: center; display: flex; flex-direction: column; align-items: center;">
-            <div style="font-weight: 600; color: #334155; font-size: 0.85rem; margin-bottom: 3px;">${fmtMoney(val)}</div>
-            <div style="display: flex; align-items: center; justify-content: center; gap: 4px;">
-              <div style="width: 8px; height: 8px; border-radius: 50%; background-color: ${color}; opacity: 0.8;"></div>
-              <span style="font-size: 0.7rem; color: #64748b; font-weight: 500; text-align: left;">${pct}%</span>
-            </div>
-          </div>
-        `;
-      };
-      
-      const renderPlainCell = (val) => {
-        if (val === 0) return `<div style="text-align: center; color: #cbd5e1; font-weight: 500; font-size: 0.9rem;">-</div>`;
-        return `
-          <div style="text-align: center; display: flex; flex-direction: column; align-items: center;">
-            <div style="font-weight: 600; color: #64748b; font-size: 0.85rem; margin-bottom: 3px;">${fmtMoney(val)}</div>
-          </div>
-        `;
-      };
-
-      const hasCostCenters = Object.keys(summary.costCenters).length > 0;
-      const toggleHtml = hasCostCenters
-        ? `<span class="cost-center-toggle" onclick="toggleCostCenters('scc-rows-${summary.id}', this)" title="Expandir Empreendimentos" style="cursor:pointer; margin-right: 6px;"><i data-lucide="chevron-right" style="width: 14px;"></i></span>`
-        : '';
-
-      const tr = document.createElement("tr");
-      tr.style.transition = "background-color 0.2s";
-      tr.style.backgroundColor = "#f1f5f9";
-      tr.style.cursor = hasCostCenters ? 'pointer' : 'default';
-      if (hasCostCenters) {
-        tr.onclick = (e) => { if (!e.target.closest('.cost-center-toggle')) { const btn = tr.querySelector('.cost-center-toggle'); if (btn) btn.click(); } };
-      }
-      tr.onmouseenter = () => tr.style.backgroundColor = "#e2e8f0";
-      tr.onmouseleave = () => tr.style.backgroundColor = "#f1f5f9";
-      tr.innerHTML = `
-        <td style="text-align: center; color: #64748b; font-weight: 500;">${summary.id}</td>
-        <td style="text-align: left; display: flex; align-items: center;">
-            ${toggleHtml}
-            <div style="font-weight: 700; color: var(--color-primary); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">${summary.name}</div>
-        </td>
-        <td style="text-align: center;">
-            <div style="display: inline-flex; align-items: center; justify-content: center; background: #f1f5f9; color: #475569; font-weight: 700; padding: 2px 10px; border-radius: 12px; font-size: 0.8rem;">
-                ${summary.billIds.size}
-            </div>
-        </td>
-        <td style="text-align: center;">
-            <strong style="font-size: 0.9rem; color: #0f172a;">R$ ${fmtMoney(summary.totalOverdue)}</strong>
-        </td>
-        <td style="padding: 10px 4px;">${renderCell(summary.bracket30, pct30, '#10b981')}</td>
-        <td style="padding: 10px 4px;">${renderCell(summary.bracket60, pct60, '#f59e0b')}</td>
-        <td style="padding: 10px 4px;">${renderCell(summary.bracket90, pct90, '#f97316')}</td>
-        <td style="padding: 10px 4px;">${renderCell(summary.bracket120, pct120, '#ef4444')}</td>
-        <td style="padding: 10px 4px;">${renderCell(summary.bracketAbove120, pctAbove120, '#b91c1c')}</td>
-      `;
-      subCompSummaryBody.appendChild(tr);
-
-      if (hasCostCenters) {
-        Object.values(summary.costCenters).sort((a, b) => b.totalOverdue - a.totalOverdue).forEach(cc => {
-            const ccRow = document.createElement("tr");
-            ccRow.className = `cost-center-row scc-rows-${summary.id}`;
-            ccRow.style.display = "none";
-            ccRow.style.backgroundColor = '#fafafa';
-            ccRow.innerHTML = `
-              <td style="text-align: center; color: #64748b; font-size: 0.75rem; font-weight: 600;">${cc.id}</td>
-              <td style="text-align: left; padding-left: 36px;">
-                  <div style="font-weight: 600; color: #334155; font-size: 0.8rem; text-transform: uppercase;">${cc.name}</div>
-              </td>
-              <td style="text-align: center; color: #64748b;">
-                  ${cc.billIds.size}
-              </td>
-              <td style="text-align: center;">
-                  <strong style="color: #334155;">R$ ${fmtMoney(cc.totalOverdue)}</strong>
-              </td>
-              <td style="padding: 6px 4px;">${renderPlainCell(cc.bracket30)}</td>
-              <td style="padding: 6px 4px;">${renderPlainCell(cc.bracket60)}</td>
-              <td style="padding: 6px 4px;">${renderPlainCell(cc.bracket90)}</td>
-              <td style="padding: 6px 4px;">${renderPlainCell(cc.bracket120)}</td>
-              <td style="padding: 6px 4px;">${renderPlainCell(cc.bracketAbove120)}</td>
-            `;
-            subCompSummaryBody.appendChild(ccRow);
-        });
-      }
-    });
-
-    if (sumTitles > 0) {
-      const calcPctTotal = (val, total) => total > 0 ? (val / total * 100).toFixed(1) : 0;
-      const totalPct30 = calcPctTotal(sumBracket30, sumTotal);
-      const totalPct60 = calcPctTotal(sumBracket60, sumTotal);
-      const totalPct90 = calcPctTotal(sumBracket90, sumTotal);
-      const totalPct120 = calcPctTotal(sumBracket120, sumTotal);
-      const totalPctAbove120 = calcPctTotal(sumBracketAbove120, sumTotal);
-      const renderTotalCell = (val, pct, color) => {
-        if (val === 0) return `<div style="text-align: center; color: #cbd5e1; font-weight: 500;">-</div>`;
-        return `
-          <div style="text-align: center; display: flex; flex-direction: column; align-items: center;">
-            <div style="font-weight: 700; color: #0f172a; font-size: 0.9rem; margin-bottom: 3px;">${val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-            <div style="display: flex; align-items: center; justify-content: center; gap: 4px;">
-              <div style="width: 8px; height: 8px; border-radius: 50%; background-color: ${color}; opacity: 0.8;"></div>
-              <span style="font-size: 0.75rem; color: #475569; font-weight: 600; text-align: left;">${pct}%</span>
-            </div>
-          </div>
-        `;
-      };
-      const tFoot = document.createElement("tr");
-      tFoot.style.backgroundColor = "#fff7ed";
-      tFoot.innerHTML = `
-        <td style="border-top: 2px solid #f97316;"></td>
-        <td style="text-align: right; border-top: 2px solid #f97316; color: #ea580c; padding-right: 15px;">
-            <div style="display: flex; justify-content: flex-end; align-items: center; gap: 6px; font-weight: 800; font-size: 0.9rem;">
-                TOTAL GERAL
-            </div>
-        </td>
-        <td style="text-align: center; border-top: 2px solid #f97316;">
-          <span style="background-color: #ea580c; padding: 3px 10px; border-radius: 12px; font-weight: 700; font-size: 0.8rem; color: white;">
-            ${sumTitles}
-          </span>
-        </td>
-        <td style="text-align: center; border-top: 2px solid #f97316;">
-            <strong style="font-size: 1rem; color: #c2410c;">R$ ${sumTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
-        </td>
-        <td style="padding: 12px 4px; border-top: 2px solid #f97316;">${renderTotalCell(sumBracket30, totalPct30, '#10b981')}</td>
-        <td style="padding: 12px 4px; border-top: 2px solid #f97316;">${renderTotalCell(sumBracket60, totalPct60, '#f59e0b')}</td>
-        <td style="padding: 12px 4px; border-top: 2px solid #f97316;">${renderTotalCell(sumBracket90, totalPct90, '#f97316')}</td>
-        <td style="padding: 12px 4px; border-top: 2px solid #f97316;">${renderTotalCell(sumBracket120, totalPct120, '#ef4444')}</td>
-        <td style="padding: 12px 4px; border-top: 2px solid #f97316;">${renderTotalCell(sumBracketAbove120, totalPctAbove120, '#b91c1c')}</td>
-      `;
-      subCompSummaryBody.appendChild(tFoot);
-    }
-    if (window.lucide) lucide.createIcons();
-  }
-  // --- FIM SUB JUDICE KPIs ---
-
-  // Renderizar Tabela do Sub Judice
-  const subjudiceBody = document.getElementById("subjudice-table-body");
-  if (subjudiceBody) {
-    subjudiceBody.innerHTML = "";
-    if (filteredSubjudice.length === 0) {
-      subjudiceBody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding:30px; color:var(--color-text-muted);">Nenhum cliente sub judice encontrado.</td></tr>`;
-    } else {
-      const partesSubjudice = [
-        { nome: "Sub Judice", lista: filteredSubjudice.filter(c => c.subjudice === "S") },
-        { nome: "Sub judice no Integra", lista: filteredSubjudice.filter(c => c.subjudice !== "S") }
-      ];
-      partesSubjudice.forEach(parte => {
-        if (!parte.lista.length) return;
-        const headerRow = document.createElement("tr");
-        headerRow.className = "fila-group-header";
-        const integraGrupo = parte.nome.indexOf("Integra") >= 0;
-        const bg = integraGrupo ? "#fdf4ff" : "#f3f4f6";
-        const color = integraGrupo ? "#86198f" : "#334155";
-        const qtd = parte.lista.length === 1 ? "1 título" : parte.lista.length + " títulos";
-        headerRow.innerHTML = `<td colspan="11" style="background:${bg};color:${color};font-weight:700;font-size:0.75rem;letter-spacing:0.04em;text-transform:uppercase;padding:8px 12px;border:none;">${parte.nome}<span style="margin-left:8px;letter-spacing:0;text-transform:none;background:rgba(255,255,255,0.7);border:1px solid rgba(0,0,0,0.08);border-radius:999px;padding:2px 8px;font-size:0.72rem;">${qtd}</span></td>`;
-        subjudiceBody.appendChild(headerRow);
-      parte.lista.forEach(client => {
-        const formattedVal = (client.overdueValue + client.overdueCharges).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        
-        const billIds = client.billIds || [];
-        const rawTitleNumber = String(billIds[0] || "").replace(/^B-/, '').split('-')[0];
-
-        const row = document.createElement("tr");
-        row.className = client.subjudice === "S" ? "table-row-hover" : "table-row-hover subjudice-integra-highlight";
-        row.innerHTML = `
-          <td style="text-align: center; width: 1%; white-space: nowrap;"><span>${client.companyId}</span></td>
-          <td style="${client._searchBuyerHit ? 'max-width: 280px; white-space: normal;' : 'white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis;'}" title="${client._searchBuyerHit ? ('Principal: ' + (client._searchBuyerHit.mainName || client.customerName) + ' | Pesquisado: ' + client._searchBuyerHit.searchedName) : client.customerName}">
-            ${typeof window.filaCustomerNameCellHtml === "function" ? window.filaCustomerNameCellHtml(client) : `<span style="text-transform:uppercase;">${client.customerName}</span>`}
-          </td>
-          <td>
-            <span>
-              ${rawTitleNumber}
-            </span>
-          </td>
-          <td style="white-space: nowrap;">
-            <span>${getPrimaryCostCenter(client.costCenterId)} - ${client.unitName || 'N/D'}</span>
-          </td>
-          <td style="white-space: nowrap; text-align: left; width: 1%;" title="Fase Processual">
-            <span style="font-weight: 500; font-size: 0.75rem; text-transform: uppercase;">${(() => {
-                if (client.subjudice !== "S") return "Sub judice no Integra";
-                const info = typeof window.getClientJudicialPhaseInfo === 'function' ? window.getClientJudicialPhaseInfo(client) : null;
-                return (info && info.faseLabel) ? info.faseLabel : "Sem Fase";
-            })()}</span>
-          </td>
-          <td style="white-space: nowrap; text-align: center; width: 1%;" title="Data da Fase">
-            ${(() => {
-                const cid = String(client.customerId);
-                const customerNotes = (AppState.judNotes && AppState.judNotes[cid]) ? AppState.judNotes[cid] : [];
-                const validJudNotes = customerNotes.filter(n => n.type === "Judicial" && n.fase !== "Nota Interna" && n.status !== "Cancelada");
-                if (validJudNotes.length > 0) {
-                    validJudNotes.sort((a,b) => new Date(b.date) - new Date(a.date));
-                    const lastNote = validJudNotes[0];
-                    if (lastNote.prazo) {
-                        const prazoParts = lastNote.prazo.split('-');
-                        const prazoFormatted = prazoParts.length === 3 ? `${prazoParts[2]}/${prazoParts[1]}/${prazoParts[0]}` : lastNote.prazo;
-                        
-                        let style = 'font-weight: 600; font-size: 0.75rem; padding: 2px 6px; border-radius: 4px;';
-                        if (prazoParts.length === 3) {
-                            const pDate = new Date(parseInt(prazoParts[0]), parseInt(prazoParts[1])-1, parseInt(prazoParts[2]));
-                            const today = new Date();
-                            today.setHours(0,0,0,0);
-                            const diff = (pDate - today) / (1000 * 60 * 60 * 24);
-                            if (diff < 0) {
-                                style += ' color: #7f1d1d; background: #fef2f2; border: 1px solid #fecaca;';
-                            } else if (diff <= 7) {
-                                style += ' color: #854d0e; background: #fefce8; border: 1px solid #fef08a;';
-                            }
-                        }
-                        
-                        return `<span style="${style}">${prazoFormatted}</span>`;
-                    }
-                }
-                return '<span style="color: var(--color-text-muted); font-size: 0.8rem;">-</span>';
-            })()}
-          </td>
-          <td style="white-space: nowrap; text-align: center; width: 1%;">
-            ${getDelayBadgeHtml(client.maxDaysDelay)}
-          </td>
-          <td style="white-space: nowrap; text-align: center; width: 1%;">
-            <span>${client.billCount}</span>
-          </td>
-          <td>
-            <span>${formattedVal}</span>
-          </td>
-          ${(() => {
-              const judNotesList = AppState.judNotes && AppState.judNotes[client.customerId] ? AppState.judNotes[client.customerId] : [];
-              let latestNote = null;
-              let latestIndex = -1;
-              judNotesList.forEach((n, idx) => {
-                  if (!latestNote || new Date(n.date) > new Date(latestNote.date)) {
-                      latestNote = n;
-                      latestIndex = idx;
-                  }
-              });
-              if (latestNote) {
-                  const dateStr = new Date(latestNote.date).toLocaleDateString('pt-BR');
-                  return `<td style="white-space: nowrap; text-align: center; font-size: 0.75rem;" 
-                            onmouseenter="if(window.showJudTooltip) window.showJudTooltip(event, ${client.customerId}, ${latestIndex})" 
-                            onmouseleave="if(window.hideJudTooltip) window.hideJudTooltip()">
-                            <span style="border-bottom: 1px dashed var(--color-primary); cursor: help;">${dateStr}</span>
-                          </td>`;
-              }
-              return `<td style="text-align: center; color: var(--color-text-muted); font-size: 0.75rem;">-</td>`;
-          })()}
-          <td style="white-space: nowrap; text-align: center;">
-            <button class="btn btn-secondary btn-sm" data-customer-id="${client.customerId}" data-title="${rawTitleNumber}" data-name="${(client.customerName || '').replace(/"/g, '&quot;')}" data-unit="${(client.unitName || '').replace(/"/g, '&quot;')}" data-cc="${String(typeof getPrimaryCostCenter === 'function' ? getPrimaryCostCenter(client.costCenterId) : (client.costCenterId || '')).replace(/"/g, '&quot;')}" onclick="visualizarExtratoDireto(this)" style="margin-right: 4px; padding: 2px 6px; font-size: 0.7rem; line-height: 1.2;">
-              <i data-lucide="file-text" style="width: 14px; height: 14px; margin-right: 2px; vertical-align: middle;"></i> Extrato
-            </button>
-            <button class="btn btn-primary btn-sm" onclick="viewCustomerCard(${client.customerId}, ${client.saleId})" style="padding: 2px 6px; font-size: 0.7rem; line-height: 1.2;">
-              <i data-lucide="eye" style="width: 14px; height: 14px; margin-right: 2px; vertical-align: middle;"></i> Detalhes
-            </button>
-          </td>
-        `;
-        subjudiceBody.appendChild(row);
-      });
-      });
-    }
-  }
-
   AppState.dashboardRendered = true;
   if (window.lucide) {
     ["tab-dashboard", "tab-subjudice", "tab-zeropaid"].forEach((id) => {
@@ -11664,6 +11686,13 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
+  window.crmCarteiraPrecisaPintar = function() {
+    return ["tab-dashboard", "tab-subjudice", "tab-zeropaid"].some((id) => {
+      const el = document.getElementById(id);
+      return !!(el && el.style.display !== "none");
+    });
+  };
+
   // === BACKGROUND FETCH PARA FILA DE COBRANÇA ===
   setTimeout(async () => {
     if (window._isDefaultersLoading || AppState.defaultersLoaded) return;
@@ -11682,7 +11711,7 @@ document.addEventListener("DOMContentLoaded", () => {
          const bills = await SiengeApiService.getDefaulters(null, null, force);
          AppState.defaultersBills = bills;
          AppState.defaultersLoaded = true;
-         if (document.getElementById('tab-dashboard') && document.getElementById('tab-dashboard').style.display !== 'none') {
+         if (window.crmCarteiraPrecisaPintar && window.crmCarteiraPrecisaPintar()) {
             loadDashboardData();
          }
        } catch (e) {
@@ -11698,7 +11727,7 @@ document.addEventListener("DOMContentLoaded", () => {
          const bills = await SiengeApiService.getDefaulters();
          AppState.defaultersBills = bills;
          AppState.defaultersLoaded = true;
-         if (document.getElementById('tab-dashboard') && document.getElementById('tab-dashboard').style.display !== 'none') {
+         if (window.crmCarteiraPrecisaPintar && window.crmCarteiraPrecisaPintar()) {
             loadDashboardData();
          }
        } catch (e) {

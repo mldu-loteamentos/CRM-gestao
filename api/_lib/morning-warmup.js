@@ -197,7 +197,9 @@ function collectIncomePaidEntries(rows, today) {
 }
 
 function normalizeBill(bill, underJudgmentIds) {
-  const installments = bill.defaulterInstallments || [];
+  const installments = []
+    .concat(bill.defaulterInstallments || [])
+    .concat(bill.underJudgmentInstallments || []);
   const mapped = {
     id: bill.receivableBillId || String(bill.id),
     saleId: bill.receivableBillId ? Number(bill.receivableBillId) : (bill.saleId || 100),
@@ -227,7 +229,7 @@ function normalizeBill(bill, underJudgmentIds) {
   return mapped;
 }
 
-const DEFAULTERS_CACHE_REV = 3;
+const DEFAULTERS_CACHE_REV = 4;
 
 function documentoExtratoEhCt(row) {
   const tipo = String((row && (row.documentIdentificationId || row.documentId || row.documentsId)) || "").trim().toUpperCase();
@@ -1078,8 +1080,15 @@ module.exports = async function handler(req, res) {
           log.push(`defaulters emp ${cId} lote ${state.batchIndex}: ${e.message}`);
         }
         const under = new Set(rawJudge.map((b) => String(b.receivableBillId || b.id)));
+        const idsNaCarteira = new Set(rawAll.map((b) => String(b.receivableBillId || b.id || "")));
+        rawJudge.forEach((b) => {
+          const id = String(b.receivableBillId || b.id || "");
+          if (!id || idsNaCarteira.has(id)) return;
+          idsNaCarteira.add(id);
+          rawAll.push(b);
+        });
         rawAll = mesclarTitulosInadimplentes(rawAll);
-        const normalized = rawAll.map((b) => normalizeBill(b, under)).filter((b) => b.daysDelay > 0 && (b.value || 0) > 0.009);
+        const normalized = rawAll.map((b) => normalizeBill(b, under)).filter((b) => b.subjudice === "S" || (b.daysDelay > 0 && (b.value || 0) > 0.009));
         let foraDaCobranca = 0;
         for (const cc of batch) {
           try {
@@ -1089,7 +1098,7 @@ module.exports = async function handler(req, res) {
             log.push(`extrato ${cc}: ${e.message}`);
           }
         }
-        const prontos = normalized.filter((b) => b.daysDelay > 0 && (b.value || 0) > 0.009);
+        const prontos = normalized.filter((b) => b.subjudice === "S" || (b.daysDelay > 0 && (b.value || 0) > 0.009));
         log.push(`emp ${cId} lote ${state.batchIndex + 1}: ${foraDaCobranca} parcela(s) sem cobrança`);
         const chunkId = `${today}_warmup_${cId}_${state.batchIndex}`;
         await setDoc(doc(db, "sienge_defaulters_history", chunkId), {

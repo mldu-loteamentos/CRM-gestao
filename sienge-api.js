@@ -192,7 +192,7 @@ function mesclarTitulosInadimplentes(bills) {
  * recebimento recente e só resta uma parcela em aberto. A revisão 2 já trazia
  * as parcelas de tipo que não gera cobrança.
  */
-const DEFAULTERS_CACHE_REV = 3;
+const DEFAULTERS_CACHE_REV = 4;
 
 function documentoExtratoEhCt(row) {
   const tipo = String((row && (row.documentIdentificationId || row.documentId || row.documentsId)) || "").trim().toUpperCase();
@@ -2666,10 +2666,19 @@ const SiengeApiService = {
 
       try {
         const underJudgmentIds = new Set(rawUnderJudgment.map(b => String(b.receivableBillId || b.id)));
+        const idsNaCarteira = new Set(rawArray.map(b => String(b.receivableBillId || b.id || "")));
+        rawUnderJudgment.forEach(b => {
+          const id = String(b.receivableBillId || b.id || "");
+          if (!id || idsNaCarteira.has(id)) return;
+          idsNaCarteira.add(id);
+          rawArray.push(b);
+        });
         rawArray = mesclarTitulosInadimplentes(rawArray);
 
         const normalizedArray = rawArray.map(bill => {
-          const installments = bill.defaulterInstallments || [];
+          const installments = []
+            .concat(bill.defaulterInstallments || [])
+            .concat(bill.underJudgmentInstallments || []);
           const mapped = {
             id:          bill.receivableBillId || String(bill.id),
             saleId:      bill.receivableBillId ? Number(bill.receivableBillId) : (bill.saleId || 100),
@@ -2724,7 +2733,7 @@ const SiengeApiService = {
         }
         console.log(`[Sienge] Empresa ${cId}: ${foraDaCobranca} parcela(s) de tipo que não gera cobrança incluída(s) no vencido.`);
         console.log(`[Sienge] Retornou ${normalizedArray.length} títulos inadimplentes da empresa ${cId}`);
-        allNormalized.push(...normalizedArray.filter(b => b.daysDelay > 0 && (b.value || 0) > 0.009));
+        allNormalized.push(...normalizedArray.filter(b => b.subjudice === "S" || (b.daysDelay > 0 && (b.value || 0) > 0.009)));
 
       } catch (err) {
         console.error(`[Sienge] Erro na API Bulk Data da empresa ${cId}:`, err);
