@@ -2116,7 +2116,7 @@ const ResultadoCaixaApp = {
   },
 
   blocoNums(b, saida) {
-    const ant = this.dfcLendo ? "…" : this.fmt(b.ant);
+    const ant = this.fmt(b.ant);
     return `<td class="rcx-num rcx-sep rcx-ant">${ant}</td><td class="rcx-num">${this.fmt(b.orc)}</td><td class="rcx-num rcx-real">${this.fmt(b.real)}</td>${this.celVar(b.real, b.orc, saida)}`;
   },
 
@@ -2191,7 +2191,7 @@ const ResultadoCaixaApp = {
     const chipForecast = this.chipsForecast();
     const agrupa = this.agrupar ? " Com “% Moura Leite”, cada valor está no percentual da Moura Leite cadastrado na empresa." : "";
     const mesNomeFaixa = nomesMes[(Number(this.mes) || 1) - 1] || "";
-    const base = "Orçado e realizado de " + (atual || "—") + " vêm do arquivo enviado para " + mesNomeFaixa + ". A coluna do ano anterior é o caixa do Sienge na visão DFC, com o percentual da Moura Leite, como no Power BI.";
+    const base = "Orçado e realizado de " + (atual || "—") + " vêm do arquivo enviado para " + mesNomeFaixa + ". A coluna de " + (antN || "o ano anterior") + " é o realizado desse arquivo, de janeiro até o mês escolhido, no mesmo percentual da Moura Leite.";
     const nota = lado === "entradas"
       ? base + " Livia, Livia I e Livia II aparecem como Central Parque. Empreendimentos com o mesmo nome ganham a sigla da cidade. MLDU aparece como Corporativo. Os quatro maiores desvios positivos e os quatro negativos do acumulado ficam à vista; o restante abre ao clicar em Outros."
         + " No gráfico de linhas, a linha do ano atual é o realizado até o mês escolhido. Cada mês seguinte, até dezembro, usa o forecast enviado nesta tela, pelas mesmas contas da visão DFC (Receitas e receitas financeiras)." + agrupa
@@ -2274,7 +2274,7 @@ const ResultadoCaixaApp = {
     const nomes = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
     const mesNome = nomes[(Number(this.mes) || 1) - 1] || "";
     const barras = [
-      { cls: "is-ant", rotulo: antN ? String(antN) : "Ano ant.", valor: total.ant, espera: this.dfcLendo },
+      { cls: "is-ant", rotulo: antN ? String(antN) : "Ano ant.", valor: total.ant, espera: false },
       { cls: "is-orc", rotulo: "Orçado", valor: total.orc },
       { cls: "is-real", rotulo: atual ? String(atual) : "Atual", valor: total.real }
     ];
@@ -2401,8 +2401,6 @@ const ResultadoCaixaApp = {
     const sel = Number(this.mes) || 1;
     const defs = this.contasSaida();
     const soma = (y, m, campo) => defs.reduce((s, def) => s + this.somaSaidaDef(y, def, m, campo, false), 0);
-    const caixaAnt = this.dfcTem("saidas");
-    const somaDfc = (m) => defs.reduce((s, def) => s + this.valorDfc(def, m, false), 0);
     const fc = this.forecastLado(ano, "saidas");
     const meses = Array.from({ length: 12 }, (_, i) => i + 1);
     const real = meses.map((m) => (m <= sel && this.temMesConta(ano, m) ? soma(ano, m, "r") : null));
@@ -2417,7 +2415,7 @@ const ResultadoCaixaApp = {
       return orc[i];
     });
     return {
-      ant: meses.map((m) => (caixaAnt ? somaDfc(m) : (this.temMesConta(ant, m) ? soma(ant, m, "r") : null))),
+      ant: meses.map((m) => (this.temMesConta(ant, m) ? soma(ant, m, "r") : null)),
       orc,
       real,
       forecast,
@@ -2615,7 +2613,6 @@ const ResultadoCaixaApp = {
     const ano = this.anoAtual();
     const ant = ano - 1;
     const mes = Number(this.mes) || 1;
-    const caixaAnt = this.dfcTem("saidas");
     const rows = this.contasSaida().map((def) => {
       const valor = (y, campo, ate) => this.somaSaidaDef(y, def, mes, campo, ate);
       return {
@@ -2623,16 +2620,8 @@ const ResultadoCaixaApp = {
         nome: def.nome,
         destaque: !!def.destaque,
         def: def,
-        mensal: {
-          ant: caixaAnt ? this.valorDfc(def, mes, false) : valor(ant, "r", false),
-          orc: valor(ano, "o", false),
-          real: valor(ano, "r", false)
-        },
-        acum: {
-          ant: caixaAnt ? this.valorDfc(def, mes, true) : valor(ant, "r", true),
-          orc: valor(ano, "o", true),
-          real: valor(ano, "r", true)
-        }
+        mensal: { ant: valor(ant, "r", false), orc: valor(ano, "o", false), real: valor(ano, "r", false) },
+        acum: { ant: valor(ant, "r", true), orc: valor(ano, "o", true), real: valor(ano, "r", true) }
       };
     });
     return { ano, ant, rows };
@@ -2677,7 +2666,6 @@ const ResultadoCaixaApp = {
   },
 
   saidasHtml() {
-    this.garantirDfc("saidas");
     const ano = this.anoAtual();
     if (this.semContas(ano)) {
       return `<p class="rcx-vazio">O arquivo que já estava salvo não guarda as contas. Suba de novo os Excel — pode escolher vários de uma vez — para montar Obras, Repasses, Pessoal e as demais.</p>`;
