@@ -97,8 +97,14 @@ window.FilaNotasFiscais = {
     return `<span class="cprev-fiscal-acoes">${tag}<button type="button" class="cprev-fiscal-btn" onclick="event.stopPropagation(); FilaNotasFiscais.abrirEnvio('${esc(ped)}','${esc(id)}')">${rot}</button></span>`;
   },
 
-  /** Abre Enviar nota com o pedido. Se a nota foi devolvida, abre a correção desse envio. */
+  /** Abre Enviar nota com o pedido. Fora do módulo Fiscal, o botão só avisa: Budget e Compras ainda não enviam. */
   abrirEnvio(pedido, idEnvio) {
+    const tab = String(window.activeAppTab || "");
+    const noFiscal = tab === "construcao-fiscal" || tab === "fiscal-enviar-nota" || tab === "fiscal-inserir-nota" || tab === "fiscal-rastrear-pedido";
+    if (!noFiscal) {
+      alert("Esta função está disponível em breve.");
+      return;
+    }
     const ped = String(pedido || "").trim();
     if (!ped) return;
     const seguir = () => {

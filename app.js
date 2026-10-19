@@ -3521,6 +3521,23 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     else if (window.EngenhariaCaucaoApp && typeof EngenhariaCaucaoApp.init === "function") {
       EngenhariaCaucaoApp.init();
     }
+  } else if (tabId === "vistoria") {
+    try {
+      if (window.VerificarConstrucaoApp && typeof window.VerificarConstrucaoApp.init === "function") {
+        window.VerificarConstrucaoApp.init();
+      } else {
+        const vcRoot = document.getElementById("verificar-construcao-root");
+        if (vcRoot) {
+          vcRoot.innerHTML = '<div class="crm-card" style="padding:24px;color:#b91c1c;">A Vistoria não carregou. Atualize a página com Ctrl+F5.</div>';
+        }
+      }
+    } catch (err) {
+      console.error("[Vistoria]", err);
+      const vcRoot = document.getElementById("verificar-construcao-root");
+      if (vcRoot) {
+        vcRoot.innerHTML = '<div class="crm-card" style="padding:24px;color:#b91c1c;">Erro ao abrir a Vistoria: ' + (err && err.message ? err.message : err) + '</div>';
+      }
+    }
   } else if (tabId === "contas-pagar") {
     try {
       if (typeof ContasPagarApp !== "undefined") {
@@ -7298,14 +7315,15 @@ window.FILA_QUEUE_GROUPS = {
   ZERO_PAGO: 1,
   ENTRADA_WEBRO: 2,
   SUBJUDICE: 3,
-  ACORDO_JURIDICO: 4,
-  EXECUTAR_ACORDO_QUEBRADO: 5,
-  RECENTE_JURIDICO: 6,
-  ANALISE_INTERNA_JURIDICO: 7,
-  ENVIAR_JURIDICO: 8,
-  SEM_CATEGORIA_SEM_PAGTO: 9,
-  SEM_CATEGORIA_COM_PAGTO: 10,
-  SEM_CATEGORIA: 9,
+  SUBJUDICE_INTEGRA: 4,
+  ACORDO_JURIDICO: 5,
+  EXECUTAR_ACORDO_QUEBRADO: 6,
+  RECENTE_JURIDICO: 7,
+  ANALISE_INTERNA_JURIDICO: 8,
+  ENVIAR_JURIDICO: 9,
+  SEM_CATEGORIA_SEM_PAGTO: 10,
+  SEM_CATEGORIA_COM_PAGTO: 11,
+  SEM_CATEGORIA: 10,
   NEX_CUMPRIDA: -1
 };
 
@@ -7393,11 +7411,14 @@ window.clientIsAnaliseInternaJuridico = function(client, thresholdJuridico) {
 window.getFilaQueueGroup = function(client, thresholdJuridico) {
   const cutoff = Number.isFinite(Number(thresholdJuridico)) ? Number(thresholdJuridico) : 151;
   const G = window.FILA_QUEUE_GROUPS;
-  if (typeof window.clientHasNexCumprida === "function" && window.clientHasNexCumprida(client)) {
-    return G.NEX_CUMPRIDA;
-  }
   if (typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(client) : (client && (client.subjudice === "S" || client.subjudice === true))) {
     return G.SUBJUDICE;
+  }
+  if (typeof window.clientIsSubjudiceIntegra === "function" && window.clientIsSubjudiceIntegra(client)) {
+    return G.SUBJUDICE_INTEGRA;
+  }
+  if (typeof window.clientHasNexCumprida === "function" && window.clientHasNexCumprida(client)) {
+    return G.NEX_CUMPRIDA;
   }
   // Acordo judicial quebrado: até 30 dias no grupo próprio; 31 ou mais vai para Enviar para Jurídico
   if (typeof window.clientIsAcordoJudicialQuebrado === "function" && window.clientIsAcordoJudicialQuebrado(client)) {
@@ -7436,6 +7457,7 @@ window.getFilaQueueGroupMeta = function(group) {
     [G.ZERO_PAGO]: { label: '0% Pago', bg: '#fee2e2', color: '#991b1b' },
     [G.ENTRADA_WEBRO]: { label: 'Pagamento de entrada Webro', bg: '#fff7ed', color: '#c2410c' },
     [G.SUBJUDICE]: { label: 'Sub Judice', bg: '#e2e8f0', color: '#334155' },
+    [G.SUBJUDICE_INTEGRA]: { label: 'Sub judice no Integra', bg: '#fdf4ff', color: '#86198f' },
     [G.ACORDO_JURIDICO]: { label: 'Acordo Judicial Quebrado', bg: '#fef3c7', color: '#92400e' },
     [G.EXECUTAR_ACORDO_QUEBRADO]: { label: 'Executar Acordo Quebrado', bg: '#ffe4e6', color: '#9f1239' },
     [G.RECENTE_JURIDICO]: { label: 'Recente Jurídico', bg: '#e0e7ff', color: '#3730a3' },
@@ -9753,6 +9775,9 @@ window.applyAdvFiltersTo = (sourceList) => {
 };
 
 async function _loadDashboardData_Impl(forceRefresh = false) {
+  if (typeof window.loadSubjudiceIntegra === "function") {
+    try { await window.loadSubjudiceIntegra(); } catch (e) {}
+  }
   window._dashboardForceRefresh = forceRefresh;
   const searchInput = document.getElementById("dashboard-search-input");
   const searchValue = searchInput ? searchInput.value.trim() : "";
@@ -10393,7 +10418,9 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
   });
   window._lotesCounter = {}; // Clear memory
   
-  const subjudiceList = rawList.filter(c => c.subjudice === "S");
+  const subjudiceList = rawList.filter(c => c.subjudice === "S").concat(
+    rawList.filter(c => typeof window.clientIsSubjudiceIntegra === "function" && window.clientIsSubjudiceIntegra(c))
+  );
   window.rawClientList = rawList;
   if (window.VerificarConstrucaoApp && typeof window.VerificarConstrucaoApp.onPortfolioReady === "function") {
     try { window.VerificarConstrucaoApp.onPortfolioReady(); } catch (e) {}
@@ -10882,6 +10909,8 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
         let rowClass = zeroPaidHighlightClass;
         if (typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(client) : client.subjudice === "S") {
             rowClass += " subjudice-highlight";
+        } else if (typeof window.clientIsSubjudiceIntegra === "function" && window.clientIsSubjudiceIntegra(client)) {
+            rowClass += " subjudice-integra-highlight";
         } else if (client.maxDaysDelay >= thresholdJuridico) {
             rowClass += " juridico-highlight";
         }
@@ -10914,6 +10943,10 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
                   : (typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(client) : client.subjudice === "S") ? `
               <span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #9ca3af; background-color: #f3f4f6; color: #374151; font-weight: 600;">
                 <i data-lucide="scale" style="width: 14px; height: 14px;"></i> Sub judice - ${client.maxDaysDelay} dia${client.maxDaysDelay === 1 ? '' : 's'}
+              </span>
+              ` : (typeof window.clientIsSubjudiceIntegra === "function" && window.clientIsSubjudiceIntegra(client)) ? `
+              <span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #e9d5ff; background-color: #fdf4ff; color: #86198f; font-weight: 600;" title="Sub judice marcado no Integra. No Sienge este título não está sub judice.">
+                <i data-lucide="scale" style="width: 14px; height: 14px;"></i> Sub judice no Integra - ${client.maxDaysDelay} dia${client.maxDaysDelay === 1 ? '' : 's'}
               </span>
               ` : (() => {
                   if (typeof window.clientIsAcordoJudicialQuebrado === "function" && window.clientIsAcordoJudicialQuebrado(client)) {
@@ -11281,14 +11314,28 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
     if (filteredSubjudice.length === 0) {
       subjudiceBody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding:30px; color:var(--color-text-muted);">Nenhum cliente sub judice encontrado.</td></tr>`;
     } else {
-      filteredSubjudice.forEach(client => {
+      const partesSubjudice = [
+        { nome: "Sub Judice", lista: filteredSubjudice.filter(c => c.subjudice === "S") },
+        { nome: "Sub judice no Integra", lista: filteredSubjudice.filter(c => c.subjudice !== "S") }
+      ];
+      partesSubjudice.forEach(parte => {
+        if (!parte.lista.length) return;
+        const headerRow = document.createElement("tr");
+        headerRow.className = "fila-group-header";
+        const integraGrupo = parte.nome.indexOf("Integra") >= 0;
+        const bg = integraGrupo ? "#fdf4ff" : "#f3f4f6";
+        const color = integraGrupo ? "#86198f" : "#334155";
+        const qtd = parte.lista.length === 1 ? "1 título" : parte.lista.length + " títulos";
+        headerRow.innerHTML = `<td colspan="11" style="background:${bg};color:${color};font-weight:700;font-size:0.75rem;letter-spacing:0.04em;text-transform:uppercase;padding:8px 12px;border:none;">${parte.nome}<span style="margin-left:8px;letter-spacing:0;text-transform:none;background:rgba(255,255,255,0.7);border:1px solid rgba(0,0,0,0.08);border-radius:999px;padding:2px 8px;font-size:0.72rem;">${qtd}</span></td>`;
+        subjudiceBody.appendChild(headerRow);
+      parte.lista.forEach(client => {
         const formattedVal = (client.overdueValue + client.overdueCharges).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         
         const billIds = client.billIds || [];
         const rawTitleNumber = String(billIds[0] || "").replace(/^B-/, '').split('-')[0];
 
         const row = document.createElement("tr");
-        row.className = "table-row-hover";
+        row.className = client.subjudice === "S" ? "table-row-hover" : "table-row-hover subjudice-integra-highlight";
         row.innerHTML = `
           <td style="text-align: center; width: 1%; white-space: nowrap;"><span>${client.companyId}</span></td>
           <td style="${client._searchBuyerHit ? 'max-width: 280px; white-space: normal;' : 'white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis;'}" title="${client._searchBuyerHit ? ('Principal: ' + (client._searchBuyerHit.mainName || client.customerName) + ' | Pesquisado: ' + client._searchBuyerHit.searchedName) : client.customerName}">
@@ -11304,6 +11351,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
           </td>
           <td style="white-space: nowrap; text-align: left; width: 1%;" title="Fase Processual">
             <span style="font-weight: 500; font-size: 0.75rem; text-transform: uppercase;">${(() => {
+                if (client.subjudice !== "S") return "Sub judice no Integra";
                 const info = typeof window.getClientJudicialPhaseInfo === 'function' ? window.getClientJudicialPhaseInfo(client) : null;
                 return (info && info.faseLabel) ? info.faseLabel : "Sem Fase";
             })()}</span>
@@ -11378,6 +11426,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
           </td>
         `;
         subjudiceBody.appendChild(row);
+      });
       });
     }
   }
@@ -11983,6 +12032,7 @@ function hasPassedJuridicoHistory(customerId) {
 
 /** Permite registrar andamento na aba Cobrança judicial somente com sub judice ativo. */
 function canInsertJudicialOccurrence(customerId, saleId, saleObj) {
+  if (typeof window.fichaSubjudiceIntegraAtivo === "function" && window.fichaSubjudiceIntegraAtivo()) return true;
   if (typeof AppState !== "undefined" && AppState.isSubjudiceMode) return true;
   return isCurrentlySubjudice(
     customerId != null ? customerId : (typeof AppState !== "undefined" ? AppState.selectedCustomerId : null),
@@ -12035,13 +12085,40 @@ function syncCobrancaJudicialTabs(originIsSubjudice, isAdvogado, saleObj) {
     saleObj
   );
   const passedJuridico = hasPassedJuridicoHistory(AppState.selectedCustomerId);
-  const show = !!(originIsSubjudice || isAdvogado || clientSub || passedJuridico);
+  const integra = typeof window.fichaSubjudiceIntegraAtivo === "function" && window.fichaSubjudiceIntegraAtivo();
+  const show = !!(originIsSubjudice || isAdvogado || clientSub || passedJuridico || integra);
   const cobrancaJudicialBtn = document.getElementById("btn-tab-cobranca-judicial");
   if (cobrancaJudicialBtn) cobrancaJudicialBtn.style.display = show ? "" : "none";
   const anexosJuridicoBtn = document.getElementById("btn-anexos-juridico");
   if (anexosJuridicoBtn) anexosJuridicoBtn.style.display = show ? "" : "none";
   syncJudicialOccurrenceFormLock(saleObj);
 }
+
+window.avisarClienteSubjudice = function(customerId) {
+  const antigo = document.getElementById("subjudice-ciente-modal");
+  if (antigo) antigo.remove();
+  const lista = window._subjudiceList || [];
+  const cliente = lista.find((c) => c && String(c.customerId) === String(customerId));
+  const nome = cliente && cliente.customerName ? String(cliente.customerName).trim() : "";
+  const esc = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  const modal = document.createElement("div");
+  modal.id = "subjudice-ciente-modal";
+  modal.setAttribute("role", "alertdialog");
+  modal.style.cssText = "position:fixed;inset:0;z-index:100000;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;padding:24px;";
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:12px;max-width:460px;width:100%;padding:20px;box-shadow:0 16px 40px rgba(15,23,42,.2);">
+      <h3 style="margin:0 0 10px;color:#991b1b;font-size:1.15rem;">Cliente sub judice</h3>
+      <p style="margin:0 0 8px;color:#1e293b;font-weight:700;">${nome ? esc(nome) : "Este cliente"} está sub judice.</p>
+      <p style="margin:0 0 18px;color:#475569;line-height:1.45;">O Integra não gera boleto deste contrato. Mesmo com pagamento integral, a emissão fica com o advogado da Moura Leite.</p>
+      <div style="display:flex;justify-content:flex-end;">
+        <button type="button" class="btn btn-fechar" onclick="document.getElementById('subjudice-ciente-modal').remove()">Fechar</button>
+      </div>
+    </div>`;
+  modal.addEventListener("click", (ev) => {
+    if (ev.target === modal) modal.remove();
+  });
+  document.body.appendChild(modal);
+};
 
 function hideGlobalFichaLoader() {
   if (window.globalFichaLoaderTimeout) {
@@ -12120,8 +12197,16 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   }
   switchFichaTab('ficha-cadastro');
   // Conditionally hide tabs if coming from Sub Judice or based on Role
+  if (typeof window.loadSubjudiceIntegra === "function") {
+    try { await window.loadSubjudiceIntegra(); } catch (e) {}
+  }
+  if (typeof window.updateSubjudiceIntegraButtonState === "function") {
+    window.updateSubjudiceIntegraButtonState();
+  }
   const currentOriginTab = window.activeAppTab || sessionStorage.getItem('currentTab');
-  const isSubjudice = currentOriginTab === 'subjudice';
+  const origemSub = currentOriginTab === 'subjudice';
+  const integraAtivo = typeof window.fichaSubjudiceIntegraAtivo === "function" && window.fichaSubjudiceIntegraAtivo();
+  const isSubjudice = origemSub && !integraAtivo;
   const acessoFicha = (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo()) || AppState.currentUser;
   const opType = acessoFicha
     ? ((typeof window.crmOperatorType === "function" && window.crmOperatorType(acessoFicha)) || acessoFicha.operator_type || "")
@@ -12212,6 +12297,7 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
       avisoSub.textContent = "";
     }
   }
+  if (isSubjudice) window.avisarClienteSubjudice(customerId);
   if (isSubjudice) {
     switchCustomerTab('tab-cobranca-judicial');
     if (typeof renderJudicialTimeline === 'function') {
@@ -22904,11 +22990,31 @@ window.centerDistratoSignatures = function(html) {
     }
     i++;
   }
-  const partyHtml = parties.map((p, idx) => `
-    <div style="margin: ${idx === 0 ? 22 : 40}px auto 0; max-width: 420px; text-align: center;">
+  const blocoAssinatura = (p) => `
       <div style="border-top: 1px solid #111; padding-top: 10px; font-weight: 700;">${p.name}</div>
-      <div style="font-size: 10.5pt; font-weight: 400; margin-top: 4px;">${p.role}</div>
+      <div style="font-size: 10.5pt; font-weight: 400; margin-top: 4px;">${p.role}</div>`;
+  const gruposAss = [];
+  parties.forEach((p) => {
+    const vendedor = /vendedor/i.test(p.role);
+    const ultimo = gruposAss[gruposAss.length - 1];
+    if (vendedor && ultimo && ultimo.vendedor) ultimo.itens.push(p);
+    else gruposAss.push({ vendedor: vendedor, itens: [p] });
+  });
+  const partyHtml = gruposAss.map((g, idx) => {
+    const topo = idx === 0 ? 22 : 40;
+    if (g.vendedor && g.itens.length > 1) {
+      const largura = (100 / g.itens.length).toFixed(2);
+      const celulas = g.itens.map((p) => `
+        <td style="width: ${largura}%; text-align: center; vertical-align: top; padding: 0 16px;">
+          ${blocoAssinatura(p)}
+        </td>`).join("");
+      return `<table style="width: 100%; margin: ${topo}px auto 0; border-collapse: collapse; white-space: normal;"><tr>${celulas}</tr></table>`;
+    }
+    return g.itens.map((p, i) => `
+    <div style="margin: ${i === 0 ? topo : 40}px auto 0; max-width: 420px; text-align: center;">
+      ${blocoAssinatura(p)}
     </div>`).join("");
+  }).join("");
   const witnessesHtml = (hasWitnessTitle || w1Name || w2Name) ? `
     <div style="margin-top: 28px; text-align: center; font-weight: 700;">Testemunhas</div>
     <table style="width: 100%; max-width: 680px; margin: 14px auto 0; border-collapse: collapse; white-space: normal;">
@@ -25668,7 +25774,8 @@ window.collectAgendaDueItems = function(dateStr, opts) {
           occIndex: index,
           agendaAlert: occ.agendaAlert,
           isResolved: handledLater,
-          isFila: false
+          isFila: false,
+          occId: occ.id || ""
         };
         const bucket = buckets.get(due);
         if (bucket) bucket.push(row);
@@ -25702,6 +25809,61 @@ window.getActiveQueueDate = function() {
 
 // v5: capacidade linear ou agenda dinâmica (carteira ÷ dias úteis da semana)
 window.CRM_DAILY_QUEUE_CACHE_KEY = "crm_daily_queue_cache_v5";
+window.CRM_AGENDA_OVERFLOW_KEY = "crm_agenda_overflow_v1";
+
+window.agendaOverflowKey = function(item) {
+  if (!item) return "";
+  if (item.occId) return "id:" + String(item.occId);
+  return [item.customerId, item.saleId, item.promiseDate || "", item.occIndex].join("|");
+};
+
+window.lerAgendaOverflow = function() {
+  try {
+    const data = JSON.parse(localStorage.getItem(window.CRM_AGENDA_OVERFLOW_KEY) || "{}");
+    return data && typeof data === "object" ? data : {};
+  } catch (e) {
+    return {};
+  }
+};
+
+window.gravarAgendaOverflow = function(data) {
+  try { localStorage.setItem(window.CRM_AGENDA_OVERFLOW_KEY, JSON.stringify(data || {})); } catch (e) {}
+};
+
+window.agendaPendente = function(item) {
+  if (!item || item.isResolved) return false;
+  const st = item.promiseStatus || "";
+  return st !== "Cumprido" && st !== "Resolvido" && st !== "Cancelada";
+};
+
+/** Com agendamento no dia: 1/3 da capacidade para clientes novos e 2/3 para a agenda. */
+window.cotasFilaDia = function(capacity, qtdAgenda) {
+  const cap = Math.max(1, Number(capacity) || 1);
+  const qtd = Math.max(0, Number(qtdAgenda) || 0);
+  if (!qtd) return { novos: cap, agenda: 0 };
+  let novos = Math.max(1, Math.round(cap / 3));
+  if (novos >= cap) novos = cap - 1;
+  let agenda = cap - novos;
+  if (qtd < agenda) {
+    novos += agenda - qtd;
+    agenda = qtd;
+  }
+  return { novos: novos, agenda: agenda };
+};
+
+window.reviverAgendamento = function(raw, selectedOperator) {
+  if (!raw) return null;
+  const due = String(raw.promiseDate || raw.due || "").slice(0, 10);
+  let hit = null;
+  if (due && typeof window.collectAgendaDueItems === "function") {
+    const rows = window.collectAgendaDueItems(due, { selectedOperator: selectedOperator, pendingOnly: false });
+    const key = window.agendaOverflowKey(raw);
+    hit = (rows || []).find((r) => window.agendaOverflowKey(r) === key) || null;
+  }
+  const row = hit || raw;
+  if (!window.agendaPendente(row)) return null;
+  return row;
+};
 
 window.getCityAssignmentCacheSig = function() {
   const rules = (window.AppState && AppState.rules) || {};
@@ -25728,7 +25890,8 @@ window.invalidateDailyQueueCache = function(reason) {
   } catch (e) {}
 };
 
-window.generateDailyQueue = async function(selectedOperator, dateStr) {
+window.generateDailyQueue = async function(selectedOperator, dateStr, opts) {
+  opts = opts || {};
   const todayStr = window.localDateStr ? window.localDateStr() : new Date().toISOString().split("T")[0];
   const dateKey = window.promiseDateKey ? window.promiseDateKey(dateStr) : dateStr;
   const opMatch = (a, b) => typeof window.occurrenceAuthorMatchesOperator === 'function'
@@ -25791,6 +25954,10 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
     ? window.resolveOperatorDailyCapacity(selectedOperator, dateKey, opConfig)
     : { capacity: Number(opConfig.capacity) || 25, mode: "linear", meta: null };
   const capacity = Math.max(1, Number(resolvedCap.capacity) || 25);
+  const pedido = Number(opts.maxItems);
+  const limit = (Number.isFinite(pedido) && pedido > 0)
+    ? Math.max(1, Math.min(capacity, Math.floor(pedido)))
+    : capacity;
   const capacityMode = resolvedCap.mode || "linear";
   const r1_pct = (opConfig.r1 || 50) / 100;
   const r2_pct = (opConfig.r2 || 20) / 100;
@@ -25802,7 +25969,7 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
   const paymentDays = opConfig.paymentDays !== undefined ? opConfig.paymentDays : 15;
   const citySig = typeof window.getCityAssignmentCacheSig === "function" ? window.getCityAssignmentCacheSig() : "";
   const configSig = [
-    capacityMode, capacity,
+    capacityMode, capacity, limit,
     opConfig.r1||50, opConfig.r2||20, opConfig.r3||10, opConfig.r4||10, opConfig.r5||10, opConfig.r6||0, opConfig.r7||0,
     paymentDays, citySig,
     resolvedCap.meta ? (resolvedCap.meta.titles + "/" + resolvedCap.meta.businessDays) : ""
@@ -25811,7 +25978,7 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
   const cachedEntry = window._dailyQueueCache[cacheKey];
   const cachedItems = unwrapQueueCache(cachedEntry);
   const cacheFresh = cachedItems.length > 0
-    && cachedItems.length <= capacity
+    && cachedItems.length <= limit
     && cachedItems.every(i => i && i.isFila)
     && (!cachedEntry || Array.isArray(cachedEntry) || !cachedEntry.sig || cachedEntry.sig === configSig);
   if (cacheFresh) {
@@ -26101,7 +26268,7 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
 
   const fillQueue = async (mode) => {
       let poolIndex = 0;
-      while (poolIndex < scoredPool.length && selectedQueue.length < capacity) {
+      while (poolIndex < scoredPool.length && selectedQueue.length < limit) {
           let batch = [];
           while (poolIndex < scoredPool.length && batch.length < 5) {
               const item = scoredPool[poolIndex++];
@@ -26113,7 +26280,7 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
           const validationResults = await Promise.all(batch.map(inspectItem));
           for (const res of validationResults) {
               if (selectedIds.has(res.item.customerId)) continue;
-              if (selectedQueue.length >= capacity) break;
+              if (selectedQueue.length >= limit) break;
               if (acceptItem(res, mode)) {
                   selectedIds.add(res.item.customerId);
                   selectedQueue.push(res.item);
@@ -26128,8 +26295,8 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
   };
 
   await fillQueue({ allowRecent: false, allowBoleto: false });
-  if (selectedQueue.length < capacity) await fillQueue({ allowRecent: true, allowBoleto: false });
-  if (selectedQueue.length < capacity) await fillQueue({ allowRecent: true, allowBoleto: true });
+  if (selectedQueue.length < limit) await fillQueue({ allowRecent: true, allowBoleto: false });
+  if (selectedQueue.length < limit) await fillQueue({ allowRecent: true, allowBoleto: true });
 
   let queueEntryDates = {};
   try {
@@ -26191,9 +26358,9 @@ window.generateDailyQueue = async function(selectedOperator, dateStr) {
       localStorage.setItem('crm_queue_entry_dates', JSON.stringify(queueEntryDates));
   }
   
-  window._dailyQueueCache[cacheKey] = { sig: configSig, items: resultQueue.slice(0, capacity) };
+  window._dailyQueueCache[cacheKey] = { sig: configSig, items: resultQueue.slice(0, limit) };
   localStorage.setItem(cacheStorageKey, JSON.stringify(window._dailyQueueCache));
-  return applyTouchedFilter(resultQueue.slice(0, capacity));
+  return applyTouchedFilter(resultQueue.slice(0, limit));
 };
 
 async function loadAgendaDayTasks(dateStr) {
@@ -26333,13 +26500,63 @@ window.fireConfetti = function() {
         : [];
 
       if (window.generateDailyQueue && dateStr === window.getActiveQueueDate() && selectedOperator !== "Todos") {
-            const queueItems = await window.generateDailyQueue(selectedOperator, dateStr);
+            const dateKeyMix = window.promiseDateKey ? window.promiseDateKey(dateStr) : dateStr;
+            const capInfo = window.resolveOperatorDailyCapacity
+              ? window.resolveOperatorDailyCapacity(selectedOperator, dateKeyMix)
+              : { capacity: 25 };
+            const capacidade = Math.max(1, Number(capInfo.capacity) || 25);
+            const opKey = String(selectedOperator);
+            const memoria = window.lerAgendaOverflow ? window.lerAgendaOverflow() : {};
+            const salvo = memoria[opKey] || {};
+            const mesmoDia = salvo.bookedDate === dateKeyMix;
+            const guardados = mesmoDia ? (salvo.booked || []) : (salvo.deferred || []);
+            const retidos = new Set(mesmoDia ? (salvo.deferred || []).map((r) => window.agendaOverflowKey(r)) : []);
+            const vistos = new Set();
+            const candidatos = [];
+            const empurrar = (row, adiado) => {
+              const atual = window.reviverAgendamento ? window.reviverAgendamento(row, selectedOperator) : row;
+              if (!atual || !window.agendaPendente(atual)) return;
+              const key = window.agendaOverflowKey(atual);
+              if (!key || vistos.has(key) || retidos.has(key)) return;
+              vistos.add(key);
+              candidatos.push(Object.assign({}, atual, { adiado: !!adiado, isFila: false }));
+            };
+            guardados.forEach((r) => empurrar(r, true));
+            dayItems.forEach((r) => { if (window.agendaPendente(r)) empurrar(r, false); });
+            const cotas = window.cotasFilaDia(capacidade, candidatos.length);
+            const queueItems = await window.generateDailyQueue(selectedOperator, dateStr, { maxItems: cotas.novos });
             const inQueue = new Set((queueItems || []).map(q => String(q.customerId) + '|' + String(q.saleId)));
-            const leftovers = dayItems.filter(n => {
-              const k = String(n.customerId) + '|' + String(n.saleId);
-              return !inQueue.has(k);
+            const agendaLivres = candidatos.filter((n) => !inQueue.has(String(n.customerId) + '|' + String(n.saleId)));
+            const agendaHoje = agendaLivres.slice(0, cotas.agenda);
+            const agendaFora = agendaLivres.slice(cotas.agenda);
+            const enxuto = (n) => ({
+              occId: n.occId || "",
+              customerId: n.customerId,
+              customerName: n.customerName,
+              cpf: n.cpf,
+              saleId: n.saleId,
+              unitId: n.unitId,
+              unitLabel: n.unitLabel || "",
+              valorAtualizado: n.valorAtualizado != null ? n.valorAtualizado : null,
+              promiseDate: n.promiseDate,
+              promiseStatus: n.promiseStatus,
+              reminder: n.reminder,
+              text: n.text,
+              date: n.date,
+              daysAgo: n.daysAgo,
+              occIndex: n.occIndex,
+              agendaAlert: n.agendaAlert,
+              isResolved: false,
+              isFila: false
             });
-            dayItems = [...(queueItems || []), ...leftovers];
+            memoria[opKey] = {
+              bookedDate: dateKeyMix,
+              booked: agendaHoje.filter((n) => n.adiado).map(enxuto),
+              deferred: agendaFora.map(enxuto)
+            };
+            if (window.gravarAgendaOverflow) window.gravarAgendaOverflow(memoria);
+            const resolvidos = dayItems.filter((n) => !window.agendaPendente(n));
+            dayItems = [...(queueItems || []), ...agendaHoje, ...resolvidos];
       }
       
       if (!window._isNotesHydrating) {
@@ -26472,6 +26689,8 @@ window.fireConfetti = function() {
     } else if (item.isFila) {
       statusColor = "#f97316"; // Laranja para a fila
       filaBadge = `<span style="background: #ffedd5; color: #ea580c; padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #fdba74; margin-bottom: 4px; cursor: help;" title="${(item.scoreDetails || 'Fila de Hoje').replace(/\n/g, '&#10;')}"><i data-lucide="zap" style="width: 10px; height: 10px;"></i> FILA DE HOJE</span><br>`;
+    } else if (item.adiado) {
+      filaBadge = `<span style="background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #7dd3fc; margin-bottom: 4px;">FILA ANTERIOR</span><br>`;
     } else if (item.promiseStatus === "Cumprido") {
       actionHtml = `
         <div style="margin-top: 6px;">
@@ -31956,7 +32175,7 @@ window.filaHouseSignalHtml = function(client) {
     houseColor = "#64748b";
     title = "Foto do lote sem construção";
   }
-  return `<button type="button" class="fila-signal" data-kind="house" title="${title}" onclick="window.openRelConstrucaoAlbum(this)" onmouseenter="window.showFilaSignalTip(event, this)" onmouseleave="window.hideFilaSignalTip()" style="border:0;background:transparent;padding:0;cursor:pointer;"><i data-lucide="house" style="width:14px;height:14px;color:${houseColor};"></i></button>`;
+  return `<button type="button" class="fila-signal" data-kind="house" title="${title}" onclick="window.openRelConstrucaoAlbum(this)" onmouseenter="window.showFilaSignalTip(event, this)" onmouseleave="window.hideFilaSignalTip()" style="border:0;background:transparent;padding:0;cursor:pointer;"><i data-lucide="house" style="width:18px;height:18px;color:${houseColor};"></i></button>`;
 };
 
 window.relFotoEntries = function(data) {
@@ -32018,12 +32237,23 @@ window.relCollectAlbum = function(client) {
   return { photos: photos, vistorias: vistorias, checks: checks, show: !!(photos.length || vistorias.length || checks.length) };
 };
 
+window.filaConstrucaoNome = function(client) {
+  const sig = window.filaLookupSignals(client);
+  const doc = sig.construction || sig.vazio || null;
+  if (!doc) return "";
+  const resp = doc.respostasFormulario || {};
+  const nome = String(resp.estagioObra || doc.stage || doc.estagioObra || "").trim();
+  if (nome) return nome;
+  return sig.construction ? "Lote com construção" : "Sem construção";
+};
+
 window.relHouseSignalHtml = function(client) {
   const sig = window.filaLookupSignals(client);
   if (!(sig.construction || sig.vazio)) return "";
   const color = window.relFotoEntries(sig.construction).length || window.relFotoEntries(sig.vazio).length ? "#105436" : "#c2410c";
   const title = sig.construction ? "Lote com construção" : "Foto do lote sem construção";
-  return `<button type="button" class="fila-signal" data-kind="house" title="${title}" onclick="window.openRelConstrucaoAlbum(this)" style="border:0;background:transparent;padding:0;cursor:pointer;"><i data-lucide="house" style="width:14px;height:14px;color:${color};"></i></button>`;
+  const nome = window.filaConstrucaoNome(client).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  return `<button type="button" class="rel-casa" data-kind="house" title="${title}" onclick="window.openRelConstrucaoAlbum(this)" onmouseenter="window.showFilaSignalTip(event, this)" onmouseleave="window.hideFilaSignalTip()"><i data-lucide="house" style="width:18px;height:18px;color:${color};flex-shrink:0;"></i><span class="rel-casa-nome">${nome}</span></button>`;
 };
 
 window.closeRelConstrucaoAlbum = function() {
@@ -41879,7 +42109,7 @@ window.searchRelacionamento = async function() {
           <td style="border-bottom: 1px solid var(--color-border); padding: 10px 10px; color: #1e293b; font-weight: 500; text-align: left; font-size: 0.75rem;">${r.empreendimento}</td>
           <td style="border-bottom: 1px solid var(--color-border); padding: 10px 10px; color: #1e293b; font-weight: 500; text-align: left; font-size: 0.75rem;">${r.unidade}</td>
           <td style="border-bottom: 1px solid var(--color-border); padding: 10px 10px; color: #1e293b; font-weight: 500; text-align: left; font-size: 0.75rem;">${r.dataVenda}</td>
-          <td class="fila-signal-cell" data-signal="house" data-fila-key="${signalKey}" title="Construção" style="border-bottom: 1px solid var(--color-border); text-align: center; padding: 10px 6px; overflow: visible;">${typeof window.relHouseSignalHtml === "function" ? window.relHouseSignalHtml(window._relSignalClients[signalKey]) : ""}</td>
+          <td class="fila-signal-cell" data-signal="house" data-fila-key="${signalKey}" style="border-bottom: 1px solid var(--color-border); text-align: left; padding: 10px 8px; overflow: visible; white-space: normal;">${typeof window.relHouseSignalHtml === "function" ? window.relHouseSignalHtml(window._relSignalClients[signalKey]) : ""}</td>
           <td style="border-bottom: 1px solid var(--color-border); text-align: center; padding: 10px 10px;">${r.statusHTML.replace('font-size: 1rem;', 'font-size: 0.75rem;').replace('padding: 6px 14px;', 'padding: 4px 10px;')}</td>
           <td style="border-bottom: 1px solid var(--color-border); text-align: center; padding: 10px 10px; white-space: nowrap;">
             <button type="button" class="btn btn-primary btn-sm" onclick="openGestaoDocumentoMenu({customerId:'${r.openCustomerId || customerId}',contractId:'${r.contractId || ''}',titulo:'${String(r.titulo || '').replace(/'/g, "\\'")}',contractNumber:'${String(r.contrato || '').replace(/'/g, "\\'")}',customerName:'${String(r.nome || '').replace(/'/g, "\\'")}',unidade:'${String(r.unidade || '').replace(/'/g, "\\'")}',empreendimento:'${String(r.empreendimento || '').replace(/'/g, "\\'")}',status:'${String(r.statusText || '').replace(/'/g, "\\'")}'})" style="margin-right: 6px; padding: 6px 12px; font-size: 0.75rem; font-weight: 700; display: inline-flex; justify-content: center; align-items: center; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; border-radius: 6px;">
@@ -46887,6 +47117,179 @@ window.updateWhatsappAlertButtonState = async function() {
         text.textContent = "Alerta WhatsApp OFF";
     }
     if (window.lucide) lucide.createIcons();
+};
+
+window.subjudiceIntegraData = { clients: {} };
+
+window.subjudiceIntegraChave = function(customerId, saleId) {
+  const cid = String(customerId || "").trim();
+  const sid = String(saleId || "").replace(/^B-/i, "").split("-")[0].trim();
+  if (!cid || !sid || sid === "null" || sid === "undefined") return "";
+  return cid + "-" + sid;
+};
+
+window.subjudiceIntegraChaves = function(client) {
+  const keys = [];
+  const add = function(id) {
+    const key = window.subjudiceIntegraChave(client && client.customerId, id);
+    if (key && keys.indexOf(key) < 0) keys.push(key);
+  };
+  if (!client) return keys;
+  add(client.saleId);
+  (client.billIds || []).forEach(add);
+  return keys;
+};
+
+window.clientIsSubjudiceIntegra = function(client) {
+  if (!client) return false;
+  if (typeof window.clientIsSubjudice === "function" && window.clientIsSubjudice(client)) return false;
+  const bag = (window.subjudiceIntegraData && window.subjudiceIntegraData.clients) || {};
+  return window.subjudiceIntegraChaves(client).some(function(key) {
+    return !!(bag[key] && bag[key].on !== false);
+  });
+};
+
+window.fichaSubjudiceIntegraAtivo = function() {
+  const cid = AppState && AppState.selectedCustomerId;
+  const sid = AppState && (AppState.selectedSaleId || AppState.selectedContractId);
+  if (!cid) return false;
+  const lista = window.rawClientList || [];
+  const row = lista.find(function(c) {
+    if (!c || String(c.customerId) !== String(cid)) return false;
+    if (!sid) return true;
+    if (String(c.saleId) === String(sid)) return true;
+    return (c.billIds || []).some(function(id) {
+      return String(id).replace(/^B-/i, "").split("-")[0] === String(sid);
+    });
+  });
+  if (row && typeof window.clientIsSubjudice === "function" && window.clientIsSubjudice(row)) return false;
+  return window.clientIsSubjudiceIntegra(row || {
+    customerId: cid,
+    saleId: sid,
+    billIds: sid ? [sid] : [],
+    subjudice: "N"
+  });
+};
+
+window.userCanMarkSubjudiceIntegra = function(user) {
+  let logged = user || (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo()) || (window.AppState && AppState.currentUser) || null;
+  if (!logged) {
+    try { logged = JSON.parse(localStorage.getItem("crm_logged_user") || "null"); } catch (e) { logged = null; }
+  }
+  if (!logged) return false;
+  const rec = (typeof window.crmImpersonacaoAtual === "function" && window.crmImpersonacaoAtual())
+    ? logged
+    : (typeof window.findCrmRegisteredUser === "function" ? window.findCrmRegisteredUser(logged) : null);
+  const profile = (rec && rec.profile_name) || logged.profile_name || logged.profile || "";
+  return typeof window.crmProfileKind === "function" && window.crmProfileKind(profile) === "back_office";
+};
+
+window.loadSubjudiceIntegra = async function() {
+  if (window.subjudiceIntegraLoaded) return;
+  let data = null;
+  if (window.firebaseCollections && window.firebaseDb) {
+    try {
+      const ref = window.firebaseCollections.doc(window.firebaseDb, "settings", "subjudice_integra");
+      const snap = await window.firebaseCollections.getDoc(ref);
+      if (snap && typeof snap.exists === "function" && snap.exists()) data = snap.data();
+    } catch (e) {
+      console.error("Erro ao carregar subjudice_integra do Firebase", e);
+    }
+  }
+  if (!data) {
+    try {
+      const local = localStorage.getItem("subjudice_integra_data");
+      if (local) data = JSON.parse(local);
+    } catch (e) {}
+  }
+  window.subjudiceIntegraData = data && typeof data === "object" ? data : { clients: {} };
+  if (!window.subjudiceIntegraData.clients) window.subjudiceIntegraData.clients = {};
+  window.subjudiceIntegraLoaded = true;
+};
+
+window.saveSubjudiceIntegra = async function() {
+  try {
+    localStorage.setItem("subjudice_integra_data", JSON.stringify(window.subjudiceIntegraData || { clients: {} }));
+  } catch (e) {}
+  if (window.firebaseCollections && window.firebaseDb) {
+    try {
+      const ref = window.firebaseCollections.doc(window.firebaseDb, "settings", "subjudice_integra");
+      await window.firebaseCollections.setDoc(ref, window.subjudiceIntegraData || { clients: {} });
+    } catch (e) {
+      console.error("Erro ao salvar subjudice_integra no Firebase", e);
+    }
+  }
+};
+
+window.updateSubjudiceIntegraButtonState = async function() {
+  if (!window.subjudiceIntegraLoaded && typeof window.loadSubjudiceIntegra === "function") {
+    await window.loadSubjudiceIntegra();
+  }
+  const btn = document.getElementById("btn-toggle-subjudice-integra");
+  const icon = document.getElementById("icon-subjudice-integra");
+  const text = document.getElementById("text-subjudice-integra");
+  if (!btn || !text) return;
+  if (!window.userCanMarkSubjudiceIntegra()) {
+    btn.style.display = "none";
+    return;
+  }
+  btn.style.display = "";
+  const ativo = typeof window.fichaSubjudiceIntegraAtivo === "function" && window.fichaSubjudiceIntegraAtivo();
+  btn.title = ativo
+    ? "Este título está marcado como sub judice no Integra. Clique para tirar a marca. No Sienge ele continua fora do sub judice e o boleto pode ser gerado."
+    : "Marca este título como sub judice só no Integra. No Sienge ele continua fora do sub judice, segue na fila de cobrança e também aparece no menu Sub Judice.";
+  if (ativo) {
+    btn.className = "btn btn-sm";
+    btn.style.backgroundColor = "#86198f";
+    btn.style.borderColor = "#86198f";
+    btn.style.color = "#fff";
+    if (icon) icon.style.color = "#fff";
+    text.textContent = "Sub judice no Integra";
+  } else {
+    btn.className = "btn btn-sm";
+    btn.style.backgroundColor = "#fdf4ff";
+    btn.style.borderColor = "#e9d5ff";
+    btn.style.color = "#86198f";
+    if (icon) icon.style.color = "#86198f";
+    text.textContent = "Sub judice no Integra";
+  }
+  if (window.lucide) lucide.createIcons();
+};
+
+window.toggleSubjudiceIntegra = async function() {
+  if (!window.userCanMarkSubjudiceIntegra()) return;
+  const customerId = String(AppState.selectedCustomerId || "");
+  const saleId = String(AppState.selectedSaleId || AppState.selectedContractId || "");
+  const key = window.subjudiceIntegraChave(customerId, saleId);
+  if (!key) return;
+  await window.loadSubjudiceIntegra();
+  if (!window.subjudiceIntegraData.clients) window.subjudiceIntegraData.clients = {};
+  const bag = window.subjudiceIntegraData.clients;
+  if (bag[key] && bag[key].on !== false) {
+    delete bag[key];
+  } else {
+    const logged = (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo()) || (AppState && AppState.currentUser) || {};
+    bag[key] = {
+      on: true,
+      customerId: customerId,
+      saleId: saleId,
+      at: new Date().toISOString(),
+      by: logged.name || logged.nome || logged.email || ""
+    };
+  }
+  await window.saveSubjudiceIntegra();
+  await window.updateSubjudiceIntegraButtonState();
+  if (typeof syncCobrancaJudicialTabs === "function") {
+    const origem = (window.activeAppTab || sessionStorage.getItem("currentTab")) === "subjudice";
+    const acesso = (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo()) || AppState.currentUser;
+    const opType = acesso ? ((typeof window.crmOperatorType === "function" && window.crmOperatorType(acesso)) || acesso.operator_type || "") : "";
+    const adv = opType === "advogado" || (typeof window.isAdvogadoCobrancaUser === "function" && window.isAdvogadoCobrancaUser(acesso));
+    syncCobrancaJudicialTabs(origem && !window.fichaSubjudiceIntegraAtivo(), adv);
+  }
+  if (typeof syncJudicialOccurrenceFormLock === "function") syncJudicialOccurrenceFormLock();
+  if (AppState.dashboardRendered && typeof loadDashboardData === "function") {
+    loadDashboardData(false);
+  }
 };
 
 function getBusinessDaysOfMonth(year, month) {

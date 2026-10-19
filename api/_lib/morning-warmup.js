@@ -465,6 +465,154 @@ function mesclarNormalizados(bills) {
   return Array.from(porId.values()).filter((b) => (b.daysDelay || 0) > 0 && (b.value || 0) > 0.009);
 }
 
+/** Posição do dia do Dashboard de cobrança, no mesmo formato que a tela grava ao abrir a fila. */
+async function salvarSnapshotCobranca(today, bills) {
+  const lista = Array.isArray(bills) ? bills : [];
+  if (!lista.length) return "sem títulos";
+  const d = new Date(today + "T12:00:00-03:00");
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth();
+  let uteis = 0;
+  let segundo = 0;
+  for (let day = 1; day <= 31; day++) {
+    const cur = new Date(Date.UTC(y, m, day, 15, 0, 0));
+    if (cur.getUTCMonth() !== m) break;
+    const wd = cur.getUTCDay();
+    if (wd === 0 || wd === 6) continue;
+    uteis += 1;
+    if (uteis === 2) { segundo = day; break; }
+  }
+  const wd = d.getUTCDay();
+  let totalValue = 0;
+  let subjudiceCount = 0;
+  let subjudiceValue = 0;
+  const companyMap = {};
+  const operatorMap = {};
+  const clientes = new Set();
+  const sjClients = {};
+  const sjCenters = {};
+  lista.forEach((b) => {
+    const billVal = Number(b.value != null ? b.value : b.overdueValue) || 0;
+    totalValue += billVal;
+    if (b.customerId != null) clientes.add(String(b.customerId));
+    const sub = b.subjudice === "S" || b.subjudice === true;
+    if (sub) {
+      subjudiceCount += 1;
+      subjudiceValue += billVal;
+    }
+    const compId = b.companyId != null ? String(b.companyId) : "N/D";
+    if (!companyMap[compId]) {
+      companyMap[compId] = {
+        company_id: b.companyId,
+        count: 0,
+        value: 0,
+        cost_centers: {},
+        aging: {
+          d0_30: { count: 0, value: 0 },
+          d31_60: { count: 0, value: 0 },
+          d61_90: { count: 0, value: 0 },
+          d91_120: { count: 0, value: 0 },
+          d120p: { count: 0, value: 0 }
+        }
+      };
+    }
+    const comp = companyMap[compId];
+    comp.count += 1;
+    comp.value += billVal;
+    const cc = String(b.costCenterId || "N/D");
+    if (!comp.cost_centers[cc]) comp.cost_centers[cc] = { id: cc, count: 0, value: 0 };
+    comp.cost_centers[cc].count += 1;
+    comp.cost_centers[cc].value += billVal;
+    const delay = Number(b.daysDelay != null ? b.daysDelay : b.maxDaysDelay) || 0;
+    const agingKey = delay <= 30 ? "d0_30" : delay <= 60 ? "d31_60" : delay <= 90 ? "d61_90" : delay <= 120 ? "d91_120" : "d120p";
+    comp.aging[agingKey].count += 1;
+    comp.aging[agingKey].value += billVal;
+    const opName = String(b.assignedOperator || "NÃO ATRIBUÍDO").toUpperCase().trim();
+    if (!operatorMap[opName]) operatorMap[opName] = { name: opName, total_count: 0, total_value: 0, above31_count: 0, above31_value: 0 };
+    operatorMap[opName].total_count += 1;
+    operatorMap[opName].total_value += billVal;
+    if (delay >= 31) {
+      operatorMap[opName].above31_count += 1;
+      operatorMap[opName].above31_value += billVal;
+    }
+    if (!sub) return;
+    const cid = String(b.customerId || "");
+    if (!cid) return;
+    if (!sjClients[cid]) {
+      sjClients[cid] = {
+        id: cid,
+        name: b.clientName || b.customerName || "",
+        value: 0,
+        titles: 0,
+        cc: cc
+      };
+    }
+    sjClients[cid].value += billVal;
+    sjClients[cid].titles += 1;
+    if (!sjCenters[cc]) sjCenters[cc] = { id: cc, value: 0, titles: 0, clients: 0 };
+    sjCenters[cc].value += billVal;
+    sjCenters[cc].titles += 1;
+  });
+  Object.keys(sjClients).forEach((cid) => {
+    const c = sjClients[cid];
+    if (sjCenters[c.cc]) sjCenters[c.cc].clients += 1;
+  });
+  const ref = doc(db, "inadimplencia_snapshots", today);
+  let prev = null;
+  try {
+    const snap = await getDoc(ref);
+    if (snap.exists()) prev = snap.data() || {};
+  } catch (e) {}
+  if (prev) {
+    const prevVal = Number(prev.total_value) || 0;
+    const prevCnt = Number(prev.total_count) || 0;
+    if ((prevVal > 0 && totalValue < prevVal * 0.85) || (prevCnt > 0 && lista.length < prevCnt * 0.85)) {
+      return "mantido: carga menor que a do dia";
+    }
+  }
+  const payload = {
+    date: today,
+    is_month_close: segundo > 0 && d.getUTCDate() === segundo,
+    is_week_start: wd === 1,
+    is_week_end: wd === 5,
+    total_count: lista.length,
+    total_customers: clientes.size,
+    total_value: totalValue,
+    avg_ticket: lista.length ? totalValue / lista.length : 0,
+    subjudice_count: subjudiceCount,
+    subjudice_customers: Object.keys(sjClients).length,
+    subjudice_value: subjudiceValue,
+    subjudice_detail: {
+      clients: Object.keys(sjClients).map((k) => sjClients[k]),
+      cost_centers: Object.keys(sjCenters).map((k) => sjCenters[k])
+    },
+    new_count: 0,
+    recovered_count: 0,
+    data_json: {
+      companies: Object.keys(companyMap).map((k) => {
+        const c = companyMap[k];
+        return Object.assign({}, c, { cost_centers: Object.keys(c.cost_centers).map((id) => c.cost_centers[id]) });
+      }),
+      operators: Object.keys(operatorMap).map((k) => operatorMap[k])
+    },
+    saved_at: new Date().toISOString(),
+    source_count: lista.length,
+    source: "morning-7h"
+  };
+  if (prev && prev.sprint_clients != null && prev.sprint_titles != null && prev.sprint_value != null) {
+    payload.total_value = Number(prev.sprint_value) || prev.total_value;
+    payload.total_customers = Number(prev.sprint_clients) || prev.total_customers;
+    payload.total_count = Number(prev.sprint_titles) || prev.total_count;
+    payload.sprint_value = prev.sprint_value;
+    payload.sprint_clients = prev.sprint_clients;
+    payload.sprint_titles = prev.sprint_titles;
+    payload.sprint_avg_delay = prev.sprint_avg_delay;
+    payload.sprint_saved_at = prev.sprint_saved_at;
+  }
+  await setDoc(ref, payload, { merge: true });
+  return lista.length + " títulos";
+}
+
 function buildDefaulterQuery(cId, today, extraParams, billTypeParams) {
   return `${SIENGE_BULK_BASE}/bulk-data/v1/defaulters-receivable-bills?companyId=${cId}`
     + `&dueDateLimit=${today}&documentsId=CT&correctionDate=${today}`
@@ -498,7 +646,6 @@ async function saveState(state) {
 }
 
 const CFIN_STATE_ID = "_cfin_state";
-const CFIN_META_ID = "_cfin_meta";
 const CFIN_JSON_MAX = 700000;
 
 function isoDate(d) {
@@ -515,25 +662,62 @@ function shiftDays(iso, days) {
   return isoDate(d);
 }
 
-/** Mês corrente, mais 6 meses para trás e 6 para a frente, em meses cheios. */
-function cfinWindow(today) {
-  const d = parseIso(today);
-  const start = new Date(d.getFullYear(), d.getMonth() - 6, 1);
-  const end = new Date(d.getFullYear(), d.getMonth() + 7, 0);
-  return { start: isoDate(start), end: isoDate(end) };
+const CFIN_INICIO = "2026-01-01";
+const CFIN_DIAS_API = 60;
+const CFIN_CORTE_ID = "_corte";
+
+function ymSeguinte(ym) {
+  const parts = String(ym || "2025-12").split("-").map(Number);
+  const d = new Date(parts[0], parts[1], 1);
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
 }
 
-function cfinMonths(startIso, endIso) {
+function empresasGeridas(customRaw) {
+  let custom = {};
+  try {
+    custom = typeof customRaw === "string" ? JSON.parse(customRaw || "{}") : (customRaw || {});
+  } catch (e) {
+    custom = {};
+  }
+  const ids = [];
+  const seen = {};
+  Object.keys(custom || {}).forEach((k) => {
+    if (k === "_v2") return;
+    const cfg = custom[k];
+    if (!cfg || typeof cfg !== "object") return;
+    const v = cfg.gerida_pelo_grupo != null ? cfg.gerida_pelo_grupo : cfg.gerida_grupo;
+    const ligada = v === 1 || v === true || v === "1" || Number(v) === 1;
+    if (!ligada) return;
+    const id = String(cfg.company_id != null ? cfg.company_id : k);
+    if (!/^\d+$/.test(id) || seen[id]) return;
+    seen[id] = true;
+    ids.push(id);
+  });
+  return ids;
+}
+
+/** Meses de 01/01/2026 até o dia que ficou fora dos últimos 60 dias. O mês do corte entra incompleto. */
+function mesesHistorico(corte, ymFechado) {
   const out = [];
-  let d = parseIso(startIso);
-  const last = parseIso(endIso);
+  if (!corte || corte < CFIN_INICIO) return out;
+  let d = parseIso(CFIN_INICIO);
+  const last = parseIso(corte);
+  const fechadoAte = String(ymFechado || "2025-12");
   while (d <= last) {
     const monthStart = isoDate(new Date(d.getFullYear(), d.getMonth(), 1));
     const monthEnd = isoDate(new Date(d.getFullYear(), d.getMonth() + 1, 0));
-    out.push({
-      start: monthStart < startIso ? startIso : monthStart,
-      end: monthEnd > endIso ? endIso : monthEnd
-    });
+    const ym = monthStart.slice(0, 7);
+    const fechado = monthEnd <= corte;
+    if (!(fechado && ym <= fechadoAte)) {
+      out.push({
+        ym: ym,
+        start: monthStart < CFIN_INICIO ? CFIN_INICIO : monthStart,
+        end: monthEnd < corte ? monthEnd : corte,
+        companyId: "",
+        fechado: fechado,
+        tentativas: 0
+      });
+    }
     d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
   }
   return out;
@@ -577,29 +761,75 @@ async function saveCfinState(state) {
   await setDoc(doc(db, "sienge_defaulters_history", CFIN_STATE_ID), state);
 }
 
-async function writeCfinParts(state, pair, bills) {
-  const list = Array.isArray(bills) ? bills : [];
-  const whole = JSON.stringify(list);
-  const parts = [];
-  if (whole.length <= CFIN_JSON_MAX) parts.push(list);
-  else {
-    const n = Math.max(2, Math.ceil(whole.length / CFIN_JSON_MAX));
-    const size = Math.ceil(list.length / n);
-    for (let i = 0; i < list.length; i += size) parts.push(list.slice(i, i + size));
-  }
-  const companyId = pair.companyId ? String(pair.companyId) : "";
-  for (let i = 0; i < parts.length; i++) {
-    const id = "cfin_" + state.date + "_" + (companyId || "all") + "_" + pair.start + "_" + pair.end + (parts.length > 1 ? "_p" + i : "");
-    await setDoc(doc(db, "sienge_defaulters_history", id), {
-      kind: "cfin",
-      date: state.date,
-      companyId: companyId,
-      start: pair.start,
-      end: pair.end,
-      data: JSON.stringify(parts[i])
+function fatiarContas(lista) {
+  const fatias = [];
+  let atual = [];
+  let tamanho = 2;
+  (lista || []).forEach((row) => {
+    let limpo = row;
+    try { limpo = JSON.parse(JSON.stringify(row)); } catch (e) { limpo = null; }
+    if (!limpo) return;
+    const pedaco = JSON.stringify(limpo);
+    if (atual.length && tamanho + pedaco.length > CFIN_JSON_MAX) {
+      fatias.push(atual);
+      atual = [];
+      tamanho = 2;
+    }
+    atual.push(limpo);
+    tamanho += pedaco.length + 1;
+  });
+  if (atual.length || !fatias.length) fatias.push(atual);
+  return fatias;
+}
+
+async function gravarMesPago(companyId, ym, bills, extra) {
+  const fatias = fatiarContas(bills);
+  const n = fatias.reduce((s, fatia) => s + fatia.length, 0);
+  const id = String(companyId) + "_" + ym;
+  const base = {
+    companyId: String(companyId),
+    ym: ym,
+    ate: extra && extra.ate ? extra.ate : "",
+    fechado: !!(extra && extra.fechado),
+    em: new Date().toISOString()
+  };
+  await setDoc(doc(db, "cfin_pagos", id), Object.assign({}, base, {
+    n: n,
+    partes: fatias.length,
+    bills: fatias[0] || []
+  }));
+  for (let i = 1; i < fatias.length; i++) {
+    await setDoc(doc(db, "cfin_pagos", id + "_p" + (i + 1)), {
+      companyId: String(companyId),
+      ym: ym,
+      parte: i + 1,
+      bills: fatias[i]
     });
-    state.chunkIds.push({ id: id, companyId: companyId, start: pair.start, end: pair.end });
   }
+}
+
+async function gravarMesEmpresas(companies, ym, bills, extra) {
+  const grupos = {};
+  (companies || []).forEach((id) => { grupos[String(id)] = []; });
+  (bills || []).forEach((bill) => {
+    const id = String(bill && bill.companyId != null ? bill.companyId : "");
+    if (!/^\d+$/.test(id)) return;
+    if (!grupos[id]) grupos[id] = [];
+    grupos[id].push(bill);
+  });
+  const ids = Object.keys(grupos);
+  for (let i = 0; i < ids.length; i++) {
+    await gravarMesPago(ids[i], ym, grupos[ids[i]], extra);
+  }
+  return ids.length;
+}
+
+async function marcarCorte(ate, ymFechado) {
+  await setDoc(doc(db, "cfin_pagos", CFIN_CORTE_ID), {
+    ate: ate || "",
+    ymFechado: ymFechado || "2025-12",
+    em: new Date().toISOString()
+  });
 }
 
 async function fetchOutcomeBills(start, end, companyId) {
@@ -608,62 +838,95 @@ async function fetchOutcomeBills(start, end, companyId) {
 }
 
 /**
- * Uma fatia da base do Controle financeiro: 6 meses antes e 6 depois.
- * Cada chamada diária faz o que cabe no tempo e chama a próxima até fechar a janela.
+ * Grava no Firebase as contas de 01/01/2026 até o dia que saiu dos últimos 60 dias.
+ * Mês já fechado não volta para o Sienge. O mês do corte é regravado todo dia, e o corte anda um dia.
+ * Roda depois da fila, na mesma rotina das 7h.
  */
 async function advanceControleFinanceiro(req, res, today, started, log) {
+  const corte = shiftDays(today, -CFIN_DIAS_API);
   let state = await loadCfinState(today);
+  if (state && state.mode !== "cfin-60") state = null;
   if (state && state.ready) {
-    if (state.cleanup && state.cleanup.length) {
-      const batch = state.cleanup.splice(0, 30);
-      for (const id of batch) {
-        try { await deleteDoc(doc(db, "sienge_defaulters_history", id)); } catch (e) {}
-      }
-      await saveCfinState(state);
-      if (state.cleanup.length) await continuarWarmup(req);
-    }
     return res.status(200).json({
-      done: !(state.cleanup && state.cleanup.length),
+      done: true,
       filaPronta: true,
       date: today,
       step: "cfin",
       ready: true,
-      message: "Base do controle financeiro já gerada.",
+      corte: state.corte || corte,
+      message: "Base do controle financeiro já gravada até " + (state.corte || corte) + ".",
       log
     });
   }
   if (!state) {
-    const win = cfinWindow(today);
-    let companies = [];
-    try {
-      const list = await fetchAllPages("/companies");
-      companies = [...new Set(list.map((c) => String(c.id || c.companyId || "")).filter(Boolean))];
-    } catch (e) {
-      log.push("empresas: " + e.message);
+    let companies = empresasGeridas(await loadConfigCustom());
+    if (!companies.length) {
+      try {
+        const list = await fetchAllPages("/companies");
+        companies = [...new Set(list.map((c) => String(c.id || c.companyId || "")).filter((id) => /^\d+$/.test(id)))];
+      } catch (e) {
+        log.push("empresas: " + e.message);
+      }
     }
+    let ymFechado = "2025-12";
+    try {
+      const corteSnap = await getDoc(doc(db, "cfin_pagos", CFIN_CORTE_ID));
+      if (corteSnap.exists()) ymFechado = String((corteSnap.data() || {}).ymFechado || ymFechado);
+    } catch (e) {}
+    const pairs = mesesHistorico(corte, ymFechado);
     state = {
       date: today,
-      start: win.start,
-      end: win.end,
+      mode: "cfin-60",
+      corte: corte,
       companies: companies,
-      pairs: cfinMonths(win.start, win.end).map((m) => ({ start: m.start, end: m.end, companyId: "" })),
+      pairs: pairs,
       index: 0,
-      chunkIds: [],
+      ymFechado: ymFechado,
       failed: 0,
-      ready: false
+      ready: pairs.length === 0
     };
-    log.push("janela " + win.start + " a " + win.end + " · " + state.pairs.length + " meses");
+    log.push("corte " + corte + " · " + pairs.length + " meses · " + companies.length + " empresas");
+    if (!pairs.length) {
+      await saveCfinState(state);
+      log.push("nada novo até " + corte);
+    }
   }
   if (!Array.isArray(state.pairs)) state.pairs = [];
-  if (!Array.isArray(state.chunkIds)) state.chunkIds = [];
+  if (!Array.isArray(state.companies)) state.companies = [];
 
   while (state.index < state.pairs.length && Date.now() - started < BUDGET_MS - 8000) {
     const pair = state.pairs[state.index];
-    try {
-      const bills = await fetchOutcomeBills(pair.start, pair.end, pair.companyId);
-      await writeCfinParts(state, pair, bills);
-      log.push((pair.companyId || "todas") + " " + pair.start + ".." + pair.end + ": " + bills.length);
+    if (!pair.companyId && !(state.companies || []).length) {
+      pair.tentativas = (Number(pair.tentativas) || 0) + 1;
+      log.push("sem empresas para gravar " + pair.ym);
+      if (pair.tentativas < 3) break;
+      state.furos = state.furos || [];
+      if (!state.furos.includes(pair.ym)) state.furos.push(pair.ym);
       state.index += 1;
+      continue;
+    }
+    try {
+      const bills = (await fetchOutcomeBills(pair.start, pair.end, pair.companyId)).filter((bill) => {
+        const d = String((bill && bill.dueDate) || "").slice(0, 10);
+        return !d || (d >= pair.start && d <= pair.end);
+      });
+      const extra = { ate: pair.end, fechado: !!pair.fechado };
+      if (pair.companyId) {
+        await gravarMesPago(pair.companyId, pair.ym, bills, extra);
+        log.push("empresa " + pair.companyId + " " + pair.ym + " " + pair.start + ".." + pair.end + ": " + bills.length);
+      } else {
+        const n = await gravarMesEmpresas(state.companies, pair.ym, bills, extra);
+        log.push(pair.ym + " " + pair.start + ".." + pair.end + ": " + bills.length + " títulos em " + n + " empresas");
+      }
+      state.index += 1;
+      const ainda = state.pairs.slice(state.index).some((p) => p && p.ym === pair.ym);
+      if (!ainda) {
+        const esperado = ymSeguinte(state.ymFechado || "2025-12");
+        if (pair.fechado && pair.ym === esperado && !(state.furos || []).includes(pair.ym)) {
+          state.ymFechado = pair.ym;
+        }
+        await marcarCorte(pair.end, state.ymFechado || "2025-12");
+      }
     } catch (e) {
       if (isTooBig(e) && pair.start < pair.end) {
         const s = parseIso(pair.start);
@@ -673,72 +936,64 @@ async function advanceControleFinanceiro(req, res, today, started, log) {
         const next = shiftDays(midIso, 1);
         if (midIso >= pair.start && midIso < pair.end && next <= pair.end) {
           state.pairs.splice(state.index, 1,
-            { start: pair.start, end: midIso, companyId: pair.companyId || "" },
-            { start: next, end: pair.end, companyId: pair.companyId || "" }
+            Object.assign({}, pair, { start: pair.start, end: midIso, tentativas: 0 }),
+            Object.assign({}, pair, { start: next, end: pair.end, tentativas: 0 })
           );
           log.push("divide " + pair.start + ".." + pair.end);
           continue;
         }
       }
       if (isTooBig(e) && !pair.companyId && state.companies && state.companies.length) {
-        state.pairs.splice(state.index, 1, ...state.companies.map((cid) => ({
-          start: pair.start, end: pair.end, companyId: String(cid)
+        state.pairs.splice(state.index, 1, ...state.companies.map((cid) => Object.assign({}, pair, {
+          companyId: String(cid),
+          tentativas: 0
         })));
-        log.push("divide empresas " + pair.start);
+        log.push("divide empresas " + pair.ym);
         continue;
       }
+      pair.tentativas = (Number(pair.tentativas) || 0) + 1;
+      log.push("falha " + (pair.companyId || "todas") + " " + pair.ym + ": " + e.message);
+      if (pair.tentativas < 3) break;
       state.failed = (Number(state.failed) || 0) + 1;
+      state.furos = state.furos || [];
+      if (!state.furos.includes(pair.ym)) state.furos.push(pair.ym);
       state.index += 1;
-      log.push("falha " + (pair.companyId || "todas") + " " + pair.start + ": " + e.message);
     }
   }
 
   if (state.index >= state.pairs.length) {
-    let previous = [];
-    try {
-      const prevSnap = await getDoc(doc(db, "sienge_defaulters_history", CFIN_META_ID));
-      if (prevSnap.exists()) previous = ((prevSnap.data() || {}).chunks || []).map((c) => c.id).filter(Boolean);
-    } catch (e) {}
-    const keep = new Set(state.chunkIds.map((c) => c.id));
-    state.cleanup = previous.filter((id) => id && !keep.has(id));
-    await setDoc(doc(db, "sienge_defaulters_history", CFIN_META_ID), {
-      kind: "cfin-meta",
-      ready: true,
-      date: today,
-      start: state.start,
-      end: state.end,
-      companies: state.companies || [],
-      chunks: state.chunkIds,
-      failed: Number(state.failed) || 0,
-      updatedAt: new Date().toISOString()
-    });
     state.ready = true;
     await saveCfinState(state);
-    log.push("base pronta: " + state.chunkIds.length + " blocos");
+    log.push("base pronta até " + corte);
   } else {
     await saveCfinState(state);
     log.push("segue " + state.index + "/" + state.pairs.length);
   }
 
-  if (state.ready && state.cleanup && state.cleanup.length) {
-    const batch = state.cleanup.splice(0, 30);
-    for (const id of batch) {
-      try { await deleteDoc(doc(db, "sienge_defaulters_history", id)); } catch (e) {}
-    }
-    await saveCfinState(state);
+  const finished = !!state.ready;
+  if (!finished) {
+    await continuarWarmup(req);
+    return res.status(200).json({
+      done: false,
+      filaPronta: true,
+      date: today,
+      step: "cfin",
+      ready: !!state.ready,
+      index: state.index,
+      total: state.pairs.length,
+      log
+    });
   }
-
-  const finished = !!(state.ready && !(state.cleanup && state.cleanup.length));
-  if (!finished) await continuarWarmup(req);
-  return res.status(200).json({
-    done: finished,
-    filaPronta: true,
-    date: today,
-    step: "cfin",
-    ready: !!state.ready,
-    index: state.index,
-    total: state.pairs.length,
-    log
+  const advancePainelDiario = require("./painel-diario");
+  return advancePainelDiario({
+    req: req,
+    res: res,
+    today: today,
+    started: started,
+    log: log,
+    db: db,
+    fetchAllPages: fetchAllPages,
+    continuar: function () { return continuarWarmup(req); }
   });
 }
 
@@ -956,6 +1211,12 @@ module.exports = async function handler(req, res) {
       state.step = "done";
       await saveState({ date: today, step: "done" });
       log.push(`finalize: ${bills.length} títulos, ${numChunks} chunks`);
+      try {
+        const snapMsg = await salvarSnapshotCobranca(today, bills);
+        log.push("dashboard cobrança: " + snapMsg);
+      } catch (e) {
+        log.push("dashboard cobrança falhou: " + e.message);
+      }
       return advanceControleFinanceiro(req, res, today, started, log);
     }
 

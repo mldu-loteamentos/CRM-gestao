@@ -945,14 +945,16 @@ ComprasControleApp.fetchOutcome = async function (start, end) {
 };
 
 ComprasControleApp._cfinHistDe = "2017-01-01";
+ComprasControleApp.apiDias = 60;
 
-// O ano fechado vai para o Firebase. Em 2026 o corte é 31/12/2025; em 2027 passa a 31/12/2026.
+// Até 60 dias atrás a consulta lê o Firebase. Os últimos 60 dias, e o que vence depois, saem do Sienge.
+// A rotina das 7h grava de 01/01/2026 até esse corte e avança um dia por manhã.
 ComprasControleApp.histAte = function () {
-  return (new Date().getFullYear() - 1) + "-12-31";
+  return this.isoShiftDay(this.hojeIso(), -this.apiDias);
 };
 
 ComprasControleApp.histVivoDe = function () {
-  return this.isoShift(this.histAte(), 1);
+  return this.isoShiftDay(this.histAte(), 1);
 };
 
 ComprasControleApp.fmtDataBr = function (iso) {
@@ -1087,6 +1089,8 @@ ComprasControleApp._billNoPeriodo = function (bill, start, end) {
 };
 
 ComprasControleApp.contasHistoricas = async function (start, end) {
+  this._cfinFalhas = [];
+  this._cfinFalhasBase = [];
   const ate = this.histAte();
   const rotulo = this.fmtDataBr(ate);
   const ini = start < this._cfinHistDe ? this._cfinHistDe : start;
@@ -1098,6 +1102,7 @@ ComprasControleApp.contasHistoricas = async function (start, end) {
   const out = [];
   const vistos = new Set();
   const falhas = [];
+  const falhasBase = [];
   let step = 0;
   const total = Math.max(1, meses.length * targets.length);
   const siengeCheio = (e) => {
@@ -1110,9 +1115,15 @@ ComprasControleApp.contasHistoricas = async function (start, end) {
       step += 1;
       const ym = meses[i];
       const chave = String(companyId) + "_" + ym;
-      let bills = this._cfinMesMem && this._cfinMesMem[chave];
-      if (!bills) bills = await this._lerMesPago(companyId, ym);
-      if (!bills) {
+      let bills = this._cfinMesMem && Object.prototype.hasOwnProperty.call(this._cfinMesMem, chave)
+        ? this._cfinMesMem[chave]
+        : null;
+      if (bills == null) bills = await this._lerMesPago(companyId, ym);
+      if (bills == null) {
+        if (ym >= "2026-01") {
+          falhasBase.push("empresa " + companyId + " " + ym);
+          continue;
+        }
         const mesIni = ym + "-01";
         const mesFim = this._fimMes(ym);
         let ok = false;
@@ -1151,6 +1162,7 @@ ComprasControleApp.contasHistoricas = async function (start, end) {
     }
   }
   this._cfinFalhas = falhas;
+  this._cfinFalhasBase = falhasBase;
   return out;
 };
 
@@ -1196,24 +1208,24 @@ ComprasControleApp.consultar = async function () {
       contas.push.apply(contas, hist);
       fonte = "base";
       const falhas = this._cfinFalhas || [];
-      this.state.falhaHist = falhas.length
-        ? ("O Sienge não devolveu " + falhas.length + " mês(es). O que já foi gravado continua no Firebase. Consulte de novo para completar. " + falhas.slice(0, 4).join(", ") + (falhas.length > 4 ? "…" : ""))
-        : "";
+      const faltam = this._cfinFalhasBase || [];
+      const avisos = [];
+      if (faltam.length) {
+        avisos.push("O Firebase ainda não tem " + faltam.length + " mês(es) até " + this.fmtDataBr(ate) + ". A rotina das 7h grava de 01/01/2026 até essa data e avança um dia por manhã.");
+      }
+      if (falhas.length) {
+        avisos.push("O Sienge não devolveu " + falhas.length + " mês(es) anteriores a 2026. O que já foi gravado continua no Firebase. Consulte de novo para completar. " + falhas.slice(0, 4).join(", ") + (falhas.length > 4 ? "…" : ""));
+      }
+      this.state.falhaHist = avisos.join(" ");
     }
     if (end >= vivoDe) {
       const vivoIni = start > vivoDe ? start : vivoDe;
-      const daBase = start > ate ? await this.billsDaBase(vivoIni, end) : null;
-      if (daBase) {
-        contas.push.apply(contas, daBase);
-        fonte = fonte ? "mista" : "base";
-      } else {
-        this.state.fonte = fonte ? "mista" : "sienge";
-        this.state.loadingMsg = "Buscando contas a pagar de " + vivoIni.split("-").reverse().join("/") + " no Sienge…";
-        this.noteProgress(this.state.loadingMsg, 0);
-        const live = await this.fetchOutcome(vivoIni, end);
-        contas.push.apply(contas, (live && live.data) || []);
-        fonte = fonte ? "mista" : "sienge";
-      }
+      this.state.fonte = fonte ? "mista" : "sienge";
+      this.state.loadingMsg = "Buscando contas a pagar de " + this.fmtDataBr(vivoIni) + " no Sienge…";
+      this.noteProgress(this.state.loadingMsg, 0);
+      const live = await this.fetchOutcome(vivoIni, end);
+      contas.push.apply(contas, (live && live.data) || []);
+      fonte = fonte ? "mista" : "sienge";
     }
     const payload = { data: contas };
     this.state.fonte = fonte || "base";
@@ -1296,9 +1308,10 @@ ComprasControleApp.paintFilters = function () {
     if (!window.MlEmpresaFilter) return;
     MlEmpresaFilter.bind(id, {
       toggleOpen() {
-        if (self.state.loading) return;
+        const escolheAntes = key === "ccIds" || key === "creditorIds";
+        if (self.state.loading && !escolheAntes) return;
         if (key === "deptIds" && self.departmentFilterLocked()) return;
-        if (!self.state.consulted && key !== "companyIds") return;
+        if (!self.state.consulted && key !== "companyIds" && !escolheAntes) return;
         self.state[openKey] = !self.state[openKey];
         if (openKey === "openEmp") { self.state.openCred = false; self.state.openDept = false; self.state.openCc = false; }
         if (openKey === "openCred") { self.state.openEmp = false; self.state.openDept = false; self.state.openCc = false; }
@@ -1319,42 +1332,45 @@ ComprasControleApp.paintFilters = function () {
         });
       },
       toggleId(itemId, on) {
-        if (self.state.loading) return;
+        const escolheAntes = key === "ccIds" || key === "creditorIds";
+        if (self.state.loading && !escolheAntes) return;
         if (key === "deptIds" && self.departmentFilterLocked()) return;
-        if (!self.state.consulted && key !== "companyIds") return;
+        if (!self.state.consulted && key !== "companyIds" && !escolheAntes) return;
         const sid = String(itemId);
         const cur = self.state[key].slice();
         self.state[key] = on ? (cur.includes(sid) ? cur : cur.concat(sid)) : cur.filter((x) => x !== sid);
         self.state[openKey] = true;
-        if (self.state.consulted) {
+        if (self.state.consulted && !self.state.loading) {
           self.applyFilters();
           self.renderList();
         }
         self.paintFilters();
       },
       selectAll() {
-        if (self.state.loading) return;
+        const escolheAntes = key === "ccIds" || key === "creditorIds";
+        if (self.state.loading && !escolheAntes) return;
         if (key === "deptIds" && self.departmentFilterLocked()) return;
-        if (!self.state.consulted && key !== "companyIds") return;
+        if (!self.state.consulted && key !== "companyIds" && !escolheAntes) return;
         self.state[key] = itemsFn().map((x) => String(x.id));
         self.state[openKey] = true;
-        if (self.state.consulted) {
+        if (self.state.consulted && !self.state.loading) {
           self.applyFilters();
           self.renderList();
         }
         self.paintFilters();
       },
       selectNone() {
-        if (self.state.loading) return;
+        const escolheAntes = key === "ccIds" || key === "creditorIds";
+        if (self.state.loading && !escolheAntes) return;
         if (key === "deptIds" && self.departmentFilterLocked()) return;
-        if (!self.state.consulted && key !== "companyIds") return;
+        if (!self.state.consulted && key !== "companyIds" && !escolheAntes) return;
         if (key === "deptIds" && self.accessibleDepartments()) {
           self.state.deptIds = self.accessibleDepartments().map((a) => a.id);
         } else {
           self.state[key] = [];
         }
         self.state[openKey] = true;
-        if (self.state.consulted) {
+        if (self.state.consulted && !self.state.loading) {
           self.applyFilters();
           self.renderList();
         }
@@ -1403,6 +1419,86 @@ ComprasControleApp.paintFilters = function () {
   bind("cfin-filter-cred", "creditorIds", "openCred", "qCred", () => this.credItems(), { singular: "credor", plural: "credores" });
   bind("cfin-filter-dept", "deptIds", "openDept", "qDept", () => this.deptItems(), { singular: "departamento", plural: "departamentos" });
   if (window.lucide) lucide.createIcons();
+};
+
+ComprasControleApp.comEscolha = function (daLista, catalogo, selectedIds) {
+  const lista = Array.isArray(daLista) ? daLista : [];
+  const extraFonte = Array.isArray(catalogo) ? catalogo : [];
+  if (!lista.length) return extraFonte;
+  const ids = new Set(lista.map((x) => String(x.id)));
+  const sel = new Set((selectedIds || []).map(String));
+  const extra = extraFonte.filter((x) => sel.has(String(x.id)) && !ids.has(String(x.id)));
+  return extra.length ? lista.concat(extra) : lista;
+};
+
+ComprasControleApp.catalogoEmpreendimentos = function () {
+  const list = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || [];
+  return list.map((c) => {
+    const id = String(c.id || c.code || "");
+    const name = String(c.name || c.nome || "").toUpperCase();
+    return { id: id, name: name, label: id ? id + " - " + name : name };
+  }).filter((x) => x.id).sort((a, b) => String(a.label).localeCompare(String(b.label), "pt-BR"));
+};
+
+ComprasControleApp.ccItems = function () {
+  const daLista = ComprasPrevisoesApp.ccItems.call(this);
+  return this.comEscolha(daLista, this.catalogoEmpreendimentos(), this.state.ccIds);
+};
+
+ComprasControleApp.credItems = function () {
+  const daLista = ComprasPrevisoesApp.credItems.call(this);
+  return this.comEscolha(daLista, this._credCatalogo || [], this.state.creditorIds);
+};
+
+ComprasControleApp.carregarCredores = async function () {
+  if (this._credCarregando || (this._credCatalogo && this._credCatalogo.length)) return;
+  this._credCarregando = true;
+  try {
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (!fx || !db || typeof fx.getDocs !== "function" || typeof fx.collection !== "function") return;
+    let rows = [];
+    for (let i = 0; i < ["sienge_creditors", "creditors"].length; i++) {
+      const nome = ["sienge_creditors", "creditors"][i];
+      try {
+        const snap = await fx.getDocs(fx.collection(db, nome));
+        if (snap && typeof snap.forEach === "function") {
+          snap.forEach((d) => rows.push((d && d.data && d.data()) || {}));
+        }
+        if (rows.length) break;
+      } catch (e) {}
+    }
+    const seen = {};
+    const items = [];
+    rows.forEach((raw) => {
+      let src = raw || {};
+      if (typeof src.raw_data === "string") {
+        try { src = Object.assign({}, JSON.parse(src.raw_data), src); } catch (e) {}
+      }
+      const name = String(src.name || src.nome || src.creditorName || src.fantasyName || src.tradeName || "").trim();
+      if (!name) return;
+      const id = this.fold(name);
+      if (!id || seen[id]) return;
+      seen[id] = true;
+      const label = name.toUpperCase();
+      items.push({ id: id, name: label, label: label });
+    });
+    items.sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+    this._credCatalogo = items;
+    if (items.length && !this.state.openCred) this.paintFilters();
+  } finally {
+    this._credCarregando = false;
+  }
+};
+
+ComprasControleApp.garantirEmpreendimentos = async function () {
+  if ((this.catalogoEmpreendimentos() || []).length) return;
+  if (!window.SiengeApiService || typeof SiengeApiService.getCostCenters !== "function") return;
+  try {
+    const list = await SiengeApiService.getCostCenters();
+    if (window.AppState && Array.isArray(list) && list.length) AppState.cachedCostCenters = list;
+    if (!this.state.openCc) this.paintFilters();
+  } catch (e) {}
 };
 
 /** { kind, data } da forma programada, null sem forma, ou { erro } quando o Sienge não respondeu. */
@@ -2089,8 +2185,8 @@ ComprasControleApp.renderPage = function () {
       <div class="search-filter-panel cprev-toolbar">
         <div class="ecau-grid cprev-ecau${busy ? " is-consulting" : ""}">
           <div id="cfin-emp-slot" class="ecau-slot ecau-cell-emp${busy ? " is-locked" : ""}"></div>
-          <div id="cfin-cc-slot" class="ecau-slot ecau-cell-obra${refineLocked ? " is-locked" : ""}"></div>
-          <div id="cfin-cred-slot" class="ecau-slot ecau-cell-cred${refineLocked ? " is-locked" : ""}"></div>
+          <div id="cfin-cc-slot" class="ecau-slot ecau-cell-obra"></div>
+          <div id="cfin-cred-slot" class="ecau-slot ecau-cell-cred"></div>
           <div class="form-group ecau-search ecau-cell-titulo${refineLocked ? " is-locked" : ""}">
             <label>Título</label>
             <input type="search" class="form-control" placeholder="Título ou nº do documento"
@@ -2134,7 +2230,6 @@ ComprasControleApp.renderPage = function () {
             </div>
           </div>
         </div>
-        <p class="cprev-hint">Com Empresas em Todos, a consulta usa só as que estão com Gerida pelo grupo ligada. A lista sai da base diária, com 6 meses antes e 6 meses depois de hoje. O mês atual abre junto com a tela; outro vencimento dentro dessa janela também vem da base, sem nova consulta ao Sienge. Empreendimento, credor, título, tipo e departamento só filtram a lista. O processamento bancário segue em segundo plano. Cada título aparece uma vez, com o valor inteiro. Se houver vários centros de custo, use <strong>Agrupado</strong> para ver o rateio. Clique na linha para ver o título, os anexos e a forma de pagamento programada.</p>
         ${this.departmentScopeNote() ? `<p class="cprev-hint">${this.esc(this.departmentScopeNote())}</p>` : ""}
       </div>
       <div id="cfin-kpis" class="ccom-kpis cprev-kpis"></div>
@@ -2156,6 +2251,8 @@ ComprasControleApp.init = async function () {
   }
   if (this._boot) return;
   this._boot = true;
+  this.carregarCredores();
+  this.garantirEmpreendimentos();
   if (!this.state.inited) {
     const range = this.defaultRange();
     this.state.startDate = range.startDate;

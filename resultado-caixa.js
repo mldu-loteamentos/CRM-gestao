@@ -1112,8 +1112,7 @@ const ResultadoCaixaApp = {
     if (lado === "entradas") {
       return [
         { pai: "01", filhos: /^01(\.\d+)+$/ },
-        { pai: "09.01", filhos: /^09\.01(\.\d+)*$/ },
-        { pai: "09.03", filhos: /^09\.03(\.\d+)*$/ }
+        { pai: "09.01", filhos: /^09\.01(\.\d+)*$/ }
       ];
     }
     return [
@@ -1814,7 +1813,7 @@ const ResultadoCaixaApp = {
   noAceito(lado) {
     return (id) => {
       const s = String(id || "");
-      if (lado === "entradas") return s === "g_01" || s.startsWith("g_01_") || s === "g_09_01" || s.startsWith("g_09_01_") || s === "g_09_03" || s.startsWith("g_09_03_");
+      if (lado === "entradas") return s === "g_01" || s.startsWith("g_01_") || s === "g_09_01" || s.startsWith("g_09_01_");
       return this.contasSaida().some((def) => this.casaNo(s, def));
     };
   },

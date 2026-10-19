@@ -560,15 +560,7 @@ const FluxoCaixaDiarioApp = {
   },
 
   abasHtml() {
-    const itens = [
-      ["movimento", "Movimento", "calendar-range"],
-      ["receber", "A receber", "arrow-down-left"],
-      ["pagar", "A pagar", "arrow-up-right"]
-    ];
-    return `<div class="ml-tabs cxd-abas" role="tablist">${itens.map(([id, nome, icon]) => {
-      const on = this.aba === id;
-      return `<button type="button" role="tab" class="ml-tab${on ? " is-active" : ""}" aria-selected="${on}" onclick="FluxoCaixaDiarioApp.setAba('${id}')"><i data-lucide="${icon}"></i> ${nome}</button>`;
-    }).join("")}</div>`;
+    return "";
   },
 
   mesesRadarHtml() {
@@ -2221,7 +2213,7 @@ const FluxoCaixaDiarioApp = {
   },
 
   /** empreendimento - unidade (título) NOME DO CLIENTE */
-  resumoLinha(it) {
+  resumoLinha(it, opts) {
     if (!it) return "—";
     if (this.ehPagar(it)) {
       const credor = String(it.credor).trim().toUpperCase();
@@ -2231,9 +2223,10 @@ const FluxoCaixaDiarioApp = {
     const emp = this.nomeEmp(it).toUpperCase() || String(it.cc || it.ccId || "").trim();
     const un = String(it.unidade || "").trim() || (it.outra ? String(it.documento || "").trim() : "");
     const prevista = !it.real && !it.outra && !!(it.titulo || it.billId);
+    const semParcela = !!(opts && opts.semParcela);
     const tit = prevista
-      ? ["Título " + (it.titulo || it.billId), it.parcela ? "Parcela " + it.parcela : (it.vencimento ? "venc. " + caixaFmtDate(it.vencimento) : "")].filter(Boolean).join(" · ")
-      : [it.titulo || it.billId, it.parcela].filter(Boolean).join("/");
+      ? ["Título " + (it.titulo || it.billId), !semParcela && it.parcela ? "Parcela " + it.parcela : (it.vencimento ? "venc. " + caixaFmtDate(it.vencimento) : "")].filter(Boolean).join(" · ")
+      : [it.titulo || it.billId, !semParcela && it.parcela].filter(Boolean).join("/");
     const nome = String(it.cliente || it.credor || it.party || "").trim().toUpperCase();
     if (it.real && !un && !tit) return nome || String(it.historico || "Movimento").trim() || "—";
     const corpo = [emp, un].filter(Boolean).join(" - ");
@@ -2818,6 +2811,117 @@ const FluxoCaixaDiarioApp = {
     return out;
   },
 
+  /** Movimento que é só juros ou só desconto do recebimento, sem a parcela em si. */
+  tipoAcessorio(it) {
+    const nomes = [];
+    if (it && Array.isArray(it.planos) && it.planos.length) nomes.push.apply(nomes, it.planos);
+    else if (it && it.plano) nomes.push(it.plano);
+    else if (it && it.historico) nomes.push(it.historico);
+    const norm = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    const hits = nomes.map(norm).filter(Boolean);
+    if (!hits.length || !hits.every((n) => /JUROS|DESCONTO/.test(n))) return "";
+    return hits.some((n) => /DESCONTO/.test(n)) ? "desconto" : "juros";
+  },
+
+  notaAcessorio(itens) {
+    const soma = { juros: 0, desconto: 0 };
+    (itens || []).forEach((x) => {
+      const tipo = this.tipoAcessorio(x.it || x);
+      if (tipo) soma[tipo] += Number((x.it || x).valor) || 0;
+    });
+    const partes = [];
+    if (Math.abs(soma.juros) >= 0.005) partes.push("juros " + caixaMoney(soma.juros));
+    if (Math.abs(soma.desconto) >= 0.005) partes.push("desconto " + caixaMoney(soma.desconto));
+    return partes.length ? `<span class="cxd-extra">${partes.join(" · ")}</span>` : "";
+  },
+
+  /**
+   * Contas recebidas do extrato: um título por linha. Juros e desconto ficam nessa linha.
+   * Várias parcelas do mesmo título abrem numa lista.
+   */
+  linhasRecebidas(lista, date) {
+    const soltos = [];
+    const grupos = {};
+    const ordem = [];
+    (lista || []).forEach((x) => {
+      const tit = String((x.it && (x.it.billId || x.it.titulo)) || "").trim();
+      if (!tit) { soltos.push(x); return; }
+      if (!grupos[tit]) {
+        grupos[tit] = { tit, itens: [] };
+        ordem.push(tit);
+      }
+      grupos[tit].itens.push(x);
+    });
+    const blocos = [];
+    const clickDe = (x) => {
+      if (!x) return "";
+      if (x.it.outra && (x.it.titulo || x.it.billId)) {
+        return `onclick="FluxoCaixaDiarioApp.openRecebimento('${date}',${x.i})" title="Abrir o título a receber"`;
+      }
+      const abre = !!((x.it.customerId || x.it.clientId) && x.it.billId);
+      return abre ? `onclick="FluxoCaixaDiarioApp.openEntrada('${date}',${x.i})"` : "";
+    };
+    const linhaSimples = (x) => {
+      blocos.push({ valor: Number(x.it.valor) || 0, html: this.linhaDetalhe(x.it, "cxd-det-in", clickDe(x)) });
+    };
+    soltos.forEach(linhaSimples);
+    ordem.forEach((tit) => {
+      const g = grupos[tit];
+      if (g.itens.length < 2) { linhaSimples(g.itens[0]); return; }
+      const principais = g.itens.filter((x) => !this.tipoAcessorio(x.it));
+      const acessorios = g.itens.filter((x) => this.tipoAcessorio(x.it));
+      const porParc = {};
+      const base = principais.length ? principais : g.itens;
+      base.forEach((x) => {
+        const p = String(x.it.parcela || "").trim() || "—";
+        if (!porParc[p]) porParc[p] = [];
+        porParc[p].push(x);
+      });
+      if (principais.length) {
+        acessorios.forEach((x) => {
+          const p = String(x.it.parcela || "").trim();
+          const chaves = Object.keys(porParc);
+          const destino = (p && porParc[p]) ? p : (chaves.length === 1 ? chaves[0] : "");
+          if (destino) porParc[destino].push(x);
+          else {
+            if (!porParc["—"]) porParc["—"] = [];
+            porParc["—"].push(x);
+          }
+        });
+      }
+      const parcelas = Object.keys(porParc).filter((p) => porParc[p].some((x) => !this.tipoAcessorio(x.it)));
+      const varias = parcelas.length > 1;
+      const baseItem = (principais.slice().sort((a, b) => (Number(b.it.valor) || 0) - (Number(a.it.valor) || 0))[0]) || g.itens[0];
+      const total = g.itens.reduce((s, x) => s + (Number(x.it.valor) || 0), 0);
+      const nota = this.notaAcessorio(acessorios);
+      const id = "parc:" + date + ":" + tit;
+      const aberto = this.detOpen[id] === true;
+      const abre = clickDe(baseItem);
+      const nParc = parcelas.length;
+      const dica = this.dicaLinha(baseItem.it);
+      let html = `<tr class="cxd-det-in${abre ? " cxd-click" : ""}" ${abre}>
+          <td class="cxd-desc cxd-tip">${varias ? `<button type="button" class="cxd-abre" onclick="event.stopPropagation(); FluxoCaixaDiarioApp.toggleGrupo('${id}')"><i data-lucide="${aberto ? "chevron-down" : "chevron-right"}" style="width:14px;height:14px;"></i></button>` : ""}${caixaEsc(this.resumoLinha(baseItem.it, varias ? { semParcela: true } : null))}${varias ? `<button type="button" class="cxd-abre" onclick="event.stopPropagation(); FluxoCaixaDiarioApp.toggleGrupo('${id}')">${nParc} parcelas</button>` : ""}${nota}${dica ? `<span class="cxd-tip-box">${dica}</span>` : ""}</td>
+          <td class="cxd-num">${caixaMoney(total)}</td>
+        </tr>`;
+      if (varias && aberto) {
+        parcelas.sort((a, b) => (Number(a) || 0) - (Number(b) || 0));
+        html += parcelas.map((p) => {
+          const itens = porParc[p];
+          const soma = itens.reduce((s, x) => s + (Number(x.it.valor) || 0), 0);
+          const ref = itens.slice().sort((a, b) => (Number(b.it.valor) || 0) - (Number(a.it.valor) || 0))[0];
+          const abreP = clickDe(ref);
+          return `<tr class="cxd-det-in cxd-parc${abreP ? " cxd-click" : ""}" ${abreP}>
+              <td class="cxd-desc">Parcela ${caixaEsc(p)}${this.notaAcessorio(itens)}</td>
+              <td class="cxd-num">${caixaMoney(soma)}</td>
+            </tr>`;
+        }).join("");
+      }
+      blocos.push({ valor: total, html });
+    });
+    blocos.sort((a, b) => b.valor - a.valor);
+    return blocos.map((l) => l.html).join("");
+  },
+
   linhaDetalhe(it, cls, click) {
     const dica = this.dicaLinha(it);
     return `<tr class="${cls}${click ? " cxd-click" : ""}" ${click || ""}>
@@ -2890,7 +2994,7 @@ const FluxoCaixaDiarioApp = {
     outros.sort(porValor);
     reais.sort(porValor);
     const linhasOutros = outros.map(linhaIn).join("");
-    const linhasReais = reais.map(linhaIn).join("");
+    const linhasReais = this.linhasRecebidas(reais, d.date);
     const saidas = (d.pagarItens || []).slice().sort((a, b) => (Number(b.valor) || 0) - (Number(a.valor) || 0));
     const linhaSaida = (it) => {
       const abre = !!it.titulo;
@@ -3237,6 +3341,10 @@ const FluxoCaixaDiarioApp = {
         #fluxo-caixa-diario-root .cxd-analitico thead th.cxd-num { text-align:right; }
         #fluxo-caixa-diario-root .cxd-analitico td { overflow:hidden; text-overflow:ellipsis; }
         #fluxo-caixa-diario-root .cxd-analitico td.cxd-desc { white-space:normal; }
+        #fluxo-caixa-diario-root .cxd-extra { display:inline; margin-left:8px; font-weight:600; font-size:.72rem; color:#64748b; }
+        #fluxo-caixa-diario-root .cxd-abre { border:0; background:transparent; color:#105436; font-weight:700; font-size:.72rem; cursor:pointer; padding:0 0 0 6px; vertical-align:middle; }
+        #fluxo-caixa-diario-root tr.cxd-parc td { font-weight:600; color:#475569; }
+        #fluxo-caixa-diario-root tr.cxd-parc td.cxd-desc { padding-left:28px; }
         #fluxo-caixa-diario-root .cxd-analitico td.cxd-plano { white-space:nowrap; color:#334155 !important; }
         #fluxo-caixa-diario-root .cxd-muted { color:#94a3b8; }
         #fluxo-caixa-diario-root .cxd-org, #fluxo-caixa-diario-root .cxd-conc { display:inline-block; font-size:.68rem; font-weight:700; border-radius:999px; padding:2px 8px; white-space:nowrap; }
@@ -3269,9 +3377,7 @@ const FluxoCaixaDiarioApp = {
           </div>
           <p id="cxd-progress" style="margin:0 0 10px;color:#105436;font-size:0.8rem;font-weight:600;" ${this.progress ? "" : "hidden"}>${caixaEsc(this.progress || "")}</p>
           ${this.error ? `<div style="margin-bottom:10px;padding:10px;background:#fff7ed;color:#9a3412;border-radius:8px;font-size:0.82rem;">${caixaEsc(this.error)}</div>` : ""}
-          ${this.aba === "receber" ? this.receberHtml() : ""}
-          ${this.aba === "pagar" ? this.pagarHtml() : ""}
-          <div class="cxd-miolo-mov" style="${this.aba === "movimento" ? "" : "display:none"}">
+          <div class="cxd-miolo-mov">
           <p class="cxd-title">CONTAS COM SALDO <span>· ligue as contas que entram no caixa</span></p>
           ${this.contasHtml()}
           <div class="cxd-saldo-ini"><span>${iniLabel}</span><span>${caixaMoney(saldoInicial)}</span></div>

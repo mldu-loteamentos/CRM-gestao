@@ -904,6 +904,9 @@ window.VerificarConstrucaoApp = {
     },
 
     init() {
+        if (this._opening) return;
+        this._opening = true;
+        setTimeout(() => { this._opening = false; }, 0);
         this.render();
         this._subscribeObrasAndamento();
         this.loadData();
@@ -1156,10 +1159,33 @@ window.VerificarConstrucaoApp = {
         document.body.appendChild(wrapper);
     },
 
+    async lerClientesDoBatimento() {
+        const fc = window.firebaseCollections;
+        if (!window.firebaseDb || !fc || !fc.getDoc || !fc.doc) return null;
+        const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+        const metaSnap = await fc.getDoc(fc.doc(window.firebaseDb, "vistoria_batimento", "_meta"));
+        const metaOk = metaSnap && (typeof metaSnap.exists === "function" ? metaSnap.exists() : metaSnap.exists);
+        if (!metaOk) return null;
+        const meta = metaSnap.data() || {};
+        if (meta.date !== hoje || !Number(meta.parts)) return null;
+        const clients = [];
+        for (let i = 0; i < Number(meta.parts); i++) {
+            const snap = await fc.getDoc(fc.doc(window.firebaseDb, "vistoria_batimento", hoje + "_p" + i));
+            const ok = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+            if (!ok) continue;
+            try {
+                const chunk = JSON.parse((snap.data() || {}).data || "[]");
+                if (Array.isArray(chunk)) clients.push.apply(clients, chunk);
+            } catch (e) {}
+        }
+        return clients;
+    },
+
     async loadData() {
         const loading = document.getElementById('vc-loading');
         const results = document.getElementById('vc-results');
         const btnWpp = document.getElementById('btn-solicitar-wpp');
+        if (!loading || !results) return;
 
         loading.style.display = 'block';
         results.style.display = 'none';
@@ -1169,7 +1195,10 @@ window.VerificarConstrucaoApp = {
         const recurrenceDays = _vcGetRecurrenceDays();
 
         try {
-            const clients = window.rawClientList || (window.AppState && window.AppState.sales) || [];
+            const doBatimento = await this.lerClientesDoBatimento();
+            const clients = (doBatimento && doBatimento.length)
+                ? doBatimento
+                : (window.rawClientList || (window.AppState && window.AppState.sales) || []);
             // Filter will be applied after loading checksByContract
             const checksByContract = {};
             const completedChecksByContract = {};
@@ -1454,7 +1483,7 @@ window.VerificarConstrucaoApp = {
             this.renderedRows = [];
 
             const missingRefs = rows.filter(_vcMissingClientRef);
-            if (missingRefs.length) {
+            if (missingRefs.length && !(doBatimento && doBatimento.length)) {
                 loading.innerHTML = `Recuperando cliente e título pela unidade (${missingRefs.length})...`;
                 await this.enrichMissingContractData(rows);
                 rows.forEach((r, i) => r.originalIdx = i);
@@ -1471,7 +1500,10 @@ window.VerificarConstrucaoApp = {
 
         } catch (e) {
             console.error('[Vistoria] Erro ao carregar dados:', e);
-            loading.innerHTML = '<span style="color:red">Erro ao carregar os dados: ' + e.message + '</span>';
+            if (loading) {
+                loading.style.display = 'block';
+                loading.innerHTML = '<span style="color:red">Erro ao carregar os dados: ' + (e && e.message ? e.message : e) + '</span>';
+            }
         }
     },
 
@@ -3062,6 +3094,4 @@ document.addEventListener("DOMContentLoaded", () => {
             window.checkNexDueAlerts();
         }
     }, 3000);
-});
-
 });

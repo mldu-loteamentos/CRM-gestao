@@ -295,6 +295,13 @@ const FiscalApp = {
     const last = new Date(fimAno, fimMes, 0).getDate();
     const end = `${meses[meses.length - 1]}-${String(last).padStart(2, "0")}`;
     try {
+      if (!(window.AppState && ((AppState.companies && AppState.companies.length) || (AppState.cachedCompanies && AppState.cachedCompanies.length))) && window.SiengeApiService && typeof SiengeApiService.getCompanies === "function") {
+        try {
+          const lista = await SiengeApiService.getCompanies();
+          window.AppState = window.AppState || {};
+          if (lista && lista.length) AppState.companies = lista;
+        } catch (e) {}
+      }
       const ids = Array.from(geridas);
       let lidos = 0;
       const chunks = await Promise.all(ids.map(async (id) => {
@@ -361,14 +368,17 @@ const FiscalApp = {
             if (valor > 0 && !FC.isEstornoName(a.categoryName)) valor = -Math.abs(valor);
           }
           if (papel === "redutora" && valor > 0 && !FC.isEstornoName(a.categoryName) && (tag === "Base de Dedução" || !(node && FC.isRevenueGroup(node.id)))) valor = -Math.abs(valor);
+          const cliente = String(mov.clientName || mov.creditorName || "").trim();
           linhas.push({
             companyId: Number(mov.companyId),
             companyName: this.nomeEmpresa(mov.companyId, mov),
             month: FC.movMonth(mov),
             ccId: a.costCenterId != null && String(a.costCenterId).trim() !== "" ? String(a.costCenterId) : "—",
             ccName: String(a.costCenterName || "").trim(),
+            cliente,
             bucket,
             papel,
+            grupo: this.clienteDoGrupo(cliente, mov.companyId),
             categoryId: FC.formatAccountCode(a.categoryId) || String(a.categoryId),
             categoryName: a.categoryName || "",
             valor: valor
@@ -403,9 +413,29 @@ const FiscalApp = {
     const linhas = (FiscalState.linhas || []).filter((l) => meses.includes(l.month));
     const empresas = {};
     const contas = {};
+    const receitaCliente = {};
+    linhas.forEach((l) => {
+      if (l.semMarca || l.grupo || !(l.valor > 0)) return;
+      if (this.ehDescontoJuros(l.categoryId, l.categoryName)) return;
+      if (!this.entraNaEmpresa(l.ccId, l.ccName)) return;
+      if (l.bucket !== "vendas" && l.bucket !== "servicos") return;
+      const k = `${l.companyId}|${l.month}|${this.normEmp(l.cliente)}`;
+      receitaCliente[k] = (receitaCliente[k] || 0) + l.valor;
+    });
     linhas.forEach((l) => {
       const c = empresas[l.companyId] || (empresas[l.companyId] = this.empresaVazia(l.companyId, l.companyName));
-      const entra = l.semMarca ? false : this.entraNaEmpresa(l.ccId, l.ccName);
+      let valor = l.valor;
+      let foraDesconto = false;
+      const corporativo = String((this.customCc(l.ccId) || {}).tipo_cc || "") === "Corporativo";
+      if (!l.semMarca && !l.grupo && corporativo && this.ehDescontoJuros(l.categoryId, l.categoryName)) {
+        const k = `${l.companyId}|${l.month}|${this.normEmp(l.cliente)}`;
+        const cabe = Math.max(0, receitaCliente[k] || 0);
+        const reduzir = Math.min(cabe, Math.abs(Number(valor) || 0));
+        receitaCliente[k] = cabe - reduzir;
+        if (reduzir <= 0.004) foraDesconto = true;
+        else valor = valor < 0 ? -reduzir : reduzir;
+      }
+      const entra = (l.semMarca || l.grupo || foraDesconto) ? false : this.entraNaEmpresa(l.ccId, l.ccName);
       const k = `${l.categoryId}|${l.papel}|${l.bucket}${l.semMarca ? "|fora" : ""}`;
       const acc = c.contas[k] || (c.contas[k] = Object.assign(this.empresaVazia(l.categoryId, l.categoryName || l.categoryId), {
         papel: l.papel, bucket: l.bucket, ccs: {}
@@ -413,9 +443,12 @@ const FiscalApp = {
       acc.name = l.categoryName || acc.name;
       acc.papel = l.papel;
       acc.bucket = l.bucket;
-      const cc = acc.ccs[l.ccId] || (acc.ccs[l.ccId] = this.empresaVazia(l.ccId, l.ccName || l.ccId));
+      const ccKey = l.ccId + (l.grupo ? "|grupo" : (foraDesconto ? "|desc" : ""));
+      const cc = acc.ccs[ccKey] || (acc.ccs[ccKey] = this.empresaVazia(l.ccId, l.ccName || l.ccId));
       cc.name = l.ccName || cc.name || l.ccId;
       cc.entra = entra;
+      cc.grupo = !!l.grupo;
+      cc.foraDesconto = !!foraDesconto;
       cc.semMarca = !!l.semMarca;
       acc.semMarca = !!l.semMarca;
       if (l.semMarca) {
@@ -423,12 +456,13 @@ const FiscalApp = {
         cc.aviso = (cc.aviso || 0) + l.valor;
         return;
       }
-      this.somar(cc, l);
+      const linha = valor === l.valor ? l : Object.assign({}, l, { valor });
+      this.somar(cc, linha);
       if (!entra) return;
-      this.somar(c, l);
-      this.somar(acc, l);
+      this.somar(c, linha);
+      this.somar(acc, linha);
       const g = contas[k] || (contas[k] = { id: l.categoryId, name: l.categoryName, papel: l.papel, bucket: l.bucket, valor: 0 });
-      g.valor += l.valor;
+      g.valor += linha.valor;
       if (l.categoryName) g.name = l.categoryName;
     });
     const lista = Object.values(empresas).map((c) => {
@@ -477,7 +511,25 @@ const FiscalApp = {
     const tipo = String(custom.tipo_cc || "");
     const parceiro = /parce(ir|ri)/i.test(String(ccName || "")) && tipo !== "Corporativo";
     if (parceiro) return false;
+    if (tipo === "Corporativo") return true;
     return custom.imposto_pago_empresa === true;
+  },
+
+  normEmp(s) {
+    return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9 ]/gi, " ").replace(/\s+/g, " ").trim().toUpperCase();
+  },
+
+  /* Receita cobrada de outra empresa do grupo (taxa de administração da SPE) não é faturamento desta empresa. */
+  clienteDoGrupo(cliente, companyId) {
+    const nome = this.normEmp(cliente);
+    if (nome.length < 12 || !/\b(LTDA|SPE|EPP|EIRELI|S A)\b/.test(nome)) return false;
+    const lista = (window.AppState && (AppState.companies || AppState.cachedCompanies)) || [];
+    return lista.some((c) => {
+      if (!c || Number(c.id) === Number(companyId)) return false;
+      const emp = this.normEmp(c.name || c.tradeName || "");
+      if (emp.length < 12) return false;
+      return nome === emp || nome.startsWith(emp) || emp.startsWith(nome);
+    });
   },
 
   somarConta(alvo, l) {
@@ -1283,7 +1335,9 @@ const FiscalApp = {
         const ccs = (acc.ccs || []).filter((cc) => this.temMovimento(cc, aba)).map((cc) => {
           const motivo = cc.semMarca
             ? "Sem marca fiscal no plano — não entra na soma"
-            : (cc.entra ? "" : (/parce(ir|ri)/i.test(String(cc.name || "")) ? "Parceiro — não entra na soma" : "Sem imposto pago pela empresa — não entra na soma"));
+            : (cc.grupo ? "Empresa do grupo — não entra na soma"
+              : (cc.foraDesconto ? "Desconto sem receita tributável — não entra na soma"
+                : (cc.entra ? "" : (/parce(ir|ri)/i.test(String(cc.name || "")) ? "Parceiro — não entra na soma" : "Sem imposto pago pela empresa — não entra na soma"))));
           const baseCc = cc.semMarca ? cc.aviso : this.valorAba(cc, aba);
           return `<div class="fim-cc${cc.entra ? "" : " fim-fora"}">
             <div class="fim-linha" style="${estilo}">
@@ -1329,7 +1383,7 @@ const FiscalApp = {
         <div class="fim-filhos" id="fim-box-${empKey}" ${aberto ? "" : "hidden"}>${contas}</div>
       </div>`;
     }).join("");
-    return `<p class="fim-muted">A empresa abre as contas financeiras. A conta abre o centro de custo. Linha zerada fica de fora. Parceiro, centro sem imposto pago pela empresa e conta de receita sem marca no plano ficam riscados e fora da soma.</p><div class="fim-scroll">
+    return `<p class="fim-muted">A empresa abre as contas financeiras. A conta abre o centro de custo. Linha zerada fica de fora. Parceiro, centro sem imposto pago pela empresa, receita de outra empresa do grupo e conta sem marca no plano ficam riscados e fora da soma. O centro corporativo entra, porque o imposto é da própria empresa.</p><div class="fim-scroll">
       <div class="fim-head" style="${estilo}"><span>Empresa / conta / centro de custo</span><span>${headBase}</span><span>${colImp}</span>${aba === "irpj" ? "<span>Adicional</span>" : ""}${comProv ? "<span>Provisão de janeiro</span>" : ""}<span></span></div>
       ${linhas}
     </div>`;

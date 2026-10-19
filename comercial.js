@@ -205,6 +205,124 @@ const ComercialApp = {
     this._loadTicker = null;
   },
 
+  hojeIso() {
+    try {
+      return new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+    } catch (e) {
+      const d = new Date();
+      return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    }
+  },
+
+  setLoadText(text) {
+    const el = document.getElementById("comercial-load-text");
+    if (el && text) el.textContent = text;
+  },
+
+  diaDaVenda(c) {
+    return String((c && (c.issueDate || c.contractDate || c.saleDate)) || "").slice(0, 10);
+  },
+
+  diaDoDistrato(c) {
+    return String((c && (c.cancellationDate || c.cancelDate)) || "").slice(0, 10);
+  },
+
+  async paginasSienge(baseUrl) {
+    let allResults = [];
+    let offset = 0;
+    const limit = 200;
+    let hasMore = true;
+    while (hasMore) {
+      const url = baseUrl + "&limit=" + limit + "&offset=" + offset;
+      const res = await siengeFetchWithRetry(url).catch(() => ({ results: [] }));
+      const results = res.results || [];
+      allResults = allResults.concat(results);
+      if (results.length < limit) hasMore = false;
+      else offset += limit;
+    }
+    return allResults;
+  },
+
+  async lerBatimento() {
+    const fc = window.firebaseCollections;
+    if (!window.firebaseDb || !fc || !fc.getDocs || !fc.collection) return [];
+    const snap = await fc.getDocs(fc.collection(window.firebaseDb, "comercial_batimento"));
+    const docs = [];
+    snap.forEach((d) => docs.push(d));
+    const byId = {};
+    docs.forEach((d) => { byId[d.id] = d; });
+    const rows = [];
+    docs.forEach((d) => {
+      if (!d.id || d.id.charAt(0) === "_" || /_p\d+$/.test(d.id)) return;
+      const data = d.data() || {};
+      if (data.year == null || data.month == null) return;
+      let distratos = [];
+      let vendas = [];
+      try { distratos = JSON.parse(data.distratos || "[]"); } catch (e) { distratos = []; }
+      if (data.splitVendas && Number(data.parts) > 0) {
+        for (let i = 0; i < Number(data.parts); i++) {
+          const part = byId[d.id + "_p" + i];
+          let chunk = [];
+          try { chunk = JSON.parse((part && part.data() && part.data().data) || "[]"); } catch (e) { chunk = []; }
+          vendas = vendas.concat(chunk);
+        }
+      } else {
+        try { vendas = JSON.parse(data.vendas || "[]"); } catch (e) { vendas = []; }
+      }
+      rows.push({ year: Number(data.year), month: Number(data.month), vendas: vendas, distratos: distratos });
+    });
+    return rows.sort((a, b) => a.year - b.year || a.month - b.month);
+  },
+
+  async buscarDia(hoje) {
+    const [vAtivas, vCanceladas, vQuitadas, distratos] = await Promise.all([
+      this.paginasSienge("/sales-contracts?situation=2&initialIssueDate=" + hoje + "&finalIssueDate=" + hoje),
+      this.paginasSienge("/sales-contracts?situation=3&initialIssueDate=" + hoje + "&finalIssueDate=" + hoje),
+      this.paginasSienge("/sales-contracts?situation=4&initialIssueDate=" + hoje + "&finalIssueDate=" + hoje),
+      this.paginasSienge("/sales-contracts?situation=3&initialCancelDate=" + hoje + "&finalCancelDate=" + hoje)
+    ]);
+    const seen = new Set();
+    const vendas = [];
+    vAtivas.concat(vCanceladas).concat(vQuitadas).forEach((c) => {
+      const id = String(c && c.id != null ? c.id : "");
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      vendas.push(c);
+    });
+    return { vendas: vendas, distratos: distratos };
+  },
+
+  mesclarDia(hoje, live) {
+    const p = String(hoje || "").split("-");
+    const year = Number(p[0]);
+    const month = Number(p[1]);
+    const rows = (this.state.rawMonths || []).slice();
+    let row = rows.find((r) => r.year === year && r.month === month);
+    if (!row) {
+      row = { year: year, month: month, vendas: [], distratos: [] };
+      rows.push(row);
+    }
+    const vendas = (row.vendas || []).filter((c) => this.diaDaVenda(c) !== hoje);
+    const distratos = (row.distratos || []).filter((c) => this.diaDoDistrato(c) !== hoje);
+    const seenV = new Set(vendas.map((c) => String(c.id)));
+    (live.vendas || []).forEach((c) => {
+      const id = String(c && c.id != null ? c.id : "");
+      if (!id || seenV.has(id)) return;
+      seenV.add(id);
+      vendas.push(c);
+    });
+    const seenD = new Set(distratos.map((c) => String(c.id)));
+    (live.distratos || []).forEach((c) => {
+      const id = String(c && c.id != null ? c.id : "");
+      if (!id || seenD.has(id)) return;
+      seenD.add(id);
+      distratos.push(c);
+    });
+    row.vendas = vendas;
+    row.distratos = distratos;
+    this.state.rawMonths = rows.sort((a, b) => a.year - b.year || a.month - b.month);
+  },
+
   async fetchData(force) {
     if (this.state.loading) return;
     this.fillFilters();
@@ -220,6 +338,24 @@ const ComercialApp = {
     this.startLoadTicker();
 
     try {
+      this.setLoadText("Lendo o batimento das 7h…");
+      let cloud = [];
+      try { cloud = await this.lerBatimento(); } catch (e) { cloud = []; }
+      if (cloud.length) {
+        this.state.rawMonths = cloud;
+        const hoje = this.hojeIso();
+        this.setLoadText("Atualizando vendas e distratos de hoje…");
+        this._loadCap = 70;
+        const live = await this.buscarDia(hoje);
+        this.mesclarDia(hoje, live);
+        this.state.loaded = true;
+        this.state.updatedAt = new Date();
+        this.stopLoadTicker();
+        this.setLoadProgress(100);
+        this.updateDashboardUI();
+        return;
+      }
+      this.setLoadText("Buscando vendas e distratos no Sienge…");
       const monthsNeeded = [];
       for (let y = year - 1; y <= year; y++) {
         const last = y === year ? maxMonth : 12;
@@ -228,21 +364,7 @@ const ComercialApp = {
       const have = new Set((this.state.rawMonths || []).map((r) => `${r.year}-${r.month}`));
       const monthsToFetch = force ? monthsNeeded : monthsNeeded.filter((m) => !have.has(`${m.year}-${m.month}`));
 
-      const fetchAllPages = async (baseUrl) => {
-        let allResults = [];
-        let offset = 0;
-        const limit = 200;
-        let hasMore = true;
-        while (hasMore) {
-          const url = `${baseUrl}&limit=${limit}&offset=${offset}`;
-          const res = await siengeFetchWithRetry(url).catch(() => ({ results: [] }));
-          const results = res.results || [];
-          allResults = allResults.concat(results);
-          if (results.length < limit) hasMore = false;
-          else offset += limit;
-        }
-        return allResults;
-      };
+      const fetchAllPages = (baseUrl) => this.paginasSienge(baseUrl);
 
       const totalMeses = Math.max(monthsToFetch.length, 1);
       let mesesProntos = 0;
