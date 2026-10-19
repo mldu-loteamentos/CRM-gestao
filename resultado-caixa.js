@@ -604,7 +604,7 @@ const ResultadoCaixaApp = {
       mapa = null;
     }
     const aceita = this.noAceito(lado);
-    const ajuste = lado === "saidas" ? -1 : 1;
+    const ajuste = 1;
     let total = 0;
     let algum = false;
     Object.keys(f.contas).forEach((cc) => {
@@ -1929,7 +1929,7 @@ const ResultadoCaixaApp = {
     const ano = this.anoAtual();
     if (!ano || !window.FluxoCaixaApp || !window.SiengeApiService) return;
     const uso = this.empresasUsadas();
-    const key = (ano - 1) + "|" + (Number(this.mes) || 1) + "|" + lado + "|" + uso.ids.join(",");
+    const key = (ano - 1) + "|12|" + lado + "|" + uso.ids.join(",");
     if (this._dfcKey === key || this._dfcPedido === key) return;
     this._dfcPedido = key;
     this.pedirDfc(lado, key);
@@ -1944,7 +1944,7 @@ const ResultadoCaixaApp = {
     this.render();
     try {
       const ant = this.anoAtual() - 1;
-      const linhas = await this.lerDfc(ant, Number(this.mes) || 1, lado);
+      const linhas = await this.lerDfc(ant, 12, lado);
       if (this._dfcToken !== token) return;
       this.dfcLinhas = linhas;
       this._dfcKey = key;
@@ -2099,14 +2099,16 @@ const ResultadoCaixaApp = {
   },
 
   pct(real, orc) {
-    if (Math.abs(orc) < 0.5) return Math.abs(real) < 0.5 ? 0 : (real > 0 ? 100 : -100);
-    return ((real - orc) / Math.abs(orc)) * 100;
+    const base = Number(orc) || 0;
+    const r = Number(real) || 0;
+    if (Math.abs(base) < 0.5) return Math.abs(r) < 0.5 ? 0 : (r > 0 ? 100 : -100);
+    return ((r - base) / base) * 100;
   },
 
   celVar(real, orc, saida) {
     const v = real - orc;
-    const ruim = saida ? v > 0.5 : v < -0.5;
-    const bom = saida ? v < -0.5 : v > 0.5;
+    const ruim = v < -0.5;
+    const bom = v > 0.5;
     const cls = ruim ? "is-neg" : (bom ? "is-pos" : "");
     const p = this.pct(real, orc);
     const pTxt = p == null ? "—" : (p.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%");
@@ -2189,7 +2191,7 @@ const ResultadoCaixaApp = {
     const chipForecast = this.chipsForecast();
     const agrupa = this.agrupar ? " Com “% Moura Leite”, cada valor está no percentual da Moura Leite cadastrado na empresa." : "";
     const mesNomeFaixa = nomesMes[(Number(this.mes) || 1) - 1] || "";
-    const base = "Orçado e realizado de " + (atual || "—") + " vêm do arquivo enviado para " + mesNomeFaixa + ". A coluna do ano anterior é o realizado do arquivo de " + (antN || "o ano anterior") + ", o mesmo em todos os meses.";
+    const base = "Orçado e realizado de " + (atual || "—") + " vêm do arquivo enviado para " + mesNomeFaixa + ". A coluna do ano anterior é o caixa do Sienge na visão DFC, com o percentual da Moura Leite, como no Power BI.";
     const nota = lado === "entradas"
       ? base + " Livia, Livia I e Livia II aparecem como Central Parque. Empreendimentos com o mesmo nome ganham a sigla da cidade. MLDU aparece como Corporativo. Os quatro maiores desvios positivos e os quatro negativos do acumulado ficam à vista; o restante abre ao clicar em Outros."
         + " No gráfico de linhas, a linha do ano atual é o realizado até o mês escolhido. Cada mês seguinte, até dezembro, usa o forecast enviado nesta tela, pelas mesmas contas da visão DFC (Receitas e receitas financeiras)." + agrupa
@@ -2276,12 +2278,12 @@ const ResultadoCaixaApp = {
       { cls: "is-orc", rotulo: "Orçado", valor: total.orc },
       { cls: "is-real", rotulo: atual ? String(atual) : "Atual", valor: total.real }
     ];
-    const maior = Math.max(...barras.map((b) => (b.espera ? 0 : Math.max(0, b.valor))), 1);
+    const maior = Math.max(...barras.map((b) => (b.espera ? 0 : Math.abs(Number(b.valor) || 0))), 1);
     return `<div class="rcx-graf">
       <div class="rcx-graf-tit">${caixaEsc(mesNome.toUpperCase())}</div>
       <div class="rcx-graf-area">
         ${barras.map((b) => {
-          const h = b.espera ? 0 : Math.max(0, b.valor) / maior * 100;
+          const h = b.espera ? 0 : Math.abs(Number(b.valor) || 0) / maior * 100;
           return `<div class="rcx-graf-col ${b.cls}">
             <div class="rcx-graf-track">
               <span class="rcx-graf-val" style="bottom:${h.toFixed(2)}%">${b.espera ? "…" : this.fmt(b.valor)}</span>
@@ -2307,8 +2309,9 @@ const ResultadoCaixaApp = {
       { cls: "is-fc", rotulo: "Forecast", escuro: soma(s.real, 1, sel), claro: sel < 12 ? soma(s.forecast, sel + 1, 12) : 0, marca: sel < 12 && (!this.forecast || s.semForecast.length) }
     ];
     colunas.forEach((c) => {
-      c.escuro = Math.max(0, c.escuro);
-      c.claro = Math.max(0, c.claro);
+      c.rotuloValor = c.escuro + c.claro;
+      c.escuro = Math.abs(c.escuro);
+      c.claro = Math.abs(c.claro);
       c.total = c.escuro + c.claro;
     });
     const maior = Math.max(...colunas.map((c) => c.total), 1);
@@ -2331,7 +2334,7 @@ const ResultadoCaixaApp = {
           const h = (c.total / maior * 100).toFixed(2);
           return `<div class="rcx-graf-col ${c.cls}">
           <div class="rcx-graf-track">
-          <span class="rcx-graf-val" style="bottom:${h}%">${this.fmt(c.total)}${c.marca ? " *" : ""}</span>
+          <span class="rcx-graf-val" style="bottom:${h}%">${this.fmt(c.rotuloValor)}${c.marca ? " *" : ""}</span>
           <div class="rcx-tot-pilha" style="height:${h}%" title="${caixaEsc(c.rotulo)}: ${this.fmt(c.escuro)} até ${mesCurto} + ${this.fmt(c.claro)} até dezembro">
             ${pedaco(c.claro, c.total, "is-claro")}${pedaco(c.escuro, c.total, "is-escuro")}
           </div></div>
@@ -2398,6 +2401,8 @@ const ResultadoCaixaApp = {
     const sel = Number(this.mes) || 1;
     const defs = this.contasSaida();
     const soma = (y, m, campo) => defs.reduce((s, def) => s + this.somaSaidaDef(y, def, m, campo, false), 0);
+    const caixaAnt = this.dfcTem("saidas");
+    const somaDfc = (m) => defs.reduce((s, def) => s + this.valorDfc(def, m, false), 0);
     const fc = this.forecastLado(ano, "saidas");
     const meses = Array.from({ length: 12 }, (_, i) => i + 1);
     const real = meses.map((m) => (m <= sel && this.temMesConta(ano, m) ? soma(ano, m, "r") : null));
@@ -2412,7 +2417,7 @@ const ResultadoCaixaApp = {
       return orc[i];
     });
     return {
-      ant: meses.map((m) => (this.temMesConta(ant, m) ? soma(ant, m, "r") : null)),
+      ant: meses.map((m) => (caixaAnt ? somaDfc(m) : (this.temMesConta(ant, m) ? soma(ant, m, "r") : null))),
       orc,
       real,
       forecast,
@@ -2429,6 +2434,11 @@ const ResultadoCaixaApp = {
 
   graficoLinhasHtml(lado) {
     const s = lado === "saidas" ? this.serieSaidas() : this.serieEntradas();
+    if (lado === "saidas") {
+      ["ant", "orc", "real", "forecast"].forEach((k) => {
+        s[k] = (s[k] || []).map((v) => (v == null ? null : Math.abs(v)));
+      });
+    }
     const ano = this.anoAtual();
     const antN = ano > 1900 ? ano - 1 : 0;
     const sel = Number(this.mes) || 1;
@@ -2578,13 +2588,34 @@ const ResultadoCaixaApp = {
         s += this.somaCodigos(arq.contas, def, mes, campo, ate) * pct;
       }
     });
-    return -s;
+    return s;
+  },
+
+  dfcTem(lado) {
+    const ano = this.anoAtual();
+    const uso = this.empresasUsadas();
+    const key = (ano - 1) + "|12|" + lado + "|" + uso.ids.join(",");
+    return this._dfcKey === key && !this.dfcLendo && (this.dfcLinhas || []).length > 0;
+  },
+
+  valorDfc(def, mes, ate) {
+    const fim = Number(mes) || 1;
+    const ini = ate ? 1 : fim;
+    let s = 0;
+    (this.dfcLinhas || []).forEach((l) => {
+      if (!l || !this.casaNo(l.node, def)) return;
+      if (l.mes < ini || l.mes > fim) return;
+      const fator = this.agrupar && l.empresa ? this.pctEmpresaId(l.empresa) : 1;
+      s += (Number(l.valor) || 0) * fator;
+    });
+    return s;
   },
 
   linhasSaida() {
     const ano = this.anoAtual();
     const ant = ano - 1;
     const mes = Number(this.mes) || 1;
+    const caixaAnt = this.dfcTem("saidas");
     const rows = this.contasSaida().map((def) => {
       const valor = (y, campo, ate) => this.somaSaidaDef(y, def, mes, campo, ate);
       return {
@@ -2592,8 +2623,16 @@ const ResultadoCaixaApp = {
         nome: def.nome,
         destaque: !!def.destaque,
         def: def,
-        mensal: { ant: valor(ant, "r", false), orc: valor(ano, "o", false), real: valor(ano, "r", false) },
-        acum: { ant: valor(ant, "r", true), orc: valor(ano, "o", true), real: valor(ano, "r", true) }
+        mensal: {
+          ant: caixaAnt ? this.valorDfc(def, mes, false) : valor(ant, "r", false),
+          orc: valor(ano, "o", false),
+          real: valor(ano, "r", false)
+        },
+        acum: {
+          ant: caixaAnt ? this.valorDfc(def, mes, true) : valor(ant, "r", true),
+          orc: valor(ano, "o", true),
+          real: valor(ano, "r", true)
+        }
       };
     });
     return { ano, ant, rows };
@@ -2638,6 +2677,7 @@ const ResultadoCaixaApp = {
   },
 
   saidasHtml() {
+    this.garantirDfc("saidas");
     const ano = this.anoAtual();
     if (this.semContas(ano)) {
       return `<p class="rcx-vazio">O arquivo que já estava salvo não guarda as contas. Suba de novo os Excel — pode escolher vários de uma vez — para montar Obras, Repasses, Pessoal e as demais.</p>`;

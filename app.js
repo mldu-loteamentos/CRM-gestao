@@ -10438,7 +10438,11 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
       c.lotesCount = window._lotesCounter[c.customerId] ? window._lotesCounter[c.customerId].size : 1;
   });
   window._lotesCounter = {}; // Clear memory
-  
+
+  if (typeof window.incluirSubjudiceIntegraForaDaCarteira === "function") {
+    window.incluirSubjudiceIntegraForaDaCarteira(rawList);
+  }
+
   const subjudiceList = rawList.filter(c => c.subjudice === "S").concat(
     rawList.filter(c => typeof window.clientIsSubjudiceIntegra === "function" && window.clientIsSubjudiceIntegra(c))
   );
@@ -10927,7 +10931,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
             })()}
           </td>
           <td style="white-space: nowrap; text-align: center; width: 1%;">
-            ${getDelayBadgeHtml(client.maxDaysDelay)}
+            ${(client.distratado && typeof window.clientIsSubjudiceIntegra === "function" && window.clientIsSubjudiceIntegra(client) && typeof window.filaAgingDistratadoHtml === "function") ? window.filaAgingDistratadoHtml() : getDelayBadgeHtml(client.maxDaysDelay)}
           </td>
           <td style="white-space: nowrap; text-align: center; width: 1%;">
             <span>${client.billCount}</span>
@@ -11362,7 +11366,9 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
           <td style="white-space: nowrap; text-align: center; width: 1%;">
             <div style="display: flex; align-items: center; justify-content: center;">
               ${(() => {
-                  const agingInner = (typeof window.clientHasNexCumprida === "function" && window.clientHasNexCumprida(client) && typeof window.getNexCumpridaAgingHtml === "function")
+                  const agingInner = (client.distratado && typeof window.clientIsSubjudiceIntegra === "function" && window.clientIsSubjudiceIntegra(client) && typeof window.filaAgingDistratadoHtml === "function")
+                  ? window.filaAgingDistratadoHtml()
+                  : (typeof window.clientHasNexCumprida === "function" && window.clientHasNexCumprida(client) && typeof window.getNexCumpridaAgingHtml === "function")
                   ? window.getNexCumpridaAgingHtml(client)
                   : (typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(client) : client.subjudice === "S") ? `
               <span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #9ca3af; background-color: #f3f4f6; color: #374151; font-weight: 600;">
@@ -12123,12 +12129,94 @@ function syncCobrancaJudicialTabs(originIsSubjudice, isAdvogado, saleObj) {
   syncJudicialOccurrenceFormLock(saleObj);
 }
 
-window.avisarClienteSubjudice = function(customerId) {
+window.fichaClienteTemSubjudiceSienge = function(customerId, saleId) {
+  const cid = String(customerId || "");
+  const sid = String(saleId || "").replace(/^B-/i, "").split("-")[0];
+  if (!cid) return false;
+  const flag = (v) => (typeof window.valueIsSubjudice === "function")
+    ? window.valueIsSubjudice(v)
+    : (v === "S" || v === true || v === 1 || v === "1");
+  const mesmo = (id) => {
+    if (!sid) return true;
+    return String(id || "").replace(/^B-/i, "").split("-")[0] === sid;
+  };
+  const listas = []
+    .concat(window.rawClientList || [])
+    .concat(window.clientList || [])
+    .concat(window._subjudiceList || [])
+    .concat((typeof AppState !== "undefined" && AppState.defaultersBills) || [])
+    .concat((typeof AppState !== "undefined" && AppState.sales) || []);
+  const doCliente = listas.filter((c) => c && String(c.customerId) === cid && flag(c.subjudice));
+  if (!doCliente.length) return false;
+  if (!sid) return true;
+  return doCliente.some((c) => mesmo(c.saleId) || mesmo(c.receivableBillId) || mesmo(c.id) || mesmo(c.realSaleId)
+    || (Array.isArray(c.billIds) && c.billIds.some(mesmo))) || doCliente.length > 0;
+};
+
+window.fichaDeveAvisarSubjudiceSienge = function(customerId, saleId) {
+  const cid = String(customerId || (typeof AppState !== "undefined" && AppState.selectedCustomerId) || "");
+  const sid = saleId || (typeof AppState !== "undefined" && (AppState.selectedSaleId || AppState.selectedContractId)) || "";
+  if (!cid) return false;
+  const temSienge = window.fichaClienteTemSubjudiceSienge(cid, sid);
+  const integra = typeof window.fichaSubjudiceIntegraAtivo === "function" && window.fichaSubjudiceIntegraAtivo();
+  if (integra && !temSienge) return false;
+  if (temSienge) return true;
+  let mem = null;
+  try {
+    const hist = JSON.parse(localStorage.getItem("subjudiceHistory") || "{}");
+    mem = hist[cid] || hist[Number(cid)] || null;
+  } catch (e) { mem = null; }
+  if (mem && mem.exitDate) return false;
+  if (mem && !mem.exitDate) return true;
+  const notas = (typeof AppState !== "undefined" && AppState.judNotes && (AppState.judNotes[cid] || AppState.judNotes[Number(cid)])) || [];
+  return notas.some((n) => n && n.type === "Judicial" && n.status !== "Cancelada" && n.fase !== "Nota Interna");
+};
+
+window.aplicarTravaSubjudiceNaFicha = function(customerId, nome) {
+  if (typeof window.fichaDeveAvisarSubjudiceSienge === "function"
+    && !window.fichaDeveAvisarSubjudiceSienge(customerId, AppState && (AppState.selectedSaleId || AppState.selectedContractId))) {
+    return;
+  }
+  if (typeof AppState !== "undefined") AppState.isSubjudiceMode = true;
+  const avisoSub = document.getElementById("ficha-subjudice-alerta");
+  if (avisoSub) {
+    avisoSub.style.display = "block";
+    avisoSub.textContent = "Cliente sub judice. O Integra não gera boleto deste contrato. Mesmo com pagamento integral, a emissão fica com o advogado da Moura Leite.";
+  }
+  const btnGerarBoletos = document.getElementById("btn-gerar-boletos-agrupados");
+  if (btnGerarBoletos) btnGerarBoletos.style.display = "none";
+  const simTaxaSelectRef = document.getElementById("simulador-taxa");
+  if (simTaxaSelectRef) {
+    simTaxaSelectRef.value = "1";
+    simTaxaSelectRef.disabled = true;
+  }
+  const simThAcoes = document.querySelector("#simulador-table-container th:last-child");
+  if (simThAcoes) simThAcoes.style.display = "none";
+  ["tab-ocorrencias", "tab-boletos", "tab-vizinhos", "tab-outros", "tab-comportamento"].forEach((tabId) => {
+    const btn = document.querySelector('button[data-target="' + tabId + '"]');
+    if (btn) btn.style.display = "none";
+  });
+  if (typeof window.avisarClienteSubjudice === "function") window.avisarClienteSubjudice(customerId, nome);
+  if (typeof switchCustomerTab === "function") switchCustomerTab("tab-cobranca-judicial");
+  if (typeof renderJudicialTimeline === "function") renderJudicialTimeline();
+  if (typeof syncCobrancaJudicialTabs === "function") syncCobrancaJudicialTabs(true, false);
+};
+
+window.avisarClienteSubjudice = function(customerId, nomeFallback) {
   const antigo = document.getElementById("subjudice-ciente-modal");
   if (antigo) antigo.remove();
   const lista = window._subjudiceList || [];
   const cliente = lista.find((c) => c && String(c.customerId) === String(customerId));
-  const nome = cliente && cliente.customerName ? String(cliente.customerName).trim() : "";
+  let nome = cliente && cliente.customerName ? String(cliente.customerName).trim() : "";
+  if (!nome && nomeFallback) nome = String(nomeFallback).replace(/\s+/g, " ").trim();
+  if (!nome && typeof AppState !== "undefined" && AppState.customers && AppState.customers[customerId]) {
+    nome = String(AppState.customers[customerId].name || "").trim();
+  }
+  if (!nome) {
+    const det = document.getElementById("det-name");
+    const t = det ? String(det.textContent || "").replace(/\s+/g, " ").trim() : "";
+    if (t && t !== "Carregando...") nome = t;
+  }
   const esc = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
   const modal = document.createElement("div");
   modal.id = "subjudice-ciente-modal";
@@ -12137,7 +12225,7 @@ window.avisarClienteSubjudice = function(customerId) {
   modal.innerHTML = `
     <div style="background:#fff;border-radius:12px;max-width:460px;width:100%;padding:20px;box-shadow:0 16px 40px rgba(15,23,42,.2);">
       <h3 style="margin:0 0 10px;color:#991b1b;font-size:1.15rem;">Cliente sub judice</h3>
-      <p style="margin:0 0 8px;color:#1e293b;font-weight:700;">${nome ? esc(nome) : "Este cliente"} está sub judice.</p>
+      <p id="subjudice-ciente-nome" style="margin:0 0 8px;color:#1e293b;font-weight:700;">${nome ? esc(nome) : "Este cliente"} está sub judice.</p>
       <p style="margin:0 0 18px;color:#475569;line-height:1.45;">O Integra não gera boleto deste contrato. Mesmo com pagamento integral, a emissão fica com o advogado da Moura Leite.</p>
       <div style="display:flex;justify-content:flex-end;">
         <button type="button" class="btn btn-fechar" onclick="document.getElementById('subjudice-ciente-modal').remove()">Fechar</button>
@@ -12235,7 +12323,9 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   const currentOriginTab = window.activeAppTab || sessionStorage.getItem('currentTab');
   const origemSub = currentOriginTab === 'subjudice';
   const integraAtivo = typeof window.fichaSubjudiceIntegraAtivo === "function" && window.fichaSubjudiceIntegraAtivo();
-  const isSubjudice = origemSub && !integraAtivo;
+  const avisarSienge = typeof window.fichaDeveAvisarSubjudiceSienge === "function"
+    && window.fichaDeveAvisarSubjudiceSienge(customerId, AppState.selectedSaleId || saleId);
+  const isSubjudice = avisarSienge || (origemSub && !integraAtivo);
   const acessoFicha = (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo()) || AppState.currentUser;
   const opType = acessoFicha
     ? ((typeof window.crmOperatorType === "function" && window.crmOperatorType(acessoFicha)) || acessoFicha.operator_type || "")
@@ -12527,6 +12617,13 @@ function formatCpfCnpj(val) {
   document.getElementById("current-page-title").innerHTML = `<i data-lucide="user"></i> Ficha do Cliente: ${customerId} - ${customer.name}${headerSubtypesHtml}`;
   const subAlertSpan = document.getElementById("ctx-subjudice-alert");
   if (subAlertSpan) subAlertSpan.innerHTML = subjudiceAlertHtml;
+  const nomeModal = document.getElementById("subjudice-ciente-nome");
+  if (nomeModal && customer && customer.name) nomeModal.textContent = customer.name + " está sub judice.";
+  if (!isSubjudice && typeof window.fichaDeveAvisarSubjudiceSienge === "function"
+    && window.fichaDeveAvisarSubjudiceSienge(customerId, AppState.selectedSaleId || saleId)
+    && typeof window.aplicarTravaSubjudiceNaFicha === "function") {
+    window.aplicarTravaSubjudiceNaFicha(customerId, customer && customer.name);
+  }
   syncCobrancaJudicialTabs(isSubjudice, isAdvogado);
   // Reset context bar — dados do contrato são populados mais tarde (após blockLotFromName)
   const ctxBar = document.getElementById('client-context-bar');
@@ -14702,6 +14799,9 @@ function formatCpfCnpj(val) {
        if (badgeEl) {
           badgeEl.textContent = "Distratado";
           badgeEl.className = "badge badge-secondary";
+       }
+       if (typeof window.sincronizarSubjudiceIntegraDistrato === "function") {
+          window.sincronizarSubjudiceIntegraDistrato();
        }
     } else if (kpiVencidas === 0 && kpiAVencer === 0 && kpiPago > 0 && sale.status !== "Quitado") {
        sale.status = "Quitado";
@@ -23931,8 +24031,13 @@ window.generateDemonstrativoDistratoPDF = function() {
 }
 
 window.boletoBloqueadoSubJudice = function() {
-  if (AppState && AppState.isSubjudiceMode) return true;
   const cid = AppState && AppState.selectedCustomerId;
+  const sid = AppState && (AppState.selectedSaleId || AppState.selectedContractId);
+  if (typeof window.fichaDeveAvisarSubjudiceSienge === "function" && window.fichaDeveAvisarSubjudiceSienge(cid, sid)) return true;
+  if (AppState && AppState.isSubjudiceMode) {
+    if (typeof window.fichaSubjudiceIntegraAtivo === "function" && window.fichaSubjudiceIntegraAtivo()) return false;
+    return true;
+  }
   if (!cid) return false;
   const lista = (window.rawClientList || []).concat(window.clientList || []);
   return lista.some((c) => c && String(c.customerId) === String(cid) && (
@@ -24060,6 +24165,10 @@ window.openBoletoPdf = async function(billId, instId, btnElement, opts) {
 };
 
 window.downloadBoletoPdf = async function(billId, instId, btnElement) {
+  if (window.boletoBloqueadoSubJudice()) {
+    alert("Cliente sub judice. O Integra não gera boleto. Mesmo com pagamento integral, a emissão fica com o advogado da Moura Leite.");
+    return;
+  }
   let originalHtml = "";
   if (btnElement) {
     originalHtml = btnElement.innerHTML;
@@ -47169,6 +47278,169 @@ window.subjudiceIntegraChaves = function(client) {
   return keys;
 };
 
+window.filaAgingDistratadoHtml = function() {
+  return `<div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
+    <span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #e9d5ff; background-color: #fdf4ff; color: #86198f; font-weight: 600;" title="Sub judice marcado no Integra. No Sienge este título não está sub judice.">
+      <i data-lucide="scale" style="width: 14px; height: 14px;"></i> Sub judice no Integra
+    </span>
+    <span style="padding: 2px 8px; font-size: 0.72rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #cbd5e1; background-color: #f8fafc; color: #334155; font-weight: 700;">Distratado</span>
+  </div>`;
+};
+
+window.subjudiceIntegraTextoDet = function(id) {
+  const el = document.getElementById(id);
+  const t = el ? String(el.textContent || "").replace(/\s+/g, " ").trim() : "";
+  if (!t || t === "Carregando..." || t === "N/D") return "";
+  return t;
+};
+
+window.subjudiceIntegraSnapshotFicha = function() {
+  const customerId = String((AppState && AppState.selectedCustomerId) || "");
+  const saleId = String((AppState && (AppState.selectedSaleId || AppState.selectedContractId || AppState.currentReceivableBillId)) || "");
+  const key = window.subjudiceIntegraChave(customerId, saleId);
+  const sales = (AppState && AppState.sales) || [];
+  const sale = sales.find(function(s) {
+    return String(s.id) === String(AppState.selectedSaleId)
+      || String(s.receivableBillId) === String(AppState.selectedSaleId)
+      || String(s.receivableBillId) === String(AppState.currentReceivableBillId);
+  }) || {};
+  const badge = document.getElementById("det-unit-badge");
+  const badgeTxt = badge ? String(badge.textContent || "").trim() : "";
+  const distratado = sale.status === "Distratado"
+    || /distrat/i.test(badgeTxt)
+    || (sale.active === false && !sale.payOffDate && sale.status !== "Quitado");
+  return {
+    key: key,
+    distratado: !!distratado,
+    campos: {
+      customerId: customerId,
+      saleId: String(sale.receivableBillId || saleId || ""),
+      customerName: window.subjudiceIntegraTextoDet("det-name") || sale.customerName || sale.clientName || "",
+      companyId: sale.companyId || (AppState && AppState.currentCompanyId) || "",
+      costCenterId: (AppState && AppState.currentCostCenterId) || sale.enterpriseId || sale.costCenterId || "",
+      unitName: window.subjudiceIntegraTextoDet("det-block-lot") || sale.unitName || "",
+      empreendimento: window.subjudiceIntegraTextoDet("det-project-name") || "",
+      distratado: !!distratado
+    }
+  };
+};
+
+window.tituloMarcadoDistratado = function(rec) {
+  if (rec && rec.distratado) return true;
+  const sales = (typeof AppState !== "undefined" && AppState.sales) || [];
+  const cid = String((rec && rec.customerId) || "");
+  const sid = String((rec && rec.saleId) || "").replace(/^B-/i, "").split("-")[0];
+  if (!cid || !sid) return false;
+  const sale = sales.find(function(s) {
+    if (String(s.customerId) !== cid) return false;
+    const ids = [s.id, s.receivableBillId, s.salesContractId].map(function(v) {
+      return String(v || "").replace(/^B-/i, "").split("-")[0];
+    });
+    return ids.indexOf(sid) >= 0;
+  });
+  if (!sale) return false;
+  return sale.status === "Distratado" || (sale.active === false && !sale.payOffDate && sale.status !== "Quitado");
+};
+
+window.incluirSubjudiceIntegraForaDaCarteira = function(rawList) {
+  if (!Array.isArray(rawList)) return;
+  const bag = (window.subjudiceIntegraData && window.subjudiceIntegraData.clients) || {};
+  const porChave = new Map();
+  rawList.forEach(function(c) {
+    window.subjudiceIntegraChaves(c).forEach(function(k) {
+      if (!porChave.has(k)) porChave.set(k, c);
+    });
+  });
+  Object.keys(bag).forEach(function(key) {
+    const rec = bag[key];
+    if (!rec || rec.on === false) return;
+    const distratado = window.tituloMarcadoDistratado(rec);
+    const ja = porChave.get(key);
+    if (ja) {
+      const sienge = typeof window.clientIsSubjudice === "function" && window.clientIsSubjudice(ja);
+      if (distratado && !sienge) ja.distratado = true;
+      return;
+    }
+    const partes = String(key).split("-");
+    const customerId = rec.customerId || partes[0] || "";
+    const saleId = rec.saleId || partes.slice(1).join("-") || "";
+    let nome = rec.customerName || "";
+    if (!nome && window.GlobalCustomerCache && Array.isArray(window.GlobalCustomerCache.data)) {
+      const hit = window.GlobalCustomerCache.data.find(function(c) {
+        return String(c.customerId || c.id) === String(customerId);
+      });
+      if (hit) nome = hit.name || hit.customerName || "";
+    }
+    if (!nome) nome = "Cliente #" + customerId;
+    let op = "NÃO ATRIBUÍDO";
+    let rule = "Sub judice no Integra";
+    const idCCusto = rec.costCenterId || "";
+    if (idCCusto && typeof window.resolveCityRuleId === "function" && typeof getRuleOperator === "function") {
+      const resolved = window.resolveCityRuleId(idCCusto);
+      if (resolved && resolved.ruleId) {
+        op = getRuleOperator(resolved.ruleId, "NÃO ATRIBUÍDO", customerId);
+        rule = "REGRA CIDADE - " + (resolved.city || "");
+      }
+    }
+    const linha = {
+      customerId: customerId,
+      customerName: nome,
+      saleId: saleId,
+      companyId: rec.companyId || "",
+      costCenterId: idCCusto,
+      unitName: rec.unitName || rec.empreendimento || "",
+      subjudice: "N",
+      percPaid: null,
+      assignedOperator: op,
+      appliedRule: rule,
+      overdueValue: 0,
+      overdueCharges: 0,
+      maxDaysDelay: 0,
+      billCount: 0,
+      billIds: [String(saleId || key)],
+      isZeroPaid: false,
+      hasOverdueAgreement: false,
+      distratado: !!distratado,
+      subjudiceIntegraFora: true,
+      lotesCount: 1,
+      age: "NA"
+    };
+    rawList.push(linha);
+    porChave.set(key, linha);
+    window.subjudiceIntegraChaves(linha).forEach(function(k) {
+      if (!porChave.has(k)) porChave.set(k, linha);
+    });
+  });
+};
+
+window.sincronizarSubjudiceIntegraDistrato = async function() {
+  if (window._syncSjIntegraDistrato) return;
+  const snap = window.subjudiceIntegraSnapshotFicha();
+  if (!snap || !snap.key || !snap.distratado) return;
+  window._syncSjIntegraDistrato = true;
+  try {
+    await window.loadSubjudiceIntegra();
+    if (!window.subjudiceIntegraData.clients) window.subjudiceIntegraData.clients = {};
+    const bag = window.subjudiceIntegraData.clients;
+    const prev = bag[snap.key];
+    if (!prev || prev.on === false) return;
+    const next = Object.assign({}, prev, snap.campos, { on: true, distratado: true });
+    const igual = !!prev.distratado
+      && String(prev.customerName || "") === String(next.customerName || "")
+      && String(prev.companyId || "") === String(next.companyId || "")
+      && String(prev.costCenterId || "") === String(next.costCenterId || "")
+      && String(prev.unitName || "") === String(next.unitName || "");
+    if (igual) return;
+    bag[snap.key] = next;
+    await window.saveSubjudiceIntegra();
+    if (AppState.dashboardRendered && typeof loadDashboardData === "function") {
+      loadDashboardData(false);
+    }
+  } finally {
+    window._syncSjIntegraDistrato = false;
+  }
+};
+
 window.clientIsSubjudiceIntegra = function(client) {
   if (!client) return false;
   if (typeof window.clientIsSubjudice === "function" && window.clientIsSubjudice(client)) return false;
@@ -47298,13 +47570,20 @@ window.toggleSubjudiceIntegra = async function() {
     delete bag[key];
   } else {
     const logged = (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo()) || (AppState && AppState.currentUser) || {};
-    bag[key] = {
+    const snap = (typeof window.subjudiceIntegraSnapshotFicha === "function") ? window.subjudiceIntegraSnapshotFicha() : { campos: {} };
+    bag[key] = Object.assign({
       on: true,
       customerId: customerId,
       saleId: saleId,
       at: new Date().toISOString(),
       by: logged.name || logged.nome || logged.email || ""
-    };
+    }, snap.campos || {}, {
+      on: true,
+      customerId: customerId,
+      saleId: saleId,
+      at: new Date().toISOString(),
+      by: logged.name || logged.nome || logged.email || ""
+    });
   }
   await window.saveSubjudiceIntegra();
   await window.updateSubjudiceIntegraButtonState();
