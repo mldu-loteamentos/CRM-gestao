@@ -107,6 +107,13 @@ function getConfiguredInternalCompanyIds() {
   return [...ALLOWED_COMPANY_IDS];
 }
 
+/** A base das 7h continua válida. Revisão nova não pode jogar fora o batimento do dia. */
+function filaCacheDoDiaServe(rev) {
+  if (rev == null || rev === "") return true;
+  const n = Number(rev);
+  return n === 3 || n === 4;
+}
+
 /** Cache do dia só vale se cobriu as empresas internas esperadas (evita base só 1+2). */
 function defaultersCacheLooksIncomplete(data, meta, expectedIds) {
   const expected = [...new Set((expectedIds || getConfiguredInternalCompanyIds()).map(Number).filter(Number.isFinite))];
@@ -2190,7 +2197,7 @@ const SiengeApiService = {
            try {
                const localCache = await IdbDefaultersCache.get(`defaulters_${todayStr}`);
                if (localCache && localCache.data) {
-                   if (localCache.cacheRev !== DEFAULTERS_CACHE_REV) {
+                   if (!filaCacheDoDiaServe(localCache.cacheRev)) {
                        console.warn('%c[Sienge] ⚠️ Cache da fila desatualizado — buscando o saldo em aberto de novo.', 'color:#f59e0b;font-weight:bold;');
                    } else if (defaultersCacheLooksIncomplete(localCache.data, localCache, expectedCompanyIds)) {
                        console.warn('%c[Sienge] ⚠️ Cache IndexedDB incompleto (faltam empresas internas) — ignorando.', 'color:#f59e0b;font-weight:bold;');
@@ -2239,7 +2246,7 @@ const SiengeApiService = {
                      if (ci > 0 && ci % 2 === 0) await new Promise((r) => setTimeout(r, 0));
                    }
 
-                   if (meta.cacheRev !== DEFAULTERS_CACHE_REV) {
+                   if (!filaCacheDoDiaServe(meta.cacheRev)) {
                      console.warn('%c[Sienge] ⚠️ Cache da fila desatualizado — buscando o saldo em aberto de novo.', 'color:#f59e0b;font-weight:bold;');
                    } else if (defaultersCacheLooksIncomplete(result, meta, expectedCompanyIds)) {
                      console.warn('%c[Sienge] ⚠️ Cache Firestore incompleto (faltam empresas internas) — buscando base completa.', 'color:#f59e0b;font-weight:bold;');
@@ -2268,7 +2275,8 @@ const SiengeApiService = {
                        paidInstallmentIds: meta.paidInstallmentIds || serializePaidInstallmentIds(),
                        timestampStr: meta.timestampStr,
                        atFull: meta.atFull || null,
-                       companyIds: meta.companyIds || expectedCompanyIds
+                       companyIds: meta.companyIds || expectedCompanyIds,
+                       cacheRev: meta.cacheRev || DEFAULTERS_CACHE_REV
                    }).catch(() => {});
 
                    return result;
