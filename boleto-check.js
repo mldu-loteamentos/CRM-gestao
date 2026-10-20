@@ -290,9 +290,12 @@ window.BoletoCheck = {
     }
     if (out.vencBoleto && ctx.vencimento && out.vencBoleto !== String(ctx.vencimento).slice(0, 10)) {
       const vt = this.dataBr(ctx.vencimento);
-      out.avisos.push(out.vencBoleto < String(ctx.vencimento).slice(0, 10)
-        ? `A linha digitável cadastrada no Sienge é de um boleto que vence em ${this.dataBr(out.vencBoleto)}, e a parcela vence em ${vt}. O boleto deve ter sido reemitido ou o vencimento foi alterado sem trocar a linha digitável: cadastre no Sienge a linha do boleto de ${vt}.`
-        : `A linha digitável cadastrada no Sienge é de um boleto que vence em ${this.dataBr(out.vencBoleto)}, depois do vencimento da parcela (${vt}). Confira o vencimento do título no Sienge.`);
+      if (out.vencBoleto < String(ctx.vencimento).slice(0, 10)) {
+        out.antecipado = true;
+        out.avisos.push(`Pagamento antecipado: o boleto vence em ${this.dataBr(out.vencBoleto)} e a parcela vence em ${vt}.`);
+      } else {
+        out.avisos.push(`A linha digitável cadastrada no Sienge é de um boleto que vence em ${this.dataBr(out.vencBoleto)}, depois do vencimento da parcela (${vt}). Confira o vencimento do título no Sienge.`);
+      }
     }
     const limite = String(d.discountDueDate || "").slice(0, 10);
     const vencTitulo = String(ctx.vencimento || "").slice(0, 10);

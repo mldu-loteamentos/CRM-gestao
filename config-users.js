@@ -402,6 +402,14 @@ const ConfigUsersApp = {
       ]
     },
     {
+      name: "Orçamento", icon: "calculator", key: "mod_orc",
+      submodules: [{ name: "Orçamento", key: "sub_orc_geral", actions: [
+        { id: "novo_orcamento", label: "Novo orçamento", permBase: "sub_orc_geral_novo_orcamento" },
+        { id: "novo_forecast", label: "Novo forecast", permBase: "sub_orc_geral_novo_forecast" },
+        { id: "acompanhamento", label: "Acompanhamento", permBase: "sub_orc_geral_acompanhamento" }
+      ] }]
+    },
+    {
       name: "Fiscal", icon: "receipt", key: "mod_fiscal",
       submodules: [
         { name: "Calcular impostos", key: "sub_fiscal_pis", actions: [{ id: "fiscal", label: "Calcular impostos", permBase: "sub_fiscal_geral_fiscal" }] },

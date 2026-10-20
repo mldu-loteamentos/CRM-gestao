@@ -80,6 +80,14 @@ const CentrosCustoApp = {
           
           const custom = CentrosCustoState.customFields[cc.id];
           
+          if (idStr === "14304" && String(custom.tipo_cc || "") === "Loteamento Fechado" && !custom.morada_ipes_aberto) {
+              custom.tipo_cc = "Loteamento Aberto";
+              custom.associacao_nome = "";
+              custom.morada_ipes_aberto = 1;
+              custom.updatedAt = Date.now();
+              customFieldsChanged = true;
+              reclassificou = true;
+          }
           if (!custom.tipo_cc) {
               if (idStr.startsWith('1')) {
                   custom.tipo_cc = 'Loteamento Aberto';
@@ -546,8 +554,12 @@ const CentrosCustoApp = {
   },
 
   propagarLoteamentoFechado(id, custom) {
+    const soltos = { "14304": 1, "14305": 1, "14703": 1, "14704": 1 };
+    const origem = String(id || "").replace(/\D/g, "");
     this.irmaosObra(id).forEach((c) => {
-      if (String(c.id) === String(id)) return;
+      const dest = String(c.id || "").replace(/\D/g, "");
+      if (dest === origem) return;
+      if (soltos[origem] || soltos[dest]) return;
       const key = String(c.id);
       const outro = Object.assign({}, this.customOf(key), {
         cc_id: key,

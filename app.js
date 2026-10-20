@@ -3330,6 +3330,9 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     mutuo: "Mútuo",
     "relatorios-cr": "Relatórios",
     "resultado-caixa": "Resultado de caixa",
+    "orcamento-novo": "Novo orçamento",
+    "orcamento-forecast": "Novo forecast",
+    "orcamento-acompanhamento": "Acompanhamento",
     "investimento": "Aplicações e Investimentos",
     "financiamento": "Financiamento",
     "repactuacao-lote": "Repactuação",
@@ -3407,6 +3410,9 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     mutuo: "handshake",
     "relatorios-cr": "file-bar-chart",
     "resultado-caixa": "scale",
+    "orcamento-novo": "file-plus",
+    "orcamento-forecast": "line-chart",
+    "orcamento-acompanhamento": "bar-chart-3",
     "investimento": "trending-up",
     "financiamento": "landmark",
     "repactuacao-lote": "refresh-cw",
@@ -3620,6 +3626,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (typeof FluxoCaixaApp !== "undefined") FluxoCaixaApp.init();
   } else if (tabId === "orcamento") {
     if (typeof OrcamentoApp !== "undefined") OrcamentoApp.init();
+  } else if (tabId === "orcamento-novo" || tabId === "orcamento-forecast" || tabId === "orcamento-acompanhamento") {
+    if (typeof OrcamentoModuloApp !== "undefined") OrcamentoModuloApp.init(tabId);
   } else if (tabId === "fluxo-caixa-diario") {
     if (typeof FluxoCaixaDiarioApp !== "undefined") FluxoCaixaDiarioApp.init();
   } else if (tabId === "mutuo") {
@@ -19540,21 +19548,29 @@ window.fmtDistratoMoney = function(n) {
   return (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 };
 
-window.distratoCcTipo = function() {
-  const sale = g_distSale || {};
+window.distratoCentroId = function() {
+  const sale = (typeof g_distSale !== "undefined" && g_distSale) || {};
   const unit = (window.AppState && AppState.units && sale.unitId && AppState.units[sale.unitId]) || {};
-  const ccId = unit.costCenterId
-    || sale.costCenterId
-    || sale.enterpriseId
-    || (window.AppState && AppState.currentCostCenterId)
-    || "";
   const unitName = unit.unitName || unit.name || sale.unitName || "";
-  const cfg = typeof window.nexCcConfig === "function" ? window.nexCcConfig(ccId, unitName) : {};
+  const doNome = String(unitName).match(/^(\d{4,6})\b/);
+  if (doNome) return doNome[1];
+  const raw = unit.costCenterId || sale.costCenterId || (window.AppState && AppState.currentCostCenterId) || "";
+  const s = String(Array.isArray(raw) ? raw[0] : raw).split(",")[0].trim();
+  const m = s.match(/\d{4,6}/);
+  return m ? m[0] : "";
+};
+
+window.distratoCcTipo = function() {
+  const id = window.distratoCentroId();
+  if (!id || typeof window.nexCcConfig !== "function") return "";
+  const cfg = window.nexCcConfig(id, "");
   return String((cfg && cfg.tipo_cc) || "");
 };
 
 window.isDistratoLoteamentoFechado = function() {
-  return /loteamento\s*fechado/i.test(window.distratoCcTipo());
+  const id = window.distratoCentroId();
+  if (id === "14304") return false;
+  return window.distratoCcTipo() === "Loteamento Fechado";
 };
 
 window.distratoFoldEmp = function(value) {
@@ -20232,7 +20248,7 @@ window.handleDistratoChoiceChange = function() {
     instQty,
     refundInstallment,
     distratoAlcada: distAlcada,
-    extraDebits: { homolog, comissao, taxaAssoc, iptu, iptuDispensado, agua, luz, utilidadesDispensadas: obraAndamento, outros },
+    extraDebits: { homolog, comissao, taxaAssoc, taxaAplicavel: !!(window.isDistratoLoteamentoFechado && window.isDistratoLoteamentoFechado()) && !obraAndamento, iptu, iptuDispensado, agua, luz, utilidadesDispensadas: obraAndamento, outros },
     isPermuta,
     permutaAbatimento: (window._distPermutaState && window._distPermutaState.selection) || null
   };
@@ -24270,10 +24286,10 @@ window.generateDemonstrativoDistratoPDF = function() {
             ? '<td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #166534; font-weight: 700;">Dispensado</td>'
             : `<td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- ${brl(results.extraDebits.luz)}</td>`}
         </tr>
-        <tr>
+        ${(results.extraDebits && results.extraDebits.taxaAplicavel) ? `<tr>
           <td style="padding: 5px 5px; border-bottom: 1px solid #ddd;">Taxa associativa:</td>
           <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #ddd; color: #b91c1c;">- ${brl(results.extraDebits.taxaAssoc)}</td>
-        </tr>
+        </tr>` : ""}
         <tr>
           <td style="padding: 5px 5px; border-bottom: 1px solid #000;">Outras despesas:</td>
           <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #000; color: #b91c1c;">- ${brl(results.extraDebits.outros)}</td>

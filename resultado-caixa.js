@@ -829,15 +829,27 @@ const ResultadoCaixaApp = {
   pctEmpresaId(empId) {
     if (!this.agrupar) return 1;
     const id = Number(empId) || 0;
-    if (!id) return 1;
+    if (!id) return 0;
     const custom = this.empresasCustom();
     const cfg = custom[id] || custom[String(id)] || {};
+    if (Number(cfg.consolidacao_padrao) !== 1) return 0;
     const bruto = cfg.percentual_mldu;
-    const pct = typeof bruto === "string" ? Number(String(bruto).replace(/\s/g, "").replace(",", ".")) : Number(bruto);
+    const pct = typeof bruto === "string" ? Number(String(bruto).replace(/\s|%/g, "").replace(",", ".")) : Number(bruto);
     if (pct > 0 && pct <= 100) return pct / 100;
     const socio = this.pctSocioMoura(id);
     if (socio > 0) return socio;
-    return 1;
+    return 0;
+  },
+
+  /** Texto do percentual da Moura Leite usado na consolidação. */
+  rotuloPctMoura(empId) {
+    if (!this.agrupar) return "";
+    const id = Number(empId) || 0;
+    if (!id) return "";
+    const fator = this.pctEmpresaId(id);
+    if (!(fator > 0)) return "";
+    const pct = fator <= 1 ? fator * 100 : fator;
+    return pct.toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "%";
   },
 
   empresaDoCc(ccId) {
@@ -880,7 +892,7 @@ const ResultadoCaixaApp = {
   pctArquivo(arq, nome) {
     if (!this.agrupar) return 1;
     const emp = Number(arq && arq.empresa) || this.empresaId(nome);
-    return emp ? this.pctEmpresaId(emp) : 1;
+    return emp ? this.pctEmpresaId(emp) : 0;
   },
 
   codigoNoLado(code, lado) {
@@ -942,7 +954,7 @@ const ResultadoCaixaApp = {
   pctMl(id) {
     if (!this.agrupar) return 1;
     const emp = this.empresaDoCc(id);
-    if (!emp) return 1;
+    if (!emp) return 0;
     return this.pctEmpresaId(emp);
   },
 
@@ -1101,6 +1113,15 @@ const ResultadoCaixaApp = {
       { id: "manutencao", nome: "DESPESAS COM MANUTENÇÃO DE EMPREENDIMENTO", codigos: ["05.11"], filhos: /^05\.11\./, nodes: ["g_05_11"] },
       { id: "retencoes", nome: "RETENÇÕES", codigos: ["05.09"], filhos: /^05\.09\./, nodes: ["g_05_09"] },
       { id: "outrosmov", nome: "OUTROS MOVIMENTOS", codigos: ["05.10"], filhos: /^05\.10\./, nodes: ["g_05_10"] }
+    ];
+  },
+
+  contasEntrada() {
+    return [
+      { id: "venda", nome: "VENDA DE IMÓVEIS", codigos: ["01.01"], filhos: /^01\.01\./, nodes: ["g_01_01"] },
+      { id: "servicos", nome: "RECEITA DE SERVIÇOS", codigos: ["01.02"], filhos: /^01\.02\./, nodes: ["g_01_02"] },
+      { id: "naooprec", nome: "RECEITAS NÃO OPERACIONAIS", codigos: ["01.03"], filhos: /^01\.03\./, nodes: ["g_01_03"] },
+      { id: "recfin", nome: "RECEITAS FINANCEIRAS", codigos: ["09.01"], filhos: /^09\.01\./, nodes: ["g_09_01"] }
     ];
   },
 
@@ -2226,7 +2247,7 @@ const ResultadoCaixaApp = {
           <span class="ml-emp-filter-label">Participação</span>
           <div class="rcx-escala">
             ${seg(!this.agrupar, "100%", "ResultadoCaixaApp.setAgrupar(false)", "Valores cheios dos arquivos")}
-            ${seg(this.agrupar, "% Moura Leite", "ResultadoCaixaApp.setAgrupar(true)", "Aplica o percentual da Moura Leite cadastrado na empresa")}
+            ${seg(this.agrupar, "% Moura Leite", "ResultadoCaixaApp.setAgrupar(true)", "Aplica o percentual da Moura Leite só nas empresas da consolidação padrão")}
           </div>
         </div>
         <div class="cc-toolbar-actions">
@@ -2604,7 +2625,7 @@ const ResultadoCaixaApp = {
     (this.dfcLinhas || []).forEach((l) => {
       if (!l || !this.casaNo(l.node, def)) return;
       if (l.mes < ini || l.mes > fim) return;
-      const fator = this.agrupar && l.empresa ? this.pctEmpresaId(l.empresa) : 1;
+      const fator = this.agrupar ? (l.empresa ? this.pctEmpresaId(l.empresa) : 0) : 1;
       s += (Number(l.valor) || 0) * fator;
     });
     return s;
@@ -2664,7 +2685,7 @@ const ResultadoCaixaApp = {
     return faixa
       + `<div class="rcx-topo">${this.graficoMesHtml(total)}${this.graficoLinhasHtml("entradas")}${this.graficoTotaisHtml("entradas")}</div>`
       + this.gradeHtml("Produto", corpo, total, totalA, false)
-      + this.matrizDfcHtml();
+      + this.matrizDfcHtml("entradas");
   },
 
   saidasHtml() {
@@ -2684,7 +2705,7 @@ const ResultadoCaixaApp = {
     const totalA = this.somaBloco(todos, "acum");
     return `<div class="rcx-topo">${this.graficoMesHtml(total)}${this.graficoLinhasHtml("saidas")}${this.graficoTotaisHtml("saidas")}</div>`
       + this.gradeHtml("Conta", corpo, total, totalA, true, true)
-      + this.matrizDfcHtml();
+      + this.matrizDfcHtml("saidas");
   },
 
   toggleMatriz(id) {
@@ -2695,15 +2716,17 @@ const ResultadoCaixaApp = {
     this.render();
   },
 
-  /** Acumulado de janeiro ao mês, por empresa e por centro de custo, na mesma base da grade de saídas. */
-  matrizDfcDados() {
+  /** Acumulado de janeiro ao mês, por empresa e por centro de custo, na mesma base da aba aberta. */
+  matrizDfcDados(lado) {
+    const saida = lado !== "entradas";
     const ano = this.anoAtual();
     const mes = Number(this.mes) || 1;
     const a = this.anoDados(ano);
     if (!a || this.semContas(ano)) return null;
     const cat = this.catalogoEmpresas();
     const empresas = {};
-    const grupos = this.contasSaida().map((def) => ({ def: def, porEmp: {}, ccs: {} }));
+    const defs = saida ? this.contasSaida() : this.contasEntrada();
+    const grupos = defs.map((def) => ({ def: def, porEmp: {}, ccs: {} }));
     const vivo = (o, r) => Math.abs(o) > 0.5 || Math.abs(r) > 0.5;
     Object.keys(a.arquivos || {}).forEach((nome) => {
       const arq = a.arquivos[nome] || {};
@@ -2711,7 +2734,11 @@ const ResultadoCaixaApp = {
       const key = empNum ? String(empNum) : ("arq:" + nome);
       if (!empresas[key]) {
         const nomes = empNum && cat[empNum] ? cat[empNum] : [];
-        empresas[key] = { id: key, nome: nomes[0] || arq.rotulo || this.nomeEmpresaArquivo(nome) || ("Empresa " + key) };
+        empresas[key] = {
+          id: key,
+          nome: nomes[0] || arq.rotulo || this.nomeEmpresaArquivo(nome) || ("Empresa " + key),
+          pctLabel: empNum ? this.rotuloPctMoura(empNum) : ""
+        };
       }
       const pct = this.pctArquivo(arq, nome);
       const porCc = arq.contasPorCc;
@@ -2759,26 +2786,35 @@ const ResultadoCaixaApp = {
       .filter((g) => cols.some((e) => g.porEmp[e.id] && vivo(g.porEmp[e.id].orc, g.porEmp[e.id].real)))
       .sort((a, b) => {
         const soma = (g) => cols.reduce((s, e) => s + ((g.porEmp[e.id] && g.porEmp[e.id].real) || 0), 0);
-        const d = soma(a) - soma(b);
+        const d = saida ? soma(a) - soma(b) : soma(b) - soma(a);
         if (d) return d;
         return String(a.def.nome || "").localeCompare(String(b.def.nome || ""), "pt");
       });
     if (!cols.length || !linhas.length) return null;
-    return { cols: cols, linhas: linhas, mes: mes };
+    return { cols: cols, linhas: linhas, mes: mes, lado: saida ? "saidas" : "entradas" };
   },
 
-  matrizCelulas(orc, real, sep) {
+  matrizCelulas(orc, real, sep, saida) {
     const o = Number(orc) || 0;
     const r = Number(real) || 0;
-    return `<td class="rcx-num${sep ? " rcx-sep" : ""}">${this.fmt(o)}</td><td class="rcx-num">${this.fmt(r)}</td>${this.celVar(r, o, true)}`;
+    return `<td class="rcx-num${sep ? " rcx-sep" : ""}">${this.fmt(o)}</td><td class="rcx-num">${this.fmt(r)}</td>${this.celVar(r, o, !!saida)}`;
   },
 
-  matrizDfcHtml() {
-    const dados = this.matrizDfcDados();
+  matrizDfcHtml(lado) {
+    const saida = lado !== "entradas";
+    const dados = this.matrizDfcDados(saida ? "saidas" : "entradas");
     if (!dados) return "";
     const mesNome = (this.MESES[dados.mes - 1] || "").toLowerCase();
     const abertos = this.matrizAbertos || {};
-    const cabEmp = dados.cols.map((e) => `<th class="rcx-sep" colspan="4" title="${caixaEsc(e.nome)}">${caixaEsc(e.nome)}</th>`).join("");
+    const cabEmp = dados.cols.map((e) => {
+      const pct = e.pctLabel ? `<span class="rcx-matriz-pct">${caixaEsc(e.pctLabel)}</span>` : "";
+      const titulo = e.nome + (e.pctLabel ? " · " + e.pctLabel + " da Moura Leite na consolidação" : "");
+      return `<th class="rcx-sep" colspan="4" title="${caixaEsc(titulo)}"><span class="rcx-matriz-emp">${caixaEsc(e.nome)}</span>${pct}</th>`;
+    }).join("");
+    const totNome = this.agrupar ? "Consolidado" : "Total";
+    const totTitle = this.agrupar
+      ? "Soma das empresas da consolidação padrão, cada uma no percentual da Moura Leite"
+      : "Soma dos valores cheios";
     const cabVal = dados.cols.map(() => `<th class="rcx-sep">Orç.</th><th>Real.</th><th>Variação</th><th>Variação</th>`).join("")
       + `<th class="rcx-sep">Orç.</th><th>Real.</th><th>Variação</th><th>Variação</th>`;
     const totEmp = {};
@@ -2799,12 +2835,13 @@ const ResultadoCaixaApp = {
         : caixaEsc(g.def.nome);
       const cells = dados.cols.map((e) => {
         const cel = g.porEmp[e.id] || { orc: 0, real: 0 };
-        return this.matrizCelulas(cel.orc, cel.real, true);
+        return this.matrizCelulas(cel.orc, cel.real, true, saida);
       }).join("");
       let html = `<tr class="rcx-matriz-grupo">${`<td class="rcx-nome">${nome}</td>`}${cells}${this.matrizCelulas(
         dados.cols.reduce((s, e) => s + ((g.porEmp[e.id] && g.porEmp[e.id].orc) || 0), 0),
         dados.cols.reduce((s, e) => s + ((g.porEmp[e.id] && g.porEmp[e.id].real) || 0), 0),
-        true
+        true,
+        saida
       )}</tr>`;
       if (aberto) {
         html += g.ccs.map((cc) => {
@@ -2812,31 +2849,33 @@ const ResultadoCaixaApp = {
           const rot = jaTemId ? cc.nome : ((cc.id ? cc.id + " - " : "") + (cc.nome || "Centro de custo"));
           const ccCells = dados.cols.map((e) => {
             const cel = cc.porEmp[e.id] || { orc: 0, real: 0 };
-            return this.matrizCelulas(cel.orc, cel.real, true);
+            return this.matrizCelulas(cel.orc, cel.real, true, saida);
           }).join("");
           const o = dados.cols.reduce((s, e) => s + ((cc.porEmp[e.id] && cc.porEmp[e.id].orc) || 0), 0);
           const r = dados.cols.reduce((s, e) => s + ((cc.porEmp[e.id] && cc.porEmp[e.id].real) || 0), 0);
-          return `<tr class="rcx-filho rcx-matriz-cc"><td class="rcx-nome">${caixaEsc(rot)}</td>${ccCells}${this.matrizCelulas(o, r, true)}</tr>`;
+          return `<tr class="rcx-filho rcx-matriz-cc"><td class="rcx-nome">${caixaEsc(rot)}</td>${ccCells}${this.matrizCelulas(o, r, true, saida)}</tr>`;
         }).join("");
       }
       return html;
     }).join("");
-    const totCells = dados.cols.map((e) => this.matrizCelulas(totEmp[e.id].orc, totEmp[e.id].real, true)).join("");
+    const totCells = dados.cols.map((e) => this.matrizCelulas(totEmp[e.id].orc, totEmp[e.id].real, true, saida)).join("");
+    const tituloBloco = saida ? "Saídas do DFC por empresa" : "Entradas do DFC por empresa";
+    const pctNota = this.agrupar ? " Cada empresa entra no consolidado pelo percentual da Moura Leite." : "";
     return `<div class="rcx-matriz-bloco">
-      <div class="rcx-matriz-titulo">Grupos do DFC por empresa</div>
-      <div class="rcx-matriz-sub">Acumulado de janeiro a ${caixaEsc(mesNome)}. Clique no grupo para abrir os centros de custo.</div>
+      <div class="rcx-matriz-titulo">${tituloBloco}</div>
+      <div class="rcx-matriz-sub">Acumulado de janeiro a ${caixaEsc(mesNome)}. Clique no grupo para abrir os centros de custo.${pctNota}</div>
       <div class="rcx-scroll rcx-matriz-scroll">
         <table class="rcx-grid rcx-matriz">
           <thead>
             <tr class="rcx-h1">
               <th class="rcx-h-nome" rowspan="2">Conta DFC</th>
               ${cabEmp}
-              <th class="rcx-sep" colspan="4">Total</th>
+              <th class="rcx-sep" colspan="4" title="${caixaEsc(totTitle)}">${totNome}</th>
             </tr>
             <tr class="rcx-h2">${cabVal}</tr>
           </thead>
           <tbody>${corpo}</tbody>
-          <tfoot><tr><td class="rcx-nome">Total</td>${totCells}${this.matrizCelulas(totGeral.orc, totGeral.real, true)}</tr></tfoot>
+          <tfoot><tr><td class="rcx-nome">${totNome}</td>${totCells}${this.matrizCelulas(totGeral.orc, totGeral.real, true, saida)}</tr></tfoot>
         </table>
       </div>
     </div>`;

@@ -4132,6 +4132,8 @@ circle.donut-segment {
 .rcx-grid tfoot td { position: sticky; bottom: 0; z-index: 1; font-weight: 800; background: #e7f6ee; border-top: 2px solid #1b8253; border-bottom: none; }
 .rcx-matriz-bloco { margin-top: 18px; }
 .rcx-matriz-titulo { font-size: 0.92rem; font-weight: 800; color: #105436; margin: 0 0 2px; }
+.rcx-matriz-emp { display: block; }
+.rcx-matriz-pct { display: block; margin-top: 2px; font-size: 0.68rem; font-weight: 800; letter-spacing: 0; color: #105436; }
 .rcx-matriz-sub { font-size: 0.75rem; color: #64748b; margin: 0 0 8px; }
 .rcx-matriz-scroll { max-height: 70vh; }
 .rcx-matriz thead tr.rcx-h1 th.rcx-h-nome { position: sticky; left: 0; z-index: 4; min-width: 240px; height: auto; text-align: left; vertical-align: middle; }

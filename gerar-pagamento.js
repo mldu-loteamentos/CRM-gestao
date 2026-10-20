@@ -37,6 +37,7 @@ const GerarPagamentoApp = {
     diaRetro: "",
     retroTodos: false,
     credores: {},
+    antecipadoOk: {},
     gen: 0
   },
 
@@ -769,9 +770,38 @@ const GerarPagamentoApp = {
     return !!(v && v.rodando && !it.emLote && it.autorizacao && it.autorizacao.ok && !it.pag);
   },
 
+  antecipadoLiberado(it) {
+    const chave = it && (it.chave || it);
+    return !!(chave && this.state.antecipadoOk && this.state.antecipadoOk[chave]);
+  },
+
+  /** O aviso de pagamento antecipado sai do bloqueio depois que o operador libera. */
+  avisoQueBloqueia(check, it) {
+    return ((check && check.avisos) || []).filter((a) => !(check.antecipado && this.antecipadoLiberado(it) && /pagamento antecipado/i.test(a)))[0] || "";
+  },
+
+  liberarAntecipado(chave) {
+    const k = String(chave || "");
+    if (!k) return;
+    this.state.antecipadoOk[k] = true;
+    Object.keys(this.state.sel).forEach((sel) => {
+      if (sel.endsWith("|" + k)) this.state.sel[sel] = true;
+    });
+    this.paintTitulos();
+  },
+
   pagSeloDe(it) {
     if (it.emLote || !window.BoletoCheck) return `<span class="gp-muted">—</span>`;
-    if (it.pag && it.pag.check) return BoletoCheck.seloHtml(it.pag.check);
+    if (it.pag && it.pag.check) {
+      const c = it.pag.check;
+      let html = BoletoCheck.seloHtml(c);
+      if (c.antecipado && c.nivel !== "erro") {
+        html += this.antecipadoLiberado(it)
+          ? ` <span class="bchk bchk-ok" title="Pagamento antecipado liberado para entrar no lote.">Liberado</span>`
+          : ` <button type="button" class="gp-liberar" title="Libera este boleto antecipado para entrar no lote" onclick="event.stopPropagation();GerarPagamentoApp.liberarAntecipado('${this.esc(it.chave)}')">Liberar</button>`;
+      }
+      return html;
+    }
     if (this.conferindoAgora(it)) return `<span class="bchk bchk-wait" title="A conferência deste título está em andamento.">Conferindo…</span>`;
     if (this.semAutorizacao(it)) return `<span class="gp-muted" title="A forma de pagamento é conferida depois da autorização no Sienge.">—</span>`;
     return `<span class="bchk bchk-erro" title="A conferência deste título não terminou. Busque os títulos de novo.">Não conferido</span>`;
@@ -820,7 +850,11 @@ const GerarPagamentoApp = {
     const p = it.pag;
     if (!p) return "Forma de pagamento ainda não conferida.";
     const c = p.check;
-    if (c.nivel === "erro" || c.nivel === "aviso" || c.nivel === "sem") return c.resumo || "Possível divergência na forma de pagamento.";
+    if (c.nivel === "erro" || c.nivel === "sem") return c.resumo || "Possível divergência na forma de pagamento.";
+    if (c.nivel === "aviso") {
+      const aviso = this.avisoQueBloqueia(c, it);
+      if (aviso) return aviso;
+    }
     if (p.fiscal && p.fiscal.nivel === "erro") return "Impostos: " + p.fiscal.resumo;
     return "";
   },
@@ -909,7 +943,9 @@ const GerarPagamentoApp = {
           if (fiscal && fiscal.retidoPagamento > 0.009) check = BoletoCheck.validar(payment, Object.assign({}, ctx, { retido: fiscal.retidoPagamento }));
         }
         s.pagInfo[chave] = { payment, check, fiscal, tipoSienge: forma.tipo || "", falha: !!(check && check.falhaConsulta) || !!(fiscal && fiscal.falhaConsulta) };
-        if (["erro", "aviso", "sem"].includes(check.nivel)) {
+        const soAntecipado = check.antecipado && check.nivel === "aviso" && !(check.erros || []).length
+          && (check.avisos || []).every((a) => /pagamento antecipado/i.test(a));
+        if (!soAntecipado && ["erro", "aviso", "sem"].includes(check.nivel)) {
           Object.keys(s.sel).forEach((k) => {
             if (k.endsWith("|" + chave)) s.sel[k] = false;
           });
@@ -2455,6 +2491,8 @@ const GerarPagamentoApp = {
           .gp-cc-pop-nome { color:#64748b; font-size:0.74rem; margin-left:4px; }
           .gp-cc-pop .bchk { display:inline-block; padding:2px 8px; border-radius:999px; font-size:0.72rem; font-weight:700; }
           #gerar-pagamento-root .gp-bloq, #gerar-pagamento-root .gp-status small.gp-bloq { color:#b91c1c; font-weight:700; }
+          #gerar-pagamento-root .gp-liberar { height:22px; margin-left:4px; padding:0 8px; border:1px solid #c2410c; border-radius:999px; background:#fff; color:#c2410c; font-size:0.68rem; font-weight:800; cursor:pointer; }
+          #gerar-pagamento-root .gp-liberar:hover { background:#ffedd5; }
           #gerar-pagamento-root .gp-lote-sem .gp-lote-h { background:#fef2f2; }
           #gerar-pagamento-root .gp-lote-conta { font-weight:800; color:#105436; font-size:0.92rem; }
           #gerar-pagamento-root .gp-lote-sem .gp-lote-conta { color:#b91c1c; }
