@@ -13,7 +13,7 @@ const OrcamentoModuloApp = {
   },
 
   novo: {
-    etapa: "escolha",
+    etapa: "lista",
     aba: "kardex",
     planoAberto: false,
     nuvem: "",
@@ -171,9 +171,13 @@ const OrcamentoModuloApp = {
         }
       },
       toggleId(id, on) {
-        if (!on) return;
-        self.novo.companyId = String(id);
-        self.novo.ccId = "";
+        if (!on) {
+          self.novo.companyId = "";
+          self.novo.ccId = "";
+        } else {
+          self.novo.companyId = String(id);
+          self.novo.ccId = "";
+        }
         self.novo.openEmp = false;
         self.novo.qEmp = "";
         self.novo.resultado = null;
@@ -184,10 +188,10 @@ const OrcamentoModuloApp = {
       selectNone() {}
     });
     const nouns = {
-      singular: "produto",
-      plural: "produtos",
-      none: "Nenhum produto",
-      noMatch: "Nenhum produto com esse nome."
+      singular: "centro de custo",
+      plural: "centros de custo",
+      none: "Nenhum centro de custo",
+      noMatch: "Nenhum centro de custo com esse nome."
     };
     MlEmpresaFilter.bind("orc-cc", {
       toggleOpen() {
@@ -211,8 +215,7 @@ const OrcamentoModuloApp = {
         }
       },
       toggleId(id, on) {
-        if (!on) return;
-        self.novo.ccId = String(id);
+        self.novo.ccId = on ? String(id) : "";
         self.novo.openCc = false;
         self.novo.qCc = "";
         self.novo.resultado = null;
@@ -233,14 +236,16 @@ const OrcamentoModuloApp = {
     const st = this.novo;
     this.ajustarPeriodo();
     const nounsCc = {
-      singular: "produto",
-      plural: "produtos",
-      none: "Nenhum produto"
+      singular: "centro de custo",
+      plural: "centros de custo",
+      none: "Nenhum centro de custo",
+      noMatch: "Nenhum centro de custo com esse nome."
     };
     if (st.etapa !== "orcamento") {
-      root.innerHTML = this.escolhaHtml(nounsCc);
+      root.innerHTML = this.listaHtml(nounsCc);
       this.bindFiltros();
       if (window.lucide) window.lucide.createIcons();
+      this.carregarIndiceNuvem();
       return;
     }
     const aba = st.aba === "receita" ? "receita" : "kardex";
@@ -280,7 +285,7 @@ const OrcamentoModuloApp = {
     return nome ? id + " - " + nome : id;
   },
 
-  escolhaHtml(nounsCc) {
+  listaHtml(nounsCc) {
     const st = this.novo;
     const de = this.anoSeguinte();
     const empHtml = MlEmpresaFilter.html({
@@ -296,23 +301,41 @@ const OrcamentoModuloApp = {
     });
     const ccHtml = MlEmpresaFilter.html({
       id: "orc-cc",
-      label: "Produto",
+      label: "Centro de custo",
       items: this.centros(),
       selectedIds: st.ccId ? [st.ccId] : [],
       open: st.openCc,
       query: st.qCc,
       emptyMeansAll: false,
-      emptyLabel: st.companyId ? "Selecione o produto" : "Escolha a empresa antes",
+      emptyLabel: st.companyId ? "Todos os centros" : "Escolha a empresa antes",
       single: true,
       nouns: nounsCc
     });
-    const pode = !!(st.companyId && st.ccId && st.anoAte >= st.anoDe);
+    const pode = !!(st.companyId && st.anoAte >= st.anoDe);
+    const linhas = this.linhasLista();
+    const corpo = linhas.length
+      ? linhas.map((r) => {
+        const cc = this.esc(r.ccId);
+        return `<tr>
+          <td class="cc-nome" title="${this.esc(r.centro)}">${this.esc(r.centro)}</td>
+          <td class="cc-nome" title="${this.esc(r.empresa)}">${this.esc(r.empresa)}</td>
+          <td>${this.esc(r.anoDe)} a ${this.esc(r.anoAte)}</td>
+          <td class="is-right tvig-acoes">
+            <button type="button" class="tvig-ico" title="Editar" onclick="OrcamentoModuloApp.editar('${cc}')"><i data-lucide="pencil" style="width:15px;height:15px;"></i></button>
+            <button type="button" class="tvig-ico is-danger" title="Excluir" onclick="OrcamentoModuloApp.excluir('${cc}')"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button>
+          </td>
+        </tr>`;
+      }).join("")
+      : "";
+    const vazio = st.ccId
+      ? "Nenhum orçamento deste centro de custo."
+      : (st.companyId ? "Nenhum orçamento desta empresa." : "Nenhum orçamento ainda.");
     return `
-      <div class="crm-card orc-escolha">
-        <p class="orc-rec-lead">O orçamento começa em ${de}. Escolha o produto e até qual ano ele vai, e avance para o kardex.</p>
+      <div class="search-filter-panel orc-lista-filtro">
+        <h3 class="tvig-section-title">Novo orçamento</h3>
+        <p class="orc-rec-lead">Escolha a empresa e o período e adicione. O centro de custo consulta o orçamento na lista.</p>
         <div class="orc-escolha-campos">
           ${empHtml}
-          ${ccHtml}
           <div class="form-group" style="margin:0;">
             <label>De</label>
             <input type="number" class="form-control" min="${de}" max="2100" value="${this.esc(st.anoDe)}" style="width:110px;height:38px;"
@@ -323,10 +346,205 @@ const OrcamentoModuloApp = {
             <input type="number" class="form-control" min="${de}" max="2100" value="${this.esc(st.anoAte)}" style="width:110px;height:38px;"
               onchange="OrcamentoModuloApp.setAno('anoAte', this.value)">
           </div>
+          ${ccHtml}
           <button type="button" class="btn btn-primary" style="height:38px;" ${pode ? "" : "disabled"}
-            onclick="OrcamentoModuloApp.avancar()">Avançar</button>
+            onclick="OrcamentoModuloApp.adicionar()">Adicionar</button>
         </div>
-      </div>`;
+        ${st.erro ? `<p class="orc-lista-erro">${this.esc(st.erro)}</p>` : ""}
+      </div>
+      <h3 class="tvig-section-title">Orçamentos</h3>
+      ${corpo ? `<div class="cc-scroll">
+        <table class="cc-table tvig-cc-table orc-lista-tab">
+          <colgroup>
+            <col><col><col style="width:140px"><col class="orc-lista-acao">
+          </colgroup>
+          <thead><tr>
+            <th>Centro de custo</th><th>Empresa</th><th>Período</th><th class="is-right">Ações</th>
+          </tr></thead>
+          <tbody>${corpo}</tbody>
+        </table>
+      </div>` : `<div class="tvig-empty">${this.esc(vazio)}</div>`}`;
+  },
+
+  nomeCentro(id) {
+    const chave = String(id || "");
+    const lista = (window.AppState && AppState.cachedCostCenters) || [];
+    const c = lista.find((x) => String(x.id || x.costCenterId || "") === chave);
+    const nome = c ? String(c.name || c.description || "").toUpperCase() : this.nomeCc(chave);
+    return nome ? chave + " - " + nome : chave;
+  },
+
+  nomeEmpresaId(id) {
+    const chave = String(id || "");
+    if (!chave) return "—";
+    const e = this.empresas().find((x) => x.id === chave);
+    return e ? e.id + " - " + e.name : chave;
+  },
+
+  empresaDoCcId(cc) {
+    const lista = (window.AppState && AppState.cachedCostCenters) || [];
+    const c = lista.find((x) => String(x.id || x.costCenterId || "") === String(cc));
+    return this.empresaDoCentro(c);
+  },
+
+  lerIndice() {
+    let idx = {};
+    try { idx = JSON.parse(localStorage.getItem("orc_lista_v1") || "{}") || {}; } catch (e) { idx = {}; }
+    if (!idx || typeof idx !== "object" || Array.isArray(idx)) idx = {};
+    try {
+      const planos = JSON.parse(localStorage.getItem("orc_plano_v1") || "{}") || {};
+      Object.keys(planos).forEach((cc) => {
+        if (!cc || cc === "_padrao" || !planos[cc] || typeof planos[cc] !== "object") return;
+        const atual = idx[cc] && typeof idx[cc] === "object" ? idx[cc] : {};
+        idx[cc] = {
+          ccId: cc,
+          companyId: String(atual.companyId || planos[cc].companyId || this.empresaDoCcId(cc) || ""),
+          anoDe: Number(atual.anoDe || planos[cc].anoDe) || this.anoSeguinte(),
+          anoAte: Number(atual.anoAte || planos[cc].anoAte) || (this.anoSeguinte() + 3),
+          em: String(atual.em || planos[cc].em || "")
+        };
+      });
+    } catch (e) {}
+    return idx;
+  },
+
+  gravarIndice(reg) {
+    const idx = this.lerIndice();
+    idx[String(reg.ccId)] = {
+      ccId: String(reg.ccId),
+      companyId: String(reg.companyId || ""),
+      anoDe: Number(reg.anoDe) || this.anoSeguinte(),
+      anoAte: Number(reg.anoAte) || this.anoSeguinte(),
+      em: String(reg.em || "")
+    };
+    try { localStorage.setItem("orc_lista_v1", JSON.stringify(idx)); } catch (e) {}
+  },
+
+  linhasLista() {
+    const st = this.novo;
+    const emp = String(st.companyId || "");
+    const cc = String(st.ccId || "");
+    return Object.keys(this.lerIndice()).map((id) => {
+      const r = this.lerIndice()[id];
+      const companyId = String(r.companyId || this.empresaDoCcId(id) || "");
+      return {
+        ccId: id,
+        companyId: companyId,
+        anoDe: Number(r.anoDe) || this.anoSeguinte(),
+        anoAte: Number(r.anoAte) || this.anoSeguinte(),
+        centro: this.nomeCentro(id),
+        empresa: this.nomeEmpresaId(companyId),
+        em: String(r.em || "")
+      };
+    }).filter((r) => {
+      if (cc && r.ccId !== cc) return false;
+      if (emp && r.companyId && r.companyId !== emp) return false;
+      if (emp && !r.companyId) return false;
+      return true;
+    }).sort((a, b) => a.centro.localeCompare(b.centro, "pt-BR"));
+  },
+
+  async carregarIndiceNuvem() {
+    if (this._listaNuvem) return;
+    this._listaNuvem = true;
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (!fx || !db || typeof fx.getDocs !== "function" || typeof fx.collection !== "function") return;
+    try {
+      const snap = await fx.getDocs(fx.collection(db, "orcamento_empreendimento"));
+      const docs = snap && snap.docs ? snap.docs : [];
+      docs.forEach((d) => {
+        if (!d || d.id === "_padrao") return;
+        const data = d.data ? (d.data() || {}) : {};
+        const cc = String(data.ccId || d.id || "");
+        if (!cc || cc === "_padrao") return;
+        const atual = this.lerIndice()[cc] || {};
+        this.gravarIndice({
+          ccId: cc,
+          companyId: String(data.companyId || atual.companyId || this.empresaDoCcId(cc) || ""),
+          anoDe: Number(data.anoDe || atual.anoDe) || this.anoSeguinte(),
+          anoAte: Number(data.anoAte || atual.anoAte) || (this.anoSeguinte() + 3),
+          em: String(data.em || atual.em || "")
+        });
+      });
+      if (this.novo.etapa !== "orcamento") this.renderNovo();
+    } catch (e) {}
+  },
+
+  adicionar() {
+    this.ajustarPeriodo();
+    const st = this.novo;
+    if (!st.companyId) {
+      st.erro = "Escolha a empresa.";
+      this.renderNovo();
+      return;
+    }
+    if (!(Number(st.anoAte) >= Number(st.anoDe))) return;
+    if (!st.ccId) {
+      st.erro = "Escolha o centro de custo para adicionar o orçamento.";
+      this.renderNovo();
+      return;
+    }
+    st.erro = "";
+    const cc = String(st.ccId);
+    const reg = {
+      companyId: String(st.companyId),
+      ccId: cc,
+      anoDe: Number(st.anoDe),
+      anoAte: Number(st.anoAte),
+      em: new Date().toISOString()
+    };
+    this.gravarIndice(reg);
+    const plano = this.planoDoCc();
+    plano.companyId = reg.companyId;
+    plano.anoDe = reg.anoDe;
+    plano.anoAte = reg.anoAte;
+    plano.em = reg.em;
+    this.gravarPlanoLocal(cc);
+    this.salvarPlano();
+    this.renderNovo();
+  },
+
+  editar(cc) {
+    const chave = String(cc || "");
+    const reg = this.lerIndice()[chave] || {};
+    const emp = String(reg.companyId || this.empresaDoCcId(chave) || "");
+    if (emp) this.novo.companyId = emp;
+    this.novo.ccId = chave;
+    if (Number(reg.anoDe) >= this.anoSeguinte()) this.novo.anoDe = Number(reg.anoDe);
+    if (Number(reg.anoAte) >= Number(this.novo.anoDe)) this.novo.anoAte = Number(reg.anoAte);
+    this.novo.etapa = "orcamento";
+    this.novo.aba = "kardex";
+    this.novo.openEmp = false;
+    this.novo.openCc = false;
+    this.novo.erro = "";
+    this.novo.resultado = null;
+    this.renderNovo();
+  },
+
+  async excluir(cc) {
+    const chave = String(cc || "");
+    const nome = this.nomeCentro(chave);
+    const ok = typeof window.mouraConfirm === "function"
+      ? await window.mouraConfirm("Excluir o orçamento de " + nome + "?")
+      : false;
+    if (!ok) return;
+    const idx = this.lerIndice();
+    delete idx[chave];
+    try { localStorage.setItem("orc_lista_v1", JSON.stringify(idx)); } catch (e) {}
+    try {
+      const planos = JSON.parse(localStorage.getItem("orc_plano_v1") || "{}") || {};
+      delete planos[chave];
+      localStorage.setItem("orc_plano_v1", JSON.stringify(planos));
+    } catch (e) {}
+    if (this._planos) delete this._planos[chave];
+    if (String(this.novo.ccId) === chave) this.novo.ccId = "";
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (fx && db && typeof fx.deleteDoc === "function") {
+      fx.deleteDoc(fx.doc(db, "orcamento_empreendimento", chave)).catch(() => {});
+    }
+    this.renderNovo();
   },
 
   barraOrcamento() {
@@ -360,7 +578,7 @@ const OrcamentoModuloApp = {
   },
 
   alterarEscolha() {
-    this.novo.etapa = "escolha";
+    this.novo.etapa = "lista";
     this.novo.openEmp = false;
     this.novo.openCc = false;
     this.renderNovo();
@@ -566,6 +784,10 @@ const OrcamentoModuloApp = {
     if (!cc) return;
     const plano = this.planoDoCc();
     plano.em = new Date().toISOString();
+    plano.companyId = String(this.novo.companyId || plano.companyId || "");
+    plano.anoDe = Number(this.novo.anoDe) || Number(plano.anoDe) || this.anoSeguinte();
+    plano.anoAte = Number(this.novo.anoAte) || Number(plano.anoAte) || plano.anoDe;
+    this.gravarIndice({ companyId: plano.companyId, ccId: cc, anoDe: plano.anoDe, anoAte: plano.anoAte, em: plano.em });
     this.gravarPlanoLocal(cc);
     this.novo.nuvem = "salvando";
     this.pintarNuvem();
@@ -578,8 +800,10 @@ const OrcamentoModuloApp = {
     }
     try {
       await fx.setDoc(fx.doc(db, "orcamento_empreendimento", cc), {
-        companyId: String(this.novo.companyId || ""),
+        companyId: String(this.novo.companyId || plano.companyId || ""),
         ccId: cc,
+        anoDe: Number(this.novo.anoDe) || Number(plano.anoDe) || this.anoSeguinte(),
+        anoAte: Number(this.novo.anoAte) || Number(plano.anoAte) || this.anoSeguinte(),
         distratos: plano.distratos,
         vendasQtd: plano.vendasQtd,
         condicoes: plano.condicoes,
@@ -1182,9 +1406,9 @@ const OrcamentoModuloApp = {
             <colgroup>${g.cols}</colgroup>
             ${head}
             <tbody>
-              ${linha("Estoque inicial", inicial.map((v, mes) => this.celTexto(v, false, this.clsMes(ano, mes))).join(""), "—")}
-              ${linha("Distratos", distCells.join(""), sDist || "—")}
-              ${linha("Vendas", vendaCells.join(""), sVenda || "—")}
+              ${linha("Estoque inicial", inicial.map((v, mes) => this.celTexto(v, false, this.clsMes(ano, mes))).join(""), "—", "is-ini")}
+              ${linha("Distratos", distCells.join(""), sDist || "—", "is-dist")}
+              ${linha("Vendas", vendaCells.join(""), sVenda || "—", "is-venda")}
               ${linha("Saldo", finais.map((v, mes) => this.celTexto(v, false, this.clsMes(ano, mes))).join(""), finais[11], "is-conta")}
             </tbody>
           </table>

@@ -9523,7 +9523,24 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .cc-table.orc-kardex-grade col.orc-rec-c-ano { width: 132px; }
 .cc-table.orc-kardex-grade td.is-passado { background: #f8fafc; color: #64748b; }
 .cc-table.orc-kardex-grade td.is-hoje { box-shadow: inset 0 -2px 0 #105436; }
-.cc-table.orc-kardex-grade td.is-real { color: #334155; }
+.cc-table.orc-kardex-grade { border-collapse: collapse; background: #fff; font-size: 12px; }
+.cc-table.orc-kardex-grade th,
+.cc-table.orc-kardex-grade td { border: 1px solid #c5d0c6; height: 26px; padding: 1px 6px; }
+.cc-table.orc-kardex-grade thead th { border-color: #0c3d28; }
+.cc-table.orc-kardex-grade tr.orc-kx.is-ini td { background: #fff; }
+.cc-table.orc-kardex-grade tr.orc-kx.is-dist td { background: #fdecec; color: #7f1d1d; }
+.cc-table.orc-kardex-grade tr.orc-kx.is-venda td { background: #e7f0fb; color: #1e3a5f; }
+.cc-table.orc-kardex-grade tr.orc-kx.is-dist td.is-passado { background: #f8d7d7; color: #9f1239; }
+.cc-table.orc-kardex-grade tr.orc-kx.is-venda td.is-passado { background: #d9e6f6; color: #1e3a5f; }
+.cc-table.orc-kardex-grade tr.orc-kx.is-ini td.is-passado,
+.cc-table.orc-kardex-grade tr.orc-kx.is-conta td.is-passado { background: #f3f4f6; }
+.cc-table.orc-kardex-grade .orc-kx-cel input.orc-dist-qtd { height: 22px; border: 1px solid transparent; border-radius: 0; background: transparent; color: inherit; }
+.cc-table.orc-kardex-grade .orc-kx-cel input.orc-dist-qtd:focus { outline: 2px solid #217346; background: #fff; color: #0f172a; }
+.orc-kardex-bloco { margin: 0 0 10px; }
+.orc-lista-filtro { margin: 0 0 14px; padding: 14px 16px 8px; }
+.orc-lista-erro { margin: 8px 0 0; color: #b91c1c; font-size: 0.8rem; font-weight: 700; }
+.orc-lista-tab col.orc-lista-acao { width: 72px; }
+.cc-table.orc-lista-tab td.tvig-acoes { white-space: nowrap; }
 .orc-escolha { padding: 18px 18px 8px; }
 .orc-escolha-campos { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
 .orc-orc-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin: 0 0 12px; }
