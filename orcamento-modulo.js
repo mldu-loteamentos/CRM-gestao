@@ -26,7 +26,8 @@ const OrcamentoModuloApp = {
     progresso: "",
     erro: "",
     resultado: null,
-    clienteAberto: -1
+    clienteAberto: -1,
+    anoAberto: ""
   },
 
   _bcb: {},
@@ -316,25 +317,9 @@ const OrcamentoModuloApp = {
     if (!r) {
       return `<div class="crm-card" style="padding:28px;color:#64748b;">Escolha a empresa, o centro de custo e os anos. A receita é montada ao clicar em Montar receita.</div>`;
     }
-    const anos = Object.keys(r.grade).sort();
     const meses = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
     const cab = meses.map((m) => `<th class="is-right">${m}</th>`).join("");
     const cols = `<col class="orc-rec-c-ano">${meses.map(() => "<col>").join("")}<col class="orc-rec-c-tot">`;
-    const linhas = anos.map((ano) => {
-      const cel = r.grade[ano];
-      const total = cel.reduce((s, v) => s + v, 0);
-      return `<tr>
-        <td>${this.esc(ano)}</td>
-        ${cel.map((v) => `<td class="is-right">${v > 0.009 ? this.esc(this.numero(v)) : "—"}</td>`).join("")}
-        <td class="is-right">${this.esc(this.numero(total))}</td>
-      </tr>`;
-    }).join("");
-    const totaisMes = meses.map((_, i) => anos.reduce((s, ano) => s + (r.grade[ano][i] || 0), 0));
-    const rodape = `<tr class="orc-rec-total">
-      <td>Total</td>
-      ${totaisMes.map((v) => `<td class="is-right">${v > 0.009 ? this.esc(this.numero(v)) : "—"}</td>`).join("")}
-      <td class="is-right">${this.esc(this.numero(r.total))}</td>
-    </tr>`;
     const indices = (r.indices || []).map((ix) => `<span>${this.esc(this.resumoIndice(ix))}</span>`).join("");
     return `
       <div class="orc-rec-kpis">
@@ -347,25 +332,11 @@ const OrcamentoModuloApp = {
         <div class="crm-card orc-rec-kpi"><span>Depois de ${this.esc(r.anoAte)}</span><strong>${this.esc(this.dinheiro(r.fora))}</strong></div>
       </div>
       ${indices ? `<div class="orc-rec-focus">${indices}</div>` : ""}
-      <div class="cc-scroll orc-rec-orig">
-        <table class="cc-table orc-rec-orig-tab">
-          <colgroup>
-            <col class="orc-rec-c-ano"><col><col><col>
-          </colgroup>
-          <thead><tr>
-            <th>Ano</th>
-            <th class="is-right">Valor original</th>
-            <th class="is-right">Repactuação</th>
-            <th class="is-right">Total</th>
-          </tr></thead>
-          <tbody>${this.porAnoHtml(r)}</tbody>
-        </table>
-      </div>
       <div class="cc-scroll orc-rec-meses">
         <table class="cc-table orc-rec-grade">
           <colgroup>${cols}</colgroup>
           <thead><tr><th>Ano</th>${cab}<th class="is-right">Total</th></tr></thead>
-          <tbody>${linhas}${rodape}</tbody>
+          <tbody id="orc-rec-anos">${this.gradeAnosHtml(r)}</tbody>
         </table>
       </div>
       <div class="cc-scroll orc-rec-clientes">
@@ -384,25 +355,56 @@ const OrcamentoModuloApp = {
       </div>`;
   },
 
-  porAnoHtml(r) {
-    const anos = Object.keys((r && r.porAno) || {}).sort();
-    if (!anos.length) return `<tr><td colspan="4">Monte a receita de novo para ver o original e a repactuação.</td></tr>`;
-    let original = 0;
-    let repactuacao = 0;
+  celNum(v, extra) {
+    const n = Number(v) || 0;
+    const cls = "is-right" + (extra ? " " + extra : "");
+    return `<td class="${cls}">${n > 0.009 ? this.esc(this.numero(n)) : "—"}</td>`;
+  },
+
+  linhaMeses(ano, rotulo, valores, extra) {
+    const lista = valores || [];
+    const soma = lista.reduce((s, v) => s + (Number(v) || 0), 0);
+    const nome = rotulo === "Original"
+      ? `<i data-lucide="chevron-down"></i>${this.esc(ano)}<small>${this.esc(rotulo)}</small>`
+      : `<small>${this.esc(rotulo)}</small>`;
+    return `<tr class="orc-rec-ano orc-rec-det${extra ? " is-reaj" : ""}" onclick="OrcamentoModuloApp.toggleAno('${ano}')">
+      <td class="orc-rec-ano-nome">${nome}</td>
+      ${lista.map((v) => this.celNum(v, extra)).join("")}
+      ${this.celNum(soma, extra)}
+    </tr>`;
+  },
+
+  gradeAnosHtml(r) {
+    const anos = Object.keys((r && r.grade) || {}).sort();
     const linhas = anos.map((ano) => {
-      const cel = r.porAno[ano] || {};
-      const base = Number(cel.original) || 0;
-      const ajuste = Number(cel.repactuacao) || 0;
-      original += base;
-      repactuacao += ajuste;
-      return `<tr>
-        <td>${this.esc(ano)}</td>
-        <td class="is-right">${this.esc(this.numero(base))}</td>
-        <td class="is-right orc-rec-reaj">${this.esc(this.numero(ajuste))}</td>
-        <td class="is-right">${this.esc(this.numero(base + ajuste))}</td>
+      const cel = r.grade[ano] || [];
+      const total = cel.reduce((s, v) => s + (Number(v) || 0), 0);
+      const aberto = this.novo.anoAberto === String(ano);
+      const parte = (r.porAno && r.porAno[ano]) || {};
+      if (aberto && Array.isArray(parte.original)) {
+        return this.linhaMeses(ano, "Original", parte.original, "") + this.linhaMeses(ano, "Repactuação", parte.repactuacao, "orc-rec-reaj");
+      }
+      if (aberto) {
+        return `<tr class="orc-rec-ano" onclick="OrcamentoModuloApp.toggleAno('${ano}')"><td colspan="14">Monte a receita de novo para ver o mês a mês.</td></tr>`;
+      }
+      return `<tr class="orc-rec-ano" onclick="OrcamentoModuloApp.toggleAno('${ano}')">
+        <td><i data-lucide="chevron-right"></i>${this.esc(ano)}</td>
+        ${cel.map((v) => this.celNum(v)).join("")}
+        ${this.celNum(total)}
       </tr>`;
     }).join("");
-    return linhas + `<tr class="orc-rec-total"><td>Total</td><td class="is-right">${this.esc(this.numero(original))}</td><td class="is-right orc-rec-reaj">${this.esc(this.numero(repactuacao))}</td><td class="is-right">${this.esc(this.numero(original + repactuacao))}</td></tr>`;
+    const totaisMes = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((i) => anos.reduce((s, ano) => s + ((r.grade[ano] && r.grade[ano][i]) || 0), 0));
+    const rodape = `<tr class="orc-rec-total"><td>Total</td>${totaisMes.map((v) => this.celNum(v)).join("")}${this.celNum(r.total)}</tr>`;
+    return linhas + rodape;
+  },
+
+  toggleAno(ano) {
+    this.novo.anoAberto = this.novo.anoAberto === String(ano) ? "" : String(ano);
+    const box = document.getElementById("orc-rec-anos");
+    if (box && this.novo.resultado) {
+      box.innerHTML = this.gradeAnosHtml(this.novo.resultado);
+      if (window.lucide) window.lucide.createIcons();
+    }
   },
 
   clientesHtml(r) {
@@ -497,6 +499,7 @@ const OrcamentoModuloApp = {
       const linhas = await this.buscarExtrato(st.ccId, st.anoAte);
       this.pintarProgresso("Distribuindo a receita pelo PMP e pela repactuação…", 75);
       st.clienteAberto = -1;
+      st.anoAberto = "";
       st.resultado = await this.distribuirReceita(linhas, st.anoDe, st.anoAte);
       st.progressoPct = 100;
     } catch (e) {
@@ -670,7 +673,10 @@ const OrcamentoModuloApp = {
     const porAno = {};
     for (let y = anoDe; y <= anoAte; y++) {
       grade[String(y)] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-      porAno[String(y)] = { original: 0, repactuacao: 0 };
+      porAno[String(y)] = {
+        original: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        repactuacao: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      };
     }
     const clientes = [];
     let principal = 0;
@@ -723,8 +729,8 @@ const OrcamentoModuloApp = {
         const mes = Number(quando.slice(5, 7)) - 1;
         if (!grade[ano] || mes < 0) return;
         grade[ano][mes] += valor;
-        porAno[ano].original += saldo;
-        porAno[ano].repactuacao += ajuste;
+        porAno[ano].original[mes] += saldo;
+        porAno[ano].repactuacao[mes] += ajuste;
         doCliente += valor;
         principalCliente += saldo;
         reajusteCliente += ajuste;
