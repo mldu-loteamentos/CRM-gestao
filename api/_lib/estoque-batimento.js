@@ -128,6 +128,175 @@ function chunkBySize(list) {
   return out;
 }
 
+const SOLD_CODES = new Set(["V", "O", "G", "P", "L"]);
+
+function displayContract(u) {
+  if (!u) return "";
+  if (u.contractNumber != null && String(u.contractNumber).trim() !== "") return String(u.contractNumber);
+  if (u.receivableBillId && String(u.receivableBillId) !== String(u.contractId || "")) return String(u.receivableBillId);
+  return "";
+}
+
+function unitBalance(u) {
+  if (!u) return null;
+  if (u.presentDebitBalance != null && !Number.isNaN(Number(u.presentDebitBalance))) return Number(u.presentDebitBalance);
+  if (u.outstandingBalance != null && !Number.isNaN(Number(u.outstandingBalance))) return Number(u.outstandingBalance);
+  return null;
+}
+
+function needsContract(u) {
+  if (!u || isSettledUnit(u)) return false;
+  const code = String(u.commercialStock || "").toUpperCase();
+  if (!SOLD_CODES.has(code) && !u.contractId) return false;
+  if (!displayContract(u)) return true;
+  return unitBalance(u) == null;
+}
+
+function normName(name) {
+  return String(name || "").replace(/\s+/g, "").toUpperCase();
+}
+
+function normNameLoose(name) {
+  return normName(name).replace(/-0+/g, "-").replace(/^0+/, "") || normName(name);
+}
+
+function cleanUnitKey(name, entId) {
+  if (!name) return "";
+  let clean = String(name).trim();
+  if (entId) {
+    const eStr = String(entId);
+    if (clean === eStr) return "";
+    if (clean.startsWith(eStr + " - ")) clean = clean.substring(eStr.length + 3);
+    else if (clean.startsWith(eStr + "-")) clean = clean.substring(eStr.length + 1);
+    else if (clean.startsWith(eStr + " ")) clean = clean.substring(eStr.length + 1);
+  }
+  return clean.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+}
+
+function isoDate(s) {
+  if (!s) return null;
+  const d = String(s).slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
+}
+
+function salePayable(c) {
+  const v = c.outstandingBalance ?? c.currentBalance ?? c.balance ?? c.receivableBalance
+    ?? c.totalOutstandingBalance ?? c.presentValue ?? c.debtBalance;
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isNaN(n) ? null : n;
+}
+
+function contractInfoFromSale(c) {
+  const mainCust = (c.salesContractCustomers || []).find((x) => x.main === true) || (c.salesContractCustomers || [])[0] || {};
+  const num = c.number || c.contractNumber || c.documentNumber || c.salesContractNumber || "";
+  const doc = mainCust.cpf || mainCust.cnpj || mainCust.cpfCnpj || c.customerCpf || c.customerCnpj || "";
+  return {
+    saleId: c.id,
+    contractNumber: num ? String(num) : "",
+    outstandingBalance: salePayable(c),
+    contractValue: c.totalSellingValue || c.value || null,
+    receivableBillId: c.receivableBillId || null,
+    customerId: mainCust.id || c.customerId || null,
+    customerDoc: String(doc || "").replace(/\D/g, ""),
+    customerName: mainCust.name || c.customerName || "",
+    situation: c.situation || c.status || ""
+  };
+}
+
+function rememberContractNames(byName, raw, info) {
+  if (!raw) return;
+  const n = normName(raw);
+  const l = normNameLoose(raw);
+  if (n) byName[n] = info;
+  if (l) byName[l] = info;
+  const c = cleanUnitKey(raw);
+  if (c) byName[c] = info;
+}
+
+async function fetchContractsForCc(ccId) {
+  const byId = {};
+  const byName = {};
+  const bySaleId = {};
+  const byNumber = {};
+  let offset = 0;
+  let hasMore = true;
+  while (hasMore) {
+    const data = await siengeFetch(`${SIENGE_API_BASE}/sales-contracts?limit=200&offset=${offset}&enterpriseId=${encodeURIComponent(ccId)}`);
+    const results = (data && data.results) || [];
+    results.forEach((c) => {
+      const info = contractInfoFromSale(c);
+      if (c.id != null) bySaleId[String(c.id)] = info;
+      if (info.contractNumber) byNumber[String(info.contractNumber)] = info;
+      if (info.receivableBillId) byNumber[String(info.receivableBillId)] = info;
+      const linked = c.salesContractUnits || c.units || c.salesContractBuildings || [];
+      linked.forEach((su) => {
+        const uid = su.unitId || su.buildingUnitId || su.id;
+        if (uid) byId[String(uid)] = info;
+        rememberContractNames(byName, su.name || su.unitName || su.unityName || su.unit, info);
+      });
+      if (c.unitId) byId[String(c.unitId)] = info;
+      rememberContractNames(byName, c.unitName || c.unityName || c.unit, info);
+    });
+    if (results.length < 200) hasMore = false;
+    else offset += results.length;
+  }
+  return { byId, byName, bySaleId, byNumber };
+}
+
+function pickSale(u, maps) {
+  if (!u || !maps) return null;
+  const clean = cleanUnitKey(u.name, u.enterpriseId);
+  return maps.byId[String(u.id)]
+    || (u.contractId != null ? maps.bySaleId[String(u.contractId)] : null)
+    || (displayContract(u) ? maps.byNumber[displayContract(u)] : null)
+    || (u.contractNumber ? maps.byNumber[String(u.contractNumber)] : null)
+    || (u.receivableBillId ? maps.byNumber[String(u.receivableBillId)] : null)
+    || maps.byName[normName(u.name)]
+    || maps.byName[normNameLoose(u.name)]
+    || (clean ? maps.byName[clean] : null)
+    || null;
+}
+
+function applyContractInfo(u, info) {
+  if (!info) return u;
+  const bal = info.outstandingBalance;
+  const num = info.contractNumber ? String(info.contractNumber) : "";
+  const nextBal = bal == null ? u.outstandingBalance : Number(bal);
+  return {
+    ...u,
+    contractId: info.saleId || u.contractId,
+    contractNumber: num || u.contractNumber || null,
+    receivableBillId: info.receivableBillId || u.receivableBillId,
+    customerId: info.customerId || u.customerId,
+    customerDoc: info.customerDoc || u.customerDoc,
+    customerName: info.customerName || u.customerName,
+    outstandingBalance: nextBal,
+    presentDebitBalance: bal == null ? u.presentDebitBalance : Number(bal),
+    contractValue: info.contractValue != null ? Number(info.contractValue) : u.contractValue,
+    situation: info.situation || u.situation,
+    finAt: new Date().toISOString()
+  };
+}
+
+function originFromReq(req) {
+  if (process.env.WARMUP_BASE_URL) return String(process.env.WARMUP_BASE_URL).replace(/\/$/, "");
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  const proto = (req.headers && (req.headers["x-forwarded-proto"] || "https")) || "https";
+  const host = (req.headers && (req.headers["x-forwarded-host"] || req.headers.host)) || "crm-gestao.vercel.app";
+  return `${proto}://${host}`;
+}
+
+function continuarBatimento(req) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 2500);
+  const secret = process.env.CRON_SECRET || process.env.WARMUP_SECRET || "";
+  fetch(`${originFromReq(req)}/api/estoque-batimento`, {
+    headers: secret ? { Authorization: `Bearer ${secret}` } : {},
+    signal: ctrl.signal
+  }).catch(() => {}).finally(() => clearTimeout(timer));
+}
+
 async function saveCc(ccId, allUnits) {
   const cc = String(ccId);
   const list = allUnits.filter((u) => String(u.enterpriseId) === cc);
@@ -223,10 +392,57 @@ module.exports = async function handler(req, res) {
     }
     state.passes = (Number(state.passes) || 0) + 1;
 
-    const units = await loadUnits();
+    let units = await loadUnits();
     if (!units.length) {
       await setDoc(doc(db, FB_COL, STATE_ID), { ...state, done: true, mode: "empty", message: "sem unidades" });
       return res.status(200).json({ done: true, date: today, message: "Sem estoque no Firebase." });
+    }
+
+    if (!Array.isArray(state.contractsSeen)) state.contractsSeen = [];
+    const seenCc = new Set(state.contractsSeen.map(String));
+    const pendingCc = [...new Set(units.filter(needsContract).map((u) => String(u.enterpriseId || "")).filter(Boolean))]
+      .filter((id) => !seenCc.has(id))
+      .sort((a, b) => Number(a) - Number(b));
+    if (pendingCc.length) {
+      const byUnit = new Map(units.map((u) => [String(u.id), u]));
+      let crossed = 0;
+      for (const ccId of pendingCc) {
+        if (Date.now() - started >= BUDGET_MS) break;
+        try {
+          const maps = await fetchContractsForCc(ccId);
+          let dirty = false;
+          units.forEach((u) => {
+            if (String(u.enterpriseId) !== String(ccId) || isSettledUnit(u)) return;
+            const info = pickSale(u, maps);
+            if (!info) return;
+            byUnit.set(String(u.id), applyContractInfo(u, info));
+            dirty = true;
+          });
+          units = [...byUnit.values()];
+          if (dirty) await saveCc(ccId, units);
+        } catch (e) {
+          log.push(`contratos ${ccId}: ${(e && e.message) || e}`);
+        }
+        seenCc.add(String(ccId));
+        crossed += 1;
+      }
+      state.contractsSeen = [...seenCc];
+      const contractsLeft = pendingCc.filter((id) => !seenCc.has(id)).length;
+      state.contractsLeft = contractsLeft;
+      await setDoc(doc(db, FB_COL, STATE_ID), { ...state, done: false });
+      if (contractsLeft > 0 && state.passes < 800) {
+        continuarBatimento(req);
+        return res.status(200).json({
+          done: false,
+          phase: "contratos",
+          date: today,
+          pass: state.passes,
+          crossed,
+          contractsLeft,
+          message: `Cruzamento de contratos no batimento diário. Faltam ${contractsLeft} empreendimento(s).`,
+          log: log.slice(0, 30)
+        });
+      }
     }
 
     const { bills: filaBills, paidMap } = await loadFilaAndPaidMap(today);
@@ -321,6 +537,7 @@ module.exports = async function handler(req, res) {
     const nextUnits = [...byId.values()];
     const n = await persistSnapshot(nextUnits, state.done);
 
+    if (!state.done && state.passes < 800) continuarBatimento(req);
     return res.status(200).json({
       done: !!state.done,
       date: today,

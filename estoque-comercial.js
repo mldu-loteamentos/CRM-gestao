@@ -8,7 +8,7 @@ const EstoqueComercialApp = {
   FB_CHUNK: 400,
   /** Firestore recusa documento acima de 1 MiB (contado em bytes UTF-8, com nomes de campo); com parcelas abertas 400 unidades passam disso. */
   FB_DOC_BYTES: 600000,
-  /** Censo pesado fica no cron. No browser o automático é diário (delta + fila). */
+  /** Carga e cruzamento ficam no batimento diário (/api/estoque-batimento). Abrir a tela só mostra a posição gravada. */
   BATIMENTO_AUTO_PAUSED: false,
   BATIMENTO_AUTO_DELTA: true,
   /**
@@ -4273,9 +4273,6 @@ window.EstoqueComercialApp = EstoqueComercialApp;
 
 document.addEventListener("tabChanged", function(e) {
   if (e.detail === "estoque-comercial") {
-    EstoqueComercialApp.init().then(() => {
-      // Automaticamente tenta deixar o batimento do dia pronto.
-      EstoqueComercialApp.autoStartDailyBatimento().catch(() => {});
-    }).catch(() => {});
+    EstoqueComercialApp.init().catch(() => {});
   }
 });
