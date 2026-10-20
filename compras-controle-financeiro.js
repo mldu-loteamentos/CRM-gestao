@@ -669,6 +669,46 @@ ComprasControleApp.departmentScopeNote = function () {
   return String(note || "").replace(/previsões/g, "títulos").replace(/previsão/g, "título");
 };
 
+ComprasControleApp.perfilFold = function (name) {
+  return String(name || "")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/&/g, " E ")
+    .replace(/[^A-Z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+/** Pagamento sem departamento: administrador, gerente FP&A e analistas de pagadoria I e II. */
+ComprasControleApp.veTituloSemDepartamento = function () {
+  const imp = typeof window.crmImpersonacaoAtual === "function" ? window.crmImpersonacaoAtual() : null;
+  if (!imp && typeof window.crmAdministradorReal === "function" && window.crmAdministradorReal()) return true;
+  const u = this.sessionUser();
+  if (!u) return false;
+  if (typeof window.isCrmAdministrator === "function" && window.isCrmAdministrator(u)) return true;
+  const n = this.perfilFold(u.profile_name || u.profile || u.role || "");
+  if (n === "ADMINISTRADOR") return true;
+  if (n.includes("GERENTE") && (n.includes("FP E A") || n.includes("FPA"))) return true;
+  return n.includes("ANALISTA") && n.includes("PAGADORIA") && /\b(I|II|1|2)\b/.test(n);
+};
+
+ComprasControleApp.tituloSemDepartamento = function (r) {
+  const nome = String((r && r.departamento) || "").trim();
+  const id = r && r.departamentoId != null ? String(r.departamentoId).trim() : "";
+  return !nome && !id;
+};
+
+ComprasControleApp.scopedRows = function () {
+  const rows = this.state.allRows || [];
+  const windows = this.departmentWindows();
+  const veSem = this.veTituloSemDepartamento();
+  return rows.filter((r) => {
+    if (this.tituloSemDepartamento(r)) return veSem;
+    if (!windows) return true;
+    return this.rowInDepartmentWindows(r, windows);
+  });
+};
+
 ComprasControleApp.groupHeaderHtml = function (group, totals) {
   const meta = this.groupMeta(group);
   const count = totals.count || 0;

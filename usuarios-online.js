@@ -332,10 +332,13 @@ document.addEventListener("tabChanged", (e) => {
   if (id !== "usuarios-online") UsuariosOnline.unlisten();
   if (id === UsuariosOnline.tab) return;
   UsuariosOnline.tab = id;
-  if (UsuariosOnline.user) {
-    UsuariosOnline.markUse();
+  if (!UsuariosOnline.user) return;
+  UsuariosOnline.markUse();
+  clearTimeout(UsuariosOnline._tabBeat);
+  UsuariosOnline._tabBeat = setTimeout(() => {
+    UsuariosOnline._tabBeat = null;
     UsuariosOnline.beat();
-  }
+  }, 700);
 });
 
 document.addEventListener("visibilitychange", () => {

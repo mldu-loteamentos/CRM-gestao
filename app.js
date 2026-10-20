@@ -304,6 +304,35 @@ if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') {
   };
 }
 
+// Ícones só dentro de um pedaço da tela. createIcons() sem raiz percorre as 78 abas.
+window.crmCriarIcones = function(root) {
+  if (!window.lucide || typeof window.lucide.createIcons !== "function") return;
+  if (root && typeof root.querySelector === "function") {
+    const temIcone = (typeof root.matches === "function" && root.matches("[data-lucide]")) || !!root.querySelector("[data-lucide]");
+    if (!temIcone) return;
+    window.lucide.createIcons({ root: root });
+    return;
+  }
+  window.lucide.createIcons();
+};
+
+// Não reescreve display:none numa aba que já está oculta: isso recalcula a página inteira.
+window.crmEsconderAbas = function(manter) {
+  const panes = document.querySelectorAll(".tab-pane");
+  for (let i = 0; i < panes.length; i++) {
+    const pane = panes[i];
+    if (pane === manter) continue;
+    if (pane.style.display !== "none") pane.style.display = "none";
+  }
+};
+
+window.crmIconeBotao = function(iconEl, name) {
+  if (!iconEl) return;
+  iconEl.setAttribute("data-lucide", name);
+  const root = (iconEl.closest && iconEl.closest("button")) || iconEl.parentElement || iconEl;
+  window.crmCriarIcones(root);
+};
+
 // getDynamicOperators was removed from here because it is defined at the end of the file.
 
 window.normalizeOperatorName = function(s) {
@@ -3219,21 +3248,21 @@ function switchTab(tabId, titleOverride, showLoader = false) {
       window.clearRelacionamento();
   }
 
-  // Esconder todas as seções e abas
-  document.querySelectorAll(".tab-pane").forEach(pane => pane.style.display = "none");
+  // Mostrar aba solicitada. As demais só são ocultadas se ainda estiverem visíveis.
+  const paneId = (tabId === "configuracoes" || tabId === "regras-negociacao") ? "tab-regras-cobranca" : `tab-${tabId}`;
+  const activePane = document.getElementById(paneId);
+  window.crmEsconderAbas(activePane);
   try { sessionStorage.removeItem("currentSubView"); } catch (e) {}
   if (typeof window.leaveDistratoSimulation === "function") window.leaveDistratoSimulation();
   document.querySelectorAll("#view-customer-details, #view-renegotiation, #view-distrato").forEach(view => view.style.display = "none");
-  document.querySelectorAll(".nav-item").forEach(item => item.classList.remove("active"));
-  
-  // Fechar dropdowns de multi-seleção
-  document.querySelectorAll(".multi-select-content").forEach(el => el.classList.remove("show"));
+  document.querySelectorAll(".nav-item.active").forEach(item => item.classList.remove("active"));
 
-  // Mostrar aba solicitada
-  const paneId = (tabId === "configuracoes" || tabId === "regras-negociacao") ? "tab-regras-cobranca" : `tab-${tabId}`;
-  const activePane = document.getElementById(paneId);
+  // Fechar só os dropdowns que estão abertos
+  document.querySelectorAll(".multi-select-content.show").forEach(el => el.classList.remove("show"));
+
   if (activePane) {
-    activePane.style.display = "block";
+    if (activePane.style.display === "none") activePane.style.display = "block";
+    window.crmCriarIcones(activePane);
     if (tabId === 'relacionamento_gestao') {
       setTimeout(() => {
         const titleInput = document.getElementById('relacionamento-filter-titulo');
@@ -3271,10 +3300,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     sidebar.classList.add("collapsed");
     if (mainContent) mainContent.classList.add("expanded");
     const toggleBtnIcon = document.querySelector("#sidebar-toggle-btn i");
-    if (toggleBtnIcon) {
-      toggleBtnIcon.setAttribute("data-lucide", "chevron-right");
-      if (window.lucide) lucide.createIcons();
-    }
+    if (toggleBtnIcon) window.crmIconeBotao(toggleBtnIcon, "chevron-right");
   }
 
   // Ajustar Topbar Title
@@ -3441,14 +3467,14 @@ function switchTab(tabId, titleOverride, showLoader = false) {
       finalIcon = 'hammer';
     }
     titleEl.innerHTML = `<i data-lucide="${finalIcon}"></i> ${finalTitle}`;
-    lucide.createIcons();
+    window.crmCriarIcones(titleEl);
   }
   
   const subAlert = document.getElementById("ctx-subjudice-alert");
   if (subAlert) subAlert.innerHTML = "";
 
   // Auto-collapse accordion menus when a leaf item is clicked
-  document.querySelectorAll(".nav-group").forEach(group => {
+  document.querySelectorAll(".nav-group.active").forEach(group => {
     group.classList.remove("active");
   });
 
@@ -3575,7 +3601,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (typeof PlanoFinanceiroApp !== "undefined") PlanoFinanceiroApp.init();
   } else if (tabId === "doc-padrao") {
     if (typeof loadDocPadraoTemplates === "function") loadDocPadraoTemplates();
-    lucide.createIcons();
+    window.crmCriarIcones(activePane || document.getElementById("tab-doc-padrao"));
   } else if (tabId === "upload-kmz") {
     loadKMZList();
   } else if (tabId === "construcao-marketing" || tabId === "marketing-eventos") {
@@ -7263,10 +7289,7 @@ function toggleNavMenu(event, submenuId) {
     const mainContent = document.querySelector('.main-content');
     if (mainContent) mainContent.classList.remove('expanded');
     const toggleBtnIcon = document.querySelector("#sidebar-toggle-btn i");
-    if (toggleBtnIcon) {
-      toggleBtnIcon.setAttribute("data-lucide", "chevron-left");
-      if (window.lucide) lucide.createIcons();
-    }
+    if (toggleBtnIcon) window.crmIconeBotao(toggleBtnIcon, "chevron-left");
   }
 
   const submenu = document.getElementById(submenuId);
@@ -11968,10 +11991,7 @@ window.toggleSidebar = function() {
   const isCollapsed = sidebar.classList.toggle("collapsed");
   mainContent.classList.toggle("expanded", isCollapsed);
   
-  if (toggleBtnIcon) {
-    toggleBtnIcon.setAttribute("data-lucide", isCollapsed ? "chevron-right" : "chevron-left");
-    lucide.createIcons();
-  }
+  if (toggleBtnIcon) window.crmIconeBotao(toggleBtnIcon, isCollapsed ? "chevron-right" : "chevron-left");
 };
 
 window.showScoreDetailsModal = function() {
@@ -12267,10 +12287,7 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   if (sidebar && !sidebar.classList.contains("collapsed")) {
     sidebar.classList.add("collapsed");
     if (mainContent) mainContent.classList.add("expanded");
-    if (toggleBtnIcon) {
-      toggleBtnIcon.setAttribute("data-lucide", "chevron-right");
-      lucide.createIcons();
-    }
+    if (toggleBtnIcon) window.crmIconeBotao(toggleBtnIcon, "chevron-right");
   }
 
   sessionStorage.setItem('currentCustomerId', customerId);
@@ -12292,7 +12309,7 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   if (container) container.style.background = "linear-gradient(135deg, #105436, #1a7a50)";
 
   // 1. Mostrar feedback visual imediato de "Carregando..." na Ficha
-  document.querySelectorAll('.tab-pane').forEach(el => el.style.display = 'none');
+  window.crmEsconderAbas(null);
   const globalFichaLoader = document.getElementById("global-ficha-loader");
   if (globalFichaLoader) {
       globalFichaLoader.style.display = "none";
@@ -15986,10 +16003,7 @@ function goBackToDashboard() {
   if (sidebar && sidebar.classList.contains("collapsed")) {
     sidebar.classList.remove("collapsed");
     if (mainContent) mainContent.classList.remove("expanded");
-    if (toggleBtnIcon) {
-      toggleBtnIcon.setAttribute("data-lucide", "chevron-left");
-      lucide.createIcons();
-    }
+    if (toggleBtnIcon) window.crmIconeBotao(toggleBtnIcon, "chevron-left");
   }
 
   document.getElementById("view-customer-details").style.display = "none";
@@ -40852,10 +40866,7 @@ document.addEventListener('click', function(event) {
         if (mainContent) mainContent.classList.add('expanded');
         // Update Lucide icon on toggle button
         const toggleBtnIcon = document.querySelector("#sidebar-toggle-btn i");
-        if (toggleBtnIcon) {
-          toggleBtnIcon.setAttribute("data-lucide", "chevron-right");
-          lucide.createIcons();
-        }
+        if (toggleBtnIcon) window.crmIconeBotao(toggleBtnIcon, "chevron-right");
       }
     }
   }
