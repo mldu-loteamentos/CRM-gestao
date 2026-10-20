@@ -24,6 +24,7 @@ const ResultadoCaixaApp = {
   dfcErro: "",
   mlAbertos: {},
   matrizAbertos: {},
+  matrizSort: null,
   mlFatia: "",
   mlDados: null,
   mlLendo: false,
@@ -2713,6 +2714,15 @@ const ResultadoCaixaApp = {
     this.render();
   },
 
+  ordenarMatriz(campo) {
+    if (campo !== "orc" && campo !== "real" && campo !== "var") return;
+    const atual = this.matrizSort;
+    this.matrizSort = atual && atual.campo === campo
+      ? { campo: campo, dir: (Number(atual.dir) || -1) * -1 }
+      : { campo: campo, dir: -1 };
+    this.render();
+  },
+
   /** Acumulado de janeiro ao mês, por empresa e por centro de custo, na mesma base da aba aberta. */
   matrizDfcDados(lado) {
     const saida = lado !== "entradas";
@@ -2776,19 +2786,53 @@ const ResultadoCaixaApp = {
         }).sort((x, y) => {
           const nx = (x.id ? x.id + " - " : "") + (x.nome || "");
           const ny = (y.id ? y.id + " - " : "") + (y.nome || "");
+          if (saida && this.matrizSort && this.matrizSort.campo) {
+            const pa = this.totalMatriz(x.porEmp, cols);
+            const pb = this.totalMatriz(y.porEmp, cols);
+            const d = (pa[this.matrizSort.campo] - pb[this.matrizSort.campo]) * (Number(this.matrizSort.dir) || 1);
+            if (d) return d;
+          }
           return nx.localeCompare(ny, "pt");
         });
         return { def: g.def, porEmp: g.porEmp, ccs: ccs };
       })
       .filter((g) => cols.some((e) => g.porEmp[e.id] && vivo(g.porEmp[e.id].orc, g.porEmp[e.id].real)))
       .sort((a, b) => {
-        const soma = (g) => cols.reduce((s, e) => s + ((g.porEmp[e.id] && g.porEmp[e.id].real) || 0), 0);
-        const d = saida ? soma(a) - soma(b) : soma(b) - soma(a);
-        if (d) return d;
+        if (saida && this.matrizSort && this.matrizSort.campo) {
+          const pa = this.totalMatriz(a.porEmp, cols);
+          const pb = this.totalMatriz(b.porEmp, cols);
+          const d = (pa[this.matrizSort.campo] - pb[this.matrizSort.campo]) * (Number(this.matrizSort.dir) || 1);
+          if (d) return d;
+        } else {
+          const soma = (g) => cols.reduce((s, e) => s + ((g.porEmp[e.id] && g.porEmp[e.id].real) || 0), 0);
+          const d = saida ? soma(a) - soma(b) : soma(b) - soma(a);
+          if (d) return d;
+        }
         return String(a.def.nome || "").localeCompare(String(b.def.nome || ""), "pt");
       });
     if (!cols.length || !linhas.length) return null;
     return { cols: cols, linhas: linhas, mes: mes, lado: saida ? "saidas" : "entradas" };
+  },
+
+  totalMatriz(porEmp, cols) {
+    let orc = 0;
+    let real = 0;
+    (cols || []).forEach((e) => {
+      const cel = porEmp && porEmp[e.id];
+      orc += (cel && cel.orc) || 0;
+      real += (cel && cel.real) || 0;
+    });
+    return { orc: orc, real: real, var: real - orc };
+  },
+
+  cabecaTotalMatriz(saida) {
+    if (!saida) return `<th class="rcx-sep">Orç.</th><th>Real.</th><th>Variação</th><th>Variação</th>`;
+    const ico = `<i data-lucide="chevrons-up-down" style="width:11px;vertical-align:middle;"></i>`;
+    const th = (campo, rotulo, cls, title) => `<th class="${cls}" title="${title}" onclick="ResultadoCaixaApp.ordenarMatriz('${campo}')" style="cursor:pointer;user-select:none;">${rotulo} ${ico}</th>`;
+    return th("orc", "Orç.", "rcx-sep", "Ordenar pelo orçado do total")
+      + th("real", "Real.", "", "Ordenar pelo realizado do total")
+      + th("var", "Var. R$", "", "Ordenar pela variação em R$ do total")
+      + `<th title="Variação percentual">Var. %</th>`;
   },
 
   matrizCelulas(orc, real, sep, saida) {
@@ -2813,7 +2857,7 @@ const ResultadoCaixaApp = {
       ? "Soma das empresas da consolidação padrão, cada uma no percentual da Moura Leite"
       : "Soma dos valores cheios";
     const cabVal = dados.cols.map(() => `<th class="rcx-sep">Orç.</th><th>Real.</th><th>Variação</th><th>Variação</th>`).join("")
-      + `<th class="rcx-sep">Orç.</th><th>Real.</th><th>Variação</th><th>Variação</th>`;
+      + this.cabecaTotalMatriz(saida);
     const totEmp = {};
     dados.cols.forEach((e) => { totEmp[e.id] = { orc: 0, real: 0 }; });
     const totGeral = { orc: 0, real: 0 };
