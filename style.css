@@ -9524,6 +9524,16 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .cc-table.orc-kardex-grade td.is-passado { background: #f8fafc; color: #64748b; }
 .cc-table.orc-kardex-grade td.is-hoje { box-shadow: inset 0 -2px 0 #105436; }
 .cc-table.orc-kardex-grade td.is-real { color: #334155; }
+.orc-escolha { padding: 18px 18px 8px; }
+.orc-escolha-campos { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.orc-orc-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 0 0 14px; }
+.orc-orc-bar strong { display: block; color: #105436; font-size: 0.92rem; }
+.orc-orc-bar span { color: #64748b; font-size: 0.78rem; font-weight: 700; }
+.orc-plano-barra { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 8px; }
+.orc-plano-barra .btn { height: 36px; }
+.cc-table.orc-plano-tab { margin: 0 0 14px; }
+.cc-table.orc-plano-tab td { vertical-align: middle; }
+.cc-table.orc-plano-tab input.form-control { height: 32px; min-width: 88px; }
 .orc-planos { display: flex; flex-direction: column; gap: 12px; margin: 0 0 12px; }
 .orc-plano-card { padding: 12px 14px; border: 1px solid #d7e3dc; border-radius: 10px; background: #fff; }
 .orc-plano-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 10px; }

@@ -7612,7 +7612,27 @@ window.rebuildNexCumpridaIndex = function() {
   return set;
 };
 
+window.NEX_TESTE_TITULOS = ["18357"];
+
+window.nexCumpridaTeste = function(ref) {
+  const ids = [];
+  const add = function(v) {
+    const s = String(v || "").replace(/^B-/i, "").split("-")[0];
+    if (s) ids.push(s);
+  };
+  if (ref && typeof ref === "object") {
+    add(ref.saleId);
+    add(ref.titulo);
+    add(ref.rawId);
+    (ref.billIds || []).forEach(add);
+  } else {
+    add(ref);
+  }
+  return ids.some(function(id) { return window.NEX_TESTE_TITULOS.indexOf(id) >= 0; });
+};
+
 window.clientHasNexCumprida = function(client) {
+  if (window.nexCumpridaTeste(client)) return true;
   if (!client) return false;
   const set = window._nexCumpridaSet || (typeof window.rebuildNexCumpridaIndex === "function" ? window.rebuildNexCumpridaIndex() : null);
   if (!set || !set.size) return false;
@@ -7690,6 +7710,7 @@ window.cancelMotivoRotulo = function(iniciativa, motivo) {
 };
 
 window.tituloTemZeroRestituicao = function(client) {
+  if (window.nexCumpridaTeste && window.nexCumpridaTeste(client)) return true;
   return !!(client && typeof window.clientIsZeroPercentPaid === "function" && window.clientIsZeroPercentPaid(client));
 };
 
@@ -7786,10 +7807,30 @@ window.cancelContratoAtualizarRotulo = function() {
   if (el) el.textContent = rot.texto;
 };
 
+window.abrirCancelamentoDoContrato = function(dados) {
+  const d = dados || {};
+  const saleId = String(d.titulo || d.saleId || "").replace(/^B-/i, "").split("-")[0];
+  const unidade = String(d.unidade || "");
+  const partes = unidade.split(" - ");
+  window._cancelClienteAvulso = {
+    customerId: d.customerId,
+    saleId: saleId,
+    customerName: d.customerName || d.nome || "",
+    costCenterId: d.costCenterId || String(partes[0] || "").trim(),
+    unitName: d.unitName || partes.slice(1).join(" - ").trim(),
+    billIds: saleId ? [saleId] : [],
+    contractId: d.contractId || "",
+    contractNumber: d.contractNumber || d.contrato || ""
+  };
+  window.abrirCancelamentoContrato(d.customerId, saleId);
+};
+
 window.abrirCancelamentoContrato = function(customerId, saleId) {
-  const client = (window.clientList || []).find(function(c) {
+  let client = (window.clientList || []).find(function(c) {
     return c && String(c.customerId) === String(customerId) && String(c.saleId) === String(saleId);
   });
+  const avulso = window._cancelClienteAvulso;
+  if (!client && avulso && String(avulso.customerId) === String(customerId) && String(avulso.saleId) === String(saleId)) client = avulso;
   if (!client || !window.tituloTemZeroRestituicao(client)) {
     const aviso = "O cancelamento pela API só vale para título com 0% de restituição.";
     if (window.showToast) window.showToast(aviso, "warning");
@@ -7812,7 +7853,7 @@ window.abrirCancelamentoContrato = function(customerId, saleId) {
         <button type="button" class="btn btn-fechar" onclick="window.fecharCancelamentoContrato()">Fechar</button>
       </div>
       <div style="padding:18px;display:flex;flex-direction:column;gap:12px;">
-        <p style="margin:0;font-size:0.8rem;color:#475569;line-height:1.45;">Título com 0% de restituição. O código 1 é iniciativa do cliente e o 2 é iniciativa da empresa. Exemplo: 101 - iniciativa do cliente por desemprego.</p>
+        <p style="margin:0;font-size:0.8rem;color:#475569;line-height:1.45;">${window.nexCumpridaTeste(client) ? "Teste: a tag Nex cumprida está marcada neste título para o cancelamento no Sienge. " : ""}Título com 0% de restituição. O código 1 é iniciativa do cliente e o 2 é iniciativa da empresa. Exemplo: 101 - iniciativa do cliente por desemprego.</p>
         <label style="display:flex;flex-direction:column;gap:4px;font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;">Data
           <input id="cancel-data" type="date" value="${iso}" style="height:38px;border:1px solid #cbd5e1;border-radius:8px;padding:0 10px;font-size:0.88rem;color:#0f172a;text-transform:none;font-weight:600;">
         </label>
@@ -7901,7 +7942,9 @@ window.enviarCancelamentoContrato = async function() {
       customerId: client.customerId,
       receivableBillId: client.saleId,
       enterpriseId: client.costCenterId,
-      unitName: client.unitName
+      unitName: client.unitName,
+      contractId: client.contractId,
+      contractNumber: client.contractNumber
     });
     if (!contract || contract.id == null) throw new Error("Não encontrei o contrato de vendas deste título.");
     if (aviso) aviso.textContent = "Enviando o cancelamento…";
@@ -42690,13 +42733,16 @@ window.searchRelacionamento = async function() {
         window._relSignalClients[signalKey] = {
           saleId: r.contractId || r.titulo,
           customerId: r.openCustomerId || customerId,
+          customerName: r.nome || "",
           contractId: r.contractId,
           contractNumber: r.contrato,
           titulo: r.titulo,
           billIds: r.titulo ? [String(r.titulo)] : [],
           costCenterId: ccId,
-          unitName: unitName
+          unitName: unitName,
+          unidade: r.unidade || ""
         };
+        const nexTeste = window.nexCumpridaTeste && window.nexCumpridaTeste(r.titulo);
         return `
         <tr style="transition: background-color 0.2s;">
           <td style="border-bottom: 1px solid var(--color-border); padding: 10px 10px; color: #1e293b; font-weight: 700; font-size: 0.75rem; text-align: left; font-variant-numeric: tabular-nums;">
@@ -42705,6 +42751,7 @@ window.searchRelacionamento = async function() {
                   ${r.contrato}
                </div>
                ${r.isHighlight ? '<div style="font-size: 0.6rem; background: var(--color-primary); color: white; padding: 2px 4px; border-radius: 6px; display: inline-block; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; width: fit-content;"><i data-lucide="target" style="width:8px; height:8px; margin-right:4px;"></i>PESQUISADO</div>' : ''}
+               ${nexTeste ? '<div style="font-size: 0.6rem; background: #ecfdf5; color: #105436; border: 1px solid #105436; padding: 2px 6px; border-radius: 6px; display: inline-block; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; width: fit-content;">Nex cumprida</div>' : ''}
                ${r.buyerNoteHtml || ''}
             </div>
           </td>
@@ -42728,6 +42775,7 @@ window.searchRelacionamento = async function() {
             <button class="btn btn-sm" onclick="openCustomerFromRelacionamento('${r.openCustomerId || customerId}', '${r.contractId || ''}', '${r.titulo || ''}')" style="background: var(--color-primary); color: white; border: none; border-radius: 6px; padding: 6px 12px; font-weight: 700; display: inline-flex; justify-content: center; align-items: center; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; font-size: 0.75rem;">
               <i data-lucide="eye" style="width:14px;height:14px; margin-right:4px;"></i> Detalhes
             </button>
+            ${nexTeste ? '<button type="button" onclick="window.abrirCancelamentoDoContrato(window._relSignalClients[\'' + signalKey + '\'])" style="margin-left: 6px; padding: 6px 12px; font-size: 0.75rem; line-height: 1.2; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #105436; background-color: #ecfdf5; color: #105436; font-weight: 700; cursor: pointer;"><i data-lucide="file-warning" style="width:14px;height:14px;"></i> Avaliar cancelamento</button>' : ''}
           </td>
         </tr>
       `;

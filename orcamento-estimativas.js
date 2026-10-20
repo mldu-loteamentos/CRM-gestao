@@ -52,6 +52,39 @@ const OrcEst = {
       .sort((a, b) => Number(a.id) - Number(b.id));
   },
 
+  montarIndice() {
+    const grupo = new Map();
+    const tag = new Map();
+    const ignored = new Set();
+    const app = typeof OrcamentoDfcApp !== "undefined" ? OrcamentoDfcApp : null;
+    const visao = app && typeof app.visaoDfc === "function" ? (app.visaoDfc() || { groups: [] }) : { groups: [] };
+    (visao.ignoredAccounts || []).forEach((id) => {
+      const sid = String(id || "").trim();
+      if (!sid) return;
+      ignored.add(sid);
+      const nk = sid.replace(/\D/g, "");
+      if (nk) ignored.add(nk);
+    });
+    (visao.groups || []).forEach((g) => {
+      if (!g || g.type !== "resultado") return;
+      (g.accounts || []).forEach((id) => {
+        const sid = String(id || "").trim();
+        const nk = sid.replace(/\D/g, "");
+        if (sid) grupo.set(sid, g.id);
+        if (nk) grupo.set(nk, g.id);
+      });
+    });
+    const cfg = this.taxConfig();
+    Object.keys(cfg || {}).forEach((k) => {
+      const sid = String(k || "").trim();
+      const nk = sid.replace(/\D/g, "");
+      if (sid) tag.set(sid, cfg[k]);
+      if (nk) tag.set(nk, cfg[k]);
+    });
+    this._ind = { grupo: grupo, tag: tag, ignored: ignored, sugestao: new Map() };
+    return this._ind;
+  },
+
   grupoEfetivo(conta, nome) {
     const cadeia = this.cadeiaConta(conta);
     for (let i = 0; i < cadeia.length; i++) {
@@ -62,9 +95,20 @@ const OrcEst = {
   },
 
   grupo(conta, nome) {
-    const app = typeof OrcamentoDfcApp !== "undefined" ? OrcamentoDfcApp : null;
-    if (app && typeof app.grupoDaConta === "function") return app.grupoDaConta(conta, nome);
-    return null;
+    if (!this._ind) this.montarIndice();
+    const ind = this._ind;
+    const dotted = String(conta || "").trim();
+    const key = dotted.replace(/\D/g, "");
+    if (!dotted) return null;
+    if (ind.ignored.has(dotted) || (key && ind.ignored.has(key))) return null;
+    if (ind.grupo.has(dotted)) return ind.grupo.get(dotted);
+    if (key && ind.grupo.has(key)) return ind.grupo.get(key);
+    const cache = key || dotted;
+    if (ind.sugestao.has(cache)) return ind.sugestao.get(cache) || null;
+    const plano = typeof PlanoFinanceiroApp !== "undefined" ? PlanoFinanceiroApp : null;
+    const achado = plano && typeof plano.suggestGroup === "function" ? plano.suggestGroup({ id: dotted, name: nome }) : null;
+    ind.sugestao.set(cache, achado || "");
+    return achado || null;
   },
 
   sinal(gid, conta, nome, valor) {
@@ -92,10 +136,27 @@ const OrcEst = {
   tag(cfg, id) {
     const sid = String(id || "").trim();
     if (!sid) return "";
-    if (cfg[sid]) return cfg[sid];
+    if (this._ind) {
+      const nk = sid.replace(/\D/g, "");
+      return this._ind.tag.get(sid) || (nk && this._ind.tag.get(nk)) || "";
+    }
+    if (cfg && cfg[sid]) return cfg[sid];
     const nk = sid.replace(/\D/g, "");
-    const hit = Object.keys(cfg).find((k) => String(k).replace(/\D/g, "") === nk);
+    const hit = Object.keys(cfg || {}).find((k) => String(k).replace(/\D/g, "") === nk);
     return hit ? cfg[hit] : "";
+  },
+
+  /* Conta de classe 2, ou com nome de desconto/cancelamento, reduz a base em que foi parametrizada. */
+  contaRedutora(conta, nome, gid, marca, bucket) {
+    const fluxo = typeof FluxoCaixaApp !== "undefined" ? FluxoCaixaApp : (window.FluxoCaixaApp || null);
+    if (fluxo && typeof fluxo.isDescontoFolhaAccount === "function" && fluxo.isDescontoFolhaAccount(conta, nome)) return false;
+    if (marca === "Base de Dedução" || gid === "g_01_04") return true;
+    const nodeId = gid || (bucket === "vendas" ? "g_01_01" : (bucket === "servicos" ? "g_01_02" : (bucket === "financeiras" ? "g_09_01" : "")));
+    const node = { id: nodeId, redutora: nodeId === "g_01_04" || nodeId === "g_11_01" };
+    if (fluxo && typeof fluxo.isReducingAccount === "function" && fluxo.isReducingAccount(conta, nome, node)) return true;
+    const classe2 = String(conta || "").replace(/\D/g, "").charAt(0) === "2";
+    const baseReceita = marca === "Base para Vendas de Lote" || marca === "Base para Receita de Serviços" || marca === "Base para Aplicações Financeiras";
+    return !!(classe2 && baseReceita);
   },
 
   /* Conta da base fiscal. Sem marca no plano, a visão DFC define venda, serviço ou dedução.
@@ -122,23 +183,18 @@ const OrcEst = {
     });
     const nome = this.norm(l.cn);
     const fora = /LUCRO RECEB|DIVIDEND|APORTE/.test(nome);
-    if (/DESCONTO DE JUROS CONTRAT/.test(nome) || String(l.conta || "").replace(/\D/g, "") === "2050103") {
-      return { bucket: "vendas", red: true };
-    }
-    if (tag === "Base para Vendas de Lote") return { bucket: "vendas", red: false };
-    if (tag === "Base para Receita de Serviços") return { bucket: "servicos", red: false };
-    if (tag === "Base para Aplicações Financeiras") return { bucket: "financeiras", red: false };
-    if (tag === "Base de Dedução") {
-      const bucket = gid === "g_01_02" ? "servicos" : (gid === "g_01_03" || gid === "g_09_01" ? "financeiras" : "vendas");
-      return { bucket, red: true };
-    }
-    if (fora) return null;
-    if (gid === "g_01_01") return { bucket: "vendas", red: false };
-    if (gid === "g_01_02") return { bucket: "servicos", red: false };
-    if (gid === "g_09_01") return { bucket: "financeiras", red: false };
-    if (gid === "g_01_03" && /JUROS|RENDIMENTO|APLICAC/.test(nome)) return { bucket: "financeiras", red: false };
-    if (gid === "g_01_04") return { bucket: "vendas", red: true };
-    return null;
+    let bucket = "";
+    if (tag === "Base para Vendas de Lote" || /DESCONTO DE JUROS CONTRAT/.test(nome) || String(l.conta || "").replace(/\D/g, "") === "2050103") bucket = "vendas";
+    else if (tag === "Base para Receita de Serviços") bucket = "servicos";
+    else if (tag === "Base para Aplicações Financeiras") bucket = "financeiras";
+    else if (tag === "Base de Dedução") bucket = gid === "g_01_02" ? "servicos" : (gid === "g_01_03" || gid === "g_09_01" ? "financeiras" : "vendas");
+    else if (fora) return null;
+    else if (gid === "g_01_01" || gid === "g_01_04") bucket = "vendas";
+    else if (gid === "g_01_02") bucket = "servicos";
+    else if (gid === "g_09_01") bucket = "financeiras";
+    else if (gid === "g_01_03" && /JUROS|RENDIMENTO|APLICAC/.test(nome)) bucket = "financeiras";
+    else return null;
+    return { bucket: bucket, red: this.contaRedutora(l.conta, l.cn, gid, tag, bucket) };
   },
 
   tipoApurado(l) {
@@ -178,13 +234,16 @@ const OrcamentoImpostosApp = {
 
   calcular(linhas) {
     const ali = OrcEst.aliquotas();
+    OrcEst.montarIndice();
     const cfg = OrcEst.taxConfig();
+    const prev = this.bases2026();
     const emp = {};
     const garantir = (id, nome) => {
       if (!emp[id]) {
         emp[id] = {
           id, nome: nome || "",
           vendas: OrcEst.z(), servicos: OrcEst.z(), financeiras: OrcEst.z(),
+          redV: OrcEst.z(), redS: OrcEst.z(), redF: OrcEst.z(),
           pis: OrcEst.z(), cofins: OrcEst.z(), irMes: OrcEst.z(), csllMes: OrcEst.z(),
           ap: { pis: OrcEst.z(), cofins: OrcEst.z(), irpj: OrcEst.z(), csll: OrcEst.z() }
         };
@@ -202,12 +261,16 @@ const OrcamentoImpostosApp = {
       }
       const cl = OrcEst.classe(l, cfg);
       if (!cl) return;
+      const gid = OrcEst.grupo(l.conta, l.cn);
       (l.m || []).forEach((v, i) => {
         if (i > 11) return;
-        let s = OrcEst.sinal(OrcEst.grupo(l.conta, l.cn), l.conta, l.cn, v);
+        let s = OrcEst.sinal(gid, l.conta, l.cn, v);
         if (cl.red && s > 0) s = -Math.abs(s);
-        if (!cl.red && s < 0) s = s;
         row[cl.bucket][i] += s;
+        if (cl.red && s) {
+          const chave = cl.bucket === "servicos" ? "redS" : (cl.bucket === "financeiras" ? "redF" : "redV");
+          row[chave][i] += s;
+        }
       });
     });
     Object.values(emp).forEach((row) => {
@@ -245,7 +308,7 @@ const OrcamentoImpostosApp = {
         irpj: this.trimestrePago(row),
         csll: this.trimestrePago(row, "csll")
       };
-      this.aplicarJaneiro(row);
+      this.aplicarJaneiro(row, prev, ali);
       row.leitura = {
         pis: this.lerLinha("PIS", row.pagar.pis, row.pis, row.ap.pis),
         cofins: this.lerLinha("COFINS", row.pagar.cofins, row.cofins, row.ap.cofins),
@@ -306,9 +369,9 @@ const OrcamentoImpostosApp = {
     return { irpj: ir + ad, csll: csll, meses: meses };
   },
 
-  aplicarJaneiro(row) {
-    const ali = OrcEst.aliquotas();
-    const prev = this.bases2026();
+  aplicarJaneiro(row, prev, ali) {
+    prev = prev || {};
+    ali = ali || OrcEst.aliquotas();
     const dez = prev["2026-12"] && prev["2026-12"][Number(row.id)];
     const pis = this.impostoMes(dez, ali);
     if (pis) {
@@ -413,10 +476,16 @@ const OrcamentoImpostosApp = {
   },
 
   lista() {
+    const ids = this.selectedCompanyIds.map(String).join(",");
+    const stamp = OrcEst.linhas().length + "|" + ids + "|" + (this._fcToken || 0);
+    if (this._stamp === stamp && this._rows) return this._rows;
     const mapa = this.calcular(this.escopo());
-    return Object.values(mapa)
+    const rows = Object.values(mapa)
       .filter((r) => r.vendas.some((v) => Math.abs(v) >= 0.5) || r.servicos.some((v) => Math.abs(v) >= 0.5) || r.financeiras.some((v) => Math.abs(v) >= 0.5) || r.ap.pis.some((v) => v >= 0.5))
       .sort((a, b) => Number(a.id) - Number(b.id));
+    this._rows = rows;
+    this._stamp = stamp;
+    return rows;
   },
 
   totalPago(row) {
@@ -605,15 +674,20 @@ const OrcamentoImpostosApp = {
       const jan28 = paga ? arr[12] : null;
       return `<tr class="orc-est-sub${paga ? " orc-est-pag" : ""}"><td>${nome}</td>${cel.join("")}<td>${OrcEst.money(ate2027)}</td><td>${paga ? OrcEst.money(jan28) : "—"}</td></tr>`;
     };
-    const corpo = faixa("Base da competência — o mês em que a receita entra")
-      + linha("Vendas", row.vendas, false, "Vendas de lote da competência, já com as redutoras")
-      + linha("Serviços", row.servicos, false, "Receita de serviços da competência")
-      + linha("Aplicações", row.financeiras, false, "Aplicações financeiras da competência")
-      + faixa("Imposto no mês em que se paga")
-      + linha("PIS", row.pagar.pis, true, "PIS da competência anterior. Janeiro usa o forecast de dezembro de 2026.")
-      + linha("COFINS", row.pagar.cofins, true, "COFINS da competência anterior. Janeiro usa o forecast de dezembro de 2026.")
-      + linha("IRPJ", row.pagar.irpj, true, "IRPJ do trimestre anterior. Janeiro usa o forecast de outubro a dezembro de 2026.")
-      + linha("CSLL", row.pagar.csll, true, "CSLL do trimestre anterior, no mesmo mês do IRPJ.");
+    const tem = (arr) => (arr || []).some((v) => Math.abs(Number(v) || 0) >= 0.5);
+    const red = (nome, arr) => (tem(arr) ? linha(nome, arr, false, "Conta parametrizada como redutora. Entra negativa nesta base.") : "");
+    const corpo = faixa("Base da competência, já líquida")
+      + linha("Vendas", row.vendas, false, "Venda de lotes, já com as redutoras abatidas")
+      + red("(−) Redutoras de vendas", row.redV)
+      + linha("Serviços", row.servicos, false, "Serviços, já com as redutoras abatidas")
+      + red("(−) Redutoras de serviços", row.redS)
+      + linha("Aplicações", row.financeiras, false, "Aplicações financeiras")
+      + red("(−) Redutoras de aplicações", row.redF)
+      + faixa("Imposto no mês do pagamento")
+      + linha("PIS", row.pagar.pis, true, "Competência do mês anterior. Janeiro usa dezembro de 2026.")
+      + linha("COFINS", row.pagar.cofins, true, "Competência do mês anterior. Janeiro usa dezembro de 2026.")
+      + linha("IRPJ", row.pagar.irpj, true, "Trimestre anterior. Janeiro usa outubro a dezembro de 2026.")
+      + linha("CSLL", row.pagar.csll, true, "No mesmo mês do IRPJ.");
     const leituras = [row.leitura.pis, row.leitura.cofins, row.leitura.irpj, row.leitura.csll];
     const notas = leituras.every((l) => !l.tem)
       ? `<p class="orc-est-nota">O orçamento de 2027 não traz PIS, COFINS, IRPJ nem CSLL. A tabela é a estimativa.</p>`

@@ -13,11 +13,13 @@ const OrcamentoModuloApp = {
   },
 
   novo: {
+    etapa: "escolha",
     aba: "kardex",
+    planoAberto: false,
     nuvem: "",
     companyId: "",
     ccId: "",
-    anoDe: new Date().getFullYear(),
+    anoDe: new Date().getFullYear() + 1,
     anoAte: new Date().getFullYear() + 4,
     openEmp: false,
     openCc: false,
@@ -182,10 +184,10 @@ const OrcamentoModuloApp = {
       selectNone() {}
     });
     const nouns = {
-      singular: "centro de custo",
-      plural: "centros de custo",
-      none: "Nenhum centro de custo",
-      noMatch: "Nenhum centro de custo com esse nome."
+      singular: "produto",
+      plural: "produtos",
+      none: "Nenhum produto",
+      noMatch: "Nenhum produto com esse nome."
     };
     MlEmpresaFilter.bind("orc-cc", {
       toggleOpen() {
@@ -229,11 +231,58 @@ const OrcamentoModuloApp = {
       return;
     }
     const st = this.novo;
+    this.ajustarPeriodo();
     const nounsCc = {
-      singular: "centro de custo",
-      plural: "centros de custo",
-      none: "Nenhum centro de custo"
+      singular: "produto",
+      plural: "produtos",
+      none: "Nenhum produto"
     };
+    if (st.etapa !== "orcamento") {
+      root.innerHTML = this.escolhaHtml(nounsCc);
+      this.bindFiltros();
+      if (window.lucide) window.lucide.createIcons();
+      return;
+    }
+    const aba = st.aba === "receita" ? "receita" : "kardex";
+    st.aba = aba;
+    const leads = { kardex: this.textoKardex(), receita: this.textoReajusteHoje() };
+    const abas = [
+      { id: "kardex", label: "Kardex", icon: "package" },
+      { id: "receita", label: "Receita", icon: "trending-up" }
+    ].map((t) => `<button type="button" role="tab" aria-selected="${aba === t.id}" class="ml-tab${aba === t.id ? " is-active" : ""}" onclick="OrcamentoModuloApp.setAba('${t.id}')"><i data-lucide="${t.icon}"></i> ${t.label}</button>`).join("");
+    root.innerHTML = `
+      <div class="ml-tabs orc-novo-tabs" role="tablist">${abas}</div>
+      <p class="orc-rec-lead">${this.esc(leads[aba])}</p>
+      ${this.barraOrcamento()}
+      ${st.erro ? `<div style="margin:0 0 12px;padding:12px 14px;border-radius:8px;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;">${this.esc(st.erro)}</div>` : ""}
+      <div id="orc-receita-corpo">${this.corpoAtivo()}</div>`;
+    if (window.lucide) window.lucide.createIcons();
+    this.garantirPlano();
+    this.garantirRealizado();
+    this.garantirPadrao();
+  },
+
+  anoSeguinte() {
+    return new Date().getFullYear() + 1;
+  },
+
+  ajustarPeriodo() {
+    const de = this.anoSeguinte();
+    if (!(Number(this.novo.anoDe) >= de)) this.novo.anoDe = de;
+    if (!(Number(this.novo.anoAte) >= Number(this.novo.anoDe))) this.novo.anoAte = Number(this.novo.anoDe);
+  },
+
+  nomeProduto() {
+    const id = String(this.novo.ccId || "");
+    const item = this.centros().find((c) => c.id === id);
+    if (item) return item.id + " - " + item.name;
+    const nome = this.nomeCc(id);
+    return nome ? id + " - " + nome : id;
+  },
+
+  escolhaHtml(nounsCc) {
+    const st = this.novo;
+    const de = this.anoSeguinte();
     const empHtml = MlEmpresaFilter.html({
       id: "orc-emp",
       label: "Empresas",
@@ -247,83 +296,99 @@ const OrcamentoModuloApp = {
     });
     const ccHtml = MlEmpresaFilter.html({
       id: "orc-cc",
-      label: "Centro de custo",
+      label: "Produto",
       items: this.centros(),
       selectedIds: st.ccId ? [st.ccId] : [],
       open: st.openCc,
       query: st.qCc,
       emptyMeansAll: false,
-      emptyLabel: st.companyId ? "Selecione o centro de custo" : "Escolha a empresa antes",
+      emptyLabel: st.companyId ? "Selecione o produto" : "Escolha a empresa antes",
       single: true,
       nouns: nounsCc
     });
+    const pode = !!(st.companyId && st.ccId && st.anoAte >= st.anoDe);
+    return `
+      <div class="crm-card orc-escolha">
+        <p class="orc-rec-lead">O orçamento começa em ${de}. Escolha o produto e até qual ano ele vai, e avance para o kardex.</p>
+        <div class="orc-escolha-campos">
+          ${empHtml}
+          ${ccHtml}
+          <div class="form-group" style="margin:0;">
+            <label>De</label>
+            <input type="number" class="form-control" min="${de}" max="2100" value="${this.esc(st.anoDe)}" style="width:110px;height:38px;"
+              onchange="OrcamentoModuloApp.setAno('anoDe', this.value)">
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label>Até</label>
+            <input type="number" class="form-control" min="${de}" max="2100" value="${this.esc(st.anoAte)}" style="width:110px;height:38px;"
+              onchange="OrcamentoModuloApp.setAno('anoAte', this.value)">
+          </div>
+          <button type="button" class="btn btn-primary" style="height:38px;" ${pode ? "" : "disabled"}
+            onclick="OrcamentoModuloApp.avancar()">Avançar</button>
+        </div>
+      </div>`;
+  },
+
+  barraOrcamento() {
+    const st = this.novo;
     const pode = !!(st.companyId && st.ccId && st.anoAte >= st.anoDe && !st.carregando);
-    const abasIds = ["kardex", "distrato", "vendas", "receita"];
-    const aba = abasIds.indexOf(st.aba) >= 0 ? st.aba : "kardex";
-    const leads = { kardex: this.textoKardex(), distrato: this.textoDistrato(), vendas: this.textoVendas(), receita: this.textoReajusteHoje() };
-    const abas = [
-      { id: "kardex", label: "Kardex", icon: "package" },
-      { id: "distrato", label: "Distrato", icon: "file-minus" },
-      { id: "vendas", label: "Vendas", icon: "wallet" },
-      { id: "receita", label: "Receita", icon: "trending-up" }
-    ].map((t) => `<button type="button" role="tab" aria-selected="${aba === t.id}" class="ml-tab${aba === t.id ? " is-active" : ""}" onclick="OrcamentoModuloApp.setAba('${t.id}')"><i data-lucide="${t.icon}"></i> ${t.label}</button>`).join("");
-    root.innerHTML = `
-      <div class="ml-tabs orc-novo-tabs" role="tablist">${abas}</div>
-      <p class="orc-rec-lead">${this.esc(leads[aba])}</p>
-      <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:16px;">
-        ${empHtml}
-        ${ccHtml}
-        <div class="form-group" style="margin:0;">
-          <label>De</label>
-          <input type="number" class="form-control" min="2000" max="2100" value="${this.esc(st.anoDe)}" style="width:110px;height:38px;"
-            onchange="OrcamentoModuloApp.setAno('anoDe', this.value)">
+    return `
+      <div class="orc-orc-bar">
+        <div>
+          <strong>${this.esc(this.nomeProduto())}</strong>
+          <span>Orçamento ${this.esc(st.anoDe)} a ${this.esc(st.anoAte)}</span>
         </div>
-        <div class="form-group" style="margin:0;">
-          <label>Até</label>
-          <input type="number" class="form-control" min="2000" max="2100" value="${this.esc(st.anoAte)}" style="width:110px;height:38px;"
-            onchange="OrcamentoModuloApp.setAno('anoAte', this.value)">
-        </div>
-        <button type="button" class="btn btn-primary" style="height:38px;" ${pode ? "" : "disabled"}
+        <button type="button" class="btn btn-outline" style="height:36px;" onclick="OrcamentoModuloApp.alterarEscolha()">Alterar</button>
+        <button type="button" class="btn btn-primary" style="height:36px;" ${pode ? "" : "disabled"}
           onclick="OrcamentoModuloApp.montarReceita()">Montar receita</button>
         <span id="orc-nuvem" class="orc-nuvem">${this.esc(this.textoNuvem())}</span>
-      </div>
-      ${st.erro ? `<div style="margin:0 0 12px;padding:12px 14px;border-radius:8px;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;">${this.esc(st.erro)}</div>` : ""}
-      <div id="orc-receita-corpo">${this.corpoAtivo()}</div>`;
-    this.bindFiltros();
-    if (window.lucide) window.lucide.createIcons();
-    this.garantirPlano();
-    this.garantirRealizado();
+      </div>`;
+  },
+
+  avancar() {
+    this.ajustarPeriodo();
+    if (!this.novo.companyId || !this.novo.ccId) return;
+    if (!(this.novo.anoAte >= this.novo.anoDe)) return;
+    this.novo.etapa = "orcamento";
+    this.novo.aba = "kardex";
+    this.novo.openEmp = false;
+    this.novo.openCc = false;
+    this.novo.erro = "";
+    this.renderNovo();
+  },
+
+  alterarEscolha() {
+    this.novo.etapa = "escolha";
+    this.novo.openEmp = false;
+    this.novo.openCc = false;
+    this.renderNovo();
   },
 
   setAno(campo, valor) {
     const n = parseInt(valor, 10);
     if (!Number.isFinite(n)) return;
-    this.novo[campo] = n;
+    this.novo[campo] = Math.min(2100, Math.max(2000, n));
+    this.ajustarPeriodo();
     this.novo.resultado = null;
     this.novo.erro = "";
-    const btn = document.querySelector("#orcamento-novo-root .btn-primary");
-    const st = this.novo;
-    if (btn) btn.disabled = !(st.companyId && st.ccId && st.anoAte >= st.anoDe && !st.carregando);
-    const corpo = document.getElementById("orc-receita-corpo");
-    if (corpo && !st.carregando) corpo.innerHTML = this.corpoAtivo();
+    this.renderNovo();
   },
 
   setAba(id) {
-    if (["kardex", "distrato", "vendas", "receita"].indexOf(id) < 0) return;
+    if (this.novo.etapa !== "orcamento") return;
+    if (id !== "kardex" && id !== "receita") return;
     this.novo.aba = id;
     this.renderNovo();
   },
 
   corpoAtivo() {
     if (this.novo.carregando) return this.carregandoHtml();
-    if (this.novo.aba === "kardex") return this.kardexHtml();
-    if (this.novo.aba === "distrato") return this.distratoHtml();
-    if (this.novo.aba === "vendas") return this.vendasHtml();
-    return this.resultadoHtml();
+    if (this.novo.aba === "receita") return this.resultadoHtml();
+    return this.kardexHtml();
   },
 
   textoKardex() {
-    return "O estoque de janeiro de 2026 é o ponto de partida. Os meses já passados trazem as vendas e os distratos realizados. Deste mês em diante, o previsto soma com o que já aconteceu.";
+    return "O kardex fecha o estoque deste ano. Deste mês em diante, informe as vendas e os distratos previstos. A receita do orçamento começa em " + this.anoSeguinte() + ".";
   },
 
   textoDistrato() {
@@ -608,6 +673,82 @@ const OrcamentoModuloApp = {
     this.renderNovo();
   },
 
+  garantirPadrao() {
+    if (this._padraoEstado) return;
+    this._padraoEstado = "carregando";
+    this.carregarPadrao();
+  },
+
+  async carregarPadrao() {
+    let lista = [];
+    try {
+      const raw = JSON.parse(localStorage.getItem("orc_venda_padrao") || "null");
+      if (raw && Array.isArray(raw.planos)) lista = raw.planos;
+    } catch (e) {}
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (fx && db) {
+      try {
+        const snap = await fx.getDoc(fx.doc(db, "orcamento_empreendimento", "_padrao"));
+        if (snap.exists() && Array.isArray((snap.data() || {}).planos)) lista = snap.data().planos;
+      } catch (e) {}
+    }
+    this._padrao = this.normalizarPlano({ planos: lista }).planos;
+    this._padraoEstado = "ok";
+    if (this.novo.planoAberto && this.novo.etapa === "orcamento" && !this.novo.carregando) this.renderNovo();
+  },
+
+  usarPadrao() {
+    const padrao = this._padrao || [];
+    if (!padrao.length || !this.novo.ccId) return;
+    const atual = this.planosAtivos();
+    this.planoDoCc().planos = padrao.map((p, i) => {
+      const antigo = atual.find((a) => this.normNome(a.nome) === this.normNome(p.nome)) || atual[i];
+      return {
+        id: antigo && antigo.id ? antigo.id : ("p" + Date.now().toString(36) + i),
+        nome: p.nome || ("Plano " + (i + 1)),
+        ticket: antigo && Number(antigo.ticket) > 0 ? antigo.ticket : (Number(p.ticket) || 0),
+        parcelas: Number(p.parcelas) || 0,
+        entrada: Number(p.entrada) || 0,
+        juros: Number(p.juros) || 0,
+        meses: antigo && antigo.meses ? antigo.meses : {}
+      };
+    });
+    this.salvarPlano();
+    this.renderNovo();
+  },
+
+  async salvarPadrao() {
+    const planos = this.planosAtivos().filter((p) => (Number(p.ticket) || 0) > 0 || (Number(p.parcelas) || 0) > 0 || (Number(p.entrada) || 0) > 0 || (Number(p.juros) || 0) > 0).map((p) => ({
+      id: p.id,
+      nome: p.nome,
+      ticket: Number(p.ticket) || 0,
+      parcelas: Number(p.parcelas) || 0,
+      entrada: Number(p.entrada) || 0,
+      juros: Number(p.juros) || 0
+    }));
+    if (!planos.length) return;
+    this._padrao = planos;
+    this._padraoEstado = "ok";
+    try { localStorage.setItem("orc_venda_padrao", JSON.stringify({ planos: planos })); } catch (e) {}
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    this.novo.nuvem = "salvando";
+    this.pintarNuvem();
+    if (!fx || !db) {
+      this.novo.nuvem = "neste navegador";
+      this.pintarNuvem();
+      return;
+    }
+    try {
+      await fx.setDoc(fx.doc(db, "orcamento_empreendimento", "_padrao"), { planos: planos, em: new Date().toISOString() }, { merge: true });
+      this.novo.nuvem = "salvo";
+    } catch (e) {
+      this.novo.nuvem = "neste navegador";
+    }
+    this.pintarNuvem();
+  },
+
   setQtd(qual, ano, mes, valor) {
     const cc = String(this.novo.ccId || "");
     const mesN = Number(mes);
@@ -713,15 +854,62 @@ const OrcamentoModuloApp = {
   },
 
   garantirRealizado() {
-    if (this._realEstado === "ok" || this._realEstado === "carregando") return;
+    const cc = String(this.novo.ccId || "");
+    if (!cc) return;
+    if (this._realCc === cc && (this._realEstado === "ok" || this._realEstado === "carregando")) return;
+    this._realCc = cc;
     this._realEstado = "carregando";
-    this.lerRealizado().then(() => {
+    this.lerRealizado(cc).then(() => {
+      if (this._realCc !== cc) return;
       this._realEstado = "ok";
       if (!this.novo.carregando) this.renderNovo();
     }).catch(() => {
-      this._realEstado = "ok";
-      this._realMapa = this._realMapa || {};
+      if (this._realCc !== cc) return;
+      this._realEstado = "erro";
+      if (!this.novo.carregando) this.renderNovo();
     });
+  },
+
+  nomeCc(cc) {
+    const lista = (window.AppState && AppState.cachedCostCenters) || [];
+    const item = lista.find((c) => String(c.id || c.costCenterId || "") === String(cc));
+    return item ? String(item.name || item.description || "") : "";
+  },
+
+  normNome(s) {
+    return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim().toUpperCase();
+  },
+
+  contratoDoCentro(c, cc) {
+    const id = this.ccDoContrato(c);
+    if (id && id === String(cc)) return true;
+    let nome = "";
+    if (window.ComercialApp && typeof ComercialApp.resolveEnterprise === "function") {
+      const r = ComercialApp.resolveEnterprise(c);
+      if (r && String(r.enterpriseId) === String(cc)) return true;
+      nome = r && r.name;
+    }
+    nome = nome || (c && (c.enterpriseName || (c.salesContractUnits && c.salesContractUnits[0] && c.salesContractUnits[0].enterpriseName))) || "";
+    const alvo = this.normNome(this.nomeCc(cc));
+    const achado = this.normNome(nome);
+    return !!(alvo && achado && (achado === alvo || achado.indexOf(alvo) >= 0 || alvo.indexOf(achado) >= 0));
+  },
+
+  async paginasOrc(path) {
+    if (window.ComercialApp && typeof ComercialApp.paginasSienge === "function") return ComercialApp.paginasSienge(path);
+    const fetch = window.siengeFetchWithRetry;
+    if (typeof fetch !== "function") return [];
+    let all = [];
+    let offset = 0;
+    const sep = path.indexOf("?") >= 0 ? "&" : "?";
+    for (let i = 0; i < 40; i++) {
+      const res = await fetch(path + sep + "limit=200&offset=" + offset, 1);
+      const rows = Array.isArray(res) ? res : ((res && (res.results || res.data)) || []);
+      all = all.concat(rows);
+      if (!rows.length || rows.length < 200) break;
+      offset += 200;
+    }
+    return all;
   },
 
   ccDoContrato(c) {
@@ -736,54 +924,57 @@ const OrcamentoModuloApp = {
     return units.length > 0 ? units.length : 1;
   },
 
-  async lerRealizado() {
+  somarContrato(mapa, cc, c, tipo, iso) {
+    const dia = String(iso || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}/.test(dia)) return;
+    if (!this.contratoDoCentro(c, cc)) return;
+    const ano = Number(dia.slice(0, 4));
+    const mes = Number(dia.slice(5, 7)) - 1;
+    if (mes < 0 || mes > 11) return;
+    if (!mapa[cc]) mapa[cc] = {};
+    const k = ano + "-" + mes;
+    if (!mapa[cc][k]) mapa[cc][k] = { vendas: 0, distratos: 0 };
+    mapa[cc][k][tipo] += this.qtyContrato(c);
+  },
+
+  async lerRealizado(cc) {
     const mapa = {};
-    const por = (cc, ano, mes) => {
-      if (!mapa[cc]) mapa[cc] = {};
-      const k = ano + "-" + mes;
-      if (!mapa[cc][k]) mapa[cc][k] = { vendas: 0, distratos: 0 };
-      return mapa[cc][k];
-    };
-    const fx = window.firebaseCollections;
-    const db = window.firebaseDb;
-    if (fx && db) {
-      const snap = await fx.getDocs(fx.collection(db, "comercial_batimento"));
-      const docs = [];
-      snap.forEach((d) => docs.push(d));
-      const byId = {};
-      docs.forEach((d) => { byId[d.id] = d; });
-      docs.forEach((d) => {
-        if (!d.id || d.id.charAt(0) === "_" || /_p\d+$/.test(d.id)) return;
-        const data = d.data() || {};
-        if (data.year == null || data.month == null) return;
-        let distratos = [];
-        let vendas = [];
-        try { distratos = JSON.parse(data.distratos || "[]"); } catch (e) { distratos = []; }
-        if (data.splitVendas && Number(data.parts) > 0) {
-          for (let i = 0; i < Number(data.parts); i++) {
-            const part = byId[d.id + "_p" + i];
-            let chunk = [];
-            try { chunk = JSON.parse((part && part.data() && part.data().data) || "[]"); } catch (e) { chunk = []; }
-            vendas = vendas.concat(chunk);
-          }
-        } else {
-          try { vendas = JSON.parse(data.vendas || "[]"); } catch (e) { vendas = []; }
+    const unidades = await this.paginasOrc("/units?enterpriseId=" + encodeURIComponent(cc) + "&additionalData=NONE");
+    const listas = await Promise.all([2, 3, 4].map((s) => this.paginasOrc("/sales-contracts?enterpriseId=" + encodeURIComponent(cc) + "&situation=" + s)));
+    const visto = new Set();
+    let vendas = 0;
+    let distratos = 0;
+    listas.forEach((lista) => {
+      (lista || []).forEach((c) => {
+        if (!c || c.id == null || visto.has(String(c.id))) return;
+        visto.add(String(c.id));
+        const marcado = Object.assign({}, c, { enterpriseId: cc });
+        const qty = this.qtyContrato(marcado);
+        const venda = String(marcado.issueDate || marcado.contractDate || marcado.saleDate || "").slice(0, 10);
+        if (/^\d{4}-\d{2}/.test(venda)) {
+          this.somarContrato(mapa, cc, marcado, "vendas", venda);
+          vendas += qty;
         }
-        const ano = Number(data.year);
-        const mes = Number(data.month) - 1;
-        if (mes < 0 || mes > 11) return;
-        const soma = (lista, tipo) => {
-          (lista || []).forEach((c) => {
-            const cc = this.ccDoContrato(c);
-            if (!cc) return;
-            por(cc, ano, mes)[tipo] += this.qtyContrato(c);
-          });
-        };
-        soma(vendas, "vendas");
-        soma(distratos, "distratos");
+        const cancel = String(marcado.cancellationDate || marcado.cancelDate || "").slice(0, 10);
+        if (/^\d{4}-\d{2}/.test(cancel)) {
+          this.somarContrato(mapa, cc, marcado, "distratos", cancel);
+          distratos += qty;
+        }
+      });
+    });
+    if (!visto.size) {
+      const rows = (window.ComercialApp && ComercialApp.state && ComercialApp.state.rawMonths) || [];
+      rows.forEach((res) => {
+        const fallback = res.year + "-" + String(res.month).padStart(2, "0") + "-01";
+        (res.vendas || []).forEach((c) => this.somarContrato(mapa, cc, c, "vendas", c.issueDate || c.contractDate || c.saleDate || fallback));
+        (res.distratos || []).forEach((c) => this.somarContrato(mapa, cc, c, "distratos", c.cancellationDate || c.cancelDate || fallback));
       });
     }
-    this._realMapa = mapa;
+    if (!this._realMapa) this._realMapa = {};
+    this._realMapa[cc] = mapa[cc] || {};
+    const disponiveis = (unidades || []).filter((u) => String((u && u.commercialStock) || "").toUpperCase() === "D").length;
+    if ((unidades || []).length) this._estoqueLive = { cc: cc, qtd: disponiveis };
+    this._realResumo = { cc: cc, vendas: vendas, distratos: distratos, contratos: visto.size };
   },
 
   qtdReal(ano, mes, tipo) {
@@ -834,6 +1025,7 @@ const OrcamentoModuloApp = {
   estoqueAtual() {
     const cc = String(this.novo.ccId || "");
     if (!cc) return { qtd: 0, origem: "" };
+    if (this._estoqueLive && this._estoqueLive.cc === cc) return { qtd: this._estoqueLive.qtd, origem: "sienge" };
     let units = [];
     const app = window.EstoqueComercialApp;
     if (app && app.state && Array.isArray(app.state.units) && app.state.units.length) units = app.state.units;
@@ -939,6 +1131,23 @@ const OrcamentoModuloApp = {
       }
       if (ano === h.ate) fimAno = saldo;
       const linha = (rotulo, nota, tds, total, cls) => `<tr class="${cls || "orc-rec-det"}"><td class="orc-rec-ano-nome">${rotulo}<small>${nota}</small></td>${tds}<td class="is-right">${total}</td></tr>`;
+      const planos = this.planosAtivos();
+      let vendasLinhas = "";
+      if (!planos.length) {
+        vendasLinhas = linha("Vendas", "previstas", vp.map((v, mes) => this.celTexto(this.mesPrevisto(ano, mes) && v ? v : null, false, this.clsMes(ano, mes))).join(""), sVp || "—", "orc-rec-det is-venda");
+      } else {
+        vendasLinhas = planos.map((p) => {
+          let soma = 0;
+          const tds = g.meses.map((_, mes) => {
+            const qtd = this.qtdPlano(p, ano, mes);
+            soma += this.mesPrevisto(ano, mes) ? qtd : 0;
+            if (!this.mesPrevisto(ano, mes)) return this.celReal(0, ano, mes);
+            return `<td class="${this.clsMes(ano, mes)}"><input type="number" min="0" step="1" inputmode="numeric" class="orc-dist-qtd" aria-label="${this.esc(p.nome)} em ${ano}" value="${qtd > 0 ? qtd : ""}" onchange="OrcamentoModuloApp.setPlanoQtd('${p.id}', ${ano}, ${mes}, this.value)"></td>`;
+          }).join("");
+          return `<tr class="orc-rec-ano"><td class="orc-rec-ano-nome">${this.esc(p.nome)}<small>vendas previstas</small></td>${tds}<td class="is-right">${soma > 0 ? soma : "—"}</td></tr>`;
+        }).join("");
+        if (planos.length > 1) vendasLinhas += linha("Vendas", "soma dos planos", vp.map((v, mes) => this.celTexto(this.mesPrevisto(ano, mes) && v ? v : null, false, this.clsMes(ano, mes))).join(""), sVp || "—", "orc-rec-det is-venda");
+      }
       blocos += `<section class="orc-kardex-bloco">
         <div class="orc-kardex-titulo"><span>${ano}</span><span>${ano === h.de ? "Estoque inicial " + abertura.qtd : "Continua de " + inicial[0]}</span></div>
         <div class="cc-scroll orc-rec-meses">
@@ -949,7 +1158,7 @@ const OrcamentoModuloApp = {
               ${linha("Distratos", "realizados", dr.map((v, mes) => this.celReal(v, ano, mes)).join(""), sDr || "—", "orc-rec-det")}
               ${linha("Distratos", "previstos", g.meses.map((_, mes) => this.celQtd(ano, mes, "distrato")).join(""), sDp || "—", "orc-rec-ano")}
               ${linha("Vendas", "realizadas", vr.map((v, mes) => this.celReal(v, ano, mes)).join(""), sVr || "—", "orc-rec-det")}
-              ${linha("Vendas", "previstas", vp.map((v, mes) => this.celTexto(this.mesPrevisto(ano, mes) && v ? v : null, false, this.clsMes(ano, mes))).join(""), sVp || "—", "orc-rec-det is-venda")}
+              ${vendasLinhas}
               ${linha("Estoque", "inicial", inicial.map((v, mes) => this.celTexto(v, false, this.clsMes(ano, mes))).join(""), "—", "orc-rec-det")}
               ${linha("Estoque", "final", finais.map((v, mes) => this.celTexto(v, false, this.clsMes(ano, mes))).join(""), finais[11], "orc-rec-det is-conta")}
             </tbody>
@@ -960,7 +1169,9 @@ const OrcamentoModuloApp = {
     const nota = est.origem
       ? "Janeiro de " + abertura.ano + " reconstitui o estoque de hoje: lotes disponíveis agora, mais as vendas já feitas neste ano, menos os distratos já feitos."
       : "A posição de estoque ainda não está neste navegador. O inicial de janeiro usa só as vendas e os distratos realizados. Abra a Posição de estoque para trazer os lotes disponíveis de hoje.";
-    const espera = this._realEstado !== "ok" ? " Buscando vendas e distratos realizados…" : "";
+    const espera = this._realEstado === "carregando"
+      ? " Buscando as vendas e os distratos deste centro no Sienge…"
+      : (this._realEstado === "erro" ? " Não foi possível ler as vendas e os distratos realizados." : "");
     return `
       <div class="orc-rec-kpis">
         <div class="crm-card orc-rec-kpi"><span>Estoque em jan/${abertura.ano}</span><strong>${abertura.qtd}</strong></div>
@@ -969,8 +1180,54 @@ const OrcamentoModuloApp = {
         <div class="crm-card orc-rec-kpi"><span>Distratos realizados em ${h.hy}</span><strong>${distRealAno}</strong></div>
         <div class="crm-card orc-rec-kpi"><span>Estoque no fim</span><strong>${fimAno}</strong></div>
       </div>
-      <div class="orc-rec-focus">${this.esc(nota + espera)} O mês em curso está marcado. A venda prevista é a soma dos planos, na aba Vendas.</div>
+      <div class="orc-plano-barra">
+        <button type="button" class="btn btn-outline" style="height:36px;" onclick="OrcamentoModuloApp.togglePlano()">${this.novo.planoAberto ? "Ocultar plano" : "Configurar plano"}</button>
+      </div>
+      ${this.novo.planoAberto ? this.planosConfigHtml() : ""}
+      <div class="orc-rec-focus">${this.esc(nota + espera)} O mês em curso está marcado. As vendas previstas entram em cada plano.</div>
       ${blocos}`;
+  },
+
+  togglePlano() {
+    this.novo.planoAberto = !this.novo.planoAberto;
+    this.renderNovo();
+  },
+
+  planosConfigHtml() {
+    const planos = this.planosAtivos();
+    const padrao = this._padrao || [];
+    const campo = (p, nome, valor, inteiro) => {
+      const texto = !(Number(valor) > 0) ? "" : (inteiro ? String(parseInt(valor, 10) || 0) : this.numero(valor));
+      return `<input type="text" inputmode="decimal" class="form-control" value="${this.esc(texto)}" onchange="OrcamentoModuloApp.setPlanoCampo('${p.id}','${nome}', this.value)">`;
+    };
+    const linhasPlanos = planos.map((p) => {
+      const saldo = Math.max(0, (Number(p.ticket) || 0) - Math.min(Number(p.entrada) || 0, Number(p.ticket) || 0));
+      const parcela = this.parcelaPlano(saldo, p.parcelas, p.juros);
+      return `<tr>
+        <td><input type="text" class="form-control" value="${this.esc(p.nome)}" aria-label="Nome do plano" onchange="OrcamentoModuloApp.setPlanoCampo('${p.id}','nome', this.value)"></td>
+        <td>${campo(p, "ticket", p.ticket, false)}</td>
+        <td>${campo(p, "entrada", p.entrada, false)}</td>
+        <td>${campo(p, "parcelas", p.parcelas, true)}</td>
+        <td>${campo(p, "juros", p.juros, false)}</td>
+        <td class="is-right">${this.esc(this.dinheiro(parcela))}</td>
+        <td class="is-right"><button type="button" class="tvig-ico is-danger" title="Excluir" onclick="OrcamentoModuloApp.removerPlano('${p.id}')"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button></td>
+      </tr>`;
+    }).join("");
+    return `
+      <div class="orc-plano-barra">
+        <button type="button" class="btn btn-outline" ${padrao.length ? "" : "disabled"} title="${padrao.length ? "Copia entrada, parcelas e juros. O ticket médio deste produto permanece se já estiver preenchido." : "Salve um padrão antes."}" onclick="OrcamentoModuloApp.usarPadrao()">Usar padrão</button>
+        <button type="button" class="btn btn-outline" ${planos.some((p) => (Number(p.ticket) || Number(p.parcelas) || Number(p.entrada) || Number(p.juros)) > 0) ? "" : "disabled"} onclick="OrcamentoModuloApp.salvarPadrao()">Salvar como padrão</button>
+        <button type="button" class="btn btn-outline" onclick="OrcamentoModuloApp.adicionarPlano()">Adicionar plano</button>
+      </div>
+      <p class="orc-plano-parcela">O padrão vale para os produtos. Em cada um, use o padrão e ajuste só o ticket médio. A quantidade de vendas entra nas linhas do kardex.</p>
+      <div class="cc-scroll orc-rec-meses">
+        <table class="cc-table orc-plano-tab">
+          <thead><tr>
+            <th>Plano</th><th>Ticket médio</th><th>Entrada</th><th>Parcelas</th><th>Juros % ao mês</th><th class="is-right">Parcela</th><th class="is-right">Ações</th>
+          </tr></thead>
+          <tbody>${linhasPlanos || `<tr><td colspan="7">Nenhum plano ainda.</td></tr>`}</tbody>
+        </table>
+      </div>`;
   },
 
   distratoHtml() {
@@ -1030,22 +1287,23 @@ const OrcamentoModuloApp = {
     const h = this.horizonte();
     const g = this.cabecaGrade();
     const planos = this.planosAtivos();
-    const cards = planos.map((p) => {
+    const padrao = this._padrao || [];
+    const campo = (p, nome, valor, inteiro) => {
+      const texto = !(Number(valor) > 0) ? "" : (inteiro ? String(parseInt(valor, 10) || 0) : this.numero(valor));
+      return `<input type="text" inputmode="decimal" class="form-control" value="${this.esc(texto)}" onchange="OrcamentoModuloApp.setPlanoCampo('${p.id}','${nome}', this.value)">`;
+    };
+    const linhasPlanos = planos.map((p) => {
       const saldo = Math.max(0, (Number(p.ticket) || 0) - Math.min(Number(p.entrada) || 0, Number(p.ticket) || 0));
       const parcela = this.parcelaPlano(saldo, p.parcelas, p.juros);
-      return `<article class="orc-plano-card">
-        <div class="orc-plano-head">
-          <input type="text" class="form-control" style="width:180px;height:36px;font-weight:700;" value="${this.esc(p.nome)}" aria-label="Nome do plano" onchange="OrcamentoModuloApp.setPlanoCampo('${p.id}','nome', this.value)">
-          <button type="button" class="orc-plano-remover" onclick="OrcamentoModuloApp.removerPlano('${p.id}')">Remover</button>
-        </div>
-        <div class="orc-vendas-cond">
-          ${this.campoPlano(p.id, "ticket", "Ticket médio", p.ticket, false)}
-          ${this.campoPlano(p.id, "entrada", "Entrada", p.entrada, false)}
-          ${this.campoPlano(p.id, "parcelas", "Nº parcelas", p.parcelas, true)}
-          ${this.campoPlano(p.id, "juros", "Juros % ao mês", p.juros, false)}
-        </div>
-        <p class="orc-plano-parcela">Parcela do saldo: ${this.esc(this.dinheiro(parcela))}</p>
-      </article>`;
+      return `<tr>
+        <td><input type="text" class="form-control" value="${this.esc(p.nome)}" aria-label="Nome do plano" onchange="OrcamentoModuloApp.setPlanoCampo('${p.id}','nome', this.value)"></td>
+        <td>${campo(p, "ticket", p.ticket, false)}</td>
+        <td>${campo(p, "entrada", p.entrada, false)}</td>
+        <td>${campo(p, "parcelas", p.parcelas, true)}</td>
+        <td>${campo(p, "juros", p.juros, false)}</td>
+        <td class="is-right">${this.esc(this.dinheiro(parcela))}</td>
+        <td class="is-right"><button type="button" class="tvig-ico is-danger" title="Excluir" onclick="OrcamentoModuloApp.removerPlano('${p.id}')"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button></td>
+      </tr>`;
     }).join("");
     let linhas = "";
     let caixaPeriodo = 0;
@@ -1058,7 +1316,13 @@ const OrcamentoModuloApp = {
         somaCaixa += v;
         if (ano >= Number(this.novo.anoDe) && ano <= Number(this.novo.anoAte)) caixaPeriodo += v;
       }
-      linhas += `<tr class="orc-rec-det"><td class="orc-rec-ano-nome">${ano}<small>realizadas</small></td>${g.meses.map((_, mes) => this.celReal(this.qtdReal(ano, mes, "venda"), ano, mes)).join("")}<td class="is-right">—</td></tr>`;
+      let somaReal = 0;
+      const tdsReal = g.meses.map((_, mes) => {
+        const qtd = this.qtdReal(ano, mes, "venda");
+        somaReal += qtd;
+        return this.celReal(qtd, ano, mes);
+      }).join("");
+      linhas += `<tr class="orc-rec-det"><td class="orc-rec-ano-nome">${ano}<small>realizadas</small></td>${tdsReal}<td class="is-right">${somaReal || "—"}</td></tr>`;
       planos.forEach((p) => {
         let soma = 0;
         const tds = g.meses.map((_, mes) => {
@@ -1072,8 +1336,20 @@ const OrcamentoModuloApp = {
       linhas += `<tr class="orc-rec-det is-venda"><td class="orc-rec-ano-nome">Entra no caixa<small>entrada e parcelas</small></td>${caixa.map((v, mes) => this.celTexto(v, true, this.clsMes(ano, mes))).join("")}<td class="is-right">${somaCaixa > 0.009 ? this.esc(this.dinheiro(somaCaixa)) : "—"}</td></tr>`;
     }
     return `
-      <div class="orc-planos">${cards || `<p class="orc-plano-parcela">Nenhum plano ainda. Cadastre o primeiro para informar as vendas.</p>`}</div>
-      <button type="button" class="btn btn-outline orc-plano-add" onclick="OrcamentoModuloApp.adicionarPlano()">Adicionar plano</button>
+      <div class="orc-plano-barra">
+        <button type="button" class="btn btn-outline" ${padrao.length ? "" : "disabled"} title="${padrao.length ? "Copia entrada, parcelas e juros. O ticket médio deste centro permanece se já estiver preenchido." : "Salve um padrão antes."}" onclick="OrcamentoModuloApp.usarPadrao()">Usar padrão</button>
+        <button type="button" class="btn btn-outline" ${planos.length ? "" : "disabled"} onclick="OrcamentoModuloApp.salvarPadrao()">Salvar como padrão</button>
+        <button type="button" class="btn btn-primary" onclick="OrcamentoModuloApp.adicionarPlano()">Adicionar plano</button>
+      </div>
+      <p class="orc-plano-parcela">O padrão vale para os empreendimentos. Em cada um, use o padrão e ajuste só o ticket médio.</p>
+      <div class="cc-scroll orc-rec-meses">
+        <table class="cc-table orc-plano-tab">
+          <thead><tr>
+            <th>Plano</th><th>Ticket médio</th><th>Entrada</th><th>Parcelas</th><th>Juros % ao mês</th><th class="is-right">Parcela</th><th class="is-right">Ações</th>
+          </tr></thead>
+          <tbody>${linhasPlanos || `<tr><td colspan="7">Nenhum plano ainda.</td></tr>`}</tbody>
+        </table>
+      </div>
       <div class="orc-rec-kpis">
         <div class="crm-card orc-rec-kpi"><span>Planos</span><strong>${planos.length}</strong></div>
         <div class="crm-card orc-rec-kpi"><span>Entra na receita do período</span><strong>${this.esc(this.dinheiro(caixaPeriodo))}</strong></div>
@@ -1106,7 +1382,7 @@ const OrcamentoModuloApp = {
   resultadoHtml() {
     const r = this.novo.resultado;
     if (!r) {
-      return `<div class="crm-card" style="padding:28px;color:#64748b;">Escolha a empresa, o centro de custo e os anos. A receita é montada ao clicar em Montar receita.</div>`;
+      return `<div class="crm-card" style="padding:28px;color:#64748b;">A receita de ${this.esc(this.novo.anoDe)} a ${this.esc(this.novo.anoAte)} é montada ao clicar em Montar receita.</div>`;
     }
     const meses = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
     const cab = meses.map((m) => `<th class="is-right">${m}</th>`).join("");
@@ -1401,6 +1677,7 @@ const OrcamentoModuloApp = {
   async montarReceita() {
     const st = this.novo;
     if (st.carregando) return;
+    this.ajustarPeriodo();
     if (!st.companyId || !st.ccId) {
       st.erro = "Escolha a empresa e o centro de custo.";
       this.renderNovo();
@@ -1430,6 +1707,7 @@ const OrcamentoModuloApp = {
       st.anoAberto = "";
       st.filtroCelula = null;
       st.resultado = await this.distribuirReceita(linhas, st.anoDe, st.anoAte);
+      st.aba = "receita";
       st.progressoPct = 100;
     } catch (e) {
       console.warn("[Orçamento] receita", e);
