@@ -38,6 +38,8 @@ const GerarPagamentoApp = {
     retroTodos: false,
     credores: {},
     antecipadoOk: {},
+    roboMsg: "",
+    roboLigando: false,
     gen: 0
   },
 
@@ -1403,6 +1405,83 @@ const GerarPagamentoApp = {
     }
   },
 
+  async roboNoAr() {
+    try {
+      const resp = await fetch(this.ROBO_URL + "/status", { method: "GET" });
+      return !!resp.ok;
+    } catch (e) {
+      return false;
+    }
+  },
+
+  abrirProtocoloRobo(acao) {
+    const email = (acao === "entrar" || acao === "preparar") ? this.emailAtual() : "";
+    const href = email ? ("mourarobo://" + acao + "/" + encodeURIComponent(email)) : ("mourarobo://" + (acao || "ligar"));
+    const frame = document.createElement("iframe");
+    frame.style.display = "none";
+    frame.src = href;
+    document.body.appendChild(frame);
+    setTimeout(() => { try { frame.remove(); } catch (e) {} }, 4000);
+  },
+
+  pintarRoboMsg() {
+    const el = document.getElementById("gp-robo-msg");
+    if (el) el.textContent = this.state.roboMsg || "";
+    const btn = document.getElementById("gp-robo-btn");
+    if (btn) btn.disabled = !!this.state.roboLigando;
+  },
+
+  baixarInstaladorRobo() {
+    const origem = window.location.origin;
+    const cmd = [
+      "@echo off",
+      "chcp 65001 >nul",
+      "echo Instalando o robô do Sienge neste computador...",
+      "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Invoke-WebRequest -Uri '" + origem + "/robo-pacote/instalar.ps1' -OutFile $env:TEMP\\moura-robo-instalar.ps1 -UseBasicParsing; $env:MOURA_ROBO_ORIGEM='" + origem + "'; & $env:TEMP\\moura-robo-instalar.ps1\"",
+      "echo.",
+      "echo Quando terminar, volte ao Integra e clique em Ligar robô.",
+      "pause"
+    ].join("\r\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([cmd], { type: "text/plain" }));
+    a.download = "Ligar robo do Sienge.cmd";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  },
+
+  /** Liga o robô neste computador, pega o código e, se ele estava desligado, abre o login do Sienge. */
+  async ligarRobo() {
+    if (this.state.roboLigando) return;
+    this.state.roboLigando = true;
+    this.state.roboMsg = "Ligando o robô neste computador…";
+    this.pintarRoboMsg();
+    const preparar = !this._roboPreparou;
+    this.abrirProtocoloRobo(preparar ? "preparar" : "ligar");
+    const jaEstava = await this.roboNoAr();
+    let ligado = jaEstava;
+    if (!ligado) {
+      for (let i = 0; i < 16; i++) {
+        await new Promise((r) => setTimeout(r, 500));
+        if (await this.roboNoAr()) { ligado = true; break; }
+      }
+    }
+    if (!ligado) {
+      this.baixarInstaladorRobo();
+      this.state.roboMsg = "Abra o arquivo Ligar robo do Sienge que foi baixado. Na primeira vez ele instala o Node, sobe o robô e abre o Sienge. Depois é só clicar em Ligar robô.";
+      this.state.roboLigando = false;
+      this.pintarRoboMsg();
+      return;
+    }
+    await this.roboParear();
+    this._roboPreparou = true;
+    this.state.roboMsg = jaEstava && !preparar
+      ? "Robô ligado. O Integra já tem o código deste computador."
+      : "Robô ligado. A janela do Sienge abriu para o login neste computador.";
+    this.state.roboLigando = false;
+    this.pintarRoboMsg();
+  },
+
   /* Lotes gravados antes de guardar a empresa: busca nos títulos carregados e no CC dono da conta. */
   completarLote(lote) {
     (lote.itens || []).forEach((it) => {
@@ -1515,7 +1594,7 @@ const GerarPagamentoApp = {
     s.roboLote = "";
     if (r.offline || r.cancelado) {
       this.paintTitulos();
-      alert(`Lote ${id} salvo no Integra, mas ainda não foi criado no Sienge.\n\n${r.erro}` + (r.offline ? `\nNa pasta robo-sienge, dê dois cliques em "Ligar robô automático" (só uma vez neste computador) e clique em "Enviar ao Sienge" na lista de lotes gerados.` : ""));
+      alert(`Lote ${id} salvo no Integra, mas ainda não foi criado no Sienge.\n\n${r.erro}` + (r.offline ? `\nClique em Ligar robô no topo desta tela. Na primeira vez, abra o arquivo que o Integra baixar.` : ""));
       return;
     }
     if (r.ok) {
@@ -1547,7 +1626,7 @@ const GerarPagamentoApp = {
     s.roboLote = "";
     if (r.offline || r.cancelado) {
       this.paintTitulos();
-      alert(r.erro + (r.offline ? `\nNa pasta robo-sienge, dê dois cliques em "Ligar robô automático" (só uma vez neste computador) e tente aprovar de novo.` : ""));
+      alert(r.erro + (r.offline ? `\nClique em Ligar robô no topo desta tela e tente aprovar de novo.` : ""));
       return;
     }
     if (r.ok) {
@@ -2512,6 +2591,9 @@ const GerarPagamentoApp = {
           #gerar-pagamento-root .gp-lote-todos { display:inline-flex; align-items:center; gap:6px; font-size:0.8rem; color:#334155; cursor:pointer; }
           #gerar-pagamento-root .gp-lote-total { font-size:1.05rem; color:#0f172a; min-width:120px; text-align:right; }
           #gerar-pagamento-root .gp-lote .gp-titulos { min-width:1000px; }
+          #gerar-pagamento-root .gp-robo-btn { height:36px; padding:0 14px; border:0; border-radius:8px; background:#fff; color:#105436; font-weight:800; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+          #gerar-pagamento-root .gp-robo-btn:disabled { opacity:0.6; cursor:wait; }
+          #gerar-pagamento-root .gp-robo-msg { color:#ecfdf5; font-size:0.75rem; font-weight:700; max-width:420px; line-height:1.35; }
         </style>
         <div class="crm-card" style="overflow:hidden;padding:0;">
           <div class="gp-busca">
@@ -2539,6 +2621,11 @@ const GerarPagamentoApp = {
         </div>`);
 
     root.innerHTML = `
+      <style>
+        #gerar-pagamento-root .gp-robo-btn { height:36px; padding:0 14px; border:0; border-radius:8px; background:#fff; color:#105436; font-weight:800; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+        #gerar-pagamento-root .gp-robo-btn:disabled { opacity:0.6; cursor:wait; }
+        #gerar-pagamento-root .gp-robo-msg { color:#ecfdf5; font-size:0.75rem; font-weight:700; max-width:420px; line-height:1.35; }
+      </style>
       <div style="display:flex;flex-direction:column;min-height:calc(100vh - 85px);font-family:inherit;">
         <div style="background:#105436;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-radius:12px 12px 0 0;flex-wrap:wrap;">
           <div style="display:flex;align-items:center;gap:12px;">
@@ -2548,6 +2635,12 @@ const GerarPagamentoApp = {
             <div>
               <h2 style="margin:0;color:#fff;font-size:1.15rem;font-weight:600;">Gerar Pagamento</h2>
             </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
+            <span id="gp-robo-msg" class="gp-robo-msg">${this.esc(s.roboMsg || "")}</span>
+            <button type="button" id="gp-robo-btn" class="gp-robo-btn" ${s.roboLigando ? "disabled" : ""} onclick="GerarPagamentoApp.ligarRobo()">
+              <i data-lucide="bot" style="width:16px;height:16px;"></i> Ligar robô
+            </button>
           </div>
         </div>
         <div style="flex:1;background:#f8fafc;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 12px 12px;padding:16px 18px;">

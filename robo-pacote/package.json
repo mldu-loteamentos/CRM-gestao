@@ -1,0 +1,13 @@
+{
+  "name": "robo-sienge",
+  "private": true,
+  "description": "Robô local que gera e aprova lotes de pagamento no Sienge a partir do Integra",
+  "scripts": {
+    "entrar": "node entrar.js",
+    "gravar": "node gravar.js",
+    "robo": "node robo.js"
+  },
+  "dependencies": {
+    "playwright": "^1.55.0"
+  }
+}

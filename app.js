@@ -22322,17 +22322,54 @@ function distPermutaMapInst(inst) {
   };
 }
 
+window.distPermutaPintarAbas = function() {
+  const abas = document.getElementById("dist-permuta-abas");
+  if (!abas) return;
+  const st = window._distPermutaState || {};
+  const order = (st.contracts || []).map((c) => String(c.billId));
+  const books = order.map((id) => (st.books || {})[id]).filter(Boolean);
+  if (!books.length) {
+    abas.hidden = true;
+    abas.innerHTML = "";
+    return;
+  }
+  if (!books.some((b) => String(b.billId) === String(st.aba))) st.aba = String(books[0].billId);
+  abas.hidden = false;
+  abas.innerHTML = books.map((book) => {
+    const on = String(book.billId) === String(st.aba);
+    const marcadas = (book.installments || []).filter((r) => r.checked).length;
+    const rotulo = "Título " + book.billId + (book.unit ? " · " + book.unit : "");
+    return `<button type="button" role="tab" aria-selected="${on ? "true" : "false"}" data-bill="${distPermutaEsc(book.billId)}" class="ml-tab${on ? " is-active" : ""}" onclick="distPermutaSetAba(this.getAttribute('data-bill'))"><i data-lucide="file-text"></i> ${distPermutaEsc(rotulo)}${marcadas ? `<span class="ml-tab-count">${marcadas}</span>` : ""}</button>`;
+  }).join("");
+  if (typeof window.crmCriarIcones === "function") window.crmCriarIcones(abas);
+  else if (window.lucide && lucide.createIcons) lucide.createIcons();
+};
+
+window.distPermutaSetAba = function(billId) {
+  const st = window._distPermutaState || {};
+  st.aba = String(billId || "");
+  window.distPermutaRenderBooks();
+};
+
 window.distPermutaRenderBooks = function() {
   const body = document.getElementById("dist-permuta-parcelas-body");
+  const abas = document.getElementById("dist-permuta-abas");
   if (!body) return;
   const st = window._distPermutaState || {};
   const order = (st.contracts || []).map((c) => String(c.billId));
   const books = order.map((id) => (st.books || {})[id]).filter(Boolean);
   if (!books.length) {
+    if (abas) {
+      abas.hidden = true;
+      abas.innerHTML = "";
+    }
     body.innerHTML = `<div style="padding:16px;color:#94a3b8;text-align:center;font-size:0.85rem;">Marque um ou mais contratos para carregar as parcelas.</div>`;
     return;
   }
-  body.innerHTML = books.map((book) => {
+  if (!books.some((b) => String(b.billId) === String(st.aba))) st.aba = String(books[0].billId);
+  window.distPermutaPintarAbas();
+  const book = books.find((b) => String(b.billId) === String(st.aba)) || books[0];
+  body.innerHTML = [book].map((book) => {
     if (book.loading) {
       return `<div style="padding:14px;border-bottom:1px solid #fed7aa;color:#9a3412;font-size:0.85rem;">Buscando parcelas do título ${distPermutaEsc(book.billId)}...</div>`;
     }
@@ -22350,7 +22387,7 @@ window.distPermutaRenderBooks = function() {
         </td>
         <td style="padding:6px;font-weight:700;">
           ${distPermutaEsc(r.number)}
-          <div class="dist-permuta-parcial-note" data-bill="${distPermutaEsc(book.billId)}" data-idx="${i}" style="font-size:0.68rem;font-weight:700;color:#9a3412;"></div>
+          <div class="dist-permuta-parcial-note" data-bill="${distPermutaEsc(book.billId)}" data-idx="${i}" style="font-size:0.68rem;font-weight:700;color:#9a3412;">${r.parcial && r.checked ? distPermutaEsc("Abatimento parcial de " + distPermutaFmt(r.abatidoVp) + " (" + ((Number(r.ratio) || 0) * 100).toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "% do valor presente) para fechar a restituição.") : ""}</div>
         </td>
         <td style="padding:6px;text-align:center;">${distPermutaFmtDate(r.due)}</td>
         <td style="padding:6px;text-align:right;">${distPermutaFmt(r.original || r.balance)}</td>
@@ -22404,11 +22441,13 @@ window.onDistratoPermutaBookToggle = async function(billId, checked) {
   st.books = st.books || {};
   if (!checked) {
     delete st.books[billId];
+    if (String(st.aba) === billId) st.aba = "";
     window.distPermutaRenderBooks();
     window.onDistratoPermutaInstToggle();
     return;
   }
   const opt = (st.contracts || []).find((c) => String(c.billId) === billId) || { billId: billId, unit: "", companyId: "" };
+  st.aba = billId;
   st.books[billId] = { billId: billId, unit: opt.unit, companyId: opt.companyId, loading: true, installments: [], saldoPresente: 0, abatedVp: 0 };
   window.distPermutaRenderBooks();
   try {
@@ -22525,6 +22564,7 @@ window.onDistratoPermutaInstToggle = function() {
     cash: cash
   };
   distPermutaSyncLoteHidden();
+  if (typeof window.distPermutaPintarAbas === "function") window.distPermutaPintarAbas();
   if (AppState.currentDistratoResult) AppState.currentDistratoResult.permutaAbatimento = st.selection;
   if (typeof updateDistratoRefundScheduleAmounts === "function") updateDistratoRefundScheduleAmounts();
   if (typeof window.syncDistratoPermutaAbatimentoUi === "function") window.syncDistratoPermutaAbatimentoUi();
@@ -22582,9 +22622,8 @@ window.toggleDistratoPermuta = function() {
     if (loteEl) loteEl.value = "";
     const box = document.getElementById("dist-permuta-contracts");
     if (box) box.innerHTML = "";
-    window._distPermutaState = { contracts: [], books: {}, installments: [], selection: null };
-    const body = document.getElementById("dist-permuta-parcelas-body");
-    if (body) body.innerHTML = `<div style="padding:16px;color:#94a3b8;text-align:center;font-size:0.85rem;">Marque um ou mais contratos para carregar as parcelas.</div>`;
+    window._distPermutaState = { contracts: [], books: {}, installments: [], selection: null, aba: "" };
+    if (typeof window.distPermutaRenderBooks === "function") window.distPermutaRenderBooks();
   }
   if (typeof window.syncDistratoPermutaAbatimentoUi === "function") window.syncDistratoPermutaAbatimentoUi();
   calculateDistrato();
