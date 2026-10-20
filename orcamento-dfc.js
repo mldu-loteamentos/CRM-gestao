@@ -27,6 +27,36 @@ const OrcamentoDfcApp = {
     return v < 0 ? "-" + abs : abs;
   },
 
+  mil(n) {
+    const v = Number(n) || 0;
+    if (Math.abs(v) < 0.5) return "—";
+    const milhar = v / 1000;
+    const abs = Math.abs(milhar);
+    const texto = abs >= 100
+      ? Math.round(abs).toLocaleString("pt-BR")
+      : abs.toLocaleString("pt-BR", { maximumFractionDigits: 1 });
+    return v < 0 ? "-" + texto : texto;
+  },
+
+  pct(orc, real) {
+    const b = Number(real) || 0;
+    if (Math.abs(b) < 0.5) return "—";
+    const p = ((Number(orc) || 0) - b) / Math.abs(b) * 100;
+    const texto = Math.abs(p) >= 10
+      ? Math.round(p).toLocaleString("pt-BR")
+      : p.toLocaleString("pt-BR", { maximumFractionDigits: 1 });
+    return (p > 0 ? "+" : "") + texto + "%";
+  },
+
+  celCmp(orc, real, prev) {
+    const o = Number(orc) || 0;
+    const b = Number(real) || 0;
+    const d = o - b;
+    const titulo = (prev ? "Previsão 2026 " : "2026 ") + this.money(b) + " · Orçado 2027 " + this.money(o) + " · Variação " + this.money(d);
+    const cls = d < -0.5 ? " orc-dfc-neg" : "";
+    return `<td title="${this.esc(titulo)}">${this.mil(b)}</td><td title="${this.esc(titulo)}">${this.mil(o)}</td><td class="${cls.trim()}" title="${this.esc(titulo)}">${this.mil(d)}</td><td title="${this.esc(titulo)}">${this.pct(o, b)}</td>`;
+  },
+
   norm(s) {
     return String(s || "")
       .normalize("NFD")
@@ -104,6 +134,14 @@ const OrcamentoDfcApp = {
     if (hoje.getFullYear() > 2026) return 12;
     if (hoje.getFullYear() < 2026) return 0;
     return hoje.getMonth();
+  },
+
+  textoCorte() {
+    const nomes = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+    const corte = this.corteForecast();
+    if (corte <= 0) return "2026 entra como forecast.";
+    if (corte >= 12) return "2026 entra pelo realizado do ano.";
+    return "Até " + nomes[corte - 1] + " entra o realizado. De " + nomes[corte] + " a dezembro entra o forecast.";
   },
 
   chaveConta(code) {
@@ -438,7 +476,9 @@ const OrcamentoDfcApp = {
           isAccount: true,
           isCc: false,
           months: a.months,
-          total: a.months.reduce((x, y) => x + y, 0)
+          base: a.base || Array(12).fill(0),
+          total: a.months.reduce((x, y) => x + y, 0),
+          baseTotal: (a.base || []).reduce((x, y) => x + y, 0)
         });
         if (!ccs.length || !this.expanded.has(accId)) return;
         ccs.forEach((c) => {
@@ -452,7 +492,9 @@ const OrcamentoDfcApp = {
             isAccount: false,
             isCc: true,
             months: c.months,
-            total: c.months.reduce((x, y) => x + y, 0)
+            base: c.base || Array(12).fill(0),
+            total: c.months.reduce((x, y) => x + y, 0),
+            baseTotal: (c.base || []).reduce((x, y) => x + y, 0)
           });
         });
       });
@@ -476,7 +518,7 @@ const OrcamentoDfcApp = {
     root.innerHTML = `
       <div class="orc-dfc-page">
         ${typeof OrcamentoApp !== "undefined" ? OrcamentoApp.abasHtml() : ""}
-        <p class="orc-dfc-lead">Orçamento de 2027 no demonstrativo de fluxo de caixa. Receita entra positiva e despesa entra negativa, no mesmo critério do Fluxo de Caixa.</p>
+        <p class="orc-dfc-lead">Orçamento de 2027 contra o DFC de 2026, em R$ mil. ${this.textoCorte()} Passe o mouse para ver o valor em reais.</p>
         <div class="orc-dfc-tools">
           <div id="orc-dfc-emp-box"></div>
           <div id="orc-dfc-cc-box"></div>
@@ -502,9 +544,24 @@ const OrcamentoDfcApp = {
       file.value = "";
       if (f) this.lerArquivo(f);
     });
-    const base = document.getElementById("orc-dfc-base");
-    if (base) base.addEventListener("click", () => this.voltarBase());
+    const baseBtn = document.getElementById("orc-dfc-base");
+    if (baseBtn) baseBtn.addEventListener("click", () => this.voltarBase());
     if (window.lucide && lucide.createIcons) lucide.createIcons();
+    this.carregarBase();
+  },
+
+  async carregarBase() {
+    const app = window.ResultadoCaixaApp;
+    if (!app) return;
+    const token = (this._bToken = (this._bToken || 0) + 1);
+    try {
+      if ((!app.acervo || typeof app.temAcervo !== "function" || !app.temAcervo()) && typeof app.lerLocal === "function") app.lerLocal();
+      if (typeof app.carregarNuvem === "function" && !app._nuvemOk) await app.carregarNuvem();
+      if (typeof app.carregarForecasts === "function") await app.carregarForecasts();
+      if (typeof app.normalizarForecastsMemoria === "function") app.normalizarForecastsMemoria();
+    } catch (e) {}
+    if (token !== this._bToken) return;
+    if (document.getElementById("orc-dfc-body")) this.paintBody();
   },
 
   paintMeta(src) {
@@ -672,7 +729,10 @@ const OrcamentoDfcApp = {
       return;
     }
     const { rows, fora } = this.montar();
-    const head = this.MESES.map((m) => `<th>${m}</th>`).join("");
+    const corte = this._corte == null ? this.corteForecast() : this._corte;
+    const h1 = this.MESES.map((m) => `<th colspan="4">${m}</th>`).join("") + `<th colspan="4">Total</th>`;
+    const sub = (rotulo) => `<th>${rotulo}</th><th>Orç</th><th>Var R$</th><th>Var %</th>`;
+    const h2 = this.MESES.map((_, i) => sub(i >= corte ? "Prev" : "Real")).join("") + sub("2026");
     const trs = rows.map((r) => {
       const cls = [
         r.isAccount ? "orc-dfc-acc" : "",
@@ -683,20 +743,21 @@ const OrcamentoDfcApp = {
       const ico = r.hasKids
         ? `<i data-lucide="${this.expanded.has(r.id) ? "chevron-down" : "chevron-right"}"></i>`
         : `<i class="orc-dfc-no"></i>`;
-      const cells = r.months.map((v) => `<td class="${v < -0.005 ? "orc-dfc-neg" : ""}">${this.money(v)}</td>`).join("");
+      const base = r.base || [];
+      const cells = r.months.map((v, i) => this.celCmp(v, base[i], i >= corte)).join("");
       const click = r.hasKids ? ` data-dfc-id="${this.esc(r.id)}"` : "";
       return `<tr class="${cls}"${click}>
-        <td style="padding-left:${12 + r.level * 16}px">${ico}<span>${this.esc(r.name)}</span></td>
+        <td style="padding-left:${6 + r.level * 8}px">${ico}<span>${this.esc(r.name)}</span></td>
         ${cells}
-        <td class="${r.total < -0.005 ? "orc-dfc-neg" : ""}">${this.money(r.total)}</td>
+        ${this.celCmp(r.total, r.baseTotal, false)}
       </tr>`;
     }).join("");
     const aviso = this.erro ? `<div class="orc-dfc-erro">${this.esc(this.erro)}</div>` : "";
     body.innerHTML = `
       ${aviso}
       <div class="orc-dfc-scroll">
-        <table class="orc-dfc-table">
-          <thead><tr><th>Conta</th>${head}<th>Total</th></tr></thead>
+        <table class="orc-dfc-table orc-dfc-cmp">
+          <thead><tr><th rowspan="2">Conta</th>${h1}</tr><tr>${h2}</tr></thead>
           <tbody>${trs}</tbody>
         </table>
       </div>`;

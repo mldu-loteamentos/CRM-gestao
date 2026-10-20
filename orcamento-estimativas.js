@@ -618,7 +618,7 @@ const OrcamentoImpostosApp = {
       body.innerHTML = `<div class="orc-dfc-erro">Não há receita de 2027 na base para estimar o imposto.</div>`;
       return;
     }
-    const head = OrcEst.MESES.map((m) => `<div class="orc-imp-h">${m}</div>`).join("") + `<div class="orc-imp-h">Total</div><div class="orc-imp-h" title="PIS e COFINS de dezembro e o trimestre de outubro a dezembro">Jan/28</div>`;
+    const head = OrcEst.MESES.map((m) => `<th>${m}</th>`).join("") + `<th>Total</th><th title="PIS e COFINS de dezembro e o trimestre de outubro a dezembro">Jan/28</th>`;
     const tot = Array(13).fill(0);
     const temTot = Array(13).fill(false);
     const linhas = lista.map((row) => {
@@ -632,28 +632,35 @@ const OrcamentoImpostosApp = {
       const aberto = !!this.abertos[row.id];
       const nomeCheio = row.id + " - " + OrcEst.norm(row.nome);
       const nome = OrcEst.esc(nomeCheio);
+      const id = OrcEst.esc(row.id);
       const celulas = pago.slice(0, 12).map((v, i) => this.cel(v, row.id, i === 0 ? "PIS e COFINS do forecast de dezembro de 2026 e trimestre de outubro a dezembro" : "")).join("");
-      const det = aberto ? `<div class="orc-imp-det-full">${this.detalhe(row)}</div>` : "";
-      return `<div class="orc-imp-nome${aberto ? " is-open" : ""}" data-est-id="${OrcEst.esc(row.id)}" title="${nome}"><i data-lucide="${aberto ? "chevron-down" : "chevron-right"}"></i><span class="orc-est-nome">${nome}</span> <span class="${chip.cls}">${chip.txt}</span></div>
+      const det = aberto ? `<tr class="orc-imp-det-row"><td colspan="15">${this.detalhe(row)}</td></tr>` : "";
+      return `<tr class="${aberto ? "is-open" : ""}">
+        <td class="orc-imp-nome" data-est-id="${id}" title="${nome}"><i data-lucide="${aberto ? "chevron-down" : "chevron-right"}"></i><span>${nome}</span><small class="${chip.cls}">${chip.txt}</small></td>
         ${celulas}
-        <div class="orc-imp-cel" data-est-id="${OrcEst.esc(row.id)}" title="${OrcEst.esc(OrcEst.money(this.somaAte(pago, 12)))}">${this.moneyGrade(this.somaAte(pago, 12))}</div>
-        <div class="orc-imp-cel" data-est-id="${OrcEst.esc(row.id)}" title="${OrcEst.esc(OrcEst.money(pago[12]))}">${this.moneyGrade(pago[12])}</div>
-        ${det}`;
+        <td data-est-id="${id}" title="${OrcEst.esc(OrcEst.money(this.somaAte(pago, 12)))}">${this.moneyGrade(this.somaAte(pago, 12))}</td>
+        <td data-est-id="${id}" title="${OrcEst.esc(OrcEst.money(pago[12]))}">${this.moneyGrade(pago[12])}</td>
+      </tr>${det}`;
     }).join("");
-    const totCel = tot.slice(0, 12).map((v, i) => `<div class="orc-imp-cel is-tot" title="${temTot[i] ? OrcEst.esc(OrcEst.money(v)) : ""}">${temTot[i] ? this.moneyGrade(v) : "—"}</div>`).join("");
+    const totCel = tot.slice(0, 12).map((v, i) => `<td title="${temTot[i] ? OrcEst.esc(OrcEst.money(v)) : ""}">${temTot[i] ? this.moneyGrade(v) : "—"}</td>`).join("");
     body.innerHTML = `
-      <div class="orc-imp-grade">
-        <div class="orc-imp-h">Imposto a pagar</div>${head}
-        ${linhas}
-        <div class="orc-imp-nome is-tot">Total</div>${totCel}
-        <div class="orc-imp-cel is-tot" title="${OrcEst.esc(OrcEst.money(this.somaAte(tot, 12)))}">${this.moneyGrade(this.somaAte(tot, 12))}</div>
-        <div class="orc-imp-cel is-tot" title="${OrcEst.esc(OrcEst.money(tot[12]))}">${this.moneyGrade(tot[12])}</div>
+      <div class="orc-imp-scroll">
+        <table class="orc-imp-tab">
+          <colgroup><col class="orc-imp-c-nome">${OrcEst.MESES.map(() => "<col>").join("")}<col><col></colgroup>
+          <thead><tr><th>Imposto a pagar</th>${head}</tr></thead>
+          <tbody>${linhas}</tbody>
+          <tfoot><tr>
+            <td>Total</td>${totCel}
+            <td title="${OrcEst.esc(OrcEst.money(this.somaAte(tot, 12)))}">${this.moneyGrade(this.somaAte(tot, 12))}</td>
+            <td title="${OrcEst.esc(OrcEst.money(tot[12]))}">${this.moneyGrade(tot[12])}</td>
+          </tr></tfoot>
+        </table>
       </div>
       <p class="orc-est-nota">Janeiro de 2027 usa o forecast de 2026. Clique na empresa para ver a receita de cada mês e o mês em que o imposto é pago.</p>`;
-    const grade = body.querySelector(".orc-imp-grade");
-    if (grade) grade.addEventListener("click", (ev) => {
+    const tab = body.querySelector(".orc-imp-tab");
+    if (tab) tab.addEventListener("click", (ev) => {
       const el = ev.target.closest("[data-est-id]");
-      if (!el || !grade.contains(el)) return;
+      if (!el || !tab.contains(el) || el.closest(".orc-imp-det-row")) return;
       this.toggle(el.getAttribute("data-est-id"));
     });
     if (window.lucide && lucide.createIcons) lucide.createIcons();
@@ -663,7 +670,7 @@ const OrcamentoImpostosApp = {
     const cheio = v == null ? "" : OrcEst.money(v);
     const dica = [cheio, title].filter(Boolean).join(". ");
     const texto = v == null ? "—" : this.moneyGrade(v);
-    return `<div class="orc-imp-cel" data-est-id="${OrcEst.esc(id)}" title="${OrcEst.esc(dica)}">${texto}</div>`;
+    return `<td data-est-id="${OrcEst.esc(id)}" title="${OrcEst.esc(dica)}">${texto}</td>`;
   },
 
   moneyGrade(v) {

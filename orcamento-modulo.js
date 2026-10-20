@@ -248,16 +248,7 @@ const OrcamentoModuloApp = {
       this.carregarIndiceNuvem();
       return;
     }
-    const aba = st.aba === "receita" ? "receita" : "kardex";
-    st.aba = aba;
-    const leads = { kardex: this.textoKardex(), receita: this.textoReajusteHoje() };
-    const abas = [
-      { id: "kardex", label: "Kardex", icon: "package" },
-      { id: "receita", label: "Receita", icon: "trending-up" }
-    ].map((t) => `<button type="button" role="tab" aria-selected="${aba === t.id}" class="ml-tab${aba === t.id ? " is-active" : ""}" onclick="OrcamentoModuloApp.setAba('${t.id}')"><i data-lucide="${t.icon}"></i> ${t.label}</button>`).join("");
     root.innerHTML = `
-      <div class="ml-tabs orc-novo-tabs" role="tablist">${abas}</div>
-      <p class="orc-rec-lead">${this.esc(leads[aba])}</p>
       ${this.barraOrcamento()}
       ${st.erro ? `<div style="margin:0 0 12px;padding:12px 14px;border-radius:8px;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;">${this.esc(st.erro)}</div>` : ""}
       <div id="orc-receita-corpo">${this.corpoAtivo()}</div>`;
@@ -311,7 +302,7 @@ const OrcamentoModuloApp = {
       single: true,
       nouns: nounsCc
     });
-    const pode = !!(st.companyId && st.anoAte >= st.anoDe);
+    const pode = !!(st.companyId && st.ccId && st.anoAte >= st.anoDe);
     const linhas = this.linhasLista();
     const corpo = linhas.length
       ? linhas.map((r) => {
@@ -388,6 +379,7 @@ const OrcamentoModuloApp = {
   },
 
   lerIndice() {
+    if (this._indice && typeof this._indice === "object" && !Array.isArray(this._indice)) return this._indice;
     let idx = {};
     try { idx = JSON.parse(localStorage.getItem("orc_lista_v1") || "{}") || {}; } catch (e) { idx = {}; }
     if (!idx || typeof idx !== "object" || Array.isArray(idx)) idx = {};
@@ -405,6 +397,7 @@ const OrcamentoModuloApp = {
         };
       });
     } catch (e) {}
+    this._indice = idx;
     return idx;
   },
 
@@ -500,9 +493,19 @@ const OrcamentoModuloApp = {
     plano.anoDe = reg.anoDe;
     plano.anoAte = reg.anoAte;
     plano.em = reg.em;
+    if (!Array.isArray(plano.planos) || !plano.planos.length) {
+      plano.planos = [{ id: "p1", nome: "Plano 1", ticket: 0, parcelas: 0, entrada: 0, juros: 0, meses: {} }];
+    }
     this.gravarPlanoLocal(cc);
     this.salvarPlano();
+    st.etapa = "orcamento";
+    st.aba = "kardex";
+    st.openEmp = false;
+    st.openCc = false;
+    st.resultado = null;
+    st.planoAberto = true;
     this.renderNovo();
+    this.montarReceita();
   },
 
   editar(cc) {
@@ -519,7 +522,9 @@ const OrcamentoModuloApp = {
     this.novo.openCc = false;
     this.novo.erro = "";
     this.novo.resultado = null;
+    this.novo.planoAberto = true;
     this.renderNovo();
+    this.montarReceita();
   },
 
   async excluir(cc) {
@@ -531,6 +536,7 @@ const OrcamentoModuloApp = {
     if (!ok) return;
     const idx = this.lerIndice();
     delete idx[chave];
+    this._indice = idx;
     try { localStorage.setItem("orc_lista_v1", JSON.stringify(idx)); } catch (e) {}
     try {
       const planos = JSON.parse(localStorage.getItem("orc_plano_v1") || "{}") || {};
@@ -602,9 +608,14 @@ const OrcamentoModuloApp = {
   },
 
   corpoAtivo() {
-    if (this.novo.carregando) return this.carregandoHtml();
-    if (this.novo.aba === "receita") return this.resultadoHtml();
-    return this.kardexHtml();
+    const receita = this.novo.carregando ? this.carregandoHtml() : this.resultadoHtml();
+    return `
+      <h3 class="tvig-section-title" style="margin-top:18px;">Kardex</h3>
+      <p class="orc-rec-lead">${this.esc(this.textoKardex())}</p>
+      ${this.kardexHtml()}
+      <h3 class="tvig-section-title" style="margin-top:28px;">Receita</h3>
+      <p class="orc-rec-lead">${this.esc(this.textoReajusteHoje())}</p>
+      <div id="orc-receita-painel">${receita}</div>`;
   },
 
   textoKardex() {
@@ -1623,8 +1634,8 @@ const OrcamentoModuloApp = {
   pintarProgresso(texto, pct) {
     this.novo.progresso = texto;
     this.novo.progressoPct = pct;
-    const corpo = document.getElementById("orc-receita-corpo");
-    if (corpo) corpo.innerHTML = this.carregandoHtml();
+    const box = document.getElementById("orc-receita-painel");
+    if (box) box.innerHTML = this.carregandoHtml();
   },
 
   resultadoHtml() {
@@ -1955,7 +1966,6 @@ const OrcamentoModuloApp = {
       st.anoAberto = "";
       st.filtroCelula = null;
       st.resultado = await this.distribuirReceita(linhas, st.anoDe, st.anoAte);
-      st.aba = "receita";
       st.progressoPct = 100;
     } catch (e) {
       console.warn("[Orçamento] receita", e);

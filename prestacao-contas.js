@@ -1434,6 +1434,9 @@ const PrestacaoContasApp = {
             <input type="month" id="pc-comp" class="tvig-comp-input" title="Consulta pela data de pagamento" value="${this.year}-${pad(this.month)}" onchange="PrestacaoContasApp.setCompetencia(this.value)">
           </div>
           <div class="cc-toolbar-actions">
+            <button type="button" class="btn btn-excel" onclick="PrestacaoContasApp.exportar()" ${this.loading ? "disabled" : ""} title="Gerar a prestação em 4 abas: resumo, vendas e distratos, estoque e carteira">
+              <i data-lucide="download" style="width:14px;height:14px;"></i> Excel
+            </button>
             <button type="button" class="btn btn-cancel pcx-limpar" onclick="PrestacaoContasApp.limpar()" ${this.loading ? "disabled" : ""}>Limpar</button>
             <button type="button" class="btn btn-primary cc-atualizar" onclick="PrestacaoContasApp.load()" ${this.loading ? "disabled" : ""}>
               <i data-lucide="refresh-cw"></i> Carregar
@@ -2058,19 +2061,23 @@ const PrestacaoContasApp = {
   async buscarVendasPainel(gen) {
     const p = this.periodoMes();
     const slim = (c) => {
-      if (window.MarketingBudgetApp && typeof MarketingBudgetApp.slimVenda === "function") return MarketingBudgetApp.slimVenda(c);
       const units = c.salesContractUnits || c.units || [];
       const cust = (c.salesContractCustomers || [])[0] || {};
-      return {
-        id: String(c.id),
-        numero: c.number || c.contractNumber || String(c.id),
-        data: String(c.issueDate || "").slice(0, 10),
-        dataCancel: String(c.cancellationDate || "").slice(0, 10),
-        unidadeNomes: units.map((u) => u.name).filter(Boolean).join(", "),
-        cliente: cust.name || "",
-        valor: Number(c.totalSellingValue || c.value || 0) || 0,
-        situacao: String(c.situation) === "3" ? "Cancelado" : (String(c.situation) === "4" ? "Quitado" : "Emitido")
-      };
+      const base = (window.MarketingBudgetApp && typeof MarketingBudgetApp.slimVenda === "function")
+        ? MarketingBudgetApp.slimVenda(c)
+        : {
+          id: String(c.id),
+          numero: c.number || c.contractNumber || String(c.id),
+          data: String(c.issueDate || "").slice(0, 10),
+          dataCancel: String(c.cancellationDate || "").slice(0, 10),
+          unidadeNomes: units.map((u) => u.name).filter(Boolean).join(", "),
+          cliente: cust.name || "",
+          valor: Number(c.totalSellingValue || c.value || 0) || 0,
+          situacao: String(c.situation) === "3" ? "Cancelado" : (String(c.situation) === "4" ? "Quitado" : "Emitido")
+        };
+      base.parcelas = this.planoParcelas(c);
+      base.motivo = this.motivoCancel(c);
+      return base;
     };
     const vendas = [];
     const distratos = [];
@@ -2113,6 +2120,10 @@ const PrestacaoContasApp = {
     const vgv = vendas.reduce((s, v) => s + (Number(v.valor) || 0), 0);
     const vgvD = distratos.reduce((s, v) => s + (Number(v.valor) || 0), 0);
     const liq = vgv - vgvD;
+    const ticket = vendas.length ? vgv / vendas.length : 0;
+    const planos = vendas.map((v) => Number(v.parcelas) || 0).filter((n) => n > 0);
+    const planoMedio = planos.length ? planos.reduce((s, n) => s + n, 0) / planos.length : 0;
+    const motivos = this.motivosDistrato(distratos);
     const p = (pack && pack.periodo) || this.periodoMes();
     const pick = {
       "venda.numero": (x) => x.numero,
@@ -2139,19 +2150,22 @@ const PrestacaoContasApp = {
       <td>${this.esc(v.unidadeNomes || "—")}</td>
       <td>${this.esc(v.cc || "—")}</td>
       <td class="is-right pcx-valor">${this.fmt(v.valor)}</td>
-      ${cancel ? "" : `<td>${this.esc(v.situacao || "—")}</td>`}
+      ${cancel ? `<td>${this.esc(v.motivo || "Não informado")}</td>` : `<td>${this.esc(v.situacao || "—")}</td><td class="is-right">${v.parcelas ? String(v.parcelas) : "—"}</td>`}
     </tr>`;
-    const head = (pref, cancel) => this.thDash("Contrato", pref + ".numero") + this.thDash(cancel ? "Cancelamento" : "Emissão", pref + ".data") + this.thDash("Cliente", pref + ".cliente") + this.thDash("Unidade", pref + ".unidade") + this.thDash("Centro", pref + ".cc") + this.thDash("Valor", pref + ".valor", true) + (cancel ? "" : this.thDash("Situação", pref + ".sit"));
+    const head = (pref, cancel) => this.thDash("Contrato", pref + ".numero") + this.thDash(cancel ? "Cancelamento" : "Emissão", pref + ".data") + this.thDash("Cliente", pref + ".cliente") + this.thDash("Unidade", pref + ".unidade") + this.thDash("Centro", pref + ".cc") + this.thDash("Valor", pref + ".valor", true) + (cancel ? "<th>Motivo</th>" : this.thDash("Situação", pref + ".sit") + "<th class=\"is-right\">Parcelas</th>");
+    const motivoTabela = `<div class="cc-scroll pcx-dash-scroll"><table class="cc-table pcx-table"><thead><tr><th>Motivo</th><th class="is-right">Contratos</th><th class="is-right">VGV</th></tr></thead><tbody>${motivos.map((m) => `<tr><td>${this.esc(m.motivo)}</td><td class="is-right">${m.qtd}</td><td class="is-right pcx-valor">${this.fmt(m.vgv)}</td></tr>`).join("") || `<tr><td colspan="3" class="pcx-vazio">Nenhum distrato neste mês.</td></tr>`}</tbody></table></div>`;
     return `
       ${this.kpisHtml([
         { rot: "Vendas", val: String(vendas.length), nota: "Emitidas no mês", cls: "is-in" },
         { rot: "Distratos", val: String(distratos.length), nota: "Cancelados no mês", cls: "is-out" },
-        { rot: "VGV das vendas", val: this.fmt(vgv), nota: "Valor de venda" },
+        { rot: "Ticket médio", val: this.fmt(ticket), nota: "VGV das vendas dividido pela quantidade" },
+        { rot: "Plano médio", val: planoMedio ? planoMedio.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + " parcelas" : "—", nota: "Média das parcelas mensais do contrato" },
         { rot: "VGV líquido", val: this.fmt(liq), nota: "Vendas menos distratos", cls: liq < -0.004 ? "is-out" : "is-in" }
       ])}
       <p class="pcx-ajuda">Contratos dos centros selecionados com emissão ou cancelamento entre ${this.dataBr(p.start)} e ${this.dataBr(p.end)}.</p>
-      ${this.blocoHtml("Vendas", vendas.length + " contrato(s)", `<div class="cc-scroll pcx-dash-scroll"><table class="cc-table pcx-table"><thead><tr>${head("venda", false)}</tr></thead><tbody>${lista.map((v) => linha(v, false)).join("") || `<tr><td colspan="7" class="pcx-vazio">Nenhuma venda neste mês.</td></tr>`}</tbody></table></div>`)}
-      ${this.blocoHtml("Distratos", distratos.length + " contrato(s)", `<div class="cc-scroll pcx-dash-scroll"><table class="cc-table pcx-table"><thead><tr>${head("dist", true)}</tr></thead><tbody>${dist.map((v) => linha(v, true)).join("") || `<tr><td colspan="6" class="pcx-vazio">Nenhum distrato neste mês.</td></tr>`}</tbody></table></div>`)}
+      ${this.blocoHtml("Vendas", vendas.length + " contrato(s)", `<div class="cc-scroll pcx-dash-scroll"><table class="cc-table pcx-table"><thead><tr>${head("venda", false)}</tr></thead><tbody>${lista.map((v) => linha(v, false)).join("") || `<tr><td colspan="8" class="pcx-vazio">Nenhuma venda neste mês.</td></tr>`}</tbody></table></div>`)}
+      ${this.blocoHtml("Motivos de cancelamento", motivos.length + " motivo(s)", motivoTabela)}
+      ${this.blocoHtml("Distratos", distratos.length + " contrato(s)", `<div class="cc-scroll pcx-dash-scroll"><table class="cc-table pcx-table"><thead><tr>${head("dist", true)}</tr></thead><tbody>${dist.map((v) => linha(v, true)).join("") || `<tr><td colspan="7" class="pcx-vazio">Nenhum distrato neste mês.</td></tr>`}</tbody></table></div>`)}
     `;
   },
 
@@ -2583,6 +2597,478 @@ const PrestacaoContasApp = {
         return `<tr><td>${this.esc(b.id)}</td><td>${this.esc(cli)}</td><td>${this.esc(uns)}</td><td>${this.dataBr(antiga)}</td><td class="is-right pcx-valor is-out">${this.fmt(b.vencido)}</td><td class="is-right pcx-valor is-out">${this.fmt(b.vencidoComAcrescimo)}</td><td class="is-right pcx-valor">${this.fmt(b.aberto)}</td></tr>`;
       }).join("") || `<tr><td colspan="7" class="pcx-vazio">Nenhum contrato em atraso nestes centros.</td></tr>`}</tbody></table></div>`)}
     `;
+  },
+
+  planoParcelas(c) {
+    if (window.ComercialApp && typeof ComercialApp.parcelasContrato === "function") {
+      const n = ComercialApp.parcelasContrato(c);
+      return n > 0 ? n : 0;
+    }
+    const conds = Array.isArray(c && c.paymentConditions) ? c.paymentConditions : [];
+    let n = 0;
+    conds.forEach((cond) => {
+      n += Number(cond && (cond.installmentsNumber || cond.numberOfInstallments || cond.quantity)) || 0;
+    });
+    return n > 0 ? n : (Number(c && (c.numberOfInstallments || c.installmentsNumber)) || 0);
+  },
+
+  motivoCancel(c) {
+    const bruto = c && (c.cancellationReason || c.cancelReason || c.cancellationMotive || c.motivoCancelamento || c.reason || "");
+    const texto = bruto && typeof bruto === "object"
+      ? (bruto.description || bruto.name || bruto.reason || "")
+      : bruto;
+    const txt = String(texto || "").replace(/\s+/g, " ").trim();
+    return txt || "Não informado";
+  },
+
+  motivosDistrato(distratos) {
+    const map = {};
+    (distratos || []).forEach((v) => {
+      const motivo = v.motivo || "Não informado";
+      const g = map[motivo] || (map[motivo] = { motivo, qtd: 0, vgv: 0 });
+      g.qtd += 1;
+      g.vgv += Number(v.valor) || 0;
+    });
+    return Object.values(map).sort((a, b) => b.qtd - a.qtd || b.vgv - a.vgv);
+  },
+
+  resumoObras() {
+    const conf = this.conferencias || { receitas: [], despesas: [] };
+    const map = {};
+    const por = (rows, campo) => {
+      (rows || []).forEach((r) => {
+        const id = r.grupo || r.obra || "—";
+        const g = map[id] || (map[id] = { id, nome: this.rotuloObra(id), recebidos: 0, pagos: 0 });
+        const v = Number(r.total) || 0;
+        if (campo === "pagos") g.pagos += v;
+        else g.recebidos += r.redutora ? -v : v;
+      });
+    };
+    por(conf.receitas, "recebidos");
+    por(conf.despesas, "pagos");
+    return Object.values(map).sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR", { numeric: true }));
+  },
+
+  estoquePorObra(units) {
+    const est = window.EstoqueComercialApp;
+    const code = (u) => String((u && u.commercialStock) || "").trim().toUpperCase();
+    const map = {};
+    (units || []).forEach((u) => {
+      if (code(u) === "T") return;
+      const id = this.chaveObra(u.enterpriseId);
+      const g = map[id] || (map[id] = { id, nome: this.rotuloObra(id), total: 0, vendidos: 0, disponiveis: 0, reserva: 0 });
+      g.total += 1;
+      const c = code(u);
+      if (c === "V" || c === "O") g.vendidos += 1;
+      else if (c === "D") g.disponiveis += 1;
+      else if (c === "R") g.reserva += 1;
+      else if (est && typeof est.mapStock === "function") {
+        const rot = est.mapStock(c);
+        if (rot === "Vendida" || rot === "Vendida em pré-contrato") g.vendidos += 1;
+        else if (rot === "Disponível") g.disponiveis += 1;
+        else if (rot === "Reserva técnica") g.reserva += 1;
+      }
+    });
+    return Object.values(map).sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR", { numeric: true }));
+  },
+
+  carteiraPorObra() {
+    const bills = (this.dash && this.dash.carteira) || [];
+    const lista = (Array.isArray(bills) ? bills : []).map((b) => Object.assign({}, b, this.medirTitulo(b)));
+    const map = {};
+    lista.forEach((b) => {
+      const id = b.obra || "—";
+      const g = map[id] || (map[id] = { id, nome: b.obraNome || this.rotuloObra(id), contratos: 0, ativos: 0, recebidoMes: 0, aberto: 0, vencido: 0 });
+      g.contratos += 1;
+      if (b.status === "Ativo") g.ativos += 1;
+      g.recebidoMes += Number(b.recebidoMes) || 0;
+      g.aberto += (Number(b.aVencer) || 0) + (Number(b.vencido) || 0);
+      g.vencido += Number(b.vencido) || 0;
+    });
+    const obras = Object.values(map).sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR", { numeric: true }));
+    const atrasados = lista.filter((b) => (Number(b.vencido) || 0) > 0.009);
+    return { obras, atrasados, lista };
+  },
+
+  async exportar() {
+    if (this.loading) return;
+    if (!this.costCenterIds.length) {
+      if (window.showToast) window.showToast("Selecione ao menos um centro de custo.", "warning");
+      return;
+    }
+    if ((this.companyIds || []).length !== 1 || !this.companyId) {
+      if (window.showToast) window.showToast("Selecione uma empresa.", "warning");
+      return;
+    }
+    const d = this.dash;
+    const chave = this.chaveDash();
+    const pronto = this.movements.length && d && d.chave === chave && d.vendas && d.estoque && d.carteira && !d.loading;
+    if (!pronto) await this.load();
+    if (this.loading) return;
+    try {
+      await this.baixarPrestacao();
+      if (window.showToast) window.showToast("Prestação gerada com 4 abas.", "success");
+    } catch (e) {
+      if (window.showToast) window.showToast((e && e.message) || "Não consegui gerar a prestação.", "error");
+    }
+  },
+
+  async baixarPrestacao() {
+    const xl = window.InvestimentoApp;
+    if (!xl || typeof xl.ensureExcelJS !== "function") throw new Error("O Excel não está disponível nesta tela.");
+    const ExcelJS = await xl.ensureExcelJS();
+    const logo = await xl.logoDataUrl();
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "CRM Moura Leite";
+    wb.created = new Date();
+    const imgId = wb.addImage({ base64: logo.dataUrl, extension: logo.extension || "png" });
+    const per = this.periodBounds();
+    const empresa = this.rotuloEmpresa();
+    const sub = empresa + " · " + per.label;
+    this.folhaResumo(wb, xl, imgId, sub);
+    this.folhaVendas(wb, xl, imgId, sub);
+    this.folhaEstoque(wb, xl, imgId, sub);
+    this.folhaCarteira(wb, xl, imgId, sub);
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "prestacao-contas-" + String(this.companyId || "empresa") + "-" + per.start.slice(0, 7) + ".xlsx";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+  },
+
+  rotuloEmpresa() {
+    const id = String(this.companyId || "");
+    const lista = (window.AppState && AppState.cachedCompanies) || [];
+    const c = lista.find((x) => String(x.id) === id);
+    const nome = c ? String(c.name || c.tradeName || "").trim() : "";
+    return nome ? id + " - " + nome : (id || "Empresa");
+  },
+
+  abrirFolha(wb, nome, colunas) {
+    const ws = wb.addWorksheet(nome, { views: [{ state: "frozen", xSplit: 1, ySplit: 4, topLeftCell: "B5", activeCell: "B5", showGridLines: false }] });
+    ws.properties.showGridLines = false;
+    ws.columns = colunas.map((w) => ({ width: w }));
+    return ws;
+  },
+
+  pintarCabeca(ws, xl, imgId, titulo, subtitulo, kpis) {
+    const logoPx = Math.round(1.54 * 96 / 2.54);
+    ws.mergeCells("A1:A2");
+    ws.getRow(1).height = 28;
+    ws.getRow(2).height = 22;
+    ws.getRow(3).height = 8;
+    const title = ws.getCell("A1");
+    title.value = {
+      richText: [
+        { font: { name: "Calibri", size: 14, bold: true, color: { argb: "FF475569" } }, text: titulo + "\n" },
+        { font: { name: "Calibri", size: 9, color: { argb: "FF64748B" } }, text: subtitulo }
+      ]
+    };
+    xl.excelPaint(title, { fill: "FFFFFFFF", align: { vertical: "middle", horizontal: "left", wrapText: true, indent: 8 } });
+    try {
+      ws.addImage(imgId, { tl: { col: 0.04, row: 0.08 }, ext: { width: logoPx, height: logoPx } });
+    } catch (e) {}
+    (kpis || []).forEach((k, i) => {
+      const col = 4 + i;
+      const colObj = ws.getColumn(col);
+      if (!colObj.width || colObj.width < 16) colObj.width = 18;
+      const rot = ws.getRow(1).getCell(col);
+      const val = ws.getRow(2).getCell(col);
+      rot.value = k.label;
+      val.value = k.value;
+      xl.excelPaint(rot, { font: { size: 8, bold: true, color: { argb: "FF94A3B8" } }, align: { horizontal: "right", vertical: "middle" } });
+      xl.excelPaint(val, { font: { size: 12, bold: true, color: { argb: k.color || "FF0F172A" } }, align: { horizontal: "right", vertical: "middle" }, numFmt: k.numFmt || "" });
+    });
+  },
+
+  pintarGrade(ws, xl, headers, linhas, total) {
+    const head = ws.getRow(4);
+    head.height = 20;
+    headers.forEach((h, i) => {
+      const cell = head.getCell(i + 1);
+      cell.value = h;
+      xl.excelPaint(cell, {
+        font: { size: 9, bold: true, color: { argb: "FFFFFFFF" } },
+        fill: "FF334155",
+        align: { horizontal: i === 0 ? "left" : "right", vertical: "middle" },
+        border: true
+      });
+    });
+    let row = 5;
+    linhas.forEach((linha) => {
+      const r = ws.getRow(row);
+      linha.forEach((c, i) => {
+        const cell = r.getCell(i + 1);
+        cell.value = c.v;
+        const neg = typeof c.v === "number" && c.v < -0.004;
+        xl.excelPaint(cell, {
+          font: { size: 9, bold: !!c.bold, color: { argb: neg ? "FFB91C1C" : (c.color || "FF0F172A") } },
+          fill: c.fill || "FFFFFFFF",
+          align: { horizontal: i === 0 || c.text ? "left" : "right", vertical: "middle" },
+          border: true,
+          numFmt: c.fmt || ""
+        });
+      });
+      row += 1;
+    });
+    if (total) {
+      const r = ws.getRow(row);
+      total.forEach((c, i) => {
+        const cell = r.getCell(i + 1);
+        cell.value = c.v;
+        const neg = typeof c.v === "number" && c.v < -0.004;
+        xl.excelPaint(cell, {
+          font: { size: 9, bold: true, color: { argb: neg ? "FFFFE4E6" : "FFFFFFFF" } },
+          fill: "FF475569",
+          align: { horizontal: i === 0 ? "left" : "right", vertical: "middle" },
+          border: true,
+          numFmt: c.fmt || ""
+        });
+      });
+      row += 1;
+    }
+    return row;
+  },
+
+  rodapeFolha(ws, xl, row) {
+    const foot = ws.getRow(row + 1).getCell(1);
+    foot.value = xl.generatedAtLabel(new Date());
+    xl.excelPaint(foot, { font: { size: 8, italic: true, color: { argb: "FF64748B" } }, align: { horizontal: "left" } });
+  },
+
+  num(v) { return Math.round((Number(v) || 0) * 100) / 100; },
+
+  folhaResumo(wb, xl, imgId, sub) {
+    const obras = this.resumoObras();
+    const rec = obras.reduce((s, o) => s + o.recebidos, 0);
+    const pag = obras.reduce((s, o) => s + o.pagos, 0);
+    const saldo = rec - pag;
+    const ws = this.abrirFolha(wb, "Resumo", [42, 18, 18, 18]);
+    this.pintarCabeca(ws, xl, imgId, "Prestação de contas — Resumo", sub, [
+      { label: "Recebidos", value: this.num(rec), color: "FF105436", numFmt: "#,##0.00" },
+      { label: "Pagos", value: this.num(pag), color: "FFB91C1C", numFmt: "#,##0.00" },
+      { label: "Saldo", value: this.num(saldo), color: saldo < 0 ? "FFB91C1C" : "FF105436", numFmt: "#,##0.00" }
+    ]);
+    const linhas = obras.map((o) => [
+      { v: o.nome, text: true },
+      { v: this.num(o.recebidos), fmt: "#,##0.00" },
+      { v: this.num(o.pagos), fmt: "#,##0.00" },
+      { v: this.num(o.recebidos - o.pagos), fmt: "#,##0.00" }
+    ]);
+    const fim = this.pintarGrade(ws, xl, ["Empreendimento", "Recebidos", "Pagos", "Saldo"], linhas, [
+      { v: "Total" },
+      { v: this.num(rec), fmt: "#,##0.00" },
+      { v: this.num(pag), fmt: "#,##0.00" },
+      { v: this.num(saldo), fmt: "#,##0.00" }
+    ]);
+    this.rodapeFolha(ws, xl, fim);
+  },
+
+  folhaVendas(wb, xl, imgId, sub) {
+    const pack = (this.dash && this.dash.vendas) || { vendas: [], distratos: [] };
+    const vendas = pack.vendas || [];
+    const distratos = pack.distratos || [];
+    const vgv = vendas.reduce((s, v) => s + (Number(v.valor) || 0), 0);
+    const planos = vendas.map((v) => Number(v.parcelas) || 0).filter((n) => n > 0);
+    const plano = planos.length ? planos.reduce((s, n) => s + n, 0) / planos.length : 0;
+    const ticket = vendas.length ? vgv / vendas.length : 0;
+    const ws = this.abrirFolha(wb, "Vendas e distratos", [28, 16, 36, 22, 28, 16, 18]);
+    this.pintarCabeca(ws, xl, imgId, "Prestação de contas — Vendas e distratos", sub, [
+      { label: "Vendas", value: vendas.length, color: "FF105436", numFmt: "0" },
+      { label: "Distratos", value: distratos.length, color: "FFB91C1C", numFmt: "0" },
+      { label: "Ticket médio", value: this.num(ticket), color: "FF0F172A", numFmt: "#,##0.00" },
+      { label: "Plano médio", value: plano ? Math.round(plano * 10) / 10 : 0, color: "FF0F172A", numFmt: "0.0" }
+    ]);
+    const porObra = {};
+    const garantir = (cc) => {
+      const id = this.chaveObra(cc);
+      return porObra[id] || (porObra[id] = { nome: this.rotuloObra(id), vendas: 0, vgv: 0, parcelas: 0, comPlano: 0, distratos: 0, vgvD: 0 });
+    };
+    vendas.forEach((v) => {
+      const g = garantir(v.cc);
+      g.vendas += 1;
+      g.vgv += Number(v.valor) || 0;
+      if (Number(v.parcelas) > 0) { g.parcelas += Number(v.parcelas); g.comPlano += 1; }
+    });
+    distratos.forEach((v) => {
+      const g = garantir(v.cc);
+      g.distratos += 1;
+      g.vgvD += Number(v.valor) || 0;
+    });
+    const linhas = Object.values(porObra).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR", { numeric: true })).map((g) => [
+      { v: g.nome, text: true },
+      { v: g.vendas, fmt: "0" },
+      { v: this.num(g.vgv), fmt: "#,##0.00" },
+      { v: g.vendas ? this.num(g.vgv / g.vendas) : 0, fmt: "#,##0.00" },
+      { v: g.comPlano ? Math.round((g.parcelas / g.comPlano) * 10) / 10 : 0, fmt: "0.0" },
+      { v: g.distratos, fmt: "0" },
+      { v: this.num(g.vgvD), fmt: "#,##0.00" }
+    ]);
+    let row = this.pintarGrade(ws, xl, ["Empreendimento", "Vendas", "VGV", "Ticket médio", "Plano médio", "Distratos", "VGV distrato"], linhas, [
+      { v: "Total" },
+      { v: vendas.length, fmt: "0" },
+      { v: this.num(vgv), fmt: "#,##0.00" },
+      { v: this.num(ticket), fmt: "#,##0.00" },
+      { v: plano ? Math.round(plano * 10) / 10 : 0, fmt: "0.0" },
+      { v: distratos.length, fmt: "0" },
+      { v: this.num(distratos.reduce((s, v) => s + (Number(v.valor) || 0), 0)), fmt: "#,##0.00" }
+    ]);
+    row = this.faixaFolha(ws, xl, row + 1, "Motivos de cancelamento", 7);
+    row = this.tabelaFolha(ws, xl, row, ["Motivo", "Contratos", "VGV"], this.motivosDistrato(distratos).map((m) => [
+      { v: m.motivo, text: true }, { v: m.qtd, fmt: "0" }, { v: this.num(m.vgv), fmt: "#,##0.00" }
+    ]));
+    row = this.faixaFolha(ws, xl, row + 1, "Vendas do mês", 7);
+    row = this.tabelaFolha(ws, xl, row, ["Contrato", "Emissão", "Cliente", "Unidade", "Empreendimento", "Valor", "Parcelas"], vendas.map((v) => [
+      { v: v.numero, text: true },
+      { v: this.dataBr(v.data), text: true },
+      { v: v.cliente || "—", text: true },
+      { v: v.unidadeNomes || "—", text: true },
+      { v: this.rotuloObra(this.chaveObra(v.cc)), text: true },
+      { v: this.num(v.valor), fmt: "#,##0.00" },
+      { v: Number(v.parcelas) || 0, fmt: "0" }
+    ]));
+    row = this.faixaFolha(ws, xl, row + 1, "Distratos do mês", 7);
+    row = this.tabelaFolha(ws, xl, row, ["Contrato", "Cancelamento", "Cliente", "Unidade", "Empreendimento", "Valor", "Motivo"], distratos.map((v) => [
+      { v: v.numero, text: true },
+      { v: this.dataBr(v.dataCancel || v.data), text: true },
+      { v: v.cliente || "—", text: true },
+      { v: v.unidadeNomes || "—", text: true },
+      { v: this.rotuloObra(this.chaveObra(v.cc)), text: true },
+      { v: this.num(v.valor), fmt: "#,##0.00" },
+      { v: v.motivo || "Não informado", text: true }
+    ]));
+    this.rodapeFolha(ws, xl, row);
+  },
+
+  faixaFolha(ws, xl, row, texto, cols) {
+    const r = ws.getRow(row);
+    r.getCell(1).value = texto;
+    xl.excelPaint(r.getCell(1), {
+      font: { size: 9, bold: true, color: { argb: "FFFFFFFF" } },
+      fill: "FF0C3D28",
+      align: { horizontal: "left", vertical: "middle" }
+    });
+    if (cols > 1) ws.mergeCells(row, 1, row, cols);
+    return row + 1;
+  },
+
+  tabelaFolha(ws, xl, row, headers, linhas) {
+    const head = ws.getRow(row);
+    head.height = 20;
+    headers.forEach((h, i) => {
+      const cell = head.getCell(i + 1);
+      cell.value = h;
+      xl.excelPaint(cell, {
+        font: { size: 9, bold: true, color: { argb: "FFFFFFFF" } },
+        fill: "FF334155",
+        align: { horizontal: i === 0 ? "left" : "right", vertical: "middle" },
+        border: true
+      });
+    });
+    row += 1;
+    if (!linhas.length) {
+      const cell = ws.getRow(row).getCell(1);
+      cell.value = "Nenhum lançamento neste período.";
+      xl.excelPaint(cell, { font: { size: 9, italic: true, color: { argb: "FF64748B" } }, align: { horizontal: "left" } });
+      return row + 1;
+    }
+    linhas.forEach((linha) => {
+      const r = ws.getRow(row);
+      linha.forEach((c, i) => {
+        const cell = r.getCell(i + 1);
+        cell.value = c.v;
+        const neg = typeof c.v === "number" && c.v < -0.004;
+        xl.excelPaint(cell, {
+          font: { size: 9, color: { argb: neg ? "FFB91C1C" : "FF0F172A" } },
+          fill: "FFFFFFFF",
+          align: { horizontal: i === 0 || c.text ? "left" : "right", vertical: "middle" },
+          border: true,
+          numFmt: c.fmt || ""
+        });
+      });
+      row += 1;
+    });
+    return row;
+  },
+
+  folhaEstoque(wb, xl, imgId, sub) {
+    const obras = this.estoquePorObra((this.dash && this.dash.estoque) || []);
+    const tot = obras.reduce((s, o) => {
+      s.total += o.total; s.vendidos += o.vendidos; s.disponiveis += o.disponiveis; s.reserva += o.reserva;
+      return s;
+    }, { total: 0, vendidos: 0, disponiveis: 0, reserva: 0 });
+    const pct = tot.total ? tot.disponiveis / tot.total : 0;
+    const ws = this.abrirFolha(wb, "Estoque", [42, 14, 14, 16, 18, 16]);
+    this.pintarCabeca(ws, xl, imgId, "Prestação de contas — Estoque", sub + " · posição atual, sem unidades transferidas. Vendidos inclui pré-contrato.", [
+      { label: "Total", value: tot.total, numFmt: "0" },
+      { label: "Vendidos", value: tot.vendidos, numFmt: "0" },
+      { label: "Disponíveis", value: tot.disponiveis, color: "FF105436", numFmt: "0" },
+      { label: "% disponível", value: pct, color: "FF105436", numFmt: "0.0%" }
+    ]);
+    this.pintarGrade(ws, xl, ["Empreendimento", "Total", "Vendidos", "Disponíveis", "Reserva técnica", "% disponível"], obras.map((o) => [
+      { v: o.nome, text: true },
+      { v: o.total, fmt: "0" },
+      { v: o.vendidos, fmt: "0" },
+      { v: o.disponiveis, fmt: "0" },
+      { v: o.reserva, fmt: "0" },
+      { v: o.total ? o.disponiveis / o.total : 0, fmt: "0.0%" }
+    ]), [
+      { v: "Total" },
+      { v: tot.total, fmt: "0" },
+      { v: tot.vendidos, fmt: "0" },
+      { v: tot.disponiveis, fmt: "0" },
+      { v: tot.reserva, fmt: "0" },
+      { v: pct, fmt: "0.0%" }
+    ]);
+    this.rodapeFolha(ws, xl, ws.lastRow ? ws.lastRow.number : 6);
+  },
+
+  folhaCarteira(wb, xl, imgId, sub) {
+    const pack = this.carteiraPorObra();
+    const aberto = pack.obras.reduce((s, o) => s + o.aberto, 0);
+    const vencido = pack.obras.reduce((s, o) => s + o.vencido, 0);
+    const inad = aberto > 0.5 ? vencido / aberto : 0;
+    const ws = this.abrirFolha(wb, "Carteira", [36, 14, 14, 18, 18, 18, 16]);
+    this.pintarCabeca(ws, xl, imgId, "Prestação de contas — Carteira e inadimplência", sub + " · posição de hoje", [
+      { label: "Em aberto", value: this.num(aberto), numFmt: "#,##0.00" },
+      { label: "Vencido", value: this.num(vencido), color: "FFB91C1C", numFmt: "#,##0.00" },
+      { label: "Inadimplência", value: inad, color: "FFB91C1C", numFmt: "0.0%" }
+    ]);
+    let row = this.pintarGrade(ws, xl, ["Empreendimento", "Contratos", "Ativos", "Recebido no mês", "Em aberto", "Vencido", "Inadimplência"], pack.obras.map((o) => [
+      { v: o.nome, text: true },
+      { v: o.contratos, fmt: "0" },
+      { v: o.ativos, fmt: "0" },
+      { v: this.num(o.recebidoMes), fmt: "#,##0.00" },
+      { v: this.num(o.aberto), fmt: "#,##0.00" },
+      { v: this.num(o.vencido), fmt: "#,##0.00" },
+      { v: o.aberto > 0.5 ? o.vencido / o.aberto : 0, fmt: "0.0%" }
+    ]), [
+      { v: "Total" },
+      { v: pack.obras.reduce((s, o) => s + o.contratos, 0), fmt: "0" },
+      { v: pack.obras.reduce((s, o) => s + o.ativos, 0), fmt: "0" },
+      { v: this.num(pack.obras.reduce((s, o) => s + o.recebidoMes, 0)), fmt: "#,##0.00" },
+      { v: this.num(aberto), fmt: "#,##0.00" },
+      { v: this.num(vencido), fmt: "#,##0.00" },
+      { v: inad, fmt: "0.0%" }
+    ]);
+    row = this.faixaFolha(ws, xl, row + 1, "Inadimplência", 7);
+    row = this.tabelaFolha(ws, xl, row, ["Título", "Cliente", "Unidade", "Empreendimento", "Vencimento mais antigo", "Vencido", "Em aberto"], pack.atrasados.map((b) => {
+      const antiga = ((b.abertas || []).find((p) => p.overdue) || {}).due || "";
+      return [
+        { v: String(b.id || ""), text: true },
+        { v: (b.cliente && (b.cliente.name || b.cliente.id)) || (typeof b.cliente === "string" ? b.cliente : "—"), text: true },
+        { v: b.unidade || "—", text: true },
+        { v: b.obraNome || "—", text: true },
+        { v: this.dataBr(antiga), text: true },
+        { v: this.num(b.vencido), fmt: "#,##0.00" },
+        { v: this.num((Number(b.aVencer) || 0) + (Number(b.vencido) || 0)), fmt: "#,##0.00" }
+      ];
+    }));
+    this.rodapeFolha(ws, xl, row);
   }
 };
 
