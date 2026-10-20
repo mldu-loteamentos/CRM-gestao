@@ -9492,7 +9492,12 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .cc-table.orc-rec-grade thead th:first-child { text-align: left; }
 .cc-table.orc-rec-grade td { padding: 6px 6px; text-align: right; white-space: nowrap; }
 .cc-table.orc-rec-grade td:first-child { text-align: left; font-weight: 700; white-space: normal; }
+.cc-table.orc-rec-grade td.orc-rec-cel { cursor: pointer; }
+.cc-table.orc-rec-grade td.orc-rec-cel:hover,
+.cc-table.orc-rec-grade td.is-filtro { box-shadow: inset 0 0 0 2px #105436; }
 .cc-table.orc-rec-grade tr.orc-rec-ano { cursor: pointer; }
+.orc-rec-filtro-bar { display: flex; align-items: center; gap: 12px; margin: 8px 0; padding: 8px 12px; background: #f8fafc; border: 1px solid #d7e3dc; border-radius: 8px; font-size: 0.78rem; font-weight: 700; color: #105436; }
+.orc-rec-filtro-bar button { margin-left: auto; height: 28px; padding: 0 10px; border: 1px solid #105436; border-radius: 6px; background: #fff; color: #105436; font-weight: 700; cursor: pointer; }
 .cc-table.orc-rec-grade tr.orc-rec-ano td { background: #f8fafc; font-weight: 800; }
 .cc-table.orc-rec-grade tr.orc-rec-ano td:first-child svg { width: 14px; height: 14px; vertical-align: -2px; margin-right: 4px; }
 .cc-table.orc-rec-grade tr.orc-rec-det td { background: #fff; font-weight: 600; }
@@ -9507,7 +9512,14 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .cc-table.orc-rec-grade tr.is-sj td.orc-rec-ano-nome small { color: #c2410c; }
 .cc-table.orc-rec-grade tr.is-conta td { background: #e8f5ee; font-weight: 800; color: #105436; }
 .cc-table.orc-rec-grade tr.is-conta td.orc-rec-ano-nome small { color: #105436; }
+.cc-table.orc-rec-grade tr.is-dist td { background: #fef2f2; color: #991b1b; }
+.cc-table.orc-rec-grade tr.is-dist td.orc-rec-ano-nome small { color: #b91c1c; }
 .cc-table.orc-rec-grade tr.is-juros td { background: #f0fdfa; color: #0f766e; }
+.cc-table.orc-dist-grade tr.orc-rec-ano { cursor: default; }
+.cc-table.orc-dist-grade td { vertical-align: middle; }
+.cc-table.orc-dist-grade input.orc-dist-qtd { width: 100%; min-width: 64px; height: 30px; box-sizing: border-box; border: 1px solid #d7e3dc; border-radius: 6px; background: #fff; text-align: right; font: inherit; font-variant-numeric: tabular-nums; color: #0f172a; padding: 0 6px; }
+.cc-table.orc-dist-grade input.orc-dist-qtd:focus { outline: 2px solid #105436; border-color: #105436; }
+.orc-rec-kpi strong.orc-rec-dist { color: #991b1b; }
 .cc-table.orc-rec-grade tr.is-juros td.orc-rec-ano-nome small { color: #0f766e; }
 .cc-table.orc-rec-grade tr.orc-rec-total td { background: #e8f5ee; font-weight: 800; color: #105436; }
 .orc-rec-clientes.cc-scroll { max-height: calc(100vh - 260px); }

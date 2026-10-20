@@ -27,13 +27,15 @@ const OrcamentoModuloApp = {
     erro: "",
     resultado: null,
     clienteAberto: -1,
-    anoAberto: ""
+    anoAberto: "",
+    filtroCelula: null
   },
 
   _bcb: {},
   _focus: {},
   _pendente: {},
   _indexadores: null,
+  _distrato: null,
 
   bcbSeries: {
     IPCA: 433,
@@ -255,13 +257,14 @@ const OrcamentoModuloApp = {
       nouns: nounsCc
     });
     const pode = !!(st.companyId && st.ccId && st.anoAte >= st.anoDe && !st.carregando);
-    const lead = this.textoReajusteHoje();
+    const aba = st.aba === "distrato" ? "distrato" : "receita";
+    const lead = aba === "distrato" ? this.textoDistrato() : this.textoReajusteHoje();
+    const abas = [
+      { id: "distrato", label: "Distrato", icon: "file-minus" },
+      { id: "receita", label: "Receita", icon: "trending-up" }
+    ].map((t) => `<button type="button" role="tab" aria-selected="${aba === t.id}" class="ml-tab${aba === t.id ? " is-active" : ""}" onclick="OrcamentoModuloApp.setAba('${t.id}')"><i data-lucide="${t.icon}"></i> ${t.label}</button>`).join("");
     root.innerHTML = `
-      <div class="ml-tabs orc-novo-tabs" role="tablist">
-        <button type="button" role="tab" class="ml-tab is-active" aria-selected="true">
-          <i data-lucide="trending-up"></i> Receita
-        </button>
-      </div>
+      <div class="ml-tabs orc-novo-tabs" role="tablist">${abas}</div>
       <p class="orc-rec-lead">${this.esc(lead)}</p>
       <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:16px;">
         ${empHtml}
@@ -280,7 +283,7 @@ const OrcamentoModuloApp = {
           onclick="OrcamentoModuloApp.montarReceita()">Montar receita</button>
       </div>
       ${st.erro ? `<div style="margin:0 0 12px;padding:12px 14px;border-radius:8px;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;">${this.esc(st.erro)}</div>` : ""}
-      <div id="orc-receita-corpo">${st.carregando ? this.carregandoHtml() : this.resultadoHtml()}</div>`;
+      <div id="orc-receita-corpo">${this.corpoAtivo()}</div>`;
     this.bindFiltros();
     if (window.lucide) window.lucide.createIcons();
   },
@@ -295,7 +298,136 @@ const OrcamentoModuloApp = {
     const st = this.novo;
     if (btn) btn.disabled = !(st.companyId && st.ccId && st.anoAte >= st.anoDe && !st.carregando);
     const corpo = document.getElementById("orc-receita-corpo");
-    if (corpo && !st.carregando) corpo.innerHTML = this.resultadoHtml();
+    if (corpo && !st.carregando) corpo.innerHTML = this.corpoAtivo();
+  },
+
+  setAba(id) {
+    if (id !== "distrato" && id !== "receita") return;
+    this.novo.aba = id;
+    this.renderNovo();
+  },
+
+  corpoAtivo() {
+    if (this.novo.carregando) return this.carregandoHtml();
+    if (this.novo.aba === "distrato") return this.distratoHtml();
+    return this.resultadoHtml();
+  },
+
+  textoDistrato() {
+    return "Informe quantos distratos acontecem em cada mês. Cada distrato abate a parcela média deste centro de custo no mesmo mês do ano seguinte.";
+  },
+
+  distratoBag() {
+    if (this._distrato) return this._distrato;
+    try {
+      this._distrato = JSON.parse(localStorage.getItem("orc_distrato_v1") || "{}");
+    } catch (e) {
+      this._distrato = {};
+    }
+    if (!this._distrato || typeof this._distrato !== "object") this._distrato = {};
+    return this._distrato;
+  },
+
+  qtdDistrato(ano, mes) {
+    const cc = String(this.novo.ccId || "");
+    const linha = cc && this.distratoBag()[cc] && this.distratoBag()[cc][String(ano)];
+    const n = linha ? Number(linha[mes]) : 0;
+    return n > 0 ? Math.round(n) : 0;
+  },
+
+  setDistrato(ano, mes, valor) {
+    const cc = String(this.novo.ccId || "");
+    const mesN = Number(mes);
+    if (!cc || mesN < 0 || mesN > 11) return;
+    const n = Math.max(0, parseInt(valor, 10) || 0);
+    const bag = this.distratoBag();
+    if (!bag[cc] || typeof bag[cc] !== "object") bag[cc] = {};
+    const chave = String(ano);
+    if (!Array.isArray(bag[cc][chave])) bag[cc][chave] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    bag[cc][chave][mesN] = n;
+    try { localStorage.setItem("orc_distrato_v1", JSON.stringify(bag)); } catch (e) {}
+    this.renderNovo();
+  },
+
+  parcelaMediaAtual() {
+    const r = this.novo.resultado;
+    return r ? Number(r.parcelaMedia) || 0 : 0;
+  },
+
+  abateMes(ano, mes) {
+    const qtd = this.qtdDistrato(Number(ano) - 1, mes);
+    const media = this.parcelaMediaAtual();
+    if (!(qtd > 0) || !(media > 0)) return 0;
+    return Math.round(qtd * media * 100) / 100;
+  },
+
+  liquidoAno(r, ano) {
+    const cel = (r && r.grade && r.grade[ano]) || [];
+    return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((mes) => (Number(cel[mes]) || 0) - this.abateMes(ano, mes));
+  },
+
+  totalAbate(r) {
+    const anos = Object.keys((r && r.grade) || {});
+    let s = 0;
+    anos.forEach((ano) => {
+      for (let mes = 0; mes < 12; mes++) s += this.abateMes(ano, mes);
+    });
+    return Math.round(s * 100) / 100;
+  },
+
+  distratoHtml() {
+    const st = this.novo;
+    if (!st.companyId || !st.ccId) {
+      return `<div class="crm-card" style="padding:28px;color:#64748b;">Escolha a empresa e o centro de custo. O distrato é informado mês a mês nesse centro.</div>`;
+    }
+    if (!(st.anoAte >= st.anoDe)) {
+      return `<div class="crm-card" style="padding:28px;color:#64748b;">O ano final precisa ser igual ou posterior ao ano inicial.</div>`;
+    }
+    const meses = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+    const nomes = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+    const r = st.resultado;
+    const media = this.parcelaMediaAtual();
+    const nMed = r ? Number(r.parcelasMedia) || 0 : 0;
+    const nota = media > 0
+      ? `Parcela média ${this.dinheiro(media)}, média de ${nMed} parcelas em aberto deste centro de custo.`
+      : "Monte a receita para calcular a parcela média. A quantidade informada fica guardada neste centro de custo.";
+    let linhas = "";
+    let qtdPeriodo = 0;
+    let abatePeriodo = 0;
+    for (let ano = st.anoDe; ano <= st.anoAte; ano++) {
+      const qtds = meses.map((_, mes) => this.qtdDistrato(ano, mes));
+      const somaQtd = qtds.reduce((s, n) => s + n, 0);
+      qtdPeriodo += somaQtd;
+      const abates = qtds.map((qtd) => (media > 0 && qtd > 0 ? Math.round(qtd * media * 100) / 100 : 0));
+      const somaAbate = abates.reduce((s, n) => s + n, 0);
+      abatePeriodo += somaAbate;
+      const inputs = qtds.map((qtd, mes) => `<td><input type="number" min="0" step="1" inputmode="numeric" class="orc-dist-qtd" aria-label="Distratos em ${nomes[mes]} de ${ano}" value="${qtd > 0 ? qtd : ""}" onchange="OrcamentoModuloApp.setDistrato(${ano}, ${mes}, this.value)"></td>`).join("");
+      linhas += `<tr class="orc-rec-ano">
+        <td class="orc-rec-ano-nome">${ano}<small>distratos</small></td>
+        ${inputs}
+        <td class="is-right">${somaQtd > 0 ? somaQtd : "—"}</td>
+      </tr>
+      <tr class="orc-rec-det is-dist">
+        <td class="orc-rec-ano-nome">Abate<small>em ${ano + 1}</small></td>
+        ${abates.map((v) => `<td class="is-right">${v > 0.009 ? this.esc(this.numero(v)) : "—"}</td>`).join("")}
+        <td class="is-right">${somaAbate > 0.009 ? this.esc(this.numero(somaAbate)) : "—"}</td>
+      </tr>`;
+    }
+    const cols = `<col class="orc-rec-c-ano">${meses.map(() => "<col>").join("")}<col class="orc-rec-c-tot">`;
+    return `
+      <div class="orc-rec-kpis">
+        <div class="crm-card orc-rec-kpi"><span>Parcela média</span><strong>${media > 0 ? this.esc(this.dinheiro(media)) : "—"}</strong></div>
+        <div class="crm-card orc-rec-kpi"><span>Distratos no período</span><strong>${qtdPeriodo}</strong></div>
+        <div class="crm-card orc-rec-kpi"><span>Abate gerado</span><strong class="orc-rec-dist">${abatePeriodo > 0.009 ? this.esc(this.dinheiro(abatePeriodo)) : this.esc(this.dinheiro(0))}</strong></div>
+      </div>
+      <div class="orc-rec-focus">${this.esc(nota)} O distrato de ${st.anoAte} abate ${st.anoAte + 1}.</div>
+      <div class="cc-scroll orc-rec-meses">
+        <table class="cc-table orc-rec-grade orc-dist-grade">
+          <colgroup>${cols}</colgroup>
+          <thead><tr><th>Ano</th>${meses.map((m) => `<th class="is-right">${m}</th>`).join("")}<th class="is-right">Total</th></tr></thead>
+          <tbody>${linhas}</tbody>
+        </table>
+      </div>`;
   },
 
   carregandoHtml() {
@@ -323,12 +455,15 @@ const OrcamentoModuloApp = {
     const cab = meses.map((m) => `<th class="is-right">${m}</th>`).join("");
     const cols = `<col class="orc-rec-c-ano">${meses.map(() => "<col>").join("")}<col class="orc-rec-c-tot">`;
     const indices = (r.indices || []).map((ix) => `<span>${this.esc(this.resumoIndice(ix))}</span>`).join("");
+    const abate = this.totalAbate(r);
+    const receita = (Number(r.total) || 0) - abate;
     return `
       <div class="orc-rec-kpis">
-        <div class="crm-card orc-rec-kpi"><span>Receita no período</span><strong>${this.esc(this.dinheiro(r.total))}</strong></div>
+        <div class="crm-card orc-rec-kpi"><span>Receita no período</span><strong>${this.esc(this.dinheiro(receita))}</strong></div>
         <div class="crm-card orc-rec-kpi"><span>Principal</span><strong>${this.esc(this.dinheiro(r.principal || 0))}</strong></div>
         <div class="crm-card orc-rec-kpi"><span>Reajuste</span><strong class="orc-rec-reaj">${this.esc(this.dinheiro(r.reajuste || 0))}</strong></div>
         <div class="crm-card orc-rec-kpi"><span>Clientes</span><strong>${r.clientes.length}</strong></div>
+        <div class="crm-card orc-rec-kpi"><span>Distrato</span><strong class="orc-rec-dist">${this.esc(this.dinheiro(-abate))}</strong></div>
         <div class="crm-card orc-rec-kpi"><span>Fora, sub judice</span><strong>${r.subJudice} · ${this.esc(this.dinheiro(r.subJudiceValor))}</strong></div>
         <div class="crm-card orc-rec-kpi"><span>Antes de ${this.esc(r.anoDe || "")}</span><strong>${this.esc(this.dinheiro(r.antes || 0))}</strong></div>
         <div class="crm-card orc-rec-kpi"><span>Depois de ${this.esc(r.anoAte)}</span><strong>${this.esc(this.dinheiro(r.fora))}</strong></div>
@@ -341,6 +476,7 @@ const OrcamentoModuloApp = {
           <tbody id="orc-rec-anos">${this.gradeAnosHtml(r)}</tbody>
         </table>
       </div>
+      <div id="orc-rec-filtro">${this.filtroBarraHtml()}</div>
       <div class="cc-scroll orc-rec-clientes">
         <table class="cc-table orc-rec-cli-tab">
           <colgroup>
@@ -357,10 +493,22 @@ const OrcamentoModuloApp = {
       </div>`;
   },
 
-  celNum(v, extra) {
+  celNum(v, extra, filtro) {
     const n = Number(v) || 0;
-    const cls = "is-right" + (extra ? " " + extra : "");
-    return `<td class="${cls}">${n > 0.009 ? this.esc(this.numero(n)) : "—"}</td>`;
+    const ativo = filtro && this.celulaAtiva(filtro);
+    const clicavel = !!(filtro && n > 0.009);
+    const visivel = Math.abs(n) > 0.009;
+    const cls = "is-right" + (extra ? " " + extra : "") + (clicavel ? " orc-rec-cel" : "") + (ativo ? " is-filtro" : "");
+    const click = clicavel
+      ? ` onclick="event.stopPropagation();OrcamentoModuloApp.filtrarCelula('${filtro.ano}','${filtro.tipo}',${filtro.mes})"`
+      : "";
+    const titulo = clicavel ? ` title="Ver os clientes deste mês"` : "";
+    return `<td class="${cls}"${click}${titulo}>${visivel ? this.esc(this.numero(n)) : "—"}</td>`;
+  },
+
+  celulaAtiva(filtro) {
+    const atual = this.novo.filtroCelula;
+    return !!(atual && String(atual.ano) === String(filtro.ano) && atual.tipo === filtro.tipo && atual.mes === filtro.mes);
   },
 
   jurosAtivos(valor, pmp) {
@@ -371,12 +519,12 @@ const OrcamentoModuloApp = {
     return Math.round((multa + juros) * 100) / 100;
   },
 
-  linhaConta(rotulo, nota, valores, trClass, extra) {
+  linhaConta(rotulo, nota, valores, trClass, extra, ano, tipo) {
     const lista = valores || [];
     const soma = lista.reduce((s, v) => s + (Number(v) || 0), 0);
     return `<tr class="orc-rec-det${trClass ? " " + trClass : ""}">
       <td class="orc-rec-ano-nome">${this.esc(rotulo)}${nota ? `<small>${this.esc(nota)}</small>` : ""}</td>
-      ${lista.map((v) => this.celNum(v, extra)).join("")}
+      ${lista.map((v, mes) => this.celNum(v, extra, tipo ? { ano: ano, mes: mes, tipo: tipo } : null)).join("")}
       ${this.celNum(soma, extra)}
     </tr>`;
   },
@@ -384,14 +532,14 @@ const OrcamentoModuloApp = {
   gradeAnosHtml(r) {
     const anos = Object.keys((r && r.grade) || {}).sort();
     const linhas = anos.map((ano) => {
-      const cel = r.grade[ano] || [];
+      const cel = this.liquidoAno(r, ano);
       const total = cel.reduce((s, v) => s + (Number(v) || 0), 0);
       const aberto = this.novo.anoAberto === String(ano);
       const parte = (r.porAno && r.porAno[ano]) || {};
       const ico = aberto ? "chevron-down" : "chevron-right";
       const cabeca = `<tr class="orc-rec-ano" onclick="OrcamentoModuloApp.toggleAno('${ano}')">
         <td class="orc-rec-ano-nome"><i data-lucide="${ico}"></i>${this.esc(ano)}<small>1.01.01.01</small></td>
-        ${cel.map((v) => this.celNum(v)).join("")}
+        ${cel.map((v, mes) => this.celNum(v, "", { ano: ano, mes: mes, tipo: "conta" })).join("")}
         ${this.celNum(total)}
       </tr>`;
       if (!aberto) return cabeca;
@@ -400,20 +548,23 @@ const OrcamentoModuloApp = {
       }
       const sub = (r.subMes && r.subMes[ano]) || [];
       const juros = (r.jurosMes && r.jurosMes[ano]) || [];
+      const dist = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((mes) => -this.abateMes(ano, mes));
       const anosAntes = Object.keys(parte.anosAntes || {}).sort();
       const rotuloAntes = anosAntes.length === 1 ? anosAntes[0] : (anosAntes.length ? anosAntes[0] + "–" + anosAntes[anosAntes.length - 1] : String(Number(ano) - 1));
       const somaAntes = (parte.antes || []).reduce((s, v) => s + (Number(v) || 0), 0);
-      const linhaAntes = somaAntes > 0.009 ? this.linhaConta(rotuloAntes, "recebe em " + ano, parte.antes, "is-antes", "") : "";
+      const linhaAntes = somaAntes > 0.009 ? this.linhaConta(rotuloAntes, "recebe em " + ano, parte.antes, "is-antes", "", ano, "antes") : "";
       return cabeca
-        + this.linhaConta(ano, "recebe pelo PMP", parte.vence, "is-vence", "")
+        + this.linhaConta(ano, "recebe pelo PMP", parte.vence, "is-vence", "", ano, "vence")
         + linhaAntes
-        + this.linhaConta("Reajuste", "sobre o caixa", parte.repactuacao, "is-reaj", "orc-rec-reaj")
+        + this.linhaConta("Reajuste", "sobre o caixa", parte.repactuacao, "is-reaj", "orc-rec-reaj", ano, "reaj")
         + this.linhaConta("Sub judice", "não soma", sub, "is-sj", "")
-        + this.linhaConta("1.01.01.01", "Venda de lotes", cel, "is-conta", "")
-        + this.linhaConta("1.03.01.02", "Juros ativos", juros, "is-juros", "");
+        + this.linhaConta("Distrato", "abate " + (Number(ano) - 1), dist, "is-dist", "")
+        + this.linhaConta("1.01.01.01", "Venda de lotes", cel, "is-conta", "", ano, "conta")
+        + this.linhaConta("1.03.01.02", "Juros ativos", juros, "is-juros", "", ano, "juros");
     }).join("");
-    const totaisMes = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((i) => anos.reduce((s, ano) => s + ((r.grade[ano] && r.grade[ano][i]) || 0), 0));
-    const rodape = `<tr class="orc-rec-total"><td>Total</td>${totaisMes.map((v) => this.celNum(v)).join("")}${this.celNum(r.total)}</tr>`;
+    const totaisMes = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((i) => anos.reduce((s, ano) => s + (this.liquidoAno(r, ano)[i] || 0), 0));
+    const totalLiq = totaisMes.reduce((s, v) => s + v, 0);
+    const rodape = `<tr class="orc-rec-total"><td>Total</td>${totaisMes.map((v, mes) => this.celNum(v, "", { ano: "", mes: mes, tipo: "total" })).join("")}${this.celNum(totalLiq)}</tr>`;
     return linhas + rodape;
   },
 
@@ -426,9 +577,105 @@ const OrcamentoModuloApp = {
     }
   },
 
-  clientesHtml(r) {
+  filtrarCelula(ano, tipo, mes) {
+    const atual = this.novo.filtroCelula;
+    const mesN = Number(mes);
+    if (atual && String(atual.ano) === String(ano) && atual.tipo === tipo && atual.mes === mesN) this.novo.filtroCelula = null;
+    else this.novo.filtroCelula = { ano: String(ano), tipo: tipo, mes: mesN };
+    this.novo.clienteAberto = -1;
+    this.repintarGrade();
+    const box = document.querySelector(".orc-rec-clientes");
+    if (box && this.novo.filtroCelula) box.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  },
+
+  limparFiltroCelula() {
+    this.novo.filtroCelula = null;
+    this.novo.clienteAberto = -1;
+    this.repintarGrade();
+  },
+
+  repintarGrade() {
+    const r = this.novo.resultado;
+    const anos = document.getElementById("orc-rec-anos");
+    const bar = document.getElementById("orc-rec-filtro");
+    const cli = document.getElementById("orc-rec-cli");
+    if (anos && r) anos.innerHTML = this.gradeAnosHtml(r);
+    if (bar) bar.innerHTML = this.filtroBarraHtml();
+    if (cli && r) cli.innerHTML = this.clientesHtml(r);
+    if (window.lucide) window.lucide.createIcons();
+  },
+
+  filtroBarraHtml() {
+    const f = this.novo.filtroCelula;
+    if (!f) return "";
+    const meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+    const rotulos = {
+      vence: "recebe pelo PMP",
+      antes: "vencimento de ano anterior",
+      reaj: "reajuste sobre o caixa",
+      conta: "venda de lotes",
+      juros: "juros ativos",
+      total: "total do mês"
+    };
+    const quando = f.tipo === "total" ? meses[f.mes] + " · todos os anos" : meses[f.mes] + " de " + f.ano;
+    return `<div class="orc-rec-filtro-bar"><span>${this.esc(quando)} · ${this.esc(rotulos[f.tipo] || "")}</span><button type="button" onclick="OrcamentoModuloApp.limparFiltroCelula()">Limpar</button></div>`;
+  },
+
+  parcelaNoFiltro(c, p, f) {
+    const quando = String(p.quando || "");
+    if (!/^\d{4}-\d{2}/.test(quando)) return false;
+    const ano = quando.slice(0, 4);
+    const mes = Number(quando.slice(5, 7)) - 1;
+    if (mes !== f.mes) return false;
+    if (f.tipo === "total") return true;
+    if (ano !== String(f.ano)) return false;
+    const anoDue = String(p.due || "").slice(0, 4);
+    if (f.tipo === "vence") return anoDue >= ano;
+    if (f.tipo === "antes") return anoDue < ano;
+    if (f.tipo === "reaj") return (Number(p.reajuste) || 0) > 0.009;
+    if (f.tipo === "juros") return this.jurosAtivos(p.valor, { conhecido: c.pmpConhecido, pmp: c.pmp }) > 0.009;
+    return true;
+  },
+
+  clientesDoFiltro(r) {
     const lista = (r && r.clientes) || [];
-    if (!lista.length) return `<tr><td colspan="9" style="color:#64748b;">Nenhuma parcela em aberto entrou no período.</td></tr>`;
+    const f = this.novo.filtroCelula;
+    const saida = [];
+    lista.forEach((c, i) => {
+      if (!f) {
+        saida.push(c);
+        return;
+      }
+      const parcelas = (c.parcelas || []).filter((p) => this.parcelaNoFiltro(c, p, f));
+      if (!parcelas.length) return;
+      let principal = 0;
+      let reajuste = 0;
+      let total = 0;
+      parcelas.forEach((p) => {
+        principal += Number(p.principal) || 0;
+        reajuste += Number(p.reajuste) || 0;
+        total += Number(p.valor) || 0;
+      });
+      saida.push(Object.assign({}, c, {
+        parcelas: parcelas,
+        principal: Math.round(principal * 100) / 100,
+        reajuste: Math.round(reajuste * 100) / 100,
+        total: Math.round(total * 100) / 100,
+        _i: i
+      }));
+    });
+    if (f) {
+      const chave = f.tipo === "reaj" ? "reajuste" : (f.tipo === "vence" || f.tipo === "antes" ? "principal" : "total");
+      saida.sort((a, b) => (b[chave] || 0) - (a[chave] || 0));
+    }
+    return saida;
+  },
+
+  clientesHtml(r) {
+    const bruto = (r && r.clientes) || [];
+    const lista = this.clientesDoFiltro(r);
+    if (!bruto.length) return `<tr><td colspan="9" style="color:#64748b;">Nenhuma parcela em aberto entrou no período.</td></tr>`;
+    if (!lista.length) return `<tr><td colspan="9" style="color:#64748b;">Nenhum cliente entra nesta célula.</td></tr>`;
     let principal = 0;
     let reajuste = 0;
     let total = 0;
@@ -436,9 +683,10 @@ const OrcamentoModuloApp = {
       principal += Number(c.principal) || 0;
       reajuste += Number(c.reajuste) || 0;
       total += Number(c.total) || 0;
-      const aberto = this.novo.clienteAberto === i;
+      const idx = c._i == null ? i : c._i;
+      const aberto = this.novo.clienteAberto === idx;
       const detalhe = aberto ? this.parcelasHtml(c) : "";
-      return `<tr class="orc-rec-cli" onclick="OrcamentoModuloApp.toggleCliente(${i})">
+      return `<tr class="orc-rec-cli" onclick="OrcamentoModuloApp.toggleCliente(${idx})">
         <td><i data-lucide="${aberto ? "chevron-down" : "chevron-right"}"></i>${this.esc(c.cliente)}</td>
         <td>${this.esc(c.unidade || "—")}</td>
         <td>${this.esc(c.titulo)}</td>
@@ -519,6 +767,7 @@ const OrcamentoModuloApp = {
       this.pintarProgresso("Distribuindo a receita pelo PMP e pela repactuação…", 75);
       st.clienteAberto = -1;
       st.anoAberto = "";
+      st.filtroCelula = null;
       st.resultado = await this.distribuirReceita(linhas, st.anoDe, st.anoAte);
       st.progressoPct = 100;
     } catch (e) {
@@ -586,22 +835,71 @@ const OrcamentoModuloApp = {
     });
   },
 
-  ehSubJudice(bill, clienteId, titulo) {
+  idTitulo(id) {
+    const s = String(id == null ? "" : id).replace(/^B-/i, "").split("-")[0].trim();
+    if (!s || s === "null" || s === "undefined") return "";
+    return s;
+  },
+
+  normPessoa(s) {
+    return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim().toUpperCase();
+  },
+
+  chaveLote(nome, unidade) {
+    const n = this.normPessoa(nome);
+    const u = this.normPessoa(unidade).replace(/^\d+\s*-\s*/, "");
+    return n && u ? n + "|" + u : "";
+  },
+
+  carteiraSubJudice() {
+    const bills = (window.AppState && window.AppState.defaultersBills) || [];
+    const bag = (window.subjudiceIntegraData && window.subjudiceIntegraData.clients) || {};
+    const stamp = [(window._subjudiceList || []).length, (window.rawClientList || []).length, bills.length, Object.keys(bag).length].join(":");
+    if (this._sjStamp === stamp && this._sjIds) return this._sjIds;
+    const ids = new Set();
+    const lotes = new Set();
+    const addId = (id) => {
+      const s = this.idTitulo(id);
+      if (s) ids.add(s);
+    };
+    const addCliente = (c) => {
+      if (!c) return;
+      const sienge = String(c.subjudice || "").toUpperCase() === "S"
+        || (typeof window.clientIsSubjudice === "function" && window.clientIsSubjudice(c));
+      const integra = typeof window.clientIsSubjudiceIntegra === "function" && window.clientIsSubjudiceIntegra(c);
+      if (!sienge && !integra) return;
+      addId(c.saleId);
+      (c.billIds || []).forEach(addId);
+      const lote = this.chaveLote(c.customerName, c.unitName);
+      if (lote) lotes.add(lote);
+    };
+    [window._subjudiceList, window.rawClientList, window.clientList].forEach((lista) => {
+      (lista || []).forEach(addCliente);
+    });
+    bills.forEach((b) => {
+      if (this.marcadoSubJudice(b)) addId(b.id || b.receivableBillId || b.billReceivableId);
+    });
+    Object.keys(bag).forEach((k) => {
+      const item = bag[k];
+      if (!item || item.on === false) return;
+      addId(item.saleId);
+      addId(k.split("-").pop());
+      const lote = this.chaveLote(item.customerName, item.unitName);
+      if (lote) lotes.add(lote);
+    });
+    this._sjIds = ids;
+    this._sjLotes = lotes;
+    this._sjStamp = stamp;
+    return ids;
+  },
+
+  ehSubJudice(bill, clienteId, titulo, nome, unidade) {
     if (this.marcadoSubJudice(bill)) return true;
     if (this.tituloSubJudiceIntegra(clienteId, titulo)) return true;
-    const cliente = { customerId: clienteId, saleId: titulo, billIds: titulo ? [titulo] : [], subjudice: "N" };
-    if (typeof window.clientIsSubjudiceIntegra === "function" && window.clientIsSubjudiceIntegra(cliente)) return true;
-    const lista = window.rawClientList || window.clientList || [];
-    const sid = String(titulo || "").replace(/^B-/i, "").split("-")[0];
-    const row = lista.find((c) => {
-      if (!c) return false;
-      const ids = []
-        .concat(c.billIds || [])
-        .concat(c.saleId ? [c.saleId] : []);
-      return ids.some((id) => String(id).replace(/^B-/i, "").split("-")[0] === sid);
-    });
-    if (row && typeof window.clientIsSubjudice === "function" && window.clientIsSubjudice(row)) return true;
-    if (row && typeof window.clientIsSubjudiceIntegra === "function" && window.clientIsSubjudiceIntegra(row)) return true;
+    const sid = this.idTitulo(titulo);
+    if (sid && this.carteiraSubJudice().has(sid)) return true;
+    const lote = this.chaveLote(nome, unidade);
+    if (lote && this._sjLotes && this._sjLotes.has(lote)) return true;
     return false;
   },
 
@@ -642,7 +940,7 @@ const OrcamentoModuloApp = {
         if (!atual.unidade && unidades.length) atual.unidade = unidades.join(", ");
         const em = bill.emissionDate || bill.issueDate || bill.contractDate || bill.saleDate || "";
         if (!atual.emissao && em) atual.emissao = String(em).slice(0, 10);
-        if (this.ehSubJudice(bill, atual.clienteId, titulo) || this.ehSubJudice(row, atual.clienteId, titulo)) atual.sub = true;
+        if (this.ehSubJudice(bill, atual.clienteId, titulo, atual.cliente, atual.unidade) || this.ehSubJudice(row, atual.clienteId, titulo, atual.cliente, atual.unidade)) atual.sub = true;
         const idx = this.lerIndexador(bill);
         if (idx && !this.ehReal(idx)) atual.indexador = idx;
         (bill.installments || []).forEach((p) => {
@@ -732,6 +1030,8 @@ const OrcamentoModuloApp = {
     let fora = 0;
     let antes = 0;
     let total = 0;
+    let somaParcelas = 0;
+    let nParcelas = 0;
     const usos = {};
     for (let i = 0; i < titulos.length; i++) {
       const t = titulos[i];
@@ -764,6 +1064,10 @@ const OrcamentoModuloApp = {
           });
         }
         const saldo = Math.round(p.saldo * 100) / 100;
+        if (!t.sub) {
+          somaParcelas += saldo;
+          nParcelas += 1;
+        }
         const valor = Math.round(saldo * fator * 100) / 100;
         const ajuste = Math.round((valor - saldo) * 100) / 100;
         const anoDue = String(p.due).slice(0, 4);
@@ -843,6 +1147,8 @@ const OrcamentoModuloApp = {
       subJudiceValor,
       anoDe,
       anoAte,
+      parcelaMedia: nParcelas ? Math.round((somaParcelas / nParcelas) * 100) / 100 : 0,
+      parcelasMedia: nParcelas,
       indices: Object.keys(usos).map((k) => usos[k])
     };
   },
