@@ -712,54 +712,19 @@ const OrcamentoImpostosApp = {
   racionalHtml(row) {
     const a = OrcEst.aliquotas();
     const mo = (v) => OrcEst.money(v);
-    const pc = (v) => this.pctAli(v);
-    const limite = (Number(a.limiteMensal) || 0) * 3;
-    const finNaBase = !!a.financNoPis;
-    const baseDe = (v, s, f) => (Number(v) || 0) + (Number(s) || 0) + (finNaBase ? (Number(f) || 0) : 0);
-    const meses = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
-    const pisHead = `<tr><th>Paga em</th><th>Competência</th><th>Vendas</th><th>Serviços</th>${finNaBase ? "<th>Aplicações</th>" : ""}<th>Base</th><th>PIS ${pc(a.pis)}</th><th>COFINS ${pc(a.cofins)}</th></tr>`;
-    const pisJan = row.forecastDez
-      ? `<tr><td>Jan/2027</td><td>Dez/2026, forecast</td><td colspan="${finNaBase ? 4 : 3}">Veio do arquivo de dezembro de 2026</td><td>${mo(row.pagar.pis[0])}</td><td>${mo(row.pagar.cofins[0])}</td></tr>`
-      : `<tr><td>Jan/2027</td><td>Dez/2026, forecast</td><td colspan="${finNaBase ? 6 : 5}">Sem o forecast de dezembro, PIS e COFINS de janeiro ficam em branco.</td></tr>`;
-    const pisMeses = [];
-    for (let i = 0; i < 12; i++) {
-      const v = row.vendas[i];
-      const s = row.servicos[i];
-      const f = row.financeiras[i];
-      const base = baseDe(v, s, f);
-      const paga = i === 11 ? "Jan/2028" : meses[i + 1] + "/2027";
-      pisMeses.push(`<tr><td>${paga}</td><td>${meses[i]}/2027</td><td>${mo(v)}</td><td>${mo(s)}</td>${finNaBase ? `<td>${mo(f)}</td>` : ""}<td>${mo(base)}</td><td>${mo(base > 0 ? base * a.pis / 100 : 0)}</td><td>${mo(base > 0 ? base * a.cofins / 100 : 0)}</td></tr>`);
-    }
     const tris = [
-      { nome: "Jan–mar", paga: "Abr/2027", ini: 0, q: row.q0, forecast: false },
-      { nome: "Abr–jun", paga: "Jul/2027", ini: 3, q: row.q1, forecast: false },
-      { nome: "Jul–set", paga: "Out/2027", ini: 6, q: row.q2, forecast: false },
-      { nome: "Out–dez", paga: "Jan/2028", ini: 9, q: row.q3, forecast: false }
+      ["Jan–mar", "Abr", row.q0],
+      ["Abr–jun", "Jul", row.q1],
+      ["Jul–set", "Out", row.q2],
+      ["Out–dez", "Jan/28", row.q3]
     ];
-    const triLinhas = tris.map((t) => {
-      const v = this.somaFaixa(row.vendas, t.ini, t.ini + 3);
-      const s = this.somaFaixa(row.servicos, t.ini, t.ini + 3);
-      const f = this.somaFaixa(row.financeiras, t.ini, t.ini + 3);
-      const lucroI = v * a.vendasIrpj / 100 + s * a.servicosIrpj / 100 + f * a.financIrpj / 100;
-      const ir = lucroI > 0 ? lucroI * a.irpj / 100 : 0;
-      const ad = lucroI > limite ? (lucroI - limite) * a.adicional / 100 : 0;
-      const lucroC = v * a.vendasCsll / 100 + s * a.servicosCsll / 100 + f * a.financCsll / 100;
-      const csll = lucroC > 0 ? lucroC * a.csll / 100 : 0;
-      return `<tr><td>${t.nome}</td><td>${t.paga}</td><td>${mo(v)}</td><td>${mo(s)}</td><td>${mo(f)}</td><td>${mo(lucroI)}</td><td>${mo(ir)}</td><td>${mo(ad)}</td><td>${mo(ir + ad)}</td><td>${mo(lucroC)}</td><td>${mo(csll)}</td></tr>`;
-    }).join("");
-    const janTri = row.pagar.irpj[0] != null
-      ? `<p>Janeiro de 2027 recolhe o IRPJ ${mo(row.pagar.irpj[0])} e a CSLL ${mo(row.pagar.csll[0])} do forecast de outubro a dezembro de 2026${row.forecastMeses ? " (" + row.forecastMeses + " meses no arquivo)" : ""}.</p>`
-      : `<p>Janeiro de 2027 não tem IRPJ nem CSLL: falta o forecast de outubro, novembro ou dezembro de 2026.</p>`;
-    const finTxt = finNaBase
-      ? "As aplicações entram na base do PIS e da COFINS."
-      : "As aplicações ficam de fora do PIS e da COFINS. Entram por inteiro no lucro do IRPJ e da CSLL.";
+    const corpo = tris.map((t) => `<tr><td>${t[0]}</td><td>${t[1]}</td><td>${mo(t[2] && t[2].irpj)}</td><td>${mo(t[2] && t[2].csll)}</td></tr>`).join("");
+    const jan = row.pagar.irpj[0] != null
+      ? " Janeiro de 2027 usa o forecast de outubro a dezembro de 2026: IRPJ " + mo(row.pagar.irpj[0]) + " e CSLL " + mo(row.pagar.csll[0]) + "."
+      : "";
     return `<div class="orc-est-racional">
-      <h4>Racional do cálculo</h4>
-      <p>PIS ${pc(a.pis)} e COFINS ${pc(a.cofins)} incidem sobre vendas mais serviços da competência. ${finTxt} Base negativa não gera imposto. O valor paga no mês seguinte: a base de janeiro paga em fevereiro, e a de dezembro paga em janeiro de 2028.</p>
-      <div class="orc-est-rac-scroll"><table class="orc-est-rac"><thead>${pisHead}</thead><tbody>${pisJan}${pisMeses.join("")}</tbody></table></div>
-      <p>IRPJ ${pc(a.irpj)} sobre o lucro presumido do trimestre: vendas × ${pc(a.vendasIrpj)}, serviços × ${pc(a.servicosIrpj)} e aplicações × ${pc(a.financIrpj)}. O adicional é ${pc(a.adicional)} do lucro que passar de ${mo(limite)} no trimestre. CSLL ${pc(a.csll)} sobre vendas × ${pc(a.vendasCsll)}, serviços × ${pc(a.servicosCsll)} e aplicações × ${pc(a.financCsll)}. Janeiro a março pagam em abril, abril a junho em julho, julho a setembro em outubro, e outubro a dezembro em janeiro de 2028.</p>
-      ${janTri}
-      <div class="orc-est-rac-scroll"><table class="orc-est-rac"><thead><tr><th>Trimestre</th><th>Paga em</th><th>Vendas</th><th>Serviços</th><th>Aplicações</th><th>Lucro do IR</th><th>IR ${pc(a.irpj)}</th><th>Adicional</th><th>IRPJ</th><th>Lucro da CSLL</th><th>CSLL</th></tr></thead><tbody>${triLinhas}</tbody></table></div>
+      <p>Vendas e serviços já estão líquidas: a conta parametrizada como redutora abate a base do grupo. PIS ${this.pctAli(a.pis)} e COFINS ${this.pctAli(a.cofins)} pagam no mês seguinte. IRPJ ${this.pctAli(a.irpj)} e CSLL ${this.pctAli(a.csll)} pagam no mês seguinte ao trimestre.${OrcEst.esc(jan)}</p>
+      <table class="orc-est-rac"><thead><tr><th>Trimestre</th><th>Paga em</th><th>IRPJ</th><th>CSLL</th></tr></thead><tbody>${corpo}</tbody></table>
     </div>`;
   }
 };
