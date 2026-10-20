@@ -347,6 +347,20 @@ const OrcamentoModuloApp = {
         <div class="crm-card orc-rec-kpi"><span>Depois de ${this.esc(r.anoAte)}</span><strong>${this.esc(this.dinheiro(r.fora))}</strong></div>
       </div>
       ${indices ? `<div class="orc-rec-focus">${indices}</div>` : ""}
+      <div class="cc-scroll orc-rec-orig">
+        <table class="cc-table orc-rec-orig-tab">
+          <colgroup>
+            <col class="orc-rec-c-ano"><col><col><col>
+          </colgroup>
+          <thead><tr>
+            <th>Ano</th>
+            <th class="is-right">Valor original</th>
+            <th class="is-right">Repactuação</th>
+            <th class="is-right">Total</th>
+          </tr></thead>
+          <tbody>${this.porAnoHtml(r)}</tbody>
+        </table>
+      </div>
       <div class="cc-scroll orc-rec-meses">
         <table class="cc-table orc-rec-grade">
           <colgroup>${cols}</colgroup>
@@ -368,6 +382,27 @@ const OrcamentoModuloApp = {
           <tbody id="orc-rec-cli">${this.clientesHtml(r)}</tbody>
         </table>
       </div>`;
+  },
+
+  porAnoHtml(r) {
+    const anos = Object.keys((r && r.porAno) || {}).sort();
+    if (!anos.length) return `<tr><td colspan="4">Monte a receita de novo para ver o original e a repactuação.</td></tr>`;
+    let original = 0;
+    let repactuacao = 0;
+    const linhas = anos.map((ano) => {
+      const cel = r.porAno[ano] || {};
+      const base = Number(cel.original) || 0;
+      const ajuste = Number(cel.repactuacao) || 0;
+      original += base;
+      repactuacao += ajuste;
+      return `<tr>
+        <td>${this.esc(ano)}</td>
+        <td class="is-right">${this.esc(this.numero(base))}</td>
+        <td class="is-right orc-rec-reaj">${this.esc(this.numero(ajuste))}</td>
+        <td class="is-right">${this.esc(this.numero(base + ajuste))}</td>
+      </tr>`;
+    }).join("");
+    return linhas + `<tr class="orc-rec-total"><td>Total</td><td class="is-right">${this.esc(this.numero(original))}</td><td class="is-right orc-rec-reaj">${this.esc(this.numero(repactuacao))}</td><td class="is-right">${this.esc(this.numero(original + repactuacao))}</td></tr>`;
   },
 
   clientesHtml(r) {
@@ -632,7 +667,11 @@ const OrcamentoModuloApp = {
     const fim = anoAte + "-12-31";
     const titulos = this.agruparTitulos(linhas);
     const grade = {};
-    for (let y = anoDe; y <= anoAte; y++) grade[String(y)] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    const porAno = {};
+    for (let y = anoDe; y <= anoAte; y++) {
+      grade[String(y)] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+      porAno[String(y)] = { original: 0, repactuacao: 0 };
+    }
     const clientes = [];
     let principal = 0;
     let reajuste = 0;
@@ -684,6 +723,8 @@ const OrcamentoModuloApp = {
         const mes = Number(quando.slice(5, 7)) - 1;
         if (!grade[ano] || mes < 0) return;
         grade[ano][mes] += valor;
+        porAno[ano].original += saldo;
+        porAno[ano].repactuacao += ajuste;
         doCliente += valor;
         principalCliente += saldo;
         reajusteCliente += ajuste;
@@ -719,6 +760,7 @@ const OrcamentoModuloApp = {
     clientes.sort((a, b) => b.total - a.total);
     return {
       grade,
+      porAno,
       clientes,
       total,
       principal,

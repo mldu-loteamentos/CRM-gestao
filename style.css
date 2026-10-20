@@ -9484,6 +9484,12 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .orc-rec-reaj, .orc-rec-kpi strong.orc-rec-reaj { color: #0f766e; font-weight: 800; }
 .orc-rec-focus { margin: 0 0 14px; padding: 8px 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; color: #334155; font-size: 0.78rem; line-height: 1.45; }
 .orc-rec-focus span { display: block; }
+.orc-rec-orig { overflow: hidden; margin-bottom: 14px; max-height: none; }
+.cc-table.orc-rec-orig-tab { width: 100%; max-width: 640px; font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+.cc-table.orc-rec-orig-tab col.orc-rec-c-ano { width: 72px; }
+.cc-table.orc-rec-orig-tab thead th.is-right,
+.cc-table.orc-rec-orig-tab td.is-right { text-align: right; }
+.cc-table.orc-rec-orig-tab tr.orc-rec-total td { background: #e8f5ee; font-weight: 800; color: #105436; }
 .orc-rec-meses { overflow: hidden; margin-bottom: 14px; max-height: none; }
 .cc-table.orc-rec-grade { font-size: 0.64rem; font-variant-numeric: tabular-nums; }
 .cc-table.orc-rec-grade col.orc-rec-c-ano { width: 42px; }
