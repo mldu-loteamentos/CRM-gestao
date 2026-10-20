@@ -94,6 +94,181 @@ const OrcamentoDfcApp = {
     this.selectedCcIds = this.selectedCcIds.filter((id) => vivos.has(String(id)));
   },
 
+  z12() {
+    return Array(12).fill(0);
+  },
+
+  /* Primeiro mês (0 = jan) que entra como forecast. Em outubro de 2026, janeiro a setembro é realizado. */
+  corteForecast() {
+    const hoje = new Date();
+    if (hoje.getFullYear() > 2026) return 12;
+    if (hoje.getFullYear() < 2026) return 0;
+    return hoje.getMonth();
+  },
+
+  chaveConta(code) {
+    return String(code || "").replace(/\s/g, "");
+  },
+
+  empresaCabe(arq) {
+    const emp = new Set(this.selectedCompanyIds.map(String));
+    if (!emp.size) return true;
+    return emp.has(String((arq && arq.empresa) || ""));
+  },
+
+  ccCabe(cc) {
+    if (!this.selectedCcIds.length) return true;
+    const id = String(cc || "");
+    const dig = id.replace(/\D/g, "");
+    return this.selectedCcIds.some((s) => {
+      const sid = String(s);
+      return sid === id || (dig && sid.replace(/\D/g, "") === dig);
+    });
+  },
+
+  arquivos2026() {
+    const app = window.ResultadoCaixaApp;
+    const meses = (app && app.acervo && app.acervo.meses) || {};
+    const chaves = Object.keys(meses).filter((k) => k.indexOf("2026-") === 0).sort().reverse();
+    const visto = {};
+    const out = [];
+    chaves.forEach((k) => {
+      const arquivos = (meses[k] && meses[k].arquivos) || {};
+      Object.keys(arquivos).forEach((nome) => {
+        const arq = arquivos[nome];
+        if (!arq) return;
+        const emp = String(arq.empresa || "");
+        const chave = emp && emp !== "0" ? emp : nome;
+        if (visto[chave]) return;
+        visto[chave] = 1;
+        out.push(arq);
+      });
+    });
+    return out;
+  },
+
+  somarBase(arr, i, v) {
+    if (!arr || i < 0 || i > 11) return;
+    arr[i] += Number(v) || 0;
+  },
+
+  base2026() {
+    const corte = this.corteForecast();
+    this._corte = corte;
+    const grupos = {};
+    const contas = {};
+    const ccs = {};
+    const bag = (map, key) => map[key] || (map[key] = this.z12());
+    const groups = (this.visaoDfc().groups || []);
+    const byId = {};
+    const porCodigo = {};
+    groups.forEach((g) => {
+      byId[g.id] = g;
+      const m = String(g.name || "").match(/^(\d{2}(?:\.\d{2})*)/);
+      if (m && g.type === "resultado") porCodigo[m[1]] = g.id;
+    });
+    const gidDe = (code, nome, node) => {
+      if (node && byId[node]) return node;
+      const direto = this.grupoDaConta(code, nome);
+      if (direto) return direto;
+      const bruto = this.chaveConta(code);
+      return porCodigo[bruto] || "";
+    };
+    const por = (gid, code, cc, i, v) => {
+      if (!gid || !v) return;
+      const chave = this.chaveConta(code);
+      const dig = chave.replace(/\D/g, "");
+      this.somarBase(bag(grupos, gid), i, v);
+      if (chave) this.somarBase(bag(contas, gid + "|" + chave), i, v);
+      if (dig && dig !== chave) this.somarBase(bag(contas, gid + "|" + dig), i, v);
+      const ccId = String(cc || "").replace(/\D/g, "") || String(cc || "");
+      if (chave) this.somarBase(bag(ccs, gid + "|" + chave + "|" + ccId), i, v);
+      if (dig) this.somarBase(bag(ccs, gid + "|" + dig + "|" + ccId), i, v);
+    };
+    let arquivos = 0;
+    this.arquivos2026().forEach((arq) => {
+      if (!this.empresaCabe(arq)) return;
+      arquivos += 1;
+      const planos = arq.planosPorCc || {};
+      const temPlano = Object.keys(planos).some((cc) => Object.keys((planos[cc] && planos[cc].contas) || {}).length);
+      if (temPlano) {
+        Object.keys(planos).forEach((cc) => {
+          if (!this.ccCabe(cc)) return;
+          const bloco = planos[cc] || {};
+          Object.keys(bloco.contas || {}).forEach((code) => {
+            const info = bloco.contas[code] || {};
+            const gid = gidDe(code, info.nome, info.node);
+            Object.keys(info.meses || {}).forEach((mm) => {
+              const i = Number(mm) - 1;
+              if (i < 0 || i >= corte) return;
+              por(gid, code, cc, i, info.meses[mm].r);
+            });
+          });
+        });
+        return;
+      }
+      const porCc = arq.contasPorCc || {};
+      Object.keys(porCc).forEach((cc) => {
+        if (!this.ccCabe(cc)) return;
+        const bloco = porCc[cc] || {};
+        Object.keys(bloco.contas || {}).forEach((code) => {
+          const info = bloco.contas[code] || {};
+          const gid = gidDe(code, info.nome, "");
+          Object.keys(info.meses || {}).forEach((mm) => {
+            const i = Number(mm) - 1;
+            if (i < 0 || i >= corte) return;
+            por(gid, code, cc, i, info.meses[mm].r);
+          });
+        });
+      });
+    });
+    const app = window.ResultadoCaixaApp;
+    const forecasts = (app && app.forecasts) || {};
+    const fluxo = typeof FluxoCaixaApp !== "undefined" ? FluxoCaixaApp : null;
+    for (let i = corte; i < 12; i++) {
+      const ym = "2026-" + String(i + 1).padStart(2, "0");
+      const doc = forecasts[ym];
+      if (!doc) continue;
+      const lista = [];
+      const porArq = doc.porArquivo;
+      if (porArq && typeof porArq === "object" && !Array.isArray(porArq) && Object.keys(porArq).length) {
+        Object.keys(porArq).forEach((nome) => lista.push(porArq[nome]));
+      } else if (doc.contas) lista.push(doc);
+      lista.forEach((arq) => {
+        if (!this.empresaCabe(arq)) return;
+        if (arq && (arq.empresa || arq.contas)) arquivos += 1;
+        Object.keys(arq.contas || {}).forEach((cc) => {
+          if (!this.ccCabe(cc)) return;
+          Object.keys(arq.contas[cc] || {}).forEach((code) => {
+            const info = arq.contas[cc][code] || {};
+            const gid = gidDe(code, info.nome, "");
+            let valor = Number((info.meses || {})[ym]) || 0;
+            const node = byId[gid];
+            if (valor && node && fluxo && typeof fluxo.signedAmount === "function") {
+              valor = fluxo.signedAmount(node, code, info.nome || "", valor);
+            }
+            por(gid, code, cc, i, valor);
+          });
+        });
+      });
+    }
+    this._basePronta = arquivos > 0;
+    return { grupos: grupos, contas: contas, ccs: ccs, corte: corte };
+  },
+
+  acharBase(map, gid, code, cc) {
+    const chave = this.chaveConta(code);
+    const dig = chave.replace(/\D/g, "");
+    const ccId = cc == null ? "" : (String(cc).replace(/\D/g, "") || String(cc));
+    const chaves = cc == null
+      ? [gid + "|" + chave, dig ? gid + "|" + dig : ""]
+      : [gid + "|" + chave + "|" + ccId, dig ? gid + "|" + dig + "|" + ccId : ""];
+    for (let i = 0; i < chaves.length; i++) {
+      if (chaves[i] && map[chaves[i]]) return map[chaves[i]];
+    }
+    return null;
+  },
+
   visaoDfc() {
     if (typeof FluxoCaixaApp !== "undefined" && typeof FluxoCaixaApp.visao === "function") {
       return FluxoCaixaApp.visao() || { groups: [] };
@@ -137,9 +312,11 @@ const OrcamentoDfcApp = {
   montar() {
     const plano = typeof PlanoFinanceiroApp !== "undefined" ? PlanoFinanceiroApp : null;
     const fluxo = typeof FluxoCaixaApp !== "undefined" ? FluxoCaixaApp : null;
+    const base = this.base2026();
     const tpl = (plano && typeof plano.dfcTemplateGroups === "function" ? plano.dfcTemplateGroups() : []).map((g) => ({
       ...g,
       months: Array(12).fill(0),
+      base: Array(12).fill(0),
       accs: new Map()
     }));
     const byId = {};
@@ -157,13 +334,15 @@ const OrcamentoDfcApp = {
       }
       let acc = g.accs.get(l.conta);
       if (!acc) {
-        acc = { conta: l.conta, cn: l.cn, months: Array(12).fill(0), ccs: new Map() };
+        const achado = this.acharBase(base.contas, gid, l.conta);
+        acc = { conta: l.conta, cn: l.cn, months: Array(12).fill(0), base: achado ? achado.slice() : Array(12).fill(0), ccs: new Map() };
         g.accs.set(l.conta, acc);
       }
       const ccId = String(l.cc || "").trim() || "—";
       let cc = acc.ccs.get(ccId);
       if (!cc) {
-        cc = { id: ccId, name: String(l.en || "").trim(), months: Array(12).fill(0) };
+        const achadoCc = this.acharBase(base.ccs, gid, l.conta, ccId);
+        cc = { id: ccId, name: String(l.en || "").trim(), months: Array(12).fill(0), base: achadoCc ? achadoCc.slice() : Array(12).fill(0) };
         acc.ccs.set(ccId, cc);
       } else if (!cc.name && l.en) {
         cc.name = String(l.en).trim();
@@ -188,22 +367,28 @@ const OrcamentoDfcApp = {
       }
       return d;
     };
+    tpl.forEach((g) => {
+      if (g.type === "resultado" && base.grupos[g.id]) g.base = base.grupos[g.id].slice();
+    });
     tpl.filter((g) => g.type !== "formula").sort((a, b) => depth(b) - depth(a)).forEach((g) => {
       tpl.filter((c) => c.parentId === g.id && c.type !== "formula").forEach((ch) => {
         ch.months.forEach((v, i) => { g.months[i] += v; });
+        ch.base.forEach((v, i) => { g.base[i] += v; });
       });
     });
-    const sum = (ids) => {
+    const sum = (ids, campo) => {
       const months = Array(12).fill(0);
       ids.forEach((id) => {
         const n = byId[id];
         if (!n) return;
-        n.months.forEach((v, i) => { months[i] += v; });
+        (n[campo] || []).forEach((v, i) => { months[i] += v; });
       });
       return months;
     };
     const apply = (id, parts) => {
-      if (byId[id]) byId[id].months = sum(parts);
+      if (!byId[id]) return;
+      byId[id].months = sum(parts, "months");
+      byId[id].base = sum(parts, "base");
     };
     apply("g_03", ["g_04", "g_05"]);
     apply("g_06", ["g_01", "g_02", "g_03"]);
@@ -224,6 +409,7 @@ const OrcamentoDfcApp = {
         .sort((a, b) => String(a.conta).localeCompare(String(b.conta), "pt-BR", { numeric: true }));
       const hasKids = children.length > 0 || accs.length > 0;
       const total = node.months.reduce((a, b) => a + b, 0);
+      const baseTotal = (node.base || []).reduce((a, b) => a + b, 0);
       rows.push({
         id: node.id,
         name: node.name,
@@ -232,7 +418,9 @@ const OrcamentoDfcApp = {
         hasKids,
         isAccount: false,
         months: node.months,
-        total
+        base: node.base,
+        total,
+        baseTotal
       });
       if (!this.expanded.has(node.id)) return;
       children.forEach((ch) => walk(ch, level + 1));

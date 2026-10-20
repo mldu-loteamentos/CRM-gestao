@@ -1418,6 +1418,7 @@ ComprasControleApp.paintFilters = function () {
         const sid = String(itemId);
         const cur = self.state[key].slice();
         self.state[key] = on ? (cur.includes(sid) ? cur : cur.concat(sid)) : cur.filter((x) => x !== sid);
+        if (key === "companyIds") self.podarCentrosForaDaEmpresa();
         self.state[openKey] = true;
         if (self.state.consulted && !self.state.loading) {
           self.applyFilters();
@@ -1431,6 +1432,7 @@ ComprasControleApp.paintFilters = function () {
         if (key === "deptIds" && self.departmentFilterLocked()) return;
         if (!self.state.consulted && key !== "companyIds" && !escolheAntes) return;
         self.state[key] = itemsFn().map((x) => String(x.id));
+        if (key === "companyIds") self.podarCentrosForaDaEmpresa();
         self.state[openKey] = true;
         if (self.state.consulted && !self.state.loading) {
           self.applyFilters();
@@ -1448,6 +1450,7 @@ ComprasControleApp.paintFilters = function () {
         } else {
           self.state[key] = [];
         }
+        if (key === "companyIds") self.podarCentrosForaDaEmpresa();
         self.state[openKey] = true;
         if (self.state.consulted && !self.state.loading) {
           self.applyFilters();
@@ -1511,12 +1514,13 @@ ComprasControleApp.comEscolha = function (daLista, catalogo, selectedIds) {
 };
 
 ComprasControleApp.catalogoEmpreendimentos = function () {
-  const list = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || [];
-  return list.map((c) => {
-    const id = String(c.id || c.code || "");
-    const name = String(c.name || c.nome || "").toUpperCase();
-    return { id: id, name: name, label: id ? id + " - " + name : name };
-  }).filter((x) => x.id).sort((a, b) => String(a.label).localeCompare(String(b.label), "pt-BR"));
+  return ComprasPrevisoesApp.centrosDaEmpresa(this.state.companyIds);
+};
+
+ComprasControleApp.podarCentrosForaDaEmpresa = function () {
+  const ok = {};
+  this.ccItems().forEach((x) => { ok[String(x.id)] = true; });
+  this.state.ccIds = (this.state.ccIds || []).filter((id) => ok[String(id)]);
 };
 
 ComprasControleApp.ccItems = function () {

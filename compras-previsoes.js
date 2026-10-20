@@ -1597,18 +1597,43 @@ const ComprasPrevisoesApp = {
     return this.uniqueItems(this.scopedRows(), (r) => this.fold(r.departamento), (r) => r.departamento.toUpperCase());
   },
 
+  empresaDoCentro(c) {
+    if (!c) return "";
+    const raw = c.idCompany != null && c.idCompany !== "" ? c.idCompany
+      : (c.companyId != null && c.companyId !== "" ? c.companyId
+        : (c.company && c.company.id != null ? c.company.id : ""));
+    return raw === "" || raw == null ? "" : String(raw);
+  },
+
+  centrosDaEmpresa(companyIds) {
+    const list = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || [];
+    const emp = companyIds instanceof Set ? companyIds : new Set((companyIds || []).map(String));
+    const comEmpresa = emp.size ? list.filter((c) => ComprasPrevisoesApp.empresaDoCentro(c)) : list;
+    const base = !emp.size || !comEmpresa.length
+      ? list
+      : list.filter((c) => emp.has(ComprasPrevisoesApp.empresaDoCentro(c)));
+    return base.map((c) => {
+      const id = String(c.id || c.code || "");
+      const name = String(c.name || c.nome || "").toUpperCase();
+      return { id: id, name: name, label: id ? id + " - " + name : name };
+    }).filter((x) => x.id).sort((a, b) => String(a.label).localeCompare(String(b.label), "pt-BR"));
+  },
+
   ccItems() {
-    const fromRows = this.uniqueItems(this.scopedRows(), (r) => r.ccId, (r) => {
+    const emp = new Set((this.state.companyIds || []).map(String));
+    const rows = this.scopedRows().filter((r) => !emp.size || emp.has(String(r.companyId || "")));
+    const fromRows = this.uniqueItems(rows, (r) => r.ccId, (r) => {
       const name = String(r.ccNome || "").toUpperCase();
       return r.ccId ? r.ccId + " - " + name : name;
     });
     if (fromRows.length) return fromRows;
-    const list = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || [];
-    return list.map((c) => {
-      const id = String(c.id || c.code || "");
-      const name = String(c.name || c.nome || "").toUpperCase();
-      return { id, name, label: id ? id + " - " + name : name };
-    }).filter((x) => x.id).sort((a, b) => String(a.label).localeCompare(String(b.label), "pt-BR"));
+    return ComprasPrevisoesApp.centrosDaEmpresa(emp);
+  },
+
+  podarCentrosForaDaEmpresa() {
+    const ok = {};
+    this.ccItems().forEach((x) => { ok[String(x.id)] = true; });
+    this.state.ccIds = (this.state.ccIds || []).filter((id) => ok[String(id)]);
   },
 
   rowGroup(r) {
@@ -1725,6 +1750,7 @@ const ComprasPrevisoesApp = {
           const sid = String(itemId);
           const cur = self.state[key].slice();
           self.state[key] = on ? (cur.includes(sid) ? cur : cur.concat(sid)) : cur.filter((x) => x !== sid);
+          if (key === "companyIds") self.podarCentrosForaDaEmpresa();
           self.state[openKey] = true;
           self.applyFilters();
           self.renderList();
@@ -1736,6 +1762,7 @@ const ComprasPrevisoesApp = {
           const escolheAntes = key === "companyIds" || key === "deptIds" || key === "ccIds" || key === "creditorIds";
           if (!self.state.consulted && !escolheAntes) return;
           self.state[key] = itemsFn().map((x) => String(x.id));
+          if (key === "companyIds") self.podarCentrosForaDaEmpresa();
           self.state[openKey] = true;
           self.applyFilters();
           self.renderList();
@@ -1751,6 +1778,7 @@ const ComprasPrevisoesApp = {
           } else {
             self.state[key] = [];
           }
+          if (key === "companyIds") self.podarCentrosForaDaEmpresa();
           self.state[openKey] = true;
           self.applyFilters();
           self.renderList();
