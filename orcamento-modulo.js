@@ -334,14 +334,16 @@ const OrcamentoModuloApp = {
     const pode = !!(st.companyId && st.ccId && st.anoAte >= st.anoDe && !st.carregando);
     return `
       <div class="orc-orc-bar">
-        <div>
+        <div class="orc-orc-produto">
           <strong>${this.esc(this.nomeProduto())}</strong>
           <span>Orçamento ${this.esc(st.anoDe)} a ${this.esc(st.anoAte)}</span>
         </div>
-        <button type="button" class="btn btn-outline" style="height:36px;" onclick="OrcamentoModuloApp.alterarEscolha()">Alterar</button>
-        <button type="button" class="btn btn-primary" style="height:36px;" ${pode ? "" : "disabled"}
-          onclick="OrcamentoModuloApp.montarReceita()">Montar receita</button>
-        <span id="orc-nuvem" class="orc-nuvem">${this.esc(this.textoNuvem())}</span>
+        <div class="orc-orc-acoes">
+          <button type="button" class="btn btn-outline" style="height:36px;" onclick="OrcamentoModuloApp.alterarEscolha()">Alterar</button>
+          <button type="button" class="btn btn-primary" style="height:36px;" ${pode ? "" : "disabled"}
+            onclick="OrcamentoModuloApp.montarReceita()">Montar receita</button>
+          <span id="orc-nuvem" class="orc-nuvem">${this.esc(this.textoNuvem())}</span>
+        </div>
       </div>`;
   },
 
@@ -388,7 +390,7 @@ const OrcamentoModuloApp = {
   },
 
   textoKardex() {
-    return "O kardex fecha o estoque deste ano. Deste mês em diante, informe as vendas e os distratos previstos. A receita do orçamento começa em " + this.anoSeguinte() + ".";
+    return "Uma linha de venda e uma de distrato. O mês fechado mostra o realizado. No mês em aberto, informe a previsão.";
   },
 
   textoDistrato() {
@@ -764,11 +766,39 @@ const OrcamentoModuloApp = {
   },
 
   setDistrato(ano, mes, valor) {
+    if (!this.mesPrevisto(ano, mes)) return;
     this.setQtd("distrato", ano, mes, valor);
   },
 
   setVenda(ano, mes, valor) {
+    if (!this.mesPrevisto(ano, mes)) return;
     this.setQtd("venda", ano, mes, valor);
+  },
+
+  setVendaLinha(ano, mes, valor) {
+    const mesN = Number(mes);
+    if (!this.novo.ccId || mesN < 0 || mesN > 11 || !this.mesPrevisto(ano, mesN)) return;
+    const plano = this.planoDoCc();
+    if (!Array.isArray(plano.planos) || !plano.planos.length) {
+      plano.planos = [{
+        id: "p" + Date.now().toString(36),
+        nome: "Plano 1",
+        ticket: 0,
+        parcelas: 0,
+        entrada: 0,
+        juros: 0,
+        meses: {}
+      }];
+    }
+    const qtd = Math.max(0, parseInt(valor, 10) || 0);
+    const chave = String(ano);
+    plano.planos.forEach((p, i) => {
+      if (!p.meses || typeof p.meses !== "object") p.meses = {};
+      if (!Array.isArray(p.meses[chave])) p.meses[chave] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+      p.meses[chave][mesN] = i === 0 ? qtd : 0;
+    });
+    this.salvarPlano();
+    this.renderNovo();
   },
 
   numeroCampo(v) {
@@ -1085,6 +1115,21 @@ const OrcamentoModuloApp = {
     return `<td class="is-right is-real${marca ? " " + marca : ""}">${Math.round(Number(n))}</td>`;
   },
 
+  celMovimento(ano, mes, tipo) {
+    const nomes = this.mesesLongo();
+    const marca = this.clsMes(ano, mes);
+    const real = this.qtdReal(ano, mes, tipo);
+    const rotulo = (tipo === "venda" ? "Vendas" : "Distratos") + " em " + nomes[mes] + " de " + ano;
+    if (!this.mesPrevisto(ano, mes)) {
+      if (!(real > 0)) return `<td class="is-right is-real is-passado" title="Realizado">—</td>`;
+      return `<td class="is-right is-real is-passado" title="Realizado">${real}</td>`;
+    }
+    const previsto = tipo === "venda" ? this.qtdVenda(ano, mes) : this.qtdDistrato(ano, mes);
+    const fn = tipo === "venda" ? "setVendaLinha" : "setDistrato";
+    const feito = real > 0 ? `<span class="orc-kx-feito" title="Realizado, não editável">${real}</span>` : "";
+    return `<td class="${marca}"><span class="orc-kx-cel">${feito}<input type="number" min="0" step="1" inputmode="numeric" class="orc-dist-qtd" aria-label="${this.esc(rotulo)}" title="Previsão" value="${previsto > 0 ? previsto : ""}" onchange="OrcamentoModuloApp.${fn}(${ano}, ${mes}, this.value)"></span></td>`;
+  },
+
   kardexHtml() {
     const vazio = this.pedirCentro();
     if (vazio) return vazio;
@@ -1098,93 +1143,72 @@ const OrcamentoModuloApp = {
     let vendaRealAno = 0;
     let distRealAno = 0;
     for (let ano = h.de; ano <= h.ate; ano++) {
-      const dr = [];
-      const dp = [];
-      const vr = [];
-      const vp = [];
       const inicial = [];
       const finais = [];
-      let sDr = 0;
-      let sDp = 0;
-      let sVr = 0;
-      let sVp = 0;
+      const distCells = [];
+      const vendaCells = [];
+      let sDist = 0;
+      let sVenda = 0;
       for (let mes = 0; mes < 12; mes++) {
+        const fechado = !this.mesPrevisto(ano, mes);
         const rDist = this.qtdReal(ano, mes, "distrato");
         const rVenda = this.qtdReal(ano, mes, "venda");
-        const pDist = this.qtdDistrato(ano, mes);
-        const pVenda = this.qtdVenda(ano, mes);
-        dr.push(rDist);
-        dp.push(pDist);
-        vr.push(rVenda);
-        vp.push(pVenda);
-        sDr += rDist;
-        sDp += pDist;
-        sVr += rVenda;
-        sVp += pVenda;
+        const dist = fechado ? rDist : rDist + this.qtdDistrato(ano, mes);
+        const venda = fechado ? rVenda : rVenda + this.qtdVenda(ano, mes);
         if (ano === h.hy) {
           vendaRealAno += rVenda;
           distRealAno += rDist;
         }
+        sDist += dist;
+        sVenda += venda;
         inicial.push(saldo);
-        saldo = saldo + rDist + pDist - rVenda - pVenda;
+        saldo = saldo + dist - venda;
         finais.push(saldo);
+        distCells.push(this.celMovimento(ano, mes, "distrato"));
+        vendaCells.push(this.celMovimento(ano, mes, "venda"));
       }
       if (ano === h.ate) fimAno = saldo;
-      const linha = (rotulo, nota, tds, total, cls) => `<tr class="${cls || "orc-rec-det"}"><td class="orc-rec-ano-nome">${rotulo}<small>${nota}</small></td>${tds}<td class="is-right">${total}</td></tr>`;
-      const planos = this.planosAtivos();
-      let vendasLinhas = "";
-      if (!planos.length) {
-        vendasLinhas = linha("Vendas", "previstas", vp.map((v, mes) => this.celTexto(this.mesPrevisto(ano, mes) && v ? v : null, false, this.clsMes(ano, mes))).join(""), sVp || "—", "orc-rec-det is-venda");
-      } else {
-        vendasLinhas = planos.map((p) => {
-          let soma = 0;
-          const tds = g.meses.map((_, mes) => {
-            const qtd = this.qtdPlano(p, ano, mes);
-            soma += this.mesPrevisto(ano, mes) ? qtd : 0;
-            if (!this.mesPrevisto(ano, mes)) return this.celReal(0, ano, mes);
-            return `<td class="${this.clsMes(ano, mes)}"><input type="number" min="0" step="1" inputmode="numeric" class="orc-dist-qtd" aria-label="${this.esc(p.nome)} em ${ano}" value="${qtd > 0 ? qtd : ""}" onchange="OrcamentoModuloApp.setPlanoQtd('${p.id}', ${ano}, ${mes}, this.value)"></td>`;
-          }).join("");
-          return `<tr class="orc-rec-ano"><td class="orc-rec-ano-nome">${this.esc(p.nome)}<small>vendas previstas</small></td>${tds}<td class="is-right">${soma > 0 ? soma : "—"}</td></tr>`;
-        }).join("");
-        if (planos.length > 1) vendasLinhas += linha("Vendas", "soma dos planos", vp.map((v, mes) => this.celTexto(this.mesPrevisto(ano, mes) && v ? v : null, false, this.clsMes(ano, mes))).join(""), sVp || "—", "orc-rec-det is-venda");
-      }
+      const linha = (rotulo, tds, total, cls) => {
+        const neg = typeof total === "number" && total < 0 ? " is-neg" : "";
+        return `<tr class="orc-kx${cls ? " " + cls : ""}"><td>${rotulo}</td>${tds}<td class="is-right${neg}">${total}</td></tr>`;
+      };
+      const head = `<thead><tr><th>${ano}</th>${g.meses.map((m, mes) => {
+        const hoje = this.clsMes(ano, mes) === "is-hoje";
+        return `<th class="is-right${hoje ? " is-hoje" : ""}">${m}</th>`;
+      }).join("")}<th class="is-right">Total</th></tr></thead>`;
       blocos += `<section class="orc-kardex-bloco">
-        <div class="orc-kardex-titulo"><span>${ano}</span><span>${ano === h.de ? "Estoque inicial " + abertura.qtd : "Continua de " + inicial[0]}</span></div>
         <div class="cc-scroll orc-rec-meses">
           <table class="cc-table orc-rec-grade orc-dist-grade orc-kardex-grade">
             <colgroup>${g.cols}</colgroup>
-            ${g.head}
+            ${head}
             <tbody>
-              ${linha("Distratos", "realizados", dr.map((v, mes) => this.celReal(v, ano, mes)).join(""), sDr || "—", "orc-rec-det")}
-              ${linha("Distratos", "previstos", g.meses.map((_, mes) => this.celQtd(ano, mes, "distrato")).join(""), sDp || "—", "orc-rec-ano")}
-              ${linha("Vendas", "realizadas", vr.map((v, mes) => this.celReal(v, ano, mes)).join(""), sVr || "—", "orc-rec-det")}
-              ${vendasLinhas}
-              ${linha("Estoque", "inicial", inicial.map((v, mes) => this.celTexto(v, false, this.clsMes(ano, mes))).join(""), "—", "orc-rec-det")}
-              ${linha("Estoque", "final", finais.map((v, mes) => this.celTexto(v, false, this.clsMes(ano, mes))).join(""), finais[11], "orc-rec-det is-conta")}
+              ${linha("Estoque inicial", inicial.map((v, mes) => this.celTexto(v, false, this.clsMes(ano, mes))).join(""), "—")}
+              ${linha("Distratos", distCells.join(""), sDist || "—")}
+              ${linha("Vendas", vendaCells.join(""), sVenda || "—")}
+              ${linha("Saldo", finais.map((v, mes) => this.celTexto(v, false, this.clsMes(ano, mes))).join(""), finais[11], "is-conta")}
             </tbody>
           </table>
         </div>
       </section>`;
     }
-    const nota = est.origem
-      ? "Janeiro de " + abertura.ano + " reconstitui o estoque de hoje: lotes disponíveis agora, mais as vendas já feitas neste ano, menos os distratos já feitos."
-      : "A posição de estoque ainda não está neste navegador. O inicial de janeiro usa só as vendas e os distratos realizados. Abra a Posição de estoque para trazer os lotes disponíveis de hoje.";
-    const espera = this._realEstado === "carregando"
-      ? " Buscando as vendas e os distratos deste centro no Sienge…"
-      : (this._realEstado === "erro" ? " Não foi possível ler as vendas e os distratos realizados." : "");
+    let aviso = "";
+    if (this._realEstado === "carregando") aviso = "Buscando as vendas e os distratos deste centro no Sienge…";
+    else if (this._realEstado === "erro") aviso = "Não foi possível ler as vendas e os distratos realizados.";
+    else if (!est.origem) aviso = "A posição de estoque ainda não está neste navegador. Abra a Posição de estoque para trazer os lotes disponíveis.";
+    const nums = [
+      ["Estoque jan/" + abertura.ano, abertura.qtd],
+      ["Disponíveis hoje", est.qtd],
+      ["Vendas " + h.hy, vendaRealAno],
+      ["Distratos " + h.hy, distRealAno],
+      ["Estoque no fim", fimAno]
+    ].map((par) => `<div><span>${this.esc(String(par[0]))}</span><strong>${this.esc(String(par[1]))}</strong></div>`).join("");
     return `
-      <div class="orc-rec-kpis">
-        <div class="crm-card orc-rec-kpi"><span>Estoque em jan/${abertura.ano}</span><strong>${abertura.qtd}</strong></div>
-        <div class="crm-card orc-rec-kpi"><span>Disponíveis hoje</span><strong>${est.qtd}</strong></div>
-        <div class="crm-card orc-rec-kpi"><span>Vendas realizadas em ${h.hy}</span><strong>${vendaRealAno}</strong></div>
-        <div class="crm-card orc-rec-kpi"><span>Distratos realizados em ${h.hy}</span><strong>${distRealAno}</strong></div>
-        <div class="crm-card orc-rec-kpi"><span>Estoque no fim</span><strong>${fimAno}</strong></div>
+      <div class="orc-kx-head">
+        <div class="orc-kx-nums">${nums}</div>
+        <button type="button" class="btn btn-outline" onclick="OrcamentoModuloApp.togglePlano()">${this.novo.planoAberto ? "Ocultar plano" : "Configurar plano"}</button>
       </div>
-      <div class="orc-plano-barra">
-        <button type="button" class="btn btn-outline" style="height:36px;" onclick="OrcamentoModuloApp.togglePlano()">${this.novo.planoAberto ? "Ocultar plano" : "Configurar plano"}</button>
-      </div>
+      ${aviso ? `<p class="orc-kx-nota">${this.esc(aviso)}</p>` : ""}
       ${this.novo.planoAberto ? this.planosConfigHtml() : ""}
-      <div class="orc-rec-focus">${this.esc(nota + espera)} O mês em curso está marcado. As vendas previstas entram em cada plano.</div>
       ${blocos}`;
   },
 
@@ -1219,7 +1243,7 @@ const OrcamentoModuloApp = {
         <button type="button" class="btn btn-outline" ${planos.some((p) => (Number(p.ticket) || Number(p.parcelas) || Number(p.entrada) || Number(p.juros)) > 0) ? "" : "disabled"} onclick="OrcamentoModuloApp.salvarPadrao()">Salvar como padrão</button>
         <button type="button" class="btn btn-outline" onclick="OrcamentoModuloApp.adicionarPlano()">Adicionar plano</button>
       </div>
-      <p class="orc-plano-parcela">O padrão vale para os produtos. Em cada um, use o padrão e ajuste só o ticket médio. A quantidade de vendas entra nas linhas do kardex.</p>
+      <p class="orc-plano-parcela">O padrão vale para os produtos. Em cada um, use o padrão e ajuste só o ticket médio. A quantidade do mês em aberto entra no primeiro plano.</p>
       <div class="cc-scroll orc-rec-meses">
         <table class="cc-table orc-plano-tab">
           <thead><tr>

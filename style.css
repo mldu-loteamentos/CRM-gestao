@@ -9520,15 +9520,30 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .orc-kardex-bloco { margin: 0 0 18px; }
 .orc-kardex-titulo { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin: 0 0 6px; color: #105436; font-size: 0.92rem; font-weight: 800; }
 .orc-kardex-titulo span:last-child { color: #64748b; font-size: 0.75rem; font-weight: 700; }
-.cc-table.orc-kardex-grade col.orc-rec-c-ano { width: 168px; }
+.cc-table.orc-kardex-grade col.orc-rec-c-ano { width: 132px; }
 .cc-table.orc-kardex-grade td.is-passado { background: #f8fafc; color: #64748b; }
 .cc-table.orc-kardex-grade td.is-hoje { box-shadow: inset 0 -2px 0 #105436; }
 .cc-table.orc-kardex-grade td.is-real { color: #334155; }
 .orc-escolha { padding: 18px 18px 8px; }
 .orc-escolha-campos { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
-.orc-orc-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 0 0 14px; }
-.orc-orc-bar strong { display: block; color: #105436; font-size: 0.92rem; }
+.orc-orc-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin: 0 0 12px; }
+.orc-orc-produto strong { display: block; color: #105436; font-size: 0.92rem; }
+.orc-orc-produto span,
 .orc-orc-bar span { color: #64748b; font-size: 0.78rem; font-weight: 700; }
+.orc-orc-acoes { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.orc-kx-head { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: center; margin: 0 0 12px; padding: 10px 14px; border: 1px solid #d7e3dc; border-radius: 10px; background: #fff; }
+.orc-kx-nums { display: flex; flex-wrap: wrap; gap: 12px 22px; flex: 1; }
+.orc-kx-nums span { display: block; color: #64748b; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.03em; text-transform: uppercase; }
+.orc-kx-nums strong { display: block; margin-top: 1px; font-size: 1.05rem; color: #0f172a; font-variant-numeric: tabular-nums; }
+.orc-kx-nums div:first-child strong { color: #105436; }
+.orc-kx-head .btn { height: 36px; margin-left: auto; }
+.orc-kx-nota { margin: -4px 0 12px; color: #64748b; font-size: 0.78rem; font-weight: 700; }
+.cc-table.orc-kardex-grade tr.orc-kx td:first-child { padding-left: 10px; font-weight: 700; }
+.cc-table.orc-kardex-grade thead th:first-child { font-size: 0.82rem; }
+.cc-table.orc-kardex-grade thead th.is-hoje { box-shadow: inset 0 -3px 0 #fde68a; }
+.orc-kx-cel { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.orc-kx-feito { color: #64748b; font-weight: 800; font-variant-numeric: tabular-nums; }
+.cc-table.orc-kardex-grade .orc-kx-cel input.orc-dist-qtd { width: 58px; min-width: 58px; flex: 0 0 58px; }
 .orc-plano-barra { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 8px; }
 .orc-plano-barra .btn { height: 36px; }
 .cc-table.orc-plano-tab { margin: 0 0 14px; }
