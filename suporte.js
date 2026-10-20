@@ -226,6 +226,8 @@
   let replyDraftFiles = [];
   let adminFilter = "pendentes";
   let adminListCache = [];
+  let ticketsCache = [];
+  const ticketMap = {};
   let mineFilter = "abertos";
 
   function esc(s) {
@@ -598,19 +600,36 @@
   }
 
   let unreadRefreshSeq = 0;
-  async function refreshUnreadBadge() {
+  function rememberTickets(list) {
+    ticketsCache = Array.isArray(list) ? list.slice() : [];
+    ticketsCache.forEach((t) => { if (t && t.id) ticketMap[t.id] = t; });
+  }
+
+  function ticketById(id) {
+    return ticketMap[id] || ticketsCache.find((t) => t && t.id === id) || adminListCache.find((t) => t && t.id === id) || null;
+  }
+
+  function applyUnreadFrom(all) {
+    if (isAdmin()) ensureAdminSeenBaseline(all);
+    const key = userKey();
+    const mine = all.filter(t => String(t.userId || "").toLowerCase() === key || String(t.userEmail || "").toLowerCase() === key);
+    applyUnreadUi(mine.filter(ticketHasUnread).length, isAdmin() ? all.filter(ticketIsNewForAdmin).length : 0);
+  }
+
+  async function refreshUnreadBadge(forceNetwork) {
     const seq = ++unreadRefreshSeq;
     if (!userKey() || !window.firebaseDb) {
       applyUnreadUi(0);
       return;
     }
+    if (!forceNetwork && ticketsCache.length) {
+      applyUnreadFrom(ticketsCache);
+      return;
+    }
     try {
       const all = await listAll();
       if (seq !== unreadRefreshSeq) return;
-      if (isAdmin()) ensureAdminSeenBaseline(all);
-      const key = userKey();
-      const mine = all.filter(t => String(t.userId || "").toLowerCase() === key || String(t.userEmail || "").toLowerCase() === key);
-      applyUnreadUi(mine.filter(ticketHasUnread).length, isAdmin() ? all.filter(ticketIsNewForAdmin).length : 0);
+      applyUnreadFrom(all);
       if (isAdmin() && window.activeAppTab === "suporte") {
         const ov = document.getElementById("suporte-overlay");
         if (!ov || ov.style.display === "none") {
@@ -627,7 +646,7 @@
     if (window._suporteUnreadTimer) return;
     window._suporteUnreadTimer = setInterval(() => {
       if (document.hidden) return;
-      refreshUnreadBadge();
+      refreshUnreadBadge(true);
     }, 30000);
   }
 
@@ -641,9 +660,26 @@
     try {
       const { db, c } = fb();
       if (c.onSnapshot) {
+        let snapTimer = null;
         window._suporteUnreadUnsub = c.onSnapshot(
           c.collection(db, COLLECTION),
-          () => { refreshUnreadBadge(); },
+          (snap) => {
+            const list = [];
+            snap.forEach((d) => list.push(ticketFromSnap(d)));
+            list.sort((a, b) => String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || "")));
+            clearTimeout(snapTimer);
+            snapTimer = setTimeout(() => {
+              rememberTickets(list);
+              applyUnreadFrom(list);
+              if (isAdmin() && window.activeAppTab === "suporte") {
+                const ov = document.getElementById("suporte-overlay");
+                if (!ov || ov.style.display === "none") {
+                  adminListCache = list;
+                  paintAdmin();
+                }
+              }
+            }, 600);
+          },
           () => { scheduleUnreadPoll(); }
         );
         return;
@@ -1073,7 +1109,15 @@
     const list = [];
     snap.forEach(docu => list.push(ticketFromSnap(docu)));
     list.sort((a, b) => String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || "")));
+    rememberTickets(list);
     return list;
+  }
+
+  function withTimeout(promise, ms, msg) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(msg)), ms);
+      promise.then((v) => { clearTimeout(timer); resolve(v); }, (e) => { clearTimeout(timer); reject(e); });
+    });
   }
 
   async function listMine() {
@@ -1251,10 +1295,10 @@
     replyDraftFiles = [];
     const box = document.getElementById("suporte-modal-box");
     box.classList.add("is-detail");
-    box.innerHTML = `<div class="suporte-modal-body"><p class="suporte-hint">Carregando…</p></div>`;
+    const cached = ticketById(id);
+    if (!cached) box.innerHTML = `<div class="suporte-modal-body"><p class="suporte-hint">Carregando…</p></div>`;
     openModal();
-    try {
-      const t = await loadTicket(id);
+    const paint = (t) => {
       const mine = !!(ctx && ctx.mine);
       const adminView = !!(ctx && ctx.admin) || (isAdmin() && !mine);
       const canReplyUser = mine || userKey() === String(t.userId || "").toLowerCase() || userKey() === String(t.userEmail || "").toLowerCase();
@@ -1327,7 +1371,17 @@
       const arch = document.getElementById("suporte-archive");
       if (arch) arch.onclick = () => archiveFromDetail(id, !t.arquivadoAt);
       if (window.lucide) lucide.createIcons();
+    };
+    if (cached) paint(cached);
+    try {
+      const t = await withTimeout(loadTicket(id), 12000, "O Firebase não respondeu. A conexão com o Firestore falhou.");
+      if (t && t.id) ticketMap[t.id] = t;
+      const reply = document.getElementById("suporte-reply");
+      const digitando = (reply && String(reply.value || "").trim()) || replyDraftFiles.length;
+      const igual = cached && String(cached.updatedAt || cached.createdAt || "") === String(t.updatedAt || t.createdAt || "");
+      if (!digitando && !igual) paint(t);
     } catch (err) {
+      if (cached) return;
       box.classList.remove("is-detail");
       box.innerHTML = `<div class="suporte-modal-body"><p class="suporte-empty">${esc(err.message)}</p></div>
         <div class="suporte-modal-foot"><button type="button" class="btn btn-cancel" onclick="document.getElementById('suporte-overlay').style.display='none'">Fechar</button></div>`;
