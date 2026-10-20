@@ -527,9 +527,9 @@ const OrcamentoImpostosApp = {
 
   render(root) {
     root.innerHTML = `
-      <div class="orc-est-page">
+      <div class="orc-est-page orc-imp-page">
         ${typeof OrcamentoApp !== "undefined" ? OrcamentoApp.abasHtml() : ""}
-        <p class="orc-dfc-lead">Estimativa do imposto a pagar em 2027, com as contas do DFC e as alíquotas do lucro presumido. PIS e COFINS do mês pagam no mês seguinte. O trimestre de janeiro a março paga em abril, o de abril a junho em julho, o de julho a setembro em outubro, e o de outubro a dezembro em janeiro de 2028.</p>
+        <p class="orc-dfc-lead">PIS e COFINS da receita do mês pagam no mês seguinte. IRPJ e CSLL do trimestre pagam no mês seguinte ao trimestre.</p>
         <div class="orc-dfc-tools">
           <div id="orc-imp-emp-box"></div>
         </div>
@@ -630,11 +630,12 @@ const OrcamentoImpostosApp = {
       }
       const chip = this.chip(row);
       const aberto = !!this.abertos[row.id];
-      const nome = OrcEst.esc(row.id + " - " + OrcEst.norm(row.nome));
+      const nomeCheio = row.id + " - " + OrcEst.norm(row.nome);
+      const nome = OrcEst.esc(nomeCheio);
       const celulas = pago.slice(0, 12).map((v, i) => this.td(v, i === 0 ? "PIS e COFINS do forecast de dezembro de 2026 e trimestre de outubro a dezembro" : "")).join("");
       const extra = aberto ? this.detalhe(row) : "";
       return `<tr data-est-id="${OrcEst.esc(row.id)}" onclick="OrcamentoImpostosApp.toggle('${OrcEst.esc(row.id)}')">
-        <td><i data-lucide="${aberto ? "chevron-down" : "chevron-right"}"></i>${nome} <span class="${chip.cls}">${chip.txt}</span></td>
+        <td title="${nome}"><i data-lucide="${aberto ? "chevron-down" : "chevron-right"}"></i><span class="orc-est-nome">${nome}</span> <span class="${chip.cls}">${chip.txt}</span></td>
         ${celulas}
         <td>${OrcEst.money(this.somaAte(pago, 12))}</td>
         <td>${this.tdTxt(pago[12])}</td>
@@ -649,7 +650,7 @@ const OrcamentoImpostosApp = {
           <tfoot><tr class="orc-dfc-formula"><td>Total</td>${totCel}<td>${OrcEst.money(this.somaAte(tot, 12))}</td><td>${OrcEst.money(tot[12])}</td></tr></tfoot>
         </table>
       </div>
-      <p class="orc-est-nota">Janeiro de 2027 paga o PIS e a COFINS do forecast de dezembro de 2026 e o IRPJ e a CSLL do forecast de outubro a dezembro. Cada arquivo de forecast vale só para a competência em que foi enviado e fica salvo na nuvem. Sem o arquivo daquele mês, a parte correspondente continua em branco. A marca ao lado da empresa diz se a linha de 2027 fecha com esta conta.</p>`;
+      <p class="orc-est-nota">Janeiro de 2027 usa o forecast de 2026. Abra a empresa para ver a receita de cada mês e o mês em que o imposto é pago.</p>`;
     if (window.lucide && lucide.createIcons) lucide.createIcons();
   },
 
