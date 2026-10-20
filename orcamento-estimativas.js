@@ -618,7 +618,7 @@ const OrcamentoImpostosApp = {
       body.innerHTML = `<div class="orc-dfc-erro">Não há receita de 2027 na base para estimar o imposto.</div>`;
       return;
     }
-    const head = OrcEst.MESES.map((m) => `<th>${m}</th>`).join("") + `<th>Total 2027</th><th title="PIS e COFINS de dezembro e o trimestre de outubro a dezembro">JAN/28</th>`;
+    const head = OrcEst.MESES.map((m) => `<th>${m}</th>`).join("") + `<th>Total</th><th title="PIS e COFINS de dezembro e o trimestre de outubro a dezembro">Jan/28</th>`;
     const tot = Array(13).fill(0);
     const temTot = Array(13).fill(false);
     const linhas = lista.map((row) => {
@@ -637,17 +637,17 @@ const OrcamentoImpostosApp = {
       return `<tr data-est-id="${OrcEst.esc(row.id)}" onclick="OrcamentoImpostosApp.toggle('${OrcEst.esc(row.id)}')">
         <td title="${nome}"><i data-lucide="${aberto ? "chevron-down" : "chevron-right"}"></i><span class="orc-est-nome">${nome}</span> <span class="${chip.cls}">${chip.txt}</span></td>
         ${celulas}
-        <td>${OrcEst.money(this.somaAte(pago, 12))}</td>
-        <td>${this.tdTxt(pago[12])}</td>
+        <td title="${OrcEst.esc(OrcEst.money(this.somaAte(pago, 12)))}">${this.moneyGrade(this.somaAte(pago, 12))}</td>
+        <td title="${OrcEst.esc(OrcEst.money(pago[12]))}">${this.moneyGrade(pago[12])}</td>
       </tr>${extra}`;
     }).join("");
-    const totCel = tot.slice(0, 12).map((v, i) => `<td>${temTot[i] ? OrcEst.money(v) : "—"}</td>`).join("");
+    const totCel = tot.slice(0, 12).map((v, i) => `<td title="${temTot[i] ? OrcEst.esc(OrcEst.money(v)) : ""}">${temTot[i] ? this.moneyGrade(v) : "—"}</td>`).join("");
     body.innerHTML = `
       <div class="orc-dfc-scroll">
         <table class="orc-dfc-table orc-est-table">
           <thead><tr><th>Imposto a pagar</th>${head}</tr></thead>
           <tbody>${linhas}</tbody>
-          <tfoot><tr class="orc-dfc-formula"><td>Total</td>${totCel}<td>${OrcEst.money(this.somaAte(tot, 12))}</td><td>${OrcEst.money(tot[12])}</td></tr></tfoot>
+          <tfoot><tr class="orc-dfc-formula"><td>Total</td>${totCel}<td title="${OrcEst.esc(OrcEst.money(this.somaAte(tot, 12)))}">${this.moneyGrade(this.somaAte(tot, 12))}</td><td title="${OrcEst.esc(OrcEst.money(tot[12]))}">${this.moneyGrade(tot[12])}</td></tr></tfoot>
         </table>
       </div>
       <p class="orc-est-nota">Janeiro de 2027 usa o forecast de 2026. Abra a empresa para ver a receita de cada mês e o mês em que o imposto é pago.</p>`;
@@ -655,78 +655,65 @@ const OrcamentoImpostosApp = {
   },
 
   td(v, title) {
-    if (v == null) return `<td title="${OrcEst.esc(title)}">—</td>`;
-    return `<td>${OrcEst.money(v)}</td>`;
+    const cheio = v == null ? "" : OrcEst.money(v);
+    const dica = [cheio, title].filter(Boolean).join(". ");
+    if (v == null) return `<td title="${OrcEst.esc(title || "")}">—</td>`;
+    return `<td title="${OrcEst.esc(dica)}">${this.moneyGrade(v)}</td>`;
   },
 
-  tdTxt(v) {
-    return OrcEst.money(v);
+  moneyGrade(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n) || Math.abs(n) < 0.005) return "—";
+    const abs = Math.abs(n);
+    const texto = abs >= 100
+      ? Math.round(abs).toLocaleString("pt-BR")
+      : abs.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return n < 0 ? "-" + texto : texto;
   },
 
   detalhe(row) {
-    const faixa = (titulo) => `<tr class="orc-est-secao"><td colspan="15">${titulo}</td></tr>`;
-    const linha = (nome, arr, paga, dica) => {
-      const cel = [];
-      for (let i = 0; i < 12; i++) {
-        const vazio = paga && i === 0 && arr[0] == null;
-        cel.push(`<td${dica ? ` title="${OrcEst.esc(dica)}"` : ""}>${vazio ? "—" : OrcEst.money(arr[i])}</td>`);
-      }
-      const ate2027 = paga ? this.somaAte(arr, 12) : arr.reduce((s, n) => s + (Number(n) || 0), 0);
-      const jan28 = paga ? arr[12] : null;
-      return `<tr class="orc-est-sub${paga ? " orc-est-pag" : ""}"><td>${nome}</td>${cel.join("")}<td>${OrcEst.money(ate2027)}</td><td>${paga ? OrcEst.money(jan28) : "—"}</td></tr>`;
-    };
+    const mo = (v) => OrcEst.money(v);
     const tem = (arr) => (arr || []).some((v) => Math.abs(Number(v) || 0) >= 0.5);
-    const red = (nome, arr) => (tem(arr) ? linha(nome, arr, false, "Conta parametrizada como redutora. Entra negativa nesta base.") : "");
-    const corpo = faixa("Base da competência, já líquida")
-      + linha("Vendas", row.vendas, false, "Venda de lotes, já com as redutoras abatidas")
-      + red("(−) Redutoras de vendas", row.redV)
-      + linha("Serviços", row.servicos, false, "Serviços, já com as redutoras abatidas")
-      + red("(−) Redutoras de serviços", row.redS)
-      + linha("Aplicações", row.financeiras, false, "Aplicações financeiras")
-      + red("(−) Redutoras de aplicações", row.redF)
-      + faixa("Imposto no mês do pagamento")
-      + linha("PIS", row.pagar.pis, true, "Competência do mês anterior. Janeiro usa dezembro de 2026.")
-      + linha("COFINS", row.pagar.cofins, true, "Competência do mês anterior. Janeiro usa dezembro de 2026.")
-      + linha("IRPJ", row.pagar.irpj, true, "Trimestre anterior. Janeiro usa outubro a dezembro de 2026.")
-      + linha("CSLL", row.pagar.csll, true, "No mesmo mês do IRPJ.");
+    const nomes = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+    const pagoEm = ["Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez", "Jan/28"];
+    const dezBag = OrcEst.bases2026()["2026-12"];
+    const dez = (dezBag && dezBag[Number(row.id)]) || null;
+    const cols = [{ nome: "Vendas", arr: row.vendas, dez: dez && dez.vendas }];
+    if (tem(row.redV)) cols.push({ nome: "Redutoras", arr: row.redV, dez: null, dica: "Já abatida da venda. O valor da coluna Vendas está líquido." });
+    cols.push({ nome: "Serviços", arr: row.servicos, dez: dez && dez.servicos });
+    if (tem(row.redS)) cols.push({ nome: "Red. serviços", arr: row.redS, dez: null });
+    if (tem(row.financeiras) || tem(row.redF)) cols.push({ nome: "Aplicações", arr: row.financeiras, dez: dez && dez.financeiras });
+    if (tem(row.redF)) cols.push({ nome: "Red. aplicações", arr: row.redF, dez: null });
+    const head = `<th>Competência</th>${cols.map((c) => `<th${c.dica ? ` title="${OrcEst.esc(c.dica)}"` : ""}>${c.nome}</th>`).join("")}<th>PIS</th><th>COFINS</th><th>Pago em</th>`;
+    const celBase = (c, i) => `<td>${i == null ? mo(c.dez) : mo(c.arr[i])}</td>`;
+    const linhaMes = (rotulo, i, pis, cofins, quando) => `<tr><td>${rotulo}</td>${cols.map((c) => celBase(c, i)).join("")}<td>${mo(pis)}</td><td>${mo(cofins)}</td><td class="orc-imp-quando">${quando}</td></tr>`;
+    const meses = nomes.map((nome, i) => linhaMes(nome, i, row.pis[i], row.cofins[i], pagoEm[i])).join("");
+    const linhaDez = linhaMes("Dez/26", null, row.pagar.pis[0], row.pagar.cofins[0], "Jan");
+    const tris = [
+      ["Out–dez/26", row.pagar.irpj[0], row.pagar.csll[0], "Jan"],
+      ["Jan–mar", row.q0 && row.q0.irpj, row.q0 && row.q0.csll, "Abr"],
+      ["Abr–jun", row.q1 && row.q1.irpj, row.q1 && row.q1.csll, "Jul"],
+      ["Jul–set", row.q2 && row.q2.irpj, row.q2 && row.q2.csll, "Out"],
+      ["Out–dez", row.q3 && row.q3.irpj, row.q3 && row.q3.csll, "Jan/28"]
+    ];
+    const triCorpo = tris.map((t) => `<tr><td>${t[0]}</td><td>${mo(t[1])}</td><td>${mo(t[2])}</td><td class="orc-imp-quando">${t[3]}</td></tr>`).join("");
     const leituras = [row.leitura.pis, row.leitura.cofins, row.leitura.irpj, row.leitura.csll];
     const notas = leituras.every((l) => !l.tem)
       ? `<p class="orc-est-nota">O orçamento de 2027 não traz PIS, COFINS, IRPJ nem CSLL. A tabela é a estimativa.</p>`
       : `<ul class="orc-est-leituras">${leituras.map((l) => `<li class="${l.tem && l.fecha ? "orc-est-ok" : (l.tem ? "orc-est-alerta" : "")}">${OrcEst.esc(l.texto)}</li>`).join("")}</ul>`;
     return `<tr class="orc-est-det"><td colspan="15">
-      <table class="orc-dfc-table orc-est-mini"><tbody>${corpo}</tbody></table>
-      ${this.racionalHtml(row)}
-      ${notas}
+      <div class="orc-imp-det">
+        <div>
+          <p class="orc-imp-leg">Receita do mês. PIS e COFINS dessa receita pagam no mês ao lado.</p>
+          <table class="orc-imp-mes"><thead><tr>${head}</tr></thead><tbody>${linhaDez}${meses}</tbody></table>
+        </div>
+        <div>
+          <p class="orc-imp-leg">IRPJ e CSLL do trimestre, pagos no mês seguinte.</p>
+          <table class="orc-imp-tri"><thead><tr><th>Trimestre</th><th>IRPJ</th><th>CSLL</th><th>Pago em</th></tr></thead><tbody>${triCorpo}</tbody></table>
+          ${notas}
+        </div>
+      </div>
     </td></tr>`;
-  },
-
-  pctAli(v) {
-    return (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%";
-  },
-
-  somaFaixa(arr, ini, fim) {
-    let s = 0;
-    for (let i = ini; i < fim; i++) s += Number(arr[i]) || 0;
-    return s;
-  },
-
-  racionalHtml(row) {
-    const a = OrcEst.aliquotas();
-    const mo = (v) => OrcEst.money(v);
-    const tris = [
-      ["Jan–mar", "Abr", row.q0],
-      ["Abr–jun", "Jul", row.q1],
-      ["Jul–set", "Out", row.q2],
-      ["Out–dez", "Jan/28", row.q3]
-    ];
-    const corpo = tris.map((t) => `<tr><td>${t[0]}</td><td>${t[1]}</td><td>${mo(t[2] && t[2].irpj)}</td><td>${mo(t[2] && t[2].csll)}</td></tr>`).join("");
-    const jan = row.pagar.irpj[0] != null
-      ? " Janeiro de 2027 usa o forecast de outubro a dezembro de 2026: IRPJ " + mo(row.pagar.irpj[0]) + " e CSLL " + mo(row.pagar.csll[0]) + "."
-      : "";
-    return `<div class="orc-est-racional">
-      <p>Vendas e serviços já estão líquidas: a conta parametrizada como redutora abate a base do grupo. PIS ${this.pctAli(a.pis)} e COFINS ${this.pctAli(a.cofins)} pagam no mês seguinte. IRPJ ${this.pctAli(a.irpj)} e CSLL ${this.pctAli(a.csll)} pagam no mês seguinte ao trimestre.${OrcEst.esc(jan)}</p>
-      <table class="orc-est-rac"><thead><tr><th>Trimestre</th><th>Paga em</th><th>IRPJ</th><th>CSLL</th></tr></thead><tbody>${corpo}</tbody></table>
-    </div>`;
   }
 };
 

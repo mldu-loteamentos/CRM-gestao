@@ -7647,6 +7647,13 @@ window.clientHasNexCumprida = function(client) {
   return ids.some(function(id) { return set.has(cid + "|" + id); });
 };
 
+window.CANCEL_SUBTIPOS = [
+  { codigo: "Interno", nome: "Interno" },
+  { codigo: "Notificação cartório", nome: "Notificação cartório" },
+  { codigo: "Notificação escritório", nome: "Notificação escritório" },
+  { codigo: "Edital", nome: "Edital" }
+];
+
 window.CANCEL_MOTIVOS_KEY = "crm_cancelamento_motivos";
 window.CANCEL_MOTIVOS_PADRAO = [
   { codigo: "01", nome: "Desemprego" },
@@ -7853,7 +7860,12 @@ window.abrirCancelamentoContrato = function(customerId, saleId) {
         <button type="button" class="btn btn-fechar" onclick="window.fecharCancelamentoContrato()">Fechar</button>
       </div>
       <div style="padding:18px;display:flex;flex-direction:column;gap:12px;">
-        <p style="margin:0;font-size:0.8rem;color:#475569;line-height:1.45;">${window.nexCumpridaTeste(client) ? "Teste: a tag Nex cumprida está marcada neste título para o cancelamento no Sienge. " : ""}Título com 0% de restituição. O código 1 é iniciativa do cliente e o 2 é iniciativa da empresa. Exemplo: 101 - iniciativa do cliente por desemprego.</p>
+        <p style="margin:0;font-size:0.8rem;color:#475569;line-height:1.45;">${window.nexCumpridaTeste(client) ? "Teste: a tag Nex cumprida está marcada neste título para o cancelamento no Sienge. " : ""}Título com 0% de restituição. O subtipo é o da tela de cancelamento do Sienge. O código 1 é iniciativa do cliente e o 2 é iniciativa da empresa, e entra no motivo. Exemplo: 101 - iniciativa do cliente por desemprego.</p>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;">Subtipo de cancelamento
+          <select id="cancel-subtipo" style="height:38px;border:1px solid #cbd5e1;border-radius:8px;padding:0 10px;font-size:0.88rem;color:#0f172a;text-transform:none;font-weight:600;">
+            ${window.CANCEL_SUBTIPOS.map(function(s) { return `<option value="${window.cancelContratoEsc(s.codigo)}">${window.cancelContratoEsc(s.nome)}</option>`; }).join("")}
+          </select>
+        </label>
         <label style="display:flex;flex-direction:column;gap:4px;font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;">Data
           <input id="cancel-data" type="date" value="${iso}" style="height:38px;border:1px solid #cbd5e1;border-radius:8px;padding:0 10px;font-size:0.88rem;color:#0f172a;text-transform:none;font-weight:600;">
         </label>
@@ -7924,10 +7936,12 @@ window.enviarCancelamentoContrato = async function() {
     return;
   }
   const data = String((document.getElementById("cancel-data") || {}).value || "").slice(0, 10);
+  const subtipo = String((document.getElementById("cancel-subtipo") || {}).value || "");
   const ini = (document.querySelector("input[name='cancel-iniciativa']:checked") || {}).value || "";
   const sel = document.getElementById("cancel-motivo");
   const motivo = window.cancelMotivosLista().find(function(m) { return m.codigo === (sel && sel.value); });
   if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) { falha("Informe a data do cancelamento."); return; }
+  if (!window.CANCEL_SUBTIPOS.some(function(s) { return s.codigo === subtipo; })) { falha("Escolha o subtipo de cancelamento."); return; }
   if (ini !== "1" && ini !== "2") { falha("Escolha de quem foi a iniciativa."); return; }
   if (!motivo) { falha("Escolha o motivo."); return; }
   const rot = window.cancelMotivoRotulo(ini, motivo);
@@ -7951,10 +7965,10 @@ window.enviarCancelamentoContrato = async function() {
     await SiengeApiService.cancelSalesContract(contract.id, {
       date: data,
       reason: rot.texto,
-      subType: rot.codigo
+      subType: subtipo
     });
-    const resumo = "Contrato " + contract.id + " cancelado no Sienge, motivo " + rot.texto + ", título " + client.saleId + " · " + (client.customerName || "");
-    window.cancelContratoRegistrar(client, "ok", resumo, { contractId: contract.id, reason: rot.texto, subType: rot.codigo, date: data });
+    const resumo = "Contrato " + contract.id + " cancelado no Sienge, subtipo " + subtipo + ", motivo " + rot.texto + ", título " + client.saleId + " · " + (client.customerName || "");
+    window.cancelContratoRegistrar(client, "ok", resumo, { contractId: contract.id, reason: rot.texto, subType: subtipo, date: data });
     if (window.showToast) window.showToast("Contrato cancelado no Sienge.", "success");
     window.fecharCancelamentoContrato();
   } catch (e) {
@@ -7963,7 +7977,7 @@ window.enviarCancelamentoContrato = async function() {
     window.cancelContratoRegistrar(client, "erro", "Falha ao cancelar o contrato do título " + client.saleId + " · " + (client.customerName || "") + ". " + msg, {
       contractId: contract && contract.id,
       reason: rot.texto,
-      subType: rot.codigo,
+      subType: subtipo,
       date: data
     });
     if (btn) btn.disabled = false;
