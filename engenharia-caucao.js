@@ -519,7 +519,9 @@ window.EngenhariaCaucaoApp = {
   credItems() {
     const companies = this.activeCompanySet();
     const rows = (this.state.allRows || []).filter((r) => companies.has(String(r.companyId)));
-    return this.uniqueItems(rows, (r) => this.fold(r.credor), (r) => r.credor.toUpperCase());
+    const fromRows = this.uniqueItems(rows, (r) => this.fold(r.credor), (r) => r.credor.toUpperCase());
+    if (fromRows.length) return fromRows;
+    return this._credCatalogo || [];
   },
 
   unitEnterpriseIds() {
@@ -763,7 +765,8 @@ window.EngenhariaCaucaoApp = {
       MlEmpresaFilter.bind(id, {
         toggleOpen() {
           if (self.state.loading) return;
-          if (!self.state.consulted && key !== "companyIds") return;
+          const escolheAntes = key === "companyIds" || key === "ccIds" || key === "creditorIds";
+          if (!self.state.consulted && !escolheAntes) return;
           if (self.tituloLock() && key !== "statusIds") return;
           const was = !!self.state[openKey];
           self.state.openEmp = false;
@@ -789,7 +792,8 @@ window.EngenhariaCaucaoApp = {
         },
         toggleId(itemId, checked) {
           if (self.state.loading) return;
-          if (!self.state.consulted && key !== "companyIds") return;
+          const escolheAntes = key === "companyIds" || key === "ccIds" || key === "creditorIds";
+          if (!self.state.consulted && !escolheAntes) return;
           if (self.tituloLock() && key !== "statusIds") return;
           const sid = String(itemId);
           const cur = self.state[key].slice();
@@ -802,7 +806,8 @@ window.EngenhariaCaucaoApp = {
         },
         selectAll() {
           if (self.state.loading) return;
-          if (!self.state.consulted && key !== "companyIds") return;
+          const escolheAntes = key === "companyIds" || key === "ccIds" || key === "creditorIds";
+          if (!self.state.consulted && !escolheAntes) return;
           if (self.tituloLock() && key !== "statusIds") return;
           self.state[key] = itemsFn().map((x) => String(x.id));
           if (key === "companyIds") self.pruneCc();
@@ -813,7 +818,8 @@ window.EngenhariaCaucaoApp = {
         },
         selectNone() {
           if (self.state.loading) return;
-          if (!self.state.consulted && key !== "companyIds") return;
+          const escolheAntes = key === "companyIds" || key === "ccIds" || key === "creditorIds";
+          if (!self.state.consulted && !escolheAntes) return;
           if (self.tituloLock() && key !== "statusIds") return;
           self.state[key] = [];
           if (key === "companyIds") self.pruneCc();
@@ -832,9 +838,12 @@ window.EngenhariaCaucaoApp = {
 
   paintFilters() {
     if (!window.MlEmpresaFilter) return;
-    if (!this.state.consulted || this.state.loading) {
+    if (this.state.loading) {
+      this.state.openEmp = false;
       this.state.openCc = false;
       this.state.openCred = false;
+      this.state.openSit = false;
+    } else if (!this.state.consulted) {
       this.state.openSit = false;
     }
     this.bindFilters();
@@ -1959,8 +1968,8 @@ window.EngenhariaCaucaoApp = {
         <div class="search-filter-panel cprev-toolbar ecau-toolbar">
           <div class="ecau-grid${busy ? " is-consulting" : ""}">
             <div id="ecau-emp-slot" class="ecau-slot ecau-cell-emp${lockFilters ? " is-locked" : ""}"></div>
-            <div id="ecau-cc-slot" class="ecau-slot ecau-cell-obra${refineLocked || this.tituloLock() ? " is-locked" : ""}"></div>
-            <div id="ecau-cred-slot" class="ecau-slot ecau-cell-cred${refineLocked || this.tituloLock() ? " is-locked" : ""}"></div>
+            <div id="ecau-cc-slot" class="ecau-slot ecau-cell-obra${busy || this.tituloLock() ? " is-locked" : ""}"></div>
+            <div id="ecau-cred-slot" class="ecau-slot ecau-cell-cred${busy || this.tituloLock() ? " is-locked" : ""}"></div>
             <div class="form-group ecau-search ecau-cell-titulo${refineLocked ? " is-locked" : ""}">
               <label>Título</label>
               <input type="search" class="form-control" placeholder="Título ou nº do documento"
@@ -2049,6 +2058,12 @@ window.EngenhariaCaucaoApp = {
       this.state.inited = true;
       this.renderPage();
       await this.loadCompanies();
+      if (window.ComprasPrevisoesApp && typeof ComprasPrevisoesApp.carregarCatalogoCredores === "function") {
+        ComprasPrevisoesApp.carregarCatalogoCredores.call(this);
+      }
+      if (window.ComprasPrevisoesApp && typeof ComprasPrevisoesApp.garantirEmpreendimentos === "function") {
+        ComprasPrevisoesApp.garantirEmpreendimentos.call(this);
+      }
     }
     if (this.state.consulted) this.applyFilters();
     this.renderPage();

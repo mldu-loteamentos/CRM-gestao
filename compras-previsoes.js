@@ -1534,7 +1534,61 @@ const ComprasPrevisoesApp = {
   },
 
   credItems() {
-    return this.uniqueItems(this.scopedRows(), (r) => this.fold(r.credor), (r) => r.credor.toUpperCase());
+    const fromRows = this.uniqueItems(this.scopedRows(), (r) => this.fold(r.credor), (r) => r.credor.toUpperCase());
+    if (fromRows.length) return fromRows;
+    return this._credCatalogo || [];
+  },
+
+  async carregarCatalogoCredores() {
+    if (this._credCarregando || (this._credCatalogo && this._credCatalogo.length)) return;
+    this._credCarregando = true;
+    try {
+      const fx = window.firebaseCollections;
+      const db = window.firebaseDb;
+      if (!fx || !db || typeof fx.getDocs !== "function" || typeof fx.collection !== "function") return;
+      let rows = [];
+      const nomes = ["sienge_creditors", "creditors"];
+      for (let i = 0; i < nomes.length; i++) {
+        try {
+          const snap = await fx.getDocs(fx.collection(db, nomes[i]));
+          if (snap && typeof snap.forEach === "function") {
+            snap.forEach((d) => rows.push((d && d.data && d.data()) || {}));
+          }
+          if (rows.length) break;
+        } catch (e) {}
+      }
+      const seen = {};
+      const items = [];
+      rows.forEach((raw) => {
+        let src = raw || {};
+        if (typeof src.raw_data === "string") {
+          try { src = Object.assign({}, JSON.parse(src.raw_data), src); } catch (e) {}
+        }
+        const name = String(src.name || src.nome || src.creditorName || src.fantasyName || src.tradeName || "").trim();
+        if (!name) return;
+        const id = this.fold(name);
+        if (!id || seen[id]) return;
+        seen[id] = true;
+        const label = name.toUpperCase();
+        items.push({ id: id, name: label, label: label });
+      });
+      items.sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+      this._credCatalogo = items;
+      if (items.length && !this.state.openCred && typeof this.paintFilters === "function") this.paintFilters();
+    } finally {
+      this._credCarregando = false;
+    }
+  },
+
+  async garantirEmpreendimentos() {
+    const list = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || [];
+    if (list.length) return;
+    if (!window.SiengeApiService || typeof SiengeApiService.getCostCenters !== "function") return;
+    try {
+      const loaded = await SiengeApiService.getCostCenters();
+      if (window.AppState && Array.isArray(loaded) && loaded.length) AppState.cachedCostCenters = loaded;
+      if (!this.state.openCc && typeof this.paintFilters === "function") this.paintFilters();
+    } catch (e) {}
   },
 
   deptItems() {
@@ -1641,7 +1695,8 @@ const ComprasPrevisoesApp = {
         toggleOpen() {
           if (self.state.loading) return;
           if (key === "deptIds" && self.departmentFilterLocked()) return;
-          if (!self.state.consulted && key !== "companyIds" && key !== "deptIds") return;
+          const escolheAntes = key === "companyIds" || key === "deptIds" || key === "ccIds" || key === "creditorIds";
+          if (!self.state.consulted && !escolheAntes) return;
           self.state[openKey] = !self.state[openKey];
           if (openKey === "openEmp") { self.state.openCred = false; self.state.openDept = false; self.state.openCc = false; }
           if (openKey === "openCred") { self.state.openEmp = false; self.state.openDept = false; self.state.openCc = false; }
@@ -1665,7 +1720,8 @@ const ComprasPrevisoesApp = {
         toggleId(itemId, on) {
           if (self.state.loading) return;
           if (key === "deptIds" && self.departmentFilterLocked()) return;
-          if (!self.state.consulted && key !== "companyIds" && key !== "deptIds") return;
+          const escolheAntes = key === "companyIds" || key === "deptIds" || key === "ccIds" || key === "creditorIds";
+          if (!self.state.consulted && !escolheAntes) return;
           const sid = String(itemId);
           const cur = self.state[key].slice();
           self.state[key] = on ? (cur.includes(sid) ? cur : cur.concat(sid)) : cur.filter((x) => x !== sid);
@@ -1677,7 +1733,8 @@ const ComprasPrevisoesApp = {
         selectAll() {
           if (self.state.loading) return;
           if (key === "deptIds" && self.departmentFilterLocked()) return;
-          if (!self.state.consulted && key !== "companyIds" && key !== "deptIds") return;
+          const escolheAntes = key === "companyIds" || key === "deptIds" || key === "ccIds" || key === "creditorIds";
+          if (!self.state.consulted && !escolheAntes) return;
           self.state[key] = itemsFn().map((x) => String(x.id));
           self.state[openKey] = true;
           self.applyFilters();
@@ -1687,7 +1744,8 @@ const ComprasPrevisoesApp = {
         selectNone() {
           if (self.state.loading) return;
           if (key === "deptIds" && self.departmentFilterLocked()) return;
-          if (!self.state.consulted && key !== "companyIds" && key !== "deptIds") return;
+          const escolheAntes = key === "companyIds" || key === "deptIds" || key === "ccIds" || key === "creditorIds";
+          if (!self.state.consulted && !escolheAntes) return;
           if (key === "deptIds" && self.accessibleDepartments()) {
             self.state.deptIds = self.accessibleDepartments().map((a) => a.id);
           } else {
@@ -1741,9 +1799,11 @@ const ComprasPrevisoesApp = {
   paintFilters() {
     if (!window.MlEmpresaFilter) return;
     this.syncDepartmentSelection();
-    if (!this.state.consulted || this.state.loading) {
+    if (this.state.loading) {
+      this.state.openEmp = false;
       this.state.openCc = false;
       this.state.openCred = false;
+      this.state.openDept = false;
     }
     if (this.departmentFilterLocked()) this.state.openDept = false;
     this.bindFilters();
@@ -2431,8 +2491,8 @@ const ComprasPrevisoesApp = {
         <div class="search-filter-panel cprev-toolbar">
           <div class="ecau-grid cprev-ecau${busy ? " is-consulting" : ""}">
             <div id="cprev-emp-slot" class="ecau-slot ecau-cell-emp${busy ? " is-locked" : ""}"></div>
-            <div id="cprev-cc-slot" class="ecau-slot ecau-cell-obra${refineLocked ? " is-locked" : ""}"></div>
-            <div id="cprev-cred-slot" class="ecau-slot ecau-cell-cred${refineLocked ? " is-locked" : ""}"></div>
+            <div id="cprev-cc-slot" class="ecau-slot ecau-cell-obra${busy ? " is-locked" : ""}"></div>
+            <div id="cprev-cred-slot" class="ecau-slot ecau-cell-cred${busy ? " is-locked" : ""}"></div>
             <div class="form-group ecau-search ecau-cell-titulo${refineLocked ? " is-locked" : ""}">
               <label>Título</label>
               <input type="search" class="form-control" placeholder="Título ou nº do documento"
@@ -2565,6 +2625,8 @@ const ComprasPrevisoesApp = {
       this.state.inited = true;
       this.renderPage();
       this.ouvirFilaFiscal();
+      this.carregarCatalogoCredores();
+      this.garantirEmpreendimentos();
       await this.loadCompanies();
     }
     if (this.state.consulted) this.applyFilters();

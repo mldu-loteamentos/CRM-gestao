@@ -1023,7 +1023,11 @@ window.VerificarConstrucaoApp = {
                 </div>
 
                 <div id="vc-loading" class="vc-loading" style="display: none;">
-                    <i data-lucide="loader-2" class="vc-spin"></i> Analisando fila de clientes...
+                    <div class="ml-load" role="status" aria-live="polite">
+                        <div class="loading-spinner" aria-hidden="true"></div>
+                        <div class="loading-status-text" id="vc-loading-text">Analisando a fila de clientes…</div>
+                        <div class="ml-load-track"><div class="loading-progress-bar" id="vc-loading-bar" style="width:28%"></div></div>
+                    </div>
                 </div>
 
                 <div id="vc-results" style="display: none;">
@@ -1187,6 +1191,11 @@ window.VerificarConstrucaoApp = {
         const btnWpp = document.getElementById('btn-solicitar-wpp');
         if (!loading || !results) return;
 
+        loading.innerHTML = `<div class="ml-load" role="status" aria-live="polite">
+                        <div class="loading-spinner" aria-hidden="true"></div>
+                        <div class="loading-status-text" id="vc-loading-text">Analisando a fila de clientes…</div>
+                        <div class="ml-load-track"><div class="loading-progress-bar" id="vc-loading-bar" style="width:28%"></div></div>
+                    </div>`;
         loading.style.display = 'block';
         results.style.display = 'none';
         if (btnWpp) btnWpp.disabled = true;
@@ -1484,7 +1493,10 @@ window.VerificarConstrucaoApp = {
 
             const missingRefs = rows.filter(_vcMissingClientRef);
             if (missingRefs.length && !(doBatimento && doBatimento.length)) {
-                loading.innerHTML = `Recuperando cliente e título pela unidade (${missingRefs.length})...`;
+                const vcStatus = document.getElementById('vc-loading-text');
+                const vcBar = document.getElementById('vc-loading-bar');
+                if (vcStatus) vcStatus.textContent = 'Recuperando cliente e título pela unidade…';
+                if (vcBar) vcBar.style.width = '68%';
                 await this.enrichMissingContractData(rows);
                 rows.forEach((r, i) => r.originalIdx = i);
                 this.allRows = rows;

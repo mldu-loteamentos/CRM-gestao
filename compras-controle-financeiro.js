@@ -965,22 +965,24 @@ ComprasControleApp.billsDaBase = async function (start, end) {
 };
 
 ComprasControleApp.fetchOutcome = async function (start, end) {
-  const chunks = typeof siengeSplitDateRange === "function"
-    ? siengeSplitDateRange(start, end)
-    : [{ start: start, end: end }];
   const targets = await this.empresasDaConsulta();
   if (!targets.length) return { data: [] };
   const data = [];
   let step = 0;
-  const total = Math.max(1, chunks.length * targets.length);
-  for (const chunk of chunks) {
-    for (const companyId of targets) {
+  const total = targets.length;
+  let cursor = 0;
+  const self = this;
+  const worker = async function () {
+    while (cursor < targets.length) {
+      const companyId = targets[cursor++];
+      const bills = await self.outcomeRange(start, end, companyId);
+      if (bills && bills.length) data.push.apply(data, bills);
       step += 1;
-      this.noteProgress("Buscando contas a pagar no Sienge…", step / total);
-      const bills = await this.outcomeRange(chunk.start, chunk.end, companyId);
-      data.push.apply(data, bills);
+      self.noteProgress("Buscando contas a pagar no Sienge…", step / total);
     }
-  }
+  };
+  const n = Math.min(4, targets.length);
+  await Promise.all(Array.from({ length: n }, function () { return worker(); }));
   return { data: data };
 };
 
@@ -1128,6 +1130,36 @@ ComprasControleApp._billNoPeriodo = function (bill, start, end) {
   return datas.some((d) => d >= start && d <= end);
 };
 
+ComprasControleApp._prefetchMesesPagos = async function (targets, meses) {
+  const jobs = [];
+  (targets || []).forEach((companyId) => {
+    (meses || []).forEach((ym) => {
+      const chave = String(companyId) + "_" + ym;
+      if (this._cfinMesMem && Object.prototype.hasOwnProperty.call(this._cfinMesMem, chave)) return;
+      if (this._cfinMesAusente && this._cfinMesAusente[chave]) return;
+      jobs.push({ companyId: companyId, ym: ym, chave: chave });
+    });
+  });
+  if (!jobs.length) return;
+  let cursor = 0;
+  const self = this;
+  const worker = async function () {
+    while (cursor < jobs.length) {
+      const job = jobs[cursor++];
+      const bills = await self._lerMesPago(job.companyId, job.ym);
+      if (bills != null) {
+        if (!self._cfinMesMem) self._cfinMesMem = {};
+        self._cfinMesMem[job.chave] = bills;
+      } else {
+        if (!self._cfinMesAusente) self._cfinMesAusente = {};
+        self._cfinMesAusente[job.chave] = true;
+      }
+    }
+  };
+  const n = Math.min(8, jobs.length);
+  await Promise.all(Array.from({ length: n }, function () { return worker(); }));
+};
+
 ComprasControleApp.contasHistoricas = async function (start, end) {
   this._cfinFalhas = [];
   this._cfinFalhasBase = [];
@@ -1139,6 +1171,7 @@ ComprasControleApp.contasHistoricas = async function (start, end) {
   const targets = await this.empresasDoHistorico();
   if (!targets.length) throw new Error("Nenhuma empresa disponível para gravar as contas pagas.");
   const meses = this._mesesHist(ini, fim);
+  await this._prefetchMesesPagos(targets, meses);
   const out = [];
   const vistos = new Set();
   const falhas = [];
@@ -1158,7 +1191,9 @@ ComprasControleApp.contasHistoricas = async function (start, end) {
       let bills = this._cfinMesMem && Object.prototype.hasOwnProperty.call(this._cfinMesMem, chave)
         ? this._cfinMesMem[chave]
         : null;
-      if (bills == null) bills = await this._lerMesPago(companyId, ym);
+      if (bills == null && !(this._cfinMesAusente && this._cfinMesAusente[chave])) {
+        bills = await this._lerMesPago(companyId, ym);
+      }
       if (bills == null) {
         if (ym >= "2026-01") {
           falhasBase.push("empresa " + companyId + " " + ym);
@@ -1224,6 +1259,10 @@ ComprasControleApp.consultar = async function () {
   this.state.banco = null;
   this.state.error = "";
   this.state.falhaHist = "";
+  this.state.openEmp = false;
+  this.state.openCred = false;
+  this.state.openCc = false;
+  this.state.openDept = false;
   const alvos = await this.empresasDaConsulta();
   if (!alvos.length) {
     this.state.loading = false;
@@ -1349,7 +1388,7 @@ ComprasControleApp.paintFilters = function () {
     MlEmpresaFilter.bind(id, {
       toggleOpen() {
         const escolheAntes = key === "ccIds" || key === "creditorIds";
-        if (self.state.loading && !escolheAntes) return;
+        if (self.state.loading) return;
         if (key === "deptIds" && self.departmentFilterLocked()) return;
         if (!self.state.consulted && key !== "companyIds" && !escolheAntes) return;
         self.state[openKey] = !self.state[openKey];
@@ -1373,7 +1412,7 @@ ComprasControleApp.paintFilters = function () {
       },
       toggleId(itemId, on) {
         const escolheAntes = key === "ccIds" || key === "creditorIds";
-        if (self.state.loading && !escolheAntes) return;
+        if (self.state.loading) return;
         if (key === "deptIds" && self.departmentFilterLocked()) return;
         if (!self.state.consulted && key !== "companyIds" && !escolheAntes) return;
         const sid = String(itemId);
@@ -1388,7 +1427,7 @@ ComprasControleApp.paintFilters = function () {
       },
       selectAll() {
         const escolheAntes = key === "ccIds" || key === "creditorIds";
-        if (self.state.loading && !escolheAntes) return;
+        if (self.state.loading) return;
         if (key === "deptIds" && self.departmentFilterLocked()) return;
         if (!self.state.consulted && key !== "companyIds" && !escolheAntes) return;
         self.state[key] = itemsFn().map((x) => String(x.id));
@@ -1401,7 +1440,7 @@ ComprasControleApp.paintFilters = function () {
       },
       selectNone() {
         const escolheAntes = key === "ccIds" || key === "creditorIds";
-        if (self.state.loading && !escolheAntes) return;
+        if (self.state.loading) return;
         if (key === "deptIds" && self.departmentFilterLocked()) return;
         if (!self.state.consulted && key !== "companyIds" && !escolheAntes) return;
         if (key === "deptIds" && self.accessibleDepartments()) {
@@ -2225,8 +2264,8 @@ ComprasControleApp.renderPage = function () {
       <div class="search-filter-panel cprev-toolbar">
         <div class="ecau-grid cprev-ecau${busy ? " is-consulting" : ""}">
           <div id="cfin-emp-slot" class="ecau-slot ecau-cell-emp${busy ? " is-locked" : ""}"></div>
-          <div id="cfin-cc-slot" class="ecau-slot ecau-cell-obra"></div>
-          <div id="cfin-cred-slot" class="ecau-slot ecau-cell-cred"></div>
+          <div id="cfin-cc-slot" class="ecau-slot ecau-cell-obra${busy ? " is-locked" : ""}"></div>
+          <div id="cfin-cred-slot" class="ecau-slot ecau-cell-cred${busy ? " is-locked" : ""}"></div>
           <div class="form-group ecau-search ecau-cell-titulo${refineLocked ? " is-locked" : ""}">
             <label>Título</label>
             <input type="search" class="form-control" placeholder="Título ou nº do documento"
@@ -2303,7 +2342,6 @@ ComprasControleApp.init = async function () {
     await this.loadCompanies();
     this.renderPage();
   }
-  if (!this.state.consulted && !this.state.loading) await this.consultar();
 };
 
 ComprasControleApp.ouvirFilaFiscal = function () {

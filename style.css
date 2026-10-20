@@ -9730,10 +9730,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .vc-filtros .moura-switch { margin-left: 4px; }
 .vc-wpp { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 16px; font-weight: 700; white-space: nowrap; }
 .vc-wpp:disabled { opacity: 0.5; cursor: not-allowed; }
-.vc-loading { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 24px; color: #64748b; font-size: 0.85rem; }
-.vc-loading svg { width: 18px; height: 18px; }
-.vc-spin { animation: vcGira 0.9s linear infinite; }
-@keyframes vcGira { to { transform: rotate(360deg); } }
+.vc-loading { display: flex; justify-content: center; padding: 8px 0 4px; }
 .vc-scroll { max-height: calc(100vh - 300px); }
 .cc-table.vc-table { font-size: 0.78rem; border-collapse: separate; border-spacing: 0; }
 .cc-table.vc-table thead th { padding: 8px 8px; z-index: 4; background: #1b8253; background-clip: padding-box; box-shadow: inset 0 -1px 0 #146b42; }
