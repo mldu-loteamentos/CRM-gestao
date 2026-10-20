@@ -32,6 +32,7 @@ const OrcamentoModuloApp = {
 
   _bcb: {},
   _focus: {},
+  _pendente: {},
   _indexadores: null,
 
   bcbSeries: {
@@ -254,13 +255,14 @@ const OrcamentoModuloApp = {
       nouns: nounsCc
     });
     const pode = !!(st.companyId && st.ccId && st.anoAte >= st.anoDe && !st.carregando);
+    const lead = this.textoReajusteHoje();
     root.innerHTML = `
       <div class="ml-tabs orc-novo-tabs" role="tablist">
         <button type="button" role="tab" class="ml-tab is-active" aria-selected="true">
           <i data-lucide="trending-up"></i> Receita
         </button>
       </div>
-      <p class="orc-rec-lead">Contas a receber do centro de custo, sem cliente sub judice. O vencimento anda o PMP. Cada aniversário aplica o Focus daquele ano sobre o saldo já corrigido.</p>
+      <p class="orc-rec-lead">${this.esc(lead)}</p>
       <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:16px;">
         ${empHtml}
         ${ccHtml}
@@ -712,6 +714,7 @@ const OrcamentoModuloApp = {
       const pmp = this.pmpTitulo(t.parcelas, hoje);
       const taxa = await this.taxaDoIndexador(t.indexador);
       if (taxa) usos[taxa.chave] = taxa;
+      const pendente = await this.percentualPendente(taxa, t.emissao, hoje);
       const mm = t.emissao && t.emissao.length >= 7 ? t.emissao.slice(5, 7) : "";
       let doCliente = 0;
       let principalCliente = 0;
@@ -721,7 +724,15 @@ const OrcamentoModuloApp = {
         const p = t.parcelas[k];
         if (!(p.saldo > 0.009) || !p.due) return;
         const anos = this.anosDeReajuste(t.emissao, p.due, hoje);
-        const fator = taxa ? this.fatorAcumulado(taxa, anos) : 1;
+        const detalheAnos = [];
+        let fator = 1;
+        if (taxa) {
+          anos.forEach((ano) => {
+            const pct = pendente && ano === pendente.ano ? pendente.pct : this.percentualAno(taxa, ano);
+            fator *= (1 + pct);
+            detalheAnos.push({ ano: ano, pct: pct * 100 });
+          });
+        }
         const saldo = Math.round(p.saldo * 100) / 100;
         const valor = Math.round(saldo * fator * 100) / 100;
         const ajuste = Math.round((valor - saldo) * 100) / 100;
@@ -756,7 +767,7 @@ const OrcamentoModuloApp = {
         parcelasCliente.push({
           due: p.due,
           quando,
-          anos: anos.map((y) => ({ ano: y, pct: taxa ? this.percentualAno(taxa, y) * 100 : 0 })),
+          anos: detalheAnos,
           principal: saldo,
           reajuste: ajuste,
           valor
@@ -799,16 +810,37 @@ const OrcamentoModuloApp = {
     };
   },
 
+  textoReajusteHoje() {
+    const hoje = this.hojeIso();
+    const nomes = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+    const hm = Number(hoje.slice(5, 7));
+    const faltam = [];
+    for (let m = hm + 1; m <= 12; m++) faltam.push(nomes[m - 1]);
+    const base = "Contas a receber do centro de custo, sem cliente sub judice. O vencimento anda o PMP. ";
+    if (!faltam.length) return base + "O reajuste deste ano já está no saldo. O próximo aniversário usa o Focus daquele ano sobre o saldo já corrigido.";
+    const quais = faltam.length === 1 ? faltam[0] : faltam.slice(0, -1).join(", ") + " e " + faltam[faltam.length - 1];
+    return base + "Reajuste até " + nomes[hm - 1] + " já está no saldo. Contrato de " + quais + " ainda não rodou: esse ajuste entra na parcela e segue no ano seguinte. O aniversário depois disso usa o Focus do ano.";
+  },
+
+  jaNoSaldo(ano, mes, hoje) {
+    const hy = Number(String(hoje).slice(0, 4));
+    const hm = Number(String(hoje).slice(5, 7));
+    if (ano < hy) return true;
+    if (ano > hy) return false;
+    return Number(mes) <= hm;
+  },
+
   anosDeReajuste(emissao, due, hoje) {
     const em = String(emissao || "").slice(0, 10);
     const venc = String(due || "").slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(em) || !/^\d{4}-\d{2}-\d{2}$/.test(venc)) return [];
+    const mes = Number(em.slice(5, 7));
     const mm = em.slice(5, 7);
     const anoVenda = Number(em.slice(0, 4));
     const anos = [];
     for (let y = anoVenda + 1; y <= Number(venc.slice(0, 4)) + 1; y++) {
       const data = y + "-" + mm + "-01";
-      if (data < hoje) continue;
+      if (this.jaNoSaldo(y, mes, hoje)) continue;
       if (data > venc) break;
       anos.push(y);
     }
@@ -816,30 +848,70 @@ const OrcamentoModuloApp = {
   },
 
   aniversariosAte(emissao, due, hoje) {
-    const em = String(emissao || "").slice(0, 10);
-    const venc = String(due || "").slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(em) || !/^\d{4}-\d{2}-\d{2}$/.test(venc)) return 0;
-    const mm = em.slice(5, 7);
-    const anoVenda = Number(em.slice(0, 4));
-    let n = 0;
-    for (let y = anoVenda + 1; y <= Number(venc.slice(0, 4)) + 1; y++) {
-      const data = y + "-" + mm + "-01";
-      if (data < hoje) continue;
-      if (data > venc) break;
-      n += 1;
-    }
-    return n;
+    return this.anosDeReajuste(emissao, due, hoje).length;
   },
 
   proximaRepactuacao(emissao, hoje) {
     const em = String(emissao || "").slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(em)) return "";
-    const mm = em.slice(5, 7);
-    let y = Number(hoje.slice(0, 4));
-    let data = y + "-" + mm + "-01";
-    if (data < hoje) data = (y + 1) + "-" + mm + "-01";
-    if (Number(data.slice(0, 4)) <= Number(em.slice(0, 4))) return (Number(em.slice(0, 4)) + 1) + "-" + mm + "-01";
-    return data;
+    const mes = Number(em.slice(5, 7));
+    const hy = Number(String(hoje).slice(0, 4));
+    const hm = Number(String(hoje).slice(5, 7));
+    let y = mes <= hm ? hy + 1 : hy;
+    if (y <= Number(em.slice(0, 4))) y = Number(em.slice(0, 4)) + 1;
+    return y + "-" + em.slice(5, 7) + "-01";
+  },
+
+  async percentualPendente(taxa, emissao, hoje) {
+    const em = String(emissao || "").slice(0, 10);
+    if (!taxa || !/^\d{4}-\d{2}-\d{2}$/.test(em)) return null;
+    const mes = Number(em.slice(5, 7));
+    const hy = Number(String(hoje).slice(0, 4));
+    const hm = Number(String(hoje).slice(5, 7));
+    if (!(mes > hm)) return null;
+    const chave = taxa.chave + "|" + em.slice(0, 7) + "|" + hy;
+    if (this._pendente[chave] != null) return this._pendente[chave];
+    const acumulado = await this.acumuladoContrato(taxa, em, hy);
+    const pct = acumulado == null ? this.percentualAno(taxa, hy) : acumulado;
+    const out = { ano: hy, pct: pct };
+    this._pendente[chave] = out;
+    return out;
+  },
+
+  async acumuladoContrato(taxa, emissao, ano) {
+    const codigo = this.codigoBcb(taxa.nome);
+    if (!codigo) return null;
+    let serie;
+    try {
+      serie = await this.serieBcb(taxa.nome, codigo);
+    } catch (e) {
+      return null;
+    }
+    const retro = Number(taxa.retro) || 0;
+    let baseM = Number(emissao.slice(5, 7)) + retro;
+    let baseY = ano;
+    while (baseM < 1) { baseM += 12; baseY -= 1; }
+    while (baseM > 12) { baseM -= 12; baseY += 1; }
+    const meses = [];
+    let m = baseM;
+    let y = baseY;
+    for (let i = 0; i < 12; i++) {
+      meses.push(y + "-" + String(m).padStart(2, "0"));
+      m -= 1;
+      if (m < 1) { m = 12; y -= 1; }
+    }
+    meses.reverse();
+    const conhecidos = meses.map((k) => serie[k]).filter((n) => n != null && Number.isFinite(Number(n))).map(Number);
+    if (!conhecidos.length) return null;
+    const amostra = conhecidos.slice(-3);
+    const media = amostra.reduce((s, n) => s + n, 0) / amostra.length;
+    const proj = media > 0 ? media : 0;
+    let acc = 1;
+    meses.forEach((k) => {
+      const r = serie[k] != null && Number.isFinite(Number(serie[k])) ? Number(serie[k]) : proj;
+      acc *= (1 + r / 100);
+    });
+    return acc < 1 ? 0 : acc - 1;
   },
 
   resumoIndice(ix) {
@@ -903,6 +975,7 @@ const OrcamentoModuloApp = {
           return {
             chave: indicador,
             nome,
+            retro: Number(det && det.revenueRetroactivity) || 0,
             porAno: focus.porAno,
             dataFocus: focus.data,
             fallback: false
@@ -926,6 +999,7 @@ const OrcamentoModuloApp = {
     return {
       chave: "bcb-" + codigo,
       nome,
+      retro: Number(det && det.revenueRetroactivity) || 0,
       fallback: true,
       meses,
       anual: anualBruto < 0 ? 0 : anualBruto
