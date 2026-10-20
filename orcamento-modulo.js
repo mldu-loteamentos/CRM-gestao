@@ -896,7 +896,10 @@ const OrcamentoModuloApp = {
     if (indicador) {
       try {
         const focus = await this.previsaoFocus(indicador);
-        if (focus && Object.keys(focus.porAno).length) {
+        const anosPub = focus ? Object.keys(focus.porAno || {}).map(Number) : [];
+        const ultimo = anosPub.length ? Math.max.apply(null, anosPub) : 0;
+        const anoHoje = Number(this.hojeIso().slice(0, 4));
+        if (focus && anosPub.length && ultimo >= anoHoje) {
           return {
             chave: indicador,
             nome,
