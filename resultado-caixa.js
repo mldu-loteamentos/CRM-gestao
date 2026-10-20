@@ -835,10 +835,8 @@ const ResultadoCaixaApp = {
     if (Number(cfg.consolidacao_padrao) !== 1) return 0;
     const bruto = cfg.percentual_mldu;
     const pct = typeof bruto === "string" ? Number(String(bruto).replace(/\s|%/g, "").replace(",", ".")) : Number(bruto);
-    if (pct > 0 && pct <= 100) return pct / 100;
-    const socio = this.pctSocioMoura(id);
-    if (socio > 0) return socio;
-    return 0;
+    if (!(pct > 0) || pct > 100) return 0;
+    return pct / 100;
   },
 
   /** Texto do percentual da Moura Leite usado na consolidação. */
@@ -2122,7 +2120,7 @@ const ResultadoCaixaApp = {
   pct(real, orc) {
     const base = Number(orc) || 0;
     const r = Number(real) || 0;
-    if (Math.abs(base) < 0.5) return Math.abs(r) < 0.5 ? 0 : (r > 0 ? 100 : -100);
+    if (Math.abs(base) < 0.5) return Math.abs(r) < 0.5 ? 0 : -100;
     return ((r - base) / base) * 100;
   },
 
@@ -2132,7 +2130,7 @@ const ResultadoCaixaApp = {
     const bom = v > 0.5;
     const cls = ruim ? "is-neg" : (bom ? "is-pos" : "");
     const p = this.pct(real, orc);
-    const pTxt = p == null ? "—" : (p.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%");
+    const pTxt = p == null ? "—" : (p.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%");
     return `<td class="rcx-num ${cls}">${this.fmt(v)}</td><td class="rcx-num ${cls}">${pTxt}</td>`;
   },
 

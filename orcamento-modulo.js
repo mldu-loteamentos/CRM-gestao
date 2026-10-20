@@ -29,6 +29,7 @@ const OrcamentoModuloApp = {
   },
 
   _bcb: {},
+  _focus: {},
   _indexadores: null,
 
   bcbSeries: {
@@ -253,7 +254,7 @@ const OrcamentoModuloApp = {
           <i data-lucide="trending-up"></i> Receita
         </button>
       </div>
-      <p style="margin:0 0 14px;color:#475569;font-size:0.9rem;line-height:1.45;">A receita do centro de custo sai do contas a receber. Clientes sub judice ficam de fora. O vencimento de cada parcela anda os dias do PMP dos últimos 3 meses, e o valor sobe na data de repactuação pelo acumulado recente do indexador.</p>
+      <p style="margin:0 0 14px;color:#475569;font-size:0.9rem;line-height:1.45;">A receita do centro de custo sai do contas a receber. Clientes sub judice ficam de fora. O vencimento de cada parcela anda os dias do PMP dos últimos 3 meses. Em cada aniversário do contrato, o saldo sobe pelo percentual daquele ano no Boletim Focus, em cima do valor que já foi corrigido no ano anterior.</p>
       <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:16px;">
         ${empHtml}
         ${ccHtml}
@@ -328,10 +329,7 @@ const OrcamentoModuloApp = {
       ${totaisMes.map((v) => `<td style="text-align:right;white-space:nowrap;">${v > 0.009 ? this.esc(this.dinheiro(v)) : "—"}</td>`).join("")}
       <td style="text-align:right;white-space:nowrap;">${this.esc(this.dinheiro(r.total))}</td>
     </tr>`;
-    const indices = (r.indices || []).map((ix) => {
-      const mesesTxt = ix.meses.map((m) => this.mesNome(Number(m.key.slice(5, 7))) + "/" + m.key.slice(0, 4) + " " + this.pct(m.rate)).join(", ");
-      return `<li style="margin:0 0 4px;"><strong>${this.esc(ix.nome)}</strong>: últimos meses disponíveis ${this.esc(mesesTxt)}. Acumulado desses meses ${this.esc(this.pct(ix.acum3 * 100))}. Índice anual usado na repactuação ${this.esc(this.pct(ix.anual * 100))}${ix.anual <= 0 ? " (índice negativo não reduz a parcela)" : ""}.</li>`;
-    }).join("");
+    const indices = (r.indices || []).map((ix) => `<li style="margin:0 0 4px;">${this.esc(this.textoIndice(ix))}</li>`).join("");
     const clientes = (r.clientes || []).map((c) => `<tr>
       <td>${this.esc(c.cliente)}</td>
       <td>${this.esc(c.unidade || "—")}</td>
@@ -591,8 +589,8 @@ const OrcamentoModuloApp = {
       Object.keys(t.parcelas).forEach((k) => {
         const p = t.parcelas[k];
         if (!(p.saldo > 0.009) || !p.due) return;
-        const n = this.aniversariosAte(t.emissao, p.due, hoje);
-        const fator = taxa ? Math.pow(1 + taxa.anual, n) : 1;
+        const anos = this.anosDeReajuste(t.emissao, p.due, hoje);
+        const fator = taxa ? this.fatorAcumulado(taxa, anos) : 1;
         const valor = Math.round(p.saldo * fator * 100) / 100;
         let quando = this.addDias(p.due, pmp.pmp);
         if (!quando) return;
@@ -641,6 +639,22 @@ const OrcamentoModuloApp = {
     };
   },
 
+  anosDeReajuste(emissao, due, hoje) {
+    const em = String(emissao || "").slice(0, 10);
+    const venc = String(due || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(em) || !/^\d{4}-\d{2}-\d{2}$/.test(venc)) return [];
+    const mm = em.slice(5, 7);
+    const anoVenda = Number(em.slice(0, 4));
+    const anos = [];
+    for (let y = anoVenda + 1; y <= Number(venc.slice(0, 4)) + 1; y++) {
+      const data = y + "-" + mm + "-01";
+      if (data < hoje) continue;
+      if (data > venc) break;
+      anos.push(y);
+    }
+    return anos;
+  },
+
   aniversariosAte(emissao, due, hoje) {
     const em = String(emissao || "").slice(0, 10);
     const venc = String(due || "").slice(0, 10);
@@ -668,12 +682,62 @@ const OrcamentoModuloApp = {
     return data;
   },
 
+  textoIndice(ix) {
+    if (!ix) return "";
+    if (ix.fallback) {
+      const mesesTxt = (ix.meses || []).map((m) => this.mesNome(Number(m.key.slice(5, 7))) + "/" + m.key.slice(0, 4) + " " + this.pct(m.rate)).join(", ");
+      return ix.nome + ": o Focus não publica este indexador. Cada repactuação repete o anual recente de " + this.pct((ix.anual || 0) * 100) + ", calculado em " + mesesTxt + ". O percentual do ano entra sobre o valor já corrigido.";
+    }
+    const anos = Object.keys(ix.porAno || {}).map(Number).sort((a, b) => a - b);
+    const lista = anos.map((y) => y + " " + this.pct(ix.porAno[y])).join(", ");
+    const data = ix.dataFocus ? ix.dataFocus.split("-").reverse().join("/") : "";
+    return ix.nome + ": Boletim Focus" + (data ? " de " + data : "") + ". " + lista + ". Em cada aniversário entra o percentual daquele ano, sobre o valor já corrigido. Previsão negativa não reduz a parcela. Ano sem previsão repete a última publicada.";
+  },
+
+  fatorAcumulado(taxa, anos) {
+    let fator = 1;
+    (anos || []).forEach((ano) => { fator *= (1 + this.percentualAno(taxa, ano)); });
+    return fator;
+  },
+
+  percentualAno(taxa, ano) {
+    if (!taxa) return 0;
+    if (taxa.fallback) return Math.max(0, Number(taxa.anual) || 0);
+    const por = taxa.porAno || {};
+    let bruto = por[ano];
+    if (bruto == null) {
+      const anteriores = Object.keys(por).map(Number).filter((y) => y <= ano).sort((a, b) => b - a);
+      if (anteriores.length) bruto = por[anteriores[0]];
+      else {
+        const todos = Object.keys(por).map(Number).sort((a, b) => a - b);
+        bruto = todos.length ? por[todos[todos.length - 1]] : 0;
+      }
+    }
+    const n = Number(bruto) || 0;
+    return n < 0 ? 0 : n / 100;
+  },
+
   async taxaDoIndexador(idx) {
     if (!idx || this.ehReal(idx)) return null;
     const cat = await this.catalogoIndexadores();
     const det = cat.find((i) => String(i.id) === String(idx.id))
       || cat.find((i) => idx.nome && String(i.name || "").toUpperCase() === String(idx.nome).toUpperCase());
     const nome = (det && det.name) || idx.nome || ("Indexador " + idx.id);
+    const indicador = this.focusIndicador(nome);
+    if (indicador) {
+      try {
+        const focus = await this.previsaoFocus(indicador);
+        if (focus && Object.keys(focus.porAno).length) {
+          return {
+            chave: indicador,
+            nome,
+            porAno: focus.porAno,
+            dataFocus: focus.data,
+            fallback: false
+          };
+        }
+      } catch (e) { /* segue para o anual recente */ }
+    }
     const codigo = this.codigoBcb(nome);
     if (!codigo) return null;
     let serie;
@@ -686,17 +750,60 @@ const OrcamentoModuloApp = {
     if (!meses.length) return null;
     let prod = 1;
     meses.forEach((m) => { prod *= (1 + m.rate / 100); });
-    const acum3 = prod - 1;
     const anualBruto = Math.pow(prod, 12 / meses.length) - 1;
-    const anual = anualBruto < 0 ? 0 : anualBruto;
     return {
-      chave: String(codigo),
+      chave: "bcb-" + codigo,
       nome,
+      fallback: true,
       meses,
-      acum3,
-      anual,
-      retro: det && det.revenueRetroactivity != null ? Number(det.revenueRetroactivity) : 0
+      anual: anualBruto < 0 ? 0 : anualBruto
     };
+  },
+
+  focusIndicador(nome) {
+    const n = String(nome || "").toUpperCase();
+    const mapa = [
+      ["INCC-DI", "INCC"],
+      ["INCC-M", "INCC"],
+      ["INCC", "INCC"],
+      ["IGP-DI", "IGP-DI"],
+      ["IPC-DI", "IGP-DI"],
+      ["IGP-M", "IGP-M"],
+      ["IGPM", "IGP-M"],
+      ["INPC", "INPC"],
+      ["IPCA", "IPCA"]
+    ];
+    for (let i = 0; i < mapa.length; i++) {
+      if (n === mapa[i][0] || n.indexOf(mapa[i][0]) >= 0) return mapa[i][1];
+    }
+    return "";
+  },
+
+  async previsaoFocus(indicador) {
+    if (this._focus[indicador]) return this._focus[indicador];
+    const filtro = "Indicador eq '" + indicador + "' and baseCalculo eq 0";
+    const url = "https://olinda.bcb.gov.br/olinda/servico/Expectativas/versao/v1/odata/ExpectativasMercadoAnuais"
+      + "?$top=40&$orderby=Data desc&$select=Indicador,Data,DataReferencia,Mediana&$format=json&$filter="
+      + encodeURIComponent(filtro);
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error("Não foi possível ler o Boletim Focus de " + indicador + ".");
+    const json = await resp.json();
+    const rows = (json && json.value) || [];
+    if (!rows.length) {
+      this._focus[indicador] = null;
+      return null;
+    }
+    const data = String(rows[0].Data || "");
+    const porAno = {};
+    rows.forEach((r) => {
+      if (String(r.Data || "") !== data) return;
+      const y = Number(r.DataReferencia);
+      const m = Number(r.Mediana);
+      if (y && Number.isFinite(m)) porAno[y] = m;
+    });
+    const out = { indicador, data, porAno };
+    this._focus[indicador] = out;
+    return out;
   },
 
   codigoBcb(nome) {
