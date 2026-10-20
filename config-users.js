@@ -196,6 +196,15 @@ const ConfigUsersApp = {
       const newKey = "sub_rel_geral_buscar_cliente_" + flag;
       if (savedPerms.mod_rel === true && savedPerms[newKey] == null && savedPerms[oldKey] === true) savedPerms[newKey] = true;
     });
+    if (!savedPerms.mod_orc && (
+      savedPerms.sub_fin_orc === true
+      || savedPerms.sub_fin_orc_orcamento_acessar === true
+      || savedPerms.sub_fin_orc_orcamento_visualizar === true
+      || savedPerms.sub_fin_orc_orcamento_editar === true
+    )) {
+      savedPerms.mod_orc = true;
+      savedPerms.sub_orc_geral = true;
+    }
     if (!savedPerms.mod_gerencial && (
       savedPerms.sub_part_geral_participacoes_acessar === true
       || savedPerms.sub_soc_geral_estrutura_societaria_acessar === true
@@ -388,10 +397,6 @@ const ConfigUsersApp = {
           ]
         },
         {
-          name: "Orçamento", key: "sub_fin_orc",
-          actions: [{ id: "orcamento", label: "Orçamento" }]
-        },
-        {
           name: "Financiamento", key: "sub_fin_finan",
           actions: [{ id: "financiamento", label: "Financiamento" }]
         },
@@ -406,7 +411,7 @@ const ConfigUsersApp = {
       submodules: [{ name: "Orçamento", key: "sub_orc_geral", actions: [
         { id: "novo_orcamento", label: "Novo orçamento", permBase: "sub_orc_geral_novo_orcamento" },
         { id: "novo_forecast", label: "Novo forecast", permBase: "sub_orc_geral_novo_forecast" },
-        { id: "acompanhamento", label: "Acompanhamento", permBase: "sub_orc_geral_acompanhamento" }
+        { id: "acompanhamento", label: "Acompanhamento", permBase: "sub_fin_orc_orcamento" }
       ] }]
     },
     {
@@ -586,10 +591,29 @@ const ConfigUsersApp = {
     if (typeof window.crmPintarTesteConta === "function") window.crmPintarTesteConta();
   },
 
+  migrarOrcamentoDoFinanceiro(obj) {
+    if (!obj || typeof obj !== "object") return false;
+    const tinha = obj.sub_fin_orc === true
+      || obj.sub_fin_orc_orcamento_acessar === true
+      || obj.sub_fin_orc_orcamento_visualizar === true
+      || obj.sub_fin_orc_orcamento_editar === true;
+    if (!tinha) return false;
+    let mudou = false;
+    if (obj.mod_orc !== true) { obj.mod_orc = true; mudou = true; }
+    if (obj.sub_orc_geral !== true) { obj.sub_orc_geral = true; mudou = true; }
+    if (obj.sub_fin_orc === true) {
+      ["acessar", "visualizar", "editar"].forEach((flag) => {
+        const k = "sub_fin_orc_orcamento_" + flag;
+        if (obj[k] == null) { obj[k] = true; mudou = true; }
+      });
+    }
+    return mudou;
+  },
+
   tirarChavesPerm(obj) {
     const mortas = window.CRM_MENU_PERMS_RETIRADAS || [];
     if (!obj || typeof obj !== "object" || !mortas.length) return false;
-    let mudou = false;
+    let mudou = this.migrarOrcamentoDoFinanceiro(obj);
     mortas.forEach((k) => {
       if (Object.prototype.hasOwnProperty.call(obj, k)) {
         delete obj[k];

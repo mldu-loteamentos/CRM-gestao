@@ -3332,6 +3332,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "resultado-caixa": "Resultado de caixa",
     "orcamento-novo": "Novo orçamento",
     "orcamento-forecast": "Novo forecast",
+    "orcamento": "Acompanhamento",
     "orcamento-acompanhamento": "Acompanhamento",
     "investimento": "Aplicações e Investimentos",
     "financiamento": "Financiamento",
@@ -3412,6 +3413,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "resultado-caixa": "scale",
     "orcamento-novo": "file-plus",
     "orcamento-forecast": "line-chart",
+    "orcamento": "bar-chart-3",
     "orcamento-acompanhamento": "bar-chart-3",
     "investimento": "trending-up",
     "financiamento": "landmark",
@@ -4761,7 +4763,11 @@ window.CRM_MENU_PERMS_RETIRADAS = [
   "sub_mkt_eventos",
   "sub_mkt_geral_eventos_acessar",
   "sub_mkt_geral_eventos_visualizar",
-  "sub_mkt_geral_eventos_editar"
+  "sub_mkt_geral_eventos_editar",
+  "sub_fin_orc",
+  "sub_orc_geral_acompanhamento_acessar",
+  "sub_orc_geral_acompanhamento_visualizar",
+  "sub_orc_geral_acompanhamento_editar"
 ];
 
 window.crmPermShrinkConfirmed = function(obj) {
@@ -6254,6 +6260,12 @@ window.permCoversMenuKey = function(perms, modKey) {
       || perms.sub_rel_geral_relacionamento_visualizar === true
       || perms.sub_rel_geral_relacionamento_editar === true;
   }
+  if (modKey === "mod_orc") {
+    if (perms.mod_orc === true || perms.sub_orc_geral === true || perms.sub_fin_orc === true) return true;
+    const bases = ["sub_orc_geral_novo_orcamento", "sub_orc_geral_novo_forecast", "sub_fin_orc_orcamento"];
+    return bases.some((b) => perms[b + "_acessar"] === true || perms[b + "_visualizar"] === true || perms[b + "_editar"] === true);
+  }
+  if (modKey === "sub_fin_orc_orcamento_acessar" && perms.sub_fin_orc === true) return true;
   if (!String(modKey).endsWith("_acessar")) return false;
   const stem = String(modKey).slice(0, -"_acessar".length);
   return perms[stem + "_visualizar"] === true || perms[stem + "_editar"] === true;
