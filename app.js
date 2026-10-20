@@ -8151,8 +8151,8 @@ window.getFilaSortValue = function(client, sortCol) {
 
 window.compareFilaClients = function(a, b, sortCol, sortDir, thresholdJuridico, preserveGroups = true) {
   if (preserveGroups) {
-    const gA = window.getFilaQueueGroup(a, thresholdJuridico);
-    const gB = window.getFilaQueueGroup(b, thresholdJuridico);
+    const gA = (a && a._filaQueueGroup != null) ? a._filaQueueGroup : window.getFilaQueueGroup(a, thresholdJuridico);
+    const gB = (b && b._filaQueueGroup != null) ? b._filaQueueGroup : window.getFilaQueueGroup(b, thresholdJuridico);
     if (gA !== gB) return gA - gB;
   }
   const dir = (sortDir === 'asc' || sortDir === 1) ? 1 : -1;
@@ -10610,9 +10610,14 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
   filteredSubjudice = window.applyAdvFiltersTo(filteredSubjudice);
   window.advFilters = originalAdvFilters; // Restore
 
-  // 2. Ordenação da Lista principal — grupos fixos, coluna só dentro do grupo
+  // 2. Ordenação da Lista principal — grupos fixos, coluna só dentro do grupo.
+  // O grupo fica gravado aqui: a pintura cede a cada 60 linhas e a checagem da Nex
+  // pode reclassificar um título no meio. Sem o carimbo, o mesmo grupo abre dois blocos.
   const sortCol = AppState.currentSortCol || 'maxDaysDelay';
   const sortDir = AppState.currentSortDir || 'desc';
+  clientList.forEach((c) => {
+    if (c) c._filaQueueGroup = window.getFilaQueueGroup(c, thresholdJuridico);
+  });
   const sortFunc = (a, b) => window.compareFilaClients(a, b, sortCol, sortDir, thresholdJuridico, true);
 
   clientList.sort(sortFunc);
@@ -11303,8 +11308,11 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
       const subjudiceHistory = subjudiceMemory;
 
       const groupTotals = {};
+      const filaGrupoDe = (client) => (client && client._filaQueueGroup != null)
+        ? client._filaQueueGroup
+        : window.getFilaQueueGroup(client, thresholdJuridico);
       clientList.forEach(client => {
-        const g = window.getFilaQueueGroup(client, thresholdJuridico);
+        const g = filaGrupoDe(client);
         if (!groupTotals[g]) groupTotals[g] = { count: 0, value: 0 };
         groupTotals[g].count += 1;
         groupTotals[g].value += (Number(client.overdueValue) || 0) + (Number(client.overdueCharges) || 0);
@@ -11313,7 +11321,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
       let lastQueueGroup = null;
       for (let _filaI = 0; _filaI < clientList.length; _filaI++) {
         const client = clientList[_filaI];
-        const queueGroup = window.getFilaQueueGroup(client, thresholdJuridico);
+        const queueGroup = filaGrupoDe(client);
         if (queueGroup !== lastQueueGroup) {
           lastQueueGroup = queueGroup;
           const meta = window.getFilaQueueGroupMeta(queueGroup);
@@ -11416,7 +11424,10 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
               ${(() => {
                   const agingInner = (client.distratado && typeof window.clientIsSubjudiceIntegra === "function" && window.clientIsSubjudiceIntegra(client) && typeof window.filaAgingDistratadoHtml === "function")
                   ? window.filaAgingDistratadoHtml()
-                  : (typeof window.clientHasNexCumprida === "function" && window.clientHasNexCumprida(client) && typeof window.getNexCumpridaAgingHtml === "function")
+                  : ((client._filaQueueGroup != null
+                      ? client._filaQueueGroup === (window.FILA_QUEUE_GROUPS && window.FILA_QUEUE_GROUPS.NEX_CUMPRIDA)
+                      : (typeof window.clientHasNexCumprida === "function" && window.clientHasNexCumprida(client)))
+                    && typeof window.getNexCumpridaAgingHtml === "function")
                   ? window.getNexCumpridaAgingHtml(client)
                   : (typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(client) : client.subjudice === "S") ? `
               <span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #9ca3af; background-color: #f3f4f6; color: #374151; font-weight: 600;">
@@ -19436,7 +19447,9 @@ window.resetDistratoEditableFields = function(opts) {
 
   const permutaEl = document.getElementById("dist-permuta-toggle");
   if (permutaEl) permutaEl.checked = false;
-  window._distPermutaState = { contracts: [], installments: [], selection: null };
+  window._distPermutaState = { contracts: [], books: {}, installments: [], selection: null };
+  const permBox = document.getElementById("dist-permuta-contracts");
+  if (permBox) permBox.innerHTML = "";
   setVal("dist-novo-lote", "");
   const permSel = document.getElementById("dist-permuta-contract");
   if (permSel) {
@@ -19444,7 +19457,7 @@ window.resetDistratoEditableFields = function(opts) {
     permSel.value = "";
   }
   const permBody = document.getElementById("dist-permuta-parcelas-body");
-  if (permBody) permBody.innerHTML = `<div style="padding:16px;color:#94a3b8;text-align:center;font-size:0.85rem;">Selecione um contrato para carregar as parcelas.</div>`;
+  if (permBody) permBody.innerHTML = `<div style="padding:16px;color:#94a3b8;text-align:center;font-size:0.85rem;">Marque um ou mais contratos para carregar as parcelas.</div>`;
   const loteWrap = document.getElementById("dist-permuta-lote-wrap");
   if (loteWrap) loteWrap.style.display = "none";
   if (typeof window.syncDistratoPermutaUi === "function") window.syncDistratoPermutaUi();
@@ -19721,8 +19734,7 @@ window.syncDistratoExpenseDocs = function() {
   const obraAndamentoTopo = typeof window.isDistratoObraEmAndamento === "function" && window.isDistratoObraEmAndamento();
   const taxaRow = document.getElementById("dist-row-taxa-assoc");
   if (taxaRow) {
-    const permutaOn = !!(document.getElementById("dist-permuta-toggle") && document.getElementById("dist-permuta-toggle").checked);
-    taxaRow.style.display = (!permutaOn && fechado && !obraAndamentoTopo) ? "flex" : "none";
+    taxaRow.style.display = (fechado && !obraAndamentoTopo) ? "flex" : "none";
   }
   if (!fechado || obraAndamentoTopo) {
     const el = document.getElementById("dist-taxa-assoc");
@@ -19905,12 +19917,12 @@ function calculateDistrato() {
   
   // 2. Despesas
   const obraAndamento = typeof window.isDistratoObraEmAndamento === "function" && window.isDistratoObraEmAndamento();
-  const taxaAssoc = (isPermuta || obraAndamento || !window.isDistratoLoteamentoFechado()) ? 0 : parseCurrencyInput("dist-taxa-assoc");
+  const taxaAssoc = (obraAndamento || !window.isDistratoLoteamentoFechado()) ? 0 : parseCurrencyInput("dist-taxa-assoc");
   const iptuDispensado = obraAndamento;
-  const iptu = (isPermuta || iptuDispensado) ? 0 : parseCurrencyInput("dist-iptu");
-  const agua = (isPermuta || obraAndamento) ? 0 : parseCurrencyInput("dist-agua");
-  const luz = (isPermuta || obraAndamento) ? 0 : parseCurrencyInput("dist-luz");
-  const outros = isPermuta ? 0 : parseCurrencyInput("dist-outros");
+  const iptu = iptuDispensado ? 0 : parseCurrencyInput("dist-iptu");
+  const agua = obraAndamento ? 0 : parseCurrencyInput("dist-agua");
+  const luz = obraAndamento ? 0 : parseCurrencyInput("dist-luz");
+  const outros = parseCurrencyInput("dist-outros");
 
   const outrasDeducoes = taxaAssoc + iptu + agua + luz + outros;
   
@@ -20132,13 +20144,17 @@ window.handleDistratoChoiceChange = function() {
     instQty = instMin;
     if (instEl) instEl.value = String(instMin);
   }
-  const refundInstallment = negotiatedRefund / instQty;
-  const refundCash = isPermuta ? Math.max(0, negotiatedRefund - Number((window._distPermutaState && window._distPermutaState.saldoPresente) || 0)) : negotiatedRefund;
+  const refundCash = isPermuta ? distPermutaRemainingCash() : negotiatedRefund;
+  const refundInstallment = (isPermuta ? refundCash : negotiatedRefund) / instQty;
 
   const penaltyLabel = document.getElementById("dist-penalty-label");
   if (penaltyLabel) penaltyLabel.textContent = isPermuta ? "Multa por permuta (10% do recebido)" : "Multa por Rescisão (10% do contrato)";
   const liquidaLabel = document.getElementById("dist-liquida-label");
-  if (liquidaLabel) liquidaLabel.textContent = isPermuta ? "Restituição (90% do recebido)" : "Restituiçao Líquida (Lei do Distrato)";
+  if (liquidaLabel) {
+    liquidaLabel.textContent = isPermuta
+      ? (outrasDeducoes > 0.009 ? "Restituição líquida (90% menos despesas)" : "Restituição (90% do recebido)")
+      : "Restituiçao Líquida (Lei do Distrato)";
+  }
   document.querySelectorAll(".dist-standard-only").forEach(el => {
     el.style.display = isPermuta ? "none" : "flex";
   });
@@ -20396,10 +20412,16 @@ function distPermutaRemainingCash() {
   const isPermuta = !!(document.getElementById("dist-permuta-toggle") && document.getElementById("dist-permuta-toggle").checked);
   const target = distPermutaTargetRefund();
   if (!isPermuta) return target;
-  const saldoPresente = Number((window._distPermutaState && window._distPermutaState.saldoPresente) || 0);
-  const selected = Number((window._distPermutaState && window._distPermutaState.selection && window._distPermutaState.selection.selectedVp) || 0);
-  const abated = selected > 0.009 ? selected : saldoPresente;
-  return Math.max(0, target - abated);
+  const books = Object.keys((window._distPermutaState && window._distPermutaState.books) || {}).map(function(id) {
+    return window._distPermutaState.books[id];
+  }).filter(function(b) { return b && !b.loading && (Number(b.saldoPresente) || 0) > 0.009; });
+  if (!books.length) return 0;
+  const allQuit = books.every(function(b) {
+    return (Number(b.abatedVp) || 0) + 0.009 >= (Number(b.saldoPresente) || 0);
+  });
+  if (!allQuit) return 0;
+  const soma = books.reduce(function(s, b) { return s + (Number(b.saldoPresente) || 0); }, 0);
+  return Math.max(0, Math.round((target - soma) * 100) / 100);
 }
 
 function distratoClientPayoutAmount() {
@@ -22103,7 +22125,7 @@ window.syncDistratoPermutaAbatimentoUi = function() {
   if (scheduleWrap) scheduleWrap.style.display = showSchedule ? "flex" : "none";
   if (estimateWrap) estimateWrap.style.display = showSchedule ? "block" : "none";
   if (hint) {
-    hint.style.display = (on && target > saldoPresente + 0.009) ? "block" : "none";
+    hint.style.display = (on && showSchedule) ? "block" : "none";
   }
   const metaEl = document.getElementById("dist-permuta-meta");
   if (metaEl) metaEl.textContent = distPermutaFmt(target);
@@ -22173,17 +22195,26 @@ window.loadDistratoPermutaContracts = async function() {
     });
     window._distPermutaState = window._distPermutaState || {};
     window._distPermutaState.contracts = options;
+    window._distPermutaState.books = window._distPermutaState.books || {};
+    const box = document.getElementById("dist-permuta-contracts");
     if (!options.length) {
-      selectEl.innerHTML = `<option value="">Nenhum outro contrato CT ativo</option>`;
-      selectEl.disabled = true;
+      if (selectEl) {
+        selectEl.innerHTML = `<option value="">Nenhum outro contrato CT ativo</option>`;
+        selectEl.disabled = true;
+      }
+      if (box) box.innerHTML = `<div style="font-size:0.85rem;color:#9a3412;">Este cliente não possui outro contrato ativo para abatimento.</div>`;
       const body = document.getElementById("dist-permuta-parcelas-body");
       if (body) body.innerHTML = `<div style="padding:16px;text-align:center;color:#9a3412;font-size:0.85rem;">Este cliente não possui outro contrato ativo para abatimento.</div>`;
       return;
     }
-    selectEl.innerHTML = `<option value="">Selecione o contrato do cliente...</option>` + options.map((o) =>
-      `<option value="${o.billId}" data-company="${o.companyId}" data-unit="${String(o.unit).replace(/"/g, "&quot;")}">${o.label}</option>`
-    ).join("");
-    selectEl.disabled = false;
+    if (selectEl) selectEl.disabled = false;
+    if (box) {
+      box.innerHTML = options.map((o) => `
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid #fdba74;border-radius:6px;background:#fff;font-weight:700;color:#9a3412;">
+          <input type="checkbox" data-bill="${distPermutaEsc(o.billId)}" onchange="onDistratoPermutaBookToggle(this.getAttribute('data-bill'), this.checked)">
+          <span>${distPermutaEsc(o.label)}</span>
+        </label>`).join("");
+    }
   } catch (e) {
     console.error("Erro ao listar contratos para permuta:", e);
     selectEl.innerHTML = `<option value="">Erro ao buscar contratos</option>`;
@@ -22191,96 +22222,150 @@ window.loadDistratoPermutaContracts = async function() {
   }
 };
 
-window.onDistratoPermutaContractChange = async function() {
-  const selectEl = document.getElementById("dist-permuta-contract");
+function distPermutaEsc(v) {
+  return String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function distPermutaFmtDate(d) {
+  const iso = String(d || "").slice(0, 10);
+  const p = iso.split("-");
+  return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : (d || "—");
+}
+
+function distPermutaBookList() {
+  const st = window._distPermutaState || {};
+  const order = (st.contracts || []).map((c) => String(c.billId));
+  const books = st.books || {};
+  const known = order.map((id) => books[id]).filter((b) => b && !b.loading);
+  const extra = Object.keys(books).filter((id) => order.indexOf(id) < 0).map((id) => books[id]).filter((b) => b && !b.loading);
+  return known.concat(extra);
+}
+
+function distPermutaJoinFrase(items) {
+  const list = (items || []).filter(Boolean);
+  if (list.length < 2) return list[0] || "";
+  if (list.length === 2) return list[0] + " e " + list[1];
+  return list.slice(0, -1).join(", ") + " e " + list[list.length - 1];
+}
+
+window.distPermutaAplicarTeto = function(groups, target) {
+  let budget = Math.round((Number(target) || 0) * 100) / 100;
+  const selected = [];
+  (groups || []).forEach((group) => {
+    (group.items || []).forEach((item) => {
+      item.parcial = false;
+      item.abatidoVp = 0;
+      item.ratio = 0;
+      if (!item.checked) return;
+      const vp = Math.round((Number(item.vp) || 0) * 100) / 100;
+      if (budget <= 0.009) {
+        item.checked = false;
+        return;
+      }
+      if (vp <= budget + 0.009) {
+        item.abatidoVp = vp;
+        budget = Math.round((budget - vp) * 100) / 100;
+        selected.push(item);
+        return;
+      }
+      item.parcial = true;
+      item.abatidoVp = budget;
+      item.ratio = vp > 0 ? budget / vp : 0;
+      budget = 0;
+      selected.push(item);
+    });
+  });
+  return { selected: selected, restante: Math.max(0, budget) };
+};
+
+function distPermutaSyncLoteHidden() {
+  const books = distPermutaBookList();
+  const label = distPermutaJoinFrase(books.map((b) => "título " + b.billId + " (" + (b.unit || "N/D") + ")"));
   const loteEl = document.getElementById("dist-novo-lote");
+  if (loteEl) loteEl.value = label;
+  const sel = document.getElementById("dist-permuta-contract");
+  if (sel) {
+    const value = books.map((b) => b.billId).join(",");
+    sel.innerHTML = value ? `<option value="${distPermutaEsc(value)}">${distPermutaEsc(label)}</option>` : `<option value=""></option>`;
+    sel.value = value;
+  }
+}
+
+function distPermutaMapInst(inst) {
+  const due = inst.dueDate || inst.due || "";
+  const original = Number(inst.originalValue || inst.value || 0) || 0;
+  return {
+    id: inst.installmentId || inst.installmentNumber || inst.id,
+    number: inst.installmentNumber || inst.installmentId || inst.id,
+    due: due,
+    original: original,
+    balance: Number(inst.currentBalance != null ? inst.currentBalance : original) || 0,
+    vp: distPermutaInstVp(inst),
+    overdue: distPermutaIsOverdue(inst),
+    checked: false
+  };
+}
+
+window.distPermutaRenderBooks = function() {
   const body = document.getElementById("dist-permuta-parcelas-body");
-  const billId = selectEl ? selectEl.value : "";
-  const opt = selectEl && selectEl.selectedOptions && selectEl.selectedOptions[0];
-  const unit = opt ? (opt.getAttribute("data-unit") || "") : "";
-  const companyId = opt ? (opt.getAttribute("data-company") || "") : "";
-  if (loteEl) loteEl.value = unit ? `título ${billId} (${unit})` : "";
-  window._distPermutaState = window._distPermutaState || {};
-  window._distPermutaState.selection = null;
-  window._distPermutaState.installments = [];
-  if (!billId) {
-    if (body) body.innerHTML = `<div style="padding:16px;color:#94a3b8;text-align:center;font-size:0.85rem;">Selecione um contrato para carregar as parcelas.</div>`;
-    window.syncDistratoPermutaAbatimentoUi();
-    calculateDistrato();
+  if (!body) return;
+  const st = window._distPermutaState || {};
+  const order = (st.contracts || []).map((c) => String(c.billId));
+  const books = order.map((id) => (st.books || {})[id]).filter(Boolean);
+  if (!books.length) {
+    body.innerHTML = `<div style="padding:16px;color:#94a3b8;text-align:center;font-size:0.85rem;">Marque um ou mais contratos para carregar as parcelas.</div>`;
     return;
   }
-  if (body) body.innerHTML = `<div style="padding:16px;text-align:center;color:#9a3412;font-size:0.85rem;">Buscando parcelas a valor presente no Sienge...</div>`;
-  try {
-    const res = await SiengeApiService.getCustomerDebtBalance(billId, { companyId });
-    const rows = flattenCustomerDebtBalance(res)
-      .filter(distPermutaInstOpen)
-      .map((inst) => {
-        const due = inst.dueDate || inst.due || "";
-        const original = Number(inst.originalValue || inst.value || 0) || 0;
-        return {
-          id: inst.installmentId || inst.installmentNumber || inst.id,
-          number: inst.installmentNumber || inst.installmentId || inst.id,
-          due,
-          original,
-          balance: Number(inst.currentBalance != null ? inst.currentBalance : original) || 0,
-          vp: distPermutaInstVp(inst),
-          overdue: distPermutaIsOverdue(inst)
-        };
-      })
-      .filter((r) => r.vp > 0.009)
-      .sort((a, b) => String(a.due).localeCompare(String(b.due)));
-    window._distPermutaState.installments = rows;
-    window._distPermutaState.billId = billId;
-    window._distPermutaState.unit = unit;
-    const vencidas = rows.filter((r) => r.overdue);
-    const aVencer = rows.filter((r) => !r.overdue);
-    const sumVenc = vencidas.reduce((s, r) => s + (Number(r.vp) || 0), 0);
-    const sumFut = aVencer.reduce((s, r) => s + (Number(r.vp) || 0), 0);
-    window._distPermutaState.saldoPresente = sumVenc + sumFut;
-    window._distPermutaState.vencidasAtualizado = sumVenc;
-    window._distPermutaState.aVencerVp = sumFut;
+  body.innerHTML = books.map((book) => {
+    if (book.loading) {
+      return `<div style="padding:14px;border-bottom:1px solid #fed7aa;color:#9a3412;font-size:0.85rem;">Buscando parcelas do título ${distPermutaEsc(book.billId)}...</div>`;
+    }
+    if (book.error) {
+      return `<div style="padding:14px;border-bottom:1px solid #fed7aa;color:#b91c1c;font-size:0.85rem;">Não foi possível obter o valor presente do título ${distPermutaEsc(book.billId)}.</div>`;
+    }
+    const rows = book.installments || [];
     if (!rows.length) {
-      body.innerHTML = `<div style="padding:16px;text-align:center;color:#9a3412;font-size:0.85rem;">Nenhuma parcela em aberto com valor presente neste contrato.</div>`;
-    } else {
-      const fmtDate = (d) => {
-        const iso = String(d || "").slice(0, 10);
-        const p = iso.split("-");
-        return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : (d || "—");
-      };
-      const rowHtml = (r, i) => `
-        <tr style="border-bottom:1px solid #fed7aa;background:${i % 2 ? "#fff7ed" : "#fff"};">
-          <td style="padding:6px;text-align:center;">
-            <input type="checkbox" class="dist-permuta-inst-check" data-idx="${i}" onchange="onDistratoPermutaInstToggle()">
-          </td>
-          <td style="padding:6px;font-weight:700;">${r.number}</td>
-          <td style="padding:6px;text-align:center;">${fmtDate(r.due)}</td>
-          <td style="padding:6px;text-align:right;">${distPermutaFmt(r.original || r.balance)}</td>
-          <td style="padding:6px;text-align:right;font-weight:800;color:${r.overdue ? "#9a3412" : "#1d4ed8"};">${distPermutaFmt(r.vp)}</td>
+      return `<div style="padding:14px;border-bottom:1px solid #fed7aa;color:#9a3412;font-size:0.85rem;">Nenhuma parcela em aberto no título ${distPermutaEsc(book.billId)}.</div>`;
+    }
+    const rowHtml = (r, i) => `
+      <tr style="border-bottom:1px solid #fed7aa;background:${i % 2 ? "#fff7ed" : "#fff"};">
+        <td style="padding:6px;text-align:center;">
+          <input type="checkbox" class="dist-permuta-inst-check" data-bill="${distPermutaEsc(book.billId)}" data-idx="${i}" ${r.checked ? "checked" : ""} onchange="onDistratoPermutaInstToggle()">
+        </td>
+        <td style="padding:6px;font-weight:700;">
+          ${distPermutaEsc(r.number)}
+          <div class="dist-permuta-parcial-note" data-bill="${distPermutaEsc(book.billId)}" data-idx="${i}" style="font-size:0.68rem;font-weight:700;color:#9a3412;"></div>
+        </td>
+        <td style="padding:6px;text-align:center;">${distPermutaFmtDate(r.due)}</td>
+        <td style="padding:6px;text-align:right;">${distPermutaFmt(r.original || r.balance)}</td>
+        <td style="padding:6px;text-align:right;font-weight:800;color:${r.overdue ? "#9a3412" : "#1d4ed8"};">${distPermutaFmt(r.vp)}</td>
+      </tr>`;
+    const section = (title, list) => {
+      if (!list.length) return "";
+      const total = list.reduce((s, r) => s + (Number(r.vp) || 0), 0);
+      const idxs = list.map((r) => rows.indexOf(r));
+      return `
+        <tr style="background:#fff7ed;"><td colspan="5" style="padding:8px 8px 4px;font-size:0.72rem;font-weight:800;color:#9a3412;text-transform:uppercase;">${title}</td></tr>
+        ${list.map((r, k) => rowHtml(r, idxs[k])).join("")}
+        <tr style="background:#ffedd5;">
+          <td colspan="4" style="padding:6px 8px;text-align:right;font-weight:800;color:#9a3412;">Totais</td>
+          <td style="padding:6px 8px;text-align:right;font-weight:800;color:#9a3412;">${distPermutaFmt(total)}</td>
         </tr>`;
-      const section = (title, list) => {
-        if (!list.length) return "";
-        const total = list.reduce((s, r) => s + (Number(r.vp) || 0), 0);
-        const idxs = list.map((r) => rows.indexOf(r));
-        return `
-          <tr style="background:#fff7ed;">
-            <td colspan="5" style="padding:8px 8px 4px;font-size:0.72rem;font-weight:800;color:#9a3412;text-transform:uppercase;">${title}</td>
-          </tr>
-          ${list.map((r, k) => rowHtml(r, idxs[k])).join("")}
-          <tr style="background:#ffedd5;">
-            <td colspan="4" style="padding:6px 8px;text-align:right;font-weight:800;color:#9a3412;">Totais</td>
-            <td style="padding:6px 8px;text-align:right;font-weight:800;color:#9a3412;">${distPermutaFmt(total)}</td>
-          </tr>`;
-      };
-      body.innerHTML = `
-        <div style="padding:10px 12px;background:#fff;border-bottom:1px solid #fed7aa;">
-          <div style="font-size:0.78rem;font-weight:800;color:#9a3412;">Saldo devedor presente deste título</div>
-          <div style="font-size:1.15rem;font-weight:800;color:#0f172a;">${distPermutaFmt(window._distPermutaState.saldoPresente)}</div>
-          <div style="font-size:0.72rem;color:#9a3412;margin-top:2px;">Vencidas atualizadas ${distPermutaFmt(sumVenc)} + a vencer a VP ${distPermutaFmt(sumFut)}</div>
+    };
+    return `
+      <div style="border-bottom:8px solid #fff7ed;">
+        <div style="padding:10px 12px;background:#fff;border-bottom:1px solid #fed7aa;display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;">
+          <div>
+            <div style="font-size:0.78rem;font-weight:800;color:#9a3412;">Título ${distPermutaEsc(book.billId)} · ${distPermutaEsc(book.unit || "N/D")}</div>
+            <div style="font-size:1.05rem;font-weight:800;color:#0f172a;">${distPermutaFmt(book.saldoPresente)}</div>
+            <div style="font-size:0.72rem;color:#9a3412;margin-top:2px;">Vencidas atualizadas ${distPermutaFmt(book.vencidasAtualizado)} + a vencer a VP ${distPermutaFmt(book.aVencerVp)}</div>
+          </div>
+          <button type="button" data-bill="${distPermutaEsc(book.billId)}" onclick="marcarParcelasPermutaAteRestituicao(this.getAttribute('data-bill'))" style="background:#ea580c;border:none;color:#fff;font-weight:700;padding:6px 10px;border-radius:6px;cursor:pointer;">Marcar o restante neste título</button>
         </div>
         <table style="width:100%;border-collapse:collapse;font-size:0.8rem;">
           <thead>
             <tr style="background:#9a3412;color:#fff;">
-              <th style="padding:8px;width:36px;text-align:center;"></th>
+              <th style="padding:8px;width:36px;"></th>
               <th style="padding:8px;text-align:left;">Parcela</th>
               <th style="padding:8px;text-align:center;">Vencimento</th>
               <th style="padding:8px;text-align:right;">Valor original</th>
@@ -22288,83 +22373,176 @@ window.onDistratoPermutaContractChange = async function() {
             </tr>
           </thead>
           <tbody>
-            ${section("Valores a pagar (vencidas) — valor atualizado", vencidas)}
-            ${section("Valores a pagar (a vencer) — desconto comercial", aVencer)}
-            <tr style="background:#9a3412;color:#fff;">
-              <td colspan="4" style="padding:8px;text-align:right;font-weight:800;">Total saldo devedor presente</td>
-              <td style="padding:8px;text-align:right;font-weight:800;">${distPermutaFmt(window._distPermutaState.saldoPresente)}</td>
-            </tr>
+            ${section("Valores a pagar (vencidas) — valor atualizado", rows.filter((r) => r.overdue))}
+            ${section("Valores a pagar (a vencer) — desconto comercial", rows.filter((r) => !r.overdue))}
           </tbody>
-        </table>`;
-    }
+        </table>
+      </div>`;
+  }).join("");
+};
+
+window.onDistratoPermutaBookToggle = async function(billId, checked) {
+  billId = String(billId || "");
+  window._distPermutaState = window._distPermutaState || {};
+  const st = window._distPermutaState;
+  st.books = st.books || {};
+  if (!checked) {
+    delete st.books[billId];
+    window.distPermutaRenderBooks();
+    window.onDistratoPermutaInstToggle();
+    return;
+  }
+  const opt = (st.contracts || []).find((c) => String(c.billId) === billId) || { billId: billId, unit: "", companyId: "" };
+  st.books[billId] = { billId: billId, unit: opt.unit, companyId: opt.companyId, loading: true, installments: [], saldoPresente: 0, abatedVp: 0 };
+  window.distPermutaRenderBooks();
+  try {
+    const res = await SiengeApiService.getCustomerDebtBalance(billId, { companyId: opt.companyId });
+    if (!st.books[billId]) return;
+    const rows = flattenCustomerDebtBalance(res)
+      .filter(distPermutaInstOpen)
+      .map(distPermutaMapInst)
+      .filter((r) => r.vp > 0.009)
+      .sort((a, b) => String(a.due).localeCompare(String(b.due)));
+    const vencidas = rows.filter((r) => r.overdue);
+    const aVencer = rows.filter((r) => !r.overdue);
+    const sumVenc = vencidas.reduce((s, r) => s + (Number(r.vp) || 0), 0);
+    const sumFut = aVencer.reduce((s, r) => s + (Number(r.vp) || 0), 0);
+    st.books[billId] = {
+      billId: billId,
+      unit: opt.unit,
+      companyId: opt.companyId,
+      loading: false,
+      installments: rows,
+      saldoPresente: sumVenc + sumFut,
+      vencidasAtualizado: sumVenc,
+      aVencerVp: sumFut,
+      abatedVp: 0
+    };
   } catch (e) {
     console.error("Erro ao carregar VP da permuta:", e);
-    if (body) body.innerHTML = `<div style="padding:16px;text-align:center;color:#b91c1c;font-size:0.85rem;">Não foi possível obter o valor presente deste contrato.</div>`;
+    if (st.books[billId]) {
+      st.books[billId] = { billId: billId, unit: opt.unit, companyId: opt.companyId, loading: false, error: true, installments: [], saldoPresente: 0, abatedVp: 0 };
+    }
   }
-  window.syncDistratoPermutaAbatimentoUi();
+  window.distPermutaRenderBooks();
   window.onDistratoPermutaInstToggle();
 };
 
+window.onDistratoPermutaContractChange = async function() {
+  const selectEl = document.getElementById("dist-permuta-contract");
+  const billId = selectEl ? String(selectEl.value || "").split(",")[0] : "";
+  if (billId && typeof window.onDistratoPermutaBookToggle === "function") {
+    window.onDistratoPermutaBookToggle(billId, true);
+  }
+};
+
 window.onDistratoPermutaInstToggle = function() {
-  const rows = (window._distPermutaState && window._distPermutaState.installments) || [];
-  const checks = document.querySelectorAll(".dist-permuta-inst-check");
-  const selected = [];
-  checks.forEach((chk) => {
-    if (!chk.checked) return;
-    const inst = rows[Number(chk.getAttribute("data-idx"))];
-    if (inst) selected.push(inst);
+  const st = window._distPermutaState || {};
+  const books = distPermutaBookList();
+  const groups = books.map((book) => ({
+    billId: book.billId,
+    items: (book.installments || []).map((inst, idx) => {
+      const chk = document.querySelector('.dist-permuta-inst-check[data-bill="' + book.billId + '"][data-idx="' + idx + '"]');
+      inst.checked = chk ? !!chk.checked : !!inst.checked;
+      inst.billId = book.billId;
+      inst.unit = book.unit;
+      return inst;
+    })
+  }));
+  const applied = window.distPermutaAplicarTeto(groups, distPermutaTargetRefund());
+  books.forEach((book) => {
+    let abated = 0;
+    (book.installments || []).forEach((inst, idx) => {
+      const chk = document.querySelector('.dist-permuta-inst-check[data-bill="' + book.billId + '"][data-idx="' + idx + '"]');
+      if (chk) chk.checked = !!inst.checked;
+      const note = document.querySelector('.dist-permuta-parcial-note[data-bill="' + book.billId + '"][data-idx="' + idx + '"]');
+      if (note) {
+        if (inst.parcial && inst.checked) {
+          const pct = (Number(inst.ratio) || 0) * 100;
+          note.textContent = "Abatimento parcial de " + distPermutaFmt(inst.abatidoVp) + " (" + pct.toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "% do valor presente) para fechar a restituição.";
+        } else {
+          note.textContent = "";
+        }
+      }
+      if (inst.checked) abated += Number(inst.abatidoVp) || 0;
+    });
+    book.abatedVp = Math.round(abated * 100) / 100;
   });
-  const sum = selected.reduce((acc, r) => acc + (Number(r.vp) || 0), 0);
+  const sum = applied.selected.reduce((acc, r) => acc + (Number(r.abatidoVp) || 0), 0);
   const target = distPermutaTargetRefund();
-  const diff = target - sum;
+  const saldoPresente = books.reduce((s, b) => s + (Number(b.saldoPresente) || 0), 0);
+  st.installments = books.reduce((acc, b) => acc.concat(b.installments || []), []);
+  st.saldoPresente = saldoPresente;
+  st.billId = books.map((b) => b.billId).join(",");
+  st.unit = books.map((b) => b.unit).join(" e ");
+  const cash = distPermutaRemainingCash();
+  const diff = Math.round((target - sum - cash) * 100) / 100;
   const selEl = document.getElementById("dist-permuta-selecionado");
   const saldoEl = document.getElementById("dist-permuta-saldo");
   const metaEl = document.getElementById("dist-permuta-meta");
   const sdEl = document.getElementById("dist-permuta-sd-presente");
-  const saldoPresente = Number((window._distPermutaState && window._distPermutaState.saldoPresente) || 0);
   if (sdEl) sdEl.textContent = distPermutaFmt(saldoPresente);
   if (metaEl) metaEl.textContent = distPermutaFmt(target);
   if (selEl) selEl.textContent = distPermutaFmt(sum);
   if (saldoEl) {
-    if (diff > 0.009) {
+    if (!books.length) {
       saldoEl.style.color = "#9a3412";
-      saldoEl.textContent = "Falta: " + distPermutaFmt(diff);
+      saldoEl.textContent = "Falta: " + distPermutaFmt(target);
+    } else if (cash > 0.009) {
+      saldoEl.style.color = "#166534";
+      saldoEl.textContent = "Quitou e sobra " + distPermutaFmt(cash);
+    } else if (diff > 0.009) {
+      saldoEl.style.color = "#9a3412";
+      saldoEl.textContent = "Falta alocar: " + distPermutaFmt(diff);
     } else {
       saldoEl.style.color = "#166534";
-      saldoEl.textContent = (Math.abs(diff) <= 0.009 ? "Cobriu a restituição" : "Excedente: " + distPermutaFmt(Math.abs(diff)));
-    }
-    if (saldoPresente > 0.009 && target > saldoPresente + 0.009) {
-      saldoEl.style.color = "#9a3412";
-      saldoEl.textContent = "Este título tem saldo presente de " + distPermutaFmt(saldoPresente) + " e não cobre a restituição de " + distPermutaFmt(target);
+      saldoEl.textContent = "Cobriu a restituição";
     }
   }
-  window._distPermutaState = window._distPermutaState || {};
-  window._distPermutaState.selection = {
-    billId: window._distPermutaState.billId,
-    unit: window._distPermutaState.unit,
-    installments: selected,
-    selectedVp: sum,
-    target
+  st.selection = {
+    billId: st.billId,
+    unit: st.unit,
+    installments: applied.selected.map((inst) => Object.assign({}, inst)),
+    selectedVp: Math.round(sum * 100) / 100,
+    target: target,
+    falta: diff,
+    cash: cash
   };
-  if (AppState.currentDistratoResult) AppState.currentDistratoResult.permutaAbatimento = window._distPermutaState.selection;
+  distPermutaSyncLoteHidden();
+  if (AppState.currentDistratoResult) AppState.currentDistratoResult.permutaAbatimento = st.selection;
   if (typeof updateDistratoRefundScheduleAmounts === "function") updateDistratoRefundScheduleAmounts();
   if (typeof window.syncDistratoPermutaAbatimentoUi === "function") window.syncDistratoPermutaAbatimentoUi();
 };
 
-window.marcarParcelasPermutaAteRestituicao = function() {
-  const rows = (window._distPermutaState && window._distPermutaState.installments) || [];
+window.marcarParcelasPermutaAteRestituicao = function(billId) {
+  const books = distPermutaBookList();
   const target = distPermutaTargetRefund();
-  const checks = document.querySelectorAll(".dist-permuta-inst-check");
-  let acc = 0;
-  checks.forEach((chk) => {
-    const inst = rows[Number(chk.getAttribute("data-idx"))];
-    if (!inst) { chk.checked = false; return; }
-    if (acc + 0.009 < target) {
-      chk.checked = true;
-      acc += Number(inst.vp) || 0;
-    } else {
-      chk.checked = false;
-    }
+  let usadoOutros = 0;
+  if (billId) {
+    books.forEach((book) => {
+      if (String(book.billId) === String(billId)) return;
+      (book.installments || []).forEach((inst) => {
+        if (!inst.checked) return;
+        usadoOutros += Number(inst.abatidoVp || inst.vp) || 0;
+      });
+    });
+  }
+  let budget = billId ? Math.max(0, Math.round((target - usadoOutros) * 100) / 100) : target;
+  const alvos = billId ? books.filter((b) => String(b.billId) === String(billId)) : books;
+  alvos.forEach((book) => {
+    (book.installments || []).forEach((inst, idx) => {
+      const chk = document.querySelector('.dist-permuta-inst-check[data-bill="' + book.billId + '"][data-idx="' + idx + '"]');
+      if (!chk) return;
+      const vp = Number(inst.vp) || 0;
+      if (budget > 0.009 && vp > 0.009) {
+        chk.checked = true;
+        inst.checked = true;
+        budget = Math.round((budget - vp) * 100) / 100;
+      } else {
+        chk.checked = false;
+        inst.checked = false;
+      }
+    });
   });
   window.onDistratoPermutaInstToggle();
 };
@@ -22386,9 +22564,11 @@ window.toggleDistratoPermuta = function() {
     }
     const loteEl = document.getElementById("dist-novo-lote");
     if (loteEl) loteEl.value = "";
-    window._distPermutaState = { contracts: [], installments: [], selection: null };
+    const box = document.getElementById("dist-permuta-contracts");
+    if (box) box.innerHTML = "";
+    window._distPermutaState = { contracts: [], books: {}, installments: [], selection: null };
     const body = document.getElementById("dist-permuta-parcelas-body");
-    if (body) body.innerHTML = `<div style="padding:16px;color:#94a3b8;text-align:center;font-size:0.85rem;">Selecione um contrato para carregar as parcelas.</div>`;
+    if (body) body.innerHTML = `<div style="padding:16px;color:#94a3b8;text-align:center;font-size:0.85rem;">Marque um ou mais contratos para carregar as parcelas.</div>`;
   }
   if (typeof window.syncDistratoPermutaAbatimentoUi === "function") window.syncDistratoPermutaAbatimentoUi();
   calculateDistrato();
@@ -22633,6 +22813,7 @@ function applyDistratoConditionals(text, flags) {
     ['SE_RESTITUICAO', !!flags.hasRestituicao],
     ['SE_SEM_RESTITUICAO', !!flags.hasSemRestituicao],
     ['SE_NOVO_LOTE', !!flags.hasNovoLote],
+    ['SE_PERMUTA_PARCIAL', !!flags.hasPermutaParcial],
     ['SE_PERMUTA_SALDO', !!flags.hasPermutaSaldo],
     ['SE_PAGAMENTO_BANCARIO', !!flags.hasPagamentoBancario],
     ['SE_INICIATIVA_CLIENTE', flags.iniciativa !== 'empresa'],
@@ -23322,6 +23503,68 @@ window.applyQuitacaoRubrica = function(html) {
   return String(html || "").replace(/(<div class="pdf-sign-keep"[\s\S]*?)(<div style="border-top:1px solid #111;)/, "$1" + img + "$2");
 };
 
+function upgradePermutaTextoDistrato(text) {
+  let s = String(text || "");
+  if (!/\{\{#SE_PERMUTA\}\}/.test(s)) return s;
+  if (!/\{\{TEXTO_DEDUCOES_PERMUTA\}\}/.test(s)) {
+    s = s.replace(
+      /\{\{VALOR_MULTA\}\}\), resultando no valor de/,
+      "{{VALOR_MULTA}}){{TEXTO_DEDUCOES_PERMUTA}}, resultando no valor de"
+    );
+  }
+  if (!/\{\{PERMUTA_CONTRATOS\}\}/.test(s)) {
+    s = s.replace(
+      /5\.2\. O valor apurado a título de restituição será utilizado para compensação e abatimento de parcelas vincendas do contrato de compromisso de compra e venda mantido pelo PROMITENTE COMPRADOR junto à PROMITENTE VENDEDORA, referente ao lote \{\{NOVO_LOTE\}\}\./,
+      "5.2. O valor apurado a título de restituição será utilizado para compensação e abatimento de parcelas dos contratos de compromisso de compra e venda mantidos pelo PROMITENTE COMPRADOR junto à PROMITENTE VENDEDORA, referentes a {{PERMUTA_CONTRATOS}}. A restituição pode ser dividida entre esses títulos.\n{{#SE_PERMUTA_PARCIAL}}\n5.2.1. As parcelas marcadas serão baixadas pelo valor presente integral. Para fechar exatamente o valor da restituição, sem excedente, a parcela seguinte será abatida só na proporção que faltar: {{PERMUTA_PARCIAL_TEXTO}}.\n{{/SE_PERMUTA_PARCIAL}}"
+    );
+  }
+  if (/\{\{#SE_PERMUTA_SALDO\}\}/.test(s) && !/somente ocorre se a restituição quitar/.test(s)) {
+    s = s.replace(
+      /\{\{#SE_PERMUTA_SALDO\}\}[\s\S]*?\{\{\/SE_PERMUTA_SALDO\}\}/,
+      "{{#SE_PERMUTA_SALDO}}\n5.3. A devolução em dinheiro somente ocorre se a restituição quitar integralmente o contrato da permuta e ainda sobrar valor. Nesse caso, o saldo remanescente de {{VALOR_SALDO_RESTITUICAO}} ({{VALOR_SALDO_RESTITUICAO_EXTENSO}}) será devolvido em {{QTD_PARCELAS_RESTITUICAO}} ({{QTD_PARCELAS_RESTITUICAO_EXTENSO}}) parcela(s) de {{VALOR_PARCELA_RESTITUICAO}} ({{VALOR_PARCELA_RESTITUICAO_EXTENSO}}), via {{FORMA_PAGAMENTO}} na conta de titularidade de {{BENEFICIARIO}} (CPF/CNPJ: {{CPF_BENEFICIARIO}}). {{DADOS_PAGAMENTO}}\n{{/SE_PERMUTA_SALDO}}"
+    );
+  }
+  return s;
+}
+
+function distPermutaTextoDocumento(extra) {
+  const sel = (window._distPermutaState && window._distPermutaState.selection) || {};
+  const insts = sel.installments || [];
+  const byBill = [];
+  const seen = {};
+  insts.forEach((inst) => {
+    const id = String(inst.billId || "");
+    if (!seen[id]) {
+      seen[id] = { billId: id, unit: inst.unit || "" };
+      byBill.push(seen[id]);
+    }
+  });
+  const contratos = byBill.map((b) => "o título " + b.billId + (b.unit ? ", unidade " + b.unit : ""));
+  const parcialTxt = insts.filter((p) => p.parcial).map((p) => {
+    const pct = ((Number(p.ratio) || 0) * 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const valor = Number(p.abatidoVp) || 0;
+    const ext = typeof valorPorExtensoBRL === "function" ? valorPorExtensoBRL(valor) : "";
+    return "no título " + p.billId + (p.unit ? ", unidade " + p.unit : "") + ", a parcela " + p.number + ", com vencimento em " + distPermutaFmtDate(p.due) + ", será abatida proporcionalmente no valor presente de " + distPermutaFmt(valor) + (ext ? " (" + ext + ")" : "") + ", correspondente a " + pct + "% do valor presente de " + distPermutaFmt(p.vp);
+  }).join("; ");
+  const nomes = [];
+  const deb = extra || {};
+  if ((Number(deb.iptu) || 0) > 0.009) nomes.push("IPTU");
+  if ((Number(deb.taxaAssoc) || 0) > 0.009) nomes.push("taxa associativa");
+  if ((Number(deb.agua) || 0) > 0.009) nomes.push("água");
+  if ((Number(deb.luz) || 0) > 0.009) nomes.push("energia");
+  if ((Number(deb.outros) || 0) > 0.009) nomes.push("outras despesas");
+  let deducoes = "";
+  if (nomes.length === 1) deducoes = ", e após a dedução de " + nomes[0];
+  else if (nomes.length > 1) deducoes = ", e após a dedução de " + distPermutaJoinFrase(nomes);
+  const lote = document.getElementById("dist-novo-lote");
+  return {
+    PERMUTA_CONTRATOS: distPermutaJoinFrase(contratos) || (lote && lote.value) || "____",
+    PERMUTA_PARCIAL_TEXTO: parcialTxt,
+    hasParcial: insts.some((p) => p.parcial),
+    TEXTO_DEDUCOES_PERMUTA: deducoes
+  };
+}
+
 function upgradeDistratoClauses(text) {
   let s = String(text || '');
   if (!/\{\{#SE_PERMUTA\}\}/.test(s)) {
@@ -23367,6 +23610,7 @@ function upgradeDistratoClauses(text) {
   if (!/^t[ií]tulo\s*:/i.test(firstLine) && !/\{\{\s*TITULO\s*\}\}/.test(firstLine)) {
     s = "Título: {{TITULO}} | Unidade: {{UNIDADE}}\n\n" + s;
   }
+  s = upgradePermutaTextoDistrato(s);
   if (!/\{\{#SE_INICIATIVA_CLIENTE\}\}/.test(s) && /CLÁUSULA SEGUNDA/i.test(s)) {
     s = s.replace(
       /2\.1\. O\(A\) PROMITENTE COMPRADOR\(A\), por razões de ordem estritamente pessoal[\s\S]*?deste instrumento\./,
@@ -23469,7 +23713,12 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
     }
     if (!insts.length) {
       window.setDistratoAba("negociacao");
-      alert("Na permuta, selecione as parcelas a serem baixadas no lote escolhido.");
+      alert("Na permuta, selecione as parcelas a serem baixadas nos títulos escolhidos.");
+      return;
+    }
+    if (Number(sel.falta) > 0.009) {
+      window.setDistratoAba("negociacao");
+      alert("Ainda falta alocar " + distPermutaFmt(sel.falta) + " da restituição nos títulos da permuta. A devolução em dinheiro só entra se esses títulos forem quitados e ainda sobrar valor.");
       return;
     }
   }
@@ -23608,13 +23857,15 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
     const hasRestituicao = !isPermuta && Number(valorLiq) > 0.009;
     const hasPermutaSaldo = isPermuta && valorSaldoRest > 0.009;
     const iniciativa = distVal("dist-iniciativa") || "cliente";
-    const novoLoteRaw = distVal("dist-novo-lote");
+    const permDoc = distPermutaTextoDocumento(results.extraDebits);
+    const novoLoteRaw = distVal("dist-novo-lote") || permDoc.PERMUTA_CONTRATOS;
     const hasNovoLote = !!(novoLoteRaw && novoLoteRaw !== '____');
     let clausesReady = applyDistratoConditionals(clauses, {
       hasPermuta: isPermuta,
       hasRestituicao,
       hasSemRestituicao: !isPermuta && !hasRestituicao,
       hasNovoLote,
+      hasPermutaParcial: !!(isPermuta && permDoc.hasParcial),
       hasPermutaSaldo,
       hasPagamentoBancario: isPermuta ? (!hasNovoLote && hasPermutaSaldo) : hasRestituicao,
       iniciativa,
@@ -23651,6 +23902,9 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
       DADOS_PAGAMENTO: payInfoHtml || '',
       PERCENTUAL_RETENCAO: pctRetencao,
       NOVO_LOTE: novoLoteRaw || '____',
+      PERMUTA_CONTRATOS: permDoc.PERMUTA_CONTRATOS,
+      PERMUTA_PARCIAL_TEXTO: permDoc.PERMUTA_PARCIAL_TEXTO,
+      TEXTO_DEDUCOES_PERMUTA: isPermuta ? permDoc.TEXTO_DEDUCOES_PERMUTA : '',
       TESTEMUNHA_1_NOME: w1.nome || t.test1Nome || '________________',
       TESTEMUNHA_1_RG: w1.rg || t.test1Rg || '________________',
       TESTEMUNHA_2_NOME: w2.nome || t.test2Nome || '________________',
@@ -23932,9 +24186,11 @@ window.generateDemonstrativoDistratoPDF = function() {
   const enterpriseName = txt(cabecalho.enterpriseName);
 
   const parcelas = Number(results.instQty) || 1;
-  const refundText = parcelas > 1
-    ? `${brl(results.baseRefund)} em ${parcelas} parcelas de ${brl(results.refundInstallment)}`
-    : brl(results.baseRefund);
+  const refundText = results.isPermuta
+    ? brl(results.refundNet)
+    : (parcelas > 1
+      ? `${brl(results.baseRefund)} em ${parcelas} parcelas de ${brl(results.refundInstallment)}`
+      : brl(results.baseRefund));
 
   const chaveUnidade = String(g_distSale.unitId || "");
   const idTexto = typeof unit.id === "string" ? unit.id : "";
@@ -24023,7 +24279,7 @@ window.generateDemonstrativoDistratoPDF = function() {
           <td style="padding: 5px 5px; text-align: right; border-bottom: 1px solid #000; color: #b91c1c;">- ${brl(results.extraDebits.outros)}</td>
         </tr>
         <tr style="font-weight: bold; font-size: 12pt; background-color: #f1f5f9;">
-          <td style="padding: 12px 5px; border-bottom: 1px solid #000;">Restituição Líquida (Lei do Distrato)</td>
+          <td style="padding: 12px 5px; border-bottom: 1px solid #000;">${results.isPermuta ? "Restituição da permuta" : "Restituição Líquida (Lei do Distrato)"}</td>
           <td style="padding: 12px 5px; text-align: right; color: #000; border-bottom: 1px solid #000;">${refundText}</td>
         </tr>
       </table>
@@ -30684,8 +30940,12 @@ window.nexScheduleCumpridaCheck = function() {
   })).then(function() {
     window._nexCumpridaChecking = false;
     window._nexCumpridaSet = null;
+    if (window._isDefaultersLoading) {
+      window._filaSearchPending = true;
+      return;
+    }
     const tab = document.getElementById("tab-dashboard");
-    if (tab && tab.style.display !== "none" && window.AppState && AppState.defaultersLoaded && !window._isDefaultersLoading && typeof loadDashboardData === "function") {
+    if (tab && tab.style.display !== "none" && window.AppState && AppState.defaultersLoaded && typeof loadDashboardData === "function") {
       loadDashboardData(false);
     }
   });
