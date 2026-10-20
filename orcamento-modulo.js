@@ -405,7 +405,7 @@ const OrcamentoModuloApp = {
       const somaAntes = (parte.antes || []).reduce((s, v) => s + (Number(v) || 0), 0);
       const linhaAntes = somaAntes > 0.009 ? this.linhaConta(rotuloAntes, "recebe em " + ano, parte.antes, "is-antes", "") : "";
       return cabeca
-        + this.linhaConta(ano, "vence em " + ano, parte.vence, "is-vence", "")
+        + this.linhaConta(ano, "recebe pelo PMP", parte.vence, "is-vence", "")
         + linhaAntes
         + this.linhaConta("Reajuste", "sobre o caixa", parte.repactuacao, "is-reaj", "orc-rec-reaj")
         + this.linhaConta("Sub judice", "não soma", sub, "is-sj", "")
@@ -562,22 +562,43 @@ const OrcamentoModuloApp = {
     return [];
   },
 
-  ehSubJudice(bill, clienteId, titulo) {
+  marcadoSubJudice(obj) {
+    if (!obj) return false;
     const flag = (v) => (typeof window.valueIsSubjudice === "function")
       ? window.valueIsSubjudice(v)
       : (v === true || v === 1 || String(v || "").trim().toUpperCase() === "S");
-    if (flag(bill.subjudice) || flag(bill.subJudicie) || flag(bill.underJudgment) || flag(bill.judgment)) return true;
-    const sit = String(bill.defaulterSituation || bill.situation || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
-    if (sit.indexOf("SUB") >= 0 && sit.indexOf("JUD") >= 0) return true;
+    if (flag(obj.subjudice) || flag(obj.subJudice) || flag(obj.subJudicie) || flag(obj.underJudgment) || flag(obj.judgment)) return true;
+    const sit = String(obj.defaulterSituation || obj.situation || obj.defaulterStatus || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    return sit.indexOf("SUB") >= 0 && sit.indexOf("JUD") >= 0;
+  },
+
+  tituloSubJudiceIntegra(clienteId, titulo) {
+    const sid = String(titulo || "").replace(/^B-/i, "").split("-")[0];
+    if (!sid) return false;
+    const bag = (window.subjudiceIntegraData && window.subjudiceIntegraData.clients) || {};
+    const cid = String(clienteId || "");
+    if (cid && bag[cid + "-" + sid] && bag[cid + "-" + sid].on !== false) return true;
+    return Object.keys(bag).some((k) => {
+      const item = bag[k];
+      if (!item || item.on === false) return false;
+      const id = String(item.saleId || "").replace(/^B-/i, "").split("-")[0];
+      return id === sid;
+    });
+  },
+
+  ehSubJudice(bill, clienteId, titulo) {
+    if (this.marcadoSubJudice(bill)) return true;
+    if (this.tituloSubJudiceIntegra(clienteId, titulo)) return true;
     const cliente = { customerId: clienteId, saleId: titulo, billIds: titulo ? [titulo] : [], subjudice: "N" };
     if (typeof window.clientIsSubjudiceIntegra === "function" && window.clientIsSubjudiceIntegra(cliente)) return true;
     const lista = window.rawClientList || window.clientList || [];
+    const sid = String(titulo || "").replace(/^B-/i, "").split("-")[0];
     const row = lista.find((c) => {
       if (!c) return false;
       const ids = []
         .concat(c.billIds || [])
         .concat(c.saleId ? [c.saleId] : []);
-      return ids.some((id) => String(id).replace(/^B-/i, "").split("-")[0] === String(titulo));
+      return ids.some((id) => String(id).replace(/^B-/i, "").split("-")[0] === sid);
     });
     if (row && typeof window.clientIsSubjudice === "function" && window.clientIsSubjudice(row)) return true;
     if (row && typeof window.clientIsSubjudiceIntegra === "function" && window.clientIsSubjudiceIntegra(row)) return true;
@@ -587,6 +608,9 @@ const OrcamentoModuloApp = {
   agruparTitulos(linhas) {
     const map = {};
     (linhas || []).forEach((row) => {
+      const pai = row && row.customer && typeof row.customer === "object" ? row.customer : {};
+      const paiId = String((row && (row.customerId || pai.id || row.clientId)) || "");
+      const paiNome = (row && (row.clientName || row.customerName || pai.name)) || "";
       const nested = (row && (row.billsReceivable || row.bills)) || [];
       const bills = nested.length ? nested : [row];
       bills.forEach((bill) => {
@@ -597,8 +621,8 @@ const OrcamentoModuloApp = {
         const titulo = String(bill.billReceivableId || bill.receivableBillId || "").replace(/^B-/, "").split("-")[0];
         if (!titulo) return;
         const clienteObj = bill.customer && typeof bill.customer === "object" ? bill.customer : {};
-        const clienteId = String(bill.customerId || clienteObj.id || bill.clientId || "");
-        const nome = bill.clientName || bill.customerName || clienteObj.name || "Cliente";
+        const clienteId = String(bill.customerId || clienteObj.id || bill.clientId || paiId || "");
+        const nome = bill.clientName || bill.customerName || clienteObj.name || paiNome || "Cliente";
         const unidades = [];
         if (Array.isArray(bill.units)) {
           bill.units.forEach((u) => { if (u && (u.name || u.id)) unidades.push(u.name || u.id); });
@@ -618,7 +642,7 @@ const OrcamentoModuloApp = {
         if (!atual.unidade && unidades.length) atual.unidade = unidades.join(", ");
         const em = bill.emissionDate || bill.issueDate || bill.contractDate || bill.saleDate || "";
         if (!atual.emissao && em) atual.emissao = String(em).slice(0, 10);
-        if (this.ehSubJudice(bill, atual.clienteId, titulo)) atual.sub = true;
+        if (this.ehSubJudice(bill, atual.clienteId, titulo) || this.ehSubJudice(row, atual.clienteId, titulo)) atual.sub = true;
         const idx = this.lerIndexador(bill);
         if (idx && !this.ehReal(idx)) atual.indexador = idx;
         (bill.installments || []).forEach((p) => {
@@ -630,6 +654,7 @@ const OrcamentoModuloApp = {
           const slot = atual.parcelas[chave] || (atual.parcelas[chave] = { due, saldo: 0, receipts: [] });
           slot.saldo += saldo;
           (p.receipts || []).forEach((rc) => slot.receipts.push(rc));
+          if (this.marcadoSubJudice(p)) atual.sub = true;
           const ip = this.lerIndexador(p);
           if (ip && !this.ehReal(ip)) atual.indexador = ip;
         });
@@ -742,8 +767,6 @@ const OrcamentoModuloApp = {
         const valor = Math.round(saldo * fator * 100) / 100;
         const ajuste = Math.round((valor - saldo) * 100) / 100;
         const anoDue = String(p.due).slice(0, 4);
-        const mesDue = Number(String(p.due).slice(5, 7)) - 1;
-        if (!t.sub && porAno[anoDue] && mesDue >= 0) porAno[anoDue].vence[mesDue] += saldo;
         let quando = this.addDias(p.due, pmp.pmp);
         if (!quando) return;
         if (quando < hoje) quando = hoje;
@@ -769,6 +792,8 @@ const OrcamentoModuloApp = {
         if (anoDue < ano) {
           porAno[ano].antes[mes] += saldo;
           porAno[ano].anosAntes[anoDue] = true;
+        } else {
+          porAno[ano].vence[mes] += saldo;
         }
         doCliente += valor;
         principalCliente += saldo;
