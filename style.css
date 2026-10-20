@@ -9497,6 +9497,12 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .cc-table.orc-rec-grade tr.orc-rec-det td { background: #f4faf7; font-weight: 600; }
 .cc-table.orc-rec-grade td.orc-rec-ano-nome small { display: block; margin-left: 14px; font-size: 0.52rem; font-weight: 700; letter-spacing: 0; line-height: 1.1; color: #64748b; }
 .cc-table.orc-rec-grade tr.is-reaj td.orc-rec-ano-nome small { color: #0f766e; }
+.cc-table.orc-rec-grade tr.is-sj td { background: #fff7ed; color: #9a3412; }
+.cc-table.orc-rec-grade tr.is-sj td.orc-rec-ano-nome small { color: #c2410c; }
+.cc-table.orc-rec-grade tr.is-conta td { background: #e8f5ee; font-weight: 800; color: #105436; }
+.cc-table.orc-rec-grade tr.is-conta td.orc-rec-ano-nome small { color: #105436; }
+.cc-table.orc-rec-grade tr.is-juros td { background: #f0fdfa; color: #0f766e; }
+.cc-table.orc-rec-grade tr.is-juros td.orc-rec-ano-nome small { color: #0f766e; }
 .cc-table.orc-rec-grade tr.orc-rec-total td { background: #e8f5ee; font-weight: 800; color: #105436; }
 .orc-rec-clientes.cc-scroll { max-height: calc(100vh - 260px); }
 .cc-table.orc-rec-cli-tab { font-size: 0.72rem; font-variant-numeric: tabular-nums; }

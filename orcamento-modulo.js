@@ -361,14 +361,19 @@ const OrcamentoModuloApp = {
     return `<td class="${cls}">${n > 0.009 ? this.esc(this.numero(n)) : "—"}</td>`;
   },
 
-  linhaMeses(ano, rotulo, valores, extra) {
+  jurosAtivos(valor, pmp) {
+    const dias = pmp && pmp.conhecido ? Number(pmp.pmp) || 0 : 0;
+    if (!(dias > 0) || !(valor > 0)) return 0;
+    const multa = valor * 0.02;
+    const juros = valor * 0.01 * (dias / 30);
+    return Math.round((multa + juros) * 100) / 100;
+  },
+
+  linhaConta(rotulo, nota, valores, trClass, extra) {
     const lista = valores || [];
     const soma = lista.reduce((s, v) => s + (Number(v) || 0), 0);
-    const nome = rotulo === "Original"
-      ? `<i data-lucide="chevron-down"></i>${this.esc(ano)}<small>${this.esc(rotulo)}</small>`
-      : `<small>${this.esc(rotulo)}</small>`;
-    return `<tr class="orc-rec-ano orc-rec-det${extra ? " is-reaj" : ""}" onclick="OrcamentoModuloApp.toggleAno('${ano}')">
-      <td class="orc-rec-ano-nome">${nome}</td>
+    return `<tr class="orc-rec-det${trClass ? " " + trClass : ""}">
+      <td class="orc-rec-ano-nome">${this.esc(rotulo)}${nota ? `<small>${this.esc(nota)}</small>` : ""}</td>
       ${lista.map((v) => this.celNum(v, extra)).join("")}
       ${this.celNum(soma, extra)}
     </tr>`;
@@ -381,17 +386,24 @@ const OrcamentoModuloApp = {
       const total = cel.reduce((s, v) => s + (Number(v) || 0), 0);
       const aberto = this.novo.anoAberto === String(ano);
       const parte = (r.porAno && r.porAno[ano]) || {};
-      if (aberto && Array.isArray(parte.original)) {
-        return this.linhaMeses(ano, "Original", parte.original, "") + this.linhaMeses(ano, "Repactuação", parte.repactuacao, "orc-rec-reaj");
-      }
-      if (aberto) {
-        return `<tr class="orc-rec-ano" onclick="OrcamentoModuloApp.toggleAno('${ano}')"><td colspan="14">Monte a receita de novo para ver o mês a mês.</td></tr>`;
-      }
-      return `<tr class="orc-rec-ano" onclick="OrcamentoModuloApp.toggleAno('${ano}')">
-        <td><i data-lucide="chevron-right"></i>${this.esc(ano)}</td>
+      const ico = aberto ? "chevron-down" : "chevron-right";
+      const cabeca = `<tr class="orc-rec-ano" onclick="OrcamentoModuloApp.toggleAno('${ano}')">
+        <td class="orc-rec-ano-nome"><i data-lucide="${ico}"></i>${this.esc(ano)}<small>1.01.01.01</small></td>
         ${cel.map((v) => this.celNum(v)).join("")}
         ${this.celNum(total)}
       </tr>`;
+      if (!aberto) return cabeca;
+      if (!Array.isArray(parte.original)) {
+        return cabeca + `<tr class="orc-rec-det"><td colspan="14">Monte a receita de novo para ver o mês a mês.</td></tr>`;
+      }
+      const sub = (r.subMes && r.subMes[ano]) || [];
+      const juros = (r.jurosMes && r.jurosMes[ano]) || [];
+      return cabeca
+        + this.linhaConta("Original", "", parte.original, "", "")
+        + this.linhaConta("Reajuste", "", parte.repactuacao, "is-reaj", "orc-rec-reaj")
+        + this.linhaConta("Sub judice", "não soma", sub, "is-sj", "")
+        + this.linhaConta("1.01.01.01", "Venda de lotes", cel, "is-conta", "")
+        + this.linhaConta("1.03.01.02", "Juros ativos", juros, "is-juros", "");
     }).join("");
     const totaisMes = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((i) => anos.reduce((s, ano) => s + ((r.grade[ano] && r.grade[ano][i]) || 0), 0));
     const rodape = `<tr class="orc-rec-total"><td>Total</td>${totaisMes.map((v) => this.celNum(v)).join("")}${this.celNum(r.total)}</tr>`;
@@ -671,12 +683,14 @@ const OrcamentoModuloApp = {
     const titulos = this.agruparTitulos(linhas);
     const grade = {};
     const porAno = {};
+    const subMes = {};
+    const jurosMes = {};
+    const zeros = () => [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     for (let y = anoDe; y <= anoAte; y++) {
-      grade[String(y)] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-      porAno[String(y)] = {
-        original: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        repactuacao: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-      };
+      grade[String(y)] = zeros();
+      subMes[String(y)] = zeros();
+      jurosMes[String(y)] = zeros();
+      porAno[String(y)] = { original: zeros(), repactuacao: zeros() };
     }
     const clientes = [];
     let principal = 0;
@@ -690,12 +704,9 @@ const OrcamentoModuloApp = {
     for (let i = 0; i < titulos.length; i++) {
       const t = titulos[i];
       const saldoAberto = Object.keys(t.parcelas).reduce((s, k) => s + Math.max(0, t.parcelas[k].saldo), 0);
-      if (t.sub) {
-        if (saldoAberto > 0.009) {
-          subJudice += 1;
-          subJudiceValor += saldoAberto;
-        }
-        continue;
+      if (t.sub && saldoAberto > 0.009) {
+        subJudice += 1;
+        subJudiceValor += saldoAberto;
       }
       if (!(saldoAberto > 0.009)) continue;
       const pmp = this.pmpTitulo(t.parcelas, hoje);
@@ -718,17 +729,22 @@ const OrcamentoModuloApp = {
         if (!quando) return;
         if (quando < hoje) quando = hoje;
         if (quando < ini) {
-          antes += valor;
+          if (!t.sub) antes += valor;
           return;
         }
         if (quando > fim) {
-          fora += valor;
+          if (!t.sub) fora += valor;
           return;
         }
         const ano = quando.slice(0, 4);
         const mes = Number(quando.slice(5, 7)) - 1;
         if (!grade[ano] || mes < 0) return;
+        if (t.sub) {
+          subMes[ano][mes] += valor;
+          return;
+        }
         grade[ano][mes] += valor;
+        jurosMes[ano][mes] += this.jurosAtivos(valor, pmp);
         porAno[ano].original[mes] += saldo;
         porAno[ano].repactuacao[mes] += ajuste;
         doCliente += valor;
@@ -767,6 +783,8 @@ const OrcamentoModuloApp = {
     return {
       grade,
       porAno,
+      subMes,
+      jurosMes,
       clientes,
       total,
       principal,
