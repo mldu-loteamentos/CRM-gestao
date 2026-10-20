@@ -9517,6 +9517,19 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .cc-table.orc-rec-grade td.is-neg { color: #991b1b; font-weight: 800; }
 .orc-nuvem { align-self: center; color: #64748b; font-size: 0.75rem; font-weight: 700; }
 .orc-vendas-cond { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin: 0 0 12px; }
+.orc-kardex-bloco { margin: 0 0 18px; }
+.orc-kardex-titulo { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin: 0 0 6px; color: #105436; font-size: 0.92rem; font-weight: 800; }
+.orc-kardex-titulo span:last-child { color: #64748b; font-size: 0.75rem; font-weight: 700; }
+.cc-table.orc-kardex-grade col.orc-rec-c-ano { width: 168px; }
+.cc-table.orc-kardex-grade td.is-passado { background: #f8fafc; color: #64748b; }
+.cc-table.orc-kardex-grade td.is-hoje { box-shadow: inset 0 -2px 0 #105436; }
+.cc-table.orc-kardex-grade td.is-real { color: #334155; }
+.orc-planos { display: flex; flex-direction: column; gap: 12px; margin: 0 0 12px; }
+.orc-plano-card { padding: 12px 14px; border: 1px solid #d7e3dc; border-radius: 10px; background: #fff; }
+.orc-plano-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 10px; }
+.orc-plano-remover { border: 0; background: transparent; color: #991b1b; font-weight: 700; cursor: pointer; }
+.orc-plano-parcela { margin: 0; color: #475569; font-size: 0.78rem; font-weight: 700; }
+.orc-plano-add { height: 36px; margin: 0 0 14px; }
 .cc-table.orc-rec-grade tr.is-dist td { background: #fef2f2; color: #991b1b; }
 .cc-table.orc-rec-grade tr.is-dist td.orc-rec-ano-nome small { color: #b91c1c; }
 .cc-table.orc-rec-grade tr.is-juros td { background: #f0fdfa; color: #0f766e; }

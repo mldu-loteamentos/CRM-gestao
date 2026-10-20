@@ -292,6 +292,7 @@ const OrcamentoModuloApp = {
     this.bindFiltros();
     if (window.lucide) window.lucide.createIcons();
     this.garantirPlano();
+    this.garantirRealizado();
   },
 
   setAno(campo, valor) {
@@ -322,7 +323,7 @@ const OrcamentoModuloApp = {
   },
 
   textoKardex() {
-    return "O estoque de hoje abre este mês. O distrato devolve o lote no fim do mês e a venda tira o lote. A partir do mês seguinte, a parcela média de cada distrato deixa de entrar na receita, somada aos distratos anteriores.";
+    return "O estoque de janeiro de 2026 é o ponto de partida. Os meses já passados trazem as vendas e os distratos realizados. Deste mês em diante, o previsto soma com o que já aconteceu.";
   },
 
   textoDistrato() {
@@ -330,7 +331,7 @@ const OrcamentoModuloApp = {
   },
 
   textoVendas() {
-    return "Informe o ticket médio, a entrada, o número de parcelas e a taxa ao mês. A entrada entra no caixa no mês da venda. A parcela do saldo começa no mês seguinte e segue pelo plano.";
+    return "Cadastre cada plano com ticket médio, entrada, número de parcelas e juros ao mês. Depois informe quantas vendas daquele plano acontecem em cada mês. A entrada entra no mês da venda e a parcela começa no mês seguinte.";
   },
 
   textoNuvem() {
@@ -363,7 +364,7 @@ const OrcamentoModuloApp = {
   },
 
   planoVazio() {
-    return { distratos: {}, vendasQtd: {}, condicoes: { ticket: 0, plano: 0, juros: 0, entrada: 0 }, em: "" };
+    return { distratos: {}, vendasQtd: {}, condicoes: { ticket: 0, plano: 0, juros: 0, entrada: 0 }, planos: [], em: "" };
   },
 
   normalizarPlano(raw) {
@@ -384,6 +385,42 @@ const OrcamentoModuloApp = {
       juros: Math.max(0, Number(c.juros) || 0),
       entrada: Math.max(0, Number(c.entrada) || 0)
     };
+    const lerMeses = (meses) => {
+      const saida = {};
+      const mapa = meses && typeof meses === "object" ? meses : {};
+      Object.keys(mapa).forEach((ano) => {
+        if (!/^\d{4}$/.test(String(ano)) || !Array.isArray(mapa[ano])) return;
+        saida[String(ano)] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((i) => Math.max(0, parseInt(mapa[ano][i], 10) || 0));
+      });
+      return saida;
+    };
+    const planos = [];
+    if (Array.isArray(src.planos)) {
+      src.planos.forEach((p, i) => {
+        if (!p || typeof p !== "object") return;
+        planos.push({
+          id: String(p.id || ("p" + (i + 1))).replace(/[^a-zA-Z0-9]/g, "").slice(0, 24) || ("p" + (i + 1)),
+          nome: String(p.nome || ("Plano " + (i + 1))).slice(0, 40),
+          ticket: Math.max(0, Number(p.ticket) || 0),
+          parcelas: Math.max(0, parseInt(p.parcelas, 10) || 0),
+          entrada: Math.max(0, Number(p.entrada) || 0),
+          juros: Math.max(0, Number(p.juros) || 0),
+          meses: lerMeses(p.meses)
+        });
+      });
+    }
+    if (!planos.length && (base.condicoes.ticket || base.condicoes.plano || base.condicoes.entrada || base.condicoes.juros || Object.keys(base.vendasQtd).length)) {
+      planos.push({
+        id: "p1",
+        nome: "Plano 1",
+        ticket: base.condicoes.ticket,
+        parcelas: base.condicoes.plano,
+        entrada: base.condicoes.entrada,
+        juros: base.condicoes.juros,
+        meses: lerMeses(base.vendasQtd)
+      });
+    }
+    base.planos = planos;
     base.em = String(src.em || "");
     return base;
   },
@@ -479,6 +516,7 @@ const OrcamentoModuloApp = {
         distratos: plano.distratos,
         vendasQtd: plano.vendasQtd,
         condicoes: plano.condicoes,
+        planos: plano.planos || [],
         em: plano.em
       }, { merge: true });
       this.novo.nuvem = "salvo";
@@ -494,12 +532,80 @@ const OrcamentoModuloApp = {
     return n > 0 ? Math.round(n) : 0;
   },
 
+  mesPrevisto(ano, mes) {
+    const h = this.horizonte();
+    return Number(ano) > h.hy || (Number(ano) === h.hy && Number(mes) >= h.hm);
+  },
+
   qtdDistrato(ano, mes) {
+    if (!this.mesPrevisto(ano, mes)) return 0;
     return this.qtdLista(this.planoDoCc().distratos, ano, mes);
   },
 
   qtdVenda(ano, mes) {
-    return this.qtdLista(this.planoDoCc().vendasQtd, ano, mes);
+    if (!this.mesPrevisto(ano, mes)) return 0;
+    return this.planosAtivos().reduce((s, p) => s + this.qtdPlano(p, ano, mes), 0);
+  },
+
+  planosAtivos() {
+    const lista = this.planoDoCc().planos;
+    return Array.isArray(lista) ? lista : [];
+  },
+
+  qtdPlano(p, ano, mes) {
+    return this.qtdLista(p && p.meses, ano, mes);
+  },
+
+  acharPlano(id) {
+    return this.planosAtivos().find((p) => p.id === String(id)) || null;
+  },
+
+  setPlanoCampo(id, campo, valor) {
+    const p = this.acharPlano(id);
+    if (!p) return;
+    if (campo === "nome") p.nome = String(valor || "").slice(0, 40) || p.nome;
+    else if (campo === "parcelas") p.parcelas = Math.max(0, parseInt(valor, 10) || 0);
+    else p[campo] = Math.max(0, this.numeroCampo(valor));
+    this.salvarPlano();
+    this.renderNovo();
+  },
+
+  setPlanoQtd(id, ano, mes, valor) {
+    const p = this.acharPlano(id);
+    const mesN = Number(mes);
+    if (!p || mesN < 0 || mesN > 11 || !this.mesPrevisto(ano, mesN)) return;
+    if (!p.meses || typeof p.meses !== "object") p.meses = {};
+    const chave = String(ano);
+    if (!Array.isArray(p.meses[chave])) p.meses[chave] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    p.meses[chave][mesN] = Math.max(0, parseInt(valor, 10) || 0);
+    this.salvarPlano();
+    this.renderNovo();
+  },
+
+  adicionarPlano() {
+    const cc = String(this.novo.ccId || "");
+    if (!cc) return;
+    const plano = this.planoDoCc();
+    if (!Array.isArray(plano.planos)) plano.planos = [];
+    const n = plano.planos.length + 1;
+    plano.planos.push({
+      id: "p" + Date.now().toString(36),
+      nome: "Plano " + n,
+      ticket: 0,
+      parcelas: 0,
+      entrada: 0,
+      juros: 0,
+      meses: {}
+    });
+    this.salvarPlano();
+    this.renderNovo();
+  },
+
+  removerPlano(id) {
+    const plano = this.planoDoCc();
+    plano.planos = this.planosAtivos().filter((p) => p.id !== String(id));
+    this.salvarPlano();
+    this.renderNovo();
   },
 
   setQtd(qual, ano, mes, valor) {
@@ -582,27 +688,124 @@ const OrcamentoModuloApp = {
   },
 
   vendasNoMes(ano, mes) {
-    const c = this.condicoes();
-    const ticket = Number(c.ticket) || 0;
-    const entrada = Math.min(Number(c.entrada) || 0, ticket > 0 ? ticket : Number(c.entrada) || 0);
-    const n = Math.max(0, parseInt(c.plano, 10) || 0);
-    const pmt = this.parcelaPlano(Math.max(0, ticket - entrada), n, c.juros);
-    const mapa = this.planoDoCc().vendasQtd || {};
-    const alvo = ano * 12 + mes;
+    const alvo = Number(ano) * 12 + Number(mes);
     let total = 0;
-    Object.keys(mapa).forEach((y) => {
-      const yi = Number(y);
-      const linha = mapa[y] || [];
-      for (let m = 0; m < 12; m++) {
-        const qtd = Math.max(0, Math.round(Number(linha[m]) || 0));
-        if (!(qtd > 0)) continue;
-        const origem = yi * 12 + m;
-        const dist = alvo - origem;
-        if (dist === 0) total += qtd * entrada;
-        else if (dist >= 1 && dist <= n) total += qtd * pmt;
-      }
+    this.planosAtivos().forEach((p) => {
+      const ticket = Number(p.ticket) || 0;
+      const entrada = Math.min(Number(p.entrada) || 0, ticket > 0 ? ticket : Number(p.entrada) || 0);
+      const n = Math.max(0, parseInt(p.parcelas, 10) || 0);
+      const pmt = this.parcelaPlano(Math.max(0, ticket - entrada), n, p.juros);
+      const meses = p.meses || {};
+      Object.keys(meses).forEach((y) => {
+        const yi = Number(y);
+        const linha = meses[y] || [];
+        for (let m = 0; m < 12; m++) {
+          if (!this.mesPrevisto(yi, m)) continue;
+          const qtd = Math.max(0, Math.round(Number(linha[m]) || 0));
+          if (!(qtd > 0)) continue;
+          const dist = alvo - (yi * 12 + m);
+          if (dist === 0) total += qtd * entrada;
+          else if (dist >= 1 && dist <= n) total += qtd * pmt;
+        }
+      });
     });
     return Math.round(total * 100) / 100;
+  },
+
+  garantirRealizado() {
+    if (this._realEstado === "ok" || this._realEstado === "carregando") return;
+    this._realEstado = "carregando";
+    this.lerRealizado().then(() => {
+      this._realEstado = "ok";
+      if (!this.novo.carregando) this.renderNovo();
+    }).catch(() => {
+      this._realEstado = "ok";
+      this._realMapa = this._realMapa || {};
+    });
+  },
+
+  ccDoContrato(c) {
+    const units = (c && (c.salesContractUnits || c.units)) || [];
+    const first = units[0] || {};
+    const unitId = String((c && (c.unitId || first.id || first.unitId)) || "");
+    return String((c && (c.enterpriseId || c.costCenterId)) || first.enterpriseId || first.costCenterId || (unitId.indexOf("-") >= 0 ? unitId.split("-")[0] : ""));
+  },
+
+  qtyContrato(c) {
+    const units = (c && (c.salesContractUnits || c.units)) || [];
+    return units.length > 0 ? units.length : 1;
+  },
+
+  async lerRealizado() {
+    const mapa = {};
+    const por = (cc, ano, mes) => {
+      if (!mapa[cc]) mapa[cc] = {};
+      const k = ano + "-" + mes;
+      if (!mapa[cc][k]) mapa[cc][k] = { vendas: 0, distratos: 0 };
+      return mapa[cc][k];
+    };
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (fx && db) {
+      const snap = await fx.getDocs(fx.collection(db, "comercial_batimento"));
+      const docs = [];
+      snap.forEach((d) => docs.push(d));
+      const byId = {};
+      docs.forEach((d) => { byId[d.id] = d; });
+      docs.forEach((d) => {
+        if (!d.id || d.id.charAt(0) === "_" || /_p\d+$/.test(d.id)) return;
+        const data = d.data() || {};
+        if (data.year == null || data.month == null) return;
+        let distratos = [];
+        let vendas = [];
+        try { distratos = JSON.parse(data.distratos || "[]"); } catch (e) { distratos = []; }
+        if (data.splitVendas && Number(data.parts) > 0) {
+          for (let i = 0; i < Number(data.parts); i++) {
+            const part = byId[d.id + "_p" + i];
+            let chunk = [];
+            try { chunk = JSON.parse((part && part.data() && part.data().data) || "[]"); } catch (e) { chunk = []; }
+            vendas = vendas.concat(chunk);
+          }
+        } else {
+          try { vendas = JSON.parse(data.vendas || "[]"); } catch (e) { vendas = []; }
+        }
+        const ano = Number(data.year);
+        const mes = Number(data.month) - 1;
+        if (mes < 0 || mes > 11) return;
+        const soma = (lista, tipo) => {
+          (lista || []).forEach((c) => {
+            const cc = this.ccDoContrato(c);
+            if (!cc) return;
+            por(cc, ano, mes)[tipo] += this.qtyContrato(c);
+          });
+        };
+        soma(vendas, "vendas");
+        soma(distratos, "distratos");
+      });
+    }
+    this._realMapa = mapa;
+  },
+
+  qtdReal(ano, mes, tipo) {
+    const cc = String(this.novo.ccId || "");
+    const slot = this._realMapa && this._realMapa[cc] && this._realMapa[cc][Number(ano) + "-" + Number(mes)];
+    if (!slot) return 0;
+    return Math.max(0, Math.round(Number(tipo === "venda" ? slot.vendas : slot.distratos) || 0));
+  },
+
+  saldoInicial() {
+    const h = this.horizonte();
+    const est = this.estoqueAtual();
+    let vendas = 0;
+    let dist = 0;
+    for (let ano = h.de; ano <= h.hy; ano++) {
+      for (let mes = 0; mes < 12; mes++) {
+        if (ano > h.hy || (ano === h.hy && mes > h.hm)) break;
+        vendas += this.qtdReal(ano, mes, "venda");
+        dist += this.qtdReal(ano, mes, "distrato");
+      }
+    }
+    return { qtd: est.qtd - dist + vendas, hoje: est.qtd, origem: est.origem, vendas: vendas, dist: dist, ano: h.de };
   },
 
   liquidoAno(r, ano) {
@@ -662,73 +865,112 @@ const OrcamentoModuloApp = {
     const qtd = tipo === "venda" ? this.qtdVenda(ano, mes) : this.qtdDistrato(ano, mes);
     const fn = tipo === "venda" ? "setVenda" : "setDistrato";
     const rotulo = (tipo === "venda" ? "Vendas" : "Distratos") + " em " + nomes[mes] + " de " + ano;
-    return `<td><input type="number" min="0" step="1" inputmode="numeric" class="orc-dist-qtd" aria-label="${this.esc(rotulo)}" value="${qtd > 0 ? qtd : ""}" onchange="OrcamentoModuloApp.${fn}(${ano}, ${mes}, this.value)"></td>`;
+    const marca = this.clsMes(ano, mes);
+    if (tipo === "distrato" && !this.mesPrevisto(ano, mes)) return `<td class="is-right is-passado">—</td>`;
+    return `<td class="${marca}"><input type="number" min="0" step="1" inputmode="numeric" class="orc-dist-qtd" aria-label="${this.esc(rotulo)}" value="${qtd > 0 ? qtd : ""}" onchange="OrcamentoModuloApp.${fn}(${ano}, ${mes}, this.value)"></td>`;
   },
 
-  celTexto(v, dinheiro) {
-    if (v == null || v === "") return `<td class="is-right">—</td>`;
+  clsMes(ano, mes) {
+    const h = this.horizonte();
+    if (Number(ano) === h.hy && Number(mes) === h.hm) return "is-hoje";
+    if (Number(ano) < h.hy || (Number(ano) === h.hy && Number(mes) < h.hm)) return "is-passado";
+    return "";
+  },
+
+  celTexto(v, dinheiro, extra) {
+    const marca = extra ? " " + extra : "";
+    if (v == null || v === "") return `<td class="is-right${marca}">—</td>`;
     const n = Number(v) || 0;
-    if (dinheiro && !(Math.abs(n) > 0.009)) return `<td class="is-right">—</td>`;
+    if (dinheiro && !(Math.abs(n) > 0.009)) return `<td class="is-right${marca}">—</td>`;
     const cls = n < -0.009 ? " is-neg" : "";
     const texto = dinheiro ? this.dinheiro(n) : String(Math.round(n));
-    return `<td class="is-right${cls}">${this.esc(texto)}</td>`;
+    return `<td class="is-right${cls}${marca}">${this.esc(texto)}</td>`;
+  },
+
+  celReal(n, ano, mes) {
+    const marca = this.clsMes(ano, mes);
+    if (!(Number(n) > 0)) return `<td class="is-right is-real${marca ? " " + marca : ""}">—</td>`;
+    return `<td class="is-right is-real${marca ? " " + marca : ""}">${Math.round(Number(n))}</td>`;
   },
 
   kardexHtml() {
     const vazio = this.pedirCentro();
     if (vazio) return vazio;
     const h = this.horizonte();
-    const est = this.estoqueAtual();
     const g = this.cabecaGrade();
-    let saldo = est.qtd;
-    let linhas = "";
-    let distPrev = 0;
-    let vendaPrev = 0;
+    const abertura = this.saldoInicial();
+    const est = this.estoqueAtual();
+    let saldo = abertura.qtd;
+    let blocos = "";
+    let fimAno = saldo;
+    let vendaRealAno = 0;
+    let distRealAno = 0;
     for (let ano = h.de; ano <= h.ate; ano++) {
+      const dr = [];
+      const dp = [];
+      const vr = [];
+      const vp = [];
       const inicial = [];
       const finais = [];
-      let somaDist = 0;
-      let somaVenda = 0;
+      let sDr = 0;
+      let sDp = 0;
+      let sVr = 0;
+      let sVp = 0;
       for (let mes = 0; mes < 12; mes++) {
-        const passado = ano < h.hy || (ano === h.hy && mes < h.hm);
-        const dist = this.qtdDistrato(ano, mes);
-        const venda = this.qtdVenda(ano, mes);
-        somaDist += dist;
-        somaVenda += venda;
-        if (passado) {
-          inicial.push(null);
-          finais.push(null);
-        } else {
-          distPrev += dist;
-          vendaPrev += venda;
-          inicial.push(saldo);
-          saldo = saldo + dist - venda;
-          finais.push(saldo);
+        const rDist = this.qtdReal(ano, mes, "distrato");
+        const rVenda = this.qtdReal(ano, mes, "venda");
+        const pDist = this.qtdDistrato(ano, mes);
+        const pVenda = this.qtdVenda(ano, mes);
+        dr.push(rDist);
+        dp.push(pDist);
+        vr.push(rVenda);
+        vp.push(pVenda);
+        sDr += rDist;
+        sDp += pDist;
+        sVr += rVenda;
+        sVp += pVenda;
+        if (ano === h.hy) {
+          vendaRealAno += rVenda;
+          distRealAno += rDist;
         }
+        inicial.push(saldo);
+        saldo = saldo + rDist + pDist - rVenda - pVenda;
+        finais.push(saldo);
       }
-      linhas += `<tr class="orc-rec-det"><td class="orc-rec-ano-nome">${ano}<small>estoque inicial</small></td>${inicial.map((v) => this.celTexto(v, false)).join("")}<td class="is-right">—</td></tr>`;
-      linhas += `<tr class="orc-rec-ano"><td class="orc-rec-ano-nome">${ano}<small>distratos</small></td>${g.meses.map((_, mes) => this.celQtd(ano, mes, "distrato")).join("")}<td class="is-right">${somaDist > 0 ? somaDist : "—"}</td></tr>`;
-      linhas += `<tr class="orc-rec-ano"><td class="orc-rec-ano-nome">${ano}<small>vendas</small></td>${g.meses.map((_, mes) => this.celQtd(ano, mes, "venda")).join("")}<td class="is-right">${somaVenda > 0 ? somaVenda : "—"}</td></tr>`;
-      linhas += `<tr class="orc-rec-det is-conta"><td class="orc-rec-ano-nome">${ano}<small>estoque final</small></td>${finais.map((v) => this.celTexto(v, false)).join("")}<td class="is-right">${finais[11] == null ? "—" : finais[11]}</td></tr>`;
+      if (ano === h.ate) fimAno = saldo;
+      const linha = (rotulo, nota, tds, total, cls) => `<tr class="${cls || "orc-rec-det"}"><td class="orc-rec-ano-nome">${rotulo}<small>${nota}</small></td>${tds}<td class="is-right">${total}</td></tr>`;
+      blocos += `<section class="orc-kardex-bloco">
+        <div class="orc-kardex-titulo"><span>${ano}</span><span>${ano === h.de ? "Estoque inicial " + abertura.qtd : "Continua de " + inicial[0]}</span></div>
+        <div class="cc-scroll orc-rec-meses">
+          <table class="cc-table orc-rec-grade orc-dist-grade orc-kardex-grade">
+            <colgroup>${g.cols}</colgroup>
+            ${g.head}
+            <tbody>
+              ${linha("Distratos", "realizados", dr.map((v, mes) => this.celReal(v, ano, mes)).join(""), sDr || "—", "orc-rec-det")}
+              ${linha("Distratos", "previstos", g.meses.map((_, mes) => this.celQtd(ano, mes, "distrato")).join(""), sDp || "—", "orc-rec-ano")}
+              ${linha("Vendas", "realizadas", vr.map((v, mes) => this.celReal(v, ano, mes)).join(""), sVr || "—", "orc-rec-det")}
+              ${linha("Vendas", "previstas", vp.map((v, mes) => this.celTexto(this.mesPrevisto(ano, mes) && v ? v : null, false, this.clsMes(ano, mes))).join(""), sVp || "—", "orc-rec-det is-venda")}
+              ${linha("Estoque", "inicial", inicial.map((v, mes) => this.celTexto(v, false, this.clsMes(ano, mes))).join(""), "—", "orc-rec-det")}
+              ${linha("Estoque", "final", finais.map((v, mes) => this.celTexto(v, false, this.clsMes(ano, mes))).join(""), finais[11], "orc-rec-det is-conta")}
+            </tbody>
+          </table>
+        </div>
+      </section>`;
     }
     const nota = est.origem
-      ? "Lotes disponíveis hoje neste centro de custo. Mês anterior a este fica fora do saldo: o estoque de hoje já é o ponto de partida."
-      : "Ainda não há posição de estoque neste navegador. O saldo inicial fica em zero até a Posição de estoque ser aberta uma vez.";
+      ? "Janeiro de " + abertura.ano + " reconstitui o estoque de hoje: lotes disponíveis agora, mais as vendas já feitas neste ano, menos os distratos já feitos."
+      : "A posição de estoque ainda não está neste navegador. O inicial de janeiro usa só as vendas e os distratos realizados. Abra a Posição de estoque para trazer os lotes disponíveis de hoje.";
+    const espera = this._realEstado !== "ok" ? " Buscando vendas e distratos realizados…" : "";
     return `
       <div class="orc-rec-kpis">
+        <div class="crm-card orc-rec-kpi"><span>Estoque em jan/${abertura.ano}</span><strong>${abertura.qtd}</strong></div>
         <div class="crm-card orc-rec-kpi"><span>Disponíveis hoje</span><strong>${est.qtd}</strong></div>
-        <div class="crm-card orc-rec-kpi"><span>Distratos daqui pra frente</span><strong>${distPrev}</strong></div>
-        <div class="crm-card orc-rec-kpi"><span>Vendas daqui pra frente</span><strong>${vendaPrev}</strong></div>
-        <div class="crm-card orc-rec-kpi"><span>Estoque no fim</span><strong>${saldo}</strong></div>
+        <div class="crm-card orc-rec-kpi"><span>Vendas realizadas em ${h.hy}</span><strong>${vendaRealAno}</strong></div>
+        <div class="crm-card orc-rec-kpi"><span>Distratos realizados em ${h.hy}</span><strong>${distRealAno}</strong></div>
+        <div class="crm-card orc-rec-kpi"><span>Estoque no fim</span><strong>${fimAno}</strong></div>
       </div>
-      <div class="orc-rec-focus">${this.esc(nota)}</div>
-      <div class="cc-scroll orc-rec-meses">
-        <table class="cc-table orc-rec-grade orc-dist-grade">
-          <colgroup>${g.cols}</colgroup>
-          ${g.head}
-          <tbody>${linhas}</tbody>
-        </table>
-      </div>`;
+      <div class="orc-rec-focus">${this.esc(nota + espera)} O mês em curso está marcado. A venda prevista é a soma dos planos, na aba Vendas.</div>
+      ${blocos}`;
   },
 
   distratoHtml() {
@@ -774,45 +1016,70 @@ const OrcamentoModuloApp = {
       </div>`;
   },
 
+  campoPlano(id, campo, label, valor, inteiro) {
+    const texto = !(Number(valor) > 0) ? "" : (inteiro ? String(parseInt(valor, 10) || 0) : this.numero(valor));
+    return `<div class="form-group" style="margin:0;">
+      <label>${label}</label>
+      <input type="text" inputmode="decimal" class="form-control" style="width:130px;height:36px;" value="${this.esc(texto)}" onchange="OrcamentoModuloApp.setPlanoCampo('${id}','${campo}', this.value)">
+    </div>`;
+  },
+
   vendasHtml() {
     const vazio = this.pedirCentro();
     if (vazio) return vazio;
-    const c = this.condicoes();
     const h = this.horizonte();
     const g = this.cabecaGrade();
-    const campo = (id, label, valor, step) => `<div class="form-group" style="margin:0;">
-      <label>${label}</label>
-      <input type="text" inputmode="decimal" class="form-control orc-vendas-campo" style="width:140px;height:38px;" value="${valor > 0 ? this.esc(String(valor).replace(".", ",")) : ""}" onchange="OrcamentoModuloApp.setCondicao('${id}', this.value)">
-    </div>`;
+    const planos = this.planosAtivos();
+    const cards = planos.map((p) => {
+      const saldo = Math.max(0, (Number(p.ticket) || 0) - Math.min(Number(p.entrada) || 0, Number(p.ticket) || 0));
+      const parcela = this.parcelaPlano(saldo, p.parcelas, p.juros);
+      return `<article class="orc-plano-card">
+        <div class="orc-plano-head">
+          <input type="text" class="form-control" style="width:180px;height:36px;font-weight:700;" value="${this.esc(p.nome)}" aria-label="Nome do plano" onchange="OrcamentoModuloApp.setPlanoCampo('${p.id}','nome', this.value)">
+          <button type="button" class="orc-plano-remover" onclick="OrcamentoModuloApp.removerPlano('${p.id}')">Remover</button>
+        </div>
+        <div class="orc-vendas-cond">
+          ${this.campoPlano(p.id, "ticket", "Ticket médio", p.ticket, false)}
+          ${this.campoPlano(p.id, "entrada", "Entrada", p.entrada, false)}
+          ${this.campoPlano(p.id, "parcelas", "Nº parcelas", p.parcelas, true)}
+          ${this.campoPlano(p.id, "juros", "Juros % ao mês", p.juros, false)}
+        </div>
+        <p class="orc-plano-parcela">Parcela do saldo: ${this.esc(this.dinheiro(parcela))}</p>
+      </article>`;
+    }).join("");
     let linhas = "";
     let caixaPeriodo = 0;
     for (let ano = h.de; ano <= h.ate; ano++) {
       const caixa = [];
-      let somaQtd = 0;
       let somaCaixa = 0;
       for (let mes = 0; mes < 12; mes++) {
-        somaQtd += this.qtdVenda(ano, mes);
         const v = this.vendasNoMes(ano, mes);
         caixa.push(v);
         somaCaixa += v;
         if (ano >= Number(this.novo.anoDe) && ano <= Number(this.novo.anoAte)) caixaPeriodo += v;
       }
-      linhas += `<tr class="orc-rec-ano"><td class="orc-rec-ano-nome">${ano}<small>vendas</small></td>${g.meses.map((_, mes) => this.celQtd(ano, mes, "venda")).join("")}<td class="is-right">${somaQtd > 0 ? somaQtd : "—"}</td></tr>`;
-      linhas += `<tr class="orc-rec-det is-venda"><td class="orc-rec-ano-nome">Entra no caixa<small>entrada e parcelas</small></td>${caixa.map((v) => this.celTexto(v, true)).join("")}<td class="is-right">${somaCaixa > 0.009 ? this.esc(this.dinheiro(somaCaixa)) : "—"}</td></tr>`;
+      linhas += `<tr class="orc-rec-det"><td class="orc-rec-ano-nome">${ano}<small>realizadas</small></td>${g.meses.map((_, mes) => this.celReal(this.qtdReal(ano, mes, "venda"), ano, mes)).join("")}<td class="is-right">—</td></tr>`;
+      planos.forEach((p) => {
+        let soma = 0;
+        const tds = g.meses.map((_, mes) => {
+          const qtd = this.qtdPlano(p, ano, mes);
+          soma += this.mesPrevisto(ano, mes) ? qtd : 0;
+          if (!this.mesPrevisto(ano, mes)) return this.celReal(0, ano, mes);
+          return `<td class="${this.clsMes(ano, mes)}"><input type="number" min="0" step="1" inputmode="numeric" class="orc-dist-qtd" aria-label="${this.esc(p.nome)} em ${ano}" value="${qtd > 0 ? qtd : ""}" onchange="OrcamentoModuloApp.setPlanoQtd('${p.id}', ${ano}, ${mes}, this.value)"></td>`;
+        }).join("");
+        linhas += `<tr class="orc-rec-ano"><td class="orc-rec-ano-nome">${this.esc(p.nome)}<small>vendas previstas</small></td>${tds}<td class="is-right">${soma > 0 ? soma : "—"}</td></tr>`;
+      });
+      linhas += `<tr class="orc-rec-det is-venda"><td class="orc-rec-ano-nome">Entra no caixa<small>entrada e parcelas</small></td>${caixa.map((v, mes) => this.celTexto(v, true, this.clsMes(ano, mes))).join("")}<td class="is-right">${somaCaixa > 0.009 ? this.esc(this.dinheiro(somaCaixa)) : "—"}</td></tr>`;
     }
     return `
-      <div class="orc-vendas-cond">
-        ${campo("ticket", "Ticket médio", c.ticket)}
-        ${campo("entrada", "Entrada", c.entrada)}
-        ${campo("plano", "Plano (parcelas)", c.plano)}
-        ${campo("juros", "Juros % ao mês", c.juros)}
-      </div>
+      <div class="orc-planos">${cards || `<p class="orc-plano-parcela">Nenhum plano ainda. Cadastre o primeiro para informar as vendas.</p>`}</div>
+      <button type="button" class="btn btn-outline orc-plano-add" onclick="OrcamentoModuloApp.adicionarPlano()">Adicionar plano</button>
       <div class="orc-rec-kpis">
-        <div class="crm-card orc-rec-kpi"><span>Parcela do saldo</span><strong>${this.esc(this.dinheiro(this.parcelaPlano(Math.max(0, (c.ticket || 0) - Math.min(c.entrada || 0, c.ticket || 0)), c.plano, c.juros)))}</strong></div>
+        <div class="crm-card orc-rec-kpi"><span>Planos</span><strong>${planos.length}</strong></div>
         <div class="crm-card orc-rec-kpi"><span>Entra na receita do período</span><strong>${this.esc(this.dinheiro(caixaPeriodo))}</strong></div>
       </div>
       <div class="cc-scroll orc-rec-meses">
-        <table class="cc-table orc-rec-grade orc-dist-grade">
+        <table class="cc-table orc-rec-grade orc-dist-grade orc-kardex-grade">
           <colgroup>${g.cols}</colgroup>
           ${g.head}
           <tbody>${linhas}</tbody>
