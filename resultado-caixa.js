@@ -847,8 +847,7 @@ const ResultadoCaixaApp = {
     const id = Number(empId) || 0;
     if (!id) return "";
     const fator = this.pctEmpresaId(id);
-    if (!(fator > 0)) return "";
-    const pct = fator <= 1 ? fator * 100 : fator;
+    const pct = fator > 0 ? (fator <= 1 ? fator * 100 : fator) : 0;
     return pct.toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "%";
   },
 

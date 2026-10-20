@@ -167,8 +167,11 @@ const OrcamentoApp = {
         .orc-ghost.is-on { background: #105436; color: #fff; }
         .orc-ghost.is-on:hover { background: #0c3d28; }
         .orc-ghost svg { width: 14px; height: 14px; }
-        .orc-kpis { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
-        .orc-kpi { background: #fff; border: 1px solid #94a3b8; border-top: 4px solid #105436; border-radius: 10px; padding: 12px 14px 10px; min-width: 150px; flex: 1; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08); }
+        .orc-kpi-groups { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+        .orc-kpi-group { display: flex; gap: 10px; align-items: stretch; flex-wrap: wrap; }
+        .orc-kpi-year { flex: 0 0 64px; display: flex; align-items: center; font-weight: 800; color: #105436; font-size: 0.78rem; letter-spacing: 0.04em; }
+        .orc-kpis { display: flex; gap: 10px; flex: 1; flex-wrap: wrap; min-width: 0; }
+        .orc-kpi { background: #fff; border: 1px solid #94a3b8; border-top: 4px solid #105436; border-radius: 10px; padding: 12px 14px 10px; min-width: 148px; flex: 1; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08); }
         .orc-kpi span { display: block; color: #1e293b; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.03em; }
         .orc-kpi strong { display: block; margin-top: 4px; font-size: 1.15rem; font-weight: 800; color: #0c3d28; line-height: 1.2; }
         .orc-kpi strong .orc-pct { display: inline; margin-left: 6px; font-size: 0.95rem; }
@@ -228,15 +231,21 @@ const OrcamentoApp = {
         .orc-tag { display: inline-block; border-radius: 999px; padding: 1px 7px; font-size: 0.66rem; font-weight: 800; letter-spacing: 0.01em; }
         .orc-tag-cart { background: #dbeafe; color: #1e3a8a; }
         .orc-tag-vend { background: #ffedd5; color: #c2410c; }
+        .orc-tag-serv { background: #ccfbf1; color: #0f766e; }
         .orc-origem .orc-sub { display: inline; margin: 0; }
         .orc-cart-col { color: #1e3a8a; }
         .orc-vend-col { color: #c2410c; }
+        .orc-serv-col { color: #0f766e; }
         .orc-kpi strong.orc-cart-col { color: #1e3a8a; }
         .orc-kpi strong.orc-vend-col { color: #c2410c; }
-        .orc-emp td.orc-cart-col, .orc-emp td.orc-vend-col,
-        .orc-total td.orc-cart-col, .orc-total td.orc-vend-col { color: #fff; }
-        .orc-cc td.orc-cart-col, .orc-cc td.orc-vend-col,
-        .orc-obra td.orc-cart-col, .orc-obra td.orc-vend-col { color: #064e3b; }
+        .orc-kpi strong.orc-serv-col { color: #0f766e; }
+        .orc-kpi.orc-kpi-cart { border-top-color: #1e3a8a; }
+        .orc-kpi.orc-kpi-vend { border-top-color: #c2410c; }
+        .orc-kpi.orc-kpi-serv { border-top-color: #0f766e; }
+        .orc-emp td.orc-cart-col, .orc-emp td.orc-vend-col, .orc-emp td.orc-serv-col,
+        .orc-total td.orc-cart-col, .orc-total td.orc-vend-col, .orc-total td.orc-serv-col { color: #fff; }
+        .orc-cc td.orc-cart-col, .orc-cc td.orc-vend-col, .orc-cc td.orc-serv-col,
+        .orc-obra td.orc-cart-col, .orc-obra td.orc-vend-col, .orc-obra td.orc-serv-col { color: #064e3b; }
         .orc-table tbody tr:hover td { background: #ffedd5; }
         .orc-table tbody tr.orc-emp:hover td, .orc-table tbody tr.orc-total:hover td,
         .orc-table tbody tr.orc-emp:hover td *, .orc-table tbody tr.orc-total:hover td * { color: #7c2d12; }
@@ -261,7 +270,7 @@ const OrcamentoApp = {
       <div class="orc-head">
         <div>
           <h2>Orçamento 2026 × 2027</h2>
-          <p>Empresa, centro de custo e a conta do plano. Os meses de 2026 vêm primeiro — janeiro a setembro recebido, outubro a dezembro forecast (*) — depois os de 2027. Carteira e Novas vendas separam o orçado de 2027 pela observação da base. A variação em reais e o percentual ficam em colunas separadas. O total soma cada mês. Valor Moura Leite aplica o % MLDU de cada empresa.</p>
+          <p>Empresa, centro de custo e a conta do plano. Em 2026, janeiro a setembro é o recebido e outubro a dezembro é forecast. Em 2027, carteira, novas vendas e serviços aparecem separados. Serviços é a receita de prestação de serviços (contas 1.02). Valor Moura Leite aplica o % MLDU de cada empresa.</p>
         </div>
       </div>
       <div class="orc-tools">
@@ -282,7 +291,7 @@ const OrcamentoApp = {
         </label>
         <button type="button" class="btn btn-excel" id="orc-excel" title="Exportar tabela atual para Excel"><i data-lucide="download" style="width:14px;height:14px;"></i> Excel</button>
       </div>
-      <div class="orc-kpis" id="orc-kpis"></div>
+      <div class="orc-kpi-groups" id="orc-kpis"></div>
       <div class="orc-scroll">
         <table class="orc-table">
           <thead>
@@ -290,7 +299,7 @@ const OrcamentoApp = {
               <th class="orc-label" rowspan="2">Empresa / Centro de custo / Plano</th>
               <th class="orc-h26" colspan="${this.periodCols(2026).length}">2026</th>
               <th class="orc-h27 orc-split" colspan="${this.periodCols(2027).length}">2027</th>
-              <th class="orc-cmp orc-split" colspan="9">Comparativo</th>
+              <th class="orc-cmp orc-split" colspan="10">Comparativo</th>
             </tr>
             <tr>
               ${this.periodCols(2026).map((col) => `<th class="orc-h26${col.forecast ? " orc-fc" : ""}">${this.esc(col.label)}</th>`).join("")}
@@ -299,6 +308,7 @@ const OrcamentoApp = {
               <th>Total 2027</th>
               <th title="Parcela do orçado 2027 marcada como carteira na observação">Carteira</th>
               <th title="Parcela do orçado 2027 marcada como vendas na observação">Novas vendas</th>
+              <th title="Receita de prestação de serviços em 2027">Serviços</th>
               <th title="Total 2027 − Total 2026">Variação</th>
               <th title="Total 2027 − Total 2026">Variação %</th>
               <th class="orc-split" title="Carteira em aberto em 2027, sem sub judice">Sienge 2027</th>
@@ -498,7 +508,7 @@ const OrcamentoApp = {
   },
 
   tableSpan() {
-    return 1 + this.periodCols(2026).length + this.periodCols(2027).length + 9;
+    return 1 + this.periodCols(2026).length + this.periodCols(2027).length + 10;
   },
 
   bind() {
@@ -834,6 +844,10 @@ const OrcamentoApp = {
     return sign + p.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
   },
 
+  isServicoConta(conta) {
+    return String(conta || "").indexOf("1.02") === 0;
+  },
+
   origemDe(line) {
     const map = window.ORCAMENTO_ORIGEM_2027 || {};
     const key = String(line.e || "") + "|" + String(line.cc || "") + "|" + String(line.conta || "");
@@ -870,6 +884,8 @@ const OrcamentoApp = {
           cm: this.blank(),
           vend: 0,
           vm: this.blank(),
+          serv: 0,
+          sm: this.blank(),
           notas: ""
         };
         map.set(key, row);
@@ -893,6 +909,15 @@ const OrcamentoApp = {
       if (Array.isArray(o.vm)) row.vm = o.vm.map((v) => this.signed(line.conta, v));
       row.notas = (o.notas || []).join(" · ");
       row._origem = true;
+    });
+    map.forEach((row) => {
+      if (!this.isServicoConta(row.conta)) return;
+      row.serv = this.sum(row.m27);
+      row.sm = row.m27.slice();
+      row.cart = 0;
+      row.cm = this.blank();
+      row.vend = 0;
+      row.vm = this.blank();
     });
     (this.received().lines || []).forEach((line) => {
       const row = touch(line);
@@ -1026,6 +1051,8 @@ const OrcamentoApp = {
             cm: this.blank(),
             vend: 0,
             vm: this.blank(),
+            serv: 0,
+            sm: this.blank(),
             leaf: false,
             children: new Map()
           });
@@ -1037,6 +1064,8 @@ const OrcamentoApp = {
         (acc.cm || []).forEach((v, i) => { child.cm[i] += Number(v) || 0; });
         child.vend += Number(acc.vend) || 0;
         (acc.vm || []).forEach((v, i) => { child.vm[i] += Number(v) || 0; });
+        child.serv += Number(acc.serv) || 0;
+        (acc.sm || []).forEach((v, i) => { child.sm[i] += Number(v) || 0; });
         if (idx === parts.length - 1) child.leaf = true;
         node = child;
       });
@@ -1085,6 +1114,7 @@ const OrcamentoApp = {
     const yCm = this.blank();
     let yCart = 0;
     let yVend = 0;
+    let yServ = 0;
     companies.forEach((emp) => {
       const e26 = this.blank();
       const e27 = this.blank();
@@ -1092,6 +1122,7 @@ const OrcamentoApp = {
       const eCm = this.blank();
       let eCart = 0;
       let eVend = 0;
+      let eServ = 0;
       emp.costCenters.forEach((cc) => {
         this.sumNode(cc.tree, "m26").forEach((v, i) => { e26[i] += v; });
         this.sumNode(cc.tree, "m27").forEach((v, i) => { e27[i] += v; });
@@ -1099,6 +1130,7 @@ const OrcamentoApp = {
         this.sumNode(cc.tree, "cm").forEach((v, i) => { eCm[i] += v; });
         eCart += this.sumScalar(cc.tree, "cart");
         eVend += this.sumScalar(cc.tree, "vend");
+        eServ += this.sumScalar(cc.tree, "serv");
       });
       const factor = this.shareFactor(emp.e);
       const se26 = this.scaleMonths(e26, factor);
@@ -1107,12 +1139,14 @@ const OrcamentoApp = {
       const seCm = this.scaleMonths(eCm, factor);
       const seCart = eCart * factor;
       const seVend = eVend * factor;
+      const seServ = eServ * factor;
       se26.forEach((v, i) => { y26[i] += v; });
       se27.forEach((v, i) => { y27[i] += v; });
       seVm.forEach((v, i) => { yVm[i] += v; });
       seCm.forEach((v, i) => { yCm[i] += v; });
       yCart += seCart;
       yVend += seVend;
+      yServ += seServ;
       const shareNote = this.mouraView ? (" · " + this.participation(emp.e).toLocaleString("pt-BR") + "% ML") : "";
       rows.push({
         kind: "emp",
@@ -1129,6 +1163,7 @@ const OrcamentoApp = {
         cm: seCm,
         vend: seVend,
         vm: seVm,
+        serv: seServ,
         expandable: true,
         parentEmp: "",
         parentObra: "",
@@ -1150,6 +1185,7 @@ const OrcamentoApp = {
           cm: this.scaleMonths(this.sumNode(cc.tree, "cm"), factor),
           vend: this.sumScalar(cc.tree, "vend") * factor,
           vm: this.scaleMonths(this.sumNode(cc.tree, "vm"), factor),
+          serv: this.sumScalar(cc.tree, "serv") * factor,
           expandable: true,
           parentEmp: emp.key,
           parentObra: parentObra,
@@ -1169,6 +1205,7 @@ const OrcamentoApp = {
             cm: this.scaleMonths(acc.cm, factor),
             vend: (Number(acc.vend) || 0) * factor,
             vm: this.scaleMonths(acc.vm, factor),
+            serv: (Number(acc.serv) || 0) * factor,
             expandable: false,
             parentEmp: emp.key,
             parentObra: parentObra,
@@ -1187,6 +1224,7 @@ const OrcamentoApp = {
         const gCm = this.blank();
         let gCart = 0;
         let gVend = 0;
+        let gServ = 0;
         item.centers.forEach((cc) => {
           this.sumNode(cc.tree, "m26").forEach((v, i) => { g26[i] += v; });
           this.sumNode(cc.tree, "m27").forEach((v, i) => { g27[i] += v; });
@@ -1194,6 +1232,7 @@ const OrcamentoApp = {
           this.sumNode(cc.tree, "cm").forEach((v, i) => { gCm[i] += v; });
           gCart += this.sumScalar(cc.tree, "cart");
           gVend += this.sumScalar(cc.tree, "vend");
+          gServ += this.sumScalar(cc.tree, "serv");
         });
         rows.push({
           kind: "obra",
@@ -1210,6 +1249,7 @@ const OrcamentoApp = {
           cm: this.scaleMonths(gCm, factor),
           vend: gVend * factor,
           vm: this.scaleMonths(gVm, factor),
+          serv: gServ * factor,
           expandable: true,
           parentEmp: emp.key,
           parentObra: "",
@@ -1239,13 +1279,14 @@ const OrcamentoApp = {
         cm: yCm,
         vend: yVend,
         vm: yVm,
+        serv: yServ,
         expandable: false,
         parentEmp: "",
         parentObra: "",
         parentCc: ""
       });
     }
-    return { companies, rows, y26, y27, yCart, yVend };
+    return { companies, rows, y26, y27, yCart, yVend, yServ };
   },
 
   rowVisible(row) {
@@ -1280,14 +1321,25 @@ const OrcamentoApp = {
       const t27 = this.sum(y27);
       const delta = t27 - t26;
       kpis.innerHTML = `
-        <div class="orc-kpi"><span>EMPRESAS</span><strong>${data.companies.length}</strong></div>
-        <div class="orc-kpi"><span>RECEBIDO JAN–SET 2026</span><strong>${this.money(rec)}</strong></div>
-        <div class="orc-kpi"><span>FORECAST OUT–DEZ 2026</span><strong class="orc-fc">${this.money(fc)}</strong></div>
-        <div class="orc-kpi"><span>2026 COMPLETO</span><strong>${this.money(t26)}</strong></div>
-        <div class="orc-kpi"><span>ORÇADO 2027</span><strong>${this.money(t27)}</strong></div>
-        <div class="orc-kpi"><span>CARTEIRA 2027</span><strong class="orc-cart-col">${this.money(data.yCart)}</strong></div>
-        <div class="orc-kpi"><span>NOVAS VENDAS 2027</span><strong class="orc-vend-col">${this.money(data.yVend)}</strong></div>
-        <div class="orc-kpi"><span>VARIAÇÃO 2027 − 2026</span><strong class="${delta < 0 ? "orc-neg" : ""}">${this.money(delta)} <span class="orc-pct">${this.pctLabel(delta, t26)}</span></strong></div>
+        <div class="orc-kpi-group">
+          <div class="orc-kpi-year">2026</div>
+          <div class="orc-kpis">
+            <div class="orc-kpi"><span>EMPRESAS</span><strong>${data.companies.length}</strong></div>
+            <div class="orc-kpi"><span>RECEBIDO JAN–SET</span><strong>${this.money(rec)}</strong></div>
+            <div class="orc-kpi"><span>FORECAST OUT–DEZ</span><strong class="orc-fc">${this.money(fc)}</strong></div>
+            <div class="orc-kpi"><span>ANO COMPLETO</span><strong>${this.money(t26)}</strong></div>
+          </div>
+        </div>
+        <div class="orc-kpi-group">
+          <div class="orc-kpi-year">2027</div>
+          <div class="orc-kpis">
+            <div class="orc-kpi"><span>ORÇADO</span><strong>${this.money(t27)}</strong></div>
+            <div class="orc-kpi orc-kpi-cart"><span>CARTEIRA</span><strong class="orc-cart-col">${this.money(data.yCart)}</strong></div>
+            <div class="orc-kpi orc-kpi-vend"><span>NOVAS VENDAS</span><strong class="orc-vend-col">${this.money(data.yVend)}</strong></div>
+            <div class="orc-kpi orc-kpi-serv"><span>SERVIÇOS</span><strong class="orc-serv-col">${this.money(data.yServ)}</strong></div>
+            <div class="orc-kpi"><span>VARIAÇÃO</span><strong class="${delta < 0 ? "orc-neg" : ""}">${this.money(delta)} <span class="orc-pct">${this.pctLabel(delta, t26)}</span></strong></div>
+          </div>
+        </div>
       `;
     }
   },
@@ -1305,6 +1357,7 @@ const OrcamentoApp = {
     const bits = [];
     if (row.cart) bits.push('<span class="orc-tag orc-tag-cart">Carteira</span>');
     if (row.vend) bits.push('<span class="orc-tag orc-tag-vend">Novas vendas</span>');
+    if (row.serv) bits.push('<span class="orc-tag orc-tag-serv">Serviços</span>');
     if (row.notas) bits.push('<span class="orc-sub">' + this.esc(row.notas) + "</span>");
     return bits.length ? '<span class="orc-origem">' + bits.join("") + "</span>" : "";
   },
@@ -1312,8 +1365,10 @@ const OrcamentoApp = {
   origemCell(row, field) {
     const cart = Number(row.cart) || 0;
     const vend = Number(row.vend) || 0;
-    if (!cart && !vend && !row.notas) return '<td>—</td>';
+    const serv = Number(row.serv) || 0;
+    if (!cart && !vend && !serv && !row.notas) return '<td>—</td>';
     if (field === "cart") return this.moneyCell(cart, "orc-cart-col");
+    if (field === "serv") return this.moneyCell(serv, "orc-serv-col");
     if (!vend) return this.moneyCell(vend, "orc-vend-col");
     const cls = ["orc-vend-col", "orc-vend-hover", vend < 0 ? "orc-neg" : ""].filter(Boolean).join(" ");
     return '<td class="' + cls + '" data-vend="' + row._i + '">' + this.money(vend) + "</td>";
@@ -1350,6 +1405,7 @@ const OrcamentoApp = {
       + this.moneyCell(t27, "orc-y27")
       + this.origemCell(row, "cart")
       + this.origemCell(row, "vend")
+      + this.origemCell(row, "serv")
       + this.moneyCell(delta, delta < 0 ? "orc-neg" : "")
       + this.pctCell(delta, t26)
       + this.siengeCells(row)
@@ -1407,7 +1463,7 @@ const OrcamentoApp = {
 
     const c26 = this.periodCols(2026);
     const c27 = this.periodCols(2027);
-    const colCount = 2 + c26.length + c27.length + 9;
+    const colCount = 2 + c26.length + c27.length + 10;
     const start27 = 3 + c26.length;
     const startCmp = start27 + c27.length;
     const ws = wb.addWorksheet("Orçamento", { properties: { showGridLines: false } });
@@ -1424,6 +1480,7 @@ const OrcamentoApp = {
       { width: 18 },
       { width: 52 },
       ...Array.from({ length: c26.length + c27.length }, () => ({ width: 14 })),
+      { width: 16 },
       { width: 16 },
       { width: 16 },
       { width: 16 },
@@ -1468,6 +1525,9 @@ const OrcamentoApp = {
       { label: "Forecast out–dez 2026", value: this.sum(y26.slice(9)), color: "FF9A3412", money: true },
       { label: "2026 completo", value: t26, color: "FF0F172A", money: true },
       { label: "Orçado 2027", value: t27, color: "FF105436", money: true },
+      { label: "Carteira", value: data.yCart, color: "FF1E3A8A", money: true },
+      { label: "Novas vendas", value: data.yVend, color: "FFC2410C", money: true },
+      { label: "Serviços", value: data.yServ, color: "FF0F766E", money: true },
       { label: "Variação", value: delta, color: delta < 0 ? "FFB91C1C" : "FF105436", money: true }
     ];
     kpis.forEach((k, i) => {
@@ -1488,8 +1548,8 @@ const OrcamentoApp = {
         numFmt: k.money ? "#,##0.00" : "0"
       });
     });
-    const pctHead = ws.getRow(1).getCell(10);
-    const pctVal = ws.getRow(2).getCell(10);
+    const pctHead = ws.getRow(1).getCell(13);
+    const pctVal = ws.getRow(2).getCell(13);
     pctHead.value = "Variação %";
     pctVal.value = Math.abs(t26) < 0.005 ? null : delta / t26;
     inv.excelPaint(pctHead, {
@@ -1534,7 +1594,7 @@ const OrcamentoApp = {
     groupHeads.forEach(([col, text]) => {
       ws.getRow(4).getCell(col).value = text;
     });
-    const heads = ["", ""].concat(c26.map((col) => col.label), c27.map((col) => col.label), ["Total 2026", "Total 2027", "Carteira", "Novas vendas", "Variação", "Variação %", "Sienge 2027", "Variação", "Variação %"]);
+    const heads = ["", ""].concat(c26.map((col) => col.label), c27.map((col) => col.label), ["Total 2026", "Total 2027", "Carteira", "Novas vendas", "Serviços", "Variação", "Variação %", "Sienge 2027", "Variação", "Variação %"]);
     const headRow = ws.getRow(5);
     headRow.height = 20;
     heads.forEach((h, i) => {
@@ -1638,34 +1698,36 @@ const OrcamentoApp = {
       };
       paintMoney(excelRow.getCell(startCmp), a26, row.kind, false);
       paintMoney(excelRow.getCell(startCmp + 1), a27, row.kind, false);
-      if (!(Number(row.cart) || Number(row.vend) || row.notas)) {
+      if (!(Number(row.cart) || Number(row.vend) || Number(row.serv) || row.notas)) {
         paintDash(excelRow.getCell(startCmp + 2));
         paintDash(excelRow.getCell(startCmp + 3));
+        paintDash(excelRow.getCell(startCmp + 4));
       } else {
         paintMoney(excelRow.getCell(startCmp + 2), row.cart, row.kind, false);
         paintMoney(excelRow.getCell(startCmp + 3), row.vend, row.kind, false);
+        paintMoney(excelRow.getCell(startCmp + 4), row.serv, row.kind, false);
       }
-      paintMoney(excelRow.getCell(startCmp + 4), d, row.kind, false);
-      paintPct(excelRow.getCell(startCmp + 5), d, a26, row.kind);
+      paintMoney(excelRow.getCell(startCmp + 5), d, row.kind, false);
+      paintPct(excelRow.getCell(startCmp + 6), d, a26, row.kind);
       if (!row.cartCcs) {
-        paintDash(excelRow.getCell(startCmp + 6));
         paintDash(excelRow.getCell(startCmp + 7));
         paintDash(excelRow.getCell(startCmp + 8));
+        paintDash(excelRow.getCell(startCmp + 9));
       } else {
         const fig = this.siengeFigures(row);
         if (fig.loading || fig.error) {
-          paintDash(excelRow.getCell(startCmp + 6));
           paintDash(excelRow.getCell(startCmp + 7));
           paintDash(excelRow.getCell(startCmp + 8));
+          paintDash(excelRow.getCell(startCmp + 9));
           if (fig.loading) {
-            excelRow.getCell(startCmp + 6).value = "…";
             excelRow.getCell(startCmp + 7).value = "…";
             excelRow.getCell(startCmp + 8).value = "…";
+            excelRow.getCell(startCmp + 9).value = "…";
           }
         } else {
-          paintMoney(excelRow.getCell(startCmp + 6), fig.receber, row.kind, false);
-          paintMoney(excelRow.getCell(startCmp + 7), fig.delta, row.kind, false);
-          paintPct(excelRow.getCell(startCmp + 8), fig.delta, fig.receber, row.kind);
+          paintMoney(excelRow.getCell(startCmp + 7), fig.receber, row.kind, false);
+          paintMoney(excelRow.getCell(startCmp + 8), fig.delta, row.kind, false);
+          paintPct(excelRow.getCell(startCmp + 9), fig.delta, fig.receber, row.kind);
         }
       }
       rowIdx += 1;

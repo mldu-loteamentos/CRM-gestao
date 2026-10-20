@@ -117,13 +117,21 @@ const OrcamentoModuloApp = {
     })).filter((c) => c.id);
   },
 
+  empresaDoCentro(c) {
+    if (!c) return "";
+    const raw = c.idCompany != null && c.idCompany !== "" ? c.idCompany
+      : (c.companyId != null && c.companyId !== "" ? c.companyId
+        : (c.company && c.company.id != null ? c.company.id : ""));
+    return raw === "" || raw == null ? "" : String(raw);
+  },
+
   centros() {
     const emp = String(this.novo.companyId || "");
     if (!emp) return [];
     const lista = (window.AppState && AppState.cachedCostCenters) || [];
-    return lista.filter((c) => String(c.companyId) === emp).map((c) => ({
+    return lista.filter((c) => this.empresaDoCentro(c) === emp).map((c) => ({
       id: String(c.id || c.costCenterId || ""),
-      name: String(c.name || "").toUpperCase()
+      name: String(c.name || c.description || "").toUpperCase()
     })).filter((c) => c.id);
   },
 
