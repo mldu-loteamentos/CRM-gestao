@@ -25,7 +25,8 @@ const OrcamentoModuloApp = {
     carregando: false,
     progresso: "",
     erro: "",
-    resultado: null
+    resultado: null,
+    clienteAberto: -1
   },
 
   _bcb: {},
@@ -254,7 +255,7 @@ const OrcamentoModuloApp = {
           <i data-lucide="trending-up"></i> Receita
         </button>
       </div>
-      <p style="margin:0 0 14px;color:#475569;font-size:0.9rem;line-height:1.45;">A receita do centro de custo sai do contas a receber. Clientes sub judice ficam de fora. O vencimento de cada parcela anda os dias do PMP dos últimos 3 meses. Em cada aniversário do contrato, o saldo sobe pelo percentual daquele ano no Boletim Focus, em cima do valor que já foi corrigido no ano anterior.</p>
+      <p class="orc-rec-lead">Contas a receber do centro de custo, sem cliente sub judice. O vencimento anda o PMP. Cada aniversário aplica o Focus daquele ano sobre o saldo já corrigido.</p>
       <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:16px;">
         ${empHtml}
         ${ccHtml}
@@ -329,39 +330,92 @@ const OrcamentoModuloApp = {
       ${totaisMes.map((v) => `<td style="text-align:right;white-space:nowrap;">${v > 0.009 ? this.esc(this.dinheiro(v)) : "—"}</td>`).join("")}
       <td style="text-align:right;white-space:nowrap;">${this.esc(this.dinheiro(r.total))}</td>
     </tr>`;
-    const indices = (r.indices || []).map((ix) => `<li style="margin:0 0 4px;">${this.esc(this.textoIndice(ix))}</li>`).join("");
-    const clientes = (r.clientes || []).map((c) => `<tr>
-      <td>${this.esc(c.cliente)}</td>
-      <td>${this.esc(c.unidade || "—")}</td>
-      <td>${this.esc(c.titulo)}</td>
-      <td style="text-align:right;">${c.pmpConhecido ? this.esc(c.pmp + " d") : "—"}</td>
-      <td>${this.esc(c.repactuacao || "—")}</td>
-      <td>${this.esc(c.indexador || "—")}</td>
-      <td style="text-align:right;white-space:nowrap;">${this.esc(this.dinheiro(c.total))}</td>
-    </tr>`).join("");
+    const indices = (r.indices || []).map((ix) => `<span>${this.esc(this.resumoIndice(ix))}</span>`).join("");
     return `
-      <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
-        <div class="crm-card" style="padding:12px 14px;min-width:160px;"><div style="color:#64748b;font-size:0.72rem;font-weight:700;">RECEITA NO PERÍODO</div><div style="font-weight:800;color:#105436;">${this.esc(this.dinheiro(r.total))}</div></div>
-        <div class="crm-card" style="padding:12px 14px;min-width:160px;"><div style="color:#64748b;font-size:0.72rem;font-weight:700;">CLIENTES NO ORÇAMENTO</div><div style="font-weight:800;">${r.clientes.length}</div></div>
-        <div class="crm-card" style="padding:12px 14px;min-width:160px;"><div style="color:#64748b;font-size:0.72rem;font-weight:700;">FORA, SUB JUDICE</div><div style="font-weight:800;">${r.subJudice} · ${this.esc(this.dinheiro(r.subJudiceValor))}</div></div>
-        <div class="crm-card" style="padding:12px 14px;min-width:160px;"><div style="color:#64748b;font-size:0.72rem;font-weight:700;">ANTES DE ${this.esc(r.anoDe || "")}</div><div style="font-weight:800;">${this.esc(this.dinheiro(r.antes || 0))}</div></div>
-        <div class="crm-card" style="padding:12px 14px;min-width:160px;"><div style="color:#64748b;font-size:0.72rem;font-weight:700;">DEPOIS DE ${this.esc(r.anoAte)}</div><div style="font-weight:800;">${this.esc(this.dinheiro(r.fora))}</div></div>
+      <div class="orc-rec-kpis">
+        <div class="crm-card orc-rec-kpi"><span>Receita no período</span><strong>${this.esc(this.dinheiro(r.total))}</strong></div>
+        <div class="crm-card orc-rec-kpi"><span>Principal</span><strong>${this.esc(this.dinheiro(r.principal || 0))}</strong></div>
+        <div class="crm-card orc-rec-kpi"><span>Reajuste</span><strong class="orc-rec-reaj">${this.esc(this.dinheiro(r.reajuste || 0))}</strong></div>
+        <div class="crm-card orc-rec-kpi"><span>Clientes</span><strong>${r.clientes.length}</strong></div>
+        <div class="crm-card orc-rec-kpi"><span>Fora, sub judice</span><strong>${r.subJudice} · ${this.esc(this.dinheiro(r.subJudiceValor))}</strong></div>
+        <div class="crm-card orc-rec-kpi"><span>Antes de ${this.esc(r.anoDe || "")}</span><strong>${this.esc(this.dinheiro(r.antes || 0))}</strong></div>
+        <div class="crm-card orc-rec-kpi"><span>Depois de ${this.esc(r.anoAte)}</span><strong>${this.esc(this.dinheiro(r.fora))}</strong></div>
       </div>
-      ${indices ? `<ul style="margin:0 0 14px;padding-left:18px;color:#334155;font-size:0.85rem;line-height:1.45;">${indices}</ul>` : ""}
+      ${indices ? `<div class="orc-rec-focus">${indices}</div>` : ""}
       <div style="overflow:auto;margin-bottom:16px;">
         <table class="custom-table" style="min-width:980px;">
           <thead><tr><th>Ano</th>${cab}<th style="text-align:right;">Total</th></tr></thead>
           <tbody>${linhas}${rodape}</tbody>
         </table>
       </div>
-      <div style="overflow:auto;max-height:480px;">
+      <div class="orc-rec-clientes">
         <table class="custom-table">
           <thead><tr>
-            <th>Cliente</th><th>Unidade</th><th>Título</th><th style="text-align:right;">PMP</th><th>Repactuação</th><th>Indexador</th><th style="text-align:right;">No período</th>
+            <th>Cliente</th><th>Unidade</th><th>Título</th><th class="is-right">PMP</th><th>Repactuação</th><th>Indexador</th>
+            <th class="is-right">Principal</th><th class="is-right">Reajuste</th><th class="is-right">No período</th>
           </tr></thead>
-          <tbody>${clientes || `<tr><td colspan="7" style="color:#64748b;">Nenhuma parcela em aberto entrou no período.</td></tr>`}</tbody>
+          <tbody id="orc-rec-cli">${this.clientesHtml(r)}</tbody>
         </table>
       </div>`;
+  },
+
+  clientesHtml(r) {
+    const lista = (r && r.clientes) || [];
+    if (!lista.length) return `<tr><td colspan="9" style="color:#64748b;">Nenhuma parcela em aberto entrou no período.</td></tr>`;
+    let principal = 0;
+    let reajuste = 0;
+    let total = 0;
+    const linhas = lista.map((c, i) => {
+      principal += Number(c.principal) || 0;
+      reajuste += Number(c.reajuste) || 0;
+      total += Number(c.total) || 0;
+      const aberto = this.novo.clienteAberto === i;
+      const detalhe = aberto ? this.parcelasHtml(c) : "";
+      return `<tr class="orc-rec-cli" onclick="OrcamentoModuloApp.toggleCliente(${i})">
+        <td><i data-lucide="${aberto ? "chevron-down" : "chevron-right"}"></i>${this.esc(c.cliente)}</td>
+        <td>${this.esc(c.unidade || "—")}</td>
+        <td>${this.esc(c.titulo)}</td>
+        <td class="is-right">${c.pmpConhecido ? this.esc(c.pmp + " d") : "—"}</td>
+        <td>${this.esc(c.repactuacao || "—")}</td>
+        <td>${this.esc(c.indexador || "—")}</td>
+        <td class="is-right">${this.esc(this.dinheiro(c.principal))}</td>
+        <td class="is-right orc-rec-reaj">${this.esc(this.dinheiro(c.reajuste))}</td>
+        <td class="is-right">${this.esc(this.dinheiro(c.total))}</td>
+      </tr>${detalhe}`;
+    }).join("");
+    const rodape = `<tr class="orc-rec-total"><td colspan="6">Total</td><td class="is-right">${this.esc(this.dinheiro(principal))}</td><td class="is-right orc-rec-reaj">${this.esc(this.dinheiro(reajuste))}</td><td class="is-right">${this.esc(this.dinheiro(total))}</td></tr>`;
+    return linhas + rodape;
+  },
+
+  parcelasHtml(c) {
+    const linhas = (c.parcelas || []).map((p) => {
+      const anos = (p.anos || []).map((a) => a.ano + " " + this.pct(a.pct)).join(" + ");
+      const caixa = p.quando ? p.quando.split("-").reverse().join("/") : "—";
+      const venc = p.due ? String(p.due).slice(0, 10).split("-").reverse().join("/") : "—";
+      return `<tr>
+        <td>${this.esc(venc)}</td>
+        <td>${this.esc(caixa)}</td>
+        <td>${anos ? this.esc(anos) : "Sem reajuste"}</td>
+        <td class="is-right">${this.esc(this.dinheiro(p.principal))}</td>
+        <td class="is-right orc-rec-reaj">${this.esc(this.dinheiro(p.reajuste))}</td>
+        <td class="is-right">${this.esc(this.dinheiro(p.valor))}</td>
+      </tr>`;
+    }).join("");
+    return `<tr class="orc-rec-parc"><td colspan="9">
+      <table class="orc-rec-parc-tab">
+        <thead><tr><th>Vencimento</th><th>Caixa</th><th>Reajustes do Focus</th><th class="is-right">Principal</th><th class="is-right">Reajuste</th><th class="is-right">Corrigido</th></tr></thead>
+        <tbody>${linhas || `<tr><td colspan="6">Nenhuma parcela no período.</td></tr>`}</tbody>
+      </table>
+    </td></tr>`;
+  },
+
+  toggleCliente(i) {
+    this.novo.clienteAberto = this.novo.clienteAberto === i ? -1 : i;
+    const box = document.getElementById("orc-rec-cli");
+    if (box && this.novo.resultado) {
+      box.innerHTML = this.clientesHtml(this.novo.resultado);
+      if (window.lucide) window.lucide.createIcons();
+    }
   },
 
   async montarReceita() {
@@ -392,6 +446,7 @@ const OrcamentoModuloApp = {
       this.pintarProgresso("Buscando o contas a receber do centro de custo…", 40);
       const linhas = await this.buscarExtrato(st.ccId, st.anoAte);
       this.pintarProgresso("Distribuindo a receita pelo PMP e pela repactuação…", 75);
+      st.clienteAberto = -1;
       st.resultado = await this.distribuirReceita(linhas, st.anoDe, st.anoAte);
       st.progressoPct = 100;
     } catch (e) {
@@ -564,6 +619,8 @@ const OrcamentoModuloApp = {
     const grade = {};
     for (let y = anoDe; y <= anoAte; y++) grade[String(y)] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     const clientes = [];
+    let principal = 0;
+    let reajuste = 0;
     let subJudice = 0;
     let subJudiceValor = 0;
     let fora = 0;
@@ -586,12 +643,17 @@ const OrcamentoModuloApp = {
       if (taxa) usos[taxa.chave] = taxa;
       const mm = t.emissao && t.emissao.length >= 7 ? t.emissao.slice(5, 7) : "";
       let doCliente = 0;
+      let principalCliente = 0;
+      let reajusteCliente = 0;
+      const parcelasCliente = [];
       Object.keys(t.parcelas).forEach((k) => {
         const p = t.parcelas[k];
         if (!(p.saldo > 0.009) || !p.due) return;
         const anos = this.anosDeReajuste(t.emissao, p.due, hoje);
         const fator = taxa ? this.fatorAcumulado(taxa, anos) : 1;
-        const valor = Math.round(p.saldo * fator * 100) / 100;
+        const saldo = Math.round(p.saldo * 100) / 100;
+        const valor = Math.round(saldo * fator * 100) / 100;
+        const ajuste = Math.round((valor - saldo) * 100) / 100;
         let quando = this.addDias(p.due, pmp.pmp);
         if (!quando) return;
         if (quando < hoje) quando = hoje;
@@ -608,7 +670,19 @@ const OrcamentoModuloApp = {
         if (!grade[ano] || mes < 0) return;
         grade[ano][mes] += valor;
         doCliente += valor;
+        principalCliente += saldo;
+        reajusteCliente += ajuste;
+        principal += saldo;
+        reajuste += ajuste;
         total += valor;
+        parcelasCliente.push({
+          due: p.due,
+          quando,
+          anos: anos.map((y) => ({ ano: y, pct: taxa ? this.percentualAno(taxa, y) * 100 : 0 })),
+          principal: saldo,
+          reajuste: ajuste,
+          valor
+        });
       });
       if (doCliente > 0.009) {
         const prox = this.proximaRepactuacao(t.emissao, hoje);
@@ -620,7 +694,10 @@ const OrcamentoModuloApp = {
           pmpConhecido: pmp.conhecido,
           repactuacao: prox ? (this.mesNome(Number(prox.slice(5, 7))) + "/" + prox.slice(0, 4) + (mm ? "" : "")) : (t.indexador ? "Sem data de venda" : "Sem reajuste"),
           indexador: taxa ? taxa.nome : (t.indexador ? t.indexador.nome || t.indexador.id : "REAL"),
-          total: doCliente
+          principal: principalCliente,
+          reajuste: reajusteCliente,
+          total: doCliente,
+          parcelas: parcelasCliente.sort((a, b) => String(a.due).localeCompare(String(b.due)))
         });
       }
     }
@@ -629,6 +706,8 @@ const OrcamentoModuloApp = {
       grade,
       clientes,
       total,
+      principal,
+      reajuste,
       fora,
       antes,
       subJudice,
@@ -680,6 +759,15 @@ const OrcamentoModuloApp = {
     if (data < hoje) data = (y + 1) + "-" + mm + "-01";
     if (Number(data.slice(0, 4)) <= Number(em.slice(0, 4))) return (Number(em.slice(0, 4)) + 1) + "-" + mm + "-01";
     return data;
+  },
+
+  resumoIndice(ix) {
+    if (!ix) return "";
+    if (ix.fallback) return ix.nome + " · anual recente " + this.pct((ix.anual || 0) * 100) + " em cada ano";
+    const anos = Object.keys(ix.porAno || {}).map(Number).sort((a, b) => a - b);
+    const lista = anos.map((y) => y + " " + this.pct(ix.porAno[y])).join(" · ");
+    const data = ix.dataFocus ? ix.dataFocus.split("-").reverse().join("/") : "";
+    return ix.nome + " · Focus" + (data ? " " + data : "") + " · " + lista;
   },
 
   textoIndice(ix) {

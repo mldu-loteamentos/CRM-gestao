@@ -594,32 +594,99 @@ const OrcamentoImpostosApp = {
   },
 
   detalhe(row) {
-    const linhas = [
-      ["Vendas na competência", row.vendas, false],
-      ["Serviços na competência", row.servicos, false],
-      ["Aplicações na competência", row.financeiras, false],
-      ["PIS a pagar", row.pagar.pis, true],
-      ["COFINS a pagar", row.pagar.cofins, true],
-      ["IRPJ a pagar", row.pagar.irpj, true],
-      ["CSLL a pagar", row.pagar.csll, true]
-    ];
-    const corpo = linhas.map(([nome, arr, paga]) => {
+    const faixa = (titulo) => `<tr class="orc-est-secao"><td colspan="15">${titulo}</td></tr>`;
+    const linha = (nome, arr, paga, dica) => {
       const cel = [];
       for (let i = 0; i < 12; i++) {
-        const v = paga ? arr[i] : arr[i];
-        cel.push(`<td>${paga && i === 0 && arr[0] == null ? "—" : OrcEst.money(v)}</td>`);
+        const vazio = paga && i === 0 && arr[0] == null;
+        cel.push(`<td${dica ? ` title="${OrcEst.esc(dica)}"` : ""}>${vazio ? "—" : OrcEst.money(arr[i])}</td>`);
       }
-      const ate2027 = paga ? this.somaAte(arr, 12) : arr.reduce((s, n) => s + n, 0);
+      const ate2027 = paga ? this.somaAte(arr, 12) : arr.reduce((s, n) => s + (Number(n) || 0), 0);
       const jan28 = paga ? arr[12] : null;
-      return `<tr class="orc-est-sub"><td>${nome}</td>${cel.join("")}<td>${OrcEst.money(ate2027)}</td><td>${paga ? OrcEst.money(jan28) : "—"}</td></tr>`;
-    }).join("");
-    const notas = [row.leitura.pis, row.leitura.cofins, row.leitura.irpj, row.leitura.csll]
-      .map((l) => `<li class="${l.tem && l.fecha ? "orc-est-ok" : (l.tem ? "orc-est-alerta" : "")}">${OrcEst.esc(l.texto)}</li>`)
-      .join("");
+      return `<tr class="orc-est-sub${paga ? " orc-est-pag" : ""}"><td>${nome}</td>${cel.join("")}<td>${OrcEst.money(ate2027)}</td><td>${paga ? OrcEst.money(jan28) : "—"}</td></tr>`;
+    };
+    const corpo = faixa("Base da competência — o mês em que a receita entra")
+      + linha("Vendas", row.vendas, false, "Vendas de lote da competência, já com as redutoras")
+      + linha("Serviços", row.servicos, false, "Receita de serviços da competência")
+      + linha("Aplicações", row.financeiras, false, "Aplicações financeiras da competência")
+      + faixa("Imposto no mês em que se paga")
+      + linha("PIS", row.pagar.pis, true, "PIS da competência anterior. Janeiro usa o forecast de dezembro de 2026.")
+      + linha("COFINS", row.pagar.cofins, true, "COFINS da competência anterior. Janeiro usa o forecast de dezembro de 2026.")
+      + linha("IRPJ", row.pagar.irpj, true, "IRPJ do trimestre anterior. Janeiro usa o forecast de outubro a dezembro de 2026.")
+      + linha("CSLL", row.pagar.csll, true, "CSLL do trimestre anterior, no mesmo mês do IRPJ.");
+    const leituras = [row.leitura.pis, row.leitura.cofins, row.leitura.irpj, row.leitura.csll];
+    const notas = leituras.every((l) => !l.tem)
+      ? `<p class="orc-est-nota">O orçamento de 2027 não traz PIS, COFINS, IRPJ nem CSLL. A tabela é a estimativa.</p>`
+      : `<ul class="orc-est-leituras">${leituras.map((l) => `<li class="${l.tem && l.fecha ? "orc-est-ok" : (l.tem ? "orc-est-alerta" : "")}">${OrcEst.esc(l.texto)}</li>`).join("")}</ul>`;
     return `<tr class="orc-est-det"><td colspan="15">
       <table class="orc-dfc-table orc-est-mini"><tbody>${corpo}</tbody></table>
-      <ul class="orc-est-leituras">${notas}</ul>
+      ${this.racionalHtml(row)}
+      ${notas}
     </td></tr>`;
+  },
+
+  pctAli(v) {
+    return (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%";
+  },
+
+  somaFaixa(arr, ini, fim) {
+    let s = 0;
+    for (let i = ini; i < fim; i++) s += Number(arr[i]) || 0;
+    return s;
+  },
+
+  racionalHtml(row) {
+    const a = OrcEst.aliquotas();
+    const mo = (v) => OrcEst.money(v);
+    const pc = (v) => this.pctAli(v);
+    const limite = (Number(a.limiteMensal) || 0) * 3;
+    const finNaBase = !!a.financNoPis;
+    const baseDe = (v, s, f) => (Number(v) || 0) + (Number(s) || 0) + (finNaBase ? (Number(f) || 0) : 0);
+    const meses = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+    const pisHead = `<tr><th>Paga em</th><th>Competência</th><th>Vendas</th><th>Serviços</th>${finNaBase ? "<th>Aplicações</th>" : ""}<th>Base</th><th>PIS ${pc(a.pis)}</th><th>COFINS ${pc(a.cofins)}</th></tr>`;
+    const pisJan = row.forecastDez
+      ? `<tr><td>Jan/2027</td><td>Dez/2026, forecast</td><td colspan="${finNaBase ? 4 : 3}">Veio do arquivo de dezembro de 2026</td><td>${mo(row.pagar.pis[0])}</td><td>${mo(row.pagar.cofins[0])}</td></tr>`
+      : `<tr><td>Jan/2027</td><td>Dez/2026, forecast</td><td colspan="${finNaBase ? 6 : 5}">Sem o forecast de dezembro, PIS e COFINS de janeiro ficam em branco.</td></tr>`;
+    const pisMeses = [];
+    for (let i = 0; i < 12; i++) {
+      const v = row.vendas[i];
+      const s = row.servicos[i];
+      const f = row.financeiras[i];
+      const base = baseDe(v, s, f);
+      const paga = i === 11 ? "Jan/2028" : meses[i + 1] + "/2027";
+      pisMeses.push(`<tr><td>${paga}</td><td>${meses[i]}/2027</td><td>${mo(v)}</td><td>${mo(s)}</td>${finNaBase ? `<td>${mo(f)}</td>` : ""}<td>${mo(base)}</td><td>${mo(base > 0 ? base * a.pis / 100 : 0)}</td><td>${mo(base > 0 ? base * a.cofins / 100 : 0)}</td></tr>`);
+    }
+    const tris = [
+      { nome: "Jan–mar", paga: "Abr/2027", ini: 0, q: row.q0, forecast: false },
+      { nome: "Abr–jun", paga: "Jul/2027", ini: 3, q: row.q1, forecast: false },
+      { nome: "Jul–set", paga: "Out/2027", ini: 6, q: row.q2, forecast: false },
+      { nome: "Out–dez", paga: "Jan/2028", ini: 9, q: row.q3, forecast: false }
+    ];
+    const triLinhas = tris.map((t) => {
+      const v = this.somaFaixa(row.vendas, t.ini, t.ini + 3);
+      const s = this.somaFaixa(row.servicos, t.ini, t.ini + 3);
+      const f = this.somaFaixa(row.financeiras, t.ini, t.ini + 3);
+      const lucroI = v * a.vendasIrpj / 100 + s * a.servicosIrpj / 100 + f * a.financIrpj / 100;
+      const ir = lucroI > 0 ? lucroI * a.irpj / 100 : 0;
+      const ad = lucroI > limite ? (lucroI - limite) * a.adicional / 100 : 0;
+      const lucroC = v * a.vendasCsll / 100 + s * a.servicosCsll / 100 + f * a.financCsll / 100;
+      const csll = lucroC > 0 ? lucroC * a.csll / 100 : 0;
+      return `<tr><td>${t.nome}</td><td>${t.paga}</td><td>${mo(v)}</td><td>${mo(s)}</td><td>${mo(f)}</td><td>${mo(lucroI)}</td><td>${mo(ir)}</td><td>${mo(ad)}</td><td>${mo(ir + ad)}</td><td>${mo(lucroC)}</td><td>${mo(csll)}</td></tr>`;
+    }).join("");
+    const janTri = row.pagar.irpj[0] != null
+      ? `<p>Janeiro de 2027 recolhe o IRPJ ${mo(row.pagar.irpj[0])} e a CSLL ${mo(row.pagar.csll[0])} do forecast de outubro a dezembro de 2026${row.forecastMeses ? " (" + row.forecastMeses + " meses no arquivo)" : ""}.</p>`
+      : `<p>Janeiro de 2027 não tem IRPJ nem CSLL: falta o forecast de outubro, novembro ou dezembro de 2026.</p>`;
+    const finTxt = finNaBase
+      ? "As aplicações entram na base do PIS e da COFINS."
+      : "As aplicações ficam de fora do PIS e da COFINS. Entram por inteiro no lucro do IRPJ e da CSLL.";
+    return `<div class="orc-est-racional">
+      <h4>Racional do cálculo</h4>
+      <p>PIS ${pc(a.pis)} e COFINS ${pc(a.cofins)} incidem sobre vendas mais serviços da competência. ${finTxt} Base negativa não gera imposto. O valor paga no mês seguinte: a base de janeiro paga em fevereiro, e a de dezembro paga em janeiro de 2028.</p>
+      <div class="orc-est-rac-scroll"><table class="orc-est-rac"><thead>${pisHead}</thead><tbody>${pisJan}${pisMeses.join("")}</tbody></table></div>
+      <p>IRPJ ${pc(a.irpj)} sobre o lucro presumido do trimestre: vendas × ${pc(a.vendasIrpj)}, serviços × ${pc(a.servicosIrpj)} e aplicações × ${pc(a.financIrpj)}. O adicional é ${pc(a.adicional)} do lucro que passar de ${mo(limite)} no trimestre. CSLL ${pc(a.csll)} sobre vendas × ${pc(a.vendasCsll)}, serviços × ${pc(a.servicosCsll)} e aplicações × ${pc(a.financCsll)}. Janeiro a março pagam em abril, abril a junho em julho, julho a setembro em outubro, e outubro a dezembro em janeiro de 2028.</p>
+      ${janTri}
+      <div class="orc-est-rac-scroll"><table class="orc-est-rac"><thead><tr><th>Trimestre</th><th>Paga em</th><th>Vendas</th><th>Serviços</th><th>Aplicações</th><th>Lucro do IR</th><th>IR ${pc(a.irpj)}</th><th>Adicional</th><th>IRPJ</th><th>Lucro da CSLL</th><th>CSLL</th></tr></thead><tbody>${triLinhas}</tbody></table></div>
+    </div>`;
   }
 };
 
