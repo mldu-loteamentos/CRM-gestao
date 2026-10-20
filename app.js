@@ -23570,9 +23570,19 @@ function upgradePermutaTextoDistrato(text) {
   if (!/\{\{PERMUTA_CONTRATOS\}\}/.test(s)) {
     s = s.replace(
       /5\.2\. O valor apurado a título de restituição será utilizado para compensação e abatimento de parcelas vincendas do contrato de compromisso de compra e venda mantido pelo PROMITENTE COMPRADOR junto à PROMITENTE VENDEDORA, referente ao lote \{\{NOVO_LOTE\}\}\./,
-      "5.2. O valor apurado a título de restituição será utilizado para compensação e abatimento de parcelas dos contratos de compromisso de compra e venda mantidos pelo PROMITENTE COMPRADOR junto à PROMITENTE VENDEDORA, referentes a {{PERMUTA_CONTRATOS}}. A restituição pode ser dividida entre esses títulos.\n{{#SE_PERMUTA_PARCIAL}}\n5.2.1. As parcelas marcadas serão baixadas pelo valor presente integral. Para fechar exatamente o valor da restituição, sem excedente, a parcela seguinte será abatida só na proporção que faltar: {{PERMUTA_PARCIAL_TEXTO}}.\n{{/SE_PERMUTA_PARCIAL}}"
+      "5.2. O valor apurado a título de restituição será utilizado para compensação e abatimento de parcelas dos contratos de compromisso de compra e venda mantidos pelo PROMITENTE COMPRADOR junto à PROMITENTE VENDEDORA, referentes a {{PERMUTA_CONTRATOS}}. A restituição pode ser dividida entre esses títulos. O abatimento alcança {{PERMUTA_PARCELAS}}.\n{{#SE_PERMUTA_PARCIAL}}\n5.2.1. As parcelas marcadas serão baixadas pelo valor presente integral. {{PERMUTA_PARCIAL_TEXTO}}\n{{/SE_PERMUTA_PARCIAL}}"
     );
   }
+  if (!/\{\{PERMUTA_PARCELAS\}\}/.test(s)) {
+    s = s.replace(
+      "A restituição pode ser dividida entre esses títulos.",
+      "A restituição pode ser dividida entre esses títulos. O abatimento alcança {{PERMUTA_PARCELAS}}."
+    );
+  }
+  s = s.replace(
+    /5\.2\.1\. As parcelas marcadas serão baixadas pelo valor presente integral\. Para fechar exatamente o valor da restituição, sem excedente, a parcela seguinte será abatida só na proporção que faltar: \{\{PERMUTA_PARCIAL_TEXTO\}\}\./,
+    "5.2.1. As parcelas marcadas serão baixadas pelo valor presente integral. {{PERMUTA_PARCIAL_TEXTO}}"
+  );
   if (/\{\{#SE_PERMUTA_SALDO\}\}/.test(s) && !/somente ocorre se a restituição quitar/.test(s)) {
     s = s.replace(
       /\{\{#SE_PERMUTA_SALDO\}\}[\s\S]*?\{\{\/SE_PERMUTA_SALDO\}\}/,
@@ -23580,6 +23590,56 @@ function upgradePermutaTextoDistrato(text) {
     );
   }
   return s;
+}
+
+function distPermutaValorComExtenso(valor) {
+  const n = Number(valor) || 0;
+  const ext = typeof valorPorExtensoBRL === "function" ? valorPorExtensoBRL(n) : "";
+  return distPermutaFmt(n) + (ext ? " (" + ext + ")" : "");
+}
+
+function distPermutaNumeroParcela(number) {
+  const n = parseInt(String(number == null ? "" : number).replace(/\D/g, ""), 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+function distPermutaFaixas(numeros) {
+  const lista = [];
+  (numeros || []).forEach((n) => {
+    if (n == null || lista[lista.length - 1] === n) return;
+    lista.push(n);
+  });
+  lista.sort((a, b) => a - b);
+  const unicos = [];
+  lista.forEach((n) => {
+    if (unicos[unicos.length - 1] !== n) unicos.push(n);
+  });
+  const faixas = [];
+  unicos.forEach((n) => {
+    const ultima = faixas[faixas.length - 1];
+    if (ultima && n === ultima[1] + 1) ultima[1] = n;
+    else faixas.push([n, n]);
+  });
+  return faixas;
+}
+
+function distPermutaRotuloFaixa(faixa) {
+  return faixa[0] === faixa[1] ? String(faixa[0]) : (faixa[0] + " a " + faixa[1]);
+}
+
+function distPermutaTextoFaixas(faixas) {
+  if (!faixas.length) return "";
+  if (faixas.length === 1) {
+    const faixa = faixas[0];
+    return faixa[0] === faixa[1] ? ("a parcela " + faixa[0]) : ("as parcelas " + distPermutaRotuloFaixa(faixa));
+  }
+  const seq = distPermutaRotuloFaixa(faixas[0]);
+  const fim = distPermutaRotuloFaixa(faixas[faixas.length - 1]);
+  const meio = faixas.slice(1, -1).map(distPermutaRotuloFaixa);
+  let txt = "as parcelas sequenciais de " + seq;
+  if (meio.length) txt += ", as parcelas " + meio.join(", ");
+  txt += " e as parcelas finais de " + fim;
+  return txt;
 }
 
 function distPermutaTextoDocumento(extra) {
@@ -23590,30 +23650,40 @@ function distPermutaTextoDocumento(extra) {
   insts.forEach((inst) => {
     const id = String(inst.billId || "");
     if (!seen[id]) {
-      seen[id] = { billId: id, unit: inst.unit || "" };
+      seen[id] = { billId: id, unit: inst.unit || "", numeros: [] };
       byBill.push(seen[id]);
     }
+    const numero = distPermutaNumeroParcela(inst.number);
+    if (numero != null) seen[id].numeros.push(numero);
   });
   const contratos = byBill.map((b) => "o título " + b.billId + (b.unit ? ", unidade " + b.unit : ""));
+  const parcelas = byBill.map((b) => {
+    const faixas = distPermutaTextoFaixas(distPermutaFaixas(b.numeros));
+    if (!faixas) return "";
+    return faixas + " do título " + b.billId + (b.unit ? ", unidade " + b.unit : "");
+  }).filter(Boolean);
   const parcialTxt = insts.filter((p) => p.parcial).map((p) => {
     const pct = ((Number(p.ratio) || 0) * 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const valor = Number(p.abatidoVp) || 0;
-    const ext = typeof valorPorExtensoBRL === "function" ? valorPorExtensoBRL(valor) : "";
-    return "no título " + p.billId + (p.unit ? ", unidade " + p.unit : "") + ", a parcela " + p.number + ", com vencimento em " + distPermutaFmtDate(p.due) + ", será abatida proporcionalmente no valor presente de " + distPermutaFmt(valor) + (ext ? " (" + ext + ")" : "") + ", correspondente a " + pct + "% do valor presente de " + distPermutaFmt(p.vp);
-  }).join("; ");
-  const nomes = [];
+    return "Para fechar exatamente o valor da restituição, sem excedente, no título " + p.billId + (p.unit ? ", unidade " + p.unit : "") + ", a parcela " + p.number + ", com vencimento em " + distPermutaFmtDate(p.due) + ", será baixada parcialmente no valor presente de " + distPermutaValorComExtenso(valor) + ", correspondente a " + pct + "% do valor presente de " + distPermutaFmt(p.vp) + ".";
+  }).join(" ");
+  const deducoesItens = [];
   const deb = extra || {};
-  if ((Number(deb.iptu) || 0) > 0.009) nomes.push("IPTU");
-  if ((Number(deb.taxaAssoc) || 0) > 0.009) nomes.push("taxa associativa");
-  if ((Number(deb.agua) || 0) > 0.009) nomes.push("água");
-  if ((Number(deb.luz) || 0) > 0.009) nomes.push("energia");
-  if ((Number(deb.outros) || 0) > 0.009) nomes.push("outras despesas");
+  [
+    ["IPTU", deb.iptu],
+    ["taxa associativa", deb.taxaAssoc],
+    ["água", deb.agua],
+    ["energia", deb.luz],
+    ["outras despesas", deb.outros]
+  ].forEach((par) => {
+    if ((Number(par[1]) || 0) > 0.009) deducoesItens.push(par[0] + " no valor de " + distPermutaValorComExtenso(par[1]));
+  });
   let deducoes = "";
-  if (nomes.length === 1) deducoes = ", e após a dedução de " + nomes[0];
-  else if (nomes.length > 1) deducoes = ", e após a dedução de " + distPermutaJoinFrase(nomes);
+  if (deducoesItens.length) deducoes = ", e após a dedução de " + distPermutaJoinFrase(deducoesItens);
   const lote = document.getElementById("dist-novo-lote");
   return {
     PERMUTA_CONTRATOS: distPermutaJoinFrase(contratos) || (lote && lote.value) || "____",
+    PERMUTA_PARCELAS: distPermutaJoinFrase(parcelas) || "____",
     PERMUTA_PARCIAL_TEXTO: parcialTxt,
     hasParcial: insts.some((p) => p.parcial),
     TEXTO_DEDUCOES_PERMUTA: deducoes
@@ -23958,6 +24028,7 @@ window.generateDistratoPDF = async function generateDistratoPDF() {
       PERCENTUAL_RETENCAO: pctRetencao,
       NOVO_LOTE: novoLoteRaw || '____',
       PERMUTA_CONTRATOS: permDoc.PERMUTA_CONTRATOS,
+      PERMUTA_PARCELAS: permDoc.PERMUTA_PARCELAS,
       PERMUTA_PARCIAL_TEXTO: permDoc.PERMUTA_PARCIAL_TEXTO,
       TEXTO_DEDUCOES_PERMUTA: isPermuta ? permDoc.TEXTO_DEDUCOES_PERMUTA : '',
       TESTEMUNHA_1_NOME: w1.nome || t.test1Nome || '________________',
