@@ -6532,44 +6532,69 @@ async function initializeApplication() {
           const tok = window.normalizeContractIdToken(raw);
           if (tok) set.add(tok);
       };
+      add(AppState.currentReceivableBillId);
       add(AppState.selectedSaleId);
       add(AppState.selectedTitulo);
       add(AppState.selectedContractId);
-      add(sessionStorage.getItem('currentSaleId'));
-      add(sessionStorage.getItem('currentTitulo'));
-      const sel = String(AppState.selectedSaleId || '');
-      const tit = String(AppState.selectedTitulo || '');
-      const cid = String(AppState.selectedContractId || '');
+      add(AppState.currentSalesContractId);
+      add(AppState.currentContractNumber);
+      const seeds = new Set(set);
+      const bate = (v) => {
+          const raw = v == null ? '' : String(v).trim();
+          if (!raw) return false;
+          const tok = window.normalizeContractIdToken(raw);
+          return seeds.has(raw) || (tok && seeds.has(tok));
+      };
       (AppState.sales || []).forEach(s => {
-          const sid = String(s.id || '');
-          const bill = String(s.receivableBillId || '');
-          if (sid === sel || bill === sel || sid === tit || bill === tit || sid === cid || bill === cid) {
-              add(s.id);
-              add(s.receivableBillId);
-          }
-      });
-      const custId = String(AppState.selectedCustomerId || '');
-      (window.rawClientList || window.clientList || []).forEach(c => {
-          if (String(c.customerId) !== custId) return;
-          const billIds = (c.billIds || []).map(String);
-          const saleTok = window.normalizeContractIdToken(c.saleId);
-          const matches = String(c.saleId) === sel || String(c.saleId) === tit || String(c.saleId) === cid
-              || saleTok === window.normalizeContractIdToken(sel)
-              || saleTok === window.normalizeContractIdToken(tit)
-              || billIds.some(b => {
-                  const t = window.normalizeContractIdToken(b);
-                  return t && (t === window.normalizeContractIdToken(sel) || t === window.normalizeContractIdToken(tit) || t === window.normalizeContractIdToken(cid));
-              });
-          if (matches) {
-              add(c.saleId);
-              billIds.forEach(add);
-          }
+          if (!s) return;
+          const ids = [s.id, s.receivableBillId, s.salesContractId, s.contractNumber];
+          if (!ids.some(bate)) return;
+          ids.forEach(add);
       });
       return set;
   };
 
+  /** Outros títulos do cliente aberto, fora da ficha atual. Inclui quitado. */
+  window.outrosTitulosDoCliente = function() {
+      const cust = String(AppState.selectedCustomerId || '');
+      const atual = window.getCurrentContractIdSet();
+      const pertence = (id) => {
+          const raw = id == null ? '' : String(id).trim();
+          if (!raw) return false;
+          const tok = window.normalizeContractIdToken(raw);
+          return atual.has(raw) || (tok && atual.has(tok));
+      };
+      const vistos = new Set();
+      const out = [];
+      const push = (saleId, unitId) => {
+          const id = saleId == null ? '' : String(saleId).trim();
+          if (!id || pertence(id) || vistos.has(id)) return;
+          vistos.add(id);
+          out.push({ saleId: id, unitId: unitId || null });
+      };
+      const sales = (AppState.sales || []).filter(s => window.saleBelongsToCustomer && window.saleBelongsToCustomer(s, cust));
+      if (sales.length) {
+          sales.forEach(s => {
+              if (pertence(s.id) || pertence(s.receivableBillId) || pertence(s.contractNumber) || pertence(s.salesContractId)) return;
+              push(s.receivableBillId || s.id, s.unitId);
+          });
+          return out;
+      }
+      [].concat(window.clientList || [], window.rawClientList || []).forEach(c => {
+          if (!c || String(c.customerId) !== cust) return;
+          if (pertence(c.saleId)) return;
+          push(c.saleId, c.unitId);
+      });
+      return out;
+  };
+
   window.occurrenceMatchesCurrentContract = function(occ) {
-      if (!occ || occ.saleId == null || occ.saleId === '') return true;
+      const canalNota = String((occ && (occ.canal || occ.fase)) || "");
+      const ehNota = canalNota === "Nota interna" || canalNota === "Nota Interna";
+      if (!occ || occ.saleId == null || occ.saleId === '') {
+          if (ehNota && window.getCurrentContractIdSet().size) return false;
+          return true;
+      }
       const set = window.getCurrentContractIdSet();
       if (!set.size) return true;
       const raw = String(occ.saleId);
@@ -12291,8 +12316,9 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   }
 
   sessionStorage.setItem('currentCustomerId', customerId);
-  sessionStorage.setItem('currentSaleId', AppState.selectedSaleId);
+  sessionStorage.setItem('currentSaleId', AppState.selectedSaleId || '');
   if (specificTitulo) sessionStorage.setItem('currentTitulo', specificTitulo);
+  else sessionStorage.removeItem('currentTitulo');
 
     if (window.subscribeCustomerNotes) window.subscribeCustomerNotes(customerId);
     if (window.subscribeCustomerJudNotes) window.subscribeCustomerJudNotes(customerId);
@@ -16956,9 +16982,13 @@ async function saveCustomerOccurrence() {
   ) || {};
   const pinCheckbox = document.getElementById("note-pin-checkbox");
   const isPinned = pinCheckbox ? pinCheckbox.checked : false;
-  const canonicalSaleId = (typeof window.nexCanonicalTitulo === "function")
-    ? window.nexCanonicalTitulo(AppState.selectedSaleId)
-    : (AppState.currentReceivableBillId || AppState.selectedTitulo || AppState.selectedSaleId);
+  const tituloAberto = String(AppState.selectedSaleId || AppState.selectedTitulo || AppState.selectedContractId || "");
+  const tituloBill = String(AppState.currentReceivableBillId || "");
+  const mesmoTitulo = tituloAberto && tituloBill && (
+    tituloAberto === tituloBill
+    || (typeof window.normalizeContractIdToken === "function" && window.normalizeContractIdToken(tituloAberto) === window.normalizeContractIdToken(tituloBill))
+  );
+  const canonicalSaleId = mesmoTitulo ? tituloBill : (tituloAberto || tituloBill);
 
   const newOccId = () => (window.crypto && typeof window.crypto.randomUUID === "function")
     ? window.crypto.randomUUID()
@@ -17030,7 +17060,44 @@ async function saveCustomerOccurrence() {
   
   // LOGICA CROSS-CONTRACT E LIMPEZA DE TEMPO NA FILA
   let redirectSaleId = null;
-  if (canal !== "Nota interna") {
+  const abrirPerguntaReplicar = (otherContracts, texto, tituloModal) => {
+      window.finalizeOccurrenceSave(occurrence, null, true);
+      const modal = document.getElementById("cross-contract-modal");
+      const textEl = document.getElementById("cross-contract-modal-text");
+      const tituloEl = modal ? modal.querySelector("h3") : null;
+      const validarBtn = modal ? modal.querySelector("button[onclick*='validar']") : null;
+      if (tituloEl) tituloEl.textContent = tituloModal || "Replicar Ocorrência?";
+      if (validarBtn) validarBtn.style.display = tituloModal ? "none" : "";
+      if (modal && textEl) {
+          textEl.innerHTML = texto;
+          window.pendingReplicationData = {
+              occurrence: occurrence,
+              otherContracts: otherContracts
+          };
+          modal.style.display = "flex";
+          setTimeout(() => modal.classList.add('active'), 10);
+          if (window.lucide) lucide.createIcons();
+          return true;
+      }
+      return false;
+  };
+  const ehNotaInterna = canal === "Nota interna" || canal === "Nota Interna";
+  if (ehNotaInterna) {
+      const outrosNotas = (typeof window.outrosTitulosDoCliente === "function")
+        ? window.outrosTitulosDoCliente()
+        : [];
+      if (outrosNotas.length > 0 && !window.isCrossContractValidating) {
+          const titulos = outrosNotas.map(oc => oc.saleId).slice(0, 6).join(", ");
+          const extra = outrosNotas.length > 6 ? " e outros" : "";
+          const perguntou = abrirPerguntaReplicar(
+              outrosNotas,
+              `A nota interna foi gravada só neste título (<b>${occurrence.saleId || "atual"}</b>). Este cliente também tem o(s) título(s) <b>${titulos}</b>${extra}. Deseja replicar a mesma nota para eles? Sem a sua confirmação, ela fica só neste título.`,
+              "Replicar nota interna?"
+          );
+          if (perguntou) return;
+      }
+      window.isCrossContractValidating = false;
+  } else if (canal !== "Nota interna") {
       const uniqueOtherSales = new Set();
       const otherContracts = [];
       const currentSet = (typeof window.getCurrentContractIdSet === "function")
@@ -17059,20 +17126,13 @@ async function saveCustomerOccurrence() {
       if (otherContracts.length > 0 && !window.isCrossContractValidating) {
           const hasInstallments = occurrence.promisedInstallments && occurrence.promisedInstallments.length > 0;
           if (!hasInstallments) {
-              window.finalizeOccurrenceSave(occurrence, null, true);
-              const modal = document.getElementById("cross-contract-modal");
-              const textEl = document.getElementById("cross-contract-modal-text");
-              if (modal && textEl) {
-                  const titulos = otherContracts.map(oc => oc.saleId).slice(0, 4).join(", ");
-                  textEl.innerHTML = `A ocorrência já foi gravada neste título (<b>${occurrence.saleId}</b>). Replicar o mesmo registro para o(s) outro(s) contrato(s) pendente(s): <b>${titulos}</b>?`;
-                  window.pendingReplicationData = {
-                      occurrence: occurrence,
-                      otherContracts: otherContracts
-                  };
-                  modal.style.display = "flex";
-                  setTimeout(() => modal.classList.add('active'), 10);
-                  return;
-              }
+              const titulos = otherContracts.map(oc => oc.saleId).slice(0, 4).join(", ");
+              const perguntou = abrirPerguntaReplicar(
+                  otherContracts,
+                  `A ocorrência já foi gravada neste título (<b>${occurrence.saleId}</b>). Replicar o mesmo registro para o(s) outro(s) contrato(s) pendente(s): <b>${titulos}</b>?`,
+                  ""
+              );
+              if (perguntou) return;
           }
       }
       window.isCrossContractValidating = false;

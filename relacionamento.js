@@ -2044,6 +2044,9 @@ const RelacionamentoApp = {
         quitado: quitadoInfo.quitado,
         quitadoMotivo: quitadoInfo.motivo
       };
+      await this._garantirCompradoresContrato(escCtx);
+      const compradores = this._compradoresEscritura(escCtx);
+      const pago = await this._valorPagoTitulo(escCtx);
       RelacionamentoState.escritura = escCtx;
       if (escCtx.quitado) {
         escCtx.contasPendente = true;
@@ -2069,14 +2072,14 @@ const RelacionamentoApp = {
       const bancEl = document.getElementById("esc-bancos");
       if (bancEl) bancEl.value = "";
       const titulo = sale.receivableBillId || bill?.id || "—";
-      const valor = Number(sale.contractValue || sale.updatedContractValue || bill?.receivableBillValue || 0);
+      const valor = pago > 0 ? pago : Number(sale.contractValue || sale.updatedContractValue || bill?.receivableBillValue || 0);
       const valorFmt = valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
       const statusHtml = quitadoInfo.quitado
         ? `<span style="color:#15803d;font-weight:700;">Quitado</span><div style="font-size:0.75rem;color:#64748b;">${quitadoInfo.motivo}</div>`
         : `<span style="color:#b91c1c;font-weight:700;">Não quitado</span><div style="font-size:0.75rem;color:#b91c1c;">${quitadoInfo.motivo}. Este termo só pode ser emitido com o contrato quitado.</div>`;
       document.getElementById("esc-contrato-resumo").innerHTML = `
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;font-size:0.9rem;">
-          <div><span style="color:#64748b;">Cliente</span><br><strong>${customer.name || "—"}</strong></div>
+          <div><span style="color:#64748b;">Cliente</span><br><strong>${this._escDoc(compradores.texto || customer.name || "—")}</strong></div>
           <div><span style="color:#64748b;">Título</span><br><strong>${titulo}</strong></div>
           <div><span style="color:#64748b;">Contrato</span><br><strong>${sale.id || "—"}</strong></div>
           <div><span style="color:#64748b;">Unidade</span><br><strong>${block && lot ? (block + " - " + lot) : (unitName || "—")}</strong></div>
@@ -2136,12 +2139,23 @@ const RelacionamentoApp = {
       const contas = ctx.contasPromise ? await ctx.contasPromise : null;
       const bancos = (contas && contas.texto) || "";
       if (!bancos && !confirm("Não encontrei no Sienge as contas em que as parcelas foram baixadas. Gerar a autorização sem os dados bancários?")) return;
+      await this._garantirCompradoresContrato(ctx);
+      const compradores = this._compradoresEscritura(ctx);
+      const pago = await this._valorPagoTitulo(ctx);
+      if (!(pago > 0)) {
+        alert("Não foi possível obter no Sienge o valor pago deste título. O termo usa esse valor, não o valor de tabela do contrato.");
+        return;
+      }
       const { legalBase, quadraLote, titulo } = this._escDocBase(ctx, {
         NOME_CARTORIO: nomeCartorio,
         CIDADE_CARTORIO: nomeCartorio,
         LOCALIZACAO: ctx.localizacao || "____",
         DADOS_BANCARIOS: bancos
       });
+      legalBase.NOME_CLIENTE = compradores.texto;
+      legalBase.PERCENTUAL_CLIENTE = compradores.pctLabel;
+      legalBase.VALOR_CONTRATO = pago.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+      legalBase.VALOR_CONTRATO_EXTENSO = typeof valorPorExtensoBRL === "function" ? valorPorExtensoBRL(pago) : "";
       const markup = typeof window.formatDocPadraoMarkup === "function" ? window.formatDocPadraoMarkup(corpo) : corpo;
       const filled = this._fillDocVars(markup, legalBase).replace(/[ \t]+\n/g, "\n");
       const visivel = (s) => String(s || "").replace(/<[^>]+>/g, "").trim();
@@ -2605,6 +2619,54 @@ const RelacionamentoApp = {
       texto.innerHTML = `A unidade <strong>${this._escDoc(unidade)}</strong> está sem matrícula no Sienge. Para gerar ${documento || "o termo de quitação"}, atualize o cadastro em <strong>Comercial → Gestão de Unidades → Unidades → Cadastro de Unidades → Editar → Matrícula</strong> (campo destacado em amarelo) e gere o documento de novo.`;
     }
     ov.style.display = "flex";
+  },
+
+  /** Traz os compradores do contrato de venda quando a lista da busca veio só com o titular. */
+  async _garantirCompradoresContrato(ctx) {
+    const sale = (ctx && ctx.sale) || {};
+    const ja = (typeof window.salesContractPeople === "function") ? window.salesContractPeople(sale) : [];
+    if (ja.length >= 2 || !sale.id) return;
+    if (!(window.SiengeApiService && typeof SiengeApiService.getContractRaw === "function")) return;
+    try {
+      const raw = await SiengeApiService.getContractRaw(sale.id);
+      const lista = raw && (raw.salesContractCustomers || raw.customers);
+      if (!Array.isArray(lista) || !lista.length) return;
+      sale.customers = lista;
+      sale.salesContractCustomers = lista;
+    } catch (e) {}
+  },
+
+  /**
+   * Nomes do termo: todos os compradores do contrato e o cônjuge, se ainda não estiver na lista.
+   * O percentual é o do conjunto (100% quando o casal compra junto), como na planilha.
+   */
+  _compradoresEscritura(ctx) {
+    const sale = (ctx && ctx.sale) || {};
+    const customer = (ctx && ctx.customer) || {};
+    const people = (typeof window.salesContractPeople === "function") ? window.salesContractPeople(sale) : [];
+    const nomes = [];
+    const visto = new Set();
+    const add = (nome) => {
+      const n = String(nome || "").replace(/\s+/g, " ").trim();
+      if (!n || /^n\/?d$/i.test(n) || n === "-" || n === "- X -") return;
+      if (/^cliente\s+\d+$/i.test(n)) return;
+      const k = n.toUpperCase();
+      if (visto.has(k)) return;
+      visto.add(k);
+      nomes.push(k);
+    };
+    people.slice().sort((a, b) => (a.main === b.main ? 0 : (a.main ? -1 : 1))).forEach((p) => add(p.name));
+    if (!nomes.length) add(customer.name || sale.customerName);
+    const spouse = (typeof window.legalSpouseRecord === "function") ? window.legalSpouseRecord(customer) : null;
+    if (spouse) add(spouse.name);
+    const pcts = people.map((p) => Number(p.participationPercentage)).filter((n) => Number.isFinite(n) && n > 0);
+    const soma = pcts.reduce((s, n) => s + n, 0);
+    const pct = (soma > 0 && soma <= 100.01) ? (Math.round(soma * 100) / 100) : 100;
+    const texto = !nomes.length
+      ? "____"
+      : (nomes.length === 1 ? nomes[0] : (nomes.slice(0, -1).join(", ") + " e " + nomes[nomes.length - 1]));
+    const pctTxt = pct.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+    return { texto, pctLabel: " (" + pctTxt + "%)" };
   },
 
   /** Soma do que foi recebido no título (líquido de acréscimos e descontos), sem baixas de distrato. */
