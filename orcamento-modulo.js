@@ -56,6 +56,10 @@ const OrcamentoModuloApp = {
     return (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   },
 
+  numero(v) {
+    return (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  },
+
   pct(v) {
     return (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%";
   },
@@ -314,21 +318,22 @@ const OrcamentoModuloApp = {
     }
     const anos = Object.keys(r.grade).sort();
     const meses = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
-    const cab = meses.map((m) => `<th style="text-align:right;white-space:nowrap;">${m}</th>`).join("");
+    const cab = meses.map((m) => `<th class="is-right">${m}</th>`).join("");
+    const cols = `<col class="orc-rec-c-ano">${meses.map(() => "<col>").join("")}<col class="orc-rec-c-tot">`;
     const linhas = anos.map((ano) => {
       const cel = r.grade[ano];
       const total = cel.reduce((s, v) => s + v, 0);
       return `<tr>
-        <td style="font-weight:700;">${this.esc(ano)}</td>
-        ${cel.map((v) => `<td style="text-align:right;white-space:nowrap;">${v > 0.009 ? this.esc(this.dinheiro(v)) : "—"}</td>`).join("")}
-        <td style="text-align:right;font-weight:700;white-space:nowrap;">${this.esc(this.dinheiro(total))}</td>
+        <td>${this.esc(ano)}</td>
+        ${cel.map((v) => `<td class="is-right">${v > 0.009 ? this.esc(this.numero(v)) : "—"}</td>`).join("")}
+        <td class="is-right">${this.esc(this.numero(total))}</td>
       </tr>`;
     }).join("");
     const totaisMes = meses.map((_, i) => anos.reduce((s, ano) => s + (r.grade[ano][i] || 0), 0));
-    const rodape = `<tr style="font-weight:800;background:#f8fafc;">
+    const rodape = `<tr class="orc-rec-total">
       <td>Total</td>
-      ${totaisMes.map((v) => `<td style="text-align:right;white-space:nowrap;">${v > 0.009 ? this.esc(this.dinheiro(v)) : "—"}</td>`).join("")}
-      <td style="text-align:right;white-space:nowrap;">${this.esc(this.dinheiro(r.total))}</td>
+      ${totaisMes.map((v) => `<td class="is-right">${v > 0.009 ? this.esc(this.numero(v)) : "—"}</td>`).join("")}
+      <td class="is-right">${this.esc(this.numero(r.total))}</td>
     </tr>`;
     const indices = (r.indices || []).map((ix) => `<span>${this.esc(this.resumoIndice(ix))}</span>`).join("");
     return `
@@ -342,14 +347,20 @@ const OrcamentoModuloApp = {
         <div class="crm-card orc-rec-kpi"><span>Depois de ${this.esc(r.anoAte)}</span><strong>${this.esc(this.dinheiro(r.fora))}</strong></div>
       </div>
       ${indices ? `<div class="orc-rec-focus">${indices}</div>` : ""}
-      <div style="overflow:auto;margin-bottom:16px;">
-        <table class="custom-table" style="min-width:980px;">
-          <thead><tr><th>Ano</th>${cab}<th style="text-align:right;">Total</th></tr></thead>
+      <div class="cc-scroll orc-rec-meses">
+        <table class="cc-table orc-rec-grade">
+          <colgroup>${cols}</colgroup>
+          <thead><tr><th>Ano</th>${cab}<th class="is-right">Total</th></tr></thead>
           <tbody>${linhas}${rodape}</tbody>
         </table>
       </div>
-      <div class="orc-rec-clientes">
-        <table class="custom-table">
+      <div class="cc-scroll orc-rec-clientes">
+        <table class="cc-table orc-rec-cli-tab">
+          <colgroup>
+            <col class="orc-rec-c-cli"><col class="orc-rec-c-un"><col class="orc-rec-c-tit">
+            <col class="orc-rec-c-pmp"><col class="orc-rec-c-rep"><col class="orc-rec-c-idx">
+            <col class="orc-rec-c-val"><col class="orc-rec-c-val"><col class="orc-rec-c-val">
+          </colgroup>
           <thead><tr>
             <th>Cliente</th><th>Unidade</th><th>Título</th><th class="is-right">PMP</th><th>Repactuação</th><th>Indexador</th>
             <th class="is-right">Principal</th><th class="is-right">Reajuste</th><th class="is-right">No período</th>
@@ -378,12 +389,12 @@ const OrcamentoModuloApp = {
         <td class="is-right">${c.pmpConhecido ? this.esc(c.pmp + " d") : "—"}</td>
         <td>${this.esc(c.repactuacao || "—")}</td>
         <td>${this.esc(c.indexador || "—")}</td>
-        <td class="is-right">${this.esc(this.dinheiro(c.principal))}</td>
-        <td class="is-right orc-rec-reaj">${this.esc(this.dinheiro(c.reajuste))}</td>
-        <td class="is-right">${this.esc(this.dinheiro(c.total))}</td>
+        <td class="is-right">${this.esc(this.numero(c.principal))}</td>
+        <td class="is-right orc-rec-reaj">${this.esc(this.numero(c.reajuste))}</td>
+        <td class="is-right">${this.esc(this.numero(c.total))}</td>
       </tr>${detalhe}`;
     }).join("");
-    const rodape = `<tr class="orc-rec-total"><td colspan="6">Total</td><td class="is-right">${this.esc(this.dinheiro(principal))}</td><td class="is-right orc-rec-reaj">${this.esc(this.dinheiro(reajuste))}</td><td class="is-right">${this.esc(this.dinheiro(total))}</td></tr>`;
+    const rodape = `<tr class="orc-rec-total"><td colspan="6">Total</td><td class="is-right">${this.esc(this.numero(principal))}</td><td class="is-right orc-rec-reaj">${this.esc(this.numero(reajuste))}</td><td class="is-right">${this.esc(this.numero(total))}</td></tr>`;
     return linhas + rodape;
   },
 
@@ -395,14 +406,18 @@ const OrcamentoModuloApp = {
       return `<tr>
         <td>${this.esc(venc)}</td>
         <td>${this.esc(caixa)}</td>
-        <td>${anos ? this.esc(anos) : "Sem reajuste"}</td>
-        <td class="is-right">${this.esc(this.dinheiro(p.principal))}</td>
-        <td class="is-right orc-rec-reaj">${this.esc(this.dinheiro(p.reajuste))}</td>
-        <td class="is-right">${this.esc(this.dinheiro(p.valor))}</td>
+        <td class="orc-rec-anos">${anos ? this.esc(anos) : "Sem reajuste"}</td>
+        <td class="is-right">${this.esc(this.numero(p.principal))}</td>
+        <td class="is-right orc-rec-reaj">${this.esc(this.numero(p.reajuste))}</td>
+        <td class="is-right">${this.esc(this.numero(p.valor))}</td>
       </tr>`;
     }).join("");
-    return `<tr class="orc-rec-parc"><td colspan="9">
-      <table class="orc-rec-parc-tab">
+    return `<tr class="orc-rec-parc"><td class="orc-rec-parc-cell" colspan="9">
+      <table class="cc-table orc-rec-parc-tab">
+        <colgroup>
+          <col class="orc-rec-c-data"><col class="orc-rec-c-data"><col>
+          <col class="orc-rec-c-val"><col class="orc-rec-c-val"><col class="orc-rec-c-val">
+        </colgroup>
         <thead><tr><th>Vencimento</th><th>Caixa</th><th>Reajustes do Focus</th><th class="is-right">Principal</th><th class="is-right">Reajuste</th><th class="is-right">Corrigido</th></tr></thead>
         <tbody>${linhas || `<tr><td colspan="6">Nenhuma parcela no período.</td></tr>`}</tbody>
       </table>
