@@ -9512,6 +9512,11 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .cc-table.orc-rec-grade tr.is-sj td.orc-rec-ano-nome small { color: #c2410c; }
 .cc-table.orc-rec-grade tr.is-conta td { background: #e8f5ee; font-weight: 800; color: #105436; }
 .cc-table.orc-rec-grade tr.is-conta td.orc-rec-ano-nome small { color: #105436; }
+.cc-table.orc-rec-grade tr.is-venda td { background: #ecfdf5; color: #065f46; }
+.cc-table.orc-rec-grade tr.is-venda td.orc-rec-ano-nome small { color: #047857; }
+.cc-table.orc-rec-grade td.is-neg { color: #991b1b; font-weight: 800; }
+.orc-nuvem { align-self: center; color: #64748b; font-size: 0.75rem; font-weight: 700; }
+.orc-vendas-cond { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin: 0 0 12px; }
 .cc-table.orc-rec-grade tr.is-dist td { background: #fef2f2; color: #991b1b; }
 .cc-table.orc-rec-grade tr.is-dist td.orc-rec-ano-nome small { color: #b91c1c; }
 .cc-table.orc-rec-grade tr.is-juros td { background: #f0fdfa; color: #0f766e; }
