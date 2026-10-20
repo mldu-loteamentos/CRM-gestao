@@ -4130,6 +4130,19 @@ circle.donut-segment {
 .rcx-num.is-pos { color: #105436; font-weight: 700; }
 .rcx-num.is-neg { color: #b91c1c; font-weight: 700; }
 .rcx-grid tfoot td { position: sticky; bottom: 0; z-index: 1; font-weight: 800; background: #e7f6ee; border-top: 2px solid #1b8253; border-bottom: none; }
+.rcx-matriz-bloco { margin-top: 18px; }
+.rcx-matriz-titulo { font-size: 0.92rem; font-weight: 800; color: #105436; margin: 0 0 2px; }
+.rcx-matriz-sub { font-size: 0.75rem; color: #64748b; margin: 0 0 8px; }
+.rcx-matriz-scroll { max-height: 70vh; }
+.rcx-matriz thead tr.rcx-h1 th.rcx-h-nome { position: sticky; left: 0; z-index: 4; min-width: 240px; height: auto; text-align: left; vertical-align: middle; }
+.rcx-matriz td.rcx-nome { position: sticky; left: 0; z-index: 1; background: #fff; min-width: 240px; max-width: 320px; }
+.rcx-matriz tbody tr:nth-child(even) td.rcx-nome { background: #f7faf8; }
+.rcx-matriz tbody tr:hover td.rcx-nome { background: #e7f6ee; }
+.rcx-matriz tfoot td.rcx-nome { z-index: 2; background: #e7f6ee; }
+.rcx-matriz-abre { display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent; padding: 0; font: inherit; font-weight: 800; color: inherit; cursor: pointer; }
+.rcx-matriz-abre svg { width: 14px; height: 14px; }
+.rcx-matriz tr.rcx-matriz-grupo td { font-weight: 800; }
+.rcx-matriz tr.rcx-matriz-cc td.rcx-nome { font-weight: 500; }
 @media (max-width: 1100px) {
   .rcx-kpis { grid-template-columns: 1fr; }
 }
