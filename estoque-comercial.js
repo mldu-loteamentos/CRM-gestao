@@ -1446,29 +1446,78 @@ const EstoqueComercialApp = {
   },
 
   buildDefaulterIndex() {
-    const idx = { byRb: new Map(), byUnit: new Map(), byCustomer: new Map() };
+    const idx = { byRb: new Map(), byUnit: new Map(), alias: new Map(), bills: new Map(), _n: 0 };
     const bills = (window.AppState && AppState.defaultersBills) || [];
+    idx._n = bills.length;
     bills.forEach(b => {
       const val = this.filaBillAmount(b);
-      const rb = String(b.receivableBillId || b.id || "");
-      if (rb) idx.byRb.set(rb, (idx.byRb.get(rb) || 0) + val);
-      const cust = String(b.customerId || b.clientId || "");
-      if (cust) {
-        if (!idx.byCustomer) idx.byCustomer = new Map();
-        idx.byCustomer.set(cust, (idx.byCustomer.get(cust) || 0) + val);
-      }
+      if (!(val > 0.009)) return;
+      const ids = [b.id, b.receivableBillId, b.saleId]
+        .filter((v) => v != null && String(v).trim() !== "")
+        .map((v) => String(v));
+      if (!ids.length) return;
+      const primary = String(b.id || b.receivableBillId || ids[0]);
       const cc = String(b.costCenterId || (b.costCentersId && b.costCentersId[0]) || "");
-      const units = String(b.units || "");
-      units.split(/[;,|/]/).forEach(part => {
+      if (!idx.bills.has(primary)) idx.bills.set(primary, { val, cc });
+      ids.forEach((id) => {
+        idx.alias.set(id, primary);
+        idx.byRb.set(id, val);
+      });
+      String(b.units || b.unityName || "").split(/[;,|/]/).forEach(part => {
         const n = this.normName(part);
-        if (n && n !== "N/D") {
-          const k = `${cc}|${n}`;
-          idx.byUnit.set(k, (idx.byUnit.get(k) || 0) + val);
-        }
+        if (n && n !== "N/D") idx.byUnit.set(`${cc}|${n}`, primary);
       });
     });
     this.state.defaulterIndex = idx;
     return idx;
+  },
+
+  ensureDefaulterIndex() {
+    const n = ((window.AppState && AppState.defaultersBills) || []).length;
+    const idx = this.state.defaulterIndex;
+    if (idx && idx._n === n && idx.byRb) return idx;
+    return this.buildDefaulterIndex();
+  },
+
+  filaBillKey(u) {
+    if (!u || !this.filaCarregada()) return "";
+    const idx = this.ensureDefaulterIndex();
+    const ids = [u.receivableBillId, u.contractNumber, u.contractId]
+      .filter((v) => v != null && String(v).trim() !== "")
+      .map((v) => String(v));
+    for (let i = 0; i < ids.length; i++) {
+      if (idx.alias && idx.alias.has(ids[i])) return idx.alias.get(ids[i]);
+    }
+    const k = `${String(u.enterpriseId || "")}|${this.normName(u.name)}`;
+    const alias = idx.byUnit.get(k) || "";
+    return alias ? (idx.alias.get(alias) || alias) : "";
+  },
+
+  filaRecorteAberto() {
+    const emp = ((document.getElementById("est-filter-emp") || {}).value || "").trim();
+    const unitId = ((document.getElementById("est-filter-unit") || {}).value || "").trim();
+    const q = String((document.getElementById("est-stock-search") || {}).value || "").trim();
+    const status = this.state.status && this.state.status !== "all";
+    return !emp && !unitId && !q && !status;
+  },
+
+  resumoFila(rows) {
+    if (!this.filaCarregada()) return null;
+    const idx = this.ensureDefaulterIndex();
+    if (this.filaRecorteAberto()) {
+      let total = 0;
+      idx.bills.forEach((b) => { total += Number(b.val) || 0; });
+      return { n: idx.bills.size, total };
+    }
+    const ids = new Set();
+    let total = 0;
+    (rows || []).forEach((u) => {
+      const id = this.filaBillKey(u);
+      if (!id || ids.has(id) || !idx.bills.has(id)) return;
+      ids.add(id);
+      total += Number(idx.bills.get(id).val) || 0;
+    });
+    return { n: ids.size, total };
   },
 
   isInadimplente(u) {
@@ -1481,11 +1530,14 @@ const EstoqueComercialApp = {
 
   filaBillAmount(b) {
     if (!b) return 0;
-    const charges = Number(b.overdueCharges);
-    const principal = Number(b.overdueValue != null ? b.overdueValue : b.value) || 0;
-    if (Number.isFinite(charges) && charges > 0.009) return principal + charges;
+    if (typeof window.summarizeOpenDefaulterBill === "function") {
+      const open = window.summarizeOpenDefaulterBill(b);
+      if (!open || open.skip) return 0;
+      return Number(open.value) || 0;
+    }
     const interest = Number(b.interest || b.interestValue || 0);
     const fine = Number(b.fine || b.fineValue || 0);
+    const principal = Number(b.overdueValue != null ? b.overdueValue : b.value) || 0;
     if (interest + fine > 0.009) return principal + interest + fine;
     const insts = b.defaulterInstallments || [];
     if (insts.length) {
@@ -1499,24 +1551,20 @@ const EstoqueComercialApp = {
   },
 
   overdueValue(u) {
+    if (this.filaCarregada()) return this.filaValue(u);
     const ficha = Number(u && u.kpiVencidas);
     if (Number.isFinite(ficha) && ficha > 0.009) return ficha;
     if (u && Number.isFinite(ficha) && String(u.siengeConferidoEm || "").slice(0, 10) === this.todayStr()) return 0;
     return this.filaValue(u);
   },
 
-  /** Valor da unidade na Fila de cobrança do dia (sem o atraso gravado na última ficha). */
+  /** Valor do título desta unidade na Fila de cobrança de hoje. Outro lote do mesmo cliente não herda o atraso. */
   filaValue(u) {
     if (!u) return 0;
-    const idx = this.state.defaulterIndex || this.buildDefaulterIndex();
-    if (u.receivableBillId && idx.byRb.has(String(u.receivableBillId))) {
-      return idx.byRb.get(String(u.receivableBillId)) || 0;
-    }
-    const k = `${String(u.enterpriseId || "")}|${this.normName(u.name)}`;
-    if (idx.byUnit.has(k)) return idx.byUnit.get(k) || 0;
-    const cust = String(u.customerId || "");
-    if (cust && idx.byCustomer && idx.byCustomer.has(cust)) return idx.byCustomer.get(cust) || 0;
-    return 0;
+    const key = this.filaBillKey(u);
+    if (!key) return 0;
+    const idx = this.ensureDefaulterIndex();
+    return idx.byRb.get(key) || 0;
   },
 
   sanitizeUnit(u) {
@@ -1574,7 +1622,11 @@ const EstoqueComercialApp = {
     const rel = u.relFin || this.inferRelFin(u);
     if (rel === "distratado" || String(u.situation || "").toLowerCase().includes("distrat")) return "Distratado";
     if (rel === "quitado" || u.quitado) return "Quitado";
-    if (rel === "inadimplente" || this.isInadimplente(u)) return "Ativo inadimplente";
+    if (this.filaCarregada()) {
+      if (this.filaValue(u) > 0.009) return "Ativo inadimplente";
+    } else if (rel === "inadimplente" || this.isInadimplente(u)) {
+      return "Ativo inadimplente";
+    }
     if (rel === "adimplente") return "Ativo adimplente";
     const bal = this.unitBalance(u);
     if (bal != null && Number(bal) > 0.009) return "Ativo adimplente";
@@ -1630,7 +1682,7 @@ const EstoqueComercialApp = {
         quitados += 1;
         return;
       }
-      const key = this.contractKey(u);
+      const key = (this.filaCarregada() && this.filaBillKey(u)) || this.contractKey(u);
       if (seen.has(key)) return;
       seen.add(key);
       ativos += 1;
@@ -1650,6 +1702,11 @@ const EstoqueComercialApp = {
         vencido += saldo - noPrazo;
       }
     });
+    const fila = this.resumoFila(rows);
+    if (fila) {
+      atraso = fila.total;
+      inadimplentes = fila.n;
+    }
     return { aReceber, atraso, vencido, aVencer, ativos, quitados, distratados, inadimplentes, semSaldo };
   },
 
@@ -1765,10 +1822,18 @@ const EstoqueComercialApp = {
     const wrap = document.getElementById("est-fin-filtros");
     if (!wrap) return;
     const counts = { all: base.length };
+    const titulosAtraso = new Set();
     base.forEach((u) => {
       const fin = this.financialStatus(u);
+      if (fin === "Ativo inadimplente") {
+        const id = this.filaBillKey(u) || this.contractKey(u);
+        if (titulosAtraso.has(id)) return;
+        titulosAtraso.add(id);
+      }
       counts[fin] = (counts[fin] || 0) + 1;
     });
+    const fila = this.resumoFila(base);
+    if (fila) counts["Ativo inadimplente"] = fila.n;
     const atual = this.state.finFiltro || "all";
     wrap.innerHTML = this.FIN_FILTROS.map((f) => {
       const n = counts[f.id] || 0;
