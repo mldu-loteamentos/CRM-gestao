@@ -9484,18 +9484,24 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .orc-rec-reaj, .orc-rec-kpi strong.orc-rec-reaj { color: #0f766e; font-weight: 800; }
 .orc-rec-focus { margin: 0 0 14px; padding: 8px 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; color: #334155; font-size: 0.78rem; line-height: 1.45; }
 .orc-rec-focus span { display: block; }
-.orc-rec-meses { overflow: hidden; margin-bottom: 14px; max-height: none; }
-.cc-table.orc-rec-grade { font-size: 0.58rem; font-variant-numeric: tabular-nums; }
-.cc-table.orc-rec-grade col.orc-rec-c-ano { width: 78px; }
-.cc-table.orc-rec-grade col.orc-rec-c-tot { width: 7.6%; }
-.cc-table.orc-rec-grade thead th { padding: 6px 2px; font-size: 0.58rem; letter-spacing: 0; text-align: right; }
+.orc-rec-meses { overflow-x: auto; margin-bottom: 14px; max-height: none; }
+.cc-table.orc-rec-grade { font-size: 0.72rem; font-variant-numeric: tabular-nums; }
+.cc-table.orc-rec-grade col.orc-rec-c-ano { width: 132px; }
+.cc-table.orc-rec-grade col.orc-rec-c-tot { width: 8.2%; }
+.cc-table.orc-rec-grade thead th { padding: 8px 6px; font-size: 0.68rem; letter-spacing: 0; text-align: right; white-space: nowrap; }
 .cc-table.orc-rec-grade thead th:first-child { text-align: left; }
-.cc-table.orc-rec-grade td { padding: 4px 1px; text-align: right; overflow: hidden; text-overflow: clip; }
-.cc-table.orc-rec-grade td:first-child { text-align: left; font-weight: 700; }
+.cc-table.orc-rec-grade td { padding: 6px 6px; text-align: right; white-space: nowrap; }
+.cc-table.orc-rec-grade td:first-child { text-align: left; font-weight: 700; white-space: normal; }
 .cc-table.orc-rec-grade tr.orc-rec-ano { cursor: pointer; }
-.cc-table.orc-rec-grade tr.orc-rec-ano td:first-child svg { width: 12px; height: 12px; vertical-align: -2px; margin-right: 2px; }
-.cc-table.orc-rec-grade tr.orc-rec-det td { background: #f4faf7; font-weight: 600; }
-.cc-table.orc-rec-grade td.orc-rec-ano-nome small { display: block; margin-left: 14px; font-size: 0.52rem; font-weight: 700; letter-spacing: 0; line-height: 1.1; color: #64748b; }
+.cc-table.orc-rec-grade tr.orc-rec-ano td { background: #f8fafc; font-weight: 800; }
+.cc-table.orc-rec-grade tr.orc-rec-ano td:first-child svg { width: 14px; height: 14px; vertical-align: -2px; margin-right: 4px; }
+.cc-table.orc-rec-grade tr.orc-rec-det td { background: #fff; font-weight: 600; }
+.cc-table.orc-rec-grade tr.orc-rec-det td:first-child { padding-left: 22px; }
+.cc-table.orc-rec-grade td.orc-rec-ano-nome small { display: block; margin-left: 0; font-size: 0.62rem; font-weight: 700; letter-spacing: 0; line-height: 1.15; color: #64748b; }
+.cc-table.orc-rec-grade tr.is-vence td { background: #fffbeb; color: #713f12; }
+.cc-table.orc-rec-grade tr.is-vence td.orc-rec-ano-nome small { color: #a16207; }
+.cc-table.orc-rec-grade tr.is-antes td { background: #eff6ff; color: #1e3a8a; }
+.cc-table.orc-rec-grade tr.is-antes td.orc-rec-ano-nome small { color: #1d4ed8; }
 .cc-table.orc-rec-grade tr.is-reaj td.orc-rec-ano-nome small { color: #0f766e; }
 .cc-table.orc-rec-grade tr.is-sj td { background: #fff7ed; color: #9a3412; }
 .cc-table.orc-rec-grade tr.is-sj td.orc-rec-ano-nome small { color: #c2410c; }

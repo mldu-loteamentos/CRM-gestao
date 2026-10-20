@@ -395,14 +395,19 @@ const OrcamentoModuloApp = {
         ${this.celNum(total)}
       </tr>`;
       if (!aberto) return cabeca;
-      if (!Array.isArray(parte.original)) {
-        return cabeca + `<tr class="orc-rec-det"><td colspan="14">Monte a receita de novo para ver o mês a mês.</td></tr>`;
+      if (!Array.isArray(parte.vence)) {
+        return cabeca + `<tr class="orc-rec-det"><td colspan="14">Monte a receita de novo para ver o vencimento do ano e o que chega do ano anterior.</td></tr>`;
       }
       const sub = (r.subMes && r.subMes[ano]) || [];
       const juros = (r.jurosMes && r.jurosMes[ano]) || [];
+      const anosAntes = Object.keys(parte.anosAntes || {}).sort();
+      const rotuloAntes = anosAntes.length === 1 ? anosAntes[0] : (anosAntes.length ? anosAntes[0] + "–" + anosAntes[anosAntes.length - 1] : String(Number(ano) - 1));
+      const somaAntes = (parte.antes || []).reduce((s, v) => s + (Number(v) || 0), 0);
+      const linhaAntes = somaAntes > 0.009 ? this.linhaConta(rotuloAntes, "recebe em " + ano, parte.antes, "is-antes", "") : "";
       return cabeca
-        + this.linhaConta("Original", "", parte.original, "", "")
-        + this.linhaConta("Reajuste", "", parte.repactuacao, "is-reaj", "orc-rec-reaj")
+        + this.linhaConta(ano, "vence em " + ano, parte.vence, "is-vence", "")
+        + linhaAntes
+        + this.linhaConta("Reajuste", "sobre o caixa", parte.repactuacao, "is-reaj", "orc-rec-reaj")
         + this.linhaConta("Sub judice", "não soma", sub, "is-sj", "")
         + this.linhaConta("1.01.01.01", "Venda de lotes", cel, "is-conta", "")
         + this.linhaConta("1.03.01.02", "Juros ativos", juros, "is-juros", "");
@@ -692,7 +697,7 @@ const OrcamentoModuloApp = {
       grade[String(y)] = zeros();
       subMes[String(y)] = zeros();
       jurosMes[String(y)] = zeros();
-      porAno[String(y)] = { original: zeros(), repactuacao: zeros() };
+      porAno[String(y)] = { original: zeros(), repactuacao: zeros(), vence: zeros(), antes: zeros(), anosAntes: {} };
     }
     const clientes = [];
     let principal = 0;
@@ -736,6 +741,9 @@ const OrcamentoModuloApp = {
         const saldo = Math.round(p.saldo * 100) / 100;
         const valor = Math.round(saldo * fator * 100) / 100;
         const ajuste = Math.round((valor - saldo) * 100) / 100;
+        const anoDue = String(p.due).slice(0, 4);
+        const mesDue = Number(String(p.due).slice(5, 7)) - 1;
+        if (!t.sub && porAno[anoDue] && mesDue >= 0) porAno[anoDue].vence[mesDue] += saldo;
         let quando = this.addDias(p.due, pmp.pmp);
         if (!quando) return;
         if (quando < hoje) quando = hoje;
@@ -758,6 +766,10 @@ const OrcamentoModuloApp = {
         jurosMes[ano][mes] += this.jurosAtivos(valor, pmp);
         porAno[ano].original[mes] += saldo;
         porAno[ano].repactuacao[mes] += ajuste;
+        if (anoDue < ano) {
+          porAno[ano].antes[mes] += saldo;
+          porAno[ano].anosAntes[anoDue] = true;
+        }
         doCliente += valor;
         principalCliente += saldo;
         reajusteCliente += ajuste;

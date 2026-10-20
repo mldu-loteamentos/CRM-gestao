@@ -1661,7 +1661,7 @@ const EstoqueComercialApp = {
   },
 
   portfolioOf(rows) {
-    const seen = new Set();
+    const seen = new Map();
     let aReceber = 0;
     let atraso = 0;
     let ativos = 0;
@@ -1683,24 +1683,39 @@ const EstoqueComercialApp = {
         return;
       }
       const key = (this.filaCarregada() && this.filaBillKey(u)) || this.contractKey(u);
-      if (seen.has(key)) return;
-      seen.add(key);
-      ativos += 1;
       const bal = this.unitBalance(u);
       const saldo = bal == null || Number.isNaN(Number(bal)) ? null : Number(bal) || 0;
-      if (saldo == null) semSaldo += 1;
-      else aReceber += saldo;
+      const at = String(u.siengeConferidoEm || u.finAt || "");
+      let slot = seen.get(key);
+      if (!slot) {
+        slot = { saldo: null, at: "", ov: 0, kpiAVencer: null };
+        seen.set(key, slot);
+      }
+      if (saldo == null) return;
+      const maisNovo = slot.saldo == null || (at && slot.at && at > slot.at) || ((!at || !slot.at || at === slot.at) && saldo > slot.saldo);
+      if (!maisNovo) return;
       const ov = this.overdueValue(u);
+      slot.saldo = saldo;
+      slot.at = at;
+      slot.ov = ov;
+      slot.kpiAVencer = u.kpiAVencer != null && Number.isFinite(Number(u.kpiAVencer)) ? Number(u.kpiAVencer) : null;
+    });
+    seen.forEach((slot) => {
+      ativos += 1;
+      if (slot.saldo == null) {
+        semSaldo += 1;
+        return;
+      }
+      aReceber += slot.saldo;
+      const ov = slot.ov || 0;
       if (ov > 0.009) {
         inadimplentes += 1;
         atraso += ov;
       }
       // "Em atraso" traz juros e multa; o a vencer e o vencido saem do principal (saldo − parcelas ainda no prazo).
-      if (saldo != null) {
-        const noPrazo = u.kpiAVencer != null && Number.isFinite(Number(u.kpiAVencer)) ? Math.min(saldo, Math.max(0, Number(u.kpiAVencer))) : Math.max(0, saldo - ov);
-        aVencer += noPrazo;
-        vencido += saldo - noPrazo;
-      }
+      const noPrazo = slot.kpiAVencer != null ? Math.min(slot.saldo, Math.max(0, slot.kpiAVencer)) : Math.max(0, slot.saldo - ov);
+      aVencer += noPrazo;
+      vencido += slot.saldo - noPrazo;
     });
     const fila = this.resumoFila(rows);
     if (fila) {
@@ -3810,7 +3825,7 @@ const EstoqueComercialApp = {
       semTitulo: soma((c) => c.semTitulo)
     };
     const dif = tot.integra - tot.sienge;
-    const bate = Math.abs(dif) < 1 && !g.falhas.length;
+    const bate = Math.abs(dif) < 1 && !g.falhas.length && !g.interrompido;
     const hora = new Date(g.at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
     const motivos = {};
     g.ccs.forEach((c) => Object.entries(c.motivos || {}).forEach(([k, v]) => {
@@ -3894,7 +3909,7 @@ const EstoqueComercialApp = {
       <div class="est-conf-grid">
         <div><label>Sienge · a receber</label><b>${this.money(tot.sienge)}</b><small>Em atraso com juros e multa ${this.money(tot.siengeAtraso)} em ${tot.siengeTitVenc} título(s)</small></div>
         <div><label>Integra · a receber</label><b>${this.money(tot.integra)}</b><small>Em atraso ${this.money(tot.integraAtraso)} em ${tot.integraInad} contrato(s)</small></div>
-        <div><label>Diferença</label><b>${bate ? "Bate" : this.money(dif)}</b><small>${tot.semUnidN ? `${tot.semUnidN} título(s) com saldo no Sienge sem unidade ativa no Integra: ${this.money(tot.semUnidV)}` : "Todo título com saldo tem unidade no Integra"}${tot.semTitulo ? ` · ${tot.semTitulo} unidade(s) ativa(s) sem título no Sienge` : ""}</small></div>
+        <div><label>Diferença</label><b>${bate ? "Bate" : (g.interrompido ? "Incompleta" : this.money(dif))}</b><small>${g.interrompido ? `Parou em ${g.ccs.length} empreendimento(s). Este total não é o Contas a Receber inteiro.` : (tot.semUnidN ? `${tot.semUnidN} título(s) com saldo no Sienge sem unidade ativa no Integra: ${this.money(tot.semUnidV)}` : "Todo título com saldo tem unidade no Integra")}${tot.semTitulo ? ` · ${tot.semTitulo} unidade(s) ativa(s) sem título no Sienge` : ""}</small></div>
       </div>
       ${acertarHtml}
       ${analisarHtml}
