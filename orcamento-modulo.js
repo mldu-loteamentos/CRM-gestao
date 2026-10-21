@@ -670,7 +670,7 @@ const OrcamentoModuloApp = {
   },
 
   planoVazio() {
-    return { distratos: {}, vendasQtd: {}, condicoes: { ticket: 0, plano: 0, juros: 0, entrada: 0 }, planos: [], em: "" };
+    return { distratos: {}, vendasQtd: {}, condicoes: { ticket: 0, plano: 0, juros: 0, entrada: 0, comissao: 0 }, planos: [], em: "" };
   },
 
   normalizarPlano(raw) {
@@ -689,7 +689,8 @@ const OrcamentoModuloApp = {
       ticket: Math.max(0, Number(c.ticket) || 0),
       plano: Math.max(0, parseInt(c.plano, 10) || 0),
       juros: Math.max(0, Number(c.juros) || 0),
-      entrada: Math.max(0, Number(c.entrada) || 0)
+      entrada: Math.max(0, Number(c.entrada) || 0),
+      comissao: Math.min(100, Math.max(0, Number(c.comissao) || 0))
     };
     const lerMeses = (meses) => {
       const saida = {};
@@ -885,7 +886,7 @@ const OrcamentoModuloApp = {
     else if (campo === "parcelas") p.parcelas = Math.max(0, parseInt(valor, 10) || 0);
     else p[campo] = Math.max(0, this.numeroCampo(valor));
     if (campo === "ticket" && p.entradaPct != null && p.entradaPct !== "") {
-      p.entrada = Math.round((Number(p.ticket) || 0) * (Number(p.entradaPct) || 0)) / 100;
+      p.entrada = Math.round(this.ticketLiquido(Number(p.ticket) || 0) * (Number(p.entradaPct) || 0)) / 100;
     }
     this.salvarPlano();
     this.renderNovo();
@@ -1258,6 +1259,14 @@ const OrcamentoModuloApp = {
     return (Number(n) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 4 }) + "%";
   },
 
+  comMarca(raw, marca) {
+    const s = String(raw == null ? "" : raw).trim();
+    if (!s) return "—";
+    const limpo = s.replace(new RegExp(marca.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "+$", "i"), "").trim();
+    if (!limpo) return "—";
+    return this.esc(limpo) + marca;
+  },
+
   chaveLinhaTabela(r) {
     const nome = this.normNome((r && r.plano) || "");
     const inter = r && r.intermediarias ? "S" : "N";
@@ -1344,7 +1353,8 @@ const OrcamentoModuloApp = {
       if (antigo) usados[antigo.id] = true;
       const ticketBase = this.ticketMedio();
       const ticket = ticketBase > 0 ? ticketBase : (antigo ? (Number(antigo.ticket) || 0) : 0);
-      const entrada = ticket > 0 ? Math.round(ticket * (Number(v.entradaPct) || 0)) / 100 : 0;
+      const base = this.ticketLiquido(ticket);
+      const entrada = base > 0 ? Math.round(base * (Number(v.entradaPct) || 0)) / 100 : 0;
       return {
         id: v.id,
         nome: v.nome,
@@ -1780,12 +1790,13 @@ const OrcamentoModuloApp = {
     const n = Math.max(0, this.numeroCampo(valor));
     const plano = this.planoDoCc();
     plano.ticketMedio = n;
-    if (!plano.condicoes) plano.condicoes = { ticket: 0, plano: 0, juros: 0, entrada: 0 };
+    if (!plano.condicoes) plano.condicoes = { ticket: 0, plano: 0, juros: 0, entrada: 0, comissao: 0 };
     plano.condicoes.ticket = n;
+    const base = this.ticketLiquido(n);
     this.planosAtivos().forEach((p) => {
       p.ticket = n;
       if (p.entradaPct != null && p.entradaPct !== "") {
-        p.entrada = Math.round(n * (Number(p.entradaPct) || 0)) / 100;
+        p.entrada = Math.round(base * (Number(p.entradaPct) || 0)) / 100;
       }
     });
     this.salvarPlano();
@@ -1826,6 +1837,35 @@ const OrcamentoModuloApp = {
     return Math.round(qtd * media * 100) / 100;
   },
 
+  comissaoPct() {
+    const c = this.planoDoCc().condicoes || {};
+    const n = Number(c.comissao) || 0;
+    return n > 0 ? Math.min(100, n) : 0;
+  },
+
+  ticketLiquido(bruto) {
+    const base = bruto == null ? this.ticketMedio() : Math.max(0, Number(bruto) || 0);
+    const pct = this.comissaoPct();
+    return Math.round(base * (1 - pct / 100) * 100) / 100;
+  },
+
+  setComissao(valor) {
+    const cc = String(this.novo.ccId || "");
+    if (!cc) return;
+    const n = Math.min(100, Math.max(0, this.numeroCampo(valor)));
+    const plano = this.planoDoCc();
+    if (!plano.condicoes) plano.condicoes = { ticket: 0, plano: 0, juros: 0, entrada: 0, comissao: 0 };
+    plano.condicoes.comissao = n;
+    const base = this.ticketLiquido();
+    this.planosAtivos().forEach((p) => {
+      if (p.entradaPct != null && p.entradaPct !== "") {
+        p.entrada = Math.round(base * (Number(p.entradaPct) || 0)) / 100;
+      }
+    });
+    this.salvarPlano();
+    this.renderNovo();
+  },
+
   parcelaPlano(saldo, n, jurosPct) {
     if (!(saldo > 0) || !(n > 0)) return 0;
     const i = (Number(jurosPct) || 0) / 100;
@@ -1838,9 +1878,9 @@ const OrcamentoModuloApp = {
   vendasNoMes(ano, mes) {
     const alvo = Number(ano) * 12 + Number(mes);
     let total = 0;
-    const ticketEmp = this.ticketMedio();
+    const temTicket = this.ticketMedio() > 0;
     this.planosAtivos().forEach((p) => {
-      const ticket = ticketEmp > 0 ? ticketEmp : (Number(p.ticket) || 0);
+      const ticket = temTicket ? this.ticketLiquido() : this.ticketLiquido(Number(p.ticket) || 0);
       let entrada = Math.min(Number(p.entrada) || 0, ticket > 0 ? ticket : Number(p.entrada) || 0);
       if (p.entradaPct != null && p.entradaPct !== "" && ticket > 0) {
         entrada = Math.min(ticket, Math.round(ticket * (Number(p.entradaPct) || 0)) / 100);
@@ -2161,9 +2201,9 @@ const OrcamentoModuloApp = {
       return `<tr>
         <td class="orc-kx-vig-plano">${this.esc(nome)}</td>
         <td class="is-center">${r.intermediarias ? "Sim" : "Não"}</td>
-        <td class="is-center">${String(r.entradaMin || "").trim() ? txt(r.entradaMin) + "%" : "—"}</td>
-        <td class="is-center">${String(r.parcelamentoEntrada || "").trim() ? txt(r.parcelamentoEntrada) + "x" : "—"}</td>
-        <td class="is-center">${String(r.taxaJuros || "").trim() ? txt(r.taxaJuros) + "%" : "—"}</td>
+        <td class="is-center">${this.comMarca(r.entradaMin, "%")}</td>
+        <td class="is-center">${this.comMarca(r.parcelamentoEntrada, "x")}</td>
+        <td class="is-center">${this.comMarca(r.taxaJuros, "%")}</td>
         <td class="is-center">${txt(r.reajuste)}</td>
         <td class="is-center">${desc}</td>
         ${tds}
@@ -2279,6 +2319,7 @@ const OrcamentoModuloApp = {
       <div class="orc-kx-head">
         <div class="orc-kx-nums">${nums}</div>
         <label class="orc-kx-ticket-campo">Ticket médio<input type="text" inputmode="decimal" value="${this.esc(ticketTxt)}" aria-label="Ticket médio" onchange="OrcamentoModuloApp.setTicketMedio(this.value)"></label>
+        <label class="orc-kx-ticket-campo">Comissão %<input type="text" inputmode="decimal" class="orc-kx-comissao" value="${this.esc(this.comissaoPct() > 0 ? this.numero(this.comissaoPct()) : "")}" aria-label="Percentual de comissão" onchange="OrcamentoModuloApp.setComissao(this.value)"></label>
       </div>
       ${aviso ? `<p class="orc-kx-nota">${this.esc(aviso)}</p>` : ""}
       ${faixa}
@@ -2301,9 +2342,10 @@ const OrcamentoModuloApp = {
       const comp = this.rotuloCompetencia((this.tabelaCatalogo() || {}).competencia || this.planoDoCc().tabelaCompetencia);
       const linhasPlanos = planos.filter((p) => p.origem === "tabela").map((p) => {
         const ticket = Number(p.ticket) || 0;
+        const base = this.ticketLiquido(ticket);
         const pctEnt = p.entradaPct != null && p.entradaPct !== "" ? Number(p.entradaPct) : 0;
-        const entrada = ticket > 0 ? Math.round(ticket * pctEnt) / 100 : 0;
-        const parcela = this.parcelaPlano(Math.max(0, ticket - entrada), p.parcelas, p.juros);
+        const entrada = base > 0 ? Math.round(base * pctEnt) / 100 : 0;
+        const parcela = this.parcelaPlano(Math.max(0, base - entrada), p.parcelas, p.juros);
         const entradaTxt = pctEnt >= 100 ? "à vista" : (pctEnt > 0 ? this.fmtPct(pctEnt) : "—");
         return `<tr>
           <td>${this.esc(p.nome)}</td>

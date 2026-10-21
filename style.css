@@ -9606,6 +9606,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .orc-kx-abre i { width: 16px; height: 16px; }
 .orc-kx-ticket-campo { display: flex; align-items: center; gap: 8px; margin-left: auto; color: #64748b; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.03em; text-transform: uppercase; }
 .orc-kx-ticket-campo input { width: 140px; height: 36px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 10px; font-size: 0.95rem; font-weight: 700; color: #0f172a; background: #fff; text-transform: none; letter-spacing: 0; }
+.orc-kx-ticket-campo input.orc-kx-comissao { width: 88px; }
 .cc-table.orc-kardex-grade tr.orc-kx-painel > td { height: auto; padding: 0; background: #f8fafc; white-space: normal; }
 .orc-kx-vig-box { padding: 10px 12px 14px; }
 .orc-kx-vig-titulo { margin: 0 0 8px; color: #105436; font-size: 0.82rem; font-weight: 800; }

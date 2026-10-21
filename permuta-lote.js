@@ -692,7 +692,14 @@ const PermutaApp = {
         <h2 style="text-align:center;color:#111;font-size:13pt;font-weight:bold;letter-spacing:0.02em;margin:0 0 22px;font-family:'Times New Roman',serif;">${this.esc(tituloDoc)}</h2>`;
       const corpoCss = "font-family:'Times New Roman',serif;font-size:11pt;line-height:1.45;text-align:justify;white-space:pre-wrap;color:#111;";
       const paginas = rel._paginarDoc(topo, blocos, corpoCss);
-      const nome = "Permuta_" + String(st.titulo || "lote").replace(/\W+/g, "") + ".pdf";
+      const cliente = (st.customer && (st.customer.name || st.customer.nome)) || "";
+      const cod = (st.unit && (st.unit.costCenterId || st.unit.enterpriseId))
+        || (st.contract && (st.contract.enterpriseId || st.contract.costCenterId))
+        || "";
+      const unidade = [String(cod).replace(/\D/g, ""), st.quadraLote && st.quadraLote !== "—" ? st.quadraLote : ""].filter(Boolean).join(" ");
+      const nome = typeof window.buildFichaPdfFilename === "function"
+        ? window.buildFichaPdfFilename("Permuta", { contrato: unidade, costCenterId: String(cod).replace(/\D/g, ""), titulo: st.titulo, nome: cliente })
+        : "Permuta | Título " + String(st.titulo || "") + ".pdf";
       await rel._baixarPaginasPdf(paginas, nome);
       this.fechar();
     } catch (e) {
@@ -805,7 +812,7 @@ const PermutaApp = {
     const permutantes = [];
     if (nomeCli) {
       const par = [{ nome: nomeCli, papel: "Permutante" }];
-      if (conj && conj.name) par.push({ nome: conj.name, papel: "Cônjuge" });
+      if (conj && conj.name) par.push({ nome: conj.name, papel: "Permutante" });
       permutantes.push(par);
     }
     let empresa = st.empresaNome || "";
