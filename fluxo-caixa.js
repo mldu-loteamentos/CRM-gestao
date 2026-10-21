@@ -1976,97 +1976,253 @@ const FluxoCaixaApp = {
     return txt || "—";
   },
 
-  exportDrillExcel() {
+  tipoEmpresaDrill(mov, companyId) {
+    const title = this.movTitleInfo(mov);
+    let letra = "";
+    if (title.role === "adiantamento") letra = "A";
+    else if (title.role === "abatimento") letra = "D";
+    else if (title.tipo === "CP") letra = "P";
+    else if (title.tipo === "CR") letra = "R";
+    const c = this.companyById(companyId);
+    const empresa = c
+      ? `${c.id} - ${c.fullName || c.name || ""}`.trim()
+      : (companyId != null && String(companyId) !== "" ? String(companyId) : "");
+    return [letra, empresa].filter(Boolean).join(" / ");
+  },
+
+  dataExcelDrill(iso) {
+    const s = String(iso || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+    const [y, m, d] = s.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  },
+
+  async exportDrillExcel() {
     const ctx = this._drillExport;
     if (!ctx || !Array.isArray(ctx.items) || !ctx.items.length) {
       alert("Não há lançamentos para exportar.");
       return;
     }
-    if (typeof XLSX === "undefined") {
-      alert("A biblioteca XLSX não foi carregada. Atualize a página e tente novamente.");
+    const XL = window.InvestimentoApp;
+    const ExcelJS = window.ExcelJS || (XL && typeof XL.ensureExcelJS === "function" ? await XL.ensureExcelJS().catch(() => null) : null);
+    if (!ExcelJS || !XL || typeof XL.excelPaint !== "function") {
+      alert("A biblioteca de Excel não carregou. Atualize a página com Ctrl+F5.");
       return;
     }
-    const rows = ctx.items.map((it) => {
+    const headers = [
+      "Data",
+      "Nº mov.",
+      "Título CP/CR",
+      "Favorecido / paga",
+      "Tipo (p/r/d/a)/Empresa",
+      "C.C.",
+      "Grupo da visão",
+      "Plano financeiro",
+      "HISTÓRICO",
+      "Valor (R$)"
+    ];
+    const moneyFmt = "#,##0.00";
+    const dateFmt = "dd/mm/yyyy";
+    const colCount = headers.length;
+    const lastL = this.excelLetra(colCount);
+    const linhas = ctx.items.map((it) => {
       const mov = it.mov || {};
       const title = this.movTitleInfo(mov);
-      const role =
-        title.role === "adiantamento" ? "ADIANTAMENTO"
-          : (title.role === "abatimento" ? "ABATIMENTO" : "");
-      const sharePct = (Number(it.share) || 0) * 100;
-      const factorPct = (Number(it.factor) || 0) * 100;
-      const raw = Number(it.rawBankAmount);
-      const rateado = Number.isFinite(Number(it.rateadoBruto))
-        ? Number(it.rateadoBruto)
-        : (Number.isFinite(raw) ? raw * (Number(it.share) || 0) : "");
+      const movN = this.movNumber(mov);
+      const movNum = Number(movN);
       return {
-        "Data": this.fmtDatePt(this.cashDate(mov)),
-        "Nº mov.": this.movNumber(mov),
-        "Título CP/CR": title.label || "",
-        "Favorecido / parte": title.party || "",
-        "Tipo (adiant./abate)": role,
-        "Empresa": this.companyLabel(it.companyId || mov.companyId),
-        "C.C.": [it.costCenterId, it.costCenterName].filter(Boolean).join(" - ") || "",
-        "Grupo da visão": this.grupoVisaoDoItem(it),
-        "Plano financeiro": this.planoDoItem(it),
-        "Histórico": this.movHistoric(mov),
-        "Total título (API)": Number.isFinite(raw) ? raw : "",
-        "% rateio C.C.": sharePct,
-        "Valor rateado (título × %)": rateado === "" ? "" : rateado,
-        "Fator MLDU %": factorPct,
-        "Valor no DFC": Number(it.amount) || 0
+        data: this.dataExcelDrill(this.cashDate(mov)),
+        mov: Number.isFinite(movNum) && String(movNum) === String(movN).trim() ? movNum : String(movN || ""),
+        titulo: title.label && title.label !== "—" ? title.label : "",
+        favorecido: title.party || "",
+        tipoEmpresa: this.tipoEmpresaDrill(mov, it.companyId || mov.companyId),
+        cc: [it.costCenterId, it.costCenterName].filter(Boolean).join(" - "),
+        grupo: this.grupoVisaoDoItem(it),
+        plano: this.planoDoItem(it),
+        historico: this.movHistoric(mov),
+        valor: Number(it.amount) || 0
       };
     });
-    rows.push({
-      "Data": "",
-      "Nº mov.": "",
-      "Título CP/CR": "",
-      "Favorecido / parte": "",
-      "Tipo (adiant./abate)": "",
-      "Empresa": "",
-      "C.C.": "",
-      "Grupo da visão": "",
-      "Plano financeiro": "",
-      "Histórico": `Soma dos lançamentos (${ctx.items.length})`,
-      "Total título (API)": "",
-      "% rateio C.C.": "",
-      "Valor rateado (título × %)": "",
-      "Fator MLDU %": "",
-      "Valor no DFC": Number(ctx.sum) || 0
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "CRM Moura Leite";
+    wb.created = new Date();
+    const ws = wb.addWorksheet("Lancamentos", {
+      views: [{ state: "frozen", xSplit: 1, ySplit: 4, topLeftCell: "B5", activeCell: "B5", showGridLines: false }]
     });
-    rows.push({
-      "Data": "",
-      "Nº mov.": "",
-      "Título CP/CR": "",
-      "Favorecido / parte": "",
-      "Tipo (adiant./abate)": "",
-      "Empresa": "",
-      "C.C.": "",
-      "Grupo da visão": "",
-      "Plano financeiro": "",
-      "Histórico": "Total exibido na linha",
-      "Total título (API)": "",
-      "% rateio C.C.": "",
-      "Valor rateado (título × %)": "",
-      "Fator MLDU %": "",
-      "Valor no DFC": Number(ctx.lineTotal) || 0
+    ws.properties.showGridLines = false;
+    ws.columns = [
+      { width: 14 }, { width: 12 }, { width: 42 }, { width: 36 }, { width: 42 },
+      { width: 28 }, { width: 32 }, { width: 42 }, { width: 28 }, { width: 16 }
+    ];
+
+    let imgId = null;
+    if (typeof XL.logoDataUrl === "function") {
+      try {
+        const logo = await XL.logoDataUrl();
+        if (logo && logo.dataUrl) imgId = wb.addImage({ base64: logo.dataUrl, extension: logo.extension || "png" });
+      } catch (e) { /* segue sem logo */ }
+    }
+    ws.mergeCells("A1:A2");
+    ws.getRow(1).height = 28;
+    ws.getRow(2).height = 22;
+    const titleCell = ws.getCell("A1");
+    const sub = [ctx.subtitle, ctx.startDate && ctx.endDate ? `${ctx.startDate} a ${ctx.endDate}` : ""].filter(Boolean).join(" · ");
+    titleCell.value = {
+      richText: [
+        { font: { name: "Calibri", size: 14, bold: true, color: { argb: "FF475569" } }, text: `Lançamentos · ${ctx.title || "conta"}\n` },
+        { font: { name: "Calibri", size: 9, color: { argb: "FF64748B" } }, text: sub }
+      ]
+    };
+    this.excelPinta(titleCell, {
+      fill: "FFFFFFFF",
+      align: { vertical: "middle", horizontal: "left", wrapText: true, indent: 8 }
+    });
+    if (imgId != null) {
+      try {
+        const logoPx = Math.round(1.54 * 96 / 2.54);
+        ws.addImage(imgId, { tl: { col: 0.04, row: 0.08 }, ext: { width: logoPx, height: logoPx } });
+      } catch (e) { /* logo opcional */ }
+    }
+    const kpis = [
+      { label: "Lançamentos", value: ctx.items.length, money: false },
+      { label: "Soma", value: Number(ctx.sum) || 0, money: true },
+      { label: "Total da linha", value: Number(ctx.lineTotal) || 0, money: true }
+    ];
+    kpis.forEach((k, i) => {
+      const col = 4 + i;
+      const top = ws.getRow(1).getCell(col);
+      const val = ws.getRow(2).getCell(col);
+      top.value = k.label;
+      val.value = k.value;
+      this.excelPinta(top, {
+        fill: "FFFFFFFF",
+        font: { bold: true, size: 8, color: { argb: "FF94A3B8" } },
+        align: { horizontal: "right", vertical: "bottom" }
+      });
+      this.excelPinta(val, {
+        fill: "FFFFFFFF",
+        font: { bold: true, size: 12, color: { argb: "FF0F172A" } },
+        align: { horizontal: "right", vertical: "middle" },
+        numFmt: k.money ? moneyFmt : "0"
+      });
+    });
+    ws.getRow(3).height = 8;
+    const head = ws.getRow(4);
+    head.height = 20;
+    headers.forEach((h, i) => {
+      const cell = head.getCell(i + 1);
+      cell.value = h;
+      this.excelPinta(cell, {
+        fill: "FF334155",
+        font: { bold: true, size: 9, color: { argb: "FFFFFFFF" } },
+        align: { horizontal: i === colCount - 1 ? "right" : "left", vertical: "middle" },
+        border: true
+      });
     });
 
+    const pintarValor = (cell, n, fill, bold) => {
+      cell.value = n;
+      const zero = Math.abs(Number(n) || 0) < 0.005;
+      const color = zero ? "FF94A3B8" : (n < 0 ? "FFB91C1C" : "FF0F172A");
+      this.excelPinta(cell, {
+        fill,
+        font: { bold: !!bold, size: 9, color: { argb: color } },
+        align: { horizontal: "right", vertical: "middle" },
+        border: true,
+        numFmt: moneyFmt
+      });
+    };
+    const pintarTexto = (cell, value, fill, opts) => {
+      cell.value = value == null ? "" : value;
+      this.excelPinta(cell, {
+        fill,
+        font: { bold: !!(opts && opts.bold), size: 9, color: { argb: (opts && opts.color) || "FF0F172A" } },
+        align: { horizontal: (opts && opts.align) || "left", vertical: "middle" },
+        border: true,
+        numFmt: (opts && opts.numFmt) || ""
+      });
+    };
+
+    let rowIndex = 5;
+    linhas.forEach((ln) => {
+      const linha = ws.getRow(rowIndex);
+      linha.height = 18;
+      const fill = "FFFFFFFF";
+      if (ln.data) {
+        linha.getCell(1).value = ln.data;
+        this.excelPinta(linha.getCell(1), {
+          fill,
+          font: { size: 9, color: { argb: "FF0F172A" } },
+          align: { horizontal: "left", vertical: "middle" },
+          border: true,
+          numFmt: dateFmt
+        });
+      } else {
+        pintarTexto(linha.getCell(1), "", fill);
+      }
+      pintarTexto(linha.getCell(2), ln.mov, fill, { numFmt: Number.isFinite(Number(ln.mov)) ? "0" : "" });
+      pintarTexto(linha.getCell(3), ln.titulo, fill);
+      pintarTexto(linha.getCell(4), ln.favorecido, fill);
+      pintarTexto(linha.getCell(5), ln.tipoEmpresa, fill);
+      pintarTexto(linha.getCell(6), ln.cc, fill);
+      pintarTexto(linha.getCell(7), ln.grupo, fill);
+      pintarTexto(linha.getCell(8), ln.plano, fill);
+      pintarTexto(linha.getCell(9), ln.historico, fill);
+      pintarValor(linha.getCell(10), ln.valor, fill, true);
+      rowIndex += 1;
+    });
+
+    const soma = ws.getRow(rowIndex);
+    soma.height = 20;
+    for (let c = 1; c <= colCount; c++) {
+      pintarTexto(soma.getCell(c), "", "FF475569", { bold: true, color: "FFFFFFFF" });
+    }
+    pintarTexto(soma.getCell(9), `Soma dos lançamentos (${ctx.items.length})`, "FF475569", {
+      bold: true, color: "FFFFFFFF", align: "right"
+    });
+    pintarValor(soma.getCell(10), Number(ctx.sum) || 0, "FF475569", true);
+    soma.getCell(10).font = { name: "Calibri", size: 9, bold: true, color: { argb: "FFFFFFFF" } };
+    rowIndex += 1;
+
+    const linhaTotal = ws.getRow(rowIndex);
+    linhaTotal.height = 18;
+    for (let c = 1; c <= colCount; c++) {
+      pintarTexto(linhaTotal.getCell(c), "", "FF64748B", { bold: true, color: "FFFFFFFF" });
+    }
+    pintarTexto(linhaTotal.getCell(9), "Total exibido na linha", "FF64748B", {
+      bold: true, color: "FFFFFFFF", align: "right"
+    });
+    pintarValor(linhaTotal.getCell(10), Number(ctx.lineTotal) || 0, "FF64748B", true);
+    linhaTotal.getCell(10).font = { name: "Calibri", size: 9, bold: true, color: { argb: "FFFFFFFF" } };
+
+    const foot = ws.getRow(rowIndex + 2);
+    foot.getCell(1).value = typeof XL.generatedAtLabel === "function"
+      ? XL.generatedAtLabel(new Date())
+      : "Relatório gerado pelo CRM Moura Leite";
+    this.excelPinta(foot.getCell(1), {
+      font: { italic: true, size: 8, color: { argb: "FF64748B" } },
+      align: { horizontal: "left", vertical: "middle" }
+    });
+    ws.mergeCells(`A${rowIndex + 2}:${lastL}${rowIndex + 2}`);
+
     try {
-      const ws = XLSX.utils.json_to_sheet(rows);
-      ws["!cols"] = [
-        { wch: 12 }, { wch: 12 }, { wch: 42 }, { wch: 36 }, { wch: 14 },
-        { wch: 42 }, { wch: 32 }, { wch: 36 }, { wch: 42 }, { wch: 40 },
-        { wch: 16 }, { wch: 12 }, { wch: 22 }, { wch: 12 }, { wch: 14 }
-      ];
-      const wb = XLSX.utils.book_new();
-      const sheetName = String(ctx.sheetName || "Lancamentos").slice(0, 31);
-      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+      const buf = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const a = document.createElement("a");
       const safeName = String(ctx.fileBase || "lancamentos_dfc")
         .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
         .replace(/[^a-zA-Z0-9._-]+/g, "_")
         .replace(/^_+|_+$/g, "")
         .slice(0, 80);
-      XLSX.writeFile(wb, `${safeName || "lancamentos_dfc"}.xlsx`);
+      a.href = URL.createObjectURL(blob);
+      a.download = `${safeName || "lancamentos_dfc"}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        URL.revokeObjectURL(a.href);
+        if (a.parentNode) a.parentNode.removeChild(a);
+      }, 1000);
     } catch (e) {
       console.error("[FluxoCaixa] export drill:", e);
       alert("Erro ao exportar Excel: " + (e.message || e));
