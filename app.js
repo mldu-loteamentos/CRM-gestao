@@ -18760,6 +18760,80 @@ function renegCenarioAtual() {
   return "deslocar";
 }
 
+function renegNumBr(n, casas) {
+  return Number(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: casas, maximumFractionDigits: casas });
+}
+
+/** Por que a modalidade aberta é a que o operador pode usar neste cliente. */
+function renegPorqueFechada(k, faixa) {
+  const mods = faixa.mods;
+  const pct = Number(faixa.pctPago) || 0;
+  const pmp = Number(faixa.pmp) || 0;
+  const acordos = Number(faixa.acordos) || 0;
+  const pctTxt = renegNumBr(pct, 1) + "%";
+  const pmpTxt = Math.round(pmp) + (Math.round(pmp) === 1 ? " dia" : " dias");
+  if (k === "somar") return "Somar ficou fechada: o pago (" + pctTxt + ") não está abaixo de " + mods.somar.pctPagoMax + "%.";
+  if (k === "deslocar") {
+    const falhas = [];
+    if (!(pct > mods.deslocar.pctPagoMin)) falhas.push("o pago (" + pctTxt + ") não passa de " + mods.deslocar.pctPagoMin + "%");
+    if (!(acordos <= mods.deslocar.maxAcordos)) falhas.push("já há " + (acordos === 1 ? "1 acordo" : acordos + " acordos") + ", acima do máximo de " + mods.deslocar.maxAcordos);
+    return "Deslocar ficou fechada: " + (falhas.join(" e ") || "o perfil não fecha") + ".";
+  }
+  if (k === "diluir") {
+    const falhas = [];
+    if (acordos !== 0) falhas.push(acordos === 1 ? "já há 1 acordo" : "já há " + acordos + " acordos");
+    if (!(pct > mods.diluir.pctPagoMin)) falhas.push("o pago (" + pctTxt + ") não passa de " + mods.diluir.pctPagoMin + "%");
+    if (!(pmp <= mods.diluir.pmpMax)) falhas.push("o PMP (" + pmpTxt + ") passa de " + mods.diluir.pmpMax + " dias");
+    return "Diluir ficou fechada: " + (falhas.join(", ") || "o perfil de deslocar não se aplica") + ".";
+  }
+  return "";
+}
+
+function renegPorqueLiberada(valor) {
+  const faixa = window._renegFaixa;
+  if (!faixa || !faixa.perm || !faixa.perm[valor]) return "";
+  const mods = faixa.mods;
+  const pct = Number(faixa.pctPago) || 0;
+  const pmp = Number(faixa.pmp) || 0;
+  const acordos = Number(faixa.acordos) || 0;
+  const pctTxt = renegNumBr(pct, 1) + "%";
+  const pmpTxt = Math.round(pmp) + (Math.round(pmp) === 1 ? " dia" : " dias");
+  const acTxt = acordos === 0 ? "não tem acordo anterior" : (acordos === 1 ? "tem 1 acordo anterior" : "tem " + acordos + " acordos anteriores");
+  const nomes = { diluir: "Diluir", somar: "Somar", deslocar: "Deslocar" };
+  const internas = ["diluir", "somar", "deslocar"];
+  let aberta = "";
+  if (valor === "somar") {
+    aberta = "Somar foi liberada porque este cliente pagou " + pctTxt + " do contrato, abaixo de " + mods.somar.pctPagoMax + "%.";
+  } else if (valor === "deslocar") {
+    aberta = "Deslocar foi liberada porque este cliente pagou " + pctTxt + ", acima de " + mods.deslocar.pctPagoMin + "%, e " + acTxt + " (o máximo é " + mods.deslocar.maxAcordos + ").";
+  } else if (valor === "cartao") {
+    aberta = "Cartão de crédito foi liberado porque esta forma não depende do percentual pago, do PMP nem de acordos anteriores.";
+  } else if (valor === "diluir") {
+    const direto = acordos === 0 && pct > mods.diluir.pctPagoMin && pmp <= mods.diluir.pmpMax;
+    const peloDeslocar = pct > mods.deslocar.pctPagoMin && acordos <= mods.deslocar.maxAcordos;
+    if (direto && peloDeslocar) aberta = "Diluir foi liberada pelos dois caminhos: nenhum acordo anterior, pago de " + pctTxt + " (acima de " + mods.diluir.pctPagoMin + "%) e PMP de " + pmpTxt + " (até " + mods.diluir.pmpMax + " dias), e também pelo perfil de deslocar.";
+    else if (direto) aberta = "Diluir foi liberada porque não há acordo anterior, o pago é " + pctTxt + " (acima de " + mods.diluir.pctPagoMin + "%) e o PMP é " + pmpTxt + " (até " + mods.diluir.pmpMax + " dias).";
+    else aberta = "Diluir foi liberada porque este cliente entra no perfil de deslocar: pagou " + pctTxt + " (acima de " + mods.deslocar.pctPagoMin + "%) e " + acTxt + ".";
+  }
+  const fechadas = internas.filter((k) => k !== valor && !faixa.perm[k]);
+  const abertasJunto = internas.filter((k) => k !== valor && faixa.perm[k]);
+  let extra = "";
+  if (valor !== "cartao" && !abertasJunto.length && fechadas.length) {
+    extra = " É o único acordo interno liberado. " + fechadas.map((k) => renegPorqueFechada(k, faixa)).join(" ");
+  } else if (fechadas.length) {
+    extra = " " + fechadas.map((k) => renegPorqueFechada(k, faixa)).join(" ");
+  }
+  if (valor !== "cartao" && abertasJunto.length) extra += " " + abertasJunto.map((k) => nomes[k]).join(" e ") + " também ficou liberada.";
+  if (valor !== "cartao") extra += " Cartão de crédito permanece liberado.";
+  if (valor === "cartao") {
+    const soInterna = internas.filter((k) => faixa.perm[k]);
+    const fora = internas.filter((k) => !faixa.perm[k]);
+    if (soInterna.length === 1) extra = " No acordo interno, só " + nomes[soInterna[0]] + " entrou. " + fora.map((k) => renegPorqueFechada(k, faixa)).join(" ");
+    else if (fora.length) extra = " " + fora.map((k) => renegPorqueFechada(k, faixa)).join(" ");
+  }
+  return aberta + extra;
+}
+
 const RENEG_MODALIDADES = {
   diluir: "As parcelas marcadas, vencidas ou a vencer, viram um saldo. Depois do sinal, esse saldo é dividido entre todas as outras parcelas a vencer do contrato, pela Tabela Price com a taxa do contrato. O cliente fica sem parcelas novas: cada parcela a vencer recebe um acréscimo.",
   somar: "As parcelas marcadas, vencidas ou a vencer, viram um saldo. Depois do sinal, esse saldo vira N parcelas pela Tabela Price com a taxa do contrato. Cada uma é somada a uma das próximas parcelas a vencer, no mesmo vencimento; as demais seguem com o valor original. N vai até a quantidade de parcelas a vencer.",
@@ -18805,10 +18879,14 @@ window.montarSeletorModalidade = function() {
   };
   const mostrarDica = (li) => {
     const txt = RENEG_MODALIDADES[li.dataset.value];
-    if (!txt) { dica.hidden = true; return; }
-    dica.innerHTML = `<b></b><p></p>`;
+    if (!txt || li.classList.contains("is-off")) { dica.hidden = true; return; }
+    const porque = renegPorqueLiberada(li.dataset.value);
+    dica.innerHTML = `<b></b><p></p><p class="rmod-porque"></p>`;
     dica.querySelector("b").textContent = li.textContent;
     dica.querySelector("p").textContent = txt;
+    const pq = dica.querySelector(".rmod-porque");
+    if (porque) pq.textContent = porque;
+    else pq.remove();
     dica.hidden = false;
     const rl = lista.getBoundingClientRect();
     const ri = li.getBoundingClientRect();
@@ -19024,7 +19102,9 @@ function renegAplicarFaixaModalidade() {
     }
     if (typeof window.sincronizarSeletorModalidade === "function") window.sincronizarSeletorModalidade();
   }
-  return { mods: mods, pctPago: pctPago, pmp: pmp, acordos: acordos, perm: perm };
+  const faixa = { mods: mods, pctPago: pctPago, pmp: pmp, acordos: acordos, perm: perm };
+  window._renegFaixa = faixa;
+  return faixa;
 }
 
 function calculateRenegotiation() {
