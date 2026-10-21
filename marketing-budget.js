@@ -5,15 +5,17 @@
    Realizado: data da baixa, valor líquido mais os impostos retidos.
    Só entram baixas tipo 1 (pagamento) e tipo 10 (adiantamento). Abatimento de adiantamento, cancelamento e as outras baixas ficam de fora, como no relatório do Sienge.
    (a conta, as filhas e as contas alocadas em 05.02 MARKETING na visão DFC).
-   Previsão entra no comprometido junto com o título em aberto.
+   No gráfico, comprometido é só o título em aberto, igual ao detalhamento. A previsão fica numa barra própria.
    A aba Contratos mostra quem está em dia, quem não pagou nada e quem deve a entrada (possíveis cancelamentos).
    A aba Perfil da venda cruza sexo e idade dos clientes com a situação de pagamento e os cancelamentos. */
 const MarketingBudgetApp = {
   CONFIG_COLLECTION: "marketing_budget_config",
   CACHE_TITULOS_COL: "marketing_budget_titulos",
+  CACHE_VENDAS_COL: "marketing_budget_vendas",
   CACHE_TITULOS_MS: 30 * 60 * 1000,
   CACHE_CURTO_MS: 5 * 60 * 1000,
   _cacheTitulos: {},
+  _cacheVendas: {},
   CONFIG_LOCAL: "crm_marketing_budget_config",
   CAT_DOC: "_categorias",
   CAT_PADRAO: /MARKET|PUBLICI|PROPAGAND|M[IÍ]DIA|EVENTO|BRINDE|PATROCIN|STAND|PANFLET|OUTDOOR|ANUNCI|DIVULGA/i,
@@ -1254,7 +1256,109 @@ const MarketingBudgetApp = {
     }));
   },
 
-  async buscarVendas(cc, gen) {
+  mesesEntre(inicio, fim) {
+    const out = [];
+    const a = String(inicio || "").slice(0, 7);
+    const b = String(fim || "").slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(a) || !/^\d{4}-\d{2}$/.test(b) || a > b) return out;
+    let y = Number(a.slice(0, 4));
+    let m = Number(a.slice(5, 7));
+    const yF = Number(b.slice(0, 4));
+    const mF = Number(b.slice(5, 7));
+    for (let g = 0; g < 240; g++) {
+      out.push(y + "-" + String(m).padStart(2, "0"));
+      if (y === yF && m === mF) break;
+      m += 1;
+      if (m > 12) { m = 1; y += 1; }
+    }
+    return out;
+  },
+
+  fimDoMes(ym) {
+    const y = Number(String(ym).slice(0, 4));
+    const m = Number(String(ym).slice(5, 7));
+    if (!y || !m) return "";
+    const d = new Date(y, m, 0);
+    return y + "-" + String(m).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  },
+
+  /** Meses YYYY-MM seguidos viram um único intervalo de datas. */
+  juntarMeses(lista) {
+    const out = [];
+    lista.slice().sort().forEach((ym) => {
+      const ini = ym + "-01";
+      const fim = this.fimDoMes(ym);
+      const ult = out[out.length - 1];
+      if (ult && this.deslocarDia(ult.end, 1) === ini) ult.end = fim;
+      else out.push({ start: ini, end: fim });
+    });
+    return out;
+  },
+
+  async lerCacheVendas(ccId) {
+    const id = String(ccId || "");
+    if (this._cacheVendas[id]) return this._cacheVendas[id];
+    const vazio = { meses: {} };
+    if (!id || !window.firebaseDb || !window.firebaseCollections) return vazio;
+    try {
+      const { doc, getDoc } = window.firebaseCollections;
+      const snap = await getDoc(doc(window.firebaseDb, this.CACHE_VENDAS_COL, id));
+      const existe = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+      if (!existe) {
+        this._cacheVendas[id] = vazio;
+        return vazio;
+      }
+      const lista = ((snap.data() || {}).meses || []).map(String).filter((ym) => /^\d{4}-\d{2}$/.test(ym));
+      const pedacos = await Promise.all(lista.map((ym) => getDoc(doc(window.firebaseDb, this.CACHE_VENDAS_COL, id + "_" + ym)).catch(() => null)));
+      pedacos.forEach((ped, i) => {
+        const ok = ped && (typeof ped.exists === "function" ? ped.exists() : ped.exists);
+        if (!ok) return;
+        const data = ped.data() || {};
+        vazio.meses[lista[i]] = {
+          vendas: Array.isArray(data.vendas) ? data.vendas : [],
+          distratos: Array.isArray(data.distratos) ? data.distratos : []
+        };
+      });
+      this._cacheVendas[id] = vazio;
+      return vazio;
+    } catch (e) {
+      console.warn("[Budget] cache de vendas", e);
+      return vazio;
+    }
+  },
+
+  async gravarCacheVendas(ccId, porMes) {
+    const id = String(ccId || "");
+    const chaves = Object.keys(porMes || {}).filter((ym) => /^\d{4}-\d{2}$/.test(ym));
+    if (!id || !chaves.length) return;
+    const mem = this._cacheVendas[id] || { meses: {} };
+    chaves.forEach((ym) => { mem.meses[ym] = porMes[ym]; });
+    this._cacheVendas[id] = mem;
+    if (!window.firebaseDb || !window.firebaseCollections) return;
+    try {
+      const { doc, getDoc, setDoc } = window.firebaseCollections;
+      const savedAt = Date.now();
+      const ref = doc(window.firebaseDb, this.CACHE_VENDAS_COL, id);
+      const snap = await getDoc(ref).catch(() => null);
+      const existe = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+      const atuais = existe ? ((snap.data() || {}).meses || []) : [];
+      const meses = [...new Set(atuais.map(String).concat(chaves))].filter((ym) => /^\d{4}-\d{2}$/.test(ym)).sort();
+      const lote = 8;
+      for (let i = 0; i < chaves.length; i += lote) {
+        const fatia = chaves.slice(i, i + lote);
+        await Promise.all(fatia.map((ym) => setDoc(doc(window.firebaseDb, this.CACHE_VENDAS_COL, id + "_" + ym), {
+          vendas: porMes[ym].vendas || [],
+          distratos: porMes[ym].distratos || [],
+          savedAt: savedAt
+        })));
+      }
+      await setDoc(ref, { meses: meses, savedAt: savedAt }, { merge: true });
+    } catch (e) {
+      console.warn("[Budget] não gravei as vendas", e);
+    }
+  },
+
+  async buscarVendasFaixa(cc, gen, inicio, fim) {
     const s = this.state;
     const todas = async (base) => {
       let out = [];
@@ -1271,11 +1375,12 @@ const MarketingBudgetApp = {
     };
     const q = `enterpriseId=${encodeURIComponent(cc.id)}`;
     const [emitidos, cancelados, quitados, distratos] = await Promise.all([
-      todas(`/sales-contracts?${q}&situation=2&initialIssueDate=${s.startDate}&finalIssueDate=${s.endDate}`),
-      todas(`/sales-contracts?${q}&situation=3&initialIssueDate=${s.startDate}&finalIssueDate=${s.endDate}`),
-      todas(`/sales-contracts?${q}&situation=4&initialIssueDate=${s.startDate}&finalIssueDate=${s.endDate}`),
-      todas(`/sales-contracts?${q}&situation=3&initialCancelDate=${s.startDate}&finalCancelDate=${s.endDate}`)
+      todas(`/sales-contracts?${q}&situation=2&initialIssueDate=${inicio}&finalIssueDate=${fim}`),
+      todas(`/sales-contracts?${q}&situation=3&initialIssueDate=${inicio}&finalIssueDate=${fim}`),
+      todas(`/sales-contracts?${q}&situation=4&initialIssueDate=${inicio}&finalIssueDate=${fim}`),
+      todas(`/sales-contracts?${q}&situation=3&initialCancelDate=${inicio}&finalCancelDate=${fim}`)
     ]);
+    if (gen !== s.gen) return { vendas: [], distratos: [] };
     const doEmp = (c) => !c.enterpriseId || String(c.enterpriseId) === String(cc.id);
     const vistos = new Set();
     const vendas = [];
@@ -1286,13 +1391,87 @@ const MarketingBudgetApp = {
       vendas.push(this.slimVenda(c));
     });
     const dVistos = new Set();
-    s.distratos = distratos.filter((c) => {
-      const id = String(c && c.id != null ? c.id : "");
-      if (!id || dVistos.has(id) || !doEmp(c)) return false;
-      dVistos.add(id);
-      return true;
-    }).map((c) => this.slimVenda(c));
-    s.vendas = vendas.sort((a, b) => String(b.data).localeCompare(String(a.data)));
+    return {
+      vendas: vendas,
+      distratos: distratos.filter((c) => {
+        const id = String(c && c.id != null ? c.id : "");
+        if (!id || dVistos.has(id) || !doEmp(c)) return false;
+        dVistos.add(id);
+        return true;
+      }).map((c) => this.slimVenda(c))
+    };
+  },
+
+  async buscarVendas(cc, gen) {
+    const s = this.state;
+    const inicio = s.startDate;
+    const fim = s.endDate;
+    const corte = this.hoje().slice(0, 7) + "-01";
+    const temFechado = inicio < corte;
+    const fimFechado = temFechado ? (fim < corte ? fim : this.deslocarDia(corte, -1)) : "";
+    const cache = temFechado ? await this.lerCacheVendas(cc.id) : { meses: {} };
+    if (gen !== s.gen) return;
+    const mesesFechados = fimFechado ? this.mesesEntre(inicio, fimFechado) : [];
+    const faltam = mesesFechados.filter((ym) => !cache.meses[ym]);
+    const vivoInicio = fim >= corte ? (inicio > corte ? inicio : corte) : "";
+    const faixas = this.juntarMeses(faltam);
+    if (vivoInicio) faixas.push({ start: vivoInicio, end: fim });
+    let vendas = [];
+    let distratos = [];
+    mesesFechados.forEach((ym) => {
+      const item = cache.meses[ym];
+      if (!item) return;
+      vendas = vendas.concat((item.vendas || []).map((v) => Object.assign({}, v)));
+      distratos = distratos.concat((item.distratos || []).map((v) => Object.assign({}, v)));
+    });
+    const novos = {};
+    if (mesesFechados.length && !faltam.length) {
+      this.setProgress("Usando as vendas e os distratos já gravados dos meses anteriores…", 0.94);
+    }
+    for (let i = 0; i < faixas.length; i++) {
+      if (gen !== s.gen) return;
+      const faixa = faixas[i];
+      const fechada = faixa.end < corte;
+      this.setProgress(fechada
+        ? "Buscando as vendas e os distratos dos meses anteriores…"
+        : "Buscando as vendas e os distratos do mês atual em diante…", 0.94);
+      const ped = await this.buscarVendasFaixa(cc, gen, faixa.start, faixa.end);
+      if (gen !== s.gen) return;
+      vendas = vendas.concat(ped.vendas);
+      distratos = distratos.concat(ped.distratos);
+      if (!fechada) continue;
+      this.mesesEntre(faixa.start, faixa.end).forEach((ym) => {
+        novos[ym] = { vendas: [], distratos: [] };
+      });
+      ped.vendas.forEach((v) => {
+        const ym = String(v.data || "").slice(0, 7);
+        if (novos[ym]) novos[ym].vendas.push(v);
+      });
+      ped.distratos.forEach((v) => {
+        const ym = String(v.dataCancel || v.data || "").slice(0, 7);
+        if (novos[ym]) novos[ym].distratos.push(v);
+      });
+    }
+    if (gen !== s.gen) return;
+    if (Object.keys(novos).length) await this.gravarCacheVendas(cc.id, novos);
+    if (gen !== s.gen) return;
+    const unir = (lista) => {
+      const map = new Map();
+      lista.forEach((v) => { if (v && v.id) map.set(String(v.id), v); });
+      return [...map.values()];
+    };
+    const dLista = unir(distratos);
+    const porDistrato = {};
+    dLista.forEach((d) => { porDistrato[d.id] = d; });
+    const vLista = unir(vendas);
+    vLista.forEach((v) => {
+      const d = porDistrato[v.id];
+      if (!d) return;
+      v.situacao = "Cancelado";
+      if (!v.dataCancel) v.dataCancel = d.dataCancel || d.data || "";
+    });
+    s.distratos = dLista;
+    s.vendas = vLista.sort((a, b) => String(b.data).localeCompare(String(a.data)));
   },
 
   slimVenda(c) {
@@ -2224,7 +2403,7 @@ const MarketingBudgetApp = {
         ${this.kpi("Consumo da verba", r.verba > 0 ? r.consumo.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "%" : "—", "Pago + comprometido, em relação à verba", corConsumo,
           `<div class="mkb-bar"><i style="width:${consumo}%;background:${corConsumo};"></i></div>`)}
       </div>
-      <div class="mkb-card mkb-chart-full"><div class="mkb-card-h"><h3>Verba e gastos mês a mês</h3><small>Barras = o que foi pago e o que está comprometido · linha = acumulado comparado com a verba</small></div><div class="mkb-canvas"><canvas id="mkb-ch-mes"></canvas></div></div>
+      <div class="mkb-card mkb-chart-full"><div class="mkb-card-h"><h3>Verba e gastos mês a mês</h3><small>Barras = realizado, em aberto e previsão, como no detalhamento · linha = acumulado dos três, comparado com a verba</small></div><div class="mkb-canvas"><canvas id="mkb-ch-mes"></canvas></div></div>
       <div class="mkb-card">
         <div class="mkb-card-h"><h3>Títulos que compõem a verba</h3><small>Entra no realizado só a baixa de pagamento ou de adiantamento, no dia do pagamento, pelo líquido mais os impostos retidos. Abatimento de adiantamento, cancelamento e as outras baixas ficam de fora. Em aberto entra no comprometido. Previsão ou nota vencida antes de hoje não fica no mês passado: entra no comprometido de hoje, porque será prorrogada ou cancelada. PPC e PCT que já foram pagos, ou que já viraram nota, saem da verba. O valor fica na nota.</small></div>
         <div id="mkb-gastos">${this.gastosHtml(r)}</div>
@@ -2324,15 +2503,15 @@ const MarketingBudgetApp = {
     const porMes = (st) => meses.map((m) => r.rows.filter((x) => x.status === st && String(x.data).slice(0, 7) === m).reduce((t, x) => t + x.valor, 0));
     const realM = porMes("realizado");
     const prevM = porMes("previsao").map((v, i) => v + porMes("previsao_vencida")[i]);
-    const compM = porMes("comprometido").map((v, i) => v + prevM[i]);
+    const compM = porMes("comprometido");
     let accGasto = 0;
     const serie = [];
     meses.forEach((m, i) => {
-      accGasto += realM[i] + compM[i];
-      if (accGasto <= 0.004) return;
+      accGasto += realM[i] + compM[i] + prevM[i];
+      if (accGasto <= 0.004 && realM[i] + compM[i] + prevM[i] <= 0.004) return;
       serie.push({
         rot: (nomesMes[Number(m.slice(5)) - 1] || m) + "/" + m.slice(2, 4),
-        real: realM[i], comp: compM[i], acc: accGasto
+        real: realM[i], comp: compM[i], prev: prevM[i], acc: accGasto
       });
     });
     const fonte = serie.length > 10 ? 9 : 11;
@@ -2365,20 +2544,21 @@ const MarketingBudgetApp = {
     const labels1 = serie.map((p) => p.rot);
     grafico(s1, serie.length ? { tipo: tipo.bar, data: [
       { name: "Realizado", labels: labels1, values: serie.map((p) => Math.round(p.real)) },
-      { name: "Comprometido", labels: labels1, values: serie.map((p) => Math.round(p.comp)) }
-    ], opt: { chartColors: ["105436", "F37021"], barGrouping: "stacked" } } : null, { x: meio.esq, y: meio.y, w: meio.w, h: meio.h, titulo: "Realizado e comprometido", vazio: "Nenhum mês com gasto acumulado neste período." });
+      { name: "Comprometido", labels: labels1, values: serie.map((p) => Math.round(p.comp)) },
+      { name: "Previsão", labels: labels1, values: serie.map((p) => Math.round(p.prev)) }
+    ], opt: { chartColors: ["105436", "F37021", "64748B"], barGrouping: "stacked" } } : null, { x: meio.esq, y: meio.y, w: meio.w, h: meio.h, titulo: "Realizado, comprometido e previsão", vazio: "Nenhum mês com gasto acumulado neste período." });
     const caixaTab = { x: meio.dir, y: meio.y, w: meio.wDir, h: meio.h };
     s1.addShape("roundRect", { x: caixaTab.x, y: caixaTab.y, w: caixaTab.w, h: caixaTab.h, fill: { color: "FFFFFF" }, line: { color: "E2E8F0", pt: 1 }, rectRadius: 0.06 });
     s1.addText("Gasto mês a mês", { x: caixaTab.x + 0.16, y: caixaTab.y + 0.08, w: caixaTab.w - 0.32, h: 0.26, fontFace: "Calibri", fontSize: 13, bold: true, color: "105436", margin: 0 });
     if (serie.length) {
-      const linhasMes = [[cab("Mês"), cab("Realizado"), cab("Comprometido"), cab("Acumulado")]];
+      const linhasMes = [[cab("Mês"), cab("Realizado"), cab("Comprometido"), cab("Previsão"), cab("Acumulado")]];
       serie.forEach((p, i) => {
         const base = { fill: { color: i % 2 ? "F8FAFC" : "FFFFFF" } };
-        linhasMes.push([cel(p.rot, base), cel(self.money(p.real), base), cel(self.money(p.comp), base), cel(self.money(p.acc), base)]);
+        linhasMes.push([cel(p.rot, base), cel(self.money(p.real), base), cel(self.money(p.comp), base), cel(self.money(p.prev), base), cel(self.money(p.acc), base)]);
       });
       const fim = serie[serie.length - 1];
-      linhasMes.push([cab("Total"), cab(self.money(serie.reduce((t, p) => t + p.real, 0))), cab(self.money(serie.reduce((t, p) => t + p.comp, 0))), cab(self.money(fim.acc))]);
-      tabela(s1, linhasMes, Object.assign({ cols: [1.1, 1.66, 1.72, 1.61] }, caixaTab));
+      linhasMes.push([cab("Total"), cab(self.money(serie.reduce((t, p) => t + p.real, 0))), cab(self.money(serie.reduce((t, p) => t + p.comp, 0))), cab(self.money(serie.reduce((t, p) => t + p.prev, 0))), cab(self.money(fim.acc))]);
+      tabela(s1, linhasMes, Object.assign({ cols: [0.82, 1.22, 1.38, 1.22, 1.45] }, caixaTab));
     }
     const s3 = pptx.addSlide();
     faixa(s3, "Contratos");
@@ -3164,9 +3344,9 @@ const MarketingBudgetApp = {
     const porMes = (st) => meses.map((m) => r.rows.filter((x) => x.status === st && String(x.data).slice(0, 7) === m).reduce((t, x) => t + x.valor, 0));
     const real = porMes("realizado");
     const prev = porMes("previsao").map((v, i) => v + porMes("previsao_vencida")[i]);
-    const comp = porMes("comprometido").map((v, i) => v + prev[i]);
+    const comp = porMes("comprometido");
     let acc = 0;
-    const acum = meses.map((_, i) => (acc += real[i] + comp[i]));
+    const acum = meses.map((_, i) => (acc += real[i] + comp[i] + prev[i]));
     const tick = { callback: (v) => this.moneyShort(v) };
     const tip = { callbacks: { label: (c) => `${c.dataset.label}: ${this.money(c.parsed.y != null ? c.parsed.y : c.parsed)}` } };
     const elMes = document.getElementById("mkb-ch-mes");
@@ -3174,6 +3354,7 @@ const MarketingBudgetApp = {
       const ds = [
         { type: "bar", label: "Realizado", data: real, backgroundColor: "#105436", stack: "g", order: 2 },
         { type: "bar", label: "Comprometido", data: comp, backgroundColor: "#f37021", stack: "g", order: 2 },
+        { type: "bar", label: "Previsão", data: prev, backgroundColor: "#64748b", stack: "g", order: 2 },
         { type: "line", label: "Acumulado", data: acum, borderColor: "#0ea5e9", backgroundColor: "#0ea5e9", tension: 0.25, pointRadius: 2, order: 1 }
       ];
       if (r.verba > 0) ds.push({ type: "line", label: "Verba", data: meses.map(() => r.verba), borderColor: "#b91c1c", borderDash: [6, 4], pointRadius: 0, order: 0 });
