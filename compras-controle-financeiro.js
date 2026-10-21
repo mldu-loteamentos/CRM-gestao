@@ -1388,7 +1388,7 @@ ComprasControleApp.paintFilters = function () {
     if (!window.MlEmpresaFilter) return;
     MlEmpresaFilter.bind(id, {
       toggleOpen() {
-        const escolheAntes = key === "ccIds" || key === "creditorIds";
+        const escolheAntes = key === "ccIds";
         if (self.state.loading) return;
         if (key === "deptIds" && self.departmentFilterLocked()) return;
         if (!self.state.consulted && key !== "companyIds" && !escolheAntes) return;
@@ -1412,7 +1412,7 @@ ComprasControleApp.paintFilters = function () {
         });
       },
       toggleId(itemId, on) {
-        const escolheAntes = key === "ccIds" || key === "creditorIds";
+        const escolheAntes = key === "ccIds";
         if (self.state.loading) return;
         if (key === "deptIds" && self.departmentFilterLocked()) return;
         if (!self.state.consulted && key !== "companyIds" && !escolheAntes) return;
@@ -1428,7 +1428,7 @@ ComprasControleApp.paintFilters = function () {
         self.paintFilters();
       },
       selectAll() {
-        const escolheAntes = key === "ccIds" || key === "creditorIds";
+        const escolheAntes = key === "ccIds";
         if (self.state.loading) return;
         if (key === "deptIds" && self.departmentFilterLocked()) return;
         if (!self.state.consulted && key !== "companyIds" && !escolheAntes) return;
@@ -1442,7 +1442,7 @@ ComprasControleApp.paintFilters = function () {
         self.paintFilters();
       },
       selectNone() {
-        const escolheAntes = key === "ccIds" || key === "creditorIds";
+        const escolheAntes = key === "ccIds";
         if (self.state.loading) return;
         if (key === "deptIds" && self.departmentFilterLocked()) return;
         if (!self.state.consulted && key !== "companyIds" && !escolheAntes) return;
@@ -1487,15 +1487,22 @@ ComprasControleApp.paintFilters = function () {
     emptyMeansAll: true,
     nouns: { singular: "empreendimento", plural: "empreendimentos" }
   }));
+  const credoresProntos = typeof this.credoresProntos === "function"
+    ? this.credoresProntos()
+    : !!(this.state.consulted && !this.state.loading);
+  const nounsCredor = typeof this.nounsCredor === "function"
+    ? this.nounsCredor()
+    : { singular: "credor", plural: "credores", none: "Nenhum credor", noMatch: "Nenhum credor com esse nome." };
   set("cfin-cred-slot", MlEmpresaFilter.html({
     id: "cfin-filter-cred",
     label: "Credor",
-    items: this.credItems(),
+    items: typeof this.credItems === "function" ? this.credItems() : [],
     selectedIds: this.state.creditorIds,
-    open: !!this.state.openCred,
+    open: !!this.state.openCred && credoresProntos,
     query: this.state.qCred,
     emptyMeansAll: true,
-    nouns: this.nounsCredor()
+    emptyLabel: credoresProntos ? "" : "Consulte para listar",
+    nouns: nounsCredor
   }));
   set("cfin-dept-slot", this.deptFilterHtml());
   bind("cfin-filter-emp", "companyIds", "openEmp", "qEmp", () => this.empItems(), { singular: "empresa", plural: "empresas" });
@@ -1530,13 +1537,23 @@ ComprasControleApp.ccItems = function () {
   return this.comEscolha(daLista, this.catalogoEmpreendimentos(), this.state.ccIds);
 };
 
-ComprasControleApp.credItems = function () {
-  const daLista = ComprasPrevisoesApp.credItems.call(this);
-  return this.comEscolha(daLista, this._credCatalogo || [], this.state.creditorIds);
+ComprasControleApp.credoresProntos = function () {
+  return !!(this.state && this.state.consulted && !this.state.loading);
 };
 
-ComprasControleApp.carregarCredores = async function () {
-  return ComprasPrevisoesApp.carregarCatalogoCredores.call(this);
+ComprasControleApp.nounsCredor = function () {
+  const pronto = this.credoresProntos();
+  return {
+    singular: "credor",
+    plural: "credores",
+    none: pronto ? "Nenhum credor" : "Consulte para listar os credores",
+    noMatch: "Nenhum credor com esse nome."
+  };
+};
+
+ComprasControleApp.credItems = function () {
+  if (!this.credoresProntos()) return [];
+  return ComprasPrevisoesApp.credItems.call(this);
 };
 
 ComprasControleApp.garantirEmpreendimentos = async function () {
@@ -2235,7 +2252,7 @@ ComprasControleApp.renderPage = function () {
         <div class="ecau-grid cprev-ecau${busy ? " is-consulting" : ""}">
           <div id="cfin-emp-slot" class="ecau-slot ecau-cell-emp${busy ? " is-locked" : ""}"></div>
           <div id="cfin-cc-slot" class="ecau-slot ecau-cell-obra${busy ? " is-locked" : ""}"></div>
-          <div id="cfin-cred-slot" class="ecau-slot ecau-cell-cred${busy ? " is-locked" : ""}"></div>
+          <div id="cfin-cred-slot" class="ecau-slot ecau-cell-cred${refineLocked ? " is-locked" : ""}"></div>
           <div class="form-group ecau-search ecau-cell-titulo${refineLocked ? " is-locked" : ""}">
             <label>Título</label>
             <input type="search" class="form-control" placeholder="Título ou nº do documento"
@@ -2300,7 +2317,6 @@ ComprasControleApp.init = async function () {
   }
   if (this._boot) return;
   this._boot = true;
-  this.carregarCredores();
   this.garantirEmpreendimentos();
   if (!this.state.inited) {
     const range = this.defaultRange();

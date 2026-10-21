@@ -627,7 +627,7 @@ const OrcamentoModuloApp = {
   },
 
   textoKardex() {
-    return "Tab segue para o mês seguinte. Selecione várias células e tecle Enter para preencher, ou arraste o canto verde para copiar. Ao informar as vendas, distribua a quantidade nos planos da tabela vigente. A venda não deixa o estoque negativo.";
+    return "Abaixo de Vendas, informe a quantidade de cada plano e o ticket médio. Tab segue o mês. Selecione várias células e tecle Enter, ou arraste o canto verde. A venda não deixa o estoque negativo.";
   },
 
   textoDistrato() {
@@ -887,14 +887,38 @@ const OrcamentoModuloApp = {
     this.renderNovo();
   },
 
+  qtdDoTipo(tipo, ano, mes) {
+    const chave = String(tipo || "");
+    if (chave.indexOf("plano:") === 0) return this.qtdPlano(this.acharPlano(chave.slice(6)), ano, mes);
+    return chave === "venda" ? this.qtdVenda(ano, mes) : this.qtdDistrato(ano, mes);
+  },
+
   setPlanoQtd(id, ano, mes, valor) {
-    const p = this.acharPlano(id);
-    const mesN = Number(mes);
-    if (!p || mesN < 0 || mesN > 11 || !this.mesPrevisto(ano, mesN)) return;
-    if (!p.meses || typeof p.meses !== "object") p.meses = {};
-    const chave = String(ano);
-    if (!Array.isArray(p.meses[chave])) p.meses[chave] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-    p.meses[chave][mesN] = Math.max(0, parseInt(valor, 10) || 0);
+    this.aplicarPlano(id, [{ ano: ano, mes: mes }], valor);
+  },
+
+  aplicarPlano(id, cells, valor) {
+    const pedido = Math.max(0, parseInt(valor, 10) || 0);
+    const ordenadas = (cells || []).slice().sort((a, b) => Number(a.ano) - Number(b.ano) || Number(a.mes) - Number(b.mes));
+    const ja = {};
+    let cortou = false;
+    ordenadas.forEach((c) => {
+      const ano = Number(c.ano);
+      const mes = Number(c.mes);
+      const p = this.acharPlano(id);
+      if (!p || !this.mesPrevisto(ano, mes)) return;
+      const atualPlano = this.qtdPlano(p, ano, mes);
+      const outras = Math.max(0, this.qtdVenda(ano, mes) - atualPlano);
+      const teto = this.limiteVenda(ano, mes, outras + pedido, ja);
+      const qtd = Math.max(0, teto - outras);
+      if (qtd < pedido) cortou = true;
+      ja["venda|" + ano + "|" + mes] = outras + qtd;
+      if (!p.meses || typeof p.meses !== "object") p.meses = {};
+      const chave = String(ano);
+      if (!Array.isArray(p.meses[chave])) p.meses[chave] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+      p.meses[chave][mes] = qtd;
+    });
+    this._kxAviso = cortou ? "A venda foi reduzida para o estoque não ficar negativo." : "";
     this.salvarPlano();
     this.renderNovo();
   },
@@ -1099,6 +1123,10 @@ const OrcamentoModuloApp = {
   aplicarGrade(tipo, cells, valor) {
     const ordenadas = (cells || []).slice().sort((a, b) => Number(a.ano) - Number(b.ano) || Number(a.mes) - Number(b.mes));
     const pedido = Math.max(0, parseInt(valor, 10) || 0);
+    if (String(tipo).indexOf("plano:") === 0) {
+      this.aplicarPlano(String(tipo).slice(6), ordenadas, pedido);
+      return;
+    }
     if (tipo === "venda") {
       if (this._dist) return;
       const ja = {};
@@ -1613,7 +1641,7 @@ const OrcamentoModuloApp = {
       const i = lista.indexOf(input);
       if (ev.key === "Tab") {
         const prox = lista[i + (ev.shiftKey ? -1 : 1)];
-        const atual = String(tipo === "venda" ? this.qtdVenda(input.dataset.ano, input.dataset.mes) : this.qtdDistrato(input.dataset.ano, input.dataset.mes));
+        const atual = String(this.qtdDoTipo(tipo, input.dataset.ano, input.dataset.mes));
         const digitado = String(Math.max(0, parseInt(input.value, 10) || 0));
         if (prox) {
           this._kxFoco = { tipo: tipo, ano: prox.dataset.ano, mes: prox.dataset.mes };
@@ -1639,7 +1667,7 @@ const OrcamentoModuloApp = {
         return;
       }
       const tipo = input.dataset.tipo;
-      const atual = String(tipo === "venda" ? this.qtdVenda(input.dataset.ano, input.dataset.mes) : this.qtdDistrato(input.dataset.ano, input.dataset.mes));
+      const atual = String(this.qtdDoTipo(tipo, input.dataset.ano, input.dataset.mes));
       const digitado = String(Math.max(0, parseInt(input.value, 10) || 0));
       if (atual === digitado) return;
       const next = ev.relatedTarget;
@@ -1991,7 +2019,40 @@ const OrcamentoModuloApp = {
     }
     const previsto = tipo === "venda" ? this.qtdVenda(ano, mes) : this.qtdDistrato(ano, mes);
     const feito = real > 0 ? `<span class="orc-kx-feito" title="Realizado, não editável">${real}</span>` : "";
-    return `<td class="${marca}" data-kx-td="1"><span class="orc-kx-cel">${feito}<input type="number" min="0" step="1" inputmode="numeric" class="orc-dist-qtd" data-kx="1" data-tipo="${tipo}" data-ano="${ano}" data-mes="${mes}" aria-label="${this.esc(rotulo)}" title="Previsão" value="${previsto > 0 ? previsto : ""}"></span></td>`;
+    return `<td class="${marca}" data-kx-td="1"><span class="orc-kx-cel">${feito}<input type="text" inputmode="numeric" class="orc-dist-qtd" data-kx="1" data-tipo="${tipo}" data-ano="${ano}" data-mes="${mes}" aria-label="${this.esc(rotulo)}" title="Previsão" value="${previsto > 0 ? previsto : ""}"></span></td>`;
+  },
+
+  celVendaTotal(ano, mes) {
+    const marca = this.clsMes(ano, mes);
+    const real = this.qtdReal(ano, mes, "venda");
+    if (!this.mesPrevisto(ano, mes)) {
+      if (!(real > 0)) return `<td class="is-right is-real is-passado" title="Realizado">—</td>`;
+      return `<td class="is-right is-real is-passado" title="Realizado">${real}</td>`;
+    }
+    const previsto = this.qtdVenda(ano, mes);
+    const feito = real > 0 ? `<span class="orc-kx-feito" title="Realizado, não editável">${real}</span>` : "";
+    const prev = previsto > 0 ? String(previsto) : (feito ? "" : "—");
+    return `<td class="${marca}" title="Soma dos planos">${feito}${prev ? " " + prev : ""}</td>`;
+  },
+
+  celPlanoQtd(p, ano, mes) {
+    const nomes = this.mesesLongo();
+    const marca = this.clsMes(ano, mes);
+    if (!this.mesPrevisto(ano, mes)) return `<td class="is-right is-passado">—</td>`;
+    const qtd = this.qtdPlano(p, ano, mes);
+    const tipo = "plano:" + p.id;
+    const rotulo = p.nome + " em " + nomes[mes] + " de " + ano;
+    return `<td class="${marca}" data-kx-td="1"><span class="orc-kx-cel"><input type="text" inputmode="numeric" class="orc-dist-qtd" data-kx="1" data-tipo="${this.esc(tipo)}" data-ano="${ano}" data-mes="${mes}" aria-label="${this.esc(rotulo)}" value="${qtd > 0 ? qtd : ""}"></span></td>`;
+  },
+
+  nomePlanoHtml(p) {
+    const pct = p.entradaPct != null && p.entradaPct !== "" ? Number(p.entradaPct) : null;
+    const entrada = pct == null ? "" : (pct >= 100 ? "à vista" : (pct > 0 ? "entrada " + this.fmtPct(pct) : ""));
+    const parc = Number(p.parcelas) > 0 ? p.parcelas + " parcelas" : "";
+    const juros = Number(p.juros) > 0 ? "juros " + this.fmtPct(p.juros) : "";
+    const cond = [entrada, parc, juros].filter(Boolean).join(" · ");
+    const ticket = Number(p.ticket) > 0 ? this.numero(p.ticket) : "";
+    return `<td class="orc-kx-plano"><span>${this.esc(p.nome)}</span>${cond ? `<small>${this.esc(cond)}</small>` : ""}<label>Ticket médio<input type="text" inputmode="decimal" class="orc-kx-ticket" value="${this.esc(ticket)}" aria-label="Ticket médio de ${this.esc(p.nome)}" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onchange="OrcamentoModuloApp.setPlanoCampo('${p.id}','ticket', this.value)"></label></td>`;
   },
 
   kardexHtml() {
@@ -2029,13 +2090,22 @@ const OrcamentoModuloApp = {
         saldo = saldo + dist - venda;
         finais.push(saldo);
         distCells.push(this.celMovimento(ano, mes, "distrato"));
-        vendaCells.push(this.celMovimento(ano, mes, "venda"));
+        vendaCells.push(this.celVendaTotal(ano, mes));
       }
       if (ano === h.ate) fimAno = saldo;
       const linha = (rotulo, tds, total, cls) => {
         const neg = typeof total === "number" && total < 0 ? " is-neg" : "";
         return `<tr class="orc-kx${cls ? " " + cls : ""}"><td>${rotulo}</td>${tds}<td class="is-right${neg}">${total}</td></tr>`;
       };
+      const planos = this.planosAtivos();
+      const linhasPlano = planos.length ? planos.map((p) => {
+        let soma = 0;
+        const tds = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((mes) => {
+          if (this.mesPrevisto(ano, mes)) soma += this.qtdPlano(p, ano, mes);
+          return this.celPlanoQtd(p, ano, mes);
+        }).join("");
+        return `<tr class="orc-kx is-plano">${this.nomePlanoHtml(p)}${tds}<td class="is-right">${soma > 0 ? soma : "—"}</td></tr>`;
+      }).join("") : `<tr class="orc-kx is-plano"><td colspan="14">Nenhum plano na tabela vigente.</td></tr>`;
       const head = `<thead><tr><th>${ano}</th>${g.meses.map((m, mes) => {
         const hoje = this.clsMes(ano, mes) === "is-hoje";
         return `<th class="is-right${hoje ? " is-hoje" : ""}">${m}</th>`;
@@ -2049,6 +2119,7 @@ const OrcamentoModuloApp = {
               ${linha("Estoque inicial", inicial.map((v, mes) => this.celTexto(v, false, this.clsMes(ano, mes))).join(""), "—", "is-ini")}
               ${linha("Distratos", distCells.join(""), sDist || "—", "is-dist")}
               ${linha("Vendas", vendaCells.join(""), sVenda || "—", "is-venda")}
+              ${linhasPlano}
               ${linha("Saldo", finais.map((v, mes) => this.celTexto(v, false, this.clsMes(ano, mes))).join(""), finais[11], "is-conta")}
             </tbody>
           </table>
@@ -2066,13 +2137,17 @@ const OrcamentoModuloApp = {
       ["Distratos " + h.hy, distRealAno],
       ["Estoque no fim", fimAno]
     ].map((par) => `<div><span>${this.esc(String(par[0]))}</span><strong>${this.esc(String(par[1]))}</strong></div>`).join("");
+    const tab = this.tabelaCatalogo();
+    const comp = tab ? this.rotuloCompetencia(tab.competencia) : "";
+    const faixa = comp
+      ? `<p class="orc-kx-nota">Tabela vigente de ${this.esc(comp)}. O ticket médio é deste empreendimento.</p>`
+      : `<p class="orc-kx-nota">Sem tabela vigente neste empreendimento. Informe o ticket médio em cada plano.</p>`;
     return `
       <div class="orc-kx-head">
         <div class="orc-kx-nums">${nums}</div>
-        <button type="button" class="btn btn-outline" onclick="OrcamentoModuloApp.togglePlano()">${this.novo.planoAberto ? "Ocultar plano" : "Configurar plano"}</button>
       </div>
       ${aviso ? `<p class="orc-kx-nota">${this.esc(aviso)}</p>` : ""}
-      ${this.novo.planoAberto ? this.planosConfigHtml() : ""}
+      ${faixa}
       ${blocos}`;
   },
 

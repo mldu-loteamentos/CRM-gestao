@@ -1541,30 +1541,23 @@ const ComprasPrevisoesApp = {
     });
   },
 
+  credoresProntos() {
+    return !!(this.state && this.state.consulted && !this.state.loading);
+  },
+
   nounsCredor() {
-    const carregando = !!this._credCarregando && !(this._credCatalogo && this._credCatalogo.length);
+    const pronto = this.credoresProntos();
     return {
       singular: "credor",
       plural: "credores",
-      none: carregando ? "Carregando credores..." : "Nenhum credor",
-      noMatch: carregando ? "Carregando credores..." : "Nenhum credor com esse nome."
+      none: pronto ? "Nenhum credor" : "Consulte para listar os credores",
+      noMatch: "Nenhum credor com esse nome."
     };
   },
 
   credItems() {
-    const fromRows = this.uniqueItems(this.scopedRows(), (r) => this.fold(r.credor), (r) => r.credor.toUpperCase());
-    const cat = this._credCatalogo || [];
-    if (!fromRows.length) return cat;
-    if (!cat.length) return fromRows;
-    const seen = {};
-    const out = [];
-    cat.concat(fromRows).forEach((x) => {
-      const id = String(x && x.id || "");
-      if (!id || seen[id]) return;
-      seen[id] = true;
-      out.push(x);
-    });
-    return out;
+    if (!this.credoresProntos()) return [];
+    return this.uniqueItems(this.scopedRows(), (r) => this.fold(r.credor), (r) => String(r.credor || "").toUpperCase());
   },
 
   nomeCredor(src) {
@@ -1877,7 +1870,7 @@ const ComprasPrevisoesApp = {
         toggleOpen() {
           if (self.state.loading) return;
           if (key === "deptIds" && self.departmentFilterLocked()) return;
-          const escolheAntes = key === "companyIds" || key === "deptIds" || key === "ccIds" || key === "creditorIds";
+          const escolheAntes = key === "companyIds" || key === "deptIds" || key === "ccIds";
           if (!self.state.consulted && !escolheAntes) return;
           self.state[openKey] = !self.state[openKey];
           if (openKey === "openEmp") { self.state.openCred = false; self.state.openDept = false; self.state.openCc = false; }
@@ -1902,7 +1895,7 @@ const ComprasPrevisoesApp = {
         toggleId(itemId, on) {
           if (self.state.loading) return;
           if (key === "deptIds" && self.departmentFilterLocked()) return;
-          const escolheAntes = key === "companyIds" || key === "deptIds" || key === "ccIds" || key === "creditorIds";
+          const escolheAntes = key === "companyIds" || key === "deptIds" || key === "ccIds";
           if (!self.state.consulted && !escolheAntes) return;
           const sid = String(itemId);
           const cur = self.state[key].slice();
@@ -1916,7 +1909,7 @@ const ComprasPrevisoesApp = {
         selectAll() {
           if (self.state.loading) return;
           if (key === "deptIds" && self.departmentFilterLocked()) return;
-          const escolheAntes = key === "companyIds" || key === "deptIds" || key === "ccIds" || key === "creditorIds";
+          const escolheAntes = key === "companyIds" || key === "deptIds" || key === "ccIds";
           if (!self.state.consulted && !escolheAntes) return;
           self.state[key] = itemsFn().map((x) => String(x.id));
           self.aposFiltro(key);
@@ -1928,7 +1921,7 @@ const ComprasPrevisoesApp = {
         selectNone() {
           if (self.state.loading) return;
           if (key === "deptIds" && self.departmentFilterLocked()) return;
-          const escolheAntes = key === "companyIds" || key === "deptIds" || key === "ccIds" || key === "creditorIds";
+          const escolheAntes = key === "companyIds" || key === "deptIds" || key === "ccIds";
           if (!self.state.consulted && !escolheAntes) return;
           if (key === "deptIds" && self.accessibleDepartments()) {
             self.state.deptIds = self.accessibleDepartments().map((a) => a.id);
@@ -2022,9 +2015,10 @@ const ComprasPrevisoesApp = {
       label: "Credor",
       items: this.credItems(),
       selectedIds: this.state.creditorIds,
-      open: !!this.state.openCred,
+      open: !!this.state.openCred && this.credoresProntos(),
       query: this.state.qCred,
       emptyMeansAll: true,
+      emptyLabel: this.credoresProntos() ? "" : "Consulte para listar",
       nouns: this.nounsCredor()
     }));
     set("cprev-dept-slot", this.deptFilterHtml());
@@ -2679,7 +2673,7 @@ const ComprasPrevisoesApp = {
           <div class="ecau-grid cprev-ecau${busy ? " is-consulting" : ""}">
             <div id="cprev-emp-slot" class="ecau-slot ecau-cell-emp${busy ? " is-locked" : ""}"></div>
             <div id="cprev-cc-slot" class="ecau-slot ecau-cell-obra${busy ? " is-locked" : ""}"></div>
-            <div id="cprev-cred-slot" class="ecau-slot ecau-cell-cred${busy ? " is-locked" : ""}"></div>
+            <div id="cprev-cred-slot" class="ecau-slot ecau-cell-cred${refineLocked ? " is-locked" : ""}"></div>
             <div class="form-group ecau-search ecau-cell-titulo${refineLocked ? " is-locked" : ""}">
               <label>Título</label>
               <input type="search" class="form-control" placeholder="Título ou nº do documento"
@@ -2812,7 +2806,6 @@ const ComprasPrevisoesApp = {
       this.state.inited = true;
       this.renderPage();
       this.ouvirFilaFiscal();
-      this.carregarCatalogoCredores();
       this.garantirEmpreendimentos();
       await this.loadCompanies();
     }

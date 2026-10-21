@@ -9485,13 +9485,23 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .orc-rec-focus { margin: 0 0 14px; padding: 8px 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; color: #334155; font-size: 0.78rem; line-height: 1.45; }
 .orc-rec-focus span { display: block; }
 .orc-rec-meses { overflow-x: auto; margin-bottom: 14px; max-height: none; }
-.cc-table.orc-rec-grade { font-size: 0.72rem; font-variant-numeric: tabular-nums; }
-.cc-table.orc-rec-grade col.orc-rec-c-ano { width: 132px; }
-.cc-table.orc-rec-grade col.orc-rec-c-tot { width: 8.2%; }
-.cc-table.orc-rec-grade thead th { padding: 8px 6px; font-size: 0.68rem; letter-spacing: 0; text-align: right; white-space: nowrap; }
-.cc-table.orc-rec-grade thead th:first-child { text-align: left; }
-.cc-table.orc-rec-grade td { padding: 6px 6px; text-align: right; white-space: nowrap; }
-.cc-table.orc-rec-grade td:first-child { text-align: left; font-weight: 700; white-space: normal; }
+.cc-table.orc-rec-grade { font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+.cc-table.orc-rec-grade col.orc-rec-c-ano { width: 228px; }
+.cc-table.orc-rec-grade col.orc-rec-c-tot { width: 9%; }
+.cc-table.orc-rec-grade thead th { padding: 8px 8px; font-size: 0.72rem; letter-spacing: 0; text-align: right; white-space: nowrap; }
+.cc-table.orc-rec-grade thead th:first-child { text-align: left; position: sticky; left: 0; z-index: 3; background: #105436; min-width: 210px; }
+.cc-table.orc-rec-grade td { padding: 7px 8px; text-align: right; white-space: nowrap; }
+.cc-table.orc-rec-grade td:first-child { text-align: left; font-weight: 700; white-space: nowrap; position: sticky; left: 0; z-index: 1; min-width: 210px; background: #fff; }
+.cc-table.orc-rec-grade tr.orc-rec-ano td:first-child { background: #f8fafc; }
+.cc-table.orc-rec-grade tr.orc-rec-det td:first-child { padding-left: 18px; box-shadow: inset 3px 0 0 #cbd5e1; }
+.cc-table.orc-rec-grade tr.is-vence td:first-child { background: #fffbeb; box-shadow: inset 3px 0 0 #d97706; }
+.cc-table.orc-rec-grade tr.is-antes td:first-child { background: #eff6ff; box-shadow: inset 3px 0 0 #2563eb; }
+.cc-table.orc-rec-grade tr.is-reaj td:first-child { box-shadow: inset 3px 0 0 #0f766e; }
+.cc-table.orc-rec-grade tr.is-sj td:first-child { background: #fff7ed; box-shadow: inset 3px 0 0 #ea580c; }
+.cc-table.orc-rec-grade tr.is-dist td:first-child { background: #fef2f2; box-shadow: inset 3px 0 0 #dc2626; }
+.cc-table.orc-rec-grade tr.is-venda td:first-child { background: #ecfdf5; box-shadow: inset 3px 0 0 #059669; }
+.cc-table.orc-rec-grade tr.is-conta td:first-child { background: #e8f5ee; box-shadow: inset 3px 0 0 #105436; }
+.cc-table.orc-rec-grade tr.is-juros td:first-child { box-shadow: inset 3px 0 0 #7c3aed; }
 .cc-table.orc-rec-grade td.orc-rec-cel { cursor: pointer; }
 .cc-table.orc-rec-grade td.orc-rec-cel:hover,
 .cc-table.orc-rec-grade td.is-filtro { box-shadow: inset 0 0 0 2px #105436; }
@@ -9520,7 +9530,25 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .orc-kardex-bloco { margin: 0 0 18px; }
 .orc-kardex-titulo { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin: 0 0 6px; color: #105436; font-size: 0.92rem; font-weight: 800; }
 .orc-kardex-titulo span:last-child { color: #64748b; font-size: 0.75rem; font-weight: 700; }
-.cc-table.orc-kardex-grade col.orc-rec-c-ano { width: 132px; }
+.cc-table.orc-kardex-grade col.orc-rec-c-ano { width: 220px; }
+.cc-table.orc-kardex-grade input.orc-dist-qtd,
+.cc-table.orc-rec-grade input.orc-dist-qtd {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.cc-table.orc-kardex-grade input.orc-dist-qtd::-webkit-outer-spin-button,
+.cc-table.orc-kardex-grade input.orc-dist-qtd::-webkit-inner-spin-button,
+.cc-table.orc-rec-grade input.orc-dist-qtd::-webkit-outer-spin-button,
+.cc-table.orc-rec-grade input.orc-dist-qtd::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.cc-table.orc-kardex-grade tr.orc-kx.is-plano td { background: #f8fafc; color: #334155; font-weight: 600; }
+.cc-table.orc-kardex-grade tr.orc-kx.is-plano td.orc-kx-plano { padding: 4px 8px 4px 22px; text-align: left; white-space: normal; }
+.cc-table.orc-kardex-grade .orc-kx-plano span { display: block; font-weight: 800; color: #0f172a; }
+.cc-table.orc-kardex-grade .orc-kx-plano small { display: block; margin: 1px 0 4px; color: #64748b; font-size: 10px; font-weight: 700; line-height: 1.2; }
+.cc-table.orc-kardex-grade .orc-kx-plano label { display: flex; align-items: center; gap: 6px; color: #64748b; font-size: 10px; font-weight: 800; letter-spacing: 0.02em; text-transform: uppercase; }
+.cc-table.orc-kardex-grade .orc-kx-ticket { width: 108px; height: 24px; border: 1px solid #cbd5e1; border-radius: 4px; padding: 0 6px; font-size: 12px; font-weight: 700; color: #0f172a; background: #fff; text-transform: none; letter-spacing: 0; }
 .cc-table.orc-kardex-grade td.is-passado { background: #f8fafc; color: #64748b; }
 .cc-table.orc-kardex-grade td.is-hoje { box-shadow: none; }
 .cc-table.orc-kardex-grade thead th.is-hoje { box-shadow: none; background: #1f8a55; }
