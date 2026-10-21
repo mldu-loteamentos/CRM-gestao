@@ -140,6 +140,7 @@
     "construcao-home": { modulo: "home" },
     "construcao-engenharia": { modulo: "engenharia", subitem: "caucao" },
     "engenharia-caucao": { modulo: "engenharia", subitem: "caucao" },
+    "engenharia-custo-obra": { modulo: "engenharia", subitem: "custo_obra" },
     "engenharia-config": { modulo: "engenharia", subitem: "config" },
     vistoria: { modulo: "vistoria" },
     "construcao-compras": { modulo: "compras" },

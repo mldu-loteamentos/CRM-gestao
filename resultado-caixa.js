@@ -587,9 +587,9 @@ const ResultadoCaixaApp = {
       const empArq = Number(arq.empresa) || this.empresaId(arq.nome) || this.empresaId(arq.rotulo) || 0;
       Object.keys(arq.contas || {}).forEach((cc) => {
         const nomeCc = (arq.nomes || {})[cc] || "";
-        if (est.entraNoImposto && !est.entraNoImposto(cc, nomeCc)) return;
         const emp = empArq || this.empresaDoCentro(cc, nomeCc);
         if (!emp) return;
+        if (est.entraNoImposto && !est.entraNoImposto(cc, nomeCc, emp)) return;
         const row = porEmp[emp] || (porEmp[emp] = { vendas: 0, servicos: 0, financeiras: 0, redV: 0, redS: 0, redF: 0 });
         Object.keys(arq.contas[cc] || {}).forEach((code) => {
           const info = arq.contas[cc][code] || {};

@@ -3024,7 +3024,11 @@ function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
       ruleSuffix = "INTERNO_ABSOLUTO";
     } else if (typeof window.clientHasPagamentoEntradaWebro === "function" && window.clientHasPagamentoEntradaWebro(c)) {
       requiredType = "interno_absoluto";
-      ruleSuffix = "INTERNO_ABSOLUTO / ENTRADA WEBRO";
+      const analiseWebro = typeof window.clientIsAnaliseInternaJuridico === "function"
+        && window.clientIsAnaliseInternaJuridico(c, threshJuridico);
+      ruleSuffix = analiseWebro
+        ? "INTERNO_ABSOLUTO / ENTRADA WEBRO / ANALISE INTERNA JURIDICO"
+        : "INTERNO_ABSOLUTO / ENTRADA WEBRO";
     } else if (days >= threshJuridico) {
       requiredType = "apoio_juridico";
       ruleSuffix = "APOIO_JURIDICO / ENVIAR JURIDICO";
@@ -3429,6 +3433,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "compras-previsoes": "Follow-up de previsões",
     "compras-config": "Calendário de vencimento de títulos a pagar",
     "engenharia-caucao": "Gestão de caução",
+    "engenharia-custo-obra": "Custo obra",
     "engenharia-config": "Configurações",
     "construcao-engenharia": "Gestão de caução",
     "construcao-compras": "Follow-up de previsões",
@@ -3502,6 +3507,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "compras-previsoes": "clipboard-list",
     "compras-config": "calendar-clock",
     "engenharia-caucao": "shield-check",
+    "engenharia-custo-obra": "hard-hat",
     "engenharia-config": "settings",
     "construcao-engenharia": "shield-check",
     "construcao-compras": "clipboard-list",
@@ -3632,6 +3638,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     else if (window.EngenhariaCaucaoApp && typeof EngenhariaCaucaoApp.init === "function") {
       EngenhariaCaucaoApp.init();
     }
+  } else if (tabId === "engenharia-custo-obra") {
+    if (window.CustoObraApp && typeof window.CustoObraApp.init === "function") window.CustoObraApp.init();
   } else if (tabId === "vistoria") {
     try {
       if (window.VerificarConstrucaoApp && typeof window.VerificarConstrucaoApp.init === "function") {
@@ -7626,6 +7634,9 @@ window.getFilaQueueGroup = function(client, thresholdJuridico) {
   }
   if (client && client.isZeroPaid) return G.ZERO_PAGO;
   if (typeof window.clientHasPagamentoEntradaWebro === "function" && window.clientHasPagamentoEntradaWebro(client)) {
+    if (typeof window.clientIsAnaliseInternaJuridico === "function" && window.clientIsAnaliseInternaJuridico(client, cutoff)) {
+      return G.ANALISE_INTERNA_JURIDICO;
+    }
     return G.ENTRADA_WEBRO;
   }
   if (client && client.hasOverdueAgreement) {
@@ -12106,6 +12117,11 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
                   }
                   if (typeof window.clientHasPagamentoEntradaWebro === "function" && window.clientHasPagamentoEntradaWebro(client)
                     && typeof window.getEntradaWebroAgingHtml === "function") {
+                      if (typeof window.clientIsAnaliseInternaJuridico === "function" && window.clientIsAnaliseInternaJuridico(client, thresholdJuridico)
+                        && typeof window.getAnaliseInternaJuridicoAgingHtml === "function") {
+                          const webroTag = typeof window.webroBoletoTagHtml === "function" ? window.webroBoletoTagHtml() : "";
+                          return window.getAnaliseInternaJuridicoAgingHtml(client) + webroTag;
+                      }
                       return window.getEntradaWebroAgingHtml(client);
                   }
                   if (client.hasOverdueAgreement) {

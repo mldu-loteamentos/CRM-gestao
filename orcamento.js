@@ -270,7 +270,7 @@ const OrcamentoApp = {
       <div class="orc-head">
         <div>
           <h2>Orçamento 2026 × 2027</h2>
-          <p>Empresa, centro de custo e a conta do plano. Em 2026, janeiro a setembro é o recebido e outubro a dezembro é forecast. Em 2027, carteira, novas vendas e serviços aparecem separados. Serviços é a receita de prestação de serviços (contas 1.02). Valor Moura Leite aplica o % MLDU de cada empresa.</p>
+          <p>Empresa, centro de custo e a conta do plano. Em 2026, janeiro a setembro é o recebido e outubro a dezembro é forecast. Em 2027, carteira, novas vendas e serviços aparecem separados. Serviços é a receita de prestação de serviços (contas 1.02). Na empresa 3, a administração de carteira de recebíveis entra como venda de lotes. Valor Moura Leite aplica o % MLDU de cada empresa.</p>
         </div>
       </div>
       <div class="orc-tools">
@@ -844,7 +844,8 @@ const OrcamentoApp = {
     return sign + p.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
   },
 
-  isServicoConta(conta) {
+  isServicoConta(conta, empresa) {
+    if (String(empresa || "") === "3" && String(conta || "").replace(/\D/g, "") === "1020102") return false;
     return String(conta || "").indexOf("1.02") === 0;
   },
 
@@ -911,7 +912,7 @@ const OrcamentoApp = {
       row._origem = true;
     });
     map.forEach((row) => {
-      if (!this.isServicoConta(row.conta)) return;
+      if (!this.isServicoConta(row.conta, row.e)) return;
       row.serv = this.sum(row.m27);
       row.sm = row.m27.slice();
       row.cart = 0;

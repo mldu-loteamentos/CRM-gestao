@@ -336,6 +336,7 @@ const ConfigUsersApp = {
       name: "Engenharia", icon: "hard-hat", key: "mod_eng",
       submodules: [{ name: "Engenharia", key: "sub_eng_geral", actions: [
         { id: "caucao", label: "Gestão de caução", permBase: "sub_eng_geral_caucao" },
+        { id: "custo_obra", label: "Custo obra", permBase: "sub_eng_geral_custo_obra" },
         { id: "config", label: "Configurações", permBase: "sub_eng_geral_config" }
       ] }]
     },

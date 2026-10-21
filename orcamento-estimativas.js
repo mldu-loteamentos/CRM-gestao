@@ -166,7 +166,13 @@ const OrcEst = {
     return { entra: true, nome: nome };
   },
 
-  entraNoImposto(ccId, ccNome) {
+  /* SPE 36 recolhe sobre a receita inteira. O flag do parceiro não tira o centro da base. */
+  empresaReceitaInteira(empresa) {
+    return String(empresa == null ? "" : empresa).replace(/\D/g, "") === "36";
+  },
+
+  entraNoImposto(ccId, ccNome, empresa) {
+    if (this.empresaReceitaInteira(empresa)) return true;
     return this.centroImposto(ccId, ccNome).entra;
   },
 
@@ -208,7 +214,8 @@ const OrcEst = {
     const nome = this.norm(l.cn);
     const fora = /LUCRO RECEB|DIVIDEND|APORTE/.test(nome);
     let bucket = "";
-    if (tag === "Base para Vendas de Lote" || /DESCONTO DE JUROS CONTRAT/.test(nome) || String(l.conta || "").replace(/\D/g, "") === "2050103") bucket = "vendas";
+    if (String(l.e || "") === "3" && String(l.conta || "").replace(/\D/g, "") === "1020102") bucket = "vendas";
+    else if (tag === "Base para Vendas de Lote" || /DESCONTO DE JUROS CONTRAT/.test(nome) || String(l.conta || "").replace(/\D/g, "") === "2050103") bucket = "vendas";
     else if (tag === "Base para Receita de Serviços") bucket = "servicos";
     else if (tag === "Base para Aplicações Financeiras") bucket = "financeiras";
     else if (tag === "Base de Dedução") bucket = gid === "g_01_02" ? "servicos" : (gid === "g_01_03" || gid === "g_09_01" ? "financeiras" : "vendas");
@@ -277,7 +284,7 @@ const OrcamentoImpostosApp = {
     (linhas || OrcEst.linhas()).forEach((l) => {
       const id = String(l.e || "");
       if (!id) return;
-      if (!OrcEst.entraNoImposto(l.cc, l.en)) return;
+      if (!OrcEst.entraNoImposto(l.cc, l.en, id)) return;
       const row = garantir(id, l.enome);
       const tipo = OrcEst.tipoApurado(l);
       if (tipo) {
@@ -682,7 +689,7 @@ const OrcamentoImpostosApp = {
           </tr></tfoot>
         </table>
       </div>
-      <p class="orc-est-nota">Janeiro de 2027 usa o forecast de 2026. Receita de centro de custo de parceiro, e de centro com o imposto desmarcado, fica de fora. A taxa de cessão entra na venda de lotes quando o plano marca essa conta nessa base. A coluna Vendas é a receita integral. As redutoras ficam à parte e entram abatidas na base do imposto. Passe o mouse no valor para ver a conta do PIS, do COFINS, do IRPJ e da CSLL.</p>`;
+      <p class="orc-est-nota">Janeiro de 2027 usa o forecast de 2026. Receita de centro de custo de parceiro, e de centro com o imposto desmarcado, fica de fora. Na SPE 36, o imposto incide sobre a receita inteira: a parte do parceiro entra na base. A taxa de cessão entra na venda de lotes quando o plano marca essa conta nessa base. Na empresa 3, a administração de carteira de recebíveis entra na venda de lotes. A coluna Vendas é a receita integral. As redutoras ficam à parte e entram abatidas na base do imposto. Passe o mouse no valor para ver a conta do PIS, do COFINS, do IRPJ e da CSLL.</p>`;
     const tab = body.querySelector(".orc-imp-tab");
     if (tab) tab.addEventListener("click", (ev) => {
       const el = ev.target.closest("[data-est-id]");

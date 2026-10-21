@@ -417,7 +417,7 @@ const FiscalApp = {
     linhas.forEach((l) => {
       if (l.semMarca || l.grupo || !(l.valor > 0)) return;
       if (this.ehDescontoJuros(l.categoryId, l.categoryName)) return;
-      if (!this.entraNaEmpresa(l.ccId, l.ccName)) return;
+      if (!this.entraNaEmpresa(l.ccId, l.ccName, l.companyId)) return;
       if (l.bucket !== "vendas" && l.bucket !== "servicos") return;
       const k = `${l.companyId}|${l.month}|${this.normEmp(l.cliente)}`;
       receitaCliente[k] = (receitaCliente[k] || 0) + l.valor;
@@ -435,7 +435,7 @@ const FiscalApp = {
         if (reduzir <= 0.004) foraDesconto = true;
         else valor = valor < 0 ? -reduzir : reduzir;
       }
-      const entra = (l.semMarca || l.grupo || foraDesconto) ? false : this.entraNaEmpresa(l.ccId, l.ccName);
+      const entra = (l.semMarca || l.grupo || foraDesconto) ? false : this.entraNaEmpresa(l.ccId, l.ccName, l.companyId);
       const k = `${l.categoryId}|${l.papel}|${l.bucket}${l.semMarca ? "|fora" : ""}`;
       const acc = c.contas[k] || (c.contas[k] = Object.assign(this.empresaVazia(l.categoryId, l.categoryName || l.categoryId), {
         papel: l.papel, bucket: l.bucket, ccs: {}
@@ -506,7 +506,8 @@ const FiscalApp = {
     }
   },
 
-  entraNaEmpresa(ccId, ccName) {
+  entraNaEmpresa(ccId, ccName, companyId) {
+    if (String(companyId == null ? "" : companyId).replace(/\D/g, "") === "36") return true;
     const custom = this.customCc(ccId);
     const tipo = String(custom.tipo_cc || "");
     const parceiro = /parce(ir|ri)/i.test(String(ccName || "")) && tipo !== "Corporativo";
