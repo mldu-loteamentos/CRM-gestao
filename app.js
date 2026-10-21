@@ -7805,7 +7805,12 @@ window.cancelMotivosLerBruto = function(raw) {
     try { data = JSON.parse(raw || "null"); } catch (e) { data = null; }
   }
   if (data && Array.isArray(data.catalogo)) {
-    return { catalogo: window.cancelMotivosNormalizar(data.catalogo), em: String(data.em || ""), temCatalogo: true };
+    return {
+      catalogo: window.cancelMotivosNormalizar(data.catalogo),
+      em: String(data.em || ""),
+      temCatalogo: true,
+      pendente: !!data.pendente
+    };
   }
   if (Array.isArray(data)) return { extras: data, em: "", temCatalogo: false };
   return { extras: [], em: "", temCatalogo: false };
@@ -7871,16 +7876,24 @@ window.cancelContratoEsc = function(s) {
 
 window.cancelMotivosGravar = async function(catalogo) {
   const key = window.CANCEL_MOTIVOS_KEY;
+  window._motivosCancelRev = (window._motivosCancelRev || 0) + 1;
   const doc = { catalogo: window.cancelMotivosNormalizar(catalogo), em: new Date().toISOString() };
-  localStorage.setItem(key, JSON.stringify(doc));
+  const gravarLocal = function(pendente) {
+    try {
+      localStorage.setItem(key, JSON.stringify({ catalogo: doc.catalogo, em: doc.em, pendente: !!pendente }));
+    } catch (e) {}
+  };
   if (!window.firebaseDb || !window.firebaseCollections) {
+    gravarLocal(true);
     return { ok: false, catalogo: doc.catalogo, erro: "A base não está disponível nesta tela." };
   }
+  gravarLocal(true);
   try {
     const fc = window.firebaseCollections;
     const payload = {};
-    payload[key] = JSON.stringify(doc);
+    payload[key] = JSON.stringify({ catalogo: doc.catalogo, em: doc.em });
     await fc.setDoc(fc.doc(window.firebaseDb, "config", "global"), payload, { merge: true });
+    gravarLocal(false);
     return { ok: true, catalogo: doc.catalogo };
   } catch (e) {
     console.warn("[Motivos] não gravei na base", e);
@@ -7890,27 +7903,37 @@ window.cancelMotivosGravar = async function(catalogo) {
 
 window.cancelMotivosSincronizar = async function() {
   const key = window.CANCEL_MOTIVOS_KEY;
-  const local = window.cancelMotivosLerLocal();
+  const revInicio = window._motivosCancelRev || 0;
   if (!window.firebaseDb || !window.firebaseCollections) return window.cancelMotivosLista();
   try {
     const fc = window.firebaseCollections;
     const ref = fc.doc(window.firebaseDb, "config", "global");
     const snap = await fc.getDoc(ref);
+    if ((window._motivosCancelRev || 0) !== revInicio) return window.cancelMotivosLista();
     const exists = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
     const cloud = exists ? window.cancelMotivosLerBruto((snap.data() || {})[key] || "null") : { extras: [], em: "", temCatalogo: false };
-    const localVence = local.temCatalogo && (!cloud.temCatalogo || String(local.em || "") > String(cloud.em || ""));
+    const local = window.cancelMotivosLerLocal();
+    const localVence = local.temCatalogo && (local.pendente || !cloud.temCatalogo || String(local.em || "") >= String(cloud.em || ""));
     const base = localVence ? local.catalogo : (cloud.temCatalogo ? cloud.catalogo : window.cancelMotivosLista());
     const completo = window.cancelMotivosComPadrao(base);
-    const faltaNaBase = !cloud.temCatalogo || completo.mudou || (cloud.temCatalogo && completo.lista.some(function(m) {
-      return !(cloud.catalogo || []).some(function(c) { return c.codigo === m.codigo; });
-    }));
-    if (localVence || faltaNaBase) {
-      const gravou = await window.cancelMotivosGravar(completo.lista);
-      if (gravou && gravou.ok === false && localVence) {
-        console.warn("[Motivos] a lista local não subiu", gravou.erro);
+    if ((window._motivosCancelRev || 0) !== revInicio) return window.cancelMotivosLista();
+    const igual = function(a, b) {
+      const na = window.cancelMotivosNormalizar(a);
+      const nb = window.cancelMotivosNormalizar(b);
+      return na.length === nb.length && na.every(function(m, i) { return m.codigo === nb[i].codigo && m.nome === nb[i].nome; });
+    };
+    if (localVence) {
+      if (!cloud.temCatalogo || !igual(completo.lista, cloud.catalogo)) {
+        await window.cancelMotivosGravar(completo.lista);
+      } else if (local.pendente) {
+        localStorage.setItem(key, JSON.stringify({ catalogo: completo.lista, em: local.em || cloud.em || new Date().toISOString() }));
       }
     } else if (cloud.temCatalogo) {
-      localStorage.setItem(key, JSON.stringify({ catalogo: completo.lista, em: cloud.em || new Date().toISOString() }));
+      if (completo.mudou || !igual(completo.lista, cloud.catalogo)) {
+        await window.cancelMotivosGravar(completo.lista);
+      } else {
+        localStorage.setItem(key, JSON.stringify({ catalogo: completo.lista, em: cloud.em || new Date().toISOString() }));
+      }
     }
     return window.cancelMotivosLista();
   } catch (e) {
@@ -7918,58 +7941,71 @@ window.cancelMotivosSincronizar = async function() {
   }
 };
 
-window.renderMotivosCancelamento = async function() {
+window.renderMotivosCancelamento = async function(opts) {
+  opts = opts || {};
   const root = document.getElementById("motivos-cancelamento-root");
   if (!root) return;
-  root.innerHTML = `<div class="ml-load" style="padding:28px 0;"><div class="loading-spinner" aria-hidden="true"></div><div class="loading-status-text">Carregando os motivos…</div></div>`;
-  await window.cancelMotivosSincronizar();
-  if (!document.getElementById("motivos-cancelamento-root")) return;
+  if (!opts.pularSync) {
+    root.innerHTML = `<div class="ml-load" style="padding:28px 0;"><div class="loading-spinner" aria-hidden="true"></div><div class="loading-status-text">Carregando os motivos…</div></div>`;
+    await window.cancelMotivosSincronizar();
+    if (!document.getElementById("motivos-cancelamento-root")) return;
+  }
   const editando = window._motivoCancelEdit || "";
   const lista = window.cancelMotivosLista();
+  const destaque = String(opts.destaque || "");
   const linhas = lista.map(function(m) {
     const cod = window.cancelContratoEsc(m.codigo);
-    return `<tr>
-      <td style="font-variant-numeric:tabular-nums;font-weight:700;">${cod}</td>
+    return `<tr data-motivo="${cod}" class="${m.codigo === destaque ? "is-nova" : ""}">
+      <td class="motivos-cancel-cod">${cod}</td>
       <td>${window.cancelContratoEsc(m.nome)}</td>
-      <td class="is-right" style="white-space:nowrap;width:72px;">
+      <td class="motivos-cancel-acoes">
         <button type="button" class="tvig-ico" title="Editar" onclick="window.motivoCancelEditar('${cod}')"><i data-lucide="pencil" style="width:15px;height:15px;"></i></button>
         <button type="button" class="tvig-ico is-danger" title="Excluir" onclick="window.motivoCancelExcluir('${cod}')"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button>
       </td>
     </tr>`;
   }).join("");
-  const vazio = lista.length ? "" : `<tr><td colspan="3" style="text-align:center;color:#64748b;padding:18px;">Nenhum motivo cadastrado.</td></tr>`;
+  const vazio = lista.length ? "" : `<tr><td colspan="3" class="motivos-cancel-vazio">Nenhum motivo cadastrado.</td></tr>`;
   root.innerHTML = `
-    <div class="crm-card" style="padding:16px 18px;margin-bottom:14px;">
-      <p style="margin:0 0 12px;color:#64748b;font-size:0.88rem;">Estes motivos entram no cancelamento do contrato. O código de dois dígitos junta com 1 (cliente) ou 2 (empresa). Exemplo: 01 vira 101, iniciativa do cliente por desemprego.</p>
-      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
-        <label style="display:flex;flex-direction:column;gap:4px;font-size:0.72rem;font-weight:700;color:#64748b;width:110px;text-transform:uppercase;">Código
-          <input id="motivo-cancel-cod" maxlength="2" inputmode="numeric" value="${window.cancelContratoEsc(editando)}" style="height:38px;border:1px solid #cbd5e1;border-radius:8px;padding:0 10px;font-size:0.88rem;font-weight:600;background:#fff;">
+    <div class="crm-card motivos-cancel-form">
+      <p class="motivos-cancel-ajuda">Estes motivos entram no cancelamento do contrato. O código de dois dígitos junta com 1 (cliente) ou 2 (empresa). Exemplo: 01 vira 101, iniciativa do cliente por desemprego.</p>
+      <div class="motivos-cancel-linha">
+        <label>Código
+          <input id="motivo-cancel-cod" maxlength="2" inputmode="numeric" value="${window.cancelContratoEsc(editando)}">
         </label>
-        <label style="display:flex;flex-direction:column;gap:4px;font-size:0.72rem;font-weight:700;color:#64748b;flex:1;min-width:220px;text-transform:uppercase;">Motivo
-          <input id="motivo-cancel-nome" value="${window.cancelContratoEsc((lista.find(function(m) { return m.codigo === editando; }) || {}).nome || "")}" style="height:38px;border:1px solid #cbd5e1;border-radius:8px;padding:0 10px;font-size:0.88rem;font-weight:600;background:#fff;">
+        <label class="motivos-cancel-campo-nome">Motivo
+          <input id="motivo-cancel-nome" value="${window.cancelContratoEsc((lista.find(function(m) { return m.codigo === editando; }) || {}).nome || "")}">
         </label>
-        <button type="button" class="btn btn-primary" style="height:38px;" onclick="window.motivoCancelSalvar()">${editando ? "Salvar" : "Incluir"}</button>
-        ${editando ? '<button type="button" class="btn btn-cancel" style="height:38px;" onclick="window.motivoCancelEditar(\'\')">Cancelar</button>' : ""}
+        <button type="button" class="btn btn-primary" onclick="window.motivoCancelSalvar()">${editando ? "Salvar" : "Incluir"}</button>
+        ${editando ? '<button type="button" class="btn btn-cancel" onclick="window.motivoCancelEditar(\'\')">Cancelar</button>' : ""}
       </div>
-      <p id="motivo-cancel-aviso" style="margin:8px 0 0;min-height:1.1em;font-size:0.8rem;color:#b91c1c;"></p>
+      <p id="motivo-cancel-aviso" class="motivos-cancel-aviso"></p>
     </div>
-    <div class="crm-card" style="padding:0;overflow:auto;">
-      <table class="cc-table" style="width:100%;">
-        <thead><tr><th style="width:110px;">Código</th><th>Motivo</th><th class="is-right" style="width:72px;">Ações</th></tr></thead>
+    <div class="crm-card motivos-cancel-lista">
+      <table class="motivos-cancel-table">
+        <thead><tr><th class="motivos-cancel-cod">Código</th><th>Motivo</th><th class="motivos-cancel-acoes">Ações</th></tr></thead>
         <tbody>${linhas || vazio}</tbody>
       </table>
     </div>`;
-  if (window.lucide) window.lucide.createIcons();
+  if (opts.aviso) {
+    const aviso = document.getElementById("motivo-cancel-aviso");
+    if (aviso) {
+      aviso.textContent = opts.aviso;
+      aviso.style.color = opts.avisoOk ? "#105436" : "#b91c1c";
+    }
+  }
+  const linhaNova = destaque ? root.querySelector('tr[data-motivo="' + window.cancelContratoEsc(destaque) + '"]') : null;
+  if (linhaNova && typeof linhaNova.scrollIntoView === "function") linhaNova.scrollIntoView({ block: "nearest" });
+  try { if (window.lucide) window.lucide.createIcons({ root: root }); } catch (e) {}
 };
 
 window.motivoCancelEditar = function(codigo) {
   window._motivoCancelEdit = String(codigo || "");
-  window.renderMotivosCancelamento();
+  window.renderMotivosCancelamento({ pularSync: true });
 };
 
 window.motivoCancelSalvar = async function() {
   const aviso = document.getElementById("motivo-cancel-aviso");
-  const falha = function(msg) { if (aviso) aviso.textContent = msg; };
+  const falha = function(msg) { if (aviso) { aviso.style.color = "#b91c1c"; aviso.textContent = msg; } };
   const codigo = String((document.getElementById("motivo-cancel-cod") || {}).value || "").replace(/\D/g, "").padStart(2, "0").slice(-2);
   const nome = String((document.getElementById("motivo-cancel-nome") || {}).value || "").trim();
   const anterior = String(window._motivoCancelEdit || "");
@@ -7981,11 +8017,13 @@ window.motivoCancelSalvar = async function() {
   prox.push({ codigo: codigo, nome: nome });
   const gravou = await window.cancelMotivosGravar(prox);
   window._motivoCancelEdit = "";
-  await window.renderMotivosCancelamento();
-  if (gravou && gravou.ok === false) {
-    const aviso2 = document.getElementById("motivo-cancel-aviso");
-    if (aviso2) aviso2.textContent = gravou.erro || "O motivo não gravou na base.";
-  }
+  const ok = !!(gravou && gravou.ok);
+  await window.renderMotivosCancelamento({
+    pularSync: true,
+    destaque: codigo,
+    avisoOk: ok,
+    aviso: ok ? (anterior ? "Motivo atualizado." : "Motivo incluído.") : ((gravou && gravou.erro) || "O motivo não gravou na base.")
+  });
 };
 
 window.motivoCancelExcluir = async function(codigo) {
@@ -7994,9 +8032,13 @@ window.motivoCancelExcluir = async function(codigo) {
     : false;
   if (!ok) return;
   const prox = window.cancelMotivosLista().filter(function(m) { return m.codigo !== String(codigo); });
-  await window.cancelMotivosGravar(prox);
+  const gravou = await window.cancelMotivosGravar(prox);
   if (window._motivoCancelEdit === String(codigo)) window._motivoCancelEdit = "";
-  window.renderMotivosCancelamento();
+  window.renderMotivosCancelamento({
+    pularSync: true,
+    avisoOk: !!(gravou && gravou.ok),
+    aviso: gravou && gravou.ok ? "" : ((gravou && gravou.erro) || "O motivo não saiu da base.")
+  });
 };
 
 window.cancelContratoPintarMotivos = function(selecionado) {

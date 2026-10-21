@@ -4,6 +4,7 @@
    Centro sem MARKETING no nome: baixas, em aberto e previsões nas contas do grupo 2.03.05 MARKETING
    Realizado: data da baixa, valor líquido mais os impostos retidos.
    Só entram baixas tipo 1 (pagamento) e tipo 10 (adiantamento). Abatimento de adiantamento, cancelamento e as outras baixas ficam de fora, como no relatório do Sienge.
+   Previsão paga, cancelada ou com saldo zero sai da previsão. O que continua em aberto fica na data de vencimento, sem mudar para o mês corrente.
    (a conta, as filhas e as contas alocadas em 05.02 MARKETING na visão DFC).
    No gráfico, comprometido é só o título em aberto, igual ao detalhamento. A previsão fica numa barra própria.
    A aba Contratos mostra quem está em dia, quem não pagou nada e quem deve a entrada (possíveis cancelamentos).
@@ -1049,6 +1050,38 @@ const MarketingBudgetApp = {
     return { noPeriodo: noPeriodo, total: total, data: data, fatias: fatias };
   },
 
+  /** Parcela que o Sienge já baixou ou cancelou não continua como previsão. */
+  parcelaEncerrada(bill, app, saldo, pays, original) {
+    if (saldo != null && Math.abs(Number(saldo) || 0) <= 0.009) return true;
+    if (saldo == null && bill && bill.correctedBalanceAmount != null && bill.correctedBalanceAmount !== "") {
+      const corr = Number(bill.correctedBalanceAmount);
+      if (Number.isFinite(corr) && Math.abs(corr) <= 0.009) return true;
+    }
+    const sit = app.fold([
+      bill && bill.situation,
+      bill && bill.status,
+      bill && bill.billStatus,
+      bill && bill.installmentStatus,
+      bill && bill.paymentStatus,
+      bill && bill.consistencyStatus,
+      bill && bill.installmentSituation
+    ].filter(function(v) { return v != null && v !== ""; }).join(" "));
+    if (sit === "PG" || sit === "CA" || /\b(PG|PAGO|PAGA|LIQUIDADO|QUITADO|CANCEL)\b/.test(sit)) return true;
+    const lista = Array.isArray(pays) ? pays : (pays ? [pays] : []);
+    if (original > 0.009 && lista.length) {
+      const soma = lista.reduce((t, p) => {
+        if (!p || typeof p !== "object") return t;
+        const n = this.numBaixa(p.netAmount);
+        const c = this.numBaixa(p.correctedNetAmount);
+        const g = this.numBaixa(p.grossAmount);
+        const v = n != null ? Math.abs(n) : (c != null ? Math.abs(c) : (g != null ? Math.abs(g) : 0));
+        return t + v;
+      }, 0);
+      if (soma + 0.009 >= original) return true;
+    }
+    return false;
+  },
+
   montarGastos(bills, ccIds) {
     const app = window.ComprasControleApp || window.ComprasPrevisoesApp;
     const ccSet = new Set((ccIds || []).map(String));
@@ -1072,17 +1105,15 @@ const MarketingBudgetApp = {
       let dataPg = "";
       const original = Number(bill.originalAmount) || 0;
       const saldo = app.billBalance(bill);
-      const aberta = typeof app.isSituacaoAberta === "function" && app.isSituacaoAberta(bill, null);
-      const quitado = !aberta && original > 0.009 && saldo != null && saldo <= 0.009;
+      const encerrada = this.parcelaEncerrada(bill, app, saldo, pays, original);
       const baixas = this.baixasDoTitulo(bill, pays, app, docId, docNome);
       const realizado = baixas.noPeriodo;
       dataPg = baixas.data || dataPg;
-      const aberto = quitado ? 0 : (saldo != null ? Math.max(0, saldo) : Math.max(0, original - baixas.total));
+      const aberto = encerrada ? 0 : (saldo != null ? Math.max(0, saldo) : Math.max(0, original - baixas.total));
       const titulo = String(bill.billId);
       const parcela = bill.installmentId != null ? String(bill.installmentId) : "";
       const venc = String(bill.dueDate || "").slice(0, 10);
       const hoje = this.hoje();
-      const nota = typeof app.isNotaDoc === "function" && app.isNotaDoc(docId, docNome, bill);
       const retro = !!(venc && hoje && venc < hoje);
       const tituloInfo = {
         companyId: bill.companyId != null ? String(bill.companyId) : "",
@@ -1112,18 +1143,12 @@ const MarketingBudgetApp = {
           if (!cats[catId]) cats[catId] = { id: catId, nome: catNome, total: 0 };
           cats[catId].total += valor;
         };
-        if (previsao && realizado <= 0.009) {
-          if (retro) push("previsao_vencida", original * fat, hoje, true);
-          else push("previsao", original * fat, venc);
-        } else if (previsao) {
+        if (previsao) {
           baixas.fatias.forEach((b, i) => push("realizado", b.valor * fat, b.data, false, i));
-          if (aberto > 0.009) {
-            if (retro) push("previsao_vencida", aberto * fat, hoje, true);
-            else push("previsao", aberto * fat, venc);
-          }
+          if (aberto > 0.009) push(retro ? "previsao_vencida" : "previsao", aberto * fat, venc, false);
         } else {
           baixas.fatias.forEach((b, i) => push("realizado", b.valor * fat, b.data, false, i));
-          if (!teveSubst) push("comprometido", aberto * fat, (nota && retro) ? hoje : venc, nota && retro);
+          if (!teveSubst && aberto > 0.009) push("comprometido", aberto * fat, venc, false);
         }
       });
     });
@@ -1996,9 +2021,9 @@ const MarketingBudgetApp = {
   },
 
   /* ---------- render ---------- */
-  /** Na lista, a data é o vencimento. Títulos vencidos guardam o dia de hoje só para entrar no período. */
+  /** Na lista, a previsão vencida mostra o vencimento. O mês do gráfico é o mesmo vencimento. */
   dataGasto(x) {
-    return (x && x.prorrogado && x.vencimento) ? x.vencimento : ((x && x.data) || "");
+    return (x && (x.status === "previsao" || x.status === "previsao_vencida") && x.vencimento) ? x.vencimento : ((x && x.data) || "");
   },
 
   kpi(label, valor, sub, cor, extra) {
@@ -2405,7 +2430,7 @@ const MarketingBudgetApp = {
       </div>
       <div class="mkb-card mkb-chart-full"><div class="mkb-card-h"><h3>Verba e gastos mês a mês</h3><small>Barras = realizado, em aberto e previsão, como no detalhamento · linha = acumulado dos três, comparado com a verba</small></div><div class="mkb-canvas"><canvas id="mkb-ch-mes"></canvas></div></div>
       <div class="mkb-card">
-        <div class="mkb-card-h"><h3>Títulos que compõem a verba</h3><small>Entra no realizado só a baixa de pagamento ou de adiantamento, no dia do pagamento, pelo líquido mais os impostos retidos. Abatimento de adiantamento, cancelamento e as outras baixas ficam de fora. Em aberto entra no comprometido. Previsão ou nota vencida antes de hoje não fica no mês passado: entra no comprometido de hoje, porque será prorrogada ou cancelada. PPC e PCT que já foram pagos, ou que já viraram nota, saem da verba. O valor fica na nota.</small></div>
+        <div class="mkb-card-h"><h3>Títulos que compõem a verba</h3><small>Entra no realizado só a baixa de pagamento ou de adiantamento, no dia do pagamento, pelo líquido mais os impostos retidos. Abatimento de adiantamento, cancelamento e as outras baixas ficam de fora. Em aberto e previsão ficam na data de vencimento, como no contas a pagar do Sienge. Previsão paga, cancelada ou com saldo zero sai da previsão. PPC e PCT que já viraram nota saem da verba. O valor fica na nota.</small></div>
         <div id="mkb-gastos">${this.gastosHtml(r)}</div>
       </div>`;
     const vendas = `
