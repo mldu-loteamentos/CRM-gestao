@@ -191,7 +191,10 @@ const ResultadoCaixaApp = {
   async subirForecast(input) {
     const files = input && input.files ? Array.from(input.files) : [];
     if (!files.length) return;
+    this._nuvemToken = (this._nuvemToken || 0) + 1;
+    this._subindo = true;
     if (typeof XLSX === "undefined") {
+      this._subindo = false;
       this.error = "A biblioteca de Excel não carregou. Atualize a página.";
       this.render();
       return;
@@ -281,6 +284,7 @@ const ResultadoCaixaApp = {
       this.error = e.message || String(e);
     }
     this.lendo = false;
+    this._subindo = false;
     if (input) input.value = "";
     this.render();
   },
@@ -492,8 +496,10 @@ const ResultadoCaixaApp = {
     const fx = window.firebaseCollections;
     const db = window.firebaseDb;
     if (!fx || !db) return;
+    const token = this._nuvemToken || 0;
     try {
       const snap = await fx.getDocs(fx.collection(db, "resultado_caixa"));
+      if ((this._nuvemToken || 0) !== token) return;
       const nuvem = {};
       const semParte = {};
       snap.forEach((docSnap) => {
@@ -513,6 +519,21 @@ const ResultadoCaixaApp = {
         };
       });
       if (Object.keys(nuvem).length) {
+        const local = this.forecasts || {};
+        Object.keys(local).forEach((ym) => {
+          const porL = (local[ym] && local[ym].porArquivo) || {};
+          if (!Object.keys(porL).length) return;
+          if (!nuvem[ym] || !nuvem[ym].porArquivo || !Object.keys(nuvem[ym].porArquivo).length) {
+            nuvem[ym] = local[ym];
+            return;
+          }
+          const por = nuvem[ym].porArquivo;
+          Object.keys(porL).forEach((nome) => {
+            const loc = porL[nome];
+            const rem = por[nome];
+            if (!rem || (loc && loc.em && String(loc.em) > String(rem.em || ""))) por[nome] = loc;
+          });
+        });
         this.forecasts = nuvem;
         this.normalizarForecastsMemoria();
         this.gravarForecastLocal();
@@ -1491,7 +1512,10 @@ const ResultadoCaixaApp = {
   async subir(input) {
     const files = input && input.files ? Array.from(input.files) : [];
     if (!files.length) return;
+    this._nuvemToken = (this._nuvemToken || 0) + 1;
+    this._subindo = true;
     if (typeof XLSX === "undefined") {
+      this._subindo = false;
       this.error = "A biblioteca de Excel não carregou. Atualize a página.";
       this.render();
       return;
@@ -1522,6 +1546,7 @@ const ResultadoCaixaApp = {
     }
     this._mapa = null;
     this.lendo = false;
+    this._subindo = false;
     if (input) input.value = "";
     this.render();
   },
@@ -1669,18 +1694,43 @@ const ResultadoCaixaApp = {
     if (!fx || !db || !arq) return false;
     const id = arq._doc || this.docCaixa(slot, arq.empresa, nome);
     const limpo = this.enxugarArq(arq);
-    await fx.setDoc(fx.doc(db, "resultado_caixa", id), {
+    const detalhe = JSON.stringify({
+      contasPorCc: limpo.contasPorCc || {},
+      planosJson: this.empacotarPlanos(limpo.planosPorCc)
+    });
+    const LIM = 500000;
+    const base = {
       slot: slot,
       nome: nome,
       empresa: Number(arq.empresa) || 0,
       rotulo: arq.rotulo || "",
       entradas: limpo.entradas,
       contas: limpo.contas,
-      contasPorCc: limpo.contasPorCc,
-      planosJson: this.empacotarPlanos(limpo.planosPorCc),
       em: new Date().toISOString()
-    });
+    };
+    const ids = [];
+    if (detalhe.length > LIM) {
+      for (let i = 0, n = 0; i < detalhe.length; i += LIM, n++) {
+        const pid = id + "__p" + n;
+        ids.push(pid);
+        await fx.setDoc(fx.doc(db, "resultado_caixa", pid), {
+          tipo: "parte",
+          pai: id,
+          texto: detalhe.slice(i, i + LIM)
+        });
+      }
+      base.partes = ids;
+    } else {
+      base.contasPorCc = limpo.contasPorCc;
+      base.planosJson = this.empacotarPlanos(limpo.planosPorCc);
+      base.partes = [];
+    }
+    await fx.setDoc(fx.doc(db, "resultado_caixa", id), base);
+    for (let n = ids.length; n < 40; n++) {
+      fx.deleteDoc(fx.doc(db, "resultado_caixa", id + "__p" + n)).catch(function() {});
+    }
     arq._doc = id;
+    arq._partes = ids;
     arq._pendente = false;
     this._nuvemOk = true;
     return true;
@@ -1728,9 +1778,19 @@ const ResultadoCaixaApp = {
     if (!docId || !fx || !db) return;
     this._nuvemToken = (this._nuvemToken || 0) + 1;
     fx.deleteDoc(fx.doc(db, "resultado_caixa", docId)).catch(() => {});
+    if (String(docId).indexOf("__p") >= 0 || String(docId).indexOf("fc-") === 0) return;
+    for (let n = 0; n < 40; n++) {
+      fx.deleteDoc(fx.doc(db, "resultado_caixa", docId + "__p" + n)).catch(function() {});
+    }
   },
 
   aplicarDoc(acervo, id, x) {
+    if (x && x.tipo === "parte") {
+      if (!acervo._partes) acervo._partes = {};
+      acervo._partes[id] = x.texto || "";
+      return;
+    }
+    if (x && (x.tipo === "forecast" || String(x.slot || "").indexOf("fc-") === 0)) return;
     const nome = x.nome || id;
     const arq = {
       empresa: Number(x.empresa) || 0,
@@ -1740,7 +1800,8 @@ const ResultadoCaixaApp = {
       contasPorCc: x.contasPorCc || {},
       planosPorCc: (x.planosPorCc && Object.keys(x.planosPorCc).length) ? x.planosPorCc : this.abrirPlanos(x.planosJson),
       _doc: id,
-      _slot: x.slot || ""
+      _slot: x.slot || "",
+      _partes: Array.isArray(x.partes) ? x.partes : []
     };
     const slot = String(x.slot || "");
     if (slot.indexOf("ant-") === 0) {
@@ -1755,6 +1816,71 @@ const ResultadoCaixaApp = {
     }
   },
 
+  juntarPartes(acervo) {
+    const partes = (acervo && acervo._partes) || {};
+    const visitar = (bag) => {
+      Object.keys((bag && bag.arquivos) || {}).forEach((nome) => {
+        const arq = bag.arquivos[nome];
+        const ids = arq && arq._partes;
+        if (!ids || !ids.length) return;
+        let texto = "";
+        let ok = true;
+        ids.forEach((pid) => {
+          if (!partes[pid]) ok = false;
+          else texto += partes[pid];
+        });
+        if (!ok || !texto) {
+          arq._pendente = true;
+          return;
+        }
+        try {
+          const det = JSON.parse(texto);
+          if (det.contasPorCc) arq.contasPorCc = det.contasPorCc;
+          if (det.planosJson) arq.planosPorCc = this.abrirPlanos(det.planosJson);
+          else if (det.planosPorCc) arq.planosPorCc = det.planosPorCc;
+          delete arq._partes;
+        } catch (e) {
+          arq._pendente = true;
+        }
+      });
+    };
+    Object.keys((acervo && acervo.anterior) || {}).forEach((k) => visitar(acervo.anterior[k]));
+    Object.keys((acervo && acervo.meses) || {}).forEach((k) => visitar(acervo.meses[k]));
+    if (acervo) delete acervo._partes;
+  },
+
+  /* O snapshot da nuvem também traz o forecast. Ele não pode substituir setembro nem 2025 que ainda estão só nesta tela. */
+  fundirAcervo(remoto) {
+    const local = this.acervo || { anterior: {}, meses: {} };
+    const cheio = (bag) => Object.keys(bag || {}).some((k) => Object.keys((bag[k] && bag[k].arquivos) || {}).length);
+    const manterLocal = !cheio(remoto && remoto.anterior) && !cheio(remoto && remoto.meses);
+    const fundir = (locMap, remMap) => {
+      const out = {};
+      Object.keys(remMap || {}).forEach((k) => {
+        out[k] = { arquivos: Object.assign({}, (remMap[k] && remMap[k].arquivos) || {}) };
+      });
+      Object.keys(locMap || {}).forEach((k) => {
+        const la = (locMap[k] && locMap[k].arquivos) || {};
+        if (!Object.keys(la).length) return;
+        if (!out[k]) out[k] = { arquivos: {} };
+        Object.keys(la).forEach((nome) => {
+          const arq = la[nome];
+          if (!arq) return;
+          const temNaNuvem = !!out[k].arquivos[nome];
+          if (arq._pendente || (!temNaNuvem && manterLocal)) {
+            if (!temNaNuvem) arq._pendente = true;
+            out[k].arquivos[nome] = arq;
+          }
+        });
+      });
+      return out;
+    };
+    this.acervo = {
+      anterior: fundir(local.anterior, remoto && remoto.anterior),
+      meses: fundir(local.meses, remoto && remoto.meses)
+    };
+  },
+
   async carregarNuvem() {
     const fx = window.firebaseCollections;
     const db = window.firebaseDb;
@@ -1765,28 +1891,37 @@ const ResultadoCaixaApp = {
       this.lendo = true;
       this.render();
     }
+    const leituraVelha = () => (this._nuvemToken || 0) !== token;
     try {
       const snap = await fx.getDocs(fx.collection(db, "resultado_caixa"));
-      if ((this._nuvemToken || 0) !== token) return;
+      if (leituraVelha()) {
+        if (!this._subindo) this.lendo = false;
+        return;
+      }
       if (snap.empty) {
         if (this.temAcervo()) await this.enviarAcervo();
         this.lendo = false;
-        if ((this._nuvemToken || 0) === token) this.render();
+        if (!this._subindo) this.render();
         return;
       }
-      const acervo = { anterior: {}, meses: {} };
-      snap.forEach((docSnap) => this.aplicarDoc(acervo, docSnap.id, docSnap.data() || {}));
-      if ((this._nuvemToken || 0) !== token) return;
-      this.acervo = acervo;
+      const remoto = { anterior: {}, meses: {} };
+      snap.forEach((docSnap) => this.aplicarDoc(remoto, docSnap.id, docSnap.data() || {}));
+      this.juntarPartes(remoto);
+      if (leituraVelha()) {
+        if (!this._subindo) this.lendo = false;
+        return;
+      }
+      this.fundirAcervo(remoto);
       this._nuvemOk = true;
       this.montarVista();
       this.gravarLocal();
+      await this.enviarPendentes();
       await this.carregarForecasts();
     } catch (e) {
       if (!this.temAcervo()) this.error = "Não consegui ler os arquivos salvos: " + ((e && e.message) || e);
     }
     this.lendo = false;
-    if ((this._nuvemToken || 0) === token) this.render();
+    if (!this._subindo) this.render();
   },
 
   bagLado(ano, lado) {
