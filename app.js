@@ -7784,7 +7784,8 @@ window.CANCEL_MOTIVOS_PADRAO = [
   { codigo: "20", nome: "Topografia do Lote" },
   { codigo: "21", nome: "Divergência na Negociação" },
   { codigo: "22", nome: "Optou por casa pronta" },
-  { codigo: "23", nome: "Lei Arrependimento 7 dias" }
+  { codigo: "23", nome: "Lei Arrependimento 7 dias" },
+  { codigo: "24", nome: "Contrato Nulo" }
 ];
 
 window.cancelMotivosNormalizar = function(lista) {
@@ -7823,9 +7824,18 @@ window.cancelMotivosExtras = function() {
   return Array.isArray(local.extras) ? local.extras : [];
 };
 
+/** O 24 (Contrato Nulo) entra no id 224 da suspensão. Não recoloca motivo que o usuário excluiu. */
+window.cancelMotivosComPadrao = function(lista) {
+  const norm = window.cancelMotivosNormalizar(lista);
+  if (norm.some(function(m) { return m.codigo === "24"; })) return { lista: norm, mudou: false };
+  norm.push({ codigo: "24", nome: "Contrato Nulo" });
+  norm.sort(function(a, b) { return String(a.codigo).localeCompare(String(b.codigo)); });
+  return { lista: norm, mudou: true };
+};
+
 window.cancelMotivosLista = function() {
   const local = window.cancelMotivosLerLocal();
-  if (local.temCatalogo) return local.catalogo;
+  if (local.temCatalogo) return window.cancelMotivosComPadrao(local.catalogo).lista;
   const map = {};
   window.CANCEL_MOTIVOS_PADRAO.forEach(function(m) {
     map[m.codigo] = { codigo: m.codigo, nome: m.nome };
@@ -7863,14 +7873,19 @@ window.cancelMotivosGravar = async function(catalogo) {
   const key = window.CANCEL_MOTIVOS_KEY;
   const doc = { catalogo: window.cancelMotivosNormalizar(catalogo), em: new Date().toISOString() };
   localStorage.setItem(key, JSON.stringify(doc));
-  if (!window.firebaseDb || !window.firebaseCollections) return doc.catalogo;
+  if (!window.firebaseDb || !window.firebaseCollections) {
+    return { ok: false, catalogo: doc.catalogo, erro: "A base não está disponível nesta tela." };
+  }
   try {
     const fc = window.firebaseCollections;
     const payload = {};
     payload[key] = JSON.stringify(doc);
     await fc.setDoc(fc.doc(window.firebaseDb, "config", "global"), payload, { merge: true });
-  } catch (e) {}
-  return doc.catalogo;
+    return { ok: true, catalogo: doc.catalogo };
+  } catch (e) {
+    console.warn("[Motivos] não gravei na base", e);
+    return { ok: false, catalogo: doc.catalogo, erro: (e && e.message) || "Falha ao gravar na base." };
+  }
 };
 
 window.cancelMotivosSincronizar = async function() {
@@ -7883,12 +7898,19 @@ window.cancelMotivosSincronizar = async function() {
     const snap = await fc.getDoc(ref);
     const exists = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
     const cloud = exists ? window.cancelMotivosLerBruto((snap.data() || {})[key] || "null") : { extras: [], em: "", temCatalogo: false };
-    if (cloud.temCatalogo && (!local.temCatalogo || String(cloud.em || "") > String(local.em || ""))) {
-      localStorage.setItem(key, JSON.stringify({ catalogo: cloud.catalogo, em: cloud.em || new Date().toISOString() }));
-    } else if (local.temCatalogo && (!cloud.temCatalogo || String(local.em || "") > String(cloud.em || ""))) {
-      const payload = {};
-      payload[key] = localStorage.getItem(key);
-      await fc.setDoc(ref, payload, { merge: true });
+    const localVence = local.temCatalogo && (!cloud.temCatalogo || String(local.em || "") > String(cloud.em || ""));
+    const base = localVence ? local.catalogo : (cloud.temCatalogo ? cloud.catalogo : window.cancelMotivosLista());
+    const completo = window.cancelMotivosComPadrao(base);
+    const faltaNaBase = !cloud.temCatalogo || completo.mudou || (cloud.temCatalogo && completo.lista.some(function(m) {
+      return !(cloud.catalogo || []).some(function(c) { return c.codigo === m.codigo; });
+    }));
+    if (localVence || faltaNaBase) {
+      const gravou = await window.cancelMotivosGravar(completo.lista);
+      if (gravou && gravou.ok === false && localVence) {
+        console.warn("[Motivos] a lista local não subiu", gravou.erro);
+      }
+    } else if (cloud.temCatalogo) {
+      localStorage.setItem(key, JSON.stringify({ catalogo: completo.lista, em: cloud.em || new Date().toISOString() }));
     }
     return window.cancelMotivosLista();
   } catch (e) {
@@ -7957,9 +7979,13 @@ window.motivoCancelSalvar = async function() {
   if (lista.some(function(m) { return m.codigo === codigo && m.codigo !== anterior; })) { falha("Esse código já existe."); return; }
   const prox = lista.filter(function(m) { return m.codigo !== anterior && m.codigo !== codigo; });
   prox.push({ codigo: codigo, nome: nome });
-  await window.cancelMotivosGravar(prox);
+  const gravou = await window.cancelMotivosGravar(prox);
   window._motivoCancelEdit = "";
-  window.renderMotivosCancelamento();
+  await window.renderMotivosCancelamento();
+  if (gravou && gravou.ok === false) {
+    const aviso2 = document.getElementById("motivo-cancel-aviso");
+    if (aviso2) aviso2.textContent = gravou.erro || "O motivo não gravou na base.";
+  }
 };
 
 window.motivoCancelExcluir = async function(codigo) {
@@ -8449,13 +8475,13 @@ window.enviarCancelamentoContrato = async function() {
     if (aviso) aviso.textContent = "Enviando o cancelamento…";
     await SiengeApiService.cancelSalesContract(contract.id, {
       date: data,
-      reason: rot.texto,
+      reason: rot.codigo,
       subType: subtipo
     });
     const subNome = (window.CANCEL_SUBTIPOS.find(function(s) { return s.codigo === subtipo; }) || {}).nome || subtipo;
     const anexosTxt = [docs.cnd && "CND", docs.associacao && "CND da associação", docs.webro && "print da baixa Webro"].filter(Boolean).join(", ");
-    const resumo = "Contrato " + contract.id + " cancelado no Sienge, subtipo " + subNome + " (" + subtipo + "), motivo " + rot.texto + ", título " + client.saleId + " · " + (client.customerName || "") + (anexosTxt ? ". Documentos na unidade: " + anexosTxt : "");
-    window.cancelContratoRegistrar(client, "ok", resumo, { contractId: contract.id, reason: rot.texto, subType: subtipo, date: data, cnd: !!docs.cnd, associacao: !!docs.associacao, webro: !!docs.webro });
+    const resumo = "Contrato " + contract.id + " cancelado no Sienge, subtipo " + subNome + " (" + subtipo + "), motivo " + rot.codigo + " (" + rot.texto + "), título " + client.saleId + " · " + (client.customerName || "") + (anexosTxt ? ". Documentos na unidade: " + anexosTxt : "");
+    window.cancelContratoRegistrar(client, "ok", resumo, { contractId: contract.id, reason: rot.codigo, reasonTexto: rot.texto, subType: subtipo, date: data, cnd: !!docs.cnd, associacao: !!docs.associacao, webro: !!docs.webro });
     if (window.showToast) window.showToast("Contrato cancelado no Sienge.", "success");
     window.fecharCancelamentoContrato();
   } catch (e) {
@@ -8463,7 +8489,7 @@ window.enviarCancelamentoContrato = async function() {
     falha(msg);
     window.cancelContratoRegistrar(client, "erro", "Falha ao cancelar o contrato do título " + client.saleId + " · " + (client.customerName || "") + ". " + msg, {
       contractId: contract && contract.id,
-      reason: rot.texto,
+      reason: rot.codigo,
       subType: subtipo,
       date: data
     });
@@ -40683,7 +40709,17 @@ window.confirmSuspenderContrato = async function() {
   }
   if (cartaFile) {
     try {
-      await uploadOne(cartaFile, ["CARTA DE SUSPENSAO", "SUSPENSAO DE CONTRATO", "CARTA DE SUSPENSÃO", "SUSPENSAO"], "suspensao-carta", "a carta de suspensão");
+      setStatus("Enviando a carta de suspensão para a unidade no Sienge…");
+      const ctxUp = typeof window.nexSiengeUnitContext === "function" ? window.nexSiengeUnitContext(customerId, saleId, null) : {};
+      if (typeof window.anexosUploadUnitAttachment !== "function") throw new Error("Módulo de anexos indisponível.");
+      await window.anexosUploadUnitAttachment({
+        file: cartaFile,
+        tagLabel: "CARTA DE SUSPENSAO",
+        sale: Object.assign({}, ctxUp.sale || {}, { customerId: customerId, receivableBillId: saleId }),
+        unitName: st.unit || ctxUp.unitName,
+        costCenterId: st.cc || ctxUp.costCenterId,
+        context: "suspensao-carta"
+      });
     } catch (e) {
       errs.push("Carta: " + ((e && e.message) || e));
     }
@@ -40719,7 +40755,8 @@ window.confirmSuspenderContrato = async function() {
   }
 
   const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
-  const reason = "2 - iniciativa da empresa por implemento de condição suspensiva";
+  const rotSusp = window.cancelMotivoRotulo("2", { codigo: "24", nome: "Contrato Nulo" });
+  const reason = rotSusp.codigo;
   const client = st.client || { customerId: customerId, saleId: saleId, customerName: st.name, costCenterId: st.cc, unitName: st.unit };
   let contract = null;
   try {
@@ -40737,13 +40774,14 @@ window.confirmSuspenderContrato = async function() {
     });
     if (!contract || contract.id == null) throw new Error("Não encontrei o contrato de vendas deste título.");
     await SiengeApiService.cancelSalesContract(contract.id, { date: hoje, reason: reason, subType: "I" });
-    const resumo = "Contrato " + contract.id + " suspenso e cancelado no Sienge, título " + saleId + " · " + (st.name || "")
+    const resumo = "Contrato " + contract.id + " suspenso e cancelado no Sienge, motivo " + reason + " (" + rotSusp.texto + "), título " + saleId + " · " + (st.name || "")
+      + ". Carta de suspensão gravada na unidade"
       + (st.obraAndamento ? ". Obra em andamento, IPTU e CND dispensados" : ". CND gravada na unidade" + (haIptu ? " com extrato de IPTU" : ""))
       + (haTaxa ? ". Taxa associativa " + taxaValor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "")
       + (st.webro ? ". Print da baixa Webro gravado na unidade" : "");
     window.suspenderRegistrar(st, "ok", resumo, {
-      contractId: contract.id, reason: reason, subType: "I", date: hoje,
-      iptu: haIptu, iptuArquivos: iptuFiles.length, taxaAssociativa: haTaxa, taxaValor: taxaValor,
+      contractId: contract.id, reason: reason, reasonTexto: rotSusp.texto, subType: "I", date: hoje,
+      carta: true, iptu: haIptu, iptuArquivos: iptuFiles.length, taxaAssociativa: haTaxa, taxaValor: taxaValor,
       webro: !!st.webro, obraAndamento: !!st.obraAndamento
     });
   } catch (e) {
