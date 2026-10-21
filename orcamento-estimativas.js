@@ -532,11 +532,14 @@ const OrcamentoImpostosApp = {
         <p class="orc-dfc-lead">PIS e COFINS da receita do mês pagam no mês seguinte. IRPJ e CSLL do trimestre pagam no mês seguinte ao trimestre.</p>
         <div class="orc-dfc-tools">
           <div id="orc-imp-emp-box"></div>
+          <button type="button" class="btn btn-excel" id="orc-imp-excel" title="Exportar tabela atual para Excel"><i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel</button>
         </div>
         <div id="orc-imp-body"></div>
       </div>`;
     this.paintFiltro();
     this.paintCorpo();
+    const excelBtn = document.getElementById("orc-imp-excel");
+    if (excelBtn) excelBtn.addEventListener("click", () => this.exportExcel());
     this.carregarForecast();
     if (window.lucide && lucide.createIcons) lucide.createIcons();
   },
@@ -724,6 +727,174 @@ const OrcamentoImpostosApp = {
           ${notas}
         </div>
       </div>`;
+  },
+
+  async exportExcel() {
+    const inv = window.InvestimentoApp;
+    if (!inv || typeof inv.ensureExcelJS !== "function") {
+      alert("O Excel ainda não carregou. Atualize a página e tente de novo.");
+      return;
+    }
+    const lista = this.lista();
+    if (!lista.length) {
+      alert("Não há imposto para exportar.");
+      return;
+    }
+    const ExcelJS = await inv.ensureExcelJS();
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "CRM Moura Leite";
+    wb.created = new Date();
+    const ws = wb.addWorksheet("Impostos", { views: [{ showGridLines: false }] });
+    const meses = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+    const impostos = [
+      ["PIS", "pis"],
+      ["COFINS", "cofins"],
+      ["CSLL", "csll"],
+      ["IRPJ", "irpj"]
+    ];
+    const colunas = ["Imposto"].concat(meses, ["Total", "Jan/28"]);
+    const last = colunas.length;
+    ws.properties.showGridLines = false;
+    ws.views = [{ state: "frozen", xSplit: 1, ySplit: 4, topLeftCell: "B5", activeCell: "B5", showGridLines: false }];
+    ws.columns = colunas.map((_, i) => ({ width: i === 0 ? 18 : 13 }));
+    ws.mergeCells("A1:A2");
+    ws.getRow(1).height = 28;
+    ws.getRow(2).height = 22;
+    ws.getRow(3).height = 8;
+    ws.getRow(4).height = 20;
+    const title = ws.getCell("A1");
+    title.value = {
+      richText: [
+        { font: { name: "Calibri", size: 14, bold: true, color: { argb: "FF475569" } }, text: "Impostos\n" },
+        { font: { name: "Calibri", size: 9, color: { argb: "FF64748B" } }, text: "A pagar em 2027. PIS e COFINS no mês seguinte. IRPJ e CSLL no mês seguinte ao trimestre. Janeiro inclui o forecast de 2026." }
+      ]
+    };
+    inv.excelPaint(title, { fill: "FFFFFFFF", align: { vertical: "middle", horizontal: "left", wrapText: true, indent: 8 } });
+    try {
+      const logo = await inv.logoDataUrl();
+      if (logo && logo.dataUrl) {
+        const img = wb.addImage({ base64: logo.dataUrl, extension: logo.extension || "png" });
+        const px = Math.round(1.54 * 96 / 2.54);
+        ws.addImage(img, { tl: { col: 0.04, row: 0.08 }, ext: { width: px, height: px } });
+      }
+    } catch (e) {}
+    const serie = (arr) => meses.map((_, i) => (arr && arr[i] != null ? Number(arr[i]) || 0 : null));
+    const somaLista = (chave, ate) => {
+      let s = 0;
+      let algum = false;
+      lista.forEach((row) => {
+        const arr = row.pagar[chave] || [];
+        for (let i = 0; i < ate; i++) {
+          if (arr[i] == null) continue;
+          algum = true;
+          s += Number(arr[i]) || 0;
+        }
+      });
+      return algum ? s : 0;
+    };
+    const totalAno = impostos.reduce((s, par) => s + somaLista(par[1], 12), 0);
+    const totalJan28 = impostos.reduce((s, par) => s + somaLista(par[1], 13) - somaLista(par[1], 12), 0);
+    [["Empresas", lista.length, false], ["A pagar em 2027", totalAno, true], ["Jan/28", totalJan28, true]].forEach((par, i) => {
+      const col = 4 + i * 2;
+      const c1 = ws.getCell(1, col);
+      const c2 = ws.getCell(2, col);
+      c1.value = par[0];
+      c2.value = par[1];
+      inv.excelPaint(c1, { font: { size: 8, bold: true, color: { argb: "FF94A3B8" } }, align: { horizontal: "right", vertical: "middle" } });
+      inv.excelPaint(c2, {
+        font: { size: 12, bold: true, color: { argb: "FF0F172A" } },
+        align: { horizontal: "right", vertical: "middle" },
+        numFmt: par[2] ? "#,##0.00" : undefined
+      });
+    });
+    const head = ws.getRow(4);
+    colunas.forEach((nome, i) => {
+      const cell = head.getCell(i + 1);
+      cell.value = nome;
+      inv.excelPaint(cell, {
+        font: { size: 9, bold: true, color: { argb: "FFFFFFFF" } },
+        fill: "FF334155",
+        align: { horizontal: i === 0 ? "left" : "right", vertical: "middle" },
+        border: true
+      });
+    });
+    const pintarFaixa = (texto, fill) => {
+      const linha = ws.addRow([]);
+      linha.height = 18;
+      ws.mergeCells(linha.number, 1, linha.number, last);
+      for (let i = 1; i <= last; i++) {
+        const cell = linha.getCell(i);
+        if (i === 1) cell.value = texto;
+        inv.excelPaint(cell, {
+          font: { size: 9, bold: true, color: { argb: "FFFFFFFF" } },
+          fill: fill,
+          align: { horizontal: "left", vertical: "middle" },
+          border: true
+        });
+      }
+    };
+    const pintarLinha = (rotulo, valores, fill, fontColor) => {
+      const linha = ws.addRow([]);
+      const todos = [rotulo].concat(valores);
+      todos.forEach((v, i) => {
+        const cell = linha.getCell(i + 1);
+        const num = i > 0;
+        const n = num ? v : null;
+        const vazio = num && (n == null || !Number.isFinite(n));
+        const zero = num && !vazio && Math.abs(n) < 0.005;
+        cell.value = num ? (vazio ? null : n) : v;
+        const cor = vazio || zero ? "FF94A3B8" : (num && n < 0 ? "FFB91C1C" : fontColor);
+        inv.excelPaint(cell, {
+          font: { size: 9, bold: fill !== "FFFFFFFF", color: { argb: cor } },
+          fill: fill,
+          align: { horizontal: i === 0 ? "left" : "right", vertical: "middle" },
+          border: true,
+          numFmt: num ? "#,##0.00" : undefined
+        });
+      });
+    };
+    const valoresDe = (arr) => {
+      const mesesVal = serie(arr);
+      const total = this.somaAte(arr, 12);
+      const jan28 = arr && arr[12] != null ? Number(arr[12]) || 0 : null;
+      return mesesVal.concat([total, jan28]);
+    };
+    lista.forEach((row) => {
+      pintarFaixa(row.id + " - " + OrcEst.norm(row.nome), "FF0C3D28");
+      impostos.forEach((par) => pintarLinha(par[0], valoresDe(row.pagar[par[1]] || []), "FFFFFFFF", "FF0F172A"));
+    });
+    pintarFaixa("Total", "FF475569");
+    impostos.forEach((par) => {
+      const acc = Array(13).fill(0);
+      const tem = Array(13).fill(false);
+      lista.forEach((row) => {
+        const arr = row.pagar[par[1]] || [];
+        for (let i = 0; i < 13; i++) {
+          if (arr[i] == null) continue;
+          tem[i] = true;
+          acc[i] += Number(arr[i]) || 0;
+        }
+      });
+      const mesesVal = acc.slice(0, 12).map((v, i) => (tem[i] ? v : null));
+      const total = tem.slice(0, 12).some(Boolean) ? acc.slice(0, 12).reduce((s, v, i) => s + (tem[i] ? v : 0), 0) : null;
+      pintarLinha(par[0], mesesVal.concat([total, tem[12] ? acc[12] : null]), "FF475569", "FFFFFFFF");
+    });
+    ws.addRow([]);
+    const foot = ws.addRow([]);
+    foot.height = 18;
+    ws.mergeCells(foot.number, 1, foot.number, last);
+    const rodape = foot.getCell(1);
+    rodape.value = inv.generatedAtLabel(new Date());
+    inv.excelPaint(rodape, { font: { size: 8, italic: true, color: { argb: "FF64748B" } }, align: { horizontal: "left", vertical: "middle" } });
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "Impostos-2027.xlsx";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 };
 

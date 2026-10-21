@@ -10361,6 +10361,21 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .rcx-ml tr.is-formula th, .rcx-ml tr.is-formula td { background: #f6fbf8; color: #2a6248; font-weight: 700; }
 .rcx-ml td.is-neg { color: #b45353; }
 .rcx-ml td.is-fc { color: #3d6f99; }
+.rcx-ml thead th.is-orc { background: #FFC000; color: #3f2e00; }
+.rcx-ml thead tr:nth-child(2) th.is-orc { background: #FFE08A; color: #3f2e00; }
+.rcx-ml tbody td.is-orc { background: #FFF4CC; color: #3f2e00; }
+.rcx-ml thead th.is-fcst { background: #F37021; color: #fff; }
+.rcx-ml thead tr:nth-child(2) th.is-fcst { background: #F37021; color: #fff; }
+.rcx-ml tbody td.is-fcst { background: #FFF1E8; color: #7c2d12; }
+.rcx-ml thead th.is-tot-orc { background: #0C3D28; color: #fff; }
+.rcx-ml thead th.is-tot-fc,
+.rcx-ml thead th.is-ytg { background: #F37021; color: #fff; }
+.rcx-ml tbody td.is-neg { color: #b91c1c; }
+.rcx-ml-grupo-btn { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-right: 4px; border: 1px solid currentColor; border-radius: 2px; background: transparent; color: inherit; font: inherit; font-weight: 800; line-height: 1; cursor: pointer; vertical-align: middle; }
+.rcx-ml thead th.is-dobra, .rcx-ml td.is-dobra { min-width: 28px; width: 28px; padding: 4px; }
+.rcx-ml-sub, .rcx-ml-f { display: block; font-size: 0.62rem; font-weight: 800; letter-spacing: 0.04em; }
+.rcx-ml thead tr:nth-child(2) th.is-fcst .rcx-ml-abre,
+.rcx-ml thead tr:nth-child(2) th.is-orc .rcx-ml-abre { color: inherit; font-weight: 800; }
 .rcx-ml td.is-tot { font-weight: 800; }
 .rcx-ml-abre, .rcx-ml-no { border: 0; background: transparent; color: inherit; font: inherit; font-weight: 800; cursor: pointer; text-align: left; }
 .rcx-ml thead .rcx-ml-abre { display: block; width: 100%; text-align: center; }
@@ -10423,9 +10438,10 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .orc-dfc-table.orc-dfc-cmp { width: max-content; min-width: 100%; table-layout: auto; font-size: 11px; }
 .orc-dfc-table.orc-dfc-cmp th,
 .orc-dfc-table.orc-dfc-cmp td { padding: 3px 4px; white-space: nowrap; }
-.orc-dfc-table.orc-dfc-cmp th:not(:first-child),
-.orc-dfc-table.orc-dfc-cmp td:not(:first-child) { min-width: 58px; }
-.orc-dfc-table.orc-dfc-cmp th:first-child { min-width: 220px; width: 220px; }
+.orc-dfc-table.orc-dfc-cmp thead tr:nth-child(2) th,
+.orc-dfc-table.orc-dfc-cmp tbody td:not(:first-child) { min-width: 64px; width: 72px; }
+.orc-dfc-table.orc-dfc-cmp thead tr:first-child th:first-child { min-width: 220px; width: 220px; max-width: 260px; }
+.orc-dfc-table.orc-dfc-cmp thead tr:nth-child(2) th:first-child { min-width: 64px; width: 72px; max-width: 88px; left: auto; text-align: right; }
 .orc-dfc-table.orc-dfc-cmp td:first-child { min-width: 220px; max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: #fff; }
 .orc-dfc-table tbody tr:hover > td { background: #d1fae5; }
 .orc-dfc-table.orc-dfc-cmp thead tr:first-child th { top: 0; height: 32px; font-size: 12px; }

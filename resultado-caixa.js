@@ -3436,6 +3436,12 @@ const ResultadoCaixaApp = {
     this.render();
   },
 
+  toggleGrupoMl(qual) {
+    if (qual === "orc") this.mlGrupoOrc = this.mlGrupoOrc === false;
+    else this.mlGrupoFc = this.mlGrupoFc === false;
+    this.render();
+  },
+
   mlVisivel(linha) {
     if (!linha) return false;
     if (linha.tipo === "formula" || linha.level === 0) return true;
@@ -3507,26 +3513,47 @@ const ResultadoCaixaApp = {
     if (sel > 1) cols.push({ id: "acum", nome: "Acumulado jan–" + this.MESES[sel - 2].toLowerCase(), futuro: false });
     cols.push({ id: String(sel), nome: this.MESES[sel - 1], futuro: false });
     for (let m = sel + 1; m <= 12; m++) cols.push({ id: String(m), nome: this.MESES[m - 1], futuro: true });
-    const tom = (c) => c.futuro ? " is-futuro" : "";
-    const head1 = cols.map((c, i) => `<th colspan="${c.futuro ? 2 : 4}" class="rcx-ml-grupo${tom(c)}${i ? " is-sep" : ""}"><button type="button" class="rcx-ml-abre${this.mlFatia === c.id ? " is-on" : ""}" onclick="ResultadoCaixaApp.toggleFatia('${c.id}')">${caixaEsc(c.nome)}</button></th>`).join("");
-    const head2 = cols.map((c, i) => {
+    const passados = cols.filter((c) => !c.futuro);
+    const futuros = cols.filter((c) => c.futuro);
+    const orcAberto = this.mlGrupoOrc !== false;
+    const fcAberto = this.mlGrupoFc !== false;
+    const botaoGrupo = (aberto, qual, rotulo) => `<button type="button" class="rcx-ml-grupo-btn" title="${aberto ? "Ocultar colunas" : "Mostrar colunas"}" onclick="event.stopPropagation();ResultadoCaixaApp.toggleGrupoMl('${qual}')">${aberto ? "−" : "+"}</button> ${rotulo}`;
+    const head1 = passados.map((c, i) => `<th colspan="4" class="rcx-ml-grupo${i ? " is-sep" : ""}"><button type="button" class="rcx-ml-abre${this.mlFatia === c.id ? " is-on" : ""}" onclick="ResultadoCaixaApp.toggleFatia('${c.id}')">${caixaEsc(c.nome)}</button></th>`).join("")
+      + (futuros.length
+        ? `<th colspan="${orcAberto ? futuros.length : 1}" class="rcx-ml-grupo is-orc is-sep">${botaoGrupo(orcAberto, "orc", "Orçado")}</th><th colspan="${fcAberto ? futuros.length : 1}" class="rcx-ml-grupo is-fcst">${botaoGrupo(fcAberto, "fc", "Forecast")}</th>`
+        : "");
+    const head2 = passados.map((c, i) => {
       const sep = i ? " is-sep" : "";
-      const cor = tom(c);
-      return c.futuro
-        ? `<th class="${sep}${cor}">Orçado</th><th class="${cor}">Forecast</th>`
-        : `<th class="${sep}${cor}">Orçado</th><th class="${cor}">Realizado</th><th class="${cor}">Var. %</th><th class="${cor}">Var. R$</th>`;
-    }).join("");
+      return `<th class="${sep}">Orçado</th><th>Realizado</th><th>Var. %</th><th>Var. R$</th>`;
+    }).join("")
+      + (futuros.length
+        ? (orcAberto
+          ? futuros.map((c, i) => `<th class="is-orc${i ? "" : " is-sep"}"><button type="button" class="rcx-ml-abre${this.mlFatia === c.id ? " is-on" : ""}" onclick="ResultadoCaixaApp.toggleFatia('${c.id}')">${caixaEsc(c.nome)}</button><span class="rcx-ml-sub">ORÇ.</span></th>`).join("")
+          : `<th class="is-orc is-sep is-dobra"></th>`)
+          + (fcAberto
+            ? futuros.map((c) => `<th class="is-fcst"><span class="rcx-ml-f">F</span><button type="button" class="rcx-ml-abre${this.mlFatia === c.id ? " is-on" : ""}" onclick="ResultadoCaixaApp.toggleFatia('${c.id}')">${caixaEsc(c.nome)}</button><span class="rcx-ml-sub">FORECAST</span></th>`).join("")
+            : `<th class="is-fcst is-dobra"></th>`)
+        : "");
     const cel = (v, cls) => `<td class="${cls || ""}">${this.mlNum(v)}</td>`;
     const bloco = (meses) => {
-      const pedacos = cols.map((c, i) => {
+      const pedacos = passados.map((c, i) => {
         const f = this.fatiaMl(meses, c.id, sel);
         const sep = i ? "is-sep" : "";
-        if (c.futuro) return cel(f.a, sep) + cel(f.b, "is-fc");
         const neg = (f.b - f.a) < -0.5 ? "is-neg" : "";
         return cel(f.a, sep) + cel(f.b) + `<td>${this.mlPct(f.a, f.b)}</td>` + cel(f.b - f.a, neg);
       }).join("");
+      let futurosHtml = "";
+      if (futuros.length) {
+        if (orcAberto) {
+          futurosHtml += futuros.map((c, i) => cel(this.fatiaMl(meses, c.id, sel).a, "is-orc" + (i ? "" : " is-sep"))).join("");
+        } else futurosHtml += `<td class="is-dobra is-sep"></td>`;
+        if (fcAberto) {
+          futurosHtml += futuros.map((c) => cel(this.fatiaMl(meses, c.id, sel).b, "is-fcst")).join("");
+        } else futurosHtml += `<td class="is-dobra"></td>`;
+      }
       const t = this.totaisMl(meses, sel);
-      return pedacos + cel(t.oAno, "is-tot is-sep") + cel(t.real, "is-tot") + cel(t.com, "is-tot");
+      const ytg = futuros.reduce((s, c) => s + (Number(this.fatiaMl(meses, c.id, sel).b) || 0), 0);
+      return pedacos + futurosHtml + cel(t.oAno, "is-tot is-sep") + cel(t.real, "is-tot") + cel(t.com, "is-tot is-tot-fc") + cel(ytg, "is-tot is-ytg");
     };
     const abertos = this.mlAbertos || {};
     const linhas = [];
@@ -3560,7 +3587,9 @@ const ResultadoCaixaApp = {
         });
       });
     });
-    const span = cols.reduce((s, c) => s + (c.futuro ? 2 : 4), 0) + 4;
+    const span = passados.length * 4
+      + (futuros.length ? ((orcAberto ? futuros.length : 1) + (fcAberto ? futuros.length : 1)) : 0)
+      + 4;
     let painel = "";
     if (this.mlFatia) {
       const col = cols.find((c) => c.id === this.mlFatia);
@@ -3637,8 +3666,8 @@ const ResultadoCaixaApp = {
       ${avisos.map((t) => `<div class="rcx-aviso">${caixaEsc(t)}</div>`).join("")}
       <div class="rcx-ml-scroll"><table class="rcx-ml">
         <thead>
-          <tr><th>Conta</th>${head1}<th colspan="3" class="rcx-ml-grupo is-ano is-sep">Total do ano</th></tr>
-          <tr><th></th>${head2}<th class="is-sep is-ano">Orçado</th><th class="is-ano">Realizado</th><th class="is-ano">Com forecast</th></tr>
+          <tr><th>Conta</th>${head1}<th rowspan="2" class="rcx-ml-grupo is-tot-orc is-sep">TOTAL<br>ORÇ.</th><th rowspan="2" class="rcx-ml-grupo is-ano">Realizado</th><th rowspan="2" class="rcx-ml-grupo is-tot-fc">TOTAL<br>FORECAST</th><th rowspan="2" class="rcx-ml-grupo is-ytg">YTG</th></tr>
+          <tr><th></th>${head2}</tr>
         </thead>
         <tbody>${linhas.join("") || `<tr><td colspan="${span}">Sem linhas da visão DFC.</td></tr>`}</tbody>
       </table></div>

@@ -286,45 +286,43 @@ const OrcamentoDfcApp = {
     return parte == null ? base : base + "__p" + parte;
   },
 
+  docExiste(snap) {
+    return !!(snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists));
+  },
+
   async lerRealizadoSalvo(fim, empresas) {
     const fx = window.firebaseCollections;
     const db = window.firebaseDb;
     const out = {};
-    if (!fx || !db || !fim) return out;
-    const partes = {};
-    try {
-      const snap = await fx.getDocs(fx.collection(db, "dfc_realizado"));
-      snap.forEach((docSnap) => {
-        const x = docSnap.data() || {};
-        if (x.tipo === "parte") partes[docSnap.id] = x.texto || "";
-      });
-      snap.forEach((docSnap) => {
-        const x = docSnap.data() || {};
-        if (x.tipo === "parte" || String(x.fim || "") !== String(fim)) return;
-        const emp = String(x.empresa || "");
-        if (!emp || empresas.indexOf(emp) < 0) return;
-        let texto = x.payload || "";
-        if (Array.isArray(x.partes) && x.partes.length) {
-          texto = "";
-          let ok = true;
-          x.partes.forEach((pid) => {
-            if (!partes[pid]) ok = false;
-            else texto += partes[pid];
-          });
-          if (!ok) return;
-        }
-        let cru = [];
-        try { cru = JSON.parse(texto || "[]"); } catch (e) { cru = []; }
-        if (!Array.isArray(cru)) return;
-        out[emp] = cru.map((r) => ({
-          companyId: emp,
-          gid: r[0],
-          code: r[1],
-          cc: r[2],
-          i: r[3],
-          v: Number(r[4]) || 0
+    if (!fx || !db || !fim || typeof fx.getDoc !== "function") return out;
+    const lerUm = async (emp) => {
+      const snap = await fx.getDoc(fx.doc(db, "dfc_realizado", this.docRealizado(emp)));
+      if (!this.docExiste(snap)) return;
+      const x = snap.data() || {};
+      if (String(x.fim || "") !== String(fim)) return;
+      let texto = x.payload || "";
+      if (Array.isArray(x.partes) && x.partes.length) {
+        const blocos = await Promise.all(x.partes.map(async (pid) => {
+          const p = await fx.getDoc(fx.doc(db, "dfc_realizado", pid));
+          return this.docExiste(p) ? String((p.data() || {}).texto || "") : null;
         }));
-      });
+        if (blocos.some((b) => b == null)) return;
+        texto = blocos.join("");
+      }
+      let cru = [];
+      try { cru = JSON.parse(texto || "[]"); } catch (e) { cru = []; }
+      if (!Array.isArray(cru)) return;
+      out[String(emp)] = cru.map((r) => ({
+        companyId: String(emp),
+        gid: r[0],
+        code: r[1],
+        cc: r[2],
+        i: r[3],
+        v: Number(r[4]) || 0
+      }));
+    };
+    try {
+      await Promise.all((empresas || []).map((emp) => lerUm(emp).catch(() => {})));
     } catch (e) {}
     return out;
   },
@@ -719,27 +717,56 @@ const OrcamentoDfcApp = {
     this.carregarBase();
   },
 
+  async lerForecastsSalvos(app) {
+    if (!app) return;
+    if (app.forecasts && Object.keys(app.forecasts).length) return;
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (!fx || !db || typeof fx.query !== "function" || typeof fx.where !== "function") return;
+    const snap = await fx.getDocs(fx.query(fx.collection(db, "resultado_caixa"), fx.where("tipo", "==", "forecast")));
+    const nuvem = {};
+    snap.forEach((docSnap) => {
+      const id = docSnap.id || "";
+      const x = docSnap.data() || {};
+      if (x.tipo !== "forecast" && id.indexOf("fc-") !== 0) return;
+      const ym = String(x.competencia || id.replace(/^fc-/, ""));
+      if (!/^\d{4}-\d{2}$/.test(ym)) return;
+      const por = x.porArquivo;
+      const jaPartido = por && typeof por === "object" && !Array.isArray(por) && Object.keys(por).length;
+      nuvem[ym] = {
+        arquivos: x.arquivos || [],
+        em: x.em || "",
+        contas: x.contas || {},
+        nomes: x.nomes || {},
+        porArquivo: jaPartido ? por : null
+      };
+    });
+    if (!Object.keys(nuvem).length) return;
+    app.forecasts = nuvem;
+    if (typeof app.normalizarForecastsMemoria === "function") app.normalizarForecastsMemoria();
+    if (typeof app.gravarForecastLocal === "function") app.gravarForecastLocal();
+  },
+
   async carregarBase() {
     const token = (this._bToken = (this._bToken || 0) + 1);
     this._caixaEstado = "lendo";
     this._caixaErro = "";
-    this.notaCaixa("Lendo o realizado de 2026 no caixa e banco…");
+    this.notaCaixa("Lendo o realizado de 2026 salvo…");
+    const app = window.ResultadoCaixaApp;
+    if (app && typeof app.lerLocal === "function" && !(app.forecasts && Object.keys(app.forecasts).length)) {
+      try { app.lerLocal(); } catch (e) {}
+    }
     if (document.getElementById("orc-dfc-body")) this.paintBody();
+    const forecastP = this.lerForecastsSalvos(app);
     try {
       await this.buscarCaixa2026();
     } catch (e) {
       this._caixaEstado = "erro";
       this._caixaErro = (e && e.message) || "Falha ao ler o realizado de 2026 no caixa e banco.";
     }
-    const app = window.ResultadoCaixaApp;
-    if (app && token === this._bToken) {
-      try {
-        if ((!app.acervo || typeof app.temAcervo !== "function" || !app.temAcervo()) && typeof app.lerLocal === "function") app.lerLocal();
-        if (typeof app.carregarNuvem === "function" && !app._nuvemOk) await app.carregarNuvem();
-        if (typeof app.carregarForecasts === "function") await app.carregarForecasts();
-        if (typeof app.normalizarForecastsMemoria === "function") app.normalizarForecastsMemoria();
-      } catch (e) {}
-    }
+    if (token !== this._bToken) return;
+    if (document.getElementById("orc-dfc-body")) this.paintBody();
+    try { await forecastP; } catch (e) {}
     if (token !== this._bToken) return;
     if (document.getElementById("orc-dfc-body")) this.paintBody();
   },
@@ -911,8 +938,8 @@ const OrcamentoDfcApp = {
     const { rows, fora } = this.montar();
     const corte = this._corte == null ? this.corteForecast() : this._corte;
     const h1 = this.MESES.map((m, i) => `<th colspan="4" class="orc-dfc-mes${i % 2 ? " is-alt" : ""}">${m}</th>`).join("") + `<th colspan="4" class="orc-dfc-mes">Total</th>`;
-    const sub = (rotulo) => `<th class="orc-dfc-sep">${rotulo}</th><th>Orç</th><th>Var R$</th><th>Var %</th>`;
-    const h2 = this.MESES.map((_, i) => sub(i >= corte ? "Prev" : "Real")).join("") + sub("2026");
+    const sub = (rotulo) => `<th class="orc-dfc-sep">${rotulo}</th><th>2027</th><th>Var R$</th><th>Var %</th>`;
+    const h2 = this.MESES.map((_, i) => sub(i >= corte ? "Prev" : "2026")).join("") + sub("2026");
     const trs = rows.map((r) => {
       const cls = [
         r.isAccount ? "orc-dfc-acc" : "",
@@ -1094,10 +1121,10 @@ const OrcamentoDfcApp = {
     const meses = this.MESES;
     const colunas = ["Conta"];
     meses.forEach((m, i) => {
-      const rot = i >= corte ? "Prev" : "Real";
-      colunas.push(m + " " + rot, m + " Orç", m + " Var R$", m + " Var %");
+      const rot = i >= corte ? "Prev" : "2026";
+      colunas.push(m + " " + rot, m + " 2027", m + " Var R$", m + " Var %");
     });
-    colunas.push("Total Real", "Total Orç", "Total Var R$", "Total Var %");
+    colunas.push("Total 2026", "Total 2027", "Total Var R$", "Total Var %");
     const last = colunas.length;
     const letra = (i) => inv.excelColLetter(i);
     ws.properties.showGridLines = false;

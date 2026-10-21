@@ -2063,14 +2063,14 @@ const FluxoCaixaApp = {
         if (logo && logo.dataUrl) imgId = wb.addImage({ base64: logo.dataUrl, extension: logo.extension || "png" });
       } catch (e) { /* segue sem logo */ }
     }
-    ws.mergeCells("A1:A2");
+    ws.mergeCells("A1:C2");
     ws.getRow(1).height = 28;
     ws.getRow(2).height = 22;
     const titleCell = ws.getCell("A1");
-    const sub = [ctx.subtitle, ctx.startDate && ctx.endDate ? `${ctx.startDate} a ${ctx.endDate}` : ""].filter(Boolean).join(" · ");
+    const sub = [ctx.title, ctx.subtitle, ctx.startDate && ctx.endDate ? `${ctx.startDate} a ${ctx.endDate}` : ""].filter(Boolean).join(" · ");
     titleCell.value = {
       richText: [
-        { font: { name: "Calibri", size: 14, bold: true, color: { argb: "FF475569" } }, text: `Lançamentos · ${ctx.title || "conta"}\n` },
+        { font: { name: "Calibri", size: 14, bold: true, color: { argb: "FF475569" } }, text: "Lançamentos\n" },
         { font: { name: "Calibri", size: 9, color: { argb: "FF64748B" } }, text: sub }
       ]
     };
