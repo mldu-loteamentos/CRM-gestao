@@ -184,9 +184,7 @@ const ConfigTagsApp = {
               <h3 style="margin: 0; color: var(--color-bg-dark); font-size: 1.2rem; font-weight: 700; display: flex; align-items: center; gap: 8px;">
                 <i data-lucide="tag" style="color: var(--color-bg-dark); width: 20px;"></i> ${title}
               </h3>
-              <button class="btn btn-outline" style="border:none; padding: 5px; color: var(--color-text-muted);" onclick="document.getElementById('tag-modal-overlay').remove()">
-                <i data-lucide="x" style="width: 20px;"></i>
-              </button>
+              <button type="button" class="btn btn-fechar" onclick="document.getElementById('tag-modal-overlay').remove()">Fechar</button>
             </div>
 
             <div style="margin-bottom: 15px;">

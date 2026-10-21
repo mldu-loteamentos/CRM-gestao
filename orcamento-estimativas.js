@@ -146,6 +146,30 @@ const OrcEst = {
     return hit ? cfg[hit] : "";
   },
 
+  /* Centro de parceiro, ou com "Imposto pago pela empresa?" desmarcado, fica fora da base. */
+  centroImposto(ccId, ccNome) {
+    const dig = String(ccId == null ? "" : ccId).replace(/\D/g, "");
+    const lista = (window.CentrosCustoState && CentrosCustoState.costCenters) || [];
+    const cc = dig ? lista.find((c) => String(c.id).replace(/\D/g, "") === dig) : null;
+    const nome = (cc && cc.name) || ccNome || "";
+    const app = window.CentrosCustoApp;
+    if (app && cc && typeof app.isCorporativo === "function" && app.isCorporativo(cc)) return { entra: true, nome: nome };
+    if (app && cc && typeof app.isParceiro === "function" && app.isParceiro(cc)) return { entra: false, nome: nome };
+    const fiscal = window.FiscalApp;
+    const custom = fiscal && typeof fiscal.customCc === "function" ? (fiscal.customCc(dig || ccId) || {}) : {};
+    const tipo = String((custom && custom.tipo_cc) || "");
+    if (tipo === "Corporativo") return { entra: true, nome: nome };
+    if (/parce(ir|ri)/i.test(String(nome || "")) && tipo !== "Corporativo") return { entra: false, nome: nome };
+    if (custom && Object.prototype.hasOwnProperty.call(custom, "imposto_pago_empresa")) {
+      return { entra: custom.imposto_pago_empresa === true, nome: nome };
+    }
+    return { entra: true, nome: nome };
+  },
+
+  entraNoImposto(ccId, ccNome) {
+    return this.centroImposto(ccId, ccNome).entra;
+  },
+
   /* Conta de classe 2, ou com nome de desconto/cancelamento, reduz a base em que foi parametrizada. */
   contaRedutora(conta, nome, gid, marca, bucket) {
     const fluxo = typeof FluxoCaixaApp !== "undefined" ? FluxoCaixaApp : (window.FluxoCaixaApp || null);
@@ -253,6 +277,7 @@ const OrcamentoImpostosApp = {
     (linhas || OrcEst.linhas()).forEach((l) => {
       const id = String(l.e || "");
       if (!id) return;
+      if (!OrcEst.entraNoImposto(l.cc, l.en)) return;
       const row = garantir(id, l.enome);
       const tipo = OrcEst.tipoApurado(l);
       if (tipo) {
@@ -657,7 +682,7 @@ const OrcamentoImpostosApp = {
           </tr></tfoot>
         </table>
       </div>
-      <p class="orc-est-nota">Janeiro de 2027 usa o forecast de 2026. Clique na empresa para ver a receita de cada mês e o mês em que o imposto é pago.</p>`;
+      <p class="orc-est-nota">Janeiro de 2027 usa o forecast de 2026. Receita de centro de custo de parceiro, e de centro com o imposto desmarcado, fica de fora. A taxa de cessão entra na venda de lotes quando o plano marca essa conta nessa base. Clique na empresa para ver a receita de cada mês e o mês em que o imposto é pago.</p>`;
     const tab = body.querySelector(".orc-imp-tab");
     if (tab) tab.addEventListener("click", (ev) => {
       const el = ev.target.closest("[data-est-id]");

@@ -990,7 +990,7 @@ const ConfigUsersApp = {
           <h3 style="margin:0;color:var(--color-primary);font-size:1.1rem;display:flex;align-items:center;gap:8px;">
             <i data-lucide="${icon}" style="width:18px;height:18px;"></i> ${title}
           </h3>
-          <button type="button" onclick="ConfigUsersApp.closeProfileNameModal()" style="background:none;border:none;font-size:1.4rem;line-height:1;cursor:pointer;color:#64748b;">&times;</button>
+          <button type="button" class="btn btn-fechar" onclick="ConfigUsersApp.closeProfileNameModal()">Fechar</button>
         </div>
         ${hint ? `<p style="margin:0 0 14px;font-size:0.85rem;color:#64748b;line-height:1.45;">${hint}</p>` : ""}
         <label for="config-profile-name-input" style="display:block;font-size:0.75rem;font-weight:700;color:var(--color-text-muted);margin-bottom:6px;">
@@ -1546,7 +1546,7 @@ const ConfigUsersApp = {
                 <div style="color: rgba(255,255,255,0.75); font-size: 0.72rem; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase;">Cadastro de usuários</div>
                 <h3 style="margin: 4px 0 0; font-size: 1.2rem; color: #fff; font-weight: 700;">${user ? 'Editar usuário' : 'Convidar novo usuário'}</h3>
               </div>
-              <button type="button" onclick="document.getElementById('user-modal-overlay').remove()" style="border: none; background: rgba(255,255,255,0.15); color: #fff; width: 32px; height: 32px; border-radius: 8px; cursor: pointer; font-size: 1.1rem; line-height: 1;">×</button>
+              <button type="button" class="btn btn-fechar" onclick="document.getElementById('user-modal-overlay').remove()">Fechar</button>
             </div>
             <div style="padding: 24px 28px; overflow-y: auto; flex: 1;">
             

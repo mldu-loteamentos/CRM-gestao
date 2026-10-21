@@ -2091,7 +2091,7 @@ const FluxoCaixaDiarioApp = {
       <div style="background:#fff;border-radius:12px;width:min(720px,96vw);max-height:86vh;overflow:auto;padding:18px 20px;">
         <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;">
           <h3 style="margin:0;color:#105436;">Título a receber ${caixaEsc(item.titulo)}${item.parcela ? " · parcela " + caixaEsc(item.parcela) : ""}</h3>
-          <button type="button" class="btn btn-cancel btn-sm" onclick="FluxoCaixaDiarioApp.closeTitulo()">Fechar</button>
+          <button type="button" class="btn btn-fechar btn-sm" onclick="FluxoCaixaDiarioApp.closeTitulo()">Fechar</button>
         </div>
         ${det.loading ? `<p style="color:#64748b;">Abrindo o título a receber…</p>` : ""}
         ${det.error ? `<p style="color:#b91c1c;">${caixaEsc(det.error)}</p>` : ""}
@@ -2131,7 +2131,7 @@ const FluxoCaixaDiarioApp = {
       <div style="background:#fff;border-radius:12px;width:min(720px,96vw);max-height:86vh;overflow:auto;padding:18px 20px;">
         <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;">
           <h3 style="margin:0;color:#105436;">Título ${caixaEsc(item.titulo)}${item.parcela ? " · parcela " + caixaEsc(item.parcela) : ""}</h3>
-          <button type="button" class="btn btn-cancel btn-sm" onclick="FluxoCaixaDiarioApp.closeTitulo()">Fechar</button>
+          <button type="button" class="btn btn-fechar btn-sm" onclick="FluxoCaixaDiarioApp.closeTitulo()">Fechar</button>
         </div>
         ${det.loading ? `<p style="color:#64748b;">Abrindo título, anexos e forma de pagamento…</p>` : ""}
         ${det.error ? `<p style="color:#b91c1c;">${caixaEsc(det.error)}</p>` : ""}
@@ -2459,7 +2459,7 @@ const FluxoCaixaDiarioApp = {
       <div style="background:#fff;border-radius:12px;width:min(920px,96vw);max-height:86vh;overflow:auto;padding:18px 20px;" role="dialog" aria-label="${caixaEsc(titulo)}">
         <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;">
           <h3 style="margin:0;color:#b91c1c;">${caixaEsc(titulo)}</h3>
-          <button type="button" class="btn btn-cancel btn-sm" onclick="FluxoCaixaDiarioApp.fecharSemConc()">Fechar</button>
+          <button type="button" class="btn btn-fechar btn-sm" onclick="FluxoCaixaDiarioApp.fecharSemConc()">Fechar</button>
         </div>
         <p style="margin:8px 0 12px;color:#64748b;font-size:0.84rem;">Movimento realizado que o Sienge ainda não conciliou com o extrato do banco. A soma dos valores absolutos é ${caixaMoney(abs)}.</p>
         <table class="cxd-sheet cxd-analitico">
@@ -2622,7 +2622,7 @@ const FluxoCaixaDiarioApp = {
         <p>${n === 1 ? "1 empresa" : n + " empresas"} com falta de caixa ou dinheiro parado para aplicar.</p>
         <div class="cxd-aviso-lista">${cards}</div>
         <div class="cxd-comp-actions">
-          <button type="button" class="btn btn-cancel" onclick="FluxoCaixaDiarioApp.fecharAviso()">Fechar</button>
+          <button type="button" class="btn btn-fechar" onclick="FluxoCaixaDiarioApp.fecharAviso()">Fechar</button>
         </div>
       </div>
     </div>`;
@@ -3031,7 +3031,7 @@ const FluxoCaixaDiarioApp = {
         ${al.manuais ? `<span class="cxd-chip cxd-chip-cb" title="Lançamentos direto em Caixa e bancos, sem título do contas a pagar/receber">${al.manuais} lançamento(s) de caixa e bancos</span>` : ""}
         ${al.semConc ? `<button type="button" class="cxd-chip cxd-chip-nc cxd-chip-btn" title="Clique para ver os movimentos sem conciliação" onclick="FluxoCaixaDiarioApp.abrirSemConc('${d.date}')">${al.semConc} sem conciliação · ${caixaMoney(al.valorSemConc)}</button>` : ""}
         <span class="cxd-daydet-res">Saldo do dia <b class="${aberto.movimento < 0 ? "cxd-out" : "cxd-in"}">${caixaMoney(aberto.movimento)}</b></span>
-        <button type="button" class="btn btn-cancel btn-sm" onclick="FluxoCaixaDiarioApp.toggle('${d.date}')">Fechar</button>
+        <button type="button" class="btn btn-fechar btn-sm" onclick="FluxoCaixaDiarioApp.toggle('${d.date}')">Fechar</button>
       </div>
       ${blocos.join("")}
     </div>`;

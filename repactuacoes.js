@@ -1017,6 +1017,10 @@ async function loadRepactuacoes(isBackground = false) {
 }
 
 function renderRepactuacoes(historico, meta) {
+    try {
+        const bill = String(window.lastRepactuacaoBillId || "").split("|")[0];
+        window._repactuacaoMeta = meta ? Object.assign({}, meta, { billId: bill }) : null;
+    } catch (e) {}
     const resultsEl = document.getElementById("repactuacoes-results");
     
     if (!meta || !historico) {

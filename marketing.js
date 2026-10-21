@@ -377,7 +377,7 @@ const MarketingApp = {
         <div style="background:#fff;border-radius:12px;width:560px;max-width:100%;max-height:90vh;overflow:auto;box-shadow:0 20px 40px rgba(0,0,0,0.18);">
           <div style="padding:16px 20px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;">
             <h3 id="mkt-modal-title" style="margin:0;font-size:1.05rem;">Novo evento</h3>
-            <button onclick="MarketingApp.closeBudgetModal()" style="border:none;background:none;cursor:pointer;font-size:1.2rem;color:#64748b;">✕</button>
+            <button type="button" class="btn btn-fechar" onclick="MarketingApp.closeBudgetModal()">Fechar</button>
           </div>
           <div style="padding:18px 20px;display:flex;flex-direction:column;gap:12px;">
             <input type="hidden" id="mkt-edit-id">

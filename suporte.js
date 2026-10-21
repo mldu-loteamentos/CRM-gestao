@@ -906,7 +906,7 @@
     return `
       <div class="suporte-modal-head">
         <h2><i data-lucide="life-buoy"></i> ${esc(title)}</h2>
-        <button type="button" class="modal-close" id="suporte-close-x"><i data-lucide="x"></i></button>
+        <button type="button" class="btn btn-fechar" id="suporte-close-x">Fechar</button>
       </div>
       <div class="suporte-modal-body">
         <div class="form-group">
@@ -1201,7 +1201,7 @@
     box.innerHTML = `
       <div class="suporte-modal-head">
         <h2><i data-lucide="ticket"></i> Meus chamados</h2>
-        <button type="button" class="modal-close" id="suporte-close-x"><i data-lucide="x"></i></button>
+        <button type="button" class="btn btn-fechar" id="suporte-close-x">Fechar</button>
       </div>
       <div class="suporte-modal-body" id="suporte-mine-body"><p class="suporte-hint">Carregando…</p></div>
       <div class="suporte-modal-foot">
@@ -1311,7 +1311,7 @@
       box.innerHTML = `
         <div class="suporte-modal-head">
           <h2><i data-lucide="message-square"></i> Chamado</h2>
-          <button type="button" class="btn btn-cancel" id="suporte-close-x">Fechar</button>
+          <button type="button" class="btn btn-fechar" id="suporte-close-x">Fechar</button>
         </div>
         <div class="suporte-modal-body" id="suporte-detail-body">${threadHtml(t)}</div>
         <div class="suporte-modal-foot suporte-reply-foot">
@@ -1386,7 +1386,7 @@
       if (cached) return;
       box.classList.remove("is-detail");
       box.innerHTML = `<div class="suporte-modal-body"><p class="suporte-empty">${esc(err.message)}</p></div>
-        <div class="suporte-modal-foot"><button type="button" class="btn btn-cancel" onclick="document.getElementById('suporte-overlay').style.display='none'">Fechar</button></div>`;
+        <div class="suporte-modal-foot"><button type="button" class="btn btn-fechar" onclick="document.getElementById('suporte-overlay').style.display='none'">Fechar</button></div>`;
     }
   }
 

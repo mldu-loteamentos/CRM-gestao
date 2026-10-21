@@ -2442,7 +2442,7 @@ const FluxoCaixaApp = {
               title="Exportar quadro em Excel">
               <i data-lucide="download" style="width:14px;height:14px;"></i> Excel
             </button>
-            <button type="button" onclick="FluxoCaixaApp.closeDrill()" style="border:none;background:rgba(255,255,255,0.15);color:#fff;width:34px;height:34px;border-radius:8px;cursor:pointer;font-size:1.25rem;line-height:1;">×</button>
+            <button type="button" class="btn btn-fechar" onclick="FluxoCaixaApp.closeDrill()">Fechar</button>
           </div>
         </div>
         <div style="padding:16px 18px 20px;overflow:auto;">${body}</div>
@@ -2526,13 +2526,13 @@ const FluxoCaixaApp = {
     const box = overlay.querySelector(".fc-receber-box");
     if (!box) return;
     box.innerHTML = erro
-      ? `<div style="color:#b91c1c;font-weight:700;">${this.esc(erro)}</div><button type="button" class="btn btn-outline" style="margin-top:12px;" onclick="FluxoCaixaApp.closeReceber()">Fechar</button>`
+      ? `<div style="color:#b91c1c;font-weight:700;">${this.esc(erro)}</div><button type="button" class="btn btn-fechar" style="margin-top:12px;" onclick="FluxoCaixaApp.closeReceber()">Fechar</button>`
       : `<div class="fc-receber-head">
           <div>
             <strong>Título ${this.esc(billId)}</strong>
             <span>${this.esc(doc || title.label || "")}</span>
           </div>
-          <button type="button" onclick="FluxoCaixaApp.closeReceber()">×</button>
+          <button type="button" class="btn btn-fechar" onclick="FluxoCaixaApp.closeReceber()">Fechar</button>
         </div>
         <dl class="fc-receber-dl">
           <dt>Cliente</dt><dd>${this.esc(cliente)}</dd>
@@ -2852,8 +2852,7 @@ const FluxoCaixaApp = {
           </div>
           <div class="fc-ins-actions">
             <button type="button" class="btn btn-outline fc-ins-pdf" onclick="FluxoCaixaApp.exportInsightsPdf()">PDF para a diretoria</button>
-            <button type="button" class="btn btn-outline fc-ins-pdf" onclick="FluxoCaixaApp.fecharInsights()">Fechar</button>
-            <button type="button" class="fc-ins-x" onclick="FluxoCaixaApp.fecharInsights()" aria-label="Fechar">×</button>
+            <button type="button" class="btn btn-fechar" onclick="FluxoCaixaApp.fecharInsights()">Fechar</button>
           </div>
         </div>
         <div class="fc-ins-body">

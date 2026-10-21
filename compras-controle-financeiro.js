@@ -2019,7 +2019,7 @@ ComprasControleApp.pintarTitulo = function () {
       <div class="cfin-titulo-card${row.rateioHtml ? " is-largo" : ""}" onclick="event.stopPropagation()">
         <div class="cfin-titulo-head">
           <h3>Título ${this.esc(row.titulo)}${row.parcela ? " · parcela " + this.esc(row.parcela) : ""}</h3>
-          <button type="button" class="btn btn-cancel btn-sm" onclick="ComprasControleApp.fecharTitulo()">Fechar</button>
+          <button type="button" class="btn btn-fechar btn-sm" onclick="ComprasControleApp.fecharTitulo()">Fechar</button>
         </div>
         ${det.loading ? `<p class="cfin-titulo-wait">Abrindo título, anexos e forma de pagamento…</p>` : abas}
         ${det.error ? `<p class="cfin-titulo-erro">${this.esc(det.error)}</p>` : ""}

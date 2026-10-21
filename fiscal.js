@@ -857,7 +857,7 @@ const FiscalApp = {
     pop.id = "fim-ali-pop";
     pop.className = "fim-pop";
     pop.innerHTML = `<div class="fim-pop-box" role="dialog" aria-modal="true">
-      <div class="fim-pop-h"><b>Alíquotas do lucro presumido</b><button type="button" class="fim-pop-x" onclick="FiscalApp.fecharAliquotas()">×</button></div>
+      <div class="fim-pop-h"><b>Alíquotas do lucro presumido</b><button type="button" class="btn btn-fechar" onclick="FiscalApp.fecharAliquotas()">Fechar</button></div>
       <p class="fim-muted">Loteamento. O padrão é o do lucro presumido. Ajuste se a empresa tiver outro enquadramento.</p>
       <div class="fim-ali-grid">
         ${campo("fim-pis", "PIS (%)", a.pis)}

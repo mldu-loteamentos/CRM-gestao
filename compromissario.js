@@ -2904,7 +2904,7 @@ const CompromissarioApp = {
         <div style="background:#fff;border-radius:10px;width:520px;max-width:100%;box-shadow:0 8px 24px rgba(0,0,0,.12);">
           <div style="padding:16px 18px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;">
             <h3 style="margin:0;font-size:1.05rem;">${this.escHtml(cityName)}</h3>
-            <button type="button" class="btn btn-outline" onclick="document.getElementById('comp-city-view-modal').remove()">Fechar</button>
+            <button type="button" class="btn btn-fechar" onclick="document.getElementById('comp-city-view-modal').remove()">Fechar</button>
           </div>
           <div style="padding:18px;display:flex;flex-direction:column;gap:10px;font-size:0.9rem;color:#334155;">
             <div><strong>Forma:</strong> ${this.escHtml(how)}</div>
@@ -3003,7 +3003,7 @@ const CompromissarioApp = {
         <div class="modal-box" style="width:min(860px,96vw);max-height:90vh;padding:0;display:flex;flex-direction:column;" onclick="event.stopPropagation()">
           <div class="modal-header" style="margin:0;padding:16px 24px;">
             <h3 style="margin:0;">Editar ${esc}</h3>
-            <button type="button" class="modal-close" onclick="document.getElementById('comp-config-modal').remove()">&times;</button>
+            <button type="button" class="btn btn-fechar" onclick="document.getElementById('comp-config-modal').remove()">Fechar</button>
           </div>
           <div style="padding:18px 24px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:16px;">
             <label class="moura-switch">
@@ -3312,7 +3312,7 @@ Botucatu, [DATA]
         <div style="background: #fff; border-radius: 8px; width: 800px; max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
           <div style="padding: 15px 20px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
             <h3 style="margin: 0; font-size: 1.1rem; color: #1e293b;">Gerar Requerimento Especial - ${cityName}</h3>
-            <button onclick="document.getElementById('comp-req-modal').remove()" style="background: transparent; border: none; font-size: 1.5rem; cursor: pointer; color: #64748b;">&times;</button>
+            <button type="button" class="btn btn-fechar" onclick="document.getElementById('comp-req-modal').remove()">Fechar</button>
           </div>
           <div style="padding: 20px; overflow-y: auto; flex: 1;">
             <p style="font-size: 0.85rem; color: #64748b; margin-bottom: 10px;">Revise e ajuste o texto se necessário antes de copiar para o seu documento oficial.</p>
@@ -3463,7 +3463,7 @@ Botucatu, [DATA]`;
         <div style="background: #fff; border-radius: 8px; width: 700px; max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
           <div style="padding: 15px 20px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
             <h3 style="margin: 0; font-size: 1.1rem; color: #1e293b;">Editar Padrão de Requerimento - ${city}</h3>
-            <button onclick="document.getElementById('comp-tpl-modal').remove()" style="background: transparent; border: none; font-size: 1.5rem; cursor: pointer; color: #64748b;">&times;</button>
+            <button type="button" class="btn btn-fechar" onclick="document.getElementById('comp-tpl-modal').remove()">Fechar</button>
           </div>
           <div style="padding: 20px; overflow-y: auto; flex: 1;">
             <p style="font-size: 0.8rem; color: #64748b; margin-bottom: 10px;">Variáveis disponíveis: <b>[EMPRESA]</b>, <b>[UNIDADE]</b>, <b>[COMPRADOR]</b>, <b>[DATA]</b>, <b>[TIPO_OPERACAO]</b>.</p>

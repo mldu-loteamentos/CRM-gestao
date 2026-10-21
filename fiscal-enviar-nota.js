@@ -351,7 +351,7 @@ window.FilaNotasFiscais = {
     pop.id = "fnf-anexos-pop";
     pop.className = "fnf-pop";
     pop.innerHTML = `<div class="fnf-pop-box" role="dialog" aria-label="Anexos">
-      <div class="fnf-pop-h"><b>Anexos</b><button type="button" class="fnf-pop-x" onclick="document.getElementById('fnf-anexos-pop').remove()" title="Fechar"><i data-lucide="x"></i></button></div>
+      <div class="fnf-pop-h"><b>Anexos</b><button type="button" class="btn btn-fechar" onclick="document.getElementById('fnf-anexos-pop').remove()">Fechar</button></div>
       <ul>${lista.map((a) => `<li><a href="${esc(a.url)}" target="_blank" rel="noopener"><i data-lucide="${this.iconeAnexo(a.tipo)}"></i><span>${esc(a.nome || this.TIPOS_ANEXO[a.tipo] || "Anexo")}</span><small>${esc(this.TIPOS_ANEXO[a.tipo] || "")}</small></a></li>`).join("")}</ul>
     </div>`;
     pop.addEventListener("click", (ev) => { if (ev.target === pop) pop.remove(); });
@@ -713,7 +713,7 @@ window.EnviarNotaApp = {
       .env-ped-tab tbody tr:hover .env-ped-sel { background: #105436; color: #fff; }
     </style>
     <div class="fnf-pop-box" role="dialog" aria-modal="true">
-      <div class="fnf-pop-h"><b>Pedidos em aberto</b><button type="button" class="fnf-pop-x" onclick="EnviarNotaApp.fecharBuscaPedidos()" title="Fechar"><i data-lucide="x"></i></button></div>
+      <div class="fnf-pop-h"><b>Pedidos em aberto</b><button type="button" class="btn btn-fechar" onclick="EnviarNotaApp.fecharBuscaPedidos()">Fechar</button></div>
       <p class="env-bp-help">${aviso}</p>
       <div class="env-bp-busca">
         <label class="env-bp-label" for="env-busca-credor">Credor</label>

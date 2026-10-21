@@ -1158,7 +1158,7 @@ const PlanoFinanceiroApp = {
               <div style="color:#fff;font-size:0.95rem;font-weight:800;">Base fiscal</div>
               <div style="color:rgba(255,255,255,0.82);font-size:0.75rem;margin-top:2px;">Conta ${this.esc(id)}${nome ? ' · ' + this.esc(nome) : ''}</div>
             </div>
-            <button type="button" onclick="document.getElementById('pf-tax-overlay').remove()" style="background:rgba(255,255,255,0.14);border:1px solid rgba(255,255,255,0.3);color:#fff;border-radius:8px;width:32px;height:32px;cursor:pointer;font-size:1.1rem;line-height:1;">×</button>
+            <button type="button" class="btn btn-fechar" onclick="document.getElementById('pf-tax-overlay').remove()">Fechar</button>
           </div>
           <div style="padding:18px;">
             <label style="display:block;font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;">Base de cálculo</label>

@@ -1537,7 +1537,7 @@ const InvestimentoApp = {
             <div style="font-size:1rem;font-weight:800;">${this.esc(this.kindLabel(kind))} · ${this.esc(periodLabel)}</div>
             <div style="font-size:0.78rem;opacity:.9;margin-top:3px;">${this.esc(titleAcc)}</div>
           </div>
-          <button type="button" onclick="InvestimentoApp.closeMovimentos()" style="border:none;background:rgba(255,255,255,0.15);color:#fff;width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:1.2rem;line-height:1;">×</button>
+          <button type="button" class="btn btn-fechar" onclick="InvestimentoApp.closeMovimentos()">Fechar</button>
         </div>
         <div style="padding:14px 16px 18px;">
           ${openingHint}

@@ -2569,7 +2569,7 @@ const ComprasPrevisoesApp = {
             </div>
             <div class="cprev-modal-actions">
               ${this.pmpHtml(parcelas)}
-              <button type="button" class="btn btn-cancel" onclick="ComprasPrevisoesApp.closeParcelas()">Fechar</button>
+              <button type="button" class="btn btn-fechar" onclick="ComprasPrevisoesApp.closeParcelas()">Fechar</button>
             </div>
           </div>
           ${this.state.parcelasLoading ? `<div class="tvig-empty" style="padding:16px;">Carregando parcelas…</div>` : ""}

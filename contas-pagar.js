@@ -448,7 +448,7 @@ const ContasPagarApp = {
             <h3 style="margin-bottom: 15px;">Dados Bancários do Credor</h3>
             <div id="cp-bank-modal-content" style="font-size: 0.9rem; line-height: 1.5; color: #444;"></div>
             <div style="text-align: right; margin-top: 20px;">
-              <button class="btn btn-primary" onclick="document.getElementById('cp-bank-modal').style.display='none'">Fechar</button>
+              <button type="button" class="btn btn-fechar" onclick="document.getElementById('cp-bank-modal').style.display='none'">Fechar</button>
             </div>
           </div>
         </div>
@@ -1707,7 +1707,7 @@ const ContasPagarApp = {
     const html = `
       <div id="${overlayId}" style="position: fixed; inset: 0; background: rgba(0,0,0,0.42); display: flex; align-items: center; justify-content: center; padding: 24px; padding-left: 260px; z-index: 9999;">
         <div style="width: min(1350px, 95%); max-height: 90vh; overflow: auto; background: white; border-radius: 18px; box-shadow: 0 24px 80px rgba(0,0,0,0.18); padding: 24px; position: relative;">
-          <button onclick="ContasPagarApp.closeValidationPopup()" style="position: absolute; top: 16px; right: 16px; width: 36px; height: 36px; border: none; border-radius: 50%; background: #f4f4f4; cursor: pointer; font-size: 18px; line-height: 1;">×</button>
+          <button type="button" class="btn btn-fechar" onclick="ContasPagarApp.closeValidationPopup()" style="position: absolute; top: 16px; right: 16px;">Fechar</button>
           <h3 style="margin-top: 0;">Títulos que serão criados no Sienge</h3>
           <p style="margin: 8px 0 18px; color: #444;">Revisão dos títulos antes de avançar para o vínculo de anexos.</p>
           <div id="cp-validation-popup-status" style="padding: 24px; text-align: center; color: #444;">
@@ -1716,7 +1716,7 @@ const ContasPagarApp = {
           </div>
           <div id="cp-validation-popup-content" style="display: none; overflow-x: auto;"></div>
           <div id="cp-validation-popup-actions" style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
-            <button class="btn btn-outline" onclick="ContasPagarApp.closeValidationPopup()">Fechar</button>
+            <button type="button" class="btn btn-fechar" onclick="ContasPagarApp.closeValidationPopup()">Fechar</button>
             <button id="cp-validation-popup-continue" class="btn btn-primary" disabled onclick="ContasPagarState.step=2; ContasPagarApp.closeValidationPopup(); ContasPagarApp.render();">Continuar para Vínculos</button>
           </div>
         </div>

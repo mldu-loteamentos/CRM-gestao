@@ -673,7 +673,7 @@ const SocietarioApp = {
     return `<div class="soc-panel">
       <div class="soc-panel-head">
         <strong>${this.esc(title)}</strong>
-        <button type="button" class="soc-panel-x" title="Fechar" onclick="SocietarioApp.closePanel()">×</button>
+        <button type="button" class="btn btn-fechar" onclick="SocietarioApp.closePanel()">Fechar</button>
       </div>
       ${inner}
     </div>`;

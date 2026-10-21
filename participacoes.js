@@ -1364,9 +1364,7 @@ const ParticipacoesApp = {
               <h3>${this.esc(this.detail.credor)}</h3>
               <div class="part-detail-sub">${this.esc(periodoLab)} · ${rows.length} lançamento(s) · <strong>${this.fmt(total)}</strong></div>
             </div>
-            <button type="button" class="btn btn-outline btn-sm" onclick="ParticipacoesApp.closeMatrixDetail()" title="Fechar" style="padding:4px 8px;">
-              <i data-lucide="x" style="width:16px;height:16px;"></i>
-            </button>
+            <button type="button" class="btn btn-fechar" onclick="ParticipacoesApp.closeMatrixDetail()">Fechar</button>
           </header>
           <div class="part-detail-body">
             ${rows.length ? `
@@ -1393,7 +1391,7 @@ const ParticipacoesApp = {
             ` : `<div style="padding:24px;text-align:center;color:#64748b;">Nenhum lançamento neste filtro.</div>`}
           </div>
           <footer>
-            <button type="button" class="btn btn-cancel" onclick="ParticipacoesApp.closeMatrixDetail()">Fechar</button>
+            <button type="button" class="btn btn-fechar" onclick="ParticipacoesApp.closeMatrixDetail()">Fechar</button>
           </footer>
         </div>
       </div>

@@ -128,7 +128,7 @@ const IndexadoresApp = {
         <div style="background: #fff; width: 450px; max-width: 90%; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); overflow: hidden; display: flex; flex-direction: column; max-height: 80vh;">
           <div style="padding: 15px 20px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; background: #f8fafc;">
             <h3 style="margin: 0; font-size: 1.1rem; color: #1e293b; display:flex; align-items:center; gap:8px;"><i data-lucide="settings" style="width:18px;"></i> Gerenciar Indexadores</h3>
-            <button onclick="document.getElementById('idx-settings-modal').remove()" style="background: none; border: none; font-size: 1.5rem; line-height: 1; cursor: pointer; color: #64748b;">&times;</button>
+            <button type="button" class="btn btn-fechar" onclick="document.getElementById('idx-settings-modal').remove()">Fechar</button>
           </div>
           <div style="padding: 15px 20px; overflow-y: auto; flex: 1;">
             <p style="margin-top: 0; font-size: 0.85rem; color: #64748b; margin-bottom: 15px;">Selecione quais indexadores devem aparecer na sua lista principal para consulta:</p>
@@ -321,9 +321,7 @@ const IndexadoresApp = {
         <div class="idx-modal" role="dialog" aria-label="Histórico completo">
           <div class="idx-modal-head">
             <h3><i data-lucide="line-chart" style="width:18px;height:18px;"></i> Histórico completo · ${this.esc(name)}</h3>
-            <button type="button" class="idx-modal-fechar" onclick="IndexadoresApp.closeHistoryModal()" title="Fechar">
-              <i data-lucide="x" style="width:18px;height:18px;"></i>
-            </button>
+            <button type="button" class="btn btn-fechar" onclick="IndexadoresApp.closeHistoryModal()">Fechar</button>
           </div>
           <div class="idx-modal-tools">
             <div class="idx-campo">
@@ -339,7 +337,7 @@ const IndexadoresApp = {
             ${this.tabelaHtml(lista, 'idx-history-tbody')}
           </div>
           <div class="idx-modal-foot">
-            <button type="button" class="btn btn-outline" onclick="IndexadoresApp.closeHistoryModal()">Fechar</button>
+            <button type="button" class="btn btn-fechar" onclick="IndexadoresApp.closeHistoryModal()">Fechar</button>
           </div>
         </div>
       </div>

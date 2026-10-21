@@ -8599,7 +8599,8 @@ function filaPaintPmpCells() {
     if (!client) return;
     td.innerHTML = window.filaPmpHtml(client);
   });
-  if (window.lucide) lucide.createIcons();
+  const raizPmp = document.getElementById("defaulters-table-body");
+  if (window.lucide && raizPmp) lucide.createIcons({ root: raizPmp });
 }
 
 window.ensureFilaPmpIndex = async function() {
@@ -11237,7 +11238,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
         <div class="kpi-icon-wrapper"><i data-lucide="clock"></i></div>
       </div>
     `;
-    if (window.lucide) lucide.createIcons();
+    if (window.lucide) lucide.createIcons({ root: kpiContainer });
   }
 
   const subCompSummaryBody = document.getElementById("subjudice-company-summary-body");
@@ -11460,7 +11461,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
       `;
       subCompSummaryBody.appendChild(tFoot);
     }
-    if (window.lucide) lucide.createIcons();
+    if (window.lucide) lucide.createIcons({ root: subCompSummaryBody });
   }
   // --- FIM SUB JUDICE KPIs ---
 
@@ -11861,11 +11862,23 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
   }
 
   // Renderizar Tabela da Fila de Cobrança
+  const filaFotoRolagem = () => {
+    const els = [document.scrollingElement, document.querySelector(".main-content"), document.querySelector(".nav-links")].filter(Boolean);
+    return { els: els, pos: els.map((el) => el.scrollTop) };
+  };
+  const filaRestaurarRolagem = (foto) => {
+    if (!foto) return;
+    foto.els.forEach((el, i) => { if (el && el.isConnected) el.scrollTop = foto.pos[i]; });
+  };
+  window._filaFotoRolagem = null;
   if (body) {
-    body.innerHTML = "";
     if (clientList.length === 0) {
+      const fotoVazio = filaFotoRolagem();
       body.innerHTML = `<tr><td colspan="13" style="text-align:center; padding:30px; color:var(--color-text-muted);">Nenhum cliente inadimplente encontrado com os filtros ativos.</td></tr>`;
+      filaRestaurarRolagem(fotoVazio);
+      window._filaFotoRolagem = fotoVazio;
     } else {
+      const frag = document.createDocumentFragment();
       const subjudiceHistory = subjudiceMemory;
 
       const groupTotals = {};
@@ -11913,7 +11926,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
             </td>
             <td colspan="3" style="${cellBase}"></td>
           `;
-          body.appendChild(headerRow);
+          frag.appendChild(headerRow);
         }
         const formattedVal = (client.overdueValue + client.overdueCharges).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         const isZeroPaid = client.isZeroPaid;
@@ -12073,9 +12086,13 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
             </div>
           </td>
         `;
-        body.appendChild(row);
+        frag.appendChild(row);
         if ((_filaI + 1) % 60 === 0) await filaPausa();
       }
+      const foto = filaFotoRolagem();
+      body.replaceChildren(frag);
+      filaRestaurarRolagem(foto);
+      window._filaFotoRolagem = foto;
       if (typeof window.ensureFilaSignalsIndex === "function") window.ensureFilaSignalsIndex();
       if (typeof window.ensureFilaPmpIndex === "function") window.ensureFilaPmpIndex();
     }
@@ -12087,6 +12104,11 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
       const root = document.getElementById(id);
       if (root) lucide.createIcons({ root: root });
     });
+  }
+  if (window._filaFotoRolagem) {
+    filaRestaurarRolagem(window._filaFotoRolagem);
+    const fotoIcones = window._filaFotoRolagem;
+    requestAnimationFrame(() => filaRestaurarRolagem(fotoIcones));
   }
   
   // Habilita o botão de Filtros Avançados
@@ -17109,7 +17131,7 @@ window.openPromisedInstallmentsModal = function() {
       <h3 style="margin: 0; color: var(--color-primary); display: flex; align-items: center; gap: 8px;">
         <i data-lucide="list-checks" style="width: 24px; height: 24px;"></i> Selecionar Parcelas
       </h3>
-      <button onclick="document.getElementById('promise-installments-modal').remove()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #64748b;">&times;</button>
+      <button type="button" class="btn btn-fechar" onclick="document.getElementById('promise-installments-modal').remove()">Fechar</button>
     </div>
     <div style="overflow-x: auto; flex: 1; border: 1px solid #e2e8f0; border-radius: 8px;">
       <table class="crm-table" style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
@@ -18340,7 +18362,7 @@ window.editOccurrenceReal = function(customerId, occDate) {
         <h3 style="margin:0;color:var(--color-primary);font-size:1.1rem;display:flex;align-items:center;gap:8px;">
           <i data-lucide="edit-3" style="width:18px;height:18px;"></i> Editar ocorrência
         </h3>
-        <button type="button" onclick="window.closeEditOccurrenceModal()" style="background:none;border:none;font-size:1.4rem;line-height:1;cursor:pointer;color:#64748b;">&times;</button>
+        <button type="button" class="btn btn-fechar" onclick="window.closeEditOccurrenceModal()">Fechar</button>
       </div>
       <div style="font-size:0.78rem;color:#64748b;margin-bottom:12px;">
         Canal: <strong style="color:#334155;">${String(occ.canal || "—").replace(/</g, "&lt;")}</strong>
@@ -18783,26 +18805,42 @@ function renegPctTxt(pct, marcos) {
   return inteiro + "%";
 }
 
-/** Uma frase curta para cada modalidade que este cliente não pode usar. */
-function renegFraseFechada(k, faixa) {
+function renegPorqueAberta(k, faixa) {
   const mods = faixa.mods;
   const pct = Number(faixa.pctPago) || 0;
   const pmp = Math.round(Number(faixa.pmp) || 0);
   const acordos = Number(faixa.acordos) || 0;
   const pctTxt = renegPctTxt(pct, [mods.somar.pctPagoMax, mods.diluir.pctPagoMin, mods.deslocar.pctPagoMin]);
-  if (k === "somar") return "Somar está fechada: o pago (" + pctTxt + ") já não está abaixo de " + mods.somar.pctPagoMax + "%.";
+  if (k === "somar") return "o pago está em " + pctTxt + ", abaixo de " + mods.somar.pctPagoMax + "%.";
+  if (k === "deslocar") return "o pago (" + pctTxt + ") passa de " + mods.deslocar.pctPagoMin + "% e há no máximo " + mods.deslocar.maxAcordos + " acordo anterior.";
+  if (k === "cartao") return "não depende do percentual pago, do atraso nem de acordo anterior, e não pede sinal.";
+  if (k === "diluir") {
+    const direto = acordos === 0 && pct > mods.diluir.pctPagoMin && pmp <= mods.diluir.pmpMax;
+    if (direto) return "não há acordo anterior, o pago (" + pctTxt + ") passa de " + mods.diluir.pctPagoMin + "% e o atraso médio é de " + pmp + (pmp === 1 ? " dia" : " dias") + " (o limite é " + mods.diluir.pmpMax + ").";
+    return "este cliente também pode deslocar: pagou mais de " + mods.deslocar.pctPagoMin + "% e tem no máximo " + mods.deslocar.maxAcordos + " acordo anterior.";
+  }
+  return "";
+}
+
+function renegPorqueFechada(k, faixa) {
+  const mods = faixa.mods;
+  const pct = Number(faixa.pctPago) || 0;
+  const pmp = Math.round(Number(faixa.pmp) || 0);
+  const acordos = Number(faixa.acordos) || 0;
+  const pctTxt = renegPctTxt(pct, [mods.somar.pctPagoMax, mods.diluir.pctPagoMin, mods.deslocar.pctPagoMin]);
+  if (k === "somar") return "o pago (" + pctTxt + ") já não está abaixo de " + mods.somar.pctPagoMax + "%.";
   if (k === "deslocar") {
     const falhas = [];
     if (!(pct > mods.deslocar.pctPagoMin)) falhas.push("o pago (" + pctTxt + ") não passa de " + mods.deslocar.pctPagoMin + "%");
     if (!(acordos <= mods.deslocar.maxAcordos)) falhas.push(acordos === 1 ? "já existe 1 acordo anterior" : "já existem " + acordos + " acordos anteriores");
-    return "Deslocar está fechada: " + (falhas.join(" e ") || "as condições não fecham") + ".";
+    return (falhas.join(" e ") || "as condições não fecham") + ".";
   }
   if (k === "diluir") {
     const falhas = [];
     if (!(pct > mods.diluir.pctPagoMin)) falhas.push("o pago (" + pctTxt + ") não passa de " + mods.diluir.pctPagoMin + "%");
     if (!(pmp <= mods.diluir.pmpMax)) falhas.push("o atraso médio (" + pmp + " dias) passa de " + mods.diluir.pmpMax + " dias");
     if (acordos !== 0) falhas.push(acordos === 1 ? "já existe 1 acordo anterior" : "já existem " + acordos + " acordos anteriores");
-    return "Diluir está fechada: " + (falhas.join(" e ") || "as condições não fecham") + ".";
+    return (falhas.join(" e ") || "as condições não fecham") + ".";
   }
   return "";
 }
@@ -18810,30 +18848,17 @@ function renegFraseFechada(k, faixa) {
 function renegPorqueLiberada(valor) {
   const faixa = window._renegFaixa;
   if (!faixa || !faixa.perm || !faixa.perm[valor]) return "";
-  const mods = faixa.mods;
-  const pct = Number(faixa.pctPago) || 0;
-  const pmp = Math.round(Number(faixa.pmp) || 0);
-  const acordos = Number(faixa.acordos) || 0;
-  const pctTxt = renegPctTxt(pct, [mods.somar.pctPagoMax, mods.diluir.pctPagoMin, mods.deslocar.pctPagoMin]);
-  const acTxt = acordos === 0 ? "Nenhum acordo anterior." : (acordos === 1 ? "1 acordo anterior." : acordos + " acordos anteriores.");
-  const fatos = "Pagou " + pctTxt + " do contrato. Atraso médio de " + pmp + (pmp === 1 ? " dia." : " dias.") + " " + acTxt;
-  let aberta = "";
-  if (valor === "somar") {
-    aberta = "Somar está aberta: vale para quem pagou menos de " + mods.somar.pctPagoMax + "%.";
-  } else if (valor === "deslocar") {
-    aberta = "Deslocar está aberta: o pago passa de " + mods.deslocar.pctPagoMin + "% e há no máximo " + mods.deslocar.maxAcordos + " acordo anterior.";
-  } else if (valor === "cartao") {
-    aberta = "Cartão de crédito está aberto em qualquer situação e não pede sinal.";
-  } else if (valor === "diluir") {
-    const direto = acordos === 0 && pct > mods.diluir.pctPagoMin && pmp <= mods.diluir.pmpMax;
-    aberta = direto
-      ? "Diluir está aberta: nenhum acordo anterior, pago acima de " + mods.diluir.pctPagoMin + "% e atraso médio de até " + mods.diluir.pmpMax + " dias."
-      : "Diluir está aberta porque este cliente também pode deslocar: pagou mais de " + mods.deslocar.pctPagoMin + "% e tem no máximo " + mods.deslocar.maxAcordos + " acordo anterior.";
+  const nomes = { somar: "Somar", diluir: "Diluir", deslocar: "Deslocar", cartao: "Cartão de crédito" };
+  const pode = ["somar", "diluir", "deslocar", "cartao"].filter((k) => faixa.perm[k]);
+  const nao = ["somar", "diluir", "deslocar"].filter((k) => !faixa.perm[k]);
+  const linhas = ["O que pode ser feito:"];
+  pode.forEach((k) => linhas.push(nomes[k] + ": " + renegPorqueAberta(k, faixa)));
+  if (nao.length) {
+    linhas.push("");
+    linhas.push("O que não pode ser feito:");
+    nao.forEach((k) => linhas.push(nomes[k] + ": " + renegPorqueFechada(k, faixa)));
   }
-  const fechadas = ["diluir", "somar", "deslocar"].filter((k) => k !== valor && !faixa.perm[k]).map((k) => renegFraseFechada(k, faixa));
-  const linhas = [fatos, aberta].concat(fechadas);
-  if (valor !== "cartao") linhas.push("Cartão de crédito continua disponível.");
-  return linhas.filter(Boolean).join("\n");
+  return linhas.join("\n");
 }
 
 const RENEG_MODALIDADES = {
@@ -19079,26 +19104,33 @@ function renegSomarPago(inst) {
   let pago = 0;
   let liquido = 0;
   let qtd = 0;
+  let juros = 0;
+  let desc = 0;
   if (recs.length) {
     recs.forEach((rec) => {
       if (typeof window.isWriteOffReceipt === "function" && window.isWriteOffReceipt(rec)) return;
       const bruto = Number(rec.receiptValue) || 0;
       if (!(bruto > 0)) return;
+      const acrescimo = Number(rec.additionalValue) || 0;
+      const desconto = Number(rec.discountValue) || 0;
       pago += bruto;
-      liquido += Number(rec.netReceiptValue != null ? rec.netReceiptValue : bruto) || 0;
+      juros += acrescimo;
+      desc += desconto;
+      const liquidoRec = rec.netReceiptValue != null ? Number(rec.netReceiptValue) : (bruto + acrescimo - desconto);
+      liquido += Number.isFinite(liquidoRec) ? liquidoRec : bruto;
       qtd += 1;
     });
-    return { pago: pago, liquido: liquido, qtd: qtd };
+    return { pago: pago, liquido: liquido, qtd: qtd, juros: juros, desconto: desc };
   }
   const rid = String((inst && (inst.receiptId || inst.receiptType)) || "");
-  if (rid === "3" || rid === "7") return { pago: 0, liquido: 0, qtd: 0 };
+  if (rid === "3" || rid === "7") return { pago: 0, liquido: 0, qtd: 0, juros: 0, desconto: 0 };
   const principal = Number(inst && inst.principalPaid) || 0;
-  if (principal > 0) return { pago: principal, liquido: principal, qtd: 1 };
+  if (principal > 0) return { pago: principal, liquido: principal, qtd: 1, juros: 0, desconto: 0 };
   if (inst && (inst.isValidReceipt || Number(inst.installmentSituation) === 2)) {
     const bruto = Number(inst.receiptValue) || 0;
-    if (bruto > 0) return { pago: bruto, liquido: bruto, qtd: 1 };
+    if (bruto > 0) return { pago: bruto, liquido: bruto, qtd: 1, juros: 0, desconto: 0 };
   }
-  return { pago: 0, liquido: 0, qtd: 0 };
+  return { pago: 0, liquido: 0, qtd: 0, juros: 0, desconto: 0 };
 }
 
 function renegPctPagoContrato(sale) {
@@ -19118,7 +19150,10 @@ function renegSituacaoContrato(sale) {
   let original = 0;
   let pago = 0;
   let liquido = 0;
+  let juros = 0;
+  let desconto = 0;
   let qtdPagas = 0;
+  let qtdParcelasPagas = 0;
   let qtdVencidas = 0;
   let valorVencidas = 0;
   let qtdAVencer = 0;
@@ -19128,7 +19163,10 @@ function renegSituacaoContrato(sale) {
     const rec = renegSomarPago(inst);
     pago += rec.pago;
     liquido += rec.liquido;
+    juros += rec.juros || 0;
+    desconto += rec.desconto || 0;
     qtdPagas += rec.qtd;
+    if ((rec.pago || 0) > 0.009) qtdParcelasPagas += 1;
     const cb = Number(inst && inst.currentBalance);
     const saldo = Number.isFinite(cb) ? cb : 0;
     if (!(saldo > 0.009)) return;
@@ -19146,6 +19184,9 @@ function renegSituacaoContrato(sale) {
     original: original,
     pago: pago,
     liquido: liquido > 0.009 ? liquido : pago,
+    juros: juros,
+    desconto: desconto,
+    qtdParcelasPagas: qtdParcelasPagas,
     qtdPagas: qtdPagas,
     qtdVencidas: qtdVencidas,
     valorVencidas: valorVencidas,
@@ -20321,45 +20362,162 @@ function renegParcelasMarcadas() {
   return (g_renegBills || []).filter((b) => ids.includes(String((b && (b.installmentId || b.installmentNum)) || "")));
 }
 
-function renegProximoReajuste(sale) {
-  const insts = renegParcelasDoContrato(sale);
-  const hoje = typeof window.todayIsoLocal === "function" ? window.todayIsoLocal() : new Date().toISOString().slice(0, 10);
-  const abertas = insts.filter((inst) => {
-    const cb = Number(inst && inst.currentBalance);
-    if (Number.isFinite(cb)) return cb > 0.009;
-    return !(inst && (inst.isValidReceipt || Number(inst.installmentSituation) === 2));
-  }).filter((inst) => inst && inst.dueDate).sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)));
-  const amostra = abertas.find((i) => i.indexerName || i.indexerId != null || i.indexerCode != null) || abertas[0] || insts[0];
-  let nome = "";
-  let id = "";
-  if (amostra) {
-    id = amostra.indexerId != null && amostra.indexerId !== "" ? amostra.indexerId : (amostra.indexerCode != null ? amostra.indexerCode : "");
-    nome = String(amostra.indexerName || amostra.indexerDescription || (typeof amostra.indexer === "string" ? amostra.indexer : "") || "");
-    if (id !== "" && window.AppState && Array.isArray(AppState.indexers)) {
-      const obj = AppState.indexers.find((x) => String(x.id) === String(id));
-      if (obj && obj.name) nome = String(obj.name);
+const RENEG_MESES = ["", "janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+
+function renegDataVendaIso(sale) {
+  const fontes = [sale, window.dbContract, window.sale];
+  const campos = ["saleDate", "contractDate", "issueDate", "accountingDate", "emissionDate", "date"];
+  for (let i = 0; i < fontes.length; i++) {
+    const obj = fontes[i];
+    if (!obj) continue;
+    for (let c = 0; c < campos.length; c++) {
+      const raw = obj[campos[c]];
+      if (raw) return String(raw).split("T")[0];
     }
   }
-  const sem = /^(real|sem\s*reajuste|sem\s*index)/i.test(String(nome).trim()) || String(id) === "0";
-  if (sem) return { texto: "Este contrato não tem reajuste anual.", num: "", data: "" };
-  const indice = String(nome).trim() || "índice do contrato";
-  const venda = window.parseSiengeDay ? window.parseSiengeDay((sale && (sale.saleDate || sale.contractDate || sale.issueDate || sale.date)) || "") : null;
-  let alvo = null;
-  if (venda) {
-    const hojeD = window.parseSiengeDay(hoje) || new Date();
-    const aniv = new Date(hojeD.getFullYear(), venda.getMonth(), venda.getDate(), 12, 0, 0);
-    if (aniv < hojeD) aniv.setFullYear(aniv.getFullYear() + 1);
-    const iso = aniv.getFullYear() + "-" + String(aniv.getMonth() + 1).padStart(2, "0") + "-" + String(aniv.getDate()).padStart(2, "0");
-    alvo = abertas.find((i) => String(i.dueDate).slice(0, 10) >= iso) || null;
+  return "";
+}
+
+function renegNomeDoIndexador(id, nome) {
+  const atual = String(nome || "").trim();
+  if (atual && !/^\d+$/.test(atual)) return atual;
+  const pools = [];
+  if (window.IndexadoresState && Array.isArray(IndexadoresState.allSiengeIndexers)) pools.push(IndexadoresState.allSiengeIndexers);
+  if (window.AppState && Array.isArray(AppState.indexers)) pools.push(AppState.indexers);
+  for (let i = 0; i < pools.length; i++) {
+    const obj = pools[i].find((x) => String(x.id) === String(id));
+    if (obj && (obj.name || obj.description)) return String(obj.name || obj.description);
   }
-  if (!alvo) return { texto: "O reajuste anual deste contrato é pelo " + indice + ", na data de aniversário do contrato.", num: "", data: "" };
-  const num = String(alvo.installmentNumber || alvo.installmentNum || alvo.installmentId || "");
-  const data = new Date(String(alvo.dueDate).slice(0, 10) + "T12:00:00").toLocaleDateString("pt-BR");
-  return {
-    texto: "A próxima parcela com reajuste é a nº " + (num || "—") + ", com vencimento em " + data + ", pelo " + indice + ".",
-    num: num,
-    data: data
+  return atual;
+}
+
+function renegRotuloIndexador(id, nome) {
+  const n = String(nome || "").trim();
+  const i = id == null || id === "" ? "" : String(id).trim();
+  if (!i && !n) return "";
+  if (n && (!i || n === i || n.indexOf(i + " -") === 0 || n.indexOf(i + "-") === 0)) return n;
+  if (i && n) return i + " - " + n;
+  return n || i;
+}
+
+/** Mesma regra da aba Repactuações: o reajuste cai no mês da venda, todo ano, a partir do ano seguinte. */
+function renegInfoReajuste(sale) {
+  const refs = [];
+  const coletar = (obj) => {
+    if (obj && typeof collectIndexerRefs === "function") collectIndexerRefs(refs, obj);
   };
+  renegParcelasDoContrato(sale).forEach(coletar);
+  (g_renegBills || []).forEach(coletar);
+  coletar(sale);
+  coletar(window.dbContract);
+  const picked = typeof pickContractIndexer === "function" ? pickContractIndexer(refs) : { chosen: null, adjustCount: 0 };
+  const chosen = (picked && picked.chosen) || {};
+  const id = chosen.id != null ? chosen.id : "";
+  const nome = renegNomeDoIndexador(id, chosen.name || "");
+  const achou = refs.length > 0 && picked && picked.chosen;
+  const sem = !achou || !picked.adjustCount || (typeof isRealIndexer === "function" ? isRealIndexer(id, nome) : (/^real$/i.test(nome) || String(id) === "0"));
+  const ped = String(renegDataVendaIso(sale) || "").split("-");
+  const mes = ped.length >= 2 ? Number(ped[1]) : 0;
+  const anoVenda = ped.length >= 1 ? Number(ped[0]) : 0;
+  const hoje = new Date();
+  let anoInicio = anoVenda > 0 ? anoVenda + 1 : 0;
+  if (anoInicio && mes >= 1 && mes <= 12) {
+    while (anoInicio < hoje.getFullYear() || (anoInicio === hoje.getFullYear() && mes < (hoje.getMonth() + 1))) anoInicio += 1;
+  }
+  let info = {
+    sem: !!sem,
+    mes: mes,
+    anoInicio: anoInicio,
+    nome: nome,
+    id: id,
+    rotulo: achou ? (renegRotuloIndexador(id, nome) || (sem ? "REAL" : "")) : "",
+    proximo: mes && anoInicio ? String(mes).padStart(2, "0") + "/" + anoInicio : ""
+  };
+  const tela = renegMetaRepactuacaoTela();
+  if (!tela) return info;
+  const idTela = tela.indexerId != null && tela.indexerId !== "" ? tela.indexerId : info.id;
+  const nomeTela = renegNomeDoIndexador(idTela, tela.indexerName || info.nome);
+  const semTela = typeof isRealIndexer === "function" ? isRealIndexer(idTela, nomeTela) : (/^real$/i.test(String(nomeTela)) || String(idTela) === "0");
+  const prox = tela.upcoming && tela.upcoming.adjustMonth ? String(tela.upcoming.adjustMonth) : "";
+  const pedProx = prox.split("/");
+  if (pedProx.length === 2 && Number(pedProx[0]) >= 1) {
+    info.mes = Number(pedProx[0]);
+    info.anoInicio = Number(pedProx[1]);
+    info.proximo = prox;
+  }
+  info.sem = !!semTela;
+  info.id = idTela;
+  info.nome = nomeTela;
+  info.rotulo = renegRotuloIndexador(idTela, nomeTela) || (semTela ? "REAL" : info.rotulo);
+  if (!info.proximo && info.mes && info.anoInicio) info.proximo = String(info.mes).padStart(2, "0") + "/" + info.anoInicio;
+  return info;
+}
+
+function renegMetaRepactuacaoTela() {
+  const atual = String((g_renegSale && (g_renegSale.receivableBillId || g_renegSale.id)) || "").replace(/\D/g, "");
+  const meta = window._repactuacaoMeta;
+  if (meta && (meta.indexerName || meta.indexerId != null)) {
+    const bill = String(meta.billId || "").replace(/\D/g, "");
+    if (!bill || !atual || bill === atual) return meta;
+    return null;
+  }
+  const el = document.getElementById("repactuacoes-results");
+  const texto = el ? String(el.textContent || "") : "";
+  const ind = texto.match(/(\d{1,2})\s*-\s*([A-Za-z][A-Za-z0-9-]*)/);
+  const prox = texto.match(/Pr[oó]xima Repactua[cç][aã]o:\s*(\d{2}\/\d{4})/i);
+  if (!ind && !prox) return null;
+  return {
+    indexerId: ind ? ind[1] : "",
+    indexerName: ind ? ind[2] : "",
+    upcoming: prox ? { adjustMonth: prox[1] } : null
+  };
+}
+
+function renegMarcaReajuste(dataBr, tipo, info) {
+  if (!info || info.sem || !info.mes || !info.anoInicio) return "";
+  if (String(tipo || "").toUpperCase().indexOf("SINAL") >= 0) return "";
+  const p = String(dataBr || "").trim().split("/");
+  if (p.length < 3) return "";
+  if (Number(p[1]) !== info.mes || !(Number(p[2]) >= info.anoInicio)) return "";
+  return String(info.nome || "").replace(/^\d+\s*[-–]\s*/, "").trim() || "Reajuste";
+}
+
+function renegCelulaVazia(s) {
+  const t = String(s || "").trim();
+  return !t || t === "—" || t === "-" || t === "–";
+}
+
+function renegLerQuadroAberto(info) {
+  return Array.from(document.querySelectorAll("#reneg-selected-bills-body tr")).map((tr) => {
+    const td = tr.querySelectorAll("td");
+    if (td.length < 7) return null;
+    const check = tr.querySelector(".reneg-bill-check");
+    const linha = {
+      num: String(td[1].textContent || "").trim(),
+      venc: String(td[2].textContent || "").replace(/\s+/g, " ").trim(),
+      id: String(td[3].textContent || "").trim(),
+      indice: String(td[4].textContent || "").trim(),
+      principal: String(td[5].textContent || "").trim(),
+      corrigido: String(td[6].textContent || "").trim(),
+      marcada: !!(check && check.checked),
+      vencida: /vencida/i.test(String(td[2].textContent || ""))
+    };
+    if (info && !info.sem && renegCelulaVazia(linha.id) && renegCelulaVazia(linha.indice) && info.rotulo) {
+      const corte = info.rotulo.indexOf(" - ");
+      if (corte > 0) {
+        linha.id = info.rotulo.slice(0, corte);
+        linha.indice = info.rotulo.slice(corte + 3);
+      } else {
+        linha.indice = info.rotulo;
+      }
+    }
+    return linha;
+  }).filter(Boolean);
+}
+
+function renegTxtEl(id) {
+  const el = document.getElementById(id);
+  return el ? String(el.textContent || "").replace(/\s+/g, " ").trim() : "";
 }
 
 function baixarPropostaAcordoPdf(results, nomeArquivo) {
@@ -20367,18 +20525,15 @@ function baixarPropostaAcordoPdf(results, nomeArquivo) {
   const { jsPDF } = window.jspdf;
   const pdf = new jsPDF("p", "mm", "a4");
   const brl = (v) => Number(v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-  const m = 14;
-  const largura = 182;
+  const m = 12;
+  const largura = 186;
   const sale = g_renegSale || {};
   const cli = g_renegCustomer || {};
   const unit = (window.AppState && AppState.units && sale.unitId && AppState.units[sale.unitId]) || {};
   const sit = renegSituacaoContrato(sale);
+  const info = renegInfoReajuste(sale);
+  const abertas = renegLerQuadroAberto(info);
   const agenda = renegLerAgenda();
-  const reaj = renegProximoReajuste(sale);
-  const marcadas = renegParcelasMarcadas();
-  const nums = marcadas.map((b) => b.installmentNum || b.installmentNumber || b.installmentId).filter((n) => n != null && n !== "");
-  const cenario = results.cenario || "somar";
-  const nomeMod = { somar: "Somar", diluir: "Diluir", deslocar: "Deslocar" }[cenario] || "Acordo interno";
   const sinalData = renegIsoBr(results.sinalDueStr);
   const expira = renegIsoBr(renegIsoMaisDias(results.sinalDueStr, 2));
   const contrato = [sale.documentId, sale.documentNumber].filter(Boolean).join("") || sale.id || "";
@@ -20387,23 +20542,20 @@ function baixarPropostaAcordoPdf(results, nomeArquivo) {
   const docCli = cli.cpf || cli.document || cli.cnpj || "";
 
   pdf.setFillColor(16, 84, 54);
-  pdf.rect(0, 0, 210, 24, "F");
+  pdf.rect(0, 0, 210, 16, "F");
   pdf.setTextColor(255, 255, 255);
   pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(16);
-  pdf.text("Proposta de acordo", m, 11);
-  pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(9);
-  pdf.text("Orçamento da renegociação. Não é documento para assinatura.", m, 18);
+  pdf.setFontSize(15);
+  pdf.text("Proposta de acordo", m, 10.5);
 
-  let y = 32;
+  let y = 22;
   pdf.setTextColor(15, 23, 42);
   pdf.setFont("helvetica", "bold");
   pdf.setFontSize(11);
   pdf.text(String(cli.name || "Cliente"), m, y);
   y += 5;
   pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(9);
+  pdf.setFontSize(8);
   pdf.setTextColor(71, 85, 105);
   const idLinhas = [
     (contrato ? "Contrato " + contrato : "") + (sale.receivableBillId ? "   Título " + sale.receivableBillId : ""),
@@ -20412,134 +20564,133 @@ function baixarPropostaAcordoPdf(results, nomeArquivo) {
   ].filter(Boolean);
   idLinhas.forEach((linha) => {
     pdf.text(pdf.splitTextToSize(linha, largura), m, y);
-    y += 4.5;
+    y += 4;
   });
-  y += 2;
 
-  const desenharSecao = (titulo) => {
+  const garantir = (altura) => {
+    if (y + altura > 286) {
+      pdf.addPage();
+      y = 12;
+    }
+  };
+  const secao = (titulo) => {
+    garantir(10);
     pdf.setFont("helvetica", "bold");
     pdf.setFontSize(10);
     pdf.setTextColor(16, 84, 54);
-    pdf.text(titulo, m, y);
-    y += 5;
+    pdf.text(titulo, m, y + 5);
+    y += 7;
   };
-  const escrever = (texto) => {
-    pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(9);
-    pdf.setTextColor(15, 23, 42);
-    const linhas = pdf.splitTextToSize(texto, largura);
-    pdf.text(linhas, m, y + 4);
-    y += 4 + linhas.length * 4.2;
-  };
-
-  desenharSecao("Como está hoje");
-  const pagoValor = sit.liquido > 0.009 ? sit.liquido : sit.pago;
-  const linhasHoje = [
-    ["Pago", sit.qtdPagas + " parc.", brl(pagoValor), sit.pct + "% do contrato"],
-    ["Vencido", sit.qtdVencidas + " parc.", brl(sit.valorVencidas), ""],
-    ["A vencer", sit.qtdAVencer + " parc.", brl(sit.valorAVencer), ""],
-    ["Contrato", sit.totalParc + " parc.", brl(sit.totalValor), ""]
-  ];
-  if (typeof pdf.autoTable === "function") {
-    pdf.autoTable({
-      startY: y + 2,
-      margin: { left: m, right: m },
+  const tabela = (opts) => {
+    if (typeof pdf.autoTable !== "function") return false;
+    garantir(16);
+    pdf.autoTable(Object.assign({
+      startY: y,
+      margin: { left: m, right: m, top: 12, bottom: 12 },
       theme: "grid",
-      styles: { fontSize: 8, cellPadding: 1.6, textColor: [15, 23, 42] },
-      headStyles: { fillColor: [16, 84, 54], textColor: 255, fontStyle: "bold" },
-      columnStyles: { 2: { halign: "right" }, 3: { halign: "right" } },
-      head: [["", "Parcelas", "Valor", ""]],
-      body: linhasHoje
+      styles: { fontSize: 7, cellPadding: 1, textColor: [15, 23, 42], overflow: "linebreak" },
+      headStyles: { fillColor: [16, 84, 54], textColor: 255, fontStyle: "bold", fontSize: 7 },
+      showHead: "everyPage"
+    }, opts));
+    y = pdf.lastAutoTable.finalY + 3;
+    return true;
+  };
+
+  secao("Como está hoje");
+  const pagos = [["Parcelas pagas", String(sit.qtdParcelasPagas || 0)], ["Recebido", brl(sit.pago)]];
+  if ((sit.juros || 0) > 0.009) pagos.push(["Juros", brl(sit.juros)]);
+  if ((sit.desconto || 0) > 0.009) pagos.push(["Desconto", brl(sit.desconto)]);
+  tabela({
+    head: [["", ""]],
+    body: pagos,
+    columnStyles: { 1: { halign: "right", fontStyle: "bold" } },
+    tableWidth: 78
+  });
+
+  secao("Parcelas em aberto");
+  tabela({
+    head: [["Nº", "Vencimento", "ID", "Indexador", "Principal", "Corrigido", "Marcada"]],
+    body: abertas.map((l) => [l.num, l.venc, l.id || "—", l.indice || "—", l.principal, l.corrigido, l.marcada ? "Sim" : ""]),
+    headStyles: { fillColor: [230, 81, 0], textColor: 255, fontStyle: "bold", fontSize: 7 },
+    columnStyles: { 4: { halign: "right" }, 5: { halign: "right" }, 6: { halign: "center" } },
+    didParseCell: (data) => {
+      if (data.section !== "body") return;
+      const linha = abertas[data.row.index];
+      if (linha && linha.vencida) data.cell.styles.fillColor = [255, 243, 224];
+    }
+  });
+  const rodapeAberto = [
+    [renegTxtEl("reneg-orange-vencidas"), renegTxtEl("reneg-orange-vencidas-val")],
+    [renegTxtEl("reneg-orange-avencer"), renegTxtEl("reneg-orange-avencer-val")],
+    ["Total parcelas: " + renegTxtEl("reneg-orange-total-count"), "Total a pagar: " + renegTxtEl("reneg-orange-total-val")],
+    ["Última parcela atual: " + renegTxtEl("reneg-orange-ultima"), ""]
+  ].filter((ln) => ln[0]);
+  if (rodapeAberto.length) {
+    tabela({
+      body: rodapeAberto,
+      theme: "plain",
+      styles: { fontSize: 8, cellPadding: 0.8, textColor: [191, 54, 12] },
+      columnStyles: { 1: { halign: "right", fontStyle: "bold" } }
     });
-    y = pdf.lastAutoTable.finalY + 6;
-  } else {
-    y += 2;
-    linhasHoje.forEach((ln) => { escrever(ln.filter(Boolean).join("   ")); });
   }
 
-  desenharSecao("Como fica");
-  const listaNums = nums.length > 8 ? (nums[0] + " a " + nums[nums.length - 1]) : nums.join(", ");
-  const fraseMarcadas = nums.length
-    ? (nums.length + " parcela" + (nums.length === 1 ? "" : "s") + " marcada" + (nums.length === 1 ? "" : "s") + " (nº " + listaNums + ")")
-    : "as parcelas marcadas";
-  escrever("Modalidade " + nomeMod + ". Sinal de " + brl(results.sinalValue) + " (" + (Number(results.sinalPct) || 0) + "%) com vencimento em " + (sinalData || "—") + ". " + fraseMarcadas.charAt(0).toUpperCase() + fraseMarcadas.slice(1) + " formam o saldo de " + brl(results.grossDebt) + ".");
-
-  const alteradas = agenda.filter((l) => l.tipo === "SOMADA" || l.tipo === "DILUÍDA" || l.tipo === "DILUIDA" || l.tipo === "ACORDO");
-  const mantidas = agenda.filter((l) => l.tipo === "MANTIDA");
-  if (cenario === "diluir") {
-    const primeira = alteradas[0];
-    const ultima = alteradas[alteradas.length - 1];
-    escrever("Depois do sinal, esse saldo é repartido nas " + alteradas.length + " parcelas que ainda vão vencer"
-      + (primeira && ultima ? ", de " + primeira.data + " a " + ultima.data : "")
-      + ". Cada uma recebe cerca de " + brl(results.installmentValue) + " a mais. O contrato não ganha parcela nova.");
-  } else if (cenario === "somar") {
-    escrever("Depois do sinal, o saldo vira " + (Number(results.instQty) || alteradas.length) + " parcelas de " + brl(results.installmentValue) + ", somadas às próximas que vão vencer:");
-    const corpo = alteradas.slice(0, 8).map((l) => {
-      const num = renegNumPorData(l.data);
-      return [num ? "nº " + num : "—", l.data, l.original || "—", l.extra || "—", l.total || "—"];
-    });
-    if (corpo.length && typeof pdf.autoTable === "function") {
-      pdf.autoTable({
-        startY: y,
-        margin: { left: m, right: m },
-        theme: "grid",
-        styles: { fontSize: 8, cellPadding: 1.4, textColor: [15, 23, 42] },
-        headStyles: { fillColor: [16, 84, 54], textColor: 255, fontStyle: "bold" },
-        columnStyles: { 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" } },
-        head: [["Parcela", "Vencimento", "Original", "Acréscimo", "Fica em"]],
-        body: corpo
-      });
-      y = pdf.lastAutoTable.finalY + 4;
-    }
-    if (mantidas.length) {
-      const valorMantida = mantidas[0].total || mantidas[0].original || "";
-      escrever("As outras " + mantidas.length + " parcelas seguem em " + valorMantida + ", de " + mantidas[0].data + " até " + mantidas[mantidas.length - 1].data + ".");
-    }
-  } else {
-    const mostrar = alteradas.slice(0, 8);
-    escrever("Depois do sinal, o saldo vira " + (Number(results.instQty) || alteradas.length) + " parcelas de " + brl(results.installmentValue)
-      + (alteradas.length ? ", de " + alteradas[0].data + " a " + alteradas[alteradas.length - 1].data : "") + ".");
-    if (mostrar.length && mostrar.length <= 8 && typeof pdf.autoTable === "function") {
-      pdf.autoTable({
-        startY: y,
-        margin: { left: m, right: m },
-        theme: "grid",
-        styles: { fontSize: 8, cellPadding: 1.4, textColor: [15, 23, 42] },
-        headStyles: { fillColor: [16, 84, 54], textColor: 255, fontStyle: "bold" },
-        columnStyles: { 1: { halign: "right" } },
-        head: [["Vencimento", "Valor"]],
-        body: mostrar.map((l) => [l.data, l.total])
-      });
-      y = pdf.lastAutoTable.finalY + 4;
-    }
-    if (mantidas.length) {
-      escrever("As " + mantidas.length + " parcelas do contrato que continuam passam a vencer depois do acordo, até " + mantidas[mantidas.length - 1].data + ".");
-    }
-  }
-
-  const totalTela = document.getElementById("reneg-green-total-pagar");
-  const ultimaTela = document.getElementById("reneg-green-ultima");
-  if (totalTela && totalTela.textContent) {
-    escrever("Total desta proposta: " + totalTela.textContent.trim() + (ultimaTela && ultimaTela.textContent ? ", com última parcela em " + ultimaTela.textContent.trim() + "." : "."));
-  }
-
-  const caixaH = 16;
-  pdf.setFillColor(232, 243, 238);
-  pdf.roundedRect(m, y, largura, caixaH, 1.5, 1.5, "F");
+  secao("Como fica");
+  const mesNome = info.mes ? RENEG_MESES[info.mes] : "";
+  let linhaIndice = info.rotulo
+    ? ("Indexador: " + info.rotulo + (info.sem ? ". Sem reajuste de parcela." : (mesNome && info.proximo ? ". Reajuste em " + mesNome + ", a partir de " + info.proximo + "." : ".")))
+    : "Indexador: não identificado nesta tela.";
+  garantir(8);
   pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(9);
-  pdf.setTextColor(16, 84, 54);
-  pdf.text("Próximo reajuste", m + 3, y + 5);
-  pdf.setFont("helvetica", "normal");
-  pdf.setTextColor(15, 23, 42);
-  const reajLinhas = pdf.splitTextToSize(reaj.texto, largura - 6);
-  pdf.text(reajLinhas.slice(0, 2), m + 3, y + 10);
-  y += caixaH + 6;
-
   pdf.setFontSize(8);
-  pdf.setTextColor(71, 85, 105);
-  const aviso = "Esta proposta só vira acordo se o sinal de " + brl(results.sinalValue) + " for pago até " + (sinalData || "a data combinada") + ". Sem esse pagamento, ela expira em " + (expira || "dois dias depois") + ".";
-  pdf.text(pdf.splitTextToSize(aviso, largura), m, Math.min(y, 284));
+  pdf.setTextColor(15, 23, 42);
+  pdf.text(pdf.splitTextToSize(linhaIndice, largura), m, y + 3);
+  y += 7;
+
+  const cronograma = agenda.map((l) => {
+    const num = renegNumPorData(l.data);
+    const marca = renegMarcaReajuste(l.data, l.tipo, info);
+    return [num || "—", l.tipo || "—", l.data || "—", l.original || "—", l.extra || "—", l.total || "—", marca];
+  });
+  tabela({
+    head: [["Parcela", "Tipo", "Vencimento", "Original", "Acréscimo", "Total", "Reajuste"]],
+    body: cronograma,
+    columnStyles: { 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" }, 6: { halign: "center", fontStyle: "bold" } },
+    didParseCell: (data) => {
+      if (data.section === "body" && data.row.raw && data.row.raw[6]) {
+        data.cell.styles.fillColor = [232, 243, 238];
+        if (data.column.index === 6) data.cell.styles.textColor = [16, 84, 54];
+      }
+    }
+  });
+
+  const extraVisivel = document.getElementById("reneg-green-extra-row");
+  const rodapeNovo = [
+    [renegTxtEl("reneg-green-sinal-label"), renegTxtEl("reneg-green-sinal-val")],
+    [renegTxtEl("reneg-green-acordo-label"), renegTxtEl("reneg-green-acordo-val")],
+    [renegTxtEl("reneg-green-mantidas-label"), renegTxtEl("reneg-green-mantidas-val")]
+  ];
+  if (extraVisivel && extraVisivel.style.display !== "none" && renegTxtEl("reneg-green-extra-label")) {
+    rodapeNovo.push([renegTxtEl("reneg-green-extra-label"), renegTxtEl("reneg-green-extra-val")]);
+  }
+  rodapeNovo.push(
+    ["Total parcelas: " + renegTxtEl("reneg-green-total-parcelas"), "Total a pagar: " + renegTxtEl("reneg-green-total-pagar")],
+    ["Última parcela: " + renegTxtEl("reneg-green-ultima"), ""]
+  );
+  tabela({
+    body: rodapeNovo.filter((ln) => ln[0]),
+    theme: "plain",
+    styles: { fontSize: 8, cellPadding: 0.8, textColor: [27, 94, 32] },
+    columnStyles: { 1: { halign: "right", fontStyle: "bold" } }
+  });
+
+  if ((Number(results.sinalValue) || 0) > 0.009) {
+    garantir(12);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(8);
+    pdf.setTextColor(71, 85, 105);
+    const aviso = "Sinal de " + brl(results.sinalValue) + " até " + (sinalData || "a data combinada") + ". Sem o pagamento, a proposta expira em " + (expira || "dois dias depois") + ".";
+    pdf.text(pdf.splitTextToSize(aviso, largura), m, y + 3);
+  }
   pdf.save(nomeArquivo);
 }
 
@@ -29888,9 +30039,7 @@ window.checkAgendaAlarms = function() {
                             <i data-lucide="bell-ringing" style="width: 18px;"></i> Lembrete
                             ${ownerInfo}
                         </h5>
-                        <button type="button" style="background: none; border: none; color: #94a3b8; cursor: pointer; padding: 0; margin-left: 10px;" onclick="window.closeAgendaAlarmToast(this)">
-                            <i data-lucide="x" style="width: 16px;"></i>
-                        </button>
+                        <button type="button" class="btn btn-fechar" onclick="window.closeAgendaAlarmToast(this)">Fechar</button>
                     </div>
                     <p style="margin: 0 0 12px 0; font-size: 0.95rem; color: #334155; line-height: 1.4; font-weight: 500; font-family: 'Comic Sans MS', 'Chalkboard SE', 'Comic Neue', cursive;">
                         ${noteObj.text}
@@ -34495,7 +34644,11 @@ window.paintFilaSignalCells = function() {
       ? window.relHouseSignalHtml(client)
       : window.filaSignalHtml(client);
   });
-  if (window.lucide) lucide.createIcons();
+  if (window.lucide) {
+    document.querySelectorAll("#defaulters-table-body, #subjudice-table-body, #zeropaid-table-body").forEach((root) => {
+      lucide.createIcons({ root: root });
+    });
+  }
 };
 
 window.ensureFilaSignalsIndex = function() {
@@ -38690,9 +38843,7 @@ window.openEtapaModal = function(id = 'new', parentId = null) {
             <div style="background: #fff; width: 450px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); overflow: hidden; display: flex; flex-direction: column;">
                 <div style="padding: 15px 20px; background: #004E33; color: white; display: flex; justify-content: space-between; align-items: center;">
                     <h3 style="margin: 0; font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px;"><i data-lucide="scale" style="width: 18px; color: #fff;"></i> <span id="etapa-modal-title">Editar Etapa</span></h3>
-                    <button onclick="document.getElementById('etapa-judicial-modal').style.display='none'" style="background: transparent; border: none; color: white; cursor: pointer;">
-                        <i data-lucide="x" style="width: 20px; height: 20px;"></i>
-                    </button>
+                    <button type="button" class="btn btn-fechar" onclick="document.getElementById('etapa-judicial-modal').style.display='none'">Fechar</button>
                 </div>
                 <div style="padding: 20px; display: flex; flex-direction: column; gap: 15px;">
                     <input type="hidden" id="etapa-modal-id">
@@ -38814,9 +38965,7 @@ window.openJudicialOptionsEditor = function() {
             <h3 style="margin: 0; font-size: 1.25rem; color: var(--color-primary); display: flex; align-items: center; gap: 10px;">
               <i data-lucide="scale" style="width: 20px; height: 20px;"></i> Configurar Etapas
             </h3>
-            <button onclick="window.closeJudicialOptionsEditor()" style="background: none; border: none; cursor: pointer; color: #94a3b8; padding: 4px; border-radius: 6px; transition: background 0.2s;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='none'">
-              <i data-lucide="x" style="width: 20px; height: 20px;"></i>
-            </button>
+            <button type="button" class="btn btn-fechar" onclick="window.closeJudicialOptionsEditor()">Fechar</button>
           </div>
           
           <div id="jud-list-container" style="max-height: 280px; overflow-y: auto; margin-bottom: 20px; padding-right: 8px; padding-left: 2px; padding-top: 2px;"></div>
@@ -39219,9 +39368,7 @@ window.openEtapaFinanciamentoModal = function(id = "new", parentId = null) {
       <div style="background: #fff; width: 450px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); overflow: hidden; display: flex; flex-direction: column;">
         <div style="padding: 15px 20px; background: #004E33; color: white; display: flex; justify-content: space-between; align-items: center;">
           <h3 style="margin: 0; font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px;"><i data-lucide="landmark" style="width: 18px; color: #fff;"></i> <span id="etapa-fin-modal-title">Editar Etapa</span></h3>
-          <button onclick="document.getElementById('etapa-financiamento-modal').style.display='none'" style="background: transparent; border: none; color: white; cursor: pointer;">
-            <i data-lucide="x" style="width: 20px; height: 20px;"></i>
-          </button>
+          <button type="button" class="btn btn-fechar" onclick="document.getElementById('etapa-financiamento-modal').style.display='none'">Fechar</button>
         </div>
         <div style="padding: 20px; display: flex; flex-direction: column; gap: 15px;">
           <input type="hidden" id="etapa-fin-modal-id">
@@ -44550,9 +44697,7 @@ window.openGestaoDocumentoMenu = function(ctx) {
       <div class="moura-gestao-docs-panel" role="dialog" aria-modal="true" aria-labelledby="moura-gestao-docs-title">
         <header>
           <h3 id="moura-gestao-docs-title">O que deseja gerenciar?</h3>
-          <button type="button" class="btn btn-outline btn-sm" onclick="closeGestaoDocumentoMenu()" title="Fechar" style="padding:4px 8px;">
-            <i data-lucide="x" style="width:16px;height:16px;"></i>
-          </button>
+          <button type="button" class="btn btn-fechar" onclick="closeGestaoDocumentoMenu()">Fechar</button>
         </header>
         <div class="moura-gestao-docs-list">
           <button type="button" class="moura-gestao-docs-item" onclick="escolherGestaoDocumento('aditamento')">
@@ -45003,7 +45148,7 @@ window.openOptionsEditor = function(type) {
     </style>
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
       <h3 style="margin: 0; font-size: 1.25rem; color: var(--color-primary); display: flex; align-items: center; gap: 10px;"><i data-lucide="settings" style="width: 20px; height: 20px;"></i> ${title}</h3>
-      <button onclick="closeOptionsEditor()" style="background: none; border: none; cursor: pointer; color: #94a3b8; padding: 4px; border-radius: 6px; transition: background 0.2s;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='none'"><i data-lucide="x" style="width: 20px; height: 20px;"></i></button>
+      <button type="button" class="btn btn-fechar" onclick="closeOptionsEditor()">Fechar</button>
     </div>
     <div id="options-list-container" style="max-height: 280px; overflow-y: auto; margin-bottom: 20px; padding-right: 8px; padding-left: 2px; padding-top: 2px;"></div>
     <div style="display: flex; gap: 10px; margin-bottom: 25px;">
@@ -51471,9 +51616,7 @@ window.showMapaJuridicoOverlay = function(ui) {
     </style>
     <div class="mapa-header" style="flex-shrink:0;background:linear-gradient(135deg,#0d4630 0%,#105436 48%,#1a7a50 100%);box-shadow:0 4px 16px rgba(16,84,54,0.28);overflow:visible;">
       <div style="display:flex;align-items:center;gap:12px;padding:14px 18px 12px;">
-        <button type="button" onclick="closeMapaJuridico()" style="display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,0.12);color:#fff;border:1px solid rgba(255,255,255,0.35);border-radius:8px;padding:7px 12px;font-weight:700;font-size:0.82rem;cursor:pointer;">
-          <i data-lucide="x" style="width:16px;"></i> Fechar
-        </button>
+        <button type="button" class="btn btn-fechar" onclick="closeMapaJuridico()">Fechar</button>
         <div style="flex:1;">
           <div style="font-size:1.08rem;font-weight:800;color:#fff;letter-spacing:0.01em;">Mapa Jurídico — Fases processuais</div>
           <div style="font-size:0.75rem;color:rgba(255,255,255,0.82);">${ui.nowLabel || ""}</div>

@@ -1477,7 +1477,7 @@ function renderAnexosModule(opts) {
         <div id="upload-summary" style="margin-bottom: 20px; text-align: left; max-height: 150px; overflow-y: auto; font-size: 0.9rem; color: var(--color-text);"></div>
 
         <button id="btn-cancelar-upload" class="btn btn-danger" onclick="AnexosApp.cancelarUpload()">Cancelar Envio</button>
-        <button id="btn-fechar-upload" class="btn btn-primary" style="display: none;" onclick="AnexosApp.fecharUploadModal()">Fechar</button>
+        <button type="button" id="btn-fechar-upload" class="btn btn-fechar" style="display: none;" onclick="AnexosApp.fecharUploadModal()">Fechar</button>
       </div>
     </div>
   `;
@@ -1764,7 +1764,7 @@ const AnexosApp = {
           <div style="min-width:0;font-weight:700;font-size:0.92rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${anexosEsc(name)}</div>
           <div style="display:flex;gap:8px;flex-shrink:0;">
             <a href="${url}" target="_blank" rel="noopener" style="border:none;background:rgba(255,255,255,0.15);color:#fff;padding:6px 10px;border-radius:8px;text-decoration:none;font-size:0.78rem;font-weight:600;">Nova aba</a>
-            <button type="button" onclick="AnexosApp.closeFilePreview()" style="border:none;background:rgba(255,255,255,0.15);color:#fff;width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:1.2rem;line-height:1;">×</button>
+            <button type="button" class="btn btn-fechar" onclick="AnexosApp.closeFilePreview()">Fechar</button>
           </div>
         </div>
         ${body}

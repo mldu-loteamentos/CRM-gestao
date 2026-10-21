@@ -1063,7 +1063,7 @@ window.showVistoriaInfo = function(id) {
                 <h3 style="margin: 0; font-size: 1.15rem; display: flex; align-items: center; gap: 8px;">
                     <i data-lucide="check-circle" style="width: 20px;"></i> Detalhes da Vistoria
                 </h3>
-                <button onclick="document.body.removeChild(document.getElementById('modal-vistoria-info'))" style="background: none; border: none; cursor: pointer; color: rgba(255,255,255,0.8); font-size: 1.2rem;">✕</button>
+                <button type="button" class="btn btn-fechar" onclick="document.body.removeChild(document.getElementById('modal-vistoria-info'))">Fechar</button>
             </div>
             <div style="padding: 24px; overflow-y: auto; color: #334155; font-size: 0.95rem; line-height: 1.6;">
                 ${cardsHtml}

@@ -1134,7 +1134,7 @@ window.VerificarConstrucaoApp = {
                             </div>
                             <h2 style="margin:0; font-size:1.15rem; color:#fff; font-weight:600;">Validar Vistoria</h2>
                         </div>
-                        <button onclick="document.getElementById('modal-validar-vistoria').style.display='none'" style="background:rgba(255,255,255,0.15); border:none; cursor:pointer; color:#fff; font-size:1.1rem; width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; transition:background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">✕</button>
+                        <button type="button" class="btn btn-fechar" onclick="document.getElementById('modal-validar-vistoria').style.display='none'">Fechar</button>
                     </div>
                     <div id="validar-vistoria-body" style="padding:28px; min-height:200px;">
                         Carregando...
@@ -1163,15 +1163,13 @@ window.VerificarConstrucaoApp = {
                                 <p style="margin:2px 0 0; font-size:0.78rem; color:rgba(255,255,255,0.7);">Empreendimentos com obra ativa — clientes dispensados de vistoria</p>
                             </div>
                         </div>
-                        <button onclick="document.getElementById('modal-obras-andamento').style.display='none'" style="background:rgba(255,255,255,0.15); border:none; cursor:pointer; color:#fff; font-size:1.1rem; width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; transition:background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">✕</button>
+                        <button type="button" class="btn btn-fechar" onclick="document.getElementById('modal-obras-andamento').style.display='none'">Fechar</button>
                     </div>
                     <div style="padding:20px 28px; max-height:55vh; overflow-y:auto;">
                         <div id="obras-andamento-list">Carregando...</div>
                     </div>
                     <div style="padding:18px 28px; border-top:1px solid #e2e8f0; display:flex; justify-content:flex-end; gap:12px; background:#f8fafc; border-radius: 0 0 14px 14px;">
-                        <button onclick="document.getElementById('modal-obras-andamento').style.display='none'" style="padding:10px 22px; border:2px solid #94a3b8; color:#64748b; background:transparent; border-radius:8px; cursor:pointer; font-weight:600; font-size:0.9rem; transition: all 0.2s;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">
-                            Fechar
-                        </button>
+                        <button type="button" class="btn btn-fechar" onclick="document.getElementById('modal-obras-andamento').style.display='none'">Fechar</button>
                         <button onclick="window.VerificarConstrucaoApp.salvarObrasAndamento()" style="padding:10px 22px; border:none; color:#fff; background:linear-gradient(135deg, #153123 0%, #1e4a35 100%); border-radius:8px; cursor:pointer; font-weight:600; font-size:0.9rem; display:flex; align-items:center; gap:6px; box-shadow:0 4px 12px rgba(21,49,35,0.3); transition: all 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
                             <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
                             Salvar

@@ -725,7 +725,7 @@ const CentrosCustoApp = {
         <div style="background: white; border-radius: 8px; width: 720px; max-width: 95%; max-height: 92vh; box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: flex; flex-direction: column;">
           <div style="padding: 16px 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;">
             <h3 style="margin: 0; font-size: 1.1rem; color: var(--color-primary);">Editar Centro de Custo: ${cc.id} - ${cc.name}</h3>
-            <button onclick="CentrosCustoApp.closeModal()" style="background: none; border: none; cursor: pointer; font-size: 1.2rem; color: #999;">&times;</button>
+            <button type="button" class="btn btn-fechar" onclick="CentrosCustoApp.closeModal()">Fechar</button>
           </div>
           <div style="padding: 20px; display: flex; flex-direction: column; gap: 20px; overflow-y: auto;">
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
@@ -875,7 +875,7 @@ const CentrosCustoApp = {
         <div style="background: white; border-radius: 8px; width: 400px; max-width: 95%; box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: flex; flex-direction: column;">
           <div style="padding: 16px 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;">
             <h3 style="margin: 0; font-size: 1.1rem; color: var(--color-primary);">Tipos de Centro de Custo</h3>
-            <button onclick="CentrosCustoApp.closeManageTiposModal(${currentCcId})" style="background: none; border: none; cursor: pointer; font-size: 1.2rem; color: #999;">&times;</button>
+            <button type="button" class="btn btn-fechar" onclick="CentrosCustoApp.closeManageTiposModal(${currentCcId})">Fechar</button>
           </div>
           <div style="padding: 20px; display: flex; flex-direction: column; gap: 15px;">
             <div style="display: flex; gap: 8px;">

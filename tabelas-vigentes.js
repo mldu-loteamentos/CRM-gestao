@@ -1132,7 +1132,7 @@ const TabelasVigentesApp = {
       <div class="modal-box tvig-editor-box${ro ? " is-readonly" : ""}" onclick="event.stopPropagation()">
         <div class="modal-header tvig-editor-head">
           <h3>${this.esc(ed.title)}</h3>
-          <button type="button" class="modal-close" onclick="TabelasVigentesApp.closeEditor()"><i data-lucide="x"></i></button>
+          <button type="button" class="btn btn-fechar" onclick="TabelasVigentesApp.closeEditor()">Fechar</button>
         </div>
         <div class="tvig-editor-body">
           <div class="tvig-editor-grid">
@@ -1217,7 +1217,7 @@ const TabelasVigentesApp = {
         </div>
         <div class="tvig-editor-foot">
           ${ro
-            ? `<button type="button" class="btn btn-cancel" onclick="TabelasVigentesApp.closeEditor()">Fechar</button>`
+            ? `<button type="button" class="btn btn-fechar" onclick="TabelasVigentesApp.closeEditor()">Fechar</button>`
             : `<button type="button" class="btn btn-cancel" onclick="TabelasVigentesApp.closeEditor()">Cancelar</button>
           <button type="button" class="btn btn-primary" onclick="TabelasVigentesApp.saveEditor()">
             <i data-lucide="save" style="width:16px;"></i> Salvar tabela
