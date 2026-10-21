@@ -7497,6 +7497,7 @@ window.toggleSort = function(col) {
 };
 
 window.FILA_QUEUE_GROUPS = {
+  PROPOSTA_CONFISSAO: -3,
   PROPOSTA_SINAL: -2,
   ACORDO_INTERNO_QUEBRADO: 0,
   ZERO_PAGO: 1,
@@ -7598,6 +7599,9 @@ window.clientIsAnaliseInternaJuridico = function(client, thresholdJuridico) {
 window.getFilaQueueGroup = function(client, thresholdJuridico) {
   const cutoff = Number.isFinite(Number(thresholdJuridico)) ? Number(thresholdJuridico) : 151;
   const G = window.FILA_QUEUE_GROUPS;
+  if (typeof window.clientTemPropostaParaConfessao === "function" && window.clientTemPropostaParaConfessao(client)) {
+    return G.PROPOSTA_CONFISSAO;
+  }
   if (typeof window.clientTemPropostaAguardandoSinal === "function" && window.clientTemPropostaAguardandoSinal(client)) {
     return G.PROPOSTA_SINAL;
   }
@@ -7642,6 +7646,7 @@ window.getFilaQueueGroup = function(client, thresholdJuridico) {
 window.getFilaQueueGroupMeta = function(group) {
   const G = window.FILA_QUEUE_GROUPS;
   const map = {
+    [G.PROPOSTA_CONFISSAO]: { label: 'Emitir termo de confissão de dívida', bg: '#ecfdf5', color: '#105436' },
     [G.PROPOSTA_SINAL]: { label: 'Proposta aguardando sinal', bg: '#fffbeb', color: '#92400e' },
     [G.NEX_CUMPRIDA]: { label: 'Nex cumprida', bg: '#ecfdf5', color: '#105436' },
     [G.ACORDO_INTERNO_QUEBRADO]: { label: 'Acordo Interno Quebrado', bg: '#ffedd5', color: '#9a3412' },
@@ -7796,7 +7801,7 @@ window.cancelMotivosNormalizar = function(lista) {
     if (!/^\d{2}$/.test(codigo) || codigo === "00" || nome.length < 2) return;
     map[codigo] = { codigo: codigo, nome: nome };
   });
-  return Object.keys(map).sort().map(function(k) { return map[k]; });
+  return Object.keys(map).sort(function(a, b) { return Number(a) - Number(b); }).map(function(k) { return map[k]; });
 };
 
 window.cancelMotivosLerBruto = function(raw) {
@@ -7834,7 +7839,7 @@ window.cancelMotivosComPadrao = function(lista) {
   const norm = window.cancelMotivosNormalizar(lista);
   if (norm.some(function(m) { return m.codigo === "24"; })) return { lista: norm, mudou: false };
   norm.push({ codigo: "24", nome: "Contrato Nulo" });
-  norm.sort(function(a, b) { return String(a.codigo).localeCompare(String(b.codigo)); });
+  norm.sort(function(a, b) { return Number(a.codigo) - Number(b.codigo); });
   return { lista: norm, mudou: true };
 };
 
@@ -7849,7 +7854,7 @@ window.cancelMotivosLista = function() {
     if (map[m.codigo] && window.CANCEL_MOTIVOS_PADRAO.some(function(p) { return p.codigo === m.codigo; })) return;
     map[m.codigo] = m;
   });
-  return Object.keys(map).sort().map(function(k) { return map[k]; });
+  return Object.keys(map).sort(function(a, b) { return Number(a) - Number(b); }).map(function(k) { return map[k]; });
 };
 
 window.cancelMotivoRotulo = function(iniciativa, motivo) {
@@ -7951,7 +7956,7 @@ window.renderMotivosCancelamento = async function(opts) {
     if (!document.getElementById("motivos-cancelamento-root")) return;
   }
   const editando = window._motivoCancelEdit || "";
-  const lista = window.cancelMotivosLista();
+  const lista = Array.isArray(opts.lista) ? window.cancelMotivosNormalizar(opts.lista) : window.cancelMotivosLista();
   const destaque = String(opts.destaque || "");
   const linhas = lista.map(function(m) {
     const cod = window.cancelContratoEsc(m.codigo);
@@ -7994,7 +7999,11 @@ window.renderMotivosCancelamento = async function(opts) {
     }
   }
   const linhaNova = destaque ? root.querySelector('tr[data-motivo="' + window.cancelContratoEsc(destaque) + '"]') : null;
-  if (linhaNova && typeof linhaNova.scrollIntoView === "function") linhaNova.scrollIntoView({ block: "nearest" });
+  if (linhaNova && typeof linhaNova.scrollIntoView === "function") {
+    requestAnimationFrame(function() {
+      linhaNova.scrollIntoView({ block: "end", inline: "nearest" });
+    });
+  }
   try { if (window.lucide) window.lucide.createIcons({ root: root }); } catch (e) {}
 };
 
@@ -8020,6 +8029,7 @@ window.motivoCancelSalvar = async function() {
   const ok = !!(gravou && gravou.ok);
   await window.renderMotivosCancelamento({
     pularSync: true,
+    lista: gravou && gravou.catalogo,
     destaque: codigo,
     avisoOk: ok,
     aviso: ok ? (anterior ? "Motivo atualizado." : "Motivo incluído.") : ((gravou && gravou.erro) || "O motivo não gravou na base.")
@@ -12064,7 +12074,9 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
           <td style="white-space: nowrap; text-align: center; width: 1%;">
             <div style="display: flex; align-items: center; justify-content: center;">
               ${(() => {
-                  const agingInner = (typeof window.clientTemPropostaAguardandoSinal === "function" && window.clientTemPropostaAguardandoSinal(client) && typeof window.getPropostaSinalAgingHtml === "function")
+                  const agingInner = (typeof window.clientTemPropostaParaConfessao === "function" && window.clientTemPropostaParaConfessao(client) && typeof window.getPropostaConfissaoAgingHtml === "function")
+                  ? window.getPropostaConfissaoAgingHtml(client)
+                  : (typeof window.clientTemPropostaAguardandoSinal === "function" && window.clientTemPropostaAguardandoSinal(client) && typeof window.getPropostaSinalAgingHtml === "function")
                   ? window.getPropostaSinalAgingHtml(client)
                   : (client.distratado && typeof window.clientIsSubjudiceIntegra === "function" && window.clientIsSubjudiceIntegra(client) && typeof window.filaAgingDistratadoHtml === "function")
                   ? window.filaAgingDistratadoHtml()
@@ -20121,6 +20133,26 @@ window.clientTemPropostaAguardandoSinal = function(client) {
   return window.renegPropostaEstaAtiva(window.renegPropostaDeCliente(client));
 };
 
+window.clientTemPropostaParaConfessao = function(client) {
+  const p = window.renegPropostaDeCliente(client);
+  return window.renegPropostaProntaParaConfessao(p) && !!p.sinalPago;
+};
+
+window.renegPropostaProntaParaConfessao = function(p) {
+  if (!p || p.status === "concluida" || p.status === "expirada") return false;
+  if (p.sinalPago) return true;
+  if (!window.renegPropostaEstaAtiva(p)) return false;
+  return window.renegSinalFoiPago(p.sinalValue, String(p.createdAt || "").slice(0, 10));
+};
+
+window.getPropostaConfissaoAgingHtml = function(client) {
+  const p = window.renegPropostaDeCliente(client);
+  const valor = (Number(p && p.sinalValue) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  return `<span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #105436; background-color: #ecfdf5; color: #105436; font-weight: 600;" title="O sinal de ${valor} foi baixado. Gere o termo de confissão de dívida.">
+    <i data-lucide="file-check" style="width: 14px; height: 14px;"></i> Emitir termo
+  </span>`;
+};
+
 window.getPropostaSinalAgingHtml = function(client) {
   const p = window.renegPropostaDeCliente(client);
   const prazo = renegIsoBr(p && p.sinalDue);
@@ -20149,7 +20181,7 @@ window.carregarRenegPropostas = function(force) {
       const data = d.data() || {};
       data.id = d.id;
       const limite = String(data.expiraEm || renegIsoMaisDias(data.sinalDue, 2) || "");
-      if (data.status !== "concluida" && data.status !== "expirada" && limite && hoje > limite) {
+      if (!data.sinalPago && data.status !== "concluida" && data.status !== "expirada" && limite && hoje > limite) {
         data.status = "expirada";
         vencer.push(d.id);
       }
@@ -20157,11 +20189,14 @@ window.carregarRenegPropostas = function(force) {
     });
     window._renegPropostasMap = map;
     window._renegPropostasEm = Date.now();
-    window._renegPropostasCarregando = null;
     vencer.forEach(function(id) {
       const ref = fc.doc(window.firebaseDb, "reneg_propostas", id);
       fc.setDoc(ref, { status: "expirada", expiradaEm: new Date().toISOString() }, { merge: true }).catch(function() {});
     });
+    if (typeof window.renegMarcarSinaisPagos === "function") {
+      try { await window.renegMarcarSinaisPagos(map); } catch (e) {}
+    }
+    window._renegPropostasCarregando = null;
     return map;
   })().catch(function(e) {
     window._renegPropostasCarregando = null;
@@ -20193,19 +20228,67 @@ function renegRecebimentosDoContrato() {
   return recs;
 }
 
-window.renegSinalFoiPago = function(valor, desdeIso) {
+window.renegSinalFoiPago = function(valor, desdeIso, recibos) {
   const alvo = Number(valor) || 0;
   if (!(alvo > 0)) return false;
-  const desde = window.parseSiengeDay ? window.parseSiengeDay(desdeIso) : null;
+  const lista = Array.isArray(recibos) ? recibos : renegRecebimentosDoContrato();
+  return lista.some(function(r) { return renegReciboConfereSinal(r, alvo, desdeIso); });
+};
+
+function renegReciboConfereSinal(r, alvo, desdeIso) {
+  if (!r || (typeof window.isWriteOffReceipt === "function" && window.isWriteOffReceipt(r))) return false;
+  const v = parseFloat(r.receiptValue || r.amount || r.value || r.netReceiptValue || 0);
   const tol = Math.max(2, alvo * 0.02);
-  return renegRecebimentosDoContrato().some(function(r) {
-    if (typeof window.isGenuineRecebimento === "function" && !window.isGenuineRecebimento(r)) return false;
-    const v = parseFloat(r.receiptValue || r.amount || r.value || r.netReceiptValue || 0);
-    if (!(v > 0) || Math.abs(v - alvo) > tol) return false;
-    const d = window.parseSiengeDay ? window.parseSiengeDay(r.receiptDate || r.date || r.paymentDate) : null;
-    if (desde && d && d < desde) return false;
-    return true;
+  if (!(v > 0) || Math.abs(v - alvo) > tol) return false;
+  const genuino = typeof window.isGenuineRecebimento === "function" && window.isGenuineRecebimento(r);
+  if (!genuino) {
+    const tipo = String(r.type || r.receiptType || r.receiptTypeId || r.typeId || "").trim();
+    const nome = String(r.typeName || r.receiptTypeName || r.description || "").trim();
+    if (tipo || nome) return false;
+  }
+  const d = window.parseSiengeDay ? window.parseSiengeDay(r.receiptDate || r.date || r.paymentDate) : null;
+  const desde = window.parseSiengeDay ? window.parseSiengeDay(desdeIso) : null;
+  if (desde && d && d < desde) return false;
+  return true;
+}
+
+window.renegMarcarSinaisPagos = async function(map) {
+  if (!map || typeof map.forEach !== "function") return;
+  const fc = window.firebaseCollections;
+  const abertas = [];
+  map.forEach(function(p) {
+    if (!p || p.sinalPago || p.status === "concluida" || p.status === "expirada") return;
+    if (!window.renegPropostaEstaAtiva(p)) return;
+    abertas.push(p);
   });
+  for (let i = 0; i < abertas.length; i++) {
+    const p = abertas[i];
+    const desde = String(p.createdAt || "").slice(0, 10);
+    let pago = false;
+    if (window.AppState && String(AppState.selectedSaleId || "") === String(p.saleId || "")) {
+      pago = window.renegSinalFoiPago(p.sinalValue, desde);
+    }
+    if (!pago && typeof window.siengeFetchWithRetry === "function" && p.saleId) {
+      const billId = String(p.saleId).replace(/^B-/i, "").split("-")[0];
+      const res = await window.siengeFetchWithRetry("/accounts-receivable/receivable-bills/" + encodeURIComponent(billId) + "/installments?limit=200", 1).catch(function() { return null; });
+      const insts = (res && res.results) || (Array.isArray(res) ? res : []);
+      const recs = [];
+      insts.forEach(function(inst) {
+        if (!inst) return;
+        (inst.receipts || []).forEach(function(r) { if (r) recs.push(r); });
+        if (inst.receiptDate && (inst.receiptValue || inst.isValidReceipt)) recs.push(inst);
+      });
+      pago = window.renegSinalFoiPago(p.sinalValue, desde, recs);
+    }
+    if (!pago) continue;
+    p.sinalPago = true;
+    p.sinalPagoEm = new Date().toISOString();
+    if (fc && fc.setDoc && fc.doc && window.firebaseDb) {
+      fc.setDoc(fc.doc(window.firebaseDb, "reneg_propostas", p.id || renegPropostaId(p.customerId, p.saleId)), {
+        sinalPago: true, sinalPagoEm: p.sinalPagoEm
+      }, { merge: true }).catch(function() {});
+    }
+  }
 };
 
 function renegPropostaAtual() {
@@ -20224,14 +20307,15 @@ window.atualizarBotaoReneg = function() {
     return;
   }
   const p = renegPropostaAtual();
-  const pago = p && window.renegPropostaEstaAtiva(p) && window.renegSinalFoiPago(p.sinalValue, String(p.createdAt || "").slice(0, 10));
+  const pago = window.renegPropostaProntaParaConfessao(p);
   label.textContent = pago ? "Gerar termo de confissão de dívida" : "Gerar proposta de acordo";
 };
 
 function renegMontarAvisoProposta(p, pago) {
   const box = document.getElementById("reneg-proposta-aviso");
   if (!box) return;
-  if (!p || !window.renegPropostaEstaAtiva(p)) {
+  const aberta = p && p.status !== "concluida" && p.status !== "expirada" && (p.sinalPago || window.renegPropostaEstaAtiva(p));
+  if (!aberta) {
     box.hidden = true;
     box.textContent = "";
     return;
@@ -20248,12 +20332,12 @@ function renegMontarAvisoProposta(p, pago) {
 window.renegChecarPropostaAtiva = async function() {
   try { await window.carregarRenegPropostas(true); } catch (e) { return; }
   const p = renegPropostaAtual();
-  if (!p || !window.renegPropostaEstaAtiva(p)) {
+  if (!p || p.status === "concluida" || p.status === "expirada" || (!p.sinalPago && !window.renegPropostaEstaAtiva(p))) {
     renegMontarAvisoProposta(null, false);
     window.atualizarBotaoReneg();
     return;
   }
-  const pago = window.renegSinalFoiPago(p.sinalValue, String(p.createdAt || "").slice(0, 10));
+  const pago = window.renegPropostaProntaParaConfessao(p);
   if (pago && !p.sinalPago) {
     p.sinalPago = true;
     const fc = window.firebaseCollections;
@@ -20774,7 +20858,7 @@ function generateAgreementPDF() {
   window._renegGerando = true;
   try {
   const proposta = renegPropostaAtual();
-  const pago = !!(proposta && window.renegPropostaEstaAtiva(proposta) && window.renegSinalFoiPago(proposta.sinalValue, String(proposta.createdAt || "").slice(0, 10)));
+  const pago = window.renegPropostaProntaParaConfessao(proposta);
   const modo = pago ? "confissao" : "proposta";
   if (modo === "proposta") {
     const unitProp = (g_renegSale && AppState.units && AppState.units[g_renegSale.unitId]) || {};
