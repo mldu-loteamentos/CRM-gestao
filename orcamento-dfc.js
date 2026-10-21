@@ -281,6 +281,84 @@ const OrcamentoDfcApp = {
     if (el) el.textContent = this._caixaMsg;
   },
 
+  docRealizado(companyId, parte) {
+    const base = "c" + String(companyId || "").replace(/\D/g, "");
+    return parte == null ? base : base + "__p" + parte;
+  },
+
+  async lerRealizadoSalvo(fim, empresas) {
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    const out = {};
+    if (!fx || !db || !fim) return out;
+    const partes = {};
+    try {
+      const snap = await fx.getDocs(fx.collection(db, "dfc_realizado"));
+      snap.forEach((docSnap) => {
+        const x = docSnap.data() || {};
+        if (x.tipo === "parte") partes[docSnap.id] = x.texto || "";
+      });
+      snap.forEach((docSnap) => {
+        const x = docSnap.data() || {};
+        if (x.tipo === "parte" || String(x.fim || "") !== String(fim)) return;
+        const emp = String(x.empresa || "");
+        if (!emp || empresas.indexOf(emp) < 0) return;
+        let texto = x.payload || "";
+        if (Array.isArray(x.partes) && x.partes.length) {
+          texto = "";
+          let ok = true;
+          x.partes.forEach((pid) => {
+            if (!partes[pid]) ok = false;
+            else texto += partes[pid];
+          });
+          if (!ok) return;
+        }
+        let cru = [];
+        try { cru = JSON.parse(texto || "[]"); } catch (e) { cru = []; }
+        if (!Array.isArray(cru)) return;
+        out[emp] = cru.map((r) => ({
+          companyId: emp,
+          gid: r[0],
+          code: r[1],
+          cc: r[2],
+          i: r[3],
+          v: Number(r[4]) || 0
+        }));
+      });
+    } catch (e) {}
+    return out;
+  },
+
+  async salvarRealizadoEmpresa(companyId, fim, rows) {
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (!fx || !db || !companyId) return false;
+    const compacto = (rows || []).map((r) => [r.gid, r.code, r.cc, r.i, Math.round((Number(r.v) || 0) * 100) / 100]);
+    const texto = JSON.stringify(compacto);
+    const id = this.docRealizado(companyId);
+    const LIM = 400000;
+    const ids = [];
+    if (texto.length > LIM) {
+      for (let i = 0, n = 0; i < texto.length; i += LIM, n++) {
+        const pid = this.docRealizado(companyId, n);
+        ids.push(pid);
+        await fx.setDoc(fx.doc(db, "dfc_realizado", pid), { tipo: "parte", pai: id, texto: texto.slice(i, i + LIM) });
+      }
+    }
+    await fx.setDoc(fx.doc(db, "dfc_realizado", id), {
+      empresa: String(companyId),
+      fim: fim,
+      em: new Date().toISOString(),
+      n: compacto.length,
+      payload: ids.length ? "" : texto,
+      partes: ids
+    });
+    for (let n = ids.length; n < 20; n++) {
+      fx.deleteDoc(fx.doc(db, "dfc_realizado", this.docRealizado(companyId, n))).catch(function () {});
+    }
+    return true;
+  },
+
   async buscarCaixa2026() {
     const fluxo = window.FluxoCaixaApp;
     const api = window.SiengeApiService;
@@ -301,6 +379,17 @@ const OrcamentoDfcApp = {
       this._caixaEstado = this._lancamentos2026.length ? "ok" : "vazio";
       return;
     }
+    let salvos = {};
+    try { salvos = await this.lerRealizadoSalvo(fim, empresas); } catch (e) { salvos = {}; }
+    const faltam = empresas.filter((id) => !Object.prototype.hasOwnProperty.call(salvos, id));
+    if (!faltam.length) {
+      this._lancamentos2026 = empresas.reduce((acc, id) => acc.concat(salvos[id] || []), []);
+      this._caixaChave = chave;
+      this._caixaEstado = this._lancamentos2026.length ? "ok" : "vazio";
+      this._caixaErro = "";
+      this._caixaAviso = "";
+      return;
+    }
     if (typeof fluxo.ensureCategories === "function") {
       try { await fluxo.ensureCategories(); } catch (e) {}
     }
@@ -308,23 +397,23 @@ const OrcamentoDfcApp = {
     const byId = {};
     grupos.forEach((g) => { if (g && g.id) byId[g.id] = g; });
     const corte = this.corteForecast();
-    const partes = new Array(empresas.length);
+    const partesMov = new Array(faltam.length);
     let cursor = 0;
     let feitas = 0;
     const self = this;
     const worker = async function () {
-      while (cursor < empresas.length) {
+      while (cursor < faltam.length) {
         const i = cursor++;
-        const id = empresas[i];
-        self.notaCaixa("Lendo o realizado de 2026 no caixa e banco · empresa " + id + " · " + (feitas + 1) + " de " + empresas.length);
+        const id = faltam[i];
+        self.notaCaixa("Lendo o realizado de 2026 no caixa e banco · empresa " + id + " · " + (feitas + 1) + " de " + faltam.length);
         const data = await api.getBankMovements("2026-01-01", fim, { selectionType: "M", companyId: id });
-        partes[i] = (data || []).map((m) => Object.assign({}, m, { companyId: (m && m.companyId) || id }));
+        partesMov[i] = (data || []).map((m) => Object.assign({}, m, { companyId: (m && m.companyId) || id }));
         feitas += 1;
       }
     };
-    const n = Math.min(3, empresas.length);
+    const n = Math.min(3, faltam.length);
     await Promise.all(Array.from({ length: n }, function () { return worker(); }));
-    let movs = partes.reduce((acc, rows) => acc.concat(rows || []), []);
+    let movs = partesMov.reduce((acc, rows) => acc.concat(rows || []), []);
     if (typeof window.siengeDedupeBankMovements === "function") movs = window.siengeDedupeBankMovements(movs);
     const lista = [];
     movs.forEach((mov) => {
@@ -348,10 +437,24 @@ const OrcamentoDfcApp = {
         });
       });
     });
-    this._lancamentos2026 = lista;
+    const porEmp = {};
+    lista.forEach((r) => {
+      const id = String(r.companyId || "");
+      if (!porEmp[id]) porEmp[id] = [];
+      porEmp[id].push(r);
+    });
+    let falhaNuvem = false;
+    await Promise.all(faltam.map((id) => this.salvarRealizadoEmpresa(id, fim, porEmp[id] || []).catch(() => { falhaNuvem = true; })));
+    const todos = [];
+    empresas.forEach((id) => {
+      if (Object.prototype.hasOwnProperty.call(salvos, id)) todos.push.apply(todos, salvos[id] || []);
+      else todos.push.apply(todos, porEmp[id] || []);
+    });
+    this._lancamentos2026 = todos;
     this._caixaChave = chave;
-    this._caixaEstado = lista.length ? "ok" : "vazio";
+    this._caixaEstado = todos.length ? "ok" : "vazio";
     this._caixaErro = "";
+    this._caixaAviso = falhaNuvem ? "O realizado de 2026 até " + fim.split("-").reverse().join("/") + " entrou na tela, mas não ficou salvo." : "";
   },
 
   acharBase(map, gid, code, cc) {
@@ -407,7 +510,8 @@ const OrcamentoDfcApp = {
     return null;
   },
 
-  montar() {
+  montar(opts) {
+    const aberto = !!(opts && opts.aberto);
     const plano = typeof PlanoFinanceiroApp !== "undefined" ? PlanoFinanceiroApp : null;
     const fluxo = typeof FluxoCaixaApp !== "undefined" ? FluxoCaixaApp : null;
     const base = this.base2026();
@@ -520,7 +624,7 @@ const OrcamentoDfcApp = {
         total,
         baseTotal
       });
-      if (!this.expanded.has(node.id)) return;
+      if (!aberto && !this.expanded.has(node.id)) return;
       children.forEach((ch) => walk(ch, level + 1));
       accs.forEach((a) => {
         const accId = "acc:" + node.id + ":" + a.conta;
@@ -540,7 +644,7 @@ const OrcamentoDfcApp = {
           total: a.months.reduce((x, y) => x + y, 0),
           baseTotal: (a.base || []).reduce((x, y) => x + y, 0)
         });
-        if (!ccs.length || !this.expanded.has(accId)) return;
+        if (!aberto && (!ccs.length || !this.expanded.has(accId))) return;
         ccs.forEach((c) => {
           const label = c.id === "—" ? "Sem centro de custo" : (c.name ? c.id + " - " + c.name : c.id);
           rows.push({
@@ -582,6 +686,9 @@ const OrcamentoDfcApp = {
         <div class="orc-dfc-tools">
           <div id="orc-dfc-emp-box"></div>
           <div id="orc-dfc-cc-box"></div>
+          <button type="button" class="btn btn-sm btn-excel" id="orc-dfc-excel" title="Exportar a tabela atual para Excel">
+            <i data-lucide="download" style="width:14px;height:14px;"></i> Excel
+          </button>
           <button type="button" class="orc-dfc-up" id="orc-dfc-up"><i data-lucide="upload"></i> Subir Excel 2027</button>
           <input id="orc-dfc-file" type="file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
           <button type="button" class="orc-dfc-base" id="orc-dfc-base" ${this._custom ? "" : "hidden"}>Base original</button>
@@ -606,6 +713,8 @@ const OrcamentoDfcApp = {
     });
     const baseBtn = document.getElementById("orc-dfc-base");
     if (baseBtn) baseBtn.addEventListener("click", () => this.voltarBase());
+    const excelBtn = document.getElementById("orc-dfc-excel");
+    if (excelBtn) excelBtn.addEventListener("click", () => this.exportExcel());
     if (window.lucide && lucide.createIcons) lucide.createIcons();
     this.carregarBase();
   },
@@ -827,6 +936,7 @@ const OrcamentoDfcApp = {
     if (this._caixaEstado === "lendo") avisoBase = `<div class="orc-dfc-erro orc-dfc-caixa-msg">${this.esc(this._caixaMsg || "Lendo o realizado de 2026 no caixa e banco…")}</div>`;
     else if (this._caixaEstado === "erro") avisoBase = `<div class="orc-dfc-erro">${this.esc(this._caixaErro || "Falha ao ler o realizado de 2026 no caixa e banco.")}</div>`;
     else if (this._caixaEstado === "vazio") avisoBase = `<div class="orc-dfc-erro">O caixa e banco não devolveu movimento realizado em 2026 para essas empresas.</div>`;
+    else if (this._caixaAviso) avisoBase = `<div class="orc-dfc-erro">${this.esc(this._caixaAviso)}</div>`;
     const aviso = this.erro ? `<div class="orc-dfc-erro">${this.esc(this.erro)}</div>` : "";
     body.innerHTML = `
       ${aviso}
@@ -956,6 +1066,180 @@ const OrcamentoDfcApp = {
       };
     }
     return null;
+  },
+
+  nomeAba(id, nome, used) {
+    const limpo = String(nome || "EMPRESA").replace(/[:\\/?*\[\]]/g, " ").replace(/\s+/g, " ").trim();
+    let base = String(id) + "-" + limpo;
+    if (base.length > 31) base = base.slice(0, 31);
+    let name = base;
+    let n = 2;
+    while (used.has(name.toLowerCase())) {
+      const suf = "-" + (n++);
+      name = (base.slice(0, Math.max(1, 31 - suf.length)) + suf).slice(0, 31);
+    }
+    used.add(name.toLowerCase());
+    return name;
+  },
+
+  pctNum(orc, real) {
+    const b = Number(real) || 0;
+    if (Math.abs(b) < 0.005) return null;
+    return ((Number(orc) || 0) - b) / Math.abs(b);
+  },
+
+  preencherDfc(ws, inv, opts) {
+    const rows = opts.rows || [];
+    const corte = this._corte == null ? this.corteForecast() : this._corte;
+    const meses = this.MESES;
+    const colunas = ["Conta"];
+    meses.forEach((m, i) => {
+      const rot = i >= corte ? "Prev" : "Real";
+      colunas.push(m + " " + rot, m + " Orç", m + " Var R$", m + " Var %");
+    });
+    colunas.push("Total Real", "Total Orç", "Total Var R$", "Total Var %");
+    const last = colunas.length;
+    const letra = (i) => inv.excelColLetter(i);
+    ws.properties.showGridLines = false;
+    ws.properties.outlineProperties = { summaryBelow: false, summaryRight: false };
+    ws.views = [{ state: "frozen", xSplit: 1, ySplit: 4, topLeftCell: "B5", activeCell: "B5", showGridLines: false }];
+    ws.columns = colunas.map((_, i) => ({ width: i === 0 ? 46 : 13 }));
+    ws.mergeCells("A1:A2");
+    ws.getRow(1).height = 28;
+    ws.getRow(2).height = 22;
+    ws.getRow(3).height = 8;
+    ws.getRow(4).height = 20;
+    const sub = opts.varias
+      ? (opts.empresa.id + " - " + (opts.empresa.name || ""))
+      : ("Orçamento 2027 contra o DFC de 2026 · " + this.textoCorte());
+    const title = ws.getCell("A1");
+    title.value = {
+      richText: [
+        { font: { name: "Calibri", size: 14, bold: true, color: { argb: "FF475569" } }, text: "DFC 2027\n" },
+        { font: { name: "Calibri", size: 9, color: { argb: "FF64748B" } }, text: sub }
+      ]
+    };
+    title.alignment = { vertical: "middle", wrapText: true, indent: 8 };
+    if (opts.logo && opts.logo.dataUrl) {
+      try {
+        const img = ws.workbook.addImage({ base64: opts.logo.dataUrl, extension: opts.logo.extension || "png" });
+        const px = Math.round(1.54 * 96 / 2.54);
+        ws.addImage(img, { tl: { col: 0, row: 0 }, ext: { width: px, height: px } });
+      } catch (e) {}
+    }
+    const fim = this.fimRealizado2026();
+    const ind = [
+      ["Realizado até", fim ? fim.split("-").reverse().join("/") : "—"],
+      ["Linhas", rows.length]
+    ];
+    ind.forEach((par, i) => {
+      const col = 4 + i * 2;
+      const c1 = ws.getCell(1, col);
+      const c2 = ws.getCell(2, col);
+      c1.value = par[0];
+      c2.value = par[1];
+      inv.excelPaint(c1, { font: { size: 8, bold: true, color: { argb: "FF94A3B8" } }, align: { horizontal: "right", vertical: "middle" } });
+      inv.excelPaint(c2, { font: { size: 12, bold: true, color: { argb: "FF0F172A" } }, align: { horizontal: "right", vertical: "middle" } });
+    });
+    const head = ws.getRow(4);
+    colunas.forEach((nome, i) => {
+      const cell = head.getCell(i + 1);
+      cell.value = nome;
+      inv.excelPaint(cell, {
+        font: { size: 9, bold: true, color: { argb: "FFFFFFFF" } },
+        fill: "FF334155",
+        align: { horizontal: i === 0 ? "left" : "right", vertical: "middle" },
+        border: true
+      });
+    });
+    rows.forEach((r) => {
+      const linha = ws.addRow([]);
+      linha.outlineLevel = Math.max(0, Math.min(7, Number(r.level) || 0));
+      const valores = [r.name];
+      const bases = r.base || [];
+      (r.months || []).forEach((orc, i) => {
+        const real = Number(bases[i]) || 0;
+        valores.push(real, Number(orc) || 0, (Number(orc) || 0) - real, this.pctNum(orc, real));
+      });
+      valores.push(Number(r.baseTotal) || 0, Number(r.total) || 0, (Number(r.total) || 0) - (Number(r.baseTotal) || 0), this.pctNum(r.total, r.baseTotal));
+      let fill = "FFFFFFFF";
+      let fontColor = "FF0F172A";
+      let bold = false;
+      if (r.type === "total_n1" || r.level === 0) { fill = "FF0C3D28"; fontColor = "FFFFFFFF"; bold = true; }
+      else if (r.type === "formula") { fill = "FFECFDF5"; fontColor = "FF064E3B"; bold = true; }
+      else if (r.isAccount) { fill = "FFF8FAFC"; bold = true; }
+      else if (r.isCc) { fill = "FFE7F6EE"; fontColor = "FF105436"; }
+      valores.forEach((v, i) => {
+        const cell = linha.getCell(i + 1);
+        const num = i > 0 && typeof v === "number";
+        const pct = num && (i % 4 === 0);
+        const zero = num && !pct && Math.abs(v) < 0.005;
+        cell.value = pct ? v : (zero ? 0 : v);
+        const cor = pct ? (v < 0 ? "FFB91C1C" : fontColor) : (zero ? "FF94A3B8" : (num && v < 0 ? "FFB91C1C" : fontColor));
+        inv.excelPaint(cell, {
+          font: { size: 9, bold: bold, color: { argb: cor } },
+          fill: fill,
+          align: { horizontal: i === 0 ? "left" : "right", vertical: "middle", indent: i === 0 ? Math.min(r.level || 0, 8) : 0 },
+          border: true,
+          numFmt: pct ? "0.0%" : (num ? "#,##0.00" : undefined)
+        });
+      });
+    });
+    const foot = ws.addRow([]);
+    foot.height = 18;
+    ws.mergeCells(foot.number, 1, foot.number, last);
+    const rodape = foot.getCell(1);
+    rodape.value = inv.generatedAtLabel(new Date());
+    inv.excelPaint(rodape, { font: { size: 8, italic: true, color: { argb: "FF64748B" } }, align: { horizontal: "left", vertical: "middle" } });
+    ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: last } };
+    return letra;
+  },
+
+  async exportExcel() {
+    const inv = window.InvestimentoApp;
+    if (!inv || typeof inv.ensureExcelJS !== "function") {
+      this.erro = "O Excel ainda não carregou. Atualize a página e tente de novo.";
+      this.paintBody();
+      return;
+    }
+    if (!this.lines().length) {
+      this.erro = "Suba o Excel do orçamento 2027 antes de exportar.";
+      this.paintBody();
+      return;
+    }
+    const empresas = this.empresas();
+    const sel = this.selectedCompanyIds.map(String);
+    const todas = !sel.length || sel.length >= empresas.length;
+    const alvos = todas ? empresas : [{ id: "", name: sel.length === 1 ? ((empresas.find((e) => String(e.id) === sel[0]) || {}).name || "") : "Seleção" }];
+    const ExcelJS = await inv.ensureExcelJS();
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "CRM Moura Leite";
+    const used = new Set();
+    let logo = null;
+    try { logo = await inv.logoDataUrl(); } catch (e) { logo = null; }
+    const prev = this.selectedCompanyIds.slice();
+    try {
+      for (let i = 0; i < (todas ? empresas.length : 1); i++) {
+        if (todas) this.selectedCompanyIds = [String(empresas[i].id)];
+        const pack = this.montar({ aberto: true });
+        const alvo = todas ? empresas[i] : alvos[0];
+        const nome = todas ? this.nomeAba(alvo.id, alvo.name, used) : this.nomeAba("DFC", "2027", used);
+        const ws = wb.addWorksheet(nome, { views: [{ showGridLines: false }] });
+        this.preencherDfc(ws, inv, { empresa: alvo, rows: pack.rows, varias: todas, logo: logo });
+      }
+    } finally {
+      this.selectedCompanyIds = prev;
+    }
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    const fim = (this.fimRealizado2026() || "2026").replace(/-/g, "");
+    a.download = "DFC-2027-" + fim + ".xlsx";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   },
 
   async parseExcel(buf) {

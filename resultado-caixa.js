@@ -586,7 +586,7 @@ const ResultadoCaixaApp = {
       Object.keys(arq.contas || {}).forEach((cc) => {
         const emp = empArq || this.empresaDoCentro(cc, (arq.nomes || {})[cc]);
         if (!emp) return;
-        const row = porEmp[emp] || (porEmp[emp] = { vendas: 0, servicos: 0, financeiras: 0 });
+        const row = porEmp[emp] || (porEmp[emp] = { vendas: 0, servicos: 0, financeiras: 0, redV: 0, redS: 0, redF: 0 });
         Object.keys(arq.contas[cc] || {}).forEach((code) => {
           const info = arq.contas[cc][code] || {};
           const valor = Number((info.meses || {})[ym]) || 0;
@@ -596,6 +596,10 @@ const ResultadoCaixaApp = {
           let s = est.sinal(est.grupoEfetivo ? est.grupoEfetivo(code, info.nome || "") : est.grupo(code, info.nome || ""), code, info.nome || "", valor);
           if (cl.red && s > 0) s = -Math.abs(s);
           row[cl.bucket] += s;
+          if (cl.red && s) {
+            const chave = cl.bucket === "servicos" ? "redS" : (cl.bucket === "financeiras" ? "redF" : "redV");
+            row[chave] += s;
+          }
         });
       });
     });
@@ -1695,19 +1699,12 @@ const ResultadoCaixaApp = {
     const id = arq._doc || this.docCaixa(slot, arq.empresa, nome);
     const limpo = this.enxugarArq(arq);
     const detalhe = JSON.stringify({
+      entradas: limpo.entradas || {},
+      contas: limpo.contas || {},
       contasPorCc: limpo.contasPorCc || {},
       planosJson: this.empacotarPlanos(limpo.planosPorCc)
     });
-    const LIM = 500000;
-    const base = {
-      slot: slot,
-      nome: nome,
-      empresa: Number(arq.empresa) || 0,
-      rotulo: arq.rotulo || "",
-      entradas: limpo.entradas,
-      contas: limpo.contas,
-      em: new Date().toISOString()
-    };
+    const LIM = 400000;
     const ids = [];
     if (detalhe.length > LIM) {
       for (let i = 0, n = 0; i < detalhe.length; i += LIM, n++) {
@@ -1719,12 +1716,16 @@ const ResultadoCaixaApp = {
           texto: detalhe.slice(i, i + LIM)
         });
       }
-      base.partes = ids;
-    } else {
-      base.contasPorCc = limpo.contasPorCc;
-      base.planosJson = this.empacotarPlanos(limpo.planosPorCc);
-      base.partes = [];
     }
+    const base = {
+      slot: slot,
+      nome: nome,
+      empresa: Number(arq.empresa) || 0,
+      rotulo: arq.rotulo || "",
+      em: new Date().toISOString(),
+      payload: ids.length ? "" : detalhe,
+      partes: ids
+    };
     await fx.setDoc(fx.doc(db, "resultado_caixa", id), base);
     for (let n = ids.length; n < 40; n++) {
       fx.deleteDoc(fx.doc(db, "resultado_caixa", id + "__p" + n)).catch(function() {});
@@ -1792,13 +1793,17 @@ const ResultadoCaixaApp = {
     }
     if (x && (x.tipo === "forecast" || String(x.slot || "").indexOf("fc-") === 0)) return;
     const nome = x.nome || id;
+    let extra = null;
+    if (typeof x.payload === "string" && x.payload && !(Array.isArray(x.partes) && x.partes.length)) {
+      try { extra = JSON.parse(x.payload); } catch (e) { extra = null; }
+    }
     const arq = {
       empresa: Number(x.empresa) || 0,
       rotulo: x.rotulo || "",
-      entradas: x.entradas || {},
-      contas: x.contas || {},
-      contasPorCc: x.contasPorCc || {},
-      planosPorCc: (x.planosPorCc && Object.keys(x.planosPorCc).length) ? x.planosPorCc : this.abrirPlanos(x.planosJson),
+      entradas: (extra && extra.entradas) || x.entradas || {},
+      contas: (extra && extra.contas) || x.contas || {},
+      contasPorCc: (extra && extra.contasPorCc) || x.contasPorCc || {},
+      planosPorCc: (extra && extra.planosJson) ? this.abrirPlanos(extra.planosJson) : ((x.planosPorCc && Object.keys(x.planosPorCc).length) ? x.planosPorCc : this.abrirPlanos(x.planosJson)),
       _doc: id,
       _slot: x.slot || "",
       _partes: Array.isArray(x.partes) ? x.partes : []
@@ -1835,6 +1840,8 @@ const ResultadoCaixaApp = {
         }
         try {
           const det = JSON.parse(texto);
+          if (det.entradas) arq.entradas = det.entradas;
+          if (det.contas) arq.contas = det.contas;
           if (det.contasPorCc) arq.contasPorCc = det.contasPorCc;
           if (det.planosJson) arq.planosPorCc = this.abrirPlanos(det.planosJson);
           else if (det.planosPorCc) arq.planosPorCc = det.planosPorCc;

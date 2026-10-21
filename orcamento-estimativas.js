@@ -691,11 +691,11 @@ const OrcamentoImpostosApp = {
     const dezBag = this.bases2026()["2026-12"];
     const dez = (dezBag && dezBag[Number(row.id)]) || null;
     const cols = [{ nome: "Vendas", arr: row.vendas, dez: dez && dez.vendas }];
-    if (tem(row.redV)) cols.push({ nome: "Redutoras", arr: row.redV, dez: null, dica: "Já abatida da venda. O valor da coluna Vendas está líquido." });
+    if (tem(row.redV) || (dez && Math.abs(Number(dez.redV) || 0) >= 0.5)) cols.push({ nome: "Redutoras", arr: row.redV, dez: dez ? dez.redV : null, dica: "Já abatida da venda. O valor da coluna Vendas está líquido. Dezembro de 2026 vem do forecast." });
     cols.push({ nome: "Serviços", arr: row.servicos, dez: dez && dez.servicos });
-    if (tem(row.redS)) cols.push({ nome: "Red. serviços", arr: row.redS, dez: null });
+    if (tem(row.redS) || (dez && Math.abs(Number(dez.redS) || 0) >= 0.5)) cols.push({ nome: "Red. serviços", arr: row.redS, dez: dez ? dez.redS : null });
     if (tem(row.financeiras) || tem(row.redF)) cols.push({ nome: "Aplicações", arr: row.financeiras, dez: dez && dez.financeiras });
-    if (tem(row.redF)) cols.push({ nome: "Red. aplicações", arr: row.redF, dez: null });
+    if (tem(row.redF) || (dez && Math.abs(Number(dez.redF) || 0) >= 0.5)) cols.push({ nome: "Red. aplicações", arr: row.redF, dez: dez ? dez.redF : null });
     const head = `<th>Competência</th>${cols.map((c) => `<th${c.dica ? ` title="${OrcEst.esc(c.dica)}"` : ""}>${c.nome}</th>`).join("")}<th>PIS</th><th>COFINS</th><th>Pago em</th>`;
     const celBase = (c, i) => `<td>${i == null ? mo(c.dez) : mo(c.arr[i])}</td>`;
     const linhaMes = (rotulo, i, pis, cofins, quando) => `<tr><td>${rotulo}</td>${cols.map((c) => celBase(c, i)).join("")}<td>${mo(pis)}</td><td>${mo(cofins)}</td><td class="orc-imp-quando">${quando}</td></tr>`;
