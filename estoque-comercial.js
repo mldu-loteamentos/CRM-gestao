@@ -113,6 +113,9 @@ const EstoqueComercialApp = {
   },
 
   isDeptOnlyCc(cc) {
+    const id = String(cc && typeof cc === "object" && cc.id != null ? cc.id : "").replace(/\D/g, "");
+    // Mirante dos Ramos comercial é empreendimento próprio (92 lotes), não o departamento comercial de outra obra.
+    if (id === "14703") return false;
     const name = this.foldCcName(cc && typeof cc === "object" ? cc.name : cc);
     if (!name) return false;
     // "… - OBRA", "… - OBRAS", "… MLES (OBRAS)" etc.

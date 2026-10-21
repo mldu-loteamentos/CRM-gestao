@@ -20286,6 +20286,263 @@ async function baixarHtmlComoPdf(html, nomeArquivo) {
   }
 }
 
+function renegLerAgenda() {
+  const body = document.getElementById("reneg-schedule-body");
+  if (!body) return [];
+  return Array.from(body.querySelectorAll("tr")).map((tr) => {
+    const td = Array.from(tr.children).filter((el) => el.tagName === "TD");
+    if (td.length < 4) return null;
+    const tipo = String(td[1].textContent || "").replace(/\s+/g, " ").trim().toUpperCase();
+    if (!tipo || /PARCELAS SUBSEQUENTES/.test(tipo)) return null;
+    return {
+      tipo: tipo,
+      data: String(td[2].textContent || "").trim(),
+      original: td.length >= 6 ? String(td[3].textContent || "").trim() : "",
+      extra: td.length >= 6 ? String(td[4].textContent || "").trim() : "",
+      total: String(td[td.length - 1].textContent || "").trim()
+    };
+  }).filter(Boolean);
+}
+
+function renegNumPorData(dataBr) {
+  const pedacos = String(dataBr || "").split("/");
+  if (pedacos.length < 3) return "";
+  const iso = pedacos[2] + "-" + pedacos[1] + "-" + pedacos[0];
+  const listas = [(g_renegBills || []), renegParcelasDoContrato(g_renegSale)];
+  for (let i = 0; i < listas.length; i++) {
+    const achou = listas[i].find((b) => String((b && b.dueDate) || "").slice(0, 10) === iso);
+    if (achou) return String(achou.installmentNum || achou.installmentNumber || achou.installmentId || "");
+  }
+  return "";
+}
+
+function renegParcelasMarcadas() {
+  const ids = Array.from(document.querySelectorAll(".reneg-bill-check:checked")).map((c) => String(c.value));
+  return (g_renegBills || []).filter((b) => ids.includes(String((b && (b.installmentId || b.installmentNum)) || "")));
+}
+
+function renegProximoReajuste(sale) {
+  const insts = renegParcelasDoContrato(sale);
+  const hoje = typeof window.todayIsoLocal === "function" ? window.todayIsoLocal() : new Date().toISOString().slice(0, 10);
+  const abertas = insts.filter((inst) => {
+    const cb = Number(inst && inst.currentBalance);
+    if (Number.isFinite(cb)) return cb > 0.009;
+    return !(inst && (inst.isValidReceipt || Number(inst.installmentSituation) === 2));
+  }).filter((inst) => inst && inst.dueDate).sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)));
+  const amostra = abertas.find((i) => i.indexerName || i.indexerId != null || i.indexerCode != null) || abertas[0] || insts[0];
+  let nome = "";
+  let id = "";
+  if (amostra) {
+    id = amostra.indexerId != null && amostra.indexerId !== "" ? amostra.indexerId : (amostra.indexerCode != null ? amostra.indexerCode : "");
+    nome = String(amostra.indexerName || amostra.indexerDescription || (typeof amostra.indexer === "string" ? amostra.indexer : "") || "");
+    if (id !== "" && window.AppState && Array.isArray(AppState.indexers)) {
+      const obj = AppState.indexers.find((x) => String(x.id) === String(id));
+      if (obj && obj.name) nome = String(obj.name);
+    }
+  }
+  const sem = /^(real|sem\s*reajuste|sem\s*index)/i.test(String(nome).trim()) || String(id) === "0";
+  if (sem) return { texto: "Este contrato não tem reajuste anual.", num: "", data: "" };
+  const indice = String(nome).trim() || "índice do contrato";
+  const venda = window.parseSiengeDay ? window.parseSiengeDay((sale && (sale.saleDate || sale.contractDate || sale.issueDate || sale.date)) || "") : null;
+  let alvo = null;
+  if (venda) {
+    const hojeD = window.parseSiengeDay(hoje) || new Date();
+    const aniv = new Date(hojeD.getFullYear(), venda.getMonth(), venda.getDate(), 12, 0, 0);
+    if (aniv < hojeD) aniv.setFullYear(aniv.getFullYear() + 1);
+    const iso = aniv.getFullYear() + "-" + String(aniv.getMonth() + 1).padStart(2, "0") + "-" + String(aniv.getDate()).padStart(2, "0");
+    alvo = abertas.find((i) => String(i.dueDate).slice(0, 10) >= iso) || null;
+  }
+  if (!alvo) return { texto: "O reajuste anual deste contrato é pelo " + indice + ", na data de aniversário do contrato.", num: "", data: "" };
+  const num = String(alvo.installmentNumber || alvo.installmentNum || alvo.installmentId || "");
+  const data = new Date(String(alvo.dueDate).slice(0, 10) + "T12:00:00").toLocaleDateString("pt-BR");
+  return {
+    texto: "A próxima parcela com reajuste é a nº " + (num || "—") + ", com vencimento em " + data + ", pelo " + indice + ".",
+    num: num,
+    data: data
+  };
+}
+
+function baixarPropostaAcordoPdf(results, nomeArquivo) {
+  if (!window.jspdf || !window.jspdf.jsPDF) throw new Error("gerador de PDF indisponível");
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF("p", "mm", "a4");
+  const brl = (v) => Number(v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const m = 14;
+  const largura = 182;
+  const sale = g_renegSale || {};
+  const cli = g_renegCustomer || {};
+  const unit = (window.AppState && AppState.units && sale.unitId && AppState.units[sale.unitId]) || {};
+  const sit = renegSituacaoContrato(sale);
+  const agenda = renegLerAgenda();
+  const reaj = renegProximoReajuste(sale);
+  const marcadas = renegParcelasMarcadas();
+  const nums = marcadas.map((b) => b.installmentNum || b.installmentNumber || b.installmentId).filter((n) => n != null && n !== "");
+  const cenario = results.cenario || "somar";
+  const nomeMod = { somar: "Somar", diluir: "Diluir", deslocar: "Deslocar" }[cenario] || "Acordo interno";
+  const sinalData = renegIsoBr(results.sinalDueStr);
+  const expira = renegIsoBr(renegIsoMaisDias(results.sinalDueStr, 2));
+  const contrato = [sale.documentId, sale.documentNumber].filter(Boolean).join("") || sale.id || "";
+  const unidade = [unit.costCenterId || sale.costCenterId || sale.enterpriseId, unit.name || unit.unitName || sale.unitName].filter(Boolean).join(" - ");
+  const emp = unit.enterpriseName || unit.costCenterName || sale.enterpriseName || sale.costCenterName || "";
+  const docCli = cli.cpf || cli.document || cli.cnpj || "";
+
+  pdf.setFillColor(16, 84, 54);
+  pdf.rect(0, 0, 210, 24, "F");
+  pdf.setTextColor(255, 255, 255);
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(16);
+  pdf.text("Proposta de acordo", m, 11);
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(9);
+  pdf.text("Orçamento da renegociação. Não é documento para assinatura.", m, 18);
+
+  let y = 32;
+  pdf.setTextColor(15, 23, 42);
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(11);
+  pdf.text(String(cli.name || "Cliente"), m, y);
+  y += 5;
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(9);
+  pdf.setTextColor(71, 85, 105);
+  const idLinhas = [
+    (contrato ? "Contrato " + contrato : "") + (sale.receivableBillId ? "   Título " + sale.receivableBillId : ""),
+    [emp, unidade].filter(Boolean).join("   ·   "),
+    docCli ? "CPF/CNPJ " + docCli : ""
+  ].filter(Boolean);
+  idLinhas.forEach((linha) => {
+    pdf.text(pdf.splitTextToSize(linha, largura), m, y);
+    y += 4.5;
+  });
+  y += 2;
+
+  const desenharSecao = (titulo) => {
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(10);
+    pdf.setTextColor(16, 84, 54);
+    pdf.text(titulo, m, y);
+    y += 5;
+  };
+  const escrever = (texto) => {
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(9);
+    pdf.setTextColor(15, 23, 42);
+    const linhas = pdf.splitTextToSize(texto, largura);
+    pdf.text(linhas, m, y + 4);
+    y += 4 + linhas.length * 4.2;
+  };
+
+  desenharSecao("Como está hoje");
+  const pagoValor = sit.liquido > 0.009 ? sit.liquido : sit.pago;
+  const linhasHoje = [
+    ["Pago", sit.qtdPagas + " parc.", brl(pagoValor), sit.pct + "% do contrato"],
+    ["Vencido", sit.qtdVencidas + " parc.", brl(sit.valorVencidas), ""],
+    ["A vencer", sit.qtdAVencer + " parc.", brl(sit.valorAVencer), ""],
+    ["Contrato", sit.totalParc + " parc.", brl(sit.totalValor), ""]
+  ];
+  if (typeof pdf.autoTable === "function") {
+    pdf.autoTable({
+      startY: y + 2,
+      margin: { left: m, right: m },
+      theme: "grid",
+      styles: { fontSize: 8, cellPadding: 1.6, textColor: [15, 23, 42] },
+      headStyles: { fillColor: [16, 84, 54], textColor: 255, fontStyle: "bold" },
+      columnStyles: { 2: { halign: "right" }, 3: { halign: "right" } },
+      head: [["", "Parcelas", "Valor", ""]],
+      body: linhasHoje
+    });
+    y = pdf.lastAutoTable.finalY + 6;
+  } else {
+    y += 2;
+    linhasHoje.forEach((ln) => { escrever(ln.filter(Boolean).join("   ")); });
+  }
+
+  desenharSecao("Como fica");
+  const listaNums = nums.length > 8 ? (nums[0] + " a " + nums[nums.length - 1]) : nums.join(", ");
+  const fraseMarcadas = nums.length
+    ? (nums.length + " parcela" + (nums.length === 1 ? "" : "s") + " marcada" + (nums.length === 1 ? "" : "s") + " (nº " + listaNums + ")")
+    : "as parcelas marcadas";
+  escrever("Modalidade " + nomeMod + ". Sinal de " + brl(results.sinalValue) + " (" + (Number(results.sinalPct) || 0) + "%) com vencimento em " + (sinalData || "—") + ". " + fraseMarcadas.charAt(0).toUpperCase() + fraseMarcadas.slice(1) + " formam o saldo de " + brl(results.grossDebt) + ".");
+
+  const alteradas = agenda.filter((l) => l.tipo === "SOMADA" || l.tipo === "DILUÍDA" || l.tipo === "DILUIDA" || l.tipo === "ACORDO");
+  const mantidas = agenda.filter((l) => l.tipo === "MANTIDA");
+  if (cenario === "diluir") {
+    const primeira = alteradas[0];
+    const ultima = alteradas[alteradas.length - 1];
+    escrever("Depois do sinal, esse saldo é repartido nas " + alteradas.length + " parcelas que ainda vão vencer"
+      + (primeira && ultima ? ", de " + primeira.data + " a " + ultima.data : "")
+      + ". Cada uma recebe cerca de " + brl(results.installmentValue) + " a mais. O contrato não ganha parcela nova.");
+  } else if (cenario === "somar") {
+    escrever("Depois do sinal, o saldo vira " + (Number(results.instQty) || alteradas.length) + " parcelas de " + brl(results.installmentValue) + ", somadas às próximas que vão vencer:");
+    const corpo = alteradas.slice(0, 8).map((l) => {
+      const num = renegNumPorData(l.data);
+      return [num ? "nº " + num : "—", l.data, l.original || "—", l.extra || "—", l.total || "—"];
+    });
+    if (corpo.length && typeof pdf.autoTable === "function") {
+      pdf.autoTable({
+        startY: y,
+        margin: { left: m, right: m },
+        theme: "grid",
+        styles: { fontSize: 8, cellPadding: 1.4, textColor: [15, 23, 42] },
+        headStyles: { fillColor: [16, 84, 54], textColor: 255, fontStyle: "bold" },
+        columnStyles: { 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" } },
+        head: [["Parcela", "Vencimento", "Original", "Acréscimo", "Fica em"]],
+        body: corpo
+      });
+      y = pdf.lastAutoTable.finalY + 4;
+    }
+    if (mantidas.length) {
+      const valorMantida = mantidas[0].total || mantidas[0].original || "";
+      escrever("As outras " + mantidas.length + " parcelas seguem em " + valorMantida + ", de " + mantidas[0].data + " até " + mantidas[mantidas.length - 1].data + ".");
+    }
+  } else {
+    const mostrar = alteradas.slice(0, 8);
+    escrever("Depois do sinal, o saldo vira " + (Number(results.instQty) || alteradas.length) + " parcelas de " + brl(results.installmentValue)
+      + (alteradas.length ? ", de " + alteradas[0].data + " a " + alteradas[alteradas.length - 1].data : "") + ".");
+    if (mostrar.length && mostrar.length <= 8 && typeof pdf.autoTable === "function") {
+      pdf.autoTable({
+        startY: y,
+        margin: { left: m, right: m },
+        theme: "grid",
+        styles: { fontSize: 8, cellPadding: 1.4, textColor: [15, 23, 42] },
+        headStyles: { fillColor: [16, 84, 54], textColor: 255, fontStyle: "bold" },
+        columnStyles: { 1: { halign: "right" } },
+        head: [["Vencimento", "Valor"]],
+        body: mostrar.map((l) => [l.data, l.total])
+      });
+      y = pdf.lastAutoTable.finalY + 4;
+    }
+    if (mantidas.length) {
+      escrever("As " + mantidas.length + " parcelas do contrato que continuam passam a vencer depois do acordo, até " + mantidas[mantidas.length - 1].data + ".");
+    }
+  }
+
+  const totalTela = document.getElementById("reneg-green-total-pagar");
+  const ultimaTela = document.getElementById("reneg-green-ultima");
+  if (totalTela && totalTela.textContent) {
+    escrever("Total desta proposta: " + totalTela.textContent.trim() + (ultimaTela && ultimaTela.textContent ? ", com última parcela em " + ultimaTela.textContent.trim() + "." : "."));
+  }
+
+  const caixaH = 16;
+  pdf.setFillColor(232, 243, 238);
+  pdf.roundedRect(m, y, largura, caixaH, 1.5, 1.5, "F");
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(9);
+  pdf.setTextColor(16, 84, 54);
+  pdf.text("Próximo reajuste", m + 3, y + 5);
+  pdf.setFont("helvetica", "normal");
+  pdf.setTextColor(15, 23, 42);
+  const reajLinhas = pdf.splitTextToSize(reaj.texto, largura - 6);
+  pdf.text(reajLinhas.slice(0, 2), m + 3, y + 10);
+  y += caixaH + 6;
+
+  pdf.setFontSize(8);
+  pdf.setTextColor(71, 85, 105);
+  const aviso = "Esta proposta só vira acordo se o sinal de " + brl(results.sinalValue) + " for pago até " + (sinalData || "a data combinada") + ". Sem esse pagamento, ela expira em " + (expira || "dois dias depois") + ".";
+  pdf.text(pdf.splitTextToSize(aviso, largura), m, Math.min(y, 284));
+  pdf.save(nomeArquivo);
+}
+
 function generateAgreementPDF() {
   const results = AppState.currentRenegResult;
   if (!results) return;
@@ -20294,9 +20551,31 @@ function generateAgreementPDF() {
     return;
   }
   return (async function() {
+  if (window._renegGerando) return;
+  window._renegGerando = true;
+  try {
   const proposta = renegPropostaAtual();
   const pago = !!(proposta && window.renegPropostaEstaAtiva(proposta) && window.renegSinalFoiPago(proposta.sinalValue, String(proposta.createdAt || "").slice(0, 10)));
   const modo = pago ? "confissao" : "proposta";
+  if (modo === "proposta") {
+    const unitProp = (g_renegSale && AppState.units && AppState.units[g_renegSale.unitId]) || {};
+    const unitNameProp = unitProp.name || unitProp.unitName || (g_renegSale && g_renegSale.unitName) || "";
+    const nomeProp = typeof window.buildFichaPdfFilename === "function"
+      ? window.buildFichaPdfFilename("Proposta de acordo", {
+          contrato: (g_renegSale && g_renegSale.unitId) || unitNameProp,
+          costCenterId: unitProp.costCenterId || (g_renegSale && (g_renegSale.costCenterId || g_renegSale.enterpriseId)),
+          titulo: g_renegSale && (g_renegSale.receivableBillId || g_renegSale.id),
+          nome: (g_renegCustomer && g_renegCustomer.name) || ""
+        })
+      : "Proposta de acordo.pdf";
+    baixarPropostaAcordoPdf(results, nomeProp);
+    let salva = null;
+    try { salva = await renegSalvarProposta(results); }
+    catch (e) { alert("O PDF da proposta foi baixado, mas não consegui gravar no Firebase: " + ((e && e.message) || e)); return; }
+    renegMontarAvisoProposta(salva, false);
+    window.atualizarBotaoReneg();
+    return;
+  }
   if (typeof window.enrichCustomerForLegalDocs === "function" && g_renegCustomer) {
     g_renegCustomer = await window.enrichCustomerForLegalDocs(g_renegCustomer);
   }
@@ -20382,6 +20661,9 @@ function generateAgreementPDF() {
     await renegConcluirProposta();
     renegMontarAvisoProposta(null, false);
     window.atualizarBotaoReneg();
+  }
+  } finally {
+    window._renegGerando = false;
   }
   })().catch(function(e) {
     alert("Não consegui gerar o termo: " + ((e && e.message) || e));
