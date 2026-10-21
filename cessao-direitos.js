@@ -3210,6 +3210,7 @@ const CessaoPopup = {
 
 CessaoApp.abrirPopup = function (ctx) { return CessaoPopup.abrir(ctx); };
 window.CessaoPopup = CessaoPopup;
+window.CessaoPopupState = CessaoPopupState;
 
 document.addEventListener('tabChanged', (e) => {
   if (e.detail === 'relacionamento_cessao') {
