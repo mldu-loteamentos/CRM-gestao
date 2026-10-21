@@ -70,20 +70,27 @@ const FiscalApp = {
     return `${year}-${String(month).padStart(2, "0")}`;
   },
 
-  /* Abril paga jan–mar, julho paga abr–jun, outubro paga jul–set, janeiro paga out–dez do ano anterior. */
+  /* O trimestre fecha no mês anterior ao pagamento: março paga em abril, junho em julho, setembro em outubro, dezembro em janeiro. */
   ehMesDeApuracao(month) {
     const m = month == null ? FiscalState.month : month;
-    return m === 1 || m === 4 || m === 7 || m === 10;
+    return m === 3 || m === 6 || m === 9 || m === 12;
   },
 
   trimestrePago(month, year) {
     const m = month == null ? FiscalState.month : month;
     const y = year == null ? FiscalState.year : year;
-    if (m === 4) return [1, 2, 3].map((mm) => this.ym(y, mm));
-    if (m === 7) return [4, 5, 6].map((mm) => this.ym(y, mm));
-    if (m === 10) return [7, 8, 9].map((mm) => this.ym(y, mm));
-    if (m === 1) return [10, 11, 12].map((mm) => this.ym(y - 1, mm));
+    if (m === 3) return [1, 2, 3].map((mm) => this.ym(y, mm));
+    if (m === 6) return [4, 5, 6].map((mm) => this.ym(y, mm));
+    if (m === 9) return [7, 8, 9].map((mm) => this.ym(y, mm));
+    if (m === 12) return [10, 11, 12].map((mm) => this.ym(y, mm));
     return null;
+  },
+
+  pagamentoDoTrimestre(month, year) {
+    const m = month == null ? FiscalState.month : month;
+    const y = year == null ? FiscalState.year : year;
+    if (m === 12) return { month: 1, year: y + 1 };
+    return { month: m + 1, year: y };
   },
 
   mesesDaAba(aba) {
@@ -111,8 +118,9 @@ const FiscalApp = {
     const lista = meses || [];
     if (!lista.length) return "";
     if ((aba === "irpj" || aba === "csll") && lista.length >= 3) {
-      const paga = `${this.MESES[FiscalState.month - 1]} de ${FiscalState.year}`;
-      return `Apuração de ${this.nomeMes(lista[0])} a ${this.nomeMes(lista[lista.length - 1])} · paga em ${paga}`;
+      const paga = this.pagamentoDoTrimestre(FiscalState.month, FiscalState.year);
+      const quando = `${this.MESES[paga.month - 1]} de ${paga.year}`;
+      return `Apuração de ${this.nomeMes(lista[0])} a ${this.nomeMes(lista[lista.length - 1])} · paga em ${quando}`;
     }
     if (aba === "irpj" || aba === "csll") return `Provisão de ${this.nomeMes(lista[0])}`;
     return this.nomeMes(lista[0]);
@@ -1202,10 +1210,7 @@ const FiscalApp = {
     const cal = "Janeiro, fevereiro e março pagam em abril. Abril, maio e junho pagam em julho. Julho, agosto e setembro pagam em outubro. Outubro, novembro e dezembro pagam em janeiro.";
     let per = p.apuracao
       ? `${p.periodo}. O adicional de IRPJ usa três vezes o limite mensal (${this.money(a.limiteMensal)} por mês).`
-      : `${p.periodo}. A coluna é a provisão deste mês. O trimestre fecha no mês do pagamento. O adicional usa o limite de um mês (${this.money(a.limiteMensal)}).`;
-    if (p.apuracao && FiscalState.month === 1) {
-      per += " A coluna Provisão de janeiro mostra só janeiro, que entra no trimestre pago em abril.";
-    }
+      : `${p.periodo}. A coluna é a provisão deste mês. O trimestre fecha no mês anterior ao pagamento. O adicional usa o limite de um mês (${this.money(a.limiteMensal)}).`;
     if (p.aba === "pis" || p.aba === "cofins") {
       return `PIS ${this.pct(a.pis)} e COFINS ${this.pct(a.cofins)} sobre a receita do mês. Entram as contas marcadas como vendas de lote e serviços. As redutoras do DFC (cancelamento, desconto e base de dedução) diminuem o grupo correspondente. ${fin}`;
     }
@@ -1414,9 +1419,8 @@ const FiscalApp = {
     const mes = String(FiscalState.month).padStart(2, "0");
     const ano = FiscalState.year;
     if ((meta.doc === "IRPJ" || meta.doc === "CSLL") && this.ehMesDeApuracao()) {
-      const tri = FiscalState.month === 4 ? 1 : (FiscalState.month === 7 ? 2 : (FiscalState.month === 10 ? 3 : 4));
-      const anoTri = FiscalState.month === 1 ? ano - 1 : ano;
-      return `${meta.doc} ${tri} TRIM ${anoTri}`;
+      const tri = FiscalState.month === 3 ? 1 : (FiscalState.month === 6 ? 2 : (FiscalState.month === 9 ? 3 : 4));
+      return `${meta.doc} ${tri} TRIM ${ano}`;
     }
     return `${meta.nome} ${this.siglaEmpresa(comp.id, comp.name)} ${mes}/${ano}`;
   },
@@ -1426,10 +1430,9 @@ const FiscalApp = {
     const mesNome = bruto.charAt(0).toUpperCase() + bruto.slice(1);
     const ano = FiscalState.year;
     if ((meta.doc === "IRPJ" || meta.doc === "CSLL") && this.ehMesDeApuracao()) {
-      const tri = FiscalState.month === 4 ? 1 : (FiscalState.month === 7 ? 2 : (FiscalState.month === 10 ? 3 : 4));
-      const anoTri = FiscalState.month === 1 ? ano - 1 : ano;
+      const tri = FiscalState.month === 3 ? 1 : (FiscalState.month === 6 ? 2 : (FiscalState.month === 9 ? 3 : 4));
       const ord = ["", "1º", "2º", "3º", "4º"][tri];
-      return `Recolhimento de ${meta.nome} - ${ord} trimestre de ${anoTri}`;
+      return `Recolhimento de ${meta.nome} - ${ord} trimestre de ${ano}`;
     }
     return `Recolhimento mensal de ${meta.nome} - ${mesNome} ${ano}`;
   },
@@ -1440,7 +1443,7 @@ const FiscalApp = {
     if (type === "pis" || type === "cofins") {
       return m === 12 ? { month: 1, year: y + 1 } : { month: m + 1, year: y };
     }
-    if (this.ehMesDeApuracao(m)) return { month: m, year: y };
+    if (this.ehMesDeApuracao(m)) return this.pagamentoDoTrimestre(m, y);
     if (m <= 3) return { month: 4, year: y };
     if (m <= 6) return { month: 7, year: y };
     if (m <= 9) return { month: 10, year: y };
