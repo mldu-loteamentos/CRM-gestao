@@ -620,7 +620,19 @@ const EstoqueComercialApp = {
     this.state.batimentoDate = data.batimentoDate || null;
     this.state.batimentoAt = data.batimentoAt || data.fetchedAt || null;
     this.state.batimentoDone = !!data.batimentoDone;
+    if (!this.state.complete && this.inventarioCarregado()) this.state.complete = true;
     this.sealInferredFinance();
+  },
+
+  /** Estoque já gravado e batimento do dia fechado. O campo complete fica false porque a carga grava o meta a cada empreendimento, antes de marcar o fim. */
+  inventarioCarregado() {
+    const units = this.state.units || [];
+    const done = new Set((this.state.ccDone || []).map(String));
+    if (!units.length || !done.size || !this.state.batimentoDone) return false;
+    const ids = new Set(units.map((u) => String(u.enterpriseId || "")).filter(Boolean));
+    if (!ids.size) return false;
+    for (const id of ids) if (!done.has(id)) return false;
+    return true;
   },
 
   fbReady() {
@@ -1430,7 +1442,7 @@ const EstoqueComercialApp = {
     }
     const n = this.state.units.length.toLocaleString("pt-BR");
     const day = this.state.batimentoDate ? String(this.state.batimentoDate).split("-").reverse().join("/") : "";
-    const incompleta = this.state.complete ? "" : " · carga dos empreendimentos ainda incompleta";
+    const incompleta = (this.state.complete || this.inventarioCarregado()) ? "" : " · carga dos empreendimentos ainda incompleta";
     const erro = this.state.fbSaveError ? " · a última gravação não concluiu" : "";
     el.textContent = day
       ? `${n} unidades · situação de ${day}${incompleta}${erro}`
@@ -4331,6 +4343,20 @@ const EstoqueComercialApp = {
       if (!empSel) this.state.complete = !this.state.stopSync;
       this._prevQuitados = null;
       this.saveCache();
+      if (!empSel && this.fbReady()) {
+        try {
+          const { doc, setDoc } = window.firebaseCollections;
+          await setDoc(doc(window.firebaseDb, this.FB_COL, "_meta"), this.fbClean({
+            complete: !!this.state.complete,
+            ccDone: this.state.ccDone || [],
+            unitCount: this.state.units.length,
+            fetchedAt: this.state.fetchedAt || new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }), { merge: true });
+        } catch (e) {
+          console.warn("[Estoque] meta da carga", e);
+        }
+      }
       this.setProgress(this.state.stopSync ? "Atualização interrompida. O que já baixou ficou salvo." : "");
       this.fillUnitSelect();
       this.paintEmpSelect();

@@ -797,20 +797,40 @@ function _vcRowIsObraDispensed(r, obras) {
     return !!_vcResolveObraEntry(state, r.costCenterId, r.empreendimento).isOn;
 }
 
+function _vcRememberCostCenter(map, id, labelHint) {
+    const key = String(id || '').trim();
+    if (!key || key === 'N/D' || key === '-' || map.has(key)) return;
+    const fromCc = _vcGetEmpLabel(key);
+    const label = (fromCc && fromCc !== '-' && !/^CC\s/.test(fromCc))
+        ? fromCc
+        : (String(labelHint || '').trim() || fromCc || key);
+    map.set(key, {
+        costCenterId: key,
+        id: parseInt(key, 10) || 0,
+        label: label,
+        empreendimentoName: _vcEmpNameFromCc(key)
+    });
+}
+
 function _vcCollectOverdueCostCenters() {
-    const clients = window.rawClientList || [];
     const map = new Map();
-    clients.forEach(c => {
-        const id = _vcExtractCostCenterId(c);
-        if (!id || map.has(id)) return;
-        map.set(id, {
-            costCenterId: id,
-            id: parseInt(id, 10) || 0,
-            label: _vcGetEmpLabel(id),
-            empreendimentoName: _vcEmpNameFromCc(id)
+    const rows = (window.VerificarConstrucaoApp && window.VerificarConstrucaoApp.allRows) || [];
+    rows.forEach(r => {
+        if (r && r.costCenterId) _vcRememberCostCenter(map, r.costCenterId, r.empLabel);
+    });
+    const lists = [window.rawClientList, window.clientList];
+    const sales = window.AppState && window.AppState.sales;
+    if (Array.isArray(sales)) lists.push(sales);
+    lists.forEach(list => {
+        (list || []).forEach(c => {
+            const id = _vcExtractCostCenterId(c);
+            if (id) _vcRememberCostCenter(map, id);
         });
     });
-    return [...map.values()].sort((a, b) => a.id - b.id || a.label.localeCompare(b.label));
+    Object.keys(_vcReadObrasState()).forEach(k => {
+        if (/^\d+$/.test(k)) _vcRememberCostCenter(map, k);
+    });
+    return [...map.values()].sort((a, b) => a.id - b.id || String(a.label).localeCompare(String(b.label), 'pt-BR', { numeric: true }));
 }
 
 function _vcNormUnitName(name) {
@@ -2022,8 +2042,14 @@ window.VerificarConstrucaoApp = {
     },
 
     salvarObrasAndamento() {
+        const atual = this._tempObrasState;
+        if (!atual || !Object.keys(atual).length) {
+            const modal = document.getElementById('modal-obras-andamento');
+            if (modal) modal.style.display = 'none';
+            return;
+        }
         const toSave = {};
-        Object.keys(this._tempObrasState || {}).forEach(k => {
+        Object.keys(atual).forEach(k => {
             const v = this._tempObrasState[k];
             if (!v) return;
             toSave[k] = { isOn: !!v.isOn, previsao: v.previsao || '' };

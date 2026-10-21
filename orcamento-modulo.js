@@ -627,7 +627,7 @@ const OrcamentoModuloApp = {
   },
 
   textoKardex() {
-    return "Abaixo de Vendas, informe a quantidade de cada plano e o ticket médio. Tab segue o mês. Selecione várias células e tecle Enter, ou arraste o canto verde. A venda não deixa o estoque negativo.";
+    return "O ticket médio é do empreendimento. Abra Vendas para ver a tabela vigente e informar a quantidade de cada plano. A venda não deixa o estoque negativo.";
   },
 
   textoDistrato() {
@@ -1294,7 +1294,8 @@ const OrcamentoModuloApp = {
     const prox = vindos.map((v) => {
       const antigo = atuais.find((a) => this.normNome(a.nome) === this.normNome(v.nome)) || atuais.find((a) => a.id === v.id);
       if (antigo) usados[antigo.id] = true;
-      const ticket = antigo ? (Number(antigo.ticket) || 0) : 0;
+      const ticketBase = this.ticketMedio();
+      const ticket = ticketBase > 0 ? ticketBase : (antigo ? (Number(antigo.ticket) || 0) : 0);
       const entrada = ticket > 0 ? Math.round(ticket * (Number(v.entradaPct) || 0)) / 100 : 0;
       return {
         id: antigo && antigo.id ? antigo.id : v.id,
@@ -1712,6 +1713,39 @@ const OrcamentoModuloApp = {
     return this.planoDoCc().condicoes || { ticket: 0, plano: 0, juros: 0, entrada: 0 };
   },
 
+  ticketMedio() {
+    const plano = this.planoDoCc();
+    const direto = Number(plano.ticketMedio);
+    if (direto > 0) return direto;
+    const cond = Number(plano.condicoes && plano.condicoes.ticket);
+    return cond > 0 ? cond : 0;
+  },
+
+  setTicketMedio(valor) {
+    const cc = String(this.novo.ccId || "");
+    if (!cc) return;
+    const n = Math.max(0, this.numeroCampo(valor));
+    const plano = this.planoDoCc();
+    plano.ticketMedio = n;
+    if (!plano.condicoes) plano.condicoes = { ticket: 0, plano: 0, juros: 0, entrada: 0 };
+    plano.condicoes.ticket = n;
+    this.planosAtivos().forEach((p) => {
+      p.ticket = n;
+      if (p.entradaPct != null && p.entradaPct !== "") {
+        p.entrada = Math.round(n * (Number(p.entradaPct) || 0)) / 100;
+      }
+    });
+    this.salvarPlano();
+    this.renderNovo();
+  },
+
+  toggleVendas(ano) {
+    if (!this.novo.vendasAbertas) this.novo.vendasAbertas = {};
+    const chave = String(ano);
+    this.novo.vendasAbertas[chave] = !this.novo.vendasAbertas[chave];
+    this.renderNovo();
+  },
+
   parcelaMediaAtual() {
     const r = this.novo.resultado;
     return r ? Number(r.parcelaMedia) || 0 : 0;
@@ -1751,8 +1785,9 @@ const OrcamentoModuloApp = {
   vendasNoMes(ano, mes) {
     const alvo = Number(ano) * 12 + Number(mes);
     let total = 0;
+    const ticketEmp = this.ticketMedio();
     this.planosAtivos().forEach((p) => {
-      const ticket = Number(p.ticket) || 0;
+      const ticket = ticketEmp > 0 ? ticketEmp : (Number(p.ticket) || 0);
       let entrada = Math.min(Number(p.entrada) || 0, ticket > 0 ? ticket : Number(p.entrada) || 0);
       if (p.entradaPct != null && p.entradaPct !== "" && ticket > 0) {
         entrada = Math.min(ticket, Math.round(ticket * (Number(p.entradaPct) || 0)) / 100);
@@ -2045,14 +2080,64 @@ const OrcamentoModuloApp = {
     return `<td class="${marca}" data-kx-td="1"><span class="orc-kx-cel"><input type="text" inputmode="numeric" class="orc-dist-qtd" data-kx="1" data-tipo="${this.esc(tipo)}" data-ano="${ano}" data-mes="${mes}" aria-label="${this.esc(rotulo)}" value="${qtd > 0 ? qtd : ""}"></span></td>`;
   },
 
-  nomePlanoHtml(p) {
-    const pct = p.entradaPct != null && p.entradaPct !== "" ? Number(p.entradaPct) : null;
-    const entrada = pct == null ? "" : (pct >= 100 ? "à vista" : (pct > 0 ? "entrada " + this.fmtPct(pct) : ""));
-    const parc = Number(p.parcelas) > 0 ? p.parcelas + " parcelas" : "";
-    const juros = Number(p.juros) > 0 ? "juros " + this.fmtPct(p.juros) : "";
-    const cond = [entrada, parc, juros].filter(Boolean).join(" · ");
-    const ticket = Number(p.ticket) > 0 ? this.numero(p.ticket) : "";
-    return `<td class="orc-kx-plano"><span>${this.esc(p.nome)}</span>${cond ? `<small>${this.esc(cond)}</small>` : ""}<label>Ticket médio<input type="text" inputmode="decimal" class="orc-kx-ticket" value="${this.esc(ticket)}" aria-label="Ticket médio de ${this.esc(p.nome)}" onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onchange="OrcamentoModuloApp.setPlanoCampo('${p.id}','ticket', this.value)"></label></td>`;
+  painelVendasHtml(ano) {
+    const tab = this.tabelaCatalogo();
+    const meses = this.mesesCurto();
+    const headMes = meses.map((m, mes) => {
+      const hoje = this.clsMes(ano, mes) === "is-hoje";
+      return `<th class="is-right${hoje ? " is-hoje" : ""}">${m}</th>`;
+    }).join("");
+    if (!tab || !(tab.rows || []).length) {
+      return `<tr class="orc-kx-painel"><td colspan="14"><p class="orc-kx-nota">Não há tabela vigente neste empreendimento.</p></td></tr>`;
+    }
+    const comp = this.rotuloCompetencia(tab.competencia);
+    const txt = (v) => {
+      const s = v == null ? "" : String(v).trim();
+      return s ? this.esc(s) : "—";
+    };
+    const linhas = (tab.rows || []).map((r) => {
+      const nome = String((r && r.plano) || "").replace(/\s+/g, " ").trim();
+      if (!nome) return "";
+      const p = this.planosAtivos().find((a) => this.normNome(a.nome) === this.normNome(nome));
+      let soma = 0;
+      const tds = p ? [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((mes) => {
+        if (this.mesPrevisto(ano, mes)) soma += this.qtdPlano(p, ano, mes);
+        return this.celPlanoQtd(p, ano, mes);
+      }).join("") : `<td class="is-right" colspan="12">—</td>`;
+      const desc = r.descontoOn && String(r.descontoPct || "").trim() ? this.esc(String(r.descontoPct)) + "%" : "—";
+      return `<tr>
+        <td class="orc-kx-vig-plano">${this.esc(nome)}</td>
+        <td class="is-center">${r.intermediarias ? "Sim" : "Não"}</td>
+        <td class="is-center">${String(r.entradaMin || "").trim() ? txt(r.entradaMin) + "%" : "—"}</td>
+        <td class="is-center">${String(r.parcelamentoEntrada || "").trim() ? txt(r.parcelamentoEntrada) + "x" : "—"}</td>
+        <td class="is-center">${String(r.taxaJuros || "").trim() ? txt(r.taxaJuros) + "%" : "—"}</td>
+        <td class="is-center">${txt(r.reajuste)}</td>
+        <td class="is-center">${desc}</td>
+        ${tds}
+        <td class="is-right">${soma > 0 ? soma : "—"}</td>
+      </tr>`;
+    }).join("");
+    return `<tr class="orc-kx-painel"><td colspan="14">
+      <div class="orc-kx-vig-box">
+        <p class="orc-kx-vig-titulo">Tabela vigente${comp ? " de " + this.esc(comp) : ""}</p>
+        <div class="orc-kx-vig-wrap">
+          <table class="orc-kx-vig">
+            <thead><tr>
+              <th>Plano de pagamento</th>
+              <th>Intermediárias</th>
+              <th>Entrada mínima</th>
+              <th>Parcelamento da entrada</th>
+              <th>Taxa de juros</th>
+              <th>Indexador</th>
+              <th>Condição especial</th>
+              ${headMes}
+              <th class="is-right">Total</th>
+            </tr></thead>
+            <tbody>${linhas}</tbody>
+          </table>
+        </div>
+      </div>
+    </td></tr>`;
   },
 
   kardexHtml() {
@@ -2097,15 +2182,8 @@ const OrcamentoModuloApp = {
         const neg = typeof total === "number" && total < 0 ? " is-neg" : "";
         return `<tr class="orc-kx${cls ? " " + cls : ""}"><td>${rotulo}</td>${tds}<td class="is-right${neg}">${total}</td></tr>`;
       };
-      const planos = this.planosAtivos();
-      const linhasPlano = planos.length ? planos.map((p) => {
-        let soma = 0;
-        const tds = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((mes) => {
-          if (this.mesPrevisto(ano, mes)) soma += this.qtdPlano(p, ano, mes);
-          return this.celPlanoQtd(p, ano, mes);
-        }).join("");
-        return `<tr class="orc-kx is-plano">${this.nomePlanoHtml(p)}${tds}<td class="is-right">${soma > 0 ? soma : "—"}</td></tr>`;
-      }).join("") : `<tr class="orc-kx is-plano"><td colspan="14">Nenhum plano na tabela vigente.</td></tr>`;
+      const aberto = !!(this.novo.vendasAbertas && this.novo.vendasAbertas[ano]);
+      const rotuloVenda = `<button type="button" class="orc-kx-abre" aria-expanded="${aberto}" onclick="OrcamentoModuloApp.toggleVendas(${ano})"><i data-lucide="${aberto ? "chevron-down" : "chevron-right"}"></i>Vendas</button>`;
       const head = `<thead><tr><th>${ano}</th>${g.meses.map((m, mes) => {
         const hoje = this.clsMes(ano, mes) === "is-hoje";
         return `<th class="is-right${hoje ? " is-hoje" : ""}">${m}</th>`;
@@ -2118,8 +2196,8 @@ const OrcamentoModuloApp = {
             <tbody>
               ${linha("Estoque inicial", inicial.map((v, mes) => this.celTexto(v, false, this.clsMes(ano, mes))).join(""), "—", "is-ini")}
               ${linha("Distratos", distCells.join(""), sDist || "—", "is-dist")}
-              ${linha("Vendas", vendaCells.join(""), sVenda || "—", "is-venda")}
-              ${linhasPlano}
+              ${linha(rotuloVenda, vendaCells.join(""), sVenda || "—", "is-venda")}
+              ${aberto ? this.painelVendasHtml(ano) : ""}
               ${linha("Saldo", finais.map((v, mes) => this.celTexto(v, false, this.clsMes(ano, mes))).join(""), finais[11], "is-conta")}
             </tbody>
           </table>
@@ -2139,12 +2217,15 @@ const OrcamentoModuloApp = {
     ].map((par) => `<div><span>${this.esc(String(par[0]))}</span><strong>${this.esc(String(par[1]))}</strong></div>`).join("");
     const tab = this.tabelaCatalogo();
     const comp = tab ? this.rotuloCompetencia(tab.competencia) : "";
+    const ticket = this.ticketMedio();
+    const ticketTxt = ticket > 0 ? this.numero(ticket) : "";
     const faixa = comp
-      ? `<p class="orc-kx-nota">Tabela vigente de ${this.esc(comp)}. O ticket médio é deste empreendimento.</p>`
-      : `<p class="orc-kx-nota">Sem tabela vigente neste empreendimento. Informe o ticket médio em cada plano.</p>`;
+      ? `<p class="orc-kx-nota">Tabela vigente de ${this.esc(comp)}. Abra Vendas para informar a quantidade de cada plano.</p>`
+      : `<p class="orc-kx-nota">Sem tabela vigente neste empreendimento.</p>`;
     return `
       <div class="orc-kx-head">
         <div class="orc-kx-nums">${nums}</div>
+        <label class="orc-kx-ticket-campo">Ticket médio<input type="text" inputmode="decimal" value="${this.esc(ticketTxt)}" aria-label="Ticket médio" onchange="OrcamentoModuloApp.setTicketMedio(this.value)"></label>
       </div>
       ${aviso ? `<p class="orc-kx-nota">${this.esc(aviso)}</p>` : ""}
       ${faixa}

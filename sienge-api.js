@@ -3074,13 +3074,18 @@ const SiengeApiService = {
   async cancelSalesContract(contractId, body) {
     const id = String(contractId || "").trim();
     if (!/^\d+$/.test(id)) throw new Error("Id do contrato de vendas inválido.");
+    const letras = {
+      I: "I", X: "X", J: "J", E: "E",
+      INTERNAL: "I", NOTARY_NOTIFICATION: "X", OFFICE_NOTIFICATION: "J", EDICT: "E"
+    };
+    const subType = letras[String((body && body.subType) || "").trim().toUpperCase()] || "";
     const payload = {
       date: String((body && body.date) || "").slice(0, 10),
       reason: String((body && body.reason) || "").trim(),
-      subType: String((body && body.subType) || "").trim()
+      subType: subType
     };
     if (!payload.date || !payload.reason || !payload.subType) {
-      throw new Error("Data, motivo e subtipo são obrigatórios.");
+      throw new Error("Data, motivo e subtipo são obrigatórios. O subtipo vai como I, X, J ou E.");
     }
     return siengePost("/sales-contracts/" + encodeURIComponent(id) + "/cancellation", payload);
   },
