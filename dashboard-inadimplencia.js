@@ -1895,6 +1895,8 @@ const DashboardInadimplencia = (function() {
     const companyData = {};
     const operatorData = {};
     const zeroPaidClients = [];
+    let above31Value = 0;
+    let above31Titles = 0;
     
     bills.forEach(b => {
       if ((Number(b.overdueValue) || 0) < 0.01) return;
@@ -1940,6 +1942,10 @@ const DashboardInadimplencia = (function() {
         op.customers.push({ name: b.customerName || 'N/D', title: String(bTitle), value: b.overdueValue || 0, delay: b.maxDaysDelay || 0 });
         op.total_c += numTitulos; op.total_v += (b.overdueValue||0);
         op[delayBucket+'_c'] += numTitulos; op[delayBucket+'_v'] += (b.overdueValue||0);
+        if (delay >= 31) {
+          above31Value += (b.overdueValue || 0);
+          above31Titles += numTitulos;
+        }
 
       if (b.isZeroPaid) zeroPaidClients.push({ name: b.customerName || 'N/D', title: String(bTitle), delay: b.maxDaysDelay || 0, value: b.overdueValue || 0, billCount: Number(b.totalInstallmentsCount || b.billCount || (b.billIds && b.billIds.length) || 1), unitName: b.unitName, costCenterId: b.costCenterId });
     });
@@ -2204,47 +2210,66 @@ const DashboardInadimplencia = (function() {
     } else {
         zeroPaidEmpList = zeroPaidEmpListFull;
     }
-    function getAbove31(snap) {
-        let v = 0, c = 0;
-        if (snap && snap.data_json && snap.data_json.companies) {
-            snap.data_json.companies.forEach(comp => {
-                if (comp.aging) {
-                    const a = emptyAging();
-                    absorbAging(a, comp.aging);
-                    ['d31_60', 'd61_90', 'd91_120', 'd120p'].forEach(k => {
-                        if (a[k]) {
-                            v += a[k].value || 0;
-                            c += a[k].count || 0;
-                        }
-                    });
-                }
-            });
+    function snapAgingAbove31(snap) {
+        if (!snap) return { v: 0, c: 0, trusted: false };
+        const dj = snapDataJson(snap);
+        let v = 0;
+        let c = 0;
+        const take = (row) => {
+            if (!row) return;
+            v += Number(row.value) || 0;
+            c += Number(row.count) || 0;
+        };
+        (dj.companies || []).forEach((comp) => {
+            const a = comp && comp.aging;
+            if (!a) return;
+            take(a.d31_60);
+            take(a.d61_90);
+            const faixa91 = (Number(a.d91_120 && a.d91_120.value) || Number(a.d91_120 && a.d91_120.count) || 0) > 0 ? a.d91_120 : a.d91_180;
+            take(faixa91);
+            const tem120 = (Number(a.d120p && a.d120p.value) || Number(a.d120p && a.d120p.count) || 0) > 0;
+            if (tem120) take(a.d120p);
+            else {
+                take(a.d181_365);
+                take(a.d365p);
+            }
+        });
+        if (v > 1 || c > 0) return { v: v, c: c, trusted: true };
+        let ov = 0;
+        let oc = 0;
+        (dj.operators || []).forEach((op) => {
+            ov += Number(op && op.above31_value) || 0;
+            oc += Number(op && op.above31_count) || 0;
+        });
+        if (ov > 1 || oc > 0) return { v: ov, c: oc, trusted: true };
+        const rootV = (Number(snap.d60_value) || 0) + (Number(snap.d90_value) || 0) + (Number(snap.d120_value) || 0) + (Number(snap.above120_value) || 0);
+        const rootC = (Number(snap.d60_count) || 0) + (Number(snap.d90_count) || 0) + (Number(snap.d120_count) || 0) + (Number(snap.above120_count) || 0);
+        if (rootV > 1 || rootC > 0) return { v: rootV, c: rootC, trusted: true };
+        if ((Number(snap.above31_value) || 0) > 1 || (Number(snap.above31_count) || 0) > 0) {
+            return { v: Number(snap.above31_value) || 0, c: Number(snap.above31_count) || 0, trusted: true };
         }
-        // Se as propriedades sumadas derem zero, tenta usar os campos que já vinham calculados na raiz
-        if (v === 0 && snap.above31_value) v = snap.above31_value;
-        if (c === 0 && snap.above31_count) c = snap.above31_count;
-        
-        return { v, c };
+        return { v: 0, c: 0, trusted: false };
     }
-    
-    const hojeSnapForFallback = chartSnaps[chartSnaps.length - 1];
-    const hojeAbove31 = getAbove31(hojeSnapForFallback);
 
-    const chart31v = chartSnaps.map(s => {
-        let res = getAbove31(s);
-        if (res.v === 0 && s.total_value > 0 && hojeSnapForFallback.total_value > 0) {
-            res.v = (hojeAbove31.v / hojeSnapForFallback.total_value) * s.total_value;
-            res.c = Math.round((hojeAbove31.c / hojeSnapForFallback.total_count) * s.total_count);
+    const ratioV = totalOverdue > 0 ? above31Value / totalOverdue : 0;
+    const ratioC = totalBills > 0 ? above31Titles / totalBills : 0;
+    const chart31 = chartSnaps.map((s, i) => {
+        const got = snapAgingAbove31(s);
+        let v = got.v;
+        let c = got.c;
+        if (!got.trusted && Number(s && s.total_value) > 0 && ratioV > 0) {
+            v = ratioV * Number(s.total_value);
+            const baseCount = Number(s && s.total_count) || 0;
+            c = baseCount > 0 ? Math.round(ratioC * baseCount) : 0;
         }
-        return res.v;
-    });
-    const chart31t = chartSnaps.map(s => {
-        let res = getAbove31(s);
-        if (res.v === 0 && s.total_value > 0 && hojeSnapForFallback.total_value > 0) {
-            res.c = Math.round((hojeAbove31.c / hojeSnapForFallback.total_count) * s.total_count);
+        if (i === chartSnaps.length - 1 && above31Value > 0) {
+            v = above31Value;
+            c = above31Titles;
         }
-        return res.c;
+        return { v: v, c: c };
     });
+    const chart31v = chart31.map((x) => x.v);
+    const chart31t = chart31.map((x) => x.c);
 
     let ontemSnap = null;
     if (snapshots.length > 1) {
@@ -2416,8 +2441,8 @@ tr.tot td{background:#fff7ed!important;font-weight:800;color:#c2410c;border-top:
   <div style="background: linear-gradient(135deg, #f97316 0%, #c2410c 100%); border-radius:8px; padding:12px; color:white; display:flex; flex-direction:column; box-shadow:0 4px 6px rgba(249, 115, 22, 0.2);">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
       <div style="font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">📅 Títulos com 31 dias de atraso ou mais</div>
-      <div style="font-size:12px; font-weight:700;">${chart31t[chart31t.length-1] || 0} Títulos <span style="font-size:10px; font-weight:500;">(${(((chart31t[chart31t.length-1] || 0) / (totalBills || 1)) * 100).toFixed(1)}% do total de Títulos)</span></div>
-      <div style="font-size:12px; font-weight:800;">Total: ${fmtMoneyNoRs(chart31v[chart31v.length-1] || 0)}</div>
+      <div style="font-size:12px; font-weight:700;">${above31Titles} Títulos <span style="font-size:10px; font-weight:500;">(${((above31Titles / (totalBills || 1)) * 100).toFixed(1)}% do total de Títulos)</span></div>
+      <div style="font-size:12px; font-weight:800;">Total: ${fmtMoneyNoRs(above31Value)}</div>
     </div>
     <div style="background:rgba(255,255,255,0.95); border-radius:6px; padding:10px; display:flex; gap:15px; justify-content:space-around;">
       <div style="flex:1; display:flex; flex-direction:column; align-items:center;">

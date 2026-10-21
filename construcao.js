@@ -686,6 +686,35 @@ window.loadConstrucoes = async function() {
             }
         });
 
+        try {
+            if (typeof window.ensureFilaSignalsIndex === "function") await window.ensureFilaSignalsIndex();
+            if (typeof window.relCollectAlbum === "function") {
+                const ctxAlbum = window.ConstrucaoApp.getActiveContractContext();
+                const daFila = (window.clientList || []).find(function(c) {
+                    return c && String(c.customerId) === String(ctxAlbum.customerId)
+                        && (String(c.saleId) === String(ctxAlbum.titulo) || String(c.saleId) === String(ctxAlbum.saleId));
+                });
+                const clienteAlbum = daFila || {
+                    customerId: ctxAlbum.customerId,
+                    saleId: ctxAlbum.titulo || ctxAlbum.saleId,
+                    costCenterId: ctxAlbum.costCenterId,
+                    unitName: ctxAlbum.unitName,
+                    billIds: [ctxAlbum.titulo, ctxAlbum.saleId].filter(Boolean)
+                };
+                const album = window.relCollectAlbum(clienteAlbum);
+                const ja = new Set(results.map(function(r) { return r.id; }));
+                (album.vistorias || []).concat(album.checks || []).forEach(function(docAlbum) {
+                    if (!docAlbum || ja.has(docAlbum.id)) return;
+                    ja.add(docAlbum.id);
+                    results.push(Object.assign({
+                        _source: docAlbum._collection === "vistorias" ? "vistoria" : "check"
+                    }, docAlbum));
+                });
+            }
+        } catch (albumErr) {
+            console.warn("[Construção] Não foi possível completar com a foto da fila:", albumErr);
+        }
+
         const sameContract = (a, b) => {
             const keysA = new Set([String(a.contractId || ''), ...((a.contractKeys || []).map(String))].filter(k => k && k !== 'undefined' && k !== 'null'));
             const keysB = new Set([String(b.contractId || ''), ...((b.contractKeys || []).map(String))].filter(k => k && k !== 'undefined' && k !== 'null'));
@@ -704,8 +733,8 @@ window.loadConstrucoes = async function() {
             if (pendingStatus.has(data.status)) return false;
             if (!hasInspectionContent(data)) return false;
             if (data._collection === 'vistorias' && data.status === 'concluida') {
-                const hasCheck = results.some(o => o._collection === 'construction_checks' && sameContract(o, data));
-                if (hasCheck) return false;
+                const hasShownCheck = results.some(o => o._collection === 'construction_checks' && sameContract(o, data) && hasInspectionContent(o) && !pendingStatus.has(o.status));
+                if (hasShownCheck) return false;
             }
             return true;
         });
@@ -836,7 +865,7 @@ function renderConstrucaoHistory(checks) {
         const lotLabel = window.ConstrucaoApp.formatLotLabel(check.unidade, check.costCenterId);
         const stageLabel = isPendingLink
             ? (check.status === 'aguardando_validacao' ? 'Aguardando validação' : 'Link enviado')
-            : (check.stage || '-');
+            : (check.stage || (check.respostasFormulario && check.respostasFormulario.estagioObra) || check.estagioObra || '-');
         const stageStyle = isPendingLink
             ? (check.status === 'aguardando_validacao'
                 ? 'background:#ede9fe;color:#6d28d9'

@@ -7933,11 +7933,12 @@ window.cancelamentoPodeSeguir = function(info) {
   if (!temContrato) motivos.push("Não foi possível apurar o valor do contrato.");
   if (!restituicaoZero) motivos.push("A restituição é " + window.cancelamentoDinheiro(info && info.restituicao) + ". O cancelamento direto no Sienge só segue com restituição zero.");
   if (temContrato && !pagoBaixo) motivos.push("O cliente pagou " + pctTxt + "% do contrato. Quem pagou 10% ou mais do contrato não cancela direto no Sienge, mesmo que a restituição tenha ficado em zero. Esses 10% são o quanto já foi pago, não a multa.");
-  if (pagoBaixo && restituicaoZero && nex && (info.temConstrucao || info.construcaoIncerta)) {
-    if (info.temConstrucao) motivos.push("O lote tem construção. Com NEX cumprida, o cancelamento direto só segue sem construção.");
-    else motivos.push("Não foi possível confirmar que o lote está sem construção.");
+  if (info && info.temConstrucao) {
+    motivos.push("O lote tem construção. O cancelamento direto não segue. Encaminhe para o jurídico.");
+  } else if (info && info.construcaoIncerta) {
+    motivos.push("Não foi possível confirmar que o lote está sem construção.");
   }
-  if (pagoBaixo && restituicaoZero && !(nex && (info.temConstrucao || info.construcaoIncerta))) {
+  if (pagoBaixo && restituicaoZero && !(info && (info.temConstrucao || info.construcaoIncerta))) {
     return { ok: true, via: (info.pago <= 0.009 ? "zero" : (nex ? "nex" : "baixo")), motivos: [] };
   }
   return { ok: false, via: "", motivos: motivos };
@@ -8002,6 +8003,57 @@ window.cancelamentoLerConstrucao = async function(client) {
     return { temConstrucao: false, incerta: false, texto: "Não há registro de construção neste lote." };
   }
   return { temConstrucao: false, incerta: true, texto: "A consulta de construção ainda não retornou." };
+};
+
+window.cancelamentoExigencias = function(client) {
+  const ccRaw = client && client.costCenterId;
+  const cc = String(Array.isArray(ccRaw) ? (ccRaw[0] || "") : (ccRaw || "")).split(",")[0].trim();
+  const unit = (client && (client.unitName || client.unitLabel)) || "";
+  const cfg = (typeof window.nexCcConfig === "function") ? window.nexCcConfig(cc, unit) : {};
+  const loteamentoFechado = cc !== "14304" && String((cfg && cfg.tipo_cc) || "") === "Loteamento Fechado";
+  const obras = (typeof window.distratoObrasMap === "function") ? window.distratoObrasMap() : {};
+  const obra = obras[cc];
+  const obraAndamento = obra === true || !!(obra && obra.isOn);
+  const webro = typeof window.suspenderClientePagaWebro === "function" && window.suspenderClientePagaWebro(client);
+  return { obraAndamento: obraAndamento, loteamentoFechado: loteamentoFechado, webro: !!webro };
+};
+
+window.cancelamentoDocsOk = function() {
+  const exig = window._cancelExigencias || {};
+  const cnd = document.getElementById("cancel-cnd-file");
+  const assoc = document.getElementById("cancel-assoc-file");
+  const webro = document.getElementById("cancel-webro-file");
+  if (!exig.obraAndamento && !(cnd && cnd.files && cnd.files[0])) return false;
+  if (exig.loteamentoFechado && !exig.obraAndamento && !(assoc && assoc.files && assoc.files[0])) return false;
+  if (exig.webro && !(webro && webro.files && webro.files[0])) return false;
+  return true;
+};
+
+window.cancelamentoLiberarSeguir = function() {
+  const btn = document.getElementById("cancel-seguir-btn");
+  if (!btn) return;
+  const ok = window.cancelamentoDocsOk();
+  btn.disabled = !ok;
+  btn.style.opacity = ok ? "" : "0.45";
+  btn.style.cursor = ok ? "" : "not-allowed";
+  btn.title = ok ? "" : "Anexe os documentos pedidos para seguir com o distrato.";
+};
+
+window.cancelamentoGuardarDocsESeguir = function(customerId, saleId) {
+  if (!window.cancelamentoDocsOk()) {
+    if (window.showToast) window.showToast("Anexe os documentos pedidos para seguir com o distrato.", "warning");
+    return;
+  }
+  const cnd = document.getElementById("cancel-cnd-file");
+  const assoc = document.getElementById("cancel-assoc-file");
+  const webro = document.getElementById("cancel-webro-file");
+  window._cancelDocs = {
+    cnd: cnd && cnd.files && cnd.files[0] ? cnd.files[0] : null,
+    associacao: assoc && assoc.files && assoc.files[0] ? assoc.files[0] : null,
+    webro: webro && webro.files && webro.files[0] ? webro.files[0] : null
+  };
+  window.fecharAvaliacaoCancelamento();
+  window.abrirCancelamentoContrato(customerId, saleId);
 };
 
 window.fecharAvaliacaoCancelamento = function() {
@@ -8073,6 +8125,9 @@ window.abrirAvaliacaoCancelamento = async function(customerId, saleId) {
       nexCumprida: nex
     };
     const pode = window.cancelamentoPodeSeguir(info);
+    const exig = window.cancelamentoExigencias(client);
+    window._cancelExigencias = exig;
+    window._cancelDocs = null;
     window._cancelAvaliacao = {
       customerId: String(client.customerId),
       saleId: String(client.saleId || saleId),
@@ -8086,12 +8141,38 @@ window.abrirAvaliacaoCancelamento = async function(customerId, saleId) {
     const linha = function(rotulo, valor) {
       return `<div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #e2e8f0;"><span style="color:#64748b;">${rotulo}</span><strong style="color:#0f172a;">${valor}</strong></div>`;
     };
+    const saleJs = String(client.saleId || saleId).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    const cidNum = Number(client.customerId) || 0;
+    const campoArquivo = function(id, rotulo, ajuda) {
+      return `<div style="margin-top:12px;">
+        <label style="display:block;font-size:0.82rem;font-weight:700;color:#0f172a;margin-bottom:4px;">${rotulo}</label>
+        <p style="margin:0 0 6px;font-size:0.78rem;color:#64748b;">${ajuda}</p>
+        <input type="file" id="${id}" accept="image/*,.png,.jpg,.jpeg,.webp,.pdf,application/pdf" onchange="window.cancelamentoLiberarSeguir()" style="width:100%;box-sizing:border-box;padding:8px;border:1px dashed #cbd5e1;border-radius:8px;background:#f8fafc;font-size:0.85rem;">
+      </div>`;
+    };
+    let docsHtml = "";
+    if (pode.ok) {
+      if (exig.obraAndamento) {
+        docsHtml += `<p style="margin:12px 0 0;font-size:0.82rem;color:#166534;background:#f0fdf4;border-radius:8px;padding:8px 10px;">Obra em andamento: CND e CND da associação dispensadas.</p>`;
+      } else {
+        docsHtml += campoArquivo("cancel-cnd-file", "CND", "A certidão sobe no cadastro da unidade, como na suspensão do contrato.");
+        if (exig.loteamentoFechado) {
+          docsHtml += campoArquivo("cancel-assoc-file", "CND da associação", "Loteamento fechado. Anexe a CND da associação.");
+        }
+      }
+      if (exig.webro) {
+        docsHtml += campoArquivo("cancel-webro-file", "Print da tela da Webro com os boletos baixados", "Este cliente tem a tag Boleto WEBRO. O print sobe no cadastro da unidade.");
+      }
+    }
+    const pedeDoc = !!(pode.ok && (!exig.obraAndamento || exig.webro));
     const aviso = pode.ok
-      ? `<p style="margin:12px 0 0;padding:10px 12px;border-radius:8px;background:#ecfdf5;color:#105436;font-size:0.84rem;font-weight:700;">Pago ${window.cancelContratoEsc(pct)} do contrato, menos de 10%. Restituição zero. Pode cancelar direto no Sienge.</p>`
+      ? `<p style="margin:12px 0 0;padding:10px 12px;border-radius:8px;background:#ecfdf5;color:#105436;font-size:0.84rem;font-weight:700;">Pago ${window.cancelContratoEsc(pct)} do contrato, menos de 10%. Restituição zero. Sem construção.${pedeDoc ? " Para seguir, anexe os mesmos documentos da suspensão." : " Pode cancelar direto no Sienge."}</p>`
       : `<p style="margin:12px 0 0;padding:10px 12px;border-radius:8px;background:#fef2f2;color:#991b1b;font-size:0.84rem;">${pode.motivos.map(function(m) { return window.cancelContratoEsc(m); }).join("<br>")}</p>`;
     const seguir = pode.ok
-      ? `<button type="button" class="btn btn-primary" onclick="window.fecharAvaliacaoCancelamento(); window.abrirCancelamentoContrato(${Number(client.customerId) || 0}, '${String(client.saleId || saleId).replace(/\\/g, "\\\\").replace(/'/g, "\\'")}')">Seguir para o cancelamento</button>`
-      : "";
+      ? `<button type="button" class="btn btn-primary" id="cancel-seguir-btn" ${pedeDoc ? "disabled style=\"opacity:0.45;cursor:not-allowed;\" title=\"Anexe os documentos pedidos para seguir com o distrato.\"" : ""} onclick="window.cancelamentoGuardarDocsESeguir(${cidNum}, '${saleJs}')">Seguir para o cancelamento</button>`
+      : (obra.temConstrucao
+        ? `<button type="button" class="btn btn-primary" onclick="window.fecharAvaliacaoCancelamento(); window.enviarParaJuridico(${cidNum}, '${saleJs}')">Enviar para o jurídico</button>`
+        : "");
     corpo.innerHTML = `
       <p style="margin:0 0 8px;font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;">Construção</p>
       <p style="margin:0 0 16px;font-size:0.9rem;font-weight:700;color:${obra.temConstrucao ? "#9a3412" : "#105436"};">${window.cancelContratoEsc(obra.texto)}</p>
@@ -8106,6 +8187,7 @@ window.abrirAvaliacaoCancelamento = async function(customerId, saleId) {
       ${linha("Multa de 10% do contrato", window.cancelContratoEsc(window.cancelamentoDinheiro(resumo.multa)))}
       ${linha("Restituição", window.cancelContratoEsc(window.cancelamentoDinheiro(resumo.restituicao)))}
       <p style="margin:8px 0 0;font-size:0.75rem;color:#64748b;line-height:1.4;">A restituição é o valor pago menos a multa de 10% do contrato. Se o pago for menor que essa multa, a restituição fica em zero. A multa não muda. Quem pagou 10% ou mais do contrato não cancela direto, mesmo com restituição zero.</p>
+      ${docsHtml}
       ${aviso}
       <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:8px;">
         <button type="button" class="btn btn-cancel" onclick="window.fecharAvaliacaoCancelamento()">Cancelar</button>
@@ -8227,7 +8309,27 @@ window.enviarCancelamentoContrato = async function() {
   if (ini !== "1" && ini !== "2") { falha("Escolha de quem foi a iniciativa."); return; }
   if (!motivo) { falha("Escolha o motivo."); return; }
   const rot = window.cancelMotivoRotulo(ini, motivo);
+  const exig = window._cancelExigencias || {};
+  const docs = window._cancelDocs || {};
+  if (!exig.obraAndamento && !docs.cnd) { falha("Anexe a CND antes de cancelar."); return; }
+  if (exig.loteamentoFechado && !exig.obraAndamento && !docs.associacao) { falha("Anexe a CND da associação antes de cancelar."); return; }
+  if (exig.webro && !docs.webro) { falha("Anexe o print da baixa da Webro antes de cancelar."); return; }
   if (btn) btn.disabled = true;
+  if (aviso) { aviso.style.color = "#475569"; aviso.textContent = "Enviando os documentos para a unidade…"; }
+  try {
+    const subir = async function(arquivo, tags, contexto, rotulo) {
+      if (!arquivo) return;
+      if (aviso) aviso.textContent = "Enviando " + rotulo + " para a unidade…";
+      await window.nexUploadToSiengeUnit(client.customerId, client.saleId, arquivo, tags, null, contexto);
+    };
+    await subir(docs.cnd, ["CND", "CERTIDAO NEGATIVA DE DEBITO", "CERTIDAO NEGATIVA DE DEBITO IPTU"], "cancelamento-cnd", "a CND");
+    await subir(docs.associacao, ["CND ASSOCIACAO", "CND DA ASSOCIACAO", "TAXA ASSOCIATIVA"], "cancelamento-associacao", "a CND da associação");
+    await subir(docs.webro, ["BAIXA WEBRO", "PRINT WEBRO", "WEBRO", "COMPROVANTE BAIXA WEBRO"], "cancelamento-webro", "o print da baixa Webro");
+  } catch (e) {
+    if (btn) btn.disabled = false;
+    falha("Não foi possível gravar o documento na unidade. O título não foi cancelado. " + ((e && e.message) || e));
+    return;
+  }
   if (aviso) { aviso.style.color = "#475569"; aviso.textContent = "Buscando o contrato de vendas…"; }
   let contract = null;
   try {
@@ -8250,8 +8352,9 @@ window.enviarCancelamentoContrato = async function() {
       subType: subtipo
     });
     const subNome = (window.CANCEL_SUBTIPOS.find(function(s) { return s.codigo === subtipo; }) || {}).nome || subtipo;
-    const resumo = "Contrato " + contract.id + " cancelado no Sienge, subtipo " + subNome + " (" + subtipo + "), motivo " + rot.texto + ", título " + client.saleId + " · " + (client.customerName || "");
-    window.cancelContratoRegistrar(client, "ok", resumo, { contractId: contract.id, reason: rot.texto, subType: subtipo, date: data });
+    const anexosTxt = [docs.cnd && "CND", docs.associacao && "CND da associação", docs.webro && "print da baixa Webro"].filter(Boolean).join(", ");
+    const resumo = "Contrato " + contract.id + " cancelado no Sienge, subtipo " + subNome + " (" + subtipo + "), motivo " + rot.texto + ", título " + client.saleId + " · " + (client.customerName || "") + (anexosTxt ? ". Documentos na unidade: " + anexosTxt : "");
+    window.cancelContratoRegistrar(client, "ok", resumo, { contractId: contract.id, reason: rot.texto, subType: subtipo, date: data, cnd: !!docs.cnd, associacao: !!docs.associacao, webro: !!docs.webro });
     if (window.showToast) window.showToast("Contrato cancelado no Sienge.", "success");
     window.fecharCancelamentoContrato();
   } catch (e) {
@@ -8273,8 +8376,8 @@ window.getNexCumpridaAgingHtml = function(client) {
   const estilo = "padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #105436; background-color: #ecfdf5; color: #105436; font-weight: 700;";
   const cid = Number(client && client.customerId) || 0;
   const sale = String(client && client.saleId || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-  return `<button type="button" onclick="event.stopPropagation(); window.abrirAvaliacaoCancelamento(${cid}, '${sale}')" style="${estilo} cursor: pointer;" title="NEX cumprida (${dayLabel}). Ver construção e o cálculo do distrato antes do cancelamento.">
-    <i data-lucide="file-warning" style="width: 14px; height: 14px;"></i> Avaliar Cancelamento
+  return `<button type="button" onclick="event.stopPropagation(); window.abrirAvaliacaoCancelamento(${cid}, '${sale}')" style="${estilo} cursor: pointer;" title="NEX cumprida há ${dayLabel} de atraso. Ver construção e o cálculo do distrato antes do cancelamento.">
+    <i data-lucide="file-warning" style="width: 14px; height: 14px;"></i> NEX cumprida - ${dayLabel}
   </button>`;
 };
 
@@ -12588,10 +12691,16 @@ window.aplicarTravaSubjudiceNaFicha = function(customerId, nome) {
     return;
   }
   if (typeof AppState !== "undefined") AppState.isSubjudiceMode = true;
+  const advogadoFicha = window.fichaUsuarioEhAdvogadoCobranca();
   const avisoSub = document.getElementById("ficha-subjudice-alerta");
   if (avisoSub) {
-    avisoSub.style.display = "block";
-    avisoSub.textContent = "Cliente sub judice. O Integra não gera boleto deste contrato. Mesmo com pagamento integral, a emissão fica com o advogado da Moura Leite.";
+    if (advogadoFicha) {
+      avisoSub.style.display = "none";
+      avisoSub.textContent = "";
+    } else {
+      avisoSub.style.display = "block";
+      avisoSub.textContent = "Cliente sub judice. O Integra não gera boleto deste contrato. Mesmo com pagamento integral, a emissão fica com o advogado da Moura Leite.";
+    }
   }
   const btnGerarBoletos = document.getElementById("btn-gerar-boletos-agrupados");
   if (btnGerarBoletos) btnGerarBoletos.style.display = "none";
@@ -12606,13 +12715,22 @@ window.aplicarTravaSubjudiceNaFicha = function(customerId, nome) {
     const btn = document.querySelector('button[data-target="' + tabId + '"]');
     if (btn) btn.style.display = "none";
   });
-  if (typeof window.avisarClienteSubjudice === "function") window.avisarClienteSubjudice(customerId, nome);
+  if (!advogadoFicha && typeof window.avisarClienteSubjudice === "function") window.avisarClienteSubjudice(customerId, nome);
   if (typeof switchCustomerTab === "function") switchCustomerTab("tab-cobranca-judicial");
   if (typeof renderJudicialTimeline === "function") renderJudicialTimeline();
   if (typeof syncCobrancaJudicialTabs === "function") syncCobrancaJudicialTabs(true, false);
 };
 
+window.fichaUsuarioEhAdvogadoCobranca = function() {
+  const acesso = (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo()) || (typeof AppState !== "undefined" && AppState.currentUser);
+  if (!acesso) return false;
+  if (typeof window.isAdvogadoCobrancaUser === "function" && window.isAdvogadoCobrancaUser(acesso)) return true;
+  const op = (typeof window.crmOperatorType === "function" && window.crmOperatorType(acesso)) || acesso.operator_type || "";
+  return op === "advogado";
+};
+
 window.avisarClienteSubjudice = function(customerId, nomeFallback) {
+  if (window.fichaUsuarioEhAdvogadoCobranca()) return;
   const antigo = document.getElementById("subjudice-ciente-modal");
   if (antigo) antigo.remove();
   const lista = window._subjudiceList || [];
@@ -12816,7 +12934,7 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
 
   const avisoSub = document.getElementById("ficha-subjudice-alerta");
   if (avisoSub) {
-    if (isSubjudice) {
+    if (isSubjudice && !isAdvogado) {
       avisoSub.style.display = "block";
       avisoSub.textContent = "Cliente sub judice. O Integra não gera boleto deste contrato. Mesmo com pagamento integral, a emissão fica com o advogado da Moura Leite.";
     } else {
@@ -12824,7 +12942,7 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
       avisoSub.textContent = "";
     }
   }
-  if (isSubjudice) window.avisarClienteSubjudice(customerId);
+  if (isSubjudice && !isAdvogado) window.avisarClienteSubjudice(customerId);
   if (isSubjudice) {
     switchCustomerTab('tab-cobranca-judicial');
     if (typeof renderJudicialTimeline === 'function') {
@@ -39309,6 +39427,32 @@ window.ensureSuspenderContratoModal = function() {
   return overlay;
 };
 
+window.suspenderLiberarEfetivar = function() {
+  const btn = document.getElementById("suspender-contrato-confirm");
+  const st = window._suspenderContrato || {};
+  if (!btn || !st.webro) return;
+  const input = document.getElementById("suspender-webro-file");
+  const ok = !!(input && input.files && input.files[0]);
+  btn.disabled = !ok;
+  btn.title = ok ? "" : "Anexe o print da baixa Webro para emitir a carta de suspensão.";
+  btn.style.opacity = ok ? "" : "0.45";
+  btn.style.cursor = ok ? "" : "not-allowed";
+};
+
+window.mostrarCartaSuspensao = function(html) {
+  const title = document.getElementById("pdf-modal-title");
+  const content = document.getElementById("pdf-document-content");
+  const overlay = document.getElementById("pdf-view-overlay");
+  if (!content || !overlay || !html) return;
+  if (title) title.textContent = "Carta de Suspensão de Contrato";
+  content.innerHTML = html;
+  overlay.style.zIndex = "10100";
+  overlay.style.opacity = "";
+  overlay.style.pointerEvents = "";
+  overlay.classList.add("active");
+  if (window.lucide) lucide.createIcons();
+};
+
 window.previewSuspenderArquivos = function(input, previewId) {
   const preview = document.getElementById(previewId);
   if (!preview) return;
@@ -39374,9 +39518,9 @@ window.openSuspenderContratoModal = function(customerId, saleId) {
   const webroBloco = ctx.webro
     ? `<div style="margin-top:14px;">
         <label style="display:block;font-size:0.82rem;font-weight:700;color:#0f172a;margin-bottom:6px;">Print da tela da Webro com os boletos baixados</label>
-        <p style="margin:0 0 8px;font-size:0.78rem;color:#64748b;">Este cliente tem a tag Boleto WEBRO. O print sobe no cadastro da unidade.</p>
+        <p style="margin:0 0 8px;font-size:0.78rem;color:#64748b;">Este cliente tem a tag Boleto WEBRO. A carta de suspensão só é emitida depois que este print for anexado.</p>
         <input type="file" id="suspender-webro-file" accept="image/*,.png,.jpg,.jpeg,.webp,.pdf,application/pdf"
-          onchange="window.previewSuspenderArquivos(this, 'suspender-webro-preview')"
+          onchange="window.previewSuspenderArquivos(this, 'suspender-webro-preview'); window.suspenderLiberarEfetivar()"
           style="width:100%;box-sizing:border-box;padding:8px;border:1px dashed #cbd5e1;border-radius:8px;background:#f8fafc;font-size:0.85rem;">
         <div id="suspender-webro-preview" style="margin-top:8px;font-size:0.8rem;color:#64748b;"></div>
       </div>`
@@ -39393,7 +39537,7 @@ window.openSuspenderContratoModal = function(customerId, saleId) {
         <p id="suspender-contrato-status" style="margin:12px 0 0;font-size:0.8rem;color:#64748b;min-height:1.2em;"></p>
         <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px;">
           <button type="button" class="btn btn-cancel" onclick="closeSuspenderContratoModal()">Cancelar</button>
-          <button type="button" class="btn btn-primary" id="suspender-contrato-confirm" onclick="confirmSuspenderContrato()">Efetivar suspensão</button>
+          <button type="button" class="btn btn-primary" id="suspender-contrato-confirm" onclick="confirmSuspenderContrato()" ${ctx.webro ? "disabled title=\"Anexe o print da baixa Webro para emitir a carta de suspensão.\" style=\"opacity:0.45;cursor:not-allowed;\"" : ""}>Efetivar suspensão</button>
         </div>
       </div>`;
   }
@@ -39474,8 +39618,10 @@ window.confirmSuspenderContrato = async function() {
   }
   if (!carta || !carta.html) {
     if (confirmBtn) confirmBtn.disabled = false;
+    setStatus("A carta de suspensão não foi emitida.", "erro");
     return;
   }
+  window.mostrarCartaSuspensao(carta.html);
 
   const toast = (msg, kind) => {
     if (typeof window.nexToast === "function") window.nexToast(msg, kind);
@@ -39571,18 +39717,8 @@ window.confirmSuspenderContrato = async function() {
   }
 
   window.closeSuspenderContratoModal();
-  toast("Suspensão efetivada. O título foi cancelado no Sienge e os documentos foram gravados na unidade.");
-  try {
-    document.getElementById("pdf-modal-title").textContent = "Carta de Suspensão de Contrato";
-    document.getElementById("pdf-document-content").innerHTML = carta.html;
-    const overlay = document.getElementById("pdf-view-overlay");
-    if (overlay) {
-      overlay.style.opacity = "";
-      overlay.style.pointerEvents = "";
-      overlay.classList.add("active");
-    }
-    if (window.lucide) lucide.createIcons();
-  } catch (e) {}
+  window.mostrarCartaSuspensao(carta.html);
+  toast("Suspensão efetivada. A carta de suspensão foi emitida, o título foi cancelado no Sienge e os documentos foram gravados na unidade.");
 };
 
 // ----------------------------------------------------
@@ -43600,7 +43736,8 @@ window._gestaoDocBloqueio = function(tipo, status) {
     if (s && (quitado || distratado)) {
       return "A permuta só pode ser feita em lote ativo (status atual: " + status + ").";
     }
-    return "Indisponível por enquanto.";
+    if (/inadimpl/.test(s)) return "A permuta só pode ser feita com o cliente adimplente.";
+    return "";
   }
   if (!s) return "";
   if (tipo === "aditamento" && (quitado || distratado)) {
@@ -43699,6 +43836,24 @@ window.escolherGestaoDocumento = function(tipo) {
       });
     } else {
       alert("A tela de cessão ainda não carregou. Atualize a página e tente de novo.");
+    }
+    return;
+  }
+
+  if (tipo === "permuta") {
+    if (window.PermutaApp && typeof PermutaApp.abrir === "function") {
+      PermutaApp.abrir({
+        titulo: titulo && String(titulo) !== "—" ? (String(titulo).replace(/\D/g, "") || String(titulo)) : "",
+        contrato: contractNumber ? String(contractNumber).trim() : "",
+        nome: customerName ? String(customerName).trim() : "",
+        customerId: customerId,
+        contractId: contractId,
+        unidade: ctx.unidade || "",
+        empreendimento: ctx.empreendimento || "",
+        status: ctx.status || ""
+      });
+    } else {
+      alert("A tela de permuta ainda não carregou. Atualize a página e tente de novo.");
     }
     return;
   }
