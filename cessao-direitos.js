@@ -1186,9 +1186,7 @@ const CessaoPopup = {
             <h3 id="cessao-popup-title">Cessão de direitos</h3>
             <p id="cessao-popup-sub"></p>
           </div>
-          <button type="button" class="btn btn-outline btn-sm" onclick="CessaoPopup.fechar()" title="Fechar" style="padding:4px 8px;">
-            <i data-lucide="x" style="width:16px;height:16px;"></i>
-          </button>
+          <button type="button" class="btn btn-fechar" onclick="CessaoPopup.fechar()">Fechar</button>
         </header>
         <div id="cessao-popup-tabs"></div>
         <div class="cessao-popup-body" id="cessao-popup-body"></div>
@@ -1298,7 +1296,7 @@ const CessaoPopup = {
       }
       const raw = p.percentage != null ? p.percentage : p.participationPercentage;
       const pctSienge = raw != null && raw !== "" && Number.isFinite(Number(raw)) ? Number(raw) : null;
-      cedentes.push({
+      const row = {
         id: id,
         name: (full && full.name) || p.name || p.customerName || ctx.nome || ("Cliente " + id),
         main: !!(p.main === true || p.main === "true" || String(p.main).toLowerCase() === "s"),
@@ -1307,7 +1305,19 @@ const CessaoPopup = {
         cede: people.length <= 1,
         cederPct: people.length <= 1 ? (pctSienge != null && pctSienge > 0 ? pctSienge : 100) : 0,
         customer: full || { id: id, name: p.name || ctx.nome || "" }
-      });
+      };
+      const ja = id && cedentes.find((c) => String(c.id) === id);
+      if (ja) {
+        if ((row.participacao || 0) > (ja.participacao || 0)) {
+          ja.participacao = row.participacao;
+          ja.pctSienge = row.pctSienge;
+          ja.cederPct = row.cederPct;
+        }
+        if (row.main) ja.main = true;
+        if (row.customer && row.customer.name && (!ja.customer || !ja.customer.name)) ja.customer = row.customer;
+        continue;
+      }
+      cedentes.push(row);
     }
     if (cedentes.length === 1 && !(cedentes[0].participacao > 0)) {
       cedentes[0].participacao = 100;

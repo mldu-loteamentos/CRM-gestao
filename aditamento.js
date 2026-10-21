@@ -410,7 +410,7 @@
                 <h3 style="margin:0;font-size:1.1rem;color:var(--color-primary);">Parcelas: como está hoje e como vai ficar</h3>
                 ${sub && sub.textContent ? `<div class="doc-modal-sub">${this._escDoc(sub.textContent)}</div>` : ""}
               </div>
-              <button type="button" class="adi-pop-x" onclick="RelacionamentoApp.adiFecharParcelas()" title="Fechar">&times;</button>
+              <button type="button" class="btn btn-fechar" onclick="RelacionamentoApp.adiFecharParcelas()">Fechar</button>
             </div>
             <div class="adi-pop-body">
               <div class="adi-grid">${this._adiHojeHtml(ctx)}${this._adiNovoHtml(ctx)}</div>

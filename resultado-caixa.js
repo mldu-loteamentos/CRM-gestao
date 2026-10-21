@@ -938,13 +938,18 @@ const ResultadoCaixaApp = {
     return s;
   },
 
-  /** Entradas do ano anterior no mesmo recorte do Power BI: receitas (com cancelamentos) e receitas financeiras. */
+  /** Entradas no recorte do Power BI: receitas, cancelamentos (01.04) e receitas financeiras. */
+  defsEntradaPowerBi() {
+    return this.contasEntrada().concat([
+      { id: "cancelamentos", nome: "CANCELAMENTOS DE VENDAS", codigos: ["01.04"], filhos: /^01\.04\./, nodes: ["g_01_04"] }
+    ]);
+  },
+
   valorPowerBi(arq, ccId, mes, campo, ate) {
     const dono = arq && arq.contasPorCc && arq.contasPorCc[ccId];
     if (!dono || !dono.contas) return null;
-    const defs = this.contasEntrada().concat([{ codigos: ["01.04"], filhos: /^01\.04\./ }]);
     let s = 0;
-    defs.forEach((def) => { s += this.somaCodigos(dono.contas, def, mes, campo, ate); });
+    this.defsEntradaPowerBi().forEach((def) => { s += this.somaCodigos(dono.contas, def, mes, campo, ate); });
     return s;
   },
 
@@ -977,7 +982,7 @@ const ResultadoCaixaApp = {
       const arq = a.arquivos[nome];
       if (!arq) return;
       const pct = this.agrupar ? this.pctArquivo(arq, nome) : 1;
-      if (anoAnterior && lado === "entradas") {
+      if (lado === "entradas") {
         const pb = this.valorPowerBi(arq, ccId, mes, campo, ate);
         if (pb != null) {
           if (pb) s += pb * pct;
@@ -2891,7 +2896,7 @@ const ResultadoCaixaApp = {
     if (!a || this.semContas(ano)) return null;
     const cat = this.catalogoEmpresas();
     const empresas = {};
-    const defs = saida ? this.contasSaida() : this.contasEntrada();
+    const defs = saida ? this.contasSaida() : this.defsEntradaPowerBi();
     const grupos = defs.map((def) => ({ def: def, porEmp: {}, ccs: {} }));
     const vivo = (o, r) => Math.abs(o) > 0.5 || Math.abs(r) > 0.5;
     Object.keys(a.arquivos || {}).forEach((nome) => {

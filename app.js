@@ -1128,6 +1128,7 @@ function switchCustomerTab(tabId) {
   }
   
   if (tabId === 'tab-ocorrencias') {
+    if (typeof window.atualizarCanalBaixaWebro === "function") window.atualizarCanalBaixaWebro();
     if (typeof window.populatePromisedInstallmentsDropdown === 'function') {
       window.populatePromisedInstallmentsDropdown();
     }
@@ -1962,6 +1963,64 @@ window.installmentIsEntradaWebro = function(inst) {
     const fold = String(p || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     return /\bE\d+\b/.test(fold) || fold.indexOf("ENTRADA") >= 0;
   });
+};
+
+window.parcelaWebroSinalOuEntradaVencida = function(inst) {
+  if (!inst || typeof window.installmentIsParcelaWebro !== "function" || !window.installmentIsParcelaWebro(inst)) return false;
+  const sinal = typeof window.installmentIsSinalSI === "function" && window.installmentIsSinalSI(inst);
+  const entrada = typeof window.installmentIsEntradaWebro === "function" && window.installmentIsEntradaWebro(inst);
+  if (!sinal && !entrada) return false;
+  if (Number(inst.installmentSituation) === 2) return false;
+  const cb = Number(inst.currentBalance != null ? inst.currentBalance : inst.balanceDue);
+  if (Number.isFinite(cb) && cb <= 0.009) return false;
+  const due = String(inst.dueDate || inst.originalDueDate || inst.due || "").slice(0, 10);
+  if (due.length >= 10) {
+    const hoje = new Date();
+    const iso = hoje.getFullYear() + "-" + String(hoje.getMonth() + 1).padStart(2, "0") + "-" + String(hoje.getDate()).padStart(2, "0");
+    return due < iso;
+  }
+  const dias = typeof window.sinalInstallmentOverdueDays === "function" ? window.sinalInstallmentOverdueDays(inst) : 0;
+  return dias > 0;
+};
+
+window.clientePodeRegistrarBaixaWebro = function(client) {
+  if (!client && typeof AppState !== "undefined" && AppState.selectedCustomerId) {
+    const id = String(AppState.selectedCustomerId);
+    const sid = String(AppState.selectedSaleId || AppState.currentReceivableBillId || "");
+    const listas = [].concat(window.rawClientList || [], window.clientList || []);
+    client = listas.find((c) => c && String(c.customerId) === id && (!sid || String(c.saleId) === sid || (Array.isArray(c.billIds) && c.billIds.some((b) => String(b).replace(/^B-/i, "").split("-")[0] === sid))))
+      || listas.find((c) => c && String(c.customerId) === id)
+      || { customerId: id, saleId: sid };
+  }
+  if (!client || !client.customerId) return false;
+  if (client.isZeroPaid || (typeof window.clientIsZeroPercentPaid === "function" && window.clientIsZeroPercentPaid(client))) return true;
+  const vistos = new Set();
+  const lista = [];
+  const push = (inst) => {
+    if (!inst) return;
+    const k = String(inst.installmentId || inst.installmentNumber || "") + ":" + String(inst.dueDate || inst.due || "");
+    if (vistos.has(k)) return;
+    vistos.add(k);
+    lista.push(inst);
+  };
+  if (typeof AppState !== "undefined"
+      && String(AppState.selectedCustomerId) === String(client.customerId)) {
+    (AppState.currentContractInstallments || []).forEach(push);
+  }
+  if (typeof window.listInstallmentsForSiCheck === "function") {
+    window.listInstallmentsForSiCheck(client).forEach(push);
+  }
+  return lista.some((inst) => window.parcelaWebroSinalOuEntradaVencida(inst));
+};
+
+window.atualizarCanalBaixaWebro = function() {
+  if (typeof window.renderSelectOptions === "function") window.renderSelectOptions("canal");
+  const canalEl = document.getElementById("note-canal");
+  if (canalEl && typeof window.isWebroBaixaCanal === "function" && window.isWebroBaixaCanal(canalEl.value)
+      && !window.clientePodeRegistrarBaixaWebro()) {
+    canalEl.value = "";
+    if (typeof window.validateOccurrenceForm === "function") window.validateOccurrenceForm();
+  }
 };
 
 window.webroBoletoTagHtml = function() {
@@ -15214,6 +15273,7 @@ function formatCpfCnpj(val) {
     }
     
     AppState.currentContractInstallments = currentContractInstallments;
+    if (typeof window.atualizarCanalBaixaWebro === "function") window.atualizarCanalBaixaWebro();
     if (typeof window.nexRememberInstallmentPayments === "function") {
       window.nexRememberInstallmentPayments(
         AppState.selectedCustomerId,
@@ -17411,6 +17471,11 @@ async function saveCustomerOccurrence() {
   const canal = canalEl ? canalEl.value : "";
   const isProposalReneg = canal === "Proposta de renegociação";
   const isWebroBaixa = typeof window.isWebroBaixaCanal === "function" && window.isWebroBaixaCanal(canal);
+  if (isWebroBaixa && typeof window.clientePodeRegistrarBaixaWebro === "function" && !window.clientePodeRegistrarBaixaWebro()) {
+    alert("Aguardando Baixa Webro só vale para cliente 0% pago ou com parcela vencida de sinal ou entrada marcada como parcela Webro.");
+    if (typeof window.atualizarCanalBaixaWebro === "function") window.atualizarCanalBaixaWebro();
+    return;
+  }
   const isReuniaoSemanal = typeof window.isReuniaoSemanalTerceirizadaCanal === "function" && window.isReuniaoSemanalTerceirizadaCanal(canal);
   
   if (isProposalReneg) {
@@ -44279,6 +44344,11 @@ window.renderSelectOptions = function(type) {
   if (!isCanal && !currentOptions.includes('Aprovação Gestor')) currentOptions.push('Aprovação Gestor');
   
   const disabledOptions = JSON.parse(localStorage.getItem('crm_disabled_options') || '[]');
+  const podeWebro = typeof window.clientePodeRegistrarBaixaWebro === "function" && window.clientePodeRegistrarBaixaWebro();
+  const opcaoCanalVisivel = (opt) => {
+    if (isCanal && typeof window.isWebroBaixaCanal === "function" && window.isWebroBaixaCanal(opt) && !podeWebro) return false;
+    return !disabledOptions.includes(opt);
+  };
 
   // 1. Atualizar select da tela de ocorrências
   const selectEl = document.getElementById(selectId);
@@ -44292,15 +44362,14 @@ window.renderSelectOptions = function(type) {
     selectEl.appendChild(emptyOpt);
     
     currentOptions.forEach(opt => {
-      if (!disabledOptions.includes(opt)) {
-          const option = document.createElement("option");
-          option.value = opt;
-          option.textContent = opt;
-          selectEl.appendChild(option);
-      }
+      if (!opcaoCanalVisivel(opt)) return;
+      const option = document.createElement("option");
+      option.value = opt;
+      option.textContent = opt;
+      selectEl.appendChild(option);
     });
     
-    if (currentVal && currentOptions.includes(currentVal)) {
+    if (currentVal && opcaoCanalVisivel(currentVal)) {
       selectEl.value = currentVal;
     } else {
       selectEl.value = "";
@@ -44319,15 +44388,14 @@ window.renderSelectOptions = function(type) {
     reprocessSelectEl.appendChild(emptyOpt);
     
     currentOptions.forEach(opt => {
-      if (!disabledOptions.includes(opt)) {
-          const option = document.createElement("option");
-          option.value = opt;
-          option.textContent = opt;
-          reprocessSelectEl.appendChild(option);
-      }
+      if (!opcaoCanalVisivel(opt)) return;
+      const option = document.createElement("option");
+      option.value = opt;
+      option.textContent = opt;
+      reprocessSelectEl.appendChild(option);
     });
     
-    if (currentVal && currentOptions.includes(currentVal)) {
+    if (currentVal && opcaoCanalVisivel(currentVal)) {
       reprocessSelectEl.value = currentVal;
     } else {
       reprocessSelectEl.value = "";

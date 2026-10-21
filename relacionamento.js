@@ -2318,7 +2318,10 @@ const RelacionamentoApp = {
     ov.className = "qui-rub-overlay";
     ov.innerHTML = `
       <div class="qui-rub-panel" role="dialog" aria-modal="true" aria-labelledby="qui-rub-title">
-        <div class="qui-rub-title" id="qui-rub-title">Termo de quitação</div>
+        <div class="qui-rub-head">
+          <div class="qui-rub-title" id="qui-rub-title">Termo de quitação</div>
+          <button type="button" class="btn btn-fechar" data-r="">Fechar</button>
+        </div>
         <div class="qui-rub-pergunta">Com rubrica digital?</div>
         <ul class="qui-rub-opcoes">
           <li><strong>Sim:</strong> sai com a rubrica e os canais de atendimento.</li>
