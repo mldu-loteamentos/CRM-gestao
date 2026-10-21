@@ -7924,21 +7924,22 @@ window.cancelamentoResumoDeKpis = function(kpis) {
 
 window.cancelamentoPodeSeguir = function(info) {
   const motivos = [];
-  const zeroPago = !!(info && info.pago <= 0.009);
   const nex = !!(info && info.nexCumprida);
-  const semConstrucao = !(info && info.temConstrucao);
   const restituicaoZero = !!(info && info.restituicao <= 0.009);
-  const pagoBaixo = !!(info && info.contrato > 0.009 && info.pctPago < 10);
-  if (!(info && info.contrato > 0.009)) motivos.push("Não foi possível apurar o valor do contrato.");
-  if (!restituicaoZero) motivos.push("A restituição da lei do distrato é " + window.cancelamentoDinheiro(info && info.restituicao) + ". Esta regra só segue com restituição zero.");
-  if (zeroPago && restituicaoZero && info.contrato > 0.009 && !(nex && (info.temConstrucao || info.construcaoIncerta))) {
-    return { ok: true, via: "zero", motivos: [] };
+  const temContrato = !!(info && info.contrato > 0.009);
+  const pct = Math.round((Number(info && info.pctPago) || 0) * 100) / 100;
+  const pagoBaixo = !!(temContrato && pct < 10);
+  const pctTxt = pct.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (!temContrato) motivos.push("Não foi possível apurar o valor do contrato.");
+  if (!restituicaoZero) motivos.push("A restituição é " + window.cancelamentoDinheiro(info && info.restituicao) + ". O cancelamento direto no Sienge só segue com restituição zero.");
+  if (temContrato && !pagoBaixo) motivos.push("O cliente pagou " + pctTxt + "% do contrato. Quem pagou 10% ou mais do contrato não cancela direto no Sienge, mesmo que a restituição tenha ficado em zero. Esses 10% são o quanto já foi pago, não a multa.");
+  if (pagoBaixo && restituicaoZero && nex && (info.temConstrucao || info.construcaoIncerta)) {
+    if (info.temConstrucao) motivos.push("O lote tem construção. Com NEX cumprida, o cancelamento direto só segue sem construção.");
+    else motivos.push("Não foi possível confirmar que o lote está sem construção.");
   }
-  if (!nex) motivos.push("A NEX precisa estar cumprida, com status entregue.");
-  if (nex && !semConstrucao) motivos.push("O lote tem construção. O cancelamento da NEX cumprida só segue sem construção.");
-  if (nex && info.contrato > 0.009 && !pagoBaixo) motivos.push("O valor pago é " + info.pctPago.toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "% do contrato. Precisa ser inferior a 10%.");
-  if (nex && info.construcaoIncerta) motivos.push("Não foi possível confirmar que o lote está sem construção.");
-  if (nex && semConstrucao && !info.construcaoIncerta && restituicaoZero && pagoBaixo) return { ok: true, via: "nex", motivos: [] };
+  if (pagoBaixo && restituicaoZero && !(nex && (info.temConstrucao || info.construcaoIncerta))) {
+    return { ok: true, via: (info.pago <= 0.009 ? "zero" : (nex ? "nex" : "baixo")), motivos: [] };
+  }
   return { ok: false, via: "", motivos: motivos };
 };
 
@@ -8079,12 +8080,14 @@ window.abrirAvaliacaoCancelamento = async function(customerId, saleId) {
       via: pode.via,
       em: Date.now()
     };
-    const pct = resumo.pctPago.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%";
+    const pctNum = Math.round((Number(resumo.pctPago) || 0) * 100) / 100;
+    const pct = pctNum.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%";
+    const abaixo = resumo.contrato > 0.009 && pctNum < 10;
     const linha = function(rotulo, valor) {
       return `<div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #e2e8f0;"><span style="color:#64748b;">${rotulo}</span><strong style="color:#0f172a;">${valor}</strong></div>`;
     };
     const aviso = pode.ok
-      ? `<p style="margin:12px 0 0;padding:10px 12px;border-radius:8px;background:#ecfdf5;color:#105436;font-size:0.84rem;font-weight:700;">Sem restituição. O valor pago fica abaixo da multa de 10% do contrato.</p>`
+      ? `<p style="margin:12px 0 0;padding:10px 12px;border-radius:8px;background:#ecfdf5;color:#105436;font-size:0.84rem;font-weight:700;">Pago ${window.cancelContratoEsc(pct)} do contrato, menos de 10%. Restituição zero. Pode cancelar direto no Sienge.</p>`
       : `<p style="margin:12px 0 0;padding:10px 12px;border-radius:8px;background:#fef2f2;color:#991b1b;font-size:0.84rem;">${pode.motivos.map(function(m) { return window.cancelContratoEsc(m); }).join("<br>")}</p>`;
     const seguir = pode.ok
       ? `<button type="button" class="btn btn-primary" onclick="window.fecharAvaliacaoCancelamento(); window.abrirCancelamentoContrato(${Number(client.customerId) || 0}, '${String(client.saleId || saleId).replace(/\\/g, "\\\\").replace(/'/g, "\\'")}')">Seguir para o cancelamento</button>`
@@ -8092,12 +8095,17 @@ window.abrirAvaliacaoCancelamento = async function(customerId, saleId) {
     corpo.innerHTML = `
       <p style="margin:0 0 8px;font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;">Construção</p>
       <p style="margin:0 0 16px;font-size:0.9rem;font-weight:700;color:${obra.temConstrucao ? "#9a3412" : "#105436"};">${window.cancelContratoEsc(obra.texto)}</p>
+      <div style="margin:0 0 16px;padding:12px;border-radius:8px;background:${abaixo ? "#ecfdf5" : "#fef2f2"};border:1px solid ${abaixo ? "#a7f3d0" : "#fecaca"};">
+        <div style="font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;">Percentual pago do contrato</div>
+        <div style="font-size:1.35rem;font-weight:800;color:${abaixo ? "#105436" : "#991b1b"};margin-top:2px;">${window.cancelContratoEsc(pct)}</div>
+        <p style="margin:6px 0 0;font-size:0.8rem;color:#334155;line-height:1.4;">É o quanto o cliente já pagou do valor do contrato. O corte para cancelar direto no Sienge é menos de 10% pagos. Não é a multa de 10%.</p>
+      </div>
       <p style="margin:0 0 4px;font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;">Cálculo do distrato</p>
       ${linha("Valor do contrato", window.cancelContratoEsc(window.cancelamentoDinheiro(resumo.contrato)))}
-      ${linha("Valor pago", window.cancelContratoEsc(window.cancelamentoDinheiro(resumo.pago)) + " · " + window.cancelContratoEsc(pct))}
+      ${linha("Valor pago", window.cancelContratoEsc(window.cancelamentoDinheiro(resumo.pago)))}
       ${linha("Multa de 10% do contrato", window.cancelContratoEsc(window.cancelamentoDinheiro(resumo.multa)))}
       ${linha("Restituição", window.cancelContratoEsc(window.cancelamentoDinheiro(resumo.restituicao)))}
-      <p style="margin:8px 0 0;font-size:0.75rem;color:#64748b;line-height:1.4;">A restituição é o valor pago menos a multa de 10% do contrato. Se o pago for menor que essa multa, a restituição fica em zero.</p>
+      <p style="margin:8px 0 0;font-size:0.75rem;color:#64748b;line-height:1.4;">A restituição é o valor pago menos a multa de 10% do contrato. Se o pago for menor que essa multa, a restituição fica em zero. A multa não muda. Quem pagou 10% ou mais do contrato não cancela direto, mesmo com restituição zero.</p>
       ${aviso}
       <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:8px;">
         <button type="button" class="btn btn-cancel" onclick="window.fecharAvaliacaoCancelamento()">Cancelar</button>
@@ -8120,7 +8128,7 @@ window.abrirCancelamentoContrato = function(customerId, saleId) {
   const aval = window._cancelAvaliacao;
   const avalOk = aval && aval.pode && String(aval.customerId) === String(customerId) && String(aval.saleId) === String(saleId) && (Date.now() - aval.em) < 30 * 60 * 1000;
   if (!client || !avalOk) {
-    const aviso = "Avalie o cancelamento antes de enviar. A restituição precisa ser zero.";
+    const aviso = "Avalie o cancelamento antes de enviar. Só segue direto quem pagou menos de 10% do contrato e está com restituição zero.";
     if (window.showToast) window.showToast(aviso, "warning");
     return;
   }
@@ -8206,7 +8214,7 @@ window.enviarCancelamentoContrato = async function() {
   const aval = window._cancelAvaliacao;
   const avalOk = aval && aval.pode && client && String(aval.customerId) === String(client.customerId) && String(aval.saleId) === String(client.saleId);
   if (!client || !avalOk) {
-    falha("Avalie o cancelamento de novo. A restituição precisa ser zero.");
+    falha("Avalie o cancelamento de novo. Só segue direto quem pagou menos de 10% do contrato e está com restituição zero.");
     return;
   }
   const data = String((document.getElementById("cancel-data") || {}).value || "").slice(0, 10);
