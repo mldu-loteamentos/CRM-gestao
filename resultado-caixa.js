@@ -595,7 +595,7 @@ const ResultadoCaixaApp = {
           const info = arq.contas[cc][code] || {};
           const valor = Number((info.meses || {})[ym]) || 0;
           if (!valor) return;
-          const cl = est.classe({ conta: code, cn: info.nome || "" }, cfg);
+          const cl = est.classe({ e: emp, conta: code, cn: info.nome || "" }, cfg);
           if (!cl) return;
           let s = est.sinal(est.grupoEfetivo ? est.grupoEfetivo(code, info.nome || "") : est.grupo(code, info.nome || ""), code, info.nome || "", valor);
           if (cl.red && s > 0) s = -Math.abs(s);
