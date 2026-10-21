@@ -248,7 +248,18 @@ const OrcamentoModuloApp = {
       this.carregarIndiceNuvem();
       return;
     }
+    if (!this._tabelas) this._tabelas = this.lerTabelasLocal();
+    if (this.sincronizarPlanos()) this.salvarPlano();
+    const aba = st.aba === "entradas" || st.aba === "receita" ? "entradas" : "kardex";
+    st.aba = aba;
+    const abas = [
+      { id: "kardex", label: "Kardex", icon: "package" },
+      { id: "entradas", label: "Entradas", icon: "trending-up" }
+    ].map((t) => `<button type="button" role="tab" aria-selected="${aba === t.id}" class="ml-tab${aba === t.id ? " is-active" : ""}" onclick="OrcamentoModuloApp.setAba('${t.id}')"><i data-lucide="${t.icon}"></i> ${t.label}</button>`).join("");
+    const lead = aba === "entradas" ? this.textoReajusteHoje() : this.textoKardex();
     root.innerHTML = `
+      <div class="ml-tabs orc-novo-tabs" role="tablist">${abas}</div>
+      <p class="orc-rec-lead">${this.esc(lead)}</p>
       ${this.barraOrcamento()}
       ${st.erro ? `<div style="margin:0 0 12px;padding:12px 14px;border-radius:8px;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;">${this.esc(st.erro)}</div>` : ""}
       <div id="orc-receita-corpo">${this.corpoAtivo()}</div>`;
@@ -256,6 +267,8 @@ const OrcamentoModuloApp = {
     this.garantirPlano();
     this.garantirRealizado();
     this.garantirPadrao();
+    this.garantirTabelas();
+    this.ligarKardex();
   },
 
   anoSeguinte() {
@@ -505,7 +518,6 @@ const OrcamentoModuloApp = {
     st.resultado = null;
     st.planoAberto = true;
     this.renderNovo();
-    this.montarReceita();
   },
 
   editar(cc) {
@@ -524,7 +536,6 @@ const OrcamentoModuloApp = {
     this.novo.resultado = null;
     this.novo.planoAberto = true;
     this.renderNovo();
-    this.montarReceita();
   },
 
   async excluir(cc) {
@@ -602,24 +613,21 @@ const OrcamentoModuloApp = {
 
   setAba(id) {
     if (this.novo.etapa !== "orcamento") return;
-    if (id !== "kardex" && id !== "receita") return;
-    this.novo.aba = id;
+    const aba = id === "entradas" || id === "receita" ? "entradas" : (id === "kardex" ? "kardex" : "");
+    if (!aba) return;
+    this.novo.aba = aba;
     this.renderNovo();
   },
 
   corpoAtivo() {
-    const receita = this.novo.carregando ? this.carregandoHtml() : this.resultadoHtml();
-    return `
-      <h3 class="tvig-section-title" style="margin-top:18px;">Kardex</h3>
-      <p class="orc-rec-lead">${this.esc(this.textoKardex())}</p>
-      ${this.kardexHtml()}
-      <h3 class="tvig-section-title" style="margin-top:28px;">Receita</h3>
-      <p class="orc-rec-lead">${this.esc(this.textoReajusteHoje())}</p>
-      <div id="orc-receita-painel">${receita}</div>`;
+    const aba = this.novo.aba === "entradas" || this.novo.aba === "receita" ? "entradas" : "kardex";
+    if (aba === "entradas") return this.novo.carregando ? this.carregandoHtml() : this.resultadoHtml();
+    const aviso = this._kxAviso ? `<p class="orc-kx-nota">${this.esc(this._kxAviso)}</p>` : "";
+    return aviso + this.kardexHtml();
   },
 
   textoKardex() {
-    return "Uma linha de venda e uma de distrato. O mês fechado mostra o realizado. No mês em aberto, informe a previsão.";
+    return "Tab segue para o mês seguinte. Selecione várias células e tecle Enter para preencher, ou arraste o canto verde para copiar. Ao informar as vendas, distribua a quantidade nos planos da tabela vigente. A venda não deixa o estoque negativo.";
   },
 
   textoDistrato() {
@@ -701,6 +709,10 @@ const OrcamentoModuloApp = {
           parcelas: Math.max(0, parseInt(p.parcelas, 10) || 0),
           entrada: Math.max(0, Number(p.entrada) || 0),
           juros: Math.max(0, Number(p.juros) || 0),
+          entradaPct: p.entradaPct == null || p.entradaPct === "" ? null : Math.max(0, Number(p.entradaPct) || 0),
+          entradaParcelas: Math.max(0, parseInt(p.entradaParcelas, 10) || 0),
+          reajuste: String(p.reajuste || ""),
+          origem: p.origem === "tabela" ? "tabela" : "",
           meses: lerMeses(p.meses)
         });
       });
@@ -868,6 +880,9 @@ const OrcamentoModuloApp = {
     if (campo === "nome") p.nome = String(valor || "").slice(0, 40) || p.nome;
     else if (campo === "parcelas") p.parcelas = Math.max(0, parseInt(valor, 10) || 0);
     else p[campo] = Math.max(0, this.numeroCampo(valor));
+    if (campo === "ticket" && p.entradaPct != null && p.entradaPct !== "") {
+      p.entrada = Math.round((Number(p.ticket) || 0) * (Number(p.entradaPct) || 0)) / 100;
+    }
     this.salvarPlano();
     this.renderNovo();
   },
@@ -1011,29 +1026,641 @@ const OrcamentoModuloApp = {
   },
 
   setVendaLinha(ano, mes, valor) {
+    const cel = { ano: Number(ano), mes: Number(mes) };
+    this.aplicarGrade("venda", [cel], valor);
+  },
+
+  escreverDistrato(ano, mes, qtd) {
+    const mesN = Number(mes);
+    if (!this.mesPrevisto(ano, mesN)) return;
+    const plano = this.planoDoCc();
+    if (!plano.distratos || typeof plano.distratos !== "object") plano.distratos = {};
+    const chave = String(ano);
+    if (!Array.isArray(plano.distratos[chave])) plano.distratos[chave] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    plano.distratos[chave][mesN] = Math.max(0, parseInt(qtd, 10) || 0);
+  },
+
+  escreverVenda(ano, mes, qtd) {
     const mesN = Number(mes);
     if (!this.novo.ccId || mesN < 0 || mesN > 11 || !this.mesPrevisto(ano, mesN)) return;
     const plano = this.planoDoCc();
     if (!Array.isArray(plano.planos) || !plano.planos.length) {
-      plano.planos = [{
-        id: "p" + Date.now().toString(36),
-        nome: "Plano 1",
-        ticket: 0,
-        parcelas: 0,
-        entrada: 0,
-        juros: 0,
-        meses: {}
-      }];
+      plano.planos = [{ id: "p1", nome: "Plano 1", ticket: 0, parcelas: 0, entrada: 0, juros: 0, meses: {} }];
     }
-    const qtd = Math.max(0, parseInt(valor, 10) || 0);
+    const n = Math.max(0, parseInt(qtd, 10) || 0);
     const chave = String(ano);
     plano.planos.forEach((p, i) => {
       if (!p.meses || typeof p.meses !== "object") p.meses = {};
       if (!Array.isArray(p.meses[chave])) p.meses[chave] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-      p.meses[chave][mesN] = i === 0 ? qtd : 0;
+      p.meses[chave][mesN] = i === 0 ? n : 0;
     });
+  },
+
+  saldoCaminho(troca) {
+    const h = this.horizonte();
+    let saldo = this.saldoInicial().qtd;
+    let negativo = false;
+    for (let ano = h.de; ano <= h.ate; ano++) {
+      for (let mes = 0; mes < 12; mes++) {
+        const fechado = !this.mesPrevisto(ano, mes);
+        let dist = this.qtdReal(ano, mes, "distrato");
+        let venda = this.qtdReal(ano, mes, "venda");
+        if (!fechado) {
+          const kd = "distrato|" + ano + "|" + mes;
+          const kv = "venda|" + ano + "|" + mes;
+          dist += troca && troca[kd] != null ? troca[kd] : this.qtdDistrato(ano, mes);
+          venda += troca && troca[kv] != null ? troca[kv] : this.qtdVenda(ano, mes);
+        }
+        saldo = saldo + dist - venda;
+        if (saldo < -0.001) negativo = true;
+      }
+    }
+    return negativo;
+  },
+
+  limiteVenda(ano, mes, pedido, ja) {
+    const chave = "venda|" + Number(ano) + "|" + Number(mes);
+    const pedidoN = Math.max(0, parseInt(pedido, 10) || 0);
+    const atual = ja && ja[chave] != null ? ja[chave] : this.qtdVenda(ano, mes);
+    if (pedidoN <= atual) return pedidoN;
+    let ok = atual;
+    let lo = atual;
+    let hi = pedidoN;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const troca = Object.assign({}, ja || {});
+      troca[chave] = mid;
+      if (!this.saldoCaminho(troca)) { ok = mid; lo = mid + 1; }
+      else hi = mid - 1;
+    }
+    return ok;
+  },
+
+  aplicarGrade(tipo, cells, valor) {
+    const ordenadas = (cells || []).slice().sort((a, b) => Number(a.ano) - Number(b.ano) || Number(a.mes) - Number(b.mes));
+    const pedido = Math.max(0, parseInt(valor, 10) || 0);
+    if (tipo === "venda") {
+      if (this._dist) return;
+      const ja = {};
+      const itens = [];
+      let cortou = false;
+      ordenadas.forEach((c) => {
+        const ano = Number(c.ano);
+        const mes = Number(c.mes);
+        if (!this.mesPrevisto(ano, mes)) return;
+        const teto = this.limiteVenda(ano, mes, pedido, ja);
+        if (teto < pedido) cortou = true;
+        ja["venda|" + ano + "|" + mes] = teto;
+        itens.push({ ano: ano, mes: mes, qtd: teto, pedido: pedido });
+      });
+      if (!itens.length) return;
+      this._kxAviso = cortou ? "A venda foi reduzida para o estoque não ficar negativo." : "";
+      if (itens.every((it) => it.qtd === 0)) {
+        itens.forEach((it) => this.escreverDistribuicao(it.ano, it.mes, {}));
+        this.salvarPlano();
+        this.renderNovo();
+        return;
+      }
+      this.abrirDistribuicao(itens);
+      return;
+    }
+    const ja = {};
+    ordenadas.forEach((c) => {
+      const ano = Number(c.ano);
+      const mes = Number(c.mes);
+      if (!this.mesPrevisto(ano, mes)) return;
+      ja["distrato|" + ano + "|" + mes] = pedido;
+    });
+    Object.keys(ja).forEach((k) => {
+      const p = k.split("|");
+      this.escreverDistrato(p[1], p[2], ja[k]);
+    });
+    this._kxAviso = "";
     this.salvarPlano();
     this.renderNovo();
+  },
+
+  escreverDistribuicao(ano, mes, mapa) {
+    const mesN = Number(mes);
+    if (!this.mesPrevisto(ano, mesN)) return;
+    const chave = String(ano);
+    this.planosAtivos().forEach((p) => {
+      if (!p.meses || typeof p.meses !== "object") p.meses = {};
+      if (!Array.isArray(p.meses[chave])) p.meses[chave] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+      const qtd = mapa && mapa[p.id] != null ? mapa[p.id] : 0;
+      p.meses[chave][mesN] = Math.max(0, parseInt(qtd, 10) || 0);
+    });
+  },
+
+  lerTabelasLocal() {
+    if (window.TabelasVigentesApp) {
+      try {
+        if (!TabelasVigentesApp.state.tables || !TabelasVigentesApp.state.tables.length) TabelasVigentesApp.loadLocal();
+      } catch (e) {}
+      if (TabelasVigentesApp.state.tables && TabelasVigentesApp.state.tables.length) return TabelasVigentesApp.state.tables;
+    }
+    try {
+      const raw = JSON.parse(localStorage.getItem("crm_moura_tabelas_vigentes") || "[]");
+      return Array.isArray(raw) ? raw : [];
+    } catch (e) {
+      return [];
+    }
+  },
+
+  garantirTabelas() {
+    const cc = String(this.novo.ccId || "");
+    if (!cc || this._tabPedido === cc) return;
+    this._tabPedido = cc;
+    this.buscarTabelas(cc, true);
+  },
+
+  async buscarTabelas(cc, repintar) {
+    let lista = this.lerTabelasLocal();
+    try {
+      if (window.TabelasVigentesApp && typeof TabelasVigentesApp.loadCloud === "function") {
+        if (!TabelasVigentesApp.state.tables || !TabelasVigentesApp.state.tables.length) TabelasVigentesApp.loadLocal();
+        await TabelasVigentesApp.loadCloud();
+        if (TabelasVigentesApp.state.tables && TabelasVigentesApp.state.tables.length) lista = TabelasVigentesApp.state.tables;
+      } else if (window.firebaseDb && window.firebaseCollections && window.firebaseCollections.getDocs) {
+        const fx = window.firebaseCollections;
+        const snap = await fx.getDocs(fx.collection(window.firebaseDb, "tabelas_vigentes"));
+        const nuvem = [];
+        snap.forEach((d) => {
+          if (!d.id || String(d.id).charAt(0) === "_") return;
+          nuvem.push(Object.assign({ id: d.id }, d.data() || {}));
+        });
+        if (nuvem.length) lista = nuvem;
+      }
+    } catch (e) {}
+    if (String(this.novo.ccId || "") !== String(cc)) return lista;
+    this._tabelas = lista;
+    const mudou = this.sincronizarPlanos();
+    if (mudou) this.salvarPlano();
+    if (repintar && mudou && !this._dist && !this.novo.carregando) this.renderNovo();
+    return lista;
+  },
+
+  tabelasDoCc() {
+    const cc = String(this.novo.ccId || "");
+    return (this._tabelas || []).filter((t) => t && String(t.enterpriseId || "") === cc && Array.isArray(t.rows) && t.rows.length);
+  },
+
+  tabelaCatalogo() {
+    return this.tabelasDoCc().slice().sort((a, b) => String(b.competencia || "").localeCompare(String(a.competencia || "")))[0] || null;
+  },
+
+  tabelaPara(ano, mes) {
+    const ym = String(ano) + "-" + String(Number(mes) + 1).padStart(2, "0");
+    const lista = this.tabelasDoCc().slice().sort((a, b) => String(b.competencia || "").localeCompare(String(a.competencia || "")));
+    return lista.find((t) => String(t.competencia || "") <= ym) || lista[0] || null;
+  },
+
+  rotuloCompetencia(ym) {
+    const m = /^(\d{4})-(\d{2})$/.exec(String(ym || ""));
+    if (!m) return "";
+    const nome = this.mesesLongo()[Number(m[2]) - 1] || "";
+    return nome ? nome + " de " + m[1] : "";
+  },
+
+  fmtPct(n) {
+    return (Number(n) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 4 }) + "%";
+  },
+
+  planosDaTabela(tab) {
+    const rows = (tab && tab.rows) || [];
+    const vistos = {};
+    const saida = [];
+    rows.forEach((r) => {
+      const nome = String((r && r.plano) || "").replace(/\s+/g, " ").trim();
+      if (!nome) return;
+      const chave = this.normNome(nome);
+      if (vistos[chave]) return;
+      vistos[chave] = true;
+      const boleto = chave === "BOLETO UNICO" || chave === "BOLETOUNICO";
+      const faixa = nome.match(/(\d+)\s*a\s*(\d+)/i);
+      const n = parseInt(nome.replace(/\D/g, ""), 10);
+      const parcelas = boleto ? 0 : (faixa ? parseInt(faixa[2], 10) : (Number.isFinite(n) ? n : 0));
+      const slug = chave.replace(/[^A-Z0-9]/g, "").slice(0, 18).toLowerCase() || String(saida.length + 1);
+      saida.push({
+        id: "tv" + slug,
+        nome: nome,
+        parcelas: parcelas,
+        juros: boleto ? 0 : Math.max(0, this.numeroCampo(r.taxaJuros)),
+        entradaPct: boleto ? 100 : Math.max(0, this.numeroCampo(r.entradaMin)),
+        entradaParcelas: Math.max(0, parseInt(r.parcelamentoEntrada, 10) || 0),
+        reajuste: String(r.reajuste || ""),
+        origem: "tabela"
+      });
+    });
+    return saida;
+  },
+
+  sincronizarPlanos() {
+    const tab = this.tabelaCatalogo();
+    if (!tab || !this.novo.ccId) return false;
+    const vindos = this.planosDaTabela(tab);
+    if (!vindos.length) return false;
+    const plano = this.planoDoCc();
+    const atuais = Array.isArray(plano.planos) ? plano.planos.slice() : [];
+    const usados = {};
+    const prox = vindos.map((v) => {
+      const antigo = atuais.find((a) => this.normNome(a.nome) === this.normNome(v.nome)) || atuais.find((a) => a.id === v.id);
+      if (antigo) usados[antigo.id] = true;
+      const ticket = antigo ? (Number(antigo.ticket) || 0) : 0;
+      const entrada = ticket > 0 ? Math.round(ticket * (Number(v.entradaPct) || 0)) / 100 : 0;
+      return {
+        id: antigo && antigo.id ? antigo.id : v.id,
+        nome: v.nome,
+        ticket: ticket,
+        parcelas: v.parcelas,
+        entrada: entrada,
+        juros: v.juros,
+        entradaPct: v.entradaPct,
+        entradaParcelas: v.entradaParcelas,
+        reajuste: v.reajuste,
+        origem: "tabela",
+        meses: antigo && antigo.meses ? antigo.meses : {}
+      };
+    });
+    atuais.forEach((a) => {
+      if (usados[a.id]) return;
+      const tem = a.meses && Object.keys(a.meses).some((y) => (a.meses[y] || []).some((n) => Number(n) > 0));
+      if (tem) prox.push(a);
+    });
+    const assinatura = (lista) => lista.map((p) => [p.id, p.nome, p.parcelas, p.juros, p.entradaPct, p.origem, p.entrada].join(":")).join("|");
+    if (assinatura(atuais) === assinatura(prox) && String(plano.tabelaCompetencia || "") === String(tab.competencia || "")) return false;
+    plano.planos = prox;
+    plano.tabelaCompetencia = String(tab.competencia || "");
+    return true;
+  },
+
+  linhasDialogo(tab, ano, mes) {
+    const atuais = this.planosAtivos();
+    return this.planosDaTabela(tab).map((v) => {
+      const antigo = atuais.find((a) => this.normNome(a.nome) === this.normNome(v.nome)) || atuais.find((a) => a.id === v.id);
+      return Object.assign({}, v, {
+        id: antigo && antigo.id ? antigo.id : v.id,
+        qtdAtual: antigo ? this.qtdPlano(antigo, ano, mes) : 0
+      });
+    });
+  },
+
+  garantirLinhas(linhas) {
+    const plano = this.planoDoCc();
+    if (!Array.isArray(plano.planos)) plano.planos = [];
+    (linhas || []).forEach((ln) => {
+      if (plano.planos.some((p) => p.id === ln.id || this.normNome(p.nome) === this.normNome(ln.nome))) return;
+      plano.planos.push({
+        id: ln.id,
+        nome: ln.nome,
+        ticket: 0,
+        parcelas: ln.parcelas,
+        entrada: 0,
+        juros: ln.juros,
+        entradaPct: ln.entradaPct,
+        entradaParcelas: ln.entradaParcelas,
+        reajuste: ln.reajuste || "",
+        origem: "tabela",
+        meses: {}
+      });
+    });
+  },
+
+  escalarInteiros(partes, alvo) {
+    const base = (partes || []).reduce((s, n) => s + n, 0);
+    const nAlvo = Math.max(0, parseInt(alvo, 10) || 0);
+    if (!partes || !partes.length) return [];
+    if (nAlvo === base) return partes.slice();
+    if (!base || !nAlvo) return partes.map(() => 0);
+    const out = partes.map((n) => Math.floor(n * nAlvo / base));
+    let acc = out.reduce((s, n) => s + n, 0);
+    const ordem = partes.map((n, i) => ({ i: i, r: (n * nAlvo / base) - out[i] })).sort((a, b) => b.r - a.r);
+    let k = 0;
+    while (acc < nAlvo && ordem.length) {
+      out[ordem[k % ordem.length].i] += 1;
+      acc += 1;
+      k += 1;
+    }
+    return out;
+  },
+
+  abrirDistribuicao(itens) {
+    const alvo = itens.reduce((m, it) => Math.max(m, it.qtd), 0);
+    this._dist = { itens: itens, alvo: alvo, linhas: [], pendente: true };
+    const seguir = () => {
+      if (!this._dist || this._dist.itens !== itens) return;
+      const tab = this.tabelaPara(itens[0].ano, itens[0].mes) || this.tabelaCatalogo();
+      this.sincronizarPlanos();
+      const linhas = tab ? this.linhasDialogo(tab, itens[0].ano, itens[0].mes) : [];
+      if (!linhas.length) {
+        this._dist = null;
+        this._kxAviso = "Não há tabela vigente deste empreendimento. Cadastre os planos em Tabelas vigentes.";
+        this.renderNovo();
+        return;
+      }
+      const base = linhas.map((ln) => ln.qtdAtual);
+      const somaBase = base.reduce((s, n) => s + n, 0);
+      const iniciais = linhas.length === 1 ? [alvo] : (somaBase > 0 ? this.escalarInteiros(base, alvo) : linhas.map(() => 0));
+      this._dist = { itens: itens, alvo: alvo, linhas: linhas, iniciais: iniciais, competencia: tab.competencia };
+      this.pintarDistribuicao();
+    };
+    if (this.tabelasDoCc().length) seguir();
+    else this.buscarTabelas(this.novo.ccId, false).then(seguir);
+  },
+
+  pintarDistribuicao() {
+    const dist = this._dist;
+    if (!dist || !dist.linhas || !dist.linhas.length) return;
+    const antigo = document.getElementById("orc-kx-dist");
+    if (antigo) antigo.remove();
+    const nomes = this.mesesLongo();
+    const itens = dist.itens;
+    const iguais = itens.every((it) => it.qtd === dist.alvo);
+    let quando = "";
+    if (itens.length === 1) quando = nomes[itens[0].mes] + " de " + itens[0].ano;
+    else quando = itens.length + " meses";
+    const comp = this.rotuloCompetencia(dist.competencia);
+    const limite = itens.some((it) => it.qtd < it.pedido);
+    const notaLimite = limite ? " O estoque limitou a quantidade para não ficar negativo." : "";
+    const notaQtd = iguais
+      ? (itens.length > 1 ? "A mesma distribuição entra em cada mês selecionado." : "A soma precisa fechar " + dist.alvo + ".")
+      : "Meses com menos estoque recebem a mesma proporção.";
+    const linhas = dist.linhas.map((ln, i) => {
+      const boleto = ln.entradaPct >= 100 && !(ln.parcelas > 0);
+      const entrada = boleto ? "à vista" : (ln.entradaPct > 0 ? "entrada " + this.fmtPct(ln.entradaPct) + (ln.entradaParcelas > 0 ? " em " + ln.entradaParcelas + "x" : "") : "sem entrada mínima");
+      const resto = boleto ? "" : (ln.parcelas > 0 ? " · " + ln.parcelas + " parcelas" : "") + (ln.juros > 0 ? " · juros " + this.fmtPct(ln.juros) + " a.m." : "");
+      const valor = dist.iniciais[i] > 0 ? String(dist.iniciais[i]) : "";
+      return `<tr>
+        <td>${this.esc(ln.nome)}</td>
+        <td class="orc-kx-dist-cond">${this.esc(entrada + resto)}</td>
+        <td class="is-right"><input type="number" min="0" step="1" inputmode="numeric" class="orc-kx-dist-qtd" data-i="${i}" aria-label="Vendas no plano ${this.esc(ln.nome)}" value="${valor}"></td>
+      </tr>`;
+    }).join("");
+    const box = document.createElement("div");
+    box.id = "orc-kx-dist";
+    box.className = "modal-overlay active orc-kx-dist";
+    box.innerHTML = `
+      <div class="modal-box orc-kx-dist-box" role="dialog" aria-modal="true" aria-labelledby="orc-kx-dist-titulo">
+        <div class="modal-header">
+          <h3 id="orc-kx-dist-titulo">Vendas de ${this.esc(quando)}</h3>
+          <button type="button" class="btn btn-fechar" onclick="OrcamentoModuloApp.fecharDistribuicao()">Fechar</button>
+        </div>
+        <p class="orc-kx-dist-nota">${dist.alvo} ${dist.alvo === 1 ? "venda" : "vendas"}${comp ? " · tabela de " + this.esc(comp) : ""}. ${this.esc(notaQtd)}${this.esc(notaLimite)}</p>
+        <div class="cc-scroll">
+          <table class="orc-kx-dist-tab">
+            <thead><tr><th>Plano</th><th>Condição</th><th class="is-right">Vendas</th></tr></thead>
+            <tbody>${linhas}</tbody>
+          </table>
+        </div>
+        <div class="orc-kx-dist-rodape">
+          <strong id="orc-kx-dist-soma" class="orc-kx-dist-soma"></strong>
+          <div class="orc-kx-dist-acoes">
+            <button type="button" class="btn btn-cancel" onclick="OrcamentoModuloApp.fecharDistribuicao()">Cancelar</button>
+            <button type="button" class="btn btn-primary" id="orc-kx-dist-ok" onclick="OrcamentoModuloApp.confirmarDistribuicao()">Aplicar</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(box);
+    box.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") {
+        ev.preventDefault();
+        this.fecharDistribuicao();
+      } else if (ev.key === "Enter") {
+        ev.preventDefault();
+        this.confirmarDistribuicao();
+      }
+    });
+    box.querySelectorAll(".orc-kx-dist-qtd").forEach((el) => {
+      el.addEventListener("input", () => this.atualizarDistribuicao());
+    });
+    this.atualizarDistribuicao();
+    const foco = box.querySelector(".orc-kx-dist-qtd");
+    if (foco) {
+      foco.focus();
+      if (typeof foco.select === "function") foco.select();
+    }
+  },
+
+  atualizarDistribuicao() {
+    const box = document.getElementById("orc-kx-dist");
+    const dist = this._dist;
+    if (!box || !dist) return;
+    const soma = Array.from(box.querySelectorAll(".orc-kx-dist-qtd")).reduce((s, el) => s + Math.max(0, parseInt(el.value, 10) || 0), 0);
+    const el = document.getElementById("orc-kx-dist-soma");
+    const btn = document.getElementById("orc-kx-dist-ok");
+    if (el) {
+      el.textContent = soma + " de " + dist.alvo;
+      el.className = "orc-kx-dist-soma " + (soma === dist.alvo ? "is-ok" : "is-falta");
+    }
+    if (btn) btn.disabled = soma !== dist.alvo;
+  },
+
+  fecharDistribuicao(repintar) {
+    const el = document.getElementById("orc-kx-dist");
+    if (el) el.remove();
+    const dist = this._dist;
+    this._dist = null;
+    if (repintar === false || !dist || !dist.itens || !dist.itens.length) return;
+    const c = dist.itens[0];
+    this._kxFoco = { tipo: "venda", ano: String(c.ano), mes: String(c.mes) };
+    this._kx = { tipo: "venda", anchor: { ano: c.ano, mes: c.mes }, focus: { ano: c.ano, mes: c.mes }, cells: [{ ano: c.ano, mes: c.mes }] };
+    this.renderNovo();
+  },
+
+  confirmarDistribuicao() {
+    const dist = this._dist;
+    const box = document.getElementById("orc-kx-dist");
+    if (!dist || !box || !dist.linhas) return;
+    const bruto = Array.from(box.querySelectorAll(".orc-kx-dist-qtd")).map((el) => Math.max(0, parseInt(el.value, 10) || 0));
+    const soma = bruto.reduce((s, n) => s + n, 0);
+    if (soma !== dist.alvo) return;
+    this.sincronizarPlanos();
+    this.garantirLinhas(dist.linhas);
+    let cortou = !!this._kxAviso;
+    dist.itens.forEach((item) => {
+      const partes = this.escalarInteiros(bruto, item.qtd);
+      const mapa = {};
+      dist.linhas.forEach((ln, i) => { mapa[ln.id] = partes[i] || 0; });
+      this.escreverDistribuicao(item.ano, item.mes, mapa);
+      if (item.qtd < item.pedido) cortou = true;
+    });
+    this._kxAviso = cortou ? "A venda foi reduzida para o estoque não ficar negativo." : "";
+    const c = dist.itens[0];
+    this._kxFoco = { tipo: "venda", ano: String(c.ano), mes: String(c.mes) };
+    this._kx = { tipo: "venda", anchor: { ano: c.ano, mes: c.mes }, focus: { ano: c.ano, mes: c.mes }, cells: [{ ano: c.ano, mes: c.mes }] };
+    this.fecharDistribuicao(false);
+    this.salvarPlano();
+    this.renderNovo();
+  },
+
+  listaKx(tipo) {
+    const root = document.getElementById("orc-receita-corpo");
+    if (!root) return [];
+    return Array.from(root.querySelectorAll('input.orc-dist-qtd[data-tipo="' + tipo + '"]'));
+  },
+
+  faixaKx(tipo, a, b) {
+    const lista = this.listaKx(tipo);
+    const ia = lista.findIndex((el) => Number(el.dataset.ano) === Number(a.ano) && Number(el.dataset.mes) === Number(a.mes));
+    const ib = lista.findIndex((el) => Number(el.dataset.ano) === Number(b.ano) && Number(el.dataset.mes) === Number(b.mes));
+    if (ia < 0 || ib < 0) return [b];
+    const de = Math.min(ia, ib);
+    const ate = Math.max(ia, ib);
+    return lista.slice(de, ate + 1).map((el) => ({ ano: Number(el.dataset.ano), mes: Number(el.dataset.mes) }));
+  },
+
+  pintarKx() {
+    const root = document.getElementById("orc-receita-corpo");
+    if (!root) return;
+    root.querySelectorAll("td.is-kx-sel, td.is-kx-foco").forEach((td) => td.classList.remove("is-kx-sel", "is-kx-foco"));
+    root.querySelectorAll(".orc-kx-fill").forEach((n) => n.remove());
+    const sel = this._kx;
+    if (!sel || !sel.cells) return;
+    sel.cells.forEach((c) => {
+      const el = root.querySelector('input.orc-dist-qtd[data-tipo="' + sel.tipo + '"][data-ano="' + c.ano + '"][data-mes="' + c.mes + '"]');
+      const td = el && el.closest("td");
+      if (td) td.classList.add("is-kx-sel");
+    });
+    const f = sel.focus;
+    if (!f) return;
+    const foco = root.querySelector('input.orc-dist-qtd[data-tipo="' + sel.tipo + '"][data-ano="' + f.ano + '"][data-mes="' + f.mes + '"]');
+    const td = foco && foco.closest("td");
+    if (!td) return;
+    td.classList.add("is-kx-foco");
+    const h = document.createElement("span");
+    h.className = "orc-kx-fill";
+    h.title = "Arraste para copiar aos meses seguintes";
+    td.appendChild(h);
+  },
+
+  focarKx() {
+    const f = this._kxFoco;
+    this._kxFoco = null;
+    if (!f) return;
+    const root = document.getElementById("orc-receita-corpo");
+    const el = root && root.querySelector('input.orc-dist-qtd[data-tipo="' + f.tipo + '"][data-ano="' + f.ano + '"][data-mes="' + f.mes + '"]');
+    if (!el) return;
+    el.focus();
+    if (typeof el.select === "function") el.select();
+  },
+
+  ligarKardex() {
+    const root = document.getElementById("orc-receita-corpo");
+    if (!root || this.novo.aba !== "kardex") return;
+    if (!this._kxDoc) {
+      this._kxDoc = true;
+      document.addEventListener("mouseup", () => {
+        if (window.OrcamentoModuloApp) OrcamentoModuloApp.soltarKardex();
+      });
+    }
+    const celDe = (input) => ({ ano: Number(input.dataset.ano), mes: Number(input.dataset.mes) });
+    const escolher = (input, faixa) => {
+      const tipo = input.dataset.tipo;
+      const cel = celDe(input);
+      if (faixa && this._kx && this._kx.tipo === tipo && this._kx.anchor) {
+        this._kx.cells = this.faixaKx(tipo, this._kx.anchor, cel);
+        this._kx.focus = cel;
+        this._kx.tipo = tipo;
+      } else {
+        this._kx = { tipo: tipo, anchor: cel, focus: cel, cells: [cel] };
+      }
+      this.pintarKx();
+    };
+    root.addEventListener("mousedown", (ev) => {
+      const fill = ev.target.closest && ev.target.closest(".orc-kx-fill");
+      if (fill) {
+        ev.preventDefault();
+        const input = fill.parentElement && fill.parentElement.querySelector("input.orc-dist-qtd");
+        if (!input) return;
+        this._kxIgnoraBlur = true;
+        this._kxArraste = { tipo: input.dataset.tipo, origem: celDe(input), valor: input.value };
+        return;
+      }
+      const input = ev.target.closest && ev.target.closest("input.orc-dist-qtd");
+      if (!input) return;
+      if (ev.shiftKey) escolher(input, true);
+      else {
+        escolher(input, false);
+        this._kxPinta = true;
+      }
+    });
+    root.addEventListener("mouseover", (ev) => {
+      const input = ev.target.closest && (ev.target.closest("input.orc-dist-qtd") || (ev.target.closest("td") && ev.target.closest("td").querySelector("input.orc-dist-qtd")));
+      if (!input) return;
+      if (this._kxArraste && input.dataset.tipo === this._kxArraste.tipo) {
+        const tipo = this._kxArraste.tipo;
+        const origem = this._kxArraste.origem;
+        const dest = celDe(input);
+        const lista = this.listaKx(tipo);
+        const io = lista.findIndex((el) => Number(el.dataset.ano) === origem.ano && Number(el.dataset.mes) === origem.mes);
+        const id = lista.findIndex((el) => Number(el.dataset.ano) === dest.ano && Number(el.dataset.mes) === dest.mes);
+        if (io < 0 || id < 0) return;
+        const cells = id < io ? [origem] : lista.slice(io, id + 1).map(celDe);
+        this._kx = { tipo: tipo, anchor: origem, focus: origem, cells: cells };
+        this.pintarKx();
+        return;
+      }
+      if (this._kxPinta && this._kx && input.dataset.tipo === this._kx.tipo) escolher(input, true);
+    });
+    root.addEventListener("keydown", (ev) => {
+      const input = ev.target;
+      if (!input || !input.matches || !input.matches("input.orc-dist-qtd")) return;
+      if (ev.key !== "Tab" && ev.key !== "Enter") return;
+      ev.preventDefault();
+      this._kxIgnoraBlur = true;
+      const tipo = input.dataset.tipo;
+      const lista = this.listaKx(tipo);
+      const i = lista.indexOf(input);
+      if (ev.key === "Tab") {
+        const prox = lista[i + (ev.shiftKey ? -1 : 1)];
+        const atual = String(tipo === "venda" ? this.qtdVenda(input.dataset.ano, input.dataset.mes) : this.qtdDistrato(input.dataset.ano, input.dataset.mes));
+        const digitado = String(Math.max(0, parseInt(input.value, 10) || 0));
+        if (prox) {
+          this._kxFoco = { tipo: tipo, ano: prox.dataset.ano, mes: prox.dataset.mes };
+          this._kx = { tipo: tipo, anchor: celDe(prox), focus: celDe(prox), cells: [celDe(prox)] };
+        }
+        if (atual === digitado) {
+          if (prox) { prox.focus(); prox.select(); this.pintarKx(); }
+          this._kxIgnoraBlur = false;
+          return;
+        }
+        this.aplicarGrade(tipo, [celDe(input)], input.value);
+        return;
+      }
+      const cells = this._kx && this._kx.tipo === tipo && this._kx.cells && this._kx.cells.length ? this._kx.cells : [celDe(input)];
+      this._kxFoco = { tipo: tipo, ano: input.dataset.ano, mes: input.dataset.mes };
+      this.aplicarGrade(tipo, cells, input.value);
+    });
+    root.addEventListener("focusout", (ev) => {
+      const input = ev.target;
+      if (!input || !input.matches || !input.matches("input.orc-dist-qtd")) return;
+      if (this._kxIgnoraBlur || this._kxArraste) {
+        this._kxIgnoraBlur = false;
+        return;
+      }
+      const tipo = input.dataset.tipo;
+      const atual = String(tipo === "venda" ? this.qtdVenda(input.dataset.ano, input.dataset.mes) : this.qtdDistrato(input.dataset.ano, input.dataset.mes));
+      const digitado = String(Math.max(0, parseInt(input.value, 10) || 0));
+      if (atual === digitado) return;
+      const next = ev.relatedTarget;
+      const cells = this._kx && this._kx.tipo === tipo && this._kx.cells && this._kx.cells.length > 1 ? this._kx.cells : [celDe(input)];
+      if (next && next.matches && next.matches("input.orc-dist-qtd")) {
+        this._kxFoco = { tipo: next.dataset.tipo, ano: next.dataset.ano, mes: next.dataset.mes };
+      }
+      this.aplicarGrade(tipo, cells, input.value);
+    });
+    this.pintarKx();
+    this.focarKx();
+  },
+
+  soltarKardex() {
+    const arr = this._kxArraste;
+    this._kxArraste = null;
+    this._kxPinta = false;
+    if (!arr || !this._kx || !this._kx.cells || this._kx.cells.length < 2) return;
+    this._kxFoco = { tipo: arr.tipo, ano: String(arr.origem.ano), mes: String(arr.origem.mes) };
+    this._kxIgnoraBlur = true;
+    this.aplicarGrade(arr.tipo, this._kx.cells, arr.valor);
   },
 
   numeroCampo(v) {
@@ -1098,7 +1725,10 @@ const OrcamentoModuloApp = {
     let total = 0;
     this.planosAtivos().forEach((p) => {
       const ticket = Number(p.ticket) || 0;
-      const entrada = Math.min(Number(p.entrada) || 0, ticket > 0 ? ticket : Number(p.entrada) || 0);
+      let entrada = Math.min(Number(p.entrada) || 0, ticket > 0 ? ticket : Number(p.entrada) || 0);
+      if (p.entradaPct != null && p.entradaPct !== "" && ticket > 0) {
+        entrada = Math.min(ticket, Math.round(ticket * (Number(p.entradaPct) || 0)) / 100);
+      }
       const n = Math.max(0, parseInt(p.parcelas, 10) || 0);
       const pmt = this.parcelaPlano(Math.max(0, ticket - entrada), n, p.juros);
       const meses = p.meses || {};
@@ -1360,9 +1990,8 @@ const OrcamentoModuloApp = {
       return `<td class="is-right is-real is-passado" title="Realizado">${real}</td>`;
     }
     const previsto = tipo === "venda" ? this.qtdVenda(ano, mes) : this.qtdDistrato(ano, mes);
-    const fn = tipo === "venda" ? "setVendaLinha" : "setDistrato";
     const feito = real > 0 ? `<span class="orc-kx-feito" title="Realizado, não editável">${real}</span>` : "";
-    return `<td class="${marca}"><span class="orc-kx-cel">${feito}<input type="number" min="0" step="1" inputmode="numeric" class="orc-dist-qtd" aria-label="${this.esc(rotulo)}" title="Previsão" value="${previsto > 0 ? previsto : ""}" onchange="OrcamentoModuloApp.${fn}(${ano}, ${mes}, this.value)"></span></td>`;
+    return `<td class="${marca}" data-kx-td="1"><span class="orc-kx-cel">${feito}<input type="number" min="0" step="1" inputmode="numeric" class="orc-dist-qtd" data-kx="1" data-tipo="${tipo}" data-ano="${ano}" data-mes="${mes}" aria-label="${this.esc(rotulo)}" title="Previsão" value="${previsto > 0 ? previsto : ""}"></span></td>`;
   },
 
   kardexHtml() {
@@ -1454,11 +2083,40 @@ const OrcamentoModuloApp = {
 
   planosConfigHtml() {
     const planos = this.planosAtivos();
-    const padrao = this._padrao || [];
+    const daTabela = planos.some((p) => p.origem === "tabela");
     const campo = (p, nome, valor, inteiro) => {
       const texto = !(Number(valor) > 0) ? "" : (inteiro ? String(parseInt(valor, 10) || 0) : this.numero(valor));
       return `<input type="text" inputmode="decimal" class="form-control" value="${this.esc(texto)}" onchange="OrcamentoModuloApp.setPlanoCampo('${p.id}','${nome}', this.value)">`;
     };
+    if (daTabela) {
+      const comp = this.rotuloCompetencia((this.tabelaCatalogo() || {}).competencia || this.planoDoCc().tabelaCompetencia);
+      const linhasPlanos = planos.filter((p) => p.origem === "tabela").map((p) => {
+        const ticket = Number(p.ticket) || 0;
+        const pctEnt = p.entradaPct != null && p.entradaPct !== "" ? Number(p.entradaPct) : 0;
+        const entrada = ticket > 0 ? Math.round(ticket * pctEnt) / 100 : 0;
+        const parcela = this.parcelaPlano(Math.max(0, ticket - entrada), p.parcelas, p.juros);
+        const entradaTxt = pctEnt >= 100 ? "à vista" : (pctEnt > 0 ? this.fmtPct(pctEnt) : "—");
+        return `<tr>
+          <td>${this.esc(p.nome)}</td>
+          <td>${campo(p, "ticket", p.ticket, false)}</td>
+          <td>${this.esc(entradaTxt)}</td>
+          <td>${p.parcelas > 0 ? p.parcelas : "—"}</td>
+          <td>${Number(p.juros) > 0 ? this.esc(this.fmtPct(p.juros)) : "—"}</td>
+          <td class="is-right">${this.esc(this.dinheiro(parcela))}</td>
+        </tr>`;
+      }).join("");
+      return `
+        <p class="orc-plano-parcela">Planos da tabela vigente${comp ? " de " + this.esc(comp) : ""}. Informe o ticket médio. Ao lançar as vendas no Kardex, distribua a quantidade entre estes planos.</p>
+        <div class="cc-scroll orc-rec-meses">
+          <table class="cc-table orc-plano-tab">
+            <thead><tr>
+              <th>Plano</th><th>Ticket médio</th><th>Entrada</th><th>Parcelas</th><th>Juros % ao mês</th><th class="is-right">Parcela</th>
+            </tr></thead>
+            <tbody>${linhasPlanos}</tbody>
+          </table>
+        </div>`;
+    }
+    const padrao = this._padrao || [];
     const linhasPlanos = planos.map((p) => {
       const saldo = Math.max(0, (Number(p.ticket) || 0) - Math.min(Number(p.entrada) || 0, Number(p.ticket) || 0));
       const parcela = this.parcelaPlano(saldo, p.parcelas, p.juros);
@@ -1478,7 +2136,7 @@ const OrcamentoModuloApp = {
         <button type="button" class="btn btn-outline" ${planos.some((p) => (Number(p.ticket) || Number(p.parcelas) || Number(p.entrada) || Number(p.juros)) > 0) ? "" : "disabled"} onclick="OrcamentoModuloApp.salvarPadrao()">Salvar como padrão</button>
         <button type="button" class="btn btn-outline" onclick="OrcamentoModuloApp.adicionarPlano()">Adicionar plano</button>
       </div>
-      <p class="orc-plano-parcela">O padrão vale para os produtos. Em cada um, use o padrão e ajuste só o ticket médio. A quantidade do mês em aberto entra no primeiro plano.</p>
+      <p class="orc-plano-parcela">Sem tabela vigente deste empreendimento, os planos ficam livres. Cadastre a tabela para amarrar as vendas.</p>
       <div class="cc-scroll orc-rec-meses">
         <table class="cc-table orc-plano-tab">
           <thead><tr>
@@ -1634,7 +2292,7 @@ const OrcamentoModuloApp = {
   pintarProgresso(texto, pct) {
     this.novo.progresso = texto;
     this.novo.progressoPct = pct;
-    const box = document.getElementById("orc-receita-painel");
+    const box = document.getElementById("orc-receita-painel") || document.getElementById("orc-receita-corpo");
     if (box) box.innerHTML = this.carregandoHtml();
   },
 
@@ -1953,6 +2611,7 @@ const OrcamentoModuloApp = {
       return;
     }
     st.carregando = true;
+    st.aba = "entradas";
     st.erro = "";
     st.resultado = null;
     st.progressoPct = 30;

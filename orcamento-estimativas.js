@@ -688,7 +688,7 @@ const OrcamentoImpostosApp = {
     const tem = (arr) => (arr || []).some((v) => Math.abs(Number(v) || 0) >= 0.5);
     const nomes = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
     const pagoEm = ["Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez", "Jan/28"];
-    const dezBag = OrcEst.bases2026()["2026-12"];
+    const dezBag = this.bases2026()["2026-12"];
     const dez = (dezBag && dezBag[Number(row.id)]) || null;
     const cols = [{ nome: "Vendas", arr: row.vendas, dez: dez && dez.vendas }];
     if (tem(row.redV)) cols.push({ nome: "Redutoras", arr: row.redV, dez: null, dica: "Já abatida da venda. O valor da coluna Vendas está líquido." });

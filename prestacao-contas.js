@@ -1434,8 +1434,8 @@ const PrestacaoContasApp = {
             <input type="month" id="pc-comp" class="tvig-comp-input" title="Consulta pela data de pagamento" value="${this.year}-${pad(this.month)}" onchange="PrestacaoContasApp.setCompetencia(this.value)">
           </div>
           <div class="cc-toolbar-actions">
-            <button type="button" class="btn btn-excel" onclick="PrestacaoContasApp.exportar()" ${this.loading ? "disabled" : ""} title="Gerar a prestação em 4 abas: resumo, vendas e distratos, estoque e carteira">
-              <i data-lucide="download" style="width:14px;height:14px;"></i> Excel
+            <button type="button" class="btn btn-primary" onclick="PrestacaoContasApp.exportar()" ${this.loading ? "disabled" : ""} title="Gerar a prestação em PDF, retrato">
+              <i data-lucide="download" style="width:14px;height:14px;"></i> PDF
             </button>
             <button type="button" class="btn btn-cancel pcx-limpar" onclick="PrestacaoContasApp.limpar()" ${this.loading ? "disabled" : ""}>Limpar</button>
             <button type="button" class="btn btn-primary cc-atualizar" onclick="PrestacaoContasApp.load()" ${this.loading ? "disabled" : ""}>
@@ -2690,6 +2690,478 @@ const PrestacaoContasApp = {
     return { obras, atrasados, lista };
   },
 
+  nomeParceiroRelatorio() {
+    const p = this.activePartnership();
+    if (p && String(p.partnerName || "").trim()) return String(p.partnerName).trim();
+    const ids = new Set((this.costCenterIds || []).map(String));
+    const lista = typeof this.parceriasVisiveis === "function" ? (this.parceriasVisiveis() || []) : [];
+    const hit = lista.find((item) => (item.obras || []).some((o) => (o.costCenters || []).some((c) => ids.has(String(c.id)))));
+    if (hit && String(hit.partnerName || "").trim()) return String(hit.partnerName).trim();
+    return this.rotuloEmpresa();
+  },
+
+  temParceriaRelatorio() {
+    if (this.activePartnership()) return true;
+    const parc = this.ccsDoParceiro();
+    return parc.length > 0 && parc.length < (this.costCenterIds || []).length;
+  },
+
+  listaCarteira() {
+    const raw = this.dash && this.dash.carteira;
+    if (Array.isArray(raw)) return raw;
+    return (raw && raw.bills) || [];
+  },
+
+  dataRefCarteira() {
+    const fim = this.periodBounds().end;
+    const hoje = new Date().toISOString().slice(0, 10);
+    return fim < hoje ? fim : hoje;
+  },
+
+  visitarSaldos(fn) {
+    const wanted = new Set((this.costCenterIds || []).map(String));
+    this.listaCarteira().forEach((b) => {
+      Object.values(b.parcelas || {}).forEach((partes) => {
+        const base = Object.values(partes || {})[0] || {};
+        const due = String(base.dueDate || "").slice(0, 10);
+        Object.entries(partes || {}).forEach(([cc, inst]) => {
+          if (wanted.size && !wanted.has(String(cc))) return;
+          const saldo = Number(inst && inst.currentBalance != null ? inst.currentBalance : 0) || 0;
+          if (saldo <= 0.009) return;
+          fn({ b, cc: String(cc), due, saldo, inst });
+        });
+      });
+    });
+  },
+
+  tituloNoJuridico(b) {
+    const flag = (v) => v === true || v === 1 || String(v || "").trim().toUpperCase() === "S";
+    const marcado = (obj) => {
+      if (!obj || typeof obj !== "object") return false;
+      if (flag(obj.subjudice) || flag(obj.subJudice) || flag(obj.underJudgment) || flag(obj.judgment)) return true;
+      const sit = String(obj.defaulterSituation || obj.situation || obj.defaulterStatus || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+      return sit.indexOf("SUB") >= 0 && sit.indexOf("JUD") >= 0;
+    };
+    if (marcado(b) || marcado(b.cliente)) return true;
+    let achou = false;
+    Object.values(b.parcelas || {}).forEach((partes) => {
+      Object.values(partes || {}).forEach((p) => { if (marcado(p)) achou = true; });
+    });
+    if (achou) return true;
+    const sid = String(b.id || "").replace(/^B-/i, "").split("-")[0];
+    const bag = (window.subjudiceIntegraData && window.subjudiceIntegraData.clients) || {};
+    const cid = String((b.cliente && (b.cliente.id || b.cliente.customerId)) || "");
+    if (cid && bag[cid + "-" + sid] && bag[cid + "-" + sid].on !== false) return true;
+    return Object.keys(bag).some((k) => {
+      const item = bag[k];
+      if (!item || item.on === false) return false;
+      const id = String(item.saleId || "").replace(/^B-/i, "").split("-")[0];
+      return !!id && id === sid;
+    });
+  },
+
+  classificarIniciativa(motivo) {
+    const t = String(motivo || "").trim();
+    const m = t.match(/^([12])\d{2}(?!\d)/);
+    if (m) return m[1];
+    if (/iniciativa da empresa/i.test(t)) return "2";
+    if (/iniciativa do cliente/i.test(t)) return "1";
+    return "";
+  },
+
+  saidasPorPlano() {
+    const conf = this.conferencias || { despesas: [] };
+    const map = {};
+    (conf.despesas || []).forEach((r) => {
+      const contas = r.contas || [];
+      if (!contas.length) {
+        const g = map["—"] || (map["—"] = { codigo: "—", nome: "Sem plano financeiro", valor: 0 });
+        g.valor += Number(r.total) || 0;
+        return;
+      }
+      contas.forEach((c) => {
+        const codigo = c.codigo || "—";
+        const nome = c.nome || "Sem nome";
+        const k = codigo + "|" + nome;
+        const g = map[k] || (map[k] = { codigo, nome, valor: 0 });
+        g.valor += Number(c.valor) || 0;
+      });
+    });
+    return Object.values(map).filter((g) => g.valor > 0.004).sort((a, b) => b.valor - a.valor);
+  },
+
+  mesesSeguintes(qtd) {
+    const nomes = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+    const curtos = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+    const out = [];
+    let y = Number(this.year);
+    let m = Number(this.month);
+    for (let i = 0; i < qtd; i++) {
+      const chave = y + "-" + String(m).padStart(2, "0");
+      out.push({ chave, rotulo: curtos[m - 1] + "/" + y, nome: nomes[m - 1] + " de " + y });
+      m += 1;
+      if (m > 12) { m = 1; y += 1; }
+    }
+    return out;
+  },
+
+  montarCarteiraPdf() {
+    const ref = this.dataRefCarteira();
+    const parcSet = new Set(this.ccsDoParceiro().map(String));
+    const parceria = this.temParceriaRelatorio();
+    const porObra = {};
+    const meses = {};
+    this.mesesSeguintes(12).forEach((m) => { meses[m.chave] = { chave: m.chave, rotulo: m.rotulo, nome: m.nome, empresa: 0, parceiro: 0 }; });
+    const aging = [
+      { rot: "Até 30 dias", ate: 30, valor: 0 },
+      { rot: "Até 60 dias", ate: 60, valor: 0 },
+      { rot: "Até 90 dias", ate: 90, valor: 0 },
+      { rot: "Até 120 dias", ate: 120, valor: 0 },
+      { rot: "Acima de 120 dias", ate: 99999, valor: 0 }
+    ];
+    let atraso = 0;
+    const garantir = (cc) => {
+      const id = this.chaveObra(cc);
+      return porObra[id] || (porObra[id] = { id, nome: this.rotuloObra(id), empresa: 0, parceiro: 0, ultima: "", ateUltima: 0 });
+    };
+    this.visitarSaldos((item) => {
+      const g = garantir(item.cc);
+      const doParc = parceria && parcSet.has(item.cc);
+      g.empresa += item.saldo;
+      if (doParc) {
+        g.parceiro += item.saldo;
+        if (item.due && item.due > g.ultima) g.ultima = item.due;
+      }
+      if (item.due && meses[item.due.slice(0, 7)]) {
+        meses[item.due.slice(0, 7)].empresa += item.saldo;
+        if (doParc) meses[item.due.slice(0, 7)].parceiro += item.saldo;
+      }
+      if (item.due && item.due < ref) {
+        atraso += item.saldo;
+        const dias = Math.round((new Date(ref + "T12:00:00") - new Date(item.due + "T12:00:00")) / 86400000);
+        const faixa = aging.find((f) => dias <= f.ate) || aging[aging.length - 1];
+        faixa.valor += item.saldo;
+      }
+    });
+    Object.values(porObra).forEach((g) => {
+      if (!g.ultima) { g.ateUltima = g.empresa; return; }
+      g.ateUltima = 0;
+    });
+    this.visitarSaldos((item) => {
+      const g = porObra[this.chaveObra(item.cc)];
+      if (!g || !g.ultima) return;
+      if (item.due && item.due <= g.ultima) g.ateUltima += item.saldo;
+    });
+    const obras = Object.values(porObra).sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR", { numeric: true }));
+    let juridico = 0;
+    let juridicoN = 0;
+    this.listaCarteira().forEach((b) => {
+      if (!this.tituloNoJuridico(b)) return;
+      const med = this.medirTitulo(b);
+      const aberto = (Number(med.aVencer) || 0) + (Number(med.vencido) || 0);
+      if (aberto <= 0.009) return;
+      juridico += aberto;
+      juridicoN += 1;
+    });
+    const empresa = obras.reduce((s, o) => s + o.empresa, 0);
+    const parceiro = obras.reduce((s, o) => s + o.parceiro, 0);
+    return { ref, parceria, obras, meses: Object.values(meses), aging, atraso, juridico, juridicoN, empresa, parceiro };
+  },
+
+  contratosPorObra() {
+    const map = {};
+    this.listaCarteira().forEach((b) => {
+      const m = this.medirTitulo(b);
+      const id = m.obra || "—";
+      const g = map[id] || (map[id] = { id, nome: this.rotuloObra(id), ativos: 0, quitados: 0 });
+      if (m.status === "Ativo") g.ativos += 1;
+      else g.quitados += 1;
+    });
+    return Object.values(map).sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR", { numeric: true }));
+  },
+
+  pdfMoeda(v) {
+    const n = Number(v) || 0;
+    const neg = n < -0.004;
+    return (neg ? "−" : "") + "R$ " + this.fmt(Math.abs(n));
+  },
+
+  pdfCasca(miolo, pagina, total, capa) {
+    const per = this.periodBounds();
+    const faixa = capa
+      ? "background:linear-gradient(160deg,#071f16 0%,#0c3d28 42%,#105436 100%);"
+      : "background:linear-gradient(90deg,#0c3d28 0%,#105436 62%,#1a7a4c 100%);";
+    return `<div style="position:relative;width:794px;height:1123px;background:${capa ? "#f3f1ea" : "#f7f6f3"};overflow:hidden;font-family:'Segoe UI',Calibri,sans-serif;color:#1c1917;">
+      <div style="height:78px;${faixa}color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 28px;box-sizing:border-box;">
+        <img src="Banner/logo branca.png" alt="" style="height:42px;object-fit:contain;">
+        <div style="text-align:right;">
+          <div style="font-size:13px;font-weight:700;letter-spacing:0.04em;">Prestação de contas</div>
+          <div style="font-size:11px;opacity:0.85;margin-top:2px;">${this.esc(per.label)}</div>
+        </div>
+      </div>
+      <div style="height:3px;background:#f37021;"></div>
+      <div class="pcx-pdf-miolo" style="height:994px;padding:${capa ? "0" : "18px 32px 12px"};box-sizing:border-box;overflow:hidden;">${miolo}</div>
+      <div style="position:absolute;left:0;right:0;bottom:0;height:48px;background:#0c3d28;color:#e7efe9;display:flex;align-items:center;justify-content:space-between;padding:0 28px;box-sizing:border-box;font-size:11px;">
+        <span>${this.esc(this.nomeParceiroRelatorio())}</span>
+        <span>${pagina} de ${total}</span>
+      </div>
+    </div>`;
+  },
+
+  pdfKpis(itens) {
+    return `<div style="display:flex;gap:10px;margin:0 0 14px;">${itens.map((k) => `<div style="flex:1;background:#fff;border:1px solid #e7e5e4;border-top:3px solid ${k.cor};border-radius:8px;padding:10px 12px;">
+      <div style="font-size:10px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#78716c;">${this.esc(k.rot)}</div>
+      <div style="font-size:18px;font-weight:800;color:${k.cor};margin-top:4px;">${k.val}</div>
+      ${k.nota ? `<div style="font-size:10px;color:#78716c;margin-top:2px;">${this.esc(k.nota)}</div>` : ""}
+    </div>`).join("")}</div>`;
+  },
+
+  pdfTabela(colunas, linhas) {
+    const th = colunas.map((c, i) => `<th style="text-align:${i ? "right" : "left"};padding:6px 8px;font-size:10px;font-weight:700;">${this.esc(c)}</th>`).join("");
+    const body = linhas.length ? linhas.map((ln, ri) => `<tr style="background:${ri % 2 ? "#fafaf9" : "#fff"};">${ln.map((c, i) => `<td style="text-align:${i ? "right" : "left"};padding:5px 8px;font-size:11px;border-top:1px solid #e7e5e4;color:${c.cor || "#1c1917"};font-weight:${c.bold ? "700" : "500"};">${c.html != null ? c.html : this.esc(c.v)}</td>`).join("")}</tr>`).join("")
+      : `<tr><td colspan="${colunas.length}" style="padding:8px;font-size:11px;color:#78716c;">Nenhum lançamento neste recorte.</td></tr>`;
+    return `<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;">
+      <thead><tr style="background:#105436;color:#fff;">${th}</tr></thead><tbody>${body}</tbody></table>`;
+  },
+
+  pdfTitulo(txt) {
+    return `<h2 style="margin:0 0 12px;font-size:20px;color:#0c3d28;font-weight:800;">${this.esc(txt)}</h2>`;
+  },
+
+  pdfPaginaCapa() {
+    const per = this.periodBounds();
+    const parceiro = this.nomeParceiroRelatorio();
+    const empresa = this.rotuloEmpresa();
+    return `<div style="height:100%;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 20% 20%,rgba(16,84,54,0.08),transparent 42%),#f3f1ea;">
+      <div style="width:560px;background:#fff;border-radius:16px;padding:42px 40px;box-shadow:0 18px 40px rgba(12,61,40,0.12);border-top:6px solid #105436;">
+        <div style="font-size:12px;letter-spacing:0.16em;text-transform:uppercase;color:#f37021;font-weight:800;">Moura Leite</div>
+        <div style="font-size:36px;line-height:1.1;color:#0c3d28;font-weight:800;margin:14px 0 18px;">Prestação de contas</div>
+        <div style="height:1px;background:#e7e5e4;margin:0 0 18px;"></div>
+        <div style="font-size:12px;color:#78716c;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;">Parceiro</div>
+        <div style="font-size:22px;color:#1c1917;font-weight:700;margin:4px 0 16px;">${this.esc(parceiro)}</div>
+        <div style="font-size:12px;color:#78716c;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;">Competência</div>
+        <div style="font-size:18px;color:#105436;font-weight:800;margin-top:4px;">${this.esc(per.label)}</div>
+        <div style="margin-top:22px;font-size:12px;color:#78716c;">${this.esc(empresa)}</div>
+      </div>
+    </div>`;
+  },
+
+  pdfPaginaCaixa() {
+    if (!this.conferencias && this.movements.length) this.rebuildFromMovements();
+    const obras = this.resumoObras();
+    const entrada = obras.reduce((s, o) => s + o.recebidos, 0);
+    const saida = obras.reduce((s, o) => s + o.pagos, 0);
+    const saldo = entrada - saida;
+    const linhas = obras.map((o) => {
+      const s = o.recebidos - o.pagos;
+      return [{ v: o.nome }, { v: this.pdfMoeda(o.recebidos) }, { v: this.pdfMoeda(o.pagos) }, { v: this.pdfMoeda(s), cor: s < -0.004 ? "#b91c1c" : "#105436", bold: true }];
+    });
+    linhas.push([{ v: "Total", bold: true }, { v: this.pdfMoeda(entrada), bold: true }, { v: this.pdfMoeda(saida), bold: true }, { v: this.pdfMoeda(saldo), cor: saldo < -0.004 ? "#b91c1c" : "#105436", bold: true }]);
+    const planos = this.saidasPorPlano();
+    const linhasPlano = planos.map((p) => [{ v: (p.codigo && p.codigo !== "—" ? p.codigo + "  " : "") + p.nome }, { v: this.pdfMoeda(p.valor) }]);
+    return this.pdfTitulo("Entradas e saídas")
+      + this.pdfKpis([
+        { rot: "Entrada", val: this.pdfMoeda(entrada), cor: "#105436", nota: "Recebido no mês" },
+        { rot: "Saída", val: this.pdfMoeda(saida), cor: "#b91c1c", nota: "Pago no mês" },
+        { rot: "Saldo", val: this.pdfMoeda(saldo), cor: saldo < -0.004 ? "#b91c1c" : "#105436", nota: "Entrada menos saída" }
+      ])
+      + `<div style="font-size:13px;font-weight:800;color:#0c3d28;margin:0 0 6px;">Por empreendimento</div>`
+      + this.pdfTabela(["Empreendimento", "Entrada", "Saída", "Saldo"], linhas)
+      + `<div style="font-size:13px;font-weight:800;color:#0c3d28;margin:14px 0 6px;">Saídas por plano financeiro</div>`
+      + this.pdfTabela(["Plano financeiro", "Saída"], linhasPlano);
+  },
+
+  pdfPaginaVendas() {
+    const pack = (this.dash && this.dash.vendas) || { vendas: [], distratos: [] };
+    const vendas = pack.vendas || [];
+    const distratos = pack.distratos || [];
+    const vgv = vendas.reduce((s, v) => s + (Number(v.valor) || 0), 0);
+    const ticket = vendas.length ? vgv / vendas.length : 0;
+    const dias = distratos.map((v) => {
+      const a = String(v.data || "").slice(0, 10);
+      const b = String(v.dataCancel || "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(a) || !/^\d{4}-\d{2}-\d{2}$/.test(b)) return null;
+      const n = (new Date(b + "T12:00:00") - new Date(a + "T12:00:00")) / 86400000;
+      return n >= 0 ? n : null;
+    }).filter((n) => n != null);
+    const mediaDias = dias.length ? dias.reduce((s, n) => s + n, 0) / dias.length : 0;
+    const tempo = dias.length ? (mediaDias / 30.4375).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + " meses" : "—";
+    const grupos = { "1": { qtd: 0, vgv: 0 }, "2": { qtd: 0, vgv: 0 }, "": { qtd: 0, vgv: 0 } };
+    distratos.forEach((v) => {
+      const k = this.classificarIniciativa(v.motivo);
+      const g = grupos[k] || grupos[""];
+      g.qtd += 1;
+      g.vgv += Number(v.valor) || 0;
+    });
+    const motivos = this.motivosDistrato(distratos).map((m) => [{ v: m.motivo }, { v: String(m.qtd) }, { v: this.pdfMoeda(m.vgv) }]);
+    return this.pdfTitulo("Vendas e distratos")
+      + this.pdfKpis([
+        { rot: "Vendas", val: String(vendas.length), cor: "#105436", nota: "Emitidas na competência" },
+        { rot: "Distratos", val: String(distratos.length), cor: "#b91c1c", nota: "Cancelados na competência" },
+        { rot: "Ticket médio", val: this.pdfMoeda(ticket), cor: "#0c3d28", nota: "VGV das vendas" },
+        { rot: "Tempo médio", val: tempo, cor: "#0c3d28", nota: dias.length ? "Da emissão ao distrato" : "Sem data de cancelamento" }
+      ])
+      + `<div style="display:flex;gap:10px;margin:0 0 14px;">
+        <div style="flex:1;background:#fff;border:1px solid #e7e5e4;border-radius:8px;padding:10px 12px;">
+          <div style="font-size:11px;font-weight:800;color:#105436;">Iniciativa do cliente · prefixo 1</div>
+          <div style="font-size:16px;font-weight:800;margin-top:4px;">${grupos["1"].qtd} distrato(s)</div>
+          <div style="font-size:12px;color:#57534e;">${this.pdfMoeda(grupos["1"].vgv)}</div>
+        </div>
+        <div style="flex:1;background:#fff;border:1px solid #e7e5e4;border-radius:8px;padding:10px 12px;">
+          <div style="font-size:11px;font-weight:800;color:#b45309;">Iniciativa da empresa · prefixo 2</div>
+          <div style="font-size:16px;font-weight:800;margin-top:4px;">${grupos["2"].qtd} distrato(s)</div>
+          <div style="font-size:12px;color:#57534e;">${this.pdfMoeda(grupos["2"].vgv)}</div>
+        </div>
+      </div>`
+      + (grupos[""].qtd ? `<p style="margin:-6px 0 10px;font-size:11px;color:#78716c;">${grupos[""].qtd} distrato(s) sem o prefixo 1 ou 2 no motivo.</p>` : "")
+      + `<div style="font-size:13px;font-weight:800;color:#0c3d28;margin:0 0 6px;">Motivos de cancelamento</div>`
+      + this.pdfTabela(["Motivo", "Contratos", "VGV"], motivos);
+  },
+
+  pdfAnel(ativos, quitados, cor) {
+    const total = ativos + quitados;
+    const r = 38;
+    const c = 2 * Math.PI * r;
+    const frac = total ? ativos / total : 0;
+    const dash = (frac * c).toFixed(2);
+    const resto = (c - frac * c).toFixed(2);
+    const pctA = total ? Math.round(ativos * 100 / total) : 0;
+    const pctQ = total ? 100 - pctA : 0;
+    return `<div style="width:148px;text-align:center;">
+      <svg width="110" height="110" viewBox="0 0 110 110">
+        <circle cx="55" cy="55" r="${r}" fill="none" stroke="#d6d3d1" stroke-width="14"></circle>
+        <circle cx="55" cy="55" r="${r}" fill="none" stroke="${cor}" stroke-width="14" stroke-dasharray="${dash} ${resto}" transform="rotate(-90 55 55)"></circle>
+        <text x="55" y="52" text-anchor="middle" font-size="18" font-weight="700" fill="#1c1917">${total}</text>
+        <text x="55" y="66" text-anchor="middle" font-size="9" fill="#78716c">contratos</text>
+      </svg>
+      <div style="font-size:10px;color:#44403c;line-height:1.35;">
+        <span style="color:${cor};font-weight:700;">●</span> ${ativos} ativos (${pctA}%)<br>
+        <span style="color:#a8a29e;font-weight:700;">●</span> ${quitados} quitados (${pctQ}%)
+      </div>
+    </div>`;
+  },
+
+  pdfBarras(obras) {
+    const max = Math.max(1, ...obras.map((o) => o.vendidos));
+    if (!obras.length) return `<p style="font-size:12px;color:#78716c;">Nenhum lote vendido neste recorte.</p>`;
+    return `<div>${obras.map((o) => {
+      const w = Math.max(4, Math.round(o.vendidos * 280 / max));
+      return `<div style="display:flex;align-items:center;gap:8px;margin:0 0 6px;font-size:11px;">
+        <div style="width:170px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.esc(o.nome)}</div>
+        <div style="width:${w}px;height:14px;background:#105436;border-radius:3px;"></div>
+        <strong>${o.vendidos}</strong>
+      </div>`;
+    }).join("")}</div>`;
+  },
+
+  pdfPaginaEstoque() {
+    const obras = this.estoquePorObra((this.dash && this.dash.estoque) || []);
+    const linhas = obras.map((o) => [{ v: o.nome }, { v: String(o.total) }, { v: String(o.vendidos) }, { v: String(o.disponiveis) }, { v: String(o.reserva) }]);
+    const tot = obras.reduce((s, o) => ({ total: s.total + o.total, vendidos: s.vendidos + o.vendidos, disponiveis: s.disponiveis + o.disponiveis, reserva: s.reserva + o.reserva }), { total: 0, vendidos: 0, disponiveis: 0, reserva: 0 });
+    linhas.push([{ v: "Total", bold: true }, { v: String(tot.total), bold: true }, { v: String(tot.vendidos), bold: true }, { v: String(tot.disponiveis), bold: true }, { v: String(tot.reserva), bold: true }]);
+    const contratos = this.contratosPorObra();
+    const cores = ["#105436", "#f37021", "#0f766e", "#b45309", "#14532d", "#9a3412"];
+    const aneis = contratos.map((c, i) => `<div style="width:160px;margin:0 8px 10px;text-align:center;">
+      <div style="font-size:11px;font-weight:800;color:#0c3d28;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.esc(c.nome)}</div>
+      ${this.pdfAnel(c.ativos, c.quitados, cores[i % cores.length])}
+    </div>`).join("");
+    return this.pdfTitulo("Posição de estoque")
+      + this.pdfTabela(["Empreendimento", "Lotes", "Vendidos", "Disponíveis", "Reserva técnica"], linhas)
+      + `<div style="font-size:13px;font-weight:800;color:#0c3d28;margin:14px 0 8px;">Total vendido</div>`
+      + this.pdfBarras(obras)
+      + `<div style="font-size:13px;font-weight:800;color:#0c3d28;margin:14px 0 8px;">Contratos ativos e quitados</div>`
+      + `<div style="display:flex;flex-wrap:wrap;">${aneis || `<p style="font-size:12px;color:#78716c;">Nenhum contrato na carteira destes centros.</p>`}</div>`;
+  },
+
+  pdfPaginaCarteira() {
+    const c = this.montarCarteiraPdf();
+    const kpis = [
+      { rot: "A receber", val: this.pdfMoeda(c.empresa), cor: "#105436", nota: "Saldo dos empreendimentos" },
+      { rot: "Em atraso", val: this.pdfMoeda(c.atraso), cor: "#b91c1c", nota: "Posição " + this.dataBr(c.ref) },
+      { rot: "No jurídico", val: this.pdfMoeda(c.juridico), cor: "#9a3412", nota: c.juridicoN + " título(s)" }
+    ];
+    if (c.parceria) kpis.splice(1, 0, { rot: "Parceiro", val: this.pdfMoeda(c.parceiro), cor: "#f37021", nota: "Centro de custo do parceiro" });
+    const colMes = c.parceria ? ["Mês", "Empreendimento", "Parceiro"] : ["Mês", "A receber"];
+    const linhasMes = c.meses.map((m) => {
+      const ln = [{ v: m.nome }, { v: this.pdfMoeda(m.empresa) }];
+      if (c.parceria) ln.push({ v: this.pdfMoeda(m.parceiro) });
+      return ln;
+    });
+    const linhasObra = c.obras.map((o) => [
+      { v: o.nome },
+      { v: o.ultima ? this.dataBr(o.ultima) : "—" },
+      { v: this.pdfMoeda(o.ateUltima) }
+    ]);
+    const maxAge = Math.max(1, ...c.aging.map((f) => f.valor));
+    const aging = c.aging.map((f) => {
+      const w = Math.max(4, Math.round(f.valor * 220 / maxAge));
+      return `<div style="display:flex;align-items:center;gap:8px;margin:0 0 6px;font-size:11px;">
+        <div style="width:118px;">${this.esc(f.rot)}</div>
+        <div style="width:${w}px;height:12px;background:#b91c1c;border-radius:3px;"></div>
+        <span>${this.pdfMoeda(f.valor)}</span>
+      </div>`;
+    }).join("");
+    return this.pdfTitulo("Posição de carteira")
+      + this.pdfKpis(kpis)
+      + `<div style="display:flex;gap:16px;align-items:flex-start;">
+        <div style="flex:1.15;">
+          <div style="font-size:13px;font-weight:800;color:#0c3d28;margin:0 0 6px;">Próximos 12 meses</div>
+          ${this.pdfTabela(colMes, linhasMes)}
+        </div>
+        <div style="flex:0.85;">
+          <div style="font-size:13px;font-weight:800;color:#0c3d28;margin:0 0 6px;">Aging do atraso</div>
+          <div style="background:#fff;border:1px solid #e7e5e4;border-radius:8px;padding:10px 12px;margin:0 0 12px;">${aging}</div>
+          <div style="font-size:13px;font-weight:800;color:#0c3d28;margin:0 0 6px;">Até a última parcela do parceiro</div>
+          ${this.pdfTabela(["Empreendimento", "Última", "A receber"], linhasObra)}
+        </div>
+      </div>`;
+  },
+
+  async baixarPdf() {
+    if (typeof html2canvas !== "function" || !window.jspdf) throw new Error("Gerador de PDF indisponível.");
+    if (typeof window.loadSubjudiceIntegra === "function") {
+      try { await window.loadSubjudiceIntegra(); } catch (e) {}
+    }
+    const blocos = [
+      this.pdfPaginaCapa(),
+      this.pdfPaginaCaixa(),
+      this.pdfPaginaVendas(),
+      this.pdfPaginaEstoque(),
+      this.pdfPaginaCarteira()
+    ];
+    const total = blocos.length;
+    const W = 794;
+    const H = 1123;
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF("p", "mm", "a4");
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    for (let i = 0; i < blocos.length; i++) {
+      const page = document.createElement("div");
+      page.style.cssText = "position:fixed;left:-14000px;top:0;width:" + W + "px;height:" + H + "px;z-index:0;";
+      page.innerHTML = this.pdfCasca(blocos[i], i + 1, total, i === 0);
+      document.body.appendChild(page);
+      try {
+        await Promise.all(Array.from(page.querySelectorAll("img")).map((img) => img.complete ? null : new Promise((r) => { img.onload = img.onerror = r; })));
+        const miolo = page.querySelector(".pcx-pdf-miolo");
+        if (miolo && miolo.scrollHeight > miolo.clientHeight + 4) {
+          const s = miolo.clientHeight / miolo.scrollHeight;
+          miolo.style.transformOrigin = "top left";
+          miolo.style.transform = "scale(" + s + ")";
+          miolo.style.width = (100 / s) + "%";
+          miolo.style.height = miolo.scrollHeight + "px";
+        }
+        const canvas = await html2canvas(page, { scale: 2, useCORS: true, backgroundColor: "#f7f6f3", logging: false, width: W, height: H });
+        if (i > 0) pdf.addPage();
+        pdf.addImage(canvas.toDataURL("image/jpeg", 0.92), "JPEG", 0, 0, pageW, pageH);
+      } finally {
+        page.remove();
+      }
+    }
+    const per = this.periodBounds();
+    pdf.save("prestacao-contas-" + String(this.companyId || "empresa") + "-" + per.start.slice(0, 7) + ".pdf");
+  },
+
   async exportar() {
     if (this.loading) return;
     if (!this.costCenterIds.length) {
@@ -2706,8 +3178,8 @@ const PrestacaoContasApp = {
     if (!pronto) await this.load();
     if (this.loading) return;
     try {
-      await this.baixarPrestacao();
-      if (window.showToast) window.showToast("Prestação gerada com 4 abas.", "success");
+      await this.baixarPdf();
+      if (window.showToast) window.showToast("Prestação gerada em PDF.", "success");
     } catch (e) {
       if (window.showToast) window.showToast((e && e.message) || "Não consegui gerar a prestação.", "error");
     }

@@ -9522,7 +9522,8 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .orc-kardex-titulo span:last-child { color: #64748b; font-size: 0.75rem; font-weight: 700; }
 .cc-table.orc-kardex-grade col.orc-rec-c-ano { width: 132px; }
 .cc-table.orc-kardex-grade td.is-passado { background: #f8fafc; color: #64748b; }
-.cc-table.orc-kardex-grade td.is-hoje { box-shadow: inset 0 -2px 0 #105436; }
+.cc-table.orc-kardex-grade td.is-hoje { box-shadow: none; }
+.cc-table.orc-kardex-grade thead th.is-hoje { box-shadow: none; background: #1f8a55; }
 .cc-table.orc-kardex-grade { border-collapse: collapse; background: #fff; font-size: 12px; }
 .cc-table.orc-kardex-grade th,
 .cc-table.orc-kardex-grade td { border: 1px solid #c5d0c6; height: 26px; padding: 1px 6px; }
@@ -9557,7 +9558,28 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .orc-kx-nota { margin: -4px 0 12px; color: #64748b; font-size: 0.78rem; font-weight: 700; }
 .cc-table.orc-kardex-grade tr.orc-kx td:first-child { padding-left: 10px; font-weight: 700; }
 .cc-table.orc-kardex-grade thead th:first-child { font-size: 0.82rem; }
-.cc-table.orc-kardex-grade thead th.is-hoje { box-shadow: inset 0 -3px 0 #fde68a; }
+.cc-table.orc-kardex-grade thead th.is-hoje { box-shadow: none; background: #1f8a55; }
+.cc-table.orc-kardex-grade td { position: relative; }
+.cc-table.orc-kardex-grade td.is-kx-sel { box-shadow: inset 0 0 0 1px #217346; }
+.cc-table.orc-kardex-grade td.is-kx-foco { box-shadow: inset 0 0 0 2px #217346; }
+.orc-kx-fill { position: absolute; right: 0; bottom: 0; width: 7px; height: 7px; background: #217346; border: 1px solid #fff; cursor: crosshair; z-index: 3; }
+.orc-kx-dist { z-index: 10000; }
+.orc-kx-dist-box { width: 640px; max-width: 94vw; padding: 22px 22px 18px; }
+.orc-kx-dist-box .modal-header { align-items: center; }
+.orc-kx-dist-box .modal-header h3 { margin: 0; }
+.orc-kx-dist-nota { margin: 0 0 12px; color: #475569; font-size: 0.84rem; font-weight: 700; }
+.orc-kx-dist-box .cc-scroll { max-height: 360px; }
+.orc-kx-dist-tab { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+.orc-kx-dist-tab th { background: #105436; color: #fff; text-align: left; padding: 8px 10px; font-weight: 700; }
+.orc-kx-dist-tab th.is-right, .orc-kx-dist-tab td.is-right { text-align: right; }
+.orc-kx-dist-tab td { border-bottom: 1px solid #e2e8f0; padding: 6px 10px; vertical-align: middle; }
+.orc-kx-dist-cond { color: #64748b; font-size: 0.78rem; }
+.orc-kx-dist-tab input.orc-kx-dist-qtd { width: 84px; height: 34px; text-align: right; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 8px; }
+.orc-kx-dist-rodape { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 14px; }
+.orc-kx-dist-acoes { display: flex; gap: 8px; }
+.orc-kx-dist-soma { font-size: 0.92rem; }
+.orc-kx-dist-soma.is-ok { color: #105436; }
+.orc-kx-dist-soma.is-falta { color: #b45309; }
 .orc-kx-cel { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
 .orc-kx-feito { color: #64748b; font-weight: 800; font-variant-numeric: tabular-nums; }
 .cc-table.orc-kardex-grade .orc-kx-cel input.orc-dist-qtd { width: 58px; min-width: 58px; flex: 0 0 58px; }
@@ -10326,14 +10348,16 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .orc-dfc-meta { color: #64748b; font-size: 0.78rem; padding-bottom: 6px; }
 .orc-dfc-layout { display: flex; flex-direction: column; gap: 12px; align-items: stretch; }
 .orc-dfc-layout > #orc-dfc-body { flex: 1; min-width: 0; width: 100%; }
-.orc-dfc-scroll { overflow: auto; max-height: calc(100vh - 228px); border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; }
-.orc-dfc-table.orc-dfc-cmp { width: 100%; min-width: 0; table-layout: fixed; font-size: 9px; }
+.orc-dfc-scroll { overflow: auto; max-height: calc(100vh - 220px); border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; }
+.orc-dfc-table.orc-dfc-cmp { width: max-content; min-width: 100%; table-layout: auto; font-size: 12px; }
 .orc-dfc-table.orc-dfc-cmp th,
-.orc-dfc-table.orc-dfc-cmp td { padding: 1px 2px; height: auto; }
-.orc-dfc-table.orc-dfc-cmp th:first-child { min-width: 0; width: 148px; left: 0; }
-.orc-dfc-table.orc-dfc-cmp td:first-child { white-space: normal; line-height: 1.15; overflow: hidden; }
-.orc-dfc-table.orc-dfc-cmp thead tr:nth-child(2) th { top: 16px; height: 16px; font-weight: 600; font-size: 8px; }
-.orc-dfc-table.orc-dfc-cmp thead tr:first-child th { height: 16px; font-size: 9px; }
+.orc-dfc-table.orc-dfc-cmp td { padding: 4px 8px; white-space: nowrap; }
+.orc-dfc-table.orc-dfc-cmp th:not(:first-child),
+.orc-dfc-table.orc-dfc-cmp td:not(:first-child) { min-width: 78px; }
+.orc-dfc-table.orc-dfc-cmp th:first-child { min-width: 280px; width: 280px; }
+.orc-dfc-table.orc-dfc-cmp td:first-child { min-width: 280px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.orc-dfc-table.orc-dfc-cmp thead tr:first-child th { top: 0; height: 30px; font-size: 12px; }
+.orc-dfc-table.orc-dfc-cmp thead tr:nth-child(2) th { top: 30px; height: 26px; font-size: 11px; font-weight: 600; background: #0c3d28; }
 .orc-dfc-alerta { width: 100%; }
 .orc-dfc-table { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; font-size: 0.78rem; }
 .orc-dfc-table th { position: sticky; top: 0; z-index: 2; background: #105436; color: #fff; text-align: right; font-weight: 700; height: 36px; padding: 0 10px; white-space: nowrap; }

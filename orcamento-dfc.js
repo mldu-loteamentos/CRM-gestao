@@ -166,23 +166,20 @@ const OrcamentoDfcApp = {
 
   arquivos2026() {
     const app = window.ResultadoCaixaApp;
-    const meses = (app && app.acervo && app.acervo.meses) || {};
-    const chaves = Object.keys(meses).filter((k) => k.indexOf("2026-") === 0).sort().reverse();
-    const visto = {};
-    const out = [];
-    chaves.forEach((k) => {
+    const acervo = (app && app.acervo) || {};
+    const lista = [];
+    const meses = acervo.meses || {};
+    Object.keys(meses).filter((k) => k.indexOf("2026-") === 0).sort().forEach((k) => {
       const arquivos = (meses[k] && meses[k].arquivos) || {};
       Object.keys(arquivos).forEach((nome) => {
-        const arq = arquivos[nome];
-        if (!arq) return;
-        const emp = String(arq.empresa || "");
-        const chave = emp && emp !== "0" ? emp : nome;
-        if (visto[chave]) return;
-        visto[chave] = 1;
-        out.push(arq);
+        if (arquivos[nome]) lista.push(arquivos[nome]);
       });
     });
-    return out;
+    const ant = acervo.anterior && acervo.anterior["2026"];
+    Object.keys((ant && ant.arquivos) || {}).forEach((nome) => {
+      if (ant.arquivos[nome]) lista.push(ant.arquivos[nome]);
+    });
+    return lista;
   },
 
   somarBase(arr, i, v) {
@@ -224,41 +221,41 @@ const OrcamentoDfcApp = {
       if (dig) this.somarBase(bag(ccs, gid + "|" + dig + "|" + ccId), i, v);
     };
     let arquivos = 0;
-    this.arquivos2026().forEach((arq) => {
-      if (!this.empresaCabe(arq)) return;
-      arquivos += 1;
-      const planos = arq.planosPorCc || {};
-      const temPlano = Object.keys(planos).some((cc) => Object.keys((planos[cc] && planos[cc].contas) || {}).length);
-      if (temPlano) {
-        Object.keys(planos).forEach((cc) => {
-          if (!this.ccCabe(cc)) return;
-          const bloco = planos[cc] || {};
-          Object.keys(bloco.contas || {}).forEach((code) => {
-            const info = bloco.contas[code] || {};
-            const gid = gidDe(code, info.nome, info.node);
-            Object.keys(info.meses || {}).forEach((mm) => {
-              const i = Number(mm) - 1;
-              if (i < 0 || i >= corte) return;
-              por(gid, code, cc, i, info.meses[mm].r);
-            });
-          });
-        });
-        return;
-      }
-      const porCc = arq.contasPorCc || {};
-      Object.keys(porCc).forEach((cc) => {
+    const celulas = {};
+    const gravar = (gid, code, cc, i, v) => {
+      if (!gid || i < 0 || i >= corte) return;
+      const k = gid + "|" + this.chaveConta(code) + "|" + String(cc || "") + "|" + i;
+      celulas[k] = { gid: gid, code: code, cc: cc, i: i, v: Number(v) || 0 };
+    };
+    const lerMapa = (mapa) => {
+      Object.keys(mapa || {}).forEach((cc) => {
         if (!this.ccCabe(cc)) return;
-        const bloco = porCc[cc] || {};
+        const bloco = mapa[cc] || {};
         Object.keys(bloco.contas || {}).forEach((code) => {
           const info = bloco.contas[code] || {};
-          const gid = gidDe(code, info.nome, "");
+          const gid = gidDe(code, info.nome, info.node);
           Object.keys(info.meses || {}).forEach((mm) => {
-            const i = Number(mm) - 1;
-            if (i < 0 || i >= corte) return;
-            por(gid, code, cc, i, info.meses[mm].r);
+            const i = Number(String(mm).replace(/\D/g, "").slice(-2)) - 1;
+            if (!(i >= 0) || i >= corte) return;
+            const cel = info.meses[mm];
+            const v = cel && typeof cel === "object" ? (cel.r != null ? cel.r : cel.o) : cel;
+            gravar(gid, code, cc, i, v);
           });
         });
       });
+    };
+    this.arquivos2026().forEach((arq) => {
+      if (!this.empresaCabe(arq)) return;
+      const temConta = Object.keys(arq.contasPorCc || {}).length;
+      const temPlano = Object.keys(arq.planosPorCc || {}).length;
+      if (!temConta && !temPlano) return;
+      arquivos += 1;
+      if (temPlano) lerMapa(arq.planosPorCc);
+      if (temConta) lerMapa(arq.contasPorCc);
+    });
+    Object.keys(celulas).forEach((k) => {
+      const c = celulas[k];
+      por(c.gid, c.code, c.cc, c.i, c.v);
     });
     const app = window.ResultadoCaixaApp;
     const forecasts = (app && app.forecasts) || {};
@@ -280,7 +277,13 @@ const OrcamentoDfcApp = {
           Object.keys(arq.contas[cc] || {}).forEach((code) => {
             const info = arq.contas[cc][code] || {};
             const gid = gidDe(code, info.nome, "");
-            let valor = Number((info.meses || {})[ym]) || 0;
+            const meses = info.meses || {};
+            let valor = Number(meses[ym]);
+            if (!Number.isFinite(valor)) {
+              const cel = meses[ym] || meses[String(i + 1)];
+              valor = cel && typeof cel === "object" ? Number(cel.r != null ? cel.r : cel.o) : Number(cel);
+            }
+            valor = Number(valor) || 0;
             const node = byId[gid];
             if (valor && node && fluxo && typeof fluxo.signedAmount === "function") {
               valor = fluxo.signedAmount(node, code, info.nome || "", valor);
@@ -556,6 +559,7 @@ const OrcamentoDfcApp = {
     const token = (this._bToken = (this._bToken || 0) + 1);
     try {
       if ((!app.acervo || typeof app.temAcervo !== "function" || !app.temAcervo()) && typeof app.lerLocal === "function") app.lerLocal();
+      if (!this.arquivos2026().length) app._nuvemOk = false;
       if (typeof app.carregarNuvem === "function" && !app._nuvemOk) await app.carregarNuvem();
       if (typeof app.carregarForecasts === "function") await app.carregarForecasts();
       if (typeof app.normalizarForecastsMemoria === "function") app.normalizarForecastsMemoria();
@@ -752,9 +756,11 @@ const OrcamentoDfcApp = {
         ${this.celCmp(r.total, r.baseTotal, false)}
       </tr>`;
     }).join("");
+    const avisoBase = this._basePronta ? "" : `<div class="orc-dfc-erro">O realizado de 2026 e o forecast de outubro a dezembro não estão no Resultado de caixa.</div>`;
     const aviso = this.erro ? `<div class="orc-dfc-erro">${this.esc(this.erro)}</div>` : "";
     body.innerHTML = `
       ${aviso}
+      ${avisoBase}
       <div class="orc-dfc-scroll">
         <table class="orc-dfc-table orc-dfc-cmp">
           <thead><tr><th rowspan="2">Conta</th>${h1}</tr><tr>${h2}</tr></thead>
