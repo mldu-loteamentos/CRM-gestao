@@ -1333,6 +1333,7 @@ ComprasControleApp.limpar = function () {
   this.state.startDate = range.startDate;
   this.state.endDate = range.endDate;
   this.state.companyIds = [];
+  this.state.empPelosCentros = false;
   this.state.creditorIds = [];
   this.state.deptIds = [];
   this.state.ccIds = [];
@@ -1418,7 +1419,7 @@ ComprasControleApp.paintFilters = function () {
         const sid = String(itemId);
         const cur = self.state[key].slice();
         self.state[key] = on ? (cur.includes(sid) ? cur : cur.concat(sid)) : cur.filter((x) => x !== sid);
-        if (key === "companyIds") self.podarCentrosForaDaEmpresa();
+        self.aposFiltro(key);
         self.state[openKey] = true;
         if (self.state.consulted && !self.state.loading) {
           self.applyFilters();
@@ -1432,7 +1433,7 @@ ComprasControleApp.paintFilters = function () {
         if (key === "deptIds" && self.departmentFilterLocked()) return;
         if (!self.state.consulted && key !== "companyIds" && !escolheAntes) return;
         self.state[key] = itemsFn().map((x) => String(x.id));
-        if (key === "companyIds") self.podarCentrosForaDaEmpresa();
+        self.aposFiltro(key);
         self.state[openKey] = true;
         if (self.state.consulted && !self.state.loading) {
           self.applyFilters();
@@ -1450,7 +1451,7 @@ ComprasControleApp.paintFilters = function () {
         } else {
           self.state[key] = [];
         }
-        if (key === "companyIds") self.podarCentrosForaDaEmpresa();
+        self.aposFiltro(key);
         self.state[openKey] = true;
         if (self.state.consulted && !self.state.loading) {
           self.applyFilters();
@@ -1473,6 +1474,7 @@ ComprasControleApp.paintFilters = function () {
     open: !!this.state.openEmp,
     query: this.state.qEmp,
     emptyMeansAll: true,
+    literalAll: !!this.state.empPelosCentros,
     nouns: { singular: "empresa", plural: "empresas" }
   }));
   set("cfin-cc-slot", MlEmpresaFilter.html({
@@ -1493,7 +1495,7 @@ ComprasControleApp.paintFilters = function () {
     open: !!this.state.openCred,
     query: this.state.qCred,
     emptyMeansAll: true,
-    nouns: { singular: "credor", plural: "credores" }
+    nouns: this.nounsCredor()
   }));
   set("cfin-dept-slot", this.deptFilterHtml());
   bind("cfin-filter-emp", "companyIds", "openEmp", "qEmp", () => this.empItems(), { singular: "empresa", plural: "empresas" });
@@ -1534,44 +1536,7 @@ ComprasControleApp.credItems = function () {
 };
 
 ComprasControleApp.carregarCredores = async function () {
-  if (this._credCarregando || (this._credCatalogo && this._credCatalogo.length)) return;
-  this._credCarregando = true;
-  try {
-    const fx = window.firebaseCollections;
-    const db = window.firebaseDb;
-    if (!fx || !db || typeof fx.getDocs !== "function" || typeof fx.collection !== "function") return;
-    let rows = [];
-    for (let i = 0; i < ["sienge_creditors", "creditors"].length; i++) {
-      const nome = ["sienge_creditors", "creditors"][i];
-      try {
-        const snap = await fx.getDocs(fx.collection(db, nome));
-        if (snap && typeof snap.forEach === "function") {
-          snap.forEach((d) => rows.push((d && d.data && d.data()) || {}));
-        }
-        if (rows.length) break;
-      } catch (e) {}
-    }
-    const seen = {};
-    const items = [];
-    rows.forEach((raw) => {
-      let src = raw || {};
-      if (typeof src.raw_data === "string") {
-        try { src = Object.assign({}, JSON.parse(src.raw_data), src); } catch (e) {}
-      }
-      const name = String(src.name || src.nome || src.creditorName || src.fantasyName || src.tradeName || "").trim();
-      if (!name) return;
-      const id = this.fold(name);
-      if (!id || seen[id]) return;
-      seen[id] = true;
-      const label = name.toUpperCase();
-      items.push({ id: id, name: label, label: label });
-    });
-    items.sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
-    this._credCatalogo = items;
-    if (items.length && !this.state.openCred) this.paintFilters();
-  } finally {
-    this._credCarregando = false;
-  }
+  return ComprasPrevisoesApp.carregarCatalogoCredores.call(this);
 };
 
 ComprasControleApp.garantirEmpreendimentos = async function () {
@@ -1580,6 +1545,7 @@ ComprasControleApp.garantirEmpreendimentos = async function () {
   try {
     const list = await SiengeApiService.getCostCenters();
     if (window.AppState && Array.isArray(list) && list.length) AppState.cachedCostCenters = list;
+    if ((this.state.ccIds || []).length) this.aplicarEmpresasDosCentros();
     if (!this.state.openCc) this.paintFilters();
   } catch (e) {}
 };

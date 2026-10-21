@@ -2888,23 +2888,28 @@ const PrestacaoContasApp = {
 
   pdfCasca(miolo, pagina, total, capa) {
     const per = this.periodBounds();
-    const faixa = capa
-      ? "background:linear-gradient(160deg,#071f16 0%,#0c3d28 42%,#105436 100%);"
-      : "background:linear-gradient(90deg,#0c3d28 0%,#105436 62%,#1a7a4c 100%);";
-    return `<div style="position:relative;width:794px;height:1123px;background:${capa ? "#f3f1ea" : "#f7f6f3"};overflow:hidden;font-family:'Segoe UI',Calibri,sans-serif;color:#1c1917;">
-      <div style="height:78px;${faixa}color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 28px;box-sizing:border-box;">
-        <img src="Banner/logo branca.png" alt="" style="height:42px;object-fit:contain;">
+    const parceiro = this.nomeParceiroRelatorio();
+    const rodape = `<div style="position:absolute;left:0;right:0;bottom:0;height:42px;background:#fff;border-top:1px solid #e5e7eb;color:#64748b;display:flex;align-items:center;justify-content:space-between;padding:0 36px;box-sizing:border-box;font-size:11px;">
+        <span style="color:#105436;font-weight:700;letter-spacing:0.02em;">${this.esc(parceiro)}</span>
+        <span>${pagina} / ${total}</span>
+      </div>`;
+    if (capa) {
+      return `<div style="position:relative;width:794px;height:1123px;background:#fff;overflow:hidden;font-family:'Segoe UI',Calibri,sans-serif;color:#0f172a;">
+        <div class="pcx-pdf-miolo" style="height:1081px;box-sizing:border-box;overflow:hidden;">${miolo}</div>
+        ${rodape}
+      </div>`;
+    }
+    return `<div style="position:relative;width:794px;height:1123px;background:#fff;overflow:hidden;font-family:'Segoe UI',Calibri,sans-serif;color:#0f172a;">
+      <div style="height:62px;background:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 36px;box-sizing:border-box;">
+        <img src="Banner/logo%20moura%20leite%20loteamentos.png" alt="" style="height:34px;object-fit:contain;">
         <div style="text-align:right;">
-          <div style="font-size:13px;font-weight:700;letter-spacing:0.04em;">Prestação de contas</div>
-          <div style="font-size:11px;opacity:0.85;margin-top:2px;">${this.esc(per.label)}</div>
+          <div style="font-size:12px;font-weight:700;color:#105436;letter-spacing:0.04em;">Prestação de contas</div>
+          <div style="font-size:11px;color:#64748b;margin-top:2px;">${this.esc(per.label)}</div>
         </div>
       </div>
-      <div style="height:3px;background:#f37021;"></div>
-      <div class="pcx-pdf-miolo" style="height:994px;padding:${capa ? "0" : "18px 32px 12px"};box-sizing:border-box;overflow:hidden;">${miolo}</div>
-      <div style="position:absolute;left:0;right:0;bottom:0;height:48px;background:#0c3d28;color:#e7efe9;display:flex;align-items:center;justify-content:space-between;padding:0 28px;box-sizing:border-box;font-size:11px;">
-        <span>${this.esc(this.nomeParceiroRelatorio())}</span>
-        <span>${pagina} de ${total}</span>
-      </div>
+      <div style="height:3px;background:linear-gradient(90deg,#105436 0%,#105436 78%,#f37021 78%,#f37021 100%);"></div>
+      <div class="pcx-pdf-miolo" style="height:1016px;padding:22px 36px 16px;box-sizing:border-box;overflow:hidden;background:#fff;">${miolo}</div>
+      ${rodape}
     </div>`;
   },
 
@@ -2918,7 +2923,7 @@ const PrestacaoContasApp = {
 
   pdfTabela(colunas, linhas) {
     const th = colunas.map((c, i) => `<th style="text-align:${i ? "right" : "left"};padding:6px 8px;font-size:10px;font-weight:700;">${this.esc(c)}</th>`).join("");
-    const body = linhas.length ? linhas.map((ln, ri) => `<tr style="background:${ri % 2 ? "#fafaf9" : "#fff"};">${ln.map((c, i) => `<td style="text-align:${i ? "right" : "left"};padding:5px 8px;font-size:11px;border-top:1px solid #e7e5e4;color:${c.cor || "#1c1917"};font-weight:${c.bold ? "700" : "500"};">${c.html != null ? c.html : this.esc(c.v)}</td>`).join("")}</tr>`).join("")
+    const body = linhas.length ? linhas.map((ln, ri) => `<tr style="background:${ri % 2 ? "#f8fafc" : "#fff"};">${ln.map((c, i) => `<td style="text-align:${i ? "right" : "left"};padding:5px 8px;font-size:11px;border-top:1px solid #e2e8f0;color:${c.cor || "#0f172a"};font-weight:${c.bold ? "700" : "500"};">${c.html != null ? c.html : this.esc(c.v)}</td>`).join("")}</tr>`).join("")
       : `<tr><td colspan="${colunas.length}" style="padding:8px;font-size:11px;color:#78716c;">Nenhum lançamento neste recorte.</td></tr>`;
     return `<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;">
       <thead><tr style="background:#105436;color:#fff;">${th}</tr></thead><tbody>${body}</tbody></table>`;
@@ -2932,17 +2937,24 @@ const PrestacaoContasApp = {
     const per = this.periodBounds();
     const parceiro = this.nomeParceiroRelatorio();
     const empresa = this.rotuloEmpresa();
-    return `<div style="height:100%;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 20% 20%,rgba(16,84,54,0.08),transparent 42%),#f3f1ea;">
-      <div style="width:560px;background:#fff;border-radius:16px;padding:42px 40px;box-shadow:0 18px 40px rgba(12,61,40,0.12);border-top:6px solid #105436;">
-        <div style="font-size:12px;letter-spacing:0.16em;text-transform:uppercase;color:#f37021;font-weight:800;">Moura Leite</div>
-        <div style="font-size:36px;line-height:1.1;color:#0c3d28;font-weight:800;margin:14px 0 18px;">Prestação de contas</div>
-        <div style="height:1px;background:#e7e5e4;margin:0 0 18px;"></div>
-        <div style="font-size:12px;color:#78716c;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;">Parceiro</div>
-        <div style="font-size:22px;color:#1c1917;font-weight:700;margin:4px 0 16px;">${this.esc(parceiro)}</div>
-        <div style="font-size:12px;color:#78716c;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;">Competência</div>
-        <div style="font-size:18px;color:#105436;font-weight:800;margin-top:4px;">${this.esc(per.label)}</div>
-        <div style="margin-top:22px;font-size:12px;color:#78716c;">${this.esc(empresa)}</div>
+    return `<div style="height:100%;background:#fff;display:flex;flex-direction:column;padding:78px 68px 72px;box-sizing:border-box;">
+      <img src="Banner/logo%20moura%20leite%20loteamentos.png" alt="" style="height:46px;object-fit:contain;align-self:flex-start;">
+      <div style="margin-top:auto;max-width:620px;">
+        <div style="width:56px;height:4px;background:#f37021;border-radius:2px;"></div>
+        <div style="margin-top:22px;font-size:13px;letter-spacing:0.22em;text-transform:uppercase;color:#105436;font-weight:700;">Prestação de contas</div>
+        <div style="margin-top:14px;font-size:40px;line-height:1.12;font-weight:700;color:#0f172a;">${this.esc(parceiro)}</div>
+        <div style="margin-top:36px;display:flex;gap:48px;">
+          <div>
+            <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#94a3b8;font-weight:700;">Competência</div>
+            <div style="margin-top:6px;font-size:22px;font-weight:700;color:#105436;">${this.esc(per.label)}</div>
+          </div>
+          <div>
+            <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#94a3b8;font-weight:700;">Empresa</div>
+            <div style="margin-top:6px;font-size:16px;font-weight:600;color:#334155;max-width:280px;">${this.esc(empresa)}</div>
+          </div>
+        </div>
       </div>
+      <div style="margin-top:auto;font-size:12px;color:#94a3b8;">Moura Leite · documento de acompanhamento</div>
     </div>`;
   },
 
@@ -3151,7 +3163,7 @@ const PrestacaoContasApp = {
           miolo.style.width = (100 / s) + "%";
           miolo.style.height = miolo.scrollHeight + "px";
         }
-        const canvas = await html2canvas(page, { scale: 2, useCORS: true, backgroundColor: "#f7f6f3", logging: false, width: W, height: H });
+        const canvas = await html2canvas(page, { scale: 2, useCORS: true, backgroundColor: "#ffffff", logging: false, width: W, height: H });
         if (i > 0) pdf.addPage();
         pdf.addImage(canvas.toDataURL("image/jpeg", 0.92), "JPEG", 0, 0, pageW, pageH);
       } finally {

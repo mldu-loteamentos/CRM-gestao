@@ -108,7 +108,7 @@ window.MlEmpresaFilter = {
     return id ? `${id} - ${name}` : name;
   },
 
-  buttonLabel(items, selectedIds, emptyMeansAll, countMode, nouns, emptyLabel) {
+  buttonLabel(items, selectedIds, emptyMeansAll, countMode, nouns, emptyLabel, literalAll) {
     const all = items || [];
     const sel = (selectedIds || []).map(String);
     const n = sel.length;
@@ -125,7 +125,7 @@ window.MlEmpresaFilter = {
       const it = all.find((x) => String(x.id) === sel[0]);
       return it ? this.formatItemLabel(it) : "1 selecionado";
     }
-    if (n === all.length) return "Todos";
+    if (n === all.length) return literalAll && n > 1 ? (n + " selecionado(s)") : "Todos";
     return n + " selecionado(s)";
   },
 
@@ -165,7 +165,7 @@ window.MlEmpresaFilter = {
     const open = !!opts.open;
     const label = opts.label || "Empresas";
     const extra = opts.extraClass ? ` ${opts.extraClass}` : "";
-    const btn = this.buttonLabel(items, opts.selectedIds, !!opts.emptyMeansAll, !!opts.countMode, opts.nouns || null, opts.emptyLabel || "");
+    const btn = this.buttonLabel(items, opts.selectedIds, !!opts.emptyMeansAll, !!opts.countMode, opts.nouns || null, opts.emptyLabel || "", !!opts.literalAll);
     return `<div class="ml-emp-filter${extra}${open ? " is-open" : ""}" id="${this.esc(id)}" onmousedown="event.stopPropagation()">
       <div class="ml-emp-filter-label">${this.esc(label)}</div>
       <button type="button" class="ml-emp-filter-btn" onclick="event.preventDefault();event.stopPropagation();${opts.toggleJs || `MlEmpresaFilter.toggleOpen(${this.jsArg(id)})`}">

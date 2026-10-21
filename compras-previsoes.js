@@ -1525,58 +1525,171 @@ const ComprasPrevisoesApp = {
       const name = this.companyName(r.companyId) || r.companyId;
       return r.companyId + " - " + name;
     });
-    if (fromRows.length) return fromRows;
-    return (this.state.companies || []).map((c) => ({
+    const base = fromRows.length ? fromRows : (this.state.companies || []).map((c) => ({
       id: String(c.id),
       name: String(c.name || "").toUpperCase(),
       label: c.id + " - " + String(c.name || "").toUpperCase()
     }));
+    if (!this.state.empPelosCentros) return base;
+    const permitidas = new Set(this.empresasDosCentros(this.state.ccIds));
+    if (!permitidas.size) return base;
+    const filtradas = base.filter((x) => permitidas.has(String(x.id)));
+    if (filtradas.length) return filtradas;
+    return Array.from(permitidas).map((id) => {
+      const name = this.companyName(id) || id;
+      return { id: String(id), name: name, label: id + " - " + name };
+    });
+  },
+
+  nounsCredor() {
+    const carregando = !!this._credCarregando && !(this._credCatalogo && this._credCatalogo.length);
+    return {
+      singular: "credor",
+      plural: "credores",
+      none: carregando ? "Carregando credores..." : "Nenhum credor",
+      noMatch: carregando ? "Carregando credores..." : "Nenhum credor com esse nome."
+    };
   },
 
   credItems() {
     const fromRows = this.uniqueItems(this.scopedRows(), (r) => this.fold(r.credor), (r) => r.credor.toUpperCase());
-    if (fromRows.length) return fromRows;
-    return this._credCatalogo || [];
+    const cat = this._credCatalogo || [];
+    if (!fromRows.length) return cat;
+    if (!cat.length) return fromRows;
+    const seen = {};
+    const out = [];
+    cat.concat(fromRows).forEach((x) => {
+      const id = String(x && x.id || "");
+      if (!id || seen[id]) return;
+      seen[id] = true;
+      out.push(x);
+    });
+    return out;
+  },
+
+  nomeCredor(src) {
+    if (!src || typeof src !== "object") return "";
+    return String(
+      src.name || src.nome || src.creditorName || src.fantasyName || src.tradeName
+      || src.corporateName || src.companyName || ""
+    ).trim();
+  },
+
+  empurrarCredor(src, seen, items) {
+    if (!src || typeof src !== "object" || Array.isArray(src)) {
+      if (Array.isArray(src)) src.forEach((row) => this.empurrarCredor(row, seen, items));
+      return;
+    }
+    let base = src;
+    if (typeof src.raw_data === "string") {
+      try { base = Object.assign({}, JSON.parse(src.raw_data), src); } catch (e) {}
+    } else if (src.raw_data && typeof src.raw_data === "object") {
+      base = Object.assign({}, src.raw_data, src);
+    }
+    let aninhou = false;
+    ["items", "results", "creditors", "credores", "records"].forEach((k) => {
+      if (!Array.isArray(base[k])) return;
+      aninhou = true;
+      base[k].forEach((row) => this.empurrarCredor(row, seen, items));
+    });
+    const name = this.nomeCredor(base);
+    if (!name) {
+      if (aninhou) return;
+      Object.keys(base).forEach((k) => {
+        const v = base[k];
+        if (v && typeof v === "object" && this.nomeCredor(v)) this.empurrarCredor(v, seen, items);
+      });
+      return;
+    }
+    const id = this.fold(name);
+    if (!id || seen[id]) return;
+    seen[id] = true;
+    const label = name.toUpperCase();
+    items.push({ id: id, name: label, label: label });
+  },
+
+  async lerCredoresFirebase() {
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    const items = [];
+    const seen = {};
+    if (!fx || !db || typeof fx.getDocs !== "function" || typeof fx.collection !== "function") return items;
+    const nomes = ["sienge_creditors", "creditors"];
+    for (let i = 0; i < nomes.length; i++) {
+      try {
+        const snap = await fx.getDocs(fx.collection(db, nomes[i]));
+        if (snap && typeof snap.forEach === "function") {
+          snap.forEach((d) => this.empurrarCredor((d && d.data && d.data()) || {}, seen, items));
+        }
+        if (items.length) break;
+      } catch (e) {}
+    }
+    return items;
+  },
+
+  async lerCredoresSienge(onParcial) {
+    if (typeof window.siengeFetchWithRetry !== "function") return [];
+    const items = [];
+    const seen = {};
+    const limit = 200;
+    let offset = 0;
+    for (let page = 0; page < 40; page++) {
+      let res = null;
+      try {
+        res = await window.siengeFetchWithRetry("/creditors?limit=" + limit + "&offset=" + offset, 1);
+      } catch (e) { break; }
+      const lote = (res && (res.results || res.resultSet || res.data)) || [];
+      if (!lote.length) break;
+      this.empurrarCredor(lote, seen, items);
+      if (typeof onParcial === "function") onParcial(items.slice());
+      if (lote.length < limit) break;
+      offset += limit;
+    }
+    return items;
   },
 
   async carregarCatalogoCredores() {
-    if (this._credCarregando || (this._credCatalogo && this._credCatalogo.length)) return;
-    this._credCarregando = true;
-    try {
-      const fx = window.firebaseCollections;
-      const db = window.firebaseDb;
-      if (!fx || !db || typeof fx.getDocs !== "function" || typeof fx.collection !== "function") return;
-      let rows = [];
-      const nomes = ["sienge_creditors", "creditors"];
-      for (let i = 0; i < nomes.length; i++) {
-        try {
-          const snap = await fx.getDocs(fx.collection(db, nomes[i]));
-          if (snap && typeof snap.forEach === "function") {
-            snap.forEach((d) => rows.push((d && d.data && d.data()) || {}));
-          }
-          if (rows.length) break;
-        } catch (e) {}
-      }
-      const seen = {};
-      const items = [];
-      rows.forEach((raw) => {
-        let src = raw || {};
-        if (typeof src.raw_data === "string") {
-          try { src = Object.assign({}, JSON.parse(src.raw_data), src); } catch (e) {}
-        }
-        const name = String(src.name || src.nome || src.creditorName || src.fantasyName || src.tradeName || "").trim();
-        if (!name) return;
-        const id = this.fold(name);
-        if (!id || seen[id]) return;
-        seen[id] = true;
-        const label = name.toUpperCase();
-        items.push({ id: id, name: label, label: label });
-      });
-      items.sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
-      this._credCatalogo = items;
-      if (items.length && !this.state.openCred && typeof this.paintFilters === "function") this.paintFilters();
-    } finally {
+    if (ComprasPrevisoesApp._credPromise) {
+      this._credCarregando = !(this._credCatalogo && this._credCatalogo.length);
+      if (typeof this.paintFilters === "function") this.paintFilters();
+      try { await ComprasPrevisoesApp._credPromise; } catch (e) {}
       this._credCarregando = false;
+      this._credCatalogo = ComprasPrevisoesApp._credCatalogo || this._credCatalogo || [];
+      if (typeof this.paintFilters === "function") this.paintFilters();
+      return;
+    }
+    if (this._credCatalogo && this._credCatalogo.length) return;
+    const compartilhado = ComprasPrevisoesApp._credCatalogo;
+    if (compartilhado && compartilhado.length) {
+      this._credCatalogo = compartilhado;
+      if (typeof this.paintFilters === "function") this.paintFilters();
+      return;
+    }
+    const self = this;
+    const publicar = (items, carregando) => {
+      const lista = (items || []).slice().sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+      ComprasPrevisoesApp._credCatalogo = lista;
+      self._credCatalogo = lista;
+      self._credCarregando = !!carregando && !lista.length;
+      if (typeof self.paintFilters === "function") self.paintFilters();
+    };
+    this._credCarregando = true;
+    publicar([], true);
+    const job = (async function () {
+      let items = await self.lerCredoresFirebase();
+      if (items.length) return items;
+      items = await self.lerCredoresSienge((parcial) => publicar(parcial, true));
+      return items;
+    })();
+    ComprasPrevisoesApp._credPromise = job;
+    try {
+      const items = await job;
+      publicar(items, false);
+    } catch (e) {
+      this._credCarregando = false;
+      if (typeof this.paintFilters === "function") this.paintFilters();
+    } finally {
+      ComprasPrevisoesApp._credPromise = null;
     }
   },
 
@@ -1587,6 +1700,7 @@ const ComprasPrevisoesApp = {
     try {
       const loaded = await SiengeApiService.getCostCenters();
       if (window.AppState && Array.isArray(loaded) && loaded.length) AppState.cachedCostCenters = loaded;
+      if ((this.state.ccIds || []).length) this.aplicarEmpresasDosCentros();
       if (!this.state.openCc && typeof this.paintFilters === "function") this.paintFilters();
     } catch (e) {}
   },
@@ -1599,10 +1713,53 @@ const ComprasPrevisoesApp = {
 
   empresaDoCentro(c) {
     if (!c) return "";
+    const company = c.company;
     const raw = c.idCompany != null && c.idCompany !== "" ? c.idCompany
       : (c.companyId != null && c.companyId !== "" ? c.companyId
-        : (c.company && c.company.id != null ? c.company.id : ""));
+        : (company && typeof company === "object" && company.id != null ? company.id
+          : (company != null && company !== "" && typeof company !== "object" ? company : "")));
     return raw === "" || raw == null ? "" : String(raw);
+  },
+
+  empresasDosCentros(ccIds) {
+    const wanted = new Set((ccIds || []).map(String));
+    const found = {};
+    if (!wanted.size) return [];
+    const list = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || [];
+    list.forEach((c) => {
+      const id = String((c && (c.id || c.code)) || "");
+      if (!wanted.has(id)) return;
+      const emp = this.empresaDoCentro(c);
+      if (emp) found[emp] = true;
+    });
+    this.scopedRows().forEach((r) => {
+      if (wanted.has(String(r.ccId || "")) && r.companyId) found[String(r.companyId)] = true;
+    });
+    return Object.keys(found);
+  },
+
+  aplicarEmpresasDosCentros() {
+    const cc = (this.state.ccIds || []).map(String).filter(Boolean);
+    const todos = this.centrosDaEmpresa([]);
+    const todosIds = new Set(todos.map((x) => String(x.id)));
+    const escolheuTodos = cc.length && todos.length && cc.length >= todos.length && cc.every((id) => todosIds.has(id));
+    if (!cc.length || escolheuTodos) {
+      if (this.state.empPelosCentros) this.state.companyIds = [];
+      this.state.empPelosCentros = false;
+      return;
+    }
+    const empresas = this.empresasDosCentros(cc);
+    if (!empresas.length) return;
+    this.state.companyIds = empresas;
+    this.state.empPelosCentros = true;
+  },
+
+  aposFiltro(key) {
+    if (key === "companyIds") {
+      this.state.empPelosCentros = false;
+      this.podarCentrosForaDaEmpresa();
+    }
+    if (key === "ccIds") this.aplicarEmpresasDosCentros();
   },
 
   centrosDaEmpresa(companyIds) {
@@ -1620,7 +1777,7 @@ const ComprasPrevisoesApp = {
   },
 
   ccItems() {
-    const emp = new Set((this.state.companyIds || []).map(String));
+    const emp = this.state.empPelosCentros ? new Set() : new Set((this.state.companyIds || []).map(String));
     const rows = this.scopedRows().filter((r) => !emp.size || emp.has(String(r.companyId || "")));
     const fromRows = this.uniqueItems(rows, (r) => r.ccId, (r) => {
       const name = String(r.ccNome || "").toUpperCase();
@@ -1750,7 +1907,7 @@ const ComprasPrevisoesApp = {
           const sid = String(itemId);
           const cur = self.state[key].slice();
           self.state[key] = on ? (cur.includes(sid) ? cur : cur.concat(sid)) : cur.filter((x) => x !== sid);
-          if (key === "companyIds") self.podarCentrosForaDaEmpresa();
+          self.aposFiltro(key);
           self.state[openKey] = true;
           self.applyFilters();
           self.renderList();
@@ -1762,7 +1919,7 @@ const ComprasPrevisoesApp = {
           const escolheAntes = key === "companyIds" || key === "deptIds" || key === "ccIds" || key === "creditorIds";
           if (!self.state.consulted && !escolheAntes) return;
           self.state[key] = itemsFn().map((x) => String(x.id));
-          if (key === "companyIds") self.podarCentrosForaDaEmpresa();
+          self.aposFiltro(key);
           self.state[openKey] = true;
           self.applyFilters();
           self.renderList();
@@ -1778,7 +1935,7 @@ const ComprasPrevisoesApp = {
           } else {
             self.state[key] = [];
           }
-          if (key === "companyIds") self.podarCentrosForaDaEmpresa();
+          self.aposFiltro(key);
           self.state[openKey] = true;
           self.applyFilters();
           self.renderList();
@@ -1847,6 +2004,7 @@ const ComprasPrevisoesApp = {
       open: !!this.state.openEmp,
       query: this.state.qEmp,
       emptyMeansAll: true,
+      literalAll: !!this.state.empPelosCentros,
       nouns: { singular: "empresa", plural: "empresas" }
     }));
     set("cprev-cc-slot", MlEmpresaFilter.html({
@@ -1867,7 +2025,7 @@ const ComprasPrevisoesApp = {
       open: !!this.state.openCred,
       query: this.state.qCred,
       emptyMeansAll: true,
-      nouns: { singular: "credor", plural: "credores" }
+      nouns: this.nounsCredor()
     }));
     set("cprev-dept-slot", this.deptFilterHtml());
     if (window.lucide) lucide.createIcons();
@@ -2043,6 +2201,7 @@ const ComprasPrevisoesApp = {
     this.state.startDate = range.startDate;
     this.state.endDate = range.endDate;
     this.state.companyIds = [];
+    this.state.empPelosCentros = false;
     this.state.creditorIds = [];
     this.state.deptIds = [];
     this.state.ccIds = [];

@@ -40,7 +40,7 @@ const OrcamentoDfcApp = {
 
   pct(orc, real) {
     const b = Number(real) || 0;
-    if (Math.abs(b) < 0.5) return "—";
+    if (Math.abs(b) < 0.005) return "—";
     const p = ((Number(orc) || 0) - b) / Math.abs(b) * 100;
     const texto = Math.abs(p) >= 10
       ? Math.round(p).toLocaleString("pt-BR")
@@ -48,13 +48,14 @@ const OrcamentoDfcApp = {
     return (p > 0 ? "+" : "") + texto + "%";
   },
 
-  celCmp(orc, real, prev) {
+  celCmp(orc, real, prev, sep) {
     const o = Number(orc) || 0;
     const b = Number(real) || 0;
     const d = o - b;
     const titulo = (prev ? "Previsão 2026 " : "2026 ") + this.money(b) + " · Orçado 2027 " + this.money(o) + " · Variação " + this.money(d);
-    const cls = d < -0.5 ? " orc-dfc-neg" : "";
-    return `<td title="${this.esc(titulo)}">${this.mil(b)}</td><td title="${this.esc(titulo)}">${this.mil(o)}</td><td class="${cls.trim()}" title="${this.esc(titulo)}">${this.mil(d)}</td><td title="${this.esc(titulo)}">${this.pct(o, b)}</td>`;
+    const neg = d < -0.005 ? " orc-dfc-neg" : "";
+    const edge = sep ? " orc-dfc-sep" : "";
+    return `<td class="${edge.trim()}" title="${this.esc(titulo)}">${this.money(b)}</td><td title="${this.esc(titulo)}">${this.money(o)}</td><td class="${(neg + edge).trim()}" title="${this.esc(titulo)}">${this.money(d)}</td><td title="${this.esc(titulo)}">${this.pct(o, b)}</td>`;
   },
 
   norm(s) {
@@ -221,40 +222,9 @@ const OrcamentoDfcApp = {
       if (dig) this.somarBase(bag(ccs, gid + "|" + dig + "|" + ccId), i, v);
     };
     let arquivos = 0;
-    const celulas = {};
-    const gravar = (gid, code, cc, i, v) => {
-      if (!gid || i < 0 || i >= corte) return;
-      const k = gid + "|" + this.chaveConta(code) + "|" + String(cc || "") + "|" + i;
-      celulas[k] = { gid: gid, code: code, cc: cc, i: i, v: Number(v) || 0 };
-    };
-    const lerMapa = (mapa) => {
-      Object.keys(mapa || {}).forEach((cc) => {
-        if (!this.ccCabe(cc)) return;
-        const bloco = mapa[cc] || {};
-        Object.keys(bloco.contas || {}).forEach((code) => {
-          const info = bloco.contas[code] || {};
-          const gid = gidDe(code, info.nome, info.node);
-          Object.keys(info.meses || {}).forEach((mm) => {
-            const i = Number(String(mm).replace(/\D/g, "").slice(-2)) - 1;
-            if (!(i >= 0) || i >= corte) return;
-            const cel = info.meses[mm];
-            const v = cel && typeof cel === "object" ? (cel.r != null ? cel.r : cel.o) : cel;
-            gravar(gid, code, cc, i, v);
-          });
-        });
-      });
-    };
-    this.arquivos2026().forEach((arq) => {
-      if (!this.empresaCabe(arq)) return;
-      const temConta = Object.keys(arq.contasPorCc || {}).length;
-      const temPlano = Object.keys(arq.planosPorCc || {}).length;
-      if (!temConta && !temPlano) return;
-      arquivos += 1;
-      if (temPlano) lerMapa(arq.planosPorCc);
-      if (temConta) lerMapa(arq.contasPorCc);
-    });
-    Object.keys(celulas).forEach((k) => {
-      const c = celulas[k];
+    (this._lancamentos2026 || []).forEach((c) => {
+      if (this.selectedCompanyIds.length && this.selectedCompanyIds.map(String).indexOf(String(c.companyId)) < 0) return;
+      if (!this.ccCabe(c.cc)) return;
       por(c.gid, c.code, c.cc, c.i, c.v);
     });
     const app = window.ResultadoCaixaApp;
@@ -293,8 +263,95 @@ const OrcamentoDfcApp = {
         });
       });
     }
-    this._basePronta = arquivos > 0;
+    this._basePronta = this._caixaEstado === "ok" || arquivos > 0;
     return { grupos: grupos, contas: contas, ccs: ccs, corte: corte };
+  },
+
+  fimRealizado2026() {
+    const corte = this.corteForecast();
+    if (corte <= 0) return "";
+    if (corte >= 12) return "2026-12-31";
+    const d = new Date(2026, corte, 0);
+    return "2026-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  },
+
+  notaCaixa(texto) {
+    this._caixaMsg = texto || "";
+    const el = document.querySelector(".orc-dfc-caixa-msg");
+    if (el) el.textContent = this._caixaMsg;
+  },
+
+  async buscarCaixa2026() {
+    const fluxo = window.FluxoCaixaApp;
+    const api = window.SiengeApiService;
+    const fim = this.fimRealizado2026();
+    const empresas = this.empresas().map((e) => String(e.id)).filter(Boolean);
+    if (!fim || !empresas.length) {
+      this._lancamentos2026 = [];
+      this._caixaEstado = "vazio";
+      return;
+    }
+    if (!fluxo || !api || typeof api.getBankMovements !== "function" || typeof fluxo.allocate !== "function") {
+      this._caixaErro = "A consulta de caixa e banco não está disponível.";
+      this._caixaEstado = "erro";
+      return;
+    }
+    const chave = empresas.slice().sort().join(",") + "|" + fim;
+    if (this._caixaChave === chave && Array.isArray(this._lancamentos2026)) {
+      this._caixaEstado = this._lancamentos2026.length ? "ok" : "vazio";
+      return;
+    }
+    if (typeof fluxo.ensureCategories === "function") {
+      try { await fluxo.ensureCategories(); } catch (e) {}
+    }
+    const grupos = (fluxo.visao && fluxo.visao() && fluxo.visao().groups) || this.visaoDfc().groups || [];
+    const byId = {};
+    grupos.forEach((g) => { if (g && g.id) byId[g.id] = g; });
+    const corte = this.corteForecast();
+    const partes = new Array(empresas.length);
+    let cursor = 0;
+    let feitas = 0;
+    const self = this;
+    const worker = async function () {
+      while (cursor < empresas.length) {
+        const i = cursor++;
+        const id = empresas[i];
+        self.notaCaixa("Lendo o realizado de 2026 no caixa e banco · empresa " + id + " · " + (feitas + 1) + " de " + empresas.length);
+        const data = await api.getBankMovements("2026-01-01", fim, { selectionType: "M", companyId: id });
+        partes[i] = (data || []).map((m) => Object.assign({}, m, { companyId: (m && m.companyId) || id }));
+        feitas += 1;
+      }
+    };
+    const n = Math.min(3, empresas.length);
+    await Promise.all(Array.from({ length: n }, function () { return worker(); }));
+    let movs = partes.reduce((acc, rows) => acc.concat(rows || []), []);
+    if (typeof window.siengeDedupeBankMovements === "function") movs = window.siengeDedupeBankMovements(movs);
+    const lista = [];
+    movs.forEach((mov) => {
+      const factor = typeof fluxo.factorForCompany === "function" ? fluxo.factorForCompany(mov.companyId) : 1;
+      if (factor <= 0) return;
+      fluxo.allocate(mov, factor).forEach((a) => {
+        if (!a) return;
+        const gid = self.grupoDaConta(a.categoryId, a.categoryName);
+        const node = gid && byId[gid];
+        if (!node) return;
+        const valor = fluxo.signedAmount(node, a.categoryId, a.categoryName, a.amount, a.reducer, a.categoryType, a.mov);
+        const i = Number(String(a.month || "").slice(5, 7)) - 1;
+        if (!(i >= 0) || i >= corte || !valor) return;
+        lista.push({
+          companyId: String(mov.companyId || a.companyId || ""),
+          gid: gid,
+          code: a.categoryId,
+          cc: a.costCenterId,
+          i: i,
+          v: valor
+        });
+      });
+    });
+    this._lancamentos2026 = lista;
+    this._caixaChave = chave;
+    this._caixaEstado = lista.length ? "ok" : "vazio";
+    this._caixaErro = "";
   },
 
   acharBase(map, gid, code, cc) {
@@ -521,7 +578,7 @@ const OrcamentoDfcApp = {
     root.innerHTML = `
       <div class="orc-dfc-page">
         ${typeof OrcamentoApp !== "undefined" ? OrcamentoApp.abasHtml() : ""}
-        <p class="orc-dfc-lead">Orçamento de 2027 contra o DFC de 2026, em R$ mil. ${this.textoCorte()} Passe o mouse para ver o valor em reais.</p>
+        <p class="orc-dfc-lead">Orçamento de 2027 contra o DFC de 2026, em reais. ${this.textoCorte()} O realizado vem do caixa e banco.</p>
         <div class="orc-dfc-tools">
           <div id="orc-dfc-emp-box"></div>
           <div id="orc-dfc-cc-box"></div>
@@ -554,16 +611,26 @@ const OrcamentoDfcApp = {
   },
 
   async carregarBase() {
-    const app = window.ResultadoCaixaApp;
-    if (!app) return;
     const token = (this._bToken = (this._bToken || 0) + 1);
+    this._caixaEstado = "lendo";
+    this._caixaErro = "";
+    this.notaCaixa("Lendo o realizado de 2026 no caixa e banco…");
+    if (document.getElementById("orc-dfc-body")) this.paintBody();
     try {
-      if ((!app.acervo || typeof app.temAcervo !== "function" || !app.temAcervo()) && typeof app.lerLocal === "function") app.lerLocal();
-      if (!this.arquivos2026().length) app._nuvemOk = false;
-      if (typeof app.carregarNuvem === "function" && !app._nuvemOk) await app.carregarNuvem();
-      if (typeof app.carregarForecasts === "function") await app.carregarForecasts();
-      if (typeof app.normalizarForecastsMemoria === "function") app.normalizarForecastsMemoria();
-    } catch (e) {}
+      await this.buscarCaixa2026();
+    } catch (e) {
+      this._caixaEstado = "erro";
+      this._caixaErro = (e && e.message) || "Falha ao ler o realizado de 2026 no caixa e banco.";
+    }
+    const app = window.ResultadoCaixaApp;
+    if (app && token === this._bToken) {
+      try {
+        if ((!app.acervo || typeof app.temAcervo !== "function" || !app.temAcervo()) && typeof app.lerLocal === "function") app.lerLocal();
+        if (typeof app.carregarNuvem === "function" && !app._nuvemOk) await app.carregarNuvem();
+        if (typeof app.carregarForecasts === "function") await app.carregarForecasts();
+        if (typeof app.normalizarForecastsMemoria === "function") app.normalizarForecastsMemoria();
+      } catch (e) {}
+    }
     if (token !== this._bToken) return;
     if (document.getElementById("orc-dfc-body")) this.paintBody();
   },
@@ -734,8 +801,8 @@ const OrcamentoDfcApp = {
     }
     const { rows, fora } = this.montar();
     const corte = this._corte == null ? this.corteForecast() : this._corte;
-    const h1 = this.MESES.map((m) => `<th colspan="4">${m}</th>`).join("") + `<th colspan="4">Total</th>`;
-    const sub = (rotulo) => `<th>${rotulo}</th><th>Orç</th><th>Var R$</th><th>Var %</th>`;
+    const h1 = this.MESES.map((m, i) => `<th colspan="4" class="orc-dfc-mes${i % 2 ? " is-alt" : ""}">${m}</th>`).join("") + `<th colspan="4" class="orc-dfc-mes">Total</th>`;
+    const sub = (rotulo) => `<th class="orc-dfc-sep">${rotulo}</th><th>Orç</th><th>Var R$</th><th>Var %</th>`;
     const h2 = this.MESES.map((_, i) => sub(i >= corte ? "Prev" : "Real")).join("") + sub("2026");
     const trs = rows.map((r) => {
       const cls = [
@@ -748,15 +815,18 @@ const OrcamentoDfcApp = {
         ? `<i data-lucide="${this.expanded.has(r.id) ? "chevron-down" : "chevron-right"}"></i>`
         : `<i class="orc-dfc-no"></i>`;
       const base = r.base || [];
-      const cells = r.months.map((v, i) => this.celCmp(v, base[i], i >= corte)).join("");
+      const cells = r.months.map((v, i) => this.celCmp(v, base[i], i >= corte, true)).join("");
       const click = r.hasKids ? ` data-dfc-id="${this.esc(r.id)}"` : "";
       return `<tr class="${cls}"${click}>
         <td style="padding-left:${6 + r.level * 8}px">${ico}<span>${this.esc(r.name)}</span></td>
         ${cells}
-        ${this.celCmp(r.total, r.baseTotal, false)}
+        ${this.celCmp(r.total, r.baseTotal, false, true)}
       </tr>`;
     }).join("");
-    const avisoBase = this._basePronta ? "" : `<div class="orc-dfc-erro">O realizado de 2026 e o forecast de outubro a dezembro não estão no Resultado de caixa.</div>`;
+    let avisoBase = "";
+    if (this._caixaEstado === "lendo") avisoBase = `<div class="orc-dfc-erro orc-dfc-caixa-msg">${this.esc(this._caixaMsg || "Lendo o realizado de 2026 no caixa e banco…")}</div>`;
+    else if (this._caixaEstado === "erro") avisoBase = `<div class="orc-dfc-erro">${this.esc(this._caixaErro || "Falha ao ler o realizado de 2026 no caixa e banco.")}</div>`;
+    else if (this._caixaEstado === "vazio") avisoBase = `<div class="orc-dfc-erro">O caixa e banco não devolveu movimento realizado em 2026 para essas empresas.</div>`;
     const aviso = this.erro ? `<div class="orc-dfc-erro">${this.esc(this.erro)}</div>` : "";
     body.innerHTML = `
       ${aviso}
@@ -812,7 +882,9 @@ const OrcamentoDfcApp = {
     this.paintMeta();
     this.paintEmp();
     this.paintCc();
+    this._caixaChave = "";
     this.paintBody();
+    this.carregarBase();
   },
 
   voltarBase() {
@@ -828,7 +900,9 @@ const OrcamentoDfcApp = {
     this.paintMeta();
     this.paintEmp();
     this.paintCc();
+    this._caixaChave = "";
     this.paintBody();
+    this.carregarBase();
   },
 
   cellText(cell) {
