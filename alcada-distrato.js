@@ -160,6 +160,23 @@
     return s.charAt(0) === "1" || s.charAt(0) === "2";
   }
 
+  function nomeEmpreendimentoObra(id, nome) {
+    const bruto = String(nome || "").trim();
+    if (bruto && bruto.toUpperCase() !== String(id).toUpperCase()) return bruto;
+    try {
+      if (typeof window.knownCostCenterName === "function") {
+        const conhecido = String(window.knownCostCenterName(id) || "").trim();
+        if (conhecido) return conhecido;
+      }
+    } catch (e) {}
+    return bruto;
+  }
+
+  function rotuloEmpreendimentoObra(id, nome) {
+    const n = nomeEmpreendimentoObra(id, nome);
+    return n ? (String(id) + " - " + n.toUpperCase()) : String(id);
+  }
+
   function listEmpreendimentosForObras() {
     let all = resolveCostCentersRaw().slice();
     if (window.EstoqueComercialApp && typeof EstoqueComercialApp.filterEmpreendimentosLikeRelacionamento === "function") {
@@ -175,7 +192,7 @@
       const id = String(cc.id);
       byId.set(id, {
         id: id,
-        label: id + " - " + String(cc.name || "").toUpperCase()
+        label: rotuloEmpreendimentoObra(id, cc.name)
       });
     });
 
@@ -184,7 +201,7 @@
     Object.keys(state).forEach((k) => {
       if (!/^\d+$/.test(k)) return;
       if (byId.has(k)) return;
-      byId.set(k, { id: k, label: k });
+      byId.set(k, { id: k, label: rotuloEmpreendimentoObra(k, "") });
     });
 
     return [...byId.values()].sort((a, b) => {

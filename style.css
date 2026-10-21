@@ -9808,6 +9808,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 }
 .rmod-lista li.is-foco { background: #e8f3ee; color: #105436; }
 .rmod-lista li.is-sel { font-weight: 700; color: #105436; }
+.rmod-lista li.is-off { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
 .rmod-dica {
   position: fixed;
   z-index: 100011;

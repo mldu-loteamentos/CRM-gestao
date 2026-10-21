@@ -918,31 +918,22 @@ const ResultadoCaixaApp = {
     return emp ? this.pctEmpresaId(emp) : 0;
   },
 
-  codigoNoLado(code, lado) {
-    const c = String(code || "");
-    return this.grupos(lado).some((g) => c === g.pai || (g.filhos && g.filhos.test(c)));
+  defsDoLado(lado) {
+    return lado === "saidas" ? this.contasSaida() : this.contasEntrada();
   },
 
-  /** Soma o centro pelas contas da visão já salvas. Null se o arquivo não guardou esse detalhe. */
+  codigoNoLado(code, lado) {
+    const c = String(code || "");
+    return this.defsDoLado(lado).some((def) => (def.codigos || []).indexOf(c) >= 0 || (def.filhos && def.filhos.test(c)));
+  },
+
+  /** Soma o centro pelas mesmas contas da matriz do DFC. Null se o arquivo não guardou esse detalhe. */
   valorContas(arq, lado, ccId, mes, campo, ate) {
     const dono = arq && arq.contasPorCc && arq.contasPorCc[ccId];
     if (!dono || !dono.contas) return null;
-    const codes = Object.keys(dono.contas);
-    const usar = [];
-    this.grupos(lado).forEach((g) => {
-      const pai = codes.filter((c) => c === g.pai);
-      const filhos = g.filhos ? codes.filter((c) => c !== g.pai && g.filhos.test(c)) : [];
-      (pai.length ? pai : filhos).forEach((c) => { if (usar.indexOf(c) < 0) usar.push(c); });
-    });
-    const fim = Number(mes);
-    const ini = ate ? 1 : fim;
     let s = 0;
-    usar.forEach((code) => {
-      const meses = (dono.contas[code] && dono.contas[code].meses) || {};
-      for (let m = ini; m <= fim; m++) {
-        const cel = meses[String(m)];
-        if (cel) s += Number(cel[campo]) || 0;
-      }
+    this.defsDoLado(lado).forEach((def) => {
+      s += this.somaCodigos(dono.contas, def, mes, campo, ate);
     });
     return s;
   },
@@ -1153,28 +1144,12 @@ const ResultadoCaixaApp = {
     return (def.nodes || []).some((n) => s === n || s.startsWith(n + "_"));
   },
 
-  grupos(lado) {
-    if (lado === "entradas") {
-      return [
-        { pai: "01", filhos: /^01(\.\d+)+$/ },
-        { pai: "09.01", filhos: /^09\.01(\.\d+)*$/ }
-      ];
-    }
-    return [
-      { pai: "02", filhos: /^02\.\d+$/ },
-      { pai: "04", filhos: /^04\.\d+$/ },
-      { pai: "05", filhos: /^05\.\d+$/ },
-      { pai: "07", filhos: /^07(\.\d+)?$/ },
-      { pai: "09.02", filhos: null },
-      { pai: "09.05", filhos: null }
-    ];
-  },
-
   somarLinhas(linhas, lado) {
     const acc = {};
-    this.grupos(lado).forEach((g) => {
-      const pai = linhas.filter((l) => l.code === g.pai);
-      const fonte = pai.length ? pai : (g.filhos ? linhas.filter((l) => g.filhos.test(l.code)) : []);
+    const lista = linhas || [];
+    this.defsDoLado(lado).forEach((def) => {
+      const tem = lista.filter((l) => (def.codigos || []).indexOf(l.code) >= 0);
+      const fonte = tem.length ? tem : lista.filter((l) => def.filhos && def.filhos.test(l.code));
       fonte.forEach((l) => {
         (l.months || []).forEach((m) => {
           if (!acc[m.ym]) acc[m.ym] = { o: 0, r: 0 };

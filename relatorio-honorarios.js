@@ -1804,16 +1804,22 @@ const HonorariosReport = {
 window.HonorariosReport = HonorariosReport;
 
 window.honorariosInternosPct = function () {
-  try {
-    const raw = localStorage.getItem("crm_honorarios_internos_pct");
-    if (raw == null || raw === "") return 5;
-    const parsed = JSON.parse(raw);
-    const n = Number(parsed && parsed.pct != null ? parsed.pct : raw);
-    if (!Number.isFinite(n) || n < 0) return 5;
-    return Math.min(100, n);
-  } catch (e) {
-    return 5;
-  }
+  const ler = function (raw) {
+    try {
+      const parsed = JSON.parse(raw || "{}");
+      const n = Number(parsed && parsed.pct != null ? parsed.pct : raw);
+      if (!Number.isFinite(n) || n < 0) return null;
+      return { pct: Math.min(100, n), at: Number(parsed && parsed.updatedAt) || 0 };
+    } catch (e) {
+      return null;
+    }
+  };
+  const local = ler(localStorage.getItem("crm_honorarios_internos_pct"));
+  const memAt = Number(window._honorariosInternosPctAt) || 0;
+  const memPct = Number(window._honorariosInternosPctMem);
+  if (Number.isFinite(memPct) && memAt >= ((local && local.at) || 0)) return Math.min(100, Math.max(0, memPct));
+  if (local) return local.pct;
+  return 5;
 };
 
 window.paintHonorariosInternosPct = function () {
@@ -1835,7 +1841,13 @@ window.saveHonorariosInternosPct = async function () {
     if (status) status.textContent = "Informe um percentual entre 0 e 100.";
     return;
   }
-  localStorage.setItem("crm_honorarios_internos_pct", JSON.stringify({ pct: n, updatedAt: Date.now() }));
+  const salvoEm = Date.now();
+  window._honorariosInternosPctMem = n;
+  window._honorariosInternosPctAt = salvoEm;
+  localStorage.setItem("crm_honorarios_internos_pct", JSON.stringify({ pct: n, updatedAt: salvoEm }));
+  if (window.HonorariosReport && HonorariosReport.comp && typeof HonorariosReport.render === "function") {
+    try { HonorariosReport.render(); } catch (e) {}
+  }
   if (status) status.textContent = "Salvando…";
   try {
     if (typeof window.forceUploadLocalConfig === "function") await window.forceUploadLocalConfig(true);

@@ -18604,6 +18604,8 @@ window.montarSeletorModalidade = function() {
     btn.setAttribute("aria-expanded", "false");
   };
   const escolher = (v) => {
+    const opt = Array.from(sel.options).find((o) => o.value === v);
+    if (opt && opt.disabled) return;
     fechar();
     if (sel.value === v) return;
     sel.value = v;
@@ -18673,17 +18675,136 @@ window.sincronizarSeletorModalidade = function() {
     btn.textContent = opt ? opt.textContent : "";
     btn.title = RENEG_MODALIDADES[sel.value] || "";
   }
-  wrap.querySelectorAll(".rmod-lista li").forEach((li) => {
-    const on = li.dataset.value === sel.value;
-    li.classList.toggle("is-sel", on);
-    li.setAttribute("aria-selected", on ? "true" : "false");
-  });
+  const lista = document.querySelector(".rmod-lista");
+  if (lista) {
+    lista.querySelectorAll("li").forEach((li) => {
+      const opt = Array.from(sel.options).find((o) => o.value === li.dataset.value);
+      const off = !!(opt && opt.disabled);
+      li.classList.toggle("is-off", off);
+      li.title = off ? (opt.title || "Esta modalidade não se aplica a este cliente.") : "";
+      const on = li.dataset.value === sel.value;
+      li.classList.toggle("is-sel", on);
+      li.setAttribute("aria-selected", on ? "true" : "false");
+    });
+  }
 };
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => window.montarSeletorModalidade());
 else window.montarSeletorModalidade();
 
 function renegFuturasOrdenadas(bills) {
   return (bills || []).filter((b) => b && !b.isOverdue).slice().sort((a, b) => String(a.dueDate || "").localeCompare(String(b.dueDate || "")));
+}
+
+window.RENEG_MODALIDADE_PADRAO = {
+  diluir: { pctPagoMin: 40, pmpMax: 15, sinalMin: 30, sinalMax: 50 },
+  deslocar: { pctPagoMin: 50, maxAcordos: 1, sinalMin: 30, sinalMax: 50, tetoParcelaPct: 110 },
+  somar: { pctPagoMax: 30, sinalMin: 30, maxParcelas: 6 }
+};
+
+window.renegModalidadesConfig = function() {
+  const base = JSON.parse(JSON.stringify(window.RENEG_MODALIDADE_PADRAO));
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem("crm_moura_negotiation_rules") || "{}") || {}; } catch (e) { saved = {}; }
+  const mods = saved.modalidades || {};
+  Object.keys(base).forEach((k) => {
+    const src = mods[k] || {};
+    Object.keys(base[k]).forEach((field) => {
+      const n = Number(src[field]);
+      if (Number.isFinite(n)) base[k][field] = n;
+    });
+  });
+  return base;
+};
+
+window.renegContarAcordos = function(sale) {
+  const insts = (sale && (sale.installments || sale.paymentConditions)) || [];
+  const series = new Set();
+  insts.forEach((inst) => {
+    const code = String(inst.conditionType || inst.paymentConditionType || inst.installmentType || inst.tipo || "").trim().toUpperCase().replace(/\s+/g, "");
+    const name = String(inst.conditionTypeName || inst.paymentConditionTypeName || inst.typeName || inst.installmentTypeName || "").toUpperCase();
+    if (/^(SA|A\d*)$/.test(code) || code === "AC" || code === "ACO" || name.indexOf("ACORDO") >= 0) {
+      series.add(/^(SA|A\d*)$/.test(code) ? code : (code || name || "ACORDO"));
+    }
+  });
+  return series.size;
+};
+
+window.renegModalidadePermitida = function(mods, pctPago, pmp, acordos) {
+  const d = mods.diluir;
+  const s = mods.deslocar;
+  const m = mods.somar;
+  const deslocar = pctPago > s.pctPagoMin && acordos <= s.maxAcordos;
+  const diluir = (acordos === 0 && pctPago > d.pctPagoMin && pmp <= d.pmpMax) || deslocar;
+  const somar = pctPago < m.pctPagoMax;
+  return { diluir: diluir, deslocar: deslocar, somar: somar, cartao: true };
+};
+
+function renegValorParcelaAtual(bills) {
+  const base = (bills || []).filter((b) => b && !b.isOverdue);
+  const fonte = base.length ? base : (bills || []);
+  const vals = fonte.map((b) => Number(b && b.value) || 0).filter((v) => v > 0.009);
+  if (!vals.length) return 0;
+  vals.sort((a, b) => a - b);
+  return vals[Math.floor((vals.length - 1) / 2)];
+}
+
+function renegPreencherSinal(min, max) {
+  const sel = document.getElementById("reneg-sinal-pct");
+  if (!sel) return 0;
+  const lo = Math.max(0, Math.min(100, Number(min) || 0));
+  const hi = Math.max(lo, Math.min(100, Number(max) || 100));
+  const cur = Number(sel.value);
+  const values = [];
+  for (let p = Math.ceil(lo); p <= Math.floor(hi); p += 5) values.push(p);
+  if (!values.length || values[0] !== Math.round(lo)) values.unshift(Math.round(lo));
+  if (values[values.length - 1] !== Math.round(hi)) values.push(Math.round(hi));
+  const uniq = [...new Set(values)].filter((v) => v + 0.001 >= lo && v - 0.001 <= hi).sort((a, b) => a - b);
+  if (!uniq.length) uniq.push(Math.round(lo));
+  sel.innerHTML = uniq.map((v) => `<option value="${v}">${v}%</option>`).join("");
+  let pick = uniq.find((v) => v === cur);
+  if (pick == null) pick = uniq.find((v) => v >= cur) || uniq[uniq.length - 1];
+  sel.value = String(pick);
+  return pick;
+}
+
+function renegAplicarFaixaModalidade() {
+  const mods = window.renegModalidadesConfig();
+  let totalValue = 0;
+  let totalPaid = 0;
+  if (g_renegSale && g_renegSale.installments) {
+    g_renegSale.installments.forEach((inst) => {
+      totalValue += (inst.value || 0);
+      totalPaid += (inst.principalPaid || 0);
+    });
+  }
+  const pctPago = totalValue > 0 ? (totalPaid / totalValue) * 100 : 0;
+  const pmp = window.currentCustomerStats ? (window.currentCustomerStats.pmp || 0) : 0;
+  const acordos = window.renegContarAcordos(g_renegSale);
+  const perm = window.renegModalidadePermitida(mods, pctPago, pmp, acordos);
+  const sel = document.getElementById("reneg-payment-method");
+  if (sel) {
+    const motivo = {
+      diluir: "Diluir exige nenhum acordo anterior, mais de " + mods.diluir.pctPagoMin + "% pago e PMP de até " + mods.diluir.pmpMax + " dias. Quem pagou mais de " + mods.deslocar.pctPagoMin + "% e tem no máximo " + mods.deslocar.maxAcordos + " acordo também pode diluir.",
+      deslocar: "Deslocar exige mais de " + mods.deslocar.pctPagoMin + "% pago e no máximo " + mods.deslocar.maxAcordos + " acordo.",
+      somar: "Somar é para quem pagou menos de " + mods.somar.pctPagoMax + "% do contrato."
+    };
+    Array.from(sel.options).forEach((opt) => {
+      if (opt.value === "cartao") {
+        opt.disabled = false;
+        opt.title = "";
+        return;
+      }
+      const ok = !!perm[opt.value];
+      opt.disabled = !ok;
+      opt.title = ok ? "" : (motivo[opt.value] || "");
+    });
+    if (sel.selectedOptions[0] && sel.selectedOptions[0].disabled) {
+      const livre = Array.from(sel.options).find((o) => !o.disabled);
+      if (livre) sel.value = livre.value;
+    }
+    if (typeof window.sincronizarSeletorModalidade === "function") window.sincronizarSeletorModalidade();
+  }
+  return { mods: mods, pctPago: pctPago, pmp: pmp, acordos: acordos, perm: perm };
 }
 
 function calculateRenegotiation() {
@@ -18703,6 +18824,7 @@ function calculateRenegotiation() {
   const scheduleBody = document.getElementById("reneg-schedule-body");
   
   const fmt = v => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  renegAplicarFaixaModalidade();
   
   if (!selectedBills.length) {
     principalEl.textContent = 'R$ 0,00';
@@ -18715,56 +18837,16 @@ function calculateRenegotiation() {
     return;
   }
   
-  const regrasJson = localStorage.getItem('crm_moura_negotiation_rules');
-  const regras = regrasJson ? JSON.parse(regrasJson) : {};
-  const activeProfile = 'operador'; // O teste atual do usuario e com operador
-
-  // 1. Calcular % Pago
-  let totalValue = 0;
-  let totalPaid = 0;
-  if (g_renegSale && g_renegSale.installments) {
-      g_renegSale.installments.forEach(inst => {
-          totalValue += (inst.value || 0);
-          totalPaid += (inst.principalPaid || 0);
-      });
-  }
-  const pctPago = totalValue > 0 ? (totalPaid / totalValue) * 100 : 0;
-  
-  // 2. Obter PMP
-  const pmp = window.currentCustomerStats ? (window.currentCustomerStats.pmp || 0) : 0;
-  
-  // 3. Encontrar regra compatível
-  let matchedRule = null;
-  const profileRules = regras[activeProfile] || [];
-  for (let rule of profileRules) {
-      const condPct = rule.pctPago !== null ? rule.pctPago : 0;
-      const condPmp = rule.pmp !== null ? rule.pmp : Infinity;
-      
-      if (pctPago >= condPct && pmp <= condPmp) {
-          matchedRule = rule;
-          break; // pega a primeira que bater, assumindo que estejam ordenadas ou a primeira que satisfaz
-      }
-  }
-  
-  // Valores default de segurança caso não ache regra
-  let ruleSinalMin = matchedRule && matchedRule.sinalMin !== null ? matchedRule.sinalMin : 0;
-  let ruleSinalMax = matchedRule && matchedRule.sinalMax !== null ? matchedRule.sinalMax : 100;
-  let ruleMaxParcelas = matchedRule && matchedRule.maxParcelas !== null ? matchedRule.maxParcelas : 360;
-  let ruleTaxa = matchedRule && matchedRule.taxa !== null ? matchedRule.taxa : 1.0;
-  
-  // Atualizar inputs da interface (min/max)
-  const sinalInputEl = document.getElementById("reneg-sinal-pct");
-  if (sinalInputEl) {
-      sinalInputEl.min = ruleSinalMin;
-      sinalInputEl.max = ruleSinalMax;
-      
-      let currentSinal = Number(sinalInputEl.value) || 0;
-      if (currentSinal < ruleSinalMin) sinalInputEl.value = ruleSinalMin;
-      if (currentSinal > ruleSinalMax) sinalInputEl.value = ruleSinalMax;
-  }
+  const faixaReneg = renegAplicarFaixaModalidade();
+  const modsReneg = faixaReneg.mods;
 
   const discountPct = Number(document.getElementById("reneg-discount-pct").value) || 0;
   const cenario = renegCenarioAtual();
+  const faixaMod = modsReneg[cenario] || {};
+  const ruleSinalMin = cenario === "cartao" ? 0 : (Number(faixaMod.sinalMin) || 0);
+  const ruleSinalMax = cenario === "somar" || cenario === "cartao" ? 100 : (faixaMod.sinalMax != null ? Number(faixaMod.sinalMax) : 100);
+  const ruleMaxParcelas = cenario === "somar" ? Math.max(1, Number(faixaMod.maxParcelas) || 6) : 360;
+  if (cenario !== "cartao") renegPreencherSinal(ruleSinalMin, ruleSinalMax);
   const paymentMethod = cenario === "cartao" ? "cartao" : "interno";
   const cardBrand = document.getElementById("reneg-card-brand")?.value || "masterVisa";
   const isCartao = cenario === "cartao";
@@ -18796,7 +18878,7 @@ function calculateRenegotiation() {
       : (cenario === "somar"
         ? "Depois do sinal, as parcelas selecionadas — vencidas ou não — viram N parcelas com a taxa do contrato, somadas às próximas parcelas a vencer."
         : (cenario === "deslocar"
-          ? "Depois do sinal, as parcelas selecionadas viram um acordo à parte, com a taxa do contrato. As parcelas a vencer continuam depois dele."
+          ? "Depois do sinal, as parcelas selecionadas viram um acordo à parte. Cada parcela fica em até " + (Number(faixaMod.tetoParcelaPct) || 110) + "% da parcela atual, e as parcelas a vencer continuam depois do acordo."
           : "O saldo vai para o cartão, na bandeira e no número de parcelas escolhidos."));
   }
 
@@ -18813,25 +18895,44 @@ function calculateRenegotiation() {
   const sinalDueStr = document.getElementById("reneg-sinal-due")?.value || '';
   const firstDueDateStr = document.getElementById("reneg-first-due-date")?.value || '';
   
-  // Atualizar dropdown de parcelas restrito ao MaxParcelas da regra
+  // Cartão: no máximo 12x. Somar: até o limite configurado. Deslocar: a parcela não passa do teto da parcela atual.
   const selectedCount = selectedBills.length;
   const maxInstallmentsCalc = Math.floor(selectedCount + (selectedCount * (sinalPct / 100)));
-  // Cartão: no máximo 12x. Somar: no máximo as parcelas a vencer. Diluir: todas elas.
+  let minInstallments = 1;
   let maxInstallments = Math.min(maxInstallmentsCalc, ruleMaxParcelas, isCartao ? 12 : 9999);
   if (cenario === "somar") maxInstallments = Math.min(ruleMaxParcelas, Math.max(1, futurasDestino.length));
   if (cenario === "diluir") maxInstallments = Math.max(1, futurasDestino.length);
+  if (cenario === "deslocar") {
+    const parcelaAtual = renegValorParcelaAtual(g_renegBills);
+    const tetoPct = Number(faixaMod.tetoParcelaPct) || 110;
+    const provPrincipal = selectedBills.reduce((acc, b) => acc + (b.value || 0), 0);
+    const provUpdated = selectedBills.reduce((acc, b) => acc + (b.computedCorrected || b.value || 0), 0);
+    const provCharges = Math.max(0, provUpdated - provPrincipal);
+    const restante = (provPrincipal + provCharges * (1 - discountPct / 100)) * (1 - sinalPct / 100);
+    const tetoValor = parcelaAtual * (tetoPct / 100);
+    if (tetoValor > 0.009 && restante > 0.009) {
+      minInstallments = Math.max(1, Math.ceil((restante - 0.004) / tetoValor));
+      let guard = 0;
+      while (guard < 240 && renegPricePmt(restante, interestRate, minInstallments) > tetoValor + 0.009) {
+        minInstallments += 1;
+        guard += 1;
+      }
+    }
+    maxInstallments = Math.max(minInstallments, 36);
+  }
   
   const qtySelect = document.getElementById("reneg-installments-qty");
-  const currentSelectedQty = Number(qtySelect.value) || 1;
+  const currentSelectedQty = Number(qtySelect.value) || minInstallments;
   if (cenario !== "diluir") {
+    let pickQty = currentSelectedQty;
+    if (pickQty < minInstallments) pickQty = minInstallments;
+    if (pickQty > maxInstallments) pickQty = maxInstallments;
     qtySelect.innerHTML = '';
-    for (let i = 1; i <= Math.max(1, maxInstallments); i++) {
+    for (let i = minInstallments; i <= Math.max(minInstallments, maxInstallments); i++) {
       const opt = document.createElement('option');
       opt.value = i;
       opt.textContent = `${i}\u00D7${i === 1 ? ' (À vista)' : ''}`;
-      if (i === currentSelectedQty || (i === maxInstallments && currentSelectedQty > maxInstallments)) {
-        opt.selected = true;
-      }
+      if (i === pickQty) opt.selected = true;
       qtySelect.appendChild(opt);
     }
   }
@@ -36238,70 +36339,53 @@ window.bindNegotiationRulesAutoSave = function() {
     const root = document.getElementById("content-regra-negociacao");
     if (!root || root.dataset.negAutoSave === "1") return;
     root.dataset.negAutoSave = "1";
+    const daModalidade = function(t) {
+        return t && t.classList && t.classList.contains("mod-regra-input");
+    };
     root.addEventListener("input", function(ev) {
-        const t = ev.target;
-        if (!t || !t.closest || !t.closest(".negotiation-rule-row")) return;
+        if (!daModalidade(ev.target)) return;
         window.scheduleNegotiationRulesAutoSave();
     });
     root.addEventListener("change", function(ev) {
-        const t = ev.target;
-        if (!t || !t.closest || !t.closest(".negotiation-rule-row")) return;
+        if (!daModalidade(ev.target)) return;
         window.scheduleNegotiationRulesAutoSave({ immediate: true });
     });
 };
 
 window.saveNegotiationRules = function() {
-    const rulesConfig = {};
-    ['operador', 'administrador', 'advogado'].forEach(profile => {
-        const container = document.getElementById('rules-container-' + profile);
-        if (!container) return;
-        const rows = container.querySelectorAll('.negotiation-rule-row');
-        rulesConfig[profile] = [];
-        rows.forEach(row => {
-            const pctPago = row.querySelector('.rule-pct-pago').value;
-            const pmp = row.querySelector('.rule-pmp').value;
-            const sinalMin = row.querySelector('.rule-sinal-minimo').value;
-            const sinalMax = row.querySelector('.rule-sinal-maximo').value;
-            const maxParcelas = row.querySelector('.rule-max-parcelas').value;
-            const taxa = row.querySelector('.rule-taxa-operacao').value;
-            
-            rulesConfig[profile].push({
-                pctPago: pctPago ? parseFloat(pctPago) : null,
-                pmp: pmp ? parseInt(pmp) : null,
-                sinalMin: sinalMin ? parseFloat(sinalMin) : null,
-                sinalMax: sinalMax ? parseFloat(sinalMax) : null,
-                maxParcelas: maxParcelas ? parseInt(maxParcelas) : null,
-                taxa: taxa ? parseFloat(taxa) : null
-            });
-        });
+    const campos = document.querySelectorAll("[data-mod].mod-regra-input");
+    if (!campos.length) return;
+    let prev = {};
+    try { prev = JSON.parse(localStorage.getItem("crm_moura_negotiation_rules") || "{}") || {}; } catch (e) { prev = {}; }
+    const mods = JSON.parse(JSON.stringify(window.RENEG_MODALIDADE_PADRAO));
+    campos.forEach((input) => {
+        const parts = String(input.getAttribute("data-mod") || "").split(".");
+        if (parts.length !== 2 || !mods[parts[0]] || !(parts[1] in mods[parts[0]])) return;
+        const n = Number(String(input.value || "").replace(",", "."));
+        if (Number.isFinite(n)) mods[parts[0]][parts[1]] = n;
     });
-    rulesConfig.bloqueio_meses = window.getRenegotiationBlockMonths();
-    localStorage.setItem("crm_moura_negotiation_rules", JSON.stringify(rulesConfig));
-    window.persistRenegotiationBlockMonths(rulesConfig.bloqueio_meses);
+    ["diluir", "deslocar"].forEach((k) => {
+        if (mods[k].sinalMax < mods[k].sinalMin) {
+            const tmp = mods[k].sinalMin;
+            mods[k].sinalMin = mods[k].sinalMax;
+            mods[k].sinalMax = tmp;
+        }
+    });
+    prev.modalidades = mods;
+    prev.bloqueio_meses = window.getRenegotiationBlockMonths();
+    prev.updatedAt = Date.now();
+    localStorage.setItem("crm_moura_negotiation_rules", JSON.stringify(prev));
+    window.persistRenegotiationBlockMonths(prev.bloqueio_meses);
 };
 
 window.initializeNegotiationRules = function() {
     window._seedingNegotiationRules = true;
-    const savedRulesJSON = localStorage.getItem("crm_moura_negotiation_rules");
-    let savedRules = null;
-    if (savedRulesJSON) {
-        try { savedRules = JSON.parse(savedRulesJSON); } catch(e) {}
-    }
-
-    ['operador', 'administrador', 'advogado'].forEach(profile => {
-        const container = document.getElementById('rules-container-' + profile);
-        if (!container) return;
-        
-        container.innerHTML = ''; // clear existing
-        
-        if (savedRules && savedRules[profile] && savedRules[profile].length > 0) {
-            savedRules[profile].forEach(rule => {
-                window.addNegotiationRule(profile, rule);
-            });
-        } else {
-            // default 1 empty rule
-            window.addNegotiationRule(profile);
-        }
+    const mods = window.renegModalidadesConfig();
+    document.querySelectorAll("[data-mod].mod-regra-input").forEach((input) => {
+        if (document.activeElement === input) return;
+        const parts = String(input.getAttribute("data-mod") || "").split(".");
+        const v = parts.length === 2 && mods[parts[0]] ? mods[parts[0]][parts[1]] : null;
+        if (v != null) input.value = String(v);
     });
     window._seedingNegotiationRules = false;
     if (window.bindNegotiationRulesAutoSave) window.bindNegotiationRulesAutoSave();
@@ -36469,40 +36553,26 @@ window.renderTimeline = function() {
     const leftPct = ((node.dias - renderMin) / range) * 100;
     const x = (leftPct / 100) * boardWidth;
     const estW = Math.min(150, Math.max(68, String(acaoLabel || "").length * 6.2 + 16));
-    return { node, index, acaoLabel, color, leftPct, x, estW, shift: 0, side: "above", labelLevel: 0 };
-  });
-  const circleOccupied = [];
-  laid.forEach(item => {
-    let lane = 0;
-    while ((circleOccupied[lane] || []).some(x => Math.abs(x - item.x) < 30)) lane++;
-    if (!circleOccupied[lane]) circleOccupied[lane] = [];
-    circleOccupied[lane].push(item.x);
-    const level = Math.ceil(lane / 2);
-    item.shift = lane === 0 ? 0 : (lane % 2 === 1 ? -1 : 1) * level * 36;
-    item.side = item.shift < 0 ? "above" : item.shift > 0 ? "below" : (item.index % 2 === 0 ? "above" : "below");
+    return { node, index, acaoLabel, color, leftPct, x, estW, shift: 0, side: "below", labelLevel: 0 };
   });
   const zeroX = (zeroPct / 100) * boardWidth;
-  laid.forEach(item => {
-    if (item.side === "above" && Math.abs(item.x - zeroX) < 96) item.side = "below";
+  const ladoLivre = (item, side, level) => {
+    if (side === "above" && level === 0 && Math.abs(item.x - zeroX) < 88) return false;
+    const left = item.x - item.estW / 2;
+    const right = item.x + item.estW / 2;
+    return !laid.some(other => other !== item && other._placed && other.side === side && other.labelLevel === level && left < other.x + other.estW / 2 + 8 && right > other.x - other.estW / 2 - 8);
+  };
+  laid.slice().sort((a, b) => a.x - b.x).forEach((item, i) => {
+    const prefer = i % 2 === 0 ? "below" : "above";
+    const other = prefer === "below" ? "above" : "below";
+    if (ladoLivre(item, prefer, 0)) { item.side = prefer; item.labelLevel = 0; }
+    else if (ladoLivre(item, other, 0)) { item.side = other; item.labelLevel = 0; }
+    else if (ladoLivre(item, prefer, 1)) { item.side = prefer; item.labelLevel = 1; }
+    else { item.side = other; item.labelLevel = 1; }
+    item.shift = 0;
+    item._placed = true;
   });
-  const bySide = { above: [], below: [] };
-  laid.forEach(item => bySide[item.side].push(item));
-  Object.keys(bySide).forEach(side => {
-    const levels = [];
-    if (side === "above") {
-      levels[0] = [{ left: zeroX - 96, right: zeroX + 96 }];
-    }
-    bySide[side].sort((a, b) => a.x - b.x).forEach(item => {
-      const left = item.x - item.estW / 2;
-      const right = item.x + item.estW / 2;
-      let level = 0;
-      while ((levels[level] || []).some(box => left < box.right + 8 && right > box.left - 8)) level++;
-      if (!levels[level]) levels[level] = [];
-      levels[level].push({ left, right });
-      item.labelLevel = level;
-    });
-  });
-  const labelReach = (item) => 22 + item.labelLevel * 42 + Math.abs(item.shift);
+  const labelReach = (item) => 11 + (16 + item.labelLevel * 34) + 38;
   const maxUp = Math.max(72, ...laid.filter(item => item.side === "above").map(labelReach), 0);
   const maxDown = Math.max(36, ...laid.filter(item => item.side === "below").map(labelReach), 0);
   const axis = maxUp + 6;
@@ -36554,30 +36624,23 @@ window.renderTimeline = function() {
     const acaoLabel = item.acaoLabel;
     const color = item.color;
     const labelAbove = item.side === "above";
-    const labelGap = 8 + item.labelLevel * 42;
-    const shift = item.shift;
+    const stemH = 16 + item.labelLevel * 34;
     
     nodeEl.style.cssText = `
       position: absolute;
       left: ${item.leftPct}%;
       top: ${axis}px;
-      transform: translate(-50%, -50%);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      cursor: grab;
+      width: 0;
+      height: 0;
       z-index: 10;
     `;
 
-    const labelHtml = `<div class="timeline-node-label" style="margin-${labelAbove ? "bottom" : "top"}:${labelGap}px; font-size:0.72rem; font-weight:700; color:#334155; text-align:center; line-height:1.15; max-width:142px; background:rgba(255,255,255,0.94); border-radius:6px; padding:2px 4px; pointer-events:none;">${acaoLabel}<br><span class="node-dias-text" style="color:${color}; font-size:0.82rem;">${node.dias} dias</span></div>`;
-    const stem = shift ? `<div style="position:absolute; left:50%; top:50%; width:2px; height:${Math.abs(shift)}px; background:${color}; opacity:0.45; transform:translate(-50%, ${shift < 0 ? "-100%" : "0"}); pointer-events:none;"></div>` : "";
+    const labelHtml = `<div class="timeline-node-label" style="font-size:0.72rem; font-weight:700; color:#334155; text-align:center; line-height:1.15; max-width:142px; background:transparent; padding:0; pointer-events:none;">${acaoLabel}<br><span class="node-dias-text" style="color:${color}; font-size:0.82rem;">${node.dias} dias</span></div>`;
+    const stem = `<div style="width:2px; height:${stemH}px; background:${color}; border-radius:1px; flex:0 0 auto; pointer-events:none;"></div>`;
+    const texto = `<div style="position:absolute; left:0; ${labelAbove ? "bottom:11px" : "top:11px"}; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; pointer-events:none;">${labelAbove ? labelHtml + stem : stem + labelHtml}</div>`;
     nodeEl.innerHTML = `
-      ${stem}
-      <div style="transform: translateY(${shift}px); display:flex; flex-direction:column; align-items:center;">
-        ${labelAbove ? labelHtml : ""}
-        <div class="timeline-circle" style="width: 22px; height: 22px; border-radius: 50%; background: ${color}; border: 3px solid #fff; box-shadow: 0 0 0 2px ${color}, 0 4px 6px rgba(0,0,0,0.1); transition: transform 0.2s;"></div>
-        ${labelAbove ? "" : labelHtml}
-      </div>
+      ${texto}
+      <div class="timeline-circle" style="position:absolute; left:0; top:0; transform:translate(-50%,-50%); width:22px; height:22px; border-radius:50%; background:${color}; border:3px solid #fff; box-shadow:0 0 0 2px ${color}, 0 4px 6px rgba(0,0,0,0.1); cursor:grab;"></div>
     `;
     
     let isDragging = false;
@@ -47238,6 +47301,62 @@ window.syncGlobalConfigFromFirebase = async function() {
                       if (window.PlanoFinanceiroApp) PlanoFinanceiroApp.taxConfig = JSON.parse(merged || "{}");
                     } catch (e) {}
                     if (merged && merged !== (cloudRaw || "") && window.forceUploadLocalConfig) {
+                        setTimeout(() => window.forceUploadLocalConfig(true), 1500);
+                    }
+                    return;
+                }
+                if (k === "crm_moura_negotiation_rules") {
+                    const atOf = function(raw) {
+                        try { return Number(JSON.parse(raw || "{}").updatedAt) || 0; } catch (e) { return 0; }
+                    };
+                    const localRaw = localStorage.getItem(k) || "";
+                    const cloudRaw = globalData[k] || "";
+                    const chosen = atOf(localRaw) >= atOf(cloudRaw) ? (localRaw || cloudRaw) : cloudRaw;
+                    if (chosen && chosen !== localRaw) {
+                        _originalSetItem.call(localStorage, k, chosen);
+                        changed = true;
+                        if (typeof window.initializeNegotiationRules === "function") {
+                            try { window.initializeNegotiationRules(); } catch (e) {}
+                        }
+                    }
+                    if (chosen && chosen !== cloudRaw && window.forceUploadLocalConfig) {
+                        setTimeout(() => window.forceUploadLocalConfig(true), 1500);
+                    }
+                    return;
+                }
+                if (k === "crm_honorarios_internos_pct") {
+                    const lerPct = function(raw) {
+                        try {
+                            const o = JSON.parse(raw || "{}");
+                            const pct = Number(o && o.pct != null ? o.pct : raw);
+                            if (!Number.isFinite(pct)) return null;
+                            return { pct: Math.min(100, Math.max(0, pct)), at: Number(o && o.updatedAt) || 0, raw: String(raw || "") };
+                        } catch (e) { return null; }
+                    };
+                    const local = lerPct(localStorage.getItem(k));
+                    const cloud = lerPct(globalData[k]);
+                    const memAt = Number(window._honorariosInternosPctAt) || 0;
+                    const memPct = Number(window._honorariosInternosPctMem);
+                    let chosen = local;
+                    if (cloud && (!chosen || cloud.at >= chosen.at)) chosen = cloud;
+                    if (Number.isFinite(memPct) && memAt >= ((chosen && chosen.at) || 0)) {
+                        chosen = { pct: Math.min(100, Math.max(0, memPct)), at: memAt, raw: JSON.stringify({ pct: memPct, updatedAt: memAt }) };
+                    }
+                    if (chosen && chosen.raw && chosen.raw !== (localStorage.getItem(k) || "")) {
+                        _originalSetItem.call(localStorage, k, chosen.raw);
+                        changed = true;
+                    }
+                    if (chosen) {
+                        window._honorariosInternosPctMem = chosen.pct;
+                        window._honorariosInternosPctAt = chosen.at;
+                        if (window.HonorariosReport && HonorariosReport.comp && typeof HonorariosReport.render === "function") {
+                            try { HonorariosReport.render(); } catch (e) {}
+                        }
+                        if (typeof window.paintHonorariosInternosPct === "function") {
+                            try { window.paintHonorariosInternosPct(); } catch (e) {}
+                        }
+                    }
+                    if (chosen && chosen.raw && chosen.raw !== (globalData[k] || "") && window.forceUploadLocalConfig) {
                         setTimeout(() => window.forceUploadLocalConfig(true), 1500);
                     }
                     return;
