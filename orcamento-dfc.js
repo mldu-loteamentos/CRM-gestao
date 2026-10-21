@@ -494,6 +494,7 @@ const OrcamentoDfcApp = {
   grupoDaConta(conta, nome) {
     const dotted = String(conta || "").trim();
     const key = dotted.replace(/\D/g, "");
+    const plano = typeof PlanoFinanceiroApp !== "undefined" ? PlanoFinanceiroApp : null;
     const visao = this.visaoDfc();
     const ignored = new Set();
     (visao.ignoredAccounts || []).forEach((id) => {
@@ -504,6 +505,9 @@ const OrcamentoDfcApp = {
       if (nk) ignored.add(nk);
     });
     if (ignored.has(dotted) || (key && ignored.has(key))) return null;
+    if (plano && typeof plano._idMatchesPrefix === "function" && plano._idMatchesPrefix(dotted, "2.03.05")) {
+      return "g_05_02";
+    }
     let found = null;
     (visao.groups || []).forEach((g) => {
       if (!g || g.type !== "resultado") return;
@@ -514,7 +518,6 @@ const OrcamentoDfcApp = {
       });
     });
     if (found) return found;
-    const plano = typeof PlanoFinanceiroApp !== "undefined" ? PlanoFinanceiroApp : null;
     if (plano && typeof plano.suggestGroup === "function") {
       return plano.suggestGroup({ id: dotted, name: nome });
     }

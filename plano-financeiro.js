@@ -250,6 +250,40 @@ const PlanoFinanceiroApp = {
       visao.receitaSwapFixVer = this.RECEITA_SWAP_FIX_VER;
       this.saveToStorage({ silent: true });
     }
+    if (Number(visao.marketingFixVer || 0) < 1 && this.moverMarketingParaDfc(visao)) {
+      visao.marketingFixVer = 1;
+      this.saveToStorage({ silent: true });
+    } else if (Number(visao.marketingFixVer || 0) < 1) {
+      visao.marketingFixVer = 1;
+      this.saveToStorage({ silent: true });
+    }
+  },
+
+  /** 2.03.05 é marketing no plano. A regra antiga jogava mídia em 04.04 e o restante em 05.03. */
+  moverMarketingParaDfc(visao) {
+    if (!visao || !Array.isArray(visao.groups)) return false;
+    const dest = visao.groups.find((g) => g.id === "g_05_02");
+    if (!dest || dest.type !== "resultado") return false;
+    dest.accounts = Array.isArray(dest.accounts) ? dest.accounts.map(String) : [];
+    let changed = false;
+    visao.groups.forEach((g) => {
+      if (!g || g.id === "g_05_02" || g.type !== "resultado" || !Array.isArray(g.accounts)) return;
+      const fica = [];
+      g.accounts.forEach((id) => {
+        if (this._idMatchesPrefix(id, "2.03.05")) {
+          if (!dest.accounts.includes(String(id))) dest.accounts.push(String(id));
+          changed = true;
+        } else {
+          fica.push(id);
+        }
+      });
+      g.accounts = fica;
+    });
+    if (changed) {
+      dest.accounts.sort((a, b) => String(a).localeCompare(String(b), "pt-BR", { numeric: true }));
+      visao.updatedAt = Date.now();
+    }
+    return changed;
   },
 
   // 1.02.01 (administração/serviços) → 01.02; 1.04.01 (venda/reembolso) → 01.03.
@@ -328,7 +362,7 @@ const PlanoFinanceiroApp = {
       ['2.02.01.01', 'g_04_02'],
       ['2.02.01', 'g_04_02'],
       ['2.01.01.02', 'g_04_02'],
-      ['2.03.05.01', 'g_04_04'],
+      ['2.03.05', 'g_05_02'],
       ['1.01.01.01', 'g_01_01'],
       ['1.01.01', 'g_01_01'],
       ['1.02.01.08', 'g_01_02'],
@@ -380,7 +414,6 @@ const PlanoFinanceiroApp = {
       ['2.03.04', 'g_05_03'],
       ['2.03.06', 'g_05_03'],
       ['2.03.03', 'g_05_03'],
-      ['2.03.05', 'g_05_03'],
       ['2.09.03', 'g_05_09'],
       ['2.09.01', 'g_05_09'],
       ['2.10.01', 'g_05_06'],
@@ -435,7 +468,8 @@ const PlanoFinanceiroApp = {
     if (/REEMBOLSO/.test(name) && !/DESPESA/.test(name)) return 'g_01_03';
     if (/^PIS$|^COFINS$/.test(name)) return 'g_02_01';
     if (/^IRPJ$|^CSLL$/.test(name)) return 'g_02_02';
-    if (/DESPESA DE ADMINISTRACAO DE EMPREEND/.test(name)) return 'g_04_04';
+    if (/DESPESA DE ADMINISTRACAO DE EMPREEND/.test(name) && !this._idMatchesPrefix(id, '2.03.05')) return 'g_04_04';
+    if (this._idMatchesPrefix(id, '2.03.05')) return 'g_05_02';
     if (/^REPASSE$|\bMUTUO\b/.test(name)) return 'g_04_01';
     if (/AQUISICAO DE TERRENO|PROJETOS DIVERSOS/.test(name)) return 'g_04_02';
     if (/\(OBRA\)|MATERIAIS APLICADOS|SERVICOS DE TERCEIROS \(OBRA\)|CONCESSIONARIA/.test(name)) return 'g_04_03';

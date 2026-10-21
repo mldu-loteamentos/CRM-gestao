@@ -25,6 +25,12 @@ const FluxoCaixaApp = {
   grupoAberto: "",
   companyDropOpen: false,
   companyQuery: "",
+  selectedCostCenterIds: [],
+  loadedCostCenterKey: "",
+  ccDropOpen: false,
+  ccQuery: "",
+  _ccCatalog: null,
+  _ccLoading: false,
   loading: false,
   drillRateioAberto: false,
   error: "",
@@ -60,14 +66,22 @@ const FluxoCaixaApp = {
     this.noteCompanySet(true);
     this.render();
     this.ensureCategories();
+    this.ensureCcCatalog();
     if (!window._fcEmpDropBound) {
       window._fcEmpDropBound = true;
       document.addEventListener("mousedown", (e) => {
         const t = e.target;
-        if (FluxoCaixaApp.companyDropOpen && t && t.closest && !t.closest("#fc-emp")) {
+        if (!t || !t.closest) return;
+        let changed = false;
+        if (FluxoCaixaApp.companyDropOpen && !t.closest("#fc-emp")) {
           FluxoCaixaApp.companyDropOpen = false;
-          FluxoCaixaApp.render();
+          changed = true;
         }
+        if (FluxoCaixaApp.ccDropOpen && !t.closest("#fc-cc")) {
+          FluxoCaixaApp.ccDropOpen = false;
+          changed = true;
+        }
+        if (changed) FluxoCaixaApp.render();
       });
     }
   },
@@ -970,6 +984,7 @@ const FluxoCaixaApp = {
       this.loadedStart = this.startDate;
       this.loadedEnd = this.endDate;
       this.loadedComparar = this.compararAno;
+      this.loadedCostCenterKey = this.costCenterKey();
       this.noteCompanySet(true);
       this.loading = false;
       this.render();
@@ -997,11 +1012,15 @@ const FluxoCaixaApp = {
   alocar(movs, ids) {
     const selected = new Set((ids || []).map(String));
     const allocs = [];
+    const ccSet = this.costCenterFilterSet();
     (movs || []).forEach(mov => {
       if (selected.size && !selected.has(String(mov.companyId))) return;
       const factor = this.factorForCompany(mov.companyId);
       if (factor <= 0) return;
-      this.allocate(mov, factor).forEach(a => allocs.push(a));
+      this.allocate(mov, factor).forEach(a => {
+        if (ccSet && !ccSet.has(this.ccIdOf(a.costCenterId))) return;
+        allocs.push(a);
+      });
     });
     this.settleAdvancesInAllocs(allocs, movs);
     return allocs;
@@ -1144,6 +1163,7 @@ const FluxoCaixaApp = {
       this.selectedCompanyIds = cons.map(c => String(c.id));
       this.error = "";
     }
+    this.pruneCostCenters();
     this.noteCompanySet(true);
     this.companyDropOpen = false;
     if (this.startDate && this.endDate && this.selectedCompanyIds.length) this.load();
@@ -1166,12 +1186,17 @@ const FluxoCaixaApp = {
     return src.map(String).slice().sort((a, b) => Number(a) - Number(b));
   },
 
-  filtersDirty() {
+  companyPeriodDirty() {
     if (!this.loadedCompanyIds) return false;
     const loaded = this.loadedCompanyIds.map(String).slice().sort((a, b) => Number(a) - Number(b)).join(",");
     const now = this.selectedCompanyIds.map(String).slice().sort((a, b) => Number(a) - Number(b)).join(",");
     return loaded !== now || this.loadedStart !== this.startDate || this.loadedEnd !== this.endDate
       || String(this.loadedComparar || "") !== String(this.compararAno || "");
+  },
+
+  filtersDirty() {
+    if (!this.loadedCompanyIds) return false;
+    return this.companyPeriodDirty() || this.costCenterKey() !== String(this.loadedCostCenterKey || "");
   },
 
   paintConsultDirty() {
@@ -1188,7 +1213,7 @@ const FluxoCaixaApp = {
       note = document.createElement("p");
       note.id = "fc-stale";
       note.className = "fc-stale";
-      note.textContent = "A grade é da consulta anterior. Clique em Consultar para aplicar a empresa ou o período.";
+      note.textContent = "A grade é da consulta anterior. Clique em Consultar para aplicar a empresa, o centro de custo ou o período.";
       filters.insertAdjacentElement("afterend", note);
     } else if (!dirty && note) {
       note.remove();
@@ -1203,6 +1228,7 @@ const FluxoCaixaApp = {
       this.selectedCompanyIds = this.selectedCompanyIds.filter(x => x !== sid);
     }
     this.consolidacaoAtiva = false;
+    this.pruneCostCenters();
     this.refreshAfterCompanyChange();
   },
 
@@ -1218,6 +1244,7 @@ const FluxoCaixaApp = {
     MlEmpresaFilter.bind("fc-emp", {
       toggleOpen: () => {
         this.companyDropOpen = !this.companyDropOpen;
+        if (this.companyDropOpen) this.ccDropOpen = false;
         this.render();
       },
       setQuery: (q) => {
@@ -1236,11 +1263,13 @@ const FluxoCaixaApp = {
       selectAll: () => {
         this.selectedCompanyIds = this.allCompanies().map(c => String(c.id));
         this.consolidacaoAtiva = false;
+        this.pruneCostCenters();
         this.refreshAfterCompanyChange();
       },
       selectNone: () => {
         this.selectedCompanyIds = [];
         this.consolidacaoAtiva = false;
+        this.pruneCostCenters();
         this.refreshAfterCompanyChange();
       }
     });
@@ -1264,6 +1293,184 @@ const FluxoCaixaApp = {
       });
     }
     return "";
+  },
+
+  ccIdOf(id) {
+    return id != null && String(id).trim() !== "" ? String(id).trim() : "";
+  },
+
+  ccCompanyOf(cc) {
+    if (!cc) return "";
+    const co = cc.companyId != null && cc.companyId !== "" ? cc.companyId
+      : (cc.idCompany != null && cc.idCompany !== "" ? cc.idCompany
+        : (cc.company && cc.company.id));
+    return co != null && co !== "" ? String(co) : "";
+  },
+
+  ccCatalogReady() {
+    return Array.isArray(this._ccCatalog);
+  },
+
+  async ensureCcCatalog() {
+    const live = (window.CentrosCustoState && CentrosCustoState.costCenters) || [];
+    const cached = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || [];
+    let list = live.length ? live : cached;
+    if (!list.length && !this._ccLoading && window.SiengeApiService && typeof SiengeApiService.getCostCenters === "function") {
+      this._ccLoading = true;
+      try {
+        list = await SiengeApiService.getCostCenters(false);
+      } catch (e) {
+        list = [];
+      }
+      this._ccLoading = false;
+    }
+    if (!Array.isArray(list)) list = [];
+    if (!list.length && this._ccCatalog && this._ccCatalog.length) return;
+    this._ccCatalog = list;
+    this.pruneCostCenters();
+    if (!this.loading && document.getElementById("fluxo-caixa-root")) this.render();
+  },
+
+  ccSource() {
+    const live = (window.CentrosCustoState && CentrosCustoState.costCenters) || [];
+    if (live.length) return live;
+    const cached = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || [];
+    if (cached.length) return cached;
+    return this._ccCatalog || [];
+  },
+
+  ccItems() {
+    const companies = new Set(this.selectedCompanyIds.map(String));
+    const seen = new Set();
+    const items = [];
+    this.ccSource().forEach((cc) => {
+      const id = this.ccIdOf(cc && cc.id);
+      const companyId = this.ccCompanyOf(cc);
+      if (!id || seen.has(id) || !companies.has(companyId)) return;
+      seen.add(id);
+      const name = String((cc && (cc.name || cc.description)) || "").trim().toUpperCase();
+      items.push({ id, label: name ? (id + " - " + name) : id });
+    });
+    return items;
+  },
+
+  pruneCostCenters() {
+    if (!this.ccCatalogReady()) return;
+    const allowed = new Set(this.ccItems().map((c) => String(c.id)));
+    this.selectedCostCenterIds = this.selectedCostCenterIds.map(String).filter((id) => allowed.has(id));
+  },
+
+  costCenterKey() {
+    return this.selectedCostCenterIds.map(String).slice()
+      .sort((a, b) => Number(a) - Number(b) || String(a).localeCompare(String(b), "pt-BR", { numeric: true }))
+      .join(",");
+  },
+
+  /** null = todos os centros da empresa. Lista completa marcada também não restringe. */
+  costCenterFilterSet() {
+    const sel = this.selectedCostCenterIds.map(String);
+    if (!sel.length) return null;
+    const items = this.ccItems();
+    if (items.length && sel.length >= items.length) {
+      const all = new Set(items.map((c) => String(c.id)));
+      if (sel.every((id) => all.has(id))) return null;
+    }
+    return new Set(sel);
+  },
+
+  applyCostCenterChange() {
+    this.ccDropOpen = true;
+    if (this.loadedCompanyIds && !this.companyPeriodDirty()) {
+      this.loadedCostCenterKey = this.costCenterKey();
+      this.rebuildFromCache();
+      return;
+    }
+    this.render();
+    this.paintConsultDirty();
+  },
+
+  bindCostCenterFilter() {
+    if (!window.MlEmpresaFilter) return;
+    const self = this;
+    const nouns = {
+      singular: "centro de custo",
+      plural: "centros de custo",
+      none: self.selectedCompanyIds.length > 1
+        ? "Nenhum centro de custo destas empresas"
+        : "Nenhum centro de custo desta empresa",
+      noMatch: "Nenhum centro de custo com esse nome."
+    };
+    MlEmpresaFilter.bind("fc-cc", {
+      toggleOpen() {
+        self.ccDropOpen = !self.ccDropOpen;
+        if (self.ccDropOpen) self.companyDropOpen = false;
+        self.render();
+      },
+      close() {
+        if (!self.ccDropOpen) return;
+        self.ccDropOpen = false;
+        self.render();
+      },
+      setQuery(q) {
+        self.ccQuery = q || "";
+        const box = document.getElementById("fc-cc-list");
+        if (box && window.MlEmpresaFilter) {
+          box.innerHTML = MlEmpresaFilter.listHtml({
+            id: "fc-cc",
+            items: self.ccItems(),
+            selectedIds: self.selectedCostCenterIds,
+            query: self.ccQuery,
+            nouns
+          });
+        }
+      },
+      toggleId(id, on) {
+        const sid = String(id);
+        if (on) {
+          if (!self.selectedCostCenterIds.map(String).includes(sid)) self.selectedCostCenterIds.push(sid);
+        } else {
+          self.selectedCostCenterIds = self.selectedCostCenterIds.filter((x) => String(x) !== sid);
+        }
+        self.applyCostCenterChange();
+      },
+      selectAll() {
+        self.selectedCostCenterIds = self.ccItems().map((c) => String(c.id));
+        self.applyCostCenterChange();
+      },
+      selectNone() {
+        self.selectedCostCenterIds = [];
+        self.applyCostCenterChange();
+      }
+    });
+  },
+
+  costCenterDropHtml() {
+    if (!this.selectedCompanyIds.length) {
+      return `<div class="ml-emp-filter"><div class="ml-emp-filter-label">Centros de custo</div><button type="button" class="ml-emp-filter-btn" disabled><span>Selecione a empresa</span></button></div>`;
+    }
+    if (this._ccLoading && !this.ccCatalogReady()) {
+      return `<div class="ml-emp-filter"><div class="ml-emp-filter-label">Centros de custo</div><button type="button" class="ml-emp-filter-btn" disabled><span>Carregando...</span></button></div>`;
+    }
+    this.bindCostCenterFilter();
+    if (!window.MlEmpresaFilter) return "";
+    const nouns = {
+      singular: "centro de custo",
+      plural: "centros de custo",
+      none: this.selectedCompanyIds.length > 1
+        ? "Nenhum centro de custo destas empresas"
+        : "Nenhum centro de custo desta empresa",
+      noMatch: "Nenhum centro de custo com esse nome."
+    };
+    return MlEmpresaFilter.html({
+      id: "fc-cc",
+      label: "Centros de custo",
+      items: this.ccItems(),
+      selectedIds: this.selectedCostCenterIds.map(String),
+      open: this.ccDropOpen,
+      query: this.ccQuery,
+      emptyMeansAll: true,
+      nouns
+    });
   },
 
   expandableByLevel() {
@@ -1388,6 +1595,7 @@ const FluxoCaixaApp = {
               </select>
             </label>
             ${this.companyDropHtml()}
+            ${this.costCenterDropHtml()}
             <div class="fc-filter-actions">
               <button type="button" class="btn ${this.consolidacaoAtiva ? "btn-primary" : "btn-outline"} fc-cons-btn" onclick="FluxoCaixaApp.aplicarConsolidacao()" ${this.loading ? "disabled" : ""} title="Empresas marcadas como consolidação padrão, pelo percentual da Moura Leite">
                 Consolidação padrão
@@ -1436,7 +1644,7 @@ const FluxoCaixaApp = {
                   <button type="button" class="btn btn-outline fc-mini" onclick="switchTab('plano-financeiro','Plano Financeiro e Visões')">Alocar</button>
                 </div>` : ""}
               <div class="fc-tree-scroll">
-                ${this.filtersDirty() ? `<p id="fc-stale" class="fc-stale">A grade é da consulta anterior. Clique em Consultar para aplicar a empresa ou o período.</p>` : ""}
+                ${this.filtersDirty() ? `<p id="fc-stale" class="fc-stale">A grade é da consulta anterior. Clique em Consultar para aplicar a empresa, o centro de custo ou o período.</p>` : ""}
                 ${this.loading
                   ? `<div class="fc-loading"><span class="fc-loading-spin" aria-hidden="true"></span><span>buscando lançamentos</span></div>`
                   : ((this.rows || []).length ? this.gridHtml() : "")}
