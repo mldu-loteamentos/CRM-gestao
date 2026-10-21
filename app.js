@@ -3318,6 +3318,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     rydoo: "Rydoo",
     "titulos-incompletos": "Títulos incompletos",
     "config-tags": "Configuração de TAGs",
+    "motivos-cancelamento": "Motivos de cancelamento",
     "config-users": "Configuração de Usuários",
     "doc-padrao": "Documentos Padrões",
     subjudice: "Sub Judice",
@@ -3399,6 +3400,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     rydoo: "receipt",
     "titulos-incompletos": "file-warning",
     "config-tags": "tags",
+    "motivos-cancelamento": "list",
     "config-users": "users",
     "doc-padrao": "file-cog",
     subjudice: "scale",
@@ -3601,6 +3603,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     }
   } else if (tabId === "config-tags") {
     if (typeof ConfigTagsApp !== "undefined") ConfigTagsApp.loadTags();
+  } else if (tabId === "motivos-cancelamento") {
+    if (typeof window.renderMotivosCancelamento === "function") window.renderMotivosCancelamento();
   } else if (tabId === "config-users") {
     if (typeof ConfigUsersApp !== "undefined") ConfigUsersApp.loadUsers();
   } else if (tabId === "suporte") {
@@ -7682,26 +7686,52 @@ window.CANCEL_MOTIVOS_PADRAO = [
   { codigo: "23", nome: "Lei Arrependimento 7 dias" }
 ];
 
-window.cancelMotivosExtras = function() {
-  try {
-    const lista = JSON.parse(localStorage.getItem(window.CANCEL_MOTIVOS_KEY) || "[]");
-    return Array.isArray(lista) ? lista : [];
-  } catch (e) {
-    return [];
-  }
-};
-
-window.cancelMotivosLista = function() {
+window.cancelMotivosNormalizar = function(lista) {
   const map = {};
-  window.CANCEL_MOTIVOS_PADRAO.forEach(function(m) {
-    map[m.codigo] = { codigo: m.codigo, nome: m.nome, padrao: true };
-  });
-  window.cancelMotivosExtras().forEach(function(m) {
+  (lista || []).forEach(function(m) {
     const codigo = String(m && m.codigo || "").replace(/\D/g, "").padStart(2, "0").slice(-2);
     const nome = String(m && m.nome || "").trim();
     if (!/^\d{2}$/.test(codigo) || codigo === "00" || nome.length < 2) return;
-    if (map[codigo] && map[codigo].padrao) return;
-    map[codigo] = { codigo: codigo, nome: nome, padrao: false };
+    map[codigo] = { codigo: codigo, nome: nome };
+  });
+  return Object.keys(map).sort().map(function(k) { return map[k]; });
+};
+
+window.cancelMotivosLerBruto = function(raw) {
+  let data = raw;
+  if (typeof raw === "string") {
+    try { data = JSON.parse(raw || "null"); } catch (e) { data = null; }
+  }
+  if (data && Array.isArray(data.catalogo)) {
+    return { catalogo: window.cancelMotivosNormalizar(data.catalogo), em: String(data.em || ""), temCatalogo: true };
+  }
+  if (Array.isArray(data)) return { extras: data, em: "", temCatalogo: false };
+  return { extras: [], em: "", temCatalogo: false };
+};
+
+window.cancelMotivosLerLocal = function() {
+  try {
+    return window.cancelMotivosLerBruto(localStorage.getItem(window.CANCEL_MOTIVOS_KEY) || "null");
+  } catch (e) {
+    return { extras: [], em: "", temCatalogo: false };
+  }
+};
+
+window.cancelMotivosExtras = function() {
+  const local = window.cancelMotivosLerLocal();
+  return Array.isArray(local.extras) ? local.extras : [];
+};
+
+window.cancelMotivosLista = function() {
+  const local = window.cancelMotivosLerLocal();
+  if (local.temCatalogo) return local.catalogo;
+  const map = {};
+  window.CANCEL_MOTIVOS_PADRAO.forEach(function(m) {
+    map[m.codigo] = { codigo: m.codigo, nome: m.nome };
+  });
+  window.cancelMotivosNormalizar(local.extras).forEach(function(m) {
+    if (map[m.codigo] && window.CANCEL_MOTIVOS_PADRAO.some(function(p) { return p.codigo === m.codigo; })) return;
+    map[m.codigo] = m;
   });
   return Object.keys(map).sort().map(function(k) { return map[k]; });
 };
@@ -7728,73 +7758,118 @@ window.cancelContratoEsc = function(s) {
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 };
 
+window.cancelMotivosGravar = async function(catalogo) {
+  const key = window.CANCEL_MOTIVOS_KEY;
+  const doc = { catalogo: window.cancelMotivosNormalizar(catalogo), em: new Date().toISOString() };
+  localStorage.setItem(key, JSON.stringify(doc));
+  if (!window.firebaseDb || !window.firebaseCollections) return doc.catalogo;
+  try {
+    const fc = window.firebaseCollections;
+    const payload = {};
+    payload[key] = JSON.stringify(doc);
+    await fc.setDoc(fc.doc(window.firebaseDb, "config", "global"), payload, { merge: true });
+  } catch (e) {}
+  return doc.catalogo;
+};
+
 window.cancelMotivosSincronizar = async function() {
   const key = window.CANCEL_MOTIVOS_KEY;
-  const norm = function(lista) {
-    const map = {};
-    (lista || []).forEach(function(m) {
-      const codigo = String(m && m.codigo || "").replace(/\D/g, "").padStart(2, "0").slice(-2);
-      const nome = String(m && m.nome || "").trim();
-      if (!/^\d{2}$/.test(codigo) || codigo === "00" || nome.length < 2) return;
-      if (window.CANCEL_MOTIVOS_PADRAO.some(function(p) { return p.codigo === codigo; })) return;
-      map[codigo] = { codigo: codigo, nome: nome };
-    });
-    return Object.keys(map).sort().map(function(k) { return map[k]; });
-  };
-  const local = norm(window.cancelMotivosExtras());
-  if (!window.firebaseDb || !window.firebaseCollections) {
-    localStorage.setItem(key, JSON.stringify(local));
-    return local;
-  }
+  const local = window.cancelMotivosLerLocal();
+  if (!window.firebaseDb || !window.firebaseCollections) return window.cancelMotivosLista();
   try {
     const fc = window.firebaseCollections;
     const ref = fc.doc(window.firebaseDb, "config", "global");
     const snap = await fc.getDoc(ref);
     const exists = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
-    let cloud = [];
-    if (exists) {
-      try { cloud = JSON.parse((snap.data() || {})[key] || "[]") || []; } catch (e) { cloud = []; }
-    }
-    const merged = norm(cloud.concat(local));
-    localStorage.setItem(key, JSON.stringify(merged));
-    if (JSON.stringify(merged) !== JSON.stringify(norm(cloud))) {
+    const cloud = exists ? window.cancelMotivosLerBruto((snap.data() || {})[key] || "null") : { extras: [], em: "", temCatalogo: false };
+    if (cloud.temCatalogo && (!local.temCatalogo || String(cloud.em || "") > String(local.em || ""))) {
+      localStorage.setItem(key, JSON.stringify({ catalogo: cloud.catalogo, em: cloud.em || new Date().toISOString() }));
+    } else if (local.temCatalogo && (!cloud.temCatalogo || String(local.em || "") > String(cloud.em || ""))) {
       const payload = {};
-      payload[key] = JSON.stringify(merged);
+      payload[key] = localStorage.getItem(key);
       await fc.setDoc(ref, payload, { merge: true });
     }
-    return merged;
+    return window.cancelMotivosLista();
   } catch (e) {
-    localStorage.setItem(key, JSON.stringify(local));
-    return local;
+    return window.cancelMotivosLista();
   }
 };
 
-window.cancelMotivoAdicionar = async function() {
-  const codigoEl = document.getElementById("cancel-motivo-novo-cod");
-  const nomeEl = document.getElementById("cancel-motivo-novo-nome");
-  const aviso = document.getElementById("cancel-contrato-aviso");
-  const codigo = String(codigoEl && codigoEl.value || "").replace(/\D/g, "").padStart(2, "0").slice(-2);
-  const nome = String(nomeEl && nomeEl.value || "").trim();
-  const falha = function(msg) { if (aviso) aviso.textContent = msg; };
-  if (!/^\d{2}$/.test(codigo) || codigo === "00") {
-    falha("Informe um código de dois dígitos.");
-    return;
-  }
-  if (nome.length < 3) {
-    falha("Informe o nome do motivo.");
-    return;
-  }
-  if (window.cancelMotivosLista().some(function(m) { return m.codigo === codigo; })) {
-    falha("Esse código já existe.");
-    return;
-  }
-  const extra = window.cancelMotivosExtras().concat([{ codigo: codigo, nome: nome }]);
-  localStorage.setItem(window.CANCEL_MOTIVOS_KEY, JSON.stringify(extra));
+window.renderMotivosCancelamento = async function() {
+  const root = document.getElementById("motivos-cancelamento-root");
+  if (!root) return;
+  root.innerHTML = `<div class="ml-load" style="padding:28px 0;"><div class="loading-spinner" aria-hidden="true"></div><div class="loading-status-text">Carregando os motivos…</div></div>`;
   await window.cancelMotivosSincronizar();
-  if (codigoEl) codigoEl.value = "";
-  if (nomeEl) nomeEl.value = "";
-  window.cancelContratoPintarMotivos(codigo);
-  if (aviso) aviso.textContent = "Motivo " + codigo + " incluído.";
+  if (!document.getElementById("motivos-cancelamento-root")) return;
+  const editando = window._motivoCancelEdit || "";
+  const lista = window.cancelMotivosLista();
+  const linhas = lista.map(function(m) {
+    const cod = window.cancelContratoEsc(m.codigo);
+    return `<tr>
+      <td style="font-variant-numeric:tabular-nums;font-weight:700;">${cod}</td>
+      <td>${window.cancelContratoEsc(m.nome)}</td>
+      <td class="is-right" style="white-space:nowrap;width:72px;">
+        <button type="button" class="tvig-ico" title="Editar" onclick="window.motivoCancelEditar('${cod}')"><i data-lucide="pencil" style="width:15px;height:15px;"></i></button>
+        <button type="button" class="tvig-ico is-danger" title="Excluir" onclick="window.motivoCancelExcluir('${cod}')"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button>
+      </td>
+    </tr>`;
+  }).join("");
+  const vazio = lista.length ? "" : `<tr><td colspan="3" style="text-align:center;color:#64748b;padding:18px;">Nenhum motivo cadastrado.</td></tr>`;
+  root.innerHTML = `
+    <div class="crm-card" style="padding:16px 18px;margin-bottom:14px;">
+      <p style="margin:0 0 12px;color:#64748b;font-size:0.88rem;">Estes motivos entram no cancelamento do contrato. O código de dois dígitos junta com 1 (cliente) ou 2 (empresa). Exemplo: 01 vira 101, iniciativa do cliente por desemprego.</p>
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:0.72rem;font-weight:700;color:#64748b;width:110px;text-transform:uppercase;">Código
+          <input id="motivo-cancel-cod" maxlength="2" inputmode="numeric" value="${window.cancelContratoEsc(editando)}" style="height:38px;border:1px solid #cbd5e1;border-radius:8px;padding:0 10px;font-size:0.88rem;font-weight:600;background:#fff;">
+        </label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:0.72rem;font-weight:700;color:#64748b;flex:1;min-width:220px;text-transform:uppercase;">Motivo
+          <input id="motivo-cancel-nome" value="${window.cancelContratoEsc((lista.find(function(m) { return m.codigo === editando; }) || {}).nome || "")}" style="height:38px;border:1px solid #cbd5e1;border-radius:8px;padding:0 10px;font-size:0.88rem;font-weight:600;background:#fff;">
+        </label>
+        <button type="button" class="btn btn-primary" style="height:38px;" onclick="window.motivoCancelSalvar()">${editando ? "Salvar" : "Incluir"}</button>
+        ${editando ? '<button type="button" class="btn btn-cancel" style="height:38px;" onclick="window.motivoCancelEditar(\'\')">Cancelar</button>' : ""}
+      </div>
+      <p id="motivo-cancel-aviso" style="margin:8px 0 0;min-height:1.1em;font-size:0.8rem;color:#b91c1c;"></p>
+    </div>
+    <div class="crm-card" style="padding:0;overflow:auto;">
+      <table class="cc-table" style="width:100%;">
+        <thead><tr><th style="width:110px;">Código</th><th>Motivo</th><th class="is-right" style="width:72px;">Ações</th></tr></thead>
+        <tbody>${linhas || vazio}</tbody>
+      </table>
+    </div>`;
+  if (window.lucide) window.lucide.createIcons();
+};
+
+window.motivoCancelEditar = function(codigo) {
+  window._motivoCancelEdit = String(codigo || "");
+  window.renderMotivosCancelamento();
+};
+
+window.motivoCancelSalvar = async function() {
+  const aviso = document.getElementById("motivo-cancel-aviso");
+  const falha = function(msg) { if (aviso) aviso.textContent = msg; };
+  const codigo = String((document.getElementById("motivo-cancel-cod") || {}).value || "").replace(/\D/g, "").padStart(2, "0").slice(-2);
+  const nome = String((document.getElementById("motivo-cancel-nome") || {}).value || "").trim();
+  const anterior = String(window._motivoCancelEdit || "");
+  if (!/^\d{2}$/.test(codigo) || codigo === "00") { falha("Informe um código de dois dígitos."); return; }
+  if (nome.length < 3) { falha("Informe o nome do motivo."); return; }
+  const lista = window.cancelMotivosLista().slice();
+  if (lista.some(function(m) { return m.codigo === codigo && m.codigo !== anterior; })) { falha("Esse código já existe."); return; }
+  const prox = lista.filter(function(m) { return m.codigo !== anterior && m.codigo !== codigo; });
+  prox.push({ codigo: codigo, nome: nome });
+  await window.cancelMotivosGravar(prox);
+  window._motivoCancelEdit = "";
+  window.renderMotivosCancelamento();
+};
+
+window.motivoCancelExcluir = async function(codigo) {
+  const ok = typeof window.mouraConfirm === "function"
+    ? await window.mouraConfirm("Excluir o motivo " + codigo + "?")
+    : false;
+  if (!ok) return;
+  const prox = window.cancelMotivosLista().filter(function(m) { return m.codigo !== String(codigo); });
+  await window.cancelMotivosGravar(prox);
+  if (window._motivoCancelEdit === String(codigo)) window._motivoCancelEdit = "";
+  window.renderMotivosCancelamento();
 };
 
 window.cancelContratoPintarMotivos = function(selecionado) {
@@ -7816,7 +7891,124 @@ window.cancelContratoAtualizarRotulo = function() {
   if (el) el.textContent = rot.texto;
 };
 
-window.abrirCancelamentoDoContrato = function(dados) {
+window.cancelamentoDinheiro = function(n) {
+  return (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+};
+
+window.cancelamentoAcharCliente = function(customerId, saleId) {
+  let client = (window.clientList || []).find(function(c) {
+    return c && String(c.customerId) === String(customerId) && String(c.saleId) === String(saleId);
+  });
+  const avulso = window._cancelClienteAvulso;
+  if (!client && avulso && String(avulso.customerId) === String(customerId) && String(avulso.saleId) === String(saleId)) client = avulso;
+  return client || null;
+};
+
+window.cancelamentoBillsDoExtrato = function(res) {
+  const bills = [];
+  ((res && res.results) || []).forEach(function(item) {
+    if (item && Array.isArray(item.billsReceivable)) bills.push.apply(bills, item.billsReceivable);
+    else if (item && Array.isArray(item.installments)) bills.push(item);
+  });
+  return bills;
+};
+
+window.cancelamentoResumoDeKpis = function(kpis) {
+  const contrato = Math.max(0, Number(kpis && kpis.kpiTotalContrato) || Number(kpis && kpis.kpiSomaOriginal) || 0);
+  const pago = Math.max(0, (Number(kpis && kpis.kpiPago) || 0) - (Number(kpis && kpis.kpiDesconto) || 0));
+  const multa = Math.round(contrato * 0.10 * 100) / 100;
+  const restituicao = Math.max(0, Math.round((pago - multa) * 100) / 100);
+  const pctPago = contrato > 0.009 ? (pago / contrato) * 100 : 0;
+  return { contrato: contrato, pago: pago, multa: multa, restituicao: restituicao, pctPago: pctPago };
+};
+
+window.cancelamentoPodeSeguir = function(info) {
+  const motivos = [];
+  const zeroPago = !!(info && info.pago <= 0.009);
+  const nex = !!(info && info.nexCumprida);
+  const semConstrucao = !(info && info.temConstrucao);
+  const restituicaoZero = !!(info && info.restituicao <= 0.009);
+  const pagoBaixo = !!(info && info.contrato > 0.009 && info.pctPago < 10);
+  if (!(info && info.contrato > 0.009)) motivos.push("Não foi possível apurar o valor do contrato.");
+  if (!restituicaoZero) motivos.push("A restituição da lei do distrato é " + window.cancelamentoDinheiro(info && info.restituicao) + ". Esta regra só segue com restituição zero.");
+  if (zeroPago && restituicaoZero && info.contrato > 0.009 && !(nex && (info.temConstrucao || info.construcaoIncerta))) {
+    return { ok: true, via: "zero", motivos: [] };
+  }
+  if (!nex) motivos.push("A NEX precisa estar cumprida, com status entregue.");
+  if (nex && !semConstrucao) motivos.push("O lote tem construção. O cancelamento da NEX cumprida só segue sem construção.");
+  if (nex && info.contrato > 0.009 && !pagoBaixo) motivos.push("O valor pago é " + info.pctPago.toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "% do contrato. Precisa ser inferior a 10%.");
+  if (nex && info.construcaoIncerta) motivos.push("Não foi possível confirmar que o lote está sem construção.");
+  if (nex && semConstrucao && !info.construcaoIncerta && restituicaoZero && pagoBaixo) return { ok: true, via: "nex", motivos: [] };
+  return { ok: false, via: "", motivos: motivos };
+};
+
+window.cancelamentoMontarExtrato = async function(client) {
+  if (!window.SiengeApiService || typeof SiengeApiService.getCustomerFinancialStatements !== "function") {
+    throw new Error("A consulta do extrato não está disponível.");
+  }
+  const res = await SiengeApiService.getCustomerFinancialStatements(client.customerId);
+  const titulo = String(client.saleId || "").replace(/^B-/i, "").split("-")[0];
+  const bill = window.cancelamentoBillsDoExtrato(res).find(function(b) {
+    const id = String(b.billReceivableId || b.receivableBillId || b.id || "").replace(/^B-/i, "").split("-")[0];
+    return id && id === titulo;
+  });
+  const insts = bill && Array.isArray(bill.installments) ? bill.installments : [];
+  if (insts.length && typeof window.mapaJuridicoKpisFromInstallments === "function") {
+    return window.cancelamentoResumoDeKpis(window.mapaJuridicoKpisFromInstallments(insts));
+  }
+  if (typeof SiengeApiService.findSalesContract === "function") {
+    const contrato = await SiengeApiService.findSalesContract({
+      customerId: client.customerId,
+      receivableBillId: client.saleId,
+      enterpriseId: client.costCenterId,
+      unitName: client.unitName,
+      contractId: client.contractId,
+      contractNumber: client.contractNumber
+    });
+    const valor = Number(contrato && (contrato.value || contrato.totalSellingValue)) || 0;
+    const aberto = Number(contrato && contrato.outstandingBalance) || 0;
+    const pago = Math.max(0, valor - aberto);
+    return window.cancelamentoResumoDeKpis({ kpiTotalContrato: valor, kpiPago: pago, kpiDesconto: 0 });
+  }
+  return window.cancelamentoResumoDeKpis(null);
+};
+
+window.cancelamentoLerConstrucao = async function(client) {
+  try {
+    if (typeof window.ensureFilaSignalsIndex === "function") await window.ensureFilaSignalsIndex();
+  } catch (e) {}
+  const sig = typeof window.filaLookupSignals === "function" ? window.filaLookupSignals(client) : { ready: false };
+  const quando = function(item) {
+    return typeof window.relDataBr === "function" ? window.relDataBr(item) : "";
+  };
+  if (sig && sig.construction) {
+    const stage = String(sig.construction.stage || "").trim();
+    const data = quando(sig.construction);
+    return {
+      temConstrucao: true,
+      incerta: false,
+      texto: "Lote com construção" + (stage ? " · " + stage : "") + (data ? " · " + data : "") + "."
+    };
+  }
+  if (sig && sig.vazio) {
+    const data = quando(sig.vazio);
+    return { temConstrucao: false, incerta: false, texto: "Lote sem construção" + (data ? " · foto em " + data : "") + "." };
+  }
+  if (sig && sig.pending) {
+    return { temConstrucao: false, incerta: false, texto: "Vistoria em andamento. Ainda não há construção concluída neste lote." };
+  }
+  if (sig && sig.ready) {
+    return { temConstrucao: false, incerta: false, texto: "Não há registro de construção neste lote." };
+  }
+  return { temConstrucao: false, incerta: true, texto: "A consulta de construção ainda não retornou." };
+};
+
+window.fecharAvaliacaoCancelamento = function() {
+  const pop = document.getElementById("cancel-avaliacao-pop");
+  if (pop) pop.remove();
+};
+
+window.abrirAvaliacaoDoContrato = function(dados) {
   const d = dados || {};
   const saleId = String(d.titulo || d.saleId || "").replace(/^B-/i, "").split("-")[0];
   const unidade = String(d.unidade || "");
@@ -7831,17 +8023,104 @@ window.abrirCancelamentoDoContrato = function(dados) {
     contractId: d.contractId || "",
     contractNumber: d.contractNumber || d.contrato || ""
   };
-  window.abrirCancelamentoContrato(d.customerId, saleId);
+  window.abrirAvaliacaoCancelamento(d.customerId, saleId);
+};
+
+window.abrirAvaliacaoCancelamento = async function(customerId, saleId) {
+  const client = window.cancelamentoAcharCliente(customerId, saleId);
+  if (!client) {
+    if (window.showToast) window.showToast("Não encontrei o contrato para avaliar o cancelamento.", "warning");
+    return;
+  }
+  window.fecharAvaliacaoCancelamento();
+  const pop = document.createElement("div");
+  pop.id = "cancel-avaliacao-pop";
+  pop.style.cssText = "position:fixed;inset:0;background:rgba(12,41,29,0.55);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px;";
+  const nome = window.cancelContratoEsc(client.customerName || "");
+  const titulo = window.cancelContratoEsc(client.saleId || saleId);
+  pop.innerHTML = `
+    <div style="background:#fff;border-radius:12px;width:min(640px,100%);max-height:min(88vh,760px);overflow:auto;box-shadow:0 18px 40px rgba(0,0,0,0.22);border:1px solid rgba(16,84,54,0.12);">
+      <div style="background:#105436;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px;">
+        <div>
+          <div style="color:#fff;font-size:0.95rem;font-weight:800;">Avaliar cancelamento</div>
+          <div style="color:rgba(255,255,255,0.82);font-size:0.75rem;margin-top:2px;">${nome} · título ${titulo}</div>
+        </div>
+        <button type="button" class="btn btn-fechar" onclick="window.fecharAvaliacaoCancelamento()">Fechar</button>
+      </div>
+      <div id="cancel-avaliacao-corpo" style="padding:18px;">
+        <div class="ml-load" style="padding:28px 0;">
+          <div class="loading-spinner" aria-hidden="true"></div>
+          <div class="loading-status-text">Consultando a construção e o cálculo do distrato…</div>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(pop);
+  const corpo = document.getElementById("cancel-avaliacao-corpo");
+  try {
+    const obra = await window.cancelamentoLerConstrucao(client);
+    const resumo = await window.cancelamentoMontarExtrato(client);
+    if (!document.getElementById("cancel-avaliacao-pop")) return;
+    const nex = typeof window.clientHasNexCumprida === "function" && window.clientHasNexCumprida(client);
+    const info = {
+      contrato: resumo.contrato,
+      pago: resumo.pago,
+      multa: resumo.multa,
+      restituicao: resumo.restituicao,
+      pctPago: resumo.pctPago,
+      temConstrucao: obra.temConstrucao,
+      construcaoIncerta: obra.incerta,
+      nexCumprida: nex
+    };
+    const pode = window.cancelamentoPodeSeguir(info);
+    window._cancelAvaliacao = {
+      customerId: String(client.customerId),
+      saleId: String(client.saleId || saleId),
+      pode: pode.ok,
+      via: pode.via,
+      em: Date.now()
+    };
+    const pct = resumo.pctPago.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%";
+    const linha = function(rotulo, valor) {
+      return `<div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #e2e8f0;"><span style="color:#64748b;">${rotulo}</span><strong style="color:#0f172a;">${valor}</strong></div>`;
+    };
+    const aviso = pode.ok
+      ? `<p style="margin:12px 0 0;padding:10px 12px;border-radius:8px;background:#ecfdf5;color:#105436;font-size:0.84rem;font-weight:700;">Sem restituição. O valor pago fica abaixo da multa de 10% do contrato.</p>`
+      : `<p style="margin:12px 0 0;padding:10px 12px;border-radius:8px;background:#fef2f2;color:#991b1b;font-size:0.84rem;">${pode.motivos.map(function(m) { return window.cancelContratoEsc(m); }).join("<br>")}</p>`;
+    const seguir = pode.ok
+      ? `<button type="button" class="btn btn-primary" onclick="window.fecharAvaliacaoCancelamento(); window.abrirCancelamentoContrato(${Number(client.customerId) || 0}, '${String(client.saleId || saleId).replace(/\\/g, "\\\\").replace(/'/g, "\\'")}')">Seguir para o cancelamento</button>`
+      : "";
+    corpo.innerHTML = `
+      <p style="margin:0 0 8px;font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;">Construção</p>
+      <p style="margin:0 0 16px;font-size:0.9rem;font-weight:700;color:${obra.temConstrucao ? "#9a3412" : "#105436"};">${window.cancelContratoEsc(obra.texto)}</p>
+      <p style="margin:0 0 4px;font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;">Cálculo do distrato</p>
+      ${linha("Valor do contrato", window.cancelContratoEsc(window.cancelamentoDinheiro(resumo.contrato)))}
+      ${linha("Valor pago", window.cancelContratoEsc(window.cancelamentoDinheiro(resumo.pago)) + " · " + window.cancelContratoEsc(pct))}
+      ${linha("Multa de 10% do contrato", window.cancelContratoEsc(window.cancelamentoDinheiro(resumo.multa)))}
+      ${linha("Restituição", window.cancelContratoEsc(window.cancelamentoDinheiro(resumo.restituicao)))}
+      <p style="margin:8px 0 0;font-size:0.75rem;color:#64748b;line-height:1.4;">A restituição é o valor pago menos a multa de 10% do contrato. Se o pago for menor que essa multa, a restituição fica em zero.</p>
+      ${aviso}
+      <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:8px;">
+        <button type="button" class="btn btn-cancel" onclick="window.fecharAvaliacaoCancelamento()">Cancelar</button>
+        ${seguir}
+      </div>`;
+  } catch (e) {
+    if (!corpo) return;
+    const msg = (e && e.message) ? e.message : "Não foi possível avaliar o cancelamento.";
+    corpo.innerHTML = `<p style="margin:0;color:#991b1b;">${window.cancelContratoEsc(msg)}</p>
+      <div style="margin-top:16px;display:flex;justify-content:flex-end;"><button type="button" class="btn btn-cancel" onclick="window.fecharAvaliacaoCancelamento()">Cancelar</button></div>`;
+  }
+};
+
+window.abrirCancelamentoDoContrato = function(dados) {
+  window.abrirAvaliacaoDoContrato(dados);
 };
 
 window.abrirCancelamentoContrato = function(customerId, saleId) {
-  let client = (window.clientList || []).find(function(c) {
-    return c && String(c.customerId) === String(customerId) && String(c.saleId) === String(saleId);
-  });
-  const avulso = window._cancelClienteAvulso;
-  if (!client && avulso && String(avulso.customerId) === String(customerId) && String(avulso.saleId) === String(saleId)) client = avulso;
-  if (!client || !window.tituloTemZeroRestituicao(client)) {
-    const aviso = "O cancelamento pela API só vale para título com 0% de restituição.";
+  const client = window.cancelamentoAcharCliente(customerId, saleId);
+  const aval = window._cancelAvaliacao;
+  const avalOk = aval && aval.pode && String(aval.customerId) === String(customerId) && String(aval.saleId) === String(saleId) && (Date.now() - aval.em) < 30 * 60 * 1000;
+  if (!client || !avalOk) {
+    const aviso = "Avalie o cancelamento antes de enviar. A restituição precisa ser zero.";
     if (window.showToast) window.showToast(aviso, "warning");
     return;
   }
@@ -7862,7 +8141,7 @@ window.abrirCancelamentoContrato = function(customerId, saleId) {
         <button type="button" class="btn btn-fechar" onclick="window.fecharCancelamentoContrato()">Fechar</button>
       </div>
       <div style="padding:18px;display:flex;flex-direction:column;gap:12px;">
-        <p style="margin:0;font-size:0.8rem;color:#475569;line-height:1.45;">${window.nexCumpridaTeste(client) ? "Teste: a tag Nex cumprida está marcada neste título para o cancelamento no Sienge. " : ""}Título com 0% de restituição. O subtipo segue a tela do Sienge: Interno, notificação de cartório, notificação de escritório ou edital. No Sienge vai a letra I, X, J ou E. O código 1 é iniciativa do cliente e o 2 é iniciativa da empresa, e entra no motivo. Exemplo: 101 - iniciativa do cliente por desemprego.</p>
+        <p style="margin:0;font-size:0.8rem;color:#475569;line-height:1.45;">A avaliação deste título ficou sem restituição. O subtipo segue a tela do Sienge: Interno, notificação de cartório, notificação de escritório ou edital. No Sienge vai a letra I, X, J ou E. O código 1 é iniciativa do cliente e o 2 é iniciativa da empresa. Os motivos vêm de Configurações gerais, em Motivos de cancelamento.</p>
         <label style="display:flex;flex-direction:column;gap:4px;font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;">Subtipo de cancelamento
           <select id="cancel-subtipo" style="height:38px;border:1px solid #cbd5e1;border-radius:8px;padding:0 10px;font-size:0.88rem;color:#0f172a;text-transform:none;font-weight:600;">
             ${window.CANCEL_SUBTIPOS.map(function(s) { return `<option value="${window.cancelContratoEsc(s.codigo)}">${window.cancelContratoEsc(s.nome)}</option>`; }).join("")}
@@ -7879,15 +8158,6 @@ window.abrirCancelamentoContrato = function(customerId, saleId) {
           <select id="cancel-motivo" onchange="window.cancelContratoAtualizarRotulo()" style="height:38px;border:1px solid #cbd5e1;border-radius:8px;padding:0 10px;font-size:0.88rem;color:#0f172a;text-transform:none;font-weight:600;"></select>
         </label>
         <div id="cancel-motivo-rotulo" style="background:#ecfdf5;color:#105436;border-radius:8px;padding:8px 10px;font-size:0.82rem;font-weight:700;"></div>
-        <div style="display:flex;gap:8px;align-items:flex-end;">
-          <label style="display:flex;flex-direction:column;gap:4px;font-size:0.72rem;font-weight:700;color:#64748b;width:88px;text-transform:uppercase;">Novo código
-            <input id="cancel-motivo-novo-cod" maxlength="2" inputmode="numeric" placeholder="24" style="height:38px;border:1px solid #cbd5e1;border-radius:8px;padding:0 10px;font-size:0.88rem;text-transform:none;font-weight:600;">
-          </label>
-          <label style="display:flex;flex-direction:column;gap:4px;font-size:0.72rem;font-weight:700;color:#64748b;flex:1;text-transform:uppercase;">Novo motivo
-            <input id="cancel-motivo-novo-nome" placeholder="Nome do motivo" style="height:38px;border:1px solid #cbd5e1;border-radius:8px;padding:0 10px;font-size:0.88rem;text-transform:none;font-weight:600;">
-          </label>
-          <button type="button" class="btn btn-outline" onclick="window.cancelMotivoAdicionar()">Incluir</button>
-        </div>
         <p id="cancel-contrato-aviso" style="margin:0;min-height:1.1em;font-size:0.8rem;color:#b91c1c;"></p>
       </div>
       <div style="padding:0 18px 16px;display:flex;justify-content:flex-end;gap:8px;">
@@ -7933,8 +8203,10 @@ window.enviarCancelamentoContrato = async function() {
   const aviso = document.getElementById("cancel-contrato-aviso");
   const btn = document.getElementById("cancel-contrato-enviar");
   const falha = function(msg) { if (aviso) { aviso.style.color = "#b91c1c"; aviso.textContent = msg; } };
-  if (!client || !window.tituloTemZeroRestituicao(client)) {
-    falha("O cancelamento pela API só vale para título com 0% de restituição.");
+  const aval = window._cancelAvaliacao;
+  const avalOk = aval && aval.pode && client && String(aval.customerId) === String(client.customerId) && String(aval.saleId) === String(client.saleId);
+  if (!client || !avalOk) {
+    falha("Avalie o cancelamento de novo. A restituição precisa ser zero.");
     return;
   }
   const data = String((document.getElementById("cancel-data") || {}).value || "").slice(0, 10);
@@ -7990,16 +8262,10 @@ window.enviarCancelamentoContrato = async function() {
 window.getNexCumpridaAgingHtml = function(client) {
   const days = Number(client && client.maxDaysDelay) || 0;
   const dayLabel = days + " dia" + (days === 1 ? "" : "s");
-  const zero = window.tituloTemZeroRestituicao(client);
   const estilo = "padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #105436; background-color: #ecfdf5; color: #105436; font-weight: 700;";
-  if (!zero) {
-    return `<span style="${estilo}" title="NEX com validade jurídica (${dayLabel}). O cancelamento pela API só vale para título com 0% de restituição.">
-      <i data-lucide="file-warning" style="width: 14px; height: 14px;"></i> Avaliar Cancelamento
-    </span>`;
-  }
   const cid = Number(client && client.customerId) || 0;
   const sale = String(client && client.saleId || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-  return `<button type="button" onclick="event.stopPropagation(); window.abrirCancelamentoContrato(${cid}, '${sale}')" style="${estilo} cursor: pointer;" title="0% de restituição (${dayLabel}). Abrir o cancelamento do contrato no Sienge.">
+  return `<button type="button" onclick="event.stopPropagation(); window.abrirAvaliacaoCancelamento(${cid}, '${sale}')" style="${estilo} cursor: pointer;" title="NEX cumprida (${dayLabel}). Ver construção e o cálculo do distrato antes do cancelamento.">
     <i data-lucide="file-warning" style="width: 14px; height: 14px;"></i> Avaliar Cancelamento
   </button>`;
 };
@@ -29700,6 +29966,67 @@ window.toggleSimulateAll = function(checked) {
 // ----------------------------------------------------
 // 10. WE SEND - MÓDULO EXTRAJUDICIAL >= 61 DIAS
 // ----------------------------------------------------
+window.nexClienteSubJudice = function(customerId, saleId, item) {
+  const cid = String(customerId || (item && item.customerId) || "");
+  const sid = String(saleId || (item && item.saleId) || "");
+  const marcado = function(obj) {
+    return !!(obj && typeof window.valueIsSubjudice === "function" && window.valueIsSubjudice(obj.subjudice));
+  };
+  const integra = function(obj) {
+    return !!(obj && typeof window.clientIsSubjudiceIntegra === "function" && window.clientIsSubjudiceIntegra(obj));
+  };
+  if (marcado(item)) return true;
+
+  const billIds = [];
+  const addIds = function(list) {
+    (list || []).forEach(function(id) {
+      const raw = String(id == null ? "" : id);
+      const t = raw.replace(/^B-/i, "").split("-")[0];
+      if (t && billIds.indexOf(t) < 0) billIds.push(t);
+      if (raw && billIds.indexOf(raw) < 0) billIds.push(raw);
+    });
+  };
+  if (item) addIds(item.billIds);
+  if (sid) addIds([sid]);
+
+  const lists = [window.rawClientList, window.clientList, window.zeroPaidList];
+  for (let li = 0; li < lists.length; li++) {
+    const list = lists[li] || [];
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      if (!c || String(c.customerId) !== cid) continue;
+      const sameSale = !sid || String(c.saleId) === sid || (c.billIds || []).some(function(id) {
+        const t = String(id || "").replace(/^B-/i, "").split("-")[0];
+        return t === sid || String(id) === sid;
+      });
+      if (!sameSale) continue;
+      if (marcado(c) || integra(c)) return true;
+      addIds(c.billIds);
+    }
+  }
+
+  const sales = (window.AppState && AppState.sales) || [];
+  for (let i = 0; i < sales.length; i++) {
+    const s = sales[i];
+    if (!s) continue;
+    const ids = [s.receivableBillId, s.id].map(function(v) { return String(v == null ? "" : v); });
+    const bate = ids.indexOf(sid) >= 0 || ids.some(function(v) { return v && billIds.indexOf(v) >= 0; });
+    if (bate && marcado(s)) return true;
+  }
+
+  const bills = (window.AppState && AppState.defaultersBills) || [];
+  for (let i = 0; i < bills.length; i++) {
+    const b = bills[i];
+    if (!b || String(b.customerId) !== cid) continue;
+    const bSale = String(b.saleId == null ? "" : b.saleId);
+    if (sid && bSale !== sid && billIds.indexOf(bSale) < 0) continue;
+    if (marcado(b)) return true;
+    addIds([b.id, b.receivableBillId, b.saleId]);
+  }
+
+  return integra({ customerId: cid, saleId: sid, billIds: billIds, subjudice: "N" });
+};
+
 async function loadWeSendTab() {
   window._loadWeSendGen = (Number(window._loadWeSendGen) || 0) + 1;
   const gen = window._loadWeSendGen;
@@ -29803,8 +30130,12 @@ async function loadWeSendTab() {
         maxDaysDelay: 0,
         totalOverdue: 0,
         billCount: 0,
-        billIds: []
+        billIds: [],
+        subjudice: "N"
       };
+    }
+    if (typeof window.valueIsSubjudice === "function" && (window.valueIsSubjudice(bill.subjudice) || (sale && window.valueIsSubjudice(sale.subjudice)))) {
+      grouped[key].subjudice = "S";
     }
     grouped[key].totalOverdue += (Number(bill.value) || 0) + (Number(bill.interest) || 0) + (Number(bill.fine) || 0);
     grouped[key].billIds.push(bill.id);
@@ -29852,6 +30183,9 @@ async function loadWeSendTab() {
       if (fila.overdueValue != null) item.totalOverdue = fila.overdueValue;
       if (fila.hasUnpaidSinal) item.hasUnpaidSinal = true;
       if ((fila.sinalDaysDelay || 0) > (item.sinalDaysDelay || 0)) item.sinalDaysDelay = fila.sinalDaysDelay;
+      if (typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(fila) : window.valueIsSubjudice(fila.subjudice)) {
+        item.subjudice = "S";
+      }
     }
   });
 
@@ -29904,6 +30238,7 @@ async function loadWeSendTab() {
   const d61List = [];
   const entradaDays = 31;
   allItems.forEach(item => {
+    if (typeof window.nexClienteSubJudice === "function" && window.nexClienteSubJudice(item.customerId, item.saleId, item)) return;
     const cc = window.nexCcConfig(resolveCc(item).id || item.costCenterId, item.unitName);
     const aplicaSuspensiva = typeof window.clientAppliesClausulaSuspensiva === "function"
       ? window.clientAppliesClausulaSuspensiva(item)
@@ -32584,7 +32919,7 @@ window.updateNexEligibleHelp = function() {
           }).join("")}
         </ul>`
       : `<p style="margin:0;">Nenhum empreendimento está com cláusula suspensiva ativa no cadastro de centros de custo.</p>`;
-    zeroEl.innerHTML = `Entram nesta lista clientes com <strong>0% pago</strong>, atraso a partir de <strong>${zeroDays} dias</strong> (régua), <strong>sem cláusula suspensiva</strong>, ainda <strong>sem NEX gerada</strong>, e que <strong>atingiram a régua a partir de ${typeof window.getNexZeroCutoff === "function" ? window.getNexZeroCutoff().split("-").reverse().join("/") : "03/09/2026"}</strong> (controle novo — backlog antigo sem NEX não reaparece).
+    zeroEl.innerHTML = `Entram nesta lista clientes com <strong>0% pago</strong>, atraso a partir de <strong>${zeroDays} dias</strong> (régua), <strong>sem cláusula suspensiva</strong>, ainda <strong>sem NEX gerada</strong>, e que <strong>atingiram a régua a partir de ${typeof window.getNexZeroCutoff === "function" ? window.getNexZeroCutoff().split("-").reverse().join("/") : "03/09/2026"}</strong> (controle novo — backlog antigo sem NEX não reaparece). <strong>Sub judice não entra</strong>: o contato é feito por outros meios e o Integra não envia carta interna.
       <button type="button" onclick="window.toggleNexSuspensivaHelp(event)" title="Ver empreendimentos com cláusula suspensiva" style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-left:4px;padding:0;border:none;border-radius:50%;background:#e2e8f0;color:#475569;cursor:pointer;vertical-align:middle;">
         <i data-lucide="info" style="width:12px;height:12px;"></i>
       </button>
@@ -32598,12 +32933,12 @@ window.updateNexEligibleHelp = function() {
 
   const entradaEl = document.getElementById("nex-help-entrada");
   if (entradaEl) {
-    entradaEl.innerHTML = "Entram nesta lista clientes com a tag <strong>Boleto WEBRO</strong> que estão pagando entrada, com atraso a partir de <strong>31 dias</strong>, ainda <strong>sem NEX gerada</strong>. A notificação segue o mesmo controle dos clientes 0% pago.";
+    entradaEl.innerHTML = "Entram nesta lista clientes com a tag <strong>Boleto WEBRO</strong> que estão pagando entrada, com atraso a partir de <strong>31 dias</strong>, ainda <strong>sem NEX gerada</strong>. A notificação segue o mesmo controle dos clientes 0% pago. <strong>Sub judice não entra</strong>: o contato é feito por outros meios e o Integra não envia carta interna.";
   }
 
   const d61El = document.getElementById("nex-help-61");
   if (d61El) {
-    d61El.innerHTML = "Entram nesta lista os demais clientes (já houve algum pagamento), com atraso a partir de <strong>" + stdDays + " dias</strong> conforme a <strong>régua de cobrança</strong>, e ainda <strong>sem NEX gerada</strong>. Se o prazo da régua mudar, esta lista acompanha o novo valor automaticamente.";
+    d61El.innerHTML = "Entram nesta lista os demais clientes (já houve algum pagamento), com atraso a partir de <strong>" + stdDays + " dias</strong> conforme a <strong>régua de cobrança</strong>, e ainda <strong>sem NEX gerada</strong>. Se o prazo da régua mudar, esta lista acompanha o novo valor automaticamente. <strong>Sub judice não entra</strong>: o contato é feito por outros meios e o Integra não envia carta interna.";
   }
 };
 
@@ -33985,6 +34320,10 @@ window.gerarDocumentoFisicoNEX = async function(customerId, saleId) {
     }
 
     try {
+        if (typeof window.nexClienteSubJudice === "function" && window.nexClienteSubJudice(customerId, saleId)) {
+            alert("Este cliente está sub judice e não é elegível para NEX. O contato é feito por outros meios e o Integra não envia carta interna.");
+            return;
+        }
         const existing = await window.loadNexHistory(customerId, saleId);
         const blocked = window.nexValidInLast90Days(existing);
         if (blocked) {
@@ -34107,10 +34446,15 @@ window.gerarDocumentosFisicosNEXEmMassa = async function(selector) {
     let fullHtml = '';
     let generated = 0;
     let skipped = 0;
+    const subJudiceTitulos = [];
     for (let i = 0; i < checkboxes.length; i++) {
         const chk = checkboxes[i];
         const saleId = chk.getAttribute('data-sale-id');
         const customerId = chk.getAttribute('data-customer-id');
+        if (typeof window.nexClienteSubJudice === "function" && window.nexClienteSubJudice(customerId, saleId)) {
+            subJudiceTitulos.push(String(saleId || customerId || ""));
+            continue;
+        }
         const existing = await window.loadNexHistory(customerId, saleId);
         const blocked = window.nexValidInLast90Days(existing);
         if (blocked) {
@@ -34139,9 +34483,24 @@ window.gerarDocumentosFisicosNEXEmMassa = async function(selector) {
         fullHtml += docHtml;
         generated++;
     }
+    const titulosFora = function(arr) {
+        const shown = arr.slice(0, 12).join(", ");
+        return arr.length > 12 ? shown + " e mais " + (arr.length - 12) : shown;
+    };
     if (!generated) {
-        alert(skipped ? "Nenhuma NEX gerada: os selecionados já possuem NEX válida nos últimos 90 dias." : "Não foi possível gerar as NEX em lote.");
+        const partes = [];
+        if (subJudiceTitulos.length) partes.push(subJudiceTitulos.length + " sub judice (títulos " + titulosFora(subJudiceTitulos) + ")");
+        if (skipped) partes.push(skipped + " com NEX válida nos últimos 90 dias");
+        alert(partes.length
+            ? "Nenhuma NEX gerada. Fora do envio: " + partes.join("; ") + ". Cliente sub judice não recebe carta interna pelo Integra."
+            : "Não foi possível gerar as NEX em lote.");
         return;
+    }
+    if (subJudiceTitulos.length || skipped) {
+        const partes = [];
+        if (subJudiceTitulos.length) partes.push(subJudiceTitulos.length + " sub judice (títulos " + titulosFora(subJudiceTitulos) + ") — não recebem carta interna");
+        if (skipped) partes.push(skipped + " com NEX válida nos últimos 90 dias");
+        alert("NEX geradas: " + generated + ". Fora do lote: " + partes.join("; ") + ".");
     }
     
     document.getElementById("pdf-modal-title").textContent = "Notificações Extrajudiciais (Lote)";
@@ -38490,6 +38849,7 @@ async function saveDocPadrao(tipo) {
     terceiros: ['doc-terceiros-title', 'doc-terceiros-corpo'],
     vencimento: ['doc-vencimento-title', 'doc-vencimento-corpo'],
     aditamento: ['doc-aditamento-title', 'doc-aditamento-corpo'],
+    permuta: ['doc-permuta-title', 'doc-permuta-corpo'],
   };
   const ids = keyMap[tipo] || [];
   const data = {};
@@ -38549,6 +38909,7 @@ async function previewDocPadrao(tipo) {
     terceiros: 'Autorização de Terceiros',
     vencimento: 'Alteração de Vencimento',
     aditamento: 'Aditamento Contratual',
+    permuta: 'Permuta de lote',
   };
   const label = labelMap[tipo] || tipo;
   const fillLegalPreview = async (rawText) => {
@@ -38649,6 +39010,25 @@ async function previewDocPadrao(tipo) {
       .replace(/\{\{\s*REAJUSTE_JUROS_ADITAMENTO\s*\}\}/g, 'As referidas parcelas estão sem reajuste anual e sem juros de parcelamento.');
     const filled = window.centerDistratoSignatures(await fillLegalPreview(exemplo));
     content = `<h2 style="text-align:center;">${title}</h2><p style="font-size:12px;color:#64748b;">Na prévia, motivo e condições usam um exemplo (50 parcelas de R$ 1.000,00). No PDF entram os dados preenchidos na tela do aditamento.</p><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${filled}</div>`;
+  } else if (tipo === 'permuta') {
+    const title = document.getElementById('doc-permuta-title')?.value || '';
+    const corpo = document.getElementById('doc-permuta-corpo')?.value || '';
+    const exemplo = corpo
+      .replace(/\{\{\s*LOTE_DESTINO\s*\}\}/g, 'F-164')
+      .replace(/\{\{\s*AREA_LOTE_DESTINO\s*\}\}/g, '200 m²')
+      .replace(/\{\{\s*AREA_LOTE_DESTINO_EXTENSO\s*\}\}/g, 'duzentos metros')
+      .replace(/\{\{\s*VALOR_LOTE_DESTINO\s*\}\}/g, 'R$ 180.013,56')
+      .replace(/\{\{\s*VALOR_LOTE_DESTINO_EXTENSO\s*\}\}/g, 'cento e oitenta mil e treze reais e cinquenta e seis centavos')
+      .replace(/\{\{\s*CONDICOES_ORIGEM\s*\}\}/g, 'parcelado em 1 parcela sinal, 3 parcelas de entrada e 176 parcelas mensais')
+      .replace(/\{\{\s*CONDICOES_SALDO\s*\}\}/g, '173 parcelas mensais no valor de R$ 1.020,27 (um mil e vinte reais e vinte e sete centavos) cada, com primeiro vencimento no dia 10/04/2024 e demais nos meses subsequentes')
+      .replace(/\{\{\s*VALOR_PAGO\s*\}\}/g, 'R$ 3.530,28')
+      .replace(/\{\{\s*VALOR_PAGO_EXTENSO\s*\}\}/g, 'três mil, quinhentos e trinta reais e vinte e oito centavos')
+      .replace(/\{\{\s*SALDO_DEVEDOR\s*\}\}/g, 'R$ 176.506,71')
+      .replace(/\{\{\s*SALDO_DEVEDOR_EXTENSO\s*\}\}/g, 'cento e setenta e seis mil, quinhentos e seis reais e setenta e um centavos')
+      .replace(/\{\{\s*INDEXADOR\s*\}\}/g, 'IPCA')
+      .replace(/\{\{\s*CERTIFICADO_GRAPROHAB\s*\}\}/g, '071/2021');
+    const filled = window.centerDistratoSignatures ? window.centerDistratoSignatures(await fillLegalPreview(exemplo)) : await fillLegalPreview(exemplo);
+    content = `<h2 style="text-align:center;">${title}</h2><p style="font-size:12px;color:#64748b;">Na prévia, o lote de destino e os valores usam um exemplo de troca dentro do mesmo empreendimento. Na geração entram o lote ativo escolhido e o saldo do título.</p><hr><div style="white-space:pre-wrap;font-family:serif;font-size:14px;line-height:1.6;">${filled}</div>`;
   }
   
   const win = window.open('', '_blank', 'width=700,height=600,scrollbars=yes');
@@ -38687,7 +39067,7 @@ function applySavedDocPadraoFields(tipo, data, fieldMap) {
 
 // Carregar templates salvos ao inicializar
 async function loadDocPadraoTemplates() {
-  const tipos = ['reneg', 'boleto', 'carta', 'cec', 'suspensao', 'distrato', 'escritura', 'quitacao', 'terceiros', 'vencimento', 'aditamento'];
+  const tipos = ['reneg', 'boleto', 'carta', 'cec', 'suspensao', 'distrato', 'escritura', 'quitacao', 'terceiros', 'vencimento', 'aditamento', 'permuta'];
   const fieldMap = {
     reneg: ['doc-reneg-title', 'doc-reneg-subtitle', 'doc-reneg-clauses'],
     boleto: ['doc-boleto-inst1', 'doc-boleto-inst2', 'doc-boleto-obs'],
@@ -38700,6 +39080,7 @@ async function loadDocPadraoTemplates() {
     terceiros: ['doc-terceiros-title', 'doc-terceiros-corpo'],
     vencimento: ['doc-vencimento-title', 'doc-vencimento-corpo'],
     aditamento: ['doc-aditamento-title', 'doc-aditamento-corpo'],
+    permuta: ['doc-permuta-title', 'doc-permuta-corpo'],
   };
   
   if (window.firebaseCollections && window.firebaseDb) {
@@ -42952,7 +43333,13 @@ window.searchRelacionamento = async function() {
           unitName: unitName,
           unidade: r.unidade || ""
         };
-        const nexTeste = window.nexCumpridaTeste && window.nexCumpridaTeste(r.titulo);
+        const nexCliente = {
+          customerId: r.openCustomerId || customerId,
+          saleId: r.titulo,
+          titulo: r.titulo,
+          billIds: r.titulo ? [String(r.titulo)] : []
+        };
+        const nexTeste = window.clientHasNexCumprida && window.clientHasNexCumprida(nexCliente);
         return `
         <tr style="transition: background-color 0.2s;">
           <td style="border-bottom: 1px solid var(--color-border); padding: 10px 10px; color: #1e293b; font-weight: 700; font-size: 0.75rem; text-align: left; font-variant-numeric: tabular-nums;">
@@ -42985,7 +43372,7 @@ window.searchRelacionamento = async function() {
             <button class="btn btn-sm" onclick="openCustomerFromRelacionamento('${r.openCustomerId || customerId}', '${r.contractId || ''}', '${r.titulo || ''}')" style="background: var(--color-primary); color: white; border: none; border-radius: 6px; padding: 6px 12px; font-weight: 700; display: inline-flex; justify-content: center; align-items: center; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; font-size: 0.75rem;">
               <i data-lucide="eye" style="width:14px;height:14px; margin-right:4px;"></i> Detalhes
             </button>
-            ${nexTeste ? '<button type="button" onclick="window.abrirCancelamentoDoContrato(window._relSignalClients[\'' + signalKey + '\'])" style="margin-left: 6px; padding: 6px 12px; font-size: 0.75rem; line-height: 1.2; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #105436; background-color: #ecfdf5; color: #105436; font-weight: 700; cursor: pointer;"><i data-lucide="file-warning" style="width:14px;height:14px;"></i> Avaliar cancelamento</button>' : ''}
+            ${nexTeste ? '<button type="button" onclick="window.abrirAvaliacaoDoContrato(window._relSignalClients[\'' + signalKey + '\'])" style="margin-left: 6px; padding: 6px 12px; font-size: 0.75rem; line-height: 1.2; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #105436; background-color: #ecfdf5; color: #105436; font-weight: 700; cursor: pointer;"><i data-lucide="file-warning" style="width:14px;height:14px;"></i> Avaliar cancelamento</button>' : ''}
           </td>
         </tr>
       `;
@@ -43082,6 +43469,9 @@ window.openGestaoDocumentoMenu = function(ctx) {
           <button type="button" class="moura-gestao-docs-item" onclick="escolherGestaoDocumento('cessao')">
             <i data-lucide="handshake"></i> Cessão de direitos
           </button>
+          <button type="button" class="moura-gestao-docs-item" onclick="escolherGestaoDocumento('permuta')">
+            <i data-lucide="arrow-left-right"></i> Permuta de lote
+          </button>
           <button type="button" class="moura-gestao-docs-item" onclick="escolherGestaoDocumento('quitacao')">
             <i data-lucide="badge-check"></i> Termo de quitação
           </button>
@@ -43094,7 +43484,7 @@ window.openGestaoDocumentoMenu = function(ctx) {
   }
   overlay._ctx = ctx || {};
   const list = overlay.querySelector(".moura-gestao-docs-list");
-  if (list && !list.querySelector("[onclick*=\"escolherGestaoDocumento('vencimento')\"]")) {
+  if (list && !list.querySelector("[onclick*=\"escolherGestaoDocumento('permuta')\"]")) {
     list.innerHTML = `
           <button type="button" class="moura-gestao-docs-item" onclick="escolherGestaoDocumento('aditamento')">
             <i data-lucide="file-plus"></i> Aditamento
@@ -43110,6 +43500,9 @@ window.openGestaoDocumentoMenu = function(ctx) {
           </button>
           <button type="button" class="moura-gestao-docs-item" onclick="escolherGestaoDocumento('cessao')">
             <i data-lucide="handshake"></i> Cessão de direitos
+          </button>
+          <button type="button" class="moura-gestao-docs-item" onclick="escolherGestaoDocumento('permuta')">
+            <i data-lucide="arrow-left-right"></i> Permuta de lote
           </button>
           <button type="button" class="moura-gestao-docs-item" onclick="escolherGestaoDocumento('quitacao')">
             <i data-lucide="badge-check"></i> Termo de quitação
@@ -43130,9 +43523,15 @@ window.openGestaoDocumentoMenu = function(ctx) {
 /** Status vem da coluna Status da Gestão; vazio (ex.: aberto pela Cessão) não bloqueia aqui, a tela confere no Sienge. */
 window._gestaoDocBloqueio = function(tipo, status) {
   const s = String(status || "").trim().toLowerCase();
-  if (!s) return "";
   const distratado = /distrat|cancel/.test(s);
   const quitado = /^quitado$/.test(s);
+  if (tipo === "permuta") {
+    if (s && (quitado || distratado)) {
+      return "A permuta só pode ser feita em lote ativo (status atual: " + status + ").";
+    }
+    return "Indisponível por enquanto.";
+  }
+  if (!s) return "";
   if (tipo === "aditamento" && (quitado || distratado)) {
     return "O aditamento só pode ser feito em contrato ativo (status atual: " + status + ").";
   }

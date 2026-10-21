@@ -556,10 +556,12 @@ const OrcamentoModuloApp = {
     } catch (e) {}
     if (this._planos) delete this._planos[chave];
     if (String(this.novo.ccId) === chave) this.novo.ccId = "";
+    try { localStorage.removeItem("orc_receita_v1_" + chave); } catch (e) {}
     const fx = window.firebaseCollections;
     const db = window.firebaseDb;
     if (fx && db && typeof fx.deleteDoc === "function") {
       fx.deleteDoc(fx.doc(db, "orcamento_empreendimento", chave)).catch(() => {});
+      fx.deleteDoc(fx.doc(db, "orcamento_receita", chave)).catch(() => {});
     }
     this.renderNovo();
   },
@@ -713,6 +715,7 @@ const OrcamentoModuloApp = {
           entradaParcelas: Math.max(0, parseInt(p.entradaParcelas, 10) || 0),
           reajuste: String(p.reajuste || ""),
           origem: p.origem === "tabela" ? "tabela" : "",
+          chave: String(p.chave || "").slice(0, 180),
           meses: lerMeses(p.meses)
         });
       });
@@ -767,6 +770,7 @@ const OrcamentoModuloApp = {
     if (!cc || this._planoPedido === cc) return;
     this._planoPedido = cc;
     this.carregarPlano(cc);
+    this.carregarReceita(cc);
   },
 
   async carregarPlano(cc) {
@@ -1254,24 +1258,59 @@ const OrcamentoModuloApp = {
     return (Number(n) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 4 }) + "%";
   },
 
+  chaveLinhaTabela(r) {
+    const nome = this.normNome((r && r.plano) || "");
+    const inter = r && r.intermediarias ? "S" : "N";
+    const ent = String(this.numeroCampo(r && r.entradaMin));
+    const parc = String(parseInt(r && r.parcelamentoEntrada, 10) || 0);
+    const juros = String(this.numeroCampo(r && r.taxaJuros));
+    const reaj = this.normNome((r && r.reajuste) || "");
+    const desc = r && r.descontoOn ? String(this.numeroCampo(r.descontoPct)) : "0";
+    return [nome, inter, ent, parc, juros, reaj, desc].join("|");
+  },
+
+  idDaChave(chave) {
+    let h = 2166136261;
+    const s = String(chave || "");
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return "tv" + (h >>> 0).toString(16);
+  },
+
+  planoDaLinha(r) {
+    const chave = this.chaveLinhaTabela(r);
+    const lista = this.planosAtivos();
+    const porChave = lista.find((a) => a.chave && a.chave === chave);
+    if (porChave) return porChave;
+    const porId = lista.find((a) => a.id === this.idDaChave(chave));
+    if (porId) return porId;
+    const nome = this.normNome((r && r.plano) || "");
+    const mesmo = lista.filter((a) => this.normNome(a.nome) === nome);
+    return mesmo.length === 1 ? mesmo[0] : null;
+  },
+
   planosDaTabela(tab) {
     const rows = (tab && tab.rows) || [];
-    const vistos = {};
     const saida = [];
+    const usados = {};
     rows.forEach((r) => {
       const nome = String((r && r.plano) || "").replace(/\s+/g, " ").trim();
       if (!nome) return;
-      const chave = this.normNome(nome);
-      if (vistos[chave]) return;
-      vistos[chave] = true;
-      const boleto = chave === "BOLETO UNICO" || chave === "BOLETOUNICO";
+      const chaveNome = this.normNome(nome);
+      const chave = this.chaveLinhaTabela(r);
+      let id = this.idDaChave(chave);
+      if (usados[id]) id = (id + "x" + saida.length).replace(/[^a-zA-Z0-9]/g, "").slice(0, 24);
+      usados[id] = true;
+      const boleto = chaveNome === "BOLETO UNICO" || chaveNome === "BOLETOUNICO";
       const faixa = nome.match(/(\d+)\s*a\s*(\d+)/i);
       const n = parseInt(nome.replace(/\D/g, ""), 10);
       const parcelas = boleto ? 0 : (faixa ? parseInt(faixa[2], 10) : (Number.isFinite(n) ? n : 0));
-      const slug = chave.replace(/[^A-Z0-9]/g, "").slice(0, 18).toLowerCase() || String(saida.length + 1);
       saida.push({
-        id: "tv" + slug,
+        id: id,
         nome: nome,
+        chave: chave,
         parcelas: parcelas,
         juros: boleto ? 0 : Math.max(0, this.numeroCampo(r.taxaJuros)),
         entradaPct: boleto ? 100 : Math.max(0, this.numeroCampo(r.entradaMin)),
@@ -1290,16 +1329,26 @@ const OrcamentoModuloApp = {
     if (!vindos.length) return false;
     const plano = this.planoDoCc();
     const atuais = Array.isArray(plano.planos) ? plano.planos.slice() : [];
+    const homonimos = {};
+    vindos.forEach((v) => {
+      const nome = this.normNome(v.nome);
+      homonimos[nome] = (homonimos[nome] || 0) + 1;
+    });
     const usados = {};
     const prox = vindos.map((v) => {
-      const antigo = atuais.find((a) => this.normNome(a.nome) === this.normNome(v.nome)) || atuais.find((a) => a.id === v.id);
+      let antigo = atuais.find((a) => a.chave && a.chave === v.chave && !usados[a.id]);
+      if (!antigo) antigo = atuais.find((a) => a.id === v.id && !usados[a.id]);
+      if (!antigo && homonimos[this.normNome(v.nome)] === 1) {
+        antigo = atuais.find((a) => !usados[a.id] && this.normNome(a.nome) === this.normNome(v.nome));
+      }
       if (antigo) usados[antigo.id] = true;
       const ticketBase = this.ticketMedio();
       const ticket = ticketBase > 0 ? ticketBase : (antigo ? (Number(antigo.ticket) || 0) : 0);
       const entrada = ticket > 0 ? Math.round(ticket * (Number(v.entradaPct) || 0)) / 100 : 0;
       return {
-        id: antigo && antigo.id ? antigo.id : v.id,
+        id: v.id,
         nome: v.nome,
+        chave: v.chave,
         ticket: ticket,
         parcelas: v.parcelas,
         entrada: entrada,
@@ -1313,10 +1362,11 @@ const OrcamentoModuloApp = {
     });
     atuais.forEach((a) => {
       if (usados[a.id]) return;
+      if (vindos.some((v) => this.normNome(v.nome) === this.normNome(a.nome))) return;
       const tem = a.meses && Object.keys(a.meses).some((y) => (a.meses[y] || []).some((n) => Number(n) > 0));
       if (tem) prox.push(a);
     });
-    const assinatura = (lista) => lista.map((p) => [p.id, p.nome, p.parcelas, p.juros, p.entradaPct, p.origem, p.entrada].join(":")).join("|");
+    const assinatura = (lista) => lista.map((p) => [p.id, p.chave, p.nome, p.parcelas, p.juros, p.entradaPct, p.origem, p.entrada].join(":")).join("|");
     if (assinatura(atuais) === assinatura(prox) && String(plano.tabelaCompetencia || "") === String(tab.competencia || "")) return false;
     plano.planos = prox;
     plano.tabelaCompetencia = String(tab.competencia || "");
@@ -1325,10 +1375,12 @@ const OrcamentoModuloApp = {
 
   linhasDialogo(tab, ano, mes) {
     const atuais = this.planosAtivos();
+    const usados = {};
     return this.planosDaTabela(tab).map((v) => {
-      const antigo = atuais.find((a) => this.normNome(a.nome) === this.normNome(v.nome)) || atuais.find((a) => a.id === v.id);
+      const antigo = atuais.find((a) => !usados[a.id] && ((a.chave && a.chave === v.chave) || a.id === v.id));
+      if (antigo) usados[antigo.id] = true;
       return Object.assign({}, v, {
-        id: antigo && antigo.id ? antigo.id : v.id,
+        id: v.id,
         qtdAtual: antigo ? this.qtdPlano(antigo, ano, mes) : 0
       });
     });
@@ -1338,10 +1390,11 @@ const OrcamentoModuloApp = {
     const plano = this.planoDoCc();
     if (!Array.isArray(plano.planos)) plano.planos = [];
     (linhas || []).forEach((ln) => {
-      if (plano.planos.some((p) => p.id === ln.id || this.normNome(p.nome) === this.normNome(ln.nome))) return;
+      if (plano.planos.some((p) => p.id === ln.id || (ln.chave && p.chave === ln.chave))) return;
       plano.planos.push({
         id: ln.id,
         nome: ln.nome,
+        chave: ln.chave || "",
         ticket: 0,
         parcelas: ln.parcelas,
         entrada: 0,
@@ -2098,7 +2151,7 @@ const OrcamentoModuloApp = {
     const linhas = (tab.rows || []).map((r) => {
       const nome = String((r && r.plano) || "").replace(/\s+/g, " ").trim();
       if (!nome) return "";
-      const p = this.planosAtivos().find((a) => this.normNome(a.nome) === this.normNome(nome));
+      const p = this.planoDaLinha(r);
       let soma = 0;
       const tds = p ? [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((mes) => {
         if (this.mesPrevisto(ano, mes)) soma += this.qtdPlano(p, ano, mes);
@@ -2747,6 +2800,118 @@ const OrcamentoModuloApp = {
     }
   },
 
+  receitaParaNuvem(r) {
+    const cc = String(this.novo.ccId || r.ccId || "");
+    const clientesCheios = (r.clientes || []).map((c) => ({
+      cliente: c.cliente || "",
+      unidade: c.unidade || "",
+      titulo: c.titulo || "",
+      pmp: Number(c.pmp) || 0,
+      pmpConhecido: !!c.pmpConhecido,
+      repactuacao: c.repactuacao || "",
+      indexador: c.indexador || "",
+      principal: Number(c.principal) || 0,
+      reajuste: Number(c.reajuste) || 0,
+      total: Number(c.total) || 0,
+      parcelas: Array.isArray(c.parcelas) ? c.parcelas : []
+    }));
+    const base = {
+      companyId: String(this.novo.companyId || r.companyId || ""),
+      ccId: cc,
+      anoDe: Number(r.anoDe) || Number(this.novo.anoDe),
+      anoAte: Number(r.anoAte) || Number(this.novo.anoAte),
+      grade: r.grade || {},
+      porAno: r.porAno || {},
+      subMes: r.subMes || {},
+      jurosMes: r.jurosMes || {},
+      total: Number(r.total) || 0,
+      principal: Number(r.principal) || 0,
+      reajuste: Number(r.reajuste) || 0,
+      fora: Number(r.fora) || 0,
+      antes: Number(r.antes) || 0,
+      subJudice: Number(r.subJudice) || 0,
+      subJudiceValor: Number(r.subJudiceValor) || 0,
+      parcelaMedia: Number(r.parcelaMedia) || 0,
+      parcelasMedia: Number(r.parcelasMedia) || 0,
+      indices: Array.isArray(r.indices) ? r.indices : [],
+      clientes: clientesCheios,
+      em: new Date().toISOString()
+    };
+    let doc = base;
+    try {
+      if (JSON.stringify(base).length > 900000) {
+        doc = Object.assign({}, base, {
+          clientes: clientesCheios.map((c) => {
+            const sem = Object.assign({}, c);
+            delete sem.parcelas;
+            return sem;
+          })
+        });
+      }
+      return JSON.parse(JSON.stringify(doc));
+    } catch (e) {
+      const sem = Object.assign({}, base, { clientes: [], indices: [] });
+      return JSON.parse(JSON.stringify(sem));
+    }
+  },
+
+  async salvarReceita(resultado) {
+    const cc = String((resultado && resultado.ccId) || this.novo.ccId || "");
+    if (!cc || !resultado) return false;
+    const doc = this.receitaParaNuvem(resultado);
+    try { localStorage.setItem("orc_receita_v1_" + cc, JSON.stringify(doc)); } catch (e) {}
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (!fx || !db || typeof fx.setDoc !== "function") {
+      this.novo.nuvem = "neste navegador";
+      this.novo.erro = "A receita foi montada, mas o Firebase não está disponível neste navegador.";
+      return false;
+    }
+    this.novo.nuvem = "salvando";
+    this.pintarNuvem();
+    try {
+      await fx.setDoc(fx.doc(db, "orcamento_receita", cc), doc);
+      this.novo.nuvem = "salvo";
+      return true;
+    } catch (e) {
+      try {
+        const semClientes = Object.assign({}, doc, { clientes: [] });
+        await fx.setDoc(fx.doc(db, "orcamento_receita", cc), semClientes);
+        this.novo.nuvem = "salvo";
+        return true;
+      } catch (e2) {
+        this.novo.nuvem = "neste navegador";
+        this.novo.erro = "A receita foi montada, mas não foi salva no Firebase.";
+        return false;
+      }
+    }
+  },
+
+  async carregarReceita(cc) {
+    const pedido = String(cc || "");
+    if (!pedido) return;
+    const selo = (this._receitaSelo = (this._receitaSelo || 0) + 1);
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    let data = null;
+    if (fx && db && typeof fx.getDoc === "function") {
+      try {
+        const snap = await fx.getDoc(fx.doc(db, "orcamento_receita", pedido));
+        if (snap && snap.exists && snap.exists()) data = snap.data() || {};
+      } catch (e) {}
+    }
+    if (!data) {
+      try { data = JSON.parse(localStorage.getItem("orc_receita_v1_" + pedido) || "null"); } catch (e) { data = null; }
+    }
+    if (this._receitaSelo !== selo) return;
+    if (String(this.novo.ccId) !== pedido || this.novo.resultado || this.novo.carregando) return;
+    if (!data || typeof data !== "object") return;
+    if (Number(data.anoDe) !== Number(this.novo.anoDe) || Number(data.anoAte) !== Number(this.novo.anoAte)) return;
+    if (!data.grade) return;
+    this.novo.resultado = data;
+    if (this.novo.etapa === "orcamento") this.renderNovo();
+  },
+
   async montarReceita() {
     const st = this.novo;
     if (st.carregando) return;
@@ -2771,6 +2936,7 @@ const OrcamentoModuloApp = {
     st.erro = "";
     st.resultado = null;
     st.progressoPct = 30;
+    this._receitaSelo = (this._receitaSelo || 0) + 1;
     this.renderNovo();
     try {
       if (typeof window.loadSubjudiceIntegra === "function") await window.loadSubjudiceIntegra();
@@ -2781,6 +2947,10 @@ const OrcamentoModuloApp = {
       st.anoAberto = "";
       st.filtroCelula = null;
       st.resultado = await this.distribuirReceita(linhas, st.anoDe, st.anoAte);
+      st.resultado.ccId = String(st.ccId);
+      st.resultado.companyId = String(st.companyId || "");
+      this.pintarProgresso("Salvando a receita do orçamento plurianual…", 90);
+      await this.salvarReceita(st.resultado);
       st.progressoPct = 100;
     } catch (e) {
       console.warn("[Orçamento] receita", e);

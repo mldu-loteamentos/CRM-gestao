@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="i.ntegr.a/arvore.png">
 
   <!-- CSS Principal -->
-  <link rel="stylesheet" href="style.css?v=1604">
+  <link rel="stylesheet" href="style.css?v=1605">
 
   <style>
     /* Padronização de campos de dados (Ref: Endereço Residencial) */
@@ -891,7 +891,7 @@
 
     <div class="login-pane-brand">
       <div class="login-band login-band-logo">
-        <img src="i.ntegr.a/logo-oficial.png?v=1604" alt="I.ntegr.A Moura Leite">
+        <img src="i.ntegr.a/logo-oficial.png?v=1605" alt="I.ntegr.A Moura Leite">
       </div>
 
       <div class="login-band login-band-action">
@@ -1306,6 +1306,9 @@
             <li data-tab="indexadores" data-module="sub_cfg_apoio_indexadores_acessar">
               <a onclick="switchTab('indexadores', 'Indexadores')">Indexadores</a>
             </li>
+            <li data-tab="motivos-cancelamento" data-module="sub_cfg_apoio_motivos_cancelamento_acessar">
+              <a onclick="switchTab('motivos-cancelamento', 'Motivos de cancelamento')">Motivos de cancelamento</a>
+            </li>
             <li data-tab="plano-financeiro" data-module="sub_cfg_apoio_plano_financeiro_acessar">
               <a onclick="switchTab('plano-financeiro', 'Plano Financeiro e Visões')">Plano Financeiro e Visões</a>
             </li>
@@ -1361,7 +1364,7 @@
             font-size: 0.67rem;
             color: rgba(255,255,255,0.4);
           ">
-            v1.0.1604 &nbsp;&middot;&nbsp; 21/10/2026
+            v1.0.1605 &nbsp;&middot;&nbsp; 21/10/2026
           </span>
         </div>
       </div>
@@ -1597,6 +1600,9 @@
       <!-- TAB: CONFIGURAÇÕES - TAGS -->
       <section id="tab-config-tags" class="tab-pane" style="display: none;">
         <div id="config-tags-root"></div>
+      </section>
+      <section id="tab-motivos-cancelamento" class="tab-pane" style="display: none;">
+        <div id="motivos-cancelamento-root"></div>
       </section>
 
       <!-- TAB: CONFIGURAÇÕES - USUÁRIOS E PERFIS -->
@@ -1887,6 +1893,9 @@
               </div>
               <div class="doc-menu-item" onclick="selectDocTemplate('aditamento')" id="menu-doc-aditamento">
                 <i data-lucide="file-plus"></i> Aditamento Contratual
+              </div>
+              <div class="doc-menu-item" onclick="selectDocTemplate('permuta')" id="menu-doc-permuta">
+                <i data-lucide="arrow-left-right"></i> Permuta de lote
               </div>
             </div>
             
@@ -2524,6 +2533,75 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
                   </button>
                 </div>
               </div>
+
+              <div id="editor-permuta" class="doc-editor-form">
+                <h3 style="margin-top: 0; color: #1e293b; font-size: 1.3rem; margin-bottom: 20px;">Permuta de lote</h3>
+                <div class="form-group">
+                  <label>Título do Documento</label>
+                  <input type="text" class="form-control" id="doc-permuta-title" value="INSTRUMENTO PARTICULAR DE PERMUTA DE IMÓVEIS URBANOS">
+                </div>
+                <div class="form-group">
+                  <label>Texto Padrão</label>
+                  <div class="doc-fmt-bar">
+                    <button type="button" class="doc-fmt-btn" onclick="wrapDocPadraoBold('doc-permuta-corpo')" title="Negrito (Ctrl+B)"><b>N</b> Negrito</button>
+                    <span class="doc-fmt-hint">Troca de lote dentro do mesmo empreendimento. Usado em Buscar Cliente → Gestão → Permuta de lote. O lote de destino, o valor pago, o saldo e as condições entram na hora de gerar. Por enquanto a geração está indisponível e o item só vale para lote ativo.</span>
+                  </div>
+                  <textarea class="form-control" id="doc-permuta-corpo" rows="32" onkeydown="docPadraoEditorKey(event)" style="font-family: monospace; font-size: 0.8rem; line-height: 1.4; resize: vertical;">Título: {{TITULO}} | Unidade de origem: {{UNIDADE}} | Unidade de destino: {{LOTE_DESTINO}}
+
+Por este instrumento particular de permuta de imóveis urbanos, realizados entre os contratantes, de um lado, como primeiro(s) permutante(s):
+
+{{NOME_CLIENTE}}, {{NACIONALIDADE_CLIENTE}}, {{PROFISSAO_CLIENTE}}, {{ESTADO_CIVIL}}, portador(a) da Cédula de Identidade RG Nº {{RG_CLIENTE}}, inscrito(a) no CPF-MF sob o Nº {{CPF_CNPJ}}, residente(s) e domiciliado(s) na {{ENDERECO_CLIENTE}}, no município de {{CIDADE_CLIENTE}};
+
+e de outro lado, como segundo(s) permutante(s):
+
+{{PREAMBULO}},
+
+doravante denominados como outorgantes permutantes, têm entre si, justos e contratados o que se segue adiante:
+
+1. {{NOME_CLIENTE}}, acima qualificado, declara que é legítimo possuidor de um lote de terras localizado na quadra-lote: {{QUADRA}}-{{LOTE}}, com área total de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}), no valor de {{VALOR_CONTRATO}} ({{VALOR_CONTRATO_EXTENSO}}), localizado no loteamento {{EMPREENDIMENTO}}, conforme contrato particular de venda e compra datado de {{DATA_CONTRATO}}, {{CONDICOES_ORIGEM}}, reajustadas de acordo com a variação do percentual anual acumulada do índice {{INDEXADOR}} na data de aniversário do contrato.
+
+2. {{PREAMBULO}}, acima qualificados, declaram que são legítimos possuidores de um lote de terras localizado na quadra-lote: {{LOTE_DESTINO}}, com área total de {{AREA_LOTE_DESTINO}} ({{AREA_LOTE_DESTINO_EXTENSO}}), no loteamento {{EMPREENDIMENTO}}, no valor de {{VALOR_LOTE_DESTINO}} ({{VALOR_LOTE_DESTINO_EXTENSO}}).
+
+3. Os bens imóveis acima descritos e devidamente caracterizados encontram-se livres e desembaraçados para o presente pacto de permuta ou troca.
+
+4. Que as partes aqui qualificadas decidem, através do presente instrumento, permutar os imóveis acima descritos, na forma como se encontram, permanecendo ambos no mesmo empreendimento.
+
+5. A unidade localizada na quadra-lote: {{QUADRA}}-{{LOTE}} tem o valor atual de {{VALOR_CONTRATO}} ({{VALOR_CONTRATO_EXTENSO}}), sendo que do valor total já foram pagos {{VALOR_PAGO}} ({{VALOR_PAGO_EXTENSO}}), restando na presente data o saldo devedor de {{SALDO_DEVEDOR}} ({{SALDO_DEVEDOR_EXTENSO}}).
+
+A unidade localizada na quadra-lote: {{LOTE_DESTINO}}, cujo valor atual é de {{VALOR_LOTE_DESTINO}} ({{VALOR_LOTE_DESTINO_EXTENSO}}), os segundos permutantes, na qualidade de proprietários do referido lote no loteamento {{EMPREENDIMENTO}}, devidamente registrado no Certificado do GRAPROHAB Nº {{CERTIFICADO_GRAPROHAB}} e matriculado sob nº {{MATRICULA}}, pelo presente instrumento e na melhor forma de direito se comprometem a permutar com os primeiros permutantes o lote integrante do mesmo loteamento.
+
+6. Portanto, os primeiros permutantes assumem o saldo devedor de {{SALDO_DEVEDOR}} ({{SALDO_DEVEDOR_EXTENSO}}), que será pago da seguinte forma: {{CONDICOES_SALDO}}, reajustadas de acordo com a variação do percentual anual acumulada do índice {{INDEXADOR}}; havendo neste ato também a mudança de lotes fisicamente, dentro do mesmo empreendimento.
+
+7. Para que fique estabelecida tal mudança de forma correta e sem problemas de interpretação, cada permutante terá uma cópia desta permuta.
+
+8. Ambas as partes convencionam permutar os imóveis, transferindo reciprocamente uma à outra os bens acima mencionados, com todas as garantias, obrigando-se a fazer a troca, que é boa, firme e valiosa, respondendo pelos vícios que, porventura, apresentarem, obrigando, ainda, seus herdeiros e sucessores a qualquer título. Os outorgantes permutantes, desde já, fazem mútua cessão e transferência dos respectivos direitos, posse, domínio e ação que sobre os imóveis ora permutados exerciam, para que cada um deles possa usar, gozar e dispor do imóvel que, em razão desta troca, lhe fica pertencendo.
+
+9. As partes elegem o foro de {{CIDADE_ATUAL}}, para solucionar qualquer litígio que desta avença advier, renunciando a qualquer outro, por mais privilegiado que seja.
+
+E por assim estarem justos e contratados, os permutantes assinam o presente instrumento particular de permuta em 2 (duas) vias de igual conteúdo, juntamente com as duas testemunhas que a tudo presenciaram.
+
+{{CIDADE_ATUAL}}, {{DATA_HOJE_EXTENSO}}
+
+{{ASSINATURAS_VENDEDORES}}
+Permutante(s)
+
+__________________________________________________________________
+{{NOME_CLIENTE}}
+Permutante(s)
+
+Testemunhas
+Nome: {{TESTEMUNHA_1_NOME}}                    Nome: {{TESTEMUNHA_2_NOME}}
+RG: {{TESTEMUNHA_1_RG}}                        RG: {{TESTEMUNHA_2_RG}}</textarea>
+                </div>
+                <div style="display: flex; gap: 12px; margin-top: 16px;">
+                  <button class="btn btn-primary" onclick="saveDocPadrao('permuta')">
+                    <i data-lucide="save" style="width:18px;"></i> Salvar Modelo
+                  </button>
+                  <button class="btn btn-outline" onclick="previewDocPadrao('permuta')">
+                    <i data-lucide="eye" style="width:18px;"></i> Simular PDF
+                  </button>
+                </div>
+              </div>
             </div>
 
             <!-- Variáveis Lateral (Right Sidebar) -->
@@ -2693,6 +2771,21 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
                 <div class="var-pill" onclick="copyVar(this)">{{TESTEMUNHA_1_RG}}</div>
                 <div class="var-pill" onclick="copyVar(this)">{{TESTEMUNHA_2_NOME}}</div>
                 <div class="var-pill" onclick="copyVar(this)">{{TESTEMUNHA_2_RG}}</div>
+
+                <div class="var-pill-group-title">Permuta de lote</div>
+                <div class="var-pill" onclick="copyVar(this)" title="Quadra-lote que o cliente passa a ocupar, no mesmo empreendimento">{{LOTE_DESTINO}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{AREA_LOTE_DESTINO}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{AREA_LOTE_DESTINO_EXTENSO}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{VALOR_LOTE_DESTINO}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{VALOR_LOTE_DESTINO_EXTENSO}}</div>
+                <div class="var-pill" onclick="copyVar(this)" title="Como o contrato de origem foi parcelado">{{CONDICOES_ORIGEM}}</div>
+                <div class="var-pill" onclick="copyVar(this)" title="Parcelas que o cliente assume no lote de destino">{{CONDICOES_SALDO}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{VALOR_PAGO}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{VALOR_PAGO_EXTENSO}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{SALDO_DEVEDOR}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{SALDO_DEVEDOR_EXTENSO}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{INDEXADOR}}</div>
+                <div class="var-pill" onclick="copyVar(this)">{{CERTIFICADO_GRAPROHAB}}</div>
 
                 <div class="var-pill-group-title">Termo de Quitação</div>
                 <div class="var-pill" onclick="copyVar(this)" title="Só aparece no termo de aviso; no formal fica em branco">{{CANAIS_ATENDIMENTO}}</div>
@@ -3069,7 +3162,7 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
         <!-- Container padrão (Em Construção) -->
         <div id="home-em-construcao-container"
           style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-          <img src="i.ntegr.a/arvore.png?v=1604" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 1.25rem;">
+          <img src="i.ntegr.a/arvore.png?v=1605" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 1.25rem;">
           <p style="color: var(--color-primary); font-size: 1.15rem; font-weight: 600; letter-spacing: 0.06em; margin: 0;">
             Inteligência - Integração - Agilidade
           </p>
@@ -3850,7 +3943,7 @@ RG: {{TESTEMUNHA_1_RG}}                                                         
         <section id="tab-construcao-seguranca" class="tab-pane" style="display: none;">
           <div
             style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 500px; text-align: center;">
-            <img src="i.ntegr.a/arvore.png?v=1604" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
+            <img src="i.ntegr.a/arvore.png?v=1605" alt="I.ntegr.A" style="width: min(560px, 72vw); max-width: 560px; margin-bottom: 2rem;">
             <h2 style="color: var(--color-primary); font-size: 1.8rem; margin-bottom: 0;">Módulo em Construção</h2>
           </div>
         </section>
@@ -8282,91 +8375,91 @@ RG: {{TESTEMUNHA_1_RG}} RG: {{TESTEMUNHA_2_RG}}</textarea>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/digidem/leaflet-side-by-side@2.0.0/leaflet-side-by-side.min.js"></script>
   <!-- Scripts de Negócio -->
-  <script type="module" src="firebase-config.js?v=1604"></script>
+  <script type="module" src="firebase-config.js?v=1605"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
   <script>
       window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
   </script>
   <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
-  <script defer src="data.js?v=1604"></script>
-  <script defer src="sienge-api.js?v=1604"></script>
-  <script defer src="consumo-api.js?v=1604"></script>
-  <script defer src="azure-auth.js?v=1604"></script>
-  <script defer src="usuarios-online.js?v=1604"></script>
-  <script defer src="auditoria-login.js?v=1604"></script>
-  <script defer src="app.js?v=1604"></script>
-  <script defer src="empresa-filter.js?v=1604"></script>
-  <script defer src="cartao-taxas.js?v=1604"></script>
-  <script defer src="alcada-desconto.js?v=1604"></script>
-  <script defer src="alcada-distrato.js?v=1604"></script>
-  <script defer src="home-dashboard.js?v=1604"></script>
-  <script defer src="anexos.js?v=1604"></script>
-  <script defer src="contas-pagar.js?v=1604"></script>
-    <script defer src="boleto-check.js?v=1604"></script>
-    <script defer src="nota-fiscal-check.js?v=1604"></script>
-    <script defer src="gerar-pagamento.js?v=1604"></script>
-  <script defer src="rydoo.js?v=1604"></script>
-  <script defer src="titulos-incompletos.js?v=1604"></script>
-  <script defer src="compras-previsoes.js?v=1604"></script>
-  <script defer src="compras-controle-financeiro.js?v=1604"></script>
-  <script defer src="compras-dashboard.js?v=1604"></script>
-  <script defer src="caucao-core.js?v=1604"></script>
-  <script defer src="engenharia-caucao.js?v=1604"></script>
-  <script defer src="config-tags.js?v=1604"></script>
-  <script defer src="config-users.js?v=1604"></script>
-  <script defer src="suporte.js?v=1604"></script>
-  <script defer src="construcao.js?v=1604"></script>
-  <script defer src="empresas.js?v=1604"></script>
-  <script defer src="relacionamento.js?v=1604"></script>
-  <script defer src="aditamento.js?v=1604"></script>
-  <script defer src="cessao-direitos.js?v=1604"></script>
-  <script defer src="doc-assinatura.js?v=1604"></script>
-  <script defer src="compromissario.js?v=1604"></script>
-  <script defer src="comercial.js?v=1604"></script>
-  <script defer src="estoque-comercial.js?v=1604"></script>
-  <script defer src="condicoes-pagamento.js?v=1604"></script>
-  <script defer src="documentos-sienge.js?v=1604"></script>
-  <script defer src="tabelas-vigentes.js?v=1604"></script>
-  <script defer src="controle-comissao.js?v=1604"></script>
-  <script defer src="recebimentos-webro.js?v=1604"></script>
-  <script defer src="scod.js?v=1604"></script>
-  <script defer src="centros-custo.js?v=1604"></script>
-  <script defer src="marketing.js?v=1604"></script>
+  <script defer src="data.js?v=1605"></script>
+  <script defer src="sienge-api.js?v=1605"></script>
+  <script defer src="consumo-api.js?v=1605"></script>
+  <script defer src="azure-auth.js?v=1605"></script>
+  <script defer src="usuarios-online.js?v=1605"></script>
+  <script defer src="auditoria-login.js?v=1605"></script>
+  <script defer src="app.js?v=1605"></script>
+  <script defer src="empresa-filter.js?v=1605"></script>
+  <script defer src="cartao-taxas.js?v=1605"></script>
+  <script defer src="alcada-desconto.js?v=1605"></script>
+  <script defer src="alcada-distrato.js?v=1605"></script>
+  <script defer src="home-dashboard.js?v=1605"></script>
+  <script defer src="anexos.js?v=1605"></script>
+  <script defer src="contas-pagar.js?v=1605"></script>
+    <script defer src="boleto-check.js?v=1605"></script>
+    <script defer src="nota-fiscal-check.js?v=1605"></script>
+    <script defer src="gerar-pagamento.js?v=1605"></script>
+  <script defer src="rydoo.js?v=1605"></script>
+  <script defer src="titulos-incompletos.js?v=1605"></script>
+  <script defer src="compras-previsoes.js?v=1605"></script>
+  <script defer src="compras-controle-financeiro.js?v=1605"></script>
+  <script defer src="compras-dashboard.js?v=1605"></script>
+  <script defer src="caucao-core.js?v=1605"></script>
+  <script defer src="engenharia-caucao.js?v=1605"></script>
+  <script defer src="config-tags.js?v=1605"></script>
+  <script defer src="config-users.js?v=1605"></script>
+  <script defer src="suporte.js?v=1605"></script>
+  <script defer src="construcao.js?v=1605"></script>
+  <script defer src="empresas.js?v=1605"></script>
+  <script defer src="relacionamento.js?v=1605"></script>
+  <script defer src="aditamento.js?v=1605"></script>
+  <script defer src="cessao-direitos.js?v=1605"></script>
+  <script defer src="doc-assinatura.js?v=1605"></script>
+  <script defer src="compromissario.js?v=1605"></script>
+  <script defer src="comercial.js?v=1605"></script>
+  <script defer src="estoque-comercial.js?v=1605"></script>
+  <script defer src="condicoes-pagamento.js?v=1605"></script>
+  <script defer src="documentos-sienge.js?v=1605"></script>
+  <script defer src="tabelas-vigentes.js?v=1605"></script>
+  <script defer src="controle-comissao.js?v=1605"></script>
+  <script defer src="recebimentos-webro.js?v=1605"></script>
+  <script defer src="scod.js?v=1605"></script>
+  <script defer src="centros-custo.js?v=1605"></script>
+  <script defer src="marketing.js?v=1605"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
-  <script defer src="marketing-budget.js?v=1604"></script>
-  <script defer src="plano-financeiro.js?v=1604"></script>
-  <script defer src="orcamento-data.js?v=1604"></script>
-  <script defer src="orcamento-origem.js?v=1604"></script>
-  <script defer src="orcamento-2026.js?v=1604"></script>
-  <script defer src="orcamento.js?v=1604"></script>
-  <script defer src="orcamento-modulo.js?v=1604"></script>
-  <script defer src="prestacao-contas.js?v=1604"></script>
+  <script defer src="marketing-budget.js?v=1605"></script>
+  <script defer src="plano-financeiro.js?v=1605"></script>
+  <script defer src="orcamento-data.js?v=1605"></script>
+  <script defer src="orcamento-origem.js?v=1605"></script>
+  <script defer src="orcamento-2026.js?v=1605"></script>
+  <script defer src="orcamento.js?v=1605"></script>
+  <script defer src="orcamento-modulo.js?v=1605"></script>
+  <script defer src="prestacao-contas.js?v=1605"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script defer src="fluxo-caixa.js?v=1604"></script>
-  <script defer src="orcamento-dfc-2027.js?v=1604"></script>
-  <script defer src="orcamento-dfc.js?v=1604"></script>
-  <script defer src="caixa-diario.js?v=1604"></script>
-  <script defer src="mutuo.js?v=1604"></script>
-  <script defer src="resultado-caixa.js?v=1604"></script>
-  <script defer src="relatorio-honorarios.js?v=1604"></script>
-  <script defer src="investimento.js?v=1604"></script>
-  <script defer src="parametrizacao-parceiro.js?v=1604"></script>
-  <script defer src="societario.js?v=1604"></script>
-  <script defer src="participacoes.js?v=1604"></script>
-  <script defer src="fiscal.js?v=1604"></script>
-  <script defer src="orcamento-estimativas.js?v=1604"></script>
-  <script defer src="fiscal-inserir-nota.js?v=1604"></script>
-  <script defer src="fiscal-enviar-nota.js?v=1604"></script>
-  <script defer src="fiscal-rastrear-pedido.js?v=1604"></script>
-  <script defer src="indexadores.js?v=1604"></script>
-  <script defer src="verificar-construcao.js?v=1604"></script>
-  <script defer src="financiamento.js?v=1604"></script>
-  <script src="repactuacoes.js?v=1604"></script>
-  <script defer src="repactuacao-lote.js?v=1604"></script>
+  <script defer src="fluxo-caixa.js?v=1605"></script>
+  <script defer src="orcamento-dfc-2027.js?v=1605"></script>
+  <script defer src="orcamento-dfc.js?v=1605"></script>
+  <script defer src="caixa-diario.js?v=1605"></script>
+  <script defer src="mutuo.js?v=1605"></script>
+  <script defer src="resultado-caixa.js?v=1605"></script>
+  <script defer src="relatorio-honorarios.js?v=1605"></script>
+  <script defer src="investimento.js?v=1605"></script>
+  <script defer src="parametrizacao-parceiro.js?v=1605"></script>
+  <script defer src="societario.js?v=1605"></script>
+  <script defer src="participacoes.js?v=1605"></script>
+  <script defer src="fiscal.js?v=1605"></script>
+  <script defer src="orcamento-estimativas.js?v=1605"></script>
+  <script defer src="fiscal-inserir-nota.js?v=1605"></script>
+  <script defer src="fiscal-enviar-nota.js?v=1605"></script>
+  <script defer src="fiscal-rastrear-pedido.js?v=1605"></script>
+  <script defer src="indexadores.js?v=1605"></script>
+  <script defer src="verificar-construcao.js?v=1605"></script>
+  <script defer src="financiamento.js?v=1605"></script>
+  <script src="repactuacoes.js?v=1605"></script>
+  <script defer src="repactuacao-lote.js?v=1605"></script>
   
   <!-- Dashboard de Inadimplência -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script defer src="dashboard-inadimplencia.js?v=1604"></script>
+  <script defer src="dashboard-inadimplencia.js?v=1605"></script>
 
   <!-- Modal Compartilhar Lembrete -->
   <div id="share-agenda-modal" class="modal-overlay" style="display: none; z-index: 999999;">

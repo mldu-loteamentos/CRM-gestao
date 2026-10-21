@@ -124,6 +124,7 @@
       { id: "doc_padrao", label: "Documentos Padrões" },
       { id: "empresas", label: "Empresas" },
       { id: "indexadores", label: "Indexadores" },
+      { id: "motivos_cancelamento", label: "Motivos de cancelamento" },
       { id: "plano_financeiro", label: "Plano Financeiro e Visões" },
       { id: "preambulos", label: "Preâmbulos" },
       { id: "upload_mapa", label: "Projeto Urbanístico" },
@@ -200,6 +201,7 @@
     "upload-kmz": { modulo: "configuracoes", subitem: "upload_kmz" },
     "upload-mapa": { modulo: "configuracoes", subitem: "upload_mapa" },
     indexadores: { modulo: "configuracoes", subitem: "indexadores" },
+    "motivos-cancelamento": { modulo: "configuracoes", subitem: "motivos_cancelamento" },
     "documentos-sienge": { modulo: "configuracoes", subitem: "documentos" }
   };
 

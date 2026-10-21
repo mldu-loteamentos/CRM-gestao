@@ -486,6 +486,7 @@ const ConfigUsersApp = {
             { id: "doc_padrao", label: "Documentos Padrões" },
             { id: "empresas", label: "Empresas" },
             { id: "indexadores", label: "Indexadores" },
+            { id: "motivos_cancelamento", label: "Motivos de cancelamento" },
             { id: "plano_financeiro", label: "Plano Financeiro e Visões" },
             { id: "preambulos", label: "Preâmbulos" },
             { id: "upload_mapa", label: "Projeto Urbanístico" },
