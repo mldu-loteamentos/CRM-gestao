@@ -938,27 +938,69 @@ const ResultadoCaixaApp = {
     return s;
   },
 
+  /** Entradas do ano anterior no mesmo recorte do Power BI: receitas (com cancelamentos) e receitas financeiras. */
+  valorPowerBi(arq, ccId, mes, campo, ate) {
+    const dono = arq && arq.contasPorCc && arq.contasPorCc[ccId];
+    if (!dono || !dono.contas) return null;
+    const defs = this.contasEntrada().concat([{ codigos: ["01.04"], filhos: /^01\.04\./ }]);
+    let s = 0;
+    defs.forEach((def) => { s += this.somaCodigos(dono.contas, def, mes, campo, ate); });
+    return s;
+  },
+
+  /** Valor gravado na importação, quando o arquivo não trouxe o detalhe das contas. */
+  valorImportado(arq, lado, ccId, mes, campo, ate) {
+    const bag = arq && arq[lado] && arq[lado][ccId];
+    if (!bag || !bag.meses) return null;
+    const fim = Number(mes);
+    const ini = ate ? 1 : fim;
+    let s = 0;
+    let achou = false;
+    for (let m = ini; m <= fim; m++) {
+      const cel = bag.meses[String(m)];
+      if (!cel) continue;
+      achou = true;
+      s += Number(cel[campo]) || 0;
+    }
+    return achou ? s : null;
+  },
+
   /** Valor do centro de custo somando arquivo por arquivo, cada um no percentual da sua empresa. */
   valorAgrupado(lado, ano, ccId, mes, campo, ate) {
-    if (!this.agrupar) return this.valor(lado, ano, ccId, mes, campo, ate);
     const a = this.anoDados(ano);
     if (!a) return 0;
     const fim = Number(mes);
     const ini = ate ? 1 : fim;
+    const anoAnterior = String(ano) !== String(this.anoAtual());
     let s = 0;
     Object.keys(a.arquivos || {}).forEach((nome) => {
       const arq = a.arquivos[nome];
       if (!arq) return;
+      const pct = this.agrupar ? this.pctArquivo(arq, nome) : 1;
+      if (anoAnterior && lado === "entradas") {
+        const pb = this.valorPowerBi(arq, ccId, mes, campo, ate);
+        if (pb != null) {
+          if (pb) s += pb * pct;
+          return;
+        }
+      }
+      if (anoAnterior) {
+        const gravado = this.valorImportado(arq, lado, ccId, mes, campo, ate);
+        if (gravado != null) {
+          if (gravado) s += gravado * pct;
+          return;
+        }
+      }
       const pelasContas = this.valorContas(arq, lado, ccId, mes, campo, ate);
       if (pelasContas != null) {
-        if (pelasContas) s += pelasContas * this.pctArquivo(arq, nome);
+        if (pelasContas) s += pelasContas * pct;
         return;
       }
       const bag = arq[lado] && arq[lado][ccId];
       if (bag) {
         for (let m = ini; m <= fim; m++) {
           const cel = (bag.meses || {})[String(m)];
-          if (cel) s += (Number(cel[campo]) || 0) * this.pctArquivo(arq, nome);
+          if (cel) s += (Number(cel[campo]) || 0) * pct;
         }
       }
     });
