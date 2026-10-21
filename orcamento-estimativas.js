@@ -550,9 +550,7 @@ const OrcamentoImpostosApp = {
     const token = (this._fcToken = (this._fcToken || 0) + 1);
     try {
       const semForecast = !app.forecasts || !Object.keys(app.forecasts).length;
-      const semAcervo = typeof app.temAcervo === "function" ? !app.temAcervo() : false;
-      if (semForecast && semAcervo && typeof app.lerLocal === "function") app.lerLocal();
-      if (typeof app.carregarNuvem === "function" && !app._nuvemOk) await app.carregarNuvem();
+      if (semForecast && typeof app.lerLocal === "function") app.lerLocal();
       if (typeof app.carregarForecasts === "function") await app.carregarForecasts();
       if (typeof app.normalizarForecastsMemoria === "function") app.normalizarForecastsMemoria();
       if (typeof app.montarVista === "function") app.montarVista();

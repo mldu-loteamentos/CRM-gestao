@@ -495,11 +495,11 @@ const ResultadoCaixaApp = {
   async carregarForecasts() {
     const fx = window.firebaseCollections;
     const db = window.firebaseDb;
-    if (!fx || !db) return;
-    const token = this._nuvemToken || 0;
+    if (!fx || !db || typeof fx.where !== "function") return;
+    const token = (this._fcToken = (this._fcToken || 0) + 1);
     try {
-      const snap = await fx.getDocs(fx.collection(db, "resultado_caixa"));
-      if ((this._nuvemToken || 0) !== token) return;
+      const snap = await fx.getDocs(fx.query(fx.collection(db, "resultado_caixa"), fx.where("tipo", "==", "forecast")));
+      if (this._fcToken !== token) return;
       const nuvem = {};
       const semParte = {};
       snap.forEach((docSnap) => {
@@ -543,7 +543,9 @@ const ResultadoCaixaApp = {
         });
       }
       this.aplicarForecastVista();
-    } catch (e) {}
+    } catch (e) {
+      if (!Object.keys(this.forecasts || {}).length) this.aviso = "Não consegui ler o forecast salvo.";
+    }
   },
 
   empresaDoForecast(cc, nome) {
@@ -1057,6 +1059,8 @@ const ResultadoCaixaApp = {
   empresaId(nomeArquivo) {
     const rot = this.fold(this.nomeEmpresaArquivo(nomeArquivo));
     if (!rot) return 0;
+    const peloNumero = rot.match(/^EMPRESA\s+(\d+)$/);
+    if (peloNumero) return Number(peloNumero[1]);
     const aliases = [
       ["ELLENCO", 12],
       ["TERRA DO ARACARI", 3],
@@ -1921,6 +1925,7 @@ const ResultadoCaixaApp = {
       this.render();
     }
     const leituraVelha = () => (this._nuvemToken || 0) !== token;
+    const forecastP = this.carregarForecasts();
     try {
       const snap = await fx.getDocs(fx.collection(db, "resultado_caixa"));
       if (leituraVelha()) {
@@ -1929,6 +1934,7 @@ const ResultadoCaixaApp = {
       }
       if (snap.empty) {
         if (this.temAcervo()) await this.enviarAcervo();
+        try { await forecastP; } catch (e) {}
         this.lendo = false;
         if (!this._subindo) this.render();
         return;
@@ -1945,10 +1951,10 @@ const ResultadoCaixaApp = {
       this.montarVista();
       this.gravarLocal();
       await this.enviarPendentes();
-      await this.carregarForecasts();
     } catch (e) {
       if (!this.temAcervo()) this.error = "Não consegui ler os arquivos salvos: " + ((e && e.message) || e);
     }
+    try { await forecastP; } catch (e) {}
     this.lendo = false;
     if (!this._subindo) this.render();
   },
@@ -3097,10 +3103,14 @@ const ResultadoCaixaApp = {
       const nomes = Object.keys(arquivos);
       for (let j = 0; j < nomes.length; j++) {
         const arq = arquivos[nomes[j]];
-        if (Number(arq && arq.empresa) === 1) return arq;
+        if (this.empresaDoArquivoMl(nomes[j], arq) === 1) return arq;
       }
     }
     return null;
+  },
+
+  empresaDoArquivoMl(nome, arq) {
+    return Number(arq && arq.empresa) || this.empresaId(nome) || this.empresaId(arq && arq.rotulo) || 0;
   },
 
   bagMes() {
@@ -3239,14 +3249,25 @@ const ResultadoCaixaApp = {
         });
       });
     });
-    const ccMl = new Set(Object.keys((arq && arq.contasPorCc) || {}));
     const mapa = await this.mapaPronto();
     const forecastsAno = Object.keys(this.forecasts || {}).filter((ym) => Number(ym.slice(0, 4)) === Number(ano)).map((ym) => this.forecasts[ym]);
+    const fontesForecast = [];
     forecastsAno.forEach((fcDoc) => {
-      if (!fcDoc || !fcDoc.contas) return;
-      Object.keys(fcDoc.contas).forEach((cc) => {
-        if (ccMl.size && !ccMl.has(String(cc))) return;
+      const por = fcDoc && fcDoc.porArquivo;
+      if (por && typeof por === "object" && !Array.isArray(por)) {
+        Object.keys(por).forEach((nome) => {
+          const fatia = por[nome];
+          if (fatia && this.empresaDoArquivoMl(nome, fatia) === 1) fontesForecast.push({ doc: fatia, filtrarCc: false });
+        });
+        return;
+      }
+      if (fcDoc && fcDoc.contas) fontesForecast.push({ doc: fcDoc, filtrarCc: true });
+    });
+    fontesForecast.forEach((fonte) => {
+      const fcDoc = fonte.doc;
+      Object.keys(fcDoc.contas || {}).forEach((cc) => {
         const nomeCc = (fcDoc.nomes && fcDoc.nomes[cc]) || cc;
+        if (fonte.filtrarCc && this.empresaDoCentro(cc, nomeCc) !== 1) return;
         Object.keys(fcDoc.contas[cc] || {}).forEach((code) => {
           const conta = fcDoc.contas[cc][code];
           const node = this.noDaLinha(FC, mapa, { code: code, nome: conta.nome || "" });
@@ -3436,9 +3457,9 @@ const ResultadoCaixaApp = {
     this.render();
   },
 
-  toggleGrupoMl(qual) {
-    if (qual === "orc") this.mlGrupoOrc = this.mlGrupoOrc === false;
-    else this.mlGrupoFc = this.mlGrupoFc === false;
+  setGrupoMl(qual, on) {
+    if (qual === "orc") this.mlGrupoOrc = !!on;
+    else this.mlGrupoFc = !!on;
     this.render();
   },
 
@@ -3499,9 +3520,19 @@ const ResultadoCaixaApp = {
         ${seg(realOn, "R$", "ResultadoCaixaApp.setEscala('real')")}
         ${seg(!realOn, "R$ milhões", "ResultadoCaixaApp.setEscala('milhoes')")}
       </div>
+      <label class="moura-switch rcx-ml-switch">
+        <input type="checkbox" ${this.mlGrupoOrc !== false ? "checked" : ""} onchange="ResultadoCaixaApp.setGrupoMl('orc', this.checked)">
+        <span class="moura-switch-track" aria-hidden="true"></span>
+        <span class="moura-switch-text">Mostrar orçamento</span>
+      </label>
+      <label class="moura-switch rcx-ml-switch">
+        <input type="checkbox" ${this.mlGrupoFc !== false ? "checked" : ""} onchange="ResultadoCaixaApp.setGrupoMl('fc', this.checked)">
+        <span class="moura-switch-track" aria-hidden="true"></span>
+        <span class="moura-switch-text">Mostrar forecast</span>
+      </label>
       <button type="button" class="rcx-arq-btn" onclick="ResultadoCaixaApp.carregarMl(true)">Atualizar</button>
     </div>
-    <p class="rcx-ajuda">Moura Leite, exercício ${ano}. Até ${this.MESES[sel - 1]} o realizado sai da API. O acumulado anterior compara o orçado dos relatórios com esse realizado. Os meses seguintes comparam o orçado com o forecast.</p>`;
+    <p class="rcx-ajuda">Empresa 1, exercício ${ano}. Até ${this.MESES[sel - 1]} o realizado sai do Sienge, só desta empresa. O acumulado anterior compara o orçado da empresa 1 com esse realizado. Os meses seguintes comparam o orçado com o forecast da empresa 1.</p>`;
     if (this.mlLendo) return barra + this.loaderHtml();
     if (this.mlErro) return barra + `<div class="rcx-erro">${caixaEsc(this.mlErro)}</div>`;
     const dados = this.mlDados;
@@ -3515,24 +3546,20 @@ const ResultadoCaixaApp = {
     for (let m = sel + 1; m <= 12; m++) cols.push({ id: String(m), nome: this.MESES[m - 1], futuro: true });
     const passados = cols.filter((c) => !c.futuro);
     const futuros = cols.filter((c) => c.futuro);
-    const orcAberto = this.mlGrupoOrc !== false;
-    const fcAberto = this.mlGrupoFc !== false;
-    const botaoGrupo = (aberto, qual, rotulo) => `<button type="button" class="rcx-ml-grupo-btn" title="${aberto ? "Ocultar colunas" : "Mostrar colunas"}" onclick="event.stopPropagation();ResultadoCaixaApp.toggleGrupoMl('${qual}')">${aberto ? "−" : "+"}</button> ${rotulo}`;
+    const orcAberto = this.mlGrupoOrc !== false && futuros.length > 0;
+    const fcAberto = this.mlGrupoFc !== false && futuros.length > 0;
     const head1 = passados.map((c, i) => `<th colspan="4" class="rcx-ml-grupo${i ? " is-sep" : ""}"><button type="button" class="rcx-ml-abre${this.mlFatia === c.id ? " is-on" : ""}" onclick="ResultadoCaixaApp.toggleFatia('${c.id}')">${caixaEsc(c.nome)}</button></th>`).join("")
-      + (futuros.length
-        ? `<th colspan="${orcAberto ? futuros.length : 1}" class="rcx-ml-grupo is-orc is-sep">${botaoGrupo(orcAberto, "orc", "Orçado")}</th><th colspan="${fcAberto ? futuros.length : 1}" class="rcx-ml-grupo is-fcst">${botaoGrupo(fcAberto, "fc", "Forecast")}</th>`
-        : "");
+      + (orcAberto ? `<th colspan="${futuros.length}" class="rcx-ml-grupo is-orc is-sep">Orçado</th>` : "")
+      + (fcAberto ? `<th colspan="${futuros.length}" class="rcx-ml-grupo is-fcst">Forecast</th>` : "");
     const head2 = passados.map((c, i) => {
       const sep = i ? " is-sep" : "";
       return `<th class="${sep}">Orçado</th><th>Realizado</th><th>Var. %</th><th>Var. R$</th>`;
     }).join("")
-      + (futuros.length
-        ? (orcAberto
-          ? futuros.map((c, i) => `<th class="is-orc${i ? "" : " is-sep"}"><button type="button" class="rcx-ml-abre${this.mlFatia === c.id ? " is-on" : ""}" onclick="ResultadoCaixaApp.toggleFatia('${c.id}')">${caixaEsc(c.nome)}</button><span class="rcx-ml-sub">ORÇ.</span></th>`).join("")
-          : `<th class="is-orc is-sep is-dobra"></th>`)
-          + (fcAberto
-            ? futuros.map((c) => `<th class="is-fcst"><span class="rcx-ml-f">F</span><button type="button" class="rcx-ml-abre${this.mlFatia === c.id ? " is-on" : ""}" onclick="ResultadoCaixaApp.toggleFatia('${c.id}')">${caixaEsc(c.nome)}</button><span class="rcx-ml-sub">FORECAST</span></th>`).join("")
-            : `<th class="is-fcst is-dobra"></th>`)
+      + (orcAberto
+        ? futuros.map((c, i) => `<th class="is-orc${i ? "" : " is-sep"}"><button type="button" class="rcx-ml-abre${this.mlFatia === c.id ? " is-on" : ""}" onclick="ResultadoCaixaApp.toggleFatia('${c.id}')">${caixaEsc(c.nome)}</button><span class="rcx-ml-sub">ORÇ.</span></th>`).join("")
+        : "")
+      + (fcAberto
+        ? futuros.map((c) => `<th class="is-fcst"><span class="rcx-ml-f">F</span><button type="button" class="rcx-ml-abre${this.mlFatia === c.id ? " is-on" : ""}" onclick="ResultadoCaixaApp.toggleFatia('${c.id}')">${caixaEsc(c.nome)}</button><span class="rcx-ml-sub">FORECAST</span></th>`).join("")
         : "");
     const cel = (v, cls) => `<td class="${cls || ""}">${this.mlNum(v)}</td>`;
     const bloco = (meses) => {
@@ -3543,14 +3570,8 @@ const ResultadoCaixaApp = {
         return cel(f.a, sep) + cel(f.b) + `<td>${this.mlPct(f.a, f.b)}</td>` + cel(f.b - f.a, neg);
       }).join("");
       let futurosHtml = "";
-      if (futuros.length) {
-        if (orcAberto) {
-          futurosHtml += futuros.map((c, i) => cel(this.fatiaMl(meses, c.id, sel).a, "is-orc" + (i ? "" : " is-sep"))).join("");
-        } else futurosHtml += `<td class="is-dobra is-sep"></td>`;
-        if (fcAberto) {
-          futurosHtml += futuros.map((c) => cel(this.fatiaMl(meses, c.id, sel).b, "is-fcst")).join("");
-        } else futurosHtml += `<td class="is-dobra"></td>`;
-      }
+      if (orcAberto) futurosHtml += futuros.map((c, i) => cel(this.fatiaMl(meses, c.id, sel).a, "is-orc" + (i ? "" : " is-sep"))).join("");
+      if (fcAberto) futurosHtml += futuros.map((c) => cel(this.fatiaMl(meses, c.id, sel).b, "is-fcst")).join("");
       const t = this.totaisMl(meses, sel);
       const ytg = futuros.reduce((s, c) => s + (Number(this.fatiaMl(meses, c.id, sel).b) || 0), 0);
       return pedacos + futurosHtml + cel(t.oAno, "is-tot is-sep") + cel(t.real, "is-tot") + cel(t.com, "is-tot is-tot-fc") + cel(ytg, "is-tot is-ytg");
@@ -3588,7 +3609,8 @@ const ResultadoCaixaApp = {
       });
     });
     const span = passados.length * 4
-      + (futuros.length ? ((orcAberto ? futuros.length : 1) + (fcAberto ? futuros.length : 1)) : 0)
+      + (orcAberto ? futuros.length : 0)
+      + (fcAberto ? futuros.length : 0)
       + 4;
     let painel = "";
     if (this.mlFatia) {

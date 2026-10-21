@@ -18775,27 +18775,34 @@ function renegNumBr(n, casas) {
   return Number(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: casas, maximumFractionDigits: casas });
 }
 
-/** Por que a modalidade aberta é a que o operador pode usar neste cliente. */
-function renegPorqueFechada(k, faixa) {
+function renegPctTxt(pct, marcos) {
+  const n = Number(pct) || 0;
+  const inteiro = Math.round(n);
+  const conflita = (marcos || []).some((m) => (inteiro >= m) !== (n >= m) || (inteiro > m) !== (n > m));
+  if (conflita) return n.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
+  return inteiro + "%";
+}
+
+/** Uma frase curta para cada modalidade que este cliente não pode usar. */
+function renegFraseFechada(k, faixa) {
   const mods = faixa.mods;
   const pct = Number(faixa.pctPago) || 0;
-  const pmp = Number(faixa.pmp) || 0;
+  const pmp = Math.round(Number(faixa.pmp) || 0);
   const acordos = Number(faixa.acordos) || 0;
-  const pctTxt = renegNumBr(pct, 1) + "%";
-  const pmpTxt = Math.round(pmp) + (Math.round(pmp) === 1 ? " dia" : " dias");
-  if (k === "somar") return "Somar ficou fechada: o pago (" + pctTxt + ") não está abaixo de " + mods.somar.pctPagoMax + "%.";
+  const pctTxt = renegPctTxt(pct, [mods.somar.pctPagoMax, mods.diluir.pctPagoMin, mods.deslocar.pctPagoMin]);
+  if (k === "somar") return "Somar está fechada: o pago (" + pctTxt + ") já não está abaixo de " + mods.somar.pctPagoMax + "%.";
   if (k === "deslocar") {
     const falhas = [];
     if (!(pct > mods.deslocar.pctPagoMin)) falhas.push("o pago (" + pctTxt + ") não passa de " + mods.deslocar.pctPagoMin + "%");
-    if (!(acordos <= mods.deslocar.maxAcordos)) falhas.push("já há " + (acordos === 1 ? "1 acordo" : acordos + " acordos") + ", acima do máximo de " + mods.deslocar.maxAcordos);
-    return "Deslocar ficou fechada: " + (falhas.join(" e ") || "o perfil não fecha") + ".";
+    if (!(acordos <= mods.deslocar.maxAcordos)) falhas.push(acordos === 1 ? "já existe 1 acordo anterior" : "já existem " + acordos + " acordos anteriores");
+    return "Deslocar está fechada: " + (falhas.join(" e ") || "as condições não fecham") + ".";
   }
   if (k === "diluir") {
     const falhas = [];
-    if (acordos !== 0) falhas.push(acordos === 1 ? "já há 1 acordo" : "já há " + acordos + " acordos");
     if (!(pct > mods.diluir.pctPagoMin)) falhas.push("o pago (" + pctTxt + ") não passa de " + mods.diluir.pctPagoMin + "%");
-    if (!(pmp <= mods.diluir.pmpMax)) falhas.push("o PMP (" + pmpTxt + ") passa de " + mods.diluir.pmpMax + " dias");
-    return "Diluir ficou fechada: " + (falhas.join(", ") || "o perfil de deslocar não se aplica") + ".";
+    if (!(pmp <= mods.diluir.pmpMax)) falhas.push("o atraso médio (" + pmp + " dias) passa de " + mods.diluir.pmpMax + " dias");
+    if (acordos !== 0) falhas.push(acordos === 1 ? "já existe 1 acordo anterior" : "já existem " + acordos + " acordos anteriores");
+    return "Diluir está fechada: " + (falhas.join(" e ") || "as condições não fecham") + ".";
   }
   return "";
 }
@@ -18805,51 +18812,35 @@ function renegPorqueLiberada(valor) {
   if (!faixa || !faixa.perm || !faixa.perm[valor]) return "";
   const mods = faixa.mods;
   const pct = Number(faixa.pctPago) || 0;
-  const pmp = Number(faixa.pmp) || 0;
+  const pmp = Math.round(Number(faixa.pmp) || 0);
   const acordos = Number(faixa.acordos) || 0;
-  const pctTxt = renegNumBr(pct, 1) + "%";
-  const pmpTxt = Math.round(pmp) + (Math.round(pmp) === 1 ? " dia" : " dias");
-  const acTxt = acordos === 0 ? "não tem acordo anterior" : (acordos === 1 ? "tem 1 acordo anterior" : "tem " + acordos + " acordos anteriores");
-  const nomes = { diluir: "Diluir", somar: "Somar", deslocar: "Deslocar" };
-  const internas = ["diluir", "somar", "deslocar"];
+  const pctTxt = renegPctTxt(pct, [mods.somar.pctPagoMax, mods.diluir.pctPagoMin, mods.deslocar.pctPagoMin]);
+  const acTxt = acordos === 0 ? "Nenhum acordo anterior." : (acordos === 1 ? "1 acordo anterior." : acordos + " acordos anteriores.");
+  const fatos = "Pagou " + pctTxt + " do contrato. Atraso médio de " + pmp + (pmp === 1 ? " dia." : " dias.") + " " + acTxt;
   let aberta = "";
   if (valor === "somar") {
-    aberta = "Somar foi liberada porque este cliente pagou " + pctTxt + " do contrato, abaixo de " + mods.somar.pctPagoMax + "%.";
+    aberta = "Somar está aberta: vale para quem pagou menos de " + mods.somar.pctPagoMax + "%.";
   } else if (valor === "deslocar") {
-    aberta = "Deslocar foi liberada porque este cliente pagou " + pctTxt + ", acima de " + mods.deslocar.pctPagoMin + "%, e " + acTxt + " (o máximo é " + mods.deslocar.maxAcordos + ").";
+    aberta = "Deslocar está aberta: o pago passa de " + mods.deslocar.pctPagoMin + "% e há no máximo " + mods.deslocar.maxAcordos + " acordo anterior.";
   } else if (valor === "cartao") {
-    aberta = "Cartão de crédito foi liberado porque esta forma não depende do percentual pago, do PMP nem de acordos anteriores.";
+    aberta = "Cartão de crédito está aberto em qualquer situação e não pede sinal.";
   } else if (valor === "diluir") {
     const direto = acordos === 0 && pct > mods.diluir.pctPagoMin && pmp <= mods.diluir.pmpMax;
-    const peloDeslocar = pct > mods.deslocar.pctPagoMin && acordos <= mods.deslocar.maxAcordos;
-    if (direto && peloDeslocar) aberta = "Diluir foi liberada pelos dois caminhos: nenhum acordo anterior, pago de " + pctTxt + " (acima de " + mods.diluir.pctPagoMin + "%) e PMP de " + pmpTxt + " (até " + mods.diluir.pmpMax + " dias), e também pelo perfil de deslocar.";
-    else if (direto) aberta = "Diluir foi liberada porque não há acordo anterior, o pago é " + pctTxt + " (acima de " + mods.diluir.pctPagoMin + "%) e o PMP é " + pmpTxt + " (até " + mods.diluir.pmpMax + " dias).";
-    else aberta = "Diluir foi liberada porque este cliente entra no perfil de deslocar: pagou " + pctTxt + " (acima de " + mods.deslocar.pctPagoMin + "%) e " + acTxt + ".";
+    aberta = direto
+      ? "Diluir está aberta: nenhum acordo anterior, pago acima de " + mods.diluir.pctPagoMin + "% e atraso médio de até " + mods.diluir.pmpMax + " dias."
+      : "Diluir está aberta porque este cliente também pode deslocar: pagou mais de " + mods.deslocar.pctPagoMin + "% e tem no máximo " + mods.deslocar.maxAcordos + " acordo anterior.";
   }
-  const fechadas = internas.filter((k) => k !== valor && !faixa.perm[k]);
-  const abertasJunto = internas.filter((k) => k !== valor && faixa.perm[k]);
-  let extra = "";
-  if (valor !== "cartao" && !abertasJunto.length && fechadas.length) {
-    extra = " É o único acordo interno liberado. " + fechadas.map((k) => renegPorqueFechada(k, faixa)).join(" ");
-  } else if (fechadas.length) {
-    extra = " " + fechadas.map((k) => renegPorqueFechada(k, faixa)).join(" ");
-  }
-  if (valor !== "cartao" && abertasJunto.length) extra += " " + abertasJunto.map((k) => nomes[k]).join(" e ") + " também ficou liberada.";
-  if (valor !== "cartao") extra += " Cartão de crédito permanece liberado.";
-  if (valor === "cartao") {
-    const soInterna = internas.filter((k) => faixa.perm[k]);
-    const fora = internas.filter((k) => !faixa.perm[k]);
-    if (soInterna.length === 1) extra = " No acordo interno, só " + nomes[soInterna[0]] + " entrou. " + fora.map((k) => renegPorqueFechada(k, faixa)).join(" ");
-    else if (fora.length) extra = " " + fora.map((k) => renegPorqueFechada(k, faixa)).join(" ");
-  }
-  return aberta + extra;
+  const fechadas = ["diluir", "somar", "deslocar"].filter((k) => k !== valor && !faixa.perm[k]).map((k) => renegFraseFechada(k, faixa));
+  const linhas = [fatos, aberta].concat(fechadas);
+  if (valor !== "cartao") linhas.push("Cartão de crédito continua disponível.");
+  return linhas.filter(Boolean).join("\n");
 }
 
 const RENEG_MODALIDADES = {
-  diluir: "As parcelas marcadas, vencidas ou a vencer, viram um saldo. Depois do sinal, esse saldo é dividido entre todas as outras parcelas a vencer do contrato, pela Tabela Price com a taxa do contrato. O cliente fica sem parcelas novas: cada parcela a vencer recebe um acréscimo.",
-  somar: "As parcelas marcadas, vencidas ou a vencer, viram um saldo. Depois do sinal, esse saldo vira N parcelas pela Tabela Price com a taxa do contrato. Cada uma é somada a uma das próximas parcelas a vencer, no mesmo vencimento; as demais seguem com o valor original. N vai até a quantidade de parcelas a vencer.",
-  deslocar: "Depois do sinal, o saldo das parcelas marcadas vira um acordo à parte em N parcelas, pela Tabela Price com a taxa do contrato, a partir do 1º vencimento escolhido. As parcelas a vencer do contrato passam para depois da última parcela do acordo.",
-  cartao: "O saldo das parcelas marcadas vai para o cartão de crédito, em até 12 vezes e sem sinal. A taxa depende da bandeira e é repassada ao cliente ou absorvida pela empresa, conforme a configuração. O Integra gera o link de pagamento."
+  diluir: "As parcelas marcadas viram um saldo. Depois do sinal, esse saldo é repartido entre as parcelas que ainda vão vencer. Não nasce parcela nova: cada uma das que faltam fica um pouco maior.",
+  somar: "As parcelas marcadas viram um saldo. Depois do sinal, esse saldo vira até 6 parcelas e cada uma é somada a uma das próximas que vão vencer, no mesmo dia. As outras parcelas continuam iguais.",
+  deslocar: "Depois do sinal, o saldo das parcelas marcadas vira um acordo separado. As parcelas que ainda vão vencer do contrato passam para depois da última parcela desse acordo.",
+  cartao: "O saldo vai para o cartão, em até 12 vezes, sem sinal. O Integra gera o link de pagamento."
 };
 
 /** Lista própria sobre o select nativo: ao passar o mouse em cada modalidade, uma caixa explica o que ela faz. */
@@ -19076,19 +19067,102 @@ function renegPreencherSinal(min, max) {
   return pick;
 }
 
+function renegParcelasDoContrato(sale) {
+  const atual = window.AppState && Array.isArray(AppState.currentContractInstallments) ? AppState.currentContractInstallments : [];
+  if (atual.length) return atual;
+  return (sale && Array.isArray(sale.installments)) ? sale.installments : [];
+}
+
+/** Mesma conta do velocímetro da ficha: recebimentos ÷ valor original das parcelas. */
+function renegSomarPago(inst) {
+  const recs = Array.isArray(inst && inst.receipts) ? inst.receipts : [];
+  let pago = 0;
+  let liquido = 0;
+  let qtd = 0;
+  if (recs.length) {
+    recs.forEach((rec) => {
+      if (typeof window.isWriteOffReceipt === "function" && window.isWriteOffReceipt(rec)) return;
+      const bruto = Number(rec.receiptValue) || 0;
+      if (!(bruto > 0)) return;
+      pago += bruto;
+      liquido += Number(rec.netReceiptValue != null ? rec.netReceiptValue : bruto) || 0;
+      qtd += 1;
+    });
+    return { pago: pago, liquido: liquido, qtd: qtd };
+  }
+  const rid = String((inst && (inst.receiptId || inst.receiptType)) || "");
+  if (rid === "3" || rid === "7") return { pago: 0, liquido: 0, qtd: 0 };
+  const principal = Number(inst && inst.principalPaid) || 0;
+  if (principal > 0) return { pago: principal, liquido: principal, qtd: 1 };
+  if (inst && (inst.isValidReceipt || Number(inst.installmentSituation) === 2)) {
+    const bruto = Number(inst.receiptValue) || 0;
+    if (bruto > 0) return { pago: bruto, liquido: bruto, qtd: 1 };
+  }
+  return { pago: 0, liquido: 0, qtd: 0 };
+}
+
+function renegPctPagoContrato(sale) {
+  const insts = renegParcelasDoContrato(sale);
+  let original = 0;
+  let pago = 0;
+  insts.forEach((inst) => {
+    original += Number(inst && inst.originalValue != null ? inst.originalValue : inst && inst.value) || 0;
+    pago += renegSomarPago(inst).pago;
+  });
+  return original > 0.009 ? (pago / original) * 100 : 0;
+}
+
+function renegSituacaoContrato(sale) {
+  const insts = renegParcelasDoContrato(sale);
+  const today = typeof window.todayIsoLocal === "function" ? window.todayIsoLocal() : new Date().toISOString().slice(0, 10);
+  let original = 0;
+  let pago = 0;
+  let liquido = 0;
+  let qtdPagas = 0;
+  let qtdVencidas = 0;
+  let valorVencidas = 0;
+  let qtdAVencer = 0;
+  let valorAVencer = 0;
+  insts.forEach((inst) => {
+    original += Number(inst && inst.originalValue != null ? inst.originalValue : inst && inst.value) || 0;
+    const rec = renegSomarPago(inst);
+    pago += rec.pago;
+    liquido += rec.liquido;
+    qtdPagas += rec.qtd;
+    const cb = Number(inst && inst.currentBalance);
+    const saldo = Number.isFinite(cb) ? cb : 0;
+    if (!(saldo > 0.009)) return;
+    const vencida = typeof window.installmentIsChargeOverdue === "function" && window.installmentIsChargeOverdue(inst, today);
+    if (vencida) {
+      qtdVencidas += 1;
+      valorVencidas += contractInstallmentOverdueUpdated(inst, today);
+    } else {
+      qtdAVencer += 1;
+      valorAVencer += saldo;
+    }
+  });
+  const pct = original > 0.009 ? Math.round((pago / original) * 100) : 0;
+  return {
+    original: original,
+    pago: pago,
+    liquido: liquido > 0.009 ? liquido : pago,
+    qtdPagas: qtdPagas,
+    qtdVencidas: qtdVencidas,
+    valorVencidas: valorVencidas,
+    qtdAVencer: qtdAVencer,
+    valorAVencer: valorAVencer,
+    pct: pct,
+    totalParc: qtdPagas + qtdVencidas + qtdAVencer,
+    totalValor: (liquido > 0.009 ? liquido : pago) + valorVencidas + valorAVencer
+  };
+}
+
 function renegAplicarFaixaModalidade() {
   const mods = window.renegModalidadesConfig();
-  let totalValue = 0;
-  let totalPaid = 0;
-  if (g_renegSale && g_renegSale.installments) {
-    g_renegSale.installments.forEach((inst) => {
-      totalValue += (inst.value || 0);
-      totalPaid += (inst.principalPaid || 0);
-    });
-  }
-  const pctPago = totalValue > 0 ? (totalPaid / totalValue) * 100 : 0;
+  const parcelasContrato = renegParcelasDoContrato(g_renegSale);
+  const pctPago = renegPctPagoContrato(g_renegSale);
   const pmp = window.currentCustomerStats ? (window.currentCustomerStats.pmp || 0) : 0;
-  const acordos = window.renegContarAcordos(g_renegSale);
+  const acordos = window.renegContarAcordos(parcelasContrato.length ? { installments: parcelasContrato } : g_renegSale);
   const perm = window.renegModalidadePermitida(mods, pctPago, pmp, acordos);
   const sel = document.getElementById("reneg-payment-method");
   if (sel) {
@@ -19185,11 +19259,11 @@ function calculateRenegotiation() {
   if (mathSinalRow) mathSinalRow.style.display = isCartao ? "none" : "flex";
   if (cenarioHint) {
     cenarioHint.textContent = cenario === "diluir"
-      ? "Depois do sinal, as parcelas selecionadas — vencidas ou não — se diluem nas demais não vencidas, com a taxa do contrato."
+      ? "Depois do sinal, o saldo das parcelas marcadas é repartido nas que ainda vão vencer. Cada uma delas fica um pouco maior."
       : (cenario === "somar"
-        ? "Depois do sinal, as parcelas selecionadas — vencidas ou não — viram N parcelas com a taxa do contrato, somadas às próximas parcelas a vencer."
+        ? "Depois do sinal, o saldo vira até 6 parcelas e cada uma é somada à próxima que vai vencer. O restante do contrato não muda."
         : (cenario === "deslocar"
-          ? "Depois do sinal, as parcelas selecionadas viram um acordo à parte. Cada parcela fica em até " + (Number(faixaMod.tetoParcelaPct) || 110) + "% da parcela atual, e as parcelas a vencer continuam depois do acordo."
+          ? "Depois do sinal, o saldo vira um acordo separado. As parcelas que ainda vão vencer passam para depois dele. Cada parcela nova fica em até " + (Number(faixaMod.tetoParcelaPct) || 110) + "% da parcela atual."
           : "O saldo vai para o cartão, na bandeira e no número de parcelas escolhidos."));
   }
 
@@ -20042,7 +20116,7 @@ window.atualizarBotaoReneg = function() {
   }
   const p = renegPropostaAtual();
   const pago = p && window.renegPropostaEstaAtiva(p) && window.renegSinalFoiPago(p.sinalValue, String(p.createdAt || "").slice(0, 10));
-  label.textContent = pago ? "Gerar termo de confissão de dívida" : "Gerar termo de proposta";
+  label.textContent = pago ? "Gerar termo de confissão de dívida" : "Gerar proposta de acordo";
 };
 
 function renegMontarAvisoProposta(p, pago) {

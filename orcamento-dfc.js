@@ -149,10 +149,23 @@ const OrcamentoDfcApp = {
     return String(code || "").replace(/\s/g, "");
   },
 
+  empresaDoArquivo(arq) {
+    const n = Number(arq && arq.empresa) || 0;
+    if (n) return String(n);
+    const app = window.ResultadoCaixaApp;
+    const rotulo = (arq && (arq.rotulo || arq.nome)) || "";
+    if (app && typeof app.empresaId === "function") {
+      const id = app.empresaId(rotulo);
+      if (id) return String(id);
+    }
+    const m = String(rotulo).match(/(\d+)\s*$/);
+    return m ? String(Number(m[1])) : "";
+  },
+
   empresaCabe(arq) {
     const emp = new Set(this.selectedCompanyIds.map(String));
     if (!emp.size) return true;
-    return emp.has(String((arq && arq.empresa) || ""));
+    return emp.has(this.empresaDoArquivo(arq));
   },
 
   ccCabe(cc) {
@@ -719,7 +732,14 @@ const OrcamentoDfcApp = {
 
   async lerForecastsSalvos(app) {
     if (!app) return;
-    if (app.forecasts && Object.keys(app.forecasts).length) return;
+    const mesesFc = ["2026-10", "2026-11", "2026-12"];
+    const jaTem = app.forecasts && mesesFc.some((ym) => {
+      const doc = app.forecasts[ym];
+      if (!doc) return false;
+      const por = doc.porArquivo;
+      return (por && typeof por === "object" && Object.keys(por).length) || (doc.contas && Object.keys(doc.contas).length);
+    });
+    if (jaTem) return;
     const fx = window.firebaseCollections;
     const db = window.firebaseDb;
     if (!fx || !db || typeof fx.query !== "function" || typeof fx.where !== "function") return;

@@ -3993,7 +3993,7 @@ circle.donut-segment {
 .fc-consult-btn.is-dirty { box-shadow: 0 0 0 2px #f59e0b; }
 .rcx-page { padding: 4px 2px 24px; min-width: 0; max-width: 100%; }
 .rcx-tabs { margin-bottom: 18px; max-width: 100%; }
-.rcx-toolbar { gap: 14px 18px; margin-bottom: 14px; padding: 12px 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; }
+.rcx-toolbar { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 14px 18px; margin-bottom: 14px; padding: 12px 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; }
 .rcx-toolbar .cc-toolbar-actions { gap: 10px; }
 .rcx-field { display: flex; flex-direction: column; gap: 0; }
 .rcx-select { height: 36px; min-width: 150px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; padding: 0 10px; font-size: 0.82rem; font-weight: 600; color: #0f172a; }
@@ -9822,7 +9822,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .rmod-dica {
   position: fixed;
   z-index: 100011;
-  width: 360px;
+  width: 400px;
   max-width: calc(100vw - 16px);
   padding: 10px 12px;
   background: #fff;
@@ -9837,7 +9837,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 }
 .rmod-dica b { display: block; margin-bottom: 4px; color: #105436; font-size: 0.82rem; }
 .rmod-dica p { margin: 0; }
-.rmod-dica .rmod-porque { margin-top: 8px; padding-top: 8px; border-top: 1px solid #e2e8f0; color: #0f172a; }
+.rmod-dica .rmod-porque { margin-top: 8px; padding-top: 8px; border-top: 1px solid #e2e8f0; color: #0f172a; white-space: pre-line; }
 
 /* Segurança · Auditoria do Login Sienge */
 .alog-page { padding: 16px 18px 28px; display: flex; flex-direction: column; gap: 12px; }
@@ -10373,7 +10373,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .rcx-ml thead th.is-tot-fc,
 .rcx-ml thead th.is-ytg { background: #F37021; color: #fff; }
 .rcx-ml tbody td.is-neg { color: #b91c1c; }
-.rcx-ml-grupo-btn { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-right: 4px; border: 1px solid currentColor; border-radius: 2px; background: transparent; color: inherit; font: inherit; font-weight: 800; line-height: 1; cursor: pointer; vertical-align: middle; }
+.rcx-ml-switch { align-self: flex-end; margin-bottom: 2px; }
 .rcx-ml thead th.is-dobra, .rcx-ml td.is-dobra { min-width: 28px; width: 28px; padding: 4px; }
 .rcx-ml-sub, .rcx-ml-f { display: block; font-size: 0.62rem; font-weight: 800; letter-spacing: 0.04em; }
 .rcx-ml thead tr:nth-child(2) th.is-fcst .rcx-ml-abre,
