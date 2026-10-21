@@ -659,7 +659,7 @@ const OrcamentoImpostosApp = {
       const nomeCheio = row.id + " - " + OrcEst.norm(row.nome);
       const nome = OrcEst.esc(nomeCheio);
       const id = OrcEst.esc(row.id);
-      const celulas = pago.slice(0, 12).map((v, i) => this.cel(v, row.id, i === 0 ? "PIS e COFINS do forecast de dezembro de 2026 e trimestre de outubro a dezembro" : "")).join("");
+      const celulas = pago.slice(0, 12).map((v, i) => this.cel(v, row.id, this.memoriaPago(row, i))).join("");
       const det = aberto ? `<tr class="orc-imp-det-row"><td colspan="15">${this.detalhe(row)}</td></tr>` : "";
       return `<tr class="${aberto ? "is-open" : ""}">
         <td class="orc-imp-nome" data-est-id="${id}" title="${nome}"><i data-lucide="${aberto ? "chevron-down" : "chevron-right"}"></i><span>${nome}</span><small class="${chip.cls}">${chip.txt}</small></td>
@@ -682,7 +682,7 @@ const OrcamentoImpostosApp = {
           </tr></tfoot>
         </table>
       </div>
-      <p class="orc-est-nota">Janeiro de 2027 usa o forecast de 2026. Receita de centro de custo de parceiro, e de centro com o imposto desmarcado, fica de fora. A taxa de cessão entra na venda de lotes quando o plano marca essa conta nessa base. Clique na empresa para ver a receita de cada mês e o mês em que o imposto é pago.</p>`;
+      <p class="orc-est-nota">Janeiro de 2027 usa o forecast de 2026. Receita de centro de custo de parceiro, e de centro com o imposto desmarcado, fica de fora. A taxa de cessão entra na venda de lotes quando o plano marca essa conta nessa base. A coluna Vendas é a receita integral. As redutoras ficam à parte e entram abatidas na base do imposto. Passe o mouse no valor para ver a conta do PIS, do COFINS, do IRPJ e da CSLL.</p>`;
     const tab = body.querySelector(".orc-imp-tab");
     if (tab) tab.addEventListener("click", (ev) => {
       const el = ev.target.closest("[data-est-id]");
@@ -694,9 +694,173 @@ const OrcamentoImpostosApp = {
 
   cel(v, id, title) {
     const cheio = v == null ? "" : OrcEst.money(v);
-    const dica = [cheio, title].filter(Boolean).join(". ");
+    const dica = title ? (cheio ? cheio + "\n" + title : title) : cheio;
     const texto = v == null ? "—" : this.moneyGrade(v);
-    return `<td data-est-id="${OrcEst.esc(id)}" title="${OrcEst.esc(dica)}">${texto}</td>`;
+    return `<td data-est-id="${OrcEst.esc(id)}" title="${OrcEst.esc(dica).replace(/\n/g, "&#10;")}">${texto}</td>`;
+  },
+
+  vendaIntegral(liquido, red) {
+    return (Number(liquido) || 0) - (Number(red) || 0);
+  },
+
+  aliTxt(n) {
+    return (Number(n) || 0).toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "%";
+  },
+
+  baseMes(row, i) {
+    return {
+      vendas: row.vendas[i] || 0,
+      servicos: row.servicos[i] || 0,
+      financeiras: row.financeiras[i] || 0,
+      redV: row.redV[i] || 0,
+      redS: row.redS[i] || 0,
+      redF: row.redF[i] || 0
+    };
+  },
+
+  somarBases(bases) {
+    const acc = { vendas: 0, servicos: 0, financeiras: 0, redV: 0, redS: 0, redF: 0 };
+    (bases || []).forEach((b) => {
+      if (!b) return;
+      acc.vendas += Number(b.vendas) || 0;
+      acc.servicos += Number(b.servicos) || 0;
+      acc.financeiras += Number(b.financeiras) || 0;
+      acc.redV += Number(b.redV) || 0;
+      acc.redS += Number(b.redS) || 0;
+      acc.redF += Number(b.redF) || 0;
+    });
+    return acc;
+  },
+
+  linhasReceita(b) {
+    const mo = (v) => OrcEst.money(v);
+    const linhas = [];
+    linhas.push("Vendas " + mo(this.vendaIntegral(b.vendas, b.redV)));
+    if (Math.abs(Number(b.redV) || 0) >= 0.5) linhas.push("Redutoras " + mo(b.redV));
+    linhas.push("Base de vendas " + mo(b.vendas));
+    if (Math.abs(Number(b.servicos) || 0) >= 0.5 || Math.abs(Number(b.redS) || 0) >= 0.5) {
+      if (Math.abs(Number(b.redS) || 0) >= 0.5) {
+        linhas.push("Serviços " + mo(this.vendaIntegral(b.servicos, b.redS)));
+        linhas.push("Red. serviços " + mo(b.redS));
+      }
+      linhas.push("Base de serviços " + mo(b.servicos));
+    }
+    if (Math.abs(Number(b.financeiras) || 0) >= 0.5 || Math.abs(Number(b.redF) || 0) >= 0.5) {
+      if (Math.abs(Number(b.redF) || 0) >= 0.5) {
+        linhas.push("Aplicações " + mo(this.vendaIntegral(b.financeiras, b.redF)));
+        linhas.push("Red. aplicações " + mo(b.redF));
+      }
+      linhas.push("Base de aplicações " + mo(b.financeiras));
+    }
+    return linhas;
+  },
+
+  basePisDe(b, ali) {
+    return (Number(b.vendas) || 0) + (Number(b.servicos) || 0) + (ali.financNoPis ? (Number(b.financeiras) || 0) : 0);
+  },
+
+  memoriaPis(ali, b, rotulo, pagoEm) {
+    const mo = (v) => OrcEst.money(v);
+    const base = this.basePisDe(b, ali);
+    const pis = base > 0 ? base * ali.pis / 100 : 0;
+    const linhas = ["PIS de " + rotulo + (pagoEm ? ", pago em " + pagoEm : "")];
+    linhas.push.apply(linhas, this.linhasReceita(b));
+    if (!ali.financNoPis && Math.abs(Number(b.financeiras) || 0) >= 0.5) linhas.push("Aplicações não entram no PIS.");
+    linhas.push("Base do PIS " + mo(base) + " × " + this.aliTxt(ali.pis) + " = " + mo(pis));
+    return linhas;
+  },
+
+  memoriaCofins(ali, b, rotulo, pagoEm) {
+    const mo = (v) => OrcEst.money(v);
+    const base = this.basePisDe(b, ali);
+    const cofins = base > 0 ? base * ali.cofins / 100 : 0;
+    const linhas = ["COFINS de " + rotulo + (pagoEm ? ", pago em " + pagoEm : "")];
+    linhas.push.apply(linhas, this.linhasReceita(b));
+    if (!ali.financNoPis && Math.abs(Number(b.financeiras) || 0) >= 0.5) linhas.push("Aplicações não entram no COFINS.");
+    linhas.push("Base do COFINS " + mo(base) + " × " + this.aliTxt(ali.cofins) + " = " + mo(cofins));
+    return linhas;
+  },
+
+  memoriaIrpj(ali, bases, rotulo, pagoEm) {
+    const b = this.somarBases(bases);
+    const mo = (v) => OrcEst.money(v);
+    const presV = (Number(b.vendas) || 0) * ali.vendasIrpj / 100;
+    const presS = (Number(b.servicos) || 0) * ali.servicosIrpj / 100;
+    const presF = (Number(b.financeiras) || 0) * ali.financIrpj / 100;
+    const lucro = presV + presS + presF;
+    const limite = (Number(ali.limiteMensal) || 0) * 3;
+    const ir = lucro > 0 ? lucro * ali.irpj / 100 : 0;
+    const ad = lucro > limite ? (lucro - limite) * ali.adicional / 100 : 0;
+    const linhas = ["IRPJ de " + rotulo + (pagoEm ? ", pago em " + pagoEm : "")];
+    linhas.push.apply(linhas, this.linhasReceita(b));
+    linhas.push("Vendas × " + this.aliTxt(ali.vendasIrpj) + " = " + mo(presV));
+    if (Math.abs(b.servicos) >= 0.5) linhas.push("Serviços × " + this.aliTxt(ali.servicosIrpj) + " = " + mo(presS));
+    if (Math.abs(b.financeiras) >= 0.5) linhas.push("Aplicações × " + this.aliTxt(ali.financIrpj) + " = " + mo(presF));
+    linhas.push("Lucro presumido " + mo(lucro));
+    linhas.push("IRPJ " + this.aliTxt(ali.irpj) + " = " + mo(ir));
+    if (ad >= 0.5) linhas.push("Adicional " + this.aliTxt(ali.adicional) + " sobre " + mo(lucro - limite) + " acima de " + mo(limite) + " = " + mo(ad));
+    else linhas.push("Sem adicional. O lucro do trimestre não passa de " + mo(limite) + ".");
+    linhas.push("IRPJ " + mo(ir + ad));
+    return linhas;
+  },
+
+  memoriaCsll(ali, bases, rotulo, pagoEm) {
+    const b = this.somarBases(bases);
+    const mo = (v) => OrcEst.money(v);
+    const presV = (Number(b.vendas) || 0) * ali.vendasCsll / 100;
+    const presS = (Number(b.servicos) || 0) * ali.servicosCsll / 100;
+    const presF = (Number(b.financeiras) || 0) * ali.financCsll / 100;
+    const lucro = presV + presS + presF;
+    const csll = lucro > 0 ? lucro * ali.csll / 100 : 0;
+    const linhas = ["CSLL de " + rotulo + (pagoEm ? ", pago em " + pagoEm : "")];
+    linhas.push.apply(linhas, this.linhasReceita(b));
+    linhas.push("Vendas × " + this.aliTxt(ali.vendasCsll) + " = " + mo(presV));
+    if (Math.abs(b.servicos) >= 0.5) linhas.push("Serviços × " + this.aliTxt(ali.servicosCsll) + " = " + mo(presS));
+    if (Math.abs(b.financeiras) >= 0.5) linhas.push("Aplicações × " + this.aliTxt(ali.financCsll) + " = " + mo(presF));
+    linhas.push("Lucro presumido " + mo(lucro));
+    linhas.push("CSLL " + this.aliTxt(ali.csll) + " = " + mo(csll));
+    return linhas;
+  },
+
+  memoriaPago(row, i) {
+    const ali = OrcEst.aliquotas();
+    const curtos = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+    const pagos = ["janeiro/2027", "fevereiro/2027", "março/2027", "abril/2027", "maio/2027", "junho/2027", "julho/2027", "agosto/2027", "setembro/2027", "outubro/2027", "novembro/2027", "dezembro/2027", "janeiro/2028"];
+    const partes = ["Pago em " + pagos[i] + ": " + OrcEst.money(this.totalPago(row)[i])];
+    if (i === 0) {
+      const dez = this.baseForecastMes(row, "2026-12");
+      if (dez) {
+        partes.push(this.memoriaPis(ali, dez, "dez/2026", "jan/2027").join("\n"));
+        partes.push(this.memoriaCofins(ali, dez, "dez/2026", "jan/2027").join("\n"));
+      }
+      const tri = this.basesForecastTri(row);
+      if (tri.some(Boolean)) {
+        partes.push(this.memoriaIrpj(ali, tri, "out–dez/2026", "jan/2027").join("\n"));
+        partes.push(this.memoriaCsll(ali, tri, "out–dez/2026", "jan/2027").join("\n"));
+      }
+    } else if (i >= 1 && i <= 12) {
+      const mes = i - 1;
+      const pago = i < 12 ? curtos[i] + "/2027" : "jan/2028";
+      partes.push(this.memoriaPis(ali, this.baseMes(row, mes), curtos[mes] + "/2027", pago).join("\n"));
+      partes.push(this.memoriaCofins(ali, this.baseMes(row, mes), curtos[mes] + "/2027", pago).join("\n"));
+      const triIdx = { 3: 0, 6: 1, 9: 2, 12: 3 }[i];
+      if (triIdx != null) {
+        const rotulos = ["jan–mar/2027", "abr–jun/2027", "jul–set/2027", "out–dez/2027"];
+        const bases = [0, 1, 2].map((k) => this.baseMes(row, triIdx * 3 + k));
+        partes.push(this.memoriaIrpj(ali, bases, rotulos[triIdx], pago).join("\n"));
+        partes.push(this.memoriaCsll(ali, bases, rotulos[triIdx], pago).join("\n"));
+      }
+    }
+    return partes.join("\n\n");
+  },
+
+  baseForecastMes(row, ym) {
+    const prev = this.bases2026();
+    return (prev[ym] && prev[ym][Number(row.id)]) || null;
+  },
+
+  basesForecastTri(row) {
+    return ["2026-10", "2026-11", "2026-12"].map((ym) => this.baseForecastMes(row, ym));
   },
 
   moneyGrade(v) {
@@ -714,17 +878,26 @@ const OrcamentoImpostosApp = {
     const tem = (arr) => (arr || []).some((v) => Math.abs(Number(v) || 0) >= 0.5);
     const nomes = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
     const pagoEm = ["Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez", "Jan/28"];
-    const dezBag = this.bases2026()["2026-12"];
-    const dez = (dezBag && dezBag[Number(row.id)]) || null;
-    const cols = [{ nome: "Vendas", arr: row.vendas, dez: dez && dez.vendas }];
-    if (tem(row.redV) || (dez && Math.abs(Number(dez.redV) || 0) >= 0.5)) cols.push({ nome: "Redutoras", arr: row.redV, dez: dez ? dez.redV : null, dica: "Já abatida da venda. O valor da coluna Vendas está líquido. Dezembro de 2026 vem do forecast." });
+    const ali = OrcEst.aliquotas();
+    const dez = this.baseForecastMes(row, "2026-12");
+    const cols = [{ nome: "Vendas", arr: row.vendas.map((v, i) => this.vendaIntegral(v, row.redV[i])), dez: dez ? this.vendaIntegral(dez.vendas, dez.redV) : null, dica: "Receita integral, antes das redutoras." }];
+    if (tem(row.redV) || (dez && Math.abs(Number(dez.redV) || 0) >= 0.5)) cols.push({ nome: "Redutoras", arr: row.redV, dez: dez ? dez.redV : null, dica: "Distratos e as outras contas redutoras. Ficam fora da coluna Vendas e entram abatidas na base do imposto." });
     cols.push({ nome: "Serviços", arr: row.servicos, dez: dez && dez.servicos });
     if (tem(row.redS) || (dez && Math.abs(Number(dez.redS) || 0) >= 0.5)) cols.push({ nome: "Red. serviços", arr: row.redS, dez: dez ? dez.redS : null });
     if (tem(row.financeiras) || tem(row.redF)) cols.push({ nome: "Aplicações", arr: row.financeiras, dez: dez && dez.financeiras });
     if (tem(row.redF) || (dez && Math.abs(Number(dez.redF) || 0) >= 0.5)) cols.push({ nome: "Red. aplicações", arr: row.redF, dez: dez ? dez.redF : null });
     const head = `<th>Competência</th>${cols.map((c) => `<th${c.dica ? ` title="${OrcEst.esc(c.dica)}"` : ""}>${c.nome}</th>`).join("")}<th>PIS</th><th>COFINS</th><th>Pago em</th>`;
-    const celBase = (c, i) => `<td>${i == null ? mo(c.dez) : mo(c.arr[i])}</td>`;
-    const linhaMes = (rotulo, i, pis, cofins, quando) => `<tr><td>${rotulo}</td>${cols.map((c) => celBase(c, i)).join("")}<td>${mo(pis)}</td><td>${mo(cofins)}</td><td class="orc-imp-quando">${quando}</td></tr>`;
+    const celTxt = (valor, linhas) => {
+      const dica = linhas && linhas.length ? ` title="${linhas.map((l) => OrcEst.esc(l)).join("&#10;")}" style="cursor:help"` : "";
+      return `<td${dica}>${mo(valor)}</td>`;
+    };
+    const celBase = (c, i) => celTxt(i == null ? c.dez : c.arr[i]);
+    const linhaMes = (rotulo, i, pis, cofins, quando) => {
+      const base = i == null ? dez : this.baseMes(row, i);
+      const memP = base ? this.memoriaPis(ali, base, rotulo, quando) : [];
+      const memC = base ? this.memoriaCofins(ali, base, rotulo, quando) : [];
+      return `<tr><td>${rotulo}</td>${cols.map((c) => celBase(c, i)).join("")}${celTxt(pis, memP)}${celTxt(cofins, memC)}<td class="orc-imp-quando">${quando}</td></tr>`;
+    };
     const meses = nomes.map((nome, i) => linhaMes(nome, i, row.pis[i], row.cofins[i], pagoEm[i])).join("");
     const linhaDez = linhaMes("Dez/26", null, row.pagar.pis[0], row.pagar.cofins[0], "Jan");
     const tris = [
@@ -734,7 +907,20 @@ const OrcamentoImpostosApp = {
       ["Jul–set", row.q2 && row.q2.irpj, row.q2 && row.q2.csll, "Out"],
       ["Out–dez", row.q3 && row.q3.irpj, row.q3 && row.q3.csll, "Jan/28"]
     ];
-    const triCorpo = tris.map((t) => `<tr><td>${t[0]}</td><td>${mo(t[1])}</td><td>${mo(t[2])}</td><td class="orc-imp-quando">${t[3]}</td></tr>`).join("");
+    const basesDoTri = [
+      this.basesForecastTri(row),
+      [0, 1, 2].map((k) => this.baseMes(row, k)),
+      [3, 4, 5].map((k) => this.baseMes(row, k)),
+      [6, 7, 8].map((k) => this.baseMes(row, k)),
+      [9, 10, 11].map((k) => this.baseMes(row, k))
+    ];
+    const triCorpo = tris.map((t, idx) => {
+      const bases = basesDoTri[idx];
+      const temBase = bases.some(Boolean);
+      const memI = temBase ? this.memoriaIrpj(ali, bases, t[0], t[3]) : [];
+      const memC = temBase ? this.memoriaCsll(ali, bases, t[0], t[3]) : [];
+      return `<tr><td>${t[0]}</td>${celTxt(t[1], memI)}${celTxt(t[2], memC)}<td class="orc-imp-quando">${t[3]}</td></tr>`;
+    }).join("");
     const leituras = [row.leitura.pis, row.leitura.cofins, row.leitura.irpj, row.leitura.csll];
     const notas = leituras.every((l) => !l.tem)
       ? `<p class="orc-est-nota">O orçamento de 2027 não traz PIS, COFINS, IRPJ nem CSLL. A tabela é a estimativa.</p>`
