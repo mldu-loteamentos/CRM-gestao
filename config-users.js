@@ -1778,6 +1778,7 @@ const ConfigUsersApp = {
           manager_email: managerEmail,
           editedAt: Date.now(),
           profileChosenAt: Date.now(),
+          criadoPeloAdmin: true,
           badge_color: badgeColor,
           resend_billet: resendBillet,
           assina_testemunha: assinaTestemunha,

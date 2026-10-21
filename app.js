@@ -5042,6 +5042,31 @@ window.pickCrmUserName = function(prev, next) {
   return nextName || prevName;
 };
 
+window.crmUserEmailValido = function(u) {
+  const em = String(u && u.email || "").trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em);
+};
+
+window.crmSomenteUsuariosDoAdministrador = function(raw, cloudA, cloudB) {
+  let cloud = [];
+  try { cloud = JSON.parse(window.mergeCrmUsers(cloudA || "[]", cloudB || "[]") || "[]") || []; } catch (e) { cloud = []; }
+  if (!Array.isArray(cloud)) cloud = [];
+  const emails = new Set(cloud.filter((u) => window.crmUserEmailValido(u)).map((u) => String(u.email).trim().toLowerCase()));
+  let list = raw;
+  if (typeof list === "string") {
+    try { list = JSON.parse(list || "[]") || []; } catch (e) { list = []; }
+  }
+  if (!Array.isArray(list)) list = [];
+  const kept = list.filter((u) => {
+    if (!window.crmUserEmailValido(u)) return false;
+    if (!emails.size) return true;
+    const em = String(u.email).trim().toLowerCase();
+    return emails.has(em) || u.criadoPeloAdmin === true;
+  });
+  const nuvem = cloud.filter((u) => window.crmUserEmailValido(u));
+  return window.mergeCrmUsers(JSON.stringify(kept), JSON.stringify(nuvem));
+};
+
 window.mergeCrmUsers = function(localStr, cloudStr) {
   let local = [];
   let cloud = [];
@@ -5069,7 +5094,7 @@ window.mergeCrmUsers = function(localStr, cloudStr) {
   };
   const byKey = new Map();
   const put = (u) => {
-    if (!u) return;
+    if (!u || !window.crmUserEmailValido(u)) return;
     const email = String(u.email || "").toLowerCase().trim();
     if (email && window._crmUsersRemoved && window._crmUsersRemoved.has(email)) return;
     const key = email || ("id:" + String(u.id || ""));
@@ -5176,7 +5201,11 @@ window.syncCrmUsersFromFirebase = async function() {
   }
   let local = "[]";
   try { local = localStorage.getItem("crm_users") || "[]"; } catch (e) {}
-  const merged = window.stripRemovedCrmUsers(window.mergeCrmUsers(window.mergeCrmUsers(local, globalUsers), dedicated));
+  const merged = window.crmSomenteUsuariosDoAdministrador(
+    window.stripRemovedCrmUsers(window.mergeCrmUsers(window.mergeCrmUsers(local, globalUsers), dedicated)),
+    dedicated,
+    globalUsers
+  );
   try {
     const setter = window._originalSetItem || localStorage.setItem.bind(localStorage);
     setter.call(localStorage, "crm_users", merged);
@@ -5336,16 +5365,24 @@ window._writeCrmUsersNow = async function(mem) {
   const usersRef = fc.doc(window.firebaseDb, "config", "crm_users");
   const globalRef = fc.doc(window.firebaseDb, "config", "global");
   const writeMerged = async (dedicated, globalUsers) => {
-    const merged = window.mergeCrmUsers(
+    const merged = window.crmSomenteUsuariosDoAdministrador(
       window.mergeCrmUsers(mem, local),
-      window.mergeCrmUsers(dedicated, globalUsers)
+      dedicated,
+      globalUsers
     );
     const memList = JSON.parse(mem);
     const out = JSON.parse(merged);
     const emails = new Set(out.map((u) => String((u && u.email) || "").toLowerCase().trim()).filter(Boolean));
+    let cloudEmails = new Set();
+    try {
+      const cloudList = JSON.parse(window.mergeCrmUsers(dedicated, globalUsers) || "[]") || [];
+      cloudEmails = new Set(cloudList.filter((u) => window.crmUserEmailValido(u)).map((u) => String(u.email).trim().toLowerCase()));
+    } catch (e) { cloudEmails = new Set(); }
     const missing = (Array.isArray(memList) ? memList : []).filter((u) => {
       const em = String((u && u.email) || "").toLowerCase().trim();
+      if (!window.crmUserEmailValido(u)) return false;
       if (em && window._crmUsersRemoved && window._crmUsersRemoved.has(em)) return false;
+      if (u.criadoPeloAdmin !== true && !cloudEmails.has(em)) return false;
       return em && !emails.has(em);
     });
     if (missing.length) throw new Error("O usuário não entrou na lista salva.");
@@ -5877,7 +5914,7 @@ window.crmUnirListasDeUsuarios = function(listas) {
   const byKey = new Map();
   (listas || []).forEach((lista) => {
     (Array.isArray(lista) ? lista : []).forEach((u) => {
-      if (!u) return;
+      if (!u || !window.crmUserEmailValido(u)) return;
       const email = String(u.email || "").toLowerCase().trim();
       if (email && window._crmUsersRemoved && window._crmUsersRemoved.has(email)) return;
       const key = email || ("id:" + String(u.id || ""));
