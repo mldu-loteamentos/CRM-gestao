@@ -58,8 +58,16 @@ const DocAssinaturaApp = {
   },
 
   unir(nuvem, local) {
+    const naNuvem = new Set((nuvem || []).map((row) => String(row && row.id || "")).filter(Boolean));
     const map = new Map();
-    [...local, ...nuvem].forEach((row) => {
+    (local || []).forEach((row) => {
+      if (!row) return;
+      const id = String(row.id || "");
+      if (!id) return;
+      if (id.indexOf("local-") !== 0 && !naNuvem.has(id)) return;
+      map.set(id, row);
+    });
+    (nuvem || []).forEach((row) => {
       if (!row) return;
       const id = String(row.id || "");
       if (!id) return;
@@ -224,6 +232,7 @@ const DocAssinaturaApp = {
       this.aviso = "Não consegui ler a lista compartilhada. Os documentos desta máquina continuam visíveis.";
     }
     this.itens = this.unir(nuvem, this.lerLocal());
+    if (nuvem.length || !this.aviso) this.gravarLocal(this.itens);
     this.carregando = false;
     this.pintar();
   },

@@ -7497,6 +7497,7 @@ window.toggleSort = function(col) {
 };
 
 window.FILA_QUEUE_GROUPS = {
+  PROPOSTA_SINAL: -2,
   ACORDO_INTERNO_QUEBRADO: 0,
   ZERO_PAGO: 1,
   ENTRADA_WEBRO: 2,
@@ -7597,6 +7598,9 @@ window.clientIsAnaliseInternaJuridico = function(client, thresholdJuridico) {
 window.getFilaQueueGroup = function(client, thresholdJuridico) {
   const cutoff = Number.isFinite(Number(thresholdJuridico)) ? Number(thresholdJuridico) : 151;
   const G = window.FILA_QUEUE_GROUPS;
+  if (typeof window.clientTemPropostaAguardandoSinal === "function" && window.clientTemPropostaAguardandoSinal(client)) {
+    return G.PROPOSTA_SINAL;
+  }
   if (typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(client) : (client && (client.subjudice === "S" || client.subjudice === true))) {
     return G.SUBJUDICE;
   }
@@ -7638,6 +7642,7 @@ window.getFilaQueueGroup = function(client, thresholdJuridico) {
 window.getFilaQueueGroupMeta = function(group) {
   const G = window.FILA_QUEUE_GROUPS;
   const map = {
+    [G.PROPOSTA_SINAL]: { label: 'Proposta aguardando sinal', bg: '#fffbeb', color: '#92400e' },
     [G.NEX_CUMPRIDA]: { label: 'Nex cumprida', bg: '#ecfdf5', color: '#105436' },
     [G.ACORDO_INTERNO_QUEBRADO]: { label: 'Acordo Interno Quebrado', bg: '#ffedd5', color: '#9a3412' },
     [G.ZERO_PAGO]: { label: '0% Pago', bg: '#fee2e2', color: '#991b1b' },
@@ -10069,6 +10074,9 @@ async function loadDashboardData(forceRefresh = false) {
           }
         } catch (e) {}
       }
+      if (typeof window.carregarRenegPropostas === "function") {
+        await window.carregarRenegPropostas().catch(() => null);
+      }
       await _loadDashboardData_Impl(force);
     }
     finally {
@@ -11975,7 +11983,9 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
           <td style="white-space: nowrap; text-align: center; width: 1%;">
             <div style="display: flex; align-items: center; justify-content: center;">
               ${(() => {
-                  const agingInner = (client.distratado && typeof window.clientIsSubjudiceIntegra === "function" && window.clientIsSubjudiceIntegra(client) && typeof window.filaAgingDistratadoHtml === "function")
+                  const agingInner = (typeof window.clientTemPropostaAguardandoSinal === "function" && window.clientTemPropostaAguardandoSinal(client) && typeof window.getPropostaSinalAgingHtml === "function")
+                  ? window.getPropostaSinalAgingHtml(client)
+                  : (client.distratado && typeof window.clientIsSubjudiceIntegra === "function" && window.clientIsSubjudiceIntegra(client) && typeof window.filaAgingDistratadoHtml === "function")
                   ? window.filaAgingDistratadoHtml()
                   : ((client._filaQueueGroup != null
                       ? client._filaQueueGroup === (window.FILA_QUEUE_GROUPS && window.FILA_QUEUE_GROUPS.NEX_CUMPRIDA)
@@ -18710,6 +18720,7 @@ function showRenegotiationView(customer, sale, allUnpaidBills) {
   document.getElementById("reneg-first-due-date").value = firstDate.toISOString().split("T")[0];
   
   calculateRenegotiation();
+  if (typeof window.renegChecarPropostaAtiva === "function") window.renegChecarPropostaAtiva();
 }
 
 function toggleAllRenegBills(checked) {
@@ -19096,7 +19107,7 @@ function renegAplicarFaixaModalidade() {
       opt.disabled = !ok;
       opt.title = ok ? "" : (motivo[opt.value] || "");
     });
-    if (sel.selectedOptions[0] && sel.selectedOptions[0].disabled) {
+    if (!window._renegRestaurando && sel.selectedOptions[0] && sel.selectedOptions[0].disabled) {
       const livre = Array.from(sel.options).find((o) => !o.disabled);
       if (livre) sel.value = livre.value;
     }
@@ -19711,6 +19722,7 @@ function calculateRenegotiation() {
   if (greenTotalParcelasEl) greenTotalParcelasEl.textContent = greenTotalParcelas;
   if (greenTotalPagarEl) greenTotalPagarEl.textContent = fmt(greenTotalPagar);
   if (greenUltimaEl) greenUltimaEl.textContent = greenLastDate;
+  if (typeof window.atualizarBotaoReneg === "function") window.atualizarBotaoReneg();
   
   // Salvar no estado global de simulação
   AppState.currentRenegResult = {
@@ -19889,6 +19901,317 @@ async function copyRenegPayLinkMessage() {
   }
 }
 
+function renegIsoHoje() {
+  const n = new Date();
+  return n.getFullYear() + "-" + String(n.getMonth() + 1).padStart(2, "0") + "-" + String(n.getDate()).padStart(2, "0");
+}
+
+function renegIsoMaisDias(iso, dias) {
+  const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return "";
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + Number(dias || 0), 12);
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+
+function renegIsoBr(iso) {
+  const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? (m[3] + "/" + m[2] + "/" + m[1]) : "";
+}
+
+function renegPropostaId(customerId, saleId) {
+  return String(customerId || "0") + "_" + String(saleId || "0").replace(/[^\w.-]+/g, "-");
+}
+
+window.renegPropostaEstaAtiva = function(p) {
+  if (!p || p.sinalPago || p.status === "concluida" || p.status === "expirada") return false;
+  const limite = String(p.expiraEm || renegIsoMaisDias(p.sinalDue, 2) || "");
+  return !!limite && renegIsoHoje() <= limite;
+};
+
+window.renegPropostaDeCliente = function(client) {
+  const map = window._renegPropostasMap;
+  if (!map || !client) return null;
+  return map.get(renegPropostaId(client.customerId, client.saleId)) || null;
+};
+
+window.clientTemPropostaAguardandoSinal = function(client) {
+  return window.renegPropostaEstaAtiva(window.renegPropostaDeCliente(client));
+};
+
+window.getPropostaSinalAgingHtml = function(client) {
+  const p = window.renegPropostaDeCliente(client);
+  const prazo = renegIsoBr(p && p.sinalDue);
+  const expira = renegIsoBr(p && (p.expiraEm || renegIsoMaisDias(p.sinalDue, 2)));
+  return `<span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #f59e0b; background-color: #fffbeb; color: #92400e; font-weight: 600;" title="Proposta ativa. O sinal vence em ${prazo}. Sem o pagamento, expira em ${expira}.">
+    <i data-lucide="file-clock" style="width: 14px; height: 14px;"></i> Proposta até ${prazo || "—"}
+  </span>`;
+};
+
+window.carregarRenegPropostas = function(force) {
+  if (!force && window._renegPropostasMap && window._renegPropostasEm && Date.now() - window._renegPropostasEm < 20000) {
+    return Promise.resolve(window._renegPropostasMap);
+  }
+  if (!force && window._renegPropostasCarregando) return window._renegPropostasCarregando;
+  const fc = window.firebaseCollections;
+  if (!window.firebaseDb || !fc || !fc.getDocs || !fc.collection) {
+    window._renegPropostasMap = window._renegPropostasMap || new Map();
+    return Promise.resolve(window._renegPropostasMap);
+  }
+  window._renegPropostasCarregando = (async function() {
+    const map = new Map();
+    const snap = await fc.getDocs(fc.collection(window.firebaseDb, "reneg_propostas"));
+    const hoje = renegIsoHoje();
+    const vencer = [];
+    snap.forEach(function(d) {
+      const data = d.data() || {};
+      data.id = d.id;
+      const limite = String(data.expiraEm || renegIsoMaisDias(data.sinalDue, 2) || "");
+      if (data.status !== "concluida" && data.status !== "expirada" && limite && hoje > limite) {
+        data.status = "expirada";
+        vencer.push(d.id);
+      }
+      map.set(d.id, data);
+    });
+    window._renegPropostasMap = map;
+    window._renegPropostasEm = Date.now();
+    window._renegPropostasCarregando = null;
+    vencer.forEach(function(id) {
+      const ref = fc.doc(window.firebaseDb, "reneg_propostas", id);
+      fc.setDoc(ref, { status: "expirada", expiradaEm: new Date().toISOString() }, { merge: true }).catch(function() {});
+    });
+    return map;
+  })().catch(function(e) {
+    window._renegPropostasCarregando = null;
+    window._renegPropostasMap = window._renegPropostasMap || new Map();
+    throw e;
+  });
+  return window._renegPropostasCarregando;
+};
+
+function renegRecebimentosDoContrato() {
+  const listas = [];
+  if (g_renegSale && Array.isArray(g_renegSale.installments)) listas.push(g_renegSale.installments);
+  if (Array.isArray(window.AppState && AppState.currentContractInstallments)) listas.push(AppState.currentContractInstallments);
+  const recs = [];
+  listas.forEach(function(lista) {
+    lista.forEach(function(inst) {
+      if (!inst) return;
+      (inst.receipts || []).forEach(function(r) { if (r) recs.push(r); });
+      if (inst.receiptDate && (inst.receiptValue || inst.isValidReceipt)) {
+        recs.push({
+          receiptDate: inst.receiptDate,
+          receiptValue: inst.receiptValue,
+          type: inst.receiptId || inst.receiptTypeStr,
+          typeName: inst.receiptTypeStr
+        });
+      }
+    });
+  });
+  return recs;
+}
+
+window.renegSinalFoiPago = function(valor, desdeIso) {
+  const alvo = Number(valor) || 0;
+  if (!(alvo > 0)) return false;
+  const desde = window.parseSiengeDay ? window.parseSiengeDay(desdeIso) : null;
+  const tol = Math.max(2, alvo * 0.02);
+  return renegRecebimentosDoContrato().some(function(r) {
+    if (typeof window.isGenuineRecebimento === "function" && !window.isGenuineRecebimento(r)) return false;
+    const v = parseFloat(r.receiptValue || r.amount || r.value || r.netReceiptValue || 0);
+    if (!(v > 0) || Math.abs(v - alvo) > tol) return false;
+    const d = window.parseSiengeDay ? window.parseSiengeDay(r.receiptDate || r.date || r.paymentDate) : null;
+    if (desde && d && d < desde) return false;
+    return true;
+  });
+};
+
+function renegPropostaAtual() {
+  const customer = g_renegCustomer || {};
+  const sale = g_renegSale || {};
+  const id = renegPropostaId(customer.id || customer.customerId || AppState.selectedCustomerId, AppState.selectedSaleId || sale.receivableBillId || sale.id);
+  return (window._renegPropostasMap && window._renegPropostasMap.get(id)) || null;
+}
+
+window.atualizarBotaoReneg = function() {
+  const label = document.getElementById("reneg-generate-label");
+  if (!label) return;
+  const method = typeof renegCenarioAtual === "function" ? renegCenarioAtual() : "deslocar";
+  if (method === "cartao") {
+    label.textContent = "Gerar link de pagamento";
+    return;
+  }
+  const p = renegPropostaAtual();
+  const pago = p && window.renegPropostaEstaAtiva(p) && window.renegSinalFoiPago(p.sinalValue, String(p.createdAt || "").slice(0, 10));
+  label.textContent = pago ? "Gerar termo de confissão de dívida" : "Gerar termo de proposta";
+};
+
+function renegMontarAvisoProposta(p, pago) {
+  const box = document.getElementById("reneg-proposta-aviso");
+  if (!box) return;
+  if (!p || !window.renegPropostaEstaAtiva(p)) {
+    box.hidden = true;
+    box.textContent = "";
+    return;
+  }
+  const prazo = renegIsoBr(p.sinalDue);
+  const expira = renegIsoBr(p.expiraEm || renegIsoMaisDias(p.sinalDue, 2));
+  const valor = (Number(p.sinalValue) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  box.hidden = false;
+  box.textContent = pago
+    ? ("Proposta ativa restaurada. O sinal de " + valor + " já aparece como pago. Pode gerar o termo de confissão de dívida.")
+    : ("Proposta ativa restaurada. O acordo só vale se o sinal de " + valor + " for pago até " + prazo + ". Sem esse pagamento, a proposta expira em " + expira + ".");
+};
+
+window.renegChecarPropostaAtiva = async function() {
+  try { await window.carregarRenegPropostas(true); } catch (e) { return; }
+  const p = renegPropostaAtual();
+  if (!p || !window.renegPropostaEstaAtiva(p)) {
+    renegMontarAvisoProposta(null, false);
+    window.atualizarBotaoReneg();
+    return;
+  }
+  const pago = window.renegSinalFoiPago(p.sinalValue, String(p.createdAt || "").slice(0, 10));
+  if (pago && !p.sinalPago) {
+    p.sinalPago = true;
+    const fc = window.firebaseCollections;
+    if (fc && fc.setDoc) {
+      fc.setDoc(fc.doc(window.firebaseDb, "reneg_propostas", p.id || renegPropostaId(p.customerId, p.saleId)), {
+        sinalPago: true, sinalPagoEm: new Date().toISOString()
+      }, { merge: true }).catch(function() {});
+    }
+  }
+  window._renegRestaurando = true;
+  const sel = document.getElementById("reneg-payment-method");
+  if (sel && p.cenario) {
+    const optMod = Array.from(sel.options).find(function(o) { return o.value === p.cenario; });
+    if (optMod) optMod.disabled = false;
+    sel.value = p.cenario;
+    if (typeof window.sincronizarSeletorModalidade === "function") window.sincronizarSeletorModalidade();
+    if (typeof onRenegPaymentMethodChange === "function") onRenegPaymentMethodChange();
+  }
+  const sinalDue = document.getElementById("reneg-sinal-due");
+  if (sinalDue && p.sinalDue) sinalDue.value = p.sinalDue;
+  const firstDue = document.getElementById("reneg-first-due-date");
+  if (firstDue && p.firstDueDate) firstDue.value = p.firstDueDate;
+  const sinalPct = document.getElementById("reneg-sinal-pct");
+  if (sinalPct && p.sinalPct != null) {
+    const opt = Array.from(sinalPct.options).find(function(o) { return String(o.value) === String(p.sinalPct); });
+    if (!opt) sinalPct.insertAdjacentHTML("beforeend", '<option value="' + p.sinalPct + '">' + p.sinalPct + "%</option>");
+    sinalPct.value = String(p.sinalPct);
+  }
+  const qty = document.getElementById("reneg-installments-qty");
+  if (qty && p.instQty != null) {
+    const opt = Array.from(qty.options).find(function(o) { return String(o.value) === String(p.instQty); });
+    if (!opt) qty.insertAdjacentHTML("beforeend", '<option value="' + p.instQty + '">' + p.instQty + "×</option>");
+    qty.value = String(p.instQty);
+  }
+  if (Array.isArray(p.selectedBillIds) && p.selectedBillIds.length) {
+    const wanted = new Set(p.selectedBillIds.map(String));
+    document.querySelectorAll(".reneg-bill-check").forEach(function(c) {
+      if (c.disabled) return;
+      c.checked = wanted.has(String(c.value));
+    });
+  }
+  if (typeof calculateRenegotiation === "function") calculateRenegotiation();
+  window._renegRestaurando = false;
+  renegMontarAvisoProposta(p, pago);
+  window.atualizarBotaoReneg();
+  if (window._renegPropostaAvisada !== p.id) {
+    window._renegPropostaAvisada = p.id;
+    alert(pago
+      ? "Este contrato tem uma proposta ativa e o sinal já consta como pago. Os dados foram restaurados para gerar o termo de confissão de dívida."
+      : "Este contrato tem uma proposta ativa aguardando o sinal até " + renegIsoBr(p.sinalDue) + ". Os dados foram restaurados. O termo de confissão só sai depois do pagamento.");
+  }
+};
+
+async function renegSalvarProposta(results) {
+  const fc = window.firebaseCollections;
+  if (!window.firebaseDb || !fc || !fc.setDoc || !fc.doc) throw new Error("Firebase indisponível");
+  const customer = g_renegCustomer || {};
+  const sale = g_renegSale || {};
+  const customerId = String(customer.id || customer.customerId || AppState.selectedCustomerId || "");
+  const saleId = String(AppState.selectedSaleId || sale.receivableBillId || sale.id || "");
+  const id = renegPropostaId(customerId, saleId);
+  const u = (window.AppState && AppState.currentUser) || {};
+  const selected = Array.from(document.querySelectorAll(".reneg-bill-check:not([disabled])"))
+    .filter(function(c) { return c.checked; })
+    .map(function(c) { return String(c.value); });
+  const sinalDue = String(results.sinalDueStr || document.getElementById("reneg-sinal-due")?.value || "").slice(0, 10);
+  const dados = {
+    customerId: customerId,
+    saleId: saleId,
+    customerName: customer.name || "",
+    status: "ativa",
+    sinalPago: false,
+    cenario: results.cenario || results.paymentMethod,
+    paymentMethod: results.paymentMethod,
+    sinalPct: results.sinalPct,
+    sinalValue: Number(results.sinalValue) || 0,
+    sinalDue: sinalDue,
+    expiraEm: renegIsoMaisDias(sinalDue, 2),
+    instQty: results.instQty,
+    installmentValue: Number(results.installmentValue) || 0,
+    firstDueDate: String(results.firstDueDate || "").slice(0, 10),
+    selectedBillIds: selected,
+    createdAt: new Date().toISOString(),
+    createdBy: u.name || u.nome || "",
+    createdByEmail: u.email || ""
+  };
+  await fc.setDoc(fc.doc(window.firebaseDb, "reneg_propostas", id), dados, { merge: true });
+  dados.id = id;
+  window._renegPropostasMap = window._renegPropostasMap || new Map();
+  window._renegPropostasMap.set(id, dados);
+  return dados;
+}
+
+async function renegConcluirProposta() {
+  const p = renegPropostaAtual();
+  if (!p) return;
+  const fc = window.firebaseCollections;
+  p.status = "concluida";
+  p.sinalPago = true;
+  p.concluidaEm = new Date().toISOString();
+  if (fc && fc.setDoc) {
+    await fc.setDoc(fc.doc(window.firebaseDb, "reneg_propostas", p.id), {
+      status: "concluida", sinalPago: true, concluidaEm: p.concluidaEm
+    }, { merge: true });
+  }
+}
+
+async function baixarHtmlComoPdf(html, nomeArquivo) {
+  if (!window.jspdf || !window.jspdf.jsPDF || typeof html2canvas !== "function") {
+    throw new Error("gerador de PDF indisponível");
+  }
+  const host = document.createElement("div");
+  host.style.cssText = "position:fixed;left:0;top:0;width:740px;background:#fff;padding:24px 32px;color:#111;z-index:-1;pointer-events:none;";
+  host.innerHTML = html;
+  document.body.appendChild(host);
+  try {
+    const canvas = await html2canvas(host, { scale: 2, backgroundColor: "#ffffff" });
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF("p", "mm", "a4");
+    const margin = 8;
+    const imgW = 210 - margin * 2;
+    const pageCanvasH = Math.floor((297 - margin * 2) * canvas.width / imgW);
+    let y = 0;
+    let page = 0;
+    while (y < canvas.height) {
+      const sliceH = Math.min(pageCanvasH, canvas.height - y);
+      const slice = document.createElement("canvas");
+      slice.width = canvas.width;
+      slice.height = sliceH;
+      slice.getContext("2d").drawImage(canvas, 0, y, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+      if (page) pdf.addPage();
+      pdf.addImage(slice.toDataURL("image/jpeg", 0.92), "JPEG", margin, margin, imgW, sliceH * imgW / canvas.width);
+      y += sliceH;
+      page += 1;
+    }
+    pdf.save(nomeArquivo);
+  } finally {
+    host.remove();
+  }
+}
+
 function generateAgreementPDF() {
   const results = AppState.currentRenegResult;
   if (!results) return;
@@ -19897,6 +20220,9 @@ function generateAgreementPDF() {
     return;
   }
   return (async function() {
+  const proposta = renegPropostaAtual();
+  const pago = !!(proposta && window.renegPropostaEstaAtiva(proposta) && window.renegSinalFoiPago(proposta.sinalValue, String(proposta.createdAt || "").slice(0, 10)));
+  const modo = pago ? "confissao" : "proposta";
   if (typeof window.enrichCustomerForLegalDocs === "function" && g_renegCustomer) {
     g_renegCustomer = await window.enrichCustomerForLegalDocs(g_renegCustomer);
   }
@@ -19910,7 +20236,8 @@ function generateAgreementPDF() {
   try { saved = JSON.parse(localStorage.getItem("crm_docpadrao_reneg") || "{}"); } catch (e) {}
   const titleEl = document.getElementById("doc-reneg-title");
   const subtitleEl = document.getElementById("doc-reneg-subtitle");
-  const docTitle = (titleEl && titleEl.value) || saved["doc-reneg-title"] || "INSTRUMENTO PARTICULAR DE CONFISSÃO DE DÍVIDA";
+  let docTitle = (titleEl && titleEl.value) || saved["doc-reneg-title"] || "INSTRUMENTO PARTICULAR DE CONFISSÃO DE DÍVIDA";
+  if (modo === "proposta") docTitle = "TERMO DE PROPOSTA DE ACORDO";
   const docSubtitle = (subtitleEl && subtitleEl.value) || saved["doc-reneg-subtitle"] || "Moura Leite Loteamentos";
 
   const padraoEl = document.getElementById("doc-reneg-clauses");
@@ -19937,9 +20264,18 @@ function generateAgreementPDF() {
     ? window.buildLegalDocVarMap(g_renegCustomer, g_renegSale, unit, { preambleText, map: extraMap })
     : extraMap;
   textTemplate = applyDistratoTemplateVars(textTemplate, legalMap);
+  if (modo === "proposta") {
+    textTemplate = textTemplate
+      .replace(/termo de confiss[aã]o de d[ií]vida/gi, "proposta de acordo")
+      .replace(/presente confiss[aã]o/gi, "presente proposta")
+      .replace(/objeto da presente confiss[aã]o/gi, "objeto da presente proposta");
+  }
   if (typeof window.centerDistratoSignatures === "function") {
     textTemplate = window.centerDistratoSignatures(textTemplate);
   }
+  const avisoProposta = modo === "proposta"
+    ? `<p style="margin:0 0 14px;"><b>Esta proposta não é o acordo.</b> Ela só se converte em confissão de dívida se o sinal de ${Number(results.sinalValue || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} for pago até ${renegIsoBr(results.sinalDueStr)}. Sem esse pagamento, a proposta expira em ${renegIsoBr(renegIsoMaisDias(results.sinalDueStr, 2))} e o acordo não é válido. Cartão de crédito não depende deste sinal.</p>`
+    : "";
 
   const docHtml = `
     <div style="text-align: center; margin-bottom: 2rem;">
@@ -19947,15 +20283,35 @@ function generateAgreementPDF() {
       <h3 style="font-size: 12pt; color: #666; margin: 0;">${docSubtitle}</h3>
     </div>
     <div style="text-align: justify; margin-bottom: 2rem; font-family: Georgia, 'Times New Roman', serif; font-size: 11pt; line-height: 1.55;">
+      ${avisoProposta}
       ${textTemplate.replace(/\n/g, "<br>")}
     </div>
   `;
 
-  document.getElementById("pdf-modal-title").textContent = "Termo de Confissão de Dívida - PDF";
-  document.getElementById("pdf-document-content").innerHTML = docHtml;
-  document.getElementById("pdf-view-overlay").classList.add("active");
-  lucide.createIcons();
-  })();
+  const unitName = unit.name || unit.unitName || g_renegSale.unitName || "";
+  const nomeArq = typeof window.buildFichaPdfFilename === "function"
+    ? window.buildFichaPdfFilename(modo === "proposta" ? "Proposta de acordo" : "Confissão de dívida", {
+        contrato: g_renegSale.unitId || unitName,
+        costCenterId: unit.costCenterId || g_renegSale.costCenterId || g_renegSale.enterpriseId,
+        titulo: g_renegSale.receivableBillId || g_renegSale.id,
+        nome: (g_renegCustomer && g_renegCustomer.name) || ""
+      })
+    : (modo === "proposta" ? "Proposta de acordo.pdf" : "Confissão de dívida.pdf");
+  await baixarHtmlComoPdf(docHtml, nomeArq);
+  if (modo === "proposta") {
+    let salva = null;
+    try { salva = await renegSalvarProposta(results); }
+    catch (e) { alert("O PDF da proposta foi baixado, mas não consegui gravar no Firebase: " + ((e && e.message) || e)); return; }
+    renegMontarAvisoProposta(salva, false);
+    window.atualizarBotaoReneg();
+  } else {
+    await renegConcluirProposta();
+    renegMontarAvisoProposta(null, false);
+    window.atualizarBotaoReneg();
+  }
+  })().catch(function(e) {
+    alert("Não consegui gerar o termo: " + ((e && e.message) || e));
+  });
 }
 
 function setPdfPrintLogo(enabled) {
