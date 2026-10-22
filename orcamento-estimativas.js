@@ -1120,23 +1120,43 @@ const OrcamentoRepassesApp = {
   selectedCompanyIds: [],
   companyDropOpen: false,
   companyQuery: "",
-  abertos: {},
+  fechados: {},
+  nos: {},
 
-  grupoEntra(gid, sociedade) {
-    if (!gid) return false;
-    if (/^g_(02|06|07|08|10|11|12)($|_)/.test(gid)) return false;
-    if (gid === "g_03") return false;
-    if (!sociedade && /^g_(07)($|_)/.test(gid)) return false;
-    return true;
+  pctTxt(n) {
+    const v = Number(n) || 0;
+    const r = Math.round(v * 1000) / 1000;
+    if (Math.abs(r - Math.round(r)) < 0.001) return String(Math.round(r)) + "%";
+    return String(r).replace(".", ",") + "%";
   },
 
-  obraDoCc(part, cc) {
-    const digits = String(cc || "").replace(/\D/g, "");
-    const prefix = digits.length >= 3 ? digits.slice(0, -2) : digits;
-    return (part.obras || []).find((o) => {
-      if (String(o.code || "") && String(o.code) === prefix) return true;
-      return (o.costCenters || []).some((c) => String(c.id).replace(/\D/g, "") === digits);
-    }) || null;
+  soma(arr) {
+    return (arr || []).reduce((s, n) => s + (Number(n) || 0), 0);
+  },
+
+  appPar() {
+    return typeof ParametrizacaoParceiroApp !== "undefined" ? ParametrizacaoParceiroApp : (window.ParametrizacaoParceiroApp || null);
+  },
+
+  centrosDa(part) {
+    const map = new Map();
+    (part.obras || []).forEach((obra) => {
+      (obra.costCenters || []).forEach((c) => {
+        const id = String(c.id || "").replace(/\D/g, "");
+        if (!id || map.has(id)) return;
+        map.set(id, { obra: obra, nome: String(c.name || "").trim() });
+      });
+    });
+    return map;
+  },
+
+  grupoOculto(part, node) {
+    const app = this.appPar();
+    if (app && typeof app.isDfcHiddenForParceria === "function" && app.isDfcHiddenForParceria(part, node)) return true;
+    const id = String((node && node.id) || "");
+    const sociedade = app && typeof app.isSociedade === "function" && app.isSociedade(part);
+    if (sociedade && (id === "g_04_01" || /^g_11($|_)/.test(id))) return true;
+    return false;
   },
 
   fator(part, obra, conta) {
