@@ -2303,6 +2303,7 @@ window.rememberParcelaTiposDoTitulo = function(billId, insts) {
 
 window.applyCachedParcelaTiposToBill = function(bill) {
   if (!bill) return;
+  bill._hasCachedOverdueSi = false;
   const cache = window.readParcelaTipoCache();
   const ids = [bill.id, bill.saleId, bill.receivableBillId].map(window.normalizeTituloId).filter(Boolean);
   let map = null;
@@ -2313,12 +2314,20 @@ window.applyCachedParcelaTiposToBill = function(bill) {
     ? window.todayIsoLocal()
     : new Date().toISOString().slice(0, 10);
   let cachedSiDelay = 0;
-  Object.keys(map.byDue || {}).forEach((due) => {
-    if (!window.installmentIsSinalSI({ conditionType: map.byDue[due] })) return;
-    if (!(due && due < today)) return;
+  // O mapa guarda o tipo de todas as parcelas do extrato, inclusive o sinal já pago.
+  // Só entra como 0% a parcela SI que ainda está na lista de vencidas deste título.
+  (bill.defaulterInstallments || []).forEach((inst) => {
+    if (!window.installmentIsSinalSI(inst)) return;
+    const saldo = inst.balanceDue != null ? Number(inst.balanceDue)
+      : (inst.currentBalance != null ? Number(inst.currentBalance) : null);
+    if (saldo != null && Number.isFinite(saldo) && saldo <= 0.009) return;
+    const due = String(inst.dueDate || inst.due || "").slice(0, 10);
+    if (due && due >= today) return;
     const d = (typeof window.quitacaoDaysBetween === "function")
       ? window.quitacaoDaysBetween(due, today)
-      : Math.max(0, Math.round((new Date(today + "T12:00:00") - new Date(due + "T12:00:00")) / 86400000));
+      : (due
+        ? Math.max(0, Math.round((new Date(today + "T12:00:00") - new Date(due + "T12:00:00")) / 86400000))
+        : (typeof window.sinalInstallmentOverdueDays === "function" ? window.sinalInstallmentOverdueDays(inst, bill) : 0));
     if (Number(d) > cachedSiDelay) cachedSiDelay = Number(d) || 0;
   });
   if (cachedSiDelay > 0) {

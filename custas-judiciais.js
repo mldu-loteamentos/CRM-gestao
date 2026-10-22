@@ -36,37 +36,27 @@ const CustasJudiciaisApp = {
       root.innerHTML = `<p class="cj-nota">Abra o título do cliente para registrar as custas.</p>`;
       return;
     }
-    root.innerHTML = `<p class="cj-nota">Informe a data, do que se trata e anexe a guia e o comprovante de pagamento.</p>
-      <div class="cj-form">
-        <label>Data
-          <input type="date" id="cj-data">
-        </label>
-        <label class="cj-largo">Do que se trata
-          <textarea id="cj-desc" rows="3" placeholder="Ex.: custas de distribuição, diligência do oficial"></textarea>
-        </label>
-        <label>Guias
-          <input type="file" id="cj-guias" accept="application/pdf,image/*" multiple>
-        </label>
-        <label>Comprovantes de pagamento
-          <input type="file" id="cj-comp" accept="application/pdf,image/*" multiple>
-        </label>
-      </div>
-      <div id="cj-arquivos"></div>
-      <div class="cj-acoes">
-        <button type="button" class="btn btn-primary" id="cj-salvar">Salvar</button>
-        <button type="button" class="btn btn-cancel" id="cj-cancelar" hidden>Cancelar</button>
+    this.editId = "";
+    this.guias = [];
+    this.comprovantes = [];
+    root.innerHTML = `<div class="cj-topo">
+        <p class="cj-nota">Clique na linha para editar.</p>
+        <button type="button" class="btn btn-primary" id="cj-nova">Nova custa</button>
       </div>
       <div id="cj-lista"><p class="cj-nota">Carregando…</p></div>`;
-    const guias = document.getElementById("cj-guias");
-    const comp = document.getElementById("cj-comp");
-    if (guias) guias.addEventListener("change", () => this.receberArquivos(guias, "guias"));
-    if (comp) comp.addEventListener("change", () => this.receberArquivos(comp, "comprovantes"));
-    const salvar = document.getElementById("cj-salvar");
-    const cancelar = document.getElementById("cj-cancelar");
-    if (salvar) salvar.addEventListener("click", () => this.salvar());
-    if (cancelar) cancelar.addEventListener("click", () => this.cancelarEdicao());
-    this.pintarArquivos();
+    const nova = document.getElementById("cj-nova");
+    if (nova) nova.addEventListener("click", () => this.nova());
     await this.carregar();
+  },
+
+  nova() {
+    this.editId = "nova";
+    this.rascunho = null;
+    this.guias = [];
+    this.comprovantes = [];
+    this.pintarLista();
+    const data = document.getElementById("cj-data");
+    if (data) data.focus();
   },
 
   receberArquivos(input, campo) {
@@ -82,40 +72,77 @@ const CustasJudiciaisApp = {
       const ja = this[campo].some((f) => f.name === file.name && f.size === file.size);
       if (!ja) this[campo].push(file);
     });
-    this.pintarArquivos();
+    this.guardarRascunho();
+    this.pintarLista();
   },
 
-  pintarArquivos() {
-    const box = document.getElementById("cj-arquivos");
+  guardarRascunho() {
+    const data = document.getElementById("cj-data");
+    const desc = document.getElementById("cj-desc");
+    if (!data && !desc) return;
+    this.rascunho = {
+      data: data ? data.value : "",
+      descricao: desc ? desc.value : ""
+    };
+  },
+
+  celulaArquivos(campo, inputId, existentes) {
+    const links = (existentes || []).map((a) => `<a href="${this.esc(a.url)}" target="_blank" rel="noopener">${this.esc(a.name || "Arquivo")}</a>`).join("");
+    const novos = (this[campo] || []).map((f, i) => `<span>${this.esc(f.name)}
+      <button type="button" class="tvig-ico is-danger" title="Tirar arquivo" data-cj-tirar="${campo}:${i}">
+        <i data-lucide="trash-2" style="width:15px;height:15px;"></i>
+      </button></span>`).join("");
+    return `<div class="cj-cel-arq">
+      <label class="cj-escolher"><i data-lucide="paperclip" style="width:14px;height:14px;"></i> Anexar
+        <input type="file" id="${inputId}" accept="application/pdf,image/*" multiple>
+      </label>
+      ${links}${novos}
+    </div>`;
+  },
+
+  linhaEdicao(item) {
+    const fonte = this.rascunho || {
+      data: String((item && item.data) || "").slice(0, 10),
+      descricao: (item && item.descricao) || ""
+    };
+    this.rascunho = null;
+    const data = this.esc(fonte.data);
+    const desc = this.esc(fonte.descricao);
+    return `<tr class="cj-linha-edicao">
+      <td><input type="date" id="cj-data" value="${data}"></td>
+      <td><input type="text" id="cj-desc" value="${desc}" placeholder="Ex.: custas de distribuição, diligência do oficial"></td>
+      <td>${this.celulaArquivos("guias", "cj-guias", item && item.guias)}</td>
+      <td>${this.celulaArquivos("comprovantes", "cj-comp", item && item.comprovantes)}</td>
+      <td class="is-right cj-acoes-cell">
+        <div class="cj-acoes">
+          <button type="button" class="btn btn-primary" id="cj-salvar">Salvar</button>
+          <button type="button" class="btn btn-cancel" id="cj-cancelar">Cancelar</button>
+        </div>
+      </td>
+    </tr>`;
+  },
+
+  ligarEdicao() {
+    const guias = document.getElementById("cj-guias");
+    const comp = document.getElementById("cj-comp");
+    if (guias) guias.addEventListener("change", () => this.receberArquivos(guias, "guias"));
+    if (comp) comp.addEventListener("change", () => this.receberArquivos(comp, "comprovantes"));
+    const salvar = document.getElementById("cj-salvar");
     const cancelar = document.getElementById("cj-cancelar");
-    if (cancelar) cancelar.hidden = !this.editId;
-    if (!box) return;
-    const bloco = (titulo, campo) => {
-      if (!this[campo].length) return "";
-      return `<div class="cj-pend"><b>${titulo}</b>${this[campo].map((f, i) => `
-        <span>${this.esc(f.name)}
-          <button type="button" class="tvig-ico is-danger" title="Tirar arquivo" data-cj-tirar="${campo}:${i}">
-            <i data-lucide="trash-2" style="width:15px;height:15px;"></i>
-          </button>
-        </span>`).join("")}</div>`;
-    };
-    const atual = this.itens.find((x) => x.id === this.editId);
-    const ja = (rotulo, lista) => {
-      if (!atual || !lista || !lista.length) return "";
-      return `<div class="cj-pend"><b>${rotulo} já anexados</b>${lista.map((a) => `<a href="${this.esc(a.url)}" target="_blank" rel="noopener">${this.esc(a.name || "Arquivo")}</a>`).join("")}</div>`;
-    };
-    box.innerHTML = bloco("Guias novas", "guias") + bloco("Comprovantes novos", "comprovantes")
-      + ja("Guias", atual && atual.guias) + ja("Comprovantes", atual && atual.comprovantes);
-    box.querySelectorAll("[data-cj-tirar]").forEach((btn) => {
+    if (salvar) salvar.addEventListener("click", () => this.salvar());
+    if (cancelar) cancelar.addEventListener("click", () => this.cancelarEdicao());
+    const lista = document.getElementById("cj-lista");
+    if (!lista) return;
+    lista.querySelectorAll("[data-cj-tirar]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const ped = String(btn.getAttribute("data-cj-tirar") || "").split(":");
         const campo = ped[0];
         const i = Number(ped[1]);
         if (this[campo]) this[campo].splice(i, 1);
-        this.pintarArquivos();
+        this.guardarRascunho();
+        this.pintarLista();
       });
     });
-    if (window.lucide && lucide.createIcons) lucide.createIcons();
   },
 
   fb() {
@@ -178,60 +205,65 @@ const CustasJudiciaisApp = {
   pintarLista() {
     const lista = document.getElementById("cj-lista");
     if (!lista) return;
-    if (!this.itens.length) {
-      lista.innerHTML = `<p class="cj-nota">Nenhuma custa registrada neste título.</p>`;
-      return;
-    }
-    const linhas = this.itens.map((item) => `<tr>
-      <td>${this.esc(this.dataBr(item.data))}</td>
-      <td>${this.esc(item.descricao || "")}</td>
-      <td>${this.links(item.guias)}</td>
-      <td>${this.links(item.comprovantes)}</td>
-      <td class="is-right cj-acoes-cell">
-        <button type="button" class="tvig-ico" title="Editar" data-cj-editar="${this.esc(item.id)}">
-          <i data-lucide="pencil" style="width:15px;height:15px;"></i>
-        </button>
-        <button type="button" class="tvig-ico is-danger" title="Excluir" data-cj-excluir="${this.esc(item.id)}">
-          <i data-lucide="trash-2" style="width:15px;height:15px;"></i>
-        </button>
-      </td>
-    </tr>`).join("");
+    const nova = this.editId === "nova" ? this.linhaEdicao(null) : "";
+    const linhas = this.itens.map((item) => {
+      if (this.editId === item.id) return this.linhaEdicao(item);
+      return `<tr class="cj-linha" data-cj-linha="${this.esc(item.id)}" title="Clique para editar">
+        <td>${this.esc(this.dataBr(item.data))}</td>
+        <td>${this.esc(item.descricao || "")}</td>
+        <td>${this.links(item.guias)}</td>
+        <td>${this.links(item.comprovantes)}</td>
+        <td class="is-right cj-acoes-cell">
+          <button type="button" class="tvig-ico" title="Editar" data-cj-editar="${this.esc(item.id)}">
+            <i data-lucide="pencil" style="width:15px;height:15px;"></i>
+          </button>
+          <button type="button" class="tvig-ico is-danger" title="Excluir" data-cj-excluir="${this.esc(item.id)}">
+            <i data-lucide="trash-2" style="width:15px;height:15px;"></i>
+          </button>
+        </td>
+      </tr>`;
+    }).join("");
+    const vazio = !this.itens.length && !nova
+      ? `<tr><td colspan="5"><p class="cj-nota">Nenhuma custa registrada neste título.</p></td></tr>`
+      : "";
     lista.innerHTML = `<div class="cj-tabela-scroll"><table class="custom-table cj-tabela">
       <thead><tr><th>Data</th><th>Do que se trata</th><th>Guias</th><th>Comprovantes</th><th class="is-right">Ações</th></tr></thead>
-      <tbody>${linhas}</tbody>
+      <tbody>${nova}${linhas}${vazio}</tbody>
     </table></div>`;
+    lista.querySelectorAll("[data-cj-linha]").forEach((tr) => {
+      tr.addEventListener("click", (ev) => {
+        if (ev.target.closest("a, button, input, label")) return;
+        this.editar(tr.getAttribute("data-cj-linha"));
+      });
+    });
     lista.querySelectorAll("[data-cj-editar]").forEach((btn) => {
       btn.addEventListener("click", () => this.editar(btn.getAttribute("data-cj-editar")));
     });
     lista.querySelectorAll("[data-cj-excluir]").forEach((btn) => {
       btn.addEventListener("click", () => this.excluir(btn.getAttribute("data-cj-excluir")));
     });
+    if (this.editId) this.ligarEdicao();
     if (window.lucide && lucide.createIcons) lucide.createIcons();
   },
 
   editar(id) {
     const item = this.itens.find((x) => x.id === id);
-    if (!item) return;
+    if (!item || this.editId === item.id) return;
     this.editId = item.id;
+    this.rascunho = null;
     this.guias = [];
     this.comprovantes = [];
+    this.pintarLista();
     const data = document.getElementById("cj-data");
-    const desc = document.getElementById("cj-desc");
-    if (data) data.value = String(item.data || "").slice(0, 10);
-    if (desc) desc.value = item.descricao || "";
-    this.pintarArquivos();
     if (data) data.focus();
   },
 
   cancelarEdicao() {
     this.editId = "";
+    this.rascunho = null;
     this.guias = [];
     this.comprovantes = [];
-    const data = document.getElementById("cj-data");
-    const desc = document.getElementById("cj-desc");
-    if (data) data.value = "";
-    if (desc) desc.value = "";
-    this.pintarArquivos();
+    this.pintarLista();
   },
 
   async subir(files, id, pasta) {
