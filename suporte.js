@@ -27,7 +27,8 @@
     { id: "tab-informe-rendimentos", label: "Informe de Rendimentos" },
     { id: "extrato-cliente", label: "Visualizar Extrato" },
     { id: "tab-anexos-juridico", label: "Anexos Jurídico" },
-    { id: "tab-cobranca-judicial", label: "Cobrança Judicial" }
+    { id: "tab-cobranca-judicial", label: "Cobrança Judicial" },
+    { id: "tab-custas-judiciais", label: "Custas judiciais" }
   ];
 
   const MENU = [

@@ -1177,209 +1177,246 @@ const OrcamentoRepassesApp = {
     catch (e) { return true; }
   },
 
+  pessoasDe(part) {
+    const app = this.appPar();
+    const lista = [];
+    (part.socios || []).forEach((s) => {
+      if (!s) return;
+      const todos = app && typeof app.titulosDoSocio === "function" ? app.titulosDoSocio(s) : [];
+      const dividido = todos.length > 1 || (todos.length === 1 && todos[0].pctPlano !== 100);
+      const tits = todos.filter((t) => t.efetivo > 0);
+      if (dividido && tits.length) {
+        tits.forEach((t) => {
+          const nomePlano = t.planoNome || t.planoId;
+          lista.push({
+            nome: (s.name || "Sócio") + (nomePlano ? " · " + nomePlano : ""),
+            pct: t.efetivo
+          });
+        });
+        return;
+      }
+      const pct = Number(s.sharePct) || 0;
+      if (pct > 0) lista.push({ nome: s.name || (part.partnerName || "Parceiro"), pct: pct });
+    });
+    return lista;
+  },
+
   calcular() {
-    const impostos = OrcamentoImpostosApp.calcular(OrcEst.linhas());
     const ids = new Set(this.selectedCompanyIds.map(String));
     const linhas = OrcEst.linhas().filter((l) => !ids.size || ids.has(String(l.e)));
     const porEmpresa = new Map();
     linhas.forEach((l) => {
       const id = String(l.e || "");
-      if (!porEmpresa.has(id)) porEmpresa.set(id, { id, nome: l.enome || "", linhas: [] });
-      porEmpresa.get(id).linhas.push(l);
+      if (!porEmpresa.has(id)) porEmpresa.set(id, []);
+      porEmpresa.get(id).push(l);
     });
     const pars = OrcEst.parcerias().filter((p) => !ids.size || ids.has(String(p.companyId)));
-    const porParam = new Map();
-    pars.forEach((p) => {
-      const id = String(p.companyId || "");
-      if (!id) return;
-      const pack = porParam.get(id) || { itens: [] };
-      pack.itens.push(p);
-      porParam.set(id, pack);
-    });
-    const saida = [];
-    const vistos = new Set();
-    porEmpresa.forEach((emp, id) => {
-      vistos.add(id);
-      const item = this.montar(emp, (porParam.get(id) && porParam.get(id).itens) || [], impostos[id] || null);
-      if (item) saida.push(item);
-    });
-    porParam.forEach((pack, id) => {
-      if (vistos.has(id)) return;
-      const nome = (pack.itens[0] && pack.itens[0].companyName) || "";
-      const item = this.montar({ id, nome, linhas: [] }, pack.itens, impostos[id] || null);
-      if (item) saida.push(item);
-    });
-    saida.sort((a, b) => Number(a.id) - Number(b.id));
+    const saida = pars.map((p, i) => this.montarDfc(p, porEmpresa.get(String(p.companyId || "")) || [], i));
+    saida.sort((a, b) => Number(a.companyId) - Number(b.companyId) || String(a.nome).localeCompare(String(b.nome), "pt-BR"));
     return saida;
   },
 
-  montar(emp, itens, imposto) {
-    const apurada = OrcEst.z();
-    const apuradaCc = new Map();
-    emp.linhas.forEach((l) => {
-      const gid = OrcEst.grupo(l.conta, l.cn) || "";
-      const nome = OrcEst.norm(l.cn);
-      const eh = gid === "g_11_01" || String(l.conta) === "2.07.01" || (gid === "g_04_01" && /REPASSE|DISTRIBUICAO/.test(nome));
-      if (!eh) return;
+  montarDfc(part, linhas, indice) {
+    const app = this.appPar();
+    const fluxo = typeof FluxoCaixaApp !== "undefined" ? FluxoCaixaApp : (window.FluxoCaixaApp || null);
+    const dfc = typeof OrcamentoDfcApp !== "undefined" ? OrcamentoDfcApp : null;
+    const plano = typeof PlanoFinanceiroApp !== "undefined" ? PlanoFinanceiroApp : null;
+    const tpl = ((plano && typeof plano.dfcTemplateGroups === "function" && plano.dfcTemplateGroups())
+      || (app && typeof app.dfcDefaultGroups === "function" && app.dfcDefaultGroups())
+      || []).map((g) => ({ ...g, months: OrcEst.z(), accs: new Map() }));
+    const byId = {};
+    tpl.forEach((g) => { byId[g.id] = g; });
+    const centros = this.centrosDa(part);
+    const sociedade = !!(app && typeof app.isSociedade === "function" && app.isSociedade(part));
+    const kind = app && typeof app.kindOf === "function" ? app.kindOf(part) : (part.kind || "parceria");
+    linhas.forEach((l) => {
+      const ccId = String(l.cc || "").replace(/\D/g, "");
+      const achado = centros.get(ccId);
+      if (!achado) return;
+      const obra = achado.obra;
+      if (!this.entraConta(part, obra, l.conta)) return;
+      const fator = this.fator(part, obra, l.conta);
+      if (!(Math.abs(fator) > 0)) return;
+      const gid = dfc && typeof dfc.grupoDaConta === "function" ? dfc.grupoDaConta(l.conta, l.cn) : OrcEst.grupo(l.conta, l.cn);
+      const g = gid ? byId[gid] : null;
+      if (!g || g.type !== "resultado" || this.grupoOculto(part, g)) return;
+      const pct = sociedade ? 100 : (app && typeof app.partnerPctForObra === "function" ? app.partnerPctForObra(part, obra, l.conta) : (Number(obra.defaultPartnerShare) || 0));
+      let acc = g.accs.get(l.conta);
+      if (!acc) {
+        acc = { conta: l.conta, cn: l.cn || "", months: OrcEst.z(), pcts: new Set(), ccs: new Map() };
+        g.accs.set(l.conta, acc);
+      }
+      if (pct) acc.pcts.add(Math.round(Number(pct) * 1000) / 1000);
+      let cc = acc.ccs.get(ccId);
+      if (!cc) {
+        cc = { id: ccId, nome: achado.nome || String(l.en || "").trim(), months: OrcEst.z(), pct: pct };
+        acc.ccs.set(ccId, cc);
+      } else if (!cc.nome && (achado.nome || l.en)) {
+        cc.nome = achado.nome || String(l.en).trim();
+      }
       (l.m || []).forEach((v, i) => {
         if (i > 11) return;
-        const n = Math.abs(Number(v) || 0);
-        apurada[i] += n;
-        const cc = String(l.cc || "");
-        const cur = apuradaCc.get(cc) || { id: cc, nome: l.en || "", m: OrcEst.z() };
-        cur.m[i] += n;
-        apuradaCc.set(cc, cur);
+        const s = (fluxo && typeof fluxo.signedAmount === "function"
+          ? fluxo.signedAmount(g, l.conta, l.cn, v)
+          : OrcEst.sinal(gid, l.conta, l.cn, v)) * fator;
+        acc.months[i] += s;
+        cc.months[i] += s;
+        g.months[i] += s;
       });
     });
-    const temApurada = apurada.some((v) => v >= 0.5);
-    if (!itens.length && !temApurada) return null;
-
-    const socios = [];
-    const obras = [];
-    itens.forEach((p) => {
-      const kind = String(p.kind || "parceria");
-      if (kind === "sociedade" || kind === "mista") {
-        (p.socios || []).forEach((s) => {
-          if (!s || !(Number(s.sharePct) > 0)) return;
-          const app = typeof ParametrizacaoParceiroApp !== "undefined" ? ParametrizacaoParceiroApp : (window.ParametrizacaoParceiroApp || null);
-          const todos = app && typeof app.titulosDoSocio === "function" ? app.titulosDoSocio(s) : [];
-          const dividido = todos.length > 1 || (todos.length === 1 && todos[0].pctPlano !== 100);
-          const tits = todos.filter((t) => t.efetivo > 0);
-          if (dividido && tits.length) {
-            tits.forEach((t) => {
-              const nomePlano = t.planoNome || t.planoId;
-              socios.push({
-                id: String(s.id || "") + "|" + t.planoId,
-                nome: (s.name || "Sócio") + (nomePlano ? " · " + nomePlano : ""),
-                pct: t.efetivo
-              });
-            });
-            return;
-          }
-          socios.push({ id: String(s.id || ""), nome: s.name || "Sócio", pct: Number(s.sharePct) || 0 });
-        });
+    const depth = (g) => {
+      let d = 0;
+      let cur = g;
+      while (cur && cur.parentId && byId[cur.parentId]) {
+        d += 1;
+        cur = byId[cur.parentId];
       }
-      if (kind === "parceria" || kind === "mista") {
-        (p.obras || []).forEach((o) => obras.push({ part: p, obra: o, nome: p.partnerName || "Parceiro" }));
-      }
-    });
-    const kind = itens.some((p) => p.kind === "mista") ? "mista"
-      : (itens.some((p) => p.kind === "sociedade") ? "sociedade"
-        : (itens.length ? "parceria" : ""));
-
-    const resultado = OrcEst.z();
-    const parceiro = OrcEst.z();
-    const centrosMap = new Map();
-    emp.linhas.forEach((l) => {
-      const gid = OrcEst.grupo(l.conta, l.cn) || "";
-      if (!this.grupoEntra(gid, kind === "sociedade" || kind === "mista")) return;
-      const nome = OrcEst.norm(l.cn);
-      if (/^PIS$|^COFINS$|^IRPJ$|^CSLL$/.test(nome)) return;
-      const obrasDaLinha = (kind === "parceria" || kind === "mista")
-        ? obras.filter((ob) => this.obraDoCc(ob.part, l.cc) === ob.obra && this.entraConta(ob.part, ob.obra, l.conta))
-        : [];
-      (l.m || []).forEach((v, i) => {
-        if (i > 11) return;
-        const s = OrcEst.sinal(gid, l.conta, l.cn, v);
-        if (kind === "sociedade" || kind === "mista") resultado[i] += s;
-        obrasDaLinha.forEach((ob) => {
-          const pedaco = s * this.fator(ob.part, ob.obra, l.conta);
-          parceiro[i] += pedaco;
-          const cc = String(l.cc || "");
-          const cur = centrosMap.get(cc) || { id: cc, nome: l.en || "", m: OrcEst.z() };
-          if (!cur.nome && l.en) cur.nome = l.en;
-          cur.m[i] += pedaco;
-          centrosMap.set(cc, cur);
-        });
-      });
-    });
-
-    const impostoMes = OrcEst.z();
-    if (imposto && (kind === "sociedade" || kind === "mista")) {
-      for (let i = 0; i < 12; i++) {
-        impostoMes[i] = (imposto.pis[i] || 0) + (imposto.cofins[i] || 0) + (imposto.irMes[i] || 0) + (imposto.csllMes[i] || 0);
-      }
-    }
-    const pctSocios = socios.reduce((s, x) => s + x.pct, 0);
-    const distSocios = OrcEst.z();
-    const pessoas = socios.map((s) => ({ ...s, m: OrcEst.z() }));
-    for (let i = 0; i < 12; i++) {
-      const base = resultado[i] - (kind === "mista" ? Math.max(parceiro[i], 0) : 0) - impostoMes[i];
-      const distribuivel = base > 0 ? base : 0;
-      pessoas.forEach((p) => {
-        p.m[i] = distribuivel * p.pct / 100;
-        distSocios[i] += p.m[i];
-      });
-    }
-    const pagarParc = parceiro.map((v) => (v > 0 ? v : 0));
-    const centros = [...centrosMap.values()]
-      .filter((c) => c.m.some((v) => Math.abs(v) >= 0.005))
-      .sort((a, b) => String(a.id).localeCompare(String(b.id), "pt-BR", { numeric: true }));
-    const pagar = OrcEst.z();
-    for (let i = 0; i < 12; i++) pagar[i] = pagarParc[i] + distSocios[i];
-
-    const leitura = this.lerApurada(kind, pagar, resultado, impostoMes, apurada, pctSocios);
-    return {
-      id: emp.id,
-      nome: emp.nome,
-      kind,
-      itens: itens.length,
-      socios: pessoas,
-      centros,
-      pctSocios,
-      resultado,
-      impostoMes,
-      parceiro: pagarParc,
-      pagar,
-      apurada,
-      temApurada,
-      leitura,
-      semParam: !itens.length
+      return d;
     };
-  },
-
-  lerApurada(kind, pagar, resultado, impostoMes, apurada, pctSocios) {
-    const tem = apurada.some((v) => v >= 0.5);
-    if (!tem) {
-      return { fecha: false, tem: false, texto: "O orçamento não traz linha de repasse nem de distribuição. O valor é a estimativa pela parametrização." };
-    }
-    const soma = (a) => a.reduce((s, n) => s + (Number(n) || 0), 0);
-    const linha = soma(apurada);
-    const est = soma(pagar);
-    const bruto = soma(resultado.map((v, i) => (v > 0 ? v : 0)));
-    const impostos = soma(impostoMes);
-    if (!kind) {
-      return { fecha: false, tem: true, texto: "Há linha de distribuição no orçamento (" + OrcEst.money(linha) + "), mas esta empresa não tem sócio nem parceiro parametrizado. Não dá para conferir o percentual." };
-    }
-    if (OrcEst.perto(linha, est)) {
-      const extra = kind === "sociedade" || kind === "mista"
-        ? " Os impostos da competência já estão abatidos da distribuição."
-        : "";
-      return { fecha: true, tem: true, texto: "A linha apurada fecha com o cálculo." + extra };
-    }
-    const liquidoCheio = soma(resultado.map((v, i) => {
-      const b = v - impostoMes[i];
-      return b > 0 ? b : 0;
+    tpl.filter((g) => g.type !== "formula").sort((a, b) => depth(b) - depth(a)).forEach((g) => {
+      tpl.filter((c) => c.parentId === g.id && c.type !== "formula").forEach((ch) => {
+        ch.months.forEach((v, i) => { g.months[i] += v; });
+      });
+    });
+    const sum = (ids) => {
+      const months = OrcEst.z();
+      ids.forEach((id) => {
+        const n = byId[id];
+        if (!n) return;
+        n.months.forEach((v, i) => { months[i] += v; });
+      });
+      return months;
+    };
+    const apply = (id, parts) => { if (byId[id]) byId[id].months = sum(parts); };
+    apply("g_03", ["g_04", "g_05"]);
+    apply("g_06", ["g_01", "g_02", "g_03"]);
+    apply("g_08", ["g_06", "g_07"]);
+    apply("g_10", ["g_08", "g_09"]);
+    apply("g_12", ["g_10", "g_11"]);
+    const vivo = new Set(["g_03", "g_06", "g_08", "g_10", "g_12"]);
+    tpl.forEach((g) => {
+      const tem = g.months.some((v) => Math.abs(v) >= 0.005) || [...g.accs.values()].some((a) => a.months.some((v) => Math.abs(v) >= 0.005));
+      if (!tem) return;
+      vivo.add(g.id);
+      let cur = g;
+      while (cur && cur.parentId) {
+        vivo.add(cur.parentId);
+        cur = byId[cur.parentId];
+      }
+    });
+    const rows = [];
+    const walk = (node, level) => {
+      if (!vivo.has(node.id)) return;
+      const children = tpl.filter((g) => g.parentId === node.id && vivo.has(g.id));
+      const accs = [...node.accs.values()]
+        .filter((a) => a.months.some((v) => Math.abs(v) >= 0.005))
+        .sort((a, b) => String(a.conta).localeCompare(String(b.conta), "pt-BR", { numeric: true }));
+      const nome = node.id === "g_12" ? "12 VARIAÇÃO DE CAIXA — repasse" : node.name;
+      rows.push({
+        id: node.id,
+        name: nome,
+        type: node.type,
+        level: level,
+        hasKids: children.length > 0 || accs.length > 0,
+        isAccount: false,
+        months: node.months
+      });
+      children.forEach((ch) => walk(ch, level + 1));
+      accs.forEach((a) => {
+        const accId = "acc:" + node.id + ":" + a.conta;
+        const ccs = [...a.ccs.values()]
+          .filter((c) => c.months.some((v) => Math.abs(v) >= 0.005))
+          .sort((x, y) => String(x.id).localeCompare(String(y.id), "pt-BR", { numeric: true }));
+        const pcts = [...a.pcts].filter((n) => n > 0).sort((x, y) => x - y);
+        rows.push({
+          id: accId,
+          name: String(a.conta || "") + (a.cn ? " " + a.cn : ""),
+          type: "conta",
+          level: level + 1,
+          hasKids: ccs.length > 0,
+          isAccount: true,
+          pcts: sociedade ? [] : pcts,
+          ccIds: ccs.map((c) => c.id),
+          months: a.months
+        });
+        ccs.forEach((c) => {
+          rows.push({
+            id: accId + ":" + c.id,
+            parent: accId,
+            name: c.nome ? (c.id + " — " + c.nome) : c.id,
+            type: "cc",
+            level: level + 2,
+            hasKids: false,
+            isCc: true,
+            pct: sociedade ? 0 : c.pct,
+            months: c.months
+          });
+        });
+      });
+    };
+    tpl.filter((g) => !g.parentId).forEach((g) => walk(g, 0));
+    const variacao = (byId.g_12 && byId.g_12.months) || OrcEst.z();
+    const pessoas = this.pessoasDe(part).map((p) => ({
+      nome: p.nome,
+      pct: p.pct,
+      m: variacao.map((v) => v * p.pct / 100)
     }));
-    if ((kind === "sociedade" || kind === "mista") && pctSocios > 0 && OrcEst.perto(linha, liquidoCheio * pctSocios / 100) === false && OrcEst.perto(linha, bruto * (pctSocios / 100))) {
-      return { fecha: false, tem: true, texto: "A linha apurada (" + OrcEst.money(linha) + ") se aproxima do resultado bruto, sem abater os impostos (" + OrcEst.money(impostos) + "). A distribuição dos sócios sai líquida: " + OrcEst.money(est) + "." };
-    }
+    const ccIds = [...centros.keys()].sort((a, b) => String(a).localeCompare(String(b), "pt-BR", { numeric: true }));
     return {
-      fecha: false, tem: true,
-      texto: "A linha apurada (" + OrcEst.money(linha) + ") não fecha com a estimativa (" + OrcEst.money(est) + ")."
+      id: String(part.id || (part.companyId + "-" + indice)),
+      companyId: String(part.companyId || ""),
+      nome: part.partnerName || part.companyName || "Parceria",
+      empresa: part.companyName || "",
+      kind: kind,
+      sociedade: sociedade,
+      centros: ccIds,
+      rows: rows,
+      variacao: variacao,
+      pessoas: pessoas,
+      pctPessoas: pessoas.reduce((s, p) => s + p.pct, 0),
+      temValor: variacao.some((v) => Math.abs(v) >= 0.005) || rows.some((r) => r.isAccount)
     };
   },
-
   toggle(id) {
-    this.abertos[id] = !this.abertos[id];
+    this.fechados[id] = !this.fechados[id];
     this.paintCorpo();
+  },
+
+  toggleNo(partId, nodeId) {
+    const set = this.nos[partId];
+    if (!set || !nodeId) return;
+    if (set.has(nodeId)) set.delete(nodeId);
+    else set.add(nodeId);
+    this.paintCorpo();
+  },
+
+  nosDe(card) {
+    if (!this.nos[card.id]) {
+      const set = new Set();
+      (card.rows || []).forEach((r) => {
+        if (r.hasKids && !r.isAccount && !r.isCc) set.add(r.id);
+      });
+      this.nos[card.id] = set;
+    }
+    return this.nos[card.id];
+  },
+
+  empresasFiltro() {
+    const map = new Map();
+    OrcEst.empresas().forEach((e) => map.set(String(e.id), e));
+    OrcEst.parcerias().forEach((p) => {
+      const id = String(p.companyId || "");
+      if (!id || map.has(id)) return;
+      map.set(id, { id: id, name: p.companyName || "", label: id + " - " + OrcEst.norm(p.companyName || "") });
+    });
+    return [...map.values()].sort((a, b) => Number(a.id) - Number(b.id));
   },
 
   render(root) {
     root.innerHTML = `
       <div class="orc-est-page">
         ${typeof OrcamentoApp !== "undefined" ? OrcamentoApp.abasHtml() : ""}
-        <p class="orc-dfc-lead">Repasse de 2027 pela parametrização de sócios e parceiros. Na parceria, o valor abre por centro de custo. Na sociedade, abre por sócio, depois de tirar o imposto da competência. Quando o orçamento já traz a linha, a tela diz se o valor fecha.</p>
+        <p class="orc-dfc-lead">Um DFC de 2027 para cada parceria e cada sociedade. Entram os centros de custo cadastrados e as contas em que o rateio se aplica, no percentual do parceiro. A variação de caixa é o repasse.</p>
         <div class="orc-dfc-tools">
           <div id="orc-rep-emp-box"></div>
         </div>
@@ -1405,7 +1442,7 @@ const OrcamentoRepassesApp = {
   paintFiltro() {
     const box = document.getElementById("orc-rep-emp-box");
     if (!box || !window.MlEmpresaFilter) return;
-    const items = OrcEst.empresas();
+    const items = this.empresasFiltro();
     box.innerHTML = MlEmpresaFilter.html({
       id: "orc-rep-emp",
       label: "Empresas",
@@ -1458,60 +1495,91 @@ const OrcamentoRepassesApp = {
     if (!body) return;
     const lista = this.calcular();
     if (!lista.length) {
-      body.innerHTML = `<div class="orc-dfc-erro">Não há parametrização de sócio ou parceiro nem linha de distribuição neste orçamento.</div>`;
+      body.innerHTML = `<div class="orc-dfc-erro">Não há parceria nem sociedade parametrizada para as empresas selecionadas.</div>`;
       return;
     }
-    const head = OrcEst.MESES.map((m) => `<th>${m}</th>`).join("") + `<th>Total 2027</th>`;
-    const tot = OrcEst.z();
-    const linhas = lista.map((row) => {
-      row.pagar.forEach((v, i) => { tot[i] += v; });
-      const aberto = !!this.abertos[row.id];
-      const chip = row.semParam
-        ? { cls: "orc-est-alerta", txt: "sem parametrização" }
-        : (row.leitura.fecha ? { cls: "orc-est-ok", txt: "linha confere" }
-          : (row.leitura.tem ? { cls: "orc-est-alerta", txt: "rever a linha" } : { cls: "orc-est-mudo", txt: "sem linha no orçamento" }));
-      const rotulo = row.kind === "sociedade" ? "Sociedade" : (row.kind === "mista" ? "Mista" : (row.kind === "parceria" ? "Parceria" : "Sem cadastro"));
-      const cel = row.pagar.map((v) => `<td>${OrcEst.money(v)}</td>`).join("");
-      const extra = aberto ? this.detalhe(row) : "";
-      return `<tr data-est-id="${OrcEst.esc(row.id)}" onclick="OrcamentoRepassesApp.toggle('${OrcEst.esc(row.id)}')">
-        <td><i data-lucide="${aberto ? "chevron-down" : "chevron-right"}"></i>${OrcEst.esc(row.id + " - " + OrcEst.norm(row.nome))} <span class="orc-est-tipo">${rotulo}</span> <span class="${chip.cls}">${chip.txt}</span></td>
-        ${cel}
-        <td>${OrcEst.money(row.pagar.reduce((s, n) => s + n, 0))}</td>
-      </tr>${extra}`;
-    }).join("");
-    body.innerHTML = `
-      <div class="orc-dfc-scroll">
-        <table class="orc-dfc-table orc-est-table">
-          <thead><tr><th>Repasse a pagar</th>${head}</tr></thead>
-          <tbody>${linhas}</tbody>
-          <tfoot><tr class="orc-dfc-formula"><td>Total</td>${tot.map((v) => `<td>${OrcEst.money(v)}</td>`).join("")}<td>${OrcEst.money(tot.reduce((s, n) => s + n, 0))}</td></tr></tfoot>
-        </table>
-      </div>
-      <p class="orc-est-nota">Sociedade: o PIS, a COFINS e o IRPJ/CSLL da competência saem do resultado antes de aplicar o percentual do sócio. O pagamento do imposto continua no mês seguinte e no trimestre, mas o abatimento da distribuição usa o mês em que a receita aconteceu.</p>`;
+    body.innerHTML = `<div class="orc-rep-lista">${lista.map((card) => this.cardHtml(card)).join("")}</div>
+      <p class="orc-est-nota">Na parceria, o valor de cada conta é a parte do parceiro. Na sociedade, o DFC é integral e a variação se divide pelo percentual de cada sócio. Repasse e dividendos já lançados no orçamento da sociedade ficam de fora, para o valor não se abater duas vezes.</p>`;
+    body.querySelectorAll("[data-rep-card]").forEach((btn) => {
+      btn.addEventListener("click", () => this.toggle(btn.getAttribute("data-rep-card")));
+    });
+    body.querySelectorAll("[data-rep-no]").forEach((tr) => {
+      tr.addEventListener("click", () => this.toggleNo(tr.getAttribute("data-rep-part"), tr.getAttribute("data-rep-no")));
+    });
     if (window.lucide && lucide.createIcons) lucide.createIcons();
   },
 
-  detalhe(row) {
-    const linha = (nome, arr) => `<tr class="orc-est-sub"><td>${OrcEst.esc(nome)}</td>${arr.map((v) => `<td>${OrcEst.money(v)}</td>`).join("")}<td>${OrcEst.money(arr.reduce((s, n) => s + (Number(n) || 0), 0))}</td></tr>`;
-    let corpo = "";
-    if ((row.kind === "parceria" || row.kind === "mista") && row.centros && row.centros.length) {
-      row.centros.forEach((c) => {
-        const nome = c.id ? ("C.C. " + c.id + (c.nome ? " — " + c.nome : "")) : (c.nome || "Centro de custo");
-        corpo += linha(nome, c.m);
-      });
-    } else if (row.kind === "parceria" || row.kind === "mista") corpo += linha("Parceiro", row.parceiro);
-    if (row.kind === "sociedade" || row.kind === "mista") {
-      row.socios.forEach((s) => { corpo += linha(s.nome + " · " + String(s.pct).replace(".", ",") + "%", s.m); });
-      corpo += linha("Resultado antes do imposto", row.resultado);
-      corpo += linha("Impostos abatidos", row.impostoMes.map((v) => -v));
+  cardHtml(card) {
+    const aberto = !this.fechados[card.id];
+    const rotulo = card.kind === "sociedade" ? "Sociedade" : (card.kind === "mista" ? "Mista" : "Parceria");
+    const total = this.soma(card.variacao);
+    const centros = (card.centros || []).join(" · ") || "nenhum centro cadastrado";
+    return `<section class="orc-rep-card">
+      <button type="button" class="orc-rep-head" data-rep-card="${OrcEst.esc(card.id)}">
+        <span>
+          <i data-lucide="${aberto ? "chevron-down" : "chevron-right"}"></i>
+          <strong>${OrcEst.esc(card.nome)}</strong>
+          <span class="orc-est-tipo">${rotulo}</span>
+          <span class="orc-rep-sub">${OrcEst.esc(card.companyId + " — " + card.empresa)}</span>
+          <span class="orc-rep-sub">Centros ${OrcEst.esc(centros)}</span>
+        </span>
+        <span class="orc-rep-valor"><span>Variação — repasse</span><b>${OrcEst.money(total)}</b></span>
+      </button>
+      ${aberto ? this.dfcHtml(card) : ""}
+    </section>`;
+  },
+
+  dfcHtml(card) {
+    if (!card.temValor) {
+      return `<p class="orc-est-nota">Não há lançamento de 2027 nos centros desta ${card.sociedade ? "sociedade" : "parceria"}.</p>`;
     }
-    if (row.temApurada) corpo += linha("Linha do orçamento", row.apurada);
-    const avisoPct = (row.kind === "sociedade" || row.kind === "mista") && row.socios.length && Math.abs(row.pctSocios - 100) > 0.05
-      ? `<li class="orc-est-alerta">As participações dos sócios somam ${String(row.pctSocios.toFixed(2)).replace(".", ",")}%, não 100%.</li>`
-      : "";
-    return `<tr class="orc-est-det"><td colspan="14">
-      <table class="orc-dfc-table orc-est-mini"><tbody>${corpo}</tbody></table>
-      <ul class="orc-est-leituras"><li class="${row.leitura.fecha ? "orc-est-ok" : (row.leitura.tem ? "orc-est-alerta" : "")}">${OrcEst.esc(row.leitura.texto)}</li>${avisoPct}</ul>
-    </td></tr>`;
+    const aberto = this.nosDe(card);
+    const head = OrcEst.MESES.map((m) => `<th>${m}</th>`).join("") + `<th>Total 2027</th>`;
+    const pilha = [];
+    const linhas = [];
+    (card.rows || []).forEach((r) => {
+      while (pilha.length && pilha[pilha.length - 1].level >= r.level) pilha.pop();
+      const escondido = pilha.some((p) => !p.open);
+      if (escondido) return;
+      if (r.hasKids) pilha.push({ open: aberto.has(r.id), level: r.level });
+      const cls = [
+        r.isAccount ? "orc-dfc-acc" : "",
+        r.isCc ? "orc-dfc-cc" : "",
+        r.type === "formula" ? "orc-dfc-formula" : "",
+        r.type === "total_n1" ? "orc-dfc-n1" : "",
+        r.id === "g_12" ? "orc-rep-var" : ""
+      ].filter(Boolean).join(" ");
+      const ico = r.hasKids
+        ? `<i data-lucide="${aberto.has(r.id) ? "chevron-down" : "chevron-right"}"></i>`
+        : `<i class="orc-dfc-no"></i>`;
+      const pcts = (r.pcts || []).map((n) => this.pctTxt(n));
+      const pct = r.isCc && r.pct ? `<span class="orc-rep-pct">${this.pctTxt(r.pct)}</span>` : (pcts.length ? `<span class="orc-rep-pct">${OrcEst.esc(pcts.join(" · "))}</span>` : "");
+      const ccs = r.isAccount && r.ccIds && r.ccIds.length ? `<span class="orc-rep-cc">${OrcEst.esc(r.ccIds.join(" · "))}</span>` : "";
+      const cel = (r.months || []).map((v) => {
+        const n = Number(v) || 0;
+        return `<td${n < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(n)}</td>`;
+      }).join("");
+      const click = r.hasKids ? ` data-rep-part="${OrcEst.esc(card.id)}" data-rep-no="${OrcEst.esc(r.id)}"` : "";
+      linhas.push(`<tr class="${cls}"${click}>
+        <td style="padding-left:${10 + r.level * 14}px">${ico}<span>${OrcEst.esc(r.name)}</span>${pct}${ccs}</td>
+        ${cel}
+        <td${this.soma(r.months) < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(this.soma(r.months))}</td>
+      </tr>`);
+    });
+    let socios = "";
+    if (card.pessoas && card.pessoas.length) {
+      const aviso = Math.abs(card.pctPessoas - 100) > 0.05
+        ? `<p class="orc-est-alerta">As participações somam ${OrcEst.esc(this.pctTxt(card.pctPessoas))}, não 100%.</p>`
+        : "";
+      const quem = card.sociedade ? "Cada sócio recebe este percentual da variação." : "Cada participante recebe este percentual da variação.";
+      socios = `<div class="orc-rep-socios"><h4>${quem}</h4>${aviso}
+        <div class="orc-dfc-scroll"><table class="orc-dfc-table orc-est-table"><thead><tr><th>Participante</th>${head}</tr></thead><tbody>
+        ${card.pessoas.map((p) => `<tr><td>${OrcEst.esc(p.nome)} <span class="orc-rep-pct">${this.pctTxt(p.pct)}</span></td>${p.m.map((v) => `<td>${OrcEst.money(v)}</td>`).join("")}<td>${OrcEst.money(this.soma(p.m))}</td></tr>`).join("")}
+        </tbody></table></div></div>`;
+    }
+    return `<div class="orc-dfc-scroll"><table class="orc-dfc-table orc-est-table">
+      <thead><tr><th>DFC</th>${head}</tr></thead>
+      <tbody>${linhas.join("")}</tbody>
+    </table></div>${socios}`;
   }
 };

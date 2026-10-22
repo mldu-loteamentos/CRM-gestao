@@ -1171,6 +1171,10 @@ function switchCustomerTab(tabId) {
       window.syncJudicialOccurrenceFormLock();
     }
   }
+
+  if (tabId === "tab-custas-judiciais" && window.CustasJudiciaisApp) {
+    window.CustasJudiciaisApp.render();
+  }
   
   if (tabId === 'tab-construcao' && typeof window.loadConstrucoes === 'function') {
     window.loadConstrucoes();
@@ -12868,6 +12872,17 @@ function syncCobrancaJudicialTabs(originIsSubjudice, isAdvogado, saleObj) {
   if (cobrancaJudicialBtn) cobrancaJudicialBtn.style.display = show ? "" : "none";
   const anexosJuridicoBtn = document.getElementById("btn-anexos-juridico");
   if (anexosJuridicoBtn) anexosJuridicoBtn.style.display = show ? "" : "none";
+  const custasBtn = document.getElementById("btn-tab-custas-judiciais");
+  const mostraCustas = typeof window.custasJudiciaisDeveMostrar === "function"
+    ? window.custasJudiciaisDeveMostrar(originIsSubjudice)
+    : !!(originIsSubjudice || integra || clientSub);
+  if (custasBtn) custasBtn.style.display = mostraCustas ? "" : "none";
+  if (!mostraCustas) {
+    const paneCustas = document.getElementById("tab-custas-judiciais");
+    if (paneCustas && paneCustas.classList.contains("active") && typeof switchCustomerTab === "function") {
+      switchCustomerTab(show ? "tab-cobranca-judicial" : "tab-contrato");
+    }
+  }
   syncJudicialOccurrenceFormLock(saleObj);
 }
 
