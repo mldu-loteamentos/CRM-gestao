@@ -51,7 +51,7 @@ const CustasJudiciaisApp = {
 
   limparUnidade(nome, ccId) {
     let t = String(nome || "").replace(/\s+/g, " ").trim();
-    if (!t || t === "N/D" || t === "—" || t === "-") return "";
+    if (!t || t === "N/D" || t === "—" || t === "-" || /^carregando\b/i.test(t)) return "";
     const cc = String(ccId || "").replace(/\D/g, "");
     if (cc) t = t.replace(new RegExp("^" + cc + "\\s*[-–]\\s*", "i"), "").trim();
     if (!t || t === "N/D" || (cc && t.replace(/\D/g, "") === cc)) return "";

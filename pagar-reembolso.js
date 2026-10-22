@@ -162,9 +162,32 @@ const PagarReembolsoApp = {
       const partes = String(sale.unitId).split("-");
       if (partes.length >= 3) nome = limpar(partes.slice(2).join("-"));
     }
-    const id = su.id != null && su.id !== "" ? su.id : (sale.siengeUnitId || "");
-    if (!nome && (id == null || id === "")) return null;
-    return { name: nome || "", id: id };
+    if (!nome) return null;
+    return { name: nome, id: "" };
+  },
+
+  async nomeCliente(item) {
+    const atual = String(item.customerName || "").trim();
+    if (atual && !/^carregando\b/i.test(atual)) return atual;
+    let cid = String(item.customerId || "").replace(/\D/g, "");
+    const sid = String(item.saleId || "").replace(/\D/g, "");
+    if (sid) {
+      try {
+        const bill = await this.get("/accounts-receivable/receivable-bills/" + encodeURIComponent(sid));
+        if (!cid && bill) cid = String(bill.customerId || bill.clientId || "").replace(/\D/g, "");
+        const direto = bill && (bill.customerName || bill.clientName || (bill.customer && bill.customer.name));
+        if (direto) return String(direto).trim();
+      } catch (e) {}
+    }
+    if (!cid) return "";
+    try {
+      const cust = window.SiengeAPI && typeof SiengeAPI.getCustomer === "function"
+        ? await SiengeAPI.getCustomer(cid)
+        : await this.get("/customers/" + encodeURIComponent(cid));
+      return String((cust && (cust.name || cust.clientName)) || "").trim();
+    } catch (e) {
+      return "";
+    }
   },
 
   async unidadeRemota(item) {
@@ -221,24 +244,25 @@ const PagarReembolsoApp = {
     const fc = this.fb();
     await Promise.all(itens.map(async (item) => {
       const cc = item.costCenterId;
-      const gravada = CJ && typeof CJ.limparUnidade === "function" ? CJ.limparUnidade(item.unitName, cc) : String(item.unitName || "").trim();
+      const gravada = CJ && typeof CJ.limparUnidade === "function" ? CJ.limparUnidade(item.unitName, cc) : String(item.unitName || "").replace(/^carregando\b/i, "").trim();
       let nome = gravada;
-      let unitId = item.siengeUnitId || "";
       if (!nome && CJ && typeof CJ.unidadeConhecida === "function") nome = CJ.unidadeConhecida(item.customerId, item.saleId, cc);
-      if (!nome || !unitId) {
+      if (!nome) {
         const remota = await this.unidadeRemota(item);
-        if (remota) {
-          if (!nome && remota.name) nome = remota.name;
-          if (!unitId && remota.id) unitId = remota.id;
-        }
+        if (remota && remota.name) nome = remota.name;
       }
-      if (nome) item.unitName = nome;
-      if (unitId) item.siengeUnitId = unitId;
+      const cliente = await this.nomeCliente(item);
+      if (cliente) item.customerName = cliente;
+      if (nome) {
+        const catalogo = await this.unidade(String(cc || item.costCenterId || "").replace(/\D/g, ""), nome);
+        if (catalogo && catalogo.name) nome = catalogo.name;
+        item.unitName = nome;
+      }
       if (!fc || !item.id) return;
       const patch = {};
-      if (nome && nome !== gravada) patch.unitName = nome;
-      if (unitId && String(unitId) !== String(item._siengeUnitId || "")) patch.siengeUnitId = unitId;
-      if (item.customerName) patch.customerName = item.customerName;
+      if (nome && nome !== String(item.unitName || "")) patch.unitName = nome;
+      if (nome) patch.unitName = nome;
+      if (cliente) patch.customerName = cliente;
       if (!Object.keys(patch).length) return;
       try {
         await fc.setDoc(fc.doc(window.firebaseDb, "custas_judiciais", item.id), patch, { merge: true });
@@ -261,6 +285,8 @@ const PagarReembolsoApp = {
       if (!String(item.companyId || "").replace(/\D/g, "")) falta.push("empresa do título");
       if (!String(item.costCenterId || "").replace(/\D/g, "")) falta.push("centro de custo");
       const aviso = ok ? "" : `<div class="cj-nota">Falta ${this.esc(falta.join(", "))}. Edite a custa na ficha do título.</div>`;
+      const CJ = window.CustasJudiciaisApp;
+      const nomeUnidade = CJ && typeof CJ.limparUnidade === "function" ? CJ.limparUnidade(item.unitName, item.costCenterId) : String(item.unitName || "").trim();
       const proc = item.processoConsulta ? this.esc(item.processoConsulta) : "Sem número no cadastro";
       const emp = [item.companyId, item.companyName].filter(Boolean).join(" · ");
       const nAnexos = ((item.guias || []).length + (item.comprovantes || []).length);
@@ -269,7 +295,7 @@ const PagarReembolsoApp = {
         <td><strong>${this.esc(item.saleId || "—")}</strong></td>
         <td class="cc-nome" title="${this.esc(item.customerName || "")}">${this.esc(item.customerName || "—")}</td>
         <td class="cc-nome" title="${this.esc(emp)}">${this.esc(emp || "—")}</td>
-        <td class="cc-nome" title="${this.esc(item.unitName || "")}">${this.esc(item.unitName || "—")}</td>
+        <td title="${this.esc(nomeUnidade || "")}">${this.esc(nomeUnidade || "—")}</td>
         <td>${this.esc(item.costCenterId || "—")}</td>
         <td>${this.esc(this.dataBr(item.data))}</td>
         <td class="cc-nome">${this.esc(item.descricao || "")}${aviso}</td>
@@ -469,6 +495,11 @@ const PagarReembolsoApp = {
   async unidade(ccId, nome) {
     const alvo = this.foldUnit(String(nome || "").replace(new RegExp("^" + ccId + "[\\s\\-–]*"), ""));
     if (!ccId || !alvo) return null;
+    try {
+      const direto = await this.get("/units?limit=20&offset=0&enterpriseId=" + encodeURIComponent(ccId) + "&name=" + encodeURIComponent(String(nome || "").trim()) + "&additionalData=NONE");
+      const achou = ((direto && direto.results) || []).find((u) => this.foldUnit(u.name) === alvo || this.foldUnit(u.commercialName) === alvo);
+      if (achou) return achou;
+    } catch (e) {}
     let offset = 0;
     for (let g = 0; g < 15; g++) {
       const data = await this.get("/units?limit=200&offset=" + offset + "&enterpriseId=" + encodeURIComponent(ccId) + "&additionalData=NONE");
@@ -512,13 +543,14 @@ const PagarReembolsoApp = {
     const dep = await this.departamentoTesouraria();
     await this.garantirCentros();
     const rateio = this.rateio(ccId);
-    if (!primeiro.unitName || !primeiro.siengeUnitId) await this.completarUnidades([primeiro]);
-    let unidade = primeiro.siengeUnitId ? { id: primeiro.siengeUnitId, name: primeiro.unitName || "" } : null;
-    if (!unidade || unidade.id == null || unidade.id === "") unidade = await this.unidade(ccId, primeiro.unitName);
-    if (!unidade || unidade.id == null || unidade.id === "") {
-      throw new Error("Não encontrei a unidade " + (primeiro.unitName || "do título " + primeiro.saleId) + " no centro de custo " + ccId + ".");
-    }
-    const unitId = /^\d+$/.test(String(unidade.id)) ? parseInt(unidade.id, 10) : unidade.id;
+    await this.completarUnidades([primeiro]);
+    const CJ = window.CustasJudiciaisApp;
+    const nomeUnidade = (CJ && typeof CJ.limparUnidade === "function" ? CJ.limparUnidade(primeiro.unitName, ccId) : String(primeiro.unitName || "").trim());
+    if (!nomeUnidade) throw new Error("Não encontrei a unidade do título " + primeiro.saleId + " no centro de custo " + ccId + ".");
+    const catalogo = await this.unidade(ccId, nomeUnidade);
+    const idCatalogo = catalogo && catalogo.id != null ? String(catalogo.id) : "";
+    const candidatos = [nomeUnidade];
+    if (idCatalogo && idCatalogo !== nomeUnidade) candidatos.push(idCatalogo);
     const payload = {
       debtorId: companyId,
       creditorId: this.CREDOR,
@@ -541,19 +573,33 @@ const PagarReembolsoApp = {
       departmentsCost: [{ departmentId: dep, percentage: 100 }],
       buildingsCost: [],
       taxes: [],
-      units: [{ costCenterId: parseInt(ccId, 10), unitId: unitId, percentage: 100, principal: "S" }]
+      units: [{ unitId: nomeUnidade, costCenterId: parseInt(ccId, 10), percentage: 100, principal: "S" }]
     };
     let billId = "";
+    let created = null;
     try {
-      const created = await this.siengeJson("/bills", {
-        method: "POST",
-        headers: {
-          Authorization: this.siengeAuth(),
-          Accept: "application/json",
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(payload)
-      });
+      let ultimoErro = null;
+      for (let c = 0; c < candidatos.length; c++) {
+        payload.units = [{ unitId: String(candidatos[c]), costCenterId: parseInt(ccId, 10), percentage: 100, principal: "S" }];
+        try {
+          created = await this.siengeJson("/bills", {
+            method: "POST",
+            headers: {
+              Authorization: this.siengeAuth(),
+              Accept: "application/json",
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
+          });
+          ultimoErro = null;
+          break;
+        } catch (erroUnidade) {
+          ultimoErro = erroUnidade;
+          const msg = (erroUnidade && erroUnidade.message) || "";
+          if (!/n[aã]o est[aá] cadastrad/i.test(msg) || c === candidatos.length - 1) throw erroUnidade;
+        }
+      }
+      if (ultimoErro) throw ultimoErro;
       billId = created.body && (created.body.id || created.body.billId);
       if (!billId) {
         const loc = created.res.headers.get("Location") || created.res.headers.get("location") || "";
