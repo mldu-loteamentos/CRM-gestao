@@ -17,6 +17,7 @@ const ParametrizacaoParceiroApp = {
   _bankLoading: false,
   expanded: null,
   socioAberto: "",
+  vinculoUi: null,
 
   obraFromCc(id) {
     const digits = String(id || "").replace(/\D/g, "");
@@ -431,6 +432,7 @@ const ParametrizacaoParceiroApp = {
 
   setDetailTab(tab) {
     this.detailTab = tab || "geral";
+    this.fecharVinculo();
     this.render();
     if (this.detailTab === "credor") {
       this.ensureCreditorBank();
@@ -861,7 +863,8 @@ const ParametrizacaoParceiroApp = {
         if (idSet.has(c._id.substring(0, i))) depth++;
       }
       c._depth = depth;
-      c._isTotal = /total/i.test(c._type);
+      const tipo = String(c._type || "").toLowerCase();
+      c._isTotal = tipo === "t" || /total|sintet/i.test(tipo);
     });
     this.categories.sort((a, b) => a._id.localeCompare(b._id, "pt-BR", { numeric: true }));
     this.loadingCats = false;
@@ -1031,6 +1034,7 @@ const ParametrizacaoParceiroApp = {
   toggleSocio(id) {
     const sid = String(id || "");
     this.socioAberto = this.socioAberto === sid ? "" : sid;
+    this.fecharVinculo();
     this.renderKeepScroll();
   },
 
@@ -1088,8 +1092,29 @@ const ParametrizacaoParceiroApp = {
     return this.centrosOrdenados([...this.catalogoCentros().values()].filter((cc) => this.empresaDoCentro(cc) === emp));
   },
 
-  planosFolha() {
-    return (this.categories || []).filter((c) => c && c._id && !c._isTotal);
+  codigoConta(c) {
+    return String((c && (c._id || c.id)) || "").replace(/\./g, "").trim();
+  },
+
+  /* R / resultado / analítica. T, totalizadora e sintética ficam de fora. Sem tipo, vale a conta que não agrupa outra. */
+  ehContaResultado(c) {
+    const t = String((c && (c._type || c.tpConta || c.type || c.financialCategoryType)) || "").toLowerCase();
+    if (t === "t" || t.includes("total") || t.includes("sintet")) return false;
+    if (t === "r" || t.includes("result") || t.includes("analit")) return true;
+    return !t;
+  },
+
+  planosSaida() {
+    const cats = (this.categories || []).filter((c) => this.codigoConta(c));
+    const ids = cats.map((c) => this.codigoConta(c));
+    return cats.filter((c) => {
+      const id = this.codigoConta(c);
+      if (!id.startsWith("2")) return false;
+      if (!this.ehContaResultado(c)) return false;
+      const t = String(c._type || c.tpConta || c.type || c.financialCategoryType || "").trim();
+      if (t) return true;
+      return !ids.some((outro) => outro !== id && outro.startsWith(id));
+    });
   },
 
   documentosTitulo() {
@@ -1121,13 +1146,31 @@ const ParametrizacaoParceiroApp = {
       row.ccTitulo = cc ? String(cc.id) : "";
       row.ccTituloNome = cc ? String(cc.name || cc.nome || "") : "";
     } else if (campo === "plano") {
-      const cat = this.planosFolha().find((c) => String(c._id) === v);
-      row.planoId = cat ? String(cat._id) : "";
-      row.planoNome = cat ? String(cat._name || "") : "";
+      if (!v) {
+        row.planoId = "";
+        row.planoNome = "";
+      } else {
+        const cat = this.planosSaida().find((c) => String(c._id) === v);
+        if (!cat) {
+          this.renderKeepScroll();
+          return;
+        }
+        row.planoId = String(cat._id);
+        row.planoNome = String(cat._name || "");
+      }
     } else if (campo === "doc") {
-      const d = this.documentosTitulo().find((x) => String(x.id) === v);
-      row.docTipo = d ? String(d.id) : "";
-      row.docNome = d ? String(d.nome || d.id) : "";
+      if (!v) {
+        row.docTipo = "";
+        row.docNome = "";
+      } else {
+        const d = this.documentosTitulo().find((x) => String(x.id) === v);
+        if (!d) {
+          this.renderKeepScroll();
+          return;
+        }
+        row.docTipo = String(d.id);
+        row.docNome = String(d.nome || d.id);
+      }
     } else return;
     this.persist();
     this.renderKeepScroll();
@@ -1165,35 +1208,148 @@ const ParametrizacaoParceiroApp = {
       + ".";
   },
 
-  vinculoTituloHtml(p, s) {
-    const planos = this.planosFolha().map((c) => ({
-      id: String(c._id),
-      label: String(c._id) + " — " + String(c._name || "")
-    }));
-    const docs = this.documentosTitulo().map((d) => ({
+  fecharVinculo() {
+    this.vinculoUi = { socioId: String(this.socioAberto || ""), planoOpen: false, planoQuery: "", docOpen: false, docQuery: "" };
+  },
+
+  uiVinculo() {
+    const sid = String(this.socioAberto || "");
+    if (!this.vinculoUi || this.vinculoUi.socioId !== sid) this.fecharVinculo();
+    return this.vinculoUi;
+  },
+
+  itensPlano(s) {
+    const items = this.planosSaida().map((c) => ({ id: String(c._id), name: String(c._name || "") }));
+    const id = String((s && s.planoId) || "");
+    if (id && !items.some((i) => i.id === id)) items.push({ id, name: String((s && s.planoNome) || "") });
+    return items;
+  },
+
+  itensDocumento(s) {
+    const items = this.documentosTitulo().map((d) => ({
       id: String(d.id),
-      label: String(d.id) + (d.nome && d.nome !== d.id ? " — " + d.nome : "")
+      name: d.nome && String(d.nome) !== String(d.id) ? String(d.nome) : ""
     }));
-    const sel = (rotulo, valor, opcoes, campo, vazio) => {
-      const opts = [`<option value="">${this.esc(vazio)}</option>`].concat(opcoes.map((o) =>
-        `<option value="${this.esc(o.id)}"${String(o.id) === String(valor) ? " selected" : ""}>${this.esc(o.label)}</option>`
-      ));
-      return `<label style="display:flex;flex-direction:column;gap:4px;min-width:200px;flex:1;font-size:0.68rem;font-weight:700;color:#475569;text-transform:uppercase;">${rotulo}
-        <select onchange="ParametrizacaoParceiroApp.setSocioVinculo('${this.esc(s.id)}','${campo}', this.value)"
-          style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;background:#fff;font-weight:700;text-transform:none;color:#0f172a;">${opts.join("")}</select>
-      </label>`;
+    const id = String((s && s.docTipo) || "");
+    if (id && !items.some((i) => i.id === id)) items.push({ id, name: String((s && s.docNome) || "") });
+    return items;
+  },
+
+  opcoesVinculo(campo, s) {
+    const ui = this.uiVinculo();
+    const plano = campo === "plano";
+    return {
+      id: plano ? "pp-vinculo-plano" : "pp-vinculo-doc",
+      label: plano ? "Plano financeiro" : "Tipo de documento",
+      items: plano ? this.itensPlano(s) : this.itensDocumento(s),
+      selectedIds: plano ? (s && s.planoId ? [String(s.planoId)] : []) : (s && s.docTipo ? [String(s.docTipo)] : []),
+      open: plano ? !!ui.planoOpen : !!ui.docOpen,
+      query: plano ? (ui.planoQuery || "") : (ui.docQuery || ""),
+      single: true,
+      emptyMeansAll: false,
+      emptyLabel: plano ? "Escolha a conta" : "Escolha o documento",
+      extraClass: "pp-vinculo-filtro",
+      nouns: plano ? {
+        singular: "conta",
+        plural: "contas",
+        none: this.loadingCats ? "Carregando o plano financeiro…" : "Nenhuma conta de resultado de saída",
+        noMatch: "Nenhuma conta com esse nome."
+      } : {
+        singular: "documento",
+        plural: "documentos",
+        none: "Nenhum tipo de documento",
+        noMatch: "Nenhum documento com esse nome."
+      }
     };
-    const avisoPlano = this.loadingCats ? "Carregando o plano financeiro…" : (planos.length ? "" : "O plano financeiro ainda não carregou.");
-    const avisoDoc = docs.length ? "" : "Os tipos de documento ainda não carregaram.";
+  },
+
+  vinculoTituloHtml(p, s) {
+    const F = window.MlEmpresaFilter;
+    const plano = F ? F.html(this.opcoesVinculo("plano", s)) : "";
+    const doc = F ? F.html(this.opcoesVinculo("doc", s)) : "";
+    const avisoPlano = this.loadingCats ? "Carregando o plano financeiro…" : (this.planosSaida().length ? "" : "Nenhuma conta de resultado de saída carregada.");
+    const avisoDoc = this.documentosTitulo().length ? "" : "Os tipos de documento ainda não carregaram.";
     return `<div style="margin-top:12px;">
       <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:8px;">Título a pagar deste credor</div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;">
-        ${sel("Plano financeiro", s.planoId, planos, "plano", "Escolha a conta")}
-        ${sel("Tipo de documento", s.docTipo, docs, "doc", "Escolha o documento")}
+      <div class="pp-vinculo-filtros">
+        <div id="pp-vinculo-plano-slot" class="pp-vinculo-slot">${plano}</div>
+        <div id="pp-vinculo-doc-slot" class="pp-vinculo-slot">${doc}</div>
       </div>
-      <p style="margin:8px 0 0;font-size:0.75rem;color:#64748b;line-height:1.4;">${this.esc(this.textoRepasse(p))} O plano financeiro e o tipo de documento identificam esse título no contas a pagar. O título ainda não é gerado nesta tela.</p>
+      <p style="margin:8px 0 0;font-size:0.75rem;color:#64748b;line-height:1.4;">${this.esc(this.textoRepasse(p))} O plano financeiro e o tipo de documento identificam esse título no contas a pagar. Só entra conta de resultado de saída, com código que começa com 2. O título ainda não é gerado nesta tela.</p>
       ${avisoPlano || avisoDoc ? `<p style="margin:4px 0 0;font-size:0.75rem;color:#b45309;">${this.esc([avisoPlano, avisoDoc].filter(Boolean).join(" "))}</p>` : ""}
     </div>`;
+  },
+
+  socioVinculoAberto() {
+    const p = this.current();
+    if (!p) return null;
+    return (p.socios || []).find((x) => String(x.id) === String(this.socioAberto)) || null;
+  },
+
+  pintarVinculo(campo) {
+    const s = this.socioVinculoAberto();
+    const slot = document.getElementById(campo === "plano" ? "pp-vinculo-plano-slot" : "pp-vinculo-doc-slot");
+    if (!slot || !s || !window.MlEmpresaFilter) return;
+    slot.innerHTML = MlEmpresaFilter.html(this.opcoesVinculo(campo, s));
+    if (window.lucide && lucide.createIcons) lucide.createIcons();
+  },
+
+  pintarVinculoLista(campo) {
+    const s = this.socioVinculoAberto();
+    const id = campo === "plano" ? "pp-vinculo-plano" : "pp-vinculo-doc";
+    const el = document.getElementById(id + "-list");
+    if (el && s && window.MlEmpresaFilter) el.innerHTML = MlEmpresaFilter.listHtml(this.opcoesVinculo(campo, s));
+  },
+
+  bindVinculoFiltros() {
+    if (!window.MlEmpresaFilter) return;
+    const self = this;
+    ["plano", "doc"].forEach((campo) => {
+      const id = campo === "plano" ? "pp-vinculo-plano" : "pp-vinculo-doc";
+      if (!document.getElementById(id)) return;
+      MlEmpresaFilter.bind(id, {
+        toggleOpen() {
+          const ui = self.uiVinculo();
+          const aberto = campo === "plano" ? !ui.planoOpen : !ui.docOpen;
+          ui.planoOpen = campo === "plano" ? aberto : false;
+          ui.docOpen = campo === "doc" ? aberto : false;
+          ui.planoQuery = "";
+          ui.docQuery = "";
+          self.pintarVinculo("plano");
+          self.pintarVinculo("doc");
+          if (aberto) {
+            const q = document.getElementById(id + "-search");
+            if (q && q.focus) q.focus();
+          }
+        },
+        close() {
+          const ui = self.uiVinculo();
+          if (campo === "plano") {
+            if (!ui.planoOpen) return;
+            ui.planoOpen = false;
+          } else {
+            if (!ui.docOpen) return;
+            ui.docOpen = false;
+          }
+          self.pintarVinculo(campo);
+        },
+        setQuery(q) {
+          const ui = self.uiVinculo();
+          if (campo === "plano") ui.planoQuery = q || "";
+          else ui.docQuery = q || "";
+          self.pintarVinculoLista(campo);
+        },
+        toggleId(itemId, on) {
+          if (!on) return;
+          const ui = self.uiVinculo();
+          ui.planoOpen = false;
+          ui.docOpen = false;
+          ui.planoQuery = "";
+          ui.docQuery = "";
+          self.setSocioVinculo(self.socioAberto, campo, String(itemId || ""));
+        }
+      });
+    });
   },
 
   async removeSocio(id) {
@@ -1832,6 +1988,7 @@ const ParametrizacaoParceiroApp = {
       </div>
     `;
     if (window.lucide) lucide.createIcons();
+    this.bindVinculoFiltros();
     if (this._keepScrollPos) {
       const pos = this._keepScrollPos;
       this._keepScrollPos = null;
@@ -2027,7 +2184,7 @@ const ParametrizacaoParceiroApp = {
         </label>`;
       }).join("");
       const pctTxt = s.sharePct === "" || s.sharePct == null ? "sem %" : this.fmtPct(s.sharePct) + "%";
-      return `<div style="border:1px solid #d1fae5;background:#f0fdf4;border-radius:10px;overflow:hidden;">
+      return `<div style="border:1px solid #d1fae5;background:#f0fdf4;border-radius:10px;overflow:visible;">
         <button type="button" onclick="ParametrizacaoParceiroApp.toggleSocio('${this.esc(s.id)}')"
           style="width:100%;display:flex;align-items:center;gap:10px;text-align:left;border:none;background:transparent;padding:12px 14px;cursor:pointer;">
           <span style="width:16px;color:#065f46;font-weight:800;">${aberto ? "▾" : "▸"}</span>

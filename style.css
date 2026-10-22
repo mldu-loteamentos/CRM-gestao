@@ -2620,6 +2620,9 @@ circle.donut-segment {
 .ml-emp-filter-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #f1f5f9; cursor: pointer; font-size: 0.82rem; color: #334155; font-weight: 600; }
 .ml-emp-filter-item:last-child { border-bottom: none; }
 .ml-emp-filter-item span { min-width: 0; white-space: normal; line-height: 1.35; }
+#parametrizacao-parceiro-root .pp-vinculo-filtros { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-start; }
+#parametrizacao-parceiro-root .pp-vinculo-filtros .pp-vinculo-slot { flex: 1 1 280px; min-width: 240px; }
+#parametrizacao-parceiro-root .pp-vinculo-filtros .ml-emp-filter { flex: none; width: 100%; max-width: none; min-width: 0; }
 
 /* Dashboard inadimplência — filtros sem encavalar (override do width fixo do MlEmpresaFilter) */
 .dash-inad-filters-grid {
