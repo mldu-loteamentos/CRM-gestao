@@ -105,6 +105,7 @@ const PagarReembolsoApp = {
       });
       this.documentosUsados = usados;
       await this.completarProcessos(itens);
+      await this.completarUnidades(itens);
       itens.sort((a, b) => String(a.saleId || "").localeCompare(String(b.saleId || "")) || String(a.data || "").localeCompare(String(b.data || "")));
       this.itens = itens;
     } catch (e) {
@@ -137,6 +138,53 @@ const PagarReembolsoApp = {
           : String(item.processo || "").trim();
         item.processoConsulta = texto || gravado || "";
       });
+    }));
+  },
+
+  textoUnidade(v) {
+    if (Array.isArray(v)) {
+      const u = v[0] || {};
+      return u.name || u.unitName || u.description || "";
+    }
+    if (v && typeof v === "object") return v.name || v.unitName || "";
+    return v;
+  },
+
+  async unidadeRemota(item) {
+    const sid = String(item.saleId || "").replace(/\D/g, "");
+    if (!sid) return "";
+    const CJ = window.CustasJudiciaisApp;
+    const limpar = (v, cc) => CJ && typeof CJ.limparUnidade === "function" ? CJ.limparUnidade(v, cc) : String(v || "").trim();
+    let bill = null;
+    try { bill = await this.get("/accounts-receivable/receivable-bills/" + encodeURIComponent(sid)); } catch (e) { bill = null; }
+    const cc = item.costCenterId || (bill && (bill.enterpriseId || (Array.isArray(bill.costCentersId) ? bill.costCentersId[0] : "")));
+    const daConta = limpar(this.textoUnidade(bill && (bill.units || bill.unityName || bill.unitName)), cc);
+    if (daConta) return daConta;
+    let sale = null;
+    try {
+      const data = await this.get("/sales-contracts?receivableBillId=" + encodeURIComponent(sid) + "&limit=5");
+      sale = ((data && data.results) || [])[0] || null;
+    } catch (e) { sale = null; }
+    if (sale && CJ && typeof CJ.nomeDeRegistro === "function") return CJ.nomeDeRegistro(sale, cc);
+    const unidade = sale && sale.salesContractUnits && sale.salesContractUnits[0];
+    return limpar(unidade && (unidade.name || unidade.unitName), cc);
+  },
+
+  async completarUnidades(itens) {
+    const CJ = window.CustasJudiciaisApp;
+    const fc = this.fb();
+    await Promise.all(itens.map(async (item) => {
+      const cc = item.costCenterId;
+      const gravada = CJ && typeof CJ.limparUnidade === "function" ? CJ.limparUnidade(item.unitName, cc) : String(item.unitName || "").trim();
+      let nome = gravada;
+      if (!nome && CJ && typeof CJ.unidadeConhecida === "function") nome = CJ.unidadeConhecida(item.customerId, item.saleId, cc);
+      if (!nome) nome = await this.unidadeRemota(item);
+      if (!nome) return;
+      item.unitName = nome;
+      if (nome === gravada || !fc || !item.id) return;
+      try {
+        await fc.setDoc(fc.doc(window.firebaseDb, "custas_judiciais", item.id), { unitName: nome }, { merge: true });
+      } catch (e) {}
     }));
   },
 

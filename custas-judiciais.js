@@ -49,15 +49,69 @@ const CustasJudiciaisApp = {
     return String(digitado || "").trim();
   },
 
+  limparUnidade(nome, ccId) {
+    let t = String(nome || "").replace(/\s+/g, " ").trim();
+    if (!t || t === "N/D" || t === "—" || t === "-") return "";
+    const cc = String(ccId || "").replace(/\D/g, "");
+    if (cc) t = t.replace(new RegExp("^" + cc + "\\s*[-–]\\s*", "i"), "").trim();
+    if (!t || t === "N/D" || (cc && t.replace(/\D/g, "") === cc)) return "";
+    return t;
+  },
+
+  nomeDeRegistro(row, ccId) {
+    if (!row) return "";
+    const cc = ccId || row.costCenterId;
+    const direto = this.limparUnidade(row.unitName || row.units || row.unityName, cc);
+    if (direto) return direto;
+    const unidade = (row.salesContractUnits && row.salesContractUnits[0]) || {};
+    const doContrato = this.limparUnidade(unidade.name || unidade.unitName, cc);
+    if (doContrato) return doContrato;
+    const partes = String(row.unitId || "").split("-");
+    if (partes.length >= 3) return this.limparUnidade(partes.slice(2).join("-"), cc);
+    return "";
+  },
+
+  idsDoRegistro(row) {
+    const lista = [row && row.saleId, row && row.receivableBillId, row && row.id].concat((row && row.billIds) || []);
+    return lista.map((v) => String(v || "").replace(/^B-/i, "").split("-")[0].replace(/\D/g, "")).filter(Boolean);
+  },
+
+  unidadeConhecida(cid, sid, ccId) {
+    const st = window.AppState || {};
+    const c = String(cid || "").replace(/\D/g, "");
+    const s = String(sid || "").replace(/\D/g, "");
+    const cc = String(ccId || "").replace(/\D/g, "");
+    const fontes = [].concat(st.defaultersList || [], st.sales || []);
+    const doCliente = fontes.filter((row) => {
+      const rc = String(row.customerId || "").replace(/\D/g, "");
+      return !c || !rc || rc === c;
+    });
+    const porTitulo = doCliente.filter((row) => s && this.idsDoRegistro(row).indexOf(s) >= 0);
+    const porCentro = doCliente.filter((row) => cc && String(row.costCenterId || "").replace(/\D/g, "") === cc);
+    const fila = porTitulo.length ? porTitulo : (porCentro.length ? porCentro : (doCliente.length === 1 ? doCliente : []));
+    for (let i = 0; i < fila.length; i++) {
+      const nome = this.nomeDeRegistro(fila[i], cc);
+      if (nome) return nome;
+    }
+    const tituloEl = document.getElementById("ctx-titulo-val");
+    const aberto = tituloEl ? String(tituloEl.textContent || "").replace(/\D/g, "") : "";
+    if (!s || !aberto || aberto === s) {
+      const rotulo = document.getElementById("det-block-lot-span") || document.getElementById("det-block-lot") || document.getElementById("ctx-empreend-val");
+      const nome = this.limparUnidade(rotulo && rotulo.textContent, cc);
+      if (nome) return nome;
+    }
+    return "";
+  },
+
   contextoTitulo() {
     const st = window.AppState || {};
     const chave = this.chave();
     const lista = st.defaultersList || [];
     const hit = lista.find((c) => String(c.customerId || "").replace(/\D/g, "") === chave.cid
-      && String(c.saleId || "").replace(/\D/g, "") === chave.sid) || null;
+      && this.idsDoRegistro(c).indexOf(chave.sid) >= 0) || null;
     const companyId = String(st.currentCompanyId || (hit && hit.companyId) || "").replace(/\D/g, "");
     const costCenterId = String(st.currentCostCenterId || (hit && hit.costCenterId) || "").replace(/\D/g, "");
-    const unitName = String((hit && (hit.unitName || hit.units)) || "").trim();
+    const unitName = this.nomeDeRegistro(hit, costCenterId) || this.unidadeConhecida(chave.cid, chave.sid, costCenterId);
     let companyName = "";
     if (companyId && typeof window.getCompanyName === "function") companyName = window.getCompanyName(companyId) || "";
     return {
