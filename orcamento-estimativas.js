@@ -1120,6 +1120,8 @@ const OrcamentoRepassesApp = {
   selectedCompanyIds: [],
   companyDropOpen: false,
   companyQuery: "",
+  abaId: "",
+  obraCode: "",
   fechados: {},
   nos: {},
 
@@ -1138,10 +1140,12 @@ const OrcamentoRepassesApp = {
     return typeof ParametrizacaoParceiroApp !== "undefined" ? ParametrizacaoParceiroApp : (window.ParametrizacaoParceiroApp || null);
   },
 
-  centrosDa(part) {
+  centrosDa(part, obraCode) {
     const map = new Map();
     (part.obras || []).forEach((obra) => {
+      if (obraCode && String(obra.code) !== String(obraCode)) return;
       (obra.costCenters || []).forEach((c) => {
+        if (c.inAccount === false) return;
         const id = String(c.id || "").replace(/\D/g, "");
         if (!id || map.has(id)) return;
         map.set(id, { obra: obra, nome: String(c.name || "").trim() });
@@ -1201,22 +1205,28 @@ const OrcamentoRepassesApp = {
     return lista;
   },
 
-  calcular() {
+  prestacoes() {
     const ids = new Set(this.selectedCompanyIds.map(String));
-    const linhas = OrcEst.linhas().filter((l) => !ids.size || ids.has(String(l.e)));
-    const porEmpresa = new Map();
-    linhas.forEach((l) => {
-      const id = String(l.e || "");
-      if (!porEmpresa.has(id)) porEmpresa.set(id, []);
-      porEmpresa.get(id).push(l);
-    });
-    const pars = OrcEst.parcerias().filter((p) => !ids.size || ids.has(String(p.companyId)));
-    const saida = pars.map((p, i) => this.montarDfc(p, porEmpresa.get(String(p.companyId || "")) || [], i));
-    saida.sort((a, b) => Number(a.companyId) - Number(b.companyId) || String(a.nome).localeCompare(String(b.nome), "pt-BR"));
-    return saida;
+    return OrcEst.parcerias()
+      .filter((p) => !ids.size || ids.has(String(p.companyId)))
+      .slice()
+      .sort((a, b) => String(a.partnerName || "").localeCompare(String(b.partnerName || ""), "pt-BR") || Number(a.companyId) - Number(b.companyId));
   },
 
-  montarDfc(part, linhas, indice) {
+  linhasDaEmpresa(companyId) {
+    const ids = new Set(this.selectedCompanyIds.map(String));
+    return OrcEst.linhas().filter((l) => {
+      const emp = String(l.e || "");
+      if (ids.size && !ids.has(emp)) return false;
+      return !companyId || emp === String(companyId);
+    });
+  },
+
+  calcular() {
+    return this.prestacoes().map((p, i) => this.montarDfc(p, this.linhasDaEmpresa(p.companyId), i));
+  },
+
+  montarDfc(part, linhas, indice, obraCode) {
     const app = this.appPar();
     const fluxo = typeof FluxoCaixaApp !== "undefined" ? FluxoCaixaApp : (window.FluxoCaixaApp || null);
     const dfc = typeof OrcamentoDfcApp !== "undefined" ? OrcamentoDfcApp : null;
@@ -1226,7 +1236,7 @@ const OrcamentoRepassesApp = {
       || []).map((g) => ({ ...g, months: OrcEst.z(), accs: new Map() }));
     const byId = {};
     tpl.forEach((g) => { byId[g.id] = g; });
-    const centros = this.centrosDa(part);
+    const centros = this.centrosDa(part, obraCode);
     const sociedade = !!(app && typeof app.isSociedade === "function" && app.isSociedade(part));
     const kind = app && typeof app.kindOf === "function" ? app.kindOf(part) : (part.kind || "parceria");
     linhas.forEach((l) => {
@@ -1362,8 +1372,11 @@ const OrcamentoRepassesApp = {
       m: variacao.map((v) => v * p.pct / 100)
     }));
     const ccIds = [...centros.keys()].sort((a, b) => String(a).localeCompare(String(b), "pt-BR", { numeric: true }));
+    const obra = (part.obras || []).find((o) => String(o.code) === String(obraCode)) || null;
     return {
-      id: String(part.id || (part.companyId + "-" + indice)),
+      id: String(part.id || (part.companyId + "-" + indice)) + (obraCode ? ":" + obraCode : ""),
+      obraCode: obra ? String(obra.code) : "",
+      obraShare: obra ? Number(obra.defaultPartnerShare) || 0 : 0,
       companyId: String(part.companyId || ""),
       nome: part.partnerName || part.companyName || "Parceria",
       empresa: part.companyName || "",
@@ -1416,7 +1429,7 @@ const OrcamentoRepassesApp = {
     root.innerHTML = `
       <div class="orc-est-page">
         ${typeof OrcamentoApp !== "undefined" ? OrcamentoApp.abasHtml() : ""}
-        <p class="orc-dfc-lead">Um DFC de 2027 para cada parceria e cada sociedade. Entram os centros de custo cadastrados e as contas em que o rateio se aplica, no percentual do parceiro. A variação de caixa é o repasse.</p>
+        <p class="orc-dfc-lead">Cada aba é uma prestação de contas. Escolha a obra e marque os centros de custo que entram no repasse.</p>
         <div class="orc-dfc-tools">
           <div id="orc-rep-emp-box"></div>
         </div>
@@ -1490,18 +1503,92 @@ const OrcamentoRepassesApp = {
     if (window.lucide && lucide.createIcons) lucide.createIcons();
   },
 
+  partAtual(lista) {
+    const itens = lista || this.prestacoes();
+    if (!itens.length) return null;
+    return itens.find((p) => String(p.id) === String(this.abaId)) || itens[0];
+  },
+
+  obraAtual(part) {
+    const obras = (part && part.obras) || [];
+    if (!obras.length) return null;
+    return obras.find((o) => String(o.code) === String(this.obraCode)) || obras[0];
+  },
+
+  setAba(id) {
+    this.abaId = String(id || "");
+    this.obraCode = "";
+    this.paintCorpo();
+  },
+
+  setObra(code) {
+    this.obraCode = String(code || "");
+    this.paintCorpo();
+  },
+
+  marcarCc(ccId, on) {
+    const part = this.partAtual();
+    const obra = this.obraAtual(part);
+    const app = this.appPar();
+    if (!part || !obra) return;
+    const row = (obra.costCenters || []).find((c) => String(c.id) === String(ccId));
+    if (!row) return;
+    row.inAccount = !!on;
+    if (app && typeof app.persist === "function") app.persist();
+    this.paintCorpo();
+  },
+
   paintCorpo() {
     const body = document.getElementById("orc-rep-body");
     if (!body) return;
-    const lista = this.calcular();
+    const lista = this.prestacoes();
     if (!lista.length) {
       body.innerHTML = `<div class="orc-dfc-erro">Não há parceria nem sociedade parametrizada para as empresas selecionadas.</div>`;
       return;
     }
-    body.innerHTML = `<div class="orc-rep-lista">${lista.map((card) => this.cardHtml(card)).join("")}</div>
+    const part = this.partAtual(lista);
+    this.abaId = String(part.id || "");
+    const obra = this.obraAtual(part);
+    this.obraCode = obra ? String(obra.code) : "";
+    const card = this.montarDfc(part, this.linhasDaEmpresa(part.companyId), 0, this.obraCode);
+    const abas = lista.map((p) => {
+      const on = String(p.id) === this.abaId;
+      const app = this.appPar();
+      const tipo = app && typeof app.kindLabel === "function" ? app.kindLabel(p) : (p.kind || "");
+      return `<button type="button" role="tab" aria-selected="${on ? "true" : "false"}" class="ml-tab${on ? " is-active" : ""}" data-rep-aba="${OrcEst.esc(p.id)}"><i data-lucide="hand-coins"></i> ${OrcEst.esc(p.partnerName || "Prestação")}${tipo ? ` <span class="ml-tab-count">${OrcEst.esc(tipo)}</span>` : ""}</button>`;
+    }).join("");
+    const obras = (part.obras || []).map((o) => {
+      const on = String(o.code) === this.obraCode;
+      const n = (o.costCenters || []).filter((c) => c.inAccount !== false).length;
+      return `<button type="button" role="tab" aria-selected="${on ? "true" : "false"}" class="ml-tab${on ? " is-active" : ""}" data-rep-obra="${OrcEst.esc(o.code)}"><i data-lucide="building-2"></i> Obra ${OrcEst.esc(o.code)}${n ? ` <span class="ml-tab-count">${n}</span>` : ""}</button>`;
+    }).join("");
+    const centros = ((obra && obra.costCenters) || []).slice().sort((a, b) => String(a.id).localeCompare(String(b.id), "pt-BR", { numeric: true }));
+    const marcas = centros.length
+      ? centros.map((c) => {
+        const on = c.inAccount !== false;
+        const nome = c.name ? " — " + c.name : "";
+        return `<label class="orc-rep-cc-mark${on ? " is-on" : ""}"><input type="checkbox" data-rep-cc="${OrcEst.esc(c.id)}" ${on ? "checked" : ""}> ${OrcEst.esc(String(c.id) + nome)}</label>`;
+      }).join("")
+      : `<p class="orc-est-nota">Esta obra não tem centro de custo. Inclua na parametrização do parceiro.</p>`;
+    const rateio = obra && !card.sociedade && card.obraShare ? `<span class="orc-rep-sub">Rateio ${OrcEst.esc(this.pctTxt(card.obraShare))}</span>` : "";
+    body.innerHTML = `
+      <div class="ml-tabs orc-rep-tabs" role="tablist">${abas}</div>
+      ${obras ? `<div class="ml-tabs orc-rep-obras" role="tablist">${obras}</div>` : `<p class="orc-est-nota">Esta prestação ainda não tem obra.</p>`}
+      <div class="orc-rep-ccs">${marcas}</div>
+      <div class="orc-rep-resumo">
+        <span><strong>${OrcEst.esc(card.nome)}</strong> <span class="orc-rep-sub">${OrcEst.esc((card.companyId ? card.companyId + " — " : "") + card.empresa)}</span> ${rateio}</span>
+        <span class="orc-rep-valor"><span>Variação — repasse</span><b>${OrcEst.money(this.soma(card.variacao))}</b></span>
+      </div>
+      ${this.dfcHtml(card)}
       <p class="orc-est-nota">Na parceria, o valor de cada conta é a parte do parceiro. Na sociedade, o DFC é integral e a variação se divide pelo percentual de cada sócio. Repasse e dividendos já lançados no orçamento da sociedade ficam de fora, para o valor não se abater duas vezes.</p>`;
-    body.querySelectorAll("[data-rep-card]").forEach((btn) => {
-      btn.addEventListener("click", () => this.toggle(btn.getAttribute("data-rep-card")));
+    body.querySelectorAll("[data-rep-aba]").forEach((btn) => {
+      btn.addEventListener("click", () => this.setAba(btn.getAttribute("data-rep-aba")));
+    });
+    body.querySelectorAll("[data-rep-obra]").forEach((btn) => {
+      btn.addEventListener("click", () => this.setObra(btn.getAttribute("data-rep-obra")));
+    });
+    body.querySelectorAll("[data-rep-cc]").forEach((el) => {
+      el.addEventListener("change", () => this.marcarCc(el.getAttribute("data-rep-cc"), el.checked));
     });
     body.querySelectorAll("[data-rep-no]").forEach((tr) => {
       tr.addEventListener("click", () => this.toggleNo(tr.getAttribute("data-rep-part"), tr.getAttribute("data-rep-no")));
@@ -1530,6 +1617,9 @@ const OrcamentoRepassesApp = {
   },
 
   dfcHtml(card) {
+    if (!card.centros || !card.centros.length) {
+      return `<p class="orc-est-nota">Marque ao menos um centro de custo desta obra.</p>`;
+    }
     if (!card.temValor) {
       return `<p class="orc-est-nota">Não há lançamento de 2027 nos centros desta ${card.sociedade ? "sociedade" : "parceria"}.</p>`;
     }

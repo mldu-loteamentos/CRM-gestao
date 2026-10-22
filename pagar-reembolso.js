@@ -4,6 +4,8 @@ const PagarReembolsoApp = {
   documentosUsados: [],
   marcados: {},
   retornos: [],
+  busca: "",
+  ocultarLiberados: false,
   carregando: false,
   liberando: false,
   CREDOR: 2244,
@@ -44,6 +46,20 @@ const PagarReembolsoApp = {
     return item && !String(item.billId || "").trim();
   },
 
+  fold(v) {
+    return String(v || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  },
+
+  visiveis() {
+    const q = this.fold(this.busca);
+    return this.itens.filter((item) => {
+      if (this.ocultarLiberados && !this.pendente(item)) return false;
+      if (!q) return true;
+      const blob = this.fold([item.saleId, item.billId, item.customerName].filter(Boolean).join(" "));
+      return blob.indexOf(q) >= 0;
+    });
+  },
+
   pronto(item) {
     return this.pendente(item) && Number(item.valor) > 0 && String(item.companyId || "").replace(/\D/g, "")
       && String(item.costCenterId || "").replace(/\D/g, "");
@@ -65,16 +81,32 @@ const PagarReembolsoApp = {
     if (!root) return;
     root.innerHTML = `<div class="cc-toolbar pr-toolbar">
         <p class="cj-nota">Marque os reembolsos pendentes e libere. Cada título a receber gera um título a pagar no Sienge, com vencimento em 10 dias.</p>
+        <label class="pr-busca">
+          <i data-lucide="search"></i>
+          <input type="search" id="pr-busca" placeholder="Título ou cliente" autocomplete="off">
+        </label>
         <div class="cc-toolbar-actions">
+          <button type="button" class="btn btn-outline" id="pr-ocultar">Ocultar liberados</button>
           <button type="button" class="btn btn-outline" id="pr-todos">Marcar todos</button>
           <button type="button" class="btn btn-primary" id="pr-liberar">Liberar</button>
         </div>
       </div>
       <div id="pr-lista"></div>`;
+    const busca = document.getElementById("pr-busca");
+    const ocultar = document.getElementById("pr-ocultar");
     const todos = document.getElementById("pr-todos");
     const liberar = document.getElementById("pr-liberar");
+    if (busca) busca.addEventListener("input", () => {
+      this.busca = busca.value || "";
+      this.pintar();
+    });
+    if (ocultar) ocultar.addEventListener("click", () => {
+      this.ocultarLiberados = !this.ocultarLiberados;
+      this.pintar();
+    });
     if (todos) todos.addEventListener("click", () => this.marcarTodos());
     if (liberar) liberar.addEventListener("click", () => this.liberar());
+    if (window.lucide && lucide.createIcons) lucide.createIcons();
   },
 
   carga(texto, pct) {
@@ -86,7 +118,7 @@ const PagarReembolsoApp = {
   async carregar() {
     if (this.carregando) return;
     this.carregando = true;
-    this.carga("Carregando os reembolsos pendentes…", 35);
+    this.carga("Carregando os reembolsos…", 35);
     const fc = this.fb();
     if (!fc) {
       this.itens = [];
@@ -102,12 +134,18 @@ const PagarReembolsoApp = {
         const data = d.data() || {};
         data.id = d.id;
         if (data.documentNumber) usados.push(String(data.documentNumber));
-        if (this.pendente(data)) itens.push(data);
+        itens.push(data);
       });
       this.documentosUsados = usados;
       await this.completarProcessos(itens);
       await this.completarUnidades(itens);
-      itens.sort((a, b) => String(a.saleId || "").localeCompare(String(b.saleId || "")) || String(a.data || "").localeCompare(String(b.data || "")));
+      itens.sort((a, b) => {
+        const pa = this.pendente(a) ? 0 : 1;
+        const pb = this.pendente(b) ? 0 : 1;
+        if (pa !== pb) return pa - pb;
+        return String(a.saleId || "").localeCompare(String(b.saleId || ""), "pt-BR", { numeric: true })
+          || String(b.liberatedAt || "").localeCompare(String(a.liberatedAt || ""));
+      });
       this.itens = itens;
     } catch (e) {
       this.itens = [];
@@ -273,26 +311,33 @@ const PagarReembolsoApp = {
   pintar() {
     const lista = document.getElementById("pr-lista");
     if (!lista) return;
+    const ocultar = document.getElementById("pr-ocultar");
+    if (ocultar) ocultar.textContent = this.ocultarLiberados ? "Mostrar liberados" : "Ocultar liberados";
     const avisos = (this.retornos || []).map((r) => `<p class="pr-retorno${r.ok ? "" : " is-erro"}">${this.esc(r.texto)}</p>`).join("");
-    if (!this.itens.length) {
-      lista.innerHTML = avisos + `<div class="cc-scroll cj-scroll"><table class="cc-table cj-cc"><tbody><tr><td class="cj-vazio">Não há reembolso pendente.</td></tr></tbody></table></div>`;
+    const visiveis = this.visiveis();
+    if (!visiveis.length) {
+      const vazio = this.itens.length ? "Nenhum reembolso encontrado." : "Não há reembolso.";
+      lista.innerHTML = avisos + `<div class="cc-scroll cj-scroll"><table class="cc-table cj-cc"><tbody><tr><td class="cj-vazio">${vazio}</td></tr></tbody></table></div>`;
       return;
     }
-    const linhas = this.itens.map((item) => {
+    const linhas = visiveis.map((item) => {
+      const liberado = !this.pendente(item);
       const ok = this.pronto(item);
       const falta = [];
       if (!(Number(item.valor) > 0)) falta.push("valor");
       if (!String(item.companyId || "").replace(/\D/g, "")) falta.push("empresa do título");
       if (!String(item.costCenterId || "").replace(/\D/g, "")) falta.push("centro de custo");
-      const aviso = ok ? "" : `<div class="cj-nota">Falta ${this.esc(falta.join(", "))}. Edite a custa na ficha do título.</div>`;
+      const aviso = !liberado && !ok ? `<div class="cj-nota">Falta ${this.esc(falta.join(", "))}. Edite a custa na ficha do título.</div>` : "";
       const CJ = window.CustasJudiciaisApp;
       const nomeUnidade = CJ && typeof CJ.limparUnidade === "function" ? CJ.limparUnidade(item.unitName, item.costCenterId) : String(item.unitName || "").trim();
       const proc = item.processoConsulta ? this.esc(item.processoConsulta) : "Sem número no cadastro";
       const emp = [item.companyId, item.companyName].filter(Boolean).join(" · ");
       const nAnexos = ((item.guias || []).length + (item.comprovantes || []).length);
-      return `<tr>
+      const pagar = item.billId ? `<span class="pr-bill">${this.esc(item.billId)}</span>` : "—";
+      return `<tr class="${liberado ? "pr-liberado" : ""}">
         <td class="is-center"><input type="checkbox" data-pr="${this.esc(item.id)}" ${this.marcados[item.id] ? "checked" : ""} ${ok ? "" : "disabled"}></td>
         <td><strong>${this.esc(item.saleId || "—")}</strong></td>
+        <td>${pagar}</td>
         <td class="cc-nome" title="${this.esc(item.customerName || "")}">${this.esc(item.customerName || "—")}</td>
         <td class="cc-nome" title="${this.esc(emp)}">${this.esc(emp || "—")}</td>
         <td title="${this.esc(nomeUnidade || "")}">${this.esc(nomeUnidade || "—")}</td>
@@ -310,10 +355,10 @@ const PagarReembolsoApp = {
     }).join("");
     lista.innerHTML = avisos + `<div class="cc-scroll cj-scroll"><table class="cc-table cj-cc pr-cc">
       <colgroup>
-        <col class="pr-c-check"><col class="pr-c-tit"><col><col><col><col class="pr-c-cc"><col class="cj-c-data"><col><col class="cj-c-valor"><col><col class="cj-c-ico">
+        <col class="pr-c-check"><col class="pr-c-tit"><col class="pr-c-tit"><col><col><col><col class="pr-c-cc"><col class="cj-c-data"><col><col class="cj-c-valor"><col><col class="cj-c-ico">
       </colgroup>
       <thead><tr>
-        <th class="is-center"></th><th>Título</th><th>Cliente</th><th>Empresa</th><th>Unidade</th><th>Centro de custo</th><th>Data</th><th>Do que se trata</th><th class="is-right">Valor</th><th>Processo</th><th class="is-center">Anexos</th>
+        <th class="is-center"></th><th>Título</th><th>A pagar</th><th>Cliente</th><th>Empresa</th><th>Unidade</th><th>Centro de custo</th><th>Data</th><th>Do que se trata</th><th class="is-right">Valor</th><th>Processo</th><th class="is-center">Anexos</th>
       </tr></thead>
       <tbody>${linhas}</tbody>
     </table></div>`;
@@ -334,8 +379,9 @@ const PagarReembolsoApp = {
   },
 
   marcarTodos() {
-    const algum = this.itens.some((item) => this.pronto(item) && !this.marcados[item.id]);
-    this.itens.forEach((item) => {
+    const lista = this.visiveis();
+    const algum = lista.some((item) => this.pronto(item) && !this.marcados[item.id]);
+    lista.forEach((item) => {
       if (this.pronto(item)) this.marcados[item.id] = algum;
     });
     this.pintar();

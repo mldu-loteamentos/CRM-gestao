@@ -26,6 +26,20 @@ const CustasJudiciaisApp = {
     return m ? (m[3] + "/" + m[2] + "/" + m[1]) : "";
   },
 
+  quando(iso) {
+    const dt = new Date(iso || "");
+    if (!iso || isNaN(dt.getTime())) return "";
+    try {
+      return new Intl.DateTimeFormat("pt-BR", {
+        timeZone: "America/Sao_Paulo",
+        day: "2-digit", month: "2-digit", year: "numeric",
+        hour: "2-digit", minute: "2-digit"
+      }).format(dt);
+    } catch (e) {
+      return "";
+    }
+  },
+
   money(n) {
     return (Number(n) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   },
@@ -294,10 +308,13 @@ const CustasJudiciaisApp = {
     const linhas = this.itens.map((item) => {
       const pago = item.billId ? `<div class="cj-nota">Título a pagar ${this.esc(item.billId)}</div>` : "";
       const nAnexos = ((item.guias || []).length + (item.comprovantes || []).length);
+      const quem = item.createdBy || item.updatedBy || "—";
+      const quando = this.quando(item.createdAt || item.updatedAt);
       return `<tr class="cj-linha" data-cj-linha="${this.esc(item.id)}" title="Clique para editar">
         <td>${this.esc(this.dataBr(item.data))}</td>
         <td class="cc-nome">${this.esc(item.descricao || "")}${pago}</td>
         <td class="is-right">${item.valor != null && item.valor !== "" ? this.money(item.valor) : "—"}</td>
+        <td class="cj-quem"><div>${this.esc(quem)}</div>${quando ? `<div class="cj-nota">${this.esc(quando)}</div>` : ""}</td>
         <td class="is-center">
           <button type="button" class="tvig-ico" title="Anexos" data-cj-anexos="${this.esc(item.id)}">
             <i data-lucide="paperclip" style="width:15px;height:15px;"></i>${nAnexos ? `<span class="cj-anexo-n">${nAnexos}</span>` : ""}
@@ -314,11 +331,11 @@ const CustasJudiciaisApp = {
       </tr>`;
     }).join("");
     const vazio = !this.itens.length
-      ? `<tr><td colspan="5" class="cj-vazio">Nenhuma custa registrada neste título.</td></tr>`
+      ? `<tr><td colspan="6" class="cj-vazio">Nenhuma custa registrada neste título.</td></tr>`
       : "";
     lista.innerHTML = `<div class="cc-scroll cj-scroll"><table class="cc-table cj-cc">
-      <colgroup><col class="cj-c-data"><col><col class="cj-c-valor"><col class="cj-c-ico"><col class="cj-c-acoes"></colgroup>
-      <thead><tr><th>Data</th><th>Do que se trata</th><th class="is-right">Valor</th><th class="is-center">Anexos</th><th class="is-center">Ações</th></tr></thead>
+      <colgroup><col class="cj-c-data"><col><col class="cj-c-valor"><col class="cj-c-quem"><col class="cj-c-ico"><col class="cj-c-acoes"></colgroup>
+      <thead><tr><th>Data</th><th>Do que se trata</th><th class="is-right">Valor</th><th>Cadastrado por</th><th class="is-center">Anexos</th><th class="is-center">Ações</th></tr></thead>
       <tbody>${linhas}${vazio}</tbody>
     </table></div>`;
     lista.querySelectorAll("[data-cj-linha]").forEach((tr) => {
