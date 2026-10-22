@@ -183,9 +183,15 @@ const GerarPagamentoApp = {
     (this.state.titulos || []).forEach((r) => {
       if (!r || r.pago || !(Number(r.aPagar) > 0.009)) return;
       if (r.esperada || this.contaParceriaDe(this.ccDe(r.ccId))) return;
-      const id = String(r.ccId || "");
+      let id = String(r.ccId || "");
+      let nome = r.ccNome || "";
+      const par = this.parDoObra(id, this.companyIdOf(this.ccDe(id)) || r.companyId);
+      if (par && String(par.base.id) === id && this.ehRepasse(r)) {
+        id = String(par.parc.id);
+        nome = par.parc.name || nome;
+      }
       if (!id) return;
-      if (!vistos.has(id)) vistos.set(id, { id, nome: r.ccNome || "", titulos: new Set(), valor: 0 });
+      if (!vistos.has(id)) vistos.set(id, { id, nome, titulos: new Set(), valor: 0 });
       const g = vistos.get(id);
       const chave = this.chaveTitulo(r.titulo, r.parcela);
       if (g.titulos.has(chave)) return;
@@ -282,9 +288,13 @@ const GerarPagamentoApp = {
   /* Conta e situação são recalculadas na hora, para refletir a conta cadastrada depois da busca. */
   reclassificar() {
     this.state.titulos.forEach((r) => {
-      const esperada = this.contaPagamentoDistratoNovo(r) || this.contaParceriaDe(this.ccDe(r.ccId));
+      const distrato = this.contaPagamentoDistratoNovo(r);
+      const repasse = distrato ? null : this.contaPagamentoRepasse(r);
+      const esperada = distrato || repasse || this.contaParceriaDe(this.ccDe(r.ccId));
       const alvo = esperada ? this.numConta(esperada.numero || esperada.id) : "";
       r.esperada = esperada;
+      const parRepasse = repasse ? this.parDoObra(r.ccId, this.companyIdOf(this.ccDe(r.ccId)) || r.companyId) : null;
+      r.contaOrigemCc = parRepasse ? String(parRepasse.parc.id) : "";
       if (!r.contas.length) r.status = r.pago ? "pago-sem-conta" : "aberto";
       else if (!alvo) r.status = "sem-conta";
       else r.status = r.contas.every((c) => this.numConta(c) === alvo) ? "ok" : "outra";
@@ -460,7 +470,22 @@ const GerarPagamentoApp = {
       if (!bill || bill.billId == null) return;
       const docId = app.docCode(bill.documentIdentificationId);
       const docNome = bill.documentIdentificationName || "";
-      const cats = lista(bill.paymentsCategories).filter((c) => c && c.costCenterId != null && ccMap[String(c.costCenterId)]);
+      const todas = lista(bill.paymentsCategories);
+      const catsParc = todas.filter((c) => c && c.costCenterId != null && ccMap[String(c.costCenterId)]);
+      const repasse = this.ehRepasse({
+        docId: String(docId || "").trim(),
+        docNome: String(docNome || "").trim(),
+        ccsTitulo: [{ planos: todas.filter(Boolean).map((c) => ({
+          id: c.financialCategoryId != null ? String(c.financialCategoryId).trim() : "",
+          nome: String(c.financialCategoryName || "").trim()
+        })) }]
+      });
+      const catsLot = repasse ? todas.filter((c) => {
+        if (!c || c.costCenterId == null || ccMap[String(c.costCenterId)]) return false;
+        const par = this.parDoObra(c.costCenterId, bill.companyId);
+        return !!(par && String(par.base.id) === String(c.costCenterId));
+      }) : [];
+      const cats = catsParc.length ? catsParc : catsLot;
       if (!cats.length) return;
       const titulo = String(bill.billId);
       const parcela = bill.installmentId != null ? String(bill.installmentId) : "";
@@ -508,7 +533,8 @@ const GerarPagamentoApp = {
       const tituloAPagar = saldo != null ? Math.max(0, saldo) : (pago ? 0 : original);
       const autorizacao = this.autorizacaoDe(bill);
       cats.forEach((cat) => {
-        const cc = ccMap[String(cat.costCenterId)];
+        const cc = ccMap[String(cat.costCenterId)] || this.ccDe(cat.costCenterId);
+        if (!cc) return;
         const chave = titulo + "|" + parcela + "|" + cc.id;
         if (vistos[chave]) return;
         vistos[chave] = true;
@@ -1993,6 +2019,43 @@ const GerarPagamentoApp = {
      e a prestação de contas aplica o rateio padrão. */
   DISTRATO_PARCEIRO_ATE: "2025-12-31",
 
+  /* Loteador (13300) e parceiro (13301) da mesma obra e da mesma empresa. */
+  parDoObra(ccId, companyId) {
+    const obra = this.obra(ccId);
+    if (!obra) return null;
+    const emp = String(companyId || "");
+    const mesmos = (this.state.costCenters || []).filter((c) => this.obra(c.id) === obra && (!emp || String(this.companyIdOf(c) || "") === emp));
+    const porNome = (c) => this.ccDeParceriaPeloNome(c.id, c.name);
+    const parc = mesmos.find(porNome) || mesmos.find((c) => String(c.id) !== obra + "00" && this.contaParceriaDe(c));
+    const base = mesmos.find((c) => String(c.id) === obra + "00" && !porNome(c))
+      || mesmos.find((c) => c && parc && String(c.id) !== String(parc.id) && !porNome(c));
+    if (!parc || !base || String(base.id) === String(parc.id)) return null;
+    return { base, parc };
+  },
+
+  /* Repasse ou distribuição: o plano do título, o plano cadastrado no credor, ou o nome da conta. */
+  ehRepasse(r) {
+    const planos = [];
+    ((r && r.ccsTitulo) || []).forEach((c) => ((c && c.planos) || []).forEach((p) => { if (p) planos.push(p); }));
+    const texto = [r && r.docId, r && r.docNome].concat(planos.map((p) => [p.id, p.nome].filter(Boolean).join(" "))).join(" ");
+    if (/repasse|distribui[cç][aã]o de lucro/i.test(texto)) return true;
+    const ids = new Set(planos.map((p) => String(p.id || "").trim()).filter(Boolean));
+    const doc = String((r && r.docId) || "").trim();
+    return this.parceriasRateio().some((part) => (part.socios || []).some((s) => {
+      const plano = String(s.planoId || "").trim();
+      const tipo = String(s.docTipo || "").trim();
+      return !!plano && ids.has(plano) && (!tipo || !doc || tipo === doc);
+    }));
+  },
+
+  /* Saldo do parceiro lançado no CC do loteador e pago pela conta de parceria do CC do parceiro. */
+  contaPagamentoRepasse(r) {
+    if (!r || this.ccDeParceriaPeloNome(r.ccId, r.ccNome) || !this.ehRepasse(r)) return null;
+    const par = this.parDoObra(r.ccId, this.companyIdOf(this.ccDe(r.ccId)) || r.companyId);
+    if (!par || String(par.base.id) !== String(r.ccId)) return null;
+    return this.contaParceriaDe(par.parc);
+  },
+
   /** Conta do CC do parceiro, quando o distrato novo está só no CC da obra. */
   contaPagamentoDistratoNovo(r) {
     const ccs = r && r.ccsTitulo && r.ccsTitulo.length
@@ -2425,7 +2488,8 @@ const GerarPagamentoApp = {
     if (r.status === "outra") return `<span class="gp-pill gp-bad">Pago em outra conta</span><small>Saiu pela C/C ${this.esc(outras.join(", "))} · esperado C/C ${this.esc(conta)}</small>`;
     if (r.status === "sem-conta") return `<span class="gp-pill gp-bad">CC sem conta de parceria</span><small>Pago pela C/C ${this.esc(r.contas.join(", "))}</small>`;
     if (r.status === "pago-sem-conta") return `<span class="gp-pill gp-wait">Pago</span><small>O Sienge não informou a conta da baixa</small>`;
-    return `<span class="gp-pill gp-wait">Em aberto</span><small>Deve sair pela C/C ${this.esc(conta || "—")}</small>`;
+    const origem = r.contaOrigemCc ? ` · conta de parceria do ${this.esc(r.contaOrigemCc)}` : "";
+    return `<span class="gp-pill gp-wait">Em aberto</span><small>Deve sair pela C/C ${this.esc(conta || "—")}${origem}</small>`;
   },
 
   titulosHtml() {

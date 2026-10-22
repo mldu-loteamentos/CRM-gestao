@@ -902,6 +902,99 @@ window.EngenhariaCaucaoApp = {
     }
   },
 
+  /* Mês anterior, mês corrente e parcelas futuras. O que vence antes disso pode vir do Firebase. */
+  inicioMesAnterior(hoje) {
+    const s = this.isoDate(hoje) || this.isoToday();
+    const d = new Date(Number(s.slice(0, 4)), Number(s.slice(5, 7)) - 2, 1);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-01";
+  },
+
+  fatiarRows(rows, limite) {
+    const out = [];
+    let cur = [];
+    let bytes = 0;
+    (rows || []).forEach((row) => {
+      const size = JSON.stringify(row).length + 2;
+      if (cur.length && bytes + size > limite) {
+        out.push(cur);
+        cur = [];
+        bytes = 0;
+      }
+      cur.push(row);
+      bytes += size;
+    });
+    if (cur.length || !out.length) out.push(cur);
+    return out;
+  },
+
+  async buscarSienge(start, end, companyId) {
+    if (!start || !end || start > end) return { rows: [], bills: [] };
+    if (typeof window.siengeFetchWithRetry !== "function") {
+      throw new Error("API Sienge indisponível.");
+    }
+    const faixas = typeof window.siengeSplitDateRange === "function"
+      ? window.siengeSplitDateRange(start, end)
+      : [{ start, end }];
+    const rows = [];
+    const bills = [];
+    for (const faixa of faixas) {
+      let endpoint = "/bulk-data/v1/outcome?startDate=" + encodeURIComponent(faixa.start)
+        + "&endDate=" + encodeURIComponent(faixa.end)
+        + "&selectionType=D&correctionIndexerId=0&correctionDate=2023-01-01&withAuthorizations=false";
+      if (companyId) endpoint += "&companyId=" + encodeURIComponent(companyId);
+      const payload = await window.siengeFetchWithRetry(endpoint, 2);
+      const data = (payload && payload.data) || (Array.isArray(payload) ? payload : []);
+      bills.push.apply(bills, data);
+      rows.push.apply(rows, this.transform({ data: data }));
+    }
+    return { rows, bills };
+  },
+
+  async lerPassado(start, end) {
+    const fc = window.firebaseCollections;
+    if (!fc || !fc.getDoc || !window.firebaseDb) return null;
+    const snap = await fc.getDoc(fc.doc(window.firebaseDb, "caucao_base", "_passado"));
+    const exists = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+    if (!exists) return null;
+    const meta = snap.data() || {};
+    if (String(meta.startDate || "") > start || String(meta.endDate || "") < end) return null;
+    const rows = [];
+    for (let i = 0; i < (Number(meta.chunks) || 0); i++) {
+      const part = await fc.getDoc(fc.doc(window.firebaseDb, "caucao_base", "_passado_" + i));
+      const ok = part && (typeof part.exists === "function" ? part.exists() : part.exists);
+      if (!ok) return null;
+      rows.push.apply(rows, (part.data() || {}).rows || []);
+    }
+    return { rows, meta };
+  },
+
+  async gravarPassado(start, end, rows) {
+    const fc = window.firebaseCollections;
+    if (!fc || !fc.setDoc || !fc.doc || !window.firebaseDb) return;
+    const chunks = this.fatiarRows(rows, 400000);
+    let old = 0;
+    try {
+      const snap = await fc.getDoc(fc.doc(window.firebaseDb, "caucao_base", "_passado"));
+      const exists = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+      if (exists) old = Number((snap.data() || {}).chunks) || 0;
+    } catch (e) {}
+    for (let i = 0; i < chunks.length; i++) {
+      await fc.setDoc(fc.doc(window.firebaseDb, "caucao_base", "_passado_" + i), { chunk: i, rows: chunks[i] });
+    }
+    await fc.setDoc(fc.doc(window.firebaseDb, "caucao_base", "_passado"), {
+      startDate: start,
+      endDate: end,
+      chunks: chunks.length,
+      count: rows.length,
+      geradoEm: new Date().toISOString()
+    });
+    if (typeof fc.deleteDoc === "function") {
+      for (let i = chunks.length; i < old; i++) {
+        fc.deleteDoc(fc.doc(window.firebaseDb, "caucao_base", "_passado_" + i)).catch(function () {});
+      }
+    }
+  },
+
   async consultar(aoVivo) {
     const start = this.state.startDate;
     const end = this.state.endDate;
@@ -926,26 +1019,61 @@ window.EngenhariaCaucaoApp = {
     try {
       this.loadLiberated();
       await this.pullLiberated();
-      const base = aoVivo === true ? null : await this.lerBaseDoDia(start, end);
-      if (base) {
-        this.state.allRows = base.rows;
-        this.state.fonte = { tipo: "base", meta: base.meta };
-        this.state.billsByTitulo = {};
-      } else {
-        let endpoint = "/bulk-data/v1/outcome?startDate=" + encodeURIComponent(start)
-          + "&endDate=" + encodeURIComponent(end)
-          + "&selectionType=D&correctionIndexerId=0&correctionDate=2023-01-01&withAuthorizations=false";
-        if ((this.state.companyIds || []).length === 1) {
-          endpoint += "&companyId=" + encodeURIComponent(this.state.companyIds[0]);
-        }
-        if (typeof window.siengeFetchWithRetry !== "function") {
-          throw new Error("API Sienge indisponível.");
-        }
-        const payload = await window.siengeFetchWithRetry(endpoint, 2);
-        this.indexBills(payload);
-        this.state.allRows = this.transform(payload);
-        this.state.fonte = { tipo: "sienge", at: new Date().toISOString() };
+      const corte = this.inicioMesAnterior();
+      const passadoFim = this.addDaysIso(corte, -1);
+      const querPassado = start <= passadoFim;
+      const fimPassado = end < passadoFim ? end : passadoFim;
+      let passado = [];
+      let passadoMeta = null;
+      if (querPassado && aoVivo !== true) {
+        try {
+          const cache = await this.lerPassado(start, fimPassado);
+          if (cache) {
+            passado = (cache.rows || []).filter((r) => {
+              const v = this.isoDate(r.vencimento);
+              return v && v >= start && v <= fimPassado;
+            });
+            passadoMeta = cache.meta;
+          } else {
+            const base = await this.lerBaseDoDia(start, fimPassado, { gerar: false });
+            if (base) {
+              passado = (base.rows || []).filter((r) => {
+                const v = this.isoDate(r.vencimento);
+                return v && v >= start && v <= fimPassado;
+              });
+              passadoMeta = { geradoEm: (base.meta && base.meta.geradoEm) || "", startDate: start, endDate: fimPassado };
+              this.gravarPassado(start, fimPassado, passado).catch(function () {});
+            }
+          }
+        } catch (e) { /* sem base, o passado sai da API */ }
       }
+      let passadoAtualizado = false;
+      if (querPassado && !passadoMeta) {
+        const lido = await this.buscarSienge(start, fimPassado, "");
+        passado = lido.rows.filter((r) => {
+          const v = this.isoDate(r.vencimento);
+          return !v || (v >= start && v <= fimPassado);
+        });
+        passadoMeta = { geradoEm: new Date().toISOString(), startDate: start, endDate: fimPassado };
+        passadoAtualizado = true;
+        this.gravarPassado(start, fimPassado, passado).catch(function () {});
+      }
+      if (passadoMeta) await this.aplicarAjustes(passado, passadoMeta);
+      const vivoIni = start > corte ? start : corte;
+      const empresa = (this.state.companyIds || []).length === 1 ? this.state.companyIds[0] : "";
+      const vivo = vivoIni <= end ? await this.buscarSienge(vivoIni, end, empresa) : { rows: [], bills: [] };
+      this.indexBills({ data: vivo.bills });
+      const map = new Map();
+      passado.forEach((r) => map.set(this.rowKey(r), r));
+      vivo.rows.forEach((r) => map.set(this.rowKey(r), r));
+      this.state.allRows = [...map.values()];
+      this.state.fonte = {
+        tipo: querPassado ? "misto" : "sienge",
+        corte,
+        passado: passadoMeta,
+        passadoAtualizado,
+        at: new Date().toISOString()
+      };
       this.state.updatedAt = new Date().toISOString();
       this.applyFilters();
     } catch (e) {
@@ -1030,14 +1158,14 @@ window.EngenhariaCaucaoApp = {
    * Base gerada pela rotina das 06:30 (caucao_base). Só serve se cobrir o período pedido.
    * Antes das 06:30 e no fim de semana vale a última base gerada.
    */
-  async lerBaseDoDia(start, end) {
+  async lerBaseDoDia(start, end, opts) {
     const fc = window.firebaseCollections;
     if (!fc || !fc.getDoc || !window.firebaseDb) return null;
     let meta = null;
     try { meta = await this.lerMetaBase(); } catch (e) { return null; }
     const hoje = this.isoToday();
     const atual = meta && meta.date === hoje && meta.done;
-    if (!atual && this.baseJaDeveriaExistir()) meta = await this.gerarBaseHoje();
+    if (!atual && this.baseJaDeveriaExistir() && !(opts && opts.gerar === false)) meta = await this.gerarBaseHoje();
     if (!meta || !meta.done || !meta.range) return null;
     if (start < meta.range.startDate || end > meta.range.endDate) return null;
     const rows = [];
@@ -1084,7 +1212,15 @@ window.EngenhariaCaucaoApp = {
       return isNaN(d) ? "" : d.toLocaleDateString("pt-BR") + " às " + d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
     };
     let txt;
-    if (f.tipo === "base") {
+    if (f.tipo === "misto") {
+      const ate = this.fmtDate(this.addDaysIso(f.corte, -1));
+      const desde = this.fmtDate(f.corte);
+      const quando = f.passado && f.passado.geradoEm ? hora(f.passado.geradoEm) : "";
+      txt = (f.passadoAtualizado
+        ? "Passado até " + ate + " consultado no Sienge e gravado para a próxima consulta"
+        : "Passado até " + ate + (quando ? " lido da base de " + quando : " lido da base"))
+        + ". De " + desde + " em diante, com o mês atual, o mês anterior e as parcelas futuras, consulta no Sienge em " + hora(f.at);
+    } else if (f.tipo === "base") {
       const m = f.meta || {};
       const prorr = Number(m.prorrogadas) || 0;
       txt = "Base do dia gerada em " + hora(m.geradoEm)

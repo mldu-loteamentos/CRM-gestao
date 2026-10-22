@@ -1133,11 +1133,39 @@ const ParametrizacaoParceiroApp = {
     this.renderKeepScroll();
   },
 
+  /* Repasse sai no CC do loteador (13300). A conta é a de parceria cadastrada no CC do parceiro (13301). */
+  paresRepasse(p) {
+    const pares = [];
+    this.obrasOf(p).forEach((o) => {
+      const prefix = String(o.code || "").replace(/\D/g, "");
+      if (!prefix) return;
+      const lista = this.centrosDaObra(prefix).filter((cc) => !p.companyId || this.empresaDoCentro(cc) === String(p.companyId));
+      const temConta = (cc) => {
+        const c = this.customCc(cc.id).conta_parceria;
+        return !!(c && (c.id || c.numero));
+      };
+      const parc = lista.find((cc) => this.ehCcParceiro(cc))
+        || lista.find((cc) => String(cc.id).replace(/\D/g, "") !== prefix + "00" && temConta(cc));
+      const base = lista.find((cc) => String(cc.id).replace(/\D/g, "") === prefix + "00" && !this.ehCcParceiro(cc))
+        || lista.find((cc) => !this.ehCcParceiro(cc) && (!parc || String(cc.id) !== String(parc.id)));
+      if (base) pares.push({ base, parc });
+    });
+    return pares;
+  },
+
+  textoRepasse(p) {
+    const pares = this.paresRepasse(p);
+    if (!pares.length) {
+      return "O repasse é lançado no centro de custo do loteador de cada obra e pago pela conta de parceria cadastrada no centro de custo do parceiro.";
+    }
+    return "O repasse é lançado no centro de custo do loteador e pago pela conta de parceria do parceiro: "
+      + pares.map((x) => x.parc
+        ? x.base.id + " pela conta do " + x.parc.id
+        : String(x.base.id)).join("; ")
+      + ".";
+  },
+
   vinculoTituloHtml(p, s) {
-    const centros = this.centrosDaEmpresa(p.companyId).map((cc) => ({
-      id: String(cc.id),
-      label: String(cc.id) + " — " + String(cc.name || cc.nome || "")
-    }));
     const planos = this.planosFolha().map((c) => ({
       id: String(c._id),
       label: String(c._id) + " — " + String(c._name || "")
@@ -1160,11 +1188,10 @@ const ParametrizacaoParceiroApp = {
     return `<div style="margin-top:12px;">
       <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:8px;">Título a pagar deste credor</div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
-        ${sel("Centro de custo", s.ccTitulo, centros, "cc", centros.length ? "Escolha o centro" : "Nenhum centro nesta empresa")}
         ${sel("Plano financeiro", s.planoId, planos, "plano", "Escolha a conta")}
         ${sel("Tipo de documento", s.docTipo, docs, "doc", "Escolha o documento")}
       </div>
-      <p style="margin:8px 0 0;font-size:0.75rem;color:#64748b;line-height:1.4;">O centro de custo é o da empresa desta parceria, onde o título será criado. O plano financeiro e o tipo de documento entram no contas a pagar da distribuição ou do repasse. O título ainda não é gerado nesta tela.</p>
+      <p style="margin:8px 0 0;font-size:0.75rem;color:#64748b;line-height:1.4;">${this.esc(this.textoRepasse(p))} O plano financeiro e o tipo de documento identificam esse título no contas a pagar. O título ainda não é gerado nesta tela.</p>
       ${avisoPlano || avisoDoc ? `<p style="margin:4px 0 0;font-size:0.75rem;color:#b45309;">${this.esc([avisoPlano, avisoDoc].filter(Boolean).join(" "))}</p>` : ""}
     </div>`;
   },
@@ -2006,7 +2033,7 @@ const ParametrizacaoParceiroApp = {
           <span style="width:16px;color:#065f46;font-weight:800;">${aberto ? "▾" : "▸"}</span>
           <span style="min-width:0;flex:1;">
             <span style="display:block;font-weight:800;color:#065f46;">${this.esc(s.name)}</span>
-            <span style="display:block;font-size:0.75rem;color:#047857;margin-top:2px;">ID ${this.esc(s.id)}${s.cpfCnpj ? " · " + this.esc(s.cpfCnpj) : ""}${s.ccTitulo ? " · C.C. " + this.esc(s.ccTitulo) : ""}${s.planoId ? " · " + this.esc(s.planoId) : ""}${s.docTipo ? " · " + this.esc(s.docTipo) : ""}</span>
+            <span style="display:block;font-size:0.75rem;color:#047857;margin-top:2px;">ID ${this.esc(s.id)}${s.cpfCnpj ? " · " + this.esc(s.cpfCnpj) : ""}${s.planoId ? " · " + this.esc(s.planoId) : ""}${s.docTipo ? " · " + this.esc(s.docTipo) : ""}</span>
           </span>
           <span style="font-weight:800;color:#105436;font-variant-numeric:tabular-nums;">${this.esc(pctTxt)}</span>
         </button>
@@ -2031,7 +2058,7 @@ const ParametrizacaoParceiroApp = {
     return `
       <div class="crm-card" style="padding:16px;">
         <h3 style="margin:0 0 4px;font-size:0.95rem;color:var(--color-primary);">${pessoas} (credores)</h3>
-        <p style="margin:0 0 12px;font-size:0.78rem;color:#64748b;">Cada ${pessoa} é um credor do Sienge, com o percentual de participação. No credor também ficam o centro de custo, o plano financeiro e o tipo de documento do título a pagar.</p>
+        <p style="margin:0 0 12px;font-size:0.78rem;color:#64748b;">Cada ${pessoa} é um credor do Sienge, com o percentual de participação. No credor ficam o plano financeiro e o tipo de documento do repasse. O centro de custo é o do loteador.</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
           <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;min-width:120px;">
             <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;">${pessoas}</div>
