@@ -3808,13 +3808,16 @@ function auditActionMeta(action, summary, module) {
     if (/exclu/.test(blob)) return { group: "nota", label: "Envio de nota excluído" };
     return { group: "nota", label: "Nota enviada ao fiscal" };
   }
-  if (key === "Gerar título" || key === "Atualizar título" || key === "Excluir título") {
+  if (key === "Gerar título" || key === "Liberar reembolso" || key === "Atualizar título" || key === "Excluir título") {
     const falha = /erro|falha/.test(blob) || String(summary || "").toLowerCase().indexOf("não enviad") !== -1;
     if (key === "Excluir título") {
       return { group: "titulo", label: falha ? "Falha ao excluir título no Sienge" : "Título excluído no Sienge" };
     }
     if (key === "Atualizar título" || /dados banc|payment-information|forma de pagamento/.test(blob)) {
       return { group: "titulo", label: falha ? "Falha ao atualizar título no Sienge" : "Título atualizado no Sienge" };
+    }
+    if (key === "Liberar reembolso") {
+      return { group: "titulo", label: falha ? "Falha ao liberar reembolso no Sienge" : "Reembolso de custas liberado" };
     }
     return { group: "titulo", label: falha ? "Falha ao gerar título no Sienge" : "Título gerado no Sienge" };
   }

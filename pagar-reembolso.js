@@ -46,6 +46,15 @@ const PagarReembolsoApp = {
     return dt.toISOString().slice(0, 10);
   },
 
+  testeExcluido(item) {
+    const sale = String(item && item.saleId || "");
+    const bill = String(item && item.billId || "");
+    const nome = this.fold(item && item.customerName);
+    if (sale === "393" && (bill === "111129" || nome.indexOf("maria de lourdes") >= 0)) return true;
+    if (sale === "1645" && (bill === "111127" || nome.indexOf("sidnei") >= 0)) return true;
+    return false;
+  },
+
   pendente(item) {
     return item && !String(item.billId || "").trim();
   },
@@ -107,7 +116,7 @@ const PagarReembolsoApp = {
     const edita = this.podeEditar();
     root.innerHTML = `<div class="pr-topo">
         <p class="cj-nota">${edita ? "Marque os reembolsos pendentes e libere. Cada título a receber gera um título a pagar no Sienge, com vencimento em 10 dias." : "Consulta dos reembolsos. Dá para ver o que está pago e o que está programado. A liberação fica com quem tem permissão de editar."}</p>
-        <div class="pr-toolbar">
+        <div class="pr-barra">
           <div class="search-box-wrapper pr-busca-fila">
             <input type="text" id="pr-busca" class="search-input" placeholder="Pesquise pelo título ou nome do cliente..." style="font-style: italic;" autocomplete="off" value="${this.esc(this.busca)}">
             <i data-lucide="search" class="search-icon"></i>
@@ -119,14 +128,14 @@ const PagarReembolsoApp = {
           </label>
           ${edita ? `<button type="button" class="btn btn-primary" id="pr-liberar">Liberar</button>` : ""}
         </div>
-        <div class="pr-periodos">
+        <div class="pr-filtros">
           <div class="pr-periodo">
-            <span>Custas pagas pela Moura Leite</span>
+            <span>Pagas pela Moura Leite</span>
             <label>De <input type="date" id="pr-ml-ini" value="${this.esc(this.mlIni)}"></label>
             <label>Até <input type="date" id="pr-ml-fim" value="${this.esc(this.mlFim)}"></label>
           </div>
           <div class="pr-periodo">
-            <span>Custas pagas pela Colenci</span>
+            <span>Pagas pela Colenci</span>
             <label>De <input type="date" id="pr-col-ini" value="${this.esc(this.colIni)}"></label>
             <label>Até <input type="date" id="pr-col-fim" value="${this.esc(this.colFim)}"></label>
           </div>
@@ -182,12 +191,20 @@ const PagarReembolsoApp = {
       const snap = await fc.getDocs(fc.collection(window.firebaseDb, "custas_judiciais"));
       const itens = [];
       const usados = [];
+      const testes = [];
       snap.forEach((d) => {
         const data = d.data() || {};
         data.id = d.id;
+        if (this.testeExcluido(data)) {
+          testes.push(data.id);
+          return;
+        }
         if (data.documentNumber) usados.push(String(data.documentNumber));
         itens.push(data);
       });
+      if (testes.length && fc.deleteDoc) {
+        await Promise.all(testes.map((id) => fc.deleteDoc(fc.doc(window.firebaseDb, "custas_judiciais", id)).catch(() => {})));
+      }
       this.documentosUsados = usados;
       await this.completarProcessos(itens);
       await this.completarUnidades(itens);
@@ -416,8 +433,8 @@ const PagarReembolsoApp = {
       </colgroup>
       <thead><tr>
         <th title="ID da empresa"><span class="pr-id-head">ID <i data-lucide="info"></i></span></th>
-        <th>Título sub judice</th><th>Cliente</th><th>Centro de custo</th><th>Unidade</th>
-        <th>${marcaTodos}</th><th>Data reembolso</th><th>Status</th><th>Processo</th><th class="is-right">Valor</th><th class="is-center">Anexos</th>
+        <th>Título</th><th>Cliente</th><th>CC</th><th>Unidade</th>
+        <th>${marcaTodos}</th><th>Reembolso</th><th>Status</th><th>Processo</th><th class="is-right">Valor</th><th class="is-center" title="Anexos">Anexos</th>
       </tr></thead>
       <tbody>${linhas}</tbody>
     </table></div>`;
@@ -768,7 +785,8 @@ const PagarReembolsoApp = {
       if (!billId) throw new Error("O Sienge criou o título, mas não devolveu o número.");
       billId = String(billId);
     } catch (e) {
-      this.auditar("erro", "Falha ao gerar reembolso de custas do título " + primeiro.saleId + ": " + ((e && e.message) || e), {
+      this.auditar("erro", "Falha na liberação de reembolso do título " + primeiro.saleId + ": " + ((e && e.message) || e), {
+        action: "Liberar reembolso",
         companyId: companyId, cliente: primeiro.customerName || "", saleId: primeiro.saleId, erro: (e && e.message) || String(e)
       });
       throw e;
@@ -799,8 +817,8 @@ const PagarReembolsoApp = {
     }
     await this.marcarLiberadas(grupo, billId, doc, notes, due);
     this.auditar(avisos.length ? "erro" : "ok",
-      "Título " + billId + " gerado para reembolso de custas do título " + primeiro.saleId + " · credor 2244 · empresa " + companyId + (avisos.length ? " · " + avisos[0] : ""),
-      { billId: billId, companyId: companyId, cliente: primeiro.customerName || "", saleId: primeiro.saleId, documentNumber: doc, total: total, avisos: avisos });
+      "Liberação de reembolso: título a pagar " + billId + " para o título " + primeiro.saleId + " · " + (primeiro.customerName || "") + " · credor 2244 · empresa " + companyId + (avisos.length ? " · " + avisos[0] : ""),
+      { action: "Liberar reembolso", billId: billId, companyId: companyId, cliente: primeiro.customerName || "", saleId: primeiro.saleId, documentNumber: doc, total: total, avisos: avisos });
     return { billId: billId, avisos: avisos };
   },
 

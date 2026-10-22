@@ -10639,10 +10639,13 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .cj-anexos-bloco li { padding: 8px 12px; border-bottom: 1px solid #e8eee9; font-size: 0.82rem; }
 .cj-anexos-bloco li:nth-child(even) { background: #f7faf8; }
 .cj-anexos-bloco a { color: #105436; font-weight: 700; }
-.pr-topo { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.pr-topo { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; padding: 14px; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; }
+.pr-barra { display: flex; align-items: center; gap: 12px; }
+.pr-barra .pr-busca-fila { flex: 1; min-width: 0; }
+.pr-barra .btn-primary { height: 36px; white-space: nowrap; }
+.pr-filtros { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 10px; align-items: center; }
 .pr-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.pr-periodos { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
-.pr-periodos .pr-excel { height: 36px; margin-bottom: 8px; }
+.pr-filtros .pr-excel { height: 36px; }
 .pr-busca-fila .search-input,
 .pr-busca-fila .search-input:focus { background-color: #fff; }
 .pr-busca-fila .search-input:-webkit-autofill { -webkit-box-shadow: 0 0 0 1000px #fff inset; }
@@ -10710,7 +10713,17 @@ tr.pr-linha { cursor: pointer; }
 tr.pr-liberado td { background: #f7faf8; }
 .pr-retorno { margin: 0 0 12px; padding: 12px 14px; border-radius: 8px; background: #e7f6ee; color: #105436; font-weight: 700; }
 .pr-retorno.is-erro { background: #fff7ed; color: #9a3412; }
-.cc-table.pr-cc td { white-space: nowrap; }
+.cc-table.cj-cc.pr-cc { width: 100%; min-width: 0; table-layout: fixed; }
+.cc-table.pr-cc th, .cc-table.pr-cc td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-table.pr-cc col.pr-c-id { width: 4%; }
+.cc-table.pr-cc col.pr-c-tit { width: 7%; }
+.cc-table.pr-cc col.pr-c-cc { width: 6%; }
+.cc-table.pr-cc col.pr-c-pagar { width: 12%; }
+.cc-table.pr-cc col.pr-c-status { width: 9%; }
+.cc-table.pr-cc col.cj-c-data { width: 9%; }
+.cc-table.pr-cc col.cj-c-valor { width: 9%; }
+.cc-table.pr-cc col.cj-c-ico { width: 5%; }
+#pagar-reembolso-root .cc-scroll { overflow-x: hidden; }
 .pr-toolbar .cj-nota { flex: 1; min-width: 220px; }
 .cc-table.pr-cc col.pr-c-check { width: 42px; }
 .cc-table.pr-cc col.pr-c-tit { width: 78px; }
