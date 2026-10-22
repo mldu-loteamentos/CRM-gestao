@@ -363,7 +363,9 @@ module.exports = async function handler(req, res) {
 
   if (!force) {
     const filaMeta = await getDoc(doc(db, "sienge_defaulters_history", today));
-    const filaPronta = filaMeta.exists() && !!(filaMeta.data() || {}).warmupDone;
+    const filaData = filaMeta.exists() ? (filaMeta.data() || {}) : null;
+    const filaCachePronto = !!(filaData && Number(filaData.chunks) > 0 && (filaData.atFull || filaData.paidMap || filaData.timestampStr));
+    const filaPronta = !!(filaData && (filaData.warmupDone || filaCachePronto));
     if (!filaPronta) {
       return res.status(200).json({
         done: false,

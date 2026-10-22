@@ -1284,29 +1284,67 @@ const EstoqueComercialApp = {
       if (!ok) this._contractsAutoStarted = false;
     }
     const already = (meta && meta.batimentoDate === today) || this.state.batimentoDate === today;
-    if (already && !this.hasActivePending()) return;
-    // Posição do dia já gravada inteira no Firebase: mostra a de hoje sem refazer o batimento.
-    if (meta && meta.batimentoDate === today && meta.unitsSavedDate === today) return;
-
-    this._firebasePendingData = null;
-    this._autoDeltaRun = true;
-    try {
-      await this.batimentoFinanceiro({ auto: true });
-    } finally {
-      this._autoDeltaRun = false;
-      if (this._firebasePendingData) {
-        const fb = this._firebasePendingData;
-        this._firebasePendingData = null;
-        const merged = this.mergeUnitsPreferFinance(this.state.units, fb.units || []);
-        this.applyCache({ ...fb, units: merged });
-        this.state.firebaseOk = true;
-        this.persistQuitacaoIfDirty();
-        this.fillEnterprisesFromUnits();
-        this.fillUnitSelect();
-        this.updateMeta();
-        this.renderTable();
-        if (window.lucide) window.lucide.createIcons();
+    const diaGravado = meta && meta.batimentoDate === today && meta.unitsSavedDate === today;
+    if (!(diaGravado || (already && !this.hasActivePending()))) {
+      this._firebasePendingData = null;
+      this._autoDeltaRun = true;
+      try {
+        await this.batimentoFinanceiro({ auto: true });
+      } finally {
+        this._autoDeltaRun = false;
+        if (this._firebasePendingData) {
+          const fb = this._firebasePendingData;
+          this._firebasePendingData = null;
+          const merged = this.mergeUnitsPreferFinance(this.state.units, fb.units || []);
+          this.applyCache({ ...fb, units: merged });
+          this.state.firebaseOk = true;
+          this.persistQuitacaoIfDirty();
+          this.fillEnterprisesFromUnits();
+          this.fillUnitSelect();
+          this.updateMeta();
+          this.renderTable();
+          if (window.lucide) window.lucide.createIcons();
+        }
       }
+    }
+    await this.garantirConferenciaGeral();
+  },
+
+  conferenciaGeralDoDiaCompleta() {
+    const g = this.loadConferenciaGeral();
+    if (!g || g.interrompido || g.rodando || (g.falhas || []).length) return false;
+    if (!String(g.at || "").startsWith(this.todayStr())) return false;
+    const ids = this.ccsParaConferir();
+    if (!ids.length) return false;
+    const feitos = new Set((g.ccs || []).map((c) => String(c.ccId)));
+    return ids.every((id) => feitos.has(String(id)));
+  },
+
+  /** A tela só mostrava a conferência antiga. Se o dia não fechou, continua daqui. */
+  async garantirConferenciaGeral() {
+    if (this.state._confGeralRunning || this.state._autoFinanceRunning || this.state.loading) return;
+    if (!this.state.units.length) return;
+    this.fillEnterprisesFromUnits();
+    if (!this.state.enterprises.length) {
+      try { await this.loadEnterprises(); } catch (e) {}
+    }
+    if (this.conferenciaGeralDoDiaCompleta()) return;
+    this.state._confGeralRunning = true;
+    this.state.stopSync = false;
+    this.setBusy(true);
+    try {
+      const g = this.loadConferenciaGeral();
+      const mesmoDia = !!(g && String(g.at || "").startsWith(this.todayStr()));
+      await this.conferirTodos({ retomar: !!(mesmoDia && (g.interrompido || g.rodando)) });
+    } catch (e) {
+      console.warn("[Estoque] conferência geral", e);
+      this.setProgress("A conferência com o Sienge parou: " + ((e && e.message) || e));
+    } finally {
+      this.state._confGeralRunning = false;
+      this.setBusy(false);
+      this.updateMeta();
+      this.renderTable();
+      if (window.lucide) window.lucide.createIcons();
     }
   },
 
@@ -3777,18 +3815,32 @@ const EstoqueComercialApp = {
   },
 
   /** Batimento de todos os empreendimentos pelo extrato do Contas a Receber (poucas consultas por centro, sem ficha por cliente). */
-  async conferirTodos() {
+  async conferirTodos(opts) {
     const ids = this.ccsParaConferir();
-    const geral = { at: new Date().toISOString(), ccs: [], falhas: [], interrompido: false };
-    for (let i = 0; i < ids.length; i++) {
+    if (!ids.length) return this.loadConferenciaGeral();
+    const previa = this.loadConferenciaGeral();
+    const retomar = !!(opts && opts.retomar && previa);
+    const feitos = new Set(retomar ? (previa.ccs || []).map((c) => String(c.ccId)) : []);
+    const geral = retomar
+      ? { at: previa.at, ccs: (previa.ccs || []).slice(), falhas: (previa.falhas || []).filter((id) => !feitos.has(String(id))), interrompido: false, rodando: true }
+      : { at: new Date().toISOString(), ccs: [], falhas: [], interrompido: false, rodando: true };
+    const fila = ids.filter((id) => !feitos.has(String(id)));
+    const gravar = () => {
+      this.state.conferenciaGeral = geral;
+      try { localStorage.setItem(this.CONF_GERAL_KEY, JSON.stringify(geral)); } catch (e) {}
+    };
+    gravar();
+    this.renderTable();
+    for (let i = 0; i < fila.length; i++) {
       if (this.state.stopSync) {
         geral.interrompido = true;
         break;
       }
-      const id = ids[i];
-      this._progressoPct = ((i + 1) / ids.length) * 100;
+      const id = fila[i];
+      const ordem = feitos.size + i + 1;
+      this._progressoPct = (ordem / Math.max(ids.length, 1)) * 100;
       try {
-        const c = await this.conferirComSienge(id, { pularQuitados: true, rotulo: `Empreendimento ${i + 1}/${ids.length}` });
+        const c = await this.conferirComSienge(id, { pularQuitados: true, rotulo: `Empreendimento ${ordem}/${ids.length}` });
         if (!c) continue;
         geral.ccs.push({
           ccId: c.ccId,
@@ -3813,13 +3865,12 @@ const EstoqueComercialApp = {
         console.warn("[Estoque] conferência geral", id, e);
         geral.falhas.push(id);
       }
-      if (i % 5 === 4) this.renderTable();
+      gravar();
+      this.renderTable();
     }
+    geral.rodando = false;
     this._progressoPct = undefined;
-    this.state.conferenciaGeral = geral;
-    try {
-      localStorage.setItem(this.CONF_GERAL_KEY, JSON.stringify(geral));
-    } catch (e) {}
+    gravar();
     return geral;
   },
 
@@ -3840,7 +3891,7 @@ const EstoqueComercialApp = {
       semTitulo: soma((c) => c.semTitulo)
     };
     const dif = tot.integra - tot.sienge;
-    const bate = Math.abs(dif) < 1 && !g.falhas.length && !g.interrompido;
+    const bate = !g.rodando && Math.abs(dif) < 1 && !g.falhas.length && !g.interrompido;
     const hora = new Date(g.at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
     const motivos = {};
     g.ccs.forEach((c) => Object.entries(c.motivos || {}).forEach(([k, v]) => {
@@ -3919,12 +3970,12 @@ const EstoqueComercialApp = {
     return `<div class="est-conf ${bate ? "is-ok" : "is-bad"}">
       <div class="est-conf-h">
         <strong>Conferência de todos os empreendimentos com o Contas a Receber do Sienge</strong>
-        <small>${hora} · ${g.ccs.length} empreendimento(s)${g.falhas.length ? ` · <span class="est-conf-falha" style="display:inline">sem resposta do Sienge: ${g.falhas.map(esc).join(", ")}</span>` : ""}${g.interrompido ? " · interrompida" : ""}</small>
+        <small>${hora} · ${g.ccs.length} empreendimento(s)${g.falhas.length ? ` · <span class="est-conf-falha" style="display:inline">sem resposta do Sienge: ${g.falhas.map(esc).join(", ")}</span>` : ""}${g.rodando ? " · conferindo" : (g.interrompido ? " · interrompida" : "")}</small>
       </div>
       <div class="est-conf-grid">
         <div><label>Sienge · a receber</label><b>${this.money(tot.sienge)}</b><small>Em atraso com juros e multa ${this.money(tot.siengeAtraso)} em ${tot.siengeTitVenc} título(s)</small></div>
         <div><label>Integra · a receber</label><b>${this.money(tot.integra)}</b><small>Em atraso ${this.money(tot.integraAtraso)} em ${tot.integraInad} contrato(s)</small></div>
-        <div><label>Diferença</label><b>${bate ? "Bate" : (g.interrompido ? "Incompleta" : this.money(dif))}</b><small>${g.interrompido ? `Parou em ${g.ccs.length} empreendimento(s). Este total não é o Contas a Receber inteiro.` : (tot.semUnidN ? `${tot.semUnidN} título(s) com saldo no Sienge sem unidade ativa no Integra: ${this.money(tot.semUnidV)}` : "Todo título com saldo tem unidade no Integra")}${tot.semTitulo ? ` · ${tot.semTitulo} unidade(s) ativa(s) sem título no Sienge` : ""}</small></div>
+        <div><label>Diferença</label><b>${g.rodando ? "Conferindo" : (bate ? "Bate" : (g.interrompido ? "Incompleta" : this.money(dif)))}</b><small>${g.rodando ? "A conferência está percorrendo os empreendimentos. O total cresce a cada um que termina." : (g.interrompido ? `Parou em ${g.ccs.length} empreendimento(s). Ao abrir a tela de novo, continua do ponto em que parou.` : (tot.semUnidN ? `${tot.semUnidN} título(s) com saldo no Sienge sem unidade ativa no Integra: ${this.money(tot.semUnidV)}` : "Todo título com saldo tem unidade no Integra"))}${!g.rodando && !g.interrompido && tot.semTitulo ? ` · ${tot.semTitulo} unidade(s) ativa(s) sem título no Sienge` : ""}</small></div>
       </div>
       ${acertarHtml}
       ${analisarHtml}

@@ -25320,13 +25320,13 @@ window.centerDistratoSignatures = function(html) {
   const partyHtml = gruposAss.map((g, idx) => {
     const topo = idx === 0 ? 22 : 40;
     if (g.vendedor && g.itens.length > 1) {
-      const largura = (100 / g.itens.length).toFixed(2);
-      const nomes = g.itens.map((p) => `
-        <td style="width: ${largura}%; text-align: center; vertical-align: top; padding: 0 16px; font-weight: 700;">${p.name}</td>`).join("");
+      const nomes = g.itens.map((p) => `<div style="font-weight: 700;">${p.name}</div>`).join("");
       return `<div style="margin: ${topo}px auto 0; text-align: center;">
-        <div style="border-top: 1px solid #111; padding-top: 10px;">
-          <table style="width: 100%; border-collapse: collapse; white-space: normal;"><tr>${nomes}</tr></table>
-          <div style="font-size: 10.5pt; font-weight: 400; margin-top: 4px;">${g.itens[0].role}</div>
+        <div style="display: inline-block; min-width: 260px; max-width: 520px; text-align: center;">
+          <div style="border-top: 1px solid #111; padding-top: 10px;">
+            ${nomes}
+            <div style="font-size: 10.5pt; font-weight: 400; margin-top: 4px;">${g.itens[0].role}</div>
+          </div>
         </div>
       </div>`;
     }
