@@ -80,6 +80,7 @@ const ProcessoContraApp = {
   render() {
     const root = document.getElementById("processo-contra-root");
     if (!root) return;
+    if (this.empresaId && !this.empresas().some((c) => String(c.id) === String(this.empresaId))) this.empresaId = "";
     const edita = this.podeEditar();
     const opcoes = this.empresas().map((c) => {
       const nome = this.nomeEmpresa(c.id);
@@ -152,8 +153,6 @@ const ProcessoContraApp = {
     const abrir = document.getElementById("pc-abrir");
     if (cancelar) cancelar.addEventListener("click", () => this.limpar());
     if (abrir) abrir.addEventListener("click", () => this.abrir());
-    this.sugerirClientes();
-    this.sugerirTitulos();
     this.pintarLista();
     if (window.lucide && lucide.createIcons) lucide.createIcons();
   },

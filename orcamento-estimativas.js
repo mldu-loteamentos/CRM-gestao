@@ -1381,8 +1381,8 @@ const OrcamentoRepassesApp = {
         acc.months[i] += s;
         cc.months[i] += s;
         g.months[i] += s;
+        });
       });
-    });
     const depth = (g) => {
       let d = 0;
       let cur = g;
@@ -1428,9 +1428,19 @@ const OrcamentoRepassesApp = {
     const centros = this.centrosDa(part, obraCode, usarRateio);
     this.encher(tpl, byId, linhas, centros, part, usarRateio);
     const resultado = (byId.g_12 && byId.g_12.months) ? byId.g_12.months.slice() : OrcEst.z();
+    const linhasDez = this.linhasDez2026(part.companyId);
     const dezMolde = this.molde();
-    this.encher(dezMolde.tpl, dezMolde.byId, this.linhasDez2026(part.companyId), centros, part, usarRateio);
-    const dez = (dezMolde.byId.g_12 && dezMolde.byId.g_12.months && dezMolde.byId.g_12.months[0]) || 0;
+    this.encher(dezMolde.tpl, dezMolde.byId, linhasDez, centros, part, usarRateio);
+    const dezMap = {};
+    dezMolde.tpl.forEach((g) => {
+      dezMap[g.id] = (g.months && g.months[0]) || 0;
+      g.accs.forEach((a, conta) => {
+        const accId = "acc:" + g.id + ":" + conta;
+        dezMap[accId] = (a.months && a.months[0]) || 0;
+        a.ccs.forEach((c) => { dezMap[accId + ":" + c.id] = (c.months && c.months[0]) || 0; });
+      });
+    });
+    const dez = dezMap.g_12 || 0;
     const pagamento = OrcEst.z();
     pagamento[0] = dez;
     for (let i = 1; i < 12; i++) pagamento[i] = resultado[i - 1];
@@ -1463,6 +1473,7 @@ const OrcamentoRepassesApp = {
         hasKids: children.length > 0 || accs.length > 0,
         isAccount: false,
         months: node.months,
+        dez: dezMap[node.id] || 0,
         jan28: node.id === "g_12" ? jan28 : null
       });
       children.forEach((ch) => walk(ch, level + 1));
@@ -1481,7 +1492,8 @@ const OrcamentoRepassesApp = {
           isAccount: true,
           pcts: sociedade ? [] : pcts,
           ccIds: ccs.map((c) => c.id),
-          months: a.months
+          months: a.months,
+          dez: dezMap[accId] || 0
         });
         ccs.forEach((c) => {
           rows.push({
@@ -1493,7 +1505,8 @@ const OrcamentoRepassesApp = {
             hasKids: false,
             isCc: true,
             pct: sociedade ? 0 : c.pct,
-            months: c.months
+            months: c.months,
+            dez: dezMap[accId + ":" + c.id] || 0
           });
         });
       });
@@ -1503,9 +1516,30 @@ const OrcamentoRepassesApp = {
     const pessoas = this.pessoasDe(part).map((p) => ({
       nome: p.nome,
       pct: p.pct,
+      dez: dez * p.pct / 100,
       m: variacao.map((v) => v * p.pct / 100),
       jan28: jan28 * p.pct / 100
     }));
+    const distribuicao = [];
+    centros.forEach((meta, ccId) => {
+      const um = new Map([[ccId, meta]]);
+      const anoMolde = this.molde();
+      this.encher(anoMolde.tpl, anoMolde.byId, linhas, um, part, usarRateio);
+      const ano = (anoMolde.byId.g_12 && anoMolde.byId.g_12.months) ? anoMolde.byId.g_12.months.slice() : OrcEst.z();
+      const umDez = this.molde();
+      this.encher(umDez.tpl, umDez.byId, linhasDez, um, part, usarRateio);
+      const dezCc = (umDez.byId.g_12 && umDez.byId.g_12.months && umDez.byId.g_12.months[0]) || 0;
+      const pag = OrcEst.z();
+      pag[0] = dezCc;
+      for (let i = 1; i < 12; i++) pag[i] = ano[i - 1];
+      distribuicao.push({
+        id: ccId,
+        nome: meta.nome || "",
+        obra: (meta.obra && meta.obra.code) || "",
+        m: pag,
+        jan28: ano[11] || 0
+      });
+    });
     const ccIds = [...centros.keys()].sort((a, b) => String(a).localeCompare(String(b), "pt-BR", { numeric: true }));
     return {
       id: String(part.id || (part.companyId + "-" + indice)) + (obraCode ? ":" + obraCode : ""),
@@ -1521,6 +1555,7 @@ const OrcamentoRepassesApp = {
       centros: ccIds,
       rows: rows,
       variacao: variacao,
+      distribuicao: distribuicao,
       pessoas: pessoas,
       pctPessoas: pessoas.reduce((s, p) => s + p.pct, 0),
       temValor: variacao.some((v) => Math.abs(v) >= 0.005) || rows.some((r) => r.isAccount)
@@ -1568,11 +1603,16 @@ const OrcamentoRepassesApp = {
         <p class="orc-dfc-lead">Cada aba é uma prestação de contas. Na parceria, escolha a obra e marque os centros de custo. Na sociedade, o resultado geral de todos os centros gera a distribuição.</p>
         <div class="orc-dfc-tools">
           <div id="orc-rep-emp-box"></div>
+          <button type="button" class="btn btn-excel" id="orc-rep-excel" title="Exportar a distribuição por centro de custo">
+            <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
+          </button>
         </div>
         <div id="orc-rep-body"></div>
       </div>`;
     this.paintFiltro();
     this.paintCorpo();
+    const excel = document.getElementById("orc-rep-excel");
+    if (excel) excel.addEventListener("click", () => this.exportDistribuicao());
     this.garantirParams();
     if (window.lucide && lucide.createIcons) lucide.createIcons();
   },
@@ -1753,6 +1793,193 @@ const OrcamentoRepassesApp = {
   },
 
   /* O forecast de dezembro pode estar só na nuvem. Quando chega, janeiro passa a mostrar o repasse. */
+  distribuicaoDa(part) {
+    const app = this.appPar();
+    const sociedade = !!(app && typeof app.isSociedade === "function" && app.isSociedade(part));
+    const linhas = this.linhasDaEmpresa(part.companyId);
+    const linhasDez = this.linhasDez2026(part.companyId);
+    const obras = sociedade ? [null] : ((part.obras && part.obras.length) ? part.obras : [null]);
+    const saida = [];
+    obras.forEach((obra) => {
+      const algumMarcado = !obra || (obra.costCenters || []).some((c) => c.inAccount !== false);
+      const usarRateio = !sociedade && !!obra && !this.principalMarcado(obra) && algumMarcado;
+      const centros = this.centrosDa(part, obra ? obra.code : "", usarRateio);
+      centros.forEach((meta, ccId) => {
+        const um = new Map([[ccId, meta]]);
+        const anoMolde = this.molde();
+        this.encher(anoMolde.tpl, anoMolde.byId, linhas, um, part, usarRateio);
+        const ano = (anoMolde.byId.g_12 && anoMolde.byId.g_12.months) ? anoMolde.byId.g_12.months.slice() : OrcEst.z();
+        const umDez = this.molde();
+        this.encher(umDez.tpl, umDez.byId, linhasDez, um, part, usarRateio);
+        const dezCc = (umDez.byId.g_12 && umDez.byId.g_12.months && umDez.byId.g_12.months[0]) || 0;
+        const pag = OrcEst.z();
+        pag[0] = dezCc;
+        for (let i = 1; i < 12; i++) pag[i] = ano[i - 1];
+        if (!pag.some((v) => Math.abs(v) >= 0.005)) return;
+        saida.push({
+          prestacao: part.partnerName || part.companyName || "Prestação",
+          obra: obra ? String(obra.code) : "",
+          id: ccId,
+          nome: meta.nome || "",
+          m: pag
+        });
+      });
+    });
+    return saida;
+  },
+
+  async exportDistribuicao() {
+    const inv = window.InvestimentoApp;
+    if (!inv || typeof inv.ensureExcelJS !== "function") {
+      alert("O Excel ainda não carregou. Atualize a página e tente de novo.");
+      return;
+    }
+    const dfc = typeof OrcamentoDfcApp !== "undefined" ? OrcamentoDfcApp : null;
+    const caixa = window.ResultadoCaixaApp;
+    if (!this.garantirForecastLocal() && dfc && caixa && typeof dfc.lerForecastsSalvos === "function") {
+      try { await dfc.lerForecastsSalvos(caixa); } catch (e) {}
+    }
+    const partes = this.prestacoes();
+    const porEmpresa = new Map();
+    partes.forEach((part) => {
+      const linhas = this.distribuicaoDa(part);
+      if (!linhas.length) return;
+      const id = String(part.companyId || "");
+      if (!porEmpresa.has(id)) porEmpresa.set(id, []);
+      porEmpresa.get(id).push.apply(porEmpresa.get(id), linhas);
+    });
+    if (!porEmpresa.size) {
+      alert("Não há distribuição para exportar nas prestações selecionadas.");
+      return;
+    }
+    const ExcelJS = await inv.ensureExcelJS();
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "CRM Moura Leite";
+    wb.created = new Date();
+    const meses = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+    const colunas = ["Prestação", "Obra", "Centro de custo"].concat(meses, ["Total"]);
+    const last = colunas.length;
+    const used = new Set();
+    const pintar = (ws, cell, opts) => inv.excelPaint(cell, opts);
+    for (const [emp, linhas] of porEmpresa) {
+      const nome = this.nomeEmpresaExport(emp);
+      const ws = wb.addWorksheet(inv.excelSheetName(emp, used), { views: [{ showGridLines: false, state: "frozen", xSplit: 1, ySplit: 4, topLeftCell: "B5", activeCell: "B5" }] });
+      ws.properties.showGridLines = false;
+      ws.columns = colunas.map((_, i) => ({ width: i < 3 ? (i === 2 ? 36 : 22) : 13 }));
+      ws.mergeCells("A1:A2");
+      ws.getRow(1).height = 28;
+      ws.getRow(2).height = 22;
+      ws.getRow(3).height = 8;
+      ws.getRow(4).height = 20;
+      const title = ws.getCell("A1");
+      title.value = {
+        richText: [
+          { font: { name: "Calibri", size: 14, bold: true, color: { argb: "FF475569" } }, text: "Distribuição por centro de custo\n" },
+          { font: { name: "Calibri", size: 9, color: { argb: "FF64748B" } }, text: nome + ". Janeiro de 2027 é o resultado do forecast de dezembro de 2026." }
+        ]
+      };
+      pintar(ws, title, { fill: "FFFFFFFF", align: { vertical: "middle", horizontal: "left", wrapText: true, indent: 8 } });
+      try {
+        const logo = await inv.logoDataUrl();
+        if (logo && logo.dataUrl) {
+          const img = wb.addImage({ base64: logo.dataUrl, extension: logo.extension || "png" });
+          const px = Math.round(1.54 * 96 / 2.54);
+          ws.addImage(img, { tl: { col: 0.04, row: 0.08 }, ext: { width: px, height: px } });
+        }
+      } catch (e) {}
+      const totalGeral = linhas.reduce((s, r) => s + this.soma(r.m), 0);
+      const c1 = ws.getCell(1, 5);
+      const c2 = ws.getCell(2, 5);
+      c1.value = "Distribuição 2027";
+      c2.value = totalGeral;
+      pintar(ws, c1, { font: { size: 8, bold: true, color: { argb: "FF94A3B8" } }, align: { horizontal: "right", vertical: "middle" } });
+      pintar(ws, c2, { font: { size: 12, bold: true, color: { argb: "FF0F172A" } }, align: { horizontal: "right", vertical: "middle" }, numFmt: "#,##0.00" });
+      const head = ws.getRow(4);
+      colunas.forEach((nomeCol, i) => {
+        const cell = head.getCell(i + 1);
+        cell.value = nomeCol;
+        pintar(ws, cell, {
+          font: { size: 9, bold: true, color: { argb: "FFFFFFFF" } },
+          fill: "FF334155",
+          align: { horizontal: i < 3 ? "left" : "right", vertical: "middle" },
+          border: true
+        });
+      });
+      let atual = "";
+      linhas.forEach((r) => {
+        if (r.prestacao !== atual) {
+          atual = r.prestacao;
+          const faixa = ws.addRow([]);
+          faixa.height = 18;
+          ws.mergeCells(faixa.number, 1, faixa.number, last);
+          for (let i = 1; i <= last; i++) {
+            const cell = faixa.getCell(i);
+            if (i === 1) cell.value = atual;
+            pintar(ws, cell, {
+              font: { size: 9, bold: true, color: { argb: "FFFFFFFF" } },
+              fill: "FF0C3D28",
+              align: { horizontal: "left", vertical: "middle" },
+              border: true
+            });
+          }
+        }
+        const linha = ws.addRow([]);
+        const valores = [r.prestacao, r.obra || "—", (r.id + (r.nome ? " — " + r.nome : ""))].concat(r.m, [this.soma(r.m)]);
+        valores.forEach((v, i) => {
+          const cell = linha.getCell(i + 1);
+          const num = i >= 3;
+          const n = num ? (Number(v) || 0) : v;
+          cell.value = num ? n : v;
+          const cor = num && n < -0.004 ? "FFB91C1C" : (num && Math.abs(n) < 0.005 ? "FF94A3B8" : "FF0F172A");
+          pintar(ws, cell, {
+            font: { size: 9, color: { argb: cor } },
+            fill: "FFFFFFFF",
+            align: { horizontal: i < 3 ? "left" : "right", vertical: "middle" },
+            border: true,
+            numFmt: num ? "#,##0.00" : undefined
+          });
+        });
+      });
+      const tot = ws.addRow([]);
+      const acc = OrcEst.z();
+      linhas.forEach((r) => r.m.forEach((v, i) => { acc[i] += Number(v) || 0; }));
+      const fim = ["Total", "", ""].concat(acc, [this.soma(acc)]);
+      fim.forEach((v, i) => {
+        const cell = tot.getCell(i + 1);
+        const num = i >= 3;
+        cell.value = num ? (Number(v) || 0) : v;
+        pintar(ws, cell, {
+          font: { size: 9, bold: true, color: { argb: "FFFFFFFF" } },
+          fill: "FF475569",
+          align: { horizontal: i < 3 ? "left" : "right", vertical: "middle" },
+          border: true,
+          numFmt: num ? "#,##0.00" : undefined
+        });
+      });
+      ws.addRow([]);
+      const foot = ws.addRow([]);
+      foot.height = 18;
+      ws.mergeCells(foot.number, 1, foot.number, last);
+      const rodape = foot.getCell(1);
+      rodape.value = inv.generatedAtLabel(new Date());
+      pintar(ws, rodape, { font: { size: 8, italic: true, color: { argb: "FF64748B" } }, align: { horizontal: "left", vertical: "middle" } });
+    }
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "Distribuicao-centros-2027.xlsx";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  },
+
+  nomeEmpresaExport(id) {
+    const c = this.empresasFiltro().find((e) => String(e.id) === String(id));
+    return c ? (c.id + " - " + (c.name || c.label || "")) : String(id || "");
+  },
+
   pedirForecastDezembro() {
     if (this._fcDez) return;
     if (this.garantirForecastLocal()) return;
@@ -1795,7 +2022,8 @@ const OrcamentoRepassesApp = {
       return `<p class="orc-est-nota">Não há lançamento de 2027 nos centros desta ${card.sociedade ? "sociedade" : "parceria"}.</p>`;
     }
     const aberto = this.nosDe(card);
-    const head = OrcEst.MESES.map((m) => `<th>${m}</th>`).join("") + `<th>JAN/28</th><th>Total 2027</th>`;
+    const headMeses = OrcEst.MESES.map((m) => `<th>${m}</th>`).join("") + `<th>JAN/28</th><th>Total 2027</th>`;
+    const head = `<th title="Resultado do forecast de dezembro de 2026. O repasse desse resultado entra em janeiro de 2027.">DEZ/26</th>` + headMeses;
     const pilha = [];
     const linhas = [];
     (card.rows || []).forEach((r) => {
@@ -1808,7 +2036,10 @@ const OrcamentoRepassesApp = {
         r.isCc ? "orc-dfc-cc" : "",
         r.type === "formula" ? "orc-dfc-formula" : "",
         r.type === "total_n1" ? "orc-dfc-n1" : "",
-        r.id === "g_12" ? "orc-rep-var" : ""
+        r.id === "g_12" ? "orc-rep-var" : "",
+        r.id === "g_08" ? "orc-dfc-fcf" : "",
+        r.id === "g_03" ? "orc-dfc-saida-forte" : "",
+        (r.id === "g_02" || r.id === "g_04" || r.id === "g_05") ? "orc-dfc-saida" : ""
       ].filter(Boolean).join(" ");
       const ico = r.hasKids
         ? `<i data-lucide="${aberto.has(r.id) ? "chevron-down" : "chevron-right"}"></i>`
@@ -1816,6 +2047,8 @@ const OrcamentoRepassesApp = {
       const pcts = (r.pcts || []).map((n) => this.pctTxt(n));
       const pct = r.isCc && r.pct ? `<span class="orc-rep-pct">${this.pctTxt(r.pct)}</span>` : (pcts.length ? `<span class="orc-rep-pct">${OrcEst.esc(pcts.join(" · "))}</span>` : "");
       const ccs = r.isAccount && r.ccIds && r.ccIds.length ? `<span class="orc-rep-cc">${OrcEst.esc(r.ccIds.join(" · "))}</span>` : "";
+      const dezN = Number(r.dez) || 0;
+      const dezTd = `<td class="orc-rep-fc${dezN < -0.004 ? " orc-dfc-neg" : ""}" title="Forecast de dezembro de 2026">${OrcEst.money(dezN)}</td>`;
       const cel = (r.months || []).map((v) => {
         const n = Number(v) || 0;
         return `<td${n < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(n)}</td>`;
@@ -1826,6 +2059,7 @@ const OrcamentoRepassesApp = {
       const click = r.hasKids ? ` data-rep-part="${OrcEst.esc(card.id)}" data-rep-no="${OrcEst.esc(r.id)}"` : "";
       linhas.push(`<tr class="${cls}"${click}>
         <td style="padding-left:${10 + r.level * 14}px">${ico}<span>${OrcEst.esc(r.name)}</span>${pct}${ccs}</td>
+        ${dezTd}
         ${cel}
         ${jan}
         <td${this.soma(r.months) < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(this.soma(r.months))}</td>
@@ -1839,7 +2073,7 @@ const OrcamentoRepassesApp = {
       const quem = card.sociedade ? "Cada sócio recebe este percentual da variação." : "Cada participante recebe este percentual da variação.";
       socios = `<div class="orc-rep-socios"><h4>${quem}</h4>${aviso}
         <div class="orc-dfc-scroll"><table class="orc-dfc-table orc-est-table"><thead><tr><th>Participante</th>${head}</tr></thead><tbody>
-        ${card.pessoas.map((p) => `<tr><td>${OrcEst.esc(p.nome)} <span class="orc-rep-pct">${this.pctTxt(p.pct)}</span></td>${p.m.map((v) => `<td>${OrcEst.money(v)}</td>`).join("")}<td>${OrcEst.money(p.jan28)}</td><td>${OrcEst.money(this.soma(p.m))}</td></tr>`).join("")}
+        ${card.pessoas.map((p) => `<tr><td>${OrcEst.esc(p.nome)} <span class="orc-rep-pct">${this.pctTxt(p.pct)}</span></td><td class="orc-rep-fc">${OrcEst.money(p.dez)}</td>${p.m.map((v) => `<td>${OrcEst.money(v)}</td>`).join("")}<td>${OrcEst.money(p.jan28)}</td><td>${OrcEst.money(this.soma(p.m))}</td></tr>`).join("")}
         </tbody></table></div></div>`;
     }
     return `<div class="orc-dfc-scroll"><table class="orc-dfc-table orc-est-table">

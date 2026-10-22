@@ -1432,7 +1432,10 @@ const OrcamentoDfcApp = {
         r.isAccount ? "orc-dfc-acc" : "",
         r.isCc ? "orc-dfc-cc" : "",
         r.type === "formula" ? "orc-dfc-formula" : "",
-        r.type === "total_n1" ? "orc-dfc-n1" : ""
+        r.type === "total_n1" ? "orc-dfc-n1" : "",
+        r.id === "g_08" ? "orc-dfc-fcf" : "",
+        r.id === "g_03" ? "orc-dfc-saida-forte" : "",
+        (r.id === "g_02" || r.id === "g_04" || r.id === "g_05") ? "orc-dfc-saida" : ""
       ].filter(Boolean).join(" ");
       const ico = r.hasKids
         ? `<i data-lucide="${this.expanded.has(r.id) ? "chevron-down" : "chevron-right"}"></i>`
