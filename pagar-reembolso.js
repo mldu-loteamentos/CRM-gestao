@@ -86,6 +86,10 @@ const PagarReembolsoApp = {
       && String(item.costCenterId || "").replace(/\D/g, "");
   },
 
+  podeEditar() {
+    return typeof window.hasCrmPerm === "function" && window.hasCrmPerm("sub_fin_cr_pagar_reembolso_editar") === true;
+  },
+
   fb() {
     const fc = window.firebaseCollections;
     if (!window.firebaseDb || !fc || !fc.collection || !fc.getDocs || !fc.doc || !fc.setDoc) return null;
@@ -100,8 +104,9 @@ const PagarReembolsoApp = {
   renderCasca() {
     const root = document.getElementById("pagar-reembolso-root");
     if (!root) return;
+    const edita = this.podeEditar();
     root.innerHTML = `<div class="pr-topo">
-        <p class="cj-nota">Marque os reembolsos pendentes e libere. Cada título a receber gera um título a pagar no Sienge, com vencimento em 10 dias.</p>
+        <p class="cj-nota">${edita ? "Marque os reembolsos pendentes e libere. Cada título a receber gera um título a pagar no Sienge, com vencimento em 10 dias." : "Consulta dos reembolsos. Dá para ver o que está pago e o que está programado. A liberação fica com quem tem permissão de editar."}</p>
         <div class="pr-toolbar">
           <div class="search-box-wrapper pr-busca-fila">
             <input type="text" id="pr-busca" class="search-input" placeholder="Pesquise pelo título ou nome do cliente..." style="font-style: italic;" autocomplete="off" value="${this.esc(this.busca)}">
@@ -112,7 +117,7 @@ const PagarReembolsoApp = {
             <span class="moura-switch-track" aria-hidden="true"></span>
             <span class="moura-switch-text">Ocultar liberados</span>
           </label>
-          <button type="button" class="btn btn-primary" id="pr-liberar">Liberar</button>
+          ${edita ? `<button type="button" class="btn btn-primary" id="pr-liberar">Liberar</button>` : ""}
         </div>
         <div class="pr-periodos">
           <div class="pr-periodo">
@@ -125,7 +130,7 @@ const PagarReembolsoApp = {
             <label>De <input type="date" id="pr-col-ini" value="${this.esc(this.colIni)}"></label>
             <label>Até <input type="date" id="pr-col-fim" value="${this.esc(this.colFim)}"></label>
           </div>
-          <button type="button" class="btn btn-excel" id="pr-excel" title="Exportar tabela atual para Excel">
+          <button type="button" class="btn btn-excel pr-excel" id="pr-excel" title="Exportar tabela atual para Excel">
             <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
           </button>
         </div>
@@ -369,42 +374,32 @@ const PagarReembolsoApp = {
       lista.innerHTML = avisos + `<div class="cc-scroll cj-scroll"><table class="cc-table cj-cc"><tbody><tr><td class="cj-vazio">${vazio}</td></tr></tbody></table></div>`;
       return;
     }
+    const edita = this.podeEditar();
     const linhas = visiveis.map((item) => {
       const liberado = !this.pendente(item);
       const ok = this.pronto(item);
-      const falta = [];
-      if (!(Number(item.valor) > 0)) falta.push("valor");
-      if (!String(item.companyId || "").replace(/\D/g, "")) falta.push("empresa do título");
-      if (!String(item.costCenterId || "").replace(/\D/g, "")) falta.push("centro de custo");
-      const aviso = !liberado && !ok ? `<div class="cj-nota">Falta ${this.esc(falta.join(", "))}. Edite a custa na ficha do título.</div>` : "";
       const CJ = window.CustasJudiciaisApp;
       const nomeUnidade = CJ && typeof CJ.limparUnidade === "function" ? CJ.limparUnidade(item.unitName, item.costCenterId) : String(item.unitName || "").trim();
-      const proc = item.processoConsulta ? this.esc(item.processoConsulta) : "Sem número no cadastro";
-      const emp = [item.companyId, item.companyName].filter(Boolean).join(" · ");
+      const proc = item.processoConsulta || "Sem número no cadastro";
+      const empresaId = String(item.companyId || "").replace(/\D/g, "") || "—";
       const nAnexos = ((item.guias || []).length + (item.comprovantes || []).length + (item.anexos || []).length);
       const pagar = item.billId ? this.esc(item.billId) : "—";
       const sit = this.situacao(item);
-      const programada = liberado ? (this.dataBr(item.dueDate) || "—") : "—";
-      const colenci = item.reemPago ? (this.dataBr(item.pagoEm) || "—") : "—";
-      return `<tr class="${liberado ? "pr-liberado" : ""}">
-        <td class="pr-pagar">
-          <label class="pr-th-flag">
-            <input type="checkbox" data-pr="${this.esc(item.id)}" ${this.marcados[item.id] ? "checked" : ""} ${ok ? "" : "disabled"}>
-            <span class="pr-bill">${pagar}</span>
-          </label>
-          <div class="cj-nota">Título ${this.esc(item.saleId || "—")}</div>
-        </td>
+      const reembolso = liberado ? (this.dataBr(item.dueDate) || "—") : "—";
+      const marca = edita
+        ? `<input type="checkbox" data-pr="${this.esc(item.id)}" ${this.marcados[item.id] ? "checked" : ""} ${ok ? "" : "disabled"}>`
+        : "";
+      return `<tr class="pr-linha${liberado ? " pr-liberado" : ""}" data-pr-detalhe="${this.esc(item.id)}">
+        <td>${this.esc(empresaId)}</td>
+        <td>${this.esc(item.saleId || "—")}</td>
         <td class="cc-nome" title="${this.esc(item.customerName || "")}">${this.esc(item.customerName || "—")}</td>
-        <td class="cc-nome" title="${this.esc(emp)}">${this.esc(emp || "—")}</td>
-        <td title="${this.esc(nomeUnidade || "")}">${this.esc(nomeUnidade || "—")}</td>
         <td>${this.esc(item.costCenterId || "—")}</td>
-        <td>${this.esc(this.dataBr(item.data)) || "—"}</td>
-        <td>${this.esc(programada)}</td>
-        <td>${this.esc(colenci)}</td>
+        <td title="${this.esc(nomeUnidade || "")}">${this.esc(nomeUnidade || "—")}</td>
+        <td class="pr-pagar">${marca}<span class="pr-bill">${pagar}</span></td>
+        <td>${this.esc(reembolso)}</td>
         <td><span class="pr-status ${sit.classe}">${this.esc(sit.rotulo)}</span></td>
-        <td class="cc-nome">${this.esc(item.descricao || "")}${aviso}</td>
+        <td class="cc-nome" title="${this.esc(proc)}">${this.esc(proc)}</td>
         <td class="is-right">${item.valor != null && item.valor !== "" ? this.money(item.valor) : "—"}</td>
-        <td class="cc-nome" title="${proc}">${proc}</td>
         <td class="is-center">
           <button type="button" class="tvig-ico" title="Anexos" data-pr-anexos="${this.esc(item.id)}">
             <i data-lucide="paperclip" style="width:15px;height:15px;"></i>${nAnexos ? `<span class="cj-anexo-n">${nAnexos}</span>` : ""}
@@ -412,12 +407,17 @@ const PagarReembolsoApp = {
         </td>
       </tr>`;
     }).join("");
+    const marcaTodos = edita
+      ? `<label class="pr-th-flag"><input type="checkbox" id="pr-flag-todos" ${todosOn ? "checked" : ""}> Título a pagar</label>`
+      : "Título a pagar";
     lista.innerHTML = avisos + `<div class="cc-scroll cj-scroll"><table class="cc-table cj-cc pr-cc">
       <colgroup>
-        <col class="pr-c-pagar"><col><col><col><col class="pr-c-cc"><col class="cj-c-data"><col class="cj-c-data"><col class="cj-c-data"><col class="pr-c-status"><col><col class="cj-c-valor"><col><col class="cj-c-ico">
+        <col class="pr-c-id"><col class="pr-c-tit"><col><col class="pr-c-cc"><col><col class="pr-c-pagar"><col class="cj-c-data"><col class="pr-c-status"><col><col class="cj-c-valor"><col class="cj-c-ico">
       </colgroup>
       <thead><tr>
-        <th><label class="pr-th-flag"><input type="checkbox" id="pr-flag-todos" ${todosOn ? "checked" : ""}> Título a pagar</label></th><th>Cliente</th><th>Empresa</th><th>Unidade</th><th>Centro de custo</th><th>Pago pela Moura Leite</th><th>Data programada</th><th>Pago pela Colenci</th><th>Status</th><th>Do que se trata</th><th class="is-right">Valor</th><th>Processo</th><th class="is-center">Anexos</th>
+        <th title="ID da empresa"><span class="pr-id-head">ID <i data-lucide="info"></i></span></th>
+        <th>Título sub judice</th><th>Cliente</th><th>Centro de custo</th><th>Unidade</th>
+        <th>${marcaTodos}</th><th>Data reembolso</th><th>Status</th><th>Processo</th><th class="is-right">Valor</th><th class="is-center">Anexos</th>
       </tr></thead>
       <tbody>${linhas}</tbody>
     </table></div>`;
@@ -440,7 +440,53 @@ const PagarReembolsoApp = {
         CustasJudiciaisApp.abrirPainelAnexos(item.guias, item.comprovantes, item.anexos);
       });
     });
+    lista.querySelectorAll("[data-pr-detalhe]").forEach((tr) => {
+      tr.addEventListener("click", (ev) => {
+        if (ev.target.closest("button, input, label, a")) return;
+        this.abrirDetalhe(tr.getAttribute("data-pr-detalhe"));
+      });
+    });
     if (window.lucide && lucide.createIcons) lucide.createIcons();
+  },
+
+  abrirDetalhe(id) {
+    const item = this.itens.find((x) => x.id === id);
+    if (!item) return;
+    const antigo = document.getElementById("pr-detalhe");
+    if (antigo) antigo.remove();
+    const pago = item.reemPago ? (this.dataBr(item.pagoEm) || "Pago, sem a data no Sienge") : "Ainda não pago";
+    const liberacao = this.quando(item.liberatedAt) || "Ainda não liberado";
+    const pedido = [item.createdBy || "—", this.quando(item.createdAt)].filter(Boolean).join(" · ");
+    const linha = (rotulo, valor) => `<div class="pr-det-linha"><span>${rotulo}</span><strong>${this.esc(valor || "—")}</strong></div>`;
+    const pop = document.createElement("div");
+    pop.id = "pr-detalhe";
+    pop.className = "cj-pop";
+    pop.innerHTML = `<div class="cj-pop-box pr-det-box">
+      <div class="cj-pop-head"><h3>Reembolso do título ${this.esc(item.saleId || "—")}</h3><button type="button" class="btn btn-fechar" id="pr-det-fechar">Fechar</button></div>
+      ${linha("Do que se trata", item.descricao || "—")}
+      ${linha("Quando a Colenci pagou", pago)}
+      ${linha("Liberação pela Moura Leite", liberacao)}
+      ${linha("Quem entrou com o pedido", pedido)}
+      ${linha("Quem liberou", item.liberatedBy || "—")}
+    </div>`;
+    document.body.appendChild(pop);
+    const fechar = document.getElementById("pr-det-fechar");
+    if (fechar) fechar.addEventListener("click", () => pop.remove());
+    pop.addEventListener("click", (ev) => { if (ev.target === pop) pop.remove(); });
+  },
+
+  quando(iso) {
+    const dt = new Date(iso || "");
+    if (!iso || isNaN(dt.getTime())) return "";
+    try {
+      return new Intl.DateTimeFormat("pt-BR", {
+        timeZone: "America/Sao_Paulo",
+        day: "2-digit", month: "2-digit", year: "numeric",
+        hour: "2-digit", minute: "2-digit"
+      }).format(dt);
+    } catch (e) {
+      return this.dataBr(iso);
+    }
   },
 
   marcarTodos() {
@@ -467,6 +513,7 @@ const PagarReembolsoApp = {
   },
 
   async liberar() {
+    if (!this.podeEditar()) return;
     if (this.liberando) return;
     const lista = this.selecionados();
     if (!lista.length) {
@@ -944,12 +991,13 @@ const PagarReembolsoApp = {
 
   pintarPlanilha(ws, XL, opts) {
     const itens = opts.itens || [];
-    const heads = ["Título a receber", "Título a pagar", "Cliente", "Unidade", "Centro de custo", "Pago pela Moura Leite", "Data programada", "Pago pela Colenci", "Status", "Do que se trata", "Valor", "Processo"];
+    const heads = ["ID da empresa", "Título sub judice", "Cliente", "Centro de custo", "Unidade", "Título a pagar", "Data reembolso", "Status", "Processo", "Valor", "Do que se trata", "Pago pela Colenci", "Liberação Moura Leite", "Pedido por", "Liberado por"];
+    const valorCol = 9;
     const moneyFmt = "#,##0.00";
     const logoPx = Math.round(1.54 * 96 / 2.54);
     ws.properties.showGridLines = false;
     ws.views = [{ state: "frozen", xSplit: 1, ySplit: 4, topLeftCell: "B5", activeCell: "B5", showGridLines: false }];
-    ws.columns = heads.map((h, i) => ({ width: i === 2 || i === 9 || i === 11 ? 32 : (i === 10 ? 16 : 22) }));
+    ws.columns = heads.map((h, i) => ({ width: i === 2 || i === 8 || i === 10 ? 32 : (i === valorCol ? 16 : 22) }));
     ws.mergeCells("A1:A2");
     ws.getRow(1).height = 28;
     ws.getRow(2).height = 22;
@@ -993,7 +1041,7 @@ const PagarReembolsoApp = {
       XL.excelPaint(cell, {
         fill: "FF334155",
         font: { bold: true, size: 9, color: { argb: "FFFFFFFF" } },
-        align: { horizontal: i === 10 ? "right" : "left", vertical: "middle" },
+        align: { horizontal: i === valorCol ? "right" : "left", vertical: "middle" },
         border: true
       });
     });
@@ -1003,29 +1051,32 @@ const PagarReembolsoApp = {
       const unidade = CJ && typeof CJ.limparUnidade === "function" ? CJ.limparUnidade(item.unitName, item.costCenterId) : String(item.unitName || "");
       const sit = this.situacao(item);
       const vals = [
+        String(item.companyId || "").replace(/\D/g, ""),
         item.saleId || "",
-        item.billId || "",
         item.customerName || "",
-        unidade || "",
         item.costCenterId || "",
-        this.dataBr(item.data),
+        unidade || "",
+        item.billId || "",
         this.pendente(item) ? "" : this.dataBr(item.dueDate),
-        item.reemPago ? this.dataBr(item.pagoEm) : "",
         sit.rotulo === "—" ? "" : sit.rotulo,
-        item.descricao || "",
+        item.processoConsulta || item.processo || "",
         Number(item.valor) || 0,
-        item.processoConsulta || item.processo || ""
+        item.descricao || "",
+        item.reemPago ? this.dataBr(item.pagoEm) : "",
+        this.quando(item.liberatedAt),
+        item.createdBy || "",
+        item.liberatedBy || ""
       ];
       vals.forEach((v, i) => {
         const cell = row.getCell(i + 1);
         cell.value = v;
-        const zero = i === 10 && !v;
+        const zero = i === valorCol && !v;
         XL.excelPaint(cell, {
           fill: "FFFFFFFF",
           font: { size: 9, color: { argb: zero ? "FF94A3B8" : "FF0F172A" } },
-          align: { horizontal: i === 10 ? "right" : "left", vertical: "middle" },
+          align: { horizontal: i === valorCol ? "right" : "left", vertical: "middle" },
           border: true,
-          numFmt: i === 10 ? moneyFmt : undefined
+          numFmt: i === valorCol ? moneyFmt : undefined
         });
       });
     });
@@ -1033,13 +1084,13 @@ const PagarReembolsoApp = {
     heads.forEach((_, i) => {
       const cell = tot.getCell(i + 1);
       if (i === 0) cell.value = "Total";
-      if (i === 10) cell.value = total;
+      if (i === valorCol) cell.value = total;
       XL.excelPaint(cell, {
         fill: "FF475569",
         font: { bold: true, size: 9, color: { argb: "FFFFFFFF" } },
-        align: { horizontal: i === 10 ? "right" : "left", vertical: "middle" },
+        align: { horizontal: i === valorCol ? "right" : "left", vertical: "middle" },
         border: true,
-        numFmt: i === 10 ? moneyFmt : undefined
+        numFmt: i === valorCol ? moneyFmt : undefined
       });
     });
     const foot = ws.getRow(7 + itens.length);

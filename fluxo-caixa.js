@@ -2145,6 +2145,10 @@ const FluxoCaixaApp = {
 
   toggleDrillRateio() {
     this.drillRateioAberto = !this.drillRateioAberto;
+    if (typeof this._drillReplayFn === "function") {
+      this._drillReplayFn();
+      return;
+    }
     const args = this._drillReplay;
     if (!args) return;
     this.openDrill(args[0], args[1], args[2], args[3], args[4], args[5]);
@@ -2440,23 +2444,7 @@ const FluxoCaixaApp = {
   openDrill(id, isAccount, ccId, companyId, month, comparado) {
     this._drillComparado = !!comparado;
     this._drillReplay = [id, isAccount, ccId, companyId, month, !!comparado];
-    const prevDrill = document.querySelector("#fc-drill-modal .crm-scroll-table");
-    const keepDrill = prevDrill ? prevDrill.scrollTop : 0;
-    const tree = document.querySelector("#fluxo-caixa-root .fc-tree-scroll");
-    const keepTop = tree ? tree.scrollTop : 0;
-    const keepLeft = tree ? tree.scrollLeft : 0;
-    const main = document.querySelector(".main-content");
-    const keepMain = main ? main.scrollTop : 0;
-    const keepWin = window.scrollY || document.documentElement.scrollTop || 0;
-    const hold = () => {
-      const box = document.querySelector("#fluxo-caixa-root .fc-tree-scroll");
-      if (box) {
-        box.scrollTop = keepTop;
-        box.scrollLeft = keepLeft;
-      }
-      if (main) main.scrollTop = keepMain;
-      if (keepWin) window.scrollTo(0, keepWin);
-    };
+    this._drillReplayFn = null;
     const info = this.resolveDrill(id, !!isAccount, ccId);
     const wantCo = companyId != null && String(companyId) !== "" ? String(companyId) : "";
     const wantMonths = String(month == null ? "" : month)
@@ -2483,7 +2471,27 @@ const FluxoCaixaApp = {
     else if (wantMonths.length > 1) partes.push(this.rotuloPeriodo(wantMonths));
     if (partes.length) info.subtitle = `${info.subtitle} · ${partes.join(" · ")}`;
     info.total = sum;
+    this.mostrarDrill(info, items);
+  },
 
+  mostrarDrill(info, items, inicio, fim) {
+    const prevDrill = document.querySelector("#fc-drill-modal .crm-scroll-table");
+    const keepDrill = prevDrill ? prevDrill.scrollTop : 0;
+    const tree = document.querySelector("#fluxo-caixa-root .fc-tree-scroll");
+    const keepTop = tree ? tree.scrollTop : 0;
+    const keepLeft = tree ? tree.scrollLeft : 0;
+    const main = document.querySelector(".main-content");
+    const keepMain = main ? main.scrollTop : 0;
+    const keepWin = window.scrollY || document.documentElement.scrollTop || 0;
+    const hold = () => {
+      const box = document.querySelector("#fluxo-caixa-root .fc-tree-scroll");
+      if (box) {
+        box.scrollTop = keepTop;
+        box.scrollLeft = keepLeft;
+      }
+      if (main) main.scrollTop = keepMain;
+      if (keepWin) window.scrollTo(0, keepWin);
+    };
     // Pares adiantamento × abatimento pelo mesmo título (billId / documento)
     const byTitle = {};
     items.forEach((it) => {
@@ -2497,9 +2505,10 @@ const FluxoCaixaApp = {
     );
 
     this._drillItems = items;
-    const compPeriodo = this._drillComparado ? this.periodoComparado() : null;
-    const periodoIni = compPeriodo && compPeriodo.start ? compPeriodo.start : this.startDate;
-    const periodoFim = compPeriodo && compPeriodo.end ? compPeriodo.end : this.endDate;
+    const sum = items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
+    const compPeriodo = !inicio && this._drillComparado ? this.periodoComparado() : null;
+    const periodoIni = inicio || (compPeriodo && compPeriodo.start) || this.startDate;
+    const periodoFim = fim || (compPeriodo && compPeriodo.end) || this.endDate;
     this._drillExport = {
       items,
       sum,
@@ -2639,7 +2648,7 @@ const FluxoCaixaApp = {
         <div style="padding:14px 18px;background:#105436;color:#fff;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;border-radius:12px 12px 0 0;flex-shrink:0;">
           <div style="min-width:0;">
             <div style="font-size:1.05rem;font-weight:800;">Lançamentos · ${this.esc(info.title)}</div>
-            <div style="font-size:0.8rem;opacity:.9;margin-top:3px;">${this.esc(info.subtitle)} · ${this.esc(this.startDate)} a ${this.esc(this.endDate)}</div>
+            <div style="font-size:0.8rem;opacity:.9;margin-top:3px;">${this.esc(info.subtitle)} · ${this.esc(periodoIni)} a ${this.esc(periodoFim)}</div>
           </div>
           <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
             <button type="button" class="fc-rateio-btn${this.drillRateioAberto ? " is-on" : ""}" onclick="event.stopPropagation();FluxoCaixaApp.toggleDrillRateio()" title="Total do título, % de rateio, valor rateado e fator MLDU">

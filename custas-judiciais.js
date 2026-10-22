@@ -209,7 +209,7 @@ const CustasJudiciaisApp = {
     this.comprovantes = [];
     this.rascunho = null;
     root.innerHTML = `<div class="cj-topo">
-        <p class="cj-nota">Clique na linha para editar.</p>
+        <p class="cj-nota">Clique na linha para editar. Custa com título a pagar não é alterada.</p>
         <button type="button" class="btn btn-primary" id="cj-nova">Nova custa</button>
       </div>
       <div id="cj-lista"></div>`;
@@ -311,6 +311,30 @@ const CustasJudiciaisApp = {
     }
     this.pintarLista();
     this.marcarContagem();
+    await this.completarPagamento(geracao);
+  },
+
+  situacao(item) {
+    if (!String((item && item.billId) || "").trim()) return { rotulo: "—", classe: "" };
+    if (item.reemPago) return { rotulo: "Pago", classe: "is-pago" };
+    return { rotulo: "Programado", classe: "is-prog" };
+  },
+
+  async completarPagamento(geracao) {
+    const app = window.PagarReembolsoApp;
+    if (!app || typeof app.lerTitulo !== "function") return;
+    const alvos = this.itens.filter((item) => item.billId && item.reemPago == null);
+    if (!alvos.length) return;
+    await Promise.all(alvos.map(async (item) => {
+      try {
+        const info = await app.lerTitulo(item.billId);
+        item.reemPago = !!info.pago;
+      } catch (e) {
+        item.reemPago = false;
+      }
+    }));
+    if (geracao != null && geracao !== this._geracao) return;
+    this.pintarLista();
   },
 
   marcarContagem() {
@@ -371,36 +395,39 @@ const CustasJudiciaisApp = {
     const lista = document.getElementById("cj-lista");
     if (!lista) return;
     const linhas = this.itens.map((item) => {
-      const pago = item.billId ? `<div class="cj-nota">Título a pagar ${this.esc(item.billId)}</div>` : "";
+      const travado = !!String(item.billId || "").trim();
       const nAnexos = ((item.guias || []).length + (item.comprovantes || []).length + (item.anexos || []).length);
       const quem = item.createdBy || item.updatedBy || "—";
       const quando = this.quando(item.createdAt || item.updatedAt);
-      return `<tr class="cj-linha" data-cj-linha="${this.esc(item.id)}" title="Clique para editar">
-        <td>${this.esc(this.dataBr(item.data))}</td>
-        <td class="cc-nome">${this.esc(item.descricao || "")}${pago}</td>
+      const liberado = item.liberatedBy || "";
+      const quandoLib = this.quando(item.liberatedAt);
+      const sit = this.situacao(item);
+      const acoes = travado
+        ? ""
+        : `<button type="button" class="tvig-ico" title="Editar" data-cj-editar="${this.esc(item.id)}"><i data-lucide="pencil" style="width:15px;height:15px;"></i></button>
+           <button type="button" class="tvig-ico is-danger" title="Excluir" data-cj-excluir="${this.esc(item.id)}"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button>`;
+      return `<tr class="cj-linha${travado ? " is-travada" : ""}" ${travado ? "" : `data-cj-linha="${this.esc(item.id)}"`} title="${travado ? "Título a pagar gerado. Esta custa não pode ser editada." : "Clique para editar"}">
+        <td>${this.esc(this.dataBr(item.data) || "—")}</td>
+        <td><span class="pr-status ${sit.classe}">${this.esc(sit.rotulo)}</span></td>
+        <td class="cc-nome" title="${this.esc(item.descricao || "")}">${this.esc(item.descricao || "—")}</td>
+        <td class="cj-quem">${liberado ? `<span class="cj-quem-linha">${this.esc(liberado)}${quandoLib ? `<span class="cj-quando">${this.esc(quandoLib)}</span>` : ""}</span>` : "—"}</td>
+        <td>${travado ? this.esc(item.billId) : "—"}</td>
         <td class="is-right">${item.valor != null && item.valor !== "" ? this.money(item.valor) : "—"}</td>
-        <td class="cj-quem"><div>${this.esc(quem)}</div>${quando ? `<div class="cj-nota">${this.esc(quando)}</div>` : ""}</td>
+        <td class="cj-quem"><span class="cj-quem-linha">${this.esc(quem)}${quando ? `<span class="cj-quando">${this.esc(quando)}</span>` : ""}</span></td>
         <td class="is-center">
           <button type="button" class="tvig-ico" title="Anexos" data-cj-anexos="${this.esc(item.id)}">
             <i data-lucide="paperclip" style="width:15px;height:15px;"></i>${nAnexos ? `<span class="cj-anexo-n">${nAnexos}</span>` : ""}
           </button>
         </td>
-        <td class="is-center cj-acoes-cell">
-          <button type="button" class="tvig-ico" title="Editar" data-cj-editar="${this.esc(item.id)}">
-            <i data-lucide="pencil" style="width:15px;height:15px;"></i>
-          </button>
-          <button type="button" class="tvig-ico is-danger" title="Excluir" data-cj-excluir="${this.esc(item.id)}">
-            <i data-lucide="trash-2" style="width:15px;height:15px;"></i>
-          </button>
-        </td>
+        <td class="is-center cj-acoes-cell">${acoes}</td>
       </tr>`;
     }).join("");
     const vazio = !this.itens.length
-      ? `<tr><td colspan="6" class="cj-vazio">Nenhuma custa registrada neste título.</td></tr>`
+      ? `<tr><td colspan="9" class="cj-vazio">Nenhuma custa registrada neste título.</td></tr>`
       : "";
     lista.innerHTML = `<div class="cc-scroll cj-scroll"><table class="cc-table cj-cc">
-      <colgroup><col class="cj-c-data"><col><col class="cj-c-valor"><col class="cj-c-quem"><col class="cj-c-ico"><col class="cj-c-acoes"></colgroup>
-      <thead><tr><th>Data</th><th>Do que se trata</th><th class="is-right">Valor</th><th>Cadastrado por</th><th class="is-center">Anexos</th><th class="is-center">Ações</th></tr></thead>
+      <colgroup><col class="cj-c-data"><col class="cj-c-status"><col><col class="cj-c-quem"><col class="cj-c-pagar"><col class="cj-c-valor"><col class="cj-c-quem"><col class="cj-c-ico"><col class="cj-c-acoes"></colgroup>
+      <thead><tr><th>Data de pagamento</th><th>Status</th><th>Do que se trata</th><th>Liberado por</th><th>Título a pagar</th><th class="is-right">Valor</th><th>Cadastrado por</th><th class="is-center">Anexos</th><th class="is-center">Ações</th></tr></thead>
       <tbody>${linhas}${vazio}</tbody>
     </table></div>`;
     lista.querySelectorAll("[data-cj-linha]").forEach((tr) => {
@@ -435,6 +462,7 @@ const CustasJudiciaisApp = {
   editar(id) {
     const item = this.itens.find((x) => x.id === id);
     if (!item) return;
+    if (String(item.billId || "").trim()) return;
     this.editId = item.id;
     this.rascunho = null;
     this.guias = [];
@@ -755,11 +783,10 @@ const CustasJudiciaisApp = {
 
   async excluir(id) {
     const item = this.itens.find((x) => x.id === id);
-    if (!item) return;
-    const extra = item.billId ? " O título a pagar " + item.billId + " no Sienge continua." : "";
+    if (!item || String(item.billId || "").trim()) return;
     const ok = typeof window.mouraConfirm === "function"
-      ? await window.mouraConfirm("Excluir esta custa e os anexos?" + extra)
-      : confirm("Excluir esta custa e os anexos?" + extra);
+      ? await window.mouraConfirm("Excluir esta custa e os anexos?")
+      : confirm("Excluir esta custa e os anexos?");
     if (!ok) return;
     const fc = this.fb();
     if (!fc || !fc.deleteDoc) { alert("O Firebase não está disponível."); return; }

@@ -1189,16 +1189,54 @@ const OrcamentoRepassesApp = {
     const meses = (info && info.meses) || {};
     let valor = Number(meses[ym]);
     if (!Number.isFinite(valor)) {
-      const cel = meses[ym] || meses[String(Number(String(ym).slice(5)))];
+      const cel = meses[ym] || meses["12"] || meses[12];
       valor = cel && typeof cel === "object" ? Number(cel.r != null ? cel.r : cel.o) : Number(cel);
     }
     return Number(valor) || 0;
   },
 
+  /* A empresa 1 detalha a conta um nível abaixo do DFC. O valor sobe para a conta alocada. */
+  contaNoDfc(code, nome) {
+    const bruto = String(code || "").trim();
+    if (!bruto) return bruto;
+    const dfc = typeof OrcamentoDfcApp !== "undefined" ? OrcamentoDfcApp : null;
+    const cabe = (conta) => {
+      if (dfc && typeof dfc.grupoDaConta === "function" && dfc.grupoDaConta(conta, nome)) return true;
+      return !!OrcEst.grupo(conta, nome);
+    };
+    if (cabe(bruto)) return bruto;
+    const partes = bruto.split(".").filter(Boolean);
+    while (partes.length > 1) {
+      partes.pop();
+      const pai = partes.join(".");
+      if (cabe(pai)) return pai;
+    }
+    return bruto;
+  },
+
+  garantirForecastLocal() {
+    const app = window.ResultadoCaixaApp;
+    if (!app) return false;
+    const doc = app.forecasts && app.forecasts["2026-12"];
+    const por = doc && doc.porArquivo;
+    const tem = (por && typeof por === "object" && Object.keys(por).length) || (doc && doc.contas && Object.keys(doc.contas).length);
+    if (tem) return true;
+    if (typeof app.lerLocal === "function") {
+      try { app.lerLocal(); } catch (e) {}
+    }
+    const depois = app.forecasts && app.forecasts["2026-12"];
+    const por2 = depois && depois.porArquivo;
+    return !!((por2 && Object.keys(por2).length) || (depois && depois.contas && Object.keys(depois.contas).length));
+  },
+
   linhasDez2026(companyId) {
+    this.garantirForecastLocal();
     const app = window.ResultadoCaixaApp;
     const doc = app && app.forecasts && app.forecasts["2026-12"];
     if (!doc) return [];
+    if (typeof app.normalizarForecastsMemoria === "function") {
+      try { app.normalizarForecastsMemoria(); } catch (e) {}
+    }
     const lista = [];
     const por = doc.porArquivo;
     if (por && typeof por === "object" && !Array.isArray(por) && Object.keys(por).length) {
@@ -1209,7 +1247,7 @@ const OrcamentoRepassesApp = {
     const out = [];
     lista.forEach((arq) => {
       let id = String((arq && arq.empresa) || "").replace(/\D/g, "");
-      if (!id && dfc && typeof dfc.empresaDoArquivo === "function") id = String(dfc.empresaDoArquivo(arq) || "").replace(/\D/g, "");
+      if (!id && dfc && typeof dfc.empresaDoArquivo === "function") id = String(dfc.empresaDoArquivo(arq && (arq.rotulo || arq.nome)) || "").replace(/\D/g, "");
       if (emp && id && id !== emp) return;
       Object.keys((arq && arq.contas) || {}).forEach((cc) => {
         Object.keys(arq.contas[cc] || {}).forEach((code) => {
@@ -1221,7 +1259,7 @@ const OrcamentoRepassesApp = {
           out.push({
             e: id || emp,
             cc: String(cc).replace(/\D/g, "") || String(cc),
-            conta: code,
+            conta: this.contaNoDfc(code, info.nome || ""),
             cn: info.nome || "",
             m: m
           });
@@ -1416,7 +1454,7 @@ const OrcamentoRepassesApp = {
       const accs = [...node.accs.values()]
         .filter((a) => a.months.some((v) => Math.abs(v) >= 0.005))
         .sort((a, b) => String(a.conta).localeCompare(String(b.conta), "pt-BR", { numeric: true }));
-      const nome = node.id === "g_12" ? "12 VARIAÇÃO DE CAIXA — repasse" : node.name;
+      const nome = node.id === "g_12" ? (sociedade ? "12 VARIAÇÃO DE CAIXA — distribuição" : "12 VARIAÇÃO DE CAIXA — repasse") : node.name;
       rows.push({
         id: node.id,
         name: nome,
@@ -1527,7 +1565,7 @@ const OrcamentoRepassesApp = {
     root.innerHTML = `
       <div class="orc-est-page">
         ${typeof OrcamentoApp !== "undefined" ? OrcamentoApp.abasHtml() : ""}
-        <p class="orc-dfc-lead">Cada aba é uma prestação de contas. Escolha a obra e marque os centros de custo que entram no repasse.</p>
+        <p class="orc-dfc-lead">Cada aba é uma prestação de contas. Na parceria, escolha a obra e marque os centros de custo. Na sociedade, o resultado geral de todos os centros gera a distribuição.</p>
         <div class="orc-dfc-tools">
           <div id="orc-rep-emp-box"></div>
         </div>
@@ -1626,10 +1664,13 @@ const OrcamentoRepassesApp = {
 
   marcarCc(ccId, on) {
     const part = this.partAtual();
-    const obra = this.obraAtual(part);
     const app = this.appPar();
-    if (!part || !obra) return;
-    const row = (obra.costCenters || []).find((c) => String(c.id) === String(ccId));
+    if (!part) return;
+    let row = null;
+    (part.obras || []).forEach((obra) => {
+      const achado = (obra.costCenters || []).find((c) => String(c.id) === String(ccId));
+      if (achado) row = achado;
+    });
     if (!row) return;
     row.inAccount = !!on;
     if (app && typeof app.persist === "function") app.persist();
@@ -1646,41 +1687,55 @@ const OrcamentoRepassesApp = {
     }
     const part = this.partAtual(lista);
     this.abaId = String(part.id || "");
-    const obra = this.obraAtual(part);
+    const appPar = this.appPar();
+    const sociedade = !!(appPar && typeof appPar.isSociedade === "function" && appPar.isSociedade(part));
+    const obra = sociedade ? null : this.obraAtual(part);
     this.obraCode = obra ? String(obra.code) : "";
-    const card = this.montarDfc(part, this.linhasDaEmpresa(part.companyId), 0, this.obraCode);
+    const card = this.montarDfc(part, this.linhasDaEmpresa(part.companyId), 0, sociedade ? "" : this.obraCode);
     const abas = lista.map((p) => {
       const on = String(p.id) === this.abaId;
       const app = this.appPar();
       const tipo = app && typeof app.kindLabel === "function" ? app.kindLabel(p) : (p.kind || "");
       return `<button type="button" role="tab" aria-selected="${on ? "true" : "false"}" class="ml-tab${on ? " is-active" : ""}" data-rep-aba="${OrcEst.esc(p.id)}"><i data-lucide="hand-coins"></i> ${OrcEst.esc(p.partnerName || "Prestação")}${tipo ? ` <span class="ml-tab-count">${OrcEst.esc(tipo)}</span>` : ""}</button>`;
     }).join("");
-    const obras = (part.obras || []).map((o) => {
+    const obras = sociedade ? "" : (part.obras || []).map((o) => {
       const on = String(o.code) === this.obraCode;
       const n = (o.costCenters || []).filter((c) => c.inAccount !== false).length;
       return `<button type="button" role="tab" aria-selected="${on ? "true" : "false"}" class="ml-tab${on ? " is-active" : ""}" data-rep-obra="${OrcEst.esc(o.code)}"><i data-lucide="building-2"></i> Obra ${OrcEst.esc(o.code)}${n ? ` <span class="ml-tab-count">${n}</span>` : ""}</button>`;
     }).join("");
-    const centros = ((obra && obra.costCenters) || []).slice().sort((a, b) => String(a.id).localeCompare(String(b.id), "pt-BR", { numeric: true }));
+    const vistos = new Set();
+    const centros = [];
+    (sociedade ? (part.obras || []) : (obra ? [obra] : [])).forEach((o) => {
+      (o.costCenters || []).forEach((c) => {
+        const id = String(c.id || "");
+        if (!id || vistos.has(id)) return;
+        vistos.add(id);
+        centros.push(c);
+      });
+    });
+    centros.sort((a, b) => String(a.id).localeCompare(String(b.id), "pt-BR", { numeric: true }));
     const marcas = centros.length
       ? centros.map((c) => {
         const on = c.inAccount !== false;
         const nome = c.name ? " — " + c.name : "";
         return `<label class="orc-rep-cc-mark${on ? " is-on" : ""}"><input type="checkbox" data-rep-cc="${OrcEst.esc(c.id)}" ${on ? "checked" : ""}> ${OrcEst.esc(String(c.id) + nome)}</label>`;
       }).join("")
-      : `<p class="orc-est-nota">Esta obra não tem centro de custo. Inclua na parametrização do parceiro.</p>`;
+      : `<p class="orc-est-nota">${sociedade ? "Esta sociedade não tem centro de custo." : "Esta obra não tem centro de custo."} Inclua na parametrização do parceiro.</p>`;
     const rateio = obra && !card.sociedade
       ? `<span class="orc-rep-sub">${card.rateio ? ("Rateio " + OrcEst.esc(this.pctTxt(card.obraShare))) : "Integral"}</span>`
       : "";
     body.innerHTML = `
       <div class="ml-tabs orc-rep-tabs" role="tablist">${abas}</div>
-      ${obras ? `<div class="ml-tabs orc-rep-obras" role="tablist">${obras}</div>` : `<p class="orc-est-nota">Esta prestação ainda não tem obra.</p>`}
+      ${sociedade ? "" : (obras ? `<div class="ml-tabs orc-rep-obras" role="tablist">${obras}</div>` : `<p class="orc-est-nota">Esta prestação ainda não tem obra.</p>`)}
       <div class="orc-rep-ccs">${marcas}</div>
       <div class="orc-rep-resumo">
         <span><strong>${OrcEst.esc(card.nome)}</strong> <span class="orc-rep-sub">${OrcEst.esc((card.companyId ? card.companyId + " — " : "") + card.empresa)}</span> ${rateio}</span>
-        <span class="orc-rep-valor"><span>Variação — repasse</span><b>${OrcEst.money(this.soma(card.variacao))}</b></span>
+        <span class="orc-rep-valor"><span>${sociedade ? "Variação — distribuição" : "Variação — repasse"}</span><b>${OrcEst.money(this.soma(card.variacao))}</b></span>
       </div>
       ${this.dfcHtml(card)}
-      <p class="orc-est-nota">Com o centro principal da obra marcado, o DFC soma os centros marcados por inteiro. Sem ele, o valor é o rateio do parceiro sobre a obra. O resultado fica no mês. O repasse, na linha de variação, é pago no mês seguinte: janeiro de 2027 paga o forecast de dezembro de 2026, e o resultado de dezembro de 2027 aparece em JAN/28. Na sociedade, o DFC é integral e a variação se divide pelo percentual de cada sócio. Repasse e dividendos já lançados no orçamento da sociedade ficam de fora, para o valor não se abater duas vezes.</p>`;
+      <p class="orc-est-nota">${sociedade
+        ? "Na sociedade o DFC junta todos os centros marcados. O resultado geral fica no mês. A distribuição, na linha de variação, é paga no mês seguinte: janeiro de 2027 paga o forecast de dezembro de 2026, e o resultado de dezembro de 2027 aparece em JAN/28. A variação se divide pelo percentual de cada sócio. Repasse e dividendos já lançados no orçamento ficam de fora, para o valor não se abater duas vezes."
+        : "Com o centro principal da obra marcado, o DFC soma os centros marcados por inteiro. Sem ele, o valor é o rateio do parceiro sobre a obra. O resultado fica no mês. O repasse, na linha de variação, é pago no mês seguinte: janeiro de 2027 paga o forecast de dezembro de 2026, e o resultado de dezembro de 2027 aparece em JAN/28."}</p>`;
     body.querySelectorAll("[data-rep-aba]").forEach((btn) => {
       btn.addEventListener("click", () => this.setAba(btn.getAttribute("data-rep-aba")));
     });
@@ -1694,6 +1749,22 @@ const OrcamentoRepassesApp = {
       tr.addEventListener("click", () => this.toggleNo(tr.getAttribute("data-rep-part"), tr.getAttribute("data-rep-no")));
     });
     if (window.lucide && lucide.createIcons) lucide.createIcons();
+    this.pedirForecastDezembro();
+  },
+
+  /* O forecast de dezembro pode estar só na nuvem. Quando chega, janeiro passa a mostrar o repasse. */
+  pedirForecastDezembro() {
+    if (this._fcDez) return;
+    if (this.garantirForecastLocal()) return;
+    const dfc = typeof OrcamentoDfcApp !== "undefined" ? OrcamentoDfcApp : null;
+    const app = window.ResultadoCaixaApp;
+    if (!dfc || typeof dfc.lerForecastsSalvos !== "function" || !app) return;
+    this._fcDez = "lendo";
+    dfc.lerForecastsSalvos(app).then(() => {
+      const achou = this.garantirForecastLocal();
+      this._fcDez = achou ? "" : "vazio";
+      if (achou && document.getElementById("orc-rep-body")) this.paintCorpo();
+    }).catch(() => { this._fcDez = "vazio"; });
   },
 
   cardHtml(card) {
@@ -1718,7 +1789,7 @@ const OrcamentoRepassesApp = {
 
   dfcHtml(card) {
     if (!card.centros || !card.centros.length) {
-      return `<p class="orc-est-nota">Marque ao menos um centro de custo desta obra.</p>`;
+      return `<p class="orc-est-nota">Marque ao menos um centro de custo${card.sociedade ? "." : " desta obra."}</p>`;
     }
     if (!card.temValor) {
       return `<p class="orc-est-nota">Não há lançamento de 2027 nos centros desta ${card.sociedade ? "sociedade" : "parceria"}.</p>`;

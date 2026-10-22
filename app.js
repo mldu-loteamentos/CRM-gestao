@@ -3393,6 +3393,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "gerar-pagamento": "Gerar Pagamento",
     rydoo: "Rydoo",
     "pagar-reembolso": "Pagar reembolso",
+    "processo-contra": "Processo contra",
     "titulos-incompletos": "Títulos incompletos",
     "config-tags": "Configuração de TAGs",
     "motivos-cancelamento": "Motivos de cancelamento",
@@ -3477,6 +3478,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "gerar-pagamento": "wallet",
     rydoo: "receipt",
     "pagar-reembolso": "wallet",
+    "processo-contra": "scale",
     "titulos-incompletos": "file-warning",
     "config-tags": "tags",
     "motivos-cancelamento": "list",
@@ -6387,7 +6389,7 @@ window.permCoversMenuKey = function(perms, modKey) {
   }
   if (modKey === "mod_juridico") {
     const flags = (base) => perms[base + "_acessar"] === true || perms[base + "_visualizar"] === true || perms[base + "_editar"] === true;
-    return flags("sub_fin_cr_sub_judice") || flags("sub_fin_cr_pagar_reembolso");
+    return flags("sub_fin_cr_sub_judice") || flags("sub_fin_cr_pagar_reembolso") || flags("sub_jur_geral_processo_contra");
   }
   if (modKey === "mod_orc") {
     if (perms.mod_orc === true || perms.sub_orc_geral === true || perms.sub_fin_orc === true) return true;
@@ -12950,10 +12952,10 @@ window.aplicarTravaSubjudiceNaFicha = function(customerId, nome) {
     return;
   }
   if (typeof AppState !== "undefined") AppState.isSubjudiceMode = true;
-  const advogadoFicha = window.fichaUsuarioEhAdvogadoCobranca();
+  const dispensaAlerta = window.fichaUsuarioDispensaAlertaSubjudice();
   const avisoSub = document.getElementById("ficha-subjudice-alerta");
   if (avisoSub) {
-    if (advogadoFicha) {
+    if (dispensaAlerta) {
       avisoSub.style.display = "none";
       avisoSub.textContent = "";
     } else {
@@ -12974,7 +12976,7 @@ window.aplicarTravaSubjudiceNaFicha = function(customerId, nome) {
     const btn = document.querySelector('button[data-target="' + tabId + '"]');
     if (btn) btn.style.display = "none";
   });
-  if (!advogadoFicha && typeof window.avisarClienteSubjudice === "function") window.avisarClienteSubjudice(customerId, nome);
+  if (!dispensaAlerta && typeof window.avisarClienteSubjudice === "function") window.avisarClienteSubjudice(customerId, nome);
   if (typeof switchCustomerTab === "function") switchCustomerTab("tab-cobranca-judicial");
   if (typeof renderJudicialTimeline === "function") renderJudicialTimeline();
   if (typeof syncCobrancaJudicialTabs === "function") syncCobrancaJudicialTabs(true, false);
@@ -12988,8 +12990,13 @@ window.fichaUsuarioEhAdvogadoCobranca = function() {
   return op === "advogado";
 };
 
+window.fichaUsuarioDispensaAlertaSubjudice = function() {
+  if (typeof window.fichaUsuarioEhAdvogadoCobranca === "function" && window.fichaUsuarioEhAdvogadoCobranca()) return true;
+  return typeof window.isCrmSuperAdmin === "function" && window.isCrmSuperAdmin();
+};
+
 window.avisarClienteSubjudice = function(customerId, nomeFallback) {
-  if (window.fichaUsuarioEhAdvogadoCobranca()) return;
+  if (window.fichaUsuarioDispensaAlertaSubjudice()) return;
   const antigo = document.getElementById("subjudice-ciente-modal");
   if (antigo) antigo.remove();
   const lista = window._subjudiceList || [];
@@ -13191,9 +13198,10 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
   // Abas judiciais: menu Sub Judice, advogado, ou contrato/cliente já sub judice (ex.: fila de cobrança)
   syncCobrancaJudicialTabs(isSubjudice, isAdvogado);
 
+  const dispensaAlertaSub = (typeof window.fichaUsuarioDispensaAlertaSubjudice === "function" && window.fichaUsuarioDispensaAlertaSubjudice()) || isAdvogado;
   const avisoSub = document.getElementById("ficha-subjudice-alerta");
   if (avisoSub) {
-    if (isSubjudice && !isAdvogado) {
+    if (isSubjudice && !dispensaAlertaSub) {
       avisoSub.style.display = "block";
       avisoSub.textContent = "Cliente sub judice. O Integra não gera boleto deste contrato. Mesmo com pagamento integral, a emissão fica com o advogado da Moura Leite.";
     } else {
@@ -13201,7 +13209,7 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
       avisoSub.textContent = "";
     }
   }
-  if (isSubjudice && !isAdvogado) window.avisarClienteSubjudice(customerId);
+  if (isSubjudice && !dispensaAlertaSub) window.avisarClienteSubjudice(customerId);
   if (isSubjudice) {
     switchCustomerTab('tab-cobranca-judicial');
     if (typeof renderJudicialTimeline === 'function') {

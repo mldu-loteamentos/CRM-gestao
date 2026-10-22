@@ -1,7 +1,7 @@
 // DFC do orçamento 2027. A visão de receitas (OrcamentoApp) não passa por aqui.
 const OrcamentoDfcApp = {
   LS: "crm_orcamento_dfc_2027",
-  LS_SALDO: "orc_dfc_saldos_contas",
+  LS_SALDO: "orc_dfc_saldos_contas_v2",
   MESES: ["JAN", "FEV", "MAR", "ABR", "MAI", "JUN", "JUL", "AGO", "SET", "OUT", "NOV", "DEZ"],
   selectedCompanyIds: [],
   selectedCcIds: [],
@@ -49,14 +49,18 @@ const OrcamentoDfcApp = {
     return (p > 0 ? "+" : "") + texto + "%";
   },
 
-  celCmp(orc, real, prev, sep) {
+  celCmp(orc, real, prev, sep, chave) {
     const o = Number(orc) || 0;
     const b = Number(real) || 0;
     const d = o - b;
     const titulo = (prev ? "Previsão 2026 " : "2026 ") + this.money(b) + " · Orçado 2027 " + this.money(o) + " · Variação " + this.money(d);
     const neg = d < -0.005 ? " orc-dfc-neg" : "";
     const edge = sep ? " orc-dfc-sep" : "";
-    return `<td class="${edge.trim()}" title="${this.esc(titulo)}">${this.money(b)}</td><td title="${this.esc(titulo)}">${this.money(o)}</td><td class="${(neg + edge).trim()}" title="${this.esc(titulo)}">${this.money(d)}</td><td title="${this.esc(titulo)}">${this.pct(o, b)}</td>`;
+    const abre = chave && !prev;
+    const cls2026 = [edge.trim(), abre ? "orc-dfc-abre" : ""].filter(Boolean).join(" ");
+    const marca = abre ? ` data-orc-2026="${this.esc(chave)}"` : "";
+    const dica = this.esc(titulo + (abre ? " · Ver lançamentos" : ""));
+    return `<td class="${cls2026}"${marca} title="${dica}">${this.money(b)}</td><td title="${this.esc(titulo)}">${this.money(o)}</td><td class="${(neg + edge).trim()}" title="${this.esc(titulo)}">${this.money(d)}</td><td title="${this.esc(titulo)}">${this.pct(o, b)}</td>`;
   },
 
   norm(s) {
@@ -371,6 +375,168 @@ const OrcamentoDfcApp = {
     return true;
   },
 
+  async lerMovimentos(fim, empresas, aviso) {
+    const api = window.SiengeApiService;
+    if (!api || typeof api.getBankMovements !== "function") {
+      throw new Error("A consulta de caixa e banco não está disponível.");
+    }
+    const partes = new Array((empresas || []).length);
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < empresas.length) {
+        const i = cursor++;
+        const id = empresas[i];
+        if (typeof aviso === "function") aviso(id);
+        const data = await api.getBankMovements("2026-01-01", fim, { selectionType: "M", companyId: id });
+        partes[i] = (data || []).map((m) => Object.assign({}, m, { companyId: (m && m.companyId) || id }));
+      }
+    };
+    const n = Math.min(3, empresas.length);
+    await Promise.all(Array.from({ length: n }, () => worker()));
+    let movs = partes.reduce((acc, rows) => acc.concat(rows || []), []);
+    if (typeof window.siengeDedupeBankMovements === "function") movs = window.siengeDedupeBankMovements(movs);
+    return movs;
+  },
+
+  async garantirMovimentos2026() {
+    const fim = this.fimRealizado2026();
+    const empresas = this.empresas().map((e) => String(e.id)).filter(Boolean);
+    const chave = empresas.slice().sort().join(",") + "|" + fim;
+    if (this._movsProntos && this._movChave === chave && Array.isArray(this._movs2026)) return;
+    const fluxo = window.FluxoCaixaApp;
+    if (fluxo && typeof fluxo.ensureCategories === "function") {
+      try { await fluxo.ensureCategories(); } catch (e) {}
+    }
+    this._movs2026 = await this.lerMovimentos(fim, empresas);
+    this._movsProntos = true;
+    this._movChave = chave;
+    this._itens2026 = null;
+  },
+
+  gidsDoNo(id) {
+    const groups = (this.visaoDfc().groups) || [];
+    const ids = new Set();
+    const walk = (gid) => {
+      if (!gid || ids.has(gid)) return;
+      ids.add(gid);
+      groups.filter((g) => g && g.parentId === gid).forEach((ch) => walk(ch.id));
+    };
+    walk(id);
+    return ids;
+  },
+
+  itens2026() {
+    if (this._itens2026) return this._itens2026;
+    const fluxo = window.FluxoCaixaApp;
+    const grupos = (fluxo && fluxo.visao && fluxo.visao() && fluxo.visao().groups) || this.visaoDfc().groups || [];
+    const byId = {};
+    grupos.forEach((g) => { if (g && g.id) byId[g.id] = g; });
+    const corte = this.corteForecast();
+    const itens = [];
+    (this._movs2026 || []).forEach((mov) => {
+      const factor = fluxo && typeof fluxo.factorForCompany === "function" ? fluxo.factorForCompany(mov.companyId) : 1;
+      if (!fluxo || factor <= 0) return;
+      fluxo.allocate(mov, factor).forEach((a) => {
+        if (!a) return;
+        const gid = this.grupoDaConta(a.categoryId, a.categoryName);
+        const node = gid && byId[gid];
+        if (!node) return;
+        const amount = fluxo.signedAmount(node, a.categoryId, a.categoryName, a.amount, a.reducer, a.categoryType, a.mov);
+        const i = Number(String(a.month || "").slice(5, 7)) - 1;
+        if (!(i >= 0) || i >= corte || !amount) return;
+        itens.push(Object.assign({}, a, { amount: amount, signedAmount: amount, nodeId: gid, i: i, companyId: mov.companyId || a.companyId }));
+      });
+    });
+    this._itens2026 = itens;
+    return itens;
+  },
+
+  itensDaCelula(row, mesIdx) {
+    const corte = this._corte == null ? this.corteForecast() : this._corte;
+    const gids = row.drillConta ? new Set([row.drillGid]) : this.gidsDoNo(row.drillGid);
+    const emp = new Set(this.selectedCompanyIds.map(String));
+    const conta = this.chaveConta(row.drillConta || "");
+    const contaDig = conta.replace(/\D/g, "");
+    const ccWant = row.drillCc ? (String(row.drillCc).replace(/\D/g, "") || String(row.drillCc)) : "";
+    return this.itens2026().filter((it) => {
+      if (emp.size && !emp.has(String(it.companyId || ""))) return false;
+      if (!this.ccCabe(it.costCenterId)) return false;
+      if (!gids.has(it.nodeId)) return false;
+      if (mesIdx == null) {
+        if (!(it.i >= 0 && it.i < corte)) return false;
+      } else if (it.i !== mesIdx) return false;
+      if (conta) {
+        const a = this.chaveConta(it.categoryId);
+        const ad = a.replace(/\D/g, "");
+        if (a !== conta && ad !== contaDig && a.indexOf(conta + ".") !== 0) return false;
+      }
+      if (ccWant) {
+        const bruto = String(it.costCenterId || "").trim();
+        const got = bruto.replace(/\D/g, "") || (bruto || "—");
+        if (got !== ccWant) return false;
+      }
+      return true;
+    }).sort((a, b) => String((a.mov && (a.mov.paymentDate || a.mov.bankMovementDate)) || a.month || "").localeCompare(String((b.mov && (b.mov.paymentDate || b.mov.bankMovementDate)) || b.month || "")));
+  },
+
+  avisoDrill(texto, erro) {
+    const fluxo = window.FluxoCaixaApp;
+    if (fluxo && typeof fluxo.closeDrill === "function") fluxo.closeDrill();
+    const overlay = document.createElement("div");
+    overlay.id = "fc-drill-modal";
+    overlay.style.cssText = "position:fixed;inset:0;z-index:9000;background:rgba(15,23,42,0.45);display:flex;align-items:center;justify-content:center;padding:16px;";
+    overlay.onclick = (e) => { if (e.target === overlay && fluxo) fluxo.closeDrill(); };
+    const miolo = erro
+      ? `<div style="padding:22px;color:#b91c1c;font-weight:700;">${this.esc(texto)}</div><div style="padding:0 22px 22px;"><button type="button" class="btn btn-fechar" onclick="FluxoCaixaApp.closeDrill()">Fechar</button></div>`
+      : `<div class="ml-load" style="padding:28px 36px;">
+          <div class="loading-spinner" aria-hidden="true"></div>
+          <div class="loading-status-text">${this.esc(texto)}</div>
+          <div class="ml-load-track"><div class="loading-progress-bar" style="width:40%"></div></div>
+        </div>`;
+    overlay.innerHTML = `<div style="background:#fff;border-radius:12px;min-width:320px;max-width:480px;box-shadow:0 20px 50px rgba(0,0,0,0.25);">${miolo}</div>`;
+    document.body.appendChild(overlay);
+  },
+
+  async abrirCelula2026(chave) {
+    const fluxo = window.FluxoCaixaApp;
+    if (!fluxo || typeof fluxo.mostrarDrill !== "function") return;
+    const pedacos = String(chave || "").split("||");
+    const mes = pedacos.pop();
+    const id = pedacos.join("||");
+    const row = (this._linhasDfc || []).find((r) => r.id === id);
+    if (!row) return;
+    const corte = this._corte == null ? this.corteForecast() : this._corte;
+    const mesIdx = mes === "t" ? null : Number(mes);
+    if (mesIdx != null && (!(mesIdx >= 0) || mesIdx >= corte)) return;
+    const fim = this.fimRealizado2026();
+    const nomeMes = mesIdx == null
+      ? "realizado de 2026"
+      : (this.MESES[mesIdx] || "") + "/2026";
+    let totalLinha = 0;
+    if (mesIdx == null) {
+      for (let i = 0; i < corte; i++) totalLinha += Number((row.base || [])[i]) || 0;
+    } else totalLinha = Number((row.base || [])[mesIdx]) || 0;
+    const pintar = () => {
+      const itens = this.itensDaCelula(row, mesIdx);
+      fluxo._drillReplayFn = pintar;
+      fluxo._drillComparado = false;
+      fluxo.mostrarDrill({
+        title: row.name,
+        subtitle: "Lançamentos de " + nomeMes,
+        total: totalLinha
+      }, itens, "2026-01-01", fim || "2026-12-31");
+    };
+    if (!(this._movsProntos && Array.isArray(this._movs2026))) {
+      this.avisoDrill("Lendo os lançamentos de 2026 no caixa e banco…");
+    }
+    try {
+      await this.garantirMovimentos2026();
+      pintar();
+    } catch (e) {
+      this.avisoDrill((e && e.message) || "Não consegui ler os lançamentos de 2026.", true);
+    }
+  },
+
   async buscarCaixa2026() {
     const fluxo = window.FluxoCaixaApp;
     const api = window.SiengeApiService;
@@ -409,31 +575,18 @@ const OrcamentoDfcApp = {
     const byId = {};
     grupos.forEach((g) => { if (g && g.id) byId[g.id] = g; });
     const corte = this.corteForecast();
-    const partesMov = new Array(faltam.length);
-    let cursor = 0;
     let feitas = 0;
-    const self = this;
-    const worker = async function () {
-      while (cursor < faltam.length) {
-        const i = cursor++;
-        const id = faltam[i];
-        self.notaCaixa("Lendo o realizado de 2026 no caixa e banco · empresa " + id + " · " + (feitas + 1) + " de " + faltam.length);
-        const data = await api.getBankMovements("2026-01-01", fim, { selectionType: "M", companyId: id });
-        partesMov[i] = (data || []).map((m) => Object.assign({}, m, { companyId: (m && m.companyId) || id }));
-        feitas += 1;
-      }
-    };
-    const n = Math.min(3, faltam.length);
-    await Promise.all(Array.from({ length: n }, function () { return worker(); }));
-    let movs = partesMov.reduce((acc, rows) => acc.concat(rows || []), []);
-    if (typeof window.siengeDedupeBankMovements === "function") movs = window.siengeDedupeBankMovements(movs);
+    const movs = await this.lerMovimentos(fim, faltam, (id) => {
+      feitas += 1;
+      this.notaCaixa("Lendo o realizado de 2026 no caixa e banco · empresa " + id + " · " + feitas + " de " + faltam.length);
+    });
     const lista = [];
     movs.forEach((mov) => {
       const factor = typeof fluxo.factorForCompany === "function" ? fluxo.factorForCompany(mov.companyId) : 1;
       if (factor <= 0) return;
       fluxo.allocate(mov, factor).forEach((a) => {
         if (!a) return;
-        const gid = self.grupoDaConta(a.categoryId, a.categoryName);
+        const gid = this.grupoDaConta(a.categoryId, a.categoryName);
         const node = gid && byId[gid];
         if (!node) return;
         const valor = fluxo.signedAmount(node, a.categoryId, a.categoryName, a.amount, a.reducer, a.categoryType, a.mov);
@@ -463,6 +616,12 @@ const OrcamentoDfcApp = {
       else todos.push.apply(todos, porEmp[id] || []);
     });
     this._lancamentos2026 = todos;
+    if (faltam.length === empresas.length) {
+      this._movs2026 = movs;
+      this._movsProntos = true;
+      this._movChave = chave;
+      this._itens2026 = null;
+    }
     this._caixaChave = chave;
     this._caixaEstado = todos.length ? "ok" : "vazio";
     this._caixaErro = "";
@@ -637,7 +796,10 @@ const OrcamentoDfcApp = {
         months: node.months,
         base: node.base,
         total,
-        baseTotal
+        baseTotal,
+        drillGid: node.id,
+        drillConta: "",
+        drillCc: ""
       });
       if (!aberto && !this.expanded.has(node.id)) return;
       children.forEach((ch) => walk(ch, level + 1));
@@ -657,7 +819,10 @@ const OrcamentoDfcApp = {
           months: a.months,
           base: a.base || Array(12).fill(0),
           total: a.months.reduce((x, y) => x + y, 0),
-          baseTotal: (a.base || []).reduce((x, y) => x + y, 0)
+          baseTotal: (a.base || []).reduce((x, y) => x + y, 0),
+          drillGid: node.id,
+          drillConta: a.conta,
+          drillCc: ""
         });
         if (!aberto && (!ccs.length || !this.expanded.has(accId))) return;
         ccs.forEach((c) => {
@@ -673,7 +838,10 @@ const OrcamentoDfcApp = {
             months: c.months,
             base: c.base || Array(12).fill(0),
             total: c.months.reduce((x, y) => x + y, 0),
-            baseTotal: (c.base || []).reduce((x, y) => x + y, 0)
+            baseTotal: (c.base || []).reduce((x, y) => x + y, 0),
+            drillGid: node.id,
+            drillConta: a.conta,
+            drillCc: c.id
           });
         });
       });
@@ -829,12 +997,9 @@ const OrcamentoDfcApp = {
     return null;
   },
 
+  /* A posição de saldos da empresa soma conta corrente, aplicação, mútuo e bloqueio. */
   ehContaAnalise(c) {
-    const nome = this.norm(((c && c.nome) || "") + " " + ((c && c.numero) || ""));
-    const tipo = String((c && c.tipo) || "");
-    if (/MUTUO|JUDICIAL|BLOQUEIO|BLOQ|CHEQUE|EMISSAO|TRANSITOR|REAPROP|ADIANTAMENTO/.test(nome)) return false;
-    if (tipo === "I" || tipo === "A" || /INVEST|APLIC/.test(nome)) return false;
-    return tipo === "B" || tipo === "C" || /CONTA CORRENTE|\bC C\b|\bCAIXA\b/.test(nome);
+    return !!(c && String(c.numero || "").trim());
   },
 
   contasEscolhidas() {
@@ -922,17 +1087,20 @@ const OrcamentoDfcApp = {
           const lista = await api.getAccountBalances(job.dt, { companyId: job.emp, showLast: true });
           const dia = mapa[job.dt] || (mapa[job.dt] = {});
           (lista || []).forEach((b) => {
+            const co = String(b.companyId != null ? b.companyId : (b.idCompany != null ? b.idCompany : job.emp));
+            if (co !== String(job.emp)) return;
             const num = String(b.accountNumber || b.number || "").trim();
             if (!num) return;
             const valor = this.valorSaldo(b);
             if (valor == null) return;
-            const k = job.emp + "|" + num;
             const dtBal = String(b.balanceDate || "").slice(0, 10);
+            if (dtBal && dtBal > job.dt) return;
+            const k = job.emp + "|" + num;
             const prev = dia[k];
             if (!prev || (dtBal && dtBal >= (prev.dt || ""))) dia[k] = { valor: valor, dt: dtBal || job.dt };
             if (!vistos.has(k)) {
               vistos.add(k);
-              contas.push({ chave: k, empresa: job.emp, numero: num, nome: num, tipo: "" });
+              contas.push({ chave: k, empresa: job.emp, numero: num, nome: String(b.accountName || b.name || num).trim(), tipo: "" });
             }
           });
         }
@@ -1055,9 +1223,9 @@ const OrcamentoDfcApp = {
     }).join("") : "";
     const resultado = this.resultadoMes(mes);
     return `<section class="orc-dfc-quadro">
-      ${this._saldoPicker ? `<div class="orc-dfc-checks"><p>Contas usadas no saldo. A marca entra na soma de todos os meses.</p>${checks || "<span>Nenhuma conta voltou da consulta.</span>"}</div>` : ""}
+      ${this._saldoPicker ? `<div class="orc-dfc-checks"><p>A marca inicial é a posição de saldos inteira: conta corrente, aplicação, mútuo e bloqueio. Vale para todos os meses.</p>${checks || "<span>Nenhuma conta voltou da consulta.</span>"}</div>` : ""}
       <h3>Contas em ${this.MESES[mes]} de 2026</h3>
-      <p>Início em ${this.dataBr(iniData)} e fim em ${this.dataBr(fimData)}. A variação é o saldo final menos o saldo inicial. A geração do resultado deste mês no DFC foi ${this.money(resultado)}.</p>
+      <p>Início em ${this.dataBr(iniData)} e fim em ${this.dataBr(fimData)}, na mesma posição de saldos. A variação é o saldo final menos o saldo inicial. A geração do resultado deste mês no DFC foi ${this.money(resultado)}.</p>
       <div class="orc-dfc-scroll orc-dfc-quadro-scroll">
         <table class="orc-dfc-table orc-dfc-quadro-tab">
           <thead><tr><th>Conta</th><th>Saldo em ${this.dataBr(iniData)}</th><th>Saldo em ${this.dataBr(fimData)}</th><th>Variação</th></tr></thead>
@@ -1254,6 +1422,7 @@ const OrcamentoDfcApp = {
       return;
     }
     const { rows, fora } = this.montar();
+    this._linhasDfc = rows;
     const corte = this._corte == null ? this.corteForecast() : this._corte;
     const h1 = this.MESES.map((m, i) => `<th colspan="4" class="orc-dfc-mes${i % 2 ? " is-alt" : ""}">${m}</th>`).join("") + `<th colspan="4" class="orc-dfc-mes">Total</th>`;
     const sub = (rotulo) => `<th class="orc-dfc-sep">${rotulo}</th><th>2027</th><th>Var R$</th><th>Var %</th>`;
@@ -1269,12 +1438,12 @@ const OrcamentoDfcApp = {
         ? `<i data-lucide="${this.expanded.has(r.id) ? "chevron-down" : "chevron-right"}"></i>`
         : `<i class="orc-dfc-no"></i>`;
       const base = r.base || [];
-      const cells = r.months.map((v, i) => this.celCmp(v, base[i], i >= corte, true)).join("");
+      const cells = r.months.map((v, i) => this.celCmp(v, base[i], i >= corte, true, i < corte ? (r.id + "||" + i) : "")).join("");
       const click = r.hasKids ? ` data-dfc-id="${this.esc(r.id)}"` : "";
       return `<tr class="${cls}"${click}>
         <td style="padding-left:${6 + r.level * 8}px">${ico}<span>${this.esc(r.name)}</span></td>
         ${cells}
-        ${this.celCmp(r.total, r.baseTotal, false, true)}
+        ${this.celCmp(r.total, r.baseTotal, false, true, corte > 0 ? (r.id + "||t") : "")}
       </tr>`;
     }).join("");
     let avisoBase = "";
@@ -1296,6 +1465,12 @@ const OrcamentoDfcApp = {
       <div id="orc-dfc-saldos">${this.quadroSaldos()}</div>`;
     body.querySelectorAll("[data-dfc-id]").forEach((tr) => {
       tr.addEventListener("click", () => this.toggle(tr.getAttribute("data-dfc-id")));
+    });
+    body.querySelectorAll("[data-orc-2026]").forEach((td) => {
+      td.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        this.abrirCelula2026(td.getAttribute("data-orc-2026"));
+      });
     });
     this.ligarSaldos(body);
     this.pedirSaldos();

@@ -82,7 +82,8 @@
     ]},
     { id: "juridico", label: "Jurídico", subs: [
       { id: "subjudice", label: "Cobrança Sub judice" },
-      { id: "pagar_reembolso", label: "Pagar reembolso" }
+      { id: "pagar_reembolso", label: "Pagar reembolso" },
+      { id: "processo_contra", label: "Processo contra" }
     ]},
     { id: "fiscal", label: "Fiscal", subs: [
       { id: "pis_cofins", label: "Calcular impostos" },
@@ -157,6 +158,7 @@
     zeropaid: { modulo: "financeiro", subitem: "zeropaid" },
     subjudice: { modulo: "juridico", subitem: "subjudice" },
     "pagar-reembolso": { modulo: "juridico", subitem: "pagar_reembolso" },
+    "processo-contra": { modulo: "juridico", subitem: "processo_contra" },
     wesend: { modulo: "financeiro", subitem: "notificacoes" },
     configuracoes: { modulo: "financeiro", subitem: "config_cr" },
     "contas-pagar": { modulo: "financeiro", subitem: "cp_assistente" },

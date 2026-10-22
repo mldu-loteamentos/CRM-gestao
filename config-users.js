@@ -410,7 +410,8 @@ const ConfigUsersApp = {
       name: "Jurídico", icon: "scale", key: "mod_juridico",
       submodules: [{ name: "Jurídico", key: "sub_jur_geral", actions: [
         { id: "cobranca_sub_judice", label: "Cobrança Sub judice", permBase: "sub_fin_cr_sub_judice" },
-        { id: "pagar_reembolso", label: "Pagar reembolso", permBase: "sub_fin_cr_pagar_reembolso" }
+        { id: "pagar_reembolso", label: "Pagar reembolso", permBase: "sub_fin_cr_pagar_reembolso" },
+        { id: "processo_contra", label: "Processo contra", permBase: "sub_jur_geral_processo_contra" }
       ] }]
     },
     {
