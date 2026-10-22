@@ -10472,6 +10472,21 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .orc-dfc-cc td { background: #f8fafc; font-weight: 500; color: #334155; }
 .orc-dfc-neg { color: #991b1b; }
 .orc-dfc-formula .orc-dfc-neg { color: #991b1b; }
+.orc-dfc-saldo td { background: #f0fdf4; font-weight: 800; color: #064e3b; }
+.orc-dfc-saldo td:first-child { background: #f0fdf4; }
+.orc-dfc-saldo-abre,
+.orc-dfc-saldo-btn { border: none; background: transparent; color: #105436; font-weight: 800; cursor: pointer; font-variant-numeric: tabular-nums; padding: 0; text-decoration: underline; text-underline-offset: 2px; }
+.orc-dfc-saldo-btn.is-on { background: #105436; color: #fff; text-decoration: none; border-radius: 4px; padding: 1px 6px; }
+.orc-dfc-quadro { margin-top: 14px; }
+.orc-dfc-quadro h3 { margin: 0 0 4px; color: #105436; font-size: 0.95rem; }
+.orc-dfc-quadro p { margin: 0 0 8px; color: #64748b; font-size: 0.78rem; max-width: 920px; }
+.orc-dfc-quadro-scroll { max-height: 320px; }
+.orc-dfc-quadro-tab { min-width: 640px; }
+.orc-dfc-quadro-tab tfoot td { font-weight: 800; background: #ecfdf5; }
+.orc-dfc-checks { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-bottom: 12px; padding: 10px 12px; background: #fff; border: 1px solid #d1fae5; border-radius: 10px; }
+.orc-dfc-checks p { flex: 1 1 100%; margin: 0 0 4px; }
+.orc-dfc-conta { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: #334155; }
+.orc-dfc-conta.is-fora { color: #94a3b8; }
 .orc-dfc-erro { margin-bottom: 10px; padding: 10px 12px; border-radius: 8px; background: #fff7ed; color: #9a3412; border: 1px solid #fdba74; }
 .orc-dfc-load { padding: 28px 0; }
 .orc-dfc-alerta { width: 280px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px; padding: 12px; }

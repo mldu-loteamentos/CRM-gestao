@@ -1,6 +1,7 @@
 // DFC do orçamento 2027. A visão de receitas (OrcamentoApp) não passa por aqui.
 const OrcamentoDfcApp = {
   LS: "crm_orcamento_dfc_2027",
+  LS_SALDO: "orc_dfc_saldos_contas",
   MESES: ["JAN", "FEV", "MAR", "ABR", "MAI", "JUN", "JUL", "AGO", "SET", "OUT", "NOV", "DEZ"],
   selectedCompanyIds: [],
   selectedCcIds: [],
@@ -794,6 +795,300 @@ const OrcamentoDfcApp = {
     if (document.getElementById("orc-dfc-body")) this.paintBody();
   },
 
+  empresasDoSaldo() {
+    const todas = this.empresas();
+    const sel = this.selectedCompanyIds.map(String);
+    return sel.length ? todas.filter((e) => sel.indexOf(String(e.id)) >= 0) : todas;
+  },
+
+  chaveSaldos() {
+    const ids = this.empresasDoSaldo().map((e) => String(e.id)).sort().join(",");
+    return ids + "|" + this.corteForecast();
+  },
+
+  /* Dia 0 do mês seguinte: 0 = 31/12/2025, 1 = 31/01/2026. */
+  dataSaldo(ano, mes) {
+    const d = new Date(ano, mes, 0);
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return d.getFullYear() + "-" + mm + "-" + dd;
+  },
+
+  dataBr(iso) {
+    const p = String(iso || "").split("-");
+    if (p.length < 3) return iso || "";
+    return p[2] + "/" + p[1] + "/" + p[0];
+  },
+
+  valorSaldo(b) {
+    const list = [b && b.amount, b && b.balance, b && b.balanceAmount, b && b.currentBalance, b && b.lastBalance, b && b.lastBalanceAmount, b && b.availableAmount, b && b.availableBalance, b && b.value];
+    for (let i = 0; i < list.length; i++) {
+      const n = Number(list[i]);
+      if (Number.isFinite(n)) return n;
+    }
+    return null;
+  },
+
+  ehContaAnalise(c) {
+    const nome = this.norm(((c && c.nome) || "") + " " + ((c && c.numero) || ""));
+    const tipo = String((c && c.tipo) || "");
+    if (/MUTUO|JUDICIAL|BLOQUEIO|BLOQ|CHEQUE|EMISSAO|TRANSITOR|REAPROP|ADIANTAMENTO/.test(nome)) return false;
+    if (tipo === "I" || tipo === "A" || /INVEST|APLIC/.test(nome)) return false;
+    return tipo === "B" || tipo === "C" || /CONTA CORRENTE|\bC C\b|\bCAIXA\b/.test(nome);
+  },
+
+  contasEscolhidas() {
+    if (!Array.isArray(this._saldoSel)) {
+      try { this._saldoSel = JSON.parse(localStorage.getItem(this.LS_SALDO) || "null"); } catch (e) { this._saldoSel = null; }
+    }
+    if (Array.isArray(this._saldoSel)) return this._saldoSel.map(String);
+    return (this._saldoContas || []).filter((c) => this.ehContaAnalise(c)).map((c) => c.chave);
+  },
+
+  somaSaldo(data) {
+    const mapa = (this._saldoMap && this._saldoMap[data]) || {};
+    const set = this.contasEscolhidas();
+    let t = 0;
+    set.forEach((k) => { t += Number(mapa[k]) || 0; });
+    return t;
+  },
+
+  resultadoMes(i) {
+    const base = this.base2026();
+    const arr = (base.grupos && (base.grupos.g_10 || base.grupos.g_12)) || [];
+    return Number(arr[i]) || 0;
+  },
+
+  pedirSaldos() {
+    const chave = this.chaveSaldos();
+    if (this._saldoChave === chave && (this._saldoEstado === "ok" || this._saldoEstado === "lendo")) return;
+    this.carregarSaldos();
+  },
+
+  async carregarSaldos() {
+    const api = window.SiengeApiService;
+    const empresas = this.empresasDoSaldo();
+    const corte = this.corteForecast();
+    const chave = this.chaveSaldos();
+    const token = (this._sToken = (this._sToken || 0) + 1);
+    this._saldoChave = chave;
+    if (!empresas.length || corte <= 0) {
+      this._saldoEstado = "vazio";
+      this._saldoContas = [];
+      this._saldoMap = {};
+      return;
+    }
+    if (!api || typeof api.getAccountBalances !== "function") {
+      this._saldoEstado = "erro";
+      this._saldoErro = "A consulta de saldo das contas não está disponível.";
+      return;
+    }
+    this._saldoEstado = "lendo";
+    this._saldoErro = "";
+    this.atualizarSaldosDom();
+    const datas = [];
+    for (let i = 0; i <= corte; i++) datas.push(this.dataSaldo(2026, i));
+    try {
+      const contas = [];
+      const vistos = new Set();
+      if (typeof api.getCheckingAccounts === "function") {
+        await Promise.all(empresas.map(async (emp) => {
+          const res = await api.getCheckingAccounts(emp.id, { allStatuses: true });
+          ((res && res.results) || []).forEach((raw) => {
+            const type = raw && raw.accountType;
+            const typeId = String((type && typeof type === "object" ? type.id : raw.accountTypeId) || "").trim().toUpperCase();
+            const numero = String(raw.accountNumber || raw.number || "").trim();
+            if (!numero) return;
+            const k = String(emp.id) + "|" + numero;
+            if (vistos.has(k)) return;
+            vistos.add(k);
+            contas.push({
+              chave: k,
+              empresa: String(emp.id),
+              numero: numero,
+              nome: String(raw.accountName || raw.name || numero).trim(),
+              tipo: typeId
+            });
+          });
+        }));
+      }
+      const mapa = {};
+      const jobs = [];
+      empresas.forEach((emp) => datas.forEach((dt) => jobs.push({ emp: String(emp.id), dt: dt })));
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < jobs.length) {
+          const job = jobs[cursor++];
+          const lista = await api.getAccountBalances(job.dt, { companyId: job.emp, showLast: true });
+          const dia = mapa[job.dt] || (mapa[job.dt] = {});
+          (lista || []).forEach((b) => {
+            const num = String(b.accountNumber || b.number || "").trim();
+            if (!num) return;
+            const valor = this.valorSaldo(b);
+            if (valor == null) return;
+            const k = job.emp + "|" + num;
+            const dtBal = String(b.balanceDate || "").slice(0, 10);
+            const prev = dia[k];
+            if (!prev || (dtBal && dtBal >= (prev.dt || ""))) dia[k] = { valor: valor, dt: dtBal || job.dt };
+            if (!vistos.has(k)) {
+              vistos.add(k);
+              contas.push({ chave: k, empresa: job.emp, numero: num, nome: num, tipo: "" });
+            }
+          });
+        }
+      };
+      const n = Math.min(4, jobs.length || 1);
+      await Promise.all(Array.from({ length: n }, () => worker()));
+      if (token !== this._sToken) return;
+      const flat = {};
+      Object.keys(mapa).forEach((dt) => {
+        flat[dt] = {};
+        Object.keys(mapa[dt]).forEach((k) => { flat[dt][k] = mapa[dt][k].valor; });
+      });
+      this._saldoContas = contas.sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt"));
+      this._saldoMap = flat;
+      this._saldoEstado = "ok";
+    } catch (e) {
+      if (token !== this._sToken) return;
+      this._saldoEstado = "erro";
+      this._saldoErro = (e && e.message) || "Não consegui ler o saldo das contas.";
+    }
+    this.atualizarSaldosDom();
+  },
+
+  atualizarSaldosDom() {
+    const foot = document.getElementById("orc-dfc-saldo-foot");
+    if (foot) foot.innerHTML = this.htmlSaldos();
+    const box = document.getElementById("orc-dfc-saldos");
+    if (box) box.innerHTML = this.quadroSaldos();
+    this.ligarSaldos(document.getElementById("orc-dfc-body"));
+  },
+
+  mesSaldo() {
+    const corte = this._corte == null ? this.corteForecast() : this._corte;
+    let mes = Number(this._saldoMes);
+    if (!(mes >= 0) || mes >= corte) mes = 0;
+    return mes;
+  },
+
+  verSaldoMes(i) {
+    this._saldoMes = Number(i) || 0;
+    this.atualizarSaldosDom();
+  },
+
+  abrirEscolhaSaldos() {
+    this._saldoPicker = !this._saldoPicker;
+    this.atualizarSaldosDom();
+  },
+
+  toggleSaldoConta(chave, on) {
+    const set = new Set(this.contasEscolhidas());
+    if (on) set.add(String(chave));
+    else set.delete(String(chave));
+    this._saldoSel = Array.from(set);
+    try { localStorage.setItem(this.LS_SALDO, JSON.stringify(this._saldoSel)); } catch (e) {}
+    this._saldoPicker = true;
+    this.atualizarSaldosDom();
+  },
+
+  htmlSaldos() {
+    const corte = this._corte == null ? this.corteForecast() : this._corte;
+    const span = 1 + (this.MESES.length + 1) * 4;
+    if (this._saldoEstado === "lendo") {
+      return `<tr class="orc-dfc-saldo"><td colspan="${span}">Lendo o saldo das contas…</td></tr>`;
+    }
+    if (this._saldoEstado === "erro") {
+      return `<tr class="orc-dfc-saldo"><td colspan="${span}">${this.esc(this._saldoErro || "Não consegui ler o saldo das contas.")}</td></tr>`;
+    }
+    if (this._saldoEstado !== "ok" || corte <= 0) return "";
+    const vazio = `<td class="orc-dfc-sep">—</td><td></td><td></td><td></td>`;
+    const cel = (i, valor, escolhe) => {
+      if (i >= corte) return vazio;
+      const on = this.mesSaldo() === i ? " is-on" : "";
+      const btn = escolhe
+        ? `<button type="button" class="orc-dfc-saldo-btn${on}" data-saldo-mes="${i}">${this.money(valor)}</button>`
+        : this.money(valor);
+      return `<td class="orc-dfc-sep">${btn}</td><td></td><td></td><td></td>`;
+    };
+    const fatia = (i) => {
+      const ini = this.somaSaldo(this.dataSaldo(2026, i));
+      const fim = this.somaSaldo(this.dataSaldo(2026, i + 1));
+      return { ini: ini, fim: fim, variacao: fim - ini };
+    };
+    const linha = (nome, campo, abre) => {
+      const cells = this.MESES.map((_, i) => i >= corte ? vazio : cel(i, fatia(i)[campo], campo !== "variacao")).join("");
+      const ultimo = corte - 1;
+      const a = fatia(0).ini;
+      const b = fatia(ultimo).fim;
+      const tot = campo === "ini" ? a : (campo === "fim" ? b : b - a);
+      const label = abre
+        ? `<button type="button" class="orc-dfc-saldo-abre" data-saldo-abrir="1">Saldo inicial</button>`
+        : nome;
+      return `<tr class="orc-dfc-saldo"><td>${label}</td>${cells}<td class="orc-dfc-sep">${this.money(tot)}</td><td></td><td></td><td></td></tr>`;
+    };
+    const rodape = linha("", "ini", true) + linha("Saldo final", "fim", false) + linha("Variação", "variacao", false);
+    return rodape;
+  },
+
+  quadroSaldos() {
+    const corte = this._corte == null ? this.corteForecast() : this._corte;
+    if (this._saldoEstado !== "ok" || corte <= 0) return "";
+    const mes = this.mesSaldo();
+    const iniData = this.dataSaldo(2026, mes);
+    const fimData = this.dataSaldo(2026, mes + 1);
+    const mapaIni = (this._saldoMap && this._saldoMap[iniData]) || {};
+    const mapaFim = (this._saldoMap && this._saldoMap[fimData]) || {};
+    const escolhidas = new Set(this.contasEscolhidas());
+    const varias = this.empresasDoSaldo().length > 1;
+    const linhas = (this._saldoContas || []).filter((c) => escolhidas.has(c.chave)).map((c) => {
+      const a = Number(mapaIni[c.chave]) || 0;
+      const b = Number(mapaFim[c.chave]) || 0;
+      const nome = (varias ? c.empresa + " · " : "") + c.numero + (c.nome && c.nome !== c.numero ? " " + c.nome : "");
+      return { nome: nome, ini: a, fim: b, variacao: b - a };
+    }).sort((x, y) => String(x.nome).localeCompare(String(y.nome), "pt"));
+    const tot = linhas.reduce((s, r) => ({ ini: s.ini + r.ini, fim: s.fim + r.fim, variacao: s.variacao + r.variacao }), { ini: 0, fim: 0, variacao: 0 });
+    const corpo = linhas.map((r) => `<tr><td>${this.esc(r.nome)}</td><td>${this.money(r.ini)}</td><td>${this.money(r.fim)}</td><td class="${r.variacao < -0.005 ? "orc-dfc-neg" : ""}">${this.money(r.variacao)}</td></tr>`).join("");
+    const checks = this._saldoPicker ? (this._saldoContas || []).map((c) => {
+      const on = escolhidas.has(c.chave);
+      const nome = (varias ? c.empresa + " · " : "") + c.numero + (c.nome && c.nome !== c.numero ? " " + c.nome : "");
+      return `<label class="orc-dfc-conta${this.ehContaAnalise(c) ? "" : " is-fora"}"><input type="checkbox" data-saldo-conta="${this.esc(c.chave)}" ${on ? "checked" : ""}> ${this.esc(nome)}</label>`;
+    }).join("") : "";
+    const resultado = this.resultadoMes(mes);
+    return `<section class="orc-dfc-quadro">
+      ${this._saldoPicker ? `<div class="orc-dfc-checks"><p>Contas usadas no saldo. A marca entra na soma de todos os meses.</p>${checks || "<span>Nenhuma conta voltou da consulta.</span>"}</div>` : ""}
+      <h3>Contas em ${this.MESES[mes]} de 2026</h3>
+      <p>Início em ${this.dataBr(iniData)} e fim em ${this.dataBr(fimData)}. A variação é o saldo final menos o saldo inicial. A geração do resultado deste mês no DFC foi ${this.money(resultado)}.</p>
+      <div class="orc-dfc-scroll orc-dfc-quadro-scroll">
+        <table class="orc-dfc-table orc-dfc-quadro-tab">
+          <thead><tr><th>Conta</th><th>Saldo em ${this.dataBr(iniData)}</th><th>Saldo em ${this.dataBr(fimData)}</th><th>Variação</th></tr></thead>
+          <tbody>${corpo || `<tr><td colspan="4">Nenhuma conta marcada. Clique em Saldo inicial para escolher.</td></tr>`}</tbody>
+          <tfoot><tr><td>Total</td><td>${this.money(tot.ini)}</td><td>${this.money(tot.fim)}</td><td class="${tot.variacao < -0.005 ? "orc-dfc-neg" : ""}">${this.money(tot.variacao)}</td></tr></tfoot>
+        </table>
+      </div>
+    </section>`;
+  },
+
+  ligarSaldos(raiz) {
+    const box = raiz || document.getElementById("orc-dfc-body");
+    if (!box) return;
+    const self = this;
+    box.querySelectorAll("[data-saldo-mes]").forEach((btn) => {
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        self.verSaldoMes(btn.getAttribute("data-saldo-mes"));
+      });
+    });
+    box.querySelectorAll("[data-saldo-abrir]").forEach((btn) => {
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        self.abrirEscolhaSaldos();
+      });
+    });
+    box.querySelectorAll("[data-saldo-conta]").forEach((inp) => {
+      inp.addEventListener("change", () => self.toggleSaldoConta(inp.getAttribute("data-saldo-conta"), inp.checked));
+    });
+  },
+
   paintMeta(src) {
     const el = document.getElementById("orc-dfc-meta");
     if (!el) return;
@@ -995,11 +1290,15 @@ const OrcamentoDfcApp = {
         <table class="orc-dfc-table orc-dfc-cmp">
           <thead><tr><th rowspan="2">Conta</th>${h1}</tr><tr>${h2}</tr></thead>
           <tbody>${trs}</tbody>
+          <tfoot id="orc-dfc-saldo-foot">${this.htmlSaldos()}</tfoot>
         </table>
-      </div>`;
+      </div>
+      <div id="orc-dfc-saldos">${this.quadroSaldos()}</div>`;
     body.querySelectorAll("[data-dfc-id]").forEach((tr) => {
       tr.addEventListener("click", () => this.toggle(tr.getAttribute("data-dfc-id")));
     });
+    this.ligarSaldos(body);
+    this.pedirSaldos();
     if (foraEl) {
       if (!fora.length) {
         foraEl.innerHTML = "";

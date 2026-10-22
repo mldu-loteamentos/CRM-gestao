@@ -22301,9 +22301,11 @@ window.syncDistratoPermutaUi = function() {
   if (typeof window.syncDistratoTipoUi === "function") window.syncDistratoTipoUi();
 };
 
-const DIST_ABAS = ["resumo", "calculo", "negociacao", "bancarios", "testemunhas"];
+const DIST_ABAS = ["resumo", "calculo", "bancarios", "testemunhas"];
 
 window.setDistratoAba = function(aba) {
+  const irNegociacao = aba === "negociacao";
+  if (aba === "negociacao") aba = "calculo";
   if (!DIST_ABAS.includes(aba)) aba = "resumo";
   window._distAba = aba;
   document.querySelectorAll("#dist-abas .ml-tab").forEach((b) => {
@@ -22314,8 +22316,12 @@ window.setDistratoAba = function(aba) {
   document.querySelectorAll("#dist-layout-container .dist-aba-pane").forEach((p) => {
     p.hidden = p.dataset.distAba !== aba;
   });
-  const abas = document.getElementById("dist-abas");
-  if (abas && abas.getBoundingClientRect().top < 0) abas.scrollIntoView({ block: "start" });
+  const alvo = irNegociacao ? document.getElementById("dist-negociacao") : null;
+  if (alvo) alvo.scrollIntoView({ block: "start" });
+  else {
+    const abas = document.getElementById("dist-abas");
+    if (abas && abas.getBoundingClientRect().top < 0) abas.scrollIntoView({ block: "start" });
+  }
 };
 
 window.distratoAbaPasso = function(delta) {
