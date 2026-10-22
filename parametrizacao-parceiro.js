@@ -266,6 +266,38 @@ const ParametrizacaoParceiroApp = {
     return socio ? "sócio" : "parceiro";
   },
 
+  /* Credor do Sienge → centro de custo da empresa 13. */
+  CENTROS_SOCIOS_13: {
+    "1806": ["71301", "ELLENCO & MOURA LEITE BOITUVA EMPREENDIMENTO IMOBILIÁRIO SPE LTDA"],
+    "2043": ["71302", "MARIO VERCELLINO NETO"],
+    "2046": ["71303", "NORBERTO VERCELLINO"],
+    "2044": ["71304", "FERNANDO VERCELLINO"],
+    "2045": ["71305", "MARIA REGINA VERCELLINO"],
+    "2047": ["71306", "VERA LUCIA VERCELLINO"],
+    "2048": ["71307", "NATASHA MOREIRA MORAES VERCELLINO"],
+    "2049": ["71308", "VITOR SOARES VERCELLINO"],
+    "2052": ["71309", "LUIS GUSTAVO VERCELLINO RODRIGUES"],
+    "2051": ["71310", "EDGAR TADEU VERCELLINO RODRIGUES"],
+    "2050": ["71311", "DANIEL FILIPE VERCELLINO RODRIGUES"],
+    "2054": ["71312", "CARLOS EDUARDO VERCELLINO RODRIGUES"],
+    "2055": ["71313", "MAISA MAGORDO RODRIGUES"],
+    "2053": ["71314", "PEDRO ADEMIR PRESTES"]
+  },
+
+  vincularCentrosEmpresa13(p) {
+    if (!p || String(p.companyId) !== "13" || !this.isSociedade(p)) return false;
+    let mudou = false;
+    (p.socios || []).forEach((s) => {
+      if (!s || s.ccTitulo) return;
+      const par = this.CENTROS_SOCIOS_13[String(s.id)];
+      if (!par) return;
+      s.ccTitulo = par[0];
+      s.ccTituloNome = par[1];
+      mudou = true;
+    });
+    return mudou;
+  },
+
   VERCELLINO_SOCIOS: [
     { id: "1806", name: "ELLENCO & MOURA LEITE BOITUVA EMPREENDIMENTO IMOBILIÁRIO SPE LTDA", sharePct: 55.498 },
     { id: "2044", name: "FERNANDO VERCELLINO", sharePct: 6.179 },
@@ -353,7 +385,9 @@ const ParametrizacaoParceiroApp = {
         planoNome: pl.nome,
         pctPlano,
         pctSocio: socioPct,
-        efetivo
+        efetivo,
+        ccId: String((s && s.ccTitulo) || ""),
+        ccNome: String((s && s.ccTituloNome) || "")
       };
     });
   },
@@ -903,6 +937,7 @@ const ParametrizacaoParceiroApp = {
     let semeou = false;
     this.items.forEach(p => { if (this.aplicarSociosVercellino(p)) semeou = true; });
     this.items.forEach(p => { if (this.corrigirEmpresaEllenco(p)) semeou = true; });
+    this.items.forEach(p => { if (this.vincularCentrosEmpresa13(p)) semeou = true; });
     if (semeou) this.persist();
     if (this.items.length && !this.selectedId) this.selectedId = this.items[0].id;
     const cur = this.current();
@@ -1223,9 +1258,25 @@ const ParametrizacaoParceiroApp = {
     if (!row) return;
     const v = String(valor || "");
     if (campo === "cc") {
-      const cc = this.centrosDaEmpresa(p.companyId).find((c) => String(c.id) === v);
-      row.ccTitulo = cc ? String(cc.id) : "";
-      row.ccTituloNome = cc ? String(cc.name || cc.nome || "") : "";
+      if (!v) {
+        row.ccTitulo = "";
+        row.ccTituloNome = "";
+      } else {
+        const cc = this.centrosDaEmpresa(p.companyId).find((c) => String(c.id) === v);
+        const conhecido = this.CENTROS_SOCIOS_13[String(row.id)];
+        if (cc) {
+          row.ccTitulo = String(cc.id);
+          row.ccTituloNome = String(cc.name || cc.nome || "");
+        } else if (conhecido && conhecido[0] === v) {
+          row.ccTitulo = conhecido[0];
+          row.ccTituloNome = conhecido[1];
+        } else if (String(row.ccTitulo) === v) {
+          /* o nome já está no sócio */
+        } else {
+          this.renderKeepScroll();
+          return;
+        }
+      }
     } else if (campo === "plano") {
       if (!v) {
         row.planoId = "";
@@ -1292,7 +1343,7 @@ const ParametrizacaoParceiroApp = {
   },
 
   fecharVinculo() {
-    this.vinculoUi = { socioId: String(this.socioAberto || ""), planoOpen: false, planoQuery: "", docOpen: false, docQuery: "", planos: {} };
+    this.vinculoUi = { socioId: String(this.socioAberto || ""), ccOpen: false, ccQuery: "", planoOpen: false, planoQuery: "", docOpen: false, docQuery: "", planos: {} };
   },
 
   uiPlano(idx) {
@@ -1305,6 +1356,8 @@ const ParametrizacaoParceiroApp = {
 
   fecharPlanosUi() {
     const ui = this.uiVinculo();
+    ui.ccOpen = false;
+    ui.ccQuery = "";
     ui.planoOpen = false;
     ui.planoQuery = "";
     ui.docOpen = false;
@@ -1445,6 +1498,38 @@ const ParametrizacaoParceiroApp = {
     };
   },
 
+  itensCentro(p, s) {
+    const items = this.centrosDaEmpresa(p && p.companyId).map((c) => ({
+      id: String(c.id),
+      name: String(c.name || c.nome || "")
+    }));
+    const id = String((s && s.ccTitulo) || "");
+    if (id && !items.some((i) => i.id === id)) items.unshift({ id, name: String((s && s.ccTituloNome) || "") });
+    return items;
+  },
+
+  opcoesCentro(p, s) {
+    const ui = this.uiVinculo();
+    return {
+      id: "pp-vinculo-cc",
+      label: "Centro de custo",
+      items: this.itensCentro(p, s),
+      selectedIds: s && s.ccTitulo ? [String(s.ccTitulo)] : [],
+      open: !!ui.ccOpen,
+      query: ui.ccQuery || "",
+      single: true,
+      emptyMeansAll: false,
+      emptyLabel: "Escolha o centro de custo",
+      extraClass: "pp-vinculo-filtro",
+      nouns: {
+        singular: "centro de custo",
+        plural: "centros de custo",
+        none: "Nenhum centro de custo desta empresa",
+        noMatch: "Nenhum centro com esse nome."
+      }
+    };
+  },
+
   opcoesPlanoSocio(s, idx) {
     const planos = this.normalizarPlanos(s);
     const plano = planos[idx] || { id: "", nome: "", pct: "" };
@@ -1525,10 +1610,12 @@ const ParametrizacaoParceiroApp = {
     const avisoPlano = this.loadingCats ? "Carregando o plano financeiro…" : (this.planosSaida().length ? "" : "Nenhuma conta de resultado de saída carregada.");
     const avisoDoc = this.documentosTitulo().length ? "" : "Os tipos de documento ainda não carregaram.";
     const regra = sociedade
-      ? "Cada plano gera um título. O percentual do plano vale sobre a participação do sócio: 70% e 30% de quem tem 50% do negócio são 35% e 15%."
+      ? "O título sai no centro de custo deste sócio, no plano financeiro escolhido. Cada plano gera um título. O percentual do plano vale sobre a participação do sócio: 70% e 30% de quem tem 50% do negócio são 35% e 15%."
       : "O plano financeiro e o tipo de documento identificam esse título no contas a pagar. Só entra conta de resultado de saída, com código que começa com 2. O título ainda não é gerado nesta tela.";
+    const centro = sociedade && F ? F.html(this.opcoesCentro(p, s)) : "";
     return `<div style="margin-top:12px;">
       <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:8px;">Título a pagar deste credor</div>
+      ${sociedade ? `<div class="pp-vinculo-filtros" style="margin-bottom:10px;"><div id="pp-vinculo-cc-slot" class="pp-vinculo-slot">${centro}</div></div>` : ""}
       ${sociedade ? this.planosSocioHtml(p, s) : `<div class="pp-vinculo-filtros"><div id="pp-vinculo-plano-slot" class="pp-vinculo-slot">${plano}</div></div>`}
       <div class="pp-vinculo-filtros" style="margin-top:10px;">
         <div id="pp-vinculo-doc-slot" class="pp-vinculo-slot">${doc}</div>
@@ -1546,22 +1633,28 @@ const ParametrizacaoParceiroApp = {
 
   pintarVinculo(campo, idx) {
     const s = this.socioVinculoAberto();
-    const slotId = campo === "plano"
-      ? (idx == null ? "pp-vinculo-plano-slot" : "pp-vinculo-plano-" + idx + "-slot")
-      : "pp-vinculo-doc-slot";
+    const slotId = campo === "cc" ? "pp-vinculo-cc-slot"
+      : (campo === "plano"
+        ? (idx == null ? "pp-vinculo-plano-slot" : "pp-vinculo-plano-" + idx + "-slot")
+        : "pp-vinculo-doc-slot");
     const slot = document.getElementById(slotId);
     if (!slot || !s || !window.MlEmpresaFilter) return;
-    const opts = campo === "plano" && idx != null ? this.opcoesPlanoSocio(s, idx) : this.opcoesVinculo(campo, s);
+    const p = this.current();
+    const opts = campo === "cc" ? this.opcoesCentro(p, s)
+      : (campo === "plano" && idx != null ? this.opcoesPlanoSocio(s, idx) : this.opcoesVinculo(campo, s));
     slot.innerHTML = MlEmpresaFilter.html(opts);
     if (window.lucide && lucide.createIcons) lucide.createIcons();
   },
 
   pintarVinculoLista(campo, idx) {
     const s = this.socioVinculoAberto();
-    const id = campo === "plano" ? (idx == null ? "pp-vinculo-plano" : "pp-vinculo-plano-" + idx) : "pp-vinculo-doc";
+    const id = campo === "cc" ? "pp-vinculo-cc"
+      : (campo === "plano" ? (idx == null ? "pp-vinculo-plano" : "pp-vinculo-plano-" + idx) : "pp-vinculo-doc");
     const el = document.getElementById(id + "-list");
     if (!el || !s || !window.MlEmpresaFilter) return;
-    const opts = campo === "plano" && idx != null ? this.opcoesPlanoSocio(s, idx) : this.opcoesVinculo(campo, s);
+    const p = this.current();
+    const opts = campo === "cc" ? this.opcoesCentro(p, s)
+      : (campo === "plano" && idx != null ? this.opcoesPlanoSocio(s, idx) : this.opcoesVinculo(campo, s));
     el.innerHTML = MlEmpresaFilter.listHtml(opts);
   },
 
@@ -1582,32 +1675,24 @@ const ParametrizacaoParceiroApp = {
     const p = this.current();
     const varios = !!(s && p && this.isSociedade(p));
     const campos = varios
-      ? this.normalizarPlanos(s).map((_, idx) => ({ campo: "plano", idx }))
+      ? [{ campo: "cc", idx: null }].concat(this.normalizarPlanos(s).map((_, idx) => ({ campo: "plano", idx })))
       : [{ campo: "plano", idx: null }];
     campos.push({ campo: "doc", idx: null });
     campos.forEach(({ campo, idx }) => {
-      const id = campo === "plano" ? (idx == null ? "pp-vinculo-plano" : "pp-vinculo-plano-" + idx) : "pp-vinculo-doc";
+      const id = campo === "cc" ? "pp-vinculo-cc"
+        : (campo === "plano" ? (idx == null ? "pp-vinculo-plano" : "pp-vinculo-plano-" + idx) : "pp-vinculo-doc");
       if (!document.getElementById(id)) return;
       MlEmpresaFilter.bind(id, {
         toggleOpen() {
           const ui = self.uiVinculo();
-          if (campo === "doc") {
-            const aberto = !ui.docOpen;
-            self.fecharPlanosUi();
-            ui.docOpen = aberto;
-            self.pintarPlanosSocio();
-            self.pintarVinculo("doc");
-            if (aberto) {
-              const q = document.getElementById(id + "-search");
-              if (q && q.focus) q.focus();
-            }
-            return;
-          }
-          const estado = idx == null ? ui : self.uiPlano(idx);
-          const aberto = idx == null ? !ui.planoOpen : !estado.open;
+          const abertoAntes = campo === "cc" ? !!ui.ccOpen : (campo === "doc" ? !!ui.docOpen : (idx == null ? !!ui.planoOpen : !!self.uiPlano(idx).open));
           self.fecharPlanosUi();
-          if (idx == null) ui.planoOpen = aberto;
+          const aberto = !abertoAntes;
+          if (campo === "cc") ui.ccOpen = aberto;
+          else if (campo === "doc") ui.docOpen = aberto;
+          else if (idx == null) ui.planoOpen = aberto;
           else self.uiPlano(idx).open = aberto;
+          if (document.getElementById("pp-vinculo-cc-slot")) self.pintarVinculo("cc");
           self.pintarPlanosSocio();
           self.pintarVinculo("doc");
           if (aberto) {
@@ -1617,6 +1702,12 @@ const ParametrizacaoParceiroApp = {
         },
         close() {
           const ui = self.uiVinculo();
+          if (campo === "cc") {
+            if (!ui.ccOpen) return;
+            ui.ccOpen = false;
+            self.pintarVinculo("cc");
+            return;
+          }
           if (campo === "doc") {
             if (!ui.docOpen) return;
             ui.docOpen = false;
@@ -1635,6 +1726,11 @@ const ParametrizacaoParceiroApp = {
           self.pintarVinculo("plano", idx);
         },
         setQuery(q) {
+          if (campo === "cc") {
+            self.uiVinculo().ccQuery = q || "";
+            self.pintarVinculoLista("cc");
+            return;
+          }
           if (campo === "doc") {
             self.uiVinculo().docQuery = q || "";
             self.pintarVinculoLista("doc");
@@ -1683,6 +1779,7 @@ const ParametrizacaoParceiroApp = {
       }
       p.socios = p.socios || [];
       p.socios.push(this.blankSocio({ id, name, cpfCnpj: doc, sharePct: "" }));
+      this.vincularCentrosEmpresa13(p);
       this.socioAberto = String(id);
       this.creditorQuery = "";
       this.creditorHits = [];
@@ -2517,7 +2614,7 @@ const ParametrizacaoParceiroApp = {
           <span style="width:16px;color:#065f46;font-weight:800;">${aberto ? "▾" : "▸"}</span>
           <span style="min-width:0;flex:1;">
             <span style="display:block;font-weight:800;color:#065f46;">${this.esc(s.name)}</span>
-            <span style="display:block;font-size:0.75rem;color:#047857;margin-top:2px;">ID ${this.esc(s.id)}${s.cpfCnpj ? " · " + this.esc(s.cpfCnpj) : ""}${this.resumoPlanosSocio(p, s)}${s.docTipo ? " · " + this.esc(s.docTipo) : ""}</span>
+            <span style="display:block;font-size:0.75rem;color:#047857;margin-top:2px;">ID ${this.esc(s.id)}${s.cpfCnpj ? " · " + this.esc(s.cpfCnpj) : ""}${s.ccTitulo ? " · " + this.esc(s.ccTitulo) : ""}${this.resumoPlanosSocio(p, s)}${s.docTipo ? " · " + this.esc(s.docTipo) : ""}</span>
           </span>
           ${pctTxt ? `<span style="font-weight:800;color:#105436;font-variant-numeric:tabular-nums;">${this.esc(pctTxt)}</span>` : ""}
         </button>
@@ -2539,10 +2636,10 @@ const ParametrizacaoParceiroApp = {
       <div class="crm-card" style="padding:16px;">
         <h3 style="margin:0 0 4px;font-size:0.95rem;color:var(--color-primary);">${pessoas} (credores)</h3>
         <p style="margin:0 0 12px;font-size:0.78rem;color:#64748b;">${divideFatia
-          ? `Cada ${pessoa} é um credor do Sienge. O percentual da obra já está configurado. Aqui entra a parte de cada um nessa fatia: 50% de 36% são 18%.`
+          ? `Cada ${pessoa} é um credor do Sienge. O percentual da obra já está configurado. Aqui entra a parte de cada um nessa fatia: 50% de 36% são 18%. No credor ficam o plano financeiro e o tipo de documento do repasse. O centro de custo é o do loteador.`
           : (sociedade
-            ? `Cada ${pessoa} é um credor do Sienge, com o percentual de participação.`
-            : `Cada ${pessoa} é um credor do Sienge. O percentual fica na obra, como já está configurado.`)} No credor ficam o plano financeiro e o tipo de documento do repasse. O centro de custo é o do loteador.</p>
+            ? `Cada ${pessoa} é um credor do Sienge, com o percentual de participação. No credor ficam o centro de custo, o plano financeiro desse centro e o tipo de documento.`
+            : `Cada ${pessoa} é um credor do Sienge. O percentual fica na obra, como já está configurado. No credor ficam o plano financeiro e o tipo de documento do repasse. O centro de custo é o do loteador.`)}</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
           <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;min-width:120px;">
             <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;">${pessoas}</div>
