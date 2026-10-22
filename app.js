@@ -8592,11 +8592,17 @@ window.getRecenteJuridicoAgingHtml = function(client, diffDays) {
   </span>`;
 };
 
-window.getAnaliseInternaJuridicoAgingHtml = function(client) {
+window.getAnaliseInternaJuridicoAgingHtml = function(client, webro) {
   const days = Number(client && client.maxDaysDelay) || 0;
   const dayLabel = days + " dia" + (days === 1 ? "" : "s");
-  return `<span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #a78bfa; background-color: #ede9fe; color: #5b21b6; font-weight: 600;" title="Análise Interna Jurídico: permanece com o operador interno da cidade. O back office (Lucelia) visualiza o grupo ao filtrar pelo próprio nome, sem assumir a tag de responsável.">
-    <i data-lucide="message-circle" style="width: 14px; height: 14px;"></i> Análise Interna Jurídico - ${dayLabel}
+  const titulo = webro
+    ? "Análise Interna Jurídico com boleto Webro. Permanece com o operador interno da cidade."
+    : "Análise Interna Jurídico: permanece com o operador interno da cidade. O back office (Lucelia) visualiza o grupo ao filtrar pelo próprio nome, sem assumir a tag de responsável.";
+  const classe = webro ? ' class="tag-boleto-webro"' : "";
+  const estilo = webro ? "" : ' style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #a78bfa; background-color: #ede9fe; color: #5b21b6; font-weight: 600;"';
+  const icone = webro ? "banknote" : "message-circle";
+  return `<span${classe}${estilo} title="${titulo}">
+    <i data-lucide="${icone}" style="width: 14px; height: 14px;"></i> Análise Interna Jurídico - ${dayLabel}
   </span>`;
 };
 
@@ -12119,8 +12125,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
                     && typeof window.getEntradaWebroAgingHtml === "function") {
                       if (typeof window.clientIsAnaliseInternaJuridico === "function" && window.clientIsAnaliseInternaJuridico(client, thresholdJuridico)
                         && typeof window.getAnaliseInternaJuridicoAgingHtml === "function") {
-                          const webroTag = typeof window.webroBoletoTagHtml === "function" ? window.webroBoletoTagHtml() : "";
-                          return window.getAnaliseInternaJuridicoAgingHtml(client) + webroTag;
+                          return window.getAnaliseInternaJuridicoAgingHtml(client, true);
                       }
                       return window.getEntradaWebroAgingHtml(client);
                   }
@@ -19356,6 +19361,7 @@ function calculateRenegotiation() {
     calcValEl.textContent = '–';
     if (sinalSummaryEl) sinalSummaryEl.textContent = '–';
     if (scheduleBody) scheduleBody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--color-text-muted); padding:12px; font-size:0.78rem;">Selecione ao menos uma parcela.</td></tr>';
+    renegPreencherFaixasMantidas([]);
     return;
   }
   
@@ -19781,7 +19787,7 @@ function calculateRenegotiation() {
           if (soma) diluidasResumo.push({ original, total, data: dataParcela(bill) });
           else {
             greenMantidasCount++;
-            mantidasResumo.push({ original, data: dataParcela(bill) });
+            mantidasResumo.push({ original, total, data: dataParcela(bill) });
           }
           const badge = soma
             ? "background:rgba(239,68,68,0.1);color:var(--color-danger);"
@@ -19893,9 +19899,8 @@ function calculateRenegotiation() {
 
   // Diluir e somar: o resumo mostra o contrato novo (sinal, parcelas com período e valor, composição de cada parcela).
   const greenExtraRowEl = document.getElementById("reneg-green-extra-row");
-  const greenExtraLabelEl = document.getElementById("reneg-green-extra-label");
-  const greenExtraValEl = document.getElementById("reneg-green-extra-val");
   if (greenExtraRowEl) greenExtraRowEl.style.display = "none";
+  renegPreencherFaixasMantidas([]);
   if ((cenario === "diluir" || cenario === "somar") && diluidasResumo.length) {
     const faixa = (vals) => {
       const mi = Math.min(...vals);
@@ -19920,10 +19925,8 @@ function calculateRenegotiation() {
     if (greenAcordoValEl) greenAcordoValEl.textContent = valorCada(diluidasResumo.map((d) => d.total));
     if (greenMantidasLabelEl) greenMantidasLabelEl.textContent = `Cada ${nome}: original + acréscimo`;
     if (greenMantidasValEl) greenMantidasValEl.textContent = `${faixa(diluidasResumo.map((d) => d.original))} + ${fmt(installmentValue)}`;
-    if (cenario === "somar" && mantidasResumo.length && greenExtraRowEl) {
-      greenExtraRowEl.style.display = "flex";
-      if (greenExtraLabelEl) greenExtraLabelEl.textContent = periodo(mantidasResumo, "mantida");
-      if (greenExtraValEl) greenExtraValEl.textContent = valorCada(mantidasResumo.map((d) => d.original));
+    if (cenario === "somar" && mantidasResumo.length) {
+      renegPreencherFaixasMantidas(mantidasResumo);
     }
   }
 
@@ -20193,9 +20196,14 @@ window.carregarRenegPropostas = function(force) {
     const snap = await fc.getDocs(fc.collection(window.firebaseDb, "reneg_propostas"));
     const hoje = renegIsoHoje();
     const vencer = [];
+    const apagarTeste = [];
     snap.forEach(function(d) {
       const data = d.data() || {};
       data.id = d.id;
+      if (renegPropostaTeste15479(d.id, data)) {
+        apagarTeste.push(d.id);
+        return;
+      }
       const limite = String(data.expiraEm || renegIsoMaisDias(data.sinalDue, 2) || "");
       if (!data.sinalPago && data.status !== "concluida" && data.status !== "expirada" && limite && hoje > limite) {
         data.status = "expirada";
@@ -20205,6 +20213,9 @@ window.carregarRenegPropostas = function(force) {
     });
     window._renegPropostasMap = map;
     window._renegPropostasEm = Date.now();
+    apagarTeste.forEach(function(id) {
+      if (fc.deleteDoc) fc.deleteDoc(fc.doc(window.firebaseDb, "reneg_propostas", id)).catch(function() {});
+    });
     vencer.forEach(function(id) {
       const ref = fc.doc(window.firebaseDb, "reneg_propostas", id);
       fc.setDoc(ref, { status: "expirada", expiradaEm: new Date().toISOString() }, { merge: true }).catch(function() {});
@@ -20688,6 +20699,52 @@ function renegTxtEl(id) {
   return el ? String(el.textContent || "").replace(/\s+/g, " ").trim() : "";
 }
 
+function renegFaixasConsecutivas(lista) {
+  const faixas = [];
+  (lista || []).forEach(function(item) {
+    const valor = Number(item && (item.total != null ? item.total : item.original)) || 0;
+    const ult = faixas[faixas.length - 1];
+    if (ult && Math.abs(ult.valor - valor) < 0.005) {
+      ult.fim = item.data;
+      ult.qtd += 1;
+    } else {
+      faixas.push({ valor: valor, inicio: item.data, fim: item.data, qtd: 1 });
+    }
+  });
+  return faixas;
+}
+
+function renegTextoFaixa(f) {
+  const valor = (Number(f.valor) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  if (f.qtd === 1) return "1 parcela de " + valor + " em " + (f.inicio || "—");
+  return f.qtd + " parcelas de " + valor + " de " + (f.inicio || "—") + " até " + (f.fim || f.inicio || "—");
+}
+
+function renegPreencherFaixasMantidas(lista) {
+  const el = document.getElementById("reneg-green-faixas");
+  if (!el) return;
+  const faixas = renegFaixasConsecutivas(lista);
+  if (!faixas.length) {
+    el.style.display = "none";
+    el.innerHTML = "";
+    return;
+  }
+  el.style.display = "flex";
+  el.innerHTML = faixas.map(function(f) {
+    const valor = (Number(f.valor) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    return '<div class="reneg-faixa" style="display:flex; justify-content:space-between; gap:8px; font-size:0.85rem; color:#1b5e20; font-weight:500;"><span>' + renegTextoFaixa(f) + '</span><span>' + valor + '</span></div>';
+  }).join("");
+}
+
+function renegPropostaTeste15479(id, data) {
+  const sale = String((data && data.saleId) || "");
+  const num = sale.replace(/^B-/i, "").split("-")[0].replace(/\D/g, "");
+  const idNum = String(id || "").split("_").pop().replace(/^B-/i, "").replace(/\D/g, "");
+  if (num !== "15479" && idNum !== "15479") return false;
+  const criada = String((data && data.createdAt) || "");
+  return !criada || criada <= "2026-10-22T23:59:59";
+}
+
 function baixarPropostaAcordoPdf(results, nomeArquivo) {
   if (!window.jspdf || !window.jspdf.jsPDF) throw new Error("gerador de PDF indisponível");
   const { jsPDF } = window.jspdf;
@@ -20700,8 +20757,6 @@ function baixarPropostaAcordoPdf(results, nomeArquivo) {
   const unit = (window.AppState && AppState.units && sale.unitId && AppState.units[sale.unitId]) || {};
   const sit = renegSituacaoContrato(sale);
   const info = renegInfoReajuste(sale);
-  const abertas = renegLerQuadroAberto(info);
-  const agenda = renegLerAgenda();
   const sinalData = renegIsoBr(results.sinalDueStr);
   const expira = renegIsoBr(renegIsoMaisDias(results.sinalDueStr, 2));
   const contrato = [sale.documentId, sale.documentNumber].filter(Boolean).join("") || sale.id || "";
@@ -20735,124 +20790,139 @@ function baixarPropostaAcordoPdf(results, nomeArquivo) {
     y += 4;
   });
 
-  const garantir = (altura) => {
-    if (y + altura > 286) {
-      pdf.addPage();
-      y = 12;
-    }
-  };
-  const secao = (titulo) => {
-    garantir(10);
+  y += 2;
+  const pctPago = sit.original > 0.009 ? Math.max(0, Math.min(1, sit.pago / sit.original)) : 0;
+  const qtdContrato = (sit.qtdParcelasPagas || 0) + (sit.qtdVencidas || 0) + (sit.qtdAVencer || 0);
+  const totalContrato = (sit.liquido || 0) + (sit.valorVencidas || 0) + (sit.valorAVencer || 0);
+  const kpis = [
+    { titulo: "Valores pagos", qtd: (sit.qtdParcelasPagas || 0) + " parc.", valor: brl(sit.liquido), det: "Orig. " + brl(sit.pago) + " + Acrésc. " + brl(sit.juros) + " - Desc. " + brl(sit.desconto), cor: [16, 84, 54], fundo: [255, 255, 255] },
+    { titulo: "Valores vencidos", qtd: (sit.qtdVencidas || 0) + " parc.", valor: brl(sit.valorVencidas), det: "", cor: [230, 81, 0], fundo: [255, 243, 224] },
+    { titulo: "Valores a vencer", qtd: (sit.qtdAVencer || 0) + " parc.", valor: brl(sit.valorAVencer), det: "", cor: [25, 118, 210], fundo: [255, 255, 255] },
+    { titulo: "Total contrato", qtd: qtdContrato + " parc.", valor: brl(totalContrato), det: "", cor: [16, 84, 54], fundo: [255, 255, 255] }
+  ];
+  const cardW = 36;
+  const cardH = 28;
+  kpis.forEach(function(k, i) {
+    const x = m + i * (cardW + 2);
+    pdf.setFillColor(k.fundo[0], k.fundo[1], k.fundo[2]);
+    pdf.rect(x, y, cardW, cardH, "F");
+    pdf.setDrawColor(k.cor[0], k.cor[1], k.cor[2]);
+    pdf.setLineWidth(0.6);
+    pdf.line(x, y, x, y + cardH);
+    pdf.setLineWidth(0.2);
+    pdf.setDrawColor(226, 232, 240);
+    pdf.rect(x, y, cardW, cardH);
     pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(10);
-    pdf.setTextColor(16, 84, 54);
-    pdf.text(titulo, m, y + 5);
-    y += 7;
-  };
-  const tabela = (opts) => {
-    if (typeof pdf.autoTable !== "function") return false;
-    garantir(16);
-    pdf.autoTable(Object.assign({
-      startY: y,
-      margin: { left: m, right: m, top: 12, bottom: 12 },
-      theme: "grid",
-      styles: { fontSize: 7, cellPadding: 1, textColor: [15, 23, 42], overflow: "linebreak" },
-      headStyles: { fillColor: [16, 84, 54], textColor: 255, fontStyle: "bold", fontSize: 7 },
-      showHead: "everyPage"
-    }, opts));
-    y = pdf.lastAutoTable.finalY + 3;
-    return true;
-  };
-
-  secao("Como está hoje");
-  const pagos = [["Parcelas pagas", String(sit.qtdParcelasPagas || 0)], ["Recebido", brl(sit.pago)]];
-  if ((sit.juros || 0) > 0.009) pagos.push(["Juros", brl(sit.juros)]);
-  if ((sit.desconto || 0) > 0.009) pagos.push(["Desconto", brl(sit.desconto)]);
-  tabela({
-    head: [["", ""]],
-    body: pagos,
-    columnStyles: { 1: { halign: "right", fontStyle: "bold" } },
-    tableWidth: 78
-  });
-
-  secao("Parcelas em aberto");
-  tabela({
-    head: [["Nº", "Vencimento", "ID", "Indexador", "Principal", "Corrigido", "Marcada"]],
-    body: abertas.map((l) => [l.num, l.venc, l.id || "—", l.indice || "—", l.principal, l.corrigido, l.marcada ? "Sim" : ""]),
-    headStyles: { fillColor: [230, 81, 0], textColor: 255, fontStyle: "bold", fontSize: 7 },
-    columnStyles: { 4: { halign: "right" }, 5: { halign: "right" }, 6: { halign: "center" } },
-    didParseCell: (data) => {
-      if (data.section !== "body") return;
-      const linha = abertas[data.row.index];
-      if (linha && linha.vencida) data.cell.styles.fillColor = [255, 243, 224];
+    pdf.setFontSize(6);
+    pdf.setTextColor(k.cor[0], k.cor[1], k.cor[2]);
+    pdf.text(k.titulo.toUpperCase(), x + 2, y + 4);
+    pdf.setTextColor(15, 23, 42);
+    pdf.setFontSize(7);
+    pdf.text(k.qtd, x + 2, y + 9);
+    pdf.setFontSize(7.5);
+    pdf.text(k.valor, x + 2, y + 14);
+    if (k.det) {
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(4.5);
+      pdf.setTextColor(100, 116, 139);
+      pdf.text(pdf.splitTextToSize(k.det, cardW - 3), x + 2, y + 18);
     }
   });
-  const rodapeAberto = [
+  const gx = m + 4 * (cardW + 2) + 14;
+  const gy = y + 18;
+  const gr = 12;
+  pdf.setLineWidth(1.6);
+  for (let i = 0; i < 36; i++) {
+    const a1 = Math.PI * (1 - i / 36);
+    const a2 = Math.PI * (1 - (i + 1) / 36);
+    const ligado = ((i + 0.5) / 36) <= pctPago + 0.0001;
+    const t = (i + 0.5) / 36;
+    const cor = ligado ? (t < 0.45 ? [231, 76, 60] : (t < 0.75 ? [241, 196, 15] : [46, 204, 113])) : [226, 232, 240];
+    pdf.setDrawColor(cor[0], cor[1], cor[2]);
+    pdf.line(gx + gr * Math.cos(a1), gy - gr * Math.sin(a1), gx + gr * Math.cos(a2), gy - gr * Math.sin(a2));
+  }
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(11);
+  pdf.setTextColor(16, 84, 54);
+  pdf.text(Math.round(pctPago * 100) + "%", gx, gy - 1, { align: "center" });
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(6);
+  pdf.setTextColor(100, 116, 139);
+  pdf.text("Pago do contrato", gx, gy + 4, { align: "center" });
+  y += cardH + 6;
+
+  const mesNome = info.mes ? RENEG_MESES[info.mes] : "";
+  const linhaIndice = info.rotulo
+    ? ("Indexador: " + info.rotulo + (info.sem ? ". Sem reajuste de parcela." : (mesNome && info.proximo ? ". Reajuste em " + mesNome + ", a partir de " + info.proximo + "." : ".")))
+    : "";
+  if (linhaIndice) {
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(7.5);
+    pdf.setTextColor(15, 23, 42);
+    const indLinhas = pdf.splitTextToSize(linhaIndice, largura);
+    pdf.text(indLinhas, m, y + 3);
+    y += indLinhas.length * 3.4 + 2;
+  }
+
+  const faixas = Array.from(document.querySelectorAll("#reneg-green-faixas .reneg-faixa")).map(function(el) {
+    const spans = el.querySelectorAll("span");
+    return [spans[0] ? spans[0].textContent.trim() : "", spans[1] ? spans[1].textContent.trim() : ""];
+  }).filter(function(ln) { return ln[0]; });
+  const linhasLaranja = [
     [renegTxtEl("reneg-orange-vencidas"), renegTxtEl("reneg-orange-vencidas-val")],
     [renegTxtEl("reneg-orange-avencer"), renegTxtEl("reneg-orange-avencer-val")],
     ["Total parcelas: " + renegTxtEl("reneg-orange-total-count"), "Total a pagar: " + renegTxtEl("reneg-orange-total-val")],
     ["Última parcela atual: " + renegTxtEl("reneg-orange-ultima"), ""]
-  ].filter((ln) => ln[0]);
-  if (rodapeAberto.length) {
-    tabela({
-      body: rodapeAberto,
-      theme: "plain",
-      styles: { fontSize: 8, cellPadding: 0.8, textColor: [191, 54, 12] },
-      columnStyles: { 1: { halign: "right", fontStyle: "bold" } }
-    });
-  }
-
-  secao("Como fica");
-  const mesNome = info.mes ? RENEG_MESES[info.mes] : "";
-  let linhaIndice = info.rotulo
-    ? ("Indexador: " + info.rotulo + (info.sem ? ". Sem reajuste de parcela." : (mesNome && info.proximo ? ". Reajuste em " + mesNome + ", a partir de " + info.proximo + "." : ".")))
-    : "Indexador: não identificado nesta tela.";
-  garantir(8);
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(8);
-  pdf.setTextColor(15, 23, 42);
-  pdf.text(pdf.splitTextToSize(linhaIndice, largura), m, y + 3);
-  y += 7;
-
-  const cronograma = agenda.map((l) => {
-    const num = renegNumPorData(l.data);
-    const marca = renegMarcaReajuste(l.data, l.tipo, info);
-    return [num || "—", l.tipo || "—", l.data || "—", l.original || "—", l.extra || "—", l.total || "—", marca];
-  });
-  tabela({
-    head: [["Parcela", "Tipo", "Vencimento", "Original", "Acréscimo", "Total", "Reajuste"]],
-    body: cronograma,
-    columnStyles: { 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" }, 6: { halign: "center", fontStyle: "bold" } },
-    didParseCell: (data) => {
-      if (data.section === "body" && data.row.raw && data.row.raw[6]) {
-        data.cell.styles.fillColor = [232, 243, 238];
-        if (data.column.index === 6) data.cell.styles.textColor = [16, 84, 54];
-      }
-    }
-  });
-
-  const extraVisivel = document.getElementById("reneg-green-extra-row");
-  const rodapeNovo = [
+  ].filter(function(ln) { return ln[0]; });
+  const linhasVerde = [
     [renegTxtEl("reneg-green-sinal-label"), renegTxtEl("reneg-green-sinal-val")],
     [renegTxtEl("reneg-green-acordo-label"), renegTxtEl("reneg-green-acordo-val")],
     [renegTxtEl("reneg-green-mantidas-label"), renegTxtEl("reneg-green-mantidas-val")]
-  ];
-  if (extraVisivel && extraVisivel.style.display !== "none" && renegTxtEl("reneg-green-extra-label")) {
-    rodapeNovo.push([renegTxtEl("reneg-green-extra-label"), renegTxtEl("reneg-green-extra-val")]);
-  }
-  rodapeNovo.push(
+  ].concat(faixas).concat([
     ["Total parcelas: " + renegTxtEl("reneg-green-total-parcelas"), "Total a pagar: " + renegTxtEl("reneg-green-total-pagar")],
     ["Última parcela: " + renegTxtEl("reneg-green-ultima"), ""]
-  );
-  tabela({
-    body: rodapeNovo.filter((ln) => ln[0]),
-    theme: "plain",
-    styles: { fontSize: 8, cellPadding: 0.8, textColor: [27, 94, 32] },
-    columnStyles: { 1: { halign: "right", fontStyle: "bold" } }
-  });
+  ]).filter(function(ln) { return ln[0]; });
+
+  const desenharPainel = function(x, topo, w, titulo, cor, fundo, linhas) {
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(6.5);
+    const linhasDes = linhas.map(function(ln) {
+      return { esq: pdf.splitTextToSize(String(ln[0] || ""), w - 30).slice(0, 2), dir: ln[1] || "" };
+    });
+    const alto = 8 + linhasDes.reduce(function(s, l) { return s + Math.max(6.2, l.esq.length * 3.1 + 2.2); }, 0) + 2;
+    pdf.setFillColor(cor[0], cor[1], cor[2]);
+    pdf.rect(x, topo, w, 8, "F");
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(8);
+    pdf.setTextColor(255, 255, 255);
+    pdf.text(titulo, x + 3, topo + 5.4);
+    pdf.setFillColor(fundo[0], fundo[1], fundo[2]);
+    pdf.rect(x, topo + 8, w, alto - 8, "F");
+    pdf.setDrawColor(cor[0], cor[1], cor[2]);
+    pdf.setLineWidth(0.4);
+    pdf.rect(x, topo, w, alto);
+    pdf.setLineWidth(0.2);
+    let ly = topo + 13;
+    linhasDes.forEach(function(l, i) {
+      const ultimo = i >= linhasDes.length - 2;
+      pdf.setFont("helvetica", ultimo ? "bold" : "normal");
+      pdf.setFontSize(6.5);
+      pdf.setTextColor(cor[0], cor[1], cor[2]);
+      pdf.text(l.esq, x + 3, ly);
+      if (l.dir) {
+        pdf.setFont("helvetica", "bold");
+        pdf.text(String(l.dir), x + w - 3, ly, { align: "right" });
+      }
+      ly += Math.max(6.2, l.esq.length * 3.1 + 2.2);
+    });
+    return alto;
+  };
+  const colW = (largura - 4) / 2;
+  const altEsq = desenharPainel(m, y, colW, "PARCELAS EM ABERTO", [230, 81, 0], [255, 243, 224], linhasLaranja);
+  const altDir = desenharPainel(m + colW + 4, y, colW, "CRONOGRAMA PROPOSTO", [46, 125, 50], [232, 245, 233], linhasVerde);
+  y += Math.max(altEsq, altDir) + 6;
 
   if ((Number(results.sinalValue) || 0) > 0.009) {
-    garantir(12);
     pdf.setFont("helvetica", "normal");
     pdf.setFontSize(8);
     pdf.setTextColor(71, 85, 105);

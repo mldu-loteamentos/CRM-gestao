@@ -9978,7 +9978,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 
 /* Parametrização de parceiro · Centros de custo da obra */
 .ppcc { padding: 16px; }
-.ppcc-obras > div { margin-bottom: 14px !important; }
+.pp-obra-tabs { margin-bottom: 16px; }
 .ppcc-head { display: flex; justify-content: space-between; align-items: stretch; gap: 16px; flex-wrap: wrap; padding: 14px 16px; margin-bottom: 14px; background: #f7faf8; border: 1px solid #e3eee7; border-radius: 10px; }
 .ppcc-titulo { font-size: 1.05rem; font-weight: 800; color: #105436; }
 .ppcc-sub { margin-top: 4px; font-size: 0.78rem; color: #64748b; }

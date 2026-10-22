@@ -2506,15 +2506,14 @@ const ParametrizacaoParceiroApp = {
   },
 
   obraChipsHtml(p, sociedade) {
-    return `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;">
-      ${(p.obras || []).map(o => {
+    const obras = p.obras || [];
+    if (!obras.length) return `<span style="font-size:0.78rem;color:#94a3b8;">Nenhuma obra ainda. Inclua pelo centro de custo.</span>`;
+    return `<div class="ml-tabs pp-obra-tabs" role="tablist">
+      ${obras.map(o => {
         const on = String(o.code) === String(this.selectedObraCode);
-        const label = sociedade ? ("Obra " + o.code) : ("Obra " + o.code + " · " + String(o.defaultPartnerShare).replace(".", ",") + "%");
-        return `<button type="button" onclick="ParametrizacaoParceiroApp.selectObra('${this.esc(o.code)}')"
-          style="border:1.5px solid ${on ? "#105436" : "#e2e8f0"};background:${on ? "#105436" : "#fff"};color:${on ? "#fff" : "#334155"};border-radius:999px;padding:6px 12px;font-size:0.78rem;font-weight:800;cursor:pointer;">
-          ${this.esc(label)}
-        </button>`;
-      }).join("") || `<span style="font-size:0.78rem;color:#94a3b8;">Nenhuma obra ainda. Inclua pelo centro de custo.</span>`}
+        const pct = sociedade ? "" : `<span class="ml-tab-count">${this.esc(String(o.defaultPartnerShare).replace(".", ","))}%</span>`;
+        return `<button type="button" role="tab" aria-selected="${on ? "true" : "false"}" class="ml-tab${on ? " is-active" : ""}" onclick="ParametrizacaoParceiroApp.selectObra('${this.esc(o.code)}')"><i data-lucide="building-2"></i> Obra ${this.esc(o.code)}${pct}</button>`;
+      }).join("")}
     </div>`;
   },
 
