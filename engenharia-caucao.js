@@ -579,19 +579,14 @@ window.EngenhariaCaucaoApp = {
       const companyId = this.ccCompanyId(c);
       return companyId && companies.has(companyId) && this.ccIsStockEnterprise(c);
     });
-    const allowed = new Set(catalog.map((c) => String(c.id || c.code || "")));
     const rows = (this.state.allRows || []).filter((r) => r.ccId && companies.has(String(r.companyId)));
     const toItem = (id, nome, companyId) => {
       const name = String(nome || "").toUpperCase();
       return { id: String(id), name, label: id ? id + " - " + name : name, companyId: companyId || "" };
     };
+    /* Com a relação carregada, entra todo centro de custo que tem título, inclusive departamento (OBRAS). */
     if (rows.length) {
-      const stockRows = rows.filter((r) => {
-        const id = String(r.ccId);
-        return allowed.has(id) || this.ccIsStockEnterprise({ id: r.ccId, name: r.ccNome });
-      });
-      const source = stockRows.length ? stockRows : rows;
-      return this.uniqueItems(source, (r) => r.ccId, (r) => {
+      return this.uniqueItems(rows, (r) => r.ccId, (r) => {
         const name = String(r.ccNome || "").toUpperCase();
         return r.ccId + " - " + name;
       });
