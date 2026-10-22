@@ -10553,7 +10553,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .cj-tabela td .cj-nota { padding: 8px 0; }
 .cj-pop { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; background: rgba(15, 23, 42, 0.55); padding: 24px; }
 .cj-pop[hidden] { display: none; }
-.cj-pop-box { width: min(980px, 96vw); max-height: 90vh; overflow: auto; background: #fff; border-radius: 12px; padding: 22px 24px 18px; box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25); }
+.cj-pop-box { position: relative; width: min(980px, 96vw); max-height: 90vh; overflow: auto; background: #fff; border-radius: 12px; padding: 22px 24px 18px; box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25); }
 .cj-pop-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
 .cj-pop-head h3 { margin: 0; font-size: 1.15rem; color: #105436; }
 .cj-pop-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -10593,10 +10593,33 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .cj-anexos-bloco li { padding: 8px 12px; border-bottom: 1px solid #e8eee9; font-size: 0.82rem; }
 .cj-anexos-bloco li:nth-child(even) { background: #f7faf8; }
 .cj-anexos-bloco a { color: #105436; font-weight: 700; }
-.pr-toolbar { align-items: center; margin-bottom: 12px; }
-.pr-busca { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 10px; border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; }
-.pr-busca input { border: 0; outline: none; height: 34px; width: 180px; font: inherit; font-size: 0.82rem; background: transparent; color: #0f172a; }
-.pr-busca svg { width: 14px; height: 14px; color: #64748b; }
+.pr-topo { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.pr-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.pr-periodos { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+.pr-periodo { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; }
+.pr-periodo > span { font-size: .75rem; font-weight: 700; color: #105436; }
+.pr-periodo label { display: flex; align-items: center; gap: 6px; font-size: .75rem; font-weight: 600; color: #475569; }
+.pr-periodo input[type="date"] { height: 36px; border: 1px solid #cbd5e1; border-radius: 4px; padding: 0 8px; background: #fff; color: #0f172a; font-size: .85rem; }
+.pr-status { font-size: .75rem; font-weight: 700; }
+.pr-status.is-pago { color: #105436; }
+.pr-status.is-prog { color: #9a3412; }
+.cc-table.pr-cc col.pr-c-status { width: 110px; }
+.pr-busca-fila { flex: 1; min-width: 260px; }
+.pr-th-flag { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; cursor: pointer; }
+.pr-th-flag input { width: 16px; height: 16px; accent-color: #105436; margin: 0; }
+.cc-table.pr-cc col.pr-c-pagar { width: 168px; }
+.cc-table.pr-cc th:first-child, .cc-table.pr-cc td.pr-pagar { height: auto; white-space: normal; }
+.cj-tipos { display: flex; flex-direction: column; gap: 2px; max-height: 220px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px; background: #fff; }
+.cj-tipo { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; font-size: 0.84rem; font-weight: 600; color: #1c2e24; cursor: pointer; }
+.cj-tipo.is-on { background: #e7f6ee; }
+.cj-tipo input { width: 16px; height: 16px; accent-color: #105436; margin: 0; }
+.cj-tipo-outro { display: flex; gap: 8px; margin-top: 8px; }
+.cj-tipo-outro input { flex: 1; height: 36px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0 10px; font: inherit; }
+.cj-salvando { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.94); border-radius: 12px; }
+.cj-anexos-box { width: min(560px, 96vw); }
+.cj-anexos-lista { max-height: 420px; }
+.cj-anexos-lista a { display: flex; align-items: center; gap: 8px; min-height: 36px; }
+.cj-anexos-lista svg { width: 16px; height: 16px; flex-shrink: 0; }
 .pr-bill { font-weight: 800; color: #105436; }
 tr.pr-liberado td { background: #f7faf8; }
 .pr-retorno { margin: 0 0 12px; padding: 12px 14px; border-radius: 8px; background: #e7f6ee; color: #105436; font-weight: 700; }

@@ -1140,18 +1140,95 @@ const OrcamentoRepassesApp = {
     return typeof ParametrizacaoParceiroApp !== "undefined" ? ParametrizacaoParceiroApp : (window.ParametrizacaoParceiroApp || null);
   },
 
-  centrosDa(part, obraCode) {
+  centrosDa(part, obraCode, todos) {
     const map = new Map();
     (part.obras || []).forEach((obra) => {
       if (obraCode && String(obra.code) !== String(obraCode)) return;
       (obra.costCenters || []).forEach((c) => {
-        if (c.inAccount === false) return;
+        if (!todos && c.inAccount === false) return;
         const id = String(c.id || "").replace(/\D/g, "");
         if (!id || map.has(id)) return;
         map.set(id, { obra: obra, nome: String(c.name || "").trim() });
       });
     });
     return map;
+  },
+
+  nomeCc(c) {
+    return String((c && c.name) || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+  },
+
+  ccProduto(obra) {
+    const lista = (obra && obra.costCenters) || [];
+    const produto = (c) => this.nomeCc(c).indexOf("PARCERIA") < 0;
+    return lista.find((c) => produto(c) && /00$/.test(String(c.id || "").replace(/\D/g, "")))
+      || lista.find((c) => produto(c))
+      || null;
+  },
+
+  /* O centro principal da obra (13300) ligado significa o valor integral.
+     Desligado, o DFC usa o rateio do parceiro sobre a obra inteira. */
+  principalMarcado(obra) {
+    const principal = this.ccProduto(obra);
+    if (!principal) return true;
+    return principal.inAccount !== false;
+  },
+
+  molde() {
+    const app = this.appPar();
+    const plano = typeof PlanoFinanceiroApp !== "undefined" ? PlanoFinanceiroApp : null;
+    const tpl = ((plano && typeof plano.dfcTemplateGroups === "function" && plano.dfcTemplateGroups())
+      || (app && typeof app.dfcDefaultGroups === "function" && app.dfcDefaultGroups())
+      || []).map((g) => ({ ...g, months: OrcEst.z(), accs: new Map() }));
+    const byId = {};
+    tpl.forEach((g) => { byId[g.id] = g; });
+    return { tpl: tpl, byId: byId };
+  },
+
+  valorForecast(info, ym) {
+    const meses = (info && info.meses) || {};
+    let valor = Number(meses[ym]);
+    if (!Number.isFinite(valor)) {
+      const cel = meses[ym] || meses[String(Number(String(ym).slice(5)))];
+      valor = cel && typeof cel === "object" ? Number(cel.r != null ? cel.r : cel.o) : Number(cel);
+    }
+    return Number(valor) || 0;
+  },
+
+  linhasDez2026(companyId) {
+    const app = window.ResultadoCaixaApp;
+    const doc = app && app.forecasts && app.forecasts["2026-12"];
+    if (!doc) return [];
+    const lista = [];
+    const por = doc.porArquivo;
+    if (por && typeof por === "object" && !Array.isArray(por) && Object.keys(por).length) {
+      Object.keys(por).forEach((nome) => lista.push(por[nome]));
+    } else if (doc.contas) lista.push(doc);
+    const emp = String(companyId || "").replace(/\D/g, "");
+    const dfc = typeof OrcamentoDfcApp !== "undefined" ? OrcamentoDfcApp : null;
+    const out = [];
+    lista.forEach((arq) => {
+      let id = String((arq && arq.empresa) || "").replace(/\D/g, "");
+      if (!id && dfc && typeof dfc.empresaDoArquivo === "function") id = String(dfc.empresaDoArquivo(arq) || "").replace(/\D/g, "");
+      if (emp && id && id !== emp) return;
+      Object.keys((arq && arq.contas) || {}).forEach((cc) => {
+        Object.keys(arq.contas[cc] || {}).forEach((code) => {
+          const info = arq.contas[cc][code] || {};
+          const valor = this.valorForecast(info, "2026-12");
+          if (!valor) return;
+          const m = OrcEst.z();
+          m[0] = valor;
+          out.push({
+            e: id || emp,
+            cc: String(cc).replace(/\D/g, "") || String(cc),
+            conta: code,
+            cn: info.nome || "",
+            m: m
+          });
+        });
+      });
+    });
+    return out;
   },
 
   grupoOculto(part, node) {
@@ -1226,31 +1303,25 @@ const OrcamentoRepassesApp = {
     return this.prestacoes().map((p, i) => this.montarDfc(p, this.linhasDaEmpresa(p.companyId), i));
   },
 
-  montarDfc(part, linhas, indice, obraCode) {
+  encher(tpl, byId, linhas, centros, part, usarRateio) {
     const app = this.appPar();
     const fluxo = typeof FluxoCaixaApp !== "undefined" ? FluxoCaixaApp : (window.FluxoCaixaApp || null);
     const dfc = typeof OrcamentoDfcApp !== "undefined" ? OrcamentoDfcApp : null;
-    const plano = typeof PlanoFinanceiroApp !== "undefined" ? PlanoFinanceiroApp : null;
-    const tpl = ((plano && typeof plano.dfcTemplateGroups === "function" && plano.dfcTemplateGroups())
-      || (app && typeof app.dfcDefaultGroups === "function" && app.dfcDefaultGroups())
-      || []).map((g) => ({ ...g, months: OrcEst.z(), accs: new Map() }));
-    const byId = {};
-    tpl.forEach((g) => { byId[g.id] = g; });
-    const centros = this.centrosDa(part, obraCode);
     const sociedade = !!(app && typeof app.isSociedade === "function" && app.isSociedade(part));
-    const kind = app && typeof app.kindOf === "function" ? app.kindOf(part) : (part.kind || "parceria");
-    linhas.forEach((l) => {
+    (linhas || []).forEach((l) => {
       const ccId = String(l.cc || "").replace(/\D/g, "");
       const achado = centros.get(ccId);
       if (!achado) return;
       const obra = achado.obra;
       if (!this.entraConta(part, obra, l.conta)) return;
-      const fator = this.fator(part, obra, l.conta);
+      const fator = usarRateio ? this.fator(part, obra, l.conta) : 1;
       if (!(Math.abs(fator) > 0)) return;
       const gid = dfc && typeof dfc.grupoDaConta === "function" ? dfc.grupoDaConta(l.conta, l.cn) : OrcEst.grupo(l.conta, l.cn);
       const g = gid ? byId[gid] : null;
       if (!g || g.type !== "resultado" || this.grupoOculto(part, g)) return;
-      const pct = sociedade ? 100 : (app && typeof app.partnerPctForObra === "function" ? app.partnerPctForObra(part, obra, l.conta) : (Number(obra.defaultPartnerShare) || 0));
+      const pct = usarRateio
+        ? (app && typeof app.partnerPctForObra === "function" ? app.partnerPctForObra(part, obra, l.conta) : (Number(obra.defaultPartnerShare) || 0))
+        : 0;
       let acc = g.accs.get(l.conta);
       if (!acc) {
         acc = { conta: l.conta, cn: l.cn || "", months: OrcEst.z(), pcts: new Set(), ccs: new Map() };
@@ -1303,6 +1374,30 @@ const OrcamentoRepassesApp = {
     apply("g_08", ["g_06", "g_07"]);
     apply("g_10", ["g_08", "g_09"]);
     apply("g_12", ["g_10", "g_11"]);
+    return sociedade;
+  },
+
+  montarDfc(part, linhas, indice, obraCode) {
+    const app = this.appPar();
+    const molde = this.molde();
+    const tpl = molde.tpl;
+    const byId = molde.byId;
+    const obra = (part.obras || []).find((o) => String(o.code) === String(obraCode)) || null;
+    const sociedade = !!(app && typeof app.isSociedade === "function" && app.isSociedade(part));
+    const kind = app && typeof app.kindOf === "function" ? app.kindOf(part) : (part.kind || "parceria");
+    const algumMarcado = !obra || (obra.costCenters || []).some((c) => c.inAccount !== false);
+    const usarRateio = !sociedade && !!obra && !this.principalMarcado(obra) && algumMarcado;
+    const centros = this.centrosDa(part, obraCode, usarRateio);
+    this.encher(tpl, byId, linhas, centros, part, usarRateio);
+    const resultado = (byId.g_12 && byId.g_12.months) ? byId.g_12.months.slice() : OrcEst.z();
+    const dezMolde = this.molde();
+    this.encher(dezMolde.tpl, dezMolde.byId, this.linhasDez2026(part.companyId), centros, part, usarRateio);
+    const dez = (dezMolde.byId.g_12 && dezMolde.byId.g_12.months && dezMolde.byId.g_12.months[0]) || 0;
+    const pagamento = OrcEst.z();
+    pagamento[0] = dez;
+    for (let i = 1; i < 12; i++) pagamento[i] = resultado[i - 1];
+    const jan28 = resultado[11] || 0;
+    if (byId.g_12) byId.g_12.months = pagamento.slice();
     const vivo = new Set(["g_03", "g_06", "g_08", "g_10", "g_12"]);
     tpl.forEach((g) => {
       const tem = g.months.some((v) => Math.abs(v) >= 0.005) || [...g.accs.values()].some((a) => a.months.some((v) => Math.abs(v) >= 0.005));
@@ -1329,7 +1424,8 @@ const OrcamentoRepassesApp = {
         level: level,
         hasKids: children.length > 0 || accs.length > 0,
         isAccount: false,
-        months: node.months
+        months: node.months,
+        jan28: node.id === "g_12" ? jan28 : null
       });
       children.forEach((ch) => walk(ch, level + 1));
       accs.forEach((a) => {
@@ -1369,10 +1465,10 @@ const OrcamentoRepassesApp = {
     const pessoas = this.pessoasDe(part).map((p) => ({
       nome: p.nome,
       pct: p.pct,
-      m: variacao.map((v) => v * p.pct / 100)
+      m: variacao.map((v) => v * p.pct / 100),
+      jan28: jan28 * p.pct / 100
     }));
     const ccIds = [...centros.keys()].sort((a, b) => String(a).localeCompare(String(b), "pt-BR", { numeric: true }));
-    const obra = (part.obras || []).find((o) => String(o.code) === String(obraCode)) || null;
     return {
       id: String(part.id || (part.companyId + "-" + indice)) + (obraCode ? ":" + obraCode : ""),
       obraCode: obra ? String(obra.code) : "",
@@ -1382,6 +1478,8 @@ const OrcamentoRepassesApp = {
       empresa: part.companyName || "",
       kind: kind,
       sociedade: sociedade,
+      rateio: usarRateio,
+      jan28: jan28,
       centros: ccIds,
       rows: rows,
       variacao: variacao,
@@ -1570,7 +1668,9 @@ const OrcamentoRepassesApp = {
         return `<label class="orc-rep-cc-mark${on ? " is-on" : ""}"><input type="checkbox" data-rep-cc="${OrcEst.esc(c.id)}" ${on ? "checked" : ""}> ${OrcEst.esc(String(c.id) + nome)}</label>`;
       }).join("")
       : `<p class="orc-est-nota">Esta obra não tem centro de custo. Inclua na parametrização do parceiro.</p>`;
-    const rateio = obra && !card.sociedade && card.obraShare ? `<span class="orc-rep-sub">Rateio ${OrcEst.esc(this.pctTxt(card.obraShare))}</span>` : "";
+    const rateio = obra && !card.sociedade
+      ? `<span class="orc-rep-sub">${card.rateio ? ("Rateio " + OrcEst.esc(this.pctTxt(card.obraShare))) : "Integral"}</span>`
+      : "";
     body.innerHTML = `
       <div class="ml-tabs orc-rep-tabs" role="tablist">${abas}</div>
       ${obras ? `<div class="ml-tabs orc-rep-obras" role="tablist">${obras}</div>` : `<p class="orc-est-nota">Esta prestação ainda não tem obra.</p>`}
@@ -1580,7 +1680,7 @@ const OrcamentoRepassesApp = {
         <span class="orc-rep-valor"><span>Variação — repasse</span><b>${OrcEst.money(this.soma(card.variacao))}</b></span>
       </div>
       ${this.dfcHtml(card)}
-      <p class="orc-est-nota">Na parceria, o valor de cada conta é a parte do parceiro. Na sociedade, o DFC é integral e a variação se divide pelo percentual de cada sócio. Repasse e dividendos já lançados no orçamento da sociedade ficam de fora, para o valor não se abater duas vezes.</p>`;
+      <p class="orc-est-nota">Com o centro principal da obra marcado, o DFC soma os centros marcados por inteiro. Sem ele, o valor é o rateio do parceiro sobre a obra. O resultado fica no mês. O repasse, na linha de variação, é pago no mês seguinte: janeiro de 2027 paga o forecast de dezembro de 2026, e o resultado de dezembro de 2027 aparece em JAN/28. Na sociedade, o DFC é integral e a variação se divide pelo percentual de cada sócio. Repasse e dividendos já lançados no orçamento da sociedade ficam de fora, para o valor não se abater duas vezes.</p>`;
     body.querySelectorAll("[data-rep-aba]").forEach((btn) => {
       btn.addEventListener("click", () => this.setAba(btn.getAttribute("data-rep-aba")));
     });
@@ -1624,7 +1724,7 @@ const OrcamentoRepassesApp = {
       return `<p class="orc-est-nota">Não há lançamento de 2027 nos centros desta ${card.sociedade ? "sociedade" : "parceria"}.</p>`;
     }
     const aberto = this.nosDe(card);
-    const head = OrcEst.MESES.map((m) => `<th>${m}</th>`).join("") + `<th>Total 2027</th>`;
+    const head = OrcEst.MESES.map((m) => `<th>${m}</th>`).join("") + `<th>JAN/28</th><th>Total 2027</th>`;
     const pilha = [];
     const linhas = [];
     (card.rows || []).forEach((r) => {
@@ -1649,10 +1749,14 @@ const OrcamentoRepassesApp = {
         const n = Number(v) || 0;
         return `<td${n < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(n)}</td>`;
       }).join("");
+      const jan = r.id === "g_12"
+        ? `<td${Number(r.jan28) < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(r.jan28)}</td>`
+        : `<td>—</td>`;
       const click = r.hasKids ? ` data-rep-part="${OrcEst.esc(card.id)}" data-rep-no="${OrcEst.esc(r.id)}"` : "";
       linhas.push(`<tr class="${cls}"${click}>
         <td style="padding-left:${10 + r.level * 14}px">${ico}<span>${OrcEst.esc(r.name)}</span>${pct}${ccs}</td>
         ${cel}
+        ${jan}
         <td${this.soma(r.months) < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(this.soma(r.months))}</td>
       </tr>`);
     });
@@ -1664,7 +1768,7 @@ const OrcamentoRepassesApp = {
       const quem = card.sociedade ? "Cada sócio recebe este percentual da variação." : "Cada participante recebe este percentual da variação.";
       socios = `<div class="orc-rep-socios"><h4>${quem}</h4>${aviso}
         <div class="orc-dfc-scroll"><table class="orc-dfc-table orc-est-table"><thead><tr><th>Participante</th>${head}</tr></thead><tbody>
-        ${card.pessoas.map((p) => `<tr><td>${OrcEst.esc(p.nome)} <span class="orc-rep-pct">${this.pctTxt(p.pct)}</span></td>${p.m.map((v) => `<td>${OrcEst.money(v)}</td>`).join("")}<td>${OrcEst.money(this.soma(p.m))}</td></tr>`).join("")}
+        ${card.pessoas.map((p) => `<tr><td>${OrcEst.esc(p.nome)} <span class="orc-rep-pct">${this.pctTxt(p.pct)}</span></td>${p.m.map((v) => `<td>${OrcEst.money(v)}</td>`).join("")}<td>${OrcEst.money(p.jan28)}</td><td>${OrcEst.money(this.soma(p.m))}</td></tr>`).join("")}
         </tbody></table></div></div>`;
     }
     return `<div class="orc-dfc-scroll"><table class="orc-dfc-table orc-est-table">

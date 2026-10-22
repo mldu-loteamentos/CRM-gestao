@@ -363,8 +363,6 @@ const ConfigUsersApp = {
             { id: "fila_cobranca", label: "Fila de Cobrança" },
             { id: "agenda", label: "Agenda do Operador" },
             { id: "zero_paid", label: "Clientes 0% Pago" },
-            { id: "sub_judice", label: "Sub Judice" },
-            { id: "pagar_reembolso", label: "Pagar reembolso", permBase: "sub_fin_cr_pagar_reembolso" },
             { id: "notificacoes", label: "Notificações" },
             { id: "recebimentos_webro", label: "Recebimentos Webro" },
             { id: "scod", label: "Scod" },
@@ -407,6 +405,13 @@ const ConfigUsersApp = {
           actions: [{ id: "repactuacao", label: "Repactuação" }]
         }
       ]
+    },
+    {
+      name: "Jurídico", icon: "scale", key: "mod_juridico",
+      submodules: [{ name: "Jurídico", key: "sub_jur_geral", actions: [
+        { id: "cobranca_sub_judice", label: "Cobrança Sub judice", permBase: "sub_fin_cr_sub_judice" },
+        { id: "pagar_reembolso", label: "Pagar reembolso", permBase: "sub_fin_cr_pagar_reembolso" }
+      ] }]
     },
     {
       name: "Orçamento", icon: "calculator", key: "mod_orc",

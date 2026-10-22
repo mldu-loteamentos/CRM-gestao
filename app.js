@@ -3398,7 +3398,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "motivos-cancelamento": "Motivos de cancelamento",
     "config-users": "Configuração de Usuários",
     "doc-padrao": "Documentos Padrões",
-    subjudice: "Sub Judice",
+    subjudice: "Cobrança Sub judice",
     "configuracoes": "Configurações",
     "regras-negociacao": "Configurações",
     "regras-cobranca": "Configurações",
@@ -6384,6 +6384,10 @@ window.permCoversMenuKey = function(perms, modKey) {
     return perms.sub_rel_geral_relacionamento_acessar === true
       || perms.sub_rel_geral_relacionamento_visualizar === true
       || perms.sub_rel_geral_relacionamento_editar === true;
+  }
+  if (modKey === "mod_juridico") {
+    const flags = (base) => perms[base + "_acessar"] === true || perms[base + "_visualizar"] === true || perms[base + "_editar"] === true;
+    return flags("sub_fin_cr_sub_judice") || flags("sub_fin_cr_pagar_reembolso");
   }
   if (modKey === "mod_orc") {
     if (perms.mod_orc === true || perms.sub_orc_geral === true || perms.sub_fin_orc === true) return true;

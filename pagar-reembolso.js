@@ -6,6 +6,10 @@ const PagarReembolsoApp = {
   retornos: [],
   busca: "",
   ocultarLiberados: false,
+  mlIni: "",
+  mlFim: "",
+  colIni: "",
+  colFim: "",
   carregando: false,
   liberando: false,
   CREDOR: 2244,
@@ -50,14 +54,31 @@ const PagarReembolsoApp = {
     return String(v || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   },
 
+  noPeriodo(iso, ini, fim) {
+    if (!ini && !fim) return true;
+    const d = String(iso || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
+    if (ini && d < ini) return false;
+    if (fim && d > fim) return false;
+    return true;
+  },
+
   visiveis() {
     const q = this.fold(this.busca);
     return this.itens.filter((item) => {
       if (this.ocultarLiberados && !this.pendente(item)) return false;
+      if (!this.noPeriodo(item.data, this.mlIni, this.mlFim)) return false;
+      if (!this.noPeriodo(item.pagoEm, this.colIni, this.colFim)) return false;
       if (!q) return true;
       const blob = this.fold([item.saleId, item.billId, item.customerName].filter(Boolean).join(" "));
       return blob.indexOf(q) >= 0;
     });
+  },
+
+  situacao(item) {
+    if (this.pendente(item)) return { rotulo: "—", classe: "" };
+    if (item.reemPago) return { rotulo: "Pago", classe: "is-pago" };
+    return { rotulo: "Programado", classe: "is-prog" };
   },
 
   pronto(item) {
@@ -79,33 +100,59 @@ const PagarReembolsoApp = {
   renderCasca() {
     const root = document.getElementById("pagar-reembolso-root");
     if (!root) return;
-    root.innerHTML = `<div class="cc-toolbar pr-toolbar">
+    root.innerHTML = `<div class="pr-topo">
         <p class="cj-nota">Marque os reembolsos pendentes e libere. Cada título a receber gera um título a pagar no Sienge, com vencimento em 10 dias.</p>
-        <label class="pr-busca">
-          <i data-lucide="search"></i>
-          <input type="search" id="pr-busca" placeholder="Título ou cliente" autocomplete="off">
-        </label>
-        <div class="cc-toolbar-actions">
-          <button type="button" class="btn btn-outline" id="pr-ocultar">Ocultar liberados</button>
-          <button type="button" class="btn btn-outline" id="pr-todos">Marcar todos</button>
+        <div class="pr-toolbar">
+          <div class="search-box-wrapper pr-busca-fila">
+            <input type="text" id="pr-busca" class="search-input" placeholder="Pesquise pelo título ou nome do cliente..." style="font-style: italic;" autocomplete="off" value="${this.esc(this.busca)}">
+            <i data-lucide="search" class="search-icon"></i>
+          </div>
+          <label class="moura-switch">
+            <input type="checkbox" id="pr-ocultar" ${this.ocultarLiberados ? "checked" : ""}>
+            <span class="moura-switch-track" aria-hidden="true"></span>
+            <span class="moura-switch-text">Ocultar liberados</span>
+          </label>
           <button type="button" class="btn btn-primary" id="pr-liberar">Liberar</button>
+        </div>
+        <div class="pr-periodos">
+          <div class="pr-periodo">
+            <span>Custas pagas pela Moura Leite</span>
+            <label>De <input type="date" id="pr-ml-ini" value="${this.esc(this.mlIni)}"></label>
+            <label>Até <input type="date" id="pr-ml-fim" value="${this.esc(this.mlFim)}"></label>
+          </div>
+          <div class="pr-periodo">
+            <span>Custas pagas pela Colenci</span>
+            <label>De <input type="date" id="pr-col-ini" value="${this.esc(this.colIni)}"></label>
+            <label>Até <input type="date" id="pr-col-fim" value="${this.esc(this.colFim)}"></label>
+          </div>
+          <button type="button" class="btn btn-excel" id="pr-excel" title="Exportar tabela atual para Excel">
+            <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
+          </button>
         </div>
       </div>
       <div id="pr-lista"></div>`;
     const busca = document.getElementById("pr-busca");
     const ocultar = document.getElementById("pr-ocultar");
-    const todos = document.getElementById("pr-todos");
     const liberar = document.getElementById("pr-liberar");
     if (busca) busca.addEventListener("input", () => {
       this.busca = busca.value || "";
       this.pintar();
     });
-    if (ocultar) ocultar.addEventListener("click", () => {
-      this.ocultarLiberados = !this.ocultarLiberados;
+    if (ocultar) ocultar.addEventListener("change", () => {
+      this.ocultarLiberados = ocultar.checked;
       this.pintar();
     });
-    if (todos) todos.addEventListener("click", () => this.marcarTodos());
     if (liberar) liberar.addEventListener("click", () => this.liberar());
+    [["pr-ml-ini", "mlIni"], ["pr-ml-fim", "mlFim"], ["pr-col-ini", "colIni"], ["pr-col-fim", "colFim"]].forEach(([id, chave]) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener("change", () => {
+        this[chave] = el.value || "";
+        this.pintar();
+      });
+    });
+    const excel = document.getElementById("pr-excel");
+    if (excel) excel.addEventListener("click", () => this.exportExcel());
     if (window.lucide && lucide.createIcons) lucide.createIcons();
   },
 
@@ -155,6 +202,8 @@ const PagarReembolsoApp = {
       return;
     }
     this.carregando = false;
+    this.pintar();
+    await this.completarSituacao(this.itens);
     this.pintar();
   },
 
@@ -311,10 +360,10 @@ const PagarReembolsoApp = {
   pintar() {
     const lista = document.getElementById("pr-lista");
     if (!lista) return;
-    const ocultar = document.getElementById("pr-ocultar");
-    if (ocultar) ocultar.textContent = this.ocultarLiberados ? "Mostrar liberados" : "Ocultar liberados";
     const avisos = (this.retornos || []).map((r) => `<p class="pr-retorno${r.ok ? "" : " is-erro"}">${this.esc(r.texto)}</p>`).join("");
     const visiveis = this.visiveis();
+    const prontos = visiveis.filter((item) => this.pronto(item));
+    const todosOn = prontos.length > 0 && prontos.every((item) => this.marcados[item.id]);
     if (!visiveis.length) {
       const vazio = this.itens.length ? "Nenhum reembolso encontrado." : "Não há reembolso.";
       lista.innerHTML = avisos + `<div class="cc-scroll cj-scroll"><table class="cc-table cj-cc"><tbody><tr><td class="cj-vazio">${vazio}</td></tr></tbody></table></div>`;
@@ -332,17 +381,27 @@ const PagarReembolsoApp = {
       const nomeUnidade = CJ && typeof CJ.limparUnidade === "function" ? CJ.limparUnidade(item.unitName, item.costCenterId) : String(item.unitName || "").trim();
       const proc = item.processoConsulta ? this.esc(item.processoConsulta) : "Sem número no cadastro";
       const emp = [item.companyId, item.companyName].filter(Boolean).join(" · ");
-      const nAnexos = ((item.guias || []).length + (item.comprovantes || []).length);
-      const pagar = item.billId ? `<span class="pr-bill">${this.esc(item.billId)}</span>` : "—";
+      const nAnexos = ((item.guias || []).length + (item.comprovantes || []).length + (item.anexos || []).length);
+      const pagar = item.billId ? this.esc(item.billId) : "—";
+      const sit = this.situacao(item);
+      const programada = liberado ? (this.dataBr(item.dueDate) || "—") : "—";
+      const colenci = item.reemPago ? (this.dataBr(item.pagoEm) || "—") : "—";
       return `<tr class="${liberado ? "pr-liberado" : ""}">
-        <td class="is-center"><input type="checkbox" data-pr="${this.esc(item.id)}" ${this.marcados[item.id] ? "checked" : ""} ${ok ? "" : "disabled"}></td>
-        <td><strong>${this.esc(item.saleId || "—")}</strong></td>
-        <td>${pagar}</td>
+        <td class="pr-pagar">
+          <label class="pr-th-flag">
+            <input type="checkbox" data-pr="${this.esc(item.id)}" ${this.marcados[item.id] ? "checked" : ""} ${ok ? "" : "disabled"}>
+            <span class="pr-bill">${pagar}</span>
+          </label>
+          <div class="cj-nota">Título ${this.esc(item.saleId || "—")}</div>
+        </td>
         <td class="cc-nome" title="${this.esc(item.customerName || "")}">${this.esc(item.customerName || "—")}</td>
         <td class="cc-nome" title="${this.esc(emp)}">${this.esc(emp || "—")}</td>
         <td title="${this.esc(nomeUnidade || "")}">${this.esc(nomeUnidade || "—")}</td>
         <td>${this.esc(item.costCenterId || "—")}</td>
-        <td>${this.esc(this.dataBr(item.data))}</td>
+        <td>${this.esc(this.dataBr(item.data)) || "—"}</td>
+        <td>${this.esc(programada)}</td>
+        <td>${this.esc(colenci)}</td>
+        <td><span class="pr-status ${sit.classe}">${this.esc(sit.rotulo)}</span></td>
         <td class="cc-nome">${this.esc(item.descricao || "")}${aviso}</td>
         <td class="is-right">${item.valor != null && item.valor !== "" ? this.money(item.valor) : "—"}</td>
         <td class="cc-nome" title="${proc}">${proc}</td>
@@ -355,24 +414,30 @@ const PagarReembolsoApp = {
     }).join("");
     lista.innerHTML = avisos + `<div class="cc-scroll cj-scroll"><table class="cc-table cj-cc pr-cc">
       <colgroup>
-        <col class="pr-c-check"><col class="pr-c-tit"><col class="pr-c-tit"><col><col><col><col class="pr-c-cc"><col class="cj-c-data"><col><col class="cj-c-valor"><col><col class="cj-c-ico">
+        <col class="pr-c-pagar"><col><col><col><col class="pr-c-cc"><col class="cj-c-data"><col class="cj-c-data"><col class="cj-c-data"><col class="pr-c-status"><col><col class="cj-c-valor"><col><col class="cj-c-ico">
       </colgroup>
       <thead><tr>
-        <th class="is-center"></th><th>Título</th><th>A pagar</th><th>Cliente</th><th>Empresa</th><th>Unidade</th><th>Centro de custo</th><th>Data</th><th>Do que se trata</th><th class="is-right">Valor</th><th>Processo</th><th class="is-center">Anexos</th>
+        <th><label class="pr-th-flag"><input type="checkbox" id="pr-flag-todos" ${todosOn ? "checked" : ""}> Título a pagar</label></th><th>Cliente</th><th>Empresa</th><th>Unidade</th><th>Centro de custo</th><th>Pago pela Moura Leite</th><th>Data programada</th><th>Pago pela Colenci</th><th>Status</th><th>Do que se trata</th><th class="is-right">Valor</th><th>Processo</th><th class="is-center">Anexos</th>
       </tr></thead>
       <tbody>${linhas}</tbody>
     </table></div>`;
     lista.querySelectorAll("[data-pr]").forEach((el) => {
       el.addEventListener("change", () => {
         this.marcados[el.getAttribute("data-pr")] = el.checked;
+        this.pintar();
       });
+    });
+    const flag = document.getElementById("pr-flag-todos");
+    if (flag) flag.addEventListener("change", () => {
+      prontos.forEach((item) => { this.marcados[item.id] = flag.checked; });
+      this.pintar();
     });
     lista.querySelectorAll("[data-pr-anexos]").forEach((btn) => {
       btn.addEventListener("click", (ev) => {
         ev.stopPropagation();
         const item = this.itens.find((x) => x.id === btn.getAttribute("data-pr-anexos"));
         if (!item || !window.CustasJudiciaisApp) return;
-        CustasJudiciaisApp.abrirPainelAnexos(item.guias, item.comprovantes, btn);
+        CustasJudiciaisApp.abrirPainelAnexos(item.guias, item.comprovantes, item.anexos);
       });
     });
     if (window.lucide && lucide.createIcons) lucide.createIcons();
@@ -676,6 +741,7 @@ const PagarReembolsoApp = {
     grupo.forEach((item) => {
       (item.guias || []).forEach((a) => arquivos.push(a));
       (item.comprovantes || []).forEach((a) => arquivos.push(a));
+      (item.anexos || []).forEach((a) => arquivos.push(a));
     });
     for (let i = 0; i < arquivos.length; i++) {
       try {
@@ -767,6 +833,218 @@ const PagarReembolsoApp = {
       liberatedAt: quando,
       liberatedBy: u.name || u.nome || u.email || ""
     }, { merge: true })));
+  },
+
+  tituloPago(bill) {
+    if (!bill || typeof bill !== "object") return false;
+    const blob = this.fold([bill.status, bill.situation, bill.consistencyStatus, bill.installmentStatus, bill.paid].filter((v) => v != null && v !== "").join(" "));
+    if (/pago|paid|quit|liquid|settl|baixad/.test(blob)) return true;
+    const saldo = bill.balanceAmount != null ? Number(bill.balanceAmount) : (bill.openBalance != null ? Number(bill.openBalance) : null);
+    return saldo != null && Number.isFinite(saldo) && saldo <= 0.004;
+  },
+
+  async lerTitulo(billId) {
+    const bill = await this.get("/bills/" + encodeURIComponent(billId));
+    let pago = this.tituloPago(bill);
+    let pagoEm = pago && bill ? String(bill.payOffDate || bill.paymentDate || bill.dischargeDate || "").slice(0, 10) : "";
+    if (!pago || !pagoEm) {
+      try {
+        const inst = await this.get("/bills/" + encodeURIComponent(billId) + "/installments");
+        const list = Array.isArray(inst) ? inst : ((inst && (inst.results || inst.installments)) || []);
+        if (list.length && list.every((row) => this.tituloPago(row))) pago = true;
+        if (pago) {
+          list.forEach((row) => {
+            const d = String(row.paymentDate || row.payOffDate || row.dischargeDate || row.receiptDate || "").slice(0, 10);
+            if (/^\d{4}-\d{2}-\d{2}$/.test(d) && (!pagoEm || d > pagoEm)) pagoEm = d;
+          });
+        }
+      } catch (e) {}
+    }
+    if (!pago) pagoEm = "";
+    return { pago: pago, pagoEm: pagoEm, dueDate: bill && String(bill.dueDate || "").slice(0, 10) };
+  },
+
+  async completarSituacao(itens) {
+    const alvos = (itens || []).filter((item) => item && item.billId && item.reemPago == null);
+    await Promise.all(alvos.map(async (item) => {
+      try {
+        const info = await this.lerTitulo(item.billId);
+        item.reemPago = !!info.pago;
+        item.pagoEm = info.pagoEm || "";
+        if (!item.dueDate && info.dueDate) item.dueDate = info.dueDate;
+      } catch (e) {
+        item.reemPago = false;
+        item.pagoEm = "";
+      }
+    }));
+  },
+
+  async exportExcel() {
+    const XL = window.InvestimentoApp;
+    if (!XL || typeof XL.ensureExcelJS !== "function") {
+      alert("Não foi possível carregar o formato de Aplicações e Investimentos. Atualize a página.");
+      return;
+    }
+    const linhas = this.visiveis();
+    if (!linhas.length) {
+      alert("Nenhum reembolso no período.");
+      return;
+    }
+    let ExcelJS;
+    try { ExcelJS = await XL.ensureExcelJS(); }
+    catch (e) {
+      alert("Não foi possível carregar a biblioteca de Excel. Recarregue a página.");
+      return;
+    }
+    const grupos = new Map();
+    linhas.forEach((item) => {
+      const id = String(item.companyId || "").replace(/\D/g, "") || "0";
+      if (!grupos.has(id)) grupos.set(id, []);
+      grupos.get(id).push(item);
+    });
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "CRM Moura Leite";
+    wb.created = new Date();
+    let imgId = null;
+    try {
+      const logo = await XL.logoDataUrl();
+      imgId = wb.addImage({ base64: logo.dataUrl, extension: logo.extension || "png" });
+    } catch (e) {}
+    const used = new Set();
+    const gerado = XL.generatedAtLabel(new Date());
+    grupos.forEach((itens, id) => {
+      let nome = "";
+      if (id !== "0" && typeof XL.excelSheetName === "function") {
+        try { nome = XL.excelSheetName(id, used); } catch (e) { nome = ""; }
+      }
+      if (!nome) nome = this.nomeAba((itens[0] && itens[0].companyName) || ("Empresa " + id), used);
+      const ws = wb.addWorksheet(nome, { properties: { showGridLines: false } });
+      this.pintarPlanilha(ws, XL, { itens: itens, imgId: imgId, gerado: gerado, empresa: (itens[0] && itens[0].companyName) || "" });
+    });
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "reembolsos_custas_" + this.hoje() + ".xlsx";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  },
+
+  nomeAba(base, used) {
+    let nome = String(base || "Sem empresa").replace(/[:\\/?*\[\]]/g, " ").replace(/\s+/g, " ").trim().slice(0, 31) || "Sem empresa";
+    let n = 2;
+    while (used.has(nome.toLowerCase())) {
+      const suf = "-" + (n++);
+      nome = (String(base).slice(0, Math.max(1, 31 - suf.length)) + suf).slice(0, 31);
+    }
+    used.add(nome.toLowerCase());
+    return nome;
+  },
+
+  pintarPlanilha(ws, XL, opts) {
+    const itens = opts.itens || [];
+    const heads = ["Título a receber", "Título a pagar", "Cliente", "Unidade", "Centro de custo", "Pago pela Moura Leite", "Data programada", "Pago pela Colenci", "Status", "Do que se trata", "Valor", "Processo"];
+    const moneyFmt = "#,##0.00";
+    const logoPx = Math.round(1.54 * 96 / 2.54);
+    ws.properties.showGridLines = false;
+    ws.views = [{ state: "frozen", xSplit: 1, ySplit: 4, topLeftCell: "B5", activeCell: "B5", showGridLines: false }];
+    ws.columns = heads.map((h, i) => ({ width: i === 2 || i === 9 || i === 11 ? 32 : (i === 10 ? 16 : 22) }));
+    ws.mergeCells("A1:A2");
+    ws.getRow(1).height = 28;
+    ws.getRow(2).height = 22;
+    let sub = opts.empresa || "Reembolsos de custas";
+    if (this.mlIni || this.mlFim) sub += " · Moura Leite " + (this.dataBr(this.mlIni) || "…") + " a " + (this.dataBr(this.mlFim) || "…");
+    if (this.colIni || this.colFim) sub += " · Colenci " + (this.dataBr(this.colIni) || "…") + " a " + (this.dataBr(this.colFim) || "…");
+    const titulo = ws.getCell("A1");
+    titulo.value = {
+      richText: [
+        { font: { name: "Calibri", size: 14, bold: true, color: { argb: "FF475569" } }, text: "Reembolsos de custas\n" },
+        { font: { name: "Calibri", size: 9, color: { argb: "FF64748B" } }, text: sub }
+      ]
+    };
+    XL.excelPaint(titulo, { fill: "FFFFFFFF", align: { vertical: "middle", horizontal: "left", wrapText: true, indent: 8 } });
+    if (opts.imgId != null) {
+      try { ws.addImage(opts.imgId, { tl: { col: 0.04, row: 0.08 }, ext: { width: logoPx, height: logoPx } }); } catch (e) {}
+    }
+    const total = itens.reduce((s, item) => s + (Number(item.valor) || 0), 0);
+    const pagos = itens.filter((item) => item.reemPago).length;
+    const programados = itens.filter((item) => !this.pendente(item) && !item.reemPago).length;
+    [
+      { label: "Quantidade", value: itens.length, fmt: "0" },
+      { label: "Valor", value: total, fmt: moneyFmt },
+      { label: "Pagos", value: pagos, fmt: "0" },
+      { label: "Programados", value: programados, fmt: "0" }
+    ].forEach((k, i) => {
+      const col = 4 + i;
+      const rotulo = ws.getRow(1).getCell(col);
+      const valor = ws.getRow(2).getCell(col);
+      rotulo.value = k.label;
+      valor.value = k.value;
+      XL.excelPaint(rotulo, { fill: "FFFFFFFF", font: { bold: true, size: 8, color: { argb: "FF94A3B8" } }, align: { horizontal: "right", vertical: "bottom" } });
+      XL.excelPaint(valor, { fill: "FFFFFFFF", font: { bold: true, size: 12, color: { argb: "FF0F172A" } }, align: { horizontal: "right", vertical: "middle" }, numFmt: k.fmt });
+    });
+    ws.getRow(3).height = 8;
+    const head = ws.getRow(4);
+    head.height = 20;
+    heads.forEach((h, i) => {
+      const cell = head.getCell(i + 1);
+      cell.value = h;
+      XL.excelPaint(cell, {
+        fill: "FF334155",
+        font: { bold: true, size: 9, color: { argb: "FFFFFFFF" } },
+        align: { horizontal: i === 10 ? "right" : "left", vertical: "middle" },
+        border: true
+      });
+    });
+    const CJ = window.CustasJudiciaisApp;
+    itens.forEach((item, idx) => {
+      const row = ws.getRow(5 + idx);
+      const unidade = CJ && typeof CJ.limparUnidade === "function" ? CJ.limparUnidade(item.unitName, item.costCenterId) : String(item.unitName || "");
+      const sit = this.situacao(item);
+      const vals = [
+        item.saleId || "",
+        item.billId || "",
+        item.customerName || "",
+        unidade || "",
+        item.costCenterId || "",
+        this.dataBr(item.data),
+        this.pendente(item) ? "" : this.dataBr(item.dueDate),
+        item.reemPago ? this.dataBr(item.pagoEm) : "",
+        sit.rotulo === "—" ? "" : sit.rotulo,
+        item.descricao || "",
+        Number(item.valor) || 0,
+        item.processoConsulta || item.processo || ""
+      ];
+      vals.forEach((v, i) => {
+        const cell = row.getCell(i + 1);
+        cell.value = v;
+        const zero = i === 10 && !v;
+        XL.excelPaint(cell, {
+          fill: "FFFFFFFF",
+          font: { size: 9, color: { argb: zero ? "FF94A3B8" : "FF0F172A" } },
+          align: { horizontal: i === 10 ? "right" : "left", vertical: "middle" },
+          border: true,
+          numFmt: i === 10 ? moneyFmt : undefined
+        });
+      });
+    });
+    const tot = ws.getRow(5 + itens.length);
+    heads.forEach((_, i) => {
+      const cell = tot.getCell(i + 1);
+      if (i === 0) cell.value = "Total";
+      if (i === 10) cell.value = total;
+      XL.excelPaint(cell, {
+        fill: "FF475569",
+        font: { bold: true, size: 9, color: { argb: "FFFFFFFF" } },
+        align: { horizontal: i === 10 ? "right" : "left", vertical: "middle" },
+        border: true,
+        numFmt: i === 10 ? moneyFmt : undefined
+      });
+    });
+    const foot = ws.getRow(7 + itens.length);
+    foot.getCell(1).value = opts.gerado;
+    XL.excelPaint(foot.getCell(1), { font: { italic: true, size: 8, color: { argb: "FF64748B" } }, align: { horizontal: "left" } });
   }
 };
 

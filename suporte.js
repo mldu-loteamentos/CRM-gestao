@@ -45,7 +45,6 @@
       { id: "fila", label: "Fila de Cobrança" },
       { id: "agenda", label: "Agenda do Operador" },
       { id: "zeropaid", label: "Clientes 0% Pago" },
-      { id: "subjudice", label: "Sub Judice" },
       { id: "notificacoes", label: "Notificações", abas: [
         { id: "followup", label: "Follow-up de NEX" },
         { id: "elegiveis-zero", label: "Elegíveis 0% pago" },
@@ -80,6 +79,10 @@
       { id: "resultado_caixa", label: "Resultado de caixa" },
       { id: "financiamento", label: "Financiamento" },
       { id: "repactuacao", label: "Repactuação" }
+    ]},
+    { id: "juridico", label: "Jurídico", subs: [
+      { id: "subjudice", label: "Cobrança Sub judice" },
+      { id: "pagar_reembolso", label: "Pagar reembolso" }
     ]},
     { id: "fiscal", label: "Fiscal", subs: [
       { id: "pis_cofins", label: "Calcular impostos" },
@@ -152,7 +155,8 @@
     inadimplencia_dashboard: { modulo: "financeiro", subitem: "dashboard" },
     agenda: { modulo: "financeiro", subitem: "agenda" },
     zeropaid: { modulo: "financeiro", subitem: "zeropaid" },
-    subjudice: { modulo: "financeiro", subitem: "subjudice" },
+    subjudice: { modulo: "juridico", subitem: "subjudice" },
+    "pagar-reembolso": { modulo: "juridico", subitem: "pagar_reembolso" },
     wesend: { modulo: "financeiro", subitem: "notificacoes" },
     configuracoes: { modulo: "financeiro", subitem: "config_cr" },
     "contas-pagar": { modulo: "financeiro", subitem: "cp_assistente" },
