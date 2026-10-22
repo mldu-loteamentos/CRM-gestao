@@ -422,9 +422,11 @@ window.BoletoCheck = {
             out.pix.titular = `Chave ${tipoNome.toLowerCase()} cadastrada nas chaves PIX do credor ${this.docFmt(credDoc)} no Sienge.`;
           } else if (credDoc) {
             const contato = tipo === "T" ? credor.telefones.includes(k) : (tipo === "E" ? credor.emails.includes(k) : false);
-            out.avisos.push(`Chave ${tipoNome.toLowerCase()} não confirmada como do titular ${this.docFmt(credDoc)}: `
+            const avisoChave = `Chave ${tipoNome.toLowerCase()} não confirmada como do titular ${this.docFmt(credDoc)}: `
               + (contato ? `o ${tipo === "T" ? "telefone" : "e-mail"} está no cadastro do credor, mas a chave ` : "a chave ")
-              + "não está nas chaves PIX cadastradas no credor. Confirme o titular no banco e cadastre a chave no credor, ou troque para a chave CPF/CNPJ.");
+              + "não está nas chaves PIX cadastradas no credor. Confirme o titular no banco e cadastre a chave no credor, ou troque para a chave CPF/CNPJ.";
+            out.avisos.push(avisoChave);
+            out.avisosLivres = (out.avisosLivres || []).concat(avisoChave);
           }
         }
       }

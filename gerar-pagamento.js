@@ -805,7 +805,11 @@ const GerarPagamentoApp = {
 
   /** O aviso de pagamento antecipado sai do bloqueio depois que o operador libera. */
   avisoQueBloqueia(check, it) {
-    return ((check && check.avisos) || []).filter((a) => !(check.antecipado && this.antecipadoLiberado(it) && /pagamento antecipado/i.test(a)))[0] || "";
+    const livres = new Set((check && check.avisosLivres) || []);
+    return ((check && check.avisos) || []).filter((a) => {
+      if (livres.has(a)) return false;
+      return !(check.antecipado && this.antecipadoLiberado(it) && /pagamento antecipado/i.test(a));
+    })[0] || "";
   },
 
   liberarAntecipado(chave) {
@@ -973,7 +977,8 @@ const GerarPagamentoApp = {
         s.pagInfo[chave] = { payment, check, fiscal, tipoSienge: forma.tipo || "", falha: !!(check && check.falhaConsulta) || !!(fiscal && fiscal.falhaConsulta) };
         const soAntecipado = check.antecipado && check.nivel === "aviso" && !(check.erros || []).length
           && (check.avisos || []).every((a) => /pagamento antecipado/i.test(a));
-        if (!soAntecipado && ["erro", "aviso", "sem"].includes(check.nivel)) {
+        const avisoLivre = check.nivel === "aviso" && !(check.erros || []).length && !this.avisoQueBloqueia(check, { chave });
+        if (!soAntecipado && !avisoLivre && ["erro", "aviso", "sem"].includes(check.nivel)) {
           Object.keys(s.sel).forEach((k) => {
             if (k.endsWith("|" + chave)) s.sel[k] = false;
           });
