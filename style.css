@@ -10513,16 +10513,36 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .orc-dfc-n1 td { background: #f8fafc; font-weight: 800; }
 .orc-dfc-formula td { background: #ecfdf5; font-weight: 800; color: #064e3b; }
 .orc-dfc-table tbody tr.orc-dfc-saida > td,
-.orc-dfc-table tbody tr.orc-dfc-saida:hover > td { background: #fdecec; color: #7f1d1d; font-weight: 800; }
+.orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-saida > td,
+.orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-saida > td:first-child { background: #fdecec; color: #7f1d1d; font-weight: 800; }
 .orc-dfc-table tbody tr.orc-dfc-saida-forte > td,
-.orc-dfc-table tbody tr.orc-dfc-saida-forte:hover > td { background: #f3b4b4; color: #6b1d1d; font-weight: 800; }
+.orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-saida-forte > td,
+.orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-saida-forte > td:first-child { background: #f3b4b4; color: #6b1d1d; font-weight: 800; }
 .orc-dfc-table tbody tr.orc-dfc-fcf > td,
-.orc-dfc-table tbody tr.orc-dfc-fcf:hover > td,
+.orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-fcf > td,
+.orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-fcf > td:first-child,
 .orc-dfc-table tbody tr.orc-dfc-fcf > td.orc-dfc-neg,
-.orc-dfc-table tbody tr.orc-dfc-fcf:hover > td.orc-dfc-neg { background: #105436; color: #fff; font-weight: 800; }
-.orc-dfc-table tbody tr.orc-dfc-saida:hover > td:first-child { background: #f8b4b4; color: #6b1d1d; box-shadow: inset 4px 0 0 #9f1239; }
-.orc-dfc-table tbody tr.orc-dfc-saida-forte:hover > td:first-child { background: #e89090; color: #5c1515; box-shadow: inset 4px 0 0 #9f1239; }
-.orc-dfc-table tbody tr.orc-dfc-fcf:hover > td:first-child { background: #0c3d28; color: #fff; box-shadow: inset 4px 0 0 #083322; }
+.orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-fcf > td.orc-dfc-neg { background: #105436; color: #fff; font-weight: 800; }
+.orc-dfc-table tbody tr.orc-dfc-saida:hover > td,
+.orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-saida:hover > td,
+.orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-saida:hover > td:first-child { background: #f8b4b4; color: #6b1d1d; box-shadow: none; }
+.orc-dfc-table tbody tr.orc-dfc-saida-forte:hover > td,
+.orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-saida-forte:hover > td,
+.orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-saida-forte:hover > td:first-child { background: #e89090; color: #5c1515; box-shadow: none; }
+.orc-dfc-table tbody tr.orc-dfc-fcf:hover > td,
+.orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-fcf:hover > td,
+.orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-fcf:hover > td:first-child,
+.orc-dfc-table tbody tr.orc-dfc-fcf:hover > td.orc-dfc-neg { background: #0c3d28; color: #fff; box-shadow: none; }
+.orc-dfc-table tbody tr.orc-dfc-formula:not(.orc-dfc-fcf):not(.orc-dfc-saida-forte):hover > td,
+.orc-dfc-table tbody tr.orc-dfc-n1:not(.orc-dfc-saida):hover > td,
+.orc-dfc-table tbody tr.orc-rep-var:hover > td,
+.orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-formula:not(.orc-dfc-fcf):not(.orc-dfc-saida-forte):hover > td,
+.orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-n1:not(.orc-dfc-saida):hover > td { background: #bbf7d0; }
+.orc-dfc-table tbody tr.orc-dfc-formula:not(.orc-dfc-fcf):not(.orc-dfc-saida-forte):hover > td:first-child,
+.orc-dfc-table tbody tr.orc-dfc-n1:not(.orc-dfc-saida):hover > td:first-child,
+.orc-dfc-table tbody tr.orc-rep-var:hover > td:first-child,
+.orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-formula:not(.orc-dfc-fcf):not(.orc-dfc-saida-forte):hover > td:first-child,
+.orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-n1:not(.orc-dfc-saida):hover > td:first-child { background: #105436; color: #fff; box-shadow: inset 4px 0 0 #083322; }
 .orc-dfc-acc td { font-weight: 600; }
 .orc-dfc-cc td { background: #f8fafc; font-weight: 500; color: #334155; }
 .orc-dfc-neg { color: #991b1b; }
@@ -10696,7 +10716,9 @@ tr.pr-liberado td { background: #f7faf8; }
 .cc-table.pr-cc col.pr-c-tit { width: 78px; }
 .cc-table.pr-cc col.pr-c-cc { width: 110px; }
 .cc-table.pr-cc input[type="checkbox"] { width: 16px; height: 16px; accent-color: #105436; }
+.orc-rep-tabs, .orc-rep-obras { flex-wrap: wrap; overflow: visible; row-gap: 0; }
 .orc-rep-tabs { margin-top: 4px; }
+.orc-rep-tabs .ml-tab, .orc-rep-obras .ml-tab { padding: 8px 10px; font-size: 0.78rem; }
 .orc-rep-obras { margin-bottom: 12px; }
 .orc-rep-ccs { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
 .orc-rep-cc-mark { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px 10px; background: #fff; font-size: 0.78rem; font-weight: 700; color: #1c2e24; cursor: pointer; }

@@ -1,7 +1,7 @@
 /* Custo obra 13900 — leitura dos relatórios enviados, sem consulta ao Sienge.
    IDD de outubro/2026: planejado x comprometido por item (UC2 e UC4).
    IDT de setembro/2026: custo orçado, medido, realizado, verba e tendência.
-   PPC/PCT de out-nov-dez/2026. */
+   Caução de out-nov-dez/2026. */
 (function() {
   function num(v) {
     const n = Number(v);
@@ -161,7 +161,7 @@
       const tabs = [
         { id: "resumo", label: "Resumo", icon: "layout-dashboard" },
         { id: "idd", label: "Desembolso", icon: "wallet" },
-        { id: "ppc", label: "PPC e PCT", icon: "file-text", count: (this.dados().compromissos || []).length }
+        { id: "ppc", label: "Caução", icon: "file-text", count: (this.dados().compromissos || []).filter(function(c) { return c.doc !== "PPC" && c.doc !== "PCT"; }).length }
       ];
       const atual = this.aba;
       return '<div class="ml-tabs cob-tabs" role="tablist">' + tabs.map(function(t) {
@@ -289,10 +289,9 @@
     htmlPpc: function() {
       const self = this;
       const q = this.busca.ppc.trim().toLowerCase();
-      const docs = ["todos", "PPC", "PCT", "CAU"];
-      const ccs = ["todos"].concat([...new Set((this.dados().compromissos || []).map(function(c) { return c.ccId; }).filter(Boolean))]);
+      const ccs = ["todos"].concat([...new Set((this.dados().compromissos || []).filter(function(c) { return c.doc !== "PPC" && c.doc !== "PCT"; }).map(function(c) { return c.ccId; }).filter(Boolean))]);
       const lista = this.ordenarLista((this.dados().compromissos || []).filter(function(c) {
-        if (self.doc !== "todos" && c.doc !== self.doc) return false;
+        if (c.doc === "PPC" || c.doc === "PCT") return false;
         if (self.cc !== "todos" && c.ccId !== self.cc) return false;
         if (!q) return true;
         return (c.credor + " " + c.titulo + " " + c.numero + " " + c.nota).toLowerCase().indexOf(q) >= 0;
@@ -308,10 +307,10 @@
           return '<button type="button" class="cob-pill' + (on ? " is-ok" : "") + '" onclick="CustoObraApp.' + fn + '(\'' + id + '\')">' + esc(id === "todos" ? "Todos" : id) + "</button>";
         }).join("");
       };
-      return '<div class="cob-toolbar">' + botoes(this.cc, ccs, "setCc") + botoes(this.doc, docs, "setDoc")
+      return '<div class="cob-toolbar">' + botoes(this.cc, ccs, "setCc")
         + '<input id="cob-busca-ppc" class="cob-busca" placeholder="Buscar credor ou título" value="' + esc(this.busca.ppc) + '" oninput="CustoObraApp.filtrar(\'ppc\', this.value)">'
         + "</div>"
-        + '<p class="cob-nota">Títulos PPC, PCT e caução de outubro a dezembro de 2026, da planilha do IDD. O total desta seleção é ' + brl(total) + ".</p>"
+        + '<p class="cob-nota">Títulos de caução de outubro a dezembro de 2026, da planilha do IDD. O total desta seleção é ' + brl(total) + ".</p>"
         + '<div class="cob-table-wrap cob-scroll"><table class="cob-table"><thead><tr>'
         + this.th("ppc", "ccId", "Centro")
         + this.th("ppc", "vencimento", "Vencimento")

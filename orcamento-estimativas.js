@@ -1158,6 +1158,17 @@ const OrcamentoRepassesApp = {
     return String((c && c.name) || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
   },
 
+  ccEhDoParceiro(nome) {
+    return this.nomeCc({ name: nome }).indexOf("PARCERIA") >= 0;
+  },
+
+  /* Na parceria a linha do centro principal (13300) não é o repasse. Fica o centro do parceiro. */
+  ccsDoRepasse(ccs, sociedade) {
+    if (sociedade) return ccs;
+    const parceiro = (ccs || []).filter((c) => this.ccEhDoParceiro(c.nome || c.id));
+    return parceiro.length ? parceiro : (ccs || []);
+  },
+
   ccProduto(obra) {
     const lista = (obra && obra.costCenters) || [];
     const produto = (c) => this.nomeCc(c).indexOf("PARCERIA") < 0;
@@ -1415,6 +1426,54 @@ const OrcamentoRepassesApp = {
     return sociedade;
   },
 
+  /* As duas fatias da empresa 13 (lucro e remessa da controladora) entram na 12 como lucro recebido. */
+  lucrosRecebidosEmpresa13() {
+    if (this._semLucros) return null;
+    const partes = OrcEst.parcerias().filter((p) => String(p.companyId) === "13");
+    if (!partes.length) return null;
+    const meses = OrcEst.z();
+    let dez = 0;
+    let jan28 = 0;
+    let achou = false;
+    this._semLucros = true;
+    try {
+      partes.forEach((part) => {
+        const card = this.montarDfc(part, this.linhasDaEmpresa("13"), 0, "");
+        (card.pessoas || []).forEach((p) => {
+          const nome = this.nomeCc({ name: p.nome });
+          if (nome.indexOf("ELLENCO") < 0) return;
+          if (nome.indexOf("LUCRO") < 0 && nome.indexOf("REMESSA") < 0 && nome.indexOf("CONTROLADORA") < 0) return;
+          achou = true;
+          (p.m || []).forEach((v, i) => { if (i < 12) meses[i] += Number(v) || 0; });
+          dez += Number(p.dez) || 0;
+          jan28 += Number(p.jan28) || 0;
+        });
+      });
+    } finally {
+      this._semLucros = false;
+    }
+    if (!achou) return null;
+    return { meses: meses, dez: dez, jan28: jan28 };
+  },
+
+  incluirLucros(byId, meses) {
+    const g = byId && byId.g_11_02;
+    if (!g || !meses) return;
+    let acc = g.accs.get("lucros-13");
+    if (!acc) {
+      acc = { conta: "Lucros recebidos", cn: "Empresa 13", months: OrcEst.z(), pcts: new Set(), ccs: new Map() };
+      g.accs.set("lucros-13", acc);
+    }
+    meses.forEach((v, i) => {
+      if (i > 11) return;
+      const n = Number(v) || 0;
+      acc.months[i] += n;
+      g.months[i] += n;
+      if (byId.g_11) byId.g_11.months[i] += n;
+      if (byId.g_12) byId.g_12.months[i] += n;
+    });
+  },
+
   montarDfc(part, linhas, indice, obraCode) {
     const app = this.appPar();
     const molde = this.molde();
@@ -1427,6 +1486,8 @@ const OrcamentoRepassesApp = {
     const usarRateio = !sociedade && !!obra && !this.principalMarcado(obra) && algumMarcado;
     const centros = this.centrosDa(part, obraCode, usarRateio);
     this.encher(tpl, byId, linhas, centros, part, usarRateio);
+    const lucros = !this._semLucros && String(part.companyId) === "12" ? this.lucrosRecebidosEmpresa13() : null;
+    if (lucros) this.incluirLucros(byId, lucros.meses);
     const resultado = (byId.g_12 && byId.g_12.months) ? byId.g_12.months.slice() : OrcEst.z();
     const linhasDez = this.linhasDez2026(part.companyId);
     const dezMolde = this.molde();
@@ -1440,6 +1501,7 @@ const OrcamentoRepassesApp = {
         a.ccs.forEach((c) => { dezMap[accId + ":" + c.id] = (c.months && c.months[0]) || 0; });
       });
     });
+    if (lucros) dezMap["acc:g_11_02:Lucros recebidos"] = lucros.dez;
     const dez = dezMap.g_12 || 0;
     const pagamento = OrcEst.z();
     pagamento[0] = dez;
@@ -1479,9 +1541,9 @@ const OrcamentoRepassesApp = {
       children.forEach((ch) => walk(ch, level + 1));
       accs.forEach((a) => {
         const accId = "acc:" + node.id + ":" + a.conta;
-        const ccs = [...a.ccs.values()]
+        const ccs = this.ccsDoRepasse([...a.ccs.values()]
           .filter((c) => c.months.some((v) => Math.abs(v) >= 0.005))
-          .sort((x, y) => String(x.id).localeCompare(String(y.id), "pt-BR", { numeric: true }));
+          .sort((x, y) => String(x.id).localeCompare(String(y.id), "pt-BR", { numeric: true })), sociedade);
         const pcts = [...a.pcts].filter((n) => n > 0).sort((x, y) => x - y);
         rows.push({
           id: accId,
@@ -1804,7 +1866,9 @@ const OrcamentoRepassesApp = {
       const algumMarcado = !obra || (obra.costCenters || []).some((c) => c.inAccount !== false);
       const usarRateio = !sociedade && !!obra && !this.principalMarcado(obra) && algumMarcado;
       const centros = this.centrosDa(part, obra ? obra.code : "", usarRateio);
+      const temParceiro = !sociedade && [...centros.values()].some((meta) => this.ccEhDoParceiro(meta.nome));
       centros.forEach((meta, ccId) => {
+        if (temParceiro && !this.ccEhDoParceiro(meta.nome)) return;
         const um = new Map([[ccId, meta]]);
         const anoMolde = this.molde();
         this.encher(anoMolde.tpl, anoMolde.byId, linhas, um, part, usarRateio);
