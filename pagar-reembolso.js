@@ -62,10 +62,12 @@ const PagarReembolsoApp = {
   renderCasca() {
     const root = document.getElementById("pagar-reembolso-root");
     if (!root) return;
-    root.innerHTML = `<p class="cj-nota">Marque os reembolsos pendentes e libere. Cada título a receber gera um título a pagar no Sienge, com vencimento em 10 dias.</p>
-      <div class="pr-topo">
-        <button type="button" class="btn btn-outline" id="pr-todos">Marcar todos</button>
-        <button type="button" class="btn btn-primary" id="pr-liberar">Liberar</button>
+    root.innerHTML = `<div class="cc-toolbar pr-toolbar">
+        <p class="cj-nota">Marque os reembolsos pendentes e libere. Cada título a receber gera um título a pagar no Sienge, com vencimento em 10 dias.</p>
+        <div class="cc-toolbar-actions">
+          <button type="button" class="btn btn-outline" id="pr-todos">Marcar todos</button>
+          <button type="button" class="btn btn-primary" id="pr-liberar">Liberar</button>
+        </div>
       </div>
       <div id="pr-lista"></div>`;
     const todos = document.getElementById("pr-todos");
@@ -142,7 +144,7 @@ const PagarReembolsoApp = {
     const lista = document.getElementById("pr-lista");
     if (!lista) return;
     if (!this.itens.length) {
-      lista.innerHTML = `<p class="cj-nota">Não há reembolso pendente.</p>`;
+      lista.innerHTML = `<div class="cc-scroll cj-scroll"><table class="cc-table cj-cc"><tbody><tr><td class="cj-vazio">Não há reembolso pendente.</td></tr></tbody></table></div>`;
       return;
     }
     const linhas = this.itens.map((item) => {
@@ -152,24 +154,33 @@ const PagarReembolsoApp = {
       if (!String(item.companyId || "").replace(/\D/g, "")) falta.push("empresa do título");
       if (!String(item.costCenterId || "").replace(/\D/g, "")) falta.push("centro de custo");
       const aviso = ok ? "" : `<div class="cj-nota">Falta ${this.esc(falta.join(", "))}. Edite a custa na ficha do título.</div>`;
-      const proc = item.processoConsulta
-        ? this.esc(item.processoConsulta)
-        : `<span class="cj-nota">Sem número no cadastro</span>`;
-      const emp = [item.companyId, item.companyName].filter(Boolean).join(" ");
+      const proc = item.processoConsulta ? this.esc(item.processoConsulta) : "Sem número no cadastro";
+      const emp = [item.companyId, item.companyName].filter(Boolean).join(" · ");
+      const nAnexos = ((item.guias || []).length + (item.comprovantes || []).length);
       return `<tr>
-        <td><input type="checkbox" data-pr="${this.esc(item.id)}" ${this.marcados[item.id] ? "checked" : ""} ${ok ? "" : "disabled"}></td>
-        <td>${this.esc(item.saleId || "")}<div class="cj-nota">${this.esc(item.customerName || "")}</div></td>
-        <td>${this.esc(emp || "—")}</td>
-        <td>${this.esc(item.unitName || "—")}<div class="cj-nota">${this.esc(item.costCenterId || "")}</div></td>
+        <td class="is-center"><input type="checkbox" data-pr="${this.esc(item.id)}" ${this.marcados[item.id] ? "checked" : ""} ${ok ? "" : "disabled"}></td>
+        <td><strong>${this.esc(item.saleId || "—")}</strong></td>
+        <td class="cc-nome" title="${this.esc(item.customerName || "")}">${this.esc(item.customerName || "—")}</td>
+        <td class="cc-nome" title="${this.esc(emp)}">${this.esc(emp || "—")}</td>
+        <td class="cc-nome" title="${this.esc(item.unitName || "")}">${this.esc(item.unitName || "—")}</td>
+        <td>${this.esc(item.costCenterId || "—")}</td>
         <td>${this.esc(this.dataBr(item.data))}</td>
-        <td>${this.esc(item.descricao || "")}${aviso}</td>
+        <td class="cc-nome">${this.esc(item.descricao || "")}${aviso}</td>
         <td class="is-right">${item.valor != null && item.valor !== "" ? this.money(item.valor) : "—"}</td>
-        <td>${proc}</td>
+        <td class="cc-nome" title="${proc}">${proc}</td>
+        <td class="is-center">
+          <button type="button" class="tvig-ico" title="Anexos" data-pr-anexos="${this.esc(item.id)}">
+            <i data-lucide="paperclip" style="width:15px;height:15px;"></i>${nAnexos ? `<span class="cj-anexo-n">${nAnexos}</span>` : ""}
+          </button>
+        </td>
       </tr>`;
     }).join("");
-    lista.innerHTML = `<div class="cj-tabela-scroll"><table class="custom-table cj-tabela">
+    lista.innerHTML = `<div class="cc-scroll cj-scroll"><table class="cc-table cj-cc pr-cc">
+      <colgroup>
+        <col class="pr-c-check"><col class="pr-c-tit"><col><col><col><col class="pr-c-cc"><col class="cj-c-data"><col><col class="cj-c-valor"><col><col class="cj-c-ico">
+      </colgroup>
       <thead><tr>
-        <th></th><th>Título</th><th>Empresa</th><th>Unidade</th><th>Data</th><th>Do que se trata</th><th class="is-right">Valor</th><th>Processo</th>
+        <th class="is-center"></th><th>Título</th><th>Cliente</th><th>Empresa</th><th>Unidade</th><th>Centro de custo</th><th>Data</th><th>Do que se trata</th><th class="is-right">Valor</th><th>Processo</th><th class="is-center">Anexos</th>
       </tr></thead>
       <tbody>${linhas}</tbody>
     </table></div>`;
@@ -178,6 +189,15 @@ const PagarReembolsoApp = {
         this.marcados[el.getAttribute("data-pr")] = el.checked;
       });
     });
+    lista.querySelectorAll("[data-pr-anexos]").forEach((btn) => {
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        const item = this.itens.find((x) => x.id === btn.getAttribute("data-pr-anexos"));
+        if (!item || !window.CustasJudiciaisApp) return;
+        CustasJudiciaisApp.abrirPainelAnexos(item.guias, item.comprovantes, btn);
+      });
+    });
+    if (window.lucide && lucide.createIcons) lucide.createIcons();
   },
 
   marcarTodos() {

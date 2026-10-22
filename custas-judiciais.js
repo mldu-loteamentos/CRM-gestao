@@ -78,6 +78,11 @@ const CustasJudiciaisApp = {
       root.innerHTML = `<p class="cj-nota">Abra o título do cliente para registrar as custas.</p>`;
       return;
     }
+    const chaveAtual = chave.cid + "|" + chave.sid;
+    if (this._chave !== chaveAtual) {
+      this._chave = chaveAtual;
+      this.itens = [];
+    }
     this.editId = "";
     this.guias = [];
     this.comprovantes = [];
@@ -86,10 +91,12 @@ const CustasJudiciaisApp = {
         <p class="cj-nota">Clique na linha para editar.</p>
         <button type="button" class="btn btn-primary" id="cj-nova">Nova custa</button>
       </div>
-      <div id="cj-lista"><div class="ml-load"><div class="loading-spinner" aria-hidden="true"></div><div class="loading-status-text">Carregando as custas…</div><div class="ml-load-track"><div class="loading-progress-bar" style="width:40%"></div></div></div></div>`;
+      <div id="cj-lista"></div>`;
     const nova = document.getElementById("cj-nova");
     if (nova) nova.addEventListener("click", () => this.nova());
-    await this.carregar();
+    this.pintarLista();
+    const geracao = (this._geracao = (this._geracao || 0) + 1);
+    this.carregar(geracao);
   },
 
   nova() {
@@ -137,18 +144,27 @@ const CustasJudiciaisApp = {
     return fc;
   },
 
-  async carregar() {
+  async carregar(geracao) {
     const lista = document.getElementById("cj-lista");
     const chave = this.chave();
     const fc = this.fb();
+    if (geracao != null && geracao !== this._geracao) return;
     if (!fc) {
       this.itens = [];
       if (lista) lista.innerHTML = `<p class="cj-nota">Não consegui ler as custas: o Firebase não está disponível.</p>`;
       return;
     }
     try {
-      const q = fc.query(fc.collection(window.firebaseDb, "custas_judiciais"), fc.where("customerId", "==", chave.cid));
-      const snap = await fc.getDocs(q);
+      const col = fc.collection(window.firebaseDb, "custas_judiciais");
+      let snap;
+      try {
+        snap = await fc.getDocs(fc.query(col, fc.where("customerId", "==", chave.cid), fc.where("saleId", "==", chave.sid)));
+      } catch (e) {
+        const msg = String((e && e.message) || e);
+        if (!/index|índice/i.test(msg)) throw e;
+        snap = await fc.getDocs(fc.query(col, fc.where("customerId", "==", chave.cid)));
+      }
+      if (geracao != null && geracao !== this._geracao) return;
       const itens = [];
       snap.forEach((d) => {
         const data = d.data() || {};
@@ -183,9 +199,39 @@ const CustasJudiciaisApp = {
     pill.textContent = String(this.itens.length);
   },
 
-  links(lista) {
-    if (!lista || !lista.length) return "—";
-    return lista.map((a) => `<a href="${this.esc(a.url)}" target="_blank" rel="noopener">${this.esc(a.name || "Arquivo")}</a>`).join("<br>");
+  listaArquivos(arquivos, vazio) {
+    if (!arquivos || !arquivos.length) return `<li class="cj-arq-vazio">${vazio}</li>`;
+    return arquivos.map((a) => `<li><a href="${this.esc(a.url)}" target="_blank" rel="noopener">${this.esc(a.name || "Arquivo")}</a></li>`).join("");
+  },
+
+  fecharPainelAnexos() {
+    const pop = document.getElementById("cj-anexos-pop");
+    if (pop) pop.remove();
+  },
+
+  abrirPainelAnexos(guias, comprovantes, anchor) {
+    this.fecharPainelAnexos();
+    const pop = document.createElement("div");
+    pop.id = "cj-anexos-pop";
+    pop.className = "cj-anexos-pop";
+    pop.innerHTML = `<div class="cj-anexos-bloco"><b>Guias</b><ul>${this.listaArquivos(guias, "Nenhuma guia")}</ul></div>
+      <div class="cj-anexos-bloco"><b>Comprovantes</b><ul>${this.listaArquivos(comprovantes, "Nenhum comprovante")}</ul></div>`;
+    document.body.appendChild(pop);
+    const r = anchor.getBoundingClientRect();
+    const largura = pop.offsetWidth || 280;
+    const altura = pop.offsetHeight || 160;
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - largura - 8));
+    const abaixo = r.bottom + 6;
+    const top = abaixo + altura > window.innerHeight - 8 ? Math.max(8, r.top - altura - 6) : abaixo;
+    pop.style.left = left + "px";
+    pop.style.top = top + "px";
+    const fechar = (ev) => {
+      if (pop.contains(ev.target) || anchor.contains(ev.target)) return;
+      this.fecharPainelAnexos();
+      document.removeEventListener("mousedown", fechar);
+    };
+    this._fechaPainel = fechar;
+    setTimeout(() => document.addEventListener("mousedown", fechar), 0);
   },
 
   pintarLista() {
@@ -193,13 +239,17 @@ const CustasJudiciaisApp = {
     if (!lista) return;
     const linhas = this.itens.map((item) => {
       const pago = item.billId ? `<div class="cj-nota">Título a pagar ${this.esc(item.billId)}</div>` : "";
+      const nAnexos = ((item.guias || []).length + (item.comprovantes || []).length);
       return `<tr class="cj-linha" data-cj-linha="${this.esc(item.id)}" title="Clique para editar">
         <td>${this.esc(this.dataBr(item.data))}</td>
-        <td>${this.esc(item.descricao || "")}${pago}</td>
+        <td class="cc-nome">${this.esc(item.descricao || "")}${pago}</td>
         <td class="is-right">${item.valor != null && item.valor !== "" ? this.money(item.valor) : "—"}</td>
-        <td>${this.links(item.guias)}</td>
-        <td>${this.links(item.comprovantes)}</td>
-        <td class="is-right cj-acoes-cell">
+        <td class="is-center">
+          <button type="button" class="tvig-ico" title="Anexos" data-cj-anexos="${this.esc(item.id)}">
+            <i data-lucide="paperclip" style="width:15px;height:15px;"></i>${nAnexos ? `<span class="cj-anexo-n">${nAnexos}</span>` : ""}
+          </button>
+        </td>
+        <td class="is-center cj-acoes-cell">
           <button type="button" class="tvig-ico" title="Editar" data-cj-editar="${this.esc(item.id)}">
             <i data-lucide="pencil" style="width:15px;height:15px;"></i>
           </button>
@@ -210,16 +260,25 @@ const CustasJudiciaisApp = {
       </tr>`;
     }).join("");
     const vazio = !this.itens.length
-      ? `<tr><td colspan="6"><p class="cj-nota">Nenhuma custa registrada neste título.</p></td></tr>`
+      ? `<tr><td colspan="5" class="cj-vazio">Nenhuma custa registrada neste título.</td></tr>`
       : "";
-    lista.innerHTML = `<div class="cj-tabela-scroll"><table class="custom-table cj-tabela">
-      <thead><tr><th>Data</th><th>Do que se trata</th><th class="is-right">Valor</th><th>Guias</th><th>Comprovantes</th><th class="is-right">Ações</th></tr></thead>
+    lista.innerHTML = `<div class="cc-scroll cj-scroll"><table class="cc-table cj-cc">
+      <colgroup><col class="cj-c-data"><col><col class="cj-c-valor"><col class="cj-c-ico"><col class="cj-c-acoes"></colgroup>
+      <thead><tr><th>Data</th><th>Do que se trata</th><th class="is-right">Valor</th><th class="is-center">Anexos</th><th class="is-center">Ações</th></tr></thead>
       <tbody>${linhas}${vazio}</tbody>
     </table></div>`;
     lista.querySelectorAll("[data-cj-linha]").forEach((tr) => {
       tr.addEventListener("click", (ev) => {
         if (ev.target.closest("a, button")) return;
         this.editar(tr.getAttribute("data-cj-linha"));
+      });
+    });
+    lista.querySelectorAll("[data-cj-anexos]").forEach((btn) => {
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        const item = this.itens.find((x) => x.id === btn.getAttribute("data-cj-anexos"));
+        if (!item) return;
+        this.abrirPainelAnexos(item.guias, item.comprovantes, btn);
       });
     });
     lista.querySelectorAll("[data-cj-editar]").forEach((btn) => {
@@ -267,7 +326,7 @@ const CustasJudiciaisApp = {
       descricao: (item && item.descricao) || "",
       valor: item && item.valor != null && item.valor !== "" ? this.money(item.valor) : ""
     };
-    const titulo = this.editId === "nova" ? "Nova custa" : "Editar custa";
+    const titulo = item ? "Editar custa" : "Nova custa";
     el.hidden = false;
     el.innerHTML = `<div class="cj-pop-box" role="dialog" aria-modal="true" aria-labelledby="cj-pop-titulo">
       <div class="cj-pop-head">
@@ -281,20 +340,6 @@ const CustasJudiciaisApp = {
       <label class="cj-pop-campo">Do que se trata
         <input type="text" id="cj-desc" value="${this.esc(fonte.descricao)}" placeholder="Ex.: custas de distribuição, diligência do oficial">
       </label>
-      <div class="cj-pop-arquivos">
-        <div>
-          <span>Guias</span>
-          <label class="cj-escolher"><i data-lucide="paperclip" style="width:14px;height:14px;"></i> Anexar
-            <input type="file" id="cj-guias" accept="application/pdf,image/*" multiple>
-          </label>
-        </div>
-        <div>
-          <span>Comprovantes</span>
-          <label class="cj-escolher"><i data-lucide="paperclip" style="width:14px;height:14px;"></i> Anexar
-            <input type="file" id="cj-comp" accept="application/pdf,image/*" multiple>
-          </label>
-        </div>
-      </div>
       <div id="cj-chips"></div>
       <div class="cj-pop-acoes">
         <button type="button" class="btn btn-primary" id="cj-salvar">Salvar</button>
@@ -302,10 +347,6 @@ const CustasJudiciaisApp = {
       </div>
     </div>`;
     this.rascunho = null;
-    const guias = document.getElementById("cj-guias");
-    const comp = document.getElementById("cj-comp");
-    if (guias) guias.addEventListener("change", () => this.receberArquivos(guias, "guias"));
-    if (comp) comp.addEventListener("change", () => this.receberArquivos(comp, "comprovantes"));
     const salvar = document.getElementById("cj-salvar");
     const cancelar = document.getElementById("cj-cancelar");
     const fechar = document.getElementById("cj-fechar");
@@ -328,20 +369,30 @@ const CustasJudiciaisApp = {
     if (!box) return;
     const item = this.itens.find((x) => x.id === this.editId);
     const bloco = (rotulo, campo, tirar, novos) => {
-      const salvos = this.arquivosVisiveis(item, campo, tirar).map((a) => `<span><a href="${this.esc(a.url)}" target="_blank" rel="noopener">${this.esc(a.name || "Arquivo")}</a>
+      const salvos = this.arquivosVisiveis(item, campo, tirar).map((a) => `<li><a href="${this.esc(a.url)}" target="_blank" rel="noopener">${this.esc(a.name || "Arquivo")}</a>
         <button type="button" class="tvig-ico is-danger" title="Tirar arquivo" data-cj-tirar-salvo="${campo}:${this.esc(a.url)}">
           <i data-lucide="trash-2" style="width:15px;height:15px;"></i>
-        </button></span>`).join("");
-      const pend = novos.map((f, i) => `<span>${this.esc(f.name)}
+        </button></li>`).join("");
+      const pend = novos.map((f, i) => `<li><span>${this.esc(f.name)}</span>
         <button type="button" class="tvig-ico is-danger" title="Tirar arquivo" data-cj-tirar="${campo}:${i}">
           <i data-lucide="trash-2" style="width:15px;height:15px;"></i>
-        </button></span>`).join("");
-      return `<div class="cj-chip-col"><b>${rotulo}</b>${salvos}${pend || (!salvos ? `<span class="cj-nota">Nenhum arquivo</span>` : "")}</div>`;
+        </button></li>`).join("");
+      const vazio = !salvos && !pend ? `<li class="cj-arq-vazio">Nenhum arquivo</li>` : "";
+      const inputId = campo === "guias" ? "cj-guias" : "cj-comp";
+      return `<section class="cj-arq-bloco"><header><b>${rotulo}</b>
+        <label class="cj-escolher"><i data-lucide="paperclip" style="width:14px;height:14px;"></i> Anexar
+          <input type="file" id="${inputId}" accept="application/pdf,image/*" multiple>
+        </label>
+      </header><ul class="cj-arq-lista">${salvos}${pend}${vazio}</ul></section>`;
     };
-    box.innerHTML = `<div class="cj-chips">
+    box.innerHTML = `<div class="cj-arq-grade">
       ${bloco("Guias", "guias", this.guiasTirar, this.guias)}
       ${bloco("Comprovantes", "comprovantes", this.comprovantesTirar, this.comprovantes)}
     </div>`;
+    const guias = document.getElementById("cj-guias");
+    const comp = document.getElementById("cj-comp");
+    if (guias) guias.addEventListener("change", () => this.receberArquivos(guias, "guias"));
+    if (comp) comp.addEventListener("change", () => this.receberArquivos(comp, "comprovantes"));
     box.querySelectorAll("[data-cj-tirar]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const ped = String(btn.getAttribute("data-cj-tirar") || "").split(":");
@@ -368,6 +419,7 @@ const CustasJudiciaisApp = {
   },
 
   fecharModal() {
+    this.fecharPainelAnexos();
     const el = document.getElementById("cj-modal");
     if (el) el.hidden = true;
     this.editId = "";
