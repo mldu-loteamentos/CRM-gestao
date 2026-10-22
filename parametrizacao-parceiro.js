@@ -286,6 +286,8 @@ const ParametrizacaoParceiroApp = {
   blankSocio(src) {
     const s = src || {};
     const pct = s.sharePct == null || s.sharePct === "" ? "" : Number(s.sharePct);
+    const planos = this.normalizarPlanos(s);
+    const primeiro = planos.find((pl) => pl.id) || planos[0] || { id: "", nome: "" };
     return {
       id: String(s.id || ""),
       name: String(s.name || ""),
@@ -297,15 +299,94 @@ const ParametrizacaoParceiroApp = {
       bankLoaded: !!s.bankLoaded,
       ccTitulo: String(s.ccTitulo || ""),
       ccTituloNome: String(s.ccTituloNome || ""),
-      planoId: String(s.planoId || ""),
-      planoNome: String(s.planoNome || ""),
+      planoId: String(primeiro.id || ""),
+      planoNome: String(primeiro.nome || ""),
+      planos,
       docTipo: String(s.docTipo || ""),
       docNome: String(s.docNome || "")
     };
   },
 
+  normalizarPlanos(s) {
+    const bruto = Array.isArray(s && s.planos) ? s.planos : [];
+    const lista = bruto.map((pl) => {
+      const brutoPct = pl && pl.pct;
+      const n = brutoPct === "" || brutoPct == null ? "" : Number(String(brutoPct).replace(",", "."));
+      return {
+        id: String((pl && (pl.id || pl.planoId)) || ""),
+        nome: String((pl && (pl.nome || pl.planoNome)) || ""),
+        pct: n === "" || !Number.isFinite(n) ? "" : Math.max(0, Math.min(100, n))
+      };
+    });
+    if (lista.length) return lista;
+    if (s && s.planoId) return [{ id: String(s.planoId), nome: String(s.planoNome || ""), pct: "" }];
+    return [{ id: "", nome: "", pct: "" }];
+  },
+
+  sincronizarPlanoPrincipal(row) {
+    if (!row) return;
+    const primeiro = (row.planos || []).find((pl) => pl && pl.id) || { id: "", nome: "" };
+    row.planoId = String(primeiro.id || "");
+    row.planoNome = String(primeiro.nome || "");
+  },
+
+  resumoPlanosSocio(p, s) {
+    if (!this.isSociedade(p)) return s && s.planoId ? " · " + this.esc(s.planoId) : "";
+    const ids = this.normalizarPlanos(s).filter((pl) => pl.id);
+    if (ids.length > 1) return " · " + ids.length + " planos";
+    return ids[0] ? " · " + this.esc(ids[0].id) : "";
+  },
+
+  /* Um plano sem percentual fica com 100% da participação. Com vários, cada percentual vale sobre a participação do sócio. */
+  titulosDoSocio(s) {
+    const parte = Number(s && s.sharePct);
+    const socioPct = Number.isFinite(parte) ? parte : 0;
+    const planos = this.normalizarPlanos(s).filter((pl) => pl.id);
+    if (!planos.length) return [];
+    const informado = planos.some((pl) => pl.pct !== "" && pl.pct != null);
+    const unico = planos.length === 1;
+    return planos.map((pl) => {
+      const pctPlano = informado ? (Number(pl.pct) || 0) : (unico ? 100 : 0);
+      const efetivo = Math.round(socioPct * pctPlano / 100 * 1000) / 1000;
+      return {
+        planoId: pl.id,
+        planoNome: pl.nome,
+        pctPlano,
+        pctSocio: socioPct,
+        efetivo
+      };
+    });
+  },
+
   totalSociosPct(p) {
     return (p && p.socios || []).reduce((sum, s) => sum + (Number(s.sharePct) || 0), 0);
+  },
+
+  /* Um parceiro usa o percentual da obra. Dois ou mais dividem essa fatia. Sociedade continua com o percentual do sócio. */
+  pedeFatiaCredor(p) {
+    if (!p || this.isSociedade(p)) return false;
+    return (p.socios || []).filter((s) => s && s.id).length >= 2;
+  },
+
+  pctObra(obra) {
+    if (!obra) return 0;
+    const travado = this.percentualTravado(obra);
+    if (travado != null) return travado;
+    return Number(obra.defaultPartnerShare) || 0;
+  },
+
+  fatiasDoSocio(p, sharePct) {
+    const parte = Number(sharePct);
+    if (!(parte > 0)) return [];
+    return (p.obras || []).filter((o) => o && o.code).map((o) => {
+      const base = this.pctObra(o);
+      const efetivo = Math.round(base * parte / 100 * 1000) / 1000;
+      return { code: String(o.code), base, efetivo };
+    });
+  },
+
+  fmtPctCurto(n) {
+    return Number(n || 0).toLocaleString("pt-BR", { maximumFractionDigits: 3 });
   },
 
   sociosOrdenados(lista) {
@@ -1158,6 +1239,8 @@ const ParametrizacaoParceiroApp = {
         row.planoId = String(cat._id);
         row.planoNome = String(cat._name || "");
       }
+      const pct0 = row.planos && row.planos[0] ? row.planos[0].pct : "";
+      row.planos = [{ id: row.planoId, nome: row.planoNome, pct: pct0 }];
     } else if (campo === "doc") {
       if (!v) {
         row.docTipo = "";
@@ -1209,7 +1292,104 @@ const ParametrizacaoParceiroApp = {
   },
 
   fecharVinculo() {
-    this.vinculoUi = { socioId: String(this.socioAberto || ""), planoOpen: false, planoQuery: "", docOpen: false, docQuery: "" };
+    this.vinculoUi = { socioId: String(this.socioAberto || ""), planoOpen: false, planoQuery: "", docOpen: false, docQuery: "", planos: {} };
+  },
+
+  uiPlano(idx) {
+    const ui = this.uiVinculo();
+    ui.planos = ui.planos || {};
+    const chave = String(idx);
+    if (!ui.planos[chave]) ui.planos[chave] = { open: false, query: "" };
+    return ui.planos[chave];
+  },
+
+  fecharPlanosUi() {
+    const ui = this.uiVinculo();
+    ui.planoOpen = false;
+    ui.planoQuery = "";
+    ui.docOpen = false;
+    ui.docQuery = "";
+    ui.planos = {};
+  },
+
+  adicionarPlanoSocio(id) {
+    const p = this.current();
+    if (!p || !this.isSociedade(p)) return;
+    const row = (p.socios || []).find((s) => String(s.id) === String(id));
+    if (!row) return;
+    row.planos = this.normalizarPlanos(row);
+    row.planos.push({ id: "", nome: "", pct: "" });
+    this.sincronizarPlanoPrincipal(row);
+    this.persist();
+    this.renderKeepScroll();
+  },
+
+  removerPlanoSocio(id, idx) {
+    const p = this.current();
+    if (!p || !this.isSociedade(p)) return;
+    const row = (p.socios || []).find((s) => String(s.id) === String(id));
+    if (!row) return;
+    const planos = this.normalizarPlanos(row);
+    const i = Number(idx);
+    if (planos.length < 2 || !planos[i]) return;
+    planos.splice(i, 1);
+    row.planos = planos;
+    this.sincronizarPlanoPrincipal(row);
+    this.fecharPlanosUi();
+    this.persist();
+    this.renderKeepScroll();
+  },
+
+  setPlanoPct(id, idx, value) {
+    const p = this.current();
+    if (!p || !this.isSociedade(p)) return;
+    const row = (p.socios || []).find((s) => String(s.id) === String(id));
+    if (!row) return;
+    const planos = this.normalizarPlanos(row);
+    const i = Number(idx);
+    if (!planos[i]) return;
+    const raw = String(value == null ? "" : value).trim().replace(",", ".");
+    if (raw === "") planos[i].pct = "";
+    else {
+      const n = Number(raw);
+      if (!Number.isFinite(n)) return;
+      planos[i].pct = Math.max(0, Math.min(100, n));
+    }
+    row.planos = planos;
+    this.sincronizarPlanoPrincipal(row);
+    this.persist();
+    this.renderKeepScroll();
+  },
+
+  setPlanoSocio(id, idx, valor) {
+    const p = this.current();
+    if (!p || !this.isSociedade(p)) return;
+    const row = (p.socios || []).find((s) => String(s.id) === String(id));
+    if (!row) return;
+    const planos = this.normalizarPlanos(row);
+    const i = Number(idx);
+    if (!planos[i]) return;
+    const v = String(valor || "");
+    if (!v) {
+      planos[i].id = "";
+      planos[i].nome = "";
+    } else {
+      const cat = this.planosSaida().find((c) => String(c._id) === v);
+      if (!cat) {
+        this.renderKeepScroll();
+        return;
+      }
+      if (planos.some((pl, j) => j !== i && pl.id === String(cat._id))) {
+        this.renderKeepScroll();
+        return;
+      }
+      planos[i].id = String(cat._id);
+      planos[i].nome = String(cat._name || "");
+    }
+    row.planos = planos;
+    this.sincronizarPlanoPrincipal(row);
+    this.persist();
+    this.renderKeepScroll();
   },
 
   uiVinculo() {
@@ -1218,11 +1398,13 @@ const ParametrizacaoParceiroApp = {
     return this.vinculoUi;
   },
 
-  itensPlano(s) {
+  itensPlano(s, plano, ocupados) {
     const items = this.planosSaida().map((c) => ({ id: String(c._id), name: String(c._name || "") }));
-    const id = String((s && s.planoId) || "");
-    if (id && !items.some((i) => i.id === id)) items.push({ id, name: String((s && s.planoNome) || "") });
-    return items;
+    const id = String((plano && plano.id) || (s && s.planoId) || "");
+    const nome = String((plano && plano.nome) || (s && s.planoNome) || "");
+    if (id && !items.some((i) => i.id === id)) items.push({ id, name: nome });
+    const usados = ocupados || new Set();
+    return items.filter((i) => i.id === id || !usados.has(i.id));
   },
 
   itensDocumento(s) {
@@ -1263,19 +1445,95 @@ const ParametrizacaoParceiroApp = {
     };
   },
 
+  opcoesPlanoSocio(s, idx) {
+    const planos = this.normalizarPlanos(s);
+    const plano = planos[idx] || { id: "", nome: "", pct: "" };
+    const ui = this.uiPlano(idx);
+    const ocupados = new Set(planos.map((pl, i) => i === idx ? "" : pl.id).filter(Boolean));
+    return {
+      id: "pp-vinculo-plano-" + idx,
+      label: "Plano financeiro",
+      items: this.itensPlano(s, plano, ocupados),
+      selectedIds: plano.id ? [String(plano.id)] : [],
+      open: !!ui.open,
+      query: ui.query || "",
+      single: true,
+      emptyMeansAll: false,
+      emptyLabel: "Escolha a conta",
+      extraClass: "pp-vinculo-filtro",
+      nouns: {
+        singular: "conta",
+        plural: "contas",
+        none: this.loadingCats ? "Carregando o plano financeiro…" : "Nenhuma conta de resultado de saída",
+        noMatch: "Nenhuma conta com esse nome."
+      }
+    };
+  },
+
+  textoTituloPlano(s, plano) {
+    const parte = Number(s && s.sharePct);
+    const socioPct = Number.isFinite(parte) ? parte : 0;
+    if (!(socioPct > 0)) return "Informe a participação do sócio. O percentual do plano vale sobre ela.";
+    const planos = this.normalizarPlanos(s).filter((pl) => pl.id);
+    const informado = planos.some((pl) => pl.pct !== "" && pl.pct != null);
+    const unico = planos.length <= 1;
+    if (!unico && !informado) return "Informe o percentual de cada plano sobre os " + this.fmtPctCurto(socioPct) + "% do sócio.";
+    if (informado && (plano.pct === "" || plano.pct == null)) return "Informe o percentual deste plano sobre os " + this.fmtPctCurto(socioPct) + "% do sócio.";
+    const pctPlano = plano && plano.pct !== "" && plano.pct != null ? Number(plano.pct) : 100;
+    const efetivo = Math.round(socioPct * pctPlano / 100 * 1000) / 1000;
+    return this.fmtPctCurto(pctPlano) + "% de " + this.fmtPctCurto(socioPct) + "% = " + this.fmtPctCurto(efetivo) + "% do negócio.";
+  },
+
+  planosSocioHtml(p, s) {
+    const F = window.MlEmpresaFilter;
+    const planos = this.normalizarPlanos(s);
+    const soma = planos.reduce((n, pl) => n + (Number(pl.pct) || 0), 0);
+    const informado = planos.some((pl) => pl.pct !== "" && pl.pct != null);
+    const resto = Math.round((100 - soma) * 1000) / 1000;
+    const fecha = informado && Math.abs(resto) < 0.001;
+    const avisoSoma = !informado ? "" : (fecha
+      ? "Os planos fecham 100% da participação deste sócio."
+      : "Os planos somam " + this.fmtPctCurto(soma) + "%. Falta " + this.fmtPctCurto(Math.max(resto, 0)) + "% para fechar a participação.");
+    const linhas = planos.map((pl, idx) => {
+      const filtro = F ? F.html(this.opcoesPlanoSocio(s, idx)) : "";
+      const tirar = planos.length > 1
+        ? `<button type="button" onclick="ParametrizacaoParceiroApp.removerPlanoSocio('${this.esc(s.id)}', ${idx})" style="height:36px;border:none;background:transparent;color:#dc2626;cursor:pointer;font-size:0.75rem;font-weight:700;">Tirar</button>`
+        : "";
+      return `<div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;margin-top:${idx ? "10px" : "0"};">
+        <div id="pp-vinculo-plano-${idx}-slot" class="pp-vinculo-slot" style="flex:1 1 240px;min-width:220px;">${filtro}</div>
+        <label style="display:flex;flex-direction:column;gap:4px;width:110px;font-size:0.68rem;font-weight:700;color:#475569;text-transform:uppercase;">% do plano
+          <input type="number" min="0" max="100" step="0.001" value="${pl.pct === "" ? "" : pl.pct}"
+            onchange="ParametrizacaoParceiroApp.setPlanoPct('${this.esc(s.id)}', ${idx}, this.value)"
+            style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;font-weight:800;background:#fff;text-transform:none;">
+        </label>
+        ${tirar}
+        <span style="flex:1 1 220px;font-size:0.75rem;font-weight:600;color:#047857;line-height:1.35;padding-top:22px;">${this.esc(this.textoTituloPlano(s, pl))}</span>
+      </div>`;
+    }).join("");
+    return `<div>
+      ${linhas}
+      <button type="button" onclick="ParametrizacaoParceiroApp.adicionarPlanoSocio('${this.esc(s.id)}')" style="margin-top:8px;height:32px;border:1px solid #105436;background:#fff;color:#105436;border-radius:6px;padding:0 12px;font-size:0.75rem;font-weight:800;cursor:pointer;">Adicionar plano</button>
+      ${avisoSoma ? `<p style="margin:6px 0 0;font-size:0.75rem;color:${fecha ? "#047857" : "#b45309"};">${this.esc(avisoSoma)}</p>` : ""}
+    </div>`;
+  },
+
   vinculoTituloHtml(p, s) {
     const F = window.MlEmpresaFilter;
-    const plano = F ? F.html(this.opcoesVinculo("plano", s)) : "";
+    const sociedade = this.isSociedade(p);
+    const plano = !sociedade && F ? F.html(this.opcoesVinculo("plano", s)) : "";
     const doc = F ? F.html(this.opcoesVinculo("doc", s)) : "";
     const avisoPlano = this.loadingCats ? "Carregando o plano financeiro…" : (this.planosSaida().length ? "" : "Nenhuma conta de resultado de saída carregada.");
     const avisoDoc = this.documentosTitulo().length ? "" : "Os tipos de documento ainda não carregaram.";
+    const regra = sociedade
+      ? "Cada plano gera um título. O percentual do plano vale sobre a participação do sócio: 70% e 30% de quem tem 50% do negócio são 35% e 15%."
+      : "O plano financeiro e o tipo de documento identificam esse título no contas a pagar. Só entra conta de resultado de saída, com código que começa com 2. O título ainda não é gerado nesta tela.";
     return `<div style="margin-top:12px;">
       <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:8px;">Título a pagar deste credor</div>
-      <div class="pp-vinculo-filtros">
-        <div id="pp-vinculo-plano-slot" class="pp-vinculo-slot">${plano}</div>
+      ${sociedade ? this.planosSocioHtml(p, s) : `<div class="pp-vinculo-filtros"><div id="pp-vinculo-plano-slot" class="pp-vinculo-slot">${plano}</div></div>`}
+      <div class="pp-vinculo-filtros" style="margin-top:10px;">
         <div id="pp-vinculo-doc-slot" class="pp-vinculo-slot">${doc}</div>
       </div>
-      <p style="margin:8px 0 0;font-size:0.75rem;color:#64748b;line-height:1.4;">${this.esc(this.textoRepasse(p))} O plano financeiro e o tipo de documento identificam esse título no contas a pagar. Só entra conta de resultado de saída, com código que começa com 2. O título ainda não é gerado nesta tela.</p>
+      <p style="margin:8px 0 0;font-size:0.75rem;color:#64748b;line-height:1.4;">${sociedade ? "" : this.esc(this.textoRepasse(p) + " ")}${regra}</p>
       ${avisoPlano || avisoDoc ? `<p style="margin:4px 0 0;font-size:0.75rem;color:#b45309;">${this.esc([avisoPlano, avisoDoc].filter(Boolean).join(" "))}</p>` : ""}
     </div>`;
   },
@@ -1286,36 +1544,71 @@ const ParametrizacaoParceiroApp = {
     return (p.socios || []).find((x) => String(x.id) === String(this.socioAberto)) || null;
   },
 
-  pintarVinculo(campo) {
+  pintarVinculo(campo, idx) {
     const s = this.socioVinculoAberto();
-    const slot = document.getElementById(campo === "plano" ? "pp-vinculo-plano-slot" : "pp-vinculo-doc-slot");
+    const slotId = campo === "plano"
+      ? (idx == null ? "pp-vinculo-plano-slot" : "pp-vinculo-plano-" + idx + "-slot")
+      : "pp-vinculo-doc-slot";
+    const slot = document.getElementById(slotId);
     if (!slot || !s || !window.MlEmpresaFilter) return;
-    slot.innerHTML = MlEmpresaFilter.html(this.opcoesVinculo(campo, s));
+    const opts = campo === "plano" && idx != null ? this.opcoesPlanoSocio(s, idx) : this.opcoesVinculo(campo, s);
+    slot.innerHTML = MlEmpresaFilter.html(opts);
     if (window.lucide && lucide.createIcons) lucide.createIcons();
   },
 
-  pintarVinculoLista(campo) {
+  pintarVinculoLista(campo, idx) {
     const s = this.socioVinculoAberto();
-    const id = campo === "plano" ? "pp-vinculo-plano" : "pp-vinculo-doc";
+    const id = campo === "plano" ? (idx == null ? "pp-vinculo-plano" : "pp-vinculo-plano-" + idx) : "pp-vinculo-doc";
     const el = document.getElementById(id + "-list");
-    if (el && s && window.MlEmpresaFilter) el.innerHTML = MlEmpresaFilter.listHtml(this.opcoesVinculo(campo, s));
+    if (!el || !s || !window.MlEmpresaFilter) return;
+    const opts = campo === "plano" && idx != null ? this.opcoesPlanoSocio(s, idx) : this.opcoesVinculo(campo, s);
+    el.innerHTML = MlEmpresaFilter.listHtml(opts);
+  },
+
+  pintarPlanosSocio() {
+    const s = this.socioVinculoAberto();
+    const p = this.current();
+    if (!s || !p || !this.isSociedade(p)) {
+      this.pintarVinculo("plano");
+      return;
+    }
+    this.normalizarPlanos(s).forEach((_, idx) => this.pintarVinculo("plano", idx));
   },
 
   bindVinculoFiltros() {
     if (!window.MlEmpresaFilter) return;
     const self = this;
-    ["plano", "doc"].forEach((campo) => {
-      const id = campo === "plano" ? "pp-vinculo-plano" : "pp-vinculo-doc";
+    const s = this.socioVinculoAberto();
+    const p = this.current();
+    const varios = !!(s && p && this.isSociedade(p));
+    const campos = varios
+      ? this.normalizarPlanos(s).map((_, idx) => ({ campo: "plano", idx }))
+      : [{ campo: "plano", idx: null }];
+    campos.push({ campo: "doc", idx: null });
+    campos.forEach(({ campo, idx }) => {
+      const id = campo === "plano" ? (idx == null ? "pp-vinculo-plano" : "pp-vinculo-plano-" + idx) : "pp-vinculo-doc";
       if (!document.getElementById(id)) return;
       MlEmpresaFilter.bind(id, {
         toggleOpen() {
           const ui = self.uiVinculo();
-          const aberto = campo === "plano" ? !ui.planoOpen : !ui.docOpen;
-          ui.planoOpen = campo === "plano" ? aberto : false;
-          ui.docOpen = campo === "doc" ? aberto : false;
-          ui.planoQuery = "";
-          ui.docQuery = "";
-          self.pintarVinculo("plano");
+          if (campo === "doc") {
+            const aberto = !ui.docOpen;
+            self.fecharPlanosUi();
+            ui.docOpen = aberto;
+            self.pintarPlanosSocio();
+            self.pintarVinculo("doc");
+            if (aberto) {
+              const q = document.getElementById(id + "-search");
+              if (q && q.focus) q.focus();
+            }
+            return;
+          }
+          const estado = idx == null ? ui : self.uiPlano(idx);
+          const aberto = idx == null ? !ui.planoOpen : !estado.open;
+          self.fecharPlanosUi();
+          if (idx == null) ui.planoOpen = aberto;
+          else self.uiPlano(idx).open = aberto;
+          self.pintarPlanosSocio();
           self.pintarVinculo("doc");
           if (aberto) {
             const q = document.getElementById(id + "-search");
@@ -1324,29 +1617,38 @@ const ParametrizacaoParceiroApp = {
         },
         close() {
           const ui = self.uiVinculo();
-          if (campo === "plano") {
-            if (!ui.planoOpen) return;
-            ui.planoOpen = false;
-          } else {
+          if (campo === "doc") {
             if (!ui.docOpen) return;
             ui.docOpen = false;
+            self.pintarVinculo("doc");
+            return;
           }
-          self.pintarVinculo(campo);
+          if (idx == null) {
+            if (!ui.planoOpen) return;
+            ui.planoOpen = false;
+            self.pintarVinculo("plano");
+            return;
+          }
+          const estado = self.uiPlano(idx);
+          if (!estado.open) return;
+          estado.open = false;
+          self.pintarVinculo("plano", idx);
         },
         setQuery(q) {
-          const ui = self.uiVinculo();
-          if (campo === "plano") ui.planoQuery = q || "";
-          else ui.docQuery = q || "";
-          self.pintarVinculoLista(campo);
+          if (campo === "doc") {
+            self.uiVinculo().docQuery = q || "";
+            self.pintarVinculoLista("doc");
+            return;
+          }
+          if (idx == null) self.uiVinculo().planoQuery = q || "";
+          else self.uiPlano(idx).query = q || "";
+          self.pintarVinculoLista("plano", idx);
         },
         toggleId(itemId, on) {
           if (!on) return;
-          const ui = self.uiVinculo();
-          ui.planoOpen = false;
-          ui.docOpen = false;
-          ui.planoQuery = "";
-          ui.docQuery = "";
-          self.setSocioVinculo(self.socioAberto, campo, String(itemId || ""));
+          self.fecharPlanosUi();
+          if (campo === "plano" && idx != null) self.setPlanoSocio(self.socioAberto, idx, String(itemId || ""));
+          else self.setSocioVinculo(self.socioAberto, campo, String(itemId || ""));
         }
       });
     });
@@ -2010,7 +2312,7 @@ const ParametrizacaoParceiroApp = {
       <h3 style="margin:0 0 6px;color:var(--color-primary);">Nova prestação de contas</h3>
       <p style="margin:0 0 16px;color:#64748b;font-size:0.82rem;line-height:1.45;">
         Informe a empresa (cobrança interna), o nome e se é <strong>parceria</strong>, <strong>sociedade</strong> ou <strong>mista</strong>.
-        Centro de custo e percentual de obra ficam para depois. Na aba Credor dá para cadastrar vários parceiros ou sócios, cada um com o seu percentual.
+        Centro de custo e percentual de obra ficam para depois. Com um parceiro, o percentual fica na obra. Com dois ou mais, cada um informa a parte dele nessa fatia.
         Mista junta os dois: sócios com participação e rateio por obra.
       </p>
       <div style="display:flex;flex-direction:column;gap:12px;min-width:0;">
@@ -2166,6 +2468,9 @@ const ParametrizacaoParceiroApp = {
     const total = this.totalSociosPct(p);
     const resto = Math.round((100 - total) * 1000) / 1000;
     const socios = this.sociosOrdenados(p.socios);
+    const sociedade = this.isSociedade(p);
+    const divideFatia = this.pedeFatiaCredor(p);
+    const mostraPct = sociedade || divideFatia;
     const card = (s) => {
       const aberto = String(this.socioAberto || "") === String(s.id);
       const banks = s.bankList || [];
@@ -2183,24 +2488,42 @@ const ParametrizacaoParceiroApp = {
           </span>
         </label>`;
       }).join("");
-      const pctTxt = s.sharePct === "" || s.sharePct == null ? "sem %" : this.fmtPct(s.sharePct) + "%";
+      const fatias = divideFatia ? this.fatiasDoSocio(p, s.sharePct) : [];
+      const pctTxt = !mostraPct ? "" : (s.sharePct === "" || s.sharePct == null
+        ? "sem %"
+        : (fatias.length === 1
+          ? this.fmtPctCurto(s.sharePct) + "% · " + this.fmtPctCurto(fatias[0].efetivo) + "%"
+          : this.fmtPct(s.sharePct) + "%"));
+      const fatiaTxt = fatias.length
+        ? fatias.map((f) => "obra " + f.code + ": " + this.fmtPctCurto(s.sharePct) + "% de " + this.fmtPctCurto(f.base) + "% = " + this.fmtPctCurto(f.efetivo) + "%").join(" · ")
+        : (divideFatia ? "Esta parte vale sobre o percentual já configurado em cada obra." : "");
+      const campoPct = sociedade
+        ? `<label style="display:flex;flex-direction:column;gap:4px;width:150px;font-size:0.68rem;font-weight:700;color:#475569;text-transform:uppercase;">% de participação
+              <input type="number" min="0" max="100" step="0.001" value="${s.sharePct === "" ? "" : s.sharePct}"
+                onchange="ParametrizacaoParceiroApp.setSocioPct('${this.esc(s.id)}', this.value)"
+                style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;font-weight:800;background:#fff;text-transform:none;">
+            </label>`
+        : (divideFatia
+          ? `<label style="display:flex;flex-direction:column;gap:4px;min-width:220px;flex:1;font-size:0.68rem;font-weight:700;color:#475569;text-transform:uppercase;">% da fatia da obra
+              <input type="number" min="0" max="100" step="0.001" value="${s.sharePct === "" ? "" : s.sharePct}"
+                onchange="ParametrizacaoParceiroApp.setSocioPct('${this.esc(s.id)}', this.value)"
+                style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;font-weight:800;background:#fff;text-transform:none;max-width:160px;">
+              <span style="font-weight:600;text-transform:none;color:#047857;line-height:1.35;">${this.esc(fatiaTxt)}</span>
+            </label>`
+          : "");
       return `<div style="border:1px solid #d1fae5;background:#f0fdf4;border-radius:10px;overflow:visible;">
         <button type="button" onclick="ParametrizacaoParceiroApp.toggleSocio('${this.esc(s.id)}')"
           style="width:100%;display:flex;align-items:center;gap:10px;text-align:left;border:none;background:transparent;padding:12px 14px;cursor:pointer;">
           <span style="width:16px;color:#065f46;font-weight:800;">${aberto ? "▾" : "▸"}</span>
           <span style="min-width:0;flex:1;">
             <span style="display:block;font-weight:800;color:#065f46;">${this.esc(s.name)}</span>
-            <span style="display:block;font-size:0.75rem;color:#047857;margin-top:2px;">ID ${this.esc(s.id)}${s.cpfCnpj ? " · " + this.esc(s.cpfCnpj) : ""}${s.planoId ? " · " + this.esc(s.planoId) : ""}${s.docTipo ? " · " + this.esc(s.docTipo) : ""}</span>
+            <span style="display:block;font-size:0.75rem;color:#047857;margin-top:2px;">ID ${this.esc(s.id)}${s.cpfCnpj ? " · " + this.esc(s.cpfCnpj) : ""}${this.resumoPlanosSocio(p, s)}${s.docTipo ? " · " + this.esc(s.docTipo) : ""}</span>
           </span>
-          <span style="font-weight:800;color:#105436;font-variant-numeric:tabular-nums;">${this.esc(pctTxt)}</span>
+          ${pctTxt ? `<span style="font-weight:800;color:#105436;font-variant-numeric:tabular-nums;">${this.esc(pctTxt)}</span>` : ""}
         </button>
         ${aberto ? `<div style="padding:0 14px 12px;border-top:1px solid #d1fae5;">
           <div style="display:flex;justify-content:flex-end;gap:12px;align-items:flex-end;flex-wrap:wrap;padding-top:10px;">
-            <label style="display:flex;flex-direction:column;gap:4px;width:150px;font-size:0.68rem;font-weight:700;color:#475569;text-transform:uppercase;">% de participação
-              <input type="number" min="0" max="100" step="0.001" value="${s.sharePct === "" ? "" : s.sharePct}"
-                onchange="ParametrizacaoParceiroApp.setSocioPct('${this.esc(s.id)}', this.value)"
-                style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;font-weight:800;background:#fff;">
-            </label>
+            ${campoPct}
             <button type="button" onclick="ParametrizacaoParceiroApp.removeSocio('${this.esc(s.id)}')" style="height:36px;border:none;background:transparent;color:#dc2626;cursor:pointer;font-size:0.78rem;font-weight:700;">Remover</button>
           </div>
           ${this.vinculoTituloHtml(p, s)}
@@ -2215,20 +2538,25 @@ const ParametrizacaoParceiroApp = {
     return `
       <div class="crm-card" style="padding:16px;">
         <h3 style="margin:0 0 4px;font-size:0.95rem;color:var(--color-primary);">${pessoas} (credores)</h3>
-        <p style="margin:0 0 12px;font-size:0.78rem;color:#64748b;">Cada ${pessoa} é um credor do Sienge, com o percentual de participação. No credor ficam o plano financeiro e o tipo de documento do repasse. O centro de custo é o do loteador.</p>
+        <p style="margin:0 0 12px;font-size:0.78rem;color:#64748b;">${divideFatia
+          ? `Cada ${pessoa} é um credor do Sienge. O percentual da obra já está configurado. Aqui entra a parte de cada um nessa fatia: 50% de 36% são 18%.`
+          : (sociedade
+            ? `Cada ${pessoa} é um credor do Sienge, com o percentual de participação.`
+            : `Cada ${pessoa} é um credor do Sienge. O percentual fica na obra, como já está configurado.`)} No credor ficam o plano financeiro e o tipo de documento do repasse. O centro de custo é o do loteador.</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
           <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;min-width:120px;">
             <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;">${pessoas}</div>
             <strong style="color:#0f172a;">${socios.length}</strong>
           </div>
+          ${mostraPct ? `
           <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;min-width:140px;">
-            <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;">Participação</div>
+            <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;">${divideFatia ? "Fatia" : "Participação"}</div>
             <strong id="pp-socios-total" style="color:#105436;">${this.fmtPct(total)}%</strong>
           </div>
           <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;min-width:140px;">
-            <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;">Restante</div>
+            <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;">${divideFatia ? "Restante da fatia" : "Restante"}</div>
             <strong id="pp-socios-resto" style="color:${Math.abs(resto) < 0.001 ? "#105436" : "#b45309"};">${this.fmtPct(resto)}%</strong>
-          </div>
+          </div>` : ""}
         </div>
         <div style="margin-bottom:14px;">
           <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:8px;">Dia do pagamento dos ${pessoas.toLowerCase()}</div>

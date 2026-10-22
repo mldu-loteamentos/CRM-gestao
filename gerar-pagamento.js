@@ -2042,9 +2042,11 @@ const GerarPagamentoApp = {
     const ids = new Set(planos.map((p) => String(p.id || "").trim()).filter(Boolean));
     const doc = String((r && r.docId) || "").trim();
     return this.parceriasRateio().some((part) => (part.socios || []).some((s) => {
-      const plano = String(s.planoId || "").trim();
+      const lista = Array.isArray(s.planos) && s.planos.length
+        ? s.planos.map((pl) => String((pl && pl.id) || "").trim()).filter(Boolean)
+        : [String(s.planoId || "").trim()].filter(Boolean);
       const tipo = String(s.docTipo || "").trim();
-      return !!plano && ids.has(plano) && (!tipo || !doc || tipo === doc);
+      return lista.some((plano) => ids.has(plano)) && (!tipo || !doc || tipo === doc);
     }));
   },
 

@@ -996,6 +996,7 @@ window.EngenhariaCaucaoApp = {
   },
 
   async consultar(aoVivo) {
+    if (this.state.loading) return;
     const start = this.state.startDate;
     const end = this.state.endDate;
     if (!start || !end) {
@@ -2121,10 +2122,8 @@ window.EngenhariaCaucaoApp = {
             </div>
             <div class="ecau-actions">
               <div class="ecau-actions-main">
-                <button type="button" class="btn btn-primary btn-sm" ${busy ? "disabled" : ""} onclick="EngenhariaCaucaoApp.consultar()">
-                  ${busy
-                    ? '<span class="ecau-spin" aria-hidden="true"></span>'
-                    : '<i data-lucide="search" style="width:14px;height:14px;"></i>'}
+                <button type="button" class="btn btn-primary btn-sm" onclick="EngenhariaCaucaoApp.consultar()">
+                  <i data-lucide="search" style="width:14px;height:14px;"></i>
                   Consultar
                 </button>
                 <button type="button" class="btn btn-cancel btn-sm" ${busy ? "disabled" : ""} onclick="EngenhariaCaucaoApp.limpar()">Limpar</button>

@@ -1221,6 +1221,21 @@ const OrcamentoRepassesApp = {
       if (kind === "sociedade" || kind === "mista") {
         (p.socios || []).forEach((s) => {
           if (!s || !(Number(s.sharePct) > 0)) return;
+          const app = typeof ParametrizacaoParceiroApp !== "undefined" ? ParametrizacaoParceiroApp : (window.ParametrizacaoParceiroApp || null);
+          const todos = app && typeof app.titulosDoSocio === "function" ? app.titulosDoSocio(s) : [];
+          const dividido = todos.length > 1 || (todos.length === 1 && todos[0].pctPlano !== 100);
+          const tits = todos.filter((t) => t.efetivo > 0);
+          if (dividido && tits.length) {
+            tits.forEach((t) => {
+              const nomePlano = t.planoNome || t.planoId;
+              socios.push({
+                id: String(s.id || "") + "|" + t.planoId,
+                nome: (s.name || "Sócio") + (nomePlano ? " · " + nomePlano : ""),
+                pct: t.efetivo
+              });
+            });
+            return;
+          }
           socios.push({ id: String(s.id || ""), nome: s.name || "Sócio", pct: Number(s.sharePct) || 0 });
         });
       }
