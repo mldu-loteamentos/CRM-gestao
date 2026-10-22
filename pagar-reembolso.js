@@ -3,6 +3,7 @@ const PagarReembolsoApp = {
   itens: [],
   documentosUsados: [],
   marcados: {},
+  retornos: [],
   carregando: false,
   liberando: false,
   CREDOR: 2244,
@@ -150,24 +151,69 @@ const PagarReembolsoApp = {
     return v;
   },
 
+  extrairUnidade(sale, cc) {
+    if (!sale) return null;
+    const CJ = window.CustasJudiciaisApp;
+    const limpar = (v) => CJ && typeof CJ.limparUnidade === "function" ? CJ.limparUnidade(v, cc) : String(v || "").trim();
+    const lista = sale.salesContractUnits || (Array.isArray(sale.units) ? sale.units : []);
+    const su = (lista || []).find((u) => u && (u.main === true || u.main === "S")) || (lista || [])[0] || {};
+    let nome = limpar(su.name || su.unitName || sale.unitName || this.textoUnidade(sale.units));
+    if (!nome && sale.unitId) {
+      const partes = String(sale.unitId).split("-");
+      if (partes.length >= 3) nome = limpar(partes.slice(2).join("-"));
+    }
+    const id = su.id != null && su.id !== "" ? su.id : (sale.siengeUnitId || "");
+    if (!nome && (id == null || id === "")) return null;
+    return { name: nome || "", id: id };
+  },
+
   async unidadeRemota(item) {
     const sid = String(item.saleId || "").replace(/\D/g, "");
-    if (!sid) return "";
-    const CJ = window.CustasJudiciaisApp;
-    const limpar = (v, cc) => CJ && typeof CJ.limparUnidade === "function" ? CJ.limparUnidade(v, cc) : String(v || "").trim();
+    const cc = String(item.costCenterId || "").replace(/\D/g, "");
+    let cid = String(item.customerId || "").replace(/\D/g, "");
     let bill = null;
-    try { bill = await this.get("/accounts-receivable/receivable-bills/" + encodeURIComponent(sid)); } catch (e) { bill = null; }
-    const cc = item.costCenterId || (bill && (bill.enterpriseId || (Array.isArray(bill.costCentersId) ? bill.costCentersId[0] : "")));
-    const daConta = limpar(this.textoUnidade(bill && (bill.units || bill.unityName || bill.unitName)), cc);
-    if (daConta) return daConta;
-    let sale = null;
-    try {
-      const data = await this.get("/sales-contracts?receivableBillId=" + encodeURIComponent(sid) + "&limit=5");
-      sale = ((data && data.results) || [])[0] || null;
-    } catch (e) { sale = null; }
-    if (sale && CJ && typeof CJ.nomeDeRegistro === "function") return CJ.nomeDeRegistro(sale, cc);
-    const unidade = sale && sale.salesContractUnits && sale.salesContractUnits[0];
-    return limpar(unidade && (unidade.name || unidade.unitName), cc);
+    if (sid) {
+      try { bill = await this.get("/accounts-receivable/receivable-bills/" + encodeURIComponent(sid)); } catch (e) { bill = null; }
+    }
+    if (!cid && bill) cid = String(bill.customerId || bill.clientId || "").replace(/\D/g, "");
+    if (bill) {
+      if (!item.customerName) item.customerName = bill.customerName || bill.clientName || "";
+      if (!item.companyName && bill.companyName) item.companyName = bill.companyName;
+      if (!item.costCenterId) {
+        const centro = bill.enterpriseId || (Array.isArray(bill.costCentersId) ? bill.costCentersId[0] : "");
+        if (centro) item.costCenterId = String(centro).replace(/\D/g, "");
+      }
+    }
+    const contratos = [];
+    if (cid && window.SiengeAPI && typeof SiengeAPI.getSales === "function") {
+      try {
+        const sales = await SiengeAPI.getSales(cid);
+        (sales || []).forEach((s) => contratos.push(s));
+      } catch (e) {}
+    }
+    if (!contratos.length && cid) {
+      try {
+        const res = await this.get("/sales-contracts?customerId=" + encodeURIComponent(cid) + "&limit=200");
+        ((res && res.results) || []).forEach((c) => contratos.push(c));
+      } catch (e) {}
+    }
+    const tituloDe = (c) => String(c.receivableBillId || c.billReceivableId || "").replace(/\D/g, "");
+    const centroDe = (c) => String(c.enterpriseId || c.costCenterId || "").replace(/\D/g, "");
+    const centro = cc || String(item.costCenterId || "").replace(/\D/g, "");
+    let sale = contratos.find((c) => sid && tituloDe(c) === sid) || null;
+    if (!sale) {
+      const doCentro = contratos.filter((c) => centro && centroDe(c) === centro);
+      if (doCentro.length === 1) sale = doCentro[0];
+    }
+    if (!sale && contratos.length === 1) sale = contratos[0];
+    if (sale && !item.customerName) item.customerName = sale.customerName || "";
+    const achada = this.extrairUnidade(sale, centro);
+    if (achada && (achada.name || achada.id)) return achada;
+    const CJ = window.CustasJudiciaisApp;
+    const limpar = (v) => CJ && typeof CJ.limparUnidade === "function" ? CJ.limparUnidade(v, centro) : String(v || "").trim();
+    const daConta = limpar(this.textoUnidade(bill && (bill.units || bill.unityName || bill.unitName)));
+    if (daConta) return { name: daConta, id: "" };
+    return null;
   },
 
   async completarUnidades(itens) {
@@ -177,13 +223,25 @@ const PagarReembolsoApp = {
       const cc = item.costCenterId;
       const gravada = CJ && typeof CJ.limparUnidade === "function" ? CJ.limparUnidade(item.unitName, cc) : String(item.unitName || "").trim();
       let nome = gravada;
+      let unitId = item.siengeUnitId || "";
       if (!nome && CJ && typeof CJ.unidadeConhecida === "function") nome = CJ.unidadeConhecida(item.customerId, item.saleId, cc);
-      if (!nome) nome = await this.unidadeRemota(item);
-      if (!nome) return;
-      item.unitName = nome;
-      if (nome === gravada || !fc || !item.id) return;
+      if (!nome || !unitId) {
+        const remota = await this.unidadeRemota(item);
+        if (remota) {
+          if (!nome && remota.name) nome = remota.name;
+          if (!unitId && remota.id) unitId = remota.id;
+        }
+      }
+      if (nome) item.unitName = nome;
+      if (unitId) item.siengeUnitId = unitId;
+      if (!fc || !item.id) return;
+      const patch = {};
+      if (nome && nome !== gravada) patch.unitName = nome;
+      if (unitId && String(unitId) !== String(item._siengeUnitId || "")) patch.siengeUnitId = unitId;
+      if (item.customerName) patch.customerName = item.customerName;
+      if (!Object.keys(patch).length) return;
       try {
-        await fc.setDoc(fc.doc(window.firebaseDb, "custas_judiciais", item.id), { unitName: nome }, { merge: true });
+        await fc.setDoc(fc.doc(window.firebaseDb, "custas_judiciais", item.id), patch, { merge: true });
       } catch (e) {}
     }));
   },
@@ -191,8 +249,9 @@ const PagarReembolsoApp = {
   pintar() {
     const lista = document.getElementById("pr-lista");
     if (!lista) return;
+    const avisos = (this.retornos || []).map((r) => `<p class="pr-retorno${r.ok ? "" : " is-erro"}">${this.esc(r.texto)}</p>`).join("");
     if (!this.itens.length) {
-      lista.innerHTML = `<div class="cc-scroll cj-scroll"><table class="cc-table cj-cc"><tbody><tr><td class="cj-vazio">Não há reembolso pendente.</td></tr></tbody></table></div>`;
+      lista.innerHTML = avisos + `<div class="cc-scroll cj-scroll"><table class="cc-table cj-cc"><tbody><tr><td class="cj-vazio">Não há reembolso pendente.</td></tr></tbody></table></div>`;
       return;
     }
     const linhas = this.itens.map((item) => {
@@ -223,7 +282,7 @@ const PagarReembolsoApp = {
         </td>
       </tr>`;
     }).join("");
-    lista.innerHTML = `<div class="cc-scroll cj-scroll"><table class="cc-table cj-cc pr-cc">
+    lista.innerHTML = avisos + `<div class="cc-scroll cj-scroll"><table class="cc-table cj-cc pr-cc">
       <colgroup>
         <col class="pr-c-check"><col class="pr-c-tit"><col><col><col><col class="pr-c-cc"><col class="cj-c-data"><col><col class="cj-c-valor"><col><col class="cj-c-ico">
       </colgroup>
@@ -292,17 +351,18 @@ const PagarReembolsoApp = {
     for (let i = 0; i < grupos.length; i++) {
       this.carga("Gerando o título a pagar no Sienge…", Math.round(((i + 0.2) / grupos.length) * 100));
       try {
-        const billId = await this.gerarGrupo(grupos[i]);
-        feitos.push("Título " + grupos[i][0].saleId + " → " + billId);
+        const gerado = await this.gerarGrupo(grupos[i]);
+        const extra = gerado.avisos && gerado.avisos.length ? " " + gerado.avisos.join(" ") : "";
+        feitos.push("Título a pagar " + gerado.billId + " gerado para o título " + grupos[i][0].saleId + "." + extra);
         grupos[i].forEach((item) => { delete this.marcados[item.id]; });
       } catch (e) {
-        falhas.push("Título " + grupos[i][0].saleId + ": " + ((e && e.message) || e));
+        falhas.push("Não gerei o título a pagar do título " + grupos[i][0].saleId + ": " + ((e && e.message) || e));
       }
     }
     this.liberando = false;
+    this.retornos = feitos.map((texto) => ({ ok: true, texto: texto })).concat(falhas.map((texto) => ({ ok: false, texto: texto })));
     await this.carregar();
-    const msg = [].concat(feitos, falhas).join("\n");
-    alert(msg || "Nenhum título foi gerado.");
+    alert(this.retornos.map((r) => r.texto).join("\n") || "Nenhum título foi gerado.");
   },
 
   siengeAuth() {
@@ -452,9 +512,11 @@ const PagarReembolsoApp = {
     const dep = await this.departamentoTesouraria();
     await this.garantirCentros();
     const rateio = this.rateio(ccId);
-    const unidade = await this.unidade(ccId, primeiro.unitName);
-    if (!unidade || unidade.id == null) {
-      throw new Error("Não encontrei a unidade \"" + (primeiro.unitName || "") + "\" no centro de custo " + ccId + ".");
+    if (!primeiro.unitName || !primeiro.siengeUnitId) await this.completarUnidades([primeiro]);
+    let unidade = primeiro.siengeUnitId ? { id: primeiro.siengeUnitId, name: primeiro.unitName || "" } : null;
+    if (!unidade || unidade.id == null || unidade.id === "") unidade = await this.unidade(ccId, primeiro.unitName);
+    if (!unidade || unidade.id == null || unidade.id === "") {
+      throw new Error("Não encontrei a unidade " + (primeiro.unitName || "do título " + primeiro.saleId) + " no centro de custo " + ccId + ".");
     }
     const unitId = /^\d+$/.test(String(unidade.id)) ? parseInt(unidade.id, 10) : unidade.id;
     const payload = {
@@ -498,6 +560,7 @@ const PagarReembolsoApp = {
         const last = loc.split("/").filter(Boolean).pop();
         if (last && !isNaN(parseInt(last, 10))) billId = last;
       }
+      if (!billId) billId = await this.acharTitulo(companyId, doc, hoje);
       if (!billId) throw new Error("O Sienge criou o título, mas não devolveu o número.");
       billId = String(billId);
     } catch (e) {
@@ -533,7 +596,17 @@ const PagarReembolsoApp = {
     this.auditar(avisos.length ? "erro" : "ok",
       "Título " + billId + " gerado para reembolso de custas do título " + primeiro.saleId + " · credor 2244 · empresa " + companyId + (avisos.length ? " · " + avisos[0] : ""),
       { billId: billId, companyId: companyId, cliente: primeiro.customerName || "", saleId: primeiro.saleId, documentNumber: doc, total: total, avisos: avisos });
-    return avisos.length ? (billId + " · " + avisos.join(" ")) : billId;
+    return { billId: billId, avisos: avisos };
+  },
+
+  async acharTitulo(companyId, doc, hoje) {
+    try {
+      const busca = await this.get("/bills?startDate=" + encodeURIComponent(hoje) + "&endDate=" + encodeURIComponent(hoje) + "&debtorId=" + encodeURIComponent(companyId) + "&creditorId=" + this.CREDOR);
+      const found = ((busca && busca.results) || []).find((b) => String(b.documentNumber || "") === String(doc || ""));
+      return found && (found.id || found.billId) || "";
+    } catch (e) {
+      return "";
+    }
   },
 
   async enviarPix(billId) {

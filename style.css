@@ -10592,6 +10592,9 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .cj-anexos-bloco li:nth-child(even) { background: #f7faf8; }
 .cj-anexos-bloco a { color: #105436; font-weight: 700; }
 .pr-toolbar { align-items: center; margin-bottom: 12px; }
+.pr-retorno { margin: 0 0 12px; padding: 12px 14px; border-radius: 8px; background: #e7f6ee; color: #105436; font-weight: 700; }
+.pr-retorno.is-erro { background: #fff7ed; color: #9a3412; }
+.cc-table.pr-cc td { white-space: nowrap; }
 .pr-toolbar .cj-nota { flex: 1; min-width: 220px; }
 .cc-table.pr-cc col.pr-c-check { width: 42px; }
 .cc-table.pr-cc col.pr-c-tit { width: 78px; }
