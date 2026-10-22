@@ -108,9 +108,9 @@ const ProcessoContraApp = {
     root.innerHTML = `<div class="pc-page">
         <p class="cj-nota">Busque o cliente. O título a receber fica no campo ao lado. A outra parte entra com o processo contra a empresa escolhida.</p>
         <div class="pc-buscas">
-          <label>Cliente
+          <label>Nome do Cliente
             <div class="pc-drop">
-              <input type="text" id="pc-q" class="pc-campo" placeholder="Nome do cliente..." autocomplete="off" value="${this.esc(this.buscaCliente)}">
+              <input type="text" id="pc-q" class="pc-campo" placeholder="Digite para buscar..." autocomplete="off" value="${this.esc(this.buscaCliente)}">
               <div id="pc-clientes" class="pc-dd"></div>
             </div>
           </label>

@@ -1,7 +1,7 @@
 // DFC do orçamento 2027. A visão de receitas (OrcamentoApp) não passa por aqui.
 const OrcamentoDfcApp = {
   LS: "crm_orcamento_dfc_2027",
-  LS_SALDO: "orc_dfc_saldos_contas_v2",
+  LS_SALDO: "orc_dfc_balancete_v1",
   MESES: ["JAN", "FEV", "MAR", "ABR", "MAI", "JUN", "JUL", "AGO", "SET", "OUT", "NOV", "DEZ"],
   selectedCompanyIds: [],
   selectedCcIds: [],
@@ -997,9 +997,40 @@ const OrcamentoDfcApp = {
     return null;
   },
 
-  /* A posição de saldos da empresa soma conta corrente, aplicação, mútuo e bloqueio. */
+  /* Caixa e equivalentes do balancete (1.1.01), sem a Terracotta. */
   ehContaAnalise(c) {
-    return !!(c && String(c.numero || "").trim());
+    if (!c || !c.analitica) return false;
+    const cod = String(c.numero || "");
+    const nome = this.norm(c.nome);
+    if (cod.indexOf("1.1.01.03.016") === 0 || cod.indexOf("1.01.01.03.016") === 0) return false;
+    if (nome.indexOf("TERRACOTTA") >= 0) return false;
+    return cod.indexOf("1.1.01") === 0 || cod.indexOf("1.01.01") === 0;
+  },
+
+  diaSeguinte(iso) {
+    const p = String(iso || "").split("-").map(Number);
+    const d = new Date(p[0], (p[1] || 1) - 1, (p[2] || 1) + 1);
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return d.getFullYear() + "-" + mm + "-" + dd;
+  },
+
+  sinalBalancete(valor, tipo) {
+    const n = Number(valor);
+    if (!Number.isFinite(n)) return null;
+    const t = String(tipo || "").trim().toUpperCase();
+    if (t.indexOf("C") === 0) return -Math.abs(n);
+    if (t.indexOf("D") === 0) return Math.abs(n);
+    return n;
+  },
+
+  linhaBalancete(b) {
+    const codigo = String(b.accountId || b.account || b.code || "").trim();
+    const nome = String(b.accountName || b.name || b.description || b.accountDescription || codigo).trim();
+    const temAnterior = b.previousBalance != null && b.previousBalance !== "";
+    const bruto = temAnterior ? b.previousBalance : (b.balanceCarriedForward != null ? b.balanceCarriedForward : b.balance);
+    const tipo = temAnterior ? (b.previousBalanceType || b.balanceType) : (b.balanceCarriedForwardType || b.balanceType);
+    return { codigo: codigo, nome: nome, valor: this.sinalBalancete(bruto, tipo) };
   },
 
   contasEscolhidas() {
@@ -1043,9 +1074,9 @@ const OrcamentoDfcApp = {
       this._saldoMap = {};
       return;
     }
-    if (!api || typeof api.getAccountBalances !== "function") {
+    if (!api || typeof api.getTrialBalance !== "function") {
       this._saldoEstado = "erro";
-      this._saldoErro = "A consulta de saldo das contas não está disponível.";
+      this._saldoErro = "A consulta do balancete de verificação não está disponível.";
       return;
     }
     this._saldoEstado = "lendo";
@@ -1054,72 +1085,56 @@ const OrcamentoDfcApp = {
     const datas = [];
     for (let i = 0; i <= corte; i++) datas.push(this.dataSaldo(2026, i));
     try {
-      const contas = [];
-      const vistos = new Set();
-      if (typeof api.getCheckingAccounts === "function") {
-        await Promise.all(empresas.map(async (emp) => {
-          const res = await api.getCheckingAccounts(emp.id, { allStatuses: true });
-          ((res && res.results) || []).forEach((raw) => {
-            const type = raw && raw.accountType;
-            const typeId = String((type && typeof type === "object" ? type.id : raw.accountTypeId) || "").trim().toUpperCase();
-            const numero = String(raw.accountNumber || raw.number || "").trim();
-            if (!numero) return;
-            const k = String(emp.id) + "|" + numero;
-            if (vistos.has(k)) return;
-            vistos.add(k);
-            contas.push({
-              chave: k,
-              empresa: String(emp.id),
-              numero: numero,
-              nome: String(raw.accountName || raw.name || numero).trim(),
-              tipo: typeId
-            });
-          });
-        }));
-      }
       const mapa = {};
+      const porConta = new Map();
       const jobs = [];
       empresas.forEach((emp) => datas.forEach((dt) => jobs.push({ emp: String(emp.id), dt: dt })));
       let cursor = 0;
+      const self = this;
       const worker = async () => {
         while (cursor < jobs.length) {
           const job = jobs[cursor++];
-          const lista = await api.getAccountBalances(job.dt, { companyId: job.emp, showLast: true });
+          const diaPedido = self.diaSeguinte(job.dt);
+          const lista = await api.getTrialBalance(job.emp, diaPedido, diaPedido);
           const dia = mapa[job.dt] || (mapa[job.dt] = {});
           (lista || []).forEach((b) => {
-            const co = String(b.companyId != null ? b.companyId : (b.idCompany != null ? b.idCompany : job.emp));
-            if (co !== String(job.emp)) return;
-            const num = String(b.accountNumber || b.number || "").trim();
-            if (!num) return;
-            const valor = this.valorSaldo(b);
-            if (valor == null) return;
-            const dtBal = String(b.balanceDate || "").slice(0, 10);
-            if (dtBal && dtBal > job.dt) return;
-            const k = job.emp + "|" + num;
-            const prev = dia[k];
-            if (!prev || (dtBal && dtBal >= (prev.dt || ""))) dia[k] = { valor: valor, dt: dtBal || job.dt };
-            if (!vistos.has(k)) {
-              vistos.add(k);
-              contas.push({ chave: k, empresa: job.emp, numero: num, nome: String(b.accountName || b.name || num).trim(), tipo: "" });
+            const linha = self.linhaBalancete(b);
+            if (!linha.codigo || linha.valor == null) return;
+            const k = job.emp + "|" + linha.codigo;
+            dia[k] = linha.valor;
+            if (!porConta.has(k)) {
+              porConta.set(k, { chave: k, empresa: job.emp, numero: linha.codigo, nome: linha.nome, analitica: true });
             }
           });
         }
       };
-      const n = Math.min(4, jobs.length || 1);
+      const n = Math.min(3, jobs.length || 1);
       await Promise.all(Array.from({ length: n }, () => worker()));
       if (token !== this._sToken) return;
-      const flat = {};
-      Object.keys(mapa).forEach((dt) => {
-        flat[dt] = {};
-        Object.keys(mapa[dt]).forEach((k) => { flat[dt][k] = mapa[dt][k].valor; });
+      const porEmpresa = {};
+      porConta.forEach((c) => {
+        if (!porEmpresa[c.empresa]) porEmpresa[c.empresa] = [];
+        porEmpresa[c.empresa].push(c.numero);
       });
-      this._saldoContas = contas.sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt"));
-      this._saldoMap = flat;
-      this._saldoEstado = "ok";
+      porConta.forEach((c) => {
+        const irmas = porEmpresa[c.empresa] || [];
+        c.analitica = !irmas.some((o) => o !== c.numero && o.indexOf(c.numero + ".") === 0);
+      });
+      const caixa = [];
+      porConta.forEach((c) => {
+        if (!c.analitica) return;
+        const cod = c.numero;
+        if (cod.indexOf("1.1.01") === 0 || cod.indexOf("1.01.01") === 0) caixa.push(c);
+      });
+      const lista = caixa.length ? caixa : Array.from(porConta.values()).filter((c) => c.analitica);
+      lista.sort((a, b) => String(a.numero).localeCompare(String(b.numero), "pt-BR", { numeric: true }));
+      this._saldoContas = lista;
+      this._saldoMap = mapa;
+      this._saldoEstado = lista.length ? "ok" : "vazio";
     } catch (e) {
       if (token !== this._sToken) return;
       this._saldoEstado = "erro";
-      this._saldoErro = (e && e.message) || "Não consegui ler o saldo das contas.";
+      this._saldoErro = (e && e.message) || "Não consegui ler o balancete de verificação.";
     }
     this.atualizarSaldosDom();
   },
@@ -1223,9 +1238,9 @@ const OrcamentoDfcApp = {
     }).join("") : "";
     const resultado = this.resultadoMes(mes);
     return `<section class="orc-dfc-quadro">
-      ${this._saldoPicker ? `<div class="orc-dfc-checks"><p>A marca inicial é a posição de saldos inteira: conta corrente, aplicação, mútuo e bloqueio. Vale para todos os meses.</p>${checks || "<span>Nenhuma conta voltou da consulta.</span>"}</div>` : ""}
+      ${this._saldoPicker ? `<div class="orc-dfc-checks"><p>Contas analíticas do balancete, em Caixa e equivalentes. A marca inicial deixa a Terracotta de fora. Vale para todos os meses.</p>${checks || "<span>Nenhuma conta analítica voltou do balancete.</span>"}</div>` : ""}
       <h3>Contas em ${this.MESES[mes]} de 2026</h3>
-      <p>Início em ${this.dataBr(iniData)} e fim em ${this.dataBr(fimData)}, na mesma posição de saldos. A variação é o saldo final menos o saldo inicial. A geração do resultado deste mês no DFC foi ${this.money(resultado)}.</p>
+      <p>Início em ${this.dataBr(iniData)} e fim em ${this.dataBr(fimData)}, pelo balancete de verificação societário. A variação é o saldo final menos o saldo inicial. A geração do resultado deste mês no DFC foi ${this.money(resultado)}.</p>
       <div class="orc-dfc-scroll orc-dfc-quadro-scroll">
         <table class="orc-dfc-table orc-dfc-quadro-tab">
           <thead><tr><th>Conta</th><th>Saldo em ${this.dataBr(iniData)}</th><th>Saldo em ${this.dataBr(fimData)}</th><th>Variação</th></tr></thead>

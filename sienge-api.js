@@ -3592,6 +3592,27 @@ const SiengeApiService = {
     }
   },
 
+  async getTrialBalance(companyId, initialPeriod, finalPeriod) {
+    const ini = String(initialPeriod || "").slice(0, 10);
+    const fim = String(finalPeriod || "").slice(0, 10);
+    if (!companyId || !ini || !fim) return [];
+    const base = `/trial-balance?companyId=${encodeURIComponent(companyId)}&initialPeriod=${ini}&finalPeriod=${fim}&onlyAccountsWithMovements=false`;
+    const tentativas = [base + "&reportType=SOCIETARY", base + "&reportType=S", base];
+    let vazio = null;
+    let ultimo = null;
+    for (let i = 0; i < tentativas.length; i++) {
+      try {
+        const lista = await siengeFetchAllPages(tentativas[i], 200);
+        if (lista && lista.length) return lista;
+        vazio = lista || [];
+      } catch (e) {
+        ultimo = e;
+      }
+    }
+    if (vazio) return vazio;
+    throw ultimo || new Error("Balancete indisponível");
+  },
+
   async getAccountBalances(balanceDate, opts = {}) {
     const date = String(balanceDate || "").slice(0, 10);
     const showLast = opts.showLast === false ? "N" : "S";
