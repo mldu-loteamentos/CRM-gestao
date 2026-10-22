@@ -25221,11 +25221,14 @@ window.centerDistratoSignatures = function(html) {
     const topo = idx === 0 ? 22 : 40;
     if (g.vendedor && g.itens.length > 1) {
       const largura = (100 / g.itens.length).toFixed(2);
-      const celulas = g.itens.map((p) => `
-        <td style="width: ${largura}%; text-align: center; vertical-align: top; padding: 0 16px;">
-          ${blocoAssinatura(p)}
-        </td>`).join("");
-      return `<table style="width: 100%; margin: ${topo}px auto 0; border-collapse: collapse; white-space: normal;"><tr>${celulas}</tr></table>`;
+      const nomes = g.itens.map((p) => `
+        <td style="width: ${largura}%; text-align: center; vertical-align: top; padding: 0 16px; font-weight: 700;">${p.name}</td>`).join("");
+      return `<div style="margin: ${topo}px auto 0; text-align: center;">
+        <div style="border-top: 1px solid #111; padding-top: 10px;">
+          <table style="width: 100%; border-collapse: collapse; white-space: normal;"><tr>${nomes}</tr></table>
+          <div style="font-size: 10.5pt; font-weight: 400; margin-top: 4px;">${g.itens[0].role}</div>
+        </div>
+      </div>`;
     }
     return g.itens.map((p, i) => `
     <div style="margin: ${i === 0 ? topo : 40}px auto 0; max-width: 420px; text-align: center;">
