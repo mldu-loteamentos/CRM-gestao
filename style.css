@@ -10551,6 +10551,23 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .cj-tabela td.is-right, .cj-tabela th.is-right { text-align: right; white-space: nowrap; width: 1%; }
 .cj-tabela a { color: #105436; font-weight: 700; }
 .cj-tabela td .cj-nota { padding: 8px 0; }
+.cj-pop { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; background: rgba(15, 23, 42, 0.55); padding: 24px; }
+.cj-pop[hidden] { display: none; }
+.cj-pop-box { width: min(640px, 100%); background: #fff; border-radius: 12px; padding: 18px 20px 16px; box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25); }
+.cj-pop-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.cj-pop-head h3 { margin: 0; font-size: 1.05rem; color: #105436; }
+.cj-pop-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.cj-pop label, .cj-pop-campo { display: flex; flex-direction: column; gap: 4px; font-size: 0.75rem; font-weight: 700; color: #64748b; }
+.cj-pop-campo { margin-top: 12px; }
+.cj-pop input[type="date"], .cj-pop input[type="text"] { height: 38px; box-sizing: border-box; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0 10px; font: inherit; font-size: 0.9rem; font-weight: 500; color: #0f172a; background: #fff; }
+.cj-pop-arquivos { display: flex; gap: 16px; margin-top: 14px; }
+.cj-pop-arquivos > div { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; font-size: 0.75rem; font-weight: 700; color: #64748b; }
+.cj-chips { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
+.cj-chip-col { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; font-size: 0.8rem; }
+.cj-chip-col b { font-size: 0.72rem; color: #64748b; }
+.cj-chip-col span, .cj-chip-col a { display: inline-flex; align-items: center; gap: 4px; }
+.cj-pop-acoes { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.pr-topo { display: flex; justify-content: flex-end; gap: 8px; margin: 12px 0; }
 .orc-rep-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; margin: 0 0 12px; overflow: hidden; }
 .orc-rep-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; padding: 12px 14px; border: 0; background: #f8fafc; cursor: pointer; text-align: left; font: inherit; color: #0f172a; }
 .orc-rep-head > span:first-child { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }

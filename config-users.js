@@ -364,6 +364,7 @@ const ConfigUsersApp = {
             { id: "agenda", label: "Agenda do Operador" },
             { id: "zero_paid", label: "Clientes 0% Pago" },
             { id: "sub_judice", label: "Sub Judice" },
+            { id: "pagar_reembolso", label: "Pagar reembolso", permBase: "sub_fin_cr_pagar_reembolso" },
             { id: "notificacoes", label: "Notificações" },
             { id: "recebimentos_webro", label: "Recebimentos Webro" },
             { id: "scod", label: "Scod" },

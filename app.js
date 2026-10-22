@@ -3392,6 +3392,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "contas-pagar": "Assistente de Contas a Pagar",
     "gerar-pagamento": "Gerar Pagamento",
     rydoo: "Rydoo",
+    "pagar-reembolso": "Pagar reembolso",
     "titulos-incompletos": "Títulos incompletos",
     "config-tags": "Configuração de TAGs",
     "motivos-cancelamento": "Motivos de cancelamento",
@@ -3475,6 +3476,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "contas-pagar": "landmark",
     "gerar-pagamento": "wallet",
     rydoo: "receipt",
+    "pagar-reembolso": "wallet",
     "titulos-incompletos": "file-warning",
     "config-tags": "tags",
     "motivos-cancelamento": "list",
@@ -45901,11 +45903,83 @@ window.filterJudicialHistory = function(filter, btnEl) {
   window.renderJudicialTimeline();
 };
 
+window.processoJudicialTexto = function(valor) {
+  const t = String(valor == null ? "" : valor).trim();
+  if (!t) return "";
+  if (/^ex:\s*/i.test(t) && /1000000-00\.0000\.8\.26\.0000/.test(t)) return "";
+  if (t === "1000000-00.0000.8.26.0000") return "";
+  return t;
+};
+
+window.processoJudicialDoCliente = function(customerId) {
+  const cid = String(customerId || "");
+  const map = (window.AppState && AppState.judicialProcessNumbers) || {};
+  return window.processoJudicialTexto(map[cid] || map[Number(cid)] || "");
+};
+
+window.atualizarAvisoProcesso = function() {
+  const input = document.getElementById("jud-process-number");
+  const aviso = document.getElementById("jud-process-status");
+  if (!input) return;
+  const texto = window.processoJudicialTexto(input.value);
+  if (input.value !== texto) input.value = texto;
+  if (!aviso) return;
+  if (texto) {
+    aviso.textContent = "";
+    aviso.style.display = "none";
+  } else {
+    aviso.style.display = "block";
+    aviso.textContent = "Sem número de processo neste cadastro.";
+  }
+};
+
 window.saveProcessNumber = function(value) {
     if (!AppState.selectedCustomerId) return;
+    const cid = String(AppState.selectedCustomerId);
+    const texto = window.processoJudicialTexto(value);
     if (!AppState.judicialProcessNumbers) AppState.judicialProcessNumbers = {};
-    AppState.judicialProcessNumbers[AppState.selectedCustomerId] = value;
-    localStorage.setItem("crm_moura_jud_processes", JSON.stringify(AppState.judicialProcessNumbers));
+    AppState.judicialProcessNumbers[cid] = texto;
+    try { localStorage.setItem("crm_moura_jud_processes", JSON.stringify(AppState.judicialProcessNumbers)); } catch (e) {}
+    if (typeof window.atualizarAvisoProcesso === "function") window.atualizarAvisoProcesso();
+    window._processoJudicialLido = window._processoJudicialLido || {};
+    window._processoJudicialLido[cid] = true;
+    const fc = window.firebaseCollections;
+    if (!window.firebaseDb || !fc || !fc.doc || !fc.setDoc) return;
+    fc.setDoc(fc.doc(window.firebaseDb, "processos_judiciais", cid), {
+      customerId: cid,
+      numero: texto,
+      updatedAt: new Date().toISOString()
+    }, { merge: true }).catch(function() {});
+};
+
+window.carregarProcessoJudicial = async function(customerId) {
+  const cid = String(customerId || "");
+  if (!cid) return "";
+  window._processoJudicialLido = window._processoJudicialLido || {};
+  if (window._processoJudicialLido[cid]) return window.processoJudicialDoCliente(cid);
+  if (!AppState.judicialProcessNumbers) {
+    try { AppState.judicialProcessNumbers = JSON.parse(localStorage.getItem("crm_moura_jud_processes") || "{}"); }
+    catch (e) { AppState.judicialProcessNumbers = {}; }
+  }
+  let texto = window.processoJudicialTexto(AppState.judicialProcessNumbers[cid] || AppState.judicialProcessNumbers[Number(cid)] || "");
+  const fc = window.firebaseCollections;
+  if (window.firebaseDb && fc && fc.doc && fc.getDoc) {
+    try {
+      const snap = await fc.getDoc(fc.doc(window.firebaseDb, "processos_judiciais", cid));
+      if (snap && typeof snap.exists === "function" && snap.exists()) {
+        const remoto = window.processoJudicialTexto((snap.data() || {}).numero);
+        if (remoto) texto = remoto;
+      }
+    } catch (e) {}
+  }
+  AppState.judicialProcessNumbers[cid] = texto;
+  window._processoJudicialLido[cid] = true;
+  const input = document.getElementById("jud-process-number");
+  if (input && String(AppState.selectedCustomerId) === cid && !window.processoJudicialTexto(input.value) && texto) {
+    input.value = texto;
+  }
+  if (typeof window.atualizarAvisoProcesso === "function") window.atualizarAvisoProcesso();
+  return texto;
 };
 
 window.copiarEConsultarProcesso = function() {
@@ -45950,7 +46024,13 @@ window.renderJudicialTimeline = function() {
       if (!AppState.judicialProcessNumbers) {
           AppState.judicialProcessNumbers = JSON.parse(localStorage.getItem("crm_moura_jud_processes") || "{}");
       }
-      processInput.value = AppState.judicialProcessNumbers[AppState.selectedCustomerId] || "";
+      processInput.value = window.processoJudicialTexto(
+        AppState.judicialProcessNumbers[AppState.selectedCustomerId]
+        || AppState.judicialProcessNumbers[String(AppState.selectedCustomerId)]
+        || ""
+      );
+      if (typeof window.atualizarAvisoProcesso === "function") window.atualizarAvisoProcesso();
+      if (typeof window.carregarProcessoJudicial === "function") window.carregarProcessoJudicial(AppState.selectedCustomerId);
   }
 
   if (!AppState.judNotes) {

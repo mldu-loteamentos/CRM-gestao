@@ -4,7 +4,10 @@ const CustasJudiciaisApp = {
   editId: "",
   guias: [],
   comprovantes: [],
+  guiasTirar: [],
+  comprovantesTirar: [],
   salvando: false,
+  rascunho: null,
 
   esc(v) {
     return String(v == null ? "" : v)
@@ -13,7 +16,7 @@ const CustasJudiciaisApp = {
 
   chave() {
     const cid = String((window.AppState && AppState.selectedCustomerId) || "").replace(/\D/g, "");
-    const bruto = String((window.AppState && (AppState.selectedSaleId || AppState.selectedContractId)) || "");
+    const bruto = String((window.AppState && (AppState.selectedSaleId || AppState.selectedContractId || AppState.currentReceivableBillId)) || "");
     const sid = bruto.replace(/^B-/i, "").split("-")[0].replace(/\D/g, "");
     return { cid: cid, sid: sid };
   },
@@ -23,14 +26,53 @@ const CustasJudiciaisApp = {
     return m ? (m[3] + "/" + m[2] + "/" + m[1]) : "";
   },
 
+  money(n) {
+    return (Number(n) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  },
+
+  lerValor(texto) {
+    const t = String(texto || "").trim();
+    if (!t) return 0;
+    if (t.indexOf(",") >= 0) return Number(t.replace(/\./g, "").replace(",", ".")) || 0;
+    return Number(t) || 0;
+  },
+
   usuario() {
     const u = (window.AppState && AppState.currentUser) || {};
     return u.name || u.nome || u.email || "";
   },
 
+  processoAtual() {
+    const el = document.getElementById("jud-process-number");
+    const digitado = el ? el.value : "";
+    if (typeof window.processoJudicialTexto === "function") return window.processoJudicialTexto(digitado);
+    return String(digitado || "").trim();
+  },
+
+  contextoTitulo() {
+    const st = window.AppState || {};
+    const chave = this.chave();
+    const lista = st.defaultersList || [];
+    const hit = lista.find((c) => String(c.customerId || "").replace(/\D/g, "") === chave.cid
+      && String(c.saleId || "").replace(/\D/g, "") === chave.sid) || null;
+    const companyId = String(st.currentCompanyId || (hit && hit.companyId) || "").replace(/\D/g, "");
+    const costCenterId = String(st.currentCostCenterId || (hit && hit.costCenterId) || "").replace(/\D/g, "");
+    const unitName = String((hit && (hit.unitName || hit.units)) || "").trim();
+    let companyName = "";
+    if (companyId && typeof window.getCompanyName === "function") companyName = window.getCompanyName(companyId) || "";
+    return {
+      companyId: companyId,
+      companyName: companyName,
+      costCenterId: costCenterId,
+      unitName: unitName,
+      customerName: (hit && (hit.customerName || hit.clientName)) || ""
+    };
+  },
+
   async render() {
     const root = document.getElementById("custas-judiciais-root");
     if (!root) return;
+    this.fecharModal();
     const chave = this.chave();
     if (!chave.cid || !chave.sid) {
       root.innerHTML = `<p class="cj-nota">Abra o título do cliente para registrar as custas.</p>`;
@@ -39,11 +81,12 @@ const CustasJudiciaisApp = {
     this.editId = "";
     this.guias = [];
     this.comprovantes = [];
+    this.rascunho = null;
     root.innerHTML = `<div class="cj-topo">
         <p class="cj-nota">Clique na linha para editar.</p>
         <button type="button" class="btn btn-primary" id="cj-nova">Nova custa</button>
       </div>
-      <div id="cj-lista"><p class="cj-nota">Carregando…</p></div>`;
+      <div id="cj-lista"><div class="ml-load"><div class="loading-spinner" aria-hidden="true"></div><div class="loading-status-text">Carregando as custas…</div><div class="ml-load-track"><div class="loading-progress-bar" style="width:40%"></div></div></div></div>`;
     const nova = document.getElementById("cj-nova");
     if (nova) nova.addEventListener("click", () => this.nova());
     await this.carregar();
@@ -54,9 +97,9 @@ const CustasJudiciaisApp = {
     this.rascunho = null;
     this.guias = [];
     this.comprovantes = [];
-    this.pintarLista();
-    const data = document.getElementById("cj-data");
-    if (data) data.focus();
+    this.guiasTirar = [];
+    this.comprovantesTirar = [];
+    this.abrirModal(null);
   },
 
   receberArquivos(input, campo) {
@@ -73,76 +116,19 @@ const CustasJudiciaisApp = {
       if (!ja) this[campo].push(file);
     });
     this.guardarRascunho();
-    this.pintarLista();
+    this.pintarChips();
   },
 
   guardarRascunho() {
     const data = document.getElementById("cj-data");
     const desc = document.getElementById("cj-desc");
-    if (!data && !desc) return;
+    const valor = document.getElementById("cj-valor");
+    if (!data && !desc && !valor) return;
     this.rascunho = {
       data: data ? data.value : "",
-      descricao: desc ? desc.value : ""
+      descricao: desc ? desc.value : "",
+      valor: valor ? valor.value : ""
     };
-  },
-
-  celulaArquivos(campo, inputId, existentes) {
-    const links = (existentes || []).map((a) => `<a href="${this.esc(a.url)}" target="_blank" rel="noopener">${this.esc(a.name || "Arquivo")}</a>`).join("");
-    const novos = (this[campo] || []).map((f, i) => `<span>${this.esc(f.name)}
-      <button type="button" class="tvig-ico is-danger" title="Tirar arquivo" data-cj-tirar="${campo}:${i}">
-        <i data-lucide="trash-2" style="width:15px;height:15px;"></i>
-      </button></span>`).join("");
-    return `<div class="cj-cel-arq">
-      <label class="cj-escolher"><i data-lucide="paperclip" style="width:14px;height:14px;"></i> Anexar
-        <input type="file" id="${inputId}" accept="application/pdf,image/*" multiple>
-      </label>
-      ${links}${novos}
-    </div>`;
-  },
-
-  linhaEdicao(item) {
-    const fonte = this.rascunho || {
-      data: String((item && item.data) || "").slice(0, 10),
-      descricao: (item && item.descricao) || ""
-    };
-    this.rascunho = null;
-    const data = this.esc(fonte.data);
-    const desc = this.esc(fonte.descricao);
-    return `<tr class="cj-linha-edicao">
-      <td><input type="date" id="cj-data" value="${data}"></td>
-      <td><input type="text" id="cj-desc" value="${desc}" placeholder="Ex.: custas de distribuição, diligência do oficial"></td>
-      <td>${this.celulaArquivos("guias", "cj-guias", item && item.guias)}</td>
-      <td>${this.celulaArquivos("comprovantes", "cj-comp", item && item.comprovantes)}</td>
-      <td class="is-right cj-acoes-cell">
-        <div class="cj-acoes">
-          <button type="button" class="btn btn-primary" id="cj-salvar">Salvar</button>
-          <button type="button" class="btn btn-cancel" id="cj-cancelar">Cancelar</button>
-        </div>
-      </td>
-    </tr>`;
-  },
-
-  ligarEdicao() {
-    const guias = document.getElementById("cj-guias");
-    const comp = document.getElementById("cj-comp");
-    if (guias) guias.addEventListener("change", () => this.receberArquivos(guias, "guias"));
-    if (comp) comp.addEventListener("change", () => this.receberArquivos(comp, "comprovantes"));
-    const salvar = document.getElementById("cj-salvar");
-    const cancelar = document.getElementById("cj-cancelar");
-    if (salvar) salvar.addEventListener("click", () => this.salvar());
-    if (cancelar) cancelar.addEventListener("click", () => this.cancelarEdicao());
-    const lista = document.getElementById("cj-lista");
-    if (!lista) return;
-    lista.querySelectorAll("[data-cj-tirar]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const ped = String(btn.getAttribute("data-cj-tirar") || "").split(":");
-        const campo = ped[0];
-        const i = Number(ped[1]);
-        if (this[campo]) this[campo].splice(i, 1);
-        this.guardarRascunho();
-        this.pintarLista();
-      });
-    });
   },
 
   fb() {
@@ -205,12 +191,12 @@ const CustasJudiciaisApp = {
   pintarLista() {
     const lista = document.getElementById("cj-lista");
     if (!lista) return;
-    const nova = this.editId === "nova" ? this.linhaEdicao(null) : "";
     const linhas = this.itens.map((item) => {
-      if (this.editId === item.id) return this.linhaEdicao(item);
+      const pago = item.billId ? `<div class="cj-nota">Título a pagar ${this.esc(item.billId)}</div>` : "";
       return `<tr class="cj-linha" data-cj-linha="${this.esc(item.id)}" title="Clique para editar">
         <td>${this.esc(this.dataBr(item.data))}</td>
-        <td>${this.esc(item.descricao || "")}</td>
+        <td>${this.esc(item.descricao || "")}${pago}</td>
+        <td class="is-right">${item.valor != null && item.valor !== "" ? this.money(item.valor) : "—"}</td>
         <td>${this.links(item.guias)}</td>
         <td>${this.links(item.comprovantes)}</td>
         <td class="is-right cj-acoes-cell">
@@ -223,47 +209,173 @@ const CustasJudiciaisApp = {
         </td>
       </tr>`;
     }).join("");
-    const vazio = !this.itens.length && !nova
-      ? `<tr><td colspan="5"><p class="cj-nota">Nenhuma custa registrada neste título.</p></td></tr>`
+    const vazio = !this.itens.length
+      ? `<tr><td colspan="6"><p class="cj-nota">Nenhuma custa registrada neste título.</p></td></tr>`
       : "";
     lista.innerHTML = `<div class="cj-tabela-scroll"><table class="custom-table cj-tabela">
-      <thead><tr><th>Data</th><th>Do que se trata</th><th>Guias</th><th>Comprovantes</th><th class="is-right">Ações</th></tr></thead>
-      <tbody>${nova}${linhas}${vazio}</tbody>
+      <thead><tr><th>Data</th><th>Do que se trata</th><th class="is-right">Valor</th><th>Guias</th><th>Comprovantes</th><th class="is-right">Ações</th></tr></thead>
+      <tbody>${linhas}${vazio}</tbody>
     </table></div>`;
     lista.querySelectorAll("[data-cj-linha]").forEach((tr) => {
       tr.addEventListener("click", (ev) => {
-        if (ev.target.closest("a, button, input, label")) return;
+        if (ev.target.closest("a, button")) return;
         this.editar(tr.getAttribute("data-cj-linha"));
       });
     });
     lista.querySelectorAll("[data-cj-editar]").forEach((btn) => {
-      btn.addEventListener("click", () => this.editar(btn.getAttribute("data-cj-editar")));
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        this.editar(btn.getAttribute("data-cj-editar"));
+      });
     });
     lista.querySelectorAll("[data-cj-excluir]").forEach((btn) => {
-      btn.addEventListener("click", () => this.excluir(btn.getAttribute("data-cj-excluir")));
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        this.excluir(btn.getAttribute("data-cj-excluir"));
+      });
     });
-    if (this.editId) this.ligarEdicao();
     if (window.lucide && lucide.createIcons) lucide.createIcons();
   },
 
   editar(id) {
     const item = this.itens.find((x) => x.id === id);
-    if (!item || this.editId === item.id) return;
+    if (!item) return;
     this.editId = item.id;
     this.rascunho = null;
     this.guias = [];
     this.comprovantes = [];
-    this.pintarLista();
-    const data = document.getElementById("cj-data");
-    if (data) data.focus();
+    this.guiasTirar = [];
+    this.comprovantesTirar = [];
+    this.abrirModal(item);
   },
 
-  cancelarEdicao() {
+  modalEl() {
+    let el = document.getElementById("cj-modal");
+    if (el) return el;
+    el = document.createElement("div");
+    el.id = "cj-modal";
+    el.className = "cj-pop";
+    el.hidden = true;
+    document.body.appendChild(el);
+    return el;
+  },
+
+  abrirModal(item) {
+    const el = this.modalEl();
+    const fonte = this.rascunho || {
+      data: String((item && item.data) || "").slice(0, 10),
+      descricao: (item && item.descricao) || "",
+      valor: item && item.valor != null && item.valor !== "" ? this.money(item.valor) : ""
+    };
+    const titulo = this.editId === "nova" ? "Nova custa" : "Editar custa";
+    el.hidden = false;
+    el.innerHTML = `<div class="cj-pop-box" role="dialog" aria-modal="true" aria-labelledby="cj-pop-titulo">
+      <div class="cj-pop-head">
+        <h3 id="cj-pop-titulo">${titulo}</h3>
+        <button type="button" class="btn btn-fechar" id="cj-fechar">Fechar</button>
+      </div>
+      <div class="cj-pop-grid">
+        <label>Data<input type="date" id="cj-data" value="${this.esc(fonte.data)}"></label>
+        <label>Valor<input type="text" id="cj-valor" inputmode="decimal" placeholder="0,00" value="${this.esc(fonte.valor)}"></label>
+      </div>
+      <label class="cj-pop-campo">Do que se trata
+        <input type="text" id="cj-desc" value="${this.esc(fonte.descricao)}" placeholder="Ex.: custas de distribuição, diligência do oficial">
+      </label>
+      <div class="cj-pop-arquivos">
+        <div>
+          <span>Guias</span>
+          <label class="cj-escolher"><i data-lucide="paperclip" style="width:14px;height:14px;"></i> Anexar
+            <input type="file" id="cj-guias" accept="application/pdf,image/*" multiple>
+          </label>
+        </div>
+        <div>
+          <span>Comprovantes</span>
+          <label class="cj-escolher"><i data-lucide="paperclip" style="width:14px;height:14px;"></i> Anexar
+            <input type="file" id="cj-comp" accept="application/pdf,image/*" multiple>
+          </label>
+        </div>
+      </div>
+      <div id="cj-chips"></div>
+      <div class="cj-pop-acoes">
+        <button type="button" class="btn btn-primary" id="cj-salvar">Salvar</button>
+        <button type="button" class="btn btn-cancel" id="cj-cancelar">Cancelar</button>
+      </div>
+    </div>`;
+    this.rascunho = null;
+    const guias = document.getElementById("cj-guias");
+    const comp = document.getElementById("cj-comp");
+    if (guias) guias.addEventListener("change", () => this.receberArquivos(guias, "guias"));
+    if (comp) comp.addEventListener("change", () => this.receberArquivos(comp, "comprovantes"));
+    const salvar = document.getElementById("cj-salvar");
+    const cancelar = document.getElementById("cj-cancelar");
+    const fechar = document.getElementById("cj-fechar");
+    if (salvar) salvar.addEventListener("click", () => this.salvar());
+    if (cancelar) cancelar.addEventListener("click", () => this.fecharModal());
+    if (fechar) fechar.addEventListener("click", () => this.fecharModal());
+    el.onclick = (ev) => { if (ev.target === el) this.fecharModal(); };
+    this.pintarChips();
+    const data = document.getElementById("cj-data");
+    if (data) data.focus();
+    if (window.lucide && lucide.createIcons) lucide.createIcons();
+  },
+
+  arquivosVisiveis(item, campo, tirar) {
+    return ((item && item[campo]) || []).filter((a) => tirar.indexOf(a && a.url) < 0);
+  },
+
+  pintarChips() {
+    const box = document.getElementById("cj-chips");
+    if (!box) return;
+    const item = this.itens.find((x) => x.id === this.editId);
+    const bloco = (rotulo, campo, tirar, novos) => {
+      const salvos = this.arquivosVisiveis(item, campo, tirar).map((a) => `<span><a href="${this.esc(a.url)}" target="_blank" rel="noopener">${this.esc(a.name || "Arquivo")}</a>
+        <button type="button" class="tvig-ico is-danger" title="Tirar arquivo" data-cj-tirar-salvo="${campo}:${this.esc(a.url)}">
+          <i data-lucide="trash-2" style="width:15px;height:15px;"></i>
+        </button></span>`).join("");
+      const pend = novos.map((f, i) => `<span>${this.esc(f.name)}
+        <button type="button" class="tvig-ico is-danger" title="Tirar arquivo" data-cj-tirar="${campo}:${i}">
+          <i data-lucide="trash-2" style="width:15px;height:15px;"></i>
+        </button></span>`).join("");
+      return `<div class="cj-chip-col"><b>${rotulo}</b>${salvos}${pend || (!salvos ? `<span class="cj-nota">Nenhum arquivo</span>` : "")}</div>`;
+    };
+    box.innerHTML = `<div class="cj-chips">
+      ${bloco("Guias", "guias", this.guiasTirar, this.guias)}
+      ${bloco("Comprovantes", "comprovantes", this.comprovantesTirar, this.comprovantes)}
+    </div>`;
+    box.querySelectorAll("[data-cj-tirar]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const ped = String(btn.getAttribute("data-cj-tirar") || "").split(":");
+        const campo = ped[0];
+        const i = Number(ped[1]);
+        if (this[campo]) this[campo].splice(i, 1);
+        this.guardarRascunho();
+        this.pintarChips();
+      });
+    });
+    box.querySelectorAll("[data-cj-tirar-salvo]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const bruto = String(btn.getAttribute("data-cj-tirar-salvo") || "");
+        const corte = bruto.indexOf(":");
+        const campo = bruto.slice(0, corte);
+        const url = bruto.slice(corte + 1);
+        const lista = campo === "guias" ? this.guiasTirar : this.comprovantesTirar;
+        if (url && lista.indexOf(url) < 0) lista.push(url);
+        this.guardarRascunho();
+        this.pintarChips();
+      });
+    });
+    if (window.lucide && lucide.createIcons) lucide.createIcons();
+  },
+
+  fecharModal() {
+    const el = document.getElementById("cj-modal");
+    if (el) el.hidden = true;
     this.editId = "";
     this.rascunho = null;
     this.guias = [];
     this.comprovantes = [];
-    this.pintarLista();
+    this.guiasTirar = [];
+    this.comprovantesTirar = [];
   },
 
   async subir(files, id, pasta) {
@@ -289,11 +401,13 @@ const CustasJudiciaisApp = {
     const chave = this.chave();
     const data = String((document.getElementById("cj-data") || {}).value || "").slice(0, 10);
     const descricao = String((document.getElementById("cj-desc") || {}).value || "").replace(/\s+/g, " ").trim();
+    const valor = Math.round(this.lerValor((document.getElementById("cj-valor") || {}).value) * 100) / 100;
     if (!data) { alert("Informe a data."); return; }
+    if (!(valor > 0)) { alert("Informe o valor."); return; }
     if (!descricao) { alert("Informe do que se trata."); return; }
     const atual = this.itens.find((x) => x.id === this.editId);
-    const guiasAtuais = (atual && atual.guias) || [];
-    const compAtuais = (atual && atual.comprovantes) || [];
+    const guiasAtuais = this.arquivosVisiveis(atual, "guias", this.guiasTirar);
+    const compAtuais = this.arquivosVisiveis(atual, "comprovantes", this.comprovantesTirar);
     if (!guiasAtuais.length && !this.guias.length) { alert("Anexe a guia."); return; }
     if (!compAtuais.length && !this.comprovantes.length) { alert("Anexe o comprovante de pagamento."); return; }
     const fc = this.fb();
@@ -302,25 +416,43 @@ const CustasJudiciaisApp = {
     const btn = document.getElementById("cj-salvar");
     if (btn) btn.disabled = true;
     try {
-      const id = this.editId || (chave.cid + "_" + chave.sid + "_" + Date.now());
+      const novo = !atual;
+      const id = novo ? (chave.cid + "_" + chave.sid + "_" + Date.now()) : atual.id;
       const guias = guiasAtuais.concat(await this.subir(this.guias, id, "guia"));
       const comprovantes = compAtuais.concat(await this.subir(this.comprovantes, id, "comprovante"));
+      const ctx = this.contextoTitulo();
       const payload = {
         customerId: chave.cid,
         saleId: chave.sid,
         data: data,
         descricao: descricao,
+        valor: valor,
         guias: guias,
         comprovantes: comprovantes,
+        companyId: ctx.companyId || (atual && atual.companyId) || "",
+        companyName: ctx.companyName || (atual && atual.companyName) || "",
+        costCenterId: ctx.costCenterId || (atual && atual.costCenterId) || "",
+        unitName: ctx.unitName || (atual && atual.unitName) || "",
+        customerName: ctx.customerName || (atual && atual.customerName) || "",
+        processo: this.processoAtual() || (atual && atual.processo) || "",
         updatedAt: new Date().toISOString(),
         updatedBy: this.usuario()
       };
-      if (!this.editId) {
+      if (novo) {
         payload.createdAt = payload.updatedAt;
         payload.createdBy = payload.updatedBy;
+        payload.billId = "";
       }
       await fc.setDoc(fc.doc(window.firebaseDb, "custas_judiciais", id), payload, { merge: true });
-      this.cancelarEdicao();
+      const removidos = [].concat(atual && atual.guias || [], atual && atual.comprovantes || [])
+        .filter((a) => a && (this.guiasTirar.indexOf(a.url) >= 0 || this.comprovantesTirar.indexOf(a.url) >= 0));
+      if (removidos.length && fc.deleteObject && fc.ref && window.firebaseStorage) {
+        await Promise.all(removidos.map((a) => {
+          if (!a.path) return Promise.resolve();
+          return fc.deleteObject(fc.ref(window.firebaseStorage, a.path)).catch(function() {});
+        }));
+      }
+      this.fecharModal();
       await this.carregar();
     } catch (e) {
       alert("Não consegui salvar a custa: " + ((e && e.message) || e));
@@ -333,9 +465,10 @@ const CustasJudiciaisApp = {
   async excluir(id) {
     const item = this.itens.find((x) => x.id === id);
     if (!item) return;
+    const extra = item.billId ? " O título a pagar " + item.billId + " no Sienge continua." : "";
     const ok = typeof window.mouraConfirm === "function"
-      ? await window.mouraConfirm("Excluir esta custa e os anexos?")
-      : confirm("Excluir esta custa e os anexos?");
+      ? await window.mouraConfirm("Excluir esta custa e os anexos?" + extra)
+      : confirm("Excluir esta custa e os anexos?" + extra);
     if (!ok) return;
     const fc = this.fb();
     if (!fc || !fc.deleteDoc) { alert("O Firebase não está disponível."); return; }
@@ -348,7 +481,6 @@ const CustasJudiciaisApp = {
         }));
       }
       await fc.deleteDoc(fc.doc(window.firebaseDb, "custas_judiciais", id));
-      if (this.editId === id) this.cancelarEdicao();
       await this.carregar();
     } catch (e) {
       alert("Não consegui excluir a custa: " + ((e && e.message) || e));
