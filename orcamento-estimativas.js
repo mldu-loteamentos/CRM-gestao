@@ -1234,6 +1234,7 @@ const OrcamentoRepassesApp = {
 
     const resultado = OrcEst.z();
     const parceiro = OrcEst.z();
+    const centrosMap = new Map();
     emp.linhas.forEach((l) => {
       const gid = OrcEst.grupo(l.conta, l.cn) || "";
       if (!this.grupoEntra(gid, kind === "sociedade" || kind === "mista")) return;
@@ -1246,7 +1247,15 @@ const OrcamentoRepassesApp = {
         if (i > 11) return;
         const s = OrcEst.sinal(gid, l.conta, l.cn, v);
         if (kind === "sociedade" || kind === "mista") resultado[i] += s;
-        obrasDaLinha.forEach((ob) => { parceiro[i] += s * this.fator(ob.part, ob.obra, l.conta); });
+        obrasDaLinha.forEach((ob) => {
+          const pedaco = s * this.fator(ob.part, ob.obra, l.conta);
+          parceiro[i] += pedaco;
+          const cc = String(l.cc || "");
+          const cur = centrosMap.get(cc) || { id: cc, nome: l.en || "", m: OrcEst.z() };
+          if (!cur.nome && l.en) cur.nome = l.en;
+          cur.m[i] += pedaco;
+          centrosMap.set(cc, cur);
+        });
       });
     });
 
@@ -1268,6 +1277,9 @@ const OrcamentoRepassesApp = {
       });
     }
     const pagarParc = parceiro.map((v) => (v > 0 ? v : 0));
+    const centros = [...centrosMap.values()]
+      .filter((c) => c.m.some((v) => Math.abs(v) >= 0.005))
+      .sort((a, b) => String(a.id).localeCompare(String(b.id), "pt-BR", { numeric: true }));
     const pagar = OrcEst.z();
     for (let i = 0; i < 12; i++) pagar[i] = pagarParc[i] + distSocios[i];
 
@@ -1278,6 +1290,7 @@ const OrcamentoRepassesApp = {
       kind,
       itens: itens.length,
       socios: pessoas,
+      centros,
       pctSocios,
       resultado,
       impostoMes,
@@ -1331,7 +1344,7 @@ const OrcamentoRepassesApp = {
     root.innerHTML = `
       <div class="orc-est-page">
         ${typeof OrcamentoApp !== "undefined" ? OrcamentoApp.abasHtml() : ""}
-        <p class="orc-dfc-lead">Repasse de 2027 pela parametrização de sócios e parceiros. Na parceria, o percentual incide sobre o resultado das contas que entram no rateio. Na sociedade, o imposto da competência sai antes da distribuição. Quando o orçamento já traz a linha, a tela diz se o valor fecha.</p>
+        <p class="orc-dfc-lead">Repasse de 2027 pela parametrização de sócios e parceiros. Na parceria, o valor abre por centro de custo. Na sociedade, abre por sócio, depois de tirar o imposto da competência. Quando o orçamento já traz a linha, a tela diz se o valor fecha.</p>
         <div class="orc-dfc-tools">
           <div id="orc-rep-emp-box"></div>
         </div>
@@ -1446,11 +1459,16 @@ const OrcamentoRepassesApp = {
   detalhe(row) {
     const linha = (nome, arr) => `<tr class="orc-est-sub"><td>${OrcEst.esc(nome)}</td>${arr.map((v) => `<td>${OrcEst.money(v)}</td>`).join("")}<td>${OrcEst.money(arr.reduce((s, n) => s + (Number(n) || 0), 0))}</td></tr>`;
     let corpo = "";
-    if (row.kind === "parceria" || row.kind === "mista") corpo += linha("Parceiro", row.parceiro);
+    if ((row.kind === "parceria" || row.kind === "mista") && row.centros && row.centros.length) {
+      row.centros.forEach((c) => {
+        const nome = c.id ? ("C.C. " + c.id + (c.nome ? " — " + c.nome : "")) : (c.nome || "Centro de custo");
+        corpo += linha(nome, c.m);
+      });
+    } else if (row.kind === "parceria" || row.kind === "mista") corpo += linha("Parceiro", row.parceiro);
     if (row.kind === "sociedade" || row.kind === "mista") {
+      row.socios.forEach((s) => { corpo += linha(s.nome + " · " + String(s.pct).replace(".", ",") + "%", s.m); });
       corpo += linha("Resultado antes do imposto", row.resultado);
       corpo += linha("Impostos abatidos", row.impostoMes.map((v) => -v));
-      row.socios.forEach((s) => { corpo += linha(s.nome + " · " + String(s.pct).replace(".", ",") + "%", s.m); });
     }
     if (row.temApurada) corpo += linha("Linha do orçamento", row.apurada);
     const avisoPct = (row.kind === "sociedade" || row.kind === "mista") && row.socios.length && Math.abs(row.pctSocios - 100) > 0.05

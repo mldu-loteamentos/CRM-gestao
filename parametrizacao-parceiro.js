@@ -293,7 +293,13 @@ const ParametrizacaoParceiroApp = {
       bankInfo: s.bankInfo || null,
       bankList: Array.isArray(s.bankList) ? s.bankList : [],
       bankId: s.bankId || (s.bankInfo && s.bankInfo.id != null ? s.bankInfo.id : ""),
-      bankLoaded: !!s.bankLoaded
+      bankLoaded: !!s.bankLoaded,
+      ccTitulo: String(s.ccTitulo || ""),
+      ccTituloNome: String(s.ccTituloNome || ""),
+      planoId: String(s.planoId || ""),
+      planoNome: String(s.planoNome || ""),
+      docTipo: String(s.docTipo || ""),
+      docNome: String(s.docNome || "")
     };
   },
 
@@ -426,7 +432,10 @@ const ParametrizacaoParceiroApp = {
   setDetailTab(tab) {
     this.detailTab = tab || "geral";
     this.render();
-    if (this.detailTab === "credor") this.ensureCreditorBank();
+    if (this.detailTab === "credor") {
+      this.ensureCreditorBank();
+      this.garantirDocumentos();
+    }
   },
 
   centrosOrdenados(lista) {
@@ -1072,6 +1081,92 @@ const ParametrizacaoParceiroApp = {
     }
     this.persist();
     this.renderKeepScroll();
+  },
+
+  centrosDaEmpresa(companyId) {
+    const emp = String(companyId || "");
+    return this.centrosOrdenados([...this.catalogoCentros().values()].filter((cc) => this.empresaDoCentro(cc) === emp));
+  },
+
+  planosFolha() {
+    return (this.categories || []).filter((c) => c && c._id && !c._isTotal);
+  },
+
+  documentosTitulo() {
+    const app = window.DocumentosSiengeApp;
+    const lista = (app && app.items) || [];
+    return lista.filter((d) => d && d.id && d.ativo !== false && d.pagamento !== false);
+  },
+
+  async garantirDocumentos() {
+    const app = window.DocumentosSiengeApp;
+    if (!app || typeof app.garantirLista !== "function" || this._docsPedido) return;
+    if ((app.items || []).length) return;
+    this._docsPedido = true;
+    try {
+      await app.garantirLista();
+    } catch (e) {}
+    this._docsPedido = false;
+    if (this.detailTab === "credor" && document.getElementById("parametrizacao-parceiro-root")) this.renderKeepScroll();
+  },
+
+  setSocioVinculo(id, campo, valor) {
+    const p = this.current();
+    if (!p) return;
+    const row = (p.socios || []).find((s) => String(s.id) === String(id));
+    if (!row) return;
+    const v = String(valor || "");
+    if (campo === "cc") {
+      const cc = this.centrosDaEmpresa(p.companyId).find((c) => String(c.id) === v);
+      row.ccTitulo = cc ? String(cc.id) : "";
+      row.ccTituloNome = cc ? String(cc.name || cc.nome || "") : "";
+    } else if (campo === "plano") {
+      const cat = this.planosFolha().find((c) => String(c._id) === v);
+      row.planoId = cat ? String(cat._id) : "";
+      row.planoNome = cat ? String(cat._name || "") : "";
+    } else if (campo === "doc") {
+      const d = this.documentosTitulo().find((x) => String(x.id) === v);
+      row.docTipo = d ? String(d.id) : "";
+      row.docNome = d ? String(d.nome || d.id) : "";
+    } else return;
+    this.persist();
+    this.renderKeepScroll();
+  },
+
+  vinculoTituloHtml(p, s) {
+    const centros = this.centrosDaEmpresa(p.companyId).map((cc) => ({
+      id: String(cc.id),
+      label: String(cc.id) + " — " + String(cc.name || cc.nome || "")
+    }));
+    const planos = this.planosFolha().map((c) => ({
+      id: String(c._id),
+      label: String(c._id) + " — " + String(c._name || "")
+    }));
+    const docs = this.documentosTitulo().map((d) => ({
+      id: String(d.id),
+      label: String(d.id) + (d.nome && d.nome !== d.id ? " — " + d.nome : "")
+    }));
+    const sel = (rotulo, valor, opcoes, campo, vazio) => {
+      const opts = [`<option value="">${this.esc(vazio)}</option>`].concat(opcoes.map((o) =>
+        `<option value="${this.esc(o.id)}"${String(o.id) === String(valor) ? " selected" : ""}>${this.esc(o.label)}</option>`
+      ));
+      return `<label style="display:flex;flex-direction:column;gap:4px;min-width:200px;flex:1;font-size:0.68rem;font-weight:700;color:#475569;text-transform:uppercase;">${rotulo}
+        <select onchange="ParametrizacaoParceiroApp.setSocioVinculo('${this.esc(s.id)}','${campo}', this.value)"
+          style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 8px;background:#fff;font-weight:700;text-transform:none;color:#0f172a;">${opts.join("")}</select>
+      </label>`;
+    };
+    const avisoPlano = this.loadingCats ? "Carregando o plano financeiro…" : (planos.length ? "" : "O plano financeiro ainda não carregou.");
+    const avisoDoc = docs.length ? "" : "Os tipos de documento ainda não carregaram.";
+    return `<div style="margin-top:12px;">
+      <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:8px;">Título a pagar deste credor</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        ${sel("Centro de custo", s.ccTitulo, centros, "cc", centros.length ? "Escolha o centro" : "Nenhum centro nesta empresa")}
+        ${sel("Plano financeiro", s.planoId, planos, "plano", "Escolha a conta")}
+        ${sel("Tipo de documento", s.docTipo, docs, "doc", "Escolha o documento")}
+      </div>
+      <p style="margin:8px 0 0;font-size:0.75rem;color:#64748b;line-height:1.4;">O centro de custo é o da empresa desta parceria, onde o título será criado. O plano financeiro e o tipo de documento entram no contas a pagar da distribuição ou do repasse. O título ainda não é gerado nesta tela.</p>
+      ${avisoPlano || avisoDoc ? `<p style="margin:4px 0 0;font-size:0.75rem;color:#b45309;">${this.esc([avisoPlano, avisoDoc].filter(Boolean).join(" "))}</p>` : ""}
+    </div>`;
   },
 
   async removeSocio(id) {
@@ -1911,7 +2006,7 @@ const ParametrizacaoParceiroApp = {
           <span style="width:16px;color:#065f46;font-weight:800;">${aberto ? "▾" : "▸"}</span>
           <span style="min-width:0;flex:1;">
             <span style="display:block;font-weight:800;color:#065f46;">${this.esc(s.name)}</span>
-            <span style="display:block;font-size:0.75rem;color:#047857;margin-top:2px;">ID ${this.esc(s.id)}${s.cpfCnpj ? " · " + this.esc(s.cpfCnpj) : ""}</span>
+            <span style="display:block;font-size:0.75rem;color:#047857;margin-top:2px;">ID ${this.esc(s.id)}${s.cpfCnpj ? " · " + this.esc(s.cpfCnpj) : ""}${s.ccTitulo ? " · C.C. " + this.esc(s.ccTitulo) : ""}${s.planoId ? " · " + this.esc(s.planoId) : ""}${s.docTipo ? " · " + this.esc(s.docTipo) : ""}</span>
           </span>
           <span style="font-weight:800;color:#105436;font-variant-numeric:tabular-nums;">${this.esc(pctTxt)}</span>
         </button>
@@ -1924,6 +2019,7 @@ const ParametrizacaoParceiroApp = {
             </label>
             <button type="button" onclick="ParametrizacaoParceiroApp.removeSocio('${this.esc(s.id)}')" style="height:36px;border:none;background:transparent;color:#dc2626;cursor:pointer;font-size:0.78rem;font-weight:700;">Remover</button>
           </div>
+          ${this.vinculoTituloHtml(p, s)}
           <div style="margin-top:8px;">
             ${this._bankLoading && !s.bankLoaded ? `<div style="font-size:0.75rem;color:#64748b;">Buscando dados bancários no Sienge…</div>` : ""}
             ${!this._bankLoading && s.bankLoaded && !banks.length ? `<div style="font-size:0.75rem;color:#b45309;">Nenhuma conta bancária neste credor no Sienge.</div>` : ""}
@@ -1935,7 +2031,7 @@ const ParametrizacaoParceiroApp = {
     return `
       <div class="crm-card" style="padding:16px;">
         <h3 style="margin:0 0 4px;font-size:0.95rem;color:var(--color-primary);">${pessoas} (credores)</h3>
-        <p style="margin:0 0 12px;font-size:0.78rem;color:#64748b;">Cada ${pessoa} é um credor do Sienge, com o percentual de participação. A busca acrescenta mais um, no mesmo agrupamento.</p>
+        <p style="margin:0 0 12px;font-size:0.78rem;color:#64748b;">Cada ${pessoa} é um credor do Sienge, com o percentual de participação. No credor também ficam o centro de custo, o plano financeiro e o tipo de documento do título a pagar.</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
           <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;min-width:120px;">
             <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;">${pessoas}</div>

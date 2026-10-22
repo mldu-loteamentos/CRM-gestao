@@ -160,6 +160,14 @@ const FiscalApp = {
     return cfg;
   },
 
+  /* Empresa 3: administração de carteira de recebíveis é venda de lotes, não serviço. */
+  carteiraEmpresa3(companyId, categoryId, categoryName) {
+    if (String(companyId == null ? "" : companyId).replace(/\D/g, "") !== "3") return false;
+    if (this.normConta(categoryId) === "1020102") return true;
+    const nome = String(categoryName || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    return /CARTEIRA DE RECEBIVEIS/.test(nome);
+  },
+
   ehDescontoJuros(id, nome) {
     if (this.normConta(id) === "2050103") return true;
     const n = String(nome || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
@@ -339,7 +347,7 @@ const FiscalApp = {
         FC.allocate(mov, 1).forEach((a) => {
           const node = this.noDaConta(mapa, a.categoryId);
           let tag = this.tagDaConta(cfg, a.categoryId);
-          if (this.ehDescontoJuros(a.categoryId, a.categoryName)) tag = "Base para Vendas de Lote";
+          if (this.ehDescontoJuros(a.categoryId, a.categoryName) || this.carteiraEmpresa3(mov.companyId, a.categoryId, a.categoryName)) tag = "Base para Vendas de Lote";
           const base = tag === "Base para Vendas de Lote" ? "vendas"
             : (tag === "Base para Receita de Serviços" ? "servicos"
               : (tag === "Base para Aplicações Financeiras" ? "financeiras" : ""));
@@ -1389,7 +1397,7 @@ const FiscalApp = {
         <div class="fim-filhos" id="fim-box-${empKey}" ${aberto ? "" : "hidden"}>${contas}</div>
       </div>`;
     }).join("");
-    return `<p class="fim-muted">A empresa abre as contas financeiras. A conta abre o centro de custo. Linha zerada fica de fora. Parceiro, centro sem imposto pago pela empresa, receita de outra empresa do grupo e conta sem marca no plano ficam riscados e fora da soma. O centro corporativo entra, porque o imposto é da própria empresa.</p><div class="fim-scroll">
+    return `<p class="fim-muted">A empresa abre as contas financeiras. A conta abre o centro de custo. Linha zerada fica de fora. Parceiro, centro sem imposto pago pela empresa, receita de outra empresa do grupo e conta sem marca no plano ficam riscados e fora da soma. O centro corporativo entra, porque o imposto é da própria empresa. Na empresa 3, a administração de carteira de recebíveis entra na venda de lotes.</p><div class="fim-scroll">
       <div class="fim-head" style="${estilo}"><span>Empresa / conta / centro de custo</span><span>${headBase}</span><span>${colImp}</span>${aba === "irpj" ? "<span>Adicional</span>" : ""}${comProv ? "<span>Provisão de janeiro</span>" : ""}<span></span></div>
       ${linhas}
     </div>`;

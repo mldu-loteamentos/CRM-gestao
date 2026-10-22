@@ -1753,15 +1753,49 @@ const MarketingBudgetApp = {
     const brutas = s.vendas.reduce((t, v) => t + v.unidades, 0);
     const distr = s.distratos.reduce((t, v) => t + v.unidades, 0);
     const liquidas = Math.max(0, brutas - distr);
+    const inicioCusto = this.primeiraVendaMes();
+    const somaCusto = (st) => rows.filter((r) => r.status === st && this.gastoEntraNoCusto(r, inicioCusto)).reduce((t, r) => t + r.valor, 0);
+    const realizadoCusto = somaCusto("realizado");
+    const previstoCusto = somaCusto("previsao") + somaCusto("previsao_vencida");
+    const comprometidoCusto = somaCusto("comprometido") + previstoCusto;
     return {
       rows, verba, realizado, comprometido, previsto,
       saldo: verba - realizado - comprometido,
       consumo: verba > 0 ? ((realizado + comprometido) / verba) * 100 : 0,
-      brutas, distr, liquidas,
+      brutas, distr, liquidas, inicioCusto,
       vgvVendido: s.vendas.filter((v) => v.situacao !== "Cancelado").reduce((t, v) => t + v.valor, 0),
-      cac: liquidas > 0 ? realizado / liquidas : null,
-      cacTotal: liquidas > 0 ? (realizado + comprometido) / liquidas : null
+      cac: liquidas > 0 ? realizadoCusto / liquidas : null,
+      cacTotal: liquidas > 0 ? (realizadoCusto + comprometidoCusto) / liquidas : null
     };
+  },
+
+  /** Mês da primeira venda no recorte. O custo por unidade começa nele. */
+  primeiraVendaMes() {
+    let min = "";
+    (this.state.vendas || []).forEach((v) => {
+      const m = String(v.data || "").slice(0, 7);
+      if (/^\d{4}-\d{2}$/.test(m) && (!min || m < min)) min = m;
+    });
+    return min;
+  },
+
+  /** Gasto anterior à primeira venda fica fora do custo por unidade, mesmo com o filtro mais longo. */
+  gastoEntraNoCusto(row, inicio) {
+    if (!inicio) return false;
+    const m = String(this.dataGasto(row) || "").slice(0, 7);
+    return /^\d{4}-\d{2}$/.test(m) && m >= inicio;
+  },
+
+  /** Custo acumulado por unidade. Meses anteriores à primeira venda não entram no numerador. */
+  serieCustoUnidade(meses, real, vend, dist) {
+    const inicio = this.primeiraVendaMes();
+    let accR = 0;
+    let accU = 0;
+    return meses.map((m, i) => {
+      if (inicio && m >= inicio) accR += Number(real[i]) || 0;
+      accU += (Number(vend[i]) || 0) - (Number(dist[i]) || 0);
+      return accU > 0 ? accR / accU : null;
+    });
   },
 
   meses() {
@@ -2436,13 +2470,13 @@ const MarketingBudgetApp = {
     const vendas = `
       <div class="mkb-kpis mkb-kpis-3">
         ${this.kpi("Unidades vendidas", r.liquidas.toLocaleString("pt-BR"), `${r.brutas} contratos emitidos · ${r.distr} distratados no período`, "#6366f1")}
-        ${this.kpi("Custo por unidade vendida", r.cac != null ? this.money(r.cac) : "—", "Só o que já foi pago de marketing, dividido pelas unidades", "#105436")}
-        ${this.kpi("Custo por unidade com o em aberto", r.cacTotal != null ? this.money(r.cacTotal) : "—", "Marketing já pago e o que ainda está comprometido, dividido pelas unidades vendidas", "#f37021")}
+        ${this.kpi("Custo por unidade vendida", r.cac != null ? this.money(r.cac) : "—", "Só o que já foi pago de marketing desde a primeira venda, dividido pelas unidades", "#105436")}
+        ${this.kpi("Custo por unidade com o em aberto", r.cacTotal != null ? this.money(r.cacTotal) : "—", "Marketing já pago e o que ainda está comprometido desde a primeira venda, dividido pelas unidades vendidas", "#f37021")}
       </div>
-      <div class="mkb-card mkb-chart-full"><div class="mkb-card-h"><h3>Vendas e custo por unidade</h3><small>Quantas unidades venderam em cada mês e quanto de marketing cada uma consumiu</small></div><div class="mkb-canvas"><canvas id="mkb-ch-vendas"></canvas></div></div>`;
+      <div class="mkb-card mkb-chart-full"><div class="mkb-card-h"><h3>Vendas e custo por unidade</h3><small>Quantas unidades venderam em cada mês e quanto de marketing cada uma consumiu desde a primeira venda</small></div><div class="mkb-canvas"><canvas id="mkb-ch-vendas"></canvas></div></div>`;
     return this.secao("De onde vem a verba", "", verba)
       + this.secao("Uso da verba", "Quanto desse teto já foi pago e quanto ainda está comprometido.", uso)
-      + this.secao("Vendas do período", "As unidades vendidas servem para ver quanto de marketing cada venda consumiu.", vendas);
+      + this.secao("Vendas do período", "As unidades vendidas servem para ver quanto de marketing cada venda consumiu. O custo entra na primeira venda, mesmo que o período filtrado comece antes.", vendas);
   },
 
   async esperarComplementos() {
@@ -3393,13 +3427,7 @@ const MarketingBudgetApp = {
       const s = this.state;
       const vend = meses.map((m) => s.vendas.filter((v) => v.data.slice(0, 7) === m).reduce((t, v) => t + v.unidades, 0));
       const dist = meses.map((m) => s.distratos.filter((v) => (v.dataCancel || v.data).slice(0, 7) === m).reduce((t, v) => t + v.unidades, 0));
-      let accR = 0;
-      let accU = 0;
-      const cac = meses.map((_, i) => {
-        accR += real[i];
-        accU += vend[i] - dist[i];
-        return accU > 0 ? accR / accU : null;
-      });
+      const cac = this.serieCustoUnidade(meses, real, vend, dist);
       this.charts.vendas = new Chart(elV, {
         data: {
           labels: rot,
