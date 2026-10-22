@@ -1,8 +1,10 @@
 /* Processo em que outra parte entra contra uma empresa do grupo. */
 const ProcessoContraApp = {
-  busca: "",
-  achados: [],
-  buscando: false,
+  buscaCliente: "",
+  buscaTitulo: "",
+  filtro: "",
+  achadosCliente: [],
+  achadosTitulo: [],
   parte: null,
   itens: [],
   empresaId: "",
@@ -40,9 +42,28 @@ const ProcessoContraApp = {
     return fc;
   },
 
+  empresaGerida(id) {
+    const sid = String(id == null ? "" : id).trim();
+    if (!sid) return false;
+    const num = String(Number(sid));
+    const fontes = [];
+    if (window.EmpresasState && EmpresasState.customFields) fontes.push(EmpresasState.customFields);
+    try { fontes.push(JSON.parse(localStorage.getItem("crm_empresas_custom") || "{}") || {}); } catch (e) {}
+    if (window.AppState && AppState.companiesCustom) fontes.push(AppState.companiesCustom);
+    for (let i = 0; i < fontes.length; i++) {
+      const map = fontes[i] || {};
+      const cfg = map[sid] || map[num] || map[Number(sid)];
+      if (!cfg || typeof cfg !== "object") continue;
+      const v = cfg.gerida_pelo_grupo != null ? cfg.gerida_pelo_grupo : cfg.gerida_grupo;
+      if (v == null) continue;
+      return v === 1 || v === true || v === "1" || Number(v) === 1;
+    }
+    return false;
+  },
+
   empresas() {
     const lista = (window.AppState && AppState.companies) || [];
-    return lista.slice().sort((a, b) => Number(a.id) - Number(b.id));
+    return lista.filter((c) => this.empresaGerida(c.id)).slice().sort((a, b) => Number(a.id) - Number(b.id));
   },
 
   nomeEmpresa(id) {
@@ -65,11 +86,12 @@ const ProcessoContraApp = {
       const sel = String(c.id) === String(this.empresaId) ? " selected" : "";
       return `<option value="${this.esc(c.id)}"${sel}>${this.esc(c.id + " - " + nome)}</option>`;
     }).join("");
+    const vazioEmp = opcoes ? "" : `<option value="" disabled>Nenhuma empresa gerida pelo grupo</option>`;
     const motivos = this.MOTIVOS.map((m) => `<option value="${this.esc(m)}"${m === this.motivo ? " selected" : ""}>${this.esc(m)}</option>`).join("");
     const form = !edita ? "" : `<div class="pc-form" id="pc-form">
         <p class="cj-nota">${this.parte ? ("Parte: " + this.esc(this.parte.rotulo)) : "Escolha a parte na busca para abrir o processo."}</p>
         <label>Empresa processada
-          <select id="pc-empresa"><option value="">Selecione</option>${opcoes}</select>
+          <select id="pc-empresa"><option value="">Selecione</option>${vazioEmp}${opcoes}</select>
         </label>
         <label>Número do processo
           <input type="text" id="pc-numero" value="${this.esc(this.processo)}" autocomplete="off">
@@ -83,19 +105,42 @@ const ProcessoContraApp = {
         </div>
       </div>`;
     root.innerHTML = `<div class="pc-page">
-        <p class="cj-nota">Busque o cliente, o credor ou o título a receber. A outra parte entra com o processo contra a empresa escolhida.</p>
-        <div class="search-box-wrapper pc-busca">
-          <input type="text" id="pc-q" class="search-input" placeholder="Cliente, credor ou título a receber..." style="font-style: italic;" autocomplete="off" value="${this.esc(this.busca)}">
+        <p class="cj-nota">Busque o cliente. O título a receber fica no campo ao lado. A outra parte entra com o processo contra a empresa escolhida.</p>
+        <div class="pc-buscas">
+          <label>Cliente
+            <div class="pc-drop">
+              <input type="text" id="pc-q" class="pc-campo" placeholder="Nome do cliente..." autocomplete="off" value="${this.esc(this.buscaCliente)}">
+              <div id="pc-clientes" class="pc-dd"></div>
+            </div>
+          </label>
+          <label>Título a receber
+            <div class="pc-drop">
+              <input type="text" id="pc-titulo" class="pc-campo" placeholder="Número do título ou nome do cliente..." autocomplete="off" value="${this.esc(this.buscaTitulo)}">
+              <div id="pc-titulos" class="pc-dd"></div>
+            </div>
+          </label>
+        </div>
+        ${form}
+        <div class="search-box-wrapper pc-busca pc-filtro">
+          <input type="text" id="pc-filtro" class="search-input" placeholder="Número do processo ou motivo..." style="font-style: italic;" autocomplete="off" value="${this.esc(this.filtro)}">
           <i data-lucide="search" class="search-icon"></i>
         </div>
-        <div id="pc-achados"></div>
-        ${form}
         <div id="pc-lista"></div>
       </div>`;
     const q = document.getElementById("pc-q");
     if (q) q.addEventListener("input", () => {
-      this.busca = q.value || "";
-      this.procurar();
+      this.buscaCliente = q.value || "";
+      this.sugerirClientes();
+    });
+    const tit = document.getElementById("pc-titulo");
+    if (tit) tit.addEventListener("input", () => {
+      this.buscaTitulo = tit.value || "";
+      this.sugerirTitulos();
+    });
+    const filtro = document.getElementById("pc-filtro");
+    if (filtro) filtro.addEventListener("input", () => {
+      this.filtro = filtro.value || "";
+      this.pintarLista();
     });
     const emp = document.getElementById("pc-empresa");
     const num = document.getElementById("pc-numero");
@@ -107,7 +152,8 @@ const ProcessoContraApp = {
     const abrir = document.getElementById("pc-abrir");
     if (cancelar) cancelar.addEventListener("click", () => this.limpar());
     if (abrir) abrir.addEventListener("click", () => this.abrir());
-    this.pintarAchados();
+    this.sugerirClientes();
+    this.sugerirTitulos();
     this.pintarLista();
     if (window.lucide && lucide.createIcons) lucide.createIcons();
   },
@@ -117,92 +163,113 @@ const ProcessoContraApp = {
     this.empresaId = "";
     this.processo = "";
     this.motivo = "";
-    this.busca = "";
-    this.achados = [];
+    this.buscaCliente = "";
+    this.buscaTitulo = "";
+    this.achadosCliente = [];
+    this.achadosTitulo = [];
     this.render();
   },
 
-  async procurar() {
-    const q = this.fold(this.busca).trim();
-    const token = (this._token = (this._token || 0) + 1);
-    if (q.length < 2) {
-      this.achados = [];
-      this.pintarAchados();
-      return;
+  clientesBase() {
+    const cache = window.GlobalCustomerCache && GlobalCustomerCache.data;
+    if (Array.isArray(cache) && cache.length) {
+      return cache.map((c) => ({ id: String(c.id || "").replace(/\D/g, ""), name: String(c.name || "").trim() })).filter((c) => c.id || c.name);
     }
-    const locais = this.buscarLocais(q);
-    this.achados = locais;
-    this.pintarAchados();
-    let credores = [];
-    try { credores = await this.buscarCredores(this.busca.trim()); } catch (e) { credores = []; }
-    if (token !== this._token) return;
-    const vistos = new Set(locais.map((a) => a.tipo + "|" + a.id));
-    credores.forEach((c) => {
-      const k = c.tipo + "|" + c.id;
-      if (vistos.has(k)) return;
-      vistos.add(k);
-      locais.push(c);
+    const vistos = new Set();
+    const out = [];
+    [].concat(window.rawClientList || []).concat(window.clientList || []).concat(window._subjudiceList || []).forEach((c) => {
+      if (!c) return;
+      const id = String(c.customerId || "").replace(/\D/g, "");
+      const name = String(c.customerName || c.clientName || "").trim();
+      if (!id || vistos.has(id)) return;
+      vistos.add(id);
+      out.push({ id: id, name: name });
     });
-    this.achados = locais.slice(0, 20);
-    this.pintarAchados();
+    return out;
   },
 
-  buscarLocais(q) {
-    const listas = []
-      .concat(window.rawClientList || [])
-      .concat(window.clientList || [])
-      .concat(window._subjudiceList || []);
-    const out = [];
+  sugerirClientes() {
+    const dd = document.getElementById("pc-clientes");
+    if (!dd) return;
+    const q = this.fold(this.buscaCliente).trim();
+    const termos = q.split(" ").filter(Boolean);
+    if (!termos.length) {
+      this.achadosCliente = [];
+      dd.style.display = "none";
+      dd.innerHTML = "";
+      return;
+    }
+    const lista = this.clientesBase().filter((c) => {
+      const blob = this.fold(c.id + " " + c.name);
+      return termos.every((t) => blob.indexOf(t) >= 0);
+    }).slice(0, 12);
+    this.achadosCliente = lista.map((c) => ({
+      tipo: "cliente",
+      id: c.id,
+      nome: c.name,
+      customerId: c.id,
+      rotulo: (c.id ? c.id + " - " : "") + c.name
+    }));
+    this.pintarDrop(dd, this.achadosCliente, "cliente");
+  },
+
+  sugerirTitulos() {
+    const dd = document.getElementById("pc-titulos");
+    if (!dd) return;
+    const q = this.fold(this.buscaTitulo).trim();
+    if (q.length < 2) {
+      this.achadosTitulo = [];
+      dd.style.display = "none";
+      dd.innerHTML = "";
+      return;
+    }
     const vistos = new Set();
-    listas.forEach((c) => {
-      if (!c) return;
+    const out = [];
+    [].concat(window.rawClientList || []).concat(window.clientList || []).concat(window._subjudiceList || []).forEach((c) => {
+      if (!c || out.length >= 12) return;
       const nome = String(c.customerName || c.clientName || "").trim();
       const cid = String(c.customerId || "").replace(/\D/g, "");
-      const sid = String(c.saleId || c.receivableBillId || c.id || "").replace(/\D/g, "");
-      const blob = this.fold([nome, cid, sid].join(" "));
+      const sid = String(c.saleId || c.receivableBillId || "").replace(/\D/g, "");
+      if (!sid || vistos.has(sid)) return;
+      const blob = this.fold(sid + " " + nome + " " + cid);
       if (blob.indexOf(q) < 0) return;
-      if (sid && !vistos.has("titulo|" + sid)) {
-        vistos.add("titulo|" + sid);
-        out.push({ tipo: "titulo", id: sid, nome: nome, customerId: cid, rotulo: "Título " + sid + (nome ? " · " + nome : "") });
-      }
-      if (cid && !vistos.has("cliente|" + cid)) {
-        vistos.add("cliente|" + cid);
-        out.push({ tipo: "cliente", id: cid, nome: nome, customerId: cid, rotulo: "Cliente " + cid + (nome ? " · " + nome : "") });
-      }
+      vistos.add(sid);
+      out.push({ tipo: "titulo", id: sid, nome: nome, customerId: cid, rotulo: sid + " - " + (nome || "Sem cliente") });
     });
-    return out.slice(0, 12);
+    this.achadosTitulo = out;
+    this.pintarDrop(dd, out, "titulo");
   },
 
-  async buscarCredores(q) {
-    if (typeof window.siengeFetchWithRetry !== "function") return [];
-    const dig = String(q || "").replace(/\D/g, "");
-    const path = dig.length >= 11
-      ? "/creditors?limit=10&cnpj=" + encodeURIComponent(dig)
-      : "/creditors?limit=10&name=" + encodeURIComponent(q);
-    const res = await window.siengeFetchWithRetry(path, 1);
-    const lista = Array.isArray(res) ? res : ((res && (res.results || res.creditors)) || []);
-    return lista.map((c) => {
-      const nome = String(c.name || c.tradeName || c.corporateName || "").trim();
-      return { tipo: "credor", id: String(c.id || ""), nome: nome, rotulo: "Credor " + (c.id || "") + (nome ? " · " + nome : "") };
-    }).filter((c) => c.id);
-  },
-
-  pintarAchados() {
-    const box = document.getElementById("pc-achados");
-    if (!box) return;
-    if (!this.achados.length) {
-      box.innerHTML = "";
+  pintarDrop(dd, lista, qual) {
+    if (!lista.length) {
+      dd.style.display = "none";
+      dd.innerHTML = "";
       return;
     }
-    box.innerHTML = `<ul class="pc-lista-busca">${this.achados.map((a, i) => `<li><button type="button" data-pc-parte="${i}">${this.esc(a.rotulo)}</button></li>`).join("")}</ul>`;
-    box.querySelectorAll("[data-pc-parte]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const item = this.achados[Number(btn.getAttribute("data-pc-parte"))];
-        if (!item || !this.podeEditar()) return;
-        this.parte = item;
-        this.render();
+    dd.style.display = "block";
+    dd.innerHTML = lista.map((a, i) => `<button type="button" data-pc-${qual}="${i}">${this.esc(a.rotulo)}</button>`).join("");
+    dd.querySelectorAll("button").forEach((btn) => {
+      btn.addEventListener("mousedown", (ev) => {
+        ev.preventDefault();
+        const item = lista[Number(btn.getAttribute("data-pc-" + qual))];
+        this.escolher(item);
       });
     });
+  },
+
+  escolher(item) {
+    if (!item || !this.podeEditar()) return;
+    this.parte = item;
+    this.achadosCliente = [];
+    this.achadosTitulo = [];
+    if (item.tipo === "titulo") {
+      this.buscaTitulo = item.rotulo;
+      this.buscaCliente = "";
+    } else {
+      this.buscaCliente = item.nome || item.rotulo;
+      this.buscaTitulo = "";
+    }
+    this.render();
   },
 
   async carregar() {
@@ -238,7 +305,16 @@ const ProcessoContraApp = {
       box.innerHTML = `<div class="cc-scroll"><table class="cc-table"><tbody><tr><td class="cj-vazio">Nenhum processo contra aberto.</td></tr></tbody></table></div>`;
       return;
     }
-    const linhas = this.itens.map((item) => {
+    const q = this.fold(this.filtro).trim();
+    const visiveis = !q ? this.itens : this.itens.filter((item) => {
+      const blob = this.fold((item.processo || "") + " " + (item.motivo || ""));
+      return blob.indexOf(q) >= 0;
+    });
+    if (!visiveis.length) {
+      box.innerHTML = `<div class="cc-scroll"><table class="cc-table"><tbody><tr><td class="cj-vazio">Nenhum processo com esse número ou motivo.</td></tr></tbody></table></div>`;
+      return;
+    }
+    const linhas = visiveis.map((item) => {
       const quando = this.quando(item.createdAt);
       const acao = edita
         ? `<button type="button" class="tvig-ico is-danger" title="Excluir" data-pc-del="${this.esc(item.id)}"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button>`
@@ -285,7 +361,7 @@ const ProcessoContraApp = {
 
   async abrir() {
     if (!this.podeEditar()) return;
-    if (!this.parte) { alert("Busque e escolha o cliente, o credor ou o título."); return; }
+    if (!this.parte) { alert("Busque e escolha o cliente ou o título a receber."); return; }
     const empresa = String(this.empresaId || "").replace(/\D/g, "");
     const processo = String(this.processo || "").trim();
     const motivo = String(this.motivo || "").trim();
