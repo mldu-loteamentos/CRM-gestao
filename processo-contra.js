@@ -1,10 +1,22 @@
 /* Processo em que outra parte entra contra uma empresa do grupo. */
 const ProcessoContraApp = {
-  buscaCliente: "",
-  buscaTitulo: "",
+  fTitulo: "",
+  fContrato: "",
+  fDoc: "",
+  fNome: "",
+  fTel: "",
+  fEmail: "",
+  fEmp: "",
+  fUnidade: "",
+  unidades: [],
+  ccs: [],
+  clienteId: "",
+  clienteNome: "",
+  clienteDoc: "",
+  fichaHtml: "",
+  buscando: false,
+  erroBusca: "",
   filtro: "",
-  achadosCliente: [],
-  achadosTitulo: [],
   parte: null,
   itens: [],
   empresaId: "",
@@ -75,6 +87,8 @@ const ProcessoContraApp = {
   init() {
     this.render();
     this.carregar();
+    this.carregarEmpreendimentos();
+    if (typeof window.startCustomerBackgroundSync === "function") window.startCustomerBackgroundSync(false, true);
   },
 
   render() {
@@ -89,8 +103,11 @@ const ProcessoContraApp = {
     }).join("");
     const vazioEmp = opcoes ? "" : `<option value="" disabled>Nenhuma empresa gerida pelo grupo</option>`;
     const motivos = this.MOTIVOS.map((m) => `<option value="${this.esc(m)}"${m === this.motivo ? " selected" : ""}>${this.esc(m)}</option>`).join("");
+    const nota = this.parte
+      ? ("Parte: " + this.parte.rotulo)
+      : "Pesquise o cliente acima. Os dados dele aparecem antes deste formulário.";
     const form = !edita ? "" : `<div class="pc-form" id="pc-form">
-        <p class="cj-nota">${this.parte ? ("Parte: " + this.esc(this.parte.rotulo)) : "Escolha a parte na busca para abrir o processo."}</p>
+        <p class="cj-nota">${this.esc(nota)}</p>
         <label>Empresa processada
           <select id="pc-empresa"><option value="">Selecione</option>${vazioEmp}${opcoes}</select>
         </label>
@@ -105,22 +122,19 @@ const ProcessoContraApp = {
           <button type="button" class="btn btn-primary" id="pc-abrir">Abrir processo</button>
         </div>
       </div>`;
+    const ficha = this.buscando
+      ? `<div class="crm-card pc-pesq"><div class="crm-card-content" style="padding:24px;"><div class="ml-load"><div class="loading-spinner"></div><div class="loading-status-text">Buscando o cliente</div><div class="ml-load-track"><div class="loading-progress-bar"></div></div></div></div></div>`
+      : (this.erroBusca
+        ? `<p class="cj-nota">${this.esc(this.erroBusca)}</p>`
+        : (this.fichaHtml ? `<div class="crm-card" id="pc-cliente-card" style="margin-bottom:16px;">
+            <div class="crm-card-header" style="background-color:#f3f4f6;padding:12px 20px;border-bottom:1px solid #e5e7eb;border-radius:8px 8px 0 0;">
+              <h3 style="margin:0;font-size:1.1rem;color:var(--color-primary);">Dados do cliente</h3>
+            </div>
+            <div class="crm-card-content">${this.fichaHtml}</div>
+          </div>` : ""));
     root.innerHTML = `<div class="pc-page">
-        <p class="cj-nota">Busque o cliente. O título a receber fica no campo ao lado. A outra parte entra com o processo contra a empresa escolhida.</p>
-        <div class="pc-buscas">
-          <label>Nome do Cliente
-            <div class="pc-drop">
-              <input type="text" id="pc-q" class="pc-campo" placeholder="Digite para buscar..." autocomplete="off" value="${this.esc(this.buscaCliente)}">
-              <div id="pc-clientes" class="pc-dd"></div>
-            </div>
-          </label>
-          <label>Título a receber
-            <div class="pc-drop">
-              <input type="text" id="pc-titulo" class="pc-campo" placeholder="Número do título ou nome do cliente..." autocomplete="off" value="${this.esc(this.buscaTitulo)}">
-              <div id="pc-titulos" class="pc-dd"></div>
-            </div>
-          </label>
-        </div>
+        ${this.htmlPesquisa()}
+        ${ficha}
         ${form}
         <div class="search-box-wrapper pc-busca pc-filtro">
           <input type="text" id="pc-filtro" class="search-input" placeholder="Número do processo ou motivo..." style="font-style: italic;" autocomplete="off" value="${this.esc(this.filtro)}">
@@ -128,16 +142,7 @@ const ProcessoContraApp = {
         </div>
         <div id="pc-lista"></div>
       </div>`;
-    const q = document.getElementById("pc-q");
-    if (q) q.addEventListener("input", () => {
-      this.buscaCliente = q.value || "";
-      this.sugerirClientes();
-    });
-    const tit = document.getElementById("pc-titulo");
-    if (tit) tit.addEventListener("input", () => {
-      this.buscaTitulo = tit.value || "";
-      this.sugerirTitulos();
-    });
+    this.ligarPesquisa();
     const filtro = document.getElementById("pc-filtro");
     if (filtro) filtro.addEventListener("input", () => {
       this.filtro = filtro.value || "";
@@ -158,115 +163,532 @@ const ProcessoContraApp = {
   },
 
   limpar() {
-    this.parte = null;
     this.empresaId = "";
     this.processo = "";
     this.motivo = "";
-    this.buscaCliente = "";
-    this.buscaTitulo = "";
-    this.achadosCliente = [];
-    this.achadosTitulo = [];
     this.render();
   },
 
-  clientesBase() {
-    const cache = window.GlobalCustomerCache && GlobalCustomerCache.data;
-    if (Array.isArray(cache) && cache.length) {
-      return cache.map((c) => ({ id: String(c.id || "").replace(/\D/g, ""), name: String(c.name || "").trim() })).filter((c) => c.id || c.name);
-    }
-    const vistos = new Set();
-    const out = [];
-    [].concat(window.rawClientList || []).concat(window.clientList || []).concat(window._subjudiceList || []).forEach((c) => {
-      if (!c) return;
-      const id = String(c.customerId || "").replace(/\D/g, "");
-      const name = String(c.customerName || c.clientName || "").trim();
-      if (!id || vistos.has(id)) return;
-      vistos.add(id);
-      out.push({ id: id, name: name });
-    });
-    return out;
+  htmlPesquisa() {
+    const optsEmp = (this.ccs || []).map((c) => {
+      const sel = String(c.id) === String(this.fEmp) ? " selected" : "";
+      return `<option value="${this.esc(c.id)}"${sel}>${this.esc(c.id + " - " + (c.name || ""))}</option>`;
+    }).join("");
+    const optsUni = (this.unidades || []).map((u) => {
+      const sel = String(u.id) === String(this.fUnidade) ? " selected" : "";
+      return `<option value="${this.esc(u.id)}"${sel}>${this.esc(u.name || u.id)}</option>`;
+    }).join("");
+    return `<div class="crm-card pc-pesq">
+      <div class="crm-card-header" style="background-color:#f3f4f6;padding:12px 20px;border-bottom:1px solid #e5e7eb;border-radius:8px 8px 0 0;margin-bottom:20px;">
+        <h3 style="margin:0;font-size:1.1rem;color:var(--color-primary);">Pesquisar</h3>
+      </div>
+      <div class="crm-card-content" style="padding-bottom:0;">
+        <div class="pc-pesq-grid">
+          <div class="form-group"><label>Título (Contas a Receber)</label>
+            <input type="text" class="form-control" id="pcf-filter-titulo" value="${this.esc(this.fTitulo)}" autocomplete="off"></div>
+          <div class="form-group"><label>Contrato</label>
+            <input type="text" class="form-control" id="pcf-filter-contrato" value="${this.esc(this.fContrato)}" autocomplete="off"></div>
+          <div class="form-group"><label>CPF/CNPJ</label>
+            <input type="text" class="form-control" id="pcf-filter-doc" placeholder="000.000.000-00" value="${this.esc(this.fDoc)}" autocomplete="off"></div>
+          <div class="form-group" style="grid-column:1 / 3;"><label>Empreendimento</label>
+            <select class="form-control" id="pcf-filter-emp" style="display:none;"><option value="">Selecione...</option>${optsEmp}</select>
+            <div id="pcf-emp-slot"></div></div>
+          <div class="form-group"><label>Unidade</label>
+            <select class="form-control" id="pcf-filter-unidade"><option value="">Selecione o emp...</option>${optsUni}</select></div>
+          <div class="form-group" style="display:flex;align-items:flex-end;">
+            <button type="button" class="btn btn-primary" id="pcf-limpar" style="height:38px;width:100%;" title="Nova Busca / Limpar"><i data-lucide="eraser" style="width:14px;margin-right:6px;"></i> Limpar</button></div>
+          <div class="form-group"><label>Nome do Cliente</label>
+            <div class="pc-drop"><input type="text" class="form-control" id="pcf-filter-nome" placeholder="Digite para buscar..." value="${this.esc(this.fNome)}" autocomplete="off"></div></div>
+          <div class="form-group"><label>Telefone</label>
+            <div class="pc-drop"><input type="text" class="form-control" id="pcf-filter-telefone" placeholder="Digite para buscar..." value="${this.esc(this.fTel)}" autocomplete="off"></div></div>
+          <div class="form-group"><label>E-mail</label>
+            <input type="text" class="form-control" id="pcf-filter-email" placeholder="Digite para buscar..." value="${this.esc(this.fEmail)}" autocomplete="off"></div>
+        </div>
+      </div>
+    </div>`;
   },
 
-  sugerirClientes() {
-    const dd = document.getElementById("pc-clientes");
-    if (!dd) return;
-    const q = this.fold(this.buscaCliente).trim();
-    const termos = q.split(" ").filter(Boolean);
-    if (!termos.length) {
-      this.achadosCliente = [];
-      dd.style.display = "none";
-      dd.innerHTML = "";
-      return;
-    }
-    const lista = this.clientesBase().filter((c) => {
-      const blob = this.fold(c.id + " " + c.name);
-      return termos.every((t) => blob.indexOf(t) >= 0);
-    }).slice(0, 12);
-    this.achadosCliente = lista.map((c) => ({
-      tipo: "cliente",
-      id: c.id,
-      nome: c.name,
-      customerId: c.id,
-      rotulo: (c.id ? c.id + " - " : "") + c.name
-    }));
-    this.pintarDrop(dd, this.achadosCliente, "cliente");
-  },
-
-  sugerirTitulos() {
-    const dd = document.getElementById("pc-titulos");
-    if (!dd) return;
-    const q = this.fold(this.buscaTitulo).trim();
-    if (q.length < 2) {
-      this.achadosTitulo = [];
-      dd.style.display = "none";
-      dd.innerHTML = "";
-      return;
-    }
-    const vistos = new Set();
-    const out = [];
-    [].concat(window.rawClientList || []).concat(window.clientList || []).concat(window._subjudiceList || []).forEach((c) => {
-      if (!c || out.length >= 12) return;
-      const nome = String(c.customerName || c.clientName || "").trim();
-      const cid = String(c.customerId || "").replace(/\D/g, "");
-      const sid = String(c.saleId || c.receivableBillId || "").replace(/\D/g, "");
-      if (!sid || vistos.has(sid)) return;
-      const blob = this.fold(sid + " " + nome + " " + cid);
-      if (blob.indexOf(q) < 0) return;
-      vistos.add(sid);
-      out.push({ tipo: "titulo", id: sid, nome: nome, customerId: cid, rotulo: sid + " - " + (nome || "Sem cliente") });
-    });
-    this.achadosTitulo = out;
-    this.pintarDrop(dd, out, "titulo");
-  },
-
-  pintarDrop(dd, lista, qual) {
-    if (!lista.length) {
-      dd.style.display = "none";
-      dd.innerHTML = "";
-      return;
-    }
-    dd.style.display = "block";
-    dd.innerHTML = lista.map((a, i) => `<button type="button" data-pc-${qual}="${i}">${this.esc(a.rotulo)}</button>`).join("");
-    dd.querySelectorAll("button").forEach((btn) => {
-      btn.addEventListener("mousedown", (ev) => {
-        ev.preventDefault();
-        const item = lista[Number(btn.getAttribute("data-pc-" + qual))];
-        this.escolher(item);
+  ligarPesquisa() {
+    const self = this;
+    const enter = (el) => {
+      if (!el) return;
+      el.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === "Tab") {
+          if (!String(el.value || "").trim()) return;
+          ev.preventDefault();
+          self.pesquisar();
+        }
       });
+    };
+    const titulo = document.getElementById("pcf-filter-titulo");
+    const contrato = document.getElementById("pcf-filter-contrato");
+    const doc = document.getElementById("pcf-filter-doc");
+    const nome = document.getElementById("pcf-filter-nome");
+    const tel = document.getElementById("pcf-filter-telefone");
+    const email = document.getElementById("pcf-filter-email");
+    const emp = document.getElementById("pcf-filter-emp");
+    const uni = document.getElementById("pcf-filter-unidade");
+    if (titulo) titulo.addEventListener("input", () => {
+      titulo.value = String(titulo.value || "").replace(/\D/g, "");
+      this.fTitulo = titulo.value;
+      this.clienteId = "";
+      this.travarFiltros();
     });
+    if (contrato) contrato.addEventListener("input", () => { this.fContrato = contrato.value || ""; this.clienteId = ""; this.travarFiltros(); });
+    if (doc) doc.addEventListener("input", () => { this.mascaraDoc(doc); this.fDoc = doc.value || ""; this.clienteId = ""; this.travarFiltros(); });
+    if (nome) nome.addEventListener("input", () => {
+      this.fNome = nome.value || "";
+      this.clienteId = "";
+      this.travarFiltros();
+      if (typeof window.handleDynamicCustomerSearch === "function") window.handleDynamicCustomerSearch(this.fNome, "nome", "pc");
+    });
+    if (tel) tel.addEventListener("input", () => {
+      this.fTel = tel.value || "";
+      this.clienteId = "";
+      this.travarFiltros();
+      if (typeof window.handleDynamicCustomerSearch === "function") window.handleDynamicCustomerSearch(this.fTel, "telefone", "pc");
+    });
+    if (email) email.addEventListener("input", () => {
+      this.fEmail = email.value || "";
+      this.clienteId = "";
+      this.travarFiltros();
+      if (typeof window.handleDynamicCustomerSearch === "function") window.handleDynamicCustomerSearch(this.fEmail, "email", "pc");
+    });
+    if (emp) emp.addEventListener("change", () => {
+      this.fEmp = emp.value || "";
+      this.fUnidade = "";
+      this.unidades = [];
+      this.clienteId = "";
+      this.carregarUnidades(this.fEmp);
+    });
+    if (uni) uni.addEventListener("change", () => {
+      this.fUnidade = uni.value || "";
+      this.clienteId = "";
+      if (this.fUnidade) this.pesquisar();
+    });
+    [titulo, contrato, doc, nome, tel, email].forEach(enter);
+    const limpar = document.getElementById("pcf-limpar");
+    if (limpar) limpar.addEventListener("click", () => this.limparBusca());
+    this.travarFiltros();
+    this.empPicker.render();
   },
 
-  escolher(item) {
-    if (!item || !this.podeEditar()) return;
-    this.parte = item;
-    this.achadosCliente = [];
-    this.achadosTitulo = [];
-    if (item.tipo === "titulo") {
-      this.buscaTitulo = item.rotulo;
-      this.buscaCliente = "";
+  empPicker: {
+    id: "pcf-emp-filter",
+    open: false,
+    query: "",
+    bound: false,
+    select() { return document.getElementById("pcf-filter-emp"); },
+    items() {
+      const sel = this.select();
+      if (!sel) return [];
+      return Array.from(sel.options).filter((o) => o.value !== "").map((o) => ({ id: String(o.value), label: String(o.textContent || "").trim().toUpperCase() }));
+    },
+    opts() {
+      const sel = this.select();
+      return {
+        id: this.id,
+        label: "Empreendimento",
+        items: this.items(),
+        selectedIds: sel && sel.value ? [String(sel.value)] : [],
+        open: this.open,
+        query: this.query,
+        single: true,
+        emptyMeansAll: false,
+        nouns: { singular: "empreendimento", plural: "empreendimentos", noMatch: "Nenhum empreendimento com esse nome." }
+      };
+    },
+    bind() {
+      if (this.bound || !window.MlEmpresaFilter) return;
+      this.bound = true;
+      const self = this;
+      MlEmpresaFilter.bind(this.id, {
+        toggleOpen() {
+          const sel = self.select();
+          if (sel && sel.disabled) return;
+          self.open = !self.open;
+          if (!self.open) self.query = "";
+          self.render();
+        },
+        close() { self.open = false; self.query = ""; self.render(); },
+        setQuery(q) {
+          self.query = q || "";
+          const list = document.getElementById(self.id + "-list");
+          if (list) list.innerHTML = MlEmpresaFilter.listHtml(self.opts());
+        },
+        toggleId(itemId) {
+          const sel = self.select();
+          if (!sel) return;
+          self.open = false;
+          self.query = "";
+          if (String(sel.value) !== String(itemId)) {
+            sel.value = String(itemId);
+            sel.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+          self.render();
+        }
+      });
+    },
+    render() {
+      const slot = document.getElementById("pcf-emp-slot");
+      const sel = this.select();
+      if (!slot || !sel || !window.MlEmpresaFilter) return;
+      this.bind();
+      if (sel.disabled) { this.open = false; this.query = ""; }
+      slot.innerHTML = MlEmpresaFilter.html(this.opts());
+      const btn = slot.querySelector(".ml-emp-filter-btn");
+      if (btn) {
+        btn.disabled = !!sel.disabled;
+        if (!sel.value) {
+          const span = btn.querySelector("span");
+          if (span) span.textContent = this.items().length ? "Selecione..." : "Carregando empreendimentos...";
+        }
+      }
+      if (window.lucide) lucide.createIcons();
+    }
+  },
+
+  travarFiltros() {
+    const nome = document.getElementById("pcf-filter-nome");
+    const tel = document.getElementById("pcf-filter-telefone");
+    const email = document.getElementById("pcf-filter-email");
+    const doc = document.getElementById("pcf-filter-doc");
+    const titulo = document.getElementById("pcf-filter-titulo");
+    const contrato = document.getElementById("pcf-filter-contrato");
+    const emp = document.getElementById("pcf-filter-emp");
+    const uni = document.getElementById("pcf-filter-unidade");
+    const hasNome = nome && nome.value.trim() !== "";
+    const hasTel = tel && tel.value.trim() !== "";
+    const hasEmail = email && email.value.trim() !== "";
+    const hasDoc = doc && doc.value.trim() !== "";
+    const hasTitulo = titulo && titulo.value.trim() !== "";
+    const hasContrato = contrato && contrato.value.trim() !== "";
+    const hasEmp = emp && emp.value !== "";
+    if (nome) nome.disabled = hasTel || hasEmail || hasDoc || hasTitulo || hasContrato || hasEmp;
+    if (tel) tel.disabled = hasNome || hasEmail || hasDoc || hasTitulo || hasContrato || hasEmp;
+    if (email) email.disabled = hasNome || hasTel || hasDoc || hasTitulo || hasContrato || hasEmp;
+    if (doc) doc.disabled = hasNome || hasTel || hasEmail || hasTitulo || hasContrato || hasEmp;
+    if (titulo) titulo.disabled = hasNome || hasTel || hasEmail || hasDoc || hasContrato || hasEmp;
+    if (contrato) contrato.disabled = hasNome || hasTel || hasEmail || hasDoc || hasTitulo || hasEmp;
+    if (emp) emp.disabled = hasNome || hasTel || hasEmail || hasDoc || hasTitulo || hasContrato;
+    if (uni) uni.disabled = !hasEmp || hasNome || hasTel || hasEmail || hasDoc || hasTitulo || hasContrato;
+    this.empPicker.render();
+  },
+
+  mascaraDoc(input) {
+    let v = String(input.value || "").replace(/\D/g, "");
+    if (v.length <= 11) {
+      v = v.replace(/(\d{3})(\d)/, "$1.$2");
+      v = v.replace(/(\d{3})(\d)/, "$1.$2");
+      v = v.replace(/(\d{3})(\d{1,2})$/, "$1-$2");
     } else {
-      this.buscaCliente = item.nome || item.rotulo;
-      this.buscaTitulo = "";
+      v = v.replace(/^(\d{2})(\d)/, "$1.$2");
+      v = v.replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3");
+      v = v.replace(/\.(\d{3})(\d)/, ".$1/$2");
+      v = v.replace(/(\d{4})(\d)/, "$1-$2");
+      if (v.length > 18) v = v.substring(0, 18);
+    }
+    input.value = v;
+  },
+
+  limparBusca() {
+    this.fTitulo = "";
+    this.fContrato = "";
+    this.fDoc = "";
+    this.fNome = "";
+    this.fTel = "";
+    this.fEmail = "";
+    this.fEmp = "";
+    this.fUnidade = "";
+    this.unidades = [];
+    this.clienteId = "";
+    this.clienteNome = "";
+    this.clienteDoc = "";
+    this.fichaHtml = "";
+    this.erroBusca = "";
+    this.buscando = false;
+    this.parte = null;
+    this.empPicker.open = false;
+    this.empPicker.query = "";
+    this.render();
+  },
+
+  async carregarEmpreendimentos() {
+    if (!window.SiengeApiService || typeof SiengeApiService.getCostCenters !== "function") return;
+    try {
+      let ccs = await SiengeApiService.getCostCenters();
+      let customFields = {};
+      try { customFields = JSON.parse(localStorage.getItem("crm_centros_custo_custom") || "{}") || {}; } catch (e) {}
+      if (window.EstoqueComercialApp && typeof EstoqueComercialApp.filterEmpreendimentosLikeRelacionamento === "function") {
+        ccs = EstoqueComercialApp.filterEmpreendimentosLikeRelacionamento(ccs);
+      } else {
+        ccs = (ccs || []).filter((c) => {
+          const custom = customFields[c.id] || {};
+          const tipo = custom.tipo_cc || "";
+          return tipo === "Loteamento Aberto" || tipo === "Loteamento Fechado" || tipo === "Incorporação";
+        });
+      }
+      ccs.sort((a, b) => Number(a.id) - Number(b.id));
+      this.ccs = ccs;
+      const sel = document.getElementById("pcf-filter-emp");
+      if (!sel) return;
+      const keep = this.fEmp;
+      sel.innerHTML = `<option value="">Selecione...</option>` + ccs.map((c) => `<option value="${this.esc(c.id)}">${this.esc(c.id + " - " + (c.name || ""))}</option>`).join("");
+      if (keep) sel.value = keep;
+      this.empPicker.render();
+    } catch (e) {}
+  },
+
+  async carregarUnidades(cc) {
+    const sel = document.getElementById("pcf-filter-unidade");
+    if (!cc) {
+      this.unidades = [];
+      if (sel) {
+        sel.innerHTML = `<option value="">Selecione o emp...</option>`;
+        sel.disabled = true;
+      }
+      this.travarFiltros();
+      return;
+    }
+    if (sel) {
+      sel.innerHTML = `<option value="">Carregando unidades...</option>`;
+      sel.disabled = true;
+    }
+    try {
+      let all = [];
+      let offset = 0;
+      while (offset < 5000) {
+        const data = await window.siengeFetchWithRetry(`/units?limit=200&offset=${offset}&enterpriseId=${encodeURIComponent(cc)}&additionalData=NONE`);
+        const results = (data && data.results) || [];
+        all = all.concat(results);
+        if (!results.length) break;
+        offset += results.length;
+        if (results.length < 200) break;
+      }
+      all = all.filter((u) => u.commercialStock !== "T");
+      all.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "pt", { numeric: true }));
+      this.unidades = all.map((u) => ({ id: u.id, name: u.name || u.id }));
+      if (sel) {
+        sel.innerHTML = `<option value="">Selecione uma unidade...</option>` + this.unidades.map((u) => `<option value="${this.esc(u.id)}">${this.esc(u.name)}</option>`).join("");
+      }
+    } catch (e) {
+      this.unidades = [];
+      if (sel) sel.innerHTML = `<option value="">Erro ao carregar unidades</option>`;
+    }
+    this.travarFiltros();
+  },
+
+  acharNoCache() {
+    const cache = window.GlobalCustomerCache && GlobalCustomerCache.data;
+    if (!cache) return null;
+    const nome = this.fold(this.fNome).trim();
+    const tel = String(this.fTel || "").replace(/\D/g, "");
+    const email = this.fold(this.fEmail).trim();
+    let match = null;
+    if (nome) {
+      const termos = nome.split(" ").filter(Boolean);
+      match = cache.find((c) => termos.every((t) => this.fold(c.name).indexOf(t) >= 0));
+    } else if (tel.length >= 4) {
+      match = cache.find((c) => (c.phones || []).some((p) => {
+        const full = String(p.areaCode || "") + String(p.number || p.phoneNumber || "");
+        return full.replace(/\D/g, "").indexOf(tel) >= 0;
+      }));
+    } else if (email) {
+      match = cache.find((c) => this.fold(c.email).indexOf(email) >= 0);
+    }
+    if (!match) return null;
+    if (typeof window.filterCustomersToAssignedPortfolio === "function") {
+      const ok = window.filterCustomersToAssignedPortfolio([match]);
+      if (!ok.length) return null;
+    }
+    return match;
+  },
+
+  async resolverCliente() {
+    const titulo = String(this.fTitulo || "").replace(/\D/g, "");
+    const contrato = String(this.fContrato || "").trim();
+    const doc = String(this.fDoc || "").replace(/\D/g, "");
+    const get = window.relSiengeGet;
+    if (titulo) {
+      let bill = null;
+      try { bill = await get("/accounts-receivable/receivable-bills/" + encodeURIComponent(titulo)); }
+      catch (e) { bill = typeof window.relFindTituloLocal === "function" ? window.relFindTituloLocal(titulo) : null; }
+      if (!bill) throw new Error("Título não encontrado.");
+      const tipo = String(bill.documentId || "").trim().toUpperCase();
+      if (tipo && tipo !== "CT" && tipo !== "CTCV") throw new Error("O título " + titulo + " não é de venda.");
+      if (!bill.customerId) throw new Error("O título não tem cliente.");
+      return String(bill.customerId);
+    }
+    if (contrato) {
+      const c = await window.findSalesContractExact(contrato, get);
+      if (!c) throw new Error("Contrato não encontrado.");
+      const id = c.customerId || (c.customer && c.customer.id) || (c.customers && c.customers[0] && (c.customers[0].id || c.customers[0].customerId));
+      if (!id) throw new Error("O contrato não tem cliente.");
+      return String(id);
+    }
+    if (doc && !(this.clienteId && this.clienteDoc && doc === String(this.clienteDoc).replace(/\D/g, ""))) {
+      const param = doc.length === 14 ? "cnpj=" + doc : "cpf=" + doc;
+      const data = await get("/customers?" + param);
+      const lista = (data && data.results) || [];
+      if (!lista.length) throw new Error("CPF/CNPJ não encontrado.");
+      return String(lista[0].id);
+    }
+    if (this.clienteId) return String(this.clienteId);
+    if (this.fEmp && this.fUnidade) {
+      const uni = document.getElementById("pcf-filter-unidade");
+      const nomeUni = uni && uni.selectedIndex >= 0 ? uni.options[uni.selectedIndex].text.trim() : "";
+      let customerId = "";
+      try {
+        const uData = await get("/units?enterpriseId=" + encodeURIComponent(this.fEmp) + "&name=" + encodeURIComponent(nomeUni));
+        const uObj = ((uData && uData.results) || []).find((u) => String(u.id) === String(this.fUnidade));
+        if (uObj && uObj.contractId) {
+          const ct = await get("/sales-contracts/" + encodeURIComponent(uObj.contractId));
+          customerId = ct && (ct.customerId || (ct.customer && ct.customer.id));
+        }
+      } catch (e) {}
+      if (!customerId) {
+        const direct = await get("/sales-contracts?enterpriseId=" + encodeURIComponent(this.fEmp) + "&unitId=" + encodeURIComponent(this.fUnidade));
+        const lista = ((direct && direct.results) || []).filter((c) => String(c.unitId) === String(this.fUnidade));
+        const ct = lista[0];
+        customerId = ct && (ct.customerId || (ct.customer && ct.customer.id));
+      }
+      if (!customerId) throw new Error("Não há cliente nesta unidade.");
+      return String(customerId);
+    }
+    const match = this.acharNoCache();
+    if (match) {
+      this.clienteId = match.id;
+      this.clienteNome = match.name;
+      this.clienteDoc = match.cpf || match.cnpj || match.cpfCnpj || "";
+      return String(match.id);
+    }
+    if (String(this.fNome || "").trim() || String(this.fTel || "").replace(/\D/g, "") || String(this.fEmail || "").trim()) {
+      throw new Error("Cliente não encontrado.");
+    }
+    throw new Error("Preencha um campo para pesquisar.");
+  },
+
+  docMascara(val) {
+    const d = String(val || "").replace(/\D/g, "");
+    if (d.length === 14) return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5");
+    if (d.length === 11) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+    return d || "Não informado";
+  },
+
+  htmlFicha(c) {
+    const nome = this.esc(c.name || "");
+    const docBruto = c.cpfCnpj || c.cpf || c.cnpj || this.clienteDoc || "";
+    const doc = this.docMascara(docBruto);
+    const docLabel = String(docBruto).replace(/\D/g, "").length > 11 ? "CNPJ" : "CPF";
+    let age = "Não informado";
+    const nasc = c.birthDate || "";
+    if (String(docBruto).replace(/\D/g, "").length > 11) age = "Não se aplica";
+    else if (nasc && nasc !== "1980-01-01") {
+      const birth = new Date(nasc + "T12:00:00");
+      if (!isNaN(birth.getTime())) {
+        const today = new Date();
+        let diff = today.getFullYear() - birth.getFullYear();
+        const m = today.getMonth() - birth.getMonth();
+        if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) diff--;
+        age = diff + " anos";
+      }
+    }
+    const prof = this.esc(c.profession || c.occupation || "N/D");
+    const email = c.email && c.email !== "N/D" ? String(c.email) : "";
+    let addr = "Não informado";
+    let addrLabel = "Endereço";
+    let addrIcon = "home";
+    if (c.addresses && c.addresses.length) {
+      const a = c.addresses[0];
+      const comercial = a.type === 2 || String(a.typeDescription || a.type || "").toUpperCase().indexOf("COM") >= 0;
+      addrIcon = comercial ? "building" : "home";
+      addrLabel = comercial ? "Endereço Comercial" : "Endereço Residencial";
+      const street = a.street || a.streetName || "";
+      const num = a.number ? ", " + a.number : "";
+      const compl = a.complement ? " - " + a.complement : "";
+      const neigh = a.neighborhood ? ", " + a.neighborhood : "";
+      const city = a.cityName || a.city || "";
+      const state = a.stateName || a.state || "";
+      const zip = (a.postalCode || a.zipCode) ? " - CEP: " + (a.postalCode || a.zipCode) : "";
+      addr = street + num + compl + neigh + ", " + city + "/" + state + zip;
+    } else if (c.address && c.address !== "N/D") addr = c.address;
+    const fones = [];
+    (c.phones || []).forEach((p) => {
+      const ddd = String(p.areaCode || "").replace(/\D/g, "");
+      const num = String(p.number || p.phoneNumber || "").replace(/\D/g, "");
+      const full = ddd + num;
+      let formatted = full;
+      if (full.length === 11) formatted = "(" + full.slice(0, 2) + ") " + full.slice(2, 7) + "-" + full.slice(7);
+      else if (full.length === 10) formatted = "(" + full.slice(0, 2) + ") " + full.slice(2, 6) + "-" + full.slice(6);
+      if (!formatted || fones.some((x) => x.formatted === formatted)) return;
+      fones.push({ formatted: formatted, raw: full, principal: p.main === true || String(p.type || "").toUpperCase() === "MAIN" });
+    });
+    if (fones.length && !fones.some((p) => p.principal)) fones[0].principal = true;
+    const foneHtml = fones.length ? fones.map((p) => `<div style="display:flex;align-items:center;gap:8px;">
+        <i data-lucide="phone" style="width:15px;height:15px;color:var(--color-primary);"></i>
+        <span style="font-size:0.95rem;color:#1e293b;font-weight:500;">${this.esc(p.formatted)}</span>
+        ${p.principal ? `<span class="badge badge-success" style="font-size:0.6rem;padding:2px 6px;text-transform:none;">Principal</span>` : ""}
+        <button type="button" onclick="copyToClipboard('${p.raw}', this)" style="background:none;border:none;padding:4px;cursor:pointer;" title="Copiar número"><i data-lucide="copy" style="width:14px;height:14px;color:var(--color-primary);"></i></button>
+      </div>`).join("") : `<span style="font-size:0.95rem;color:#1e293b;">Não informado</span>`;
+    const docDig = String(docBruto).replace(/\D/g, "");
+    return `<div class="cessao-customer-grid">
+      <div class="cessao-customer-field cessao-customer-field--wide"><span class="cessao-lbl">Nome</span><span class="cessao-val">${nome}</span></div>
+      <div class="cessao-customer-field"><span class="cessao-lbl">${docLabel}</span><span class="cessao-val" style="display:flex;align-items:center;gap:8px;">${this.esc(doc)}
+        ${docDig ? `<button type="button" onclick="copyToClipboard('${docDig}', this)" style="background:none;border:none;padding:4px;cursor:pointer;" title="Copiar Documento"><i data-lucide="copy" style="width:14px;height:14px;color:var(--color-primary);"></i></button>` : ""}
+      </span></div>
+      <div class="cessao-customer-field"><span class="cessao-lbl">Idade</span><span class="cessao-val" style="display:flex;align-items:center;gap:8px;"><i data-lucide="calendar" style="width:15px;height:15px;color:var(--color-primary);"></i> ${this.esc(age)}</span></div>
+      <div class="cessao-customer-field"><span class="cessao-lbl">Profissão</span><span class="cessao-val" style="display:flex;align-items:center;gap:8px;"><i data-lucide="briefcase" style="width:15px;height:15px;color:var(--color-primary);"></i> ${prof}</span></div>
+      <div class="cessao-customer-field"><span class="cessao-lbl">Telefones</span>${foneHtml}</div>
+      <div class="cessao-customer-field cessao-customer-field--wide"><span class="cessao-lbl">E-mail</span><span class="cessao-val" style="display:flex;align-items:center;gap:8px;"><i data-lucide="mail" style="width:15px;height:15px;color:var(--color-primary);"></i> ${this.esc(email || "Não informado")}</span></div>
+      <div class="cessao-customer-field cessao-customer-field--full"><span class="cessao-lbl">${this.esc(addrLabel)}</span><span class="cessao-val" style="display:flex;align-items:flex-start;gap:8px;"><i data-lucide="${addrIcon}" style="width:15px;height:15px;color:var(--color-primary);margin-top:2px;"></i> ${this.esc(addr)}</span></div>
+    </div>`;
+  },
+
+  async pesquisar() {
+    const ler = (id) => { const el = document.getElementById(id); return el ? (el.value || "") : ""; };
+    if (document.getElementById("pcf-filter-titulo")) {
+      this.fTitulo = ler("pcf-filter-titulo");
+      this.fContrato = ler("pcf-filter-contrato");
+      this.fDoc = ler("pcf-filter-doc");
+      this.fNome = ler("pcf-filter-nome");
+      this.fTel = ler("pcf-filter-telefone");
+      this.fEmail = ler("pcf-filter-email");
+      const emp = document.getElementById("pcf-filter-emp");
+      const uni = document.getElementById("pcf-filter-unidade");
+      if (emp) this.fEmp = emp.value || "";
+      if (uni) this.fUnidade = uni.value || "";
+    }
+    const token = (this._buscaToken = (this._buscaToken || 0) + 1);
+    this.buscando = true;
+    this.erroBusca = "";
+    this.fichaHtml = "";
+    this.parte = null;
+    this.render();
+    try {
+      const id = await this.resolverCliente();
+      if (token !== this._buscaToken) return;
+      const api = window.SiengeApiService;
+      const full = api && typeof api.getCustomer === "function" ? await api.getCustomer(id) : null;
+      if (token !== this._buscaToken) return;
+      if (!full) throw new Error("Não encontrei o cadastro deste cliente.");
+      const doc = full.cpfCnpj || full.cpf || full.cnpj || this.clienteDoc || "";
+      const docFmt = this.docMascara(doc);
+      this.clienteId = String(full.id || id);
+      this.clienteNome = full.name || this.clienteNome || "";
+      this.clienteDoc = doc;
+      this.parte = {
+        tipo: "cliente",
+        id: this.clienteId,
+        nome: this.clienteNome,
+        customerId: this.clienteId,
+        rotulo: this.clienteId + " - " + this.clienteNome + (docFmt && docFmt !== "Não informado" ? " - " + docFmt : "")
+      };
+      this.fichaHtml = this.htmlFicha(full);
+      this.buscando = false;
+    } catch (e) {
+      if (token !== this._buscaToken) return;
+      this.buscando = false;
+      this.erroBusca = (e && e.message) || "Não consegui pesquisar o cliente.";
     }
     this.render();
   },
@@ -360,7 +782,7 @@ const ProcessoContraApp = {
 
   async abrir() {
     if (!this.podeEditar()) return;
-    if (!this.parte) { alert("Busque e escolha o cliente ou o título a receber."); return; }
+    if (!this.parte) { alert("Pesquise o cliente antes de abrir o processo."); return; }
     const empresa = String(this.empresaId || "").replace(/\D/g, "");
     const processo = String(this.processo || "").trim();
     const motivo = String(this.motivo || "").trim();

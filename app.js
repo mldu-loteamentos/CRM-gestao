@@ -933,9 +933,9 @@ window.handleAgendaAutocomplete = function(query) {
 };
 
 window.handleDynamicCustomerSearch = function(query, type, source) {
-    const src = source === "fin" ? "fin" : "relacionamento";
-    const inputId = src === "fin" ? `fin-filter-${type}` : `relacionamento-filter-${type}`;
-    const dropdownId = src === "fin" ? `custom-dropdown-fin-${type}` : `custom-dropdown-${type}`;
+    const src = source === "fin" ? "fin" : (source === "pc" ? "pc" : "relacionamento");
+    const inputId = src === "fin" ? `fin-filter-${type}` : (src === "pc" ? `pcf-filter-${type}` : `relacionamento-filter-${type}`);
+    const dropdownId = src === "fin" ? `custom-dropdown-fin-${type}` : (src === "pc" ? `pcf-dropdown-${type}` : `custom-dropdown-${type}`);
 
     window.SelectedDynamicCustomerId = null;
     window.SelectedDynamicCustomerName = null;
@@ -1094,6 +1094,14 @@ window.handleDynamicCustomerSearch = function(query, type, source) {
                     if (window.FinanciamentoApp && typeof window.FinanciamentoApp.buscar === "function") {
                         window.FinanciamentoApp.buscar();
                     }
+                } else if (src === "pc" && window.ProcessoContraApp) {
+                    ProcessoContraApp.clienteId = c.id;
+                    ProcessoContraApp.clienteNome = c.name;
+                    ProcessoContraApp.clienteDoc = c.cpf || c.cnpj || c.cpfCnpj || "";
+                    window.SelectedDynamicCustomerId = null;
+                    window.SelectedDynamicCustomerName = null;
+                    window.SelectedDynamicCustomerDoc = null;
+                    ProcessoContraApp.pesquisar();
                 } else if (typeof window.searchRelacionamento === "function") {
                 window.searchRelacionamento();
                 }

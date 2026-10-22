@@ -10637,6 +10637,16 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .pc-form select, .pc-form input, .pc-campo { height: 38px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 10px; background: #fff; color: #0f172a; font: inherit; width: 100%; box-sizing: border-box; }
 .pc-buscas { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .pc-buscas label { display: flex; flex-direction: column; gap: 6px; font-size: 0.75rem; font-weight: 700; color: #64748b; }
+.pc-pesq { margin-bottom: 16px; }
+.pc-pesq-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 160px; gap: 16px; align-items: end; margin-bottom: 20px; }
+.pc-pesq .form-control { height: 38px; border: 1px solid #94a3b8; }
+.pc-pesq .form-control:disabled { background: #f1f5f9; color: #94a3b8; }
+#pcf-emp-slot .ml-emp-filter { width: 100%; max-width: none; min-width: 0; flex: none; }
+#pcf-emp-slot .ml-emp-filter-label { display: none; }
+#pcf-emp-slot .ml-emp-filter-btn { height: 38px; min-height: 38px; border-color: #94a3b8; font-weight: 400; }
+#pcf-emp-slot .ml-emp-filter-btn:disabled { background: #f1f5f9; color: #94a3b8; cursor: not-allowed; }
+#pcf-emp-slot .ml-emp-filter.is-open .ml-emp-filter-btn { border-color: var(--color-primary); }
+#pcf-emp-slot .ml-emp-filter-list { max-height: 320px; }
 .pc-drop { position: relative; }
 .pc-dd { display: none; position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 4px); background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; max-height: 240px; overflow: auto; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12); }
 .pc-dd button { display: block; width: 100%; text-align: left; background: #fff; border: 0; border-bottom: 1px solid #f3f4f6; padding: 8px 12px; cursor: pointer; font: inherit; font-size: 0.85rem; color: #1c2e24; }
