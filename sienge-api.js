@@ -3720,6 +3720,7 @@ const SiengeApiService = {
       return (res && (res.results || res.data)) || [];
     } catch (e) {
       console.error("[Sienge] Erro ao obter saldos de contas:", e);
+      if (opts && opts.rethrow) throw e;
       return [];
     }
   },

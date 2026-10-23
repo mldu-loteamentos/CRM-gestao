@@ -355,13 +355,34 @@ const OrcamentoImpostosApp = {
      IRPJ e CSLL vêm do forecast de outubro, novembro e dezembro de 2026. */
   bases2026() {
     const app = window.ResultadoCaixaApp;
-    if (!app || typeof app.basesForecast !== "function") return {};
     const out = {};
-    ["2026-10", "2026-11", "2026-12"].forEach((ym) => {
-      const bag = app.basesForecast(ym);
-      if (bag) out[ym] = bag;
-    });
+    if (app && typeof app.basesForecast === "function") {
+      ["2026-10", "2026-11", "2026-12"].forEach((ym) => {
+        const bag = app.basesForecast(ym);
+        if (bag) out[ym] = bag;
+      });
+    }
+    this.baseCarteira21(out);
     return out;
+  },
+
+  /* A empresa 21 não está no forecast de caixa. Outubro a dezembro de 2026 vêm da carteira enviada. */
+  baseCarteira21(out) {
+    const linhas = (window.ORCAMENTO_RECEITA_2026 && window.ORCAMENTO_RECEITA_2026.lines) || [];
+    [["2026-10", 9], ["2026-11", 10], ["2026-12", 11]].forEach((par) => {
+      const ym = par[0];
+      const idx = par[1];
+      const ja = out[ym] && out[ym][21] && (Number(out[ym][21].vendas) || 0) > 0;
+      if (ja) return;
+      let vendas = 0;
+      linhas.forEach((l) => {
+        if (String(l.e) !== "21") return;
+        vendas += Number(l.m && l.m[idx]) || 0;
+      });
+      if (!(vendas > 0)) return;
+      if (!out[ym]) out[ym] = {};
+      out[ym][21] = { vendas: vendas, servicos: 0, financeiras: 0, redV: 0, redS: 0, redF: 0 };
+    });
   },
 
   impostoMes(base, ali) {
@@ -1185,8 +1206,9 @@ const OrcamentoRepassesApp = {
   },
 
   /* Obra com o par (16103 empreendedor e 16104 parceria) e outros centros da mesma obra
-     (16113, 16114, 16115). O DFC soma todos os marcados; o repasse fica no final. */
-  parExtra(obra) {
+     (16113, 16114, 16115). O DFC soma todos os marcados; o repasse fica no final.
+     A empresa 6 usa o mesmo fechamento mesmo quando o terceiro centro não está na obra. */
+  parExtra(obra, exigeOutro) {
     const lista = (obra && obra.costCenters) || [];
     const parcs = lista.filter((c) => this.ccEhDoParceiro(c.name || c.id));
     if (parcs.length !== 1) return null;
@@ -1201,7 +1223,7 @@ const OrcamentoRepassesApp = {
       const cid = String(c.id || "").replace(/\D/g, "");
       return cid && cid !== id && cid !== baseId;
     });
-    if (!outros.length) return null;
+    if (exigeOutro !== false && !outros.length) return null;
     return { base: base, parc: parc };
   },
 
@@ -1349,58 +1371,10 @@ const OrcamentoRepassesApp = {
     catch (e) { return true; }
   },
 
-  /* Empresa 6: a variação de caixa é o repasse do terrenista. Os empreendedores têm outra base. */
+  /* Empresa 6 fecha como a 36: DFC integral e repasse no percentual parametrizado. */
   aracariDe(part) {
     const app = this.appPar();
     return !!(app && typeof app.isMista === "function" && app.isMista(part) && String(part && part.companyId) === "6");
-  },
-
-  centroGap(centros) {
-    let achado = null;
-    (centros || new Map()).forEach((meta, id) => {
-      if (achado) return;
-      if (this.ccEhDoParceiro(meta && meta.nome)) achado = { id: id, nome: meta.nome || "" };
-    });
-    return achado || { id: "14202", nome: "PARCERIA GAP" };
-  },
-
-  resultadoFiltrado(linhas, linhasDez, part, fica) {
-    const anoLinhas = (linhas || []).filter(fica);
-    const dezLinhas = (linhasDez || []).filter(fica);
-    const centros = new Map();
-    anoLinhas.concat(dezLinhas).forEach((l) => {
-      const cc = String(l.cc || "").replace(/\D/g, "");
-      if (cc && !centros.has(cc)) centros.set(cc, { obra: null, nome: "" });
-    });
-    const anoMolde = this.molde();
-    this.encher(anoMolde.tpl, anoMolde.byId, anoLinhas, centros, part, false);
-    const ano = (anoMolde.byId.g_12 && anoMolde.byId.g_12.months) ? anoMolde.byId.g_12.months.slice() : OrcEst.z();
-    const dezMolde = this.molde();
-    this.encher(dezMolde.tpl, dezMolde.byId, dezLinhas, centros, part, false);
-    const dez = (dezMolde.byId.g_12 && dezMolde.byId.g_12.months && dezMolde.byId.g_12.months[0]) || 0;
-    return { ano: ano, dez: dez };
-  },
-
-  /* O repasse do GAP é o resultado do 14202. A tarifa bancária não entra nele. */
-  resultadoGapAracari(linhas, linhasDez, part) {
-    const app = this.appPar();
-    return this.resultadoFiltrado(linhas, linhasDez, part, (l) => {
-      const cc = String(l && l.cc || "").replace(/\D/g, "");
-      if (cc !== "14202") return false;
-      return !(app && typeof app.ehDespesaBancaria === "function" && app.ehDespesaBancaria(l.conta, l.cn));
-    });
-  },
-
-  /* 14201 com as contas dele, mais o 70600 (impostos e despesas fora do rateio).
-     Tarifa bancária de outro centro também fica com o empreendedor: não entra no rateio. */
-  resultadoEmpreendedorAracari(linhas, linhasDez, part) {
-    const app = this.appPar();
-    const cheio = new Set(["14201", "70600"]);
-    return this.resultadoFiltrado(linhas, linhasDez, part, (l) => {
-      const cc = String(l && l.cc || "").replace(/\D/g, "");
-      if (cheio.has(cc)) return true;
-      return !!(app && typeof app.ehDespesaBancaria === "function" && app.ehDespesaBancaria(l.conta, l.cn));
-    });
   },
 
   pessoasDe(part) {
@@ -1656,15 +1630,11 @@ const OrcamentoRepassesApp = {
     const sociedade = !!(app && typeof app.isSociedade === "function" && app.isSociedade(part));
     const kind = app && typeof app.kindOf === "function" ? app.kindOf(part) : (part.kind || "parceria");
     const aracari = this.aracariDe(part);
-    const obra = aracari && obraBruta
-      ? Object.assign({}, obraBruta, { costCenters: (obraBruta.costCenters || []).filter((c) => String(c.id || "").replace(/\D/g, "") !== "70600") })
-      : obraBruta;
+    const obra = obraBruta;
     const algumMarcado = !obra || (obra.costCenters || []).some((c) => c.inAccount !== false);
-    const especial = !aracari && !sociedade && obra ? this.parExtra(obra) : null;
+    const especial = !sociedade && obra ? this.parExtra(obra, aracari ? false : undefined) : null;
     const usarRateio = !especial && !sociedade && !!obra && !this.principalMarcado(obra) && algumMarcado;
-    const centros = aracari
-      ? this.centrosDa({ obras: obra ? [obra] : [] }, obra ? obra.code : "", usarRateio)
-      : this.centrosDa(part, obraCode, usarRateio);
+    const centros = this.centrosDa(part, obraCode, usarRateio);
     this.encher(tpl, byId, linhas, centros, part, usarRateio);
     const resultadoProprio = (byId.g_12 && byId.g_12.months) ? byId.g_12.months.slice() : OrcEst.z();
     const lucros = !this._semLucros && String(part.companyId) === "12" ? this.lucrosRecebidosEmpresa13() : null;
@@ -1730,7 +1700,7 @@ const OrcamentoRepassesApp = {
         const listaCc = [...a.ccs.values()]
           .filter((c) => c.months.some((v) => Math.abs(v) >= 0.005))
           .sort((x, y) => this.ordemCentro(x.id, y.id));
-        const ccs = (especial || aracari) ? listaCc : this.ccsDoRepasse(listaCc, sociedade);
+        const ccs = especial ? listaCc : this.ccsDoRepasse(listaCc, sociedade);
         const pcts = [...a.pcts].filter((n) => n > 0).sort((x, y) => x - y);
         rows.push({
           id: accId,
@@ -1778,19 +1748,7 @@ const OrcamentoRepassesApp = {
       if (!sociedade && /00$/.test(idDig) && !this.ccEhDoParceiro(meta.nome)) return;
       parceiros.push({ ccId: ccId, meta: meta });
     });
-    let pagGap = null;
-    if (aracari) {
-      const gap = this.centroGap(centros);
-      const baseGap = this.resultadoGapAracari(linhas, linhasDez, part);
-      pagGap = this.serieDeslocada(baseGap.dez, baseGap.ano);
-      distribuicao.push({
-        id: gap.id,
-        nome: "PARCERIA GAP",
-        obra: obra ? String(obra.code || "") : "",
-        m: pagGap.m.slice(),
-        jan28: pagGap.jan28
-      });
-    } else if (especial) {
+    if (especial) {
       distribuicao.push(this.repasseDoExtra(linhas, linhasDez, centros, part, especial, obra));
     } else if (!sociedade && usarRateio && parceiros.length) {
       const pesos = parceiros.map((p) => {
@@ -1836,18 +1794,6 @@ const OrcamentoRepassesApp = {
         p.jan28 = janCard * p.pct / 100;
       });
     }
-    if (aracari && pagGap) {
-      variacaoCard = pagGap.m.slice();
-      janCard = Number(pagGap.jan28) || 0;
-      const baseEmp = this.resultadoEmpreendedorAracari(linhas, linhasDez, part);
-      const pagEmp = this.serieDeslocada(baseEmp.dez, baseEmp.ano);
-      pessoas.forEach((p) => {
-        const fatia = (Number(p.pct) || 0) / 100;
-        p.m = pagEmp.m.map((v) => (Number(v) || 0) * fatia);
-        p.jan28 = (Number(pagEmp.jan28) || 0) * fatia;
-        p.dez = (Number(baseEmp.dez) || 0) * fatia;
-      });
-    }
     pessoas.sort((a, b) => this.ordemCentro(a.ccId, b.ccId) || String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR"));
     const ccIds = [...centros.keys()].sort((a, b) => this.ordemCentro(a, b));
     return {
@@ -1861,7 +1807,7 @@ const OrcamentoRepassesApp = {
       sociedade: sociedade,
       rateio: usarRateio,
       extra: !!especial,
-      aracari: aracari,
+      aracari: aracari && !especial,
       jan28: janCard,
       centros: ccIds,
       rows: rows,
@@ -2031,12 +1977,56 @@ const OrcamentoRepassesApp = {
     this.paintCorpo();
   },
 
+  ypesQuerido() {
+    const ids = this.selectedCompanyIds.map(String);
+    return !ids.length || ids.indexOf("21") >= 0;
+  },
+
+  htmlYpes() {
+    if (!this.ypesQuerido() || !window.OrcamentoImpostosApp) return "";
+    const linhas = OrcEst.linhas().filter((l) => String(l.e) === "21");
+    if (!linhas.length) return "";
+    const mapa = OrcamentoImpostosApp.calcular(linhas);
+    const row = mapa["21"];
+    const pago = row ? OrcamentoImpostosApp.totalPago(row) : OrcEst.z().concat([0]);
+    const receita = OrcEst.z();
+    linhas.forEach((l) => {
+      if (String(l.conta || "") !== "1.01.01.01") return;
+      (l.m || []).forEach((v, i) => { if (i < 12) receita[i] += Number(v) || 0; });
+    });
+    const admin = OrcEst.z().map(() => 10000);
+    const resultado = receita.map((v, i) => v - (Number(pago[i]) || 0) - admin[i]);
+    const pct = window.OrcamentoApp && typeof OrcamentoApp.participation === "function" ? OrcamentoApp.participation("21") : 23.8;
+    const ml = resultado.map((v) => v * (Number(pct) || 0) / 100);
+    const cel = (arr) => arr.map((v) => {
+      const n = Number(v) || 0;
+      return `<td${n < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(n)}</td>`;
+    }).join("");
+    const linha = (nome, arr, forte) => `<tr class="${forte ? "orc-dfc-n1" : ""}"><td>${nome}</td>${cel(arr)}<td>${OrcEst.money(this.soma(arr))}</td></tr>`;
+    const meses = OrcEst.MESES.map((m) => `<th>${m}</th>`).join("");
+    return `<section class="orc-rep-socios">
+      <h4>21 — Reserva dos Ypês IV. O repasse do mês é a receita, menos o imposto a pagar desta tela, menos R$ 10.000 de outras despesas administrativas.</h4>
+      <div class="orc-dfc-scroll"><table class="orc-dfc-table orc-est-table orc-rep-quadro">
+        <thead><tr><th>Repasse</th>${meses}<th>Total</th></tr></thead>
+        <tbody>
+          ${linha("Receita de venda de lotes", receita, false)}
+          ${linha("Impostos a pagar", pago.slice(0, 12).map((v) => -(Number(v) || 0)), false)}
+          ${linha("2.03.02.18 Outras despesas administrativas", admin.map((v) => -v), false)}
+          ${linha("Resultado", resultado, true)}
+          ${linha("Moura Leite · " + OrcEst.esc(this.pctTxt(pct)), ml, true)}
+        </tbody>
+      </table></div>
+    </section>`;
+  },
+
   paintCorpo() {
     const body = document.getElementById("orc-rep-body");
     if (!body) return;
     const lista = this.prestacoes();
+    const ypes = this.htmlYpes();
     if (!lista.length) {
-      body.innerHTML = `<div class="orc-dfc-erro">Não há parceria nem sociedade parametrizada para as empresas selecionadas.</div>`;
+      body.innerHTML = ypes || `<div class="orc-dfc-erro">Não há parceria nem sociedade parametrizada para as empresas selecionadas.</div>`;
+      if (window.lucide && lucide.createIcons) lucide.createIcons();
       return;
     }
     const part = this.partAtual(lista);
@@ -2095,7 +2085,8 @@ const OrcamentoRepassesApp = {
         ? "O valor do topo é o repasse do centro 14202, pago no mês seguinte. A distribuição dos empreendedores é o resultado do centro 14201 e das contas correspondentes, mais o centro 70600, onde estão os impostos da SPE e as despesas administrativas que não entram no rateio."
         : (card.extra
         ? "Esta obra tem o centro do empreendedor, o da parceria e outros centros (marketing, comercial, gestão). O DFC soma os centros marcados por inteiro, só nas contas ligadas na prestação de contas. O repasse do final é o percentual do parceiro sobre esse DFC, pago no mês seguinte no centro do empreendedor."
-        : "Com o centro principal da obra marcado, o DFC soma os centros marcados por inteiro. Sem ele, o valor é o rateio do parceiro sobre a obra. A linha 12 fica no mês em que o resultado acontece. O repasse é a variação desse mês paga no mês seguinte: janeiro de 2027 paga dezembro de 2026. A variação do 13301 é paga no 13300, na conta cadastrada no 13301. A do 13401 é paga no 13400, na conta do 13401. O centro de custo não entra no cadastro do credor.")))}</p>`;
+        : "Com o centro principal da obra marcado, o DFC soma os centros marcados por inteiro. Sem ele, o valor é o rateio do parceiro sobre a obra. A linha 12 fica no mês em que o resultado acontece. O repasse é a variação desse mês paga no mês seguinte: janeiro de 2027 paga dezembro de 2026. A variação do 13301 é paga no 13300, na conta cadastrada no 13301. A do 13401 é paga no 13400, na conta do 13401. O centro de custo não entra no cadastro do credor.")))}</p>
+      ${ypes}`;
     body.querySelectorAll("[data-rep-aba]").forEach((btn) => {
       btn.addEventListener("click", () => this.setAba(btn.getAttribute("data-rep-aba")));
     });
@@ -2121,28 +2112,7 @@ const OrcamentoRepassesApp = {
     const obras = sociedade ? [null] : ((part.obras && part.obras.length) ? part.obras : [null]);
     const saida = [];
     obras.forEach((obra) => {
-      if (this.aracariDe(part)) {
-        const obraDfc = obra
-          ? Object.assign({}, obra, { costCenters: (obra.costCenters || []).filter((c) => String(c.id || "").replace(/\D/g, "") !== "70600") })
-          : null;
-        const algumMarcado = !obraDfc || (obraDfc.costCenters || []).some((c) => c.inAccount !== false);
-        const usarRateio = !!obraDfc && !this.principalMarcado(obraDfc) && algumMarcado;
-        const centros = this.centrosDa({ obras: obraDfc ? [obraDfc] : [] }, obraDfc ? obraDfc.code : "", usarRateio);
-        const serie = this.resultadoCc(linhas, linhasDez, centros, part, usarRateio);
-        const pag = this.serieDeslocada(serie.dez, serie.ano);
-        const gap = this.centroGap(centros);
-        if ((pag.m || []).some((v) => Math.abs(Number(v) || 0) >= 0.005) || Math.abs(Number(pag.jan28) || 0) >= 0.005) {
-          saida.push({
-            prestacao: part.partnerName || part.companyName || "Prestação",
-            obra: obra ? String(obra.code) : "",
-            id: gap.id,
-            nome: gap.nome,
-            m: pag.m
-          });
-        }
-        return;
-      }
-      const especial = !sociedade && obra ? this.parExtra(obra) : null;
+      const especial = !sociedade && obra ? this.parExtra(obra, this.aracariDe(part) ? false : undefined) : null;
       if (especial) {
         const centrosExtra = this.centrosDa(part, obra.code, false);
         const linha = this.repasseDoExtra(linhas, linhasDez, centrosExtra, part, especial, obra);
@@ -2548,15 +2518,12 @@ const OrcamentoRepassesApp = {
         : (Math.abs(card.pctPessoas - 100) > 0.05
           ? `<p class="orc-est-alerta">As participações somam ${OrcEst.esc(this.pctTxt(card.pctPessoas))}, não 100%.</p>`
           : "");
-      const quem = card.aracari
-        ? "Cada empreendedor recebe a fatia dele sobre o resultado do centro 14201 e das contas correspondentes, mais o centro 70600. Nesse centro estão os impostos da SPE e as despesas administrativas que não entram no rateio."
-        : (card.kind === "mista"
-        ? "Cada empreendedor recebe, sobre o valor do terrenista, a proporção da fatia dele. 50% de uma fatia de 56% são 28% do negócio."
-        : (card.companyId === "12"
-        ? "Cada sócio recebe este percentual da variação de caixa do mês. O lucro recebido da empresa 13 já está nessa variação."
-        : (card.sociedade
-          ? "Cada sócio recebe este percentual da distribuição do mês seguinte, no centro de custo cadastrado."
-          : "Cada participante recebe este percentual do repasse do mês seguinte.")));
+      let quem = "Cada participante recebe este percentual do repasse do mês seguinte.";
+      if (card.extra) quem = "Cada participante recebe este percentual do repasse do mês seguinte.";
+      else if (card.aracari) quem = "Cada empreendedor recebe a fatia dele sobre o resultado do centro 14201 e das contas correspondentes, mais o centro 70600. Nesse centro estão os impostos da SPE e as despesas administrativas que não entram no rateio.";
+      else if (card.kind === "mista") quem = "Cada empreendedor recebe, sobre o valor do terrenista, a proporção da fatia dele. 50% de uma fatia de 56% são 28% do negócio.";
+      else if (card.companyId === "12") quem = "Cada sócio recebe este percentual da variação de caixa do mês. O lucro recebido da empresa 13 já está nessa variação.";
+      else if (card.sociedade) quem = "Cada sócio recebe este percentual da distribuição do mês seguinte, no centro de custo cadastrado.";
       const coluna = card.sociedade ? "Centro de custo" : "Participante";
       const totM = OrcEst.z();
       let totJan = 0;

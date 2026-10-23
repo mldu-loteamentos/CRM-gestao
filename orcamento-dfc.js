@@ -998,12 +998,12 @@ const OrcamentoDfcApp = {
     return null;
   },
 
-  /* PAR, REAPROPFIN e 1-6 ficam num grupo à parte e não entram no saldo inicial nem no saldo final. */
+  /* PAR, REAPROPFIN, 1-6 e 1-1 ficam num grupo à parte e não entram no saldo inicial nem no saldo final. */
   contaForaDoSaldo(c) {
     const bruto = String((c && (c.numero || c.chave)) || c || "");
     const num = bruto.indexOf("|") >= 0 ? bruto.split("|").slice(1).join("|") : bruto;
     const n = num.trim().toUpperCase().replace(/\s+/g, "").replace(/[–—−]/g, "-");
-    return n === "PAR" || n === "REAPROPFIN" || n === "1-6";
+    return n === "PAR" || n === "REAPROPFIN" || n === "1-6" || n === "1-1";
   },
 
   /* Caixa e equivalentes do balancete (1.1.01), sem a Terracotta. No saldo de contas, a conta corrente entra e a aplicação fica de fora. */
@@ -1110,10 +1110,13 @@ const OrcamentoDfcApp = {
   },
 
   linhaConta(b) {
-    if (!b || typeof b !== "object") return { codigo: "", nome: "", valor: null };
+    if (!b || typeof b !== "object") return { codigo: "", nome: "", valor: null, empresa: "" };
     const codigo = String(b.accountNumber || b.number || b.account || "").trim();
     const nome = String(b.accountName || b.name || b.description || codigo).trim();
-    return { codigo: codigo, nome: nome, valor: this.valorSaldo(b) };
+    const empresa = String(
+      b.companyId != null ? b.companyId : ((b.company && (b.company.id || b.company)) || "")
+    ).replace(/\D/g, "");
+    return { codigo: codigo, nome: nome, valor: this.valorSaldo(b), empresa: empresa };
   },
 
   contasEscolhidas() {
@@ -1208,67 +1211,117 @@ const OrcamentoDfcApp = {
     try {
       const mapa = {};
       const porConta = new Map();
-      const jobs = [];
       const fontes = new Set();
-      empresas.forEach((emp) => datas.forEach((dt) => jobs.push({ emp: String(emp.id), dt: dt })));
-      this._saldoTotal = jobs.length;
-      let cursor = 0;
-      const self = this;
+      const queridas = new Set(empresas.map((e) => String(e.id)));
+      this._saldoTotal = datas.length;
       let falha = null;
-      const worker = async () => {
-        while (cursor < jobs.length) {
-          if ((self._saldoTimeouts || 0) >= 4) break;
-          const job = jobs[cursor++];
-          const per = self.periodoDoSaldo(job.dt);
-          let linhas = [];
-          let origem = "balancete";
-          if (typeof api.getTrialBalance === "function") {
+      const guardar = (emp, dt, linhas, origem) => {
+        if (!linhas.length || !queridas.has(String(emp))) return;
+        fontes.add(origem);
+        const dia = mapa[dt] || (mapa[dt] = {});
+        linhas.forEach((linha) => {
+          const k = String(emp) + "|" + linha.codigo;
+          dia[k] = linha.valor;
+          if (!porConta.has(k)) {
+            porConta.set(k, { chave: k, empresa: String(emp), numero: linha.codigo, nome: linha.nome, analitica: true, origem: origem === "contas" ? "contas" : "" });
+          }
+        });
+      };
+      const lerContas = async (dt, emp) => {
+        const opt = { showLast: true, rethrow: true };
+        if (emp) opt.companyId = emp;
+        const contas = await this.comPrazo(api.getAccountBalances(dt, opt), 45000);
+        const porEmp = new Map();
+        let semEmpresa = false;
+        (contas || []).forEach((b) => {
+          const linha = this.linhaConta(b);
+          if (!linha.codigo || linha.valor == null) return;
+          const id = linha.empresa || (emp ? String(emp) : "");
+          if (!id) { semEmpresa = true; return; }
+          if (!queridas.has(id)) return;
+          if (!porEmp.has(id)) porEmp.set(id, []);
+          porEmp.get(id).push(linha);
+        });
+        return { porEmp: porEmp, semEmpresa: semEmpresa && !porEmp.size };
+      };
+      const datasVazias = [];
+      if (typeof api.getAccountBalances === "function") {
+        for (let i = 0; i < datas.length; i++) {
+          if (token !== this._sToken) return;
+          const dt = datas[i];
+          try {
+            const lido = await lerContas(dt, "");
+            if (lido.semEmpresa || !lido.porEmp.size) datasVazias.push(dt);
+            else {
+              lido.porEmp.forEach((linhas, emp) => guardar(emp, dt, linhas, "contas"));
+              const cobriu = empresas.every((e) => lido.porEmp.has(String(e.id)));
+              if (!cobriu) datasVazias.push(dt);
+            }
+          } catch (e) {
+            falha = e;
+            datasVazias.push(dt);
+          }
+          this._saldoFeitos = i + 1;
+          this.atualizarSaldosDom();
+        }
+      } else {
+        datas.forEach((dt) => datasVazias.push(dt));
+      }
+      const faltam = [];
+      datasVazias.forEach((dt) => {
+        empresas.forEach((emp) => {
+          const id = String(emp.id);
+          const dia = mapa[dt] || {};
+          const tem = Object.keys(dia).some((k) => k.indexOf(id + "|") === 0);
+          if (!tem) faltam.push({ emp: id, dt: dt });
+        });
+      });
+      if (faltam.length && typeof api.getAccountBalances === "function") {
+        this._saldoTotal = datas.length + faltam.length;
+        let cursor = 0;
+        const self = this;
+        const worker = async () => {
+          while (cursor < faltam.length) {
+            const job = faltam[cursor++];
             try {
-              const lista = await self.comPrazo(api.getTrialBalance(job.emp, per.ini, per.fim), 20000);
+              const lido = await lerContas(job.dt, job.emp);
+              lido.porEmp.forEach((linhas, emp) => guardar(emp, job.dt, linhas, "contas"));
+            } catch (e) {
+              falha = falha || e;
+            }
+            self._saldoFeitos = (self._saldoFeitos || 0) + 1;
+            if (self._saldoFeitos % 3 === 0) self.atualizarSaldosDom();
+          }
+        };
+        const n = Math.min(2, faltam.length);
+        await Promise.all(Array.from({ length: n }, () => worker()));
+      }
+      if (token !== this._sToken) return;
+      if (!porConta.size && typeof api.getTrialBalance === "function") {
+        let cursor = 0;
+        const jobsBal = [];
+        empresas.forEach((emp) => datas.forEach((dt) => jobsBal.push({ emp: String(emp.id), dt: dt })));
+        const self = this;
+        const workerBal = async () => {
+          while (cursor < jobsBal.length && (self._saldoTimeouts || 0) < 3) {
+            const job = jobsBal[cursor++];
+            const per = self.periodoDoSaldo(job.dt);
+            try {
+              const lista = await self.comPrazo(api.getTrialBalance(job.emp, per.ini, per.fim), 30000);
+              const linhas = [];
               (lista || []).forEach((b) => {
                 const linha = self.linhaBalancete(b, true);
                 if (linha.codigo && linha.valor != null) linhas.push(linha);
               });
-            } catch (e) {
-              falha = e;
-              linhas = [];
-              if (e && e.timeout) self._saldoTimeouts = (self._saldoTimeouts || 0) + 1;
-            }
-          }
-          const temCaixa = linhas.some((l) => l.codigo.indexOf("1.1.01") === 0 || l.codigo.indexOf("1.01.01") === 0);
-          if (!temCaixa && typeof api.getAccountBalances === "function" && (self._saldoTimeouts || 0) < 4) {
-            try {
-              const contas = await self.comPrazo(api.getAccountBalances(job.dt, { companyId: job.emp, showLast: true }), 20000);
-              const alt = [];
-              (contas || []).forEach((b) => {
-                const linha = self.linhaConta(b);
-                if (linha.codigo && linha.valor != null) alt.push(linha);
-              });
-              if (alt.length) {
-                linhas = alt;
-                origem = "contas";
-              }
+              guardar(job.emp, job.dt, linhas, "balancete");
             } catch (e) {
               falha = falha || e;
               if (e && e.timeout) self._saldoTimeouts = (self._saldoTimeouts || 0) + 1;
             }
           }
-          self._saldoFeitos = (self._saldoFeitos || 0) + 1;
-          if (self._saldoFeitos === 1 || self._saldoFeitos % 4 === 0) self.atualizarSaldosDom();
-          if (!linhas.length) continue;
-          fontes.add(origem);
-          const dia = mapa[job.dt] || (mapa[job.dt] = {});
-          linhas.forEach((linha) => {
-            const k = job.emp + "|" + linha.codigo;
-            dia[k] = linha.valor;
-            if (!porConta.has(k)) {
-              porConta.set(k, { chave: k, empresa: job.emp, numero: linha.codigo, nome: linha.nome, analitica: true, origem: origem === "contas" ? "contas" : "" });
-            }
-          });
-        }
-      };
-      const n = Math.min(3, jobs.length || 1);
-      await Promise.all(Array.from({ length: n }, () => worker()));
+        };
+        await workerBal();
+      }
       if (token !== this._sToken) return;
       if (!porConta.size && falha) {
         if (falha.timeout) throw new Error("O Sienge não respondeu o saldo das contas.");
@@ -1446,7 +1499,7 @@ const OrcamentoDfcApp = {
     const resultado = this.resultadoMes(mes);
     const grupoFora = fora.length ? `<div class="orc-dfc-fora">
       <h3>Fora do saldo</h3>
-      <p>PAR, REAPROPFIN e 1-6. Estes saldos não entram no saldo inicial nem no saldo final.</p>
+      <p>PAR, REAPROPFIN, 1-6 e 1-1. Estes saldos não entram no saldo inicial nem no saldo final.</p>
       <div class="orc-dfc-scroll orc-dfc-quadro-scroll">
         <table class="orc-dfc-table orc-dfc-quadro-tab">
           ${cabeca}
@@ -1456,7 +1509,7 @@ const OrcamentoDfcApp = {
       </div>
     </div>` : "";
     return `<section class="orc-dfc-quadro">
-      ${this._saldoPicker ? `<div class="orc-dfc-checks"><p>Saldo inicial de 2026, em ${this.dataBr(abertura)}. Marque as contas que entram nessa apuração. Terracotta, aplicações, PAR, REAPROPFIN e 1-6 ficam de fora. O realizado dos meses seguintes usa as mesmas contas. No forecast, o saldo inicial é o saldo final do mês anterior e o saldo final soma a variação de caixa do mês.</p>${checks || "<span>Nenhuma conta de caixa voltou da consulta.</span>"}</div>` : ""}
+      ${this._saldoPicker ? `<div class="orc-dfc-checks"><p>Saldo inicial de 2026, em ${this.dataBr(abertura)}. Marque as contas que entram nessa apuração. Terracotta, aplicações, PAR, REAPROPFIN, 1-6 e 1-1 ficam de fora. O realizado dos meses seguintes usa as mesmas contas. No forecast, o saldo inicial é o saldo final do mês anterior e o saldo final soma a variação de caixa do mês.</p>${checks || "<span>Nenhuma conta de caixa voltou da consulta.</span>"}</div>` : ""}
       <h3>Contas em ${this.MESES[mes]} de 2026</h3>
       <p>Início em ${this.dataBr(iniData)} e fim em ${this.dataBr(fimData)}, ${this._saldoFonte === "contas" ? "pelo saldo das contas correntes" : (this._saldoFonte === "misto" ? "pelo balancete societário e, onde ele não respondeu, pelo saldo das contas correntes" : "pelo balancete de verificação societário")}. A variação é o saldo final menos o saldo inicial. A geração do resultado deste mês no DFC foi ${this.money(resultado)}.</p>
       <div class="orc-dfc-scroll orc-dfc-quadro-scroll">
