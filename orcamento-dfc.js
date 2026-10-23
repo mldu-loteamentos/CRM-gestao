@@ -1262,8 +1262,27 @@ const OrcamentoDfcApp = {
     this.atualizarSaldosDom();
   },
 
-  htmlSaldos() {
+  /* Realizado: saldo das contas marcadas. Forecast: saldo final do mês anterior mais a variação de caixa do mês, até dezembro. */
+  serieSaldos() {
     const corte = this._corte == null ? this.corteForecast() : this._corte;
+    const g12 = (this._linhasDfc || []).find((r) => r.id === "g_12");
+    const base = (g12 && g12.base) || [];
+    const out = [];
+    for (let i = 0; i < 12; i++) {
+      if (i < corte) {
+        const ini = this.somaSaldo(this.dataSaldo(2026, i));
+        const fim = this.somaSaldo(this.dataSaldo(2026, i + 1));
+        out.push({ ini: ini, fim: fim, variacao: fim - ini, previsto: false });
+      } else {
+        const ini = i === 0 ? this.somaSaldo(this.dataSaldo(2026, 0)) : out[i - 1].fim;
+        const variacao = Number(base[i]) || 0;
+        out.push({ ini: ini, fim: ini + variacao, variacao: variacao, previsto: true });
+      }
+    }
+    return out;
+  },
+
+  htmlSaldos() {
     const span = 1 + (this.MESES.length + 1) * 4;
     if (this._saldoEstado === "lendo") {
       return `<tr class="orc-dfc-saldo"><td colspan="${span}">Lendo o saldo das contas…</td></tr>`;
@@ -1274,34 +1293,30 @@ const OrcamentoDfcApp = {
     if (this._saldoEstado === "vazio") {
       return `<tr class="orc-dfc-saldo"><td colspan="${span}">O balancete não devolveu o saldo de caixa no fim do mês.</td></tr>`;
     }
-    if (this._saldoEstado !== "ok" || corte <= 0) return "";
-    const vazio = `<td class="orc-dfc-sep">—</td><td></td><td></td><td></td>`;
+    if (this._saldoEstado !== "ok") return "";
+    const serie = this.serieSaldos();
+    const neg = (v) => (Number(v) < -0.005 ? " orc-dfc-neg" : "");
     const cel = (i, valor, escolhe) => {
-      if (i >= corte) return vazio;
-      const on = this.mesSaldo() === i ? " is-on" : "";
-      const btn = escolhe
-        ? `<button type="button" class="orc-dfc-saldo-btn${on}" data-saldo-mes="${i}">${this.money(valor)}</button>`
-        : this.money(valor);
-      return `<td class="orc-dfc-sep">${btn}</td><td></td><td></td><td></td>`;
-    };
-    const fatia = (i) => {
-      const ini = this.somaSaldo(this.dataSaldo(2026, i));
-      const fim = this.somaSaldo(this.dataSaldo(2026, i + 1));
-      return { ini: ini, fim: fim, variacao: fim - ini };
+      const item = serie[i];
+      if (!item) return `<td class="orc-dfc-sep">—</td><td></td><td></td><td></td>`;
+      if (escolhe && !item.previsto) {
+        const on = this.mesSaldo() === i ? " is-on" : "";
+        return `<td class="orc-dfc-sep${neg(valor)}"><button type="button" class="orc-dfc-saldo-btn${on}" data-saldo-mes="${i}">${this.money(valor)}</button></td><td></td><td></td><td></td>`;
+      }
+      return `<td class="orc-dfc-sep${neg(valor)}">${this.money(valor)}</td><td></td><td></td><td></td>`;
     };
     const linha = (nome, campo, abre) => {
-      const cells = this.MESES.map((_, i) => i >= corte ? vazio : cel(i, fatia(i)[campo], campo !== "variacao")).join("");
-      const ultimo = corte - 1;
-      const a = fatia(0).ini;
-      const b = fatia(ultimo).fim;
+      const cells = this.MESES.map((_, i) => cel(i, serie[i][campo], campo !== "variacao")).join("");
+      const a = serie[0].ini;
+      const b = serie[11].fim;
       const tot = campo === "ini" ? a : (campo === "fim" ? b : b - a);
       const label = abre
         ? `<button type="button" class="orc-dfc-saldo-abre" data-saldo-abrir="1">Saldo inicial</button>`
         : nome;
-      return `<tr class="orc-dfc-saldo"><td>${label}</td>${cells}<td class="orc-dfc-sep">${this.money(tot)}</td><td></td><td></td><td></td></tr>`;
+      return `<tr class="orc-dfc-saldo"><td>${label}</td>${cells}<td class="orc-dfc-sep${neg(tot)}">${this.money(tot)}</td><td></td><td></td><td></td></tr>`;
     };
-    const rodape = linha("", "ini", true) + linha("Saldo final", "fim", false) + linha("Variação", "variacao", false);
-    return rodape;
+    const folga = `<tr class="orc-dfc-saldo-gap"><td colspan="${span}"></td></tr>`;
+    return folga + linha("", "ini", true) + linha("Saldo final", "fim", false) + linha("Variação", "variacao", false);
   },
 
   quadroSaldos() {
@@ -1319,17 +1334,21 @@ const OrcamentoDfcApp = {
       const b = Number(mapaFim[c.chave]) || 0;
       const nome = (varias ? c.empresa + " · " : "") + c.numero + (c.nome && c.nome !== c.numero ? " " + c.nome : "");
       return { nome: nome, ini: a, fim: b, variacao: b - a };
-    }).sort((x, y) => String(x.nome).localeCompare(String(y.nome), "pt"));
+    }).filter((r) => Math.abs(r.ini) >= 0.005 || Math.abs(r.fim) >= 0.005)
+      .sort((x, y) => String(x.nome).localeCompare(String(y.nome), "pt"));
     const tot = linhas.reduce((s, r) => ({ ini: s.ini + r.ini, fim: s.fim + r.fim, variacao: s.variacao + r.variacao }), { ini: 0, fim: 0, variacao: 0 });
     const corpo = linhas.map((r) => `<tr><td>${this.esc(r.nome)}</td><td>${this.money(r.ini)}</td><td>${this.money(r.fim)}</td><td class="${r.variacao < -0.005 ? "orc-dfc-neg" : ""}">${this.money(r.variacao)}</td></tr>`).join("");
+    const abertura = this.dataSaldo(2026, 0);
+    const mapaAbertura = (this._saldoMap && this._saldoMap[abertura]) || {};
     const checks = this._saldoPicker ? (this._saldoContas || []).map((c) => {
       const on = escolhidas.has(c.chave);
       const nome = (varias ? c.empresa + " · " : "") + c.numero + (c.nome && c.nome !== c.numero ? " " + c.nome : "");
-      return `<label class="orc-dfc-conta${this.ehContaAnalise(c) ? "" : " is-fora"}"><input type="checkbox" data-saldo-conta="${this.esc(c.chave)}" ${on ? "checked" : ""}> ${this.esc(nome)}</label>`;
+      const saldo = Number(mapaAbertura[c.chave]) || 0;
+      return `<label class="orc-dfc-conta${this.ehContaAnalise(c) ? "" : " is-fora"}"><input type="checkbox" data-saldo-conta="${this.esc(c.chave)}" ${on ? "checked" : ""}> <span>${this.esc(nome)}</span><b>${this.money(saldo)}</b></label>`;
     }).join("") : "";
     const resultado = this.resultadoMes(mes);
     return `<section class="orc-dfc-quadro">
-      ${this._saldoPicker ? `<div class="orc-dfc-checks"><p>Contas de caixa. A marca inicial deixa a Terracotta e as aplicações de fora. Vale para todos os meses.</p>${checks || "<span>Nenhuma conta de caixa voltou da consulta.</span>"}</div>` : ""}
+      ${this._saldoPicker ? `<div class="orc-dfc-checks"><p>Saldo inicial de 2026, em ${this.dataBr(abertura)}. Marque as contas que entram nessa apuração. Terracotta e aplicações ficam de fora. O realizado dos meses seguintes usa as mesmas contas. No forecast, o saldo inicial é o saldo final do mês anterior e o saldo final soma a variação de caixa do mês.</p>${checks || "<span>Nenhuma conta de caixa voltou da consulta.</span>"}</div>` : ""}
       <h3>Contas em ${this.MESES[mes]} de 2026</h3>
       <p>Início em ${this.dataBr(iniData)} e fim em ${this.dataBr(fimData)}, ${this._saldoFonte === "contas" ? "pelo saldo das contas correntes" : (this._saldoFonte === "misto" ? "pelo balancete societário e, onde ele não respondeu, pelo saldo das contas correntes" : "pelo balancete de verificação societário")}. A variação é o saldo final menos o saldo inicial. A geração do resultado deste mês no DFC foi ${this.money(resultado)}.</p>
       <div class="orc-dfc-scroll orc-dfc-quadro-scroll">

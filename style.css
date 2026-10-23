@@ -10550,11 +10550,13 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .orc-dfc-cc td { background: #f8fafc; font-weight: 500; color: #334155; }
 .orc-dfc-neg { color: #991b1b; }
 .orc-dfc-formula .orc-dfc-neg { color: #991b1b; }
-.orc-dfc-saldo td { background: #f0fdf4; font-weight: 800; color: #064e3b; }
-.orc-dfc-saldo td:first-child { background: #f0fdf4; }
+.orc-dfc-saldo-gap td { height: 18px; padding: 0; border: none; background: #fff; }
+.orc-dfc-table.orc-dfc-cmp tfoot tr.orc-dfc-saldo td,
+.orc-dfc-table.orc-dfc-cmp tfoot tr.orc-dfc-saldo td:first-child { background: #eef2ff; color: #1e293b; font-weight: 600; font-size: 11px; }
+.orc-dfc-table.orc-dfc-cmp tfoot tr.orc-dfc-saldo td.orc-dfc-neg { color: #991b1b; }
 .orc-dfc-saldo-abre,
-.orc-dfc-saldo-btn { border: none; background: transparent; color: #105436; font-weight: 800; cursor: pointer; font-variant-numeric: tabular-nums; padding: 0; text-decoration: underline; text-underline-offset: 2px; }
-.orc-dfc-saldo-btn.is-on { background: #105436; color: #fff; text-decoration: none; border-radius: 4px; padding: 1px 6px; }
+.orc-dfc-saldo-btn { border: none; background: transparent; color: inherit; font: inherit; font-weight: 600; cursor: pointer; font-variant-numeric: tabular-nums; padding: 0; text-decoration: underline; text-underline-offset: 2px; }
+.orc-dfc-saldo-btn.is-on { color: #1e3a8a; text-decoration: none; box-shadow: inset 0 -2px 0 #64748b; }
 .orc-dfc-quadro { margin-top: 14px; }
 .orc-dfc-quadro h3 { margin: 0 0 4px; color: #105436; font-size: 0.95rem; }
 .orc-dfc-quadro p { margin: 0 0 8px; color: #64748b; font-size: 0.78rem; max-width: 920px; }
@@ -10563,7 +10565,8 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .orc-dfc-quadro-tab tfoot td { font-weight: 800; background: #ecfdf5; }
 .orc-dfc-checks { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-bottom: 12px; padding: 10px 12px; background: #fff; border: 1px solid #d1fae5; border-radius: 10px; }
 .orc-dfc-checks p { flex: 1 1 100%; margin: 0 0 4px; }
-.orc-dfc-conta { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: #334155; }
+.orc-dfc-conta { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: #334155; min-width: 280px; }
+.orc-dfc-conta b { margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums; color: #1e293b; }
 .orc-dfc-conta.is-fora { color: #94a3b8; }
 .orc-dfc-erro { margin-bottom: 10px; padding: 10px 12px; border-radius: 8px; background: #fff7ed; color: #9a3412; border: 1px solid #fdba74; }
 .orc-dfc-load { padding: 28px 0; }
@@ -10744,11 +10747,14 @@ tr.pr-liberado td { background: #f7faf8; }
 .cc-table.pr-cc input[type="checkbox"] { width: 16px; height: 16px; accent-color: #105436; }
 .orc-rep-tabs { margin: 4px 0 0; }
 .orc-rep-obras { margin: 0 0 12px; }
-.orc-rep-quadro { table-layout: fixed; width: 100%; min-width: 1480px; }
-.orc-rep-quadro col.orc-rep-nome { width: 280px; }
-.orc-rep-quadro col.orc-rep-mes { width: 92px; }
-.orc-rep-quadro th:first-child,
-.orc-rep-quadro td:first-child { min-width: 0; width: 280px; white-space: normal; }
+.orc-rep-socios .orc-dfc-scroll { overflow: hidden; max-height: none; }
+.orc-rep-quadro { table-layout: fixed; width: 100%; min-width: 0; }
+.orc-rep-quadro col.orc-rep-nome { width: 16%; }
+.orc-rep-quadro col.orc-rep-mes { width: 6%; }
+.orc-rep-quadro.orc-dfc-table th,
+.orc-rep-quadro.orc-dfc-table td { min-width: 0; height: auto; padding: 4px 2px; font-size: 0.68rem; white-space: normal; }
+.orc-rep-quadro.orc-dfc-table th:first-child,
+.orc-rep-quadro.orc-dfc-table td:first-child { width: 16%; min-width: 0; left: auto; text-align: left; }
 .orc-rep-ccs { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
 .orc-rep-cc-mark { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px 10px; background: #fff; font-size: 0.78rem; font-weight: 700; color: #1c2e24; cursor: pointer; }
 .orc-rep-cc-mark input { width: 16px; height: 16px; accent-color: #105436; }

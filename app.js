@@ -3035,6 +3035,9 @@ function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
     if (isSubj) {
       requiredType = "advogado";
       ruleSuffix = "JURÍDICO";
+    } else if (subIntegra && !propostaFila) {
+      requiredType = "apoio_juridico";
+      ruleSuffix = "BACK OFFICE / SUB JUDICE NO INTEGRA";
     } else if (nexCumprida && !propostaFila && !subIntegra) {
       requiredType = "apoio_juridico";
       ruleSuffix = "BACK OFFICE / NEX CUMPRIDA";
@@ -12233,7 +12236,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
                 <i data-lucide="scale" style="width: 14px; height: 14px;"></i> Sub judice - ${client.maxDaysDelay} dia${client.maxDaysDelay === 1 ? '' : 's'}
               </span>
               ` : (typeof window.clientIsSubjudiceIntegra === "function" && window.clientIsSubjudiceIntegra(client)) ? `
-              <span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #e9d5ff; background-color: #fdf4ff; color: #86198f; font-weight: 600;" title="Sub judice marcado no Integra. No Sienge este título não está sub judice.">
+              <span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #e9d5ff; background-color: #fdf4ff; color: #86198f; font-weight: 600;" title="Sub judice marcado no Integra. Responsável: operador de cobrança back office. No Sienge este título não está sub judice.">
                 <i data-lucide="scale" style="width: 14px; height: 14px;"></i> Sub judice no Integra - ${client.maxDaysDelay} dia${client.maxDaysDelay === 1 ? '' : 's'}
               </span>
               ` : (() => {
@@ -50216,7 +50219,7 @@ window.subjudiceIntegraChaves = function(client) {
 
 window.filaAgingDistratadoHtml = function() {
   return `<div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
-    <span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #e9d5ff; background-color: #fdf4ff; color: #86198f; font-weight: 600;" title="Sub judice marcado no Integra. No Sienge este título não está sub judice.">
+    <span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #e9d5ff; background-color: #fdf4ff; color: #86198f; font-weight: 600;" title="Sub judice marcado no Integra. Responsável: operador de cobrança back office. No Sienge este título não está sub judice.">
       <i data-lucide="scale" style="width: 14px; height: 14px;"></i> Sub judice no Integra
     </span>
     <span style="padding: 2px 8px; font-size: 0.72rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #cbd5e1; background-color: #f8fafc; color: #334155; font-weight: 700;">Distratado</span>

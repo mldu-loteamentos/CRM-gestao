@@ -1327,13 +1327,20 @@ const OrcamentoRepassesApp = {
           const nomePlano = t.planoNome || t.planoId;
           lista.push({
             nome: (s.name || "Sócio") + (nomePlano ? " · " + nomePlano : ""),
-            pct: t.efetivo
+            pct: t.efetivo,
+            ccId: String(t.ccId || s.ccTitulo || ""),
+            ccNome: String(t.ccNome || s.ccTituloNome || "")
           });
         });
         return;
       }
       const pct = Number(s.sharePct) || 0;
-      if (pct > 0) lista.push({ nome: s.name || (part.partnerName || "Parceiro"), pct: pct });
+      if (pct > 0) lista.push({
+        nome: s.name || (part.partnerName || "Parceiro"),
+        pct: pct,
+        ccId: String(s.ccTitulo || ""),
+        ccNome: String(s.ccTituloNome || "")
+      });
     });
     return lista;
   },
@@ -1489,6 +1496,22 @@ const OrcamentoRepassesApp = {
     return { m: pag, jan28: Number(meses[11]) || 0 };
   },
 
+  /* O lucro recebido não nasce num centro. Entra no 71200, o corporativo, para o total dos centros fechar com a distribuição dos sócios. */
+  completarLucrosNoCentro(distribuicao, pagamento, jan28) {
+    const soma = OrcEst.z();
+    let janSoma = 0;
+    distribuicao.forEach((r) => {
+      (r.m || []).forEach((v, i) => { soma[i] += Number(v) || 0; });
+      janSoma += Number(r.jan28) || 0;
+    });
+    const alvo = distribuicao.find((r) => String(r.id).replace(/\D/g, "") === "71200")
+      || distribuicao.find((r) => this.nomeCc({ name: r.nome }).indexOf("CORPORATIVO") >= 0)
+      || distribuicao[0];
+    if (!alvo) return;
+    alvo.m = (alvo.m || OrcEst.z()).map((v, i) => (Number(v) || 0) + ((Number(pagamento[i]) || 0) - soma[i]));
+    alvo.jan28 = (Number(alvo.jan28) || 0) + ((Number(jan28) || 0) - janSoma);
+  },
+
   resultadoCc(linhas, linhasDez, um, part, comRateio) {
     const anoMolde = this.molde();
     this.encher(anoMolde.tpl, anoMolde.byId, linhas, um, part, comRateio);
@@ -1511,6 +1534,7 @@ const OrcamentoRepassesApp = {
     const usarRateio = !sociedade && !!obra && !this.principalMarcado(obra) && algumMarcado;
     const centros = this.centrosDa(part, obraCode, usarRateio);
     this.encher(tpl, byId, linhas, centros, part, usarRateio);
+    const resultadoProprio = (byId.g_12 && byId.g_12.months) ? byId.g_12.months.slice() : OrcEst.z();
     const lucros = !this._semLucros && String(part.companyId) === "12" ? this.lucrosRecebidosEmpresa13() : null;
     if (lucros) this.incluirLucros(byId, lucros.meses);
     const resultado = (byId.g_12 && byId.g_12.months) ? byId.g_12.months.slice() : OrcEst.z();
@@ -1527,9 +1551,11 @@ const OrcamentoRepassesApp = {
       });
     });
     const dez = dezMap.g_12 || 0;
-    const serieCard = this.serieDeslocada(dez, resultado);
-    const pagamento = serieCard.m;
-    const jan28 = serieCard.jan28;
+    /* Na empresa 12 o lucro recebido da 13 entra e é distribuído no mesmo mês.
+       O resultado próprio continua saindo no mês seguinte. */
+    const seriePropria = this.serieDeslocada(dez, lucros ? resultadoProprio : resultado);
+    const pagamento = seriePropria.m.map((v, i) => (Number(v) || 0) + (lucros ? (Number(lucros.meses[i]) || 0) : 0));
+    const jan28 = (Number(seriePropria.jan28) || 0) + (lucros ? (Number(lucros.jan28) || 0) : 0);
     const vivo = new Set(["g_03", "g_06", "g_08", "g_10", "g_12"]);
     tpl.forEach((g) => {
       const tem = g.months.some((v) => Math.abs(v) >= 0.005) || [...g.accs.values()].some((a) => a.months.some((v) => Math.abs(v) >= 0.005));
@@ -1599,6 +1625,8 @@ const OrcamentoRepassesApp = {
     const pessoas = this.pessoasDe(part).map((p) => ({
       nome: p.nome,
       pct: p.pct,
+      ccId: p.ccId || "",
+      ccNome: p.ccNome || "",
       dez: dez * p.pct / 100,
       m: variacao.map((v) => v * p.pct / 100),
       jan28: jan28 * p.pct / 100
@@ -1640,6 +1668,7 @@ const OrcamentoRepassesApp = {
         });
       });
     }
+    if (lucros && distribuicao.length) this.completarLucrosNoCentro(distribuicao, pagamento, jan28);
     const ccIds = [...centros.keys()].sort((a, b) => String(a).localeCompare(String(b), "pt-BR", { numeric: true }));
     return {
       id: String(part.id || (part.companyId + "-" + indice)) + (obraCode ? ":" + obraCode : ""),
@@ -2119,7 +2148,17 @@ const OrcamentoRepassesApp = {
           const onde = !base.sociedade && pago && pago !== String(r.id).replace(/\D/g, "") ? " · pago no " + pago : "";
           numeros(ws, String(r.id) + (r.nome ? " — " + r.nome : "") + onde, meses, jan, "FFFFFFFF", false);
         };
-        if (!centros.length) faixa(ws, "Nenhum centro de custo nesta prestação", "FFFFFFFF", "FF64748B");
+        if (base.sociedade && pessoas.length) {
+          const pAcc = OrcEst.z();
+          let pJan = 0;
+          pessoas.forEach((p) => {
+            const meses = p.m || OrcEst.z();
+            meses.forEach((v, i) => { pAcc[i] += Number(v) || 0; });
+            pJan += Number(p.jan28) || 0;
+            numeros(ws, this.rotuloSocio(p), meses, p.jan28, "FFFFFFFF", false);
+          });
+          numeros(ws, "Total", pAcc, pJan, "FF475569", true);
+        } else if (!centros.length) faixa(ws, "Nenhum centro de custo nesta prestação", "FFFFFFFF", "FF64748B");
         else if (divide) {
           pessoas.forEach((p) => {
             const fatia = (Number(p.pct) || 0) / 100;
@@ -2157,6 +2196,14 @@ const OrcamentoRepassesApp = {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  },
+
+  rotuloSocio(p) {
+    const pct = Number(p && p.pct) ? " · " + this.pctTxt(p.pct) : "";
+    const cc = String((p && p.ccId) || "").trim();
+    const ccNome = String((p && p.ccNome) || "").trim();
+    if (cc) return cc + (ccNome ? " - " + ccNome : "") + pct;
+    return String((p && p.nome) || "Sócio") + pct;
   },
 
   nomeEmpresaExport(id) {
@@ -2274,19 +2321,24 @@ const OrcamentoRepassesApp = {
       const aviso = Math.abs(card.pctPessoas - 100) > 0.05
         ? `<p class="orc-est-alerta">As participações somam ${OrcEst.esc(this.pctTxt(card.pctPessoas))}, não 100%.</p>`
         : "";
-      const quem = card.sociedade
-        ? "Cada sócio recebe este percentual da distribuição do mês seguinte."
-        : "Cada participante recebe este percentual do repasse do mês seguinte.";
+      const quem = card.companyId === "12"
+        ? "Cada sócio recebe este percentual. O lucro recebido da empresa 13 entra na distribuição do mesmo mês. O resultado próprio da empresa 12 entra no mês seguinte."
+        : (card.sociedade
+          ? "Cada sócio recebe este percentual da distribuição do mês seguinte, no centro de custo cadastrado."
+          : "Cada participante recebe este percentual do repasse do mês seguinte.");
+      const coluna = card.sociedade ? "Centro de custo" : "Participante";
       socios = `<div class="orc-rep-socios"><h4>${quem}</h4>${aviso}
-        <div class="orc-dfc-scroll"><table class="orc-dfc-table orc-est-table orc-rep-quadro">${this.colunasRepasse()}<thead>${this.cabecaPagamento("Participante")}</thead><tbody>
-        ${card.pessoas.map((p) => `<tr><td>${OrcEst.esc(p.nome)} <span class="orc-rep-pct">${this.pctTxt(p.pct)}</span></td>${(p.m || []).map((v) => `<td${Number(v) < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(v)}</td>`).join("")}<td${Number(p.jan28) < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(p.jan28)}</td><td>${OrcEst.money(this.soma(p.m))}</td></tr>`).join("")}
+        <div class="orc-dfc-scroll"><table class="orc-dfc-table orc-est-table orc-rep-quadro">${this.colunasRepasse()}<thead>${this.cabecaPagamento(coluna)}</thead><tbody>
+        ${card.pessoas.map((p) => `<tr><td>${OrcEst.esc(card.sociedade ? this.rotuloSocio(p) : (p.nome + " · " + this.pctTxt(p.pct)))}</td>${(p.m || []).map((v) => `<td${Number(v) < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(v)}</td>`).join("")}<td${Number(p.jan28) < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(p.jan28)}</td><td>${OrcEst.money(this.soma(p.m))}</td></tr>`).join("")}
         </tbody></table></div></div>`;
     }
     const centrosRep = (card.distribuicao || []).slice().sort((a, b) => String(a.id).localeCompare(String(b.id), "pt-BR", { numeric: true }));
     const rotuloRep = card.sociedade ? "Distribuição" : "Repasse";
-    const fraseRep = card.sociedade
-      ? "A variação de caixa de um mês vira distribuição no mês seguinte."
-      : "A variação de caixa de um mês é o repasse do mês seguinte, pago no centro da obra e na conta cadastrada no centro do parceiro.";
+    const fraseRep = card.companyId === "12"
+      ? "O lucro recebido da empresa 13 é distribuído no mês em que entra. O resultado próprio de um mês vira distribuição no mês seguinte."
+      : (card.sociedade
+        ? "A variação de caixa de um mês vira distribuição no mês seguinte."
+        : "A variação de caixa de um mês é o repasse do mês seguinte, pago no centro da obra e na conta cadastrada no centro do parceiro.");
     let quadro = "";
     if (centrosRep.length) {
       const acc = OrcEst.z();
