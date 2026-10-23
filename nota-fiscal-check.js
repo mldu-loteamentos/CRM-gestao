@@ -459,7 +459,77 @@ window.NotaFiscalCheck = {
     if (n.simples == null && /simples nacional na data de compet[eê]ncia[\s\S]{0,60}\bsim\b/i.test(texto)) n.simples = "sim";
     if (n.simples == null && /simples nacional na data de compet[eê]ncia[\s\S]{0,60}\bn[aã]o\b/i.test(texto)) n.simples = "nao";
     n.cnpjs = [...new Set((texto.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/g) || []).map((c) => this.digits(c)))];
+    n.cnpjPrestador = this.cnpjApos(texto, /prestador de servi[cç]os?|dados do prestador|(?:^|\n)\s*prestador\b|emitente/i);
+    const naColuna = this.valorNaColuna(itens, /^valor l[ií]quido( da nfs-?e| da nota)?( \(r\$\))?$/i);
+    if (naColuna != null && naColuna > 0 && (n.liquido == null || n.liquido === 0)) n.liquido = naColuna;
+    const retidoNota = (n.inss || 0) + (n.irrf || 0) + (n.pis || 0) + (n.cofins || 0) + (n.csll || 0) + (n.csrf || 0) + (n.issRetido && n.valorIss ? n.valorIss : 0);
+    if ((n.liquido == null || n.liquido === 0) && n.valorServico > 0 && retidoNota < 0.009) n.liquido = n.valorServico;
     return n;
+  },
+
+  /** CNPJ ou CPF que aparece logo depois de um rótulo (prestador da nota, beneficiário do boleto). */
+  cnpjApos(texto, rotulo) {
+    const src = rotulo.source || String(rotulo);
+    const m = String(texto || "").match(new RegExp("(?:" + src + ")[\\s\\S]{0,280}?(\\d{2}\\.\\d{3}\\.\\d{3}/\\d{4}-\\d{2}|\\d{3}\\.\\d{3}\\.\\d{3}-\\d{2})", "i"));
+    return m ? this.digits(m[1]) : "";
+  },
+
+  /** Valor na coluna do rótulo, na linha de baixo. Evita pegar o primeiro número da linha seguinte. */
+  valorNaColuna(itens, rotulo) {
+    const ordenados = (itens || []).slice().sort((a, b) => a.y - b.y || a.x - b.x);
+    let rot = null;
+    ordenados.forEach((r) => {
+      if (!r || r.s.length > 80 || !rotulo.test(r.s)) return;
+      if (!rot || r.y < rot.y) rot = r;
+    });
+    if (!rot) return null;
+    let melhor = null;
+    ordenados.forEach((v) => {
+      const dy = v.y - rot.y;
+      if (dy < 2 || dy > 36) return;
+      const n = this.num(v.s);
+      if (n == null) return;
+      const dx = Math.abs((v.x || 0) - (rot.x || 0));
+      if (dx > Math.max((rot.w || 0) + 12, 110)) return;
+      if (!melhor || dx < melhor.dx) melhor = { dx, n };
+    });
+    return melhor ? melhor.n : null;
+  },
+
+  textoPdf(itens) {
+    const ordenados = (itens || []).slice().sort((a, b) => a.y - b.y || a.x - b.x);
+    const linhas = [];
+    ordenados.forEach((it) => {
+      const l = linhas[linhas.length - 1];
+      if (l && Math.abs(l.y - it.y) < 2.5) l.itens.push(it);
+      else linhas.push({ y: it.y, itens: [it] });
+    });
+    return linhas.map((l) => l.itens.sort((a, b) => a.x - b.x).map((i) => i.s).join(" ")).join("\n");
+  },
+
+  /** CPF/CNPJ do beneficiário impresso no boleto anexado ao título. */
+  async cnpjBeneficiarioBoleto(billId) {
+    const id = String(billId || "");
+    if (!id) return "";
+    this._boletoBenef = this._boletoBenef || {};
+    if (this._boletoBenef[id] != null) return this._boletoBenef[id];
+    let doc = "";
+    try {
+      const anexos = await this.anexos(id);
+      const boletos = (anexos || []).filter((a) => /boleto/.test(this.fold(`${a.description} ${a.name}`)) && !/comprovante/.test(this.fold(`${a.description} ${a.name}`)));
+      for (const a of boletos.slice(0, 2)) {
+        const { buf } = await this.baixar(id, a.id);
+        const inicio = new TextDecoder("latin1").decode(new Uint8Array(buf.slice(0, 64))).trim();
+        if (!/^%PDF/.test(inicio)) continue;
+        const texto = this.textoPdf(await this.itensDoPdf(buf));
+        doc = this.cnpjApos(texto, /benefici[aá]rio|cedente/i);
+        if (doc) break;
+      }
+    } catch (e) {
+      doc = "";
+    }
+    this._boletoBenef[id] = doc || "";
+    return this._boletoBenef[id];
   },
 
   lerSimples(t) {
@@ -697,6 +767,9 @@ window.NotaFiscalCheck = {
 
       if (n.valorServico != null && r.bruto && this.difere(n.valorServico, r.bruto)) {
         r.avisos.push(`Valor do serviço na nota (${this.money(n.valorServico)}) diferente do valor do título (${this.money(r.bruto)}).`);
+      }
+      if ((n.liquido == null || n.liquido === 0) && n.valorServico != null && r.liquido != null && !this.difere(n.valorServico, r.bruto) && Math.abs(r.retido || 0) < this.TOL) {
+        n.liquido = n.valorServico;
       }
       if (n.liquido != null && r.liquido != null && this.difere(n.liquido, r.liquido) && !this.difere(n.valorServico, r.bruto)) {
         r.erros.push(`Valor líquido da nota ${this.money(n.liquido)} diferente do líquido do título (${this.money(r.bruto)} − ${this.money(r.retido)} = ${this.money(r.liquido)}).`);
