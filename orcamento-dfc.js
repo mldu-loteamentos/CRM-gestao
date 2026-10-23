@@ -1847,7 +1847,7 @@ const OrcamentoDfcApp = {
   },
 
   htmlSaldos() {
-    const span = 1 + this.MESES.length + 1 + this.MESES.length * (1 + this.colsVar());
+    const span = 1 + this.MESES.length + 1 + (this.MESES.length + 1) * (1 + this.colsVar());
     if (this._saldoEstado === "lendo") {
       const n = Number(this._saldoFeitos) || 0;
       const t = Number(this._saldoTotal) || 0;
@@ -1876,11 +1876,14 @@ const OrcamentoDfcApp = {
       const a = serie.y26[0].ini;
       const b = serie.y26[11].fim;
       const tot = campo === "ini" ? a : (campo === "fim" ? b : b - a);
+      const a27 = serie.y27[0].ini;
+      const b27 = serie.y27[11].fim;
+      const tot27 = campo === "ini" ? a27 : (campo === "fim" ? b27 : b27 - a27);
       const c27 = serie.y27.map((item, i) => {
         const valor = item[campo];
         const sep = i === 0 ? " orc-dfc-sep" : "";
         return `<td class="${sep.trim()}${neg(valor)}">${this.money(valor)}</td>${this.htmlVars(valor, serie.y26[i][campo])}`;
-      }).join("");
+      }).join("") + `<td class="orc-dfc-sep${neg(tot27)}">${this.money(tot27)}</td>${this.htmlVars(tot27, tot)}`;
       const label = abre
         ? `<button type="button" class="orc-dfc-saldo-abre" data-saldo-abrir="1">Saldo inicial</button>`
         : nome;
@@ -2139,8 +2142,8 @@ const OrcamentoDfcApp = {
     const corte = this._corte == null ? this.corteForecast() : this._corte;
     const extras = (this.varRs ? `<th class="orc-dfc-vcol">Var R$</th>` : "") + (this.varPct ? `<th class="orc-dfc-vcol">Var %</th>` : "");
     const h26 = this.MESES.map((m, i) => `<th${i === 0 ? " class=\"orc-dfc-sep\"" : ""} title="${i >= corte ? "Previsão de 2026" : "Realizado de 2026"}">${m}</th>`).join("") + `<th class="orc-dfc-sep">Total</th>`;
-    const h27 = this.MESES.map((m, i) => `<th${i === 0 ? " class=\"orc-dfc-sep\"" : ""}>${m}</th>${extras}`).join("");
-    const h1 = `<th colspan="13" class="orc-dfc-mes">2026</th><th colspan="${12 * (1 + this.colsVar())}" class="orc-dfc-mes is-alt">2027</th>`;
+    const h27 = this.MESES.map((m, i) => `<th${i === 0 ? " class=\"orc-dfc-sep\"" : ""}>${m}</th>${extras}`).join("") + `<th class="orc-dfc-sep">Total</th>${extras}`;
+    const h1 = `<th colspan="13" class="orc-dfc-mes">2026</th><th colspan="${13 * (1 + this.colsVar())}" class="orc-dfc-mes is-alt">2027</th>`;
     const h2 = h26 + h27;
     const trs = rows.map((r) => {
       const cls = [
@@ -2171,11 +2174,12 @@ const OrcamentoDfcApp = {
       const baseTotal = Number(r.baseTotal) || 0;
       const chaveTot = corte > 0 ? (r.id + "||t") : "";
       const tot26 = `<td class="orc-dfc-sep${baseTotal < -0.005 ? " orc-dfc-neg" : ""}${chaveTot ? " orc-dfc-abre" : ""}"${chaveTot ? ` data-orc-2026="${this.esc(chaveTot)}"` : ""} title="Total de 2026">${this.money(baseTotal)}</td>`;
+      const tot27 = (r.months || []).reduce((a, b) => a + (Number(b) || 0), 0);
       const c27 = (r.months || []).map((v, i) => {
         const n = Number(v) || 0;
         const sep = i === 0 ? " orc-dfc-sep" : "";
         return `<td class="${sep.trim()}${n < -0.005 ? " orc-dfc-neg" : ""}">${this.money(n)}</td>${this.htmlVars(n, base[i])}`;
-      }).join("");
+      }).join("") + `<td class="orc-dfc-sep${tot27 < -0.005 ? " orc-dfc-neg" : ""}" title="Total de 2027">${this.money(tot27)}</td>${this.htmlVars(tot27, baseTotal)}`;
       const click = r.hasKids ? ` data-dfc-id="${this.esc(r.id)}"` : "";
       return `<tr class="${cls}"${click}>
         <td style="padding-left:${6 + r.level * 8}px">${ico}<span>${this.esc(r.name)}</span></td>
@@ -2444,6 +2448,9 @@ const OrcamentoDfcApp = {
       if (this.varRs) colunas.push(m + " Var R$");
       if (this.varPct) colunas.push(m + " Var %");
     });
+    colunas.push("Total 2027");
+    if (this.varRs) colunas.push("Total Var R$");
+    if (this.varPct) colunas.push("Total Var %");
     const last = colunas.length;
     const letra = (i) => inv.excelColLetter(i);
     ws.properties.showGridLines = false;
@@ -2518,6 +2525,12 @@ const OrcamentoDfcApp = {
         if (this.varRs) { valores.push(o - b); kinds.push("num"); }
         if (this.varPct) { valores.push(this.pctNum(o, b)); kinds.push("pct"); }
       });
+      const tot27 = (r.months || []).reduce((a, b) => a + (Number(b) || 0), 0);
+      const baseAno = Number(r.baseTotal) || 0;
+      valores.push(tot27);
+      kinds.push("num");
+      if (this.varRs) { valores.push(tot27 - baseAno); kinds.push("num"); }
+      if (this.varPct) { valores.push(this.pctNum(tot27, baseAno)); kinds.push("pct"); }
       let fill = "FFFFFFFF";
       let fontColor = "FF0F172A";
       let bold = false;
