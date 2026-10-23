@@ -15,6 +15,7 @@ const OrcamentoDfcApp = {
   _pronto: false,
   busy: false,
   erro: "",
+  varModo: "rs",
 
   esc(s) {
     return String(s == null ? "" : s)
@@ -865,7 +866,7 @@ const OrcamentoDfcApp = {
     root.innerHTML = `
       <div class="orc-dfc-page">
         ${typeof OrcamentoApp !== "undefined" ? OrcamentoApp.abasHtml() : ""}
-        <p class="orc-dfc-lead">Orçamento de 2027 contra o DFC de 2026, em reais. ${this.textoCorte()} O realizado vem do caixa e banco.</p>
+        <p class="orc-dfc-lead">Janeiro a dezembro de 2026, o total, e depois janeiro a dezembro de 2027. A variação ao lado de cada mês de 2027 compara com o mesmo mês de 2026. O saldo final de 2026 é o saldo inicial de janeiro de 2027, e cada mês seguinte parte do saldo final do anterior. ${this.textoCorte()} O realizado vem do caixa e banco.</p>
         <div class="orc-dfc-tools">
           <div id="orc-dfc-emp-box"></div>
           <div id="orc-dfc-cc-box"></div>
@@ -1405,28 +1406,50 @@ const OrcamentoDfcApp = {
     this.atualizarSaldosDom();
   },
 
-  /* Realizado: saldo das contas marcadas. Forecast: saldo final do mês anterior mais a variação de caixa do mês, até dezembro. */
+  /* Realizado: saldo das contas marcadas. Forecast e 2027: saldo final do mês anterior mais a variação de caixa do mês. */
   serieSaldos() {
     const corte = this._corte == null ? this.corteForecast() : this._corte;
     const g12 = (this._linhasDfc || []).find((r) => r.id === "g_12");
     const base = (g12 && g12.base) || [];
-    const out = [];
+    const orc = (g12 && g12.months) || [];
+    const y26 = [];
     for (let i = 0; i < 12; i++) {
       if (i < corte) {
         const ini = this.somaSaldo(this.dataSaldo(2026, i));
         const fim = this.somaSaldo(this.dataSaldo(2026, i + 1));
-        out.push({ ini: ini, fim: fim, variacao: fim - ini, previsto: false });
+        y26.push({ ini: ini, fim: fim, variacao: fim - ini, previsto: false });
       } else {
-        const ini = i === 0 ? this.somaSaldo(this.dataSaldo(2026, 0)) : out[i - 1].fim;
+        const ini = i === 0 ? this.somaSaldo(this.dataSaldo(2026, 0)) : y26[i - 1].fim;
         const variacao = Number(base[i]) || 0;
-        out.push({ ini: ini, fim: ini + variacao, variacao: variacao, previsto: true });
+        y26.push({ ini: ini, fim: ini + variacao, variacao: variacao, previsto: true });
       }
     }
-    return out;
+    const y27 = [];
+    for (let i = 0; i < 12; i++) {
+      const ini = i === 0 ? y26[11].fim : y27[i - 1].fim;
+      const variacao = Number(orc[i]) || 0;
+      y27.push({ ini: ini, fim: ini + variacao, variacao: variacao, previsto: true });
+    }
+    return { y26: y26, y27: y27 };
+  },
+
+  setVarModo(modo) {
+    this.varModo = modo === "pct" ? "pct" : "rs";
+    this.paintBody();
+  },
+
+  htmlVar(orc, real) {
+    const o = Number(orc) || 0;
+    const b = Number(real) || 0;
+    const d = o - b;
+    const titulo = "2026 " + this.money(b) + " · 2027 " + this.money(o) + " · " + this.money(d) + " · " + this.pct(o, b);
+    const neg = d < -0.005 && (this.varModo === "rs" || Math.abs(b) >= 0.005) ? " orc-dfc-neg" : "";
+    const texto = this.varModo === "pct" ? this.pct(o, b) : this.money(d);
+    return `<td class="orc-dfc-vcol${neg}" title="${this.esc(titulo)}">${texto}</td>`;
   },
 
   htmlSaldos() {
-    const span = 1 + (this.MESES.length + 1) * 4;
+    const span = 1 + this.MESES.length + 1 + this.MESES.length * 2;
     if (this._saldoEstado === "lendo") {
       const n = Number(this._saldoFeitos) || 0;
       const t = Number(this._saldoTotal) || 0;
@@ -1442,24 +1465,28 @@ const OrcamentoDfcApp = {
     if (this._saldoEstado !== "ok") return "";
     const serie = this.serieSaldos();
     const neg = (v) => (Number(v) < -0.005 ? " orc-dfc-neg" : "");
-    const cel = (i, valor, escolhe) => {
-      const item = serie[i];
-      if (!item) return `<td class="orc-dfc-sep">—</td><td></td><td></td><td></td>`;
-      if (escolhe && !item.previsto) {
-        const on = this.mesSaldo() === i ? " is-on" : "";
-        return `<td class="orc-dfc-sep${neg(valor)}"><button type="button" class="orc-dfc-saldo-btn${on}" data-saldo-mes="${i}">${this.money(valor)}</button></td><td></td><td></td><td></td>`;
-      }
-      return `<td class="orc-dfc-sep${neg(valor)}">${this.money(valor)}</td><td></td><td></td><td></td>`;
-    };
     const linha = (nome, campo, abre) => {
-      const cells = this.MESES.map((_, i) => cel(i, serie[i][campo], campo !== "variacao")).join("");
-      const a = serie[0].ini;
-      const b = serie[11].fim;
+      const c26 = serie.y26.map((item, i) => {
+        const valor = item[campo];
+        const sep = i === 0 ? " orc-dfc-sep" : "";
+        if (abre && !item.previsto) {
+          const on = this.mesSaldo() === i ? " is-on" : "";
+          return `<td class="${sep.trim()}${neg(valor)}"><button type="button" class="orc-dfc-saldo-btn${on}" data-saldo-mes="${i}">${this.money(valor)}</button></td>`;
+        }
+        return `<td class="${sep.trim()}${neg(valor)}">${this.money(valor)}</td>`;
+      }).join("");
+      const a = serie.y26[0].ini;
+      const b = serie.y26[11].fim;
       const tot = campo === "ini" ? a : (campo === "fim" ? b : b - a);
+      const c27 = serie.y27.map((item, i) => {
+        const valor = item[campo];
+        const sep = i === 0 ? " orc-dfc-sep" : "";
+        return `<td class="${sep.trim()}${neg(valor)}">${this.money(valor)}</td>${this.htmlVar(valor, serie.y26[i][campo])}`;
+      }).join("");
       const label = abre
         ? `<button type="button" class="orc-dfc-saldo-abre" data-saldo-abrir="1">Saldo inicial</button>`
         : nome;
-      return `<tr class="orc-dfc-saldo"><td>${label}</td>${cells}<td class="orc-dfc-sep${neg(tot)}">${this.money(tot)}</td><td></td><td></td><td></td></tr>`;
+      return `<tr class="orc-dfc-saldo"><td>${label}</td>${c26}<td class="orc-dfc-sep${neg(tot)}">${this.money(tot)}</td>${c27}</tr>`;
     };
     const folga = `<tr class="orc-dfc-saldo-gap"><td colspan="${span}"></td></tr>`;
     return folga + linha("", "ini", true) + linha("Saldo final", "fim", false) + linha("Variação", "variacao", false);
@@ -1509,7 +1536,7 @@ const OrcamentoDfcApp = {
       </div>
     </div>` : "";
     return `<section class="orc-dfc-quadro">
-      ${this._saldoPicker ? `<div class="orc-dfc-checks"><p>Saldo inicial de 2026, em ${this.dataBr(abertura)}. Marque as contas que entram nessa apuração. Terracotta, aplicações, PAR, REAPROPFIN, 1-6 e 1-1 ficam de fora. O realizado dos meses seguintes usa as mesmas contas. No forecast, o saldo inicial é o saldo final do mês anterior e o saldo final soma a variação de caixa do mês.</p>${checks || "<span>Nenhuma conta de caixa voltou da consulta.</span>"}</div>` : ""}
+      ${this._saldoPicker ? `<div class="orc-dfc-checks"><p>Saldo inicial de 2026, em ${this.dataBr(abertura)}. Marque as contas que entram nessa apuração. Terracotta, aplicações, PAR, REAPROPFIN, 1-6 e 1-1 ficam de fora. O realizado dos meses seguintes usa as mesmas contas. No forecast, o saldo inicial é o saldo final do mês anterior e o saldo final soma a variação de caixa do mês. Em 2027, janeiro começa com o saldo final de dezembro de 2026 e cada mês seguinte parte do saldo final do anterior.</p>${checks || "<span>Nenhuma conta de caixa voltou da consulta.</span>"}</div>` : ""}
       <h3>Contas em ${this.MESES[mes]} de 2026</h3>
       <p>Início em ${this.dataBr(iniData)} e fim em ${this.dataBr(fimData)}, ${this._saldoFonte === "contas" ? "pelo saldo das contas correntes" : (this._saldoFonte === "misto" ? "pelo balancete societário e, onde ele não respondeu, pelo saldo das contas correntes" : "pelo balancete de verificação societário")}. A variação é o saldo final menos o saldo inicial. A geração do resultado deste mês no DFC foi ${this.money(resultado)}.</p>
       <div class="orc-dfc-scroll orc-dfc-quadro-scroll">
@@ -1711,9 +1738,11 @@ const OrcamentoDfcApp = {
     const { rows, fora } = this.montar();
     this._linhasDfc = rows;
     const corte = this._corte == null ? this.corteForecast() : this._corte;
-    const h1 = this.MESES.map((m, i) => `<th colspan="4" class="orc-dfc-mes${i % 2 ? " is-alt" : ""}">${m}</th>`).join("") + `<th colspan="4" class="orc-dfc-mes">Total</th>`;
-    const sub = (rotulo) => `<th class="orc-dfc-sep">${rotulo}</th><th>2027</th><th>Var R$</th><th>Var %</th>`;
-    const h2 = this.MESES.map((_, i) => sub(i >= corte ? "Prev" : "2026")).join("") + sub("2026");
+    const modoRs = this.varModo !== "pct";
+    const h26 = this.MESES.map((m, i) => `<th${i === 0 ? " class=\"orc-dfc-sep\"" : ""} title="${i >= corte ? "Previsão de 2026" : "Realizado de 2026"}">${m}</th>`).join("") + `<th class="orc-dfc-sep">Total</th>`;
+    const h27 = this.MESES.map((m, i) => `<th${i === 0 ? " class=\"orc-dfc-sep\"" : ""}>${m}</th><th class="orc-dfc-vcol">${modoRs ? "Var R$" : "Var %"}</th>`).join("");
+    const h1 = `<th colspan="13" class="orc-dfc-mes">2026</th><th colspan="24" class="orc-dfc-mes is-alt">2027</th>`;
+    const h2 = h26 + h27;
     const trs = rows.map((r) => {
       const cls = [
         r.isAccount ? "orc-dfc-acc" : "",
@@ -1728,12 +1757,30 @@ const OrcamentoDfcApp = {
         ? `<i data-lucide="${this.expanded.has(r.id) ? "chevron-down" : "chevron-right"}"></i>`
         : `<i class="orc-dfc-no"></i>`;
       const base = r.base || [];
-      const cells = r.months.map((v, i) => this.celCmp(v, base[i], i >= corte, true, i < corte ? (r.id + "||" + i) : "")).join("");
+      const c26 = (r.months || []).map((v, i) => {
+        const real = Number(base[i]) || 0;
+        const chave = i < corte ? (r.id + "||" + i) : "";
+        const abre = chave ? " orc-dfc-abre" : "";
+        const marca = chave ? ` data-orc-2026="${this.esc(chave)}"` : "";
+        const neg = real < -0.005 ? " orc-dfc-neg" : "";
+        const sep = i === 0 ? " orc-dfc-sep" : "";
+        const titulo = (i >= corte ? "Previsão " : "Realizado ") + this.money(real);
+        return `<td class="${(sep + neg + abre).trim()}"${marca} title="${this.esc(titulo + (chave ? " · Ver lançamentos" : ""))}">${this.money(real)}</td>`;
+      }).join("");
+      const baseTotal = Number(r.baseTotal) || 0;
+      const chaveTot = corte > 0 ? (r.id + "||t") : "";
+      const tot26 = `<td class="orc-dfc-sep${baseTotal < -0.005 ? " orc-dfc-neg" : ""}${chaveTot ? " orc-dfc-abre" : ""}"${chaveTot ? ` data-orc-2026="${this.esc(chaveTot)}"` : ""} title="Total de 2026">${this.money(baseTotal)}</td>`;
+      const c27 = (r.months || []).map((v, i) => {
+        const n = Number(v) || 0;
+        const sep = i === 0 ? " orc-dfc-sep" : "";
+        return `<td class="${sep.trim()}${n < -0.005 ? " orc-dfc-neg" : ""}">${this.money(n)}</td>${this.htmlVar(n, base[i])}`;
+      }).join("");
       const click = r.hasKids ? ` data-dfc-id="${this.esc(r.id)}"` : "";
       return `<tr class="${cls}"${click}>
         <td style="padding-left:${6 + r.level * 8}px">${ico}<span>${this.esc(r.name)}</span></td>
-        ${cells}
-        ${this.celCmp(r.total, r.baseTotal, false, true, corte > 0 ? (r.id + "||t") : "")}
+        ${c26}
+        ${tot26}
+        ${c27}
       </tr>`;
     }).join("");
     let avisoBase = "";
@@ -1747,7 +1794,7 @@ const OrcamentoDfcApp = {
       ${avisoBase}
       <div class="orc-dfc-scroll">
         <table class="orc-dfc-table orc-dfc-cmp">
-          <thead><tr><th rowspan="2">Conta</th>${h1}</tr><tr>${h2}</tr></thead>
+          <thead><tr><th rowspan="2" class="orc-dfc-conta-th">Conta<span class="orc-dfc-var-switch" role="group" aria-label="Variação de 2027 contra 2026"><button type="button" data-dfc-var="rs" class="${modoRs ? "is-on" : ""}">Var R$</button><button type="button" data-dfc-var="pct" class="${modoRs ? "" : "is-on"}">Var %</button></span></th>${h1}</tr><tr>${h2}</tr></thead>
           <tbody>${trs}</tbody>
           <tfoot id="orc-dfc-saldo-foot">${this.htmlSaldos()}</tfoot>
         </table>
@@ -1755,6 +1802,12 @@ const OrcamentoDfcApp = {
       <div id="orc-dfc-saldos">${this.quadroSaldos()}</div>`;
     body.querySelectorAll("[data-dfc-id]").forEach((tr) => {
       tr.addEventListener("click", () => this.toggle(tr.getAttribute("data-dfc-id")));
+    });
+    body.querySelectorAll("[data-dfc-var]").forEach((btn) => {
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        this.setVarModo(btn.getAttribute("data-dfc-var"));
+      });
     });
     body.querySelectorAll("[data-orc-2026]").forEach((td) => {
       td.addEventListener("click", (ev) => {
@@ -1905,13 +1958,12 @@ const OrcamentoDfcApp = {
   preencherDfc(ws, inv, opts) {
     const rows = opts.rows || [];
     const corte = this._corte == null ? this.corteForecast() : this._corte;
+    const modoPct = this.varModo === "pct";
     const meses = this.MESES;
     const colunas = ["Conta"];
-    meses.forEach((m, i) => {
-      const rot = i >= corte ? "Prev" : "2026";
-      colunas.push(m + " " + rot, m + " 2027", m + " Var R$", m + " Var %");
-    });
-    colunas.push("Total 2026", "Total 2027", "Total Var R$", "Total Var %");
+    meses.forEach((m, i) => colunas.push(m + "/26" + (i >= corte ? " prev" : "")));
+    colunas.push("Total 2026");
+    meses.forEach((m) => colunas.push(m + "/27", m + (modoPct ? " Var %" : " Var R$")));
     const last = colunas.length;
     const letra = (i) => inv.excelColLetter(i);
     ws.properties.showGridLines = false;
@@ -1970,12 +2022,20 @@ const OrcamentoDfcApp = {
       const linha = ws.addRow([]);
       linha.outlineLevel = Math.max(0, Math.min(7, Number(r.level) || 0));
       const valores = [r.name];
+      const kinds = ["text"];
       const bases = r.base || [];
+      bases.forEach((real) => { valores.push(Number(real) || 0); kinds.push("num"); });
+      while (valores.length < 13) { valores.push(0); kinds.push("num"); }
+      valores.push(Number(r.baseTotal) || 0);
+      kinds.push("num");
       (r.months || []).forEach((orc, i) => {
-        const real = Number(bases[i]) || 0;
-        valores.push(real, Number(orc) || 0, (Number(orc) || 0) - real, this.pctNum(orc, real));
+        const o = Number(orc) || 0;
+        const b = Number(bases[i]) || 0;
+        valores.push(o);
+        kinds.push("num");
+        valores.push(modoPct ? this.pctNum(o, b) : (o - b));
+        kinds.push(modoPct ? "pct" : "num");
       });
-      valores.push(Number(r.baseTotal) || 0, Number(r.total) || 0, (Number(r.total) || 0) - (Number(r.baseTotal) || 0), this.pctNum(r.total, r.baseTotal));
       let fill = "FFFFFFFF";
       let fontColor = "FF0F172A";
       let bold = false;
@@ -1985,11 +2045,12 @@ const OrcamentoDfcApp = {
       else if (r.isCc) { fill = "FFE7F6EE"; fontColor = "FF105436"; }
       valores.forEach((v, i) => {
         const cell = linha.getCell(i + 1);
-        const num = i > 0 && typeof v === "number";
-        const pct = num && (i % 4 === 0);
-        const zero = num && !pct && Math.abs(v) < 0.005;
-        cell.value = pct ? v : (zero ? 0 : v);
-        const cor = pct ? (v < 0 ? "FFB91C1C" : fontColor) : (zero ? "FF94A3B8" : (num && v < 0 ? "FFB91C1C" : fontColor));
+        const kind = kinds[i] || "text";
+        const pct = kind === "pct";
+        const num = kind === "num" || pct;
+        const zero = kind === "num" && Math.abs(Number(v) || 0) < 0.005;
+        cell.value = pct ? (v == null ? null : v) : (zero ? 0 : v);
+        const cor = (pct && v < 0) || (kind === "num" && !zero && Number(v) < 0) ? "FFB91C1C" : (zero ? "FF94A3B8" : fontColor);
         inv.excelPaint(cell, {
           font: { size: 9, bold: bold, color: { argb: cor } },
           fill: fill,

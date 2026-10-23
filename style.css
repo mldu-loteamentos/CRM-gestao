@@ -10516,12 +10516,22 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .orc-dfc-table.orc-dfc-cmp thead tr:nth-child(2) th,
 .orc-dfc-table.orc-dfc-cmp tbody td:not(:first-child) { min-width: 64px; width: 72px; }
 .orc-dfc-table.orc-dfc-cmp thead tr:first-child th:first-child { min-width: 220px; width: 220px; max-width: 260px; }
+.orc-dfc-conta-th { vertical-align: middle; }
+.orc-dfc-var-switch { display: flex; gap: 4px; margin-top: 4px; }
+.orc-dfc-var-switch button {
+  border: 1px solid #d7ebe0; background: transparent; color: #d7ebe0;
+  font: inherit; font-size: 10px; font-weight: 800; border-radius: 4px;
+  padding: 2px 6px; cursor: pointer; line-height: 1.2;
+}
+.orc-dfc-var-switch button.is-on { background: #fff; color: #105436; border-color: #fff; }
+.orc-dfc-table.orc-dfc-cmp thead th.orc-dfc-vcol { background: #164e3a; color: #fff; }
 .orc-dfc-table.orc-dfc-cmp thead tr:nth-child(2) th:first-child { min-width: 64px; width: 72px; max-width: 88px; left: auto; text-align: right; }
 .orc-dfc-table.orc-dfc-cmp td:first-child { min-width: 220px; max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: #fff; }
 .orc-dfc-table tbody tr:hover > td,
 .orc-dfc-table.orc-dfc-cmp tbody tr:hover > td:first-child { background: #d1fae5; box-shadow: none; }
 .orc-dfc-table.orc-dfc-cmp thead tr:first-child th { top: 0; height: 32px; font-size: 12px; }
 .orc-dfc-table.orc-dfc-cmp thead tr:nth-child(2) th { top: 32px; height: 28px; font-size: 11px; font-weight: 700; background: #0c3d28; letter-spacing: 0.01em; }
+.orc-dfc-table.orc-dfc-cmp thead tr:first-child th.orc-dfc-conta-th { height: auto; min-height: 60px; white-space: normal; }
 .orc-dfc-table.orc-dfc-cmp thead tr:first-child th.orc-dfc-mes { border-left: 3px solid #d7ebe0; }
 .orc-dfc-table.orc-dfc-cmp thead tr:first-child th.is-alt { background: #0a3a28; }
 .orc-dfc-table.orc-dfc-cmp td.orc-dfc-abre { cursor: pointer; }
