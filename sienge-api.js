@@ -3634,21 +3634,10 @@ const SiengeApiService = {
     const ini = String(initialPeriod || "").slice(0, 10);
     const fim = String(finalPeriod || "").slice(0, 10);
     if (!companyId || !ini || !fim) return [];
-    const base = `/trial-balance?companyId=${encodeURIComponent(companyId)}&initialPeriod=${ini}&finalPeriod=${fim}`;
-    const tentativas = [base + "&onlyAccountsWithMovements=false", base];
-    let ultimo = null;
-    for (let i = 0; i < tentativas.length; i++) {
-      try {
-        const lista = await this.lerBalanceteCompleto(tentativas[i]);
-        if (lista.length) return lista;
-      } catch (e) {
-        ultimo = e;
-        const st = Number(e && e.status);
-        if (st && st !== 400 && st !== 422) throw e;
-      }
-    }
-    if (ultimo) throw ultimo;
-    return [];
+    const q = `companyId=${encodeURIComponent(companyId)}&initialPeriod=${ini}&finalPeriod=${fim}`;
+    const oficial = `/trial-balance?${q}&desconsiderClosingBalance=true&reportType=CORPORATE&onlyAccountsWithMovements=true&thirdParties=false`;
+    const lista = await this.lerBalanceteCompleto(oficial);
+    return lista || [];
   },
 
   async getAccountBalances(balanceDate, opts = {}) {

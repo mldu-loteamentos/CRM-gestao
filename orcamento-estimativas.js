@@ -1481,6 +1481,24 @@ const OrcamentoRepassesApp = {
     });
   },
 
+  serieDeslocada(dez, ano) {
+    const pag = OrcEst.z();
+    const meses = ano || OrcEst.z();
+    pag[0] = Number(dez) || 0;
+    for (let i = 1; i < 12; i++) pag[i] = Number(meses[i - 1]) || 0;
+    return { m: pag, jan28: Number(meses[11]) || 0 };
+  },
+
+  resultadoCc(linhas, linhasDez, um, part, comRateio) {
+    const anoMolde = this.molde();
+    this.encher(anoMolde.tpl, anoMolde.byId, linhas, um, part, comRateio);
+    const ano = (anoMolde.byId.g_12 && anoMolde.byId.g_12.months) ? anoMolde.byId.g_12.months.slice() : OrcEst.z();
+    const umDez = this.molde();
+    this.encher(umDez.tpl, umDez.byId, linhasDez, um, part, comRateio);
+    const dezCc = (umDez.byId.g_12 && umDez.byId.g_12.months && umDez.byId.g_12.months[0]) || 0;
+    return { ano: ano, dez: dezCc };
+  },
+
   montarDfc(part, linhas, indice, obraCode) {
     const app = this.appPar();
     const molde = this.molde();
@@ -1509,10 +1527,9 @@ const OrcamentoRepassesApp = {
       });
     });
     const dez = dezMap.g_12 || 0;
-    const pagamento = OrcEst.z();
-    pagamento[0] = dez;
-    for (let i = 1; i < 12; i++) pagamento[i] = resultado[i - 1];
-    const jan28 = resultado[11] || 0;
+    const serieCard = this.serieDeslocada(dez, resultado);
+    const pagamento = serieCard.m;
+    const jan28 = serieCard.jan28;
     const vivo = new Set(["g_03", "g_06", "g_08", "g_10", "g_12"]);
     tpl.forEach((g) => {
       const tem = g.months.some((v) => Math.abs(v) >= 0.005) || [...g.accs.values()].some((a) => a.months.some((v) => Math.abs(v) >= 0.005));
@@ -1587,27 +1604,42 @@ const OrcamentoRepassesApp = {
       jan28: jan28 * p.pct / 100
     }));
     const distribuicao = [];
+    const parceiros = [];
     centros.forEach((meta, ccId) => {
       const idDig = String(ccId).replace(/\D/g, "");
       if (!sociedade && /00$/.test(idDig) && !this.ccEhDoParceiro(meta.nome)) return;
-      const um = new Map([[ccId, meta]]);
-      const anoMolde = this.molde();
-      this.encher(anoMolde.tpl, anoMolde.byId, linhas, um, part, usarRateio);
-      const ano = (anoMolde.byId.g_12 && anoMolde.byId.g_12.months) ? anoMolde.byId.g_12.months.slice() : OrcEst.z();
-      const umDez = this.molde();
-      this.encher(umDez.tpl, umDez.byId, linhasDez, um, part, usarRateio);
-      const dezCc = (umDez.byId.g_12 && umDez.byId.g_12.months && umDez.byId.g_12.months[0]) || 0;
-      const pag = OrcEst.z();
-      pag[0] = dezCc;
-      for (let i = 1; i < 12; i++) pag[i] = ano[i - 1];
-      distribuicao.push({
-        id: ccId,
-        nome: meta.nome || "",
-        obra: (meta.obra && meta.obra.code) || "",
-        m: pag,
-        jan28: ano[11] || 0
-      });
+      parceiros.push({ ccId: ccId, meta: meta });
     });
+    if (!sociedade && usarRateio && parceiros.length) {
+      const pesos = parceiros.map((p) => {
+        const bruto = this.resultadoCc(linhas, linhasDez, new Map([[p.ccId, p.meta]]), part, false);
+        const peso = Math.abs(bruto.dez) + bruto.ano.reduce((s, v) => s + Math.abs(Number(v) || 0), 0);
+        return { p: p, peso: peso };
+      });
+      const somaP = pesos.reduce((s, item) => s + item.peso, 0);
+      pesos.forEach((item) => {
+        const fatia = somaP > 0.0001 ? item.peso / somaP : 1 / pesos.length;
+        distribuicao.push({
+          id: item.p.ccId,
+          nome: item.p.meta.nome || "",
+          obra: (item.p.meta.obra && item.p.meta.obra.code) || "",
+          m: pagamento.map((v) => (Number(v) || 0) * fatia),
+          jan28: (Number(jan28) || 0) * fatia
+        });
+      });
+    } else {
+      parceiros.forEach((p) => {
+        const serie = this.resultadoCc(linhas, linhasDez, new Map([[p.ccId, p.meta]]), part, usarRateio);
+        const pag = this.serieDeslocada(serie.dez, serie.ano);
+        distribuicao.push({
+          id: p.ccId,
+          nome: p.meta.nome || "",
+          obra: (p.meta.obra && p.meta.obra.code) || "",
+          m: pag.m,
+          jan28: pag.jan28
+        });
+      });
+    }
     const ccIds = [...centros.keys()].sort((a, b) => String(a).localeCompare(String(b), "pt-BR", { numeric: true }));
     return {
       id: String(part.id || (part.companyId + "-" + indice)) + (obraCode ? ":" + obraCode : ""),
@@ -1873,25 +1905,51 @@ const OrcamentoRepassesApp = {
       const usarRateio = !sociedade && !!obra && !this.principalMarcado(obra) && algumMarcado;
       const centros = this.centrosDa(part, obra ? obra.code : "", usarRateio);
       const temParceiro = !sociedade && [...centros.values()].some((meta) => this.ccEhDoParceiro(meta.nome));
+      const parceiros = [];
       centros.forEach((meta, ccId) => {
         if (temParceiro && !this.ccEhDoParceiro(meta.nome)) return;
-        const um = new Map([[ccId, meta]]);
+        const idDig = String(ccId).replace(/\D/g, "");
+        if (!sociedade && /00$/.test(idDig) && !this.ccEhDoParceiro(meta.nome)) return;
+        parceiros.push({ ccId: ccId, meta: meta });
+      });
+      if (!sociedade && usarRateio && parceiros.length) {
         const anoMolde = this.molde();
-        this.encher(anoMolde.tpl, anoMolde.byId, linhas, um, part, usarRateio);
+        this.encher(anoMolde.tpl, anoMolde.byId, linhas, centros, part, true);
         const ano = (anoMolde.byId.g_12 && anoMolde.byId.g_12.months) ? anoMolde.byId.g_12.months.slice() : OrcEst.z();
         const umDez = this.molde();
-        this.encher(umDez.tpl, umDez.byId, linhasDez, um, part, usarRateio);
-        const dezCc = (umDez.byId.g_12 && umDez.byId.g_12.months && umDez.byId.g_12.months[0]) || 0;
-        const pag = OrcEst.z();
-        pag[0] = dezCc;
-        for (let i = 1; i < 12; i++) pag[i] = ano[i - 1];
-        if (!pag.some((v) => Math.abs(v) >= 0.005)) return;
+        this.encher(umDez.tpl, umDez.byId, linhasDez, centros, part, true);
+        const dezObra = (umDez.byId.g_12 && umDez.byId.g_12.months && umDez.byId.g_12.months[0]) || 0;
+        const pagamento = this.serieDeslocada(dezObra, ano);
+        const pesos = parceiros.map((p) => {
+          const bruto = this.resultadoCc(linhas, linhasDez, new Map([[p.ccId, p.meta]]), part, false);
+          const peso = Math.abs(bruto.dez) + bruto.ano.reduce((s, v) => s + Math.abs(Number(v) || 0), 0);
+          return { p: p, peso: peso };
+        });
+        const somaP = pesos.reduce((s, item) => s + item.peso, 0);
+        pesos.forEach((item) => {
+          const fatia = somaP > 0.0001 ? item.peso / somaP : 1 / pesos.length;
+          const m = pagamento.m.map((v) => (Number(v) || 0) * fatia);
+          if (!m.some((v) => Math.abs(v) >= 0.005)) return;
+          saida.push({
+            prestacao: part.partnerName || part.companyName || "Prestação",
+            obra: obra ? String(obra.code) : "",
+            id: item.p.ccId,
+            nome: item.p.meta.nome || "",
+            m: m
+          });
+        });
+        return;
+      }
+      parceiros.forEach((p) => {
+        const serie = this.resultadoCc(linhas, linhasDez, new Map([[p.ccId, p.meta]]), part, usarRateio);
+        const pag = this.serieDeslocada(serie.dez, serie.ano);
+        if (!pag.m.some((v) => Math.abs(v) >= 0.005)) return;
         saida.push({
           prestacao: part.partnerName || part.companyName || "Prestação",
           obra: obra ? String(obra.code) : "",
-          id: ccId,
-          nome: meta.nome || "",
-          m: pag
+          id: p.ccId,
+          nome: p.meta.nome || "",
+          m: pag.m
         });
       });
     });
@@ -2120,10 +2178,10 @@ const OrcamentoRepassesApp = {
   },
 
   cabecaPagamento(primeira) {
-    const meses = OrcEst.MESES.map((m) => `<th>${m}</th>`).join("");
+    const meses = OrcEst.MESES.map((m, i) => `<th${i === 0 ? " class=\"orc-rep-jan\"" : ""}>${m}</th>`).join("");
     const origens = OrcEst.MESES.map((_, i) => {
       const de = i === 0 ? "DEZ/26" : (OrcEst.MESES[i - 1] + "/27");
-      return `<th>variação de caixa de ${de}</th>`;
+      return `<th${i === 0 ? " class=\"orc-rep-jan\"" : ""}>variação de caixa de ${de}</th>`;
     }).join("");
     return `<tr><th rowspan="2">${primeira}</th>${meses}<th>JAN/28</th><th rowspan="2">Total</th></tr><tr class="orc-rep-origem">${origens}<th>variação de caixa de DEZ/27</th></tr>`;
   },
@@ -2207,15 +2265,19 @@ const OrcamentoRepassesApp = {
         janAcc += Number(r.jan28) || 0;
         const pago = !card.sociedade ? this.ccPagamento(r.id) : "";
         const nome = String(r.id) + (r.nome ? " — " + r.nome : "") + (pago && pago !== String(r.id).replace(/\D/g, "") ? " · pago no " + pago : "");
-        return `<tr><td>${OrcEst.esc(nome)}</td>${meses.map((v) => {
+        return `<tr><td>${OrcEst.esc(nome)}</td>${meses.map((v, i) => {
           const n = Number(v) || 0;
-          return `<td${n < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(n)}</td>`;
+          const cls = [n < -0.004 ? "orc-dfc-neg" : "", i === 0 ? "orc-rep-jan" : ""].filter(Boolean).join(" ");
+          return `<td${cls ? " class=\"" + cls + "\"" : ""}>${OrcEst.money(n)}</td>`;
         }).join("")}<td${Number(r.jan28) < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(r.jan28)}</td><td>${OrcEst.money(this.soma(meses))}</td></tr>`;
       }).join("");
       quadro = `<div class="orc-rep-socios"><h4>${OrcEst.esc(rotuloRep)}. ${OrcEst.esc(fraseRep)}</h4>
         <div class="orc-dfc-scroll"><table class="orc-dfc-table orc-est-table orc-rep-quadro"><thead>${this.cabecaPagamento("Centro de custo")}</thead>
         <tbody>${corpo}</tbody>
-        <tfoot><tr><td>Total</td>${acc.map((v) => `<td${v < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(v)}</td>`).join("")}<td${janAcc < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(janAcc)}</td><td>${OrcEst.money(this.soma(acc))}</td></tr></tfoot>
+        <tfoot><tr><td>Total</td>${acc.map((v, i) => {
+          const cls = [v < -0.004 ? "orc-dfc-neg" : "", i === 0 ? "orc-rep-jan" : ""].filter(Boolean).join(" ");
+          return `<td${cls ? " class=\"" + cls + "\"" : ""}>${OrcEst.money(v)}</td>`;
+        }).join("")}<td${janAcc < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(janAcc)}</td><td>${OrcEst.money(this.soma(acc))}</td></tr></tfoot>
         </table></div></div>`;
     }
     return `<div class="orc-dfc-scroll"><table class="orc-dfc-table orc-est-table">

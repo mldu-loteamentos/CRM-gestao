@@ -10758,6 +10758,9 @@ tr.pr-liberado td { background: #f7faf8; }
 .orc-rep-socios h4 { margin: 8px 0; font-size: 0.8rem; color: #105436; font-weight: 700; }
 .orc-rep-quadro thead th { position: static; height: auto; white-space: normal; line-height: 1.25; padding: 6px 8px; vertical-align: bottom; }
 .orc-rep-quadro thead tr.orc-rep-origem th { font-size: 0.62rem; font-weight: 600; background: #0c3d28; }
+.orc-rep-quadro th.orc-rep-jan { background: #1d4ed8; color: #fff; }
+.orc-rep-quadro thead tr.orc-rep-origem th.orc-rep-jan { background: #1e40af; color: #fff; }
+.orc-rep-quadro td.orc-rep-jan { background: #dbeafe; color: #1e3a8a; font-weight: 700; }
 .orc-est-page .ml-emp-filter { flex: 0 0 340px; width: 340px; max-width: 420px; height: auto; }
 .orc-est-ok { color: #15803d; font-weight: 700; font-size: 0.72rem; margin-left: 8px; }
 .orc-est-alerta { color: #c2410c; font-weight: 700; font-size: 0.72rem; margin-left: 8px; }

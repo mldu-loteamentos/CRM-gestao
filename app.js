@@ -9016,7 +9016,15 @@ function getPrimaryCostCenter(id) {
   return strId.split(',')[0].trim();
 }
 
-/* A fila mostra o centro e a unidade uma vez: 10800 - A-04, no mesmo padrão de 12400 - D-091. */
+/* A fila mostra o centro e o código da unidade: 10800 - A-4, no mesmo padrão de 12400 - D-091. */
+function filaCodigoUnidade(nome) {
+  let s = String(nome || "").trim();
+  s = s.replace(/\s+(?:lote|quadra|unidade|apto|apartamento|bloco|casa|torre)\b[\s\S]*$/i, "").trim();
+  const curto = s.match(/^([A-Za-z])-0(\d)$/);
+  if (curto) s = curto[1].toUpperCase() + "-" + curto[2];
+  return s;
+}
+
 function filaUnidadeTexto(client) {
   const cc = getPrimaryCostCenter(client && client.costCenterId);
   const ccNum = String(cc || "").replace(/\D/g, "");
@@ -9031,6 +9039,7 @@ function filaUnidadeTexto(client) {
     }
     if (nome === ccNum) nome = "";
   }
+  nome = filaCodigoUnidade(nome);
   if (!nome || /^n\/d$/i.test(nome)) return (!cc || cc === "C.C. N/D") ? "N/D" : (cc + " - N/D");
   if (!cc || cc === "C.C. N/D" || nome.indexOf(cc + " - ") === 0 || nome.indexOf(cc + "-") === 0) return nome;
   return cc + " - " + nome;

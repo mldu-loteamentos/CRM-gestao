@@ -997,13 +997,14 @@ const OrcamentoDfcApp = {
     return null;
   },
 
-  /* Caixa e equivalentes do balancete (1.1.01), sem a Terracotta. */
+  /* Caixa e equivalentes do balancete (1.1.01), sem a Terracotta. No saldo de contas, a conta corrente entra e a aplicação fica de fora. */
   ehContaAnalise(c) {
     if (!c || !c.analitica) return false;
     const cod = String(c.numero || "");
-    const nome = this.norm(c.nome);
+    const nome = this.norm((c.nome || "") + " " + cod);
     if (cod.indexOf("1.1.01.03.016") === 0 || cod.indexOf("1.01.01.03.016") === 0) return false;
     if (nome.indexOf("TERRACOTTA") >= 0) return false;
+    if (c.origem === "contas") return !/INVEST|APLIC/.test(nome);
     return cod.indexOf("1.1.01") === 0 || cod.indexOf("1.01.01") === 0;
   },
 
@@ -1065,12 +1066,25 @@ const OrcamentoDfcApp = {
     return { codigo: codigo, nome: nome, valor: valor };
   },
 
+  linhaConta(b) {
+    if (!b || typeof b !== "object") return { codigo: "", nome: "", valor: null };
+    const codigo = String(b.accountNumber || b.number || b.account || "").trim();
+    const nome = String(b.accountName || b.name || b.description || codigo).trim();
+    return { codigo: codigo, nome: nome, valor: this.valorSaldo(b) };
+  },
+
   contasEscolhidas() {
     if (!Array.isArray(this._saldoSel)) {
       try { this._saldoSel = JSON.parse(localStorage.getItem(this.LS_SALDO) || "null"); } catch (e) { this._saldoSel = null; }
     }
-    if (Array.isArray(this._saldoSel)) return this._saldoSel.map(String);
-    return (this._saldoContas || []).filter((c) => this.ehContaAnalise(c)).map((c) => c.chave);
+    const todas = (this._saldoContas || []).filter((c) => this.ehContaAnalise(c)).map((c) => c.chave);
+    if (!Array.isArray(this._saldoSel)) return todas;
+    const set = new Set((this._saldoContas || []).map((c) => c.chave));
+    const salvas = this._saldoSel.map(String);
+    const vigentes = salvas.filter((k) => set.has(k));
+    if (vigentes.length) return vigentes;
+    if (salvas.length && set.size) return todas;
+    return salvas;
   },
 
   somaSaldo(data) {
@@ -1107,13 +1121,14 @@ const OrcamentoDfcApp = {
       this.atualizarSaldosDom();
       return;
     }
-    if (!api || typeof api.getTrialBalance !== "function") {
+    if (!api || (typeof api.getTrialBalance !== "function" && typeof api.getAccountBalances !== "function")) {
       this._saldoEstado = "erro";
-      this._saldoErro = "A consulta do balancete de verificação não está disponível.";
+      this._saldoErro = "A consulta do saldo de caixa não está disponível.";
       return;
     }
     this._saldoEstado = "lendo";
     this._saldoErro = "";
+    this._saldoFonte = "";
     this.atualizarSaldosDom();
     const datas = [];
     for (let i = 0; i <= corte; i++) datas.push(this.dataSaldo(2026, i));
@@ -1121,6 +1136,7 @@ const OrcamentoDfcApp = {
       const mapa = {};
       const porConta = new Map();
       const jobs = [];
+      const fontes = new Set();
       empresas.forEach((emp) => datas.forEach((dt) => jobs.push({ emp: String(emp.id), dt: dt })));
       let cursor = 0;
       const self = this;
@@ -1129,21 +1145,45 @@ const OrcamentoDfcApp = {
         while (cursor < jobs.length) {
           const job = jobs[cursor++];
           const per = self.periodoDoSaldo(job.dt);
-          let lista = [];
-          try {
-            lista = await api.getTrialBalance(job.emp, per.ini, per.fim);
-          } catch (e) {
-            falha = e;
-            continue;
+          let linhas = [];
+          let origem = "balancete";
+          if (typeof api.getTrialBalance === "function") {
+            try {
+              const lista = await api.getTrialBalance(job.emp, per.ini, per.fim);
+              (lista || []).forEach((b) => {
+                const linha = self.linhaBalancete(b, true);
+                if (linha.codigo && linha.valor != null) linhas.push(linha);
+              });
+            } catch (e) {
+              falha = e;
+              linhas = [];
+            }
           }
+          const temCaixa = linhas.some((l) => l.codigo.indexOf("1.1.01") === 0 || l.codigo.indexOf("1.01.01") === 0);
+          if (!temCaixa && typeof api.getAccountBalances === "function") {
+            try {
+              const contas = await api.getAccountBalances(job.dt, { companyId: job.emp, showLast: true });
+              const alt = [];
+              (contas || []).forEach((b) => {
+                const linha = self.linhaConta(b);
+                if (linha.codigo && linha.valor != null) alt.push(linha);
+              });
+              if (alt.length) {
+                linhas = alt;
+                origem = "contas";
+              }
+            } catch (e) {
+              falha = falha || e;
+            }
+          }
+          if (!linhas.length) continue;
+          fontes.add(origem);
           const dia = mapa[job.dt] || (mapa[job.dt] = {});
-          (lista || []).forEach((b) => {
-            const linha = self.linhaBalancete(b, true);
-            if (!linha.codigo || linha.valor == null) return;
+          linhas.forEach((linha) => {
             const k = job.emp + "|" + linha.codigo;
             dia[k] = linha.valor;
             if (!porConta.has(k)) {
-              porConta.set(k, { chave: k, empresa: job.emp, numero: linha.codigo, nome: linha.nome, analitica: true });
+              porConta.set(k, { chave: k, empresa: job.emp, numero: linha.codigo, nome: linha.nome, analitica: true, origem: origem === "contas" ? "contas" : "" });
             }
           });
         }
@@ -1154,21 +1194,25 @@ const OrcamentoDfcApp = {
       if (!porConta.size && falha) throw falha;
       const porEmpresa = {};
       porConta.forEach((c) => {
+        if (c.origem === "contas") return;
         if (!porEmpresa[c.empresa]) porEmpresa[c.empresa] = [];
         porEmpresa[c.empresa].push(c.numero);
       });
       porConta.forEach((c) => {
+        if (c.origem === "contas") { c.analitica = true; return; }
         const irmas = porEmpresa[c.empresa] || [];
         c.analitica = !irmas.some((o) => o !== c.numero && o.indexOf(c.numero + ".") === 0);
       });
       const caixa = [];
       porConta.forEach((c) => {
         if (!c.analitica) return;
+        if (c.origem === "contas") { caixa.push(c); return; }
         const cod = c.numero;
         if (cod.indexOf("1.1.01") === 0 || cod.indexOf("1.01.01") === 0) caixa.push(c);
       });
       const lista = caixa.length ? caixa : Array.from(porConta.values()).filter((c) => c.analitica);
       lista.sort((a, b) => String(a.numero).localeCompare(String(b.numero), "pt-BR", { numeric: true }));
+      this._saldoFonte = fontes.has("balancete") && fontes.has("contas") ? "misto" : (fontes.has("contas") ? "contas" : "balancete");
       this._saldoContas = lista;
       this._saldoMap = mapa;
       this._saldoEstado = lista.length ? "ok" : "vazio";
@@ -1285,9 +1329,9 @@ const OrcamentoDfcApp = {
     }).join("") : "";
     const resultado = this.resultadoMes(mes);
     return `<section class="orc-dfc-quadro">
-      ${this._saldoPicker ? `<div class="orc-dfc-checks"><p>Contas analíticas do balancete, em Caixa e equivalentes. A marca inicial deixa a Terracotta de fora. Vale para todos os meses.</p>${checks || "<span>Nenhuma conta analítica voltou do balancete.</span>"}</div>` : ""}
+      ${this._saldoPicker ? `<div class="orc-dfc-checks"><p>Contas de caixa. A marca inicial deixa a Terracotta e as aplicações de fora. Vale para todos os meses.</p>${checks || "<span>Nenhuma conta de caixa voltou da consulta.</span>"}</div>` : ""}
       <h3>Contas em ${this.MESES[mes]} de 2026</h3>
-      <p>Início em ${this.dataBr(iniData)} e fim em ${this.dataBr(fimData)}, pelo balancete de verificação societário. A variação é o saldo final menos o saldo inicial. A geração do resultado deste mês no DFC foi ${this.money(resultado)}.</p>
+      <p>Início em ${this.dataBr(iniData)} e fim em ${this.dataBr(fimData)}, ${this._saldoFonte === "contas" ? "pelo saldo das contas correntes" : (this._saldoFonte === "misto" ? "pelo balancete societário e, onde ele não respondeu, pelo saldo das contas correntes" : "pelo balancete de verificação societário")}. A variação é o saldo final menos o saldo inicial. A geração do resultado deste mês no DFC foi ${this.money(resultado)}.</p>
       <div class="orc-dfc-scroll orc-dfc-quadro-scroll">
         <table class="orc-dfc-table orc-dfc-quadro-tab">
           <thead><tr><th>Conta</th><th>Saldo em ${this.dataBr(iniData)}</th><th>Saldo em ${this.dataBr(fimData)}</th><th>Variação</th></tr></thead>
