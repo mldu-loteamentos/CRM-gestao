@@ -10651,8 +10651,8 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .pc-lista-busca button:hover { background: #e7f6ee; }
 .pc-form { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 12px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; }
 .pc-form .cj-nota, .pc-acoes { grid-column: 1 / -1; }
-.pc-form label { display: flex; flex-direction: column; gap: 6px; font-size: 0.75rem; font-weight: 700; color: #64748b; }
-.pc-form select, .pc-form input, .pc-campo { height: 38px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 10px; background: #fff; color: #0f172a; font: inherit; width: 100%; box-sizing: border-box; }
+.pc-form label:not(.ml-emp-filter-item) { display: flex; flex-direction: column; gap: 6px; font-size: 0.75rem; font-weight: 700; color: #64748b; }
+.pc-form select, .pc-form input:not([type="radio"]):not([type="checkbox"]), .pc-campo { height: 38px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 10px; background: #fff; color: #0f172a; font: inherit; width: 100%; box-sizing: border-box; }
 .pc-buscas { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .pc-buscas label { display: flex; flex-direction: column; gap: 6px; font-size: 0.75rem; font-weight: 700; color: #64748b; }
 .pc-pesq { margin-bottom: 16px; }
@@ -10671,6 +10671,9 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 #pc-emp-slot .ml-emp-filter-btn { height: 38px; min-height: 38px; border-color: #cbd5e1; font-weight: 400; border-radius: 6px; }
 #pc-emp-slot .ml-emp-filter.is-open .ml-emp-filter-btn { border-color: var(--color-primary); }
 #pc-emp-slot .ml-emp-filter-list { max-height: 280px; }
+#pc-emp-slot .ml-emp-filter-item { display: flex; flex-direction: row; align-items: flex-start; gap: 10px; font-size: 0.82rem; font-weight: 600; color: #334155; }
+#pc-emp-slot .ml-emp-filter-item input { width: 16px; height: 16px; min-width: 16px; margin: 2px 0 0; padding: 0; flex: 0 0 16px; border: none; border-radius: 0; background: transparent; accent-color: #105436; }
+#pc-emp-slot .ml-emp-filter-search input { height: 34px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 12px; font-weight: 400; }
 .pc-drop { position: relative; width: 100%; }
 .pc-drop .form-control { width: 100%; }
 .pc-dd { display: none; position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 4px); background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; max-height: 240px; overflow: auto; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12); }

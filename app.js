@@ -11635,7 +11635,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
             <span>${getPrimaryCostCenter(client.costCenterId)} - ${client.unitName || 'N/D'}</span>
           </td>
           <td style="white-space: nowrap; text-align: left; width: 1%;" title="Fase Processual">
-            <span style="font-weight: 500; font-size: 0.75rem; text-transform: uppercase;">${(() => {
+            <span style="text-transform: uppercase;">${(() => {
                 if (client.subjudice !== "S") return "Sub judice no Integra";
                 const info = typeof window.getClientJudicialPhaseInfo === 'function' ? window.getClientJudicialPhaseInfo(client) : null;
                 return (info && info.faseLabel) ? info.faseLabel : "Sem Fase";
@@ -20530,6 +20530,9 @@ async function baixarHtmlComoPdf(html, nomeArquivo) {
   host.innerHTML = html;
   document.body.appendChild(host);
   try {
+    if (window.RelacionamentoApp && typeof RelacionamentoApp._justificarPagina === "function") {
+      RelacionamentoApp._justificarPagina(host);
+    }
     const canvas = await html2canvas(host, { scale: 2, backgroundColor: "#ffffff" });
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF("p", "mm", "a4");
@@ -35707,6 +35710,9 @@ window.nexHtmlToPdfFile = async function(html, fileName) {
   wrap.innerHTML = html;
   document.body.appendChild(wrap);
   try {
+    if (window.RelacionamentoApp && typeof RelacionamentoApp._justificarPagina === "function") {
+      RelacionamentoApp._justificarPagina(wrap);
+    }
     const canvas = await html2canvas(wrap, { scale: 2, useCORS: true, backgroundColor: "#ffffff", logging: false });
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF("p", "mm", "a4");

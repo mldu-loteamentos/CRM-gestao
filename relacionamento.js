@@ -1792,6 +1792,94 @@ const RelacionamentoApp = {
     return { grupos: validos, avisos, texto };
   },
 
+  _embrulharPalavras(el) {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach((node) => {
+      const texto = node.nodeValue || "";
+      if (!texto.trim()) return;
+      const pai = node.parentElement;
+      if (!pai || pai.closest("table") || pai.closest("span[data-doc-palavra]")) return;
+      const align = String(pai.style.textAlign || "").toLowerCase();
+      if (align === "center" || align === "right") return;
+      const frag = document.createDocumentFragment();
+      texto.split(/(\n+)/).forEach((parte) => {
+        if (!parte) return;
+        if (/^\n+$/.test(parte)) {
+          for (let i = 0; i < parte.length; i++) frag.appendChild(document.createElement("br"));
+          return;
+        }
+        parte.split(/\s+/).filter(Boolean).forEach((w) => {
+          const span = document.createElement("span");
+          span.setAttribute("data-doc-palavra", "1");
+          span.style.display = "inline-block";
+          span.style.marginRight = "4px";
+          span.textContent = w;
+          frag.appendChild(span);
+        });
+      });
+      pai.replaceChild(frag, node);
+    });
+  },
+
+  _justificarBloco(corpo) {
+    if (!corpo) return;
+    this._embrulharPalavras(corpo);
+    const spans = Array.from(corpo.querySelectorAll("span[data-doc-palavra]")).filter((s) => !s.closest("table"));
+    if (spans.length < 2) return;
+    const linhas = [];
+    let atual = [];
+    let topo = null;
+    spans.forEach((s) => {
+      const t = s.offsetTop;
+      if (topo == null || Math.abs(t - topo) <= 2) {
+        atual.push(s);
+        if (topo == null) topo = t;
+      } else {
+        linhas.push({ itens: atual, topo: topo });
+        atual = [s];
+        topo = t;
+      }
+    });
+    if (atual.length) linhas.push({ itens: atual, topo: topo });
+    const altura = spans[0].offsetHeight || 18;
+    const stl = getComputedStyle(corpo);
+    const direita = corpo.getBoundingClientRect().right - (parseFloat(stl.paddingRight) || 0);
+    const ajustes = [];
+    linhas.forEach((ln, i) => {
+      const prox = linhas[i + 1];
+      const mesmoPai = prox && ln.itens[0].parentElement === prox.itens[0].parentElement;
+      const fim = !prox || !mesmoPai || (prox.topo - ln.topo) > altura * 1.75;
+      if (fim || ln.itens.length < 2) return;
+      const borda = ln.itens[ln.itens.length - 1].getBoundingClientRect().right;
+      const sobra = direita - borda;
+      if (sobra < 1) return;
+      ajustes.push({
+        itens: ln.itens,
+        extra: sobra / (ln.itens.length - 1),
+        bases: ln.itens.map((el) => parseFloat(getComputedStyle(el).marginRight) || 0)
+      });
+    });
+    ajustes.forEach((aj) => {
+      aj.itens.forEach((el, idx) => {
+        el.style.marginRight = idx === aj.itens.length - 1 ? "0px" : (aj.bases[idx] + aj.extra) + "px";
+      });
+    });
+  },
+
+  _justificarPagina(page) {
+    if (!page) return;
+    const corpos = page.querySelectorAll(".qui-corpo");
+    if (corpos.length) {
+      corpos.forEach((el) => this._justificarBloco(el));
+      return;
+    }
+    const lista = Array.from(page.querySelectorAll("div, p")).filter((el) => String(el.style.textAlign || "").toLowerCase() === "justify");
+    lista.filter((el) => !lista.some((outro) => outro !== el && outro.contains(el)))
+      .forEach((el) => this._justificarBloco(el));
+  },
+
   _paginarDoc(topo, blocos, corpoCss, opts) {
     const montar = (primeira, itens) => `${primeira ? topo : ""}<div class="qui-corpo" style="${corpoCss}">${itens.join("\n\n")}</div>`;
     if (opts && opts.umaPagina) return [montar(true, blocos)];
@@ -2732,6 +2820,7 @@ const RelacionamentoApp = {
           pt -= 0.25;
           area.querySelectorAll(".qui-corpo").forEach((el) => { el.style.fontSize = pt + "pt"; });
         }
+        this._justificarPagina(page);
         // Documento de página única: o que ainda sobrar é reduzido por inteiro (inclusive o quadro do tabelião).
         if (opts.umaPagina && area.scrollHeight > limite) {
           const s = Math.max(0.6, limite / area.scrollHeight);

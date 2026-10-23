@@ -1336,7 +1336,11 @@ const CessaoPopup = {
         .concat(instFin || [])
         .concat(extrato || [])
         .concat(daTela));
-      indexador = this.indiceDoContrato(condsApi, installments);
+      indexador = this.indiceDoContrato(condsApi, []
+        .concat(installments || [])
+        .concat(instFin || [])
+        .concat(extrato || [])
+        .concat(daTela), contract);
     }
     if (!condicoes.length) condicoes = [{ id: "c1", tipo: "Mensal", qtde: "", valor: "", vencimento: "" }];
     condicoes.sort((a, b) => this.cmpVencimento(a, b));
@@ -1550,14 +1554,39 @@ const CessaoPopup = {
     return this.jurosConsiderado(this.modaTaxa(semMora.length ? semMora : positivas));
   },
 
-  indiceDoContrato(conds, installments) {
-    const fontes = (conds || []).concat(installments || []);
-    for (const o of fontes) {
-      if (!o) continue;
-      const nome = o.indexerName || o.indexerDescription || (typeof o.indexer === "string" ? o.indexer : "");
-      if (!nome) continue;
-      if (/real/i.test(String(nome))) return "REAL";
-      return String(nome).trim();
+  indiceDoContrato(conds, parcelas, contract) {
+    const refs = [];
+    const coletar = (o) => {
+      if (o && typeof collectIndexerRefs === "function") collectIndexerRefs(refs, o);
+    };
+    (conds || []).forEach(coletar);
+    (parcelas || []).forEach(coletar);
+    coletar(contract);
+    const titulo = String((contract && (contract.receivableBillId || contract.id)) || "").replace(/\D/g, "");
+    const ficha = String((window.g_renegSale && (g_renegSale.receivableBillId || g_renegSale.id)) || "").replace(/\D/g, "");
+    if (titulo && ficha && titulo === ficha) {
+      if (window.dbContract) coletar(dbContract);
+      if (typeof renegMetaRepactuacaoTela === "function") coletar(renegMetaRepactuacaoTela());
+      if (Array.isArray(window.g_renegBills)) g_renegBills.forEach(coletar);
+    }
+    if (typeof pickContractIndexer === "function" && refs.length) {
+      const picked = pickContractIndexer(refs) || {};
+      const chosen = picked.chosen || {};
+      const id = chosen.id != null ? chosen.id : "";
+      const bruto = chosen.name || "";
+      const real = typeof isRealIndexer === "function"
+        ? isRealIndexer(id, bruto)
+        : (String(id) === "0" || /^real$/i.test(String(bruto).trim()));
+      if (!real && (picked.adjustCount || id !== "" || bruto)) {
+        const nome = typeof renegNomeDoIndexador === "function" ? renegNomeDoIndexador(id, bruto) : bruto;
+        if (typeof isRealIndexer === "function" && isRealIndexer(id, nome)) return "REAL";
+        if (typeof renegRotuloIndexador === "function") {
+          const rotulo = renegRotuloIndexador(id, nome);
+          if (rotulo) return rotulo;
+        }
+        const limpo = String(nome || id || "").trim();
+        if (limpo) return limpo;
+      }
     }
     return "REAL";
   },
@@ -2472,7 +2501,10 @@ const CessaoPopup = {
 
   clausulaReajuste() {
     const nome = String(CessaoPopupState.indexador || "REAL").trim();
-    if (!nome || /^real$/i.test(nome)) return "1.2. Referidas parcelas não possuem reajuste anual.";
+    const real = typeof isRealIndexer === "function"
+      ? isRealIndexer("", nome) || /^real$/i.test(nome)
+      : (!nome || /^real$/i.test(nome));
+    if (real) return "1.2. Referidas parcelas não possuem reajuste anual.";
     return "1.2. Referidas parcelas contam com reajuste anual pelo " + nome + " na data de aniversário do contrato.";
   },
 
@@ -2634,7 +2666,7 @@ const CessaoPopup = {
   /** Cada palavra vira um bloco: o gerador de PDF apagava o espaço no texto justificado. */
   htmlTexto(s) {
     return String(s || "").replace(/\s+/g, " ").trim().split(" ").filter(Boolean)
-      .map((w) => `<span style="display:inline-block;margin-right:4px">${this.esc(w)}</span>`).join("");
+      .map((w) => `<span data-doc-palavra="1" style="display:inline-block;margin-right:4px">${this.esc(w)}</span>`).join("");
   },
 
   dataHoje() {
