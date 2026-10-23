@@ -15,7 +15,8 @@ const OrcamentoDfcApp = {
   _pronto: false,
   busy: false,
   erro: "",
-  varModo: "rs",
+  varRs: true,
+  varPct: false,
 
   esc(s) {
     return String(s == null ? "" : s)
@@ -870,6 +871,18 @@ const OrcamentoDfcApp = {
         <div class="orc-dfc-tools">
           <div id="orc-dfc-emp-box"></div>
           <div id="orc-dfc-cc-box"></div>
+          <div class="orc-dfc-vars">
+            <label class="moura-switch">
+              <input type="checkbox" id="orc-dfc-var-rs" ${this.varRs ? "checked" : ""}>
+              <span class="moura-switch-track" aria-hidden="true"></span>
+              <span class="moura-switch-text">Variação R$</span>
+            </label>
+            <label class="moura-switch">
+              <input type="checkbox" id="orc-dfc-var-pct" ${this.varPct ? "checked" : ""}>
+              <span class="moura-switch-track" aria-hidden="true"></span>
+              <span class="moura-switch-text">Variação %</span>
+            </label>
+          </div>
           <button type="button" class="btn btn-sm btn-excel" id="orc-dfc-excel" title="Exportar a tabela atual para Excel">
             <i data-lucide="download" style="width:14px;height:14px;"></i> Excel
           </button>
@@ -899,6 +912,10 @@ const OrcamentoDfcApp = {
     if (baseBtn) baseBtn.addEventListener("click", () => this.voltarBase());
     const excelBtn = document.getElementById("orc-dfc-excel");
     if (excelBtn) excelBtn.addEventListener("click", () => this.exportExcel());
+    const varRs = document.getElementById("orc-dfc-var-rs");
+    const varPct = document.getElementById("orc-dfc-var-pct");
+    if (varRs) varRs.addEventListener("change", () => { this.varRs = !!varRs.checked; this.paintBody(); });
+    if (varPct) varPct.addEventListener("change", () => { this.varPct = !!varPct.checked; this.paintBody(); });
     if (window.lucide && lucide.createIcons) lucide.createIcons();
     this.carregarBase();
   },
@@ -1433,23 +1450,29 @@ const OrcamentoDfcApp = {
     return { y26: y26, y27: y27 };
   },
 
-  setVarModo(modo) {
-    this.varModo = modo === "pct" ? "pct" : "rs";
-    this.paintBody();
+  colsVar() {
+    return (this.varRs ? 1 : 0) + (this.varPct ? 1 : 0);
   },
 
-  htmlVar(orc, real) {
+  htmlVars(orc, real) {
     const o = Number(orc) || 0;
     const b = Number(real) || 0;
     const d = o - b;
     const titulo = "2026 " + this.money(b) + " · 2027 " + this.money(o) + " · " + this.money(d) + " · " + this.pct(o, b);
-    const neg = d < -0.005 && (this.varModo === "rs" || Math.abs(b) >= 0.005) ? " orc-dfc-neg" : "";
-    const texto = this.varModo === "pct" ? this.pct(o, b) : this.money(d);
-    return `<td class="orc-dfc-vcol${neg}" title="${this.esc(titulo)}">${texto}</td>`;
+    let html = "";
+    if (this.varRs) {
+      const neg = d < -0.005 ? " orc-dfc-neg" : "";
+      html += `<td class="orc-dfc-vcol${neg}" title="${this.esc(titulo)}">${this.money(d)}</td>`;
+    }
+    if (this.varPct) {
+      const neg = d < -0.005 && Math.abs(b) >= 0.005 ? " orc-dfc-neg" : "";
+      html += `<td class="orc-dfc-vcol${neg}" title="${this.esc(titulo)}">${this.pct(o, b)}</td>`;
+    }
+    return html;
   },
 
   htmlSaldos() {
-    const span = 1 + this.MESES.length + 1 + this.MESES.length * 2;
+    const span = 1 + this.MESES.length + 1 + this.MESES.length * (1 + this.colsVar());
     if (this._saldoEstado === "lendo") {
       const n = Number(this._saldoFeitos) || 0;
       const t = Number(this._saldoTotal) || 0;
@@ -1481,7 +1504,7 @@ const OrcamentoDfcApp = {
       const c27 = serie.y27.map((item, i) => {
         const valor = item[campo];
         const sep = i === 0 ? " orc-dfc-sep" : "";
-        return `<td class="${sep.trim()}${neg(valor)}">${this.money(valor)}</td>${this.htmlVar(valor, serie.y26[i][campo])}`;
+        return `<td class="${sep.trim()}${neg(valor)}">${this.money(valor)}</td>${this.htmlVars(valor, serie.y26[i][campo])}`;
       }).join("");
       const label = abre
         ? `<button type="button" class="orc-dfc-saldo-abre" data-saldo-abrir="1">Saldo inicial</button>`
@@ -1738,10 +1761,10 @@ const OrcamentoDfcApp = {
     const { rows, fora } = this.montar();
     this._linhasDfc = rows;
     const corte = this._corte == null ? this.corteForecast() : this._corte;
-    const modoRs = this.varModo !== "pct";
+    const extras = (this.varRs ? `<th class="orc-dfc-vcol">Var R$</th>` : "") + (this.varPct ? `<th class="orc-dfc-vcol">Var %</th>` : "");
     const h26 = this.MESES.map((m, i) => `<th${i === 0 ? " class=\"orc-dfc-sep\"" : ""} title="${i >= corte ? "Previsão de 2026" : "Realizado de 2026"}">${m}</th>`).join("") + `<th class="orc-dfc-sep">Total</th>`;
-    const h27 = this.MESES.map((m, i) => `<th${i === 0 ? " class=\"orc-dfc-sep\"" : ""}>${m}</th><th class="orc-dfc-vcol">${modoRs ? "Var R$" : "Var %"}</th>`).join("");
-    const h1 = `<th colspan="13" class="orc-dfc-mes">2026</th><th colspan="24" class="orc-dfc-mes is-alt">2027</th>`;
+    const h27 = this.MESES.map((m, i) => `<th${i === 0 ? " class=\"orc-dfc-sep\"" : ""}>${m}</th>${extras}`).join("");
+    const h1 = `<th colspan="13" class="orc-dfc-mes">2026</th><th colspan="${12 * (1 + this.colsVar())}" class="orc-dfc-mes is-alt">2027</th>`;
     const h2 = h26 + h27;
     const trs = rows.map((r) => {
       const cls = [
@@ -1773,7 +1796,7 @@ const OrcamentoDfcApp = {
       const c27 = (r.months || []).map((v, i) => {
         const n = Number(v) || 0;
         const sep = i === 0 ? " orc-dfc-sep" : "";
-        return `<td class="${sep.trim()}${n < -0.005 ? " orc-dfc-neg" : ""}">${this.money(n)}</td>${this.htmlVar(n, base[i])}`;
+        return `<td class="${sep.trim()}${n < -0.005 ? " orc-dfc-neg" : ""}">${this.money(n)}</td>${this.htmlVars(n, base[i])}`;
       }).join("");
       const click = r.hasKids ? ` data-dfc-id="${this.esc(r.id)}"` : "";
       return `<tr class="${cls}"${click}>
@@ -1794,7 +1817,7 @@ const OrcamentoDfcApp = {
       ${avisoBase}
       <div class="orc-dfc-scroll">
         <table class="orc-dfc-table orc-dfc-cmp">
-          <thead><tr><th rowspan="2" class="orc-dfc-conta-th">Conta<span class="orc-dfc-var-switch" role="group" aria-label="Variação de 2027 contra 2026"><button type="button" data-dfc-var="rs" class="${modoRs ? "is-on" : ""}">Var R$</button><button type="button" data-dfc-var="pct" class="${modoRs ? "" : "is-on"}">Var %</button></span></th>${h1}</tr><tr>${h2}</tr></thead>
+          <thead><tr><th rowspan="2">Conta</th>${h1}</tr><tr>${h2}</tr></thead>
           <tbody>${trs}</tbody>
           <tfoot id="orc-dfc-saldo-foot">${this.htmlSaldos()}</tfoot>
         </table>
@@ -1802,12 +1825,6 @@ const OrcamentoDfcApp = {
       <div id="orc-dfc-saldos">${this.quadroSaldos()}</div>`;
     body.querySelectorAll("[data-dfc-id]").forEach((tr) => {
       tr.addEventListener("click", () => this.toggle(tr.getAttribute("data-dfc-id")));
-    });
-    body.querySelectorAll("[data-dfc-var]").forEach((btn) => {
-      btn.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        this.setVarModo(btn.getAttribute("data-dfc-var"));
-      });
     });
     body.querySelectorAll("[data-orc-2026]").forEach((td) => {
       td.addEventListener("click", (ev) => {
@@ -1958,12 +1975,15 @@ const OrcamentoDfcApp = {
   preencherDfc(ws, inv, opts) {
     const rows = opts.rows || [];
     const corte = this._corte == null ? this.corteForecast() : this._corte;
-    const modoPct = this.varModo === "pct";
     const meses = this.MESES;
     const colunas = ["Conta"];
     meses.forEach((m, i) => colunas.push(m + "/26" + (i >= corte ? " prev" : "")));
     colunas.push("Total 2026");
-    meses.forEach((m) => colunas.push(m + "/27", m + (modoPct ? " Var %" : " Var R$")));
+    meses.forEach((m) => {
+      colunas.push(m + "/27");
+      if (this.varRs) colunas.push(m + " Var R$");
+      if (this.varPct) colunas.push(m + " Var %");
+    });
     const last = colunas.length;
     const letra = (i) => inv.excelColLetter(i);
     ws.properties.showGridLines = false;
@@ -2033,8 +2053,8 @@ const OrcamentoDfcApp = {
         const b = Number(bases[i]) || 0;
         valores.push(o);
         kinds.push("num");
-        valores.push(modoPct ? this.pctNum(o, b) : (o - b));
-        kinds.push(modoPct ? "pct" : "num");
+        if (this.varRs) { valores.push(o - b); kinds.push("num"); }
+        if (this.varPct) { valores.push(this.pctNum(o, b)); kinds.push("pct"); }
       });
       let fill = "FFFFFFFF";
       let fontColor = "FF0F172A";
