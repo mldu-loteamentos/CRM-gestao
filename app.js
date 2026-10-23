@@ -9612,6 +9612,87 @@ window.canonicalJudicialPhaseName = function(fase) {
   return String(fase == null ? '' : fase).trim().replace(/^\d+(?:\.\d+)*\.?\s+/, '');
 };
 
+/* Une as etapas pelo nome, sem apagar o que só existe num dos lados. O pai é reconhecido pelo nome. */
+window.mergeEtapasPorNome = function(localArr, cloudArr) {
+  const norm = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim().toUpperCase();
+  const local = Array.isArray(localArr) ? localArr : [];
+  const cloud = Array.isArray(cloudArr) ? cloudArr : [];
+  const out = cloud.map((e) => Object.assign({}, e));
+  const byId = new Map(out.filter((e) => e && e.id).map((e) => [String(e.id), e]));
+  const nomePai = (e, list) => {
+    if (!e || e.parentId == null || e.parentId === "") return "";
+    const p = list.find((x) => x && String(x.id) === String(e.parentId));
+    return p ? norm(p.nome || p.name) : "";
+  };
+  const chave = (e, list) => norm(e && (e.nome || e.name)) + "|" + nomePai(e, list);
+  const chaves = new Set(out.map((e) => chave(e, out)));
+  local.forEach((e) => {
+    if (!e || !e.id || byId.has(String(e.id))) return;
+    if (chaves.has(chave(e, local))) return;
+    const copia = Object.assign({}, e);
+    if (e.parentId) {
+      const paiLocal = local.find((x) => x && String(x.id) === String(e.parentId));
+      if (paiLocal) {
+        const pai = out.find((x) => norm(x.nome || x.name) === norm(paiLocal.nome || paiLocal.name) && nomePai(x, out) === nomePai(paiLocal, local));
+        if (pai) copia.parentId = pai.id;
+      }
+    }
+    out.push(copia);
+    byId.set(String(copia.id), copia);
+    chaves.add(chave(copia, out));
+  });
+  return out;
+};
+
+/* Níveis que a Lucélia cadastrou depois da reintegração de posse. Entram para todo mundo, na árvore e na lista de opções. */
+window.ensureReintegracaoPosseNiveis = function() {
+  if (!Array.isArray(window.EtapasJudiciaisState) || !window.EtapasJudiciaisState.length) return false;
+  const norm = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim().toUpperCase();
+  const niveis = [
+    { nome: "Aguardando expedição do mandado de reintegração", dias: 10, descricao: "Aguardando o juiz expedir o mandado de reintegração de posse." },
+    { nome: "Aguardando cumprimento pelo Oficial de Justiça", dias: 30, descricao: "Aguardando o oficial de justiça entregar o mandado de reintegração de posse." },
+    { nome: "Realizar reintegração", dias: 5, descricao: "Mandado cumprido. Liberado para realizar a reintegração." },
+    { nome: "Avaliação prévia Engenharia", dias: 10, descricao: "Agendar avaliação prévia da engenharia com relação às condições do imóvel." },
+    { nome: "Vistoria técnica externa", dias: 10, descricao: "Engenheiro externo realizará avaliação e emissão de projetos para aprovação." },
+    { nome: "Aprovação projeto - Prefeitura", dias: 90, descricao: "Realizar visita e aguardar aprovação do projeto na prefeitura." }
+  ];
+  const pais = window.EtapasJudiciaisState.filter((e) => norm(e.nome || e.name) === "REINTEGRACAO DE POSSE");
+  if (!pais.length) return false;
+  let mudou = false;
+  pais.forEach((pai) => {
+    const filhos = window.EtapasJudiciaisState.filter((e) => String(e.parentId) === String(pai.id));
+    const tem = new Set(filhos.map((e) => norm(e.nome || e.name)));
+    let order = filhos.reduce((m, e) => Math.max(m, Number(e.order) || 0), 0);
+    niveis.forEach((n) => {
+      if (tem.has(norm(n.nome))) return;
+      order += 10;
+      window.EtapasJudiciaisState.push({
+        id: "j_reint_" + norm(n.nome).replace(/[^A-Z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40),
+        nome: n.nome,
+        dias: n.dias,
+        descricao: n.descricao,
+        parentId: pai.id,
+        order: order
+      });
+      tem.add(norm(n.nome));
+      mudou = true;
+    });
+  });
+  if (!mudou) return false;
+  try { localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState)); } catch (e) {}
+  if (window.forceUploadLocalConfig) {
+    try { window.forceUploadLocalConfig(true); } catch (e) {}
+  }
+  if (typeof window.renderEtapasJudiciais === "function") {
+    try { window.renderEtapasJudiciais(); } catch (e) {}
+  }
+  if (typeof window.updateJudFaseDropdown === "function") {
+    try { window.updateJudFaseDropdown(); } catch (e) {}
+  }
+  return true;
+};
+try { window.ensureReintegracaoPosseNiveis(); } catch (e) {}
+
 window.buildJudicialStageCatalog = function() {
   const etapas = [...(window.EtapasJudiciaisState || [])];
   etapas.forEach((e, i) => { if (typeof e.order === 'undefined') e.order = i * 10; });
@@ -49166,18 +49247,22 @@ window.syncGlobalConfigFromFirebase = async function() {
                         }
                         return;
                     }
-                    if (k === "crm_moura_judiciais" || k === "crm_moura_financiamento") {
+                    if ((k === "crm_moura_judiciais" || k === "crm_moura_financiamento") && typeof window.mergeEtapasPorNome === "function") {
                         try {
                             const localArr = JSON.parse(localStorage.getItem(k) || "[]");
                             const cloudArr = JSON.parse(globalData[k] || "[]");
-                            if (localArr.length > cloudArr.length) {
-                                console.log("[Firebase] Local", k, "tem mais itens que a nuvem. Forçando upload da versão local...");
-                                if (window.forceUploadLocalConfig) {
-                                    setTimeout(() => window.forceUploadLocalConfig(true), 2000);
-                                }
-                                return;
+                            const merged = window.mergeEtapasPorNome(localArr, cloudArr);
+                            const mergedStr = JSON.stringify(merged);
+                            if (mergedStr !== (localStorage.getItem(k) || "[]")) {
+                                _originalSetItem.call(localStorage, k, mergedStr);
+                                changed = true;
                             }
-                        } catch(e) {}
+                            const cloudIds = new Set(cloudArr.filter((e) => e && e.id).map((e) => String(e.id)));
+                            if (merged.some((e) => e && e.id && !cloudIds.has(String(e.id))) && window.forceUploadLocalConfig) {
+                                setTimeout(() => window.forceUploadLocalConfig(true), 2000);
+                            }
+                            return;
+                        } catch (e) {}
                     }
                     _originalSetItem.call(localStorage, k, globalData[k]);
                     changed = true;
@@ -49186,6 +49271,7 @@ window.syncGlobalConfigFromFirebase = async function() {
             try {
                 const jud = JSON.parse(localStorage.getItem("crm_moura_judiciais") || "[]");
                 if (Array.isArray(jud)) window.EtapasJudiciaisState = jud;
+                if (typeof window.ensureReintegracaoPosseNiveis === "function") window.ensureReintegracaoPosseNiveis();
             } catch (e) {}
             try {
                 const fin = JSON.parse(localStorage.getItem("crm_moura_financiamento") || "[]");
