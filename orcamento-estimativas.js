@@ -1567,11 +1567,18 @@ const OrcamentoRepassesApp = {
       });
     });
     const dez = dezMap.g_12 || 0;
-    /* Na empresa 12 o lucro recebido da 13 entra e é distribuído no mesmo mês.
-       O resultado próprio continua saindo no mês seguinte. */
-    const seriePropria = this.serieDeslocada(dez, lucros ? resultadoProprio : resultado);
-    const pagamento = seriePropria.m.map((v, i) => (Number(v) || 0) + (lucros ? (Number(lucros.meses[i]) || 0) : 0));
-    const jan28 = (Number(seriePropria.jan28) || 0) + (lucros ? (Number(lucros.jan28) || 0) : 0);
+    /* Na empresa 12 a distribuição do mês é a variação de caixa desse mês (linha 12),
+       já com o lucro recebido da empresa 13. Nas demais, o mês paga a variação anterior. */
+    let pagamento;
+    let jan28;
+    if (lucros) {
+      pagamento = resultado.slice();
+      jan28 = Number(lucros.jan28) || 0;
+    } else {
+      const seriePropria = this.serieDeslocada(dez, resultado);
+      pagamento = seriePropria.m;
+      jan28 = seriePropria.jan28;
+    }
     const vivo = new Set(["g_03", "g_06", "g_08", "g_10", "g_12"]);
     tpl.forEach((g) => {
       const tem = g.months.some((v) => Math.abs(v) >= 0.005) || [...g.accs.values()].some((a) => a.months.some((v) => Math.abs(v) >= 0.005));
@@ -1674,7 +1681,9 @@ const OrcamentoRepassesApp = {
     } else {
       parceiros.forEach((p) => {
         const serie = this.resultadoCc(linhas, linhasDez, new Map([[p.ccId, p.meta]]), part, usarRateio);
-        const pag = this.serieDeslocada(serie.dez, serie.ano);
+        const pag = lucros
+          ? { m: (serie.ano || OrcEst.z()).slice(), jan28: 0 }
+          : this.serieDeslocada(serie.dez, serie.ano);
         distribuicao.push({
           id: p.ccId,
           nome: p.meta.nome || "",
@@ -1706,6 +1715,7 @@ const OrcamentoRepassesApp = {
       pessoas: pessoas,
       resultadoMeses: resultadoProprio,
       dezBruto: dez,
+      distribuiNoMes: !!lucros,
       pctPessoas: pessoas.reduce((s, p) => s + p.pct, 0),
       temValor: variacao.some((v) => Math.abs(v) >= 0.005) || rows.some((r) => r.isAccount)
     };
@@ -1922,9 +1932,11 @@ const OrcamentoRepassesApp = {
         <span class="orc-rep-valor"><span>${sociedade ? "Variação — distribuição" : "Variação — repasse"}</span><b>${OrcEst.money(this.soma(card.variacao))}</b></span>
       </div>
       ${this.dfcHtml(card)}
-      <p class="orc-est-nota">${sociedade
+      <p class="orc-est-nota">${card.companyId === "12"
+        ? "Na empresa 12 a distribuição de cada mês é a variação de caixa desse mês. O lucro recebido da empresa 13 já entra nessa variação, no mês em que chega, e o centro 71200 completa a diferença."
+        : (sociedade
         ? "Na sociedade o DFC junta todos os centros marcados. A linha 12 fica no mês em que o resultado acontece. A variação desse mês vira distribuição no mês seguinte, por centro de custo: janeiro de 2027 distribui dezembro de 2026, e dezembro de 2027 é distribuído em JAN/28. Cada sócio recebe o seu percentual. Repasse e dividendos já lançados no orçamento ficam de fora, para o valor não se abater duas vezes."
-        : "Com o centro principal da obra marcado, o DFC soma os centros marcados por inteiro. Sem ele, o valor é o rateio do parceiro sobre a obra. A linha 12 fica no mês em que o resultado acontece. O repasse é a variação desse mês paga no mês seguinte: janeiro de 2027 paga dezembro de 2026. A variação do 13301 é paga no 13300, na conta cadastrada no 13301. A do 13401 é paga no 13400, na conta do 13401. O centro de custo não entra no cadastro do credor."}</p>`;
+        : "Com o centro principal da obra marcado, o DFC soma os centros marcados por inteiro. Sem ele, o valor é o rateio do parceiro sobre a obra. A linha 12 fica no mês em que o resultado acontece. O repasse é a variação desse mês paga no mês seguinte: janeiro de 2027 paga dezembro de 2026. A variação do 13301 é paga no 13300, na conta cadastrada no 13301. A do 13401 é paga no 13400, na conta do 13401. O centro de custo não entra no cadastro do credor.")}</p>`;
     body.querySelectorAll("[data-rep-aba]").forEach((btn) => {
       btn.addEventListener("click", () => this.setAba(btn.getAttribute("data-rep-aba")));
     });
@@ -2100,7 +2112,9 @@ const OrcamentoRepassesApp = {
       title.value = {
         richText: [
           { font: { name: "Calibri", size: 14, bold: true, color: { argb: "FF475569" } }, text: "Prestação de contas\n" },
-          { font: { name: "Calibri", size: 9, color: { argb: "FF64748B" } }, text: nome + ". Janeiro é o repasse da variação de dezembro de 2026. Cada mês paga a variação do mês anterior." }
+          { font: { name: "Calibri", size: 9, color: { argb: "FF64748B" } }, text: nome + (String(emp) === "12"
+            ? ". Cada mês distribui a variação de caixa desse mês. O lucro da empresa 13 entra no mês em que chega."
+            : ". Janeiro é o repasse da variação de dezembro de 2026. Cada mês paga a variação do mês anterior.") }
         ]
       };
       pintar(ws, title, { fill: "FFFFFFFF", align: { vertical: "middle", horizontal: "left", wrapText: true, indent: 8 } });
@@ -2277,13 +2291,14 @@ const OrcamentoRepassesApp = {
     return `<colgroup><col class="orc-rep-nome">${meses}<col class="orc-rep-mes"><col class="orc-rep-mes"></colgroup>`;
   },
 
-  cabecaPagamento(primeira) {
+  cabecaPagamento(primeira, mesmoMes) {
     const meses = OrcEst.MESES.map((m) => `<th>${m}</th>`).join("");
-    const origens = OrcEst.MESES.map((_, i) => {
-      const de = i === 0 ? "DEZ/26" : (OrcEst.MESES[i - 1] + "/27");
+    const origens = OrcEst.MESES.map((m, i) => {
+      const de = mesmoMes ? (m + "/27") : (i === 0 ? "DEZ/26" : (OrcEst.MESES[i - 1] + "/27"));
       return `<th>variação de caixa de ${de}</th>`;
     }).join("");
-    return `<tr><th rowspan="2">${primeira}</th>${meses}<th>JAN/28</th><th rowspan="2">Total</th></tr><tr class="orc-rep-origem">${origens}<th>variação de caixa de DEZ/27</th></tr>`;
+    const jan28 = mesmoMes ? "lucros da empresa 13 de DEZ/27" : "variação de caixa de DEZ/27";
+    return `<tr><th rowspan="2">${primeira}</th>${meses}<th>JAN/28</th><th rowspan="2">Total</th></tr><tr class="orc-rep-origem">${origens}<th>${jan28}</th></tr>`;
   },
 
   dfcHtml(card) {
@@ -2343,20 +2358,20 @@ const OrcamentoRepassesApp = {
         ? `<p class="orc-est-alerta">As participações somam ${OrcEst.esc(this.pctTxt(card.pctPessoas))}, não 100%.</p>`
         : "";
       const quem = card.companyId === "12"
-        ? "Cada sócio recebe este percentual. O lucro recebido da empresa 13 entra na distribuição do mesmo mês. O resultado próprio da empresa 12 entra no mês seguinte."
+        ? "Cada sócio recebe este percentual da variação de caixa do mês. O lucro recebido da empresa 13 já está nessa variação."
         : (card.sociedade
           ? "Cada sócio recebe este percentual da distribuição do mês seguinte, no centro de custo cadastrado."
           : "Cada participante recebe este percentual do repasse do mês seguinte.");
       const coluna = card.sociedade ? "Centro de custo" : "Participante";
       socios = `<div class="orc-rep-socios"><h4>${quem}</h4>${aviso}
-        <div class="orc-dfc-scroll"><table class="orc-dfc-table orc-est-table orc-rep-quadro">${this.colunasRepasse()}<thead>${this.cabecaPagamento(coluna)}</thead><tbody>
+        <div class="orc-dfc-scroll"><table class="orc-dfc-table orc-est-table orc-rep-quadro">${this.colunasRepasse()}<thead>${this.cabecaPagamento(coluna, card.distribuiNoMes)}</thead><tbody>
         ${card.pessoas.map((p) => `<tr><td>${OrcEst.esc(card.sociedade ? this.rotuloSocio(p) : (p.nome + " · " + this.pctTxt(p.pct)))}</td>${(p.m || []).map((v) => `<td${Number(v) < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(v)}</td>`).join("")}<td${Number(p.jan28) < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(p.jan28)}</td><td>${OrcEst.money(this.soma(p.m))}</td></tr>`).join("")}
         </tbody></table></div></div>`;
     }
     const centrosRep = (card.distribuicao || []).slice().sort((a, b) => this.ordemCentro(a.id, b.id));
     const rotuloRep = card.sociedade ? "Distribuição" : "Repasse";
     const fraseRep = card.companyId === "12"
-      ? "O lucro recebido da empresa 13 é distribuído no mês em que entra. O resultado próprio de um mês vira distribuição no mês seguinte."
+      ? "A distribuição do mês é a variação de caixa desse mês. O lucro recebido da empresa 13 entra no mês em que chega."
       : (card.sociedade
         ? "A variação de caixa de um mês vira distribuição no mês seguinte."
         : "A variação de caixa de um mês é o repasse do mês seguinte, pago no centro da obra e na conta cadastrada no centro do parceiro.");
@@ -2376,7 +2391,7 @@ const OrcamentoRepassesApp = {
         }).join("")}<td${Number(r.jan28) < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(r.jan28)}</td><td>${OrcEst.money(this.soma(meses))}</td></tr>`;
       }).join("");
       quadro = `<div class="orc-rep-socios"><h4>${OrcEst.esc(rotuloRep)}. ${OrcEst.esc(fraseRep)}</h4>
-        <div class="orc-dfc-scroll"><table class="orc-dfc-table orc-est-table orc-rep-quadro">${this.colunasRepasse()}<thead>${this.cabecaPagamento("Centro de custo")}</thead>
+        <div class="orc-dfc-scroll"><table class="orc-dfc-table orc-est-table orc-rep-quadro">${this.colunasRepasse()}<thead>${this.cabecaPagamento("Centro de custo", card.distribuiNoMes)}</thead>
         <tbody>${corpo}</tbody>
         <tfoot><tr><td>Total</td>${acc.map((v) => `<td${v < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(v)}</td>`).join("")}<td${janAcc < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(janAcc)}</td><td>${OrcEst.money(this.soma(acc))}</td></tr></tfoot>
         </table></div></div>`;
