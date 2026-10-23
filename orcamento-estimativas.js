@@ -1330,11 +1330,12 @@ const OrcamentoRepassesApp = {
     return !!((por2 && Object.keys(por2).length) || (depois && depois.contas && Object.keys(depois.contas).length));
   },
 
-  /* Repasse e distribuição previstos no forecast não entram nesta tela: o repasse é calculado aqui. */
+  /* No forecast de dezembro, só sai repasse ou distrato. O restante do mês permanece. */
   forecastDeRepasse(conta, nome) {
-    const gid = this.grupoEfetivo(conta, nome);
-    if (gid === "g_04_01" || gid === "g_11_01") return true;
-    return /REPASSE|DISTRIBUICAO/.test(OrcEst.norm(nome));
+    if (/REPASSE|DISTRATO/.test(OrcEst.norm(nome))) return true;
+    let gid = "";
+    try { gid = this.grupoEfetivo(conta, nome) || ""; } catch (e) { gid = ""; }
+    return gid === "g_04_01";
   },
 
   linhasDez2026(companyId) {
@@ -1410,16 +1411,18 @@ const OrcamentoRepassesApp = {
   /* Empresa 6: duas visões. O terrenista vê o 14202; o repasse é a variação do 14201 no mês seguinte.
      O empreendedor vê 14201 e 70600; esse saldo é a distribuição entre os sócios. */
   aracariDe(part) {
-    const app = this.appPar();
-    return !!(app && typeof app.isMista === "function" && app.isMista(part) && String(part && part.companyId) === "6");
+    if (!part || String(part.companyId) !== "6") return false;
+    const fold = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    const nome = fold(part.partnerName) + " " + fold(part.companyName);
+    return nome.indexOf("ARACARI") >= 0;
   },
 
   pessoasDe(part) {
     const app = this.appPar();
     const lista = [];
-    if (app && typeof app.isMista === "function" && app.isMista(part) && typeof app.efetivoEmpreendedor === "function") {
+    const aracari = this.aracariDe(part);
+    if (app && typeof app.efetivoEmpreendedor === "function" && (aracari || (typeof app.isMista === "function" && app.isMista(part)))) {
       const terr = app.pctTerrenista(part);
-      const aracari = this.aracariDe(part);
       const fonte = (part.socios || []).some((s) => s && app.papelSocio(s) === "empreendedor" && Number(s.sharePct) > 0)
         ? (part.socios || [])
         : (aracari && Array.isArray(app.ARACARI_EMPREENDEDORES) ? app.ARACARI_EMPREENDEDORES : []);
