@@ -10165,6 +10165,14 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .pcx-alert.is-error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
 .pcx-alert.is-warn { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
 .pcx-alert.is-info { justify-content: flex-start; background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+.pcx-dist { margin: 0 0 14px; padding: 14px 16px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; }
+.pcx-dist h3 { margin: 0 0 6px; font-size: 0.95rem; color: #105436; }
+.pcx-dist p { margin: 0 0 10px; font-size: 0.78rem; color: #64748b; line-height: 1.45; }
+.pcx-dist-alerta { background: #fff7ed; color: #9a3412; border: 1px solid #fdba74; align-items: flex-start; }
+.pcx-dist-alerta strong { display: block; margin-bottom: 4px; }
+.pcx-dist-sub { font-size: 0.68rem; color: #64748b; line-height: 1.35; }
+.pcx-dist-obs { font-size: 0.72rem; line-height: 1.4; min-width: 220px; }
+.pcx-dist-table td { vertical-align: top; }
 .pcx-alert.is-info .pcx-spin { border-color: rgba(16, 84, 54, 0.25); border-top-color: #105436; }
 .pcx-det-aviso.is-warn { background: #fffbeb; color: #92400e; }
 .cc-table .pcx-mini td.pcx-orig-doc { font-weight: 700; color: #105436; white-space: nowrap; }

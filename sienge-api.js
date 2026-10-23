@@ -109,9 +109,7 @@ function getConfiguredInternalCompanyIds() {
 
 /** A base das 7h continua válida. Revisão nova não pode jogar fora o batimento do dia. */
 function filaCacheDoDiaServe(rev) {
-  if (rev == null || rev === "") return true;
-  const n = Number(rev);
-  return n === 3 || n === 4;
+  return Number(rev) === DEFAULTERS_CACHE_REV;
 }
 
 /** Cache do dia só vale se cobriu as empresas internas esperadas (evita base só 1+2). */
@@ -190,6 +188,9 @@ function mesclarTitulosInadimplentes(bills) {
     (bill.defaulterInstallments || []).forEach(add);
     prev.defaulterInstallments = Array.from(insts.values());
     if ((!prev.costCentersId || !prev.costCentersId.length) && bill.costCentersId) prev.costCentersId = bill.costCentersId;
+    if ((!prev.underJudgmentInstallments || !prev.underJudgmentInstallments.length) && bill.underJudgmentInstallments && bill.underJudgmentInstallments.length) {
+      prev.underJudgmentInstallments = bill.underJudgmentInstallments;
+    }
   });
   return Array.from(porId.values()).concat(semId);
 }
@@ -199,7 +200,26 @@ function mesclarTitulosInadimplentes(bills) {
  * recebimento recente e só resta uma parcela em aberto. A revisão 2 já trazia
  * as parcelas de tipo que não gera cobrança.
  */
-const DEFAULTERS_CACHE_REV = 4;
+const DEFAULTERS_CACHE_REV = 5;
+
+function linhasBulkDefaulters(res) {
+  if (!res || typeof res !== "object") return null;
+  if (Array.isArray(res)) return res;
+  if (Array.isArray(res.data)) return res.data;
+  if (Array.isArray(res.results)) return res.results;
+  if (res.data && Array.isArray(res.data.results)) return res.data.results;
+  return null;
+}
+
+function idTituloInadimplente(bill) {
+  return String((bill && (bill.receivableBillId || bill.id || bill.saleId)) || "");
+}
+
+function tituloTrazSubJudice(bill, ids) {
+  const id = idTituloInadimplente(bill);
+  if (id && ids && ids.has(id)) return true;
+  return !!(bill && Array.isArray(bill.underJudgmentInstallments) && bill.underJudgmentInstallments.length);
+}
 
 function documentoExtratoEhCt(row) {
   const tipo = String((row && (row.documentIdentificationId || row.documentId || row.documentsId)) || "").trim().toUpperCase();
@@ -2588,6 +2608,19 @@ const SiengeApiService = {
     targetCompanies.forEach(id => totalWeight += (companyTimes[id] || 7000));
     let currentWeightAccum = 0;
 
+    const prevSubPorEmpresa = new Map();
+    try {
+      const prevCache = await IdbDefaultersCache.get(`defaulters_${today}`);
+      (prevCache && Array.isArray(prevCache.data) ? prevCache.data : []).forEach((b) => {
+        if (!b || b.subjudice !== "S") return;
+        const emp = String(b.companyId || "");
+        const id = idTituloInadimplente(b);
+        if (!id) return;
+        if (!prevSubPorEmpresa.has(emp)) prevSubPorEmpresa.set(emp, new Set());
+        prevSubPorEmpresa.get(emp).add(id);
+      });
+    } catch (e) {}
+
     let _companyIndex = 0;
     for (const cId of targetCompanies) {
       const cStartTime = Date.now();
@@ -2630,6 +2663,7 @@ const SiengeApiService = {
       
       let rawArray = [];
       let rawUnderJudgment = [];
+      const idsSemConfirmacao = new Set();
 
       for (let i = 0; i < ccBatches.length; i++) {
         const batch = ccBatches[i];
@@ -2660,20 +2694,37 @@ const SiengeApiService = {
           console.log(`[Sienge] Empresa ${cId} — Processando lote ${i + 1}/${ccBatches.length} (CCs: ${batch.join(', ')})`);
         }
 
+        let resAll = null;
+        let resJudge = null;
         try {
-          const resAll   = await siengeFetchWithRetry(`/bulk-data/v1/defaulters-receivable-bills${qAll}`);
-          await new Promise(r => setTimeout(r, 1000));
-          const resJudge = await siengeFetchWithRetry(`/bulk-data/v1/defaulters-receivable-bills${qJudge}`);
-
-          rawArray.push(...(resAll.data || []));
-          rawUnderJudgment.push(...(resJudge.data || []));
+          resAll = await siengeFetchWithRetry(`/bulk-data/v1/defaulters-receivable-bills${qAll}`);
         } catch (err) {
           console.error(`[Sienge] Erro na API Bulk Data da empresa ${cId} (Lote ${i + 1}):`, err);
+        }
+        const allRows = linhasBulkDefaulters(resAll) || [];
+        if (resAll) {
+          try {
+            await new Promise(r => setTimeout(r, 1000));
+            resJudge = await siengeFetchWithRetry(`/bulk-data/v1/defaulters-receivable-bills${qJudge}`);
+          } catch (err) {
+            console.error(`[Sienge] Erro na lista de sub judice da empresa ${cId} (Lote ${i + 1}):`, err);
+          }
+        }
+        const judgeRows = linhasBulkDefaulters(resJudge);
+        rawArray.push(...allRows);
+        if (judgeRows) rawUnderJudgment.push(...judgeRows);
+        if (allRows.length && !judgeRows) {
+          allRows.forEach((b) => {
+            const id = idTituloInadimplente(b);
+            if (id) idsSemConfirmacao.add(id);
+          });
+          console.warn(`[Sienge] Empresa ${cId} lote ${i + 1}: sub judice não confirmado. ${allRows.length} título(s) não serão dados como saída.`);
         }
       }
 
       try {
-        const underJudgmentIds = new Set(rawUnderJudgment.map(b => String(b.receivableBillId || b.id)));
+        const underJudgmentIds = new Set(rawUnderJudgment.map(b => idTituloInadimplente(b)).filter(Boolean));
+        const prevIds = prevSubPorEmpresa.get(String(cId)) || new Set();
         const idsNaCarteira = new Set(rawArray.map(b => String(b.receivableBillId || b.id || "")));
         rawUnderJudgment.forEach(b => {
           const id = String(b.receivableBillId || b.id || "");
@@ -2682,6 +2733,12 @@ const SiengeApiService = {
           rawArray.push(b);
         });
         rawArray = mesclarTitulosInadimplentes(rawArray);
+        let marcadosAgora = 0;
+        rawArray.forEach((b) => { if (tituloTrazSubJudice(b, underJudgmentIds)) marcadosAgora += 1; });
+        const quedaEmpresa = prevIds.size >= 8 && marcadosAgora * 2 < prevIds.size;
+        if (quedaEmpresa) {
+          console.warn(`[Sienge] Empresa ${cId}: sub judice caiu de ${prevIds.size} para ${marcadosAgora}. A marca anterior permanece.`);
+        }
 
         const normalizedArray = rawArray.map(bill => {
           const installments = []
@@ -2699,7 +2756,9 @@ const SiengeApiService = {
             units:       bill.units || 'N/D',
             value: 0, interest: 0, fine: 0, daysDelay: 0,
             slipStatus:  'Vencido',
-            subjudice:   underJudgmentIds.has(String(bill.receivableBillId || bill.id)) ? 'S' : 'N',
+            subjudice: (tituloTrazSubJudice(bill, underJudgmentIds)
+              || (idsSemConfirmacao.has(idTituloInadimplente(bill)) && prevIds.has(idTituloInadimplente(bill)))
+              || (quedaEmpresa && prevIds.has(idTituloInadimplente(bill)))) ? 'S' : 'N',
             defaulterInstallments:      installments,
             defaulterJudicialActivities: bill.defaulterJudicialActivities || [],
             totalInstallmentsCount: (bill.defaulterInstallments ? bill.defaulterInstallments.length : 0) +

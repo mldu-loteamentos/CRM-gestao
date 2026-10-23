@@ -10,6 +10,7 @@ const ParametrizacaoParceiroApp = {
   ccSearch: "",
   loadingCats: false,
   creditorQuery: "",
+  credorPapel: "empreendedor",
   creditorHits: [],
   creditorSearching: false,
   _creditorTimer: null,
@@ -282,6 +283,178 @@ const ParametrizacaoParceiroApp = {
     return socio ? "sócio" : "parceiro";
   },
 
+  papelSocio(s) {
+    return s && s.papel === "terrenista" ? "terrenista" : "empreendedor";
+  },
+
+  sociosPorPapel(p, papel) {
+    const alvo = papel === "terrenista" ? "terrenista" : "empreendedor";
+    return (p && p.socios || []).filter((s) => s && s.id && this.papelSocio(s) === alvo);
+  },
+
+  /* Despesa bancária não entra no rateio do terrenista. A liquidação da tarifa do boleto rateia pelo centro de custo; a responsabilidade continua inteira do empreendedor. */
+  ehDespesaBancaria(accId, nome) {
+    const id = String(accId || "").replace(/\D/g, "");
+    if (id === "2050105" || id.indexOf("2050105") === 0) return true;
+    const n = String(nome || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    return /DESPESAS BANCARIAS/.test(n) || /TARIFA DE BOLETO/.test(n) || /TARIFA BANCARIA/.test(n);
+  },
+
+  pctTerrenista(p) {
+    const obra = (p && p.obras && p.obras[0]) || null;
+    const travado = obra ? this.percentualTravado(obra) : null;
+    const n = travado != null ? travado : Number(obra && obra.defaultPartnerShare);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  },
+
+  efetivoEmpreendedor(p, sharePct) {
+    const fatia = Number(sharePct);
+    const terr = this.pctTerrenista(p);
+    if (!(fatia > 0) || !(terr >= 0) || terr >= 100) return 0;
+    return Math.round((100 - terr) * fatia / 100 * 1000) / 1000;
+  },
+
+  ehAracari(p) {
+    if (!p || String(p.companyId) !== "6" || !this.isMista(p)) return false;
+    const fold = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    const nome = fold(p.partnerName) + " " + fold(p.companyName);
+    return nome.indexOf("ARACARI") >= 0;
+  },
+
+  /* 50% / 25% / 25% da fatia de 56% do centro 14201. O efetivo no negócio é 28% / 14% / 14%. */
+  ARACARI_EMPREENDEDORES: [
+    {
+      id: "7",
+      name: "MOURA LEITE DESENVOLVIMENTO E URBANIZACAO LTDA",
+      cpfCnpj: "01.066.134/0001-78",
+      sharePct: 50,
+      papel: "empreendedor",
+      ccTitulo: "70603",
+      ccTituloNome: "MOURA LEITE DESENVOLVIMENTO E URBANIZAÇÃO LTDA",
+      planoId: "20707",
+      planoNome: "Distribuição Lucro - Remessa para Controladora",
+      docTipo: "DIST",
+      docNome: "DISTRIBUIÇÃO DE LUCRO"
+    },
+    {
+      id: "235",
+      name: "SOMA DESENVOLVIMENTO IMOBILIARIO LTDA",
+      cpfCnpj: "18.424.091/0001-58",
+      sharePct: 25,
+      papel: "empreendedor",
+      ccTitulo: "70601",
+      ccTituloNome: "SOMA DESENVOLVIMENTO IMOBILIARIO LTDA",
+      planoId: "20701",
+      planoNome: "Distribuição Lucro",
+      docTipo: "DIST",
+      docNome: "DISTRIBUIÇÃO DE LUCRO"
+    },
+    {
+      id: "1388",
+      name: "PRF PARTICIPACOES IMOBILIARIAS LTDA",
+      cpfCnpj: "19.812.125/0001-44",
+      sharePct: 25,
+      papel: "empreendedor",
+      ccTitulo: "70602",
+      ccTituloNome: "PR&F PARTICIPAÇÕES IMOBILIÁRIAS LTDA",
+      planoId: "20701",
+      planoNome: "Distribuição Lucro",
+      docTipo: "DIST",
+      docNome: "DISTRIBUIÇÃO DE LUCRO"
+    }
+  ],
+
+  aplicarSociosAracari(p) {
+    if (!p || p.sociosSeed === "aracari-empreendedores-v1") return false;
+    if (!this.ehAracari(p)) return false;
+    p.socios = Array.isArray(p.socios) ? p.socios : [];
+    this.ARACARI_EMPREENDEDORES.forEach((src) => {
+      const row = this.blankSocio(src);
+      const i = p.socios.findIndex((s) => String(s.id) === String(src.id));
+      if (i >= 0) {
+        const prev = p.socios[i];
+        row.bankInfo = prev.bankInfo || null;
+        row.bankList = prev.bankList || [];
+        row.bankId = prev.bankId || row.bankId;
+        row.bankLoaded = !!prev.bankLoaded;
+        p.socios[i] = row;
+      } else {
+        p.socios.push(row);
+      }
+    });
+    if (!p.contaTerrenista) p.contaTerrenista = "99382-5";
+    if (!p.contaDistribuicao) p.contaDistribuicao = "99397-3";
+    p.sociosSeed = "aracari-empreendedores-v1";
+    return true;
+  },
+
+  isoDeData(d) {
+    const pad = (n) => String(n).padStart(2, "0");
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+  },
+
+  /* O resultado é da competência. O pagamento do terrenista, e a transferência de cada empreendedor, caem no mês seguinte. */
+  dataPagamentoMista(p, year, month) {
+    const cred = (p && p.creditor) || {};
+    const y = Number(year);
+    const m = Number(month);
+    if (!y || !m) return "";
+    const close = new Date(y, m, 0);
+    if (cred.paymentDayMode === "businessDays") {
+      const n = parseInt(cred.paymentBusinessDays, 10);
+      if (!(n >= 1)) return "";
+      return this.isoDeData(this.addBusinessDaysAfter(close, n));
+    }
+    const day = parseInt(cred.paymentDay, 10);
+    if (!(day >= 1)) return "";
+    let mm = m + 1;
+    let yy = y;
+    if (mm > 12) { mm = 1; yy += 1; }
+    const last = new Date(yy, mm, 0).getDate();
+    const d = Math.min(day, last);
+    return yy + "-" + String(mm).padStart(2, "0") + "-" + String(d).padStart(2, "0");
+  },
+
+  dinheiro(n) {
+    return (Number(n) || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  },
+
+  /* valorTerrenista é o que o terrenista tem a receber (a parte dele, já com o % da parceria). */
+  distribuicaoEmpreendedores(p, valorTerrenista, impostos, despesas) {
+    const terr = this.pctTerrenista(p);
+    const cents = (n) => Math.round((Number(n) || 0) * 100) / 100;
+    const linhas = this.sociosPorPapel(p, "empreendedor")
+      .map((s) => {
+        const share = Number(s.sharePct) || 0;
+        const efetivo = this.efetivoEmpreendedor(p, share);
+        const bruto = terr > 0 ? cents(Number(valorTerrenista) * efetivo / terr) : 0;
+        return { socio: s, share, efetivo, bruto };
+      })
+      .filter((row) => row.share > 0)
+      .sort((a, b) => b.share - a.share || String(a.socio.name || "").localeCompare(String(b.socio.name || ""), "pt-BR"));
+    let restoImp = cents(impostos);
+    let restoDesp = cents(despesas);
+    linhas.forEach((row, i) => {
+      const ultima = i === linhas.length - 1;
+      const imp = ultima ? restoImp : cents(Number(impostos) * row.share / 100);
+      const desp = ultima ? restoDesp : cents(Number(despesas) * row.share / 100);
+      restoImp = cents(restoImp - imp);
+      restoDesp = cents(restoDesp - desp);
+      row.impostos = imp;
+      row.despesas = desp;
+      row.liquido = cents(row.bruto - imp - desp);
+    });
+    return { terrPct: terr, fatiaEmp: Math.round((100 - terr) * 1000) / 1000, linhas };
+  },
+
+  textoObservacaoDistribuicao(mesNome, ano, bruto, impostos, despesas, liquido) {
+    return "Distribuição de Lucro " + mesNome + " " + ano
+      + " - TOTAL REPASSE R$ " + this.dinheiro(bruto)
+      + " - R$ " + this.dinheiro(impostos) + " (PIS/COFINS/IR)"
+      + " - R$ " + this.dinheiro(despesas) + " despesas operacionais"
+      + " = R$ " + this.dinheiro(liquido);
+  },
+
   /* Credor do Sienge → centro de custo da empresa 13. */
   CENTROS_SOCIOS_13: {
     "1806": ["71301", "ELLENCO & MOURA LEITE BOITUVA EMPREENDIMENTO IMOBILIÁRIO SPE LTDA"],
@@ -351,7 +524,8 @@ const ParametrizacaoParceiroApp = {
       planoNome: String(primeiro.nome || ""),
       planos,
       docTipo: String(s.docTipo || ""),
-      docNome: String(s.docNome || "")
+      docNome: String(s.docNome || ""),
+      papel: s.papel === "terrenista" ? "terrenista" : (s.papel === "empreendedor" ? "empreendedor" : "")
     };
   },
 
@@ -434,7 +608,7 @@ const ParametrizacaoParceiroApp = {
 
   /* Um parceiro usa o percentual da obra. Dois ou mais dividem essa fatia. Sociedade continua com o percentual do sócio. */
   pedeFatiaCredor(p) {
-    if (!p || this.isSociedade(p)) return false;
+    if (!p || this.isSociedade(p) || this.isMista(p)) return false;
     return (p.socios || []).filter((s) => s && s.id).length >= 2;
   },
 
@@ -670,8 +844,9 @@ const ParametrizacaoParceiroApp = {
   },
 
   /** Fator a aplicar no valor (1 = 100%). Sociedade = conta integral; parceria = % do parceiro. */
-  partnershipAmountFactor(part, obra, accId) {
+  partnershipAmountFactor(part, obra, accId, nome) {
     if (!part || !obra) return 1;
+    if (this.isMista(part) && this.ehDespesaBancaria(accId, nome || this.catName(accId))) return 0;
     if (!this.accountEntersPartnership(part, obra, accId)) return 0;
     if (this.isSociedade(part)) return 1;
     return (Number(this.partnerPctForObra(part, obra, accId)) || 0) / 100;
@@ -972,6 +1147,7 @@ const ParametrizacaoParceiroApp = {
     this.items.forEach(p => this.normalizeItem(p));
     let semeou = false;
     this.items.forEach(p => { if (this.aplicarSociosVercellino(p)) semeou = true; });
+    this.items.forEach(p => { if (this.aplicarSociosAracari(p)) semeou = true; });
     this.items.forEach(p => { if (this.corrigirEmpresaEllenco(p)) semeou = true; });
     this.items.forEach(p => { if (this.vincularCentrosEmpresa13(p)) semeou = true; });
     if (semeou) this.persist();
@@ -1818,7 +1994,8 @@ const ParametrizacaoParceiroApp = {
         return;
       }
       p.socios = p.socios || [];
-      p.socios.push(this.blankSocio({ id, name, cpfCnpj: doc, sharePct: "" }));
+      const papel = this.isMista(p) && this.credorPapel === "terrenista" ? "terrenista" : (this.isMista(p) ? "empreendedor" : "");
+      p.socios.push(this.blankSocio({ id, name, cpfCnpj: doc, sharePct: "", papel }));
       this.vincularCentrosEmpresa13(p);
       this.socioAberto = String(id);
       this.creditorQuery = "";
@@ -1948,10 +2125,11 @@ const ParametrizacaoParceiroApp = {
     if (!p) return;
     p.creditor = p.creditor || {};
     const n = parseInt(String(value).trim(), 10);
+    const minDia = this.isMista(p) ? 1 : this.PAY_MIN_DAY;
     if (!Number.isFinite(n)) {
       p.creditor.paymentDay = "";
-    } else if (n < this.PAY_MIN_DAY) {
-      p.creditor.paymentDay = this.PAY_MIN_DAY;
+    } else if (n < minDia) {
+      p.creditor.paymentDay = minDia;
     } else if (n > 31) {
       p.creditor.paymentDay = 31;
     } else {
@@ -2110,10 +2288,29 @@ const ParametrizacaoParceiroApp = {
     this.render();
   },
 
-  onCreditorSearch(val) {
+  onCreditorSearch(val, papel) {
     this.creditorQuery = val;
+    if (papel === "terrenista" || papel === "empreendedor") this.credorPapel = papel;
     clearTimeout(this._creditorTimer);
     this._creditorTimer = setTimeout(() => this.runCreditorSearch(val), 280);
+  },
+
+  setSocioPapel(id, papel) {
+    const p = this.current();
+    if (!p) return;
+    const row = (p.socios || []).find((s) => String(s.id) === String(id));
+    if (!row) return;
+    row.papel = papel === "terrenista" ? "terrenista" : "empreendedor";
+    this.persist();
+    this.renderKeepScroll();
+  },
+
+  setContaMista(campo, valor) {
+    const p = this.current();
+    if (!p) return;
+    if (campo !== "contaTerrenista" && campo !== "contaDistribuicao") return;
+    p[campo] = String(valor || "").trim();
+    this.persist();
   },
 
   normSearch(s) {
@@ -2201,7 +2398,8 @@ const ParametrizacaoParceiroApp = {
   async runCreditorSearch(val) {
     const q = String(val || "").trim();
     const digits = q.replace(/\D/g, "");
-    const box = document.getElementById("pp-cred-sugg");
+    const papel = this.credorPapel === "terrenista" ? "terrenista" : "empreendedor";
+    const box = document.getElementById(this.isMista(this.current()) ? ("pp-cred-sugg-" + papel) : "pp-cred-sugg");
     if (q.length < 2 && digits.length < 3) {
       this.creditorHits = [];
       if (box) box.innerHTML = "";
@@ -2354,10 +2552,12 @@ const ParametrizacaoParceiroApp = {
       const tipo = this.kindLabel(p);
       const nPessoas = (p.socios || []).filter(s => s.id).length;
       const rateioTxt = [...new Set((p.obras || []).map(o => o.defaultPartnerShare + "%"))].join(" / ") || "sem rateio";
+      const nEmp = this.sociosPorPapel(p, "empreendedor").length;
+      const nTerr = this.sociosPorPapel(p, "terrenista").length;
       const shares = this.isSociedade(p)
         ? (nPessoas + " sócios · " + this.fmtPct(this.totalSociosPct(p)) + "%")
         : (this.isMista(p)
-          ? (nPessoas + " sócios · " + rateioTxt)
+          ? (nEmp + " empreendedores · " + nTerr + (nTerr === 1 ? " terrenista · " : " terrenistas · ") + rateioTxt)
           : (nPessoas + (nPessoas === 1 ? " parceiro · " : " parceiros · ") + rateioTxt));
       return `<button type="button" class="pp-lista-item${active ? " is-on" : ""}" onclick="ParametrizacaoParceiroApp.select('${p.id}')">
         <span class="pp-lista-nome">${this.esc(p.partnerName)}</span>
@@ -2581,9 +2781,12 @@ const ParametrizacaoParceiroApp = {
     `;
   },
 
-  sociosCredorHtml(p) {
-    const pessoa = this.rotuloCredor(p);
-    const pessoas = this.rotuloCredor(p, true);
+  sociosCredorHtml(p, opt) {
+    opt = opt || {};
+    if (this.isMista(p) && !opt.papel) return this.mistaCredorHtml(p);
+    const papel = opt.papel === "terrenista" ? "terrenista" : (opt.papel === "empreendedor" ? "empreendedor" : "");
+    const pessoa = papel === "empreendedor" ? "empreendedor" : (papel === "terrenista" ? "terrenista" : this.rotuloCredor(p));
+    const pessoas = papel === "empreendedor" ? "Empreendedores" : (papel === "terrenista" ? "Terrenistas" : this.rotuloCredor(p, true));
     const cred = p.creditor || {};
     const day = cred.paymentDay == null ? "" : cred.paymentDay;
     const mode = cred.paymentDayMode === "businessDays" ? "businessDays" : "monthDay";
@@ -2601,12 +2804,14 @@ const ParametrizacaoParceiroApp = {
       return `<button type="button" onclick="ParametrizacaoParceiroApp.updatePaymentDayMode('${id}')"
         style="border:1px solid ${on ? "#105436" : "#e2e8f0"};background:${on ? "#e8f5ee" : "#fff"};color:${on ? "#105436" : "#334155"};border-radius:8px;padding:8px 12px;cursor:pointer;font-size:0.78rem;font-weight:700;">${label}</button>`;
     };
-    const total = this.totalSociosPct(p);
+    let socios = this.sociosOrdenados(p.socios);
+    if (papel) socios = socios.filter((s) => this.papelSocio(s) === papel);
+    const total = socios.reduce((sum, s) => sum + (Number(s.sharePct) || 0), 0);
     const resto = Math.round((100 - total) * 1000) / 1000;
-    const socios = this.sociosOrdenados(p.socios);
     const sociedade = this.isSociedade(p);
     const divideFatia = this.pedeFatiaCredor(p);
-    const mostraPct = sociedade || divideFatia;
+    const mostraPct = sociedade || divideFatia || papel === "empreendedor" || (papel === "terrenista" && socios.length >= 2);
+    const terrPct = papel ? this.pctTerrenista(p) : 0;
     const card = (s) => {
       const aberto = String(this.socioAberto || "") === String(s.id);
       const banks = s.bankList || [];
@@ -2628,20 +2833,33 @@ const ParametrizacaoParceiroApp = {
       const fatiaTxt = fatias.length
         ? fatias.map((f) => "obra " + f.code + ": " + this.fmtPctCurto(s.sharePct) + "% de " + this.fmtPctCurto(f.base) + "% = " + this.fmtPctCurto(f.efetivo) + "%").join(" · ")
         : (divideFatia ? "Esta parte vale sobre o percentual já configurado em cada obra." : "");
-      const campoPct = !mostraPct ? "" : `<label style="display:flex;flex-direction:column;gap:4px;width:150px;font-size:0.68rem;font-weight:700;color:#475569;text-transform:uppercase;">${sociedade ? "% de participação" : "% da fatia"}
+      const rotuloPct = sociedade ? "% de participação" : (papel === "empreendedor" ? "% dos empreendedores" : (papel === "terrenista" ? "% dos terrenistas" : "% da fatia"));
+      const campoPct = !mostraPct ? "" : `<label style="display:flex;flex-direction:column;gap:4px;width:170px;font-size:0.68rem;font-weight:700;color:#475569;text-transform:uppercase;">${rotuloPct}
               <input type="number" min="0" max="100" step="0.001" value="${s.sharePct === "" ? "" : s.sharePct}"
                 onchange="ParametrizacaoParceiroApp.setSocioPct('${this.esc(s.id)}', this.value)"
                 style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;font-weight:800;background:#fff;text-transform:none;">
             </label>`;
-      const introPct = sociedade
-        ? "Parte deste sócio no negócio. A soma de todos fecha 100%."
-        : (fatiaTxt || "Parte deste parceiro na fatia já configurada em cada obra.");
+      const efetivoEmp = papel === "empreendedor" ? this.efetivoEmpreendedor(p, s.sharePct) : 0;
+      const introPct = papel === "empreendedor"
+        ? "Parte deste empreendedor na fatia de " + this.fmtPctCurto(100 - terrPct) + "% da parceria. " + this.fmtPctCurto(s.sharePct) + "% dessa fatia são " + this.fmtPctCurto(efetivoEmp) + "% do negócio."
+        : (papel === "terrenista"
+          ? "Quando há mais de um terrenista, este percentual divide os " + this.fmtPctCurto(terrPct) + "% da parceria. Com um só, ele recebe a fatia inteira."
+          : (sociedade
+            ? "Parte deste sócio no negócio. A soma de todos fecha 100%."
+            : (fatiaTxt || "Parte deste parceiro na fatia já configurada em cada obra.")));
       const introTitulo = sociedade
         ? "Cada plano gera um título neste centro de custo. O percentual do plano vale sobre a participação: 70% e 30% de quem tem 50% são 35% e 15%."
-        : (this.isMista(p)
-          ? "O título deste sócio empreendedor sai no centro de custo escolhido aqui. O centro do parceiro terrenista é o da obra."
-          : this.textoRepasse(p));
-      const pctResumo = !mostraPct ? "" : `<span class="pp-pessoa-pct">${s.sharePct === "" || s.sharePct == null ? "—" : this.esc(this.fmtPct(s.sharePct)) + "%"}<small>${divideFatia ? (fatias.length === 1 ? "efetivo " + this.esc(this.fmtPctCurto(fatias[0].efetivo)) + "%" : "da fatia") : "participação"}</small></span>`;
+        : (papel === "empreendedor"
+          ? "O título de distribuição deste empreendedor sai no centro de custo, no plano e no documento daqui. O texto leva o valor apurado, o PIS/COFINS/IR e as despesas operacionais da parte dele."
+          : (papel === "terrenista"
+            ? "O pagamento do terrenista sai da conta de origem, no dia configurado acima."
+            : (this.isMista(p)
+              ? "O título deste sócio empreendedor sai no centro de custo escolhido aqui. O centro do parceiro terrenista é o da obra."
+              : this.textoRepasse(p))));
+      const pctLegenda = papel === "empreendedor"
+        ? ("efetivo " + this.fmtPctCurto(efetivoEmp) + "%")
+        : (divideFatia ? (fatias.length === 1 ? "efetivo " + this.fmtPctCurto(fatias[0].efetivo) + "%" : "da fatia") : "participação");
+      const pctResumo = !mostraPct ? "" : `<span class="pp-pessoa-pct">${s.sharePct === "" || s.sharePct == null ? "—" : this.esc(this.fmtPct(s.sharePct)) + "%"}<small>${this.esc(pctLegenda)}</small></span>`;
       return `<div class="pp-pessoa${aberto ? " is-open" : ""}">
         <button type="button" class="pp-pessoa-h" onclick="ParametrizacaoParceiroApp.toggleSocio('${this.esc(s.id)}')">
           <i data-lucide="${aberto ? "chevron-down" : "chevron-right"}" class="pp-pessoa-seta"></i>
@@ -2654,7 +2872,7 @@ const ParametrizacaoParceiroApp = {
         </button>
         ${aberto ? `<div class="pp-pessoa-corpo">
           ${mostraPct ? `<section class="pp-bloco">
-            <h4>${sociedade ? "Participação" : "Parte na fatia da obra"}</h4>
+            <h4>${sociedade ? "Participação" : (papel === "empreendedor" ? "Parte na fatia dos empreendedores" : (papel === "terrenista" ? "Parte na fatia dos terrenistas" : "Parte na fatia da obra"))}</h4>
             <p>${this.esc(introPct)}</p>
             ${campoPct}
           </section>` : ""}
@@ -2671,6 +2889,7 @@ const ParametrizacaoParceiroApp = {
             ${banksHtml}
           </section>
           <div class="pp-pessoa-rodape">
+            ${papel ? `<button type="button" class="pp-pessoa-remover" onclick="ParametrizacaoParceiroApp.setSocioPapel('${this.esc(s.id)}','${papel === "empreendedor" ? "terrenista" : "empreendedor"}')">${papel === "empreendedor" ? "Mover para terrenistas" : "Mover para empreendedores"}</button>` : ""}
             <button type="button" class="pp-pessoa-remover" onclick="ParametrizacaoParceiroApp.removeSocio('${this.esc(s.id)}')">Remover ${this.esc(pessoa)}</button>
           </div>
         </div>` : ""}
@@ -2678,14 +2897,16 @@ const ParametrizacaoParceiroApp = {
     };
     return `
       <div class="crm-card" style="padding:16px;">
-        <h3 style="margin:0 0 4px;font-size:0.95rem;color:var(--color-primary);">${pessoas} (credores)</h3>
-        <p style="margin:0 0 12px;font-size:0.78rem;color:#64748b;">${divideFatia
-          ? `Clique no ${pessoa} para informar a parte dele na fatia da obra, o plano e o documento.`
-          : (sociedade
-            ? `Clique no ${pessoa} para ver a participação, o centro de custo, os planos e a conta.`
-            : (this.isMista(p)
-              ? "Clique no sócio empreendedor para informar a participação, o centro de custo dele, o plano e o documento. O parceiro terrenista continua no rateio da obra."
-              : `Clique no ${pessoa} para ver o plano financeiro e o tipo de documento. O percentual fica na obra. O centro de custo não é informado neste credor.`))}</p>
+        <h3 style="margin:0 0 4px;font-size:0.95rem;color:var(--color-primary);">${papel === "empreendedor" ? "Credores empreendedores" : (papel === "terrenista" ? "Credores terrenistas" : pessoas + " (credores)")}</h3>
+        <p style="margin:0 0 12px;font-size:0.78rem;color:#64748b;">${papel === "empreendedor"
+          ? "Cada um informa a parte dele na fatia dos empreendedores. As despesas bancárias ficam 100% com eles, mesmo quando a tarifa do boleto é rateada pelo centro de custo."
+          : (papel === "terrenista"
+            ? "Quem recebe o rateio da obra. Com um terrenista, o percentual é o da obra. Com mais de um, divida essa fatia aqui."
+            : (divideFatia
+              ? `Clique no ${pessoa} para informar a parte dele na fatia da obra, o plano e o documento.`
+              : (sociedade
+                ? `Clique no ${pessoa} para ver a participação, o centro de custo, os planos e a conta.`
+                : `Clique no ${pessoa} para ver o plano financeiro e o tipo de documento. O percentual fica na obra. O centro de custo não é informado neste credor.`)))}</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
           <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;min-width:120px;">
             <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;">${pessoas}</div>
@@ -2693,23 +2914,23 @@ const ParametrizacaoParceiroApp = {
           </div>
           ${mostraPct ? `
           <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;min-width:140px;">
-            <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;">${divideFatia ? "Fatia" : "Participação"}</div>
-            <strong id="pp-socios-total" style="color:#105436;">${this.fmtPct(total)}%</strong>
+            <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;">${papel || divideFatia ? "Fatia" : "Participação"}</div>
+            <strong id="pp-socios-total${papel ? "-" + papel : ""}" style="color:#105436;">${this.fmtPct(total)}%</strong>
           </div>
           <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;min-width:140px;">
             <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;">${divideFatia ? "Restante da fatia" : "Restante"}</div>
-            <strong id="pp-socios-resto" style="color:${Math.abs(resto) < 0.001 ? "#105436" : "#b45309"};">${this.fmtPct(resto)}%</strong>
+            <strong id="pp-socios-resto${papel ? "-" + papel : ""}" style="color:${Math.abs(resto) < 0.001 ? "#105436" : "#b45309"};">${this.fmtPct(resto)}%</strong>
           </div>` : ""}
         </div>
-        <div style="margin-bottom:14px;">
-          <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:8px;">Dia do pagamento dos ${pessoas.toLowerCase()}</div>
+        ${opt.semDia ? "" : `<div style="margin-bottom:14px;">
+          <div style="font-size:0.75rem;font-weight:700;color:#475569;margin-bottom:8px;">${papel === "terrenista" ? "Dia do pagamento do terrenista. A transferência de cada empreendedor sai neste mesmo dia." : ("Dia do pagamento dos " + pessoas.toLowerCase())}</div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
             ${modeBtn("monthDay", "Dia do mês")}
             ${modeBtn("businessDays", "Dias úteis após o fechamento")}
           </div>
           ${mode === "monthDay" ? `
-            <label style="display:flex;flex-direction:column;gap:4px;max-width:220px;font-size:0.75rem;font-weight:700;color:#475569;">Dia (mínimo ${this.PAY_MIN_DAY})
-              <input type="number" min="${this.PAY_MIN_DAY}" max="31" placeholder="${this.PAY_MIN_DAY} a 31" value="${this.esc(day)}"
+            <label style="display:flex;flex-direction:column;gap:4px;max-width:220px;font-size:0.75rem;font-weight:700;color:#475569;">Dia${papel === "terrenista" ? "" : " (mínimo " + this.PAY_MIN_DAY + ")"}
+              <input type="number" min="${papel === "terrenista" ? 1 : this.PAY_MIN_DAY}" max="31" placeholder="${papel === "terrenista" ? "1 a 31" : this.PAY_MIN_DAY + " a 31"}" value="${this.esc(day)}"
                 onchange="ParametrizacaoParceiroApp.updatePaymentDay(this.value)"
                 style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
             </label>
@@ -2721,16 +2942,41 @@ const ParametrizacaoParceiroApp = {
               <span style="font-weight:500;color:${bizPrev && !bizOk ? "#b91c1c" : "#94a3b8"};">${this.esc(bizHint)}</span>
             </label>
           `}
-        </div>
+        </div>`}
         <label style="display:block;font-size:0.7rem;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:4px;">Adicionar ${pessoa}</label>
-        <input placeholder="Buscar credor por nome, CPF ou CNPJ" value="${this.esc(this.creditorQuery)}"
-          oninput="ParametrizacaoParceiroApp.onCreditorSearch(this.value)"
+        <input placeholder="Buscar credor por nome, CPF ou CNPJ" value="${papel ? (this.credorPapel === papel ? this.esc(this.creditorQuery) : "") : this.esc(this.creditorQuery)}"
+          oninput="ParametrizacaoParceiroApp.onCreditorSearch(this.value, '${papel}')"
           style="width:100%;max-width:520px;height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;">
-        <div id="pp-cred-sugg">${this.creditorSuggHtml()}</div>
+        <div id="${papel ? "pp-cred-sugg-" + papel : "pp-cred-sugg"}">${!papel || this.credorPapel === papel ? this.creditorSuggHtml() : ""}</div>
         <div style="display:flex;flex-direction:column;gap:6px;margin-top:14px;">
           ${socios.map(card).join("") || `<p style="color:#94a3b8;margin:0;">Nenhum ${pessoa} adicionado ainda.</p>`}
         </div>
       </div>
+    `;
+  },
+
+  mistaCredorHtml(p) {
+    const terr = this.pctTerrenista(p);
+    const origem = p.contaTerrenista || "";
+    const destino = p.contaDistribuicao || "";
+    return `
+      <div class="crm-card" style="padding:16px;margin-bottom:12px;">
+        <h3 style="margin:0 0 4px;font-size:0.95rem;color:var(--color-primary);">Contas da prestação mista</h3>
+        <p style="margin:0 0 12px;font-size:0.78rem;color:#64748b;line-height:1.45;">O terrenista tem ${this.esc(this.fmtPctCurto(terr))}% da parceria e é pago na conta de origem. No mesmo dia, cada empreendedor é transferido, separado, para a conta de distribuição. Nessa conta ficam o imposto e as despesas administrativas dos 30 dias seguintes, na proporção de cada sócio.</p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">
+          <label style="font-size:0.72rem;font-weight:700;color:#475569;">Conta do terrenista
+            <input value="${this.esc(origem)}" onchange="ParametrizacaoParceiroApp.setContaMista('contaTerrenista', this.value)"
+              style="width:100%;height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;box-sizing:border-box;display:block;margin-top:4px;">
+          </label>
+          <label style="font-size:0.72rem;font-weight:700;color:#475569;">Conta da distribuição
+            <input value="${this.esc(destino)}" onchange="ParametrizacaoParceiroApp.setContaMista('contaDistribuicao', this.value)"
+              style="width:100%;height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;box-sizing:border-box;display:block;margin-top:4px;">
+          </label>
+        </div>
+      </div>
+      ${this.sociosCredorHtml(p, { papel: "empreendedor", semDia: true })}
+      <div style="height:12px;"></div>
+      ${this.sociosCredorHtml(p, { papel: "terrenista", semDia: false })}
     `;
   },
 

@@ -1317,6 +1317,22 @@ const OrcamentoRepassesApp = {
   pessoasDe(part) {
     const app = this.appPar();
     const lista = [];
+    if (app && typeof app.isMista === "function" && app.isMista(part) && typeof app.efetivoEmpreendedor === "function") {
+      const terr = app.pctTerrenista(part);
+      (part.socios || []).forEach((s) => {
+        if (!s || app.papelSocio(s) !== "empreendedor") return;
+        const share = Number(s.sharePct) || 0;
+        if (!(share > 0) || !(terr > 0)) return;
+        const efetivo = app.efetivoEmpreendedor(part, share);
+        lista.push({
+          nome: s.name || "Empreendedor",
+          pct: efetivo / terr * 100,
+          ccId: String(s.ccTitulo || ""),
+          ccNome: String(s.ccTituloNome || "")
+        });
+      });
+      return lista.sort((a, b) => this.ordemCentro(a.ccId, b.ccId) || String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR"));
+    }
     (part.socios || []).forEach((s) => {
       if (!s) return;
       const todos = app && typeof app.titulosDoSocio === "function" ? app.titulosDoSocio(s) : [];
@@ -2354,14 +2370,18 @@ const OrcamentoRepassesApp = {
     });
     let socios = "";
     if (card.pessoas && card.pessoas.length) {
-      const aviso = Math.abs(card.pctPessoas - 100) > 0.05
-        ? `<p class="orc-est-alerta">As participações somam ${OrcEst.esc(this.pctTxt(card.pctPessoas))}, não 100%.</p>`
-        : "";
-      const quem = card.companyId === "12"
+      const aviso = card.kind === "mista"
+        ? ""
+        : (Math.abs(card.pctPessoas - 100) > 0.05
+          ? `<p class="orc-est-alerta">As participações somam ${OrcEst.esc(this.pctTxt(card.pctPessoas))}, não 100%.</p>`
+          : "");
+      const quem = card.kind === "mista"
+        ? "Cada empreendedor recebe, sobre o valor do terrenista, a proporção da fatia dele. 50% de uma fatia de 56% são 28% do negócio."
+        : (card.companyId === "12"
         ? "Cada sócio recebe este percentual da variação de caixa do mês. O lucro recebido da empresa 13 já está nessa variação."
         : (card.sociedade
           ? "Cada sócio recebe este percentual da distribuição do mês seguinte, no centro de custo cadastrado."
-          : "Cada participante recebe este percentual do repasse do mês seguinte.");
+          : "Cada participante recebe este percentual do repasse do mês seguinte."));
       const coluna = card.sociedade ? "Centro de custo" : "Participante";
       socios = `<div class="orc-rep-socios"><h4>${quem}</h4>${aviso}
         <div class="orc-dfc-scroll"><table class="orc-dfc-table orc-est-table orc-rep-quadro">${this.colunasRepasse()}<thead>${this.cabecaPagamento(coluna, card.distribuiNoMes)}</thead><tbody>

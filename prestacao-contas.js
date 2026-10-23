@@ -35,6 +35,7 @@ const PrestacaoContasApp = {
   dash: null,
   dashGen: 0,
   dashSort: { key: "", dir: 1 },
+  retencaoMista: null,
 
   competenciaPadrao() {
     const now = new Date();
@@ -158,6 +159,7 @@ const PrestacaoContasApp = {
     this.companyId = emp || String(part.companyId || "");
     this.companyIds = this.companyId ? [this.companyId] : [];
     this.empOpen = false;
+    this.retencaoMista = null;
     const obras = Array.isArray(part.obras) && part.obras.length ? part.obras : [];
     this.costCenterIds = [...new Set(obras.flatMap(o => (o.costCenters || []).filter(c => c.inAccount).map(c => String(c.id))))];
     this.render();
@@ -983,6 +985,13 @@ const PrestacaoContasApp = {
             distratoNota = virtual.nota;
           }
         }
+        const parceria = this.activePartnership();
+        const soBanco = parceria && PP && PP.isMista(parceria) && g.contas.length
+          && g.contas.every((c) => PP.ehDespesaBancaria(c.codigo, c.nome));
+        if (soBanco) {
+          status = "na";
+          distratoNota = "Despesa bancária fica 100% com o empreendedor, mesmo quando a liquidação da tarifa do boleto rateia pelo centro de custo.";
+        }
         const motivos = [...new Set(g.contas.filter(c => !c.amarrada).map(c => c.motivo))];
         const row = {
           key: idx + "|" + g.grupo + "|" + g.classe,
@@ -1086,11 +1095,13 @@ const PrestacaoContasApp = {
           || null;
         const og = obra ? this.origemGuia(mov, fc.costCenterId) : null;
         if (og) {
-          factor = og.itens.reduce((s, it) => s + it.valor * PP.partnershipAmountFactor(part, obra, it.conta), 0) / og.soma;
+          factor = og.itens.reduce((s, it) => s + it.valor * PP.partnershipAmountFactor(part, obra, it.conta, it.nome), 0) / og.soma;
           if (!(factor > 0)) return null;
         } else if (obra) {
+          const nomeConta = fc.financialCategoryName || this.catName(categoryId) || "";
+          if (PP.isMista(part) && PP.ehDespesaBancaria(categoryId, nomeConta)) return null;
           if (!PP.accountEntersPartnership(part, obra, categoryId)) return null;
-          factor = PP.partnershipAmountFactor(part, obra, categoryId);
+          factor = PP.partnershipAmountFactor(part, obra, categoryId, nomeConta);
           if (!factor) return null;
         }
       }
@@ -1322,6 +1333,11 @@ const PrestacaoContasApp = {
       }
       if (gen !== this.dashGen) return;
       this.rebuildFromMovements();
+      try {
+        await this.carregarRetencaoMista();
+      } catch (e) {
+        console.warn("[Prestação de Contas] Retenção da conta de distribuição:", e);
+      }
     } catch (err) {
       if (gen !== this.dashGen) return;
       console.error("[Prestação de Contas]", err);
@@ -1364,6 +1380,7 @@ const PrestacaoContasApp = {
     this.totals = { receitas: 0, custos: 0, despesas: 0, custosDespesas: 0, gco: 0 };
     this.error = "";
     this.rastreio = null;
+    this.retencaoMista = null;
     this.selectedAccount = null;
     this.dash = null;
     this.gruposAbertos = new Set();
@@ -1510,6 +1527,225 @@ const PrestacaoContasApp = {
     return p.length === 3 && p[0].length === 4 ? `${p[2]}/${p[1]}/${p[0]}` : "—";
   },
 
+  isoMaisDias(iso, dias) {
+    const p = String(iso || "").slice(0, 10).split("-");
+    if (p.length !== 3) return "";
+    const d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+    if (Number.isNaN(d.getTime())) return "";
+    d.setDate(d.getDate() + (Number(dias) || 0));
+    const pad = (n) => String(n).padStart(2, "0");
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+  },
+
+  chaveConta(s) {
+    return String(s || "").toUpperCase().replace(/[^0-9A-Z]/g, "");
+  },
+
+  /* Resultado do terrenista nesta competência. Despesa bancária sai inteira do empreendedor e não entra aqui. */
+  baseMista() {
+    const PP = window.ParametrizacaoParceiroApp;
+    const part = this.activePartnership();
+    if (!part || !PP || typeof PP.isMista !== "function" || !PP.isMista(part)) return null;
+    const wanted = (this.costCenterIds || []).map(String);
+    const fcApp = this.fc();
+    let valor = 0;
+    let bancarias = 0;
+    (this.movements || []).forEach((mov) => {
+      const amount = Number(mov.bankMovementAmount) || 0;
+      if (!amount) return;
+      let cats = Array.isArray(mov.financialCategories) ? mov.financialCategories : [];
+      if (!cats.length) return;
+      if (wanted.length) cats = cats.filter((fc) => wanted.includes(String(fc.costCenterId)));
+      if (!cats.length) return;
+      const entries = (fcApp && typeof fcApp.categoryShareEntries === "function")
+        ? fcApp.categoryShareEntries(cats)
+        : cats.map((fc) => ({ fc, share: 1 / Math.max(cats.length, 1) }));
+      const sinal = this.sinalMov(mov);
+      entries.forEach(({ fc, share }) => {
+        const categoryId = String((fc && fc.financialCategoryId) || "").trim();
+        if (!categoryId) return;
+        const nome = (fc && fc.financialCategoryName) || this.catName(categoryId) || "";
+        if (this.classeConta(categoryId, nome, sinal) === "repasse") return;
+        const parte = Math.abs(amount) * (Number(share) || 0);
+        if (PP.ehDespesaBancaria(categoryId, nome)) {
+          bancarias += parte;
+          return;
+        }
+        const obra = PP.obraForCostCenter(part, fc.costCenterId) || (part.obras && part.obras[0]) || null;
+        if (!obra || !PP.accountEntersPartnership(part, obra, categoryId)) return;
+        const factor = PP.partnershipAmountFactor(part, obra, categoryId, nome);
+        if (!(factor > 0)) return;
+        valor += this.signedAmount(null, categoryId, nome, parte * factor, fc.financialCategoryReducer, fc.financialCategoryType, mov);
+      });
+    });
+    return { valor, bancarias };
+  },
+
+  tipoRetencao(id, nome) {
+    const PP = window.ParametrizacaoParceiroApp;
+    const n = String(nome || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    if (/DISTRIBUICAO DE LUCRO|\bREPASSE\b/.test(n)) return "";
+    if (PP && PP.ehDespesaBancaria(id, nome)) return "";
+    const gid = this.noDfc(id, nome);
+    if (gid.indexOf("g_02") === 0 || /\bPIS\b|\bCOFINS\b|\bIRPJ\b|\bCSLL\b|\bIRRF\b|IMPOSTO DE RENDA/.test(n)) return "imposto";
+    if (gid === "g_05_03" || gid.indexOf("g_05_03_") === 0 || /ADMINISTRATIV|DESPESAS OPERACIONAIS|DESPESA OPERACIONAL/.test(n)) return "despesa";
+    return "";
+  },
+
+  contaDoTitulo(bill) {
+    const nums = [];
+    const push = (v) => {
+      const s = String(v || "").trim();
+      if (s) nums.push(s);
+    };
+    push(bill && (bill.accountNumber || bill.checkingAccountNumber || bill.bankAccountNumber));
+    (bill && bill.payments || []).forEach((pay) => {
+      push(pay && (pay.accountNumber || pay.checkingAccountNumber));
+      (pay && pay.bankMovements || []).forEach((bm) => push(bm && bm.accountNumber));
+    });
+    return nums;
+  },
+
+  async outcomeFaixa(start, end, companyId, depth) {
+    const fetchFn = window.siengeFetchWithRetry || window.siengeFetch;
+    if (typeof fetchFn !== "function") throw new Error("A consulta ao Sienge não está disponível.");
+    let endpoint = "/bulk-data/v1/outcome?startDate=" + encodeURIComponent(start)
+      + "&endDate=" + encodeURIComponent(end)
+      + "&selectionType=D&correctionIndexerId=0&correctionDate=2023-01-01&withAuthorizations=false";
+    if (companyId) endpoint += "&companyId=" + encodeURIComponent(companyId);
+    try {
+      const payload = await fetchFn(endpoint, 2);
+      return (payload && payload.data) || (Array.isArray(payload) ? payload : []);
+    } catch (err) {
+      const grande = Number(err && err.status) === 507 || /\b507\b/.test(String((err && err.message) || ""));
+      if (!grande || (depth || 0) > 5 || start >= end) throw err;
+      const s = new Date(start + "T12:00:00");
+      const e = new Date(end + "T12:00:00");
+      const midDate = new Date(s.getTime() + Math.floor((e - s) / 2));
+      const pad = (n) => String(n).padStart(2, "0");
+      const mid = midDate.getFullYear() + "-" + pad(midDate.getMonth() + 1) + "-" + pad(midDate.getDate());
+      const next = this.isoMaisDias(mid, 1);
+      if (!(mid >= start && mid < end && next <= end)) throw err;
+      const left = await this.outcomeFaixa(start, mid, companyId, (depth || 0) + 1);
+      const right = await this.outcomeFaixa(next, end, companyId, (depth || 0) + 1);
+      return left.concat(right);
+    }
+  },
+
+  reterDaConta(part, bills) {
+    const PP = window.ParametrizacaoParceiroApp;
+    const alvo = this.chaveConta(part && part.contaDistribuicao);
+    const ccs = new Set((PP ? PP.sociosPorPapel(part, "empreendedor") : []).map((s) => String(s.ccTitulo || "").replace(/\D/g, "")).filter(Boolean));
+    const tot = { impostos: 0, despesas: 0 };
+    (bills || []).forEach((bill) => {
+      if (!bill) return;
+      if (part && part.companyId && String(bill.companyId || "") && String(bill.companyId) !== String(part.companyId)) return;
+      const doc = String(bill.documentIdentificationId || "").toUpperCase();
+      if (doc === "DIST") return;
+      const saldo = bill.balanceAmount != null ? Number(bill.balanceAmount) : (Number(bill.originalAmount) || 0);
+      if (!(saldo > 0.009)) return;
+      const contas = this.contaDoTitulo(bill).map((c) => this.chaveConta(c)).filter(Boolean);
+      if (alvo && contas.length && !contas.some((c) => c === alvo || c.indexOf(alvo) >= 0 || alvo.indexOf(c) >= 0)) return;
+      const cats = Array.isArray(bill.paymentsCategories) ? bill.paymentsCategories : [];
+      if (!cats.length) return;
+      if (alvo && !contas.length) {
+        const noCc = cats.some((c) => ccs.has(String(c.costCenterId || "").replace(/\D/g, "")));
+        if (ccs.size && !noCc) return;
+      }
+      const rates = cats.map((c) => Number(c && c.financialCategoryRate));
+      const soma = rates.reduce((s, n) => s + (Number.isFinite(n) ? n : 0), 0);
+      cats.forEach((c, i) => {
+        const tipo = this.tipoRetencao(c && c.financialCategoryId, c && c.financialCategoryName);
+        if (!tipo) return;
+        const rate = soma > 0 ? ((Number.isFinite(rates[i]) ? rates[i] : 0) / soma) : (1 / cats.length);
+        tot[tipo] += saldo * rate;
+      });
+    });
+    return tot;
+  },
+
+  async carregarRetencaoMista() {
+    const PP = window.ParametrizacaoParceiroApp;
+    const part = this.activePartnership();
+    if (!part || !PP || !PP.isMista(part)) {
+      this.retencaoMista = null;
+      return;
+    }
+    const base = this.baseMista() || { valor: 0, bancarias: 0 };
+    const data = PP.dataPagamentoMista(part, this.year, this.month);
+    const pack = { base, data, impostos: 0, despesas: 0, erro: "", carregou: false };
+    this.retencaoMista = pack;
+    if (!data) return;
+    const fim = this.isoMaisDias(data, 30);
+    if (!fim) return;
+    try {
+      const bills = await this.outcomeFaixa(data, fim, this.companyId || part.companyId, 0);
+      const tot = this.reterDaConta(part, bills);
+      pack.impostos = tot.impostos;
+      pack.despesas = tot.despesas;
+      pack.carregou = true;
+    } catch (e) {
+      pack.erro = "Não foi possível ler os títulos a pagar dos próximos 30 dias.";
+    }
+    this.retencaoMista = pack;
+  },
+
+  distribuicaoMistaHtml() {
+    const PP = window.ParametrizacaoParceiroApp;
+    const part = this.activePartnership();
+    if (!part || !PP || !PP.isMista(part)) return "";
+    const meses = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+    const mesNome = meses[(Number(this.month) || 1) - 1] || "";
+    const pack = this.retencaoMista;
+    const base = (pack && pack.base) || this.baseMista() || { valor: 0, bancarias: 0 };
+    const dist = PP.distribuicaoEmpreendedores(part, base.valor, pack ? pack.impostos : 0, pack ? pack.despesas : 0);
+    const origem = part.contaTerrenista || "conta do terrenista";
+    const destino = part.contaDistribuicao || "conta de distribuição";
+    const data = (pack && pack.data) || PP.dataPagamentoMista(part, this.year, this.month);
+    const quando = data ? this.dataBr(data) : "no dia do pagamento do terrenista";
+    const docNum = "DISTRIBUIÇÃO " + String(this.month).padStart(2, "0") + " " + this.year;
+    const linhas = dist.linhas || [];
+    const alerta = !linhas.length
+      ? `<div class="pcx-alert is-warn">Cadastre os credores empreendedores e a parte de cada um na fatia de ${this.esc(PP.fmtPctCurto(dist.fatiaEmp))}%.</div>`
+      : (!this.movements.length
+        ? ""
+        : (!(base.valor > 0.009)
+          ? `<div class="pcx-alert is-warn">Nesta competência o terrenista não tem valor a receber, então não há transferência para a conta ${this.esc(destino)}.</div>`
+          : `<div class="pcx-alert pcx-dist-alerta"><div><strong>Transferência no dia do terrenista.</strong> Em ${this.esc(quando)}, ao pagar o terrenista na conta ${this.esc(origem)}, transferir para a conta ${this.esc(destino)}, um lançamento para cada empreendedor:${linhas.map((row) => `<div>${this.esc(row.socio.name)} · R$ ${this.esc(PP.dinheiro(row.bruto))}</div>`).join("")}</div></div>`));
+    const corpo = linhas.map((row) => {
+      const s = row.socio;
+      const texto = PP.textoObservacaoDistribuicao(mesNome, this.year, row.bruto, row.impostos, row.despesas, row.liquido);
+      const plano = [s.planoId, s.planoNome].filter(Boolean).join(" — ");
+      return `<tr>
+        <td>${this.esc(s.name)}<div class="pcx-dist-sub">ID ${this.esc(s.id)} · ${this.esc(PP.fmtPctCurto(row.share))}% da fatia · efetivo ${this.esc(PP.fmtPctCurto(row.efetivo))}%</div></td>
+        <td>${this.esc(s.ccTitulo || "—")}${s.ccTituloNome ? `<div class="pcx-dist-sub">${this.esc(s.ccTituloNome)}</div>` : ""}</td>
+        <td>${this.esc(plano || "—")}<div class="pcx-dist-sub">${this.esc(s.docTipo || "DIST")} ${this.esc(docNum)}</div></td>
+        <td class="is-right">${this.fmt(row.bruto)}</td>
+        <td class="is-right">${this.fmt(row.impostos)}</td>
+        <td class="is-right">${this.fmt(row.despesas)}</td>
+        <td class="is-right pcx-valor">${this.fmt(row.liquido)}</td>
+        <td class="pcx-dist-obs">${this.esc(texto)}</td>
+      </tr>`;
+    }).join("");
+    const avisoRet = !data
+      ? "Defina o dia do pagamento do terrenista para calcular os 30 dias de caixa."
+      : (pack && pack.erro
+        ? pack.erro
+        : (pack && pack.carregou
+          ? "Impostos e despesas administrativas com vencimento de " + this.dataBr(data) + " a " + this.dataBr(this.isoMaisDias(data, 30)) + " na conta " + destino + "."
+          : "Carregue a competência para buscar as retenções dos próximos 30 dias."));
+    return `<section class="pcx-dist">
+      <h3>Distribuição dos empreendedores</h3>
+      <p>O terrenista tem ${this.esc(PP.fmtPctCurto(dist.terrPct))}% e, nesta competência, ${this.fmt(base.valor)} a receber. Cada empreendedor sai dessa base: 50% de uma fatia de ${this.esc(PP.fmtPctCurto(dist.fatiaEmp))}% são ${this.esc(PP.fmtPctCurto(dist.fatiaEmp / 2))}% do negócio. Despesas bancárias do período: ${this.fmt(base.bancarias)}, por conta do empreendedor, fora desse rateio.</p>
+      ${alerta}
+      <p class="pcx-dist-sub">${this.esc(avisoRet)} O líquido é o que a empresa paga a cada sócio, já com a parte dele do imposto e da despesa.</p>
+      ${corpo ? `<div class="cc-scroll"><table class="cc-table pcx-table pcx-dist-table">
+        <thead><tr><th>Empreendedor</th><th>Centro de custo</th><th>Plano / documento</th><th class="is-right">Apurado</th><th class="is-right">PIS/COFINS/IR</th><th class="is-right">Despesas</th><th class="is-right">A pagar</th><th>Observação do título</th></tr></thead>
+        <tbody>${corpo}</tbody>
+      </table></div>` : ""}
+    </section>`;
+  },
+
   conferirHtml(aba) {
     const conf = this.conferencias || { receitas: [], despesas: [], repasses: [] };
     const repasse = aba === "repasse";
@@ -1531,7 +1767,9 @@ const PrestacaoContasApp = {
           : (repasse ? "Nenhum repasse pago nesta competência." : "Nenhum lançamento nos centros selecionados.")));
     const corpo = rows.length ? this.obrasHtml(rows, repasse) : `<tr><td colspan="8" class="pcx-vazio">${vazio}</td></tr>`;
     const corTotal = resultado < -0.004 ? "#b91c1c" : "#15803d";
+    const dist = repasse ? "" : this.distribuicaoMistaHtml();
     return `
+      ${dist}
       <div class="pcx-resumo">
         <div class="pcx-pills">
           ${pill("fora", "fora do padrão")}
