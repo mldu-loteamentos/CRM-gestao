@@ -80,11 +80,15 @@ const OrcamentoDfcApp = {
   garantir() {
     if (this._pronto) return;
     this._pronto = true;
+    const emb = window.ORCAMENTO_DFC_2027;
+    const embAt = Number(emb && emb.savedAt) || 0;
     try {
       const raw = localStorage.getItem(this.LS);
       if (!raw) return;
       const pack = JSON.parse(raw);
-      if (pack && Array.isArray(pack.lines) && pack.lines.length) this._custom = pack;
+      if (!pack || !Array.isArray(pack.lines) || !pack.lines.length) return;
+      if (Number(pack.savedAt) < embAt) return;
+      this._custom = pack;
     } catch (e) {}
   },
 
@@ -1263,8 +1267,16 @@ const OrcamentoDfcApp = {
     if (up && file) up.addEventListener("click", () => file.click());
     if (file) file.addEventListener("change", () => {
       const f = file.files && file.files[0];
-      file.value = "";
-      if (f) this.lerArquivo(f);
+      if (!f) return;
+      const nome = f.name;
+      f.arrayBuffer().then((buf) => {
+        file.value = "";
+        this.lerArquivo(nome, buf);
+      }).catch(() => {
+        file.value = "";
+        this.erro = "Não consegui ler o arquivo. Feche o Excel e envie de novo.";
+        this.paintMeta();
+      });
     });
     const baseBtn = document.getElementById("orc-dfc-base");
     if (baseBtn) baseBtn.addEventListener("click", () => this.voltarBase());
@@ -1337,9 +1349,11 @@ const OrcamentoDfcApp = {
     }
     if (token !== this._bToken) return;
     if (document.getElementById("orc-dfc-body")) this.paintBody();
+    const nuvemP = this.lerOrcamentoNuvem(token);
     try { await forecastP; } catch (e) {}
     if (token !== this._bToken) return;
     if (document.getElementById("orc-dfc-body")) this.paintBody();
+    try { await nuvemP; } catch (e) {}
   },
 
   empresasDoSaldo() {
@@ -1962,7 +1976,8 @@ const OrcamentoDfcApp = {
     const n = (pack.lines || []).length;
     const nome = pack.fileName || "Base 2027";
     const extra = this._custom ? " · arquivo enviado" : "";
-    el.textContent = n ? (nome + " · " + n.toLocaleString("pt-BR") + " lançamentos" + extra) : "Nenhum orçamento carregado.";
+    const aviso = this.erro ? " · " + this.erro : "";
+    el.textContent = n ? (nome + " · " + n.toLocaleString("pt-BR") + " lançamentos" + extra + aviso) : ("Nenhum orçamento carregado." + aviso);
   },
 
   paintEmp() {
@@ -2220,20 +2235,98 @@ const OrcamentoDfcApp = {
     if (window.lucide && lucide.createIcons) lucide.createIcons();
   },
 
-  async lerArquivo(file) {
+  gravarLocal(pack) {
+    const json = JSON.stringify(pack);
+    const native = window._nativeLocalStorageSetItem || localStorage.setItem.bind(localStorage);
+    try {
+      native.call(localStorage, this.LS, json);
+      return "";
+    } catch (e) {
+      try { localStorage.removeItem(this.LS); } catch (e2) {}
+      return "O arquivo entrou nesta tela, mas o navegador não guardou a cópia local.";
+    }
+  },
+
+  async salvarOrcamentoNuvem(pack) {
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (!fx || !db || !pack || typeof fx.setDoc !== "function") return;
+    const texto = JSON.stringify(pack.lines || []);
+    const id = "2027";
+    const LIM = 400000;
+    const ids = [];
+    try {
+      if (texto.length > LIM) {
+        for (let i = 0, n = 0; i < texto.length; i += LIM, n++) {
+          const pid = id + "__p" + n;
+          ids.push(pid);
+          await fx.setDoc(fx.doc(db, "dfc_orcamento", pid), { tipo: "parte", pai: id, texto: texto.slice(i, i + LIM) });
+        }
+      }
+      await fx.setDoc(fx.doc(db, "dfc_orcamento", id), {
+        fileName: pack.fileName || "",
+        savedAt: pack.savedAt || Date.now(),
+        year: 2027,
+        n: (pack.lines || []).length,
+        payload: ids.length ? "" : texto,
+        partes: ids
+      });
+      for (let n = ids.length; n < 20; n++) {
+        fx.deleteDoc(fx.doc(db, "dfc_orcamento", id + "__p" + n)).catch(function () {});
+      }
+    } catch (e) {
+      if (!this.erro) this.erro = "Os valores entraram nesta tela, mas não ficaram salvos na nuvem.";
+      this.paintMeta();
+    }
+  },
+
+  async lerOrcamentoNuvem(token) {
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (!fx || !db || typeof fx.getDoc !== "function" || this._ignorarNuvem) return;
+    const snap = await fx.getDoc(fx.doc(db, "dfc_orcamento", "2027"));
+    if (token !== this._bToken || !this.docExiste(snap)) return;
+    const x = snap.data() || {};
+    let texto = x.payload || "";
+    if (Array.isArray(x.partes) && x.partes.length) {
+      const blocos = await Promise.all(x.partes.map(async (pid) => {
+        const p = await fx.getDoc(fx.doc(db, "dfc_orcamento", pid));
+        return this.docExiste(p) ? String((p.data() || {}).texto || "") : null;
+      }));
+      if (token !== this._bToken || blocos.some((b) => b == null)) return;
+      texto = blocos.join("");
+    }
+    let lines = [];
+    try { lines = JSON.parse(texto || "[]"); } catch (e) { return; }
+    if (!Array.isArray(lines) || !lines.length) return;
+    const pack = { fileName: x.fileName || "Base 2027", savedAt: Number(x.savedAt) || 0, year: 2027, lines: lines };
+    const atual = this.origem();
+    if (Number(pack.savedAt) <= Number(atual.savedAt || 0)) return;
+    this._custom = pack;
+    this.gravarLocal(pack);
+    if (token !== this._bToken || !document.getElementById("orc-dfc-body")) return;
+    const base = document.getElementById("orc-dfc-base");
+    if (base) base.hidden = false;
+    this.paintMeta();
+    this.paintEmp();
+    this.paintCc();
+    this.paintBody();
+  },
+
+  async lerArquivo(fileName, buf) {
     this.erro = "";
     this.busy = true;
+    this._bToken = (this._bToken || 0) + 1;
     this.paintBody();
+    let pack = null;
     try {
-      const buf = await file.arrayBuffer();
       const lines = await this.parseExcel(buf);
-      if (!lines.length) throw new Error("O Excel não tem lançamentos com valor na aba de importação.");
-      this._custom = { fileName: file.name, savedAt: Date.now(), lines };
-      try { localStorage.setItem(this.LS, JSON.stringify(this._custom)); } catch (e) {}
-      this.selectedCompanyIds = [];
-      this.selectedCcIds = [];
-      this._expandInited = false;
-      this.expanded = new Set();
+      if (!lines.length) throw new Error("O Excel não tem lançamentos com valor. Use a aba Importação, com EMPRESA, CONTA e os meses.");
+      pack = { fileName: fileName, savedAt: Date.now(), year: 2027, lines: lines };
+      this._custom = pack;
+      this._ignorarNuvem = false;
+      const aviso = this.gravarLocal(pack);
+      if (aviso) this.erro = aviso;
     } catch (err) {
       this.erro = (err && err.message) ? err.message : "Não consegui ler esse Excel.";
     }
@@ -2243,13 +2336,13 @@ const OrcamentoDfcApp = {
     this.paintMeta();
     this.paintEmp();
     this.paintCc();
-    this._caixaChave = "";
     this.paintBody();
-    this.carregarBase();
+    if (pack) this.salvarOrcamentoNuvem(pack);
   },
 
   voltarBase() {
     this._custom = null;
+    this._ignorarNuvem = true;
     this.erro = "";
     try { localStorage.removeItem(this.LS); } catch (e) {}
     this.selectedCompanyIds = [];
@@ -2512,32 +2605,13 @@ const OrcamentoDfcApp = {
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   },
 
-  async parseExcel(buf) {
-    if (typeof ExcelJS === "undefined") {
-      throw new Error("O leitor de Excel ainda não carregou. Atualize a página e tente de novo.");
-    }
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(buf);
-    let sheet = null;
-    let header = null;
-    wb.worksheets.forEach((ws) => {
-      if (sheet) return;
-      if (this.norm(ws.name) !== "IMPORTACAO") return;
-      const h = this.cabecalho(ws);
-      if (h) { sheet = ws; header = h; }
-    });
-    if (!sheet) {
-      wb.worksheets.forEach((ws) => {
-        if (sheet) return;
-        const h = this.cabecalho(ws);
-        if (h) { sheet = ws; header = h; }
-      });
-    }
-    if (!sheet || !header) {
-      throw new Error("Não achei a planilha com as colunas EMPRESA, CONTA e os meses de janeiro a dezembro.");
-    }
+  chaveLinha(l) {
+    return String(l.e || "") + "|" + String(l.cc || "") + "|" + String(l.conta || "");
+  },
+
+  linhasDaAba(ws, header) {
     const lines = [];
-    sheet.eachRow((row, n) => {
+    ws.eachRow((row, n) => {
       if (n <= header.row) return;
       const emp = this.cellText(row.getCell(header.emp));
       const conta = this.cellText(row.getCell(header.conta));
@@ -2555,6 +2629,38 @@ const OrcamentoDfcApp = {
         m: meses
       });
     });
+    return lines;
+  },
+
+  async parseExcel(buf) {
+    if (typeof ExcelJS === "undefined") {
+      throw new Error("O leitor de Excel ainda não carregou. Atualize a página e tente de novo.");
+    }
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf);
+    const abas = [];
+    wb.worksheets.forEach((ws) => {
+      const h = this.cabecalho(ws);
+      if (h) abas.push({ ws: ws, header: h, nome: this.norm(ws.name) });
+    });
+    if (!abas.length) {
+      throw new Error("Não achei a planilha com as colunas EMPRESA, CONTA e os meses de janeiro a dezembro.");
+    }
+    abas.sort((a, b) => (a.nome === "IMPORTACAO" ? 0 : 1) - (b.nome === "IMPORTACAO" ? 0 : 1));
+    const grupos = new Map();
+    abas.forEach((aba, idx) => {
+      const por = new Map();
+      this.linhasDaAba(aba.ws, aba.header).forEach((l) => {
+        const k = this.chaveLinha(l);
+        if (!por.has(k)) por.set(k, []);
+        por.get(k).push(l);
+      });
+      por.forEach((rows, k) => {
+        if (!idx || !grupos.has(k)) grupos.set(k, rows);
+      });
+    });
+    const lines = [];
+    grupos.forEach((rows) => rows.forEach((l) => lines.push(l)));
     return lines;
   }
 };
