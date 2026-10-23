@@ -268,7 +268,7 @@ const OrcamentoApp = {
       <div class="orc-head">
         <div>
           <h2>Orçamento 2026 × 2027</h2>
-          <p>Empresa, centro de custo e a conta do plano. Em 2026, janeiro a setembro é o recebido e outubro a dezembro é forecast. Em 2027, carteira, novas vendas e serviços aparecem separados. Serviços é a receita de prestação de serviços (contas 1.02). Na empresa 3, a administração de carteira de recebíveis entra como venda de lotes. Valor Moura Leite aplica o % MLDU de cada empresa.</p>
+          <p>Empresa, centro de custo e a conta do plano. Em 2026, janeiro a setembro é o recebido e outubro a dezembro é forecast. Em 2027, carteira, novas vendas e serviços aparecem separados. Serviços é a receita de prestação de serviços (contas 1.02). Na empresa 3, a administração de carteira de recebíveis entra como venda de lotes. Valor Moura Leite aplica o % Consolidação de cada empresa.</p>
         </div>
       </div>
       <div class="orc-tools">

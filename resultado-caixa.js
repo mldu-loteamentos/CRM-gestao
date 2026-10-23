@@ -610,7 +610,7 @@ const ResultadoCaixaApp = {
     return Object.keys(porEmp).length ? porEmp : null;
   },
 
-  /** Forecast do ano pelas contas da visão DFC do lado (entradas ou saídas), no % Moura Leite quando agrupado. */
+  /** Forecast do ano pelas contas da visão DFC do lado (entradas ou saídas), no % Consolidação quando agrupado. */
   forecastLado(ano, lado) {
     const out = {};
     for (let m = 1; m <= 12; m++) {
@@ -863,13 +863,13 @@ const ResultadoCaixaApp = {
     const custom = this.empresasCustom();
     const cfg = custom[id] || custom[String(id)] || {};
     if (Number(cfg.consolidacao_padrao) !== 1) return 0;
-    const bruto = cfg.percentual_mldu;
+    const bruto = cfg.percentual_mldu; // coluna % Consolidação; o % Líquido MLDU fica de fora
     const pct = typeof bruto === "string" ? Number(String(bruto).replace(/\s|%/g, "").replace(",", ".")) : Number(bruto);
     if (!(pct > 0) || pct > 100) return 0;
     return pct / 100;
   },
 
-  /** Texto do percentual da Moura Leite usado na consolidação. */
+  /** Texto do % Consolidação usado na consolidação padrão. */
   rotuloPctMoura(empId) {
     if (!this.agrupar) return "";
     const id = Number(empId) || 0;
@@ -915,7 +915,7 @@ const ResultadoCaixaApp = {
     return this.empresaId(nomeCc || "");
   },
 
-  /** Percentual da Moura Leite da empresa dona do arquivo (1 sem agrupar). */
+  /** % Consolidação da empresa dona do arquivo (1 sem agrupar). */
   pctArquivo(arq, nome) {
     if (!this.agrupar) return 1;
     const emp = Number(arq && arq.empresa) || this.empresaId(nome);
@@ -2381,16 +2381,16 @@ const ResultadoCaixaApp = {
       return s + (a ? Object.keys(a.arquivos || {}).length : 0);
     }, 0) + Object.keys(nomesFc).length;
     const chipForecast = this.chipsForecast();
-    const agrupa = this.agrupar ? " Com “% Moura Leite”, cada valor está no percentual da Moura Leite cadastrado na empresa." : "";
+    const agrupa = this.agrupar ? " Com “% Consolidação”, cada valor está no % Consolidação da empresa, e só entra quem tem a consolidação padrão ligada." : "";
     const mesNomeFaixa = nomesMes[(Number(this.mes) || 1) - 1] || "";
-    const base = "Orçado e realizado de " + (atual || "—") + " vêm do arquivo enviado para " + mesNomeFaixa + ". A coluna de " + (antN || "o ano anterior") + " é o realizado desse arquivo, de janeiro até o mês escolhido, no mesmo percentual da Moura Leite.";
+    const base = "Orçado e realizado de " + (atual || "—") + " vêm do arquivo enviado para " + mesNomeFaixa + ". A coluna de " + (antN || "o ano anterior") + " é o realizado desse arquivo, de janeiro até o mês escolhido, no mesmo % Consolidação.";
     const nota = lado === "entradas"
       ? base + " Livia, Livia I e Livia II aparecem como Central Parque. Empreendimentos com o mesmo nome ganham a sigla da cidade. MLDU aparece como Corporativo. Os quatro maiores desvios positivos e os quatro negativos do acumulado ficam à vista; o restante abre ao clicar em Outros."
         + " No gráfico de linhas, a linha do ano atual é o realizado até o mês escolhido. Cada mês seguinte, até dezembro, usa o forecast enviado nesta tela, pelas mesmas contas da visão DFC (Receitas e receitas financeiras)." + agrupa
       : base + " As saídas são as contas da visão DFC, da maior saída para a menor pelo realizado acumulado. Gastar acima do orçado fica em vermelho."
         + " No gráfico de linhas, a linha do ano atual é o realizado até o mês escolhido. Cada mês seguinte, até dezembro, usa o forecast enviado nesta tela, pelas mesmas contas da visão DFC das saídas." + agrupa;
     const avisoRateio = lado === "saidas" && this.faltaCentroNasSaidas()
-      ? `<div class="rcx-erro">Para aplicar o % Moura Leite nas saídas destes arquivos, suba o Excel de novo. O arquivo que já estava salvo não guarda o centro de custo de cada conta.</div>`
+      ? `<div class="rcx-erro">Para aplicar o % Consolidação nas saídas destes arquivos, suba o Excel de novo. O arquivo que já estava salvo não guarda o centro de custo de cada conta.</div>`
       : "";
     const avisoAnt = chipsAtual && !chipsAnt
       ? `<div class="rcx-aviso">Nenhum arquivo de ${antN} ainda. A coluna do ano anterior fica zerada até você subir essa competência. Ela vale para todos os meses.</div>`
@@ -2417,7 +2417,7 @@ const ResultadoCaixaApp = {
           <span class="ml-emp-filter-label">Participação</span>
           <div class="rcx-escala">
             ${seg(!this.agrupar, "100%", "ResultadoCaixaApp.setAgrupar(false)", "Valores cheios dos arquivos")}
-            ${seg(this.agrupar, "% Moura Leite", "ResultadoCaixaApp.setAgrupar(true)", "Aplica o percentual da Moura Leite só nas empresas da consolidação padrão")}
+            ${seg(this.agrupar, "% Consolidação", "ResultadoCaixaApp.setAgrupar(true)", "Aplica a coluna % Consolidação só nas empresas com consolidação padrão ligada")}
           </div>
         </div>
         <div class="cc-toolbar-actions">
@@ -3021,12 +3021,12 @@ const ResultadoCaixaApp = {
     const abertos = this.matrizAbertos || {};
     const cabEmp = dados.cols.map((e) => {
       const pct = e.pctLabel ? `<span class="rcx-matriz-pct">${caixaEsc(e.pctLabel)}</span>` : "";
-      const titulo = e.nome + (e.pctLabel ? " · " + e.pctLabel + " da Moura Leite na consolidação" : "");
+      const titulo = e.nome + (e.pctLabel ? " · " + e.pctLabel + " de % Consolidação" : "");
       return `<th class="rcx-sep" colspan="4" title="${caixaEsc(titulo)}"><span class="rcx-matriz-emp">${caixaEsc(e.nome)}</span>${pct}</th>`;
     }).join("");
     const totNome = this.agrupar ? "Consolidado" : "Total";
     const totTitle = this.agrupar
-      ? "Soma das empresas da consolidação padrão, cada uma no percentual da Moura Leite"
+      ? "Soma das empresas com consolidação padrão ligada, cada uma no % Consolidação"
       : "Soma dos valores cheios";
     const cabVal = dados.cols.map(() => `<th class="rcx-sep">Orç.</th><th>Real.</th><th>Variação</th><th>Variação</th>`).join("")
       + this.cabecaTotalMatriz(saida);
@@ -3073,7 +3073,7 @@ const ResultadoCaixaApp = {
     }).join("");
     const totCells = dados.cols.map((e) => this.matrizCelulas(totEmp[e.id].orc, totEmp[e.id].real, true, saida)).join("");
     const tituloBloco = saida ? "Saídas do DFC por empresa" : "Entradas do DFC por empresa";
-    const pctNota = this.agrupar ? " Cada empresa entra no consolidado pelo percentual da Moura Leite." : "";
+    const pctNota = this.agrupar ? " Cada empresa entra no consolidado pelo % Consolidação." : "";
     return `<div class="rcx-matriz-bloco">
       <div class="rcx-matriz-titulo">${tituloBloco}</div>
       <div class="rcx-matriz-sub">Acumulado de janeiro a ${caixaEsc(mesNome)}. Clique no grupo para abrir os centros de custo.${pctNota}</div>

@@ -1,4 +1,4 @@
-// Fluxo de Caixa (DFC) — movimentos de caixa/banco Sienge × visão DFC Padrão × % MLDU
+// Fluxo de Caixa (DFC) — movimentos de caixa/banco Sienge × visão DFC Padrão × % Consolidação
 
 const FluxoCaixaApp = {
   startDate: "",
@@ -118,7 +118,7 @@ const FluxoCaixaApp = {
         id: String(c.id),
         fullName: c.name || c.tradeName || `Empresa ${c.id}`,
         usual: String(cfg.nome_usual || "").trim(),
-        pct: Number(cfg.percentual_mldu) || 0,
+        pct: Number(cfg.percentual_mldu) || 0, // coluna % Consolidação; o % Líquido MLDU fica de fora
         consolidacao: Number(cfg.consolidacao_padrao) === 1
       };
     }).sort((a, b) => Number(a.id) - Number(b.id));
@@ -1564,7 +1564,7 @@ const FluxoCaixaApp = {
     const canExpand = accPending || [...byLevel.values()].some(ids => ids.some(id => !this.expanded.has(id)));
     const canCollapse = accOpen || [...byLevel.values()].some(ids => ids.some(id => this.expanded.has(id)));
     const modo = this.consolidacaoAtiva
-      ? "consolidação padrão · percentual Moura Leite"
+      ? "consolidação padrão · % Consolidação"
       : "empresas selecionadas · 100% do valor";
     root.innerHTML = `
       <div class="fc-shell">
@@ -1597,7 +1597,7 @@ const FluxoCaixaApp = {
             ${this.companyDropHtml()}
             ${this.costCenterDropHtml()}
             <div class="fc-filter-actions">
-              <button type="button" class="btn ${this.consolidacaoAtiva ? "btn-primary" : "btn-outline"} fc-cons-btn" onclick="FluxoCaixaApp.aplicarConsolidacao()" ${this.loading ? "disabled" : ""} title="Empresas marcadas como consolidação padrão, pelo percentual da Moura Leite">
+              <button type="button" class="btn ${this.consolidacaoAtiva ? "btn-primary" : "btn-outline"} fc-cons-btn" onclick="FluxoCaixaApp.aplicarConsolidacao()" ${this.loading ? "disabled" : ""} title="Empresas com consolidação padrão ligada, cada uma no % Consolidação">
                 Consolidação padrão
               </button>
               <button type="button" class="btn btn-primary fc-consult-btn${this.filtersDirty() ? " is-dirty" : ""}" onclick="FluxoCaixaApp.load()" ${this.loading ? "disabled" : ""} title="${this.filtersDirty() ? "A seleção ou o período mudou. Consulte de novo para atualizar a grade." : ""}">
