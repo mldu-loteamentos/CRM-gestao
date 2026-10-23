@@ -12,8 +12,21 @@ window.isAdvogadoCobrancaProfile = function(name) {
 
 window.isAdvogadoCobrancaUser = function(user) {
   if (!user || user.status === "INATIVO") return false;
+  if (window.cobrancaPapel(user) === "assistente") return false;
+  if (window.cobrancaPapel(user) === "advogado") return true;
   if (window.isAdvogadoCobrancaProfile(user.profile_name)) return true;
   return window.isOperadorCobrancaProfile(user.profile_name) && String(user.operator_type || "") === "advogado";
+};
+
+/** Advogado de cobrança recebe o sub judice. Assistente de cobrança não. */
+window.cobrancaPapel = function(user) {
+  const p = String(user && user.cobranca_papel || "");
+  if (p === "assistente" || p === "advogado") return p;
+  const em = String(user && user.email || "").toLowerCase().trim();
+  if (em === "colenci@mouraleite.com.br") return "assistente";
+  if (em === "caco@colenci.com.br") return "advogado";
+  if (window.isAdvogadoCobrancaProfile(user && user.profile_name)) return "advogado";
+  return "";
 };
 
 window.isOperadorCobrancaTerceirizadoProfile = function(name) {
@@ -24,7 +37,8 @@ window.isOperadorCobrancaTerceirizadoProfile = function(name) {
 /** Tipo efetivo: o perfil Terceirizado vale como Externo, mesmo sem o subtipo antigo. */
 window.crmOperatorType = function(user) {
   if (!user) return "";
-  if (window.isAdvogadoCobrancaProfile(user.profile_name)) return "advogado";
+  if (window.cobrancaPapel(user) === "assistente") return "assistente";
+  if (window.isAdvogadoCobrancaProfile(user.profile_name) || window.cobrancaPapel(user) === "advogado") return "advogado";
   if (window.isOperadorCobrancaTerceirizadoProfile(user.profile_name)) return "externo";
   return String(user.operator_type || "");
 };
@@ -38,10 +52,14 @@ window.syncUserModalProfile = function(sel) {
   const advBox = document.getElementById("umodal-advogado-config");
   const resend = document.getElementById("umodal-resend-billet-container");
   const opType = document.getElementById("umodal-operator-type");
+  const papelSel = document.getElementById("umodal-cobranca-papel");
+  const papelBox = document.getElementById("umodal-cobranca-papel-box");
+  if (papelBox) papelBox.style.display = isAdv ? "block" : "none";
+  const papel = papelSel ? papelSel.value : "";
   if (typeBox) typeBox.style.display = (isOp && !isTerc) ? "block" : "none";
   if (resend) resend.style.display = (isOp || isAdv) ? "block" : "none";
   if (opType && isTerc) opType.value = "externo";
-  if (advBox) advBox.style.display = (isAdv || (isOp && opType && opType.value === "advogado")) ? "block" : "none";
+  if (advBox) advBox.style.display = ((isAdv && papel !== "assistente") || (isOp && opType && opType.value === "advogado")) ? "block" : "none";
   if (window.ConfigUsersApp && typeof ConfigUsersApp.syncDeptBox === "function") ConfigUsersApp.syncDeptBox();
 };
 
@@ -309,25 +327,54 @@ const ConfigUsersApp = {
     return JSON.stringify(value == null ? null : value).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
   },
 
+  /* Cadastro não é apagado sozinho. O Caco e a Danieli são pessoas diferentes. */
   dropReplacedUserEmails() {
-    const swaps = [{ from: "caco@colenci.com.br", to: "colenci@mouraleite.com.br" }];
+    return false;
+  },
+
+  garantirCobrancaJuridica() {
+    if (!Array.isArray(this.users)) this.users = [];
     let changed = false;
-    swaps.forEach(({ from, to }) => {
-      const list = this.users || [];
-      const emailOf = (u) => String((u && u.email) || "").toLowerCase().trim();
-      const keep = list.find((u) => emailOf(u) === to);
-      const olds = list.filter((u) => emailOf(u) === from);
-      if (!keep || !olds.length) return;
-      olds.forEach((old) => {
-        if (window.crmUserEditedAt(old) > window.crmUserEditedAt(keep)) {
-          const { id, email, ...rest } = old;
-          Object.assign(keep, rest);
-        }
-      });
-      this.users = list.filter((u) => emailOf(u) !== from);
-      if (typeof window.removeCrmUserEmail === "function") window.removeCrmUserEmail(from);
+    const emailCaco = "caco@colenci.com.br";
+    if (typeof window.reviveCrmUserEmail === "function") window.reviveCrmUserEmail(emailCaco);
+    let caco = this.users.find((u) => String((u && u.email) || "").toLowerCase().trim() === emailCaco);
+    if (!caco) {
+      caco = {
+        id: this.nextUserId(),
+        name: "CARLOS EDUARDO COLENCI",
+        email: emailCaco,
+        sienge_user: "CACO",
+        phone: "(14) 99671-2870",
+        profile_name: "ADVOGADO COBRANÇA",
+        operator_type: "advogado",
+        cobranca_papel: "advogado",
+        manager_name: "ISRAEL",
+        manager_email: "israel@mouraleite.com.br",
+        status: "ATIVO",
+        adv_companies: ["1", "2", "3", "6", "13", "28", "32"],
+        adv_cities: ["ARAÇARIGUAMA", "AVARÉ", "BOITUVA", "BOTUCATU", "CERQUEIRA CÉSAR", "FARTURA", "ITATINGA", "PIRAJU", "TAGUAI", "TATUÍ"],
+        adv_cost_centers: [],
+        criadoPeloAdmin: true,
+        editedAt: Date.now()
+      };
+      this.users.push(caco);
       changed = true;
-    });
+    } else {
+      if (caco.cobranca_papel !== "advogado") { caco.cobranca_papel = "advogado"; changed = true; }
+      if (!window.isAdvogadoCobrancaProfile(caco.profile_name)) {
+        caco.profile_name = "ADVOGADO COBRANÇA";
+        caco.operator_type = "advogado";
+        changed = true;
+      }
+      if (String(caco.status || "").toUpperCase() !== "ATIVO") { caco.status = "ATIVO"; changed = true; }
+      if (String(caco.sienge_user || "") !== "CACO") { caco.sienge_user = "CACO"; changed = true; }
+    }
+    const danieli = this.users.find((u) => String((u && u.email) || "").toLowerCase().trim() === "colenci@mouraleite.com.br");
+    if (danieli && !danieli.cobranca_papel) {
+      danieli.cobranca_papel = "assistente";
+      danieli.editedAt = Date.now();
+      changed = true;
+    }
     return changed;
   },
 
@@ -531,7 +578,7 @@ const ConfigUsersApp = {
       if (savedUsers) this.users = JSON.parse(savedUsers);
     }
     if (!Array.isArray(this.users)) this.users = [];
-    const droppedOld = this.dropReplacedUserEmails();
+    const droppedOld = this.garantirCobrancaJuridica();
     if ((this.normalizeUserIds() || droppedOld) && typeof window.persistCrmUsersToFirebase === "function") {
       try {
         const saved = await window.persistCrmUsersToFirebase(this.users);
@@ -1631,8 +1678,17 @@ const ConfigUsersApp = {
                   </select>
                </div>
             </div>
+
+            <div id="umodal-cobranca-papel-box" style="margin-bottom: 16px; display: ${window.isAdvogadoCobrancaProfile(user && user.profile_name) ? 'block' : 'none'};">
+               <label style="display: block; font-weight: 600; color: #5f6368; margin-bottom: 6px; font-size: 0.85rem;">Função na cobrança</label>
+               <select id="umodal-cobranca-papel" onchange="window.syncUserModalProfile(document.getElementById('umodal-profile'))" style="width: 100%; max-width: 360px; padding: 10px; border: 1px solid #e8eaed; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; outline: none; cursor: pointer;">
+                  <option value="advogado" ${(user && window.cobrancaPapel(user) === "assistente") ? "" : "selected"}>Advogado cobrança</option>
+                  <option value="assistente" ${(user && window.cobrancaPapel(user) === "assistente") ? "selected" : ""}>Assistente cobrança</option>
+               </select>
+               <span style="font-size: 0.75rem; color: #9aa0a6; display: block; margin-top: 6px;">O advogado de cobrança fica responsável pelo sub judice na fila. A assistente de cobrança não recebe essa fila.</span>
+            </div>
             
-            <div id="umodal-advogado-config" style="margin-bottom: 16px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e8eaed; display: ${user && (window.isAdvogadoCobrancaProfile(user.profile_name) || user.operator_type === 'advogado') ? 'block' : 'none'};">
+            <div id="umodal-advogado-config" style="margin-bottom: 16px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e8eaed; display: ${user && window.cobrancaPapel(user) !== "assistente" && (window.isAdvogadoCobrancaProfile(user.profile_name) || user.operator_type === "advogado") ? "block" : "none"};">
                <h4 style="margin: 0 0 8px 0; font-size: 0.95rem; color: #202124;">Configurações de Atuação do Advogado</h4>
                <p style="font-size: 0.8rem; color: #5f6368; margin-top: 0; margin-bottom: 12px;">Selecione os locais onde este advogado irá atuar (se o título coincidir com qualquer um dos locais marcados, será atribuído a este advogado).</p>
                
@@ -1766,8 +1822,11 @@ const ConfigUsersApp = {
       }
 
       const isAdvProfile = window.isAdvogadoCobrancaProfile(profileName);
+      const papelEl = document.getElementById("umodal-cobranca-papel");
+      const cobrancaPapel = isAdvProfile && papelEl && papelEl.value === "assistente" ? "assistente" : (isAdvProfile ? "advogado" : "");
       const isOperatorProfile = window.isOperadorCobrancaProfile(profileName) || profileName.toUpperCase().includes("OPERADOR");
       const resolvedOperatorType = isAdvProfile ? "advogado" : (isOperatorProfile ? operatorType : null);
+      const atuaComoAdvogado = resolvedOperatorType === "advogado" && cobrancaPapel !== "assistente";
       const fields = {
           name: name,
           email: email,
@@ -1776,9 +1835,10 @@ const ConfigUsersApp = {
           telefone_corporativo: telefoneCorporativo,
           profile_name: profileName,
           operator_type: resolvedOperatorType,
-          adv_companies: resolvedOperatorType === 'advogado' ? advCompanies : [],
-          adv_cities: resolvedOperatorType === 'advogado' ? advCities : [],
-          adv_cost_centers: resolvedOperatorType === 'advogado' ? advCostCenters : [],
+          cobranca_papel: cobrancaPapel,
+          adv_companies: atuaComoAdvogado ? advCompanies : [],
+          adv_cities: atuaComoAdvogado ? advCities : [],
+          adv_cost_centers: atuaComoAdvogado ? advCostCenters : [],
           check_construction: checkConstruction,
           const_companies: [],
           const_cities: checkConstruction ? constCities : [],

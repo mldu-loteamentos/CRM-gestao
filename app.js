@@ -3027,9 +3027,17 @@ function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
     const cityHasExterno = typeof window.cityRuleHasOperatorType === "function"
       && window.cityRuleHasOperatorType(ruleId, "externo");
 
+    const nexCumprida = typeof window.clientHasNexCumprida === "function" && window.clientHasNexCumprida(c);
+    const propostaFila = (typeof window.clientTemPropostaParaConfessao === "function" && window.clientTemPropostaParaConfessao(c))
+      || (typeof window.clientTemPropostaAguardandoSinal === "function" && window.clientTemPropostaAguardandoSinal(c));
+    const subIntegra = typeof window.clientIsSubjudiceIntegra === "function" && window.clientIsSubjudiceIntegra(c);
+
     if (isSubj) {
       requiredType = "advogado";
       ruleSuffix = "JURÍDICO";
+    } else if (nexCumprida && !propostaFila && !subIntegra) {
+      requiredType = "apoio_juridico";
+      ruleSuffix = "BACK OFFICE / NEX CUMPRIDA";
     } else if (c.isAcordoJudicialQuebrado) {
       requiredType = "apoio_juridico";
       const enviarJuridico = typeof window.clientIsAcordoJudicialEnviarJuridico === "function"
@@ -3102,12 +3110,13 @@ function applyCollectionOperatorRegua(consolidated, subjudiceMemory) {
         }
       }
 
+      if (!matchedAdv) {
+        matchedAdv = advogados.find((u) => window.cobrancaPapel && window.cobrancaPapel(u) === "advogado") || advogados[0] || null;
+      }
+
       if (matchedAdv) {
         c.assignedOperator = formatOperatorUserName(matchedAdv);
         c.appliedRule = "RÉGUA - JURÍDICO";
-      } else if (ruleId) {
-        c.assignedOperator = getRuleOperatorByType(ruleId, "NÃO ATRIBUÍDO", c.customerId, "fallback");
-        c.appliedRule = "RÉGUA (JURÍDICO SEM ADV) - " + city;
       } else {
         c.assignedOperator = "NÃO ATRIBUÍDO";
         c.appliedRule = "RÉGUA (JURÍDICO SEM ADV)";
@@ -5271,6 +5280,55 @@ window.mergeCrmUsersWithCloud = async function(localStr, globalStr) {
   );
 };
 
+window.usuarioCaco = function() {
+  return {
+    id: 6,
+    name: "CARLOS EDUARDO COLENCI",
+    email: "caco@colenci.com.br",
+    sienge_user: "CACO",
+    phone: "(14) 99671-2870",
+    profile_name: "ADVOGADO COBRANÇA",
+    operator_type: "advogado",
+    cobranca_papel: "advogado",
+    manager_name: "ISRAEL",
+    manager_email: "israel@mouraleite.com.br",
+    status: "ATIVO",
+    adv_companies: ["1", "2", "3", "6", "13", "28", "32"],
+    adv_cities: ["ARAÇARIGUAMA", "AVARÉ", "BOITUVA", "BOTUCATU", "CERQUEIRA CÉSAR", "FARTURA", "ITATINGA", "PIRAJU", "TAGUAI", "TATUÍ"],
+    adv_cost_centers: [],
+    criadoPeloAdmin: true,
+    editedAt: Date.now()
+  };
+};
+
+window.incluirCacoNaLista = function(raw) {
+  if (typeof window.reviveCrmUserEmail === "function") window.reviveCrmUserEmail("caco@colenci.com.br");
+  let list = [];
+  try { list = JSON.parse(raw || "[]") || []; } catch (e) { list = []; }
+  if (!Array.isArray(list)) list = [];
+  const emailOf = (u) => String((u && u.email) || "").toLowerCase().trim();
+  let caco = list.find((u) => emailOf(u) === "caco@colenci.com.br");
+  if (!caco) {
+    caco = window.usuarioCaco();
+    const ids = list.map((u) => Number(u && u.id) || 0);
+    if (ids.indexOf(6) >= 0) caco.id = Math.max(0, ...ids) + 1;
+    else caco.id = 6;
+    list.push(caco);
+  } else {
+    if (!caco.sienge_user) caco.sienge_user = "CACO";
+    if (!caco.name) caco.name = "CARLOS EDUARDO COLENCI";
+    caco.cobranca_papel = "advogado";
+    caco.operator_type = "advogado";
+    if (!window.isAdvogadoCobrancaProfile || !window.isAdvogadoCobrancaProfile(caco.profile_name)) {
+      caco.profile_name = "ADVOGADO COBRANÇA";
+    }
+    if (String(caco.status || "").toUpperCase() === "INATIVO") caco.status = "ATIVO";
+  }
+  const danieli = list.find((u) => emailOf(u) === "colenci@mouraleite.com.br");
+  if (danieli && !danieli.cobranca_papel) danieli.cobranca_papel = "assistente";
+  return JSON.stringify(list);
+};
+
 window.syncCrmUsersFromFirebase = async function() {
   if (!window.firebaseDb || !window.firebaseCollections || !window.firebaseCollections.getDoc) return null;
   const fc = window.firebaseCollections;
@@ -5281,6 +5339,8 @@ window.syncCrmUsersFromFirebase = async function() {
     const data = dSnap.data() || {};
     dedicated = data.list || data.crm_users || "[]";
     window.noteCrmUsersRemoved(data.removedEmails);
+    window._cacoPrecisaVolta = /caco@colenci\.com\.br/i.test(JSON.stringify(data.removedEmails || []))
+      || !/caco@colenci\.com\.br/i.test(String(dedicated));
     let nuvem = [];
     if (Array.isArray(dedicated)) nuvem = dedicated;
     else {
@@ -5293,14 +5353,15 @@ window.syncCrmUsersFromFirebase = async function() {
     const gData = gSnap.data() || {};
     globalUsers = gData.crm_users || "[]";
     window.noteCrmUsersRemoved(gData.removedEmails);
+    if (/caco@colenci\.com\.br/i.test(JSON.stringify(gData.removedEmails || []))) window._cacoPrecisaVolta = true;
   }
   let local = "[]";
   try { local = localStorage.getItem("crm_users") || "[]"; } catch (e) {}
-  const merged = window.crmSomenteUsuariosDoAdministrador(
+  const merged = window.incluirCacoNaLista(window.crmSomenteUsuariosDoAdministrador(
     window.stripRemovedCrmUsers(window.mergeCrmUsers(window.mergeCrmUsers(local, globalUsers), dedicated)),
     dedicated,
     globalUsers
-  );
+  ));
   try {
     const setter = window._originalSetItem || localStorage.setItem.bind(localStorage);
     setter.call(localStorage, "crm_users", merged);
@@ -5310,6 +5371,10 @@ window.syncCrmUsersFromFirebase = async function() {
       const setter = window._originalSetItem || localStorage.setItem.bind(localStorage);
       setter.call(localStorage, "crm_users", merged);
     } catch (err) {}
+  }
+  if (window._cacoPrecisaVolta && typeof window.persistCrmUsersToFirebase === "function") {
+    window._cacoPrecisaVolta = false;
+    try { window.persistCrmUsersToFirebase(JSON.parse(merged)); } catch (e) {}
   }
   return merged;
 };
@@ -8598,7 +8663,7 @@ window.getNexCumpridaAgingHtml = function(client) {
   const estilo = "padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #105436; background-color: #ecfdf5; color: #105436; font-weight: 700;";
   const cid = Number(client && client.customerId) || 0;
   const sale = String(client && client.saleId || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-  return `<button type="button" onclick="event.stopPropagation(); window.abrirAvaliacaoCancelamento(${cid}, '${sale}')" style="${estilo} cursor: pointer;" title="NEX cumprida há ${dayLabel} de atraso. Ver construção e o cálculo do distrato antes do cancelamento.">
+  return `<button type="button" onclick="event.stopPropagation(); window.abrirAvaliacaoCancelamento(${cid}, '${sale}')" style="${estilo} cursor: pointer;" title="NEX cumprida há ${dayLabel} de atraso. Responsável: operador de cobrança back office. Ver construção e o cálculo do distrato antes do cancelamento.">
     <i data-lucide="file-warning" style="width: 14px; height: 14px;"></i> NEX cumprida - ${dayLabel}
   </button>`;
 };
@@ -8949,6 +9014,26 @@ function getPrimaryCostCenter(id) {
   if (!id) return "C.C. N/D";
   const strId = Array.isArray(id) ? String(id[0]) : String(id);
   return strId.split(',')[0].trim();
+}
+
+/* A fila mostra o centro e a unidade uma vez: 10800 - A-04, no mesmo padrão de 12400 - D-091. */
+function filaUnidadeTexto(client) {
+  const cc = getPrimaryCostCenter(client && client.costCenterId);
+  const ccNum = String(cc || "").replace(/\D/g, "");
+  let nome = String((client && client.unitName) || "").replace(/^Quadra-Lote:\s*/i, "").replace(/^U\s*-\s*/i, "").trim();
+  if (ccNum) {
+    let guard = 0;
+    while (nome && guard < 4) {
+      const m = nome.match(/^(\d+)\s*[-–]\s*(.*)$/);
+      if (!m || m[1] !== ccNum) break;
+      nome = String(m[2] || "").trim();
+      guard++;
+    }
+    if (nome === ccNum) nome = "";
+  }
+  if (!nome || /^n\/d$/i.test(nome)) return (!cc || cc === "C.C. N/D") ? "N/D" : (cc + " - N/D");
+  if (!cc || cc === "C.C. N/D" || nome.indexOf(cc + " - ") === 0 || nome.indexOf(cc + "-") === 0) return nome;
+  return cc + " - " + nome;
 }
 
 function getCostCenterName(id) {
@@ -11632,7 +11717,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
             </span>
           </td>
           <td style="white-space: nowrap;">
-            <span>${getPrimaryCostCenter(client.costCenterId)} - ${client.unitName || 'N/D'}</span>
+            <span>${filaUnidadeTexto(client)}</span>
           </td>
           <td style="white-space: nowrap; text-align: left; width: 1%;" title="Fase Processual">
             <span style="text-transform: uppercase;">${(() => {
@@ -12112,7 +12197,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
             </span>
           </td>
           <td style="white-space: nowrap;">
-            <span>${getPrimaryCostCenter(client.costCenterId)} - ${client.unitName || 'N/D'}</span>
+            <span>${filaUnidadeTexto(client)}</span>
           </td>
           <td class="fila-signal-cell" data-fila-key="${String(client.customerId)}-${String(client.saleId)}">
             ${typeof window.filaSignalHtml === "function" ? window.filaSignalHtml(client) : ""}
@@ -31192,7 +31277,7 @@ async function _loadZeroPaidTab_Impl() {
         </span>
       </td>
       <td style="white-space: nowrap;">
-        <span>${getPrimaryCostCenter(client.costCenterId)} - ${client.unitName || 'N/D'}</span>
+        <span>${filaUnidadeTexto(client)}</span>
       </td>
       <td style="white-space: nowrap; text-align: center; width: 1%;">
         <span class="badge" style="${getOperatorBadgeStyle(client.assignedOperator)}">${client.assignedOperator}</span>
