@@ -5765,11 +5765,48 @@ window.commitCrmGlobalConfig = async function(payload) {
       next[kImp] = window.mergePlanoImpostos(localImp, cloud[kImp] || "{}");
       window._impostosAposCommit = next[kImp];
     }
+    if (typeof window.mergeEtapasPorNome === "function") {
+      ["crm_moura_judiciais", "crm_moura_financiamento"].forEach((k) => {
+        let localArr = [];
+        let cloudArr = [];
+        try { localArr = JSON.parse(next[k] || localStorage.getItem(k) || "[]"); } catch (e) { localArr = []; }
+        try { cloudArr = JSON.parse(cloud[k] || "[]"); } catch (e) { cloudArr = []; }
+        if (!Array.isArray(localArr)) localArr = [];
+        if (!Array.isArray(cloudArr)) cloudArr = [];
+        if (!localArr.length && !cloudArr.length) return;
+        let merged = window.mergeEtapasPorNome(localArr, cloudArr);
+        if (k === "crm_moura_judiciais" && typeof window.ensureReintegracaoPosseNiveis === "function") {
+          const anterior = window.EtapasJudiciaisState;
+          window.EtapasJudiciaisState = merged;
+          window._commitConfigBusy = true;
+          try { window.ensureReintegracaoPosseNiveis(); } finally { window._commitConfigBusy = false; }
+          merged = window.EtapasJudiciaisState;
+          if (!merged.length && anterior) window.EtapasJudiciaisState = anterior;
+        }
+        if (merged.length) next[k] = JSON.stringify(merged);
+      });
+      window._etapasAposCommit = next.crm_moura_judiciais || "";
+    }
     tx.set(docRef, next, { merge: true });
   });
   if (window._cartoriosAposCommit) {
     try { _originalSetItem.call(localStorage, "crm_moura_cartorios_list", window._cartoriosAposCommit); } catch (e) {}
     window._cartoriosAposCommit = null;
+  }
+  if (window._etapasAposCommit) {
+    try {
+      const setter = window._originalSetItem || localStorage.setItem.bind(localStorage);
+      setter.call(localStorage, "crm_moura_judiciais", window._etapasAposCommit);
+      const lista = JSON.parse(window._etapasAposCommit);
+      if (Array.isArray(lista) && lista.length) window.EtapasJudiciaisState = lista;
+    } catch (e) {}
+    window._etapasAposCommit = "";
+    if (typeof window.renderEtapasJudiciais === "function" && document.getElementById("judiciais-tree-container")) {
+      try { window.renderEtapasJudiciais(); } catch (e) {}
+    }
+    if (typeof window.updateJudFaseDropdown === "function") {
+      try { window.updateJudFaseDropdown(); } catch (e) {}
+    }
   }
   if (window._impostosAposCommit) {
     try { _originalSetItem.call(localStorage, "crm_plano_impostos", window._impostosAposCommit); } catch (e) {}
@@ -9649,14 +9686,15 @@ window.ensureReintegracaoPosseNiveis = function() {
   if (!Array.isArray(window.EtapasJudiciaisState) || !window.EtapasJudiciaisState.length) return false;
   const norm = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim().toUpperCase();
   const niveis = [
-    { nome: "Aguardando expedição do mandado de reintegração", dias: 10, descricao: "Aguardando o juiz expedir o mandado de reintegração de posse." },
+    { nome: "Aguardando expedição do mandado de reintegração", dias: 90, descricao: "Sentença já proferida para reintegração de posse. Aguardando o juiz expedir o mandado de reintegração." },
     { nome: "Aguardando cumprimento pelo Oficial de Justiça", dias: 30, descricao: "Aguardando o oficial de justiça entregar o mandado de reintegração de posse." },
-    { nome: "Realizar reintegração", dias: 5, descricao: "Mandado cumprido. Liberado para realizar a reintegração." },
-    { nome: "Avaliação prévia Engenharia", dias: 10, descricao: "Agendar avaliação prévia da engenharia com relação às condições do imóvel." },
-    { nome: "Vistoria técnica externa", dias: 10, descricao: "Engenheiro externo realizará avaliação e emissão de projetos para aprovação." },
+    { nome: "Realizar reintegração", dias: 30, descricao: "Mandado cumprido. Liberado para realizar a reintegração." },
+    { nome: "Avaliação prévia Engenharia", dias: 30, descricao: "Agendar avaliação prévia da engenharia com relação às condições do imóvel." },
+    { nome: "Vistoria técnica externa", dias: 60, descricao: "Engenheiro externo realizará avaliação e emissão de projeto para aprovação." },
     { nome: "Aprovação projeto - Prefeitura", dias: 90, descricao: "Realizar visita e aguardar aprovação do projeto na prefeitura." }
   ];
-  const pais = window.EtapasJudiciaisState.filter((e) => norm(e.nome || e.name) === "REINTEGRACAO DE POSSE");
+  const ehReint = (e) => norm(e && (e.nome || e.name)).replace(/^\d+(?:\.\d+)*\.?\s+/, "") === "REINTEGRACAO DE POSSE";
+  const pais = window.EtapasJudiciaisState.filter(ehReint);
   if (!pais.length) return false;
   let mudou = false;
   pais.forEach((pai) => {
@@ -9664,7 +9702,15 @@ window.ensureReintegracaoPosseNiveis = function() {
     const tem = new Set(filhos.map((e) => norm(e.nome || e.name)));
     let order = filhos.reduce((m, e) => Math.max(m, Number(e.order) || 0), 0);
     niveis.forEach((n) => {
-      if (tem.has(norm(n.nome))) return;
+      const ja = filhos.find((e) => norm(e.nome || e.name) === norm(n.nome));
+      if (ja) {
+        if (String(ja.id).indexOf("j_reint_") === 0 && (Number(ja.dias) !== n.dias || ja.descricao !== n.descricao)) {
+          ja.dias = n.dias;
+          ja.descricao = n.descricao;
+          mudou = true;
+        }
+        return;
+      }
       order += 10;
       window.EtapasJudiciaisState.push({
         id: "j_reint_" + norm(n.nome).replace(/[^A-Z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40),
@@ -9679,8 +9725,11 @@ window.ensureReintegracaoPosseNiveis = function() {
     });
   });
   if (!mudou) return false;
-  try { localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState)); } catch (e) {}
-  if (window.forceUploadLocalConfig) {
+  try {
+    const setter = window._originalSetItem || localStorage.setItem.bind(localStorage);
+    setter.call(localStorage, "crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
+  } catch (e) {}
+  if (!window._commitConfigBusy && window.forceUploadLocalConfig) {
     try { window.forceUploadLocalConfig(true); } catch (e) {}
   }
   if (typeof window.renderEtapasJudiciais === "function") {
@@ -39329,6 +39378,10 @@ window.onDropJudNode = function(e, targetId) {
 window.renderEtapasJudiciais = function() {
   const container = document.getElementById('judiciais-tree-container');
   if (!container) return;
+  if (!window._renderEtapas && typeof window.ensureReintegracaoPosseNiveis === "function") {
+    window._renderEtapas = true;
+    try { window.ensureReintegracaoPosseNiveis(); } finally { window._renderEtapas = false; }
+  }
   
   container.innerHTML = '';
   
@@ -39343,14 +39396,14 @@ window.renderEtapasJudiciais = function() {
   });
   
   const sorted = [...window.EtapasJudiciaisState].sort((a, b) => (a.order || 0) - (b.order || 0));
-  const rootItems = sorted.filter(e => !e.parentId);
+  const rootItems = sorted.filter(e => e.parentId == null || e.parentId === "");
   
   const catalog = typeof window.buildJudicialStageCatalog === 'function' ? window.buildJudicialStageCatalog() : [];
   const prefixById = {};
   catalog.forEach(s => { prefixById[String(s.id)] = s.prefix.includes('.') ? s.prefix : s.prefix + '.'; });
   
   const renderNode = (node, level) => {
-      const children = sorted.filter(e => e.parentId === node.id);
+      const children = sorted.filter(e => String(e.parentId || "") === String(node.id));
       const numLabel = prefixById[String(node.id)] || '';
       
       let bgColor = '#ffffff';
