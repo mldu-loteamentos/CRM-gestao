@@ -1032,12 +1032,13 @@ const GerarPagamentoApp = {
     return !!(chave && this.state.beneficiarioOk && this.state.beneficiarioOk[chave]);
   },
 
-  /** O aviso de pagamento antecipado, e o de beneficiário do boleto, saem do bloqueio depois que o operador libera. */
+  /** O aviso de data do boleto, e o de beneficiário, saem do bloqueio depois que o operador libera. */
   avisoQueBloqueia(check, it) {
     const livres = new Set((check && check.avisosLivres) || []);
     return ((check && check.avisos) || []).filter((a) => {
       if (livres.has(a)) return false;
       if (check.antecipado && this.antecipadoLiberado(it) && /pagamento antecipado/i.test(a)) return false;
+      if (check.vencimentoPosterior && this.antecipadoLiberado(it) && /boleto vence em/i.test(a)) return false;
       if (check.beneficiarioDivergente && this.beneficiarioLiberado(it) && /benefici[aá]rio do boleto/i.test(a)) return false;
       return true;
     })[0] || "";
@@ -1104,10 +1105,16 @@ const GerarPagamentoApp = {
     if (it.pag && it.pag.check) {
       const c = it.pag.check;
       let html = BoletoCheck.seloHtml(c);
-      if (c.antecipado && c.nivel !== "erro") {
+      if ((c.antecipado || c.vencimentoPosterior) && c.nivel !== "erro") {
+        const dica = c.vencimentoPosterior
+          ? "Libera este boleto, que vence depois da parcela, para entrar no lote"
+          : "Libera este boleto antecipado para entrar no lote";
+        const livre = c.vencimentoPosterior
+          ? "Boleto com vencimento posterior liberado para entrar no lote."
+          : "Pagamento antecipado liberado para entrar no lote.";
         html += this.antecipadoLiberado(it)
-          ? ` <span class="bchk bchk-ok" title="Pagamento antecipado liberado para entrar no lote.">Liberado</span>`
-          : ` <button type="button" class="gp-liberar" title="Libera este boleto antecipado para entrar no lote" onclick="event.stopPropagation();GerarPagamentoApp.liberarAntecipado('${this.esc(it.chave)}')">Liberar</button>`;
+          ? ` <span class="bchk bchk-ok" title="${this.esc(livre)}">Liberado</span>`
+          : ` <button type="button" class="gp-liberar" title="${this.esc(dica)}" onclick="event.stopPropagation();GerarPagamentoApp.liberarAntecipado('${this.esc(it.chave)}')">Liberar</button>`;
       }
       if (c.beneficiarioDivergente) {
         html += this.beneficiarioLiberado(it)
@@ -1265,8 +1272,8 @@ const GerarPagamentoApp = {
         await this.alertarBeneficiarioBoleto(check, payment, notaBenef, r.titulo);
         if (gen !== s.gen) return;
         s.pagInfo[chave] = { payment, check, fiscal, tipoSienge: forma.tipo || "", falha: !!(check && check.falhaConsulta) || !!(fiscal && fiscal.falhaConsulta) };
-        const soAntecipado = check.antecipado && check.nivel === "aviso" && !(check.erros || []).length
-          && (check.avisos || []).every((a) => /pagamento antecipado/i.test(a));
+        const soAntecipado = (check.antecipado || check.vencimentoPosterior) && check.nivel === "aviso" && !(check.erros || []).length
+          && (check.avisos || []).every((a) => /pagamento antecipado|boleto vence em/i.test(a));
         const avisoLivre = check.nivel === "aviso" && !(check.erros || []).length && !this.avisoQueBloqueia(check, { chave });
         if (!soAntecipado && !avisoLivre && ["erro", "aviso", "sem"].includes(check.nivel)) {
           Object.keys(s.sel).forEach((k) => {

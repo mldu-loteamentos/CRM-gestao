@@ -312,7 +312,8 @@ window.BoletoCheck = {
         out.antecipado = true;
         out.avisos.push(`Pagamento antecipado: o boleto vence em ${this.dataBr(vb)} e a parcela vence em ${vt}. Libere para pagar antes do vencimento.`);
       } else {
-        out.avisos.push(`A linha digitável cadastrada no Sienge é de um boleto que vence em ${this.dataBr(vb)}, depois do vencimento da parcela (${vt}). Confira o vencimento do título no Sienge.`);
+        out.vencimentoPosterior = true;
+        out.avisos.push(`O boleto vence em ${this.dataBr(vb)} e a parcela vence em ${vt}. Libere para pagar com este boleto.`);
       }
     }
     const limite = String(d.discountDueDate || "").slice(0, 10);
