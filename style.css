@@ -9625,8 +9625,27 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .cc-table.orc-kardex-grade tr.orc-kx.is-venda td.is-passado { background: #d9e6f6; color: #1e3a5f; }
 .cc-table.orc-kardex-grade tr.orc-kx.is-ini td.is-passado,
 .cc-table.orc-kardex-grade tr.orc-kx.is-conta td.is-passado { background: #f3f4f6; }
-.cc-table.orc-kardex-grade .orc-kx-cel input.orc-dist-qtd { height: 22px; border: 1px solid transparent; border-radius: 0; background: transparent; color: inherit; }
-.cc-table.orc-kardex-grade .orc-kx-cel input.orc-dist-qtd:focus { outline: 2px solid #217346; background: #fff; color: #0f172a; }
+.cc-table.orc-kardex-grade td[data-kx-td] { padding: 0; }
+.cc-table.orc-kardex-grade td[data-kx-td] .orc-kx-cel { align-items: stretch; width: 100%; height: 100%; min-height: 26px; gap: 0; }
+.cc-table.orc-kardex-grade td[data-kx-td] .orc-kx-cel input.orc-dist-qtd {
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
+  height: 26px;
+  margin: 0;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-sizing: border-box;
+  color: inherit;
+}
+.cc-table.orc-kardex-grade td[data-kx-td] .orc-kx-cel input.orc-dist-qtd:focus {
+  outline: none;
+  background: #fff;
+  color: #0f172a;
+  box-shadow: inset 0 0 0 2px #217346;
+}
 .orc-kardex-bloco { margin: 0 0 10px; }
 .orc-lista-filtro { margin: 0 0 14px; padding: 14px 16px 8px; }
 .orc-lista-erro { margin: 8px 0 0; color: #b91c1c; font-size: 0.8rem; font-weight: 700; }
@@ -9689,8 +9708,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .orc-kx-dist-soma.is-ok { color: #105436; }
 .orc-kx-dist-soma.is-falta { color: #b45309; }
 .orc-kx-cel { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
-.orc-kx-feito { color: #64748b; font-weight: 800; font-variant-numeric: tabular-nums; }
-.cc-table.orc-kardex-grade .orc-kx-cel input.orc-dist-qtd { width: 58px; min-width: 58px; flex: 0 0 58px; }
+.orc-kx-feito { color: #64748b; font-weight: 800; font-variant-numeric: tabular-nums; padding: 0 4px; align-self: center; }
 .orc-plano-barra { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 8px; }
 .orc-plano-barra .btn { height: 36px; }
 .cc-table.orc-plano-tab { margin: 0 0 14px; }

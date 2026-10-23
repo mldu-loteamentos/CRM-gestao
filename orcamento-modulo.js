@@ -3014,13 +3014,22 @@ const OrcamentoModuloApp = {
         return this.linhasExtrato(await window.siengeFetchWithRetry(path(s, e), 2));
       } catch (err) {
         if (Number(err && err.status) === 404) return [];
-        const sy = Number(String(s).slice(0, 4));
-        const ey = Number(String(e).slice(0, 4));
-        if (Number(err && err.status) !== 507 || depth > 6 || ey - sy < 1) throw err;
-        const mid = Math.floor((sy + ey) / 2);
-        const esq = await get(s, mid + "-12-31", depth + 1);
-        const dir = await get((mid + 1) + "-01-01", e, depth + 1);
-        return esq.concat(dir);
+        const st = Number(err && err.status);
+        const pesado = st === 500 || st === 502 || st === 503 || st === 504 || st === 507;
+        const a = new Date(String(s).slice(0, 10) + "T12:00:00");
+        const b = new Date(String(e).slice(0, 10) + "T12:00:00");
+        const dias = Math.round((b - a) / 86400000);
+        if (!pesado || depth > 12 || !(dias >= 31)) throw err;
+        const meio = new Date(a.getTime() + Math.floor((b - a) / 2));
+        const iso = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+        const esqFim = iso(meio);
+        const dir = new Date(meio.getTime());
+        dir.setDate(dir.getDate() + 1);
+        const dirIni = iso(dir);
+        if (esqFim <= s || dirIni > e) throw err;
+        const esq = await get(s, esqFim, depth + 1);
+        const direita = await get(dirIni, e, depth + 1);
+        return esq.concat(direita);
       }
     };
     if (typeof window.siengeFetchWithRetry !== "function") throw new Error("A consulta ao Sienge não está disponível nesta tela.");
