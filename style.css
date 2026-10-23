@@ -10004,6 +10004,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .cc-table.ppcc-table td { height: 42px; padding: 4px 12px; }
 .cc-table.ppcc-table td.ppcc-id { font-weight: 800; color: #105436; font-variant-numeric: tabular-nums; }
 .cc-table.ppcc-table td.ppcc-nome { font-weight: 600; }
+.ppcc-papel { width: 100%; height: 32px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #0f172a; font: inherit; font-size: 0.75rem; font-weight: 700; padding: 0 8px; }
 .cc-table.ppcc-table td.ppcc-vazio { text-align: center; color: #94a3b8; padding: 26px; height: auto; }
 .cc-table.ppcc-table .moura-switch { justify-content: center; vertical-align: middle; }
 .ppcc-rodape { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; font-size: 0.76rem; color: #64748b; }
@@ -10483,14 +10484,8 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .orc-dfc-table.orc-dfc-cmp thead tr:first-child th:first-child { min-width: 220px; width: 220px; max-width: 260px; }
 .orc-dfc-table.orc-dfc-cmp thead tr:nth-child(2) th:first-child { min-width: 64px; width: 72px; max-width: 88px; left: auto; text-align: right; }
 .orc-dfc-table.orc-dfc-cmp td:first-child { min-width: 220px; max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: #fff; }
-.orc-dfc-table tbody tr:hover > td { background: #d1fae5; }
-.orc-dfc-table tbody tr:hover > td:first-child {
-  background: #105436;
-  color: #fff;
-  font-weight: 800;
-  box-shadow: inset 4px 0 0 #083322;
-  z-index: 2;
-}
+.orc-dfc-table tbody tr:hover > td,
+.orc-dfc-table.orc-dfc-cmp tbody tr:hover > td:first-child { background: #d1fae5; box-shadow: none; }
 .orc-dfc-table.orc-dfc-cmp thead tr:first-child th { top: 0; height: 32px; font-size: 12px; }
 .orc-dfc-table.orc-dfc-cmp thead tr:nth-child(2) th { top: 32px; height: 28px; font-size: 11px; font-weight: 700; background: #0c3d28; letter-spacing: 0.01em; }
 .orc-dfc-table.orc-dfc-cmp thead tr:first-child th.orc-dfc-mes { border-left: 3px solid #d7ebe0; }
@@ -10532,17 +10527,17 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .orc-dfc-table tbody tr.orc-dfc-fcf:hover > td,
 .orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-fcf:hover > td,
 .orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-fcf:hover > td:first-child,
-.orc-dfc-table tbody tr.orc-dfc-fcf:hover > td.orc-dfc-neg { background: #0c3d28; color: #fff; box-shadow: none; }
+.orc-dfc-table tbody tr.orc-dfc-fcf:hover > td.orc-dfc-neg { background: #3d9b6e; color: #fff; box-shadow: inset 0 0 0 1px #d1fae5; }
 .orc-dfc-table tbody tr.orc-dfc-formula:not(.orc-dfc-fcf):not(.orc-dfc-saida-forte):hover > td,
 .orc-dfc-table tbody tr.orc-dfc-n1:not(.orc-dfc-saida):hover > td,
 .orc-dfc-table tbody tr.orc-rep-var:hover > td,
 .orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-formula:not(.orc-dfc-fcf):not(.orc-dfc-saida-forte):hover > td,
-.orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-n1:not(.orc-dfc-saida):hover > td { background: #bbf7d0; }
+.orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-n1:not(.orc-dfc-saida):hover > td,
+.orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-formula:not(.orc-dfc-fcf):not(.orc-dfc-saida-forte):hover > td:first-child,
+.orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-n1:not(.orc-dfc-saida):hover > td:first-child,
 .orc-dfc-table tbody tr.orc-dfc-formula:not(.orc-dfc-fcf):not(.orc-dfc-saida-forte):hover > td:first-child,
 .orc-dfc-table tbody tr.orc-dfc-n1:not(.orc-dfc-saida):hover > td:first-child,
-.orc-dfc-table tbody tr.orc-rep-var:hover > td:first-child,
-.orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-formula:not(.orc-dfc-fcf):not(.orc-dfc-saida-forte):hover > td:first-child,
-.orc-dfc-table.orc-dfc-cmp tbody tr.orc-dfc-n1:not(.orc-dfc-saida):hover > td:first-child { background: #105436; color: #fff; box-shadow: inset 4px 0 0 #083322; }
+.orc-dfc-table tbody tr.orc-rep-var:hover > td:first-child { background: #bbf7d0; color: #064e3b; box-shadow: none; }
 .orc-dfc-acc td { font-weight: 600; }
 .orc-dfc-cc td { background: #f8fafc; font-weight: 500; color: #334155; }
 .orc-dfc-neg { color: #991b1b; }
@@ -10662,7 +10657,8 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .pc-buscas label { display: flex; flex-direction: column; gap: 6px; font-size: 0.75rem; font-weight: 700; color: #64748b; }
 .pc-pesq { margin-bottom: 16px; }
 .pc-pesq-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 160px; gap: 16px; align-items: end; margin-bottom: 20px; }
-.pc-pesq .form-control { height: 38px; border: 1px solid #94a3b8; }
+.pc-pesq-grid > .form-group { min-width: 0; }
+.pc-pesq .form-control { height: 38px; width: 100%; box-sizing: border-box; border: 1px solid #94a3b8; }
 .pc-pesq .form-control:disabled { background: #f1f5f9; color: #94a3b8; }
 #pcf-emp-slot .ml-emp-filter { width: 100%; max-width: none; min-width: 0; flex: none; }
 #pcf-emp-slot .ml-emp-filter-label { display: none; }
@@ -10670,7 +10666,13 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 #pcf-emp-slot .ml-emp-filter-btn:disabled { background: #f1f5f9; color: #94a3b8; cursor: not-allowed; }
 #pcf-emp-slot .ml-emp-filter.is-open .ml-emp-filter-btn { border-color: var(--color-primary); }
 #pcf-emp-slot .ml-emp-filter-list { max-height: 320px; }
-.pc-drop { position: relative; }
+#pc-emp-slot .ml-emp-filter { width: 100%; max-width: none; min-width: 0; flex: none; }
+#pc-emp-slot .ml-emp-filter-label { display: none; }
+#pc-emp-slot .ml-emp-filter-btn { height: 38px; min-height: 38px; border-color: #cbd5e1; font-weight: 400; border-radius: 6px; }
+#pc-emp-slot .ml-emp-filter.is-open .ml-emp-filter-btn { border-color: var(--color-primary); }
+#pc-emp-slot .ml-emp-filter-list { max-height: 280px; }
+.pc-drop { position: relative; width: 100%; }
+.pc-drop .form-control { width: 100%; }
 .pc-dd { display: none; position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 4px); background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; max-height: 240px; overflow: auto; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12); }
 .pc-dd button { display: block; width: 100%; text-align: left; background: #fff; border: 0; border-bottom: 1px solid #f3f4f6; padding: 8px 12px; cursor: pointer; font: inherit; font-size: 0.85rem; color: #1c2e24; }
 .pc-dd button:hover { background: #f0fdf4; }

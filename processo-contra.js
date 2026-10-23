@@ -20,6 +20,7 @@ const ProcessoContraApp = {
   parte: null,
   itens: [],
   empresaId: "",
+  tituloEmpresa: "",
   processo: "",
   motivo: "",
   MOTIVOS: [
@@ -94,23 +95,15 @@ const ProcessoContraApp = {
   render() {
     const root = document.getElementById("processo-contra-root");
     if (!root) return;
-    if (this.empresaId && !this.empresas().some((c) => String(c.id) === String(this.empresaId))) this.empresaId = "";
+    if (this.empresaId && String(this.empresaId) !== String(this.tituloEmpresa) && !this.empresas().some((c) => String(c.id) === String(this.empresaId))) this.empresaId = "";
     const edita = this.podeEditar();
-    const opcoes = this.empresas().map((c) => {
-      const nome = this.nomeEmpresa(c.id);
-      const sel = String(c.id) === String(this.empresaId) ? " selected" : "";
-      return `<option value="${this.esc(c.id)}"${sel}>${this.esc(c.id + " - " + nome)}</option>`;
-    }).join("");
-    const vazioEmp = opcoes ? "" : `<option value="" disabled>Nenhuma empresa gerida pelo grupo</option>`;
     const motivos = this.MOTIVOS.map((m) => `<option value="${this.esc(m)}"${m === this.motivo ? " selected" : ""}>${this.esc(m)}</option>`).join("");
-    const nota = this.parte
-      ? ("Parte: " + this.parte.rotulo)
-      : "Pesquise o cliente acima. Os dados dele aparecem antes deste formulário.";
+    const porTitulo = !!String(this.fTitulo || "").replace(/\D/g, "") && !!this.tituloEmpresa;
+    const nota = this.parte ? "" : "Pesquise o cliente acima. Os dados dele aparecem antes deste formulário.";
+    const campoEmpresa = porTitulo ? "" : `<label>Empresa processada<div id="pc-emp-slot"></div></label>`;
     const form = !edita ? "" : `<div class="pc-form" id="pc-form">
-        <p class="cj-nota">${this.esc(nota)}</p>
-        <label>Empresa processada
-          <select id="pc-empresa"><option value="">Selecione</option>${vazioEmp}${opcoes}</select>
-        </label>
+        ${nota ? `<p class="cj-nota">${this.esc(nota)}</p>` : ""}
+        ${campoEmpresa}
         <label>Número do processo
           <input type="text" id="pc-numero" value="${this.esc(this.processo)}" autocomplete="off">
         </label>
@@ -148,24 +141,26 @@ const ProcessoContraApp = {
       this.filtro = filtro.value || "";
       this.pintarLista();
     });
-    const emp = document.getElementById("pc-empresa");
     const num = document.getElementById("pc-numero");
     const mot = document.getElementById("pc-motivo");
-    if (emp) emp.addEventListener("change", () => { this.empresaId = emp.value || ""; });
     if (num) num.addEventListener("input", () => { this.processo = num.value || ""; });
     if (mot) mot.addEventListener("change", () => { this.motivo = mot.value || ""; });
     const cancelar = document.getElementById("pc-cancelar");
     const abrir = document.getElementById("pc-abrir");
     if (cancelar) cancelar.addEventListener("click", () => this.limpar());
     if (abrir) abrir.addEventListener("click", () => this.abrir());
+    this.empEmpresa.render();
     this.pintarLista();
     if (window.lucide && lucide.createIcons) lucide.createIcons();
   },
 
   limpar() {
     this.empresaId = "";
+    this.tituloEmpresa = "";
     this.processo = "";
     this.motivo = "";
+    this.empEmpresa.open = false;
+    this.empEmpresa.query = "";
     this.render();
   },
 
@@ -197,11 +192,11 @@ const ProcessoContraApp = {
             <select class="form-control" id="pcf-filter-unidade"><option value="">Selecione o emp...</option>${optsUni}</select></div>
           <div class="form-group" style="display:flex;align-items:flex-end;">
             <button type="button" class="btn btn-primary" id="pcf-limpar" style="height:38px;width:100%;" title="Nova Busca / Limpar"><i data-lucide="eraser" style="width:14px;margin-right:6px;"></i> Limpar</button></div>
-          <div class="form-group"><label>Nome do Cliente</label>
+          <div class="form-group" style="grid-column:1 / 2;"><label>Nome do Cliente</label>
             <div class="pc-drop"><input type="text" class="form-control" id="pcf-filter-nome" placeholder="Digite para buscar..." value="${this.esc(this.fNome)}" autocomplete="off"></div></div>
-          <div class="form-group"><label>Telefone</label>
+          <div class="form-group" style="grid-column:2 / 3;"><label>Telefone</label>
             <div class="pc-drop"><input type="text" class="form-control" id="pcf-filter-telefone" placeholder="Digite para buscar..." value="${this.esc(this.fTel)}" autocomplete="off"></div></div>
-          <div class="form-group"><label>E-mail</label>
+          <div class="form-group" style="grid-column:3 / 4;"><label>E-mail</label>
             <input type="text" class="form-control" id="pcf-filter-email" placeholder="Digite para buscar..." value="${this.esc(this.fEmail)}" autocomplete="off"></div>
         </div>
       </div>
@@ -243,6 +238,7 @@ const ProcessoContraApp = {
       if (typeof window.handleDynamicCustomerSearch === "function") window.handleDynamicCustomerSearch(this.fNome, "nome", "pc");
     });
     if (tel) tel.addEventListener("input", () => {
+      tel.value = String(tel.value || "").replace(/\D/g, "");
       this.fTel = tel.value || "";
       this.clienteId = "";
       this.travarFiltros();
@@ -271,6 +267,64 @@ const ProcessoContraApp = {
     if (limpar) limpar.addEventListener("click", () => this.limparBusca());
     this.travarFiltros();
     this.empPicker.render();
+  },
+
+  empEmpresa: {
+    id: "pc-empresa-filter",
+    open: false,
+    query: "",
+    bound: false,
+    items() {
+      return ProcessoContraApp.empresas().map((c) => ({
+        id: String(c.id),
+        label: String(c.id) + " - " + String(ProcessoContraApp.nomeEmpresa(c.id) || c.name || c.tradeName || "").toUpperCase()
+      }));
+    },
+    opts() {
+      return {
+        id: this.id,
+        label: "Empresa",
+        items: this.items(),
+        selectedIds: ProcessoContraApp.empresaId ? [String(ProcessoContraApp.empresaId)] : [],
+        open: this.open,
+        query: this.query,
+        single: true,
+        emptyMeansAll: false,
+        emptyLabel: "Selecione",
+        nouns: { singular: "empresa", plural: "empresas", noMatch: "Nenhuma empresa com esse nome." }
+      };
+    },
+    bind() {
+      if (this.bound || !window.MlEmpresaFilter) return;
+      this.bound = true;
+      const self = this;
+      MlEmpresaFilter.bind(this.id, {
+        toggleOpen() {
+          self.open = !self.open;
+          if (!self.open) self.query = "";
+          self.render();
+        },
+        close() { self.open = false; self.query = ""; self.render(); },
+        setQuery(q) {
+          self.query = q || "";
+          const list = document.getElementById(self.id + "-list");
+          if (list) list.innerHTML = MlEmpresaFilter.listHtml(self.opts());
+        },
+        toggleId(itemId) {
+          ProcessoContraApp.empresaId = String(itemId || "");
+          self.open = false;
+          self.query = "";
+          self.render();
+        }
+      });
+    },
+    render() {
+      const slot = document.getElementById("pc-emp-slot");
+      if (!slot || !window.MlEmpresaFilter) return;
+      this.bind();
+      slot.innerHTML = MlEmpresaFilter.html(this.opts());
+      if (window.lucide) lucide.createIcons();
+    }
   },
 
   empPicker: {
@@ -408,6 +462,7 @@ const ProcessoContraApp = {
     this.erroBusca = "";
     this.buscando = false;
     this.parte = null;
+    this.tituloEmpresa = "";
     this.empPicker.open = false;
     this.empPicker.query = "";
     this.render();
@@ -509,6 +564,7 @@ const ProcessoContraApp = {
     const contrato = String(this.fContrato || "").trim();
     const doc = String(this.fDoc || "").replace(/\D/g, "");
     const get = window.relSiengeGet;
+    this.tituloEmpresa = "";
     if (titulo) {
       let bill = null;
       try { bill = await get("/accounts-receivable/receivable-bills/" + encodeURIComponent(titulo)); }
@@ -517,6 +573,9 @@ const ProcessoContraApp = {
       const tipo = String(bill.documentId || "").trim().toUpperCase();
       if (tipo && tipo !== "CT" && tipo !== "CTCV") throw new Error("O título " + titulo + " não é de venda.");
       if (!bill.customerId) throw new Error("O título não tem cliente.");
+      const company = String(bill.companyId || bill.debtorId || "").replace(/\D/g, "");
+      this.tituloEmpresa = company;
+      if (company) this.empresaId = company;
       return String(bill.customerId);
     }
     if (contrato) {
@@ -783,10 +842,11 @@ const ProcessoContraApp = {
   async abrir() {
     if (!this.podeEditar()) return;
     if (!this.parte) { alert("Pesquise o cliente antes de abrir o processo."); return; }
-    const empresa = String(this.empresaId || "").replace(/\D/g, "");
+    const porTitulo = !!String(this.fTitulo || "").replace(/\D/g, "") && !!this.tituloEmpresa;
+    const empresa = porTitulo ? this.tituloEmpresa : String(this.empresaId || "").replace(/\D/g, "");
     const processo = String(this.processo || "").trim();
     const motivo = String(this.motivo || "").trim();
-    if (!empresa) { alert("Escolha a empresa que está sendo processada."); return; }
+    if (!empresa) { alert(porTitulo ? "Esse título não tem empresa vinculada." : "Escolha a empresa que está sendo processada."); return; }
     if (!processo) { alert("Informe o número do processo."); return; }
     if (!this.MOTIVOS.includes(motivo)) { alert("Escolha o motivo na lista."); return; }
     const fc = this.fb();

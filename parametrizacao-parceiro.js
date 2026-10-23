@@ -233,6 +233,22 @@ const ParametrizacaoParceiroApp = {
       .sort((a, b) => Number(a.id) - Number(b.id));
   },
 
+  papelDoCentro(cc) {
+    const gravado = String(cc && cc.papel || "");
+    if (gravado === "terrenista" || gravado === "empreendedor" || gravado === "obra") return gravado;
+    if (this.ehCcParceiro(cc) || Number(this.customCc(cc && cc.id).perc_terrenista) > 0) return "terrenista";
+    return "obra";
+  },
+
+  setCcPapel(ccId, papel) {
+    const obra = this.currentObra();
+    if (!obra) return;
+    const cc = (obra.costCenters || []).find((c) => String(c.id) === String(ccId));
+    if (!cc) return;
+    cc.papel = papel === "terrenista" || papel === "empreendedor" ? papel : "obra";
+    this.persist();
+  },
+
   isSociedade(p) {
     return this.kindOf(p) === "sociedade";
   },
@@ -371,7 +387,7 @@ const ParametrizacaoParceiroApp = {
 
   chipsSocioHtml(p, s) {
     const chips = [];
-    if (this.isSociedade(p)) {
+    if (this.isSociedade(p) || this.isMista(p)) {
       chips.push(s.ccTitulo
         ? `<span class="pp-chip">CC ${this.esc(s.ccTitulo)}</span>`
         : `<span class="pp-chip is-falta">Sem centro</span>`);
@@ -1627,13 +1643,14 @@ const ParametrizacaoParceiroApp = {
   vinculoTituloHtml(p, s) {
     const F = window.MlEmpresaFilter;
     const sociedade = this.isSociedade(p);
+    const comCentro = sociedade || this.isMista(p);
     const plano = !sociedade && F ? F.html(this.opcoesVinculo("plano", s)) : "";
     const doc = F ? F.html(this.opcoesVinculo("doc", s)) : "";
     const avisoPlano = this.loadingCats ? "Carregando o plano financeiro…" : (this.planosSaida().length ? "" : "Nenhuma conta de resultado de saída carregada.");
     const avisoDoc = this.documentosTitulo().length ? "" : "Os tipos de documento ainda não carregaram.";
-    const centro = sociedade && F ? F.html(this.opcoesCentro(p, s)) : "";
+    const centro = comCentro && F ? F.html(this.opcoesCentro(p, s)) : "";
     return `<div>
-      ${sociedade ? `<div class="pp-vinculo-filtros" style="margin-bottom:10px;"><div id="pp-vinculo-cc-slot" class="pp-vinculo-slot">${centro}</div></div>` : ""}
+      ${comCentro ? `<div class="pp-vinculo-filtros" style="margin-bottom:10px;"><div id="pp-vinculo-cc-slot" class="pp-vinculo-slot">${centro}</div></div>` : ""}
       ${sociedade ? this.planosSocioHtml(p, s) : `<div class="pp-vinculo-filtros"><div id="pp-vinculo-plano-slot" class="pp-vinculo-slot">${plano}</div></div>`}
       <div class="pp-vinculo-filtros" style="margin-top:10px;">
         <div id="pp-vinculo-doc-slot" class="pp-vinculo-slot">${doc}</div>
@@ -1691,9 +1708,11 @@ const ParametrizacaoParceiroApp = {
     const s = this.socioVinculoAberto();
     const p = this.current();
     const varios = !!(s && p && this.isSociedade(p));
+    const comCentro = !!(s && p && (this.isSociedade(p) || this.isMista(p)));
     const campos = varios
       ? [{ campo: "cc", idx: null }].concat(this.normalizarPlanos(s).map((_, idx) => ({ campo: "plano", idx })))
       : [{ campo: "plano", idx: null }];
+    if (comCentro && !varios) campos.unshift({ campo: "cc", idx: null });
     campos.push({ campo: "doc", idx: null });
     campos.forEach(({ campo, idx }) => {
       const id = campo === "cc" ? "pp-vinculo-cc"
@@ -2549,7 +2568,7 @@ const ParametrizacaoParceiroApp = {
               ${p.kind === "sociedade"
                 ? "Sociedade: não aplica rateio por obra. Cada sócio tem um percentual de participação e recebe pela distribuição de lucro."
                 : (p.kind === "mista"
-                  ? "Mista: há sócios com percentual de participação e também parceiros com rateio por obra."
+                  ? "Mista: há um parceiro terrenista, com rateio por obra, e o empreendedor pode ter sócios. O centro de custo dos sócios empreendedores é cadastrado à parte do centro do terrenista."
                   : "Parceria: pode ter vários parceiros, cada um com o seu percentual, como os sócios. O rateio por obra continua na aba Rateio DFC.")}
             </p>
           </div>
@@ -2615,7 +2634,9 @@ const ParametrizacaoParceiroApp = {
         : (fatiaTxt || "Parte deste parceiro na fatia já configurada em cada obra.");
       const introTitulo = sociedade
         ? "Cada plano gera um título neste centro de custo. O percentual do plano vale sobre a participação: 70% e 30% de quem tem 50% são 35% e 15%."
-        : this.textoRepasse(p);
+        : (this.isMista(p)
+          ? "O título deste sócio empreendedor sai no centro de custo escolhido aqui. O centro do parceiro terrenista é o da obra."
+          : this.textoRepasse(p));
       const pctResumo = !mostraPct ? "" : `<span class="pp-pessoa-pct">${s.sharePct === "" || s.sharePct == null ? "—" : this.esc(this.fmtPct(s.sharePct)) + "%"}<small>${divideFatia ? (fatias.length === 1 ? "efetivo " + this.esc(this.fmtPctCurto(fatias[0].efetivo)) + "%" : "da fatia") : "participação"}</small></span>`;
       return `<div class="pp-pessoa${aberto ? " is-open" : ""}">
         <button type="button" class="pp-pessoa-h" onclick="ParametrizacaoParceiroApp.toggleSocio('${this.esc(s.id)}')">
@@ -2658,7 +2679,9 @@ const ParametrizacaoParceiroApp = {
           ? `Clique no ${pessoa} para informar a parte dele na fatia da obra, o plano e o documento.`
           : (sociedade
             ? `Clique no ${pessoa} para ver a participação, o centro de custo, os planos e a conta.`
-            : `Clique no ${pessoa} para ver o plano financeiro e o tipo de documento. O percentual fica na obra e o centro de custo é o do loteador.`)}</p>
+            : (this.isMista(p)
+              ? "Clique no sócio empreendedor para informar a participação, o centro de custo dele, o plano e o documento. O parceiro terrenista continua no rateio da obra."
+              : `Clique no ${pessoa} para ver o plano financeiro e o tipo de documento. O percentual fica na obra e o centro de custo é o do loteador.`))}</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
           <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;min-width:120px;">
             <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;">${pessoas}</div>
@@ -2824,6 +2847,16 @@ const ParametrizacaoParceiroApp = {
     }
     const centros = this.centrosOrdenados(obra.costCenters || []);
     const total = centros.length;
+    const mista = this.isMista(p);
+    const papelSel = (cc) => {
+      const atual = this.papelDoCentro(cc);
+      const opt = (valor, rotulo) => `<option value="${valor}"${atual === valor ? " selected" : ""}>${rotulo}</option>`;
+      return `<select class="ppcc-papel" onchange="ParametrizacaoParceiroApp.setCcPapel('${cc.id}', this.value)">
+        ${opt("obra", "Obra")}
+        ${opt("empreendedor", "Sócios empreendedores")}
+        ${opt("terrenista", "Parceiro terrenista")}
+      </select>`;
+    };
     const rateio = sociedade ? "" : travado != null
       ? `<div class="ppcc-kpi" title="Percentual cadastrado no centro de custo. Não pode ser alterado aqui.">
           <span class="ppcc-kpi-rot">Rateio da obra</span>
@@ -2836,6 +2869,7 @@ const ParametrizacaoParceiroApp = {
     const linhas = centros.map(cc => `<tr>
         <td class="ppcc-id">${this.esc(cc.id)}</td>
         <td class="ppcc-nome" title="${this.esc(cc.name)}">${this.esc(cc.name)}</td>
+        ${mista ? `<td>${papelSel(cc)}</td>` : ""}
         <td class="is-center">
           <label class="moura-switch" title="Entra na conta">
             <input type="checkbox" ${cc.inAccount ? "checked" : ""} onchange="ParametrizacaoParceiroApp.setCcInAccount('${cc.id}', this.checked)">
@@ -2847,14 +2881,14 @@ const ParametrizacaoParceiroApp = {
             <i data-lucide="trash-2" style="width:15px;height:15px;"></i>
           </button>
         </td>
-      </tr>`).join("") || `<tr><td colspan="4" class="ppcc-vazio">Nenhum centro de custo nesta obra.</td></tr>`;
+      </tr>`).join("") || `<tr><td colspan="${mista ? 5 : 4}" class="ppcc-vazio">Nenhum centro de custo nesta obra.</td></tr>`;
     return `
       <div class="crm-card ppcc">
         <div class="ppcc-obras">${this.obraChipsHtml(p, sociedade)}</div>
         <div class="ppcc-head">
           <div>
             <div class="ppcc-titulo">Obra ${this.esc(obra.code)}</div>
-            <div class="ppcc-sub">${sociedade ? "Os centros entram na conta da SPE, sem rateio." : "Centros de custo que entram na prestação de contas desta obra."}</div>
+            <div class="ppcc-sub">${sociedade ? "Os centros entram na conta da SPE, sem rateio." : (mista ? "Marque o centro dos sócios empreendedores e o do parceiro terrenista. Os dois entram na prestação." : "Centros de custo que entram na prestação de contas desta obra.")}</div>
           </div>
           <div class="ppcc-kpis">
             <div class="ppcc-kpi">
@@ -2879,8 +2913,8 @@ const ParametrizacaoParceiroApp = {
         </div>
         <div class="cc-scroll ppcc-scroll">
           <table class="cc-table ppcc-table">
-            <colgroup><col style="width:96px"><col><col style="width:130px"><col style="width:64px"></colgroup>
-            <thead><tr><th>C.C.</th><th>Nome</th><th class="is-center">Entra na conta</th><th class="is-right">Ações</th></tr></thead>
+            <colgroup><col style="width:96px"><col>${mista ? `<col style="width:210px">` : ""}<col style="width:130px"><col style="width:64px"></colgroup>
+            <thead><tr><th>C.C.</th><th>Nome</th>${mista ? `<th>Quem</th>` : ""}<th class="is-center">Entra na conta</th><th class="is-right">Ações</th></tr></thead>
             <tbody>${linhas}</tbody>
           </table>
         </div>

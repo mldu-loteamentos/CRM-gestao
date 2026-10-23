@@ -1140,12 +1140,23 @@ const OrcamentoRepassesApp = {
     return typeof ParametrizacaoParceiroApp !== "undefined" ? ParametrizacaoParceiroApp : (window.ParametrizacaoParceiroApp || null);
   },
 
+  ccCorporativo(c) {
+    return this.nomeCc(c).indexOf("CORPORATIVO") >= 0;
+  },
+
+  /* Só entra na distribuição ou no repasse o centro marcado na parametrização. Corporativo, como o 70200, fica de fora. */
+  ccEntraDistribuicao(c, todos) {
+    if (!c || this.ccCorporativo(c)) return false;
+    if (todos) return true;
+    return c.inAccount !== false;
+  },
+
   centrosDa(part, obraCode, todos) {
     const map = new Map();
     (part.obras || []).forEach((obra) => {
       if (obraCode && String(obra.code) !== String(obraCode)) return;
       (obra.costCenters || []).forEach((c) => {
-        if (!todos && c.inAccount === false) return;
+        if (!this.ccEntraDistribuicao(c, todos)) return;
         const id = String(c.id || "").replace(/\D/g, "");
         if (!id || map.has(id)) return;
         map.set(id, { obra: obra, nome: String(c.name || "").trim() });
@@ -1508,6 +1519,7 @@ const OrcamentoRepassesApp = {
     for (let i = 1; i < 12; i++) pagamento[i] = resultado[i - 1];
     const jan28 = resultado[11] || 0;
     if (byId.g_12) byId.g_12.months = pagamento.slice();
+    dezMap.g_12 = pagamento[0];
     const vivo = new Set(["g_03", "g_06", "g_08", "g_10", "g_12"]);
     tpl.forEach((g) => {
       const tem = g.months.some((v) => Math.abs(v) >= 0.005) || [...g.accs.values()].some((a) => a.months.some((v) => Math.abs(v) >= 0.005));
@@ -1802,7 +1814,7 @@ const OrcamentoRepassesApp = {
     }).join("");
     const obras = sociedade ? "" : (part.obras || []).map((o) => {
       const on = String(o.code) === this.obraCode;
-      const n = (o.costCenters || []).filter((c) => c.inAccount !== false).length;
+      const n = (o.costCenters || []).filter((c) => c.inAccount !== false && !this.ccCorporativo(c)).length;
       return `<button type="button" role="tab" aria-selected="${on ? "true" : "false"}" class="ml-tab${on ? " is-active" : ""}" data-rep-obra="${OrcEst.esc(o.code)}"><i data-lucide="building-2"></i> Obra ${OrcEst.esc(o.code)}${n ? ` <span class="ml-tab-count">${n}</span>` : ""}</button>`;
     }).join("");
     const vistos = new Set();
@@ -1810,7 +1822,7 @@ const OrcamentoRepassesApp = {
     (sociedade ? (part.obras || []) : (obra ? [obra] : [])).forEach((o) => {
       (o.costCenters || []).forEach((c) => {
         const id = String(c.id || "");
-        if (!id || vistos.has(id)) return;
+        if (!id || vistos.has(id) || this.ccCorporativo(c)) return;
         vistos.add(id);
         centros.push(c);
       });
@@ -1869,6 +1881,7 @@ const OrcamentoRepassesApp = {
       const temParceiro = !sociedade && [...centros.values()].some((meta) => this.ccEhDoParceiro(meta.nome));
       centros.forEach((meta, ccId) => {
         if (temParceiro && !this.ccEhDoParceiro(meta.nome)) return;
+        if (this.ccCorporativo({ name: meta.nome })) return;
         const um = new Map([[ccId, meta]]);
         const anoMolde = this.molde();
         this.encher(anoMolde.tpl, anoMolde.byId, linhas, um, part, usarRateio);

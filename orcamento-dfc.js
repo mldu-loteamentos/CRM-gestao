@@ -1091,11 +1091,18 @@ const OrcamentoDfcApp = {
       empresas.forEach((emp) => datas.forEach((dt) => jobs.push({ emp: String(emp.id), dt: dt })));
       let cursor = 0;
       const self = this;
+      let falha = null;
       const worker = async () => {
         while (cursor < jobs.length) {
           const job = jobs[cursor++];
           const diaPedido = self.diaSeguinte(job.dt);
-          const lista = await api.getTrialBalance(job.emp, diaPedido, diaPedido);
+          let lista = [];
+          try {
+            lista = await api.getTrialBalance(job.emp, diaPedido, diaPedido);
+          } catch (e) {
+            falha = e;
+            continue;
+          }
           const dia = mapa[job.dt] || (mapa[job.dt] = {});
           (lista || []).forEach((b) => {
             const linha = self.linhaBalancete(b);
@@ -1111,6 +1118,7 @@ const OrcamentoDfcApp = {
       const n = Math.min(3, jobs.length || 1);
       await Promise.all(Array.from({ length: n }, () => worker()));
       if (token !== this._sToken) return;
+      if (!porConta.size && falha) throw falha;
       const porEmpresa = {};
       porConta.forEach((c) => {
         if (!porEmpresa[c.empresa]) porEmpresa[c.empresa] = [];
@@ -1134,7 +1142,10 @@ const OrcamentoDfcApp = {
     } catch (e) {
       if (token !== this._sToken) return;
       this._saldoEstado = "erro";
-      this._saldoErro = (e && e.message) || "Não consegui ler o balancete de verificação.";
+      const st = Number(e && e.status);
+      this._saldoErro = st === 422
+        ? "O Sienge recusou a consulta do balancete."
+        : ((e && e.message) || "Não consegui ler o balancete de verificação.");
     }
     this.atualizarSaldosDom();
   },

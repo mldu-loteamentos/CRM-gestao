@@ -3596,20 +3596,21 @@ const SiengeApiService = {
     const ini = String(initialPeriod || "").slice(0, 10);
     const fim = String(finalPeriod || "").slice(0, 10);
     if (!companyId || !ini || !fim) return [];
-    const base = `/trial-balance?companyId=${encodeURIComponent(companyId)}&initialPeriod=${ini}&finalPeriod=${fim}&onlyAccountsWithMovements=false`;
-    const tentativas = [base + "&reportType=SOCIETARY", base + "&reportType=S", base];
-    let vazio = null;
+    const base = `/trial-balance?companyId=${encodeURIComponent(companyId)}&initialPeriod=${ini}&finalPeriod=${fim}`;
+    const tentativas = [base, base + "&onlyAccountsWithMovements=false"];
     let ultimo = null;
     for (let i = 0; i < tentativas.length; i++) {
       try {
-        const lista = await siengeFetchAllPages(tentativas[i], 200);
-        if (lista && lista.length) return lista;
-        vazio = lista || [];
+        const res = await siengeFetchWithRetry(tentativas[i], 2);
+        if (Array.isArray(res)) return res;
+        const lista = (res && (res.results || res.data || res.accounts)) || [];
+        return Array.isArray(lista) ? lista : [];
       } catch (e) {
         ultimo = e;
+        const st = Number(e && e.status);
+        if (st && st !== 400 && st !== 422) throw e;
       }
     }
-    if (vazio) return vazio;
     throw ultimo || new Error("Balancete indisponível");
   },
 
