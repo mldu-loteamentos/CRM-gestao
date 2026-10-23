@@ -883,29 +883,55 @@ const GerarPagamentoApp = {
   },
 
   /**
-   * Lote que o Integra registrou no Sienge, mas cujas parcelas não estão mais naquele número de lote:
-   * foi excluído direto no Sienge. Sai da lista e os títulos voltam a ficar livres.
+   * Lote que o Integra registrou no Sienge e que o operador excluiu direto no Sienge.
+   * O lote inteiro some quando nenhuma parcela continua naquele número.
+   * Se só parte saiu, esses títulos saem do lote do Integra e voltam para a busca, para reenvio.
+   * sentToBank sem o número do lote não segura o título: o lote daquele número já não existe.
    */
   async conferirLotesExcluidosNoSienge() {
     const s = this.state;
     const lidoEm = s.loteSiengeLidoEm || 0;
-    const sumidos = s.lotes.filter((l) => {
+    const soltar = (k, numero) => {
+      const atual = s.loteSienge[k];
+      if (!atual || atual === "sim" || atual === numero) delete s.loteSienge[k];
+    };
+    const passo = (acao, msg) => ({ acao, por: this.usuarioAtual(), porEmail: this.emailAtual(), em: new Date().toISOString(), ok: true, msg });
+    const sumidos = [];
+    for (const l of s.lotes) {
       const sg = l.sienge || {};
-      if (!this.loteNoSienge(l) || !sg.numero) return false;
+      if (!this.loteNoSienge(l) || !sg.numero) continue;
       const desde = new Date(sg.geradoEm || l.criadoEm || 0).getTime();
-      if (!(desde < lidoEm)) return false;
-      const chaves = (l.itens || []).map((i) => this.chaveTitulo(i.titulo, i.parcela));
-      if (!chaves.length || !chaves.every((k) => s.formaSienge[k])) return false;
-      return chaves.every((k) => !s.loteSienge[k] || (s.loteSienge[k] !== "sim" && s.loteSienge[k] !== String(sg.numero)));
-    });
-    for (const l of sumidos) {
-      const sg = l.sienge;
-      const msg = `O lote nº ${sg.numero} não existe mais no Sienge (excluído direto no Sienge).`;
-      sg.historico = (sg.historico || []).concat([{ acao: "excluir", por: this.usuarioAtual(), porEmail: this.emailAtual(), em: new Date().toISOString(), ok: true, msg }]).slice(-30);
-      sg.status = "excluido";
-      l.cancelado = true;
-      l.canceladoEm = new Date().toISOString();
-      l.canceladoMotivo = msg;
+      if (!(desde < lidoEm)) continue;
+      const itens = l.itens || [];
+      const chaves = itens.map((i) => this.chaveTitulo(i.titulo, i.parcela));
+      if (!chaves.length) continue;
+      const numero = String(sg.numero);
+      const visto = (k) => !!s.formaSienge[k];
+      const ainda = (k) => s.loteSienge[k] === numero;
+      const saiu = chaves.filter((k) => visto(k) && !ainda(k));
+      if (!saiu.length) continue;
+      const loteSumiu = chaves.every(visto) && chaves.every((k) => !ainda(k));
+      if (loteSumiu) {
+        const msg = `O lote nº ${numero} não existe mais no Sienge (excluído direto no Sienge). Os títulos podem ser reenviados.`;
+        sg.historico = (sg.historico || []).concat([passo("excluir", msg)]).slice(-30);
+        sg.status = "excluido";
+        l.cancelado = true;
+        l.canceladoEm = new Date().toISOString();
+        l.canceladoMotivo = msg;
+        chaves.forEach((k) => soltar(k, numero));
+        await this.salvarLote(l);
+        this.auditarLote(l);
+        sumidos.push(l);
+        continue;
+      }
+      const fora = new Set(saiu);
+      const lista = itens.filter((i) => fora.has(this.chaveTitulo(i.titulo, i.parcela))).map((i) => `${i.titulo}/${i.parcela || 1}`);
+      const resto = itens.filter((i) => !fora.has(this.chaveTitulo(i.titulo, i.parcela)));
+      const msg = `Títulos ${lista.join(", ")} saíram do lote nº ${numero} no Sienge e podem ser reenviados.`;
+      sg.historico = (sg.historico || []).concat([passo("retirar", msg)]).slice(-30);
+      l.itens = resto;
+      l.total = Math.round(resto.reduce((t, i) => t + Number(i.valor || 0), 0) * 100) / 100;
+      saiu.forEach((k) => soltar(k, numero));
       await this.salvarLote(l);
       this.auditarLote(l);
     }
@@ -1944,7 +1970,7 @@ const GerarPagamentoApp = {
     if (!lote || !lote.id || !window.AuditService) return;
     const eventos = [{ tipo: "LOTE_GERADO", em: lote.criadoEm, por: lote.criadoPor, porEmail: lote.criadoPorEmail, ok: true }];
     ((lote.sienge && lote.sienge.historico) || []).forEach((h) => eventos.push({
-      tipo: h.acao === "excluir" ? "LOTE_EXCLUIDO" : (!h.ok ? "LOTE_ERRO" : (h.acao === "aprovar" ? "LOTE_APROVADO" : "LOTE_SIENGE")),
+      tipo: h.acao === "excluir" || h.acao === "retirar" ? "LOTE_EXCLUIDO" : (!h.ok ? "LOTE_ERRO" : (h.acao === "aprovar" ? "LOTE_APROVADO" : "LOTE_SIENGE")),
       acao: h.acao, em: h.em, por: h.por, porEmail: h.porEmail || "", ok: !!h.ok, msg: h.ok && h.acao !== "excluir" ? "" : h.msg || ""
     }));
     let feitos;
@@ -1977,7 +2003,7 @@ const GerarPagamentoApp = {
       LOTE_SIENGE: "Lote criado no Sienge pelo robô",
       LOTE_APROVADO: "Lote aprovado no Sienge pelo robô",
       LOTE_ERRO: ev.acao === "aprovar" ? "O robô não aprovou o lote no Sienge" : "O robô não criou o lote no Sienge",
-      LOTE_EXCLUIDO: ev.acao === "excluir" ? "Lote excluído no Sienge" : "Lote excluído no Integra"
+      LOTE_EXCLUIDO: ev.acao === "retirar" ? "Títulos saíram do lote no Sienge e voltaram para reenvio" : (ev.acao === "excluir" ? "Lote excluído no Sienge" : "Lote excluído no Integra")
     }[ev.tipo] || ev.tipo;
     const numero = (ev.tipo === "LOTE_SIENGE" || ev.tipo === "LOTE_APROVADO" || (ev.tipo === "LOTE_ERRO" && ev.acao === "aprovar")) && sg.numero ? ` (Sienge nº ${sg.numero})` : "";
     try {

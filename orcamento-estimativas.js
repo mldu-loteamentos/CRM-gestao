@@ -1330,6 +1330,13 @@ const OrcamentoRepassesApp = {
     return !!((por2 && Object.keys(por2).length) || (depois && depois.contas && Object.keys(depois.contas).length));
   },
 
+  /* Repasse e distribuição previstos no forecast não entram nesta tela: o repasse é calculado aqui. */
+  forecastDeRepasse(conta, nome) {
+    const gid = this.grupoEfetivo(conta, nome);
+    if (gid === "g_04_01" || gid === "g_11_01") return true;
+    return /REPASSE|DISTRIBUICAO/.test(OrcEst.norm(nome));
+  },
+
   linhasDez2026(companyId) {
     this.garantirForecastLocal();
     const app = window.ResultadoCaixaApp;
@@ -1355,13 +1362,16 @@ const OrcamentoRepassesApp = {
           const info = arq.contas[cc][code] || {};
           const valor = this.valorForecast(info, "2026-12");
           if (!valor) return;
+          const nome = info.nome || "";
+          const conta = this.contaNoDfc(code, nome);
+          if (this.forecastDeRepasse(conta, nome)) return;
           const m = OrcEst.z();
           m[0] = valor;
           out.push({
             e: id || emp,
             cc: String(cc).replace(/\D/g, "") || String(cc),
-            conta: this.contaNoDfc(code, info.nome || ""),
-            cn: info.nome || "",
+            conta: conta,
+            cn: nome,
             m: m
           });
         });
@@ -2112,13 +2122,37 @@ const OrcamentoRepassesApp = {
     </section>`;
   },
 
+  abasRepasse(lista, temYpes) {
+    const itens = lista.map((p) => {
+      const app = this.appPar();
+      const tipo = app && typeof app.kindLabel === "function" ? app.kindLabel(p) : (p.kind || "");
+      return { id: String(p.id), nome: p.partnerName || "Prestação", tipo: tipo || "" };
+    });
+    if (temYpes) itens.push({ id: "ypes-21", nome: "Reserva dos Ypês IV", tipo: "21" });
+    itens.sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR") || String(a.id).localeCompare(String(b.id)));
+    return itens.map((p) => {
+      const on = String(p.id) === String(this.abaId);
+      return `<button type="button" role="tab" aria-selected="${on ? "true" : "false"}" class="ml-tab${on ? " is-active" : ""}" data-rep-aba="${OrcEst.esc(p.id)}"><i data-lucide="hand-coins"></i> ${OrcEst.esc(p.nome)}${p.tipo ? ` <span class="ml-tab-count">${OrcEst.esc(p.tipo)}</span>` : ""}</button>`;
+    }).join("");
+  },
+
   paintCorpo() {
     const body = document.getElementById("orc-rep-body");
     if (!body) return;
     const lista = this.prestacoes();
     const ypes = this.htmlYpes();
-    if (!lista.length) {
-      body.innerHTML = ypes || `<div class="orc-dfc-erro">Não há parceria nem sociedade parametrizada para as empresas selecionadas.</div>`;
+    const abaYpes = "ypes-21";
+    if (!lista.length && !ypes) {
+      body.innerHTML = `<div class="orc-dfc-erro">Não há parceria nem sociedade parametrizada para as empresas selecionadas.</div>`;
+      if (window.lucide && lucide.createIcons) lucide.createIcons();
+      return;
+    }
+    if (ypes && (String(this.abaId) === abaYpes || !lista.length)) {
+      this.abaId = abaYpes;
+      body.innerHTML = `<div class="ml-tabs orc-rep-tabs" role="tablist">${this.abasRepasse(lista, true)}</div>${ypes}`;
+      body.querySelectorAll("[data-rep-aba]").forEach((btn) => {
+        btn.addEventListener("click", () => this.setAba(btn.getAttribute("data-rep-aba")));
+      });
       if (window.lucide && lucide.createIcons) lucide.createIcons();
       return;
     }
@@ -2129,12 +2163,7 @@ const OrcamentoRepassesApp = {
     const obra = sociedade ? null : this.obraAtual(part);
     this.obraCode = obra ? String(obra.code) : "";
     const card = this.montarDfc(part, this.linhasDaEmpresa(part.companyId), 0, sociedade ? "" : this.obraCode);
-    const abas = lista.map((p) => {
-      const on = String(p.id) === this.abaId;
-      const app = this.appPar();
-      const tipo = app && typeof app.kindLabel === "function" ? app.kindLabel(p) : (p.kind || "");
-      return `<button type="button" role="tab" aria-selected="${on ? "true" : "false"}" class="ml-tab${on ? " is-active" : ""}" data-rep-aba="${OrcEst.esc(p.id)}"><i data-lucide="hand-coins"></i> ${OrcEst.esc(p.partnerName || "Prestação")}${tipo ? ` <span class="ml-tab-count">${OrcEst.esc(tipo)}</span>` : ""}</button>`;
-    }).join("");
+    const abas = this.abasRepasse(lista, !!ypes);
     const obras = sociedade ? "" : (part.obras || []).map((o) => {
       const on = String(o.code) === this.obraCode;
       const n = (o.costCenters || []).filter((c) => c.inAccount !== false).length;
@@ -2189,8 +2218,7 @@ const OrcamentoRepassesApp = {
         ? "O DFC junta os centros 14201 e 70600. O saldo dos dois é a distribuição do mês seguinte, separada entre Moura Leite, Soma e PRF."
         : (card.extra
         ? "Esta obra tem o centro do empreendedor, o da parceria e outros centros (marketing, comercial, gestão). O DFC soma os centros marcados por inteiro, só nas contas ligadas na prestação de contas. O repasse do final é o percentual do parceiro sobre esse DFC, pago no mês seguinte no centro do empreendedor."
-        : "Com o centro principal da obra marcado, o DFC soma os centros marcados por inteiro. Sem ele, o valor é o rateio do parceiro sobre a obra. A linha 12 fica no mês em que o resultado acontece. O repasse é a variação desse mês paga no mês seguinte: janeiro de 2027 paga dezembro de 2026. A variação do 13301 é paga no 13300, na conta cadastrada no 13301. A do 13401 é paga no 13400, na conta do 13401. O centro de custo não entra no cadastro do credor."))))}</p>
-      ${ypes}`;
+        : "Com o centro principal da obra marcado, o DFC soma os centros marcados por inteiro. Sem ele, o valor é o rateio do parceiro sobre a obra. A linha 12 fica no mês em que o resultado acontece. O repasse é a variação desse mês paga no mês seguinte: janeiro de 2027 paga dezembro de 2026. A variação do 13301 é paga no 13300, na conta cadastrada no 13301. A do 13401 é paga no 13400, na conta do 13401. O centro de custo não entra no cadastro do credor."))))}</p>`;
     body.querySelectorAll("[data-rep-aba]").forEach((btn) => {
       btn.addEventListener("click", () => this.setAba(btn.getAttribute("data-rep-aba")));
     });
