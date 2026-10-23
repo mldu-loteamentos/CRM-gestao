@@ -816,14 +816,22 @@ const ParametrizacaoParceiroApp = {
     return Number(obra.defaultPartnerShare) || 0;
   },
 
+  marcada(mapa, sid) {
+    if (!mapa) return false;
+    const nk = this.normKey(sid);
+    if (Object.prototype.hasOwnProperty.call(mapa, sid)) return !!mapa[sid];
+    if (nk && Object.prototype.hasOwnProperty.call(mapa, nk)) return !!mapa[nk];
+    return Object.keys(mapa).some(k => nk && this.normKey(k) === nk && mapa[k]);
+  },
+
   isAccountNAForObra(part, obra, accId) {
     if (!obra) return false;
     const sid = String(accId || "");
     const parent = this.accountParentId(sid) || this.accountParentIdLoose(sid);
     const ancs = parent ? [parent].concat(this.nodeAncestors(parent)) : [];
     const ancestorNA = ancs.some(a => obra.naNodes && obra.naNodes[a]);
-    if (ancestorNA) return !(obra.inAccounts && (obra.inAccounts[sid] || obra.inAccounts[this.normKey(sid)]));
-    return !!(obra.naAccounts && (obra.naAccounts[sid] || obra.naAccounts[this.normKey(sid)]));
+    if (ancestorNA) return !this.marcada(obra.inAccounts, sid);
+    return this.marcada(obra.naAccounts, sid);
   },
 
   isNAForObra(part, obra, key, ancestors) {

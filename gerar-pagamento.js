@@ -129,6 +129,23 @@ const GerarPagamentoApp = {
     return c && (c.id || c.numero) ? c : null;
   },
 
+  /* Conta cadastrada no centro, mesmo quando o objeto do centro não está na lista carregada. */
+  contaDoCentro(id) {
+    const direta = this.contaParceriaDe(this.ccDe(id));
+    if (direta) return direta;
+    const c = this.customOf(id).conta_parceria;
+    return c && (c.id || c.numero) ? c : null;
+  },
+
+  /* 99391-6 é a conta final da empresa 1. No cadastro ela também aparece como 1-6. */
+  ehContaFinal(conta) {
+    if (!conta) return false;
+    const bruto = String(conta.numero || conta.id || "").replace(/\s/g, "").toUpperCase();
+    if (bruto === "1-6" || bruto === "16") return true;
+    const n = this.numConta(bruto);
+    return n === this.CONTA_FINAL_NUM || n === "0993916";
+  },
+
   /* Conta final da empresa 1. A guia única sai inteira por ela. */
   CONTA_FINAL_NUM: "993916",
 
@@ -150,8 +167,8 @@ const GerarPagamentoApp = {
 
   /*
    * Onde o documento inteiro é pago, e se alguma parte precisa ser transferida.
-   * Parceria completa (empreendedor + parceiro, rateio certo): o título sai inteiro
-   * na conta do centro do parceiro, sem transferência.
+   * Parceria completa (empreendedor + parceiro, como 13900/13901): o título sai inteiro
+   * na conta do centro do parceiro, sem transferência. Não usa a conta final 1-6 / 99391-6.
    * Título que mistura outro centro (outra conta) com um par que tem rateio padrão:
    * o documento sai na conta desse outro centro e transfere o total do par
    * (empreendedor + parceiro) para a conta do parceiro.
@@ -187,7 +204,7 @@ const GerarPagamentoApp = {
         nome,
         valor,
         parceria: this.ccDeParceriaPeloNome(c.id, nome),
-        conta: this.contaParceriaDe(this.ccDe(c.id)),
+        conta: this.contaDoCentro(c.id),
         planos: c.planos || []
       });
     });
@@ -196,12 +213,14 @@ const GerarPagamentoApp = {
     const outros = [];
     Object.keys(grupos).forEach((ob) => {
       const g = grupos[ob];
-      const parc = g.linhas.find((l) => l.parceria);
-      const bases = g.linhas.filter((l) => !l.parceria);
+      const parcNome = g.linhas.find((l) => l.parceria);
+      const parcId = g.linhas.find((l) => l.id === ob + "01" && g.linhas.some((x) => x.id === ob + "00"));
+      const parc = parcNome || parcId;
+      const bases = g.linhas.filter((l) => !parc || l.id !== parc.id);
       const valor = Math.round(g.linhas.reduce((t, l) => t + l.valor, 0) * 100) / 100;
       const listaCc = g.linhas.map((l) => ({ id: l.id, nome: l.nome }));
       if (parc && bases.length) {
-        pares.push({ obra: ob, valor, conta: parc.conta, ccs: listaCc });
+        pares.push({ obra: ob, valor, conta: parc.conta || this.contaDoCentro(parc.id), ccs: listaCc });
         return;
       }
       if (!parc && bases.length) {
@@ -220,8 +239,26 @@ const GerarPagamentoApp = {
     const comConta = (lista) => lista.filter((x) => (x.linhas || []).some((l) => this.chaveConta(l.conta)));
     const pagadores = comConta(outros);
     if (pares.length && !pagadores.length) {
-      const conta = this.contaMaior(pares, (p) => p.conta);
-      return conta ? { conta, acertos: [] } : null;
+      const comContaParc = pares.filter((p) => this.chaveConta(p.conta));
+      const preferidos = comContaParc.filter((p) => !this.ehContaFinal(p.conta));
+      const conta = this.contaMaior(preferidos.length ? preferidos : comContaParc, (p) => p.conta);
+      if (!conta) return { conta: null, faltaContaParceiro: true, acertos: [] };
+      const deKey = this.chaveConta(conta);
+      const numeroDe = (c) => (c && (c.numero || c.id)) || "";
+      const acertos = [];
+      pares.forEach((p) => {
+        const paraKey = this.chaveConta(p.conta);
+        if (!paraKey || paraKey === deKey || this.ehContaFinal(p.conta)) return;
+        acertos.push({
+          de: conta,
+          para: p.conta,
+          deNumero: numeroDe(conta),
+          paraNumero: numeroDe(p.conta),
+          valor: p.valor,
+          ccs: p.ccs
+        });
+      });
+      return { conta, acertos };
     }
     if (!pagadores.length) return null;
     const contaPag = this.contaMaior(pagadores.reduce((acc, o) => acc.concat(o.linhas), []), (l) => l.conta);
@@ -711,7 +748,10 @@ const GerarPagamentoApp = {
           return;
         }
         const cad = ccMap[id] || this.ccDe(id);
-        ccsTitulo.push({ id, nome: (cad && cad.name) || c.costCenterName || "", parceria: !!ccMap[id], rateio: rate, planos: plano.id || plano.nome ? [plano] : [] });
+        const nomeCad = String((cad && cad.name) || "").trim();
+        const nomeApi = String(c.costCenterName || "").trim();
+        const nome = (this.ccDeParceriaPeloNome(id, nomeApi) && !this.ccDeParceriaPeloNome(id, nomeCad)) ? nomeApi : (nomeCad || nomeApi);
+        ccsTitulo.push({ id, nome, parceria: !!ccMap[id], rateio: rate, planos: plano.id || plano.nome ? [plano] : [] });
       });
       ccsTitulo.sort((a, b) => Number(a.id) - Number(b.id));
       const tituloAPagar = saldo != null ? Math.max(0, saldo) : (pago ? 0 : original);
@@ -1395,7 +1435,20 @@ const GerarPagamentoApp = {
       const d = destinos[ch];
       const r = porTitulo[ch][0];
       const conta = d.conta;
-      if (!conta) return;
+      if (!conta) {
+        const key = "__sem";
+        if (!grupos[key]) grupos[key] = { key, contaKey: "", dia: "", conta: null, empresaConta: String(r.companyId || ""), itens: {}, ordem: [] };
+        const g = grupos[key];
+        if (g.itens[ch]) return;
+        g.itens[ch] = {
+          chave: ch, titulo: r.titulo, parcela: r.parcela, credor: r.credor, credorId: r.credorId, companyId: r.companyId, documento: r.documento,
+          vencimento: r.vencimento, valor: r.tituloValor, aPagar: r.tituloAPagar, inteiro: true, autorizacao: r.autorizacao || null,
+          guiaUnica: false, acertos: [],
+          ccs: (r.ccsTitulo || []).map((c) => ({ id: c.id, nome: c.nome, parceria: c.parceria, rateio: c.rateio, planos: c.planos || [] }))
+        };
+        g.ordem.push(ch);
+        return;
+      }
       const contaKey = this.numConta(conta.numero || conta.id) || String(conta.id);
       const dia = this.diaDoLote(r.vencimento);
       const key = contaKey + "@" + (dia || "sem-data");
@@ -2421,23 +2474,22 @@ const GerarPagamentoApp = {
     return this.contaParceriaDe(par.parc);
   },
 
-  /** Conta do CC do parceiro, quando o distrato novo está só no CC da obra. */
+  /**
+   * Distrato de parceria sai pela conta cadastrada no centro do parceiro (13801),
+   * mesmo quando o título está apropriado só no centro da obra (13800).
+   * Vale para todas as obras com par empreendedor + parceiro.
+   */
   contaPagamentoDistratoNovo(r) {
-    const ccs = r && r.ccsTitulo && r.ccsTitulo.length
+    if (!r || this.ccDeParceriaPeloNome(r.ccId, r.ccNome)) return null;
+    const ccs = r.ccsTitulo && r.ccsTitulo.length
       ? r.ccsTitulo
-      : [{ id: r && r.ccId, nome: r && r.ccNome, planos: [], rateio: 100 }];
-    const ctx = this.contextoRateio(r);
-    if (!this.ehDistrato(ccs, ctx)) return null;
-    const emissao = String(ctx.emissao || "");
-    if (!emissao || emissao <= this.DISTRATO_PARCEIRO_ATE) return null;
-    if (ccs.some((c) => this.ccDeParceriaPeloNome(c.id, c.nome) && this.num(c.rateio) > 0.009)) return null;
-    const obra = this.obra(r.ccId);
+      : [{ id: r.ccId, nome: r.ccNome, planos: [], rateio: 100 }];
+    if (!this.ehDistrato(ccs, this.contextoRateio(r))) return null;
     const emp = String(this.companyIdOf(this.ccDe(r.ccId)) || r.companyId || "");
-    const parc = (this.state.costCenters || []).find((c) => this.obra(c.id) === obra
-      && String(c.id) !== String(r.ccId)
-      && this.ccDeParceriaPeloNome(c.id, c.name)
-      && (!emp || String(this.companyIdOf(c) || "") === emp));
-    return parc ? this.contaParceriaDe(parc) : null;
+    const par = this.parDoObra(r.ccId, emp) || this.parDoObra(r.ccId, "");
+    if (!par || this.obra(r.ccId) !== this.obra(par.base.id)) return null;
+    if (String(r.ccId) === String(par.parc.id)) return null;
+    return this.contaParceriaDe(par.parc);
   },
 
   contextoRateio(r) {
@@ -2445,8 +2497,10 @@ const GerarPagamentoApp = {
   },
 
   ehDistrato(ccs, ctx) {
-    const planos = (ccs || []).reduce((l, c) => l.concat((c.planos || []).map((p) => p.nome || "")), []);
-    return /distrat/i.test([ctx && ctx.docId, ctx && ctx.docNome].concat(planos).join(" "));
+    const planos = (ccs || []).reduce((l, c) => l.concat((c.planos || []).map((p) => [p && p.id, p && p.nome].filter(Boolean).join(" "))), []);
+    const texto = [ctx && ctx.docId, ctx && ctx.docNome, ctx && ctx.documento].concat(planos).join(" ");
+    if (/distrat/i.test(texto)) return true;
+    return String((ctx && ctx.docId) || "").trim().toUpperCase() === "RD";
   },
 
   /** Obra cadastrada como sociedade não tem rateio. O lote não pode ser barrado por isso. */
@@ -2482,23 +2536,72 @@ const GerarPagamentoApp = {
     return PP.dfcGroups().some((g) => (g.accounts || []).some((a) => String(a) === String(accId) || PP.normKey(a) === nk));
   },
 
+  /* 2.03.05.02.02 no título e 203050202 na visão DFC são a mesma conta. */
+  planoNoDfc(plano) {
+    const PP = window.ParametrizacaoParceiroApp;
+    const id = String((plano && plano.id) || "").trim();
+    const nome = String((plano && plano.nome) || "").trim();
+    const grupos = PP && typeof PP.dfcGroups === "function" ? PP.dfcGroups() : [];
+    const nk = (v) => (PP && typeof PP.normKey === "function" ? PP.normKey(v) : String(v || "").replace(/\D/g, ""));
+    const achar = (chave) => {
+      const alvo = nk(chave);
+      if (!alvo) return "";
+      let hit = "";
+      grupos.some((g) => (g.accounts || []).some((a) => {
+        if (String(a) === String(chave) || nk(a) === alvo) { hit = String(a); return true; }
+        return false;
+      }));
+      return hit;
+    };
+    const direto = achar(id);
+    if (direto) return { id: direto, nome, rotulo: id };
+    const fold = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    const alvoNome = fold(nome);
+    if (!alvoNome || !PP || !Array.isArray(PP.categories)) return null;
+    const cat = PP.categories.find((c) => fold(c._name || c.name || c.description) === alvoNome);
+    const cid = cat ? achar(cat._id || cat.id) : "";
+    return cid ? { id: cid, nome, rotulo: id || cid } : null;
+  },
+
+  /* Título só no 14000: o 14001 da mesma obra também acha a parceria. */
+  centrosDaParceria(ccIds) {
+    const ids = [];
+    const add = (id) => {
+      const s = String(id || "");
+      if (s && ids.indexOf(s) < 0) ids.push(s);
+    };
+    (ccIds || []).forEach(add);
+    ids.slice().forEach((id) => {
+      const emp = String(this.companyIdOf(this.ccDe(id)) || "");
+      const par = (emp && this.parDoObra(id, emp)) || this.parDoObra(id, "");
+      if (!par) return;
+      add(par.base && par.base.id);
+      add(par.parc && par.parc.id);
+    });
+    return ids;
+  },
+
   /** Plano que a configuração do parceiro manda ratear. Vazio quando a conta está fora ou não há parceria neste centro. */
   planoExigeRateio(ccIds, planos) {
     const PP = window.ParametrizacaoParceiroApp;
     if (!PP || typeof PP.accountEntersPartnership !== "function") return "";
     const lista = [];
     (planos || []).forEach((p) => {
-      const id = String((p && p.id) || "").trim();
-      if (!id || lista.some((x) => x.id === id) || !this.planoConstaNoDfc(id)) return;
-      lista.push({ id, nome: String((p && p.nome) || "").trim() });
+      const canon = this.planoNoDfc(p);
+      if (!canon || lista.some((x) => x.id === canon.id)) return;
+      lista.push(canon);
     });
     if (!lista.length) return "";
-    const ids = (ccIds || []).map((id) => String(id || "")).filter(Boolean);
+    const ids = this.centrosDaParceria(ccIds);
     for (const part of this.parceriasRateio()) {
-      const obra = ids.map((id) => PP.obraForCostCenter(part, id)).find(Boolean);
+      let obra = ids.map((id) => PP.obraForCostCenter(part, id)).find(Boolean);
+      if (!obra) {
+        const codigo = ids.map((id) => this.obra(id)).find(Boolean);
+        obra = (codigo && (part.obras || []).find((o) => String(o.code) === String(codigo))) || null;
+      }
       if (!obra) continue;
       for (const plano of lista) {
-        if (PP.accountEntersPartnership(part, obra, plano.id)) return [plano.id, plano.nome].filter(Boolean).join(" — ");
+        if (PP.accountEntersPartnership(part, obra, plano.id)) return [plano.rotulo || plano.id, plano.nome].filter(Boolean).join(" — ");
       }
     }
     return "";
@@ -2538,12 +2641,15 @@ const GerarPagamentoApp = {
       o.pct = o.linhas.reduce((t, l) => t + l.pct, 0);
       o.valor = total * o.pct / 100;
       const comPlano = o.linhas.filter((l) => l.planos.length);
-      const ehParc = (l) => this.ccDeParceriaPeloNome(l.id, l.nome);
+      const ehParc = (l) => this.ccDeParceriaPeloNome(l.id, l.nome)
+        || (String(l.id) === o.obra + "01" && o.linhas.some((x) => String(x.id) === o.obra + "00"));
       const temParceriaNoTitulo = o.linhas.some(ehParc);
       const sociedade = this.obraEhSociedade(o.obra, o.linhas.map((l) => l.id));
       const planosObra = o.linhas.reduce((acc, l) => acc.concat(l.planos || []), []);
       const exigeNasLinhas = this.planoExigeRateio(o.linhas.map((l) => l.id), planosObra);
-      if (!temParceriaNoTitulo && !exigeNasLinhas && !sociedade) {
+      const parDistrato = distrato ? (this.parDoObra(o.linhas[0] && o.linhas[0].id, o.empresa) || this.parDoObra(o.linhas[0] && o.linhas[0].id, "")) : null;
+      const distratoNaObra = !!(parDistrato && o.linhas.some((l) => String(l.id) === String(parDistrato.base.id)) && !o.linhas.some((l) => String(l.id) === String(parDistrato.parc.id)));
+      if (!temParceriaNoTitulo && !exigeNasLinhas && !sociedade && !distratoNaObra) {
         o.consumo = true;
         o.linhas.forEach((l) => {
           l.padrao = null;
@@ -2575,22 +2681,25 @@ const GerarPagamentoApp = {
         || (baseCad ? String(baseCad.id) : o.obra + "00");
       const parcTitulo = o.linhas.find((l) => l.id !== base && ehParc(l));
       const parcCad = parcTitulo ? null : daObra.find((c) => String(c.id) !== base && this.ccDeParceriaPeloNome(c.id, c.name));
-      const parc = parcTitulo ? parcTitulo.id : (parcCad ? String(parcCad.id) : "");
+      const parc = parcTitulo ? parcTitulo.id : (parcCad ? String(parcCad.id) : (parDistrato ? String(parDistrato.parc.id) : ""));
       // Título só no CC da Moura Leite é 100% dela, sem rateio. Só no CC do parceiro, apenas distrato emitido até 31/12/2025.
       const temBase = o.linhas.some((l) => l.id === base);
       const soParceiro = parc && !temBase && !!parcTitulo;
       const aplicouRateio = !!(temBase && parcTitulo && parcTitulo.pct > 0.009);
-      const distratoNovo = distrato && !!emissao && emissao > this.DISTRATO_PARCEIRO_ATE && temBase && !parcTitulo && !!parc;
+      const distratoNovo = distrato && temBase && !parcTitulo && !!parc;
       if (distratoNovo) {
         const padraoNovo = this.rateioPadraoObra(base, parc);
+        o.distratoNovo = true;
+        o.contaParceiro = parc;
         if (!padraoNovo) {
-          o.semPadrao = semPadrao = true;
-          problemas.push(`Obra ${o.rotulo}: distrato emitido em ${this.dataBr(emissao)} está 100% no ${base}. Cadastre o rateio padrão da obra para a prestação de contas.`);
+          o.linhas.forEach((l) => {
+            l.padrao = 100;
+            l.esperado = l.valor;
+            l.ok = !l.planoErro;
+          });
           return;
         }
-        o.distratoNovo = true;
         o.padrao = padraoNovo;
-        o.contaParceiro = parc;
         if (padraoNovo.aviso) avisos.push(padraoNovo.aviso);
         o.linhas.forEach((l) => {
           l.padrao = 100;
@@ -2618,7 +2727,7 @@ const GerarPagamentoApp = {
       if (exigeRateio && !aplicouRateio && !distratoAntigo) {
         erroRateio = true;
         o.linhas.forEach((l) => { l.ok = false; });
-        problemas.push(`Obra ${o.rotulo}: o plano ${exigeRateio} exige rateio e o título foi lançado sem rateio.`);
+        problemas.push(`Obra ${o.rotulo}: o plano ${exigeRateio} entra na parceria e o título foi lançado sem rateio${parc ? ` (falta o centro ${parc})` : ""}.`);
         return;
       }
       if (soParceiro && !distratoAntigo) {
@@ -2754,7 +2863,8 @@ const GerarPagamentoApp = {
     const soSociedade = conf && conf.obras && conf.obras.length && conf.obras.every((o) => o.sociedade);
     if (conf && conf.ok !== false && conf.obras && conf.obras.some((o) => o.distratoNovo)) {
       const o = conf.obras.find((x) => x.distratoNovo);
-      const dica = `Distrato emitido a partir de 01/01/2026: 100% no centro de custo da obra. O pagamento sai pela conta do ${o.contaParceiro || "parceiro"} e a prestação de contas aplica ${this.pct(o.padrao.ml)} Moura Leite / ${this.pct(o.padrao.terr)} terrenista.`;
+      const prestacao = o.padrao ? ` A prestação de contas aplica ${this.pct(o.padrao.ml)} Moura Leite / ${this.pct(o.padrao.terr)} terrenista.` : "";
+      const dica = `Distrato de parceria: o título pode estar no centro da obra e o pagamento sai pela conta do centro do parceiro ${o.contaParceiro || ""}.${prestacao}`;
       return { texto: "Prestação", cls: "bchk-ok", dica };
     }
     if (soSociedade && !(conf && conf.ok === false)) {
@@ -2813,7 +2923,7 @@ const GerarPagamentoApp = {
       <tr class="gp-rateio-obra"><td colspan="7">Obra ${this.esc(o.rotulo || o.obra)} · ${this.pct(o.pct)} do título · ${this.money(o.valor)}${o.sociedade
         ? ` <span>· sociedade, sem rateio</span>`
         : (o.distratoNovo
-        ? ` <span>· distrato emitido a partir de 01/01/2026: 100% no CC da obra, pagamento pela conta do ${this.esc(o.contaParceiro)}. Prestação ${this.pct(o.padrao.ml)} / ${this.pct(o.padrao.terr)}</span>`
+        ? ` <span>· distrato de parceria: 100% no CC da obra, pagamento pela conta do ${this.esc(o.contaParceiro)}${o.padrao ? `. Prestação ${this.pct(o.padrao.ml)} / ${this.pct(o.padrao.terr)}` : ""}</span>`
         : (o.exclusivo
         ? ` <span>· ${o.exclusivo === "ml" ? "CC exclusivo da Moura Leite: 100% Moura Leite, sem rateio" : `distrato emitido até ${this.dataBr(this.DISTRATO_PARCEIRO_ATE)}: 100% no CC do parceiro, sem rateio`}</span>`
         : (o.padrao
@@ -2832,7 +2942,7 @@ const GerarPagamentoApp = {
       </tr>`).join("")}`).join("");
     const rodape = (conf.ok
       ? (conf.obras.some((o) => o.distratoNovo)
-        ? `<p class="gp-rateio-msg is-ok">Distrato emitido a partir de 01/01/2026: o título fica inteiro no centro de custo da obra e o lote paga pela conta do parceiro. A prestação de contas desconta a parte do parceiro pelo rateio padrão da obra.</p>`
+        ? `<p class="gp-rateio-msg is-ok">Distrato de parceria: o título pode ficar no centro de custo da obra e o lote paga pela conta cadastrada no centro do parceiro.</p>`
         : (conf.obras.every((o) => o.sociedade)
         ? `<p class="gp-rateio-msg is-ok">Sociedade: não há rateio entre os centros. O título pode ir para o lote.</p>`
         : `<p class="gp-rateio-msg is-ok">O rateio e o plano financeiro conferem com o padrão cadastrado em Centros de Custo.</p>`))

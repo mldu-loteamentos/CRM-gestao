@@ -418,7 +418,7 @@ window.NotaFiscalCheck = {
     };
     const aoLado = (rotulo) => {
       const src = rotulo.source.replace(/^\^/, "").replace(/\$$/, "");
-      const m = texto.match(new RegExp(`(?:${src})\\s*[:\\-–]?\\s*((?:R\\$\\s*)?-?\\d[\\d.,]*\\s*%?|retido[^\\n]{0,30}|n[aã]o retido|sim|n[aã]o)`, "i"));
+      const m = texto.match(new RegExp(`(?:${src})\\s*[=:\\-–]?\\s*((?:R\\$\\s*)?-?\\d[\\d.,]*\\s*%?|retido[^\\n]{0,30}|n[aã]o retido|sim|n[aã]o)`, "i"));
       return m ? m[1] : null;
     };
     const campo = (rotulos, valorTexto) => {
@@ -432,7 +432,9 @@ window.NotaFiscalCheck = {
     };
     const valor = (rotulos) => {
       const v = campo(rotulos, false);
-      return v == null ? null : (this.num(v) == null ? 0 : this.num(v));
+      if (v == null) return null;
+      if (/^-$/.test(String(v).trim())) return 0;
+      return this.num(v);
     };
     const retIss = campo([/^reten[cç][aã]o do issqn$/i, /^iss(qn)? retido$/i, /^iss(qn)? retido na fonte$/i], true);
     const simples = campo([/simples nacional/i, /^optante (pelo )?simples/i], true);
@@ -461,9 +463,14 @@ window.NotaFiscalCheck = {
     n.cnpjs = [...new Set((texto.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/g) || []).map((c) => this.digits(c)))];
     n.cnpjPrestador = this.cnpjApos(texto, /prestador de servi[cç]os?|dados do prestador|(?:^|\n)\s*prestador\b|emitente/i);
     const naColuna = this.valorNaColuna(itens, /^valor l[ií]quido( da nfs-?e| da nota)?( \(r\$\))?$/i);
-    if (naColuna != null && naColuna > 0 && (n.liquido == null || n.liquido === 0)) n.liquido = naColuna;
+    if (naColuna != null && naColuna > 0 && !(n.liquido > 0.004)) n.liquido = naColuna;
+    const totalDeclarado = this.valorDeclarado(texto, /valor total da nota/i);
+    const liquidoDeclarado = this.valorDeclarado(texto, /valor l[ií]quido da nota/i);
+    if (!(n.valorServico > 0.004) && totalDeclarado > 0.004) n.valorServico = totalDeclarado;
+    if (!(n.liquido > 0.004) && liquidoDeclarado > 0.004) n.liquido = liquidoDeclarado;
     const retidoNota = (n.inss || 0) + (n.irrf || 0) + (n.pis || 0) + (n.cofins || 0) + (n.csll || 0) + (n.csrf || 0) + (n.issRetido && n.valorIss ? n.valorIss : 0);
-    if ((n.liquido == null || n.liquido === 0) && n.valorServico > 0 && retidoNota < 0.009) n.liquido = n.valorServico;
+    if (!(n.liquido > 0.004) && n.valorServico > 0.004 && retidoNota < 0.009) n.liquido = n.valorServico;
+    if (!(n.liquido > 0.004) && !(n.valorServico > 0.004)) n.liquido = null;
     return n;
   },
 
@@ -472,6 +479,38 @@ window.NotaFiscalCheck = {
     const src = rotulo.source || String(rotulo);
     const m = String(texto || "").match(new RegExp("(?:" + src + ")[\\s\\S]{0,280}?(\\d{2}\\.\\d{3}\\.\\d{3}/\\d{4}-\\d{2}|\\d{3}\\.\\d{3}\\.\\d{3}-\\d{2})", "i"));
     return m ? this.digits(m[1]) : "";
+  },
+
+  /**
+   * Valor impresso junto do rótulo ("VALOR TOTAL DA NOTA = R$ 255,00")
+   * ou na última coluna da linha de baixo ("VALOR LÍQUIDO DA NOTA (R$)").
+   * Zero solto da tabela de retenção não conta.
+   */
+  valorDeclarado(texto, rotulo) {
+    const linhas = String(texto || "").split("\n");
+    const re = rotulo instanceof RegExp ? rotulo : new RegExp(rotulo, "i");
+    for (let i = 0; i < linhas.length; i++) {
+      const linha = linhas[i];
+      const m = linha.match(re);
+      if (!m) continue;
+      const depois = linha.slice(m.index + m[0].length);
+      const mesma = depois.match(/^\s*(?:\([^)]*\))?\s*[=:\-–]?\s*(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2})/);
+      if (mesma) {
+        const n = this.num(mesma[1]);
+        if (n > 0.004) return n;
+      }
+      const prox = linhas[i + 1] || "";
+      const vals = [];
+      const reV = /(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2})/g;
+      let vm;
+      while ((vm = reV.exec(prox))) {
+        const n = this.num(vm[1]);
+        if (n != null) vals.push(n);
+      }
+      const positivo = vals.filter((n) => n > 0.004);
+      if (positivo.length) return positivo[positivo.length - 1];
+    }
+    return null;
   },
 
   /** Valor na coluna do rótulo, na linha de baixo. Evita pegar o primeiro número da linha seguinte. */
@@ -483,14 +522,17 @@ window.NotaFiscalCheck = {
       if (!rot || r.y < rot.y) rot = r;
     });
     if (!rot) return null;
+    const esq = (rot.x || 0) - 8;
+    const dir = (rot.x || 0) + Math.max(rot.w || 0, 40) + 90;
     let melhor = null;
     ordenados.forEach((v) => {
       const dy = v.y - rot.y;
       if (dy < 2 || dy > 36) return;
       const n = this.num(v.s);
       if (n == null) return;
-      const dx = Math.abs((v.x || 0) - (rot.x || 0));
-      if (dx > Math.max((rot.w || 0) + 12, 110)) return;
+      const x = v.x || 0;
+      if (x < esq || x > dir) return;
+      const dx = Math.abs(x - (rot.x || 0));
       if (!melhor || dx < melhor.dx) melhor = { dx, n };
     });
     return melhor ? melhor.n : null;
@@ -768,9 +810,10 @@ window.NotaFiscalCheck = {
       if (n.valorServico != null && r.bruto && this.difere(n.valorServico, r.bruto)) {
         r.avisos.push(`Valor do serviço na nota (${this.money(n.valorServico)}) diferente do valor do título (${this.money(r.bruto)}).`);
       }
-      if ((n.liquido == null || n.liquido === 0) && n.valorServico != null && r.liquido != null && !this.difere(n.valorServico, r.bruto) && Math.abs(r.retido || 0) < this.TOL) {
-        n.liquido = n.valorServico;
+      if (!(Number(n.liquido) > 0.004) && Number(n.valorServico) > 0.004 && retNota <= T) {
+        n.liquido = Math.round((Number(n.valorServico) - retNota) * 100) / 100;
       }
+      if (!(Number(n.liquido) > 0.004)) n.liquido = Number(n.valorServico) > 0.004 ? n.liquido : null;
       if (n.liquido != null && r.liquido != null && this.difere(n.liquido, r.liquido) && !this.difere(n.valorServico, r.bruto)) {
         r.erros.push(`Valor líquido da nota ${this.money(n.liquido)} diferente do líquido do título (${this.money(r.bruto)} − ${this.money(r.retido)} = ${this.money(r.liquido)}).`);
       }

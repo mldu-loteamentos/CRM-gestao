@@ -60,6 +60,19 @@ window.BoletoCheck = {
     return 11 - r;
   },
 
+  /** Sábado, domingo ou feriado: o banco aceita o pagamento no próximo dia útil. */
+  proximoDiaUtil(iso) {
+    const s = String(iso || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    if (typeof window.installmentChargeDueIso === "function") return window.installmentChargeDueIso(s);
+    const d = new Date(s + "T12:00:00");
+    const dow = d.getDay();
+    if (dow === 6) d.setDate(d.getDate() + 2);
+    else if (dow === 0) d.setDate(d.getDate() + 1);
+    const p = (n) => String(n).padStart(2, "0");
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+  },
+
   /** Fator de vencimento → data mais próxima da referência (o fator recomeça em 1000 a cada 9000 dias desde 22/02/2025). */
   dataDoFator(fator, ref) {
     const f = Number(fator);
@@ -289,12 +302,17 @@ window.BoletoCheck = {
       }
     }
     if (out.vencBoleto && ctx.vencimento && out.vencBoleto !== String(ctx.vencimento).slice(0, 10)) {
-      const vt = this.dataBr(ctx.vencimento);
-      if (out.vencBoleto < String(ctx.vencimento).slice(0, 10)) {
+      const vb = out.vencBoleto;
+      const vtIso = String(ctx.vencimento).slice(0, 10);
+      const vt = this.dataBr(vtIso);
+      const mesmoDiaUtil = this.proximoDiaUtil(vb) === this.proximoDiaUtil(vtIso);
+      if (mesmoDiaUtil) {
+        out.infos.push(`Vencimento em ${vt} cai em fim de semana ou feriado. O boleto pode ser pago em ${this.dataBr(this.proximoDiaUtil(vtIso))}.`);
+      } else if (vb < vtIso) {
         out.antecipado = true;
-        out.avisos.push(`Pagamento antecipado: o boleto vence em ${this.dataBr(out.vencBoleto)} e a parcela vence em ${vt}.`);
+        out.avisos.push(`Pagamento antecipado: o boleto vence em ${this.dataBr(vb)} e a parcela vence em ${vt}. Libere para pagar antes do vencimento.`);
       } else {
-        out.avisos.push(`A linha digitável cadastrada no Sienge é de um boleto que vence em ${this.dataBr(out.vencBoleto)}, depois do vencimento da parcela (${vt}). Confira o vencimento do título no Sienge.`);
+        out.avisos.push(`A linha digitável cadastrada no Sienge é de um boleto que vence em ${this.dataBr(vb)}, depois do vencimento da parcela (${vt}). Confira o vencimento do título no Sienge.`);
       }
     }
     const limite = String(d.discountDueDate || "").slice(0, 10);
