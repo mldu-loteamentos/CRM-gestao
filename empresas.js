@@ -45,6 +45,7 @@ const EmpresasApp = {
           "6": { company_id: 6, nome_usual: "ARAÇARI SPE", percentual_mldu: 50, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 1 },
           "12": { company_id: 12, nome_usual: "ELLENCO & MLDU BOI", percentual_mldu: 50, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 0 },
           "13": { company_id: 13, nome_usual: "VERCELLINO", percentual_mldu: 27.75, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 1 },
+          "21": { company_id: 21, nome_usual: "YPÊS IV", percentual_mldu: 23.8, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 0 },
           "14": { company_id: 14, nome_usual: "PIRAPITINGUI", percentual_mldu: 0, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 0 },
           "15": { company_id: 15, nome_usual: "", percentual_mldu: 0, consolidacao_padrao: 1, gerida_pelo_grupo: 0, cobranca_interna: 0 },
           "16": { company_id: 16, nome_usual: "", percentual_mldu: 0, consolidacao_padrao: 1, gerida_pelo_grupo: 0, cobranca_interna: 0 },
@@ -565,6 +566,7 @@ const EmpresasApp = {
       "6": { company_id: 6, nome_usual: "ARAÇARI SPE", percentual_mldu: 50, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 1 },
       "12": { company_id: 12, nome_usual: "ELLENCO & MLDU BOI", percentual_mldu: 50, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 0 },
       "13": { company_id: 13, nome_usual: "VERCELLINO", percentual_mldu: 27.75, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 1 },
+      "21": { company_id: 21, nome_usual: "YPÊS IV", percentual_mldu: 23.8, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 0 },
       "14": { company_id: 14, nome_usual: "PIRAPITINGUI", percentual_mldu: 0, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 0 },
       "28": { company_id: 28, nome_usual: "RAMOS I", percentual_mldu: 0, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 1 },
       "32": { company_id: 32, nome_usual: "ITATINGA", percentual_mldu: 100, consolidacao_padrao: 1, gerida_pelo_grupo: 1, cobranca_interna: 1 }

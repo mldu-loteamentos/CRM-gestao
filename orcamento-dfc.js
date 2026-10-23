@@ -964,7 +964,8 @@ const OrcamentoDfcApp = {
   },
 
   empresasDoSaldo() {
-    const todas = this.empresas();
+    /* A 21 entrou só com a carteira de 2027. Não tem saldo de caixa de 2026 e a consulta dela segura as outras. */
+    const todas = this.empresas().filter((e) => String(e.id) !== "21");
     const sel = this.selectedCompanyIds.map(String);
     return sel.length ? todas.filter((e) => sel.indexOf(String(e.id)) >= 0) : todas;
   },
@@ -1023,7 +1024,7 @@ const OrcamentoDfcApp = {
     if (!api || typeof api.getCheckingAccounts !== "function") return map;
     await Promise.all((empresas || []).map(async (emp) => {
       try {
-        const res = await api.getCheckingAccounts(emp.id, { allStatuses: true });
+        const res = await this.comPrazo(api.getCheckingAccounts(emp.id, { allStatuses: true }), 20000);
         ((res && res.results) || []).forEach((raw) => {
           const num = String(raw.accountNumber || raw.number || "").trim();
           const nome = String(raw.accountName || raw.name || raw.description || "").trim();
@@ -1144,6 +1145,30 @@ const OrcamentoDfcApp = {
     return Number(arr[i]) || 0;
   },
 
+  comPrazo(p, ms) {
+    return new Promise((resolve, reject) => {
+      let done = false;
+      const t = setTimeout(() => {
+        if (done) return;
+        done = true;
+        const err = new Error("A consulta do saldo demorou demais.");
+        err.timeout = true;
+        reject(err);
+      }, ms);
+      Promise.resolve(p).then((v) => {
+        if (done) return;
+        done = true;
+        clearTimeout(t);
+        resolve(v);
+      }, (e) => {
+        if (done) return;
+        done = true;
+        clearTimeout(t);
+        reject(e);
+      });
+    });
+  },
+
   pedirSaldos() {
     const chave = this.chaveSaldos();
     if (this._saldoChave === chave && (this._saldoEstado === "ok" || this._saldoEstado === "lendo")) return;
@@ -1167,11 +1192,15 @@ const OrcamentoDfcApp = {
     if (!api || (typeof api.getTrialBalance !== "function" && typeof api.getAccountBalances !== "function")) {
       this._saldoEstado = "erro";
       this._saldoErro = "A consulta do saldo de caixa não está disponível.";
+      this.atualizarSaldosDom();
       return;
     }
     this._saldoEstado = "lendo";
     this._saldoErro = "";
     this._saldoFonte = "";
+    this._saldoFeitos = 0;
+    this._saldoTotal = 0;
+    this._saldoTimeouts = 0;
     this.atualizarSaldosDom();
     const nomesP = this.carregarNomesConta(empresas);
     const datas = [];
@@ -1182,18 +1211,20 @@ const OrcamentoDfcApp = {
       const jobs = [];
       const fontes = new Set();
       empresas.forEach((emp) => datas.forEach((dt) => jobs.push({ emp: String(emp.id), dt: dt })));
+      this._saldoTotal = jobs.length;
       let cursor = 0;
       const self = this;
       let falha = null;
       const worker = async () => {
         while (cursor < jobs.length) {
+          if ((self._saldoTimeouts || 0) >= 4) break;
           const job = jobs[cursor++];
           const per = self.periodoDoSaldo(job.dt);
           let linhas = [];
           let origem = "balancete";
           if (typeof api.getTrialBalance === "function") {
             try {
-              const lista = await api.getTrialBalance(job.emp, per.ini, per.fim);
+              const lista = await self.comPrazo(api.getTrialBalance(job.emp, per.ini, per.fim), 20000);
               (lista || []).forEach((b) => {
                 const linha = self.linhaBalancete(b, true);
                 if (linha.codigo && linha.valor != null) linhas.push(linha);
@@ -1201,12 +1232,13 @@ const OrcamentoDfcApp = {
             } catch (e) {
               falha = e;
               linhas = [];
+              if (e && e.timeout) self._saldoTimeouts = (self._saldoTimeouts || 0) + 1;
             }
           }
           const temCaixa = linhas.some((l) => l.codigo.indexOf("1.1.01") === 0 || l.codigo.indexOf("1.01.01") === 0);
-          if (!temCaixa && typeof api.getAccountBalances === "function") {
+          if (!temCaixa && typeof api.getAccountBalances === "function" && (self._saldoTimeouts || 0) < 4) {
             try {
-              const contas = await api.getAccountBalances(job.dt, { companyId: job.emp, showLast: true });
+              const contas = await self.comPrazo(api.getAccountBalances(job.dt, { companyId: job.emp, showLast: true }), 20000);
               const alt = [];
               (contas || []).forEach((b) => {
                 const linha = self.linhaConta(b);
@@ -1218,8 +1250,11 @@ const OrcamentoDfcApp = {
               }
             } catch (e) {
               falha = falha || e;
+              if (e && e.timeout) self._saldoTimeouts = (self._saldoTimeouts || 0) + 1;
             }
           }
+          self._saldoFeitos = (self._saldoFeitos || 0) + 1;
+          if (self._saldoFeitos === 1 || self._saldoFeitos % 4 === 0) self.atualizarSaldosDom();
           if (!linhas.length) continue;
           fontes.add(origem);
           const dia = mapa[job.dt] || (mapa[job.dt] = {});
@@ -1235,7 +1270,10 @@ const OrcamentoDfcApp = {
       const n = Math.min(3, jobs.length || 1);
       await Promise.all(Array.from({ length: n }, () => worker()));
       if (token !== this._sToken) return;
-      if (!porConta.size && falha) throw falha;
+      if (!porConta.size && falha) {
+        if (falha.timeout) throw new Error("O Sienge não respondeu o saldo das contas.");
+        throw falha;
+      }
       const porEmpresa = {};
       porConta.forEach((c) => {
         if (c.origem === "contas") return;
@@ -1337,7 +1375,10 @@ const OrcamentoDfcApp = {
   htmlSaldos() {
     const span = 1 + (this.MESES.length + 1) * 4;
     if (this._saldoEstado === "lendo") {
-      return `<tr class="orc-dfc-saldo"><td colspan="${span}">Lendo o saldo das contas…</td></tr>`;
+      const n = Number(this._saldoFeitos) || 0;
+      const t = Number(this._saldoTotal) || 0;
+      const extra = t ? (" " + n + " de " + t) : "";
+      return `<tr class="orc-dfc-saldo"><td colspan="${span}">Lendo o saldo das contas…${extra}</td></tr>`;
     }
     if (this._saldoEstado === "erro") {
       return `<tr class="orc-dfc-saldo"><td colspan="${span}">${this.esc(this._saldoErro || "Não consegui ler o saldo das contas.")}</td></tr>`;

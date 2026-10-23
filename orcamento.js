@@ -812,7 +812,7 @@ const OrcamentoApp = {
       const n = Number(row.percentual_mldu);
       return Number.isFinite(n) ? n : 0;
     }
-    const defaults = { "1": 100, "5": 66, "6": 50, "12": 50, "13": 27.75, "32": 100 };
+    const defaults = { "1": 100, "5": 66, "6": 50, "12": 50, "13": 27.75, "21": 23.8, "32": 100 };
     return defaults[id] != null ? defaults[id] : 0;
   },
 
