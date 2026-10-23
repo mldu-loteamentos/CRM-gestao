@@ -234,6 +234,16 @@ const ParametrizacaoParceiroApp = {
       .sort((a, b) => Number(a.id) - Number(b.id));
   },
 
+  empresasEditaveis(p) {
+    const lista = this.eligibleCompanies().slice();
+    const id = String((p && p.companyId) || "");
+    if (id && !lista.some(c => String(c.id) === id)) {
+      const atual = this.companies().find(c => String(c.id) === id);
+      lista.unshift(atual || { id: id, name: (p && p.companyName) || ("Empresa " + id) });
+    }
+    return lista;
+  },
+
   papelDoCentro(cc) {
     const gravado = String(cc && cc.papel || "");
     if (gravado === "terrenista" || gravado === "empreendedor" || gravado === "obra") return gravado;
@@ -1371,6 +1381,34 @@ const ParametrizacaoParceiroApp = {
     if (!p) return;
     if (field === "partnerName") p.partnerName = value;
     if (field === "kind") p.kind = value === "sociedade" || value === "mista" ? value : "parceria";
+    this.persist();
+    this.render();
+  },
+
+  updateCompany(companyId) {
+    const p = this.current();
+    if (!p) return;
+    const id = String(companyId || "");
+    if (!id || id === String(p.companyId)) return;
+    const company = this.companies().find(c => String(c.id) === id)
+      || this.empresasEditaveis(p).find(c => String(c.id) === id);
+    if (!company) {
+      this.render();
+      return;
+    }
+    const nome = String(p.partnerName || "").trim().toLowerCase();
+    const dup = this.items.find(x =>
+      x !== p &&
+      String(x.companyId) === id &&
+      String(x.partnerName || "").trim().toLowerCase() === nome
+    );
+    if (dup) {
+      alert("Esta empresa já tem uma prestação de contas com o mesmo parceiro.");
+      this.render();
+      return;
+    }
+    p.companyId = id;
+    p.companyName = company.name || company.tradeName || ("Empresa " + id);
     this.persist();
     this.render();
   },
@@ -2741,16 +2779,23 @@ const ParametrizacaoParceiroApp = {
   },
 
   geralTabHtml(p, sociedade) {
+    const empresas = this.empresasEditaveis(p);
+    const input = "width:100%;max-width:100%;height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;box-sizing:border-box;background:#fff;";
     return `
       <div class="crm-card" style="padding:16px;overflow:hidden;">
         <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start;">
           <div>
             <h3 style="margin:0 0 4px;font-size:0.95rem;color:var(--color-primary);">Dados gerais</h3>
-            <p style="margin:0;font-size:0.78rem;color:#64748b;">Nome do parceiro e o tipo da prestação de contas.</p>
+            <p style="margin:0;font-size:0.78rem;color:#64748b;">Empresa, nome do parceiro e o tipo da prestação de contas.</p>
           </div>
           <button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.removeCurrent()" style="color:#dc2626;border-color:#fecaca;">Excluir</button>
         </div>
         <div style="display:flex;flex-direction:column;gap:12px;margin-top:14px;min-width:0;">
+          <label style="font-size:0.75rem;font-weight:700;color:#475569;display:flex;flex-direction:column;gap:4px;min-width:0;">Empresa
+            <select onchange="ParametrizacaoParceiroApp.updateCompany(this.value)" style="${input}">
+              ${empresas.map(c => `<option value="${this.esc(c.id)}" ${String(c.id) === String(p.companyId) ? "selected" : ""}>${this.esc(c.id)} — ${this.esc(c.name)}</option>`).join("")}
+            </select>
+          </label>
           <label style="font-size:0.75rem;font-weight:700;color:#475569;display:flex;flex-direction:column;gap:4px;min-width:0;">Parceiro / sócio
             <input value="${this.esc(p.partnerName)}" onchange="ParametrizacaoParceiroApp.updateField('partnerName', this.value)"
               style="width:100%;max-width:100%;height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;box-sizing:border-box;">

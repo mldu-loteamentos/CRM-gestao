@@ -48557,7 +48557,7 @@ window.mergeEmpresasCustom = function(localStr, cloudStr) {
       }
       const pT = Number(prev.updatedAt || 0);
       const nT = Number(item.updatedAt || 0);
-      const touched = (obj) => !!(obj && (obj.nome_usual_edited || obj.percentual_mldu_edited || Number(obj.updatedAt || 0) > 0));
+      const touched = (obj) => !!(obj && (obj.nome_usual_edited || obj.percentual_mldu_edited || obj.percentual_liquido_mldu_edited || Number(obj.updatedAt || 0) > 0));
       let newer;
       let older;
       if (nT > pT) { newer = item; older = prev; }
@@ -48588,6 +48588,9 @@ window.mergeEmpresasCustom = function(localStr, cloudStr) {
       const newerPerc = Number(newer.percentual_mldu);
       const olderPerc = Number(older.percentual_mldu);
       if (!newer.percentual_mldu_edited && !(newerPerc > 0) && olderPerc > 0) merged.percentual_mldu = older.percentual_mldu;
+      const newerLiq = Number(newer.percentual_liquido_mldu);
+      const olderLiq = Number(older.percentual_liquido_mldu);
+      if (!newer.percentual_liquido_mldu_edited && !(newerLiq > 0) && olderLiq > 0) merged.percentual_liquido_mldu = older.percentual_liquido_mldu;
       merged.updatedAt = Math.max(pT, nT);
       recs[id] = merged;
     });

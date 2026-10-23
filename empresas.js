@@ -154,16 +154,17 @@ const EmpresasApp = {
     return rounded.toFixed(4).replace(/0+$/, "").replace(/\.$/, "").replace(".", ",");
   },
 
-  commitPct(input, companyId) {
+  commitPct(input, companyId, field) {
+    const key = field === "percentual_liquido_mldu" ? "percentual_liquido_mldu" : "percentual_mldu";
     const parsed = this.parsePct(input.value);
     if (parsed.invalid) {
       const cur = this.customOf(companyId);
-      input.value = this.fmtPct(cur && cur.percentual_mldu);
+      input.value = this.fmtPct(cur && cur[key]);
       return;
     }
     input.value = parsed.empty ? "0" : this.fmtPct(parsed.n);
     input.dataset.userEdited = "1";
-    this.saveInline(companyId, "percentual_mldu", input.value);
+    this.saveInline(companyId, key, input.value);
   },
 
   clearOtherFlags(custom, keep) {
@@ -196,21 +197,26 @@ const EmpresasApp = {
         if (typed) rec.nome_usual_edited = 1;
       }
     }
-    if (!perc || perc.disabled) return;
-    const typedPerc = perc.dataset.userEdited === "1";
-    const parsed = this.parsePct(perc.value);
+    this.flushPctInput(rec, perc, "percentual_mldu");
+    this.flushPctInput(rec, tr.querySelector('.inline-input[data-field="percentual_liquido_mldu"]'), "percentual_liquido_mldu");
+  },
+
+  flushPctInput(rec, input, field) {
+    if (!rec || !input || input.disabled) return;
+    const typed = input.dataset.userEdited === "1";
+    const parsed = this.parsePct(input.value);
     if (parsed.invalid) return;
     if (parsed.empty) {
-      if (typedPerc && Number(rec.percentual_mldu) !== 0) {
-        rec.percentual_mldu = 0;
-        rec.percentual_mldu_edited = 1;
+      if (typed && Number(rec[field]) !== 0) {
+        rec[field] = 0;
+        rec[field + "_edited"] = 1;
       }
       return;
     }
-    if (Number(rec.percentual_mldu) === parsed.n) return;
-    if (!typedPerc && parsed.n === 0 && Number(rec.percentual_mldu) > 0) return;
-    rec.percentual_mldu = parsed.n;
-    if (typedPerc) rec.percentual_mldu_edited = 1;
+    if (Number(rec[field]) === parsed.n) return;
+    if (!typed && parsed.n === 0 && Number(rec[field]) > 0) return;
+    rec[field] = parsed.n;
+    if (typed) rec[field + "_edited"] = 1;
   },
 
   schedulePaint(id) {
@@ -318,7 +324,7 @@ const EmpresasApp = {
       consolidacao_padrao: 0,
       gerida_pelo_grupo: 0
     };
-    const isText = field === "nome_usual" || field === "percentual_mldu";
+    const isText = field === "nome_usual" || field === "percentual_mldu" || field === "percentual_liquido_mldu";
     const locked = this.rowLocked(custom);
     const active = this.activeLock(custom);
     if (locked && !isText && field !== active) {
@@ -342,13 +348,13 @@ const EmpresasApp = {
       custom.nome_usual = next;
       custom.nome_usual_edited = 1;
     }
-    if (field === "percentual_mldu") {
+    if (field === "percentual_mldu" || field === "percentual_liquido_mldu") {
       const parsed = this.parsePct(value);
       if (parsed.invalid) return;
       const n = parsed.empty ? 0 : parsed.n;
-      if (Number(custom.percentual_mldu) === n) return;
-      custom.percentual_mldu = n;
-      custom.percentual_mldu_edited = 1;
+      if (Number(custom[field]) === n) return;
+      custom[field] = n;
+      custom[field + "_edited"] = 1;
     }
     if (field === "consolidacao_padrao") custom.consolidacao_padrao = value ? 1 : 0;
     if (field === "gerida_pelo_grupo") custom.gerida_pelo_grupo = value ? 1 : 0;
@@ -445,7 +451,7 @@ const EmpresasApp = {
         <table class="emp-table">
           <colgroup>
             <col class="emp-c-id"><col class="emp-c-nome"><col class="emp-c-cnpj"><col class="emp-c-usual">
-            <col class="emp-c-pct"><col class="emp-c-flag"><col class="emp-c-flag"><col class="emp-c-flag"><col class="emp-c-flag"><col class="emp-c-flag">
+            <col class="emp-c-pct"><col class="emp-c-pct"><col class="emp-c-flag"><col class="emp-c-flag"><col class="emp-c-flag"><col class="emp-c-flag"><col class="emp-c-flag">
           </colgroup>
           <thead>
             <tr>
@@ -453,7 +459,8 @@ const EmpresasApp = {
               <th>Empresa</th>
               <th>CNPJ</th>
               <th>Nome usual</th>
-              <th class="is-center">% MLDU</th>
+              <th class="is-center">% Consolidação</th>
+              <th class="is-center">% Líquido MLDU</th>
               <th class="is-center">Consolidação</th>
               <th class="is-center">Gerida pelo grupo</th>
               <th class="is-center">Cobrança interna</th>
@@ -465,13 +472,14 @@ const EmpresasApp = {
     `;
 
     if (filteredCompanies.length === 0) {
-      html += `<tr><td colspan="10" style="text-align: center; padding: 30px;">Nenhuma empresa corresponde ao filtro.</td></tr>`;
+      html += `<tr><td colspan="11" style="text-align: center; padding: 30px;">Nenhuma empresa corresponde ao filtro.</td></tr>`;
     }
 
     filteredCompanies.forEach(company => {
       const custom = this.customOf(company.id) || {};
       const usualName = custom.nome_usual || '';
       const percMldu = this.fmtPct(custom.percentual_mldu || 0);
+      const percLiq = this.fmtPct(custom.percentual_liquido_mldu || 0);
       const locked = this.rowLocked(custom);
       const active = this.activeLock(custom);
       const lock = locked ? "disabled" : "";
@@ -495,7 +503,10 @@ const EmpresasApp = {
             <input type="text" class="inline-input" value="${this.escAttr(usualName)}" placeholder="Nome usual" ${lock} oninput="this.dataset.userEdited='1'; EmpresasApp.saveInline(${company.id}, 'nome_usual', this.value)" onblur="EmpresasApp.saveInline(${company.id}, 'nome_usual', this.value)">
           </td>
           <td class="is-center">
-            <input type="text" inputmode="decimal" class="inline-input emp-pct" value="${this.escAttr(percMldu)}" ${lock} oninput="this.dataset.userEdited='1'; EmpresasApp.saveInline(${company.id}, 'percentual_mldu', this.value)" onblur="EmpresasApp.commitPct(this, ${company.id})">
+            <input type="text" inputmode="decimal" data-field="percentual_mldu" class="inline-input emp-pct" value="${this.escAttr(percMldu)}" ${lock} oninput="this.dataset.userEdited='1'; EmpresasApp.saveInline(${company.id}, 'percentual_mldu', this.value)" onblur="EmpresasApp.commitPct(this, ${company.id})">
+          </td>
+          <td class="is-center">
+            <input type="text" inputmode="decimal" data-field="percentual_liquido_mldu" class="inline-input emp-pct" value="${this.escAttr(percLiq)}" ${lock} oninput="this.dataset.userEdited='1'; EmpresasApp.saveInline(${company.id}, 'percentual_liquido_mldu', this.value)" onblur="EmpresasApp.commitPct(this, ${company.id}, 'percentual_liquido_mldu')">
           </td>
           <td class="is-center">${interruptor("consolidacao_padrao", checkedCons)}</td>
           <td class="is-center">${interruptor("gerida_pelo_grupo", checkedGerida)}</td>

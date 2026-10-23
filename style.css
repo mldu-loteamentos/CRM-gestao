@@ -10336,11 +10336,11 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .emp-scroll { overflow-x: hidden; overflow-y: auto; max-height: calc(100vh - 210px); border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
 .emp-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 0.72rem; }
 .emp-table col.emp-c-id { width: 4%; }
-.emp-table col.emp-c-nome { width: 18%; }
-.emp-table col.emp-c-cnpj { width: 14%; }
-.emp-table col.emp-c-usual { width: 13%; }
+.emp-table col.emp-c-nome { width: 16%; }
+.emp-table col.emp-c-cnpj { width: 12%; }
+.emp-table col.emp-c-usual { width: 12%; }
 .emp-table col.emp-c-pct { width: 8%; }
-.emp-table col.emp-c-flag { width: 8.6%; }
+.emp-table col.emp-c-flag { width: 8%; }
 .emp-table thead th { position: sticky; top: 0; z-index: 2; background: #1b8253; color: #fff; padding: 6px 4px; text-align: left; font-weight: 700; white-space: normal; line-height: 1.15; font-size: 0.68rem; }
 .emp-table td { padding: 4px; border-bottom: 1px solid #e8eee9; vertical-align: middle; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #1c2e24; }
 .emp-table td.emp-nome { white-space: normal; line-height: 1.25; }
