@@ -2081,36 +2081,63 @@ const OrcamentoRepassesApp = {
           border: true
         });
       });
+      const porNome = new Map();
       lista.forEach((card) => {
-        const obra = card.obraCode ? " · OBRA " + card.obraCode : "";
-        faixa(ws, "PRESTAÇÃO DE CONTAS " + String(card.nome || "PRESTAÇÃO").toUpperCase() + obra, "FF0C3D28", "FFFFFFFF");
-        const centros = (card.distribuicao || []).filter((r) => (r.m || []).some((v) => Math.abs(Number(v) || 0) >= 0.005) || Math.abs(Number(r.jan28) || 0) >= 0.005);
+        const chave = String(card.nome || "Prestação");
+        if (!porNome.has(chave)) porNome.set(chave, []);
+        porNome.get(chave).push(card);
+      });
+      porNome.forEach((grupo) => {
+        const base = grupo[0];
+        faixa(ws, "PRESTAÇÃO DE CONTAS " + String(base.nome || "PRESTAÇÃO").toUpperCase(), "FF0C3D28", "FFFFFFFF");
+        const centros = [];
+        grupo.forEach((card) => {
+          (card.distribuicao || []).forEach((r) => {
+            if ((r.m || []).some((v) => Math.abs(Number(v) || 0) >= 0.005) || Math.abs(Number(r.jan28) || 0) >= 0.005) centros.push(r);
+          });
+        });
         centros.sort((a, b) => String(a.id).localeCompare(String(b.id), "pt-BR", { numeric: true }));
         const acc = OrcEst.z();
         let janAcc = 0;
         centros.forEach((r) => {
-          const meses = r.m || OrcEst.z();
-          meses.forEach((v, i) => { acc[i] += Number(v) || 0; });
+          (r.m || OrcEst.z()).forEach((v, i) => { acc[i] += Number(v) || 0; });
           janAcc += Number(r.jan28) || 0;
-          const pago = this.ccPagamento(r.id);
-          const onde = !card.sociedade && pago && pago !== String(r.id).replace(/\D/g, "") ? " · pago no " + pago : "";
-          numeros(ws, String(r.id) + (r.nome ? " — " + r.nome : "") + onde, meses, r.jan28, "FFFFFFFF", false);
         });
-        if (!centros.length) faixa(ws, "Nenhum centro de custo nesta prestação", "FFFFFFFF", "FF64748B");
-        else numeros(ws, "Total", acc, janAcc, "FF475569", true);
-        const pessoas = card.sociedade ? (card.pessoas || []) : [];
-        if (pessoas.length) {
-          faixa(ws, "DISTRIBUIÇÃO DOS SÓCIOS", "FFE7F6EE", "FF105436");
-          const pAcc = OrcEst.z();
-          let pJan = 0;
-          pessoas.forEach((p) => {
-            const meses = p.m || OrcEst.z();
-            meses.forEach((v, i) => { pAcc[i] += Number(v) || 0; });
-            pJan += Number(p.jan28) || 0;
-            const pct = Number(p.pct) ? " " + this.pctTxt(p.pct) : "";
-            numeros(ws, (p.nome || "Sócio") + pct, meses, p.jan28, "FFFFFFFF", false);
+        const pessoas = [];
+        const visto = new Set();
+        grupo.forEach((card) => {
+          (card.pessoas || []).forEach((p) => {
+            const nomeP = String(p.nome || "").trim();
+            if (!nomeP || visto.has(nomeP) || !(Number(p.pct) > 0)) return;
+            visto.add(nomeP);
+            pessoas.push(p);
           });
-          numeros(ws, "Total dos sócios", pAcc, pJan, "FF475569", true);
+        });
+        const divide = pessoas.length > 1 || (pessoas.length === 1 && Math.abs(Number(pessoas[0].pct) - 100) > 0.05);
+        const linhaCentro = (r, meses, jan) => {
+          const pago = this.ccPagamento(r.id);
+          const onde = !base.sociedade && pago && pago !== String(r.id).replace(/\D/g, "") ? " · pago no " + pago : "";
+          numeros(ws, String(r.id) + (r.nome ? " — " + r.nome : "") + onde, meses, jan, "FFFFFFFF", false);
+        };
+        if (!centros.length) faixa(ws, "Nenhum centro de custo nesta prestação", "FFFFFFFF", "FF64748B");
+        else if (divide) {
+          pessoas.forEach((p) => {
+            const fatia = (Number(p.pct) || 0) / 100;
+            faixa(ws, String(p.nome || "Parceiro").toUpperCase() + " · " + this.pctTxt(p.pct), "FFE7F6EE", "FF105436");
+            const pAcc = OrcEst.z();
+            let pJan = 0;
+            centros.forEach((r) => {
+              const meses = (r.m || OrcEst.z()).map((v) => (Number(v) || 0) * fatia);
+              const jan = (Number(r.jan28) || 0) * fatia;
+              meses.forEach((v, i) => { pAcc[i] += v; });
+              pJan += jan;
+              linhaCentro(r, meses, jan);
+            });
+            numeros(ws, "Total", pAcc, pJan, "FF475569", true);
+          });
+        } else {
+          centros.forEach((r) => linhaCentro(r, r.m || OrcEst.z(), r.jan28));
+          numeros(ws, "Total", acc, janAcc, "FF475569", true);
         }
       });
       ws.addRow([]);
@@ -2177,11 +2204,16 @@ const OrcamentoRepassesApp = {
     return dig.slice(0, -2) + "00";
   },
 
+  colunasRepasse() {
+    const meses = OrcEst.MESES.map(() => `<col class="orc-rep-mes">`).join("");
+    return `<colgroup><col class="orc-rep-nome">${meses}<col class="orc-rep-mes"><col class="orc-rep-mes"></colgroup>`;
+  },
+
   cabecaPagamento(primeira) {
-    const meses = OrcEst.MESES.map((m, i) => `<th${i === 0 ? " class=\"orc-rep-jan\"" : ""}>${m}</th>`).join("");
+    const meses = OrcEst.MESES.map((m) => `<th>${m}</th>`).join("");
     const origens = OrcEst.MESES.map((_, i) => {
       const de = i === 0 ? "DEZ/26" : (OrcEst.MESES[i - 1] + "/27");
-      return `<th${i === 0 ? " class=\"orc-rep-jan\"" : ""}>variação de caixa de ${de}</th>`;
+      return `<th>variação de caixa de ${de}</th>`;
     }).join("");
     return `<tr><th rowspan="2">${primeira}</th>${meses}<th>JAN/28</th><th rowspan="2">Total</th></tr><tr class="orc-rep-origem">${origens}<th>variação de caixa de DEZ/27</th></tr>`;
   },
@@ -2246,7 +2278,7 @@ const OrcamentoRepassesApp = {
         ? "Cada sócio recebe este percentual da distribuição do mês seguinte."
         : "Cada participante recebe este percentual do repasse do mês seguinte.";
       socios = `<div class="orc-rep-socios"><h4>${quem}</h4>${aviso}
-        <div class="orc-dfc-scroll"><table class="orc-dfc-table orc-est-table orc-rep-quadro"><thead>${this.cabecaPagamento("Participante")}</thead><tbody>
+        <div class="orc-dfc-scroll"><table class="orc-dfc-table orc-est-table orc-rep-quadro">${this.colunasRepasse()}<thead>${this.cabecaPagamento("Participante")}</thead><tbody>
         ${card.pessoas.map((p) => `<tr><td>${OrcEst.esc(p.nome)} <span class="orc-rep-pct">${this.pctTxt(p.pct)}</span></td>${(p.m || []).map((v) => `<td${Number(v) < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(v)}</td>`).join("")}<td${Number(p.jan28) < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(p.jan28)}</td><td>${OrcEst.money(this.soma(p.m))}</td></tr>`).join("")}
         </tbody></table></div></div>`;
     }
@@ -2265,19 +2297,15 @@ const OrcamentoRepassesApp = {
         janAcc += Number(r.jan28) || 0;
         const pago = !card.sociedade ? this.ccPagamento(r.id) : "";
         const nome = String(r.id) + (r.nome ? " — " + r.nome : "") + (pago && pago !== String(r.id).replace(/\D/g, "") ? " · pago no " + pago : "");
-        return `<tr><td>${OrcEst.esc(nome)}</td>${meses.map((v, i) => {
+        return `<tr><td>${OrcEst.esc(nome)}</td>${meses.map((v) => {
           const n = Number(v) || 0;
-          const cls = [n < -0.004 ? "orc-dfc-neg" : "", i === 0 ? "orc-rep-jan" : ""].filter(Boolean).join(" ");
-          return `<td${cls ? " class=\"" + cls + "\"" : ""}>${OrcEst.money(n)}</td>`;
+          return `<td${n < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(n)}</td>`;
         }).join("")}<td${Number(r.jan28) < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(r.jan28)}</td><td>${OrcEst.money(this.soma(meses))}</td></tr>`;
       }).join("");
       quadro = `<div class="orc-rep-socios"><h4>${OrcEst.esc(rotuloRep)}. ${OrcEst.esc(fraseRep)}</h4>
-        <div class="orc-dfc-scroll"><table class="orc-dfc-table orc-est-table orc-rep-quadro"><thead>${this.cabecaPagamento("Centro de custo")}</thead>
+        <div class="orc-dfc-scroll"><table class="orc-dfc-table orc-est-table orc-rep-quadro">${this.colunasRepasse()}<thead>${this.cabecaPagamento("Centro de custo")}</thead>
         <tbody>${corpo}</tbody>
-        <tfoot><tr><td>Total</td>${acc.map((v, i) => {
-          const cls = [v < -0.004 ? "orc-dfc-neg" : "", i === 0 ? "orc-rep-jan" : ""].filter(Boolean).join(" ");
-          return `<td${cls ? " class=\"" + cls + "\"" : ""}>${OrcEst.money(v)}</td>`;
-        }).join("")}<td${janAcc < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(janAcc)}</td><td>${OrcEst.money(this.soma(acc))}</td></tr></tfoot>
+        <tfoot><tr><td>Total</td>${acc.map((v) => `<td${v < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(v)}</td>`).join("")}<td${janAcc < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(janAcc)}</td><td>${OrcEst.money(this.soma(acc))}</td></tr></tfoot>
         </table></div></div>`;
     }
     return `<div class="orc-dfc-scroll"><table class="orc-dfc-table orc-est-table">
