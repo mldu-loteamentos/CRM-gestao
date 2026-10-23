@@ -95,27 +95,23 @@ const ComprasDashboardApp = {
   },
 
   injectCss() {
-    if (document.getElementById("cdash-style")) return;
+    const prev = document.getElementById("cdash-style");
+    if (prev) prev.remove();
     const style = document.createElement("style");
     style.id = "cdash-style";
     style.textContent = `
       .cdash { color: #334155; }
-      .cdash-top { display: flex; justify-content: flex-end; gap: 18px; align-items: flex-end; margin-bottom: 8px; flex-wrap: wrap; }
-      .cdash-top label { display: block; font-size: 0.72rem; color: #64748b; margin-bottom: 4px; }
-      .cdash-top select, .cdash-stamp { height: 34px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; padding: 0 10px; font-size: 0.85rem; color: #334155; }
-      .cdash-stamp { display: flex; align-items: center; min-width: 150px; }
-      .cdash-title { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; font-size: 1.35rem; font-weight: 600; color: #475569; }
-      .cdash-dots { display: flex; gap: 4px; }
-      .cdash-dots i { width: 14px; height: 14px; border-radius: 50%; display: block; }
-      .cdash-grid { display: grid; grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.3fr); gap: 22px; align-items: start; }
-      .cdash-kpis { display: grid; grid-template-columns: repeat(3, 1fr); border-bottom: 1px solid #e2e8f0; margin-bottom: 8px; }
-      .cdash-kpis + .cdash-kpis { border-bottom: 0; margin-top: 4px; }
-      .cdash-load { padding: 36px 0; }
-      .cdash-kpi { text-align: center; padding: 8px 8px 14px; }
-      .cdash-kpi + .cdash-kpi { border-left: 1px solid #e2e8f0; }
-      .cdash-kpi span { display: block; font-size: 0.78rem; color: #64748b; }
-      .cdash-kpi strong { display: block; font-size: 2.4rem; font-weight: 650; color: #334155; line-height: 1.15; margin-top: 6px; }
-      .cdash-cap { text-align: center; font-size: 0.75rem; color: #64748b; margin: 8px 0 16px; }
+      .cdash-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+      .cdash-field { display: flex; align-items: center; gap: 8px; font-size: 0.78rem; font-weight: 700; color: #64748b; }
+      .cdash-field select { height: 36px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; padding: 0 10px; font-size: 0.85rem; color: #334155; min-width: 180px; }
+      .cdash-side { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+      .cdash-when { font-size: 0.75rem; color: #94a3b8; }
+      .cdash-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0 0 10px; }
+      .cdash-kpi { text-align: left; padding: 14px 16px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; }
+      .cdash-kpi span { display: block; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: #64748b; }
+      .cdash-kpi strong { display: block; font-size: 1.65rem; font-weight: 650; color: #0f172a; line-height: 1.15; margin-top: 4px; }
+      .cdash-kpi em { display: block; margin-top: 4px; font-style: normal; font-size: 0.78rem; color: #64748b; }
+      .cdash-cap { font-size: 0.75rem; color: #94a3b8; margin: 0 0 14px; }
       .cdash-block h3 { text-align: center; font-size: 0.95rem; font-weight: 600; color: #64748b; margin: 8px 0 10px; }
       .cdash-bars { display: flex; align-items: flex-end; gap: 6px; height: 168px; }
       .cdash-bar { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; min-width: 0; height: 100%; }
@@ -139,8 +135,9 @@ const ComprasDashboardApp = {
       .cdash-time { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
       .cdash-time i { display: block; height: 14px; background: #f43f5e; border-radius: 2px; min-width: 2px; }
       .cdash-msg { padding: 28px 8px; text-align: center; color: #64748b; }
-      .cdash-btn { height: 34px; border: 1px solid #105436; background: #105436; color: #fff; border-radius: 6px; font-weight: 700; padding: 0 12px; cursor: pointer; }
-      @media (max-width: 980px) { .cdash-grid, .cdash-kpis { grid-template-columns: 1fr; } }
+      .cdash-load { padding: 36px 0; }
+      .cdash-btn { height: 36px; border: 1px solid #105436; background: #105436; color: #fff; border-radius: 6px; font-weight: 700; padding: 0 14px; cursor: pointer; }
+      @media (max-width: 800px) { .cdash-kpis { grid-template-columns: 1fr; } }
     `;
     document.head.appendChild(style);
   },
@@ -418,27 +415,23 @@ const ComprasDashboardApp = {
         + '<div class="loading-status-text">' + this.esc(this.state.etapa || "Buscando os títulos a pagar…") + "</div>"
         + '<div class="ml-load-track"><div class="loading-progress-bar" style="width:' + pct + '%"></div></div></div>';
     } else if (this.state.error) {
-      body = '<div class="cdash-msg">' + this.esc(this.state.error) + '<div style="margin-top:12px;"><button type="button" class="cdash-btn" id="cdash-retry">Atualizar</button></div></div>';
+      body = '<div class="cdash-msg">' + this.esc(this.state.error) + "</div>";
     } else if (Array.isArray(access) && !access.length) {
       body = '<div class="cdash-msg">Seu usuário não tem departamento cadastrado.</div>';
     } else if (!hist.length) {
       body = '<div class="cdash-msg">Nenhum documento inserido de ' + this.fmtBr(win.histStart) + " até " + this.fmtBr(win.today) + ".</div>";
     } else {
       body = '<div class="cdash-kpis">'
-        + '<div class="cdash-kpi"><span>Documentos inseridos</span><strong>' + this.fmtInt(this.documentos(hist)) + "</strong></div>"
-        + '<div class="cdash-kpi"><span>NFe</span><strong>' + this.fmtInt(this.documentos(nfe)) + "</strong></div>"
-        + '<div class="cdash-kpi"><span>NFS</span><strong>' + this.fmtInt(this.documentos(nfs)) + "</strong></div></div>"
-        + '<div class="cdash-kpis">'
-        + '<div class="cdash-kpi"><span>Prazo médio NFe (dias)</span><strong>' + this.fmtDays(this.pmp(nfe)) + "</strong></div>"
-        + '<div class="cdash-kpi"><span>Prazo médio NFS (dias)</span><strong>' + this.fmtDays(this.pmp(nfs)) + "</strong></div>"
-        + "<div class=\"cdash-kpi\"><span>Período</span><strong style=\"font-size:1.05rem;margin-top:14px\">" + this.fmtBr(win.histStart) + " a " + this.fmtBr(win.today) + "</strong></div></div>"
-        + '<p class="cdash-cap">Inclusão no Sienge neste período. O prazo é o vencimento menos a emissão, ponderado pelo valor da parcela. Um documento em mais de um departamento entra em cada linha. O total é a quantidade única.</p>'
+        + '<div class="cdash-kpi"><span>Documentos inseridos</span><strong>' + this.fmtInt(this.documentos(hist)) + "</strong><em>" + this.fmtBr(win.histStart) + " a " + this.fmtBr(win.today) + "</em></div>"
+        + '<div class="cdash-kpi"><span>NFe</span><strong>' + this.fmtInt(this.documentos(nfe)) + "</strong><em>Prazo médio " + this.fmtDays(this.pmp(nfe)) + " dias</em></div>"
+        + '<div class="cdash-kpi"><span>NFS</span><strong>' + this.fmtInt(this.documentos(nfs)) + "</strong><em>Prazo médio " + this.fmtDays(this.pmp(nfs)) + " dias</em></div></div>"
+        + '<p class="cdash-cap">Prazo: vencimento menos a emissão, ponderado pelo valor.</p>'
         + this.tabelaHtml(hist);
     }
     root.innerHTML = '<div class="cdash">'
-      + '<div class="cdash-top"><div><label>Departamento</label>' + select + '</div>'
-      + '<div><label>Data Atualização</label><div class="cdash-stamp">' + this.esc(this.stamp(this.state.updatedAt)) + "</div></div>"
-      + '<button type="button" class="cdash-btn" id="cdash-refresh">Atualizar</button></div>'
+      + '<div class="cdash-top"><label class="cdash-field">Departamento ' + select + '</label>'
+      + '<div class="cdash-side"><span class="cdash-when">Atualizado em ' + this.esc(this.stamp(this.state.updatedAt)) + '</span>'
+      + '<button type="button" class="cdash-btn" id="cdash-refresh">Atualizar</button></div></div>'
       + body + "</div>";
     const dept = document.getElementById("cdash-dept");
     if (dept) dept.addEventListener("change", () => {
@@ -447,8 +440,6 @@ const ComprasDashboardApp = {
     });
     const refresh = document.getElementById("cdash-refresh");
     if (refresh) refresh.addEventListener("click", () => this.load());
-    const retry = document.getElementById("cdash-retry");
-    if (retry) retry.addEventListener("click", () => this.load());
   },
 
   init() {

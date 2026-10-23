@@ -1342,7 +1342,18 @@ const OrcamentoRepassesApp = {
         ccNome: String(s.ccTituloNome || "")
       });
     });
-    return lista;
+    return lista.sort((a, b) => this.ordemCentro(a.ccId, b.ccId) || String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR"));
+  },
+
+  ordemCentro(a, b) {
+    const da = String(a || "").replace(/\D/g, "");
+    const db = String(b || "").replace(/\D/g, "");
+    const na = da ? Number(da) : NaN;
+    const nb = db ? Number(db) : NaN;
+    if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+    if (Number.isFinite(na)) return -1;
+    if (Number.isFinite(nb)) return 1;
+    return String(a || "").localeCompare(String(b || ""), "pt-BR", { numeric: true });
   },
 
   prestacoes() {
@@ -1590,7 +1601,7 @@ const OrcamentoRepassesApp = {
         const accId = "acc:" + node.id + ":" + a.conta;
         const ccs = this.ccsDoRepasse([...a.ccs.values()]
           .filter((c) => c.months.some((v) => Math.abs(v) >= 0.005))
-          .sort((x, y) => String(x.id).localeCompare(String(y.id), "pt-BR", { numeric: true })), sociedade);
+          .sort((x, y) => this.ordemCentro(x.id, y.id)), sociedade);
         const pcts = [...a.pcts].filter((n) => n > 0).sort((x, y) => x - y);
         rows.push({
           id: accId,
@@ -1669,7 +1680,9 @@ const OrcamentoRepassesApp = {
       });
     }
     if (lucros && distribuicao.length) this.completarLucrosNoCentro(distribuicao, pagamento, jan28);
-    const ccIds = [...centros.keys()].sort((a, b) => String(a).localeCompare(String(b), "pt-BR", { numeric: true }));
+    distribuicao.sort((a, b) => this.ordemCentro(a.id, b.id));
+    pessoas.sort((a, b) => this.ordemCentro(a.ccId, b.ccId) || String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR"));
+    const ccIds = [...centros.keys()].sort((a, b) => this.ordemCentro(a, b));
     return {
       id: String(part.id || (part.companyId + "-" + indice)) + (obraCode ? ":" + obraCode : ""),
       obraCode: obra ? String(obra.code) : "",
@@ -1882,7 +1895,7 @@ const OrcamentoRepassesApp = {
         centros.push(c);
       });
     });
-    centros.sort((a, b) => String(a.id).localeCompare(String(b.id), "pt-BR", { numeric: true }));
+    centros.sort((a, b) => this.ordemCentro(a.id, b.id));
     const marcas = centros.length
       ? centros.map((c) => {
         const on = c.inAccount !== false;
@@ -2125,7 +2138,7 @@ const OrcamentoRepassesApp = {
             if ((r.m || []).some((v) => Math.abs(Number(v) || 0) >= 0.005) || Math.abs(Number(r.jan28) || 0) >= 0.005) centros.push(r);
           });
         });
-        centros.sort((a, b) => String(a.id).localeCompare(String(b.id), "pt-BR", { numeric: true }));
+        centros.sort((a, b) => this.ordemCentro(a.id, b.id));
         const acc = OrcEst.z();
         let janAcc = 0;
         centros.forEach((r) => {
@@ -2142,6 +2155,7 @@ const OrcamentoRepassesApp = {
             pessoas.push(p);
           });
         });
+        pessoas.sort((a, b) => this.ordemCentro(a.ccId, b.ccId) || String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR"));
         const divide = pessoas.length > 1 || (pessoas.length === 1 && Math.abs(Number(pessoas[0].pct) - 100) > 0.05);
         const linhaCentro = (r, meses, jan) => {
           const pago = this.ccPagamento(r.id);
@@ -2332,7 +2346,7 @@ const OrcamentoRepassesApp = {
         ${card.pessoas.map((p) => `<tr><td>${OrcEst.esc(card.sociedade ? this.rotuloSocio(p) : (p.nome + " · " + this.pctTxt(p.pct)))}</td>${(p.m || []).map((v) => `<td${Number(v) < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(v)}</td>`).join("")}<td${Number(p.jan28) < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(p.jan28)}</td><td>${OrcEst.money(this.soma(p.m))}</td></tr>`).join("")}
         </tbody></table></div></div>`;
     }
-    const centrosRep = (card.distribuicao || []).slice().sort((a, b) => String(a.id).localeCompare(String(b.id), "pt-BR", { numeric: true }));
+    const centrosRep = (card.distribuicao || []).slice().sort((a, b) => this.ordemCentro(a.id, b.id));
     const rotuloRep = card.sociedade ? "Distribuição" : "Repasse";
     const fraseRep = card.companyId === "12"
       ? "O lucro recebido da empresa 13 é distribuído no mês em que entra. O resultado próprio de um mês vira distribuição no mês seguinte."

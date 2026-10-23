@@ -128,6 +128,109 @@ const GerarPagamentoApp = {
     return c && (c.id || c.numero) ? c : null;
   },
 
+  /* Conta final da empresa 1. A guia única sai inteira por ela. */
+  CONTA_FINAL_NUM: "993916",
+
+  contaFinalEmpresa1() {
+    const campos = this.state.customFields || {};
+    const ids = Object.keys(campos);
+    for (let i = 0; i < ids.length; i++) {
+      const c = campos[ids[i]] && campos[ids[i]].conta_parceria;
+      if (c && this.numConta(c.numero || c.id) === this.CONTA_FINAL_NUM) return c;
+    }
+    return { id: "99391-6", numero: "99391-6", nome: "Conta final empresa 1", banco: "341", agencia: "0223" };
+  },
+
+  listaPt(itens) {
+    const lista = (itens || []).filter(Boolean);
+    if (lista.length <= 1) return lista[0] || "";
+    return lista.slice(0, -1).join(", ") + " e " + lista[lista.length - 1];
+  },
+
+  /*
+   * Documento único (guia de FGTS, por exemplo): o mesmo título rateia centros da conta
+   * final 99391-6 e centros de outra conta de parceria. A guia não pode sair em duas contas.
+   * Os centros vêm do cadastro (conta_parceria); 99466-6 e 98746-2 são os casos mais comuns.
+   */
+  acertosDocumentoUnico(linhas) {
+    const base = linhas && linhas[0];
+    if (!base) return null;
+    const empresa = String(base.companyId || "");
+    if (empresa && empresa !== "1") return null;
+    if (linhas.some((r) => this.contaPagamentoDistratoNovo(r) || this.contaPagamentoRepasse(r))) return null;
+    const ccs = (base.ccsTitulo && base.ccsTitulo.length)
+      ? base.ccsTitulo
+      : linhas.map((r) => ({ id: r.ccId, nome: r.ccNome, rateio: 0 }));
+    if (ccs.length < 2) return null;
+    const pagar = Number(base.tituloAPagar) || 0;
+    const porConta = new Map();
+    let temFinal = false;
+    let temOutra = false;
+    ccs.forEach((c) => {
+      const rateio = Number(c.rateio) || 0;
+      if (rateio <= 0.009 && !linhas.some((r) => String(r.ccId) === String(c.id))) return;
+      const parc = this.contaParceriaDe(this.ccDe(c.id));
+      const num = parc ? (this.numConta(parc.numero || parc.id) || String(parc.id)) : "";
+      if (!num || num === this.CONTA_FINAL_NUM) {
+        temFinal = true;
+        return;
+      }
+      temOutra = true;
+      const row = linhas.find((r) => String(r.ccId) === String(c.id));
+      const parte = row ? (Number(row.aPagar) || 0) : pagar * (rateio / 100);
+      const g = porConta.get(num) || { conta: parc, valor: 0, ccs: [] };
+      g.valor += parte;
+      if (!g.ccs.some((x) => x.id === String(c.id))) g.ccs.push({ id: String(c.id), nome: c.nome || "" });
+      porConta.set(num, g);
+    });
+    if (!temFinal || !temOutra) return null;
+    const lista = [...porConta.values()]
+      .map((x) => ({ conta: x.conta, valor: Math.round(x.valor * 100) / 100, ccs: x.ccs }))
+      .filter((x) => x.valor > 0.009);
+    return lista.length ? lista : null;
+  },
+
+  transferenciasDe(itens) {
+    const para = this.contaFinalEmpresa1();
+    const paraNumero = para.numero || "99391-6";
+    const mapa = new Map();
+    (itens || []).forEach((it) => {
+      (it.acertos || []).forEach((a) => {
+        const deNumero = (a.conta && (a.conta.numero || a.conta.id)) || "";
+        const k = this.numConta(deNumero) || deNumero;
+        if (!k) return;
+        const g = mapa.get(k) || { deNumero, deLabel: this.contaLabel(a.conta), paraNumero, valor: 0, ccs: [], titulos: [] };
+        g.valor = Math.round((g.valor + (Number(a.valor) || 0)) * 100) / 100;
+        (a.ccs || []).forEach((c) => {
+          if (!g.ccs.some((x) => x.id === String(c.id))) g.ccs.push({ id: String(c.id), nome: c.nome || "" });
+        });
+        const tit = String(it.titulo || "");
+        if (tit && !g.titulos.includes(tit)) g.titulos.push(tit);
+        mapa.set(k, g);
+      });
+    });
+    return [...mapa.values()];
+  },
+
+  textoTransferencias(lista) {
+    if (!lista || !lista.length) return "";
+    return "\n\nTransferência entre contas. A guia entra inteira na conta final e este valor compensa o que deveria sair da conta de parceria:\n" + lista.map((a) => {
+      const ccs = this.listaPt((a.ccs || []).map((c) => c.id));
+      const tits = (a.titulos || []).length ? ` Título(s) ${a.titulos.join(", ")}.` : "";
+      return `• Da conta ${a.deNumero} para a conta ${a.paraNumero}: ${this.money(a.valor)}, centros de custo ${ccs}.${tits}`;
+    }).join("\n");
+  },
+
+  transferenciasHtml(lista) {
+    if (!lista || !lista.length) return "";
+    const itens = lista.map((a) => {
+      const ccs = this.listaPt((a.ccs || []).map((c) => c.id));
+      const tits = (a.titulos || []).length ? ` Títulos ${this.esc(a.titulos.join(", "))}.` : "";
+      return `<li>Transferir <strong>${this.money(a.valor)}</strong> da conta <strong>${this.esc(a.deNumero)}</strong> para a conta <strong>${this.esc(a.paraNumero)}</strong>, referente aos centros de custo ${this.esc(ccs)}.${tits} Esse valor foi pago na conta final e deveria sair da conta de parceria.</li>`;
+    }).join("");
+    return `<div class="gp-acerto" role="alert"><strong>Transferência entre contas</strong><span>A guia entra inteira neste lote, na conta ${this.esc(lista[0].paraNumero)}. O documento não pode ser pago em duas contas.</span><ul>${itens}</ul></div>`;
+  },
+
   /** CC Corporativo não segue a regra de parceria, mesmo com "parceiro/parceria" no nome. */
   ehCorporativo(id) {
     return String(this.customOf(id).tipo_cc || "") === "Corporativo";
@@ -1080,13 +1183,28 @@ const GerarPagamentoApp = {
   /* Títulos em aberto agrupados por conta de parceria e dia do lote (um lote por conta por dia).
      Vencimento de sábado ou domingo entra no lote da segunda.
      Título com CC de parceria entra inteiro: valor total e todos os CCs do rateio, inclusive os que não são de parceria.
-     Se os CCs de parceria do título forem de contas diferentes, cada conta fica só com a sua parte. */
+     Se os CCs de parceria do título forem de contas diferentes, cada conta fica só com a sua parte.
+     Guia única (o mesmo título na conta final e numa conta de parceria) sai inteira na 99391-6, com alerta de transferência. */
   gruposLote() {
     const grupos = {};
     const abertosTodos = this.state.titulos.filter((r) => !r.pago && r.aPagar > 0.009);
+    const porTitulo = {};
+    abertosTodos.forEach((r) => {
+      const ch = this.chaveTitulo(r.titulo, r.parcela);
+      (porTitulo[ch] = porTitulo[ch] || []).push(r);
+    });
+    const guias = {};
+    Object.keys(porTitulo).forEach((ch) => {
+      const acertos = this.acertosDocumentoUnico(porTitulo[ch]);
+      if (acertos) guias[ch] = acertos;
+    });
     // CC da obra com conta própria (ex.: 14000 na conta MLDU) só define a conta quando o título não tem CC de parceria.
     const comParceria = new Set(abertosTodos.filter((r) => this.ccDeParceriaPeloNome(r.ccId, r.ccNome)).map((r) => this.chaveTitulo(r.titulo, r.parcela)));
-    const abertos = abertosTodos.filter((r) => !comParceria.has(this.chaveTitulo(r.titulo, r.parcela)) || this.ccDeParceriaPeloNome(r.ccId, r.ccNome));
+    const abertos = abertosTodos.filter((r) => {
+      const ch = this.chaveTitulo(r.titulo, r.parcela);
+      if (guias[ch]) return false;
+      return !comParceria.has(ch) || this.ccDeParceriaPeloNome(r.ccId, r.ccNome);
+    });
     const contaKeyDe = (r) => (r.esperada ? this.numConta(r.esperada.numero || r.esperada.id) || String(r.esperada.id) : "");
     const contasDoTitulo = {};
     abertos.forEach((r) => {
@@ -1124,6 +1242,25 @@ const GerarPagamentoApp = {
       it.valor += r.valor;
       it.aPagar += r.aPagar;
       if (!it.ccs.some((c) => c.id === r.ccId)) it.ccs.push({ id: r.ccId, nome: r.ccNome, parceria: true });
+    });
+    const contaFinal = this.contaFinalEmpresa1();
+    const contaKeyFinal = this.numConta(contaFinal.numero || contaFinal.id) || this.CONTA_FINAL_NUM;
+    Object.keys(guias).forEach((ch) => {
+      const r = porTitulo[ch][0];
+      const dia = this.diaDoLote(r.vencimento);
+      const key = contaKeyFinal + "@" + (dia || "sem-data");
+      if (!grupos[key]) {
+        grupos[key] = { key, contaKey: contaKeyFinal, dia: dia || "", conta: contaFinal, empresaConta: "1", itens: {}, ordem: [] };
+      }
+      const g = grupos[key];
+      if (g.itens[ch]) return;
+      g.itens[ch] = {
+        chave: ch, titulo: r.titulo, parcela: r.parcela, credor: r.credor, credorId: r.credorId, companyId: r.companyId, documento: r.documento,
+        vencimento: r.vencimento, valor: r.tituloValor, aPagar: r.tituloAPagar, inteiro: true, autorizacao: r.autorizacao || null,
+        guiaUnica: true, acertos: guias[ch],
+        ccs: (r.ccsTitulo || []).map((c) => ({ id: c.id, nome: c.nome, parceria: c.parceria, rateio: c.rateio, planos: c.planos || [] }))
+      };
+      g.ordem.push(ch);
     });
     return Object.values(grupos).map((g) => {
       const itens = g.ordem.map((k) => g.itens[k]).sort((a, b) => (a.vencimento || "").localeCompare(b.vencimento || "") || Number(a.titulo) - Number(b.titulo));
@@ -1305,7 +1442,8 @@ const GerarPagamentoApp = {
     const alerta = fora.length
       ? `\n\n${fora.length} título(s) deste dia ficam fora por bloqueio:\n` + fora.slice(0, 8).map((it) => `• ${it.titulo}/${it.parcela || 1} ${it.credor}: ${it.bloqueio}`).join("\n") + (fora.length > 8 ? `\n• e mais ${fora.length - 8}` : "")
       : "";
-    const pergunta = `Gerar lote do dia ${this.dataBr(g.dia)} com ${itens.length} título(s), total de ${this.money(total)}, pela conta ${this.contaLabel(g.conta)}?\n\nData da baixa no banco: ${this.dataBr(baixa)}. O robô preenche essa data no Sienge.${alerta}`;
+    const transferencias = this.transferenciasDe(itens);
+    const pergunta = `Gerar lote do dia ${this.dataBr(g.dia)} com ${itens.length} título(s), total de ${this.money(total)}, pela conta ${this.contaLabel(g.conta)}?\n\nData da baixa no banco: ${this.dataBr(baixa)}. O robô preenche essa data no Sienge.${alerta}${this.textoTransferencias(transferencias)}`;
     const okConf = typeof window.mouraConfirm === "function" ? await window.mouraConfirm(pergunta) : confirm(pergunta);
     if (!okConf) {
       s.gerandoLote = "";
@@ -1329,6 +1467,7 @@ const GerarPagamentoApp = {
       conta: g.conta,
       empresaConta: g.empresaConta || "",
       total: Math.round(total * 100) / 100,
+      ...(transferencias.length ? { transferencias } : {}),
       itens: itens.map((it) => ({
         titulo: it.titulo, parcela: it.parcela, credor: it.credor, credorId: it.credorId || "", companyId: it.companyId || "", documento: it.documento,
         vencimento: it.vencimento, valor: this.valorPagar(it),
@@ -1593,11 +1732,11 @@ const GerarPagamentoApp = {
         action: ev.tipo,
         module: "Gerar Pagamento",
         status: ev.ok ? "ok" : "erro",
-        summary: `${titulo}: ${lote.id}${numero} · ${titulos.length} título(s) · ${this.money(lote.total)} · baixa ${this.dataBr(lote.dataBaixa || lote.dia)} · ${this.contaLabel(lote.conta)}${ev.msg ? " · " + ev.msg : ""}`,
+        summary: `${titulo}: ${lote.id}${numero} · ${titulos.length} título(s) · ${this.money(lote.total)} · baixa ${this.dataBr(lote.dataBaixa || lote.dia)} · ${this.contaLabel(lote.conta)}${ev.msg ? " · " + ev.msg : ""}${(lote.transferencias || []).length ? " · " + (lote.transferencias || []).map((a) => `transferir ${this.money(a.valor)} da ${a.deNumero} para ${a.paraNumero} (CC ${(a.ccs || []).map((c) => c.id).join(", ")})`).join("; ") : ""}`,
         customerLabel: credores.slice(0, 3).join(", ") + (credores.length > 3 ? ` e mais ${credores.length - 3}` : ""),
         enterpriseId: String((itens[0] && itens[0].ccs) || "").split(" - ")[0],
         titleId: titulos.join(", "),
-        details: { lote: lote.id, numeroSienge: sg.numero || "", total: lote.total, pagamento: lote.dia, dataBaixa: lote.dataBaixa || lote.dia, conta: this.contaLabel(lote.conta), titulos, mensagem: ev.msg || "" }
+        details: { lote: lote.id, numeroSienge: sg.numero || "", total: lote.total, pagamento: lote.dia, dataBaixa: lote.dataBaixa || lote.dia, conta: this.contaLabel(lote.conta), titulos, mensagem: ev.msg || "", transferencias: lote.transferencias || [] }
       });
     } catch (e) {
       console.warn("[Gerar Pagamento] auditoria", e);
@@ -1725,6 +1864,10 @@ const GerarPagamentoApp = {
         v.rateioTexto || i.ccs || "", v.planoTexto || "", i.forma || "", i.linhaDigitavel || "", v.autorizacao || "Não verificada", v.plano, v.rateio, v.pagamento, v.desconto]);
     });
     linhas.push(["", "", "Total do lote", Number(lote.total) || 0]);
+    (lote.transferencias || []).forEach((a) => {
+      const ccs = this.listaPt((a.ccs || []).map((c) => c.id));
+      linhas.push([`Transferir ${this.money(a.valor)} da conta ${a.deNumero} para a conta ${a.paraNumero}. Centros de custo: ${ccs}. Compensa o que foi pago na conta final e deveria sair da conta de parceria.`]);
+    });
     linhas.push([], [`Gerado pelo Integra em ${new Date().toLocaleString("pt-BR")}`]);
     const ws = XLSX.utils.aoa_to_sheet(linhas);
     ws["!cols"] = [{ wch: 14 }, { wch: 14 }, { wch: 11 }, { wch: 13 }, { wch: 34 }, { wch: 30 }, { wch: 34 }, { wch: 18 }, { wch: 50 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 13 }, { wch: 14 }];
@@ -1845,7 +1988,7 @@ const GerarPagamentoApp = {
           <td>${this.dataBr(it.vencimento)}</td>
           <td><strong>${this.esc(it.titulo)}</strong>${it.parcela ? `<span class="gp-muted"> / ${this.esc(it.parcela)}</span>` : ""}</td>
           <td title="${this.esc(it.credor)}">${this.esc(it.credor)}</td>
-          <td>${this.esc(it.documento || "—")}</td>
+          <td>${this.esc(it.documento || "—")}${it.guiaUnica ? `<br><small class="gp-acerto-mini">Guia inteira na conta final</small>` : ""}</td>
           <td class="gp-status">${this.ccsCelulaHtml(it)}</td>
           <td style="text-align:right;"${retido ? ` title="${this.esc(`Líquido: bruto ${this.money(it.aPagar)} − impostos retidos ${this.money(retido)}`)}"` : ""}>${this.money(this.valorPagar(it))}${retido ? `<br><small class="gp-muted" style="white-space:nowrap;">retido ${this.money(retido)}</small>` : ""}</td>
           <td class="gp-status">${pagSelo}</td>
@@ -1892,6 +2035,7 @@ const GerarPagamentoApp = {
             </button>
           </div>`)}
         </div>
+        ${this.transferenciasHtml(this.transferenciasDe(g.itens))}
         <div class="gp-lote-corpo" style="overflow:auto;"${aberto ? "" : " hidden"}>
           <table class="gp-table gp-titulos">
             <colgroup><col style="width:3%"><col style="width:8%"><col style="width:7%"><col style="width:12%"><col style="width:9%"><col style="width:11%"><col style="width:9%"><col style="width:10%"><col style="width:9%"><col style="width:12%"><col style="width:10%"></colgroup>
@@ -1940,7 +2084,7 @@ const GerarPagamentoApp = {
               <button type="button" class="btn btn-sm btn-excel" onclick="GerarPagamentoApp.baixarLoteExcel('${this.esc(l.id)}')" title="Baixar o lote em Excel"><i data-lucide="download" style="width:14px;height:14px;"></i> Excel</button>
               <button type="button" class="btn btn-sm" onclick="GerarPagamentoApp.excluirLote('${this.esc(l.id)}')" style="color:#b91c1c;background:#fff;border:1px solid #fecaca;">Excluir</button>
             </td>
-          </tr>`).join("")}</tbody>
+          </tr>${(l.transferencias || []).length ? `<tr><td colspan="8">${this.transferenciasHtml(l.transferencias)}</td></tr>` : ""}`).join("")}</tbody>
         </table>
       </div>` : "";
     if (aba === "lote") {
@@ -2595,6 +2739,12 @@ const GerarPagamentoApp = {
           #gerar-pagamento-root .gp-alerta-conta span { display:block; margin-bottom:6px; }
           #gerar-pagamento-root .gp-alerta-conta ul { margin:0; padding-left:18px; }
           #gerar-pagamento-root .gp-alerta-conta li { margin:2px 0; }
+          #gerar-pagamento-root .gp-acerto { margin:0 16px 12px; padding:12px 14px; border:1px solid #fdba74; border-radius:10px; background:#fff7ed; color:#9a3412; font-size:0.82rem; line-height:1.45; }
+          #gerar-pagamento-root .gp-acerto strong { color:#c2410c; }
+          #gerar-pagamento-root .gp-acerto span { display:block; margin-top:2px; }
+          #gerar-pagamento-root .gp-acerto ul { margin:6px 0 0; padding-left:18px; }
+          #gerar-pagamento-root .gp-acerto li { margin:4px 0; }
+          #gerar-pagamento-root .gp-acerto-mini { color:#c2410c; font-weight:600; }
           #gerar-pagamento-root .gp-abas-lote { margin:6px 20px 4px; }
           #gerar-pagamento-root .gp-conf { display:flex; gap:10px; align-items:flex-start; margin:12px 20px 4px; padding:12px 14px; border:1px solid #bbf7d0; border-left:4px solid #105436; border-radius:10px; background:#f0fdf4; color:#14532d; font-size:0.82rem; line-height:1.45; }
           #gerar-pagamento-root .gp-conf.is-erro { border-color:#fecaca; border-left-color:#b91c1c; background:#fef2f2; color:#7f1d1d; }
