@@ -196,6 +196,25 @@ function collectIncomePaidEntries(rows, today) {
   return Array.from(map.entries());
 }
 
+function linhasBulk(res) {
+  if (!res || typeof res !== "object") return null;
+  if (Array.isArray(res)) return res;
+  if (Array.isArray(res.data)) return res.data;
+  if (Array.isArray(res.results)) return res.results;
+  if (res.data && Array.isArray(res.data.results)) return res.data.results;
+  return null;
+}
+
+function idTitulo(bill) {
+  return String((bill && (bill.receivableBillId || bill.id || bill.saleId)) || "");
+}
+
+function tituloTrazSubJudice(bill, ids) {
+  const id = idTitulo(bill);
+  if (id && ids && ids.has(id)) return true;
+  return !!(bill && Array.isArray(bill.underJudgmentInstallments) && bill.underJudgmentInstallments.length);
+}
+
 function normalizeBill(bill, underJudgmentIds) {
   const installments = []
     .concat(bill.defaulterInstallments || [])
@@ -212,7 +231,7 @@ function normalizeBill(bill, underJudgmentIds) {
     units: bill.units || "N/D",
     value: 0, interest: 0, fine: 0, daysDelay: 0,
     slipStatus: "Vencido",
-    subjudice: underJudgmentIds.has(String(bill.receivableBillId || bill.id)) ? "S" : "N",
+    subjudice: tituloTrazSubJudice(bill, underJudgmentIds) ? "S" : "N",
     defaulterInstallments: installments,
     defaulterJudicialActivities: bill.defaulterJudicialActivities || [],
     totalInstallmentsCount: (bill.defaulterInstallments ? bill.defaulterInstallments.length : 0)
@@ -229,7 +248,7 @@ function normalizeBill(bill, underJudgmentIds) {
   return mapped;
 }
 
-const DEFAULTERS_CACHE_REV = 4;
+const DEFAULTERS_CACHE_REV = 5;
 
 function documentoExtratoEhCt(row) {
   const tipo = String((row && (row.documentIdentificationId || row.documentId || row.documentsId)) || "").trim().toUpperCase();
@@ -433,6 +452,9 @@ function mesclarTitulosInadimplentes(bills) {
     (prev.defaulterInstallments || []).forEach(add);
     (bill.defaulterInstallments || []).forEach(add);
     prev.defaulterInstallments = Array.from(insts.values());
+    if ((!prev.underJudgmentInstallments || !prev.underJudgmentInstallments.length) && bill.underJudgmentInstallments && bill.underJudgmentInstallments.length) {
+      prev.underJudgmentInstallments = bill.underJudgmentInstallments;
+    }
   });
   return Array.from(porId.values()).concat(semId);
 }
@@ -1070,16 +1092,35 @@ module.exports = async function handler(req, res) {
         const qJudge = buildDefaulterQuery(cId, today, extraParams, "&normalReceivableBills=false&inBillingReceivableBills=false&defaultersReceivableBills=false&underJudgmentReceivableBills=true");
         let rawAll = [];
         let rawJudge = [];
+        let allOk = false;
+        let judgeOk = false;
         try {
           const resAll = await siengeFetch(qAll);
-          await new Promise((r) => setTimeout(r, 1000));
-          const resJudge = await siengeFetch(qJudge);
-          rawAll = resAll.data || [];
-          rawJudge = resJudge.data || [];
+          const allRows = linhasBulk(resAll);
+          if (allRows) {
+            rawAll = allRows;
+            allOk = true;
+          }
         } catch (e) {
           log.push(`defaulters emp ${cId} lote ${state.batchIndex}: ${e.message}`);
         }
-        const under = new Set(rawJudge.map((b) => String(b.receivableBillId || b.id)));
+        if (allOk) {
+          try {
+            await new Promise((r) => setTimeout(r, 1000));
+            const resJudge = await siengeFetch(qJudge);
+            const judgeRows = linhasBulk(resJudge);
+            if (judgeRows) {
+              rawJudge = judgeRows;
+              judgeOk = true;
+            }
+          } catch (e) {
+            log.push(`sub judice emp ${cId} lote ${state.batchIndex}: ${e.message}`);
+          }
+        }
+        const under = new Set(rawJudge.map((b) => idTitulo(b)).filter(Boolean));
+        if (rawAll.length && !judgeOk) {
+          log.push(`emp ${cId} lote ${state.batchIndex + 1}: sub judice não confirmado`);
+        }
         const idsNaCarteira = new Set(rawAll.map((b) => String(b.receivableBillId || b.id || "")));
         rawJudge.forEach((b) => {
           const id = String(b.receivableBillId || b.id || "");
@@ -1196,6 +1237,12 @@ module.exports = async function handler(req, res) {
         } catch (e) {}
       }
       const bills = mesclarNormalizados(billsRaw);
+      const subCount = bills.filter((b) => b && b.subjudice === "S").length;
+      if (bills.length >= 200 && subCount === 0) {
+        log.push(`finalize adiado: ${bills.length} títulos e nenhum sub judice`);
+        await saveState(state);
+        return res.status(200).json({ done: false, filaPronta: false, date: today, step: "finalize", log });
+      }
       const paidMap = Array.from(paidMerged.entries());
       const CHUNK = 100;
       const numChunks = Math.max(1, Math.ceil(bills.length / CHUNK));

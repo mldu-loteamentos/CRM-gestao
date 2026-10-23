@@ -1170,16 +1170,21 @@ const FiscalApp = {
       linha(`Base do ${p.aba === "pis" ? "PIS" : "COFINS"}`, t.basePis, "base");
       linha(`${p.aba === "pis" ? "PIS" : "COFINS"} (× ${this.pct(aliq)})`, imposto, "imposto");
     } else if (p.aba === "irpj") {
+      linha("Base para aplicações financeiras", t.bf);
+      linha("Redutoras de aplicações", t.rf, "redutora");
+      linha("Aplicações líquidas", t.financeiras, "base");
       linha(`Vendas de lote × ${this.pct(a.vendasIrpj)}`, t.vendas * a.vendasIrpj / 100);
       linha(`Serviços × ${this.pct(a.servicosIrpj)}`, t.servicos * a.servicosIrpj / 100);
-      linha(`Aplicações × ${this.pct(a.financIrpj)}`, t.financeiras * a.financIrpj / 100);
+      linha(`Aplicações líquidas × ${this.pct(a.financIrpj)}`, t.financeiras * a.financIrpj / 100);
       linha("Lucro presumido", t.lucroIrpj, "base");
-      linha(`IRPJ (× ${this.pct(a.irpj)})`, t.ir, "imposto");
-      linha(`Adicional ${this.pct(a.adicional)} acima de ${this.money(a.limiteMensal * (p.apuracao ? 3 : 1))}`, t.adicional, "imposto");
+      linha(`IRPJ a recolher (× ${this.pct(a.irpj)} + adicional ${this.pct(a.adicional)})`, t.ir + t.adicional, "imposto");
     } else {
+      linha("Base para aplicações financeiras", t.bf);
+      linha("Redutoras de aplicações", t.rf, "redutora");
+      linha("Aplicações líquidas", t.financeiras, "base");
       linha(`Vendas de lote × ${this.pct(a.vendasCsll)}`, t.vendas * a.vendasCsll / 100);
       linha(`Serviços × ${this.pct(a.servicosCsll)}`, t.servicos * a.servicosCsll / 100);
-      linha(`Aplicações × ${this.pct(a.financCsll)}`, t.financeiras * a.financCsll / 100);
+      linha(`Aplicações líquidas × ${this.pct(a.financCsll)}`, t.financeiras * a.financCsll / 100);
       linha("Base da CSLL", t.lucroCsll, "base");
       linha(`CSLL (× ${this.pct(a.csll)})`, t.csll, "imposto");
     }
@@ -1208,7 +1213,7 @@ const FiscalApp = {
   },
 
   nomeBase(bucket) {
-    return bucket === "servicos" ? "Serviços" : (bucket === "financeiras" ? "Aplicações" : "Vendas de lote");
+    return bucket === "servicos" ? "Serviços" : (bucket === "financeiras" ? "Base para aplicações financeiras" : "Vendas de lote");
   },
 
   textoRacional(p, a) {
@@ -1223,7 +1228,7 @@ const FiscalApp = {
       return `PIS ${this.pct(a.pis)} e COFINS ${this.pct(a.cofins)} sobre a receita do mês. Entram as contas marcadas como vendas de lote e serviços. As redutoras do DFC (cancelamento, desconto e base de dedução) diminuem o grupo correspondente. ${fin}`;
     }
     if (p.aba === "irpj") {
-      return `IRPJ ${this.pct(a.irpj)} sobre o lucro presumido: ${this.pct(a.vendasIrpj)} das vendas de lote, ${this.pct(a.servicosIrpj)} dos serviços e ${this.pct(a.financIrpj)} das aplicações, já líquidas das redutoras. O adicional é ${this.pct(a.adicional)} do que passar de ${this.money(a.limiteMensal)} por mês, por empresa. ${cal} ${per}`;
+      return `IRPJ ${this.pct(a.irpj)} sobre o lucro presumido, já com o adicional de ${this.pct(a.adicional)} do que passar de ${this.money(a.limiteMensal)} por mês, por empresa. O lucro usa ${this.pct(a.vendasIrpj)} das vendas de lote, ${this.pct(a.servicosIrpj)} dos serviços e ${this.pct(a.financIrpj)} da base de aplicações financeiras, já líquida das redutoras. ${cal} ${per}`;
     }
     return `CSLL ${this.pct(a.csll)} sobre ${this.pct(a.vendasCsll)} das vendas de lote, ${this.pct(a.servicosCsll)} dos serviços e ${this.pct(a.financCsll)} das aplicações, já líquidas das redutoras. ${cal} ${per}`;
   },
@@ -1231,10 +1236,9 @@ const FiscalApp = {
   cards(p) {
     const t = p.empresas.reduce((s, c) => {
       s.base += p.aba === "irpj" ? c.lucroIrpj : (p.aba === "csll" ? c.lucroCsll : c.basePis);
-      s.imp += c[p.aba] || 0;
-      s.adi += c.adicional || 0;
+      s.imp += this.impostoAba(c, p.aba);
       return s;
-    }, { base: 0, imp: 0, adi: 0 });
+    }, { base: 0, imp: 0 });
     const nomeBase = p.aba === "irpj" ? "Lucro presumido" : (p.aba === "csll" ? "Base da CSLL" : "Base de cálculo");
     const nomeImp = p.modo === "provisao"
       ? "Provisão do mês"
@@ -1242,7 +1246,7 @@ const FiscalApp = {
     const kpi = (rot, val, cls) => `<div class="ppcc-kpi"><span class="ppcc-kpi-rot">${rot}</span><span class="ppcc-kpi-val${cls ? " " + cls : ""}">${val}</span></div>`;
     return kpi(nomeBase, this.money(t.base)) +
       kpi(nomeImp, this.money(t.imp), "is-pos") +
-      (p.aba === "irpj" ? kpi("Adicional", this.money(t.adi)) : kpi("Empresas", p.empresas.length));
+      kpi("Empresas", p.empresas.length);
   },
 
   temMovimento(item, aba) {
@@ -1260,7 +1264,8 @@ const FiscalApp = {
   },
 
   impostoAba(item, aba) {
-    if (aba === "irpj") return item.ir;
+    if (!item) return 0;
+    if (aba === "irpj") return item.irpj != null ? item.irpj : ((item.ir || 0) + (item.adicional || 0));
     return item[aba] || 0;
   },
 
@@ -1297,7 +1302,6 @@ const FiscalApp = {
 
   grelha(aba, comProv) {
     const cols = ["minmax(240px, 1.6fr)", "128px", "132px"];
-    if (aba === "irpj") cols.push("118px");
     if (comProv) cols.push("148px");
     cols.push("minmax(230px, 300px)");
     return `grid-template-columns:${cols.join(" ")}`;
@@ -1357,8 +1361,7 @@ const FiscalApp = {
             <div class="fim-linha" style="${estilo}">
               <span class="fim-nome">${this.esc(cc.id)} ${this.esc(cc.name || "")}${motivo ? ` <small>${this.esc(motivo)}</small>` : ""}</span>
               ${cel(baseCc)}
-              ${cc.semMarca ? `<span class="fim-val">—</span>` : cel(cc[aba] || 0)}
-              ${aba === "irpj" ? `<span class="fim-val">${cc.entra ? this.money(cc.adicional) : "—"}</span>` : ""}
+              ${cc.semMarca ? `<span class="fim-val">—</span>` : cel(this.impostoAba(cc, aba))}
               ${comProv ? cel(provCc(c.id, acc, cc)) : ""}
               <span></span>
             </div>
@@ -1373,8 +1376,7 @@ const FiscalApp = {
               <span class="fim-nome">${this.esc(acc.id)} ${this.esc(acc.name || "")} <small>${this.esc(papel)}</small></span>
             </button>
             ${cel(baseAcc)}
-            ${acc.semMarca ? `<span class="fim-val">—</span>` : cel(acc[aba] || 0)}
-            ${aba === "irpj" ? cel(acc.adicional) : ""}
+            ${acc.semMarca ? `<span class="fim-val">—</span>` : cel(this.impostoAba(acc, aba))}
             ${comProv ? cel(provAcc(c.id, acc)) : ""}
             <span></span>
           </div>
@@ -1389,8 +1391,7 @@ const FiscalApp = {
             <b>${this.esc(c.id)} ${this.esc(c.name)}</b>
           </button>
           ${cel(this.valorAba(c, aba))}
-          ${cel(c[aba] || 0)}
-          ${aba === "irpj" ? cel(c.adicional) : ""}
+          ${cel(this.impostoAba(c, aba))}
           ${comProv ? cel(provEmp(c.id)) : ""}
           ${acao}
         </div>
@@ -1398,7 +1399,7 @@ const FiscalApp = {
       </div>`;
     }).join("");
     return `<p class="fim-muted">A empresa abre as contas financeiras. A conta abre o centro de custo. Linha zerada fica de fora. Parceiro, centro sem imposto pago pela empresa, receita de outra empresa do grupo e conta sem marca no plano ficam riscados e fora da soma. O centro corporativo entra, porque o imposto é da própria empresa. Na empresa 3, a administração de carteira de recebíveis entra na venda de lotes.</p><div class="fim-scroll">
-      <div class="fim-head" style="${estilo}"><span>Empresa / conta / centro de custo</span><span>${headBase}</span><span>${colImp}</span>${aba === "irpj" ? "<span>Adicional</span>" : ""}${comProv ? "<span>Provisão de janeiro</span>" : ""}<span></span></div>
+      <div class="fim-head" style="${estilo}"><span>Empresa / conta / centro de custo</span><span>${headBase}</span><span>${colImp}</span>${comProv ? "<span>Provisão de janeiro</span>" : ""}<span></span></div>
       ${linhas}
     </div>`;
   },
@@ -1641,17 +1642,17 @@ const FiscalApp = {
       const deducoes = (c) => (c.red.vendas || 0) + (c.red.servicos || 0) + (c.red.financeiras || 0);
       const base = (c) => (ehIr ? c.lucroIrpj : c.lucroCsll);
       const limite = lista.length ? lista[0].limite : a.limiteMensal;
-      const head = ["Empresa", "Receita bruta", "(-) Deduções", "Vendas líquidas", `× ${this.pct(pv)}`, "Serviços líquidos", `× ${this.pct(ps)}`, "Aplicações", `× ${this.pct(pf)}`, ehIr ? "Lucro presumido" : "Base da CSLL"];
-      if (ehIr) head.push(`IRPJ ${this.pct(a.irpj)}`, `Adicional ${this.pct(a.adicional)}`, "IRPJ a recolher");
+      const head = ["Empresa", "Receita bruta", "(-) Deduções", "Vendas líquidas", `× ${this.pct(pv)}`, "Serviços líquidos", `× ${this.pct(ps)}`, "Base para aplicações financeiras", "(−) Redutoras de aplicações", "Aplicações líquidas", `× ${this.pct(pf)}`, ehIr ? "Lucro presumido" : "Base da CSLL"];
+      if (ehIr) head.push("IRPJ a recolher");
       else head.push(`CSLL ${this.pct(a.csll)}`);
       const linhaDe = (rot, c) => {
-        const l = [rot, mo(bruto(c)), mo(deducoes(c)), mo(c.vendas), mo(c.vendas * pv / 100), mo(c.servicos), mo(c.servicos * ps / 100), mo(c.financeiras), mo(c.financeiras * pf / 100), mo(base(c))];
-        if (ehIr) l.push(mo(c.ir), mo(c.adicional), mo(c.irpj));
+        const l = [rot, mo(bruto(c)), mo(deducoes(c)), mo(c.vendas), mo(c.vendas * pv / 100), mo(c.servicos), mo(c.servicos * ps / 100), mo(c.bruto.financeiras || 0), mo(c.red.financeiras || 0), mo(c.financeiras), mo(c.financeiras * pf / 100), mo(base(c))];
+        if (ehIr) l.push(mo(c.irpj));
         else l.push(mo(c.csll));
         return l;
       };
-      const tot = ["Total", mo(soma(lista, bruto)), mo(soma(lista, deducoes)), mo(soma(lista, (c) => c.vendas)), mo(soma(lista, (c) => c.vendas * pv / 100)), mo(soma(lista, (c) => c.servicos)), mo(soma(lista, (c) => c.servicos * ps / 100)), mo(soma(lista, (c) => c.financeiras)), mo(soma(lista, (c) => c.financeiras * pf / 100)), mo(soma(lista, base))];
-      if (ehIr) tot.push(mo(soma(lista, (c) => c.ir)), mo(soma(lista, (c) => c.adicional)), mo(soma(lista, (c) => c.irpj)));
+      const tot = ["Total", mo(soma(lista, bruto)), mo(soma(lista, deducoes)), mo(soma(lista, (c) => c.vendas)), mo(soma(lista, (c) => c.vendas * pv / 100)), mo(soma(lista, (c) => c.servicos)), mo(soma(lista, (c) => c.servicos * ps / 100)), mo(soma(lista, (c) => c.bruto.financeiras || 0)), mo(soma(lista, (c) => c.red.financeiras || 0)), mo(soma(lista, (c) => c.financeiras)), mo(soma(lista, (c) => c.financeiras * pf / 100)), mo(soma(lista, base))];
+      if (ehIr) tot.push(mo(soma(lista, (c) => c.irpj)));
       else tot.push(mo(soma(lista, (c) => c.csll)));
       tabela(
         `${ehIr ? "IRPJ" : "CSLL"} · ${p.periodo}`,
@@ -1853,7 +1854,9 @@ const FiscalApp = {
         const s1 = item("Serviços (contas de base)", c.bruto.servicos || 0);
         const s2 = item("(−) Deduções de serviços", c.red.servicos || 0);
         const sl = item("Serviços líquidos × presunção", f(`B${s1}+B${s2}`, c.servicos), ps, f(`B${r}*C${r}`, c.servicos * ps));
-        const fl = item("Aplicações financeiras × presunção", c.financeiras || 0, pf, f(`B${r}*C${r}`, c.financeiras * pf));
+        const f1 = item("Base para aplicações financeiras", c.bruto.financeiras || 0);
+        const f2 = item("(−) Redutoras de aplicações", c.red.financeiras || 0);
+        const fl = item("Aplicações líquidas × presunção", f(`B${f1}+B${f2}`, c.financeiras), pf, f(`B${r}*C${r}`, c.financeiras * pf));
         const base = ehIr ? c.lucroIrpj : c.lucroCsll;
         const rb = item(ehIr ? "Lucro presumido" : "Base da CSLL", null, null, f(`D${vl}+D${sl}+D${fl}`, base), "sub");
         if (ehIr) {

@@ -7780,7 +7780,7 @@ window.getFilaQueueGroupMeta = function(group) {
 window.clientIsRecenteJuridico = function(client, history) {
   if (!client || client.hasOverdueAgreement) return false;
   if (typeof window.clientIsSubjudice === "function" ? window.clientIsSubjudice(client) : (client.subjudice === "S" || client.subjudice === true)) return false;
-  let hist = history;
+  let hist = history || window._filaSubjudiceMemory;
   if (!hist) {
     try { hist = JSON.parse(localStorage.getItem("subjudiceHistory") || "{}"); } catch (e) { hist = {}; }
   }
@@ -11170,6 +11170,35 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
     }
   });
 
+  let ativosAntes = 0;
+  let saidasHoje = 0;
+  Object.keys(subjudiceMemory).forEach((k) => {
+    const m = subjudiceMemory[k];
+    if (!m) return;
+    if (!m.exitDate) ativosAntes += 1;
+    else if (String(m.exitDate).slice(0, 10) === todayStr) saidasHoje += 1;
+  });
+  let ativosAgora = 0;
+  Object.keys(customerSubjudiceStatus).forEach((k) => {
+    if (customerSubjudiceStatus[k] === "S") ativosAgora += 1;
+  });
+  const baseAtiva = ativosAntes + saidasHoje;
+  const quedaEmMassa = baseAtiva >= 15 && ativosAgora * 2 < baseAtiva;
+  if (quedaEmMassa) {
+    console.warn("[Fila] Sub judice caiu de " + baseAtiva + " para " + ativosAgora + ". Quem já estava no jurídico permanece.");
+    Object.keys(subjudiceMemory).forEach((k) => {
+      const m = subjudiceMemory[k];
+      if (m && String(m.exitDate || "").slice(0, 10) === todayStr) m.exitDate = null;
+    });
+    Object.values(consolidated).forEach((c) => {
+      const mem = getSubjudiceMemoryRecord(subjudiceMemory, c.customerId);
+      if (!mem || mem.exitDate) return;
+      if (!mem.entryDate && !mem.lastSeen) return;
+      c.subjudice = "S";
+      customerSubjudiceStatus[c.customerId] = "S";
+    });
+  }
+
   Object.keys(customerSubjudiceStatus).forEach(cIdStr => {
     const cId = Number(cIdStr);
     const status = customerSubjudiceStatus[cIdStr];
@@ -11215,6 +11244,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
   });
 
   const memoriaSub = subjudiceMemory;
+  window._filaSubjudiceMemory = subjudiceMemory;
   setTimeout(() => {
     try { localStorage.setItem('subjudiceHistory', JSON.stringify(memoriaSub)); } catch (e) {}
   }, 0);

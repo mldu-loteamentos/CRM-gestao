@@ -109,7 +109,9 @@ function getConfiguredInternalCompanyIds() {
 
 /** A base das 7h continua válida. Revisão nova não pode jogar fora o batimento do dia. */
 function filaCacheDoDiaServe(rev) {
-  return Number(rev) === DEFAULTERS_CACHE_REV;
+  if (rev == null || rev === "") return true;
+  const n = Number(rev);
+  return n === 3 || n === 4 || n === 5;
 }
 
 /** Cache do dia só vale se cobriu as empresas internas esperadas (evita base só 1+2). */
@@ -4255,7 +4257,12 @@ const SiengeApiService = {
          }
       }
       
+      const quedaFirebase = currentFirebaseSubjudice.size >= 15 && siengeSubjudice.size * 2 < currentFirebaseSubjudice.size;
+      if (quedaFirebase) {
+         console.warn(`[Firebase] Sub judice caiu de ${currentFirebaseSubjudice.size} para ${siengeSubjudice.size}. Saídas não registradas.`);
+      }
       for (const [cId, data] of currentFirebaseSubjudice.entries()) {
+         if (quedaFirebase) break;
          if (!siengeSubjudice.has(cId)) {
              const docRef = doc(window.firebaseDb, "sienge_customers", cId);
              batchPromises.push(setDoc(docRef, {
