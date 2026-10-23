@@ -22726,13 +22726,47 @@ function quitacaoRateMode(rates) {
   return best;
 }
 
-/** Taxa mensal decimal do parcelamento Price (0.008 = 0,80% a.m.). */
+function quitacaoEscolherTaxa(candidates) {
+  const priceLike = (candidates || []).filter((r) => r >= 0.005 && r <= 0.0095);
+  if (priceLike.length) return quitacaoRateMode(priceLike);
+  const notMora = (candidates || []).filter((r) => Math.abs(r - 0.01) > 0.0004);
+  if (notMora.length) return quitacaoRateMode(notMora);
+  return 0;
+}
+
+/** Taxa mensal decimal do parcelamento. 0 quando o título não tem juros de parcelamento. */
 function quitacaoGetMonthlyInterestRate(sale) {
   const candidates = [];
   const push = (v) => {
     const r = quitacaoNormalizeMonthlyRate(v);
     if (r != null) candidates.push(r);
   };
+  const conds = sale && Array.isArray(sale.paymentConditions) ? sale.paymentConditions : [];
+  let condicaoDisse = false;
+  conds.forEach((c) => {
+    if (!c) return;
+    const tipo = String(c.interestType || c.interestTypeId || "").trim().toUpperCase();
+    if (tipo === "N" || tipo === "NAO" || tipo === "NÃO") {
+      condicaoDisse = true;
+      return;
+    }
+    if (c.interestPercentage != null && c.interestPercentage !== "") {
+      condicaoDisse = true;
+      const n = Number(c.interestPercentage);
+      if (Number.isFinite(n) && n > 0 && Math.abs(n - 1) >= 0.051 && Math.abs(n - 0.01) >= 0.0004) push(c.interestPercentage);
+    }
+  });
+  if (condicaoDisse) return quitacaoEscolherTaxa(candidates);
+  ((window.AppState && AppState.currentContractInstallments) || []).forEach((inst) => {
+    if (!inst) return;
+    const tipo = String(inst.interestType || inst.interestTypeId || "").trim().toUpperCase();
+    if (tipo === "N" || tipo === "NAO" || tipo === "NÃO") return;
+    push(inst.interestPercentage);
+    if (inst.interestRate != null && Number(inst.interestRate) > 0 && Number(inst.interestRate) <= 0.05) {
+      candidates.push(Number(inst.interestRate));
+    }
+  });
+  if (candidates.length) return quitacaoEscolherTaxa(candidates);
   if (sale) {
     push(sale.interestPercentage);
     if (sale.interestRate != null) {
@@ -22741,41 +22775,34 @@ function quitacaoGetMonthlyInterestRate(sale) {
       else push(ir);
     }
   }
-  ((window.AppState && AppState.currentContractInstallments) || []).forEach((inst) => {
-    push(inst.interestPercentage);
-    push(inst.interestRate);
-  });
-  const priceLike = candidates.filter((r) => r >= 0.005 && r <= 0.0095);
-  if (priceLike.length) return quitacaoRateMode(priceLike);
-  const notMora = candidates.filter((r) => Math.abs(r - 0.01) > 0.0004);
-  if (notMora.length) return quitacaoRateMode(notMora);
-  return 0.008;
+  return quitacaoEscolherTaxa(candidates);
 }
 
-/** Ex.: 0,80%P — P = Tabela Price */
-function quitacaoFormatJurosLabel(sale) {
-  const rate = quitacaoGetMonthlyInterestRate(sale);
-  if (rate == null || !Number.isFinite(rate)) return null;
-  const pct = rate * 100;
+/** Ex.: 0,80%P — P = Tabela Price. 0,00% quando não há juros de parcelamento. */
+function quitacaoFormatJurosLabel(rate) {
+  const n = Number(rate);
+  if (!Number.isFinite(n) || n <= 0) return "0,00%";
+  const pct = n * 100;
   return pct.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%P";
 }
 
-window.updateQuitacaoJurosDisplay = function(sale) {
+window.updateQuitacaoJurosDisplay = function(sale, forcedRate) {
   const labelEl = document.getElementById("quitacao-juros-label");
   const hintEl = document.getElementById("quitacao-juros-hint");
   const badge = document.getElementById("quitacao-juros-badge");
   const s = sale || (typeof window.getQuitacaoCurrentSale === "function" ? window.getQuitacaoCurrentSale() : null);
-  const label = quitacaoFormatJurosLabel(s);
-  const rate = quitacaoGetMonthlyInterestRate(s);
-  if (labelEl) labelEl.textContent = label || "—";
+  const rate = forcedRate != null && Number.isFinite(Number(forcedRate))
+    ? Number(forcedRate)
+    : quitacaoGetMonthlyInterestRate(s);
+  const label = quitacaoFormatJurosLabel(rate);
+  const sem = !(rate > 0);
+  if (labelEl) labelEl.textContent = label;
   if (hintEl) {
-    if (label && rate != null) {
-      hintEl.textContent = `${(rate * 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}% a.m. · Tabela Price (P)`;
-    } else {
-      hintEl.textContent = "Juros do parcelamento indisponível neste contrato";
-    }
+    hintEl.textContent = sem
+      ? "Sem juros de parcelamento"
+      : `${(rate * 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}% a.m. · Tabela Price (P)`;
   }
-  if (badge) badge.title = label ? `Juros embutidos do parcelamento: ${label} (Price)` : "Sem taxa de juros no contrato";
+  if (badge) badge.title = sem ? "Sem juros de parcelamento neste título" : `Juros embutidos do parcelamento: ${label} (Price)`;
   window._quitacaoState = window._quitacaoState || {};
   window._quitacaoState.jurosLabel = label;
   window._quitacaoState.monthlyRate = rate;
@@ -22919,9 +22946,7 @@ function quitacaoMapOverdueFromSimulador(inst, monthlyRate, lookups) {
   const installmentId = inst.installmentId != null ? inst.installmentId
     : (inst.id != null ? inst.id : inst.installmentNumber);
   const number = quitacaoResolveInstallmentNumber(inst, lookups && lookups.byId, lookups && lookups.byDue);
-  const jurosParcelamento = monthlyRate != null
-    ? ((monthlyRate * 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%P")
-    : (window._quitacaoState && window._quitacaoState.jurosLabel) || "—";
+  const jurosParcelamento = quitacaoFormatJurosLabel(monthlyRate);
   return {
     raw: inst,
     key: billId + ":" + String(installmentId),
@@ -22974,19 +22999,24 @@ function quitacaoMapDebtRow(inst, monthlyRate, lookups) {
     const d = quitacaoDaysBetween(today, due);
     daysDisc = d != null ? Math.max(0, d) : 0;
   }
-  const vp = typeof distPermutaInstVp === "function" ? distPermutaInstVp(inst) : (Number(inst.presentValue) || corrected);
+  const apiPv = Number(
+    inst.presentValue != null ? inst.presentValue
+      : (inst.presentValueAmount != null ? inst.presentValueAmount : inst.correctedPresentValue)
+  );
+  const vpFromApi = Number.isFinite(apiPv) && apiPv > 0.009;
+  const vp = typeof distPermutaInstVp === "function" ? distPermutaInstVp(inst) : (vpFromApi ? apiPv : (Number(inst.presentValue) || corrected));
   const baseForVp = corrected > 0.009 ? corrected : original;
   let jurosVpPct = null;
   if (!overdue && baseForVp > 0.009 && vp > 0.009 && Math.abs(baseForVp - vp) > 0.009) {
     jurosVpPct = ((baseForVp / vp) - 1) * 100;
-  } else if (!overdue && monthlyRate != null && daysDisc > 0) {
+  } else if (!overdue && vpFromApi) {
+    jurosVpPct = 0;
+  } else if (!overdue && monthlyRate > 0 && daysDisc > 0) {
     const months = daysDisc / 30;
     jurosVpPct = (Math.pow(1 + monthlyRate, months) - 1) * 100;
   }
   const tipo = inst.conditionType || inst.paymentConditionType || inst.installmentType || inst.typeName || "Parcelas";
-  const jurosParcelamento = monthlyRate != null
-    ? ((monthlyRate * 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%P")
-    : (window._quitacaoState && window._quitacaoState.jurosLabel) || "—";
+  const jurosParcelamento = quitacaoFormatJurosLabel(monthlyRate);
   const vpNum = Number(vp) || 0;
   const face = original > 0.009 ? original : corrected;
   const desconto = (!overdue && face > vpNum) ? (face - vpNum) : 0;
@@ -23020,8 +23050,30 @@ function quitacaoMapDebtRow(inst, monthlyRate, lookups) {
     jurosParcelamento,
     finePct: Number.isFinite(finePct) ? finePct : 2,
     interestLatePct: Number.isFinite(interestLatePct) ? interestLatePct : 1,
+    vpFromApi,
     source: overdue ? "debt-balance" : "antecipacao-vp"
   };
+}
+
+/** O Sienge não descontou as parcelas a vencer: o título não tem juros de parcelamento. */
+function quitacaoExtratoSemParcelamento(futuras) {
+  const base = (futuras || []).filter((r) => (Number(r.corrected) || Number(r.original)) > 0.009);
+  const comVp = base.filter((r) => r && r.vpFromApi);
+  if (!comVp.length || comVp.length < Math.max(1, Math.ceil(base.length * 0.8))) return false;
+  return comVp.every((r) => {
+    const face = Number(r.corrected) > 0.009 ? Number(r.corrected) : Number(r.original);
+    return Math.abs(face - Number(r.vp)) <= 0.05;
+  });
+}
+
+function quitacaoZerarJurosParcelamento(sale, rows) {
+  window.updateQuitacaoJurosDisplay(sale, 0);
+  const label = "0,00%";
+  (rows || []).forEach((r) => {
+    if (!r) return;
+    r.jurosParcelamento = label;
+    if (!r.overdue) r.jurosVpPct = 0;
+  });
 }
 
 function quitacaoInstIsPaid(inst) {
@@ -23103,7 +23155,11 @@ window.loadQuitacaoDebtReport = async function(force) {
       window._quitacaoState.paidRows = paidRows;
       window._quitacaoState.pagoLiquido = paidRows.reduce((s, r) => s + (Number(r.liquido) || Number(r.valorBaixa) || 0), 0);
     }
-    window.updateQuitacaoJurosDisplay(sale);
+    if (quitacaoExtratoSemParcelamento(window._quitacaoState.aVencer)) {
+      quitacaoZerarJurosParcelamento(sale, window._quitacaoState.rows);
+    } else {
+      window.updateQuitacaoJurosDisplay(sale);
+    }
     const paidCountEl = document.getElementById("quitacao-left-pagas-count");
     const paidValEl = document.getElementById("quitacao-left-pagas-val");
     const cachedPaid = window._quitacaoState.paidRows || [];
@@ -23165,6 +23221,7 @@ window.loadQuitacaoDebtReport = async function(force) {
         return row;
       })
       .sort((a, b) => String(a.due).localeCompare(String(b.due)));
+    if (quitacaoExtratoSemParcelamento(aVencer)) quitacaoZerarJurosParcelamento(sale, rows);
     const sumPago = paidRows.reduce((s, r) => s + (Number(r.liquido) || Number(r.valorBaixa) || 0), 0);
     const sumBaixa = paidRows.reduce((s, r) => s + (Number(r.valorBaixa) || 0), 0);
     const sumVencVp = vencidas.reduce((s, r) => s + (Number(r.vp) || 0), 0);
@@ -23263,7 +23320,7 @@ window.loadQuitacaoDebtReport = async function(force) {
     if (typeof window.syncQuitacaoSiTypesToFila === "function") {
       try { window.syncQuitacaoSiTypesToFila(window._quitacaoState && window._quitacaoState.billId); } catch (e) {}
     }
-    if (statusEl) statusEl.textContent = `Atualizado · ${n} parcela(s) em aberto · juros ${quitacaoFormatJurosLabel(sale) || "—"}`;
+    if (statusEl) statusEl.textContent = `Atualizado · ${n} parcela(s) em aberto · juros ${quitacaoFormatJurosLabel(window._quitacaoState.monthlyRate)}`;
     if (typeof window.syncQuitacaoAdvogadoVista === "function") window.syncQuitacaoAdvogadoVista();
   } catch (e) {
     console.error("Erro relatório quitação:", e);
@@ -24088,7 +24145,7 @@ window.exportQuitacaoSaldoDevedorExcel = function() {
   const st = window._quitacaoState || {};
   const sale = window.getQuitacaoCurrentSale();
   const customer = (AppState.customers && AppState.selectedCustomerId) ? AppState.customers[AppState.selectedCustomerId] : null;
-  const juros = quitacaoFormatJurosLabel(sale) || "—";
+  const juros = quitacaoFormatJurosLabel(st.monthlyRate);
   const header = [
     ["Saldo Devedor Presente — Quitação"],
     ["Cliente", (customer && (customer.name || customer.customerName)) || ""],

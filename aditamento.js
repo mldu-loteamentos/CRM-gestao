@@ -27,6 +27,97 @@
   const my = (iso) => (/^\d{4}-\d{2}/.test(String(iso || "")) ? String(iso).slice(5, 7) + "/" + String(iso).slice(0, 4) : "—");
   const extenso = (v) => (typeof window.valorPorExtensoBRL === "function" ? window.valorPorExtensoBRL(v) : "");
 
+  /** Percentual ao mês. 0,008 e 0,80 viram 0,80. 1% é mora e não entra. */
+  function taxaMensalPct(v) {
+    if (v == null || v === "") return null;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0) return null;
+    if (n > 0 && n <= 0.05) return Math.round(n * 100 * 10000) / 10000;
+    return Math.round(n * 10000) / 10000;
+  }
+
+  function jurosDeObjeto(o) {
+    if (!o || typeof o !== "object") return null;
+    const tipo = String(o.interestType || o.interestTypeId || "").trim().toUpperCase();
+    if (tipo === "N" || tipo === "NAO" || tipo === "NÃO") return 0;
+    const bruto = o.interestPercentage != null && o.interestPercentage !== ""
+      ? o.interestPercentage
+      : (o.interestRate != null && Number(o.interestRate) > 0 && Number(o.interestRate) <= 0.05 ? o.interestRate : null);
+    const pct = taxaMensalPct(bruto);
+    if (pct == null) return null;
+    if (Math.abs(pct - 1) < 0.051) return null;
+    return pct;
+  }
+
+  function modaTaxa(lista) {
+    const bag = new Map();
+    lista.forEach((n) => {
+      const k = Number(n).toFixed(4);
+      bag.set(k, (bag.get(k) || 0) + 1);
+    });
+    let best = Number(lista[0]) || 0;
+    let qtd = 0;
+    bag.forEach((n, k) => {
+      if (n > qtd) { qtd = n; best = Number(k); }
+    });
+    return best;
+  }
+
+  /**
+   * Juros de parcelamento do título. A taxa do cabeçalho do contrato e a da
+   * tabela vigente não entram quando o extrato das parcelas não tem essa taxa.
+   */
+  function jurosParcelamento(ctx, lista) {
+    const sale = (ctx && ctx.sale) || {};
+    const bill = (ctx && ctx.bill) || {};
+    const conds = []
+      .concat(Array.isArray(bill.paymentConditions) ? bill.paymentConditions : [])
+      .concat(Array.isArray(sale.paymentConditions) ? sale.paymentConditions : []);
+    const taxas = [];
+    let declarado = false;
+    (lista || []).concat(conds).forEach((o) => {
+      const n = jurosDeObjeto(o);
+      if (n == null) return;
+      declarado = true;
+      if (n > 0.00001) taxas.push(n);
+    });
+    if (taxas.length) return modaTaxa(taxas);
+    if (declarado) return 0;
+    const hoje = hojeIso();
+    const futuras = (lista || []).filter((p) => {
+      if (!p) return false;
+      const due = String(p.dueDate || p.originalDueDate || "").slice(0, 10);
+      const vp = Number(p.presentValue != null ? p.presentValue : p.presentValueAmount);
+      const face = Number(p.currentBalance != null ? p.currentBalance : (p.originalValue != null ? p.originalValue : p.value));
+      return /^\d{4}-\d{2}-\d{2}$/.test(due) && due >= hoje && Number.isFinite(vp) && vp > 0.009 && face > 0.009;
+    });
+    if (futuras.length) {
+      const semDesconto = futuras.every((p) => {
+        const vp = Number(p.presentValue != null ? p.presentValue : p.presentValueAmount);
+        const face = Number(p.currentBalance != null ? p.currentBalance : (p.originalValue != null ? p.originalValue : p.value));
+        return Math.abs(vp - face) <= 0.05;
+      });
+      if (semDesconto) return 0;
+      const cab = jurosDeObjeto(sale);
+      return cab != null ? cab : 0;
+    }
+    if ((lista || []).length) return 0;
+    const cab = jurosDeObjeto(sale);
+    return cab != null ? cab : 0;
+  }
+
+  /** Saldo presente da parcela: valor atualizado, com os acréscimos do extrato. */
+  function saldoPresenteParcela(p, valorFace) {
+    const comAcr = Number(
+      p.currentBalanceWithAddition != null ? p.currentBalanceWithAddition
+        : (p.correctedValueWithAdditions != null ? p.correctedValueWithAdditions : NaN)
+    );
+    if (Number.isFinite(comAcr) && comAcr > 0.009) return comAcr;
+    const base = Number(p.currentBalance != null ? p.currentBalance : valorFace) || 0;
+    const extra = Number(p.additionalValue != null ? p.additionalValue : (p.additionsValue != null ? p.additionsValue : 0)) || 0;
+    return base + (extra > 0.009 ? extra : 0);
+  }
+
   function parseValor(raw) {
     let s = String(raw == null ? "" : raw).replace(/[R$\s]/g, "");
     if (!s) return 0;
@@ -113,7 +204,7 @@
         const due = this._dueKey(p.dueDate || p.originalDueDate || p.installmentDueDate || p.dataVencto);
         const valor = Number(p.originalValue != null ? p.originalValue : (p.value != null ? p.value : p.installmentValue)) || 0;
         const paga = this._installmentSettled(p);
-        const saldo = paga ? 0 : Number(p.currentBalance != null ? p.currentBalance : valor) || 0;
+        const saldo = paga ? 0 : saldoPresenteParcela(p, valor);
         if (paga) { pagas += 1; valorPago += valor; } else saldoAberto += saldo;
         if (!grupos.has(chave)) grupos.set(chave, { chave, label, itens: [] });
         grupos.get(chave).itens.push({ due, valor, paga, saldo });
@@ -156,13 +247,7 @@
 
       const sale = ctx.sale || {};
       const conds = Array.isArray(sale.paymentConditions) ? sale.paymentConditions : [];
-      let juros = null;
-      [sale.interestPercentage].concat(conds.map((c) => c && c.interestPercentage)).some((v) => {
-        const n = Number(v);
-        if (v == null || v === "" || !Number.isFinite(n)) return false;
-        juros = n;
-        return true;
-      });
+      const juros = jurosParcelamento(ctx, lista);
       let indice = "";
       let indiceAchado = false;
       conds.concat(lista).some((o) => {
@@ -283,7 +368,7 @@
         <div class="adi-resumo">
           <div><span>Valor do contrato</span><strong>${brl(a.valorContrato)}</strong></div>
           <div><span>Parcelas pagas</span><strong>${a.pagas} de ${a.total}</strong><small>${brl(a.valorPago)}</small></div>
-          <div><span>Saldo em aberto</span><strong>${brl(a.saldoAberto)}</strong><small>${a.abertas} parcela(s)</small></div>
+          <div><span>Saldo presente</span><strong>${brl(a.saldoAberto)}</strong><small>${a.abertas} parcela(s)</small></div>
           <div><span>Juros hoje</span><strong>${a.juros != null ? pct4(a.juros) : "—"}</strong><small>ao mês</small></div>
           <div><span>Reajuste hoje</span><strong>${esc(reajuste)}</strong></div>
           <div><span>Situação</span><strong class="${adimpl.adimplente ? "adi-ok" : "adi-ruim"}">${esc(adimpl.label || "—")}</strong></div>
@@ -373,7 +458,7 @@
         <div class="adi-parc-col">
           <div class="adi-lbl">Como está hoje</div>
           <ul>${hoje.length ? lista(hoje) : '<li class="adi-vazio">Sem parcelas lidas do Sienge.</li>'}</ul>
-          <div class="adi-parc-rod">Saldo em aberto <strong>${brl(a.saldoAberto)}</strong> · ${a.abertas} parcela(s)</div>
+          <div class="adi-parc-rod">Saldo presente <strong>${brl(a.saldoAberto)}</strong> · ${a.abertas} parcela(s)</div>
         </div>
         <div class="adi-parc-seta" aria-hidden="true">→</div>
         <div class="adi-parc-col adi-parc-novo">
@@ -921,7 +1006,7 @@
         if (tot) {
           const cls = Math.abs(diff) < 1 ? "adi-ok" : "adi-atencao";
           tot.innerHTML = `<span>Total das novas condições <strong>${brl(total)}</strong></span>
-            <span>Saldo em aberto hoje <strong>${brl(saldo)}</strong></span>
+            <span>Saldo presente <strong>${brl(saldo)}</strong></span>
             <span>Diferença <strong class="${cls}">${diff > 0 ? "+" : ""}${brl(diff)}</strong></span>`;
         }
         const resumo = this._adiEl("adi-parc-resumo");

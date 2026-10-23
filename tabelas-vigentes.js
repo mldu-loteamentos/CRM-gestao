@@ -1132,7 +1132,7 @@ const TabelasVigentesApp = {
       <div class="modal-box tvig-editor-box${ro ? " is-readonly" : ""}" onclick="event.stopPropagation()">
         <div class="modal-header tvig-editor-head">
           <h3>${this.esc(ed.title)}</h3>
-          <button type="button" class="btn btn-fechar" onclick="TabelasVigentesApp.closeEditor()">Fechar</button>
+          ${ro ? "" : `<button type="button" class="btn btn-fechar" onclick="TabelasVigentesApp.closeEditor()">Fechar</button>`}
         </div>
         <div class="tvig-editor-body">
           <div class="tvig-editor-grid">
