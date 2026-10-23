@@ -997,15 +997,57 @@ const OrcamentoDfcApp = {
     return null;
   },
 
+  /* PAR, REAPROPFIN e 1-6 ficam num grupo à parte e não entram no saldo inicial nem no saldo final. */
+  contaForaDoSaldo(c) {
+    const bruto = String((c && (c.numero || c.chave)) || c || "");
+    const num = bruto.indexOf("|") >= 0 ? bruto.split("|").slice(1).join("|") : bruto;
+    const n = num.trim().toUpperCase().replace(/\s+/g, "").replace(/[–—−]/g, "-");
+    return n === "PAR" || n === "REAPROPFIN" || n === "1-6";
+  },
+
   /* Caixa e equivalentes do balancete (1.1.01), sem a Terracotta. No saldo de contas, a conta corrente entra e a aplicação fica de fora. */
   ehContaAnalise(c) {
     if (!c || !c.analitica) return false;
+    if (this.contaForaDoSaldo(c)) return false;
     const cod = String(c.numero || "");
     const nome = this.norm((c.nome || "") + " " + cod);
     if (cod.indexOf("1.1.01.03.016") === 0 || cod.indexOf("1.01.01.03.016") === 0) return false;
     if (nome.indexOf("TERRACOTTA") >= 0) return false;
     if (c.origem === "contas") return !/INVEST|APLIC/.test(nome);
     return cod.indexOf("1.1.01") === 0 || cod.indexOf("1.01.01") === 0;
+  },
+
+  async carregarNomesConta(empresas) {
+    const api = window.SiengeApiService;
+    const map = {};
+    if (!api || typeof api.getCheckingAccounts !== "function") return map;
+    await Promise.all((empresas || []).map(async (emp) => {
+      try {
+        const res = await api.getCheckingAccounts(emp.id, { allStatuses: true });
+        ((res && res.results) || []).forEach((raw) => {
+          const num = String(raw.accountNumber || raw.number || "").trim();
+          const nome = String(raw.accountName || raw.name || raw.description || "").trim();
+          if (!num || !nome || nome === num) return;
+          const solto = num.toUpperCase().replace(/\s+/g, "").replace(/^0+/, "");
+          map[String(emp.id) + "|" + num] = nome;
+          if (!map[num]) map[num] = nome;
+          if (solto && !map[solto]) map[solto] = nome;
+        });
+      } catch (e) {}
+    }));
+    return map;
+  },
+
+  rotuloConta(c, varias) {
+    const num = String((c && c.numero) || "").trim();
+    let nome = String((c && c.nome) || "").trim();
+    const solto = num.toUpperCase().replace(/\s+/g, "").replace(/^0+/, "");
+    const chave = String((c && c.empresa) || "") + "|" + num;
+    const cadastro = (this._nomesConta && (this._nomesConta[c.chave] || this._nomesConta[chave] || this._nomesConta[num] || this._nomesConta[solto])) || "";
+    if ((!nome || nome === num) && cadastro) nome = cadastro;
+    const prefixo = varias ? String(c.empresa) + " · " : "";
+    if (nome && nome !== num) return prefixo + num + " — " + nome;
+    return prefixo + num;
   },
 
   diaSeguinte(iso) {
@@ -1077,10 +1119,11 @@ const OrcamentoDfcApp = {
     if (!Array.isArray(this._saldoSel)) {
       try { this._saldoSel = JSON.parse(localStorage.getItem(this.LS_SALDO) || "null"); } catch (e) { this._saldoSel = null; }
     }
-    const todas = (this._saldoContas || []).filter((c) => this.ehContaAnalise(c)).map((c) => c.chave);
+    const fora = (k) => this.contaForaDoSaldo(k);
+    const todas = (this._saldoContas || []).filter((c) => this.ehContaAnalise(c)).map((c) => c.chave).filter((k) => !fora(k));
     if (!Array.isArray(this._saldoSel)) return todas;
     const set = new Set((this._saldoContas || []).map((c) => c.chave));
-    const salvas = this._saldoSel.map(String);
+    const salvas = this._saldoSel.map(String).filter((k) => !fora(k));
     const vigentes = salvas.filter((k) => set.has(k));
     if (vigentes.length) return vigentes;
     if (salvas.length && set.size) return todas;
@@ -1130,6 +1173,7 @@ const OrcamentoDfcApp = {
     this._saldoErro = "";
     this._saldoFonte = "";
     this.atualizarSaldosDom();
+    const nomesP = this.carregarNomesConta(empresas);
     const datas = [];
     for (let i = 0; i <= corte; i++) datas.push(this.dataSaldo(2026, i));
     try {
@@ -1212,6 +1256,14 @@ const OrcamentoDfcApp = {
       });
       const lista = caixa.length ? caixa : Array.from(porConta.values()).filter((c) => c.analitica);
       lista.sort((a, b) => String(a.numero).localeCompare(String(b.numero), "pt-BR", { numeric: true }));
+      const nomesConta = await nomesP;
+      if (token !== this._sToken) return;
+      this._nomesConta = nomesConta;
+      lista.forEach((c) => {
+        const solto = String(c.numero || "").toUpperCase().replace(/\s+/g, "").replace(/^0+/, "");
+        const extra = nomesConta[c.chave] || nomesConta[c.numero] || nomesConta[solto] || "";
+        if (extra && (!c.nome || c.nome === c.numero)) c.nome = extra;
+      });
       this._saldoFonte = fontes.has("balancete") && fontes.has("contas") ? "misto" : (fontes.has("contas") ? "contas" : "balancete");
       this._saldoContas = lista;
       this._saldoMap = mapa;
@@ -1329,35 +1381,51 @@ const OrcamentoDfcApp = {
     const mapaFim = (this._saldoMap && this._saldoMap[fimData]) || {};
     const escolhidas = new Set(this.contasEscolhidas());
     const varias = this.empresasDoSaldo().length > 1;
-    const linhas = (this._saldoContas || []).filter((c) => escolhidas.has(c.chave)).map((c) => {
+    const linhaDe = (c) => {
       const a = Number(mapaIni[c.chave]) || 0;
       const b = Number(mapaFim[c.chave]) || 0;
-      const nome = (varias ? c.empresa + " · " : "") + c.numero + (c.nome && c.nome !== c.numero ? " " + c.nome : "");
-      return { nome: nome, ini: a, fim: b, variacao: b - a };
-    }).filter((r) => Math.abs(r.ini) >= 0.005 || Math.abs(r.fim) >= 0.005)
-      .sort((x, y) => String(x.nome).localeCompare(String(y.nome), "pt"));
-    const tot = linhas.reduce((s, r) => ({ ini: s.ini + r.ini, fim: s.fim + r.fim, variacao: s.variacao + r.variacao }), { ini: 0, fim: 0, variacao: 0 });
-    const corpo = linhas.map((r) => `<tr><td>${this.esc(r.nome)}</td><td>${this.money(r.ini)}</td><td>${this.money(r.fim)}</td><td class="${r.variacao < -0.005 ? "orc-dfc-neg" : ""}">${this.money(r.variacao)}</td></tr>`).join("");
+      return { nome: this.rotuloConta(c, varias), ini: a, fim: b, variacao: b - a };
+    };
+    const viva = (r) => Math.abs(r.ini) >= 0.005 || Math.abs(r.fim) >= 0.005;
+    const ordem = (x, y) => String(x.nome).localeCompare(String(y.nome), "pt");
+    const linhas = (this._saldoContas || []).filter((c) => escolhidas.has(c.chave) && !this.contaForaDoSaldo(c)).map(linhaDe).filter(viva).sort(ordem);
+    const fora = (this._saldoContas || []).filter((c) => this.contaForaDoSaldo(c)).map(linhaDe).filter(viva).sort(ordem);
+    const somar = (lista) => lista.reduce((s, r) => ({ ini: s.ini + r.ini, fim: s.fim + r.fim, variacao: s.variacao + r.variacao }), { ini: 0, fim: 0, variacao: 0 });
+    const tot = somar(linhas);
+    const totFora = somar(fora);
+    const corpoDe = (lista) => lista.map((r) => `<tr><td>${this.esc(r.nome)}</td><td>${this.money(r.ini)}</td><td>${this.money(r.fim)}</td><td class="${r.variacao < -0.005 ? "orc-dfc-neg" : ""}">${this.money(r.variacao)}</td></tr>`).join("");
+    const cabeca = `<thead><tr><th>Conta</th><th>Saldo em ${this.dataBr(iniData)}</th><th>Saldo em ${this.dataBr(fimData)}</th><th>Variação</th></tr></thead>`;
     const abertura = this.dataSaldo(2026, 0);
     const mapaAbertura = (this._saldoMap && this._saldoMap[abertura]) || {};
-    const checks = this._saldoPicker ? (this._saldoContas || []).map((c) => {
+    const checks = this._saldoPicker ? (this._saldoContas || []).filter((c) => !this.contaForaDoSaldo(c)).map((c) => {
       const on = escolhidas.has(c.chave);
-      const nome = (varias ? c.empresa + " · " : "") + c.numero + (c.nome && c.nome !== c.numero ? " " + c.nome : "");
       const saldo = Number(mapaAbertura[c.chave]) || 0;
-      return `<label class="orc-dfc-conta${this.ehContaAnalise(c) ? "" : " is-fora"}"><input type="checkbox" data-saldo-conta="${this.esc(c.chave)}" ${on ? "checked" : ""}> <span>${this.esc(nome)}</span><b>${this.money(saldo)}</b></label>`;
+      return `<label class="orc-dfc-conta${this.ehContaAnalise(c) ? "" : " is-fora"}"><input type="checkbox" data-saldo-conta="${this.esc(c.chave)}" ${on ? "checked" : ""}> <span>${this.esc(this.rotuloConta(c, varias))}</span><b>${this.money(saldo)}</b></label>`;
     }).join("") : "";
     const resultado = this.resultadoMes(mes);
+    const grupoFora = fora.length ? `<div class="orc-dfc-fora">
+      <h3>Fora do saldo</h3>
+      <p>PAR, REAPROPFIN e 1-6. Estes saldos não entram no saldo inicial nem no saldo final.</p>
+      <div class="orc-dfc-scroll orc-dfc-quadro-scroll">
+        <table class="orc-dfc-table orc-dfc-quadro-tab">
+          ${cabeca}
+          <tbody>${corpoDe(fora)}</tbody>
+          <tfoot><tr class="orc-dfc-fora"><td>Total</td><td>${this.money(totFora.ini)}</td><td>${this.money(totFora.fim)}</td><td class="${totFora.variacao < -0.005 ? "orc-dfc-neg" : ""}">${this.money(totFora.variacao)}</td></tr></tfoot>
+        </table>
+      </div>
+    </div>` : "";
     return `<section class="orc-dfc-quadro">
-      ${this._saldoPicker ? `<div class="orc-dfc-checks"><p>Saldo inicial de 2026, em ${this.dataBr(abertura)}. Marque as contas que entram nessa apuração. Terracotta e aplicações ficam de fora. O realizado dos meses seguintes usa as mesmas contas. No forecast, o saldo inicial é o saldo final do mês anterior e o saldo final soma a variação de caixa do mês.</p>${checks || "<span>Nenhuma conta de caixa voltou da consulta.</span>"}</div>` : ""}
+      ${this._saldoPicker ? `<div class="orc-dfc-checks"><p>Saldo inicial de 2026, em ${this.dataBr(abertura)}. Marque as contas que entram nessa apuração. Terracotta, aplicações, PAR, REAPROPFIN e 1-6 ficam de fora. O realizado dos meses seguintes usa as mesmas contas. No forecast, o saldo inicial é o saldo final do mês anterior e o saldo final soma a variação de caixa do mês.</p>${checks || "<span>Nenhuma conta de caixa voltou da consulta.</span>"}</div>` : ""}
       <h3>Contas em ${this.MESES[mes]} de 2026</h3>
       <p>Início em ${this.dataBr(iniData)} e fim em ${this.dataBr(fimData)}, ${this._saldoFonte === "contas" ? "pelo saldo das contas correntes" : (this._saldoFonte === "misto" ? "pelo balancete societário e, onde ele não respondeu, pelo saldo das contas correntes" : "pelo balancete de verificação societário")}. A variação é o saldo final menos o saldo inicial. A geração do resultado deste mês no DFC foi ${this.money(resultado)}.</p>
       <div class="orc-dfc-scroll orc-dfc-quadro-scroll">
         <table class="orc-dfc-table orc-dfc-quadro-tab">
-          <thead><tr><th>Conta</th><th>Saldo em ${this.dataBr(iniData)}</th><th>Saldo em ${this.dataBr(fimData)}</th><th>Variação</th></tr></thead>
-          <tbody>${corpo || `<tr><td colspan="4">Nenhuma conta marcada. Clique em Saldo inicial para escolher.</td></tr>`}</tbody>
+          ${cabeca}
+          <tbody>${corpoDe(linhas) || `<tr><td colspan="4">Nenhuma conta marcada. Clique em Saldo inicial para escolher.</td></tr>`}</tbody>
           <tfoot><tr><td>Total</td><td>${this.money(tot.ini)}</td><td>${this.money(tot.fim)}</td><td class="${tot.variacao < -0.005 ? "orc-dfc-neg" : ""}">${this.money(tot.variacao)}</td></tr></tfoot>
         </table>
       </div>
+      ${grupoFora}
     </section>`;
   },
 

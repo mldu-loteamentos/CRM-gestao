@@ -155,15 +155,13 @@ const OrcamentoApp = {
         .orc-head { background: #0c3d28; color: #fff; border-radius: 12px; padding: 16px 18px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
         .orc-head h2 { margin: 0; font-size: 1.15rem; font-weight: 800; color: #fff; }
         .orc-head p { margin: 6px 0 0; font-size: 0.84rem; color: #fff; max-width: 820px; line-height: 1.4; }
-        .orc-tools { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 12px; }
-        .orc-search { height: 40px; border: 1px solid #475569; border-radius: 8px; padding: 0 12px; min-width: 240px; font-size: 0.9rem; color: #0f172a; background: #fff; }
+        .orc-tools { display: flex; gap: 12px; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; margin-bottom: 12px; }
+        .orc-tools-filters, .orc-tools-actions { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
         #orcamento-root .ml-emp-filter { flex: 0 0 420px; width: 420px; max-width: none; min-width: 280px; }
         #orcamento-root #orc-plan-box .ml-emp-filter { flex: 0 0 340px; width: 340px; min-width: 240px; }
         #orcamento-root .btn-excel { height: 40px; }
         .orc-ghost { height: 40px; border-radius: 8px; border: 1px solid #105436; background: #fff; color: #105436; font-weight: 800; padding: 0 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; }
         .orc-ghost:hover { background: #d1fae5; }
-        .orc-ghost-muted { border-color: #cbd5e1; color: #475569; }
-        .orc-ghost-muted:hover { background: #f1f5f9; }
         .orc-ghost.is-on { background: #105436; color: #fff; }
         .orc-ghost.is-on:hover { background: #0c3d28; }
         .orc-ghost svg { width: 14px; height: 14px; }
@@ -274,22 +272,23 @@ const OrcamentoApp = {
         </div>
       </div>
       <div class="orc-tools">
-        <div id="orc-emp-box"></div>
-        <div id="orc-plan-box"></div>
-        <input id="orc-search" class="orc-search" type="search" placeholder="Buscar empresa, centro de custo ou conta" value="${this.esc(this.query)}">
-        <div class="orc-view">
-          <button type="button" id="orc-view-total" class="${this.mouraView ? "" : "is-on"}">Valor total</button>
-          <button type="button" id="orc-view-moura" class="${this.mouraView ? "is-on" : ""}">Valor Moura Leite</button>
+        <div class="orc-tools-filters">
+          <div id="orc-emp-box"></div>
+          <div id="orc-plan-box"></div>
         </div>
-        <button type="button" class="orc-ghost${this.quarterView ? " is-on" : ""}" id="orc-quarter" title="Recolher os meses em trimestres"><i data-lucide="calendar-range"></i> ${this.quarterView ? "Ver meses" : "Por trimestre"}</button>
-        <button type="button" class="orc-ghost" id="orc-expand"><i data-lucide="chevrons-down"></i> Expandir todos</button>
-        <button type="button" class="orc-ghost orc-ghost-muted" id="orc-collapse"><i data-lucide="chevrons-up"></i> Recolher todos</button>
-        <label class="moura-switch" title="Ligado soma o centro de custo com PARCERIA no nome. Desligado deixa só o empreendimento.">
-          <input type="checkbox" id="orc-parceria" ${this.includeParceria ? "checked" : ""}>
-          <span class="moura-switch-track" aria-hidden="true"></span>
-          <span class="moura-switch-text">Incluir parceria</span>
-        </label>
-        <button type="button" class="btn btn-excel" id="orc-excel" title="Exportar tabela atual para Excel"><i data-lucide="download" style="width:14px;height:14px;"></i> Excel</button>
+        <div class="orc-tools-actions">
+          <div class="orc-view">
+            <button type="button" id="orc-view-total" class="${this.mouraView ? "" : "is-on"}">Valor total</button>
+            <button type="button" id="orc-view-moura" class="${this.mouraView ? "is-on" : ""}">Valor Moura Leite</button>
+          </div>
+          <button type="button" class="orc-ghost${this.quarterView ? " is-on" : ""}" id="orc-quarter" title="Recolher os meses em trimestres"><i data-lucide="calendar-range"></i> ${this.quarterView ? "Ver meses" : "Por trimestre"}</button>
+          <label class="moura-switch" title="Ligado soma o centro de custo com PARCERIA no nome. Desligado deixa só o empreendimento.">
+            <input type="checkbox" id="orc-parceria" ${this.includeParceria ? "checked" : ""}>
+            <span class="moura-switch-track" aria-hidden="true"></span>
+            <span class="moura-switch-text">Incluir parceria</span>
+          </label>
+          <button type="button" class="btn btn-excel" id="orc-excel" title="Exportar tabela atual para Excel"><i data-lucide="download" style="width:14px;height:14px;"></i> Excel</button>
+        </div>
       </div>
       <div class="orc-kpi-groups" id="orc-kpis"></div>
       <div class="orc-scroll">
@@ -512,13 +511,6 @@ const OrcamentoApp = {
   },
 
   bind() {
-    const search = document.getElementById("orc-search");
-    if (search) {
-      search.addEventListener("input", () => {
-        this.query = search.value || "";
-        this.paint();
-      });
-    }
     const viewTotal = document.getElementById("orc-view-total");
     if (viewTotal) viewTotal.addEventListener("click", () => this.setMoura(false));
     const viewMoura = document.getElementById("orc-view-moura");
@@ -528,10 +520,6 @@ const OrcamentoApp = {
       this.quarterView = !this.quarterView;
       this.render();
     });
-    const expand = document.getElementById("orc-expand");
-    if (expand) expand.addEventListener("click", () => this.expandAll(true));
-    const collapse = document.getElementById("orc-collapse");
-    if (collapse) collapse.addEventListener("click", () => this.expandAll(false));
     const parceria = document.getElementById("orc-parceria");
     if (parceria) parceria.addEventListener("change", () => {
       this.includeParceria = !!parceria.checked;

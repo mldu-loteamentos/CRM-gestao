@@ -10581,6 +10581,8 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .orc-dfc-quadro-scroll { max-height: 320px; }
 .orc-dfc-quadro-tab { min-width: 640px; }
 .orc-dfc-quadro-tab tfoot td { font-weight: 800; background: #ecfdf5; }
+.orc-dfc-fora { margin-top: 16px; }
+.orc-dfc-quadro-tab tfoot tr.orc-dfc-fora td { background: #f1f5f9; }
 .orc-dfc-checks { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-bottom: 12px; padding: 10px 12px; background: #fff; border: 1px solid #d1fae5; border-radius: 10px; }
 .orc-dfc-checks p { flex: 1 1 100%; margin: 0 0 4px; }
 .orc-dfc-conta { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: #334155; min-width: 280px; }
