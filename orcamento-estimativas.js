@@ -1368,8 +1368,8 @@ const OrcamentoRepassesApp = {
     const ids = new Set(this.selectedCompanyIds.map(String));
     return OrcEst.linhas().filter((l) => {
       const emp = String(l.e || "");
-      if (ids.size && !ids.has(emp)) return false;
-      return !companyId || emp === String(companyId);
+      if (companyId) return emp === String(companyId);
+      return !ids.size || ids.has(emp);
     });
   },
 
@@ -1464,15 +1464,20 @@ const OrcamentoRepassesApp = {
       try {
         partes.forEach((part) => {
           const card = this.montarDfc(part, this.linhasDaEmpresa("13"), 0, "");
+          const ano = card.resultadoMeses || OrcEst.z();
+          let pct = 0;
           (card.pessoas || []).forEach((p) => {
             const nome = this.nomeCc({ name: p.nome });
             if (nome.indexOf("ELLENCO") < 0) return;
             if (nome.indexOf("LUCRO") < 0 && nome.indexOf("REMESSA") < 0 && nome.indexOf("CONTROLADORA") < 0) return;
             achou = true;
-            meses[0] += Number(p.dez) || 0;
-            (p.m || []).forEach((v, i) => { if (i > 0 && i < 12) meses[i] += Number(v) || 0; });
-            jan28 += Number(p.jan28) || 0;
+            pct += Number(p.pct) || 0;
           });
+          if (!(pct > 0)) return;
+          const fatia = pct / 100;
+          meses[0] += (Number(card.dezBruto) || 0) * fatia;
+          for (let i = 1; i < 12; i++) meses[i] += (Number(ano[i - 1]) || 0) * fatia;
+          jan28 += (Number(ano[11]) || 0) * fatia;
         });
       } finally {
         this._semLucros = false;
@@ -1699,6 +1704,8 @@ const OrcamentoRepassesApp = {
       variacao: variacao,
       distribuicao: distribuicao,
       pessoas: pessoas,
+      resultadoMeses: resultadoProprio,
+      dezBruto: dez,
       pctPessoas: pessoas.reduce((s, p) => s + p.pct, 0),
       temValor: variacao.some((v) => Math.abs(v) >= 0.005) || rows.some((r) => r.isAccount)
     };
