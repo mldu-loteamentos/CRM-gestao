@@ -11,6 +11,7 @@ const ComprasDashboardApp = {
     error: "",
     etapa: "",
     pct: 8,
+    aviso: "",
     titles: [],
     deptKey: "",
     updatedAt: null
@@ -222,6 +223,144 @@ const ComprasDashboardApp = {
     return (payload && payload.data) || (Array.isArray(payload) ? payload : []);
   },
 
+  CACHE: "compras_dashboard_cache",
+  LOOKBACK: 400,
+
+  /* Últimos 30 dias saem da API. O que é anterior já está no Firebase. */
+  corte() {
+    const today = this.isoToday();
+    const apiFrom = this.addDays(today, -29);
+    return { today, apiFrom, histEnd: this.addDays(apiFrom, -1), anoIni: "2025-01-01" };
+  },
+
+  compactar(row) {
+    return [
+      row.id, row.parcela || "", row.doc || "", row.tipo || "",
+      row.issue || "", row.registered || "", row.due || "", Number(row.amount) || 0,
+      (row.depts || []).map((d) => (d.id || "") + "\t" + (d.name || "")).join("\n")
+    ];
+  },
+
+  expandir(a) {
+    if (!Array.isArray(a) || a[0] == null) return null;
+    const depts = String(a[8] || "").split("\n").filter(Boolean).map((s) => {
+      const t = s.split("\t");
+      return { id: t[0] || "", name: t[1] || "" };
+    });
+    return {
+      id: String(a[0]),
+      parcela: String(a[1] || ""),
+      doc: String(a[2] || ""),
+      tipo: String(a[3] || ""),
+      issue: this.isoDate(a[4]),
+      registered: this.isoDate(a[5]),
+      due: this.isoDate(a[6]),
+      amount: Number(a[7]) || 0,
+      depts
+    };
+  },
+
+  fb() {
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (!fx || !db || typeof fx.getDocs !== "function" || typeof fx.setDoc !== "function") return null;
+    return { fx, db };
+  },
+
+  async lerTudo() {
+    const fb = this.fb();
+    if (!fb) return null;
+    const snap = await fb.fx.getDocs(fb.fx.collection(fb.db, this.CACHE));
+    const docs = {};
+    snap.forEach((d) => { docs[d.id] = d.data() || {}; });
+    const meta = docs._meta || {};
+    const meses = {};
+    Object.keys(docs).forEach((id) => {
+      if (id === "_meta" || id.indexOf("~") >= 0) return;
+      const doc = docs[id];
+      let texto = doc.payload || "";
+      const n = Number(doc.partes) || 0;
+      if (n) {
+        texto = "";
+        for (let i = 0; i < n; i++) texto += (docs[id + "~" + i] && docs[id + "~" + i].texto) || "";
+      }
+      let cru = [];
+      try { cru = JSON.parse(texto || "[]"); } catch (e) { cru = []; }
+      meses[id] = (Array.isArray(cru) ? cru : []).map((item) => this.expandir(item)).filter((r) => r && r.registered);
+    });
+    return { cobertoAte: this.isoDate(meta.cobertoAte), meses };
+  },
+
+  async salvarMes(mes, rows) {
+    const fb = this.fb();
+    if (!fb) return;
+    const texto = JSON.stringify((rows || []).map((r) => this.compactar(r)));
+    const LIM = 350000;
+    const partes = [];
+    if (texto.length > LIM) {
+      for (let i = 0, n = 0; i < texto.length; i += LIM, n++) {
+        const pid = mes + "~" + n;
+        partes.push(pid);
+        await fb.fx.setDoc(fb.fx.doc(fb.db, this.CACHE, pid), { tipo: "parte", mes, texto: texto.slice(i, i + LIM) });
+      }
+    }
+    await fb.fx.setDoc(fb.fx.doc(fb.db, this.CACHE, mes), {
+      mes,
+      em: new Date().toISOString(),
+      n: (rows || []).length,
+      partes: partes.length,
+      payload: partes.length ? "" : texto
+    });
+  },
+
+  async salvarMeta(cobertoAte) {
+    const fb = this.fb();
+    if (!fb) return;
+    await fb.fx.setDoc(fb.fx.doc(fb.db, this.CACHE, "_meta"), {
+      cobertoAte: cobertoAte,
+      em: new Date().toISOString()
+    }, { merge: true });
+  },
+
+  async mesclar(rows, desde, ate) {
+    const porMes = new Map();
+    (rows || []).forEach((r) => {
+      if (!r.registered || r.registered < desde || r.registered > ate) return;
+      const mes = r.registered.slice(0, 7);
+      if (!porMes.has(mes)) porMes.set(mes, []);
+      porMes.get(mes).push(r);
+    });
+    for (const [mes, lista] of porMes) {
+      const cache = this._cacheMeses || {};
+      const antigo = cache[mes] || [];
+      const fica = antigo.filter((r) => r.registered < desde || r.registered > ate);
+      const junto = this.dedupe(fica.concat(lista));
+      cache[mes] = junto;
+      this._cacheMeses = cache;
+      await this.salvarMes(mes, junto);
+    }
+  },
+
+  async buscarIntervalo(start, end, rotulo) {
+    const bag = [];
+    const ini = new Date(start + "T12:00:00");
+    const fim = new Date(end + "T12:00:00");
+    const total = Math.max(1, Math.round((fim - ini) / 86400000));
+    let cursor = start;
+    while (cursor <= end) {
+      const sliceEnd = this.addDays(cursor, 89);
+      const ate = sliceEnd > end ? end : sliceEnd;
+      const feito = new Date(cursor + "T12:00:00");
+      this.state.etapa = rotulo;
+      this.state.pct = Math.max(8, Math.min(92, Math.round(((feito - ini) / 86400000) / total * 100)));
+      this.render();
+      const payload = await this.fetchOutcome(cursor, ate, 0);
+      this.collect(payload, bag);
+      cursor = this.addDays(ate, 1);
+    }
+    return bag;
+  },
+
   async fetchOutcome(start, end, depth) {
     const endpoint = "/bulk-data/v1/outcome?startDate=" + encodeURIComponent(start)
       + "&endDate=" + encodeURIComponent(end)
@@ -255,33 +394,63 @@ const ComprasDashboardApp = {
     if (this.state.loading) return;
     this.state.loading = true;
     this.state.error = "";
-    this.state.etapa = "Buscando os títulos a pagar…";
-    this.state.pct = 12;
+    this.state.aviso = "";
+    this.state.etapa = "Lendo o histórico no Firebase…";
+    this.state.pct = 8;
     this.render();
-    const win = this.windows();
-    const fetchStart = this.addDays(win.histStart, -400);
-    const bag = [];
+    const corte = this.corte();
     try {
       if (typeof window.siengeFetchWithRetry !== "function") throw new Error("API Sienge indisponível.");
-      const ini = new Date(fetchStart + "T12:00:00");
-      const fim = new Date(win.today + "T12:00:00");
-      const total = Math.max(1, Math.round((fim - ini) / 86400000));
-      let cursor = fetchStart;
-      while (cursor <= win.today) {
-        const sliceEnd = this.addDays(cursor, 89);
-        const end = sliceEnd > win.today ? win.today : sliceEnd;
-        const feito = new Date(cursor + "T12:00:00");
-        this.state.etapa = "Buscando os títulos a pagar…";
-        this.state.pct = Math.max(12, Math.min(92, Math.round(((feito - ini) / 86400000) / total * 100)));
+      let cache = null;
+      try { cache = await this.lerTudo(); } catch (e) { cache = null; }
+      this._cacheMeses = (cache && cache.meses) || {};
+      const coberto = (cache && cache.cobertoAte) || "";
+      let historico = [];
+      Object.keys(this._cacheMeses).forEach((mes) => {
+        this._cacheMeses[mes].forEach((r) => {
+          if (r.registered >= corte.anoIni && r.registered <= corte.histEnd) historico.push(r);
+        });
+      });
+      if (!coberto || coberto < corte.histEnd) {
+        const gapIni = coberto && coberto >= corte.anoIni ? this.addDays(coberto, 1) : corte.anoIni;
+        const rotulo = gapIni <= "2025-12-31"
+          ? "Buscando 2025 e o restante de 2026 no Sienge…"
+          : "Buscando o restante de 2026 no Sienge…";
+        const bag = await this.buscarIntervalo(this.addDays(gapIni, -this.LOOKBACK), corte.histEnd, rotulo);
+        const novos = this.dedupe(bag).filter((r) => r.registered >= gapIni && r.registered <= corte.histEnd);
+        this.state.etapa = "Salvando o histórico no Firebase…";
+        this.state.pct = 94;
         this.render();
-        const payload = await this.fetchOutcome(cursor, end, 0);
-        this.collect(payload, bag);
-        cursor = this.addDays(end, 1);
+        try {
+          await this.mesclar(novos, gapIni, corte.histEnd);
+          await this.salvarMeta(corte.histEnd);
+        } catch (e) {
+          console.warn("[Dashboard] histórico", e);
+          this.state.aviso = "Consultei o Sienge, mas não consegui gravar o histórico no Firebase.";
+        }
+        historico = historico.filter((r) => r.registered < gapIni).concat(novos);
       }
-      this.state.titles = this.dedupe(bag);
+      this.state.etapa = "Buscando os últimos 30 dias…";
+      this.state.pct = 96;
+      this.render();
+      let frescos = [];
+      try {
+        const bag = await this.buscarIntervalo(this.addDays(corte.apiFrom, -this.LOOKBACK), corte.today, "Buscando os últimos 30 dias…");
+        frescos = this.dedupe(bag).filter((r) => r.registered >= corte.apiFrom && r.registered <= corte.today);
+        this.state.etapa = "Salvando os últimos 30 dias no Firebase…";
+        this.state.pct = 98;
+        this.render();
+        await this.mesclar(frescos, corte.apiFrom, corte.today);
+        await this.salvarMeta(corte.today);
+      } catch (e) {
+        this.state.aviso = (e && e.message) ? e.message : "Não consegui atualizar os últimos 30 dias no Sienge.";
+        frescos = [];
+      }
+      this.state.titles = this.dedupe(historico.concat(frescos));
       this.state.updatedAt = new Date();
       this.state.loaded = true;
       this.state.pct = 100;
+      if (!this.state.titles.length && this.state.aviso) this.state.error = this.state.aviso;
     } catch (e) {
       this.state.error = (e && e.message) ? e.message : "Falha ao buscar os títulos no Sienge.";
       this.state.titles = [];
@@ -425,7 +594,8 @@ const ComprasDashboardApp = {
         + '<div class="cdash-kpi"><span>Documentos inseridos</span><strong>' + this.fmtInt(this.documentos(hist)) + "</strong><em>" + this.fmtBr(win.histStart) + " a " + this.fmtBr(win.today) + "</em></div>"
         + '<div class="cdash-kpi"><span>NFe</span><strong>' + this.fmtInt(this.documentos(nfe)) + "</strong><em>Prazo médio " + this.fmtDays(this.pmp(nfe)) + " dias</em></div>"
         + '<div class="cdash-kpi"><span>NFS</span><strong>' + this.fmtInt(this.documentos(nfs)) + "</strong><em>Prazo médio " + this.fmtDays(this.pmp(nfs)) + " dias</em></div></div>"
-        + '<p class="cdash-cap">Prazo: vencimento menos a emissão, ponderado pelo valor.</p>'
+        + '<p class="cdash-cap">Prazo: vencimento menos a emissão, ponderado pelo valor. Até ' + this.fmtBr(this.corte().histEnd) + ' a leitura é do Firebase. Os últimos 30 dias vêm do Sienge.</p>'
+        + (this.state.aviso ? '<p class="cdash-cap">' + this.esc(this.state.aviso) + "</p>" : "")
         + this.tabelaHtml(hist);
     }
     root.innerHTML = '<div class="cdash">'
