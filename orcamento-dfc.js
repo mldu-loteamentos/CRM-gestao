@@ -1979,8 +1979,10 @@ const OrcamentoDfcApp = {
     const n = (pack.lines || []).length;
     const nome = pack.fileName || "Base 2027";
     const extra = this._custom ? " · arquivo enviado" : "";
-    const aviso = this.erro ? " · " + this.erro : "";
-    el.textContent = n ? (nome + " · " + n.toLocaleString("pt-BR") + " lançamentos" + extra + aviso) : ("Nenhum orçamento carregado." + aviso);
+    const estado = this.erro
+      ? " · " + this.erro
+      : (this._nuvemOk ? " · salvo no Firebase" : (this._nuvemMsg ? " · " + this._nuvemMsg : ""));
+    el.textContent = n ? (nome + " · " + n.toLocaleString("pt-BR") + " lançamentos" + extra + estado) : ("Nenhum orçamento carregado." + estado);
   },
 
   paintEmp() {
@@ -2251,13 +2253,31 @@ const OrcamentoDfcApp = {
     }
   },
 
+  async firebasePronto() {
+    for (let i = 0; i < 40; i++) {
+      const fx = window.firebaseCollections;
+      if (window.firebaseDb && fx && typeof fx.setDoc === "function" && typeof fx.getDoc === "function") return true;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return false;
+  },
+
   async salvarOrcamentoNuvem(pack) {
+    if (!pack) return;
+    const pronto = await this.firebasePronto();
     const fx = window.firebaseCollections;
     const db = window.firebaseDb;
-    if (!fx || !db || !pack || typeof fx.setDoc !== "function") return;
+    if (!pronto || !fx || !db) {
+      this._nuvemOk = false;
+      this._nuvemMsg = "";
+      this.erro = "Os valores estão nesta tela, mas o Firebase não estava disponível.";
+      this.paintMeta();
+      if (document.getElementById("orc-dfc-body")) this.paintBody();
+      return;
+    }
     const texto = JSON.stringify(pack.lines || []);
     const id = "2027";
-    const LIM = 400000;
+    const LIM = 300000;
     const ids = [];
     try {
       if (texto.length > LIM) {
@@ -2275,13 +2295,24 @@ const OrcamentoDfcApp = {
         payload: ids.length ? "" : texto,
         partes: ids
       });
+      const snap = await fx.getDoc(fx.doc(db, "dfc_orcamento", id));
+      const gravado = this.docExiste(snap) ? (snap.data() || {}) : null;
+      if (!gravado || Number(gravado.n) !== (pack.lines || []).length || Number(gravado.savedAt) !== Number(pack.savedAt)) {
+        throw new Error("o Firebase não confirmou a gravação");
+      }
       for (let n = ids.length; n < 20; n++) {
         fx.deleteDoc(fx.doc(db, "dfc_orcamento", id + "__p" + n)).catch(function () {});
       }
+      this._nuvemOk = true;
+      this._nuvemMsg = "";
+      this.erro = "";
     } catch (e) {
-      if (!this.erro) this.erro = "Os valores entraram nesta tela, mas não ficaram salvos na nuvem.";
-      this.paintMeta();
+      this._nuvemOk = false;
+      this._nuvemMsg = "";
+      this.erro = "Não ficou salvo no Firebase: " + ((e && e.message) || "falha na gravação") + ".";
     }
+    this.paintMeta();
+    if (document.getElementById("orc-dfc-body")) this.paintBody();
   },
 
   async lerOrcamentoNuvem(token) {
@@ -2307,6 +2338,8 @@ const OrcamentoDfcApp = {
     const atual = this.origem();
     if (Number(pack.savedAt) <= Number(atual.savedAt || 0)) return;
     this._custom = pack;
+    this._nuvemOk = true;
+    this._nuvemMsg = "";
     this.gravarLocal(pack);
     if (token !== this._bToken || !document.getElementById("orc-dfc-body")) return;
     const base = document.getElementById("orc-dfc-base");
@@ -2329,8 +2362,9 @@ const OrcamentoDfcApp = {
       pack = { fileName: fileName, savedAt: Date.now(), year: 2027, lines: lines };
       this._custom = pack;
       this._ignorarNuvem = false;
-      const aviso = this.gravarLocal(pack);
-      if (aviso) this.erro = aviso;
+      this._nuvemOk = false;
+      this._nuvemMsg = "Salvando no Firebase…";
+      this.gravarLocal(pack);
     } catch (err) {
       this.erro = (err && err.message) ? err.message : "Não consegui ler esse Excel.";
     }
@@ -2347,6 +2381,8 @@ const OrcamentoDfcApp = {
   voltarBase() {
     this._custom = null;
     this._ignorarNuvem = true;
+    this._nuvemOk = false;
+    this._nuvemMsg = "";
     this.erro = "";
     try { localStorage.removeItem(this.LS); } catch (e) {}
     this.selectedCompanyIds = [];
