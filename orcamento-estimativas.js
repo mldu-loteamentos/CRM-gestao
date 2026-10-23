@@ -1513,8 +1513,6 @@ const OrcamentoRepassesApp = {
     pagamento[0] = dez;
     for (let i = 1; i < 12; i++) pagamento[i] = resultado[i - 1];
     const jan28 = resultado[11] || 0;
-    if (byId.g_12) byId.g_12.months = pagamento.slice();
-    dezMap.g_12 = pagamento[0];
     const vivo = new Set(["g_03", "g_06", "g_08", "g_10", "g_12"]);
     tpl.forEach((g) => {
       const tem = g.months.some((v) => Math.abs(v) >= 0.005) || [...g.accs.values()].some((a) => a.months.some((v) => Math.abs(v) >= 0.005));
@@ -1533,17 +1531,16 @@ const OrcamentoRepassesApp = {
       const accs = [...node.accs.values()]
         .filter((a) => a.months.some((v) => Math.abs(v) >= 0.005))
         .sort((a, b) => String(a.conta).localeCompare(String(b.conta), "pt-BR", { numeric: true }));
-      const nome = node.id === "g_12" ? (sociedade ? "12 VARIAÇÃO DE CAIXA — distribuição" : "12 VARIAÇÃO DE CAIXA — repasse") : node.name;
       rows.push({
         id: node.id,
-        name: nome,
+        name: node.name,
         type: node.type,
         level: level,
         hasKids: children.length > 0 || accs.length > 0,
         isAccount: false,
         months: node.months,
         dez: dezMap[node.id] || 0,
-        jan28: node.id === "g_12" ? jan28 : null
+        jan28: null
       });
       children.forEach((ch) => walk(ch, level + 1));
       accs.forEach((a) => {
@@ -1581,7 +1578,7 @@ const OrcamentoRepassesApp = {
       });
     };
     tpl.filter((g) => !g.parentId).forEach((g) => walk(g, 0));
-    const variacao = (byId.g_12 && byId.g_12.months) || OrcEst.z();
+    const variacao = pagamento.slice();
     const pessoas = this.pessoasDe(part).map((p) => ({
       nome: p.nome,
       pct: p.pct,
@@ -1591,6 +1588,8 @@ const OrcamentoRepassesApp = {
     }));
     const distribuicao = [];
     centros.forEach((meta, ccId) => {
+      const idDig = String(ccId).replace(/\D/g, "");
+      if (!sociedade && /00$/.test(idDig) && !this.ccEhDoParceiro(meta.nome)) return;
       const um = new Map([[ccId, meta]]);
       const anoMolde = this.molde();
       this.encher(anoMolde.tpl, anoMolde.byId, linhas, um, part, usarRateio);
@@ -1672,7 +1671,7 @@ const OrcamentoRepassesApp = {
         <p class="orc-dfc-lead">Cada aba é uma prestação de contas. Na parceria, escolha a obra e marque os centros de custo. Na sociedade, o resultado geral de todos os centros gera a distribuição.</p>
         <div class="orc-dfc-tools">
           <div id="orc-rep-emp-box"></div>
-          <button type="button" class="btn btn-excel" id="orc-rep-excel" title="Exportar a distribuição com sócios e centros de custo">
+          <button type="button" class="btn btn-excel" id="orc-rep-excel" title="Exportar a prestação de contas com o repasse por centro de custo">
             <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
           </button>
         </div>
@@ -1843,8 +1842,8 @@ const OrcamentoRepassesApp = {
       </div>
       ${this.dfcHtml(card)}
       <p class="orc-est-nota">${sociedade
-        ? "Na sociedade o DFC junta todos os centros marcados. O resultado geral fica no mês. A distribuição, na linha de variação, é paga no mês seguinte: janeiro de 2027 paga o forecast de dezembro de 2026, e o resultado de dezembro de 2027 aparece em JAN/28. A variação se divide pelo percentual de cada sócio. Repasse e dividendos já lançados no orçamento ficam de fora, para o valor não se abater duas vezes."
-        : "Com o centro principal da obra marcado, o DFC soma os centros marcados por inteiro. Sem ele, o valor é o rateio do parceiro sobre a obra. O resultado fica no mês. O repasse, na linha de variação, é pago no mês seguinte: janeiro de 2027 paga o forecast de dezembro de 2026, e o resultado de dezembro de 2027 aparece em JAN/28."}</p>`;
+        ? "Na sociedade o DFC junta todos os centros marcados. A linha 12 fica no mês em que o resultado acontece. A variação desse mês vira distribuição no mês seguinte, por centro de custo: janeiro de 2027 distribui dezembro de 2026, e dezembro de 2027 é distribuído em JAN/28. Cada sócio recebe o seu percentual. Repasse e dividendos já lançados no orçamento ficam de fora, para o valor não se abater duas vezes."
+        : "Com o centro principal da obra marcado, o DFC soma os centros marcados por inteiro. Sem ele, o valor é o rateio do parceiro sobre a obra. A linha 12 fica no mês em que o resultado acontece. O repasse é a variação desse mês paga no mês seguinte: janeiro de 2027 paga dezembro de 2026. A variação do 13301 é paga no 13300, na conta cadastrada no 13301. A do 13401 é paga no 13400, na conta do 13401. O centro de custo não entra no cadastro do credor."}</p>`;
     body.querySelectorAll("[data-rep-aba]").forEach((btn) => {
       btn.addEventListener("click", () => this.setAba(btn.getAttribute("data-rep-aba")));
     });
@@ -1941,7 +1940,8 @@ const OrcamentoRepassesApp = {
     const wb = new ExcelJS.Workbook();
     wb.creator = "CRM Moura Leite";
     wb.created = new Date();
-    const colunas = ["Descrição", "%", "DEZ/26"].concat(OrcEst.MESES, ["JAN/28", "Total 2027"]);
+    const nomesMes = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+    const colunas = ["Centro de custo"].concat(nomesMes, ["JAN/28", "Total"]);
     const last = colunas.length;
     const used = new Set();
     const pintar = (ws, cell, opts) => inv.excelPaint(cell, opts);
@@ -1960,23 +1960,22 @@ const OrcamentoRepassesApp = {
         });
       }
     };
-    const numeros = (ws, rotulo, pct, dez, meses, jan28, total, fill, branco) => {
+    const numeros = (ws, rotulo, meses, jan28, fill, branco) => {
       const linha = ws.addRow([]);
-      const vals = [rotulo, pct == null ? null : (Number(pct) || 0) / 100, Number(dez) || 0].concat(meses || OrcEst.z(), [Number(jan28) || 0, Number(total) || 0]);
+      const serie = meses || OrcEst.z();
+      const vals = [rotulo].concat(serie.map((v) => Number(v) || 0), [Number(jan28) || 0, this.soma(serie)]);
       vals.forEach((v, i) => {
         const cell = linha.getCell(i + 1);
-        const num = i >= 2;
-        const pctCol = i === 1;
-        if (pctCol && v == null) cell.value = "";
-        else cell.value = (num || pctCol) ? (Number(v) || 0) : v;
+        const num = i >= 1;
+        cell.value = num ? (Number(v) || 0) : v;
         const n = Number(v) || 0;
-        const cor = branco ? "FFFFFFFF" : (num && n < -0.004 ? "FFB91C1C" : ((num || pctCol) && Math.abs(n) < 0.005 ? "FF94A3B8" : "FF0F172A"));
+        const cor = branco ? "FFFFFFFF" : (num && n < -0.004 ? "FFB91C1C" : (num && Math.abs(n) < 0.005 ? "FF94A3B8" : "FF0F172A"));
         pintar(ws, cell, {
           font: { size: 9, bold: !!branco, color: { argb: cor } },
           fill: fill,
           align: { horizontal: i === 0 ? "left" : "right", vertical: "middle" },
           border: true,
-          numFmt: pctCol && v != null ? "0.0%" : (num ? "#,##0.00" : undefined)
+          numFmt: num ? "#,##0.00" : undefined
         });
       });
     };
@@ -1984,7 +1983,7 @@ const OrcamentoRepassesApp = {
       const nome = this.nomeEmpresaExport(emp);
       const ws = wb.addWorksheet(inv.excelSheetName(emp, used), { views: [{ showGridLines: false, state: "frozen", xSplit: 1, ySplit: 4, topLeftCell: "B5", activeCell: "B5" }] });
       ws.properties.showGridLines = false;
-      ws.columns = colunas.map((_, i) => ({ width: i === 0 ? 46 : (i === 1 ? 10 : 13) }));
+      ws.columns = colunas.map((_, i) => ({ width: i === 0 ? 42 : 14 }));
       ws.mergeCells("A1:A2");
       ws.getRow(1).height = 28;
       ws.getRow(2).height = 22;
@@ -1993,8 +1992,8 @@ const OrcamentoRepassesApp = {
       const title = ws.getCell("A1");
       title.value = {
         richText: [
-          { font: { name: "Calibri", size: 14, bold: true, color: { argb: "FF475569" } }, text: "Distribuição\n" },
-          { font: { name: "Calibri", size: 9, color: { argb: "FF64748B" } }, text: nome + ". Sócios e centros de custo. Janeiro de 2027 é o resultado do forecast de dezembro de 2026." }
+          { font: { name: "Calibri", size: 14, bold: true, color: { argb: "FF475569" } }, text: "Prestação de contas\n" },
+          { font: { name: "Calibri", size: 9, color: { argb: "FF64748B" } }, text: nome + ". Janeiro é o repasse da variação de dezembro de 2026. Cada mês paga a variação do mês anterior." }
         ]
       };
       pintar(ws, title, { fill: "FFFFFFFF", align: { vertical: "middle", horizontal: "left", wrapText: true, indent: 8 } });
@@ -2009,7 +2008,7 @@ const OrcamentoRepassesApp = {
       const totalGeral = lista.reduce((s, card) => s + this.soma(card.variacao), 0);
       const c1 = ws.getCell(1, 5);
       const c2 = ws.getCell(2, 5);
-      c1.value = "Distribuição 2027";
+      c1.value = "Repasse 2027";
       c2.value = totalGeral;
       pintar(ws, c1, { font: { size: 8, bold: true, color: { argb: "FF94A3B8" } }, align: { horizontal: "right", vertical: "middle" } });
       pintar(ws, c2, { font: { size: 12, bold: true, color: { argb: "FF0F172A" } }, align: { horizontal: "right", vertical: "middle" }, numFmt: "#,##0.00" });
@@ -2020,43 +2019,41 @@ const OrcamentoRepassesApp = {
         pintar(ws, cell, {
           font: { size: 9, bold: true, color: { argb: "FFFFFFFF" } },
           fill: "FF334155",
-          align: { horizontal: i < 2 ? "left" : "right", vertical: "middle" },
+          align: { horizontal: i === 0 ? "left" : "right", vertical: "middle" },
           border: true
         });
       });
       lista.forEach((card) => {
-        const obra = card.obraCode ? " · Obra " + card.obraCode : "";
-        faixa(ws, (card.nome || "Prestação") + obra, "FF0C3D28", "FFFFFFFF");
+        const obra = card.obraCode ? " · OBRA " + card.obraCode : "";
+        faixa(ws, "PRESTAÇÃO DE CONTAS " + String(card.nome || "PRESTAÇÃO").toUpperCase() + obra, "FF0C3D28", "FFFFFFFF");
         const centros = (card.distribuicao || []).filter((r) => (r.m || []).some((v) => Math.abs(Number(v) || 0) >= 0.005) || Math.abs(Number(r.jan28) || 0) >= 0.005);
         centros.sort((a, b) => String(a.id).localeCompare(String(b.id), "pt-BR", { numeric: true }));
-        faixa(ws, "Centros de custo", "FFE7F6EE", "FF105436");
         const acc = OrcEst.z();
-        let dezAcc = 0;
         let janAcc = 0;
         centros.forEach((r) => {
           const meses = r.m || OrcEst.z();
           meses.forEach((v, i) => { acc[i] += Number(v) || 0; });
-          dezAcc += Number(meses[0]) || 0;
           janAcc += Number(r.jan28) || 0;
-          numeros(ws, String(r.id) + (r.nome ? " — " + r.nome : ""), null, meses[0], meses, r.jan28, this.soma(meses), "FFFFFFFF", false);
+          const pago = this.ccPagamento(r.id);
+          const onde = !card.sociedade && pago && pago !== String(r.id).replace(/\D/g, "") ? " · pago no " + pago : "";
+          numeros(ws, String(r.id) + (r.nome ? " — " + r.nome : "") + onde, meses, r.jan28, "FFFFFFFF", false);
         });
-        if (!centros.length) faixa(ws, "Nenhum centro de custo nesta distribuição", "FFFFFFFF", "FF64748B");
-        else numeros(ws, "Total dos centros", null, dezAcc, acc, janAcc, this.soma(acc), "FF475569", true);
-        const pessoas = card.pessoas || [];
-        const rotuloPessoa = card.sociedade ? "Sócios" : "Participantes";
-        faixa(ws, rotuloPessoa, "FFE7F6EE", "FF105436");
-        const pAcc = OrcEst.z();
-        let pDez = 0;
-        let pJan = 0;
-        pessoas.forEach((p) => {
-          const meses = p.m || OrcEst.z();
-          meses.forEach((v, i) => { pAcc[i] += Number(v) || 0; });
-          pDez += Number(p.dez) || 0;
-          pJan += Number(p.jan28) || 0;
-          numeros(ws, p.nome || "Sócio", p.pct, p.dez, meses, p.jan28, this.soma(meses), "FFFFFFFF", false);
-        });
-        if (!pessoas.length) faixa(ws, card.sociedade ? "Nenhum sócio nesta prestação" : "Nenhum participante nesta prestação", "FFFFFFFF", "FF64748B");
-        else numeros(ws, "Total dos " + rotuloPessoa.toLowerCase(), null, pDez, pAcc, pJan, this.soma(pAcc), "FF475569", true);
+        if (!centros.length) faixa(ws, "Nenhum centro de custo nesta prestação", "FFFFFFFF", "FF64748B");
+        else numeros(ws, "Total", acc, janAcc, "FF475569", true);
+        const pessoas = card.sociedade ? (card.pessoas || []) : [];
+        if (pessoas.length) {
+          faixa(ws, "DISTRIBUIÇÃO DOS SÓCIOS", "FFE7F6EE", "FF105436");
+          const pAcc = OrcEst.z();
+          let pJan = 0;
+          pessoas.forEach((p) => {
+            const meses = p.m || OrcEst.z();
+            meses.forEach((v, i) => { pAcc[i] += Number(v) || 0; });
+            pJan += Number(p.jan28) || 0;
+            const pct = Number(p.pct) ? " " + this.pctTxt(p.pct) : "";
+            numeros(ws, (p.nome || "Sócio") + pct, meses, p.jan28, "FFFFFFFF", false);
+          });
+          numeros(ws, "Total dos sócios", pAcc, pJan, "FF475569", true);
+        }
       });
       ws.addRow([]);
       const foot = ws.addRow([]);
@@ -2070,7 +2067,7 @@ const OrcamentoRepassesApp = {
     const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "Distribuicao-2027.xlsx";
+    a.download = "Prestacao-de-contas-2027.xlsx";
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -2114,6 +2111,21 @@ const OrcamentoRepassesApp = {
       </button>
       ${aberto ? this.dfcHtml(card) : ""}
     </section>`;
+  },
+
+  ccPagamento(id) {
+    const dig = String(id || "").replace(/\D/g, "");
+    if (dig.length < 3 || /00$/.test(dig)) return dig;
+    return dig.slice(0, -2) + "00";
+  },
+
+  cabecaPagamento(primeira) {
+    const meses = OrcEst.MESES.map((m) => `<th>${m}</th>`).join("");
+    const origens = OrcEst.MESES.map((_, i) => {
+      const de = i === 0 ? "DEZ/26" : (OrcEst.MESES[i - 1] + "/27");
+      return `<th>variação de caixa de ${de}</th>`;
+    }).join("");
+    return `<tr><th rowspan="2">${primeira}</th>${meses}<th>JAN/28</th><th rowspan="2">Total</th></tr><tr class="orc-rep-origem">${origens}<th>variação de caixa de DEZ/27</th></tr>`;
   },
 
   dfcHtml(card) {
@@ -2172,15 +2184,43 @@ const OrcamentoRepassesApp = {
       const aviso = Math.abs(card.pctPessoas - 100) > 0.05
         ? `<p class="orc-est-alerta">As participações somam ${OrcEst.esc(this.pctTxt(card.pctPessoas))}, não 100%.</p>`
         : "";
-      const quem = card.sociedade ? "Cada sócio recebe este percentual da variação." : "Cada participante recebe este percentual da variação.";
+      const quem = card.sociedade
+        ? "Cada sócio recebe este percentual da distribuição do mês seguinte."
+        : "Cada participante recebe este percentual do repasse do mês seguinte.";
       socios = `<div class="orc-rep-socios"><h4>${quem}</h4>${aviso}
-        <div class="orc-dfc-scroll"><table class="orc-dfc-table orc-est-table"><thead><tr><th>Participante</th>${head}</tr></thead><tbody>
-        ${card.pessoas.map((p) => `<tr><td>${OrcEst.esc(p.nome)} <span class="orc-rep-pct">${this.pctTxt(p.pct)}</span></td><td class="orc-rep-fc">${OrcEst.money(p.dez)}</td>${p.m.map((v) => `<td>${OrcEst.money(v)}</td>`).join("")}<td>${OrcEst.money(p.jan28)}</td><td>${OrcEst.money(this.soma(p.m))}</td></tr>`).join("")}
+        <div class="orc-dfc-scroll"><table class="orc-dfc-table orc-est-table orc-rep-quadro"><thead>${this.cabecaPagamento("Participante")}</thead><tbody>
+        ${card.pessoas.map((p) => `<tr><td>${OrcEst.esc(p.nome)} <span class="orc-rep-pct">${this.pctTxt(p.pct)}</span></td>${(p.m || []).map((v) => `<td${Number(v) < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(v)}</td>`).join("")}<td${Number(p.jan28) < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(p.jan28)}</td><td>${OrcEst.money(this.soma(p.m))}</td></tr>`).join("")}
         </tbody></table></div></div>`;
+    }
+    const centrosRep = (card.distribuicao || []).slice().sort((a, b) => String(a.id).localeCompare(String(b.id), "pt-BR", { numeric: true }));
+    const rotuloRep = card.sociedade ? "Distribuição" : "Repasse";
+    const fraseRep = card.sociedade
+      ? "A variação de caixa de um mês vira distribuição no mês seguinte."
+      : "A variação de caixa de um mês é o repasse do mês seguinte, pago no centro da obra e na conta cadastrada no centro do parceiro.";
+    let quadro = "";
+    if (centrosRep.length) {
+      const acc = OrcEst.z();
+      let janAcc = 0;
+      const corpo = centrosRep.map((r) => {
+        const meses = r.m || OrcEst.z();
+        meses.forEach((v, i) => { acc[i] += Number(v) || 0; });
+        janAcc += Number(r.jan28) || 0;
+        const pago = !card.sociedade ? this.ccPagamento(r.id) : "";
+        const nome = String(r.id) + (r.nome ? " — " + r.nome : "") + (pago && pago !== String(r.id).replace(/\D/g, "") ? " · pago no " + pago : "");
+        return `<tr><td>${OrcEst.esc(nome)}</td>${meses.map((v) => {
+          const n = Number(v) || 0;
+          return `<td${n < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(n)}</td>`;
+        }).join("")}<td${Number(r.jan28) < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(r.jan28)}</td><td>${OrcEst.money(this.soma(meses))}</td></tr>`;
+      }).join("");
+      quadro = `<div class="orc-rep-socios"><h4>${OrcEst.esc(rotuloRep)}. ${OrcEst.esc(fraseRep)}</h4>
+        <div class="orc-dfc-scroll"><table class="orc-dfc-table orc-est-table orc-rep-quadro"><thead>${this.cabecaPagamento("Centro de custo")}</thead>
+        <tbody>${corpo}</tbody>
+        <tfoot><tr><td>Total</td>${acc.map((v) => `<td${v < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(v)}</td>`).join("")}<td${janAcc < -0.004 ? " class=\"orc-dfc-neg\"" : ""}>${OrcEst.money(janAcc)}</td><td>${OrcEst.money(this.soma(acc))}</td></tr></tfoot>
+        </table></div></div>`;
     }
     return `<div class="orc-dfc-scroll"><table class="orc-dfc-table orc-est-table">
       <thead><tr><th>DFC</th>${head}</tr></thead>
       <tbody>${linhas.join("")}</tbody>
-    </table></div>${socios}`;
+    </table></div>${quadro}${socios}`;
   }
 };

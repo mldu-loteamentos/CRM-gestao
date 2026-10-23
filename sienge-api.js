@@ -3592,26 +3592,63 @@ const SiengeApiService = {
     }
   },
 
+  extrairBalancete(res) {
+    if (!res) return { lista: [], total: 0 };
+    if (Array.isArray(res)) return { lista: res, total: res.length };
+    let lista = [];
+    if (Array.isArray(res.results)) lista = res.results;
+    else if (Array.isArray(res.accounts)) lista = res.accounts;
+    else if (Array.isArray(res.data)) lista = res.data;
+    else if (res.data && Array.isArray(res.data.results)) lista = res.data.results;
+    else if (res.data && Array.isArray(res.data.accounts)) lista = res.data.accounts;
+    const total = Number(res.resultSetMetadata && res.resultSetMetadata.count);
+    return { lista: lista, total: Number.isFinite(total) ? total : lista.length };
+  },
+
+  async lerBalanceteCompleto(url) {
+    const res = await siengeFetchWithRetry(url, 2);
+    const pack = this.extrairBalancete(res);
+    if (!pack.lista.length || !(pack.total > pack.lista.length)) return pack.lista;
+    const page = pack.lista.length;
+    const tudo = pack.lista.slice();
+    let offset = page;
+    const teto = Math.min(pack.total, page * 25);
+    while (offset < teto) {
+      const sep = url.indexOf("?") >= 0 ? "&" : "?";
+      try {
+        const mais = await siengeFetchWithRetry(`${url}${sep}limit=${page}&offset=${offset}`, 2);
+        const extra = this.extrairBalancete(mais).lista;
+        if (!extra.length) break;
+        tudo.push.apply(tudo, extra);
+        offset += extra.length;
+      } catch (e) {
+        const st = Number(e && e.status);
+        if (st === 400 || st === 422) break;
+        throw e;
+      }
+    }
+    return tudo;
+  },
+
   async getTrialBalance(companyId, initialPeriod, finalPeriod) {
     const ini = String(initialPeriod || "").slice(0, 10);
     const fim = String(finalPeriod || "").slice(0, 10);
     if (!companyId || !ini || !fim) return [];
     const base = `/trial-balance?companyId=${encodeURIComponent(companyId)}&initialPeriod=${ini}&finalPeriod=${fim}`;
-    const tentativas = [base, base + "&onlyAccountsWithMovements=false"];
+    const tentativas = [base + "&onlyAccountsWithMovements=false", base];
     let ultimo = null;
     for (let i = 0; i < tentativas.length; i++) {
       try {
-        const res = await siengeFetchWithRetry(tentativas[i], 2);
-        if (Array.isArray(res)) return res;
-        const lista = (res && (res.results || res.data || res.accounts)) || [];
-        return Array.isArray(lista) ? lista : [];
+        const lista = await this.lerBalanceteCompleto(tentativas[i]);
+        if (lista.length) return lista;
       } catch (e) {
         ultimo = e;
         const st = Number(e && e.status);
         if (st && st !== 400 && st !== 422) throw e;
       }
     }
-    throw ultimo || new Error("Balancete indisponível");
+    if (ultimo) throw ultimo;
+    return [];
   },
 
   async getAccountBalances(balanceDate, opts = {}) {

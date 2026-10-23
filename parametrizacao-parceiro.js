@@ -1346,36 +1346,40 @@ const ParametrizacaoParceiroApp = {
     this.renderKeepScroll();
   },
 
-  /* Repasse sai no CC do loteador (13300). A conta é a de parceria cadastrada no CC do parceiro (13301). */
+  /* Cada centro do parceiro (13301, 13401) paga no centro da obra (13300, 13400). A conta é a do próprio 13301 ou 13401. */
   paresRepasse(p) {
     const pares = [];
+    const vistos = new Set();
     this.obrasOf(p).forEach((o) => {
       const prefix = String(o.code || "").replace(/\D/g, "");
       if (!prefix) return;
       const lista = this.centrosDaObra(prefix).filter((cc) => !p.companyId || this.empresaDoCentro(cc) === String(p.companyId));
-      const temConta = (cc) => {
-        const c = this.customCc(cc.id).conta_parceria;
-        return !!(c && (c.id || c.numero));
-      };
-      const parc = lista.find((cc) => this.ehCcParceiro(cc))
-        || lista.find((cc) => String(cc.id).replace(/\D/g, "") !== prefix + "00" && temConta(cc));
       const base = lista.find((cc) => String(cc.id).replace(/\D/g, "") === prefix + "00" && !this.ehCcParceiro(cc))
-        || lista.find((cc) => !this.ehCcParceiro(cc) && (!parc || String(cc.id) !== String(parc.id)));
-      if (base) pares.push({ base, parc });
+        || { id: prefix + "00", name: "" };
+      lista.forEach((cc) => {
+        const id = String(cc.id).replace(/\D/g, "");
+        if (!id || id === prefix + "00" || vistos.has(id)) return;
+        const conta = this.customCc(cc.id).conta_parceria;
+        const temConta = !!(conta && (conta.id || conta.numero));
+        if (!this.ehCcParceiro(cc) && !/01$/.test(id) && !temConta) return;
+        vistos.add(id);
+        pares.push({ base: base, parc: cc });
+      });
     });
     return pares;
   },
 
   textoRepasse(p) {
     const pares = this.paresRepasse(p);
+    const regra = "Na parceria o centro de custo não é informado no credor. ";
     if (!pares.length) {
-      return "O repasse é lançado no centro de custo do loteador de cada obra e pago pela conta de parceria cadastrada no centro de custo do parceiro.";
+      return regra + "A variação do centro do parceiro é paga no centro da obra, na conta cadastrada nesse centro do parceiro: 13301 no 13300, 13401 no 13400.";
     }
-    return "O repasse é lançado no centro de custo do loteador e pago pela conta de parceria do parceiro: "
-      + pares.map((x) => x.parc
-        ? x.base.id + " pela conta do " + x.parc.id
-        : String(x.base.id)).join("; ")
-      + ".";
+    return regra + pares.map((x) => {
+      const de = x.parc ? String(x.parc.id) : "";
+      const para = x.base ? String(x.base.id) : "";
+      return "A variação do " + de + " é paga no " + para + ", na conta cadastrada no " + de;
+    }).join(". ") + ".";
   },
 
   fecharVinculo() {
@@ -2569,7 +2573,7 @@ const ParametrizacaoParceiroApp = {
                 ? "Sociedade: não aplica rateio por obra. Cada sócio tem um percentual de participação e recebe pela distribuição de lucro."
                 : (p.kind === "mista"
                   ? "Mista: há um parceiro terrenista, com rateio por obra, e o empreendedor pode ter sócios. O centro de custo dos sócios empreendedores é cadastrado à parte do centro do terrenista."
-                  : "Parceria: pode ter vários parceiros, cada um com o seu percentual, como os sócios. O rateio por obra continua na aba Rateio DFC.")}
+                  : "Parceria: pode ter vários parceiros, cada um com o seu percentual, como os sócios. O rateio por obra continua na aba Rateio DFC. O centro de custo não entra no credor: a variação do 13301 é paga no 13300, na conta cadastrada no 13301, e a do 13401 no 13400, na conta do 13401.")}
             </p>
           </div>
         </div>
@@ -2681,7 +2685,7 @@ const ParametrizacaoParceiroApp = {
             ? `Clique no ${pessoa} para ver a participação, o centro de custo, os planos e a conta.`
             : (this.isMista(p)
               ? "Clique no sócio empreendedor para informar a participação, o centro de custo dele, o plano e o documento. O parceiro terrenista continua no rateio da obra."
-              : `Clique no ${pessoa} para ver o plano financeiro e o tipo de documento. O percentual fica na obra e o centro de custo é o do loteador.`))}</p>
+              : `Clique no ${pessoa} para ver o plano financeiro e o tipo de documento. O percentual fica na obra. O centro de custo não é informado neste credor.`))}</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
           <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;min-width:120px;">
             <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;">${pessoas}</div>

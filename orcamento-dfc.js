@@ -1024,13 +1024,45 @@ const OrcamentoDfcApp = {
     return n;
   },
 
-  linhaBalancete(b) {
-    const codigo = String(b.accountId || b.account || b.code || "").trim();
-    const nome = String(b.accountName || b.name || b.description || b.accountDescription || codigo).trim();
-    const temAnterior = b.previousBalance != null && b.previousBalance !== "";
-    const bruto = temAnterior ? b.previousBalance : (b.balanceCarriedForward != null ? b.balanceCarriedForward : b.balance);
-    const tipo = temAnterior ? (b.previousBalanceType || b.balanceType) : (b.balanceCarriedForwardType || b.balanceType);
-    return { codigo: codigo, nome: nome, valor: this.sinalBalancete(bruto, tipo) };
+  /* Mês que termina na data do saldo: o saldo final é o saldo de fechamento desse dia. */
+  periodoDoSaldo(iso) {
+    const p = String(iso || "").slice(0, 10).split("-");
+    if (p.length < 3 || !p[0] || !p[1]) return { ini: String(iso || "").slice(0, 10), fim: String(iso || "").slice(0, 10) };
+    return { ini: p[0] + "-" + p[1] + "-01", fim: p[0] + "-" + p[1] + "-" + p[2] };
+  },
+
+  linhaBalancete(b, fechamento) {
+    if (!b || typeof b !== "object") return { codigo: "", nome: "", valor: null };
+    const conta = b.account && typeof b.account === "object" ? b.account : null;
+    const codigo = String(
+      b.accountId ||
+      (conta && (conta.id || conta.code || conta.accountId)) ||
+      (typeof b.account === "string" ? b.account : "") ||
+      b.code || ""
+    ).trim();
+    const nome = String(
+      b.accountName ||
+      (conta && (conta.name || conta.description || conta.accountName)) ||
+      b.name || b.description || b.accountDescription || codigo
+    ).trim();
+    let valor = null;
+    if (fechamento) {
+      if (b.balance != null && b.balance !== "") valor = this.sinalBalancete(b.balance, b.balanceType);
+      else if (b.balanceCarriedForward != null && b.balanceCarriedForward !== "") {
+        valor = this.sinalBalancete(b.balanceCarriedForward, b.balanceCarriedForwardType || b.balanceType);
+      } else {
+        const ant = this.sinalBalancete(b.previousBalance, b.previousBalanceType);
+        const deb = Number(b.debitBalance != null ? b.debitBalance : b.debit);
+        const cred = Number(b.creditBalance != null ? b.creditBalance : b.credit);
+        if (ant != null) valor = ant + (Number.isFinite(deb) ? deb : 0) - (Number.isFinite(cred) ? cred : 0);
+      }
+    } else {
+      const temAnterior = b.previousBalance != null && b.previousBalance !== "";
+      const bruto = temAnterior ? b.previousBalance : (b.balanceCarriedForward != null ? b.balanceCarriedForward : b.balance);
+      const tipo = temAnterior ? (b.previousBalanceType || b.balanceType) : (b.balanceCarriedForwardType || b.balanceType);
+      valor = this.sinalBalancete(bruto, tipo);
+    }
+    return { codigo: codigo, nome: nome, valor: valor };
   },
 
   contasEscolhidas() {
@@ -1072,6 +1104,7 @@ const OrcamentoDfcApp = {
       this._saldoEstado = "vazio";
       this._saldoContas = [];
       this._saldoMap = {};
+      this.atualizarSaldosDom();
       return;
     }
     if (!api || typeof api.getTrialBalance !== "function") {
@@ -1095,17 +1128,17 @@ const OrcamentoDfcApp = {
       const worker = async () => {
         while (cursor < jobs.length) {
           const job = jobs[cursor++];
-          const diaPedido = self.diaSeguinte(job.dt);
+          const per = self.periodoDoSaldo(job.dt);
           let lista = [];
           try {
-            lista = await api.getTrialBalance(job.emp, diaPedido, diaPedido);
+            lista = await api.getTrialBalance(job.emp, per.ini, per.fim);
           } catch (e) {
             falha = e;
             continue;
           }
           const dia = mapa[job.dt] || (mapa[job.dt] = {});
           (lista || []).forEach((b) => {
-            const linha = self.linhaBalancete(b);
+            const linha = self.linhaBalancete(b, true);
             if (!linha.codigo || linha.valor == null) return;
             const k = job.emp + "|" + linha.codigo;
             dia[k] = linha.valor;
@@ -1193,6 +1226,9 @@ const OrcamentoDfcApp = {
     }
     if (this._saldoEstado === "erro") {
       return `<tr class="orc-dfc-saldo"><td colspan="${span}">${this.esc(this._saldoErro || "Não consegui ler o saldo das contas.")}</td></tr>`;
+    }
+    if (this._saldoEstado === "vazio") {
+      return `<tr class="orc-dfc-saldo"><td colspan="${span}">O balancete não devolveu o saldo de caixa no fim do mês.</td></tr>`;
     }
     if (this._saldoEstado !== "ok" || corte <= 0) return "";
     const vazio = `<td class="orc-dfc-sep">—</td><td></td><td></td><td></td>`;
