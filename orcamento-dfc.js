@@ -11,6 +11,9 @@ const OrcamentoDfcApp = {
   ccQuery: "",
   expanded: new Set(),
   _expandInited: false,
+  expanded2: new Set(),
+  _expand2Inited: false,
+  visao: "1",
   _custom: null,
   _pronto: false,
   busy: false,
@@ -462,6 +465,7 @@ const OrcamentoDfcApp = {
     const ccWant = row.drillCc ? (String(row.drillCc).replace(/\D/g, "") || String(row.drillCc)) : "";
     return this.itens2026().filter((it) => {
       if (emp.size && !emp.has(String(it.companyId || ""))) return false;
+      if (row.drillEmp && String(it.companyId || "") !== String(row.drillEmp)) return false;
       if (!this.ccCabe(it.costCenterId)) return false;
       if (!gids.has(it.nodeId)) return false;
       if (mesIdx == null) {
@@ -856,9 +860,325 @@ const OrcamentoDfcApp = {
   },
 
   toggle(id) {
-    if (this.expanded.has(id)) this.expanded.delete(id);
-    else this.expanded.add(id);
+    const set = this.visao === "2" ? this.expanded2 : this.expanded;
+    if (set.has(id)) set.delete(id);
+    else set.add(id);
     this.paintBody();
+  },
+
+  setVisao(id) {
+    this.visao = id === "2" ? "2" : "1";
+    const root = document.querySelector(".orc-dfc-page");
+    if (root) {
+      root.querySelectorAll("[data-dfc-visao]").forEach((btn) => {
+        const on = btn.getAttribute("data-dfc-visao") === this.visao;
+        btn.classList.toggle("is-active", on);
+        btn.setAttribute("aria-selected", on ? "true" : "false");
+      });
+    }
+    this.paintBody();
+  },
+
+  /* Visão 2: grupo do DFC, empresa, centro de custo, linha (venda de imóveis) e plano financeiro. */
+  montarVisao2(opts) {
+    const aberto = !!(opts && opts.aberto);
+    const fluxo = typeof FluxoCaixaApp !== "undefined" ? FluxoCaixaApp : null;
+    const plano = typeof PlanoFinanceiroApp !== "undefined" ? PlanoFinanceiroApp : null;
+    const corte = this.corteForecast();
+    this._corte = corte;
+    const tpl = (plano && typeof plano.dfcTemplateGroups === "function" ? plano.dfcTemplateGroups() : []).map((g) => ({
+      ...g,
+      months: Array(12).fill(0),
+      base: Array(12).fill(0)
+    }));
+    const byId = {};
+    tpl.forEach((g) => { byId[g.id] = g; });
+    const z = () => Array(12).fill(0);
+    const folhas = new Map();
+    const fora = new Map();
+    const empNomes = new Map();
+    const ccNomes = new Map();
+    const contaNomes = new Map();
+    this.empresas().forEach((e) => empNomes.set(String(e.id), String(e.name || "")));
+    const ccIdDe = (cc) => {
+      const bruto = String(cc == null ? "" : cc).trim();
+      const dig = bruto.replace(/\D/g, "");
+      return dig || bruto || "—";
+    };
+    const folha = (gid, emp, cc, conta) => {
+      const k = gid + "\n" + emp + "\n" + cc + "\n" + conta;
+      let f = folhas.get(k);
+      if (!f) {
+        f = { gid: gid, emp: emp, cc: cc, conta: conta, months: z(), base: z() };
+        folhas.set(k, f);
+      }
+      return f;
+    };
+    const vivo = (m, b) => (m || []).some((v) => Math.abs(Number(v) || 0) >= 0.005) || (b || []).some((v) => Math.abs(Number(v) || 0) >= 0.005);
+    this.linhasFiltradas().forEach((l) => {
+      const gid = this.grupoDaConta(l.conta, l.cn);
+      const g = gid ? byId[gid] : null;
+      if (!g || g.type !== "resultado") {
+        const key = String(l.conta || "") + "|" + String(l.cn || "");
+        const cur = fora.get(key) || { conta: l.conta, cn: l.cn, total: 0 };
+        (l.m || []).forEach((v) => { cur.total += Number(v) || 0; });
+        fora.set(key, cur);
+        return;
+      }
+      const emp = String(l.e || "");
+      const cc = ccIdDe(l.cc);
+      const conta = String(l.conta || "");
+      if (l.enome) empNomes.set(emp, String(l.enome).trim());
+      if (l.en) ccNomes.set(cc, String(l.en).trim());
+      if (l.cn) contaNomes.set(conta, String(l.cn).trim());
+      const f = folha(gid, emp, cc, conta);
+      (l.m || []).forEach((v, i) => {
+        if (i > 11) return;
+        const s = fluxo && typeof fluxo.signedAmount === "function"
+          ? fluxo.signedAmount(g, l.conta, l.cn, v)
+          : (Number(v) || 0);
+        f.months[i] += s;
+        g.months[i] += s;
+      });
+    });
+    const empFiltro = new Set(this.selectedCompanyIds.map(String));
+    (this._lancamentos2026 || []).forEach((c) => {
+      const emp = String(c.companyId || "");
+      if (empFiltro.size && !empFiltro.has(emp)) return;
+      if (!this.ccCabe(c.cc)) return;
+      const g = byId[c.gid];
+      if (!g || g.type !== "resultado") return;
+      const cc = ccIdDe(c.cc);
+      const conta = String(c.code || "");
+      const f = folha(c.gid, emp, cc, conta);
+      const i = Number(c.i);
+      if (i >= 0 && i < 12) {
+        f.base[i] += Number(c.v) || 0;
+        g.base[i] += Number(c.v) || 0;
+      }
+    });
+    const app = window.ResultadoCaixaApp;
+    const forecasts = (app && app.forecasts) || {};
+    for (let i = corte; i < 12; i++) {
+      const ym = "2026-" + String(i + 1).padStart(2, "0");
+      const doc = forecasts[ym];
+      if (!doc) continue;
+      const lista = [];
+      const porArq = doc.porArquivo;
+      if (porArq && typeof porArq === "object" && !Array.isArray(porArq) && Object.keys(porArq).length) {
+        Object.keys(porArq).forEach((nome) => lista.push(porArq[nome]));
+      } else if (doc.contas) lista.push(doc);
+      lista.forEach((arq) => {
+        if (!this.empresaCabe(arq)) return;
+        const emp = this.empresaDoArquivo(arq);
+        Object.keys(arq.contas || {}).forEach((ccRaw) => {
+          if (!this.ccCabe(ccRaw)) return;
+          const cc = ccIdDe(ccRaw);
+          Object.keys(arq.contas[ccRaw] || {}).forEach((code) => {
+            const info = arq.contas[ccRaw][code] || {};
+            const gid = this.grupoDaConta(code, info.nome);
+            const g = gid ? byId[gid] : null;
+            if (!g || g.type !== "resultado") return;
+            const meses = info.meses || {};
+            let valor = Number(meses[ym]);
+            if (!Number.isFinite(valor)) {
+              const cel = meses[ym] || meses[String(i + 1)];
+              valor = cel && typeof cel === "object" ? Number(cel.r != null ? cel.r : cel.o) : Number(cel);
+            }
+            valor = Number(valor) || 0;
+            if (valor && fluxo && typeof fluxo.signedAmount === "function") valor = fluxo.signedAmount(g, code, info.nome || "", valor);
+            if (!valor) return;
+            if (info.nome) contaNomes.set(String(code), String(info.nome));
+            const f = folha(gid, emp, cc, String(code));
+            f.base[i] += valor;
+            g.base[i] += valor;
+          });
+        });
+      });
+    }
+    const depth = (g) => {
+      let d = 0;
+      let cur = g;
+      while (cur && cur.parentId && byId[cur.parentId]) {
+        d += 1;
+        cur = byId[cur.parentId];
+      }
+      return d;
+    };
+    tpl.filter((g) => g.type !== "formula").sort((a, b) => depth(b) - depth(a)).forEach((g) => {
+      tpl.filter((c) => c.parentId === g.id && c.type !== "formula").forEach((ch) => {
+        ch.months.forEach((v, i) => { g.months[i] += v; });
+        ch.base.forEach((v, i) => { g.base[i] += v; });
+      });
+    });
+    const sum = (ids, campo) => {
+      const months = z();
+      ids.forEach((id) => {
+        const n = byId[id];
+        if (!n) return;
+        (n[campo] || []).forEach((v, i) => { months[i] += v; });
+      });
+      return months;
+    };
+    const apply = (id, parts) => {
+      if (!byId[id]) return;
+      byId[id].months = sum(parts, "months");
+      byId[id].base = sum(parts, "base");
+    };
+    apply("g_03", ["g_04", "g_05"]);
+    apply("g_06", ["g_01", "g_02", "g_03"]);
+    apply("g_08", ["g_06", "g_07"]);
+    apply("g_10", ["g_08", "g_09"]);
+    apply("g_12", ["g_10", "g_11"]);
+    if (!this._expand2Inited) {
+      tpl.filter((g) => !g.parentId && g.type !== "formula").forEach((g) => this.expanded2.add(g.id));
+      this._expand2Inited = true;
+    }
+    const lista = [...folhas.values()];
+    const somaDe = (itens, campo) => {
+      const m = z();
+      itens.forEach((f) => (f[campo] || []).forEach((v, i) => { m[i] += Number(v) || 0; }));
+      return m;
+    };
+    const tot = (m) => (m || []).reduce((a, b) => a + (Number(b) || 0), 0);
+    const ordEmp = (a, b) => {
+      const na = Number(a);
+      const nb = Number(b);
+      if (Number.isFinite(na) && Number.isFinite(nb) && String(na) === a && String(nb) === b) return na - nb;
+      return String(a).localeCompare(String(b), "pt-BR", { numeric: true });
+    };
+    const rows = [];
+    const linhaDe = (parcial) => {
+      const months = parcial.months;
+      const baseMeses = parcial.base;
+      rows.push(Object.assign({
+        months: months,
+        base: baseMeses,
+        total: tot(months),
+        baseTotal: tot(baseMeses),
+        isAccount: false,
+        isCc: false
+      }, parcial));
+    };
+    tpl.filter((g) => !g.parentId).forEach((raiz) => {
+      const formula = raiz.type === "formula";
+      const alvos = raiz.type === "resultado"
+        ? [raiz]
+        : tpl.filter((g) => g.parentId === raiz.id && g.type === "resultado");
+      const doGrupo = formula ? [] : lista.filter((f) => alvos.some((a) => a.id === f.gid) && vivo(f.months, f.base));
+      linhaDe({
+        id: raiz.id,
+        name: raiz.name,
+        type: raiz.type,
+        kind: formula ? "formula" : "grupo",
+        level: 0,
+        hasKids: doGrupo.length > 0,
+        months: raiz.months,
+        base: raiz.base,
+        drillGid: raiz.id,
+        drillConta: "",
+        drillCc: "",
+        drillEmp: ""
+      });
+      if (formula || !doGrupo.length) return;
+      if (!aberto && !this.expanded2.has(raiz.id)) return;
+      const emps = [...new Set(doGrupo.map((f) => f.emp))].sort(ordEmp);
+      emps.forEach((emp) => {
+        const daEmp = doGrupo.filter((f) => f.emp === emp);
+        const empId = raiz.id + "|e|" + emp;
+        const nomeEmp = empNomes.get(emp) || "";
+        linhaDe({
+          id: empId,
+          name: (emp ? emp + " - " : "") + (nomeEmp || "Sem empresa"),
+          type: "empresa",
+          kind: "empresa",
+          level: 1,
+          hasKids: true,
+          months: somaDe(daEmp, "months"),
+          base: somaDe(daEmp, "base"),
+          drillGid: raiz.id,
+          drillConta: "",
+          drillCc: "",
+          drillEmp: emp
+        });
+        if (!aberto && !this.expanded2.has(empId)) return;
+        const ccs = [...new Set(daEmp.map((f) => f.cc))].sort((a, b) => String(a).localeCompare(String(b), "pt-BR", { numeric: true }));
+        ccs.forEach((cc) => {
+          const doCc = daEmp.filter((f) => f.cc === cc);
+          const ccId = empId + "|c|" + cc;
+          const nomeCc = ccNomes.get(cc) || "";
+          const rotuloCc = cc === "—" ? "Sem centro de custo" : (nomeCc ? cc + " - " + nomeCc : cc);
+          const comLinha = raiz.type !== "resultado";
+          linhaDe({
+            id: ccId,
+            name: rotuloCc,
+            type: "cc",
+            kind: "cc",
+            level: 2,
+            hasKids: true,
+            isCc: true,
+            months: somaDe(doCc, "months"),
+            base: somaDe(doCc, "base"),
+            drillGid: raiz.id,
+            drillConta: "",
+            drillCc: cc,
+            drillEmp: emp
+          });
+          if (!aberto && !this.expanded2.has(ccId)) return;
+          const pintarConta = (paiId, gid, itens, level) => {
+            const contas = [...new Set(itens.map((f) => f.conta))].sort((a, b) => String(a).localeCompare(String(b), "pt-BR", { numeric: true }));
+            contas.forEach((conta) => {
+              const daConta = itens.filter((f) => f.conta === conta);
+              const nomeConta = contaNomes.get(conta) || "";
+              linhaDe({
+                id: paiId + "|a|" + conta,
+                name: conta + (nomeConta ? " " + nomeConta : ""),
+                type: "conta",
+                kind: "conta",
+                level: level,
+                hasKids: false,
+                isAccount: true,
+                months: somaDe(daConta, "months"),
+                base: somaDe(daConta, "base"),
+                drillGid: gid,
+                drillConta: conta,
+                drillCc: cc,
+                drillEmp: emp
+              });
+            });
+          };
+          if (!comLinha) {
+            pintarConta(ccId, raiz.id, doCc, 3);
+            return;
+          }
+          alvos.forEach((linha) => {
+            const daLinha = doCc.filter((f) => f.gid === linha.id);
+            if (!daLinha.length) return;
+            const linId = ccId + "|l|" + linha.id;
+            linhaDe({
+              id: linId,
+              name: linha.name,
+              type: "resultado",
+              kind: "linha",
+              level: 3,
+              hasKids: true,
+              months: somaDe(daLinha, "months"),
+              base: somaDe(daLinha, "base"),
+              drillGid: linha.id,
+              drillConta: "",
+              drillCc: cc,
+              drillEmp: emp
+            });
+            if (!aberto && !this.expanded2.has(linId)) return;
+            pintarConta(linId, linha.id, daLinha, 4);
+          });
+        });
+      });
+    });
+    const foraLista = [...fora.values()]
+      .filter((x) => Math.abs(x.total) >= 0.005)
+      .sort((a, b) => String(a.conta).localeCompare(String(b.conta), "pt-BR", { numeric: true }));
+    return { rows: rows, fora: foraLista };
   },
 
   render(root) {
@@ -868,6 +1188,10 @@ const OrcamentoDfcApp = {
       <div class="orc-dfc-page">
         ${typeof OrcamentoApp !== "undefined" ? OrcamentoApp.abasHtml() : ""}
         <p class="orc-dfc-lead">Janeiro a dezembro de 2026, o total, e depois janeiro a dezembro de 2027. A variação ao lado de cada mês de 2027 compara com o mesmo mês de 2026. O saldo final de 2026 é o saldo inicial de janeiro de 2027, e cada mês seguinte parte do saldo final do anterior. ${this.textoCorte()} O realizado vem do caixa e banco.</p>
+        <div class="ml-tabs orc-dfc-visao" role="tablist">
+          <button type="button" role="tab" class="ml-tab${this.visao === "2" ? "" : " is-active"}" data-dfc-visao="1" aria-selected="${this.visao === "2" ? "false" : "true"}"><i data-lucide="table-2"></i> Visão 1</button>
+          <button type="button" role="tab" class="ml-tab${this.visao === "2" ? " is-active" : ""}" data-dfc-visao="2" aria-selected="${this.visao === "2" ? "true" : "false"}"><i data-lucide="building-2"></i> Visão 2</button>
+        </div>
         <div class="orc-dfc-tools">
           <div id="orc-dfc-emp-box"></div>
           <div id="orc-dfc-cc-box"></div>
@@ -916,6 +1240,9 @@ const OrcamentoDfcApp = {
     const varPct = document.getElementById("orc-dfc-var-pct");
     if (varRs) varRs.addEventListener("change", () => { this.varRs = !!varRs.checked; this.paintBody(); });
     if (varPct) varPct.addEventListener("change", () => { this.varPct = !!varPct.checked; this.paintBody(); });
+    root.querySelectorAll("[data-dfc-visao]").forEach((btn) => {
+      btn.addEventListener("click", () => this.setVisao(btn.getAttribute("data-dfc-visao")));
+    });
     if (window.lucide && lucide.createIcons) lucide.createIcons();
     this.carregarBase();
   },
@@ -1758,7 +2085,7 @@ const OrcamentoDfcApp = {
       if (foraEl) foraEl.innerHTML = "";
       return;
     }
-    const { rows, fora } = this.montar();
+    const { rows, fora } = this.visao === "2" ? this.montarVisao2() : this.montar();
     this._linhasDfc = rows;
     const corte = this._corte == null ? this.corteForecast() : this._corte;
     const extras = (this.varRs ? `<th class="orc-dfc-vcol">Var R$</th>` : "") + (this.varPct ? `<th class="orc-dfc-vcol">Var %</th>` : "");
@@ -1770,6 +2097,8 @@ const OrcamentoDfcApp = {
       const cls = [
         r.isAccount ? "orc-dfc-acc" : "",
         r.isCc ? "orc-dfc-cc" : "",
+        r.kind === "empresa" ? "orc-dfc-emp2" : "",
+        r.kind === "linha" ? "orc-dfc-linha2" : "",
         r.type === "formula" ? "orc-dfc-formula" : "",
         r.type === "total_n1" ? "orc-dfc-n1" : "",
         r.id === "g_08" ? "orc-dfc-fcf" : "",
@@ -1812,9 +2141,13 @@ const OrcamentoDfcApp = {
     else if (this._caixaEstado === "vazio") avisoBase = `<div class="orc-dfc-erro">O caixa e banco não devolveu movimento realizado em 2026 para essas empresas.</div>`;
     else if (this._caixaAviso) avisoBase = `<div class="orc-dfc-erro">${this.esc(this._caixaAviso)}</div>`;
     const aviso = this.erro ? `<div class="orc-dfc-erro">${this.esc(this.erro)}</div>` : "";
+    const notaVisao = this.visao === "2"
+      ? `<p class="orc-dfc-lead">Visão 2: cada grupo abre nas empresas. Centro de custo, linha do DFC e plano financeiro abrem no clique.</p>`
+      : "";
     body.innerHTML = `
       ${aviso}
       ${avisoBase}
+      ${notaVisao}
       <div class="orc-dfc-scroll">
         <table class="orc-dfc-table orc-dfc-cmp">
           <thead><tr><th rowspan="2">Conta</th>${h1}</tr><tr>${h2}</tr></thead>
@@ -1995,9 +2328,11 @@ const OrcamentoDfcApp = {
     ws.getRow(2).height = 22;
     ws.getRow(3).height = 8;
     ws.getRow(4).height = 20;
-    const sub = opts.varias
+    const sub = opts.visao2
+      ? ("Visão 2 · grupo, empresa, centro de custo, linha do DFC e plano financeiro. " + this.textoCorte())
+      : (opts.varias
       ? (opts.empresa.id + " - " + (opts.empresa.name || ""))
-      : ("Orçamento 2027 contra o DFC de 2026 · " + this.textoCorte());
+      : ("Orçamento 2027 contra o DFC de 2026 · " + this.textoCorte()));
     const title = ws.getCell("A1");
     title.value = {
       richText: [
@@ -2059,10 +2394,12 @@ const OrcamentoDfcApp = {
       let fill = "FFFFFFFF";
       let fontColor = "FF0F172A";
       let bold = false;
-      if (r.type === "total_n1" || r.level === 0) { fill = "FF0C3D28"; fontColor = "FFFFFFFF"; bold = true; }
-      else if (r.type === "formula") { fill = "FFECFDF5"; fontColor = "FF064E3B"; bold = true; }
-      else if (r.isAccount) { fill = "FFF8FAFC"; bold = true; }
-      else if (r.isCc) { fill = "FFE7F6EE"; fontColor = "FF105436"; }
+      if (r.kind === "empresa") { fill = "FF0C3D28"; fontColor = "FFFFFFFF"; bold = true; }
+      else if (r.kind === "cc" || r.isCc) { fill = "FFE7F6EE"; fontColor = "FF105436"; bold = true; }
+      else if (r.kind === "linha") { fill = "FFECFDF5"; fontColor = "FF064E3B"; bold = true; }
+      else if (r.kind === "conta" || r.isAccount) { fill = "FFF8FAFC"; bold = true; }
+      else if (r.type === "total_n1" || r.kind === "grupo" || r.level === 0) { fill = "FF0C3D28"; fontColor = "FFFFFFFF"; bold = true; }
+      else if (r.type === "formula" || r.kind === "formula") { fill = "FFECFDF5"; fontColor = "FF064E3B"; bold = true; }
       valores.forEach((v, i) => {
         const cell = linha.getCell(i + 1);
         const kind = kinds[i] || "text";
@@ -2114,7 +2451,11 @@ const OrcamentoDfcApp = {
     try { logo = await inv.logoDataUrl(); } catch (e) { logo = null; }
     const prev = this.selectedCompanyIds.slice();
     try {
-      for (let i = 0; i < (todas ? empresas.length : 1); i++) {
+      if (this.visao === "2") {
+        const pack = this.montarVisao2({ aberto: true });
+        const ws = wb.addWorksheet(this.nomeAba("DFC", "visao 2", used), { views: [{ showGridLines: false }] });
+        this.preencherDfc(ws, inv, { empresa: { id: "", name: "Visão 2" }, rows: pack.rows, varias: false, visao2: true, logo: logo });
+      } else for (let i = 0; i < (todas ? empresas.length : 1); i++) {
         if (todas) this.selectedCompanyIds = [String(empresas[i].id)];
         const pack = this.montar({ aberto: true });
         const alvo = todas ? empresas[i] : alvos[0];
@@ -2130,7 +2471,7 @@ const OrcamentoDfcApp = {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     const fim = (this.fimRealizado2026() || "2026").replace(/-/g, "");
-    a.download = "DFC-2027-" + fim + ".xlsx";
+    a.download = "DFC-2027-" + (this.visao === "2" ? "visao-2-" : "") + fim + ".xlsx";
     document.body.appendChild(a);
     a.click();
     a.remove();
