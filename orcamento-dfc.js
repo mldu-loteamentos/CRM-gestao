@@ -829,6 +829,122 @@ const OrcamentoDfcApp = {
     return null;
   },
 
+  async garantirMovimentosAbertura() {
+    const fluxo = window.FluxoCaixaApp;
+    const empresas = this.selectedCompanyIds.map(String).filter(Boolean);
+    if (!fluxo || typeof fluxo.buscarMovimentos !== "function") return;
+    if (!empresas.length || empresas.length > 4) return;
+    const fim = this.fimRealizado2026();
+    if (!fim) return;
+    const inicio = "2026-01-01";
+    const reuso = this.movimentosReusados(fluxo, empresas, inicio, fim);
+    const ja = new Set((this._movs2026 || []).map((m) => String((m && m.companyId) || "")));
+    this._abPedido = this._abPedido || new Set();
+    const faltam = empresas.filter((id) => !reuso.ids.has(id) && !ja.has(id) && !this._abPedido.has(id));
+    if (!faltam.length) return;
+    faltam.forEach((id) => this._abPedido.add(id));
+    const novos = await fluxo.buscarMovimentos(inicio, fim, faltam);
+    const ainda = new Set((this._movs2026 || []).map((m) => String((m && m.companyId) || "")));
+    this._movs2026 = (this._movs2026 || []).concat((novos || []).filter((m) => !ainda.has(String((m && m.companyId) || ""))));
+    this._abChave = "";
+  },
+
+  alocsDaAbertura() {
+    const fluxo = window.FluxoCaixaApp;
+    if (!fluxo || typeof fluxo.allocate !== "function") return [];
+    const fim = this.fimRealizado2026();
+    const inicio = "2026-01-01";
+    if (!fim) return [];
+    const empresas = (this.selectedCompanyIds.length ? this.selectedCompanyIds : this.empresas().map((e) => e.id)).map(String);
+    const marca = String((fluxo.movements || []).length) + ":" + String((this._movs2026 || []).length);
+    const chave = empresas.slice().sort().join(",") + "|" + fim + "|" + (this.selectedCcIds || []).join(",") + "|" + marca;
+    if (this._abChave === chave && Array.isArray(this._abAllocs)) return this._abAllocs;
+    let movs = [];
+    const reuso = this.movimentosReusados(fluxo, empresas, inicio, fim);
+    const ccDoCaixa = typeof fluxo.costCenterFilterSet === "function" ? fluxo.costCenterFilterSet() : null;
+    if (reuso.ids.size === empresas.length && !ccDoCaixa && Array.isArray(fluxo.lastAllocs) && fluxo.lastAllocs.length) {
+      const want = new Set(empresas);
+      this._abChave = chave;
+      this._abAllocs = fluxo.lastAllocs.filter((a) => a && want.has(String(a.companyId || "")));
+      return this._abAllocs;
+    }
+    if (reuso.ids.size === empresas.length) movs = reuso.movs || [];
+    else if (Array.isArray(this._movs2026) && this._movs2026.length) {
+      const want = new Set(empresas);
+      const tem = new Set(this._movs2026.map((m) => String((m && m.companyId) || "")));
+      if (!empresas.every((id) => tem.has(id))) return [];
+      movs = this._movs2026.filter((m) => want.has(String((m && m.companyId) || "")));
+    }
+    if (!movs.length) return [];
+    const allocs = [];
+    movs.forEach((mov) => {
+      const factor = typeof fluxo.factorForCompany === "function" ? fluxo.factorForCompany(mov.companyId) : 1;
+      if (!(factor > 0)) return;
+      const lista = fluxo.allocate(mov, factor) || [];
+      for (let i = 0; i < lista.length; i++) if (lista[i]) allocs.push(lista[i]);
+    });
+    this._abChave = chave;
+    this._abAllocs = allocs;
+    return allocs;
+  },
+
+  aplicarAbertura(byId, corte, fluxo) {
+    const allocs = this.alocsDaAbertura();
+    if (!allocs.length || !(corte > 0) || !fluxo) return;
+    Object.keys(byId).forEach((id) => {
+      const g = byId[id];
+      if (!g || !g.accs) return;
+      g.accs.forEach((acc) => {
+        for (let i = 0; i < corte; i++) acc.base[i] = 0;
+        acc.ccs.forEach((cc) => { for (let i = 0; i < corte; i++) cc.base[i] = 0; });
+      });
+    });
+    allocs.forEach((a) => {
+      const gid = this.grupoDaConta(a.categoryId, a.categoryName);
+      const g = gid && byId[gid];
+      if (!g || g.type !== "resultado") return;
+      const i = Number(String(a.month || "").slice(5, 7)) - 1;
+      if (!(i >= 0) || i >= corte) return;
+      const bruto = typeof fluxo.ccIdOf === "function" ? fluxo.ccIdOf(a.costCenterId) : "";
+      const ccId = bruto ? this.ccNorm(bruto) : "—";
+      if (!this.ccCabe(ccId)) return;
+      const valor = typeof fluxo.signedAmount === "function"
+        ? fluxo.signedAmount(g, a.categoryId, a.categoryName, a.amount, a.reducer, a.categoryType, a.mov)
+        : (Number(a.amount) || 0);
+      if (!valor) return;
+      const code = (typeof fluxo.formatAccountCode === "function" && fluxo.formatAccountCode(a.categoryId)) || String(a.categoryId || "");
+      const dig = String(code).replace(/\D/g, "");
+      if (!dig) return;
+      let acc = null;
+      g.accs.forEach((item) => {
+        if (String(item.conta || "").replace(/\D/g, "") === dig) acc = item;
+      });
+      if (!acc) {
+        acc = {
+          conta: code,
+          cn: String(a.categoryName || "").trim(),
+          months: Array(12).fill(0),
+          base: Array(12).fill(0),
+          ccs: new Map()
+        };
+        g.accs.set(code, acc);
+      } else if (!acc.cn && a.categoryName) {
+        acc.cn = String(a.categoryName).trim();
+      }
+      let cc = null;
+      acc.ccs.forEach((c) => { if (this.ccNorm(c.id) === ccId) cc = c; });
+      if (!cc) {
+        const nome = String(a.costCenterName || "").replace(/^\d+\s*-\s*/, "").trim();
+        cc = { id: ccId, name: nome || this.nomeCentro(ccId), months: Array(12).fill(0), base: Array(12).fill(0) };
+        acc.ccs.set(ccId, cc);
+      } else if (!cc.name && a.costCenterName) {
+        cc.name = String(a.costCenterName).replace(/^\d+\s*-\s*/, "").trim();
+      }
+      cc.base[i] += valor;
+      acc.base[i] += valor;
+    });
+  },
+
   montar(opts) {
     const aberto = !!(opts && opts.aberto);
     const plano = typeof PlanoFinanceiroApp !== "undefined" ? PlanoFinanceiroApp : null;
@@ -932,6 +1048,7 @@ const OrcamentoDfcApp = {
       }
       cc.base = base.ccs[key].slice();
     });
+    this.aplicarAbertura(byId, base.corte, fluxo);
 
     const depth = (g) => {
       let d = 0;
@@ -1013,7 +1130,12 @@ const OrcamentoDfcApp = {
         const accId = "acc:" + node.id + ":" + a.conta;
         const ccs = [...(a.ccs ? a.ccs.values() : [])]
           .filter((c) => c.months.some((v) => Math.abs(v) >= 0.005) || (c.base || []).some((v) => Math.abs(Number(v) || 0) >= 0.005))
-          .sort((x, y) => String(x.id).localeCompare(String(y.id), "pt-BR", { numeric: true }));
+          .sort((x, y) => {
+            const peso = (c) => (c.base || []).reduce((s, v) => s + Math.abs(Number(v) || 0), 0);
+            const diff = peso(y) - peso(x);
+            if (Math.abs(diff) >= 0.005) return diff;
+            return String(x.id).localeCompare(String(y.id), "pt-BR", { numeric: true });
+          });
         rows.push({
           id: accId,
           name: a.conta + " " + (a.cn || ""),
@@ -1540,6 +1662,9 @@ const OrcamentoDfcApp = {
       this._caixaEstado = "erro";
       this._caixaErro = (e && e.message) || "Falha ao ler o realizado de 2026 no caixa e banco.";
     }
+    if (token !== this._bToken) return;
+    if (document.getElementById("orc-dfc-body")) this.paintBody();
+    try { await this.garantirMovimentosAbertura(); } catch (e) {}
     if (token !== this._bToken) return;
     if (document.getElementById("orc-dfc-body")) this.paintBody();
     const nuvemP = this.lerOrcamentoNuvem(token);
