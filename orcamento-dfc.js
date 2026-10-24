@@ -944,25 +944,19 @@ const OrcamentoDfcApp = {
     };
     tpl.forEach((g) => {
       if (g.type !== "resultado" || !base.grupos[g.id]) return;
-      // 04.01 só fecha no repasse que aparece na linha. O realizado do grupo
-      // também traz adiantamento, mútuo e contas sem orçamento em 2027, e
-      // essas não entram na totalizadora.
-      if (g.id === "g_04_01") {
-        const soma = Array(12).fill(0);
-        g.accs.forEach((acc) => {
-          if (!(acc.months || []).some((v) => Math.abs(Number(v) || 0) >= 0.005)) return;
-          (acc.base || []).forEach((v, i) => { soma[i] += Number(v) || 0; });
-        });
-        g.base = soma;
-        return;
-      }
       g.base = base.grupos[g.id].slice();
     });
     tpl.filter((g) => g.type !== "formula").sort((a, b) => depth(b) - depth(a)).forEach((g) => {
-      tpl.filter((c) => c.parentId === g.id && c.type !== "formula").forEach((ch) => {
-        ch.months.forEach((v, i) => { g.months[i] += v; });
-        ch.base.forEach((v, i) => { g.base[i] += v; });
+      const filhos = tpl.filter((c) => c.parentId === g.id && c.type !== "formula");
+      if (!filhos.length) return;
+      const meses = Array(12).fill(0);
+      const realizado = Array(12).fill(0);
+      filhos.forEach((ch) => {
+        ch.months.forEach((v, i) => { meses[i] += Number(v) || 0; });
+        ch.base.forEach((v, i) => { realizado[i] += Number(v) || 0; });
       });
+      g.months = meses;
+      g.base = realizado;
     });
     const sum = (ids, campo) => {
       const months = Array(12).fill(0);
