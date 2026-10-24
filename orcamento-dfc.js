@@ -239,14 +239,13 @@ const OrcamentoDfcApp = {
     };
     const por = (gid, code, cc, i, v) => {
       if (!gid || !v) return;
-      const chave = this.chaveConta(code);
-      const dig = chave.replace(/\D/g, "");
+      const bruto = this.chaveConta(code);
+      const dig = bruto.replace(/\D/g, "");
+      const chave = dig || bruto;
       this.somarBase(bag(grupos, gid), i, v);
       if (chave) this.somarBase(bag(contas, gid + "|" + chave), i, v);
-      if (dig && dig !== chave) this.somarBase(bag(contas, gid + "|" + dig), i, v);
       const ccId = this.ccNorm(cc);
       if (chave) this.somarBase(bag(ccs, gid + "|" + chave + "|" + ccId), i, v);
-      if (dig) this.somarBase(bag(ccs, gid + "|" + dig + "|" + ccId), i, v);
     };
     let arquivos = 0;
     (this._lancamentos2026 || []).forEach((c) => {
@@ -774,12 +773,13 @@ const OrcamentoDfcApp = {
   },
 
   acharBase(map, gid, code, cc) {
-    const chave = this.chaveConta(code);
-    const dig = chave.replace(/\D/g, "");
+    const bruto = this.chaveConta(code);
+    const dig = bruto.replace(/\D/g, "");
     const ccId = cc == null ? "" : this.ccNorm(cc);
-    const chaves = cc == null
-      ? [gid + "|" + chave, dig ? gid + "|" + dig : ""]
-      : [gid + "|" + chave + "|" + ccId, dig ? gid + "|" + dig + "|" + ccId : ""];
+    const suf = cc == null ? "" : "|" + ccId;
+    const chaves = [];
+    if (dig) chaves.push(gid + "|" + dig + suf);
+    if (bruto && bruto !== dig) chaves.push(gid + "|" + bruto + suf);
     for (let i = 0; i < chaves.length; i++) {
       if (chaves[i] && map[chaves[i]]) return map[chaves[i]];
     }
@@ -1054,12 +1054,12 @@ const OrcamentoDfcApp = {
       if (!g || g.type !== "resultado") return;
       const codeDig = code.replace(/\D/g, "");
       if (!codeDig) return;
-      if (code.indexOf(".") < 0) {
-        const temPontos = Object.keys(base.ccs).some((k) => {
+      if (code.indexOf(".") >= 0) {
+        const temDigitos = Object.keys(base.ccs).some((k) => {
           const p = k.split("|");
-          return p.length >= 3 && p[0] === gid && p[1].indexOf(".") >= 0 && p[1].replace(/\D/g, "") === codeDig && this.ccNorm(p.slice(2).join("|")) === this.ccNorm(ccRaw);
+          return p.length >= 3 && p[0] === gid && p[1].indexOf(".") < 0 && p[1].replace(/\D/g, "") === codeDig && this.ccNorm(p.slice(2).join("|")) === this.ccNorm(ccRaw);
         });
-        if (temPontos) return;
+        if (temDigitos) return;
       }
       let acc = null;
       g.accs.forEach((a) => {
