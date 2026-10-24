@@ -326,7 +326,7 @@ const OrcamentoDfcApp = {
       const snap = await fx.getDoc(fx.doc(db, "dfc_realizado", this.docRealizado(emp)));
       if (!this.docExiste(snap)) return;
       const x = snap.data() || {};
-      if (String(x.fim || "") !== String(fim) || !(Number(x.v) >= 2)) return;
+      if (String(x.fim || "") !== String(fim)) return;
       let texto = x.payload || "";
       if (Array.isArray(x.partes) && x.partes.length) {
         const blocos = await Promise.all(x.partes.map(async (pid) => {
@@ -346,7 +346,8 @@ const OrcamentoDfcApp = {
         cc: r[2],
         i: r[3],
         v: Number(r[4]) || 0,
-        ccn: r[5] || ""
+        ccn: r[5] || "",
+        cn: r[6] || ""
       }));
     };
     try {
@@ -359,7 +360,7 @@ const OrcamentoDfcApp = {
     const fx = window.firebaseCollections;
     const db = window.firebaseDb;
     if (!fx || !db || !companyId) return false;
-    const compacto = (rows || []).map((r) => [r.gid, r.code, this.ccNorm(r.cc), r.i, Math.round((Number(r.v) || 0) * 100) / 100, String(r.ccn || "")]);
+    const compacto = (rows || []).map((r) => [r.gid, r.code, this.ccNorm(r.cc), r.i, Math.round((Number(r.v) || 0) * 100) / 100, String(r.ccn || ""), String(r.cn || "")]);
     const texto = JSON.stringify(compacto);
     const id = this.docRealizado(companyId);
     const LIM = 400000;
@@ -407,6 +408,65 @@ const OrcamentoDfcApp = {
     let movs = partes.reduce((acc, rows) => acc.concat(rows || []), []);
     if (typeof window.siengeDedupeBankMovements === "function") movs = window.siengeDedupeBankMovements(movs);
     return movs;
+  },
+
+  async agregarMovimentos(movs, companyId, fluxo, byId, corte) {
+    const map = new Map();
+    const listaMovs = movs || [];
+    for (let n = 0; n < listaMovs.length; n++) {
+      const mov = listaMovs[n];
+      const factor = typeof fluxo.factorForCompany === "function" ? fluxo.factorForCompany(mov.companyId || companyId) : 1;
+      if (factor > 0) {
+        const alocs = fluxo.allocate(mov, factor) || [];
+        for (let k = 0; k < alocs.length; k++) {
+          const a = alocs[k];
+          if (!a) continue;
+          const gid = this.grupoDaConta(a.categoryId, a.categoryName);
+          const node = gid && byId[gid];
+          if (!node) continue;
+          const valor = fluxo.signedAmount(node, a.categoryId, a.categoryName, a.amount, a.reducer, a.categoryType, a.mov);
+          const i = Number(String(a.month || "").slice(5, 7)) - 1;
+          if (!(i >= 0) || i >= corte || !valor) continue;
+          const code = String(a.categoryId || "");
+          const cc = this.ccDoMovimento(a);
+          const chave = gid + "\n" + code + "\n" + cc;
+          let row = map.get(chave);
+          if (!row) {
+            row = {
+              companyId: String(mov.companyId || companyId || ""),
+              gid: gid,
+              code: code,
+              cc: cc,
+              ccn: String(a.costCenterName || "").replace(/^\d+\s*-\s*/, "").trim(),
+              cn: String(a.categoryName || "").trim(),
+              m: Array(12).fill(0)
+            };
+            map.set(chave, row);
+          } else if (!row.cn && a.categoryName) {
+            row.cn = String(a.categoryName).trim();
+          }
+          row.m[i] += valor;
+        }
+      }
+      if (n && n % 250 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    const lista = [];
+    map.forEach((row) => {
+      row.m.forEach((v, i) => {
+        if (Math.abs(v) < 0.005) return;
+        lista.push({
+          companyId: row.companyId,
+          gid: row.gid,
+          code: row.code,
+          cc: row.cc,
+          ccn: row.ccn,
+          cn: row.cn,
+          i: i,
+          v: Math.round(v * 100) / 100
+        });
+      });
+    });
+    return lista;
   },
 
   async garantirMovimentos2026() {
@@ -572,14 +632,23 @@ const OrcamentoDfcApp = {
     let salvos = {};
     try { salvos = await this.lerRealizadoSalvo(fim, empresas); } catch (e) { salvos = {}; }
     const faltam = empresas.filter((id) => !Object.prototype.hasOwnProperty.call(salvos, id));
-    if (!faltam.length) {
-      this._lancamentos2026 = empresas.reduce((acc, id) => acc.concat(salvos[id] || []), []);
-      this._caixaChave = chave;
-      this._caixaEstado = this._lancamentos2026.length ? "ok" : "vazio";
+    const publicar = (aviso) => {
+      const todos = [];
+      empresas.forEach((id) => {
+        if (Object.prototype.hasOwnProperty.call(salvos, id)) todos.push.apply(todos, salvos[id] || []);
+      });
+      this._lancamentos2026 = todos;
+      this._caixaEstado = todos.length ? "ok" : (faltam.length ? "ok" : "vazio");
       this._caixaErro = "";
-      this._caixaAviso = "";
+      this._caixaAviso = aviso || "";
+      if (document.getElementById("orc-dfc-body")) this.paintBody();
+    };
+    if (!faltam.length) {
+      publicar("");
+      this._caixaChave = chave;
       return;
     }
+    publicar("O realizado salvo já está na tela. Completando as empresas que ainda não foram gravadas.");
     if (typeof fluxo.ensureCategories === "function") {
       try { await fluxo.ensureCategories(); } catch (e) {}
     }
@@ -587,58 +656,46 @@ const OrcamentoDfcApp = {
     const byId = {};
     grupos.forEach((g) => { if (g && g.id) byId[g.id] = g; });
     const corte = this.corteForecast();
-    let feitas = 0;
-    const movs = await this.lerMovimentos(fim, faltam, (id) => {
-      feitas += 1;
-      this.notaCaixa("Lendo o realizado de 2026 no caixa e banco · empresa " + id + " · " + feitas + " de " + faltam.length);
-    });
-    const lista = [];
-    movs.forEach((mov) => {
-      const factor = typeof fluxo.factorForCompany === "function" ? fluxo.factorForCompany(mov.companyId) : 1;
-      if (factor <= 0) return;
-      fluxo.allocate(mov, factor).forEach((a) => {
-        if (!a) return;
-        const gid = this.grupoDaConta(a.categoryId, a.categoryName);
-        const node = gid && byId[gid];
-        if (!node) return;
-        const valor = fluxo.signedAmount(node, a.categoryId, a.categoryName, a.amount, a.reducer, a.categoryType, a.mov);
-        const i = Number(String(a.month || "").slice(5, 7)) - 1;
-        if (!(i >= 0) || i >= corte || !valor) return;
-        lista.push({
-          companyId: String(mov.companyId || a.companyId || ""),
-          gid: gid,
-          code: a.categoryId,
-          cc: this.ccDoMovimento(a),
-          ccn: String(a.costCenterName || "").replace(/^\d+\s*-\s*/, "").trim(),
-          i: i,
-          v: valor
-        });
+    let falhaNuvem = false;
+    let puladas = 0;
+    for (let i = 0; i < faltam.length; i++) {
+      const id = faltam[i];
+      this.notaCaixa("Realizado até setembro · empresa " + id + " · " + (i + 1) + " de " + faltam.length);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      let data = null;
+      try {
+        data = await this.comTempo(api.getBankMovements("2026-01-01", fim, { selectionType: "M", companyId: id }), 30000);
+      } catch (e) {
+        puladas += 1;
+        continue;
+      }
+      const linhas = (data || []).map((m) => Object.assign({}, m, { companyId: (m && m.companyId) || id }));
+      let lista = [];
+      try { lista = await this.agregarMovimentos(linhas, id, fluxo, byId, corte); }
+      catch (e) { puladas += 1; continue; }
+      salvos[id] = lista;
+      try { await this.salvarRealizadoEmpresa(id, fim, lista); }
+      catch (e) { falhaNuvem = true; }
+      publicar("");
+    }
+    publicar(
+      falhaNuvem ? "O realizado entrou na tela, mas uma empresa não ficou salva."
+        : (puladas ? "Algumas empresas não responderam e ficaram de fora nesta leitura." : "")
+    );
+    if (!puladas) this._caixaChave = chave;
+  },
+
+  comTempo(promise, ms) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("tempo")), ms);
+      Promise.resolve(promise).then((valor) => {
+        clearTimeout(timer);
+        resolve(valor);
+      }, (erro) => {
+        clearTimeout(timer);
+        reject(erro);
       });
     });
-    const porEmp = {};
-    lista.forEach((r) => {
-      const id = String(r.companyId || "");
-      if (!porEmp[id]) porEmp[id] = [];
-      porEmp[id].push(r);
-    });
-    let falhaNuvem = false;
-    await Promise.all(faltam.map((id) => this.salvarRealizadoEmpresa(id, fim, porEmp[id] || []).catch(() => { falhaNuvem = true; })));
-    const todos = [];
-    empresas.forEach((id) => {
-      if (Object.prototype.hasOwnProperty.call(salvos, id)) todos.push.apply(todos, salvos[id] || []);
-      else todos.push.apply(todos, porEmp[id] || []);
-    });
-    this._lancamentos2026 = todos;
-    if (faltam.length === empresas.length) {
-      this._movs2026 = movs;
-      this._movsProntos = true;
-      this._movChave = chave;
-      this._itens2026 = null;
-    }
-    this._caixaChave = chave;
-    this._caixaEstado = todos.length ? "ok" : "vazio";
-    this._caixaErro = "";
-    this._caixaAviso = falhaNuvem ? "O realizado de 2026 até " + fim.split("-").reverse().join("/") + " entrou na tela, mas não ficou salvo." : "";
   },
 
   ccNorm(cc) {
@@ -791,9 +848,12 @@ const OrcamentoDfcApp = {
     });
 
     const nomesCc = {};
+    const nomesConta = {};
     (this._lancamentos2026 || []).forEach((c) => {
       const id = this.ccNorm(c.cc);
       if (id && id !== "—" && c.ccn && !nomesCc[id]) nomesCc[id] = String(c.ccn).trim();
+      const conta = String(c.code || "");
+      if (conta && c.cn && !nomesConta[conta]) nomesConta[conta] = String(c.cn).trim();
     });
     Object.keys(base.ccs).forEach((key) => {
       const parts = key.split("|");
@@ -802,8 +862,9 @@ const OrcamentoDfcApp = {
       const code = parts[1];
       const ccRaw = parts.slice(2).join("|");
       const g = byId[gid];
-      if (!g || !g.accs) return;
+      if (!g || g.type !== "resultado") return;
       const codeDig = code.replace(/\D/g, "");
+      if (!codeDig) return;
       if (code.indexOf(".") < 0) {
         const temPontos = Object.keys(base.ccs).some((k) => {
           const p = k.split("|");
@@ -815,7 +876,19 @@ const OrcamentoDfcApp = {
       g.accs.forEach((a) => {
         if (String(a.conta || "").replace(/\D/g, "") === codeDig) acc = a;
       });
-      if (!acc) return;
+      if (!acc) {
+        const achado = this.acharBase(base.contas, gid, code);
+        acc = {
+          conta: code,
+          cn: nomesConta[code] || "",
+          months: Array(12).fill(0),
+          base: achado ? achado.slice() : Array(12).fill(0),
+          ccs: new Map()
+        };
+        g.accs.set(code, acc);
+      } else if (!acc.cn && nomesConta[code]) {
+        acc.cn = nomesConta[code];
+      }
       const id = this.ccNorm(ccRaw);
       let cc = null;
       acc.ccs.forEach((c) => { if (this.ccNorm(c.id) === id) cc = c; });
@@ -888,7 +961,7 @@ const OrcamentoDfcApp = {
     const walk = (node, level) => {
       const children = tpl.filter((g) => g.parentId === node.id);
       const accs = [...node.accs.values()]
-        .filter((a) => a.months.some((v) => Math.abs(v) >= 0.005))
+        .filter((a) => a.months.some((v) => Math.abs(v) >= 0.005) || (a.base || []).some((v) => Math.abs(Number(v) || 0) >= 0.005))
         .sort((a, b) => String(a.conta).localeCompare(String(b.conta), "pt-BR", { numeric: true }));
       const hasKids = children.length > 0 || accs.length > 0;
       const total = node.months.reduce((a, b) => a + b, 0);

@@ -122,8 +122,8 @@ const OrcamentoApp = {
       { id: "repasses", label: "Repasses", icon: "hand-coins" },
       { id: "aportes", label: "Aportes", icon: "landmark" },
       { id: "lucros", label: "Lucros recebidos", icon: "wallet" },
-      { id: "painel", label: "Painel DFC", icon: "layout-dashboard" },
-      { id: "mensal", label: "DFC mensal", icon: "table" }
+      { id: "painel", label: "DFC ppt - Grandes números", icon: "presentation" },
+      { id: "mensal", label: "DFC ppt - analítico", icon: "table" }
     ];
     return `<div class="ml-tabs orc-abas" role="tablist">${tabs.map((t) => `
       <button type="button" role="tab" aria-selected="${atual === t.id ? "true" : "false"}"
