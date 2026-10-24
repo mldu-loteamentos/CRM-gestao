@@ -1263,7 +1263,6 @@ const OrcamentoDfcApp = {
           </button>
           <button type="button" class="orc-dfc-up" id="orc-dfc-up"><i data-lucide="upload"></i> Subir Excel 2027</button>
           <input id="orc-dfc-file" type="file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
-          <button type="button" class="orc-dfc-base" id="orc-dfc-base" ${this._custom ? "" : "hidden"}>Base original</button>
           <span class="orc-dfc-meta" id="orc-dfc-meta"></span>
         </div>
         <div class="orc-dfc-layout">
@@ -1291,8 +1290,6 @@ const OrcamentoDfcApp = {
         this.paintMeta();
       });
     });
-    const baseBtn = document.getElementById("orc-dfc-base");
-    if (baseBtn) baseBtn.addEventListener("click", () => this.voltarBase());
     const excelBtn = document.getElementById("orc-dfc-excel");
     if (excelBtn) excelBtn.addEventListener("click", () => this.exportExcel());
     const varRs = document.getElementById("orc-dfc-var-rs");

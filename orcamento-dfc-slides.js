@@ -380,7 +380,13 @@ const OrcamentoDfcSlidesApp = {
     </article>`;
   },
 
-  render(root, aba) {
+  basePronta() {
+    const app = window.OrcamentoDfcApp;
+    if (!app) return false;
+    return app._caixaEstado === "ok" || app._caixaEstado === "vazio" || app._caixaEstado === "erro";
+  },
+
+  pintar(root, aba) {
     const q = this.quadro();
     const corpo = !q || q.vazio
       ? `<div class="orc-dfc-erro">Ainda não há lançamentos do DFC 2027 para montar estes slides.</div>`
@@ -390,5 +396,51 @@ const OrcamentoDfcSlidesApp = {
       ${corpo}
     </div>`;
     if (window.lucide && lucide.createIcons) lucide.createIcons();
+  },
+
+  pintarEspera(root) {
+    root.innerHTML = `<div class="orc-dfc-page orc-slide-page">
+      ${typeof OrcamentoApp !== "undefined" ? OrcamentoApp.abasHtml() : ""}
+      <div class="ml-load" style="padding:28px 12px;">
+        <div class="loading-spinner" aria-hidden="true"></div>
+        <div class="loading-status-text">Lendo o realizado e o forecast de 2026…</div>
+        <div class="ml-load-track"><div class="loading-progress-bar" style="width:35%"></div></div>
+      </div>
+    </div>`;
+    if (window.lucide && lucide.createIcons) lucide.createIcons();
+  },
+
+  async esperarSaldos(app) {
+    if (!app || typeof app.carregarSaldos !== "function") return;
+    if (app._saldoEstado === "ok" || app._saldoEstado === "vazio" || app._saldoEstado === "erro") return;
+    if (app._saldoEstado !== "lendo") {
+      try { await app.carregarSaldos(); } catch (e) {}
+      return;
+    }
+    for (let i = 0; i < 40; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      if (app._saldoEstado !== "lendo") return;
+    }
+  },
+
+  async atualizar(aba) {
+    const token = (this._token = (this._token || 0) + 1);
+    const app = window.OrcamentoDfcApp;
+    if (!app) return;
+    try {
+      if (typeof app.carregarBase === "function") await app.carregarBase();
+      await this.esperarSaldos(app);
+    } catch (e) {}
+    if (token !== this._token) return;
+    if (typeof OrcamentoApp !== "undefined" && OrcamentoApp.aba !== aba) return;
+    const root = document.getElementById("orcamento-root");
+    if (!root) return;
+    this.pintar(root, aba);
+  },
+
+  render(root, aba) {
+    if (this.basePronta()) this.pintar(root, aba);
+    else this.pintarEspera(root);
+    this.atualizar(aba);
   }
 };
