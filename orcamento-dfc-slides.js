@@ -53,13 +53,20 @@ const OrcamentoDfcSlidesApp = {
     return s || (cc ? String(cc) : "Sem projeto");
   },
 
+  empresaSlide(app) {
+    const lista = app && typeof app.empresas === "function" ? app.empresas() : [];
+    const achou = lista.find((e) => String(e.id) === "1")
+      || lista.find((e) => /MOURA\s+LEITE/i.test(String(e.name || "")));
+    return achou ? String(achou.id) : "1";
+  },
+
   quadro() {
     const app = window.OrcamentoDfcApp;
     if (!app || typeof app.montar !== "function") return null;
     if (typeof app.garantir === "function") app.garantir();
     const emp = (app.selectedCompanyIds || []).slice();
     const cc = (app.selectedCcIds || []).slice();
-    app.selectedCompanyIds = [];
+    app.selectedCompanyIds = [this.empresaSlide(app)];
     app.selectedCcIds = [];
     let pack = null;
     try { pack = app.montar({ aberto: true }); }
@@ -395,11 +402,11 @@ const OrcamentoDfcSlidesApp = {
   async atualizar(aba) {
     const app = window.OrcamentoDfcApp;
     if (!app) return;
-    if (app._caixaEstado === "ok" || app._caixaEstado === "vazio" || app._caixaEstado === "erro") return;
     const token = (this._token = (this._token || 0) + 1);
+    const pronto = app._caixaEstado === "ok" || app._caixaEstado === "vazio" || app._caixaEstado === "erro";
     try {
-      if (app._caixaEstado !== "lendo" && typeof app.carregarBase === "function") await app.carregarBase();
-      else {
+      if (!pronto && app._caixaEstado !== "lendo" && typeof app.carregarBase === "function") await app.carregarBase();
+      else if (app._caixaEstado === "lendo") {
         for (let i = 0; i < 80 && app._caixaEstado === "lendo"; i++) {
           await new Promise((resolve) => setTimeout(resolve, 500));
         }

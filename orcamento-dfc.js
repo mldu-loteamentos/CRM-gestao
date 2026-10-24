@@ -2659,7 +2659,13 @@ const OrcamentoDfcApp = {
     this._nuvemOk = true;
     this._nuvemMsg = "";
     this.gravarLocal(pack);
-    if (token !== this._bToken || !document.getElementById("orc-dfc-body")) return;
+    if (token !== this._bToken) return;
+    if (typeof OrcamentoApp !== "undefined" && (OrcamentoApp.aba === "painel" || OrcamentoApp.aba === "mensal") && window.OrcamentoDfcSlidesApp) {
+      const root = document.getElementById("orcamento-root");
+      if (root) OrcamentoDfcSlidesApp.pintar(root, OrcamentoApp.aba);
+      return;
+    }
+    if (!document.getElementById("orc-dfc-body")) return;
     const base = document.getElementById("orc-dfc-base");
     if (base) base.hidden = false;
     this.paintMeta();
