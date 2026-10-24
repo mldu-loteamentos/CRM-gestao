@@ -747,6 +747,55 @@ const FluxoCaixaApp = {
     });
   },
 
+  classificar(allocs) {
+    const visao = this.visao();
+    const groups = (visao.groups || []).map((g) => ({ ...g }));
+    const byId = {};
+    groups.forEach((g) => { if (g && g.id) byId[g.id] = g; });
+    const accToNode = {};
+    groups.forEach((g) => {
+      (g.accounts || []).forEach((id) => {
+        const sid = String(id).trim();
+        if (!sid) return;
+        accToNode[sid] = g.id;
+        const nk = this.normAccountKey(sid);
+        if (nk) accToNode[nk] = g.id;
+        const dotted = this.formatAccountCode(sid);
+        if (dotted) {
+          accToNode[dotted] = g.id;
+          const nk2 = this.normAccountKey(dotted);
+          if (nk2) accToNode[nk2] = g.id;
+        }
+      });
+    });
+    const accIndex = {};
+    (allocs || []).forEach((a) => {
+      if (!a) return;
+      const rawId = String(a.categoryId || "").trim();
+      if (!rawId) return;
+      const nk = this.normAccountKey(rawId);
+      const dotted = this.formatAccountCode(rawId);
+      const nid = accToNode[rawId] || (nk && accToNode[nk]) || (dotted && accToNode[dotted]) || null;
+      const node = nid && byId[nid];
+      if (!node || node.type === "formula") return;
+      const amount = this.signedAmount(node, a.categoryId, a.categoryName, a.amount, a.reducer, a.categoryType, a.mov);
+      if (!amount) return;
+      const idxKey = nk || rawId;
+      if (!accIndex[idxKey]) {
+        accIndex[idxKey] = {
+          id: rawId,
+          displayId: dotted || rawId,
+          name: a.categoryName || "",
+          parentId: node.id,
+          items: []
+        };
+      }
+      accIndex[idxKey].name = a.categoryName || accIndex[idxKey].name;
+      accIndex[idxKey].items.push(Object.assign({}, a, { amount: amount, signedAmount: amount, nodeId: node.id }));
+    });
+    return Object.keys(accIndex).map((k) => accIndex[k]);
+  },
+
   build(allocs) {
     const visao = this.visao();
     const groups = (visao.groups || []).map(g => ({

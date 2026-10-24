@@ -849,99 +849,140 @@ const OrcamentoDfcApp = {
     this._abChave = "";
   },
 
-  alocsDaAbertura() {
-    const fluxo = window.FluxoCaixaApp;
-    if (!fluxo || typeof fluxo.allocate !== "function") return [];
+  detalheDasContas(fluxo, corte, contas, empresas) {
+    const want = new Set((empresas || []).map(String));
+    const out = [];
+    (contas || []).forEach((acc) => {
+      if (!acc) return;
+      const meses = Array(12).fill(0);
+      const ccMap = new Map();
+      (acc.items || []).forEach((it) => {
+        if (want.size && !want.has(String(it.companyId || ""))) return;
+        const i = Number(String(it.month || "").slice(5, 7)) - 1;
+        if (!(i >= 0) || i >= corte) return;
+        const v = Number(it.signedAmount != null ? it.signedAmount : it.amount) || 0;
+        if (!v) return;
+        const bruto = fluxo && typeof fluxo.ccIdOf === "function" ? fluxo.ccIdOf(it.costCenterId) : it.costCenterId;
+        const ccId = this.ccNorm(bruto) || "—";
+        if (!this.ccCabe(ccId)) return;
+        meses[i] += v;
+        let cc = ccMap.get(ccId);
+        if (!cc) {
+          cc = {
+            id: ccId,
+            nome: String(it.costCenterName || "").replace(/^\d+\s*-\s*/, "").trim(),
+            meses: Array(12).fill(0)
+          };
+          ccMap.set(ccId, cc);
+        } else if (!cc.nome && it.costCenterName) {
+          cc.nome = String(it.costCenterName).replace(/^\d+\s*-\s*/, "").trim();
+        }
+        cc.meses[i] += v;
+      });
+      if (!meses.some((v) => Math.abs(v) >= 0.005)) return;
+      out.push({
+        gid: acc.parentId,
+        code: acc.displayId || acc.id,
+        nome: acc.name || "",
+        meses: meses,
+        ccs: Array.from(ccMap.values())
+      });
+    });
+    return out;
+  },
+
+  detalheDoCaixa(fluxo, corte) {
+    if (!fluxo || !(corte > 0)) return null;
     const fim = this.fimRealizado2026();
     const inicio = "2026-01-01";
-    if (!fim) return [];
-    const empresas = (this.selectedCompanyIds.length ? this.selectedCompanyIds : this.empresas().map((e) => e.id)).map(String);
-    const marca = String((fluxo.movements || []).length) + ":" + String((this._movs2026 || []).length);
+    if (!fim) return null;
+    const empresas = this.selectedCompanyIds.map(String).filter(Boolean);
+    if (!empresas.length) return null;
+    const marca = String((fluxo.movements || []).length) + ":" + String((this._movs2026 || []).length) + ":" + String(fluxo.loadedStart || "") + ":" + String(fluxo.loadedEnd || "");
     const chave = empresas.slice().sort().join(",") + "|" + fim + "|" + (this.selectedCcIds || []).join(",") + "|" + marca;
-    if (this._abChave === chave && Array.isArray(this._abAllocs)) return this._abAllocs;
-    let movs = [];
-    const reuso = this.movimentosReusados(fluxo, empresas, inicio, fim);
+    if (this._abChave === chave && Array.isArray(this._abDetalhe)) return this._abDetalhe;
+    let contas = null;
     const ccDoCaixa = typeof fluxo.costCenterFilterSet === "function" ? fluxo.costCenterFilterSet() : null;
-    if (reuso.ids.size === empresas.length && !ccDoCaixa && Array.isArray(fluxo.lastAllocs) && fluxo.lastAllocs.length) {
-      const want = new Set(empresas);
-      this._abChave = chave;
-      this._abAllocs = fluxo.lastAllocs.filter((a) => a && want.has(String(a.companyId || "")));
-      return this._abAllocs;
+    if (!ccDoCaixa && this.caixaCobre(fluxo, inicio, fim) && fluxo.accountIndex) {
+      const loaded = (fluxo.loadedCompanyIds || []).map(String);
+      if (empresas.every((id) => loaded.indexOf(id) >= 0)) {
+        contas = Object.keys(fluxo.accountIndex).map((k) => fluxo.accountIndex[k]);
+        const mesmo = loaded.length === empresas.length;
+        const detalheCaixa = this.detalheDasContas(fluxo, corte, contas, mesmo ? [] : empresas);
+        if (detalheCaixa.length) {
+          this._abChave = chave;
+          this._abDetalhe = detalheCaixa;
+          return detalheCaixa;
+        }
+        contas = null;
+      }
     }
-    if (reuso.ids.size === empresas.length) movs = reuso.movs || [];
-    else if (Array.isArray(this._movs2026) && this._movs2026.length) {
-      const want = new Set(empresas);
-      const tem = new Set(this._movs2026.map((m) => String((m && m.companyId) || "")));
-      if (!empresas.every((id) => tem.has(id))) return [];
-      movs = this._movs2026.filter((m) => want.has(String((m && m.companyId) || "")));
+    if (!contas && typeof fluxo.classificar === "function" && typeof fluxo.allocate === "function") {
+      let movs = [];
+      const reuso = this.movimentosReusados(fluxo, empresas, inicio, fim);
+      if (reuso.ids.size === empresas.length) movs = reuso.movs || [];
+      else if (Array.isArray(this._movs2026) && this._movs2026.length) {
+        const tem = new Set(this._movs2026.map((m) => String((m && m.companyId) || "")));
+        if (empresas.every((id) => tem.has(id))) {
+          const want = new Set(empresas);
+          movs = this._movs2026.filter((m) => want.has(String((m && m.companyId) || "")));
+        }
+      }
+      if (movs.length) {
+        const allocs = [];
+        movs.forEach((mov) => {
+          const factor = typeof fluxo.factorForCompany === "function" ? fluxo.factorForCompany(mov.companyId) : 1;
+          if (!(factor > 0)) return;
+          (fluxo.allocate(mov, factor) || []).forEach((a) => { if (a) allocs.push(a); });
+        });
+        contas = fluxo.classificar(allocs);
+      }
     }
-    if (!movs.length) return [];
-    const allocs = [];
-    movs.forEach((mov) => {
-      const factor = typeof fluxo.factorForCompany === "function" ? fluxo.factorForCompany(mov.companyId) : 1;
-      if (!(factor > 0)) return;
-      const lista = fluxo.allocate(mov, factor) || [];
-      for (let i = 0; i < lista.length; i++) if (lista[i]) allocs.push(lista[i]);
-    });
+    if (!contas || !contas.length) return null;
+    const detalhe = this.detalheDasContas(fluxo, corte, contas, empresas);
     this._abChave = chave;
-    this._abAllocs = allocs;
-    return allocs;
+    this._abDetalhe = detalhe;
+    return detalhe;
   },
 
   aplicarAbertura(byId, corte, fluxo) {
-    const allocs = this.alocsDaAbertura();
-    if (!allocs.length || !(corte > 0) || !fluxo) return;
-    Object.keys(byId).forEach((id) => {
-      const g = byId[id];
-      if (!g || !g.accs) return;
-      g.accs.forEach((acc) => {
-        for (let i = 0; i < corte; i++) acc.base[i] = 0;
-        acc.ccs.forEach((cc) => { for (let i = 0; i < corte; i++) cc.base[i] = 0; });
-      });
-    });
-    allocs.forEach((a) => {
-      const gid = this.grupoDaConta(a.categoryId, a.categoryName);
-      const g = gid && byId[gid];
+    const detalhe = this.detalheDoCaixa(fluxo, corte);
+    if (!detalhe || !detalhe.length) return;
+    detalhe.forEach((acc) => {
+      const g = byId[acc.gid];
       if (!g || g.type !== "resultado") return;
-      const i = Number(String(a.month || "").slice(5, 7)) - 1;
-      if (!(i >= 0) || i >= corte) return;
-      const bruto = typeof fluxo.ccIdOf === "function" ? fluxo.ccIdOf(a.costCenterId) : "";
-      const ccId = bruto ? this.ccNorm(bruto) : "—";
-      if (!this.ccCabe(ccId)) return;
-      const valor = typeof fluxo.signedAmount === "function"
-        ? fluxo.signedAmount(g, a.categoryId, a.categoryName, a.amount, a.reducer, a.categoryType, a.mov)
-        : (Number(a.amount) || 0);
-      if (!valor) return;
-      const code = (typeof fluxo.formatAccountCode === "function" && fluxo.formatAccountCode(a.categoryId)) || String(a.categoryId || "");
-      const dig = String(code).replace(/\D/g, "");
+      const dig = String(acc.code || "").replace(/\D/g, "");
       if (!dig) return;
-      let acc = null;
+      let alvo = null;
       g.accs.forEach((item) => {
-        if (String(item.conta || "").replace(/\D/g, "") === dig) acc = item;
+        if (String(item.conta || "").replace(/\D/g, "") === dig) alvo = item;
       });
-      if (!acc) {
-        acc = {
-          conta: code,
-          cn: String(a.categoryName || "").trim(),
+      if (!alvo) {
+        alvo = {
+          conta: acc.code,
+          cn: acc.nome || "",
           months: Array(12).fill(0),
           base: Array(12).fill(0),
           ccs: new Map()
         };
-        g.accs.set(code, acc);
-      } else if (!acc.cn && a.categoryName) {
-        acc.cn = String(a.categoryName).trim();
+        g.accs.set(acc.code, alvo);
+      } else if (!alvo.cn && acc.nome) {
+        alvo.cn = acc.nome;
       }
-      let cc = null;
-      acc.ccs.forEach((c) => { if (this.ccNorm(c.id) === ccId) cc = c; });
-      if (!cc) {
-        const nome = String(a.costCenterName || "").replace(/^\d+\s*-\s*/, "").trim();
-        cc = { id: ccId, name: nome || this.nomeCentro(ccId), months: Array(12).fill(0), base: Array(12).fill(0) };
-        acc.ccs.set(ccId, cc);
-      } else if (!cc.name && a.costCenterName) {
-        cc.name = String(a.costCenterName).replace(/^\d+\s*-\s*/, "").trim();
-      }
-      cc.base[i] += valor;
-      acc.base[i] += valor;
+      if (!alvo.base || alvo.base.length < 12) alvo.base = Array(12).fill(0);
+      for (let i = 0; i < corte; i++) alvo.base[i] = acc.meses[i] || 0;
+      (acc.ccs || []).forEach((cc) => {
+        let row = null;
+        alvo.ccs.forEach((c) => { if (this.ccNorm(c.id) === cc.id) row = c; });
+        if (!row) {
+          row = { id: cc.id, name: cc.nome || this.nomeCentro(cc.id), months: Array(12).fill(0), base: Array(12).fill(0) };
+          alvo.ccs.set(cc.id, row);
+        } else if (!row.name && cc.nome) {
+          row.name = cc.nome;
+        }
+        if (!row.base || row.base.length < 12) row.base = Array(12).fill(0);
+        for (let i = 0; i < corte; i++) row.base[i] = cc.meses[i] || 0;
+      });
     });
   },
 
