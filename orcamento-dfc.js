@@ -754,7 +754,20 @@ const OrcamentoDfcApp = {
       return d;
     };
     tpl.forEach((g) => {
-      if (g.type === "resultado" && base.grupos[g.id]) g.base = base.grupos[g.id].slice();
+      if (g.type !== "resultado" || !base.grupos[g.id]) return;
+      // 04.01 só fecha no repasse que aparece na linha. O realizado do grupo
+      // também traz adiantamento, mútuo e contas sem orçamento em 2027, e
+      // essas não entram na totalizadora.
+      if (g.id === "g_04_01") {
+        const soma = Array(12).fill(0);
+        g.accs.forEach((acc) => {
+          if (!(acc.months || []).some((v) => Math.abs(Number(v) || 0) >= 0.005)) return;
+          (acc.base || []).forEach((v, i) => { soma[i] += Number(v) || 0; });
+        });
+        g.base = soma;
+        return;
+      }
+      g.base = base.grupos[g.id].slice();
     });
     tpl.filter((g) => g.type !== "formula").sort((a, b) => depth(b) - depth(a)).forEach((g) => {
       tpl.filter((c) => c.parentId === g.id && c.type !== "formula").forEach((ch) => {
