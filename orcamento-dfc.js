@@ -244,7 +244,7 @@ const OrcamentoDfcApp = {
       this.somarBase(bag(grupos, gid), i, v);
       if (chave) this.somarBase(bag(contas, gid + "|" + chave), i, v);
       if (dig && dig !== chave) this.somarBase(bag(contas, gid + "|" + dig), i, v);
-      const ccId = String(cc || "").replace(/\D/g, "") || String(cc || "");
+      const ccId = this.ccNorm(cc);
       if (chave) this.somarBase(bag(ccs, gid + "|" + chave + "|" + ccId), i, v);
       if (dig) this.somarBase(bag(ccs, gid + "|" + dig + "|" + ccId), i, v);
     };
@@ -326,7 +326,7 @@ const OrcamentoDfcApp = {
       const snap = await fx.getDoc(fx.doc(db, "dfc_realizado", this.docRealizado(emp)));
       if (!this.docExiste(snap)) return;
       const x = snap.data() || {};
-      if (String(x.fim || "") !== String(fim)) return;
+      if (String(x.fim || "") !== String(fim) || !(Number(x.v) >= 2)) return;
       let texto = x.payload || "";
       if (Array.isArray(x.partes) && x.partes.length) {
         const blocos = await Promise.all(x.partes.map(async (pid) => {
@@ -345,7 +345,8 @@ const OrcamentoDfcApp = {
         code: r[1],
         cc: r[2],
         i: r[3],
-        v: Number(r[4]) || 0
+        v: Number(r[4]) || 0,
+        ccn: r[5] || ""
       }));
     };
     try {
@@ -358,7 +359,7 @@ const OrcamentoDfcApp = {
     const fx = window.firebaseCollections;
     const db = window.firebaseDb;
     if (!fx || !db || !companyId) return false;
-    const compacto = (rows || []).map((r) => [r.gid, r.code, r.cc, r.i, Math.round((Number(r.v) || 0) * 100) / 100]);
+    const compacto = (rows || []).map((r) => [r.gid, r.code, this.ccNorm(r.cc), r.i, Math.round((Number(r.v) || 0) * 100) / 100, String(r.ccn || "")]);
     const texto = JSON.stringify(compacto);
     const id = this.docRealizado(companyId);
     const LIM = 400000;
@@ -373,6 +374,7 @@ const OrcamentoDfcApp = {
     await fx.setDoc(fx.doc(db, "dfc_realizado", id), {
       empresa: String(companyId),
       fim: fim,
+      v: 2,
       em: new Date().toISOString(),
       n: compacto.length,
       payload: ids.length ? "" : texto,
@@ -606,7 +608,8 @@ const OrcamentoDfcApp = {
           companyId: String(mov.companyId || a.companyId || ""),
           gid: gid,
           code: a.categoryId,
-          cc: a.costCenterId,
+          cc: this.ccDoMovimento(a),
+          ccn: String(a.costCenterName || "").replace(/^\d+\s*-\s*/, "").trim(),
           i: i,
           v: valor
         });
@@ -638,10 +641,53 @@ const OrcamentoDfcApp = {
     this._caixaAviso = falhaNuvem ? "O realizado de 2026 até " + fim.split("-").reverse().join("/") + " entrou na tela, mas não ficou salvo." : "";
   },
 
+  ccNorm(cc) {
+    const bruto = String(cc == null ? "" : cc).trim();
+    if (!bruto || bruto === "—") return "—";
+    const pedaco = bruto.split(/\s+-\s+/)[0].trim();
+    if (/^\d+(?:\.0+)?$/.test(pedaco)) return String(Number(pedaco));
+    const dig = pedaco.replace(/\D/g, "");
+    if (dig && /^\d+$/.test(pedaco.replace(/\./g, ""))) return String(Number(dig));
+    return pedaco || "—";
+  },
+
+  ccDoMovimento(a) {
+    const fc = a || {};
+    const mov = fc.mov || {};
+    const candidatos = [fc.costCenterId];
+    const cats = Array.isArray(mov.financialCategories) ? mov.financialCategories : [];
+    cats.forEach((c) => {
+      if (!c) return;
+      if (fc.categoryId && String(c.financialCategoryId || "") !== String(fc.categoryId)) return;
+      candidatos.push(c.costCenterId);
+    });
+    const nome = String(fc.costCenterName || "");
+    const m = nome.match(/^(\d{4,6})\b/);
+    if (m) candidatos.push(m[1]);
+    for (let i = 0; i < candidatos.length; i++) {
+      const n = this.ccNorm(candidatos[i]);
+      if (n && n !== "—") return n;
+    }
+    return "—";
+  },
+
+  nomeCentro(id) {
+    const chave = this.ccNorm(id);
+    const listas = [];
+    if (window.CentrosCustoState && Array.isArray(CentrosCustoState.costCenters)) listas.push(CentrosCustoState.costCenters);
+    if (window.AppState && Array.isArray(AppState.costCenters)) listas.push(AppState.costCenters);
+    for (let i = 0; i < listas.length; i++) {
+      const hit = listas[i].find((c) => c && this.ccNorm(c.id) === chave);
+      const nome = hit ? String(hit.name || hit.description || "").trim() : "";
+      if (nome) return nome;
+    }
+    return "";
+  },
+
   acharBase(map, gid, code, cc) {
     const chave = this.chaveConta(code);
     const dig = chave.replace(/\D/g, "");
-    const ccId = cc == null ? "" : (String(cc).replace(/\D/g, "") || String(cc));
+    const ccId = cc == null ? "" : this.ccNorm(cc);
     const chaves = cc == null
       ? [gid + "|" + chave, dig ? gid + "|" + dig : ""]
       : [gid + "|" + chave + "|" + ccId, dig ? gid + "|" + dig + "|" + ccId : ""];
@@ -744,6 +790,44 @@ const OrcamentoDfcApp = {
       });
     });
 
+    const nomesCc = {};
+    (this._lancamentos2026 || []).forEach((c) => {
+      const id = this.ccNorm(c.cc);
+      if (id && id !== "—" && c.ccn && !nomesCc[id]) nomesCc[id] = String(c.ccn).trim();
+    });
+    Object.keys(base.ccs).forEach((key) => {
+      const parts = key.split("|");
+      if (parts.length < 3) return;
+      const gid = parts[0];
+      const code = parts[1];
+      const ccRaw = parts.slice(2).join("|");
+      const g = byId[gid];
+      if (!g || !g.accs) return;
+      const codeDig = code.replace(/\D/g, "");
+      if (code.indexOf(".") < 0) {
+        const temPontos = Object.keys(base.ccs).some((k) => {
+          const p = k.split("|");
+          return p.length >= 3 && p[0] === gid && p[1].indexOf(".") >= 0 && p[1].replace(/\D/g, "") === codeDig && this.ccNorm(p.slice(2).join("|")) === this.ccNorm(ccRaw);
+        });
+        if (temPontos) return;
+      }
+      let acc = null;
+      g.accs.forEach((a) => {
+        if (String(a.conta || "").replace(/\D/g, "") === codeDig) acc = a;
+      });
+      if (!acc) return;
+      const id = this.ccNorm(ccRaw);
+      let cc = null;
+      acc.ccs.forEach((c) => { if (this.ccNorm(c.id) === id) cc = c; });
+      if (!cc) {
+        cc = { id: id, name: nomesCc[id] || this.nomeCentro(id), months: Array(12).fill(0), base: Array(12).fill(0) };
+        acc.ccs.set(id, cc);
+      } else if (!cc.name) {
+        cc.name = nomesCc[id] || this.nomeCentro(id);
+      }
+      cc.base = base.ccs[key].slice();
+    });
+
     const depth = (g) => {
       let d = 0;
       let cur = g;
@@ -829,7 +913,7 @@ const OrcamentoDfcApp = {
       accs.forEach((a) => {
         const accId = "acc:" + node.id + ":" + a.conta;
         const ccs = [...(a.ccs ? a.ccs.values() : [])]
-          .filter((c) => c.months.some((v) => Math.abs(v) >= 0.005))
+          .filter((c) => c.months.some((v) => Math.abs(v) >= 0.005) || (c.base || []).some((v) => Math.abs(Number(v) || 0) >= 0.005))
           .sort((x, y) => String(x.id).localeCompare(String(y.id), "pt-BR", { numeric: true }));
         rows.push({
           id: accId,
