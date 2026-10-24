@@ -119,7 +119,9 @@ const OrcamentoApp = {
       { id: "receitas", label: "Receitas", icon: "trending-up" },
       { id: "dfc", label: "DFC 2027", icon: "git-branch" },
       { id: "impostos", label: "Calcular impostos", icon: "calculator" },
-      { id: "repasses", label: "Repasses", icon: "hand-coins" }
+      { id: "repasses", label: "Repasses", icon: "hand-coins" },
+      { id: "aportes", label: "Aportes", icon: "landmark" },
+      { id: "lucros", label: "Lucros recebidos", icon: "wallet" }
     ];
     return `<div class="ml-tabs orc-abas" role="tablist">${tabs.map((t) => `
       <button type="button" role="tab" aria-selected="${atual === t.id ? "true" : "false"}"
@@ -129,7 +131,7 @@ const OrcamentoApp = {
   },
 
   setAba(id) {
-    const ok = { dfc: 1, impostos: 1, repasses: 1 };
+    const ok = { dfc: 1, impostos: 1, repasses: 1, aportes: 1, lucros: 1 };
     this.aba = ok[id] ? id : "receitas";
     this.render();
   },
@@ -147,6 +149,10 @@ const OrcamentoApp = {
     }
     if (this.aba === "repasses" && typeof OrcamentoRepassesApp !== "undefined") {
       OrcamentoRepassesApp.render(root);
+      return;
+    }
+    if ((this.aba === "aportes" || this.aba === "lucros") && typeof OrcamentoCaixaApp !== "undefined") {
+      OrcamentoCaixaApp.render(root, this.aba);
       return;
     }
     root.innerHTML = `

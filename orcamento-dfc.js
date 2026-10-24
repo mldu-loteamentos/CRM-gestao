@@ -2459,6 +2459,7 @@ const OrcamentoDfcApp = {
         en: map.DESCRICAO || 0,
         conta: map.CONTA,
         cn: map["DESCRICAO CONTA"] || 0,
+        obs: map.OBSERVACAO || map.OBS || 0,
         meses
       };
     }
@@ -2688,6 +2689,7 @@ const OrcamentoDfcApp = {
         en: header.en ? this.cellText(row.getCell(header.en)) : "",
         conta,
         cn: header.cn ? this.cellText(row.getCell(header.cn)) : "",
+        obs: header.obs ? this.cellText(row.getCell(header.obs)) : "",
         m: meses
       });
     });
