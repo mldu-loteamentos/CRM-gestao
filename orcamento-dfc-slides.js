@@ -79,7 +79,13 @@ const OrcamentoDfcSlidesApp = {
     app.selectedCompanyIds = [this.empresaSlide(app)];
     app.selectedCcIds = [];
     let pack = null;
-    try { pack = app.montar(); }
+    try {
+      pack = app.montar();
+      if (app._saldoEstado === "ok" && typeof app.chaveSaldos === "function") {
+        const chave = app.chaveSaldos();
+        if (String(app._saldoChave || "") === chave) this._chaveSaldo = chave;
+      }
+    }
     finally {
       app.selectedCompanyIds = emp;
       app.selectedCcIds = cc;
@@ -156,22 +162,28 @@ const OrcamentoDfcSlidesApp = {
     };
   },
 
+  /* Mesma régua do DFC: caixa realizado até o corte e, daí em diante, a variação de 2026. Janeiro de 2027 abre no saldo final de dezembro. */
   saldos(variacao, variacao26) {
     const app = this.appDfc();
+    const chaveOk = !!(app && this._chaveSaldo && String(app._saldoChave || "") === String(this._chaveSaldo));
+    const estado = app && app._saldoEstado;
+    const pronto = chaveOk && estado === "ok";
+    const aguardando = !chaveOk || !estado || estado === "lendo";
     let fim26 = 0;
     let temCaixa = false;
-    try {
-      const corte = typeof app.corteForecast === "function" ? app.corteForecast() : 9;
-      let cursor = typeof app.somaSaldo === "function" ? app.somaSaldo(app.dataSaldo(2026, 0)) : 0;
-      if (Math.abs(cursor) >= 0.5) temCaixa = true;
-      for (let i = 0; i < 12; i++) {
-        if (i < corte) {
-          cursor = app.somaSaldo(app.dataSaldo(2026, i + 1));
-          if (Math.abs(cursor) >= 0.5) temCaixa = true;
-        } else cursor += Number(variacao26[i]) || 0;
-      }
-      fim26 = cursor;
-    } catch (e) { fim26 = 0; temCaixa = false; }
+    if (pronto) {
+      try {
+        const corte = typeof app.corteForecast === "function" ? app.corteForecast() : 9;
+        let cursor = 0;
+        for (let i = 0; i < 12; i++) {
+          if (i < corte) {
+            cursor = app.somaSaldo(app.dataSaldo(2026, i + 1));
+            if (Math.abs(cursor) >= 0.5) temCaixa = true;
+          } else cursor += Number(variacao26[i]) || 0;
+        }
+        fim26 = cursor;
+      } catch (e) { fim26 = 0; temCaixa = false; }
+    }
     const y = [];
     for (let i = 0; i < 12; i++) {
       const ini = i === 0 ? fim26 : y[i - 1].fim;
@@ -180,7 +192,29 @@ const OrcamentoDfcSlidesApp = {
     }
     let minI = 0;
     y.forEach((p, i) => { if (p.fim < y[minI].fim) minI = i; });
-    return { meses: y, temCaixa: temCaixa, minI: minI };
+    return { meses: y, temCaixa: temCaixa, minI: minI, aguardando: aguardando };
+  },
+
+  async garantirSaldoSlide(app) {
+    if (!app || typeof app.pedirSaldos !== "function") return;
+    const emp = (app.selectedCompanyIds || []).slice();
+    const cc = (app.selectedCcIds || []).slice();
+    let chave = "";
+    app.selectedCompanyIds = [this.empresaSlide(app)];
+    app.selectedCcIds = [];
+    try {
+      chave = typeof app.chaveSaldos === "function" ? app.chaveSaldos() : "";
+      app.pedirSaldos();
+    } finally {
+      app.selectedCompanyIds = emp;
+      app.selectedCcIds = cc;
+    }
+    this._chaveSaldo = chave;
+    for (let i = 0; i < 120; i++) {
+      const st = app._saldoEstado;
+      if (chave && String(app._saldoChave || "") === chave && st && st !== "lendo") return;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
   },
 
   barras() {
@@ -278,14 +312,14 @@ const OrcamentoDfcSlidesApp = {
       { i: 8, rotulo: "3T27" }
     ];
     const minLeft = ((s.minI + 1) / 12) * 100;
-    const pontos = marcos.map((m) => {
+    const pontos = s.aguardando ? "" : marcos.map((m) => {
       const left = ((m.i + 1) / 12) * 100;
       return `<span class="orc-slide-pt" style="left:${left}%">
         <span class="orc-slide-acima"><b>${m.rotulo}</b><strong>${this.mi(y[m.i].fim, 1)} M</strong><small>saldo parcial acumulado</small></span>
         <i></i>
       </span>`;
     }).join("");
-    const exposicao = `<span class="orc-slide-pt is-min" style="left:${minLeft}%">
+    const exposicao = s.aguardando ? "" : `<span class="orc-slide-pt is-min" style="left:${minLeft}%">
       <i></i>
       <span class="orc-slide-abaixo"><strong>${this.mi(y[s.minI].fim, 1)} M</strong><small>exposição máxima ${this.MESES_LONGOS[s.minI]}/27</small></span>
     </span>`;
@@ -313,9 +347,10 @@ const OrcamentoDfcSlidesApp = {
         <strong>${this.mi(v, Math.abs(v) >= 100000 ? 1 : 2)}</strong>
       </div>`;
     }).join("");
-    const nota = s.temCaixa
-      ? ""
-      : `<p class="orc-slide-nota">A régua parte de zero enquanto o saldo de caixa de dezembro de 2026 não estiver carregado. A variação de cada mês é a do DFC 2027.</p>`;
+    const nota = s.aguardando
+      ? `<p class="orc-slide-nota">Lendo o saldo de caixa de 2026 para o saldo inicial de janeiro de 2027.</p>`
+      : (s.temCaixa ? "" : `<p class="orc-slide-nota">A régua parte de zero enquanto o saldo de caixa de dezembro de 2026 não estiver carregado. A variação de cada mês é a do DFC 2027.</p>`);
+    const hero = (v) => s.aguardando ? "…" : (v < 0 ? "(" + this.miHero(v).replace(" M", "") + ") M" : this.miHero(v));
     const verdes = ["#14532d", "#15803d", "#22c55e", "#86efac"];
     const quentes = ["#b91c1c", "#ea580c", "#f97316", "#fb923c", "#fdba74", "#fed7aa"];
     return `<article class="orc-slide">
@@ -327,7 +362,7 @@ const OrcamentoDfcSlidesApp = {
       <h2>Fluxo de caixa</h2>
       <div class="orc-regua">
         <div class="orc-regua-ponta">
-          <strong>${ini < 0 ? "(" + this.miHero(ini).replace(" M", "") + ") M" : this.miHero(ini)}</strong>
+          <strong>${hero(ini)}</strong>
           <span>Saldo inicial</span>
         </div>
         <div class="orc-regua-miolo">
@@ -336,7 +371,7 @@ const OrcamentoDfcSlidesApp = {
           ${exposicao}
         </div>
         <div class="orc-regua-ponta is-fim">
-          <strong>${fim < 0 ? "(" + this.miHero(fim).replace(" M", "") + ") M" : this.miHero(fim)}</strong>
+          <strong>${hero(fim)}</strong>
           <span>Saldo final</span>
         </div>
       </div>
@@ -369,13 +404,17 @@ const OrcamentoDfcSlidesApp = {
     const saldoFim = s.map((p) => p.fim);
     const var27 = q.variacao;
     const var26 = q.variacao26;
-    const extra = (nome, meses, cls) => {
-      const t = this.total(meses);
-      return `<tr class="${cls}"><th>${nome}</th>${meses.map((v) => cel(v, false)).join("")}${cel(t, true)}<td>—</td><td>—</td></tr>`;
+    const extraSaldo = (nome, meses, total) => {
+      if (q.saldos.aguardando) {
+        return `<tr class="is-saldo"><th>${nome}</th>${meses.map(() => "<td>…</td>").join("")}<td>…</td><td>—</td><td>—</td></tr>`;
+      }
+      return `<tr class="is-saldo"><th>${nome}</th>${meses.map((v) => cel(v, false)).join("")}${cel(total, true)}<td>—</td><td>—</td></tr>`;
     };
-    const nota = q.saldos.temCaixa
-      ? "Janeiro de 2027 começa no saldo final de 2026. Cada mês seguinte parte do saldo final do anterior."
-      : "O saldo inicial fica em zero enquanto o caixa de dezembro de 2026 não estiver carregado. A variação de caixa é a do DFC 2027.";
+    const nota = q.saldos.aguardando
+      ? "Lendo o saldo de caixa de 2026 para o saldo inicial de janeiro de 2027."
+      : (q.saldos.temCaixa
+        ? "Janeiro de 2027 começa no saldo final de 2026. Cada mês seguinte parte do saldo final do anterior."
+        : "O saldo inicial fica em zero enquanto o caixa de dezembro de 2026 não estiver carregado. A variação de caixa é a do DFC 2027.");
     return `<article class="orc-slide">
       <header class="orc-slide-top">
         <span class="orc-slide-flag"></span>
@@ -387,8 +426,8 @@ const OrcamentoDfcSlidesApp = {
           <thead><tr><th></th>${cab}<th>Total</th><th>2026</th><th>Variação R$</th></tr></thead>
           <tbody>
             ${corpo}
-            ${extra("Saldo inicial", saldoIni, "is-saldo")}
-            ${extra("Saldo final", saldoFim, "is-saldo")}
+            ${extraSaldo("Saldo inicial", saldoIni, saldoIni[0])}
+            ${extraSaldo("Saldo final", saldoFim, saldoFim[11])}
             <tr class="is-var"><th>Variação de caixa</th>${var27.map((v) => cel(v, false)).join("")}${cel(this.total(var27), true)}${cel(this.total(var26), false)}${cel(this.total(var27) - this.total(var26), false)}</tr>
           </tbody>
         </table>
@@ -422,6 +461,8 @@ const OrcamentoDfcSlidesApp = {
         }
       }
     } catch (e) {}
+    if (token !== this._token) return;
+    try { await this.garantirSaldoSlide(app); } catch (e) {}
     if (token !== this._token) return;
     if (typeof OrcamentoApp !== "undefined" && OrcamentoApp.aba !== aba) return;
     const root = document.getElementById("orcamento-root");
