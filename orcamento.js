@@ -121,7 +121,9 @@ const OrcamentoApp = {
       { id: "impostos", label: "Calcular impostos", icon: "calculator" },
       { id: "repasses", label: "Repasses", icon: "hand-coins" },
       { id: "aportes", label: "Aportes", icon: "landmark" },
-      { id: "lucros", label: "Lucros recebidos", icon: "wallet" }
+      { id: "lucros", label: "Lucros recebidos", icon: "wallet" },
+      { id: "painel", label: "Painel DFC", icon: "layout-dashboard" },
+      { id: "mensal", label: "DFC mensal", icon: "table" }
     ];
     return `<div class="ml-tabs orc-abas" role="tablist">${tabs.map((t) => `
       <button type="button" role="tab" aria-selected="${atual === t.id ? "true" : "false"}"
@@ -131,7 +133,7 @@ const OrcamentoApp = {
   },
 
   setAba(id) {
-    const ok = { dfc: 1, impostos: 1, repasses: 1, aportes: 1, lucros: 1 };
+    const ok = { dfc: 1, impostos: 1, repasses: 1, aportes: 1, lucros: 1, painel: 1, mensal: 1 };
     this.aba = ok[id] ? id : "receitas";
     this.render();
   },
@@ -153,6 +155,10 @@ const OrcamentoApp = {
     }
     if ((this.aba === "aportes" || this.aba === "lucros") && typeof OrcamentoCaixaApp !== "undefined") {
       OrcamentoCaixaApp.render(root, this.aba);
+      return;
+    }
+    if ((this.aba === "painel" || this.aba === "mensal") && typeof OrcamentoDfcSlidesApp !== "undefined") {
+      OrcamentoDfcSlidesApp.render(root, this.aba);
       return;
     }
     root.innerHTML = `

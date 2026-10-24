@@ -98,6 +98,7 @@ const ResultadoCaixaApp = {
   },
 
   lerLocal() {
+    this.carregarFora();
     this.acervo = { anterior: {}, meses: {} };
     let novo = null;
     try { novo = JSON.parse(localStorage.getItem("rc_orc_v2") || "null"); } catch (e) { novo = null; }
@@ -562,7 +563,10 @@ const ResultadoCaixaApp = {
     const nomes = {};
     const por = doc.porArquivo;
     if (por && typeof por === "object" && !Array.isArray(por) && Object.keys(por).length) {
-      Object.keys(por).forEach((nome) => this.juntarForecast({ contas: contas, nomes: nomes }, por[nome]));
+      Object.keys(por).forEach((nome) => {
+        if (this.estaFora("fc", nome)) return;
+        this.juntarForecast({ contas: contas, nomes: nomes }, por[nome]);
+      });
     } else if (doc.contas) {
       this.juntarForecast({ contas: contas, nomes: nomes }, doc);
     }
@@ -584,6 +588,7 @@ const ResultadoCaixaApp = {
     }
     const porEmp = {};
     lista.forEach((arq) => {
+      if (arq.nome && this.estaFora("fc", arq.nome)) return;
       const empArq = Number(arq.empresa) || this.empresaId(arq.nome) || this.empresaId(arq.rotulo) || 0;
       Object.keys(arq.contas || {}).forEach((cc) => {
         const nomeCc = (arq.nomes || {})[cc] || "";
@@ -984,7 +989,7 @@ const ResultadoCaixaApp = {
     let s = 0;
     Object.keys(a.arquivos || {}).forEach((nome) => {
       const arq = a.arquivos[nome];
-      if (!arq) return;
+      if (!arq || this.estaFora(String(ano), nome)) return;
       const pct = this.agrupar ? this.pctArquivo(arq, nome) : 1;
       if (lado === "entradas") {
         const pb = this.valorPowerBi(arq, ccId, mes, campo, ate);
@@ -1025,6 +1030,70 @@ const ResultadoCaixaApp = {
 
   normCode(v) {
     return String(v == null ? "" : v).trim().replace(/\s+/g, "");
+  },
+
+  carregarFora() {
+    try { this.foraMap = JSON.parse(localStorage.getItem("rc_arq_fora") || "{}") || {}; }
+    catch (e) { this.foraMap = {}; }
+    if (!this.foraMap || typeof this.foraMap !== "object") this.foraMap = {};
+  },
+
+  chaveFora(tipo, nome) {
+    return String(tipo || "") + "|" + String(nome || "");
+  },
+
+  estaFora(tipo, nome) {
+    return !!(this.foraMap && this.foraMap[this.chaveFora(tipo, nome)]);
+  },
+
+  alternarOlho(tipo, chave) {
+    let nome = chave;
+    try { nome = decodeURIComponent(chave); } catch (e) {}
+    if (!this.foraMap) this.foraMap = {};
+    const k = this.chaveFora(tipo, nome);
+    if (this.foraMap[k]) delete this.foraMap[k];
+    else this.foraMap[k] = 1;
+    try { localStorage.setItem("rc_arq_fora", JSON.stringify(this.foraMap)); } catch (e) {}
+    this._dfcKey = "";
+    this._dfcPedido = "";
+    this.aplicarForecastVista();
+    this.render();
+  },
+
+  nomeUsualEmpresa(id) {
+    const n = Number(id) || 0;
+    if (!n) return "";
+    const custom = this.empresasCustom();
+    const cfg = custom[n] || custom[String(n)] || {};
+    return String(cfg.nome_usual || "").trim();
+  },
+
+  rotuloArquivo(nome, arq) {
+    const emp = Number(arq && arq.empresa) || this.empresaId(nome) || this.empresaId(arq && arq.rotulo) || 0;
+    let curto = emp ? this.nomeUsualEmpresa(emp) : "";
+    if (!curto) {
+      curto = String((arq && arq.rotulo) || this.nomeEmpresaArquivo(nome) || "")
+        .replace(/^empresa\s+\d+$/i, "")
+        .trim();
+    }
+    if (emp && curto) return emp + " - " + curto;
+    if (emp) return String(emp);
+    return curto || String(nome || "");
+  },
+
+  chipArquivo(tipo, nome, arq, extra) {
+    const fora = this.estaFora(tipo, nome);
+    const chave = encodeURIComponent(nome);
+    const rotulo = this.rotuloArquivo(nome, arq);
+    const remover = String(tipo) === "fc"
+      ? "ResultadoCaixaApp.removerForecastArquivo('" + chave + "')"
+      : "ResultadoCaixaApp.removerArquivo('" + tipo + "','" + chave + "')";
+    const dica = fora ? "Fora do resultado. Clique para incluir." : "Entra no resultado. Clique para deixar de fora.";
+    return `<span class="rcx-arq${fora ? " is-off" : ""}" title="${caixaEsc(nome)}">
+      <button type="button" class="rcx-olho" title="${dica}" onclick="ResultadoCaixaApp.alternarOlho('${tipo}','${chave}')"><i data-lucide="${fora ? "eye-off" : "eye"}"></i></button>
+      <span class="rcx-arq-nome">${caixaEsc(rotulo)}${extra ? " · " + caixaEsc(extra) : ""}</span>
+      <button type="button" class="rcx-x" title="Remover" onclick="${remover}"><i data-lucide="x"></i></button>
+    </span>`;
   },
 
   nomeEmpresaArquivo(nome) {
@@ -2323,31 +2392,33 @@ const ResultadoCaixaApp = {
     Object.keys(this.forecasts || {}).forEach((ym) => {
       const por = (this.forecasts[ym] && this.forecasts[ym].porArquivo) || {};
       Object.keys(por).forEach((nome) => {
-        if (!mapa.has(nome)) {
-          const arq = por[nome] || {};
-          mapa.set(nome, { rotulo: arq.rotulo || this.nomeEmpresaArquivo(nome) || nome, meses: [] });
-        }
+        if (!mapa.has(nome)) mapa.set(nome, { arq: por[nome] || {}, meses: [] });
         mapa.get(nome).meses.push(ym);
       });
     });
     if (!mapa.size) return `<span class="rcx-muted">Nenhum forecast.</span>`;
-    return Array.from(mapa.entries()).sort((a, b) => String(a[1].rotulo).localeCompare(String(b[1].rotulo), "pt")).map(([nome, info]) => {
+    return Array.from(mapa.entries()).sort((a, b) => {
+      const ia = Number(a[1].arq.empresa) || this.empresaId(a[0]) || 9999;
+      const ib = Number(b[1].arq.empresa) || this.empresaId(b[0]) || 9999;
+      if (ia !== ib) return ia - ib;
+      return this.rotuloArquivo(a[0], a[1].arq).localeCompare(this.rotuloArquivo(b[0], b[1].arq), "pt");
+    }).map(([nome, info]) => {
       const meses = info.meses.slice().sort();
       const faixa = meses.map((ym) => (this.MESES[Number(ym.slice(5, 7)) - 1] || ym) + "/" + ym.slice(0, 4));
       const periodo = faixa.length > 1 ? (faixa[0] + " a " + faixa[faixa.length - 1]) : (faixa[0] || "");
-      const chave = encodeURIComponent(nome);
-      return `<span class="rcx-arq" title="${caixaEsc(nome)}">${caixaEsc(info.rotulo)}${periodo ? " · " + caixaEsc(periodo) : ""} <button type="button" onclick="ResultadoCaixaApp.removerForecastArquivo('${chave}')">tirar</button></span>`;
+      return this.chipArquivo("fc", nome, info.arq, periodo);
     }).join("");
   },
 
   chipsDoAno(y) {
     const a = this.anoDados(y);
     const arquivos = (a && a.arquivos) || {};
-    return Object.keys(arquivos).map((nome) => {
-      const rotulo = arquivos[nome].rotulo || this.nomeEmpresaArquivo(nome) || nome;
-      const chave = encodeURIComponent(nome);
-      return `<span class="rcx-arq" title="${caixaEsc(nome)}">${caixaEsc(rotulo)} <button type="button" onclick="ResultadoCaixaApp.removerArquivo('${y}','${chave}')">tirar</button></span>`;
-    }).join("");
+    return Object.keys(arquivos).map((nome) => ({ nome: nome, arq: arquivos[nome] || {} })).sort((a, b) => {
+      const ia = Number(a.arq.empresa) || this.empresaId(a.nome) || 9999;
+      const ib = Number(b.arq.empresa) || this.empresaId(b.nome) || 9999;
+      if (ia !== ib) return ia - ib;
+      return this.rotuloArquivo(a.nome, a.arq).localeCompare(this.rotuloArquivo(b.nome, b.arq), "pt");
+    }).map((item) => this.chipArquivo(String(y), item.nome, item.arq, "")).join("");
   },
 
   faltaCentroNasSaidas() {
@@ -2357,6 +2428,7 @@ const ResultadoCaixaApp = {
       const a = this.anoDados(y);
       if (!a) return false;
       return Object.keys(a.arquivos || {}).some((n) => {
+        if (this.estaFora(String(y), n)) return false;
         const arq = a.arquivos[n];
         return arq && arq.contas && !(arq.contasPorCc && Object.keys(arq.contasPorCc).length);
       });
@@ -2574,6 +2646,7 @@ const ResultadoCaixaApp = {
     if (!a) return false;
     const chave = String(m);
     return Object.keys(a.arquivos || {}).some((nome) => {
+      if (this.estaFora(String(ano), nome)) return false;
       const arq = a.arquivos[nome] || {};
       const listas = [];
       if (arq.contasPorCc && Object.keys(arq.contasPorCc).length) {
@@ -2757,7 +2830,7 @@ const ResultadoCaixaApp = {
   semContas(ano) {
     const a = this.anoDados(ano);
     if (!a) return false;
-    const nomes = Object.keys(a.arquivos || {});
+    const nomes = Object.keys(a.arquivos || {}).filter((n) => !this.estaFora(String(ano), n));
     if (!nomes.length) return false;
     return nomes.every((n) => !a.arquivos[n].contas);
   },
@@ -2767,6 +2840,7 @@ const ResultadoCaixaApp = {
     if (!a) return 0;
     let s = 0;
     Object.keys(a.arquivos || {}).forEach((nome) => {
+      if (this.estaFora(String(ano), nome)) return;
       const arq = a.arquivos[nome] || {};
       const pct = this.pctArquivo(arq, nome);
       const porCc = arq.contasPorCc;
@@ -2908,6 +2982,7 @@ const ResultadoCaixaApp = {
     const grupos = defs.map((def) => ({ def: def, porEmp: {}, ccs: {} }));
     const vivo = (o, r) => Math.abs(o) > 0.5 || Math.abs(r) > 0.5;
     Object.keys(a.arquivos || {}).forEach((nome) => {
+      if (this.estaFora(String(ano), nome)) return;
       const arq = a.arquivos[nome] || {};
       const empNum = Number(arq.empresa) || this.empresaId(nome) || 0;
       const key = empNum ? String(empNum) : ("arq:" + nome);
@@ -3105,6 +3180,7 @@ const ResultadoCaixaApp = {
       const nomes = Object.keys(arquivos);
       for (let j = 0; j < nomes.length; j++) {
         const arq = arquivos[nomes[j]];
+        if (this.estaFora(String(ordem[i]).slice(0, 4), nomes[j])) continue;
         if (this.empresaDoArquivoMl(nomes[j], arq) === 1) return arq;
       }
     }
