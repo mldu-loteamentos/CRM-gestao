@@ -10603,6 +10603,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .orc-dfc-tools { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin: 12px 0; }
 .orc-rep-fc { background: #f8fafc; }
 .orc-dfc-page .ml-emp-filter { flex: 0 0 340px; width: 340px; max-width: 420px; }
+.orc-dfc-page #orc-dfc-plan-box .ml-emp-filter { flex-basis: 420px; width: 420px; max-width: 480px; }
 .orc-dfc-up, .orc-dfc-base {
   height: 34px; border-radius: 6px; border: 1px solid #105436; background: #fff; color: #105436;
   font-weight: 800; padding: 0 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem;

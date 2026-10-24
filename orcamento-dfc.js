@@ -5,10 +5,13 @@ const OrcamentoDfcApp = {
   MESES: ["JAN", "FEV", "MAR", "ABR", "MAI", "JUN", "JUL", "AGO", "SET", "OUT", "NOV", "DEZ"],
   selectedCompanyIds: [],
   selectedCcIds: [],
+  selectedPlanIds: [],
   companyDropOpen: false,
   companyQuery: "",
   ccDropOpen: false,
   ccQuery: "",
+  planDropOpen: false,
+  planQuery: "",
   expanded: new Set(),
   _expandInited: false,
   expanded2: new Set(),
@@ -130,13 +133,90 @@ const OrcamentoDfcApp = {
     return this.lines().filter((l) => {
       if (emp.size && !emp.has(String(l.e))) return false;
       if (cc.size && !cc.has(String(l.cc))) return false;
+      if (!this.planOn(l.conta)) return false;
       return true;
+    });
+  },
+
+  codigoPlano(conta) {
+    const raw = String(conta || "").trim();
+    if (!raw) return "";
+    if (raw.indexOf(".") >= 0) return raw;
+    if (/^\d+$/.test(raw) && raw.length >= 3) {
+      const first = raw.charAt(0);
+      let rest = raw.slice(1);
+      if (rest.length % 2 === 1) rest = "0" + rest;
+      return [first].concat(rest.match(/.{1,2}/g) || []).join(".");
+    }
+    return raw;
+  },
+
+  planos() {
+    const emp = new Set(this.selectedCompanyIds.map(String));
+    const cc = new Set(this.selectedCcIds.map(String));
+    const map = new Map();
+    const add = (conta, nome) => {
+      const id = this.codigoPlano(conta);
+      if (!id) return;
+      const n = String(nome || "").trim();
+      if (!map.has(id)) map.set(id, n);
+      else if (!map.get(id) && n) map.set(id, n);
+    };
+    this.lines().forEach((l) => {
+      if (emp.size && !emp.has(String(l.e))) return;
+      if (cc.size && !cc.has(String(l.cc))) return;
+      add(l.conta, l.cn);
+    });
+    (this._lancamentos2026 || []).forEach((c) => {
+      if (emp.size && !emp.has(String(c.companyId))) return;
+      if (!this.ccCabe(c.cc)) return;
+      add(c.code, c.cn);
+    });
+    return [...map.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => String(a.id).localeCompare(String(b.id), "pt-BR", { numeric: true }));
+  },
+
+  planOn(conta) {
+    const ids = this.selectedPlanIds || [];
+    if (!ids.length) return true;
+    const code = String(conta || "").trim();
+    if (!code) return false;
+    const dig = code.replace(/\D/g, "");
+    return ids.some((id) => {
+      const sid = String(id || "").trim();
+      if (!sid) return false;
+      if (code === sid || code.indexOf(sid + ".") === 0) return true;
+      const sd = sid.replace(/\D/g, "");
+      if (!dig || !sd) return false;
+      return dig === sd || dig.indexOf(sd) === 0;
+    });
+  },
+
+  filtroPlanoLigado() {
+    const n = (this.selectedPlanIds || []).length;
+    if (!n) return false;
+    const todos = this.planos().length;
+    return !todos || n < todos;
+  },
+
+  podarLinhasPlano(rows) {
+    if (!this.filtroPlanoLigado()) return rows || [];
+    return (rows || []).filter((r) => {
+      const meses = (r.months || []).some((v) => Math.abs(Number(v) || 0) >= 0.005);
+      const base = (r.base || []).some((v) => Math.abs(Number(v) || 0) >= 0.005);
+      return meses || base || Math.abs(Number(r.total) || 0) >= 0.005 || Math.abs(Number(r.baseTotal) || 0) >= 0.005;
     });
   },
 
   podarCentros() {
     const vivos = new Set(this.empreendimentos().map((c) => String(c.id)));
     this.selectedCcIds = this.selectedCcIds.filter((id) => vivos.has(String(id)));
+  },
+
+  podarPlanos() {
+    const vivos = new Set(this.planos().map((p) => String(p.id)));
+    this.selectedPlanIds = (this.selectedPlanIds || []).filter((id) => vivos.has(String(id)));
   },
 
   z12() {
@@ -251,6 +331,7 @@ const OrcamentoDfcApp = {
     (this._lancamentos2026 || []).forEach((c) => {
       if (this.selectedCompanyIds.length && this.selectedCompanyIds.map(String).indexOf(String(c.companyId)) < 0) return;
       if (!this.ccCabe(c.cc)) return;
+      if (!this.planOn(c.code)) return;
       por(c.gid, c.code, c.cc, c.i, c.v);
     });
     const app = window.ResultadoCaixaApp;
@@ -271,6 +352,7 @@ const OrcamentoDfcApp = {
         Object.keys(arq.contas || {}).forEach((cc) => {
           if (!this.ccCabe(cc)) return;
           Object.keys(arq.contas[cc] || {}).forEach((code) => {
+            if (!this.planOn(code)) return;
             const info = arq.contas[cc][code] || {};
             const gid = gidDe(code, info.nome, "");
             const meses = info.meses || {};
@@ -1219,7 +1301,7 @@ const OrcamentoDfcApp = {
     const foraLista = [...fora.values()]
       .filter((x) => Math.abs(x.total) >= 0.005)
       .sort((a, b) => String(a.conta).localeCompare(String(b.conta), "pt-BR", { numeric: true }));
-    return { rows, fora: foraLista };
+    return { rows: this.podarLinhasPlano(rows), fora: foraLista };
   },
 
   toggle(id) {
@@ -1310,6 +1392,7 @@ const OrcamentoDfcApp = {
       const emp = String(c.companyId || "");
       if (empFiltro.size && !empFiltro.has(emp)) return;
       if (!this.ccCabe(c.cc)) return;
+      if (!this.planOn(c.code)) return;
       const g = byId[c.gid];
       if (!g || g.type !== "resultado") return;
       const cc = ccIdDe(c.cc);
@@ -1339,6 +1422,7 @@ const OrcamentoDfcApp = {
           if (!this.ccCabe(ccRaw)) return;
           const cc = ccIdDe(ccRaw);
           Object.keys(arq.contas[ccRaw] || {}).forEach((code) => {
+            if (!this.planOn(code)) return;
             const info = arq.contas[ccRaw][code] || {};
             const gid = this.grupoDaConta(code, info.nome);
             const g = gid ? byId[gid] : null;
@@ -1575,7 +1659,7 @@ const OrcamentoDfcApp = {
     const foraLista = [...fora.values()]
       .filter((x) => Math.abs(x.total) >= 0.005)
       .sort((a, b) => String(a.conta).localeCompare(String(b.conta), "pt-BR", { numeric: true }));
-    return { rows: rows, fora: foraLista };
+    return { rows: this.podarLinhasPlano(rows), fora: foraLista };
   },
 
   render(root) {
@@ -1592,6 +1676,7 @@ const OrcamentoDfcApp = {
         <div class="orc-dfc-tools">
           <div id="orc-dfc-emp-box"></div>
           <div id="orc-dfc-cc-box"></div>
+          <div id="orc-dfc-plan-box"></div>
           <div class="orc-dfc-vars">
             <label class="moura-switch">
               <input type="checkbox" id="orc-dfc-var-rs" ${this.varRs ? "checked" : ""}>
@@ -1619,6 +1704,7 @@ const OrcamentoDfcApp = {
     this.paintMeta(src);
     this.paintEmp();
     this.paintCc();
+    this.paintPlan();
     this.paintBody();
     const up = document.getElementById("orc-dfc-up");
     const file = document.getElementById("orc-dfc-file");
@@ -2362,7 +2448,9 @@ const OrcamentoDfcApp = {
         this.companyDropOpen = !this.companyDropOpen;
         if (this.companyDropOpen) {
           this.ccDropOpen = false;
+          this.planDropOpen = false;
           this.paintCc();
+          this.paintPlan();
         }
         this.paintEmp();
       },
@@ -2387,24 +2475,30 @@ const OrcamentoDfcApp = {
         }
         this.companyDropOpen = true;
         this.podarCentros();
+        this.podarPlanos();
         this.paintEmp();
         this.paintCc();
+        this.paintPlan();
         this.paintBody();
       },
       selectAll: () => {
         this.selectedCompanyIds = items.map((c) => c.id);
         this.companyDropOpen = true;
         this.podarCentros();
+        this.podarPlanos();
         this.paintEmp();
         this.paintCc();
+        this.paintPlan();
         this.paintBody();
       },
       selectNone: () => {
         this.selectedCompanyIds = [];
         this.companyDropOpen = true;
         this.podarCentros();
+        this.podarPlanos();
         this.paintEmp();
         this.paintCc();
+        this.paintPlan();
         this.paintBody();
       }
     });
@@ -2435,7 +2529,9 @@ const OrcamentoDfcApp = {
         this.ccDropOpen = !this.ccDropOpen;
         if (this.ccDropOpen) {
           this.companyDropOpen = false;
+          this.planDropOpen = false;
           this.paintEmp();
+          this.paintPlan();
         }
         this.paintCc();
       },
@@ -2460,19 +2556,96 @@ const OrcamentoDfcApp = {
           this.selectedCcIds = this.selectedCcIds.filter((x) => x !== sid);
         }
         this.ccDropOpen = true;
+        this.podarPlanos();
         this.paintCc();
+        this.paintPlan();
         this.paintBody();
       },
       selectAll: () => {
         this.selectedCcIds = items.map((c) => c.id);
         this.ccDropOpen = true;
+        this.podarPlanos();
         this.paintCc();
+        this.paintPlan();
         this.paintBody();
       },
       selectNone: () => {
         this.selectedCcIds = [];
         this.ccDropOpen = true;
+        this.podarPlanos();
         this.paintCc();
+        this.paintPlan();
+        this.paintBody();
+      }
+    });
+    if (window.lucide && lucide.createIcons) lucide.createIcons();
+  },
+
+  paintPlan() {
+    const box = document.getElementById("orc-dfc-plan-box");
+    if (!box || !window.MlEmpresaFilter) return;
+    const items = this.planos();
+    const nouns = {
+      singular: "plano",
+      plural: "planos",
+      none: "Nenhum plano",
+      noMatch: "Nenhum plano com esse nome."
+    };
+    box.innerHTML = MlEmpresaFilter.html({
+      id: "orc-dfc-plan",
+      label: "Plano financeiro",
+      items,
+      selectedIds: (this.selectedPlanIds || []).map(String),
+      open: this.planDropOpen,
+      query: this.planQuery,
+      emptyMeansAll: true,
+      nouns
+    });
+    MlEmpresaFilter.bind("orc-dfc-plan", {
+      toggleOpen: () => {
+        this.planDropOpen = !this.planDropOpen;
+        if (this.planDropOpen) {
+          this.companyDropOpen = false;
+          this.ccDropOpen = false;
+          this.paintEmp();
+          this.paintCc();
+        }
+        this.paintPlan();
+      },
+      setQuery: (q) => {
+        this.planQuery = q || "";
+        const list = document.getElementById("orc-dfc-plan-list");
+        if (list) {
+          list.innerHTML = MlEmpresaFilter.listHtml({
+            id: "orc-dfc-plan",
+            items,
+            selectedIds: this.selectedPlanIds,
+            query: this.planQuery,
+            nouns
+          });
+        }
+      },
+      toggleId: (id, on) => {
+        const sid = String(id);
+        if (on) {
+          if (!this.selectedPlanIds.includes(sid)) this.selectedPlanIds.push(sid);
+        } else {
+          this.selectedPlanIds = this.selectedPlanIds.filter((x) => x !== sid);
+        }
+        this.planDropOpen = true;
+        this.paintPlan();
+        this.paintBody();
+      },
+      selectAll: () => {
+        this.selectedPlanIds = items.map((p) => p.id);
+        this.planDropOpen = true;
+        this.paintPlan();
+        this.paintBody();
+      },
+      selectNone: () => {
+        this.selectedPlanIds = [];
+        this.planDropOpen = true;
+        this.paintPlan();
         this.paintBody();
       }
     });
@@ -2712,6 +2885,7 @@ const OrcamentoDfcApp = {
     this.paintMeta();
     this.paintEmp();
     this.paintCc();
+    this.paintPlan();
     this.paintBody();
   },
 
@@ -2739,6 +2913,7 @@ const OrcamentoDfcApp = {
     this.paintMeta();
     this.paintEmp();
     this.paintCc();
+    this.paintPlan();
     this.paintBody();
     if (pack) this.salvarOrcamentoNuvem(pack);
   },
@@ -2752,6 +2927,9 @@ const OrcamentoDfcApp = {
     try { localStorage.removeItem(this.LS); } catch (e) {}
     this.selectedCompanyIds = [];
     this.selectedCcIds = [];
+    this.selectedPlanIds = [];
+    this.planDropOpen = false;
+    this.planQuery = "";
     this._expandInited = false;
     this.expanded = new Set();
     const base = document.getElementById("orc-dfc-base");
@@ -2759,6 +2937,7 @@ const OrcamentoDfcApp = {
     this.paintMeta();
     this.paintEmp();
     this.paintCc();
+    this.paintPlan();
     this._caixaChave = "";
     this.paintBody();
     this.carregarBase();

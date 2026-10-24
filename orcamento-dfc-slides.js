@@ -76,8 +76,10 @@ const OrcamentoDfcSlidesApp = {
     if (typeof app.garantir === "function") app.garantir();
     const emp = (app.selectedCompanyIds || []).slice();
     const cc = (app.selectedCcIds || []).slice();
+    const planos = (app.selectedPlanIds || []).slice();
     app.selectedCompanyIds = [this.empresaSlide(app)];
     app.selectedCcIds = [];
+    app.selectedPlanIds = [];
     let pack = null;
     try {
       pack = app.montar();
@@ -89,6 +91,7 @@ const OrcamentoDfcSlidesApp = {
     finally {
       app.selectedCompanyIds = emp;
       app.selectedCcIds = cc;
+      app.selectedPlanIds = planos;
     }
     const byId = {};
     ((pack && pack.rows) || []).forEach((r) => { if (r && r.id && !byId[r.id]) byId[r.id] = r; });
