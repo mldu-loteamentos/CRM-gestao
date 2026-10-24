@@ -53,6 +53,16 @@ const OrcamentoDfcSlidesApp = {
     return s || (cc ? String(cc) : "Sem projeto");
   },
 
+  appDfc() {
+    if (typeof OrcamentoDfcApp !== "undefined") return OrcamentoDfcApp;
+    return window.OrcamentoDfcApp || null;
+  },
+
+  fluxoDfc() {
+    if (typeof FluxoCaixaApp !== "undefined") return FluxoCaixaApp;
+    return window.FluxoCaixaApp || null;
+  },
+
   empresaSlide(app) {
     const lista = app && typeof app.empresas === "function" ? app.empresas() : [];
     const achou = lista.find((e) => String(e.id) === "1")
@@ -61,7 +71,7 @@ const OrcamentoDfcSlidesApp = {
   },
 
   quadro() {
-    const app = window.OrcamentoDfcApp;
+    const app = this.appDfc();
     if (!app || typeof app.montar !== "function") return null;
     if (typeof app.garantir === "function") app.garantir();
     const emp = (app.selectedCompanyIds || []).slice();
@@ -69,7 +79,7 @@ const OrcamentoDfcSlidesApp = {
     app.selectedCompanyIds = [this.empresaSlide(app)];
     app.selectedCcIds = [];
     let pack = null;
-    try { pack = app.montar({ aberto: true }); }
+    try { pack = app.montar(); }
     finally {
       app.selectedCompanyIds = emp;
       app.selectedCcIds = cc;
@@ -147,7 +157,7 @@ const OrcamentoDfcSlidesApp = {
   },
 
   saldos(variacao, variacao26) {
-    const app = window.OrcamentoDfcApp;
+    const app = this.appDfc();
     let fim26 = 0;
     let temCaixa = false;
     try {
@@ -174,8 +184,8 @@ const OrcamentoDfcSlidesApp = {
   },
 
   barras() {
-    const app = window.OrcamentoDfcApp;
-    const fluxo = window.FluxoCaixaApp;
+    const app = this.appDfc();
+    const fluxo = this.fluxoDfc();
     const linhas = (app && typeof app.lines === "function") ? app.lines() : [];
     const porGrupo = {};
     const porEmp = {};
@@ -400,7 +410,7 @@ const OrcamentoDfcSlidesApp = {
   },
 
   async atualizar(aba) {
-    const app = window.OrcamentoDfcApp;
+    const app = this.appDfc();
     if (!app) return;
     const token = (this._token = (this._token || 0) + 1);
     const pronto = app._caixaEstado === "ok" || app._caixaEstado === "vazio" || app._caixaEstado === "erro";

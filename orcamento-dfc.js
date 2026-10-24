@@ -18,7 +18,7 @@ const OrcamentoDfcApp = {
   _pronto: false,
   busy: false,
   erro: "",
-  varRs: true,
+  varRs: false,
   varPct: false,
 
   esc(s) {
