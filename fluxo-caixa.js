@@ -991,8 +991,9 @@ const FluxoCaixaApp = {
     }
   },
 
-  async buscarMovimentos(start, end) {
-    const chunks = await Promise.all(this.selectedCompanyIds.map(async id => {
+  async buscarMovimentos(start, end, companyIds) {
+    const ids = (companyIds && companyIds.length) ? companyIds : this.selectedCompanyIds;
+    const chunks = await Promise.all(ids.map(async id => {
       const data = await SiengeApiService.getBankMovements(start, end, {
         selectionType: "M",
         companyId: id
@@ -1738,10 +1739,13 @@ const FluxoCaixaApp = {
   rowClass(r) {
     if (r.isCostCenter) return "fc-r-cc";
     if (r.isAccount) return "fc-r-acc";
-    if (r.type === "formula") return "fc-r-formula";
-    if (r.type === "resultado") return "fc-r-res";
-    if (r.type === "total_n1") return "fc-r-n1";
-    return "fc-r-node";
+    let base = "fc-r-node";
+    if (r.type === "formula") base = "fc-r-formula";
+    else if (r.type === "total_n1") base = "fc-r-n1";
+    if (r.id === "g_08") base += " fc-r-fcf";
+    else if (r.id === "g_03") base += " fc-r-forte";
+    else if (r.id === "g_02" || r.id === "g_04" || r.id === "g_05") base += " fc-r-saida";
+    return base;
   },
 
   thPeriodo(p, extra, aberto) {

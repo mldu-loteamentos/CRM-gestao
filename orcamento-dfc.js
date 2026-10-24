@@ -428,7 +428,8 @@ const OrcamentoDfcApp = {
           const i = Number(String(a.month || "").slice(5, 7)) - 1;
           if (!(i >= 0) || i >= corte || !valor) continue;
           const code = String(a.categoryId || "");
-          const cc = this.ccDoMovimento(a);
+          const brutoCc = fluxo && typeof fluxo.ccIdOf === "function" ? fluxo.ccIdOf(a.costCenterId) : "";
+          const cc = brutoCc ? this.ccNorm(brutoCc) : "—";
           const chave = gid + "\n" + code + "\n" + cc;
           let row = map.get(chave);
           if (!row) {
@@ -469,6 +470,23 @@ const OrcamentoDfcApp = {
     return lista;
   },
 
+  caixaCobre(fluxo, inicio, fim) {
+    if (!fluxo || !Array.isArray(fluxo.movements) || !fluxo.loadedStart || !fluxo.loadedEnd) return false;
+    return String(fluxo.loadedStart) <= inicio && String(fluxo.loadedEnd) >= fim;
+  },
+
+  movimentosReusados(fluxo, empresas, inicio, fim) {
+    if (!this.caixaCobre(fluxo, inicio, fim)) return { ids: new Set(), movs: [] };
+    const loaded = new Set((fluxo.loadedCompanyIds || []).map(String));
+    const ids = new Set((empresas || []).map(String).filter((id) => loaded.has(id)));
+    const movs = (fluxo.movements || []).filter((m) => {
+      if (!ids.has(String((m && m.companyId) || ""))) return false;
+      const d = typeof fluxo.cashDate === "function" ? fluxo.cashDate(m) : "";
+      return d && d >= inicio && d <= fim;
+    });
+    return { ids: ids, movs: movs };
+  },
+
   async garantirMovimentos2026() {
     const fim = this.fimRealizado2026();
     const empresas = this.empresas().map((e) => String(e.id)).filter(Boolean);
@@ -478,7 +496,20 @@ const OrcamentoDfcApp = {
     if (fluxo && typeof fluxo.ensureCategories === "function") {
       try { await fluxo.ensureCategories(); } catch (e) {}
     }
-    this._movs2026 = await this.lerMovimentos(fim, empresas);
+    const inicio = "2026-01-01";
+    const ja = new Set((this._movs2026 || []).map((m) => String((m && m.companyId) || "")));
+    const reuso = this.movimentosReusados(fluxo, empresas, inicio, fim);
+    const faltam = empresas.filter((id) => !ja.has(id) && !reuso.ids.has(id));
+    let extra = [];
+    if (faltam.length) {
+      if (!fluxo || typeof fluxo.buscarMovimentos !== "function") {
+        extra = await this.lerMovimentos(fim, faltam);
+      } else {
+        extra = await fluxo.buscarMovimentos(inicio, fim, faltam);
+      }
+    }
+    const doReuso = (reuso.movs || []).filter((m) => !ja.has(String((m && m.companyId) || "")));
+    this._movs2026 = (this._movs2026 || []).concat(doReuso, extra || []);
     this._movsProntos = true;
     this._movChave = chave;
     this._itens2026 = null;
@@ -631,24 +662,26 @@ const OrcamentoDfcApp = {
     }
     let salvos = {};
     try { salvos = await this.lerRealizadoSalvo(fim, empresas); } catch (e) { salvos = {}; }
-    const faltam = empresas.filter((id) => !Object.prototype.hasOwnProperty.call(salvos, id));
     const publicar = (aviso) => {
       const todos = [];
       empresas.forEach((id) => {
         if (Object.prototype.hasOwnProperty.call(salvos, id)) todos.push.apply(todos, salvos[id] || []);
       });
       this._lancamentos2026 = todos;
-      this._caixaEstado = todos.length ? "ok" : (faltam.length ? "ok" : "vazio");
+      this._caixaEstado = todos.length ? "ok" : "vazio";
       this._caixaErro = "";
       this._caixaAviso = aviso || "";
       if (document.getElementById("orc-dfc-body")) this.paintBody();
     };
-    if (!faltam.length) {
+    const inicio = "2026-01-01";
+    const reuso = this.movimentosReusados(fluxo, empresas, inicio, fim);
+    const buscar = empresas.filter((id) => !reuso.ids.has(String(id)) && !Object.prototype.hasOwnProperty.call(salvos, id));
+    if (!buscar.length && !reuso.ids.size) {
       publicar("");
       this._caixaChave = chave;
       return;
     }
-    publicar("O realizado salvo já está na tela. Completando as empresas que ainda não foram gravadas.");
+    if (buscar.length) publicar("O realizado salvo já está na tela.");
     if (typeof fluxo.ensureCategories === "function") {
       try { await fluxo.ensureCategories(); } catch (e) {}
     }
@@ -657,45 +690,44 @@ const OrcamentoDfcApp = {
     grupos.forEach((g) => { if (g && g.id) byId[g.id] = g; });
     const corte = this.corteForecast();
     let falhaNuvem = false;
-    let puladas = 0;
-    for (let i = 0; i < faltam.length; i++) {
-      const id = faltam[i];
-      this.notaCaixa("Realizado até setembro · empresa " + id + " · " + (i + 1) + " de " + faltam.length);
+    let movs = (reuso.movs || []).slice();
+    if (buscar.length && typeof fluxo.buscarMovimentos === "function") {
+      this.notaCaixa("Lendo o realizado até setembro no caixa e banco…");
       await new Promise((resolve) => setTimeout(resolve, 0));
-      let data = null;
       try {
-        data = await this.comTempo(api.getBankMovements("2026-01-01", fim, { selectionType: "M", companyId: id }), 30000);
+        const novos = await fluxo.buscarMovimentos(inicio, fim, buscar);
+        movs = movs.concat(novos || []);
       } catch (e) {
-        puladas += 1;
-        continue;
+        publicar((e && e.message) || "Não consegui completar a leitura. O que já estava salvo continua na tela.");
+        return;
       }
-      const linhas = (data || []).map((m) => Object.assign({}, m, { companyId: (m && m.companyId) || id }));
-      let lista = [];
-      try { lista = await this.agregarMovimentos(linhas, id, fluxo, byId, corte); }
-      catch (e) { puladas += 1; continue; }
-      salvos[id] = lista;
-      try { await this.salvarRealizadoEmpresa(id, fim, lista); }
-      catch (e) { falhaNuvem = true; }
-      publicar("");
     }
-    publicar(
-      falhaNuvem ? "O realizado entrou na tela, mas uma empresa não ficou salva."
-        : (puladas ? "Algumas empresas não responderam e ficaram de fora nesta leitura." : "")
-    );
-    if (!puladas) this._caixaChave = chave;
-  },
-
-  comTempo(promise, ms) {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("tempo")), ms);
-      Promise.resolve(promise).then((valor) => {
-        clearTimeout(timer);
-        resolve(valor);
-      }, (erro) => {
-        clearTimeout(timer);
-        reject(erro);
-      });
+    const lista = movs.length ? await this.agregarMovimentos(movs, "", fluxo, byId, corte) : [];
+    const porEmp = {};
+    lista.forEach((r) => {
+      const id = String(r.companyId || "");
+      if (!id) return;
+      if (!porEmp[id]) porEmp[id] = [];
+      porEmp[id].push(r);
     });
+    const gravar = new Set();
+    reuso.ids.forEach((id) => gravar.add(String(id)));
+    buscar.forEach((id) => gravar.add(String(id)));
+    gravar.forEach((id) => { salvos[id] = porEmp[id] || []; });
+    const ja = new Set((this._movs2026 || []).map((m) => String((m && m.companyId) || "")));
+    this._movs2026 = (this._movs2026 || []).concat(movs.filter((m) => !ja.has(String((m && m.companyId) || ""))));
+    const comMov = new Set();
+    ja.forEach((id) => comMov.add(id));
+    gravar.forEach((id) => comMov.add(id));
+    this._movsProntos = empresas.every((id) => comMov.has(String(id)));
+    this._movChave = this._movsProntos ? chave : "";
+    this._itens2026 = null;
+    for (const id of gravar) {
+      try { await this.salvarRealizadoEmpresa(id, fim, salvos[id] || []); }
+      catch (e) { falhaNuvem = true; }
+    }
+    publicar(falhaNuvem ? "O realizado entrou na tela, mas uma empresa não ficou salva." : "");
+    this._caixaChave = chave;
   },
 
   ccNorm(cc) {

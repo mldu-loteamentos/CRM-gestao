@@ -4487,7 +4487,38 @@ body.fc-nome-dragging * {
 .fc-grid tr.fc-r-acc td.fc-td-name { background: #f8fafc; }
 .fc-grid tr.fc-r-node td.fc-td-name { background: #fff; }
 .fc-grid tr.fc-r-cc td,
-.fc-grid tr.fc-r-cc td.fc-td-name { background: #fff; color: #475569; font-weight: 500; }
+.fc-grid tr.fc-r-cc td.fc-td-name { background: #f8fafc; color: #334155; font-weight: 500; }
+.fc-grid tr.fc-r-formula td,
+.fc-grid tr.fc-r-formula td.fc-td-name { color: #064e3b; }
+.fc-grid tr.fc-r-saida td,
+.fc-grid tr.fc-r-saida td.fc-td-name { background: #fdecec; color: #7f1d1d; font-weight: 800; }
+.fc-grid tr.fc-r-forte td,
+.fc-grid tr.fc-r-forte td.fc-td-name { background: #f3b4b4; color: #6b1d1d; font-weight: 800; }
+.fc-grid tr.fc-r-fcf td,
+.fc-grid tr.fc-r-fcf td.fc-td-name,
+.fc-grid tr.fc-r-fcf td.fc-num.is-neg,
+.fc-grid tr.fc-r-fcf td.fc-num.is-pos,
+.fc-grid tr.fc-r-fcf td.fc-num.is-zero { background: #105436; color: #fff; font-weight: 800; }
+.fc-grid tbody tr:hover > td,
+.fc-grid tbody tr:hover > td.fc-td-name { background: #d1fae5; color: #064e3b; }
+.fc-grid tbody tr.fc-r-saida:hover > td,
+.fc-grid tbody tr.fc-r-saida:hover > td.fc-td-name { background: #f8b4b4; color: #6b1d1d; }
+.fc-grid tbody tr.fc-r-forte:hover > td,
+.fc-grid tbody tr.fc-r-forte:hover > td.fc-td-name { background: #e89090; color: #5c1515; }
+.fc-grid tbody tr.fc-r-fcf:hover > td,
+.fc-grid tbody tr.fc-r-fcf:hover > td.fc-td-name,
+.fc-grid tbody tr.fc-r-fcf:hover > td.fc-num.is-neg { background: #3d9b6e; color: #fff; box-shadow: inset 0 0 0 1px #d1fae5; }
+.fc-grid tbody tr.fc-r-formula:not(.fc-r-fcf):not(.fc-r-forte):hover > td,
+.fc-grid tbody tr.fc-r-n1:not(.fc-r-saida):hover > td,
+.fc-grid tbody tr.fc-r-formula:not(.fc-r-fcf):not(.fc-r-forte):hover > td.fc-td-name,
+.fc-grid tbody tr.fc-r-n1:not(.fc-r-saida):hover > td.fc-td-name { background: #bbf7d0; color: #064e3b; }
+.fc-grid tbody tr:hover > td.fc-num.is-neg { color: #991b1b; }
+.fc-grid tbody tr:hover > td.fc-num.is-pos { color: #105436; }
+.fc-grid tbody tr:hover > td.fc-num.is-zero { color: #94a3b8; }
+.fc-grid tbody tr.fc-r-fcf:hover > td.fc-num,
+.fc-grid tbody tr.fc-r-fcf:hover > td.fc-num.is-neg,
+.fc-grid tbody tr.fc-r-fcf:hover > td.fc-num.is-pos,
+.fc-grid tbody tr.fc-r-fcf:hover > td.fc-num.is-zero { background: #3d9b6e; color: #fff; }
 .fc-grid tr.is-drill { cursor: pointer; }
 .fc-grid tr.is-drill:hover td { box-shadow: inset 0 0 0 999px rgba(16, 84, 54, 0.06); }
 .fc-grid .fc-chevron {
