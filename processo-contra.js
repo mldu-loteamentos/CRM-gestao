@@ -23,17 +23,32 @@ const ProcessoContraApp = {
   tituloEmpresa: "",
   processo: "",
   motivo: "",
-  MOTIVOS: [
-    "Atraso na entrega da obra",
-    "Vício de construção",
-    "Cobrança indevida",
-    "Rescisão contratual",
-    "Danos morais",
-    "Revisão de contrato",
-    "Posse e reintegração",
-    "Direito de vizinhança",
-    "Publicidade enganosa",
-    "Outro"
+  motivoId: "",
+  motivoAberto: false,
+  motivoBusca: "",
+  motivoEditId: "",
+  motivos: [],
+  popup: false,
+  tipoParte: "cliente",
+  anexos: [],
+  salvando: false,
+  credorBusca: "",
+  credorLista: [],
+  prefNome: "",
+  prefBusca: "",
+  terceiroNome: "",
+  terceiroDoc: "",
+  MOTIVOS_PADRAO: [
+    { id: "atraso-obra", nome: "Atraso na entrega da obra" },
+    { id: "vicio-construcao", nome: "Vício de construção" },
+    { id: "cobranca-indevida", nome: "Cobrança indevida" },
+    { id: "rescisao", nome: "Rescisão contratual" },
+    { id: "danos-morais", nome: "Danos morais" },
+    { id: "revisao", nome: "Revisão de contrato" },
+    { id: "posse", nome: "Posse e reintegração" },
+    { id: "vizinhanca", nome: "Direito de vizinhança" },
+    { id: "publicidade", nome: "Publicidade enganosa" },
+    { id: "outro", nome: "Outro" }
   ],
 
   esc(v) {
@@ -86,8 +101,10 @@ const ProcessoContraApp = {
   },
 
   init() {
+    this.lerMotivosLocal();
     this.render();
     this.carregar();
+    this.carregarMotivosNuvem();
     this.carregarEmpreendimentos();
     if (typeof window.startCustomerBackgroundSync === "function") window.startCustomerBackgroundSync(false, true);
   },
@@ -97,43 +114,17 @@ const ProcessoContraApp = {
     if (!root) return;
     if (this.empresaId && String(this.empresaId) !== String(this.tituloEmpresa) && !this.empresas().some((c) => String(c.id) === String(this.empresaId))) this.empresaId = "";
     const edita = this.podeEditar();
-    const motivos = this.MOTIVOS.map((m) => `<option value="${this.esc(m)}"${m === this.motivo ? " selected" : ""}>${this.esc(m)}</option>`).join("");
-    const porTitulo = !!String(this.fTitulo || "").replace(/\D/g, "") && !!this.tituloEmpresa;
-    const nota = this.parte ? "" : "Pesquise o cliente acima. Os dados dele aparecem antes deste formulário.";
-    const campoEmpresa = porTitulo ? "" : `<label>Empresa processada<div id="pc-emp-slot"></div></label>`;
-    const form = !edita ? "" : `<div class="pc-form" id="pc-form">
-        ${nota ? `<p class="cj-nota">${this.esc(nota)}</p>` : ""}
-        ${campoEmpresa}
-        <label>Número do processo
-          <input type="text" id="pc-numero" value="${this.esc(this.processo)}" autocomplete="off">
-        </label>
-        <label>Motivo
-          <select id="pc-motivo"><option value="">Selecione</option>${motivos}</select>
-        </label>
-        <div class="pc-acoes">
-          <button type="button" class="btn btn-cancel" id="pc-cancelar">Cancelar</button>
-          <button type="button" class="btn btn-primary" id="pc-abrir">Abrir processo</button>
-        </div>
-      </div>`;
-    const ficha = this.buscando
-      ? `<div class="crm-card pc-pesq"><div class="crm-card-content" style="padding:24px;"><div class="ml-load"><div class="loading-spinner"></div><div class="loading-status-text">Buscando o cliente</div><div class="ml-load-track"><div class="loading-progress-bar"></div></div></div></div></div>`
-      : (this.erroBusca
-        ? `<p class="cj-nota">${this.esc(this.erroBusca)}</p>`
-        : (this.fichaHtml ? `<div class="crm-card" id="pc-cliente-card" style="margin-bottom:16px;">
-            <div class="crm-card-header" style="background-color:#f3f4f6;padding:12px 20px;border-bottom:1px solid #e5e7eb;border-radius:8px 8px 0 0;">
-              <h3 style="margin:0;font-size:1.1rem;color:var(--color-primary);">Dados do cliente</h3>
-            </div>
-            <div class="crm-card-content">${this.fichaHtml}</div>
-          </div>` : ""));
+    const abrirBtn = edita
+      ? `<div class="pc-topo"><button type="button" class="btn btn-primary" id="pc-abrir-popup">Abrir processo</button></div>`
+      : "";
     root.innerHTML = `<div class="pc-page">
-        ${this.htmlPesquisa()}
-        ${ficha}
-        ${form}
+        ${abrirBtn}
         <div class="search-box-wrapper pc-busca pc-filtro">
           <input type="text" id="pc-filtro" class="search-input" placeholder="Número do processo ou motivo..." style="font-style: italic;" autocomplete="off" value="${this.esc(this.filtro)}">
           <i data-lucide="search" class="search-icon"></i>
         </div>
         <div id="pc-lista"></div>
+        ${this.popup && edita ? this.htmlPopup() : ""}
       </div>`;
     this.ligarPesquisa();
     const filtro = document.getElementById("pc-filtro");
@@ -142,9 +133,11 @@ const ProcessoContraApp = {
       this.pintarLista();
     });
     const num = document.getElementById("pc-numero");
-    const mot = document.getElementById("pc-motivo");
     if (num) num.addEventListener("input", () => { this.processo = num.value || ""; });
-    if (mot) mot.addEventListener("change", () => { this.motivo = mot.value || ""; });
+    this.ligarMotivo();
+    const abrirPop = document.getElementById("pc-abrir-popup");
+    if (abrirPop) abrirPop.addEventListener("click", () => { this.popup = true; this.render(); });
+    this.ligarPopup();
     const cancelar = document.getElementById("pc-cancelar");
     const abrir = document.getElementById("pc-abrir");
     if (cancelar) cancelar.addEventListener("click", () => this.limpar());
@@ -159,9 +152,310 @@ const ProcessoContraApp = {
     this.tituloEmpresa = "";
     this.processo = "";
     this.motivo = "";
+    this.motivoId = "";
+    this.motivoAberto = false;
+    this.motivoBusca = "";
+    this.motivoEditId = "";
+    this.popup = false;
+    this.tipoParte = "cliente";
+    this.anexos = [];
+    this.salvando = false;
+    this.parte = null;
+    this.fichaHtml = "";
+    this.erroBusca = "";
+    this.buscando = false;
+    this.credorBusca = "";
+    this.credorLista = [];
+    this.prefNome = "";
+    this.prefBusca = "";
+    this.terceiroNome = "";
+    this.terceiroDoc = "";
+    this.fTitulo = "";
+    this.fContrato = "";
+    this.fDoc = "";
+    this.fNome = "";
+    this.fTel = "";
+    this.fEmail = "";
+    this.fEmp = "";
+    this.fUnidade = "";
+    this.clienteId = "";
     this.empEmpresa.open = false;
     this.empEmpresa.query = "";
     this.render();
+  },
+
+  tiposParte() {
+    return [
+      { id: "cliente", label: "Cliente", icon: "user" },
+      { id: "credor", label: "Credor", icon: "briefcase" },
+      { id: "prefeitura", label: "Prefeitura", icon: "landmark" },
+      { id: "terceiro", label: "Outros terceiros", icon: "users" }
+    ];
+  },
+
+  setTipo(id) {
+    if (this.tipoParte === id) return;
+    this.tipoParte = id;
+    this.parte = null;
+    this.fichaHtml = "";
+    this.erroBusca = "";
+    this.buscando = false;
+    this.tituloEmpresa = "";
+    this.empresaId = "";
+    this.credorLista = [];
+    this.credorBusca = "";
+    this.prefNome = "";
+    this.prefBusca = "";
+    this.render();
+  },
+
+  prontoParaDados() {
+    if (this.tipoParte === "terceiro") return true;
+    if (this.tipoParte === "prefeitura" && !this.prefeituras().length) return true;
+    return !!this.parte;
+  },
+
+  htmlPopup() {
+    const abas = this.tiposParte().map((t) => {
+      const on = this.tipoParte === t.id;
+      return `<button type="button" role="tab" class="ml-tab${on ? " is-active" : ""}" aria-selected="${on ? "true" : "false"}" data-pc-tipo="${t.id}"><i data-lucide="${t.icon}"></i> ${t.label}</button>`;
+    }).join("");
+    const ficha = this.tipoParte !== "cliente" ? "" : (this.buscando
+      ? `<div class="crm-card pc-pesq"><div class="crm-card-content" style="padding:24px;"><div class="ml-load"><div class="loading-spinner"></div><div class="loading-status-text">Buscando o cliente</div><div class="ml-load-track"><div class="loading-progress-bar"></div></div></div></div></div>`
+      : (this.erroBusca
+        ? `<p class="cj-nota">${this.esc(this.erroBusca)}</p>`
+        : (this.fichaHtml ? `<div class="crm-card" id="pc-cliente-card" style="margin-bottom:16px;">
+            <div class="crm-card-header" style="background-color:#f3f4f6;padding:12px 20px;border-bottom:1px solid #e5e7eb;border-radius:8px 8px 0 0;">
+              <h3 style="margin:0;font-size:1.1rem;color:var(--color-primary);">Dados do cliente</h3>
+            </div>
+            <div class="crm-card-content">${this.fichaHtml}</div>
+          </div>` : "")));
+    return `<div class="modal-overlay active" id="pc-popup">
+      <div class="modal-box pc-modal" role="dialog" aria-labelledby="pc-popup-titulo">
+        <div class="modal-header">
+          <h3 id="pc-popup-titulo">Abrir processo</h3>
+          <button type="button" class="btn btn-fechar" id="pc-fechar">Fechar</button>
+        </div>
+        <div class="ml-tabs pc-tipos" role="tablist">${abas}</div>
+        <div class="pc-popup-corpo">
+          ${this.htmlBuscaTipo()}
+          ${ficha}
+          ${this.prontoParaDados() ? this.htmlDadosProcesso() : `<p class="cj-nota">Pesquise quem está processando. Os dados do processo aparecem em seguida.</p>`}
+        </div>
+      </div>
+    </div>`;
+  },
+
+  htmlBuscaTipo() {
+    if (this.tipoParte === "cliente") return this.htmlPesquisa();
+    if (this.tipoParte === "credor") return this.htmlBuscaCredor();
+    if (this.tipoParte === "prefeitura") return this.htmlBuscaPrefeitura();
+    return this.htmlTerceiro();
+  },
+
+  htmlBuscaCredor() {
+    const linhas = (this.credorLista || []).map((c) => {
+      const doc = c.cpf || c.cnpj || "";
+      const on = this.parte && this.parte.tipo === "credor" && String(this.parte.id) === String(c.id);
+      return `<button type="button" class="pc-hit${on ? " is-on" : ""}" data-pc-credor="${this.esc(c.id)}">${this.esc(String(c.id || "") + " - " + (c.name || "") + (doc ? " - " + doc : ""))}</button>`;
+    }).join("");
+    const lista = this.credorLista && this.credorLista.length
+      ? `<div class="pc-hits">${linhas}</div>`
+      : (this.credorMsg ? `<p class="cj-nota">${this.esc(this.credorMsg)}</p>` : "");
+    return `<div class="pc-busca-tipo">
+      <label>Credor<input type="text" id="pc-credor-q" placeholder="Nome, CPF ou CNPJ" value="${this.esc(this.credorBusca)}" autocomplete="off"></label>
+      <button type="button" class="btn btn-primary" id="pc-credor-buscar">Pesquisar</button>
+      ${lista}
+    </div>`;
+  },
+
+  prefeituras() {
+    const cities = new Set();
+    const rules = (window.AppState && AppState.rules) || {};
+    Object.keys(rules).forEach((k) => {
+      const rule = rules[k];
+      if (!rule || !String(rule.id || k).startsWith("CID_")) return;
+      const nome = String(rule.desc || "").trim();
+      if (nome) cities.add(nome);
+    });
+    return Array.from(cities).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  },
+
+  htmlBuscaPrefeitura() {
+    const todas = this.prefeituras();
+    const q = this.fold(this.prefBusca).trim();
+    const lista = todas.filter((n) => !q || this.fold(n).indexOf(q) >= 0);
+    const itens = lista.slice(0, 80).map((n) => {
+      const on = this.prefNome && this.fold(this.prefNome) === this.fold(n);
+      return `<button type="button" class="pc-hit${on ? " is-on" : ""}" data-pc-pref="${this.esc(n)}">${this.esc(n)}</button>`;
+    }).join("");
+    const vazio = todas.length
+      ? (lista.length ? "" : `<p class="cj-nota">Nenhuma prefeitura com esse nome.</p>`)
+      : `<label>Nome da prefeitura<input type="text" id="pc-pref-livre" placeholder="Digite o nome" value="${this.esc(this.prefNome)}" autocomplete="off"></label>`;
+    return `<div class="pc-busca-tipo">
+      <label>Prefeitura<input type="text" id="pc-pref-q" placeholder="Buscar pelo nome..." value="${this.esc(this.prefBusca)}" autocomplete="off"></label>
+      ${todas.length ? `<div class="pc-hits">${itens}</div>` : vazio}
+    </div>`;
+  },
+
+  htmlTerceiro() {
+    return `<div class="pc-busca-tipo pc-terc">
+      <label>Nome<input type="text" id="pc-terc-nome" placeholder="Quem está processando" value="${this.esc(this.terceiroNome)}" autocomplete="off"></label>
+      <label>CPF/CNPJ<input type="text" id="pc-terc-doc" placeholder="000.000.000-00" value="${this.esc(this.terceiroDoc)}" autocomplete="off"></label>
+    </div>`;
+  },
+
+  htmlDadosProcesso() {
+    const porTitulo = this.tipoParte === "cliente" && !!String(this.fTitulo || "").replace(/\D/g, "") && !!this.tituloEmpresa;
+    const campoEmpresa = porTitulo ? "" : `<label>Empresa processada<div id="pc-emp-slot"></div></label>`;
+    const arquivos = (this.anexos || []).map((f, i) => `<li><span>${this.esc(f.name)}</span><button type="button" class="tvig-ico is-danger" title="Excluir" data-pc-arq="${i}"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button></li>`).join("");
+    return `<div class="pc-form" id="pc-form">
+        ${campoEmpresa}
+        <label>Número do processo
+          <input type="text" id="pc-numero" value="${this.esc(this.processo)}" autocomplete="off">
+        </label>
+        ${this.htmlMotivo()}
+        <label class="pc-anexo-campo">Anexos
+          <input type="file" id="pc-anexos" multiple>
+        </label>
+        ${arquivos ? `<ul class="pc-anexo-lista">${arquivos}</ul>` : ""}
+        <div class="pc-acoes">
+          <button type="button" class="btn btn-cancel" id="pc-cancelar">Cancelar</button>
+          <button type="button" class="btn btn-primary" id="pc-abrir"${this.salvando ? " disabled" : ""}>${this.salvando ? "Abrindo…" : "Abrir processo"}</button>
+        </div>
+      </div>`;
+  },
+
+  ligarPopup() {
+    const fechar = document.getElementById("pc-fechar");
+    if (fechar) fechar.addEventListener("click", () => this.limpar());
+    document.querySelectorAll("[data-pc-tipo]").forEach((btn) => {
+      btn.addEventListener("click", () => this.setTipo(btn.getAttribute("data-pc-tipo")));
+    });
+    const credQ = document.getElementById("pc-credor-q");
+    const credBtn = document.getElementById("pc-credor-buscar");
+    if (credQ) credQ.addEventListener("input", () => { this.credorBusca = credQ.value || ""; });
+    if (credQ) credQ.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); this.buscarCredor(); } });
+    if (credBtn) credBtn.addEventListener("click", () => this.buscarCredor());
+    document.querySelectorAll("[data-pc-credor]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.getAttribute("data-pc-credor");
+        const c = (this.credorLista || []).find((x) => String(x.id) === String(id));
+        if (c) this.escolherCredor(c);
+      });
+    });
+    const prefQ = document.getElementById("pc-pref-q");
+    if (prefQ) prefQ.addEventListener("input", () => {
+      this.prefBusca = prefQ.value || "";
+      const box = prefQ.parentElement && prefQ.parentElement.parentElement;
+      const hits = box ? box.querySelector(".pc-hits") : null;
+      if (!hits) return;
+      const q = this.fold(this.prefBusca).trim();
+      const lista = this.prefeituras().filter((n) => !q || this.fold(n).indexOf(q) >= 0).slice(0, 80);
+      hits.innerHTML = lista.map((n) => {
+        const on = this.prefNome && this.fold(this.prefNome) === this.fold(n);
+        return `<button type="button" class="pc-hit${on ? " is-on" : ""}" data-pc-pref="${this.esc(n)}">${this.esc(n)}</button>`;
+      }).join("") || `<p class="cj-nota">Nenhuma prefeitura com esse nome.</p>`;
+      hits.querySelectorAll("[data-pc-pref]").forEach((b) => b.addEventListener("click", () => this.escolherPrefeitura(b.getAttribute("data-pc-pref"))));
+    });
+    document.querySelectorAll("[data-pc-pref]").forEach((btn) => {
+      btn.addEventListener("click", () => this.escolherPrefeitura(btn.getAttribute("data-pc-pref")));
+    });
+    const prefLivre = document.getElementById("pc-pref-livre");
+    if (prefLivre) prefLivre.addEventListener("input", () => {
+      this.prefNome = prefLivre.value || "";
+      const nome = String(this.prefNome || "").trim();
+      this.parte = nome ? { tipo: "prefeitura", id: nome, nome: nome, customerId: "", rotulo: nome } : null;
+    });
+    const tercNome = document.getElementById("pc-terc-nome");
+    const tercDoc = document.getElementById("pc-terc-doc");
+    if (tercNome) tercNome.addEventListener("input", () => { this.terceiroNome = tercNome.value || ""; });
+    if (tercDoc) tercDoc.addEventListener("input", () => { this.mascaraDoc(tercDoc); this.terceiroDoc = tercDoc.value || ""; });
+    const arq = document.getElementById("pc-anexos");
+    if (arq) arq.addEventListener("change", () => {
+      Array.from(arq.files || []).forEach((f) => {
+        if (!this.anexos.some((x) => x.name === f.name && x.size === f.size)) this.anexos.push(f);
+      });
+      arq.value = "";
+      this.render();
+    });
+    document.querySelectorAll("[data-pc-arq]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const i = Number(btn.getAttribute("data-pc-arq"));
+        this.anexos.splice(i, 1);
+        this.render();
+      });
+    });
+  },
+
+  escolherCredor(c) {
+    const doc = c.cpf || c.cnpj || "";
+    this.parte = {
+      tipo: "credor",
+      id: String(c.id || ""),
+      nome: c.name || "",
+      customerId: "",
+      rotulo: String(c.id || "") + " - " + (c.name || "") + (doc ? " - " + doc : "")
+    };
+    this.render();
+  },
+
+  escolherPrefeitura(nome) {
+    const n = String(nome || "").trim();
+    if (!n) return;
+    this.prefNome = n;
+    this.parte = { tipo: "prefeitura", id: n, nome: n, customerId: "", rotulo: n };
+    this.render();
+  },
+
+  async buscarCredor() {
+    const q = String(this.credorBusca || "").trim();
+    const dig = q.replace(/\D/g, "");
+    if (q.length < 3 && dig.length < 11) {
+      this.credorMsg = "Digite ao menos 3 letras, ou o CPF/CNPJ.";
+      this.credorLista = [];
+      this.render();
+      return;
+    }
+    if (typeof window.siengeFetchWithRetry !== "function") {
+      this.credorMsg = "A consulta de credores não está disponível.";
+      this.render();
+      return;
+    }
+    this.credorMsg = "Buscando…";
+    this.render();
+    let path = "/creditors?limit=15&name=" + encodeURIComponent(q);
+    if (dig.length === 11) path = "/creditors?limit=15&cpf=" + encodeURIComponent(dig);
+    else if (dig.length === 14) path = "/creditors?limit=15&cnpj=" + encodeURIComponent(dig);
+    try {
+      const data = await window.siengeFetchWithRetry(path, 1);
+      this.credorLista = (data && data.results) || [];
+      this.credorMsg = this.credorLista.length ? "" : "Nenhum credor com esse nome.";
+    } catch (e) {
+      this.credorLista = [];
+      this.credorMsg = (e && e.message) || "Não consegui pesquisar o credor.";
+    }
+    this.render();
+  },
+
+  async subirAnexos(id) {
+    const lista = (this.anexos || []).filter(Boolean);
+    if (!lista.length) return [];
+    const fc = window.firebaseCollections;
+    if (!window.firebaseStorage || !fc || !fc.ref || !fc.uploadBytes || !fc.getDownloadURL) {
+      throw new Error("Não consegui enviar os anexos.");
+    }
+    const out = [];
+    for (let i = 0; i < lista.length; i++) {
+      const file = lista[i];
+      const safe = String(file.name || "anexo").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) || "anexo";
+      const path = "processos_contra/" + id + "/" + Date.now() + "_" + i + "_" + safe;
+      const storageRef = fc.ref(window.firebaseStorage, path);
+      await fc.uploadBytes(storageRef, file, { contentType: file.type || "application/octet-stream" });
+      const url = await fc.getDownloadURL(storageRef);
+      out.push({ name: file.name || safe, url: url, type: file.type || "", size: Number(file.size) || 0, path: path });
+    }
+    return out;
   },
 
   htmlPesquisa() {
@@ -769,8 +1063,8 @@ const ProcessoContraApp = {
       });
       itens.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
       this.itens = itens;
+      this.sincronizarFila();
     } catch (e) {
-      this.itens = [];
       if (box) box.innerHTML = `<p class="cj-nota">Não consegui ler os processos: ${this.esc((e && e.message) || e)}</p>`;
       return;
     }
@@ -805,12 +1099,13 @@ const ProcessoContraApp = {
         <td>${this.esc(item.companyId || "—")}</td>
         <td>${this.esc(item.processo || "—")}</td>
         <td class="cc-nome">${this.esc(item.motivo || "—")}</td>
+        <td class="pc-anexos-cell">${this.htmlAnexosItem(item)}</td>
         <td class="cj-quem"><span class="cj-quem-linha">${this.esc(item.createdBy || "—")}${quando ? `<span class="cj-quando">${this.esc(quando)}</span>` : ""}</span></td>
         <td class="is-center">${acao}</td>
       </tr>`;
     }).join("");
     box.innerHTML = `<div class="cc-scroll"><table class="cc-table cj-cc">
-      <thead><tr><th>Parte</th><th>Tipo</th><th title="ID da empresa"><span class="pr-id-head">ID <i data-lucide="info"></i></span></th><th>Processo</th><th>Motivo</th><th>Aberto por</th><th class="is-center">Ações</th></tr></thead>
+      <thead><tr><th>Parte</th><th>Tipo</th><th title="ID da empresa"><span class="pr-id-head">ID <i data-lucide="info"></i></span></th><th>Processo</th><th>Motivo</th><th>Anexos</th><th>Aberto por</th><th class="is-center">Ações</th></tr></thead>
       <tbody>${linhas}</tbody>
     </table></div>`;
     box.querySelectorAll("[data-pc-del]").forEach((btn) => {
@@ -819,8 +1114,21 @@ const ProcessoContraApp = {
     if (window.lucide && lucide.createIcons) lucide.createIcons();
   },
 
+  htmlAnexosItem(item) {
+    const lista = Array.isArray(item.anexos) ? item.anexos : [];
+    if (!lista.length) return "—";
+    return lista.map((a) => {
+      const url = String(a && a.url || "");
+      const nome = this.esc(a && a.name ? a.name : "Anexo");
+      if (!url) return nome;
+      return `<a href="${this.esc(url)}" target="_blank" rel="noopener">${nome}</a>`;
+    }).join("<br>");
+  },
+
   tipoTxt(tipo) {
     if (tipo === "credor") return "Credor";
+    if (tipo === "prefeitura") return "Prefeitura";
+    if (tipo === "terceiro") return "Outros terceiros";
     if (tipo === "titulo") return "Título";
     return "Cliente";
   },
@@ -839,37 +1147,374 @@ const ProcessoContraApp = {
     }
   },
 
+  lerMotivosLocal() {
+    let lista = null;
+    try { lista = JSON.parse(localStorage.getItem("crm_processo_contra_motivos") || "null"); } catch (e) { lista = null; }
+    const normal = (m) => {
+      const id = String(m && m.id || "").trim();
+      const nome = String(m && m.nome || "").trim();
+      return id && nome ? { id: id, nome: nome } : null;
+    };
+    const prontos = Array.isArray(lista) ? lista.map(normal).filter(Boolean) : [];
+    this.motivos = prontos.length ? prontos : this.MOTIVOS_PADRAO.map((m) => ({ id: m.id, nome: m.nome }));
+  },
+
+  gravarMotivosLocal() {
+    try { localStorage.setItem("crm_processo_contra_motivos", JSON.stringify(this.motivos)); } catch (e) {}
+  },
+
+  async salvarCatalogo() {
+    this.gravarMotivosLocal();
+    const fc = this.fb();
+    if (!fc) throw new Error("O Firebase não está disponível.");
+    await fc.setDoc(fc.doc(window.firebaseDb, "processos_contra_motivos", "lista"), {
+      itens: this.motivos.map((m) => ({ id: m.id, nome: m.nome })),
+      updatedAt: new Date().toISOString()
+    });
+  },
+
+  async carregarMotivosNuvem() {
+    const fc = this.fb();
+    if (!fc) return;
+    try {
+      const snap = await fc.getDoc(fc.doc(window.firebaseDb, "processos_contra_motivos", "lista"));
+      const existe = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+      const data = existe ? (snap.data() || {}) : null;
+      const itens = data && Array.isArray(data.itens) ? data.itens : null;
+      if (!itens || !itens.length) {
+        if (!this.motivos.length) this.motivos = this.MOTIVOS_PADRAO.map((m) => ({ id: m.id, nome: m.nome }));
+        await this.salvarCatalogo();
+      } else {
+        this.motivos = itens.map((m) => ({ id: String(m.id || "").trim(), nome: String(m.nome || "").trim() })).filter((m) => m.id && m.nome);
+        this.gravarMotivosLocal();
+      }
+      if (this.motivoId && !this.motivos.some((m) => m.id === this.motivoId)) {
+        this.motivoId = "";
+        this.motivo = "";
+      }
+      this.pintarMotivoPainel();
+    } catch (e) {}
+  },
+
+  htmlMotivo() {
+    const aberto = this.motivoAberto ? " is-open" : "";
+    return `<div class="ml-emp-filter pc-motivo-filter${aberto}" id="pc-motivo-filter" onmousedown="event.stopPropagation()">
+      <div class="ml-emp-filter-label">Motivo</div>
+      <button type="button" class="ml-emp-filter-btn" id="pc-motivo-btn">
+        <span>${this.esc(this.motivo || "Selecione")}</span>
+        <i data-lucide="chevron-down" style="width:16px;height:16px;flex-shrink:0;pointer-events:none;"></i>
+      </button>
+      <div class="ml-emp-filter-panel">
+        <div class="ml-emp-filter-search">
+          <input id="pc-motivo-busca" type="text" placeholder="Buscar..." value="${this.esc(this.motivoBusca)}" autocomplete="off">
+        </div>
+        <div class="ml-emp-filter-list" id="pc-motivo-lista">${this.htmlMotivoLista()}</div>
+        <div class="pc-motivo-novo">
+          <input id="pc-motivo-novo" type="text" placeholder="Novo motivo" autocomplete="off">
+          <button type="button" class="btn btn-primary" id="pc-motivo-incluir">Incluir</button>
+        </div>
+        <p id="pc-motivo-aviso" class="pc-motivo-aviso"></p>
+      </div>
+    </div>`;
+  },
+
+  htmlMotivoLista() {
+    const q = this.fold(this.motivoBusca).trim();
+    const lista = this.motivos.filter((m) => !q || this.fold(m.nome).indexOf(q) >= 0);
+    if (!lista.length) return `<div class="ml-emp-filter-empty">Nenhum motivo com esse nome.</div>`;
+    return lista.map((m) => {
+      const on = m.id === this.motivoId;
+      if (this.motivoEditId === m.id) {
+        return `<div class="ml-emp-filter-item pc-motivo-item is-edit">
+          <input type="text" class="pc-motivo-renome" data-id="${this.esc(m.id)}" value="${this.esc(m.nome)}">
+          <button type="button" class="btn btn-primary pc-motivo-salvar" data-id="${this.esc(m.id)}">Salvar</button>
+          <button type="button" class="btn btn-cancel pc-motivo-cancelar-edit">Cancelar</button>
+        </div>`;
+      }
+      const uso = this.motivoEmUso(m);
+      const lapis = uso ? "" : `<button type="button" class="tvig-ico" title="Editar" data-pc-edit="${this.esc(m.id)}"><i data-lucide="pencil" style="width:15px;height:15px;"></i></button>`;
+      const dica = uso ? ` title="Este motivo já está em um processo e não pode ser editado."` : "";
+      return `<div class="ml-emp-filter-item pc-motivo-item${on ? " is-on" : ""}"${dica} data-pc-mot="${this.esc(m.id)}">
+        <input type="radio" name="pc-motivo-radio"${on ? " checked" : ""} tabindex="-1">
+        <span>${this.esc(m.nome)}</span>
+        ${lapis}
+      </div>`;
+    }).join("");
+  },
+
+  motivoEmUso(m) {
+    if (!m) return false;
+    const nome = this.fold(m.nome);
+    return (this.itens || []).some((it) => (it.motivoId && it.motivoId === m.id) || (nome && this.fold(it.motivo) === nome));
+  },
+
+  nomeMotivoLivre(nome, ignorarId) {
+    const n = this.fold(nome);
+    if (!n) return false;
+    return !this.motivos.some((m) => m.id !== ignorarId && this.fold(m.nome) === n);
+  },
+
+  avisoMotivo(texto) {
+    const el = document.getElementById("pc-motivo-aviso");
+    if (el) el.textContent = texto || "";
+  },
+
+  pintarMotivoLista() {
+    const lista = document.getElementById("pc-motivo-lista");
+    if (!lista) return;
+    lista.innerHTML = this.htmlMotivoLista();
+    const ren = lista.querySelector(".pc-motivo-renome");
+    if (ren) {
+      ren.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); this.salvarTextoMotivo(ren.getAttribute("data-id")); }
+        if (e.key === "Escape") { this.motivoEditId = ""; this.avisoMotivo(""); this.pintarMotivoLista(); }
+      });
+      ren.focus();
+      ren.select();
+    }
+    if (window.lucide && lucide.createIcons) lucide.createIcons({ root: lista });
+  },
+
+  pintarMotivoPainel() {
+    const root = document.getElementById("pc-motivo-filter");
+    if (!root) return;
+    root.classList.toggle("is-open", !!this.motivoAberto);
+    const span = root.querySelector(".ml-emp-filter-btn span");
+    if (span) span.textContent = this.motivo || "Selecione";
+    const busca = document.getElementById("pc-motivo-busca");
+    if (busca && busca.value !== this.motivoBusca) busca.value = this.motivoBusca;
+    this.pintarMotivoLista();
+    if (window.lucide && lucide.createIcons) lucide.createIcons({ root: root });
+  },
+
+  toggleMotivo() {
+    this.motivoAberto = !this.motivoAberto;
+    if (!this.motivoAberto) {
+      this.motivoBusca = "";
+      this.motivoEditId = "";
+      this.avisoMotivo("");
+    }
+    this.pintarMotivoPainel();
+    if (this.motivoAberto) {
+      const busca = document.getElementById("pc-motivo-busca");
+      if (busca) busca.focus();
+    }
+  },
+
+  escolherMotivo(id) {
+    const m = this.motivos.find((x) => x.id === id);
+    if (!m) return;
+    this.motivoId = m.id;
+    this.motivo = m.nome;
+    this.motivoAberto = false;
+    this.motivoBusca = "";
+    this.motivoEditId = "";
+    this.avisoMotivo("");
+    this.pintarMotivoPainel();
+  },
+
+  cliqueMotivo(e) {
+    const edit = e.target.closest("[data-pc-edit]");
+    if (edit) {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = edit.getAttribute("data-pc-edit");
+      const m = this.motivos.find((x) => x.id === id);
+      if (m && this.motivoEmUso(m)) {
+        this.avisoMotivo("Esse motivo já está em um processo e não pode ser editado.");
+        return;
+      }
+      this.motivoEditId = id;
+      this.avisoMotivo("");
+      this.pintarMotivoLista();
+      return;
+    }
+    const salvar = e.target.closest(".pc-motivo-salvar");
+    if (salvar) {
+      e.preventDefault();
+      this.salvarTextoMotivo(salvar.getAttribute("data-id"));
+      return;
+    }
+    if (e.target.closest(".pc-motivo-cancelar-edit")) {
+      e.preventDefault();
+      this.motivoEditId = "";
+      this.avisoMotivo("");
+      this.pintarMotivoLista();
+      return;
+    }
+    if (e.target.closest(".pc-motivo-renome") || e.target.closest(".tvig-ico")) return;
+    const item = e.target.closest("[data-pc-mot]");
+    if (!item) return;
+    this.escolherMotivo(item.getAttribute("data-pc-mot"));
+  },
+
+  async incluirMotivo() {
+    const el = document.getElementById("pc-motivo-novo");
+    const nome = String((el && el.value) || "").trim().replace(/\s+/g, " ");
+    if (!nome) { this.avisoMotivo("Escreva o motivo antes de incluir."); return; }
+    if (!this.nomeMotivoLivre(nome, "")) { this.avisoMotivo("Já existe um motivo com esse nome."); return; }
+    const m = { id: "m" + Date.now(), nome: nome };
+    this.motivos.push(m);
+    try {
+      await this.salvarCatalogo();
+    } catch (e) {
+      this.motivos = this.motivos.filter((x) => x.id !== m.id);
+      this.avisoMotivo("Não consegui salvar o motivo.");
+      return;
+    }
+    this.motivoId = m.id;
+    this.motivo = m.nome;
+    if (el) el.value = "";
+    this.motivoAberto = false;
+    this.motivoBusca = "";
+    this.avisoMotivo("");
+    this.pintarMotivoPainel();
+  },
+
+  async salvarTextoMotivo(id) {
+    const m = this.motivos.find((x) => x.id === id);
+    if (!m) return;
+    if (this.motivoEmUso(m)) {
+      this.motivoEditId = "";
+      this.avisoMotivo("Esse motivo já está em um processo e não pode ser editado.");
+      this.pintarMotivoLista();
+      return;
+    }
+    const inp = document.querySelector('.pc-motivo-renome[data-id="' + id + '"]');
+    const nome = String((inp && inp.value) || "").trim().replace(/\s+/g, " ");
+    if (!nome) { this.avisoMotivo("O motivo não pode ficar vazio."); return; }
+    if (!this.nomeMotivoLivre(nome, id)) { this.avisoMotivo("Já existe um motivo com esse nome."); return; }
+    const antes = m.nome;
+    m.nome = nome;
+    if (this.motivoId === id) this.motivo = nome;
+    this.motivoEditId = "";
+    try {
+      await this.salvarCatalogo();
+      this.avisoMotivo("");
+    } catch (e) {
+      m.nome = antes;
+      if (this.motivoId === id) this.motivo = antes;
+      this.avisoMotivo("Não consegui salvar a alteração.");
+    }
+    this.pintarMotivoPainel();
+  },
+
+  ligarMotivo() {
+    const root = document.getElementById("pc-motivo-filter");
+    if (!root) return;
+    const btn = document.getElementById("pc-motivo-btn");
+    if (btn) btn.addEventListener("click", (e) => { e.preventDefault(); this.toggleMotivo(); });
+    const busca = document.getElementById("pc-motivo-busca");
+    if (busca) busca.addEventListener("input", () => {
+      this.motivoBusca = busca.value || "";
+      this.pintarMotivoLista();
+    });
+    const incluir = document.getElementById("pc-motivo-incluir");
+    const novo = document.getElementById("pc-motivo-novo");
+    if (incluir) incluir.addEventListener("click", () => this.incluirMotivo());
+    if (novo) novo.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); this.incluirMotivo(); }
+    });
+    const lista = document.getElementById("pc-motivo-lista");
+    if (lista) lista.addEventListener("click", (e) => this.cliqueMotivo(e));
+    if (!this._motivoFora) {
+      this._motivoFora = true;
+      document.addEventListener("mousedown", (e) => {
+        if (!this.motivoAberto) return;
+        const box = document.getElementById("pc-motivo-filter");
+        if (box && e.target && box.contains(e.target)) return;
+        this.motivoAberto = false;
+        this.motivoBusca = "";
+        this.motivoEditId = "";
+        this.avisoMotivo("");
+        this.pintarMotivoPainel();
+      }, true);
+    }
+  },
+
+  sincronizarFila() {
+    window._pcFilaGeracao = (window._pcFilaGeracao || 0) + 1;
+    const set = new Set();
+    (this.itens || []).forEach((it) => {
+      const id = String(it.customerId || "");
+      if (id) set.add(id);
+    });
+    window._processoContraClientes = set;
+    window._processoContraFilaPronto = true;
+    if (typeof window.pintarTagsProcessoContra === "function") window.pintarTagsProcessoContra();
+  },
+
+  montarParte() {
+    if (this.tipoParte === "terceiro") {
+      const nome = String(this.terceiroNome || "").trim();
+      const doc = String(this.terceiroDoc || "").trim();
+      if (!nome) return null;
+      return {
+        tipo: "terceiro",
+        id: "",
+        nome: nome,
+        customerId: "",
+        rotulo: nome + (doc ? " - " + doc : "")
+      };
+    }
+    if (this.tipoParte === "prefeitura" && !this.parte) {
+      const nome = String(this.prefNome || "").trim();
+      if (!nome) return null;
+      return { tipo: "prefeitura", id: nome, nome: nome, customerId: "", rotulo: nome };
+    }
+    return this.parte;
+  },
+
   async abrir() {
-    if (!this.podeEditar()) return;
-    if (!this.parte) { alert("Pesquise o cliente antes de abrir o processo."); return; }
-    const porTitulo = !!String(this.fTitulo || "").replace(/\D/g, "") && !!this.tituloEmpresa;
+    if (!this.podeEditar() || this.salvando) return;
+    const parte = this.montarParte();
+    if (!parte) {
+      const aviso = {
+        cliente: "Pesquise o cliente antes de abrir o processo.",
+        credor: "Pesquise e escolha o credor.",
+        prefeitura: "Escolha a prefeitura.",
+        terceiro: "Informe o nome de quem está processando."
+      };
+      alert(aviso[this.tipoParte] || "Informe quem está processando.");
+      return;
+    }
+    this.parte = parte;
+    const porTitulo = this.tipoParte === "cliente" && !!String(this.fTitulo || "").replace(/\D/g, "") && !!this.tituloEmpresa;
     const empresa = porTitulo ? this.tituloEmpresa : String(this.empresaId || "").replace(/\D/g, "");
     const processo = String(this.processo || "").trim();
-    const motivo = String(this.motivo || "").trim();
+    const escolhido = this.motivos.find((m) => m.id === this.motivoId);
     if (!empresa) { alert(porTitulo ? "Esse título não tem empresa vinculada." : "Escolha a empresa que está sendo processada."); return; }
     if (!processo) { alert("Informe o número do processo."); return; }
-    if (!this.MOTIVOS.includes(motivo)) { alert("Escolha o motivo na lista."); return; }
+    if (!escolhido) { alert("Escolha o motivo na lista."); return; }
     const fc = this.fb();
     if (!fc) { alert("O Firebase não está disponível."); return; }
     const u = (window.AppState && AppState.currentUser) || {};
     const id = "pc_" + Date.now();
+    this.salvando = true;
+    this.render();
     try {
+      const anexos = await this.subirAnexos(id);
       await fc.setDoc(fc.doc(window.firebaseDb, "processos_contra", id), {
         parteTipo: this.parte.tipo,
         parteId: String(this.parte.id || ""),
         parteNome: this.parte.nome || "",
         parteRotulo: this.parte.rotulo || "",
-        customerId: String(this.parte.customerId || ""),
+        customerId: this.parte.tipo === "cliente" ? String(this.parte.customerId || "") : "",
         companyId: empresa,
         companyName: this.nomeEmpresa(empresa),
         processo: processo,
-        motivo: motivo,
+        motivo: escolhido.nome,
+        motivoId: escolhido.id,
+        anexos: anexos,
         createdAt: new Date().toISOString(),
         createdBy: u.name || u.nome || u.email || ""
       });
+      this.salvando = false;
       this.limpar();
       await this.carregar();
     } catch (e) {
+      this.salvando = false;
+      this.render();
       alert("Não consegui abrir o processo: " + ((e && e.message) || e));
     }
   },

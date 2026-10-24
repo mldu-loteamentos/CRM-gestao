@@ -10727,6 +10727,42 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .pc-dd button:hover { background: #f0fdf4; }
 .pc-filtro { margin-top: 4px; }
 .pc-acoes { display: flex; justify-content: flex-end; gap: 8px; }
+.pc-form .pc-motivo-filter.ml-emp-filter { width: 100%; max-width: none; min-width: 0; flex: none; }
+#pc-motivo-filter .ml-emp-filter-item { display: flex; flex-direction: row; align-items: center; gap: 10px; font-size: 0.82rem; font-weight: 600; color: #334155; }
+#pc-motivo-filter .ml-emp-filter-item input[type="radio"] { width: 16px; height: 16px; min-width: 16px; margin: 0; padding: 0; flex: 0 0 16px; accent-color: #105436; }
+#pc-motivo-filter .ml-emp-filter-item span { min-width: 0; flex: 1; }
+#pc-motivo-filter .pc-motivo-item.is-on { background: #e7f6ee; }
+#pc-motivo-filter .tvig-ico { margin-left: auto; flex: none; }
+#pc-motivo-filter .pc-motivo-item.is-edit { align-items: center; }
+#pc-motivo-filter .pc-motivo-renome { flex: 1; width: auto; min-width: 0; height: 32px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 8px; font: inherit; font-weight: 600; }
+#pc-motivo-filter .pc-motivo-item .btn { height: 32px; width: auto; padding: 0 10px; white-space: nowrap; }
+.pc-motivo-novo { display: flex; gap: 8px; align-items: center; padding: 8px 10px 4px; border-top: 1px solid #e2e8f0; }
+.pc-motivo-novo input { flex: 1; width: auto; min-width: 0; height: 34px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 10px; font: inherit; }
+.pc-motivo-novo .btn { height: 34px; width: auto; padding: 0 12px; white-space: nowrap; }
+.pc-motivo-aviso { margin: 0; padding: 0 10px 8px; min-height: 0; font-size: 0.75rem; font-weight: 700; color: #b91c1c; }
+.pc-motivo-aviso:empty { display: none; }
+.pc-fila-nome { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; vertical-align: middle; }
+.pc-fila-nome > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pc-fila-tag { flex: none; font-size: 0.62rem; font-weight: 800; letter-spacing: 0.02em; text-transform: uppercase; color: #9f1239; background: #ffe4e6; border: 1px solid #fecdd3; border-radius: 999px; padding: 1px 7px; line-height: 1.4; }
+.pc-topo { display: flex; justify-content: flex-end; }
+#pc-popup.modal-overlay { align-items: flex-start; overflow: auto; padding: 24px 16px; }
+.pc-modal { width: min(980px, 96vw); max-width: 96vw; max-height: none; overflow: visible; padding: 1.25rem 1.5rem 1.5rem; }
+.pc-modal .modal-header { margin-bottom: 12px; }
+.pc-modal .pc-tipos { margin-bottom: 16px; }
+.pc-popup-corpo { display: flex; flex-direction: column; gap: 14px; }
+.pc-busca-tipo { display: flex; flex-direction: column; gap: 8px; }
+.pc-busca-tipo label, .pc-terc label { display: flex; flex-direction: column; gap: 6px; font-size: 0.75rem; font-weight: 700; color: #64748b; }
+.pc-busca-tipo input, .pc-terc input { height: 38px; border: 1px solid #94a3b8; border-radius: 6px; padding: 0 10px; font: inherit; background: #fff; color: #0f172a; }
+.pc-terc { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.pc-hits { display: flex; flex-direction: column; max-height: 220px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
+.pc-hit { width: 100%; text-align: left; background: #fff; border: 0; border-bottom: 1px solid #f3f4f6; padding: 8px 12px; cursor: pointer; font: inherit; font-size: 0.85rem; color: #333; }
+.pc-hit:hover, .pc-hit.is-on { background: #f3f4f6; }
+.pc-modal .pc-form { grid-template-columns: repeat(2, minmax(180px, 1fr)); }
+.pc-anexo-campo, .pc-anexo-lista { grid-column: 1 / -1; }
+.pc-anexo-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.pc-anexo-lista li { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.82rem; color: #1c2e24; }
+.pc-anexos-cell { font-size: 0.78rem; line-height: 1.35; }
+.pc-anexos-cell a { color: #105436; font-weight: 700; }
 .pr-id-head { display: inline-flex; align-items: center; gap: 4px; }
 .pr-id-head svg { width: 12px; height: 12px; }
 tr.pr-linha { cursor: pointer; }

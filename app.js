@@ -10177,19 +10177,66 @@ window.filterClientsWithSecondaryBuyers = async function(list, rawQuery) {
   });
 };
 
+window.processoContraTagHtml = function(customerId) {
+  const set = window._processoContraClientes;
+  if (!set || !set.has(String(customerId || ""))) return "";
+  return `<span class="pc-fila-tag" title="Este cliente moveu processo contra a empresa">Processo contra</span>`;
+};
+
+window.pintarTagsProcessoContra = function() {
+  document.querySelectorAll("[data-pc-cli]").forEach((el) => {
+    const id = el.getAttribute("data-pc-cli") || "";
+    const tem = window._processoContraClientes && window._processoContraClientes.has(id);
+    const tag = el.querySelector(".pc-fila-tag");
+    if (tem && !tag) {
+      const novo = document.createElement("span");
+      novo.className = "pc-fila-tag";
+      novo.title = "Este cliente moveu processo contra a empresa";
+      novo.textContent = "Processo contra";
+      el.appendChild(novo);
+    } else if (!tem && tag) {
+      tag.remove();
+    }
+  });
+};
+
+window.carregarProcessosContraFila = function() {
+  if (window._processoContraFilaPronto || window._processoContraFilaLoading) return;
+  const fc = window.firebaseCollections;
+  if (!window.firebaseDb || !fc || typeof fc.getDocs !== "function" || typeof fc.collection !== "function") return;
+  window._processoContraFilaLoading = true;
+  const geracao = (window._pcFilaGeracao || 0) + 1;
+  window._pcFilaGeracao = geracao;
+  fc.getDocs(fc.collection(window.firebaseDb, "processos_contra")).then((snap) => {
+    if (geracao !== window._pcFilaGeracao) return;
+    const set = new Set();
+    snap.forEach((d) => {
+      const data = d.data() || {};
+      const id = String(data.customerId || "");
+      if (id) set.add(id);
+    });
+    window._processoContraClientes = set;
+    window._processoContraFilaPronto = true;
+    window.pintarTagsProcessoContra();
+  }).catch(() => {}).finally(() => {
+    window._processoContraFilaLoading = false;
+  });
+};
+
 window.filaCustomerNameCellHtml = function(client) {
+  if (typeof window.carregarProcessosContraFila === "function") window.carregarProcessosContraFila();
+  const id = client && client.customerId != null ? String(client.customerId) : "";
+  const tag = window.processoContraTagHtml(id);
   const hit = client && client._searchBuyerHit;
   const mainName = window.escapeHtmlText(String((hit && hit.mainName) || (client && client.customerName) || "").toUpperCase());
-  if (!hit) {
-    return `<span style="text-transform:uppercase;">${mainName}</span>`;
-  }
-  const secName = window.escapeHtmlText(String(hit.searchedName || "").toUpperCase());
-  const pct = hit.searchedPct != null ? " · " + window.formatBuyerPct(hit.searchedPct) : "";
-  return `<div style="display:flex;flex-direction:column;gap:3px;line-height:1.25;white-space:normal;">
-    <span style="text-transform:uppercase;">${mainName}</span>
-    <span style="font-size:0.65rem;font-weight:700;color:#105436;text-transform:none;">Cliente principal: ${mainName}</span>
-    <span style="font-size:0.65rem;font-weight:700;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:2px 6px;width:fit-content;text-transform:none;">Pesquisado: ${secName} (cliente secundário${pct})</span>
-  </div>`;
+  const nome = !hit
+    ? `<span style="text-transform:uppercase;">${mainName}</span>`
+    : `<div style="display:flex;flex-direction:column;gap:3px;line-height:1.25;white-space:normal;">
+        <span style="text-transform:uppercase;">${mainName}</span>
+        <span style="font-size:0.65rem;font-weight:700;color:#105436;text-transform:none;">Cliente principal: ${mainName}</span>
+        <span style="font-size:0.65rem;font-weight:700;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:2px 6px;width:fit-content;text-transform:none;">Pesquisado: ${window.escapeHtmlText(String(hit.searchedName || "").toUpperCase())} (cliente secundário${hit.searchedPct != null ? " · " + window.formatBuyerPct(hit.searchedPct) : ""})</span>
+      </div>`;
+  return `<div class="pc-fila-nome" data-pc-cli="${window.escapeHtmlText(id)}">${nome}${tag}</div>`;
 };
 
 window.buyerRoleLabel = function(p, currentCustomerId) {
