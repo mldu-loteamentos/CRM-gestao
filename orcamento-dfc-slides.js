@@ -150,8 +150,6 @@ const OrcamentoDfcSlidesApp = {
     };
     fechar(barras.entradas, entradas.meses);
     fechar(barras.obras, obras.meses);
-    fechar(barras.aportes, this.soma(meses("g_11_01"), meses("g_11_03")));
-    fechar(barras.dividendos, meses("g_11_02"));
     return {
       vazio: false,
       linhas: linhas,
@@ -217,12 +215,104 @@ const OrcamentoDfcSlidesApp = {
     }
   },
 
+  /* 2.07.10 ainda não está no Excel importado. O total é o de 2027 da linha Cisão no DFC. */
+  dividendosEnviados: [
+    { conta: "2.07.10", nome: "Cisão", total: 12076617.29 }
+  ],
+
+  normNome(s) {
+    return String(s || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toUpperCase();
+  },
+
+  nomeDividendo(cn) {
+    let s = String(cn || "").replace(/^distribui[cç][aã]o\s+(de\s+)?lucro\s*-\s*/i, "").trim();
+    if (!s) s = "Dividendos";
+    if (s.length > 28) s = s.slice(0, 26).trim() + "…";
+    return s;
+  },
+
+  nomeEmpresaBarra(id, nome) {
+    try {
+      const raw = JSON.parse(localStorage.getItem("crm_empresas_custom") || "{}");
+      const cfg = raw[Number(id)] || raw[String(Number(id))] || {};
+      const usual = String(cfg.nome_usual || "").trim();
+      if (usual) return usual.length > 32 ? usual.slice(0, 30).trim() + "…" : usual;
+    } catch (e) {}
+    let s = String(nome || "").replace(/^\d+\s*-\s*/, "").trim();
+    s = s.replace(/\b(LTDA|EIRELI|S\.?A\.?|SPE)\b\.?/gi, " ");
+    s = s.replace(/\b(EMPREENDIMENTOS?|EMPREENDEDORA|IMOBILI[AÁ]RIOS?|PARTICIPA[CÇ][OÕ]ES|DESENVOLVIMENTO|URBANIZA[CÇ][AÃ]O)\b/gi, " ");
+    s = s.replace(/&/g, " ").replace(/\s+/g, " ").trim();
+    if (!s) s = id ? "Empresa " + id : "Empresa";
+    if (s.length > 32) s = s.slice(0, 30).trim() + "…";
+    return s;
+  },
+
+  barrasDaAba(tipo) {
+    const caixa = typeof OrcamentoCaixaApp !== "undefined" ? OrcamentoCaixaApp : null;
+    if (!caixa || typeof caixa.grupos !== "function") return [];
+    return caixa.grupos(tipo).map((g) => {
+      const bruto = caixa.total(g.meses);
+      const valor = tipo === "aportes" ? -Math.abs(bruto) : bruto;
+      return { nome: this.nomeEmpresaBarra(g.dest.id, g.dest.nome), valor: valor };
+    }).filter((x) => Math.abs(x.valor) >= 50000);
+  },
+
+  /* Saídas de 11.01 da Moura Leite, uma barra por conta, mais a Cisão enviada se o Excel não tiver a linha. */
+  barrasDividendosMenos() {
+    const app = this.appDfc();
+    const fluxo = this.fluxoDfc();
+    const emp = this.empresaSlide(app);
+    const mapa = new Map();
+    const linhas = app && typeof app.lines === "function" ? app.lines() : [];
+    linhas.forEach((l) => {
+      if (String(l.e) !== String(emp)) return;
+      const gid = typeof app.grupoDaConta === "function" ? app.grupoDaConta(l.conta, l.cn) : "";
+      if (gid !== "g_11_01") return;
+      const node = { id: gid, redutora: true };
+      let tot = 0;
+      for (let i = 0; i < 12; i++) {
+        const bruto = Number((l.m || [])[i]) || 0;
+        if (!bruto) continue;
+        const s = fluxo && typeof fluxo.signedAmount === "function"
+          ? fluxo.signedAmount(node, l.conta, l.cn, bruto)
+          : (/ESTORNO/.test(this.normNome(l.cn)) || bruto < 0 ? Math.abs(bruto) : -Math.abs(bruto));
+        tot += s;
+      }
+      if (Math.abs(tot) < 0.5) return;
+      const chave = String(l.conta || "") + "|" + this.normNome(l.cn);
+      if (!mapa.has(chave)) mapa.set(chave, { nome: this.nomeDividendo(l.cn), valor: 0, conta: String(l.conta || "") });
+      mapa.get(chave).valor += tot;
+    });
+    const itens = [...mapa.values()].filter((x) => x.valor <= -50000);
+    const temConta = (conta) => linhas.some((l) => String(l.e) === String(emp) && String(l.conta) === conta);
+    (this.dividendosEnviados || []).forEach((d) => {
+      if (temConta(d.conta)) return;
+      itens.push({ nome: d.nome, valor: -Math.abs(Number(d.total) || 0), conta: d.conta });
+    });
+    return itens.map((x) => ({ nome: x.nome, valor: x.valor }));
+  },
+
+  barrasAportesDividendos() {
+    return this.barrasDaAba("aportes")
+      .concat(this.barrasDividendosMenos())
+      .sort((a, b) => Math.abs(b.valor) - Math.abs(a.valor));
+  },
+
+  barrasLucros() {
+    return this.barrasDaAba("lucros")
+      .sort((a, b) => Math.abs(b.valor) - Math.abs(a.valor));
+  },
+
   barras() {
     const app = this.appDfc();
     const fluxo = this.fluxoDfc();
     const linhas = (app && typeof app.lines === "function") ? app.lines() : [];
     const porGrupo = {};
-    const porEmp = {};
     const porCc = {};
     const guardar = (bolsa, gid, chave, nome, tot) => {
       if (!bolsa[gid]) bolsa[gid] = new Map();
@@ -246,7 +336,6 @@ const OrcamentoDfcSlidesApp = {
       if (Math.abs(tot) < 0.5) return;
       if (!porGrupo[gid]) porGrupo[gid] = 0;
       porGrupo[gid] += tot;
-      guardar(porEmp, gid, String(l.e || l.enome || "—"), this.nomeCurto(l.e, l.enome), tot);
       guardar(porCc, gid, String(l.cc || l.en || "—"), this.nomeProjeto(l.en, l.cc), tot);
     });
     const deGrupo = (id, nome) => ({ nome: nome, valor: porGrupo[id] || 0 });
@@ -278,8 +367,8 @@ const OrcamentoDfcSlidesApp = {
         deGrupo("g_01_04", "Cancelamentos")
       ].filter((x) => Math.abs(x.valor) >= 500),
       obras: cortar(juntar(porCc, ["g_04_03"]), 6),
-      aportes: cortar(juntar(porEmp, ["g_11_01", "g_11_03"]), 6),
-      dividendos: cortar(juntar(porEmp, ["g_11_02"]), 6)
+      aportes: this.barrasAportesDividendos(),
+      dividendos: this.barrasLucros()
     };
   },
 
@@ -339,7 +428,9 @@ const OrcamentoDfcSlidesApp = {
     ];
     const nums = grandes.map(([id, nome, caixa]) => {
       const linha = q.linhas.find((l) => l.id === id);
-      const v = this.total(linha.meses);
+      const v = id === "divmais"
+        ? (q.barras.dividendos || []).reduce((s, x) => s + (Number(x.valor) || 0), 0)
+        : this.total(linha.meses);
       const seta = v >= 0 ? "arrow-up" : "arrow-down";
       return `<div class="orc-slide-num${caixa ? " is-fcf" : ""}${v < 0 ? " is-neg" : " is-pos"}">
         <i data-lucide="${seta}"></i>
