@@ -1,7 +1,8 @@
 /**
  * Segurança · Usuários online
- * Cada navegador logado grava um sinal em usuarios_online/{email} a cada minuto.
+ * Cada navegador logado grava um sinal a cada minuto.
  * A tela considera online quem deu sinal nos últimos 3 minutos.
+ * Advogados no mesmo login gravam um documento por navegador, para um não apagar o outro.
  */
 const UsuariosOnline = {
   COLLECTION: "usuarios_online",
@@ -34,8 +35,25 @@ const UsuariosOnline = {
     return String(email || "").trim().toLowerCase().replace(/\//g, "_");
   },
 
+  sessionId() {
+    let id = "";
+    try { id = sessionStorage.getItem("crm_presence_sid") || ""; } catch (e) {}
+    if (!id) {
+      id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      try { sessionStorage.setItem("crm_presence_sid", id); } catch (e) {}
+    }
+    return id;
+  },
+
+  presenceId(user) {
+    const email = this.docId(user && user.email);
+    const compartilhado = window.crmAcessoAdvogadoCompartilhado && window.crmAcessoAdvogadoCompartilhado(user);
+    if (!email || !compartilhado) return email;
+    return email + "__" + this.sessionId();
+  },
+
   storeKey(name) {
-    return "crm_presence_" + name + ":" + this.docId(this.user && this.user.email);
+    return "crm_presence_" + name + ":" + this.presenceId(this.user);
   },
 
   sinceNow() {
@@ -74,7 +92,7 @@ const UsuariosOnline = {
     if (!fb || !u || !u.email) return;
     const since = this.sinceNow();
     try {
-      await fb.f.setDoc(fb.f.doc(fb.db, this.COLLECTION, this.docId(u.email)), {
+      await fb.f.setDoc(fb.f.doc(fb.db, this.COLLECTION, this.presenceId(u)), {
         email: String(u.email).toLowerCase(),
         name: u.name || "",
         profile: u.profile_name || "",
@@ -127,7 +145,7 @@ const UsuariosOnline = {
     } catch (e) {}
     if (!fb) return;
     try {
-      await fb.f.setDoc(fb.f.doc(fb.db, this.COLLECTION, this.docId(u.email)), {
+      await fb.f.setDoc(fb.f.doc(fb.db, this.COLLECTION, this.presenceId(u)), {
         online: false,
         logoutAt: Date.now()
       }, { merge: true });
@@ -223,7 +241,7 @@ const UsuariosOnline = {
     const root = document.getElementById("usuarios-online-root");
     if (!root) return;
     const now = Date.now();
-    const me = this.docId(this.user && this.user.email);
+    const me = this.presenceId(this.user);
     const online = this.rows.filter((r) => this.isOnline(r, now))
       .sort((a, b) => (Number(a.since) || now) - (Number(b.since) || now));
     const ociosos = online.filter((r) => this.usoDe(r, now).ocioso).length;

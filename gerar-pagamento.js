@@ -42,11 +42,13 @@ const GerarPagamentoApp = {
     beneficiarioOk: {},
     roboMsg: "",
     roboLigando: false,
-    gen: 0
+    gen: 0,
+    conferencia: { lotes: {}, padroes: {} }
   },
 
   LOTES_COLLECTION: "pagamento_lotes",
   LOTES_LOCAL: "crm_pagamento_lotes",
+  CONFERENCIA_LOCAL: "crm_gp_conferencia",
   ROBO_URL: "http://127.0.0.1:7788",
   ROBO_TOKEN_KEY: "gp_robo_token",
 
@@ -456,6 +458,10 @@ const GerarPagamentoApp = {
       this.state.startDate = this.iso(new Date(d.getFullYear(), d.getMonth(), 1));
       this.state.endDate = this.iso(new Date(d.getFullYear(), d.getMonth() + 1, 0));
     }
+    const aplicarConferencia = () => {
+      if (this.state.titulos && this.state.titulos.length) this.paintTitulos();
+    };
+    this.carregarConferencia().then(aplicarConferencia);
     if (this.state.started && this.state.costCenters.length) {
       this.recarregarCustom();
       this.render();
@@ -537,6 +543,7 @@ const GerarPagamentoApp = {
       await this.sincronizarContas();
       this.recarregarCustom();
       this.state.started = true;
+      await this.carregarConferencia();
     } catch (e) {
       console.error("[Gerar Pagamento]", e);
       this.state.error = (e && e.message) ? e.message : "Não consegui carregar os centros de custo.";
@@ -1657,6 +1664,7 @@ const GerarPagamentoApp = {
           }
         }
         it.rateio = t ? this.conferirRateio(t.ccs, t.valor, t.ctx) : null;
+        this.aplicarAprendizado(it, g.contaKey);
         it.loteIntegra = this.loteIntegraDe(it.chave);
         it.loteSienge = this.state.loteSienge[it.chave] || "";
         it.emLote = !!(it.loteIntegra || it.loteSienge);
@@ -1756,16 +1764,205 @@ const GerarPagamentoApp = {
     return (grupos || []).filter((g) => this.empresaDoGrupo(g) === emp);
   },
 
-  abasEmpresaHtml(grupos) {
+  conferenciaVazia() {
+    return { lotes: {}, padroes: {} };
+  },
+
+  conferenciaLocal() {
+    try {
+      const v = JSON.parse(localStorage.getItem(this.CONFERENCIA_LOCAL) || "null");
+      if (!v || typeof v !== "object") return this.conferenciaVazia();
+      return { lotes: v.lotes || {}, padroes: v.padroes || {} };
+    } catch (e) {
+      return this.conferenciaVazia();
+    }
+  },
+
+  salvarConferenciaLocal(dados) {
+    try { localStorage.setItem(this.CONFERENCIA_LOCAL, JSON.stringify(dados)); } catch (e) {}
+  },
+
+  juntarConferencia(a, b) {
+    const saida = this.conferenciaVazia();
+    const fundir = (dest, fonte, somar) => {
+      Object.keys(fonte || {}).forEach((k) => {
+        const novo = fonte[k];
+        if (!novo) return;
+        const velho = dest[k];
+        if (!velho || String(novo.em || "") >= String(velho.em || "")) {
+          dest[k] = Object.assign({}, velho || {}, novo);
+          if (somar) dest[k].n = Math.max(Number(velho && velho.n) || 0, Number(novo.n) || 0);
+        } else if (somar && velho) {
+          velho.n = Math.max(Number(velho.n) || 0, Number(novo.n) || 0);
+        }
+      });
+    };
+    fundir(saida.lotes, a && a.lotes, false);
+    fundir(saida.lotes, b && b.lotes, false);
+    fundir(saida.padroes, a && a.padroes, true);
+    fundir(saida.padroes, b && b.padroes, true);
+    return saida;
+  },
+
+  podarConferencia(dados) {
+    const cortar = (mapa, max) => {
+      const chaves = Object.keys(mapa || {});
+      if (chaves.length <= max) return;
+      chaves.sort((a, b) => String((mapa[a] && mapa[a].em) || "").localeCompare(String((mapa[b] && mapa[b].em) || "")));
+      chaves.slice(0, chaves.length - max).forEach((k) => { delete mapa[k]; });
+    };
+    cortar(dados.lotes, 400);
+    cortar(dados.padroes, 800);
+    return dados;
+  },
+
+  async lerConferenciaRemota() {
+    const fc = window.firebaseCollections;
+    if (!window.firebaseDb || !fc || !fc.getDoc) return null;
+    try {
+      const snap = await fc.getDoc(fc.doc(window.firebaseDb, "config", "gp_conferencia"));
+      const existe = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
+      if (!existe) return this.conferenciaVazia();
+      const data = snap.data() || {};
+      return { lotes: data.lotes || {}, padroes: data.padroes || {} };
+    } catch (e) {
+      console.warn("[Gerar Pagamento] conferência", e);
+      return null;
+    }
+  },
+
+  async carregarConferencia() {
+    const local = this.conferenciaLocal();
+    const remoto = await this.lerConferenciaRemota();
+    const dados = this.podarConferencia(remoto ? this.juntarConferencia(local, remoto) : local);
+    this.state.conferencia = dados;
+    this.salvarConferenciaLocal(dados);
+  },
+
+  async salvarConferencia() {
+    const remoto = await this.lerConferenciaRemota();
+    const dados = this.podarConferencia(this.juntarConferencia(remoto, this.state.conferencia));
+    this.state.conferencia = dados;
+    this.salvarConferenciaLocal(dados);
+    const fc = window.firebaseCollections;
+    if (!window.firebaseDb || !fc || !fc.setDoc) return;
+    try {
+      await fc.setDoc(fc.doc(window.firebaseDb, "config", "gp_conferencia"), dados, { merge: true });
+    } catch (e) {
+      console.warn("[Gerar Pagamento] gravar conferência", e);
+    }
+  },
+
+  /* Conta + centros com o percentual lançado + planos + tipo de documento. É o que o financeiro aceitou. */
+  assinaturaClassificacao(it, contaKey) {
+    const linhas = [];
+    const conf = it && it.rateio;
+    if (conf && conf.obras) {
+      conf.obras.forEach((o) => (o.linhas || []).forEach((l) => {
+        if (!l || l.ausente || l.prestacao) return;
+        linhas.push({ id: String(l.id), pct: Math.round((Number(l.pct) || 0) * 10) / 10 });
+      }));
+    }
+    if (!linhas.length && Array.isArray(it && it.ccs)) {
+      it.ccs.forEach((c) => linhas.push({ id: String(c.id), pct: Math.round((Number(c.rateio) || 0) * 10) / 10 }));
+    }
+    linhas.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+    const planos = [];
+    if (Array.isArray(it && it.ccs)) it.ccs.forEach((c) => (c.planos || []).forEach((p) => {
+      const id = String((p && (p.id || p.nome)) || "").trim();
+      if (id && planos.indexOf(id) < 0) planos.push(id);
+    }));
+    planos.sort();
+    const doc = String((it && it.documento) || "").trim().split(/\s+/)[0].toUpperCase();
+    const cc = linhas.map((l) => l.id + ":" + l.pct).join(",");
+    if (!cc && !planos.length) return "";
+    return [this.numConta(contaKey) || String(contaKey || ""), cc, planos.join(","), doc].join("|");
+  },
+
+  assinaturaLote(g) {
+    const chaves = (g.itens || []).map((it) => it.chave).sort().join(",");
+    return String(g.contaKey || g.key || "") + "@" + String(g.dia || "") + "#" + chaves;
+  },
+
+  loteConferido(g) {
+    const rec = this.state.conferencia && this.state.conferencia.lotes && this.state.conferencia.lotes[this.assinaturaLote(g)];
+    return !!(rec && !rec.off);
+  },
+
+  aplicarAprendizado(it, contaKey) {
+    const conf = it && it.rateio;
+    if (!conf || conf.ok) return;
+    const sig = this.assinaturaClassificacao(it, contaKey);
+    const padrao = this.state.conferencia && this.state.conferencia.padroes && this.state.conferencia.padroes[sig];
+    if (!padrao || padrao.off) return;
+    conf.ok = true;
+    conf.erroRateio = false;
+    conf.erroPlano = false;
+    conf.semPadrao = false;
+    conf.aprendido = true;
+    const quem = padrao.por ? " (" + padrao.por + ")" : "";
+    conf.avisos = (conf.avisos || []).concat(["Classificação aceita pelo financeiro" + quem + ". O mesmo padrão deixa de ser tratado como erro."]);
+    conf.problemas = [];
+    (conf.obras || []).forEach((o) => (o.linhas || []).forEach((l) => {
+      l.ok = true;
+      l.planoErro = false;
+    }));
+  },
+
+  marcarConferido(key) {
+    const g = this.gruposLote().find((x) => x.key === key);
+    if (!g || g.key === "__sem") return;
+    const conf = this.state.conferencia || (this.state.conferencia = this.conferenciaVazia());
+    conf.lotes = conf.lotes || {};
+    conf.padroes = conf.padroes || {};
+    const sig = this.assinaturaLote(g);
+    const agora = new Date().toISOString();
+    const por = this.usuarioAtual();
+    if (conf.lotes[sig] && !conf.lotes[sig].off) {
+      conf.lotes[sig] = { off: true, em: agora, por, porEmail: this.emailAtual() };
+    } else {
+      conf.lotes[sig] = { em: agora, por, porEmail: this.emailAtual() };
+      g.itens.forEach((it) => {
+        const p = this.assinaturaClassificacao(it, g.contaKey);
+        if (!p) return;
+        const prev = conf.padroes[p] || {};
+        conf.padroes[p] = {
+          n: (Number(prev.n) || 0) + 1,
+          em: agora,
+          por,
+          conta: g.contaKey || ""
+        };
+      });
+    }
+    this.salvarConferencia();
+    this.paintTitulos();
+  },
+
+  /* Vermelho se algum lote da empresa tem erro. Amarelo enquanto falta o Conferido. Verde quando todos foram aceitos. */
+  statusEmpresa(id, grupos) {
+    const lista = (grupos || []).filter((g) => this.empresaDoGrupo(g) === id);
+    if (!lista.length) return "";
+    if (lista.some((g) => g.key === "__sem" || (g.itens || []).some((it) => this.bloqueioVisivel(it)))) return "erro";
+    if (lista.some((g) => !this.loteConferido(g))) return "pendente";
+    return "ok";
+  },
+
+  abasEmpresaHtml(grupos, gruposStatus) {
     const lista = this.listaEmpresas(grupos);
     const ativa = this.garantirAbaEmpresa(grupos);
     if (lista.length < 1) return "";
+    const base = gruposStatus || grupos;
     return `<div class="ml-tabs gp-abas-empresa" role="tablist">
       ${lista.map((e) => {
         const cad = (this.state.companies || []).find((c) => String(c.id) === String(e.id));
         const fantasia = cad && (cad.tradeName || cad.name) ? " · " + (cad.tradeName || cad.name) : "";
-        const dica = this.nomeAbaEmpresa(e.id) + fantasia + " · " + e.contas + " conta(s) de parceria · " + e.titulos + " título(s)";
-        return `<button type="button" role="tab" aria-selected="${ativa === e.id}" class="ml-tab ${ativa === e.id ? "is-active" : ""}" title="${this.esc(dica)}" onclick="GerarPagamentoApp.setAbaEmpresa('${this.esc(e.id)}')"><i data-lucide="building-2"></i> ${this.esc(this.nomeAbaEmpresa(e.id))} <span class="ml-tab-count">${e.titulos}</span></button>`;
+        const st = this.statusEmpresa(e.id, base);
+        const frase = st === "erro" ? "Tem lote com erro." : (st === "ok" ? "Classificação conferida." : (st === "pendente" ? "Falta marcar Conferido." : ""));
+        const dica = this.nomeAbaEmpresa(e.id) + fantasia + " · " + e.contas + " conta(s) de parceria · " + e.titulos + " título(s)" + (frase ? " " + frase : "");
+        const icone = st === "erro" ? "circle-x" : (st === "ok" ? "circle-check" : (st === "pendente" ? "circle-alert" : ""));
+        const cls = st === "erro" ? " gp-tab-erro" : (st === "ok" ? " gp-tab-ok" : (st === "pendente" ? " gp-tab-pend" : ""));
+        const selo = icone ? `<i data-lucide="${icone}" class="gp-tab-selo"></i>` : "";
+        return `<button type="button" role="tab" aria-selected="${ativa === e.id}" class="ml-tab${cls} ${ativa === e.id ? "is-active" : ""}" title="${this.esc(dica)}" onclick="GerarPagamentoApp.setAbaEmpresa('${this.esc(e.id)}')"><i data-lucide="building-2"></i> ${this.esc(this.nomeAbaEmpresa(e.id))} ${selo} <span class="ml-tab-count">${e.titulos}</span></button>`;
       }).join("")}
     </div>`;
   },
@@ -2473,6 +2670,50 @@ const GerarPagamentoApp = {
     this.paintTitulos();
   },
 
+  planosDoItem(it) {
+    const planos = [];
+    const ccs = it && it.ccs;
+    if (Array.isArray(ccs)) ccs.forEach((c) => {
+      (c && c.planos || []).forEach((p) => {
+        const t = [p && p.id, p && p.nome].filter(Boolean).join(" ");
+        if (t && planos.indexOf(t) < 0) planos.push(t);
+      });
+    });
+    if (!planos.length && it && it.valida && it.valida.planoTexto) planos.push(it.valida.planoTexto);
+    return planos;
+  },
+
+  centrosDoItem(it) {
+    if (it && typeof it.ccs === "string" && it.ccs.trim()) return it.ccs.trim();
+    return (it && it.ccs || []).map((c) => {
+      if (!c || typeof c === "string") return String(c || "");
+      return [c.id, c.nome].filter(Boolean).join(" ");
+    }).filter(Boolean).join(" · ") || "—";
+  },
+
+  linhaTituloHtml(it, chave) {
+    const planos = this.planosDoItem(it);
+    const id = `${this.esc(it.titulo)}${it.parcela ? " / " + this.esc(it.parcela) : ""}`;
+    return `<button type="button" class="gp-titulo-linha" onclick="GerarPagamentoApp.abrirResumo('${this.esc(chave)}')" title="Abrir o título">
+      <span class="gp-tl-id"><strong>${id}</strong></span>
+      <span class="gp-tl-credor">${this.esc(it.credor || "")}</span>
+      <span class="gp-tl-meta"><b>Centro de custo</b> ${this.esc(this.centrosDoItem(it))}</span>
+      <span class="gp-tl-meta"><b>Plano financeiro</b> ${this.esc(planos.join(" · ") || "—")}</span>
+      <span class="gp-tl-val">${this.money(it.valor != null && it.aPagar == null ? it.valor : this.valorPagar(it))}</span>
+    </button>`;
+  },
+
+  resumoEmLoteHtml(g) {
+    const linhas = (g.itens || []).map((it) => this.linhaTituloHtml(it, it.chave)).join("");
+    return `<div class="gp-lote-linhas">${linhas}</div>`;
+  },
+
+  resumoLoteGeradoHtml(l) {
+    const conta = `<div class="gp-conta-linha"><b>Conta corrente</b> ${this.esc(this.contaLabel(l.conta) || "—")}</div>`;
+    const linhas = (l.itens || []).map((it) => this.linhaTituloHtml(it, this.chaveTitulo(it.titulo, it.parcela))).join("");
+    return `<div class="gp-lote-linhas">${conta}${linhas || '<div class="gp-titulo-linha" style="cursor:default;">Nenhum título neste lote.</div>'}</div>`;
+  },
+
   lotesHtml() {
     const s = this.state;
     const grupos = this.gruposLote();
@@ -2533,7 +2774,7 @@ const GerarPagamentoApp = {
           <div class="gp-lote-tit">
             <i data-lucide="chevron-right" class="gp-lote-seta"></i>
             <div>
-              <div class="gp-lote-conta">${sem ? "Sem conta de parceria cadastrada" : `${this.esc(this.contaLabel(g.conta))} <span class="gp-lote-dia"><i data-lucide="calendar" style="width:13px;height:13px;"></i> ${this.dataBr(g.dia)}</span>`}</div>
+              <div class="gp-lote-conta">${sem ? "Sem conta de parceria cadastrada" : `${jaGerado ? '<span class="gp-cc-rotulo">Conta corrente</span> ' : ""}${this.esc(this.contaLabel(g.conta))} <span class="gp-lote-dia"><i data-lucide="calendar" style="width:13px;height:13px;"></i> ${this.dataBr(g.dia)}</span>`}</div>
               <small>${resumo} · ${this.money(somaGrupo)}</small>
             </div>
           </div>
@@ -2547,6 +2788,10 @@ const GerarPagamentoApp = {
                 onchange="GerarPagamentoApp.setDataBaixa('${this.esc(g.key)}', this.value)">
             </label>
             <strong class="gp-lote-total">${this.money(total)}</strong>
+            <button type="button" class="gp-conferido${this.loteConferido(g) ? " is-on" : ""}" onclick="GerarPagamentoApp.marcarConferido('${this.esc(g.key)}')"
+              title="${this.loteConferido(g) ? "Classificação aceita. Clique para desfazer o aceite deste lote." : "Aceite de que a classificação, o rateio e a conta estão corretos. O Integra passa a reconhecer este padrão."}">
+              <i data-lucide="${this.loteConferido(g) ? "circle-check" : "circle-alert"}" style="width:14px;height:14px;"></i> Conferido
+            </button>
             <button type="button" class="btn btn-primary" ${s.gerandoLote || !marcados.length ? "disabled" : ""} onclick="GerarPagamentoApp.gerarLote('${this.esc(g.key)}')"
               title="${!marcados.length && divergentes ? "Os títulos divergentes ficam de fora deste envio." : ""}"
               style="height:36px;width:150px;justify-content:center;display:inline-flex;align-items:center;gap:6px;">
@@ -2555,6 +2800,7 @@ const GerarPagamentoApp = {
           </div>`)}
         </div>
         ${this.transferenciasHtml(this.transferenciasDe(g.itens))}
+        ${jaGerado ? this.resumoEmLoteHtml(g) : ""}
         <div class="gp-lote-corpo" style="overflow:auto;"${aberto ? "" : " hidden"}>
           <table class="gp-table gp-titulos">
             <colgroup><col style="width:3%"><col style="width:8%"><col style="width:7%"><col style="width:12%"><col style="width:9%"><col style="width:11%"><col style="width:9%"><col style="width:10%"><col style="width:9%"><col style="width:12%"><col style="width:10%"></colgroup>
@@ -2575,7 +2821,8 @@ const GerarPagamentoApp = {
       noPeriodo);
     const aba = s.abaLotes === "lote" ? "lote" : "gerar";
     const fonteEmpresa = s.diaRetro && aba !== "lote" ? aGerarRetro : (aba === "lote" ? emLote : aGerar);
-    const abasEmpresa = this.abasEmpresaHtml(fonteEmpresa);
+    const baseStatus = s.diaRetro && aba !== "lote" ? aGerarRetro : aGerar;
+    const abasEmpresa = this.abasEmpresaHtml(fonteEmpresa, baseStatus);
     const emp = this.state.abaEmpresa;
     const soEmpresa = (lista) => this.filtrarEmpresa(lista, emp);
     const aGerarVis = soEmpresa(aGerar);
@@ -2612,7 +2859,9 @@ const GerarPagamentoApp = {
               <button type="button" class="btn btn-sm btn-excel" onclick="GerarPagamentoApp.baixarLoteExcel('${this.esc(l.id)}')" title="Baixar o lote em Excel"><i data-lucide="download" style="width:14px;height:14px;"></i> Excel</button>
               <button type="button" class="btn btn-sm" onclick="GerarPagamentoApp.excluirLote('${this.esc(l.id)}')" style="color:#b91c1c;background:#fff;border:1px solid #fecaca;">Excluir</button>
             </td>
-          </tr>${(l.transferencias || []).length ? `<tr><td colspan="8">${this.transferenciasHtml(l.transferencias)}</td></tr>` : ""}`).join("")}</tbody>
+          </tr>
+          <tr><td colspan="8">${this.resumoLoteGeradoHtml(l)}</td></tr>
+          ${(l.transferencias || []).length ? `<tr><td colspan="8">${this.transferenciasHtml(l.transferencias)}</td></tr>` : ""}`).join("")}</tbody>
         </table>
       </div>` : "";
     if (aba === "lote") {
@@ -3128,6 +3377,10 @@ const GerarPagamentoApp = {
     });
     const temRateio = ids.size > 1;
     const soSociedade = conf && conf.obras && conf.obras.length && conf.obras.every((o) => o.sociedade);
+    if (conf && conf.aprendido) {
+      const aviso = conf.avisos && conf.avisos.length ? conf.avisos.join("\n") : "O financeiro aceitou esta classificação.";
+      return { texto: "Aceito", cls: "bchk-ok", dica: aviso };
+    }
     if (conf && conf.ok !== false && conf.obras && conf.obras.some((o) => o.distratoNovo)) {
       const o = conf.obras.find((x) => x.distratoNovo);
       const prestacao = o.padrao ? ` A prestação de contas aplica ${this.pct(o.padrao.ml)} Moura Leite / ${this.pct(o.padrao.terr)} terrenista.` : "";
@@ -3351,6 +3604,26 @@ const GerarPagamentoApp = {
           #gerar-pagamento-root .gp-abas-lote { margin:0; }
           #gerar-pagamento-root .gp-faixa { display:flex; flex-wrap:wrap; align-items:flex-end; gap:8px 16px; margin:8px 20px 4px; }
           #gerar-pagamento-root .gp-abas-empresa { margin:0; flex:1 1 100%; }
+          #gerar-pagamento-root .ml-tab.gp-tab-pend { color:#a16207; background:#fef9c3; border-radius:8px 8px 0 0; }
+          #gerar-pagamento-root .ml-tab.gp-tab-pend.is-active { color:#a16207; border-bottom-color:#eab308; }
+          #gerar-pagamento-root .ml-tab.gp-tab-ok { color:#105436; background:#ecfdf5; border-radius:8px 8px 0 0; }
+          #gerar-pagamento-root .ml-tab.gp-tab-ok.is-active { color:#105436; border-bottom-color:#105436; }
+          #gerar-pagamento-root .ml-tab.gp-tab-erro { color:#b91c1c; background:#fef2f2; border-radius:8px 8px 0 0; }
+          #gerar-pagamento-root .ml-tab.gp-tab-erro.is-active { color:#b91c1c; border-bottom-color:#b91c1c; }
+          #gerar-pagamento-root .gp-tab-selo { width:15px; height:15px; }
+          #gerar-pagamento-root .gp-conferido { height:36px; padding:0 12px; border-radius:8px; border:1px solid #eab308; background:#fef9c3; color:#a16207; font-weight:800; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+          #gerar-pagamento-root .gp-conferido.is-on { border-color:#105436; background:#105436; color:#fff; }
+          #gerar-pagamento-root .gp-cc-rotulo { display:inline-block; margin-right:6px; padding:1px 7px; border-radius:999px; background:#e2e8f0; color:#334155; font-size:0.68rem; font-weight:800; letter-spacing:.02em; text-transform:uppercase; }
+          #gerar-pagamento-root .gp-lote-linhas { display:flex; flex-direction:column; gap:6px; padding:10px 14px 12px; background:#fff; }
+          #gerar-pagamento-root .gp-conta-linha { font-size:0.82rem; color:#0f172a; font-weight:700; }
+          #gerar-pagamento-root .gp-conta-linha b { color:#64748b; font-size:0.68rem; text-transform:uppercase; letter-spacing:.02em; margin-right:6px; }
+          #gerar-pagamento-root .gp-titulo-linha { display:flex; flex-wrap:wrap; align-items:center; gap:8px 14px; width:100%; text-align:left; padding:8px 10px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc; cursor:pointer; font:inherit; color:#0f172a; }
+          #gerar-pagamento-root .gp-titulo-linha:hover { background:#ecfdf5; border-color:#86efac; }
+          #gerar-pagamento-root .gp-tl-id { font-weight:800; min-width:88px; }
+          #gerar-pagamento-root .gp-tl-credor { color:#334155; flex:1 1 140px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+          #gerar-pagamento-root .gp-tl-meta { color:#334155; font-size:0.78rem; }
+          #gerar-pagamento-root .gp-tl-meta b { display:block; color:#64748b; font-size:0.66rem; text-transform:uppercase; letter-spacing:.02em; }
+          #gerar-pagamento-root .gp-tl-val { margin-left:auto; font-weight:800; color:#105436; white-space:nowrap; }
           #gerar-pagamento-root .gp-conf { display:flex; gap:10px; align-items:flex-start; margin:12px 20px 4px; padding:12px 14px; border:1px solid #bbf7d0; border-left:4px solid #105436; border-radius:10px; background:#f0fdf4; color:#14532d; font-size:0.82rem; line-height:1.45; }
           #gerar-pagamento-root .gp-conf.is-erro { border-color:#fecaca; border-left-color:#b91c1c; background:#fef2f2; color:#7f1d1d; }
           #gerar-pagamento-root .gp-conf-spin { width:16px; height:16px; flex:none; margin-top:2px; border:2px solid rgba(16,84,54,0.2); border-top-color:#105436; border-radius:50%; animation:spin 0.8s linear infinite; }

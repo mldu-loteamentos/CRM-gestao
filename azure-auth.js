@@ -237,6 +237,14 @@ async function login() {
 }
 
 async function logout(opts) {
+  // Acesso compartilhado: esta aba sai, as outras pessoas no mesmo login continuam.
+  if (opts && opts.manterOutrasAbas) {
+    try { sessionStorage.removeItem(USER_SESSION_KEY); } catch (e) {}
+    try { sessionStorage.setItem("crm_aba_encerrada", "1"); } catch (e) {}
+    window.location.reload();
+    return;
+  }
+  try { sessionStorage.removeItem("crm_aba_encerrada"); } catch (e) {}
   clearPersistedSession(!!(opts && opts.silent));
   window.location.reload();
 }

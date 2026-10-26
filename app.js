@@ -4500,6 +4500,129 @@ function validateAndLoadCrmUser(user) {
   return { ...user, ...matchedUser };
 }
 
+window.CRM_ADVOGADO_ATUANDO_KEY = "crm_advogado_atuando";
+
+window.crmListaAdvogadosCobranca = function() {
+  const lista = typeof window.getCrmUsersList === "function" ? window.getCrmUsersList() : [];
+  return (Array.isArray(lista) ? lista : [])
+    .filter((u) => u && window.isAdvogadoCobrancaUser && window.isAdvogadoCobrancaUser(u) && String(u.status || "ATIVO").toUpperCase() !== "INATIVO")
+    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "pt"));
+};
+
+window.crmAcessoAdvogadoCompartilhado = function(user) {
+  const u = user || (window.AppState && AppState.currentUser);
+  if (!u || !window.isAdvogadoCobrancaUser || !window.isAdvogadoCobrancaUser(u)) return false;
+  return window.crmListaAdvogadosCobranca().length >= 2;
+};
+
+window.crmAdvogadoAtuando = function() {
+  try {
+    const raw = sessionStorage.getItem(window.CRM_ADVOGADO_ATUANDO_KEY) || "";
+    const o = raw ? JSON.parse(raw) : null;
+    return o && o.name ? o : null;
+  } catch (e) {
+    return null;
+  }
+};
+
+window.crmAplicarAdvogadoAtuando = function(pessoa) {
+  const u = window.AppState && AppState.currentUser;
+  if (!u || !pessoa) return;
+  if (!u._nomeConta) u._nomeConta = u.name || "";
+  u.atuando = {
+    id: pessoa.id,
+    name: pessoa.name || "",
+    email: pessoa.email || "",
+    sienge_user: pessoa.sienge_user || ""
+  };
+  u.name = u.atuando.name || u._nomeConta;
+  try { sessionStorage.setItem(window.CRM_ADVOGADO_ATUANDO_KEY, JSON.stringify(u.atuando)); } catch (e) {}
+};
+
+window.crmPedirAdvogadoAtuando = function() {
+  const u = window.AppState && AppState.currentUser;
+  if (!u || !window.isAdvogadoCobrancaUser || !window.isAdvogadoCobrancaUser(u)) return Promise.resolve(null);
+  const lista = window.crmListaAdvogadosCobranca();
+  if (lista.length < 2) {
+    if (lista[0]) window.crmAplicarAdvogadoAtuando(lista[0]);
+    return Promise.resolve(lista[0] || null);
+  }
+  const salvo = window.crmAdvogadoAtuando();
+  if (salvo) {
+    const ainda = lista.find((p) => String(p.id) === String(salvo.id) || (salvo.email && String(p.email || "").toLowerCase() === String(salvo.email).toLowerCase()));
+    if (ainda) {
+      window.crmAplicarAdvogadoAtuando(ainda);
+      return Promise.resolve(ainda);
+    }
+  }
+  return new Promise((resolve) => {
+    const antigo = document.getElementById("crm-advogado-atuando");
+    if (antigo) antigo.remove();
+    const esc = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    let escolhido = null;
+    const overlay = document.createElement("div");
+    overlay.id = "crm-advogado-atuando";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.style.cssText = "position:fixed;inset:0;z-index:200000;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:24px;";
+    const card = document.createElement("div");
+    card.style.cssText = "width:min(440px,100%);background:#fff;border-radius:16px;padding:22px 22px 18px;box-shadow:0 24px 60px rgba(15,23,42,.28);";
+    const botoes = lista.map((p, i) => {
+      const id = "crm-adv-op-" + i;
+      return `<button type="button" id="${id}" data-idx="${i}" style="display:flex;width:100%;text-align:left;align-items:center;gap:10px;margin:0 0 8px;padding:12px 14px;border-radius:12px;border:1px solid #e2e8f0;background:#fff;cursor:pointer;font:inherit;">
+        <span style="width:36px;height:36px;border-radius:50%;background:#105436;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-weight:800;flex:0 0 36px;">${esc(String(p.name || "?").trim().slice(0, 2).toUpperCase())}</span>
+        <span style="min-width:0;">
+          <span style="display:block;font-weight:800;color:#0f172a;">${esc(p.name)}</span>
+          <span style="display:block;font-size:.75rem;color:#64748b;">${esc(p.email)}</span>
+        </span>
+      </button>`;
+    }).join("");
+    card.innerHTML = `
+      <h2 style="margin:0 0 6px;font-size:1.15rem;color:#0f172a;">Quem está trabalhando agora?</h2>
+      <p style="margin:0 0 14px;font-size:.84rem;color:#64748b;line-height:1.45;">Este acesso é compartilhado pelos advogados de cobrança. Escolha o seu nome. Outra pessoa pode entrar ao mesmo tempo, no próprio navegador, sem encerrar a sua sessão.</p>
+      <div id="crm-adv-lista">${botoes}</div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;">
+        <button type="button" id="crm-adv-sair" style="height:38px;padding:0 14px;border-radius:10px;border:1px solid #e2e8f0;background:#fff;color:#334155;font-weight:700;cursor:pointer;">Sair</button>
+        <button type="button" id="crm-adv-ok" disabled style="height:38px;padding:0 16px;border-radius:10px;border:0;background:#105436;color:#fff;font-weight:800;cursor:pointer;opacity:.45;">Continuar</button>
+      </div>`;
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+    const ok = card.querySelector("#crm-adv-ok");
+    const pintar = () => {
+      card.querySelectorAll("[data-idx]").forEach((btn) => {
+        const on = escolhido && String(btn.getAttribute("data-idx")) === String(lista.indexOf(escolhido));
+        btn.style.borderColor = on ? "#105436" : "#e2e8f0";
+        btn.style.background = on ? "#f0fdf4" : "#fff";
+      });
+      ok.disabled = !escolhido;
+      ok.style.opacity = escolhido ? "1" : ".45";
+    };
+    card.querySelectorAll("[data-idx]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        escolhido = lista[Number(btn.getAttribute("data-idx"))] || null;
+        pintar();
+      });
+    });
+    ok.addEventListener("click", () => {
+      if (!escolhido) return;
+      window.crmAplicarAdvogadoAtuando(escolhido);
+      overlay.remove();
+      resolve(escolhido);
+    });
+    card.querySelector("#crm-adv-sair").addEventListener("click", () => {
+      overlay.remove();
+      if (window.crmSair) window.crmSair();
+    });
+  });
+};
+
+window.crmSair = function() {
+  try { sessionStorage.removeItem(window.CRM_ADVOGADO_ATUANDO_KEY); } catch (e) {}
+  if (!window.MouraAuth || typeof MouraAuth.logout !== "function") return;
+  const compartilhado = window.crmAcessoAdvogadoCompartilhado && window.crmAcessoAdvogadoCompartilhado();
+  return MouraAuth.logout(compartilhado ? { manterOutrasAbas: true } : undefined);
+};
+
 async function processSuccessfulLogin(loggedUser) {
   try {
     window._crmLoginSync = true;
@@ -4560,6 +4683,8 @@ async function processSuccessfulLogin(loggedUser) {
       console.warn("updateOperatorTabsUI no login:", e);
     }
 
+    await window.crmPedirAdvogadoAtuando();
+
     const overlay = document.getElementById("login-modal-overlay");
     if (overlay) overlay.classList.remove("active");
     const loginVideo = document.getElementById("login-bg-video");
@@ -4618,9 +4743,11 @@ async function processSuccessfulLogin(loggedUser) {
 }
 
 async function checkAuthentication() {
-  const user = (window.MouraAuth && typeof MouraAuth.restoreSession === "function")
+  let abaEncerrada = false;
+  try { abaEncerrada = sessionStorage.getItem("crm_aba_encerrada") === "1"; } catch (e) {}
+  const user = abaEncerrada ? null : ((window.MouraAuth && typeof MouraAuth.restoreSession === "function")
     ? await MouraAuth.restoreSession()
-    : MouraAuth.getCurrentUser();
+    : MouraAuth.getCurrentUser());
   if (!user) {
     const overlay = document.getElementById("login-modal-overlay");
     overlay.classList.add("active");
@@ -4643,7 +4770,15 @@ async function checkAuthentication() {
         btn.dataset.loginBusy = "1";
         const prevText = btn.textContent;
         btn.textContent = "Aguardando Microsoft...";
-        MouraAuth.login().then(async loggedUser => {
+        const entrar = async () => {
+          try { sessionStorage.removeItem("crm_aba_encerrada"); } catch (e) {}
+          if (abaEncerrada && MouraAuth.getCurrentUser) {
+            const ja = MouraAuth.getCurrentUser();
+            if (ja) return ja;
+          }
+          return MouraAuth.login();
+        };
+        entrar().then(async loggedUser => {
           await processSuccessfulLogin(loggedUser);
         }).catch(err => {
           const errorMsg = document.getElementById("login-error-msg");
