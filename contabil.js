@@ -23,7 +23,8 @@ const ContabilApp = {
     janela: null,
     porEmpresa: null,
     serie: null,
-    loadMsg: ""
+    loadMsg: "",
+    lancando: false
   },
 
   esc(v) {
@@ -1397,6 +1398,7 @@ const ContabilApp = {
         <button type="button" class="btn btn-excel" onclick="ContabilApp.exportarExcel()" ${s.exportando ? "disabled" : ""} title="Exportar o DRE como está aberto. Cada empresa sai numa aba.">
           <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
         </button>
+        ${(window.ContabilEquiv && ContabilEquiv.podeLancar()) ? `<button type="button" class="ctb-buscar" onclick="ContabilEquiv.lancar()" ${s.lancando ? "disabled" : ""} title="Lança no Sienge o lucro ou o prejuízo de equivalência de cada mês do período, em reais. A linha 50% Eq. MLDU não entra.">${s.lancando ? "Lançando…" : "Lançar equivalência"}</button>` : ""}
       </div>` : "";
       corpo = `${avisos}${visao}<p class="ctb-nota">${aba === "dre" && serie && fimMes ? this.esc(notaDre.trim()) : this.esc(periodo) + ". Entram as contas com movimento." + notaDre}</p>${demo}`;
     }

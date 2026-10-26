@@ -3832,6 +3832,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     setTimeout(bootRepac, 0);
   } else if (tabId === "contabil") {
     if (typeof ContabilApp !== "undefined") ContabilApp.init();
+  } else if (tabId === "contabil-config") {
+    if (window.ContabilEquiv && typeof ContabilEquiv.init === "function") ContabilEquiv.init();
   } else if (tabId === "gerar-pagamento") {
     if (typeof GerarPagamentoApp !== "undefined") GerarPagamentoApp.init();
   } else if (tabId === "parametrizacao-parceiro") {
@@ -3920,6 +3922,10 @@ function auditActionMeta(action, summary, module) {
   ) {
     if (/erro|fail|falha/.test(blob)) return { group: "anexo", label: "Falha no envio de anexo" };
     return { group: "anexo", label: "Envio de Anexo" };
+  }
+  if (key === "Lançar equivalência") {
+    if (/erro|falha/.test(blob)) return { group: "sienge", label: "Falha ao lançar equivalência no Sienge" };
+    return { group: "sienge", label: "Equivalência lançada no Sienge" };
   }
   return { group: "outros", label: key === "HTTP" ? "Requisição" : key };
 }
@@ -6706,8 +6712,8 @@ window.permCoversMenuKey = function(perms, modKey) {
   }
   if (modKey === "mod_contabil") {
     if (perms.mod_contabil === true || perms.sub_contabil_geral === true) return true;
-    const base = "sub_contabil_geral_demonstracoes";
-    return perms[base + "_acessar"] === true || perms[base + "_visualizar"] === true || perms[base + "_editar"] === true;
+    const bases = ["sub_contabil_geral_demonstracoes", "sub_contabil_geral_config"];
+    return bases.some((b) => perms[b + "_acessar"] === true || perms[b + "_visualizar"] === true || perms[b + "_editar"] === true);
   }
   if (modKey === "mod_orc") {
     if (perms.mod_orc === true || perms.sub_orc_geral === true || perms.sub_fin_orc === true) return true;

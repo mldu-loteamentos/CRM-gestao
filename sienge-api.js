@@ -3711,6 +3711,67 @@ const SiengeApiService = {
     return lista || [];
   },
 
+  async getAccountancyAccounts(companyId) {
+    if (s_apiMode === "simulado") return [];
+    if (!companyId) return [];
+    const all = [];
+    let offset = 0;
+    const page = 200;
+    while (all.length < 8000) {
+      const res = await siengeFetchWithRetry(`/accountancy/accounts?companyId=${encodeURIComponent(companyId)}&limit=${page}&offset=${offset}`);
+      const results = (res && (res.results || res.data)) || [];
+      all.push(...results);
+      const total = res && res.resultSetMetadata && res.resultSetMetadata.count;
+      offset += page;
+      if (!results.length || results.length < page) break;
+      if (total != null && offset >= total) break;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    return all;
+  },
+
+  async buscarContaContabil(companyId, codigo) {
+    if (s_apiMode === "simulado") return [];
+    const cod = String(codigo || "").trim();
+    if (!companyId || !cod) return [];
+    const res = await siengeFetchWithRetry(`/accountancy/accounts?companyId=${encodeURIComponent(companyId)}&uniqueNumber=${encodeURIComponent(cod)}&limit=20&offset=0`);
+    let lista = (res && (res.results || res.data)) || [];
+    if (!lista.length && /^\d+$/.test(cod)) {
+      const porId = await siengeFetchWithRetry(`/accountancy/accounts?companyId=${encodeURIComponent(companyId)}&id=${encodeURIComponent(cod)}&limit=20&offset=0`);
+      lista = (porId && (porId.results || porId.data)) || [];
+    }
+    return lista;
+  },
+
+  async getAccountancyEntries(companyId, startDate, endDate) {
+    if (s_apiMode === "simulado") return [];
+    const ini = String(startDate || "").slice(0, 10);
+    const fim = String(endDate || "").slice(0, 10);
+    if (!companyId || !ini || !fim) return [];
+    const all = [];
+    let offset = 0;
+    const page = 200;
+    while (all.length < 1000) {
+      const q = `companyId=${encodeURIComponent(companyId)}&startDate=${encodeURIComponent(ini)}&endDate=${encodeURIComponent(fim)}&limit=${page}&offset=${offset}`;
+      const res = await siengeFetchWithRetry(`/accountancy/entries?${q}`);
+      const results = (res && (res.results || res.data)) || [];
+      all.push(...results);
+      const total = res && res.resultSetMetadata && res.resultSetMetadata.count;
+      offset += page;
+      if (!results.length || results.length < page) break;
+      if (total != null && offset >= total) break;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    return all;
+  },
+
+  async postAccountancyEntry(entry) {
+    if (s_apiMode === "simulado") {
+      throw new Error("O Sienge está em modo simulado. O lançamento de equivalência não foi enviado.");
+    }
+    return siengePost("/accountancy/entries", [entry]);
+  },
+
   async getAccountBalances(balanceDate, opts = {}) {
     const date = String(balanceDate || "").slice(0, 10);
     const showLast = opts.showLast === false ? "N" : "S";

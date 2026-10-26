@@ -456,7 +456,8 @@ const ConfigUsersApp = {
     {
       name: "Contábil", icon: "book-open", key: "mod_contabil",
       submodules: [{ name: "Contábil", key: "sub_contabil_geral", actions: [
-        { id: "demonstracoes", label: "DRE e Balanço", permBase: "sub_contabil_geral_demonstracoes" }
+        { id: "demonstracoes", label: "DRE e Balanço", permBase: "sub_contabil_geral_demonstracoes" },
+        { id: "config", label: "Configurações", permBase: "sub_contabil_geral_config" }
       ] }]
     },
     {
