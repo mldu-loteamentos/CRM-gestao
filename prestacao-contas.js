@@ -1907,7 +1907,8 @@ const PrestacaoContasApp = {
         try {
           return await SiengeApiService.getAccountStatements(datas.inicioMov, datas.dataAtual, {
             companyId: this.companyId,
-            accountNumber: conta.numero
+            accountNumber: conta.numero,
+            rethrow: true
           });
         } catch (e) {
           return { erro: (e && e.message) || "Falha ao ler o extrato." };

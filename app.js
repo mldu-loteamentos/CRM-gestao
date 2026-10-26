@@ -2215,13 +2215,62 @@ window.clientIsZeroPercentPaid = function(client) {
   return false;
 };
 
+/* A unidade da fila usa o centro 00 (17700). A cláusula fica no centro da obra (17701). Os dois são o mesmo empreendimento. */
+window.clausulaSuspensivaConfig = function(costCenterId, unitName) {
+  const direto = (typeof window.nexCcConfig === "function")
+    ? window.nexCcConfig(costCenterId, unitName)
+    : {};
+  if (direto && direto.clausula_suspensiva_ativa) return direto;
+  const ids = [];
+  const push = (v) => {
+    const s = String(v == null ? "" : v).replace(/\D/g, "");
+    if (s && ids.indexOf(s) < 0) ids.push(s);
+  };
+  if (Array.isArray(costCenterId)) costCenterId.forEach(push);
+  else push(costCenterId);
+  if (typeof getPrimaryCostCenter === "function") push(getPrimaryCostCenter(costCenterId));
+  const unitMatch = String(unitName || "").match(/^(\d{4,6})/);
+  if (unitMatch) push(unitMatch[1]);
+  const irmaos = ids.slice();
+  ids.forEach((id) => {
+    if (id.length < 4) return;
+    const obra = id.slice(0, -2);
+    ["00", "01", "02"].forEach((suf) => {
+      const cand = obra + suf;
+      if (irmaos.indexOf(cand) < 0) irmaos.push(cand);
+    });
+  });
+  const maps = [];
+  try {
+    maps.push((typeof window.parseCentrosCustoCustomMap === "function")
+      ? window.parseCentrosCustoCustomMap(localStorage.getItem("crm_centros_custo_custom") || "{}")
+      : {});
+  } catch (e) {}
+  const mem = (window.CentrosCustoState && window.CentrosCustoState.customFields) || {};
+  maps.push((typeof window.parseCentrosCustoCustomMap === "function") ? window.parseCentrosCustoCustomMap(mem) : mem);
+  let best = null;
+  let bestAt = -1;
+  maps.forEach((map) => {
+    if (!map) return;
+    const keys = Object.keys(map);
+    irmaos.forEach((id) => {
+      const key = keys.find((k) => String(k) === id || (Number(k) && Number(k) === Number(id)));
+      const row = key ? map[key] : null;
+      if (!row || !row.clausula_suspensiva_ativa) return;
+      const at = Number(row.updatedAt || 0) || 0;
+      if (!best || at >= bestAt) {
+        best = row;
+        bestAt = at;
+      }
+    });
+  });
+  return best || direto || {};
+};
+
 window.clientAppliesClausulaSuspensiva = function(client) {
   if (!client) return false;
-  const ccId = (typeof getPrimaryCostCenter === "function")
-    ? getPrimaryCostCenter(client.costCenterId)
-    : client.costCenterId;
-  const cc = (typeof window.nexCcConfig === "function")
-    ? window.nexCcConfig(ccId || client.costCenterId, client.unitName)
+  const cc = (typeof window.clausulaSuspensivaConfig === "function")
+    ? window.clausulaSuspensivaConfig(client.costCenterId, client.unitName)
     : {};
   if (!cc || !cc.clausula_suspensiva_ativa) return false;
   const hasSi = typeof window.clientHasConfirmedOverdueSinalSI === "function"
@@ -2346,8 +2395,8 @@ window.applyCachedParcelaTiposToBill = function(bill) {
 
 window.billNeedsQuitacaoTipoEnrich = function(bill) {
   const ccId = bill && (bill.costCenterId || (bill.costCentersId && bill.costCentersId[0]));
-  const cc = (typeof window.nexCcConfig === "function")
-    ? window.nexCcConfig(ccId, bill && (bill.units || bill.unityName || bill.unitName))
+  const cc = (typeof window.clausulaSuspensivaConfig === "function")
+    ? window.clausulaSuspensivaConfig(ccId, bill && (bill.units || bill.unityName || bill.unitName))
     : {};
   if (!cc || !cc.clausula_suspensiva_ativa) return false;
   const insts = (bill && bill.defaulterInstallments) || [];
@@ -32469,7 +32518,9 @@ async function loadWeSendTab() {
   const entradaDays = 31;
   allItems.forEach(item => {
     if (typeof window.nexClienteSubJudice === "function" && window.nexClienteSubJudice(item.customerId, item.saleId, item)) return;
-    const cc = window.nexCcConfig(resolveCc(item).id || item.costCenterId, item.unitName);
+    const cc = (typeof window.clausulaSuspensivaConfig === "function")
+      ? window.clausulaSuspensivaConfig(resolveCc(item).id || item.costCenterId, item.unitName)
+      : window.nexCcConfig(resolveCc(item).id || item.costCenterId, item.unitName);
     const aplicaSuspensiva = typeof window.clientAppliesClausulaSuspensiva === "function"
       ? window.clientAppliesClausulaSuspensiva(item)
       : (!!cc.clausula_suspensiva_ativa && !!item.hasUnpaidSinal);
