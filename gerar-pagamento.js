@@ -2146,7 +2146,7 @@ const GerarPagamentoApp = {
       : "";
     const transferencias = this.transferenciasDe(itens);
     if (!silencioso) {
-      const pergunta = `Gerar e autorizar o lote do dia ${this.dataBr(g.dia)} com ${itens.length} título(s), total de ${this.money(total)}, pela conta ${this.contaLabel(g.conta)}?\n\nData da baixa no banco: ${this.dataBr(baixa)}. O robô cria o lote no Sienge e já autoriza, no mesmo passo.${alerta}${this.textoTransferencias(transferencias)}`;
+      const pergunta = `Gerar e autorizar o lote do dia ${this.dataBr(g.dia)} com ${itens.length} título(s), total de ${this.money(total)}, pela conta ${this.contaLabel(g.conta)}?\n\nData da baixa no banco: ${this.dataBr(baixa)}. O robô cria o lote no Sienge, grava a autorização e gera o arquivo de contas a pagar, no mesmo passo.${alerta}${this.textoTransferencias(transferencias)}`;
       const okConf = typeof window.mouraConfirm === "function" ? await window.mouraConfirm(pergunta) : confirm(pergunta);
       if (!okConf) {
         s.gerandoLote = "";
@@ -2422,7 +2422,7 @@ const GerarPagamentoApp = {
     const titulo = {
       LOTE_GERADO: "Lote gerado no Integra",
       LOTE_SIENGE: "Lote criado no Sienge pelo robô",
-      LOTE_APROVADO: "Lote aprovado no Sienge pelo robô",
+      LOTE_APROVADO: "Lote autorizado no Sienge e arquivo de contas a pagar gerado",
       LOTE_ERRO: ev.acao === "aprovar" ? "O robô não aprovou o lote no Sienge" : "O robô não criou o lote no Sienge",
       LOTE_EXCLUIDO: ev.acao === "retirar" ? "Títulos saíram do lote no Sienge e voltaram para reenvio" : (ev.acao === "excluir" ? "Lote excluído no Sienge" : "Lote excluído no Integra")
     }[ev.tipo] || ev.tipo;
@@ -2436,11 +2436,11 @@ const GerarPagamentoApp = {
         action: ev.tipo,
         module: "Gerar Pagamento",
         status: ev.ok ? "ok" : "erro",
-        summary: `${titulo}: ${lote.id}${numero} · ${titulos.length} título(s) · ${this.money(lote.total)} · baixa ${this.dataBr(lote.dataBaixa || lote.dia)} · ${this.contaLabel(lote.conta)}${ev.msg ? " · " + ev.msg : ""}${(lote.transferencias || []).length ? " · " + (lote.transferencias || []).map((a) => `transferir ${this.money(a.valor)} da ${a.deNumero} para ${a.paraNumero} (CC ${(a.ccs || []).map((c) => c.id).join(", ")})`).join("; ") : ""}`,
+        summary: `${titulo}: ${lote.id}${numero} · ${titulos.length} título(s) · ${this.money(lote.total)} · baixa ${this.dataBr(lote.dataBaixa || lote.dia)} · ${this.contaLabel(lote.conta)}${ev.tipo === "LOTE_APROVADO" && sg.arquivo ? " · arquivo " + sg.arquivo : ""}${ev.msg ? " · " + ev.msg : ""}${(lote.transferencias || []).length ? " · " + (lote.transferencias || []).map((a) => `transferir ${this.money(a.valor)} da ${a.deNumero} para ${a.paraNumero} (CC ${(a.ccs || []).map((c) => c.id).join(", ")})`).join("; ") : ""}`,
         customerLabel: credores.slice(0, 3).join(", ") + (credores.length > 3 ? ` e mais ${credores.length - 3}` : ""),
         enterpriseId: String((itens[0] && itens[0].ccs) || "").split(" - ")[0],
         titleId: titulos.join(", "),
-        details: { lote: lote.id, numeroSienge: sg.numero || "", total: lote.total, pagamento: lote.dia, dataBaixa: lote.dataBaixa || lote.dia, conta: this.contaLabel(lote.conta), titulos, mensagem: ev.msg || "", transferencias: lote.transferencias || [] }
+        details: { lote: lote.id, numeroSienge: sg.numero || "", arquivo: sg.arquivo || "", total: lote.total, pagamento: lote.dia, dataBaixa: lote.dataBaixa || lote.dia, conta: this.contaLabel(lote.conta), titulos, mensagem: ev.msg || "", transferencias: lote.transferencias || [] }
       });
     } catch (e) {
       console.warn("[Gerar Pagamento] auditoria", e);
@@ -2500,7 +2500,7 @@ const GerarPagamentoApp = {
       return false;
     }
     if (!opts || opts.confirmar !== false) {
-      const pergunta = `Aprovar no Sienge o lote ${sg.numero ? "nº " + sg.numero : id}: ${(lote.itens || []).length} título(s), total de ${this.money(lote.total)}, pela conta ${this.contaLabel(lote.conta)}?\n\nA aprovação fica registrada em seu nome.`;
+      const pergunta = `Autorizar no Sienge o lote ${sg.numero ? "nº " + sg.numero : id}: ${(lote.itens || []).length} título(s), total de ${this.money(lote.total)}, pela conta ${this.contaLabel(lote.conta)}?\n\nA autorização fica gravada em seu nome e o Integra gera o arquivo de contas a pagar nesse mesmo passo.`;
       const okConf = typeof window.mouraConfirm === "function" ? await window.mouraConfirm(pergunta) : confirm(pergunta);
       if (!okConf) return false;
     }
@@ -2515,23 +2515,23 @@ const GerarPagamentoApp = {
       return false;
     }
     if (r.ok) {
-      await this.registrarSienge(lote, "aprovar", r, { status: "aprovado", aprovadoEm: new Date().toISOString(), aprovadoPor: this.usuarioAtual(), erro: "" });
+      await this.registrarSienge(lote, "aprovar", r, { status: "aprovado", aprovadoEm: new Date().toISOString(), aprovadoPor: this.usuarioAtual(), arquivo: r.arquivo || "", erro: "" });
     } else {
       await this.registrarSienge(lote, "aprovar", r, { erro: r.erro || "Falha no robô." });
     }
     this.paintTitulos();
-    if (!r.ok) alert(`O robô não conseguiu aprovar o lote no Sienge:\n\n${r.erro || "Falha no robô."}\n\nO lote ficou criado. Use Aprovar para tentar de novo.`);
+    if (!r.ok) alert(`O robô não concluiu a autorização do lote no Sienge:\n\n${r.erro || "Falha no robô."}\n\nSe a autorização já ficou gravada, use Autorizar lote de novo para gerar o arquivo.`);
     return !!r.ok;
   },
 
   siengeHtml(l) {
     const sg = l.sienge || {};
     const rodando = this.state.roboLote === l.id;
-    const hist = (sg.historico || []).map((h) => `${new Date(h.em).toLocaleString("pt-BR")} · ${h.acao === "aprovar" ? "Aprovar" : "Gerar"} · ${h.por} · ${h.ok ? "ok" : "erro"}${h.msg ? " · " + h.msg : ""}`).join("\n");
+    const hist = (sg.historico || []).map((h) => `${new Date(h.em).toLocaleString("pt-BR")} · ${h.acao === "aprovar" ? "Autorizar" : "Gerar"} · ${h.por} · ${h.ok ? "ok" : "erro"}${h.msg ? " · " + h.msg : ""}`).join("\n");
     if (rodando) return `<span class="gp-pill gp-wait"><span class="btn-spin" style="border-color:#cbd5e1;border-top-color:#105436;width:10px;height:10px;"></span> Robô no Sienge…</span>`;
     if (!l.sienge) return `<span class="gp-pill gp-warn" title="Lote salvo só no Integra (Excel); os títulos continuam livres para um novo lote">Não gerado no Sienge</span>`;
-    if (sg.status === "aprovado") return `<span class="gp-pill gp-ok" title="${this.esc(hist)}">Aprovado${sg.numero ? " · nº " + this.esc(sg.numero) : ""}</span><small>${this.esc(String(sg.aprovadoPor || "").split(" ")[0])} · ${new Date(sg.aprovadoEm).toLocaleDateString("pt-BR")}</small>`;
-    if (sg.status === "gerado") return `<span class="gp-pill gp-ok" title="${this.esc(hist)}">No Sienge${sg.numero ? " · nº " + this.esc(sg.numero) : ""}</span><small>${sg.erro ? `<b style="color:#b91c1c;">Aprovação falhou</b>` : "Aguardando aprovação"}</small>`;
+    if (sg.status === "aprovado") return `<span class="gp-pill gp-ok" title="${this.esc(hist)}">Autorizado${sg.numero ? " · nº " + this.esc(sg.numero) : ""}</span><small>${this.esc(String(sg.aprovadoPor || "").split(" ")[0])} · ${new Date(sg.aprovadoEm).toLocaleDateString("pt-BR")}${sg.arquivo ? " · arquivo " + this.esc(sg.arquivo) : ""}</small>`;
+    if (sg.status === "gerado") return `<span class="gp-pill gp-ok" title="${this.esc(hist)}">No Sienge${sg.numero ? " · nº " + this.esc(sg.numero) : ""}</span><small>${sg.erro ? `<b style="color:#b91c1c;">Autorização falhou</b>` : "Aguardando autorização"}</small>`;
     if (sg.status === "erro") return `<span class="gp-pill gp-bad" title="${this.esc(hist)}">Erro no Sienge</span><small title="${this.esc(sg.erro || "")}">${this.esc(String(sg.erro || "").slice(0, 60))}</small>`;
     return `<span class="gp-pill gp-warn" title="${this.esc(hist)}">Não gerado no Sienge</span><small>Aguardando robô</small>`;
   },
@@ -2540,10 +2540,10 @@ const GerarPagamentoApp = {
     const sg = l.sienge || {};
     if (this.state.roboLote) return "";
     if (!l.sienge || sg.status === "pendente" || sg.status === "erro") {
-      return `<button type="button" class="btn btn-sm btn-primary" onclick="GerarPagamentoApp.enviarAoSienge('${this.esc(l.id)}')" title="Cria o lote no Sienge e já autoriza, no mesmo passo"><i data-lucide="send" style="width:14px;height:14px;"></i> Enviar e autorizar</button>`;
+      return `<button type="button" class="btn btn-sm btn-primary" onclick="GerarPagamentoApp.enviarAoSienge('${this.esc(l.id)}')" title="Cria o lote no Sienge, grava a autorização e gera o arquivo de contas a pagar"><i data-lucide="send" style="width:14px;height:14px;"></i> Enviar e autorizar</button>`;
     }
     if (sg.status === "gerado" && this.podeAprovar()) {
-      return `<button type="button" class="btn btn-sm btn-primary" onclick="GerarPagamentoApp.aprovarNoSienge('${this.esc(l.id)}')" title="Aprovar o lote no Sienge (fica registrado em seu nome)"><i data-lucide="badge-check" style="width:14px;height:14px;"></i> Aprovar</button>`;
+      return `<button type="button" class="btn btn-sm btn-primary" onclick="GerarPagamentoApp.aprovarNoSienge('${this.esc(l.id)}')" title="Grava a autorização do lote no Sienge e gera o arquivo de contas a pagar"><i data-lucide="badge-check" style="width:14px;height:14px;"></i> Autorizar lote</button>`;
     }
     return "";
   },

@@ -15,7 +15,10 @@ const ContabilApp = {
     linhas: [],
     arvore: [],
     abertos: {},
-    buscou: false
+    buscou: false,
+    dreVisao: "ano",
+    serie: null,
+    loadMsg: ""
   },
 
   esc(v) {
@@ -89,6 +92,39 @@ const ContabilApp = {
   setAba(id) {
     this.state.aba = id === "balanco" ? "balanco" : "dre";
     this.render();
+  },
+
+  setVisao(id) {
+    this.state.dreVisao = id === "comp" ? "comp" : "ano";
+    this.render();
+  },
+
+  nomeMes(m) {
+    return ["", "jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"][Number(m)] || "";
+  },
+
+  chaveMes(ano, mes) {
+    return Number(ano) + "-" + String(mes).padStart(2, "0");
+  },
+
+  mesesAte(ym) {
+    const p = String(ym || "").split("-");
+    const ano = Number(p[0]);
+    const mes = Number(p[1]);
+    if (!ano || !mes) return { ano: 0, meses: [] };
+    const meses = [];
+    for (let m = 1; m <= mes; m++) meses.push(m);
+    return { ano: ano, meses: meses };
+  },
+
+  trimestresDo(meses) {
+    const defs = [
+      { nome: "1º tri", meses: [1, 2, 3] },
+      { nome: "2º tri", meses: [4, 5, 6] },
+      { nome: "3º tri", meses: [7, 8, 9] },
+      { nome: "4º tri", meses: [10, 11, 12] }
+    ];
+    return defs.map((t) => ({ nome: t.nome, meses: t.meses.filter((m) => meses.indexOf(m) >= 0) })).filter((t) => t.meses.length);
   },
 
   toggleConta(codigo) {
@@ -522,6 +558,163 @@ const ContabilApp = {
     return this.state.abertos[id] !== false;
   },
 
+  variacao(anterior, atual) {
+    const a = Number(anterior) || 0;
+    const b = Number(atual) || 0;
+    if (Math.abs(a) < 0.005) return null;
+    return Math.round(((b - a) / Math.abs(a)) * 1000) / 10;
+  },
+
+  fmtPct(v) {
+    if (v == null || !Number.isFinite(v)) return "—";
+    return v.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
+  },
+
+  fmtDre(v) {
+    const n = Number(v) || 0;
+    if (Math.abs(n) < 0.005) return "—";
+    return n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  },
+
+  totaisPor(contas, ler) {
+    const baldes = { bruta: [], deducao: [], custo: [], vendas: [], dga: [], equiv: [], recFin: [], despFin: [], imposto: [], demais: [] };
+    (contas || []).forEach((c) => {
+      const valor = Math.round((Number(ler(c)) || 0) * 100) / 100;
+      (baldes[c.grupo] || baldes.demais).push(valor);
+    });
+    const soma = (k) => Math.round((baldes[k] || []).reduce((s, n) => s + n, 0) * 100) / 100;
+    const bruta = soma("bruta");
+    const deducao = soma("deducao");
+    const liquida = Math.round((bruta + deducao) * 100) / 100;
+    const custo = soma("custo");
+    const bruto = Math.round((liquida + custo) * 100) / 100;
+    const vendas = soma("vendas");
+    const dga = soma("dga");
+    const despesas = Math.round((vendas + dga) * 100) / 100;
+    const antes = Math.round((bruto + despesas) * 100) / 100;
+    const equiv = soma("equiv");
+    const recFin = soma("recFin");
+    const despFin = soma("despFin");
+    const financeiro = Math.round((recFin + despFin) * 100) / 100;
+    const lair = Math.round((antes + equiv + financeiro) * 100) / 100;
+    const imposto = soma("imposto");
+    const demais = soma("demais");
+    const liquido = Math.round((lair + imposto + demais) * 100) / 100;
+    return {
+      bruta: bruta, deducao: deducao, liquida: liquida, custo: custo, bruto: bruto,
+      vendas: vendas, dga: dga, despesas: despesas, antes: antes, equiv: equiv,
+      recFin: recFin, despFin: despFin, financeiro: financeiro, lair: lair,
+      imposto: imposto, demais: demais, liquido: liquido, metade: Math.round(liquido * 50) / 100
+    };
+  },
+
+  cacheTotais(col) {
+    if (col._totais) return col._totais;
+    const ler = col.tipo === "pct" ? col.atu : col.ler;
+    col._totais = this.totaisPor(this.state.serie.contas, ler);
+    if (col.tipo === "pct") col._totaisAnt = this.totaisPor(this.state.serie.contas, col.ant);
+    return col._totais;
+  },
+
+  valorLinha(col, chave, conta) {
+    if (col.tipo === "pct") {
+      if (conta) return this.variacao(col.ant(conta), col.atu(conta));
+      this.cacheTotais(col);
+      return this.variacao(col._totaisAnt[chave], col._totais[chave]);
+    }
+    if (conta) return col.ler(conta);
+    return this.cacheTotais(col)[chave];
+  },
+
+  somaChaves(conta, ano, meses) {
+    return Math.round((meses || []).reduce((s, m) => s + (Number(conta.por[this.chaveMes(ano, m)]) || 0), 0) * 100) / 100;
+  },
+
+  colunasDre() {
+    const s = this.state.serie;
+    if (!s) return [];
+    const ano = s.ano;
+    const ant = ano - 1;
+    const meses = s.meses;
+    if (this.state.dreVisao !== "comp") {
+      const cols = meses.map((m) => ({
+        grupo: this.nomeMes(m),
+        titulo: this.nomeMes(m),
+        tipo: "val",
+        ler: (c) => Number(c.por[this.chaveMes(ano, m)]) || 0
+      }));
+      cols.push({
+        grupo: "Total",
+        titulo: "Total",
+        tipo: "val",
+        forte: true,
+        ler: (c) => this.somaChaves(c, ano, meses)
+      });
+      return cols;
+    }
+    const cols = [];
+    const pushTrio = (grupo, lerAnt, lerAtu, forte) => {
+      cols.push({ grupo: grupo, titulo: String(ant), tipo: "val", forte: !!forte, ler: lerAnt, sep: true });
+      cols.push({ grupo: grupo, titulo: String(ano), tipo: "val", forte: !!forte, ler: lerAtu });
+      cols.push({ grupo: grupo, titulo: "%", tipo: "pct", forte: !!forte, ant: lerAnt, atu: lerAtu });
+    };
+    meses.forEach((m) => {
+      pushTrio(
+        this.nomeMes(m),
+        (c) => Number(c.por[this.chaveMes(ant, m)]) || 0,
+        (c) => Number(c.por[this.chaveMes(ano, m)]) || 0,
+        false
+      );
+    });
+    pushTrio("Total", (c) => this.somaChaves(c, ant, meses), (c) => this.somaChaves(c, ano, meses), true);
+    this.trimestresDo(meses).forEach((t) => {
+      pushTrio(t.nome, (c) => this.somaChaves(c, ant, t.meses), (c) => this.somaChaves(c, ano, t.meses), false);
+    });
+    return cols;
+  },
+
+  celulaDre(valor, col) {
+    const sep = col.sep ? " orc-dfc-sep" : "";
+    if (col.tipo === "pct") {
+      const n = valor;
+      const cor = n == null ? "" : (n < -0.05 ? " orc-dfc-neg" : (n > 0.05 ? " is-pos" : ""));
+      return `<td class="orc-dfc-vcol${sep}${cor}">${this.fmtPct(n)}</td>`;
+    }
+    const n = Number(valor) || 0;
+    const neg = n < -0.005 ? " orc-dfc-neg" : "";
+    return `<td class="${(sep + neg).trim()}">${this.fmtDre(n)}</td>`;
+  },
+
+  dreLinhaCols(nivel, nome, pegar, opts) {
+    const o = opts || {};
+    const cols = o.cols || [];
+    const cls = o.cls || "";
+    const ico = o.id
+      ? `<i data-lucide="${this.dreAberto(o.id) ? "chevron-down" : "chevron-right"}"></i>`
+      : `<i class="orc-dfc-no"></i>`;
+    const click = o.id ? ` onclick="ContabilApp.toggleConta('${this.esc(o.id)}')"` : "";
+    const tds = cols.map((col) => this.celulaDre(pegar(col), col)).join("");
+    return `<tr class="${cls}"${click}>
+      <td style="padding-left:${8 + nivel * 16}px">${ico}<span>${this.esc(nome)}</span></td>
+      ${tds}
+    </tr>`;
+  },
+
+  cabecalhoDre(cols) {
+    if (this.state.dreVisao !== "comp") {
+      return `<tr><th>Conta</th>${cols.map((c) => `<th class="${c.forte ? "is-alt" : ""}">${this.esc(c.titulo)}</th>`).join("")}</tr>`;
+    }
+    const grupos = [];
+    cols.forEach((c) => {
+      const ult = grupos[grupos.length - 1];
+      if (!ult || ult.nome !== c.grupo) grupos.push({ nome: c.grupo, n: 1, sep: !!c.sep });
+      else ult.n += 1;
+    });
+    const h1 = grupos.map((g) => `<th colspan="${g.n}" class="orc-dfc-mes${g.sep ? " orc-dfc-sep" : ""}">${this.esc(g.nome)}</th>`).join("");
+    const h2 = cols.map((c) => `<th class="${c.sep ? "orc-dfc-sep" : ""}">${this.esc(c.titulo)}</th>`).join("");
+    return `<tr><th rowspan="2">Conta</th>${h1}</tr><tr>${h2}</tr>`;
+  },
+
   dreLinha(nivel, nome, valor, opts) {
     const o = opts || {};
     const cls = o.cls || "";
@@ -542,7 +735,62 @@ const ContabilApp = {
     return (lista || []).map((it) => this.dreLinha(nivel, (it.codigo ? it.codigo + " " : "") + (it.nome || ""), it.valor, { cls: "orc-dfc-acc" })).join("");
   },
 
+  htmlDreSerie() {
+    const serie = this.state.serie;
+    const cols = this.colunasDre();
+    cols.forEach((c) => { c._totais = null; c._totaisAnt = null; });
+    const contas = (serie.contas || []).filter((c) => cols.some((col) => {
+      if (col.tipo === "pct") return false;
+      return Math.abs(Number(col.ler(c)) || 0) > 0.004;
+    })).sort((a, b) => this.compararCodigo(a.codigo, b.codigo));
+    const doGrupo = (g) => contas.filter((c) => c.grupo === g);
+    const linha = (nivel, nome, chave, opts) => this.dreLinhaCols(nivel, nome, (col) => this.valorLinha(col, chave), Object.assign({ cols: cols }, opts || {}));
+    const contasHtml = (lista, nivel, pai) => {
+      if (!this.dreAberto(pai)) return "";
+      return lista.map((c) => this.dreLinhaCols(nivel, (c.codigo ? c.codigo + " " : "") + (c.nome || ""), (col) => this.valorLinha(col, "", c), { cols: cols, cls: "orc-dfc-acc" })).join("");
+    };
+    const vendas = doGrupo("vendas");
+    const dga = doGrupo("dga");
+    const demais = doGrupo("demais");
+    const linhas = [
+      linha(0, "Receita operacional bruta", "bruta", { id: "dre-bruta", cls: "orc-dfc-n1" }),
+      contasHtml(doGrupo("bruta"), 1, "dre-bruta"),
+      linha(0, "(-) Deduções da receita", "deducao", { id: "dre-ded", cls: "orc-dfc-saida" }),
+      contasHtml(doGrupo("deducao"), 1, "dre-ded"),
+      linha(0, "Receita operacional líquida", "liquida", { cls: "orc-dfc-formula" }),
+      linha(0, "Custo das unidades vendidas", "custo", { id: "dre-custo", cls: "orc-dfc-saida" }),
+      contasHtml(doGrupo("custo"), 1, "dre-custo"),
+      linha(0, "Lucro bruto", "bruto", { cls: "orc-dfc-formula" }),
+      linha(0, "Despesas e outras receitas", "despesas", { id: "dre-desp", cls: "orc-dfc-saida-forte" }),
+      this.dreAberto("dre-desp") ? linha(1, "Despesas com vendas", "vendas", { id: "dre-vendas", cls: "orc-dfc-saida" }) : "",
+      this.dreAberto("dre-desp") ? contasHtml(vendas, 2, "dre-vendas") : "",
+      this.dreAberto("dre-desp") ? linha(1, "Despesas gerais e administrativas", "dga", { id: "dre-dga", cls: "orc-dfc-saida" }) : "",
+      this.dreAberto("dre-desp") ? contasHtml(dga, 2, "dre-dga") : "",
+      linha(0, "Resultado antes das despesas financeiras e impostos", "antes", { cls: "orc-dfc-formula" }),
+      linha(0, "Equivalência patrimonial", "equiv", { id: "dre-equiv", cls: "orc-dfc-n1" }),
+      contasHtml(doGrupo("equiv"), 1, "dre-equiv"),
+      linha(0, "Resultado financeiro", "financeiro", { id: "dre-fin", cls: "orc-dfc-n1" }),
+      this.dreAberto("dre-fin") ? linha(1, "Receitas financeiras", "recFin", { id: "dre-recfin", cls: "orc-dfc-n1" }) : "",
+      this.dreAberto("dre-fin") ? contasHtml(doGrupo("recFin"), 2, "dre-recfin") : "",
+      this.dreAberto("dre-fin") ? linha(1, "Despesas financeiras", "despFin", { id: "dre-despfin", cls: "orc-dfc-saida" }) : "",
+      this.dreAberto("dre-fin") ? contasHtml(doGrupo("despFin"), 2, "dre-despfin") : "",
+      linha(0, "Lucro antes do imposto de renda e da contribuição social", "lair", { cls: "orc-dfc-formula" }),
+      linha(0, "Imposto de renda e contribuição social", "imposto", { id: "dre-ir", cls: "orc-dfc-saida" }),
+      contasHtml(doGrupo("imposto"), 1, "dre-ir"),
+      demais.length ? linha(0, "Demais contas de resultado", "demais", { id: "dre-demais", cls: "orc-dfc-n1" }) : "",
+      demais.length ? contasHtml(demais, 1, "dre-demais") : "",
+      linha(0, "Lucro líquido (prejuízo) do exercício", "liquido", { cls: "orc-dfc-fcf" }),
+      linha(0, "50% Eq. MLDU", "metade", { cls: "orc-dfc-formula" })
+    ].join("");
+    const cmp = this.state.dreVisao === "comp" ? " orc-dfc-cmp" : "";
+    return `<div class="orc-dfc-scroll"><table class="orc-dfc-table ctb-dre${cmp}">
+      <thead>${this.cabecalhoDre(cols)}</thead>
+      <tbody>${linhas}</tbody>
+    </table></div>`;
+  },
+
   htmlDre(raizes) {
+    if (this.state.serie && this.state.serie.contas) return this.htmlDreSerie();
     const d = this.montarDre(raizes);
     const b = d.baldes;
     const linhas = [
@@ -607,6 +855,26 @@ const ContabilApp = {
     </table>`;
   },
 
+  montarSerie(janela, porMes) {
+    const mapa = new Map();
+    Object.keys(porMes || {}).forEach((chave) => {
+      const arvore = this.classificar(this.montarArvore(this.juntar(porMes[chave])));
+      this.folhasDre(arvore).forEach((no) => {
+        const valor = Math.round((-Number(no.movimento) || 0) * 100) / 100;
+        const id = this.dreNorm(no.codigo) || String(no.codigo);
+        let item = mapa.get(id);
+        if (!item) {
+          item = { id: id, codigo: no.codigo, nome: no.nome, grupo: this.grupoDre(no), por: {} };
+          mapa.set(id, item);
+        }
+        item.por[chave] = Math.round(((item.por[chave] || 0) + valor) * 100) / 100;
+        if ((no.nome || "").length > (item.nome || "").length) item.nome = no.nome;
+        if (String(no.codigo || "").length > String(item.codigo || "").length) item.codigo = no.codigo;
+      });
+    });
+    return { ano: janela.ano, meses: (janela.meses || []).slice(), contas: [...mapa.values()] };
+  },
+
   async buscar() {
     const s = this.state;
     if (s.carregando) return;
@@ -633,30 +901,61 @@ const ContabilApp = {
       this.render();
       return;
     }
+    const janela = this.mesesAte(ate);
     s.carregando = true;
     s.erro = "";
     s.avisos = [];
     s.progresso = 8;
     s.buscou = true;
+    s.loadMsg = janela.meses.length
+      ? ("Lendo o realizado de janeiro a " + this.nomeMes(janela.meses[janela.meses.length - 1]) + " de " + janela.ano + " e de " + (janela.ano - 1) + "…")
+      : "Lendo o balancete…";
     this.render();
+    const tarefas = [{ tipo: "balanco", ini: ini, fim: fim, rotulo: "balanço" }];
+    janela.meses.forEach((m) => {
+      [janela.ano, janela.ano - 1].forEach((y) => {
+        const ym = this.chaveMes(y, m);
+        tarefas.push({ tipo: "mes", chave: ym, ini: ym + "-01", fim: this.fimDoMes(ym), rotulo: this.nomeMes(m) + "/" + y });
+      });
+    });
+    const fila = [];
+    empresas.forEach((emp) => tarefas.forEach((t) => fila.push({ emp: emp, t: t })));
     const listas = [];
+    const porMes = {};
     const avisos = [];
-    for (let i = 0; i < empresas.length; i++) {
-      const emp = empresas[i];
-      s.progresso = Math.round(10 + (i / empresas.length) * 80);
-      this.render();
-      try {
-        const lista = await api.getTrialBalanceContabil(emp.id, ini, fim);
-        listas.push(lista || []);
-      } catch (e) {
-        avisos.push("Empresa " + emp.id + ": " + ((e && e.message) || "o Sienge não respondeu o balancete."));
+    let feitas = 0;
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < fila.length) {
+        const item = fila[cursor++];
+        const emp = item.emp;
+        const t = item.t;
+        try {
+          const lista = await api.getTrialBalanceContabil(emp.id, t.ini, t.fim);
+          if (t.tipo === "balanco") listas.push(lista || []);
+          else {
+            if (!porMes[t.chave]) porMes[t.chave] = [];
+            porMes[t.chave].push(lista || []);
+          }
+        } catch (e) {
+          avisos.push("Empresa " + emp.id + ", " + t.rotulo + ": " + ((e && e.message) || "o Sienge não respondeu o balancete."));
+        }
+        feitas += 1;
+        s.progresso = Math.round(8 + (feitas / Math.max(fila.length, 1)) * 88);
+        this.render();
       }
-    }
+    };
+    const conc = Math.min(3, fila.length || 1);
+    const trabalhos = [];
+    for (let i = 0; i < conc; i++) trabalhos.push(worker());
+    await Promise.all(trabalhos);
     s.linhas = this.juntar(listas);
     s.arvore = this.classificar(this.montarArvore(s.linhas));
     s.abertos = this.abrirPadrao(s.arvore);
+    s.serie = this.montarSerie(janela, porMes);
     s.avisos = avisos;
     s.carregando = false;
+    s.loadMsg = "";
     s.progresso = 100;
     if (!s.linhas.length && !avisos.length) s.erro = "O balancete não devolveu contas com movimento nesse período.";
     this.render();
@@ -678,7 +977,7 @@ const ContabilApp = {
     if (s.carregando) {
       corpo = `<div class="ml-load">
         <div class="loading-spinner" aria-hidden="true"></div>
-        <div class="loading-status-text">Lendo o balancete…</div>
+        <div class="loading-status-text">${this.esc(s.loadMsg || "Lendo o balancete…")}</div>
         <div class="ml-load-track"><div class="loading-progress-bar" style="width:${Math.max(8, s.progresso)}%"></div></div>
       </div>`;
     } else if (s.erro && !s.linhas.length) {
@@ -688,14 +987,27 @@ const ContabilApp = {
     } else {
       const demo = aba === "balanco" ? this.htmlBalanco(s.arvore) : this.htmlDre(s.arvore);
       const avisos = s.avisos.length ? `<p class="ctb-erro">${s.avisos.map((a) => this.esc(a)).join("<br>")}</p>` : "";
-      const notaDre = aba === "dre"
-        ? " O DRE soma o movimento do período nos grupos do demonstrativo. Conta sem valor fica fora da lista."
-        : " O balanço usa o saldo no fim do período.";
-      corpo = `${avisos}<p class="ctb-nota">${this.esc(periodo)}. Entram as contas com movimento.${notaDre}</p>${demo}`;
+      const serie = s.serie;
+      const fimMes = serie && serie.meses && serie.meses.length ? this.nomeMes(serie.meses[serie.meses.length - 1]) : "";
+      const notaDre = aba !== "dre"
+        ? " O balanço usa o saldo no fim do período."
+        : (serie && fimMes
+          ? (s.dreVisao === "comp"
+            ? ` Janeiro a ${fimMes} de ${serie.ano - 1} e de ${serie.ano}. Cada mês traz os dois anos e a variação. O total vem em seguida, e os trimestres somam só os meses desse intervalo.`
+            : ` Janeiro a ${fimMes} de ${serie.ano}. Cada grupo abre nas contas analíticas.`)
+          : " O DRE soma o movimento do período nos grupos do demonstrativo. Conta sem valor fica fora da lista.");
+      const visao = aba === "dre" && serie ? `<div class="ml-tabs ctb-visao" role="tablist">
+        <button type="button" role="tab" aria-selected="${s.dreVisao !== "comp"}" class="ml-tab ${s.dreVisao !== "comp" ? "is-active" : ""}" onclick="ContabilApp.setVisao('ano')"><i data-lucide="calendar-range"></i> Ano atual</button>
+        <button type="button" role="tab" aria-selected="${s.dreVisao === "comp"}" class="ml-tab ${s.dreVisao === "comp" ? "is-active" : ""}" onclick="ContabilApp.setVisao('comp')"><i data-lucide="git-compare"></i> Comparar com o ano anterior</button>
+      </div>` : "";
+      corpo = `${avisos}${visao}<p class="ctb-nota">${aba === "dre" && serie && fimMes ? this.esc(notaDre.trim()) : this.esc(periodo) + ". Entram as contas com movimento." + notaDre}</p>${demo}`;
     }
     root.innerHTML = `<style>
       #contabil-root .ctb-toolbar { display:flex; flex-wrap:wrap; gap:12px 16px; align-items:flex-end; margin:4px 0 8px; }
       #contabil-root .ctb-tabs { margin:8px 0 12px; }
+      #contabil-root .ctb-visao { margin:0 0 10px; }
+      #contabil-root .ctb-dre tbody tr:not(.orc-dfc-fcf) > td.is-pos { color:#15803d; }
+      #contabil-root .ctb-dre tbody tr.orc-dfc-fcf > td.is-pos { color:#bbf7d0; }
       #contabil-root .ctb-buscar { height:38px; padding:0 16px; border:0; border-radius:8px; background:#105436; color:#fff; font-weight:700; cursor:pointer; }
       #contabil-root .ctb-buscar:disabled { opacity:0.6; cursor:wait; }
       #contabil-root .ctb-nota { color:#64748b; font-size:0.84rem; margin:0 0 12px; }

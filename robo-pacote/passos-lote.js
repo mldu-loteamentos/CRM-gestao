@@ -7,6 +7,7 @@ const sessao = require("./sessao");
 
 const TELA_PROGRAMACAO = SIENGE_URL + "#/common/page/1806";
 const TELA_AUTORIZACAO = SIENGE_URL + "#/common/page/1856";
+const TELA_ARQUIVO = SIENGE_URL + "#/common/page/1909";
 
 const dois = (n) => String(n).padStart(2, "0");
 const hojeIso = () => {
@@ -243,10 +244,12 @@ module.exports = {
     if (!mesmoValor(numero(alvo.partes[3]), lote.total)) {
       throw new Error(`O lote ${nLote} no Sienge vale ${alvo.partes[3]} e o lote do Integra ${moeda(lote.total)}. Nada foi autorizado.`);
     }
+    let jaAutorizado = false;
     if (/^autorizado$/i.test(alvo.partes[5] || "")) {
       log(`O lote ${nLote} já estava autorizado`);
-      return { numeroSienge: nLote };
+      jaAutorizado = true;
     }
+    if (!jaAutorizado) {
     const m = alvo.id.match(/^(.*)_e_(.+)_caption$/);
     if (!m) throw new Error("Não reconheci a lista de lotes da Autorização de Pagamento.");
     log(`Marcando o lote ${nLote}`);
@@ -265,6 +268,145 @@ module.exports = {
       throw new Error("O Sienge não confirmou a autorização. Confira em Autorização de Pagamento antes de tentar de novo. " + (avisos.slice(antes).join(" ") + " " + texto.slice(0, 400)).replace(/\s+/g, " ").trim());
     }
     log(`Lote ${nLote} autorizado no Sienge`);
-    return { numeroSienge: nLote };
+    }
+    const arquivo = await gerarArquivoRemessa(ctx, page, email, lote, nLote, log);
+    return { numeroSienge: nLote, arquivo: arquivo || "" };
   },
 };
+
+async function nomeDoCampo(frame, rotulo) {
+  return frame.evaluate((alvo) => {
+    const norm = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+    const quer = norm(alvo);
+    const visivel = (el) => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    const campos = [...document.querySelectorAll("input, select, textarea")].filter((e) => e.name && e.type !== "hidden" && e.type !== "button" && e.type !== "submit" && visivel(e));
+    for (const el of campos) {
+      const td = el.closest("td");
+      const prev = td && td.previousElementSibling;
+      const txt = norm(prev && prev.innerText);
+      if (txt && (txt === quer || txt.indexOf(quer + " ") === 0 || txt.indexOf(quer + ":") === 0)) return el.name;
+    }
+    return "";
+  }, rotulo);
+}
+
+async function descricaoDoCampo(frame, nome) {
+  return frame.evaluate((name) => {
+    const visivel = (el) => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    const el = [...document.querySelectorAll(`input[name="${name}"], select[name="${name}"]`)].find((e) => e.type !== "hidden" && visivel(e));
+    const td = el && el.closest("td");
+    let next = td && td.nextElementSibling;
+    while (next) {
+      const inp = [...next.querySelectorAll("input[name], select[name]")].find((e) => e.name !== name && e.type !== "hidden" && visivel(e));
+      if (inp) return inp.name;
+      next = next.nextElementSibling;
+    }
+    return "";
+  }, nome);
+}
+
+async function preencherRotulo(page, frame, rotulo, codigos, oQue) {
+  const nome = await nomeDoCampo(frame, rotulo);
+  if (!nome) return false;
+  const desc = await descricaoDoCampo(frame, nome);
+  if (desc) {
+    await preencherCodigo(page, frame, nome, desc, codigos, oQue);
+    return true;
+  }
+  const campo = campoDe(frame, nome);
+  await campo.fill(String(codigos[0] || ""));
+  await campo.press("Tab");
+  return true;
+}
+
+async function clicarBotao(page, frame, nomes, textos, avisos) {
+  for (const nome of nomes) {
+    const n = await frame.locator(`input[name="${nome}"], button[name="${nome}"]`).filter({ visible: true }).count().catch(() => 0);
+    if (!n) continue;
+    await clicarERecarregar(page, frame, `input[name="${nome}"], button[name="${nome}"]`, avisos, 120000);
+    return;
+  }
+  const seletor = await frame.evaluate((lista) => {
+    const norm = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+    const visivel = (el) => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    const alvos = lista.map(norm);
+    const el = [...document.querySelectorAll("input[type=button], input[type=submit], button")].find((e) => {
+      if (!visivel(e)) return false;
+      const t = norm(e.value || e.innerText);
+      return alvos.some((a) => t === a || t.indexOf(a) === 0);
+    });
+    if (!el) return "";
+    if (el.name) return (el.tagName === "BUTTON" ? "button" : "input") + `[name="${el.name}"]`;
+    if (el.id) return `#${el.id}`;
+    return "";
+  }, textos);
+  if (!seletor) throw new Error("Não achei o botão " + textos[0] + " em Gerações de Arquivo.");
+  await clicarERecarregar(page, frame, seletor, avisos, 120000);
+}
+
+// Gerações de Arquivo (ação 1909): o lote já autorizado vira o arquivo de contas a pagar.
+async function gerarArquivoRemessa(ctx, page, email, lote, nLote, log) {
+  const contas = contaDoLote(lote);
+  const banco = String((lote.conta && lote.conta.banco) || "").replace(/\D/g, "");
+  const avisos = vigiarAvisos(page);
+  await abrirTela(ctx, page, email, TELA_ARQUIVO, log);
+  log("Abrindo Gerações de Arquivo");
+  const frame = await quadro(page, (u) => /PagtoEsc/i.test(u) && /Gerac|Arquivo|Remessa/i.test(u), 25000)
+    || await quadro(page, (u) => /1909|GeracaoArquivo|geracaoArquivo/i.test(u), 8000);
+  if (!frame) throw new Error("A autorização ficou gravada, mas a tela Gerações de Arquivo não abriu (o usuário tem a ação 1909?).");
+
+  if (banco) {
+    const temBanco = await preencherRotulo(page, frame, "banco", [banco], "o banco");
+    if (temBanco) log(`Banco ${banco}`);
+  }
+  const temConta = await preencherRotulo(page, frame, "conta", contas, "a conta corrente");
+  if (!temConta) {
+    await preencherCodigo(page, frame, "entity.contaCorrente.contaCorrentePK.nuConta", "entity.contaCorrente.nmConta", contas, "a conta corrente").catch(() => {
+      throw new Error("A autorização ficou gravada, mas não achei a conta corrente em Gerações de Arquivo.");
+    });
+  }
+  const nomeLote = await nomeDoCampo(frame, "lote");
+  if (nomeLote) {
+    await campoDe(frame, nomeLote).fill(nLote);
+    await campoDe(frame, nomeLote).press("Tab");
+  } else {
+    const campoLote = frame.locator('input[name*="nuLote"], input[name*="NuLote"]').filter({ visible: true }).first();
+    if (await campoLote.count()) {
+      await campoLote.fill(nLote);
+      await campoLote.press("Tab");
+    }
+  }
+  log(`Consultando o lote ${nLote} para gerar o arquivo`);
+  await clicarBotao(page, frame, ["pbConsultar", "btConsultar", "btFiltrar"], ["consultar"], avisos);
+
+  const nomeArquivo = await nomeDoCampo(frame, "nome do arquivo") || await nomeDoCampo(frame, "arquivo");
+  let nome = nomeArquivo ? String(await valorDe(frame, nomeArquivo) || "").trim() : "";
+  if (nomeArquivo && !nome) {
+    nome = "CP" + nLote;
+    await campoDe(frame, nomeArquivo).fill(nome);
+    log(`Nome do arquivo: ${nome}`);
+  }
+  const textoAntes = await frame.evaluate((n) => {
+    const linhas = [...document.querySelectorAll("tr, span[id$='_caption']")].map((e) => e.innerText || "");
+    return linhas.some((t) => new RegExp("\\b" + n + "\\b").test(t));
+  }, nLote);
+  if (!textoAntes) {
+    throw new Error(`A autorização ficou gravada, mas o lote ${nLote} não aparece em Gerações de Arquivo. Só entra lote autorizado que ainda não teve arquivo. Confira no Sienge antes de gerar de novo.`);
+  }
+  const total = numero(await valorDe(frame, "total").catch(() => ""));
+  if (Number.isFinite(total) && !mesmoValor(total, lote.total)) {
+    throw new Error(`A autorização ficou gravada. O arquivo não foi gerado: o Sienge mostra ${moeda(total)} e o lote do Integra é ${moeda(lote.total)}.`);
+  }
+
+  log("Confirmando a geração do arquivo de contas a pagar");
+  const antes = avisos.length;
+  await clicarBotao(page, frame, ["pbConfirmar", "btConfirmar", "pbSalvar"], ["confirmar", "gerar arquivo"], avisos);
+  const texto = await frame.evaluate(() => document.body.innerText || "").catch(() => "");
+  const aviso = avisos.slice(antes).join(" ");
+  const junto = (aviso + " " + texto).replace(/\s+/g, " ");
+  if (/não|nao foi|erro|falha/i.test(aviso) && !/sucesso/i.test(aviso)) {
+    throw new Error("A autorização ficou gravada, mas o Sienge não gerou o arquivo. " + junto.slice(0, 400));
+  }
+  log(`Arquivo de contas a pagar gerado${nome ? " (" + nome + ")" : ""}`);
+  return nome;
+}

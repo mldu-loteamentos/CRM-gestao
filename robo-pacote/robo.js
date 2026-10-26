@@ -63,9 +63,10 @@ async function executar(tipo, dados, usuario, email) {
       ? await passos.gerarLote(ctx, page, email, dados.lote, passo)
       : await passos.aprovarLote(ctx, page, email, dados, passo);
     const numeroSienge = String((r && r.numeroSienge) || dados.numeroSienge || "");
-    registrar({ tipo, loteId, usuario, email, ok: true, numeroSienge, log });
-    console.log(`  OK${numeroSienge ? " · lote Sienge nº " + numeroSienge : ""}`);
-    return { ok: true, numeroSienge, log };
+    const arquivo = String((r && r.arquivo) || "");
+    registrar({ tipo, loteId, usuario, email, ok: true, numeroSienge, arquivo, log });
+    console.log(`  OK${numeroSienge ? " · lote Sienge nº " + numeroSienge : ""}${arquivo ? " · arquivo " + arquivo : ""}`);
+    return { ok: true, numeroSienge, arquivo, log };
   } catch (e) {
     let print = "";
     try {
