@@ -18,6 +18,10 @@ const ContabilApp = {
     buscou: false,
     dreVisao: "ano",
     dreMil: false,
+    dreSoPeriodo: false,
+    exportando: false,
+    janela: null,
+    porEmpresa: null,
     serie: null,
     loadMsg: ""
   },
@@ -59,6 +63,7 @@ const ContabilApp = {
     if (!this.state.de) this.state.de = this.mesAtual();
     if (!this.state.ate) this.state.ate = this.mesAtual();
     try { this.state.dreMil = localStorage.getItem("crm_ctb_dre_mil") === "1"; } catch (e) {}
+    try { this.state.dreSoPeriodo = localStorage.getItem("crm_ctb_dre_periodo") === "1"; } catch (e) {}
     this.render();
     if (!this.state.companies.length) this.carregarEmpresas();
   },
@@ -105,6 +110,46 @@ const ContabilApp = {
     this.state.dreMil = !!marcado;
     try { localStorage.setItem("crm_ctb_dre_mil", this.state.dreMil ? "1" : "0"); } catch (e) {}
     this.render();
+  },
+
+  setSoPeriodo(marcado) {
+    this.state.dreSoPeriodo = !!marcado;
+    try { localStorage.setItem("crm_ctb_dre_periodo", this.state.dreSoPeriodo ? "1" : "0"); } catch (e) {}
+    if (this.state.buscou && !this.state.carregando) this.buscar();
+    else this.render();
+  },
+
+  partesMes(ym) {
+    const p = String(ym || "").split("-");
+    return { ano: Number(p[0]) || 0, mes: Number(p[1]) || 0 };
+  },
+
+  /* Desligado: janeiro até o mês final. Ligado: só os meses entre De e Até. */
+  montarJanela() {
+    const ate = this.state.ate;
+    if (!this.state.dreSoPeriodo) return this.mesesAte(ate);
+    const a = this.partesMes(this.state.de);
+    const b = this.partesMes(ate);
+    if (!a.ano || !a.mes || !b.ano || !b.mes || (a.ano === b.ano && a.mes > b.mes)) return this.mesesAte(ate);
+    if (a.ano === b.ano) {
+      const meses = [];
+      for (let m = a.mes; m <= b.mes; m++) meses.push(m);
+      return { ano: a.ano, meses: meses };
+    }
+    const faixa = [];
+    let y = a.ano;
+    let m = a.mes;
+    while ((y < b.ano || (y === b.ano && m <= b.mes)) && faixa.length < 36) {
+      faixa.push({
+        ano: y,
+        mes: m,
+        chave: this.chaveMes(y, m),
+        rotulo: this.nomeMes(m) + "/" + String(y).slice(2)
+      });
+      m += 1;
+      if (m > 12) { m = 1; y += 1; }
+    }
+    return { ano: b.ano, meses: faixa.map((f) => f.mes), faixa: faixa };
   },
 
   nomeMes(m) {
@@ -646,12 +691,48 @@ const ContabilApp = {
     return Math.round((meses || []).reduce((s, m) => s + (Number(conta.por[this.chaveMes(ano, m)]) || 0), 0) * 100) / 100;
   },
 
+  somaFaixa(conta, faixa, anterior) {
+    return Math.round((faixa || []).reduce((s, f) => {
+      const chave = anterior ? this.chaveMes(f.ano - 1, f.mes) : f.chave;
+      return s + (Number(conta.por[chave]) || 0);
+    }, 0) * 100) / 100;
+  },
+
   colunasDre() {
     const s = this.state.serie;
     if (!s) return [];
     const ano = s.ano;
     const ant = ano - 1;
     const meses = s.meses;
+    if (s.faixa && s.faixa.length) {
+      const faixa = s.faixa;
+      if (this.state.dreVisao !== "comp") {
+        const cols = faixa.map((f) => ({
+          grupo: f.rotulo,
+          titulo: f.rotulo,
+          tipo: "val",
+          ler: (c) => Number(c.por[f.chave]) || 0
+        }));
+        cols.push({ grupo: "Total", titulo: "Total", tipo: "val", forte: true, ler: (c) => this.somaFaixa(c, faixa, false) });
+        return cols;
+      }
+      const cols = [];
+      const pushTrioF = (grupo, lerAnt, lerAtu, forte) => {
+        cols.push({ grupo: grupo, titulo: "Ant.", tipo: "val", forte: !!forte, ler: lerAnt, sep: true });
+        cols.push({ grupo: grupo, titulo: "Ano", tipo: "val", forte: !!forte, ler: lerAtu });
+        cols.push({ grupo: grupo, titulo: "%", tipo: "pct", forte: !!forte, ant: lerAnt, atu: lerAtu });
+      };
+      faixa.forEach((f) => {
+        pushTrioF(
+          f.rotulo,
+          (c) => Number(c.por[this.chaveMes(f.ano - 1, f.mes)]) || 0,
+          (c) => Number(c.por[f.chave]) || 0,
+          false
+        );
+      });
+      pushTrioF("Total", (c) => this.somaFaixa(c, faixa, true), (c) => this.somaFaixa(c, faixa, false), true);
+      return cols;
+    }
     if (this.state.dreVisao !== "comp") {
       const cols = meses.map((m) => ({
         grupo: this.nomeMes(m),
@@ -711,7 +792,7 @@ const ContabilApp = {
     const click = o.id ? ` onclick="ContabilApp.toggleConta('${this.esc(o.id)}')"` : "";
     const tds = cols.map((col) => this.celulaDre(pegar(col), col)).join("");
     return `<tr class="${cls}"${click}>
-      <td style="padding-left:${8 + nivel * 16}px">${ico}<span>${this.esc(nome)}</span></td>
+      <td style="padding-left:${8 + nivel * 16}px" title="${this.esc(nome)}">${ico}<span>${this.esc(nome)}</span></td>
       ${tds}
     </tr>`;
   },
@@ -760,14 +841,21 @@ const ContabilApp = {
       return Math.abs(Number(col.ler(c)) || 0) > 0.004;
     })).sort((a, b) => this.compararCodigo(a.codigo, b.codigo));
     const doGrupo = (g) => contas.filter((c) => c.grupo === g);
-    const linha = (nivel, nome, chave, opts) => this.dreLinhaCols(nivel, nome, (col) => this.valorLinha(col, chave), Object.assign({ cols: cols }, opts || {}));
+    const modeloLinhas = [];
+    const gravar = (nivel, nome, pegar, opts) => {
+      const o = opts || {};
+      const item = { nivel: nivel, nome: nome, cls: o.cls || "", id: o.id || "", valores: cols.map(pegar) };
+      modeloLinhas.push(item);
+      return this.dreLinhaCols(nivel, nome, (col) => item.valores[cols.indexOf(col)], Object.assign({ cols: cols }, o));
+    };
+    const linha = (nivel, nome, chave, opts) => gravar(nivel, nome, (col) => this.valorLinha(col, chave), opts);
     const rotuloConta = (c) => (c.codigo ? c.codigo + " " : "") + (c.nome || "");
     const valorConta = (c) => (col) => this.valorLinha(col, "", c);
     const contasHtml = (lista, nivel, pai) => {
       if (!this.dreAberto(pai)) return "";
       return this.niveisConta(lista).map((bloco) => {
         if (bloco.tipo === "folha") {
-          return this.dreLinhaCols(nivel, rotuloConta(bloco.conta), valorConta(bloco.conta), { cols: cols, cls: "orc-dfc-acc" });
+          return gravar(nivel, rotuloConta(bloco.conta), valorConta(bloco.conta), { cls: "orc-dfc-acc" });
         }
         const soma = (col) => {
           if (col.tipo === "pct") {
@@ -778,9 +866,9 @@ const ContabilApp = {
           return Math.round(bloco.filhos.reduce((s, c) => s + (Number(col.ler(c)) || 0), 0) * 100) / 100;
         };
         const nomePai = (bloco.codigo ? bloco.codigo + " " : "") + (bloco.nome || "");
-        const head = this.dreLinhaCols(nivel, nomePai, soma, { cols: cols, id: bloco.id, cls: "orc-dfc-acc" });
+        const head = gravar(nivel, nomePai, soma, { id: bloco.id, cls: "orc-dfc-acc" });
         if (!this.dreAberto(bloco.id)) return head;
-        const filhos = bloco.filhos.map((c) => this.dreLinhaCols(nivel + 1, rotuloConta(c), valorConta(c), { cols: cols, cls: "orc-dfc-acc" })).join("");
+        const filhos = bloco.filhos.map((c) => gravar(nivel + 1, rotuloConta(c), valorConta(c), { cls: "orc-dfc-acc" })).join("");
         return head + filhos;
       }).join("");
     };
@@ -817,6 +905,7 @@ const ContabilApp = {
       linha(0, "Lucro líquido (prejuízo) do exercício", "liquido", { cls: "orc-dfc-fcf" }),
       linha(0, "50% Eq. MLDU", "metade", { cls: "orc-dfc-formula" })
     ].join("");
+    this._modeloTela = { cols: cols, linhas: modeloLinhas };
     const cmp = this.state.dreVisao === "comp" ? " orc-dfc-cmp" : "";
     const mil = this.state.dreMil ? " is-mil" : " is-real";
     return `<div class="orc-dfc-scroll"><table class="orc-dfc-table ctb-dre${cmp}${mil}">
@@ -952,7 +1041,7 @@ const ContabilApp = {
         if (String(paiCodigo || "").length > String(item.paiCodigo || "").length) item.paiCodigo = paiCodigo;
       });
     });
-    return { ano: janela.ano, meses: (janela.meses || []).slice(), contas: [...mapa.values()] };
+    return { ano: janela.ano, meses: (janela.meses || []).slice(), faixa: (janela && janela.faixa) || null, contas: [...mapa.values()] };
   },
 
   async buscar() {
@@ -981,27 +1070,39 @@ const ContabilApp = {
       this.render();
       return;
     }
-    const janela = this.mesesAte(ate);
+    const janela = this.montarJanela();
     s.carregando = true;
     s.erro = "";
     s.avisos = [];
     s.progresso = 8;
     s.buscou = true;
-    s.loadMsg = janela.meses.length
-      ? ("Lendo o realizado de janeiro a " + this.nomeMes(janela.meses[janela.meses.length - 1]) + " de " + janela.ano + " e de " + (janela.ano - 1) + "…")
-      : "Lendo o balancete…";
+    s.janela = janela;
+    if (s.dreSoPeriodo) {
+      const a = this.partesMes(de);
+      const b = this.partesMes(ate);
+      s.loadMsg = "Lendo o realizado de " + this.nomeMes(a.mes) + "/" + a.ano + " a " + this.nomeMes(b.mes) + "/" + b.ano + " e o mesmo intervalo do ano anterior…";
+    } else {
+      s.loadMsg = janela.meses.length
+        ? ("Lendo o realizado de janeiro a " + this.nomeMes(janela.meses[janela.meses.length - 1]) + " de " + janela.ano + " e de " + (janela.ano - 1) + "…")
+        : "Lendo o balancete…";
+    }
     this.render();
     const tarefas = [{ tipo: "balanco", ini: ini, fim: fim, rotulo: "balanço" }];
-    janela.meses.forEach((m) => {
-      [janela.ano, janela.ano - 1].forEach((y) => {
-        const ym = this.chaveMes(y, m);
-        tarefas.push({ tipo: "mes", chave: ym, ini: ym + "-01", fim: this.fimDoMes(ym), rotulo: this.nomeMes(m) + "/" + y });
+    const mesesBusca = janela.faixa && janela.faixa.length
+      ? janela.faixa.map((f) => ({ y: f.ano, m: f.mes }))
+      : janela.meses.map((m) => ({ y: janela.ano, m: m }));
+    mesesBusca.forEach((item) => {
+      [item.y, item.y - 1].forEach((y) => {
+        const ym = this.chaveMes(y, item.m);
+        tarefas.push({ tipo: "mes", chave: ym, ini: ym + "-01", fim: this.fimDoMes(ym), rotulo: this.nomeMes(item.m) + "/" + y });
       });
     });
     const fila = [];
     empresas.forEach((emp) => tarefas.forEach((t) => fila.push({ emp: emp, t: t })));
     const listas = [];
     const porMes = {};
+    const porEmpresa = {};
+    empresas.forEach((emp) => { porEmpresa[emp.id] = { id: emp.id, nome: emp.nome, porMes: {}, listas: [] }; });
     const avisos = [];
     let feitas = 0;
     let cursor = 0;
@@ -1012,10 +1113,17 @@ const ContabilApp = {
         const t = item.t;
         try {
           const lista = await api.getTrialBalanceContabil(emp.id, t.ini, t.fim);
-          if (t.tipo === "balanco") listas.push(lista || []);
-          else {
+          const dono = porEmpresa[emp.id];
+          if (t.tipo === "balanco") {
+            listas.push(lista || []);
+            if (dono) dono.listas.push(lista || []);
+          } else {
             if (!porMes[t.chave]) porMes[t.chave] = [];
             porMes[t.chave].push(lista || []);
+            if (dono) {
+              if (!dono.porMes[t.chave]) dono.porMes[t.chave] = [];
+              dono.porMes[t.chave].push(lista || []);
+            }
           }
         } catch (e) {
           avisos.push("Empresa " + emp.id + ", " + t.rotulo + ": " + ((e && e.message) || "o Sienge não respondeu o balancete."));
@@ -1032,12 +1140,201 @@ const ContabilApp = {
     s.linhas = this.juntar(listas);
     s.arvore = this.classificar(this.montarArvore(s.linhas));
     s.abertos = this.abrirPadrao(s.arvore);
+    s.porEmpresa = porEmpresa;
     s.serie = this.montarSerie(janela, porMes);
     s.avisos = avisos;
     s.carregando = false;
     s.loadMsg = "";
     s.progresso = 100;
     if (!s.linhas.length && !avisos.length) s.erro = "O balancete não devolveu contas com movimento nesse período.";
+    this.render();
+  },
+
+  modeloDre(serie) {
+    const guardado = this.state.serie;
+    this.state.serie = serie || guardado;
+    try {
+      this.htmlDreSerie();
+      return this._modeloTela || { cols: [], linhas: [] };
+    } finally {
+      this.state.serie = guardado;
+    }
+  },
+
+  nomeAbaExcel(emp, used) {
+    const usual = String((emp && emp.nome) || "").replace(/[:\\/?*\[\]]/g, " ").replace(/\s+/g, " ").trim();
+    let base = String((emp && emp.id) || "DRE") + "-" + (usual || "EMPRESA");
+    if (base.length > 31) base = base.slice(0, 31);
+    let name = base;
+    let n = 2;
+    while (used.has(name.toLowerCase())) {
+      const suf = "-" + (n++);
+      name = (base.slice(0, Math.max(1, 31 - suf.length)) + suf).slice(0, 31);
+    }
+    used.add(name.toLowerCase());
+    return name;
+  },
+
+  estiloLinhaDre(cls) {
+    const c = String(cls || "");
+    if (c.indexOf("orc-dfc-fcf") >= 0) return { fill: "FF105436", font: "FFFFFFFF", bold: true };
+    if (c.indexOf("orc-dfc-saida-forte") >= 0) return { fill: "FFF3B4B4", font: "FF6B1D1D", bold: true };
+    if (c.indexOf("orc-dfc-saida") >= 0) return { fill: "FFFDECEC", font: "FF7F1D1D", bold: true };
+    if (c.indexOf("orc-dfc-formula") >= 0) return { fill: "FFF8FAFC", font: "FF0F172A", bold: true };
+    if (c.indexOf("orc-dfc-n1") >= 0) return { fill: "FFE7F6EE", font: "FF105436", bold: true };
+    return { fill: "FFFFFFFF", font: "FF0F172A", bold: false };
+  },
+
+  preencherAbaDre(ws, inv, imgId, emp, modelo) {
+    const cols = modelo.cols || [];
+    const linhas = modelo.linhas || [];
+    const colCount = Math.max(2, cols.length + 1);
+    const moneyFmt = this.state.dreMil ? "#,##0.0" : "#,##0.00";
+    const logoPx = Math.round(1.54 * 96 / 2.54);
+    ws.properties.showGridLines = false;
+    ws.views = [{ state: "frozen", xSplit: 1, ySplit: 4, topLeftCell: "B5", activeCell: "B5", showGridLines: false }];
+    const widths = [{ width: 42 }];
+    for (let i = 1; i < Math.max(colCount, 8); i++) widths.push({ width: this.state.dreMil ? 12 : 14 });
+    ws.columns = widths;
+    ws.mergeCells("A1:A2");
+    ws.getRow(1).height = 28;
+    ws.getRow(2).height = 22;
+    const serie = this.state.serie || {};
+    const visao = this.state.dreVisao === "comp" ? "comparado com o ano anterior" : "ano atual";
+    const escala = this.state.dreMil ? " · valores em milhares" : "";
+    const sub = (emp.id ? (emp.id + " - " + (emp.nome || "")) : (emp.nome || "")) + " · " + visao + escala;
+    const title = ws.getCell("A1");
+    title.value = {
+      richText: [
+        { font: { name: "Calibri", size: 14, bold: true, color: { argb: "FF475569" } }, text: "DRE\n" },
+        { font: { name: "Calibri", size: 9, color: { argb: "FF64748B" } }, text: sub }
+      ]
+    };
+    inv.excelPaint(title, { fill: "FFFFFFFF", align: { vertical: "middle", horizontal: "left", wrapText: true, indent: 8 } });
+    if (imgId != null) {
+      try { ws.addImage(imgId, { tl: { col: 0.04, row: 0.08 }, ext: { width: logoPx, height: logoPx } }); } catch (e) {}
+    }
+    let idxTotal = -1;
+    cols.forEach((c, i) => {
+      if (c.tipo !== "pct" && c.grupo === "Total" && !c.sep) idxTotal = i;
+    });
+    if (idxTotal < 0) {
+      for (let i = cols.length - 1; i >= 0; i--) {
+        if (cols[i].tipo !== "pct") { idxTotal = i; break; }
+      }
+    }
+    const lucro = linhas.filter((l) => String(l.cls).indexOf("orc-dfc-fcf") >= 0).pop();
+    const valorLucro = lucro && idxTotal >= 0 ? Number(lucro.valores[idxTotal]) : null;
+    const kpiL = ws.getRow(1).getCell(4);
+    const kpiV = ws.getRow(2).getCell(4);
+    kpiL.value = "Lucro líquido";
+    kpiV.value = valorLucro == null || !Number.isFinite(valorLucro) ? null : (this.state.dreMil ? valorLucro / 1000 : valorLucro);
+    inv.excelPaint(kpiL, { fill: "FFFFFFFF", font: { bold: true, size: 8, color: { argb: "FF94A3B8" } }, align: { horizontal: "right", vertical: "bottom" } });
+    inv.excelPaint(kpiV, {
+      fill: "FFFFFFFF",
+      font: { bold: true, size: 12, color: { argb: valorLucro < -0.004 ? "FFB91C1C" : "FF105436" } },
+      align: { horizontal: "right", vertical: "middle" },
+      numFmt: moneyFmt
+    });
+    ws.getRow(3).height = 8;
+    const head = ws.getRow(4);
+    head.height = 20;
+    const titulos = ["Conta"].concat(cols.map((c) => (c.grupo && c.grupo !== c.titulo ? (c.grupo + " " + c.titulo) : c.titulo)));
+    titulos.forEach((h, i) => {
+      const cell = head.getCell(i + 1);
+      cell.value = h;
+      inv.excelPaint(cell, {
+        fill: "FF334155",
+        font: { bold: true, size: 9, color: { argb: "FFFFFFFF" } },
+        align: { horizontal: i === 0 ? "left" : "right", vertical: "middle" },
+        border: true
+      });
+    });
+    linhas.forEach((l, ri) => {
+      const row = ws.getRow(5 + ri);
+      const est = this.estiloLinhaDre(l.cls);
+      const nome = row.getCell(1);
+      nome.value = l.nome;
+      inv.excelPaint(nome, {
+        fill: est.fill,
+        font: { bold: est.bold, size: 9, color: { argb: est.font } },
+        align: { horizontal: "left", vertical: "middle", indent: Math.min(6, l.nivel || 0) },
+        border: true
+      });
+      (l.valores || []).forEach((v, i) => {
+        const col = cols[i] || {};
+        const cell = row.getCell(i + 2);
+        const n = Number(v);
+        const vazio = col.tipo === "pct" ? (v == null || !Number.isFinite(n)) : Math.abs(n || 0) < (this.state.dreMil ? 50 : 0.005);
+        if (vazio) {
+          cell.value = null;
+          inv.excelPaint(cell, {
+            fill: est.fill,
+            font: { size: 9, color: { argb: "FF94A3B8" } },
+            align: { horizontal: "right", vertical: "middle" },
+            border: true
+          });
+          return;
+        }
+        const negativo = n < (col.tipo === "pct" ? -0.05 : -0.005);
+        const cor = est.fill === "FF105436" ? "FFFFFFFF" : (negativo ? "FFB91C1C" : est.font);
+        cell.value = col.tipo === "pct" ? n / 100 : (this.state.dreMil ? n / 1000 : n);
+        inv.excelPaint(cell, {
+          fill: est.fill,
+          font: { bold: est.bold, size: 9, color: { argb: cor } },
+          align: { horizontal: "right", vertical: "middle" },
+          border: true,
+          numFmt: col.tipo === "pct" ? "0.0%" : moneyFmt
+        });
+      });
+    });
+    const foot = ws.getRow(6 + linhas.length).getCell(1);
+    foot.value = inv.generatedAtLabel(new Date()) + (this.state.dreMil ? " · valores divididos por 1.000" : "") + " · aberturas como na tela";
+    inv.excelPaint(foot, { font: { size: 8, italic: true, color: { argb: "FF64748B" } }, align: { horizontal: "left" } });
+    void serie;
+  },
+
+  async exportarExcel() {
+    const s = this.state;
+    if (s.exportando || s.carregando || !s.serie) return;
+    const inv = window.InvestimentoApp;
+    if (!inv || typeof inv.ensureExcelJS !== "function") {
+      alert("Não consegui gerar o Excel. Atualize a página com Ctrl+F5.");
+      return;
+    }
+    s.exportando = true;
+    this.render();
+    try {
+      const ExcelJS = await inv.ensureExcelJS();
+      const wb = new ExcelJS.Workbook();
+      wb.creator = "CRM Moura Leite";
+      const logo = await inv.logoDataUrl();
+      const imgId = wb.addImage({ base64: logo.dataUrl, extension: logo.extension || "png" });
+      const empresas = this.empresasEscolhidas();
+      const por = s.porEmpresa || {};
+      const janela = s.janela || this.montarJanela();
+      const used = new Set();
+      const alvos = empresas.length ? empresas : [{ id: "DRE", nome: "DRE" }];
+      alvos.forEach((emp) => {
+        const bloco = por[String(emp.id)] || por[emp.id];
+        const serie = bloco && bloco.porMes ? this.montarSerie(janela, bloco.porMes) : s.serie;
+        const modelo = this.modeloDre(serie);
+        const ws = wb.addWorksheet(this.nomeAbaExcel(emp, used));
+        this.preencherAbaDre(ws, inv, imgId, emp, modelo);
+      });
+      const buf = await wb.xlsx.writeBuffer();
+      const a = document.createElement("a");
+      const de = String(s.de || "").replace("-", "");
+      const ate = String(s.ate || "").replace("-", "");
+      a.href = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+      a.download = "DRE-" + de + "-" + ate + ".xlsx";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (e) {
+      alert("Não consegui gerar o Excel. " + ((e && e.message) || ""));
+    }
+    s.exportando = false;
     this.render();
   },
 
@@ -1069,19 +1366,37 @@ const ContabilApp = {
       const avisos = s.avisos.length ? `<p class="ctb-erro">${s.avisos.map((a) => this.esc(a)).join("<br>")}</p>` : "";
       const serie = s.serie;
       const fimMes = serie && serie.meses && serie.meses.length ? this.nomeMes(serie.meses[serie.meses.length - 1]) : "";
+      const iniMes = serie && serie.meses && serie.meses.length ? this.nomeMes(serie.meses[0]) : "";
+      const trecho = s.dreSoPeriodo
+        ? (serie && serie.faixa && serie.faixa.length
+          ? (serie.faixa[0].rotulo + " a " + serie.faixa[serie.faixa.length - 1].rotulo)
+          : (iniMes && fimMes ? (iniMes === fimMes ? (iniMes + " de " + (serie && serie.ano)) : (iniMes + " a " + fimMes + " de " + (serie && serie.ano))) : ""))
+        : ("Janeiro a " + fimMes + " de " + (serie && serie.ano));
       const notaDre = aba !== "dre"
         ? " O balanço usa o saldo no fim do período."
         : (serie && fimMes
           ? (s.dreVisao === "comp"
-            ? ` Janeiro a ${fimMes} de ${serie.ano - 1} e de ${serie.ano}. Cada mês traz os dois anos e a variação. O total vem em seguida, e os trimestres somam só os meses desse intervalo.${s.dreMil ? " Valores divididos por 1.000." : ""}`
-            : ` Janeiro a ${fimMes} de ${serie.ano}. Cada grupo abre a conta, e a conta abre mais um nível.${s.dreMil ? " Valores divididos por 1.000." : ""}`)
+            ? ` ${trecho}${s.dreSoPeriodo ? (" e o mesmo intervalo de " + ((serie.ano || 0) - 1)) : (" e de janeiro a " + fimMes + " de " + ((serie.ano || 0) - 1))}. Cada mês traz os dois anos e a variação. O total vem em seguida, e os trimestres somam só os meses desse intervalo.${s.dreMil ? " Valores divididos por 1.000." : ""}`
+            : ` ${trecho}. Cada grupo abre a conta, e a conta abre mais um nível.${s.dreMil ? " Valores divididos por 1.000." : ""}`)
           : " O DRE soma o movimento do período nos grupos do demonstrativo. Conta sem valor fica fora da lista.");
       const visao = aba === "dre" && serie ? `<div class="ctb-visao-row">
         <div class="ml-tabs ctb-visao" role="tablist">
           <button type="button" role="tab" aria-selected="${s.dreVisao !== "comp"}" class="ml-tab ${s.dreVisao !== "comp" ? "is-active" : ""}" onclick="ContabilApp.setVisao('ano')"><i data-lucide="calendar-range"></i> Ano atual</button>
           <button type="button" role="tab" aria-selected="${s.dreVisao === "comp"}" class="ml-tab ${s.dreVisao === "comp" ? "is-active" : ""}" onclick="ContabilApp.setVisao('comp')"><i data-lucide="git-compare"></i> Comparar com o ano anterior</button>
         </div>
-        <label class="ctb-mil"><input type="checkbox" ${s.dreMil ? "checked" : ""} onchange="ContabilApp.setMilhar(this.checked)"> Dividir por 1.000</label>
+        <label class="moura-switch" title="Divide os valores por 1.000 e estreita as colunas">
+          <input type="checkbox" ${s.dreMil ? "checked" : ""} onchange="ContabilApp.setMilhar(this.checked)">
+          <span class="moura-switch-track" aria-hidden="true"></span>
+          <span class="moura-switch-text">Dividir por 1.000</span>
+        </label>
+        <label class="moura-switch" title="Ligado: consulta só os meses entre De e Até. Desligado: de janeiro até o mês final.">
+          <input type="checkbox" ${s.dreSoPeriodo ? "checked" : ""} onchange="ContabilApp.setSoPeriodo(this.checked)">
+          <span class="moura-switch-track" aria-hidden="true"></span>
+          <span class="moura-switch-text">Só o período</span>
+        </label>
+        <button type="button" class="btn btn-excel" onclick="ContabilApp.exportarExcel()" ${s.exportando ? "disabled" : ""} title="Exportar o DRE como está aberto. Cada empresa sai numa aba.">
+          <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
+        </button>
       </div>` : "";
       corpo = `${avisos}${visao}<p class="ctb-nota">${aba === "dre" && serie && fimMes ? this.esc(notaDre.trim()) : this.esc(periodo) + ". Entram as contas com movimento." + notaDre}</p>${demo}`;
     }
@@ -1090,9 +1405,7 @@ const ContabilApp = {
       #contabil-root .ctb-tabs { margin:8px 0 12px; }
       #contabil-root .ctb-visao { margin:0; }
       #contabil-root .ctb-visao-row { display:flex; flex-wrap:wrap; align-items:center; gap:12px 18px; margin:0 0 10px; }
-      #contabil-root .ctb-mil { display:inline-flex; align-items:center; gap:8px; height:36px; padding:0 12px; border:1px solid #cbd5e1; border-radius:8px; background:#fff; color:#0f172a; font-size:0.84rem; font-weight:700; cursor:pointer; }
-      #contabil-root .ctb-mil input { width:16px; height:16px; accent-color:#105436; cursor:pointer; }
-      #contabil-root .ctb-dre { width:max-content; min-width:0; }
+      #contabil-root .ctb-dre { width:max-content; min-width:0; table-layout:fixed; }
       #contabil-root .ctb-dre.is-real tbody td:not(:first-child),
       #contabil-root .ctb-dre.is-real thead tr:only-child th:not(:first-child),
       #contabil-root .ctb-dre.is-real thead tr:nth-child(2) th { width:108px; min-width:108px; max-width:108px; padding-left:6px; padding-right:6px; }
@@ -1118,8 +1431,11 @@ const ContabilApp = {
       #contabil-root .ctb-total td { font-weight:800; background:#f0fdf4; color:#105436; }
       #contabil-root .ctb-abre { width:18px; height:18px; border:0; background:transparent; color:#64748b; padding:0; margin-right:4px; cursor:pointer; vertical-align:middle; }
       #contabil-root .ctb-abre i, #contabil-root .ctb-abre svg { width:14px; height:14px; }
-      #contabil-root .ctb-dre { width:100%; min-width:720px; }
-      #contabil-root .ctb-dre th:first-child, #contabil-root .ctb-dre td:first-child { min-width:320px; max-width:none; }
+      #contabil-root .ctb-dre th:first-child,
+      #contabil-root .ctb-dre td:first-child {
+        width:260px; min-width:220px; max-width:280px;
+        white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+      }
       #contabil-root .orc-dfc-scroll { max-height:calc(100vh - 240px); }
     </style>
     <div class="ctb-toolbar">
