@@ -10324,6 +10324,23 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .pcx-pill.is-on { box-shadow: inset 0 0 0 1px currentColor; }
 .pcx-total { font-size: 0.8rem; color: #475569; font-variant-numeric: tabular-nums; }
 .pcx-ajuda { margin: 0 0 8px; color: #64748b; font-size: 0.76rem; line-height: 1.4; }
+.pcx-cc { display: flex; flex-direction: column; gap: 10px; margin: 0 0 12px; }
+.pcx-cc-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 14px; }
+.pcx-cc-card header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.pcx-cc-card header strong { color: #105436; font-size: 0.92rem; }
+.pcx-cc-card header span { color: #64748b; font-size: 0.75rem; }
+.pcx-cc-saldos { display: grid; grid-template-columns: repeat(3, minmax(140px, 1fr)); gap: 8px; margin-bottom: 8px; }
+.pcx-cc-saldos div { background: #f8fafc; border-radius: 8px; padding: 8px 10px; }
+.pcx-cc-saldos small { display: block; color: #64748b; font-size: 0.72rem; margin-bottom: 2px; }
+.pcx-cc-saldos strong { font-size: 1.05rem; font-variant-numeric: tabular-nums; color: #1e293b; }
+.pcx-cc-saldos strong.is-neg, .pcx-cc-mov td.is-neg { color: #b91c1c; }
+.pcx-cc-saldos strong.is-pos, .pcx-cc-mov td.is-pos { color: #15803d; }
+.pcx-cc-mov { max-height: 280px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; }
+.pcx-cc-mov table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.pcx-cc-mov th { position: sticky; top: 0; background: #105436; color: #fff; text-align: left; font-weight: 700; padding: 6px 8px; }
+.pcx-cc-mov th.is-right, .pcx-cc-mov td.is-right { text-align: right; }
+.pcx-cc-mov td { padding: 5px 8px; border-top: 1px solid #f1f5f9; }
+.pcx-cc-mov td.is-right { font-variant-numeric: tabular-nums; }
 .pcx-scroll { max-height: calc(100vh - 330px); }
 .cc-table.pcx-table { min-width: 980px; }
 .pcx-table td { height: 34px; }

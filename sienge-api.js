@@ -3735,6 +3735,26 @@ const SiengeApiService = {
     }
   },
 
+  /* Extrato da conta corrente: movimentos entre as duas datas. */
+  async getAccountStatements(startDate, endDate, opts = {}) {
+    const ini = String(startDate || "").slice(0, 10);
+    const fim = String(endDate || "").slice(0, 10);
+    if (!ini || !fim) return [];
+    if (s_apiMode === "simulado") return [];
+    const params = [`startDate=${encodeURIComponent(ini)}`, `endDate=${encodeURIComponent(fim)}`];
+    if (opts.accountNumber) params.push(`accountNumber=${encodeURIComponent(opts.accountNumber)}`);
+    if (opts.companyId) params.push(`companyId=${encodeURIComponent(opts.companyId)}`);
+    if (opts.companyGroupId) params.push(`companyGroupId=${encodeURIComponent(opts.companyGroupId)}`);
+    try {
+      const list = await siengeFetchAllPages(`/accounts-statements?${params.join("&")}`, 200);
+      return Array.isArray(list) ? list : [];
+    } catch (e) {
+      console.error("[Sienge] Erro ao obter extrato de conta:", e);
+      if (opts && opts.rethrow) throw e;
+      return [];
+    }
+  },
+
   // 22. Listar Contas Correntes Disponíveis pelo Centro de Custo (aba Disponível)
   parseCostCenterAvailableResponse(res) {
     if (!res) return { idCompany: null, list: [] };

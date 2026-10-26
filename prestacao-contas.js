@@ -36,6 +36,7 @@ const PrestacaoContasApp = {
   dashGen: 0,
   dashSort: { key: "", dir: 1 },
   retencaoMista: null,
+  saldoCc: null,
 
   competenciaPadrao() {
     const now = new Date();
@@ -1301,9 +1302,11 @@ const PrestacaoContasApp = {
     this.error = "";
     this.rastreio = null;
     this.selectedAccount = null;
+    this.saldoCc = null;
     const gen = ++this.dashGen;
     this.render();
     const { start, end } = this.periodBounds();
+    const saldoP = this.carregarSaldoParceria(gen);
     try {
       await this.ensureCategories();
       this.ensureDfcReady();
@@ -1338,12 +1341,14 @@ const PrestacaoContasApp = {
       } catch (e) {
         console.warn("[Prestação de Contas] Retenção da conta de distribuição:", e);
       }
+      await saldoP;
     } catch (err) {
       if (gen !== this.dashGen) return;
       console.error("[Prestação de Contas]", err);
       this.error = err && err.message ? err.message : "Falha ao consultar a API de movimento bancário.";
       this.movements = [];
       this.lines = [];
+      try { await saldoP; } catch (e) {}
     }
     if (gen !== this.dashGen) return;
     try {
@@ -1381,6 +1386,7 @@ const PrestacaoContasApp = {
     this.error = "";
     this.rastreio = null;
     this.retencaoMista = null;
+    this.saldoCc = null;
     this.selectedAccount = null;
     this.dash = null;
     this.gruposAbertos = new Set();
@@ -1746,6 +1752,240 @@ const PrestacaoContasApp = {
     </section>`;
   },
 
+  numeroConta(v) {
+    return String(v || "").replace(/\D/g, "");
+  },
+
+  lerNumero(v) {
+    if (v == null || v === "") return null;
+    const raw = Number(v);
+    if (Number.isFinite(raw)) return raw;
+    const n = Number(String(v).replace(/\./g, "").replace(",", "."));
+    return Number.isFinite(n) ? n : null;
+  },
+
+  valorPosicao(row) {
+    if (!row) return null;
+    const list = [row.amount, row.balance, row.balanceAmount, row.currentBalance, row.lastBalance, row.lastBalanceAmount, row.availableAmount, row.availableBalance, row.value];
+    for (let i = 0; i < list.length; i++) {
+      const n = this.lerNumero(list[i]);
+      if (n != null) return n;
+    }
+    return null;
+  },
+
+  valorCorrente(row) {
+    if (!row) return null;
+    const list = [row.balance, row.accountBalance, row.currentBalance, row.balanceAmount, row.lastBalance];
+    for (let i = 0; i < list.length; i++) {
+      const n = this.lerNumero(list[i]);
+      if (n != null) return n;
+    }
+    return null;
+  },
+
+  valorExtrato(row) {
+    const n = this.lerNumero(row && (row.value != null ? row.value : (row.amount != null ? row.amount : row.bankMovementAmount)));
+    const abs = Math.abs(n || 0);
+    const tipo = String((row && (row.type || row.operationType || row.bankMovementOperationType || row.nature)) || "").trim().toUpperCase();
+    if (/^(S|D|DEBIT|DEBITO|DÉBITO|SAIDA|SAÍDA|OUT|OUTPUT|PAYMENT)$/.test(tipo)) return -abs;
+    if (/^(E|C|CREDIT|CREDITO|CRÉDITO|ENTRADA|IN|INPUT|RECEIPT)$/.test(tipo)) return abs;
+    return n || 0;
+  },
+
+  fmtData(iso) {
+    const m = String(iso || "").slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : "";
+  },
+
+  datasSaldo() {
+    const y = Number(this.year);
+    const m = Number(this.month);
+    const pad = (n) => String(n).padStart(2, "0");
+    const prev = new Date(y, m - 1, 0);
+    const dataAnterior = `${prev.getFullYear()}-${pad(prev.getMonth() + 1)}-${pad(prev.getDate())}`;
+    const per = this.periodBounds();
+    const agora = new Date();
+    const hoje = `${agora.getFullYear()}-${pad(agora.getMonth() + 1)}-${pad(agora.getDate())}`;
+    let dataAtual = per.end;
+    if (hoje < per.end) dataAtual = hoje < per.start ? dataAnterior : hoje;
+    return { dataAnterior, dataAtual, inicioMov: per.start > dataAtual ? "" : per.start, atualEhHoje: dataAtual === hoje };
+  },
+
+  contasParceria() {
+    const CC = window.CentrosCustoApp;
+    if (!CC || typeof CC.customOf !== "function") return [];
+    const ids = new Set((this.costCenterIds || []).map(String));
+    const todos = (window.CentrosCustoState && CentrosCustoState.costCenters) || [];
+    ids.forEach((id) => {
+      const cc = todos.find((c) => String(c.id) === id);
+      const par = cc && typeof CC.parDoRateio === "function" ? CC.parDoRateio(cc) : null;
+      if (par && par.outro) ids.add(String(par.outro.id));
+    });
+    const porChave = new Map();
+    ids.forEach((id) => {
+      const conta = (CC.customOf(id) || {}).conta_parceria;
+      const numero = String((conta && conta.numero) || "").trim();
+      if (!numero) return;
+      const chave = this.numeroConta(numero) || numero.toUpperCase();
+      const item = porChave.get(chave) || {
+        numero,
+        nome: String(conta.nome || "").trim(),
+        banco: String(conta.banco || "").trim(),
+        agencia: String(conta.agencia || "").trim(),
+        centros: []
+      };
+      if (item.centros.indexOf(id) < 0) item.centros.push(id);
+      porChave.set(chave, item);
+    });
+    return [...porChave.values()].sort((a, b) => a.numero.localeCompare(b.numero, "pt-BR", { numeric: true }));
+  },
+
+  acharPosicao(rows, numero, limite) {
+    const alvo = this.numeroConta(numero);
+    const cru = String(numero || "").trim().toUpperCase();
+    let melhor = null;
+    (rows || []).forEach((row) => {
+      const num = String(row.accountNumber || row.number || "").trim();
+      if (!num) return;
+      if (this.numeroConta(num) !== alvo && num.toUpperCase() !== cru) return;
+      const amount = this.valorPosicao(row);
+      if (amount == null) return;
+      const dt = String(row.balanceDate || row.date || "").slice(0, 10);
+      if (dt && limite && dt > limite) return;
+      if (!melhor || (dt || "") >= (melhor.dt || "")) melhor = { amount, dt };
+    });
+    return melhor;
+  },
+
+  linhasExtrato(lista, numero, inicio, fim) {
+    const alvo = this.numeroConta(numero);
+    const out = [];
+    const visitar = (row, herdado) => {
+      if (!row || typeof row !== "object") return;
+      const aninhado = row.movements || row.statements || row.entries || row.bankMovements;
+      if (Array.isArray(aninhado) && aninhado.length) {
+        const base = row.accountNumber || row.number || herdado || "";
+        aninhado.forEach((m) => visitar(Object.assign({}, m, { accountNumber: m.accountNumber || m.number || base }), base));
+        return;
+      }
+      const num = String(row.accountNumber || row.number || herdado || "");
+      if (alvo && this.numeroConta(num) && this.numeroConta(num) !== alvo) return;
+      const data = String(row.date || row.movementDate || row.bankMovementDate || "").slice(0, 10);
+      if (!data || (inicio && data < inicio) || (fim && data > fim)) return;
+      out.push({
+        data,
+        historico: String(row.description || row.historic || row.history || row.bankMovementHistoricName || row.documentIdentificationName || "—").trim() || "—",
+        valor: this.valorExtrato(row),
+        saldo: this.valorCorrente(row)
+      });
+    };
+    (lista || []).forEach((row) => visitar(row, numero));
+    out.sort((a, b) => a.data.localeCompare(b.data) || a.historico.localeCompare(b.historico, "pt-BR"));
+    return out;
+  },
+
+  async carregarSaldoParceria(gen) {
+    const datas = this.datasSaldo();
+    const contas = this.contasParceria();
+    if (!contas.length || !this.companyId) {
+      if (gen === this.dashGen) this.saldoCc = { ...datas, contas: [], erro: "" };
+      return;
+    }
+    if (!window.SiengeApiService || typeof SiengeApiService.getAccountBalances !== "function") {
+      if (gen === this.dashGen) this.saldoCc = { ...datas, contas: [], erro: "A consulta de saldo do Sienge não está disponível." };
+      return;
+    }
+    try {
+      const [antes, agora] = await Promise.all([
+        SiengeApiService.getAccountBalances(datas.dataAnterior, { companyId: this.companyId }),
+        SiengeApiService.getAccountBalances(datas.dataAtual, { companyId: this.companyId })
+      ]);
+      if (gen !== this.dashGen) return;
+      const extratos = await Promise.all(contas.map(async (conta) => {
+        if (!datas.inicioMov || typeof SiengeApiService.getAccountStatements !== "function") return [];
+        try {
+          return await SiengeApiService.getAccountStatements(datas.inicioMov, datas.dataAtual, {
+            companyId: this.companyId,
+            accountNumber: conta.numero
+          });
+        } catch (e) {
+          return { erro: (e && e.message) || "Falha ao ler o extrato." };
+        }
+      }));
+      if (gen !== this.dashGen) return;
+      this.saldoCc = {
+        ...datas,
+        erro: "",
+        contas: contas.map((conta, i) => {
+          const pack = extratos[i];
+          const falhou = pack && !Array.isArray(pack);
+          const movimentos = falhou ? [] : this.linhasExtrato(pack, conta.numero, datas.inicioMov, datas.dataAtual);
+          const posAnt = this.acharPosicao(antes, conta.numero, datas.dataAnterior);
+          const posAtu = this.acharPosicao(agora, conta.numero, datas.dataAtual);
+          let atual = posAtu ? posAtu.amount : null;
+          if (atual == null) {
+            const ultimo = [...movimentos].reverse().find((m) => m.saldo != null);
+            if (ultimo) atual = ultimo.saldo;
+          }
+          return {
+            numero: conta.numero,
+            rotulo: (window.CentrosCustoApp && CentrosCustoApp.contaLabel)
+              ? CentrosCustoApp.contaLabel(conta)
+              : [conta.banco ? "Banco " + conta.banco : "", conta.agencia ? "Ag. " + conta.agencia : "", "C/C " + conta.numero, conta.nome].filter(Boolean).join(" · "),
+            centros: conta.centros.slice().sort((a, b) => Number(a) - Number(b)),
+            anterior: posAnt ? posAnt.amount : null,
+            atual,
+            movimentos,
+            erroExtrato: falhou ? pack.erro : ""
+          };
+        })
+      };
+    } catch (e) {
+      if (gen !== this.dashGen) return;
+      console.warn("[Prestação de Contas] Saldo da conta da parceria:", e);
+      this.saldoCc = { ...datas, contas: [], erro: (e && e.message) || "Falha ao consultar o saldo da conta da parceria." };
+    }
+  },
+
+  saldoParceriaHtml() {
+    const s = this.saldoCc;
+    if (!s) return "";
+    if (s.erro) return `<div class="pcx-alert is-warn">${this.esc(s.erro)}</div>`;
+    if (!s.contas.length) {
+      return `<p class="pcx-ajuda">Nenhum centro selecionado tem conta corrente de parceria. O saldo aparece aqui quando a conta está cadastrada no centro.</p>`;
+    }
+    const cor = (v) => (v == null ? "" : (v < -0.004 ? "is-neg" : "is-pos"));
+    const money = (v) => (v == null ? "—" : this.fmt(v));
+    const rotuloAtual = s.atualEhHoje ? "Saldo atual" : "Saldo no fim do mês";
+    return `<section class="pcx-cc">${s.contas.map((c) => {
+      const soma = c.movimentos.reduce((acc, m) => acc + (Number(m.valor) || 0), 0);
+      const linhas = c.movimentos.map((m) => `<tr>
+        <td>${this.esc(this.fmtData(m.data))}</td>
+        <td>${this.esc(m.historico)}</td>
+        <td class="is-right ${cor(m.valor)}">${this.fmt(m.valor)}</td>
+        <td class="is-right">${m.saldo == null ? "—" : this.fmt(m.saldo)}</td>
+      </tr>`).join("");
+      const corpo = c.erroExtrato
+        ? `<p class="pcx-ajuda">${this.esc(c.erroExtrato)}</p>`
+        : (c.movimentos.length
+          ? `<div class="pcx-cc-mov"><table><thead><tr><th>Data</th><th>Histórico</th><th class="is-right">Valor</th><th class="is-right">Saldo</th></tr></thead><tbody>${linhas}</tbody></table></div>`
+          : `<p class="pcx-ajuda">Nenhum movimento nesta conta entre ${this.esc(this.fmtData(s.inicioMov || s.dataAtual))} e ${this.esc(this.fmtData(s.dataAtual))}.</p>`);
+      return `<article class="pcx-cc-card">
+        <header>
+          <strong>${this.esc(c.rotulo)}</strong>
+          <span>Centros ${this.esc(c.centros.join(", "))}</span>
+        </header>
+        <div class="pcx-cc-saldos">
+          <div><small>Saldo em ${this.esc(this.fmtData(s.dataAnterior))}</small><strong class="${cor(c.anterior)}">${money(c.anterior)}</strong></div>
+          <div><small>${rotuloAtual} · ${this.esc(this.fmtData(s.dataAtual))}</small><strong class="${cor(c.atual)}">${money(c.atual)}</strong></div>
+          <div><small>${c.movimentos.length} movimento(s)</small><strong class="${cor(soma)}">${c.movimentos.length ? this.fmt(soma) : "—"}</strong></div>
+        </div>
+        ${corpo}
+      </article>`;
+    }).join("")}</section>`;
+  },
+
   conferirHtml(aba) {
     const conf = this.conferencias || { receitas: [], despesas: [], repasses: [] };
     const repasse = aba === "repasse";
@@ -1768,7 +2008,9 @@ const PrestacaoContasApp = {
     const corpo = rows.length ? this.obrasHtml(rows, repasse) : `<tr><td colspan="8" class="pcx-vazio">${vazio}</td></tr>`;
     const corTotal = resultado < -0.004 ? "#b91c1c" : "#15803d";
     const dist = repasse ? "" : this.distribuicaoMistaHtml();
+    const saldo = repasse ? this.saldoParceriaHtml() : "";
     return `
+      ${saldo}
       ${dist}
       <div class="pcx-resumo">
         <div class="pcx-pills">
