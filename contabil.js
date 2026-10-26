@@ -93,7 +93,8 @@ const ContabilApp = {
 
   toggleConta(codigo) {
     const k = String(codigo || "");
-    this.state.abertos[k] = !this.state.abertos[k];
+    if (k.indexOf("dre-") === 0) this.state.abertos[k] = this.state.abertos[k] === false;
+    else this.state.abertos[k] = !this.state.abertos[k];
     this.render();
   },
 
@@ -402,26 +403,182 @@ const ContabilApp = {
     return `<tr class="${forte ? "ctb-total" : "ctb-sub"}"><td>${this.esc(rotulo)}</td><td class="ctb-num${neg}">${this.money(valor)}</td></tr>`;
   },
 
-  htmlDre(raizes) {
-    const receita = this.somaClasse(raizes, "receita");
-    const deducao = this.somaClasse(raizes, "deducao");
-    const custo = this.somaClasse(raizes, "custo");
-    const despesa = this.somaClasse(raizes, "despesa");
-    const resultadoConta = this.somaClasse(raizes, "resultado");
-    const liquida = Math.round((receita + deducao) * 100) / 100;
+  /* 3.01.01.01.001 e 3.1.01.01.001 viram o mesmo 3.1.1.1.1. */
+  dreNorm(codigo) {
+    const s = String(codigo || "").trim();
+    const partes = s.indexOf(".") >= 0
+      ? s.split(".").filter(Boolean)
+      : (() => {
+          const d = s.replace(/\D/g, "");
+          if (!d) return [];
+          const out = [d.charAt(0)];
+          let i = 1;
+          while (i < d.length) {
+            const resto = d.length - i;
+            if (resto <= 3) { out.push(d.slice(i)); break; }
+            out.push(d.slice(i, i + 2));
+            i += 2;
+          }
+          return out;
+        })();
+    return partes.map((p) => {
+      const n = parseInt(p, 10);
+      return Number.isFinite(n) ? String(n) : String(p);
+    }).join(".");
+  },
+
+  dreCasa(codigo, prefixo) {
+    const n = this.dreNorm(codigo);
+    const p = this.dreNorm(prefixo);
+    if (!n || !p) return false;
+    return n === p || n.indexOf(p + ".") === 0;
+  },
+
+  /* Grupos do DRE da Moura Leite. O código manda; o nome só cobre conta sem esse código. */
+  grupoDre(no) {
+    const c = no && no.codigo;
+    if (this.dreCasa(c, "4.1.2.2.1")) return "dga";
+    if (this.dreCasa(c, "4.1.2.1")) return "recFin";
+    if (this.dreCasa(c, "4.1.2.2")) return "despFin";
+    if (this.dreCasa(c, "4.1.3")) return "equiv";
+    if (this.dreCasa(c, "4.1.1.3")) return "vendas";
+    if (this.dreCasa(c, "4.1.1")) return "dga";
+    if (this.dreCasa(c, "4.3.1") || this.dreCasa(c, "4.3.2")) return "imposto";
+    if (this.dreCasa(c, "3.1.1.1")) return "bruta";
+    if (this.dreCasa(c, "3.1.1.2")) return "deducao";
+    if (this.dreCasa(c, "3.1.1.3")) return "custo";
+    const nome = this.norm(no && no.nome);
+    if (/IRPJ|CONTRIB\.?\s*SOCIAL|\bCSLL\b/.test(nome)) return "imposto";
+    if (/PARTICIP/.test(nome)) return "equiv";
+    if (/TARIFA/.test(nome) && /BANC/.test(nome)) return "dga";
+    if (/RENDIMENT|JUROS ATIVOS|VARIACAO MONETARIA ATIVA|DESCONTOS OBTIDOS/.test(nome)) return "recFin";
+    if (/\bIOF\b|VARIACAO MONETARIA PASSIVA|DESCONTO CONCEDIDO/.test(nome) && !/CONTRATO/.test(nome)) return "despFin";
+    if (/PROPAGANDA|COMISS|STAND DE VENDAS|\bEVENTOS\b/.test(nome)) return "vendas";
+    if (/CUSTO DOS IMOVEIS|OBRA DE CONTRAPARTIDA/.test(nome)) return "custo";
+    if (/DISTRAT|DESCONTO CONCEDIDO CONTRATO|ISS S\/|PIS |COFINS|RET S\//.test(nome)) return "deducao";
+    if (/VENDA DE IMOVEIS|PRESTACAO DE SERVICO|ALUGUE/.test(nome)) return "bruta";
+    return "demais";
+  },
+
+  folhasDre(raizes) {
+    const out = [];
+    const walk = (no) => {
+      if (no.filhos && no.filhos.length) {
+        no.filhos.forEach(walk);
+        return;
+      }
+      if (!no.veioDaApi) return;
+      if (no.classe === "ativo" || no.classe === "passivo" || no.classe === "pl") return;
+      const seg = String(no.codigo || "").replace(/\D/g, "").charAt(0);
+      if (seg === "1" || seg === "2") return;
+      out.push(no);
+    };
+    (raizes || []).forEach(walk);
+    return out;
+  },
+
+  somarItens(lista) {
+    return Math.round((lista || []).reduce((s, it) => s + (Number(it.valor) || 0), 0) * 100) / 100;
+  },
+
+  /* Monta os grupos e os subtotais na ordem do demonstrativo. */
+  montarDre(raizes) {
+    const baldes = { bruta: [], deducao: [], custo: [], vendas: [], dga: [], equiv: [], recFin: [], despFin: [], imposto: [], demais: [] };
+    this.folhasDre(raizes).forEach((no) => {
+      const valor = Math.round((-Number(no.movimento) || 0) * 100) / 100;
+      if (Math.abs(valor) < 0.005) return;
+      const g = this.grupoDre(no);
+      (baldes[g] || baldes.demais).push({ codigo: no.codigo, nome: no.nome, valor: valor });
+    });
+    Object.keys(baldes).forEach((k) => baldes[k].sort((a, b) => this.compararCodigo(a.codigo, b.codigo)));
+    const bruta = this.somarItens(baldes.bruta);
+    const deducao = this.somarItens(baldes.deducao);
+    const liquida = Math.round((bruta + deducao) * 100) / 100;
+    const custo = this.somarItens(baldes.custo);
     const bruto = Math.round((liquida + custo) * 100) / 100;
-    const resultado = Math.round((bruto + despesa + resultadoConta) * 100) / 100;
-    const corpo = [
-      this.htmlGrupo(raizes, "receita", "Receitas"),
-      this.htmlGrupo(raizes, "deducao", "Deduções"),
-      (receita || deducao) ? this.htmlSubtotal("Receita líquida", liquida, false) : "",
-      this.htmlGrupo(raizes, "custo", "Custos"),
-      (custo && (receita || deducao)) ? this.htmlSubtotal("Lucro bruto", bruto, false) : "",
-      this.htmlGrupo(raizes, "despesa", "Despesas"),
-      this.htmlGrupo(raizes, "resultado", "Outras contas de resultado"),
-      this.htmlSubtotal("Resultado do período", resultado, true)
+    const vendas = this.somarItens(baldes.vendas);
+    const dga = this.somarItens(baldes.dga);
+    const despesas = Math.round((vendas + dga) * 100) / 100;
+    const antes = Math.round((bruto + despesas) * 100) / 100;
+    const equiv = this.somarItens(baldes.equiv);
+    const recFin = this.somarItens(baldes.recFin);
+    const despFin = this.somarItens(baldes.despFin);
+    const financeiro = Math.round((recFin + despFin) * 100) / 100;
+    const lair = Math.round((antes + equiv + financeiro) * 100) / 100;
+    const imposto = this.somarItens(baldes.imposto);
+    const demais = this.somarItens(baldes.demais);
+    const liquido = Math.round((lair + imposto + demais) * 100) / 100;
+    const metade = Math.round(liquido * 50) / 100;
+    return {
+      baldes: baldes,
+      bruta: bruta, deducao: deducao, liquida: liquida, custo: custo, bruto: bruto,
+      vendas: vendas, dga: dga, despesas: despesas, antes: antes, equiv: equiv,
+      recFin: recFin, despFin: despFin, financeiro: financeiro, lair: lair,
+      imposto: imposto, demais: demais, liquido: liquido, metade: metade
+    };
+  },
+
+  dreAberto(id) {
+    return this.state.abertos[id] !== false;
+  },
+
+  dreLinha(nivel, nome, valor, opts) {
+    const o = opts || {};
+    const cls = o.cls || "";
+    const neg = valor < -0.005 ? " orc-dfc-neg" : "";
+    const ico = o.id
+      ? `<i data-lucide="${this.dreAberto(o.id) ? "chevron-down" : "chevron-right"}"></i>`
+      : `<i class="orc-dfc-no"></i>`;
+    const click = o.id ? ` onclick="ContabilApp.toggleConta('${this.esc(o.id)}')"` : "";
+    const texto = Math.abs(valor) < 0.005 ? "—" : valor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return `<tr class="${cls}"${click}>
+      <td style="padding-left:${8 + nivel * 16}px">${ico}<span>${this.esc(nome)}</span></td>
+      <td class="${neg.trim()}">${texto}</td>
+    </tr>`;
+  },
+
+  dreContas(lista, nivel, paiId) {
+    if (!this.dreAberto(paiId)) return "";
+    return (lista || []).map((it) => this.dreLinha(nivel, (it.codigo ? it.codigo + " " : "") + (it.nome || ""), it.valor, { cls: "orc-dfc-acc" })).join("");
+  },
+
+  htmlDre(raizes) {
+    const d = this.montarDre(raizes);
+    const b = d.baldes;
+    const linhas = [
+      this.dreLinha(0, "Receita operacional bruta", d.bruta, { id: "dre-bruta", cls: "orc-dfc-n1" }),
+      this.dreContas(b.bruta, 1, "dre-bruta"),
+      this.dreLinha(0, "(-) Deduções da receita", d.deducao, { id: "dre-ded", cls: "orc-dfc-saida" }),
+      this.dreContas(b.deducao, 1, "dre-ded"),
+      this.dreLinha(0, "Receita operacional líquida", d.liquida, { cls: "orc-dfc-formula" }),
+      this.dreLinha(0, "Custo das unidades vendidas", d.custo, { id: "dre-custo", cls: "orc-dfc-saida" }),
+      this.dreContas(b.custo, 1, "dre-custo"),
+      this.dreLinha(0, "Lucro bruto", d.bruto, { cls: "orc-dfc-formula" }),
+      this.dreLinha(0, "Despesas e outras receitas", d.despesas, { id: "dre-desp", cls: "orc-dfc-saida-forte" }),
+      this.dreAberto("dre-desp") ? this.dreLinha(1, "Despesas com vendas", d.vendas, { id: "dre-vendas", cls: "orc-dfc-saida" }) : "",
+      this.dreAberto("dre-desp") ? this.dreContas(b.vendas, 2, "dre-vendas") : "",
+      this.dreAberto("dre-desp") ? this.dreLinha(1, "Despesas gerais e administrativas", d.dga, { id: "dre-dga", cls: "orc-dfc-saida" }) : "",
+      this.dreAberto("dre-desp") ? this.dreContas(b.dga, 2, "dre-dga") : "",
+      this.dreLinha(0, "Resultado antes das despesas financeiras e impostos", d.antes, { cls: "orc-dfc-formula" }),
+      this.dreLinha(0, "Equivalência patrimonial", d.equiv, { id: "dre-equiv", cls: "orc-dfc-n1" }),
+      this.dreContas(b.equiv, 1, "dre-equiv"),
+      this.dreLinha(0, "Resultado financeiro", d.financeiro, { id: "dre-fin", cls: "orc-dfc-n1" }),
+      this.dreAberto("dre-fin") ? this.dreLinha(1, "Receitas financeiras", d.recFin, { id: "dre-recfin", cls: "orc-dfc-n1" }) : "",
+      this.dreAberto("dre-fin") ? this.dreContas(b.recFin, 2, "dre-recfin") : "",
+      this.dreAberto("dre-fin") ? this.dreLinha(1, "Despesas financeiras", d.despFin, { id: "dre-despfin", cls: "orc-dfc-saida" }) : "",
+      this.dreAberto("dre-fin") ? this.dreContas(b.despFin, 2, "dre-despfin") : "",
+      this.dreLinha(0, "Lucro antes do imposto de renda e da contribuição social", d.lair, { cls: "orc-dfc-formula" }),
+      this.dreLinha(0, "Imposto de renda e contribuição social", d.imposto, { id: "dre-ir", cls: "orc-dfc-saida" }),
+      this.dreContas(b.imposto, 1, "dre-ir"),
+      b.demais.length ? this.dreLinha(0, "Demais contas de resultado", d.demais, { id: "dre-demais", cls: "orc-dfc-n1" }) : "",
+      b.demais.length ? this.dreContas(b.demais, 1, "dre-demais") : "",
+      this.dreLinha(0, "Lucro líquido (prejuízo) do exercício", d.liquido, { cls: "orc-dfc-fcf" }),
+      this.dreLinha(0, "50% Eq. MLDU", d.metade, { cls: "orc-dfc-formula" })
     ].join("");
-    return this.htmlTabela("Movimento do período", corpo);
+    return `<div class="orc-dfc-scroll"><table class="orc-dfc-table ctb-dre">
+      <thead><tr><th>Conta</th><th>Valor</th></tr></thead>
+      <tbody>${linhas}</tbody>
+    </table></div>`;
   },
 
   htmlBalanco(raizes) {
@@ -531,7 +688,10 @@ const ContabilApp = {
     } else {
       const demo = aba === "balanco" ? this.htmlBalanco(s.arvore) : this.htmlDre(s.arvore);
       const avisos = s.avisos.length ? `<p class="ctb-erro">${s.avisos.map((a) => this.esc(a)).join("<br>")}</p>` : "";
-      corpo = `${avisos}<p class="ctb-nota">${this.esc(periodo)}. Entram as contas com movimento. O DRE usa o movimento do período. O balanço usa o saldo no fim do período.</p>${demo}`;
+      const notaDre = aba === "dre"
+        ? " O DRE soma o movimento do período nos grupos do demonstrativo. Conta sem valor fica fora da lista."
+        : " O balanço usa o saldo no fim do período.";
+      corpo = `${avisos}<p class="ctb-nota">${this.esc(periodo)}. Entram as contas com movimento.${notaDre}</p>${demo}`;
     }
     root.innerHTML = `<style>
       #contabil-root .ctb-toolbar { display:flex; flex-wrap:wrap; gap:12px 16px; align-items:flex-end; margin:4px 0 8px; }
@@ -553,6 +713,9 @@ const ContabilApp = {
       #contabil-root .ctb-total td { font-weight:800; background:#f0fdf4; color:#105436; }
       #contabil-root .ctb-abre { width:18px; height:18px; border:0; background:transparent; color:#64748b; padding:0; margin-right:4px; cursor:pointer; vertical-align:middle; }
       #contabil-root .ctb-abre i, #contabil-root .ctb-abre svg { width:14px; height:14px; }
+      #contabil-root .ctb-dre { width:100%; min-width:720px; }
+      #contabil-root .ctb-dre th:first-child, #contabil-root .ctb-dre td:first-child { min-width:320px; max-width:none; }
+      #contabil-root .orc-dfc-scroll { max-height:calc(100vh - 240px); }
     </style>
     <div class="ctb-toolbar">
       <div id="ctb-emp-box"></div>
