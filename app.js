@@ -2161,6 +2161,15 @@ window.listInstallmentsForSiCheck = function(client) {
 
 window.clientHasConfirmedOverdueSinalSI = function(client) {
   if (!client) return false;
+  const titles = typeof window.clientTitleIdSet === "function" ? window.clientTitleIdSet(client) : new Set();
+  const bills = (typeof AppState !== "undefined" && AppState.defaultersBills) || [];
+  const peloCache = bills.some((b) => {
+    if (!b || !b._hasCachedOverdueSi) return false;
+    if (String(b.customerId) !== String(client.customerId)) return false;
+    const ids = [b.id, b.saleId, b.receivableBillId].map((v) => (typeof window.normalizeTituloId === "function" ? window.normalizeTituloId(v) : String(v || "")));
+    return ids.some((id) => id && titles.has(id));
+  });
+  if (peloCache) return true;
   const insts = typeof window.listInstallmentsForSiCheck === "function"
     ? window.listInstallmentsForSiCheck(client)
     : [];
@@ -2466,7 +2475,7 @@ window.enrichDefaulterBillsWithQuitacaoTypes = async function(bills) {
     const da = Math.max.apply(null, a[1].map((x) => Number(x.daysDelay) || 0));
     const db = Math.max.apply(null, b[1].map((x) => Number(x.daysDelay) || 0));
     return db - da;
-  }).slice(0, 40);
+  });
   const conc = 3;
   for (let i = 0; i < ranked.length; i += conc) {
     const slice = ranked.slice(i, i + conc);
@@ -11264,9 +11273,16 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
   // -----------------------------------------------
   // PASSO 3: Consolidar devedores únicos por cliente+contrato
   // -----------------------------------------------
-  if (!dataAlreadyLoaded && typeof window.enrichDefaulterBillsWithQuitacaoTypes === "function") {
-    try { await window.enrichDefaulterBillsWithQuitacaoTypes(bills); } catch (e) {
-      console.warn("[SI] Falha ao vincular tipo da quitação:", e);
+  if (forceRefresh) window._filaSiEnriched = false;
+  if (typeof window.enrichDefaulterBillsWithQuitacaoTypes === "function") {
+    const precisaSi = (bills || []).some((b) => typeof window.billNeedsQuitacaoTipoEnrich === "function" && window.billNeedsQuitacaoTipoEnrich(b));
+    if (precisaSi && !window._filaSiEnriched) {
+      const sFila = document.querySelector("#defaulters-table-body .loading-status-text");
+      if (sFila) sFila.textContent = "Conferindo o sinal dos contratos com cláusula suspensiva…";
+      try { await window.enrichDefaulterBillsWithQuitacaoTypes(bills); } catch (e) {
+        console.warn("[SI] Falha ao vincular tipo da quitação:", e);
+      }
+      window._filaSiEnriched = true;
     }
   }
   const consolidated = {};
@@ -31421,9 +31437,13 @@ async function _loadZeroPaidTab_Impl() {
   }
   const customers = getSiengeApiMode() === "simulado" ? window.MOCK_DATA.CUSTOMERS : AppState.customers;
 
-  if (typeof window.enrichDefaulterBillsWithQuitacaoTypes === "function" && !AppState.defaultersLoaded) {
-    try { await window.enrichDefaulterBillsWithQuitacaoTypes(bills); } catch (e) {
-      console.warn("[SI] Falha ao vincular tipo da quitação (0% pago):", e);
+  if (typeof window.enrichDefaulterBillsWithQuitacaoTypes === "function" && !window._filaSiEnriched) {
+    const precisaSi = (bills || []).some((b) => typeof window.billNeedsQuitacaoTipoEnrich === "function" && window.billNeedsQuitacaoTipoEnrich(b));
+    if (precisaSi) {
+      try { await window.enrichDefaulterBillsWithQuitacaoTypes(bills); } catch (e) {
+        console.warn("[SI] Falha ao vincular tipo da quitação (0% pago):", e);
+      }
+      window._filaSiEnriched = true;
     }
   }
   
