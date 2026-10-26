@@ -17,6 +17,7 @@ const ContabilApp = {
     abertos: {},
     buscou: false,
     dreVisao: "ano",
+    dreMil: false,
     serie: null,
     loadMsg: ""
   },
@@ -57,6 +58,7 @@ const ContabilApp = {
   init() {
     if (!this.state.de) this.state.de = this.mesAtual();
     if (!this.state.ate) this.state.ate = this.mesAtual();
+    try { this.state.dreMil = localStorage.getItem("crm_ctb_dre_mil") === "1"; } catch (e) {}
     this.render();
     if (!this.state.companies.length) this.carregarEmpresas();
   },
@@ -99,6 +101,12 @@ const ContabilApp = {
     this.render();
   },
 
+  setMilhar(marcado) {
+    this.state.dreMil = !!marcado;
+    try { localStorage.setItem("crm_ctb_dre_mil", this.state.dreMil ? "1" : "0"); } catch (e) {}
+    this.render();
+  },
+
   nomeMes(m) {
     return ["", "jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"][Number(m)] || "";
   },
@@ -129,7 +137,8 @@ const ContabilApp = {
 
   toggleConta(codigo) {
     const k = String(codigo || "");
-    if (k.indexOf("dre-") === 0) this.state.abertos[k] = this.state.abertos[k] === false;
+    if (k.indexOf("drec-") === 0) this.state.abertos[k] = this.state.abertos[k] !== true;
+    else if (k.indexOf("dre-") === 0) this.state.abertos[k] = this.state.abertos[k] === false;
     else this.state.abertos[k] = !this.state.abertos[k];
     this.render();
   },
@@ -555,7 +564,9 @@ const ContabilApp = {
   },
 
   dreAberto(id) {
-    return this.state.abertos[id] !== false;
+    const k = String(id || "");
+    if (k.indexOf("drec-") === 0) return this.state.abertos[k] === true;
+    return this.state.abertos[k] !== false;
   },
 
   variacao(anterior, atual) {
@@ -572,6 +583,11 @@ const ContabilApp = {
 
   fmtDre(v) {
     const n = Number(v) || 0;
+    if (this.state.dreMil) {
+      const m = n / 1000;
+      if (Math.abs(m) < 0.05) return "—";
+      return m.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    }
     if (Math.abs(n) < 0.005) return "—";
     return n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   },
@@ -723,7 +739,7 @@ const ContabilApp = {
       ? `<i data-lucide="${this.dreAberto(o.id) ? "chevron-down" : "chevron-right"}"></i>`
       : `<i class="orc-dfc-no"></i>`;
     const click = o.id ? ` onclick="ContabilApp.toggleConta('${this.esc(o.id)}')"` : "";
-    const texto = Math.abs(valor) < 0.005 ? "—" : valor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const texto = this.fmtDre(valor);
     return `<tr class="${cls}"${click}>
       <td style="padding-left:${8 + nivel * 16}px">${ico}<span>${this.esc(nome)}</span></td>
       <td class="${neg.trim()}">${texto}</td>
@@ -745,9 +761,28 @@ const ContabilApp = {
     })).sort((a, b) => this.compararCodigo(a.codigo, b.codigo));
     const doGrupo = (g) => contas.filter((c) => c.grupo === g);
     const linha = (nivel, nome, chave, opts) => this.dreLinhaCols(nivel, nome, (col) => this.valorLinha(col, chave), Object.assign({ cols: cols }, opts || {}));
+    const rotuloConta = (c) => (c.codigo ? c.codigo + " " : "") + (c.nome || "");
+    const valorConta = (c) => (col) => this.valorLinha(col, "", c);
     const contasHtml = (lista, nivel, pai) => {
       if (!this.dreAberto(pai)) return "";
-      return lista.map((c) => this.dreLinhaCols(nivel, (c.codigo ? c.codigo + " " : "") + (c.nome || ""), (col) => this.valorLinha(col, "", c), { cols: cols, cls: "orc-dfc-acc" })).join("");
+      return this.niveisConta(lista).map((bloco) => {
+        if (bloco.tipo === "folha") {
+          return this.dreLinhaCols(nivel, rotuloConta(bloco.conta), valorConta(bloco.conta), { cols: cols, cls: "orc-dfc-acc" });
+        }
+        const soma = (col) => {
+          if (col.tipo === "pct") {
+            const ant = bloco.filhos.reduce((s, c) => s + (Number(col.ant(c)) || 0), 0);
+            const atu = bloco.filhos.reduce((s, c) => s + (Number(col.atu(c)) || 0), 0);
+            return this.variacao(ant, atu);
+          }
+          return Math.round(bloco.filhos.reduce((s, c) => s + (Number(col.ler(c)) || 0), 0) * 100) / 100;
+        };
+        const nomePai = (bloco.codigo ? bloco.codigo + " " : "") + (bloco.nome || "");
+        const head = this.dreLinhaCols(nivel, nomePai, soma, { cols: cols, id: bloco.id, cls: "orc-dfc-acc" });
+        if (!this.dreAberto(bloco.id)) return head;
+        const filhos = bloco.filhos.map((c) => this.dreLinhaCols(nivel + 1, rotuloConta(c), valorConta(c), { cols: cols, cls: "orc-dfc-acc" })).join("");
+        return head + filhos;
+      }).join("");
     };
     const vendas = doGrupo("vendas");
     const dga = doGrupo("dga");
@@ -783,7 +818,8 @@ const ContabilApp = {
       linha(0, "50% Eq. MLDU", "metade", { cls: "orc-dfc-formula" })
     ].join("");
     const cmp = this.state.dreVisao === "comp" ? " orc-dfc-cmp" : "";
-    return `<div class="orc-dfc-scroll"><table class="orc-dfc-table ctb-dre${cmp}">
+    const mil = this.state.dreMil ? " is-mil" : " is-real";
+    return `<div class="orc-dfc-scroll"><table class="orc-dfc-table ctb-dre${cmp}${mil}">
       <thead>${this.cabecalhoDre(cols)}</thead>
       <tbody>${linhas}</tbody>
     </table></div>`;
@@ -855,21 +891,65 @@ const ContabilApp = {
     </table>`;
   },
 
+  /* Um nível acima da conta analítica, só quando o pai continua no mesmo grupo do DRE. */
+  niveisConta(lista) {
+    const pais = new Map();
+    const ordem = [];
+    (lista || []).forEach((c) => {
+      const pode = c.paiId && c.paiGrupo === c.grupo;
+      if (!pode) {
+        ordem.push({ tipo: "folha", conta: c, codigo: c.codigo });
+        return;
+      }
+      let bloco = pais.get(c.paiId);
+      if (!bloco) {
+        bloco = { tipo: "pai", id: "drec-" + c.paiId, codigo: c.paiCodigo || c.paiId, nome: c.paiNome || "", filhos: [] };
+        pais.set(c.paiId, bloco);
+        ordem.push(bloco);
+      }
+      if ((c.paiNome || "").length > (bloco.nome || "").length) bloco.nome = c.paiNome;
+      if (String(c.paiCodigo || "").length > String(bloco.codigo || "").length) bloco.codigo = c.paiCodigo;
+      bloco.filhos.push(c);
+    });
+    ordem.sort((a, b) => this.compararCodigo(a.codigo, b.codigo));
+    ordem.forEach((b) => {
+      if (b.filhos) b.filhos.sort((a, c) => this.compararCodigo(a.codigo, c.codigo));
+    });
+    return ordem;
+  },
+
   montarSerie(janela, porMes) {
     const mapa = new Map();
     Object.keys(porMes || {}).forEach((chave) => {
       const arvore = this.classificar(this.montarArvore(this.juntar(porMes[chave])));
+      const porCodigo = new Map();
+      const indexar = (no) => {
+        porCodigo.set(no.codigo, no);
+        (no.filhos || []).forEach(indexar);
+      };
+      arvore.forEach(indexar);
       this.folhasDre(arvore).forEach((no) => {
         const valor = Math.round((-Number(no.movimento) || 0) * 100) / 100;
         const id = this.dreNorm(no.codigo) || String(no.codigo);
+        const paiCodigo = this.paiDe(no.codigo);
+        const paiNo = paiCodigo ? porCodigo.get(paiCodigo) : null;
+        const paiNome = paiNo && paiNo.veioDaApi && paiNo.nome && paiNo.nome !== paiNo.codigo ? paiNo.nome : "";
         let item = mapa.get(id);
         if (!item) {
-          item = { id: id, codigo: no.codigo, nome: no.nome, grupo: this.grupoDre(no), por: {} };
+          item = {
+            id: id, codigo: no.codigo, nome: no.nome, grupo: this.grupoDre(no), por: {},
+            paiId: paiCodigo ? this.dreNorm(paiCodigo) : "",
+            paiCodigo: paiCodigo,
+            paiNome: paiNome,
+            paiGrupo: paiCodigo ? this.grupoDre({ codigo: paiCodigo }) : ""
+          };
           mapa.set(id, item);
         }
         item.por[chave] = Math.round(((item.por[chave] || 0) + valor) * 100) / 100;
         if ((no.nome || "").length > (item.nome || "").length) item.nome = no.nome;
         if (String(no.codigo || "").length > String(item.codigo || "").length) item.codigo = no.codigo;
+        if (paiNome.length > (item.paiNome || "").length) item.paiNome = paiNome;
+        if (String(paiCodigo || "").length > String(item.paiCodigo || "").length) item.paiCodigo = paiCodigo;
       });
     });
     return { ano: janela.ano, meses: (janela.meses || []).slice(), contas: [...mapa.values()] };
@@ -993,19 +1073,32 @@ const ContabilApp = {
         ? " O balanço usa o saldo no fim do período."
         : (serie && fimMes
           ? (s.dreVisao === "comp"
-            ? ` Janeiro a ${fimMes} de ${serie.ano - 1} e de ${serie.ano}. Cada mês traz os dois anos e a variação. O total vem em seguida, e os trimestres somam só os meses desse intervalo.`
-            : ` Janeiro a ${fimMes} de ${serie.ano}. Cada grupo abre nas contas analíticas.`)
+            ? ` Janeiro a ${fimMes} de ${serie.ano - 1} e de ${serie.ano}. Cada mês traz os dois anos e a variação. O total vem em seguida, e os trimestres somam só os meses desse intervalo.${s.dreMil ? " Valores divididos por 1.000." : ""}`
+            : ` Janeiro a ${fimMes} de ${serie.ano}. Cada grupo abre a conta, e a conta abre mais um nível.${s.dreMil ? " Valores divididos por 1.000." : ""}`)
           : " O DRE soma o movimento do período nos grupos do demonstrativo. Conta sem valor fica fora da lista.");
-      const visao = aba === "dre" && serie ? `<div class="ml-tabs ctb-visao" role="tablist">
-        <button type="button" role="tab" aria-selected="${s.dreVisao !== "comp"}" class="ml-tab ${s.dreVisao !== "comp" ? "is-active" : ""}" onclick="ContabilApp.setVisao('ano')"><i data-lucide="calendar-range"></i> Ano atual</button>
-        <button type="button" role="tab" aria-selected="${s.dreVisao === "comp"}" class="ml-tab ${s.dreVisao === "comp" ? "is-active" : ""}" onclick="ContabilApp.setVisao('comp')"><i data-lucide="git-compare"></i> Comparar com o ano anterior</button>
+      const visao = aba === "dre" && serie ? `<div class="ctb-visao-row">
+        <div class="ml-tabs ctb-visao" role="tablist">
+          <button type="button" role="tab" aria-selected="${s.dreVisao !== "comp"}" class="ml-tab ${s.dreVisao !== "comp" ? "is-active" : ""}" onclick="ContabilApp.setVisao('ano')"><i data-lucide="calendar-range"></i> Ano atual</button>
+          <button type="button" role="tab" aria-selected="${s.dreVisao === "comp"}" class="ml-tab ${s.dreVisao === "comp" ? "is-active" : ""}" onclick="ContabilApp.setVisao('comp')"><i data-lucide="git-compare"></i> Comparar com o ano anterior</button>
+        </div>
+        <label class="ctb-mil"><input type="checkbox" ${s.dreMil ? "checked" : ""} onchange="ContabilApp.setMilhar(this.checked)"> Dividir por 1.000</label>
       </div>` : "";
       corpo = `${avisos}${visao}<p class="ctb-nota">${aba === "dre" && serie && fimMes ? this.esc(notaDre.trim()) : this.esc(periodo) + ". Entram as contas com movimento." + notaDre}</p>${demo}`;
     }
     root.innerHTML = `<style>
       #contabil-root .ctb-toolbar { display:flex; flex-wrap:wrap; gap:12px 16px; align-items:flex-end; margin:4px 0 8px; }
       #contabil-root .ctb-tabs { margin:8px 0 12px; }
-      #contabil-root .ctb-visao { margin:0 0 10px; }
+      #contabil-root .ctb-visao { margin:0; }
+      #contabil-root .ctb-visao-row { display:flex; flex-wrap:wrap; align-items:center; gap:12px 18px; margin:0 0 10px; }
+      #contabil-root .ctb-mil { display:inline-flex; align-items:center; gap:8px; height:36px; padding:0 12px; border:1px solid #cbd5e1; border-radius:8px; background:#fff; color:#0f172a; font-size:0.84rem; font-weight:700; cursor:pointer; }
+      #contabil-root .ctb-mil input { width:16px; height:16px; accent-color:#105436; cursor:pointer; }
+      #contabil-root .ctb-dre { width:max-content; min-width:0; }
+      #contabil-root .ctb-dre.is-real tbody td:not(:first-child),
+      #contabil-root .ctb-dre.is-real thead tr:only-child th:not(:first-child),
+      #contabil-root .ctb-dre.is-real thead tr:nth-child(2) th { width:108px; min-width:108px; max-width:108px; padding-left:6px; padding-right:6px; }
+      #contabil-root .ctb-dre.is-mil tbody td:not(:first-child),
+      #contabil-root .ctb-dre.is-mil thead tr:only-child th:not(:first-child),
+      #contabil-root .ctb-dre.is-mil thead tr:nth-child(2) th { width:64px; min-width:64px; max-width:64px; padding-left:4px; padding-right:4px; }
       #contabil-root .ctb-dre tbody tr:not(.orc-dfc-fcf) > td.is-pos { color:#15803d; }
       #contabil-root .ctb-dre tbody tr.orc-dfc-fcf > td.is-pos { color:#bbf7d0; }
       #contabil-root .ctb-buscar { height:38px; padding:0 16px; border:0; border-radius:8px; background:#105436; color:#fff; font-weight:700; cursor:pointer; }
