@@ -3701,6 +3701,16 @@ const SiengeApiService = {
     return lista || [];
   },
 
+  /* DRE e balanço: o fechamento entra, para o resultado ir ao patrimônio quando o período estiver encerrado. */
+  async getTrialBalanceContabil(companyId, initialPeriod, finalPeriod) {
+    const ini = String(initialPeriod || "").slice(0, 10);
+    const fim = String(finalPeriod || "").slice(0, 10);
+    if (!companyId || !ini || !fim) return [];
+    const q = `companyId=${encodeURIComponent(companyId)}&initialPeriod=${ini}&finalPeriod=${fim}&desconsiderClosingBalance=false&onlyAccountsWithMovements=true&thirdParties=false`;
+    const lista = await this.lerBalanceteCompleto(`/trial-balance?${q}`);
+    return lista || [];
+  },
+
   async getAccountBalances(balanceDate, opts = {}) {
     const date = String(balanceDate || "").slice(0, 10);
     const showLast = opts.showLast === false ? "N" : "S";

@@ -3411,6 +3411,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     anexos: "Assistente de Anexos",
     "contas-pagar": "Assistente de Contas a Pagar",
     "gerar-pagamento": "Gerar Pagamento",
+    contabil: "Contábil",
     rydoo: "Rydoo",
     "pagar-reembolso": "Pagar reembolso",
     "processo-contra": "Processo contra",
@@ -3496,6 +3497,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     anexos: "paperclip",
     "contas-pagar": "landmark",
     "gerar-pagamento": "wallet",
+    contabil: "book-open",
     rydoo: "receipt",
     "pagar-reembolso": "wallet",
     "processo-contra": "scale",
@@ -3770,6 +3772,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     };
     bootRepac();
     setTimeout(bootRepac, 0);
+  } else if (tabId === "contabil") {
+    if (typeof ContabilApp !== "undefined") ContabilApp.init();
   } else if (tabId === "gerar-pagamento") {
     if (typeof GerarPagamentoApp !== "undefined") GerarPagamentoApp.init();
   } else if (tabId === "parametrizacao-parceiro") {
@@ -6507,6 +6511,11 @@ window.permCoversMenuKey = function(perms, modKey) {
     const flags = (base) => perms[base + "_acessar"] === true || perms[base + "_visualizar"] === true || perms[base + "_editar"] === true;
     return flags("sub_fin_cr_sub_judice") || flags("sub_fin_cr_pagar_reembolso") || flags("sub_jur_geral_processo_contra");
   }
+  if (modKey === "mod_contabil") {
+    if (perms.mod_contabil === true || perms.sub_contabil_geral === true) return true;
+    const base = "sub_contabil_geral_demonstracoes";
+    return perms[base + "_acessar"] === true || perms[base + "_visualizar"] === true || perms[base + "_editar"] === true;
+  }
   if (modKey === "mod_orc") {
     if (perms.mod_orc === true || perms.sub_orc_geral === true || perms.sub_fin_orc === true) return true;
     const bases = ["sub_orc_geral_novo_orcamento", "sub_orc_geral_novo_forecast", "sub_fin_orc_orcamento"];
@@ -6715,6 +6724,13 @@ async function initializeApplication() {
       return [n.date, n.author, n.canal || n.fase || '', n.promiseDate || n.prazo || '', String(n.text || '').slice(0, 80)].join('|');
   };
 
+  window.occurrenceStamp = function(n) {
+      if (!n) return 0;
+      const raw = n.promiseStatusAt || n.updatedAt || (n.lastEdit && n.lastEdit.date) || "";
+      const t = Date.parse(raw);
+      return Number.isFinite(t) ? t : 0;
+  };
+
   window.mergeOccurrenceLists = function(a, b) {
       const map = new Map();
       const add = (n) => {
@@ -6722,7 +6738,15 @@ async function initializeApplication() {
           if (typeof window.isTitulo4868BoletoOccurrence === "function" && window.isTitulo4868BoletoOccurrence(n, n.customerId)) return;
           const k = window.occurrenceIdentity(n);
           if (!k || k === '||||') return;
-          if (!map.has(k)) map.set(k, n);
+          const prev = map.get(k);
+          if (!prev) {
+              map.set(k, n);
+              return;
+          }
+          const stampPrev = window.occurrenceStamp(prev);
+          const stampNext = window.occurrenceStamp(n);
+          if (stampNext > stampPrev) map.set(k, Object.assign({}, prev, n));
+          else if (stampPrev > stampNext) map.set(k, Object.assign({}, n, prev));
       };
       (Array.isArray(a) ? a : []).forEach(add);
       (Array.isArray(b) ? b : []).forEach(add);
@@ -6858,15 +6882,23 @@ async function initializeApplication() {
   window.occurrenceMatchesCurrentContract = function(occ) {
       const canalNota = String((occ && (occ.canal || occ.fase)) || "");
       const ehNota = canalNota === "Nota interna" || canalNota === "Nota Interna";
-      if (!occ || occ.saleId == null || occ.saleId === '') {
+      const ids = [];
+      if (occ) {
+          [occ.saleId, occ.receivableBillId, occ.contractId, occ.titulo].forEach((v) => {
+              if (v != null && String(v).trim() !== "") ids.push(v);
+          });
+      }
+      if (!ids.length) {
           if (ehNota && window.getCurrentContractIdSet().size) return false;
           return true;
       }
       const set = window.getCurrentContractIdSet();
       if (!set.size) return true;
-      const raw = String(occ.saleId);
-      const tok = window.normalizeContractIdToken(raw);
-      return set.has(raw) || (tok && set.has(tok));
+      return ids.some((v) => {
+          const raw = String(v).trim();
+          const tok = window.normalizeContractIdToken(raw);
+          return set.has(raw) || (tok && set.has(tok));
+      });
   };
 
   window.occurrenceAuthorMatchesOperator = function(author, operatorName) {
@@ -7022,13 +7054,14 @@ async function initializeApplication() {
   window.persistCustomerNotesList = function(customerKey, customerId, notesToSave) {
       const current = window.getCustomerNotesList(AppState.notes, customerKey);
       const merged = window.mergeOccurrenceLists(current, notesToSave);
+      const target = String(customerId == null ? "" : customerId);
+      const n = Number(target);
+      const num = target !== "" && Number.isFinite(n) ? String(n) : "";
+      [target, num, target.replace(/^B-/i, ""), String(customerKey || "").replace(/^B-/i, "")].forEach((k) => {
+          if (!k || k === "NaN" || k === String(customerKey)) return;
+          if (AppState.notes && Object.prototype.hasOwnProperty.call(AppState.notes, k)) delete AppState.notes[k];
+      });
       AppState.notes[customerKey] = merged;
-      if (customerId != null && String(customerId) !== String(customerKey)) {
-          AppState.notes[customerId] = window.mergeOccurrenceLists(
-              window.getCustomerNotesList(AppState.notes, customerId),
-              merged
-          );
-      }
       return merged;
   };
 
@@ -7115,6 +7148,7 @@ async function initializeApplication() {
                console.log("[Firebase RT] Iniciando salvamento em massa (sharded)...");
                const { collection, getDocs } = window.firebaseCollections;
                const remoteMap = {};
+               let remoteOk = false;
                try {
                    const notesSnap = await getDocs(collection(window.firebaseDb, 'customer_notes_shards'));
                    notesSnap.forEach(d => {
@@ -7122,8 +7156,13 @@ async function initializeApplication() {
                            if (Array.isArray(v)) remoteMap[String(k)] = v;
                        });
                    });
+                   remoteOk = true;
                } catch (remoteErr) {
                    console.warn("[Firebase RT] Não foi possível ler shards remotos no save em massa:", remoteErr);
+               }
+               if (!remoteOk) {
+                   console.warn("[Firebase RT] Save em massa cancelado para não apagar ocorrências que estão só na nuvem.");
+                   return;
                }
                const chunks = {};
                for (const custId of Object.keys(AppState.notes)) {
@@ -17269,7 +17308,7 @@ function renderCustomerOccurrences() {
         `;
       } else {
         statusHtml = `
-          <select class="filter-select" style="padding:2px 6px; font-size:0.7rem; height: 22px; border-radius: 4px; border: 1px solid #ccc; background: white;" onchange="updatePromiseStatus('${occ.date}', this.value)">
+          <select class="filter-select" style="padding:2px 6px; font-size:0.7rem; height: 22px; border-radius: 4px; border: 1px solid #ccc; background: white;" onchange="updatePromiseStatus('${occ.date}', this.value, '${occ.id || ""}')">
             <option value="Pendente" ${occ.promiseStatus === 'Pendente' ? 'selected' : ''}>\uD83D\uDFE1 Pendente</option>
             <option value="Cumprido" ${occ.promiseStatus === 'Cumprido' ? 'selected' : ''}>\uD83D\uDFE2 Cumprido</option>
             <option value="Quebrado" ${occ.promiseStatus === 'Quebrado' ? 'selected' : ''}>\uD83D\uDD34 Quebrado</option>
@@ -18046,11 +18085,12 @@ async function saveCustomerOccurrence() {
     }
   }
   
-  const currentSale = (AppState.sales || []).find(s =>
-    String(s.id) === String(AppState.selectedSaleId)
-    || String(s.receivableBillId) === String(AppState.selectedSaleId)
-    || String(s.receivableBillId) === String(AppState.currentReceivableBillId)
-  ) || {};
+  const currentSale = (AppState.sales || []).find(s => {
+    if (s && s.customerId != null && String(s.customerId) !== String(AppState.selectedCustomerId)) return false;
+    return String(s.id) === String(AppState.selectedSaleId)
+      || String(s.receivableBillId) === String(AppState.selectedSaleId)
+      || (AppState.currentReceivableBillId && String(s.receivableBillId) === String(AppState.currentReceivableBillId));
+  }) || {};
   const pinCheckbox = document.getElementById("note-pin-checkbox");
   const isPinned = pinCheckbox ? pinCheckbox.checked : false;
   const tituloAberto = String(AppState.selectedSaleId || AppState.selectedTitulo || AppState.selectedContractId || "");
@@ -18068,8 +18108,10 @@ async function saveCustomerOccurrence() {
   const occurrence = {
     id: newOccId(),
     date: new Date().toISOString(),
-    author: AppState.currentUser.name,
-    saleId: canonicalSaleId || AppState.selectedSaleId || null,
+    author: (AppState.currentUser && AppState.currentUser.name) || "Operador",
+    saleId: String(AppState.currentReceivableBillId || AppState.selectedTitulo || canonicalSaleId || AppState.selectedSaleId || "") || null,
+    receivableBillId: AppState.currentReceivableBillId || null,
+    contractId: AppState.currentSalesContractId || AppState.selectedContractId || null,
     unitId: currentSale.unitId || null,
     text: text,
     promiseDate: (canal === "Nota interna" || isProposalReneg || isReuniaoSemanal) ? null : promiseDate,
@@ -18083,6 +18125,7 @@ async function saveCustomerOccurrence() {
     pinned: (canal === "Nota interna") ? isPinned : false,
     webroBaixa: !!isWebroBaixa,
     reuniaoSemanalTerceirizada: !!isReuniaoSemanal,
+    updatedAt: new Date().toISOString(),
     attachments: []
   };
 
@@ -18287,16 +18330,22 @@ window.finalizeOccurrenceSave = function(occurrence, redirectSaleId = null, skip
     ? window.mergeOccurrenceLists(existingNotes, alreadySaved ? [] : [occurrence])
     : (alreadySaved ? existingNotes : [...existingNotes, occurrence]);
   if(window.saveNotesToFirebase) window.saveNotesToFirebase(AppState.selectedCustomerId); else localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+  window._agendaSigCache = null;
+  window._agendaDueCache = null;
+  window.agendaItemsCache = {};
   
   // Limpar contador de dias na fila do contrato ATUAL apenas se tiver promessa pendente
   try {
       let queueDates = JSON.parse(localStorage.getItem('crm_queue_entry_dates') || '{}');
-      if (queueDates[occurrence.saleId]) {
+      let mudouFila = false;
+      [occurrence.saleId, occurrence.receivableBillId, occurrence.contractId].forEach((id) => {
+          if (!id || !queueDates[id]) return;
           if (occurrence.promiseStatus === "Pendente") {
-              delete queueDates[occurrence.saleId];
-              localStorage.setItem('crm_queue_entry_dates', JSON.stringify(queueDates));
+              delete queueDates[id];
+              mudouFila = true;
           }
-      }
+      });
+      if (mudouFila) localStorage.setItem('crm_queue_entry_dates', JSON.stringify(queueDates));
   } catch (e) {}
 
   try {
@@ -18908,20 +18957,51 @@ window.toggleNoteReminderCustom = function() {
   }
 };
 
-function updatePromiseStatus(occDateStr, newStatus) {
-  const list = AppState.notes[AppState.selectedCustomerId] || [];
-  const item = list.find(x => x.date === occDateStr);
-  if (item) {
-    item.promiseStatus = newStatus;
-    if (window.saveNotesToFirebase) {
-      window.saveNotesToFirebase(AppState.selectedCustomerId);
-    } else {
-      localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
-    }
+function updatePromiseStatus(occDateStr, newStatus, occId, customerIdOpt) {
+  const customerId = customerIdOpt != null && customerIdOpt !== "" ? customerIdOpt : AppState.selectedCustomerId;
+  if (customerId == null || customerId === "") return;
+  const nowIso = new Date().toISOString();
+  const match = (item) => {
+    if (!item) return false;
+    if (occId && item.id && String(item.id) === String(occId)) return true;
+    return !!(occDateStr && item.date === occDateStr);
+  };
+  const apply = (store) => {
+    if (!store) return false;
+    const list = window.getCustomerNotesList
+      ? window.getCustomerNotesList(store, customerId)
+      : (store[customerId] || store[String(customerId)] || []);
+    let hit = false;
+    list.forEach((item) => {
+      if (!match(item)) return;
+      item.promiseStatus = newStatus;
+      item.promiseStatusAt = nowIso;
+      item.updatedAt = nowIso;
+      hit = true;
+    });
+    return hit;
+  };
+  const naCobranca = apply(AppState.notes);
+  const noJuridico = apply(AppState.judNotes);
+  if (!naCobranca && !noJuridico) return;
+  window._agendaSigCache = null;
+  window._agendaDueCache = null;
+  window.agendaItemsCache = {};
+  if (naCobranca) {
+    if (window.saveNotesToFirebase) window.saveNotesToFirebase(customerId);
+    else localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+  }
+  if (noJuridico && window.saveJudNotesToFirebase) window.saveJudNotesToFirebase(customerId);
+  if (String(AppState.selectedCustomerId) === String(customerId) && typeof renderCustomerOccurrences === "function") {
     renderCustomerOccurrences();
-    loadDashboardData();
+  }
+  if (typeof loadDashboardData === "function") loadDashboardData();
+  const agenda = document.getElementById("tab-agenda");
+  if (agenda && agenda.style.display !== "none" && window.lastSelectedAgendaDate && typeof loadAgendaDayTasks === "function") {
+    loadAgendaDayTasks(window.lastSelectedAgendaDate);
   }
 }
+window.updatePromiseStatus = updatePromiseStatus;
 
 async function renderSiengeNotifications(saleId) {
   const timeline = document.getElementById("sienge-notification-timeline");
@@ -28377,12 +28457,20 @@ window.agendaNotesSignature = function() {
     const store = (window.AppState && AppState.notes) || {};
     let notes = 0;
     let due = 0;
+    let statusSig = 0;
     Object.keys(store).forEach(k => {
       const list = Array.isArray(store[k]) ? store[k] : [];
       notes += list.length;
-      list.forEach(o => { if (o && window.occurrenceDueDateKey(o)) due += 1; });
+      list.forEach(o => {
+        if (!o) return;
+        if (window.occurrenceDueDateKey(o)) due += 1;
+        const st = o.promiseStatus || "";
+        if (st === "Cumprido" || st === "Resolvido") statusSig += 1;
+        else if (st === "Quebrado") statusSig += 2;
+        else if (st === "Pendente") statusSig += 4;
+      });
     });
-    const sig = notes + ':' + due;
+    const sig = notes + ':' + due + ':' + statusSig;
     window._agendaSigCache = { at: now, sig: sig };
     return sig;
 };
@@ -28637,7 +28725,7 @@ window.collectAgendaDueItems = function(dateStr, opts) {
           daysAgo: daysAgo,
           occIndex: index,
           agendaAlert: occ.agendaAlert,
-          isResolved: handledLater,
+          isResolved: handledLater || occ.promiseStatus === "Cumprido" || occ.promiseStatus === "Resolvido",
           isFila: false,
           occId: occ.id || ""
         };
@@ -28698,6 +28786,86 @@ window.agendaPendente = function(item) {
   if (!item || item.isResolved) return false;
   const st = item.promiseStatus || "";
   return st !== "Cumprido" && st !== "Resolvido" && st !== "Cancelada";
+};
+
+/** Item ainda em aberto na agenda do dia: fila nova ou retorno agendado. */
+window.itemPendenteNaAgendaDoDia = function(item) {
+  if (!item || item.isResolved) return false;
+  const st = item.promiseStatus || "";
+  return st !== "Cumprido" && st !== "Resolvido" && st !== "Cancelada";
+};
+
+window.indiceTitulosLigados = function() {
+  const sales = (typeof AppState !== "undefined" && AppState.sales) || [];
+  const sig = String(sales.length) + ":" + String((sales[0] && sales[0].id) || "") + ":" + String((sales[sales.length - 1] && sales[sales.length - 1].id) || "");
+  if (window._tituloLinkIdx && window._tituloLinkIdx.sig === sig) return window._tituloLinkIdx.map;
+  const map = new Map();
+  const tok = (v) => (typeof window.normalizeContractIdToken === "function")
+    ? window.normalizeContractIdToken(v)
+    : String(v || "");
+  sales.forEach((s) => {
+    if (!s) return;
+    const ids = [s.id, s.receivableBillId, s.salesContractId, s.contractNumber].filter((v) => v != null && String(v).trim() !== "");
+    if (!ids.length) return;
+    let grupo = null;
+    ids.forEach((id) => {
+      const raw = String(id).trim();
+      const t = tok(id);
+      grupo = grupo || map.get(raw) || (t && map.get(t)) || null;
+    });
+    if (!grupo) grupo = new Set();
+    ids.forEach((id) => {
+      const raw = String(id).trim();
+      const t = tok(id);
+      grupo.add(raw);
+      if (t) grupo.add(t);
+      const prev = map.get(raw);
+      if (prev && prev !== grupo) prev.forEach((x) => grupo.add(x));
+      grupo.forEach((x) => map.set(x, grupo));
+      if (t) map.set(t, grupo);
+    });
+  });
+  window._tituloLinkIdx = { sig: sig, map: map };
+  return map;
+};
+
+window.notaDoMesmoTitulo = function(note, item) {
+  if (!note) return false;
+  const ids = [note.saleId, note.receivableBillId, note.contractId, note.titulo].filter((v) => v != null && String(v).trim() !== "");
+  const itemIds = [item && item.saleId, item && item.receivableBillId].filter((v) => v != null && String(v).trim() !== "");
+  if (!ids.length || !itemIds.length) return true;
+  const tok = (v) => (typeof window.normalizeContractIdToken === "function")
+    ? window.normalizeContractIdToken(v)
+    : String(v || "");
+  const map = window.indiceTitulosLigados ? window.indiceTitulosLigados() : new Map();
+  let grupo = null;
+  itemIds.forEach((id) => {
+    const raw = String(id).trim();
+    const t = tok(id);
+    grupo = grupo || map.get(raw) || (t && map.get(t)) || null;
+  });
+  if (!grupo) {
+    grupo = new Set();
+    itemIds.forEach((id) => {
+      grupo.add(String(id).trim());
+      const t = tok(id);
+      if (t) grupo.add(t);
+    });
+  }
+  return ids.some((id) => grupo.has(String(id).trim()) || (tok(id) && grupo.has(tok(id))));
+};
+
+/** Cumprido/Resolvido tira o cliente da fila do dia quando a promessa é deste dia ou foi fechada hoje. */
+window.notaResolveFilaDoDia = function(note, item, dateKey, todayStr) {
+  if (!note || note.status === "Cancelada") return false;
+  const st = note.promiseStatus || "";
+  if (st !== "Cumprido" && st !== "Resolvido") return false;
+  if (window.notaDoMesmoTitulo && !window.notaDoMesmoTitulo(note, item)) return false;
+  const prom = window.promiseDateKey ? window.promiseDateKey(note.promiseDate) : String(note.promiseDate || "").slice(0, 10);
+  const marcado = String(note.promiseStatusAt || note.updatedAt || "").slice(0, 10);
+  if (prom && dateKey && prom === dateKey) return true;
+  if (marcado && todayStr && marcado === todayStr) return true;
+  return false;
 };
 
 /** Com agendamento no dia: 1/3 da capacidade para clientes novos e 2/3 para a agenda. */
@@ -28783,15 +28951,18 @@ window.generateDailyQueue = async function(selectedOperator, dateStr, opts) {
          let exclude = false;
          const notes = (window.getCustomerNotesList ? window.getCustomerNotesList(AppState.notes, item.customerId) : (AppState.notes[item.customerId] || []));
          notes.forEach(n => {
+           const mesmo = window.notaDoMesmoTitulo
+             ? window.notaDoMesmoTitulo(n, item)
+             : (!n.saleId || String(n.saleId) === String(item.saleId));
+           if (!mesmo) return;
            if ((window.promiseDateKey(n.promiseDate) >= dateKey) && n.promiseStatus === "Pendente" && n.status !== "Cancelada") {
-              if (!n.saleId || String(n.saleId) === String(item.saleId)) {
-                  exclude = true;
-              }
+              exclude = true;
            }
            if (n.date && n.date.startsWith(todayStr) && window.occurrenceAuthorMatchesOperator(n.author, selectedOperator)) {
-              if (!n.saleId || String(n.saleId) === String(item.saleId)) {
-                  exclude = true;
-              }
+              exclude = true;
+           }
+           if (window.notaResolveFilaDoDia && window.notaResolveFilaDoDia(n, item, dateKey, todayStr)) {
+              exclude = true;
            }
          });
          item.isResolved = exclude;
@@ -29439,12 +29610,10 @@ window.fireConfetti = function() {
   }
   
   const originalItems = window.agendaItemsCache[cacheKey] || [];
-  const unresolvedItems = originalItems.filter(item => {
-      if (!item.isFila) return false;
-      if (item.isResolved) return false;
-      if (item.promiseStatus === "Cumprido" || item.promiseStatus === "Resolvido") return false;
-      return true;
-  });
+  const pendenteDoDia = (item) => (typeof window.itemPendenteNaAgendaDoDia === "function")
+    ? window.itemPendenteNaAgendaDoDia(item)
+    : (item && !item.isResolved && item.promiseStatus !== "Cumprido" && item.promiseStatus !== "Resolvido" && item.promiseStatus !== "Cancelada");
+  const unresolvedItems = originalItems.filter(pendenteDoDia);
   const unresolvedCount = unresolvedItems.length;
   const teveFila = originalItems.some(item => item && item.isFila);
   const todayStr = window.getActiveQueueDate ? window.getActiveQueueDate() : (window.localDateStr ? window.localDateStr() : new Date().toISOString().split('T')[0]);
@@ -29455,7 +29624,7 @@ window.fireConfetti = function() {
       window._filaHadPendingInSession[filaTrackKey] = true;
       const summaryDiv = document.createElement("div");
       summaryDiv.style.cssText = "background: #fff7ed; color: #c2410c; padding: 10px 15px; border-radius: 6px; font-size: 0.9rem; font-weight: 600; border: 1px solid #ffedd5; margin-bottom: 15px; display: flex; align-items: center; gap: 8px;";
-      summaryDiv.innerHTML = `<i data-lucide="zap" style="width: 16px; height: 16px;"></i> Faltam ${unresolvedCount} atendimentos para finalizar a sua fila hoje.`;
+      summaryDiv.innerHTML = `<i data-lucide="zap" style="width: 16px; height: 16px;"></i> Faltam ${unresolvedCount} atendimentos para finalizar a agenda de hoje (fila do dia e retornos).`;
       // We can insert this before the table. The `body` is the tbody. We need to find its parent.
       const table = body.closest('table');
       if (table && table.parentNode) {
@@ -29465,7 +29634,7 @@ window.fireConfetti = function() {
           summaryDiv.className = 'agenda-queue-summary';
           table.parentNode.insertBefore(summaryDiv, table);
       }
-  } else if (teveFila && unresolvedCount === 0) {
+  } else if (unresolvedCount === 0 && (teveFila || window._filaHadPendingInSession[filaTrackKey])) {
       const table = body.closest('table');
       if (table && table.parentNode) {
           const oldSummary = table.parentNode.querySelector('.agenda-queue-summary');
@@ -29485,7 +29654,7 @@ window.fireConfetti = function() {
             <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; padding: 10px 0;">
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <i data-lucide="party-popper" style="width: 24px; height: 24px; color: #166534;"></i> 
-                    <span style="font-size: 1.15rem;">Parabéns! Você finalizou sua fila de cobrança de hoje! 🎉</span>
+                    <span style="font-size: 1.15rem;">Parabéns! Você finalizou a agenda de hoje! 🎉</span>
                 </div>
                 <img src="selo/seu-barriga.jpg" alt="Selo de Qualidade Seu Barriga" style="width: 200px; height: 200px; object-fit: cover; border-radius: 50%; animation: seloPulse 2s infinite ease-in-out; border: 4px solid #166534;">
             </div>
@@ -30867,18 +31036,14 @@ window.resolveAgendaAlarm = function(btnEl, key, idx) {
 };
 
 window.toggleAgendaTaskStatus = function(customerId, occDateStr, checked) {
-  const list = AppState.notes[customerId] || [];
-  const item = list.find(x => x.date === occDateStr);
-  if (item) {
-    item.promiseStatus = checked ? "Cumprido" : "Pendente";
-    localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
-    updateSidebarAgendaBadge();
-    
-    const dateStr = window.localDateStr(selectedAgendaDate);
-    loadAgendaDayTasks(dateStr);
-    renderAgendaCalendar();
-    loadDashboardData(); // Atualiza KPIs e dashboard
+  const novo = checked ? "Cumprido" : "Pendente";
+  if (typeof window.updatePromiseStatus === "function") {
+    window.updatePromiseStatus(occDateStr, novo, "", customerId);
   }
+  if (typeof updateSidebarAgendaBadge === "function") updateSidebarAgendaBadge();
+  const dateStr = window.localDateStr(selectedAgendaDate);
+  if (typeof loadAgendaDayTasks === "function") loadAgendaDayTasks(dateStr);
+  if (typeof renderAgendaCalendar === "function") renderAgendaCalendar();
 };
 
 window.toggleAgendaNoteCheck = function(srcKey, originalIndex) {
@@ -46039,6 +46204,7 @@ window.checkAndAutomatePromises = function() {
   const todayIso = today.toISOString().split("T")[0];
 
   let hasChanges = false;
+  const clientesAlterados = new Set();
   
   Object.entries(notes).forEach(([custIdStr, occList]) => {
     const custId = parseInt(custIdStr);
@@ -46087,7 +46253,10 @@ window.checkAndAutomatePromises = function() {
               occ.promiseStatus = "Cumprido";
               occ.systemUpdatedStatus = true;
               occ.agendaAlert = true;
+              occ.promiseStatusAt = new Date().toISOString();
+              occ.updatedAt = occ.promiseStatusAt;
               hasChanges = true;
+              clientesAlterados.add(custIdStr);
             }
           } else {
             // Não pagou todas. Verificar se atrasou.
@@ -46095,7 +46264,10 @@ window.checkAndAutomatePromises = function() {
               if (occ.promiseStatus === "Pendente") {
                 occ.promiseStatus = "Quebrado";
                 occ.systemUpdatedStatus = true;
+                occ.promiseStatusAt = new Date().toISOString();
+                occ.updatedAt = occ.promiseStatusAt;
                 hasChanges = true;
+                clientesAlterados.add(custIdStr);
               }
             }
           }
@@ -46105,7 +46277,10 @@ window.checkAndAutomatePromises = function() {
             if (occ.promiseStatus === "Pendente") {
               occ.promiseStatus = "Quebrado";
               occ.systemUpdatedStatus = true;
+              occ.promiseStatusAt = new Date().toISOString();
+              occ.updatedAt = occ.promiseStatusAt;
               hasChanges = true;
+              clientesAlterados.add(custIdStr);
             }
           }
         }
@@ -46114,7 +46289,8 @@ window.checkAndAutomatePromises = function() {
   });
   
   if (hasChanges) {
-    if(window.saveNotesToFirebase) window.saveNotesToFirebase(null); else localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
+    if (window.saveNotesToFirebase) clientesAlterados.forEach((id) => window.saveNotesToFirebase(id));
+    else localStorage.setItem("crm_moura_notes", JSON.stringify(AppState.notes));
     if (typeof updateSidebarAgendaBadge === 'function') updateSidebarAgendaBadge();
     if (typeof renderAgendaAlerts === 'function') renderAgendaAlerts();
   }

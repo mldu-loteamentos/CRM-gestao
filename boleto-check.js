@@ -220,7 +220,10 @@ window.BoletoCheck = {
       return out;
     }
     const r = this.ler(payment);
-    out.forma = r.tipo === "arrecadacao" ? "Boleto de concessionária" : "Boleto";
+    const guiaUnificada = /guia\s*unificada/i.test(String(ctx.tipo || ""));
+    out.forma = guiaUnificada && (r.tipo === "arrecadacao" || payment.kind === "boleto-tax")
+      ? "Guia unificada"
+      : (r.tipo === "arrecadacao" ? "Boleto de concessionária" : "Boleto");
     let codigo = r.codigo;
     if (!codigo && !r.linha) {
       out.erros.push("Boleto sem código de barras e sem linha digitável.");
@@ -281,6 +284,7 @@ window.BoletoCheck = {
         }
       }
     }
+    out.codigo = codigo || "";
     const valor = Number(ctx.valor);
     const retido = Number(ctx.retido) || 0;
     const liquido = Math.round((valor - (retido > 0.009 ? retido : 0)) * 100) / 100;
@@ -486,7 +490,9 @@ window.BoletoCheck = {
     const d = (payment && payment.data) || {};
     const lista = (itens, cor, ic) => itens.map((t) => `<p style="margin:4px 0 0;color:${cor};">${ic} ${this.esc(t)}</p>`).join("");
     const cab = v.nivel === "ok"
-      ? `<p style="margin:6px 0 0;color:#105436;font-weight:700;">✓ Código de barras conferido: dígitos, valor${v.retidoAplicado ? " líquido" : ""}${v.vencBoleto ? " e vencimento" : ""} batem com o título.</p>`
+      ? (v.guiaSomada
+        ? `<p style="margin:6px 0 0;color:#105436;font-weight:700;">✓ Guia unificada conferida: o código soma os títulos desta guia.</p>`
+        : `<p style="margin:6px 0 0;color:#105436;font-weight:700;">✓ Código de barras conferido: dígitos, valor${v.retidoAplicado ? " líquido" : ""}${v.vencBoleto ? " e vencimento" : ""} batem com o título.</p>`)
       : "";
     return `<p><strong>Forma:</strong> ${this.esc(v.forma)}</p>
       ${v.linhaFmt ? `<p><strong>Linha digitável:</strong> <span style="font-family:monospace;font-size:0.82rem;">${this.esc(v.linhaFmt)}</span></p>` : ""}

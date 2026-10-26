@@ -22,6 +22,7 @@ const GerarPagamentoApp = {
     filtro: "todos",
     visao: "lotes",
     abaLotes: "gerar",
+    abaEmpresa: "",
     sel: {},
     selInit: {},
     lotes: [],
@@ -1275,7 +1276,7 @@ const GerarPagamentoApp = {
         if (gen !== s.gen) return;
         const credor = payment && payment.kind === "pix" ? await this.carregarCredor(r.credorId) : undefined;
         if (gen !== s.gen) return;
-        const ctx = { valor: t.aPagar, vencimento: r.vencimento, credor };
+        const ctx = { valor: t.aPagar, vencimento: r.vencimento, credor, tipo: forma.tipo || "" };
         let check = BoletoCheck.validar(payment, ctx);
         let fiscal = null;
         const boletoMenor = check.valorBoleto != null && check.valorBoleto > 0 && check.valorBoleto < t.aPagar - 0.01;
@@ -1312,8 +1313,152 @@ const GerarPagamentoApp = {
     };
     await Promise.all([worker(), worker(), worker()]);
     if (gen !== s.gen) return;
+    this.reconciliarGuiasUnificadas();
     s.validacao.rodando = false;
     this.paintTitulos();
+  },
+
+  /** CSLL e IRPJ da mesma empresa saem numa guia só. O código traz a soma, não o valor de cada título. */
+  tipoImpostoGuia(r) {
+    const blob = [r && r.docId, r && r.docNome, r && r.documento].join(" ").toUpperCase();
+    if (/\bCSLL\b/.test(blob)) return "CSLL";
+    if (/\bIRPJ\b/.test(blob)) return "IRPJ";
+    return "";
+  },
+
+  idsGuiaNasNotas(payment) {
+    const d = (payment && payment.data) || {};
+    const ids = new Set();
+    Object.keys(d).forEach((k) => {
+      if (typeof d[k] !== "string") return;
+      const pedaco = String(d[k]).split(/\d{11,}/)[0];
+      const m = pedaco.match(/t[ií]tulos?\s*[:\-]?\s*([^\n]+)/i);
+      if (!m) return;
+      m[1].split(/\D+/).forEach((n) => {
+        if (n.length >= 4 && n.length <= 9) ids.add(n);
+      });
+    });
+    return [...ids];
+  },
+
+  titulosAbertosDoId(billId) {
+    const id = String(billId || "");
+    const vistos = new Set();
+    const saida = [];
+    this.state.titulos.forEach((r) => {
+      if (String(r.titulo) !== id || r.pago || !(r.aPagar > 0.009)) return;
+      const chave = this.chaveTitulo(r.titulo, r.parcela);
+      if (vistos.has(chave)) return;
+      vistos.add(chave);
+      const t = this.resumoTitulo(chave);
+      if (t) saida.push({ chave, t, r: t.rows[0] });
+    });
+    return saida;
+  },
+
+  aplicarGuiaSomada(membros, valorGuia, fonte) {
+    const s = this.state;
+    const BC = window.BoletoCheck;
+    const partes = membros.map((m) => {
+      const imposto = this.tipoImpostoGuia(m.r);
+      const nome = imposto ? imposto + ", " : "";
+      return `${m.r.titulo} (${nome}${BC.money(m.t.aPagar)})`;
+    });
+    const info = `Guia unificada de ${BC.money(valorGuia)}. Os títulos ${partes.join(" e ")} somam o valor da guia.`;
+    membros.forEach((m) => {
+      const atual = s.pagInfo[m.chave];
+      const base = (atual && atual.check) || {
+        nivel: "ok", forma: "Guia unificada", resumo: "", erros: [], avisos: [], infos: [], desconto: false, linhaFmt: "", valorBoleto: valorGuia, vencBoleto: "", codigo: (fonte && fonte.check && fonte.check.codigo) || ""
+      };
+      base.erros = (base.erros || []).filter((e) => !/^Valor do boleto\b/.test(e));
+      base.infos = (base.infos || []).filter((e) => !/somam o valor da guia/.test(e));
+      base.infos.push(info);
+      base.forma = "Guia unificada";
+      base.guiaSomada = true;
+      base.valorBoleto = valorGuia;
+      if (fonte && fonte.check && fonte.check.linhaFmt && !base.linhaFmt) base.linhaFmt = fonte.check.linhaFmt;
+      if (base.erros.length) base.nivel = "erro";
+      else if ((base.avisos || []).length) base.nivel = "aviso";
+      else base.nivel = "ok";
+      base.resumo = base.erros[0] || (base.avisos || [])[0] || "Guia unificada conferida";
+      s.pagInfo[m.chave] = {
+        payment: (atual && atual.payment) || (fonte && fonte.info && fonte.info.payment) || null,
+        check: base,
+        fiscal: atual ? atual.fiscal : null,
+        tipoSienge: (atual && atual.tipoSienge) || (fonte && fonte.info && fonte.info.tipoSienge) || "Guia unificada",
+        falha: !!(atual && atual.falha)
+      };
+      if (base.nivel === "ok" || base.nivel === "info") {
+        Object.keys(s.sel).forEach((k) => {
+          if (k.endsWith("|" + m.chave) && !s.selManual[k]) s.sel[k] = true;
+        });
+      }
+    });
+  },
+
+  /** A guia unificada (CSLL + IRPJ, em geral) confere quando a soma dos títulos bate com o código. */
+  reconciliarGuiasUnificadas() {
+    const s = this.state;
+    const candidatos = [];
+    Object.keys(s.pagInfo || {}).forEach((chave) => {
+      const info = s.pagInfo[chave];
+      const t = this.resumoTitulo(chave);
+      if (!info || !info.check || !t) return;
+      const r = t.rows[0];
+      const notas = (info.payment && info.payment.data && info.payment.data.notes) || "";
+      const guiaNome = /guia\s*unificada/i.test(info.tipoSienge || "") || /guia\s*unificada/i.test(String(notas));
+      const imposto = this.tipoImpostoGuia(r);
+      if (guiaNome && info.check.forma === "Boleto de concessionária") {
+        info.check.forma = "Guia unificada";
+        if (/^Boleto de concessionária/.test(info.check.resumo || "")) info.check.resumo = info.check.resumo.replace(/^Boleto de concessionária/, "Guia unificada");
+      }
+      if (!(guiaNome || imposto) || !(info.check.valorBoleto > 0)) return;
+      candidatos.push({
+        chave, info, t, r, check: info.check, guiaNome, imposto,
+        codigo: info.check.codigo || "",
+        idsNotas: this.idsGuiaNasNotas(info.payment)
+      });
+    });
+    const usados = new Set();
+    const somaDe = (lista) => Math.round(lista.reduce((t, m) => t + (Number(m.t.aPagar) || 0), 0) * 100) / 100;
+    const bate = (soma, valor) => Math.abs(soma - Number(valor)) <= 0.01;
+    candidatos.forEach((c) => {
+      if (usados.has(c.chave) || c.idsNotas.length < 2) return;
+      const visto = new Set();
+      const membros = [];
+      c.idsNotas.forEach((id) => {
+        this.titulosAbertosDoId(id).forEach((m) => {
+          if (visto.has(m.chave)) return;
+          visto.add(m.chave);
+          membros.push(m);
+        });
+      });
+      if (membros.length < 2) return;
+      const soma = somaDe(membros);
+      if (!bate(soma, c.check.valorBoleto)) return;
+      this.aplicarGuiaSomada(membros, c.check.valorBoleto, c);
+      membros.forEach((m) => usados.add(m.chave));
+    });
+    const porCodigo = {};
+    candidatos.forEach((c) => {
+      if (usados.has(c.chave) || c.codigo.length < 44) return;
+      const k = [c.codigo, c.r.companyId || "", c.r.credorId || "", String(c.r.vencimento || "").slice(0, 10)].join("|");
+      (porCodigo[k] = porCodigo[k] || []).push(c);
+    });
+    Object.keys(porCodigo).forEach((k) => {
+      const grupo = porCodigo[k].filter((c) => !usados.has(c.chave));
+      if (grupo.length < 2) return;
+      const guia = grupo.some((c) => c.guiaNome);
+      const impostos = new Set(grupo.map((c) => c.imposto).filter(Boolean));
+      const par = impostos.has("CSLL") && impostos.has("IRPJ");
+      if (!guia && !par) return;
+      if (!guia && grupo.some((c) => !c.imposto)) return;
+      const membros = grupo.map((c) => ({ chave: c.chave, t: c.t, r: c.r }));
+      const soma = somaDe(membros);
+      if (!bate(soma, grupo[0].check.valorBoleto)) return;
+      this.aplicarGuiaSomada(membros, grupo[0].check.valorBoleto, grupo[0]);
+      membros.forEach((m) => usados.add(m.chave));
+    });
   },
 
   /** Abre o mesmo resumo do título usado no Contas a Pagar (dados, anexos, forma de pagamento conferida). */
@@ -1556,6 +1701,80 @@ const GerarPagamentoApp = {
     this.paintTitulos();
   },
 
+  /* Empresa dona da conta de parceria. Sem isso, usa a empresa mais frequente nos títulos do lote. */
+  empresaDoGrupo(g) {
+    const direta = String((g && g.empresaConta) || "").trim();
+    if (direta) return direta;
+    const pesos = {};
+    (g && g.itens || []).forEach((it) => {
+      const id = String((it && it.companyId) || "").trim();
+      if (id) pesos[id] = (pesos[id] || 0) + 1;
+    });
+    return Object.keys(pesos).sort((a, b) => pesos[b] - pesos[a] || (Number(a) - Number(b)) || a.localeCompare(b))[0] || "";
+  },
+
+  nomeAbaEmpresa(id) {
+    const raw = String(id || "").trim();
+    if (!raw) return "Sem empresa";
+    const n = Number(raw);
+    if (Number.isFinite(n) && String(parseInt(raw, 10)) === raw.replace(/^0+(?=\d)/, "")) return "Empresa " + String(parseInt(raw, 10));
+    if (Number.isFinite(n) && String(n) === raw) return "Empresa " + n;
+    return "Empresa " + raw;
+  },
+
+  listaEmpresas(grupos) {
+    const mapa = new Map();
+    (grupos || []).forEach((g) => {
+      const id = this.empresaDoGrupo(g);
+      const atual = mapa.get(id) || { id: id, titulos: 0, contas: 0 };
+      atual.titulos += (g.itens || []).length;
+      atual.contas += 1;
+      mapa.set(id, atual);
+    });
+    return [...mapa.values()].sort((a, b) => {
+      if (!a.id) return 1;
+      if (!b.id) return -1;
+      const na = Number(a.id);
+      const nb = Number(b.id);
+      if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb;
+      return String(a.id).localeCompare(String(b.id), "pt-BR");
+    });
+  },
+
+  garantirAbaEmpresa(grupos) {
+    const lista = this.listaEmpresas(grupos);
+    if (!lista.length) {
+      this.state.abaEmpresa = "";
+      return "";
+    }
+    if (!lista.some((e) => e.id === this.state.abaEmpresa)) this.state.abaEmpresa = lista[0].id;
+    return this.state.abaEmpresa;
+  },
+
+  filtrarEmpresa(grupos, emp) {
+    if (!emp) return grupos || [];
+    return (grupos || []).filter((g) => this.empresaDoGrupo(g) === emp);
+  },
+
+  abasEmpresaHtml(grupos) {
+    const lista = this.listaEmpresas(grupos);
+    const ativa = this.garantirAbaEmpresa(grupos);
+    if (lista.length < 1) return "";
+    return `<div class="ml-tabs gp-abas-empresa" role="tablist">
+      ${lista.map((e) => {
+        const cad = (this.state.companies || []).find((c) => String(c.id) === String(e.id));
+        const fantasia = cad && (cad.tradeName || cad.name) ? " · " + (cad.tradeName || cad.name) : "";
+        const dica = this.nomeAbaEmpresa(e.id) + fantasia + " · " + e.contas + " conta(s) de parceria · " + e.titulos + " título(s)";
+        return `<button type="button" role="tab" aria-selected="${ativa === e.id}" class="ml-tab ${ativa === e.id ? "is-active" : ""}" title="${this.esc(dica)}" onclick="GerarPagamentoApp.setAbaEmpresa('${this.esc(e.id)}')"><i data-lucide="building-2"></i> ${this.esc(this.nomeAbaEmpresa(e.id))} <span class="ml-tab-count">${e.titulos}</span></button>`;
+      }).join("")}
+    </div>`;
+  },
+
+  setAbaEmpresa(id) {
+    this.state.abaEmpresa = String(id == null ? "" : id);
+    this.paintTitulos();
+  },
+
   /** Abre (ou fecha) os lotes pendentes de um dia anterior ao período buscado. */
   setDiaRetro(dia) {
     this.state.diaRetro = this.state.diaRetro === dia ? "" : String(dia || "");
@@ -1649,8 +1868,13 @@ const GerarPagamentoApp = {
     const grupos = this.gruposLote();
     const noPeriodo = (dia) => this.noPeriodoBuscado(dia);
     const aGerarTodos = grupos.map((g) => ({ ...g, itens: g.itens.filter((it) => !it.emLote) })).filter((g) => g.itens.length);
-    if (this.state.diaRetro) return this.recortarGrupos(aGerarTodos, (dia) => dia === this.state.diaRetro);
-    return this.recortarGrupos(aGerarTodos, noPeriodo);
+    const lista = this.state.diaRetro
+      ? this.recortarGrupos(aGerarTodos, (dia) => dia === this.state.diaRetro)
+      : this.recortarGrupos(aGerarTodos, noPeriodo);
+    const emp = String(this.state.abaEmpresa || "");
+    if (!emp) return lista;
+    const daEmp = this.filtrarEmpresa(lista, emp);
+    return daEmp.length ? daEmp : lista;
   },
 
   marcarLotes(marcar) {
@@ -2349,17 +2573,26 @@ const GerarPagamentoApp = {
     const emLote = this.recortarGrupos(
       grupos.map((g) => ({ ...g, key: g.key + "#lote", itens: g.itens.filter((it) => it.emLote) })).filter((g) => g.itens.length),
       noPeriodo);
-    const nAGerar = aGerar.reduce((t, g) => t + g.itens.length, 0);
-    const nEmLote = emLote.reduce((t, g) => t + g.itens.length, 0);
     const aba = s.abaLotes === "lote" ? "lote" : "gerar";
+    const fonteEmpresa = s.diaRetro && aba !== "lote" ? aGerarRetro : (aba === "lote" ? emLote : aGerar);
+    const abasEmpresa = this.abasEmpresaHtml(fonteEmpresa);
+    const emp = this.state.abaEmpresa;
+    const soEmpresa = (lista) => this.filtrarEmpresa(lista, emp);
+    const aGerarVis = soEmpresa(aGerar);
+    const emLoteVis = soEmpresa(emLote);
+    const retroVis = soEmpresa(aGerarRetro);
+    const nAGerar = aGerarVis.reduce((t, g) => t + g.itens.length, 0);
+    const nEmLote = emLoteVis.reduce((t, g) => t + g.itens.length, 0);
     const abas = `<div class="ml-tabs gp-abas-lote" role="tablist">
         <button type="button" role="tab" aria-selected="${aba === "gerar"}" class="ml-tab ${aba === "gerar" ? "is-active" : ""}" onclick="GerarPagamentoApp.setAbaLotes('gerar')"><i data-lucide="layers"></i> A gerar <span class="ml-tab-count">${nAGerar}</span></button>
         <button type="button" role="tab" aria-selected="${aba === "lote"}" class="ml-tab ${aba === "lote" ? "is-active" : ""}" onclick="GerarPagamentoApp.setAbaLotes('lote')"><i data-lucide="check-circle-2"></i> Já em lote <span class="ml-tab-count">${nEmLote}</span></button>
       </div>`;
+    const faixa = (extra) => `<div class="gp-faixa">${abasEmpresa}${abas}${extra || ""}</div>`;
     const vazio = (txt) => `<div style="padding:22px 20px;color:#64748b;font-size:0.85rem;">${txt}</div>`;
     const chaves = new Set(s.titulos.filter((r) => noPeriodo(String(r.vencimento || "").slice(0, 10))).map((r) => this.chaveTitulo(r.titulo, r.parcela)));
     const gerados = s.lotes
       .filter((l) => (l.itens || []).some((i) => chaves.has(this.chaveTitulo(i.titulo, i.parcela))))
+      .filter((l) => !emp || this.empresaDoGrupo({ empresaConta: l.empresaConta, itens: l.itens || [] }) === emp)
       .sort((a, b) => String(b.criadoEm).localeCompare(String(a.criadoEm)));
     const geradosHtml = gerados.length ? `<div class="gp-lote">
         <div class="gp-lote-h"><div><div class="gp-lote-conta">Lotes gerados com títulos deste período</div></div></div>
@@ -2383,7 +2616,7 @@ const GerarPagamentoApp = {
         </table>
       </div>` : "";
     if (aba === "lote") {
-      return `${abas}<p class="gp-nota">Lotes gerados e títulos deste período que já estão em lote no Integra ou no Sienge. Eles não entram em outro lote. Clique na linha para ver o resumo do título.</p>${geradosHtml}${emLote.length ? emLote.map(card).join("") : (gerados.length ? "" : vazio("Nenhum título deste período está em lote."))}`;
+      return `${faixa()}<p class="gp-nota">Lotes gerados e títulos deste período que já estão em lote no Integra ou no Sienge. Eles não entram em outro lote. Clique na linha para ver o resumo do título.</p>${geradosHtml}${emLoteVis.length ? emLoteVis.map(card).join("") : (gerados.length ? "" : vazio("Nenhum título desta empresa está em lote no período."))}`;
     }
     const alerta = this.retroAlertaHtml(diasRetro);
     const massa = `<div class="gp-massa">
@@ -2392,18 +2625,19 @@ const GerarPagamentoApp = {
       <button type="button" class="btn btn-sm btn-primary" onclick="GerarPagamentoApp.gerarLotesMarcados()">Gerar lotes marcados</button>
     </div>`;
     if (s.diaRetro) {
-      const d = diasRetro.find((x) => x.dia === s.diaRetro);
-      return `${abas}${alerta}${massa}
+      const titulosRetro = retroVis.reduce((t, g) => t + g.itens.length, 0);
+      const totalRetro = retroVis.reduce((t, g) => t + g.itens.reduce((s2, it) => s2 + this.valorPagar(it), 0), 0);
+      return `${faixa(massa)}${alerta}
         <div class="gp-retro-vendo">
-          <span><i data-lucide="history" style="width:15px;height:15px;"></i> Pendências de <strong>${this.dataBr(s.diaRetro)}</strong>, antes do período buscado · ${d ? d.titulos : 0} título(s) · ${this.money(d ? d.total : 0)}</span>
+          <span><i data-lucide="history" style="width:15px;height:15px;"></i> Pendências de <strong>${this.dataBr(s.diaRetro)}</strong>, antes do período buscado · ${titulosRetro} título(s) · ${this.money(totalRetro)}</span>
           <button type="button" class="btn btn-outline btn-sm" onclick="GerarPagamentoApp.setDiaRetro('')"><i data-lucide="arrow-left" style="width:14px;height:14px;"></i> Voltar ao período ${this.dataBr(s.startDate)}${s.endDate !== s.startDate ? " a " + this.dataBr(s.endDate) : ""}</button>
         </div>
-        ${aGerarRetro.map(card).join("")}`;
+        ${retroVis.map(card).join("")}`;
     }
     const vazioPeriodo = this.state.titulos.some((r) => noPeriodo(String(r.vencimento || "").slice(0, 10)) && !r.pago && r.aPagar > 0.009)
-      ? "Nenhum título a gerar lote no período: todos já estão em lote."
+      ? "Nenhum título a gerar lote nesta empresa no período: todos já estão em lote."
       : "Nenhum título em aberto com vencimento no período buscado.";
-    return `${this.conferenciaHtml()}${abas}${alerta}${aGerar.length ? massa + aGerar.map(card).join("") : vazio(vazioPeriodo)}`;
+    return `${this.conferenciaHtml()}${faixa(massa)}${alerta}${aGerarVis.length ? aGerarVis.map(card).join("") : vazio(vazioPeriodo)}`;
   },
 
   grupoStatus(r) {
@@ -3114,7 +3348,9 @@ const GerarPagamentoApp = {
           #gerar-pagamento-root .gp-acerto ul { margin:6px 0 0; padding-left:18px; }
           #gerar-pagamento-root .gp-acerto li { margin:4px 0; }
           #gerar-pagamento-root .gp-acerto-mini { color:#c2410c; font-weight:600; }
-          #gerar-pagamento-root .gp-abas-lote { margin:6px 20px 4px; }
+          #gerar-pagamento-root .gp-abas-lote { margin:0; }
+          #gerar-pagamento-root .gp-faixa { display:flex; flex-wrap:wrap; align-items:flex-end; gap:8px 16px; margin:8px 20px 4px; }
+          #gerar-pagamento-root .gp-abas-empresa { margin:0; flex:1 1 100%; }
           #gerar-pagamento-root .gp-conf { display:flex; gap:10px; align-items:flex-start; margin:12px 20px 4px; padding:12px 14px; border:1px solid #bbf7d0; border-left:4px solid #105436; border-radius:10px; background:#f0fdf4; color:#14532d; font-size:0.82rem; line-height:1.45; }
           #gerar-pagamento-root .gp-conf.is-erro { border-color:#fecaca; border-left-color:#b91c1c; background:#fef2f2; color:#7f1d1d; }
           #gerar-pagamento-root .gp-conf-spin { width:16px; height:16px; flex:none; margin-top:2px; border:2px solid rgba(16,84,54,0.2); border-top-color:#105436; border-radius:50%; animation:spin 0.8s linear infinite; }
@@ -3179,7 +3415,7 @@ const GerarPagamentoApp = {
           #gerar-pagamento-root .gp-baixa { display:inline-flex; align-items:center; gap:6px; font-size:0.75rem; font-weight:700; color:#334155; white-space:nowrap; }
           #gerar-pagamento-root .gp-baixa input { height:36px; border:1px solid #cbd5e1; border-radius:8px; padding:0 8px; font-size:0.82rem; color:#0f172a; background:#fff; }
           #gerar-pagamento-root .gp-lote-todos { display:inline-flex; align-items:center; gap:6px; font-size:0.8rem; color:#334155; cursor:pointer; }
-          #gerar-pagamento-root .gp-massa { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:0 0 12px; }
+          #gerar-pagamento-root .gp-massa { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:0 0 8px auto; }
           #gerar-pagamento-root .gp-lote-total { font-size:1.05rem; color:#0f172a; min-width:120px; text-align:right; }
           #gerar-pagamento-root .gp-lote .gp-titulos { min-width:1000px; }
           #gerar-pagamento-root .gp-robo-btn { height:36px; padding:0 14px; border:0; border-radius:8px; background:#fff; color:#105436; font-weight:800; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }

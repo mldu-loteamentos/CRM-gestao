@@ -1,5 +1,6 @@
 const FinanciamentoState = {
   view: "busca",
+  painel: "pesquisa",
   customer: null,
   contracts: [],
   selected: null,
@@ -47,9 +48,25 @@ const FinanciamentoApp = {
   render() {
     const root = document.getElementById("financiamento-root");
     if (!root) return;
-    root.innerHTML = FinanciamentoState.view === "fluxo" ? this.fluxoHtml() : this.buscaHtml();
+    const noFluxo = FinanciamentoState.view === "fluxo";
+    const painel = FinanciamentoState.painel === "esteira" ? "esteira" : "pesquisa";
+    root.innerHTML = noFluxo ? this.fluxoHtml() : (this.abasHtml(painel) + (painel === "esteira" ? this.esteiraHtml() : this.buscaHtml()));
     if (window.lucide) lucide.createIcons();
-    if (FinanciamentoState.view === "busca") this.restoreBuscaUi();
+    if (!noFluxo && painel === "pesquisa") this.restoreBuscaUi();
+  },
+
+  setPainel(id) {
+    FinanciamentoState.painel = id === "esteira" ? "esteira" : "pesquisa";
+    FinanciamentoState.view = "busca";
+    this.render();
+  },
+
+  abasHtml(painel) {
+    const n = this.listOpenProcesses().length;
+    return `<div class="ml-tabs fin-abas" role="tablist">
+      <button type="button" role="tab" aria-selected="${painel === "pesquisa"}" class="ml-tab ${painel === "pesquisa" ? "is-active" : ""}" onclick="FinanciamentoApp.setPainel('pesquisa')"><i data-lucide="search"></i> Pesquisar</button>
+      <button type="button" role="tab" aria-selected="${painel === "esteira"}" class="ml-tab ${painel === "esteira" ? "is-active" : ""}" onclick="FinanciamentoApp.setPainel('esteira')"><i data-lucide="columns-3"></i> Esteira <span class="ml-tab-count">${n}</span></button>
+    </div>`;
   },
 
   buscaHtml() {
@@ -695,6 +712,154 @@ const FinanciamentoApp = {
     this.render();
   },
 
+  hojeIso() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, "0");
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+  },
+
+  somarDias(iso, dias) {
+    const base = String(iso || "").slice(0, 10);
+    if (!base) return "";
+    if (typeof window.addDaysIso === "function") return window.addDaysIso(base, dias);
+    const d = new Date(base + "T12:00:00");
+    if (isNaN(d.getTime())) return "";
+    d.setDate(d.getDate() + (Number(dias) || 0));
+    const p = (n) => String(n).padStart(2, "0");
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+  },
+
+  diasEntre(de, ate) {
+    const a = new Date(String(de || "").slice(0, 10) + "T12:00:00");
+    const b = new Date(String(ate || "").slice(0, 10) + "T12:00:00");
+    if (isNaN(a.getTime()) || isNaN(b.getTime())) return 0;
+    return Math.round((b.getTime() - a.getTime()) / 86400000);
+  },
+
+  catalogoEtapas() {
+    if (typeof window.buildFinanciamentoStageCatalog === "function") return window.buildFinanciamentoStageCatalog();
+    return (window.EtapasFinanciamentoState || []).map((e, i) => ({
+      id: e.id, nome: e.nome, label: (i + 1) + ". " + e.nome, dias: parseInt(e.dias, 10) || 0, selectable: true, hasChildren: false
+    }));
+  },
+
+  /* O prazo corre a partir do dia em que o financiamento entrou na etapa atual. */
+  prazoEtapa(proc, etapa) {
+    const entrada = String((proc && proc.done && etapa && proc.done[etapa.id]) || (proc && (proc.updatedAt || proc.startedAt)) || "").slice(0, 10);
+    const dias = etapa ? (parseInt(etapa.dias, 10) || 0) : 0;
+    if (!etapa) return { entrada: entrada, limite: "", dias: 0, status: "sem-etapa", restantes: null };
+    if (!dias) return { entrada: entrada, limite: "", dias: 0, status: "sem-prazo", restantes: null };
+    if (!entrada) return { entrada: "", limite: "", dias: dias, status: "sem-prazo", restantes: null };
+    const limite = this.somarDias(entrada, dias);
+    const restantes = this.diasEntre(this.hojeIso(), limite);
+    return { entrada: entrada, limite: limite, dias: dias, status: restantes < 0 ? "atrasado" : "no-prazo", restantes: restantes };
+  },
+
+  esteiraHtml() {
+    const catalogo = this.catalogoEtapas();
+    const colunasEtapa = catalogo.filter((s) => s.selectable !== false && !s.hasChildren);
+    const abertos = this.listOpenProcesses();
+    const porId = {};
+    colunasEtapa.forEach((s) => { porId[String(s.id)] = []; });
+    const aguardando = [];
+    const fora = [];
+    abertos.forEach((row) => {
+      const id = row.proc && row.proc.currentStageId;
+      if (!id) aguardando.push(row);
+      else if (porId[String(id)]) porId[String(id)].push(row);
+      else fora.push(row);
+    });
+    const ordenar = (lista, etapa) => lista.slice().sort((a, b) => {
+      const pa = this.prazoEtapa(a.proc, etapa);
+      const pb = this.prazoEtapa(b.proc, etapa);
+      const peso = (p) => p.status === "atrasado" ? -10000 + (p.restantes || 0) : (p.status === "no-prazo" ? (p.restantes || 0) : 10000);
+      return peso(pa) - peso(pb);
+    });
+    const colunas = [{ id: "", nome: "Aguardando", label: "Aguardando", dias: 0, itens: aguardando }]
+      .concat(colunasEtapa.map((s) => ({ ...s, itens: ordenar(porId[String(s.id)] || [], s) })));
+    if (fora.length) colunas.push({ id: "__fora", nome: "Etapa removida", label: "Etapa removida", dias: 0, itens: fora });
+    const atrasados = abertos.filter((row) => {
+      const etapa = colunasEtapa.find((s) => String(s.id) === String(row.proc.currentStageId));
+      return etapa && this.prazoEtapa(row.proc, etapa).status === "atrasado";
+    }).length;
+    const noPrazo = abertos.filter((row) => {
+      const etapa = colunasEtapa.find((s) => String(s.id) === String(row.proc.currentStageId));
+      return etapa && this.prazoEtapa(row.proc, etapa).status === "no-prazo";
+    }).length;
+    const resumo = abertos.length
+      ? `<p class="fin-esteira-resumo">${abertos.length} em andamento · ${noPrazo} no prazo · ${atrasados} atrasado${atrasados === 1 ? "" : "s"} · ${aguardando.length} aguardando a primeira etapa.</p>`
+      : `<p class="fin-esteira-resumo">Nenhum financiamento em aberto. Pesquise um cliente e clique em Iniciar financiamento.</p>`;
+    const vazioEtapas = colunasEtapa.length ? "" : `<p class="fin-esteira-resumo">Nenhuma etapa cadastrada. Vá em Configurações → Etapas Financiamento.</p>`;
+    return `<style>
+      #financiamento-root .fin-abas { margin: 0 0 14px; }
+      #financiamento-root .fin-esteira-resumo { margin: 0 0 12px; color: #64748b; font-size: 0.84rem; }
+      #financiamento-root .fin-esteira { display: flex; gap: 12px; overflow-x: auto; align-items: flex-start; padding-bottom: 8px; }
+      #financiamento-root .fin-col { flex: 0 0 280px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; min-height: 180px; display: flex; flex-direction: column; max-height: calc(100vh - 220px); }
+      #financiamento-root .fin-col-h { padding: 12px 12px 8px; border-bottom: 1px solid #e2e8f0; }
+      #financiamento-root .fin-col-h strong { display: block; color: #0f172a; font-size: 0.84rem; line-height: 1.3; }
+      #financiamento-root .fin-col-h span { color: #64748b; font-size: 0.75rem; }
+      #financiamento-root .fin-col-lista { padding: 10px; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+      #financiamento-root .fin-card { text-align: left; width: 100%; border: 1px solid #e2e8f0; border-left: 4px solid #105436; background: #fff; border-radius: 10px; padding: 10px 12px; cursor: pointer; }
+      #financiamento-root .fin-card.is-atrasado { border-left-color: #b91c1c; }
+      #financiamento-root .fin-card.is-vence { border-left-color: #f37021; }
+      #financiamento-root .fin-card.is-sem { border-left-color: #94a3b8; }
+      #financiamento-root .fin-card-nome { font-weight: 800; color: #0f172a; font-size: 0.84rem; }
+      #financiamento-root .fin-card-meta { color: #64748b; font-size: 0.75rem; margin-top: 2px; }
+      #financiamento-root .fin-pill { display: inline-block; margin-top: 8px; font-size: 0.72rem; font-weight: 800; border-radius: 999px; padding: 2px 8px; }
+      #financiamento-root .fin-pill.is-ok { background: #dcfce7; color: #166534; }
+      #financiamento-root .fin-pill.is-atrasado { background: #fee2e2; color: #991b1b; }
+      #financiamento-root .fin-pill.is-vence { background: #ffedd5; color: #9a3412; }
+      #financiamento-root .fin-pill.is-sem { background: #f1f5f9; color: #475569; }
+      #financiamento-root .fin-col-vazia { color: #94a3b8; font-size: 0.78rem; padding: 8px 2px; }
+    </style>
+    ${resumo}${vazioEtapas}
+    <div class="fin-esteira">${colunas.map((col) => this.colunaHtml(col)).join("")}</div>`;
+  },
+
+  colunaHtml(col) {
+    const etapa = col.id && col.id !== "__fora" ? col : null;
+    const prazoTxt = !col.id ? "Entrada na esteira" : (col.id === "__fora" ? "Etapa que saiu do cadastro" : (etapa && etapa.dias ? (etapa.dias + (etapa.dias === 1 ? " dia" : " dias")) : "Sem prazo definido"));
+    const cards = (col.itens || []).map((row) => this.cardEsteiraHtml(row, etapa)).join("");
+    return `<section class="fin-col">
+      <header class="fin-col-h">
+        <strong>${this.esc(col.label || col.nome)}</strong>
+        <span>${(col.itens || []).length} · ${this.esc(prazoTxt)}</span>
+      </header>
+      <div class="fin-col-lista">${cards || '<div class="fin-col-vazia">Nenhum financiamento</div>'}</div>
+    </section>`;
+  },
+
+  cardEsteiraHtml(row, etapa) {
+    const proc = row.proc || {};
+    const prazo = this.prazoEtapa(proc, etapa);
+    let cls = "is-sem";
+    let pill = "Sem prazo";
+    if (prazo.status === "atrasado") {
+      cls = "is-atrasado";
+      const n = Math.abs(prazo.restantes || 0);
+      pill = "Atrasado " + n + (n === 1 ? " dia" : " dias");
+    } else if (prazo.status === "no-prazo") {
+      const n = prazo.restantes || 0;
+      if (n <= 2) {
+        cls = "is-vence";
+        pill = n === 0 ? "Vence hoje" : ("Vence em " + n + (n === 1 ? " dia" : " dias"));
+      } else {
+        cls = "is-ok";
+        pill = "No prazo · " + n + " dias";
+      }
+    }
+    const quando = prazo.entrada ? ("Entrou em " + this.fmtDate(prazo.entrada)) : "Sem data de entrada";
+    const limite = prazo.limite ? (" · prazo " + this.fmtDate(prazo.limite)) : "";
+    const safeKey = String(row.key).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    return `<button type="button" class="fin-card ${cls}" onclick="FinanciamentoApp.abrirAberto('${safeKey}')">
+      <div class="fin-card-nome">${this.esc(proc.customerName || proc.customerId || "—")}</div>
+      <div class="fin-card-meta">Contrato ${this.esc(proc.contractNumber || proc.contractId || "—")} · Título ${this.esc(proc.titulo || "—")}</div>
+      <div class="fin-card-meta">${this.esc(this.formatUnidade(proc.unit || "—"))}</div>
+      <div class="fin-card-meta">${this.esc(quando + limite)}</div>
+      <span class="fin-pill ${cls}">${this.esc(pill)}</span>
+    </button>`;
+  },
+
   marcarEtapa(stageId) {
     const proc = FinanciamentoState.process;
     if (!proc) return;
@@ -719,7 +884,7 @@ const FinanciamentoApp = {
     return `
       <div style="margin-bottom:16px;">
         <button type="button" class="btn btn-outline" onclick="FinanciamentoApp.voltarBusca()">
-          <i data-lucide="arrow-left" style="width:14px;height:14px;"></i> Voltar à pesquisa
+          <i data-lucide="arrow-left" style="width:14px;height:14px;"></i> ${FinanciamentoState.painel === "esteira" ? "Voltar à esteira" : "Voltar à pesquisa"}
         </button>
       </div>
       <div class="crm-card" style="margin-bottom:16px;">

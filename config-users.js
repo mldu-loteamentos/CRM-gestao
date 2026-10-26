@@ -454,6 +454,12 @@ const ConfigUsersApp = {
       ]
     },
     {
+      name: "Contábil", icon: "book-open", key: "mod_contabil",
+      submodules: [{ name: "Contábil", key: "sub_contabil_geral", actions: [
+        { id: "demonstracoes", label: "DRE e Balanço", permBase: "sub_contabil_geral_demonstracoes" }
+      ] }]
+    },
+    {
       name: "Jurídico", icon: "scale", key: "mod_juridico",
       submodules: [{ name: "Jurídico", key: "sub_jur_geral", actions: [
         { id: "cobranca_sub_judice", label: "Cobrança Sub judice", permBase: "sub_fin_cr_sub_judice" },
