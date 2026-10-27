@@ -3,7 +3,7 @@
  * + Configurações: mínimo de dias para lançar o documento a pagar.
  */
 const COMPRAS_PRAZO_LS = "crm_compras_prazo_lancamento_v1";
-const COMPRAS_PRAZO_DEFAULT = { 0: 9, 1: 8, 2: 8, 3: 8, 4: 8, 5: 10, 6: 10 };
+const COMPRAS_PRAZO_DEFAULT = { 0: 9, 1: 8, 2: 8, 3: 8, 4: 8, 5: 10, 6: 10, semDe: 1, semAte: 7 };
 
 function parseComprasPrazo(raw) {
   let obj = raw;
@@ -16,6 +16,13 @@ function parseComprasPrazo(raw) {
     const n = Number(obj[i] != null ? obj[i] : COMPRAS_PRAZO_DEFAULT[i]);
     days[i] = Number.isFinite(n) && n >= 0 ? Math.round(n) : COMPRAS_PRAZO_DEFAULT[i];
   }
+  const clampDia = (v, fb) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return fb;
+    return Math.max(0, Math.min(31, Math.round(n)));
+  };
+  days.semDe = clampDia(obj.semDe != null ? obj.semDe : COMPRAS_PRAZO_DEFAULT.semDe, COMPRAS_PRAZO_DEFAULT.semDe);
+  days.semAte = clampDia(obj.semAte != null ? obj.semAte : COMPRAS_PRAZO_DEFAULT.semAte, COMPRAS_PRAZO_DEFAULT.semAte);
   days.updatedAt = Number(obj.updatedAt || 0);
   return days;
 }
@@ -163,7 +170,48 @@ const ComprasPrevisoesApp = {
   },
 
   minLaunchDue() {
-    return this.addDaysIso(this.isoToday(), this.minDaysToday());
+    return this.ajustarVencimentoLancavel(this.addDaysIso(this.isoToday(), this.minDaysToday()));
+  },
+
+  janelaSemLancamento() {
+    const prazo = this.loadPrazo();
+    const de = Number(prazo.semDe) || 0;
+    const ate = Number(prazo.semAte) || 0;
+    if (!(de >= 1 && ate >= de && ate <= 31)) return null;
+    return { de: de, ate: ate };
+  },
+
+  ajustarVencimentoLancavel(iso) {
+    const s = this.isoDate(iso);
+    const janela = this.janelaSemLancamento();
+    if (!s || !janela) return s;
+    const day = Number(s.slice(8, 10));
+    if (day < janela.de || day > janela.ate) return s;
+    const y = Number(s.slice(0, 4));
+    const m = Number(s.slice(5, 7));
+    const proximo = janela.ate + 1;
+    const ultimo = new Date(y, m, 0).getDate();
+    if (proximo <= ultimo) {
+      return y + "-" + String(m).padStart(2, "0") + "-" + String(proximo).padStart(2, "0");
+    }
+    const ny = m === 12 ? y + 1 : y;
+    const nm = m === 12 ? 1 : m + 1;
+    return ny + "-" + String(nm).padStart(2, "0") + "-01";
+  },
+
+  prazoHintHtml() {
+    const minDays = this.minDaysToday();
+    const bruto = this.addDaysIso(this.isoToday(), minDays);
+    const minDue = this.ajustarVencimentoLancavel(bruto);
+    const janela = this.janelaSemLancamento();
+    const data = this.esc(this.fmtDate(minDue));
+    const trava = janela
+      ? " De <strong>" + String(janela.de).padStart(2, "0") + " a " + String(janela.ate).padStart(2, "0") + "</strong> de cada mês não se gera pagamento."
+      : "";
+    const pulou = janela && minDue && bruto && minDue !== bruto
+      ? " O mínimo de <strong>" + minDays + " dias</strong> cairia em " + this.esc(this.fmtDate(bruto)) + ", dentro dessa trava, então o primeiro vencimento possível é <strong>" + data + "</strong>."
+      : " O primeiro vencimento possível é <strong>" + data + "</strong> (mínimo de <strong>" + minDays + " dias</strong>).";
+    return "Lançando a nota hoje," + pulou + trava + " Títulos abaixo desse prazo ficam em <strong>Prazo insuficiente para lançar</strong>.";
   },
 
   paymentDateOf(bill, pay, bm) {
@@ -2665,8 +2713,6 @@ const ComprasPrevisoesApp = {
     const refineLocked = !s.consulted || busy;
     this.syncDepartmentSelection();
     const deptLocked = this.departmentFilterLocked();
-    const minDays = this.minDaysToday();
-    const minDue = this.minLaunchDue();
     root.innerHTML = `
       <div class="cprev-page">
         <div class="search-filter-panel cprev-toolbar">
@@ -2717,7 +2763,7 @@ const ComprasPrevisoesApp = {
               </div>
             </div>
           </div>
-          <p class="cprev-hint">Lançando a nota hoje, o vencimento precisa de no mínimo <strong>${minDays} dias</strong> (até ${this.esc(this.fmtDate(minDue))}). Títulos abaixo desse prazo ficam em <strong>Prazo insuficiente para lançar</strong>.</p>
+          <p class="cprev-hint">${this.prazoHintHtml()}</p>
           ${this.departmentScopeNote() ? `<p class="cprev-hint">${this.esc(this.departmentScopeNote())}</p>` : ""}
         </div>
         <div id="cprev-kpis" class="ccom-kpis cprev-kpis"></div>
@@ -2733,6 +2779,13 @@ const ComprasPrevisoesApp = {
     const draft = parseComprasPrazo(this.state.prazoDraft || this.loadPrazo());
     const n = Number(val);
     draft[day] = Number.isFinite(n) && n >= 0 ? Math.round(n) : 0;
+    this.state.prazoDraft = draft;
+  },
+
+  onBloqueioField(key, val) {
+    const draft = parseComprasPrazo(this.state.prazoDraft || this.loadPrazo());
+    const n = Number(val);
+    draft[key] = Number.isFinite(n) ? Math.max(0, Math.min(31, Math.round(n))) : 0;
     this.state.prazoDraft = draft;
   },
 
@@ -2766,7 +2819,18 @@ const ComprasPrevisoesApp = {
         <div class="crm-card cprev-config-card">
           <div class="cprev-config-help">
             <i data-lucide="info"></i>
-            <p>Ao lançar a nota hoje, o documento a pagar precisa respeitar o mínimo de dias do <strong>dia da semana em que o documento entra</strong>. Previsões cujo vencimento já não cabe nesse prazo aparecem no follow-up em <strong>Prazo insuficiente para lançar</strong>.</p>
+            <p>Ao lançar a nota hoje, o documento a pagar precisa respeitar o mínimo de dias do <strong>dia da semana em que o documento entra</strong>. Também não se gera pagamento nos dias do mês configurados abaixo. O follow-up mostra o primeiro vencimento que passa nas duas travas. Previsões anteriores ficam em <strong>Prazo insuficiente para lançar</strong>.</p>
+          </div>
+          <div class="cprev-bloqueio">
+            <span>Não gerar pagamento do dia</span>
+            <input type="number" min="0" max="31" step="1" value="${this.esc(prazo.semDe)}"
+              aria-label="Primeiro dia do mês sem geração de pagamento"
+              onchange="ComprasPrevisoesApp.onBloqueioField('semDe', this.value)">
+            <span>ao dia</span>
+            <input type="number" min="0" max="31" step="1" value="${this.esc(prazo.semAte)}"
+              aria-label="Último dia do mês sem geração de pagamento"
+              onchange="ComprasPrevisoesApp.onBloqueioField('semAte', this.value)">
+            <span>de cada mês. Dia 0 desliga esta trava.</span>
           </div>
           <div class="cprev-prazo-list">
             <div class="cprev-prazo-head">
