@@ -110,6 +110,36 @@ const ContabilApp = {
     return this.state.companies.filter((c) => ids.includes(String(c.id)));
   },
 
+  /* A linha da tela é de uma empresa. O Excel passa a empresa da aba. */
+  empresaDreAtual() {
+    if (this._empresaDre) return this._empresaDre;
+    const escolhidas = this.empresasEscolhidas();
+    return escolhidas.length === 1 ? escolhidas[0] : null;
+  },
+
+  /* Participação da Moura Leite (empresa 1) na investida, pelo organograma. A controladora não tem linha. */
+  pctEquivalenciaDa(emp) {
+    const id = String(emp && emp.id || "");
+    if (!id || id === "1") return 0;
+    const eq = window.ContabilEquiv;
+    if (!eq || typeof eq.pctDoPasso !== "function") return 0;
+    const passo = (eq.CADEIA || []).find((p) => String(p.origem) === id && String(p.destino) === "1");
+    const doGrafo = Number(eq.pctDoPasso({
+      origem: id,
+      destino: "1",
+      pct: 0,
+      apelidoOrigem: passo ? passo.apelidoOrigem : "",
+      apelidoDestino: "MOURA LEITE"
+    }));
+    if (doGrafo > 0) return doGrafo;
+    return passo && Number(passo.pct) > 0 ? Number(passo.pct) : 0;
+  },
+
+  rotuloEquivalencia(pct) {
+    const txt = Number(pct).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    return txt + "% Eq. MLDU";
+  },
+
   setMes(qual, valor) {
     const v = String(valor || "").slice(0, 7);
     this.state.de = v;
@@ -595,7 +625,8 @@ const ContabilApp = {
     const imposto = this.somarItens(baldes.imposto);
     const demais = this.somarItens(baldes.demais);
     const liquido = Math.round((lair + imposto + demais) * 100) / 100;
-    const metade = Math.round(liquido * 50) / 100;
+    const pctEq = this.pctEquivalenciaDa(this.empresaDreAtual());
+    const metade = pctEq > 0 ? Math.round(liquido * pctEq) / 100 : 0;
     return {
       baldes: baldes,
       bruta: bruta, deducao: deducao, liquida: liquida, custo: custo, bruto: bruto,
@@ -658,11 +689,13 @@ const ContabilApp = {
     const imposto = soma("imposto");
     const demais = soma("demais");
     const liquido = Math.round((lair + imposto + demais) * 100) / 100;
+    const pctEq = this.pctEquivalenciaDa(this.empresaDreAtual());
     return {
       bruta: bruta, deducao: deducao, liquida: liquida, custo: custo, bruto: bruto,
       vendas: vendas, dga: dga, despesas: despesas, antes: antes, equiv: equiv,
       recFin: recFin, despFin: despFin, financeiro: financeiro, lair: lair,
-      imposto: imposto, demais: demais, liquido: liquido, metade: Math.round(liquido * 50) / 100
+      imposto: imposto, demais: demais, liquido: liquido,
+      metade: pctEq > 0 ? Math.round(liquido * pctEq) / 100 : 0
     };
   },
 
@@ -900,7 +933,9 @@ const ContabilApp = {
       demais.length ? linha(0, "Demais contas de resultado", "demais", { id: "dre-demais", cls: "orc-dfc-n1" }) : "",
       demais.length ? contasHtml(demais, 1, "dre-demais") : "",
       linha(0, "Lucro líquido (prejuízo) do exercício", "liquido", { cls: "orc-dfc-fcf" }),
-      linha(0, "50% Eq. MLDU", "metade", { cls: "orc-dfc-formula" })
+      (this.pctEquivalenciaDa(this.empresaDreAtual()) > 0
+        ? linha(0, this.rotuloEquivalencia(this.pctEquivalenciaDa(this.empresaDreAtual())), "metade", { cls: "orc-dfc-formula" })
+        : "")
     ].join("");
     this._modeloTela = { cols: cols, linhas: modeloLinhas };
     const cmp = this.state.dreVisao === "comp" ? " orc-dfc-cmp" : "";
@@ -943,7 +978,9 @@ const ContabilApp = {
       b.demais.length ? this.dreLinha(0, "Demais contas de resultado", d.demais, { id: "dre-demais", cls: "orc-dfc-n1" }) : "",
       b.demais.length ? this.dreContas(b.demais, 1, "dre-demais") : "",
       this.dreLinha(0, "Lucro líquido (prejuízo) do exercício", d.liquido, { cls: "orc-dfc-fcf" }),
-      this.dreLinha(0, "50% Eq. MLDU", d.metade, { cls: "orc-dfc-formula" })
+      (this.pctEquivalenciaDa(this.empresaDreAtual()) > 0
+        ? this.dreLinha(0, this.rotuloEquivalencia(this.pctEquivalenciaDa(this.empresaDreAtual())), d.metade, { cls: "orc-dfc-formula" })
+        : "")
     ].join("");
     return `<div class="orc-dfc-scroll"><table class="orc-dfc-table ctb-dre">
       <thead><tr><th>Conta</th><th>Valor</th></tr></thead>
@@ -1169,14 +1206,17 @@ const ContabilApp = {
     this.render();
   },
 
-  modeloDre(serie) {
+  modeloDre(serie, emp) {
     const guardado = this.state.serie;
+    const empGuardado = this._empresaDre;
     this.state.serie = serie || guardado;
+    if (emp) this._empresaDre = emp;
     try {
       this.htmlDreSerie();
       return this._modeloTela || { cols: [], linhas: [] };
     } finally {
       this.state.serie = guardado;
+      this._empresaDre = empGuardado;
     }
   },
 
@@ -1337,7 +1377,7 @@ const ContabilApp = {
       alvos.forEach((emp) => {
         const bloco = por[String(emp.id)] || por[emp.id];
         const serie = bloco && bloco.porMes ? this.montarSerie(janela, bloco.porMes) : s.serie;
-        const modelo = this.modeloDre(serie);
+        const modelo = this.modeloDre(serie, emp);
         const ws = wb.addWorksheet(this.nomeAbaExcel(emp, used));
         this.preencherAbaDre(ws, inv, imgId, emp, modelo);
       });

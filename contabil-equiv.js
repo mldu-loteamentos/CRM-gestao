@@ -750,7 +750,7 @@ const ContabilEquiv = {
     if (!linhas.length && pulos.length) return { erro: "Esta competência já foi lançada:\n" + pulos.join("\n") };
     if (!linhas.length) return { erro: "Nesta competência o resultado dessas empresas não deu lucro nem prejuízo." };
     const texto = [
-      "Vou lançar a equivalência de " + rotulo + ", em reais. O percentual é o do organograma. A linha 50% Eq. MLDU não entra.",
+      "Vou lançar a equivalência de " + rotulo + ", em reais. O percentual é o do organograma. A linha de participação da controladora no DRE não entra neste lançamento.",
       ""
     ].concat(linhas.map((l) => l.rotulo + " · resultado " + app.money(l.resultado) + " · " + l.tipo + " " + app.money(l.amount) + "\nNa empresa " + l.empresa + " · débito " + l.debitAccountId + " · crédito " + l.creditAccountId + " · " + app.dataBr(l.date) + " · partida " + l.eventId));
     if (semResultado.length) texto.push("", "Não li o resultado, então não lanço:", semResultado.join("\n"));
