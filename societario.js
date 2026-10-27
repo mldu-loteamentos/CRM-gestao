@@ -820,15 +820,6 @@ const SocietarioApp = {
     return [{ id, nome: this.nomeCentro(id) }];
   },
 
-  empreendedoresDe(p) {
-    const app = window.ParametrizacaoParceiroApp;
-    if (!app || typeof app.isMista !== "function" || !app.isMista(p)) return [];
-    const fold = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
-    const parceiro = fold(p.partnerName);
-    return (typeof app.sociosPorPapel === "function" ? app.sociosPorPapel(p, "empreendedor") : [])
-      .filter(s => fold(s.name) && fold(s.name) !== parceiro);
-  },
-
   sociosDe(p) {
     const app = window.ParametrizacaoParceiroApp;
     if (!app || typeof app.isSociedade !== "function" || !app.isSociedade(p)) return [];
@@ -854,41 +845,94 @@ const SocietarioApp = {
     if (!pessoas.length) return "";
     const linhas = pessoas.map(s => {
       const pct = s.sharePct === "" || s.sharePct == null ? "—" : this.pctCurto(s.sharePct);
-      return `<tr><td>${this.esc(s.name || s.id)}</td><td>${this.esc(this.centroDaPessoa(p, s))}</td><td>${this.esc(pct)}</td></tr>`;
+      const cc = this.centroDaPessoa(p, s);
+      const cel = cc && cc !== "—" ? cc : (s.name || s.id || "—");
+      return `<tr><td>${this.esc(cel)}</td><td>${this.esc(pct)}</td></tr>`;
     }).join("");
-    return `<section class="soc-lista"><h4>${this.esc(titulo)}</h4><table><thead><tr><th>Nome</th><th>Centro de custo</th><th>%</th></tr></thead><tbody>${linhas}</tbody></table></section>`;
+    return `<section class="soc-lista"><h4>${this.esc(titulo)}</h4><table><thead><tr><th>Centro de custo</th><th>%</th></tr></thead><tbody>${linhas}</tbody></table></section>`;
   },
 
   listasDaParceria(p) {
     const app = window.ParametrizacaoParceiroApp;
     if (app && app.isSociedade && app.isSociedade(p)) return this.pessoasLista(p, "Sócios", this.sociosDe(p));
-    if (!app || !app.isMista || !app.isMista(p)) return "";
-    const fold = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
-    const terr = typeof app.sociosPorPapel === "function" ? app.sociosPorPapel(p, "terrenista").slice() : [];
-    const ccs = [];
+    return "";
+  },
+
+  sociosEmpreendedores(p) {
+    const app = window.ParametrizacaoParceiroApp;
+    let lista = app && typeof app.sociosPorPapel === "function" ? app.sociosPorPapel(p, "empreendedor") : [];
+    if (!lista.length && app && typeof app.ehAracari === "function" && app.ehAracari(p) && Array.isArray(app.ARACARI_EMPREENDEDORES)) {
+      lista = app.ARACARI_EMPREENDEDORES;
+    }
+    return lista.filter(s => s && (s.ccTitulo || s.name)).slice().sort((a, b) => (Number(b.sharePct) || 0) - (Number(a.sharePct) || 0) || String(a.ccTitulo || "").localeCompare(String(b.ccTitulo || ""), "pt-BR", { numeric: true }));
+  },
+
+  /* Centro do parceiro terrenista. Na Araçari é o 14202. Nas outras mistas, o centro marcado como terrenista ou o par do parceiro na obra. */
+  centrosDoParceiro(p) {
+    const app = window.ParametrizacaoParceiroApp;
+    const aracari = app && typeof app.ehAracari === "function" && app.ehAracari(p);
+    const dosSocios = new Set(this.sociosEmpreendedores(p).map(s => String(s.ccTitulo || "").replace(/\D/g, "")).filter(Boolean));
+    const vistos = new Set();
+    const out = [];
+    const add = (id, nome) => {
+      const dig = String(id || "").replace(/\D/g, "");
+      if (!dig || vistos.has(dig) || dosSocios.has(dig)) return;
+      if (aracari && (dig === "14201" || dig === "70600")) return;
+      vistos.add(dig);
+      out.push({ id: dig, nome: this.nomeCentro(dig, nome) });
+    };
+    (p.socios || []).forEach(s => {
+      if (!s || !s.ccTitulo || !app || typeof app.papelSocio !== "function" || app.papelSocio(s) !== "terrenista") return;
+      add(s.ccTitulo, s.ccTituloNome);
+    });
     (p.obras || []).forEach(o => {
-      (o.costCenters || []).forEach(c => {
-        if (!c || !c.id || String(c.papel) !== "terrenista") return;
-        if (ccs.indexOf(String(c.id)) < 0) ccs.push(String(c.id));
+      const todos = (o.costCenters || []).filter(c => c && c.id);
+      todos.forEach(c => {
+        if (String(c.papel || "") === "terrenista") add(c.id, c.name);
+        else if (!aracari && this.ehCcParceria(c, todos)) add(c.id, c.name);
       });
     });
-    if (p.partnerName && !terr.some(s => fold(s.name) === fold(p.partnerName))) {
-      const pct = (p.obras || []).map(o => o.defaultPartnerShare).find(n => Number(n) > 0);
-      terr.unshift({ name: p.partnerName, ccTitulo: ccs.join(", ") || "—", sharePct: pct != null ? pct : "" });
-    }
-    return this.pessoasLista(p, "Terrenistas", terr) + this.pessoasLista(p, "Empreendedores", this.empreendedoresDe(p));
+    if (aracari) add("14202", "");
+    return out.sort((a, b) => Number(a.id) - Number(b.id));
+  },
+
+  folhaCc(c) {
+    const nome = c.nome ? `<small>${this.esc(c.nome)}</small>` : "";
+    return `<li>${this.caixaHtml(c.id, nome, "is-cc")}</li>`;
+  },
+
+  /* Mista: empreendedor com a fatia restante e terrenista com o percentual do parceiro. Abaixo, o centro de cada sócio e o do parceiro. */
+  ramosMistos(p) {
+    const app = window.ParametrizacaoParceiroApp;
+    const terr = app && typeof app.pctTerrenista === "function" ? Number(app.pctTerrenista(p)) || 0 : 0;
+    const emp = Math.round((100 - terr) * 1000) / 1000;
+    const socios = this.sociosEmpreendedores(p).map(s => {
+      const id = String(s.ccTitulo || "").replace(/\D/g, "");
+      if (id) return this.folhaCc({ id, nome: this.nomeCentro(id, s.ccTituloNome || s.name) });
+      return `<li>${this.caixaHtml(s.name || "Sócio", "", "is-cc")}</li>`;
+    });
+    const parceiro = this.centrosDoParceiro(p).map(c => this.folhaCc(c));
+    const ramo = (titulo, pct, cls, filhos) => {
+      const ul = filhos.length ? `<ul>${filhos.join("")}</ul>` : "";
+      const selo = pct > 0 ? `<span class="soc-tree-pct">${this.esc(this.pctCurto(pct))}</span>` : "";
+      return `<li>${selo}${this.caixaHtml(titulo, "", cls)}${ul}</li>`;
+    };
+    return `<ul>${ramo("Empreendedor", emp, "is-pj", socios)}${ramo("Terrenista", terr, "is-terr", parceiro)}</ul>`;
   },
 
   colunaParceria(p) {
     const app = window.ParametrizacaoParceiroApp;
     const sociedade = app && app.isSociedade && app.isSociedade(p);
+    const mista = app && app.isMista && app.isMista(p);
     const pj = this.ehPessoaJuridica(p.partnerName, p.creditor && p.creditor.cpfCnpj);
-    const tipo = sociedade ? "Sociedade" : "Parceria";
+    const tipo = mista ? "Mista" : (sociedade ? "Sociedade" : "Parceria");
     const obras = (p.obras || []).slice().sort((a, b) => String(a.code).localeCompare(String(b.code), "pt-BR", { numeric: true }));
-    const caixas = obras.flatMap(o => this.caixasDaObra(o).map(c => ({ ...c, pct: sociedade || !(Number(o.defaultPartnerShare) > 0) ? "" : this.pctCurto(o.defaultPartnerShare) })));
-    const kids = caixas.length
-      ? `<ul>${caixas.map(c => `<li><span class="soc-tree-pct">${this.esc(c.pct)}</span>${this.caixaHtml(c.id, c.nome ? `<small>${this.esc(c.nome)}</small>` : "", "is-cc")}</li>`).join("")}</ul>`
-      : "";
+    const caixas = mista ? [] : obras.flatMap(o => this.caixasDaObra(o).map(c => ({ ...c, pct: sociedade || !(Number(o.defaultPartnerShare) > 0) ? "" : this.pctCurto(o.defaultPartnerShare) })));
+    const kids = mista
+      ? this.ramosMistos(p)
+      : (caixas.length
+        ? `<ul>${caixas.map(c => `<li><span class="soc-tree-pct">${this.esc(c.pct)}</span>${this.caixaHtml(c.id, c.nome ? `<small>${this.esc(c.nome)}</small>` : "", "is-cc")}</li>`).join("")}</ul>`
+        : "");
     return `<li><div class="soc-tree-lado"><div class="soc-tree-lado-titulo">${tipo}</div>${this.caixaHtml(p.partnerName || "Sem nome", "", pj ? "is-pj" : "is-pf")}${kids}${this.listasDaParceria(p)}</div></li>`;
   },
 
@@ -907,7 +951,7 @@ const SocietarioApp = {
     const itens = atual.itens.slice().sort((a, b) => String(a.partnerName || "").localeCompare(String(b.partnerName || ""), "pt-BR"));
     return `<div class="soc-page">
       <div class="soc-toolbar">
-        <p class="soc-help">A caixa de cima é a empresa. Embaixo, cada parceria ou sociedade e os empreendimentos com o percentual. Sócios, terrenistas e empreendedores ficam em listas, com o centro de custo e o percentual.</p>
+        <p class="soc-help">A caixa de cima é a empresa, no centro da estrutura. Embaixo, cada parceria ou sociedade e os centros de custo com o percentual. Na mista, o empreendedor e o terrenista ficam separados, cada um com o seu centro de custo. Arraste o quadro para o lado para ver quem fica à direita.</p>
       </div>
       <div class="ml-tabs soc-emp-tabs" role="tablist">${abas}</div>
       <div class="soc-stage">
@@ -921,12 +965,49 @@ const SocietarioApp = {
     </div>`;
   },
 
+  bindParceriaPan() {
+    const wrap = document.querySelector(".soc-shell.is-parceria .soc-canvas-wrap");
+    if (!wrap) return;
+    let drag = null;
+    wrap.addEventListener("pointerdown", (ev) => {
+      if (ev.button !== 0) return;
+      if (ev.target.closest && ev.target.closest("button, a, input, textarea, select")) return;
+      drag = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, l: wrap.scrollLeft, t: wrap.scrollTop, moved: false };
+      wrap.setPointerCapture(ev.pointerId);
+    });
+    wrap.addEventListener("pointermove", (ev) => {
+      if (!drag || ev.pointerId !== drag.id) return;
+      const dx = ev.clientX - drag.x;
+      const dy = ev.clientY - drag.y;
+      if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 4) return;
+      drag.moved = true;
+      wrap.classList.add("is-panning");
+      wrap.scrollLeft = drag.l - dx;
+      wrap.scrollTop = drag.t - dy;
+    });
+    const solta = (ev) => {
+      if (!drag || (ev && ev.pointerId !== drag.id)) return;
+      drag = null;
+      wrap.classList.remove("is-panning");
+    };
+    wrap.addEventListener("pointerup", solta);
+    wrap.addEventListener("pointercancel", solta);
+    requestAnimationFrame(() => {
+      const company = wrap.querySelector(".soc-tree-node.is-company");
+      if (!company || wrap.scrollWidth - wrap.clientWidth <= 1) return;
+      const cr = company.getBoundingClientRect();
+      const wr = wrap.getBoundingClientRect();
+      wrap.scrollLeft += (cr.left + cr.width / 2) - (wr.left + wr.width / 2);
+    });
+  },
+
   render() {
     const root = document.getElementById("estrutura-societaria-root");
     if (!root) return;
     if (this.aba === "parceria") {
       root.innerHTML = `<div class="soc-shell is-parceria">${this.abasHtml()}${this.parceriaHtml()}</div>`;
       if (window.lucide) lucide.createIcons();
+      this.bindParceriaPan();
       return;
     }
     this.ensurePositions();

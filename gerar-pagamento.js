@@ -92,6 +92,18 @@ const GerarPagamentoApp = {
     return this.iso(d);
   },
 
+  /** Dia seguinte, se for dia útil. Na sexta, sábado, domingo e segunda. No fim de semana, até a segunda. */
+  periodoPadrao(base) {
+    const d = base ? new Date(String(base).slice(0, 10) + "T12:00:00") : new Date();
+    const hoje = this.iso(d);
+    const dow = d.getDay();
+    if (dow === 5) return { start: this.shiftIso(hoje, 1), end: this.shiftIso(hoje, 3) };
+    if (dow === 6) return { start: hoje, end: this.shiftIso(hoje, 2) };
+    if (dow === 0) return { start: hoje, end: this.shiftIso(hoje, 1) };
+    const amanha = this.shiftIso(hoje, 1);
+    return { start: amanha, end: amanha };
+  },
+
   /** Sábado e domingo entram no lote da segunda: a baixa no banco é no dia útil. */
   diaDoLote(iso) {
     const s = String(iso || "").slice(0, 10);
@@ -453,11 +465,9 @@ const GerarPagamentoApp = {
   },
 
   init() {
-    if (!this.state.startDate || !this.state.endDate) {
-      const d = new Date();
-      this.state.startDate = this.iso(new Date(d.getFullYear(), d.getMonth(), 1));
-      this.state.endDate = this.iso(new Date(d.getFullYear(), d.getMonth() + 1, 0));
-    }
+    const padrao = this.periodoPadrao();
+    this.state.startDate = padrao.start;
+    this.state.endDate = padrao.end;
     const aplicarConferencia = () => {
       if (this.state.titulos && this.state.titulos.length) this.paintTitulos();
     };
@@ -1407,24 +1417,27 @@ const GerarPagamentoApp = {
   reconciliarGuiasUnificadas() {
     const s = this.state;
     const candidatos = [];
+    const marcados = [];
     Object.keys(s.pagInfo || {}).forEach((chave) => {
       const info = s.pagInfo[chave];
       const t = this.resumoTitulo(chave);
       if (!info || !info.check || !t) return;
       const r = t.rows[0];
       const notas = (info.payment && info.payment.data && info.payment.data.notes) || "";
-      const guiaNome = /guia\s*unificada/i.test(info.tipoSienge || "") || /guia\s*unificada/i.test(String(notas));
+      const guiaNome = /guia\s*unificada/i.test(info.tipoSienge || "") || /guia\s*unificada/i.test(String(notas)) || /guia\s*unificada/i.test(info.check.forma || "");
       const imposto = this.tipoImpostoGuia(r);
       if (guiaNome && info.check.forma === "Boleto de concessionária") {
         info.check.forma = "Guia unificada";
         if (/^Boleto de concessionária/.test(info.check.resumo || "")) info.check.resumo = info.check.resumo.replace(/^Boleto de concessionária/, "Guia unificada");
       }
-      if (!(guiaNome || imposto) || !(info.check.valorBoleto > 0)) return;
-      candidatos.push({
+      const item = {
         chave, info, t, r, check: info.check, guiaNome, imposto,
         codigo: info.check.codigo || "",
         idsNotas: this.idsGuiaNasNotas(info.payment)
-      });
+      };
+      if (guiaNome) marcados.push(item);
+      if (!(guiaNome || imposto) || !(info.check.valorBoleto > 0)) return;
+      candidatos.push(item);
     });
     const usados = new Set();
     const somaDe = (lista) => Math.round(lista.reduce((t, m) => t + (Number(m.t.aPagar) || 0), 0) * 100) / 100;
@@ -1449,8 +1462,7 @@ const GerarPagamentoApp = {
     const porCodigo = {};
     candidatos.forEach((c) => {
       if (usados.has(c.chave) || c.codigo.length < 44) return;
-      const k = [c.codigo, c.r.companyId || "", c.r.credorId || "", String(c.r.vencimento || "").slice(0, 10)].join("|");
-      (porCodigo[k] = porCodigo[k] || []).push(c);
+      (porCodigo[c.codigo] = porCodigo[c.codigo] || []).push(c);
     });
     Object.keys(porCodigo).forEach((k) => {
       const grupo = porCodigo[k].filter((c) => !usados.has(c.chave));
@@ -1466,6 +1478,59 @@ const GerarPagamentoApp = {
       this.aplicarGuiaSomada(membros, grupo[0].check.valorBoleto, grupo[0]);
       membros.forEach((m) => usados.add(m.chave));
     });
+    this.casarGuiasPelaSoma(marcados, usados);
+  },
+
+  /** Títulos marcados como guia unificada somam o valor do boleto e entram num pagamento só. */
+  casarGuiasPelaSoma(candidatos, usados) {
+    const guia = (c) => !!(c && c.guiaNome);
+    const dia = (c) => String(c.r.vencimento || "").slice(0, 10);
+    const emp = (c) => String(c.r.companyId || "");
+    const valorDe = (c) => Math.round((Number(c.t.aPagar) || 0) * 100) / 100;
+    const livres = candidatos.filter((c) => guia(c) && !usados.has(c.chave) && valorDe(c) > 0.009);
+    const anchors = livres.filter((c) => c.check && c.check.valorBoleto > 0 && Math.abs(valorDe(c) - Number(c.check.valorBoleto)) > 0.01);
+    anchors.forEach((anchor) => {
+      if (usados.has(anchor.chave)) return;
+      const alvo = Number(anchor.check.valorBoleto);
+      const pool = livres.filter((c) => {
+        if (c.chave === anchor.chave || usados.has(c.chave)) return false;
+        if (anchor.codigo && anchor.codigo.length >= 44 && c.codigo && c.codigo.length >= 44) {
+          if (c.codigo === anchor.codigo) return true;
+          return Math.abs(Number(c.check.valorBoleto) - alvo) <= 0.01 && emp(c) === emp(anchor) && dia(c) === dia(anchor);
+        }
+        return emp(c) === emp(anchor) && dia(c) === dia(anchor);
+      }).slice(0, 8);
+      const extra = this.menorSomaGuia(pool, Math.round((alvo - valorDe(anchor)) * 100) / 100, valorDe);
+      if (!extra || !extra.length) return;
+      const grupo = [anchor].concat(extra);
+      const soma = Math.round(grupo.reduce((t, c) => t + valorDe(c), 0) * 100) / 100;
+      if (Math.abs(soma - alvo) > 0.01) return;
+      const membros = grupo.map((c) => ({ chave: c.chave, t: c.t, r: c.r }));
+      this.aplicarGuiaSomada(membros, alvo, anchor);
+      membros.forEach((m) => usados.add(m.chave));
+    });
+  },
+
+  menorSomaGuia(pool, falta, valorDe) {
+    if (!(falta > 0.009)) return null;
+    const alvo = Math.round(falta * 100) / 100;
+    let melhor = null;
+    const rec = (i, acc, soma) => {
+      if (melhor && acc.length >= melhor.length) return;
+      if (acc.length && Math.abs(soma - alvo) <= 0.01) {
+        melhor = acc.slice();
+        return;
+      }
+      if (soma > alvo + 0.02 || acc.length >= 4 || i >= pool.length) return;
+      for (let j = i; j < pool.length; j++) {
+        acc.push(pool[j]);
+        rec(j + 1, acc, Math.round((soma + valorDe(pool[j])) * 100) / 100);
+        acc.pop();
+        if (melhor && melhor.length === 1) return;
+      }
+    };
+    rec(0, [], 0);
+    return melhor;
   },
 
   /** Abre o mesmo resumo do título usado no Contas a Pagar (dados, anexos, forma de pagamento conferida). */
@@ -2060,14 +2125,19 @@ const GerarPagamentoApp = {
     this.paintTitulos();
   },
 
-  /** Lotes da aba A gerar que estão na tela (período buscado, ou o dia anterior aberto). */
-  gruposVisiveis() {
+  /** Lotes a gerar do período, de todas as empresas (ou do dia anterior aberto). */
+  gruposDoPeriodo() {
     const grupos = this.gruposLote();
     const noPeriodo = (dia) => this.noPeriodoBuscado(dia);
     const aGerarTodos = grupos.map((g) => ({ ...g, itens: g.itens.filter((it) => !it.emLote) })).filter((g) => g.itens.length);
-    const lista = this.state.diaRetro
+    return this.state.diaRetro
       ? this.recortarGrupos(aGerarTodos, (dia) => dia === this.state.diaRetro)
       : this.recortarGrupos(aGerarTodos, noPeriodo);
+  },
+
+  /** Lotes da aba A gerar que estão na tela (período buscado, ou o dia anterior aberto). */
+  gruposVisiveis() {
+    const lista = this.gruposDoPeriodo();
     const emp = String(this.state.abaEmpresa || "");
     if (!emp) return lista;
     const daEmp = this.filtrarEmpresa(lista, emp);
@@ -2087,7 +2157,7 @@ const GerarPagamentoApp = {
 
   async gerarLotesMarcados() {
     if (this.state.gerandoLote || this.state.roboLote) return;
-    const grupos = this.gruposVisiveis().filter((g) => g.key !== "__sem" && g.conta && g.itens.some((it) => it.marcado && !it.emLote && !it.bloqueio));
+    const grupos = this.gruposDoPeriodo().filter((g) => g.key !== "__sem" && g.conta && g.itens.some((it) => it.marcado && !it.emLote && !it.bloqueio));
     if (!grupos.length) {
       alert("Marque títulos livres em ao menos um lote.");
       return;
@@ -2095,9 +2165,9 @@ const GerarPagamentoApp = {
     const linhas = grupos.map((g) => {
       const itens = g.itens.filter((it) => it.marcado && !it.emLote && !it.bloqueio);
       const total = itens.reduce((t, it) => t + this.valorPagar(it), 0);
-      return `• ${this.dataBr(g.dia)} · ${this.contaLabel(g.conta)} · ${itens.length} título(s) · ${this.money(total)}`;
+      return `• ${this.nomeAbaEmpresa(this.empresaDoGrupo(g))} · ${this.dataBr(g.dia)} · ${this.contaLabel(g.conta)} · ${itens.length} título(s) · ${this.money(total)}`;
     });
-    const pergunta = `Gerar e autorizar ${grupos.length} lote(s) no Sienge?\n\n${linhas.join("\n")}\n\nCada lote é criado e autorizado em seguida, no mesmo passo.`;
+    const pergunta = `Gerar e autorizar ${grupos.length} lote(s) de todas as empresas no Sienge?\n\n${linhas.join("\n")}\n\nCada lote é criado e autorizado em seguida, no mesmo passo.`;
     const okConf = typeof window.mouraConfirm === "function" ? await window.mouraConfirm(pergunta) : confirm(pergunta);
     if (!okConf) return;
     for (const g of grupos) {
@@ -2871,7 +2941,7 @@ const GerarPagamentoApp = {
     const massa = `<div class="gp-massa">
       <button type="button" class="btn btn-sm btn-outline" onclick="GerarPagamentoApp.marcarLotes(true)">Marcar todos os lotes</button>
       <button type="button" class="btn btn-sm btn-outline" onclick="GerarPagamentoApp.marcarLotes(false)">Desmarcar todos os lotes</button>
-      <button type="button" class="btn btn-sm btn-primary" onclick="GerarPagamentoApp.gerarLotesMarcados()">Gerar lotes marcados</button>
+      <button type="button" class="btn btn-sm btn-primary" title="Gera os lotes marcados de todas as empresas do período" onclick="GerarPagamentoApp.gerarLotesMarcados()">Gerar lotes marcados</button>
     </div>`;
     if (s.diaRetro) {
       const titulosRetro = retroVis.reduce((t, g) => t + g.itens.length, 0);
@@ -3699,7 +3769,7 @@ const GerarPagamentoApp = {
           <div class="gp-busca">
             <div style="flex:1 1 220px;">
               <h3 style="margin:0 0 4px;color:var(--color-primary);font-size:1rem;">Títulos a pagar dos centros de custo de parceiro</h3>
-              <p style="margin:0;color:#64748b;font-size:0.78rem;">Busca pelo vencimento, para programar os lotes. Previsões ficam de fora.</p>
+              <p style="margin:0;color:#64748b;font-size:0.78rem;">Abre no dia seguinte. Na sexta, de sábado a segunda. Previsões ficam de fora.</p>
             </div>
             <div class="form-group">
               <label>Vencimento de</label>

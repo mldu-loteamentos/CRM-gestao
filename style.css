@@ -10529,11 +10529,12 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .soc-emp-tabs .ml-tab { flex: 0 0 33.333%; max-width: 33.333%; width: auto; min-width: 0; box-sizing: border-box; justify-content: flex-start; white-space: normal; }
 .soc-emp-tabs .ml-tab span { overflow: visible; text-overflow: clip; white-space: normal; }
 .soc-shell.is-parceria { height: auto; min-height: calc(100vh - 174px); }
-.soc-shell.is-parceria .soc-page { height: auto; flex: none; overflow: visible; }
-.soc-shell.is-parceria .soc-stage { flex: none; overflow: visible; min-height: 0; }
-.soc-shell.is-parceria .soc-canvas-wrap { flex: none; height: auto; min-height: 0; overflow: visible; }
+.soc-shell.is-parceria .soc-page { height: auto; flex: none; overflow: visible; min-width: 0; }
+.soc-shell.is-parceria .soc-stage { flex: none; overflow: hidden; min-height: 0; min-width: 0; }
+.soc-shell.is-parceria .soc-canvas-wrap { flex: none; height: auto; min-height: 320px; overflow: auto; justify-content: safe center; cursor: grab; }
+.soc-shell.is-parceria .soc-canvas-wrap.is-panning { cursor: grabbing; user-select: none; }
 .soc-page { display: flex; flex-direction: column; height: auto; flex: 1; min-height: 0; }
-.soc-tree { display: flex; flex-direction: column; align-items: flex-start; padding: 36px 32px 48px; min-width: max-content; }
+.soc-tree { display: flex; flex-direction: column; align-items: center; padding: 36px 32px 48px; min-width: max-content; }
 .soc-tree ul { display: flex; justify-content: center; gap: 8px; margin: 0; padding: 28px 0 0; list-style: none; position: relative; }
 .soc-tree ul::before { content: ""; position: absolute; top: 0; left: 50%; height: 28px; border-left: 2px solid #94a3b8; }
 .soc-tree li { display: flex; flex-direction: column; align-items: center; position: relative; padding: 28px 14px 0; }
@@ -10549,6 +10550,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .soc-tree-node.is-company { width: auto; min-width: 240px; max-width: 460px; background: #105436; font-size: 0.82rem; padding: 16px 18px; }
 .soc-tree-node.is-pj { background: #166534; }
 .soc-tree-node.is-pf { background: #1d4ed8; }
+.soc-tree-node.is-terr { background: #1e3a5f; }
 .soc-tree-node.is-cc { background: #0f3d2e; width: 168px; min-height: 64px; }
 .soc-tree-node.is-mini { width: 168px; min-height: 64px; }
 .soc-tree-node small { display: block; font-size: 0.58rem; font-weight: 700; letter-spacing: 0.03em; opacity: 0.88; text-transform: none; }
