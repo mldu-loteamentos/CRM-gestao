@@ -110,12 +110,9 @@ async function abrirTela(ctx, page, email, endereco, log, opcoes) {
   };
   if (opcoes && opcoes.sessaoPronta) {
     await ir();
-    const caiu = /#\/login/i.test(page.url()) || await sessao.botaoEntrarVisivel(page, 1200);
-    if (!caiu) return;
-    log("A sessão do Sienge caiu; entrando de novo");
-  } else {
-    log(`Entrando no Sienge como ${email}`);
+    return;
   }
+  log(`Entrando no Sienge como ${email}`);
   await sessao.entrarComo(ctx, page, email, log);
   await ir();
 }
@@ -225,6 +222,10 @@ module.exports = {
     }
     if (avisos.length > antes) log("Avisos do Sienge: " + avisos.slice(antes).join(" | "));
     log(`Gerado lote de pagamento escritural nº ${m[1]}`);
+    log("Reabrindo Programações de Pagamento");
+    await page.goto(TELA_PROGRAMACAO, { waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: /^entendi$/i }).first().click({ timeout: 4000 }).catch(() => {});
+    await quadro(page, (u) => /gridPagtoEscProgPagamento\.do/.test(u), 45000);
     return { numeroSienge: m[1] };
   },
 

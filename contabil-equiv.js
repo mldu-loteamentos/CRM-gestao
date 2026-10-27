@@ -312,8 +312,8 @@ const ContabilEquiv = {
         date: fim,
         amount: Math.round(Math.abs(signed) * 100) / 100,
         tipo: lucro ? "lucro" : "prejuízo",
-        debitAccountId: lucro ? debitoVar : this.CONTA_PREJUIZO,
-        creditAccountId: lucro ? this.CONTA_LUCRO : creditoVar,
+        debitAccountId: lucro ? debitoVar : (String(vinc.debitoPrejuizo || "").trim() || this.CONTA_PREJUIZO),
+        creditAccountId: lucro ? (String(vinc.creditoLucro || "").trim() || this.CONTA_LUCRO) : creditoVar,
         eventId: evento,
         description: this.complemento(this.nomeCurto(c.id, c.nome), pct, chave),
         resultado: resultado,
@@ -541,6 +541,8 @@ const ContabilEquiv = {
         origem: val("origem"),
         destino: val("destino"),
         debitoLucro: val("debitoLucro"),
+        creditoLucro: val("creditoLucro") || this.CONTA_LUCRO,
+        debitoPrejuizo: val("debitoPrejuizo") || this.CONTA_PREJUIZO,
         creditoPrejuizo: val("creditoPrejuizo"),
         evento: val("evento") || anterior.evento || "",
         apelidoOrigem: anterior.apelidoOrigem || "",
@@ -606,6 +608,42 @@ const ContabilEquiv = {
     this.pintarStatus();
   },
 
+  async receberDoOrganograma(parcial) {
+    await this.garantirConfig();
+    if (document.getElementById("ctb-eq-vincos")) this.lerVinculos();
+    if (!Array.isArray(this.state.vinculos)) this.state.vinculos = [];
+    const origem = String((parcial && parcial.origem) || "");
+    const destino = String((parcial && parcial.destino) || "");
+    if (!origem || !destino) return;
+    let row = this.state.vinculos.find((v) => String(v.origem) === origem);
+    if (!row) {
+      row = {
+        origem: origem,
+        destino: destino,
+        debitoLucro: "",
+        creditoLucro: this.CONTA_LUCRO,
+        debitoPrejuizo: this.CONTA_PREJUIZO,
+        creditoPrejuizo: "",
+        evento: "",
+        apelidoOrigem: "",
+        apelidoDestino: ""
+      };
+      this.state.vinculos.push(row);
+    }
+    row.origem = origem;
+    row.destino = destino;
+    row.debitoLucro = String(parcial.debitoLucro || "").trim();
+    row.creditoLucro = String(parcial.creditoLucro || "").trim() || this.CONTA_LUCRO;
+    row.debitoPrejuizo = String(parcial.debitoPrejuizo || "").trim() || this.CONTA_PREJUIZO;
+    row.creditoPrejuizo = String(parcial.creditoPrejuizo || "").trim();
+    if (parcial.apelidoOrigem) row.apelidoOrigem = parcial.apelidoOrigem;
+    if (parcial.apelidoDestino) row.apelidoDestino = parcial.apelidoDestino;
+    if (!row.evento) row.evento = this.eventoSalvo(destino) || "";
+    await this.persistir();
+    this.state.msg = "Vínculo da interligação salvo.";
+    if (document.getElementById("contabil-config-root")) this.render({ semLer: true });
+  },
+
   incluirVinculo() {
     this.lerVinculos();
     if (!Array.isArray(this.state.vinculos)) this.state.vinculos = [];
@@ -613,6 +651,8 @@ const ContabilEquiv = {
       origem: "",
       destino: "",
       debitoLucro: "",
+      creditoLucro: this.CONTA_LUCRO,
+      debitoPrejuizo: this.CONTA_PREJUIZO,
       creditoPrejuizo: "",
       evento: "",
       apelidoOrigem: "",
@@ -774,15 +814,15 @@ const ContabilEquiv = {
         <td class="cc-nome"><select data-c="destino" onchange="ContabilEquiv.trocarEmpresa(${i},'destino',this.value)">${this.opcoesEmpresa(v.destino)}</select></td>
         <td class="is-center">${this.esc(pctTxt)}</td>
         <td><input type="text" data-c="debitoLucro" value="${this.esc(v.debitoLucro || "")}" placeholder="1.2.02.01.002" oninput="ContabilEquiv.agendarGravar()"></td>
-        <td class="cc-conta"><div class="ctb-fixo">${this.esc(this.CONTA_LUCRO)}<small>reduzida ${this.esc(this.REDUZIDA_LUCRO)}</small></div></td>
-        <td class="cc-conta"><div class="ctb-fixo">${this.esc(this.CONTA_PREJUIZO)}<small>reduzida ${this.esc(this.REDUZIDA_PREJUIZO)}</small></div></td>
+        <td><input type="text" data-c="creditoLucro" value="${this.esc(v.creditoLucro || this.CONTA_LUCRO)}" placeholder="${this.esc(this.CONTA_LUCRO)}" oninput="ContabilEquiv.agendarGravar()"></td>
+        <td><input type="text" data-c="debitoPrejuizo" value="${this.esc(v.debitoPrejuizo || this.CONTA_PREJUIZO)}" placeholder="${this.esc(this.CONTA_PREJUIZO)}" oninput="ContabilEquiv.agendarGravar()"></td>
         <td><input type="text" data-c="creditoPrejuizo" value="${this.esc(v.creditoPrejuizo || "")}" placeholder="1.2.02.01.002" oninput="ContabilEquiv.agendarGravar()"></td>
         <td class="ctb-acoes is-center"><button type="button" class="tvig-ico is-danger" title="Excluir" onclick="ContabilEquiv.excluirVinculo(${i})"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button></td>
       </tr>`;
     }).join("");
     root.innerHTML = `<div class="cc-page ctb-eq-page">
       <div class="cc-toolbar">
-        <p class="ctb-eq-help">No lucro, a creditada é ${this.esc(this.CONTA_LUCRO)} (reduzida ${this.esc(this.REDUZIDA_LUCRO)}). No prejuízo, a debitada é ${this.esc(this.CONTA_PREJUIZO)} (reduzida ${this.esc(this.REDUZIDA_PREJUIZO)}). O percentual vem do organograma. Cada alteração já fica salva.</p>
+        <p class="ctb-eq-help">As contas vêm da interligação do organograma. No lucro, a creditada sugerida é ${this.esc(this.CONTA_LUCRO)} (reduzida ${this.esc(this.REDUZIDA_LUCRO)}). No prejuízo, a debitada sugerida é ${this.esc(this.CONTA_PREJUIZO)} (reduzida ${this.esc(this.REDUZIDA_PREJUIZO)}). O percentual vem do organograma. Cada alteração já fica salva.</p>
         <div class="cc-toolbar-actions">
           <span id="ctb-eq-status" class="ctb-eq-status">${this.esc(s.msg || "")}</span>
           <button type="button" class="btn btn-primary cc-atualizar" onclick="ContabilEquiv.incluirVinculo()">Incluir vínculo</button>
@@ -906,8 +946,8 @@ const ContabilEquiv = {
         date: fim,
         amount: Math.round(Math.abs(signed) * 100) / 100,
         tipo: lucro ? "lucro" : "prejuízo",
-        debitAccountId: lucro ? debitoVar : this.CONTA_PREJUIZO,
-        creditAccountId: lucro ? this.CONTA_LUCRO : creditoVar,
+        debitAccountId: lucro ? debitoVar : (String(passo.debitoPrejuizo || "").trim() || this.CONTA_PREJUIZO),
+        creditAccountId: lucro ? (String(passo.creditoLucro || "").trim() || this.CONTA_LUCRO) : creditoVar,
         eventId: evento,
         description: this.complemento(this.nomeCurto(passo.origem, passo.apelidoOrigem), pct, chave),
         resultado: resultado,

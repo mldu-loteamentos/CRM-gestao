@@ -760,6 +760,115 @@ const IdbDefaultersCache = {
     }
 };
 
+window.IdbDefaultersCache = IdbDefaultersCache;
+window.FILA_PRONTA_REV = 1;
+
+const FILA_PRONTA_CAMPOS = [
+  "customerId", "customerName", "customerCpf", "saleId", "companyId", "costCenterId",
+  "unitName", "unitId", "subjudice", "percPaid", "assignedOperator", "appliedRule",
+  "overdueValue", "overdueCharges", "maxDaysDelay", "billCount", "billIds",
+  "isZeroPaid", "hasOverdueAgreement", "agreementDaysDelay", "oldestDueDateMs", "dueDay",
+  "hasUnpaidSinal", "sinalDaysDelay", "lotesCount", "age",
+  "isInternalBrokenAgreement", "isAcordoJudicialQuebrado", "distratado",
+  "_filaQueueGroup", "lastPayDays"
+];
+
+function fotoFilaPronta(c) {
+  if (!c) return null;
+  const row = {};
+  FILA_PRONTA_CAMPOS.forEach((k) => {
+    if (c[k] !== undefined) row[k] = c[k];
+  });
+  if (Array.isArray(c.billIds)) row.billIds = c.billIds.slice();
+  return row;
+}
+
+window.salvarFilaProntaDoDia = function(rawList) {
+  const today = filaLocalTodayStr();
+  const rows = (rawList || []).map(fotoFilaPronta).filter(Boolean);
+  if (!rows.length) return;
+  const atFull = new Date().toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  const payload = { date: today, rev: window.FILA_PRONTA_REV, count: rows.length, atFull: atFull, rows: rows };
+  window._filaProntaCache = { date: today, rows: rows };
+  IdbDefaultersCache.set("fila_pronta_" + today, payload).catch(() => {});
+  if (!window.firebaseDb || !window.firebaseCollections) return;
+  const CHUNK = 400;
+  const numChunks = Math.ceil(rows.length / CHUNK);
+  (async () => {
+    try {
+      const { doc, setDoc } = window.firebaseCollections;
+      for (let i = 0; i < numChunks; i++) {
+        const slice = rows.slice(i * CHUNK, (i + 1) * CHUNK);
+        await setDoc(doc(window.firebaseDb, "sienge_defaulters_history", today + "_pronta_" + i), { data: JSON.stringify(slice) });
+      }
+      await setDoc(doc(window.firebaseDb, "sienge_defaulters_history", today + "_pronta"), {
+        date: today,
+        chunks: numChunks,
+        count: rows.length,
+        rev: window.FILA_PRONTA_REV,
+        atFull: atFull
+      });
+      console.log("%c[Fila] Fila pronta do dia salva (" + rows.length + " títulos).", "color:#105436;font-weight:bold;");
+    } catch (e) {
+      console.warn("[Fila] Não salvou a fila pronta no Firebase", e);
+    }
+  })();
+};
+
+window.carregarFilaProntaDoDia = async function() {
+  const today = filaLocalTodayStr();
+  const mem = window._filaProntaCache;
+  if (mem && mem.date === today && Array.isArray(mem.rows) && mem.rows.length) return mem.rows;
+  const serve = (payload) => {
+    if (!payload || payload.date !== today || Number(payload.rev) !== window.FILA_PRONTA_REV) return null;
+    if (!Array.isArray(payload.rows) || !payload.rows.length) return null;
+    window._filaProntaCache = { date: today, rows: payload.rows };
+    if (payload.atFull) {
+      window._siengeLastFetchTime = window._siengeLastFetchTime || {
+        elapsed: "0.1",
+        count: payload.rows.length,
+        at: payload.atFull,
+        atFull: payload.atFull,
+        cached: true
+      };
+    }
+    return payload.rows;
+  };
+  try {
+    const local = await IdbDefaultersCache.get("fila_pronta_" + today);
+    const rows = serve(local);
+    if (rows) return rows;
+  } catch (e) {}
+  if (!window.firebaseDb || !window.firebaseCollections) return null;
+  try {
+    const { doc, getDoc } = window.firebaseCollections;
+    const metaSnap = await getDoc(doc(window.firebaseDb, "sienge_defaulters_history", today + "_pronta"));
+    if (!metaSnap || !metaSnap.exists || !metaSnap.exists()) return null;
+    const meta = metaSnap.data() || {};
+    if (Number(meta.rev) !== window.FILA_PRONTA_REV || meta.date !== today) return null;
+    const chunks = Number(meta.chunks) || 0;
+    const rows = [];
+    for (let i = 0; i < chunks; i++) {
+      const snap = await getDoc(doc(window.firebaseDb, "sienge_defaulters_history", today + "_pronta_" + i));
+      if (snap && snap.exists && snap.exists()) {
+        const raw = snap.data() && snap.data().data;
+        if (raw) rows.push.apply(rows, JSON.parse(raw));
+      }
+    }
+    if (meta.count && rows.length < meta.count) return null;
+    const prontas = serve({ date: today, rev: meta.rev, rows: rows, atFull: meta.atFull });
+    if (prontas) {
+      IdbDefaultersCache.set("fila_pronta_" + today, {
+        date: today, rev: window.FILA_PRONTA_REV, count: prontas.length, atFull: meta.atFull || "", rows: prontas
+      }).catch(() => {});
+    }
+    return prontas;
+  } catch (e) {
+    console.warn("[Fila] Não leu a fila pronta do dia", e);
+    return null;
+  }
+};
+
 const ApiUsage = {
   COLLECTION: "api_consumo",
   LOCAL_KEY: "crm_api_consumo_v1",

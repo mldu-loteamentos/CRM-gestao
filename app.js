@@ -7917,6 +7917,9 @@ window.clientLastPaymentDays = function(client) {
       }
     });
   }
+  if (minDiff === Infinity && client && Number.isFinite(Number(client.lastPayDays))) {
+    minDiff = Number(client.lastPayDays);
+  }
   return minDiff;
 };
 
@@ -8260,6 +8263,20 @@ window.cancelMotivoRotulo = function(iniciativa, motivo) {
   };
 };
 
+/** Sem restituição e Nex cumprida: "12 - Sem retorno do cliente" é determinação da empresa (212). */
+window.cancelMotivoForcaEmpresa = function(codigoMotivo) {
+  const cod = String(codigoMotivo || "").replace(/\D/g, "").padStart(2, "0").slice(-2);
+  if (cod !== "12") return false;
+  const aval = window._cancelAvaliacao;
+  if (!aval) return false;
+  return !!(aval.nexCumprida || aval.via === "nex");
+};
+
+window.cancelMotivoIniciativaEfetiva = function(iniciativa, codigoMotivo) {
+  if (window.cancelMotivoForcaEmpresa(codigoMotivo)) return "2";
+  return String(iniciativa) === "2" ? "2" : "1";
+};
+
 window.tituloTemZeroRestituicao = function(client) {
   if (window.nexCumpridaTeste && window.nexCumpridaTeste(client)) return true;
   return !!(client && typeof window.clientIsZeroPercentPaid === "function" && window.clientIsZeroPercentPaid(client));
@@ -8453,12 +8470,23 @@ window.cancelContratoPintarMotivos = function(selecionado) {
 };
 
 window.cancelContratoAtualizarRotulo = function() {
-  const ini = (document.querySelector("input[name='cancel-iniciativa']:checked") || {}).value || "1";
   const sel = document.getElementById("cancel-motivo");
-  const motivo = window.cancelMotivosLista().find(function(m) { return m.codigo === (sel && sel.value); });
+  const codigo = sel && sel.value;
+  let ini = (document.querySelector("input[name='cancel-iniciativa']:checked") || {}).value || "1";
+  const efetiva = window.cancelMotivoIniciativaEfetiva(ini, codigo);
+  if (efetiva === "2" && ini !== "2") {
+    const radio = document.querySelector("input[name='cancel-iniciativa'][value='2']");
+    if (radio) radio.checked = true;
+    ini = "2";
+  }
+  const motivo = window.cancelMotivosLista().find(function(m) { return m.codigo === codigo; });
   const rot = window.cancelMotivoRotulo(ini, motivo || { codigo: "00", nome: "" });
   const el = document.getElementById("cancel-motivo-rotulo");
-  if (el) el.textContent = rot.texto;
+  if (el) {
+    el.textContent = window.cancelMotivoForcaEmpresa(codigo)
+      ? rot.texto + ". Sem restituição e Nex cumprida: determinação da empresa."
+      : rot.texto;
+  }
 };
 
 window.cancelamentoDinheiro = function(n) {
@@ -8703,6 +8731,7 @@ window.abrirAvaliacaoCancelamento = async function(customerId, saleId) {
       saleId: String(client.saleId || saleId),
       pode: pode.ok,
       via: pode.via,
+      nexCumprida: !!nex,
       em: Date.now()
     };
     const pctNum = Math.round((Number(resumo.pctPago) || 0) * 100) / 100;
@@ -8878,7 +8907,8 @@ window.enviarCancelamentoContrato = async function() {
   if (!window.CANCEL_SUBTIPOS.some(function(s) { return s.codigo === subtipo; })) { falha("Escolha o subtipo de cancelamento."); return; }
   if (ini !== "1" && ini !== "2") { falha("Escolha de quem foi a iniciativa."); return; }
   if (!motivo) { falha("Escolha o motivo."); return; }
-  const rot = window.cancelMotivoRotulo(ini, motivo);
+  const iniciativa = window.cancelMotivoIniciativaEfetiva(ini, motivo.codigo);
+  const rot = window.cancelMotivoRotulo(iniciativa, motivo);
   const exig = window._cancelExigencias || {};
   const docs = window._cancelDocs || {};
   if (!exig.obraAndamento && !docs.cnd) { falha("Anexe a CND antes de cancelar."); return; }
@@ -10721,8 +10751,22 @@ async function loadDashboardData(forceRefresh = false) {
           }
         } catch (e) {}
       }
-      if (typeof window.carregarRenegPropostas === "function") {
+      if (force) window._filaProntaCache = null;
+      let filaJaPronta = false;
+      if (!force && getSiengeApiMode() === "real" && typeof window.carregarFilaProntaDoDia === "function") {
+        try {
+          const rows = await window.carregarFilaProntaDoDia();
+          filaJaPronta = !!(rows && rows.length);
+        } catch (e) {}
+      }
+      if (!filaJaPronta && typeof window.carregarRenegPropostas === "function") {
         await window.carregarRenegPropostas().catch(() => null);
+      } else if (typeof window.carregarRenegPropostas === "function") {
+        window.carregarRenegPropostas().then(() => {
+          if (window._filaRenegRepintou || window._isDefaultersLoading || !AppState.dashboardRendered) return;
+          window._filaRenegRepintou = true;
+          loadDashboardData(false);
+        }).catch(() => null);
       }
       await _loadDashboardData_Impl(force);
     }
@@ -11051,6 +11095,12 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
     try { await window.loadSubjudiceIntegra(); } catch (e) {}
   }
   window._dashboardForceRefresh = forceRefresh;
+  let filaPronta = null;
+  window._filaProntaAtiva = false;
+  if (!forceRefresh && getSiengeApiMode() === "real" && typeof window.carregarFilaProntaDoDia === "function") {
+    try { filaPronta = await window.carregarFilaProntaDoDia(); } catch (e) { filaPronta = null; }
+    if (filaPronta && filaPronta.length) window._filaProntaAtiva = true;
+  }
   const searchInput = document.getElementById("dashboard-search-input");
   const searchValue = searchInput ? searchInput.value.trim() : "";
 
@@ -11060,11 +11110,11 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
   // -----------------------------------------------
   // PASSO 1: Buscar parcelas vencidas dos inadimplentes
   // -----------------------------------------------
-  let bills;
-  const dataAlreadyLoaded = getSiengeApiMode() === "real" && AppState.defaultersLoaded && !forceRefresh;
+  let bills = [];
+  const dataAlreadyLoaded = !window._filaProntaAtiva && getSiengeApiMode() === "real" && AppState.defaultersLoaded && !forceRefresh;
   const body = document.getElementById("defaulters-table-body");
   
-  if (!dataAlreadyLoaded) {
+  if (!window._filaProntaAtiva && !dataAlreadyLoaded) {
     // Exibir indicador de carregamento APENAS se for buscar na API
     if (body) {
       body.innerHTML = `<tr><td class="fila-load-cell" colspan="13">
@@ -11109,7 +11159,14 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
   // -----------------------------------------------
   // PASSO 1: Buscar parcelas vencidas dos inadimplentes
   // -----------------------------------------------
-  if (dataAlreadyLoaded) {
+  if (window._filaProntaAtiva) {
+    bills = Array.isArray(AppState.defaultersBills) ? AppState.defaultersBills : [];
+    const sPronta = document.querySelector("#defaulters-table-body .loading-status-text");
+    if (sPronta) sPronta.textContent = "Abrindo a fila de hoje…";
+    if (typeof window.prefetchRecentPayments === "function") {
+      try { await window.prefetchRecentPayments(); } catch (e) {}
+    }
+  } else if (dataAlreadyLoaded) {
     bills = AppState.defaultersBills;
     if (typeof window.prefetchRecentPayments === "function") {
       try { await window.prefetchRecentPayments(); } catch (e) {}
@@ -11263,7 +11320,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
     window.updateFilaCacheStatusIndicator();
   }
 
-  if (bills.length === 0) {
+  if ((!bills || bills.length === 0) && !(window._filaProntaAtiva && filaPronta && filaPronta.length)) {
     if (body) {
       body.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:30px; color:var(--color-text-muted);">Nenhum cliente inadimplente encontrado.</td></tr>`;
     }
@@ -11286,6 +11343,16 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
   // -----------------------------------------------
   // PASSO 3: Consolidar devedores únicos por cliente+contrato
   // -----------------------------------------------
+  let consolidated = {};
+  let subjudiceMemory = {};
+  try { subjudiceMemory = JSON.parse(localStorage.getItem('subjudiceHistory') || '{}') || {}; } catch (e) { subjudiceMemory = {}; }
+  if (window._filaProntaAtiva && filaPronta && filaPronta.length) {
+    filaPronta.forEach((c) => {
+      if (!c) return;
+      consolidated[String(c.customerId) + "-" + String(c.saleId)] = c;
+    });
+    window._filaSubjudiceMemory = subjudiceMemory;
+  } else {
   if (forceRefresh) window._filaSiEnriched = false;
   if (typeof window.enrichDefaulterBillsWithQuitacaoTypes === "function") {
     const precisaSi = (bills || []).some((b) => typeof window.billNeedsQuitacaoTipoEnrich === "function" && window.billNeedsQuitacaoTipoEnrich(b));
@@ -11298,9 +11365,6 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
       window._filaSiEnriched = true;
     }
   }
-  const consolidated = {};
-  let subjudiceMemory = {};
-  try { subjudiceMemory = JSON.parse(localStorage.getItem('subjudiceHistory') || '{}') || {}; } catch (e) { subjudiceMemory = {}; }
   const todayStr = new Date().toISOString().split('T')[0];
   const filaPausa = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -11677,6 +11741,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
   setTimeout(() => {
     try { localStorage.setItem('subjudiceHistory', JSON.stringify(memoriaSub)); } catch (e) {}
   }, 0);
+  }
 
   applyCollectionOperatorRegua(consolidated, subjudiceMemory);
 
@@ -11727,9 +11792,11 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
   const rawList = Object.values(consolidated);
   
   // Assign lotesCount to each client
-  rawList.forEach(c => {
+  if (!window._filaProntaAtiva) {
+    rawList.forEach(c => {
       c.lotesCount = window._lotesCounter[c.customerId] ? window._lotesCounter[c.customerId].size : 1;
-  });
+    });
+  }
   window._lotesCounter = {}; // Clear memory
 
   if (typeof window.incluirSubjudiceIntegraForaDaCarteira === "function") {
@@ -11776,9 +11843,21 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
         }
       }
     });
-  } else {
+  } else if (!window._filaProntaAtiva) {
     // Cache ainda não carregado: marcar como NA para não filtrar errado
     window.rawClientList.forEach(c => { c.age = 'NA'; });
+  }
+
+  if (!window._filaProntaAtiva && getSiengeApiMode() === "real" && typeof window.salvarFilaProntaDoDia === "function") {
+    const listaPronta = window.rawClientList || [];
+    if (typeof window.clientLastPaymentDays === "function") {
+      listaPronta.forEach((c) => {
+        if (!c) return;
+        const d = window.clientLastPaymentDays(c);
+        if (Number.isFinite(d) && d !== Infinity) c.lastPayDays = d;
+      });
+    }
+    window.salvarFilaProntaDoDia(listaPronta);
   }
 
   let clientList = [...rawList]; // Mostrar sub judice na fila principal
@@ -11817,7 +11896,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
   }
 
   if (typeof window.rebuildNexCumpridaIndex === "function") window.rebuildNexCumpridaIndex();
-  if (typeof window.nexScheduleCumpridaCheck === "function") window.nexScheduleCumpridaCheck();
+  if (!window._filaProntaAtiva && typeof window.nexScheduleCumpridaCheck === "function") window.nexScheduleCumpridaCheck();
   const originalAdvFilters = window.advFilters;
   window.advFilters = window.advFiltersFila || {};
   clientList = window.applyAdvFiltersTo(clientList);
@@ -28996,6 +29075,177 @@ window.gravarAgendaOverflow = function(data) {
   try { localStorage.setItem(window.CRM_AGENDA_OVERFLOW_KEY, JSON.stringify(data || {})); } catch (e) {}
 };
 
+window.CRM_AGENDA_META_KEY = "crm_agenda_meta_v1";
+window.AGENDA_EXTRA_LOTE = 15;
+
+window.lerAgendaMeta = function() {
+  try {
+    const data = JSON.parse(localStorage.getItem(window.CRM_AGENDA_META_KEY) || "{}");
+    return data && typeof data === "object" ? data : {};
+  } catch (e) {
+    return {};
+  }
+};
+
+window.gravarAgendaMeta = function(data) {
+  try { localStorage.setItem(window.CRM_AGENDA_META_KEY, JSON.stringify(data || {})); } catch (e) {}
+};
+
+window.agendaMetaDoOperador = function(operator, dateKey) {
+  const rec = (window.lerAgendaMeta()[String(operator || "")] || null);
+  if (!rec || rec.date !== dateKey || !Array.isArray(rec.base) || !rec.base.length) return null;
+  return rec;
+};
+
+window.fotoAgendaMeta = function(n) {
+  if (!n) return null;
+  return {
+    occId: n.occId || "",
+    customerId: n.customerId,
+    customerName: n.customerName,
+    cpf: n.cpf,
+    saleId: n.saleId,
+    unitId: n.unitId,
+    unitLabel: n.unitLabel || "",
+    valorAtualizado: n.valorAtualizado != null ? n.valorAtualizado : null,
+    promiseDate: n.promiseDate,
+    promiseStatus: n.promiseStatus,
+    reminder: n.reminder,
+    text: n.text,
+    date: n.date,
+    daysAgo: n.daysAgo,
+    occIndex: n.occIndex,
+    agendaAlert: n.agendaAlert,
+    isResolved: false,
+    isFila: !!n.isFila,
+    scoreDetails: n.scoreDetails || ""
+  };
+};
+
+window.gravarAgendaMetaBase = function(operator, dateKey, items) {
+  const all = window.lerAgendaMeta();
+  const prev = all[String(operator)] || {};
+  all[String(operator)] = {
+    date: dateKey,
+    base: items || [],
+    extras: prev.date === dateKey && Array.isArray(prev.extras) ? prev.extras : []
+  };
+  window.gravarAgendaMeta(all);
+};
+
+/** Agendamentos pendentes com promessa até o dia (atrasados ou de hoje). */
+window.agendamentosAtrasadosOuDoDia = function(dateKey, operator) {
+  if (typeof window.collectAgendaDueItems === "function") {
+    window.collectAgendaDueItems(dateKey, { selectedOperator: operator, pendingOnly: false });
+  }
+  const map = window._agendaDueCache && window._agendaDueCache.map;
+  if (!map) return [];
+  const rows = [];
+  map.forEach((list, due) => {
+    if (String(due) > String(dateKey)) return;
+    (list || []).forEach((r) => {
+      if (!r || r.isResolved) return;
+      if (r.promiseStatus && r.promiseStatus !== "Pendente") return;
+      rows.push(r);
+    });
+  });
+  rows.sort((a, b) => String(a.promiseDate || "").localeCompare(String(b.promiseDate || "")));
+  return rows;
+};
+
+window.marcarResolvidoNaAgenda = function(item, operator, dateKey, todayStr) {
+  if (!item || !item.isFila) return item;
+  const notes = (window.getCustomerNotesList && window.AppState)
+    ? window.getCustomerNotesList(AppState.notes, item.customerId)
+    : ((window.AppState && AppState.notes && AppState.notes[item.customerId]) || []);
+  let exclude = false;
+  (notes || []).forEach((n) => {
+    const mesmo = window.notaDoMesmoTitulo
+      ? window.notaDoMesmoTitulo(n, item)
+      : (!n.saleId || String(n.saleId) === String(item.saleId));
+    if (!mesmo) return;
+    if ((window.promiseDateKey(n.promiseDate) >= dateKey) && n.promiseStatus === "Pendente" && n.status !== "Cancelada") exclude = true;
+    if (n.date && String(n.date).startsWith(todayStr) && window.occurrenceAuthorMatchesOperator(n.author, operator)) exclude = true;
+    if (window.notaResolveFilaDoDia && window.notaResolveFilaDoDia(n, item, dateKey, todayStr)) exclude = true;
+  });
+  item.isResolved = exclude;
+  return item;
+};
+
+window.reviverItemDaMeta = function(raw, operator, dateKey, todayStr) {
+  if (!raw) return null;
+  if (raw.isFila) {
+    const item = Object.assign({}, raw, { isFila: true, isResolved: false });
+    return window.marcarResolvidoNaAgenda(item, operator, dateKey, todayStr);
+  }
+  const due = String(raw.promiseDate || "").slice(0, 10);
+  let hit = null;
+  if (due && typeof window.collectAgendaDueItems === "function") {
+    const rows = window.collectAgendaDueItems(due, { selectedOperator: operator, pendingOnly: false });
+    const key = window.agendaOverflowKey(raw);
+    hit = (rows || []).find((r) => window.agendaOverflowKey(r) === key) || null;
+  }
+  const row = Object.assign({}, hit || raw, { isFila: false });
+  if (!hit || !window.agendaPendente(row)) row.isResolved = true;
+  return row;
+};
+
+window.atualizarBotaoMaisAgendamentos = function(dayItems, operator, dateKey) {
+  window._agendaMais = { show: false, restam: 0 };
+  const meta = window.agendaMetaDoOperador(operator, dateKey);
+  if (!meta || !operator || operator === "Todos") return;
+  const hojeIso = window.localDateStr ? window.localDateStr() : dateKey;
+  const pendente = window.itemPendenteNaAgendaDoDia;
+  const baseVivos = meta.base.map((raw) => window.reviverItemDaMeta(raw, operator, dateKey, hojeIso)).filter(Boolean);
+  const basePend = baseVivos.filter(pendente);
+  const ocupados = new Set();
+  [].concat(meta.base || [], meta.extras || []).forEach((r) => {
+    const key = window.agendaOverflowKey(r);
+    if (key) ocupados.add(key);
+    if (r && r.customerId != null) ocupados.add(String(r.customerId) + "|" + String(r.saleId));
+  });
+  const sobra = window.agendamentosAtrasadosOuDoDia(dateKey, operator).filter((r) => {
+    if (!pendente(r)) return false;
+    const key = window.agendaOverflowKey(r);
+    const par = String(r.customerId) + "|" + String(r.saleId);
+    return key && !ocupados.has(key) && !ocupados.has(par);
+  });
+  window._agendaMais = { show: basePend.length === 0 && sobra.length > 0, restam: sobra.length };
+};
+
+window.htmlMaisAgendamentos = function() {
+  const m = window._agendaMais;
+  if (!m || !m.show) return "";
+  const n = Math.min(window.AGENDA_EXTRA_LOTE || 15, m.restam);
+  return `<button type="button" class="btn btn-primary" style="height:36px;" onclick="window.pedirMaisAgendamentos()">Mais agendamentos (${n})</button>`;
+};
+
+window.pedirMaisAgendamentos = function() {
+  const op = window.AgendaSelectedOperator || (document.getElementById("agenda-operator-select") && document.getElementById("agenda-operator-select").value) || "";
+  const date = window.getActiveQueueDate ? window.getActiveQueueDate() : (window.localDateStr ? window.localDateStr() : "");
+  const dateKey = window.promiseDateKey ? window.promiseDateKey(date) : date;
+  const all = window.lerAgendaMeta();
+  const rec = all[String(op)];
+  if (!rec || rec.date !== dateKey || !Array.isArray(rec.base) || !rec.base.length) return;
+  const lote = window.AGENDA_EXTRA_LOTE || 15;
+  const ocupados = new Set();
+  [].concat(rec.base, rec.extras || []).forEach((r) => {
+    const key = window.agendaOverflowKey(r);
+    if (key) ocupados.add(key);
+    if (r && r.customerId != null) ocupados.add(String(r.customerId) + "|" + String(r.saleId));
+  });
+  const proximos = window.agendamentosAtrasadosOuDoDia(dateKey, op).filter((r) => {
+    const key = window.agendaOverflowKey(r);
+    const par = String(r.customerId) + "|" + String(r.saleId);
+    return key && !ocupados.has(key) && !ocupados.has(par) && window.itemPendenteNaAgendaDoDia(r);
+  }).slice(0, lote).map(window.fotoAgendaMeta).filter(Boolean);
+  if (!proximos.length) return;
+  rec.extras = (rec.extras || []).concat(proximos);
+  window.gravarAgendaMeta(all);
+  window.agendaItemsCache = {};
+  if (typeof loadAgendaDayTasks === "function") loadAgendaDayTasks(date);
+};
+
 window.agendaPendente = function(item) {
   if (!item || item.isResolved) return false;
   const st = item.promiseStatus || "";
@@ -29772,6 +30022,20 @@ window.fireConfetti = function() {
             };
             guardados.forEach((r) => empurrar(r, true));
             dayItems.forEach((r) => { if (window.agendaPendente(r)) empurrar(r, false); });
+            const metaCongelada = window.agendaMetaDoOperador(opKey, dateKeyMix);
+            if (metaCongelada) {
+            const hojeIso = window.localDateStr ? window.localDateStr() : dateKeyMix;
+            const reviver = (raw) => window.reviverItemDaMeta(raw, selectedOperator, dateKeyMix, hojeIso);
+            const baseVivos = metaCongelada.base.map(reviver).filter(Boolean);
+            const extraVivos = (metaCongelada.extras || []).map(reviver).filter(Boolean);
+            const ja = new Set(baseVivos.concat(extraVivos).map((r) => window.agendaOverflowKey(r)));
+            const resolvidosFora = dayItems.filter((n) => !window.agendaPendente(n) && !ja.has(window.agendaOverflowKey(n)));
+            dayItems = baseVivos.concat(extraVivos, resolvidosFora);
+            if (searchFilter) {
+              const q = String(searchFilter).toLowerCase();
+              dayItems = dayItems.filter((n) => String(n.customerName || "").toLowerCase().includes(q) || String(n.saleId || "").toLowerCase().includes(q) || String(n.unitId || "").toLowerCase().includes(q));
+            }
+            } else {
             const cotas = window.cotasFilaDia(capacidade, candidatos.length);
             const queueItems = await window.generateDailyQueue(selectedOperator, dateStr, { maxItems: cotas.novos });
             const inQueue = new Set((queueItems || []).map(q => String(q.customerId) + '|' + String(q.saleId)));
@@ -29806,6 +30070,14 @@ window.fireConfetti = function() {
             if (window.gravarAgendaOverflow) window.gravarAgendaOverflow(memoria);
             const resolvidos = dayItems.filter((n) => !window.agendaPendente(n));
             dayItems = [...(queueItems || []), ...agendaHoje, ...resolvidos];
+            const vendasCarregadas = (window.AppState && Array.isArray(AppState.sales) && AppState.sales.length > 0)
+              || (typeof getSiengeApiMode === "function" && getSiengeApiMode() === "simulado");
+            const podeGravarMeta = vendasCarregadas && !window._isNotesHydrating && !searchFilter && (!typeFilter || typeFilter === "todas");
+            if (podeGravarMeta && window.gravarAgendaMetaBase) {
+              const baseFoto = [...(queueItems || []), ...agendaHoje].map(window.fotoAgendaMeta).filter(Boolean);
+              if (baseFoto.length) window.gravarAgendaMetaBase(opKey, dateKeyMix, baseFoto);
+            }
+            }
       }
       
       if (!window._isNotesHydrating) {
@@ -29829,6 +30101,10 @@ window.fireConfetti = function() {
     : (item && !item.isResolved && item.promiseStatus !== "Cumprido" && item.promiseStatus !== "Resolvido" && item.promiseStatus !== "Cancelada");
   const unresolvedItems = originalItems.filter(pendenteDoDia);
   const unresolvedCount = unresolvedItems.length;
+  if (typeof window.atualizarBotaoMaisAgendamentos === "function") {
+    const dateKeyBtn = window.promiseDateKey ? window.promiseDateKey(dateStr) : dateStr;
+    window.atualizarBotaoMaisAgendamentos(originalItems.length ? originalItems : dayItems, selectedOperator, dateKeyBtn);
+  }
   const teveFila = originalItems.some(item => item && item.isFila);
   const todayStr = window.getActiveQueueDate ? window.getActiveQueueDate() : (window.localDateStr ? window.localDateStr() : new Date().toISOString().split('T')[0]);
   const filaTrackKey = `${String(selectedOperator || 'Todos')}|${todayStr}`;
@@ -29838,7 +30114,7 @@ window.fireConfetti = function() {
       window._filaHadPendingInSession[filaTrackKey] = true;
       const summaryDiv = document.createElement("div");
       summaryDiv.style.cssText = "background: #fff7ed; color: #c2410c; padding: 10px 15px; border-radius: 6px; font-size: 0.9rem; font-weight: 600; border: 1px solid #ffedd5; margin-bottom: 15px; display: flex; align-items: center; gap: 8px;";
-      summaryDiv.innerHTML = `<i data-lucide="zap" style="width: 16px; height: 16px;"></i> Faltam ${unresolvedCount} atendimentos para finalizar a agenda de hoje (fila do dia e retornos).`;
+      summaryDiv.innerHTML = `<i data-lucide="zap" style="width: 16px; height: 16px;"></i> <span style="flex:1;">Faltam ${unresolvedCount} atendimentos para finalizar a agenda de hoje (fila do dia e retornos).</span> ${window.htmlMaisAgendamentos ? window.htmlMaisAgendamentos() : ""}`;
       // We can insert this before the table. The `body` is the tbody. We need to find its parent.
       const table = body.closest('table');
       if (table && table.parentNode) {
@@ -29870,6 +30146,7 @@ window.fireConfetti = function() {
                     <i data-lucide="party-popper" style="width: 24px; height: 24px; color: #166534;"></i> 
                     <span style="font-size: 1.15rem;">Parabéns! Você finalizou a agenda de hoje! 🎉</span>
                 </div>
+                ${window.htmlMaisAgendamentos ? window.htmlMaisAgendamentos() : ""}
                 <img src="selo/seu-barriga.jpg" alt="Selo de Qualidade Seu Barriga" style="width: 200px; height: 200px; object-fit: cover; border-radius: 50%; animation: seloPulse 2s infinite ease-in-out; border: 4px solid #166534;">
             </div>
           `;

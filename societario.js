@@ -117,7 +117,12 @@ const SocietarioApp = {
       const extra = this.companies().find((c) => String(c.id) === String(atualId));
       if (extra) lista.push(extra);
     }
-    return lista;
+    const ocupadas = new Set(
+      (this.graph.entities || [])
+        .filter((e) => e.id !== this.selectedId && e.companyId)
+        .map((e) => String(e.companyId))
+    );
+    return lista.filter((c) => String(c.id) === String(atualId || "") || !ocupadas.has(String(c.id)));
   },
 
   nomeCadastro(company) {
@@ -127,47 +132,223 @@ const SocietarioApp = {
     return usual || String(company.tradeName || company.name || ("Empresa " + company.id)).trim();
   },
 
+  mesmoNomeEmpresa(a, b) {
+    const na = this.semAcento(a);
+    const nb = this.semAcento(b);
+    if (!na || !nb || na.length < 8 || nb.length < 8) return false;
+    if (na === nb) return true;
+    const curto = na.length <= nb.length ? na : nb;
+    const longo = na.length <= nb.length ? nb : na;
+    if (curto.length < 18) return false;
+    return longo === curto || longo.startsWith(curto + " ");
+  },
+
+  ligacoes(id) {
+    return (this.graph.links || []).filter((l) => l.from === id || l.to === id).length;
+  },
+
+  caixaQueFica(a, b) {
+    if (a.id === this.graph.hubId) return a;
+    if (b.id === this.graph.hubId) return b;
+    const la = this.ligacoes(a.id);
+    const lb = this.ligacoes(b.id);
+    if (la !== lb) return la > lb ? a : b;
+    return this.semAcento(a.name).length >= this.semAcento(b.name).length ? a : b;
+  },
+
+  redirecionarCaixa(saiId, fica) {
+    const sai = this.entity(saiId);
+    if (sai && !fica.companyId && sai.companyId) fica.companyId = sai.companyId;
+    if (sai && !(fica.note || "").trim() && (sai.note || "").trim()) fica.note = sai.note;
+    const vistos = new Set();
+    this.graph.links = (this.graph.links || []).filter((l) => {
+      if (l.from === saiId) l.from = fica.id;
+      if (l.to === saiId) l.to = fica.id;
+      if (l.from === l.to) return false;
+      const key = l.from + ">" + l.to;
+      if (vistos.has(key)) return false;
+      vistos.add(key);
+      return true;
+    });
+  },
+
+  fundirCaixasRepetidas() {
+    const ents = this.graph.entities || [];
+    const cair = new Set();
+    for (let i = 0; i < ents.length; i++) {
+      const a = ents[i];
+      if (!a || cair.has(a.id) || a.kind === "pf") continue;
+      for (let j = i + 1; j < ents.length; j++) {
+        const b = ents[j];
+        if (!b || cair.has(b.id) || b.kind === "pf") continue;
+        const mesmoId = a.companyId && String(a.companyId) === String(b.companyId);
+        if (!mesmoId) continue;
+        const fica = this.caixaQueFica(a, b);
+        const sai = fica === a ? b : a;
+        this.redirecionarCaixa(sai.id, fica);
+        cair.add(sai.id);
+        if (sai === a) break;
+      }
+    }
+    if (!cair.size) return false;
+    this.graph.entities = ents.filter((e) => e && !cair.has(e.id));
+    if (this.selectedId && cair.has(this.selectedId)) this.selectedId = null;
+    return true;
+  },
+
+  nomeUsualDaEmpresa(companyOrId) {
+    const company = companyOrId && companyOrId.id != null
+      ? companyOrId
+      : this.companies().find((c) => String(c.id) === String(companyOrId));
+    if (!company) return "";
+    const app = window.EmpresasApp;
+    const custom = app && app.customOf ? app.customOf(company.id) : null;
+    const usual = custom && String(custom.nome_usual || "").trim();
+    if (!usual || /^nome usual$/i.test(usual)) return "";
+    return usual;
+  },
+
+  /** Nome da caixa: pessoa física continua com o nome dela. Empresa usa o nome usual do cadastro. */
+  nomeExibido(ent) {
+    if (!ent) return "";
+    if (ent.kind !== "pf" && ent.companyId) {
+      const usual = this.nomeUsualDaEmpresa(ent.companyId);
+      if (usual) return usual;
+      const c = this.companies().find((x) => String(x.id) === String(ent.companyId));
+      if (c) return this.nomeCadastro(c);
+    }
+    return ent.name || "";
+  },
+
+  caixaDaEmpresa(companyId, excetoId) {
+    if (!companyId) return null;
+    return (this.graph.entities || []).find((e) => e.id !== excetoId && String(e.companyId || "") === String(companyId)) || null;
+  },
+
+  aplicarNomeDoCadastro(ent) {
+    if (!ent || ent.kind === "pf" || !ent.companyId) return false;
+    const c = this.companies().find((x) => String(x.id) === String(ent.companyId));
+    if (!c) return false;
+    const nome = this.nomeUsualDaEmpresa(c) || this.nomeCadastro(c);
+    if (!nome || ent.name === nome) return false;
+    ent.name = nome;
+    return true;
+  },
+
+  tokensDistintos(s) {
+    const stop = { spe: 1, ltda: 1, sa: 1, me: 1, epp: 1, e: 1, de: 1, do: 1, da: 1, dos: 1, das: 1, empreendimento: 1, empreendimentos: 1, empreendedora: 1, imobiliario: 1, imobiliaria: 1, participacoes: 1, participacao: 1, desenvolvimento: 1, urbanizacao: 1 };
+    const romano = { i: 1, ii: 1, iii: 1, iv: 1, v: 1, vi: 1, vii: 1, viii: 1, ix: 1, x: 1 };
+    return this.semAcento(s).split(" ").filter((t) => t && !stop[t] && (t.length >= 3 || romano[t] || /^\d+$/.test(t)));
+  },
+
+  conjuntoIgual(a, b) {
+    if (!a.length || a.length !== b.length) return false;
+    const set = new Set(b);
+    return a.every((t) => set.has(t));
+  },
+
+  notaCaixaEmpresa(box, company) {
+    const boxT = this.tokensDistintos(box && box.name);
+    if (!boxT.length) return 0;
+    const usualNome = this.nomeUsualDaEmpresa(company);
+    const usual = this.tokensDistintos(usualNome);
+    const legal = this.tokensDistintos([company.name, company.tradeName, company.corporateName].filter(Boolean).join(" "));
+    if (usualNome && this.semAcento(box.name) === this.semAcento(usualNome)) return 100;
+    if (this.conjuntoIgual(boxT, usual) || this.conjuntoIgual(boxT, legal)) return 90;
+    const romano = { i: 1, ii: 1, iii: 1, iv: 1, v: 1, vi: 1, vii: 1, viii: 1, ix: 1, x: 1 };
+    const cabe = (empT) => {
+      if (!empT.length || !boxT.every((t) => empT.indexOf(t) >= 0)) return false;
+      return !empT.some((t) => boxT.indexOf(t) < 0 && (romano[t] || /^\d+$/.test(t)));
+    };
+    if (cabe(usual) || cabe(legal)) return 70;
+    return 0;
+  },
+
+  /** Liga a caixa sem cadastro só quando uma empresa ganha sozinha, e o II não herda o cadastro do I. */
+  caixaUnicaDaEmpresa(company, usados) {
+    const livres = (this.graph.entities || []).filter((e) => e && e.kind !== "pf" && !e.companyId && !(usados && usados.has(e.id)));
+    const empresas = this.empresasDaEstrutura().filter((c) => !this.caixaDaEmpresa(c.id));
+    let melhor = null;
+    let melhorNota = 0;
+    let empate = false;
+    livres.forEach((box) => {
+      const n = this.notaCaixaEmpresa(box, company);
+      if (n < 70) return;
+      const outra = empresas.reduce((m, c) => {
+        if (String(c.id) === String(company.id)) return m;
+        return Math.max(m, this.notaCaixaEmpresa(box, c));
+      }, 0);
+      if (outra >= n) return;
+      if (n > melhorNota) {
+        melhor = box;
+        melhorNota = n;
+        empate = false;
+      } else if (n === melhorNota) {
+        empate = true;
+      }
+    });
+    return empate ? null : melhor;
+  },
+
   entidadeDaEmpresa(company, usados) {
     const id = String(company.id);
     const porId = (this.graph.entities || []).find((e) => String(e.companyId || "") === id);
     if (porId) return porId;
-    const app = window.EmpresasApp;
-    const custom = app && app.customOf ? app.customOf(company.id) : null;
-    const usual = this.semAcento(custom && custom.nome_usual);
+    const usual = this.semAcento(this.nomeUsualDaEmpresa(company));
     const legal = this.semAcento(company.name || company.tradeName || company.corporateName);
-    const alvo = new Set(this.tokensNome([company.name, company.tradeName, company.corporateName, custom && custom.nome_usual].join(" ")));
     const candidatos = (this.graph.entities || []).filter((e) => {
       if (usados && usados.has(e.id)) return false;
-      if (e.kind === "pf") return false;
-      if (e.companyId && String(e.companyId) !== id) return false;
+      if (e.kind === "pf" || e.companyId) return false;
       const nome = this.semAcento(e.name);
-      if (usual.length >= 4 && nome === usual) return true;
-      const box = this.tokensNome(e.name);
-      if (box.length && box.every((t) => alvo.has(t))) return true;
-      if (nome.length < 8 || legal.length < 8) return false;
-      return legal.startsWith(nome) || nome.startsWith(legal);
+      if (!nome) return false;
+      if (usual && nome === usual) return true;
+      return !!(legal && nome === legal);
     });
-    candidatos.sort((a, b) => this.semAcento(b.name).length - this.semAcento(a.name).length);
     return candidatos[0] || null;
   },
 
   sincronizarEmpresasCadastro() {
     if (this.aba === "parceria" || !this.cadastroPronto()) return;
-    let mudou = false;
+    let mudou = this.fundirCaixasRepetidas();
+    (this.graph.entities || []).forEach((ent) => {
+      if (this.aplicarNomeDoCadastro(ent)) mudou = true;
+    });
     const novas = [];
     const usados = new Set();
     this.empresasDaEstrutura().forEach((c) => {
-      const existente = this.entidadeDaEmpresa(c, usados);
+      if (this.caixaDaEmpresa(c.id)) {
+        const dona = this.caixaDaEmpresa(c.id);
+        if (dona) usados.add(dona.id);
+        return;
+      }
+      const existente = this.entidadeDaEmpresa(c, usados) || this.caixaUnicaDaEmpresa(c, usados);
       if (existente) {
         usados.add(existente.id);
         if (!existente.companyId) {
           existente.companyId = String(c.id);
           mudou = true;
         }
+        if (this.aplicarNomeDoCadastro(existente)) mudou = true;
         return;
       }
       novas.push(c);
     });
+    const presas = (this.graph.entities || []).filter((e) => e && e.kind !== "pf" && e.companyId);
+    const cair = new Set();
+    (this.graph.entities || []).forEach((solta) => {
+      if (!solta || solta.kind === "pf" || solta.companyId || cair.has(solta.id)) return;
+      const nome = this.semAcento(solta.name);
+      if (nome.length < 4) return;
+      const dona = presas.find((p) => this.semAcento(this.nomeExibido(p)) === nome || this.semAcento(p.name) === nome);
+      if (!dona || dona.id === solta.id) return;
+      this.redirecionarCaixa(solta.id, dona);
+      cair.add(solta.id);
+    });
+    if (cair.size) {
+      this.graph.entities = (this.graph.entities || []).filter((e) => e && !cair.has(e.id));
+      if (this.selectedId && cair.has(this.selectedId)) this.selectedId = null;
+      mudou = true;
+    }
     if (novas.length) {
       const ys = (this.graph.entities || []).map((e) => Number(e.y) || 0);
       const y = (ys.length ? Math.max.apply(null, ys) : 40) + 130;
@@ -416,7 +597,7 @@ const SocietarioApp = {
     return `<div class="soc-node${hub ? " is-hub" : ""}${sel}" data-id="${ent.id}" style="left:${x}px;top:${y}px;width:${this.NODE_W}px;">
       <div class="soc-port" data-id="${ent.id}" title="Arraste até outra caixa para ligar"></div>
       <div class="soc-node-body" style="background:${bg};">
-        <span class="soc-node-name">${this.esc(ent.name)}</span>
+        <span class="soc-node-name">${this.esc(this.nomeExibido(ent))}</span>
         ${hub
           ? `<span class="soc-node-tag">Centro</span>`
           : `<span class="soc-node-kind" style="background:${kindBg};">${kind}</span>`}
@@ -595,13 +776,129 @@ const SocietarioApp = {
     this.selectedId = null;
     this.panel = "link";
     this._pendingLink = { from, to, pct: 0, note: "" };
+    this._linkFrom = from || "";
+    this._linkTo = to || "";
+    this.linkFromOpen = false;
+    this.linkToOpen = false;
+    this.linkFromQuery = "";
+    this.linkToQuery = "";
     this.render();
-    requestAnimationFrame(() => {
-      const fromEl = document.getElementById("soc-lnk-from");
-      const toEl = document.getElementById("soc-lnk-to");
-      if (fromEl) fromEl.value = from;
-      if (toEl) toEl.value = to;
+  },
+
+  opcoesLigacao() {
+    const itens = [];
+    (this.graph.entities || []).forEach((e) => {
+      if (e.kind === "pf") {
+        itens.push({ id: e.id, label: String(e.name || "").toLocaleUpperCase("pt-BR") });
+        return;
+      }
+      if (!e.companyId) return;
+      const c = this.companies().find((x) => String(x.id) === String(e.companyId));
+      const completo = c
+        ? String(c.name || c.tradeName || c.corporateName || this.nomeExibido(e))
+        : this.nomeExibido(e);
+      itens.push({
+        id: e.id,
+        label: String(e.companyId) + " - " + completo.toLocaleUpperCase("pt-BR")
+      });
     });
+    return itens;
+  },
+
+  vinculosEquivalencia() {
+    const eq = window.ContabilEquiv;
+    if (eq && Array.isArray(eq.state && eq.state.vinculos) && eq.state.vinculos.length) return eq.state.vinculos;
+    try {
+      const raw = JSON.parse(localStorage.getItem("crm_ctb_equiv") || "null");
+      if (raw && Array.isArray(raw.vinculos)) return raw.vinculos;
+    } catch (e) {}
+    return [];
+  },
+
+  contasDaLigacao(fromId, toId) {
+    const vazio = { debitoLucro: "", creditoLucro: "", debitoPrejuizo: "", creditoPrejuizo: "" };
+    const de = this.entity(fromId);
+    const para = this.entity(toId);
+    if (!de || !para || !de.companyId || !para.companyId) return vazio;
+    const origem = String(para.companyId);
+    const destino = String(de.companyId);
+    const row = this.vinculosEquivalencia().find((v) => String(v.origem) === origem && String(v.destino) === destino)
+      || this.vinculosEquivalencia().find((v) => String(v.origem) === origem);
+    if (!row) return vazio;
+    return {
+      debitoLucro: row.debitoLucro || "",
+      creditoLucro: row.creditoLucro || "",
+      debitoPrejuizo: row.debitoPrejuizo || "",
+      creditoPrejuizo: row.creditoPrejuizo || ""
+    };
+  },
+
+  paintLinkPicks() {
+    if (!window.MlEmpresaFilter) return;
+    const itens = this.opcoesLigacao();
+    const pintar = (boxId, filterId, campo, openKey, queryKey) => {
+      const box = document.getElementById(boxId);
+      if (!box) return;
+      const atual = this[campo] ? String(this[campo]) : "";
+      box.innerHTML = MlEmpresaFilter.html({
+        id: filterId,
+        label: "Empresa",
+        items: itens,
+        selectedIds: atual ? [atual] : [],
+        open: !!this[openKey],
+        query: this[queryKey] || "",
+        emptyMeansAll: false,
+        emptyLabel: "Selecione a empresa",
+        single: true
+      });
+      MlEmpresaFilter.bind(filterId, {
+        toggleOpen: () => {
+          this[openKey] = !this[openKey];
+          this.paintLinkPicks();
+        },
+        setQuery: (q) => {
+          this[queryKey] = q || "";
+          const list = document.getElementById(filterId + "-list");
+          if (!list) return;
+          const escolhido = this[campo] ? [String(this[campo])] : [];
+          list.innerHTML = MlEmpresaFilter.listHtml({
+            id: filterId,
+            items: itens,
+            selectedIds: escolhido,
+            query: this[queryKey],
+            single: true
+          });
+        },
+        toggleId: (id, on) => {
+          this[campo] = on ? String(id) : "";
+          this[openKey] = false;
+          this.paintLinkPicks();
+          this.preencherContasLigacao();
+        },
+        selectAll: () => {},
+        selectNone: () => {
+          this[campo] = "";
+          this.paintLinkPicks();
+          this.preencherContasLigacao();
+        }
+      });
+    };
+    pintar("soc-lnk-from-box", "soc-lnk-from", "_linkFrom", "linkFromOpen", "linkFromQuery");
+    pintar("soc-lnk-to-box", "soc-lnk-to", "_linkTo", "linkToOpen", "linkToQuery");
+  },
+
+  preencherContasLigacao() {
+    const contas = this.contasDaLigacao(this._linkFrom, this._linkTo);
+    const lucroCred = (window.ContabilEquiv && ContabilEquiv.CONTA_LUCRO) || "4.1.03.01.001";
+    const prejDeb = (window.ContabilEquiv && ContabilEquiv.CONTA_PREJUIZO) || "4.1.03.01.002";
+    const por = (id, valor) => {
+      const el = document.getElementById(id);
+      if (el) el.value = valor;
+    };
+    por("soc-lnk-deb-lucro", contas.debitoLucro);
+    por("soc-lnk-cred-lucro", contas.creditoLucro || lucroCred);
+    por("soc-lnk-deb-prej", contas.debitoPrejuizo || prejDeb);
+    por("soc-lnk-cred-prej", contas.creditoPrejuizo);
   },
 
   toggleLinkMode() {
@@ -632,13 +929,13 @@ const SocietarioApp = {
     if (!ent) return "";
     const cards = [];
     if ((ent.note || "").trim()) {
-      cards.push(`<article class="soc-note soc-note-ent"><strong>${this.esc(ent.name)}</strong><span>${this.esc(ent.note)}</span></article>`);
+      cards.push(`<article class="soc-note soc-note-ent"><strong>${this.esc(this.nomeExibido(ent))}</strong><span>${this.esc(ent.note)}</span></article>`);
     }
     (this.graph.links || []).forEach((l) => {
       if ((l.from !== ent.id && l.to !== ent.id) || !(l.note || "").trim()) return;
       const a = this.entity(l.from);
       const b = this.entity(l.to);
-      cards.push(`<article class="soc-note soc-note-link"><strong>${this.esc(a && a.name)} → ${this.esc(b && b.name)} (${this.fmtPct(l.pct)})</strong><span>${this.esc(l.note)}</span></article>`);
+      cards.push(`<article class="soc-note soc-note-link"><strong>${this.esc(this.nomeExibido(a))} → ${this.esc(this.nomeExibido(b))} (${this.fmtPct(l.pct)})</strong><span>${this.esc(l.note)}</span></article>`);
     });
     (this.graph.notes || []).forEach((n) => {
       if (!n.text) return;
@@ -647,7 +944,7 @@ const SocietarioApp = {
       cards.push(`<article class="soc-note soc-note-free"><span>${this.esc(n.text)}</span><button type="button" class="soc-note-x" title="Excluir nota" onclick="SocietarioApp.removeNote('${n.id}')">×</button></article>`);
     });
     if (!cards.length) return "";
-    return `<div class="soc-notes"><div class="soc-notes-title">Notas · ${this.esc(ent.name)}</div><div class="soc-notes-grid">${cards.join("")}</div></div>`;
+    return `<div class="soc-notes"><div class="soc-notes-title">Notas · ${this.esc(this.nomeExibido(ent))}</div><div class="soc-notes-grid">${cards.join("")}</div></div>`;
   },
 
   paintCompanyPick() {
@@ -687,13 +984,20 @@ const SocietarioApp = {
         });
       },
       toggleId: (id, on) => {
+        if (on && this.caixaDaEmpresa(id, this.selectedId)) {
+          alert("Essa empresa já está em outra caixa. Cada cadastro só pode aparecer uma vez.");
+          this.paintCompanyPick();
+          return;
+        }
         this._companyId = on ? String(id) : "";
         this.paintCompanyPick();
+        this.atualizarNomeUsual();
       },
       selectAll: () => {},
       selectNone: () => {
         this._companyId = "";
         this.paintCompanyPick();
+        this.atualizarNomeUsual();
       }
     });
   },
@@ -720,11 +1024,15 @@ const SocietarioApp = {
       const ent = this.entity(this.selectedId) || { id: "", name: "", kind: "pj", note: "", companyId: "", partnerId: "" };
       const isNew = !ent.id;
       return this.panelWrap("Empresa / pessoa", `
-        <p style="font-size:0.78rem;color:#64748b;margin:0 0 10px;line-height:1.4;">Inclui ou edita um quadradinho no organograma. PJ fica verde e PF azul, ou escolha outra cor abaixo.</p>
-        <label style="${this.lbl}">Nome
-          ${this.hint("Nome que aparece na caixa (empresa ou pessoa).")}
-          <input id="soc-ent-name" class="form-control" value="${this.esc(ent.name)}">
+        <p style="font-size:0.78rem;color:#64748b;margin:0 0 10px;line-height:1.4;">Pessoa física leva o nome digitado. Empresa mostra o nome usual do cadastro, e cada cadastro só entra em uma caixa.</p>
+        <label id="soc-nome-pf" style="${this.lbl}${ent.kind === "pf" ? "" : "display:none;"}">Nome
+          ${this.hint("Nome da pessoa física que aparece na caixa azul.")}
+          <input id="soc-ent-name" class="form-control" value="${this.esc(ent.kind === "pf" ? ent.name : "")}">
         </label>
+        <div id="soc-nome-pj" style="${this.lbl}${ent.kind === "pf" ? "display:none;" : ""}">Nome na caixa
+          ${this.hint("Vem do nome usual do cadastro de empresas. Não se digita aqui.")}
+          <div id="soc-nome-usual" class="form-control" style="background:#f8fafc;">${this.esc(this.nomeUsualDaEmpresa(ent.companyId) || "Escolha a empresa abaixo")}</div>
+        </div>
         <label style="${this.lbl}">Tipo
           ${this.hint("PJ = pessoa jurídica (empresa). PF = pessoa física (sócio). Isso também sugere a cor padrão.")}
           <select id="soc-ent-kind" class="form-control" onchange="SocietarioApp.onEntityKindChange()">
@@ -739,8 +1047,8 @@ const SocietarioApp = {
             <input id="soc-ent-color" type="color" value="${this.esc(ent.color || this.defaultKindColor(ent.kind))}" title="Cor personalizada" style="width:42px;height:32px;padding:0;border:1px solid #cbd5e1;border-radius:6px;cursor:pointer;">
           </div>
         </div>
-        <label style="${this.lbl}">Empresa Sienge
-          ${this.hint("Empresa gerida pelo grupo ou da Gestão Ellenco. Pessoa física continua sem esse vínculo.")}
+        <label style="${this.lbl}${ent.kind === "pf" ? "display:none;" : ""}">Empresa Sienge
+          ${this.hint("Uma empresa do cadastro por caixa. O nome usual dela é o que aparece no organograma.")}
           <div id="soc-company-box"></div>
         </label>
         <label style="${this.lbl}">Parceiro / sócio (parametrização)
@@ -760,22 +1068,43 @@ const SocietarioApp = {
     }
     if (this.panel === "link") {
       const existing = (this.graph.links || []).find(l => l.id === this.selectedLinkId);
-      const link = existing || this._pendingLink || { from: this.graph.hubId, to: "", pct: 0, note: "" };
+      const link = existing || this._pendingLink || { from: this._linkFrom || this.graph.hubId, to: this._linkTo || "", pct: 0, note: "" };
       const isNew = !existing;
+      const contas = this.contasDaLigacao(link.from, link.to);
+      const lucroCred = (window.ContabilEquiv && ContabilEquiv.CONTA_LUCRO) || "4.1.03.01.001";
+      const prejDeb = (window.ContabilEquiv && ContabilEquiv.CONTA_PREJUIZO) || "4.1.03.01.002";
       return this.panelWrap("Interligação (participação)", `
-        <p style="font-size:0.78rem;color:#64748b;margin:0 0 8px;line-height:1.4;">Traça a seta de participação: de quem detém o percentual para a empresa participada. Também dá para arrastar o pontinho branco de uma caixa até a outra.</p>
-        <label style="${this.lbl}">De (sócio / holding)
-          ${this.hint("Quem possui a participação (origem da seta).")}
-          <select id="soc-lnk-from" class="form-control">${this.entityOptions(link.from)}</select>
-        </label>
-        <label style="${this.lbl}">Para (participada)
-          ${this.hint("Empresa que recebe a participação (destino da seta).")}
-          <select id="soc-lnk-to" class="form-control">${this.entityOptions(link.to, link.from)}</select>
-        </label>
+        <p style="font-size:0.78rem;color:#64748b;margin:0 0 8px;line-height:1.4;">Escolha uma empresa em cada ponta, pelo nome completo do cadastro. As contas de lucro e prejuízo já entram na parametrização da equivalência.</p>
+        <div style="${this.lbl}">De (sócio / holding)
+          ${this.hint("Quem possui a participação. Uma empresa por vez, com o nome completo.")}
+          <div id="soc-lnk-from-box"></div>
+        </div>
+        <div style="${this.lbl}">Para (participada)
+          ${this.hint("Empresa que recebe a participação. Uma empresa por vez, com o nome completo.")}
+          <div id="soc-lnk-to-box"></div>
+        </div>
         <label style="${this.lbl}">Percentual
           ${this.hint("Quanto esta origem detém na participada. Clique no % da linha do organograma para editar depois.")}
           <input id="soc-lnk-pct" class="form-control" type="number" min="0" max="100" step="0.01" value="${link.pct || 0}">
         </label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <label style="${this.lbl}">Lucro · debitada
+            ${this.hint("Conta debitada quando a participada der lucro.")}
+            <input id="soc-lnk-deb-lucro" class="form-control" value="${this.esc(contas.debitoLucro)}" placeholder="1.2.02.01.002">
+          </label>
+          <label style="${this.lbl}">Lucro · creditada
+            ${this.hint("Conta creditada no lucro. O padrão é a reduzida 1815.")}
+            <input id="soc-lnk-cred-lucro" class="form-control" value="${this.esc(contas.creditoLucro || lucroCred)}">
+          </label>
+          <label style="${this.lbl}">Prejuízo · debitada
+            ${this.hint("Conta debitada no prejuízo. O padrão é a reduzida 1838.")}
+            <input id="soc-lnk-deb-prej" class="form-control" value="${this.esc(contas.debitoPrejuizo || prejDeb)}">
+          </label>
+          <label style="${this.lbl}">Prejuízo · creditada
+            ${this.hint("Conta creditada quando a participada der prejuízo.")}
+            <input id="soc-lnk-cred-prej" class="form-control" value="${this.esc(contas.creditoPrejuizo)}" placeholder="1.2.02.01.002">
+          </label>
+        </div>
         <label style="${this.lbl}">Nota da ligação
           ${this.hint("Opcional. Ex.: acordo de sócios, cláusula especial.")}
           <textarea id="soc-lnk-note" class="form-control" rows="2">${this.esc(link.note)}</textarea>
@@ -789,7 +1118,7 @@ const SocietarioApp = {
     if (this.panel === "note") {
       const dona = this.entity(this.selectedId);
       return this.panelWrap("Nova nota da estrutura", `
-        ${dona ? `<p style="margin:0 0 8px;font-size:0.78rem;color:#334155;">Nota de <strong>${this.esc(dona.name)}</strong>. Ela aparece só com esta empresa selecionada.</p>` : this.hint("Clique antes na empresa que recebe a nota.")}
+        ${dona ? `<p style="margin:0 0 8px;font-size:0.78rem;color:#334155;">Nota de <strong>${this.esc(this.nomeExibido(dona))}</strong>. Ela aparece só com esta empresa selecionada.</p>` : this.hint("Clique antes na empresa que recebe a nota.")}
         <textarea id="soc-note-text" class="form-control" rows="4" placeholder="Ex.: Moura Leite tem 50% na Ellenco, que por sua vez tem 55,5% na Vercellino..."></textarea>
         <button type="button" class="btn btn-primary" style="margin-top:8px;" onclick="SocietarioApp.saveNote()">Salvar nota</button>
       `);
@@ -854,11 +1183,22 @@ const SocietarioApp = {
     const kindEl = document.getElementById("soc-ent-kind");
     const colorEl = document.getElementById("soc-ent-color");
     if (!kindEl || !colorEl) return;
+    const pf = kindEl.value === "pf";
     const cur = String(colorEl.value || "").toLowerCase();
     const defaults = this.colorPresets().map(p => p.hex.toLowerCase());
-    if (!cur || defaults.includes(cur)) {
-      colorEl.value = this.defaultKindColor(kindEl.value);
-    }
+    if (!cur || defaults.includes(cur)) colorEl.value = this.defaultKindColor(kindEl.value);
+    const nomePf = document.getElementById("soc-nome-pf");
+    const nomePj = document.getElementById("soc-nome-pj");
+    const empresa = document.getElementById("soc-company-box");
+    if (nomePf) nomePf.style.display = pf ? "" : "none";
+    if (nomePj) nomePj.style.display = pf ? "none" : "";
+    if (empresa && empresa.closest("label")) empresa.closest("label").style.display = pf ? "none" : "";
+  },
+
+  atualizarNomeUsual() {
+    const el = document.getElementById("soc-nome-usual");
+    if (!el) return;
+    el.textContent = this.nomeUsualDaEmpresa(this._companyId) || "Escolha a empresa abaixo";
   },
 
   panelWrap(title, inner) {
@@ -1196,6 +1536,7 @@ const SocietarioApp = {
       this.fitCanvas();
       this.bindFit();
       if (this.panel === "entity") this.paintCompanyPick();
+      if (this.panel === "link") this.paintLinkPicks();
     });
   },
 
@@ -1211,10 +1552,17 @@ const SocietarioApp = {
   },
 
   selectLink(id) {
+    const link = (this.graph.links || []).find((l) => l.id === id);
     this.selectedLinkId = id;
     this.selectedId = null;
     this.panel = "link";
     this._pendingLink = null;
+    this._linkFrom = link ? link.from : "";
+    this._linkTo = link ? link.to : "";
+    this.linkFromOpen = false;
+    this.linkToOpen = false;
+    this.linkFromQuery = "";
+    this.linkToQuery = "";
     this.render();
   },
 
@@ -1233,6 +1581,12 @@ const SocietarioApp = {
     this.selectedId = null;
     this.panel = "link";
     this._pendingLink = null;
+    this._linkFrom = "";
+    this._linkTo = "";
+    this.linkFromOpen = false;
+    this.linkToOpen = false;
+    this.linkFromQuery = "";
+    this.linkToQuery = "";
     this.render();
   },
 
@@ -1254,24 +1608,35 @@ const SocietarioApp = {
   },
 
   saveEntity() {
-    const name = (document.getElementById("soc-ent-name").value || "").trim();
-    if (!name) { alert("Informe o nome."); return; }
     const kind = document.getElementById("soc-ent-kind").value === "pf" ? "pf" : "pj";
     const colorRaw = (document.getElementById("soc-ent-color") && document.getElementById("soc-ent-color").value) || "";
     const color = /^#[0-9a-fA-F]{6}$/.test(colorRaw) ? colorRaw : this.defaultKindColor(kind);
-    const companyId = this._companyId || "";
     const partnerId = document.getElementById("soc-ent-partner").value;
     const note = document.getElementById("soc-ent-note").value || "";
-    const company = this.companies().find(c => String(c.id) === String(companyId));
+    let companyId = "";
+    let name = "";
+    if (kind === "pf") {
+      name = (document.getElementById("soc-ent-name").value || "").trim();
+      if (!name) { alert("Informe o nome da pessoa."); return; }
+    } else {
+      companyId = this._companyId || "";
+      if (!companyId) {
+        alert("Escolha a empresa do cadastro. O nome da caixa é o nome usual dela.");
+        return;
+      }
+      if (this.caixaDaEmpresa(companyId, this.selectedId)) {
+        alert("Essa empresa já está em outra caixa. Cada cadastro só pode aparecer uma vez.");
+        return;
+      }
+      const company = this.companies().find((c) => String(c.id) === String(companyId));
+      name = this.nomeUsualDaEmpresa(companyId) || (company ? this.nomeCadastro(company) : "");
+      if (!name) { alert("Essa empresa ainda não tem nome usual no cadastro."); return; }
+    }
     const nova = !(this.selectedId && this.entity(this.selectedId));
     if (nova && kind === "pj") {
       const ok = this.empresasDaEstrutura().some((c) => String(c.id) === String(companyId));
       if (!ok) {
         alert("Empresa nova não é digitada aqui. No cadastro de empresas, ligue Gerida pelo grupo ou Gestão Ellenco. A caixa entra no organograma.");
-        return;
-      }
-      if (this.graph.entities.some((e) => String(e.companyId || "") === String(companyId))) {
-        alert("Essa empresa já está no organograma.");
         return;
       }
     }
@@ -1283,7 +1648,6 @@ const SocietarioApp = {
       ent.companyId = companyId;
       ent.partnerId = partnerId;
       ent.note = note;
-      if (company && company.name && !ent.name) ent.name = company.name;
     } else {
       const size = this.canvasSize();
       const wrap = document.getElementById("soc-canvas-wrap");
@@ -1321,13 +1685,26 @@ const SocietarioApp = {
   },
 
   saveLink() {
-    const from = document.getElementById("soc-lnk-from").value;
-    const to = document.getElementById("soc-lnk-to").value;
+    const from = this._linkFrom || "";
+    const to = this._linkTo || "";
     const pct = Number(document.getElementById("soc-lnk-pct").value);
     const note = document.getElementById("soc-lnk-note").value || "";
-    if (!from || !to) { alert("Selecione origem e destino."); return; }
+    const contas = {
+      debitoLucro: (document.getElementById("soc-lnk-deb-lucro").value || "").trim(),
+      creditoLucro: (document.getElementById("soc-lnk-cred-lucro").value || "").trim(),
+      debitoPrejuizo: (document.getElementById("soc-lnk-deb-prej").value || "").trim(),
+      creditoPrejuizo: (document.getElementById("soc-lnk-cred-prej").value || "").trim()
+    };
+    if (!from || !to) { alert("Selecione a empresa de origem e a de destino."); return; }
     if (from === to) { alert("A ligação precisa ser entre duas empresas diferentes."); return; }
     if (!Number.isFinite(pct) || pct < 0 || pct > 100) { alert("Percentual entre 0 e 100."); return; }
+    const de = this.entity(from);
+    const para = this.entity(to);
+    const ambasEmpresas = de && para && de.companyId && para.companyId;
+    if (ambasEmpresas && (!contas.debitoLucro || !contas.creditoLucro || !contas.debitoPrejuizo || !contas.creditoPrejuizo)) {
+      alert("Informe a conta de débito e a de crédito do lucro e do prejuízo.");
+      return;
+    }
     const existing = (this.graph.links || []).find(l => l.id === this.selectedLinkId);
     if (existing) {
       existing.from = from;
@@ -1345,9 +1722,23 @@ const SocietarioApp = {
     }
     this._pendingLink = null;
     this.persist();
-    this.panel = "none";
-    this.selectedLinkId = null;
-    this.render();
+    const seguir = ambasEmpresas && window.ContabilEquiv && typeof ContabilEquiv.receberDoOrganograma === "function"
+      ? ContabilEquiv.receberDoOrganograma({
+        origem: String(para.companyId),
+        destino: String(de.companyId),
+        debitoLucro: contas.debitoLucro,
+        creditoLucro: contas.creditoLucro,
+        debitoPrejuizo: contas.debitoPrejuizo,
+        creditoPrejuizo: contas.creditoPrejuizo,
+        apelidoOrigem: this.nomeExibido(para),
+        apelidoDestino: this.nomeExibido(de)
+      })
+      : Promise.resolve();
+    Promise.resolve(seguir).then(() => {
+      this.panel = "none";
+      this.selectedLinkId = null;
+      this.render();
+    });
   },
 
   deleteLink(id) {
