@@ -378,6 +378,15 @@ const GerarPagamentoApp = {
     return cc && (cc.idCompany != null ? cc.idCompany : cc.companyId);
   },
 
+  contaCurta(c) {
+    if (!c) return "Conta";
+    const num = String(c.numero || c.id || "").trim();
+    const nome = String(c.nome || "");
+    const banco = /ita[uú]/i.test(nome) ? "Itaú" : (/bradesco/i.test(nome) ? "Bradesco" : (/santander/i.test(nome) ? "Santander" : (/caixa/i.test(nome) ? "Caixa" : (/banco do brasil|\bbb\b/i.test(nome) ? "BB" : ""))));
+    const curta = [num ? "C/C " + num : "", banco].filter(Boolean).join(" · ");
+    return curta || this.contaLabel(c);
+  },
+
   contaLabel(c) {
     if (window.CentrosCustoApp && typeof CentrosCustoApp.contaLabel === "function") {
       return CentrosCustoApp.contaLabel(c);
@@ -2162,18 +2171,119 @@ const GerarPagamentoApp = {
       alert("Marque títulos livres em ao menos um lote.");
       return;
     }
-    const linhas = grupos.map((g) => {
-      const itens = g.itens.filter((it) => it.marcado && !it.emLote && !it.bloqueio);
-      const total = itens.reduce((t, it) => t + this.valorPagar(it), 0);
-      return `• ${this.nomeAbaEmpresa(this.empresaDoGrupo(g))} · ${this.dataBr(g.dia)} · ${this.contaLabel(g.conta)} · ${itens.length} título(s) · ${this.money(total)}`;
+    const baixaRuim = grupos.find((g) => {
+      const baixa = this.dataBaixaDoGrupo(g);
+      return !/^\d{4}-\d{2}-\d{2}$/.test(baixa) || this.fimDeSemana(baixa);
     });
-    const pergunta = `Gerar e autorizar ${grupos.length} lote(s) de todas as empresas no Sienge?\n\n${linhas.join("\n")}\n\nCada lote é criado e autorizado em seguida, no mesmo passo.`;
-    const okConf = typeof window.mouraConfirm === "function" ? await window.mouraConfirm(pergunta) : confirm(pergunta);
-    if (!okConf) return;
-    for (const g of grupos) {
-      const okLote = await this.gerarLote(g.key, { silencioso: true });
-      if (!okLote) break;
+    if (baixaRuim) {
+      alert("A data da baixa de " + this.nomeAbaEmpresa(this.empresaDoGrupo(baixaRuim)) + " não é dia útil. Ajuste antes de gerar os lotes.");
+      return;
     }
+    const okConf = await this.confirmarFila(grupos);
+    if (!okConf) return;
+    const lotes = [];
+    for (let i = 0; i < grupos.length; i++) {
+      const lote = await this.gerarLote(grupos[i].key, { silencioso: true, semEnvio: true, seq: i + 1 });
+      if (lote && lote.id) lotes.push(lote);
+    }
+    if (!lotes.length) {
+      alert("Não há título livre para gerar.");
+      return;
+    }
+    await this.enviarFila(lotes);
+  },
+
+  confirmarFila(grupos) {
+    const totalGeral = grupos.reduce((t, g) => t + g.itens.filter((it) => it.marcado && !it.emLote && !it.bloqueio).reduce((s, it) => s + this.valorPagar(it), 0), 0);
+    const titulos = grupos.reduce((t, g) => t + g.itens.filter((it) => it.marcado && !it.emLote && !it.bloqueio).length, 0);
+    const porEmp = new Map();
+    grupos.forEach((g) => {
+      const id = this.empresaDoGrupo(g);
+      const lista = porEmp.get(id) || [];
+      lista.push(g);
+      porEmp.set(id, lista);
+    });
+    const empresas = [...porEmp.keys()].sort((a, b) => (Number(a) || 0) - (Number(b) || 0));
+    const baixas = [...new Set(grupos.map((g) => this.dataBaixaDoGrupo(g)))];
+    const quando = baixas.length === 1 ? "Baixa em " + this.dataBr(baixas[0]) + "." : "";
+    const blocos = empresas.map((id) => {
+      const cad = (this.state.companies || []).find((c) => String(c.id) === String(id));
+      const fantasia = cad && (cad.tradeName || cad.name) ? " · " + String(cad.tradeName || cad.name).split(" ").slice(0, 3).join(" ") : "";
+      const linhas = porEmp.get(id).map((g) => {
+        const n = g.itens.filter((it) => it.marcado && !it.emLote && !it.bloqueio).length;
+        const total = g.itens.filter((it) => it.marcado && !it.emLote && !it.bloqueio).reduce((s, it) => s + this.valorPagar(it), 0);
+        const dia = baixas.length === 1 ? "" : " · " + this.dataBr(g.dia);
+        return `<div class="gp-fila-linha"><span>${this.esc(this.contaCurta(g.conta))}${dia}</span><span>${n} título(s)</span><strong>${this.money(total)}</strong></div>`;
+      }).join("");
+      return `<section class="gp-fila-emp"><h4>${this.esc(this.nomeAbaEmpresa(id) + fantasia)}</h4>${linhas}</section>`;
+    }).join("");
+    return new Promise((resolve) => {
+      const antigo = document.getElementById("gp-fila-conf");
+      if (antigo) antigo.remove();
+      const overlay = document.createElement("div");
+      overlay.id = "gp-fila-conf";
+      overlay.innerHTML = `
+        <div class="gp-fila-box" role="dialog" aria-modal="true" aria-labelledby="gp-fila-tit">
+          <h3 id="gp-fila-tit">${grupos.length} lote(s) · ${empresas.length} empresa(s)</h3>
+          <p>${titulos} título(s) · ${this.money(totalGeral)}${quando ? " · " + this.esc(quando) : ""}</p>
+          <div class="gp-fila-lista">${blocos}</div>
+          <p class="gp-fila-nota">O robô cria, autoriza e gera o arquivo de todos esses lotes antes de sair do Sienge.</p>
+          <div class="gp-fila-acoes">
+            <button type="button" class="btn btn-cancel" data-no>Cancelar</button>
+            <button type="button" class="btn btn-primary" data-ok>Gerar lotes</button>
+          </div>
+        </div>`;
+      const fechar = (ok) => { overlay.remove(); resolve(ok); };
+      overlay.querySelector("[data-ok]").addEventListener("click", () => fechar(true));
+      overlay.querySelector("[data-no]").addEventListener("click", () => fechar(false));
+      overlay.addEventListener("click", (e) => { if (e.target === overlay) fechar(false); });
+      document.body.appendChild(overlay);
+    });
+  },
+
+  async enviarFila(lotes) {
+    const s = this.state;
+    s.gerandoLote = "fila";
+    s.roboLote = "fila";
+    s.roboMsg = `O robô está no Sienge com ${lotes.length} lote(s). A sessão só fecha no fim.`;
+    this.paintTitulos();
+    this.pintarRoboMsg();
+    lotes.forEach((l) => this.completarLote(l));
+    const r = await this.roboChamar("/lotes/fila", { lotes });
+    s.gerandoLote = "";
+    s.roboLote = "";
+    s.roboMsg = "";
+    if (r.offline || r.cancelado) {
+      this.paintTitulos();
+      this.pintarRoboMsg();
+      alert(`Os lotes ficaram salvos no Integra, mas ainda não foram criados no Sienge.\n\n${r.erro}` + (r.offline ? "\nClique em Ligar robô no topo desta tela." : ""));
+      return;
+    }
+    if (r.erro && /desconhecido/i.test(String(r.erro))) {
+      this.paintTitulos();
+      this.pintarRoboMsg();
+      alert("O robô ligado neste computador ainda gera um lote e sai do Sienge. Feche a janela do robô e clique em Ligar robô de novo. Os lotes ficaram salvos no Integra.");
+      return;
+    }
+    const lista = Array.isArray(r.resultados) ? r.resultados : [];
+    for (const item of lista) {
+      const lote = s.lotes.find((l) => l.id === item.id);
+      if (!lote) continue;
+      if (item.ok) {
+        await this.registrarSienge(lote, "gerar", { ok: true, numeroSienge: item.numeroSienge }, { status: "gerado", numero: item.numeroSienge || "", geradoEm: new Date().toISOString(), geradoPor: this.usuarioAtual(), erro: "" });
+        await this.registrarSienge(lote, "aprovar", { ok: true, numeroSienge: item.numeroSienge }, { status: "aprovado", aprovadoEm: new Date().toISOString(), aprovadoPor: this.usuarioAtual(), arquivo: item.arquivo || "", erro: "" });
+      } else if (item.numeroSienge) {
+        await this.registrarSienge(lote, "gerar", { ok: true, numeroSienge: item.numeroSienge }, { status: "gerado", numero: item.numeroSienge, geradoEm: new Date().toISOString(), geradoPor: this.usuarioAtual(), erro: "" });
+        await this.registrarSienge(lote, "aprovar", { ok: false, erro: item.erro || "Falha ao autorizar." }, { erro: item.erro || "Falha ao autorizar." });
+      } else {
+        await this.registrarSienge(lote, "gerar", { ok: false, erro: item.erro || "Falha no robô." }, { status: "erro", erro: item.erro || "Falha no robô." });
+      }
+    }
+    this.paintTitulos();
+    this.pintarRoboMsg();
+    const falhas = lista.filter((x) => !x.ok);
+    if (!lista.length && r.erro) alert(r.erro);
+    else if (falhas.length) alert("Estes lotes não fecharam no Sienge. Os outros da fila foram feitos na mesma sessão.\n\n" + falhas.map((f) => "• " + (f.numeroSienge ? "nº " + f.numeroSienge + " · " : "") + (f.erro || "falha")).join("\n"));
   },
 
   async gerarLote(key, opts) {
@@ -2227,8 +2337,9 @@ const GerarPagamentoApp = {
     await this.limparPendentes(itens.map((it) => it.chave));
     const agora = new Date();
     const pad = (n) => String(n).padStart(2, "0");
+    const seq = opts && opts.seq != null ? "-" + String(opts.seq) : "";
     const id = "L" + agora.getFullYear() + pad(agora.getMonth() + 1) + pad(agora.getDate()) + "-" + pad(agora.getHours()) + pad(agora.getMinutes()) + pad(agora.getSeconds())
-      + "-" + String(g.contaKey || "").replace(/[^\w]/g, "").slice(-6) + "-" + String(g.dia || "").replace(/-/g, "").slice(4);
+      + "-" + String(g.contaKey || "").replace(/[^\w]/g, "").slice(-6) + "-" + String(g.dia || "").replace(/-/g, "").slice(4) + seq;
     const usuario = this.usuarioAtual();
     const lote = JSON.parse(JSON.stringify({
       id,
@@ -2262,6 +2373,7 @@ const GerarPagamentoApp = {
     s.gerandoLote = "";
     this.paintTitulos();
     if (!salvoRemoto) alert("O lote foi gerado, mas ficou salvo só neste computador (não consegui gravar no Firebase).");
+    if (opts && opts.semEnvio) return lote;
     return await this.enviarAoSienge(id);
   },
 
@@ -2862,8 +2974,8 @@ const GerarPagamentoApp = {
               title="${this.loteConferido(g) ? "Classificação aceita. Clique para desfazer o aceite deste lote." : "Aceite de que a classificação, o rateio e a conta estão corretos. O Integra passa a reconhecer este padrão."}">
               <i data-lucide="${this.loteConferido(g) ? "circle-check" : "circle-alert"}" style="width:14px;height:14px;"></i> Conferido
             </button>
-            <button type="button" class="btn btn-primary" ${s.gerandoLote || !marcados.length ? "disabled" : ""} onclick="GerarPagamentoApp.gerarLote('${this.esc(g.key)}')"
-              title="${!marcados.length && divergentes ? "Os títulos divergentes ficam de fora deste envio." : ""}"
+            <button type="button" class="btn btn-primary" ${s.gerandoLote || !marcados.length || !this.loteConferido(g) ? "disabled" : ""} onclick="GerarPagamentoApp.gerarLote('${this.esc(g.key)}')"
+              title="${!this.loteConferido(g) ? "Marque Conferido para liberar a geração deste lote." : (!marcados.length && divergentes ? "Os títulos divergentes ficam de fora deste envio." : "Gera só este lote.")}"
               style="height:36px;width:150px;justify-content:center;display:inline-flex;align-items:center;gap:6px;">
               ${gerando ? '<span class="btn-spin"></span> Gerando…' : '<i data-lucide="layers" style="width:14px;"></i> Gerar lote'}
             </button>
@@ -3681,6 +3793,19 @@ const GerarPagamentoApp = {
           #gerar-pagamento-root .ml-tab.gp-tab-erro { color:#b91c1c; background:#fef2f2; border-radius:8px 8px 0 0; }
           #gerar-pagamento-root .ml-tab.gp-tab-erro.is-active { color:#b91c1c; border-bottom-color:#b91c1c; }
           #gerar-pagamento-root .gp-tab-selo { width:15px; height:15px; }
+          #gp-fila-conf { position:fixed; inset:0; z-index:2147483000; display:flex; align-items:center; justify-content:center; background:rgba(12,41,29,0.55); padding:16px; }
+          #gp-fila-conf .gp-fila-box { background:#fff; border-radius:12px; width:100%; max-width:460px; max-height:min(78vh, 640px); display:flex; flex-direction:column; padding:18px 18px 14px; box-shadow:0 18px 40px rgba(0,0,0,0.22); }
+          #gp-fila-conf h3 { margin:0; color:#105436; font-size:1rem; }
+          #gp-fila-conf p { margin:6px 0 0; color:#475569; font-size:0.82rem; }
+          #gp-fila-conf .gp-fila-lista { overflow:auto; margin-top:12px; border:1px solid #e2e8f0; border-radius:10px; }
+          #gp-fila-conf .gp-fila-emp { padding:8px 10px; border-bottom:1px solid #e2e8f0; }
+          #gp-fila-conf .gp-fila-emp:last-child { border-bottom:0; }
+          #gp-fila-conf h4 { margin:0 0 4px; font-size:0.78rem; color:#105436; }
+          #gp-fila-conf .gp-fila-linha { display:grid; grid-template-columns:1fr auto auto; gap:10px; align-items:center; font-size:0.8rem; color:#0f172a; padding:3px 0; }
+          #gp-fila-conf .gp-fila-linha strong { text-align:right; }
+          #gp-fila-conf .gp-fila-nota { color:#64748b; }
+          #gp-fila-conf .gp-fila-acoes { display:flex; justify-content:flex-end; gap:8px; margin-top:14px; }
+          #gerar-pagamento-root .gp-lote-acoes .btn:disabled { opacity:0.45; cursor:not-allowed; }
           #gerar-pagamento-root .gp-conferido { height:36px; padding:0 12px; border-radius:8px; border:1px solid #eab308; background:#fef9c3; color:#a16207; font-weight:800; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
           #gerar-pagamento-root .gp-conferido.is-on { border-color:#105436; background:#105436; color:#fff; }
           #gerar-pagamento-root .gp-cc-rotulo { display:inline-block; margin-right:6px; padding:1px 7px; border-radius:999px; background:#e2e8f0; color:#334155; font-size:0.68rem; font-weight:800; letter-spacing:.02em; text-transform:uppercase; }
