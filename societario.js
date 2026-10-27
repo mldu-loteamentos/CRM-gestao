@@ -925,7 +925,7 @@ const SocietarioApp = {
     const root = document.getElementById("estrutura-societaria-root");
     if (!root) return;
     if (this.aba === "parceria") {
-      root.innerHTML = `<div class="soc-shell">${this.abasHtml()}${this.parceriaHtml()}</div>`;
+      root.innerHTML = `<div class="soc-shell is-parceria">${this.abasHtml()}${this.parceriaHtml()}</div>`;
       if (window.lucide) lucide.createIcons();
       return;
     }
