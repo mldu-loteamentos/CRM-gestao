@@ -92,7 +92,7 @@ const ContabilEquiv = {
       const lista = Array.isArray(res) ? res : ((res && res.results) || []);
       this.state.companies = lista.map((c) => ({
         id: String(c.id != null ? c.id : c.companyId),
-        nome: String(c.tradeName || c.name || c.companyName || "").trim()
+        nome: String(c.name || c.corporateName || c.companyName || c.tradeName || "").trim()
       })).filter((c) => c.id && c.id !== "undefined");
     } catch (e) {
       this.state.erro = "Não consegui listar as empresas. " + ((e && e.message) || "");

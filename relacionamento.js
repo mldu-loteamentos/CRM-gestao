@@ -2216,6 +2216,7 @@ const RelacionamentoApp = {
         const ta = document.getElementById("doc-escritura-corpo");
         corpo = (ta && ta.defaultValue) || corpo;
       }
+      if (typeof window.ajustarFraseAreaEscritura === "function") corpo = window.ajustarFraseAreaEscritura(corpo);
       if (!corpo) {
         alert("O modelo de autorização não está preenchido. Salve-o em Configurações gerais → Documentos padrões.");
         return;

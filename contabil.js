@@ -76,7 +76,7 @@ const ContabilApp = {
       const lista = Array.isArray(res) ? res : ((res && res.results) || []);
       this.state.companies = lista.map((c) => ({
         id: String(c.id != null ? c.id : c.companyId),
-        nome: String(c.tradeName || c.name || c.companyName || "").trim()
+        nome: String(c.name || c.corporateName || c.companyName || c.tradeName || "").trim()
       })).filter((c) => c.id && c.id !== "undefined");
     } catch (e) {
       this.state.erro = "Não consegui carregar as empresas do Sienge.";
@@ -85,7 +85,10 @@ const ContabilApp = {
   },
 
   itensEmpresa() {
-    return this.state.companies.map((c) => ({ id: c.id, label: c.id + " - " + this.norm(c.nome) }));
+    return this.state.companies.map((c) => ({
+      id: c.id,
+      label: c.id + " - " + String(c.nome || "").toLocaleUpperCase("pt-BR")
+    }));
   },
 
   empresasEscolhidas() {
@@ -1404,6 +1407,11 @@ const ContabilApp = {
     }
     root.innerHTML = `<style>
       #contabil-root .ctb-toolbar { display:flex; flex-wrap:wrap; gap:12px 16px; align-items:flex-end; margin:4px 0 8px; }
+      #contabil-root .ml-emp-filter { position:relative; }
+      #contabil-root .ml-emp-filter-btn span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      #contabil-root .ml-emp-filter-item { align-items:center; }
+      #contabil-root .ml-emp-filter-item span { white-space:nowrap; }
+      #contabil-root .ml-emp-filter-panel { width:max-content; min-width:100%; max-width:min(720px, 70vw); right:auto; }
       #contabil-root .ctb-tabs { margin:8px 0 12px; }
       #contabil-root .ctb-visao { margin:0; }
       #contabil-root .ctb-visao-row { display:flex; flex-wrap:wrap; align-items:center; gap:12px 18px; margin:0 0 10px; }

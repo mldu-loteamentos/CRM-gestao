@@ -6712,7 +6712,7 @@ window.permCoversMenuKey = function(perms, modKey) {
   }
   if (modKey === "mod_contabil") {
     if (perms.mod_contabil === true || perms.sub_contabil_geral === true) return true;
-    const bases = ["sub_contabil_geral_demonstracoes", "sub_contabil_geral_config"];
+    const bases = ["sub_contabil_geral_demonstracoes", "sub_contabil_geral_organograma", "sub_contabil_geral_config"];
     return bases.some((b) => perms[b + "_acessar"] === true || perms[b + "_visualizar"] === true || perms[b + "_editar"] === true);
   }
   if (modKey === "mod_orc") {
@@ -41094,6 +41094,19 @@ window.docPadraoEditorKey = function(e) {
   }
 };
 
+/* A frase da área fica onde o texto padrão a escreveu. Se o modelo antigo a deixou depois da linha do tabelião, ela volta para antes de "Ao(s) cliente(s)". */
+window.ajustarFraseAreaEscritura = function(texto) {
+  let s = String(texto || "");
+  const reFim = /(?:\r?\n)+[ \t]*Perfazendo a área de [^\n]*\.[ \t]*$/i;
+  if (!reFim.test(s)) return s;
+  const semFim = s.replace(reFim, "").replace(/[ \t]+$/g, "");
+  if (/Perfazendo a área de /i.test(semFim)) return semFim;
+  if (/Ao\(s\) cliente\(s\)/.test(semFim)) {
+    return semFim.replace(/Ao\(s\) cliente\(s\)/, "Perfazendo a área de {{AREA_LOTE}} ({{AREA_LOTE_EXTENSO}}).\n\nAo(s) cliente(s)");
+  }
+  return s;
+};
+
 window.formatDocPadraoMarkup = function(text) {
   const chunks = [];
   let s = String(text || '');
@@ -41322,6 +41335,10 @@ function applySavedDocPadraoFields(tipo, data, fieldMap) {
       return;
     }
     if (id === 'doc-escritura-corpo' && /^Autorizamos o\(a\) Senhor\(a\) Tabelião/i.test(String(data[id] || ''))) return;
+    if (id === 'doc-escritura-corpo') {
+      el.value = window.ajustarFraseAreaEscritura(data[id]);
+      return;
+    }
     if (id === 'doc-quitacao-corpo') {
       el.value = window.upgradeQuitacaoCorpo(data[id]);
       return;
