@@ -2,7 +2,7 @@
    Impostos: GET /bills/{id}/taxes. Nota: anexo PDF (DANFSe e layouts municipais com texto) ou XML, lido no navegador.
    CNAE e Simples Nacional: cadastro público do CNPJ (BrasilAPI). As regras de retenção por atividade só geram "atenção". */
 window.NotaFiscalCheck = {
-  CACHE_KEY: "crm_nf_check_v2",
+  CACHE_KEY: "crm_nf_check_v3",
   CNPJ_KEY: "crm_cnpj_receita_v1",
   TTL: 12 * 3600 * 1000,
   CNPJ_TTL: 30 * 86400 * 1000,
@@ -403,13 +403,20 @@ window.NotaFiscalCheck = {
       else linhas.push({ y: it.y, itens: [it] });
     });
     const texto = linhas.map((l) => l.itens.sort((a, b) => a.x - b.x).map((i) => i.s).join(" ")).join("\n");
+    const casaRotulo = (s, rotulo) => {
+      const bruto = String(s || "").trim();
+      if (!bruto || bruto.length > 80) return false;
+      if (rotulo.test(bruto)) return true;
+      const semUnidade = bruto.replace(/\s*\((?:r\$|%)\)\s*$/i, "").trim();
+      return semUnidade !== bruto && rotulo.test(semUnidade);
+    };
     const abaixo = (rotulo) => {
       let melhor = null;
       ordenados.forEach((r) => {
-        if (r.s.length > 70 || !rotulo.test(r.s)) return;
+        if (!casaRotulo(r.s, rotulo)) return;
         ordenados.forEach((v) => {
           const dy = v.y - r.y;
-          if (dy < 2.5 || dy > 28 || v.x < r.x - 6 || v.x > r.x + Math.max(70, r.w * 0.6)) return;
+          if (dy < 2.5 || dy > 36 || v.x < r.x - 8 || v.x > r.x + Math.max(70, r.w || 0) + 12) return;
           const d = dy + Math.abs(v.x - r.x) * 0.2;
           if (!melhor || d < melhor.d) melhor = { d, s: v.s };
         });
@@ -444,8 +451,8 @@ window.NotaFiscalCheck = {
       aliquotaIss: valor([/^al[ií]quota aplicada$/i, /^al[ií]quota( do iss(qn)?)?( \(%\))?$/i]),
       valorIss: valor([/^issqn apurado$/i, /^valor do iss(qn)?( \(r\$\))?$/i, /^iss(qn)? \(r\$\)$/i]),
       irrf: valor([/^irrf$/i, /^(valor )?(do )?ir(rf)?( retido)?( \(r\$\))?$/i]),
-      inss: valor([/^contribui[cç][aã]o previdenci[aá]ria - retida$/i, /^(valor )?(do )?inss( retido)?( \(r\$\))?$/i]),
-      csrf: valor([/^contribui[cç][oõ]es sociais - retidas$/i]),
+      inss: valor([/^contribui[cç][aã]o previdenci[aá]ria\s*[-–]\s*retida(?:\s*\(r\$\))?$/i, /^(valor )?(do )?inss( retido)?( \(r\$\))?$/i]),
+      csrf: valor([/^contribui[cç][oõ]es sociais\s*[-–]\s*retidas(?:\s*\(r\$\))?$/i]),
       pis: valor([/^(valor )?(do )?pis( retido)?( \(r\$\))?$/i]),
       cofins: valor([/^(valor )?(da )?cofins( retid[oa])?( \(r\$\))?$/i]),
       csll: valor([/^(valor )?(da )?csll( retid[oa])?( \(r\$\))?$/i]),
@@ -462,6 +469,7 @@ window.NotaFiscalCheck = {
     if (n.simples == null && /simples nacional na data de compet[eê]ncia[\s\S]{0,60}\bn[aã]o\b/i.test(texto)) n.simples = "nao";
     n.cnpjs = [...new Set((texto.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/g) || []).map((c) => this.digits(c)))];
     n.cnpjPrestador = this.cnpjApos(texto, /prestador de servi[cç]os?|dados do prestador|(?:^|\n)\s*prestador\b|emitente/i);
+    this.completarRetencoes(n, texto);
     const naColuna = this.valorNaColuna(itens, /^valor l[ií]quido( da nfs-?e| da nota)?( \(r\$\))?$/i);
     if (naColuna != null && naColuna > 0 && !(n.liquido > 0.004)) n.liquido = naColuna;
     const totalDeclarado = this.valorDeclarado(texto, /valor total da nota/i);
@@ -479,6 +487,61 @@ window.NotaFiscalCheck = {
     const src = rotulo.source || String(rotulo);
     const m = String(texto || "").match(new RegExp("(?:" + src + ")[\\s\\S]{0,280}?(\\d{2}\\.\\d{3}\\.\\d{3}/\\d{4}-\\d{2}|\\d{3}\\.\\d{3}\\.\\d{3}-\\d{2})", "i"));
     return m ? this.digits(m[1]) : "";
+  },
+
+  /**
+   * NFS-e de São Paulo (e notas parecidas) não traz o campo "ISS retido".
+   * O rodapé diz "o ISS será RETIDO pelo Tomador" e a discriminação traz "RETENÇÃO DE ISS".
+   * O INSS sai na coluna "Contribuição Previdenciária - Retida (R$)", ou em "RETENÇÃO DE INSS".
+   */
+  completarRetencoes(n, texto) {
+    const t = String(texto || "");
+    if (!n) return n;
+    if (n.issRetido == null) n.issRetido = this.issRetidoNoTexto(t);
+    if (!(Number(n.inss) > 0.004)) {
+      const daTabela = this.valorAposRotulo(t, /contribui[cç][aã]o previdenci[aá]ria\s*[-–]\s*retida/i);
+      const daDisc = this.valorAposIgual(t, /reten[cç][aã]o\s+de\s+inss/i);
+      const v = daTabela > 0.004 ? daTabela : daDisc;
+      if (v > 0.004) n.inss = v;
+    }
+    if (n.issRetido && !(Number(n.valorIss) > 0.004)) {
+      const daDisc = this.valorAposIgual(t, /reten[cç][aã]o\s+de\s+iss(?:qn)?\b/i);
+      if (daDisc > 0.004) n.valorIss = daDisc;
+    }
+    return n;
+  },
+
+  /** true quando a nota diz que o tomador retém o ISS; false quando diz que não retém; null se a nota não fala. */
+  issRetidoNoTexto(texto) {
+    const t = this.fold(texto);
+    if (!t) return null;
+    const peloTomador = /iss(?:qn)?(?!\w)(?!.{0,50}\bnao\b).{0,80}ser[a]\s+retid[oa]\s+pelo\s+tomador/.test(t);
+    const mencoes = t.match(/(?:sem\s+|nao ha\s+)?reten[c][a]o\s+de\s+iss(?:qn)?\b/g) || [];
+    const retencaoDeIss = mencoes.some((o) => !/^(?:sem |nao ha )/.test(o));
+    const explicitoNao = /iss(?:qn)?.{0,50}nao\s+ser[a]\s+retid/.test(t) || /iss(?:qn)?\s+retid[oa]\s*[:=-]?\s*nao\b/.test(t);
+    if (explicitoNao && !retencaoDeIss) return false;
+    if (peloTomador || retencaoDeIss) return true;
+    if (explicitoNao || /(?:sem|nao ha)\s+reten[c][a]o\s+de\s+iss(?:qn)?\b/.test(t)) return false;
+    if (/\biss(?:qn)?\s+retid[oa]\b/.test(t)) return true;
+    return null;
+  },
+
+  /** Primeiro valor monetário que aparece depois do rótulo (célula ao lado ou a primeira da linha de baixo). */
+  valorAposRotulo(texto, rotulo) {
+    const re = rotulo instanceof RegExp ? new RegExp(rotulo.source, "i") : new RegExp(String(rotulo), "i");
+    const src = String(texto || "");
+    const m = re.exec(src);
+    if (!m) return null;
+    const resto = src.slice(m.index + m[0].length, m.index + m[0].length + 220);
+    const v = resto.match(/(\d{1,3}(?:\.\d{3})*,\d{2})/);
+    return v ? this.num(v[1]) : null;
+  },
+
+  /** "RETENÇÃO DE INSS 3,5% = 409,50" → 409,50. A alíquota no meio não entra. */
+  valorAposIgual(texto, rotulo) {
+    const src = rotulo instanceof RegExp ? rotulo.source : String(rotulo);
+    const m = String(texto || "").match(new RegExp("(?:" + src + ")[\\s\\S]{0,60}?=\\s*(?:R\\$\\s*)?(\\d{1,3}(?:\\.\\d{3})*,\\d{2})", "i"));
+    return m ? this.num(m[1]) : null;
   },
 
   /**
@@ -604,7 +667,7 @@ window.NotaFiscalCheck = {
     const pis = num("vPis", "ValorPis");
     const cofins = num("vCofins", "ValorCofins");
     const tpPisCofins = tag("tpRetPisCofins");
-    return {
+    const n = {
       valorServico: num("vServ", "ValorServicos"),
       baseIss: num("vBC", "BaseCalculo"),
       aliquotaIss: (() => { const a = num("pAliqAplic", "pAliq", "Aliquota"); return a != null && a < 1 && a > 0 ? a * 100 : a; })(),
@@ -625,6 +688,8 @@ window.NotaFiscalCheck = {
       simples: opNac ? ({ 1: "nao", 2: "mei", 3: "sim" }[opNac] || null) : (opAbrasf ? (opAbrasf === "1" ? "sim" : "nao") : null),
       cnpjs: [this.digits(cnpjPrest)].filter((c) => c.length === 14)
     };
+    this.completarRetencoes(n, `${n.descricao || ""}\n${xml}`);
+    return n;
   },
 
   /* ---------- análise ---------- */

@@ -41567,29 +41567,94 @@ window.suspenderRegistrar = function(ctx, status, summary, extra) {
   });
 };
 
+window.suspenderArquivoDaArea = function(data) {
+  if (!data) return null;
+  const itens = data.items ? Array.from(data.items) : [];
+  for (let i = 0; i < itens.length; i++) {
+    const it = itens[i];
+    if (!it || it.kind !== "file" || !/^image\//.test(it.type || "")) continue;
+    const blob = it.getAsFile();
+    if (!blob) continue;
+    const ext = String(blob.type || "image/png").split("/")[1].replace("jpeg", "jpg") || "png";
+    return new File([blob], "print-webro." + ext, { type: blob.type || "image/png" });
+  }
+  const solto = data.files && data.files[0];
+  if (solto && /^image\//.test(solto.type || "")) {
+    return new File([solto], "print-webro.png", { type: solto.type || "image/png" });
+  }
+  return null;
+};
+
+window.suspenderDefinirWebro = function(file) {
+  const input = document.getElementById("suspender-webro-file");
+  if (!input || !file || typeof DataTransfer === "undefined") return;
+  const dt = new DataTransfer();
+  dt.items.add(file);
+  input.files = dt.files;
+  window.previewSuspenderWebro(input);
+  window.suspenderLiberarEfetivar();
+};
+
+window.suspenderLimparWebro = function() {
+  const input = document.getElementById("suspender-webro-file");
+  if (input) input.value = "";
+  window.previewSuspenderWebro(input);
+  window.suspenderLiberarEfetivar();
+};
+
+window.suspenderWebroEscolher = function(ev) {
+  if (ev && ev.target && ev.target.closest && ev.target.closest(".susp-webro-trocar")) return;
+  const input = document.getElementById("suspender-webro-file");
+  if (input) input.click();
+};
+
+window.suspenderWebroSoltar = function(ev) {
+  if (ev) ev.preventDefault();
+  const zone = document.getElementById("suspender-webro-zone");
+  if (zone) zone.classList.remove("is-over");
+  const f = ev && ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+  if (!f) return;
+  const imagem = /^image\//.test(f.type || "");
+  const pdf = /pdf$/i.test(f.type || "") || /\.pdf$/i.test(f.name || "");
+  if (!imagem && !pdf) return;
+  window.suspenderDefinirWebro(imagem ? new File([f], "print-webro.png", { type: f.type }) : f);
+};
+
+window.suspenderAoColar = function(ev) {
+  const overlay = document.getElementById("suspender-contrato-overlay");
+  if (!overlay || !overlay.classList.contains("active")) return;
+  if (!(window._suspenderContrato && window._suspenderContrato.webro)) return;
+  const file = window.suspenderArquivoDaArea(ev.clipboardData);
+  if (!file) return;
+  ev.preventDefault();
+  window.suspenderDefinirWebro(file);
+};
+
 window.ensureSuspenderContratoModal = function() {
   let overlay = document.getElementById("suspender-contrato-overlay");
-  if (overlay && document.getElementById("suspender-contrato-body")) return overlay;
-  if (overlay) overlay.remove();
-  overlay = document.createElement("div");
-  overlay.id = "suspender-contrato-overlay";
-  overlay.className = "modal-overlay";
-  overlay.style.zIndex = "10050";
-  overlay.innerHTML = `
-    <div class="modal-box" style="width:640px;max-width:95%;">
-      <div class="modal-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
-        <h3 style="display:flex;align-items:center;gap:8px;margin:0;">
-          <i data-lucide="file-warning" style="width:18px;height:18px;color:#ea580c;"></i>
-          Suspender contrato
-        </h3>
-        <button type="button" class="btn btn-fechar" onclick="closeSuspenderContratoModal()">Fechar</button>
-      </div>
-      <div id="suspender-contrato-body" style="max-height:70vh;overflow:auto;"></div>
-    </div>`;
-  document.body.appendChild(overlay);
-  overlay.addEventListener("click", function(e) {
-    if (e.target === overlay) window.closeSuspenderContratoModal();
-  });
+  if (!(overlay && document.getElementById("suspender-contrato-body"))) {
+    if (overlay) overlay.remove();
+    overlay = document.createElement("div");
+    overlay.id = "suspender-contrato-overlay";
+    overlay.className = "modal-overlay";
+    overlay.style.zIndex = "10050";
+    overlay.innerHTML = `
+      <div class="modal-box susp-box">
+        <div class="modal-header">
+          <h3><i data-lucide="file-warning" style="width:18px;height:18px;color:#f37021;"></i> Suspender contrato</h3>
+          <button type="button" class="btn btn-fechar" onclick="closeSuspenderContratoModal()">Fechar</button>
+        </div>
+        <div id="suspender-contrato-body" class="susp-body"></div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener("click", function(e) {
+      if (e.target === overlay) window.closeSuspenderContratoModal();
+    });
+  }
+  if (!window._suspenderPasteOn) {
+    window._suspenderPasteOn = true;
+    document.addEventListener("paste", window.suspenderAoColar);
+  }
   return overlay;
 };
 
@@ -41633,6 +41698,28 @@ window.previewSuspenderArquivos = function(input, previewId) {
   }).join("");
 };
 
+window.previewSuspenderWebro = function(input) {
+  const box = document.getElementById("suspender-webro-preview");
+  if (!box) return;
+  if (window._suspenderWebroUrl) {
+    URL.revokeObjectURL(window._suspenderWebroUrl);
+    window._suspenderWebroUrl = "";
+  }
+  const file = input && input.files && input.files[0];
+  if (!file) {
+    box.innerHTML = "<div class=\"susp-webro-vazio\"><strong>Ctrl+V</strong><span>para colar o print da tela da Webro</span><span>ou clique para escolher o arquivo</span></div>";
+    return;
+  }
+  const nome = window.suspenderEsc(file.name);
+  const kb = Math.max(1, Math.round(file.size / 1024));
+  let img = "";
+  if (/^image\//.test(file.type || "")) {
+    window._suspenderWebroUrl = URL.createObjectURL(file);
+    img = "<img class=\"susp-webro-img\" alt=\"Print da Webro\" src=\"" + window._suspenderWebroUrl + "\">";
+  }
+  box.innerHTML = img + "<div class=\"susp-webro-meta\"><strong>" + nome + "</strong> · " + kb + " KB <button type=\"button\" class=\"susp-webro-trocar\" onclick=\"window.suspenderLimparWebro()\">Remover</button></div>";
+};
+
 window.suspenderAtualizarCampos = function() {
   const taxaOn = document.getElementById("suspender-taxa-on");
   const taxaValor = document.getElementById("suspender-taxa-valor-wrap");
@@ -41652,66 +41739,74 @@ window.openSuspenderContratoModal = function(customerId, saleId) {
   window._suspenderContrato = ctx;
   const body = document.getElementById("suspender-contrato-body");
   const esc = window.suspenderEsc;
-  const meta = [ctx.name, ctx.unit ? ("Unidade " + ctx.unit) : "", "Título " + saleId].filter(Boolean).join(" · ");
+  const detalhe = [ctx.unit ? ("Unidade " + ctx.unit) : "", "Título " + saleId].filter(Boolean).join(" · ");
   const iptuBloco = ctx.obraAndamento
-    ? `<p style="margin:0;font-size:0.82rem;color:#166534;background:#f0fdf4;border-radius:8px;padding:8px 10px;">Obra em andamento: IPTU e CND dispensados.</p>`
-    : `<label class="moura-switch" style="margin-bottom:8px;">
-        <input type="checkbox" id="suspender-iptu-on" onchange="window.suspenderAtualizarCampos()">
-        <span class="moura-switch-track" aria-hidden="true"></span>
-        <span class="moura-switch-text">Há custo de IPTU</span>
-      </label>
-      <p id="suspender-iptu-hint" style="margin:0 0 8px;font-size:0.78rem;color:#64748b;line-height:1.4;">Envie a CND. Sem débito, a certidão negativa basta.</p>
-      <label style="display:block;font-size:0.78rem;font-weight:700;color:#0f172a;margin-bottom:6px;">CND e documentos de IPTU</label>
-      <input type="file" id="suspender-iptu-files" multiple accept="image/*,.png,.jpg,.jpeg,.webp,.pdf,application/pdf"
-        onchange="window.previewSuspenderArquivos(this, 'suspender-iptu-preview')"
-        style="width:100%;box-sizing:border-box;padding:8px;border:1px dashed #cbd5e1;border-radius:8px;background:#f8fafc;font-size:0.85rem;">
-      <div id="suspender-iptu-preview" style="margin-top:8px;font-size:0.8rem;color:#64748b;"></div>`;
+    ? `<p class="susp-ok">Obra em andamento: IPTU e CND dispensados.</p>`
+    : `<div class="susp-bloco">
+        <h4>IPTU e CND</h4>
+        <label class="moura-switch" style="margin-bottom:8px;">
+          <input type="checkbox" id="suspender-iptu-on" onchange="window.suspenderAtualizarCampos()">
+          <span class="moura-switch-track" aria-hidden="true"></span>
+          <span class="moura-switch-text">Há custo de IPTU</span>
+        </label>
+        <p id="suspender-iptu-hint">Envie a CND. Sem débito, a certidão negativa basta.</p>
+        <label class="susp-campo">CND e documentos de IPTU</label>
+        <input type="file" id="suspender-iptu-files" class="susp-arquivo" multiple accept="image/*,.png,.jpg,.jpeg,.webp,.pdf,application/pdf"
+          onchange="window.previewSuspenderArquivos(this, 'suspender-iptu-preview')">
+        <div id="suspender-iptu-preview" style="margin-top:8px;font-size:0.8rem;color:#64748b;"></div>
+      </div>`;
   const taxaBloco = (ctx.loteamentoFechado && !ctx.obraAndamento)
-    ? `<div style="margin-top:14px;">
+    ? `<div class="susp-bloco">
+        <h4>Taxa associativa</h4>
         <label class="moura-switch">
           <input type="checkbox" id="suspender-taxa-on" onchange="window.suspenderAtualizarCampos()">
           <span class="moura-switch-track" aria-hidden="true"></span>
           <span class="moura-switch-text">Há custo de taxa associativa</span>
         </label>
         <div id="suspender-taxa-valor-wrap" style="display:none;margin-top:8px;">
-          <label style="display:block;font-size:0.78rem;font-weight:700;color:#0f172a;margin-bottom:6px;">Valor da taxa associativa</label>
+          <label class="susp-campo">Valor da taxa associativa</label>
           <input type="text" id="suspender-taxa-valor" inputmode="decimal" placeholder="0,00" style="width:160px;height:36px;border:1px solid #cbd5e1;border-radius:8px;padding:0 10px;font-size:0.88rem;">
         </div>
       </div>`
     : (ctx.loteamentoFechado
-      ? `<p style="margin:14px 0 0;font-size:0.82rem;color:#166534;">Obra em andamento: taxa associativa dispensada.</p>`
+      ? `<p class="susp-ok">Obra em andamento: taxa associativa dispensada.</p>`
       : "");
   const webroTexto = ctx.zero
-    ? "Contrato 0% pago. Anexe o print da Webro com a baixa dos boletos. Ao efetivar a suspensão, esse arquivo sobe nos anexos da unidade."
-    : "Este cliente tem a tag Boleto WEBRO. A carta de suspensão só é emitida depois que este print for anexado.";
+    ? "Contrato 0% pago. Ao efetivar, este print sobe nos anexos da unidade."
+    : "Cliente com boleto Webro. A carta só é emitida com este print, e ele sobe nos anexos da unidade.";
   const webroBloco = ctx.webro
-    ? `<div style="margin-top:14px;">
-        <label style="display:block;font-size:0.82rem;font-weight:700;color:#0f172a;margin-bottom:6px;">Print da Webro com a baixa dos boletos</label>
-        <p style="margin:0 0 8px;font-size:0.78rem;color:#64748b;">${webroTexto}</p>
-        <input type="file" id="suspender-webro-file" accept="image/*,.png,.jpg,.jpeg,.webp,.pdf,application/pdf"
-          onchange="window.previewSuspenderArquivos(this, 'suspender-webro-preview'); window.suspenderLiberarEfetivar()"
-          style="width:100%;box-sizing:border-box;padding:8px;border:1px dashed #cbd5e1;border-radius:8px;background:#f8fafc;font-size:0.85rem;">
-        <div id="suspender-webro-preview" style="margin-top:8px;font-size:0.8rem;color:#64748b;"></div>
+    ? `<div class="susp-bloco">
+        <h4>Print da Webro com a baixa dos boletos</h4>
+        <p>${webroTexto}</p>
+        <div id="suspender-webro-zone" class="susp-webro-zone" tabindex="0"
+          onclick="window.suspenderWebroEscolher(event)"
+          onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.suspenderWebroEscolher(event);}"
+          ondragover="event.preventDefault();this.classList.add('is-over')"
+          ondragleave="this.classList.remove('is-over')"
+          ondrop="window.suspenderWebroSoltar(event)">
+          <input type="file" id="suspender-webro-file" class="susp-webro-input" accept="image/*,.png,.jpg,.jpeg,.webp,.pdf,application/pdf"
+            onchange="window.previewSuspenderWebro(this); window.suspenderLiberarEfetivar()">
+          <div id="suspender-webro-preview"><div class="susp-webro-vazio"><strong>Ctrl+V</strong><span>para colar o print da tela da Webro</span><span>ou clique para escolher o arquivo</span></div></div>
+        </div>
       </div>`
     : "";
   if (body) {
     body.innerHTML = `
-      <div style="padding:16px 18px 18px;">
-        <p style="margin:0 0 8px;font-size:0.84rem;color:#334155;line-height:1.45;">A carta de suspensão sobe no cadastro da unidade. Ao efetivar, <strong>o título será cancelado no Sienge</strong>.</p>
-        <div style="font-size:0.8rem;color:#64748b;margin-bottom:12px;">${esc(meta)}</div>
-        <div style="background:#fff7ed;border:1px solid #fdba74;color:#9a3412;border-radius:8px;padding:10px 12px;font-size:0.82rem;line-height:1.45;margin-bottom:14px;">Antes de confirmar: o contrato deste título será cancelado no Sienge.</div>
-        ${iptuBloco}
-        ${taxaBloco}
-        ${webroBloco}
-        <p id="suspender-contrato-status" style="margin:12px 0 0;font-size:0.8rem;color:#64748b;min-height:1.2em;"></p>
-        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px;">
-          <button type="button" class="btn btn-cancel" onclick="closeSuspenderContratoModal()">Cancelar</button>
-          <button type="button" class="btn btn-primary" id="suspender-contrato-confirm" onclick="confirmSuspenderContrato()" ${ctx.webro ? "disabled title=\"Anexe o print da baixa Webro para emitir a carta de suspensão.\" style=\"opacity:0.45;cursor:not-allowed;\"" : ""}>Efetivar suspensão</button>
-        </div>
+      <div class="susp-quem"><strong>${esc(ctx.name || "Cliente")}</strong><span>${esc(detalhe)}</span></div>
+      <p class="susp-efeito">A carta de suspensão sobe no cadastro da unidade e <strong>o título será cancelado no Sienge</strong>.</p>
+      ${iptuBloco}
+      ${taxaBloco}
+      ${webroBloco}
+      <p id="suspender-contrato-status" class="susp-status"></p>
+      <div class="susp-foot">
+        <button type="button" class="btn btn-cancel" onclick="closeSuspenderContratoModal()">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="suspender-contrato-confirm" onclick="confirmSuspenderContrato()" ${ctx.webro ? "disabled title=\"Cole ou anexe o print da baixa Webro para emitir a carta de suspensão.\" style=\"opacity:0.45;cursor:not-allowed;\"" : ""}>Efetivar suspensão</button>
       </div>`;
   }
   overlay.classList.add("active");
   if (window.lucide) lucide.createIcons();
+  const zone = document.getElementById("suspender-webro-zone");
+  if (zone) zone.focus();
 };
 
 window.closeSuspenderContratoModal = function() {
@@ -41719,6 +41814,10 @@ window.closeSuspenderContratoModal = function() {
   if (overlay) overlay.classList.remove("active");
   const confirmBtn = document.getElementById("suspender-contrato-confirm");
   if (confirmBtn) confirmBtn.disabled = false;
+  if (window._suspenderWebroUrl) {
+    URL.revokeObjectURL(window._suspenderWebroUrl);
+    window._suspenderWebroUrl = "";
+  }
 };
 
 window.confirmSuspenderContrato = async function() {
