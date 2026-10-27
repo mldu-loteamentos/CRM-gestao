@@ -1412,7 +1412,7 @@ const ContabilApp = {
         ${(window.ContabilEquiv && ContabilEquiv.podeLancar()) ? `<button type="button" class="ctb-buscar" onclick="ContabilEquiv.lancar()" ${s.lancando ? "disabled" : ""} title="Lança a equivalência desta competência: o resultado da investida, no percentual do organograma, na empresa que a controla.">${s.lancando ? "Lançando…" : "Lançar equivalência"}</button>` : ""}
       </div>` : "";
       const notaEq = aba === "dre" && window.ContabilEquiv && typeof ContabilEquiv.notaHtml === "function"
-        ? ContabilEquiv.notaHtml(s.de)
+        ? ContabilEquiv.notaHtml(s.de) + (typeof ContabilEquiv.gestaoHtml === "function" ? ContabilEquiv.gestaoHtml(s.de) : "")
         : "";
       corpo = `${avisos}${visao}${notaEq}<p class="ctb-nota">${aba === "dre" && serie && fimMes ? this.esc(notaDre.trim()) : this.esc(periodo) + ". Entram as contas com movimento." + notaDre}</p>${demo}`;
     }
@@ -1438,6 +1438,11 @@ const ContabilApp = {
       #contabil-root .ctb-buscar { height:38px; padding:0 16px; border:0; border-radius:8px; background:#105436; color:#fff; font-weight:700; cursor:pointer; }
       #contabil-root .ctb-buscar:disabled { opacity:0.6; cursor:wait; }
       #contabil-root .ctb-nota { color:#64748b; font-size:0.84rem; margin:0 0 12px; }
+      #contabil-root .ctb-gestao { margin:0 0 12px; padding:12px; border:1px solid #e2e8f0; border-radius:10px; background:#fff; }
+      #contabil-root .ctb-gestao p { margin:0 0 10px; color:#475569; font-size:0.8rem; line-height:1.4; }
+      #contabil-root .ctb-gestao-linha { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:0 0 8px; font-size:0.78rem; font-weight:700; color:#334155; }
+      #contabil-root .ctb-gestao-linha span { flex:1 1 220px; }
+      #contabil-root .ctb-gestao-linha input { height:36px; border:1px solid #cbd5e1; border-radius:6px; padding:0 10px; font-size:0.82rem; color:#0f172a; }
       #contabil-root .ctb-erro { color:#b91c1c; font-size:0.84rem; margin:0 0 12px; }
       #contabil-root .ctb-ok { color:#105436; font-size:0.84rem; font-weight:700; margin:10px 0 0; }
       #contabil-root .ctb-dif { color:#9a3412; font-size:0.84rem; margin:10px 0 0; }

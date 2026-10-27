@@ -49228,7 +49228,7 @@ window.mergeEmpresasCustom = function(localStr, cloudStr) {
         return v === 0 || v === 1 || v === true || v === false || v === "0" || v === "1" || v === "true" || v === "false";
       };
       const newerTouched = Number(newer.updatedAt || 0) > 0;
-      ["spe_socios", "consolidacao_padrao", "gerida_pelo_grupo", "gestao_elenco"].forEach((key) => {
+      ["spe_socios", "consolidacao_padrao", "gerida_pelo_grupo", "gestao_elenco", "holding_interna"].forEach((key) => {
         if (flagSet(newer, key) && (newerTouched || !flagSet(older, key))) merged[key] = flagBit(newer[key]);
         else if (flagSet(older, key)) merged[key] = flagBit(older[key]);
       });

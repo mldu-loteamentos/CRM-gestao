@@ -82,25 +82,60 @@ const RelacionamentoApp = {
   },
 
   fillCartorioSelect(selectedNome) {
-    const sel = document.getElementById("esc-cartorio");
-    if (!sel) return;
-    const current = selectedNome != null ? selectedNome : sel.value;
+    const hidden = document.getElementById("esc-cartorio");
+    const box = document.getElementById("esc-cartorio-box");
+    if (!hidden && !box) return;
     const list = this.getCartoriosList();
-    sel.innerHTML = '<option value="">Selecione o cartório</option>' + list.map((c) => {
-      const nome = c.nome || "";
-      const esc = nome.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
-      return `<option value="${esc}">${esc}</option>`;
-    }).join("");
-    if (current) {
-      const hit = list.find((c) => this._normCartorioNome(c.nome) === this._normCartorioNome(current));
-      sel.value = hit ? hit.nome : current;
-      if (sel.value !== current && current) {
-        const opt = document.createElement("option");
-        opt.value = current;
-        opt.textContent = current;
-        sel.appendChild(opt);
-        sel.value = current;
-      }
+    const current = selectedNome != null ? selectedNome : (this._cartorioNome || (hidden && hidden.value) || "");
+    const hit = list.find((c) => this._normCartorioNome(c.nome) === this._normCartorioNome(current));
+    this._cartorioNome = hit ? hit.nome : (current || "");
+    if (hidden) hidden.value = this._cartorioNome;
+    if (box && window.MlEmpresaFilter) {
+      const items = list.map((c) => ({ id: c.nome, label: String(c.nome || "").toLocaleUpperCase("pt-BR") }));
+      const selected = this._cartorioNome ? [this._cartorioNome] : [];
+      box.innerHTML = MlEmpresaFilter.html({
+        id: "esc-cartorio-filtro",
+        label: "Cartório",
+        items: items,
+        selectedIds: selected,
+        open: !!this._cartorioAberto,
+        query: this._cartorioBusca || "",
+        emptyMeansAll: false,
+        emptyLabel: "Selecione o cartório",
+        single: true
+      });
+      const pintarLista = () => {
+        const el = document.getElementById("esc-cartorio-filtro-list");
+        if (!el) return;
+        el.innerHTML = MlEmpresaFilter.listHtml({
+          id: "esc-cartorio-filtro",
+          items: items,
+          selectedIds: this._cartorioNome ? [this._cartorioNome] : [],
+          query: this._cartorioBusca || "",
+          single: true,
+          keepOrder: true
+        });
+      };
+      MlEmpresaFilter.bind("esc-cartorio-filtro", {
+        toggleOpen: () => {
+          this._cartorioAberto = !this._cartorioAberto;
+          this.fillCartorioSelect();
+        },
+        setQuery: (q) => {
+          this._cartorioBusca = q || "";
+          pintarLista();
+        },
+        toggleId: (id, on) => {
+          this._cartorioNome = on ? String(id) : "";
+          this._cartorioAberto = false;
+          this._cartorioBusca = "";
+          this.fillCartorioSelect();
+        },
+        selectNone: () => {
+          this._cartorioNome = "";
+          this.fillCartorioSelect();
+        }
+      });
     }
     this._escAtualizarBtnGerar();
     if (window.lucide) lucide.createIcons();

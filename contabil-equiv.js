@@ -12,6 +12,7 @@ const ContabilEquiv = {
     msg: "",
     empresas: {},
     lancados: {},
+    informados: {},
     updatedAt: 0,
     busca: "",
     rascunho: null,
@@ -46,6 +47,7 @@ const ContabilEquiv = {
     { origem: "6", destino: "1", pct: 55, apelidoOrigem: "ARAÇARI", apelidoDestino: "MOURA LEITE", nomeOrigem: "Araçari", nomeDestino: "Moura Leite", perdas: "4.1.03.01.002", mep: "1.2.02.01.002", receitas: "4.1.03.01.001" },
     { origem: "32", destino: "1", pct: 100, apelidoOrigem: "NOVO HORIZONTE", apelidoDestino: "MOURA LEITE", nomeOrigem: "Novo Horizonte", nomeDestino: "Moura Leite", perdas: "4.1.03.01.002", mep: "1.2.02.08.002", receitas: "4.1.03.01.001" },
     { origem: "17", destino: "1", pct: 35, apelidoOrigem: "PARQUE CIDADE", apelidoDestino: "MOURA LEITE", nomeOrigem: "Parque Cidade II", nomeDestino: "Moura Leite", perdas: "4.1.03.01.002", mep: "1.2.02.05.002", receitas: "4.1.03.01.001" },
+    { origem: "36", destino: "1", pct: 0, apelidoOrigem: "TAGUAÍ", apelidoDestino: "MOURA LEITE", nomeOrigem: "Taguaí", nomeDestino: "Moura Leite", perdas: "4.1.03.01.002", mep: "1.2.02.10.001", receitas: "4.1.03.01.001" },
     { origem: "12", destino: "1", pct: 50, apelidoOrigem: "ELLENCO", apelidoDestino: "MOURA LEITE", nomeOrigem: "Ellenco", nomeDestino: "Moura Leite", perdas: "4.1.03.01.002", mep: "1.2.02.03.002", receitas: "4.1.03.01.001" }
   ],
 
@@ -101,10 +103,109 @@ const ContabilEquiv = {
     return passo.pct;
   },
 
+  empresasGestao() {
+    const emp = window.EmpresasApp;
+    const lista = (window.ContabilApp && ContabilApp.state && ContabilApp.state.companies) || [];
+    if (!emp || typeof emp.flagOn !== "function") return [];
+    return lista.filter((c) => emp.flagOn(emp.customOf(c.id), "gestao_elenco"));
+  },
+
+  pctGestao(id) {
+    const passo = { origem: String(id), destino: "1", pct: 0, apelidoOrigem: "", apelidoDestino: "MOURA LEITE" };
+    const doGrafo = this.pctDoPasso(passo);
+    if (doGrafo > 0) return doGrafo;
+    const emp = window.EmpresasApp;
+    const custom = emp && emp.customOf ? emp.customOf(id) : null;
+    const cadastro = custom ? Number(custom.percentual_mldu) : 0;
+    if (cadastro > 0) return cadastro;
+    return String(id) === "15" ? 35 : 0;
+  },
+
+  lerValor(raw) {
+    const txt = String(raw == null ? "" : raw).trim().replace(/\s/g, "").replace(/\./g, "").replace(",", ".");
+    if (!txt || txt === "-" || txt === "+") return null;
+    const n = Number(txt);
+    return Number.isFinite(n) ? n : null;
+  },
+
+  salvarInformado(id, chave, campo, valor) {
+    if (!this.state.informados) this.state.informados = {};
+    const key = String(id) + "@" + chave;
+    const rec = this.state.informados[key] || { valor: "", mep: "" };
+    rec[campo] = String(valor || "").trim();
+    this.state.informados[key] = rec;
+    this.persistir().catch(() => {});
+  },
+
+  gestaoHtml(chave) {
+    const alvos = this.empresasGestao();
+    if (!chave || !alvos.length) return "";
+    const linhas = alvos.map((c) => {
+      const rec = (this.state.informados || {})[String(c.id) + "@" + chave] || {};
+      const pct = this.pctGestao(c.id);
+      const pctTxt = pct > 0 ? (Number(pct).toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "% na Moura Leite") : "sem percentual no organograma";
+      return `<label class="ctb-gestao-linha"><span>${this.esc(c.id + " - " + c.nome)} · ${this.esc(pctTxt)}</span>
+        <input type="text" inputmode="decimal" value="${this.esc(rec.valor || "")}" placeholder="Lucro ou prejuízo" onchange="ContabilEquiv.salvarInformado('${this.esc(c.id)}','${this.esc(chave)}','valor', this.value)">
+        <input type="text" value="${this.esc(rec.mep || "")}" placeholder="Conta MEP" onchange="ContabilEquiv.salvarInformado('${this.esc(c.id)}','${this.esc(chave)}','mep', this.value)">
+      </label>`;
+    }).join("");
+    return `<div class="ctb-gestao"><p>Gestão Ellenco: a operadora é a empresa 28, Reserva dos Ramos. A Ellenco apura o resultado e devolve o valor. Informe o lucro (positivo) ou o prejuízo (negativo) e a conta MEP. O lançamento leva esse resultado, no percentual do organograma, para a empresa 1.</p>${linhas}</div>`;
+  },
+
+  incluirGestao(app, chave, linhas, faltas, pulos, nomeEmp, fim, partes) {
+    const cfg = this.cfgDa("1");
+    this.empresasGestao().forEach((c) => {
+      const rec = (this.state.informados || {})[String(c.id) + "@" + chave] || {};
+      const resultado = this.lerValor(rec.valor);
+      const pct = this.pctGestao(c.id);
+      const nome = nomeEmp(c.id, c.nome);
+      if (resultado == null) return;
+      const pctTxt = Number(pct).toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "%";
+      const titulo = c.nome + " " + pctTxt + " → Moura Leite";
+      if (!(pct > 0)) {
+        faltas.push(nome + " sem percentual no organograma");
+        return;
+      }
+      const signed = Math.round(resultado * pct) / 100;
+      if (Math.abs(signed) < 0.01) return;
+      if (this.jaPasso("1", c.id, chave)) {
+        pulos.push(titulo);
+        return;
+      }
+      const mep = String(rec.mep || "").trim();
+      if (!mep) {
+        faltas.push(nome + " sem a conta MEP");
+        return;
+      }
+      if (!cfg || !(Number(cfg.evento) > 0)) {
+        if (!faltas.some((f) => f.indexOf("1 - ") === 0)) faltas.push(nomeEmp("1", "Moura Leite"));
+        return;
+      }
+      const lucro = signed > 0;
+      linhas.push({
+        companyId: 1,
+        origem: String(c.id),
+        empresa: nomeEmp("1", "Moura Leite"),
+        chave: chave,
+        rotulo: titulo,
+        date: fim,
+        amount: Math.round(Math.abs(signed) * 100) / 100,
+        tipo: lucro ? "lucro" : "prejuízo",
+        debitAccountId: lucro ? mep : "4.1.03.01.002",
+        creditAccountId: lucro ? "4.1.03.01.001" : mep,
+        eventId: Number(cfg.evento),
+        description: "Equivalencia " + c.nome + " " + partes[1] + "-" + String(partes[0]).slice(2),
+        resultado: resultado,
+        pct: pct
+      });
+    });
+  },
+
   aplicar(data) {
     if (!data || typeof data !== "object") return;
     this.state.empresas = data.empresas && typeof data.empresas === "object" ? data.empresas : {};
     this.state.lancados = data.lancados && typeof data.lancados === "object" ? data.lancados : {};
+    this.state.informados = data.informados && typeof data.informados === "object" ? data.informados : (this.state.informados || {});
     this.state.updatedAt = Number(data.updatedAt) || 0;
   },
 
@@ -132,6 +233,7 @@ const ContabilEquiv = {
     const payload = {
       empresas: this.state.empresas || {},
       lancados: this.state.lancados || {},
+      informados: this.state.informados || {},
       updatedAt: this.state.updatedAt
     };
     try { localStorage.setItem("crm_ctb_equiv", JSON.stringify(payload)); } catch (e) {}
@@ -577,6 +679,10 @@ const ContabilEquiv = {
         bloqueado[passo.destino] = true;
         return;
       }
+      if (!(pct > 0)) {
+        faltas.push(nomeEmp(passo.origem, passo.nomeOrigem) + " sem percentual no organograma");
+        return;
+      }
       const resultado = Math.round((base + (extras[passo.origem] || 0)) * 100) / 100;
       const signed = Math.round(resultado * pct) / 100;
       if (Math.abs(signed) < 0.01) return;
@@ -612,15 +718,17 @@ const ContabilEquiv = {
         pct: pct
       });
     });
+    this.incluirGestao(app, chave, linhas, faltas, pulos, nomeEmp, fim, p);
     if (!linhas.length && semResultado.length) return { erro: "Não li o resultado destas empresas na competência:\n" + semResultado.join("\n") };
-    if (!linhas.length && faltas.length) return { erro: "Falta a partida em Contábil > Configurações, na empresa que recebe a equivalência:\n" + faltas.join("\n") };
+    if (!linhas.length && faltas.length) return { erro: "Não lancei a equivalência:\n" + faltas.join("\n") };
     if (!linhas.length && pulos.length) return { erro: "Esta competência já foi lançada:\n" + pulos.join("\n") };
     if (!linhas.length) return { erro: "Nesta competência o resultado dessas empresas não deu lucro nem prejuízo." };
     const texto = [
       "Vou lançar a equivalência de " + rotulo + ", em reais. O percentual é o do organograma. A linha 50% Eq. MLDU não entra.",
       ""
     ].concat(linhas.map((l) => l.rotulo + " · resultado " + app.money(l.resultado) + " · " + l.tipo + " " + app.money(l.amount) + "\nNa empresa " + l.empresa + " · débito " + l.debitAccountId + " · crédito " + l.creditAccountId + " · " + app.dataBr(l.date) + " · partida " + l.eventId));
-    if (faltas.length) texto.push("", "Sem a partida, não lanço o que cai nestas empresas:", faltas.join("\n"));
+    if (semResultado.length) texto.push("", "Não li o resultado, então não lanço:", semResultado.join("\n"));
+    if (faltas.length) texto.push("", "Sem a partida ou sem o percentual, não lanço:", faltas.join("\n"));
     if (pulos.length) texto.push("", "Já lançado nesta competência, não repito:", pulos.join("\n"));
     return { linhas: linhas, texto: texto.join("\n") };
   },

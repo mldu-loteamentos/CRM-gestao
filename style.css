@@ -6715,9 +6715,12 @@ body.fc-nome-dragging * {
 .esc-conta-ate strong { display: block; color: #1e293b; font-size: 0.88rem; }
 .esc-conta-pendente .esc-conta-ico { background: #fef3c7; color: #b45309; }
 .esc-aviso { margin-top: 8px; font-size: 0.8rem; color: #92400e; }
-.esc-cartorio-row { display: flex; gap: 8px; align-items: stretch; }
+.esc-cartorio-row { display: flex; gap: 8px; align-items: flex-end; }
 .esc-cartorio-row .form-control { flex: 1; min-width: 0; }
 .esc-cartorio-row .btn { height: 46px; white-space: nowrap; }
+#esc-cartorio-row .ml-emp-filter { flex: 1 1 auto; width: auto; max-width: none; min-width: 0; }
+#esc-cartorio-row .ml-emp-filter-btn { min-height: 46px; height: 46px; }
+#esc-modal .crm-card { overflow: visible; }
 .esc-btn-add-cartorio {
   position: relative;
   width: 46px;
@@ -10534,7 +10537,8 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .soc-node.is-selected .soc-node-body { box-shadow: 0 0 0 3px #f59e0b, 0 8px 18px rgba(15, 23, 42, 0.16); }
 .soc-node-kind, .soc-node-tag { font-size: 0.58rem; font-weight: 700; letter-spacing: 0.04em; border-radius: 999px; padding: 2px 7px; }
 .soc-node-tag { background: rgba(255, 255, 255, 0.18); }
-.soc-port { position: absolute; left: 50%; top: -7px; transform: translateX(-50%); width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 2px solid #105436; cursor: crosshair; z-index: 3; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12); }
+.soc-node-body { position: relative; z-index: 1; }
+.soc-port { position: absolute; left: 50%; top: -8px; transform: translateX(-50%); width: 18px; height: 18px; border-radius: 50%; background: #fff; border: 2px solid #105436; cursor: crosshair; z-index: 5; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12); }
 .soc-port-bottom { top: auto; bottom: -7px; }
 .soc-foot { border-top: 1px solid #e8eee9; background: #fff; padding: 8px 12px 10px; max-height: 24%; overflow: auto; }
 .soc-legend { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }

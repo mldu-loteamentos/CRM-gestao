@@ -3,7 +3,10 @@ const EmpresasState = {
   customFields: {},
   loading: false,
   filterManagedOnly: false,
-  selectedFilterId: null
+  selectedFilterId: null,
+  empAberto: false,
+  empBusca: "",
+  empIds: []
 };
 
 try {
@@ -169,7 +172,7 @@ const EmpresasApp = {
   },
 
   clearOtherFlags(custom, keep) {
-    const fields = ["consolidacao_padrao", "gerida_pelo_grupo", "cobranca_interna", "spe_socios", "gestao_elenco"];
+    const fields = ["consolidacao_padrao", "gerida_pelo_grupo", "cobranca_interna", "spe_socios", "gestao_elenco", "holding_interna"];
     let cobrancaCleared = false;
     fields.forEach((field) => {
       if (field === keep) return;
@@ -273,11 +276,11 @@ const EmpresasApp = {
         td.classList.toggle("is-lock-on", td.dataset.lock === active);
       });
     }
-    ["consolidacao_padrao", "gerida_pelo_grupo", "cobranca_interna", "spe_socios", "gestao_elenco"].forEach((field) => {
+    ["consolidacao_padrao", "gerida_pelo_grupo", "cobranca_interna", "spe_socios", "gestao_elenco", "holding_interna"].forEach((field) => {
       const checkbox = document.getElementById("chk-" + field + "-" + id);
       if (!checkbox) return;
       checkbox.checked = this.flagOn(custom, field);
-      checkbox.disabled = locked && field !== active;
+      checkbox.disabled = locked && field !== active && field !== "holding_interna";
     });
   },
 
@@ -359,9 +362,16 @@ const EmpresasApp = {
     }
     if (field === "consolidacao_padrao") custom.consolidacao_padrao = value ? 1 : 0;
     if (field === "gerida_pelo_grupo") custom.gerida_pelo_grupo = value ? 1 : 0;
+    if (field === "holding_interna") {
+      if (value) this.clearOtherFlags(custom, field);
+      custom.holding_interna = value ? 1 : 0;
+    }
     if (field === "spe_socios" || field === "gestao_elenco") {
       if (value) this.clearOtherFlags(custom, field);
       custom[field] = value ? 1 : 0;
+    }
+    if (value && field !== "holding_interna" && field !== "nome_usual" && field !== "percentual_mldu" && field !== "percentual_liquido_mldu") {
+      custom.holding_interna = 0;
     }
     if (field === "cobranca_interna") {
       custom.cobranca_interna = value ? 1 : 0;
@@ -410,33 +420,16 @@ const EmpresasApp = {
       });
     }
 
-    if (EmpresasState.selectedFilterId !== null) {
-      filteredCompanies = filteredCompanies.filter(c => c.id === EmpresasState.selectedFilterId);
+    const escolhidas = (EmpresasState.empIds || []).map(String);
+    if (escolhidas.length) {
+      filteredCompanies = filteredCompanies.filter(c => escolhidas.includes(String(c.id)));
     }
 
-    let searchPill = "";
-    if (EmpresasState.selectedFilterId !== null) {
-      const emp = EmpresasState.companies.find(c => c.id === EmpresasState.selectedFilterId);
-      searchPill = `<span class="emp-pill"><span>${this.escAttr(emp ? emp.id + " - " + emp.name : EmpresasState.selectedFilterId)}</span><button type="button" onclick="EmpresasApp.clearSearchFilter()" title="Limpar">&times;</button></span>`;
-    }
-
-    const optionsHtml = EmpresasState.companies.map(c => `<option value="${this.escAttr(c.id + " - " + c.name)}"></option>`).join("");
     const geridasOn = EmpresasState.filterManagedOnly ? "checked" : "";
 
     let html = `
       <div class="emp-toolbar">
-        <div class="emp-busca">
-          <div class="ml-emp-filter-label">Empresa</div>
-          <div class="emp-busca-campo">
-            ${searchPill}
-            <input list="emp-datalist" type="text" placeholder="Pesquisar por ID ou nome" onchange="
-              const val = this.value;
-              const match = EmpresasState.companies.find(c => (c.id + ' - ' + c.name) === val || String(c.id) === val);
-              if (match) EmpresasApp.setSearchFilter(match.id);
-            ">
-            <datalist id="emp-datalist">${optionsHtml}</datalist>
-          </div>
-        </div>
+        <div id="emp-filtro-box"></div>
         <div class="cc-toolbar-actions">
           <label class="cc-parceiros">
             <input type="checkbox" ${geridasOn} onchange="EmpresasApp.toggleFilter()">
@@ -452,7 +445,7 @@ const EmpresasApp = {
         <table class="emp-table">
           <colgroup>
             <col class="emp-c-id"><col class="emp-c-nome"><col class="emp-c-cnpj"><col class="emp-c-usual">
-            <col class="emp-c-pct"><col class="emp-c-pct"><col class="emp-c-flag"><col class="emp-c-flag"><col class="emp-c-flag"><col class="emp-c-flag"><col class="emp-c-flag">
+            <col class="emp-c-pct"><col class="emp-c-pct"><col class="emp-c-flag"><col class="emp-c-flag"><col class="emp-c-flag"><col class="emp-c-flag"><col class="emp-c-flag"><col class="emp-c-flag">
           </colgroup>
           <thead>
             <tr>
@@ -467,13 +460,14 @@ const EmpresasApp = {
               <th class="is-center">Cobrança interna</th>
               <th class="is-center">SPE sócios</th>
               <th class="is-center">Gestão Ellenco</th>
+              <th class="is-center">Holding interna</th>
             </tr>
           </thead>
           <tbody>
     `;
 
     if (filteredCompanies.length === 0) {
-      html += `<tr><td colspan="11" style="text-align: center; padding: 30px;">Nenhuma empresa corresponde ao filtro.</td></tr>`;
+      html += `<tr><td colspan="12" style="text-align: center; padding: 30px;">Nenhuma empresa corresponde ao filtro.</td></tr>`;
     }
 
     filteredCompanies.forEach(company => {
@@ -489,9 +483,10 @@ const EmpresasApp = {
       const checkedCobInt = this.flagOn(custom, "cobranca_interna") ? "checked" : "";
       const checkedSpe = this.flagOn(custom, "spe_socios") ? "checked" : "";
       const checkedEllenco = this.flagOn(custom, "gestao_elenco") ? "checked" : "";
+      const checkedHolding = this.flagOn(custom, "holding_interna") ? "checked" : "";
 
       const interruptor = (field, checked) => {
-        const dis = locked && field !== active ? "disabled" : "";
+        const dis = locked && field !== active && field !== "holding_interna" ? "disabled" : "";
         return `<label class="moura-switch"><input type="checkbox" id="chk-${field}-${company.id}" ${checked} ${dis} onchange="EmpresasApp.saveInline(${company.id}, '${field}', this.checked)"><span class="moura-switch-track" aria-hidden="true"></span></label>`;
       };
 
@@ -514,6 +509,7 @@ const EmpresasApp = {
           <td class="is-center">${interruptor("cobranca_interna", checkedCobInt)}</td>
           <td class="is-center emp-lock-cell${active === "spe_socios" ? " is-lock-on" : ""}" data-lock="spe_socios">${interruptor("spe_socios", checkedSpe)}</td>
           <td class="is-center emp-lock-cell${active === "gestao_elenco" ? " is-lock-on" : ""}" data-lock="gestao_elenco">${interruptor("gestao_elenco", checkedEllenco)}</td>
+          <td class="is-center">${interruptor("holding_interna", checkedHolding)}</td>
         </tr>
       `;
     });
@@ -535,9 +531,63 @@ const EmpresasApp = {
         });
       }
       if (window.lucide) window.lucide.createIcons();
+      this.paintFiltro();
     } finally {
       this._empresasRendering = false;
     }
+  },
+
+  itensFiltro() {
+    return (EmpresasState.companies || []).map((c) => ({
+      id: String(c.id),
+      label: c.id + " - " + String(c.name || "").toLocaleUpperCase("pt-BR")
+    }));
+  },
+
+  paintFiltro() {
+    const box = document.getElementById("emp-filtro-box");
+    if (!box || !window.MlEmpresaFilter) return;
+    box.innerHTML = MlEmpresaFilter.html({
+      id: "emp-filtro",
+      label: "Empresas",
+      items: this.itensFiltro(),
+      selectedIds: EmpresasState.empIds || [],
+      open: EmpresasState.empAberto,
+      query: EmpresasState.empBusca || "",
+      emptyMeansAll: true
+    });
+    MlEmpresaFilter.bind("emp-filtro", {
+      toggleOpen: () => {
+        EmpresasState.empAberto = !EmpresasState.empAberto;
+        this.paintFiltro();
+      },
+      setQuery: (q) => {
+        EmpresasState.empBusca = q || "";
+        const list = document.getElementById("emp-filtro-list");
+        if (list) {
+          list.innerHTML = MlEmpresaFilter.listHtml({
+            id: "emp-filtro",
+            items: this.itensFiltro(),
+            selectedIds: EmpresasState.empIds || [],
+            query: EmpresasState.empBusca
+          });
+        }
+      },
+      toggleId: (id, on) => {
+        const sid = String(id);
+        const atual = (EmpresasState.empIds || []).map(String);
+        EmpresasState.empIds = on ? atual.concat(atual.includes(sid) ? [] : [sid]) : atual.filter((x) => x !== sid);
+        this.render();
+      },
+      selectAll: () => {
+        EmpresasState.empIds = this.itensFiltro().map((i) => i.id);
+        this.render();
+      },
+      selectNone: () => {
+        EmpresasState.empIds = [];
+        this.render();
+      }
+    });
   },
 
   isCobrancaInternaSet(custom) {

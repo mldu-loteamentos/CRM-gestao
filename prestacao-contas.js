@@ -1802,6 +1802,7 @@ const PrestacaoContasApp = {
     const y = Number(this.year);
     const m = Number(this.month);
     const pad = (n) => String(n).padStart(2, "0");
+    // Fechamento escolhido em setembro: o saldo anterior é o último dia de agosto.
     const prev = new Date(y, m - 1, 0);
     const dataAnterior = `${prev.getFullYear()}-${pad(prev.getMonth() + 1)}-${pad(prev.getDate())}`;
     const per = this.periodBounds();
@@ -1827,12 +1828,15 @@ const PrestacaoContasApp = {
       const conta = (CC.customOf(id) || {}).conta_parceria;
       const numero = String((conta && conta.numero) || "").trim();
       if (!numero) return;
-      const chave = this.numeroConta(numero) || numero.toUpperCase();
+      const cc = todos.find((c) => String(c.id) === String(id));
+      const companyId = String((cc && (cc.companyId || cc.idCompany)) || this.companyId || "").trim();
+      const chave = (companyId ? companyId + "|" : "") + (this.numeroConta(numero) || numero.toUpperCase());
       const item = porChave.get(chave) || {
         numero,
         nome: String(conta.nome || "").trim(),
         banco: String(conta.banco || "").trim(),
         agencia: String(conta.agencia || "").trim(),
+        companyId,
         centros: []
       };
       if (item.centros.indexOf(id) < 0) item.centros.push(id);

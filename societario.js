@@ -364,6 +364,16 @@ const SocietarioApp = {
     };
   },
 
+  nodeAtPoint(pt) {
+    let hit = null;
+    (this.graph.entities || []).forEach((ent) => {
+      const x = Number(ent.x) || 0;
+      const y = Number(ent.y) || 0;
+      if (pt.x >= x - 18 && pt.x <= x + this.NODE_W + 18 && pt.y >= y - 18 && pt.y <= y + this.NODE_H + 22) hit = ent.id;
+    });
+    return hit;
+  },
+
   bindCanvas() {
     const wrap = document.getElementById("soc-canvas-wrap");
     const canvas = document.getElementById("soc-canvas");
@@ -400,8 +410,10 @@ const SocietarioApp = {
         document.removeEventListener("mousemove", onMove);
         document.removeEventListener("mouseup", onUp);
         if (this._connect) {
-          const target = ev.target && ev.target.closest && ev.target.closest(".soc-node");
-          const toId = target ? target.getAttribute("data-id") : null;
+          const target = ev.target && ev.target.closest && ev.target.closest("#soc-canvas .soc-node");
+          let toId = target ? target.getAttribute("data-id") : null;
+          const sobCursor = this.nodeAtPoint(this.canvasPoint(ev));
+          if (sobCursor && sobCursor !== this._connect.from) toId = sobCursor;
           const from = this._connect.from;
           this._connect = null;
           this._tempLine = null;
@@ -509,6 +521,54 @@ const SocietarioApp = {
     return `<div class="soc-notes-grid">${cards.join("")}</div>`;
   },
 
+  paintCompanyPick() {
+    const box = document.getElementById("soc-company-box");
+    if (!box || !window.MlEmpresaFilter) return;
+    const items = this.companies().map((c) => ({
+      id: String(c.id),
+      label: c.id + " - " + String(c.name || c.corporateName || c.tradeName || "").toLocaleUpperCase("pt-BR")
+    }));
+    const selected = this._companyId ? [String(this._companyId)] : [];
+    box.innerHTML = MlEmpresaFilter.html({
+      id: "soc-emp",
+      label: "Empresa Sienge",
+      items: items,
+      selectedIds: selected,
+      open: !!this.companyPickOpen,
+      query: this.companyPickQuery || "",
+      emptyMeansAll: false,
+      emptyLabel: "Sem vínculo",
+      single: true
+    });
+    MlEmpresaFilter.bind("soc-emp", {
+      toggleOpen: () => {
+        this.companyPickOpen = !this.companyPickOpen;
+        this.paintCompanyPick();
+      },
+      setQuery: (q) => {
+        this.companyPickQuery = q || "";
+        const list = document.getElementById("soc-emp-list");
+        if (!list) return;
+        list.innerHTML = MlEmpresaFilter.listHtml({
+          id: "soc-emp",
+          items: items,
+          selectedIds: this._companyId ? [String(this._companyId)] : [],
+          query: this.companyPickQuery,
+          single: true
+        });
+      },
+      toggleId: (id, on) => {
+        this._companyId = on ? String(id) : "";
+        this.paintCompanyPick();
+      },
+      selectAll: () => {},
+      selectNone: () => {
+        this._companyId = "";
+        this.paintCompanyPick();
+      }
+    });
+  },
+
   companyOptions(selected) {
     return `<option value="">— sem vínculo Sienge —</option>` +
       this.companies().map(c => `<option value="${this.esc(c.id)}" ${String(c.id) === String(selected) ? "selected" : ""}>${this.esc(c.id)} — ${this.esc(c.name)}</option>`).join("");
@@ -552,7 +612,7 @@ const SocietarioApp = {
         </div>
         <label style="${this.lbl}">Empresa Sienge
           ${this.hint("Opcional. Liga esta caixa a uma empresa do cadastro do CRM/Sienge.")}
-          <select id="soc-ent-company" class="form-control">${this.companyOptions(ent.companyId)}</select>
+          <div id="soc-company-box"></div>
         </label>
         <label style="${this.lbl}">Parceiro / sócio (parametrização)
           ${this.hint("Opcional. Liga esta caixa a um sócio já cadastrado em Parametrização de Parceiros.")}
@@ -899,11 +959,16 @@ const SocietarioApp = {
       this.bindCanvas();
       this.fitCanvas();
       this.bindFit();
+      if (this.panel === "entity") this.paintCompanyPick();
     });
   },
 
   selectEntity(id, keepCanvas) {
     this.selectedId = id;
+    const ent = this.entity(id);
+    this._companyId = ent && ent.companyId ? String(ent.companyId) : "";
+    this.companyPickOpen = false;
+    this.companyPickQuery = "";
     this.selectedLinkId = null;
     this.panel = "entity";
     this.render();
@@ -919,6 +984,9 @@ const SocietarioApp = {
 
   openNewEntity() {
     this.selectedId = "";
+    this._companyId = "";
+    this.companyPickOpen = false;
+    this.companyPickQuery = "";
     this.selectedLinkId = null;
     this.panel = "entity";
     this.render();
@@ -951,7 +1019,7 @@ const SocietarioApp = {
     const kind = document.getElementById("soc-ent-kind").value === "pf" ? "pf" : "pj";
     const colorRaw = (document.getElementById("soc-ent-color") && document.getElementById("soc-ent-color").value) || "";
     const color = /^#[0-9a-fA-F]{6}$/.test(colorRaw) ? colorRaw : this.defaultKindColor(kind);
-    const companyId = document.getElementById("soc-ent-company").value;
+    const companyId = this._companyId || "";
     const partnerId = document.getElementById("soc-ent-partner").value;
     const note = document.getElementById("soc-ent-note").value || "";
     const company = this.companies().find(c => String(c.id) === String(companyId));

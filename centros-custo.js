@@ -23,18 +23,53 @@ const CentrosCustoApp = {
   /** Texto do {{REGISTRO_IMOVEL}} na autorização de escritura, pela coluna da planilha. */
   REGISTRO_IMOVEL_SEMENTE: {
     "100": "registrado",
-    "10200": "registrado", "10300": "registrado", "10400": "registrado", "10500": "registrado",
-    "10600": "registrado", "10700": "registrado", "10800": "registrado", "10900": "registrado",
-    "11000": "registrado", "11100": "registrado", "11300": "registrado", "11400": "registrado",
-    "11500": "registrado", "11600": "registrado", "11700": "registrado", "11800": "registrado",
-    "11900": "registrado", "12000": "registrado", "12100": "registrado", "12200": "registrado",
-    "12300": "registrado", "12400": "registrado", "12600": "registrado", "12700": "registrado",
-    "12800": "registrado", "12900": "registrado", "12901": "registrado", "13000": "registrado",
-    "13001": "registrado", "13100": "registrado", "13101": "registrado", "13200": "registrado",
-    "13201": "registrado", "13299": "registrado", "13300": "registrado", "13301": "registrado",
-    "13400": "registrado", "13401": "registrado", "13500": "registrado", "13501": "registrado",
-    "13600": "registrado", "13601": "registrado", "14100": "Registrado", "14201": "registrado",
-    "14202": "registrado"
+    "10100": "registrado sob o nº R2-8.515, em 08/09/1997, no 1º Cartório de Registro de Imóveis da Comarca de Cerqueira César/SP, de propriedade da firma Empreendimentos Imobiliários Chácara Moura Leite, inscrita no CGC/MF sob o nº 01.610.787/0001-76",
+    "10200": "registrado sob o nº R4-8.809, em 29/12/1997, no 1º Cartório de Registro de Imóveis da Comarca de Cerqueira César/SP, de propriedade da firma Empreendimentos Imobiliários Chácara Moura Leite, inscrita no CNPJ sob o nº 01.610.787/0001-76",
+    "10300": "registrado sob o nº R4-9.224, em 04/10/1999, no 1º Cartório de Registro de Imóveis da Comarca de Cerqueira César/SP, de propriedade da firma Empreendimentos Imobiliários Chácara Moura Leite, inscrita no CNPJ sob o nº 01.610.787/0001-76",
+    "10400": "registrado sob o nº R0 3-6.229 em 27/11/2004 no Cartório de Registro de Imóveis da Comarca de Fartura/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78",
+    "10500": "registrado sob o nº 10.309 em 03/01/2005 no 1º Cartório de Registro de Imóveis da Comarca de Cerqueira César/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78",
+    "10600": "registrado sob o nº 10.308 em 06/06/2007 no 1º Cartório de Registro de Imóveis da Comarca de Cerqueira César/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78",
+    "10700": "registrado sob o nº 10.745 em 03/01/2005 no 1º Cartório de Registro de Imóveis da Comarca de Cerqueira César/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78",
+    "10800": "registrado sob o nº R01 6.865 em 24/03/2008 no Cartório de Registro de Imóveis da Comarca de Fartura/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78",
+    "10900": "registrado sob o nº R02/7.316 em 24/03/2008 no Cartório de Registro de Imóveis da Comarca de Fartura/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78",
+    "11000": "registrado sob o nº 10.300 em 09/05/2007 no 1º Cartório de Registro de Imóveis da Comarca de Cerqueira César/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78 - Desmembramentos",
+    "11100": "registrado no 1º Cartório de Registro de Imóveis da Comarca de Cerqueira César/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78",
+    "11300": "registrado sob o nº R15- 9.760 em 29/07/2009 no Cartório de Registro de Imóveis e Anexos Piraju/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78",
+    "11400": "registrado no 1º Cartório de Registro de Imóveis da Comarca de Cerqueira César/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78",
+    "11500": "registrado no 1º Cartório de Registro de Imóveis da Comarca de Cerqueira César/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78",
+    "11600": "registrado no 1º Cartório de Registro de Imóveis da Comarca de Cerqueira César/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78",
+    "11700": "registrado no 1º Cartório de Registro de Imóveis da Comarca de Cerqueira César/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78",
+    "11800": "registrado sob o nº R2- 6.912 em 28/03/2008 no Cartório de Registro de Imóveis da Comarca de Fartura/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78",
+    "11900": "registrado sob o nº R2- 7.403 em 14/08/2010 no Cartório de Registro de Imóveis da Comarca de Fartura/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78",
+    "12000": "registrado sob o nº R6- 7.107 em 16/11/2011 no Cartório de Registro de Imóveis da Comarca de Fartura/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78",
+    "12100": "registrado sob o nº R-01/ 7.577 em 09/06/2011 no Cartório de Registro de Imóveis da Comarca de Fartura/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78",
+    "12200": "registrado no 1º Cartório de Registro de Imóveis da Comarca de Cerqueira César/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78",
+    "12300": "registrado sob o nº R6- 26.117 em 28/10/2011 no C.R.I. 1º Oficial de Botucatu/SP, de propriedade de Livia Tavares Padovan Ghelardi, inscrita no CPF sob o nº 198.215.568-09; e Alexandre Ghelardi, inscrito no CPF sob o nº 850.924.368-91",
+    "12400": "registrado sob o nº R.2-9.233 em 20/03/2015 no Cartório de Registro de Imóveis da Comarca de Fartura/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78",
+    "12500": "registrado sob o nº R6- 27.301 em 28/10/2011 no C.R.I. 1º Oficial de Botucatu/SP, de propriedade de Livia Tavares Padovan Ghelardi, inscrita no CPF sob o nº 198.215.568-09; e Alexandre Ghelardi, inscrito no CPF sob o nº 850.924.368-91",
+    "12600": "registrado sob o nº R5- 30.202 em 09/12/2014 no C.R.I. 1º Oficial de Botucatu/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78; Livia Tavares Padovan Ghelardi, inscrita no CPF sob o nº 198.215.568-09; e Alexandre Ghelardi, inscrito no CPF sob o nº 850.924.368-91",
+    "12700": "registrado sob o nº R2- 36.540 em 27/12/2017 no C.R.I. 1º Oficial de Botucatu/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78; Livia Tavares Padovan Ghelardi, inscrita no CPF sob o nº 198.215.568-09; e Alexandre Ghelardi, inscrito no CPF sob o nº 850.924.368-91",
+    "12800": "registrado sob o nº R6- 9.586 em 27/08/2019 no Cartório de Registro de Imóveis da Comarca de Fartura/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78",
+    "12900": "registrado sob o nº R3 12.491 em 03/01/2005 no 1º Cartório de Registro de Imóveis da Comarca de Cerqueira César/SP, de propriedade da empresa T.L.M. Participações e Empreendimentos, inscrita no CNPJ sob o nº 02.983.678/0001-67",
+    "12901": "registrado sob o nº R3 12.491 em 03/01/2005 no 1º Cartório de Registro de Imóveis da Comarca de Cerqueira César/SP, de propriedade da empresa T.L.M. Participações e Empreendimentos, inscrita no CNPJ sob o nº 02.983.678/0001-67",
+    "13000": "registrado sob o nº R1-303 em 24/05/2010 no 1º Cartório de Registro de Imóveis da Ipaussu/SP, de propriedade da empresa T.L.M. Participações e Empreendimentos, inscrita no CNPJ sob o nº 02.983.678/0001-67",
+    "13001": "registrado sob o nº R1-303 em 24/05/2010 no 1º Cartório de Registro de Imóveis da Ipaussu/SP, de propriedade da empresa T.L.M. Participações e Empreendimentos, inscrita no CNPJ sob o nº 02.983.678/0001-67",
+    "13100": "registrado sob o nº R.02-25.806 em 10/08/2015 no Cartório de Registro de Imóveis e Anexos Piraju/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78; Tadeu Lemos de Moura Leite, inscrito no CPF sob o nº 386.497.728-20; e Carolina Aparecida de Almeida Moura Leite, inscrita no CPF sob o nº 170.324.868-60",
+    "13101": "registrado sob o nº R.02-25.806 em 10/08/2015 no Cartório de Registro de Imóveis e Anexos Piraju/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78; Tadeu Lemos de Moura Leite, inscrito no CPF sob o nº 386.497.728-20; e Carolina Aparecida de Almeida Moura Leite, inscrita no CPF sob o nº 170.324.868-60",
+    "13200": "registrado sob o nº R.14-12.278 em 13/09/2016 no Cartório de Registro de Imóveis e Anexos da Comarca de Cerqueira César/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78; Tadeu Lemos de Moura Leite, inscrito no CPF sob o nº 386.497.728-20",
+    "13201": "registrado sob o nº R.14-12.278 em 13/09/2016 no Cartório de Registro de Imóveis e Anexos da Comarca de Cerqueira César/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78; Tadeu Lemos de Moura Leite, inscrito no CPF sob o nº 386.497.728-20",
+    "13299": "registrado sob o nº R.14-12.278 em 13/09/2016 no Cartório de Registro de Imóveis e Anexos da Comarca de Cerqueira César/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78; Tadeu Lemos de Moura Leite, inscrito no CPF sob o nº 386.497.728-20",
+    "13300": "registrado sob o nº R6- 27.301 em 28/10/2011 no C.R.I. 1º Oficial de Botucatu/SP, de propriedade de Livia Tavares Padovan Ghelardi, inscrita no CPF sob o nº 198.215.568-09; e Alexandre Ghelardi, inscrito no CPF sob o nº 850.924.368-91",
+    "13301": "registrado sob o nº R6- 27.301 em 28/10/2011 no C.R.I. 1º Oficial de Botucatu/SP, de propriedade de Livia Tavares Padovan Ghelardi, inscrita no CPF sob o nº 198.215.568-09; e Alexandre Ghelardi, inscrito no CPF sob o nº 850.924.368-91",
+    "13400": "registrado sob o nº R6- 26.117 em 28/10/2011 no C.R.I. 1º Oficial de Botucatu/SP, de propriedade de Livia Tavares Padovan Ghelardi, inscrita no CPF sob o nº 198.215.568-09; e Alexandre Ghelardi, inscrito no CPF sob o nº 850.924.368-91",
+    "13401": "registrado sob o nº R6- 26.117 em 28/10/2011 no C.R.I. 1º Oficial de Botucatu/SP, de propriedade de Livia Tavares Padovan Ghelardi, inscrita no CPF sob o nº 198.215.568-09; e Alexandre Ghelardi, inscrito no CPF sob o nº 850.924.368-91",
+    "13500": "registrado sob o nº R5- 30.202 em 09/12/2014 no C.R.I. 1º Oficial de Botucatu/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78; Livia Tavares Padovan Ghelardi, inscrita no CPF sob o nº 198.215.568-09; e Alexandre Ghelardi, inscrito no CPF sob o nº 850.924.368-91",
+    "13501": "registrado sob o nº R5- 30.202 em 09/12/2014 no C.R.I. 1º Oficial de Botucatu/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78; Livia Tavares Padovan Ghelardi, inscrita no CPF sob o nº 198.215.568-09; e Alexandre Ghelardi, inscrito no CPF sob o nº 850.924.368-91",
+    "13600": "registrado sob o nº R2- 36.540 em 27/12/2017 no C.R.I. 1º Oficial de Botucatu/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78; Livia Tavares Padovan Ghelardi, inscrita no CPF sob o nº 198.215.568-09; e Alexandre Ghelardi, inscrito no CPF sob o nº 850.924.368-91",
+    "13601": "registrado sob o nº R2- 36.540 em 27/12/2017 no C.R.I. 1º Oficial de Botucatu/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78; Livia Tavares Padovan Ghelardi, inscrita no CPF sob o nº 198.215.568-09; e Alexandre Ghelardi, inscrito no CPF sob o nº 850.924.368-91",
+    "14100": "Registrado sob o nº R3 - 39.547 em 06/12/2021 no 1º Cartório de Registro de Imóveis da Comarca de Botucatu/SP, de propriedade da empresa Moura Leite Desenvolvimento & Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78",
+    "14201": "registrado sob o nº R.5- 37.722 em 25/08/2020 do Oficial de Registro de Imóveis de São Roque/SP de propriedade de GAP EMPREENDIMENTOS IMOBILIÁRIOS SPE LTDA, inscrita no CNPJ/ME sob o nº 22.800.509/0001-51 e NIRE 35229255671, com sede e foro na cidade e comarca de Barueri, Estado de São Paulo, na Rua Caldas Novas, 50, conjunto 125, bairro Bethaville I",
+    "14202": "registrado sob o nº R.5- 37.722 em 25/08/2020 do Oficial de Registro de Imóveis de São Roque/SP de propriedade de GAP EMPREENDIMENTOS IMOBILIÁRIOS SPE LTDA, inscrita no CNPJ/ME sob o nº 22.800.509/0001-51 e NIRE 35229255671, com sede e foro na cidade e comarca de Barueri, Estado de São Paulo, na Rua Caldas Novas, 50, conjunto 125, bairro Bethaville I"
   },
 
   RECLASSIFICAR: [
@@ -137,7 +172,9 @@ const CentrosCustoApp = {
               customFieldsChanged = true;
           }
           const semente = this.REGISTRO_IMOVEL_SEMENTE[idStr] || this.REGISTRO_IMOVEL_SEMENTE[String(parseInt(idStr, 10))];
-          if (semente && !String(custom.registro_imovel || "").trim()) {
+          const registroAtual = String(custom.registro_imovel || "").trim();
+          const registroVazio = !registroAtual || /^registrado$/i.test(registroAtual);
+          if (semente && registroVazio && registroAtual !== semente) {
               custom.registro_imovel = semente;
               custom.updatedAt = Date.now();
               customFieldsChanged = true;
@@ -342,8 +379,9 @@ const CentrosCustoApp = {
     const num = String(parseInt(key, 10));
     const custom = this.customOf(key);
     const salvo = String((custom && custom.registro_imovel) || "").trim();
-    if (salvo) return salvo;
-    return this.REGISTRO_IMOVEL_SEMENTE[key] || this.REGISTRO_IMOVEL_SEMENTE[num] || "";
+    const semente = this.REGISTRO_IMOVEL_SEMENTE[key] || this.REGISTRO_IMOVEL_SEMENTE[num] || "";
+    if (salvo && !/^registrado$/i.test(salvo)) return salvo;
+    return semente || salvo;
   },
 
   /** CC Corporativo não segue a regra de parceria, mesmo com "parceiro/parceria" no nome. */
