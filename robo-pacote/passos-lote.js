@@ -103,11 +103,21 @@ async function preencherCodigo(page, frame, nome, nomeDescricao, codigos, oQue) 
   throw new Error(`O Sienge não encontrou ${oQue} ${codigos.filter(Boolean).join(" / ")}.`);
 }
 
-async function abrirTela(ctx, page, email, endereco, log) {
-  log(`Entrando no Sienge como ${email}`);
+async function abrirTela(ctx, page, email, endereco, log, opcoes) {
+  const ir = async () => {
+    await page.goto(endereco, { waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: /^entendi$/i }).first().click({ timeout: 4000 }).catch(() => {});
+  };
+  if (opcoes && opcoes.sessaoPronta) {
+    await ir();
+    const caiu = /#\/login/i.test(page.url()) || await sessao.botaoEntrarVisivel(page, 1200);
+    if (!caiu) return;
+    log("A sessão do Sienge caiu; entrando de novo");
+  } else {
+    log(`Entrando no Sienge como ${email}`);
+  }
   await sessao.entrarComo(ctx, page, email, log);
-  await page.goto(endereco, { waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: /^entendi$/i }).first().click({ timeout: 4000 }).catch(() => {});
+  await ir();
 }
 
 function contaDoLote(lote) {
@@ -124,7 +134,7 @@ module.exports = {
   PRONTO: true,
 
   // lote: { id, dia, dataBaixa, conta: { id, numero, nome }, empresaConta, total, itens: [{ titulo, parcela, credor, companyId, vencimento, valor }] }
-  async gerarLote(ctx, page, email, lote, log) {
+  async gerarLote(ctx, page, email, lote, log, opcoes) {
     const empresa = empresaDoLote(lote);
     if (!empresa.conta) throw new Error("O lote não informa a empresa da conta de pagamento. Gere o lote de novo no Integra.");
     const contas = contaDoLote(lote);
@@ -137,7 +147,7 @@ module.exports = {
       : (String(lote.dia || venc[0]).slice(0, 10) < hojeIso() ? hojeIso() : String(lote.dia || venc[0]).slice(0, 10));
 
     const avisos = vigiarAvisos(page);
-    await abrirTela(ctx, page, email, TELA_PROGRAMACAO, log);
+    await abrirTela(ctx, page, email, TELA_PROGRAMACAO, log, opcoes);
     log("Abrindo Programações de Pagamento");
     const frame = await quadro(page, (u) => /gridPagtoEscProgPagamento\.do/.test(u));
     if (!frame) throw new Error("A tela Programações de Pagamento não abriu no Sienge (o usuário tem acesso a ela?).");
@@ -219,7 +229,7 @@ module.exports = {
   },
 
   // dados: { lote, numeroSienge }
-  async aprovarLote(ctx, page, email, dados, log) {
+  async aprovarLote(ctx, page, email, dados, log, opcoes) {
     const { lote } = dados;
     const nLote = String(dados.numeroSienge || "").trim();
     if (!/^\d+$/.test(nLote)) throw new Error("Número do lote no Sienge inválido.");
@@ -227,7 +237,7 @@ module.exports = {
     if (!contas.length) throw new Error("O lote não informa a conta corrente de pagamento.");
 
     const avisos = vigiarAvisos(page);
-    await abrirTela(ctx, page, email, TELA_AUTORIZACAO, log);
+    await abrirTela(ctx, page, email, TELA_AUTORIZACAO, log, opcoes);
     log("Abrindo Autorização de Pagamento");
     const ehAutorizacao = (u) => /gridPagtoEscAutorizacao\.do/i.test(u);
     let frame = await quadro(page, ehAutorizacao);
@@ -269,7 +279,7 @@ module.exports = {
     }
     log(`Lote ${nLote} autorizado no Sienge`);
     }
-    const arquivo = await gerarArquivoRemessa(ctx, page, email, lote, nLote, log);
+    const arquivo = await gerarArquivoRemessa(ctx, page, email, lote, nLote, log, opcoes);
     return { numeroSienge: nLote, arquivo: arquivo || "" };
   },
 };
@@ -345,11 +355,11 @@ async function clicarBotao(page, frame, nomes, textos, avisos) {
 }
 
 // Gerações de Arquivo (ação 1909): o lote já autorizado vira o arquivo de contas a pagar.
-async function gerarArquivoRemessa(ctx, page, email, lote, nLote, log) {
+async function gerarArquivoRemessa(ctx, page, email, lote, nLote, log, opcoes) {
   const contas = contaDoLote(lote);
   const banco = String((lote.conta && lote.conta.banco) || "").replace(/\D/g, "");
   const avisos = vigiarAvisos(page);
-  await abrirTela(ctx, page, email, TELA_ARQUIVO, log);
+  await abrirTela(ctx, page, email, TELA_ARQUIVO, log, opcoes);
   log("Abrindo Gerações de Arquivo");
   const frame = await quadro(page, (u) => /PagtoEsc/i.test(u) && /Gerac|Arquivo|Remessa/i.test(u), 25000)
     || await quadro(page, (u) => /1909|GeracaoArquivo|geracaoArquivo/i.test(u), 8000);

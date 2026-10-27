@@ -407,12 +407,13 @@ const PagarReembolsoApp = {
         ? `<input type="checkbox" data-pr="${this.esc(item.id)}" ${this.marcados[item.id] ? "checked" : ""} ${ok ? "" : "disabled"}>`
         : "";
       return `<tr class="pr-linha${liberado ? " pr-liberado" : ""}" data-pr-detalhe="${this.esc(item.id)}">
+        <td class="pr-marca is-center">${marca || "—"}</td>
         <td>${this.esc(empresaId)}</td>
         <td>${this.esc(item.saleId || "—")}</td>
         <td class="cc-nome" title="${this.esc(item.customerName || "")}">${this.esc(item.customerName || "—")}</td>
         <td>${this.esc(item.costCenterId || "—")}</td>
         <td title="${this.esc(nomeUnidade || "")}">${this.esc(nomeUnidade || "—")}</td>
-        <td class="pr-pagar">${marca}<span class="pr-bill">${pagar}</span></td>
+        <td class="pr-pagar"><span class="pr-bill">${pagar}</span></td>
         <td>${this.esc(reembolso)}</td>
         <td><span class="pr-status ${sit.classe}">${this.esc(sit.rotulo)}</span></td>
         <td class="cc-nome" title="${this.esc(proc)}">${this.esc(proc)}</td>
@@ -425,16 +426,17 @@ const PagarReembolsoApp = {
       </tr>`;
     }).join("");
     const marcaTodos = edita
-      ? `<label class="pr-th-flag"><input type="checkbox" id="pr-flag-todos" ${todosOn ? "checked" : ""}> Título a pagar</label>`
-      : "Título a pagar";
+      ? `<label class="pr-th-flag" title="Marcar todos os reembolsos prontos"><input type="checkbox" id="pr-flag-todos" ${todosOn ? "checked" : ""} aria-label="Marcar todos"></label>`
+      : "";
     lista.innerHTML = avisos + `<div class="cc-scroll cj-scroll"><table class="cc-table cj-cc pr-cc">
       <colgroup>
-        <col class="pr-c-id"><col class="pr-c-tit"><col><col class="pr-c-cc"><col><col class="pr-c-pagar"><col class="cj-c-data"><col class="pr-c-status"><col><col class="cj-c-valor"><col class="cj-c-ico">
+        <col class="pr-c-marca"><col class="pr-c-id"><col class="pr-c-tit"><col><col class="pr-c-cc"><col><col class="pr-c-pagar"><col class="cj-c-data"><col class="pr-c-status"><col><col class="cj-c-valor"><col class="cj-c-ico">
       </colgroup>
       <thead><tr>
+        <th class="is-center" title="Marcar para liberar">${marcaTodos}</th>
         <th title="ID da empresa"><span class="pr-id-head">ID <i data-lucide="info"></i></span></th>
         <th>Título</th><th>Cliente</th><th>CC</th><th>Unidade</th>
-        <th>${marcaTodos}</th><th>Reembolso</th><th>Status</th><th>Processo</th><th class="is-right">Valor</th><th class="is-center" title="Anexos">Anexos</th>
+        <th>Título a pagar</th><th>Reembolso</th><th>Status</th><th>Processo</th><th class="is-right">Valor</th><th class="is-center" title="Anexos">Anexos</th>
       </tr></thead>
       <tbody>${linhas}</tbody>
     </table></div>`;

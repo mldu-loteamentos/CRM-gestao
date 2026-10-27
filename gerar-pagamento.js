@@ -2164,10 +2164,24 @@ const GerarPagamentoApp = {
     this.paintTitulos();
   },
 
+  lotesPendentesSienge() {
+    return (this.state.lotes || []).filter((l) => {
+      const st = (l.sienge && l.sienge.status) || "pendente";
+      return !l.sienge || st === "pendente" || st === "erro" || st === "gerado";
+    });
+  },
+
   async gerarLotesMarcados() {
     if (this.state.gerandoLote || this.state.roboLote) return;
     const grupos = this.gruposDoPeriodo().filter((g) => g.key !== "__sem" && g.conta && g.itens.some((it) => it.marcado && !it.emLote && !it.bloqueio));
     if (!grupos.length) {
+      const pendentes = this.lotesPendentesSienge();
+      if (pendentes.length) {
+        const pergunta = `Há ${pendentes.length} lote(s) salvos no Integra que ainda não fecharam no Sienge. Enviar e autorizar agora?`;
+        const okPend = typeof window.mouraConfirm === "function" ? await window.mouraConfirm(pergunta) : confirm(pergunta);
+        if (okPend) await this.enviarFila(pendentes);
+        return;
+      }
       alert("Marque títulos livres em ao menos um lote.");
       return;
     }
@@ -2250,21 +2264,25 @@ const GerarPagamentoApp = {
     this.pintarRoboMsg();
     lotes.forEach((l) => this.completarLote(l));
     const r = await this.roboChamar("/lotes/fila", { lotes });
-    s.gerandoLote = "";
-    s.roboLote = "";
-    s.roboMsg = "";
     if (r.offline || r.cancelado) {
+      s.gerandoLote = "";
+      s.roboLote = "";
+      s.roboMsg = "";
       this.paintTitulos();
       this.pintarRoboMsg();
       alert(`Os lotes ficaram salvos no Integra, mas ainda não foram criados no Sienge.\n\n${r.erro}` + (r.offline ? "\nClique em Ligar robô no topo desta tela." : ""));
       return;
     }
     if (r.erro && /desconhecido/i.test(String(r.erro))) {
-      this.paintTitulos();
+      s.roboMsg = "Atualizando o robô e gerando os lotes…";
       this.pintarRoboMsg();
-      alert("O robô ligado neste computador ainda gera um lote e sai do Sienge. Feche a janela do robô e clique em Ligar robô de novo. Os lotes ficaram salvos no Integra.");
+      this.baixarInstaladorRobo();
+      await this.enviarFilaUmAUm(lotes);
       return;
     }
+    s.gerandoLote = "";
+    s.roboLote = "";
+    s.roboMsg = "";
     const lista = Array.isArray(r.resultados) ? r.resultados : [];
     for (const item of lista) {
       const lote = s.lotes.find((l) => l.id === item.id);
@@ -2284,6 +2302,34 @@ const GerarPagamentoApp = {
     const falhas = lista.filter((x) => !x.ok);
     if (!lista.length && r.erro) alert(r.erro);
     else if (falhas.length) alert("Estes lotes não fecharam no Sienge. Os outros da fila foram feitos na mesma sessão.\n\n" + falhas.map((f) => "• " + (f.numeroSienge ? "nº " + f.numeroSienge + " · " : "") + (f.erro || "falha")).join("\n"));
+  },
+
+  /** Robô antigo sem /lotes/fila: gera e autoriza cada lote em sequência. */
+  async enviarFilaUmAUm(lotes) {
+    const s = this.state;
+    const falhas = [];
+    let ok = 0;
+    s.gerandoLote = "fila";
+    for (let i = 0; i < lotes.length; i++) {
+      const lote = lotes[i];
+      s.roboLote = "";
+      s.roboMsg = `Gerando lote ${i + 1} de ${lotes.length} no Sienge…`;
+      this.paintTitulos();
+      this.pintarRoboMsg();
+      const passou = await this.enviarAoSienge(lote.id);
+      if (passou) ok++;
+      else falhas.push(lote.id);
+    }
+    s.gerandoLote = "";
+    s.roboLote = "";
+    s.roboMsg = "";
+    this.paintTitulos();
+    this.pintarRoboMsg();
+    if (falhas.length) {
+      alert(`${ok} lote(s) gerado(s). Estes não fecharam no Sienge:\n\n` + falhas.map((id) => "• " + id).join("\n") + "\n\nAbra o arquivo Ligar robo do Sienge que foi baixado para atualizar o robô e gerar todos na mesma sessão.");
+    } else if (ok) {
+      alert(`${ok} lote(s) gerado(s) e autorizado(s) no Sienge.\n\nPara a próxima vez manter a sessão aberta até o fim, abra o arquivo Ligar robo do Sienge que foi baixado (atualiza o robô neste computador).`);
+    }
   },
 
   async gerarLote(key, opts) {

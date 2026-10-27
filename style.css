@@ -10989,11 +10989,11 @@ tr.pr-linha { cursor: pointer; }
 .pr-status.is-prog { color: #9a3412; }
 .cc-table.pr-cc col.pr-c-status { width: 110px; }
 .pr-busca-fila { flex: 1; min-width: 260px; }
-.pr-th-flag { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; cursor: pointer; }
-.pr-th-flag input { width: 16px; height: 16px; accent-color: #105436; margin: 0; }
-.cc-table.pr-cc col.pr-c-pagar { width: 168px; }
-.cc-table.pr-cc td.pr-pagar { height: 40px; white-space: nowrap; }
-.cc-table.pr-cc td.pr-pagar input { margin-right: 8px; vertical-align: middle; }
+.pr-th-flag { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.pr-th-flag input, .cc-table.pr-cc td.pr-marca input { width: 16px; height: 16px; accent-color: #105436; margin: 0; cursor: pointer; }
+.cc-table.pr-cc col.pr-c-marca { width: 44px; }
+.cc-table.pr-cc col.pr-c-pagar { width: 120px; }
+.cc-table.pr-cc td.pr-pagar, .cc-table.pr-cc td.pr-marca { height: 40px; white-space: nowrap; }
 .cj-tipos { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; align-content: start; max-height: 280px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px; background: #fff; }
 #cj-tipo-busca { height: 40px; }
 .cj-tipo { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 8px; min-height: 36px; padding: 6px 8px; border-radius: 6px; font-size: 0.84rem; font-weight: 600; color: #1c2e24; cursor: pointer; text-align: left; }
@@ -11019,10 +11019,11 @@ tr.pr-liberado td { background: #f7faf8; }
 .pr-retorno.is-erro { background: #fff7ed; color: #9a3412; }
 .cc-table.cj-cc.pr-cc { width: 100%; min-width: 0; table-layout: fixed; }
 .cc-table.pr-cc th, .cc-table.pr-cc td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-table.pr-cc col.pr-c-marca { width: 3%; }
 .cc-table.pr-cc col.pr-c-id { width: 4%; }
 .cc-table.pr-cc col.pr-c-tit { width: 7%; }
 .cc-table.pr-cc col.pr-c-cc { width: 6%; }
-.cc-table.pr-cc col.pr-c-pagar { width: 12%; }
+.cc-table.pr-cc col.pr-c-pagar { width: 9%; }
 .cc-table.pr-cc col.pr-c-status { width: 9%; }
 .cc-table.pr-cc col.cj-c-data { width: 9%; }
 .cc-table.pr-cc col.cj-c-valor { width: 9%; }
