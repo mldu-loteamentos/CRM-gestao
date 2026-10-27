@@ -144,11 +144,9 @@ const ContabilApp = {
     return { ano: Number(p[0]) || 0, mes: Number(p[1]) || 0 };
   },
 
-  /* A tela pede uma competência. O DRE e o balanço usam só esse mês. */
+  /* A competência fecha o período: janeiro até o mês escolhido, neste ano e no anterior. */
   montarJanela() {
-    const p = this.partesMes(this.state.de || this.state.ate);
-    if (!p.ano || !p.mes) return { ano: 0, meses: [] };
-    return { ano: p.ano, meses: [p.mes] };
+    return this.mesesAte(this.state.de || this.state.ate);
   },
 
   nomeMes(m) {
@@ -1105,7 +1103,7 @@ const ContabilApp = {
     s.janela = janela;
     const comp = this.partesMes(de);
     s.loadMsg = comp.mes
-      ? ("Lendo " + this.nomeMes(comp.mes) + " de " + comp.ano + " e o mesmo mês de " + (comp.ano - 1) + "…")
+      ? ("Lendo janeiro a " + this.nomeMes(comp.mes) + " de " + comp.ano + " e de " + (comp.ano - 1) + "…")
       : "Lendo o balancete…";
     this.render();
     const tarefas = [{ tipo: "balanco", ini: ini, fim: fim, rotulo: "balanço" }];
@@ -1388,12 +1386,14 @@ const ContabilApp = {
       const serie = s.serie;
       const fimMes = serie && serie.meses && serie.meses.length ? this.nomeMes(serie.meses[serie.meses.length - 1]) : "";
       const iniMes = serie && serie.meses && serie.meses.length ? this.nomeMes(serie.meses[0]) : "";
-      const trecho = iniMes ? (iniMes + " de " + (serie && serie.ano)) : "";
+      const trecho = iniMes && fimMes
+        ? (iniMes === fimMes ? (iniMes + " de " + (serie && serie.ano)) : (iniMes + " a " + fimMes + " de " + (serie && serie.ano)))
+        : "";
       const notaDre = aba !== "dre"
         ? " O balanço usa o saldo no fim da competência."
         : (serie && fimMes
           ? (s.dreVisao === "comp"
-            ? ` ${trecho} e o mesmo mês de ${((serie.ano || 0) - 1)}. Cada mês traz os dois anos e a variação.${s.dreMil ? " Valores divididos por 1.000." : ""}`
+            ? ` ${trecho} e o mesmo período de ${((serie.ano || 0) - 1)}. Cada mês traz os dois anos e a variação.${s.dreMil ? " Valores divididos por 1.000." : ""}`
             : ` ${trecho}. Cada grupo abre a conta, e a conta abre mais um nível.${s.dreMil ? " Valores divididos por 1.000." : ""}`)
           : " O DRE soma o movimento da competência nos grupos do demonstrativo. Conta sem valor fica fora da lista.");
       const visao = aba === "dre" && serie ? `<div class="ctb-visao-row">
@@ -1412,7 +1412,7 @@ const ContabilApp = {
         ${(window.ContabilEquiv && ContabilEquiv.podeLancar()) ? `<button type="button" class="ctb-buscar" onclick="ContabilEquiv.lancar()" ${s.lancando ? "disabled" : ""} title="Lança a equivalência desta competência: o resultado da investida, no percentual do organograma, na empresa que a controla.">${s.lancando ? "Lançando…" : "Lançar equivalência"}</button>` : ""}
       </div>` : "";
       const notaEq = aba === "dre" && window.ContabilEquiv && typeof ContabilEquiv.notaHtml === "function"
-        ? ContabilEquiv.notaHtml(s.de) + (typeof ContabilEquiv.gestaoHtml === "function" ? ContabilEquiv.gestaoHtml(s.de) : "")
+        ? ContabilEquiv.notaHtml(s.de)
         : "";
       corpo = `${avisos}${visao}${notaEq}<p class="ctb-nota">${aba === "dre" && serie && fimMes ? this.esc(notaDre.trim()) : this.esc(periodo) + ". Entram as contas com movimento." + notaDre}</p>${demo}`;
     }
@@ -1438,11 +1438,6 @@ const ContabilApp = {
       #contabil-root .ctb-buscar { height:38px; padding:0 16px; border:0; border-radius:8px; background:#105436; color:#fff; font-weight:700; cursor:pointer; }
       #contabil-root .ctb-buscar:disabled { opacity:0.6; cursor:wait; }
       #contabil-root .ctb-nota { color:#64748b; font-size:0.84rem; margin:0 0 12px; }
-      #contabil-root .ctb-gestao { margin:0 0 12px; padding:12px; border:1px solid #e2e8f0; border-radius:10px; background:#fff; }
-      #contabil-root .ctb-gestao p { margin:0 0 10px; color:#475569; font-size:0.8rem; line-height:1.4; }
-      #contabil-root .ctb-gestao-linha { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:0 0 8px; font-size:0.78rem; font-weight:700; color:#334155; }
-      #contabil-root .ctb-gestao-linha span { flex:1 1 220px; }
-      #contabil-root .ctb-gestao-linha input { height:36px; border:1px solid #cbd5e1; border-radius:6px; padding:0 10px; font-size:0.82rem; color:#0f172a; }
       #contabil-root .ctb-erro { color:#b91c1c; font-size:0.84rem; margin:0 0 12px; }
       #contabil-root .ctb-ok { color:#105436; font-size:0.84rem; font-weight:700; margin:10px 0 0; }
       #contabil-root .ctb-dif { color:#9a3412; font-size:0.84rem; margin:10px 0 0; }

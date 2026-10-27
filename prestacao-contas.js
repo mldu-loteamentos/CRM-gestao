@@ -162,7 +162,17 @@ const PrestacaoContasApp = {
     this.empOpen = false;
     this.retencaoMista = null;
     const obras = Array.isArray(part.obras) && part.obras.length ? part.obras : [];
-    this.costCenterIds = [...new Set(obras.flatMap(o => (o.costCenters || []).filter(c => c.inAccount).map(c => String(c.id))))];
+    const ids = [];
+    obras.forEach((o) => {
+      (o.costCenters || []).forEach((c) => {
+        if (!c || !c.inAccount || !c.id) return;
+        const id = String(c.id).replace(/\D/g, "");
+        if (!id) return;
+        ids.push(id);
+        if (/01$/.test(id)) ids.push(id.slice(0, -2) + "00");
+      });
+    });
+    this.costCenterIds = [...new Set(ids)].sort((a, b) => Number(a) - Number(b));
     this.render();
   },
 

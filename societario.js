@@ -839,14 +839,44 @@ const SocietarioApp = {
     return `<div class="soc-tree-node ${cls}"><span class="soc-tree-name">${this.esc(nome)}</span>${extra || ""}</div>`;
   },
 
-  bandaPessoas(titulo, pessoas, docDe) {
+  centroDaPessoa(p, s) {
+    const id = String((s && s.ccTitulo) || "").trim();
+    if (id) {
+      const nome = String(s.ccTituloNome || "").trim();
+      return id + (nome && nome !== id ? " — " + nome : "");
+    }
+    const ids = [];
+    (p.obras || []).forEach(o => this.caixasDaObra(o).forEach(c => { if (ids.indexOf(c.id) < 0) ids.push(c.id); }));
+    return ids.length ? ids.join(", ") : "—";
+  },
+
+  pessoasLista(p, titulo, pessoas) {
     if (!pessoas.length) return "";
-    const boxes = pessoas.map(s => {
-      const pj = this.ehPessoaJuridica(s.name, docDe ? docDe(s) : s.cpfCnpj);
-      const pct = s.sharePct === "" || s.sharePct == null ? "" : `<span class="soc-tree-pct-inline">${this.esc(this.pctCurto(s.sharePct))}</span>`;
-      return `<div class="soc-tree-node ${pj ? "is-pj" : "is-pf"} is-mini">${pct}<span class="soc-tree-name">${this.esc(s.name || s.id)}</span></div>`;
+    const linhas = pessoas.map(s => {
+      const pct = s.sharePct === "" || s.sharePct == null ? "—" : this.pctCurto(s.sharePct);
+      return `<tr><td>${this.esc(s.name || s.id)}</td><td>${this.esc(this.centroDaPessoa(p, s))}</td><td>${this.esc(pct)}</td></tr>`;
     }).join("");
-    return `<div class="soc-tree-banda"><div class="soc-tree-banda-titulo">${this.esc(titulo)}</div><div class="soc-tree-banda-row">${boxes}</div></div>`;
+    return `<section class="soc-lista"><h4>${this.esc(titulo)}</h4><table><thead><tr><th>Nome</th><th>Centro de custo</th><th>%</th></tr></thead><tbody>${linhas}</tbody></table></section>`;
+  },
+
+  listasDaParceria(p) {
+    const app = window.ParametrizacaoParceiroApp;
+    if (app && app.isSociedade && app.isSociedade(p)) return this.pessoasLista(p, "Sócios", this.sociosDe(p));
+    if (!app || !app.isMista || !app.isMista(p)) return "";
+    const fold = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+    const terr = typeof app.sociosPorPapel === "function" ? app.sociosPorPapel(p, "terrenista").slice() : [];
+    const ccs = [];
+    (p.obras || []).forEach(o => {
+      (o.costCenters || []).forEach(c => {
+        if (!c || !c.id || String(c.papel) !== "terrenista") return;
+        if (ccs.indexOf(String(c.id)) < 0) ccs.push(String(c.id));
+      });
+    });
+    if (p.partnerName && !terr.some(s => fold(s.name) === fold(p.partnerName))) {
+      const pct = (p.obras || []).map(o => o.defaultPartnerShare).find(n => Number(n) > 0);
+      terr.unshift({ name: p.partnerName, ccTitulo: ccs.join(", ") || "—", sharePct: pct != null ? pct : "" });
+    }
+    return this.pessoasLista(p, "Terrenistas", terr) + this.pessoasLista(p, "Empreendedores", this.empreendedoresDe(p));
   },
 
   colunaParceria(p) {
@@ -859,9 +889,7 @@ const SocietarioApp = {
     const kids = caixas.length
       ? `<ul>${caixas.map(c => `<li><span class="soc-tree-pct">${this.esc(c.pct)}</span>${this.caixaHtml(c.id, c.nome ? `<small>${this.esc(c.nome)}</small>` : "", "is-cc")}</li>`).join("")}</ul>`
       : "";
-    const pessoas = sociedade ? this.sociosDe(p) : this.empreendedoresDe(p);
-    const banda = this.bandaPessoas(sociedade ? "Sócios" : "Empreendedores", pessoas);
-    return `<li><div class="soc-tree-lado"><div class="soc-tree-lado-titulo">${tipo}</div>${this.caixaHtml(p.partnerName || "Sem nome", "", pj ? "is-pj" : "is-pf")}${kids}${banda}</div></li>`;
+    return `<li><div class="soc-tree-lado"><div class="soc-tree-lado-titulo">${tipo}</div>${this.caixaHtml(p.partnerName || "Sem nome", "", pj ? "is-pj" : "is-pf")}${kids}${this.listasDaParceria(p)}</div></li>`;
   },
 
   parceriaHtml() {
@@ -879,7 +907,7 @@ const SocietarioApp = {
     const itens = atual.itens.slice().sort((a, b) => String(a.partnerName || "").localeCompare(String(b.partnerName || ""), "pt-BR"));
     return `<div class="soc-page">
       <div class="soc-toolbar">
-        <p class="soc-help">A caixa de cima é a empresa. Embaixo, cada parceria ou sociedade e os empreendimentos com o percentual. Empreendedores e sócios ficam num bloco separado, abaixo dos empreendimentos.</p>
+        <p class="soc-help">A caixa de cima é a empresa. Embaixo, cada parceria ou sociedade e os empreendimentos com o percentual. Sócios, terrenistas e empreendedores ficam em listas, com o centro de custo e o percentual.</p>
       </div>
       <div class="ml-tabs soc-emp-tabs" role="tablist">${abas}</div>
       <div class="soc-stage">

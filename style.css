@@ -10520,11 +10520,11 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 
 .soc-shell { display: flex; flex-direction: column; height: calc(100vh - 174px); min-height: 0; }
 .soc-view-tabs { flex: none; margin-bottom: 10px; }
-.soc-emp-tabs { flex: none; margin: 0 0 12px; }
-.soc-emp-tabs .ml-tab { max-width: 320px; }
-.soc-emp-tabs .ml-tab span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.soc-emp-tabs { flex: none; margin: 0 0 12px; flex-direction: column; align-items: stretch; overflow: visible; gap: 0; }
+.soc-emp-tabs .ml-tab { max-width: none; width: 100%; justify-content: flex-start; white-space: normal; }
+.soc-emp-tabs .ml-tab span { overflow: visible; text-overflow: clip; white-space: normal; }
 .soc-page { display: flex; flex-direction: column; height: auto; flex: 1; min-height: 0; }
-.soc-tree { display: flex; flex-direction: column; align-items: center; padding: 36px 32px 48px; min-width: max-content; }
+.soc-tree { display: flex; flex-direction: column; align-items: flex-start; padding: 36px 32px 48px; min-width: max-content; }
 .soc-tree ul { display: flex; justify-content: center; gap: 8px; margin: 0; padding: 28px 0 0; list-style: none; position: relative; }
 .soc-tree ul::before { content: ""; position: absolute; top: 0; left: 50%; height: 28px; border-left: 2px solid #94a3b8; }
 .soc-tree li { display: flex; flex-direction: column; align-items: center; position: relative; padding: 28px 14px 0; }
@@ -10559,7 +10559,13 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .soc-btn-import:hover { background: #d85f16; color: #fff; }
 .soc-body { display: flex; flex: 1; min-height: 0; gap: 12px; }
 .soc-stage { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; }
-.soc-canvas-wrap { flex: 1; min-height: 0; overflow: auto; display: flex; justify-content: center; align-items: flex-start; background-color: #f7faf8; background-image: radial-gradient(#d5e5db 1.1px, transparent 1.1px); background-size: 20px 20px; }
+.soc-canvas-wrap { flex: 1; min-height: 0; overflow: auto; display: flex; justify-content: flex-start; align-items: flex-start; background-color: #f7faf8; background-image: radial-gradient(#d5e5db 1.1px, transparent 1.1px); background-size: 20px 20px; }
+.soc-lista { width: min(520px, 100%); margin-top: 14px; background: #fff; border: 1px dashed #b7d4c4; border-radius: 14px; padding: 10px 12px 12px; box-sizing: border-box; }
+.soc-lista h4 { margin: 0 0 8px; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: #105436; }
+.soc-lista table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.soc-lista th { text-align: left; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; padding: 4px 6px; border-bottom: 1px solid #e2e8f0; }
+.soc-lista td { padding: 6px; border-bottom: 1px solid #f1f5f9; color: #0f172a; vertical-align: top; }
+.soc-lista td:last-child { text-align: right; font-weight: 800; color: #105436; white-space: nowrap; }
 .soc-canvas { position: relative; }
 .soc-edges { position: absolute; left: 0; top: 0; z-index: 1; pointer-events: none; }
 .soc-edge-labels { position: absolute; inset: 0; z-index: 4; pointer-events: none; }

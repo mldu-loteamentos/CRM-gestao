@@ -15,6 +15,7 @@ const ContabilEquiv = {
     informados: {},
     updatedAt: 0,
     busca: "",
+    gestaoComp: "",
     rascunho: null,
     cacheContas: {},
     cacheLanc: {}
@@ -105,7 +106,8 @@ const ContabilEquiv = {
 
   empresasGestao() {
     const emp = window.EmpresasApp;
-    const lista = (window.ContabilApp && ContabilApp.state && ContabilApp.state.companies) || [];
+    const doDre = window.ContabilApp && ContabilApp.state && ContabilApp.state.companies;
+    const lista = (doDre && doDre.length) ? doDre : (this.state.companies || []);
     if (!emp || typeof emp.flagOn !== "function") return [];
     return lista.filter((c) => emp.flagOn(emp.customOf(c.id), "gestao_elenco"));
   },
@@ -137,6 +139,19 @@ const ContabilEquiv = {
     this.persistir().catch(() => {});
   },
 
+  gestaoChave() {
+    if (/^\d{4}-\d{2}$/.test(String(this.state.gestaoComp || ""))) return this.state.gestaoComp;
+    const de = window.ContabilApp && ContabilApp.state && ContabilApp.state.de;
+    if (/^\d{4}-\d{2}$/.test(String(de || ""))) return de;
+    const d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+  },
+
+  setGestaoComp(valor) {
+    this.state.gestaoComp = String(valor || "");
+    this.render();
+  },
+
   gestaoHtml(chave) {
     const alvos = this.empresasGestao();
     if (!chave || !alvos.length) return "";
@@ -149,7 +164,12 @@ const ContabilEquiv = {
         <input type="text" value="${this.esc(rec.mep || "")}" placeholder="Conta MEP" onchange="ContabilEquiv.salvarInformado('${this.esc(c.id)}','${this.esc(chave)}','mep', this.value)">
       </label>`;
     }).join("");
-    return `<div class="ctb-gestao"><p>Gestão Ellenco: a operadora é a empresa 28, Reserva dos Ramos. A Ellenco apura o resultado e devolve o valor. Informe o lucro (positivo) ou o prejuízo (negativo) e a conta MEP. O lançamento leva esse resultado, no percentual do organograma, para a empresa 1.</p>${linhas}</div>`;
+    return `<div class="ctb-gestao"><p>Gestão Ellenco: a operadora é a empresa 28, Reserva dos Ramos. A Ellenco apura o resultado e devolve o valor. Informe o lucro (positivo) ou o prejuízo (negativo) e a conta MEP da competência. O lançamento leva esse resultado, no percentual do organograma, para a empresa 1.</p>
+      <div class="ctb-campo">
+        <label for="ctb-eq-gestao-comp">Competência</label>
+        <input type="month" id="ctb-eq-gestao-comp" value="${this.esc(chave)}" onchange="ContabilEquiv.setGestaoComp(this.value)">
+      </div>
+      ${linhas}</div>`;
   },
 
   incluirGestao(app, chave, linhas, faltas, pulos, nomeEmp, fim, partes) {
@@ -570,9 +590,14 @@ const ContabilEquiv = {
       #contabil-config-root .ctb-grade { display:flex; flex-wrap:wrap; gap:12px 16px; align-items:flex-end; margin:0 0 14px; }
       #contabil-config-root .ctb-campo { display:flex; flex-direction:column; gap:4px; min-width:220px; }
       #contabil-config-root .ctb-campo label { font-size:0.72rem; letter-spacing:0.04em; text-transform:uppercase; color:#64748b; font-weight:700; }
-      #contabil-config-root select, #contabil-config-root input[type="text"], #contabil-config-root input[type="number"] {
+      #contabil-config-root select, #contabil-config-root input[type="text"], #contabil-config-root input[type="number"], #contabil-config-root input[type="month"] {
         height:38px; border:1px solid #cbd5e1; border-radius:8px; background:#fff; padding:0 10px; color:#0f172a; min-width:220px;
       }
+      #contabil-config-root .ctb-gestao { margin:16px 0; padding:12px; border:1px solid #e2e8f0; border-radius:10px; background:#fff; max-width:920px; }
+      #contabil-config-root .ctb-gestao p { margin:0 0 10px; color:#475569; font-size:0.8rem; line-height:1.4; }
+      #contabil-config-root .ctb-gestao-linha { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:8px 0 0; font-size:0.78rem; font-weight:700; color:#334155; }
+      #contabil-config-root .ctb-gestao-linha span { flex:1 1 220px; }
+      #contabil-config-root .ctb-gestao-linha input { height:36px; border:1px solid #cbd5e1; border-radius:6px; padding:0 10px; font-size:0.82rem; color:#0f172a; min-width:160px; }
       #contabil-config-root .ctb-buscar { height:38px; padding:0 16px; border:0; border-radius:8px; background:#105436; color:#fff; font-weight:700; cursor:pointer; }
       #contabil-config-root .ctb-buscar:disabled { opacity:0.6; cursor:wait; }
       #contabil-config-root .ctb-table { width:100%; border-collapse:collapse; background:#fff; border:1px solid #e2e8f0; border-radius:10px; overflow:hidden; margin:0 0 16px; }
@@ -627,6 +652,7 @@ const ContabilEquiv = {
       </div>
       <button type="button" class="ctb-buscar" onclick="ContabilEquiv.incluirCodigo()">Incluir</button>
     </div>
+    ${this.gestaoHtml(this.gestaoChave())}
     ${lanca ? `<table class="ctb-table"><thead><tr><th>Data</th><th>Valor</th><th>Débito</th><th>Crédito</th><th>Histórico</th><th>Partida</th></tr></thead><tbody>${lanca}</tbody></table>
     <p class="ctb-nota">A partida do lançamento antigo preenche o campo quando você clica no número.</p>` : ""}`;
   },
