@@ -20,6 +20,23 @@ window.CentrosCustoState = CentrosCustoState;
 
 const CentrosCustoApp = {
   /** Centros 9xxxx são veículos (Frota). Os de sócios vêm da lista conferida pelo financeiro. */
+  /** Texto do {{REGISTRO_IMOVEL}} na autorização de escritura, pela coluna da planilha. */
+  REGISTRO_IMOVEL_SEMENTE: {
+    "100": "registrado",
+    "10200": "registrado", "10300": "registrado", "10400": "registrado", "10500": "registrado",
+    "10600": "registrado", "10700": "registrado", "10800": "registrado", "10900": "registrado",
+    "11000": "registrado", "11100": "registrado", "11300": "registrado", "11400": "registrado",
+    "11500": "registrado", "11600": "registrado", "11700": "registrado", "11800": "registrado",
+    "11900": "registrado", "12000": "registrado", "12100": "registrado", "12200": "registrado",
+    "12300": "registrado", "12400": "registrado", "12600": "registrado", "12700": "registrado",
+    "12800": "registrado", "12900": "registrado", "12901": "registrado", "13000": "registrado",
+    "13001": "registrado", "13100": "registrado", "13101": "registrado", "13200": "registrado",
+    "13201": "registrado", "13299": "registrado", "13300": "registrado", "13301": "registrado",
+    "13400": "registrado", "13401": "registrado", "13500": "registrado", "13501": "registrado",
+    "13600": "registrado", "13601": "registrado", "14100": "Registrado", "14201": "registrado",
+    "14202": "registrado"
+  },
+
   RECLASSIFICAR: [
     { tipo: 'Frota', marca: 'frota_9', casa: (id) => id.startsWith('9') },
     {
@@ -72,6 +89,7 @@ const CentrosCustoApp = {
       
       let customFieldsChanged = false;
       let reclassificou = false;
+      let semeouRegistro = false;
       ccList.forEach(cc => {
           const idStr = String(cc.id);
           if (!CentrosCustoState.customFields[cc.id]) {
@@ -118,13 +136,20 @@ const CentrosCustoApp = {
               custom.imposto_pago_empresa = false;
               customFieldsChanged = true;
           }
+          const semente = this.REGISTRO_IMOVEL_SEMENTE[idStr] || this.REGISTRO_IMOVEL_SEMENTE[String(parseInt(idStr, 10))];
+          if (semente && !String(custom.registro_imovel || "").trim()) {
+              custom.registro_imovel = semente;
+              custom.updatedAt = Date.now();
+              customFieldsChanged = true;
+              semeouRegistro = true;
+          }
       });
       
       if (customFieldsChanged) {
           this.gravarLocal(JSON.stringify(CentrosCustoState.customFields));
       }
-      if (reclassificou && typeof window.persistCentrosCustoCustomToFirebase === "function") {
-          window.persistCentrosCustoCustomToFirebase().catch((e) => console.warn("[CentrosCusto] reclassificação na nuvem:", e));
+      if ((reclassificou || semeouRegistro) && typeof window.persistCentrosCustoCustomToFirebase === "function") {
+          window.persistCentrosCustoCustomToFirebase().catch((e) => console.warn("[CentrosCusto] parametrização na nuvem:", e));
       }
       
       // Load companies
@@ -230,6 +255,8 @@ const CentrosCustoApp = {
       custom.clausula_suspensiva_dias = (Number.isFinite(n) && n > 0) ? n : 30;
       if (wasDisabled) suspensivaDiasEl.disabled = true;
     }
+    const registroEl = document.getElementById(`edit-registro-imovel-${id}`);
+    if (registroEl) custom.registro_imovel = String(registroEl.value || "").trim();
     const contaEl = document.getElementById(`edit-conta-parceria-${id}`);
     let contaNova;
     // Só mexe na conta quando o usuário trocou a seleção; salvar outros campos não apaga a conta.
@@ -308,6 +335,15 @@ const CentrosCustoApp = {
   customOf(id) {
     const map = CentrosCustoState.customFields || {};
     return map[id] || map[String(id)] || {};
+  },
+
+  registroImovelDe(id) {
+    const key = String(id == null ? "" : id).trim();
+    const num = String(parseInt(key, 10));
+    const custom = this.customOf(key);
+    const salvo = String((custom && custom.registro_imovel) || "").trim();
+    if (salvo) return salvo;
+    return this.REGISTRO_IMOVEL_SEMENTE[key] || this.REGISTRO_IMOVEL_SEMENTE[num] || "";
   },
 
   /** CC Corporativo não segue a regra de parceria, mesmo com "parceiro/parceria" no nome. */
@@ -704,6 +740,7 @@ const CentrosCustoApp = {
     const assocNome = String(custom.associacao_nome || "").trim();
     const irmaos = this.irmaosObra(id).map((c) => String(c.id)).filter((x) => x !== String(id));
     const parceiro = this.isParceiro(cc);
+    const registroImovel = String(custom.registro_imovel || this.registroImovelDe(id) || "");
     const par = this.parDoRateio(cc);
     const parCustom = par ? this.customOf(par.outro.id) : {};
     const fmtPct = (n) => String(Number((Number(n) || 0).toFixed(2)));
@@ -828,6 +865,12 @@ const CentrosCustoApp = {
               <select id="edit-conta-parceria-${id}" class="form-control" disabled>
                 <option value="">Carregando contas correntes da empresa ${cc.idCompany || cc.companyId || ''}...</option>
               </select>
+            </div>
+
+            <div>
+              <label for="edit-registro-imovel-${id}" style="display:block; font-weight:bold; margin-bottom:5px; font-size:0.85rem;">Registro do imóvel na autorização de escritura</label>
+              <textarea id="edit-registro-imovel-${id}" class="form-control" rows="3" style="width:100%; box-sizing:border-box; resize:vertical;">${this.escHtml(registroImovel)}</textarea>
+              <p style="margin:6px 0 0; font-size:0.75rem; color:#64748b; line-height:1.4;">Entra no termo como {{REGISTRO_IMOVEL}}, no trecho do cartório, da empresa e do CNPJ. Exemplo: registrado no 1º Cartório de Registro de Imóveis da Comarca de Cerqueira César/SP, de propriedade da empresa Moura Leite Desenvolvimento &amp; Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78.</p>
             </div>
 
             <hr style="border: 0; border-top: 1px solid #eee; margin: 5px 0;">
@@ -1305,4 +1348,13 @@ document.addEventListener('tabChanged', (e) => {
 });
 
 window.CentrosCustoApp = CentrosCustoApp;
+window.registroImovelDoCentro = function(id) {
+  const direto = CentrosCustoApp.registroImovelDe(id);
+  if (direto) return direto;
+  const n = parseInt(id, 10);
+  if (!n) return "";
+  const raiz = String(Math.floor(n / 100) * 100);
+  if (raiz === String(n)) return "";
+  return CentrosCustoApp.registroImovelDe(raiz);
+};
 window.carregarContasParceriaFirebase = (opts) => CentrosCustoApp.carregarContasParceria(opts);

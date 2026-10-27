@@ -25830,6 +25830,7 @@ window.buildLegalDocVarMap = function(customer, sale, unit, extras) {
     DATA_HOJE: new Date().toLocaleDateString("pt-BR"),
     DATA_HOJE_EXTENSO: dateExt,
     DATA_ATUAL_EXTENSO: dateExt,
+    REGISTRO_IMOVEL: (typeof window.registroImovelDoCentro === "function" && window.registroImovelDoCentro(ccId)) || "____",
     PREAMBULO: preamble,
     CREDOR_NOME: (signers && signers[0]) || companyName || "",
     CREDOR_CPF: mask(companyCnpj),
@@ -41107,6 +41108,18 @@ window.ajustarFraseAreaEscritura = function(texto) {
   return s;
 };
 
+/* Troca a frase fixa do cartório pela variável do centro de custo. */
+window.ajustarRegistroEscritura = function(texto) {
+  let s = String(texto || "");
+  if (/\{\{\s*REGISTRO_IMOVEL\s*\}\}/.test(s)) return s;
+  const longo = /(situado no Município de (?:\{\{CIDADE_LOTEAMENTO\}\}|[^,\n]+)),\s*registrado no [\s\S]*?,\s*(?=com as seguintes confrontações)/i;
+  if (longo.test(s)) return s.replace(longo, "$1, {{REGISTRO_IMOVEL}}, ");
+  return s.replace(
+    /(situado no Município de \{\{CIDADE_LOTEAMENTO\}\}),\s*(com as seguintes confrontações)/i,
+    "$1, {{REGISTRO_IMOVEL}}, $2"
+  );
+};
+
 window.formatDocPadraoMarkup = function(text) {
   const chunks = [];
   let s = String(text || '');
@@ -41336,7 +41349,7 @@ function applySavedDocPadraoFields(tipo, data, fieldMap) {
     }
     if (id === 'doc-escritura-corpo' && /^Autorizamos o\(a\) Senhor\(a\) Tabelião/i.test(String(data[id] || ''))) return;
     if (id === 'doc-escritura-corpo') {
-      el.value = window.ajustarFraseAreaEscritura(data[id]);
+      el.value = window.ajustarRegistroEscritura(window.ajustarFraseAreaEscritura(data[id]));
       return;
     }
     if (id === 'doc-quitacao-corpo') {

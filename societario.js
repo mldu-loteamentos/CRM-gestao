@@ -7,6 +7,8 @@ const SocietarioApp = {
   selectedId: null,
   selectedLinkId: null,
   panel: "none",
+  aba: "estrutura",
+  empresaAba: "",
   linkMode: false,
   connectFrom: null,
   NODE_W: 168,
@@ -679,9 +681,166 @@ const SocietarioApp = {
     </div>`;
   },
 
+  setAba(id) {
+    this.aba = id === "parceria" ? "parceria" : "estrutura";
+    this.render();
+  },
+
+  setEmpresa(id) {
+    this.empresaAba = String(id || "");
+    this.render();
+  },
+
+  abasHtml() {
+    const aba = this.aba === "parceria" ? "parceria" : "estrutura";
+    const tab = (id, icon, label) => `<button type="button" role="tab" aria-selected="${aba === id}" class="ml-tab${aba === id ? " is-active" : ""}" onclick="SocietarioApp.setAba('${id}')"><i data-lucide="${icon}"></i> ${label}</button>`;
+    return `<div class="ml-tabs soc-view-tabs" role="tablist">${tab("estrutura", "git-fork", "Estrutura societária")}${tab("parceria", "handshake", "Parceria / Sociedade")}</div>`;
+  },
+
+  parcerias() {
+    const app = window.ParametrizacaoParceiroApp;
+    if (!app || !Array.isArray(app.items)) return [];
+    return app.items.map(p => (typeof app.normalizeItem === "function" ? app.normalizeItem(p) : p)).filter(Boolean);
+  },
+
+  empresasParceria() {
+    const app = window.ParametrizacaoParceiroApp;
+    const map = new Map();
+    this.parcerias().forEach(p => {
+      const id = String(p.companyId || "");
+      if (!id) return;
+      if (!map.has(id)) {
+        const oficial = app && typeof app.nomeEmpresa === "function" ? app.nomeEmpresa(id) : "";
+        const nome = (oficial && oficial !== "Empresa " + id) ? oficial : (p.companyName || oficial || ("Empresa " + id));
+        map.set(id, { id, nome, itens: [] });
+      }
+      map.get(id).itens.push(p);
+    });
+    return [...map.values()].sort((a, b) => Number(a.id) - Number(b.id) || a.nome.localeCompare(b.nome, "pt-BR"));
+  },
+
+  pctCurto(n) {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return "";
+    return v.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + "%";
+  },
+
+  ehPessoaJuridica(nome, doc) {
+    const n = String(nome || "").toUpperCase();
+    if (/LTDA|S\/A|S\.A\.|SPE|EIRELI|EMPREEND|PARTICIP/.test(n)) return true;
+    return String(doc || "").replace(/\D/g, "").length > 11;
+  },
+
+  nomeCentro(id, fallback) {
+    const known = typeof window.knownCostCenterName === "function" ? window.knownCostCenterName(id) : "";
+    const nome = String(known || fallback || "").trim();
+    if (!nome || nome === String(id)) return "";
+    return nome;
+  },
+
+  ehCcParceria(cc, irmaos) {
+    const papel = String(cc && cc.papel || "");
+    if (papel === "terrenista") return true;
+    const id = String(cc && cc.id || "");
+    if (window.CentrosCustoApp && typeof CentrosCustoApp.isParceiro === "function" && CentrosCustoApp.isParceiro({ id, name: cc.name || "" })) return true;
+    if (/01$/.test(id) && (irmaos || []).some(x => String(x.id) === id.slice(0, -2) + "00")) return true;
+    return false;
+  },
+
+  caixasDaObra(obra) {
+    const todos = (obra.costCenters || []).filter(c => c && c.id && c.inAccount !== false);
+    const empre = todos.filter(c => !this.ehCcParceria(c, todos));
+    const lista = empre.length ? empre : todos;
+    if (lista.length) {
+      return lista.map(c => ({ id: String(c.id), nome: this.nomeCentro(c.id, c.name) }));
+    }
+    const code = String(obra.code || "").replace(/\D/g, "");
+    if (!code) return [];
+    const id = code.length >= 5 ? code : code + "00";
+    return [{ id, nome: this.nomeCentro(id) }];
+  },
+
+  empreendedoresDe(p) {
+    const app = window.ParametrizacaoParceiroApp;
+    if (!app || typeof app.isMista !== "function" || !app.isMista(p)) return [];
+    const fold = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+    const parceiro = fold(p.partnerName);
+    return (typeof app.sociosPorPapel === "function" ? app.sociosPorPapel(p, "empreendedor") : [])
+      .filter(s => fold(s.name) && fold(s.name) !== parceiro);
+  },
+
+  sociosDe(p) {
+    const app = window.ParametrizacaoParceiroApp;
+    if (!app || typeof app.isSociedade !== "function" || !app.isSociedade(p)) return [];
+    return (p.socios || []).filter(s => s && (s.name || s.id));
+  },
+
+  caixaHtml(nome, extra, cls) {
+    return `<div class="soc-tree-node ${cls}"><span class="soc-tree-name">${this.esc(nome)}</span>${extra || ""}</div>`;
+  },
+
+  bandaPessoas(titulo, pessoas, docDe) {
+    if (!pessoas.length) return "";
+    const boxes = pessoas.map(s => {
+      const pj = this.ehPessoaJuridica(s.name, docDe ? docDe(s) : s.cpfCnpj);
+      const pct = s.sharePct === "" || s.sharePct == null ? "" : `<span class="soc-tree-pct-inline">${this.esc(this.pctCurto(s.sharePct))}</span>`;
+      return `<div class="soc-tree-node ${pj ? "is-pj" : "is-pf"} is-mini">${pct}<span class="soc-tree-name">${this.esc(s.name || s.id)}</span></div>`;
+    }).join("");
+    return `<div class="soc-tree-banda"><div class="soc-tree-banda-titulo">${this.esc(titulo)}</div><div class="soc-tree-banda-row">${boxes}</div></div>`;
+  },
+
+  colunaParceria(p) {
+    const app = window.ParametrizacaoParceiroApp;
+    const sociedade = app && app.isSociedade && app.isSociedade(p);
+    const pj = this.ehPessoaJuridica(p.partnerName, p.creditor && p.creditor.cpfCnpj);
+    const tipo = sociedade ? "Sociedade" : "Parceria";
+    const obras = (p.obras || []).slice().sort((a, b) => String(a.code).localeCompare(String(b.code), "pt-BR", { numeric: true }));
+    const caixas = obras.flatMap(o => this.caixasDaObra(o).map(c => ({ ...c, pct: sociedade || !(Number(o.defaultPartnerShare) > 0) ? "" : this.pctCurto(o.defaultPartnerShare) })));
+    const kids = caixas.length
+      ? `<ul>${caixas.map(c => `<li><span class="soc-tree-pct">${this.esc(c.pct)}</span>${this.caixaHtml(c.id, c.nome ? `<small>${this.esc(c.nome)}</small>` : "", "is-cc")}</li>`).join("")}</ul>`
+      : "";
+    const pessoas = sociedade ? this.sociosDe(p) : this.empreendedoresDe(p);
+    const banda = this.bandaPessoas(sociedade ? "Sócios" : "Empreendedores", pessoas);
+    return `<li><div class="soc-tree-lado"><div class="soc-tree-lado-titulo">${tipo}</div>${this.caixaHtml(p.partnerName || "Sem nome", "", pj ? "is-pj" : "is-pf")}${kids}${banda}</div></li>`;
+  },
+
+  parceriaHtml() {
+    const empresas = this.empresasParceria();
+    if (!empresas.length) {
+      return `<div class="soc-page"><div class="soc-toolbar"><p class="soc-help">Nenhuma parceria ou sociedade na parametrização de parceiros.</p></div></div>`;
+    }
+    if (!empresas.some(e => e.id === this.empresaAba)) this.empresaAba = empresas[0].id;
+    const atual = empresas.find(e => e.id === this.empresaAba) || empresas[0];
+    const abas = empresas.map(e => {
+      const on = e.id === atual.id;
+      const rotulo = e.id + " — " + e.nome;
+      return `<button type="button" role="tab" aria-selected="${on}" title="${this.esc(rotulo)}" class="ml-tab${on ? " is-active" : ""}" onclick="SocietarioApp.setEmpresa('${this.esc(e.id)}')"><i data-lucide="building-2"></i><span>${this.esc(rotulo)}</span></button>`;
+    }).join("");
+    const itens = atual.itens.slice().sort((a, b) => String(a.partnerName || "").localeCompare(String(b.partnerName || ""), "pt-BR"));
+    return `<div class="soc-page">
+      <div class="soc-toolbar">
+        <p class="soc-help">A caixa de cima é a empresa. Embaixo, cada parceria ou sociedade e os empreendimentos com o percentual. Empreendedores e sócios ficam num bloco separado, abaixo dos empreendimentos.</p>
+      </div>
+      <div class="ml-tabs soc-emp-tabs" role="tablist">${abas}</div>
+      <div class="soc-stage">
+        <div class="soc-canvas-wrap">
+          <div class="soc-tree">
+            ${this.caixaHtml(atual.id + " — " + atual.nome, "", "is-company")}
+            <ul>${itens.map(p => this.colunaParceria(p)).join("")}</ul>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  },
+
   render() {
     const root = document.getElementById("estrutura-societaria-root");
     if (!root) return;
+    if (this.aba === "parceria") {
+      root.innerHTML = `<div class="soc-shell">${this.abasHtml()}${this.parceriaHtml()}</div>`;
+      if (window.lucide) lucide.createIcons();
+      return;
+    }
     this.ensurePositions();
     const wrap = document.getElementById("soc-canvas-wrap");
     const sx = wrap ? wrap.scrollLeft : 0;
@@ -690,6 +849,7 @@ const SocietarioApp = {
     const linkBtn = this.linkMode ? " is-on" : "";
     const editing = this.panel && this.panel !== "none";
     root.innerHTML = `
+      <div class="soc-shell">${this.abasHtml()}
       <div class="soc-page">
         <div class="soc-toolbar">
           <p class="soc-help">Arraste as caixas, ligue pelos pontos e clique no percentual para editar a participação.</p>
@@ -724,6 +884,7 @@ const SocietarioApp = {
           </div>
           ${editing ? `<aside class="soc-aside">${this.renderPanel()}</aside>` : ""}
         </div>
+      </div>
       </div>`;
     if (window.lucide) lucide.createIcons();
     requestAnimationFrame(() => {
