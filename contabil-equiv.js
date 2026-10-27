@@ -19,7 +19,12 @@ const ContabilEquiv = {
     rascunho: null,
     vinculos: null,
     cacheContas: {},
-    cacheLanc: {}
+    cacheLanc: {},
+    eqPreview: null,
+    eqAbertos: {},
+    eqCarregando: false,
+    eqErro: "",
+    nomesConta: {}
   },
   _lido: false,
 
@@ -605,7 +610,16 @@ const ContabilEquiv = {
     } catch (e) {
       this.state.msg = "Salvo neste navegador. A nuvem não respondeu.";
     }
+    this.espelharNoOrganograma();
     this.pintarStatus();
+  },
+
+  espelharNoOrganograma() {
+    const socio = window.SocietarioApp;
+    if (!socio || typeof socio.aplicarVinculosConfig !== "function") return;
+    const lista = (this.state.vinculos || []).filter((v) => v && v.origem && v.destino);
+    if (!lista.length) return;
+    socio.aplicarVinculosConfig(lista).catch(() => {});
   },
 
   async receberDoOrganograma(parcial) {
@@ -822,7 +836,7 @@ const ContabilEquiv = {
     }).join("");
     root.innerHTML = `<div class="cc-page ctb-eq-page">
       <div class="cc-toolbar">
-        <p class="ctb-eq-help">As contas vêm da interligação do organograma. No lucro, a creditada sugerida é ${this.esc(this.CONTA_LUCRO)} (reduzida ${this.esc(this.REDUZIDA_LUCRO)}). No prejuízo, a debitada sugerida é ${this.esc(this.CONTA_PREJUIZO)} (reduzida ${this.esc(this.REDUZIDA_PREJUIZO)}). O percentual vem do organograma. Cada alteração já fica salva.</p>
+        <p class="ctb-eq-help">As contas vêm da interligação do organograma. Ao escolher a origem e o destino, a interligação entra no organograma. No lucro, a creditada sugerida é ${this.esc(this.CONTA_LUCRO)} (reduzida ${this.esc(this.REDUZIDA_LUCRO)}). No prejuízo, a debitada sugerida é ${this.esc(this.CONTA_PREJUIZO)} (reduzida ${this.esc(this.REDUZIDA_PREJUIZO)}). O percentual vem do organograma. Cada alteração já fica salva.</p>
         <div class="cc-toolbar-actions">
           <span id="ctb-eq-status" class="ctb-eq-status">${this.esc(s.msg || "")}</span>
           <button type="button" class="btn btn-primary cc-atualizar" onclick="ContabilEquiv.incluirVinculo()">Incluir vínculo</button>
@@ -1140,6 +1154,425 @@ const ContabilEquiv = {
       this.state.empresas[id] = Object.assign({}, this.state.empresas[id] || {}, { evento: achado });
     }
     try { await this.persistir(); } catch (e) {}
+  },
+
+  nomeConta(empresaId, codigo) {
+    const mapa = (this.state.nomesConta || {})[String(empresaId)] || {};
+    return String(mapa[String(codigo || "").trim()] || "");
+  },
+
+  avaliarPassos(app, chave) {
+    const nomeEmp = (id, fallback) => {
+      const emp = (app.state.companies || []).find((c) => String(c.id) === String(id));
+      return emp && emp.nome ? (id + " - " + emp.nome) : (id + " - " + (fallback || "Empresa"));
+    };
+    const fim = app.fimDoMes(chave);
+    const extras = {};
+    const bloqueado = {};
+    const gestaoIds = {};
+    this.empresasGestao().forEach((c) => { gestaoIds[String(c.id)] = true; });
+    const itens = [];
+    this.passos().forEach((passo) => {
+      if (gestaoIds[String(passo.origem)]) return;
+      const nomeOrigem = nomeEmp(passo.origem, passo.apelidoOrigem || passo.origem);
+      const nomeDestino = nomeEmp(passo.destino, passo.apelidoDestino || passo.destino);
+      const pct = this.pctDoPasso(passo);
+      const base = bloqueado[passo.origem] ? null : app.liquidoEmpresa(passo.origem, chave);
+      const resultado = base == null ? null : Math.round((base + (extras[passo.origem] || 0)) * 100) / 100;
+      const signed = resultado == null ? null : Math.round(resultado * pct) / 100;
+      const lucro = signed > 0;
+      const debitoVar = String(passo.debitoLucro || passo.mep || "").trim();
+      const creditoVar = String(passo.creditoPrejuizo || passo.mep || "").trim();
+      const debit = lucro ? debitoVar : (String(passo.debitoPrejuizo || "").trim() || this.CONTA_PREJUIZO);
+      const credit = lucro ? (String(passo.creditoLucro || "").trim() || this.CONTA_LUCRO) : creditoVar;
+      const evento = Number(passo.evento) || Number((this.cfgDa(passo.destino) || {}).evento);
+      let status = "pronto";
+      let motivo = "";
+      if (bloqueado[passo.origem]) {
+        status = "aguarda";
+        motivo = "Aguarda o lançamento que entra nesta origem.";
+      } else if (base == null) {
+        status = "sem-resultado";
+        motivo = "Não li o resultado desta empresa na competência.";
+        bloqueado[passo.destino] = true;
+      } else if (!(pct > 0)) {
+        status = "sem-pct";
+        motivo = "Sem percentual no organograma.";
+      } else if (!debitoVar || !creditoVar) {
+        status = "sem-conta";
+        motivo = "Falta a conta de débito ou a de crédito do ajuste.";
+      } else if (Math.abs(signed) < 0.01) {
+        status = "zerado";
+        motivo = "O resultado no percentual não deu valor.";
+      } else if (this.jaPasso(passo.destino, passo.origem, chave)) {
+        status = "lancado";
+        motivo = "Já lançado nesta competência.";
+      } else if (!(evento > 0)) {
+        status = "sem-evento";
+        motivo = "Ainda não há lançamento de equivalência anterior para repetir o evento do Sienge.";
+        bloqueado[passo.destino] = true;
+      }
+      const pctTxt = Number(pct || 0).toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "%";
+      const payload = status === "pronto" || status === "lancado" ? {
+        companyId: Number(passo.destino),
+        origem: String(passo.origem),
+        empresa: nomeDestino,
+        chave: chave,
+        rotulo: nomeOrigem + " " + pctTxt + " → " + nomeDestino,
+        date: fim,
+        amount: Math.round(Math.abs(signed) * 100) / 100,
+        tipo: lucro ? "lucro" : "prejuízo",
+        debitAccountId: debit,
+        creditAccountId: credit,
+        eventId: evento,
+        description: this.complemento(this.nomeCurto(passo.origem, passo.apelidoOrigem), pct, chave),
+        resultado: resultado,
+        pct: pct
+      } : null;
+      if (status === "pronto") extras[passo.destino] = Math.round(((extras[passo.destino] || 0) + signed) * 100) / 100;
+      itens.push({
+        key: this.passoKey(passo.destino, passo.origem, chave),
+        origem: String(passo.origem),
+        destino: String(passo.destino),
+        nomeOrigem: nomeOrigem,
+        nomeDestino: nomeDestino,
+        resultado: resultado,
+        pct: pct,
+        signed: signed,
+        status: status,
+        motivo: motivo,
+        payload: payload
+      });
+    });
+    this.empresasGestao().forEach((c) => {
+      const rec = (this.state.informados || {})[String(c.id) + "@" + chave] || {};
+      const resultado = this.lerValor(rec.valor);
+      const vinc = (this.state.vinculos || []).find((v) => String(v.origem) === String(c.id));
+      const destino = vinc && vinc.destino ? String(vinc.destino) : "";
+      if (!destino) return;
+      const pct = this.pctGestao(c.id);
+      const nomeOrigem = nomeEmp(c.id, c.nome);
+      const nomeDestino = nomeEmp(destino, "destino");
+      const debitoVar = vinc ? String(vinc.debitoLucro || "").trim() : "";
+      const creditoVar = vinc ? String(vinc.creditoPrejuizo || "").trim() : "";
+      const signed = resultado == null ? null : Math.round(resultado * pct) / 100;
+      const lucro = signed > 0;
+      const evento = Number(vinc && vinc.evento) || Number((this.cfgDa(destino) || {}).evento);
+      let status = "pronto";
+      let motivo = "";
+      if (resultado == null) {
+        status = "sem-resultado";
+        motivo = "Informe o lucro ou o prejuízo desta gestão na configuração.";
+      } else if (!(pct > 0)) {
+        status = "sem-pct";
+        motivo = "Sem percentual no organograma.";
+      } else if (!debitoVar || !creditoVar) {
+        status = "sem-conta";
+        motivo = "Falta a conta de débito ou a de crédito do ajuste.";
+      } else if (Math.abs(signed) < 0.01) {
+        status = "zerado";
+        motivo = "O resultado no percentual não deu valor.";
+      } else if (this.jaPasso(destino, c.id, chave)) {
+        status = "lancado";
+        motivo = "Já lançado nesta competência.";
+      } else if (!(evento > 0)) {
+        status = "sem-evento";
+        motivo = "Ainda não há lançamento de equivalência anterior para repetir o evento do Sienge.";
+      }
+      const pctTxt = Number(pct || 0).toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "%";
+      itens.push({
+        key: this.passoKey(destino, c.id, chave),
+        origem: String(c.id),
+        destino: destino,
+        nomeOrigem: nomeOrigem,
+        nomeDestino: nomeDestino,
+        resultado: resultado,
+        pct: pct,
+        signed: signed,
+        status: status,
+        motivo: motivo,
+        payload: status === "pronto" || status === "lancado" ? {
+          companyId: Number(destino),
+          origem: String(c.id),
+          empresa: nomeDestino,
+          chave: chave,
+          rotulo: nomeOrigem + " " + pctTxt + " → " + nomeDestino,
+          date: fim,
+          amount: Math.round(Math.abs(signed) * 100) / 100,
+          tipo: lucro ? "lucro" : "prejuízo",
+          debitAccountId: lucro ? debitoVar : (String(vinc.debitoPrejuizo || "").trim() || this.CONTA_PREJUIZO),
+          creditAccountId: lucro ? (String(vinc.creditoLucro || "").trim() || this.CONTA_LUCRO) : creditoVar,
+          eventId: evento,
+          description: this.complemento(this.nomeCurto(c.id, c.nome), pct, chave),
+          resultado: resultado,
+          pct: pct
+        } : null
+      });
+    });
+    return itens;
+  },
+
+  montarPrevisao(app, chave, destinosIds) {
+    const itens = chave ? this.avaliarPassos(app, chave) : [];
+    const ids = (destinosIds || []).map(String);
+    const nomeEmp = (id) => {
+      const emp = (app.state.companies || []).find((c) => String(c.id) === String(id));
+      return emp && emp.nome ? (id + " - " + emp.nome) : ("Empresa " + id);
+    };
+    const grupos = ids.map((id) => {
+      const linhas = itens.filter((it) => it.destino === id).map((it) => {
+        const cadeia = itens.filter((outro) => outro.destino === it.origem && outro.payload);
+        return Object.assign({}, it, { cadeia: cadeia });
+      });
+      const total = linhas.reduce((s, it) => {
+        if (it.status !== "pronto" && it.status !== "lancado") return s;
+        return Math.round((s + (Number(it.signed) || 0)) * 100) / 100;
+      }, 0);
+      return { id: id, nome: nomeEmp(id), linhas: linhas, total: total };
+    });
+    return { chave: chave, grupos: grupos };
+  },
+
+  async carregarNomes(prev) {
+    const api = window.SiengeApiService;
+    if (!api || typeof api.buscarContaContabil !== "function") return;
+    if (!this.state.nomesConta) this.state.nomesConta = {};
+    const fila = [];
+    const visto = {};
+    const add = (empresaId, codigo) => {
+      const id = String(empresaId || "");
+      const cod = String(codigo || "").trim();
+      if (!id || !cod) return;
+      if (!this.state.nomesConta[id]) this.state.nomesConta[id] = {};
+      if (this.state.nomesConta[id][cod]) return;
+      const k = id + "|" + cod;
+      if (visto[k]) return;
+      visto[k] = true;
+      fila.push({ id: id, cod: cod });
+    };
+    (prev.grupos || []).forEach((g) => {
+      (g.linhas || []).forEach((l) => {
+        if (l.payload) {
+          add(l.payload.companyId, l.payload.debitAccountId);
+          add(l.payload.companyId, l.payload.creditAccountId);
+        }
+        (l.cadeia || []).forEach((s) => {
+          if (!s.payload) return;
+          add(s.payload.companyId, s.payload.debitAccountId);
+          add(s.payload.companyId, s.payload.creditAccountId);
+        });
+      });
+    });
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < fila.length) {
+        const item = fila[cursor++];
+        try {
+          const lista = await api.buscarContaContabil(item.id, item.cod);
+          const raw = (lista || [])[0];
+          this.state.nomesConta[item.id][item.cod] = raw ? String(raw.name || raw.description || raw.accountName || "").trim() : "";
+        } catch (e) {
+          this.state.nomesConta[item.id][item.cod] = "";
+        }
+      }
+    };
+    const n = Math.min(3, fila.length);
+    const jobs = [];
+    for (let i = 0; i < n; i++) jobs.push(worker());
+    if (jobs.length) await Promise.all(jobs);
+  },
+
+  agendarAba() {
+    clearTimeout(this._abaTimer);
+    this._abaTimer = setTimeout(() => this.abrirAba(), 350);
+  },
+
+  async abrirAba() {
+    const app = window.ContabilApp;
+    if (!app || app.state.aba !== "equiv") return;
+    const seq = (this._abaSeq = (this._abaSeq || 0) + 1);
+    this.state.eqCarregando = true;
+    this.state.eqErro = "";
+    if (document.getElementById("contabil-root")) app.render();
+    try {
+      await this.garantirConfig();
+      const socio = window.SocietarioApp;
+      if (socio && typeof socio.load === "function" && !(socio.graph && Array.isArray(socio.graph.links) && socio.graph.links.length)) {
+        try { await socio.load(); } catch (e) {}
+      }
+      try { await this.descobrirEventos(); } catch (e) {}
+      if (seq !== this._abaSeq) return;
+      const destinos = app.empresasEscolhidas();
+      const chave = app.state.de;
+      const ids = destinos.map((d) => d.id);
+      this.passos().forEach((p) => { ids.push(p.origem, p.destino); });
+      this.empresasGestao().forEach((c) => ids.push(c.id));
+      if (chave && destinos.length) await app.garantirEmpresas(ids, chave);
+      if (seq !== this._abaSeq) return;
+      const prev = this.montarPrevisao(app, chave, destinos.map((d) => String(d.id)));
+      await this.carregarNomes(prev);
+      if (seq !== this._abaSeq) return;
+      this.state.eqPreview = prev;
+    } catch (e) {
+      if (seq !== this._abaSeq) return;
+      this.state.eqErro = "Não consegui montar a equivalência. " + ((e && e.message) || "");
+    }
+    this.state.eqCarregando = false;
+    if (document.getElementById("contabil-root") && app.state.aba === "equiv") app.render();
+  },
+
+  toggleEq(key) {
+    if (!this.state.eqAbertos) this.state.eqAbertos = {};
+    this.state.eqAbertos[key] = !this.state.eqAbertos[key];
+    const app = window.ContabilApp;
+    if (app && document.getElementById("contabil-root")) app.render();
+  },
+
+  contaHtml(empresaId, codigo, lado) {
+    const cod = String(codigo || "").trim();
+    const nome = this.nomeConta(empresaId, cod);
+    return `<div><strong>${this.esc(lado)}</strong> ${this.esc(cod || "—")}${nome ? " — " + this.esc(nome) : ""}</div>`;
+  },
+
+  detalheHtml(item) {
+    const p = item.payload;
+    if (!p && !item.motivo) return "";
+    const bloco = (titulo, alvo) => {
+      if (!alvo || !alvo.payload) return "";
+      const q = alvo.payload;
+      return `<div class="ctb-eq-bloco">
+        <strong>${this.esc(titulo)}</strong>
+        ${this.contaHtml(q.companyId, q.debitAccountId, "Débito")}
+        ${this.contaHtml(q.companyId, q.creditAccountId, "Crédito")}
+        <p class="ctb-eq-comp"><strong>Complemento.</strong> ${this.esc(q.description || "")}</p>
+      </div>`;
+    };
+    const cadeia = (item.cadeia || []).map((s) => bloco("Antes, na " + s.nomeDestino + ": " + s.nomeOrigem, s)).join("");
+    return `<div class="ctb-eq-contas">
+      ${item.motivo ? `<p class="ctb-eq-motivo">${this.esc(item.motivo)}</p>` : ""}
+      ${bloco("Lançamento na " + item.nomeDestino, item)}
+      ${cadeia}
+    </div>`;
+  },
+
+  htmlAba() {
+    const app = window.ContabilApp;
+    if (this.state.eqCarregando) {
+      return `<div class="ml-load">
+        <div class="loading-spinner" aria-hidden="true"></div>
+        <div class="loading-status-text">Lendo o resultado das empresas de origem…</div>
+        <div class="ml-load-track"><div class="loading-progress-bar" style="width:40%"></div></div>
+      </div>`;
+    }
+    if (this.state.eqErro) return `<p class="ctb-erro">${this.esc(this.state.eqErro)}</p>`;
+    const prev = this.state.eqPreview;
+    const destinos = app ? app.empresasEscolhidas() : [];
+    if (!destinos.length) return `<p class="ctb-nota">Escolha a empresa de destino. A lista traz o resultado de cada empresa de origem, no percentual do organograma.</p>`;
+    if (!app || !app.state.de) return `<p class="ctb-nota">Escolha a competência.</p>`;
+    if (!prev) return `<p class="ctb-nota">A equivalência desta competência ainda não foi montada.</p>`;
+    const prontos = [];
+    (prev.grupos || []).forEach((g) => (g.linhas || []).forEach((l) => {
+      if (l.status === "pronto") prontos.push(l);
+      (l.cadeia || []).forEach((s) => { if (s.status === "pronto") prontos.push(s); });
+    }));
+    const nProntos = new Set(prontos.map((l) => l.key)).size;
+    const btn = this.podeLancar()
+      ? `<button type="button" class="ctb-buscar" onclick="ContabilEquiv.gerarDaAba()" ${app.state.lancando || !nProntos ? "disabled" : ""}>Gerar lançamentos</button>`
+      : "";
+    const grupos = (prev.grupos || []).map((g) => {
+      const corpo = g.linhas.length ? g.linhas.map((l) => {
+        const aberto = !!(this.state.eqAbertos && this.state.eqAbertos[l.key]);
+        const icone = aberto ? "chevron-down" : "chevron-right";
+        const valor = l.signed == null ? "—" : app.money(l.signed);
+        const res = l.resultado == null ? "—" : app.money(l.resultado);
+        const pct = Number(l.pct) > 0 ? (Number(l.pct).toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "%") : "—";
+        const tipo = l.payload ? l.payload.tipo : "";
+        return `<tr>
+          <td><button type="button" class="ctb-abre" title="Ver as contas e o complemento" onclick="ContabilEquiv.toggleEq('${this.esc(l.key)}')"><i data-lucide="${icone}"></i></button>${this.esc(l.nomeOrigem)}</td>
+          <td class="ctb-num">${res}</td>
+          <td class="ctb-num">${this.esc(pct)}</td>
+          <td class="ctb-num${l.signed < 0 ? " ctb-neg" : ""}">${valor}</td>
+          <td>${this.esc(tipo)}</td>
+          <td class="ctb-eq-st is-${this.esc(l.status)}">${this.esc(this.rotuloStatus(l.status))}</td>
+        </tr>
+        ${aberto ? `<tr class="ctb-eq-detalhe"><td colspan="6">${this.detalheHtml(l)}</td></tr>` : ""}`;
+      }).join("") : `<tr><td colspan="6">Nenhuma empresa de origem aponta para este destino na configuração.</td></tr>`;
+      return `<section class="ctb-eq-dest">
+        <h3>Empresa de destino · ${this.esc(g.nome)}</h3>
+        <div class="ctb-eq-scroll"><table class="ctb-table">
+          <thead><tr>
+            <th>Empresa de origem</th>
+            <th class="ctb-num">Resultado</th>
+            <th class="ctb-num">Percentual</th>
+            <th class="ctb-num">Na destino</th>
+            <th>Tipo</th>
+            <th>Situação</th>
+          </tr></thead>
+          <tbody>${corpo}</tbody>
+          <tfoot><tr class="ctb-total"><td colspan="3">Total na empresa de destino</td><td class="ctb-num">${app.money(g.total)}</td><td colspan="2"></td></tr></tfoot>
+        </table></div>
+      </section>`;
+    }).join("");
+    return `<div class="ctb-eq-aba">
+      <div class="ctb-eq-acoes">${btn}</div>
+      <p class="ctb-nota">A empresa escolhida acima é a de destino. Cada linha é uma origem: o resultado dela, no percentual do organograma, vai para esse destino. Abra a seta para conferir a conta de débito, a de crédito, o nome da conta e o complemento.</p>
+      ${grupos}
+    </div>`;
+  },
+
+  rotuloStatus(status) {
+    if (status === "pronto") return "Pronto para gerar";
+    if (status === "lancado") return "Já lançado";
+    if (status === "sem-pct") return "Sem percentual";
+    if (status === "sem-conta") return "Sem conta";
+    if (status === "sem-evento") return "Sem evento";
+    if (status === "sem-resultado") return "Sem resultado";
+    if (status === "zerado") return "Zerado";
+    if (status === "aguarda") return "Aguarda a cadeia";
+    return status || "";
+  },
+
+  async gerarDaAba() {
+    if (!this.podeLancar()) {
+      alert("Sem permissão para lançar a equivalência.");
+      return;
+    }
+    const app = window.ContabilApp;
+    const prev = this.state.eqPreview;
+    if (!app || !prev || app.state.lancando) return;
+    const linhas = [];
+    const vistos = {};
+    const porChave = {};
+    (prev.grupos || []).forEach((g) => (g.linhas || []).forEach((l) => {
+      (l.cadeia || []).forEach((s) => { if (s.payload) porChave[s.key] = s; });
+      if (l.payload) porChave[l.key] = l;
+    }));
+    Object.keys(porChave).forEach((k) => {
+      const item = porChave[k];
+      if (item.status !== "pronto" || !item.payload || vistos[k]) return;
+      vistos[k] = true;
+      linhas.push(item.payload);
+    });
+    linhas.sort((a, b) => {
+      if (String(a.companyId) === String(b.origem)) return -1;
+      if (String(b.companyId) === String(a.origem)) return 1;
+      return String(a.origem).localeCompare(String(b.origem));
+    });
+    if (!linhas.length) {
+      alert("Não há lançamento pronto nesta competência.");
+      return;
+    }
+    const p = String(app.state.de || "").split("-");
+    const rotulo = p.length >= 2 ? (app.nomeMes(Number(p[1])) + "/" + p[0]) : app.state.de;
+    if (!window.confirm("Gerar " + linhas.length + " lançamento(s) no Sienge, competência " + rotulo + "?")) return;
+    app.state.lancando = true;
+    if (document.getElementById("contabil-root")) app.render();
+    try {
+      await this.enviar(linhas);
+    } finally {
+      app.state.lancando = false;
+      await this.abrirAba();
+    }
   },
 
   async lancar() {

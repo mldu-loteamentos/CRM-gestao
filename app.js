@@ -3472,6 +3472,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     rydoo: "Rydoo",
     "pagar-reembolso": "Pagar reembolso",
     "processo-contra": "Processo contra",
+    "reintegracao-posse": "Reintegração de posse",
     "titulos-incompletos": "Títulos incompletos",
     "config-tags": "Configuração de TAGs",
     "motivos-cancelamento": "Motivos de cancelamento",
@@ -3558,6 +3559,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     rydoo: "receipt",
     "pagar-reembolso": "wallet",
     "processo-contra": "scale",
+    "reintegracao-posse": "key",
     "titulos-incompletos": "file-warning",
     "config-tags": "tags",
     "motivos-cancelamento": "list",
@@ -9956,62 +9958,42 @@ window.mergeEtapasPorNome = function(localArr, cloudArr) {
   return out;
 };
 
-/* Níveis que a Lucélia cadastrou depois da reintegração de posse. Entram para todo mundo, na árvore e na lista de opções. */
+/* Reintegração de posse saiu da árvore do processo. Não volta ao excluir. */
 window.ensureReintegracaoPosseNiveis = function() {
   if (!Array.isArray(window.EtapasJudiciaisState) || !window.EtapasJudiciaisState.length) return false;
   const norm = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim().toUpperCase();
-  const niveis = [
-    { nome: "Aguardando expedição do mandado de reintegração", dias: 90, descricao: "Sentença já proferida para reintegração de posse. Aguardando o juiz expedir o mandado de reintegração." },
-    { nome: "Aguardando cumprimento pelo Oficial de Justiça", dias: 30, descricao: "Aguardando o oficial de justiça entregar o mandado de reintegração de posse." },
-    { nome: "Realizar reintegração", dias: 30, descricao: "Mandado cumprido. Liberado para realizar a reintegração." },
-    { nome: "Avaliação prévia Engenharia", dias: 30, descricao: "Agendar avaliação prévia da engenharia com relação às condições do imóvel." },
-    { nome: "Vistoria técnica externa", dias: 60, descricao: "Engenheiro externo realizará avaliação e emissão de projeto para aprovação." },
-    { nome: "Aprovação projeto - Prefeitura", dias: 90, descricao: "Realizar visita e aguardar aprovação do projeto na prefeitura." }
-  ];
-  const ehReint = (e) => norm(e && (e.nome || e.name)).replace(/^\d+(?:\.\d+)*\.?\s+/, "") === "REINTEGRACAO DE POSSE";
-  const pais = window.EtapasJudiciaisState.filter(ehReint);
-  if (!pais.length) return false;
-  let mudou = false;
-  pais.forEach((pai) => {
-    const filhos = window.EtapasJudiciaisState.filter((e) => String(e.parentId) === String(pai.id));
-    const tem = new Set(filhos.map((e) => norm(e.nome || e.name)));
-    let order = filhos.reduce((m, e) => Math.max(m, Number(e.order) || 0), 0);
-    niveis.forEach((n) => {
-      const ja = filhos.find((e) => norm(e.nome || e.name) === norm(n.nome));
-      if (ja) {
-        if (String(ja.id).indexOf("j_reint_") === 0 && (Number(ja.dias) !== n.dias || ja.descricao !== n.descricao)) {
-          ja.dias = n.dias;
-          ja.descricao = n.descricao;
-          mudou = true;
-        }
-        return;
-      }
-      order += 10;
-      window.EtapasJudiciaisState.push({
-        id: "j_reint_" + norm(n.nome).replace(/[^A-Z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40),
-        nome: n.nome,
-        dias: n.dias,
-        descricao: n.descricao,
-        parentId: pai.id,
-        order: order
-      });
-      tem.add(norm(n.nome));
-      mudou = true;
-    });
+  const nomeEtapa = (e) => norm(e && (e.nome || e.name)).replace(/^\d+(?:\.\d+)*\.?\s+/, "");
+  const fora = new Set([
+    "REINTEGRACAO DE POSSE",
+    "AGUARDANDO EXPEDICAO DO MANDADO DE REINTEGRACAO",
+    "AGUARDANDO CUMPRIMENTO PELO OFICIAL DE JUSTICA",
+    "REALIZAR REINTEGRACAO",
+    "AVALIACAO PREVIA ENGENHARIA",
+    "VISTORIA TECNICA EXTERNA",
+    "APROVACAO PROJETO - PREFEITURA",
+    "APROVACAO PROJETO PREFEITURA"
+  ]);
+  const idsPai = new Set(window.EtapasJudiciaisState.filter((e) => nomeEtapa(e) === "REINTEGRACAO DE POSSE").map((e) => String(e.id)));
+  const antes = window.EtapasJudiciaisState.length;
+  window.EtapasJudiciaisState = window.EtapasJudiciaisState.filter((e) => {
+    if (!e) return false;
+    if (String(e.id).indexOf("j_reint_") === 0) return false;
+    if (fora.has(nomeEtapa(e))) return false;
+    if (e.parentId && idsPai.has(String(e.parentId))) return false;
+    return true;
   });
-  if (!mudou) return false;
-  try {
-    const setter = window._originalSetItem || localStorage.setItem.bind(localStorage);
-    setter.call(localStorage, "crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
-  } catch (e) {}
-  if (!window._commitConfigBusy && window.forceUploadLocalConfig) {
-    try { window.forceUploadLocalConfig(true); } catch (e) {}
-  }
-  if (typeof window.renderEtapasJudiciais === "function") {
-    try { window.renderEtapasJudiciais(); } catch (e) {}
-  }
-  if (typeof window.updateJudFaseDropdown === "function") {
-    try { window.updateJudFaseDropdown(); } catch (e) {}
+  if (window.EtapasJudiciaisState.length === antes) return false;
+  if (!window._commitConfigBusy) {
+    try {
+      const setter = window._originalSetItem || localStorage.setItem.bind(localStorage);
+      setter.call(localStorage, "crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
+    } catch (e) {}
+    if (window.forceUploadLocalConfig) {
+      try { window.forceUploadLocalConfig(true); } catch (e) {}
+    }
+    if (typeof window.updateJudFaseDropdown === "function") {
+      try { window.updateJudFaseDropdown(); } catch (e) {}
+    }
   }
   return true;
 };

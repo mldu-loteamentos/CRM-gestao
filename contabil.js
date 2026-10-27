@@ -146,11 +146,13 @@ const ContabilApp = {
     const v = String(valor || "").slice(0, 7);
     this.state.de = v;
     this.state.ate = v;
+    if (this.state.aba === "equiv" && window.ContabilEquiv) ContabilEquiv.agendarAba();
   },
 
   setAba(id) {
-    this.state.aba = id === "balanco" ? "balanco" : "dre";
+    this.state.aba = id === "balanco" || id === "equiv" ? id : "dre";
     this.render();
+    if (this.state.aba === "equiv" && window.ContabilEquiv) ContabilEquiv.abrirAba();
   },
 
   setVisao(id) {
@@ -254,14 +256,17 @@ const ContabilApp = {
           this.state.selecionadas = this.state.selecionadas.filter((x) => x !== sid);
         }
         this.paintEmpresas();
+        if (this.state.aba === "equiv" && window.ContabilEquiv) ContabilEquiv.agendarAba();
       },
       selectAll: () => {
         this.state.selecionadas = this.state.companies.map((c) => String(c.id));
         this.paintEmpresas();
+        if (this.state.aba === "equiv" && window.ContabilEquiv) ContabilEquiv.agendarAba();
       },
       selectNone: () => {
         this.state.selecionadas = [];
         this.paintEmpresas();
+        if (this.state.aba === "equiv" && window.ContabilEquiv) ContabilEquiv.agendarAba();
       }
     });
     if (window.lucide) lucide.createIcons();
@@ -1109,6 +1114,10 @@ const ContabilApp = {
 
   async buscar() {
     const s = this.state;
+    if (s.aba === "equiv") {
+      if (window.ContabilEquiv) ContabilEquiv.abrirAba();
+      return;
+    }
     if (s.carregando) return;
     const empresas = this.empresasEscolhidas();
     if (!empresas.length) {
@@ -1403,16 +1412,21 @@ const ContabilApp = {
     const root = document.getElementById("contabil-root");
     if (!root) return;
     const s = this.state;
-    const aba = s.aba === "balanco" ? "balanco" : "dre";
+    const aba = s.aba === "balanco" ? "balanco" : (s.aba === "equiv" ? "equiv" : "dre");
     const ini = s.de ? s.de + "-01" : "";
     const fim = this.fimDoMes(s.ate);
     const periodo = ini && fim ? `${this.dataBr(ini)} a ${this.dataBr(fim)}` : "";
     const abas = `<div class="ml-tabs ctb-tabs" role="tablist">
       <button type="button" role="tab" aria-selected="${aba === "dre"}" class="ml-tab ${aba === "dre" ? "is-active" : ""}" onclick="ContabilApp.setAba('dre')"><i data-lucide="trending-up"></i> DRE</button>
       <button type="button" role="tab" aria-selected="${aba === "balanco"}" class="ml-tab ${aba === "balanco" ? "is-active" : ""}" onclick="ContabilApp.setAba('balanco')"><i data-lucide="landmark"></i> Balanço patrimonial</button>
+      <button type="button" role="tab" aria-selected="${aba === "equiv"}" class="ml-tab ${aba === "equiv" ? "is-active" : ""}" onclick="ContabilApp.setAba('equiv')"><i data-lucide="scale"></i> Equivalência patrimonial</button>
     </div>`;
     let corpo = "";
-    if (s.carregando) {
+    if (aba === "equiv") {
+      corpo = window.ContabilEquiv && typeof ContabilEquiv.htmlAba === "function"
+        ? ContabilEquiv.htmlAba()
+        : `<p class="ctb-nota">A equivalência patrimonial não está disponível. Atualize a página com Ctrl+F5.</p>`;
+    } else if (s.carregando) {
       corpo = `<div class="ml-load">
         <div class="loading-spinner" aria-hidden="true"></div>
         <div class="loading-status-text">${this.esc(s.loadMsg || "Lendo o balancete…")}</div>
@@ -1494,6 +1508,21 @@ const ContabilApp = {
       #contabil-root .ctb-total td { font-weight:800; background:#f0fdf4; color:#105436; }
       #contabil-root .ctb-abre { width:18px; height:18px; border:0; background:transparent; color:#64748b; padding:0; margin-right:4px; cursor:pointer; vertical-align:middle; }
       #contabil-root .ctb-abre i, #contabil-root .ctb-abre svg { width:14px; height:14px; }
+      #contabil-root .ctb-eq-scroll { overflow:auto; }
+      #contabil-root .ctb-eq-aba .ctb-table { min-width:880px; }
+      #contabil-root .ctb-eq-st { white-space:nowrap; }
+      #contabil-root .ctb-eq-acoes { display:flex; justify-content:flex-end; margin:0 0 8px; }
+      #contabil-root .ctb-eq-dest { margin:0 0 18px; }
+      #contabil-root .ctb-eq-dest h3 { margin:0 0 8px; color:#105436; font-size:0.95rem; }
+      #contabil-root .ctb-eq-detalhe td { background:#f8fafc; }
+      #contabil-root .ctb-eq-contas { display:grid; gap:10px; font-size:0.84rem; color:#0f172a; }
+      #contabil-root .ctb-eq-bloco { display:grid; gap:4px; }
+      #contabil-root .ctb-eq-bloco strong, #contabil-root .ctb-eq-comp strong { color:#105436; }
+      #contabil-root .ctb-eq-comp { margin:4px 0 0; line-height:1.4; }
+      #contabil-root .ctb-eq-motivo { margin:0; color:#9a3412; }
+      #contabil-root .ctb-eq-st.is-pronto { color:#105436; font-weight:700; }
+      #contabil-root .ctb-eq-st.is-lancado { color:#64748b; }
+      #contabil-root .ctb-table tfoot td { border-top:1px solid #e2e8f0; }
       #contabil-root .ctb-dre th:first-child,
       #contabil-root .ctb-dre td:first-child {
         width:260px; min-width:220px; max-width:280px;
