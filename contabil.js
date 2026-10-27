@@ -123,7 +123,9 @@ const ContabilApp = {
     if (!id || id === "1") return 0;
     const eq = window.ContabilEquiv;
     if (!eq || typeof eq.pctDoPasso !== "function") return 0;
-    const passo = (eq.CADEIA || []).find((p) => String(p.origem) === id && String(p.destino) === "1");
+    const lista = [].concat((eq.state && eq.state.vinculos) || [], eq.CADEIA || []);
+    const passo = lista.find((p) => String(p.origem) === id && String(p.destino) === "1")
+      || lista.find((p) => String(p.origem) === id);
     const doGrafo = Number(eq.pctDoPasso({
       origem: id,
       destino: "1",
