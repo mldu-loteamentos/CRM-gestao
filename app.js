@@ -33572,23 +33572,44 @@ window.nexPayStore = function() {
   return window._nexPayDates;
 };
 
+window.nexReceiptPayIso = function(rec) {
+  if (!rec || typeof rec !== "object") return "";
+  if (typeof window.isWriteOffReceipt === "function" && window.isWriteOffReceipt(rec)) return "";
+  const type = String(rec.type || rec.receiptType || rec.receiptTypeId || rec.typeId || rec.receiptId || rec.operationTypeId || "").toLowerCase();
+  const name = String(rec.typeName || rec.receiptTypeName || rec.operationTypeName || rec.description || rec.historic || "").toLowerCase();
+  const blob = (type + " " + name).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (blob.trim() && type !== "2" && !blob.includes("recebimento")) return "";
+  const val = Number(rec.receiptValue || rec.value || rec.netReceiptValue || rec.grossAmount || 0);
+  if (!(val > 0.01)) return "";
+  const pay = window.nexParseIso(rec.receiptDate || rec.paymentDate);
+  if (pay) return pay;
+  const generic = window.nexParseIso(rec.date);
+  const calc = window.nexParseIso(rec.calculationDate);
+  if (!generic || generic === calc) return "";
+  return generic;
+};
+
 window.nexInstallmentPayIsos = function(installments) {
   const dates = [];
   (installments || []).forEach(inst => {
+    if (!inst) return;
     const receipts = Array.isArray(inst.receipts) ? inst.receipts : [];
-    if (receipts.length) {
-      receipts.forEach(r => {
-        const type = String(r.type || r.receiptType || r.receiptTypeId || r.typeId || r.receiptId || r.operationTypeId || "").toLowerCase();
-        if (type && type !== "2" && !type.includes("recebimento")) return;
-        const val = Number(r.receiptValue || r.value || r.netReceiptValue || 0);
-        if (!(val > 0.01) && inst.installmentSituation !== 2 && String(inst.installmentSituation) !== "2") return;
-        const d = window.nexParseIso(r.receiptDate || r.date || r.paymentDate);
-        if (d) dates.push(d);
-      });
-    } else if (inst.installmentSituation === 2 || String(inst.installmentSituation) === "2" || inst.status === "PAID" || inst.status === "Quitado") {
-      const d = window.nexParseIso(inst.receiptDate || inst.payOffDate || inst.paymentDate);
-      if (d) dates.push(d);
-    }
+    let found = false;
+    receipts.forEach(r => {
+      const d = window.nexReceiptPayIso(r);
+      if (!d) return;
+      dates.push(d);
+      found = true;
+    });
+    if (found) return;
+    const paid = inst.installmentSituation === 2 || String(inst.installmentSituation) === "2" || inst.isValidReceipt || inst.status === "PAID" || inst.status === "Quitado";
+    if (!paid) return;
+    const due = window.nexParseIso(inst.dueDate || inst.due);
+    const d = window.nexParseIso(inst.payOffDate || inst.paymentDate || inst.receiptDate);
+    if (!d || d === due) return;
+    const val = Number(inst.receiptValue || 0);
+    if (!(val > 0.01)) return;
+    dates.push(d);
   });
   return dates;
 };
@@ -33606,11 +33627,15 @@ window.nexRememberInstallmentPayments = function(customerId, titulo, installment
   window.nexPayStore().set(key, { dates: window.nexInstallmentPayIsos(installments), checked: true });
   window._nexCumpridaSet = null;
   if (window._nexLook && window._nexLook.lost) window._nexLook.lost = new WeakMap();
+  const root = typeof document !== "undefined" ? document.getElementById("nex-history-root") : null;
+  if (root && String((AppState && AppState.selectedCustomerId) || "") === String(customerId) && typeof window.renderNexHistory === "function" && !window._nexRememberRendering) {
+    window._nexRememberRendering = true;
+    Promise.resolve(window.renderNexHistory()).finally(function() { window._nexRememberRendering = false; });
+  }
 };
 
 window.nexPayEvidenceReady = function(item) {
   if (!item) return false;
-  if (window.nexParseIso(item.lostPayIso)) return true;
   const key = window.nexPayKey(item.customerId, item.titulo || item.saleId);
   const stored = key ? window.nexPayStore().get(key) : null;
   if (stored && stored.checked) return true;
@@ -33626,12 +33651,15 @@ window.nexReceiptDatesForSale = function(saleId) {
   const addFrom = (arr) => {
     (arr || []).forEach(b => {
       if (String(b.saleId) !== String(saleId) && String(b.receivableBillId) !== String(saleId) && String(b.id) !== String(saleId)) return;
-      const d = window.nexParseIso(b.receiptDate || b.payOffDate || b.paymentDate);
-      if (d) dates.push(d);
       (b.receipts || []).forEach(r => {
-        const d2 = window.nexParseIso(r.receiptDate || r.date);
+        const d2 = window.nexReceiptPayIso(r);
         if (d2) dates.push(d2);
       });
+      (b.defaulterInstallments || []).forEach(inst => {
+        window.nexInstallmentPayIsos([inst]).forEach(d2 => dates.push(d2));
+      });
+      const payoff = window.nexParseIso(b.payOffDate);
+      if (payoff) dates.push(payoff);
     });
   };
   addFrom(AppState.defaultersBills);
@@ -33670,6 +33698,22 @@ window.nexRecentPayAfter = function(item, cutIso) {
   return found;
 };
 
+window.nexClearLostPayment = function(item) {
+  if (!item || !item.lostPayIso) return;
+  const cid = String(item.customerId || "");
+  const titulo = String(item.titulo || item.saleId || "");
+  const key = item._key || (cid && titulo ? window.nexHistoryKey(cid, titulo) : "");
+  const rows = window._nexHistory && key ? window._nexHistory[key] : null;
+  delete item.lostPayIso;
+  if (!Array.isArray(rows)) return;
+  const live = rows.find((x) => x && String(x.id) === String(item.id));
+  if (live && live !== item) delete live.lostPayIso;
+  window._nexHistStamp = (window._nexHistStamp || 0) + 1;
+  window._nexCollectCache = null;
+  window._nexCumpridaSet = null;
+  window.saveNexHistory(cid, titulo, rows).catch(() => {});
+};
+
 window.nexMarkLostPayment = function(item, payIso) {
   const iso = window.nexParseIso(payIso);
   if (!item || !iso || item.lostPayIso === iso) return;
@@ -33692,31 +33736,29 @@ window.nexLostValidityByPayment = function(item) {
   if (!item) return { lost: false };
   const gen = window.nexParseIso(item.date || item.createdAt);
   if (!gen) return { lost: false };
-  const memo = window._nexLook && window._nexLook.lost;
-  if (memo && memo.has(item)) {
-    const prev = memo.get(item);
-    if (prev && prev.lost) return prev;
-  }
+  const key = window.nexPayKey(item.customerId, item.titulo || item.saleId);
+  const stored = key ? window.nexPayStore().get(key) : null;
+  const tituloNex = String(item.titulo || item.saleId || "").replace(/^B-/i, "").split("-")[0];
   const sameFicha = String((AppState && AppState.selectedCustomerId) || "") === String(item.customerId || "")
-    && [AppState.selectedSaleId, AppState.selectedTitulo, AppState.currentReceivableBillId].some(v => v != null && String(v) === String(item.titulo || ""));
+    && [AppState.selectedSaleId, AppState.selectedTitulo, AppState.currentReceivableBillId].some(v => v != null && String(v).replace(/^B-/i, "").split("-")[0] === tituloNex);
+  const fichaInsts = sameFicha && AppState.currentContractInstallments && AppState.currentContractInstallments.length
+    ? AppState.currentContractInstallments
+    : null;
+  const evidence = !!((stored && stored.checked) || fichaInsts);
   let pays = [];
-  const stamped = window.nexParseIso(item.lostPayIso);
-  if (stamped && stamped > gen) pays.push(stamped);
-  if (sameFicha && typeof window.nexPaymentDatesAfter === "function") {
-    pays = pays.concat(window.nexPaymentDatesAfter(gen));
-    const delivered = window.nexParseIso(item.deliveredAt);
-    if (delivered) pays = pays.concat(window.nexPaymentDatesAfter(delivered));
+  if (fichaInsts) pays = pays.concat(window.nexInstallmentPayIsos(fichaInsts));
+  if (stored && stored.dates) pays = pays.concat(stored.dates);
+  if (!evidence) {
+    const stamped = window.nexParseIso(item.lostPayIso);
+    if (stamped) pays.push(stamped);
+    pays = pays.concat(window.nexReceiptDatesForSale(item.titulo || item.saleId));
+    const mapPay = window.nexRecentPayAfter(item, gen);
+    if (mapPay) pays.push(mapPay);
   }
-  const salePays = window.nexReceiptDatesForSale(item.titulo || item.saleId).filter(d => d > gen);
-  pays = pays.concat(salePays);
-  const storedPays = window.nexPayStore().get(window.nexPayKey(item.customerId, item.titulo || item.saleId));
-  if (storedPays && storedPays.dates) pays = pays.concat(storedPays.dates.filter(d => d > gen));
-  const mapPay = window.nexRecentPayAfter(item, gen);
-  if (mapPay) pays.push(mapPay);
-  pays = pays.filter(Boolean).sort();
+  pays = pays.filter(d => d && d > gen).sort();
   const result = pays.length ? { lost: true, pay: pays[0] } : { lost: false };
   if (result.lost) window.nexMarkLostPayment(item, result.pay);
-  if (memo) memo.set(item, result);
+  else if (evidence) window.nexClearLostPayment(item);
   return result;
 };
 
@@ -33752,7 +33794,6 @@ window.nexScheduleCumpridaCheck = function() {
     if (!it || !window.nexIsEntregue(it.status) || !it.arDigital) return false;
     const delivered = window.nexParseIso(it.deliveredAt);
     if (!delivered || window.nexTodayIso() < window.nexAddDays(delivered, 30)) return false;
-    if (window.nexLostValidityByPayment(it).lost) return false;
     if (window.nexPayEvidenceReady(it)) return false;
     const key = window.nexPayKey(it.customerId, it.titulo || it.saleId);
     return key && !window._nexPayAttempted.has(key);
@@ -34987,12 +35028,15 @@ window.nexEnsureLookups = function(force) {
   const addBill = (b) => {
     if (!b) return;
     const dates = [];
-    const d = window.nexParseIso(b.receiptDate || b.payOffDate || b.paymentDate);
-    if (d) dates.push(d);
     (b.receipts || []).forEach(r => {
-      const d2 = window.nexParseIso(r.receiptDate || r.date);
+      const d2 = window.nexReceiptPayIso(r);
       if (d2) dates.push(d2);
     });
+    (b.defaulterInstallments || []).forEach(inst => {
+      window.nexInstallmentPayIsos([inst]).forEach(d2 => dates.push(d2));
+    });
+    const payoff = window.nexParseIso(b.payOffDate);
+    if (payoff) dates.push(payoff);
     if (!dates.length) return;
     const keys = [];
     [b.saleId, b.receivableBillId, b.id].forEach(v => {
