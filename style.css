@@ -6715,20 +6715,23 @@ body.fc-nome-dragging * {
 .esc-conta-ate strong { display: block; color: #1e293b; font-size: 0.88rem; }
 .esc-conta-pendente .esc-conta-ico { background: #fef3c7; color: #b45309; }
 .esc-aviso { margin-top: 8px; font-size: 0.8rem; color: #92400e; }
-.esc-cartorio-row { display: flex; gap: 8px; align-items: flex-end; }
+.esc-cartorio-row { display: flex; gap: 12px; align-items: flex-end; }
 .esc-cartorio-row .form-control { flex: 1; min-width: 0; }
-.esc-cartorio-row .btn { height: 46px; white-space: nowrap; }
-#esc-cartorio-row .ml-emp-filter { flex: 1 1 auto; width: auto; max-width: none; min-width: 0; }
-#esc-cartorio-row .ml-emp-filter-btn { min-height: 46px; height: 46px; }
+.esc-cartorio-row .btn { height: 46px; white-space: nowrap; flex: none; }
+#esc-cartorio-row .ml-emp-filter { flex: 1 1 0; width: auto; max-width: none; min-width: 0; }
+#esc-cartorio-row .ml-emp-filter-btn { min-height: 46px; height: 46px; width: 100%; min-width: 0; }
+#esc-cartorio-row .ml-emp-filter-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #esc-modal .crm-card { overflow: visible; }
 .esc-btn-add-cartorio {
   position: relative;
-  width: 46px;
+  width: 52px;
+  min-width: 52px;
   padding: 0;
   justify-content: center;
 }
 .esc-btn-del-cartorio {
-  width: 46px;
+  width: 52px;
+  min-width: 52px;
   padding: 0;
   justify-content: center;
   background: #fff;
