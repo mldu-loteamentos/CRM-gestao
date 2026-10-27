@@ -91,10 +91,15 @@ const UsuariosOnline = {
     const u = this.user;
     if (!fb || !u || !u.email) return;
     const since = this.sinceNow();
+    const pessoa = u.atuando || {};
+    const emailPessoa = String(pessoa.email || u.email || "").toLowerCase();
+    const conta = String(u._emailConta || u.email || "").toLowerCase();
     try {
       await fb.f.setDoc(fb.f.doc(fb.db, this.COLLECTION, this.presenceId(u)), {
-        email: String(u.email).toLowerCase(),
-        name: u.name || "",
+        email: emailPessoa,
+        name: pessoa.name || u.name || "",
+        contaEmail: conta,
+        contaName: u._nomeConta || "",
         profile: u.profile_name || "",
         since,
         lastSeen: Date.now(),
@@ -260,6 +265,7 @@ const UsuariosOnline = {
           <span style="min-width:0;">
             <span style="display:block;font-weight:800;color:#0f172a;">${this.esc(r.name || r.email)}${r.id === me ? ' <span style="font-size:0.66rem;font-weight:800;color:#105436;background:#d1fae5;border-radius:999px;padding:1px 7px;margin-left:4px;">você</span>' : ""}</span>
             <span style="display:block;font-size:0.72rem;color:#64748b;">${this.esc(r.email || r.id)}</span>
+            ${r.contaEmail && String(r.contaEmail).toLowerCase() !== String(r.email || "").toLowerCase() ? `<span style="display:block;font-size:0.68rem;color:#92400e;">Entrou pela conta de ${this.esc(r.contaName || r.contaEmail)}</span>` : ""}
           </span>
         </div>
       </td>`;

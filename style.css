@@ -10942,12 +10942,20 @@ tr.pr-linha { cursor: pointer; }
 .cc-table.pr-cc col.pr-c-pagar { width: 168px; }
 .cc-table.pr-cc td.pr-pagar { height: 40px; white-space: nowrap; }
 .cc-table.pr-cc td.pr-pagar input { margin-right: 8px; vertical-align: middle; }
-.cj-tipos { display: flex; flex-direction: column; gap: 2px; max-height: 220px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px; background: #fff; }
-.cj-tipo { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; font-size: 0.84rem; font-weight: 600; color: #1c2e24; cursor: pointer; }
+.cj-tipos { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; align-content: start; max-height: 280px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px; background: #fff; }
+#cj-tipo-busca { height: 40px; }
+.cj-tipo { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 8px; min-height: 36px; padding: 6px 8px; border-radius: 6px; font-size: 0.84rem; font-weight: 600; color: #1c2e24; cursor: pointer; text-align: left; }
+#cj-modal label.cj-tipo { flex-direction: row; align-items: center; justify-content: flex-start; }
 .cj-tipo.is-on { background: #e7f6ee; }
-.cj-tipo input { width: 16px; height: 16px; accent-color: #105436; margin: 0; }
-.cj-tipo-outro { display: flex; gap: 8px; margin-top: 8px; }
-.cj-tipo-outro input { flex: 1; height: 36px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0 10px; font: inherit; }
+.cj-tipo input { width: 16px; height: 16px; min-width: 16px; accent-color: #105436; margin: 0; flex: none; }
+.cj-tipo span { min-width: 0; line-height: 1.3; }
+.cj-tipo-outro { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.cj-tipo-outro input { flex: 1; height: 40px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0 10px; font: inherit; }
+.cj-tipo-outro .btn { height: 40px; flex: none; padding: 0 16px; }
+#cj-modal .cj-pop-acoes { align-items: center; gap: 10px; margin-top: 16px; padding-top: 14px; border-top: 1px solid #e2e8f0; }
+#cj-modal .cj-pop-acoes .btn { height: 40px; min-width: 120px; }
+#cj-modal .cj-arq-bloco { min-height: 0; margin-top: 14px; }
+#cj-modal .cj-arq-bloco header .cj-escolher { height: 32px; padding: 0 12px; background: #fff; color: #105436; border-radius: 6px; }
 .cj-salvando { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.94); border-radius: 12px; }
 .cj-anexos-box { width: min(560px, 96vw); }
 .cj-anexos-lista { max-height: 420px; }

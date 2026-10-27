@@ -2282,17 +2282,29 @@ window.clientAppliesClausulaSuspensiva = function(client) {
     ? window.clausulaSuspensivaConfig(client.costCenterId, client.unitName)
     : {};
   if (!cc || !cc.clausula_suspensiva_ativa) return false;
-  const hasSi = typeof window.clientHasConfirmedOverdueSinalSI === "function"
-    ? window.clientHasConfirmedOverdueSinalSI(client)
-    : (typeof window.clientHasOverdueSinalSI === "function" && window.clientHasOverdueSinalSI(client));
-  if (!hasSi) return false;
-  if (!window.clientIsZeroPercentPaid(client)) return false;
+  const zero = client.isZeroPaid === true
+    || (typeof window.clientIsZeroPercentPaid === "function" && window.clientIsZeroPercentPaid(client));
+  if (!zero) return false;
+  const hasSi = client.hasUnpaidSinal === true
+    || (typeof window.clientHasConfirmedOverdueSinalSI === "function" && window.clientHasConfirmedOverdueSinalSI(client));
+  if (!hasSi) {
+    const insts = typeof window.listInstallmentsForSiCheck === "function"
+      ? window.listInstallmentsForSiCheck(client)
+      : [];
+    const algumSi = insts.some((inst) => typeof window.installmentIsSinalSI === "function" && window.installmentIsSinalSI(inst));
+    const soMensalidade = !algumSi && insts.length > 0 && insts.every((inst) => {
+      const code = (typeof getInstallmentConditionCode === "function") ? String(getInstallmentConditionCode(inst) || "") : "";
+      return !!code;
+    });
+    if (soMensalidade) return false;
+  }
   const minDays = (typeof window.clausulaSuspensivaDias === "function")
     ? window.clausulaSuspensivaDias(cc)
     : (Number(cc.clausula_suspensiva_dias) > 0 ? Number(cc.clausula_suspensiva_dias) : 30);
-  const days = typeof window.clientSinalOverdueDays === "function"
+  const sinal = typeof window.clientSinalOverdueDays === "function"
     ? window.clientSinalOverdueDays(client)
     : (Number(client.sinalDaysDelay) || 0);
+  const days = Math.max(Number(sinal) || 0, Number(client.sinalDaysDelay) || 0, Number(client.maxDaysDelay) || 0);
   return days >= minDays;
 };
 
@@ -4568,9 +4580,12 @@ window.CRM_ADVOGADO_ATUANDO_KEY = "crm_advogado_atuando";
 
 window.crmListaAdvogadosCobranca = function() {
   const lista = typeof window.getCrmUsersList === "function" ? window.getCrmUsersList() : [];
-  return (Array.isArray(lista) ? lista : [])
-    .filter((u) => u && window.isAdvogadoCobrancaUser && window.isAdvogadoCobrancaUser(u) && String(u.status || "ATIVO").toUpperCase() !== "INATIVO")
-    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "pt"));
+  const adv = (Array.isArray(lista) ? lista : [])
+    .filter((u) => u && window.isAdvogadoCobrancaUser && window.isAdvogadoCobrancaUser(u) && String(u.status || "ATIVO").toUpperCase() !== "INATIVO");
+  if (typeof window.usuarioCaco === "function" && !adv.some((u) => String(u.email || "").toLowerCase() === "caco@colenci.com.br")) {
+    adv.push(window.usuarioCaco());
+  }
+  return adv.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "pt"));
 };
 
 window.crmAcessoAdvogadoCompartilhado = function(user) {
@@ -4593,6 +4608,7 @@ window.crmAplicarAdvogadoAtuando = function(pessoa) {
   const u = window.AppState && AppState.currentUser;
   if (!u || !pessoa) return;
   if (!u._nomeConta) u._nomeConta = u.name || "";
+  if (!u._emailConta) u._emailConta = u.email || "";
   u.atuando = {
     id: pessoa.id,
     name: pessoa.name || "",
@@ -4611,7 +4627,8 @@ window.crmPedirAdvogadoAtuando = function() {
     if (lista[0]) window.crmAplicarAdvogadoAtuando(lista[0]);
     return Promise.resolve(lista[0] || null);
   }
-  const salvo = window.crmAdvogadoAtuando();
+  const salvo = window._crmForcarQuemAcessa ? null : window.crmAdvogadoAtuando();
+  window._crmForcarQuemAcessa = false;
   if (salvo) {
     const ainda = lista.find((p) => String(p.id) === String(salvo.id) || (salvo.email && String(p.email || "").toLowerCase() === String(salvo.email).toLowerCase()));
     if (ainda) {
@@ -4642,8 +4659,8 @@ window.crmPedirAdvogadoAtuando = function() {
       </button>`;
     }).join("");
     card.innerHTML = `
-      <h2 style="margin:0 0 6px;font-size:1.15rem;color:#0f172a;">Quem está trabalhando agora?</h2>
-      <p style="margin:0 0 14px;font-size:.84rem;color:#64748b;line-height:1.45;">Este acesso é compartilhado pelos advogados de cobrança. Escolha o seu nome. Outra pessoa pode entrar ao mesmo tempo, no próprio navegador, sem encerrar a sua sessão.</p>
+      <h2 style="margin:0 0 6px;font-size:1.15rem;color:#0f172a;">Quem está acessando?</h2>
+      <p style="margin:0 0 14px;font-size:.84rem;color:#64748b;line-height:1.45;">A conta da Microsoft pode ser de outra pessoa. Escolha quem está entrando agora. Esse nome fica no registro de usuários online.</p>
       <div id="crm-adv-lista">${botoes}</div>
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;">
         <button type="button" id="crm-adv-sair" style="height:38px;padding:0 14px;border-radius:10px;border:1px solid #e2e8f0;background:#fff;color:#334155;font-weight:700;cursor:pointer;">Sair</button>
@@ -4843,6 +4860,7 @@ async function checkAuthentication() {
           return MouraAuth.login();
         };
         entrar().then(async loggedUser => {
+          window._crmForcarQuemAcessa = true;
           await processSuccessfulLogin(loggedUser);
         }).catch(err => {
           const errorMsg = document.getElementById("login-error-msg");
@@ -9577,38 +9595,41 @@ window.nexAgingSpecialHtml = function(client) {
   const days = Number(client.maxDaysDelay) || 0;
   const percKnownZero = client.percPaid != null && Number(client.percPaid) === 0;
   const isZero = !!(client.isZeroPaid || percKnownZero || (typeof window.clientIsZeroPercentPaid === "function" && window.clientIsZeroPercentPaid(client)) || (typeof window.nexClientIsZeroPaid === "function" && window.nexClientIsZeroPaid(client.customerId, client.saleId)));
-  const ccConfig = (typeof window.nexCcConfig === "function")
-    ? window.nexCcConfig(client.costCenterId, client.unitName)
-    : {};
   const regua = (typeof window.nexReguaDays === "function") ? window.nexReguaDays() : { zero: 30 };
   const zeroDays = Number(regua.zero) || 30;
-  const titleHint = String((client.billIds && client.billIds[0]) || client.saleId || "").replace(/^B-/, "").split("-")[0];
-  const hasNex = typeof window.nexHasLetterForClient === "function"
-    ? window.nexHasLetterForClient(client)
-    : (typeof window.nexHasLetter === "function" && (
-      window.nexHasLetter(client.customerId, client.saleId) ||
-      (titleHint && window.nexHasLetter(client.customerId, titleHint))
-    ));
+  const letter = typeof window.nexLetterForClient === "function" ? window.nexLetterForClient(client) : null;
+  const hasNex = !!letter;
   const aplicaSuspensiva = typeof window.clientShowsSuspenderAction === "function"
     ? window.clientShowsSuspenderAction(client)
     : (typeof window.clientAppliesClausulaSuspensiva === "function" && window.clientAppliesClausulaSuspensiva(client));
 
   if (aplicaSuspensiva) {
-    const tagDays = (typeof window.clientSinalOverdueDays === "function")
-      ? window.clientSinalOverdueDays(client)
-      : (Number(client.sinalDaysDelay != null ? client.sinalDaysDelay : days) || days);
+    const tagDays = Math.max(
+      Number(days) || 0,
+      Number(client.sinalDaysDelay) || 0,
+      (typeof window.clientSinalOverdueDays === "function" ? window.clientSinalOverdueDays(client) : 0) || 0
+    );
     return `
-      <button class="btn btn-sm" onclick="event.stopPropagation(); openSuspenderContratoModal(${client.customerId}, ${client.saleId})" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #ea580c; color: #fff; border: 1px solid #c2410c; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;" title="Suspender contrato 0% pago — IPTU, CND e cancelamento no Sienge">
+      <button class="btn btn-sm" onclick="event.stopPropagation(); openSuspenderContratoModal(${client.customerId}, ${client.saleId})" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #ea580c; color: #fff; border: 1px solid #c2410c; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;" title="Cláusula suspensiva do empreendimento. Suspender contrato 0% pago — IPTU, CND e cancelamento no Sienge">
         <i data-lucide="file-warning" style="width: 14px; height: 14px;"></i> ${tagDays} dias - Suspender
       </button>
     `;
   }
-  // Controle 0% a partir de 03/09/2026: só entra quem atingiu a régua (30 dias) depois do corte.
-  // Backlog antigo (>31 dias sem NEX) deixa de mostrar a tag.
+  if (isZero && hasNex) {
+    const quando = (typeof window.nexFmtBr === "function") ? window.nexFmtBr(letter.date || letter.createdAt) : "";
+    const quandoTxt = quando ? " em " + quando : "";
+    return `
+      <button class="btn btn-sm" onclick="event.stopPropagation(); window.openNexFollowup()" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #ecfdf5; color: #166534; border: 1px solid #86efac; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;" title="NEX já enviada${quandoTxt}. O follow-up de NEX tem esta carta, então a fila de 0% pago não pede novo envio.">
+        <i data-lucide="mail-check" style="width: 14px; height: 14px;"></i> ${days} dias - NEX enviada
+      </button>
+    `;
+  }
+  // Controle 0% a partir de 03/09/2026: só entra quem atingiu a régua depois do corte.
+  // Backlog antigo (sem NEX) deixa de mostrar a tag.
   const crossedZero = typeof window.nexCrossedZeroAfterCutoff === "function"
     ? window.nexCrossedZeroAfterCutoff(days, zeroDays)
     : true;
-  if (isZero && days >= zeroDays && crossedZero && !aplicaSuspensiva && !hasNex) {
+  if (isZero && days >= zeroDays && crossedZero && !hasNex) {
     return `
       <button class="btn btn-sm" onclick="event.stopPropagation(); window.openNexElegiveisZero()" style="margin: 0; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; border-radius: 12px; background: #eab308; color: #fff; border: 1px solid #ca8a04; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;" title="Abrir Notificações — elegíveis 0% pago (régua: ${zeroDays} dias, controle a partir de ${typeof window.getNexZeroCutoff === "function" ? window.getNexZeroCutoff() : "hoje"})">
         <i data-lucide="mail" style="width: 14px; height: 14px;"></i> ${days} dias - Enviar Nex
@@ -31525,6 +31546,7 @@ async function _loadZeroPaidTab_Impl() {
         billCount: 0,
         lastContactDate: "Sem contato",
         billIds: [],
+        isZeroPaid: true,
         hasUnpaidSinal: false,
         sinalDaysDelay: 0,
         brokerName: (typeof window.extractSaleBrokerName === 'function' ? window.extractSaleBrokerName(sale) : (sale.brokerName || ''))
@@ -31934,8 +31956,8 @@ async function _loadZeroPaidTab_Impl() {
       <td style="white-space: nowrap; text-align: center; width: 1%;">
         <span class="badge" style="${getOperatorBadgeStyle(client.assignedOperator)}">${client.assignedOperator}</span>
       </td>
-      <td style="white-space: nowrap; text-align: center; width: 1%;">
-        <div style="display: flex; align-items: center; justify-content: center;">
+      <td style="white-space: nowrap; text-align: center; width: 1%;" data-aging-key="${client.customerId}-${client.saleId}">
+        <div data-aging-box style="display: flex; align-items: center; justify-content: center;">
           ${delayBadge}
         </div>
       </td>
@@ -32551,7 +32573,9 @@ async function loadWeSendTab() {
     const aplicaSuspensiva = typeof window.clientAppliesClausulaSuspensiva === "function"
       ? window.clientAppliesClausulaSuspensiva(item)
       : (!!cc.clausula_suspensiva_ativa && !!item.hasUnpaidSinal);
-    const hasNex = window.nexHasLetter(item.customerId, item.saleId);
+    const hasNex = typeof window.nexLetterForClient === "function"
+      ? !!window.nexLetterForClient(item)
+      : window.nexHasLetter(item.customerId, item.saleId);
     const fila = filaByKey[String(item.customerId) + "-" + String(item.saleId)];
     const entradaWebro = !item.isZeroPaid && (
       !!item.entradaWebro
@@ -35305,10 +35329,7 @@ window.nexFindReguaNode = function(kind) {
 window.nexReguaDays = function() {
   const zeroNode = window.nexFindReguaNode("zero");
   const stdNode = window.nexFindReguaNode("standard");
-  // Controle 0% reiniciado em 03/09/2026: limiar 30 dias (antes 31).
-  // Se a régua na timeline ainda estiver em 31+, forçamos 30.
-  let zero = Number(zeroNode && zeroNode.dias) || 30;
-  if (zero > 30) zero = 30;
+  const zero = Number(zeroNode && zeroNode.dias) || 30;
   return {
     zero,
     standard: Number(stdNode && stdNode.dias) || 61
@@ -35408,16 +35429,24 @@ window.nexHasLetterForClient = function(client) {
 
 window.nexLetterForClient = function(client) {
   if (!client || typeof window.nexCollectAll !== "function") return null;
-  const displayed = String((client.billIds && client.billIds[0]) || "").replace(/^B-/, "").split("-")[0];
-  const sid = String(client.saleId || "").replace(/^B-/, "").split("-")[0];
-  const matchId = displayed || sid;
+  const ids = typeof window.clientTitleIdSet === "function"
+    ? window.clientTitleIdSet(client)
+    : new Set();
   const cid = String(client.customerId || "");
-  if (!cid || !matchId) return null;
+  if (!cid) return null;
+  const normUnit = (v) => String(v || "").replace(/\s+/g, " ").trim().toUpperCase();
+  let clientUnit = "";
+  try {
+    const ccId = typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(client.costCenterId) : (client.costCenterId || "");
+    clientUnit = normUnit((ccId ? ccId + " - " : "") + (client.unitName || ""));
+  } catch (e) {}
   const hits = window.nexCollectAll().filter(it => {
     if (String(it.customerId) !== cid) return false;
     if (typeof window.nexLostValidityByPayment === "function" && window.nexLostValidityByPayment(it).lost) return false;
     const t = String(it.titulo || it.saleId || "").replace(/^B-/, "").split("-")[0];
-    return t && t === matchId;
+    if (t && ids.has(t)) return true;
+    const letterUnit = normUnit(it.unitLabel);
+    return !!(clientUnit && letterUnit && letterUnit !== "—" && letterUnit !== "N/D" && clientUnit === letterUnit);
   });
   hits.sort((a, b) => String(b.date || b.createdAt || "").localeCompare(String(a.date || a.createdAt || "")));
   return hits[0] || null;
@@ -35425,10 +35454,25 @@ window.nexLetterForClient = function(client) {
 
 window.filaClientFromKey = function(key) {
   const want = String(key || "");
-  const fromFila = (window.clientList || []).find(c => c && String(c.customerId) + "-" + String(c.saleId) === want);
-  if (fromFila) return fromFila;
+  const lists = [window.clientList, window.zeroPaidList];
+  for (let i = 0; i < lists.length; i++) {
+    const list = lists[i];
+    if (!Array.isArray(list)) continue;
+    const found = list.find(c => c && String(c.customerId) + "-" + String(c.saleId) === want);
+    if (found) return found;
+  }
   const bag = window._relSignalClients || {};
   return bag[want] || null;
+};
+
+window.repaintFilaAgingBadges = function() {
+  document.querySelectorAll("[data-aging-key]").forEach((el) => {
+    const client = window.filaClientFromKey(el.getAttribute("data-aging-key"));
+    const box = el.querySelector("[data-aging-box]") || el;
+    if (!client || typeof window.nexAgingActionHtml !== "function") return;
+    box.innerHTML = window.nexAgingActionHtml(client);
+  });
+  if (window.lucide) lucide.createIcons();
 };
 
 window.filaClientSignalKeys = function(client) {
@@ -35696,6 +35740,7 @@ window.ensureFilaSignalsIndex = function() {
         if (typeof window.rebuildNexCumpridaIndex === "function") window.rebuildNexCumpridaIndex();
         if (typeof window.nexScheduleCumpridaCheck === "function") window.nexScheduleCumpridaCheck();
         window.paintFilaSignalCells();
+        if (typeof window.repaintFilaAgingBadges === "function") window.repaintFilaAgingBadges();
         const pane = document.getElementById("tab-dashboard");
         if (pane && pane.style.display !== "none" && AppState.dashboardRendered && typeof loadDashboardData === "function") {
           loadDashboardData(false);
@@ -35900,6 +35945,12 @@ window.nexInFollowup = function(item) {
 window.openNexElegiveisZero = function() {
   sessionStorage.setItem("wesendActivePanel", "elegiveis-zero");
   sessionStorage.setItem("wesendReturnPanel", "elegiveis-zero");
+  if (typeof switchTab === "function") switchTab("wesend", "Notificações");
+};
+
+window.openNexFollowup = function() {
+  sessionStorage.setItem("wesendActivePanel", "followup");
+  sessionStorage.setItem("wesendReturnPanel", "followup");
   if (typeof switchTab === "function") switchTab("wesend", "Notificações");
 };
 

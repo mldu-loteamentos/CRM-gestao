@@ -507,16 +507,17 @@ const CustasJudiciaisApp = {
       </div>
       <div class="cj-pop-campo">Do que se trata
         <p class="cj-nota">Marque um ou mais tipos. A lista junta as custas já usadas e as principais de um processo de cobrança.</p>
+        <input type="search" id="cj-tipo-busca" placeholder="Buscar tipo de custa">
         <div id="cj-tipos" class="cj-tipos"></div>
         <div class="cj-tipo-outro">
           <input type="text" id="cj-tipo-novo" placeholder="Outro tipo de custa">
-          <button type="button" class="btn btn-outline" id="cj-tipo-add">Incluir</button>
+          <button type="button" class="btn btn-primary" id="cj-tipo-add">Incluir</button>
         </div>
       </div>
       <div id="cj-chips"></div>
       <div class="cj-pop-acoes">
-        <button type="button" class="btn btn-primary" id="cj-salvar">Salvar</button>
         <button type="button" class="btn btn-cancel" id="cj-cancelar">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="cj-salvar">Salvar</button>
       </div>
     </div>`;
     this.rascunho = null;
@@ -531,6 +532,8 @@ const CustasJudiciaisApp = {
     if (valor) valor.addEventListener("input", () => this.formatarValor(valor));
     const add = document.getElementById("cj-tipo-add");
     if (add) add.addEventListener("click", () => this.incluirTipo());
+    const busca = document.getElementById("cj-tipo-busca");
+    if (busca) busca.addEventListener("input", () => this.pintarTipos());
     this.pintarTipos();
     this.pintarChips();
     this.garantirCatalogo();
@@ -590,7 +593,14 @@ const CustasJudiciaisApp = {
     if (!box) return;
     const marcados = {};
     (this.tipos || []).forEach((t) => { marcados[this.fold(t)] = true; });
-    box.innerHTML = this.catalogoTipos().map((nome) => {
+    const buscaEl = document.getElementById("cj-tipo-busca");
+    const busca = this.fold(buscaEl && buscaEl.value);
+    const nomes = this.catalogoTipos().filter((nome) => !busca || this.fold(nome).indexOf(busca) >= 0);
+    if (!nomes.length) {
+      box.innerHTML = `<p class="cj-nota">Nenhum tipo com esse nome.</p>`;
+      return;
+    }
+    box.innerHTML = nomes.map((nome) => {
       const on = !!marcados[this.fold(nome)];
       return `<label class="cj-tipo${on ? " is-on" : ""}"><input type="checkbox" data-cj-tipo value="${this.esc(nome)}" ${on ? "checked" : ""}><span>${this.esc(nome)}</span></label>`;
     }).join("");

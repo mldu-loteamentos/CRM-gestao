@@ -1845,14 +1845,17 @@ const PrestacaoContasApp = {
     return [...porChave.values()].sort((a, b) => a.numero.localeCompare(b.numero, "pt-BR", { numeric: true }));
   },
 
-  acharPosicao(rows, numero, limite) {
+  acharPosicao(rows, numero, limite, companyId) {
     const alvo = this.numeroConta(numero);
     const cru = String(numero || "").trim().toUpperCase();
+    const emp = String(companyId || "").trim();
     let melhor = null;
     (rows || []).forEach((row) => {
       const num = String(row.accountNumber || row.number || "").trim();
       if (!num) return;
       if (this.numeroConta(num) !== alvo && num.toUpperCase() !== cru) return;
+      const dono = String(row.companyId || row.company || "").trim();
+      if (emp && dono && dono !== emp) return;
       const amount = this.valorPosicao(row);
       if (amount == null) return;
       const dt = String(row.balanceDate || row.date || "").slice(0, 10);
@@ -1901,16 +1904,19 @@ const PrestacaoContasApp = {
       return;
     }
     try {
+      const empresas = [...new Set(contas.map((c) => String(c.companyId || this.companyId || "")).filter(Boolean))];
+      const lerSaldos = (data) => Promise.all(empresas.map((id) => SiengeApiService.getAccountBalances(data, { companyId: id, showLast: true })))
+        .then((listas) => listas.reduce((acc, lista) => acc.concat(Array.isArray(lista) ? lista : []), []));
       const [antes, agora] = await Promise.all([
-        SiengeApiService.getAccountBalances(datas.dataAnterior, { companyId: this.companyId }),
-        SiengeApiService.getAccountBalances(datas.dataAtual, { companyId: this.companyId })
+        lerSaldos(datas.dataAnterior),
+        lerSaldos(datas.dataAtual)
       ]);
       if (gen !== this.dashGen) return;
       const extratos = await Promise.all(contas.map(async (conta) => {
         if (!datas.inicioMov || typeof SiengeApiService.getAccountStatements !== "function") return [];
         try {
           return await SiengeApiService.getAccountStatements(datas.inicioMov, datas.dataAtual, {
-            companyId: this.companyId,
+            companyId: conta.companyId || this.companyId,
             accountNumber: conta.numero,
             rethrow: true
           });
@@ -1919,33 +1925,44 @@ const PrestacaoContasApp = {
         }
       }));
       if (gen !== this.dashGen) return;
-      this.saldoCc = {
-        ...datas,
-        erro: "",
-        contas: contas.map((conta, i) => {
-          const pack = extratos[i];
-          const falhou = pack && !Array.isArray(pack);
-          const movimentos = falhou ? [] : this.linhasExtrato(pack, conta.numero, datas.inicioMov, datas.dataAtual);
-          const posAnt = this.acharPosicao(antes, conta.numero, datas.dataAnterior);
-          const posAtu = this.acharPosicao(agora, conta.numero, datas.dataAtual);
-          let atual = posAtu ? posAtu.amount : null;
-          if (atual == null) {
-            const ultimo = [...movimentos].reverse().find((m) => m.saldo != null);
-            if (ultimo) atual = ultimo.saldo;
-          }
-          return {
-            numero: conta.numero,
-            rotulo: (window.CentrosCustoApp && CentrosCustoApp.contaLabel)
-              ? CentrosCustoApp.contaLabel(conta)
-              : [conta.banco ? "Banco " + conta.banco : "", conta.agencia ? "Ag. " + conta.agencia : "", "C/C " + conta.numero, conta.nome].filter(Boolean).join(" · "),
-            centros: conta.centros.slice().sort((a, b) => Number(a) - Number(b)),
-            anterior: posAnt ? posAnt.amount : null,
-            atual,
-            movimentos,
-            erroExtrato: falhou ? pack.erro : ""
-          };
-        })
-      };
+      const montadas = await Promise.all(contas.map(async (conta, i) => {
+        const pack = extratos[i];
+        const falhou = pack && !Array.isArray(pack);
+        const movimentos = falhou ? [] : this.linhasExtrato(pack, conta.numero, datas.inicioMov, datas.dataAtual);
+        const posAnt = this.acharPosicao(antes, conta.numero, datas.dataAnterior, conta.companyId);
+        const posAtu = this.acharPosicao(agora, conta.numero, datas.dataAtual, conta.companyId);
+        let anterior = posAnt ? posAnt.amount : null;
+        if (anterior == null && typeof SiengeApiService.getAccountStatements === "function") {
+          try {
+            const ate = await SiengeApiService.getAccountStatements(datas.dataAnterior.slice(0, 8) + "01", datas.dataAnterior, {
+              companyId: conta.companyId || this.companyId,
+              accountNumber: conta.numero,
+              rethrow: true
+            });
+            const ateLinhas = this.linhasExtrato(ate, conta.numero, "", datas.dataAnterior);
+            const ultimoAnt = [...ateLinhas].reverse().find((m) => m.saldo != null);
+            if (ultimoAnt) anterior = ultimoAnt.saldo;
+          } catch (e) {}
+        }
+        let atual = posAtu ? posAtu.amount : null;
+        if (atual == null) {
+          const ultimo = [...movimentos].reverse().find((m) => m.saldo != null);
+          if (ultimo) atual = ultimo.saldo;
+        }
+        return {
+          numero: conta.numero,
+          rotulo: (window.CentrosCustoApp && CentrosCustoApp.contaLabel)
+            ? CentrosCustoApp.contaLabel(conta)
+            : [conta.banco ? "Banco " + conta.banco : "", conta.agencia ? "Ag. " + conta.agencia : "", "C/C " + conta.numero, conta.nome].filter(Boolean).join(" · "),
+          centros: conta.centros.slice().sort((a, b) => Number(a) - Number(b)),
+          anterior,
+          atual,
+          movimentos,
+          erroExtrato: falhou ? pack.erro : ""
+        };
+      }));
+      if (gen !== this.dashGen) return;
+      this.saldoCc = { ...datas, erro: "", contas: montadas };
     } catch (e) {
       if (gen !== this.dashGen) return;
       console.warn("[Prestação de Contas] Saldo da conta da parceria:", e);
@@ -1953,7 +1970,7 @@ const PrestacaoContasApp = {
     }
   },
 
-  saldoParceriaHtml() {
+  saldoParceriaHtml(soFechamento) {
     const s = this.saldoCc;
     if (!s) return "";
     if (s.erro) return `<div class="pcx-alert is-warn">${this.esc(s.erro)}</div>`;
@@ -1963,6 +1980,7 @@ const PrestacaoContasApp = {
     const cor = (v) => (v == null ? "" : (v < -0.004 ? "is-neg" : "is-pos"));
     const money = (v) => (v == null ? "—" : this.fmt(v));
     const rotuloAtual = s.atualEhHoje ? "Saldo atual" : "Saldo no fim do mês";
+    const dataFechamento = this.fmtData(s.dataAnterior);
     return `<section class="pcx-cc">${s.contas.map((c) => {
       const soma = c.movimentos.reduce((acc, m) => acc + (Number(m.valor) || 0), 0);
       const linhas = c.movimentos.map((m) => `<tr>
@@ -1971,20 +1989,22 @@ const PrestacaoContasApp = {
         <td class="is-right ${cor(m.valor)}">${this.fmt(m.valor)}</td>
         <td class="is-right">${m.saldo == null ? "—" : this.fmt(m.saldo)}</td>
       </tr>`).join("");
-      const corpo = c.erroExtrato
+      const corpo = soFechamento ? "" : (c.erroExtrato
         ? `<p class="pcx-ajuda">${this.esc(c.erroExtrato)}</p>`
         : (c.movimentos.length
           ? `<div class="pcx-cc-mov"><table><thead><tr><th>Data</th><th>Histórico</th><th class="is-right">Valor</th><th class="is-right">Saldo</th></tr></thead><tbody>${linhas}</tbody></table></div>`
-          : `<p class="pcx-ajuda">Nenhum movimento nesta conta entre ${this.esc(this.fmtData(s.inicioMov || s.dataAtual))} e ${this.esc(this.fmtData(s.dataAtual))}.</p>`);
+          : `<p class="pcx-ajuda">Nenhum movimento nesta conta entre ${this.esc(this.fmtData(s.inicioMov || s.dataAtual))} e ${this.esc(this.fmtData(s.dataAtual))}.</p>`));
+      const demais = soFechamento ? "" : `
+          <div><small>${rotuloAtual} · ${this.esc(this.fmtData(s.dataAtual))}</small><strong class="${cor(c.atual)}">${money(c.atual)}</strong></div>
+          <div><small>${c.movimentos.length} movimento(s)</small><strong class="${cor(soma)}">${c.movimentos.length ? this.fmt(soma) : "—"}</strong></div>`;
       return `<article class="pcx-cc-card">
         <header>
           <strong>${this.esc(c.rotulo)}</strong>
           <span>Centros ${this.esc(c.centros.join(", "))}</span>
         </header>
         <div class="pcx-cc-saldos">
-          <div><small>Saldo em ${this.esc(this.fmtData(s.dataAnterior))}</small><strong class="${cor(c.anterior)}">${money(c.anterior)}</strong></div>
-          <div><small>${rotuloAtual} · ${this.esc(this.fmtData(s.dataAtual))}</small><strong class="${cor(c.atual)}">${money(c.atual)}</strong></div>
-          <div><small>${c.movimentos.length} movimento(s)</small><strong class="${cor(soma)}">${c.movimentos.length ? this.fmt(soma) : "—"}</strong></div>
+          <div><small>Último fechamento · ${this.esc(dataFechamento)}</small><strong class="${cor(c.anterior)}">${money(c.anterior)}</strong></div>
+          ${demais}
         </div>
         ${corpo}
       </article>`;
@@ -2013,7 +2033,7 @@ const PrestacaoContasApp = {
     const corpo = rows.length ? this.obrasHtml(rows, repasse) : `<tr><td colspan="8" class="pcx-vazio">${vazio}</td></tr>`;
     const corTotal = resultado < -0.004 ? "#b91c1c" : "#15803d";
     const dist = repasse ? "" : this.distribuicaoMistaHtml();
-    const saldo = repasse ? this.saldoParceriaHtml() : "";
+    const saldo = this.saldoParceriaHtml(!repasse);
     return `
       ${saldo}
       ${dist}
