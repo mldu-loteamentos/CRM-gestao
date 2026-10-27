@@ -1393,11 +1393,39 @@ const SocietarioApp = {
     return String(doc || "").replace(/\D/g, "").length > 11;
   },
 
-  nomeCentro(id, fallback) {
+  centroNoCadastro(id, companyId) {
+    const dig = String(id || "").replace(/\D/g, "");
+    if (!dig) return null;
+    const app = window.ParametrizacaoParceiroApp;
+    let cc = null;
+    if (app && typeof app.catalogoCentros === "function") cc = app.catalogoCentros().get(dig) || null;
+    if (!cc) {
+      const lista = (window.CentrosCustoState && CentrosCustoState.costCenters) || (window.AppState && AppState.cachedCostCenters) || [];
+      cc = lista.find((c) => String(c.id || "").replace(/\D/g, "") === dig) || null;
+    }
+    if (!cc) return null;
+    const emp = app && typeof app.empresaDoCentro === "function" ? app.empresaDoCentro(cc) : String(cc.idCompany || cc.companyId || "");
+    if (companyId && emp && emp !== String(companyId)) return { id: dig, nome: "", outraEmpresa: true };
+    const nome = String(cc.name || "").trim();
+    return { id: String(cc.id || dig).replace(/\D/g, "") || dig, nome: nome && nome !== dig ? nome : "" };
+  },
+
+  /* Nome do cadastro de centro de custo. A lista fixa antiga só entra quando o cadastro não tem o centro. */
+  nomeCentro(id, fallback, companyId) {
+    const cad = this.centroNoCadastro(id, companyId);
+    if (cad && cad.outraEmpresa) return "";
+    const doCadastro = cad && cad.nome ? cad.nome : "";
+    const guardado = String(fallback || "").trim();
+    const nome = doCadastro || (guardado && guardado !== String(id) ? guardado : "");
+    if (nome) return nome;
     const known = typeof window.knownCostCenterName === "function" ? window.knownCostCenterName(id) : "";
-    const nome = String(known || fallback || "").trim();
-    if (!nome || nome === String(id)) return "";
-    return nome;
+    return known && known !== String(id) ? known : "";
+  },
+
+  ehDepartamento(nome) {
+    const n = this.semAcento(nome);
+    if (!n) return false;
+    return /\bmarketing\b/.test(n) || /\bcomercial\b/.test(n) || /gestao d[ae] carteira/.test(n) || /carteira e estoque/.test(n);
   },
 
   ehCcParceria(cc, irmaos) {
@@ -1409,17 +1437,47 @@ const SocietarioApp = {
     return false;
   },
 
-  caixasDaObra(obra) {
-    const todos = (obra.costCenters || []).filter(c => c && c.id && c.inAccount !== false);
-    const empre = todos.filter(c => !this.ehCcParceria(c, todos));
-    const lista = empre.length ? empre : todos;
-    if (lista.length) {
-      return lista.map(c => ({ id: String(c.id), nome: this.nomeCentro(c.id, c.name) }));
+  centrosDaObra(obra, companyId) {
+    const app = window.ParametrizacaoParceiroApp;
+    const code = String((obra && obra.code) || "").replace(/\D/g, "");
+    const papel = new Map();
+    (obra && obra.costCenters || []).forEach((c) => {
+      if (c && c.id) papel.set(String(c.id).replace(/\D/g, ""), c);
+    });
+    if (app && companyId && code && typeof app.costCentersOfObra === "function") {
+      const cad = app.costCentersOfObra(code, companyId);
+      if (cad.length) {
+        return cad.map((c) => {
+          const id = String(c.id).replace(/\D/g, "");
+          const g = papel.get(id);
+          if (g && g.inAccount === false) return null;
+          return { id: id, name: c.name || (g && g.name) || "", papel: (g && g.papel) || "" };
+        }).filter(Boolean);
+      }
     }
-    const code = String(obra.code || "").replace(/\D/g, "");
+    return (obra && obra.costCenters || []).filter((c) => c && c.id && c.inAccount !== false).map((c) => {
+      const cad = this.centroNoCadastro(c.id, companyId);
+      if (cad && cad.outraEmpresa) return null;
+      return { id: String(c.id).replace(/\D/g, ""), name: (cad && cad.nome) || c.name || "", papel: c.papel || "" };
+    }).filter(Boolean);
+  },
+
+  caixasDaObra(obra, companyId) {
+    const todos = this.centrosDaObra(obra, companyId);
+    const nomeDe = (c) => this.nomeCentro(c.id, c.name, companyId);
+    const semDepto = todos.filter((c) => !this.ehDepartamento(nomeDe(c)) && !this.ehDepartamento(c.name));
+    const base = semDepto.length ? semDepto : todos;
+    const empre = base.filter((c) => !this.ehCcParceria(c, todos));
+    const lista = empre.length ? empre : base;
+    if (lista.length) {
+      return lista.map((c) => ({ id: String(c.id), nome: nomeDe(c) }));
+    }
+    const code = String((obra && obra.code) || "").replace(/\D/g, "");
     if (!code) return [];
     const id = code.length >= 5 ? code : code + "00";
-    return [{ id, nome: this.nomeCentro(id) }];
+    const cad = this.centroNoCadastro(id, companyId);
+    if (cad && cad.outraEmpresa) return [];
+    return [{ id: (cad && cad.id) || id, nome: this.nomeCentro(id, "", companyId) }];
   },
 
   sociosDe(p) {
@@ -1433,13 +1491,15 @@ const SocietarioApp = {
   },
 
   centroDaPessoa(p, s) {
-    const id = String((s && s.ccTitulo) || "").trim();
+    const id = String((s && s.ccTitulo) || "").replace(/\D/g, "");
     if (id) {
-      const nome = String(s.ccTituloNome || "").trim();
-      return id + (nome && nome !== id ? " — " + nome : "");
+      const cad = this.centroNoCadastro(id, p && p.companyId);
+      if (cad && cad.outraEmpresa) return "—";
+      const nome = this.nomeCentro(id, s.ccTituloNome, p && p.companyId);
+      return (cad && cad.id ? cad.id : id) + (nome ? " — " + nome : "");
     }
     const ids = [];
-    (p.obras || []).forEach(o => this.caixasDaObra(o).forEach(c => { if (ids.indexOf(c.id) < 0) ids.push(c.id); }));
+    (p.obras || []).forEach(o => this.caixasDaObra(o, p && p.companyId).forEach(c => { if (ids.indexOf(c.id) < 0) ids.push(c.id); }));
     return ids.length ? ids.join(", ") : "—";
   },
 
@@ -1481,7 +1541,7 @@ const SocietarioApp = {
       if (!dig || vistos.has(dig) || dosSocios.has(dig)) return;
       if (aracari && (dig === "14201" || dig === "70600")) return;
       vistos.add(dig);
-      out.push({ id: dig, nome: this.nomeCentro(dig, nome) });
+      out.push({ id: dig, nome: this.nomeCentro(dig, nome, p && p.companyId) });
     };
     (p.socios || []).forEach(s => {
       if (!s || !s.ccTitulo || !app || typeof app.papelSocio !== "function" || app.papelSocio(s) !== "terrenista") return;
@@ -1500,7 +1560,22 @@ const SocietarioApp = {
 
   folhaCc(c) {
     const nome = c.nome ? `<small>${this.esc(c.nome)}</small>` : "";
-    return `<li>${this.caixaHtml(c.id, nome, "is-cc")}</li>`;
+    const pct = c.pct ? `<span class="soc-tree-pct">${this.esc(c.pct)}</span>` : "";
+    return `<li>${pct}${this.caixaHtml(c.id, nome, "is-cc")}</li>`;
+  },
+
+  /* O centro da obra (a terra) não é o centro do sócio. Fica de fora quando os sócios já têm o centro deles. */
+  socioEmpreendedorVisivel(p, s, todos) {
+    const id = String((s && s.ccTitulo) || "").replace(/\D/g, "");
+    if (!id) return !!(s && s.name);
+    const comParte = (todos || []).filter((o) => Number(o.sharePct) > 0 && String(o.ccTitulo || "").replace(/\D/g, ""));
+    if (comParte.length && !(Number(s.sharePct) > 0)) return false;
+    const nome = this.nomeCentro(id, (s && s.ccTituloNome) || "", p && p.companyId);
+    if (this.ehDepartamento(nome)) return false;
+    const naObra = (p.obras || []).some((o) => (o.costCenters || []).some((c) => String(c.id || "").replace(/\D/g, "") === id));
+    const outros = comParte.filter((o) => String(o.ccTitulo || "").replace(/\D/g, "") !== id);
+    if (naObra && outros.length && !/^7/.test(id)) return false;
+    return true;
   },
 
   /* Mista: empreendedor com a fatia restante e terrenista com o percentual do parceiro. Abaixo, o centro de cada sócio e o do parceiro. */
@@ -1508,18 +1583,30 @@ const SocietarioApp = {
     const app = window.ParametrizacaoParceiroApp;
     const terr = app && typeof app.pctTerrenista === "function" ? Number(app.pctTerrenista(p)) || 0 : 0;
     const emp = Math.round((100 - terr) * 1000) / 1000;
-    const socios = this.sociosEmpreendedores(p).map(s => {
+    const todos = this.sociosEmpreendedores(p);
+    const socios = todos.filter((s) => this.socioEmpreendedorVisivel(p, s, todos)).map((s) => {
       const id = String(s.ccTitulo || "").replace(/\D/g, "");
-      if (id) return this.folhaCc({ id, nome: this.nomeCentro(id, s.ccTituloNome || s.name) });
-      return `<li>${this.caixaHtml(s.name || "Sócio", "", "is-cc")}</li>`;
+      const pct = Number(s.sharePct) > 0 ? this.pctCurto(s.sharePct) : "";
+      const cad = id ? this.centroNoCadastro(id, p.companyId) : null;
+      const codigo = (cad && cad.id) || id;
+      if (codigo) return this.folhaCc({ id: codigo, nome: this.nomeCentro(codigo, s.ccTituloNome || s.name, p.companyId), pct: pct });
+      return `<li>${pct ? `<span class="soc-tree-pct">${this.esc(pct)}</span>` : ""}${this.caixaHtml(s.name || "Sócio", "", "is-cc")}</li>`;
     });
-    const parceiro = this.centrosDoParceiro(p).map(c => this.folhaCc(c));
+    const doParceiro = this.centrosDoParceiro(p).map((c) => {
+      const cad = this.centroNoCadastro(c.id, p.companyId);
+      return {
+        id: (cad && cad.id) || c.id,
+        nome: this.nomeCentro(c.id, c.nome, p.companyId) || c.nome
+      };
+    });
+    const pctTerr = doParceiro.length === 1 && terr > 0 ? this.pctCurto(terr) : "";
+    const parceiro = doParceiro.map((c) => this.folhaCc({ id: c.id, nome: c.nome, pct: pctTerr }));
     const ramo = (titulo, pct, cls, filhos) => {
       const ul = filhos.length ? `<ul>${filhos.join("")}</ul>` : "";
       const selo = pct > 0 ? `<span class="soc-tree-pct">${this.esc(this.pctCurto(pct))}</span>` : "";
       return `<li>${selo}${this.caixaHtml(titulo, "", cls)}${ul}</li>`;
     };
-    return `<ul>${ramo("Empreendedor", emp, "is-pj", socios)}${ramo("Terrenista", terr, "is-terr", parceiro)}</ul>`;
+    return `<ul class="soc-tree-split">${ramo("Empreendedor", emp, "is-pj", socios)}${ramo("Terrenista", terr, "is-terr", parceiro)}</ul>`;
   },
 
   colunaParceria(p) {
@@ -1529,7 +1616,18 @@ const SocietarioApp = {
     const pj = this.ehPessoaJuridica(p.partnerName, p.creditor && p.creditor.cpfCnpj);
     const tipo = mista ? "Mista" : (sociedade ? "Sociedade" : "Parceria");
     const obras = (p.obras || []).slice().sort((a, b) => String(a.code).localeCompare(String(b.code), "pt-BR", { numeric: true }));
-    const caixas = mista ? [] : obras.flatMap(o => this.caixasDaObra(o).map(c => ({ ...c, pct: sociedade || !(Number(o.defaultPartnerShare) > 0) ? "" : this.pctCurto(o.defaultPartnerShare) })));
+    let caixas = mista ? [] : obras.flatMap(o => this.caixasDaObra(o, p.companyId).map(c => ({ ...c, pct: sociedade || !(Number(o.defaultPartnerShare) > 0) ? "" : this.pctCurto(o.defaultPartnerShare) })));
+    if (!mista && !caixas.length && sociedade) {
+      const vistos = new Set();
+      caixas = this.sociosDe(p).map((s) => {
+        const id = String(s.ccTitulo || "").replace(/\D/g, "");
+        if (!id || vistos.has(id)) return null;
+        const cad = this.centroNoCadastro(id, p.companyId);
+        if (cad && cad.outraEmpresa) return null;
+        vistos.add(id);
+        return { id: (cad && cad.id) || id, nome: this.nomeCentro(id, s.ccTituloNome || s.name, p.companyId), pct: Number(s.sharePct) > 0 ? this.pctCurto(s.sharePct) : "" };
+      }).filter(Boolean);
+    }
     const kids = mista
       ? this.ramosMistos(p)
       : (caixas.length

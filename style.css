@@ -10575,6 +10575,9 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .soc-tree-pct { position: absolute; top: 6px; left: 50%; transform: translateX(-50%); background: #fff; color: #105436; border: 1px solid #b7e0c8; border-radius: 999px; padding: 1px 8px; font-size: 0.68rem; font-weight: 800; z-index: 1; white-space: nowrap; }
 .soc-tree-pct:empty { display: none; }
 .soc-tree-pct-inline { background: rgba(255,255,255,0.18); border-radius: 999px; padding: 2px 7px; font-size: 0.62rem; }
+.soc-tree ul.soc-tree-split { width: 100%; gap: 72px; align-items: flex-start; justify-content: center; }
+.soc-tree ul.soc-tree-split > li { flex: 1 1 280px; max-width: 640px; min-width: 240px; }
+.soc-tree ul.soc-tree-split > li > ul { flex-wrap: nowrap; justify-content: center; }
 .soc-tree-lado { display: flex; flex-direction: column; align-items: center; }
 .soc-tree-lado-titulo, .soc-tree-banda-titulo { font-size: 0.68rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: #105436; margin-bottom: 8px; }
 .soc-tree-banda { display: flex; flex-direction: column; align-items: center; max-width: 640px; margin-top: 16px; padding: 12px; border: 1px dashed #b7d4c4; border-radius: 14px; background: rgba(255,255,255,0.85); }
