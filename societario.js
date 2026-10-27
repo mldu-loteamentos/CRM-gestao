@@ -100,10 +100,15 @@ const SocietarioApp = {
     return !!app.flagOn(app.customOf(company.id), field);
   },
 
-  /** Empresa do organograma: Holding interna e Gestão Ellenco ligados no cadastro. */
+  /** Empresa do organograma: gerida pelo grupo ou Gestão Ellenco no cadastro. */
   empresasDaEstrutura() {
     if (!this.cadastroPronto()) return [];
-    return this.companies().filter((c) => this.flagEmpresa(c, "holding_interna") && this.flagEmpresa(c, "gestao_elenco"));
+    return this.companies().filter((c) => this.flagEmpresa(c, "gerida_pelo_grupo") || this.flagEmpresa(c, "gestao_elenco"));
+  },
+
+  tokensNome(s) {
+    const stop = { spe: 1, ltda: 1, sa: 1, me: 1, epp: 1, e: 1, de: 1, do: 1, da: 1, dos: 1, das: 1, empreendimento: 1, empreendimentos: 1, empreendedora: 1, imobiliario: 1, imobiliaria: 1 };
+    return this.semAcento(s).split(" ").filter((t) => t && !stop[t] && t.length >= 4);
   },
 
   empresasEscolhiveis(atualId) {
@@ -130,11 +135,15 @@ const SocietarioApp = {
     const custom = app && app.customOf ? app.customOf(company.id) : null;
     const usual = this.semAcento(custom && custom.nome_usual);
     const legal = this.semAcento(company.name || company.tradeName || company.corporateName);
+    const alvo = new Set(this.tokensNome([company.name, company.tradeName, company.corporateName, custom && custom.nome_usual].join(" ")));
     const candidatos = (this.graph.entities || []).filter((e) => {
       if (usados && usados.has(e.id)) return false;
-      if (e.companyId) return false;
+      if (e.kind === "pf") return false;
+      if (e.companyId && String(e.companyId) !== id) return false;
       const nome = this.semAcento(e.name);
       if (usual.length >= 4 && nome === usual) return true;
+      const box = this.tokensNome(e.name);
+      if (box.length && box.every((t) => alvo.has(t))) return true;
       if (nome.length < 8 || legal.length < 8) return false;
       return legal.startsWith(nome) || nome.startsWith(legal);
     });
@@ -731,7 +740,7 @@ const SocietarioApp = {
           </div>
         </div>
         <label style="${this.lbl}">Empresa Sienge
-          ${this.hint("Empresa do cadastro com Holding interna e Gestão Ellenco ligados. Pessoa física continua sem esse vínculo.")}
+          ${this.hint("Empresa gerida pelo grupo ou da Gestão Ellenco. Pessoa física continua sem esse vínculo.")}
           <div id="soc-company-box"></div>
         </label>
         <label style="${this.lbl}">Parceiro / sócio (parametrização)
@@ -1125,6 +1134,7 @@ const SocietarioApp = {
   render() {
     const root = document.getElementById("estrutura-societaria-root");
     if (!root) return;
+    if (this.aba !== "parceria") this.sincronizarEmpresasCadastro();
     if (this.aba === "parceria") {
       root.innerHTML = `<div class="soc-shell is-parceria">${this.abasHtml()}${this.parceriaHtml()}</div>`;
       if (window.lucide) lucide.createIcons();
@@ -1142,13 +1152,12 @@ const SocietarioApp = {
       <div class="soc-shell">${this.abasHtml()}
       <div class="soc-page">
         <div class="soc-toolbar">
-          <p class="soc-help">Arraste as caixas, ligue pelos pontos e clique no percentual para editar a participação.</p>
+          <p class="soc-help">Empresas geridas pelo grupo e da Gestão Ellenco entram aqui. Arraste as caixas, ligue pelos pontos e clique no percentual para editar a participação.</p>
           <div class="soc-toolbar-actions">
-            <button type="button" class="btn btn-primary btn-sm" onclick="SocietarioApp.openNewEntity()" title="Cria uma caixa nova: empresa (PJ) ou pessoa física (PF).">Empresa / pessoa</button>
+            <button type="button" class="btn btn-primary btn-sm" onclick="SocietarioApp.openNewEntity()" title="Cria uma caixa de pessoa física ou de empresa que ainda não está no desenho.">Empresa / pessoa</button>
             <button type="button" class="btn btn-outline btn-sm soc-btn-link${linkBtn}" onclick="SocietarioApp.openNewLink()" title="Cria a participação entre duas caixas. Também dá para arrastar o ponto de uma caixa até a outra.">Interligação</button>
             <button type="button" class="btn btn-outline btn-sm" onclick="SocietarioApp.resetLayout()" title="Reposiciona as caixas. As ligações e os percentuais permanecem.">Reorganizar</button>
             <button type="button" class="btn btn-outline btn-sm" onclick="SocietarioApp.openNewNote()" title="Grava uma nota na empresa selecionada.">Nota</button>
-            <button type="button" class="btn btn-sm soc-btn-import" onclick="SocietarioApp.importPartners()" title="Atualiza percentuais das caixas que já existem. Não cria caixas novas.">Vincular parametrização</button>
           </div>
         </div>
         <div class="soc-body">
@@ -1258,7 +1267,7 @@ const SocietarioApp = {
     if (nova && kind === "pj") {
       const ok = this.empresasDaEstrutura().some((c) => String(c.id) === String(companyId));
       if (!ok) {
-        alert("Empresa nova não é digitada aqui. No cadastro de empresas, ligue Holding interna e Gestão Ellenco. A caixa entra no organograma.");
+        alert("Empresa nova não é digitada aqui. No cadastro de empresas, ligue Gerida pelo grupo ou Gestão Ellenco. A caixa entra no organograma.");
         return;
       }
       if (this.graph.entities.some((e) => String(e.companyId || "") === String(companyId))) {
@@ -1391,66 +1400,6 @@ const SocietarioApp = {
       if (extra.partnerId) ent.partnerId = extra.partnerId;
     }
     return ent;
-  },
-
-  acharEntidade(nome, companyId) {
-    const id = String(companyId || "").trim();
-    if (id) {
-      const porId = (this.graph.entities || []).find((e) => String(e.companyId || "") === id);
-      if (porId) return porId;
-    }
-    const chave = this.semAcento(nome);
-    if (chave.length < 3) return null;
-    return (this.graph.entities || []).find((e) => {
-      const n = this.semAcento(e.name);
-      return n === chave || (n.length >= 8 && chave.length >= 8 && (n.startsWith(chave) || chave.startsWith(n)));
-    }) || null;
-  },
-
-  /** Só liga caixas que já estão no organograma. Não cria caixas novas. */
-  importPartners() {
-    const items = this.partners();
-    if (!items.length) {
-      alert("Não há parcerias/sociedades na Parametrização de Parceiro. Cadastre-as lá e tente de novo.");
-      return;
-    }
-    let added = 0;
-    let atualizados = 0;
-    let ignorados = 0;
-    items.forEach((p) => {
-      const companyEnt = this.acharEntidade(p.companyName || ("Empresa " + p.companyId), p.companyId);
-      const partnerEnt = this.acharEntidade(p.partnerName, "");
-      if (!companyEnt || !partnerEnt || companyEnt.id === partnerEnt.id) {
-        ignorados++;
-        return;
-      }
-      if (p.companyId && !companyEnt.companyId) companyEnt.companyId = String(p.companyId);
-      if (p.id && !partnerEnt.partnerId) partnerEnt.partnerId = p.id;
-      const pct = Number((p.creditor && p.creditor.sharePct) || p.defaultPartnerShare) || 0;
-      const existe = this.graph.links.find((l) => l.from === partnerEnt.id && l.to === companyEnt.id);
-      if (existe) {
-        if (pct && Math.abs(Number(existe.pct) - pct) > 0.001) {
-          existe.pct = pct;
-          atualizados++;
-        }
-        return;
-      }
-      this.graph.links.push({
-        id: this.uid("lnk"),
-        from: partnerEnt.id,
-        to: companyEnt.id,
-        pct,
-        note: p.kind === "sociedade" ? "Sociedade (parametrização de parceiros)" : "Parceria (parametrização de parceiros)"
-      });
-      added++;
-    });
-    this.persist();
-    this.render();
-    const partes = [];
-    if (added) partes.push(added + " interligação(ões) nova(s)");
-    if (atualizados) partes.push(atualizados + " percentual(is) atualizado(s)");
-    if (!partes.length) partes.push("Nenhuma caixa nova. Só entram ligações entre empresas que já estão no organograma" + (ignorados ? " (" + ignorados + " da parametrização sem caixa correspondente)" : ""));
-    alert(partes.join(". ") + ".");
   }
 };
 

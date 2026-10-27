@@ -299,7 +299,7 @@ const ContabilEquiv = {
       }
       const evento = Number(vinc && vinc.evento) || Number((this.cfgDa(destino) || {}).evento);
       if (!(evento > 0)) {
-        faltas.push(nomeEmp(destino, "destino") + " sem a partida");
+        faltas.push(nomeEmp(destino, "destino") + " ainda não tem lançamento de equivalência anterior para repetir o evento do Sienge");
         return;
       }
       const lucro = signed > 0;
@@ -542,7 +542,7 @@ const ContabilEquiv = {
         destino: val("destino"),
         debitoLucro: val("debitoLucro"),
         creditoPrejuizo: val("creditoPrejuizo"),
-        evento: val("evento"),
+        evento: val("evento") || anterior.evento || "",
         apelidoOrigem: anterior.apelidoOrigem || "",
         apelidoDestino: anterior.apelidoDestino || ""
       });
@@ -560,6 +560,50 @@ const ContabilEquiv = {
     else row.apelidoDestino = apelido || row.apelidoDestino;
     if (lado === "destino" && !row.evento) row.evento = this.eventoSalvo(id);
     this.render({ semLer: true });
+    this.gravar();
+  },
+
+  agendarGravar() {
+    clearTimeout(this._gravar);
+    this._gravar = setTimeout(() => this.gravar(), 400);
+  },
+
+  pintarStatus() {
+    const el = document.getElementById("ctb-eq-status");
+    if (el) el.textContent = this.state.msg || "";
+  },
+
+  espelharEmpresas() {
+    if (!this.state.empresas) this.state.empresas = {};
+    (this.state.vinculos || []).forEach((v) => {
+      if (!v.destino) return;
+      const emp = (this.state.companies || []).find((c) => String(c.id) === String(v.destino));
+      const atual = this.state.empresas[String(v.destino)] || {};
+      const patch = {
+        lucro: this.CONTA_LUCRO,
+        prejuizo: this.CONTA_PREJUIZO,
+        ajuste: v.debitoLucro || atual.ajuste || "",
+        nome: emp ? emp.nome : (atual.nome || ""),
+        updatedAt: Date.now()
+      };
+      const ev = parseInt(String(v.evento || atual.evento || ""), 10);
+      if (ev > 0) patch.evento = ev;
+      this.state.empresas[String(v.destino)] = Object.assign({}, atual, patch);
+    });
+  },
+
+  async gravar() {
+    if (document.getElementById("ctb-eq-vincos")) this.lerVinculos();
+    this.espelharEmpresas();
+    this.state.msg = "Salvando…";
+    this.pintarStatus();
+    try {
+      const nuvem = await this.persistir();
+      this.state.msg = nuvem ? "Salvo" : "Salvo neste navegador. A nuvem não respondeu.";
+    } catch (e) {
+      this.state.msg = "Salvo neste navegador. A nuvem não respondeu.";
+    }
+    this.pintarStatus();
   },
 
   incluirVinculo() {
@@ -576,6 +620,7 @@ const ContabilEquiv = {
     });
     this.state.erro = "";
     this.render({ semLer: true });
+    this.gravar();
   },
 
   async excluirVinculo(i) {
@@ -589,74 +634,11 @@ const ContabilEquiv = {
     this.state.vinculos.splice(i, 1);
     this.state.erro = "";
     this.render({ semLer: true });
+    this.gravar();
   },
 
-  async salvar() {
-    this.lerVinculos();
-    const lista = this.state.vinculos || [];
-    if (!lista.length) {
-      this.state.erro = "Inclua ao menos um vínculo.";
-      this.render({ semLer: true });
-      return;
-    }
-    const vistos = {};
-    for (let i = 0; i < lista.length; i++) {
-      const v = lista[i];
-      const n = i + 1;
-      if (!v.origem || !v.destino) {
-        this.state.erro = "Na linha " + n + ", escolha a empresa de origem e a de destino.";
-        this.render({ semLer: true });
-        return;
-      }
-      if (String(v.origem) === String(v.destino)) {
-        this.state.erro = "Na linha " + n + ", a origem e o destino são a mesma empresa.";
-        this.render({ semLer: true });
-        return;
-      }
-      const chave = String(v.origem) + ">" + String(v.destino);
-      if (vistos[chave]) {
-        this.state.erro = "O vínculo da linha " + n + " está repetido.";
-        this.render({ semLer: true });
-        return;
-      }
-      vistos[chave] = true;
-      if (!v.debitoLucro || !v.creditoPrejuizo) {
-        this.state.erro = "Na linha " + n + ", informe a conta debitada do lucro e a conta creditada do prejuízo.";
-        this.render({ semLer: true });
-        return;
-      }
-      if (!(parseInt(String(v.evento || "").trim(), 10) > 0)) {
-        this.state.erro = "Na linha " + n + ", informe a partida que o Sienge exige nesse lançamento.";
-        this.render({ semLer: true });
-        return;
-      }
-      v.evento = String(parseInt(String(v.evento).trim(), 10));
-      if (!v.apelidoOrigem) v.apelidoOrigem = this.apelidoDe(v.origem);
-      if (!v.apelidoDestino) v.apelidoDestino = this.apelidoDe(v.destino);
-    }
-    if (!this.state.empresas) this.state.empresas = {};
-    lista.forEach((v) => {
-      const emp = (this.state.companies || []).find((c) => String(c.id) === String(v.destino));
-      const atual = this.state.empresas[String(v.destino)] || {};
-      this.state.empresas[String(v.destino)] = Object.assign({}, atual, {
-        lucro: this.CONTA_LUCRO,
-        prejuizo: this.CONTA_PREJUIZO,
-        ajuste: v.debitoLucro,
-        evento: parseInt(v.evento, 10),
-        nome: emp ? emp.nome : (atual.nome || ""),
-        updatedAt: Date.now()
-      });
-    });
-    this.state.erro = "";
-    try {
-      const nuvem = await this.persistir();
-      this.state.msg = nuvem
-        ? "Parametrização salva."
-        : "Salvei neste navegador. A nuvem não respondeu, então outro computador ainda não vê esses vínculos.";
-    } catch (e) {
-      this.state.msg = "Salvei neste navegador. A nuvem não respondeu, então outro computador ainda não vê esses vínculos.";
-    }
-    this.render({ semLer: true });
+  salvar() {
+    return this.gravar();
   },
 
   usarPartida(valor) {
@@ -780,131 +762,57 @@ const ContabilEquiv = {
     if ((!opcoes || !opcoes.semLer) && document.getElementById("ctb-eq-vincos")) this.lerVinculos();
     const s = this.state;
     if (!Array.isArray(s.vinculos)) s.vinculos = this.modelo();
-    const empresas = (s.companies || []).map((c) => {
-      return '<option value="' + this.esc(c.id) + '"' + (c.id === s.empresaId ? " selected" : "") + ">" + this.esc(c.id + " - " + c.nome) + "</option>";
-    }).join("");
+    const rolagem = root.querySelector(".cc-scroll");
+    const topo = rolagem ? rolagem.scrollTop : 0;
     const vinculosHtml = (s.vinculos || []).map((v, i) => {
       const pct = this.pctDoPasso(v);
       const pctTxt = pct > 0
         ? (Number(pct).toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "%")
         : "sem vínculo";
       return `<tr data-i="${i}">
-        <td><select data-c="origem" onchange="ContabilEquiv.trocarEmpresa(${i},'origem',this.value)">${this.opcoesEmpresa(v.origem)}</select></td>
-        <td><select data-c="destino" onchange="ContabilEquiv.trocarEmpresa(${i},'destino',this.value)">${this.opcoesEmpresa(v.destino)}</select></td>
-        <td class="ctb-pct">${this.esc(pctTxt)}</td>
-        <td class="ctb-lucro"><input type="text" data-c="debitoLucro" value="${this.esc(v.debitoLucro || "")}" placeholder="1.2.02.01.002"></td>
-        <td class="ctb-lucro"><div class="ctb-fixo">${this.esc(this.CONTA_LUCRO)}<small>reduzida ${this.esc(this.REDUZIDA_LUCRO)}</small></div></td>
-        <td class="ctb-prej"><div class="ctb-fixo">${this.esc(this.CONTA_PREJUIZO)}<small>reduzida ${this.esc(this.REDUZIDA_PREJUIZO)}</small></div></td>
-        <td class="ctb-prej"><input type="text" data-c="creditoPrejuizo" value="${this.esc(v.creditoPrejuizo || "")}" placeholder="1.2.02.01.002"></td>
-        <td><input type="number" data-c="evento" min="1" step="1" value="${this.esc(v.evento || "")}"></td>
-        <td class="ctb-acoes"><button type="button" class="tvig-ico is-danger" title="Excluir" onclick="ContabilEquiv.excluirVinculo(${i})"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button></td>
+        <td class="cc-nome"><select data-c="origem" onchange="ContabilEquiv.trocarEmpresa(${i},'origem',this.value)">${this.opcoesEmpresa(v.origem)}</select></td>
+        <td class="cc-nome"><select data-c="destino" onchange="ContabilEquiv.trocarEmpresa(${i},'destino',this.value)">${this.opcoesEmpresa(v.destino)}</select></td>
+        <td class="is-center">${this.esc(pctTxt)}</td>
+        <td><input type="text" data-c="debitoLucro" value="${this.esc(v.debitoLucro || "")}" placeholder="1.2.02.01.002" oninput="ContabilEquiv.agendarGravar()"></td>
+        <td class="cc-conta"><div class="ctb-fixo">${this.esc(this.CONTA_LUCRO)}<small>reduzida ${this.esc(this.REDUZIDA_LUCRO)}</small></div></td>
+        <td class="cc-conta"><div class="ctb-fixo">${this.esc(this.CONTA_PREJUIZO)}<small>reduzida ${this.esc(this.REDUZIDA_PREJUIZO)}</small></div></td>
+        <td><input type="text" data-c="creditoPrejuizo" value="${this.esc(v.creditoPrejuizo || "")}" placeholder="1.2.02.01.002" oninput="ContabilEquiv.agendarGravar()"></td>
+        <td class="ctb-acoes is-center"><button type="button" class="tvig-ico is-danger" title="Excluir" onclick="ContabilEquiv.excluirVinculo(${i})"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button></td>
       </tr>`;
     }).join("");
-    const busca = String(s.busca || "").toUpperCase();
-    const linhas = (s.contas || []).map((c) => {
-      const blob = (c.codigo + " " + c.nome).toUpperCase();
-      const esconde = busca && blob.indexOf(busca) < 0 ? ' style="display:none"' : "";
-      return '<tr data-nome="' + this.esc(blob) + '"' + esconde + "><td>" + this.esc(c.codigo) + "</td><td>" + this.esc(c.nome) + "</td></tr>";
-    }).join("");
-    const app = window.ContabilApp;
-    const lanca = (s.lancamentos || []).map((item) => {
-      const quando = app && app.dataBr ? app.dataBr(item.date) : item.date;
-      const valor = app && app.money ? app.money(item.amount) : String(item.amount);
-      const partida = item.eventId !== "" && item.eventId != null
-        ? '<button type="button" class="ctb-link" data-partida="' + this.esc(item.eventId) + '" onclick="ContabilEquiv.usarPartida(this.getAttribute(\'data-partida\'))">' + this.esc(item.eventId) + "</button>"
-        : "—";
-      return "<tr><td>" + this.esc(quando) + "</td><td class=\"ctb-num\">" + this.esc(valor) + "</td><td>" + this.esc(item.debit) + "</td><td>" + this.esc(item.credit) + "</td><td>" + this.esc(item.description) + "</td><td>" + partida + "</td></tr>";
-    }).join("");
-    const espera = (s.lendo || s.lendoLanc) ? `<div class="ml-load">
-        <div class="loading-spinner" aria-hidden="true"></div>
-        <div class="loading-status-text">${s.lendoLanc ? "Lendo os lançamentos de equivalência…" : "Lendo o plano de contas…"}</div>
-        <div class="ml-load-track"><div class="loading-progress-bar" style="width:${Math.max(8, s.progresso || 30)}%"></div></div>
-      </div>` : "";
-    root.innerHTML = `<style>
-      #contabil-config-root .ctb-nota { color:#64748b; font-size:0.84rem; margin:4px 0 14px; max-width:820px; }
-      #contabil-config-root .ctb-erro { color:#b91c1c; font-size:0.84rem; margin:0 0 12px; }
-      #contabil-config-root .ctb-ok { color:#105436; font-size:0.84rem; font-weight:700; margin:0 0 12px; }
-      #contabil-config-root .ctb-grade { display:flex; flex-wrap:wrap; gap:12px 16px; align-items:flex-end; margin:0 0 14px; }
-      #contabil-config-root .ctb-campo { display:flex; flex-direction:column; gap:4px; min-width:220px; }
-      #contabil-config-root .ctb-campo label { font-size:0.72rem; letter-spacing:0.04em; text-transform:uppercase; color:#64748b; font-weight:700; }
-      #contabil-config-root select, #contabil-config-root input[type="text"], #contabil-config-root input[type="number"], #contabil-config-root input[type="month"] {
-        height:38px; border:1px solid #cbd5e1; border-radius:8px; background:#fff; padding:0 10px; color:#0f172a; min-width:220px;
-      }
-      #contabil-config-root .ctb-gestao { margin:16px 0; padding:12px; border:1px solid #e2e8f0; border-radius:10px; background:#fff; max-width:920px; }
-      #contabil-config-root .ctb-gestao p { margin:0 0 10px; color:#475569; font-size:0.8rem; line-height:1.4; }
-      #contabil-config-root .ctb-gestao-linha { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:8px 0 0; font-size:0.78rem; font-weight:700; color:#334155; }
-      #contabil-config-root .ctb-gestao-linha span { flex:1 1 220px; }
-      #contabil-config-root .ctb-gestao-linha input { height:36px; border:1px solid #cbd5e1; border-radius:6px; padding:0 10px; font-size:0.82rem; color:#0f172a; min-width:160px; }
-      #contabil-config-root .ctb-buscar { height:38px; padding:0 16px; border:0; border-radius:8px; background:#105436; color:#fff; font-weight:700; cursor:pointer; }
-      #contabil-config-root .ctb-buscar:disabled { opacity:0.6; cursor:wait; }
-      #contabil-config-root .ctb-table { width:100%; border-collapse:collapse; background:#fff; border:1px solid #e2e8f0; border-radius:10px; overflow:hidden; margin:0 0 16px; }
-      #contabil-config-root .ctb-table th { text-align:left; font-size:0.72rem; letter-spacing:0.04em; text-transform:uppercase; color:#64748b; padding:10px 12px; border-bottom:1px solid #e2e8f0; }
-      #contabil-config-root .ctb-table td { padding:7px 12px; border-bottom:1px solid #f1f5f9; color:#0f172a; }
-      #contabil-config-root .ctb-num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
-      #contabil-config-root .ctb-link { border:0; background:transparent; color:#105436; font-weight:700; cursor:pointer; padding:0; }
-      #contabil-config-root .ctb-vinc { overflow-x:auto; margin:0 0 12px; }
-      #contabil-config-root .ctb-vinc select, #contabil-config-root .ctb-vinc input { min-width:0; width:100%; height:34px; font-size:0.78rem; }
-      #contabil-config-root .ctb-vinc td { vertical-align:middle; }
-      #contabil-config-root .ctb-vinc th.ctb-lucro, #contabil-config-root .ctb-vinc td.ctb-lucro { background:#fef9c3; }
-      #contabil-config-root .ctb-vinc th.ctb-prej, #contabil-config-root .ctb-vinc td.ctb-prej { background:#ffedd5; }
-      #contabil-config-root .ctb-fixo { font-size:0.78rem; font-weight:700; line-height:1.25; white-space:nowrap; }
-      #contabil-config-root .ctb-fixo small { display:block; font-weight:600; color:#64748b; }
-      #contabil-config-root .ctb-pct { white-space:nowrap; font-size:0.78rem; font-weight:700; color:#334155; }
-      #contabil-config-root .ctb-acoes { text-align:right; width:52px; white-space:nowrap; }
-      #contabil-config-root .ctb-nota { max-width:980px; }
-    </style>
-    <p class="ctb-nota">Cada linha é gravada uma vez. No lucro, você escolhe a conta debitada e a creditada fica ${this.esc(this.CONTA_LUCRO)} (reduzida ${this.esc(this.REDUZIDA_LUCRO)}). No prejuízo, a debitada fica ${this.esc(this.CONTA_PREJUIZO)} (reduzida ${this.esc(this.REDUZIDA_PREJUIZO)}) e você escolhe a creditada. O percentual sai do organograma societário. O complemento sai assim: valor referente ajuste de equivalencia patrimonial Araçari SPE de 50% - comp. 09/2026. A partida é o código que o Sienge exige.</p>
-    <div class="ctb-vinc">
-      <table class="ctb-table" id="ctb-eq-vincos">
-        <thead>
-          <tr>
-            <th>Empresa de origem</th>
-            <th>Empresa de destino</th>
-            <th>Organograma</th>
-            <th class="ctb-lucro">Lucro · debitada</th>
-            <th class="ctb-lucro">Lucro · creditada</th>
-            <th class="ctb-prej">Prejuízo · debitada</th>
-            <th class="ctb-prej">Prejuízo · creditada</th>
-            <th>Partida</th>
-            <th class="ctb-acoes">Ações</th>
-          </tr>
-        </thead>
-        <tbody>${vinculosHtml}</tbody>
-      </table>
-    </div>
-    <div class="ctb-grade">
-      <button type="button" class="ctb-buscar" onclick="ContabilEquiv.incluirVinculo()">Incluir vínculo</button>
-      <button type="button" class="ctb-buscar" onclick="ContabilEquiv.salvar()">Salvar</button>
-    </div>
-    <div class="ctb-grade">
-      <div class="ctb-campo">
-        <label for="ctb-eq-emp">Consultar contas da empresa</label>
-        <select id="ctb-eq-emp" onchange="ContabilEquiv.setEmpresa(this.value)">
-          <option value="">Selecione</option>
-          ${empresas}
-        </select>
+    root.innerHTML = `<div class="cc-page ctb-eq-page">
+      <div class="cc-toolbar">
+        <p class="ctb-eq-help">No lucro, a creditada é ${this.esc(this.CONTA_LUCRO)} (reduzida ${this.esc(this.REDUZIDA_LUCRO)}). No prejuízo, a debitada é ${this.esc(this.CONTA_PREJUIZO)} (reduzida ${this.esc(this.REDUZIDA_PREJUIZO)}). O percentual vem do organograma. Cada alteração já fica salva.</p>
+        <div class="cc-toolbar-actions">
+          <span id="ctb-eq-status" class="ctb-eq-status">${this.esc(s.msg || "")}</span>
+          <button type="button" class="btn btn-primary cc-atualizar" onclick="ContabilEquiv.incluirVinculo()">Incluir vínculo</button>
+        </div>
       </div>
-      <button type="button" class="ctb-buscar" ${s.lendo ? "disabled" : ""} onclick="ContabilEquiv.verContas()">Ver contas</button>
-      <button type="button" class="ctb-buscar" ${s.lendoLanc ? "disabled" : ""} onclick="ContabilEquiv.verLancamentos()">Ver lançamentos</button>
-    </div>
-    ${s.erro ? `<p class="ctb-erro">${this.esc(s.erro)}</p>` : ""}
-    ${s.msg ? `<p class="ctb-ok">${this.esc(s.msg)}</p>` : ""}
-    ${espera}
-    ${s.contas.length ? `<div class="ctb-campo" style="margin-bottom:8px;max-width:320px;">
-      <label for="ctb-eq-busca">Filtrar contas</label>
-      <input type="text" id="ctb-eq-busca" value="${this.esc(s.busca)}" oninput="ContabilEquiv.filtrar(this.value)" placeholder="Código ou nome">
-    </div>
-    <table class="ctb-table"><thead><tr><th>Código</th><th>Conta</th></tr></thead><tbody>${linhas}</tbody></table>` : ""}
-    <div class="ctb-grade">
-      <div class="ctb-campo">
-        <label for="ctb-eq-codigo">Outra conta, pelo código</label>
-        <input type="text" id="ctb-eq-codigo" placeholder="1.2.02.01.002">
+      ${s.erro ? `<p class="ctb-eq-status" style="color:#b91c1c;margin:0 0 8px;">${this.esc(s.erro)}</p>` : ""}
+      <div class="cc-scroll">
+        <table class="cc-table ctb-eq" id="ctb-eq-vincos">
+          <colgroup>
+            <col style="width:22%"><col style="width:22%"><col style="width:90px">
+            <col style="width:14%"><col style="width:12%"><col style="width:12%"><col style="width:14%"><col style="width:42px">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Empresa de origem</th>
+              <th>Empresa de destino</th>
+              <th class="is-center">Organograma</th>
+              <th>Lucro · debitada</th>
+              <th>Lucro · creditada</th>
+              <th>Prejuízo · debitada</th>
+              <th>Prejuízo · creditada</th>
+              <th class="is-center"></th>
+            </tr>
+          </thead>
+          <tbody>${vinculosHtml || `<tr><td colspan="8" style="text-align:center;padding:30px;">Nenhum vínculo. Inclua a empresa de origem e a de destino.</td></tr>`}</tbody>
+        </table>
       </div>
-      <button type="button" class="ctb-buscar" onclick="ContabilEquiv.incluirCodigo()">Incluir</button>
-    </div>
-    ${this.gestaoHtml(this.gestaoChave())}
-    ${lanca ? `<table class="ctb-table"><thead><tr><th>Data</th><th>Valor</th><th>Débito</th><th>Crédito</th><th>Complemento</th><th>Partida</th></tr></thead><tbody>${lanca}</tbody></table>
-    <p class="ctb-nota">A partida do lançamento antigo preenche as linhas cujo destino é a empresa consultada.</p>` : ""}`;
+    </div>`;
+    const nova = root.querySelector(".cc-scroll");
+    if (nova) nova.scrollTop = topo;
     if (window.lucide && typeof window.lucide.createIcons === "function") window.lucide.createIcons();
   },
 
@@ -983,7 +891,7 @@ const ContabilEquiv = {
         bloqueado[passo.destino] = true;
         if (!vistos[passo.destino]) {
           vistos[passo.destino] = true;
-          faltas.push(nomeDestino + " sem a partida");
+          faltas.push(nomeDestino + " ainda não tem lançamento de equivalência anterior para repetir o evento do Sienge");
         }
         return;
       }
@@ -1014,9 +922,9 @@ const ContabilEquiv = {
     const texto = [
       "Vou lançar a equivalência de " + rotulo + ", em reais. O percentual é o do organograma. A linha de participação da controladora no DRE não entra neste lançamento.",
       ""
-    ].concat(linhas.map((l) => l.rotulo + " · resultado " + app.money(l.resultado) + " · " + l.tipo + " " + app.money(l.amount) + "\nNa empresa " + l.empresa + " · débito " + l.debitAccountId + " · crédito " + l.creditAccountId + " · " + app.dataBr(l.date) + " · partida " + l.eventId + "\n" + l.description));
+    ].concat(linhas.map((l) => l.rotulo + " · resultado " + app.money(l.resultado) + " · " + l.tipo + " " + app.money(l.amount) + "\nNa empresa " + l.empresa + " · débito " + l.debitAccountId + " · crédito " + l.creditAccountId + " · " + app.dataBr(l.date) + "\n" + l.description));
     if (semResultado.length) texto.push("", "Não li o resultado, então não lanço:", semResultado.join("\n"));
-    if (faltas.length) texto.push("", "Sem a partida ou sem o percentual, não lanço:", faltas.join("\n"));
+    if (faltas.length) texto.push("", "Sem o percentual ou sem um lançamento anterior, não lanço:", faltas.join("\n"));
     if (pulos.length) texto.push("", "Já lançado nesta competência, não repito:", pulos.join("\n"));
     return { linhas: linhas, texto: texto.join("\n") };
   },
@@ -1150,6 +1058,50 @@ const ContabilEquiv = {
     alert(partes.join("\n\n") || "Nenhum lançamento foi enviado.");
   },
 
+  async descobrirEventos() {
+    const api = window.SiengeApiService;
+    if (!api || typeof api.getAccountancyEntries !== "function") return;
+    const faltam = {};
+    (this.state.vinculos || []).forEach((v) => {
+      const ev = Number(v.evento) || Number((this.cfgDa(v.destino) || {}).evento);
+      if (!(ev > 0) && v.destino) faltam[String(v.destino)] = true;
+    });
+    const ids = Object.keys(faltam);
+    if (!ids.length) return;
+    const hoje = new Date();
+    for (let k = 0; k < ids.length; k++) {
+      const id = ids[k];
+      let achado = 0;
+      for (let i = 0; i < 8 && !achado; i++) {
+        const ref = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
+        const mes = String(ref.getMonth() + 1).padStart(2, "0");
+        const ini = ref.getFullYear() + "-" + mes + "-01";
+        const fimDia = new Date(ref.getFullYear(), ref.getMonth() + 1, 0).getDate();
+        const fim = ref.getFullYear() + "-" + mes + "-" + String(fimDia).padStart(2, "0");
+        let lista = [];
+        try { lista = await api.getAccountancyEntries(id, ini, fim); } catch (e) { lista = []; }
+        (lista || []).some((raw) => {
+          const item = this.lerLancamento(raw);
+          const n = Number(item.eventId);
+          if (!(n > 0)) return false;
+          const blob = (item.description + " " + item.debit + " " + item.credit).toUpperCase();
+          if (/EQUIVAL|PARTICIP|MEP/.test(blob) || item.debit === this.CONTA_LUCRO || item.credit === this.CONTA_LUCRO || item.debit === this.CONTA_PREJUIZO || item.credit === this.CONTA_PREJUIZO) {
+            achado = n;
+            return true;
+          }
+          return false;
+        });
+      }
+      if (!achado) continue;
+      (this.state.vinculos || []).forEach((v) => {
+        if (String(v.destino) === id && !(Number(v.evento) > 0)) v.evento = String(achado);
+      });
+      if (!this.state.empresas) this.state.empresas = {};
+      this.state.empresas[id] = Object.assign({}, this.state.empresas[id] || {}, { evento: achado });
+    }
+    try { await this.persistir(); } catch (e) {}
+  },
+
   async lancar() {
     if (!this.podeLancar()) {
       alert("Sem permissão para lançar a equivalência.");
@@ -1164,6 +1116,7 @@ const ContabilEquiv = {
     }
     await this.garantirConfig();
     if (!Array.isArray(this.state.vinculos)) this.state.vinculos = this.modelo();
+    try { await this.descobrirEventos(); } catch (e) {}
     const socio = window.SocietarioApp;
     if (socio && typeof socio.load === "function" && !(socio.graph && Array.isArray(socio.graph.links) && socio.graph.links.length)) {
       try { await socio.load(); } catch (e) {}
