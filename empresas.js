@@ -171,11 +171,11 @@ const EmpresasApp = {
     this.saveInline(companyId, key, input.value);
   },
 
-  clearOtherFlags(custom, keep) {
+  clearOtherFlags(custom, keep, alsoKeep) {
     const fields = ["consolidacao_padrao", "gerida_pelo_grupo", "cobranca_interna", "spe_socios", "gestao_elenco", "holding_interna"];
     let cobrancaCleared = false;
     fields.forEach((field) => {
-      if (field === keep) return;
+      if (field === keep || field === alsoKeep) return;
       if (field === "cobranca_interna" && this.flagOn(custom, field)) cobrancaCleared = true;
       custom[field] = 0;
     });
@@ -331,7 +331,9 @@ const EmpresasApp = {
     const isText = field === "nome_usual" || field === "percentual_mldu" || field === "percentual_liquido_mldu";
     const locked = this.rowLocked(custom);
     const active = this.activeLock(custom);
-    if (locked && !isText && field !== active) {
+    const parHoldingEllenco = (field === "holding_interna" && active === "gestao_elenco")
+      || (field === "gestao_elenco" && this.flagOn(custom, "holding_interna"));
+    if (locked && !isText && field !== active && !parHoldingEllenco) {
       this.schedulePaint(id);
       return;
     }
@@ -363,14 +365,14 @@ const EmpresasApp = {
     if (field === "consolidacao_padrao") custom.consolidacao_padrao = value ? 1 : 0;
     if (field === "gerida_pelo_grupo") custom.gerida_pelo_grupo = value ? 1 : 0;
     if (field === "holding_interna") {
-      if (value) this.clearOtherFlags(custom, field);
+      if (value) this.clearOtherFlags(custom, field, "gestao_elenco");
       custom.holding_interna = value ? 1 : 0;
     }
     if (field === "spe_socios" || field === "gestao_elenco") {
-      if (value) this.clearOtherFlags(custom, field);
+      if (value) this.clearOtherFlags(custom, field, field === "gestao_elenco" ? "holding_interna" : "");
       custom[field] = value ? 1 : 0;
     }
-    if (value && field !== "holding_interna" && field !== "nome_usual" && field !== "percentual_mldu" && field !== "percentual_liquido_mldu") {
+    if (value && field !== "holding_interna" && field !== "gestao_elenco" && field !== "nome_usual" && field !== "percentual_mldu" && field !== "percentual_liquido_mldu") {
       custom.holding_interna = 0;
     }
     if (field === "cobranca_interna") {

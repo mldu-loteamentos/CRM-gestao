@@ -10593,6 +10593,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .soc-port-bottom { top: auto; bottom: -7px; }
 .soc-foot { border-top: 1px solid #e8eee9; background: #fff; padding: 8px 12px 10px; max-height: 24%; overflow: auto; }
 .soc-legend { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.soc-foot.is-quiet .soc-legend { margin-bottom: 0; }
 .soc-chip { font-size: 0.68rem; font-weight: 800; color: #fff; border-radius: 999px; padding: 3px 8px; }
 .soc-chip.is-pj { background: #166534; }
 .soc-chip.is-pf { background: #1d4ed8; }

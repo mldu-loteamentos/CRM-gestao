@@ -86,6 +86,97 @@ const SocietarioApp = {
     return (window.AppState && AppState.companies) || [];
   },
 
+  cadastroPronto() {
+    const st = window.EmpresasState;
+    return !!(st && st.customFields && Object.keys(st.customFields).length && window.EmpresasApp);
+  },
+
+  flagEmpresa(company, field) {
+    const app = window.EmpresasApp;
+    if (!app || !company || typeof app.customOf !== "function") return false;
+    return !!app.flagOn(app.customOf(company.id), field);
+  },
+
+  /** Empresa do organograma: Holding interna e Gestão Ellenco ligados no cadastro. */
+  empresasDaEstrutura() {
+    if (!this.cadastroPronto()) return [];
+    return this.companies().filter((c) => this.flagEmpresa(c, "holding_interna") && this.flagEmpresa(c, "gestao_elenco"));
+  },
+
+  empresasEscolhiveis(atualId) {
+    const lista = this.empresasDaEstrutura().slice();
+    if (atualId && !lista.some((c) => String(c.id) === String(atualId))) {
+      const extra = this.companies().find((c) => String(c.id) === String(atualId));
+      if (extra) lista.push(extra);
+    }
+    return lista;
+  },
+
+  nomeCadastro(company) {
+    const app = window.EmpresasApp;
+    const custom = app && app.customOf ? app.customOf(company.id) : null;
+    const usual = custom && String(custom.nome_usual || "").trim();
+    return usual || String(company.tradeName || company.name || ("Empresa " + company.id)).trim();
+  },
+
+  entidadeDaEmpresa(company, usados) {
+    const id = String(company.id);
+    const porId = (this.graph.entities || []).find((e) => String(e.companyId || "") === id);
+    if (porId) return porId;
+    const app = window.EmpresasApp;
+    const custom = app && app.customOf ? app.customOf(company.id) : null;
+    const usual = this.semAcento(custom && custom.nome_usual);
+    const legal = this.semAcento(company.name || company.tradeName || company.corporateName);
+    const candidatos = (this.graph.entities || []).filter((e) => {
+      if (usados && usados.has(e.id)) return false;
+      if (e.companyId) return false;
+      const nome = this.semAcento(e.name);
+      if (usual.length >= 4 && nome === usual) return true;
+      if (nome.length < 8 || legal.length < 8) return false;
+      return legal.startsWith(nome) || nome.startsWith(legal);
+    });
+    candidatos.sort((a, b) => this.semAcento(b.name).length - this.semAcento(a.name).length);
+    return candidatos[0] || null;
+  },
+
+  sincronizarEmpresasCadastro() {
+    if (this.aba === "parceria" || !this.cadastroPronto()) return;
+    let mudou = false;
+    const novas = [];
+    const usados = new Set();
+    this.empresasDaEstrutura().forEach((c) => {
+      const existente = this.entidadeDaEmpresa(c, usados);
+      if (existente) {
+        usados.add(existente.id);
+        if (!existente.companyId) {
+          existente.companyId = String(c.id);
+          mudou = true;
+        }
+        return;
+      }
+      novas.push(c);
+    });
+    if (novas.length) {
+      const ys = (this.graph.entities || []).map((e) => Number(e.y) || 0);
+      const y = (ys.length ? Math.max.apply(null, ys) : 40) + 130;
+      novas.forEach((c, i) => {
+        this.graph.entities.push({
+          id: this.uid("ent"),
+          name: this.nomeCadastro(c),
+          kind: "pj",
+          color: this.defaultKindColor("pj"),
+          note: "",
+          companyId: String(c.id),
+          partnerId: "",
+          x: 80 + (i % 6) * 196,
+          y: y + Math.floor(i / 6) * 118
+        });
+      });
+      mudou = true;
+    }
+    if (mudou) this.persist();
+  },
+
   partners() {
     const app = window.ParametrizacaoParceiroApp;
     if (!app || !Array.isArray(app.items)) return [];
@@ -142,7 +233,8 @@ const SocietarioApp = {
     })) : [];
     const notes = Array.isArray(raw.notes) ? raw.notes.map(n => ({
       id: n.id || this.uid("n"),
-      text: String(n.text || "")
+      text: String(n.text || ""),
+      entityId: n.entityId || ""
     })) : [];
     const hubId = raw.hubId && entities.some(e => e.id === raw.hubId) ? raw.hubId : (entities[0] && entities[0].id) || "";
     return { hubId, entities, links, notes };
@@ -502,29 +594,44 @@ const SocietarioApp = {
     this.render();
   },
 
-  renderNotes() {
-    const fromEntities = (this.graph.entities || []).filter(e => (e.note || "").trim());
-    const fromLinks = (this.graph.links || []).filter(l => (l.note || "").trim());
-    const list = (this.graph.notes || []).filter(n => n.text);
-    if (!fromEntities.length && !fromLinks.length && !list.length) {
-      return `<p class="soc-notes-empty">Nenhuma nota ainda. Clique numa empresa ou em Nota.</p>`;
+  semAcento(s) {
+    return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  },
+
+  notaMenciona(text, ent) {
+    const nome = this.semAcento(ent && ent.name);
+    if (nome.length < 8) return false;
+    return this.semAcento(text).includes(nome);
+  },
+
+  /** Notas da empresa clicada. Sem seleção, a faixa some para liberar o organograma. */
+  notasHtml() {
+    const ent = this.entity(this.selectedId);
+    if (!ent) return "";
+    const cards = [];
+    if ((ent.note || "").trim()) {
+      cards.push(`<article class="soc-note soc-note-ent"><strong>${this.esc(ent.name)}</strong><span>${this.esc(ent.note)}</span></article>`);
     }
-    const cards = [
-      ...fromEntities.map(e => `<article class="soc-note soc-note-ent"><strong>${this.esc(e.name)}</strong><span>${this.esc(e.note)}</span></article>`),
-      ...fromLinks.map(l => {
-        const a = this.entity(l.from);
-        const b = this.entity(l.to);
-        return `<article class="soc-note soc-note-link"><strong>${this.esc(a && a.name)} → ${this.esc(b && b.name)} (${this.fmtPct(l.pct)})</strong><span>${this.esc(l.note)}</span></article>`;
-      }),
-      ...list.map(n => `<article class="soc-note soc-note-free"><span>${this.esc(n.text)}</span><button type="button" class="soc-note-x" title="Excluir nota" onclick="SocietarioApp.removeNote('${n.id}')">×</button></article>`)
-    ];
-    return `<div class="soc-notes-grid">${cards.join("")}</div>`;
+    (this.graph.links || []).forEach((l) => {
+      if ((l.from !== ent.id && l.to !== ent.id) || !(l.note || "").trim()) return;
+      const a = this.entity(l.from);
+      const b = this.entity(l.to);
+      cards.push(`<article class="soc-note soc-note-link"><strong>${this.esc(a && a.name)} → ${this.esc(b && b.name)} (${this.fmtPct(l.pct)})</strong><span>${this.esc(l.note)}</span></article>`);
+    });
+    (this.graph.notes || []).forEach((n) => {
+      if (!n.text) return;
+      const dela = n.entityId ? n.entityId === ent.id : this.notaMenciona(n.text, ent);
+      if (!dela) return;
+      cards.push(`<article class="soc-note soc-note-free"><span>${this.esc(n.text)}</span><button type="button" class="soc-note-x" title="Excluir nota" onclick="SocietarioApp.removeNote('${n.id}')">×</button></article>`);
+    });
+    if (!cards.length) return "";
+    return `<div class="soc-notes"><div class="soc-notes-title">Notas · ${this.esc(ent.name)}</div><div class="soc-notes-grid">${cards.join("")}</div></div>`;
   },
 
   paintCompanyPick() {
     const box = document.getElementById("soc-company-box");
     if (!box || !window.MlEmpresaFilter) return;
-    const items = this.companies().map((c) => ({
+    const items = this.empresasEscolhiveis(this._companyId).map((c) => ({
       id: String(c.id),
       label: c.id + " - " + String(c.name || c.corporateName || c.tradeName || "").toLocaleUpperCase("pt-BR")
     }));
@@ -611,7 +718,7 @@ const SocietarioApp = {
           </div>
         </div>
         <label style="${this.lbl}">Empresa Sienge
-          ${this.hint("Opcional. Liga esta caixa a uma empresa do cadastro do CRM/Sienge.")}
+          ${this.hint("Empresa do cadastro com Holding interna e Gestão Ellenco ligados. Pessoa física continua sem esse vínculo.")}
           <div id="soc-company-box"></div>
         </label>
         <label style="${this.lbl}">Parceiro / sócio (parametrização)
@@ -619,7 +726,7 @@ const SocietarioApp = {
           <select id="soc-ent-partner" class="form-control">${this.partnerOptions(ent.partnerId)}</select>
         </label>
         <label style="${this.lbl}">Nota
-          ${this.hint("Texto livre sobre esta caixa. Também aparece na lista de notas embaixo.")}
+          ${this.hint("Texto desta empresa. Aparece embaixo só quando a caixa está selecionada.")}
           <textarea id="soc-ent-note" class="form-control" rows="3">${this.esc(ent.note)}</textarea>
         </label>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
@@ -658,8 +765,9 @@ const SocietarioApp = {
       `);
     }
     if (this.panel === "note") {
+      const dona = this.entity(this.selectedId);
       return this.panelWrap("Nova nota da estrutura", `
-        ${this.hint("Anota um texto geral da estrutura (não fica preso a uma caixa). Ex.: Moura Leite tem 50% na Ellenco...")}
+        ${dona ? `<p style="margin:0 0 8px;font-size:0.78rem;color:#334155;">Nota de <strong>${this.esc(dona.name)}</strong>. Ela aparece só com esta empresa selecionada.</p>` : this.hint("Clique antes na empresa que recebe a nota.")}
         <textarea id="soc-note-text" class="form-control" rows="4" placeholder="Ex.: Moura Leite tem 50% na Ellenco, que por sua vez tem 55,5% na Vercellino..."></textarea>
         <button type="button" class="btn btn-primary" style="margin-top:8px;" onclick="SocietarioApp.saveNote()">Salvar nota</button>
       `);
@@ -1010,6 +1118,7 @@ const SocietarioApp = {
       this.bindParceriaPan();
       return;
     }
+    this.sincronizarEmpresasCadastro();
     this.ensurePositions();
     const wrap = document.getElementById("soc-canvas-wrap");
     const sx = wrap ? wrap.scrollLeft : 0;
@@ -1021,12 +1130,12 @@ const SocietarioApp = {
       <div class="soc-shell">${this.abasHtml()}
       <div class="soc-page">
         <div class="soc-toolbar">
-          <p class="soc-help">Arraste as caixas, ligue pelos pontos e clique no percentual para editar a participação.</p>
+          <p class="soc-help">Arraste as caixas e clique no percentual para editar. Empresa nova entra pelo cadastro, com Holding interna e Gestão Ellenco ligados.</p>
           <div class="soc-toolbar-actions">
-            <button type="button" class="btn btn-primary btn-sm" onclick="SocietarioApp.openNewEntity()" title="Cria uma caixa nova: empresa (PJ) ou pessoa física (PF).">Empresa / pessoa</button>
+            <button type="button" class="btn btn-primary btn-sm" onclick="SocietarioApp.openNewEntity()" title="Pessoa física, ou empresa do cadastro com Holding interna e Gestão Ellenco ligados.">Empresa / pessoa</button>
             <button type="button" class="btn btn-outline btn-sm soc-btn-link${linkBtn}" onclick="SocietarioApp.openNewLink()" title="Cria a participação entre duas caixas. Também dá para arrastar o ponto de uma caixa até a outra.">Interligação</button>
             <button type="button" class="btn btn-outline btn-sm" onclick="SocietarioApp.resetLayout()" title="Reposiciona as caixas. As ligações e os percentuais permanecem.">Reorganizar</button>
-            <button type="button" class="btn btn-outline btn-sm" onclick="SocietarioApp.openNewNote()" title="Inclui um texto livre na lista de notas.">Nota</button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="SocietarioApp.openNewNote()" title="Grava uma nota na empresa selecionada.">Nota</button>
             <button type="button" class="btn btn-sm soc-btn-import" onclick="SocietarioApp.importPartners()" title="Traz sócios e sociedades da Parametrização de Parceiros.">Vincular parametrização</button>
           </div>
         </div>
@@ -1039,16 +1148,13 @@ const SocietarioApp = {
                 ${(this.graph.entities || []).map(e => this.canvasNode(e)).join("")}
               </div>
             </div>
-            <div class="soc-foot">
+            <div class="soc-foot${this.notasHtml() ? "" : " is-quiet"}">
               <div class="soc-legend">
                 <span class="soc-chip is-pj">PJ Pessoa jurídica</span>
                 <span class="soc-chip is-pf">PF Pessoa física</span>
-                <span class="soc-legend-note">A cor padrão segue o tipo. Clique na caixa para escolher outra.</span>
+                <span class="soc-legend-note">A cor padrão segue o tipo. Clique na caixa para ver a nota.</span>
               </div>
-              <div class="soc-notes">
-                <div class="soc-notes-title">Notas</div>
-                ${this.renderNotes()}
-              </div>
+              ${this.notasHtml()}
             </div>
           </div>
           ${editing ? `<aside class="soc-aside">${this.renderPanel()}</aside>` : ""}
@@ -1110,6 +1216,10 @@ const SocietarioApp = {
   },
 
   openNewNote() {
+    if (!this.entity(this.selectedId)) {
+      alert("Clique na empresa que recebe a nota.");
+      return;
+    }
     this.panel = "note";
     this.render();
   },
@@ -1132,6 +1242,18 @@ const SocietarioApp = {
     const partnerId = document.getElementById("soc-ent-partner").value;
     const note = document.getElementById("soc-ent-note").value || "";
     const company = this.companies().find(c => String(c.id) === String(companyId));
+    const nova = !(this.selectedId && this.entity(this.selectedId));
+    if (nova && kind === "pj") {
+      const ok = this.empresasDaEstrutura().some((c) => String(c.id) === String(companyId));
+      if (!ok) {
+        alert("Empresa nova não é digitada aqui. No cadastro de empresas, ligue Holding interna e Gestão Ellenco. A caixa entra no organograma.");
+        return;
+      }
+      if (this.graph.entities.some((e) => String(e.companyId || "") === String(companyId))) {
+        alert("Essa empresa já está no organograma.");
+        return;
+      }
+    }
     if (this.selectedId && this.entity(this.selectedId)) {
       const ent = this.entity(this.selectedId);
       ent.name = name;
@@ -1219,7 +1341,9 @@ const SocietarioApp = {
   saveNote() {
     const text = (document.getElementById("soc-note-text").value || "").trim();
     if (!text) { alert("Escreva a nota."); return; }
-    this.graph.notes.push({ id: this.uid("n"), text });
+    const ent = this.entity(this.selectedId);
+    if (!ent) { alert("Clique na empresa que recebe a nota."); return; }
+    this.graph.notes.push({ id: this.uid("n"), text, entityId: ent.id });
     this.persist();
     this.panel = "none";
     this.render();
