@@ -2255,56 +2255,65 @@ const GerarPagamentoApp = {
     });
   },
 
+  async roboTemFila() {
+    try {
+      const resp = await fetch(this.ROBO_URL + "/status", { method: "GET" });
+      const r = await resp.json().catch(() => ({}));
+      return !!(r && r.fila);
+    } catch (e) {
+      return false;
+    }
+  },
+
   async enviarFila(lotes) {
     const s = this.state;
     s.gerandoLote = "fila";
     s.roboLote = "fila";
-    s.roboMsg = `O robô está no Sienge com ${lotes.length} lote(s). A sessão só fecha no fim.`;
+    s.roboMsg = `O robô está no Sienge com ${lotes.length} lote(s). Depois de salvar um, começa o seguinte.`;
     this.paintTitulos();
     this.pintarRoboMsg();
     lotes.forEach((l) => this.completarLote(l));
-    const r = await this.roboChamar("/lotes/fila", { lotes });
-    if (r.offline || r.cancelado) {
-      s.gerandoLote = "";
-      s.roboLote = "";
-      s.roboMsg = "";
-      this.paintTitulos();
-      this.pintarRoboMsg();
-      alert(`Os lotes ficaram salvos no Integra, mas ainda não foram criados no Sienge.\n\n${r.erro}` + (r.offline ? "\nClique em Ligar robô no topo desta tela." : ""));
-      return;
-    }
-    if (r.erro && /desconhecido/i.test(String(r.erro))) {
-      s.roboMsg = "Atualizando o robô e gerando os lotes…";
-      this.pintarRoboMsg();
-      this.baixarInstaladorRobo();
-      await this.enviarFilaUmAUm(lotes);
-      return;
-    }
-    s.gerandoLote = "";
-    s.roboLote = "";
-    s.roboMsg = "";
-    const lista = Array.isArray(r.resultados) ? r.resultados : [];
-    for (const item of lista) {
-      const lote = s.lotes.find((l) => l.id === item.id);
-      if (!lote) continue;
-      if (item.ok) {
-        await this.registrarSienge(lote, "gerar", { ok: true, numeroSienge: item.numeroSienge }, { status: "gerado", numero: item.numeroSienge || "", geradoEm: new Date().toISOString(), geradoPor: this.usuarioAtual(), erro: "" });
-        await this.registrarSienge(lote, "aprovar", { ok: true, numeroSienge: item.numeroSienge }, { status: "aprovado", aprovadoEm: new Date().toISOString(), aprovadoPor: this.usuarioAtual(), arquivo: item.arquivo || "", erro: "" });
-      } else if (item.numeroSienge) {
-        await this.registrarSienge(lote, "gerar", { ok: true, numeroSienge: item.numeroSienge }, { status: "gerado", numero: item.numeroSienge, geradoEm: new Date().toISOString(), geradoPor: this.usuarioAtual(), erro: "" });
-        await this.registrarSienge(lote, "aprovar", { ok: false, erro: item.erro || "Falha ao autorizar." }, { erro: item.erro || "Falha ao autorizar." });
-      } else {
-        await this.registrarSienge(lote, "gerar", { ok: false, erro: item.erro || "Falha no robô." }, { status: "erro", erro: item.erro || "Falha no robô." });
+    if (await this.roboTemFila()) {
+      const r = await this.roboChamar("/lotes/fila", { lotes });
+      if (r.offline || r.cancelado) {
+        s.gerandoLote = "";
+        s.roboLote = "";
+        s.roboMsg = "";
+        this.paintTitulos();
+        this.pintarRoboMsg();
+        alert(`Os lotes ficaram salvos no Integra, mas ainda não foram criados no Sienge.\n\n${r.erro}` + (r.offline ? "\nClique em Ligar robô no topo desta tela." : ""));
+        return;
+      }
+      if (!(r.erro && /desconhecido/i.test(String(r.erro)))) {
+        s.gerandoLote = "";
+        s.roboLote = "";
+        s.roboMsg = "";
+        const lista = Array.isArray(r.resultados) ? r.resultados : [];
+        for (const item of lista) {
+          const lote = s.lotes.find((l) => l.id === item.id);
+          if (!lote) continue;
+          if (item.ok) {
+            await this.registrarSienge(lote, "gerar", { ok: true, numeroSienge: item.numeroSienge }, { status: "gerado", numero: item.numeroSienge || "", geradoEm: new Date().toISOString(), geradoPor: this.usuarioAtual(), erro: "" });
+            await this.registrarSienge(lote, "aprovar", { ok: true, numeroSienge: item.numeroSienge }, { status: "aprovado", aprovadoEm: new Date().toISOString(), aprovadoPor: this.usuarioAtual(), arquivo: item.arquivo || "", erro: "" });
+          } else if (item.numeroSienge) {
+            await this.registrarSienge(lote, "gerar", { ok: true, numeroSienge: item.numeroSienge }, { status: "gerado", numero: item.numeroSienge, geradoEm: new Date().toISOString(), geradoPor: this.usuarioAtual(), erro: "" });
+            await this.registrarSienge(lote, "aprovar", { ok: false, erro: item.erro || "Falha ao autorizar." }, { erro: item.erro || "Falha ao autorizar." });
+          } else {
+            await this.registrarSienge(lote, "gerar", { ok: false, erro: item.erro || "Falha no robô." }, { status: "erro", erro: item.erro || "Falha no robô." });
+          }
+        }
+        this.paintTitulos();
+        this.pintarRoboMsg();
+        const falhas = lista.filter((x) => !x.ok);
+        if (!lista.length && r.erro) alert(r.erro);
+        else if (falhas.length) alert("Estes lotes não fecharam no Sienge. Os outros da fila seguiram na mesma sessão.\n\n" + falhas.map((f) => "• " + (f.numeroSienge ? "nº " + f.numeroSienge + " · " : "") + (f.erro || "falha")).join("\n"));
+        return;
       }
     }
-    this.paintTitulos();
-    this.pintarRoboMsg();
-    const falhas = lista.filter((x) => !x.ok);
-    if (!lista.length && r.erro) alert(r.erro);
-    else if (falhas.length) alert("Estes lotes não fecharam no Sienge. Os outros da fila foram feitos na mesma sessão.\n\n" + falhas.map((f) => "• " + (f.numeroSienge ? "nº " + f.numeroSienge + " · " : "") + (f.erro || "falha")).join("\n"));
+    await this.enviarFilaUmAUm(lotes);
   },
 
-  /** Robô antigo sem /lotes/fila: gera e autoriza cada lote em sequência. */
+  /** Gera, autoriza e já pede o próximo lote, sem fechar o Sienge no meio. */
   async enviarFilaUmAUm(lotes) {
     const s = this.state;
     const falhas = [];
@@ -2326,9 +2335,7 @@ const GerarPagamentoApp = {
     this.paintTitulos();
     this.pintarRoboMsg();
     if (falhas.length) {
-      alert(`${ok} lote(s) gerado(s). Estes não fecharam no Sienge:\n\n` + falhas.map((id) => "• " + id).join("\n") + "\n\nAbra o arquivo Ligar robo do Sienge que foi baixado para atualizar o robô e gerar todos na mesma sessão.");
-    } else if (ok) {
-      alert(`${ok} lote(s) gerado(s) e autorizado(s) no Sienge.\n\nPara a próxima vez manter a sessão aberta até o fim, abra o arquivo Ligar robo do Sienge que foi baixado (atualiza o robô neste computador).`);
+      alert(`${ok} lote(s) gerado(s). Estes não fecharam no Sienge:\n\n` + falhas.map((id) => "• " + id).join("\n"));
     }
   },
 

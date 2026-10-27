@@ -32,6 +32,49 @@ function registrar(evento) {
 }
 
 let ocupado = null;
+let janela = null;
+
+function agendarFecharJanela(ms) {
+  if (janela && janela.timer) clearTimeout(janela.timer);
+  if (!janela) return;
+  janela.timer = setTimeout(async () => {
+    if (ocupado) return agendarFecharJanela(ms);
+    const ctx = janela && janela.ctx;
+    janela = null;
+    if (ctx) await ctx.close().catch(() => {});
+    console.log("  Sessão do Sienge encerrada.");
+  }, ms || 20000);
+}
+
+async function abrirJanela(email) {
+  if (janela && janela.email === email && janela.ctx) {
+    const pages = janela.ctx.pages();
+    if (pages && pages.length) {
+      if (janela.timer) clearTimeout(janela.timer);
+      janela.page = pages[0];
+      janela.pronta = true;
+      return janela;
+    }
+  }
+  if (janela && janela.ctx) {
+    if (janela.timer) clearTimeout(janela.timer);
+    await janela.ctx.close().catch(() => {});
+    janela = null;
+  }
+  let ctx;
+  try {
+    ctx = await chromium.launchPersistentContext(cfg.perfilDoUsuario(email), {
+      channel: cfg.CANAL,
+      headless: false,
+      viewport: null,
+      args: ["--start-maximized"],
+    });
+  } catch (e) {
+    throw new Error("Não consegui abrir o navegador do robô. Feche as janelas do Sienge abertas pelo robô e tente de novo.");
+  }
+  janela = { ctx, page: ctx.pages()[0] || (await ctx.newPage()), email, pronta: false };
+  return janela;
+}
 
 async function executar(tipo, dados, usuario, email) {
   const loteId = String((dados.lote && dados.lote.id) || dados.id || "");
@@ -47,22 +90,13 @@ async function executar(tipo, dados, usuario, email) {
   }
   ocupado = { tipo, loteId, email, desde: new Date().toISOString() };
   console.log(`\n${tipo === "gerar" ? "Gerando" : "Aprovando"} lote ${loteId} (pedido por ${usuario} · ${email})`);
-  let ctx;
   try {
-    try {
-      ctx = await chromium.launchPersistentContext(cfg.perfilDoUsuario(email), {
-        channel: cfg.CANAL,
-        headless: false,
-        viewport: null,
-        args: ["--start-maximized"],
-      });
-    } catch (e) {
-      throw new Error("Não consegui abrir o navegador do robô. Feche as janelas do Sienge abertas pelo robô e tente de novo.");
-    }
-    const page = ctx.pages()[0] || (await ctx.newPage());
+    const j = await abrirJanela(email);
+    const opcoes = { sessaoPronta: !!j.pronta };
     const r = tipo === "gerar"
-      ? await passos.gerarLote(ctx, page, email, dados.lote, passo)
-      : await passos.aprovarLote(ctx, page, email, dados, passo);
+      ? await passos.gerarLote(j.ctx, j.page, email, dados.lote, passo, opcoes)
+      : await passos.aprovarLote(j.ctx, j.page, email, dados, passo, opcoes);
+    j.pronta = true;
     const numeroSienge = String((r && r.numeroSienge) || dados.numeroSienge || "");
     const arquivo = String((r && r.arquivo) || "");
     registrar({ tipo, loteId, usuario, email, ok: true, numeroSienge, arquivo, log });
@@ -71,7 +105,7 @@ async function executar(tipo, dados, usuario, email) {
   } catch (e) {
     let print = "";
     try {
-      const page = ctx && ctx.pages()[0];
+      const page = janela && janela.page;
       if (page) {
         print = path.join(cfg.LOGS_DIR, `erro-${loteId.replace(/[^\w-]/g, "")}-${Date.now()}.png`);
         await page.screenshot({ path: print, fullPage: true });
@@ -84,7 +118,7 @@ async function executar(tipo, dados, usuario, email) {
     return { ok: false, erro: e.message, log };
   } finally {
     ocupado = null;
-    if (ctx) await ctx.close().catch(() => {});
+    agendarFecharJanela(60000);
   }
 }
 
@@ -93,22 +127,12 @@ async function executarFila(lotes, usuario, email) {
   const logGeral = (msg) => console.log("  [fila] " + msg);
   ocupado = { tipo: "fila", loteId: String(lotes.length) + " lotes", email, desde: new Date().toISOString() };
   console.log(`\nFila de ${lotes.length} lote(s) (pedido por ${usuario} · ${email})`);
-  let ctx;
   const resultados = [];
   try {
-    try {
-      ctx = await chromium.launchPersistentContext(cfg.perfilDoUsuario(email), {
-        channel: cfg.CANAL,
-        headless: false,
-        viewport: null,
-        args: ["--start-maximized"],
-      });
-    } catch (e) {
-      throw new Error("Não consegui abrir o navegador do robô. Feche as janelas do Sienge abertas pelo robô e tente de novo.");
-    }
-    const page = ctx.pages()[0] || (await ctx.newPage());
+    const j = await abrirJanela(email);
     logGeral(`Entrando no Sienge como ${email}`);
-    await sessao.entrarComo(ctx, page, email, logGeral);
+    await sessao.entrarComo(j.ctx, j.page, email, logGeral);
+    j.pronta = true;
     const opcoes = { sessaoPronta: true };
     for (let i = 0; i < lotes.length; i++) {
       const lote = lotes[i];
@@ -121,9 +145,9 @@ async function executarFila(lotes, usuario, email) {
       let numero = "";
       try {
         passo(`Lote ${i + 1} de ${lotes.length}`);
-        const gerado = await passos.gerarLote(ctx, page, email, lote, passo, opcoes);
+        const gerado = await passos.gerarLote(j.ctx, j.page, email, lote, passo, opcoes);
         numero = String((gerado && gerado.numeroSienge) || "");
-        const aprovado = await passos.aprovarLote(ctx, page, email, { lote, numeroSienge: numero }, passo, opcoes);
+        const aprovado = await passos.aprovarLote(j.ctx, j.page, email, { lote, numeroSienge: numero }, passo, opcoes);
         const arquivo = String((aprovado && aprovado.arquivo) || "");
         registrar({ tipo: "fila", loteId, usuario, email, ok: true, numeroSienge: numero, arquivo, log });
         resultados.push({ id: loteId, ok: true, numeroSienge: numero, arquivo, log });
@@ -131,7 +155,7 @@ async function executarFila(lotes, usuario, email) {
         let print = "";
         try {
           print = path.join(cfg.LOGS_DIR, `erro-${loteId.replace(/[^\w-]/g, "")}-${Date.now()}.png`);
-          await page.screenshot({ path: print, fullPage: true });
+          await j.page.screenshot({ path: print, fullPage: true });
         } catch (x) {
           print = "";
         }
@@ -141,7 +165,7 @@ async function executarFila(lotes, usuario, email) {
       }
     }
     const ok = resultados.length > 0 && resultados.every((r) => r.ok);
-    console.log(ok ? "  Fila concluída. Encerrando a sessão do Sienge." : "  Fila encerrada com falha em algum lote. Encerrando a sessão do Sienge.");
+    console.log(ok ? "  Fila concluída." : "  Fila encerrada com falha em algum lote.");
     return { ok, resultados };
   } catch (e) {
     registrar({ tipo: "fila", loteId: "fila", usuario, email, ok: false, erro: e.message });
@@ -149,7 +173,7 @@ async function executarFila(lotes, usuario, email) {
     return { ok: false, erro: e.message, resultados };
   } finally {
     ocupado = null;
-    if (ctx) await ctx.close().catch(() => {});
+    agendarFecharJanela(8000);
   }
 }
 
