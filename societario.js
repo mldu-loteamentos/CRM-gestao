@@ -1800,6 +1800,186 @@ const SocietarioApp = {
     });
   },
 
+  fmtPdfPct(n) {
+    const v = Number(n) || 0;
+    return v.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + "%";
+  },
+
+  nomePdf(ent) {
+    return this.nomeExibido(ent).toLocaleUpperCase("pt-BR");
+  },
+
+  folhaMoura() {
+    const hub = this.entity(this.graph.hubId) || (this.graph.entities || []).find((e) => String(e.companyId) === "1");
+    if (!hub) return null;
+    const socios = this.ownersOf(hub.id).map((l) => ({
+      ent: this.entity(l.from),
+      pct: Number(l.pct) || 0
+    })).filter((s) => s.ent);
+    socios.sort((a, b) => {
+      const aj = a.ent.kind === "pf" ? 1 : 0;
+      const bj = b.ent.kind === "pf" ? 1 : 0;
+      if (aj !== bj) return aj - bj;
+      return (b.pct - a.pct) || this.nomePdf(a.ent).localeCompare(this.nomePdf(b.ent), "pt-BR");
+    });
+    const filhos = this.childrenOf(hub.id).map((l) => {
+      const ent = this.entity(l.to);
+      if (!ent || this.ehCentro(ent)) return null;
+      const netos = this.childrenOf(ent.id).map((n) => {
+        const alvo = this.entity(n.to);
+        if (!alvo || this.ehCentro(alvo) || this.filhoDoCentro(alvo.id)) return null;
+        return { ent: alvo, pct: Number(n.pct) || 0 };
+      }).filter(Boolean);
+      netos.sort((a, b) => (Number(a.ent.x) || 0) - (Number(b.ent.x) || 0));
+      const nota = [l.note, ent.note].map((s) => String(s || "").trim()).filter(Boolean).join(" ");
+      return { ent: ent, pct: Number(l.pct) || 0, note: nota, netos: netos.slice(0, 2) };
+    }).filter(Boolean);
+    filhos.sort((a, b) => (Number(a.ent.x) || 0) - (Number(b.ent.x) || 0));
+    return { hub: hub, socios: socios, filhos: filhos };
+  },
+
+  textoColunaPdf(hub, filho) {
+    const partes = [];
+    if (filho.note) partes.push(filho.note);
+    if (filho.netos.length) {
+      const meio = filho.netos.map((n) => this.fmtPdfPct(n.pct) + " na " + this.nomePdf(n.ent)).join(" e ");
+      partes.push(this.nomePdf(hub) + " tem " + this.fmtPdfPct(filho.pct) + " na " + this.nomePdf(filho.ent) + ", que por sua vez tem " + meio + ".");
+    }
+    return partes.join(" ");
+  },
+
+  htmlEstruturaPdf(folha) {
+    const boxW = 118;
+    const boxH = 62;
+    const gap = 16;
+    const colW = 138;
+    const socios = folha.socios;
+    const filhos = folha.filhos;
+    const topW = socios.length ? socios.length * boxW + (socios.length - 1) * gap : boxW;
+    const botW = filhos.length ? filhos.length * colW : colW;
+    const inner = Math.max(topW, botW, 720);
+    const pad = 26;
+    const frameW = inner + pad * 2;
+    const headerH = 58;
+    const yOwn = headerH + 10;
+    const yBusTop = yOwn + boxH + 20;
+    const yHub = yBusTop + 14;
+    const hubW = 210;
+    const hubH = 46;
+    const yBusBot = yHub + hubH + 18;
+    const yChild = yBusBot + 26;
+    const maxNetos = filhos.reduce((m, f) => Math.max(m, f.netos.length), 0);
+    const netoH = 56;
+    const yNeto = yChild + boxH + 24;
+    const depois = maxNetos ? (yNeto + maxNetos * netoH + (maxNetos - 1) * 16) : (yChild + boxH);
+    const yNota = depois + 14;
+    const frameH = yNota + 86;
+    const topStart = pad + (inner - topW) / 2;
+    const botStart = pad + (inner - botW) / 2;
+    const hubX = pad + (inner - hubW) / 2;
+    const hubCx = hubX + hubW / 2;
+    const cxSocio = (i) => topStart + i * (boxW + gap) + boxW / 2;
+    const cxFilho = (i) => botStart + i * colW + colW / 2;
+    const linhas = [];
+    if (socios.length) {
+      socios.forEach((s, i) => linhas.push(`<line x1="${cxSocio(i)}" y1="${yOwn + boxH}" x2="${cxSocio(i)}" y2="${yBusTop}" stroke="#1f2937" stroke-width="1.2"/>`));
+      linhas.push(`<line x1="${cxSocio(0)}" y1="${yBusTop}" x2="${cxSocio(socios.length - 1)}" y2="${yBusTop}" stroke="#1f2937" stroke-width="1.2"/>`);
+      linhas.push(`<line x1="${hubCx}" y1="${yBusTop}" x2="${hubCx}" y2="${yHub}" stroke="#1f2937" stroke-width="1.2"/>`);
+    }
+    if (filhos.length) {
+      linhas.push(`<line x1="${hubCx}" y1="${yHub + hubH}" x2="${hubCx}" y2="${yBusBot}" stroke="#1f2937" stroke-width="1.2"/>`);
+      linhas.push(`<line x1="${cxFilho(0)}" y1="${yBusBot}" x2="${cxFilho(filhos.length - 1)}" y2="${yBusBot}" stroke="#1f2937" stroke-width="1.2"/>`);
+      filhos.forEach((f, i) => {
+        const cx = cxFilho(i);
+        linhas.push(`<line x1="${cx}" y1="${yBusBot}" x2="${cx}" y2="${yChild}" stroke="#1f2937" stroke-width="1.2"/>`);
+        f.netos.forEach((n, k) => {
+          const y1 = k === 0 ? yChild + boxH : yNeto + (k - 1) * (netoH + 16) + netoH;
+          const y2 = yNeto + k * (netoH + 16);
+          linhas.push(`<line x1="${cx}" y1="${y1}" x2="${cx}" y2="${y2}" stroke="#1f2937" stroke-width="1.2"/>`);
+        });
+      });
+    }
+    const caixa = (nome, tipo, x, y, w, h, hub) => `<div style="position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;box-sizing:border-box;${hub ? "background:#105436;color:#fff;border:0;" : "background:#fff;color:#1c1917;border:1.5px solid #1c1917;"}display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:6px;font-weight:700;line-height:1.15;letter-spacing:0.02em;font-size:${hub ? 13 : 11}px;">
+      <span>${this.esc(nome)}</span>
+      ${tipo ? `<span style="display:block;margin-top:3px;font-size:10px;font-weight:600;">${tipo}</span>` : ""}
+    </div>`;
+    const sociosHtml = socios.map((s, i) => {
+      const x = topStart + i * (boxW + gap);
+      const tipo = (s.ent.kind === "pf" ? "PF" : "PJ") + (s.pct ? " " + this.fmtPdfPct(s.pct) : "");
+      return caixa(this.nomePdf(s.ent), tipo, x, yOwn, boxW, boxH, false);
+    }).join("");
+    const filhosHtml = filhos.map((f, i) => {
+      const cx = cxFilho(i);
+      const x = cx - boxW / 2;
+      const pct = `<div style="position:absolute;left:${cx - 36}px;top:${yBusBot + 4}px;width:72px;text-align:center;font-size:11px;font-weight:700;color:#1c1917;">${this.esc(this.fmtPdfPct(f.pct))}</div>`;
+      const netos = f.netos.map((n, k) => {
+        const y = yNeto + k * (netoH + 16);
+        const p = `<div style="position:absolute;left:${cx - 36}px;top:${y - 16}px;width:72px;text-align:center;font-size:11px;font-weight:700;color:#1c1917;">${this.esc(this.fmtPdfPct(n.pct))}</div>`;
+        return p + caixa(this.nomePdf(n.ent), "", x, y, boxW, netoH, false);
+      }).join("");
+      const texto = this.textoColunaPdf(folha.hub, f);
+      const nota = texto ? `<div style="position:absolute;left:${botStart + i * colW + 6}px;top:${yNota}px;width:${colW - 12}px;font-size:9px;line-height:1.35;color:#334155;font-weight:500;">${this.esc(texto)}</div>` : "";
+      return pct + caixa(this.nomePdf(f.ent), "", x, yChild, boxW, boxH, false) + netos + nota;
+    }).join("");
+    return `<div style="width:${frameW + 32}px;background:#fff;padding:16px;font-family:Arial,Helvetica,sans-serif;">
+      <div style="position:relative;width:${frameW}px;height:${frameH}px;border:2px solid #1f6b45;border-radius:10px;box-sizing:border-box;overflow:hidden;background:#fff;">
+        <div style="position:absolute;left:18px;top:14px;display:flex;align-items:center;gap:10px;">
+          <img src="i.ntegr.a/logo-moura-leite.svg" alt="Moura Leite" style="height:42px;width:auto;">
+        </div>
+        <div style="position:absolute;left:0;right:0;top:16px;text-align:center;font-size:18px;font-weight:700;letter-spacing:0.08em;color:#1f6b45;">ESTRUTURA SOCIETÁRIA</div>
+        <div style="position:absolute;left:18px;right:18px;top:54px;border-top:1px solid #d6e4da;"></div>
+        <div style="position:absolute;left:${hubX + hubW + 18}px;top:${yHub}px;border:1px solid #1c1917;padding:6px 8px;font-size:9px;line-height:1.4;font-weight:700;letter-spacing:0.03em;color:#1c1917;background:#fff;">PJ – PESSOA JURÍDICA<br>PF – PESSOA FÍSICA</div>
+        <svg width="${frameW}" height="${frameH}" style="position:absolute;left:0;top:0;">${linhas.join("")}</svg>
+        ${caixa(this.nomePdf(folha.hub), "", hubX, yHub, hubW, hubH, true)}
+        ${sociosHtml}
+        ${filhosHtml}
+      </div>
+    </div>`;
+  },
+
+  async exportarPdf() {
+    if (this._pdf) return;
+    const folha = this.folhaMoura();
+    if (!folha) {
+      alert("Não encontrei a Moura Leite no organograma.");
+      return;
+    }
+    if (!folha.socios.length && !folha.filhos.length) {
+      alert("A Moura Leite ainda não tem interligação para montar o PDF.");
+      return;
+    }
+    if (typeof html2canvas !== "function" || !window.jspdf || !window.jspdf.jsPDF) {
+      alert("Não consegui gerar o PDF. Atualize a página com Ctrl+F5.");
+      return;
+    }
+    const btn = document.querySelector(".soc-pdf-btn");
+    this._pdf = true;
+    if (btn) btn.disabled = true;
+    const page = document.createElement("div");
+    page.style.cssText = "position:fixed;left:-14000px;top:0;background:#fff;z-index:0;";
+    page.innerHTML = this.htmlEstruturaPdf(folha);
+    document.body.appendChild(page);
+    try {
+      await Promise.all(Array.from(page.querySelectorAll("img")).map((img) => img.complete ? null : new Promise((r) => { img.onload = img.onerror = r; })));
+      const canvas = await html2canvas(page, { scale: 2, useCORS: true, backgroundColor: "#ffffff", logging: false });
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+      const margem = 8;
+      const ratio = Math.min((pageW - margem * 2) / canvas.width, (pageH - margem * 2) / canvas.height);
+      const w = canvas.width * ratio;
+      const h = canvas.height * ratio;
+      pdf.addImage(canvas.toDataURL("image/png"), "PNG", (pageW - w) / 2, (pageH - h) / 2, w, h);
+      pdf.save("estrutura-societaria-moura-leite.pdf");
+    } catch (e) {
+      alert("Não consegui gerar o PDF. " + ((e && e.message) || ""));
+    }
+    page.remove();
+    this._pdf = false;
+    if (btn) btn.disabled = false;
+  },
+
   render() {
     const root = document.getElementById("estrutura-societaria-root");
     if (!root) return;
@@ -1826,6 +2006,7 @@ const SocietarioApp = {
             <button type="button" class="btn btn-outline btn-sm soc-btn-link${linkBtn}" onclick="SocietarioApp.openNewLink()" title="Cria a participação entre duas caixas. Também dá para arrastar o ponto de uma caixa até a outra.">Interligação</button>
             <button type="button" class="btn btn-outline btn-sm" onclick="SocietarioApp.resetLayout()" title="Reposiciona as caixas. As ligações e os percentuais permanecem.">Reorganizar</button>
             <button type="button" class="btn btn-outline btn-sm" onclick="SocietarioApp.openNewNote()" title="Grava uma nota na empresa selecionada.">Nota</button>
+            <button type="button" class="btn btn-outline btn-sm soc-pdf-btn" onclick="SocietarioApp.exportarPdf()" title="Gera o PDF da estrutura da Moura Leite, com os sócios e as participações.">PDF</button>
           </div>
         </div>
         <div class="soc-body">

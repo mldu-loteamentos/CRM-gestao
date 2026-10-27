@@ -3471,7 +3471,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     contabil: "Contábil",
     rydoo: "Rydoo",
     "pagar-reembolso": "Pagar reembolso",
-    "processo-contra": "Processo contra",
+    "processo-contra": "Novo processo",
     "reintegracao-posse": "Reintegração de posse",
     "titulos-incompletos": "Títulos incompletos",
     "config-tags": "Configuração de TAGs",
@@ -10437,7 +10437,7 @@ window.filterClientsWithSecondaryBuyers = async function(list, rawQuery) {
 window.processoContraTagHtml = function(customerId) {
   const set = window._processoContraClientes;
   if (!set || !set.has(String(customerId || ""))) return "";
-  return `<span class="pc-fila-tag" title="Este cliente moveu processo contra a empresa">Processo contra</span>`;
+  return `<span class="pc-fila-tag" title="Este cliente está em um processo">Processo</span>`;
 };
 
 window.pintarTagsProcessoContra = function() {
@@ -10448,8 +10448,8 @@ window.pintarTagsProcessoContra = function() {
     if (tem && !tag) {
       const novo = document.createElement("span");
       novo.className = "pc-fila-tag";
-      novo.title = "Este cliente moveu processo contra a empresa";
-      novo.textContent = "Processo contra";
+      novo.title = "Este cliente está em um processo";
+      novo.textContent = "Processo";
       el.appendChild(novo);
     } else if (!tem && tag) {
       tag.remove();

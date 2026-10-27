@@ -83,7 +83,7 @@
     { id: "juridico", label: "Jurídico", subs: [
       { id: "subjudice", label: "Cobrança Sub judice" },
       { id: "pagar_reembolso", label: "Pagar reembolso" },
-      { id: "processo_contra", label: "Processo contra" }
+      { id: "processo_contra", label: "Novo processo" }
     ]},
     { id: "fiscal", label: "Fiscal", subs: [
       { id: "pis_cofins", label: "Calcular impostos" },

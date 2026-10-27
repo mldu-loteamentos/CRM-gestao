@@ -10955,14 +10955,18 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 #pcf-emp-slot .ml-emp-filter-btn:disabled { background: #f1f5f9; color: #94a3b8; cursor: not-allowed; }
 #pcf-emp-slot .ml-emp-filter.is-open .ml-emp-filter-btn { border-color: var(--color-primary); }
 #pcf-emp-slot .ml-emp-filter-list { max-height: 320px; }
-#pc-emp-slot .ml-emp-filter { width: 100%; max-width: none; min-width: 0; flex: none; }
+#pc-emp-slot .ml-emp-filter, #pc-autor-slot .ml-emp-filter { width: 100%; max-width: none; min-width: 0; flex: none; }
+#pc-autor-slot .ml-emp-filter-label { display: none; }
+#pc-autor-slot .ml-emp-filter-btn { height: 38px; min-height: 38px; border-color: #cbd5e1; font-weight: 400; border-radius: 6px; }
+#pc-autor-slot .ml-emp-filter.is-open .ml-emp-filter-btn { border-color: var(--color-primary); }
+#pc-autor-slot .ml-emp-filter-list { max-height: 280px; }
 #pc-emp-slot .ml-emp-filter-label { display: none; }
 #pc-emp-slot .ml-emp-filter-btn { height: 38px; min-height: 38px; border-color: #cbd5e1; font-weight: 400; border-radius: 6px; }
 #pc-emp-slot .ml-emp-filter.is-open .ml-emp-filter-btn { border-color: var(--color-primary); }
 #pc-emp-slot .ml-emp-filter-list { max-height: 280px; }
-#pc-emp-slot .ml-emp-filter-item { display: flex; flex-direction: row; align-items: flex-start; gap: 10px; font-size: 0.82rem; font-weight: 600; color: #334155; }
-#pc-emp-slot .ml-emp-filter-item input { width: 16px; height: 16px; min-width: 16px; margin: 2px 0 0; padding: 0; flex: 0 0 16px; border: none; border-radius: 0; background: transparent; accent-color: #105436; }
-#pc-emp-slot .ml-emp-filter-search input { height: 34px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 12px; font-weight: 400; }
+#pc-emp-slot .ml-emp-filter-item, #pc-autor-slot .ml-emp-filter-item { display: flex; flex-direction: row; align-items: flex-start; gap: 10px; font-size: 0.82rem; font-weight: 600; color: #334155; }
+#pc-emp-slot .ml-emp-filter-item input, #pc-autor-slot .ml-emp-filter-item input { width: 16px; height: 16px; min-width: 16px; margin: 2px 0 0; padding: 0; flex: 0 0 16px; border: none; border-radius: 0; background: transparent; accent-color: #105436; }
+#pc-emp-slot .ml-emp-filter-search input, #pc-autor-slot .ml-emp-filter-search input { height: 34px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 12px; font-weight: 400; }
 .pc-drop { position: relative; width: 100%; }
 .pc-drop .form-control { width: 100%; }
 .pc-dd { display: none; position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 4px); background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; max-height: 240px; overflow: auto; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12); }
@@ -10991,7 +10995,10 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 #pc-popup.modal-overlay { align-items: flex-start; overflow: auto; padding: 24px 16px; }
 .pc-modal { width: min(980px, 96vw); max-width: 96vw; max-height: none; overflow: visible; padding: 1.25rem 1.5rem 1.5rem; }
 .pc-modal .modal-header { margin-bottom: 12px; }
-.pc-modal .pc-tipos { margin-bottom: 16px; }
+.pc-modal .pc-tipos { margin: 0 0 12px; }
+.pc-parte { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 14px 14px; margin-bottom: 14px; }
+.pc-parte h4 { margin: 0 0 10px; color: #105436; font-size: 0.95rem; }
+.pc-reu-fixo { margin: 0; padding: 10px 12px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; color: #105436; font-weight: 700; }
 .pc-popup-corpo { display: flex; flex-direction: column; gap: 14px; }
 .pc-busca-tipo { display: flex; flex-direction: column; gap: 8px; }
 .pc-busca-tipo label, .pc-terc label { display: flex; flex-direction: column; gap: 6px; font-size: 0.75rem; font-weight: 700; color: #64748b; }
