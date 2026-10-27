@@ -2285,19 +2285,6 @@ window.clientAppliesClausulaSuspensiva = function(client) {
   const zero = client.isZeroPaid === true
     || (typeof window.clientIsZeroPercentPaid === "function" && window.clientIsZeroPercentPaid(client));
   if (!zero) return false;
-  const hasSi = client.hasUnpaidSinal === true
-    || (typeof window.clientHasConfirmedOverdueSinalSI === "function" && window.clientHasConfirmedOverdueSinalSI(client));
-  if (!hasSi) {
-    const insts = typeof window.listInstallmentsForSiCheck === "function"
-      ? window.listInstallmentsForSiCheck(client)
-      : [];
-    const algumSi = insts.some((inst) => typeof window.installmentIsSinalSI === "function" && window.installmentIsSinalSI(inst));
-    const soMensalidade = !algumSi && insts.length > 0 && insts.every((inst) => {
-      const code = (typeof getInstallmentConditionCode === "function") ? String(getInstallmentConditionCode(inst) || "") : "";
-      return !!code;
-    });
-    if (soMensalidade) return false;
-  }
   const minDays = (typeof window.clausulaSuspensivaDias === "function")
     ? window.clausulaSuspensivaDias(cc)
     : (Number(cc.clausula_suspensiva_dias) > 0 ? Number(cc.clausula_suspensiva_dias) : 30);
@@ -9599,9 +9586,8 @@ window.nexAgingSpecialHtml = function(client) {
   const zeroDays = Number(regua.zero) || 30;
   const letter = typeof window.nexLetterForClient === "function" ? window.nexLetterForClient(client) : null;
   const hasNex = !!letter;
-  const aplicaSuspensiva = typeof window.clientShowsSuspenderAction === "function"
-    ? window.clientShowsSuspenderAction(client)
-    : (typeof window.clientAppliesClausulaSuspensiva === "function" && window.clientAppliesClausulaSuspensiva(client));
+  const aplicaSuspensiva = typeof window.clientAppliesClausulaSuspensiva === "function"
+    && window.clientAppliesClausulaSuspensiva(client);
 
   if (aplicaSuspensiva) {
     const tagDays = Math.max(
@@ -31597,6 +31583,11 @@ async function _loadZeroPaidTab_Impl() {
         : (Number(inst.daysOfDelay != null ? inst.daysOfDelay : inst.daysDelay) || Number(bill.daysDelay) || 0);
       if (delay > (consolidated[key].sinalDaysDelay || 0)) consolidated[key].sinalDaysDelay = delay;
     });
+    if (bill._hasCachedOverdueSi) {
+      consolidated[key].hasUnpaidSinal = true;
+      const cached = Number(bill._cachedSinalDaysDelay) || Number(bill.daysDelay) || 0;
+      if (cached > (consolidated[key].sinalDaysDelay || 0)) consolidated[key].sinalDaysDelay = cached;
+    }
   });
   
   let zeroPaidList = Object.values(consolidated);
