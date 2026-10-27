@@ -39,6 +39,68 @@ const ContabilEquiv = {
     return !!(this.state.lancados && this.state.lancados[String(id) + "@" + chave]);
   },
 
+  /* Investida → controladora. A Ellenco entra por último: o resultado dela já soma a Vercellino. */
+  CADEIA: [
+    { origem: "13", destino: "12", pct: 55.5, apelidoOrigem: "VERCELLINO", apelidoDestino: "ELLENCO", nomeOrigem: "Vercellino", nomeDestino: "Ellenco", perdas: "4.1.03.01.002", mep: "1.2.02.01.003", receitas: "4.1.03.01.001" },
+    { origem: "5", destino: "1", pct: 66, apelidoOrigem: "MLES", apelidoDestino: "MOURA LEITE", nomeOrigem: "MLES", nomeDestino: "Moura Leite", perdas: "4.1.03.01.002", mep: "1.2.02.02.003", receitas: "4.1.03.01.001" },
+    { origem: "6", destino: "1", pct: 55, apelidoOrigem: "ARAÇARI", apelidoDestino: "MOURA LEITE", nomeOrigem: "Araçari", nomeDestino: "Moura Leite", perdas: "4.1.03.01.002", mep: "1.2.02.01.002", receitas: "4.1.03.01.001" },
+    { origem: "32", destino: "1", pct: 100, apelidoOrigem: "NOVO HORIZONTE", apelidoDestino: "MOURA LEITE", nomeOrigem: "Novo Horizonte", nomeDestino: "Moura Leite", perdas: "4.1.03.01.002", mep: "1.2.02.08.002", receitas: "4.1.03.01.001" },
+    { origem: "17", destino: "1", pct: 35, apelidoOrigem: "PARQUE CIDADE", apelidoDestino: "MOURA LEITE", nomeOrigem: "Parque Cidade II", nomeDestino: "Moura Leite", perdas: "4.1.03.01.002", mep: "1.2.02.05.002", receitas: "4.1.03.01.001" },
+    { origem: "12", destino: "1", pct: 50, apelidoOrigem: "ELLENCO", apelidoDestino: "MOURA LEITE", nomeOrigem: "Ellenco", nomeDestino: "Moura Leite", perdas: "4.1.03.01.002", mep: "1.2.02.03.002", receitas: "4.1.03.01.001" }
+  ],
+
+  passoKey(destino, origem, chave) {
+    return String(destino) + "@" + String(origem) + "@" + chave;
+  },
+
+  jaPasso(destino, origem, chave) {
+    return !!(this.state.lancados && this.state.lancados[this.passoKey(destino, origem, chave)]);
+  },
+
+  notaHtml(chave) {
+    if (!chave) return "";
+    const sufixo = "@" + chave;
+    const itens = [];
+    Object.keys(this.state.lancados || {}).forEach((k) => {
+      if (k.slice(-sufixo.length) !== sufixo) return;
+      const rec = this.state.lancados[k];
+      if (rec && rec.rotulo) itens.push(rec.rotulo);
+    });
+    if (!itens.length) return "";
+    return `<p class="ctb-ok">Equivalência desta competência já gerada: ${this.esc(itens.join(" · "))}</p>`;
+  },
+
+  fold(s) {
+    return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+  },
+
+  entidade(id, apelido) {
+    const app = window.SocietarioApp;
+    const g = app && app.graph;
+    if (!g || !Array.isArray(g.entities)) return null;
+    const porId = g.entities.find((e) => String(e.companyId || "") === String(id));
+    if (porId) return porId;
+    if (String(id) === "1" && g.hubId) {
+      const hub = g.entities.find((e) => e.id === g.hubId);
+      if (hub) return hub;
+    }
+    const alvo = this.fold(apelido);
+    if (!alvo) return null;
+    return g.entities.find((e) => this.fold(e.name).indexOf(alvo) >= 0) || null;
+  },
+
+  pctDoPasso(passo) {
+    const g = window.SocietarioApp && SocietarioApp.graph;
+    const a = this.entidade(passo.destino, passo.apelidoDestino);
+    const b = this.entidade(passo.origem, passo.apelidoOrigem);
+    if (g && a && b && a.id !== b.id) {
+      const link = (g.links || []).find((l) => (l.from === a.id && l.to === b.id) || (l.from === b.id && l.to === a.id));
+      const pct = link ? Number(link.pct) : 0;
+      if (pct > 0) return pct;
+    }
+    return passo.pct;
+  },
+
   aplicar(data) {
     if (!data || typeof data !== "object") return;
     this.state.empresas = data.empresas && typeof data.empresas === "object" ? data.empresas : {};
@@ -486,62 +548,80 @@ const ContabilEquiv = {
     });
   },
 
-  montarPlano(app) {
-    const s = app.state;
-    const janela = s.janela;
-    const empresas = app.empresasEscolhidas();
-    if (!empresas.length) return { erro: "Escolha a empresa no DRE antes de lançar." };
-    if (!janela || !s.porEmpresa) return { erro: "Busque o DRE antes de lançar a equivalência." };
-    const meses = this.mesesDe(app, janela);
+  montarPlano(app, chave) {
+    const nomeEmp = (id, fallback) => {
+      const emp = (app.state.companies || []).find((c) => String(c.id) === String(id));
+      return emp && emp.nome ? (id + " - " + emp.nome) : (id + " - " + fallback);
+    };
+    const p = String(chave || "").split("-");
+    const rotulo = p.length >= 2 ? (app.nomeMes(Number(p[1])) + "/" + p[0]) : chave;
+    const fim = app.fimDoMes(chave);
     const linhas = [];
     const faltas = [];
     const pulos = [];
+    const semResultado = [];
+    const extras = {};
+    const bloqueado = {};
     const vistos = {};
-    empresas.forEach((emp) => {
-      const bloco = s.porEmpresa[String(emp.id)] || s.porEmpresa[emp.id];
-      if (!bloco || !bloco.porMes) return;
-      const serie = app.montarSerie(janela, bloco.porMes);
-      const cfg = this.cfgDa(emp.id);
-      const pronta = cfg && cfg.lucro && cfg.prejuizo && cfg.ajuste && Number(cfg.evento) > 0;
-      const nome = emp.id + " - " + emp.nome;
-      meses.forEach((mes) => {
-        const valor = Math.round(((serie.contas || []).filter((c) => c.grupo === "equiv").reduce((soma, c) => soma + (Number(c.por[mes.chave]) || 0), 0)) * 100) / 100;
-        if (Math.abs(valor) < 0.01) return;
-        if (this.jaLancado(emp.id, mes.chave)) {
-          pulos.push(nome + " · " + mes.rotulo);
-          return;
+    this.CADEIA.forEach((passo) => {
+      const pct = this.pctDoPasso(passo);
+      const pctTxt = Number(pct).toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "%";
+      const titulo = passo.nomeOrigem + " " + pctTxt + " → " + passo.nomeDestino;
+      if (bloqueado[passo.origem]) {
+        pulos.push(titulo + " aguarda o lançamento que entra em " + passo.nomeOrigem);
+        return;
+      }
+      const base = app.liquidoEmpresa(passo.origem, chave);
+      if (base == null) {
+        semResultado.push(nomeEmp(passo.origem, passo.nomeOrigem));
+        bloqueado[passo.destino] = true;
+        return;
+      }
+      const resultado = Math.round((base + (extras[passo.origem] || 0)) * 100) / 100;
+      const signed = Math.round(resultado * pct) / 100;
+      if (Math.abs(signed) < 0.01) return;
+      if (this.jaPasso(passo.destino, passo.origem, chave)) {
+        pulos.push(titulo);
+        return;
+      }
+      const cfg = this.cfgDa(passo.destino);
+      if (!cfg || !(Number(cfg.evento) > 0)) {
+        bloqueado[passo.destino] = true;
+        if (!vistos[passo.destino]) {
+          vistos[passo.destino] = true;
+          faltas.push(nomeEmp(passo.destino, passo.nomeDestino));
         }
-        if (!pronta) {
-          if (!vistos[emp.id]) { vistos[emp.id] = true; faltas.push(nome); }
-          return;
-        }
-        const lucro = valor > 0;
-        linhas.push({
-          companyId: Number(emp.id),
-          empresa: nome,
-          chave: mes.chave,
-          rotulo: mes.rotulo,
-          date: mes.fim,
-          amount: Math.round(Math.abs(valor) * 100) / 100,
-          tipo: lucro ? "lucro" : "prejuízo",
-          debitAccountId: lucro ? cfg.ajuste : cfg.prejuizo,
-          creditAccountId: lucro ? cfg.lucro : cfg.ajuste,
-          eventId: Number(cfg.evento),
-          description: this.hist(mes.chave)
-        });
+        return;
+      }
+      extras[passo.destino] = Math.round(((extras[passo.destino] || 0) + signed) * 100) / 100;
+      const lucro = signed > 0;
+      linhas.push({
+        companyId: Number(passo.destino),
+        origem: passo.origem,
+        empresa: nomeEmp(passo.destino, passo.nomeDestino),
+        chave: chave,
+        rotulo: titulo,
+        date: fim,
+        amount: Math.round(Math.abs(signed) * 100) / 100,
+        tipo: lucro ? "lucro" : "prejuízo",
+        debitAccountId: lucro ? passo.mep : passo.perdas,
+        creditAccountId: lucro ? passo.receitas : passo.mep,
+        eventId: Number(cfg.evento),
+        description: "Equivalencia " + passo.nomeOrigem + " " + p[1] + "-" + String(p[0]).slice(2),
+        resultado: resultado,
+        pct: pct
       });
     });
-    if (!linhas.length && faltas.length) {
-      return { erro: "Falta parametrizar a conta de lucro, a de prejuízo, a de ajuste MEP e a partida em Contábil > Configurações:\n" + faltas.join("\n") };
-    }
-    if (!linhas.length && pulos.length) return { erro: "Esses meses já foram lançados:\n" + pulos.join("\n") };
-    if (!linhas.length) return { erro: "Nesse período a equivalência não deu lucro nem prejuízo." };
+    if (!linhas.length && semResultado.length) return { erro: "Não li o resultado destas empresas na competência:\n" + semResultado.join("\n") };
+    if (!linhas.length && faltas.length) return { erro: "Falta a partida em Contábil > Configurações, na empresa que recebe a equivalência:\n" + faltas.join("\n") };
+    if (!linhas.length && pulos.length) return { erro: "Esta competência já foi lançada:\n" + pulos.join("\n") };
+    if (!linhas.length) return { erro: "Nesta competência o resultado dessas empresas não deu lucro nem prejuízo." };
     const texto = [
-      "Vou lançar no Sienge, em reais, um lote por mês. A linha 50% Eq. MLDU não entra.",
+      "Vou lançar a equivalência de " + rotulo + ", em reais. O percentual é o do organograma. A linha 50% Eq. MLDU não entra.",
       ""
-    ].concat(linhas.map((l) => l.empresa + " · " + l.rotulo + " · " + l.tipo + " · " + app.money(l.amount) + "\nDébito " + l.debitAccountId + " · Crédito " + l.creditAccountId + " · " + app.dataBr(l.date) + " · partida " + l.eventId));
-    if (faltas.length) texto.push("", "Sem parametrização, não lanço:", faltas.join("\n"));
-    if (pulos.length) texto.push("", "Já lançado, não repito:", pulos.join("\n"));
+    ].concat(linhas.map((l) => l.rotulo + " · resultado " + app.money(l.resultado) + " · " + l.tipo + " " + app.money(l.amount) + "\nNa empresa " + l.empresa + " · débito " + l.debitAccountId + " · crédito " + l.creditAccountId + " · " + app.dataBr(l.date) + " · partida " + l.eventId));
+    if (faltas.length) texto.push("", "Sem a partida, não lanço o que cai nestas empresas:", faltas.join("\n"));
+    if (pulos.length) texto.push("", "Já lançado nesta competência, não repito:", pulos.join("\n"));
     return { linhas: linhas, texto: texto.join("\n") };
   },
 
@@ -583,11 +663,14 @@ const ContabilEquiv = {
 
   marcar(linha, msg) {
     if (!this.state.lancados) this.state.lancados = {};
-    this.state.lancados[String(linha.companyId) + "@" + linha.chave] = {
+    this.state.lancados[this.passoKey(linha.companyId, linha.origem, linha.chave)] = {
       em: Date.now(),
       valor: linha.amount,
       tipo: linha.tipo,
-      msg: msg
+      msg: msg,
+      rotulo: linha.rotulo,
+      origem: linha.origem,
+      destino: String(linha.companyId)
     };
   },
 
@@ -626,6 +709,7 @@ const ContabilEquiv = {
     const feitos = [];
     const erros = [];
     const pulos = [];
+    const falhou = {};
     const ids = Object.keys(porEmp);
     for (let i = 0; i < ids.length; i++) {
       const grupo = porEmp[ids[i]];
@@ -638,6 +722,10 @@ const ContabilEquiv = {
       }
       for (let j = 0; j < grupo.length; j++) {
         const linha = grupo[j];
+        if (falhou[String(linha.origem)]) {
+          erros.push(linha.rotulo + ": não lancei, porque a equivalência anterior desta cadeia não foi gerada.");
+          continue;
+        }
         if (existentes && this.bate(existentes, linha)) {
           this.marcar(linha, "já estava no Sienge");
           pulos.push(linha.empresa + " · " + linha.rotulo + " já estava no Sienge.");
@@ -651,6 +739,7 @@ const ContabilEquiv = {
           feitos.push(linha.empresa + " · " + linha.rotulo + ": " + msg);
         } catch (e) {
           const falha = this.textoErro(e);
+          falhou[String(linha.companyId)] = true;
           this.auditar(linha, "erro", "Falha ao lançar equivalência de " + linha.empresa + " em " + linha.rotulo + ". " + falha);
           erros.push(linha.empresa + " · " + linha.rotulo + ": " + falha);
         }
@@ -672,12 +761,21 @@ const ContabilEquiv = {
     }
     const app = window.ContabilApp;
     if (!app || !app.state || app.state.lancando) return;
-    if (!app.state.buscou || !app.state.porEmpresa) {
-      alert("Busque o DRE antes de lançar a equivalência.");
+    const chave = app.state.de;
+    if (!chave) {
+      alert("Escolha a competência.");
       return;
     }
     await this.garantirConfig();
-    const plano = this.montarPlano(app);
+    const ids = [];
+    this.CADEIA.forEach((p) => { ids.push(p.origem, p.destino); });
+    try {
+      await app.garantirEmpresas(ids, chave);
+    } catch (e) {
+      alert("Não consegui ler o resultado das empresas. " + ((e && e.message) || ""));
+      return;
+    }
+    const plano = this.montarPlano(app, chave);
     if (plano.erro) {
       alert(plano.erro);
       return;

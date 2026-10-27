@@ -60,13 +60,27 @@ const ContabilApp = {
     return p.length === 3 && p[0] ? p[2] + "/" + p[1] + "/" + p[0] : "";
   },
 
+  mesAnterior() {
+    const p = this.partesMes(this.mesAtual());
+    let y = p.ano;
+    let m = p.mes - 1;
+    if (m < 1) { m = 12; y -= 1; }
+    return this.chaveMes(y, m);
+  },
+
   init() {
-    if (!this.state.de) this.state.de = this.mesAtual();
-    if (!this.state.ate) this.state.ate = this.mesAtual();
+    const comp = this.mesAnterior();
+    this.state.de = comp;
+    this.state.ate = comp;
     try { this.state.dreMil = localStorage.getItem("crm_ctb_dre_mil") === "1"; } catch (e) {}
     try { this.state.dreSoPeriodo = localStorage.getItem("crm_ctb_dre_periodo") === "1"; } catch (e) {}
     this.render();
     if (!this.state.companies.length) this.carregarEmpresas();
+    if (window.ContabilEquiv && typeof ContabilEquiv.garantirConfig === "function") {
+      ContabilEquiv.garantirConfig().then(() => {
+        if (document.getElementById("contabil-root")) this.render();
+      }).catch(() => {});
+    }
   },
 
   async carregarEmpresas() {
@@ -97,7 +111,9 @@ const ContabilApp = {
   },
 
   setMes(qual, valor) {
-    this.state[qual === "ate" ? "ate" : "de"] = String(valor || "").slice(0, 7);
+    const v = String(valor || "").slice(0, 7);
+    this.state.de = v;
+    this.state.ate = v;
   },
 
   setAba(id) {
@@ -128,32 +144,11 @@ const ContabilApp = {
     return { ano: Number(p[0]) || 0, mes: Number(p[1]) || 0 };
   },
 
-  /* Desligado: janeiro até o mês final. Ligado: só os meses entre De e Até. */
+  /* A tela pede uma competência. O DRE e o balanço usam só esse mês. */
   montarJanela() {
-    const ate = this.state.ate;
-    if (!this.state.dreSoPeriodo) return this.mesesAte(ate);
-    const a = this.partesMes(this.state.de);
-    const b = this.partesMes(ate);
-    if (!a.ano || !a.mes || !b.ano || !b.mes || (a.ano === b.ano && a.mes > b.mes)) return this.mesesAte(ate);
-    if (a.ano === b.ano) {
-      const meses = [];
-      for (let m = a.mes; m <= b.mes; m++) meses.push(m);
-      return { ano: a.ano, meses: meses };
-    }
-    const faixa = [];
-    let y = a.ano;
-    let m = a.mes;
-    while ((y < b.ano || (y === b.ano && m <= b.mes)) && faixa.length < 36) {
-      faixa.push({
-        ano: y,
-        mes: m,
-        chave: this.chaveMes(y, m),
-        rotulo: this.nomeMes(m) + "/" + String(y).slice(2)
-      });
-      m += 1;
-      if (m > 12) { m = 1; y += 1; }
-    }
-    return { ano: b.ano, meses: faixa.map((f) => f.mes), faixa: faixa };
+    const p = this.partesMes(this.state.de || this.state.ate);
+    if (!p.ano || !p.mes) return { ano: 0, meses: [] };
+    return { ano: p.ano, meses: [p.mes] };
   },
 
   nomeMes(m) {
@@ -1048,6 +1043,33 @@ const ContabilApp = {
     return { ano: janela.ano, meses: (janela.meses || []).slice(), faixa: (janela && janela.faixa) || null, contas: [...mapa.values()] };
   },
 
+  liquidoEmpresa(id, chave) {
+    const bloco = this.state.porEmpresa && this.state.porEmpresa[String(id)];
+    const listas = bloco && bloco.porMes && bloco.porMes[chave];
+    if (!listas || !listas.length) return null;
+    return this.montarDre(this.classificar(this.montarArvore(this.juntar(listas)))).liquido;
+  },
+
+  async garantirEmpresas(ids, chave) {
+    const api = window.SiengeApiService;
+    if (!api || typeof api.getTrialBalanceContabil !== "function") return;
+    const faltam = (ids || []).map(String).filter((id, i, arr) => arr.indexOf(id) === i).filter((id) => {
+      const bloco = this.state.porEmpresa && this.state.porEmpresa[id];
+      return !(bloco && bloco.porMes && bloco.porMes[chave] && bloco.porMes[chave].length);
+    });
+    for (let i = 0; i < faltam.length; i++) {
+      const id = faltam[i];
+      const lista = await api.getTrialBalanceContabil(id, chave + "-01", this.fimDoMes(chave));
+      if (!this.state.porEmpresa) this.state.porEmpresa = {};
+      if (!this.state.porEmpresa[id]) {
+        const emp = (this.state.companies || []).find((c) => String(c.id) === id);
+        this.state.porEmpresa[id] = { id: id, nome: emp ? emp.nome : ("Empresa " + id), porMes: {}, listas: [] };
+      }
+      if (!this.state.porEmpresa[id].porMes) this.state.porEmpresa[id].porMes = {};
+      this.state.porEmpresa[id].porMes[chave] = [lista || []];
+    }
+  },
+
   async buscar() {
     const s = this.state;
     if (s.carregando) return;
@@ -1081,15 +1103,10 @@ const ContabilApp = {
     s.progresso = 8;
     s.buscou = true;
     s.janela = janela;
-    if (s.dreSoPeriodo) {
-      const a = this.partesMes(de);
-      const b = this.partesMes(ate);
-      s.loadMsg = "Lendo o realizado de " + this.nomeMes(a.mes) + "/" + a.ano + " a " + this.nomeMes(b.mes) + "/" + b.ano + " e o mesmo intervalo do ano anterior…";
-    } else {
-      s.loadMsg = janela.meses.length
-        ? ("Lendo o realizado de janeiro a " + this.nomeMes(janela.meses[janela.meses.length - 1]) + " de " + janela.ano + " e de " + (janela.ano - 1) + "…")
-        : "Lendo o balancete…";
-    }
+    const comp = this.partesMes(de);
+    s.loadMsg = comp.mes
+      ? ("Lendo " + this.nomeMes(comp.mes) + " de " + comp.ano + " e o mesmo mês de " + (comp.ano - 1) + "…")
+      : "Lendo o balancete…";
     this.render();
     const tarefas = [{ tipo: "balanco", ini: ini, fim: fim, rotulo: "balanço" }];
     const mesesBusca = janela.faixa && janela.faixa.length
@@ -1364,25 +1381,21 @@ const ContabilApp = {
     } else if (s.erro && !s.linhas.length) {
       corpo = `<p class="ctb-erro">${this.esc(s.erro)}</p>`;
     } else if (!s.buscou) {
-      corpo = `<p class="ctb-nota">Escolha a empresa e o período. A consulta lê o balancete de verificação do Sienge.</p>`;
+      corpo = `<p class="ctb-nota">Escolha a empresa e a competência. A consulta lê o balancete de verificação do Sienge.</p>`;
     } else {
       const demo = aba === "balanco" ? this.htmlBalanco(s.arvore) : this.htmlDre(s.arvore);
       const avisos = s.avisos.length ? `<p class="ctb-erro">${s.avisos.map((a) => this.esc(a)).join("<br>")}</p>` : "";
       const serie = s.serie;
       const fimMes = serie && serie.meses && serie.meses.length ? this.nomeMes(serie.meses[serie.meses.length - 1]) : "";
       const iniMes = serie && serie.meses && serie.meses.length ? this.nomeMes(serie.meses[0]) : "";
-      const trecho = s.dreSoPeriodo
-        ? (serie && serie.faixa && serie.faixa.length
-          ? (serie.faixa[0].rotulo + " a " + serie.faixa[serie.faixa.length - 1].rotulo)
-          : (iniMes && fimMes ? (iniMes === fimMes ? (iniMes + " de " + (serie && serie.ano)) : (iniMes + " a " + fimMes + " de " + (serie && serie.ano))) : ""))
-        : ("Janeiro a " + fimMes + " de " + (serie && serie.ano));
+      const trecho = iniMes ? (iniMes + " de " + (serie && serie.ano)) : "";
       const notaDre = aba !== "dre"
-        ? " O balanço usa o saldo no fim do período."
+        ? " O balanço usa o saldo no fim da competência."
         : (serie && fimMes
           ? (s.dreVisao === "comp"
-            ? ` ${trecho}${s.dreSoPeriodo ? (" e o mesmo intervalo de " + ((serie.ano || 0) - 1)) : (" e de janeiro a " + fimMes + " de " + ((serie.ano || 0) - 1))}. Cada mês traz os dois anos e a variação. O total vem em seguida, e os trimestres somam só os meses desse intervalo.${s.dreMil ? " Valores divididos por 1.000." : ""}`
+            ? ` ${trecho} e o mesmo mês de ${((serie.ano || 0) - 1)}. Cada mês traz os dois anos e a variação.${s.dreMil ? " Valores divididos por 1.000." : ""}`
             : ` ${trecho}. Cada grupo abre a conta, e a conta abre mais um nível.${s.dreMil ? " Valores divididos por 1.000." : ""}`)
-          : " O DRE soma o movimento do período nos grupos do demonstrativo. Conta sem valor fica fora da lista.");
+          : " O DRE soma o movimento da competência nos grupos do demonstrativo. Conta sem valor fica fora da lista.");
       const visao = aba === "dre" && serie ? `<div class="ctb-visao-row">
         <div class="ml-tabs ctb-visao" role="tablist">
           <button type="button" role="tab" aria-selected="${s.dreVisao !== "comp"}" class="ml-tab ${s.dreVisao !== "comp" ? "is-active" : ""}" onclick="ContabilApp.setVisao('ano')"><i data-lucide="calendar-range"></i> Ano atual</button>
@@ -1393,17 +1406,15 @@ const ContabilApp = {
           <span class="moura-switch-track" aria-hidden="true"></span>
           <span class="moura-switch-text">Dividir por 1.000</span>
         </label>
-        <label class="moura-switch" title="Ligado: consulta só os meses entre De e Até. Desligado: de janeiro até o mês final.">
-          <input type="checkbox" ${s.dreSoPeriodo ? "checked" : ""} onchange="ContabilApp.setSoPeriodo(this.checked)">
-          <span class="moura-switch-track" aria-hidden="true"></span>
-          <span class="moura-switch-text">Só o período</span>
-        </label>
         <button type="button" class="btn btn-excel" onclick="ContabilApp.exportarExcel()" ${s.exportando ? "disabled" : ""} title="Exportar o DRE como está aberto. Cada empresa sai numa aba.">
           <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
         </button>
-        ${(window.ContabilEquiv && ContabilEquiv.podeLancar()) ? `<button type="button" class="ctb-buscar" onclick="ContabilEquiv.lancar()" ${s.lancando ? "disabled" : ""} title="Lança no Sienge o lucro ou o prejuízo de equivalência de cada mês do período, em reais. A linha 50% Eq. MLDU não entra.">${s.lancando ? "Lançando…" : "Lançar equivalência"}</button>` : ""}
+        ${(window.ContabilEquiv && ContabilEquiv.podeLancar()) ? `<button type="button" class="ctb-buscar" onclick="ContabilEquiv.lancar()" ${s.lancando ? "disabled" : ""} title="Lança a equivalência desta competência: o resultado da investida, no percentual do organograma, na empresa que a controla.">${s.lancando ? "Lançando…" : "Lançar equivalência"}</button>` : ""}
       </div>` : "";
-      corpo = `${avisos}${visao}<p class="ctb-nota">${aba === "dre" && serie && fimMes ? this.esc(notaDre.trim()) : this.esc(periodo) + ". Entram as contas com movimento." + notaDre}</p>${demo}`;
+      const notaEq = aba === "dre" && window.ContabilEquiv && typeof ContabilEquiv.notaHtml === "function"
+        ? ContabilEquiv.notaHtml(s.de)
+        : "";
+      corpo = `${avisos}${visao}${notaEq}<p class="ctb-nota">${aba === "dre" && serie && fimMes ? this.esc(notaDre.trim()) : this.esc(periodo) + ". Entram as contas com movimento." + notaDre}</p>${demo}`;
     }
     root.innerHTML = `<style>
       #contabil-root .ctb-toolbar { display:flex; flex-wrap:wrap; gap:12px 16px; align-items:flex-end; margin:4px 0 8px; }
@@ -1451,12 +1462,8 @@ const ContabilApp = {
     <div class="ctb-toolbar">
       <div id="ctb-emp-box"></div>
       <div class="ml-comp-slot">
-        <label class="ml-comp-label" for="ctb-de">De</label>
+        <label class="ml-comp-label" for="ctb-de">Competência</label>
         <input type="month" id="ctb-de" class="ml-comp-input" value="${this.esc(s.de)}" onchange="ContabilApp.setMes('de', this.value)">
-      </div>
-      <div class="ml-comp-slot">
-        <label class="ml-comp-label" for="ctb-ate">Até</label>
-        <input type="month" id="ctb-ate" class="ml-comp-input" value="${this.esc(s.ate)}" onchange="ContabilApp.setMes('ate', this.value)">
       </div>
       <button type="button" class="ctb-buscar" ${s.carregando ? "disabled" : ""} onclick="ContabilApp.buscar()">Buscar</button>
     </div>
