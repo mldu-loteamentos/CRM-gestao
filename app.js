@@ -41525,6 +41525,14 @@ window.suspenderContexto = function(customerId, saleId) {
   const obras = (typeof window.distratoObrasMap === "function") ? window.distratoObrasMap() : {};
   const obra = obras[cc];
   const obraAndamento = obra === true || !!(obra && obra.isOn);
+  const naFilaZero = (window.zeroPaidList || []).some(function(c) {
+    return c && String(c.customerId) === String(customerId) && String(c.saleId) === String(saleId);
+  });
+  const zero = naFilaZero || !!(client && (
+    client.isZeroPaid === true
+    || (typeof window.clientIsZeroPercentPaid === "function" && window.clientIsZeroPercentPaid(client))
+  ));
+  const pagaWebro = typeof window.suspenderClientePagaWebro === "function" && window.suspenderClientePagaWebro(client);
   return {
     client: client,
     customerId: customerId,
@@ -41534,7 +41542,8 @@ window.suspenderContexto = function(customerId, saleId) {
     name: (client && client.customerName) || "",
     loteamentoFechado: loteamentoFechado,
     obraAndamento: obraAndamento,
-    webro: window.suspenderClientePagaWebro(client)
+    zero: zero,
+    webro: zero || !!pagaWebro
   };
 };
 
@@ -41672,10 +41681,13 @@ window.openSuspenderContratoModal = function(customerId, saleId) {
     : (ctx.loteamentoFechado
       ? `<p style="margin:14px 0 0;font-size:0.82rem;color:#166534;">Obra em andamento: taxa associativa dispensada.</p>`
       : "");
+  const webroTexto = ctx.zero
+    ? "Contrato 0% pago. Anexe o print da Webro com a baixa dos boletos. Ao efetivar a suspensão, esse arquivo sobe nos anexos da unidade."
+    : "Este cliente tem a tag Boleto WEBRO. A carta de suspensão só é emitida depois que este print for anexado.";
   const webroBloco = ctx.webro
     ? `<div style="margin-top:14px;">
-        <label style="display:block;font-size:0.82rem;font-weight:700;color:#0f172a;margin-bottom:6px;">Print da tela da Webro com os boletos baixados</label>
-        <p style="margin:0 0 8px;font-size:0.78rem;color:#64748b;">Este cliente tem a tag Boleto WEBRO. A carta de suspensão só é emitida depois que este print for anexado.</p>
+        <label style="display:block;font-size:0.82rem;font-weight:700;color:#0f172a;margin-bottom:6px;">Print da Webro com a baixa dos boletos</label>
+        <p style="margin:0 0 8px;font-size:0.78rem;color:#64748b;">${webroTexto}</p>
         <input type="file" id="suspender-webro-file" accept="image/*,.png,.jpg,.jpeg,.webp,.pdf,application/pdf"
           onchange="window.previewSuspenderArquivos(this, 'suspender-webro-preview'); window.suspenderLiberarEfetivar()"
           style="width:100%;box-sizing:border-box;padding:8px;border:1px dashed #cbd5e1;border-radius:8px;background:#f8fafc;font-size:0.85rem;">
@@ -41749,7 +41761,7 @@ window.confirmSuspenderContrato = async function() {
   }
   if (st.webro) {
     if (!webroFile) {
-      setStatus("Anexe o print da tela da Webro com os boletos baixados.", "erro");
+      setStatus("Anexe o print da Webro com a baixa dos boletos. Ele sobe nos anexos da unidade.", "erro");
       if (webroInput) webroInput.focus();
       return;
     }
