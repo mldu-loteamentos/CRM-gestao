@@ -2,11 +2,9 @@
 window.ReintegracaoPosseApp = {
   KEY: "crm_reintegracao_posse",
   DOC: "reintegracao_posse",
-  aba: "todas",
   busca: "",
-  ordem: "cliente",
-  dir: 1,
   aberto: "",
+  grupos: {},
   fichas: {},
   updatedAt: 0,
   lido: false,
@@ -92,22 +90,12 @@ window.ReintegracaoPosseApp = {
       });
     });
     const q = this.fold(this.busca);
-    const aba = this.aba;
     const filtrada = lista.filter((c) => {
-      if (aba !== "todas" && c.etapa.id !== aba) return false;
       if (!q) return true;
       return this.fold(c.nome + " " + c.doc + " " + c.id + " " + c.etapa.nome).indexOf(q) >= 0;
     });
-    const dir = this.dir === -1 ? -1 : 1;
-    filtrada.sort((a, b) => {
-      let va = "";
-      let vb = "";
-      if (this.ordem === "etapa") { va = a.etapa.nome; vb = b.etapa.nome; }
-      else if (this.ordem === "desde") { va = a.desde; vb = b.desde; }
-      else { va = a.nome; vb = b.nome; }
-      return String(va).localeCompare(String(vb), "pt-BR", { numeric: true }) * dir;
-    });
-    return { todas: lista, visiveis: filtrada };
+    filtrada.sort((a, b) => String(a.nome).localeCompare(String(b.nome), "pt-BR", { numeric: true }));
+    return filtrada;
   },
 
   nomeCliente(id) {
@@ -179,12 +167,6 @@ window.ReintegracaoPosseApp = {
     } catch (e) {}
   },
 
-  setAba(id) {
-    this.aba = id;
-    this.aberto = "";
-    this.render();
-  },
-
   setBusca(v) {
     this.busca = v || "";
     const el = document.querySelector("#reintegracao-posse-root .reint-busca");
@@ -197,10 +179,15 @@ window.ReintegracaoPosseApp = {
     }
   },
 
-  ordenar(campo) {
-    if (this.ordem === campo) this.dir = this.dir === 1 ? -1 : 1;
-    else { this.ordem = campo; this.dir = 1; }
-    this.render();
+  grupoAberto(id, qtd) {
+    if (Object.prototype.hasOwnProperty.call(this.grupos, id)) return this.grupos[id] === true;
+    return qtd > 0;
+  },
+
+  aoGrupo(ev, id) {
+    const el = ev && ev.target;
+    if (!el || el.tagName !== "DETAILS") return;
+    this.grupos[id] = !!el.open;
   },
 
   abrirCliente(id) {
@@ -239,6 +226,11 @@ window.ReintegracaoPosseApp = {
     </label>`;
   },
 
+  proximo(cliente) {
+    const itens = this.pendencias(cliente);
+    return itens.length > 1 ? itens[1] : (itens[0] || "");
+  },
+
   painel(cliente) {
     if (this.aberto !== cliente.id) return "";
     const f = this.fichaDe(cliente.id);
@@ -254,68 +246,64 @@ window.ReintegracaoPosseApp = {
       <p class="reint-bloco">Depois da avaliação interna</p>
       ${this.campo(cliente.id, "valorComercial", "Possui valor comercial?", f.valorComercial, disabled)}
       ${this.campo(cliente.id, "demolir", "Precisa demolir e limpar o terreno?", f.demolir, disabled)}` : "";
-    return `<tr class="reint-detalhe"><td colspan="5">
+    const falta = this.pendencias(cliente);
+    return `<div class="reint-painel">
+      <ul class="reint-fazer">${falta.map((t) => `<li>${this.esc(t)}</li>`).join("")}</ul>
       <div class="reint-perguntas">
         <p class="reint-bloco">A casa</p>
         ${this.campo(cliente.id, "temMorador", "Tem morador?", morador, disabled)}
         ${extrasMorador}
         ${avaliacao}
       </div>
-    </td></tr>`;
+    </div>`;
+  },
+
+  pessoaHtml(c) {
+    const aberto = this.aberto === c.id;
+    const n = this.pendencias(c).length;
+    return `<article class="reint-pessoa${aberto ? " is-open" : ""}">
+      <div class="reint-pessoa-linha">
+        <button type="button" class="reint-pessoa-abre" onclick="ReintegracaoPosseApp.abrirCliente('${this.esc(c.id)}')">
+          <i data-lucide="chevron-right" class="reint-chev"></i>
+          <span class="reint-nome">
+            <strong>${this.esc(c.nome)}</strong>
+            <span class="reint-sub">${this.esc(c.id)}${c.doc ? " · " + this.esc(c.doc) : ""}</span>
+          </span>
+          <span class="reint-desde">Desde ${this.dataBr(c.desde)}</span>
+          <span class="reint-prox">${this.esc(this.proximo(c))}${n > 1 ? `<span class="reint-count" title="Pendências">${n}</span>` : ""}</span>
+        </button>
+        <button type="button" class="tvig-ico" title="Abrir ficha" onclick="ReintegracaoPosseApp.verFicha('${this.esc(c.id)}')"><i data-lucide="eye" style="width:15px;height:15px;"></i></button>
+      </div>
+      ${this.painel(c)}
+    </article>`;
   },
 
   render() {
     const root = document.getElementById("reintegracao-posse-root");
     if (!root) return;
-    const dados = this.clientes();
-    const conta = (id) => dados.todas.filter((c) => id === "todas" || c.etapa.id === id).length;
-    const abas = [{ id: "todas", nome: "Todos", icone: "users" }].concat(this.ETAPAS.map((e) => ({ id: e.id, nome: e.nome, icone: "git-branch" })));
-    const th = (campo, rotulo) => `<th onclick="ReintegracaoPosseApp.ordenar('${campo}')" style="cursor:pointer;user-select:none;">${rotulo} <i data-lucide="chevrons-up-down" style="width:11px;vertical-align:middle;"></i></th>`;
-    const linhas = dados.visiveis.map((c) => {
-      const falta = this.pendencias(c);
-      return `<tr>
-        <td><strong>${this.esc(c.nome)}</strong><div class="reint-sub">${this.esc(c.id)}${c.doc ? " · " + this.esc(c.doc) : ""}</div></td>
-        <td>${this.esc(c.etapa.nome)}</td>
-        <td>${this.dataBr(c.desde)}</td>
-        <td>${falta.map((t) => `<div>${this.esc(t)}</div>`).join("")}</td>
-        <td class="is-right" style="white-space:nowrap;">
-          <button type="button" class="tvig-ico" title="O que fazer" onclick="ReintegracaoPosseApp.abrirCliente('${this.esc(c.id)}')"><i data-lucide="clipboard-list" style="width:15px;height:15px;"></i></button>
-          <button type="button" class="tvig-ico" title="Abrir ficha" onclick="ReintegracaoPosseApp.verFicha('${this.esc(c.id)}')"><i data-lucide="eye" style="width:15px;height:15px;"></i></button>
-        </td>
-      </tr>${this.painel(c)}`;
-    }).join("");
+    const lista = this.clientes();
+    const grupos = this.ETAPAS.map((etapa) => {
+      const gente = lista.filter((c) => c.etapa.id === etapa.id);
+      return { etapa: etapa, gente: gente };
+    }).filter((g) => !this.fold(this.busca) || g.gente.length);
+    const html = grupos.length ? grupos.map((g) => {
+      const aberto = this.grupoAberto(g.etapa.id, g.gente.length);
+      const corpo = g.gente.length
+        ? g.gente.map((c) => this.pessoaHtml(c)).join("")
+        : `<p class="reint-vazio">Nenhum cliente nesta etapa.</p>`;
+      return `<details class="reint-grupo"${aberto ? " open" : ""} ontoggle="ReintegracaoPosseApp.aoGrupo(event,'${g.etapa.id}')">
+        <summary>
+          <i data-lucide="chevron-down" class="reint-chev"></i>
+          <span class="reint-grupo-nome">${this.esc(g.etapa.nome)}</span>
+          <span class="reint-count">${g.gente.length}</span>
+        </summary>
+        <div class="reint-lista">${corpo}</div>
+      </details>`;
+    }).join("") : `<p class="reint-vazio">Nenhum cliente encontrado.</p>`;
     root.innerHTML = `
-      <style>
-        .reint-ajuda { margin: 0 0 12px; color: #64748b; font-size: 0.84rem; line-height: 1.45; }
-        .reint-busca { max-width: 320px; margin: 10px 0 12px; }
-        .reint-table { width: 100%; border-collapse: collapse; background: #fff; }
-        .reint-table th { text-align: left; color: var(--color-primary, #105436); font-size: 0.78rem; padding: 8px; border-bottom: 1px solid #e2e8f0; }
-        .reint-table td { padding: 8px; border-bottom: 1px solid #f1f5f9; vertical-align: top; font-size: 0.84rem; color: #334155; }
-        .reint-sub { color: #64748b; font-size: 0.75rem; font-weight: 500; }
-        .reint-detalhe td { background: #f8fafc; }
-        .reint-perguntas { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
-        .reint-campo { display: flex; flex-direction: column; gap: 4px; font-size: 0.75rem; font-weight: 700; color: #334155; }
-        .reint-campo-largo { grid-column: 1 / -1; }
-        .reint-bloco { grid-column: 1 / -1; margin: 4px 0 0; font-size: 0.72rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.03em; }
-        .reint-vazio { text-align: center; color: #64748b; padding: 28px; }
-      </style>
-      <p class="reint-ajuda">Clientes cuja fase judicial atual é uma das etapas da reintegração de posse. Em cada um fica o que ainda precisa ser resolvido: morador, caminhão, chaveiro, móveis e, depois da avaliação interna, valor comercial e demolição.</p>
-      <div class="ml-tabs" role="tablist">
-        ${abas.map((a) => `<button type="button" class="ml-tab${this.aba === a.id ? " is-active" : ""}" aria-selected="${this.aba === a.id ? "true" : "false"}" onclick="ReintegracaoPosseApp.setAba('${a.id}')"><i data-lucide="${a.icone}"></i> ${this.esc(a.nome)} <span class="ml-tab-count">${conta(a.id)}</span></button>`).join("")}
-      </div>
+      <p class="reint-ajuda">Cada etapa abre e mostra quem está nela. Clique no cliente para ver o que falta: morador, caminhão, chaveiro, móveis e, depois da avaliação interna, valor comercial e demolição.</p>
       <input class="form-control reint-busca" placeholder="Buscar cliente" value="${this.esc(this.busca)}" oninput="ReintegracaoPosseApp.setBusca(this.value)">
-      <div style="overflow:auto;">
-        <table class="reint-table">
-          <thead><tr>
-            ${th("cliente", "Cliente")}
-            ${th("etapa", "Etapa")}
-            ${th("desde", "Desde")}
-            <th>O que fazer</th>
-            <th class="is-right">Ações</th>
-          </tr></thead>
-          <tbody>${linhas || `<tr><td colspan="5" class="reint-vazio">Nenhum cliente nesta etapa.</td></tr>`}</tbody>
-        </table>
-      </div>`;
+      <div class="reint-grupos">${html}</div>`;
     if (window.lucide && typeof window.lucide.createIcons === "function") window.lucide.createIcons();
   }
 };

@@ -92,6 +92,9 @@ window.MlEmpresaFilter = {
 
   sortByIdAsc(items) {
     return (items || []).slice().sort((a, b) => {
+      const oa = Number(a && a.order);
+      const ob = Number(b && b.order);
+      if (Number.isFinite(oa) && Number.isFinite(ob) && oa !== ob) return oa - ob;
       const na = Number(a && a.id);
       const nb = Number(b && b.id);
       const aNum = Number.isFinite(na);

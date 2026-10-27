@@ -606,6 +606,7 @@ const SocietarioApp = {
       return x;
     };
     layoutKids(hubId, 1, 40);
+    this.subirFilhasDasHoldings(hubId);
     const inChart = this.collectChartIds();
     const orphans = (this.graph.entities || []).filter(e => !inChart.has(e.id));
     const maxY = Math.max(280, ...this.graph.entities.map(e => Number(e.y) || 0));
@@ -710,15 +711,12 @@ const SocietarioApp = {
       const a = this.entity(link.from);
       const b = this.entity(link.to);
       if (!a || !b) return;
-      const p1 = this.nodeCenter(a);
-      const p2 = this.nodeCenter(b);
-      const mx = (p1.x + p2.x) / 2;
-      const my = (p1.y + p2.y) / 2;
-      const c1y = p1.y + (p2.y - p1.y) * 0.35;
-      const c2y = p1.y + (p2.y - p1.y) * 0.65;
+      const tra = this.tracoDaLigacao(a, b);
       const sel = this.selectedLinkId === link.id;
       const stroke = sel ? "#f59e0b" : "#105436";
-      parts.push(`<path d="M ${p1.x} ${p1.y} C ${p1.x} ${c1y}, ${p2.x} ${c2y}, ${p2.x} ${p2.y}" fill="none" stroke="${stroke}" stroke-width="${sel ? 3.5 : 2.2}" marker-end="url(#soc-arrow)"/>`);
+      parts.push(`<path d="${tra.d}" fill="none" stroke="${stroke}" stroke-width="${sel ? 3.5 : 2.2}" marker-end="url(#soc-arrow)"/>`);
+      const mx = tra.lx;
+      const my = tra.ly;
       const bg = sel ? "#f59e0b" : "#fff";
       const color = sel ? "#1c1917" : "#105436";
       labelHtml.push(`<button type="button" class="soc-edge-pct${sel ? " is-selected" : ""}" data-link="${link.id}" style="left:${mx}px;top:${my}px;background:${bg};color:${color};">${this.fmtPct(link.pct)}</button>`);
@@ -889,13 +887,112 @@ const SocietarioApp = {
     };
   },
 
-  participadaOcupada(companyId, excetoLinkId) {
+  ehCentro(ent) {
+    return !!(ent && (ent.id === this.graph.hubId || String(ent.companyId) === "1"));
+  },
+
+  filhoDoCentro(id) {
+    return (this.graph.links || []).some((l) => l.from === this.graph.hubId && l.to === id);
+  },
+
+  /* A Moura Leite continua dona única. Uma holding pode ligar de novo uma empresa que já é da Moura Leite. */
+  participadaOcupada(companyId, excetoLinkId, deId) {
     const id = String(companyId || "");
     if (!id) return false;
+    const de = deId ? this.entity(deId) : null;
+    const holding = de && !this.ehCentro(de);
     return (this.graph.links || []).some((l) => {
       if (excetoLinkId && l.id === excetoLinkId) return false;
-      return this.idsDaLigacao(l).para === id;
+      if (this.idsDaLigacao(l).para !== id) return false;
+      if (holding) {
+        const dono = this.entity(l.from);
+        if (dono && this.ehCentro(dono)) return false;
+      }
+      return true;
     });
+  },
+
+  borda(ent, lado) {
+    const x = (Number(ent.x) || 0) + this.NODE_W / 2;
+    const y = Number(ent.y) || 0;
+    return lado === "top" ? { x: x, y: y } : { x: x, y: y + this.NODE_H };
+  },
+
+  tracoDaLigacao(de, para) {
+    const cp = this.nodeCenter(para);
+    const sobe = cp.y < Number(de.y);
+    const p1 = this.borda(de, sobe ? "top" : "bottom");
+    const p2 = this.borda(para, sobe ? "bottom" : "top");
+    if (sobe && !this.ehCentro(de)) return this.tracoPorFora(de, para);
+    const c1y = p1.y + (p2.y - p1.y) * 0.35;
+    const c2y = p1.y + (p2.y - p1.y) * 0.65;
+    return {
+      d: `M ${p1.x} ${p1.y} C ${p1.x} ${c1y}, ${p2.x} ${c2y}, ${p2.x} ${p2.y}`,
+      lx: (p1.x + p2.x) / 2,
+      ly: (p1.y + p2.y) / 2
+    };
+  },
+
+  tracoPorFora(de, para) {
+    const sai = this.borda(de, "bottom");
+    const entra = this.borda(para, "bottom");
+    const desce = sai.y + 16;
+    const xs = (this.graph.entities || []).map((e) => Number(e.x) || 0);
+    const minX = xs.length ? Math.min.apply(null, xs) : 40;
+    const maxR = xs.length ? Math.max.apply(null, xs) + this.NODE_W : 400;
+    const gutter = sai.x < (minX + maxR) / 2 ? Math.max(8, minX - 28) : maxR + 28;
+    const d = `M ${sai.x} ${sai.y} L ${sai.x} ${desce} L ${gutter} ${desce} L ${gutter} ${entra.y} L ${entra.x} ${entra.y}`;
+    return { d: d, lx: (gutter + entra.x) / 2, ly: entra.y };
+  },
+
+  colocarFileiraAcima(de, row) {
+    if (!de || !row || !row.length) return;
+    const gap = 28;
+    const total = row.length * this.NODE_W + (row.length - 1) * gap;
+    let start = (Number(de.x) || 40) + this.NODE_W / 2 - total / 2;
+    if (start < 8) start = 8;
+    row.forEach((e, i) => {
+      e.x = start + i * (this.NODE_W + gap);
+      e.y = 16;
+    });
+  },
+
+  abrirFaixaDoTopo(idsNoTopo) {
+    const faixa = 16 + this.NODE_H + 28;
+    let menor = Infinity;
+    (this.graph.entities || []).forEach((e) => {
+      if (!e || idsNoTopo.has(e.id)) return;
+      menor = Math.min(menor, Number(e.y) || 0);
+    });
+    if (!Number.isFinite(menor) || menor >= faixa) return;
+    const empurra = faixa - menor;
+    (this.graph.entities || []).forEach((e) => {
+      if (!e || idsNoTopo.has(e.id)) return;
+      e.y = (Number(e.y) || 0) + empurra;
+    });
+  },
+
+  subirFilhasDasHoldings(parentId) {
+    const grupos = [];
+    const vistos = new Set();
+    const visitar = (id) => {
+      if (!id || vistos.has(id)) return;
+      vistos.add(id);
+      if (id !== this.graph.hubId) {
+        const parent = this.entity(id);
+        const acima = this.childrenOf(id)
+          .map((l) => this.entity(l.to))
+          .filter((e) => e && !this.filhoDoCentro(e.id) && !this.ehCentro(e));
+        if (parent && acima.length) grupos.push({ parent: parent, acima: acima });
+      }
+      this.childrenOf(id).forEach((l) => visitar(l.to));
+    };
+    visitar(parentId);
+    if (!grupos.length) return;
+    const ids = new Set();
+    grupos.forEach((g) => g.acima.forEach((e) => ids.add(e.id)));
+    this.abrirFaixaDoTopo(ids);
+    grupos.forEach((g) => this.colocarFileiraAcima(g.parent, g.acima));
   },
 
   parJaInterligado(deId, paraId, excetoLinkId) {
@@ -914,13 +1011,14 @@ const SocietarioApp = {
     const itens = [];
     (this.graph.entities || []).forEach((e) => {
       if (!e || e.kind === "pf" || !e.companyId) return;
-      if (lado === "para" && this.participadaOcupada(e.companyId, this.selectedLinkId) && e.id !== atualId) return;
+      if (lado === "para" && this.participadaOcupada(e.companyId, this.selectedLinkId, this._linkFrom) && e.id !== atualId) return;
       const c = this.companies().find((x) => String(x.id) === String(e.companyId));
       const completo = c
         ? String(c.name || c.tradeName || c.corporateName || this.nomeExibido(e))
         : this.nomeExibido(e);
       itens.push({
         id: e.id,
+        order: Number(e.companyId),
         label: String(e.companyId) + " - " + completo.toLocaleUpperCase("pt-BR")
       });
     });
@@ -1183,6 +1281,7 @@ const SocietarioApp = {
         </label>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
           <button type="button" class="btn btn-primary" onclick="SocietarioApp.saveEntity()" title="Grava o quadradinho no organograma">${isNew ? "Incluir" : "Salvar"}</button>
+          ${!isNew && ent.kind !== "pf" && ent.companyId ? `<button type="button" class="btn btn-outline" onclick="SocietarioApp.interligarDesde('${ent.id}')" title="Abre a interligação com esta empresa já escolhida. Uma holding também liga empresas em que a Moura Leite já participa.">Interligar</button>` : ""}
           ${!isNew ? `<button type="button" class="btn btn-outline" onclick="SocietarioApp.setHub('${ent.id}')" title="A empresa do centro do organograma (caixa principal)">Definir como centro</button>` : ""}
           ${!isNew ? `<button type="button" class="btn btn-outline" style="color:#b91c1c;border-color:#fecaca;" onclick="SocietarioApp.deleteEntity('${ent.id}')" title="Remove a caixa e as ligações ligadas a ela">Excluir</button>` : ""}
         </div>
@@ -1213,14 +1312,14 @@ const SocietarioApp = {
           <strong id="soc-link-title">Interligação (participação)</strong>
           <button type="button" class="btn btn-fechar" onclick="SocietarioApp.closePanel()">Fechar</button>
         </div>
-        <p class="soc-link-help">Escolha duas empresas do cadastro, pelo nome completo. Pessoa física não entra aqui. A holding pode participar de várias empresas. A participada só recebe uma interligação. O mesmo par não se repete. As contas já entram na parametrização.</p>
+        <p class="soc-link-help">Escolha duas empresas do cadastro, pelo nome completo, em ordem de id. Pessoa física não entra aqui. A holding pode participar de várias empresas, inclusive de uma que já é da Moura Leite. Essa empresa sobe para cima da holding, para a linha não atravessar as ligações da empresa 1. O mesmo par não se repete. As contas já entram na parametrização.</p>
         <div class="soc-link-grid">
           <div style="${this.lbl}">De (sócio / holding)
             ${this.hint("Quem possui a participação. Esta empresa pode aparecer em outras interligações.")}
             <div id="soc-lnk-from-box"></div>
           </div>
           <div style="${this.lbl}">Para (participada)
-            ${this.hint("Quem recebe a participação. Esta empresa só pode ser interligada uma vez.")}
+            ${this.hint("Quem recebe a participação. A Moura Leite liga cada uma uma vez. Uma holding pode ligar de novo uma empresa que já é da Moura Leite.")}
             <div id="soc-lnk-to-box"></div>
           </div>
         </div>
@@ -1717,7 +1816,6 @@ const SocietarioApp = {
     const sy = wrap ? wrap.scrollTop : 0;
     const size = this.canvasSize();
     const linkBtn = this.linkMode ? " is-on" : "";
-    const editing = this.panel === "entity" || this.panel === "note";
     root.innerHTML = `
       <div class="soc-shell">${this.abasHtml()}
       <div class="soc-page">
@@ -1748,10 +1846,10 @@ const SocietarioApp = {
               ${this.notasHtml()}
             </div>
           </div>
-          ${editing ? `<aside class="soc-aside">${this.renderPanel()}</aside>` : ""}
         </div>
       </div>
       </div>
+      ${this.entityModalHtml()}
       ${this.linkModalHtml()}`;
     if (window.lucide) lucide.createIcons();
     requestAnimationFrame(() => {
@@ -1769,6 +1867,32 @@ const SocietarioApp = {
       if (this.panel === "entity") this.paintCompanyPick();
       if (this.panel === "link") this.paintLinkPicks();
     });
+  },
+
+  entityModalHtml() {
+    if (this.panel !== "entity" && this.panel !== "note") return "";
+    return `<div class="soc-link-modal" id="soc-ent-modal">
+      <div class="soc-link-dialog soc-ent-dialog" role="dialog" aria-modal="true">${this.renderPanel()}</div>
+    </div>`;
+  },
+
+  interligarDesde(id) {
+    const ent = this.entity(id);
+    if (!ent || ent.kind === "pf" || !ent.companyId) {
+      alert("A interligação é entre empresas do cadastro. Pessoa física não entra.");
+      return;
+    }
+    this.selectedLinkId = "";
+    this.selectedId = null;
+    this.panel = "link";
+    this._pendingLink = null;
+    this._linkFrom = ent.id;
+    this._linkTo = "";
+    this.linkFromOpen = false;
+    this.linkToOpen = false;
+    this.linkFromQuery = "";
+    this.linkToQuery = "";
+    this.render();
   },
 
   selectEntity(id, keepCanvas) {
@@ -1943,8 +2067,11 @@ const SocietarioApp = {
       alert("Essas duas empresas já estão interligadas. O mesmo par de cadastros não se repete.");
       return;
     }
-    if (this.participadaOcupada(para.companyId, existing && existing.id)) {
-      alert("Essa participada já tem uma interligação. Ela só pode ser o destino uma vez. A holding pode participar de várias.");
+    if (this.participadaOcupada(para.companyId, existing && existing.id, de.id)) {
+      const dona = this.ehCentro(de)
+        ? "Essa participada já tem uma interligação. A Moura Leite liga cada empresa uma vez."
+        : "Essa empresa já está interligada a outra holding. O mesmo par não se repete, e cada holding liga a sua.";
+      alert(dona);
       return;
     }
     if (!Number.isFinite(pct) || pct < 0 || pct > 100) { alert("Percentual entre 0 e 100."); return; }
@@ -1952,6 +2079,7 @@ const SocietarioApp = {
       alert("Informe a conta de débito e a de crédito do lucro e do prejuízo.");
       return;
     }
+    let nova = false;
     if (existing) {
       existing.from = from;
       existing.to = to;
@@ -1964,8 +2092,10 @@ const SocietarioApp = {
         dup.note = note || dup.note;
       } else {
         this.graph.links.push({ id: this.uid("lnk"), from, to, pct, note });
+        nova = true;
       }
     }
+    if (nova && !this.filhoDoCentro(para.id) && !this.ehCentro(de)) this.subirFilhasDasHoldings(this.graph.hubId);
     this._pendingLink = null;
     this.persist();
     const seguir = window.ContabilEquiv && typeof ContabilEquiv.receberDoOrganograma === "function"

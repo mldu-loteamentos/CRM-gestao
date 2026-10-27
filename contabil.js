@@ -256,17 +256,14 @@ const ContabilApp = {
           this.state.selecionadas = this.state.selecionadas.filter((x) => x !== sid);
         }
         this.paintEmpresas();
-        if (this.state.aba === "equiv" && window.ContabilEquiv) ContabilEquiv.agendarAba();
       },
       selectAll: () => {
         this.state.selecionadas = this.state.companies.map((c) => String(c.id));
         this.paintEmpresas();
-        if (this.state.aba === "equiv" && window.ContabilEquiv) ContabilEquiv.agendarAba();
       },
       selectNone: () => {
         this.state.selecionadas = [];
         this.paintEmpresas();
-        if (this.state.aba === "equiv" && window.ContabilEquiv) ContabilEquiv.agendarAba();
       }
     });
     if (window.lucide) lucide.createIcons();
@@ -1101,7 +1098,12 @@ const ContabilApp = {
     });
     for (let i = 0; i < faltam.length; i++) {
       const id = faltam[i];
-      const lista = await api.getTrialBalanceContabil(id, chave + "-01", this.fimDoMes(chave));
+      let lista = null;
+      try {
+        lista = await api.getTrialBalanceContabil(id, chave + "-01", this.fimDoMes(chave));
+      } catch (e) {
+        continue;
+      }
       if (!this.state.porEmpresa) this.state.porEmpresa = {};
       if (!this.state.porEmpresa[id]) {
         const emp = (this.state.companies || []).find((c) => String(c.id) === id);
@@ -1465,7 +1467,6 @@ const ContabilApp = {
         <button type="button" class="btn btn-excel" onclick="ContabilApp.exportarExcel()" ${s.exportando ? "disabled" : ""} title="Exportar o DRE como está aberto. Cada empresa sai numa aba.">
           <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
         </button>
-        ${(window.ContabilEquiv && ContabilEquiv.podeLancar()) ? `<button type="button" class="ctb-buscar" onclick="ContabilEquiv.lancar()" ${s.lancando ? "disabled" : ""} title="Lança a equivalência desta competência: o resultado da investida, no percentual do organograma, na empresa que a controla.">${s.lancando ? "Lançando…" : "Lançar equivalência"}</button>` : ""}
       </div>` : "";
       const notaEq = aba === "dre" && window.ContabilEquiv && typeof ContabilEquiv.notaHtml === "function"
         ? ContabilEquiv.notaHtml(s.de)
@@ -1531,7 +1532,7 @@ const ContabilApp = {
       #contabil-root .orc-dfc-scroll { max-height:calc(100vh - 240px); }
     </style>
     <div class="ctb-toolbar">
-      <div id="ctb-emp-box"></div>
+      ${aba === "equiv" ? "" : `<div id="ctb-emp-box"></div>`}
       <div class="ml-comp-slot">
         <label class="ml-comp-label" for="ctb-de">Competência</label>
         <input type="month" id="ctb-de" class="ml-comp-input" value="${this.esc(s.de)}" onchange="ContabilApp.setMes('de', this.value)">
@@ -1540,7 +1541,7 @@ const ContabilApp = {
     </div>
     ${abas}
     ${corpo}`;
-    this.paintEmpresas();
+    if (aba !== "equiv") this.paintEmpresas();
   }
 };
 

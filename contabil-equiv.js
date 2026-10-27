@@ -104,6 +104,18 @@ const ContabilEquiv = {
     return cfg && Number(cfg.evento) > 0 ? String(cfg.evento) : "";
   },
 
+  destinosDaConfig() {
+    const ids = [];
+    const visto = {};
+    this.passos().forEach((p) => {
+      const id = String((p && p.destino) || "");
+      if (!id || !p.origem || visto[id]) return;
+      visto[id] = true;
+      ids.push(id);
+    });
+    return ids;
+  },
+
   passos() {
     const lista = Array.isArray(this.state.vinculos) ? this.state.vinculos : this.modelo();
     return this.ordenarCadeia(lista.filter((v) => v && (v.origem || v.destino)));
@@ -1402,14 +1414,14 @@ const ContabilEquiv = {
       }
       try { await this.descobrirEventos(); } catch (e) {}
       if (seq !== this._abaSeq) return;
-      const destinos = app.empresasEscolhidas();
+      const destinos = this.destinosDaConfig();
       const chave = app.state.de;
-      const ids = destinos.map((d) => d.id);
+      const ids = destinos.slice();
       this.passos().forEach((p) => { ids.push(p.origem, p.destino); });
       this.empresasGestao().forEach((c) => ids.push(c.id));
-      if (chave && destinos.length) await app.garantirEmpresas(ids, chave);
+      if (chave && ids.length) await app.garantirEmpresas(ids, chave);
       if (seq !== this._abaSeq) return;
-      const prev = this.montarPrevisao(app, chave, destinos.map((d) => String(d.id)));
+      const prev = this.montarPrevisao(app, chave, destinos);
       await this.carregarNomes(prev);
       if (seq !== this._abaSeq) return;
       this.state.eqPreview = prev;
@@ -1466,9 +1478,8 @@ const ContabilEquiv = {
     }
     if (this.state.eqErro) return `<p class="ctb-erro">${this.esc(this.state.eqErro)}</p>`;
     const prev = this.state.eqPreview;
-    const destinos = app ? app.empresasEscolhidas() : [];
-    if (!destinos.length) return `<p class="ctb-nota">Escolha a empresa de destino. A lista traz o resultado de cada empresa de origem, no percentual do organograma.</p>`;
     if (!app || !app.state.de) return `<p class="ctb-nota">Escolha a competência.</p>`;
+    if (!this.destinosDaConfig().length) return `<p class="ctb-nota">Não há vínculo de origem e destino na configuração.</p>`;
     if (!prev) return `<p class="ctb-nota">A equivalência desta competência ainda não foi montada.</p>`;
     const prontos = [];
     (prev.grupos || []).forEach((g) => (g.linhas || []).forEach((l) => {
@@ -1515,7 +1526,7 @@ const ContabilEquiv = {
     }).join("");
     return `<div class="ctb-eq-aba">
       <div class="ctb-eq-acoes">${btn}</div>
-      <p class="ctb-nota">A empresa escolhida acima é a de destino. Cada linha é uma origem: o resultado dela, no percentual do organograma, vai para esse destino. Abra a seta para conferir a conta de débito, a de crédito, o nome da conta e o complemento.</p>
+      <p class="ctb-nota">A competência vale para todos os vínculos. Cada grupo é uma empresa de destino, e cada linha é uma origem: o resultado dela, no percentual do organograma, vai para esse destino. Abra a seta para conferir a conta de débito, a de crédito, o nome da conta e o complemento.</p>
       ${grupos}
     </div>`;
   },
