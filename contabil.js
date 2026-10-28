@@ -94,9 +94,9 @@ const ContabilApp = {
         id: String(c.id != null ? c.id : c.companyId),
         nome: String(c.name || c.corporateName || c.companyName || c.tradeName || "").trim()
       })).filter((c) => c.id && c.id !== "undefined");
-      if (!this.state.selecionadas.length) {
-        this.state.selecionadas = this.state.companies.map((c) => String(c.id));
-      }
+      const geridas = this.empresasGeridas().map((c) => String(c.id));
+      const atuais = this.state.selecionadas.map(String).filter((id) => geridas.includes(id));
+      this.state.selecionadas = atuais.length ? atuais : geridas;
     } catch (e) {
       this.state.erro = "Não consegui carregar as empresas do Sienge.";
     }
@@ -154,8 +154,18 @@ const ContabilApp = {
     return this.classificar(this.montarArvore(this.juntar(listas)));
   },
 
+  geridaPeloGrupo(id) {
+    const app = window.EmpresasApp;
+    if (!app || typeof app.customOf !== "function" || typeof app.flagOn !== "function") return false;
+    return !!app.flagOn(app.customOf(id), "gerida_pelo_grupo");
+  },
+
+  empresasGeridas() {
+    return this.state.companies.filter((c) => this.geridaPeloGrupo(c.id));
+  },
+
   itensEmpresa() {
-    return this.state.companies.map((c) => ({
+    return this.empresasGeridas().map((c) => ({
       id: c.id,
       label: c.id + " - " + String(c.nome || "").toLocaleUpperCase("pt-BR")
     }));
@@ -163,7 +173,7 @@ const ContabilApp = {
 
   empresasEscolhidas() {
     const ids = this.state.selecionadas.map(String);
-    return this.state.companies.filter((c) => ids.includes(String(c.id)));
+    return this.empresasGeridas().filter((c) => ids.includes(String(c.id)));
   },
 
   /* A linha da tela é de uma empresa. O Excel passa a empresa da aba. */
@@ -311,18 +321,30 @@ const ContabilApp = {
         } else {
           this.state.selecionadas = this.state.selecionadas.filter((x) => x !== sid);
         }
-        this.paintEmpresas();
+        this.sincronizarChecksEmpresa();
       },
       selectAll: () => {
-        this.state.selecionadas = this.state.companies.map((c) => String(c.id));
-        this.paintEmpresas();
+        this.state.selecionadas = this.empresasGeridas().map((c) => String(c.id));
+        this.sincronizarChecksEmpresa();
       },
       selectNone: () => {
         this.state.selecionadas = [];
-        this.paintEmpresas();
+        this.sincronizarChecksEmpresa();
       }
     });
     if (window.lucide) lucide.createIcons();
+  },
+
+  /* Atualiza o rótulo e as marcas sem recriar a lista, para ela não voltar ao topo. */
+  sincronizarChecksEmpresa() {
+    const sel = new Set(this.state.selecionadas.map(String));
+    document.querySelectorAll("#ctb-emp-list input[data-ml-item]").forEach((el) => {
+      el.checked = sel.has(String(el.getAttribute("data-ml-item") || ""));
+    });
+    const btn = document.querySelector("#ctb-emp .ml-emp-filter-btn span");
+    if (btn && window.MlEmpresaFilter) {
+      btn.textContent = MlEmpresaFilter.buttonLabel(this.itensEmpresa(), this.state.selecionadas, false, false, null, "", false);
+    }
   },
 
   sinal(valor, tipo) {
@@ -1497,7 +1519,7 @@ const ContabilApp = {
     } else if (s.erro && !s.linhas.length) {
       corpo = `<p class="ctb-erro">${this.esc(s.erro)}</p>`;
     } else if (!s.buscou) {
-      corpo = `<p class="ctb-nota">Escolha a empresa e a competência. A consulta lê o balancete de verificação do Sienge.</p>`;
+      corpo = "";
     } else {
       const vista = this.empresaAtiva();
       const serieGuard = s.serie;
@@ -1544,10 +1566,11 @@ const ContabilApp = {
           <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar em Excel
         </button>
       </div>` : "";
-      const notaEq = aba === "dre" && window.ContabilEquiv && typeof ContabilEquiv.notaHtml === "function"
-        ? ContabilEquiv.notaHtml(s.de)
-        : "";
-      corpo = `${avisos}${visao}${notaEq}<p class="ctb-nota">${aba === "dre" && serie && fimMes ? this.esc(notaDre.trim()) : this.esc(periodo) + ". Entram as contas com movimento." + notaDre}</p>${demo}`;
+      const notaAno = aba === "dre" && serie && fimMes && s.dreVisao !== "comp";
+      const notaBloco = notaAno
+        ? (s.dreMil ? `<p class="ctb-nota">Valores divididos por 1.000.</p>` : "")
+        : `<p class="ctb-nota">${aba === "dre" && serie && fimMes ? this.esc(notaDre.trim()) : this.esc(periodo) + ". Entram as contas com movimento." + notaDre}</p>`;
+      corpo = `${avisos}${visao}${notaBloco}${demo}`;
       s.serie = serieGuard;
       this._empresaDre = empGuard;
     }
@@ -1559,7 +1582,8 @@ const ContabilApp = {
       #contabil-root .ml-emp-filter-item span { white-space:nowrap; }
       #contabil-root .ml-emp-filter-panel { width:max-content; min-width:100%; max-width:min(720px, 70vw); right:auto; }
       #contabil-root .ctb-tabs { margin:8px 0 12px; }
-      #contabil-root .ctb-emp-tabs { margin:4px 0 8px; }
+      #contabil-root .ctb-emp-tabs { margin:4px 0 8px; flex-wrap:wrap; overflow:visible; row-gap:0; }
+      #contabil-root .ctb-emp-tabs .ml-tab { flex:0 1 auto; max-width:100%; }
       #contabil-root .ctb-visao { margin:0; }
       #contabil-root .ctb-visao-row { display:flex; flex-wrap:wrap; align-items:center; gap:12px 18px; margin:0 0 10px; }
       #contabil-root .ctb-dre { width:max-content; min-width:0; table-layout:fixed; }

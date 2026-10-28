@@ -1140,16 +1140,35 @@ const SocietarioApp = {
     return !!app.flagOn(app.customOf(id), "spe_socios");
   },
 
+  /** Holding interna só desenha a estrutura. A ligação pede o percentual, sem conta de resultado. */
+  controladoraEhHoldingInterna(ref) {
+    const id = this.empresaIdRef(ref);
+    if (!id) return false;
+    const app = window.EmpresasApp;
+    if (!app || typeof app.customOf !== "function" || typeof app.flagOn !== "function") return false;
+    return !!app.flagOn(app.customOf(id), "holding_interna");
+  },
+
+  controladoraSoPercentual(ref) {
+    return this.controladoraEhSpeSocios(ref) || this.controladoraEhHoldingInterna(ref);
+  },
+
+  notaContasDaControladora(ref) {
+    if (this.controladoraEhHoldingInterna(ref)) {
+      return "Holding interna só organiza a estrutura. Informe o percentual; não há conta de lucro nem de prejuízo.";
+    }
+    if (this.controladoraEhSpeSocios(ref)) {
+      return "SPE de sócios não é administrada pelo grupo, então esta ligação não pede conta de lucro nem de prejuízo.";
+    }
+    return "As contas já entram na parametrização.";
+  },
+
   ajustarContasDaControladora() {
-    const spe = this.controladoraEhSpeSocios(this._linkFrom);
+    const soPct = this.controladoraSoPercentual(this._linkFrom);
     const box = document.getElementById("soc-link-contas");
     const nota = document.getElementById("soc-link-contas-nota");
-    if (box) box.style.display = spe ? "none" : "";
-    if (nota) {
-      nota.textContent = spe
-        ? "SPE de sócios não é administrada pelo grupo, então esta ligação não pede conta de lucro nem de prejuízo."
-        : "As contas já entram na parametrização.";
-    }
+    if (box) box.style.display = soPct ? "none" : "";
+    if (nota) nota.textContent = this.notaContasDaControladora(this._linkFrom);
   },
 
   caixaDoCadastro(companyId) {
@@ -1471,10 +1490,8 @@ const SocietarioApp = {
     const contas = this.contasDaLigacao(link.from, link.to);
     const lucroCred = (window.ContabilEquiv && ContabilEquiv.CONTA_LUCRO) || "4.1.03.01.001";
     const prejDeb = (window.ContabilEquiv && ContabilEquiv.CONTA_PREJUIZO) || "4.1.03.01.002";
-    const spe = this.controladoraEhSpeSocios(link.from);
-    const notaContas = spe
-      ? "SPE de sócios não é administrada pelo grupo, então esta ligação não pede conta de lucro nem de prejuízo."
-      : "As contas já entram na parametrização.";
+    const spe = this.controladoraSoPercentual(link.from);
+    const notaContas = this.notaContasDaControladora(link.from);
     return `<div class="soc-link-modal" id="soc-link-modal">
       <div class="soc-link-dialog" role="dialog" aria-modal="true" aria-labelledby="soc-link-title">
         <div class="soc-link-head">
@@ -1882,6 +1899,20 @@ const SocietarioApp = {
     return `<ul class="soc-tree-split">${ramo("Empreendedor", emp, "is-pj", socios)}${ramo("Terrenista", terr, "is-terr", parceiro)}</ul>`;
   },
 
+  /** Cada centro que entra na conta e tem parceiro ou parceria no nome. Não troca pelo irmão da obra. */
+  caixasParceriaDaObra(obra, companyId) {
+    const pct = !(Number(obra && obra.defaultPartnerShare) > 0) ? "" : this.pctCurto(obra.defaultPartnerShare);
+    const vistos = new Set();
+    return this.centrosDaObra(obra, companyId).map((c) => {
+      const id = String(c.id || "").replace(/\D/g, "");
+      if (!id || vistos.has(id)) return null;
+      const nome = this.nomeCentro(id, c.name, companyId);
+      if (!this.nomeEhParceiro(nome)) return null;
+      vistos.add(id);
+      return { id: id, nome: nome, pct: pct };
+    }).filter(Boolean);
+  },
+
   colunaParceria(p) {
     const app = window.ParametrizacaoParceiroApp;
     const sociedade = app && app.isSociedade && app.isSociedade(p);
@@ -1889,10 +1920,7 @@ const SocietarioApp = {
     const pj = this.ehPessoaJuridica(p.partnerName, p.creditor && p.creditor.cpfCnpj);
     const tipo = mista ? "Mista" : (sociedade ? "Sociedade" : "Parceria");
     const obras = (p.obras || []).slice().sort((a, b) => String(a.code).localeCompare(String(b.code), "pt-BR", { numeric: true }));
-    let caixas = mista || sociedade ? [] : obras.flatMap(o => this.caixasDaObra(o, p.companyId).map(c => ({ ...c, pct: !(Number(o.defaultPartnerShare) > 0) ? "" : this.pctCurto(o.defaultPartnerShare) })));
-    if (!mista && !sociedade) {
-      caixas = caixas.filter((c) => this.nomeEhParceiro(c.nome));
-    }
+    const caixas = mista || sociedade ? [] : obras.flatMap((o) => this.caixasParceriaDaObra(o, p.companyId));
     const kids = mista
       ? this.ramosMistos(p)
       : (!sociedade && caixas.length
@@ -1910,8 +1938,11 @@ const SocietarioApp = {
     const atual = empresas.find(e => e.id === this.empresaAba) || empresas[0];
     const abas = empresas.map(e => {
       const on = e.id === atual.id;
-      const rotulo = e.id + " — " + e.nome;
-      return `<button type="button" role="tab" aria-selected="${on}" title="${this.esc(rotulo)}" class="ml-tab${on ? " is-active" : ""}" onclick="SocietarioApp.setEmpresa('${this.esc(e.id)}')"><i data-lucide="building-2"></i><span>${this.esc(rotulo)}</span></button>`;
+      const usual = this.nomeUsualDaEmpresa(e.id);
+      const reduzido = (usual || e.nome || "Empresa").toLocaleUpperCase("pt-BR");
+      const rotulo = e.id + " - " + reduzido;
+      const completo = e.id + " — " + e.nome;
+      return `<button type="button" role="tab" aria-selected="${on}" title="${this.esc(completo)}" class="ml-tab${on ? " is-active" : ""}" onclick="SocietarioApp.setEmpresa('${this.esc(e.id)}')"><i data-lucide="building-2"></i><span>${this.esc(rotulo)}</span></button>`;
     }).join("");
     const itens = atual.itens.slice().sort((a, b) => String(a.partnerName || "").localeCompare(String(b.partnerName || ""), "pt-BR"));
     return `<div class="soc-page">
@@ -2397,7 +2428,7 @@ const SocietarioApp = {
       const el = document.getElementById(id);
       return el ? (el.value || "").trim() : "";
     };
-    const spe = this.controladoraEhSpeSocios(from);
+    const spe = this.controladoraSoPercentual(from);
     const contas = spe
       ? { debitoLucro: "", creditoLucro: "", debitoPrejuizo: "", creditoPrejuizo: "" }
       : {

@@ -184,17 +184,8 @@ const ContabilEquiv = {
     return !!(this.state.lancados && this.state.lancados[this.passoKey(destino, origem, chave)]);
   },
 
-  notaHtml(chave) {
-    if (!chave) return "";
-    const sufixo = "@" + chave;
-    const itens = [];
-    Object.keys(this.state.lancados || {}).forEach((k) => {
-      if (k.slice(-sufixo.length) !== sufixo) return;
-      const rec = this.state.lancados[k];
-      if (rec && rec.rotulo) itens.push(rec.rotulo + (rec.lote ? (" (lote " + rec.lote + ")") : ""));
-    });
-    if (!itens.length) return "";
-    return `<p class="ctb-ok">Equivalência desta competência já gerada: ${this.esc(itens.join(" · "))}</p>`;
+  notaHtml() {
+    return "";
   },
 
   fold(s) {
