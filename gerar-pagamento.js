@@ -92,9 +92,12 @@ const GerarPagamentoApp = {
     return this.iso(d);
   },
 
-  /** Dia seguinte, se for dia útil. Na sexta, sábado, domingo e segunda. No fim de semana, até a segunda. */
+  /** Dia seguinte, se for dia útil. Na sexta, sábado, domingo e segunda. No fim de semana, até a segunda.
+   *  No antepenúltimo dia útil, o período já vai do dia seguinte até o último dia do mês, sábado e domingo inclusos. */
   periodoPadrao(base) {
     const d = base ? new Date(String(base).slice(0, 10) + "T12:00:00") : new Date();
+    const fechamento = this.janelaFechamento(d);
+    if (fechamento) return { start: fechamento.start, end: fechamento.end };
     const hoje = this.iso(d);
     const dow = d.getDay();
     if (dow === 5) return { start: this.shiftIso(hoje, 1), end: this.shiftIso(hoje, 3) };
@@ -102,6 +105,68 @@ const GerarPagamentoApp = {
     if (dow === 0) return { start: hoje, end: this.shiftIso(hoje, 1) };
     const amanha = this.shiftIso(hoje, 1);
     return { start: amanha, end: amanha };
+  },
+
+  /** Antepenúltimo dia útil e o pagamento do dia seguinte até o último dia corrido do mês. */
+  janelaFechamento(base) {
+    const d = base ? new Date(base) : new Date();
+    const ano = d.getFullYear();
+    const mes = d.getMonth();
+    const dia = d.getDate();
+    const ultimo = new Date(ano, mes + 1, 0).getDate();
+    const uteis = [];
+    for (let i = 1; i <= ultimo; i++) {
+      const dow = new Date(ano, mes, i, 12).getDay();
+      if (dow !== 0 && dow !== 6) uteis.push(i);
+    }
+    if (uteis.length < 3 || dia < uteis[uteis.length - 3]) return null;
+    const isoDia = (n) => ano + "-" + String(mes + 1).padStart(2, "0") + "-" + String(n).padStart(2, "0");
+    return {
+      ante: isoDia(uteis[uteis.length - 3]),
+      start: isoDia(uteis[uteis.length - 2]),
+      end: isoDia(ultimo)
+    };
+  },
+
+  ehAnalistaPagadoria(user) {
+    const n = String((user && (user.profile_name || user.profile || user.role)) || "")
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return n.includes("ANALISTA") && n.includes("PAGADORIA") && /\b(I|II|1|2)\b/.test(n);
+  },
+
+  avisoFechamento() {
+    const u = window.AppState && window.AppState.currentUser;
+    if (!this.ehAnalistaPagadoria(u)) return;
+    const janela = this.janelaFechamento(new Date());
+    const hoje = this.iso(new Date());
+    if (!janela || hoje !== janela.ante) return;
+    const chave = "crm_pagadoria_fechamento_" + String(u.email || u.name || "op") + "_" + hoje;
+    try { if (localStorage.getItem(chave) === "ciente") return; } catch (e) {}
+    if (document.getElementById("gp-fechamento-aviso")) return;
+    const ini = this.dataBr(janela.start);
+    const fim = this.dataBr(janela.end);
+    const pagar = Number(String(janela.start).slice(8, 10));
+    const overlay = document.createElement("div");
+    overlay.id = "gp-fechamento-aviso";
+    overlay.setAttribute("role", "alertdialog");
+    overlay.style.cssText = "position:fixed;inset:0;z-index:2147483002;display:flex;align-items:center;justify-content:center;background:rgba(12,41,29,0.55);padding:16px;";
+    overlay.innerHTML = `<div style="background:#fff;border-radius:12px;width:100%;max-width:460px;box-shadow:0 18px 40px rgba(0,0,0,0.22);border:1px solid rgba(16,84,54,0.12);padding:22px 22px 18px;font-family:inherit;">
+      <div style="font-size:0.95rem;font-weight:800;color:#105436;margin-bottom:10px;">Moura Leite Loteamentos</div>
+      <div style="font-size:0.92rem;color:#1e293b;line-height:1.45;">Hoje deverão ser feitos os lotes do dia ${ini} ao dia ${fim} para pagar dia ${pagar}. Sábado e domingo entram no período, para o fechamento dos parceiros ficar pago até o último dia.</div>
+      <div style="display:flex;justify-content:flex-end;margin-top:18px;">
+        <button type="button" id="gp-fechamento-ciente" style="padding:8px 16px;border-radius:8px;border:0;background:#105436;color:#fff;font-weight:800;cursor:pointer;">Ciente</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    const fechar = () => {
+      try { localStorage.setItem(chave, "ciente"); } catch (e) {}
+      overlay.remove();
+    };
+    overlay.querySelector("#gp-fechamento-ciente").addEventListener("click", fechar);
   },
 
   /** Sábado e domingo entram no lote da segunda: a baixa no banco é no dia útil. */

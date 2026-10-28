@@ -1131,6 +1131,27 @@ const SocietarioApp = {
     return ent && ent.companyId ? String(ent.companyId) : "";
   },
 
+  /** A controladora (De) é SPE de sócios: o grupo não administra, então não há conta de lucro nem de prejuízo. */
+  controladoraEhSpeSocios(ref) {
+    const id = this.empresaIdRef(ref);
+    if (!id) return false;
+    const app = window.EmpresasApp;
+    if (!app || typeof app.customOf !== "function" || typeof app.flagOn !== "function") return false;
+    return !!app.flagOn(app.customOf(id), "spe_socios");
+  },
+
+  ajustarContasDaControladora() {
+    const spe = this.controladoraEhSpeSocios(this._linkFrom);
+    const box = document.getElementById("soc-link-contas");
+    const nota = document.getElementById("soc-link-contas-nota");
+    if (box) box.style.display = spe ? "none" : "";
+    if (nota) {
+      nota.textContent = spe
+        ? "SPE de sócios não é administrada pelo grupo, então esta ligação não pede conta de lucro nem de prejuízo."
+        : "As contas já entram na parametrização.";
+    }
+  },
+
   caixaDoCadastro(companyId) {
     const id = String(companyId || "").replace(/^cad:/, "");
     const existente = this.caixaDaEmpresa(id);
@@ -1230,6 +1251,7 @@ const SocietarioApp = {
     };
     pintar("soc-lnk-from-box", "soc-lnk-from", "_linkFrom", "linkFromOpen", "linkFromQuery", "de");
     pintar("soc-lnk-to-box", "soc-lnk-to", "_linkTo", "linkToOpen", "linkToQuery", "para");
+    this.ajustarContasDaControladora();
   },
 
   preencherContasLigacao() {
@@ -1244,6 +1266,7 @@ const SocietarioApp = {
     por("soc-lnk-cred-lucro", contas.creditoLucro || lucroCred);
     por("soc-lnk-deb-prej", contas.debitoPrejuizo || prejDeb);
     por("soc-lnk-cred-prej", contas.creditoPrejuizo);
+    this.ajustarContasDaControladora();
   },
 
   toggleLinkMode() {
@@ -1448,13 +1471,17 @@ const SocietarioApp = {
     const contas = this.contasDaLigacao(link.from, link.to);
     const lucroCred = (window.ContabilEquiv && ContabilEquiv.CONTA_LUCRO) || "4.1.03.01.001";
     const prejDeb = (window.ContabilEquiv && ContabilEquiv.CONTA_PREJUIZO) || "4.1.03.01.002";
+    const spe = this.controladoraEhSpeSocios(link.from);
+    const notaContas = spe
+      ? "SPE de sócios não é administrada pelo grupo, então esta ligação não pede conta de lucro nem de prejuízo."
+      : "As contas já entram na parametrização.";
     return `<div class="soc-link-modal" id="soc-link-modal">
       <div class="soc-link-dialog" role="dialog" aria-modal="true" aria-labelledby="soc-link-title">
         <div class="soc-link-head">
           <strong id="soc-link-title">Interligação (participação)</strong>
           <button type="button" class="btn btn-fechar" onclick="SocietarioApp.closePanel()">Fechar</button>
         </div>
-        <p class="soc-link-help">Escolha duas empresas do cadastro, pelo nome completo, em ordem de id. Pessoa física não entra aqui. A holding pode participar de várias empresas, inclusive de uma que já é da Moura Leite. Essa empresa sobe para cima da holding, para a linha não atravessar as ligações da empresa 1. O mesmo par não se repete. As contas já entram na parametrização.</p>
+        <p class="soc-link-help">Escolha duas empresas do cadastro, pelo nome completo, em ordem de id. Pessoa física não entra aqui. A holding pode participar de várias empresas, inclusive de uma que já é da Moura Leite. Essa empresa sobe para cima da holding, para a linha não atravessar as ligações da empresa 1. O mesmo par não se repete. <span id="soc-link-contas-nota">${this.esc(notaContas)}</span></p>
         <div class="soc-link-grid">
           <div style="${this.lbl}">De (sócio / holding)
             ${this.hint("Quem possui a participação. Holding interna e SPE sócio entram aqui, mesmo sem caixa no organograma.")}
@@ -1469,7 +1496,7 @@ const SocietarioApp = {
           ${this.hint("Quanto esta origem detém na participada.")}
           <input id="soc-lnk-pct" class="form-control" type="number" min="0" max="100" step="0.01" value="${link.pct || 0}">
         </label>
-        <div class="soc-link-contas">
+        <div class="soc-link-contas" id="soc-link-contas" style="${spe ? "display:none;" : ""}">
           <label style="${this.lbl}">Lucro · debitada
             ${this.hint("Conta debitada quando a participada der lucro.")}
             <input id="soc-lnk-deb-lucro" class="form-control" value="${this.esc(contas.debitoLucro)}" placeholder="1.2.02.01.002">
@@ -1669,6 +1696,11 @@ const SocietarioApp = {
     return /\bmarketing\b/.test(n) || /\bcomercial\b/.test(n) || /gestao d[ae] carteira/.test(n) || /carteira e estoque/.test(n);
   },
 
+  /** Nome do centro de custo do parceiro (parceiro ou parceria). */
+  nomeEhParceiro(nome) {
+    return /parce(ir|ri)/i.test(String(nome || ""));
+  },
+
   ehCcParceria(cc, irmaos) {
     const papel = String(cc && cc.papel || "");
     if (papel === "terrenista") return true;
@@ -1857,21 +1889,13 @@ const SocietarioApp = {
     const pj = this.ehPessoaJuridica(p.partnerName, p.creditor && p.creditor.cpfCnpj);
     const tipo = mista ? "Mista" : (sociedade ? "Sociedade" : "Parceria");
     const obras = (p.obras || []).slice().sort((a, b) => String(a.code).localeCompare(String(b.code), "pt-BR", { numeric: true }));
-    let caixas = mista ? [] : obras.flatMap(o => this.caixasDaObra(o, p.companyId).map(c => ({ ...c, pct: sociedade || !(Number(o.defaultPartnerShare) > 0) ? "" : this.pctCurto(o.defaultPartnerShare) })));
-    if (!mista && !caixas.length && sociedade) {
-      const vistos = new Set();
-      caixas = this.sociosDe(p).map((s) => {
-        const id = String(s.ccTitulo || "").replace(/\D/g, "");
-        if (!id || vistos.has(id)) return null;
-        const cad = this.centroNoCadastro(id, p.companyId);
-        if (cad && cad.outraEmpresa) return null;
-        vistos.add(id);
-        return { id: (cad && cad.id) || id, nome: this.nomeCentro(id, s.ccTituloNome || s.name, p.companyId), pct: Number(s.sharePct) > 0 ? this.pctCurto(s.sharePct) : "" };
-      }).filter(Boolean);
+    let caixas = mista || sociedade ? [] : obras.flatMap(o => this.caixasDaObra(o, p.companyId).map(c => ({ ...c, pct: !(Number(o.defaultPartnerShare) > 0) ? "" : this.pctCurto(o.defaultPartnerShare) })));
+    if (!mista && !sociedade) {
+      caixas = caixas.filter((c) => this.nomeEhParceiro(c.nome));
     }
     const kids = mista
       ? this.ramosMistos(p)
-      : (caixas.length
+      : (!sociedade && caixas.length
         ? `<ul>${caixas.map(c => `<li><span class="soc-tree-pct">${this.esc(c.pct)}</span>${this.caixaHtml(c.id, c.nome ? `<small>${this.esc(c.nome)}</small>` : "", "is-cc")}</li>`).join("")}</ul>`
         : "");
     return `<li><div class="soc-tree-lado"><div class="soc-tree-lado-titulo">${tipo}</div>${this.caixaHtml(p.partnerName || "Sem nome", "", pj ? "is-pj" : "is-pf")}${kids}${this.listasDaParceria(p)}</div></li>`;
@@ -1892,7 +1916,7 @@ const SocietarioApp = {
     const itens = atual.itens.slice().sort((a, b) => String(a.partnerName || "").localeCompare(String(b.partnerName || ""), "pt-BR"));
     return `<div class="soc-page">
       <div class="soc-toolbar">
-        <p class="soc-help">A caixa de cima é a empresa, no centro da estrutura. Embaixo, cada parceria ou sociedade e os centros de custo com o percentual. Na mista, o empreendedor e o terrenista ficam separados, cada um com o seu centro de custo. Arraste o quadro para o lado para ver quem fica à direita.</p>
+        <p class="soc-help">A caixa de cima é a empresa, no centro da estrutura. Embaixo, cada parceria ou sociedade. Na parceria, só o centro de custo com parceiro no nome. Na sociedade, os centros dos sócios ficam só na tabela. Na mista, o empreendedor e o terrenista ficam separados, cada um com o seu centro de custo. Arraste o quadro para o lado para ver quem fica à direita.</p>
       </div>
       <div class="ml-tabs soc-emp-tabs" role="tablist">${abas}</div>
       <div class="soc-stage">
@@ -2142,7 +2166,6 @@ const SocietarioApp = {
       <div class="soc-shell">${this.abasHtml()}
       <div class="soc-page">
         <div class="soc-toolbar">
-          <p class="soc-help">Empresas geridas pelo grupo e da Gestão Ellenco entram aqui. Arraste as caixas e clique em Salvar posições para esse arranjo valer ao abrir de novo. Ctrl e a roda do mouse aumentam o desenho. Ligue pelos pontos e clique no percentual para editar a participação.</p>
           <div class="soc-toolbar-actions">
             <button type="button" class="btn btn-outline btn-sm soc-btn-link${linkBtn}" onclick="SocietarioApp.openNewLink()" title="Cria a participação entre duas caixas. Também dá para arrastar o ponto de uma caixa até a outra.">Interligação</button>
             <button type="button" class="btn btn-outline btn-sm" onclick="SocietarioApp.resetLayout()" title="Reposiciona as caixas. As ligações e os percentuais permanecem.">Reorganizar</button>
@@ -2370,12 +2393,19 @@ const SocietarioApp = {
     const to = this._linkTo || "";
     const pct = Number(document.getElementById("soc-lnk-pct").value);
     const note = document.getElementById("soc-lnk-note").value || "";
-    const contas = {
-      debitoLucro: (document.getElementById("soc-lnk-deb-lucro").value || "").trim(),
-      creditoLucro: (document.getElementById("soc-lnk-cred-lucro").value || "").trim(),
-      debitoPrejuizo: (document.getElementById("soc-lnk-deb-prej").value || "").trim(),
-      creditoPrejuizo: (document.getElementById("soc-lnk-cred-prej").value || "").trim()
+    const lerConta = (id) => {
+      const el = document.getElementById(id);
+      return el ? (el.value || "").trim() : "";
     };
+    const spe = this.controladoraEhSpeSocios(from);
+    const contas = spe
+      ? { debitoLucro: "", creditoLucro: "", debitoPrejuizo: "", creditoPrejuizo: "" }
+      : {
+        debitoLucro: lerConta("soc-lnk-deb-lucro"),
+        creditoLucro: lerConta("soc-lnk-cred-lucro"),
+        debitoPrejuizo: lerConta("soc-lnk-deb-prej"),
+        creditoPrejuizo: lerConta("soc-lnk-cred-prej")
+      };
     const de = this.entity(from);
     const para = this.entity(to);
     const existing = (this.graph.links || []).find(l => l.id === this.selectedLinkId);
@@ -2401,7 +2431,7 @@ const SocietarioApp = {
       return;
     }
     if (!Number.isFinite(pct) || pct < 0 || pct > 100) { alert("Percentual entre 0 e 100."); return; }
-    if (!contas.debitoLucro || !contas.creditoLucro || !contas.debitoPrejuizo || !contas.creditoPrejuizo) {
+    if (!spe && (!contas.debitoLucro || !contas.creditoLucro || !contas.debitoPrejuizo || !contas.creditoPrejuizo)) {
       alert("Informe a conta de débito e a de crédito do lucro e do prejuízo.");
       return;
     }
@@ -2424,7 +2454,7 @@ const SocietarioApp = {
     if (nova && !this.filhoDoCentro(para.id) && !this.ehCentro(de)) this.subirFilhasDasHoldings(this.graph.hubId);
     this._pendingLink = null;
     this.persist();
-    const seguir = window.ContabilEquiv && typeof ContabilEquiv.receberDoOrganograma === "function"
+    const seguir = !spe && window.ContabilEquiv && typeof ContabilEquiv.receberDoOrganograma === "function"
       ? ContabilEquiv.receberDoOrganograma({
         origem: String(para.companyId),
         destino: String(de.companyId),

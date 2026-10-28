@@ -4787,6 +4787,9 @@ async function processSuccessfulLogin(loggedUser) {
       if (typeof window.checkNexDueAlerts === "function") {
         window.checkNexDueAlerts();
       }
+      if (window.GerarPagamentoApp && typeof window.GerarPagamentoApp.avisoFechamento === "function") {
+        window.GerarPagamentoApp.avisoFechamento();
+      }
     }, 2500);
   } catch (err) {
     console.error("Erro no login:", err);

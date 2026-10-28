@@ -121,14 +121,15 @@ const ProcessoContraApp = {
     const abrirBtn = edita
       ? `<div class="pc-topo"><button type="button" class="btn btn-primary" id="pc-abrir-popup">Novo processo</button></div>`
       : "";
-    root.innerHTML = `<div class="pc-page">
+    root.innerHTML = this.popup && edita
+      ? `<div class="pc-page">${this.htmlPopup()}</div>`
+      : `<div class="pc-page">
         ${abrirBtn}
         <div class="search-box-wrapper pc-busca pc-filtro">
           <input type="text" id="pc-filtro" class="search-input" placeholder="Número do processo ou motivo..." style="font-style: italic;" autocomplete="off" value="${this.esc(this.filtro)}">
           <i data-lucide="search" class="search-icon"></i>
         </div>
         <div id="pc-lista"></div>
-        ${this.popup && edita ? this.htmlPopup() : ""}
       </div>`;
     this.ligarPesquisa();
     const filtro = document.getElementById("pc-filtro");
@@ -302,24 +303,21 @@ const ProcessoContraApp = {
 
   htmlPopup() {
     const autorBusca = this.papelAutor === "cliente" ? `${this.htmlPesquisa()}${this.htmlFichaBloco()}` : `<div id="pc-autor-slot"></div>`;
-    return `<div class="modal-overlay active" id="pc-popup">
-      <div class="modal-box pc-modal" role="dialog" aria-labelledby="pc-popup-titulo">
-        <div class="modal-header">
-          <h3 id="pc-popup-titulo">Novo processo</h3>
-          <button type="button" class="btn btn-fechar" id="pc-fechar">Fechar</button>
-        </div>
-        <div class="pc-popup-corpo">
-          <section class="pc-parte">
-            <h4>Autor</h4>
-            ${this.htmlAbasAutor()}
-            ${autorBusca}
-          </section>
-          <section class="pc-parte">
-            <h4>Réu</h4>
-            ${this.htmlReu()}
-          </section>
-          ${this.htmlDadosProcesso()}
-        </div>
+    return `<div class="pc-tela" id="pc-popup">
+      <div class="pc-tela-bar">
+        <button type="button" class="btn btn-fechar" id="pc-fechar">Fechar</button>
+      </div>
+      <div class="pc-popup-corpo">
+        <section class="pc-parte">
+          <h4>Autor</h4>
+          ${this.htmlAbasAutor()}
+          ${autorBusca}
+        </section>
+        <section class="pc-parte">
+          <h4>Réu</h4>
+          ${this.htmlReu()}
+        </section>
+        ${this.htmlDadosProcesso()}
       </div>
     </div>`;
   },

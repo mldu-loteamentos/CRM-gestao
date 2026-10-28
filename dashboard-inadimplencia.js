@@ -223,6 +223,11 @@ const DashboardInadimplencia = (function() {
 
   function sprintBaseline(snap) {
     if (!snap) return null;
+    // 27/10/2026: o relatório das 11h23 publicou 4.181.968,35 / 941 / 1017.
+    // Às 18h06 a fila gravou outra carteira (4.559.477 / 1.158 / 1.264) por cima.
+    if (snap.date === "2026-10-27") {
+      return { value: 4181968.35, clients: 941, titles: 1017 };
+    }
     const hasSprint = snap.sprint_value != null && snap.sprint_clients != null && snap.sprint_titles != null;
     if (hasSprint) {
       return {
@@ -244,19 +249,33 @@ const DashboardInadimplencia = (function() {
     return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
   }
 
-  async function persistSprintBaseline(listOrMetrics) {
+  async function persistSprintBaseline(listOrMetrics, origem) {
     const metrics = listOrMetrics && listOrMetrics.titles != null && listOrMetrics.clients != null && listOrMetrics.value != null
       ? listOrMetrics
       : sprintCarteiraMetrics(listOrMetrics);
     if (!metrics || (!metrics.clients && !metrics.titles)) return;
     if (!window.firebaseCollections || !window.firebaseDb) return;
+    const fonte = origem === "relatorio" ? "relatorio" : "fila";
     const dateStr = todayIsoLocal();
     const docRef = window.firebaseCollections.doc(window.firebaseDb, "inadimplencia_snapshots", dateStr);
     try {
       const existing = await window.firebaseCollections.getDoc(docRef);
       if (existing && existing.exists()) {
         const prev = existing.data() || {};
-        const prevTitles = Number(prev.sprint_titles != null ? prev.sprint_titles : prev.total_count) || 0;
+        const temSprint = prev.sprint_value != null && prev.sprint_titles != null;
+        if (temSprint && fonte !== "relatorio") {
+          console.warn(`[Sprint] Base ${dateStr} mantida. A montagem da fila não substitui a carteira já gravada.`);
+          return;
+        }
+        const publicado = prev.sprint_origem === "relatorio";
+        const prevClients = Number(prev.sprint_clients) || 0;
+        const prevTitles = Number(prev.sprint_titles) || 0;
+        const carteiraMaior = (prevClients > 0 && metrics.clients > prevClients * 1.2)
+          || (prevTitles > 0 && metrics.titles > prevTitles * 1.2);
+        if (publicado && carteiraMaior) {
+          console.warn(`[Sprint] Base ${dateStr} mantida (${prevClients} clientes / ${prevTitles} títulos). O relatório novo (${metrics.clients} clientes / ${metrics.titles} títulos) é outra carteira.`);
+          return;
+        }
         if (prevTitles > 0 && metrics.titles < prevTitles * 0.5) {
           console.warn(`[Sprint] Base ${dateStr} não atualizada: ${metrics.titles} títulos contra ${prevTitles} (carga parcial).`);
           return;
@@ -270,6 +289,7 @@ const DashboardInadimplencia = (function() {
       sprint_titles: metrics.titles,
       sprint_avg_delay: metrics.avgDelay || 0,
       sprint_saved_at: new Date().toISOString(),
+      sprint_origem: fonte,
       total_value: metrics.value,
       total_customers: metrics.clients,
       total_count: metrics.titles,
@@ -2288,25 +2308,15 @@ const DashboardInadimplencia = (function() {
     const chart31t = chart31.map((x) => x.c);
 
     let ontemSnap = null;
-    if (snapshots.length > 1) {
-        const hojeDateStr = snapshots[snapshots.length-1].date;
-        for (let i = snapshots.length - 2; i >= 0; i--) {
-            const s = snapshots[i];
-            if (s.date === hojeDateStr) continue;
-            let isDiaUtil = true;
-            if (s.date) {
-                const d = new Date(s.date + 'T12:00:00');
-                const day = d.getDay();
-                if (day === 0 || day === 6) isDiaUtil = false; // Domingo ou Sábado
-            }
-            if (isDiaUtil) {
-                ontemSnap = s;
-                break;
-            }
-        }
-        if (!ontemSnap) {
-            ontemSnap = snapshots[snapshots.length - 2];
-        }
+    const hojeIso = todayIsoLocal();
+    for (let i = snapshots.length - 1; i >= 0; i--) {
+        const s = snapshots[i];
+        if (!s || !s.date || s.date >= hojeIso) continue;
+        const d = new Date(s.date + "T12:00:00");
+        const day = d.getDay();
+        if (day === 0 || day === 6) continue;
+        ontemSnap = s;
+        break;
     }
 
     let diffValueStr = "";
@@ -2341,7 +2351,7 @@ const DashboardInadimplencia = (function() {
       clients: uniqueClients.size,
       titles: totalBills,
       avgDelay
-    }).catch((e) => console.warn("[Sprint] Não salvou a base do dia", e));
+    }, "relatorio").catch((e) => console.warn("[Sprint] Não salvou a base do dia", e));
 
     const opSummary = (typeof window.buildSprintOperatorSummaries === "function") ? window.buildSprintOperatorSummaries() : "";
     const teamsText = `📊 *Sprint Diário - ${dateStr}*\n💰 *Valor em Atraso:* ${fmtInteiro(totalOverdue)}${diffValueStr}\n👥 *Clientes em Atraso:* ${uniqueClients.size}${diffClientsStr}\n📄 *Títulos Vencidos:* ${totalBills}${diffBillsStr}\n⏱️ *Atraso Médio:* ${avgDelay} dias` + (opSummary ? `\n\n${opSummary}` : "");

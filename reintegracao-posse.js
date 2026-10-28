@@ -84,6 +84,7 @@ window.ReintegracaoPosseApp = {
         id: String(id),
         nome: this.nomeCliente(id),
         doc: this.docCliente(id),
+        saleId: ultima.saleId || ultima.contractId || "",
         etapa: etapa,
         desde: ultima.date || "",
         prazo: ultima.prazo || ""
@@ -195,10 +196,18 @@ window.ReintegracaoPosseApp = {
     this.render();
   },
 
-  verFicha(id) {
-    if (typeof window.openCustomerFromRelacionamento === "function") {
-      window.openCustomerFromRelacionamento(id);
+  verFicha(id, saleId) {
+    const sid = String(id || "");
+    let titulo = saleId || "";
+    if (!titulo) {
+      const fila = (window.rawClientList || window.clientList || []).find((c) => String(c.customerId) === sid);
+      if (fila && fila.saleId) titulo = fila.saleId;
     }
+    if (typeof window.viewCustomerCard === "function") {
+      window.viewCustomerCard(sid, titulo || null);
+      return;
+    }
+    if (typeof window.openCustomerFromRelacionamento === "function") window.openCustomerFromRelacionamento(sid);
   },
 
   responder(id, campo, valor) {
@@ -258,24 +267,44 @@ window.ReintegracaoPosseApp = {
     </div>`;
   },
 
-  pessoaHtml(c) {
+  linhaHtml(c) {
     const aberto = this.aberto === c.id;
     const n = this.pendencias(c).length;
-    return `<article class="reint-pessoa${aberto ? " is-open" : ""}">
-      <div class="reint-pessoa-linha">
-        <button type="button" class="reint-pessoa-abre" onclick="ReintegracaoPosseApp.abrirCliente('${this.esc(c.id)}')">
-          <i data-lucide="chevron-right" class="reint-chev"></i>
-          <span class="reint-nome">
-            <strong>${this.esc(c.nome)}</strong>
-            <span class="reint-sub">${this.esc(c.id)}${c.doc ? " · " + this.esc(c.doc) : ""}</span>
-          </span>
-          <span class="reint-desde">Desde ${this.dataBr(c.desde)}</span>
-          <span class="reint-prox">${this.esc(this.proximo(c))}${n > 1 ? `<span class="reint-count" title="Pendências">${n}</span>` : ""}</span>
+    const id = this.esc(c.id);
+    const detalhe = aberto
+      ? `<tr class="reint-detalhe"><td class="reint-detalhe-cell" colspan="5">${this.painel(c)}</td></tr>`
+      : "";
+    return `<tr class="reint-linha${aberto ? " is-open" : ""}" onclick="ReintegracaoPosseApp.abrirCliente('${id}')">
+      <td class="cc-nome"><i data-lucide="chevron-right" class="reint-chev"></i><strong>${this.esc(c.nome)}</strong></td>
+      <td>${this.esc(c.doc || c.id)}</td>
+      <td>${this.dataBr(c.desde)}</td>
+      <td>${this.esc(this.proximo(c))}${n > 1 ? `<span class="reint-count" title="Pendências">${n}</span>` : ""}</td>
+      <td class="is-center reint-acao" onclick="event.stopPropagation()">
+        <button type="button" class="btn btn-primary btn-sm" title="Detalhes" onclick="ReintegracaoPosseApp.verFicha('${id}','${this.esc(c.saleId || "")}')" style="padding:2px 6px;font-size:0.7rem;line-height:1.2;">
+          <i data-lucide="eye" style="width:14px;height:14px;margin-right:2px;vertical-align:middle;"></i> Detalhes
         </button>
-        <button type="button" class="tvig-ico" title="Abrir ficha" onclick="ReintegracaoPosseApp.verFicha('${this.esc(c.id)}')"><i data-lucide="eye" style="width:15px;height:15px;"></i></button>
-      </div>
-      ${this.painel(c)}
-    </article>`;
+      </td>
+    </tr>${detalhe}`;
+  },
+
+  tabela(gente) {
+    return `<div class="cc-scroll">
+      <table class="cc-table reint-table">
+        <colgroup>
+          <col><col class="reint-c-doc"><col class="reint-c-desde"><col><col class="reint-c-acao">
+        </colgroup>
+        <thead>
+          <tr>
+            <th>Cliente</th>
+            <th>CPF/CNPJ</th>
+            <th>Desde</th>
+            <th>Próximo passo</th>
+            <th class="is-center"></th>
+          </tr>
+        </thead>
+        <tbody>${gente.map((c) => this.linhaHtml(c)).join("")}</tbody>
+      </table>
+    </div>`;
   },
 
   render() {
@@ -289,7 +318,7 @@ window.ReintegracaoPosseApp = {
     const html = grupos.length ? grupos.map((g) => {
       const aberto = this.grupoAberto(g.etapa.id, g.gente.length);
       const corpo = g.gente.length
-        ? g.gente.map((c) => this.pessoaHtml(c)).join("")
+        ? this.tabela(g.gente)
         : `<p class="reint-vazio">Nenhum cliente nesta etapa.</p>`;
       return `<details class="reint-grupo"${aberto ? " open" : ""} ontoggle="ReintegracaoPosseApp.aoGrupo(event,'${g.etapa.id}')">
         <summary>
