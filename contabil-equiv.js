@@ -918,18 +918,31 @@ const ContabilEquiv = {
     }));
   },
 
+  larguraFiltroEmpresa() {
+    const itens = this.itensPlanoEmpresa();
+    let maior = "Selecione a empresa".length;
+    itens.forEach((it) => { maior = Math.max(maior, String(it.label || "").length); });
+    return Math.min(860, Math.max(520, Math.round(maior * 8.4) + 64));
+  },
+
   paintPlanoEmpresas() {
     const box = document.getElementById("ctb-plano-emp-box");
     if (!box || !window.MlEmpresaFilter) return;
+    if ((this.state.planoEmpIds || []).length > 1) this.state.planoEmpIds = [String(this.state.planoEmpIds[0])];
     const opts = {
       id: "ctb-plano-emp",
-      label: "Empresas",
+      label: "Empresa",
       items: this.itensPlanoEmpresa(),
       selectedIds: this.state.planoEmpIds,
       open: this.state.planoEmpOpen,
       query: this.state.planoEmpQuery,
-      emptyMeansAll: false
+      emptyMeansAll: false,
+      emptyLabel: "Selecione a empresa",
+      single: true
     };
+    box.style.width = this.larguraFiltroEmpresa() + "px";
+    box.style.maxWidth = "100%";
+    box.style.flex = "0 0 auto";
     box.innerHTML = MlEmpresaFilter.html(opts);
     MlEmpresaFilter.bind("ctb-plano-emp", {
       toggleOpen: () => {
@@ -948,22 +961,18 @@ const ContabilEquiv = {
             id: "ctb-plano-emp",
             items: this.itensPlanoEmpresa(),
             selectedIds: this.state.planoEmpIds,
-            query: this.state.planoEmpQuery
+            query: this.state.planoEmpQuery,
+            single: true
           });
         }
       },
       toggleId: (itemId, on) => {
-        const sid = String(itemId);
-        const lista = this.state.planoEmpIds.map(String);
-        if (on) { if (lista.indexOf(sid) < 0) lista.push(sid); }
-        else this.state.planoEmpIds = lista.filter((x) => x !== sid);
-        if (on) this.state.planoEmpIds = lista;
+        if (!on) return;
+        this.state.planoEmpIds = [String(itemId)];
+        this.state.planoEmpOpen = false;
         this.paintPlanoEmpresas();
       },
-      selectAll: () => {
-        this.state.planoEmpIds = this.itensPlanoEmpresa().map((c) => c.id);
-        this.paintPlanoEmpresas();
-      },
+      selectAll: () => {},
       selectNone: () => {
         this.state.planoEmpIds = [];
         this.paintPlanoEmpresas();
@@ -1028,7 +1037,7 @@ const ContabilEquiv = {
   async buscarPlano() {
     const ids = (this.state.planoEmpIds || []).map(String).filter(Boolean);
     if (!ids.length) {
-      this.state.planoErro = "Escolha ao menos uma empresa.";
+      this.state.planoErro = "Escolha a empresa.";
       this.state.planoMsg = "";
       this.render({ semLer: true });
       return;
@@ -1103,13 +1112,15 @@ const ContabilEquiv = {
         </div>
       </div>
       <p class="ctb-eq-help">Contas do cadastro contábil do Sienge, por empresa. O código com máscara é o da conta; a reduzida é o id usado no lançamento.</p>
-      ${s.planoLendo ? `<div class="ml-load" style="margin:0 0 12px;">
-        <div class="loading-spinner" aria-hidden="true"></div>
-        <div class="loading-status-text">${this.esc(s.planoMsg || "Lendo as contas contábeis…")}</div>
-        <div class="ml-load-track"><div class="loading-progress-bar" style="width:${Math.max(12, s.planoProgresso || 20)}%"></div></div>
+      ${s.planoLendo ? `<div class="ctb-plano-load">
+        <div class="ml-load">
+          <div class="loading-spinner" aria-hidden="true"></div>
+          <div class="loading-status-text">${this.esc(s.planoMsg || "Lendo as contas contábeis…")}</div>
+          <div class="ml-load-track"><div class="loading-progress-bar" style="width:${Math.max(12, s.planoProgresso || 20)}%"></div></div>
+        </div>
       </div>` : ""}
       ${s.planoErro ? `<p class="ctb-eq-status" style="color:#b91c1c;margin:0 0 8px;">${this.esc(s.planoErro)}</p>` : ""}
-      ${!s.planoLendo && s.planoMsg ? `<p class="ctb-eq-status" style="margin:0 0 8px;">${this.esc(s.planoMsg)}</p>` : ""}
+      ${s.planoLendo ? "" : `${!s.planoMsg ? "" : `<p class="ctb-eq-status" style="margin:0 0 8px;">${this.esc(s.planoMsg)}</p>`}
       <div style="margin:0 0 10px;max-width:360px;">
         <input type="search" value="${this.esc(s.planoBusca || "")}" placeholder="Buscar código ou nome" oninput="ContabilEquiv.filtrarPlano(this.value)"
           style="width:100%;height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;box-sizing:border-box;">
@@ -1127,7 +1138,7 @@ const ContabilEquiv = {
           </thead>
           <tbody>${linhas || `<tr><td colspan="5" style="text-align:center;padding:30px;">${s.planoLista && s.planoLista.length ? "Nenhuma conta neste filtro." : "Escolha a empresa e clique em Buscar."}</td></tr>`}</tbody>
         </table>
-      </div>
+      </div>`}
     </div>`;
   },
 

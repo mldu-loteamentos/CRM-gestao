@@ -298,20 +298,23 @@ const ProcessoContraApp = {
 
   htmlPopup() {
     const autorBusca = this.papelAutor === "cliente" ? `${this.htmlPesquisa()}${this.htmlFichaBloco()}` : `<div id="pc-autor-slot"></div>`;
-    return `<div class="pc-tela" id="pc-popup">
+    const largo = this.papelAutor === "cliente" || (this.papelAutor !== "cliente" && this.tipoParte === "cliente");
+    return `<div class="pc-tela pc-folha" id="pc-popup">
       <div class="pc-tela-bar">
         <button type="button" class="btn btn-fechar" id="pc-fechar">Fechar</button>
       </div>
       <div class="pc-popup-corpo">
-        <section class="pc-parte">
-          <h4>Autor</h4>
-          ${this.htmlAbasAutor()}
-          ${autorBusca}
-        </section>
-        <section class="pc-parte">
-          <h4>Réu</h4>
-          ${this.htmlReu()}
-        </section>
+        <div class="pc-partes${largo ? " is-stack" : ""}">
+          <section class="pc-parte">
+            <h4>Autor</h4>
+            ${this.htmlAbasAutor()}
+            ${autorBusca}
+          </section>
+          <section class="pc-parte">
+            <h4>Réu</h4>
+            ${this.htmlReu()}
+          </section>
+        </div>
         ${this.htmlDadosProcesso()}
       </div>
     </div>`;
@@ -334,8 +337,10 @@ const ProcessoContraApp = {
       ? `<div class="pc-hits">${linhas}</div>`
       : (this.credorMsg ? `<p class="cj-nota">${this.esc(this.credorMsg)}</p>` : "");
     return `<div class="pc-busca-tipo">
-      <label>Credor<input type="text" id="pc-credor-q" placeholder="Nome, CPF ou CNPJ" value="${this.esc(this.credorBusca)}" autocomplete="off"></label>
-      <button type="button" class="btn btn-primary" id="pc-credor-buscar">Pesquisar</button>
+      <div class="pc-busca-linha">
+        <label>Credor<input type="text" id="pc-credor-q" placeholder="Nome, CPF ou CNPJ" value="${this.esc(this.credorBusca)}" autocomplete="off"></label>
+        <button type="button" class="btn btn-primary" id="pc-credor-buscar">Pesquisar</button>
+      </div>
       ${lista}
     </div>`;
   },
