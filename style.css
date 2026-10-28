@@ -11258,11 +11258,13 @@ tr.pr-liberado td { background: #f7faf8; }
 .reint-busca { max-width: 360px; margin: 0 0 14px; }
 .reint-grupos { display: flex; flex-direction: column; gap: 10px; }
 .reint-grupo { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; }
-.reint-grupo > summary { list-style: none; display: flex; align-items: center; gap: 10px; padding: 14px 16px; cursor: pointer; background: #f8fafc; border-left: 3px solid #105436; }
+.reint-grupo > summary { list-style: none; display: flex; align-items: center; gap: 10px; padding: 14px 16px; cursor: pointer; background: linear-gradient(90deg, #105436 0%, #0a3a28 100%); color: #fff; }
+.reint-grupo > summary:hover { background: linear-gradient(90deg, #0d4a2e 0%, #07281c 100%); }
 .reint-grupo > summary::-webkit-details-marker { display: none; }
-.reint-grupo-nome { flex: 1; font-weight: 700; color: #105436; font-size: 0.92rem; }
+.reint-grupo-nome { flex: 1; font-weight: 700; color: #fff; font-size: 0.92rem; }
 .reint-count { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 7px; border-radius: 999px; background: #e2e8f0; color: #334155; font-size: 0.75rem; font-weight: 700; }
-.reint-grupo[open] > summary .reint-count { background: #dcfce7; color: #105436; }
+.reint-grupo > summary .reint-count { background: rgba(255, 255, 255, 0.22); color: #fff; }
+.reint-grupo > summary .reint-chev { color: #fff; }
 .reint-chev { width: 16px; height: 16px; color: #64748b; transition: transform 0.15s ease; flex: none; }
 .reint-grupo[open] > summary .reint-chev { transform: rotate(180deg); }
 .reint-lista { border-top: 1px solid #e2e8f0; }
