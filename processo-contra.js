@@ -105,6 +105,7 @@ const ProcessoContraApp = {
 
   init() {
     this.lerMotivosLocal();
+    this.popup = this.podeEditar();
     this.render();
     this.carregar();
     this.carregarMotivosNuvem();
@@ -118,13 +119,9 @@ const ProcessoContraApp = {
     if (this.empresaId && String(this.empresaId) !== String(this.tituloEmpresa) && !this.empresas().some((c) => String(c.id) === String(this.empresaId))) this.empresaId = "";
     if (this.autorEmpresaId && !this.empresas().some((c) => String(c.id) === String(this.autorEmpresaId))) this.autorEmpresaId = "";
     const edita = this.podeEditar();
-    const abrirBtn = edita
-      ? `<div class="pc-topo"><button type="button" class="btn btn-primary" id="pc-abrir-popup">Novo processo</button></div>`
-      : "";
     root.innerHTML = this.popup && edita
       ? `<div class="pc-page">${this.htmlPopup()}</div>`
       : `<div class="pc-page">
-        ${abrirBtn}
         <div class="search-box-wrapper pc-busca pc-filtro">
           <input type="text" id="pc-filtro" class="search-input" placeholder="Número do processo ou motivo..." style="font-style: italic;" autocomplete="off" value="${this.esc(this.filtro)}">
           <i data-lucide="search" class="search-icon"></i>
@@ -140,8 +137,6 @@ const ProcessoContraApp = {
     const num = document.getElementById("pc-numero");
     if (num) num.addEventListener("input", () => { this.processo = num.value || ""; });
     this.ligarMotivo();
-    const abrirPop = document.getElementById("pc-abrir-popup");
-    if (abrirPop) abrirPop.addEventListener("click", () => { this.popup = true; this.render(); });
     this.ligarPopup();
     const cancelar = document.getElementById("pc-cancelar");
     const abrir = document.getElementById("pc-abrir");
