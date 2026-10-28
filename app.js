@@ -10756,6 +10756,12 @@ async function loadDashboardData(forceRefresh = false) {
         }).catch(() => null);
       }
       await _loadDashboardData_Impl(force);
+    } catch (e) {
+      console.error("[Fila] Não terminou de montar", e);
+      const body = document.getElementById("defaulters-table-body");
+      if (body && body.querySelector(".loading-spinner")) {
+        body.innerHTML = `<tr><td colspan="13" style="text-align:center; padding:30px; color:#991b1b;">A fila parou ao montar a tabela. Atualize a página.</td></tr>`;
+      }
     }
     finally {
       window._isDefaultersLoading = false;
@@ -11333,6 +11339,7 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
   let consolidated = {};
   let subjudiceMemory = {};
   try { subjudiceMemory = JSON.parse(localStorage.getItem('subjudiceHistory') || '{}') || {}; } catch (e) { subjudiceMemory = {}; }
+  const filaPausa = () => new Promise((resolve) => setTimeout(resolve, 0));
   if (window._filaProntaAtiva && filaPronta && filaPronta.length) {
     filaPronta.forEach((c) => {
       if (!c) return;
@@ -11353,7 +11360,6 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
     }
   }
   const todayStr = new Date().toISOString().split('T')[0];
-  const filaPausa = () => new Promise((resolve) => setTimeout(resolve, 0));
 
   for (let bi = 0; bi < bills.length; bi++) {
     const bill = bills[bi];
