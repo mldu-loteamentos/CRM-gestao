@@ -103,18 +103,61 @@ async function preencherCodigo(page, frame, nome, nomeDescricao, codigos, oQue) 
   throw new Error(`O Sienge não encontrou ${oQue} ${codigos.filter(Boolean).join(" / ")}.`);
 }
 
-async function abrirTela(ctx, page, email, endereco, log, opcoes) {
-  const ir = async () => {
-    await page.goto(endereco, { waitUntil: "domcontentloaded" });
-    await page.getByRole("button", { name: /^entendi$/i }).first().click({ timeout: 4000 }).catch(() => {});
-  };
-  if (opcoes && opcoes.sessaoPronta) {
-    await ir();
+// Com a sessão já aberta, troca só o hash do Sienge. Recarregar a página inteira derruba o acesso e pede login de novo.
+async function irPara(page, endereco, sessaoPronta) {
+  const hash = endereco.includes("#") ? endereco.slice(endereco.indexOf("#")) : "";
+  const atual = page.url();
+  const noSienge = /sienge\.com\.br\/sienge\//i.test(atual);
+  if (sessaoPronta && noSienge) {
+    if (hash && atual.indexOf(hash) === -1) {
+      await page.evaluate((h) => { window.location.hash = h; }, hash);
+      await page.waitForTimeout(700);
+    }
     return;
   }
-  log(`Entrando no Sienge como ${email}`);
-  await sessao.entrarComo(ctx, page, email, log);
-  await ir();
+  await page.goto(endereco, { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: /^entendi$/i }).first().click({ timeout: 4000 }).catch(() => {});
+}
+
+async function abrirTela(ctx, page, email, endereco, log, opcoes) {
+  const pronta = !!(opcoes && opcoes.sessaoPronta);
+  if (!pronta) {
+    log(`Entrando no Sienge como ${email}`);
+    await sessao.entrarComo(ctx, page, email, log);
+  }
+  await irPara(page, endereco, pronta);
+}
+
+async function botaoLimpar(frame) {
+  const porTexto = frame.getByRole("button", { name: /^limpar$/i }).filter({ visible: true });
+  if (await porTexto.count().catch(() => 0)) return porTexto.first();
+  const porNome = frame.locator('input[name="btLimpar"], input[name="pbLimpar"], button[name="btLimpar"], button[name="pbLimpar"]').filter({ visible: true });
+  if (await porNome.count().catch(() => 0)) return porNome.first();
+  return null;
+}
+
+// Limpa filtros e a grade na mesma tela. Não reabre o Sienge nem a página 1806.
+async function limparTela(page, frame) {
+  const botao = await botaoLimpar(frame);
+  if (!botao) throw new Error("Não achei o botão Limpar em Programações de Pagamento.");
+  await frame.evaluate(() => { window.__roboAntes = 1; }).catch(() => {});
+  await botao.click();
+  const fim = Date.now() + 8000;
+  while (Date.now() < fim) {
+    await page.waitForTimeout(400);
+    const novo = page.frames().find((x) => /gridPagtoEscProgPagamento\.do/.test(x.url()));
+    if (!novo) continue;
+    const estado = await novo.evaluate(() => {
+      const el = [...document.querySelectorAll('input[name="entity.lote.dtVenctoInicial"]')].find((e) => e.type !== "hidden" && (e.offsetWidth || e.offsetHeight));
+      return {
+        pronto: !window.__roboAntes && document.readyState === "complete",
+        venc: el ? String(el.value || "") : ""
+      };
+    }).catch(() => null);
+    if (!estado) continue;
+    if (estado.pronto || !String(estado.venc).replace(/\D/g, "")) return novo;
+  }
+  return page.frames().find((x) => /gridPagtoEscProgPagamento\.do/.test(x.url())) || frame;
 }
 
 function contaDoLote(lote) {
@@ -144,10 +187,21 @@ module.exports = {
       : (String(lote.dia || venc[0]).slice(0, 10) < hojeIso() ? hojeIso() : String(lote.dia || venc[0]).slice(0, 10));
 
     const avisos = vigiarAvisos(page);
-    await abrirTela(ctx, page, email, TELA_PROGRAMACAO, log, opcoes);
-    log("Abrindo Programações de Pagamento");
-    const frame = await quadro(page, (u) => /gridPagtoEscProgPagamento\.do/.test(u));
-    if (!frame) throw new Error("A tela Programações de Pagamento não abriu no Sienge (o usuário tem acesso a ela?).");
+    const ehProgramacao = (u) => /gridPagtoEscProgPagamento\.do/.test(u);
+    let frame = await quadro(page, ehProgramacao, 1200);
+    if (frame) {
+      log("Limpando Programações de Pagamento para o próximo lote");
+      frame = await limparTela(page, frame);
+    } else {
+      await abrirTela(ctx, page, email, TELA_PROGRAMACAO, log, opcoes);
+      log("Abrindo Programações de Pagamento");
+      frame = await quadro(page, ehProgramacao);
+      if (!frame) throw new Error("A tela Programações de Pagamento não abriu no Sienge (o usuário tem acesso a ela?).");
+      if (opcoes && opcoes.sessaoPronta) {
+        log("Limpando Programações de Pagamento");
+        frame = await limparTela(page, frame).catch((e) => { log(e.message); return frame; });
+      }
+    }
 
     log(`Preenchendo empresa, vencimento, data da baixa ${dataBr(baixa)} e conta`);
     if (empresa.titulos.length === 1) {
@@ -222,10 +276,11 @@ module.exports = {
     }
     if (avisos.length > antes) log("Avisos do Sienge: " + avisos.slice(antes).join(" | "));
     log(`Gerado lote de pagamento escritural nº ${m[1]}`);
-    log("Reabrindo Programações de Pagamento");
-    await page.goto(TELA_PROGRAMACAO, { waitUntil: "domcontentloaded" });
-    await page.getByRole("button", { name: /^entendi$/i }).first().click({ timeout: 4000 }).catch(() => {});
-    await quadro(page, (u) => /gridPagtoEscProgPagamento\.do/.test(u), 45000);
+    const frameLimpo = await quadro(page, ehProgramacao, 8000);
+    if (frameLimpo) {
+      log("Limpando a tela para o próximo lote");
+      await limparTela(page, frameLimpo).catch((e) => log(e.message));
+    }
     return { numeroSienge: m[1] };
   },
 

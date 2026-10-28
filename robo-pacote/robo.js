@@ -33,6 +33,7 @@ function registrar(evento) {
 
 let ocupado = null;
 let janela = null;
+let andamento = { total: 0, atual: "", msg: "", feitos: [] };
 
 function agendarFecharJanela(ms) {
   if (janela && janela.timer) clearTimeout(janela.timer);
@@ -126,6 +127,7 @@ async function executar(tipo, dados, usuario, email) {
 async function executarFila(lotes, usuario, email) {
   const logGeral = (msg) => console.log("  [fila] " + msg);
   ocupado = { tipo: "fila", loteId: String(lotes.length) + " lotes", email, desde: new Date().toISOString() };
+  andamento = { total: lotes.length, atual: "", msg: `Preparando ${lotes.length} lote(s) no Sienge…`, feitos: [] };
   console.log(`\nFila de ${lotes.length} lote(s) (pedido por ${usuario} · ${email})`);
   const resultados = [];
   try {
@@ -134,6 +136,25 @@ async function executarFila(lotes, usuario, email) {
     await sessao.entrarComo(j.ctx, j.page, email, logGeral);
     j.pronta = true;
     const opcoes = { sessaoPronta: true };
+    const publicar = (item) => {
+      andamento.feitos = andamento.feitos.filter((x) => x.id !== item.id).concat([item]);
+    };
+    const falhaDe = async (loteId, numero, etapa, erro, log) => {
+      let print = "";
+      try {
+        print = path.join(cfg.LOGS_DIR, `erro-${loteId.replace(/[^\w-]/g, "")}-${Date.now()}.png`);
+        await j.page.screenshot({ path: print, fullPage: true });
+      } catch (x) {
+        print = "";
+      }
+      registrar({ tipo: "fila", loteId, usuario, email, ok: false, numeroSienge: numero, erro, log, print });
+      console.log("  ERRO: " + erro);
+      const falha = { id: loteId, ok: false, numeroSienge: numero, etapa, erro, log };
+      resultados.push(falha);
+      publicar(falha);
+      andamento.atual = "";
+    };
+    const criados = [];
     for (let i = 0; i < lotes.length; i++) {
       const lote = lotes[i];
       const loteId = String(lote.id || "");
@@ -144,24 +165,38 @@ async function executarFila(lotes, usuario, email) {
       };
       let numero = "";
       try {
+        andamento.atual = loteId;
+        andamento.msg = `Gerando lote ${i + 1} de ${lotes.length} no Sienge…`;
         passo(`Lote ${i + 1} de ${lotes.length}`);
         const gerado = await passos.gerarLote(j.ctx, j.page, email, lote, passo, opcoes);
         numero = String((gerado && gerado.numeroSienge) || "");
-        const aprovado = await passos.aprovarLote(j.ctx, j.page, email, { lote, numeroSienge: numero }, passo, opcoes);
+        publicar({ id: loteId, ok: false, numeroSienge: numero, etapa: "gerado", log });
+        criados.push({ lote, loteId, numero, log });
+      } catch (e) {
+        await falhaDe(loteId, numero, "gerar", e.message, log);
+      }
+    }
+    for (let i = 0; i < criados.length; i++) {
+      const item = criados[i];
+      const loteId = item.loteId;
+      const numero = item.numero;
+      const log = item.log;
+      const passo = (msg) => {
+        log.push(msg);
+        console.log(`  [autorizar ${i + 1}/${criados.length} ${loteId}] ${msg}`);
+      };
+      try {
+        andamento.atual = loteId;
+        andamento.msg = `Autorizando o lote nº ${numero}…`;
+        const aprovado = await passos.aprovarLote(j.ctx, j.page, email, { lote: item.lote, numeroSienge: numero }, passo, opcoes);
         const arquivo = String((aprovado && aprovado.arquivo) || "");
         registrar({ tipo: "fila", loteId, usuario, email, ok: true, numeroSienge: numero, arquivo, log });
-        resultados.push({ id: loteId, ok: true, numeroSienge: numero, arquivo, log });
+        const feito = { id: loteId, ok: true, numeroSienge: numero, arquivo, log };
+        resultados.push(feito);
+        publicar(feito);
+        andamento.atual = "";
       } catch (e) {
-        let print = "";
-        try {
-          print = path.join(cfg.LOGS_DIR, `erro-${loteId.replace(/[^\w-]/g, "")}-${Date.now()}.png`);
-          await j.page.screenshot({ path: print, fullPage: true });
-        } catch (x) {
-          print = "";
-        }
-        registrar({ tipo: "fila", loteId, usuario, email, ok: false, numeroSienge: numero, erro: e.message, log, print });
-        console.log("  ERRO: " + e.message);
-        resultados.push({ id: loteId, ok: false, numeroSienge: numero, etapa: numero ? "aprovar" : "gerar", erro: e.message, log });
+        await falhaDe(loteId, numero, "aprovar", e.message, log);
       }
     }
     const ok = resultados.length > 0 && resultados.every((r) => r.ok);
@@ -243,6 +278,10 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && url.pathname === "/status") {
     return responder(res, 200, { online: true, pronto: !!passos.PRONTO, fila: true, ocupado, pareado: tokenOk(req) }, origem);
+  }
+  if (req.method === "GET" && url.pathname === "/andamento") {
+    if (!tokenOk(req)) return responder(res, 401, { ok: false, erro: "Código do robô inválido." }, origem);
+    return responder(res, 200, andamento, origem);
   }
   if (req.method === "GET" && url.pathname === "/parear") {
     if (!origem || !cfg.ORIGENS_PAREAMENTO.some((re) => re.test(origem))) {

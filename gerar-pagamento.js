@@ -2306,7 +2306,7 @@ const GerarPagamentoApp = {
           <h3 id="gp-fila-tit">${grupos.length} lote(s) · ${empresas.length} empresa(s)</h3>
           <p>${titulos} título(s) · ${this.money(totalGeral)}${quando ? " · " + this.esc(quando) : ""}</p>
           <div class="gp-fila-lista">${blocos}</div>
-          <p class="gp-fila-nota">O robô cria, autoriza e gera o arquivo de todos esses lotes antes de sair do Sienge.</p>
+          <p class="gp-fila-nota">O robô fica no Sienge. Depois de cada lote, limpa a tela e começa o próximo. A lista sai de A gerar e aparece em Já em lote conforme cada um termina.</p>
           <div class="gp-fila-acoes">
             <button type="button" class="btn btn-cancel" data-no>Cancelar</button>
             <button type="button" class="btn btn-primary" data-ok>Gerar lotes</button>
@@ -2330,6 +2330,76 @@ const GerarPagamentoApp = {
     }
   },
 
+  /* Atualiza o lote na tela sem gravar o mesmo passo duas vezes. etapa "gerado" ainda está autorizando. */
+  async aplicarItemFila(item) {
+    const lote = item && this.state.lotes.find((l) => l.id === item.id);
+    if (!lote) return false;
+    const sg = lote.sienge || {};
+    const erro = item.erro || "";
+    if (item.ok) {
+      if (sg.status === "aprovado") return false;
+      if (sg.status !== "gerado") {
+        await this.registrarSienge(lote, "gerar", { ok: true, numeroSienge: item.numeroSienge }, { status: "gerado", numero: item.numeroSienge || "", geradoEm: new Date().toISOString(), geradoPor: this.usuarioAtual(), erro: "" });
+      }
+      await this.registrarSienge(lote, "aprovar", { ok: true, numeroSienge: item.numeroSienge }, { status: "aprovado", aprovadoEm: new Date().toISOString(), aprovadoPor: this.usuarioAtual(), arquivo: item.arquivo || "", erro: "" });
+      return true;
+    }
+    if (item.numeroSienge && item.etapa === "gerado") {
+      if (sg.status === "gerado" || sg.status === "aprovado") return false;
+      await this.registrarSienge(lote, "gerar", { ok: true, numeroSienge: item.numeroSienge }, { status: "gerado", numero: item.numeroSienge, geradoEm: new Date().toISOString(), geradoPor: this.usuarioAtual(), erro: "" });
+      return true;
+    }
+    if (item.numeroSienge) {
+      let mudou = false;
+      if (sg.status !== "gerado" && sg.status !== "aprovado") {
+        await this.registrarSienge(lote, "gerar", { ok: true, numeroSienge: item.numeroSienge }, { status: "gerado", numero: item.numeroSienge, geradoEm: new Date().toISOString(), geradoPor: this.usuarioAtual(), erro: "" });
+        mudou = true;
+      }
+      const ja = ((lote.sienge && lote.sienge.historico) || []).some((h) => h.acao === "aprovar" && !h.ok && h.msg === (erro || "Falha ao autorizar."));
+      if (!ja) {
+        await this.registrarSienge(lote, "aprovar", { ok: false, erro: erro || "Falha ao autorizar." }, { erro: erro || "Falha ao autorizar." });
+        mudou = true;
+      }
+      return mudou;
+    }
+    if (sg.status === "erro" && sg.erro === (erro || "Falha no robô.")) return false;
+    await this.registrarSienge(lote, "gerar", { ok: false, erro: erro || "Falha no robô." }, { status: "erro", erro: erro || "Falha no robô." });
+    return true;
+  },
+
+  async puxarAndamento() {
+    if (this._andamentoPromise) return this._andamentoPromise;
+    this._andamentoPromise = this._lerAndamento().finally(() => { this._andamentoPromise = null; });
+    return this._andamentoPromise;
+  },
+
+  async _lerAndamento() {
+    let token = "";
+    try { token = localStorage.getItem(this.ROBO_TOKEN_KEY) || ""; } catch (e) {}
+    if (!token) return;
+    let resp;
+    try {
+      resp = await fetch(this.ROBO_URL + "/andamento", { method: "GET", headers: { "X-Robo-Token": token } });
+    } catch (e) {
+      return;
+    }
+    if (!resp.ok) return;
+    const a = await resp.json().catch(() => null);
+    if (!a) return;
+    const lista = Array.isArray(a.feitos) ? a.feitos : [];
+    let mudou = false;
+    for (const item of lista) {
+      if (await this.aplicarItemFila(item)) mudou = true;
+    }
+    if (a.atual && this.state.roboLote !== a.atual) {
+      this.state.roboLote = a.atual;
+      mudou = true;
+    }
+    if (a.msg) this.state.roboMsg = a.msg;
+    if (mudou) this.paintTitulos();
+    this.pintarRoboMsg();
+  },
+
   async enviarFila(lotes) {
     const s = this.state;
     s.gerandoLote = "fila";
@@ -2339,7 +2409,14 @@ const GerarPagamentoApp = {
     this.pintarRoboMsg();
     lotes.forEach((l) => this.completarLote(l));
     if (await this.roboTemFila()) {
-      const r = await this.roboChamar("/lotes/fila", { lotes });
+      const acompanhamento = setInterval(() => { this.puxarAndamento(); }, 3000);
+      let r;
+      try {
+        r = await this.roboChamar("/lotes/fila", { lotes });
+      } finally {
+        clearInterval(acompanhamento);
+      }
+      await this.puxarAndamento();
       if (r.offline || r.cancelado) {
         s.gerandoLote = "";
         s.roboLote = "";
@@ -2354,19 +2431,7 @@ const GerarPagamentoApp = {
         s.roboLote = "";
         s.roboMsg = "";
         const lista = Array.isArray(r.resultados) ? r.resultados : [];
-        for (const item of lista) {
-          const lote = s.lotes.find((l) => l.id === item.id);
-          if (!lote) continue;
-          if (item.ok) {
-            await this.registrarSienge(lote, "gerar", { ok: true, numeroSienge: item.numeroSienge }, { status: "gerado", numero: item.numeroSienge || "", geradoEm: new Date().toISOString(), geradoPor: this.usuarioAtual(), erro: "" });
-            await this.registrarSienge(lote, "aprovar", { ok: true, numeroSienge: item.numeroSienge }, { status: "aprovado", aprovadoEm: new Date().toISOString(), aprovadoPor: this.usuarioAtual(), arquivo: item.arquivo || "", erro: "" });
-          } else if (item.numeroSienge) {
-            await this.registrarSienge(lote, "gerar", { ok: true, numeroSienge: item.numeroSienge }, { status: "gerado", numero: item.numeroSienge, geradoEm: new Date().toISOString(), geradoPor: this.usuarioAtual(), erro: "" });
-            await this.registrarSienge(lote, "aprovar", { ok: false, erro: item.erro || "Falha ao autorizar." }, { erro: item.erro || "Falha ao autorizar." });
-          } else {
-            await this.registrarSienge(lote, "gerar", { ok: false, erro: item.erro || "Falha no robô." }, { status: "erro", erro: item.erro || "Falha no robô." });
-          }
-        }
+        for (const item of lista) await this.aplicarItemFila(item);
         this.paintTitulos();
         this.pintarRoboMsg();
         const falhas = lista.filter((x) => !x.ok);
