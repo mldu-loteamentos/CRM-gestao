@@ -100,6 +100,11 @@ const SocietarioApp = {
     return !!app.flagOn(app.customOf(company.id), field);
   },
 
+  /** Origem da interligação que sai de uma holding: holding interna e SPE sócio, mesmo sem caixa no desenho. */
+  empresasOrigemHolding() {
+    return this.companies().filter((c) => this.flagEmpresa(c, "holding_interna") || this.flagEmpresa(c, "spe_socios"));
+  },
+
   /** Empresa do organograma: gerida pelo grupo ou Gestão Ellenco no cadastro. */
   empresasDaEstrutura() {
     if (!this.cadastroPronto()) return [];
@@ -1022,7 +1027,50 @@ const SocietarioApp = {
         label: String(e.companyId) + " - " + completo.toLocaleUpperCase("pt-BR")
       });
     });
+    if (lado === "de") {
+      const ja = new Set(itens.map((item) => {
+        const ent = this.entity(item.id);
+        return ent && ent.companyId ? String(ent.companyId) : "";
+      }));
+      this.empresasOrigemHolding().forEach((c) => {
+        if (ja.has(String(c.id))) return;
+        const nome = String(c.name || c.tradeName || c.corporateName || this.nomeCadastro(c));
+        itens.push({
+          id: "cad:" + c.id,
+          order: Number(c.id),
+          label: String(c.id) + " - " + nome.toLocaleUpperCase("pt-BR")
+        });
+      });
+    }
     return itens;
+  },
+
+  empresaIdRef(ref) {
+    const s = String(ref || "");
+    if (s.indexOf("cad:") === 0) return s.slice(4);
+    const ent = this.entity(s);
+    return ent && ent.companyId ? String(ent.companyId) : "";
+  },
+
+  caixaDoCadastro(companyId) {
+    const id = String(companyId || "").replace(/^cad:/, "");
+    const existente = this.caixaDaEmpresa(id);
+    if (existente) return existente;
+    const c = this.companies().find((x) => String(x.id) === id);
+    if (!c) return null;
+    const ent = {
+      id: this.uid("ent"),
+      name: this.nomeUsualDaEmpresa(c) || this.nomeCadastro(c),
+      kind: "pj",
+      color: this.defaultKindColor("pj"),
+      note: "",
+      companyId: String(c.id),
+      partnerId: "",
+      x: 40,
+      y: 16
+    };
+    this.graph.entities.push(ent);
+    return ent;
   },
 
   vinculosEquivalencia() {
@@ -1037,11 +1085,9 @@ const SocietarioApp = {
 
   contasDaLigacao(fromId, toId) {
     const vazio = { debitoLucro: "", creditoLucro: "", debitoPrejuizo: "", creditoPrejuizo: "" };
-    const de = this.entity(fromId);
-    const para = this.entity(toId);
-    if (!de || !para || !de.companyId || !para.companyId) return vazio;
-    const origem = String(para.companyId);
-    const destino = String(de.companyId);
+    const origem = this.empresaIdRef(toId);
+    const destino = this.empresaIdRef(fromId);
+    if (!origem || !destino) return vazio;
     const row = this.vinculosEquivalencia().find((v) => String(v.origem) === origem && String(v.destino) === destino)
       || this.vinculosEquivalencia().find((v) => String(v.origem) === origem);
     if (!row) return vazio;
@@ -1315,7 +1361,7 @@ const SocietarioApp = {
         <p class="soc-link-help">Escolha duas empresas do cadastro, pelo nome completo, em ordem de id. Pessoa física não entra aqui. A holding pode participar de várias empresas, inclusive de uma que já é da Moura Leite. Essa empresa sobe para cima da holding, para a linha não atravessar as ligações da empresa 1. O mesmo par não se repete. As contas já entram na parametrização.</p>
         <div class="soc-link-grid">
           <div style="${this.lbl}">De (sócio / holding)
-            ${this.hint("Quem possui a participação. Esta empresa pode aparecer em outras interligações.")}
+            ${this.hint("Quem possui a participação. Holding interna e SPE sócio entram aqui, mesmo sem caixa no organograma.")}
             <div id="soc-lnk-from-box"></div>
           </div>
           <div style="${this.lbl}">Para (participada)
@@ -2221,6 +2267,10 @@ const SocietarioApp = {
   },
 
   saveLink() {
+    if (String(this._linkFrom || "").indexOf("cad:") === 0) {
+      const criada = this.caixaDoCadastro(this._linkFrom);
+      if (criada) this._linkFrom = criada.id;
+    }
     const from = this._linkFrom || "";
     const to = this._linkTo || "";
     const pct = Number(document.getElementById("soc-lnk-pct").value);

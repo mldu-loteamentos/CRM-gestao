@@ -9335,6 +9335,7 @@ function getPrimaryCostCenter(id) {
 function filaCodigoUnidade(nome) {
   let s = String(nome || "").trim();
   s = s.replace(/\s+(?:lote|quadra|unidade|apto|apartamento|bloco|casa|torre)\b[\s\S]*$/i, "").trim();
+  s = s.replace(/\s+abrir$/i, "").trim();
   const curto = s.match(/^([A-Za-z])-0(\d)$/);
   if (curto) s = curto[1].toUpperCase() + "-" + curto[2];
   return s;
@@ -10073,7 +10074,11 @@ window.getClientJudicialPhaseInfo = function(client) {
   if (validJudNotes.length === 0) return empty;
   validJudNotes.sort((a, b) => new Date(b.date) - new Date(a.date));
   const last = validJudNotes[0];
-  const stage = window.resolveJudicialStage(last.fase, last.faseId);
+  let stage = window.resolveJudicialStage(last.fase, last.faseId);
+  if (!stage && window.ReintegracaoPosseApp && typeof ReintegracaoPosseApp.etapaDe === "function") {
+    const et = ReintegracaoPosseApp.etapaDe(last.fase);
+    if (et) stage = { nome: et.nome, label: et.nome, id: "reint_" + et.id, dias: 0 };
+  }
   const fase = stage ? stage.nome : (window.canonicalJudicialPhaseName(last.fase) || "Sem Fase");
   const faseLabel = stage ? stage.label : (fase === "Sem Fase" ? "Sem Fase" : fase);
   const enteredAt = last.date ? new Date(last.date) : null;
@@ -12253,9 +12258,10 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
           </td>
           <td style="white-space: nowrap; text-align: left; width: 1%;" title="Fase Processual">
             <span style="text-transform: uppercase;">${(() => {
+                const info = typeof window.getClientJudicialPhaseInfo === "function" ? window.getClientJudicialPhaseInfo(client) : null;
+                if (info && info.faseLabel && info.faseLabel !== "Sem Fase") return info.faseLabel;
                 if (client.subjudice !== "S") return "Sub judice no Integra";
-                const info = typeof window.getClientJudicialPhaseInfo === 'function' ? window.getClientJudicialPhaseInfo(client) : null;
-                return (info && info.faseLabel) ? info.faseLabel : "Sem Fase";
+                return "Sem Fase";
             })()}</span>
           </td>
           <td style="white-space: nowrap; text-align: center; width: 1%;" title="Data da Fase">
@@ -19332,6 +19338,48 @@ let g_renegCustomer = null;
 let g_renegSale = null;
 let g_renegBills = [];
 
+function renegIsoLocal(d) {
+  const dt = d instanceof Date ? d : new Date();
+  const m = String(dt.getMonth() + 1).padStart(2, "0");
+  const day = String(dt.getDate()).padStart(2, "0");
+  return dt.getFullYear() + "-" + m + "-" + day;
+}
+
+function renegLimiteDataSinal() {
+  let regras = {};
+  try { regras = JSON.parse(localStorage.getItem("crm_moura_regras_negociacao") || "{}") || {}; } catch (e) { regras = {}; }
+  let dias = regras.dias_pagamento_sinal !== undefined ? Number(regras.dias_pagamento_sinal) : 7;
+  if (!Number.isFinite(dias) || dias < 0) dias = 7;
+  const min = new Date();
+  min.setHours(12, 0, 0, 0);
+  const max = new Date(min.getTime());
+  max.setDate(max.getDate() + dias);
+  if (max.getDay() === 6) max.setDate(max.getDate() + 2);
+  else if (max.getDay() === 0) max.setDate(max.getDate() + 1);
+  return { min: renegIsoLocal(min), max: renegIsoLocal(max) };
+}
+
+function renegAplicarLimiteDataSinal(preferido) {
+  const el = document.getElementById("reneg-sinal-due");
+  if (!el) return "";
+  const lim = renegLimiteDataSinal();
+  el.min = lim.min;
+  el.max = lim.max;
+  el.readOnly = false;
+  el.style.backgroundColor = "";
+  el.style.cursor = "";
+  let valor = String(preferido != null ? preferido : (el.value || lim.max)).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(valor) || valor < lim.min) valor = lim.min;
+  if (valor > lim.max) valor = lim.max;
+  el.value = valor;
+  return valor;
+}
+
+window.renegAoMudarDataSinal = function() {
+  renegAplicarLimiteDataSinal();
+  if (typeof calculateRenegotiation === "function") calculateRenegotiation();
+};
+
 function showRenegotiationView(customer, sale, allUnpaidBills) {
   if (window._renegotiationBlockedMsg) {
     alert(window._renegotiationBlockedMsg);
@@ -19524,19 +19572,9 @@ function showRenegotiationView(customer, sale, allUnpaidBills) {
   // Renderizar bloqueadas abaixo (sem separador)
   blockedBills.forEach(bill => body.appendChild(renderRow(bill)));
 
-  // Configurações Padrão de datas
-  const regras = JSON.parse(localStorage.getItem('crm_moura_regras_negociacao')) || {};
-  let diasSinal = regras.dias_pagamento_sinal !== undefined ? regras.dias_pagamento_sinal : 7;
-  
-  let dateSinal = new Date();
-  dateSinal.setDate(dateSinal.getDate() + diasSinal);
-  if (dateSinal.getDay() === 6) dateSinal.setDate(dateSinal.getDate() + 2);
-  else if (dateSinal.getDay() === 0) dateSinal.setDate(dateSinal.getDate() + 1);
-  
-  const sinalDueEl = document.getElementById("reneg-sinal-due");
-  if (sinalDueEl) {
-    sinalDueEl.value = dateSinal.toISOString().split("T")[0];
-  }
+  // A data do sinal vai de hoje até o prazo já calculado (hoje + dias do sinal, sem cair no fim de semana).
+  const sinalIso = renegAplicarLimiteDataSinal(renegLimiteDataSinal().max);
+  const dateSinal = new Date((sinalIso || renegIsoLocal(new Date())) + "T12:00:00");
 
   const allDays = g_renegBills.map(b => b.dueDate ? parseInt(b.dueDate.split('-')[2]) : null).filter(d => d);
   let defaultDay = 20;
@@ -20127,7 +20165,7 @@ function calculateRenegotiation() {
     const sinalInput = document.getElementById("reneg-sinal-pct");
     if (sinalInput) sinalInput.value = "0";
   }
-  const sinalDueStr = document.getElementById("reneg-sinal-due")?.value || '';
+  const sinalDueStr = renegAplicarLimiteDataSinal();
   const firstDueDateStr = document.getElementById("reneg-first-due-date")?.value || '';
   
   // Cartão: no máximo 12x. Somar: até o limite configurado. Deslocar: a parcela não passa do teto da parcela atual.
@@ -51368,12 +51406,7 @@ window.subjudiceIntegraChaves = function(client) {
 };
 
 window.filaAgingDistratadoHtml = function() {
-  return `<div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
-    <span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #e9d5ff; background-color: #fdf4ff; color: #86198f; font-weight: 600;" title="Sub judice marcado no Integra. Responsável: operador de cobrança back office. No Sienge este título não está sub judice.">
-      <i data-lucide="scale" style="width: 14px; height: 14px;"></i> Sub judice no Integra
-    </span>
-    <span style="padding: 2px 8px; font-size: 0.72rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #cbd5e1; background-color: #f8fafc; color: #334155; font-weight: 700;">Distratado</span>
-  </div>`;
+  return `<span style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #cbd5e1; background-color: #f8fafc; color: #334155; font-weight: 700;">Distratado</span>`;
 };
 
 window.subjudiceIntegraTextoDet = function(id) {
@@ -52953,7 +52986,7 @@ window.mapaJuridicoShowPhase = async function(prefix, compId) {
         <tbody>
           ${clients.map((c, idx) => {
             const title = window.mapaJuridicoBillIdOf(c);
-            const unit = (typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : (c.costCenterId || "")) + " - " + (c.unitName || "N/D");
+            const unit = typeof filaUnidadeTexto === "function" ? filaUnidadeTexto(c) : ((typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : (c.costCenterId || "")) + " - " + (c.unitName || "N/D"));
             const name = String(c.customerName || "").replace(/</g, "&lt;");
             const aging = (typeof getDelayBadgeHtml === "function") ? getDelayBadgeHtml(c.maxDaysDelay) : (c.maxDaysDelay || 0);
             const unitEsc = String(c.unitName || "").replace(/"/g, "&quot;");
@@ -53024,10 +53057,10 @@ window.mapaJuridicoRenderStages = function() {
       const phaseInfo = (typeof window.getClientJudicialPhaseInfo === "function")
         ? window.getClientJudicialPhaseInfo(client)
         : { fase: "Sem Fase", faseLabel: "Sem Fase" };
-      const mapped = nameMap[phaseInfo.fase] || nameMap[phaseInfo.faseLabel] || nameMap["Sem Fase"];
+      const mapped = window.mapaJuridicoAcharFase(nameMap, phaseInfo) || nameMap["Sem Fase"];
       const value = (client.overdueValue || 0) + (client.overdueCharges || 0);
-      if (agg[mapped.prefix]) {
-        agg[mapped.prefix].count += (client.billIds ? client.billIds.length : 1);
+      if (mapped && agg[mapped.prefix]) {
+        agg[mapped.prefix].count += window.mapaJuridicoQtdTitulos(client);
         agg[mapped.prefix].value += value;
         agg[mapped.prefix].clients.push(client);
       }
@@ -53340,6 +53373,54 @@ window.showMapaJuridicoOverlay = function(ui) {
   });
 };
 
+window.mapaJuridicoFoldFase = function(s) {
+  return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/^\d+(?:\.\d+)*\.?\s+/, "").replace(/\s+/g, " ").trim().toUpperCase();
+};
+
+window.mapaJuridicoIncluirReintegracao = function(nameMap, topIndex) {
+  const etapas = (window.ReintegracaoPosseApp && ReintegracaoPosseApp.ETAPAS) || [];
+  if (!etapas.length || !nameMap) return topIndex;
+  const folds = new Set(Object.keys(nameMap).map((k) => window.mapaJuridicoFoldFase(k)));
+  let n = 1;
+  etapas.forEach((etapa) => {
+    const nome = String(etapa.nome || "").trim();
+    const fold = window.mapaJuridicoFoldFase(nome);
+    if (!nome || !fold || folds.has(fold)) return;
+    nameMap[nome] = {
+      prefix: topIndex + "." + n,
+      name: nome,
+      id: "reint_" + etapa.id,
+      days: 0,
+      order: topIndex + (n / 100),
+      descricao: etapa.fazer || ""
+    };
+    folds.add(fold);
+    n += 1;
+  });
+  return n > 1 ? topIndex + 1 : topIndex;
+};
+
+window.mapaJuridicoAcharFase = function(nameMap, phaseInfo) {
+  const info = phaseInfo || {};
+  if (!nameMap) return null;
+  if (info.fase && nameMap[info.fase]) return nameMap[info.fase];
+  if (info.faseLabel && nameMap[info.faseLabel]) return nameMap[info.faseLabel];
+  const alvo = window.mapaJuridicoFoldFase(info.fase) || window.mapaJuridicoFoldFase(info.faseLabel);
+  if (alvo && alvo !== "SEM FASE") {
+    const chave = Object.keys(nameMap).find((k) => {
+      return window.mapaJuridicoFoldFase(k) === alvo || window.mapaJuridicoFoldFase(nameMap[k] && nameMap[k].name) === alvo;
+    });
+    if (chave) return nameMap[chave];
+  }
+  return nameMap["Sem Fase"] || null;
+};
+
+window.mapaJuridicoQtdTitulos = function(client) {
+  if (client && client.billIds && client.billIds.length) return client.billIds.length;
+  const n = Number(client && client.billCount);
+  return n > 0 ? n : 1;
+};
+
 window.openMapaJuridico = function() {
   return window.gerarMapaJuridicoPDF();
 };
@@ -53410,6 +53491,7 @@ window.gerarMapaJuridicoPDF = async function() {
             }
             topIndex++;
         });
+        topIndex = window.mapaJuridicoIncluirReintegracao(nameMap, topIndex);
 
         nameMap["Sem Fase"] = { prefix: "0", name: "Sem Fase", id: "sem-fase", days: 0, order: 0, descricao: "Contratos em sub judice ainda sem etapa processual cadastrada." };
 
@@ -53424,10 +53506,10 @@ window.gerarMapaJuridicoPDF = async function() {
                 const phaseInfo = (typeof window.getClientJudicialPhaseInfo === "function")
                     ? window.getClientJudicialPhaseInfo(client)
                     : { fase: "Sem Fase", faseLabel: "Sem Fase" };
-                const mapped = nameMap[phaseInfo.fase] || nameMap[phaseInfo.faseLabel] || nameMap["Sem Fase"];
+                const mapped = window.mapaJuridicoAcharFase(nameMap, phaseInfo) || nameMap["Sem Fase"];
                 const value = (client.overdueValue || 0) + (client.overdueCharges || 0);
-                if (agg[mapped.prefix]) {
-                    agg[mapped.prefix].count += (client.billIds ? client.billIds.length : 1);
+                if (mapped && agg[mapped.prefix]) {
+                    agg[mapped.prefix].count += window.mapaJuridicoQtdTitulos(client);
                     agg[mapped.prefix].value += value;
                     agg[mapped.prefix].clients.push(client);
                 }

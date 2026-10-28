@@ -10159,6 +10159,13 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .cc-table.ctb-eq td.ctb-acoes { text-align: right; width: 42px; }
 .ctb-eq-page .ctb-eq-help { flex: 1 1 420px; margin: 0; color: #64748b; font-size: 0.78rem; line-height: 1.35; }
 .ctb-eq-status { font-size: 0.78rem; font-weight: 700; color: #105436; }
+.cc-table.ctb-eq-lista tbody tr.ctb-eq-grupo td { background: #e8f5ee; color: #105436; font-weight: 800; white-space: normal; }
+.cc-table.ctb-eq-lista tbody tr.ctb-eq-total td { background: #f0fdf4; color: #105436; font-weight: 800; }
+.cc-table.ctb-eq-lista tbody tr.ctb-eq-detalhe td { background: #f8fafc; white-space: normal; overflow: visible; }
+.cc-table.ctb-eq-lista td.ctb-eq-marca { overflow: visible; }
+.cc-table.ctb-eq-lista td.ctb-eq-marca input,
+.cc-table.ctb-eq-lista th .pr-th-flag input { width: 16px; height: 16px; margin: 0; accent-color: #105436; cursor: pointer; }
+.cc-table.ctb-eq-lista .is-neg { color: #b91c1c; }
 .cc-table tbody tr.cc-row-salvo { animation: ccRowSalvo 2.4s ease-out; }
 @keyframes ccRowSalvo { 0%, 40% { background-color: #bbf7d0; } 100% { background-color: transparent; } }
 @media (max-width: 900px) {
