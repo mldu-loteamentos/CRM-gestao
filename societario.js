@@ -14,6 +14,7 @@ const SocietarioApp = {
   empresaAba: "",
   linkMode: false,
   connectFrom: null,
+  viewScale: null,
   NODE_W: 168,
   NODE_H: 72,
 
@@ -397,6 +398,7 @@ const SocietarioApp = {
       this.ensurePositions();
       this.persist();
       try { localStorage.setItem(this.SEED_KEY, this.SEED); } catch (e) {}
+      this._pronto = true;
       return;
     }
     let local = null;
@@ -419,6 +421,7 @@ const SocietarioApp = {
     }
     if (!this.graph.entities.length) this.graph = this.defaultGraph();
     this.ensurePositions();
+    this._pronto = true;
   },
 
   normalize(raw) {
@@ -504,6 +507,58 @@ const SocietarioApp = {
     };
     this.graph.entities.push(caixa);
     return caixa;
+  },
+
+  /**
+   * Empresa gerida pelo grupo ou da Gestão Ellenco, com o percentual da Moura Leite,
+   * ganha a interligação da empresa 1. Se o par já existe, só atualiza o percentual.
+   */
+  ligarParticipacaoMoura(companyId, pct) {
+    const espera = this._orgSync || Promise.resolve();
+    const job = espera.then(() => this._ligarParticipacaoMoura(companyId, pct));
+    this._orgSync = job.catch(() => {});
+    return job;
+  },
+
+  async _ligarParticipacaoMoura(companyId, pct) {
+    const id = String(companyId || "");
+    const n = Number(pct);
+    if (!id || id === "1" || !(n > 0) || n > 100) return;
+    const emp = window.EmpresasApp;
+    const custom = emp && emp.customOf ? emp.customOf(id) : null;
+    const gerida = !!(emp && emp.flagOn(custom, "gerida_pelo_grupo"));
+    const ellenco = !!(emp && emp.flagOn(custom, "gestao_elenco"));
+    if (!gerida && !elenco) return;
+    if (!this._pronto) {
+      try { await this.load(); } catch (e) {}
+    }
+    if (!this.graph || !Array.isArray(this.graph.entities)) return;
+    let centro = this.caixaDaEmpresa("1");
+    if (!centro) {
+      const hub = this.entity(this.graph.hubId);
+      if (hub) {
+        if (!hub.companyId) hub.companyId = "1";
+        centro = hub;
+      }
+    }
+    if (!centro) centro = this.garantirCaixaEmpresa("1");
+    const para = this.garantirCaixaEmpresa(id);
+    if (!centro || !para || centro.id === para.id) return;
+    let link = (this.graph.links || []).find((l) => l.from === centro.id && l.to === para.id);
+    if (!link) {
+      link = (this.graph.links || []).find((l) => {
+        const ids = this.idsDaLigacao(l);
+        return ids.de === "1" && ids.para === id;
+      }) || null;
+    }
+    if (link) {
+      if (Number(link.pct) === n) return;
+      link.pct = n;
+    } else {
+      this.graph.links.push({ id: this.uid("lnk"), from: centro.id, to: para.id, pct: n, note: "" });
+    }
+    this.persist();
+    if (document.getElementById("soc-canvas")) this.render();
   },
 
   /* Vínculo nascido na configuração: De = destino (holding), Para = origem (participada). */
@@ -633,21 +688,44 @@ const SocietarioApp = {
     return { w: maxX, h: maxY };
   },
 
+  applyZoom(scale) {
+    const canvas = document.getElementById("soc-canvas");
+    if (!canvas) return;
+    const size = this.canvasSize();
+    canvas.style.width = size.w + "px";
+    canvas.style.height = size.h + "px";
+    const n = Number(scale);
+    const zoom = Number.isFinite(n) && n > 0 ? n : 1;
+    canvas.style.zoom = String(zoom);
+  },
+
   fitCanvas() {
     if (this._drag || this._connect) return;
     const wrap = document.getElementById("soc-canvas-wrap");
     const canvas = document.getElementById("soc-canvas");
     if (!wrap || !canvas) return;
-    const size = this.canvasSize();
-    canvas.style.width = size.w + "px";
-    canvas.style.height = size.h + "px";
-    const availW = Math.max(240, wrap.clientWidth - 20);
-    const availH = Math.max(180, wrap.clientHeight - 20);
-    let scale = Math.min(availW / size.w, availH / size.h, 1);
-    if (!Number.isFinite(scale) || scale <= 0) scale = 1;
-    scale = Math.round(scale * 1000) / 1000;
-    this.fitScale = scale;
-    canvas.style.zoom = String(scale);
+    if (this.viewScale == null) {
+      if (wrap.clientWidth < 80) return;
+      const size = this.canvasSize();
+      const availW = Math.max(240, wrap.clientWidth - 20);
+      const availH = Math.max(180, wrap.clientHeight - 20);
+      let scale = Math.min(availW / size.w, availH / size.h, 1);
+      if (!Number.isFinite(scale) || scale <= 0) scale = 1;
+      this.viewScale = Math.round(scale * 1000) / 1000;
+    }
+    this.applyZoom(this.viewScale);
+  },
+
+  /** Ctrl+roda ou pinça aumenta o desenho. A rolagem comum continua andando o quadro. */
+  zoomPelaRoda(ev) {
+    if (!ev.ctrlKey && !ev.metaKey) return;
+    ev.preventDefault();
+    const canvas = document.getElementById("soc-canvas");
+    const atual = this.viewScale == null ? (parseFloat(canvas && canvas.style.zoom) || 1) : this.viewScale;
+    const fator = ev.deltaY < 0 ? 1.12 : 1 / 1.12;
+    const next = Math.round(atual * fator * 1000) / 1000;
+    this.viewScale = Math.max(0.45, Math.min(3, next));
+    this.applyZoom(this.viewScale);
   },
 
   bindFit() {
@@ -657,7 +735,9 @@ const SocietarioApp = {
       this._fitObs = null;
     }
     if (!wrap || typeof ResizeObserver === "undefined") return;
-    this._fitObs = new ResizeObserver(() => this.fitCanvas());
+    this._fitObs = new ResizeObserver(() => {
+      if (this.viewScale == null) this.fitCanvas();
+    });
     this._fitObs.observe(wrap);
   },
 
@@ -765,6 +845,7 @@ const SocietarioApp = {
     const wrap = document.getElementById("soc-canvas-wrap");
     const canvas = document.getElementById("soc-canvas");
     if (!wrap || !canvas) return;
+    wrap.addEventListener("wheel", (ev) => this.zoomPelaRoda(ev), { passive: false });
     this._drag = null;
     this._connect = null;
     this._moved = false;
@@ -818,10 +899,8 @@ const SocietarioApp = {
           const draggedId = this._drag.id;
           const moved = this._moved;
           this._drag = null;
-          if (moved) {
-            this.persist();
-            this.fitCanvas();
-          } else this.selectEntity(draggedId, true);
+          if (moved) this._posicoesAlteradas = true;
+          else this.selectEntity(draggedId, true);
         }
       };
       document.addEventListener("mousemove", onMove);
@@ -1176,7 +1255,24 @@ const SocietarioApp = {
   resetLayout() {
     if (!confirm("Reorganizar o organograma automaticamente? As posições atuais serão substituídas.")) return;
     this.autoLayout(true);
+    this._posicoesAlteradas = false;
     this.render();
+  },
+
+  salvarPosicoes() {
+    (this.graph.entities || []).forEach((e) => {
+      e.x = Math.round(Number(e.x) || 0);
+      e.y = Math.round(Number(e.y) || 0);
+    });
+    this._posicoesAlteradas = false;
+    this.persist();
+    const btn = document.querySelector(".soc-save-pos");
+    if (!btn) return;
+    btn.textContent = "Posições salvas";
+    clearTimeout(this._posMsg);
+    this._posMsg = setTimeout(() => {
+      if (btn.isConnected) btn.textContent = "Salvar posições";
+    }, 1800);
   },
 
   semAcento(s) {
@@ -2046,12 +2142,11 @@ const SocietarioApp = {
       <div class="soc-shell">${this.abasHtml()}
       <div class="soc-page">
         <div class="soc-toolbar">
-          <p class="soc-help">Empresas geridas pelo grupo e da Gestão Ellenco entram aqui. Arraste as caixas, ligue pelos pontos e clique no percentual para editar a participação.</p>
+          <p class="soc-help">Empresas geridas pelo grupo e da Gestão Ellenco entram aqui. Arraste as caixas e clique em Salvar posições para esse arranjo valer ao abrir de novo. Ctrl e a roda do mouse aumentam o desenho. Ligue pelos pontos e clique no percentual para editar a participação.</p>
           <div class="soc-toolbar-actions">
-            <button type="button" class="btn btn-primary btn-sm" onclick="SocietarioApp.openNewEntity()" title="Cria uma caixa de pessoa física ou de empresa que ainda não está no desenho.">Empresa / pessoa</button>
             <button type="button" class="btn btn-outline btn-sm soc-btn-link${linkBtn}" onclick="SocietarioApp.openNewLink()" title="Cria a participação entre duas caixas. Também dá para arrastar o ponto de uma caixa até a outra.">Interligação</button>
             <button type="button" class="btn btn-outline btn-sm" onclick="SocietarioApp.resetLayout()" title="Reposiciona as caixas. As ligações e os percentuais permanecem.">Reorganizar</button>
-            <button type="button" class="btn btn-outline btn-sm" onclick="SocietarioApp.openNewNote()" title="Grava uma nota na empresa selecionada.">Nota</button>
+            <button type="button" class="btn btn-primary btn-sm soc-save-pos" onclick="SocietarioApp.salvarPosicoes()" title="Grava o lugar de cada caixa. Ao abrir de novo, o organograma fica neste arranjo.">Salvar posições</button>
             <button type="button" class="btn btn-outline btn-sm soc-pdf-btn" onclick="SocietarioApp.exportarPdf()" title="Gera o PDF da estrutura da Moura Leite, com os sócios e as participações.">PDF</button>
           </div>
         </div>

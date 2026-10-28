@@ -10161,7 +10161,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .ctb-eq-status { font-size: 0.78rem; font-weight: 700; color: #105436; }
 .cc-table.ctb-eq-lista tbody tr.ctb-eq-grupo td { background: #e8f5ee; color: #105436; font-weight: 800; white-space: normal; }
 .cc-table.ctb-eq-lista tbody tr.ctb-eq-total td { background: #f0fdf4; color: #105436; font-weight: 800; }
-.cc-table.ctb-eq-lista tbody tr.ctb-eq-detalhe td { background: #f8fafc; white-space: normal; overflow: visible; }
+.cc-table.ctb-eq-lista tbody tr.ctb-eq-detalhe td { background: #f4f7f5; white-space: normal; overflow: visible; padding: 14px 16px 16px; vertical-align: top; }
 .cc-table.ctb-eq-lista td.ctb-eq-marca { overflow: visible; }
 .cc-table.ctb-eq-lista td.ctb-eq-marca input,
 .cc-table.ctb-eq-lista th .pr-th-flag input { width: 16px; height: 16px; margin: 0; accent-color: #105436; cursor: pointer; }

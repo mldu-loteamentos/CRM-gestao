@@ -389,6 +389,13 @@ const EmpresasApp = {
     EmpresasState.customFields[id] = custom;
     this.persistCustomMap();
     this.scheduleCloudUpload(isText);
+    if (window.SocietarioApp && typeof SocietarioApp.ligarParticipacaoMoura === "function"
+        && (field === "percentual_mldu" || field === "gerida_pelo_grupo" || field === "gestao_elenco")) {
+      const pct = Number(custom.percentual_mldu) || 0;
+      if (pct > 0 && (this.flagOn(custom, "gerida_pelo_grupo") || this.flagOn(custom, "gestao_elenco"))) {
+        SocietarioApp.ligarParticipacaoMoura(id, pct);
+      }
+    }
     if (!isText && typeof this.renderFilaPrompt === "function") this.renderFilaPrompt();
     this.schedulePaint(id);
   },

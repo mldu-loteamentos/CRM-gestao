@@ -3928,6 +3928,10 @@ function auditActionMeta(action, summary, module) {
     if (/erro|falha/.test(blob)) return { group: "sienge", label: "Falha ao lançar equivalência no Sienge" };
     return { group: "sienge", label: "Equivalência lançada no Sienge" };
   }
+  if (key === "Gerar lote de equivalência") {
+    if (/erro|falha/.test(blob)) return { group: "sienge", label: "Falha ao gerar lote de equivalência" };
+    return { group: "sienge", label: "Lote de equivalência gerado no Sienge" };
+  }
   return { group: "outros", label: key === "HTTP" ? "Requisição" : key };
 }
 

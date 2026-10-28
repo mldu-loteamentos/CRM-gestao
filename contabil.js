@@ -19,6 +19,8 @@ const ContabilApp = {
     dreVisao: "ano",
     dreMil: false,
     dreSoPeriodo: false,
+    acumulado: false,
+    empresaAba: "",
     exportando: false,
     janela: null,
     porEmpresa: null,
@@ -92,10 +94,64 @@ const ContabilApp = {
         id: String(c.id != null ? c.id : c.companyId),
         nome: String(c.name || c.corporateName || c.companyName || c.tradeName || "").trim()
       })).filter((c) => c.id && c.id !== "undefined");
+      if (!this.state.selecionadas.length) {
+        this.state.selecionadas = this.state.companies.map((c) => String(c.id));
+      }
     } catch (e) {
       this.state.erro = "Não consegui carregar as empresas do Sienge.";
     }
     this.render();
+  },
+
+  nomeUsual(emp) {
+    const id = String(emp && emp.id || "");
+    const app = window.EmpresasApp;
+    const rec = app && typeof app.customOf === "function" ? app.customOf(id) : null;
+    const usual = rec && rec.nome_usual ? String(rec.nome_usual).trim() : "";
+    return (usual || (emp && emp.nome) || "Empresa").toLocaleUpperCase("pt-BR");
+  },
+
+  empresaAtiva() {
+    const lista = this.empresasEscolhidas();
+    if (!lista.length) return null;
+    const id = String(this.state.empresaAba || "");
+    return lista.find((c) => String(c.id) === id) || lista[0];
+  },
+
+  setEmpresaAba(id) {
+    this.state.empresaAba = String(id || "");
+    this.render();
+  },
+
+  setAcumulado(marcado) {
+    this.state.acumulado = !!marcado;
+    this.render();
+  },
+
+  htmlAbasEmpresa() {
+    const lista = this.empresasEscolhidas();
+    if (!lista.length) return "";
+    const ativa = this.empresaAtiva();
+    const idAtiva = ativa ? String(ativa.id) : "";
+    return `<div class="ml-tabs ctb-emp-tabs" role="tablist">
+      ${lista.map((c) => {
+        const on = String(c.id) === idAtiva;
+        return `<button type="button" role="tab" aria-selected="${on}" class="ml-tab ${on ? "is-active" : ""}" onclick="ContabilApp.setEmpresaAba('${this.esc(c.id)}')"><i data-lucide="building-2"></i> ${this.esc(c.id + " - " + this.nomeUsual(c))}</button>`;
+      }).join("")}
+    </div>`;
+  },
+
+  serieDaEmpresa(emp) {
+    const bloco = emp && this.state.porEmpresa && this.state.porEmpresa[String(emp.id)];
+    if (!bloco || !bloco.porMes) return this.state.serie;
+    return this.montarSerie(this.state.janela || this.montarJanela(), bloco.porMes);
+  },
+
+  arvoreDaEmpresa(emp) {
+    const bloco = emp && this.state.porEmpresa && this.state.porEmpresa[String(emp.id)];
+    const listas = bloco && bloco.listas;
+    if (!listas || !listas.length) return this.state.arvore;
+    return this.classificar(this.montarArvore(this.juntar(listas)));
   },
 
   itensEmpresa() {
@@ -737,9 +793,10 @@ const ContabilApp = {
     if (!s) return [];
     const ano = s.ano;
     const ant = ano - 1;
-    const meses = s.meses;
+    const mesesTodos = s.meses || [];
+    const meses = this.state.acumulado ? mesesTodos : mesesTodos.slice(-1);
     if (s.faixa && s.faixa.length) {
-      const faixa = s.faixa;
+      const faixa = this.state.acumulado ? s.faixa : s.faixa.slice(-1);
       if (this.state.dreVisao !== "comp") {
         const cols = faixa.map((f) => ({
           grupo: f.rotulo,
@@ -747,7 +804,7 @@ const ContabilApp = {
           tipo: "val",
           ler: (c) => Number(c.por[f.chave]) || 0
         }));
-        cols.push({ grupo: "Total", titulo: "Total", tipo: "val", forte: true, ler: (c) => this.somaFaixa(c, faixa, false) });
+        if (faixa.length > 1) cols.push({ grupo: "Total", titulo: "Total", tipo: "val", forte: true, ler: (c) => this.somaFaixa(c, faixa, false) });
         return cols;
       }
       const cols = [];
@@ -764,7 +821,7 @@ const ContabilApp = {
           false
         );
       });
-      pushTrioF("Total", (c) => this.somaFaixa(c, faixa, true), (c) => this.somaFaixa(c, faixa, false), true);
+      if (faixa.length > 1) pushTrioF("Total", (c) => this.somaFaixa(c, faixa, true), (c) => this.somaFaixa(c, faixa, false), true);
       return cols;
     }
     if (this.state.dreVisao !== "comp") {
@@ -774,7 +831,7 @@ const ContabilApp = {
         tipo: "val",
         ler: (c) => Number(c.por[this.chaveMes(ano, m)]) || 0
       }));
-      cols.push({
+      if (meses.length > 1) cols.push({
         grupo: "Total",
         titulo: "Total",
         tipo: "val",
@@ -797,8 +854,8 @@ const ContabilApp = {
         false
       );
     });
-    pushTrio("Total", (c) => this.somaChaves(c, ant, meses), (c) => this.somaChaves(c, ano, meses), true);
-    this.trimestresDo(meses).forEach((t) => {
+    if (meses.length > 1) pushTrio("Total", (c) => this.somaChaves(c, ant, meses), (c) => this.somaChaves(c, ano, meses), true);
+    if (this.state.acumulado && meses.length > 1) this.trimestresDo(meses).forEach((t) => {
       pushTrio(t.nome, (c) => this.somaChaves(c, ant, t.meses), (c) => this.somaChaves(c, ano, t.meses), false);
     });
     return cols;
@@ -1212,6 +1269,9 @@ const ContabilApp = {
     s.porEmpresa = porEmpresa;
     s.serie = this.montarSerie(janela, porMes);
     s.avisos = avisos;
+    if (!empresas.some((e) => String(e.id) === String(s.empresaAba))) {
+      s.empresaAba = String(empresas[0].id);
+    }
     s.carregando = false;
     s.loadMsg = "";
     s.progresso = 100;
@@ -1439,26 +1499,42 @@ const ContabilApp = {
     } else if (!s.buscou) {
       corpo = `<p class="ctb-nota">Escolha a empresa e a competência. A consulta lê o balancete de verificação do Sienge.</p>`;
     } else {
-      const demo = aba === "balanco" ? this.htmlBalanco(s.arvore) : this.htmlDre(s.arvore);
+      const vista = this.empresaAtiva();
+      const serieGuard = s.serie;
+      const empGuard = this._empresaDre;
+      if (vista && s.porEmpresa) {
+        s.serie = this.serieDaEmpresa(vista);
+        this._empresaDre = vista;
+      }
+      const arvoreVista = vista && s.porEmpresa ? this.arvoreDaEmpresa(vista) : s.arvore;
+      const demo = aba === "balanco" ? this.htmlBalanco(arvoreVista) : this.htmlDre(arvoreVista);
       const avisos = s.avisos.length ? `<p class="ctb-erro">${s.avisos.map((a) => this.esc(a)).join("<br>")}</p>` : "";
       const serie = s.serie;
       const fimMes = serie && serie.meses && serie.meses.length ? this.nomeMes(serie.meses[serie.meses.length - 1]) : "";
       const iniMes = serie && serie.meses && serie.meses.length ? this.nomeMes(serie.meses[0]) : "";
-      const trecho = iniMes && fimMes
-        ? (iniMes === fimMes ? (iniMes + " de " + (serie && serie.ano)) : (iniMes + " a " + fimMes + " de " + (serie && serie.ano)))
-        : "";
+      const mesEscolhido = serie && serie.meses && serie.meses.length ? this.nomeMes(serie.meses[serie.meses.length - 1]) : fimMes;
+      const trecho = !s.acumulado && mesEscolhido
+        ? (mesEscolhido + " de " + (serie && serie.ano))
+        : (iniMes && fimMes
+          ? (iniMes === fimMes ? (iniMes + " de " + (serie && serie.ano)) : (iniMes + " a " + fimMes + " de " + (serie && serie.ano)))
+          : "");
       const notaDre = aba !== "dre"
         ? " O balanço usa o saldo no fim da competência."
         : (serie && fimMes
           ? (s.dreVisao === "comp"
-            ? ` ${trecho} e o mesmo período de ${((serie.ano || 0) - 1)}. Cada mês traz os dois anos e a variação.${s.dreMil ? " Valores divididos por 1.000." : ""}`
-            : ` ${trecho}. Cada grupo abre a conta, e a conta abre mais um nível.${s.dreMil ? " Valores divididos por 1.000." : ""}`)
+            ? ` ${trecho} e o mesmo período de ${((serie.ano || 0) - 1)}.${s.acumulado ? " Cada mês traz os dois anos e a variação." : " A variação é deste mês contra o mesmo mês do ano anterior."}${s.dreMil ? " Valores divididos por 1.000." : ""}`
+            : ` ${trecho}.${s.acumulado ? "" : " Janeiro até este mês, neste ano e no anterior, já foi lido."} Cada grupo abre a conta, e a conta abre mais um nível.${s.dreMil ? " Valores divididos por 1.000." : ""}`)
           : " O DRE soma o movimento da competência nos grupos do demonstrativo. Conta sem valor fica fora da lista.");
       const visao = aba === "dre" && serie ? `<div class="ctb-visao-row">
         <div class="ml-tabs ctb-visao" role="tablist">
           <button type="button" role="tab" aria-selected="${s.dreVisao !== "comp"}" class="ml-tab ${s.dreVisao !== "comp" ? "is-active" : ""}" onclick="ContabilApp.setVisao('ano')"><i data-lucide="calendar-range"></i> Ano atual</button>
           <button type="button" role="tab" aria-selected="${s.dreVisao === "comp"}" class="ml-tab ${s.dreVisao === "comp" ? "is-active" : ""}" onclick="ContabilApp.setVisao('comp')"><i data-lucide="git-compare"></i> Comparar com o ano anterior</button>
         </div>
+        <label class="moura-switch" title="Mostra janeiro até a competência, neste ano e no anterior">
+          <input type="checkbox" ${s.acumulado ? "checked" : ""} onchange="ContabilApp.setAcumulado(this.checked)">
+          <span class="moura-switch-track" aria-hidden="true"></span>
+          <span class="moura-switch-text">Mostrar acumulado</span>
+        </label>
         <label class="moura-switch" title="Divide os valores por 1.000 e estreita as colunas">
           <input type="checkbox" ${s.dreMil ? "checked" : ""} onchange="ContabilApp.setMilhar(this.checked)">
           <span class="moura-switch-track" aria-hidden="true"></span>
@@ -1472,6 +1548,8 @@ const ContabilApp = {
         ? ContabilEquiv.notaHtml(s.de)
         : "";
       corpo = `${avisos}${visao}${notaEq}<p class="ctb-nota">${aba === "dre" && serie && fimMes ? this.esc(notaDre.trim()) : this.esc(periodo) + ". Entram as contas com movimento." + notaDre}</p>${demo}`;
+      s.serie = serieGuard;
+      this._empresaDre = empGuard;
     }
     root.innerHTML = `<style>
       #contabil-root .ctb-toolbar { display:flex; flex-wrap:wrap; gap:12px 16px; align-items:flex-end; margin:4px 0 8px; }
@@ -1481,6 +1559,7 @@ const ContabilApp = {
       #contabil-root .ml-emp-filter-item span { white-space:nowrap; }
       #contabil-root .ml-emp-filter-panel { width:max-content; min-width:100%; max-width:min(720px, 70vw); right:auto; }
       #contabil-root .ctb-tabs { margin:8px 0 12px; }
+      #contabil-root .ctb-emp-tabs { margin:4px 0 8px; }
       #contabil-root .ctb-visao { margin:0; }
       #contabil-root .ctb-visao-row { display:flex; flex-wrap:wrap; align-items:center; gap:12px 18px; margin:0 0 10px; }
       #contabil-root .ctb-dre { width:max-content; min-width:0; table-layout:fixed; }
@@ -1515,12 +1594,18 @@ const ContabilApp = {
       #contabil-root .ctb-eq-acoes { display:flex; justify-content:flex-end; margin:0 0 8px; }
       #contabil-root .ctb-eq-dest { margin:0 0 18px; }
       #contabil-root .ctb-eq-dest h3 { margin:0 0 8px; color:#105436; font-size:0.95rem; }
-      #contabil-root .ctb-eq-detalhe td { background:#f8fafc; }
-      #contabil-root .ctb-eq-contas { display:grid; gap:10px; font-size:0.84rem; color:#0f172a; }
-      #contabil-root .ctb-eq-bloco { display:grid; gap:4px; }
-      #contabil-root .ctb-eq-bloco strong, #contabil-root .ctb-eq-comp strong { color:#105436; }
-      #contabil-root .ctb-eq-comp { margin:4px 0 0; line-height:1.4; }
-      #contabil-root .ctb-eq-motivo { margin:0; color:#9a3412; }
+      #contabil-root .ctb-eq-detalhe td { background:#f4f7f5; padding:14px 16px 16px; vertical-align:top; }
+      #contabil-root .ctb-eq-contas { display:grid; gap:12px; font-size:0.84rem; color:#0f172a; line-height:1.4; }
+      #contabil-root .ctb-eq-bloco { display:grid; gap:12px; margin:0; padding:14px 16px; background:#fff; border:1px solid #d7e6dc; border-radius:10px; }
+      #contabil-root .ctb-eq-onde { margin:0; font-size:0.86rem; font-weight:800; color:#105436; line-height:1.35; }
+      #contabil-root .ctb-eq-par { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+      #contabil-root .ctb-eq-lado, #contabil-root .ctb-eq-comp { display:flex; flex-direction:column; align-items:flex-start; gap:4px; margin:0; padding:10px 12px; background:#f7faf8; border:1px solid #e3eee7; border-radius:8px; }
+      #contabil-root .ctb-eq-comp p { margin:0; line-height:1.45; color:#1c2e24; }
+      #contabil-root .ctb-eq-rot { font-size:0.68rem; font-weight:800; letter-spacing:0.04em; text-transform:uppercase; color:#64748b; }
+      #contabil-root .ctb-eq-cod { font-weight:800; color:#105436; font-variant-numeric:tabular-nums; }
+      #contabil-root .ctb-eq-nome { color:#1c2e24; line-height:1.35; }
+      #contabil-root .ctb-eq-motivo { margin:0; padding:10px 12px; border-radius:8px; background:#fff7ed; color:#9a3412; line-height:1.4; }
+      @media (max-width: 800px) { #contabil-root .ctb-eq-par { grid-template-columns:1fr; } }
       #contabil-root .ctb-eq-st.is-pronto { color:#105436; font-weight:700; }
       #contabil-root .ctb-eq-st.is-lancado { color:#64748b; }
       #contabil-root .ctb-table tfoot td { border-top:1px solid #e2e8f0; }
@@ -1539,6 +1624,7 @@ const ContabilApp = {
       </div>
       <button type="button" class="ctb-buscar" ${s.carregando ? "disabled" : ""} onclick="ContabilApp.buscar()">Buscar</button>
     </div>
+    ${aba === "equiv" ? "" : this.htmlAbasEmpresa()}
     ${abas}
     ${corpo}`;
     if (aba !== "equiv") this.paintEmpresas();

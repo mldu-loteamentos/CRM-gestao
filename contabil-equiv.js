@@ -191,7 +191,7 @@ const ContabilEquiv = {
     Object.keys(this.state.lancados || {}).forEach((k) => {
       if (k.slice(-sufixo.length) !== sufixo) return;
       const rec = this.state.lancados[k];
-      if (rec && rec.rotulo) itens.push(rec.rotulo);
+      if (rec && rec.rotulo) itens.push(rec.rotulo + (rec.lote ? (" (lote " + rec.lote + ")") : ""));
     });
     if (!itens.length) return "";
     return `<p class="ctb-ok">Equivalência desta competência já gerada: ${this.esc(itens.join(" · "))}</p>`;
@@ -508,6 +508,56 @@ const ContabilEquiv = {
     }
     this.state.lendo = false;
     this.state.progresso = 100;
+    this.render();
+  },
+
+  async gerarContas() {
+    const api = window.SiengeApiService;
+    if (!api || typeof api.getAccountancyAccounts !== "function") {
+      this.state.erro = "A lista de contas não está disponível. Atualize a página com Ctrl+F5.";
+      this.render();
+      return;
+    }
+    const ids = [];
+    (this.state.vinculos || []).forEach((v) => {
+      if (v.origem) ids.push(String(v.origem));
+      if (v.destino) ids.push(String(v.destino));
+    });
+    const unicos = ids.filter((id, i) => id && ids.indexOf(id) === i);
+    if (!unicos.length) {
+      this.state.erro = "Inclua um vínculo para saber de quais empresas ler as contas.";
+      this.render();
+      return;
+    }
+    this.state.lendo = true;
+    this.state.erro = "";
+    this.state.msg = "Lendo as contas contábeis…";
+    this.state.progresso = 8;
+    this.render();
+    if (!this.state.nomesConta) this.state.nomesConta = {};
+    if (!this.state.cacheContas) this.state.cacheContas = {};
+    let total = 0;
+    const falhas = [];
+    for (let i = 0; i < unicos.length; i++) {
+      const id = unicos[i];
+      this.state.msg = "Lendo as contas da empresa " + id + "…";
+      this.state.progresso = Math.round(8 + (i / unicos.length) * 88);
+      this.render();
+      try {
+        const brutos = await api.getAccountancyAccounts(id);
+        const contas = this.ordenar((brutos || []).map((c) => this.lerConta(c)).filter((c) => c.codigo));
+        this.state.cacheContas[id] = contas;
+        if (!this.state.nomesConta[id]) this.state.nomesConta[id] = {};
+        contas.forEach((c) => { if (c.nome) this.state.nomesConta[id][c.codigo] = c.nome; });
+        total += contas.length;
+      } catch (e) {
+        falhas.push(id);
+      }
+    }
+    this.state.lendo = false;
+    this.state.progresso = 100;
+    this.state.msg = total ? ("Li " + total + " contas contábeis pela API.") : "O Sienge não devolveu contas.";
+    if (falhas.length) this.state.erro = "Não li as contas das empresas " + falhas.join(", ") + ".";
     this.render();
   },
 
@@ -862,9 +912,15 @@ const ContabilEquiv = {
         <p class="ctb-eq-help">As contas vêm da interligação do organograma. Ao escolher a origem e o destino, a interligação entra no organograma. No lucro, a creditada sugerida é ${this.esc(this.CONTA_LUCRO)} (reduzida ${this.esc(this.REDUZIDA_LUCRO)}). No prejuízo, a debitada sugerida é ${this.esc(this.CONTA_PREJUIZO)} (reduzida ${this.esc(this.REDUZIDA_PREJUIZO)}). O percentual vem do organograma. Cada alteração já fica salva.</p>
         <div class="cc-toolbar-actions">
           <span id="ctb-eq-status" class="ctb-eq-status">${this.esc(s.msg || "")}</span>
-          <button type="button" class="btn btn-primary cc-atualizar" onclick="ContabilEquiv.incluirVinculo()">Incluir vínculo</button>
+          <button type="button" class="btn btn-primary cc-atualizar" onclick="ContabilEquiv.gerarContas()" ${s.lendo ? "disabled" : ""}>Gerar contas contábeis</button>
+          <button type="button" class="btn btn-primary cc-atualizar" onclick="ContabilEquiv.incluirVinculo()" ${s.lendo ? "disabled" : ""}>Incluir vínculo</button>
         </div>
       </div>
+      ${s.lendo ? `<div class="ml-load" style="margin:0 0 12px;">
+        <div class="loading-spinner" aria-hidden="true"></div>
+        <div class="loading-status-text">${this.esc(s.msg || "Lendo as contas contábeis…")}</div>
+        <div class="ml-load-track"><div class="loading-progress-bar" style="width:${Math.max(12, s.progresso || 20)}%"></div></div>
+      </div>` : ""}
       ${s.erro ? `<p class="ctb-eq-status" style="color:#b91c1c;margin:0 0 8px;">${this.esc(s.erro)}</p>` : ""}
       <div class="cc-scroll">
         <table class="cc-table ctb-eq" id="ctb-eq-vincos">
@@ -1006,8 +1062,8 @@ const ContabilEquiv = {
     return { linhas: linhas, texto: texto.join("\n") };
   },
 
-  payload(linha) {
-    return {
+  payload(linha, semLote) {
+    const body = {
       amount: linha.amount,
       companyId: linha.companyId,
       date: this.dataDoLancamento(linha.chave) || String(linha.date || "").slice(0, 10),
@@ -1017,6 +1073,8 @@ const ContabilEquiv = {
       description: linha.description,
       entryType: "N"
     };
+    if (!semLote && linha.lote) body.entryBatchId = Number(linha.lote);
+    return body;
   },
 
   msgDe(res) {
@@ -1049,18 +1107,19 @@ const ContabilEquiv = {
       valor: linha.amount,
       tipo: linha.tipo,
       msg: msg,
+      lote: linha.lote ? String(linha.lote) : "",
       rotulo: linha.rotulo,
       origem: linha.origem,
       destino: String(linha.companyId)
     };
   },
 
-  auditar(linha, status, summary) {
+  auditar(linha, status, summary, action) {
     if (!window.AuditService || typeof AuditService.logEvent !== "function") return;
     const u = AuditService.currentUser ? AuditService.currentUser() : {};
     AuditService.logEvent({
       module: "Contábil",
-      action: "Lançar equivalência",
+      action: action || "Lançar equivalência",
       status: status,
       summary: summary,
       user: u.name || "",
@@ -1071,7 +1130,58 @@ const ContabilEquiv = {
   },
 
   resumo(app, linha, msg) {
-    return "Equivalência " + linha.tipo + " da empresa " + linha.empresa + " em " + linha.rotulo + ": " + app.money(linha.amount) + " · débito " + linha.debitAccountId + " · crédito " + linha.creditAccountId + " · " + linha.description + " · " + msg;
+    const lote = linha.lote ? (" · lote " + linha.lote) : "";
+    return "Equivalência " + linha.tipo + " da empresa " + linha.empresa + " em " + linha.rotulo + ": " + app.money(linha.amount) + " · débito " + linha.debitAccountId + " · crédito " + linha.creditAccountId + " · " + linha.description + lote + " · " + msg;
+  },
+
+  mesmoCodigo(a, b) {
+    const n = (s) => String(s || "").replace(/\D/g, "");
+    const x = n(a);
+    const y = n(b);
+    return !!x && x === y;
+  },
+
+  contaDoAjuste(linha) {
+    const deb = String(linha.debitAccountId || "");
+    const cre = String(linha.creditAccountId || "");
+    if (deb && deb !== this.CONTA_LUCRO && deb !== this.CONTA_PREJUIZO) return deb;
+    return cre;
+  },
+
+  numeroLote(res) {
+    const msg = this.msgDe(res);
+    const m = String(msg).match(/lote\s+(\d+)/i);
+    if (m) return m[1];
+    const id = res && (res.batchId || res.id || res.entryBatchId || res.batchNumber);
+    return id != null && id !== "" ? String(id) : "";
+  },
+
+  conflitoDe(linha, existentes, balanco, app) {
+    const ajuste = this.contaDoAjuste(linha);
+    const money = (n) => app && app.money ? app.money(n) : String(n);
+    const msgs = [];
+    (existentes || []).forEach((raw) => {
+      const item = this.lerLancamento(raw);
+      const naConta = this.mesmoCodigo(item.debit, ajuste) || this.mesmoCodigo(item.credit, ajuste);
+      const mesmoValor = Math.abs(item.amount - Number(linha.amount)) <= 0.02;
+      if (!naConta && !mesmoValor) return;
+      if (!naConta && mesmoValor && !/EQUIVAL|MEP|PARTICIP/i.test(item.description || "")) return;
+      if (naConta && mesmoValor) msgs.push("Já existe lançamento de " + money(item.amount) + " na conta " + ajuste + " nesta competência.");
+      else if (naConta) msgs.push("A conta " + ajuste + " já tem lançamento de " + money(item.amount) + " nesta competência, diferente de " + money(linha.amount) + ".");
+      else msgs.push("Já existe lançamento de equivalência no mesmo valor (" + money(item.amount) + ") nesta competência.");
+    });
+    if (!msgs.length && app && typeof app.lerLinha === "function") {
+      (balanco || []).some((raw) => {
+        const row = app.lerLinha(raw);
+        if (!row || !this.mesmoCodigo(row.codigo, ajuste)) return false;
+        const mov = Math.abs(Number(row.movimento) || 0);
+        if (mov < 0.01) return false;
+        if (Math.abs(mov - Number(linha.amount)) <= 0.02) msgs.push("O balanço desta competência já tem " + money(mov) + " na conta " + ajuste + ".");
+        else msgs.push("O balanço desta competência já tem " + money(mov) + " na conta " + ajuste + ", diferente de " + money(linha.amount) + ".");
+        return true;
+      });
+    }
+    return msgs;
   },
 
   async enviar(linhas, opcoes) {
@@ -1096,12 +1206,25 @@ const ContabilEquiv = {
     for (let i = 0; i < ids.length; i++) {
       const grupo = porEmp[ids[i]];
       const datas = grupo.map((l) => l.date).slice().sort();
+      const ini = datas[0].slice(0, 7) + "-01";
+      const fim = datas[datas.length - 1];
       let existentes = null;
+      let balanco = [];
+      if (app) {
+        app.state.loadMsg = "Conferindo o balanço…";
+        app.state.progresso = 20 + Math.round((i / Math.max(ids.length, 1)) * 30);
+        if (document.getElementById("contabil-root")) app.render();
+      }
       try {
-        existentes = await api.getAccountancyEntries(ids[i], datas[0].slice(0, 7) + "-01", datas[datas.length - 1]);
+        existentes = await api.getAccountancyEntries(ids[i], ini, fim);
       } catch (e) {
         existentes = null;
       }
+      if (api.getTrialBalanceContabil) {
+        try { balanco = await api.getTrialBalanceContabil(ids[i], ini, fim); } catch (e) { balanco = []; }
+      }
+      const livres = [];
+      const contasUsadas = {};
       for (let j = 0; j < grupo.length; j++) {
         const linha = grupo[j];
         if (falhou[String(linha.origem)]) {
@@ -1114,9 +1237,61 @@ const ContabilEquiv = {
           pulos.push(linha.empresa + " · " + linha.rotulo + " já estava no Sienge.");
           continue;
         }
+        const conflitos = this.conflitoDe(linha, existentes, balanco, app);
+        const ajuste = this.contaDoAjuste(linha);
+        if (ajuste && contasUsadas[ajuste]) {
+          conflitos.push("Já há um lançamento de equivalência na conta " + ajuste + " desta empresa de destino. Não gerei outro.");
+        }
+        if (conflitos.length) {
+          pulos.push(linha.empresa + " · " + linha.rotulo + ": " + conflitos[0]);
+          continue;
+        }
+        if (ajuste) contasUsadas[ajuste] = true;
+        livres.push(linha);
+      }
+      if (!livres.length) continue;
+      let numero = "";
+      if (app) {
+        app.state.loadMsg = "Gerando lote…";
+        app.state.progresso = 55;
+        if (document.getElementById("contabil-root")) app.render();
+      }
+      try {
+        const chave = livres[0].chave;
+        const partes = String(chave || "").split("-");
+        const resLote = await api.postAccountancyBatch({
+          companyId: Number(ids[i]),
+          batchType: "EQUITY_EQUIVALENCE",
+          batchDescription: "Equivalencia patrimonial " + (partes[1] || "") + "/" + (partes[0] || ""),
+          startDate: ini,
+          endDate: fim
+        });
+        numero = this.numeroLote(resLote);
+        this.auditar(livres[0], "ok", "Lote " + (numero || "sem número") + " de equivalência patrimonial gravado na empresa " + ids[i] + ", competência " + (chave || "") + ". O Sienge grava o lote em aberto e não aprova.", "Gerar lote de equivalência");
+      } catch (e) {
+        const falha = this.textoErro(e);
+        this.auditar(livres[0], "erro", "Falha ao gerar o lote de equivalência na empresa " + ids[i] + ". " + falha, "Gerar lote de equivalência");
+        erros.push("Empresa " + ids[i] + ": não gerei o lote. " + falha);
+        continue;
+      }
+      for (let j = 0; j < livres.length; j++) {
+        const linha = livres[j];
+        if (numero) linha.lote = numero;
+        if (app) {
+          app.state.loadMsg = "Gerando lote…";
+          app.state.progresso = Math.min(92, 60 + Math.round(((j + 1) / livres.length) * 30));
+          if (document.getElementById("contabil-root")) app.render();
+        }
         try {
-          const res = await api.postAccountancyEntry(this.payload(linha));
-          const msg = this.msgDe(res);
+          let res;
+          try {
+            res = await api.postAccountancyEntry(this.payload(linha));
+          } catch (e1) {
+            if (linha.lote && e1 && (e1.status === 400 || e1.status === 422)) {
+              res = await api.postAccountancyEntry(this.payload(linha, true));
+            } else throw e1;
+          }
+          const msg = this.msgDe(res) + (numero ? (" · lote " + numero) : "");
           this.marcar(linha, msg);
           ok.push(linha);
           this.auditar(linha, "ok", this.resumo(app, linha, msg));
@@ -1127,7 +1302,7 @@ const ContabilEquiv = {
           this.auditar(linha, "erro", "Falha ao lançar equivalência de " + linha.empresa + " em " + linha.rotulo + ". " + falha);
           erros.push(linha.empresa + " · " + linha.rotulo + ": " + falha);
         }
-        if (j < grupo.length - 1) await new Promise((r) => setTimeout(r, 400));
+        if (j < livres.length - 1) await new Promise((r) => setTimeout(r, 400));
       }
     }
     try { await this.persistir(); } catch (e) {}
@@ -1462,7 +1637,11 @@ const ContabilEquiv = {
   contaHtml(empresaId, codigo, lado) {
     const cod = String(codigo || "").trim();
     const nome = this.nomeConta(empresaId, cod);
-    return `<div><strong>${this.esc(lado)}</strong> ${this.esc(cod || "—")}${nome ? " — " + this.esc(nome) : ""}</div>`;
+    return `<div class="ctb-eq-lado">
+      <span class="ctb-eq-rot">${this.esc(lado)}</span>
+      <span class="ctb-eq-cod">${this.esc(cod || "—")}</span>
+      ${nome ? `<span class="ctb-eq-nome">${this.esc(nome)}</span>` : ""}
+    </div>`;
   },
 
   detalheHtml(item) {
@@ -1471,12 +1650,17 @@ const ContabilEquiv = {
     const bloco = (titulo, alvo) => {
       if (!alvo || !alvo.payload) return "";
       const q = alvo.payload;
-      return `<div class="ctb-eq-bloco">
-        <strong>${this.esc(titulo)}</strong>
-        ${this.contaHtml(q.companyId, q.debitAccountId, "Débito")}
-        ${this.contaHtml(q.companyId, q.creditAccountId, "Crédito")}
-        <p class="ctb-eq-comp"><strong>Complemento.</strong> ${this.esc(q.description || "")}</p>
-      </div>`;
+      return `<article class="ctb-eq-bloco">
+        <h4 class="ctb-eq-onde">${this.esc(titulo)}</h4>
+        <div class="ctb-eq-par">
+          ${this.contaHtml(q.companyId, q.debitAccountId, "Débito")}
+          ${this.contaHtml(q.companyId, q.creditAccountId, "Crédito")}
+        </div>
+        <div class="ctb-eq-comp">
+          <span class="ctb-eq-rot">Complemento</span>
+          <p>${this.esc(q.description || "")}</p>
+        </div>
+      </article>`;
     };
     const cadeia = (item.cadeia || []).map((s) => bloco("Antes, na " + s.nomeDestino + ": " + s.nomeOrigem, s)).join("");
     return `<div class="ctb-eq-contas">
@@ -1519,6 +1703,14 @@ const ContabilEquiv = {
 
   htmlAba() {
     const app = window.ContabilApp;
+    if (app && app.state && app.state.lancando) {
+      const pct = Math.max(12, Number(app.state.progresso) || 35);
+      return `<div class="ml-load">
+        <div class="loading-spinner" aria-hidden="true"></div>
+        <div class="loading-status-text">${this.esc(app.state.loadMsg || "Gerando lote…")}</div>
+        <div class="ml-load-track"><div class="loading-progress-bar" style="width:${pct}%"></div></div>
+      </div>`;
+    }
     if (this.state.eqCarregando) {
       return `<div class="ml-load">
         <div class="loading-spinner" aria-hidden="true"></div>
@@ -1556,7 +1748,7 @@ const ContabilEquiv = {
           <td class="is-center">${this.esc(pct)}</td>
           <td class="is-right${l.signed < 0 ? " is-neg" : ""}">${valor}</td>
           <td>${this.esc(tipo || "—")}</td>
-          <td class="ctb-eq-st is-${this.esc(l.status)}" title="${this.esc(l.motivo || "")}">${this.esc(this.rotuloStatus(l.status))}</td>
+          <td class="ctb-eq-st is-${this.esc(l.status)}" title="${this.esc(l.motivo || "")}">${this.esc(this.rotuloStatus(l.status, l))}</td>
         </tr>
         ${aberto ? `<tr class="ctb-eq-detalhe"><td colspan="7">${this.detalheHtml(l)}</td></tr>` : ""}`;
       }).join("") : `<tr><td colspan="7" class="is-center">Nenhuma empresa de origem aponta para este destino na configuração.</td></tr>`;
@@ -1588,9 +1780,13 @@ const ContabilEquiv = {
     </div>`;
   },
 
-  rotuloStatus(status) {
+  rotuloStatus(status, linha) {
     if (status === "pronto") return "Pronto para gerar";
-    if (status === "lancado") return "Já lançado";
+    if (status === "lancado") {
+      const rec = linha && this.state.lancados && this.state.lancados[linha.key];
+      if (rec && rec.lote) return "Já lançado · lote " + rec.lote;
+      return "Já lançado";
+    }
     if (status === "sem-pct") return "Sem percentual";
     if (status === "sem-conta") return "Sem conta";
     if (status === "sem-evento") return "Sem evento";
@@ -1646,8 +1842,14 @@ const ContabilEquiv = {
     const p = String(chave || "").split("-");
     const rotulo = p.length >= 2 ? (app.nomeMes(Number(p[1])) + "/" + p[0]) : chave;
     const lista = escolhidos.map((l) => l.nomeOrigem + " → " + l.nomeDestino + (l.status === "aguarda" ? " (depois do lançamento anterior e do novo balancete)" : "")).join("\n");
-    if (!window.confirm("Gerar " + escolhidos.length + " lançamento(s) no Sienge, competência " + rotulo + "?\n\n" + lista)) return;
+    const pergunta = "Gerar " + escolhidos.length + " lançamento(s) no Sienge, competência " + rotulo + "?\n\n" + lista;
+    const segue = typeof window.mouraConfirm === "function"
+      ? await window.mouraConfirm(pergunta)
+      : window.confirm(pergunta);
+    if (!segue) return;
     app.state.lancando = true;
+    app.state.loadMsg = "Conferindo o balanço…";
+    app.state.progresso = 12;
     if (document.getElementById("contabil-root")) app.render();
     const pendentes = {};
     escolhidos.forEach((l) => { pendentes[l.key] = true; });
@@ -1754,8 +1956,13 @@ const ContabilEquiv = {
       alert(plano.erro);
       return;
     }
-    if (!window.confirm(plano.texto)) return;
+    const seguePlano = typeof window.mouraConfirm === "function"
+      ? await window.mouraConfirm(plano.texto)
+      : window.confirm(plano.texto);
+    if (!seguePlano) return;
     app.state.lancando = true;
+    app.state.loadMsg = "Gerando lote…";
+    app.state.progresso = 12;
     app.render();
     try {
       await this.enviar(plano.linhas);

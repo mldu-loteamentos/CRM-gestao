@@ -1876,9 +1876,25 @@ const DashboardInadimplencia = (function() {
     }
   }
 
+  async function listaDaFilaParaSprint() {
+    if (Array.isArray(window.rawClientList) && window.rawClientList.length) return window.rawClientList;
+    if (typeof window.carregarFilaProntaDoDia === "function") {
+      try {
+        const rows = await window.carregarFilaProntaDoDia();
+        if (Array.isArray(rows) && rows.length) {
+          window.rawClientList = rows;
+          return rows;
+        }
+      } catch (e) {}
+    }
+    if (Array.isArray(window.clientList) && window.clientList.length) return window.clientList;
+    return [];
+  }
+
   async function gerarRelatorioDiarioPdf() {
-    if (!window.rawClientList || window.rawClientList.length === 0) {
-      alert("Nenhum dado na fila de cobrança para gerar o relatório. Carregue os dados primeiro.");
+    const fila = await listaDaFilaParaSprint();
+    if (!fila.length) {
+      alert("A fila de cobrança de hoje ainda não está carregada. Abra a Fila de cobrança e espere ela terminar de montar.");
       return;
     }
     if (typeof window.refreshVistoriaSprintCounts === "function") {
@@ -1886,7 +1902,7 @@ const DashboardInadimplencia = (function() {
     }
     try { await carregarDados(); } catch (e) {}
 
-    const bills = window.rawClientList;
+    const bills = fila;
     
     let totalOverdue = 0;
     let totalBills = 0;

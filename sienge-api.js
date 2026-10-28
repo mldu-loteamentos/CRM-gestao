@@ -3881,6 +3881,14 @@ const SiengeApiService = {
     return siengePost("/accountancy/entries", [entry]);
   },
 
+  /* Grava o lote. Não aprova e não fecha: o Sienge deixa o lote em aberto. */
+  async postAccountancyBatch(body) {
+    if (s_apiMode === "simulado") {
+      throw new Error("O Sienge está em modo simulado. O lote de equivalência não foi gerado.");
+    }
+    return siengePost("/batch", body);
+  },
+
   async getAccountBalances(balanceDate, opts = {}) {
     const date = String(balanceDate || "").slice(0, 10);
     const showLast = opts.showLast === false ? "N" : "S";
