@@ -312,7 +312,10 @@ const ContabilEquiv = {
       }
       const destino = vinc && vinc.destino ? String(vinc.destino) : "1";
       const titulo = c.nome + " " + pctTxt + " → " + nomeEmp(destino, "Moura Leite");
-      if (this.jaPasso(destino, c.id, chave)) {
+      const lucroGestao = signed > 0;
+      const debitGestao = lucroGestao ? debitoVar : (String(vinc.debitoPrejuizo || "").trim() || this.CONTA_PREJUIZO);
+      const creditGestao = lucroGestao ? (String(vinc.creditoLucro || "").trim() || this.CONTA_LUCRO) : creditoVar;
+      if (this.jaPasso(destino, c.id, chave) || this.mepJaNoBalanco(destino, this.contasDoAjuste(debitGestao, creditGestao), chave)) {
         pulos.push(titulo);
         return;
       }
@@ -321,7 +324,7 @@ const ContabilEquiv = {
         faltas.push(nomeEmp(destino, "destino") + " ainda não tem lançamento de equivalência anterior para repetir o evento do Sienge");
         return;
       }
-      const lucro = signed > 0;
+      const lucro = lucroGestao;
       linhas.push({
         companyId: Number(destino),
         origem: String(c.id),
@@ -331,8 +334,8 @@ const ContabilEquiv = {
         date: fim,
         amount: Math.round(Math.abs(signed) * 100) / 100,
         tipo: lucro ? "lucro" : "prejuízo",
-        debitAccountId: lucro ? debitoVar : (String(vinc.debitoPrejuizo || "").trim() || this.CONTA_PREJUIZO),
-        creditAccountId: lucro ? (String(vinc.creditoLucro || "").trim() || this.CONTA_LUCRO) : creditoVar,
+        debitAccountId: debitGestao,
+        creditAccountId: creditGestao,
         eventId: evento,
         description: this.complemento(this.nomeCurto(c.id, c.nome), pct, chave),
         resultado: resultado,
@@ -1006,7 +1009,10 @@ const ContabilEquiv = {
       const resultado = Math.round(base * 100) / 100;
       const signed = Math.round(resultado * pct) / 100;
       if (Math.abs(signed) < 0.01) return;
-      if (this.jaPasso(passo.destino, passo.origem, chave)) {
+      const lucroPlano = signed > 0;
+      const debitPlano = lucroPlano ? debitoVar : (String(passo.debitoPrejuizo || "").trim() || this.CONTA_PREJUIZO);
+      const creditPlano = lucroPlano ? (String(passo.creditoLucro || "").trim() || this.CONTA_LUCRO) : creditoVar;
+      if (this.jaPasso(passo.destino, passo.origem, chave) || this.mepJaNoBalanco(passo.destino, this.contasDoAjuste(debitPlano, creditPlano), chave)) {
         pulos.push(titulo);
         return;
       }
@@ -1020,7 +1026,7 @@ const ContabilEquiv = {
         return;
       }
       pendente[String(passo.destino)] = true;
-      const lucro = signed > 0;
+      const lucro = lucroPlano;
       linhas.push({
         companyId: Number(passo.destino),
         origem: passo.origem,
@@ -1030,8 +1036,8 @@ const ContabilEquiv = {
         date: fim,
         amount: Math.round(Math.abs(signed) * 100) / 100,
         tipo: lucro ? "lucro" : "prejuízo",
-        debitAccountId: lucro ? debitoVar : (String(passo.debitoPrejuizo || "").trim() || this.CONTA_PREJUIZO),
-        creditAccountId: lucro ? (String(passo.creditoLucro || "").trim() || this.CONTA_LUCRO) : creditoVar,
+        debitAccountId: debitPlano,
+        creditAccountId: creditPlano,
         eventId: evento,
         description: this.complemento(this.nomeCurto(passo.origem, passo.apelidoOrigem), pct, chave),
         resultado: resultado,
@@ -1137,6 +1143,39 @@ const ContabilEquiv = {
     const cre = String(linha.creditAccountId || "");
     if (deb && deb !== this.CONTA_LUCRO && deb !== this.CONTA_PREJUIZO) return deb;
     return cre;
+  },
+
+  /* Contas do ajuste MEP da empresa de origem, sem a conta genérica de lucro ou prejuízo. */
+  contasDoAjuste(debit, credit) {
+    const fora = {};
+    fora[this.CONTA_LUCRO] = true;
+    fora[this.CONTA_PREJUIZO] = true;
+    const vistos = {};
+    return [debit, credit].map((c) => String(c || "").trim()).filter((c) => {
+      if (!c || fora[c] || vistos[c]) return false;
+      vistos[c] = true;
+      return true;
+    });
+  },
+
+  /* O balancete da destino na competência já tem movimento na conta de ajuste MEP, mesmo com diferença de centavos. */
+  mepJaNoBalanco(destino, contas, chave) {
+    const app = window.ContabilApp;
+    if (!app || typeof app.lerLinha !== "function" || !contas || !contas.length) return false;
+    const bloco = app.state.porEmpresa && app.state.porEmpresa[String(destino)];
+    const listas = bloco && bloco.porMes && bloco.porMes[chave];
+    if (!listas || !listas.length) return false;
+    let achou = false;
+    listas.forEach((lista) => {
+      (lista || []).forEach((raw) => {
+        if (achou) return;
+        const row = app.lerLinha(raw);
+        if (!row || !contas.some((c) => this.mesmoCodigo(row.codigo, c))) return;
+        const mov = Math.max(Math.abs(Number(row.movimento) || 0), Number(row.deb) || 0, Number(row.cred) || 0);
+        if (mov >= 0.01) achou = true;
+      });
+    });
+    return achou;
   },
 
   numeroLote(res) {
@@ -1401,9 +1440,9 @@ const ContabilEquiv = {
       } else if (Math.abs(signed) < 0.01) {
         status = "zerado";
         motivo = "O resultado no percentual não deu valor.";
-      } else if (this.jaPasso(passo.destino, passo.origem, chave)) {
+      } else if (this.jaPasso(passo.destino, passo.origem, chave) || this.mepJaNoBalanco(passo.destino, this.contasDoAjuste(debit, credit), chave)) {
         status = "lancado";
-        motivo = "Já lançado nesta competência.";
+        motivo = "A conta de ajuste MEP desta empresa já está no balanço da destino nesta competência.";
       } else if (!(evento > 0)) {
         status = "sem-evento";
         motivo = "Ainda não há lançamento de equivalência anterior para repetir o evento do Sienge.";
@@ -1454,6 +1493,8 @@ const ContabilEquiv = {
       const creditoVar = vinc ? String(vinc.creditoPrejuizo || "").trim() : "";
       const signed = resultado == null ? null : Math.round(resultado * pct) / 100;
       const lucro = signed > 0;
+      const debit = lucro ? debitoVar : (String(vinc.debitoPrejuizo || "").trim() || this.CONTA_PREJUIZO);
+      const credit = lucro ? (String(vinc.creditoLucro || "").trim() || this.CONTA_LUCRO) : creditoVar;
       const evento = Number(vinc && vinc.evento) || Number((this.cfgDa(destino) || {}).evento);
       let status = "pronto";
       let motivo = "";
@@ -1469,9 +1510,9 @@ const ContabilEquiv = {
       } else if (Math.abs(signed) < 0.01) {
         status = "zerado";
         motivo = "O resultado no percentual não deu valor.";
-      } else if (this.jaPasso(destino, c.id, chave)) {
+      } else if (this.jaPasso(destino, c.id, chave) || this.mepJaNoBalanco(destino, this.contasDoAjuste(debit, credit), chave)) {
         status = "lancado";
-        motivo = "Já lançado nesta competência.";
+        motivo = "A conta de ajuste MEP desta empresa já está no balanço da destino nesta competência.";
       } else if (!(evento > 0)) {
         status = "sem-evento";
         motivo = "Ainda não há lançamento de equivalência anterior para repetir o evento do Sienge.";
@@ -1662,7 +1703,7 @@ const ContabilEquiv = {
   },
 
   podeMarcar(linha) {
-    return !!linha && (linha.status === "pronto" || linha.status === "aguarda");
+    return !!linha && linha.status === "pronto";
   },
 
   linhasSelecionaveis() {
@@ -1676,8 +1717,11 @@ const ContabilEquiv = {
 
   marcarLinha(key, on) {
     if (!this.state.eqMarcados) this.state.eqMarcados = {};
-    if (on) this.state.eqMarcados[key] = true;
-    else delete this.state.eqMarcados[key];
+    if (on) {
+      const linha = this.mapaPreview()[key];
+      if (!this.podeMarcar(linha)) return;
+      this.state.eqMarcados[key] = true;
+    } else delete this.state.eqMarcados[key];
     const app = window.ContabilApp;
     if (app && document.getElementById("contabil-root")) app.render();
   },

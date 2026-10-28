@@ -21,6 +21,8 @@ const ContabilApp = {
     dreSoPeriodo: false,
     acumulado: false,
     empresaAba: "",
+    empresaPronta: {},
+    empresaCarregando: "",
     exportando: false,
     janela: null,
     porEmpresa: null,
@@ -129,16 +131,45 @@ const ContabilApp = {
   },
 
   htmlAbasEmpresa() {
+    if (!this.state.buscou) return "";
     const lista = this.empresasEscolhidas();
     if (!lista.length) return "";
+    const prontas = this.state.empresaPronta || {};
+    const carregandoId = String(this.state.empresaCarregando || "");
+    const mostrar = lista.filter((c) => {
+      const id = String(c.id);
+      return !!prontas[id] || id === carregandoId;
+    });
+    if (!mostrar.length) return "";
     const ativa = this.empresaAtiva();
     const idAtiva = ativa ? String(ativa.id) : "";
     return `<div class="ml-tabs ctb-emp-tabs" role="tablist">
-      ${lista.map((c) => {
-        const on = String(c.id) === idAtiva;
-        return `<button type="button" role="tab" aria-selected="${on}" class="ml-tab ${on ? "is-active" : ""}" onclick="ContabilApp.setEmpresaAba('${this.esc(c.id)}')"><i data-lucide="building-2"></i> ${this.esc(c.id + " - " + this.nomeUsual(c))}</button>`;
+      ${mostrar.map((c) => {
+        const id = String(c.id);
+        const nome = this.esc(id + " - " + this.nomeUsual(c));
+        if (id === carregandoId && !prontas[id]) {
+          const largura = Math.max(8, Number(this.state.progresso) || 8);
+          return `<button type="button" class="ml-tab ctb-tab-load" disabled aria-busy="true" title="Lendo ${nome}">
+            <span class="loading-spinner ctb-tab-spin" aria-hidden="true"></span>
+            <span class="ctb-tab-nome">${nome}</span>
+            <span class="ml-load-track ctb-tab-track"><span class="loading-progress-bar" style="width:${largura}%"></span></span>
+          </button>`;
+        }
+        const on = id === idAtiva;
+        return `<button type="button" role="tab" aria-selected="${on}" title="${nome}" class="ml-tab ${on ? "is-active" : ""}" onclick="ContabilApp.setEmpresaAba('${this.esc(id)}')"><i data-lucide="building-2"></i><span class="ctb-tab-nome">${nome}</span></button>`;
       }).join("")}
     </div>`;
+  },
+
+  empresaJaPronta(emp) {
+    if (!emp) return false;
+    if (!this.state.carregando) return !!this.state.buscou;
+    return !!(this.state.empresaPronta && this.state.empresaPronta[String(emp.id)]);
+  },
+
+  pintarBarraAba() {
+    const barra = document.querySelector("#contabil-root .ctb-tab-load .loading-progress-bar");
+    if (barra) barra.style.width = Math.max(8, Number(this.state.progresso) || 8) + "%";
   },
 
   serieDaEmpresa(emp) {
@@ -173,7 +204,9 @@ const ContabilApp = {
 
   empresasEscolhidas() {
     const ids = this.state.selecionadas.map(String);
-    return this.empresasGeridas().filter((c) => ids.includes(String(c.id)));
+    return this.empresasGeridas()
+      .filter((c) => ids.includes(String(c.id)))
+      .sort((a, b) => Number(a.id) - Number(b.id));
   },
 
   /* A linha da tela é de uma empresa. O Excel passa a empresa da aba. */
@@ -1230,10 +1263,11 @@ const ContabilApp = {
     s.progresso = 8;
     s.buscou = true;
     s.janela = janela;
-    const comp = this.partesMes(de);
-    s.loadMsg = comp.mes
-      ? ("Lendo janeiro a " + this.nomeMes(comp.mes) + " de " + comp.ano + " e de " + (comp.ano - 1) + "…")
-      : "Lendo o balancete…";
+    s.empresaPronta = {};
+    s.empresaCarregando = String(empresas[0].id);
+    s.empresaAba = String(empresas[0].id);
+    s.porEmpresa = {};
+    s.loadMsg = "";
     this.render();
     const tarefas = [{ tipo: "balanco", ini: ini, fim: fim, rotulo: "balanço" }];
     const mesesBusca = janela.faixa && janela.faixa.length
@@ -1245,20 +1279,21 @@ const ContabilApp = {
         tarefas.push({ tipo: "mes", chave: ym, ini: ym + "-01", fim: this.fimDoMes(ym), rotulo: this.nomeMes(item.m) + "/" + y });
       });
     });
-    const fila = [];
-    empresas.forEach((emp) => tarefas.forEach((t) => fila.push({ emp: emp, t: t })));
     const listas = [];
     const porMes = {};
     const porEmpresa = {};
     empresas.forEach((emp) => { porEmpresa[emp.id] = { id: emp.id, nome: emp.nome, porMes: {}, listas: [] }; });
+    s.porEmpresa = porEmpresa;
     const avisos = [];
+    const totalPassos = Math.max(empresas.length * tarefas.length, 1);
     let feitas = 0;
-    let cursor = 0;
-    const worker = async () => {
-      while (cursor < fila.length) {
-        const item = fila[cursor++];
-        const emp = item.emp;
-        const t = item.t;
+    for (let ei = 0; ei < empresas.length; ei++) {
+      const emp = empresas[ei];
+      s.empresaCarregando = String(emp.id);
+      s.progresso = Math.round(8 + (feitas / totalPassos) * 88);
+      this.render();
+      for (let ti = 0; ti < tarefas.length; ti++) {
+        const t = tarefas[ti];
         try {
           const lista = await api.getTrialBalanceContabil(emp.id, t.ini, t.fim);
           const dono = porEmpresa[emp.id];
@@ -1277,14 +1312,16 @@ const ContabilApp = {
           avisos.push("Empresa " + emp.id + ", " + t.rotulo + ": " + ((e && e.message) || "o Sienge não respondeu o balancete."));
         }
         feitas += 1;
-        s.progresso = Math.round(8 + (feitas / Math.max(fila.length, 1)) * 88);
-        this.render();
+        s.progresso = Math.round(8 + (feitas / totalPassos) * 88);
+        this.pintarBarraAba();
       }
-    };
-    const conc = Math.min(3, fila.length || 1);
-    const trabalhos = [];
-    for (let i = 0; i < conc; i++) trabalhos.push(worker());
-    await Promise.all(trabalhos);
+      s.empresaPronta[String(emp.id)] = true;
+      s.avisos = avisos.slice();
+      s.linhas = this.juntar(listas);
+      s.arvore = this.classificar(this.montarArvore(s.linhas));
+      s.serie = this.montarSerie(janela, porMes);
+      if (!s.abertos || !Object.keys(s.abertos).length) s.abertos = this.abrirPadrao(s.arvore);
+    }
     s.linhas = this.juntar(listas);
     s.arvore = this.classificar(this.montarArvore(s.linhas));
     s.abertos = this.abrirPadrao(s.arvore);
@@ -1294,6 +1331,7 @@ const ContabilApp = {
     if (!empresas.some((e) => String(e.id) === String(s.empresaAba))) {
       s.empresaAba = String(empresas[0].id);
     }
+    s.empresaCarregando = "";
     s.carregando = false;
     s.loadMsg = "";
     s.progresso = 100;
@@ -1510,13 +1548,9 @@ const ContabilApp = {
       corpo = window.ContabilEquiv && typeof ContabilEquiv.htmlAba === "function"
         ? ContabilEquiv.htmlAba()
         : `<p class="ctb-nota">A equivalência patrimonial não está disponível. Atualize a página com Ctrl+F5.</p>`;
-    } else if (s.carregando) {
-      corpo = `<div class="ml-load">
-        <div class="loading-spinner" aria-hidden="true"></div>
-        <div class="loading-status-text">${this.esc(s.loadMsg || "Lendo o balancete…")}</div>
-        <div class="ml-load-track"><div class="loading-progress-bar" style="width:${Math.max(8, s.progresso)}%"></div></div>
-      </div>`;
-    } else if (s.erro && !s.linhas.length) {
+    } else if (s.carregando && !this.empresaJaPronta(this.empresaAtiva())) {
+      corpo = "";
+    } else if (s.erro && !s.linhas.length && !this.empresaJaPronta(this.empresaAtiva())) {
       corpo = `<p class="ctb-erro">${this.esc(s.erro)}</p>`;
     } else if (!s.buscou) {
       corpo = "";
@@ -1530,7 +1564,10 @@ const ContabilApp = {
       }
       const arvoreVista = vista && s.porEmpresa ? this.arvoreDaEmpresa(vista) : s.arvore;
       const demo = aba === "balanco" ? this.htmlBalanco(arvoreVista) : this.htmlDre(arvoreVista);
-      const avisos = s.avisos.length ? `<p class="ctb-erro">${s.avisos.map((a) => this.esc(a)).join("<br>")}</p>` : "";
+      const avisosDaVista = vista
+        ? s.avisos.filter((a) => String(a).indexOf("Empresa " + vista.id + ",") === 0)
+        : s.avisos;
+      const avisos = avisosDaVista.length ? `<p class="ctb-erro">${avisosDaVista.map((a) => this.esc(a)).join("<br>")}</p>` : "";
       const serie = s.serie;
       const fimMes = serie && serie.meses && serie.meses.length ? this.nomeMes(serie.meses[serie.meses.length - 1]) : "";
       const iniMes = serie && serie.meses && serie.meses.length ? this.nomeMes(serie.meses[0]) : "";
@@ -1582,8 +1619,12 @@ const ContabilApp = {
       #contabil-root .ml-emp-filter-item span { white-space:nowrap; }
       #contabil-root .ml-emp-filter-panel { width:max-content; min-width:100%; max-width:min(720px, 70vw); right:auto; }
       #contabil-root .ctb-tabs { margin:8px 0 12px; }
-      #contabil-root .ctb-emp-tabs { margin:4px 0 8px; flex-wrap:wrap; overflow:visible; row-gap:0; }
-      #contabil-root .ctb-emp-tabs .ml-tab { flex:0 1 auto; max-width:100%; }
+      #contabil-root .ctb-emp-tabs { margin:4px 0 8px; flex-wrap:nowrap; overflow:hidden; }
+      #contabil-root .ctb-emp-tabs .ml-tab { flex:1 1 0; min-width:0; max-width:none; padding:8px 4px; font-size:0.72rem; justify-content:center; }
+      #contabil-root .ctb-emp-tabs .ctb-tab-nome { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+      #contabil-root .ctb-tab-load { position:relative; flex-direction:row; gap:4px; cursor:wait; }
+      #contabil-root .ctb-tab-spin { width:14px; height:14px; border-width:2px; flex:none; }
+      #contabil-root .ctb-tab-track { position:absolute; left:8px; right:8px; bottom:1px; height:3px; }
       #contabil-root .ctb-visao { margin:0; }
       #contabil-root .ctb-visao-row { display:flex; flex-wrap:wrap; align-items:center; gap:12px 18px; margin:0 0 10px; }
       #contabil-root .ctb-dre { width:max-content; min-width:0; table-layout:fixed; }
