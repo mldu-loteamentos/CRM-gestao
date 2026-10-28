@@ -25,7 +25,20 @@ const ContabilEquiv = {
     eqMarcados: {},
     eqCarregando: false,
     eqErro: "",
-    nomesConta: {}
+    nomesConta: {},
+    aba: "equiv",
+    planoEmpOpen: false,
+    planoEmpQuery: "",
+    planoEmpIds: [],
+    planoTipo: "",
+    planoBusca: "",
+    planoLista: [],
+    planoLendo: false,
+    planoProgresso: 0,
+    planoMsg: "",
+    planoErro: "",
+    planoOrdem: "codigo",
+    planoDir: 1
   },
   _lido: false,
 
@@ -877,6 +890,247 @@ const ContabilEquiv = {
     return opts.join("");
   },
 
+  setAba(id) {
+    if (document.getElementById("ctb-eq-vincos")) this.lerVinculos();
+    this.state.aba = id === "contas" ? "contas" : "equiv";
+    const seguir = () => this.render({ semLer: true });
+    if (this.state.aba === "contas" && !this.state.companies.length) {
+      this.carregarEmpresas().then(seguir, seguir);
+      return;
+    }
+    seguir();
+  },
+
+  abasHtml() {
+    const aba = this.state.aba === "contas" ? "contas" : "equiv";
+    const btn = (id, label, icon) =>
+      `<button type="button" role="tab" aria-selected="${aba === id}" class="ml-tab${aba === id ? " is-active" : ""}" onclick="ContabilEquiv.setAba('${id}')"><i data-lucide="${icon}"></i> ${label}</button>`;
+    return `<div class="ml-tabs" role="tablist" style="margin-bottom:16px;">
+      ${btn("equiv", "Equivalência patrimonial", "git-merge")}
+      ${btn("contas", "Contas contábeis", "book-open")}
+    </div>`;
+  },
+
+  itensPlanoEmpresa() {
+    return (this.state.companies || []).slice().sort((a, b) => Number(a.id) - Number(b.id)).map((c) => ({
+      id: String(c.id),
+      label: String(c.id) + " - " + String(c.nome || "").toUpperCase()
+    }));
+  },
+
+  paintPlanoEmpresas() {
+    const box = document.getElementById("ctb-plano-emp-box");
+    if (!box || !window.MlEmpresaFilter) return;
+    const opts = {
+      id: "ctb-plano-emp",
+      label: "Empresas",
+      items: this.itensPlanoEmpresa(),
+      selectedIds: this.state.planoEmpIds,
+      open: this.state.planoEmpOpen,
+      query: this.state.planoEmpQuery,
+      emptyMeansAll: false
+    };
+    box.innerHTML = MlEmpresaFilter.html(opts);
+    MlEmpresaFilter.bind("ctb-plano-emp", {
+      toggleOpen: () => {
+        this.state.planoEmpOpen = !this.state.planoEmpOpen;
+        this.paintPlanoEmpresas();
+      },
+      close: () => {
+        this.state.planoEmpOpen = false;
+        this.paintPlanoEmpresas();
+      },
+      setQuery: (q) => {
+        this.state.planoEmpQuery = q || "";
+        const list = document.getElementById("ctb-plano-emp-list");
+        if (list) {
+          list.innerHTML = MlEmpresaFilter.listHtml({
+            id: "ctb-plano-emp",
+            items: this.itensPlanoEmpresa(),
+            selectedIds: this.state.planoEmpIds,
+            query: this.state.planoEmpQuery
+          });
+        }
+      },
+      toggleId: (itemId, on) => {
+        const sid = String(itemId);
+        const lista = this.state.planoEmpIds.map(String);
+        if (on) { if (lista.indexOf(sid) < 0) lista.push(sid); }
+        else this.state.planoEmpIds = lista.filter((x) => x !== sid);
+        if (on) this.state.planoEmpIds = lista;
+        this.paintPlanoEmpresas();
+      },
+      selectAll: () => {
+        this.state.planoEmpIds = this.itensPlanoEmpresa().map((c) => c.id);
+        this.paintPlanoEmpresas();
+      },
+      selectNone: () => {
+        this.state.planoEmpIds = [];
+        this.paintPlanoEmpresas();
+      }
+    });
+    if (window.lucide && typeof window.lucide.createIcons === "function") window.lucide.createIcons();
+  },
+
+  tipoConta(tipo) {
+    const t = String(tipo || "").toUpperCase();
+    if (t === "ANALYTICAL" || t === "A" || t === "ANALITICA") return "Analítica";
+    if (t === "SYNTHETIC" || t === "S" || t === "SINTETICA") return "Sintética";
+    return tipo ? String(tipo) : "—";
+  },
+
+  lerContaPlano(raw, empresa) {
+    const base = this.lerConta(raw);
+    const tipo = raw && (raw.accountType || raw.type || "");
+    const tipoTxt = typeof tipo === "object" ? (tipo.id || tipo.description || tipo.name || "") : tipo;
+    return {
+      empresaId: String(empresa.id),
+      empresa: String(empresa.id) + " - " + String(empresa.nome || ""),
+      id: base.id,
+      codigo: base.codigo,
+      nome: base.nome,
+      tipo: String(tipoTxt || "")
+    };
+  },
+
+  ordenarPlano(lista) {
+    const campo = this.state.planoOrdem || "codigo";
+    const dir = this.state.planoDir === -1 ? -1 : 1;
+    const app = window.ContabilApp;
+    return (lista || []).slice().sort((a, b) => {
+      let c = 0;
+      if (campo === "codigo" && app && app.compararCodigo) c = app.compararCodigo(a.codigo, b.codigo);
+      else if (campo === "id") c = (Number(a.id) || 0) - (Number(b.id) || 0);
+      else c = String(a[campo] || "").localeCompare(String(b[campo] || ""), "pt-BR", { numeric: true, sensitivity: "base" });
+      if (!c && campo !== "codigo" && app && app.compararCodigo) c = app.compararCodigo(a.codigo, b.codigo);
+      return c * dir;
+    });
+  },
+
+  ordenarColunaPlano(campo) {
+    if (this.state.planoOrdem === campo) this.state.planoDir = this.state.planoDir === 1 ? -1 : 1;
+    else {
+      this.state.planoOrdem = campo;
+      this.state.planoDir = 1;
+    }
+    this.render({ semLer: true });
+  },
+
+  filtrarPlano(q) {
+    this.state.planoBusca = q || "";
+    const alvo = String(q || "").toUpperCase();
+    document.querySelectorAll("#ctb-plano-tab tbody tr[data-nome]").forEach((tr) => {
+      const blob = tr.getAttribute("data-nome") || "";
+      tr.style.display = !alvo || blob.indexOf(alvo) >= 0 ? "" : "none";
+    });
+  },
+
+  async buscarPlano() {
+    const ids = (this.state.planoEmpIds || []).map(String).filter(Boolean);
+    if (!ids.length) {
+      this.state.planoErro = "Escolha ao menos uma empresa.";
+      this.state.planoMsg = "";
+      this.render({ semLer: true });
+      return;
+    }
+    const api = window.SiengeApiService;
+    if (!api || typeof api.getAccountancyAccounts !== "function") {
+      this.state.planoErro = "A lista de contas não está disponível. Atualize a página com Ctrl+F5.";
+      this.render({ semLer: true });
+      return;
+    }
+    const tipo = this.state.planoTipo === "ANALYTICAL" || this.state.planoTipo === "SYNTHETIC" ? this.state.planoTipo : "";
+    this.state.planoLendo = true;
+    this.state.planoErro = "";
+    this.state.planoMsg = "Lendo as contas contábeis…";
+    this.state.planoProgresso = 8;
+    this.render({ semLer: true });
+    const lista = [];
+    const falhas = [];
+    const empresas = this.state.companies || [];
+    for (let i = 0; i < ids.length; i++) {
+      const emp = empresas.find((c) => String(c.id) === ids[i]) || { id: ids[i], nome: "" };
+      this.state.planoMsg = "Lendo as contas contábeis…";
+      this.state.planoProgresso = Math.round(8 + (i / ids.length) * 88);
+      this.render({ semLer: true });
+      try {
+        const brutos = await api.getAccountancyAccounts(ids[i], tipo ? { accountType: tipo } : null);
+        (brutos || []).forEach((raw) => {
+          const conta = this.lerContaPlano(raw, emp);
+          if (conta.codigo) lista.push(conta);
+        });
+      } catch (e) {
+        falhas.push(ids[i]);
+      }
+    }
+    this.state.planoLista = lista;
+    this.state.planoLendo = false;
+    this.state.planoProgresso = 100;
+    this.state.planoMsg = lista.length ? (lista.length + " contas contábeis.") : "O Sienge não devolveu contas para essa consulta.";
+    this.state.planoErro = falhas.length ? ("Não li as contas das empresas " + falhas.join(", ") + ".") : "";
+    this.render({ semLer: true });
+  },
+
+  contasHtml() {
+    const s = this.state;
+    const busca = String(s.planoBusca || "").toUpperCase();
+    const th = (campo, rotulo, cls) =>
+      `<th class="${cls || ""}" onclick="ContabilEquiv.ordenarColunaPlano('${campo}')" style="cursor:pointer;user-select:none;">${rotulo} <i data-lucide="chevrons-up-down" style="width:11px;vertical-align:middle;"></i></th>`;
+    const linhas = this.ordenarPlano(s.planoLista || []).map((c) => {
+      const blob = (c.empresa + " " + c.codigo + " " + c.id + " " + c.nome + " " + this.tipoConta(c.tipo)).toUpperCase();
+      const esconde = busca && blob.indexOf(busca) < 0 ? " style=\"display:none;\"" : "";
+      return `<tr data-nome="${this.esc(blob)}"${esconde}>
+        <td>${this.esc(c.empresa)}</td>
+        <td>${this.esc(c.codigo)}</td>
+        <td class="is-center">${this.esc(c.id || "—")}</td>
+        <td>${this.esc(c.nome || "—")}</td>
+        <td>${this.esc(this.tipoConta(c.tipo))}</td>
+      </tr>`;
+    }).join("");
+    const tipoSel = (valor, rotulo) => `<option value="${valor}"${s.planoTipo === valor ? " selected" : ""}>${rotulo}</option>`;
+    return `<div class="cc-page ctb-eq-page">
+      <div class="cc-toolbar" style="align-items:flex-end;">
+        <div id="ctb-plano-emp-box"></div>
+        <label style="font-size:0.7rem;font-weight:700;color:#64748b;text-transform:uppercase;display:flex;flex-direction:column;gap:4px;">Tipo
+          <select onchange="ContabilEquiv.state.planoTipo=this.value" style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;background:#fff;font-size:0.82rem;font-weight:600;color:#0f172a;text-transform:none;">
+            ${tipoSel("", "Todas")}
+            ${tipoSel("ANALYTICAL", "Analítica")}
+            ${tipoSel("SYNTHETIC", "Sintética")}
+          </select>
+        </label>
+        <div class="cc-toolbar-actions">
+          <button type="button" class="btn btn-primary cc-atualizar" onclick="ContabilEquiv.buscarPlano()" ${s.planoLendo ? "disabled" : ""}>Buscar</button>
+        </div>
+      </div>
+      <p class="ctb-eq-help">Contas do cadastro contábil do Sienge, por empresa. O código com máscara é o da conta; a reduzida é o id usado no lançamento.</p>
+      ${s.planoLendo ? `<div class="ml-load" style="margin:0 0 12px;">
+        <div class="loading-spinner" aria-hidden="true"></div>
+        <div class="loading-status-text">${this.esc(s.planoMsg || "Lendo as contas contábeis…")}</div>
+        <div class="ml-load-track"><div class="loading-progress-bar" style="width:${Math.max(12, s.planoProgresso || 20)}%"></div></div>
+      </div>` : ""}
+      ${s.planoErro ? `<p class="ctb-eq-status" style="color:#b91c1c;margin:0 0 8px;">${this.esc(s.planoErro)}</p>` : ""}
+      ${!s.planoLendo && s.planoMsg ? `<p class="ctb-eq-status" style="margin:0 0 8px;">${this.esc(s.planoMsg)}</p>` : ""}
+      <div style="margin:0 0 10px;max-width:360px;">
+        <input type="search" value="${this.esc(s.planoBusca || "")}" placeholder="Buscar código ou nome" oninput="ContabilEquiv.filtrarPlano(this.value)"
+          style="width:100%;height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;box-sizing:border-box;">
+      </div>
+      <div class="cc-scroll">
+        <table class="cc-table ctb-eq" id="ctb-plano-tab">
+          <thead>
+            <tr>
+              ${th("empresa", "Empresa")}
+              ${th("codigo", "Código")}
+              ${th("id", "Reduzida", "is-center")}
+              ${th("nome", "Nome")}
+              ${th("tipo", "Tipo")}
+            </tr>
+          </thead>
+          <tbody>${linhas || `<tr><td colspan="5" style="text-align:center;padding:30px;">${s.planoLista && s.planoLista.length ? "Nenhuma conta neste filtro." : "Escolha a empresa e clique em Buscar."}</td></tr>`}</tbody>
+        </table>
+      </div>
+    </div>`;
+  },
+
   render(opcoes) {
     const root = document.getElementById("contabil-config-root");
     if (!root) return;
@@ -901,7 +1155,7 @@ const ContabilEquiv = {
         <td class="ctb-acoes is-center"><button type="button" class="tvig-ico is-danger" title="Excluir" onclick="ContabilEquiv.excluirVinculo(${i})"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button></td>
       </tr>`;
     }).join("");
-    root.innerHTML = `<div class="cc-page ctb-eq-page">
+    const equivHtml = `<div class="cc-page ctb-eq-page">
       <div class="cc-toolbar">
         <p class="ctb-eq-help">As contas vêm da interligação do organograma. Ao escolher a origem e o destino, a interligação entra no organograma. No lucro, a creditada sugerida é ${this.esc(this.CONTA_LUCRO)} (reduzida ${this.esc(this.REDUZIDA_LUCRO)}). No prejuízo, a debitada sugerida é ${this.esc(this.CONTA_PREJUIZO)} (reduzida ${this.esc(this.REDUZIDA_PREJUIZO)}). O percentual vem do organograma. Cada alteração já fica salva.</p>
         <div class="cc-toolbar-actions">
@@ -938,6 +1192,8 @@ const ContabilEquiv = {
         </table>
       </div>
     </div>`;
+    root.innerHTML = this.abasHtml() + (this.state.aba === "contas" ? this.contasHtml() : equivHtml);
+    if (this.state.aba === "contas") this.paintPlanoEmpresas();
     const nova = root.querySelector(".cc-scroll");
     if (nova) nova.scrollTop = topo;
     if (window.lucide && typeof window.lucide.createIcons === "function") window.lucide.createIcons();

@@ -50212,17 +50212,30 @@ window.syncGlobalConfigFromFirebase = async function() {
                             const o = JSON.parse(raw || "{}");
                             const pct = Number(o && o.pct != null ? o.pct : raw);
                             if (!Number.isFinite(pct)) return null;
-                            return { pct: Math.min(100, Math.max(0, pct)), at: Number(o && o.updatedAt) || 0, raw: String(raw || "") };
+                            const back = Number(o && o.pctBack);
+                            return {
+                                pct: Math.min(100, Math.max(0, pct)),
+                                pctBack: Number.isFinite(back) ? Math.min(100, Math.max(0, back)) : 0,
+                                at: Number(o && o.updatedAt) || 0,
+                                raw: String(raw || "")
+                            };
                         } catch (e) { return null; }
                     };
                     const local = lerPct(localStorage.getItem(k));
                     const cloud = lerPct(globalData[k]);
                     const memAt = Number(window._honorariosInternosPctAt) || 0;
                     const memPct = Number(window._honorariosInternosPctMem);
+                    const memBack = Number(window._honorariosInternosBackPct);
                     let chosen = local;
                     if (cloud && (!chosen || cloud.at >= chosen.at)) chosen = cloud;
                     if (Number.isFinite(memPct) && memAt >= ((chosen && chosen.at) || 0)) {
-                        chosen = { pct: Math.min(100, Math.max(0, memPct)), at: memAt, raw: JSON.stringify({ pct: memPct, updatedAt: memAt }) };
+                        const back = Number.isFinite(memBack) ? Math.min(100, Math.max(0, memBack)) : ((chosen && chosen.pctBack) || 0);
+                        chosen = {
+                            pct: Math.min(100, Math.max(0, memPct)),
+                            pctBack: back,
+                            at: memAt,
+                            raw: JSON.stringify({ pct: memPct, pctBack: back, updatedAt: memAt })
+                        };
                     }
                     if (chosen && chosen.raw && chosen.raw !== (localStorage.getItem(k) || "")) {
                         _originalSetItem.call(localStorage, k, chosen.raw);
@@ -50230,6 +50243,7 @@ window.syncGlobalConfigFromFirebase = async function() {
                     }
                     if (chosen) {
                         window._honorariosInternosPctMem = chosen.pct;
+                        window._honorariosInternosBackPct = chosen.pctBack || 0;
                         window._honorariosInternosPctAt = chosen.at;
                         if (window.HonorariosReport && HonorariosReport.comp && typeof HonorariosReport.render === "function") {
                             try { HonorariosReport.render(); } catch (e) {}

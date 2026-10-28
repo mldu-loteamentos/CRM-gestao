@@ -516,6 +516,7 @@ const HonorariosReport = {
           abono: Math.max(0, encDevidos - multa - juros),
           isencaoPct: Math.round(Math.min(1, Math.max(0, 1 - taxa)) * 100),
           valorBoleto: valorOriginal + multa + juros + honorarios,
+          conditionType: String(vals.conditionType || p.conditionType || (inst && inst.conditionType) || ""),
           status,
           paidAt,
           paidValue,
@@ -1085,6 +1086,10 @@ const HonorariosReport = {
     return typeof window.honorariosInternosPct === "function" ? window.honorariosInternosPct() : 5;
   },
 
+  pctBackOffice() {
+    return typeof window.honorariosInternosBackPct === "function" ? window.honorariosInternosBackPct() : 0;
+  },
+
   baseComissao(r) {
     return Math.max(0, (Number(r.jurosDevido) || 0) - (Number(r.abono) || 0));
   },
@@ -1092,6 +1097,45 @@ const HonorariosReport = {
   valorComissao(r) {
     const v = this.baseComissao(r) * this.pctInterno() / 100;
     return Math.round(v * 100) / 100;
+  },
+
+  /* Parcela SA (Sinal de Acordo) ou condição marcada como Repasse Advogado. */
+  ehSinalAcordo(r) {
+    const tipo = String((r && (r.conditionType || r.parcela)) || "").trim();
+    const fold = (s) => String(s || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const f = fold(tipo);
+    const code = f.split(/[\s\-_\/.,;:]+/)[0];
+    if (code === "SA" || f.indexOf("SINAL DE ACORDO") >= 0 || f.indexOf("SINAL ACORDO") >= 0) return true;
+    if (typeof window.paymentConditionIsRepasseAdvogado === "function") {
+      if (window.paymentConditionIsRepasseAdvogado(code) || window.paymentConditionIsRepasseAdvogado(tipo)) return true;
+    }
+    return false;
+  },
+
+  /* Valor recebido da parcela, sem a parte de juros. */
+  principalSemJuros(r) {
+    const original = Math.max(0, Number(r && r.valorOriginal) || 0);
+    const pago = Math.max(0, Number(r && r.paidValue) || 0);
+    const base = original > 0.009 && pago > original + 0.05 ? original : (pago > 0.009 ? pago : original);
+    return Math.round(base * 100) / 100;
+  },
+
+  valorBackOffice(r) {
+    const v = this.principalSemJuros(r) * this.pctBackOffice() / 100;
+    return Math.round(v * 100) / 100;
+  },
+
+  operadorBackOffice(r) {
+    let users = [];
+    try { users = JSON.parse(localStorage.getItem("crm_users") || "[]"); } catch (e) { users = []; }
+    const email = String((r && r.opKey) || "").toLowerCase();
+    const nome = String((r && r.opName) || "").toUpperCase();
+    const u = (users || []).find((x) => email && String(x.email || "").toLowerCase() === email)
+      || (users || []).find((x) => nome && String(x.name || "").toUpperCase() === nome);
+    const perfil = u ? (u.profile_name || u.profile || "") : "";
+    if (perfil && typeof window.crmProfileKind === "function") return window.crmProfileKind(perfil) === "back_office";
+    const n = nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    return n.indexOf("BACK OFFICE") >= 0 || n.indexOf("BACKOFFICE") >= 0;
   },
 
   comissaoGrupos() {
@@ -1104,8 +1148,9 @@ const HonorariosReport = {
     });
     const by = {};
     rows.forEach((r) => {
+      if (this.operadorBackOffice(r)) return;
       const k = r.opKey || "-";
-      if (!by[k]) by[k] = { key: k, name: r.opName || "Sem operador", rows: [], clientes: {}, juros: 0, abono: 0, base: 0, comissao: 0 };
+      if (!by[k]) by[k] = { key: k, name: r.opName || "Sem operador", tipo: "cobranca", rows: [], clientes: {}, juros: 0, abono: 0, base: 0, comissao: 0 };
       const g = by[k];
       g.rows.push(r);
       g.clientes[r.customerId || r.customerName] = 1;
@@ -1114,18 +1159,37 @@ const HonorariosReport = {
       g.base += this.baseComissao(r);
       g.comissao += this.valorComissao(r);
     });
-    return Object.values(by).map((g) => {
+    const grupos = Object.values(by).map((g) => {
       g.rows.sort((a, b) => String(a.customerName).localeCompare(String(b.customerName), "pt") || String(a.billId).localeCompare(String(b.billId), "pt"));
       g.nClientes = Object.keys(g.clientes).length;
       return g;
     }).sort((a, b) => b.comissao - a.comissao || a.name.localeCompare(b.name, "pt"));
+    const sa = rows.filter((r) => this.ehSinalAcordo(r));
+    if (sa.length) {
+      const back = { key: "back-office", name: "Back office", tipo: "back", rows: sa.slice(), clientes: {}, juros: 0, abono: 0, base: 0, comissao: 0 };
+      sa.forEach((r) => {
+        back.clientes[r.customerId || r.customerName] = 1;
+        back.base += this.principalSemJuros(r);
+        back.comissao += this.valorBackOffice(r);
+      });
+      back.rows.sort((a, b) => String(a.customerName).localeCompare(String(b.customerName), "pt") || String(a.billId).localeCompare(String(b.billId), "pt"));
+      back.nClientes = Object.keys(back.clientes).length;
+      back.base = Math.round(back.base * 100) / 100;
+      back.comissao = Math.round(back.comissao * 100) / 100;
+      grupos.push(back);
+    }
+    return grupos;
   },
 
   comissaoHtml() {
     const grupos = this.comissaoGrupos();
     const pct = this.pctInterno();
+    const pctBack = this.pctBackOffice();
     const pctTxt = pct.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
-    const tot = grupos.reduce((t, g) => {
+    const pctBackTxt = pctBack.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+    const cobranca = grupos.filter((g) => g.tipo !== "back");
+    const back = grupos.find((g) => g.tipo === "back") || null;
+    const tot = cobranca.reduce((t, g) => {
       t.comissao += g.comissao;
       t.juros += g.juros;
       t.abono += g.abono;
@@ -1134,27 +1198,32 @@ const HonorariosReport = {
       t.linhas += g.rows.length;
       return t;
     }, { comissao: 0, juros: 0, abono: 0, base: 0, clientes: 0, linhas: 0 });
+    const comissaoGeral = tot.comissao + (back ? back.comissao : 0);
     const cards = `<div class="rhon-cards">
-      <div class="rhon-card"><span>Percentual</span><strong>${pctTxt}%</strong><em>(juros devido − abono) × percentual</em></div>
-      <div class="rhon-card rhon-card-main"><span>Comissão interna</span><strong>R$ ${rhonMoney(tot.comissao)}</strong><em>${tot.linhas} parcela(s) paga(s)</em></div>
-      <div class="rhon-card"><span>Operadores</span><strong>${grupos.length}</strong></div>
-      <div class="rhon-card"><span>Clientes que pagaram</span><strong>${tot.clientes}</strong></div>
+      <div class="rhon-card"><span>Operadores de cobrança</span><strong>${pctTxt}%</strong><em>(juros devido − abono) × percentual</em></div>
+      <div class="rhon-card rhon-card-main"><span>Comissão da cobrança</span><strong>R$ ${rhonMoney(tot.comissao)}</strong><em>${cobranca.length} operador(es) · ${tot.linhas} parcela(s)</em></div>
+      <div class="rhon-card"><span>Back office</span><strong>${pctBackTxt}%</strong><em>SA sem juros${back ? " · R$ " + rhonMoney(back.base) : ""}</em></div>
+      <div class="rhon-card rhon-card-main"><span>Honorários do back office</span><strong>R$ ${rhonMoney(back ? back.comissao : 0)}</strong><em>${back ? back.rows.length + " recebimento(s) de SA" : "Nenhum recebimento de SA"}</em></div>
     </div>`;
     if (!grupos.length) return cards + this.emptyHtml(this.rows.length ? "Nenhum boleto pago com esses filtros." : "Nenhum boleto gerado nesta competência.");
     const body = grupos.map((g) => {
+      const backOffice = g.tipo === "back";
       const linhas = g.rows.map((r) => `<tr>
         <td><div class="rhon-cli">${rhonEsc(r.customerName)}</div><div class="rhon-sub">${rhonEsc(r.customerDoc)}</div></td>
         <td>${rhonEsc(r.billId)}${r.unitName ? `<div class="rhon-sub">${rhonEsc(r.unitName)}</div>` : ""}</td>
         <td>${rhonEsc(r.parcela || "—")}</td>
         <td>${rhonBr(r.paidAt) || "—"}</td>
-        <td class="rhon-num">${rhonMoney(r.jurosDevido)}</td>
-        <td class="rhon-num${r.abono > 0.004 ? " rhon-abono" : ""}">${rhonMoney(r.abono)}</td>
-        <td class="rhon-num">${rhonMoney(this.baseComissao(r))}</td>
-        <td class="rhon-num rhon-hon">${rhonMoney(this.valorComissao(r))}</td>
+        <td class="rhon-num">${backOffice ? "—" : rhonMoney(r.jurosDevido)}</td>
+        <td class="rhon-num${r.abono > 0.004 ? " rhon-abono" : ""}">${backOffice ? "—" : rhonMoney(r.abono)}</td>
+        <td class="rhon-num">${rhonMoney(backOffice ? this.principalSemJuros(r) : this.baseComissao(r))}</td>
+        <td class="rhon-num rhon-hon">${rhonMoney(backOffice ? this.valorBackOffice(r) : this.valorComissao(r))}</td>
       </tr>`).join("");
-      return `<tr class="rhon-emp"><td colspan="4">${rhonEsc(g.name)} · ${g.nClientes} cliente(s)</td>
-        <td class="rhon-num">${rhonMoney(g.juros)}</td>
-        <td class="rhon-num">${rhonMoney(g.abono)}</td>
+      const titulo = backOffice
+        ? `Back office · recebimento de SA sem juros × ${pctBackTxt}% · ${g.nClientes} cliente(s)`
+        : `${rhonEsc(g.name)} · ${g.nClientes} cliente(s)`;
+      return `<tr class="rhon-emp"><td colspan="4">${titulo}</td>
+        <td class="rhon-num">${backOffice ? "—" : rhonMoney(g.juros)}</td>
+        <td class="rhon-num">${backOffice ? "—" : rhonMoney(g.abono)}</td>
         <td class="rhon-num">${rhonMoney(g.base)}</td>
         <td class="rhon-num">${rhonMoney(g.comissao)}</td>
       </tr>${linhas}`;
@@ -1163,14 +1232,14 @@ const HonorariosReport = {
       <thead><tr>
         <th>Cliente</th><th>Título</th><th>Parcela</th><th>Pago em</th>
         <th class="rhon-num">Juros devido</th><th class="rhon-num">Abono concedido</th>
-        <th class="rhon-num">Base</th><th class="rhon-num">Comissão ${pctTxt}%</th>
+        <th class="rhon-num">Base</th><th class="rhon-num">Comissão</th>
       </tr></thead>
       <tbody>${body}</tbody>
-      <tfoot><tr><td colspan="4">Total geral</td>
+      <tfoot><tr><td colspan="4">Total geral · cobrança ${pctTxt}% + back office ${pctBackTxt}%</td>
         <td class="rhon-num">${rhonMoney(tot.juros)}</td>
         <td class="rhon-num">${rhonMoney(tot.abono)}</td>
-        <td class="rhon-num">${rhonMoney(tot.base)}</td>
-        <td class="rhon-num">${rhonMoney(tot.comissao)}</td>
+        <td class="rhon-num">${rhonMoney(tot.base + (back ? back.base : 0))}</td>
+        <td class="rhon-num">${rhonMoney(comissaoGeral)}</td>
       </tr></tfoot>
     </table></div>`;
   },
@@ -1474,17 +1543,26 @@ const HonorariosReport = {
     const grupos = this.comissaoGrupos();
     if (!grupos.length) { alert("Não há boletos pagos para exportar neste filtro."); return null; }
     const pct = this.pctInterno();
+    const pctBack = this.pctBackOffice();
     const tot = grupos.reduce((t, g) => {
-      t.juros += g.juros; t.abono += g.abono; t.base += g.base; t.comissao += g.comissao;
+      if (g.tipo === "back") {
+        t.baseBack += g.base;
+        t.comissaoBack += g.comissao;
+      } else {
+        t.juros += g.juros; t.abono += g.abono; t.base += g.base; t.comissao += g.comissao;
+      }
       return t;
-    }, { juros: 0, abono: 0, base: 0, comissao: 0 });
+    }, { juros: 0, abono: 0, base: 0, comissao: 0, baseBack: 0, comissaoBack: 0 });
     const rows = [];
     grupos.forEach((g) => {
+      const backOffice = g.tipo === "back";
       rows.push({
         kind: "emp",
         cells: [
-          { t: g.name + " · " + g.nClientes + " cliente(s)" }, { t: "" }, { t: "" }, { t: "" },
-          { n: g.juros }, { n: g.abono }, { n: g.base }, { n: g.comissao, color: "FF105436" }
+          { t: (backOffice ? "Back office · SA sem juros" : g.name) + " · " + g.nClientes + " cliente(s)" }, { t: "" }, { t: "" }, { t: "" },
+          backOffice ? { t: "" } : { n: g.juros },
+          backOffice ? { t: "" } : { n: g.abono },
+          { n: g.base }, { n: g.comissao, color: "FF105436" }
         ]
       });
       g.rows.forEach((r) => rows.push({
@@ -1494,10 +1572,10 @@ const HonorariosReport = {
           { t: this.celTxt([r.billId, r.unitName]) },
           { t: r.parcela || "" },
           { t: rhonBr(r.paidAt) },
-          { n: r.jurosDevido },
-          { n: r.abono, color: r.abono > 0.004 ? "FF9A3412" : "" },
-          { n: this.baseComissao(r) },
-          { n: this.valorComissao(r), color: "FF105436" }
+          backOffice ? { t: "" } : { n: r.jurosDevido },
+          backOffice ? { t: "" } : { n: r.abono, color: r.abono > 0.004 ? "FF9A3412" : "" },
+          { n: backOffice ? this.principalSemJuros(r) : this.baseComissao(r) },
+          { n: backOffice ? this.valorBackOffice(r) : this.valorComissao(r), color: "FF105436" }
         ]
       }));
     });
@@ -1505,18 +1583,18 @@ const HonorariosReport = {
       kind: "total",
       cells: [
         { t: "Total geral" }, { t: "" }, { t: "" }, { t: "" },
-        { n: tot.juros }, { n: tot.abono }, { n: tot.base }, { n: tot.comissao }
+        { n: tot.juros }, { n: tot.abono }, { n: tot.base + tot.baseBack }, { n: tot.comissao + tot.comissaoBack }
       ]
     });
     return [{
       sheet: "Comissao interna",
       title: "Comissão interna",
-      subtitle: this.compTexto() + " · " + String(pct).replace(".", ",") + "% sobre (juros devido − abono)",
+      subtitle: this.compTexto() + " · cobrança " + String(pct).replace(".", ",") + "% sobre (juros devido − abono) · back office " + String(pctBack).replace(".", ",") + "% sobre SA sem juros",
       kpis: [
-        { label: "Percentual", value: String(pct).replace(".", ",") + "%", color: "FF0F172A" },
-        { label: "Comissão interna", value: tot.comissao, money: true, color: "FF105436" },
-        { label: "Operadores", value: grupos.length, color: "FF0F172A" },
-        { label: "Base", value: tot.base, money: true, color: "FF0F172A" }
+        { label: "Cobrança", value: String(pct).replace(".", ",") + "%", color: "FF0F172A" },
+        { label: "Comissão da cobrança", value: tot.comissao, money: true, color: "FF105436" },
+        { label: "Back office", value: String(pctBack).replace(".", ",") + "%", color: "FF0F172A" },
+        { label: "Honorários do back office", value: tot.comissaoBack, money: true, color: "FF105436" }
       ],
       columns: [
         { h: "Cliente", w: 36 }, { h: "Título", w: 18 }, { h: "Parcela", w: 14 }, { h: "Pago em", w: 14 },
@@ -1803,13 +1881,18 @@ const HonorariosReport = {
 
 window.HonorariosReport = HonorariosReport;
 
-window.honorariosInternosPct = function () {
+window.honorariosInternosCfg = function () {
   const ler = function (raw) {
     try {
       const parsed = JSON.parse(raw || "{}");
       const n = Number(parsed && parsed.pct != null ? parsed.pct : raw);
       if (!Number.isFinite(n) || n < 0) return null;
-      return { pct: Math.min(100, n), at: Number(parsed && parsed.updatedAt) || 0 };
+      const back = Number(parsed && parsed.pctBack);
+      return {
+        pct: Math.min(100, n),
+        pctBack: Number.isFinite(back) ? Math.min(100, Math.max(0, back)) : 0,
+        at: Number(parsed && parsed.updatedAt) || 0
+      };
     } catch (e) {
       return null;
     }
@@ -1817,41 +1900,78 @@ window.honorariosInternosPct = function () {
   const local = ler(localStorage.getItem("crm_honorarios_internos_pct"));
   const memAt = Number(window._honorariosInternosPctAt) || 0;
   const memPct = Number(window._honorariosInternosPctMem);
-  if (Number.isFinite(memPct) && memAt >= ((local && local.at) || 0)) return Math.min(100, Math.max(0, memPct));
-  if (local) return local.pct;
-  return 5;
+  const memBack = Number(window._honorariosInternosBackPct);
+  if (Number.isFinite(memPct) && memAt >= ((local && local.at) || 0)) {
+    return {
+      pct: Math.min(100, Math.max(0, memPct)),
+      pctBack: Number.isFinite(memBack) ? Math.min(100, Math.max(0, memBack)) : ((local && local.pctBack) || 0),
+      at: memAt
+    };
+  }
+  if (local) return local;
+  return { pct: 5, pctBack: 0, at: 0 };
+};
+
+window.honorariosInternosPct = function () {
+  return window.honorariosInternosCfg().pct;
+};
+
+window.honorariosInternosBackPct = function () {
+  return window.honorariosInternosCfg().pctBack;
 };
 
 window.paintHonorariosInternosPct = function () {
-  const input = document.getElementById("hon-internos-pct");
-  if (!input || document.activeElement === input) return;
-  const n = window.honorariosInternosPct();
-  input.value = String(n);
+  const cfg = window.honorariosInternosCfg();
+  const cobrar = document.getElementById("hon-internos-pct");
+  const back = document.getElementById("hon-internos-back-pct");
+  if (cobrar && document.activeElement !== cobrar) cobrar.value = String(cfg.pct);
+  if (back && document.activeElement !== back) back.value = String(cfg.pctBack);
+};
+
+window.agendarHonorariosInternos = function () {
+  clearTimeout(window._honInternosTimer);
+  window._honInternosTimer = setTimeout(function () { window.saveHonorariosInternosPct(); }, 600);
 };
 
 window.saveHonorariosInternosPct = async function () {
+  const status = document.getElementById("hon-internos-status");
   if (typeof window.hasFinCrAction === "function" && !window.hasFinCrAction("regras_cobranca", "editar")) {
-    alert("Sem permissão para editar os honorários internos.");
+    if (status) status.textContent = "Sem permissão para editar os honorários internos.";
     return;
   }
-  const input = document.getElementById("hon-internos-pct");
-  const n = Number(String(input && input.value || "").replace(",", "."));
-  const status = document.getElementById("hon-internos-status");
-  if (!Number.isFinite(n) || n < 0 || n > 100) {
+  const lerCampo = function (id) {
+    const el = document.getElementById(id);
+    if (!el) return null;
+    const bruto = String(el.value || "").trim();
+    if (!bruto || /[.,]$/.test(bruto)) return null;
+    const n = Number(bruto.replace(",", "."));
+    if (!Number.isFinite(n) || n < 0 || n > 100) return false;
+    return Math.round(n * 100) / 100;
+  };
+  const pct = lerCampo("hon-internos-pct");
+  const pctBack = lerCampo("hon-internos-back-pct");
+  if (pct == null || pctBack == null) return;
+  if (pct === false || pctBack === false) {
     if (status) status.textContent = "Informe um percentual entre 0 e 100.";
     return;
   }
+  const atual = window.honorariosInternosCfg();
+  if (atual.pct === pct && atual.pctBack === pctBack && atual.at > 0) return;
   const salvoEm = Date.now();
-  window._honorariosInternosPctMem = n;
+  const raw = JSON.stringify({ pct: pct, pctBack: pctBack, updatedAt: salvoEm });
+  window._honorariosInternosPctMem = pct;
+  window._honorariosInternosBackPct = pctBack;
   window._honorariosInternosPctAt = salvoEm;
-  localStorage.setItem("crm_honorarios_internos_pct", JSON.stringify({ pct: n, updatedAt: salvoEm }));
+  localStorage.setItem("crm_honorarios_internos_pct", raw);
   if (window.HonorariosReport && HonorariosReport.comp && typeof HonorariosReport.render === "function") {
     try { HonorariosReport.render(); } catch (e) {}
   }
   if (status) status.textContent = "Salvando…";
   try {
-    if (typeof window.forceUploadLocalConfig === "function") await window.forceUploadLocalConfig(true);
-    if (status) status.textContent = "Percentual salvo. A comissão interna usa " + n.toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "%.";
+    const fc = window.firebaseCollections;
+    if (!window.firebaseDb || !fc || !fc.doc || !fc.setDoc) throw new Error("Firebase indisponível");
+    await fc.setDoc(fc.doc(window.firebaseDb, "config", "global"), { crm_honorarios_internos_pct: raw }, { merge: true });
+    if (status) status.textContent = "Salvo. Cobrança " + pct.toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "% · back office " + pctBack.toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "%.";
   } catch (e) {
     if (status) status.textContent = "Salvo neste computador. A nuvem não confirmou o envio.";
   }

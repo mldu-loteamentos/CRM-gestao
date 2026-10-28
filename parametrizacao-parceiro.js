@@ -535,8 +535,64 @@ const ParametrizacaoParceiroApp = {
       planos,
       docTipo: String(s.docTipo || ""),
       docNome: String(s.docNome || ""),
-      papel: s.papel === "terrenista" ? "terrenista" : (s.papel === "empreendedor" ? "empreendedor" : "")
+      papel: s.papel === "terrenista" ? "terrenista" : (s.papel === "empreendedor" ? "empreendedor" : ""),
+      holdings: this.normalizarHoldings(s)
     };
+  },
+
+  normalizarHoldings(s) {
+    return (Array.isArray(s && s.holdings) ? s.holdings : []).map((h) => {
+      const bruto = h && h.sharePct;
+      const n = bruto === "" || bruto == null ? "" : Number(String(bruto).replace(",", "."));
+      return {
+        companyId: String((h && h.companyId) || ""),
+        name: String((h && h.name) || ""),
+        sharePct: n === "" || !Number.isFinite(n) ? "" : Math.max(0, Math.min(100, n))
+      };
+    }).filter((h) => h.companyId);
+  },
+
+  empresasHolding() {
+    const app = window.EmpresasApp;
+    let custom = {};
+    if (!app || typeof app.flagOn !== "function") {
+      try { custom = JSON.parse(localStorage.getItem("crm_empresas_custom") || "{}") || {}; } catch (e) { custom = {}; }
+    }
+    return this.companies().filter((c) => {
+      if (!c || c.id == null) return false;
+      if (app && typeof app.flagOn === "function" && typeof app.customOf === "function") {
+        return app.flagOn(app.customOf(c.id), "holding_interna");
+      }
+      const row = custom[String(c.id)] || {};
+      return row.holding_interna === 1 || row.holding_interna === true || row.holding_interna === "1";
+    }).sort((a, b) => Number(a.id) - Number(b.id));
+  },
+
+  rotuloHolding(c) {
+    const app = window.EmpresasApp;
+    let usual = "";
+    if (c && app && typeof app.customOf === "function") {
+      usual = String((app.customOf(c.id) || {}).nome_usual || "").trim();
+    }
+    if (!usual || /^nome usual$/i.test(usual)) usual = (c && (c.name || c.tradeName)) || "";
+    return String(c && c.id != null ? c.id : "") + " — " + usual;
+  },
+
+  mostraHoldings(p, papel) {
+    if (!p || this.isSociedade(p) || papel === "empreendedor") return false;
+    return this.kindOf(p) === "parceria" || papel === "terrenista";
+  },
+
+  /* A holding divide a fatia do parceiro. Com um parceiro só, essa fatia é o percentual da obra. */
+  fatiaHolding(p, s, holdingPct) {
+    const parteH = Number(holdingPct);
+    if (!(parteH > 0)) return [];
+    const parteP = this.pedeFatiaCredor(p) ? (Number(s && s.sharePct) || 0) : 100;
+    return (p.obras || []).filter((o) => o && o.code).map((o) => {
+      const doParceiro = Math.round(this.pctObra(o) * parteP / 100 * 1000) / 1000;
+      const efetivo = Math.round(doParceiro * parteH / 100 * 1000) / 1000;
+      return { code: String(o.code), base: doParceiro, efetivo };
+    });
   },
 
   normalizarPlanos(s) {
@@ -576,6 +632,8 @@ const ParametrizacaoParceiroApp = {
         ? `<span class="pp-chip">CC ${this.esc(s.ccTitulo)}</span>`
         : `<span class="pp-chip is-falta">Sem centro</span>`);
     }
+    const nHold = (s.holdings || []).length;
+    if (nHold) chips.push(`<span class="pp-chip">${nHold} holding${nHold === 1 ? "" : "s"}</span>`);
     const planos = this.normalizarPlanos(s).filter((pl) => pl.id);
     if (!planos.length) chips.push(`<span class="pp-chip is-falta">Sem plano</span>`);
     else if (!this.isSociedade(p)) chips.push(`<span class="pp-chip">${this.esc(planos[0].id)}</span>`);
@@ -766,7 +824,7 @@ const ParametrizacaoParceiroApp = {
   },
 
   setDetailTab(tab) {
-    this.detailTab = tab || "geral";
+    this.detailTab = tab === "centros" ? "obras" : (tab || "geral");
     this.fecharVinculo();
     this.render();
     if (this.detailTab === "credor") {
@@ -787,7 +845,8 @@ const ParametrizacaoParceiroApp = {
   salvarCentros() {
     this.persist();
     this.ccSearch = "";
-    this.setDetailTab("obras");
+    this.detailTab = "obras";
+    this.render();
   },
 
   partnerPct(part, key) {
@@ -1318,7 +1377,7 @@ const ParametrizacaoParceiroApp = {
     const seed = this.seedCostCenters(obra, p.companyId, ccId);
     p.obras.push(this.makeObra(obra, share, seed));
     this.selectedObraCode = obra;
-    this.detailTab = "centros";
+    this.detailTab = "obras";
     this.persist();
     this.render();
   },
@@ -1512,6 +1571,106 @@ const ParametrizacaoParceiroApp = {
     }
     this.persist();
     this.renderKeepScroll();
+  },
+
+  incluirHolding(socioId) {
+    const el = document.getElementById("pp-holding-" + socioId);
+    const companyId = el && el.value;
+    const p = this.current();
+    if (!p || !companyId) return;
+    const row = (p.socios || []).find((s) => String(s.id) === String(socioId));
+    if (!row) return;
+    row.holdings = this.normalizarHoldings(row);
+    if (row.holdings.some((h) => String(h.companyId) === String(companyId))) return;
+    const emp = this.empresasHolding().find((c) => String(c.id) === String(companyId));
+    if (!emp) return;
+    row.holdings.push({ companyId: String(companyId), name: this.rotuloHolding(emp), sharePct: "" });
+    this.persist();
+    this.renderKeepScroll();
+  },
+
+  setHoldingPct(socioId, companyId, value) {
+    const p = this.current();
+    if (!p) return;
+    const row = (p.socios || []).find((s) => String(s.id) === String(socioId));
+    if (!row) return;
+    const holding = (row.holdings || []).find((h) => String(h.companyId) === String(companyId));
+    if (!holding) return;
+    const raw = String(value == null ? "" : value).trim().replace(",", ".");
+    if (raw === "") holding.sharePct = "";
+    else {
+      const n = Number(raw);
+      if (!Number.isFinite(n)) return;
+      holding.sharePct = Math.max(0, Math.min(100, n));
+    }
+    this.persist();
+    this.renderKeepScroll();
+  },
+
+  removeHolding(socioId, companyId) {
+    const p = this.current();
+    if (!p) return;
+    const row = (p.socios || []).find((s) => String(s.id) === String(socioId));
+    if (!row) return;
+    row.holdings = (row.holdings || []).filter((h) => String(h.companyId) !== String(companyId));
+    this.persist();
+    this.renderKeepScroll();
+  },
+
+  holdingsHtml(p, s) {
+    const lista = this.normalizarHoldings(s);
+    const usadas = new Set(lista.map((h) => String(h.companyId)));
+    const livres = this.empresasHolding().filter((c) => !usadas.has(String(c.id)));
+    const total = lista.reduce((sum, h) => sum + (Number(h.sharePct) || 0), 0);
+    const resto = Math.round((100 - total) * 1000) / 1000;
+    const linhas = lista.map((h) => {
+      const emp = this.companies().find((c) => String(c.id) === String(h.companyId));
+      const nome = emp ? this.rotuloHolding(emp) : (h.name || h.companyId);
+      const fatias = this.fatiaHolding(p, s, h.sharePct);
+      const efetivo = fatias.length
+        ? fatias.map((f) => "obra " + f.code + ": " + this.fmtPctCurto(h.sharePct) + "% de " + this.fmtPctCurto(f.base) + "% = " + this.fmtPctCurto(f.efetivo) + "%").join(" · ")
+        : "Informe o percentual desta holding na fatia do parceiro.";
+      return `<div style="display:grid;grid-template-columns:minmax(0,1fr) 120px 36px;gap:8px;align-items:center;padding:8px 0;border-top:1px solid #f1f5f9;">
+        <div style="min-width:0;">
+          <div style="font-size:0.82rem;font-weight:700;color:#0f172a;">${this.esc(nome)}</div>
+          <div style="font-size:0.72rem;color:#64748b;line-height:1.35;">${this.esc(efetivo)}</div>
+        </div>
+        <input type="number" min="0" max="100" step="0.001" value="${h.sharePct === "" ? "" : h.sharePct}" placeholder="%"
+          onchange="ParametrizacaoParceiroApp.setHoldingPct('${this.esc(s.id)}','${this.esc(h.companyId)}', this.value)"
+          style="height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;font-weight:800;background:#fff;width:100%;box-sizing:border-box;">
+        <button type="button" class="tvig-ico is-danger" title="Remover holding" onclick="ParametrizacaoParceiroApp.removeHolding('${this.esc(s.id)}','${this.esc(h.companyId)}')">
+          <i data-lucide="trash-2" style="width:15px;height:15px;"></i>
+        </button>
+      </div>`;
+    }).join("");
+    const escolha = livres.length
+      ? `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px;">
+          <select id="pp-holding-${this.esc(s.id)}" style="flex:1;min-width:220px;height:36px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;background:#fff;">
+            ${livres.map((c) => `<option value="${this.esc(c.id)}">${this.esc(this.rotuloHolding(c))}</option>`).join("")}
+          </select>
+          <button type="button" class="btn btn-primary" style="height:36px;" onclick="ParametrizacaoParceiroApp.incluirHolding('${this.esc(s.id)}')">Incluir holding</button>
+        </div>`
+      : `<p style="margin:8px 0 0;font-size:0.78rem;color:#64748b;">${lista.length ? "Todas as holdings internas já estão nesta divisão." : "Nenhuma empresa com Holding interna ligada. Ligue a coluna em Empresas e volte aqui."}</p>`;
+    return `<section class="pp-bloco">
+      <h4>Holdings internas</h4>
+      <p>Novo nível da fatia deste parceiro. Cada percentual vale sobre a parte dele. A soma das holdings fecha em 100%.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin:8px 0;">
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;min-width:120px;">
+          <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;">Holdings</div>
+          <strong style="color:#0f172a;">${lista.length}</strong>
+        </div>
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;min-width:120px;">
+          <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;">Soma</div>
+          <strong style="color:#105436;">${this.fmtPct(total)}%</strong>
+        </div>
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;min-width:120px;">
+          <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;">Restante</div>
+          <strong style="color:${Math.abs(resto) < 0.001 ? "#105436" : "#b45309"};">${this.fmtPct(resto)}%</strong>
+        </div>
+      </div>
+      ${linhas}
+      ${escolha}
+    </section>`;
   },
 
   centrosDaEmpresa(companyId) {
@@ -2788,15 +2947,13 @@ const ParametrizacaoParceiroApp = {
     const sociedade = this.isSociedade(p);
     const tab = this.detailTab || "geral";
     const nObras = (p.obras || []).length;
-    const nCc = (p.obras || []).reduce((acc, o) => acc + (o.costCenters || []).filter(c => c.inAccount).length, 0);
     const nSocios = (p.socios || []).filter(s => s.id).length;
     const credOk = this.variosCredores(p) ? nSocios > 0 : !!(p.creditor && p.creditor.id);
     const btn = (id, label, icon, count) =>
       `<button type="button" role="tab" aria-selected="${tab === id}" class="ml-tab${tab === id ? " is-active" : ""}" onclick="ParametrizacaoParceiroApp.setDetailTab('${id}')"><i data-lucide="${icon}"></i> ${label}${count ? ` <span class="ml-tab-count">${count}</span>` : ""}</button>`;
     let body = "";
     if (tab === "credor") body = this.credorTabHtml(p);
-    else if (tab === "obras") body = this.obrasTabHtml(p, obra, sociedade);
-    else if (tab === "centros") body = obra ? this.obraDetailHtml(p, obra, inAccount) : this.needObraHtml();
+    else if (tab === "obras" || tab === "centros") body = this.obrasTabHtml(p, obra, sociedade, inAccount);
     else if (tab === "rateio") body = (obra || sociedade) ? this.matrixHtml(p) : this.needObraHtml();
     else body = this.geralTabHtml(p, sociedade);
     return `
@@ -2811,8 +2968,7 @@ const ParametrizacaoParceiroApp = {
         <div class="ml-tabs" role="tablist" style="margin-bottom:16px;">
           ${btn("geral", "Geral", "sliders-horizontal")}
           ${btn("credor", "Credor", "user", this.variosCredores(p) ? (nSocios || "") : (credOk ? "✓" : ""))}
-          ${btn("obras", "Obras", "building-2", nObras || "")}
-          ${btn("centros", "Centros de custo", "layers", nCc || "")}
+          ${btn("obras", "Obras e centros", "building-2", nObras || "")}
           ${btn("rateio", sociedade ? "Sociedade" : "Rateio DFC", sociedade ? "users" : "pie-chart")}
         </div>
         ${body}
@@ -2982,6 +3138,7 @@ const ParametrizacaoParceiroApp = {
             <p>${this.esc(introPct)}</p>
             ${campoPct}
           </section>` : ""}
+          ${this.mostraHoldings(p, papel) ? this.holdingsHtml(p, s) : ""}
           <section class="pp-bloco">
             <h4>Título a pagar</h4>
             <p>${this.esc(introTitulo)}</p>
@@ -3012,7 +3169,7 @@ const ParametrizacaoParceiroApp = {
               ? `Clique no ${pessoa} para informar a parte dele na fatia da obra, o plano e o documento.`
               : (sociedade
                 ? `Clique no ${pessoa} para ver a participação, o centro de custo, os planos e a conta.`
-                : `Clique no ${pessoa} para ver o plano financeiro e o tipo de documento. O percentual fica na obra. O centro de custo não é informado neste credor.`)))}</p>
+                : `Clique no ${pessoa} para ver o plano financeiro, o tipo de documento e a divisão em holdings internas. O percentual da obra fica na aba Obras e centros.`)))}</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
           <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;min-width:120px;">
             <div style="font-size:0.68rem;font-weight:700;color:#64748b;text-transform:uppercase;">${pessoas}</div>
@@ -3174,7 +3331,8 @@ const ParametrizacaoParceiroApp = {
     `;
   },
 
-  obrasTabHtml(p, obra, sociedade) {
+  obrasTabHtml(p, obra, sociedade, inAccount) {
+    const centros = obra ? this.obraDetailHtml(p, obra, inAccount, { semChips: true }) : "";
     return `
       <div class="crm-card" style="padding:16px;overflow:hidden;">
         <h3 style="margin:0 0 8px;font-size:0.95rem;color:var(--color-primary);">Obras deste terrenista</h3>
@@ -3191,10 +3349,12 @@ const ParametrizacaoParceiroApp = {
         </div>
         ${sociedade && p.obras.length > 1 ? `<div style="margin-top:10px;"><button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.removeObra('${this.esc(obra && obra.code)}')" style="height:34px;font-size:0.78rem;color:#dc2626;">Remover obra</button></div>` : ""}
       </div>
+      ${centros}
     `;
   },
 
-  obraDetailHtml(p, obra, inAccount) {
+  obraDetailHtml(p, obra, inAccount, opt) {
+    opt = opt || {};
     const sociedade = this.isSociedade(p);
     const travado = sociedade ? null : this.percentualTravado(obra);
     if (travado != null && Number(obra.defaultPartnerShare) !== travado) {
@@ -3239,8 +3399,8 @@ const ParametrizacaoParceiroApp = {
         </td>
       </tr>`).join("") || `<tr><td colspan="${mista ? 5 : 4}" class="ppcc-vazio">Nenhum centro de custo nesta obra.</td></tr>`;
     return `
-      <div class="crm-card ppcc">
-        <div class="ppcc-obras">${this.obraChipsHtml(p, sociedade)}</div>
+      <div class="crm-card ppcc" style="margin-top:12px;">
+        ${opt.semChips ? "" : `<div class="ppcc-obras">${this.obraChipsHtml(p, sociedade)}</div>`}
         <div class="ppcc-head">
           <div>
             <div class="ppcc-titulo">Obra ${this.esc(obra.code)}</div>
@@ -3276,7 +3436,7 @@ const ParametrizacaoParceiroApp = {
         </div>
         <div class="ppcc-rodape">
           <span>Desligue o C.C. para tirá-lo da conta sem perder o cadastro.</span>
-          <button type="button" class="btn btn-primary" onclick="ParametrizacaoParceiroApp.salvarCentros()" title="Grava os centros desta obra e volta para a aba Obras">Salvar</button>
+          <button type="button" class="btn btn-primary" onclick="ParametrizacaoParceiroApp.salvarCentros()" title="Grava os centros desta obra">Salvar</button>
         </div>
       </div>
     `;

@@ -3820,14 +3820,16 @@ const SiengeApiService = {
     return lista || [];
   },
 
-  async getAccountancyAccounts(companyId) {
+  async getAccountancyAccounts(companyId, opcoes) {
     if (s_apiMode === "simulado") return [];
     if (!companyId) return [];
+    const tipo = opcoes && (opcoes.accountType === "ANALYTICAL" || opcoes.accountType === "SYNTHETIC")
+      ? `&accountType=${opcoes.accountType}` : "";
     const all = [];
     let offset = 0;
     const page = 200;
     while (all.length < 8000) {
-      const res = await siengeFetchWithRetry(`/accountancy/accounts?companyId=${encodeURIComponent(companyId)}&limit=${page}&offset=${offset}`);
+      const res = await siengeFetchWithRetry(`/accountancy/accounts?companyId=${encodeURIComponent(companyId)}&limit=${page}&offset=${offset}${tipo}`);
       const results = (res && (res.results || res.data)) || [];
       all.push(...results);
       const total = res && res.resultSetMetadata && res.resultSetMetadata.count;
