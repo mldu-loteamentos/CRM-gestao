@@ -3479,6 +3479,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "config-users": "Configuração de Usuários",
     "doc-padrao": "Documentos Padrões",
     subjudice: "Cobrança Sub judice",
+    "mapa-juridico": "Mapa Jurídico",
     "configuracoes": "Configurações",
     "regras-negociacao": "Configurações",
     "regras-cobranca": "Configurações",
@@ -3673,6 +3674,17 @@ function switchTab(tabId, titleOverride, showLoader = false) {
       }, 0);
     } else if (typeof window.updateFilaCacheStatusIndicator === "function") {
       window.updateFilaCacheStatusIndicator();
+    }
+  } else if (tabId === "mapa-juridico") {
+    window._abrirMapaJuridicoAoCarregar = true;
+    if (window._subjudiceList && window._subjudiceList.length) {
+      window._abrirMapaJuridicoAoCarregar = false;
+      setTimeout(() => { if (typeof window.openMapaJuridico === "function") window.openMapaJuridico(); }, 0);
+    } else if (!AppState.dashboardRendered) {
+      setTimeout(() => { if (!AppState.dashboardRendered) loadDashboardData(); }, 0);
+    } else {
+      window._abrirMapaJuridicoAoCarregar = false;
+      setTimeout(() => { if (typeof window.openMapaJuridico === "function") window.openMapaJuridico(); }, 0);
     }
   } else if (tabId === "subjudice") {
     if (!AppState.dashboardRendered) {
@@ -7677,24 +7689,12 @@ async function initializeApplication() {
 
 
   const judStr = localStorage.getItem("crm_moura_judiciais");
-  window.EtapasJudiciaisState = judStr ? JSON.parse(judStr) : [
-    { id: 'j1', nome: 'Not. Jud. via Carta', dias: 60, explicacao: "Notificação Judicial: Comunicação oficial da Justiça para informar alguém sobre um fato ou intenção jurídica, registrando formalmente a entrega da mensagem sem que haja um julgamento imediato." },
-    { id: 'j2', nome: 'Not. Jud. via Ofic. de Justiça', dias: 60, explicacao: "Comunicação oficial entregue pessoalmente por um servidor público da Justiça, garantindo fé pública e comprovação legal imediata de que o destinatário tomou ciência do fato." },
-    { id: 'j3', nome: 'Citação por Edital', dias: 120, explicacao: "Modalidade de citação utilizada quando o destinatário não é localizado, garantindo a comunicação oficial por meio de publicação pública." },
-    { id: 'j4', nome: 'Homologação Acordo', dias: 15, explicacao: "Decisão judicial que confirma e valida formalmente um acordo firmado entre as partes, tornando seus termos legalmente reconhecidos." },
-    { id: 'j5', nome: 'BACENJUD', dias: 120, explicacao: "Consulta ao sistema judicial para localizar informações e verificar a existência de ativos financeiros vinculados ao devedor, possibilitando eventual bloqueio de valores." }
-  ];
-  if (!localStorage.getItem("crm_moura_judiciais_v2")) {
-      window.EtapasJudiciaisState = [
-        { id: 'j1', nome: 'Not. Jud. via Carta', dias: 60, explicacao: "Notificação Judicial: Comunicação oficial da Justiça para informar alguém sobre um fato ou intenção jurídica, registrando formalmente a entrega da mensagem sem que haja um julgamento imediato." },
-        { id: 'j2', nome: 'Not. Jud. via Ofic. de Justiça', dias: 60, explicacao: "Comunicação oficial entregue pessoalmente por um servidor público da Justiça, garantindo fé pública e comprovação legal imediata de que o destinatário tomou ciência do fato." },
-        { id: 'j3', nome: 'Citação por Edital', dias: 120, explicacao: "Modalidade de citação utilizada quando o destinatário não é localizado, garantindo a comunicação oficial por meio de publicação pública." },
-        { id: 'j4', nome: 'Homologação Acordo', dias: 15, explicacao: "Decisão judicial que confirma e valida formalmente um acordo firmado entre as partes, tornando seus termos legalmente reconhecidos." },
-        { id: 'j5', nome: 'BACENJUD', dias: 120, explicacao: "Consulta ao sistema judicial para localizar informações e verificar a existência de ativos financeiros vinculados ao devedor, possibilitando eventual bloqueio de valores." }
-      ];
-      localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
-      localStorage.setItem("crm_moura_judiciais_v2", "true");
+  try {
+    window.EtapasJudiciaisState = judStr ? JSON.parse(judStr) : [];
+  } catch (e) {
+    window.EtapasJudiciaisState = [];
   }
+  if (!Array.isArray(window.EtapasJudiciaisState)) window.EtapasJudiciaisState = [];
   const finStr = localStorage.getItem("crm_moura_financiamento");
   window.EtapasFinanciamentoState = finStr ? JSON.parse(finStr) : [];
   if (!Array.isArray(window.EtapasFinanciamentoState)) window.EtapasFinanciamentoState = [];
@@ -9993,31 +9993,84 @@ window.mergeEtapasPorNome = function(localArr, cloudArr) {
   return out;
 };
 
-/* Reintegração de posse saiu da árvore do processo. Não volta ao excluir. */
+/* Etapas que o usuário excluiu. A sincronização não coloca de volta. */
+window.ETAPAS_JUDICIAIS_EXCLUIDAS = [
+  "NOT. JUD. VIA OFIC. DE JUSTICA",
+  "CITACAO POR EDITAL",
+  "HOMOLOGACAO ACORDO",
+  "BACENJUD"
+];
+window.ETAPAS_JUDICIAIS_EXCLUIDAS_IDS = { j2: true, j3: true, j4: true, j5: true };
+
+window.nomeEtapaJudicial = function(e) {
+  return String(e && (e.nome || e.name) || "")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ").trim().toUpperCase()
+    .replace(/^\d+(?:\.\d+)*\.?\s+/, "");
+};
+
+window.etapaJudicialExcluida = function(e) {
+  if (!e) return false;
+  if (window.ETAPAS_JUDICIAIS_EXCLUIDAS_IDS[String(e.id)]) return true;
+  const raiz = e.parentId == null || e.parentId === "";
+  return raiz && window.ETAPAS_JUDICIAIS_EXCLUIDAS.indexOf(window.nomeEtapaJudicial(e)) >= 0;
+};
+
+window.corrigirEtapasJudiciais = function(lista) {
+  const src = Array.isArray(lista) ? lista.filter(Boolean).map((e) => Object.assign({}, e)) : [];
+  const removidos = new Set();
+  const semResgate = [];
+  src.forEach((e) => {
+    if (window.etapaJudicialExcluida(e)) {
+      removidos.add(String(e.id));
+      return;
+    }
+    semResgate.push(e);
+  });
+  const out = semResgate.filter((e) => !(e.parentId && removidos.has(String(e.parentId))));
+  const restaurar = localStorage.getItem("crm_moura_judiciais_fluxo_v3") !== "1";
+  if (!restaurar || out.some((e) => window.nomeEtapaJudicial(e) === "REINTEGRACAO DE POSSE")) return out;
+  const nome = window.nomeEtapaJudicial;
+  const pagamento = out.find((e) => {
+    if (nome(e) !== "PAGAMENTO") return false;
+    const pai = out.find((x) => String(x.id) === String(e.parentId));
+    return pai && nome(pai) === "EXECUCAO DA SENTENCA";
+  }) || out.find((e) => nome(e) === "PAGAMENTO");
+  const execucao = out.find((e) => nome(e) === "EXECUCAO DA SENTENCA");
+  if (!pagamento && !execucao) return out;
+  const parentId = pagamento ? (pagamento.parentId == null ? null : pagamento.parentId) : execucao.id;
+  const orderBase = pagamento && Number.isFinite(Number(pagamento.order)) ? Number(pagamento.order) + 5 : 10;
+  const posseId = "j_reint_posse";
+  const filhos = [
+    { id: "j_reint_mandado", nome: "Aguardando expedição do mandado de reintegração", dias: 90, descricao: "Sentença já proferida para reintegração de posse. Aguardando o juiz expedir o mandado de reintegração." },
+    { id: "j_reint_oficial", nome: "Aguardando cumprimento pelo Oficial de Justiça", dias: 30, descricao: "Aguardando o oficial de justiça entregar o mandado de reintegração de posse." },
+    { id: "j_reint_realizar", nome: "Realizar reintegração", dias: 30, descricao: "Mandado cumprido. Liberado para realizar a reintegração." },
+    { id: "j_reint_avaliacao", nome: "Avaliação prévia Engenharia", dias: 30, descricao: "Agendar avaliação prévia da engenharia com relação às condições do imóvel." },
+    { id: "j_reint_vistoria", nome: "Vistoria técnica externa", dias: 60, descricao: "Engenheiro externo realizará avaliação e emissão de projeto para aprovação." },
+    { id: "j_reint_prefeitura", nome: "Aprovação projeto - Prefeitura", dias: 90, descricao: "Realizar visita e aguardar aprovação do projeto na prefeitura." }
+  ];
+  out.push({
+    id: posseId,
+    nome: "Reintegração de posse",
+    dias: 90,
+    descricao: "É a fase de expropriação, onde a Justiça força o cumprimento da decisão com a devolução do bem. O juiz determina a retomada física do bem para o credor.",
+    parentId: parentId,
+    order: orderBase
+  });
+  filhos.forEach((filho, i) => {
+    out.push(Object.assign({ parentId: posseId, order: (i + 1) * 10 }, filho));
+  });
+  return out;
+};
+
 window.ensureReintegracaoPosseNiveis = function() {
   if (!Array.isArray(window.EtapasJudiciaisState) || !window.EtapasJudiciaisState.length) return false;
-  const norm = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim().toUpperCase();
-  const nomeEtapa = (e) => norm(e && (e.nome || e.name)).replace(/^\d+(?:\.\d+)*\.?\s+/, "");
-  const fora = new Set([
-    "REINTEGRACAO DE POSSE",
-    "AGUARDANDO EXPEDICAO DO MANDADO DE REINTEGRACAO",
-    "AGUARDANDO CUMPRIMENTO PELO OFICIAL DE JUSTICA",
-    "REALIZAR REINTEGRACAO",
-    "AVALIACAO PREVIA ENGENHARIA",
-    "VISTORIA TECNICA EXTERNA",
-    "APROVACAO PROJETO - PREFEITURA",
-    "APROVACAO PROJETO PREFEITURA"
-  ]);
-  const idsPai = new Set(window.EtapasJudiciaisState.filter((e) => nomeEtapa(e) === "REINTEGRACAO DE POSSE").map((e) => String(e.id)));
-  const antes = window.EtapasJudiciaisState.length;
-  window.EtapasJudiciaisState = window.EtapasJudiciaisState.filter((e) => {
-    if (!e) return false;
-    if (String(e.id).indexOf("j_reint_") === 0) return false;
-    if (fora.has(nomeEtapa(e))) return false;
-    if (e.parentId && idsPai.has(String(e.parentId))) return false;
-    return true;
-  });
-  if (window.EtapasJudiciaisState.length === antes) return false;
+  const antes = JSON.stringify(window.EtapasJudiciaisState);
+  window.EtapasJudiciaisState = window.corrigirEtapasJudiciais(window.EtapasJudiciaisState);
+  if (window.EtapasJudiciaisState.some((e) => window.nomeEtapaJudicial(e) === "REINTEGRACAO DE POSSE")) {
+    try { localStorage.setItem("crm_moura_judiciais_fluxo_v3", "1"); } catch (e) {}
+  }
+  if (JSON.stringify(window.EtapasJudiciaisState) === antes) return false;
   if (!window._commitConfigBusy) {
     try {
       const setter = window._originalSetItem || localStorage.setItem.bind(localStorage);
@@ -11975,6 +12028,10 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
   filteredSubjudice.sort((a, b) => window.compareFilaClients(a, b, sortCol, sortDir, thresholdJuridico, false));
   window.clientList = clientList;
   window._subjudiceList = filteredSubjudice;
+  if (window._abrirMapaJuridicoAoCarregar) {
+    window._abrirMapaJuridicoAoCarregar = false;
+    setTimeout(() => { if (typeof window.openMapaJuridico === "function") window.openMapaJuridico(); }, 0);
+  }
 
   // --- SUB JUDICE KPIs ---
   let subTotalOverdue = 0;
@@ -22668,6 +22725,10 @@ window.handleDistratoChoiceChange = function() {
   const leiRefund = restituicaoLiquida;
   const leiRefundPct = totalPaid > 0 ? ((leiRefund / totalPaid) * 100).toFixed(1).replace('.0', '') : 0;
   const negotiationEnabled = !!distAlcada.enabled && !isPermuta;
+  const pisoLeiPct = totalPaid > 0 ? ((leiRefund + despesasInformadas) / totalPaid) * 100 : 0;
+  const tetoPersonalizado = (negotiationEnabled && maxPctCfg > 0 && maxRefund + 0.009 >= leiRefund)
+    ? Math.max(maxPctCfg, pisoLeiPct)
+    : pisoLeiPct;
 
   const minDisabled = !negotiationEnabled || minRefund < leiRefund;
   const maxDisabled = !negotiationEnabled || maxRefund < leiRefund;
@@ -22762,12 +22823,14 @@ window.handleDistratoChoiceChange = function() {
     restitutionPct = totalPaid > 0 ? (leiRefund / totalPaid) * 100 : 0;
     if (pctContainer) pctContainer.style.display = "none";
   } else {
-    // Personalizado pode ficar abaixo do mínimo da alçada. O teto é o máximo configurado.
+    // Abaixo de 35% ou 55% não pede aprovação. O piso é a Lei do Distrato e o teto é o máximo configurado.
     restitutionPct = Number(pctEl && pctEl.value) || 0;
-    if (restitutionPct < 0) restitutionPct = 0;
+    if (restitutionPct < pisoLeiPct) restitutionPct = pisoLeiPct;
     if (restitutionPct > 100) restitutionPct = 100;
-    if (negotiationEnabled && maxPctCfg > 0 && restitutionPct > maxPctCfg) restitutionPct = maxPctCfg;
+    if (tetoPersonalizado > 0 && restitutionPct > tetoPersonalizado) restitutionPct = tetoPersonalizado;
+    if (restitutionPct < pisoLeiPct) restitutionPct = pisoLeiPct;
     let valNum = window.distratoAlcadaLiquida(totalPaid * (restitutionPct / 100));
+    if (valNum + 0.009 < leiRefund) valNum = leiRefund;
     if (valEl) valEl.value = valNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     negotiatedRefund = valNum;
     if (pctEl) pctEl.value = Number(restitutionPct).toFixed(1);
@@ -22816,8 +22879,8 @@ window.handleDistratoChoiceChange = function() {
   }
   if (pctContainer) pctContainer.style.display = (!isPermuta && negotiationEnabled && choice === "custom") ? "flex" : "none";
   if (rangeEl) {
-    rangeEl.min = "0";
-    rangeEl.max = String(negotiationEnabled && maxPctCfg > 0 ? maxPctCfg : 100);
+    rangeEl.min = String(negotiationEnabled ? pisoLeiPct : 0);
+    rangeEl.max = String(negotiationEnabled && tetoPersonalizado > 0 ? tetoPersonalizado : 100);
     rangeEl.value = String(Number.isFinite(restitutionPct) ? restitutionPct : (negotiationEnabled ? minPctCfg : 0));
     rangeEl.disabled = !negotiationEnabled || choice !== "custom";
   }
@@ -22853,7 +22916,7 @@ window.handleDistratoChoiceChange = function() {
   const approvalAlert = document.getElementById("dist-approval-alert");
   if (approvalAlert) {
     const isExactlyLei = Math.abs(negotiatedRefund - leiRefund) < 0.01;
-    const pctOutside = negotiationEnabled && (restitutionPct < minPctCfg - 0.009 || restitutionPct > maxPctCfg + 0.009);
+    const pctOutside = negotiationEnabled && tetoPersonalizado > pisoLeiPct + 0.009 && restitutionPct > tetoPersonalizado + 0.009;
     const instOutside = negotiationEnabled && (instQty < instMin || instQty > instMax);
     if (!negotiationEnabled && !isPermuta) {
       approvalAlert.style.display = choice === "lei" ? "none" : "flex";

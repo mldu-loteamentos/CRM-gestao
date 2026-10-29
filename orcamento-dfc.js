@@ -3103,6 +3103,7 @@ const OrcamentoDfcApp = {
     if (!Array.isArray(lines) || !lines.length) return;
     const pack = { fileName: x.fileName || "Base 2027", savedAt: Number(x.savedAt) || 0, year: 2027, lines: lines };
     const atual = this.origem();
+    if (token !== this._bToken) return;
     if (Number(pack.savedAt) <= Number(atual.savedAt || 0)) return;
     this._custom = pack;
     this._nuvemOk = true;
@@ -3194,21 +3195,135 @@ const OrcamentoDfcApp = {
     return String(v == null ? "" : v).trim();
   },
 
-  cellNum(cell) {
-    if (!cell || cell.value == null) return 0;
-    let v = cell.value;
-    if (v && typeof v === "object") {
-      if (v.result != null) v = v.result;
-      else if (Array.isArray(v.richText)) v = v.richText.map((t) => t.text || "").join("");
-      else if (v.text != null) v = v.text;
-    }
-    if (typeof v === "number") return Number.isFinite(v) ? Math.round(v * 100) / 100 : 0;
-    const s = String(v || "").trim();
+  round2(n) {
+    const x = Number(n);
+    return Number.isFinite(x) ? Math.round(x * 100) / 100 : 0;
+  },
+
+  parseNum(v) {
+    if (typeof v === "number") return this.round2(v);
+    const s = String(v == null ? "" : v).trim();
     if (!s) return 0;
     const n = s.indexOf(",") >= 0
       ? Number(s.replace(/\./g, "").replace(",", "."))
       : Number(s);
-    return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
+    return Number.isFinite(n) ? this.round2(n) : 0;
+  },
+
+  cellNum(cell) {
+    if (!cell || cell.value == null) return 0;
+    let v = cell.value;
+    if (v && typeof v === "object") {
+      if (v.result != null && typeof v.result !== "object") v = v.result;
+      else if (Array.isArray(v.richText)) v = v.richText.map((t) => t.text || "").join("");
+      else if (v.text != null) v = v.text;
+      else v = "";
+    }
+    return this.parseNum(v);
+  },
+
+  colExcel(letters) {
+    let n = 0;
+    const s = String(letters || "").toUpperCase();
+    for (let i = 0; i < s.length; i++) n = n * 26 + (s.charCodeAt(i) - 64);
+    return n;
+  },
+
+  abaDoNome(wb, nome) {
+    if (!wb || !nome) return null;
+    const alvo = this.norm(nome);
+    let achou = null;
+    wb.worksheets.forEach((ws) => {
+      if (!achou && this.norm(ws.name) === alvo) achou = ws;
+    });
+    return achou || (typeof wb.getWorksheet === "function" ? wb.getWorksheet(nome) : null);
+  },
+
+  /* A Importação costuma ser fórmula. O número editado está na célula de origem. */
+  valorDaFormula(formula, wb, ws, depth) {
+    const f = String(formula || "").replace(/^=\+?/, "").replace(/\$/g, "").trim();
+    if (!f || !wb) return null;
+    const soma = f.match(/^SUM\((.+)\)$/i);
+    if (soma) return this.somaIntervalo(soma[1], wb, ws, depth);
+    const cruzada = f.match(/^(?:'([^']+)'|([^!]+))!([A-Z]+)(\d+)$/i);
+    const local = cruzada ? null : f.match(/^([A-Z]+)(\d+)$/i);
+    if (!cruzada && !local) return null;
+    const nomeAba = cruzada ? (cruzada[1] || cruzada[2] || "") : "";
+    const col = cruzada ? cruzada[3] : local[1];
+    const row = Number(cruzada ? cruzada[4] : local[2]);
+    if (!col || !row) return null;
+    const alvoWs = nomeAba ? this.abaDoNome(wb, nomeAba.trim()) : ws;
+    if (!alvoWs || typeof alvoWs.getCell !== "function") return null;
+    const alvo = alvoWs.getCell(row, this.colExcel(col));
+    const n = this.lerValor(alvo, wb, alvoWs, depth + 1);
+    if (n != null) return n;
+    if (!alvo || alvo.value == null || alvo.value === "") return 0;
+    return null;
+  },
+
+  somaIntervalo(texto, wb, ws, depth) {
+    const pedaco = String(texto || "").split(",").map((p) => p.trim()).filter(Boolean);
+    if (!pedaco.length || pedaco.length > 12) return null;
+    let total = 0;
+    for (let i = 0; i < pedaco.length; i++) {
+      const cruzada = pedaco[i].match(/^(?:'([^']+)'|([^!]+))!([A-Z]+)(\d+):([A-Z]+)(\d+)$/i);
+      const local = cruzada ? null : pedaco[i].match(/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/i);
+      if (!cruzada && !local) return null;
+      const nomeAba = cruzada ? (cruzada[1] || cruzada[2] || "") : "";
+      const c1 = this.colExcel(cruzada ? cruzada[3] : local[1]);
+      const r1 = Number(cruzada ? cruzada[4] : local[2]);
+      const c2 = this.colExcel(cruzada ? cruzada[5] : local[3]);
+      const r2 = Number(cruzada ? cruzada[6] : local[4]);
+      const alvoWs = nomeAba ? this.abaDoNome(wb, nomeAba) : ws;
+      if (!alvoWs) return null;
+      const ca = Math.min(c1, c2);
+      const cb = Math.max(c1, c2);
+      const ra = Math.min(r1, r2);
+      const rb = Math.max(r1, r2);
+      if (!ca || !c2 || !ra || !r2 || (cb - ca + 1) * (rb - ra + 1) > 400) return null;
+      for (let r = ra; r <= rb; r++) {
+        for (let c = ca; c <= cb; c++) {
+          const celula = alvoWs.getCell(r, c);
+          const n = this.lerValor(celula, wb, alvoWs, depth + 1);
+          if (n == null) {
+            if (celula && (celula.value == null || celula.value === "")) continue;
+            return null;
+          }
+          total += n;
+        }
+      }
+    }
+    return this.round2(total);
+  },
+
+  lerValor(cell, wb, ws, depth) {
+    if (!cell || depth > 3) return null;
+    const v = cell.value;
+    if (typeof v === "number") return this.round2(v);
+    if (typeof v === "string") return this.parseNum(v);
+    if (!v || typeof v !== "object") return v == null ? null : this.cellNum(cell);
+    if (v.formula) {
+      const seguido = this.valorDaFormula(v.formula, wb, ws, depth);
+      if (seguido != null) return seguido;
+    }
+    if (v.result != null && typeof v.result !== "object") return this.parseNum(v.result);
+    return null;
+  },
+
+  taxaFormula(ws, header) {
+    let n = 0;
+    let f = 0;
+    const max = header.row + 40;
+    ws.eachRow((row, r) => {
+      if (r <= header.row || r > max) return;
+      header.meses.forEach((col) => {
+        const v = row.getCell(col).value;
+        if (v == null || v === "") return;
+        n++;
+        if (typeof v === "object" && (v.formula || v.sharedFormula)) f++;
+      });
+    });
+    return n ? f / n : 0;
   },
 
   cabecalho(ws) {
@@ -3442,14 +3557,17 @@ const OrcamentoDfcApp = {
     return String(l.e || "") + "|" + String(l.cc || "") + "|" + String(l.conta || "");
   },
 
-  linhasDaAba(ws, header) {
+  linhasDaAba(ws, header, wb) {
     const lines = [];
     ws.eachRow((row, n) => {
       if (n <= header.row) return;
       const emp = this.cellText(row.getCell(header.emp));
       const conta = this.cellText(row.getCell(header.conta));
       if (!emp && !conta) return;
-      const meses = header.meses.map((col) => this.cellNum(row.getCell(col)));
+      const meses = header.meses.map((col) => {
+        const n = this.lerValor(row.getCell(col), wb, ws, 0);
+        return n == null ? 0 : n;
+      });
       if (!meses.some((v) => Math.abs(v) >= 0.005)) return;
       const corte = emp.match(/^(\d+)\s*-\s*(.*)$/);
       lines.push({
@@ -3475,23 +3593,30 @@ const OrcamentoDfcApp = {
     const abas = [];
     wb.worksheets.forEach((ws) => {
       const h = this.cabecalho(ws);
-      if (h) abas.push({ ws: ws, header: h, nome: this.norm(ws.name) });
+      if (!h) return;
+      const linhas = this.linhasDaAba(ws, h, wb);
+      if (!linhas.length) return;
+      abas.push({ nome: this.norm(ws.name), linhas: linhas, formulas: this.taxaFormula(ws, h) });
     });
     if (!abas.length) {
       throw new Error("Não achei a planilha com as colunas EMPRESA, CONTA e os meses de janeiro a dezembro.");
     }
-    abas.sort((a, b) => (a.nome === "IMPORTACAO" ? 0 : 1) - (b.nome === "IMPORTACAO" ? 0 : 1));
+    /* Fórmulas primeiro. A aba digitada, ou a Importação quando as duas são valores, fica por último e substitui a chave antiga. */
+    abas.sort((a, b) => {
+      if (Math.abs(a.formulas - b.formulas) > 0.15) return b.formulas - a.formulas;
+      if (a.nome === "IMPORTACAO") return 1;
+      if (b.nome === "IMPORTACAO") return -1;
+      return 0;
+    });
     const grupos = new Map();
-    abas.forEach((aba, idx) => {
+    abas.forEach((aba) => {
       const por = new Map();
-      this.linhasDaAba(aba.ws, aba.header).forEach((l) => {
+      aba.linhas.forEach((l) => {
         const k = this.chaveLinha(l);
         if (!por.has(k)) por.set(k, []);
         por.get(k).push(l);
       });
-      por.forEach((rows, k) => {
-        if (!idx || !grupos.has(k)) grupos.set(k, rows);
-      });
+      por.forEach((rows, k) => grupos.set(k, rows));
     });
     const lines = [];
     grupos.forEach((rows) => rows.forEach((l) => lines.push(l)));
