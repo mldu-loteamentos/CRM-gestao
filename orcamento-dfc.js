@@ -154,9 +154,16 @@ const OrcamentoDfcApp = {
     return raw;
   },
 
+  catalogoContas() {
+    const plano = typeof PlanoFinanceiroApp !== "undefined" ? PlanoFinanceiroApp : null;
+    const fluxo = typeof FluxoCaixaApp !== "undefined" ? FluxoCaixaApp : null;
+    if (plano && Array.isArray(plano.categories) && plano.categories.length) return plano.categories;
+    if (fluxo && Array.isArray(fluxo.categories) && fluxo.categories.length) return fluxo.categories;
+    return [];
+  },
+
+  /* O filtro lista o plano inteiro. O empreendimento só restringe os valores da tabela. */
   planos() {
-    const emp = new Set(this.selectedCompanyIds.map(String));
-    const cc = new Set(this.selectedCcIds.map(String));
     const map = new Map();
     const add = (conta, nome) => {
       const id = this.codigoPlano(conta);
@@ -165,19 +172,53 @@ const OrcamentoDfcApp = {
       if (!map.has(id)) map.set(id, n);
       else if (!map.get(id) && n) map.set(id, n);
     };
-    this.lines().forEach((l) => {
-      if (emp.size && !emp.has(String(l.e))) return;
-      if (cc.size && !cc.has(String(l.cc))) return;
-      add(l.conta, l.cn);
+    this.catalogoContas().forEach((c) => {
+      if (!c) return;
+      add(c.id || c.code, c.name || c.description || c.financialCategoryName || "");
     });
-    (this._lancamentos2026 || []).forEach((c) => {
-      if (emp.size && !emp.has(String(c.companyId))) return;
-      if (!this.ccCabe(c.cc)) return;
-      add(c.code, c.cn);
+    this.lines().forEach((l) => add(l.conta, l.cn));
+    (this._lancamentos2026 || []).forEach((c) => add(c.code, c.cn));
+    const forecasts = (window.ResultadoCaixaApp && window.ResultadoCaixaApp.forecasts) || {};
+    Object.keys(forecasts).forEach((ym) => {
+      if (String(ym).indexOf("2026-") !== 0) return;
+      const doc = forecasts[ym] || {};
+      const lista = [];
+      const porArq = doc.porArquivo;
+      if (porArq && typeof porArq === "object" && !Array.isArray(porArq) && Object.keys(porArq).length) {
+        Object.keys(porArq).forEach((nome) => lista.push(porArq[nome]));
+      } else if (doc.contas) lista.push(doc);
+      lista.forEach((arq) => {
+        Object.keys(arq.contas || {}).forEach((cc) => {
+          Object.keys(arq.contas[cc] || {}).forEach((code) => {
+            const info = arq.contas[cc][code] || {};
+            add(code, info.nome || "");
+          });
+        });
+      });
     });
     return [...map.entries()]
       .map(([id, name]) => ({ id, name }))
       .sort((a, b) => String(a.id).localeCompare(String(b.id), "pt-BR", { numeric: true }));
+  },
+
+  async garantirCatalogoPlano() {
+    if (this.catalogoContas().length || this._planoCatalogoPedido) return;
+    this._planoCatalogoPedido = true;
+    try {
+      const fluxo = window.FluxoCaixaApp;
+      if (fluxo && typeof fluxo.ensureCategories === "function") await fluxo.ensureCategories();
+      if (!this.catalogoContas().length && window.SiengeApiService && typeof SiengeApiService.getPaymentCategories === "function") {
+        const cats = await SiengeApiService.getPaymentCategories();
+        const lista = (cats || []).map((c) => Object.assign({}, c, {
+          name: (c && (c.name || c.description || c.financialCategoryName)) || ""
+        }));
+        if (lista.length) {
+          if (window.PlanoFinanceiroApp && !((PlanoFinanceiroApp.categories || []).length)) PlanoFinanceiroApp.categories = lista;
+          if (fluxo && !((fluxo.categories || []).length)) fluxo.categories = lista;
+        }
+      }
+    } catch (e) {}
+    if (this.catalogoContas().length && document.getElementById("orc-dfc-plan-box")) this.paintPlan();
   },
 
   planOn(conta) {
@@ -818,6 +859,7 @@ const OrcamentoDfcApp = {
       this._caixaErro = "";
       this._caixaAviso = aviso || "";
       if (document.getElementById("orc-dfc-body")) this.paintBody();
+      if (document.getElementById("orc-dfc-plan-box")) this.paintPlan();
     };
     const inicio = "2026-01-01";
     const reuso = this.movimentosReusados(fluxo, empresas, inicio, fim);
@@ -2727,6 +2769,7 @@ const OrcamentoDfcApp = {
       }
     });
     if (window.lucide && lucide.createIcons) lucide.createIcons();
+    this.garantirCatalogoPlano();
   },
 
   paintGrupo() {
