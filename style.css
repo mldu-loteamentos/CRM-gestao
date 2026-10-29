@@ -2623,6 +2623,9 @@ circle.donut-segment {
 .ml-emp-filter-all { flex: 1; height: 32px; border: none; background: #105436; color: #fff; border-radius: 6px; font-size: 0.75rem; font-weight: 800; cursor: pointer; }
 .ml-emp-filter-none { flex: 1; height: 32px; border: none; background: #f37021; color: #fff; border-radius: 6px; font-size: 0.75rem; font-weight: 800; cursor: pointer; }
 .ml-emp-filter-list { max-height: 240px; overflow: auto; }
+.ml-emp-filter-sec { position: sticky; top: 0; z-index: 1; padding: 8px 14px; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; background: #f8fafc; color: #334155; }
+.ml-emp-filter-sec.is-custo { background: #d8f3e4; color: #105436; }
+.ml-emp-filter-sec.is-despesa { background: #f8d7d3; color: #7f1d1d; }
 .ml-emp-filter-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #f1f5f9; cursor: pointer; font-size: 0.82rem; color: #334155; font-weight: 600; }
 .ml-emp-filter-item:last-child { border-bottom: none; }
 .ml-emp-filter-item span { min-width: 0; white-space: normal; line-height: 1.35; }
@@ -10755,6 +10758,8 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .orc-rep-fc { background: #f8fafc; }
 .orc-dfc-page .ml-emp-filter { flex: 0 0 340px; width: 340px; max-width: 420px; }
 .orc-dfc-page #orc-dfc-plan-box .ml-emp-filter { flex-basis: 420px; width: 420px; max-width: 480px; }
+.orc-dfc-page #orc-dfc-cd-box .ml-emp-filter { flex-basis: 380px; width: 380px; max-width: 440px; }
+.orc-dfc-page #orc-dfc-cd-box .ml-emp-filter-list { max-height: 420px; }
 .orc-dfc-up, .orc-dfc-base {
   height: 34px; border-radius: 6px; border: 1px solid #105436; background: #fff; color: #105436;
   font-weight: 800; padding: 0 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem;

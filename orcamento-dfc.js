@@ -6,12 +6,15 @@ const OrcamentoDfcApp = {
   selectedCompanyIds: [],
   selectedCcIds: [],
   selectedPlanIds: [],
+  selectedGrupoIds: [],
   companyDropOpen: false,
   companyQuery: "",
   ccDropOpen: false,
   ccQuery: "",
   planDropOpen: false,
   planQuery: "",
+  grupoDropOpen: false,
+  grupoQuery: "",
   expanded: new Set(),
   _expandInited: false,
   expanded2: new Set(),
@@ -217,6 +220,68 @@ const OrcamentoDfcApp = {
   podarPlanos() {
     const vivos = new Set(this.planos().map((p) => String(p.id)));
     this.selectedPlanIds = (this.selectedPlanIds || []).filter((id) => vivos.has(String(id)));
+  },
+
+  gruposCustoDespesa() {
+    const plano = typeof PlanoFinanceiroApp !== "undefined" ? PlanoFinanceiroApp : null;
+    const tpl = plano && typeof plano.dfcTemplateGroups === "function" ? plano.dfcTemplateGroups() : [];
+    return tpl.filter((g) => g && (g.parentId === "g_04" || g.parentId === "g_05") && g.type === "resultado");
+  },
+
+  itensGrupo() {
+    return this.gruposCustoDespesa().map((g) => ({
+      id: g.id,
+      label: g.name,
+      name: g.name,
+      group: g.parentId === "g_04" ? "04 CUSTOS" : "05 DESPESAS",
+      groupClass: g.parentId === "g_04" ? "is-custo" : "is-despesa"
+    }));
+  },
+
+  filtroGrupoLigado() {
+    const n = (this.selectedGrupoIds || []).length;
+    if (!n) return false;
+    const todos = this.gruposCustoDespesa().length;
+    return !todos || n < todos;
+  },
+
+  grupoOn(gid) {
+    if (!this.filtroGrupoLigado()) return true;
+    const id = String(gid || "");
+    if (id.indexOf("g_04_") !== 0 && id.indexOf("g_05_") !== 0) return true;
+    return (this.selectedGrupoIds || []).some((s) => String(s) === id);
+  },
+
+  linhaDoGrupo(id, gid) {
+    const texto = String(id || "");
+    const alvo = String(gid || "");
+    if (!texto || !alvo) return false;
+    if (texto === alvo) return true;
+    const marcas = ["|" + alvo, ":" + alvo];
+    for (let i = 0; i < marcas.length; i++) {
+      const marca = marcas[i];
+      const at = texto.indexOf(marca);
+      if (at < 0) continue;
+      const depois = texto.charAt(at + marca.length);
+      if (!depois || depois === "|" || depois === ":") return true;
+    }
+    return false;
+  },
+
+  linhasVisiveis(rows) {
+    const base = this.podarLinhasPlano(rows);
+    if (!this.filtroGrupoLigado()) return base;
+    const sel = new Set((this.selectedGrupoIds || []).map(String));
+    const off = this.gruposCustoDespesa().map((g) => String(g.id)).filter((id) => !sel.has(id));
+    const tem04 = [...sel].some((id) => id.indexOf("g_04_") === 0);
+    const tem05 = [...sel].some((id) => id.indexOf("g_05_") === 0);
+    return base.filter((r) => {
+      const id = String(r.id || "");
+      const gid = String(r.drillGid || "");
+      if (!tem04 && (id === "g_04" || gid === "g_04")) return false;
+      if (!tem05 && (id === "g_05" || gid === "g_05")) return false;
+      return !off.some((bad) => this.linhaDoGrupo(id, bad) || this.linhaDoGrupo(gid, bad));
+    });
   },
 
   z12() {
@@ -1032,7 +1097,7 @@ const OrcamentoDfcApp = {
     if (!detalhe || !detalhe.length) return;
     detalhe.forEach((acc) => {
       const g = byId[acc.gid];
-      if (!g || g.type !== "resultado") return;
+      if (!g || g.type !== "resultado" || !this.grupoOn(acc.gid)) return;
       const dig = String(acc.code || "").replace(/\D/g, "");
       if (!dig) return;
       let alvo = null;
@@ -1084,6 +1149,7 @@ const OrcamentoDfcApp = {
     const fora = new Map();
     this.linhasFiltradas().forEach((l) => {
       const gid = this.grupoDaConta(l.conta, l.cn);
+      if (!this.grupoOn(gid)) return;
       const g = gid ? byId[gid] : null;
       if (!g || g.type !== "resultado") {
         const key = String(l.conta || "") + "|" + String(l.cn || "");
@@ -1133,7 +1199,7 @@ const OrcamentoDfcApp = {
       const code = parts[1];
       const ccRaw = parts.slice(2).join("|");
       const g = byId[gid];
-      if (!g || g.type !== "resultado") return;
+      if (!g || g.type !== "resultado" || !this.grupoOn(gid)) return;
       const codeDig = code.replace(/\D/g, "");
       if (!codeDig) return;
       if (code.indexOf(".") >= 0) {
@@ -1183,7 +1249,7 @@ const OrcamentoDfcApp = {
       return d;
     };
     tpl.forEach((g) => {
-      if (g.type !== "resultado" || !base.grupos[g.id]) return;
+      if (g.type !== "resultado" || !base.grupos[g.id] || !this.grupoOn(g.id)) return;
       g.base = base.grupos[g.id].slice();
     });
     tpl.filter((g) => g.type !== "formula").sort((a, b) => depth(b) - depth(a)).forEach((g) => {
@@ -1301,7 +1367,7 @@ const OrcamentoDfcApp = {
     const foraLista = [...fora.values()]
       .filter((x) => Math.abs(x.total) >= 0.005)
       .sort((a, b) => String(a.conta).localeCompare(String(b.conta), "pt-BR", { numeric: true }));
-    return { rows: this.podarLinhasPlano(rows), fora: foraLista };
+    return { rows: this.linhasVisiveis(rows), fora: foraLista };
   },
 
   toggle(id) {
@@ -1363,6 +1429,7 @@ const OrcamentoDfcApp = {
     const vivo = (m, b) => (m || []).some((v) => Math.abs(Number(v) || 0) >= 0.005) || (b || []).some((v) => Math.abs(Number(v) || 0) >= 0.005);
     this.linhasFiltradas().forEach((l) => {
       const gid = this.grupoDaConta(l.conta, l.cn);
+      if (!this.grupoOn(gid)) return;
       const g = gid ? byId[gid] : null;
       if (!g || g.type !== "resultado") {
         const key = String(l.conta || "") + "|" + String(l.cn || "");
@@ -1393,6 +1460,7 @@ const OrcamentoDfcApp = {
       if (empFiltro.size && !empFiltro.has(emp)) return;
       if (!this.ccCabe(c.cc)) return;
       if (!this.planOn(c.code)) return;
+      if (!this.grupoOn(c.gid)) return;
       const g = byId[c.gid];
       if (!g || g.type !== "resultado") return;
       const cc = ccIdDe(c.cc);
@@ -1425,6 +1493,7 @@ const OrcamentoDfcApp = {
             if (!this.planOn(code)) return;
             const info = arq.contas[ccRaw][code] || {};
             const gid = this.grupoDaConta(code, info.nome);
+            if (!this.grupoOn(gid)) return;
             const g = gid ? byId[gid] : null;
             if (!g || g.type !== "resultado") return;
             const meses = info.meses || {};
@@ -1659,7 +1728,7 @@ const OrcamentoDfcApp = {
     const foraLista = [...fora.values()]
       .filter((x) => Math.abs(x.total) >= 0.005)
       .sort((a, b) => String(a.conta).localeCompare(String(b.conta), "pt-BR", { numeric: true }));
-    return { rows: this.podarLinhasPlano(rows), fora: foraLista };
+    return { rows: this.linhasVisiveis(rows), fora: foraLista };
   },
 
   render(root) {
@@ -1677,6 +1746,7 @@ const OrcamentoDfcApp = {
           <div id="orc-dfc-emp-box"></div>
           <div id="orc-dfc-cc-box"></div>
           <div id="orc-dfc-plan-box"></div>
+          <div id="orc-dfc-cd-box"></div>
           <div class="orc-dfc-vars">
             <label class="moura-switch">
               <input type="checkbox" id="orc-dfc-var-rs" ${this.varRs ? "checked" : ""}>
@@ -1705,6 +1775,7 @@ const OrcamentoDfcApp = {
     this.paintEmp();
     this.paintCc();
     this.paintPlan();
+    this.paintGrupo();
     this.paintBody();
     const up = document.getElementById("orc-dfc-up");
     const file = document.getElementById("orc-dfc-file");
@@ -2449,8 +2520,10 @@ const OrcamentoDfcApp = {
         if (this.companyDropOpen) {
           this.ccDropOpen = false;
           this.planDropOpen = false;
+          this.grupoDropOpen = false;
           this.paintCc();
           this.paintPlan();
+          this.paintGrupo();
         }
         this.paintEmp();
       },
@@ -2530,8 +2603,10 @@ const OrcamentoDfcApp = {
         if (this.ccDropOpen) {
           this.companyDropOpen = false;
           this.planDropOpen = false;
+          this.grupoDropOpen = false;
           this.paintEmp();
           this.paintPlan();
+          this.paintGrupo();
         }
         this.paintCc();
       },
@@ -2607,8 +2682,10 @@ const OrcamentoDfcApp = {
         if (this.planDropOpen) {
           this.companyDropOpen = false;
           this.ccDropOpen = false;
+          this.grupoDropOpen = false;
           this.paintEmp();
           this.paintCc();
+          this.paintGrupo();
         }
         this.paintPlan();
       },
@@ -2646,6 +2723,81 @@ const OrcamentoDfcApp = {
         this.selectedPlanIds = [];
         this.planDropOpen = true;
         this.paintPlan();
+        this.paintBody();
+      }
+    });
+    if (window.lucide && lucide.createIcons) lucide.createIcons();
+  },
+
+  paintGrupo() {
+    const box = document.getElementById("orc-dfc-cd-box");
+    if (!box || !window.MlEmpresaFilter) return;
+    const items = this.itensGrupo();
+    const nouns = {
+      singular: "grupo",
+      plural: "grupos",
+      none: "Nenhum grupo",
+      noMatch: "Nenhum grupo com esse nome."
+    };
+    box.innerHTML = MlEmpresaFilter.html({
+      id: "orc-dfc-cd",
+      label: "Custos e despesas",
+      items,
+      selectedIds: (this.selectedGrupoIds || []).map(String),
+      open: this.grupoDropOpen,
+      query: this.grupoQuery,
+      emptyMeansAll: true,
+      keepOrder: true,
+      nouns
+    });
+    MlEmpresaFilter.bind("orc-dfc-cd", {
+      toggleOpen: () => {
+        this.grupoDropOpen = !this.grupoDropOpen;
+        if (this.grupoDropOpen) {
+          this.companyDropOpen = false;
+          this.ccDropOpen = false;
+          this.planDropOpen = false;
+          this.paintEmp();
+          this.paintCc();
+          this.paintPlan();
+        }
+        this.paintGrupo();
+      },
+      setQuery: (q) => {
+        this.grupoQuery = q || "";
+        const list = document.getElementById("orc-dfc-cd-list");
+        if (list) {
+          list.innerHTML = MlEmpresaFilter.listHtml({
+            id: "orc-dfc-cd",
+            items,
+            selectedIds: this.selectedGrupoIds,
+            query: this.grupoQuery,
+            keepOrder: true,
+            nouns
+          });
+        }
+      },
+      toggleId: (id, on) => {
+        const sid = String(id);
+        if (on) {
+          if (!this.selectedGrupoIds.includes(sid)) this.selectedGrupoIds.push(sid);
+        } else {
+          this.selectedGrupoIds = this.selectedGrupoIds.filter((x) => x !== sid);
+        }
+        this.grupoDropOpen = true;
+        this.paintGrupo();
+        this.paintBody();
+      },
+      selectAll: () => {
+        this.selectedGrupoIds = items.map((g) => g.id);
+        this.grupoDropOpen = true;
+        this.paintGrupo();
+        this.paintBody();
+      },
+      selectNone: () => {
+        this.selectedGrupoIds = [];
+        this.grupoDropOpen = true;
+        this.paintGrupo();
         this.paintBody();
       }
     });
@@ -2928,8 +3080,11 @@ const OrcamentoDfcApp = {
     this.selectedCompanyIds = [];
     this.selectedCcIds = [];
     this.selectedPlanIds = [];
+    this.selectedGrupoIds = [];
     this.planDropOpen = false;
     this.planQuery = "";
+    this.grupoDropOpen = false;
+    this.grupoQuery = "";
     this._expandInited = false;
     this.expanded = new Set();
     const base = document.getElementById("orc-dfc-base");
@@ -2938,6 +3093,7 @@ const OrcamentoDfcApp = {
     this.paintEmp();
     this.paintCc();
     this.paintPlan();
+    this.paintGrupo();
     this._caixaChave = "";
     this.paintBody();
     this.carregarBase();

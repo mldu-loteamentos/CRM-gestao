@@ -139,7 +139,7 @@ window.MlEmpresaFilter = {
     const nouns = opts.nouns || null;
     const filtered = items.filter((it) => {
       if (!q) return true;
-      const blob = `${it.id} ${it.label || ""} ${it.name || ""}`.toLowerCase();
+      const blob = `${it.id} ${it.label || ""} ${it.name || ""} ${it.group || ""}`.toLowerCase();
       return blob.includes(q);
     });
     if (!filtered.length) {
@@ -151,14 +151,23 @@ window.MlEmpresaFilter = {
     }
     const kind = opts.single ? "radio" : "checkbox";
     const group = opts.single ? ` name="${this.esc(opts.id || "ml-emp")}-radio"` : "";
-    return filtered.map((it) => {
+    let html = "";
+    let last = "";
+    filtered.forEach((it) => {
+      const grp = it.group ? String(it.group) : "";
+      if (grp && grp !== last) {
+        const sec = it.groupClass ? " " + String(it.groupClass).replace(/[^a-z0-9_-]/gi, "") : "";
+        html += `<div class="ml-emp-filter-sec${sec}">${this.esc(grp)}</div>`;
+        last = grp;
+      }
       const itemId = String(it.id);
       const on = selected.has(itemId);
-      return `<label class="ml-emp-filter-item">
+      html += `<label class="ml-emp-filter-item">
         <input type="${kind}"${group} data-ml-item="${this.esc(itemId)}" ${on ? "checked" : ""}>
         <span>${this.esc(this.formatItemLabel(it))}</span>
       </label>`;
-    }).join("");
+    });
+    return html;
   },
 
   html(opts) {

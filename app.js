@@ -22054,7 +22054,7 @@ window.resetDistratoEditableFields = function(opts) {
 
   setVal("dist-restitution-pct", "60");
   setVal("dist-restitution-val", "0,00");
-  setVal("dist-restitution-choice", "custom");
+  setVal("dist-restitution-choice", "lei");
   setVal("dist-restitution-installments", "12");
   setVal("dist-iniciativa", "cliente");
   setVal("dist-fruition-months", "1");
@@ -22683,6 +22683,8 @@ window.handleDistratoChoiceChange = function() {
   if (minOption) minOption.disabled = minDisabled;
   const maxOption = document.querySelector('#dist-restitution-choice option[value="max"]');
   if (maxOption) maxOption.disabled = maxDisabled;
+  const leiOption = document.querySelector('#dist-restitution-choice option[value="lei"]');
+  if (leiOption) leiOption.disabled = !!isPermuta;
   if (customOption) customOption.disabled = !negotiationEnabled;
   if (minOption) minOption.textContent = `Mínima (${minPctCfg}%)`;
   if (maxOption) maxOption.textContent = `Máxima (${maxPctCfg}%)`;
@@ -22730,21 +22732,13 @@ window.handleDistratoChoiceChange = function() {
     restitutionPct = totalPaid > 0 ? (leiRefund / totalPaid) * 100 : 0;
     if (pctContainer) pctContainer.style.display = "none";
   } else {
-    // custom
+    // Personalizado pode ficar abaixo do mínimo da alçada. O teto é o máximo configurado.
     restitutionPct = Number(pctEl && pctEl.value) || 0;
-    
+    if (restitutionPct < 0) restitutionPct = 0;
     if (restitutionPct > 100) restitutionPct = 100;
-    if (negotiationEnabled && restitutionPct > 0 && restitutionPct < minPctCfg) restitutionPct = minPctCfg;
-    if (negotiationEnabled && restitutionPct > maxPctCfg) restitutionPct = maxPctCfg;
+    if (negotiationEnabled && maxPctCfg > 0 && restitutionPct > maxPctCfg) restitutionPct = maxPctCfg;
     let valNum = window.distratoAlcadaLiquida(totalPaid * (restitutionPct / 100));
     if (valEl) valEl.value = valNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-    // NUNCA DEIXAR MENOR QUE LEI DO DISTRATO
-    if (valNum < leiRefund) {
-      valNum = leiRefund;
-      if (valEl) valEl.value = valNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    }
-    
     negotiatedRefund = valNum;
     if (pctEl) pctEl.value = Number(restitutionPct).toFixed(1);
     if (rangeEl) rangeEl.value = Number(restitutionPct).toFixed(1);
@@ -22788,12 +22782,12 @@ window.handleDistratoChoiceChange = function() {
   const choiceWrap = document.getElementById("dist-restitution-choice");
   if (choiceWrap && choiceWrap.closest("div")) {
     const parent = choiceWrap.parentElement;
-    if (parent) parent.style.display = (isPermuta || !negotiationEnabled) ? "none" : "";
+    if (parent) parent.style.display = isPermuta ? "none" : "";
   }
   if (pctContainer) pctContainer.style.display = (!isPermuta && negotiationEnabled && choice === "custom") ? "flex" : "none";
   if (rangeEl) {
-    rangeEl.min = String(negotiationEnabled ? minPctCfg : 0);
-    rangeEl.max = String(negotiationEnabled ? maxPctCfg : 100);
+    rangeEl.min = "0";
+    rangeEl.max = String(negotiationEnabled && maxPctCfg > 0 ? maxPctCfg : 100);
     rangeEl.value = String(Number.isFinite(restitutionPct) ? restitutionPct : (negotiationEnabled ? minPctCfg : 0));
     rangeEl.disabled = !negotiationEnabled || choice !== "custom";
   }
@@ -46174,13 +46168,6 @@ window.searchRelacionamento = async function() {
           unitName: unitName,
           unidade: r.unidade || ""
         };
-        const nexCliente = {
-          customerId: r.openCustomerId || customerId,
-          saleId: r.titulo,
-          titulo: r.titulo,
-          billIds: r.titulo ? [String(r.titulo)] : []
-        };
-        const nexTeste = window.clientHasNexCumprida && window.clientHasNexCumprida(nexCliente);
         return `
         <tr style="transition: background-color 0.2s;">
           <td style="border-bottom: 1px solid var(--color-border); padding: 10px 10px; color: #1e293b; font-weight: 700; font-size: 0.75rem; text-align: left; font-variant-numeric: tabular-nums;">
@@ -46189,7 +46176,6 @@ window.searchRelacionamento = async function() {
                   ${r.contrato}
                </div>
                ${r.isHighlight ? '<div style="font-size: 0.6rem; background: var(--color-primary); color: white; padding: 2px 4px; border-radius: 6px; display: inline-block; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; width: fit-content;"><i data-lucide="target" style="width:8px; height:8px; margin-right:4px;"></i>PESQUISADO</div>' : ''}
-               ${nexTeste ? '<div style="font-size: 0.6rem; background: #ecfdf5; color: #105436; border: 1px solid #105436; padding: 2px 6px; border-radius: 6px; display: inline-block; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; width: fit-content;">Nex cumprida</div>' : ''}
                ${r.buyerNoteHtml || ''}
             </div>
           </td>
@@ -46213,7 +46199,6 @@ window.searchRelacionamento = async function() {
             <button class="btn btn-sm" onclick="openCustomerFromRelacionamento('${r.openCustomerId || customerId}', '${r.contractId || ''}', '${r.titulo || ''}')" style="background: var(--color-primary); color: white; border: none; border-radius: 6px; padding: 6px 12px; font-weight: 700; display: inline-flex; justify-content: center; align-items: center; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; font-size: 0.75rem;">
               <i data-lucide="eye" style="width:14px;height:14px; margin-right:4px;"></i> Detalhes
             </button>
-            ${nexTeste ? '<button type="button" onclick="window.abrirAvaliacaoDoContrato(window._relSignalClients[\'' + signalKey + '\'])" style="margin-left: 6px; padding: 6px 12px; font-size: 0.75rem; line-height: 1.2; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #105436; background-color: #ecfdf5; color: #105436; font-weight: 700; cursor: pointer;"><i data-lucide="file-warning" style="width:14px;height:14px;"></i> Avaliar cancelamento</button>' : ''}
           </td>
         </tr>
       `;

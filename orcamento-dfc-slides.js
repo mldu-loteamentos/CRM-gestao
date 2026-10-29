@@ -77,9 +77,11 @@ const OrcamentoDfcSlidesApp = {
     const emp = (app.selectedCompanyIds || []).slice();
     const cc = (app.selectedCcIds || []).slice();
     const planos = (app.selectedPlanIds || []).slice();
+    const grupos = (app.selectedGrupoIds || []).slice();
     app.selectedCompanyIds = [this.empresaSlide(app)];
     app.selectedCcIds = [];
     app.selectedPlanIds = [];
+    app.selectedGrupoIds = [];
     let pack = null;
     try {
       pack = app.montar();
@@ -92,6 +94,7 @@ const OrcamentoDfcSlidesApp = {
       app.selectedCompanyIds = emp;
       app.selectedCcIds = cc;
       app.selectedPlanIds = planos;
+      app.selectedGrupoIds = grupos;
     }
     const byId = {};
     ((pack && pack.rows) || []).forEach((r) => { if (r && r.id && !byId[r.id]) byId[r.id] = r; });

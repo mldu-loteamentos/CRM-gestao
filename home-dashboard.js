@@ -107,9 +107,14 @@ const HomeDashboard = {
 
   getMyClients() {
     const list = window.rawClientList || [];
+    const user = this.getViewUser();
     const opKey = this.getViewOperatorKey();
-    if (!opKey) return list;
-    return list.filter(c => this.normalizeOperatorKey(c.assignedOperator) === opKey);
+    if (!user || !opKey) return list;
+    const mine = this.clientsOfOperator(user, list);
+    if (typeof window.userSeesOnlyAssignedClients === "function" && window.userSeesOnlyAssignedClients(user)) {
+      return mine.filter((c) => typeof window.clientInCurrentUserCities !== "function" || window.clientInCurrentUserCities(c));
+    }
+    return mine;
   },
 
   isBackOfficeUser(user) {
@@ -778,15 +783,19 @@ const HomeDashboard = {
     const btn = document.querySelector('#home-op-load-data-container button');
     if (btn) btn.innerHTML = '<i data-lucide="loader-2" class="spin" style="width: 18px; margin-right: 8px;"></i> Carregando...';
     
-    // Isso deve usar a função global de carregar do Dashboard se existir
     try {
-      if (typeof window.carregarDados === 'function') {
-         await window.carregarDados(); // Essa função preenche rawClientList
+      if (typeof loadDashboardData === "function") {
+        await loadDashboardData(false);
+      } else if (typeof window.carregarFilaProntaDoDia === "function") {
+        const rows = await window.carregarFilaProntaDoDia();
+        if (Array.isArray(rows) && rows.length) window.rawClientList = rows;
+        else alert("A fila de cobrança de hoje ainda não está pronta. Tente de novo em alguns minutos.");
       } else {
-         alert("Função de carregamento não encontrada.");
+        alert("Não consegui carregar a fila de cobrança. Atualize a página com Ctrl+F5.");
       }
     } catch (e) {
       console.error(e);
+      alert("Não consegui carregar a fila de cobrança.");
     }
     
     if (btn) btn.innerHTML = '<i data-lucide="refresh-cw" style="width: 18px; margin-right: 8px;"></i> Carregar Minha Fila';
