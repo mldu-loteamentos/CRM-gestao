@@ -736,8 +736,10 @@ window.startCustomerBackgroundSync = async function(force = false, quiet = false
                     window.GlobalCustomerCache.syncStarted = true;
                     console.log(`Loaded ${cachedData.data.length} customers from local cache. Next sync at 08:00 AM.`);
                     if (container) container.style.display = 'none';
+                    if (typeof window.refazerBuscaClienteSeDigitada === "function") window.refazerBuscaClienteSeDigitada();
                     return;
                 }
+                if (typeof window.refazerBuscaClienteSeDigitada === "function") window.refazerBuscaClienteSeDigitada();
             }
         } catch(e) { console.error("Erro ao ler cache do IndexedDB:", e); }
     }
@@ -815,6 +817,7 @@ window.startCustomerBackgroundSync = async function(force = false, quiet = false
         
         window.GlobalCustomerCache.status = 'done';
         setDynamicFieldsState(false, "Digite para buscar...");
+        if (typeof window.refazerBuscaClienteSeDigitada === "function") window.refazerBuscaClienteSeDigitada();
         
         if (!quiet && textEl && progEl) {
             textEl.innerText = `Base atualizada!`;
@@ -837,8 +840,9 @@ window.startCustomerBackgroundSync = async function(force = false, quiet = false
     } catch(e) {
         console.error("Erro no sync de clientes do Firebase:", e);
         window.GlobalCustomerCache.status = 'error';
-        setDynamicFieldsState(false, "Falha na busca");
+        setDynamicFieldsState(false, "Digite para buscar...");
         if (textEl) textEl.innerText = `Erro ao sincronizar base.`;
+        if (typeof window.refazerBuscaClienteSeDigitada === "function") window.refazerBuscaClienteSeDigitada();
     }
 };
 
@@ -932,6 +936,25 @@ window.handleAgendaAutocomplete = function(query) {
     }, 200);
 };
 
+window.refazerBuscaClienteSeDigitada = function() {
+    const campos = [
+        ["relacionamento-filter-nome", "nome"],
+        ["relacionamento-filter-telefone", "telefone"],
+        ["relacionamento-filter-email", "email"],
+        ["fin-filter-nome", "nome", "fin"],
+        ["fin-filter-telefone", "telefone", "fin"],
+        ["fin-filter-email", "email", "fin"],
+        ["pcf-filter-nome", "nome", "pc"],
+        ["pcf-filter-telefone", "telefone", "pc"],
+        ["pcf-filter-email", "email", "pc"]
+    ];
+    campos.forEach(function(campo) {
+        const el = document.getElementById(campo[0]);
+        if (!el || el.disabled || !String(el.value || "").trim()) return;
+        window.handleDynamicCustomerSearch(el.value, campo[1], campo[2]);
+    });
+};
+
 window.handleDynamicCustomerSearch = function(query, type, source) {
     const src = source === "fin" ? "fin" : (source === "pc" ? "pc" : "relacionamento");
     const inputId = src === "fin" ? `fin-filter-${type}` : (src === "pc" ? `pcf-filter-${type}` : `relacionamento-filter-${type}`);
@@ -940,8 +963,9 @@ window.handleDynamicCustomerSearch = function(query, type, source) {
     window.SelectedDynamicCustomerId = null;
     window.SelectedDynamicCustomerName = null;
     window.SelectedDynamicCustomerDoc = null;
-    
-    if (!window.GlobalCustomerCache || !window.GlobalCustomerCache.data) return;
+
+    if (!window.GlobalCustomerCache) window.GlobalCustomerCache = { data: [], status: "idle", loadedCount: 0, totalCount: 0, syncStarted: false };
+    if (!Array.isArray(window.GlobalCustomerCache.data)) window.GlobalCustomerCache.data = [];
     
     // Máscara para Telefone
     if (type === 'telefone') {
@@ -1015,7 +1039,7 @@ window.handleDynamicCustomerSearch = function(query, type, source) {
             dropdown.style.borderRadius = '4px';
             dropdown.style.maxHeight = '200px';
             dropdown.style.overflowY = 'auto';
-            dropdown.style.zIndex = '1000';
+            dropdown.style.zIndex = '5000';
             dropdown.style.boxShadow = '0 4px 6px rgba(0,0,0,0.1)';
             
             // Container needs relative positioning for absolute dropdown to work
@@ -1035,24 +1059,30 @@ window.handleDynamicCustomerSearch = function(query, type, source) {
         const topMatches = matches.slice(0, 500); // Exibe até 500 resultados para permitir busca completa
         
         if (topMatches.length === 0) {
-            if (window.GlobalCustomerCache.status === 'loading') {
-                dropdown.style.display = 'block';
-                dropdown.style.width = '100%';
-                dropdown.style.top = '100%';
-                dropdown.style.left = '0';
-                
-                const item = document.createElement('div');
-                item.style.padding = '8px 12px';
-                item.style.fontSize = '0.85rem';
-                item.style.color = '#64748b';
-                item.style.fontStyle = 'italic';
-                const perc = Math.min(100, Math.round(((window.GlobalCustomerCache.loadedCount || 0) / (window.GlobalCustomerCache.totalCount || 1)) * 100));
-                item.innerHTML = `<i data-lucide="loader-2" class="spin" style="width:14px; height:14px; vertical-align:middle; margin-right:6px;"></i> Cliente não encontrado nos ${perc}% carregados. Aguarde o fim do download...`;
-                dropdown.appendChild(item);
-                if (typeof lucide !== 'undefined') lucide.createIcons();
-            } else {
-                dropdown.style.display = 'none';
+            const cache = window.GlobalCustomerCache || {};
+            const temBase = Array.isArray(cache.data) && cache.data.length > 0;
+            const falhou = !temBase && cache.status === "error";
+            if (!temBase && cache.status !== "loading" && cache.status !== "error" && typeof window.startCustomerBackgroundSync === "function") {
+                window.startCustomerBackgroundSync(false, true);
             }
+            dropdown.style.display = 'block';
+            dropdown.style.width = '100%';
+            dropdown.style.top = '100%';
+            dropdown.style.left = '0';
+            dropdown.style.zIndex = '5000';
+            const item = document.createElement('div');
+            item.style.padding = '8px 12px';
+            item.style.fontSize = '0.85rem';
+            item.style.color = '#64748b';
+            item.style.fontStyle = 'italic';
+            if (falhou) {
+                item.textContent = 'Não foi possível carregar a base de clientes.';
+            } else if (!temBase) {
+                item.textContent = 'Carregando a base de clientes...';
+            } else {
+                item.textContent = 'Nenhum cliente encontrado.';
+            }
+            dropdown.appendChild(item);
             return;
         }
         
@@ -3374,6 +3404,15 @@ function switchTab(tabId, titleOverride, showLoader = false) {
       return;
     }
   }
+  if (tabId === 'juridico-config' && typeof window.hasCrmPerm === 'function') {
+    const podeJur = window.hasCrmPerm('sub_jur_geral_configuracoes_acessar')
+      || window.hasCrmPerm('sub_jur_geral_configuracoes_visualizar')
+      || window.hasCrmPerm('sub_jur_geral_configuracoes_editar');
+    if (!podeJur) {
+      alert('Sem permissão para acessar Configurações do Jurídico.');
+      return;
+    }
+  }
   const leavingTab = window.activeAppTab;
   if (leavingTab && leavingTab !== tabId) {
     if (leavingTab === "prestacao-contas" && window.PrestacaoContasApp && typeof PrestacaoContasApp.reiniciar === "function") {
@@ -3417,6 +3456,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (activePane.style.display === "none") activePane.style.display = "block";
     window.crmCriarIcones(activePane);
     if (tabId === 'relacionamento_gestao') {
+      if (typeof window.startCustomerBackgroundSync === "function") window.startCustomerBackgroundSync(false, true);
       setTimeout(() => {
         const titleInput = document.getElementById('relacionamento-filter-titulo');
         if (titleInput) titleInput.focus();
@@ -3480,6 +3520,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "doc-padrao": "Documentos Padrões",
     subjudice: "Cobrança Sub judice",
     "mapa-juridico": "Mapa Jurídico",
+    "juridico-config": "Configurações",
     "configuracoes": "Configurações",
     "regras-negociacao": "Configurações",
     "regras-cobranca": "Configurações",
@@ -3701,6 +3742,24 @@ function switchTab(tabId, titleOverride, showLoader = false) {
       setTimeout(() => {
         if (!AppState.dashboardRendered) loadDashboardData();
       }, 0);
+    }
+  } else if (tabId === "juridico-config") {
+    if (typeof window.renderEtapasJudiciais === "function") window.renderEtapasJudiciais();
+    const tree = document.getElementById("judiciais-tree-container");
+    const podeEditar = typeof window.hasCrmPerm === "function" && window.hasCrmPerm("sub_jur_geral_configuracoes_editar");
+    if (tree) {
+      tree.querySelectorAll("[draggable]").forEach((el) => { el.draggable = podeEditar; });
+      tree.querySelectorAll("button").forEach((btn) => {
+        btn.disabled = !podeEditar;
+        btn.style.pointerEvents = podeEditar ? "" : "none";
+        btn.style.opacity = podeEditar ? "" : "0.45";
+      });
+    }
+    const addBtn = document.querySelector("#tab-juridico-config button[onclick='adicionarEtapaJudicial()']");
+    if (addBtn) {
+      addBtn.disabled = !podeEditar;
+      addBtn.style.pointerEvents = podeEditar ? "" : "none";
+      addBtn.style.opacity = podeEditar ? "" : "0.45";
     }
   } else if (tabId === "configuracoes" || tabId === "regras-negociacao" || tabId === "regras-cobranca") {
     if (typeof renderRulesSettingsTable === "function") renderRulesSettingsTable();
@@ -6837,7 +6896,7 @@ window.applyRulesModulePermissions = function() {
   const canViewNeg = window.hasFinCrAction("regras_negociacao", "visualizar");
   const canEditNeg = window.hasFinCrAction("regras_negociacao", "editar");
 
-  ["regua", "judiciais", "financiamento", "atribuicao", "fila", "cartao", "alcada", "alcada-distrato", "honorarios-internos"].forEach(id => {
+  ["regua", "financiamento", "atribuicao", "fila", "cartao", "alcada", "alcada-distrato", "honorarios-internos"].forEach(id => {
     const btn = document.getElementById("btn-regra-" + id);
     if (btn) btn.style.display = canAccCob ? "" : "none";
   });
@@ -6845,7 +6904,6 @@ window.applyRulesModulePermissions = function() {
   if (btnNeg) btnNeg.style.display = canAccNeg ? "" : "none";
 
   window.setRulesSectionMode(document.getElementById("content-regra-regua"), canViewCob, canEditCob);
-  window.setRulesSectionMode(document.getElementById("content-regra-judiciais"), canViewCob, canEditCob);
   window.setRulesSectionMode(document.getElementById("content-regra-financiamento"), canViewCob, canEditCob);
   window.setRulesSectionMode(document.getElementById("content-regra-atribuicao"), canViewCob, canEditCob);
   window.setRulesSectionMode(document.getElementById("content-regra-fila"), canViewCob, canEditCob);
@@ -6883,6 +6941,10 @@ window.applyRulesModulePermissions = function() {
 };
 
 window.switchRegrasTab = function(tabId) {
+  if (tabId === "regra-judiciais") {
+    if (typeof window.switchTab === "function") window.switchTab("juridico-config", "Configurações");
+    return;
+  }
   const isNeg = tabId === "regra-negociacao";
   if (isNeg && !window.hasFinCrAction("regras_negociacao", "acessar")) {
     alert("Sem permissão para acessar Regras de Negociação.");
@@ -23031,12 +23093,18 @@ window.handleDistratoChoiceChange = function() {
   if (maxOption) maxOption.disabled = maxDisabled;
   const leiOption = document.querySelector('#dist-restitution-choice option[value="lei"]');
   if (leiOption) leiOption.disabled = !!isPermuta;
+  const permutaOption = document.querySelector('#dist-restitution-choice option[value="permuta"]');
+  if (permutaOption) {
+    permutaOption.hidden = !isPermuta;
+    permutaOption.disabled = !isPermuta;
+  }
   if (customOption) customOption.disabled = !negotiationEnabled;
   if (minOption) minOption.textContent = `Mínima (${minPctCfg}%)`;
   if (maxOption) maxOption.textContent = `Máxima (${maxPctCfg}%)`;
 
   const choiceEl = document.getElementById("dist-restitution-choice");
   if (isPermuta && choiceEl) choiceEl.value = "permuta";
+  if (!isPermuta && choiceEl && choiceEl.value === "permuta") choiceEl.value = "lei";
   let choice = choiceEl ? choiceEl.value : "custom";
   if (isPermuta) choice = "permuta";
   if (!negotiationEnabled && choice !== "lei" && choice !== "permuta") {
@@ -25622,6 +25690,11 @@ window.toggleDistratoPermuta = function() {
   const loteWrap = document.getElementById("dist-permuta-lote-wrap");
   if (loteWrap) loteWrap.style.display = on ? "block" : "none";
   const choiceEl = document.getElementById("dist-restitution-choice");
+  const permutaOption = choiceEl && choiceEl.querySelector('option[value="permuta"]');
+  if (permutaOption) {
+    permutaOption.hidden = !on;
+    permutaOption.disabled = !on;
+  }
   if (choiceEl) choiceEl.value = on ? "permuta" : (choiceEl.value === "permuta" ? "lei" : choiceEl.value);
   if (typeof window.syncDistratoPermutaUi === "function") window.syncDistratoPermutaUi();
   if (on) {
@@ -35101,12 +35174,28 @@ window.saveNexHistory = async function(customerId, saleId, items) {
   window._nexHistory[key] = items;
   window._nexHistStamp = (window._nexHistStamp || 0) + 1;
   window._nexCollectCache = null;
+  const byId = {};
+  (items || []).forEach(it => { if (it && it.id) byId[String(it.id)] = it; });
+  Object.keys(window._nexHistory).forEach(k => {
+    if (k === key || !Array.isArray(window._nexHistory[k])) return;
+    window._nexHistory[k].forEach((row, i) => {
+      const live = row && byId[String(row.id)];
+      if (live) window._nexHistory[k][i] = window.nexPreferItem(row, live);
+    });
+  });
   try {
     const bag = JSON.parse(localStorage.getItem("crm_nex_history") || "{}") || {};
-    bag[key] = items.map(it => {
-      const copy = { ...it, titulo: it.titulo || titulo, customerId: String(customerId) };
+    const slim = (list, fallbackTitulo) => (list || []).map(it => {
+      const copy = { ...it, titulo: it.titulo || fallbackTitulo || titulo, customerId: String(it.customerId || customerId) };
       if (copy.html && copy.html.length > 80000) copy.html = "";
       return copy;
+    });
+    bag[key] = slim(items, titulo);
+    Object.keys(window._nexHistory).forEach(k => {
+      if (k === key || !Array.isArray(window._nexHistory[k])) return;
+      if (!window._nexHistory[k].some(row => row && byId[String(row.id)])) return;
+      const sid = k.startsWith(String(customerId) + "_") ? k.slice(String(customerId).length + 1) : "";
+      bag[k] = slim(window._nexHistory[k], sid);
     });
     localStorage.setItem("crm_nex_history", JSON.stringify(bag));
   } catch (e) {}
@@ -35473,7 +35562,7 @@ window.updateNexDeliveredAt = async function(id, value) {
   ctx.item.deliveredAt = window.nexParseIso(value);
   await window.saveNexHistory(ctx.customerId, ctx.saleId, ctx.items);
   window.syncNexOccurrenceNote(ctx.customerId, ctx.item);
-  window.renderNexHistory();
+  window.nexRefreshViews();
 };
 
 window.deleteNexItem = async function(id, opts) {
@@ -36606,6 +36695,7 @@ window.nexCorreiosCheckDays = function() {
 
 window.nexNeedsCorreiosCheck = function(item) {
   if (!item) return false;
+  if (String(item.status || "").trim()) return false;
   if (window.nexLostValidityByPayment(item).lost) return false;
   if (window.nexHasArDigital(item)) return false;
   const sent = window.nexParseIso(item.date || item.createdAt);
@@ -36622,11 +36712,12 @@ window.nexCorreiosCheckCount = function() {
 window.nexInFollowup = function(item) {
   if (!item) return false;
   if (window.nexLostValidityByPayment(item).lost) return false;
+  if (String(item.status || "").trim()) return false;
   const sent = window.nexParseIso(item.date || item.createdAt);
   const days = sent ? window.nexDaysBetween(sent, window.nexTodayIso()) : 999;
-  const pendingConsult = !item.tracking || !item.status;
-  const inDeadline = days != null && days <= 10;
-  return inDeadline || pendingConsult || window.nexNeedsCorreiosCheck(item);
+  const semObjeto = typeof window.nexHasTracking === "function" ? !window.nexHasTracking(item) : !String(item.tracking || "").trim();
+  const noPrazo = days != null && days <= 10;
+  return noPrazo || semObjeto || window.nexNeedsCorreiosCheck(item);
 };
 
 window.openNexElegiveisZero = function() {
@@ -53299,23 +53390,25 @@ window.mapaJuridicoShowPhase = async function(prefix, compId) {
     </div>`;
   };
   const renderTable = (finByIdx) => {
-    bodyEl.innerHTML = `
+    const groups = window.mapaJuridicoGruposDaFase(bucket, clients);
+    const pos = new Map(clients.map((c, i) => [c, i]));
+    const tableOf = (rows) => `
     <div class="table-container" style="margin:0;max-height:calc(100vh - 280px);overflow:auto;border:1px solid rgba(16,84,54,0.12);border-radius:8px;">
       <style>
-        #mapa-juridico-phase-table { width:100%; min-width:1480px; border-collapse:collapse; }
-        #mapa-juridico-phase-table thead th {
+        .mapa-juridico-phase-table { width:100%; min-width:1480px; border-collapse:collapse; }
+        .mapa-juridico-phase-table thead th {
           position: sticky; top: 0; z-index: 2;
           background: #105436 !important; color: #fff !important;
           font-size: 0.68rem !important; font-weight: 700; letter-spacing: 0.3px;
           text-transform: uppercase; padding: 10px 8px !important;
           border-bottom: 2px solid #0b3d27; white-space: nowrap;
         }
-        #mapa-juridico-phase-table tbody td {
+        .mapa-juridico-phase-table tbody td {
           font-size: 0.78rem !important; padding: 8px 8px !important;
           border-bottom: 1px solid #e2e8f0; color: #1e293b; vertical-align: middle;
         }
-        #mapa-juridico-phase-table tbody tr:nth-child(even) { background: #f4f6f4; }
-        #mapa-juridico-phase-table tbody tr:hover { background: #eef6f1 !important; }
+        .mapa-juridico-phase-table tbody tr:nth-child(even) { background: #f4f6f4; }
+        .mapa-juridico-phase-table tbody tr:hover { background: #eef6f1 !important; }
         .mapa-pct-loading { display:inline-flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; min-width:110px; }
         .mapa-pct-spinner {
           width: 16px; height: 16px; border-radius: 50%;
@@ -53325,7 +53418,7 @@ window.mapaJuridicoShowPhase = async function(prefix, compId) {
         .mapa-pct-loading span { font-size: 0.62rem; font-weight: 800; letter-spacing: 0.4px; color: #64748b; white-space: nowrap; }
         @keyframes mapa-pct-spin { to { transform: rotate(360deg); } }
       </style>
-      <table class="custom-table" id="mapa-juridico-phase-table">
+      <table class="custom-table mapa-juridico-phase-table">
         <thead>
           <tr>
             <th>Cliente</th>
@@ -53344,7 +53437,7 @@ window.mapaJuridicoShowPhase = async function(prefix, compId) {
           </tr>
         </thead>
         <tbody>
-          ${clients.map((c, idx) => {
+          ${rows.map((c) => { const idx = pos.get(c);
             const title = window.mapaJuridicoBillIdOf(c);
             const unit = typeof filaUnidadeTexto === "function" ? filaUnidadeTexto(c) : ((typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : (c.costCenterId || "")) + " - " + (c.unitName || "N/D"));
             const name = String(c.customerName || "").replace(/</g, "&lt;");
@@ -53390,6 +53483,16 @@ window.mapaJuridicoShowPhase = async function(prefix, compId) {
         </tbody>
       </table>
     </div>`;
+    const escTitle = (s) => String(s || "").replace(/</g, "&lt;");
+    if (groups.length === 1 && !groups[0].title) {
+      bodyEl.innerHTML = tableOf(groups[0].clients);
+    } else {
+      bodyEl.innerHTML = groups.map((g) => `
+        <section style="margin:0 0 18px;">
+          <div style="font-size:0.92rem;font-weight:800;color:#105436;margin:0 0 8px;">${escTitle(g.title)} <span style="font-weight:600;color:#64748b;">· ${g.clients.length} ${g.clients.length === 1 ? "cliente" : "clientes"}</span></div>
+          ${g.clients.length ? tableOf(g.clients) : '<p style="margin:0;color:#94a3b8;font-size:0.85rem;">Nenhum cliente nesta etapa.</p>'}
+        </section>`).join("");
+    }
     if (window.lucide) lucide.createIcons();
   };
   renderTable(null);
@@ -53417,7 +53520,7 @@ window.mapaJuridicoRenderStages = function() {
       const phaseInfo = (typeof window.getClientJudicialPhaseInfo === "function")
         ? window.getClientJudicialPhaseInfo(client)
         : { fase: "Sem Fase", faseLabel: "Sem Fase" };
-      const mapped = window.mapaJuridicoAcharFase(nameMap, phaseInfo) || nameMap["Sem Fase"];
+      const mapped = window.mapaJuridicoCaixaDaFase(nameMap, phaseInfo) || nameMap["Sem Fase"];
       const value = (client.overdueValue || 0) + (client.overdueCharges || 0);
       if (mapped && agg[mapped.prefix]) {
         agg[mapped.prefix].count += window.mapaJuridicoQtdTitulos(client);
@@ -53425,35 +53528,27 @@ window.mapaJuridicoRenderStages = function() {
         agg[mapped.prefix].clients.push(client);
       }
     });
-    return Object.values(agg).sort((a, b) => a.order - b.order);
+    return Object.values(agg).sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
   };
   const byKey = {};
   const register = (agg, scopeId, scopeName) => {
     (agg || []).forEach(item => {
       byKey[(scopeId ? ("c:" + scopeId + "|") : "g|") + String(item.prefix)] = {
         prefix: item.prefix, name: item.name, scopeName: scopeName || "", clients: item.clients || [],
-        days: item.days || 0, descricao: item.descricao || item.explicacao || ""
+        days: item.days || 0, descricao: item.descricao || item.explicacao || "",
+        children: item.children || []
       };
     });
   };
   const generalAgg = aggOf(filtered);
   register(generalAgg, "", "Visão Geral");
-  const blocks = [{ title: "Visão Geral", compId: "", items: generalAgg }];
-  const f = window._mapaJuridicoFilters || {};
-  const selectedCompanies = typeof window.mapaJuridicoSelectedCompanyIds === "function"
-    ? window.mapaJuridicoSelectedCompanyIds()
-    : (f.company ? [String(f.company)] : []);
-  (cache.sortedCompanies || []).forEach(compId => {
-    if (selectedCompanies.length && !selectedCompanies.includes(String(compId))) return;
-    const list = filtered.filter(c => {
-      const owner = typeof window.mapaJuridicoCompanyOf === "function" ? window.mapaJuridicoCompanyOf(c) : String(c.companyId || "");
-      return owner === String(compId);
-    });
-    if (!list.length) return;
-    const items = aggOf(list);
-    register(items, compId, cache.companyNames[compId] || ("Empresa " + compId));
-    blocks.push({ title: cache.companyNames[compId] || ("Empresa " + compId), compId: String(compId), items });
-  });
+  const vencidos = filtered.filter(c => window.mapaJuridicoEtapaVencida(c));
+  const vencidosAgg = aggOf(vencidos);
+  register(vencidosAgg, "vencidos", "Etapas vencidas");
+  const blocks = [
+    { title: "Visão Geral", compId: "", items: generalAgg },
+    { title: "Etapas vencidas", compId: "vencidos", items: vencidosAgg }
+  ];
   cache.byKey = byKey;
 
   const timeline = (items, compId) => {
@@ -53495,7 +53590,7 @@ window.mapaJuridicoRenderStages = function() {
   };
 
   root.innerHTML = `
-    <p style="margin:0 0 12px;font-size:12px;color:#64748b;">Clique em uma fase com títulos para abrir a lista. Passe o mouse na legenda para ver a explicação da etapa.</p>
+    <p style="margin:0 0 12px;font-size:12px;color:#64748b;">Clique em uma fase com títulos para ver o resumo de cada cliente. A faixa de baixo conta só quem está com a etapa vencida.</p>
     ${blocks.map(block => `
       <div class="crm-card" style="padding:12px 14px 14px;margin-bottom:10px;width:100%;box-sizing:border-box;">
         <div style="font-size:12px;font-weight:800;color:var(--color-primary);text-transform:uppercase;">${esc(block.title)}</div>
@@ -53733,6 +53828,119 @@ window.showMapaJuridicoOverlay = function(ui) {
   });
 };
 
+window.mapaJuridicoOrdemPrefixo = function(prefix) {
+  if (String(prefix) === "0") return -1;
+  const parts = String(prefix || "").split(".").map((n) => Number(n) || 0);
+  let n = 0;
+  parts.forEach((p, i) => { n += p * Math.pow(1000, 4 - i); });
+  return n;
+};
+
+window.mapaJuridicoMontarCaixas = function() {
+  const catalog = typeof window.buildJudicialStageCatalog === "function" ? window.buildJudicialStageCatalog() : [];
+  const depth = (prefix) => String(prefix || "").split(".").filter(Boolean).length;
+  const etapas = window.EtapasJudiciaisState || [];
+  const descOf = (id) => {
+    const e = etapas.find((x) => String(x.id) === String(id));
+    return e ? (e.descricao || e.explicacao || "") : "";
+  };
+  const nameMap = {};
+  catalog.forEach((s) => {
+    const d = depth(s.prefix);
+    const mostrar = (d === 1 && !s.hasChildren) || d === 2;
+    if (!mostrar) return;
+    const children = catalog
+      .filter((c) => String(c.parentId || "") === String(s.id))
+      .map((c) => ({ id: c.id, prefix: c.prefix, name: c.nome, days: c.dias || 0, descricao: descOf(c.id) }))
+      .sort((a, b) => window.mapaJuridicoOrdemPrefixo(a.prefix) - window.mapaJuridicoOrdemPrefixo(b.prefix));
+    nameMap[s.nome] = {
+      prefix: s.prefix,
+      name: s.nome,
+      id: s.id,
+      days: s.dias || 0,
+      order: window.mapaJuridicoOrdemPrefixo(s.prefix),
+      descricao: descOf(s.id),
+      hasChildren: children.length > 0,
+      children
+    };
+  });
+  nameMap["Sem Fase"] = {
+    prefix: "0",
+    name: "Sem Fase",
+    id: "sem-fase",
+    days: 0,
+    order: -1,
+    descricao: "Contratos em sub judice ainda sem etapa processual cadastrada.",
+    hasChildren: false,
+    children: []
+  };
+  return nameMap;
+};
+
+window.mapaJuridicoCaixaDaFase = function(nameMap, phaseInfo) {
+  const info = phaseInfo || {};
+  if (!nameMap) return null;
+  const catalog = typeof window.buildJudicialStageCatalog === "function" ? window.buildJudicialStageCatalog() : [];
+  const byId = {};
+  catalog.forEach((s) => { byId[String(s.id)] = s; });
+  let stage = info.faseId ? byId[String(info.faseId)] : null;
+  if (!stage) {
+    const alvo = window.mapaJuridicoFoldFase(info.fase) || window.mapaJuridicoFoldFase(info.faseLabel);
+    if (alvo && alvo !== "SEM FASE") stage = catalog.find((s) => window.mapaJuridicoFoldFase(s.nome) === alvo) || null;
+  }
+  if (!stage) return nameMap["Sem Fase"] || null;
+  let cur = stage;
+  let guard = 8;
+  while (cur && guard--) {
+    const box = Object.values(nameMap).find((v) => String(v.id) === String(cur.id));
+    if (box) return box;
+    if (cur.parentId == null || cur.parentId === "") break;
+    cur = byId[String(cur.parentId)];
+  }
+  return nameMap["Sem Fase"] || null;
+};
+
+window.mapaJuridicoEtapaVencida = function(client) {
+  const info = typeof window.getClientJudicialPhaseInfo === "function" ? window.getClientJudicialPhaseInfo(client) : null;
+  return !!(info && (info.status === "VENCIDO" || (Number.isFinite(info.daysLeft) && info.daysLeft < 0)));
+};
+
+window.mapaJuridicoGruposDaFase = function(bucket, clients) {
+  const children = (bucket && bucket.children) || [];
+  if (!children.length) return [{ title: "", clients: clients || [] }];
+  const catalog = typeof window.buildJudicialStageCatalog === "function" ? window.buildJudicialStageCatalog() : [];
+  const byId = {};
+  catalog.forEach((s) => { byId[String(s.id)] = s; });
+  const groups = children.map((ch) => ({
+    title: (ch.prefix ? ch.prefix + " " : "") + ch.name,
+    id: ch.id,
+    clients: []
+  }));
+  const loose = [];
+  (clients || []).forEach((c) => {
+    const info = typeof window.getClientJudicialPhaseInfo === "function" ? window.getClientJudicialPhaseInfo(c) : null;
+    let stage = info && info.faseId ? byId[String(info.faseId)] : null;
+    if (!stage && info) {
+      const alvo = window.mapaJuridicoFoldFase(info.fase);
+      stage = catalog.find((s) => window.mapaJuridicoFoldFase(s.nome) === alvo) || null;
+    }
+    let placed = false;
+    let cur = stage;
+    let guard = 8;
+    while (cur && guard--) {
+      const g = groups.find((x) => String(x.id) === String(cur.id));
+      if (g) { g.clients.push(c); placed = true; break; }
+      if (cur.parentId == null || cur.parentId === "") break;
+      cur = byId[String(cur.parentId)];
+    }
+    if (!placed) loose.push(c);
+  });
+  const out = [];
+  if (loose.length) out.push({ title: "Nesta etapa, ainda sem a subetapa", clients: loose });
+  groups.forEach((g) => out.push(g));
+  return out;
+};
+
 window.mapaJuridicoFoldFase = function(s) {
   return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/^\d+(?:\.\d+)*\.?\s+/, "").replace(/\s+/g, " ").trim().toUpperCase();
 };
@@ -53825,35 +54033,7 @@ window.gerarMapaJuridicoPDF = async function() {
             console.warn('Mapa jurídico: snapshots indisponíveis', snapErr);
         }
 
-        const prefixMap = {};
-        const nameMap = {};
-        const allStages = [...(window.EtapasJudiciaisState || [])].sort((a,b) => (a.order || 0) - (b.order || 0));
-        
-        let topIndex = 1;
-        allStages.filter(s => !s.parentId).forEach(s => {
-            const stageName = s.nome || s.name || '';
-            if (!stageName) return;
-            
-            let childIndex = 1;
-            const children = allStages.filter(child => child.parentId === s.id);
-            if (children.length > 0) {
-                children.forEach(child => {
-                    const childName = child.nome || child.name || '';
-                    if (!childName) return;
-                    const childPrefix = `${topIndex}.${childIndex}`;
-                    prefixMap[child.id] = childPrefix;
-                    nameMap[childName] = { prefix: childPrefix, name: childName, id: child.id, days: child.dias || child.days || 0, order: topIndex + (childIndex/100), descricao: child.descricao || child.explicacao || "" };
-                    childIndex++;
-                });
-            } else {
-                prefixMap[s.id] = String(topIndex);
-                nameMap[stageName] = { prefix: String(topIndex), name: stageName, id: s.id, days: s.dias || s.days || 0, order: topIndex, descricao: s.descricao || s.explicacao || "" };
-            }
-            topIndex++;
-        });
-        topIndex = window.mapaJuridicoIncluirReintegracao(nameMap, topIndex);
-
-        nameMap["Sem Fase"] = { prefix: "0", name: "Sem Fase", id: "sem-fase", days: 0, order: 0, descricao: "Contratos em sub judice ainda sem etapa processual cadastrada." };
+        const nameMap = window.mapaJuridicoMontarCaixas();
 
         const fmtBRL = (val) => val.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
@@ -53866,7 +54046,7 @@ window.gerarMapaJuridicoPDF = async function() {
                 const phaseInfo = (typeof window.getClientJudicialPhaseInfo === "function")
                     ? window.getClientJudicialPhaseInfo(client)
                     : { fase: "Sem Fase", faseLabel: "Sem Fase" };
-                const mapped = window.mapaJuridicoAcharFase(nameMap, phaseInfo) || nameMap["Sem Fase"];
+                const mapped = window.mapaJuridicoCaixaDaFase(nameMap, phaseInfo) || nameMap["Sem Fase"];
                 const value = (client.overdueValue || 0) + (client.overdueCharges || 0);
                 if (mapped && agg[mapped.prefix]) {
                     agg[mapped.prefix].count += window.mapaJuridicoQtdTitulos(client);
@@ -53955,7 +54135,6 @@ window.gerarMapaJuridicoPDF = async function() {
         const generalResult = buildTimelineHtml("Visão Geral", generalList, true, "");
         let timelinesHtml = generalResult.html;
         const byKey = {};
-        const interactiveBlocks = [];
         const registerAgg = (agg, scopeId, scopeName) => {
             (agg || []).forEach(item => {
                 const key = (scopeId ? ("c:" + scopeId + "|") : "g|") + String(item.prefix);
@@ -53963,18 +54142,18 @@ window.gerarMapaJuridicoPDF = async function() {
                     prefix: item.prefix,
                     name: item.name,
                     scopeName: scopeName || "",
-                    clients: item.clients || []
+                    clients: item.clients || [],
+                    days: item.days || 0,
+                    descricao: item.descricao || "",
+                    children: item.children || []
                 };
             });
         };
         registerAgg(generalResult.agg, "", "Visão Geral");
-        interactiveBlocks.push({ title: "Visão Geral", compId: "", items: generalResult.agg });
-        sortedCompanies.forEach(compId => {
-            const companyResult = buildTimelineHtml(usualCompanyName(compId), companyGroups[compId], false, compId);
-            timelinesHtml += companyResult.html;
-            registerAgg(companyResult.agg, compId, usualCompanyName(compId));
-            interactiveBlocks.push({ title: usualCompanyName(compId), compId: String(compId), items: companyResult.agg });
-        });
+        const vencidosList = generalList.filter(c => window.mapaJuridicoEtapaVencida(c));
+        const vencidosResult = buildTimelineHtml("Etapas vencidas", vencidosList, true, "vencidos");
+        timelinesHtml += vencidosResult.html;
+        registerAgg(vencidosResult.agg, "vencidos", "Etapas vencidas");
 
         const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({
             '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'

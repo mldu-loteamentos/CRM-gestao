@@ -53,7 +53,6 @@
       ]},
       { id: "config_cr", label: "Configurações (CR)", abas: [
         { id: "regra-regua", label: "Régua de Cobrança" },
-        { id: "regra-judiciais", label: "Etapas Judiciais" },
         { id: "regra-financiamento", label: "Etapas Financiamento" },
         { id: "regra-atribuicao", label: "Atribuição de Operadores" },
         { id: "regra-negociacao", label: "Regras de Negociação" },
@@ -82,8 +81,11 @@
     ]},
     { id: "juridico", label: "Jurídico", subs: [
       { id: "subjudice", label: "Cobrança Sub judice" },
+      { id: "mapa_juridico", label: "Mapa Jurídico" },
       { id: "pagar_reembolso", label: "Pagar reembolso" },
-      { id: "processo_contra", label: "Novo processo" }
+      { id: "processo_contra", label: "Novo processo" },
+      { id: "reintegracao_posse", label: "Reintegração de posse" },
+      { id: "configuracoes", label: "Configurações" }
     ]},
     { id: "fiscal", label: "Fiscal", subs: [
       { id: "pis_cofins", label: "Calcular impostos" },
@@ -159,6 +161,9 @@
     subjudice: { modulo: "juridico", subitem: "subjudice" },
     "pagar-reembolso": { modulo: "juridico", subitem: "pagar_reembolso" },
     "processo-contra": { modulo: "juridico", subitem: "processo_contra" },
+    "reintegracao-posse": { modulo: "juridico", subitem: "reintegracao_posse" },
+    "juridico-config": { modulo: "juridico", subitem: "configuracoes" },
+    "mapa-juridico": { modulo: "juridico", subitem: "mapa_juridico" },
     wesend: { modulo: "financeiro", subitem: "notificacoes" },
     configuracoes: { modulo: "financeiro", subitem: "config_cr" },
     "contas-pagar": { modulo: "financeiro", subitem: "cp_assistente" },

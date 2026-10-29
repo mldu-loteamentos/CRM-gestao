@@ -468,7 +468,8 @@ const ConfigUsersApp = {
         { id: "mapa_juridico", label: "Mapa Jurídico", permBase: "sub_jur_geral_mapa_juridico" },
         { id: "pagar_reembolso", label: "Pagar reembolso", permBase: "sub_fin_cr_pagar_reembolso" },
         { id: "processo_contra", label: "Novo processo", permBase: "sub_jur_geral_processo_contra" },
-        { id: "reintegracao_posse", label: "Reintegração de posse", permBase: "sub_jur_geral_reintegracao_posse" }
+        { id: "reintegracao_posse", label: "Reintegração de posse", permBase: "sub_jur_geral_reintegracao_posse" },
+        { id: "configuracoes", label: "Configurações", permBase: "sub_jur_geral_configuracoes" }
       ] }]
     },
     {
