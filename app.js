@@ -6398,8 +6398,22 @@ window.crmAdministradorReal = function() {
   return !!(rec && window.isCrmAdminProfileName(rec.profile_name));
 };
 
+window.crmBackOfficeReal = function() {
+  if (window.crmAdministradorReal()) return false;
+  const u = window.AppState && AppState.currentUser;
+  if (!u || typeof window.isCobrancaBackOfficeUser !== "function") return false;
+  const rec = typeof window.findCrmRegisteredUser === "function" ? window.findCrmRegisteredUser(u) : null;
+  return window.isCobrancaBackOfficeUser(rec || u);
+};
+
+window.crmPodeVerOutrosPerfis = function() {
+  return window.crmAdministradorReal() || window.crmBackOfficeReal();
+};
+
 window.crmImpersonacaoAtual = function() {
-  if (!window.crmAdministradorReal()) return null;
+  const admin = window.crmAdministradorReal();
+  const back = !admin && window.crmBackOfficeReal();
+  if (!admin && !back) return null;
   let raw = "";
   try { raw = sessionStorage.getItem(window.CRM_TESTE_CONTA_KEY) || ""; } catch (e) { raw = ""; }
   if (!raw) return null;
@@ -6412,6 +6426,7 @@ window.crmImpersonacaoAtual = function() {
   if (!alvo || String(alvo.status || "ATIVO").toUpperCase() === "INATIVO") return null;
   const meu = String((AppState.currentUser && AppState.currentUser.email) || "").toLowerCase();
   if (meu && email === meu) return null;
+  if (back && !(typeof window.isAdvogadoCobrancaUser === "function" && window.isAdvogadoCobrancaUser(alvo))) return null;
   return alvo;
 };
 
@@ -6466,10 +6481,13 @@ window.isCrmSuperAdmin = function() {
 };
 
 window.crmAbrirTesteConta = function(email) {
-  if (!window.crmAdministradorReal()) return;
+  const admin = window.crmAdministradorReal();
+  const back = !admin && window.crmBackOfficeReal();
+  if (!admin && !back) return;
   const lista = window.getCrmUsersList();
   const alvo = lista.find((u) => String((u && u.email) || "").toLowerCase() === String(email || "").toLowerCase());
   if (!alvo) return;
+  if (back && !(typeof window.isAdvogadoCobrancaUser === "function" && window.isAdvogadoCobrancaUser(alvo))) return;
   try {
     sessionStorage.setItem(window.CRM_TESTE_CONTA_KEY, JSON.stringify({
       email: alvo.email,
@@ -6529,8 +6547,9 @@ window.crmPintarTesteConta = function() {
   const menu = document.getElementById("teste-conta-menu");
   if (!widget || !btn || !menu) return;
   const admin = window.crmAdministradorReal();
-  widget.hidden = !admin;
-  if (!admin) {
+  const back = !admin && window.crmBackOfficeReal();
+  widget.hidden = !(admin || back);
+  if (!admin && !back) {
     menu.hidden = true;
     return;
   }
@@ -6539,27 +6558,35 @@ window.crmPintarTesteConta = function() {
   if (sairTopo) sairTopo.remove();
   btn.classList.toggle("is-teste", !!imp);
   btn.title = imp
-    ? ("Acessos de " + (imp.name || imp.email) + ". Você continua administrador.")
-    : "Trocar de conta";
+    ? ("Acessos de " + (imp.name || imp.email) + ". Você continua " + (back ? "no seu perfil" : "administrador") + ".")
+    : (back ? "Ver outros perfis" : "Trocar de conta");
+  btn.setAttribute("aria-label", btn.title);
   if (menu.hidden) return;
   const q = String(menu.dataset.q || "").trim().toLowerCase();
   const eu = String((AppState.currentUser && AppState.currentUser.email) || "").toLowerCase();
   const lista = window.getCrmUsersList().filter((u) => {
     if (!u || String(u.status || "ATIVO").trim().toUpperCase() === "INATIVO") return false;
     if (String(u.email || "").toLowerCase().trim() === eu) return false;
+    if (back && !(typeof window.isAdvogadoCobrancaUser === "function" && window.isAdvogadoCobrancaUser(u))) return false;
     const blob = (String(u.name || "") + " " + String(u.email || "") + " " + String(u.profile_name || "")).toLowerCase();
     return !q || blob.indexOf(q) >= 0;
   }).sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "pt-BR"));
-  const aviso = imp
-    ? `<button type="button" class="btn btn-cancel btn-sm teste-conta-encerrar" id="teste-conta-encerrar">Encerrar teste</button>
-       <p>Você continua <b>${window.crmNomeReal()}</b> e está com os acessos de <b>${imp.name || imp.email}</b>. O que for salvo fica como ${window.crmNomeReal()} no usuário ${imp.name || imp.email}. Ao fechar o navegador, a próxima entrada volta a ser só administrador.</p>`
-    : `<p>Escolha um operador para usar os acessos dele. Você continua administrador. Ao fechar o navegador, a próxima entrada volta a ser só administrador.</p>`;
+  const nomeReal = window.crmNomeReal();
+  const aviso = back
+    ? (imp
+      ? `<button type="button" class="btn btn-cancel btn-sm teste-conta-encerrar" id="teste-conta-encerrar">Encerrar teste</button>
+         <p>Você continua <b>${nomeReal}</b> e está vendo as telas de <b>${imp.name || imp.email}</b>. Ao fechar o navegador, a próxima entrada volta a ser só o seu perfil.</p>`
+      : `<p>Escolha um advogado de cobrança para ver as telas que esse perfil enxerga. Você continua no seu usuário. Ao fechar o navegador, a próxima entrada volta a ser só o seu perfil.</p>`)
+    : (imp
+      ? `<button type="button" class="btn btn-cancel btn-sm teste-conta-encerrar" id="teste-conta-encerrar">Encerrar teste</button>
+         <p>Você continua <b>${nomeReal}</b> e está com os acessos de <b>${imp.name || imp.email}</b>. O que for salvo fica como ${nomeReal} no usuário ${imp.name || imp.email}. Ao fechar o navegador, a próxima entrada volta a ser só administrador.</p>`
+      : `<p>Escolha um operador para usar os acessos dele. Você continua administrador. Ao fechar o navegador, a próxima entrada volta a ser só administrador.</p>`);
   menu.innerHTML = aviso +
-    `<input class="form-control" id="teste-conta-busca" placeholder="Buscar operador" value="${q.replace(/"/g, "&quot;")}">` +
+    `<input class="form-control" id="teste-conta-busca" placeholder="${back ? "Buscar advogado" : "Buscar operador"}" value="${q.replace(/"/g, "&quot;")}">` +
     (lista.length ? lista.map((u) => {
       const on = imp && String(imp.email || "").toLowerCase() === String(u.email || "").toLowerCase();
       return `<button type="button" class="teste-conta-item${on ? " is-on" : ""}" data-email="${String(u.email || "").replace(/"/g, "&quot;")}"><b>${String(u.name || u.email || "").replace(/</g, "")}</b><span>${String(u.profile_name || "Sem perfil").replace(/</g, "")}</span></button>`;
-    }).join("") : `<p>Nenhum operador encontrado.</p>`);
+    }).join("") : `<p>${back ? "Nenhum advogado de cobrança encontrado." : "Nenhum operador encontrado."}</p>`);
   const busca = document.getElementById("teste-conta-busca");
   if (busca) {
     busca.focus();
@@ -6588,7 +6615,7 @@ window.crmIniciarTesteConta = function() {
   if (!btn || !menu) return;
   btn.addEventListener("click", (ev) => {
     ev.stopPropagation();
-    if (!window.crmAdministradorReal()) return;
+    if (!window.crmPodeVerOutrosPerfis()) return;
     menu.hidden = !menu.hidden;
     if (menu.hidden) return;
     window.crmPintarTesteConta();
@@ -13639,7 +13666,10 @@ window.fichaUsuarioEhAdvogadoCobranca = function() {
 
 window.fichaUsuarioDispensaAlertaSubjudice = function() {
   if (typeof window.fichaUsuarioEhAdvogadoCobranca === "function" && window.fichaUsuarioEhAdvogadoCobranca()) return true;
-  return typeof window.isCrmSuperAdmin === "function" && window.isCrmSuperAdmin();
+  if (typeof window.isCrmSuperAdmin === "function" && window.isCrmSuperAdmin()) return true;
+  const acesso = (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo())
+    || (typeof AppState !== "undefined" && AppState.currentUser);
+  return typeof window.isCobrancaBackOfficeUser === "function" && window.isCobrancaBackOfficeUser(acesso);
 };
 
 window.avisarClienteSubjudice = function(customerId, nomeFallback) {
