@@ -196,9 +196,15 @@ const OrcamentoDfcApp = {
         });
       });
     });
-    return [...map.entries()]
+    let lista = [...map.entries()]
       .map(([id, name]) => ({ id, name }))
       .sort((a, b) => String(a.id).localeCompare(String(b.id), "pt-BR", { numeric: true }));
+    if (!this.filtroGrupoLigado()) return lista;
+    const sel = new Set((this.selectedGrupoIds || []).map(String));
+    return lista.filter((p) => {
+      const gid = this.grupoDaConta(p.id, p.name);
+      return !!(gid && sel.has(String(gid)));
+    });
   },
 
   async garantirCatalogoPlano() {
@@ -984,6 +990,39 @@ const OrcamentoDfcApp = {
     return visoes.find((v) => v.id === "dfc_default") || { groups: [] };
   },
 
+  /* Última alocação salva vence, no mesmo ordem da visão. */
+  indiceAlocacao() {
+    const visao = this.visaoDfc();
+    const groups = (visao && visao.groups) || [];
+    let stamp = String(((visao && visao.ignoredAccounts) || []).length);
+    groups.forEach((g) => {
+      const acc = (g && g.accounts) || [];
+      stamp += "|" + String(g && g.id) + ":" + acc.length;
+      if (acc.length) stamp += ":" + acc[0] + ":" + acc[acc.length - 1];
+    });
+    if (this._alocStamp === stamp && this._alocExato && this._alocDig) {
+      return { exato: this._alocExato, dig: this._alocDig };
+    }
+    const exato = new Map();
+    const dig = new Map();
+    let seq = 0;
+    groups.forEach((g) => {
+      if (!g || g.type !== "resultado") return;
+      (g.accounts || []).forEach((id) => {
+        const sid = String(id || "").trim();
+        if (!sid) return;
+        const item = { gid: g.id, seq: seq++ };
+        exato.set(sid, item);
+        const nk = sid.replace(/\D/g, "");
+        if (nk) dig.set(nk, item);
+      });
+    });
+    this._alocStamp = stamp;
+    this._alocExato = exato;
+    this._alocDig = dig;
+    return { exato, dig };
+  },
+
   /** Nó da visão DFC em que a conta está alocada. A alocação salva vale antes do palpite pelo nome. */
   grupoDaConta(conta, nome) {
     const dotted = String(conta || "").trim();
@@ -1002,16 +1041,11 @@ const OrcamentoDfcApp = {
     if (plano && typeof plano._idMatchesPrefix === "function" && plano._idMatchesPrefix(dotted, "2.03.05")) {
       return "g_05_02";
     }
-    let found = null;
-    (visao.groups || []).forEach((g) => {
-      if (!g || g.type !== "resultado") return;
-      (g.accounts || []).forEach((id) => {
-        const sid = String(id || "").trim();
-        const nk = sid.replace(/\D/g, "");
-        if (sid === dotted || (key && nk && nk === key)) found = g.id;
-      });
-    });
-    if (found) return found;
+    const mapa = this.indiceAlocacao();
+    const porTexto = mapa.exato.get(dotted) || null;
+    const porDigito = key ? (mapa.dig.get(key) || null) : null;
+    const achado = porTexto && porDigito ? (porTexto.seq >= porDigito.seq ? porTexto : porDigito) : (porTexto || porDigito);
+    if (achado) return achado.gid;
     if (plano && typeof plano.suggestGroup === "function") {
       return plano.suggestGroup({ id: dotted, name: nome });
     }
@@ -2828,19 +2862,25 @@ const OrcamentoDfcApp = {
           this.selectedGrupoIds = this.selectedGrupoIds.filter((x) => x !== sid);
         }
         this.grupoDropOpen = true;
+        this.podarPlanos();
         this.paintGrupo();
+        this.paintPlan();
         this.paintBody();
       },
       selectAll: () => {
         this.selectedGrupoIds = items.map((g) => g.id);
         this.grupoDropOpen = true;
+        this.podarPlanos();
         this.paintGrupo();
+        this.paintPlan();
         this.paintBody();
       },
       selectNone: () => {
         this.selectedGrupoIds = [];
         this.grupoDropOpen = true;
+        this.podarPlanos();
         this.paintGrupo();
+        this.paintPlan();
         this.paintBody();
       }
     });

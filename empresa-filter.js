@@ -70,19 +70,43 @@ window.MlEmpresaFilter = {
     if (a && typeof a.setQuery === "function") a.setQuery(q);
   },
 
+  /* A lista é recriada no clique. Sem isso a rolagem volta para o primeiro item. */
+  manterRolagem(id, fn) {
+    const list = document.getElementById(id + "-list");
+    const top = list ? list.scrollTop : 0;
+    const pageX = window.scrollX || window.pageXOffset || 0;
+    const pageY = window.scrollY || window.pageYOffset || 0;
+    if (typeof fn === "function") fn();
+    const aplicar = () => {
+      const next = document.getElementById(id + "-list");
+      if (next) next.scrollTop = top;
+      const x = window.scrollX || window.pageXOffset || 0;
+      const y = window.scrollY || window.pageYOffset || 0;
+      if (x !== pageX || y !== pageY) window.scrollTo(pageX, pageY);
+    };
+    aplicar();
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(aplicar);
+  },
+
   toggleId(id, itemId, on) {
-    const a = this.adapters[id];
-    if (a && typeof a.toggleId === "function") a.toggleId(itemId, on);
+    this.manterRolagem(id, () => {
+      const a = this.adapters[id];
+      if (a && typeof a.toggleId === "function") a.toggleId(itemId, on);
+    });
   },
 
   selectAll(id) {
-    const a = this.adapters[id];
-    if (a && typeof a.selectAll === "function") a.selectAll();
+    this.manterRolagem(id, () => {
+      const a = this.adapters[id];
+      if (a && typeof a.selectAll === "function") a.selectAll();
+    });
   },
 
   selectNone(id) {
-    const a = this.adapters[id];
-    if (a && typeof a.selectNone === "function") a.selectNone();
+    this.manterRolagem(id, () => {
+      const a = this.adapters[id];
+      if (a && typeof a.selectNone === "function") a.selectNone();
+    });
   },
 
   esc(s) {
