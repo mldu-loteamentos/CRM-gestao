@@ -22,6 +22,7 @@ const GerarPagamentoApp = {
     filtro: "todos",
     visao: "lotes",
     abaLotes: "gerar",
+    ordemLotes: "baixa-desc",
     abaEmpresa: "",
     sel: {},
     selInit: {},
@@ -2182,6 +2183,144 @@ const GerarPagamentoApp = {
     </div>`;
   },
 
+  setOrdemLotes(v) {
+    this.state.ordemLotes = v || "baixa-desc";
+    this.paintTitulos();
+  },
+
+  tomLote(l) {
+    const sg = (l && l.sienge) || {};
+    if (sg.status === "aprovado" || sg.status === "gerado") return "ok";
+    if (sg.status === "erro") return "bad";
+    return "wait";
+  },
+
+  ordenarLotes(lista) {
+    const ord = this.state.ordemLotes || "baixa-desc";
+    const dia = (l) => String(l.dataBaixa || l.dia || l.criadoEm || "");
+    const valor = (l) => Number(l.total) || 0;
+    const copia = (lista || []).slice();
+    if (ord === "baixa-asc") copia.sort((a, b) => dia(a).localeCompare(dia(b)));
+    else if (ord === "valor-desc") copia.sort((a, b) => valor(b) - valor(a));
+    else if (ord === "valor-asc") copia.sort((a, b) => valor(a) - valor(b));
+    else copia.sort((a, b) => dia(b).localeCompare(dia(a)) || String(b.criadoEm || "").localeCompare(String(a.criadoEm || "")));
+    return copia;
+  },
+
+  haQuanto(iso) {
+    const t = new Date(iso).getTime();
+    if (!t) return "";
+    const min = Math.max(0, Math.round((Date.now() - t) / 60000));
+    if (min < 60) return "há " + Math.max(1, min) + " min";
+    const h = Math.floor(min / 60);
+    if (h < 48) return "há " + h + (h === 1 ? " hora" : " horas");
+    const d = Math.floor(h / 24);
+    return "há " + d + (d === 1 ? " dia" : " dias");
+  },
+
+  painelLotesHtml(gerados) {
+    const s = this.state;
+    const lista = this.ordenarLotes(gerados);
+    const nTitulos = lista.reduce((t, l) => t + ((l.itens || []).length), 0);
+    const valor = lista.reduce((t, l) => t + (Number(l.total) || 0), 0);
+    const nEnvio = lista.filter((l) => this.tomLote(l) === "wait").length;
+    const kpi = (icone, rotulo, valorTxt, tom) => `<div class="gp-kpi gp-kpi-${tom}">
+      <span class="gp-kpi-ic"><i data-lucide="${icone}"></i></span>
+      <span><small>${rotulo}</small><strong>${valorTxt}</strong></span>
+    </div>`;
+    const cards = lista.map((l) => {
+      const tom = this.tomLote(l);
+      const sg = l.sienge || {};
+      const aberto = !!s.lotesAbertos[l.id];
+      const quando = sg.aprovadoEm || sg.geradoEm || l.criadoEm;
+      const espera = this.haQuanto(l.criadoEm);
+      const status = tom === "ok"
+        ? `<span class="gp-card-badge gp-card-badge-ok"><i data-lucide="check-circle-2"></i> Lote já gerado</span><small>em ${this.esc(quando ? new Date(quando).toLocaleString("pt-BR") : "—")}</small>`
+        : (tom === "bad"
+          ? `<span class="gp-card-badge gp-card-badge-bad"><i data-lucide="alert-circle"></i> Não gerado no Sienge</span><small>Aguardando robô${espera ? " " + this.esc(espera) : ""}</small>`
+          : `<span class="gp-card-badge gp-card-badge-wait"><i data-lucide="clock"></i> Aguardando envio</span><small>Pronto para envio</small>`);
+      const icone = tom === "ok" ? "check-circle-2" : (tom === "bad" ? "alert-circle" : "clock");
+      const sit = tom === "ok" ? "No Sienge" : (tom === "bad" ? "Não gerado no Sienge" : "Aguardando envio");
+      const sitCls = tom === "ok" ? "gp-ok" : (tom === "bad" ? "gp-bad" : "gp-wait");
+      const linhas = (l.itens || []).map((it) => {
+        const planos = this.planosDoItem(it);
+        const id = `${this.esc(it.titulo)}${it.parcela ? " / " + this.esc(it.parcela) : ""}`;
+        const chave = this.chaveTitulo(it.titulo, it.parcela);
+        return `<tr class="gp-click" onclick="GerarPagamentoApp.abrirResumo('${this.esc(chave)}')">
+          <td><strong>${id}</strong></td>
+          <td title="${this.esc(it.credor || "")}">${this.esc(it.credor || "—")}</td>
+          <td>${this.money(it.valor != null && it.aPagar == null ? it.valor : this.valorPagar(it))}</td>
+          <td title="${this.esc(this.centrosDoItem(it))}">${this.esc(this.centrosDoItem(it))}</td>
+          <td title="${this.esc(planos.join(" · "))}">${this.esc(planos.join(" · ") || "—")}</td>
+          <td><span class="gp-pill ${sitCls}">${sit}</span></td>
+        </tr>`;
+      }).join("");
+      return `<article class="gp-card gp-card-${tom}${aberto ? " is-open" : ""}">
+        <div class="gp-card-h" role="button" tabindex="0" aria-expanded="${aberto}" onclick="GerarPagamentoApp.toggleLote('${this.esc(l.id)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();GerarPagamentoApp.toggleLote('${this.esc(l.id)}');}">
+          <span class="gp-card-ic"><i data-lucide="${icone}"></i></span>
+          <div class="gp-card-id">
+            <small>Lote</small>
+            <strong>${this.esc(l.id)}</strong>
+            <span>Conta: ${this.esc(this.contaLabel(l.conta) || "—")}</span>
+          </div>
+          <div class="gp-card-meta"><i data-lucide="calendar"></i><span><small>Data da baixa</small><b>${(l.dataBaixa || l.dia) ? this.dataBr(l.dataBaixa || l.dia) : "—"}</b></span></div>
+          <div class="gp-card-meta"><i data-lucide="files"></i><span><small>Títulos</small><b>${(l.itens || []).length}</b></span></div>
+          <div class="gp-card-meta"><i data-lucide="banknote"></i><span><small>Valor total</small><b>${this.money(l.total)}</b></span></div>
+          <div class="gp-card-status">${status}</div>
+          <div class="gp-card-acoes" onclick="event.stopPropagation()">
+            ${this.siengeAcoesHtml(l)}
+            <details class="gp-mais">
+              <summary aria-label="Mais ações"><i data-lucide="more-horizontal"></i></summary>
+              <div>
+                <button type="button" onclick="GerarPagamentoApp.baixarLoteExcel('${this.esc(l.id)}')">Excel</button>
+                <button type="button" class="is-danger" onclick="GerarPagamentoApp.excluirLote('${this.esc(l.id)}')">Excluir</button>
+              </div>
+            </details>
+            <i data-lucide="chevron-down" class="gp-card-seta"></i>
+          </div>
+        </div>
+        <div class="gp-card-body"${aberto ? "" : " hidden"}>
+          <div class="gp-card-sub">Títulos do lote (${(l.itens || []).length})</div>
+          ${(l.transferencias || []).length ? this.transferenciasHtml(l.transferencias) : ""}
+          <div style="overflow:auto;">
+            <table class="gp-table gp-card-tab">
+              <thead><tr><th>Título</th><th>Credor</th><th>Valor</th><th>Centro de custo</th><th>Plano financeiro</th><th>Situação</th></tr></thead>
+              <tbody>${linhas || `<tr><td colspan="6" style="text-align:center;color:#64748b;">Nenhum título neste lote.</td></tr>`}</tbody>
+            </table>
+          </div>
+        </div>
+      </article>`;
+    }).join("");
+    return `<section class="gp-lotes-painel">
+      <header class="gp-lotes-topo">
+        <div>
+          <h3>Lotes de pagamento</h3>
+          <p>Lotes gerados e títulos deste período que já estão em lote no Integra ou no Sienge. Eles não entram em outro lote.</p>
+        </div>
+        <div class="gp-lotes-periodo"><i data-lucide="calendar"></i> ${this.dataBr(s.startDate)} – ${this.dataBr(s.endDate)}</div>
+      </header>
+      <div class="gp-kpis">
+        ${kpi("files", "Lotes gerados", String(lista.length), "ok")}
+        ${kpi("clock", "Aguardando envio", String(nEnvio), "wait")}
+        ${kpi("list", "Títulos em lote", String(nTitulos), "info")}
+        ${kpi("circle-dollar-sign", "Valor total", this.money(valor), "money")}
+      </div>
+      <div class="gp-lotes-barra">
+        <h3>Lotes gerados com títulos deste período</h3>
+        <label>Ordenar por
+          <select onchange="GerarPagamentoApp.setOrdemLotes(this.value)">
+            <option value="baixa-desc"${s.ordemLotes === "baixa-desc" ? " selected" : ""}>Data da baixa (mais recente)</option>
+            <option value="baixa-asc"${s.ordemLotes === "baixa-asc" ? " selected" : ""}>Data da baixa (mais antiga)</option>
+            <option value="valor-desc"${s.ordemLotes === "valor-desc" ? " selected" : ""}>Valor (maior)</option>
+            <option value="valor-asc"${s.ordemLotes === "valor-asc" ? " selected" : ""}>Valor (menor)</option>
+          </select>
+        </label>
+      </div>
+      ${cards || `<div class="gp-lotes-vazio">Nenhum lote gerado com títulos deste período.</div>`}
+      <p class="gp-lotes-dica"><i data-lucide="info"></i> Clique no lote para ver os títulos e mais detalhes. Use os filtros e o resumo acima para encontrar rapidamente o que precisa.</p>
+    </section>`;
+  },
+
   toggleLote(key) {
     const abertos = this.state.lotesAbertos;
     if (abertos[key]) delete abertos[key];
@@ -3206,31 +3345,8 @@ const GerarPagamentoApp = {
       .filter((l) => (l.itens || []).some((i) => chaves.has(this.chaveTitulo(i.titulo, i.parcela))))
       .filter((l) => !emp || this.empresaDoGrupo({ empresaConta: l.empresaConta, itens: l.itens || [] }) === emp)
       .sort((a, b) => String(b.criadoEm).localeCompare(String(a.criadoEm)));
-    const geradosHtml = gerados.length ? `<div class="gp-lote">
-        <div class="gp-lote-h"><div><div class="gp-lote-conta">Lotes gerados com títulos deste período</div></div></div>
-        <table class="gp-table gp-titulos">
-          <colgroup><col style="width:17%"><col style="width:8%"><col style="width:19%"><col style="width:6%"><col style="width:9%"><col style="width:10%"><col style="width:14%"><col style="width:17%"></colgroup>
-          <thead><tr><th>Lote</th><th>Data da baixa</th><th>Conta</th><th>Títulos</th><th style="text-align:right;">Total</th><th>Gerado</th><th>Sienge</th><th></th></tr></thead>
-          <tbody>${gerados.map((l) => `<tr>
-            <td><strong>${this.esc(l.id)}</strong></td>
-            <td>${(l.dataBaixa || l.dia) ? this.dataBr(l.dataBaixa || l.dia) : this.esc([...new Set((l.itens || []).map((i) => this.dataBr(i.vencimento)))].join(", "))}</td>
-            <td title="${this.esc(this.contaLabel(l.conta))}">${this.esc(this.contaLabel(l.conta))}</td>
-            <td>${(l.itens || []).length}</td>
-            <td style="text-align:right;">${this.money(l.total)}</td>
-            <td title="${this.esc(l.criadoPor || "")}">${new Date(l.criadoEm).toLocaleDateString("pt-BR")} · ${this.esc(String(l.criadoPor || "").split(" ")[0])}</td>
-            <td class="gp-status">${this.siengeHtml(l)}</td>
-            <td style="text-align:right;white-space:nowrap;">
-              ${this.siengeAcoesHtml(l)}
-              <button type="button" class="btn btn-sm btn-excel" onclick="GerarPagamentoApp.baixarLoteExcel('${this.esc(l.id)}')" title="Baixar o lote em Excel"><i data-lucide="download" style="width:14px;height:14px;"></i> Excel</button>
-              <button type="button" class="btn btn-sm" onclick="GerarPagamentoApp.excluirLote('${this.esc(l.id)}')" style="color:#b91c1c;background:#fff;border:1px solid #fecaca;">Excluir</button>
-            </td>
-          </tr>
-          <tr><td colspan="8">${this.resumoLoteGeradoHtml(l)}</td></tr>
-          ${(l.transferencias || []).length ? `<tr><td colspan="8">${this.transferenciasHtml(l.transferencias)}</td></tr>` : ""}`).join("")}</tbody>
-        </table>
-      </div>` : "";
     if (aba === "lote") {
-      return `${faixa()}<p class="gp-nota">Lotes gerados e títulos deste período que já estão em lote no Integra ou no Sienge. Eles não entram em outro lote. Clique na linha para ver o resumo do título.</p>${geradosHtml}${emLoteVis.length ? emLoteVis.map(card).join("") : (gerados.length ? "" : vazio("Nenhum título desta empresa está em lote no período."))}`;
+      return `${faixa()}${this.painelLotesHtml(gerados)}${emLoteVis.length ? emLoteVis.map(card).join("") : ""}`;
     }
     const alerta = this.retroAlertaHtml(diasRetro);
     const massa = `<div class="gp-massa">
@@ -4024,6 +4140,70 @@ const GerarPagamentoApp = {
           #gerar-pagamento-root .gp-visoes { display:flex; gap:8px; padding:14px 20px 0; }
           #gerar-pagamento-root .gp-visao { height:34px; padding:0 14px; border-radius:8px; border:1px solid #cbd5e1; background:#fff; color:#334155; font-size:0.82rem; font-weight:700; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
           #gerar-pagamento-root .gp-visao.is-active { background:#105436; border-color:#105436; color:#fff; }
+          #gerar-pagamento-root .gp-lotes-painel { margin:8px 16px 16px; }
+          #gerar-pagamento-root .gp-lotes-topo { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; margin-bottom:14px; }
+          #gerar-pagamento-root .gp-lotes-topo h3 { margin:0 0 4px; color:#0f172a; font-size:1.15rem; }
+          #gerar-pagamento-root .gp-lotes-topo p { margin:0; max-width:640px; color:#64748b; font-size:0.82rem; line-height:1.4; }
+          #gerar-pagamento-root .gp-lotes-periodo { display:inline-flex; align-items:center; gap:8px; height:38px; padding:0 12px; border:1px solid #e2e8f0; border-radius:10px; background:#fff; color:#334155; font-size:0.82rem; font-weight:700; }
+          #gerar-pagamento-root .gp-lotes-periodo i { width:16px; height:16px; color:#64748b; }
+          #gerar-pagamento-root .gp-kpis { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; margin-bottom:16px; }
+          #gerar-pagamento-root .gp-kpi { display:flex; align-items:center; gap:12px; padding:14px 16px; border:1px solid #e2e8f0; border-radius:12px; background:#fff; }
+          #gerar-pagamento-root .gp-kpi small { display:block; color:#64748b; font-size:0.75rem; font-weight:600; }
+          #gerar-pagamento-root .gp-kpi strong { display:block; margin-top:2px; color:#0f172a; font-size:1.25rem; }
+          #gerar-pagamento-root .gp-kpi-ic { width:36px; height:36px; border-radius:10px; display:inline-flex; align-items:center; justify-content:center; flex:none; }
+          #gerar-pagamento-root .gp-kpi-ic i { width:18px; height:18px; }
+          #gerar-pagamento-root .gp-kpi-ok .gp-kpi-ic { background:#ecfdf5; color:#105436; }
+          #gerar-pagamento-root .gp-kpi-wait .gp-kpi-ic { background:#fef9c3; color:#a16207; }
+          #gerar-pagamento-root .gp-kpi-info .gp-kpi-ic { background:#eff6ff; color:#1d4ed8; }
+          #gerar-pagamento-root .gp-kpi-money .gp-kpi-ic { background:#f0fdf4; color:#105436; }
+          #gerar-pagamento-root .gp-lotes-barra { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin:4px 0 10px; }
+          #gerar-pagamento-root .gp-lotes-barra h3 { margin:0; font-size:0.95rem; color:#0f172a; }
+          #gerar-pagamento-root .gp-lotes-barra label { display:inline-flex; align-items:center; gap:8px; color:#64748b; font-size:0.75rem; font-weight:700; }
+          #gerar-pagamento-root .gp-lotes-barra select { height:36px; border:1px solid #e2e8f0; border-radius:8px; padding:0 10px; background:#fff; color:#0f172a; font-size:0.82rem; font-weight:600; }
+          #gerar-pagamento-root .gp-card { margin:0 0 12px; border:1px solid #e2e8f0; border-radius:14px; background:#fff; overflow:hidden; }
+          #gerar-pagamento-root .gp-card-bad { background:#fff7f7; border-color:#fecaca; }
+          #gerar-pagamento-root .gp-card-ok { background:#f0fdf4; border-color:#bbf7d0; }
+          #gerar-pagamento-root .gp-card-wait { background:#f8fbff; border-color:#bfdbfe; }
+          #gerar-pagamento-root .gp-card-h { display:flex; align-items:center; gap:16px; flex-wrap:wrap; padding:14px 16px; cursor:pointer; }
+          #gerar-pagamento-root .gp-card-ic { width:36px; height:36px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; flex:none; background:#fff; }
+          #gerar-pagamento-root .gp-card-ic i { width:18px; height:18px; }
+          #gerar-pagamento-root .gp-card-bad .gp-card-ic { color:#dc2626; }
+          #gerar-pagamento-root .gp-card-ok .gp-card-ic { color:#105436; }
+          #gerar-pagamento-root .gp-card-wait .gp-card-ic { color:#2563eb; }
+          #gerar-pagamento-root .gp-card-id { min-width:180px; display:flex; flex-direction:column; gap:2px; }
+          #gerar-pagamento-root .gp-card-id small { color:#64748b; font-size:0.68rem; font-weight:700; text-transform:uppercase; }
+          #gerar-pagamento-root .gp-card-id strong { color:#0f172a; font-size:0.92rem; }
+          #gerar-pagamento-root .gp-card-id span { color:#64748b; font-size:0.75rem; }
+          #gerar-pagamento-root .gp-card-meta { display:flex; align-items:center; gap:8px; min-width:110px; color:#334155; }
+          #gerar-pagamento-root .gp-card-meta i { width:16px; height:16px; color:#64748b; }
+          #gerar-pagamento-root .gp-card-meta small { display:block; color:#64748b; font-size:0.68rem; }
+          #gerar-pagamento-root .gp-card-meta b { font-size:0.88rem; }
+          #gerar-pagamento-root .gp-card-status { margin-left:auto; display:flex; flex-direction:column; align-items:flex-start; gap:2px; }
+          #gerar-pagamento-root .gp-card-status small { color:#64748b; font-size:0.72rem; }
+          #gerar-pagamento-root .gp-card-badge { display:inline-flex; align-items:center; gap:6px; font-weight:800; font-size:0.82rem; }
+          #gerar-pagamento-root .gp-card-badge i { width:16px; height:16px; }
+          #gerar-pagamento-root .gp-card-badge-bad { color:#dc2626; }
+          #gerar-pagamento-root .gp-card-badge-ok { color:#105436; }
+          #gerar-pagamento-root .gp-card-badge-wait { color:#2563eb; }
+          #gerar-pagamento-root .gp-card-acoes { display:flex; align-items:center; gap:8px; }
+          #gerar-pagamento-root .gp-card-seta { width:18px; height:18px; color:#94a3b8; transition:transform .15s ease; }
+          #gerar-pagamento-root .gp-card.is-open .gp-card-seta { transform:rotate(180deg); }
+          #gerar-pagamento-root .gp-mais { position:relative; }
+          #gerar-pagamento-root .gp-mais summary { list-style:none; width:32px; height:32px; border-radius:8px; display:flex; align-items:center; justify-content:center; cursor:pointer; color:#64748b; }
+          #gerar-pagamento-root .gp-mais summary::-webkit-details-marker { display:none; }
+          #gerar-pagamento-root .gp-mais summary i { width:16px; height:16px; }
+          #gerar-pagamento-root .gp-mais div { position:absolute; right:0; top:36px; z-index:5; min-width:140px; padding:6px; border:1px solid #e2e8f0; border-radius:10px; background:#fff; box-shadow:0 10px 24px rgba(15,23,42,.12); }
+          #gerar-pagamento-root .gp-mais button { display:block; width:100%; height:32px; border:0; background:transparent; text-align:left; padding:0 8px; border-radius:6px; cursor:pointer; font-weight:700; color:#334155; }
+          #gerar-pagamento-root .gp-mais button.is-danger { color:#b91c1c; }
+          #gerar-pagamento-root .gp-mais button:hover { background:#f8fafc; }
+          #gerar-pagamento-root .gp-card-body { background:#fff; border-top:1px solid #e2e8f0; }
+          #gerar-pagamento-root .gp-card-sub { padding:10px 16px 0; font-size:0.78rem; font-weight:800; color:#64748b; text-transform:uppercase; letter-spacing:.03em; }
+          #gerar-pagamento-root .gp-card-tab { min-width:760px; }
+          #gerar-pagamento-root .gp-card-tab thead th { background:#f8fafc; color:#64748b; font-size:0.72rem; text-transform:uppercase; }
+          #gerar-pagamento-root .gp-lotes-vazio { padding:22px 8px; color:#64748b; font-size:0.85rem; }
+          #gerar-pagamento-root .gp-lotes-dica { display:flex; align-items:flex-start; gap:8px; margin:8px 0 0; padding:12px 14px; border-radius:10px; background:#f8fafc; color:#64748b; font-size:0.78rem; }
+          #gerar-pagamento-root .gp-lotes-dica i { width:16px; height:16px; color:#2563eb; flex:none; }
+          @media (max-width: 1100px) { #gerar-pagamento-root .gp-kpis { grid-template-columns:1fr 1fr; } }
           #gerar-pagamento-root .gp-lote { margin:12px 20px; border:1px solid #e2e8f0; border-radius:10px; overflow:hidden; background:#fff; }
           #gerar-pagamento-root .gp-lote-sem { border-color:#fecaca; }
           #gerar-pagamento-root .gp-lote-h { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; padding:12px 14px; background:#f0f7f3; border-bottom:1px solid #e2e8f0; }
@@ -4069,9 +4249,9 @@ const GerarPagamentoApp = {
           #gerar-pagamento-root .gp-massa { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:0 0 8px auto; }
           #gerar-pagamento-root .gp-lote-total { font-size:1.05rem; color:#0f172a; min-width:120px; text-align:right; }
           #gerar-pagamento-root .gp-lote .gp-titulos { min-width:1000px; }
-          #gerar-pagamento-root .gp-robo-btn { height:36px; padding:0 14px; border:0; border-radius:8px; background:#fff; color:#105436; font-weight:800; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+          #gerar-pagamento-root .gp-robo-btn { height:36px; padding:0 14px; border:1px solid #105436; border-radius:8px; background:#fff; color:#105436; font-weight:800; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
           #gerar-pagamento-root .gp-robo-btn:disabled { opacity:0.6; cursor:wait; }
-          #gerar-pagamento-root .gp-robo-msg { color:#ecfdf5; font-size:0.75rem; font-weight:700; max-width:420px; line-height:1.35; }
+          #gerar-pagamento-root .gp-robo-msg { color:#105436; font-size:0.75rem; font-weight:700; max-width:420px; line-height:1.35; }
         </style>
         <div class="crm-card" style="overflow:hidden;padding:0;">
           <div class="gp-busca">
@@ -4093,35 +4273,18 @@ const GerarPagamentoApp = {
               style="height:38px;width:150px;justify-content:center;display:inline-flex;align-items:center;gap:6px;">
               <i data-lucide="search" style="width:14px;"></i> Buscar títulos
             </button>
+            <span id="gp-robo-msg" class="gp-robo-msg">${this.esc(s.roboMsg || "")}</span>
+            <button type="button" id="gp-robo-btn" class="gp-robo-btn" ${s.roboLigando ? "disabled" : ""} onclick="GerarPagamentoApp.ligarRobo()">
+              <i data-lucide="bot" style="width:16px;height:16px;"></i> Ligar robô
+            </button>
           </div>
           ${this.alertaSemContaHtml()}
           <div id="gp-titulos-box">${this.titulosHtml()}</div>
         </div>`);
 
     root.innerHTML = `
-      <style>
-        #gerar-pagamento-root .gp-robo-btn { height:36px; padding:0 14px; border:0; border-radius:8px; background:#fff; color:#105436; font-weight:800; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
-        #gerar-pagamento-root .gp-robo-btn:disabled { opacity:0.6; cursor:wait; }
-        #gerar-pagamento-root .gp-robo-msg { color:#ecfdf5; font-size:0.75rem; font-weight:700; max-width:420px; line-height:1.35; }
-      </style>
       <div style="display:flex;flex-direction:column;min-height:calc(100vh - 85px);font-family:inherit;">
-        <div style="background:#105436;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-radius:12px 12px 0 0;flex-wrap:wrap;">
-          <div style="display:flex;align-items:center;gap:12px;">
-            <div style="width:36px;height:36px;background:rgba(255,255,255,0.2);border-radius:8px;display:flex;align-items:center;justify-content:center;">
-              <i data-lucide="wallet" style="width:18px;height:18px;color:#fff;"></i>
-            </div>
-            <div>
-              <h2 style="margin:0;color:#fff;font-size:1.15rem;font-weight:600;">Gerar Pagamento</h2>
-            </div>
-          </div>
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
-            <span id="gp-robo-msg" class="gp-robo-msg">${this.esc(s.roboMsg || "")}</span>
-            <button type="button" id="gp-robo-btn" class="gp-robo-btn" ${s.roboLigando ? "disabled" : ""} onclick="GerarPagamentoApp.ligarRobo()">
-              <i data-lucide="bot" style="width:16px;height:16px;"></i> Ligar robô
-            </button>
-          </div>
-        </div>
-        <div style="flex:1;background:#f8fafc;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 12px 12px;padding:16px 18px;">
+        <div style="flex:1;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px 18px;">
           ${body}
         </div>
       </div>

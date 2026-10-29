@@ -31,6 +31,24 @@ function smtpEnabled() {
   if (String(process.env.SMTP_ENABLED || '').toLowerCase() === 'false') return false;
   return !!(process.env.SMTP_USER && process.env.SMTP_PASS && process.env.SMTP_PASS !== 'COLOQUE_SUA_SENHA_AQUI');
 }
+const graphMail = require('./lib/graph-mail');
+function mailEnabled() {
+  return graphMail.graphMailConfigured() || smtpEnabled();
+}
+async function sendCrmMail(opts) {
+  if (graphMail.graphMailConfigured()) {
+    await graphMail.sendMail(opts);
+    return;
+  }
+  await transporter.sendMail({
+    from: opts.from || process.env.SMTP_FROM || process.env.SMTP_USER,
+    to: opts.to,
+    cc: opts.cc,
+    subject: opts.subject,
+    html: opts.html,
+    text: opts.text
+  });
+}
 const nodemailer = require('nodemailer');
 // Configuração do Nodemailer
 const transporter = nodemailer.createTransport({
@@ -638,13 +656,13 @@ const server = http.createServer(async (req, res) => {
               </table>
             </div>
           </div>`;
-        if (!smtpEnabled()) {
+        if (!mailEnabled()) {
           console.log('[CAUCAO AVISO] Envio de e-mail desligado. Fila mantida. Destinatários: ' + to.join(', ') + ' · ' + kind + ' · ' + items.length);
           return sendJson(res, 200, { sent: false, simulated: true, reason: 'Envio de e-mail desligado' });
         }
         try {
           const cc = String(process.env.CAUCAO_EMAIL_CC || 'financeiro@mouraleite.com.br').trim();
-          await transporter.sendMail({
+          await sendCrmMail({
             from: process.env.SMTP_FROM || process.env.SMTP_USER,
             to: to.join(', '),
             cc: cc || undefined,
@@ -669,9 +687,9 @@ const server = http.createServer(async (req, res) => {
         // Enviar e-mail para admin
         const approveLink = `http://${req.headers.host}/api/tags/approve/${token}`;
         
-        if (smtpEnabled()) {
+        if (mailEnabled()) {
           try {
-            await transporter.sendMail({
+            await sendCrmMail({
               from: process.env.SMTP_FROM,
               to: process.env.ADMIN_EMAIL,
               subject: 'Solicitação de Nova TAG de Anexo - CRM',
@@ -704,8 +722,8 @@ const server = http.createServer(async (req, res) => {
           db.prepare(`UPDATE tag_requests SET status = 'Aprovada' WHERE id = ?`).run(request.id);
           db.prepare(`INSERT OR IGNORE INTO tags (name, created_by, destino) VALUES (?, ?, ?)`).run(request.tag_name, request.requested_by_email, request.type);
           
-          if (smtpEnabled()) {
-            await transporter.sendMail({
+          if (mailEnabled()) {
+            await sendCrmMail({
               from: process.env.SMTP_FROM,
               to: request.requested_by_email,
               subject: 'TAG aprovada - Assistente de Anexos',
