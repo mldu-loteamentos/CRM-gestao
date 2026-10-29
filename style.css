@@ -10036,7 +10036,8 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 }
 .rmod-lista li.is-foco { background: #e8f3ee; color: #105436; }
 .rmod-lista li.is-sel { font-weight: 700; color: #105436; }
-.rmod-lista li.is-off { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
+.rmod-lista li.is-off { color: #92400e; }
+.rmod-lista li.is-off::after { content: " · não liberada"; font-size: 0.72rem; font-weight: 700; color: #b45309; }
 .rmod-dica {
   position: fixed;
   z-index: 100011;
@@ -10056,6 +10057,64 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .rmod-dica b { display: block; margin-bottom: 4px; color: #105436; font-size: 0.82rem; }
 .rmod-dica p { margin: 0; }
 .rmod-dica .rmod-porque { margin-top: 8px; padding-top: 8px; border-top: 1px solid #e2e8f0; color: #0f172a; white-space: pre-line; }
+.reneg-mod-alerta {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  border-radius: 8px;
+}
+.reneg-mod-alerta[hidden] { display: none; }
+.reneg-mod-alerta p { margin: 0; color: #9a3412; font-size: 0.82rem; line-height: 1.4; }
+.reneg-pedido-fab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 14px;
+  color: #fff;
+  font-weight: 800;
+  cursor: pointer;
+}
+.reneg-pedido-fab.is-pisca { animation: reneg-pedido-pisca 1s ease-in-out infinite; }
+@keyframes reneg-pedido-pisca {
+  0%, 100% { background: #f37021; }
+  50% { background: #105436; }
+}
+.reneg-pedido-fab[hidden] { display: none; }
+.reneg-pedido-painel {
+  position: fixed;
+  top: 64px;
+  right: 16px;
+  z-index: 100020;
+  width: min(440px, calc(100vw - 24px));
+  max-height: calc(100vh - 80px);
+  overflow: auto;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px;
+}
+.reneg-pedido-painel[hidden] { display: none; }
+.reneg-pedido-card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; margin-bottom: 8px; }
+.reneg-pedido-card p { margin: 0 0 4px; font-size: 0.8rem; color: #334155; }
+.reneg-pedido-just { background: #f8fafc; border-radius: 6px; padding: 8px; margin-top: 6px; }
+.reneg-pedido-justificativa {
+  position: fixed;
+  inset: 0;
+  z-index: 100030;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.45);
+}
+.reneg-pedido-justificativa[hidden] { display: none !important; }
 
 /* Segurança · Auditoria do Login Sienge */
 .alog-page { padding: 16px 18px 28px; display: flex; flex-direction: column; gap: 12px; }

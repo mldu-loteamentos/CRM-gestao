@@ -19852,7 +19852,7 @@ window.montarSeletorModalidade = function() {
   };
   const mostrarDica = (li) => {
     const txt = RENEG_MODALIDADES[li.dataset.value];
-    if (!txt || li.classList.contains("is-off")) { dica.hidden = true; return; }
+    if (!txt) { dica.hidden = true; return; }
     const porque = renegPorqueLiberada(li.dataset.value);
     dica.innerHTML = `<b></b><p></p><p class="rmod-porque"></p>`;
     dica.querySelector("b").textContent = li.textContent;
@@ -19876,9 +19876,9 @@ window.montarSeletorModalidade = function() {
   };
   const escolher = (v) => {
     const opt = Array.from(sel.options).find((o) => o.value === v);
-    if (opt && opt.disabled) return;
+    const bloqueada = !!(opt && opt.disabled);
+    window._renegSimularModalidade = bloqueada ? v : "";
     fechar();
-    if (sel.value === v) return;
     sel.value = v;
     sel.dispatchEvent(new Event("change", { bubbles: true }));
     window.sincronizarSeletorModalidade();
@@ -19961,6 +19961,252 @@ window.sincronizarSeletorModalidade = function() {
 };
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => window.montarSeletorModalidade());
 else window.montarSeletorModalidade();
+
+window.renegTituloAtual = function() {
+  const sale = typeof g_renegSale !== "undefined" ? g_renegSale : null;
+  return String((sale && (sale.receivableBillId || sale.id)) || "");
+};
+
+window.renegModalidadeFoiLiberada = function(mod) {
+  const titulo = window.renegTituloAtual();
+  if (!titulo || !mod) return false;
+  return (window._renegPedidos || []).some((p) => p && p.status === "liberada" && String(p.titulo) === titulo && p.modalidade === mod);
+};
+
+window.atualizarAlertaModalidadeReneg = function() {
+  const box = document.getElementById("reneg-mod-alerta");
+  const sel = document.getElementById("reneg-payment-method");
+  if (!box || !sel) return;
+  const opt = sel.selectedOptions[0];
+  const simulando = !!(opt && opt.disabled && window._renegSimularModalidade === sel.value);
+  box.hidden = !simulando;
+  if (!simulando) return;
+  const txt = box.querySelector("[data-reneg-alerta-txt]");
+  const motivo = opt.title ? opt.title + " " : "";
+  const titulo = window.renegTituloAtual();
+  const pedidos = window._renegPedidos || [];
+  const pendente = pedidos.some((p) => p && p.status === "pendente" && String(p.titulo) === titulo && p.modalidade === sel.value);
+  const recusada = pedidos.some((p) => p && p.status === "recusada" && String(p.titulo) === titulo && p.modalidade === sel.value);
+  let extra = "Os valores abaixo são uma simulação: confira como ficariam. A proposta só é gerada depois que o administrador liberar esta modalidade.";
+  if (pendente) extra = "O pedido desta modalidade já está com o administrador. Os valores abaixo continuam como simulação.";
+  else if (recusada) extra = "O administrador recusou a liberação deste título. Os valores abaixo continuam como simulação.";
+  if (txt) txt.textContent = opt.textContent + " não está liberada para este cliente. " + motivo + extra;
+};
+
+function renegDinheiro(n) {
+  return Number(n || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+window.montarResumoLiberacaoReneg = async function(modalidade, justificativa) {
+  const sale = g_renegSale || {};
+  const customer = g_renegCustomer || {};
+  const sit = renegSituacaoContrato(sale);
+  const customerId = customer.id || customer.customerId || (window.AppState && AppState.selectedCustomerId) || "";
+  const sales = ((window.AppState && AppState.sales) || []).filter((s) => window.saleBelongsToCustomer && window.saleBelongsToCustomer(s, customerId));
+  const contratos = (sales.length ? sales : [sale]).filter(Boolean).map((s) => ({
+    titulo: String(s.receivableBillId || s.id || ""),
+    unidade: [s.enterpriseName, s.unitName].filter(Boolean).join(" · "),
+    situacao: s.status || "Em aberto"
+  }));
+  const pmp = window.currentCustomerStats ? (Number(window.currentCustomerStats.pmp) || 0) : (window._renegFaixa ? window._renegFaixa.pmp : 0);
+  const acordos = window.renegContarAcordos(renegParcelasDoContrato(sale).length ? { installments: renegParcelasDoContrato(sale) } : sale);
+  let construcao = "A consulta de construção ainda não retornou.";
+  try {
+    if (typeof window.cancelamentoLerConstrucao === "function") {
+      const info = await window.cancelamentoLerConstrucao({
+        customerId: customerId,
+        saleId: sale.receivableBillId || sale.id,
+        costCenterId: sale.costCenterId || sale.enterpriseId,
+        unitName: sale.unitName
+      });
+      if (info && info.texto) construcao = info.texto;
+    }
+  } catch (e) {}
+  const user = (window.AppState && AppState.currentUser) || {};
+  const nomes = { diluir: "Acordo interno - diluir", somar: "Acordo interno - somar", deslocar: "Acordo interno - deslocar", cartao: "Cartão de crédito" };
+  return {
+    id: "p" + Date.now(),
+    status: "pendente",
+    criadoEm: Date.now(),
+    customerId: String(customerId),
+    cliente: customer.name || customer.customerName || customer.nome || "",
+    titulo: window.renegTituloAtual(),
+    unidade: [sale.enterpriseName, sale.unitName].filter(Boolean).join(" · "),
+    modalidade: modalidade,
+    modalidadeNome: nomes[modalidade] || modalidade,
+    pmp: pmp,
+    contratos: contratos,
+    pago: sit.pago,
+    pctPago: sit.pct,
+    saldoDevedor: (sit.valorVencidas || 0) + (sit.valorAVencer || 0),
+    construcao: construcao,
+    acordos: acordos,
+    pagasQtd: sit.qtdParcelasPagas,
+    pagasValor: sit.pago,
+    vencidasQtd: sit.qtdVencidas,
+    vencidasValor: sit.valorVencidas,
+    aVencerQtd: sit.qtdAVencer,
+    aVencerValor: sit.valorAVencer,
+    justificativa: justificativa,
+    operador: user.name || user.email || ""
+  };
+};
+
+window._renegPedidos = [];
+
+window.gravarPedidosLiberacaoLocal = function() {
+  try { localStorage.setItem("crm_reneg_liberacao_pedidos", JSON.stringify(window._renegPedidos || [])); } catch (e) {}
+};
+
+window.pintarPedidosLiberacaoReneg = function() {
+  const fab = document.getElementById("reneg-pedido-fab");
+  const painel = document.getElementById("reneg-pedido-painel");
+  const admin = typeof window.crmAdministradorReal === "function" && window.crmAdministradorReal();
+  const pendentes = (window._renegPedidos || []).filter((p) => p && p.status === "pendente").sort((a, b) => (b.criadoEm || 0) - (a.criadoEm || 0));
+  if (fab) {
+    fab.hidden = !(admin && pendentes.length);
+    fab.classList.toggle("is-pisca", !!(admin && pendentes.length));
+    fab.textContent = pendentes.length === 1 ? "1 liberação de acordo" : (pendentes.length + " liberações de acordo");
+  }
+  if (!painel || painel.hidden) return;
+  if (!admin) { painel.hidden = true; return; }
+  const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const cards = pendentes.map((p) => {
+    const contratos = (p.contratos || []).map((c) => esc((c.titulo || "Contrato") + (c.unidade ? " · " + c.unidade : "") + " · " + (c.situacao || "Em aberto"))).join("<br>");
+    const id = String(p.id || "").replace(/[^a-zA-Z0-9_-]/g, "");
+    return `<article class="reneg-pedido-card">
+      <p><strong>${esc(p.cliente || "Cliente")}</strong> · título ${esc(p.titulo || "—")}</p>
+      <p>${esc(p.modalidadeNome || p.modalidade || "")} · pedido de ${esc(p.operador || "operador")}</p>
+      <p>PMP: ${Number(p.pmp) || 0} dias</p>
+      <p>Contratos (${(p.contratos || []).length || 1}):<br>${contratos || "—"}</p>
+      <p>Já pagou: ${renegDinheiro(p.pago)}${p.pctPago != null ? " (" + (Number(p.pctPago) || 0) + "% do contrato)" : ""} · Saldo devedor: ${renegDinheiro(p.saldoDevedor)}</p>
+      <p>Construção: ${esc(p.construcao || "—")}</p>
+      <p>Acordos já feitos: ${Number(p.acordos) || 0}</p>
+      <p>Pagas: ${Number(p.pagasQtd) || 0} · ${renegDinheiro(p.pagasValor)}<br>Vencidas: ${Number(p.vencidasQtd) || 0} · ${renegDinheiro(p.vencidasValor)}<br>A vencer: ${Number(p.aVencerQtd) || 0} · ${renegDinheiro(p.aVencerValor)}</p>
+      <div class="reneg-pedido-just"><strong>Justificativa</strong><br>${esc(p.justificativa || "")}</div>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button type="button" class="btn btn-primary" onclick="window.decidirLiberacaoReneg('${id}','liberada')">Liberar</button>
+        <button type="button" class="btn btn-cancel" onclick="window.decidirLiberacaoReneg('${id}','recusada')">Recusar</button>
+      </div>
+    </article>`;
+  }).join("");
+  painel.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;"><strong>Pedidos de liberação</strong><button type="button" class="btn btn-fechar" onclick="document.getElementById('reneg-pedido-painel').hidden=true">Fechar</button></div>${cards || "<p>Nenhum pedido pendente.</p>"}`;
+};
+
+window.abrirPainelLiberacaoReneg = function() {
+  const painel = document.getElementById("reneg-pedido-painel");
+  if (!painel) return;
+  painel.hidden = false;
+  window.pintarPedidosLiberacaoReneg();
+};
+
+window.salvarPedidoLiberacaoReneg = async function(pedido) {
+  window._renegPedidos = (window._renegPedidos || []).filter((p) => p.id !== pedido.id).concat([pedido]);
+  window.gravarPedidosLiberacaoLocal();
+  window.pintarPedidosLiberacaoReneg();
+  if (!window.firebaseDb || !window.firebaseCollections) return false;
+  const ref = window.firebaseCollections.doc(window.firebaseDb, "reneg_liberacao", pedido.id);
+  await window.firebaseCollections.setDoc(ref, pedido);
+  return true;
+};
+
+window.decidirLiberacaoReneg = async function(id, status) {
+  const pedido = (window._renegPedidos || []).find((p) => p.id === id);
+  if (!pedido) return;
+  const user = (window.AppState && AppState.currentUser) || {};
+  pedido.status = status;
+  pedido.decididoEm = Date.now();
+  pedido.decididoPor = user.name || user.email || "";
+  window.gravarPedidosLiberacaoLocal();
+  window.pintarPedidosLiberacaoReneg();
+  try {
+    if (window.firebaseDb && window.firebaseCollections) {
+      const ref = window.firebaseCollections.doc(window.firebaseDb, "reneg_liberacao", id);
+      await window.firebaseCollections.updateDoc(ref, { status: status, decididoEm: pedido.decididoEm, decididoPor: pedido.decididoPor });
+    }
+  } catch (e) {
+    console.warn("Falha ao atualizar a liberação:", e);
+  }
+  if (typeof renegAplicarFaixaModalidade === "function" && document.getElementById("reneg-payment-method")) renegAplicarFaixaModalidade();
+};
+
+window.abrirPedidoLiberacaoReneg = function() {
+  const sel = document.getElementById("reneg-payment-method");
+  if (!sel || !sel.value) return;
+  let caixa = document.getElementById("reneg-pedido-justificativa");
+  if (!caixa) {
+    caixa = document.createElement("div");
+    caixa.id = "reneg-pedido-justificativa";
+    caixa.className = "reneg-pedido-justificativa";
+    caixa.innerHTML = `<div style="background:#fff;width:min(480px,100%);border-radius:10px;padding:16px;">
+      <h3 style="margin:0 0 8px;color:#105436;font-size:1rem;">Pedir liberação desta modalidade</h3>
+      <p style="margin:0 0 8px;color:#64748b;font-size:0.84rem;">Escreva por que este título precisa da modalidade que não está liberada. O administrador recebe o resumo do cliente.</p>
+      <textarea id="reneg-pedido-texto" rows="4" style="width:100%;border:1px solid #cbd5e1;border-radius:6px;padding:8px;"></textarea>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;">
+        <button type="button" class="btn btn-fechar" id="reneg-pedido-fechar">Fechar</button>
+        <button type="button" class="btn btn-primary" id="reneg-pedido-enviar">Enviar pedido</button>
+      </div>
+    </div>`;
+    document.body.appendChild(caixa);
+    caixa.querySelector("#reneg-pedido-fechar").onclick = () => { caixa.hidden = true; };
+  }
+  caixa.hidden = false;
+  const area = caixa.querySelector("#reneg-pedido-texto");
+  if (area) area.value = "";
+  caixa.querySelector("#reneg-pedido-enviar").onclick = async () => {
+    const texto = String(area && area.value || "").trim();
+    if (texto.length < 8) {
+      area.focus();
+      const ajuda = caixa.querySelector("p");
+      if (ajuda) ajuda.textContent = "Escreva a justificativa deste título, com pelo menos uma frase, para o administrador avaliar.";
+      return;
+    }
+    const ja = (window._renegPedidos || []).find((p) => p.status === "pendente" && String(p.titulo) === window.renegTituloAtual() && p.modalidade === sel.value);
+    if (ja) {
+      caixa.hidden = true;
+      if (typeof window.atualizarAlertaModalidadeReneg === "function") window.atualizarAlertaModalidadeReneg();
+      return;
+    }
+    const pedido = await window.montarResumoLiberacaoReneg(sel.value, texto);
+    caixa.hidden = true;
+    try {
+      await window.salvarPedidoLiberacaoReneg(pedido);
+    } catch (e) {
+      console.warn("Pedido gravado só neste navegador:", e);
+    }
+    const aviso = document.querySelector("#reneg-mod-alerta [data-reneg-alerta-txt]");
+    if (aviso) aviso.textContent = "Pedido enviado ao administrador, com o resumo deste cliente e a sua justificativa. Os valores continuam na tela para conferência.";
+  };
+};
+
+window.iniciarPedidosLiberacaoReneg = function() {
+  if (window._renegPedidosInicio) return;
+  window._renegPedidosInicio = true;
+  try { window._renegPedidos = JSON.parse(localStorage.getItem("crm_reneg_liberacao_pedidos") || "[]"); } catch (e) { window._renegPedidos = []; }
+  window.pintarPedidosLiberacaoReneg();
+  const ligar = () => {
+    if (!window.firebaseDb || !window.firebaseCollections || !window.firebaseCollections.onSnapshot) return false;
+    const col = window.firebaseCollections.collection(window.firebaseDb, "reneg_liberacao");
+    window._renegPedidosUnsub = window.firebaseCollections.onSnapshot(col, (snap) => {
+      const nuvem = snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+      const ids = new Set(nuvem.map((p) => p.id));
+      const locais = (window._renegPedidos || []).filter((p) => p && p.status === "pendente" && !ids.has(p.id) && Date.now() - (p.criadoEm || 0) < 120000);
+      window._renegPedidos = nuvem.concat(locais);
+      window.gravarPedidosLiberacaoLocal();
+      window.pintarPedidosLiberacaoReneg();
+      if (document.getElementById("reneg-payment-method")) {
+        try { renegAplicarFaixaModalidade(); } catch (e) {}
+      }
+    }, (err) => console.warn("Pedidos de liberação:", err));
+    return true;
+  };
+  if (!ligar()) {
+    let n = 0;
+    const t = setInterval(() => { n += 1; if (ligar() || n > 20) clearInterval(t); }, 1500);
+  }
+};
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => window.iniciarPedidosLiberacaoReneg());
+else window.iniciarPedidosLiberacaoReneg();
 
 function renegFuturasOrdenadas(bills) {
   return (bills || []).filter((b) => b && !b.isOverdue).slice().sort((a, b) => String(a.dueDate || "").localeCompare(String(b.dueDate || "")));
@@ -20164,11 +20410,11 @@ function renegAplicarFaixaModalidade() {
         opt.title = "";
         return;
       }
-      const ok = !!perm[opt.value];
+      const ok = !!perm[opt.value] || window.renegModalidadeFoiLiberada(opt.value);
       opt.disabled = !ok;
       opt.title = ok ? "" : (motivo[opt.value] || "");
     });
-    if (!window._renegRestaurando && sel.selectedOptions[0] && sel.selectedOptions[0].disabled) {
+    if (!window._renegRestaurando && sel.selectedOptions[0] && sel.selectedOptions[0].disabled && window._renegSimularModalidade !== sel.value) {
       const livre = Array.from(sel.options).find((o) => !o.disabled);
       if (livre) sel.value = livre.value;
     }
@@ -20176,6 +20422,7 @@ function renegAplicarFaixaModalidade() {
   }
   const faixa = { mods: mods, pctPago: pctPago, pmp: pmp, acordos: acordos, perm: perm };
   window._renegFaixa = faixa;
+  if (typeof window.atualizarAlertaModalidadeReneg === "function") window.atualizarAlertaModalidadeReneg();
   return faixa;
 }
 
@@ -20827,6 +21074,14 @@ function onRenegPaymentMethodChange() {
 }
 
 function handleRenegGenerateAction() {
+  const selMod = document.getElementById("reneg-payment-method");
+  const optMod = selMod && selMod.selectedOptions[0];
+  if (optMod && optMod.disabled) {
+    if (typeof window.atualizarAlertaModalidadeReneg === "function") window.atualizarAlertaModalidadeReneg();
+    const box = document.getElementById("reneg-mod-alerta");
+    if (box) box.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    return;
+  }
   const method = document.getElementById("reneg-payment-method")?.value || "interno";
   if (method === "cartao") {
     generateCardPaymentLink();
