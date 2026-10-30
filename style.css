@@ -3223,8 +3223,8 @@ circle.donut-segment {
 .repac-faixa { display: inline; margin-left: 6px; color: #94a3b8; font-size: 0.72rem; font-weight: 600; }
 .repac-det td { background: #f8fafc; padding: 4px 12px 14px 36px; }
 .repac-parcelas { width: 100%; border-collapse: collapse; }
-.repac-parcelas th { text-align: center; font-size: 0.72rem; color: #64748b; font-weight: 700; padding: 8px 6px; background: transparent; }
-.repac-parcelas td { text-align: center; padding: 7px 6px; border-top: 1px solid #e2e8f0; font-variant-numeric: tabular-nums; }
+.repac-parcelas th { text-align: center; font-size: 0.72rem; color: #64748b; font-weight: 700; padding: 8px 6px; background: transparent; white-space: nowrap; }
+.repac-parcelas td { text-align: center; padding: 7px 6px; border-top: 1px solid #e2e8f0; font-variant-numeric: tabular-nums; white-space: nowrap; }
 #est-conferencia:empty { display: none; }
 .est-conf { background: #fff; border: 1px solid #e6eeea; border-left: 4px solid #105436; border-radius: 16px; padding: 14px 18px; }
 .est-conf.is-bad { border-left-color: #c2410c; }

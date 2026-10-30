@@ -206,16 +206,25 @@ const ContabilDepara = {
     return null;
   },
 
-  /* Centro da obra termina em 00. O da parceria é o par (12901, 13001) ou o nome com parceria. */
-  ehParceriaCc(cc) {
-    const id = String(cc && (cc.id != null ? cc.id : cc) || "").replace(/\D/g, "");
+  idCentro(cc) {
+    return String(cc && (cc.id != null ? cc.id : cc) || "").replace(/\D/g, "");
+  },
+
+  nomeCentro(cc) {
+    const id = this.idCentro(cc);
+    const catalogo = this.centroCatalogo(id) || {};
+    const nomes = [catalogo.name, catalogo.nome, cc && cc.name, cc && cc.nome].map((v) => String(v || "").trim());
+    return nomes.find((n) => /parce(ir|ri)/i.test(n)) || nomes.find(Boolean) || "";
+  },
+
+  /* O centro da parceria é o que está escrito como parceria. O da obra termina em 00. */
+  marcadoParceria(cc) {
+    const id = this.idCentro(cc);
     if (!id || /00$/.test(id)) return false;
-    const catalogo = this.centroCatalogo(id) || cc || {};
-    const nome = String(catalogo.name || catalogo.nome || (cc && (cc.name || cc.nome)) || "");
+    const nome = this.nomeCentro(cc);
     const app = window.ParametrizacaoParceiroApp;
     if (app && typeof app.ehCcParceiro === "function" && app.ehCcParceiro({ id: id, name: nome })) return true;
-    if (/parce(ir|ri)/i.test(nome)) return true;
-    return /01$/.test(id);
+    return /parce(ir|ri)/i.test(nome);
   },
 
   /** Centros de custo da parceria, sem o centro da obra. */
@@ -223,23 +232,26 @@ const ContabilDepara = {
     if (!p) return [];
     const app = window.ParametrizacaoParceiroApp;
     const vistos = new Set();
-    const lista = [];
-    const por = (cc) => {
-      if (!cc || !this.ehParceriaCc(cc)) return;
-      const id = String(cc.id != null ? cc.id : cc).replace(/\D/g, "");
-      if (!id || vistos.has(id)) return;
+    const brutos = [];
+    const juntar = (cc) => {
+      const id = this.idCentro(cc);
+      if (!id || /00$/.test(id) || vistos.has(id)) return;
       vistos.add(id);
-      const catalogo = this.centroCatalogo(id);
-      lista.push({ id: id, nome: String((catalogo && (catalogo.name || catalogo.nome)) || cc.name || cc.nome || "").trim() });
+      brutos.push(cc);
     };
     (p.obras || []).forEach((o) => {
-      const ligados = (o.costCenters || []).filter((cc) => this.ehParceriaCc(cc));
-      if (ligados.length) ligados.forEach(por);
-      else if (app && typeof app.centrosDaObra === "function" && o.code) {
-        app.centrosDaObra(o.code).forEach(por);
-      }
+      (o.costCenters || []).forEach(juntar);
+      if (app && typeof app.centrosDaObra === "function" && o.code) app.centrosDaObra(o.code).forEach(juntar);
     });
-    if (!lista.length) (p.costCenters || []).forEach(por);
+    if (!brutos.length) (p.costCenters || []).forEach(juntar);
+    const marcados = brutos.filter((cc) => this.marcadoParceria(cc));
+    const fonte = marcados.length
+      ? marcados
+      : brutos.filter((cc) => /01$/.test(this.idCentro(cc)));
+    const lista = fonte.map((cc) => {
+      const id = this.idCentro(cc);
+      return { id: id, nome: this.nomeCentro(cc).trim() };
+    });
     lista.sort((a, b) => Number(a.id) - Number(b.id));
     return lista;
   },

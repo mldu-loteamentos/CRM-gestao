@@ -165,6 +165,17 @@ const RepactuacaoLoteApp = {
     return `${t.year}-${String(t.month + 1).padStart(2, "0")}-01`;
   },
 
+  /** Data base da parcela: mês da repactuação + retro, um ano antes. Nov/2026 e IPCA -2 → 01/09/2025. */
+  dataBaseEsperadaIso(adjustIso, retro) {
+    return this.expectedBaseIso(adjustIso, Number(retro) - 12);
+  },
+
+  ehReal(idx, indexerId) {
+    const nome = String((idx && idx.name) || "").trim().toUpperCase();
+    const id = String(indexerId != null ? indexerId : (idx && idx.id != null ? idx.id : ""));
+    return nome === "REAL" || id === "0";
+  },
+
   sameMonth(a, b) {
     return a && b && String(a).slice(0, 7) === String(b).slice(0, 7);
   },
@@ -707,13 +718,17 @@ const RepactuacaoLoteApp = {
     this.state.rows = this.state.rows.map((row) => {
       const idx = this.indexerById(row.indexerId);
       const retro = idx && idx.revenueRetroactivity != null ? Number(idx.revenueRetroactivity) : null;
+      const real = this.ehReal(idx, row.indexerId);
       const expectedBase = retro != null && adjust ? this.expectedBaseIso(adjust, retro) : null;
-      const baseOk = expectedBase && row.excelBase ? this.sameMonth(expectedBase, row.excelBase) : null;
+      const dataBaseEsperada = !real && retro != null && adjust ? this.dataBaseEsperadaIso(adjust, retro) : null;
+      const baseOk = dataBaseEsperada && row.excelBase ? this.sameMonth(dataBaseEsperada, row.excelBase) : null;
       return {
         ...row,
-        indexerName: idx ? idx.name : "—",
+        indexerName: idx ? idx.name : (real ? "REAL" : "—"),
         retro,
         expectedBase,
+        dataBaseEsperada,
+        siengeBase: null,
         baseOk,
         accPct: null,
         factor: null,
@@ -725,6 +740,15 @@ const RepactuacaoLoteApp = {
         accMissing: []
       };
     });
+  },
+
+  pickSiengeBaseDate(inst) {
+    if (!inst) return null;
+    const v = inst.baseDate || inst.installmentBaseDate || inst.correctionBaseDate || inst.baseDateOfInstallment;
+    if (v == null || v === "") return null;
+    const iso = String(v).slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+    return this.parseDate(v);
   },
 
   pickSiengeInstallmentValue(inst) {
@@ -764,12 +788,17 @@ const RepactuacaoLoteApp = {
       if (String(row.titulo) !== String(titulo)) return row;
       const hit = this.findInstallmentForParcela(insts, row.parcela);
       const cur = this.pickSiengeInstallmentValue(hit);
+      const siengeBase = this.pickSiengeBaseDate(hit);
+      const lancada = siengeBase || row.excelBase;
+      const baseOk = row.dataBaseEsperada && lancada ? this.sameMonth(row.dataBaseEsperada, lancada) : row.baseOk;
       const projetado = cur != null && Number.isFinite(cur) && row.factor ? cur * row.factor : null;
       const valorOk = projetado != null && row.excelValor != null
         ? Math.abs(projetado - row.excelValor) <= Math.max(0.05, Math.abs(row.excelValor) * 0.002)
         : null;
       return {
         ...row,
+        siengeBase,
+        baseOk,
         siengeValor: cur,
         crmProjetado: projetado,
         valorOk,
@@ -1114,7 +1143,7 @@ const RepactuacaoLoteApp = {
     grupos.forEach((g) => {
       const s = this.statusGrupo(g.parcelas);
       if (s === "conferido") conferidos += 1;
-      else if (s === "divergente") divergentes += 1;
+      else if (s === "divergente" || s === "database") divergentes += 1;
     });
     return { titles: grupos.length, conferidos: conferidos, divergentes: divergentes, n: this.state.rows.length };
   },
@@ -1143,6 +1172,7 @@ const RepactuacaoLoteApp = {
 
   /** conferido = valor projetado no Integra bateu com o Excel, parcela a parcela. */
   statusDe(r) {
+    if (r.baseOk === false) return "database";
     if (r.valorOk === false) return "divergente";
     if (r.valorOk === true) return "conferido";
     if (r.siengeConsultado && !r.siengeAchou) return "sem";
@@ -1152,6 +1182,7 @@ const RepactuacaoLoteApp = {
 
   statusGrupo(parcelas) {
     const lista = parcelas || [];
+    if (lista.some((r) => this.statusDe(r) === "database")) return "database";
     if (lista.some((r) => this.statusDe(r) === "divergente")) return "divergente";
     if (lista.length && lista.every((r) => this.statusDe(r) === "conferido")) return "conferido";
     if (lista.some((r) => this.statusDe(r) === "sem")) return "sem";
@@ -1161,6 +1192,7 @@ const RepactuacaoLoteApp = {
 
   statusChip(kind) {
     if (kind === "conferido") return `<span class="est-fin-chip est-fin-Adimplente">Valor conferido ✓</span>`;
+    if (kind === "database") return `<span class="est-fin-chip est-fin-Inadimplente">Data base</span>`;
     if (kind === "divergente") return `<span class="est-fin-chip est-fin-Inadimplente">Divergente</span>`;
     if (kind === "sem") return `<span class="est-fin-chip est-fin-Inadimplente">Sem Sienge</span>`;
     if (kind === "conferindo") return `<span class="est-fin-chip est-fin-apurar">Conferindo</span>`;
@@ -1216,7 +1248,7 @@ const RepactuacaoLoteApp = {
     const idx = this.state.filtroIdx || [];
     if (emp.length) grupos = grupos.filter((g) => emp.includes(String(g.companyId || "")));
     if (obra.length) grupos = grupos.filter((g) => obra.includes(String(g.obraId || "")));
-    if (idx.length) grupos = grupos.filter((g) => idx.includes(String(g.indexerId || "")));
+    if (idx.length) grupos = grupos.filter((g) => (g.parcelas || []).some((r) => idx.includes(String(r.indexerId || ""))));
     return grupos;
   },
 
@@ -1224,7 +1256,10 @@ const RepactuacaoLoteApp = {
     let grupos = this.gruposDimensao();
     const f = this.state.filter;
     if (f === "ok") grupos = grupos.filter((g) => this.statusGrupo(g.parcelas) === "conferido");
-    else if (f === "valor") grupos = grupos.filter((g) => this.statusGrupo(g.parcelas) === "divergente");
+    else if (f === "valor") grupos = grupos.filter((g) => {
+      const s = this.statusGrupo(g.parcelas);
+      return s === "divergente" || s === "database";
+    });
     else if (f === "base") grupos = grupos.filter((g) => g.parcelas.some((r) => r.baseOk === false));
     return grupos;
   },
@@ -1241,12 +1276,78 @@ const RepactuacaoLoteApp = {
     if ((window.scrollY || window.pageYOffset || 0) !== pageY) window.scrollTo(0, pageY);
   },
 
+  rotuloIdx(r) {
+    const id = r.indexerId == null || r.indexerId === "" ? "—" : String(r.indexerId);
+    const nome = r.indexerName && r.indexerName !== "—" ? String(r.indexerName) : "";
+    return nome ? `${id} — ${nome}` : id;
+  },
+
+  indexadoresDo(g) {
+    const map = new Map();
+    (g.parcelas || []).forEach((r) => {
+      const id = String(r.indexerId ?? "");
+      if (!map.has(id)) map.set(id, r);
+    });
+    return [...map.values()];
+  },
+
+  textoIndexador(g) {
+    const idxs = this.indexadoresDo(g);
+    const rotulos = idxs.map((r) => this.rotuloIdx(r));
+    const texto = rotulos.join(" · ") || "—";
+    const title = rotulos.length > 1 ? `Mais de um indexador: ${rotulos.join(", ")}` : texto;
+    return { texto, title };
+  },
+
+  textoRetro(g) {
+    const vals = [...new Set(this.indexadoresDo(g).map((r) => (r.retro == null ? null : String(r.retro))).filter((v) => v != null))];
+    return vals.length ? vals.join(" · ") : "—";
+  },
+
+  textoAcum(g) {
+    const corrigem = this.indexadoresDo(g).filter((r) => r.dataBaseEsperada && r.accPct != null);
+    if (corrigem.length === 1) return this.pct(corrigem[0].accPct);
+    if (this.indexadoresDo(g).length === 1) return this.pct(g.accPct);
+    return "—";
+  },
+
+  textoDataBase(g) {
+    const rows = (g.parcelas || []).filter((r) => r.dataBaseEsperada);
+    if (!rows.length) return { texto: "—", title: "", ruim: false, ok: false };
+    const ruins = rows.filter((r) => r.baseOk === false);
+    const alvo = ruins.length ? ruins : rows;
+    const esperados = [...new Set(alvo.map((r) => this.fmtDate(r.dataBaseEsperada)))];
+    const lancados = [...new Set(alvo.map((r) => this.fmtDate(r.siengeBase || r.excelBase)).filter((v) => v && v !== "—"))];
+    if (ruins.length) {
+      const texto = lancados.length ? `${lancados.join(" · ")} · esperado ${esperados.join(" · ")}` : esperados.join(" · ");
+      const title = `Data base esperada ${esperados.join(", ")}` + (lancados.length ? `. Lançada ${lancados.join(", ")}` : "");
+      return { texto, title, ruim: true, ok: false };
+    }
+    const ok = rows.every((r) => r.baseOk === true);
+    return { texto: esperados.join(" · "), title: esperados.join(" · "), ruim: false, ok };
+  },
+
+  textoDataBaseParcela(r) {
+    if (!r.dataBaseEsperada) return { texto: "—", title: "", ruim: false };
+    const esperado = this.fmtDate(r.dataBaseEsperada);
+    const lancada = this.fmtDate(r.siengeBase || r.excelBase);
+    if (r.baseOk === false) {
+      const texto = lancada && lancada !== "—" ? `${lancada} · esperado ${esperado}` : esperado;
+      return { texto, title: `Data base esperada ${esperado}` + (lancada && lancada !== "—" ? `. Lançada ${lancada}` : ""), ruim: true };
+    }
+    return { texto: esperado, title: esperado, ruim: false };
+  },
+
   parcelasHtml(g) {
     const linhas = g.parcelas.map((r) => {
       const valClass = r.valorOk === false ? "color:#b91c1c;font-weight:700;" : (r.valorOk ? "color:#15803d;font-weight:700;" : "");
+      const base = this.textoDataBaseParcela(r);
+      const baseStyle = base.ruim ? "color:#b91c1c;font-weight:700;" : "";
       return `<tr>
         <td>${this.esc(r.parcela)}</td>
         <td>${this.esc(this.fmtDate(r.vencimento))}</td>
+        <td>${this.esc(this.rotuloIdx(r))}</td>
+        <td style="${baseStyle}" title="${this.esc(base.title)}">${this.esc(base.texto)}</td>
         <td>${this.esc(this.money(r.siengeValor))}</td>
         <td style="${valClass}">${this.esc(this.money(r.crmProjetado))}</td>
         <td style="${valClass}">${this.esc(this.money(r.excelValor))}</td>
@@ -1257,7 +1358,7 @@ const RepactuacaoLoteApp = {
       <td colspan="12">
         <table class="repac-parcelas">
           <thead><tr>
-            <th>Parcela</th><th>Vencimento</th><th>Valor atual Sienge</th><th>Projetado CRM</th><th>Valor Excel</th><th>Status</th>
+            <th>Parcela</th><th>Vencimento</th><th>Indexador</th><th>Data base</th><th>Valor atual Sienge</th><th>Projetado CRM</th><th>Valor Excel</th><th>Status</th>
           </tr></thead>
           <tbody>${linhas}</tbody>
         </table>
@@ -1318,10 +1419,10 @@ const RepactuacaoLoteApp = {
 
   itensIndexador() {
     const map = new Map();
-    this.gruposMontados().forEach((g) => {
-      const id = String(g.indexerId || "");
+    this.state.rows.forEach((r) => {
+      const id = String(r.indexerId || "");
       if (!id || map.has(id)) return;
-      const nome = String(g.indexerName || "").trim();
+      const nome = String(r.indexerName || "").trim();
       map.set(id, { id: id, label: nome && nome !== "—" ? (id + " - " + nome.toUpperCase()) : id });
     });
     return Array.from(map.values()).sort((a, b) => Number(a.id) - Number(b.id));
@@ -1434,11 +1535,13 @@ const RepactuacaoLoteApp = {
     const visiveis = grupos.slice(0, 800);
     const body = visiveis.map((g) => {
       const aberto = !!this.state.abertos[g.key];
-      const baseClass = g.baseOk === false ? "color:#b91c1c;font-weight:700;" : (g.baseOk ? "color:#15803d;" : "");
       const nums = g.parcelas.map((r) => r.parcela).filter((n) => n != null).sort((a, b) => a - b);
       const faixa = nums.length > 1 ? `${nums[0]}–${nums[nums.length - 1]}` : (nums.length ? String(nums[0]) : "—");
       const conferidas = g.parcelas.filter((r) => r.valorOk === true).length;
       const parcTxt = `${g.parcelas.length} · ${faixa}${conferidas ? ` · ${conferidas} conferida${conferidas === 1 ? "" : "s"}` : ""}`;
+      const idx = this.textoIndexador(g);
+      const base = this.textoDataBase(g);
+      const baseClass = base.ruim ? "color:#b91c1c;font-weight:700;" : (base.ok ? "color:#15803d;" : "");
       return `<tr class="repac-tit${aberto ? " is-open" : ""}" onclick="RepactuacaoLoteApp.toggleTitulo('${encodeURIComponent(g.key)}')">
         <td class="repac-seta-cel"><i data-lucide="chevron-right" class="repac-seta"></i></td>
         <td>${this.esc(g.titulo)}</td>
@@ -1446,10 +1549,10 @@ const RepactuacaoLoteApp = {
         <td class="repac-nome" title="${this.esc(g.empresa || "")}">${this.esc(g.empresa || "—")}</td>
         <td title="${this.esc(g.documento || "")}">${this.esc(g.documento || "—")}</td>
         <td class="repac-nome" title="${this.esc(g.empreendimento || "")}">${this.esc(g.empreendimento || "—")}</td>
-        <td>${this.esc(g.indexerId)} — ${this.esc(g.indexerName || "—")}</td>
-        <td>${g.retro == null ? "—" : this.esc(g.retro)}</td>
-        <td style="${baseClass}">${this.esc(this.fmtDate(g.expectedBase))}</td>
-        <td>${this.esc(this.pct(g.accPct))}</td>
+        <td title="${this.esc(idx.title)}">${this.esc(idx.texto)}</td>
+        <td>${this.esc(this.textoRetro(g))}</td>
+        <td style="${baseClass}" title="${this.esc(base.title)}">${this.esc(base.texto)}</td>
+        <td>${this.esc(this.textoAcum(g))}</td>
         <td class="repac-parc" title="${this.esc(parcTxt)}">${this.esc(parcTxt)}</td>
         <td class="repac-status">${this.statusChip(this.statusGrupo(g.parcelas))}</td>
       </tr>${aberto ? this.parcelasHtml(g) : ""}`;
