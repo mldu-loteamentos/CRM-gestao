@@ -893,12 +893,8 @@ const ContabilEquiv = {
   setAba(id) {
     if (document.getElementById("ctb-eq-vincos")) this.lerVinculos();
     this.state.aba = id === "contas" ? "contas" : "equiv";
-    const seguir = () => this.render({ semLer: true });
-    if (this.state.aba === "contas" && !this.state.companies.length) {
-      this.carregarEmpresas().then(seguir, seguir);
-      return;
-    }
-    seguir();
+    this.render({ semLer: true });
+    if (this.state.aba === "contas" && window.ContabilDepara) window.ContabilDepara.garantir();
   },
 
   abasHtml() {
@@ -907,7 +903,7 @@ const ContabilEquiv = {
       `<button type="button" role="tab" aria-selected="${aba === id}" class="ml-tab${aba === id ? " is-active" : ""}" onclick="ContabilEquiv.setAba('${id}')"><i data-lucide="${icon}"></i> ${label}</button>`;
     return `<div class="ml-tabs" role="tablist" style="margin-bottom:16px;">
       ${btn("equiv", "Equivalência patrimonial", "git-merge")}
-      ${btn("contas", "Contas contábeis", "book-open")}
+      ${btn("contas", "Parametrização de parceiros", "users")}
     </div>`;
   },
 
@@ -1203,8 +1199,13 @@ const ContabilEquiv = {
         </table>
       </div>
     </div>`;
-    root.innerHTML = this.abasHtml() + (this.state.aba === "contas" ? this.contasHtml() : equivHtml);
-    if (this.state.aba === "contas") this.paintPlanoEmpresas();
+    if (this.state.aba === "contas") {
+      root.innerHTML = this.abasHtml() + '<div id="ctb-depara-root"></div>';
+      if (window.ContabilDepara) window.ContabilDepara.pintar();
+      if (window.lucide && typeof window.lucide.createIcons === "function") window.lucide.createIcons();
+      return;
+    }
+    root.innerHTML = this.abasHtml() + equivHtml;
     const nova = root.querySelector(".cc-scroll");
     if (nova) nova.scrollTop = topo;
     if (window.lucide && typeof window.lucide.createIcons === "function") window.lucide.createIcons();
