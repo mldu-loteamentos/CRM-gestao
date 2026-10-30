@@ -1438,24 +1438,39 @@ const RepactuacaoLoteApp = {
       const nums = g.parcelas.map((r) => r.parcela).filter((n) => n != null).sort((a, b) => a - b);
       const faixa = nums.length > 1 ? `${nums[0]}–${nums[nums.length - 1]}` : (nums.length ? String(nums[0]) : "—");
       const conferidas = g.parcelas.filter((r) => r.valorOk === true).length;
+      const parcTxt = `${g.parcelas.length} · ${faixa}${conferidas ? ` · ${conferidas} conferida${conferidas === 1 ? "" : "s"}` : ""}`;
       return `<tr class="repac-tit${aberto ? " is-open" : ""}" onclick="RepactuacaoLoteApp.toggleTitulo('${encodeURIComponent(g.key)}')">
         <td class="repac-seta-cel"><i data-lucide="chevron-right" class="repac-seta"></i></td>
         <td>${this.esc(g.titulo)}</td>
-        <td>${this.esc(g.cliente)}</td>
-        <td class="repac-nome">${this.esc(g.empresa || "—")}</td>
-        <td>${this.esc(g.documento || "—")}</td>
-        <td class="repac-nome">${this.esc(g.empreendimento || "—")}</td>
+        <td title="${this.esc(g.cliente)}">${this.esc(g.cliente)}</td>
+        <td class="repac-nome" title="${this.esc(g.empresa || "")}">${this.esc(g.empresa || "—")}</td>
+        <td title="${this.esc(g.documento || "")}">${this.esc(g.documento || "—")}</td>
+        <td class="repac-nome" title="${this.esc(g.empreendimento || "")}">${this.esc(g.empreendimento || "—")}</td>
         <td>${this.esc(g.indexerId)} — ${this.esc(g.indexerName || "—")}</td>
         <td>${g.retro == null ? "—" : this.esc(g.retro)}</td>
         <td style="${baseClass}">${this.esc(this.fmtDate(g.expectedBase))}</td>
         <td>${this.esc(this.pct(g.accPct))}</td>
-        <td>${g.parcelas.length} <span class="repac-faixa">${this.esc(faixa)}</span>${conferidas ? `<span class="repac-faixa">${conferidas} conferida${conferidas === 1 ? "" : "s"}</span>` : ""}</td>
-        <td>${this.statusChip(this.statusGrupo(g.parcelas))}</td>
+        <td class="repac-parc" title="${this.esc(parcTxt)}">${this.esc(parcTxt)}</td>
+        <td class="repac-status">${this.statusChip(this.statusGrupo(g.parcelas))}</td>
       </tr>${aberto ? this.parcelasHtml(g) : ""}`;
     }).join("");
     return `
       <div class="cc-scroll">
         <table class="cc-table repac-titulos">
+          <colgroup>
+            <col class="repac-c-seta">
+            <col class="repac-c-tit">
+            <col class="repac-c-cli">
+            <col class="repac-c-emp">
+            <col class="repac-c-doc">
+            <col class="repac-c-obra">
+            <col class="repac-c-idx">
+            <col class="repac-c-retro">
+            <col class="repac-c-base">
+            <col class="repac-c-acum">
+            <col class="repac-c-parc">
+            <col class="repac-c-st">
+          </colgroup>
           <thead>
             <tr>
               <th></th>

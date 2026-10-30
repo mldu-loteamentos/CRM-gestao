@@ -3164,9 +3164,43 @@ circle.donut-segment {
 .repac-arquivo.is-empty:hover { border-color: #105436; }
 .repac-filtros { margin-bottom: 12px; }
 .repac-page .ml-load { margin: 0 auto; }
+.cc-table.repac-titulos {
+  table-layout: auto;
+  width: 100%;
+}
+.cc-table.repac-titulos thead th,
+.cc-table.repac-titulos tr.repac-tit td {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cc-table.repac-titulos thead th:nth-child(1),
+.cc-table.repac-titulos tr.repac-tit td:nth-child(1),
+.cc-table.repac-titulos thead th:nth-child(2),
+.cc-table.repac-titulos tr.repac-tit td:nth-child(2),
+.cc-table.repac-titulos thead th:nth-child(5),
+.cc-table.repac-titulos tr.repac-tit td:nth-child(5),
+.cc-table.repac-titulos thead th:nth-child(7),
+.cc-table.repac-titulos tr.repac-tit td:nth-child(7),
+.cc-table.repac-titulos thead th:nth-child(8),
+.cc-table.repac-titulos tr.repac-tit td:nth-child(8),
+.cc-table.repac-titulos thead th:nth-child(9),
+.cc-table.repac-titulos tr.repac-tit td:nth-child(9),
+.cc-table.repac-titulos thead th:nth-child(10),
+.cc-table.repac-titulos tr.repac-tit td:nth-child(10),
+.cc-table.repac-titulos thead th:nth-child(11),
+.cc-table.repac-titulos tr.repac-tit td:nth-child(11),
+.cc-table.repac-titulos thead th:nth-child(12),
+.cc-table.repac-titulos tr.repac-tit td:nth-child(12) {
+  width: 1%;
+}
 .cc-table.repac-titulos tr.repac-tit { cursor: pointer; }
+.cc-table.repac-titulos tr.repac-tit td.repac-seta-cel,
+.cc-table.repac-titulos tr.repac-tit td.repac-status {
+  overflow: visible;
+  text-overflow: clip;
+}
 .cc-table.repac-titulos tr.repac-det > td { white-space: normal; overflow: visible; text-overflow: clip; background: #f8fafc; }
-.cc-table.repac-titulos td.repac-nome { white-space: normal; }
 .cc-table.repac-titulos .repac-parcelas th {
   position: static;
   background: transparent;
@@ -3186,7 +3220,7 @@ circle.donut-segment {
 .repac-seta-cel { width: 28px; text-align: center; }
 .repac-seta { width: 16px; height: 16px; color: #105436; transition: transform .15s ease; }
 .repac-tit.is-open .repac-seta { transform: rotate(90deg); }
-.repac-faixa { display: block; color: #94a3b8; font-size: 0.72rem; font-weight: 600; }
+.repac-faixa { display: inline; margin-left: 6px; color: #94a3b8; font-size: 0.72rem; font-weight: 600; }
 .repac-det td { background: #f8fafc; padding: 4px 12px 14px 36px; }
 .repac-parcelas { width: 100%; border-collapse: collapse; }
 .repac-parcelas th { text-align: center; font-size: 0.72rem; color: #64748b; font-weight: 700; padding: 8px 6px; background: transparent; }
