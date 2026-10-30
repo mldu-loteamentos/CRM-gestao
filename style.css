@@ -5311,6 +5311,31 @@ body.fc-nome-dragging * {
   font-family: inherit;
 }
 .alcada-pct-field span { font-size: 0.8rem; font-weight: 700; color: var(--color-primary); }
+.hon-internos-intro { margin: 0 0 14px; font-size: 0.85rem; color: #64748b; max-width: 720px; }
+.hon-internos-card { max-width: 760px; }
+.hon-internos-linha {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 20px;
+  align-items: center;
+  padding: 14px 16px;
+}
+.hon-internos-linha + .hon-internos-linha { border-top: 1px solid #edf2f0; }
+.hon-internos-linha .alcada-zero-help { max-width: none; }
+.hon-internos-linha .alcada-pct-field { flex: none; }
+.hon-internos-linha .alcada-pct-field input {
+  height: 32px;
+  -moz-appearance: textfield;
+}
+.hon-internos-linha .alcada-pct-field input::-webkit-outer-spin-button,
+.hon-internos-linha .alcada-pct-field input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.hon-internos-status { min-height: 1.2em; margin: 10px 0 0; font-size: 0.8rem; color: #105436; }
+@media (max-width: 640px) {
+  .hon-internos-linha { grid-template-columns: 1fr; justify-items: start; }
+}
 .btn-alcada-add {
   background: #F48128;
   color: #fff;

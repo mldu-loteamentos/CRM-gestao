@@ -67,6 +67,10 @@ const ContabilDepara = {
     }
     this._garantindo = true;
     this.state.erro = "";
+    this.state.lendo = true;
+    this.state.progresso = 8;
+    this.pintar();
+    this.animarBarra();
     try {
       await this.carregarMapa();
       await this.carregarParceiros();
@@ -76,6 +80,7 @@ const ContabilDepara = {
     } catch (e) {
       this.state.erro = (e && e.message) || "Não consegui abrir a parametrização.";
     }
+    this.pararBarra();
     this.state.lendo = false;
     this._garantindo = false;
     this.pintar();
@@ -187,24 +192,51 @@ const ContabilDepara = {
     return this.state.parceiros.find((p) => p.id === this.state.parceiroId) || null;
   },
 
-  /** Centros de custo ligados às obras desta parceria. */
+  centroCatalogo(id) {
+    const alvo = String(id || "").replace(/\D/g, "");
+    if (!alvo) return null;
+    const listas = [];
+    if (window.CentrosCustoState && CentrosCustoState.costCenters) listas.push(CentrosCustoState.costCenters);
+    const app = window.ParametrizacaoParceiroApp;
+    if (app && typeof app.allCostCenters === "function") listas.push(app.allCostCenters() || []);
+    for (let i = 0; i < listas.length; i++) {
+      const achou = (listas[i] || []).find((c) => c && String(c.id).replace(/\D/g, "") === alvo);
+      if (achou) return achou;
+    }
+    return null;
+  },
+
+  /* Centro da obra termina em 00. O da parceria é o par (12901, 13001) ou o nome com parceria. */
+  ehParceriaCc(cc) {
+    const id = String(cc && (cc.id != null ? cc.id : cc) || "").replace(/\D/g, "");
+    if (!id || /00$/.test(id)) return false;
+    const catalogo = this.centroCatalogo(id) || cc || {};
+    const nome = String(catalogo.name || catalogo.nome || (cc && (cc.name || cc.nome)) || "");
+    const app = window.ParametrizacaoParceiroApp;
+    if (app && typeof app.ehCcParceiro === "function" && app.ehCcParceiro({ id: id, name: nome })) return true;
+    if (/parce(ir|ri)/i.test(nome)) return true;
+    return /01$/.test(id);
+  },
+
+  /** Centros de custo da parceria, sem o centro da obra. */
   centrosDo(p) {
     if (!p) return [];
     const app = window.ParametrizacaoParceiroApp;
     const vistos = new Set();
     const lista = [];
     const por = (cc) => {
-      if (!cc) return;
+      if (!cc || !this.ehParceriaCc(cc)) return;
       const id = String(cc.id != null ? cc.id : cc).replace(/\D/g, "");
       if (!id || vistos.has(id)) return;
       vistos.add(id);
-      lista.push({ id: id, nome: String(cc.name || cc.nome || "").trim() });
+      const catalogo = this.centroCatalogo(id);
+      lista.push({ id: id, nome: String((catalogo && (catalogo.name || catalogo.nome)) || cc.name || cc.nome || "").trim() });
     };
     (p.obras || []).forEach((o) => {
-      const ligados = o.costCenters || [];
+      const ligados = (o.costCenters || []).filter((cc) => this.ehParceriaCc(cc));
       if (ligados.length) ligados.forEach(por);
-      else if (app && typeof app.centrosDaObra === "function" && typeof app.ehCcParceiro === "function" && o.code) {
-        app.centrosDaObra(o.code).filter((cc) => app.ehCcParceiro(cc)).forEach(por);
+      else if (app && typeof app.centrosDaObra === "function" && o.code) {
+        app.centrosDaObra(o.code).forEach(por);
       }
     });
     if (!lista.length) (p.costCenters || []).forEach(por);
@@ -229,36 +261,66 @@ const ContabilDepara = {
     return obras ? (nome + " · " + obras) : nome;
   },
 
+  animarBarra() {
+    clearInterval(this._barra);
+    this._barra = setInterval(() => {
+      if (!this.state.lendo || this.state.progresso >= 88) return;
+      this.state.progresso += 4;
+      const bar = document.querySelector("#ctb-depara-root .loading-progress-bar");
+      if (bar) bar.style.width = this.state.progresso + "%";
+    }, 280);
+  },
+
+  pararBarra() {
+    clearInterval(this._barra);
+    this._barra = null;
+  },
+
   async carregarContas(empresaId) {
     if (!empresaId) {
       this.state.contas = [];
       this.state.contasEmp = "";
+      this.state.lendo = false;
       return;
     }
-    if (this.state.contasEmp === String(empresaId) && this.state.contas.length) return;
+    if (this.state.contasEmp === String(empresaId) && this.state.contas.length) {
+      this.state.lendo = false;
+      return;
+    }
     const api = window.SiengeApiService;
     if (!api || typeof api.getAccountancyAccounts !== "function") {
       this.state.erro = "A lista de contas contábeis não está disponível. Atualize a página com Ctrl+F5.";
       this.state.contas = [];
       this.state.contasEmp = String(empresaId);
+      this.state.lendo = false;
       return;
     }
-    const brutos = await api.getAccountancyAccounts(empresaId);
-    const ler = window.ContabilEquiv && ContabilEquiv.lerConta ? (c) => ContabilEquiv.lerConta(c) : (c) => ({
-      id: c.id != null ? String(c.id) : "",
-      codigo: String(c.uniqueNumber || c.accountNumber || ""),
-      nome: String(c.name || "")
-    });
-    this.state.contas = (brutos || []).map((raw) => {
-      const base = ler(raw);
-      const tipo = String(raw.accountType || raw.type || "");
-      const analitica = /ANALYTICAL|^A$|ANALIT/i.test(tipo) || !tipo;
-      return { id: base.id, codigo: base.codigo, nome: base.nome, analitica: analitica };
-    }).filter((c) => c.codigo || c.id);
-    this.state.contasEmp = String(empresaId);
-    if (this.state.contas.length) {
-      if (this.state.erro === "O Sienge não devolveu o plano contábil desta empresa.") this.state.erro = "";
-    } else this.state.erro = "O Sienge não devolveu o plano contábil desta empresa.";
+    this.state.lendo = true;
+    this.state.progresso = Math.max(this.state.progresso || 0, 12);
+    this.pintar();
+    this.animarBarra();
+    try {
+      const brutos = await api.getAccountancyAccounts(empresaId);
+      const ler = window.ContabilEquiv && ContabilEquiv.lerConta ? (c) => ContabilEquiv.lerConta(c) : (c) => ({
+        id: c.id != null ? String(c.id) : "",
+        codigo: String(c.uniqueNumber || c.accountNumber || ""),
+        nome: String(c.name || "")
+      });
+      this.state.contas = (brutos || []).map((raw) => {
+        const base = ler(raw);
+        const tipo = String(raw.accountType || raw.type || "");
+        const analitica = /ANALYTICAL|^A$|ANALIT/i.test(tipo) || !tipo;
+        return { id: base.id, codigo: base.codigo, nome: base.nome, analitica: analitica };
+      }).filter((c) => c.codigo || c.id);
+      this.state.contasEmp = String(empresaId);
+      this.state.progresso = 100;
+      if (this.state.contas.length) {
+        if (this.state.erro === "O Sienge não devolveu o plano contábil desta empresa.") this.state.erro = "";
+      } else this.state.erro = "O Sienge não devolveu o plano contábil desta empresa.";
+    } finally {
+      this.pararBarra();
+      this.state.lendo = false;
+    }
   },
 
   mapaDo(parceiroId) {
@@ -449,8 +511,15 @@ const ContabilDepara = {
     const pars = this.parceirosDa(id);
     this.state.parceiroId = pars.length ? pars[0].id : "";
     this.escolherCentro();
+    const pronta = this.state.contasEmp === String(id) && this.state.contas.length;
+    if (!pronta) {
+      this.state.lendo = true;
+      this.state.progresso = 8;
+    }
     this.pintar();
     await this.carregarContas(this.state.empresaId);
+    this.pararBarra();
+    this.state.lendo = false;
     this.pintar();
   },
 
@@ -509,8 +578,8 @@ const ContabilDepara = {
     ).join("");
     const centros = this.centrosDo(this.parceiroAtual());
     const ccs = centros.map((c) => {
-      const nome = c.nome ? (" " + c.nome) : "";
-      return `<button type="button" role="tab" aria-selected="${c.id === s.ccId}" class="ml-tab${c.id === s.ccId ? " is-active" : ""}" onclick="ContabilDepara.setCentro('${this.esc(c.id)}')"><i data-lucide="landmark"></i> ${this.esc(c.id + nome)}</button>`;
+      const dica = c.nome ? (c.id + " " + c.nome) : c.id;
+      return `<button type="button" role="tab" aria-selected="${c.id === s.ccId}" class="ml-tab${c.id === s.ccId ? " is-active" : ""}" title="${this.esc(dica)}" onclick="ContabilDepara.setCentro('${this.esc(c.id)}')"><i data-lucide="landmark"></i> ${this.esc(c.id)}</button>`;
     }).join("");
     const busca = this.norm(s.busca);
     const linhas = this.linhasOrdenadas().map((c) => {
@@ -531,13 +600,18 @@ const ContabilDepara = {
       : (!centros.length && s.parceiroId
         ? "Este parceiro ainda não tem centro de custo na parceria."
         : (!s.planos.length ? "O plano financeiro desta empresa ainda não carregou." : "Nenhuma conta de resultado neste filtro."));
-    const tabela = s.empresas.length && centros.length;
+    const tabela = s.empresas.length && centros.length && !s.lendo;
+    const carga = s.lendo ? `<div class="ml-load">
+        <div class="loading-spinner" aria-hidden="true"></div>
+        <div class="loading-status-text">Carregando as contas contábeis…</div>
+        <div class="ml-load-track"><div class="loading-progress-bar" style="width:${Math.max(8, Math.min(100, s.progresso || 8))}%"></div></div>
+      </div>` : "";
     root.innerHTML = `<div class="cc-page ctb-depara">
       ${s.empresas.length ? `<div class="ml-tabs ctb-depara-tabs" role="tablist">${empresas}</div>` : ""}
       ${sub ? `<div class="ml-tabs ctb-depara-sub" role="tablist">${sub}</div>` : ""}
       ${ccs ? `<div class="ml-tabs ctb-depara-cc" role="tablist">${ccs}</div>` : ""}
-      <p class="ctb-eq-help">Cada linha é uma conta de resultado do plano financeiro. A conta e a reduzida são as deste centro de custo. O número da conta preenche a reduzida e o nome. A reduzida preenche a conta e o nome.</p>
-      ${s.erro ? `<p class="ctb-eq-status" style="color:#b91c1c;margin:0 0 8px;">${this.esc(s.erro)}</p>` : ""}
+      ${carga}
+      ${s.erro && !s.lendo ? `<p class="ctb-eq-status" style="color:#b91c1c;margin:0 0 8px;">${this.esc(s.erro)}</p>` : ""}
       ${tabela ? `<div style="margin:0 0 10px;max-width:360px;">
         <input type="search" class="ctb-depara-inp" value="${this.esc(s.busca)}" placeholder="Buscar no plano financeiro" oninput="ContabilDepara.filtrar(this.value)">
       </div>
@@ -552,7 +626,7 @@ const ContabilDepara = {
           </tr></thead>
           <tbody>${linhas || `<tr><td colspan="5" style="text-align:center;padding:30px;">${this.esc(vazio)}</td></tr>`}</tbody>
         </table>
-      </div>` : `<p class="ctb-eq-help">${this.esc(vazio)}</p>`}
+      </div>` : (s.lendo ? "" : `<p class="ctb-eq-help">${this.esc(vazio)}</p>`)}
     </div>`;
     if (window.lucide && typeof window.lucide.createIcons === "function") window.lucide.createIcons();
   }
