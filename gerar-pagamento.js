@@ -3699,8 +3699,9 @@ const GerarPagamentoApp = {
         o.padrao = padraoNovo;
         if (padraoNovo.aviso) avisos.push(padraoNovo.aviso);
         o.linhas.forEach((l) => {
-          l.padrao = 100;
-          l.esperado = l.valor;
+          const parte = l.id === parc ? padraoNovo.terr : (l.id === base ? padraoNovo.ml : 0);
+          l.padrao = parte;
+          l.esperado = o.valor * parte / 100;
           l.ok = !l.planoErro;
         });
         if (!o.linhas.some((l) => l.id === parc)) {
@@ -3937,7 +3938,7 @@ const GerarPagamentoApp = {
           : "—"}</td>
         <td class="num">${this.pct(l.pct)}</td>
         <td class="num">${this.money(l.valor)}</td>
-        <td class="num">${l.prestacao ? this.pct(l.padrao) + " na prestação" : (o.sociedade ? "sem rateio" : (o.exclusivo ? "exclusivo" : (l.padrao != null ? this.pct(l.padrao) + " da obra" : "—")))}</td>
+        <td class="num">${o.sociedade ? "sem rateio" : (o.exclusivo ? "exclusivo" : (l.padrao != null ? this.pct(l.padrao) + " da obra" : "—"))}</td>
         <td class="num">${l.esperado != null ? this.money(l.esperado) : "—"}</td>
         <td class="ic">${l.ok == null && !l.planoErro ? "" : (l.ok && !l.planoErro ? `<span class="gp-rateio-ok">✓</span>` : `<span class="gp-rateio-x">✗</span>`)}</td>
       </tr>`).join("")}`).join("");

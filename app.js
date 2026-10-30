@@ -4861,6 +4861,9 @@ async function processSuccessfulLogin(loggedUser) {
       if (window.GerarPagamentoApp && typeof window.GerarPagamentoApp.avisoFechamento === "function") {
         window.GerarPagamentoApp.avisoFechamento();
       }
+      if (window.EscalaHomeOffice && typeof window.EscalaHomeOffice.avisar === "function") {
+        window.EscalaHomeOffice.avisar();
+      }
     }, 2500);
   } catch (err) {
     console.error("Erro no login:", err);
@@ -6896,7 +6899,7 @@ window.applyRulesModulePermissions = function() {
   const canViewNeg = window.hasFinCrAction("regras_negociacao", "visualizar");
   const canEditNeg = window.hasFinCrAction("regras_negociacao", "editar");
 
-  ["regua", "financiamento", "atribuicao", "fila", "cartao", "alcada", "alcada-distrato", "honorarios-internos"].forEach(id => {
+  ["regua", "financiamento", "atribuicao", "fila", "cartao", "alcada", "alcada-distrato", "honorarios-internos", "home-office"].forEach(id => {
     const btn = document.getElementById("btn-regra-" + id);
     if (btn) btn.style.display = canAccCob ? "" : "none";
   });
@@ -6910,6 +6913,7 @@ window.applyRulesModulePermissions = function() {
   window.setRulesSectionMode(document.getElementById("content-regra-cartao"), canViewCob, canEditCob);
   window.setRulesSectionMode(document.getElementById("content-regra-alcada"), canViewCob, canEditCob);
   window.setRulesSectionMode(document.getElementById("content-regra-alcada-distrato"), canViewCob, canEditCob);
+  window.setRulesSectionMode(document.getElementById("content-regra-home-office"), canViewCob, canEditCob);
   window.setRulesSectionMode(document.getElementById("content-regra-negociacao"), canViewNeg, canEditNeg);
 
   const btnSaveCob = document.getElementById("btn-save-rules-config");
@@ -6991,6 +6995,9 @@ window.switchRegrasTab = function(tabId) {
   }
   if (tabId === "regra-honorarios-internos" && typeof window.paintHonorariosInternosPct === "function") {
     window.paintHonorariosInternosPct();
+  }
+  if (tabId === "regra-home-office" && window.EscalaHomeOffice && typeof window.EscalaHomeOffice.render === "function") {
+    window.EscalaHomeOffice.render();
   }
   window.applyRulesModulePermissions();
   if (window.lucide && typeof window.lucide.createIcons === "function") window.lucide.createIcons();

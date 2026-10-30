@@ -11390,3 +11390,29 @@ tr.pr-liberado td { background: #f7faf8; }
 .susp-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
 .susp-status { margin: 0 0 10px; min-height: 1.2em; font-size: 0.8rem; color: #64748b; }
 
+.eho-intro { margin: 0 0 14px; font-size: 0.85rem; color: #64748b; max-width: 820px; }
+.eho-sec { margin: 18px 0 8px; font-size: 0.95rem; color: #1e293b; }
+.eho-ops { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.eho-op { border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; background: #fff; }
+.eho-op h4 { margin: 0 0 8px; color: #105436; font-size: 0.95rem; }
+.eho-datas { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.eho-datas label { display: flex; flex-direction: column; gap: 4px; font-size: 0.72rem; font-weight: 700; color: #64748b; }
+.eho-datas input { height: 36px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0 8px; font-size: 0.85rem; }
+.eho-periodos { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.eho-periodo { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.82rem; color: #334155; }
+.eho-vazio, .eho-ferias { color: #94a3b8; font-size: 0.8rem; }
+.eho-status { min-height: 1.2em; margin: 8px 0 0; font-size: 0.8rem; color: #105436; }
+.eho-tabela { width: 100%; border-collapse: collapse; font-size: 0.84rem; margin-bottom: 8px; }
+.eho-tabela th { background: #105436; color: #fff; text-align: left; padding: 8px 10px; font-weight: 700; }
+.eho-tabela td { padding: 8px 10px; border-bottom: 1px solid #e2e8f0; }
+.eho-tabela tbody tr.is-meu { background: #ecfdf3; }
+.eho-eu { color: #105436; }
+.eho-tabela tbody tr.is-meu td:first-child { box-shadow: inset 3px 0 0 #105436; }
+#eho-pop { position: fixed; inset: 0; z-index: 8000; background: rgba(15, 23, 42, 0.45); display: flex; align-items: center; justify-content: center; padding: 24px; }
+.eho-pop-card { width: min(760px, 100%); max-height: 92vh; overflow: auto; background: #fff; border-radius: 16px; box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25); }
+.eho-pop-card img { display: block; width: 100%; height: auto; background: #f7c5d8; }
+.eho-pop-corpo { padding: 18px 20px 20px; }
+.eho-pop-corpo > p:first-child { margin: 0 0 6px; font-size: 1.05rem; font-weight: 700; color: #1e293b; }
+.eho-pop-acoes { display: flex; justify-content: flex-end; margin-top: 12px; }
+@media (max-width: 900px) { .eho-ops { grid-template-columns: 1fr; } }
+

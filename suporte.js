@@ -59,7 +59,8 @@
         { id: "regra-fila", label: "Fila de Cobrança" },
         { id: "regra-cartao", label: "Cartão de Crédito" },
         { id: "regra-alcada", label: "Alçada para Desconto" },
-        { id: "regra-honorarios-internos", label: "Honorários internos" }
+        { id: "regra-honorarios-internos", label: "Honorários internos" },
+        { id: "regra-home-office", label: "Escala de home office" }
       ]},
       { id: "extrato", label: "Extrato" },
       { id: "mapa", label: "Mapa jurídico" },
