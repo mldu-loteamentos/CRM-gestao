@@ -1611,10 +1611,14 @@ ComprasControleApp.formaHtml = function (payment, row) {
     const ag = [d.beneficiaryBankBranchNumber, d.beneficiaryBankBranchDigit].filter(Boolean).join("-");
     const conta = [d.beneficiaryAccountNumber, d.beneficiaryAccountDigit].filter(Boolean).join("-");
     const tipo = d.beneficiaryAccountType === "P" ? "Poupança" : "Conta corrente";
+    const docRaw = String(d.beneficiaryCNPJNumber || d.beneficiaryCPFNumber || "").replace(/\D/g, "");
+    const docFmt = window.BoletoCheck && (docRaw.length === 11 || docRaw.length === 14) ? BoletoCheck.docFmt(docRaw) : "";
+    const docLabel = docRaw.length === 14 ? "CNPJ favorecido" : "CPF favorecido";
     return `<p><strong>Forma:</strong> Transferência</p>
       <p><strong>Banco:</strong> ${this.esc(banco || "—")}</p>
       <p><strong>Agência:</strong> ${this.esc(ag || "—")}</p>
       <p><strong>${this.esc(tipo)}:</strong> ${this.esc(conta || "—")}</p>
+      ${docFmt ? `<p><strong>${docLabel}:</strong> ${this.esc(docFmt)}</p>` : ""}
       <p><strong>Favorecido:</strong> ${this.esc(d.beneficiaryName || "—")}</p>
       ${d.notes ? `<pre style="white-space:pre-wrap;font-family:inherit;margin:8px 0 0;">${this.esc(d.notes)}</pre>` : ""}`;
   }

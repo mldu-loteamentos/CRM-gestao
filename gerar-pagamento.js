@@ -2103,8 +2103,16 @@ const GerarPagamentoApp = {
     }));
   },
 
+  /** O mesmo grupo do cartão na tela. O grupo completo inclui título que já saiu em lote e a assinatura não bate com o botão. */
+  grupoNaTela(key) {
+    const k = String(key || "");
+    const vis = this.gruposVisiveis().find((x) => x.key === k);
+    if (vis) return vis;
+    return this.gruposLote().find((x) => x.key === k) || null;
+  },
+
   marcarConferido(key) {
-    const g = this.gruposLote().find((x) => x.key === key);
+    const g = this.grupoNaTela(key);
     if (!g || g.key === "__sem") return;
     const conf = this.state.conferencia || (this.state.conferencia = this.conferenciaVazia());
     conf.lotes = conf.lotes || {};
@@ -3346,7 +3354,7 @@ const GerarPagamentoApp = {
                 onchange="GerarPagamentoApp.setDataBaixa('${this.esc(g.key)}', this.value)">
             </label>
             <strong class="gp-lote-total">${this.money(total)}</strong>
-            <button type="button" class="gp-conferido${this.loteConferido(g) ? " is-on" : ""}" onclick="GerarPagamentoApp.marcarConferido('${this.esc(g.key)}')"
+            <button type="button" class="gp-conferido${this.loteConferido(g) ? " is-on" : ""}" onclick="event.stopPropagation(); GerarPagamentoApp.marcarConferido('${this.esc(g.key)}')"
               title="${this.loteConferido(g) ? "Classificação aceita. Clique para desfazer o aceite deste lote." : "Aceite de que a classificação, o rateio e a conta estão corretos. O Integra passa a reconhecer este padrão."}">
               <i data-lucide="${this.loteConferido(g) ? "circle-check" : "circle-alert"}" style="width:14px;height:14px;"></i> Conferido
             </button>

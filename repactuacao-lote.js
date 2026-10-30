@@ -26,6 +26,7 @@ const RepactuacaoLoteApp = {
     indexers: [],
     ratesByIndexer: {},
     filter: "all",
+    abertos: {},
     previewLoading: false,
     previewProgress: 0,
     previewRows: [],
@@ -700,6 +701,8 @@ const RepactuacaoLoteApp = {
         siengeValor: null,
         crmProjetado: null,
         valorOk: null,
+        siengeConsultado: false,
+        siengeAchou: false,
         accMissing: []
       };
     });
@@ -709,13 +712,16 @@ const RepactuacaoLoteApp = {
     if (!inst) return null;
     const candidates = [
       inst.currentBalance,
-      inst.currentValue,
       inst.balanceDue,
+      inst.correctedValue,
+      inst.correctedAmount,
+      inst.currentValue,
+      inst.balance,
       inst.installmentValue,
       inst.originalValue,
+      inst.originalAmount,
       inst.principalValue,
-      inst.value,
-      inst.correctedValue
+      inst.value
     ];
     for (const c of candidates) {
       if (c == null || c === "") continue;
@@ -748,7 +754,9 @@ const RepactuacaoLoteApp = {
         siengeValor: cur,
         crmProjetado: projetado,
         valorOk,
-        vencimento: row.vencimento || (hit && hit.dueDate ? String(hit.dueDate).slice(0, 10) : row.vencimento)
+        siengeConsultado: true,
+        siengeAchou: !!hit,
+        vencimento: row.vencimento || (hit && (hit.dueDate || hit.due) ? String(hit.dueDate || hit.due).slice(0, 10) : row.vencimento)
       };
     });
   },
@@ -805,37 +813,40 @@ const RepactuacaoLoteApp = {
   async fetchInstallments(titulo) {
     const id = String(titulo || "").replace(/^B-/i, "").trim();
     if (!id) return [];
-
+    const fetchFn = window.siengeFetchWithRetry;
     let list = [];
-    try {
-      if (window.SiengeApiService && typeof SiengeApiService.getBillInstallments === "function") {
-        list = await SiengeApiService.getBillInstallments(id) || [];
-      } else if (typeof window.siengeFetchWithRetry === "function") {
-        const res = await siengeFetchWithRetry(`/accounts-receivable/receivable-bills/${encodeURIComponent(id)}/installments`);
-        list = (res && (res.results || res.data || res.installments)) || (Array.isArray(res) ? res : []);
+    if (typeof fetchFn === "function") {
+      const limit = 200;
+      for (let offset = 0; offset < 5000; offset += limit) {
+        const res = await fetchFn(`/accounts-receivable/receivable-bills/${encodeURIComponent(id)}/installments?limit=${limit}&offset=${offset}`);
+        const rows = (res && (res.results || res.data || res.installments)) || (Array.isArray(res) ? res : []);
+        if (!rows.length) break;
+        list = list.concat(rows);
+        const total = res && res.resultSetMetadata && Number(res.resultSetMetadata.count);
+        if (rows.length < limit) break;
+        if (Number.isFinite(total) && list.length >= total) break;
       }
-    } catch (e) {
-      console.warn("[Repactuação] installments", id, e);
-      list = [];
+    } else if (window.SiengeApiService && typeof SiengeApiService.getBillInstallments === "function") {
+      const inst = await SiengeApiService.getBillInstallments(id);
+      list = (inst && inst.results) || inst || [];
     }
     if (!Array.isArray(list)) list = [];
 
-    // Fallback: extrato do cliente (mesma fonte da aba Repactuações)
-    const hasBalance = list.some((inst) => this.pickSiengeInstallmentValue(inst) != null);
-    if ((!list.length || !hasBalance) && typeof window.siengeFetchWithRetry === "function") {
+    const wanted = this.state.rows
+      .filter((r) => String(r.titulo) === String(titulo))
+      .map((r) => Number(r.parcela));
+    const falta = wanted.filter((p) => !this.findInstallmentForParcela(list, p));
+    if (falta.length && typeof fetchFn === "function") {
       try {
-        const end = this.state.adjustDate || (typeof window.localDateStr === "function" ? window.localDateStr() : new Date().toISOString().slice(0, 10));
-        const start = "2000-01-01";
-        const q = `/bulk-data/v1/customer-extract-history?startDueDate=${start}&endDueDate=${end}&billReceivableId=${encodeURIComponent(id)}&documentsId=CT&includeRemadeInstallments=true&includeCanceledInstallments=false&includeRevokedInstallments=false&includeRenegotiatedDischarge=false`;
-        const json = await siengeFetchWithRetry(q);
+        const q = `/bulk-data/v1/customer-extract-history?startDueDate=2000-01-01&endDueDate=2099-12-31&billReceivableId=${encodeURIComponent(id)}&documentsId=CT&includeRemadeInstallments=true&includeCanceledInstallments=false&includeRevokedInstallments=false&includeRenegotiatedDischarge=false`;
+        const json = await fetchFn(q);
         const items = (json && (json.data || json.results || json.items)) || (Array.isArray(json) ? json : []);
-        const fromExtract = [];
         (items || []).forEach((item) => {
           (item.installments || []).forEach((inst) => {
-            fromExtract.push(inst);
+            const n = Number(inst.installmentNumber != null ? inst.installmentNumber : inst.number);
+            if (!this.findInstallmentForParcela(list, n)) list.push(inst);
           });
         });
-        if (fromExtract.length) list = fromExtract;
       } catch (e2) {
         console.warn("[Repactuação] extract-history", id, e2);
       }
@@ -852,6 +863,7 @@ const RepactuacaoLoteApp = {
     this.state.loading = false;
     this.state.stop = false;
     this.state.filter = "all";
+    this.state.abertos = {};
     this.state.empresa = "";
     this.render();
   },
@@ -930,34 +942,135 @@ const RepactuacaoLoteApp = {
     this.state.stop = true;
   },
 
-  renderKpisOnly() {
-    const box = document.getElementById("repac-kpis");
-    if (!box || !this.state.rows.length) return;
-    const n = this.state.rows.length;
-    const baseFail = this.state.rows.filter((r) => r.baseOk === false).length;
-    const valFail = this.state.rows.filter((r) => r.valorOk === false).length;
-    const ok = this.state.rows.filter((r) => r.baseOk === true && r.valorOk === true).length;
-    const missingSienge = this.state.rows.filter((r) => r.siengeValor == null).length;
-    box.innerHTML = `
-      <div class="est-fin-card"><label>Parcelas</label><strong>${n}</strong></div>
-      <div class="est-fin-card is-ok"><label>Bateram</label><strong>${ok}</strong></div>
-      <div class="est-fin-card is-warn"><label>Data base divergente</label><strong>${baseFail}</strong></div>
-      <div class="est-fin-card is-warn"><label>Valor divergente</label><strong>${valFail}</strong></div>
-      <div class="est-fin-card${missingSienge ? " is-warn" : ""}"><label>Sem valor Sienge</label><strong>${missingSienge}</strong></div>
+  contagens() {
+    const rows = this.state.rows;
+    return {
+      n: rows.length,
+      baseFail: rows.filter((r) => r.baseOk === false).length,
+      valFail: rows.filter((r) => r.valorOk === false).length,
+      ok: rows.filter((r) => r.valorOk === true).length,
+      missingSienge: rows.filter((r) => r.siengeConsultado && !r.siengeAchou).length
+    };
+  },
+
+  kpisHtml(c) {
+    return `
+      <div class="est-fin-card"><label>Parcelas</label><strong>${c.n}</strong></div>
+      <div class="est-fin-card is-ok"><label>Valor conferido</label><strong>${c.ok}</strong></div>
+      <div class="est-fin-card is-warn"><label>Data base divergente</label><strong>${c.baseFail}</strong></div>
+      <div class="est-fin-card is-warn"><label>Valor divergente</label><strong>${c.valFail}</strong></div>
+      <div class="est-fin-card${c.missingSienge ? " is-warn" : ""}"><label>Sem valor Sienge</label><strong>${c.missingSienge}</strong></div>
     `;
   },
 
-  filteredRows() {
+  renderKpisOnly() {
+    const box = document.getElementById("repac-kpis");
+    if (!box || !this.state.rows.length) return;
+    box.innerHTML = this.kpisHtml(this.contagens());
+  },
+
+  chaveGrupo(r) {
+    return [r.titulo, r.documento, r.cliente, r.cc].map((v) => String(v || "")).join("|");
+  },
+
+  /** conferido = valor projetado no Integra bateu com o Excel, parcela a parcela. */
+  statusDe(r) {
+    if (r.valorOk === false) return "divergente";
+    if (r.valorOk === true) return "conferido";
+    if (r.siengeConsultado && !r.siengeAchou) return "sem";
+    if (this.state.loading) return "conferindo";
+    return "pendente";
+  },
+
+  statusGrupo(parcelas) {
+    const lista = parcelas || [];
+    if (lista.some((r) => this.statusDe(r) === "divergente")) return "divergente";
+    if (lista.length && lista.every((r) => this.statusDe(r) === "conferido")) return "conferido";
+    if (lista.some((r) => this.statusDe(r) === "sem")) return "sem";
+    if (lista.some((r) => this.statusDe(r) === "conferindo") || this.state.loading) return "conferindo";
+    return "pendente";
+  },
+
+  statusChip(kind) {
+    if (kind === "conferido") return `<span class="est-fin-chip est-fin-Adimplente">Valor conferido ✓</span>`;
+    if (kind === "divergente") return `<span class="est-fin-chip est-fin-Inadimplente">Divergente</span>`;
+    if (kind === "sem") return `<span class="est-fin-chip est-fin-Inadimplente">Sem Sienge</span>`;
+    if (kind === "conferindo") return `<span class="est-fin-chip est-fin-apurar">Conferindo</span>`;
+    return `<span class="est-fin-chip est-fin-apurar">Pendente</span>`;
+  },
+
+  gruposTabela() {
     const f = this.state.filter;
-    if (f === "base") return this.state.rows.filter((r) => r.baseOk === false);
-    if (f === "valor") return this.state.rows.filter((r) => r.valorOk === false);
-    if (f === "ok") return this.state.rows.filter((r) => r.baseOk !== false && r.valorOk !== false);
-    return this.state.rows;
+    const ordem = [];
+    const map = {};
+    this.state.rows.forEach((r) => {
+      const k = this.chaveGrupo(r);
+      if (!map[k]) {
+        map[k] = {
+          key: k,
+          titulo: r.titulo,
+          cliente: r.cliente,
+          empresa: r.empresa,
+          documento: r.documento,
+          cc: r.cc,
+          indexerId: r.indexerId,
+          indexerName: r.indexerName,
+          retro: r.retro,
+          expectedBase: r.expectedBase,
+          accPct: r.accPct,
+          baseOk: r.baseOk,
+          parcelas: []
+        };
+        ordem.push(k);
+      }
+      const g = map[k];
+      g.parcelas.push(r);
+      if (r.baseOk === false) g.baseOk = false;
+      else if (g.baseOk == null && r.baseOk === true) g.baseOk = true;
+      if (g.accPct == null && r.accPct != null) g.accPct = r.accPct;
+      if (!g.expectedBase && r.expectedBase) g.expectedBase = r.expectedBase;
+    });
+    let grupos = ordem.map((k) => map[k]);
+    if (f === "ok") grupos = grupos.filter((g) => this.statusGrupo(g.parcelas) === "conferido");
+    else if (f === "valor") grupos = grupos.filter((g) => g.parcelas.some((r) => r.valorOk === false));
+    else if (f === "base") grupos = grupos.filter((g) => g.parcelas.some((r) => r.baseOk === false));
+    return grupos;
+  },
+
+  toggleTitulo(key) {
+    const k = decodeURIComponent(String(key || ""));
+    this.state.abertos[k] = !this.state.abertos[k];
+    this.renderTableOnly();
+  },
+
+  parcelasHtml(g) {
+    const linhas = g.parcelas.map((r) => {
+      const valClass = r.valorOk === false ? "color:#b91c1c;font-weight:700;" : (r.valorOk ? "color:#15803d;font-weight:700;" : "");
+      return `<tr>
+        <td>${this.esc(r.parcela)}</td>
+        <td>${this.esc(this.fmtDate(r.vencimento))}</td>
+        <td>${this.esc(this.money(r.siengeValor))}</td>
+        <td style="${valClass}">${this.esc(this.money(r.crmProjetado))}</td>
+        <td style="${valClass}">${this.esc(this.money(r.excelValor))}</td>
+        <td>${this.statusChip(this.statusDe(r))}</td>
+      </tr>`;
+    }).join("");
+    return `<tr class="repac-det">
+      <td colspan="12">
+        <table class="repac-parcelas">
+          <thead><tr>
+            <th>Parcela</th><th>Vencimento</th><th>Valor atual Sienge</th><th>Projetado CRM</th><th>Valor Excel</th><th>Status</th>
+          </tr></thead>
+          <tbody>${linhas}</tbody>
+        </table>
+      </td>
+    </tr>`;
   },
 
   renderTableOnly() {
     const wrap = document.getElementById("repac-table-wrap");
     if (wrap) wrap.innerHTML = this.tableHtml();
+    if (window.lucide) window.lucide.createIcons();
   },
 
   uploadZoneHtml() {
@@ -996,79 +1109,64 @@ const RepactuacaoLoteApp = {
   },
 
   tableHtml() {
-    const rows = this.filteredRows();
     if (!this.state.rows.length) {
-      return `<p style="color:#64748b;padding:24px;text-align:center;">Com o mês escolhido acima, envie a planilha <strong>Títulos para Repactuação</strong> para conferir data base e valor projetado por parcela.</p>`;
+      return `<p style="color:#64748b;padding:24px;text-align:center;">Com o mês escolhido acima, envie a planilha <strong>Títulos para Repactuação</strong> para conferir o valor projetado de cada parcela.</p>`;
     }
-    const body = rows.slice(0, 800).map((r) => {
-      const baseClass = r.baseOk === false ? "color:#b91c1c;font-weight:700;" : (r.baseOk ? "color:#15803d;" : "");
-      const valClass = r.valorOk === false ? "color:#b91c1c;font-weight:700;" : (r.valorOk ? "color:#15803d;" : "");
-      let st;
-      if (r.baseOk === false || r.valorOk === false) {
-        st = `<span class="est-fin-chip est-fin-Inadimplente">Divergente</span>`;
-      } else if (r.valorOk && r.baseOk) {
-        st = `<span class="est-fin-chip est-fin-Adimplente">Bateu</span>`;
-      } else if (r.siengeValor == null && !this.state.loading) {
-        st = `<span class="est-fin-chip est-fin-Inadimplente">Sem Sienge</span>`;
-      } else {
-        st = `<span class="est-fin-chip est-fin-apurar">${this.state.loading ? "Conferindo" : "Pendente"}</span>`;
-      }
-      return `<tr>
-        <td style="text-align:center;">${this.esc(r.titulo)}</td>
-        <td style="text-align:center;">${this.esc(r.cliente)}</td>
-        <td style="text-align:center;">${this.esc(r.documento)}</td>
-        <td style="text-align:center;">${this.esc(r.cc || "—")}</td>
-        <td style="text-align:center;">${this.esc(r.parcela)}</td>
-        <td style="text-align:center;">${this.esc(this.fmtDate(r.vencimento))}</td>
-        <td style="text-align:center;">${this.esc(r.indexerId)} — ${this.esc(r.indexerName)}</td>
-        <td style="text-align:center;">${r.retro == null ? "—" : this.esc(r.retro)}</td>
-        <td style="text-align:center;${baseClass}">${this.esc(this.fmtDate(r.excelBase))}</td>
-        <td style="text-align:center;${baseClass}">${this.esc(this.fmtDate(r.expectedBase))}</td>
-        <td style="text-align:center;">${this.esc(this.pct(r.accPct))}</td>
-        <td style="text-align:center;">${this.esc(this.money(r.siengeValor))}</td>
-        <td style="text-align:center;${valClass}">${this.esc(this.money(r.crmProjetado))}</td>
-        <td style="text-align:center;${valClass}">${this.esc(this.money(r.excelValor))}</td>
-        <td style="text-align:center;">${st}</td>
-      </tr>`;
+    const grupos = this.gruposTabela();
+    const visiveis = grupos.slice(0, 800);
+    const body = visiveis.map((g) => {
+      const aberto = !!this.state.abertos[g.key];
+      const baseClass = g.baseOk === false ? "color:#b91c1c;font-weight:700;" : (g.baseOk ? "color:#15803d;" : "");
+      const nums = g.parcelas.map((r) => r.parcela).filter((n) => n != null).sort((a, b) => a - b);
+      const faixa = nums.length > 1 ? `${nums[0]}–${nums[nums.length - 1]}` : (nums.length ? String(nums[0]) : "—");
+      const conferidas = g.parcelas.filter((r) => r.valorOk === true).length;
+      return `<tr class="repac-tit${aberto ? " is-open" : ""}" onclick="RepactuacaoLoteApp.toggleTitulo('${encodeURIComponent(g.key)}')">
+        <td class="repac-seta-cel"><i data-lucide="chevron-right" class="repac-seta"></i></td>
+        <td>${this.esc(g.titulo)}</td>
+        <td>${this.esc(g.cliente)}</td>
+        <td>${this.esc(g.empresa || "—")}</td>
+        <td>${this.esc(g.documento || "—")}</td>
+        <td>${this.esc(g.cc || "—")}</td>
+        <td>${this.esc(g.indexerId)} — ${this.esc(g.indexerName || "—")}</td>
+        <td>${g.retro == null ? "—" : this.esc(g.retro)}</td>
+        <td style="${baseClass}">${this.esc(this.fmtDate(g.expectedBase))}</td>
+        <td>${this.esc(this.pct(g.accPct))}</td>
+        <td>${g.parcelas.length} <span class="repac-faixa">${this.esc(faixa)}</span>${conferidas ? `<span class="repac-faixa">${conferidas} conferida${conferidas === 1 ? "" : "s"}</span>` : ""}</td>
+        <td>${this.statusChip(this.statusGrupo(g.parcelas))}</td>
+      </tr>${aberto ? this.parcelasHtml(g) : ""}`;
     }).join("");
     return `
       <div class="table-container crm-scroll-table" style="max-height:62vh;">
-        <table class="custom-table">
+        <table class="custom-table repac-titulos">
           <thead>
             <tr>
-              <th style="text-align:center;">Título</th>
-              <th style="text-align:center;">Cliente</th>
-              <th style="text-align:center;">Documento</th>
-              <th style="text-align:center;">Centro</th>
-              <th style="text-align:center;">Parcela</th>
-              <th style="text-align:center;">Vencimento</th>
-              <th style="text-align:center;">Indexador</th>
-              <th style="text-align:center;">Retro</th>
-              <th style="text-align:center;">Data base (Excel)</th>
-              <th style="text-align:center;">Data base (CRM)</th>
-              <th style="text-align:center;">Acum. 12m</th>
-              <th style="text-align:center;">Valor atual Sienge</th>
-              <th style="text-align:center;">Projetado CRM</th>
-              <th style="text-align:center;">Valor Excel</th>
-              <th style="text-align:center;">Status</th>
+              <th></th>
+              <th>Título</th>
+              <th>Cliente</th>
+              <th>Empresa</th>
+              <th>Documento</th>
+              <th>Centro de custo</th>
+              <th>Indexador</th>
+              <th>Retro</th>
+              <th>Data base</th>
+              <th>Acum. 12m</th>
+              <th>Parcelas</th>
+              <th>Status</th>
             </tr>
           </thead>
-          <tbody>${body || `<tr><td colspan="15" style="text-align:center;padding:20px;color:#64748b;">Nenhuma linha neste filtro.</td></tr>`}</tbody>
+          <tbody>${body || `<tr><td colspan="12" style="text-align:center;padding:20px;color:#64748b;">Nenhum título neste filtro.</td></tr>`}</tbody>
         </table>
       </div>
-      ${rows.length > 800 ? `<p style="font-size:0.8rem;color:#64748b;">Exibindo 800 de ${rows.length} parcelas.</p>` : ""}
+      ${grupos.length > 800 ? `<p style="font-size:0.8rem;color:#64748b;">Exibindo 800 de ${grupos.length} títulos.</p>` : ""}
     `;
   },
 
   render() {
     const root = document.getElementById("repactuacao-lote-root");
     if (!root) return;
-    const n = this.state.rows.length;
+    const c = this.contagens();
+    const n = c.n;
     const titles = new Set(this.state.rows.map((r) => r.titulo)).size;
-    const baseFail = this.state.rows.filter((r) => r.baseOk === false).length;
-    const valFail = this.state.rows.filter((r) => r.valorOk === false).length;
-    const ok = this.state.rows.filter((r) => r.baseOk === true && r.valorOk === true).length;
-    const missingSienge = this.state.rows.filter((r) => r.siengeValor == null).length;
     root.innerHTML = `
       <div class="est-stock-page">
         ${this.previewHtml()}
@@ -1079,15 +1177,11 @@ const RepactuacaoLoteApp = {
         </div>
         ${n ? `
         <div id="repac-kpis" class="repac-kpis">
-          <div class="est-fin-card"><label>Parcelas</label><strong>${n}</strong></div>
-          <div class="est-fin-card is-ok"><label>Bateram</label><strong>${ok}</strong></div>
-          <div class="est-fin-card is-warn"><label>Data base divergente</label><strong>${baseFail}</strong></div>
-          <div class="est-fin-card is-warn"><label>Valor divergente</label><strong>${valFail}</strong></div>
-          <div class="est-fin-card${missingSienge ? " is-warn" : ""}"><label>Sem valor Sienge</label><strong>${missingSienge}</strong></div>
+          ${this.kpisHtml(c)}
         </div>
         <div class="est-stock-pills" style="margin-bottom:12px;">
           <button type="button" class="est-pill${this.state.filter === "all" ? " is-active" : ""}" onclick="RepactuacaoLoteApp.setFilter('all')">Todas</button>
-          <button type="button" class="est-pill${this.state.filter === "ok" ? " is-active" : ""}" onclick="RepactuacaoLoteApp.setFilter('ok')">Bateram</button>
+          <button type="button" class="est-pill${this.state.filter === "ok" ? " is-active" : ""}" onclick="RepactuacaoLoteApp.setFilter('ok')">Valor conferido</button>
           <button type="button" class="est-pill${this.state.filter === "base" ? " is-active" : ""}" onclick="RepactuacaoLoteApp.setFilter('base')">Data base</button>
           <button type="button" class="est-pill${this.state.filter === "valor" ? " is-active" : ""}" onclick="RepactuacaoLoteApp.setFilter('valor')">Valor</button>
         </div>` : ""}

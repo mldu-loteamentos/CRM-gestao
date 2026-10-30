@@ -3141,6 +3141,17 @@ circle.donut-segment {
   .repac-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .repac-planilha #repac-progress { margin-left: 0; }
 }
+.repac-tit { cursor: pointer; }
+.repac-tit:hover td { background: #f0f7f3; }
+.repac-tit td { vertical-align: middle; }
+.repac-seta-cel { width: 28px; text-align: center; }
+.repac-seta { width: 16px; height: 16px; color: #105436; transition: transform .15s ease; }
+.repac-tit.is-open .repac-seta { transform: rotate(90deg); }
+.repac-faixa { display: block; color: #94a3b8; font-size: 0.72rem; font-weight: 600; }
+.repac-det td { background: #f8fafc; padding: 4px 12px 14px 36px; }
+.repac-parcelas { width: 100%; border-collapse: collapse; }
+.repac-parcelas th { text-align: center; font-size: 0.72rem; color: #64748b; font-weight: 700; padding: 8px 6px; background: transparent; }
+.repac-parcelas td { text-align: center; padding: 7px 6px; border-top: 1px solid #e2e8f0; font-variant-numeric: tabular-nums; }
 #est-conferencia:empty { display: none; }
 .est-conf { background: #fff; border: 1px solid #e6eeea; border-left: 4px solid #105436; border-radius: 16px; padding: 14px 18px; }
 .est-conf.is-bad { border-left-color: #c2410c; }
