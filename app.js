@@ -22292,9 +22292,10 @@ function baixarPropostaAcordoPdf(results, nomeArquivo) {
   if (!window.jspdf || !window.jspdf.jsPDF) throw new Error("gerador de PDF indisponível");
   const { jsPDF } = window.jspdf;
   const pdf = new jsPDF("p", "mm", "a4");
+  if (typeof pdf.autoTable !== "function") throw new Error("gerador de tabela indisponível");
   const brl = (v) => Number(v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-  const m = 12;
-  const largura = 186;
+  const m = 16;
+  const largura = 178;
   const sale = g_renegSale || {};
   const cli = g_renegCustomer || {};
   const unit = (window.AppState && AppState.units && sale.unitId && AppState.units[sale.unitId]) || {};
@@ -22306,105 +22307,108 @@ function baixarPropostaAcordoPdf(results, nomeArquivo) {
   const unidade = [unit.costCenterId || sale.costCenterId || sale.enterpriseId, unit.name || unit.unitName || sale.unitName].filter(Boolean).join(" - ");
   const emp = unit.enterpriseName || unit.costCenterName || sale.enterpriseName || sale.costCenterName || "";
   const docCli = cli.cpf || cli.document || cli.cnpj || "";
+  const local = [emp, unidade].filter(Boolean).join(" · ") || "—";
+  const agora = new Date();
+  const emissao = String(agora.getDate()).padStart(2, "0") + "/" + String(agora.getMonth() + 1).padStart(2, "0") + "/" + agora.getFullYear();
+  const pct = sit.original > 0.009 ? Math.round((sit.pago / sit.original) * 100) : 0;
+  const qtdContrato = (sit.qtdParcelasPagas || 0) + (sit.qtdVencidas || 0) + (sit.qtdAVencer || 0);
+  const totalContrato = (sit.liquido || 0) + (sit.valorVencidas || 0) + (sit.valorAVencer || 0);
+  const mesNome = info.mes ? RENEG_MESES[info.mes] : "";
+  const linhaIndice = info.rotulo
+    ? ("Indexador " + info.rotulo + (info.sem ? ", sem reajuste de parcela." : (mesNome && info.proximo ? ". Reajuste em " + mesNome + ", a partir de " + info.proximo + "." : ".")))
+    : "";
+  const temSinal = (Number(results.sinalValue) || 0) > 0.009;
+  const grade = {
+    theme: "grid",
+    styles: { font: "helvetica", fontSize: 8, textColor: [30, 41, 59], lineColor: [203, 213, 225], lineWidth: 0.15, cellPadding: 2.1, valign: "middle" },
+    headStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: "bold", fontSize: 8, lineColor: [203, 213, 225] },
+    margin: { bottom: 16 }
+  };
 
-  pdf.setFillColor(16, 84, 54);
-  pdf.rect(0, 0, 210, 16, "F");
-  pdf.setTextColor(255, 255, 255);
+  pdf.setProperties({ title: "Proposta de acordo", subject: String(cli.name || ""), author: "Moura Leite" });
+  let y = 16;
   pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(15);
-  pdf.text("Proposta de acordo", m, 10.5);
-
-  let y = 22;
+  pdf.setFontSize(8);
+  pdf.setTextColor(16, 84, 54);
+  pdf.text("MOURA LEITE", m, y);
+  pdf.setFont("helvetica", "normal");
+  pdf.setTextColor(100, 116, 139);
+  pdf.text(emissao, m + largura, y, { align: "right" });
+  y += 7;
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(16);
   pdf.setTextColor(15, 23, 42);
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(11);
-  pdf.text(String(cli.name || "Cliente"), m, y);
+  pdf.text("Proposta de acordo", m, y);
+  y += 2.2;
+  pdf.setDrawColor(16, 84, 54);
+  pdf.setLineWidth(0.5);
+  pdf.line(m, y, m + largura, y);
   y += 5;
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(8);
   pdf.setTextColor(71, 85, 105);
-  const idLinhas = [
-    (contrato ? "Contrato " + contrato : "") + (sale.receivableBillId ? "   Título " + sale.receivableBillId : ""),
-    [emp, unidade].filter(Boolean).join("   ·   "),
-    docCli ? "CPF/CNPJ " + docCli : ""
-  ].filter(Boolean);
-  idLinhas.forEach((linha) => {
-    pdf.text(pdf.splitTextToSize(linha, largura), m, y);
-    y += 4;
-  });
+  const sub = pdf.splitTextToSize("Documento para o cliente. A aceitação se dá pelo pagamento do sinal. Não há assinatura nesta proposta. Sem esse pagamento, ela não tem validade.", largura);
+  pdf.text(sub, m, y);
+  y += sub.length * 3.6 + 3;
 
-  y += 2;
-  const pctPago = sit.original > 0.009 ? Math.max(0, Math.min(1, sit.pago / sit.original)) : 0;
-  const qtdContrato = (sit.qtdParcelasPagas || 0) + (sit.qtdVencidas || 0) + (sit.qtdAVencer || 0);
-  const totalContrato = (sit.liquido || 0) + (sit.valorVencidas || 0) + (sit.valorAVencer || 0);
-  const kpis = [
-    { titulo: "Valores pagos", qtd: (sit.qtdParcelasPagas || 0) + " parc.", valor: brl(sit.liquido), det: "Orig. " + brl(sit.pago) + " + Acrésc. " + brl(sit.juros) + " - Desc. " + brl(sit.desconto), cor: [16, 84, 54], fundo: [255, 255, 255] },
-    { titulo: "Valores vencidos", qtd: (sit.qtdVencidas || 0) + " parc.", valor: brl(sit.valorVencidas), det: "", cor: [230, 81, 0], fundo: [255, 243, 224] },
-    { titulo: "Valores a vencer", qtd: (sit.qtdAVencer || 0) + " parc.", valor: brl(sit.valorAVencer), det: "", cor: [25, 118, 210], fundo: [255, 255, 255] },
-    { titulo: "Total contrato", qtd: qtdContrato + " parc.", valor: brl(totalContrato), det: "", cor: [16, 84, 54], fundo: [255, 255, 255] }
-  ];
-  const cardW = 36;
-  const cardH = 28;
-  kpis.forEach(function(k, i) {
-    const x = m + i * (cardW + 2);
-    pdf.setFillColor(k.fundo[0], k.fundo[1], k.fundo[2]);
-    pdf.rect(x, y, cardW, cardH, "F");
-    pdf.setDrawColor(k.cor[0], k.cor[1], k.cor[2]);
-    pdf.setLineWidth(0.6);
-    pdf.line(x, y, x, y + cardH);
-    pdf.setLineWidth(0.2);
-    pdf.setDrawColor(226, 232, 240);
-    pdf.rect(x, y, cardW, cardH);
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(6);
-    pdf.setTextColor(k.cor[0], k.cor[1], k.cor[2]);
-    pdf.text(k.titulo.toUpperCase(), x + 2, y + 4);
-    pdf.setTextColor(15, 23, 42);
-    pdf.setFontSize(7);
-    pdf.text(k.qtd, x + 2, y + 9);
-    pdf.setFontSize(7.5);
-    pdf.text(k.valor, x + 2, y + 14);
-    if (k.det) {
-      pdf.setFont("helvetica", "normal");
-      pdf.setFontSize(4.5);
-      pdf.setTextColor(100, 116, 139);
-      pdf.text(pdf.splitTextToSize(k.det, cardW - 3), x + 2, y + 18);
+  pdf.autoTable(Object.assign({}, grade, {
+    startY: y,
+    margin: { left: m, right: m, bottom: 16 },
+    tableWidth: largura,
+    head: [["", ""]],
+    body: [
+      ["Cliente", String(cli.name || "—")],
+      ["CPF/CNPJ", docCli || "—"],
+      ["Contrato", contrato || "—"],
+      ["Título", sale.receivableBillId ? String(sale.receivableBillId) : "—"],
+      ["Unidade", local]
+    ],
+    showHead: "never",
+    columnStyles: {
+      0: { cellWidth: 32, fontStyle: "bold", textColor: [71, 85, 105] },
+      1: { cellWidth: largura - 32 }
     }
-  });
-  const gx = m + 4 * (cardW + 2) + 14;
-  const gy = y + 18;
-  const gr = 12;
-  pdf.setLineWidth(1.6);
-  for (let i = 0; i < 36; i++) {
-    const a1 = Math.PI * (1 - i / 36);
-    const a2 = Math.PI * (1 - (i + 1) / 36);
-    const ligado = ((i + 0.5) / 36) <= pctPago + 0.0001;
-    const t = (i + 0.5) / 36;
-    const cor = ligado ? (t < 0.45 ? [231, 76, 60] : (t < 0.75 ? [241, 196, 15] : [46, 204, 113])) : [226, 232, 240];
-    pdf.setDrawColor(cor[0], cor[1], cor[2]);
-    pdf.line(gx + gr * Math.cos(a1), gy - gr * Math.sin(a1), gx + gr * Math.cos(a2), gy - gr * Math.sin(a2));
-  }
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(11);
-  pdf.setTextColor(16, 84, 54);
-  pdf.text(Math.round(pctPago * 100) + "%", gx, gy - 1, { align: "center" });
-  pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(6);
-  pdf.setTextColor(100, 116, 139);
-  pdf.text("Pago do contrato", gx, gy + 4, { align: "center" });
-  y += cardH + 6;
+  }));
+  y = pdf.lastAutoTable.finalY + 7;
 
-  const mesNome = info.mes ? RENEG_MESES[info.mes] : "";
-  const linhaIndice = info.rotulo
-    ? ("Indexador: " + info.rotulo + (info.sem ? ". Sem reajuste de parcela." : (mesNome && info.proximo ? ". Reajuste em " + mesNome + ", a partir de " + info.proximo + "." : ".")))
-    : "";
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(9);
+  pdf.setTextColor(15, 23, 42);
+  pdf.text("Situação do contrato", m, y);
+  y += 3;
+  pdf.autoTable(Object.assign({}, grade, {
+    startY: y,
+    margin: { left: m, right: m, bottom: 16 },
+    tableWidth: largura,
+    head: [["", "Parcelas", "Valor"]],
+    body: [
+      ["Valores pagos", (sit.qtdParcelasPagas || 0) + " parc.", brl(sit.liquido)],
+      ["Valores vencidos", (sit.qtdVencidas || 0) + " parc.", brl(sit.valorVencidas)],
+      ["Valores a vencer", (sit.qtdAVencer || 0) + " parc.", brl(sit.valorAVencer)],
+      ["Total do contrato", qtdContrato + " parc.", brl(totalContrato)],
+      ["Pago do contrato", "", pct + "%"]
+    ],
+    columnStyles: {
+      0: { cellWidth: 78 },
+      1: { cellWidth: 40 },
+      2: { halign: "right", fontStyle: "bold" }
+    },
+    didParseCell: function(data) {
+      if (data.section === "body" && data.row.index >= 3) data.cell.styles.fontStyle = "bold";
+    }
+  }));
+  y = pdf.lastAutoTable.finalY + 3.2;
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(7.5);
+  pdf.setTextColor(100, 116, 139);
+  const comp = "Valores pagos: original " + brl(sit.pago) + " + acréscimo " + brl(sit.juros) + " − desconto " + brl(sit.desconto) + ".";
+  pdf.text(comp, m, y);
+  y += 6;
   if (linhaIndice) {
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(7.5);
-    pdf.setTextColor(15, 23, 42);
-    const indLinhas = pdf.splitTextToSize(linhaIndice, largura);
-    pdf.text(indLinhas, m, y + 3);
-    y += indLinhas.length * 3.4 + 2;
+    pdf.setTextColor(30, 41, 59);
+    const ind = pdf.splitTextToSize(linhaIndice, largura);
+    pdf.text(ind, m, y);
+    y += ind.length * 3.5 + 4;
   }
 
   const faixas = Array.from(document.querySelectorAll("#reneg-green-faixas .reneg-faixa")).map(function(el) {
@@ -22414,63 +22418,88 @@ function baixarPropostaAcordoPdf(results, nomeArquivo) {
   const linhasLaranja = [
     [renegTxtEl("reneg-orange-vencidas"), renegTxtEl("reneg-orange-vencidas-val")],
     [renegTxtEl("reneg-orange-avencer"), renegTxtEl("reneg-orange-avencer-val")],
-    ["Total parcelas: " + renegTxtEl("reneg-orange-total-count"), "Total a pagar: " + renegTxtEl("reneg-orange-total-val")],
-    ["Última parcela atual: " + renegTxtEl("reneg-orange-ultima"), ""]
-  ].filter(function(ln) { return ln[0]; });
+    ["Total: " + renegTxtEl("reneg-orange-total-count") + " parcelas", renegTxtEl("reneg-orange-total-val")],
+    ["Última parcela", renegTxtEl("reneg-orange-ultima")]
+  ].filter(function(ln) {
+    if (!ln[0] || ln[0] === "Total:  parcelas") return false;
+    if (ln[0] === "Última parcela" && !ln[1]) return false;
+    return true;
+  });
   const linhasVerde = [
     [renegTxtEl("reneg-green-sinal-label"), renegTxtEl("reneg-green-sinal-val")],
     [renegTxtEl("reneg-green-acordo-label"), renegTxtEl("reneg-green-acordo-val")],
     [renegTxtEl("reneg-green-mantidas-label"), renegTxtEl("reneg-green-mantidas-val")]
   ].concat(faixas).concat([
-    ["Total parcelas: " + renegTxtEl("reneg-green-total-parcelas"), "Total a pagar: " + renegTxtEl("reneg-green-total-pagar")],
-    ["Última parcela: " + renegTxtEl("reneg-green-ultima"), ""]
-  ]).filter(function(ln) { return ln[0]; });
-
-  const desenharPainel = function(x, topo, w, titulo, cor, fundo, linhas) {
-    pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(6.5);
-    const linhasDes = linhas.map(function(ln) {
-      return { esq: pdf.splitTextToSize(String(ln[0] || ""), w - 30).slice(0, 2), dir: ln[1] || "" };
-    });
-    const alto = 8 + linhasDes.reduce(function(s, l) { return s + Math.max(6.2, l.esq.length * 3.1 + 2.2); }, 0) + 2;
-    pdf.setFillColor(cor[0], cor[1], cor[2]);
-    pdf.rect(x, topo, w, 8, "F");
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(8);
-    pdf.setTextColor(255, 255, 255);
-    pdf.text(titulo, x + 3, topo + 5.4);
-    pdf.setFillColor(fundo[0], fundo[1], fundo[2]);
-    pdf.rect(x, topo + 8, w, alto - 8, "F");
-    pdf.setDrawColor(cor[0], cor[1], cor[2]);
-    pdf.setLineWidth(0.4);
-    pdf.rect(x, topo, w, alto);
-    pdf.setLineWidth(0.2);
-    let ly = topo + 13;
-    linhasDes.forEach(function(l, i) {
-      const ultimo = i >= linhasDes.length - 2;
-      pdf.setFont("helvetica", ultimo ? "bold" : "normal");
-      pdf.setFontSize(6.5);
-      pdf.setTextColor(cor[0], cor[1], cor[2]);
-      pdf.text(l.esq, x + 3, ly);
-      if (l.dir) {
-        pdf.setFont("helvetica", "bold");
-        pdf.text(String(l.dir), x + w - 3, ly, { align: "right" });
-      }
-      ly += Math.max(6.2, l.esq.length * 3.1 + 2.2);
-    });
-    return alto;
+    ["Total: " + renegTxtEl("reneg-green-total-parcelas") + " parcelas", renegTxtEl("reneg-green-total-pagar")],
+    ["Última parcela", renegTxtEl("reneg-green-ultima")]
+  ]).filter(function(ln) {
+    if (!ln[0] || ln[0] === "Total:  parcelas") return false;
+    if (ln[0] === "Última parcela" && !ln[1]) return false;
+    return true;
+  });
+  const colW = (largura - 6) / 2;
+  const negritoFinal = function(data) {
+    const txt = String((data.row.raw && data.row.raw[0]) || "");
+    if (/^Total|^Última/.test(txt)) data.cell.styles.fontStyle = "bold";
   };
-  const colW = (largura - 4) / 2;
-  const altEsq = desenharPainel(m, y, colW, "PARCELAS EM ABERTO", [230, 81, 0], [255, 243, 224], linhasLaranja);
-  const altDir = desenharPainel(m + colW + 4, y, colW, "CRONOGRAMA PROPOSTO", [46, 125, 50], [232, 245, 233], linhasVerde);
-  y += Math.max(altEsq, altDir) + 6;
+  pdf.autoTable(Object.assign({}, grade, {
+    startY: y,
+    margin: { left: m, right: 210 - (m + colW), bottom: 16 },
+    tableWidth: colW,
+    head: [[{ content: "Parcelas em aberto", colSpan: 2 }]],
+    body: linhasLaranja.length ? linhasLaranja : [["—", ""]],
+    columnStyles: { 1: { halign: "right", cellWidth: 42 } },
+    didParseCell: negritoFinal
+  }));
+  const yEsq = pdf.lastAutoTable.finalY;
+  pdf.autoTable(Object.assign({}, grade, {
+    startY: y,
+    margin: { left: m + colW + 6, right: m, bottom: 16 },
+    tableWidth: colW,
+    head: [[{ content: "Cronograma proposto", colSpan: 2 }]],
+    body: linhasVerde.length ? linhasVerde : [["—", ""]],
+    columnStyles: { 1: { halign: "right", cellWidth: 42 } },
+    didParseCell: negritoFinal
+  }));
+  y = Math.max(yEsq, pdf.lastAutoTable.finalY) + 8;
 
-  if ((Number(results.sinalValue) || 0) > 0.009) {
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(9);
+  pdf.setTextColor(15, 23, 42);
+  pdf.text("Condições", m, y);
+  y += 5;
+  const clausulas = [
+    "Esta proposta apresenta as condições para regularizar as parcelas em aberto do contrato indicado acima. Ela não é o acordo e não substitui o termo de confissão de dívida.",
+    temSinal
+      ? "A proposta só tem validade com o pagamento do sinal de " + brl(results.sinalValue) + " até " + (sinalData || "a data combinada") + ", pelo PIX da página seguinte. Sem esse pagamento, a proposta não vale e fica sem efeito em " + (expira || "dois dias depois") + "."
+      : "A proposta só tem validade com o pagamento do sinal, pelo PIX da página seguinte. Sem esse pagamento, a proposta não vale.",
+    "O pagamento do sinal é o aceite do cliente. Não há assinatura nesta proposta.",
+    "Confirmado o pagamento do sinal, a Moura Leite emite o termo de confissão de dívida. Esse termo formaliza o acordo, reconhece o saldo e fixa o cronograma descrito neste documento.",
+    "As parcelas seguem os vencimentos e os valores do cronograma proposto." + (linhaIndice ? " O saldo permanece no " + linhaIndice.charAt(0).toLowerCase() + linhaIndice.slice(1) : ""),
+    "Enquanto o sinal não for pago, o contrato permanece como está. Nada desta proposta altera parcelas, vencimentos ou saldo antes desse pagamento e da emissão do termo."
+  ];
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(8.5);
+  pdf.setTextColor(30, 41, 59);
+  clausulas.forEach(function(texto, i) {
+    const bloco = pdf.splitTextToSize((i + 1) + ".  " + texto, largura);
+    const alto = bloco.length * 3.8;
+    if (y + alto > 282) {
+      pdf.addPage();
+      y = 18;
+    }
+    pdf.text(bloco, m, y);
+    y += alto + 1.6;
+  });
+
+  const paginas = pdf.internal.getNumberOfPages();
+  for (let i = 1; i <= paginas; i++) {
+    pdf.setPage(i);
     pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(8);
-    pdf.setTextColor(71, 85, 105);
-    const aviso = "Sinal de " + brl(results.sinalValue) + " até " + (sinalData || "a data combinada") + ". Sem o pagamento, a proposta expira em " + (expira || "dois dias depois") + ".";
-    pdf.text(pdf.splitTextToSize(aviso, largura), m, y + 3);
+    pdf.setFontSize(7);
+    pdf.setTextColor(100, 116, 139);
+    pdf.text("Moura Leite  ·  Proposta de acordo  ·  Sem o pagamento do sinal, este documento não tem validade.", m, 290);
+    pdf.text(i + " / " + paginas, m + largura, 290, { align: "right" });
   }
   return pdf;
 }
