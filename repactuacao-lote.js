@@ -323,6 +323,7 @@ const RepactuacaoLoteApp = {
       return;
     }
     el.outerHTML = this.previewHtml();
+    this.bindUpload();
     if (window.lucide) window.lucide.createIcons();
   },
 
@@ -335,11 +336,11 @@ const RepactuacaoLoteApp = {
     let body = "";
     if (loading) {
       const pct = Math.max(8, Math.min(100, Number(this.state.previewProgress) || 8));
-      body = `<div class="ml-load">
+      body = `<div class="repac-preview-load"><div class="ml-load">
         <div class="loading-spinner" aria-hidden="true"></div>
         <div class="loading-status-text">Consultando os indexadores…</div>
         <div class="ml-load-track"><div class="loading-progress-bar" style="width:${pct}%"></div></div>
-      </div>`;
+      </div></div>`;
     } else if (err) {
       body = `<p style="margin:0;color:#b91c1c;font-size:0.85rem;">Falha na prévia: ${this.esc(err)}</p>`;
     } else if (!rows.length) {
@@ -421,10 +422,13 @@ const RepactuacaoLoteApp = {
               1º dia útil <strong style="color:#334155;">${this.esc(this.fmtDate(fbd))}</strong>
             </div>
           </div>
-          <button type="button" class="btn btn-secondary" style="padding:8px 12px;"
-            onclick="RepactuacaoLoteApp.loadIndexerPreview()" ${loading ? "disabled" : ""}>
-            <i data-lucide="refresh-cw" style="width:14px;height:14px;"></i> Atualizar prévia
-          </button>
+          <div class="repac-topo-acoes">
+            ${this.uploadZoneHtml()}
+            <button type="button" class="btn btn-secondary" style="padding:8px 12px;"
+              onclick="RepactuacaoLoteApp.loadIndexerPreview()" ${loading ? "disabled" : ""}>
+              <i data-lucide="refresh-cw" style="width:14px;height:14px;"></i> Atualizar prévia
+            </button>
+          </div>
         </div>
         <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
           <h3 style="margin:0;font-size:0.85rem;color:#166534;font-weight:800;text-transform:uppercase;letter-spacing:0.04em;">
@@ -827,8 +831,6 @@ const RepactuacaoLoteApp = {
           this.atualizarCarga();
         }
       }));
-      this.renderTableOnly();
-      this.renderKpisOnly();
     }
     this.state.loading = false;
     this.state.progresso = 100;
@@ -1421,7 +1423,6 @@ const RepactuacaoLoteApp = {
       <div class="loading-spinner" aria-hidden="true"></div>
       <div class="loading-status-text">Conferindo os títulos…</div>
       <div class="ml-load-track"><div class="loading-progress-bar" style="width:${w}%"></div></div>
-      <button type="button" class="btn btn-cancel" onclick="RepactuacaoLoteApp.parar()">Parar</button>
     </div>`;
   },
 
@@ -1483,16 +1484,14 @@ const RepactuacaoLoteApp = {
     if (!root) return;
     const c = this.contagens();
     const n = c.n;
+    const conferindo = !!this.state.loading;
     root.innerHTML = `
       <div class="cc-page repac-page">
         ${this.previewHtml()}
-        <div class="repac-planilha">
-          ${this.uploadZoneHtml()}
-        </div>
-        ${this.cargaHtml()}
+        ${conferindo ? `<div class="repac-carga-tela">${this.cargaHtml()}</div>` : `
         <div id="repac-filtros">${n ? this.filtrosHtml() : ""}</div>
         ${n ? `<div id="repac-kpis" class="repac-kpis">${this.kpisHtml(c)}</div>` : ""}
-        <div id="repac-table-wrap">${this.tableHtml()}</div>
+        <div id="repac-table-wrap">${this.tableHtml()}</div>`}
       </div>
     `;
     this.bindUpload();

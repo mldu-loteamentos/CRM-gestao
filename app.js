@@ -3744,23 +3744,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
       }, 0);
     }
   } else if (tabId === "juridico-config") {
-    if (typeof window.renderEtapasJudiciais === "function") window.renderEtapasJudiciais();
-    const tree = document.getElementById("judiciais-tree-container");
-    const podeEditar = typeof window.hasCrmPerm === "function" && window.hasCrmPerm("sub_jur_geral_configuracoes_editar");
-    if (tree) {
-      tree.querySelectorAll("[draggable]").forEach((el) => { el.draggable = podeEditar; });
-      tree.querySelectorAll("button").forEach((btn) => {
-        btn.disabled = !podeEditar;
-        btn.style.pointerEvents = podeEditar ? "" : "none";
-        btn.style.opacity = podeEditar ? "" : "0.45";
-      });
-    }
-    const addBtn = document.querySelector("#tab-juridico-config button[onclick='adicionarEtapaJudicial()']");
-    if (addBtn) {
-      addBtn.disabled = !podeEditar;
-      addBtn.style.pointerEvents = podeEditar ? "" : "none";
-      addBtn.style.opacity = podeEditar ? "" : "0.45";
-    }
+    if (window.FluxosProcesso && typeof window.FluxosProcesso.init === "function") window.FluxosProcesso.init();
+    else if (typeof window.renderEtapasJudiciais === "function") window.renderEtapasJudiciais();
   } else if (tabId === "configuracoes" || tabId === "regras-negociacao" || tabId === "regras-cobranca") {
     if (typeof renderRulesSettingsTable === "function") renderRulesSettingsTable();
     if (typeof loadRegrasNegociacao === "function") loadRegrasNegociacao();
@@ -40889,8 +40874,11 @@ window.onDropJudRoot = function(e) {
             const maxOrder = Math.max(...window.EtapasJudiciaisState.filter(x => !x.parentId).map(x => x.order || 0), 0);
             dragged.order = maxOrder + 1;
             
-            localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
-            if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(console.error);
+            if (typeof window.persistirEtapasJudiciais === "function") window.persistirEtapasJudiciais();
+            else {
+              localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
+              if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(console.error);
+            }
             window.renderEtapasJudiciais();
             if (window.updateJudFaseDropdown) window.updateJudFaseDropdown();
         }
@@ -40953,8 +40941,11 @@ window.onDropJudNode = function(e, targetId) {
             dragged.order = childMaxOrder + 10;
         }
         
-        localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
-        if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(console.error);
+        if (typeof window.persistirEtapasJudiciais === "function") window.persistirEtapasJudiciais();
+        else {
+          localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
+          if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(console.error);
+        }
         window.renderEtapasJudiciais();
         if (window.updateJudFaseDropdown) window.updateJudFaseDropdown();
     }
@@ -40986,6 +40977,7 @@ window.renderEtapasJudiciais = function() {
   const catalog = typeof window.buildJudicialStageCatalog === 'function' ? window.buildJudicialStageCatalog() : [];
   const prefixById = {};
   catalog.forEach(s => { prefixById[String(s.id)] = s.prefix.includes('.') ? s.prefix : s.prefix + '.'; });
+  const leitura = !!(window.FluxosProcesso && typeof window.FluxosProcesso.somenteLeitura === "function" && window.FluxosProcesso.somenteLeitura());
   
   const renderNode = (node, level) => {
       const children = sorted.filter(e => String(e.parentId || "") === String(node.id));
@@ -41002,7 +40994,7 @@ window.renderEtapasJudiciais = function() {
         ${level > 0 ? '<div style="position: absolute; left: -15px; top: 18px; width: 12px; height: 1px; background: #cbd5e1;"></div>' : ''}
         ${level > 0 ? '<div style="position: absolute; left: -15px; top: 0; width: 1px; height: 100%; background: #cbd5e1;"></div>' : ''}
         
-        <div class="jud-node-target" data-id="${node.id}" draggable="true" ondragstart="window.onDragStartJud(event, '${node.id}')" ondrop="window.onDropJudNode(event, '${node.id}')" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 15px; background: ${bgColor}; border: 1px solid #e2e8f0; border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.02); cursor: grab; margin-bottom: 6px; transition: background 0.2s, border 0.2s;">
+        <div class="jud-node-target" data-id="${node.id}" draggable="${leitura ? "false" : "true"}" ondragstart="window.onDragStartJud(event, '${node.id}')" ondrop="window.onDropJudNode(event, '${node.id}')" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 15px; background: ${bgColor}; border: 1px solid #e2e8f0; border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.02); cursor: ${leitura ? "default" : "grab"}; margin-bottom: 6px; transition: background 0.2s, border 0.2s;">
           <div style="display: flex; align-items: center; gap: 10px;">
             <i data-lucide="grip-vertical" style="width: 16px; height: 16px; color: #94a3b8; cursor: grab;"></i>
             <div>
@@ -41013,7 +41005,7 @@ window.renderEtapasJudiciais = function() {
               <div style="font-size: 0.75rem; color: #64748b;">${node.descricao || '<span style="font-style: italic; opacity: 0.6;">Sem descrição</span>'} • <span style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px; border: 1px solid #e2e8f0;">${node.dias || 0} dias</span></div>
             </div>
           </div>
-          <div style="display: flex; gap: 4px; opacity: 0.7; transition: opacity 0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'">
+          ${leitura ? "" : `<div style="display: flex; gap: 4px; opacity: 0.7; transition: opacity 0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'">
             <button onclick="window.openEtapaModal('new', '${node.id}')" style="background: transparent; color: #128143; border: 1px solid transparent; border-radius: 6px; padding: 5px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='#d1fae5'" onmouseout="this.style.background='transparent'" title="Adicionar Subetapa">
               <i data-lucide="plus-circle" style="width: 15px; height: 15px;"></i>
             </button>
@@ -41023,7 +41015,7 @@ window.renderEtapasJudiciais = function() {
             <button onclick="removerEtapaJudicial('${node.id}')" style="background: transparent; border: 1px solid transparent; color: #ef4444; border-radius: 6px; padding: 5px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='#fee2e2'" onmouseout="this.style.background='transparent'" title="Excluir">
               <i data-lucide="trash-2" style="width: 15px; height: 15px;"></i>
             </button>
-          </div>
+          </div>`}
         </div>
         <div class="jud-children">
           ${children.map(c => renderNode(c, level + 1)).join('')}
@@ -41128,8 +41120,11 @@ window.salvarEtapaModal = function() {
     }
 
     document.getElementById('etapa-judicial-modal').style.display = 'none';
-    localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
-    if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(console.error);
+    if (typeof window.persistirEtapasJudiciais === "function") window.persistirEtapasJudiciais();
+    else {
+      localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
+      if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(console.error);
+    }
     window.renderEtapasJudiciais();
     if (window.updateJudFaseDropdown) window.updateJudFaseDropdown();
 };
@@ -41271,7 +41266,8 @@ window.closeJudicialOptionsEditor = function() {
 
 window.saveJudicialOptionsList = function() {
   window.EtapasJudiciaisState = JSON.parse(JSON.stringify(window.tempJudicialList));
-  localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
+  if (typeof window.persistirEtapasJudiciais === "function") window.persistirEtapasJudiciais();
+  else localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
   
   if (window.renderEtapasJudiciais) window.renderEtapasJudiciais();
   if (window.updateJudFaseDropdown) window.updateJudFaseDropdown();
@@ -41361,8 +41357,11 @@ window.removerEtapaJudicial = function(id) {
       
       if (confirm(`Deseja realmente excluir a etapa "${etapa.nome}"?`)) {
           window.EtapasJudiciaisState = window.EtapasJudiciaisState.filter(e => e.id !== id);
-          localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
-          if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(console.error);
+          if (typeof window.persistirEtapasJudiciais === "function") window.persistirEtapasJudiciais();
+          else {
+            localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
+            if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(console.error);
+          }
           window.renderEtapasJudiciais();
       }
   }
