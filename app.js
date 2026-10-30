@@ -52201,6 +52201,7 @@ async function loadWhatsappAlerts() {
         }
     }
     if (!window.whatsappAlertsData.clients) window.whatsappAlertsData.clients = {};
+    if (!Array.isArray(window.whatsappAlertsData.historico)) window.whatsappAlertsData.historico = [];
     window.whatsappAlertsLoaded = true;
 }
 
@@ -52265,36 +52266,119 @@ window.userCanToggleWhatsappAlert = function(user) {
     if (typeof window.isOperadorCobrancaTerceirizadoProfile === "function"
       && window.isOperadorCobrancaTerceirizadoProfile(profile)) return false;
     if (typeof window.crmOperatorType === "function" && window.crmOperatorType(rec || logged) === "advogado") return false;
-    if (typeof window.crmProfileKind === "function" && window.crmProfileKind(profile) === "back_office") return true;
+    const kind = typeof window.crmProfileKind === "function" ? window.crmProfileKind(profile) : "";
+    if (kind === "back_office" || kind === "cobranca") return true;
     if (typeof window.isCrmAdministrator === "function" && window.isCrmAdministrator(logged)) return true;
     if (typeof window.isCrmAdminProfileName === "function" && window.isCrmAdminProfileName(profile)) return true;
     return false;
 };
 
+window.pedirJustificativaWhatsapp = function(ligando) {
+    return new Promise((resolve) => {
+        let overlay = document.getElementById("whatsapp-justificativa");
+        if (!overlay) {
+            overlay = document.createElement("div");
+            overlay.id = "whatsapp-justificativa";
+            overlay.style.cssText = "display:none;position:fixed;inset:0;z-index:2147483002;align-items:center;justify-content:center;background:rgba(12,41,29,0.55);padding:16px;";
+            overlay.innerHTML = `<div style="background:#fff;width:min(480px,100%);border-radius:12px;padding:18px 18px 16px;box-shadow:0 18px 40px rgba(0,0,0,0.22);">
+                <h3 id="whatsapp-just-titulo" style="margin:0 0 8px;color:#105436;font-size:1rem;">Alerta WhatsApp</h3>
+                <p id="whatsapp-just-ajuda" style="margin:0 0 8px;color:#64748b;font-size:0.84rem;line-height:1.45;"></p>
+                <textarea id="whatsapp-just-texto" rows="4" style="width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:8px;padding:8px;font:inherit;" placeholder="O que o cliente pediu e por quê"></textarea>
+                <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
+                    <button type="button" class="btn btn-cancel" id="whatsapp-just-cancelar">Cancelar</button>
+                    <button type="button" class="btn btn-primary" id="whatsapp-just-confirmar">Confirmar</button>
+                </div>
+            </div>`;
+            document.body.appendChild(overlay);
+            overlay.querySelector("#whatsapp-just-cancelar").onclick = () => {
+                const done = overlay._resolver;
+                overlay._resolver = null;
+                overlay.style.display = "none";
+                if (done) done(null);
+            };
+            overlay.addEventListener("click", (e) => {
+                if (e.target !== overlay) return;
+                overlay.querySelector("#whatsapp-just-cancelar").click();
+            });
+        }
+        const ajuda = overlay.querySelector("#whatsapp-just-ajuda");
+        const area = overlay.querySelector("#whatsapp-just-texto");
+        const acao = ligando ? "ligar" : "desligar";
+        if (ajuda) ajuda.textContent = "O cliente pediu para " + acao + " o alerta de WhatsApp. Escreva o que motivou esse pedido.";
+        if (area) area.value = "";
+        overlay._resolver = resolve;
+        overlay.style.display = "flex";
+        overlay.querySelector("#whatsapp-just-confirmar").onclick = () => {
+            const texto = String(area && area.value || "").trim();
+            if (texto.length < 8) {
+                if (ajuda) ajuda.textContent = "Escreva a justificativa do pedido do cliente, com pelo menos uma frase.";
+                if (area) area.focus();
+                return;
+            }
+            const done = overlay._resolver;
+            overlay._resolver = null;
+            overlay.style.display = "none";
+            if (done) done(texto);
+        };
+        setTimeout(() => { if (area) area.focus(); }, 30);
+    });
+};
+
 window.toggleWhatsappAlert = async function() {
     if (!window.userCanToggleWhatsappAlert()) return;
+    if (window._whatsappJustificando) return;
     const customerId = String(AppState.selectedCustomerId);
     if (!customerId || customerId === "null" || customerId === "undefined") return;
-    
+
     await loadWhatsappAlerts();
-    
-    if (window.whatsappAlertsData.clients[customerId]) {
+    const ligando = !window.whatsappAlertsData.clients[customerId];
+    window._whatsappJustificando = true;
+    let justificativa = null;
+    try {
+        justificativa = await window.pedirJustificativaWhatsapp(ligando);
+    } finally {
+        window._whatsappJustificando = false;
+    }
+    if (!justificativa) return;
+
+    const usuario = (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo())
+        || (AppState && AppState.currentUser)
+        || {};
+    const por = usuario.name || usuario.email || "";
+    const agora = new Date().toISOString();
+    const sale = (AppState.sales || []).find(s =>
+        String(s.id) === String(AppState.selectedSaleId)
+        || String(s.receivableBillId) === String(AppState.selectedSaleId)
+    ) || {};
+    const billId = sale.receivableBillId || AppState.selectedSaleId || null;
+    if (!Array.isArray(window.whatsappAlertsData.historico)) window.whatsappAlertsData.historico = [];
+    window.whatsappAlertsData.historico.push({
+        customerId: customerId,
+        on: ligando,
+        justificativa: justificativa,
+        por: por,
+        at: agora,
+        saleId: AppState.selectedSaleId || sale.id || null,
+        receivableBillId: billId
+    });
+    if (window.whatsappAlertsData.historico.length > 300) {
+        window.whatsappAlertsData.historico = window.whatsappAlertsData.historico.slice(-300);
+    }
+
+    if (!ligando) {
         delete window.whatsappAlertsData.clients[customerId];
     } else {
-        const sale = (AppState.sales || []).find(s =>
-          String(s.id) === String(AppState.selectedSaleId)
-          || String(s.receivableBillId) === String(AppState.selectedSaleId)
-        ) || {};
-        const billId = sale.receivableBillId || AppState.selectedSaleId || null;
         window.whatsappAlertsData.clients[customerId] = {
             on: true,
             saleId: AppState.selectedSaleId || sale.id || null,
             receivableBillId: billId,
             contractNumber: sale.contractNumber || sale.number || null,
-            at: new Date().toISOString()
+            justificativa: justificativa,
+            por: por,
+            at: agora
         };
     }
-    
+
     updateWhatsappAlertButtonState();
     await saveWhatsappAlerts();
 };
@@ -52315,8 +52399,13 @@ window.updateWhatsappAlertButtonState = async function() {
     btn.style.display = "";
     
     const customerId = String(AppState.selectedCustomerId);
-    const isOn = !!window.whatsappAlertsData.clients[customerId];
-    
+    const rec = window.whatsappAlertsData.clients[customerId];
+    const isOn = !!rec;
+    const motivo = rec && rec.justificativa ? String(rec.justificativa) : "";
+    btn.title = isOn && motivo
+        ? "Alerta ligado. Motivo do cliente: " + motivo
+        : "Alerta para reenviar o boleto da remessa mensal pelo WhatsApp. Ao ligar ou desligar, informe o que motivou o cliente a pedir isso.";
+
     if (isOn) {
         btn.className = "btn btn-primary btn-sm";
         btn.style.backgroundColor = "";
