@@ -109,6 +109,8 @@ const ContabilDepara = {
     const lista = [];
     itens.forEach((p) => {
       if (!p || !p.companyId || !p.id) return;
+      const tipo = app && typeof app.kindOf === "function" ? app.kindOf(p) : String(p.kind || "parceria");
+      if (tipo !== "parceria" && tipo !== "mista") return;
       const id = String(p.companyId);
       if (!empresas.has(id)) {
         const cat = ((window.AppState && AppState.companies) || []).find((c) => String(c.id) === id);

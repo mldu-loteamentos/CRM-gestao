@@ -25,6 +25,7 @@ const RepactuacaoLoteApp = {
     ratesByIndexer: {},
     filter: "all",
     previewLoading: false,
+    previewProgress: 0,
     previewRows: [],
     previewError: ""
   },
@@ -182,6 +183,8 @@ const RepactuacaoLoteApp = {
         this.state.adjustMonth = `${nm.year}-${String(nm.month + 1).padStart(2, "0")}`;
         this.applyAdjustMonthToState(this.state.adjustMonth);
       }
+      this.state.previewLoading = true;
+      this.state.previewProgress = 8;
       this.render();
       this.loadIndexerPreview();
     } catch (e) {
@@ -235,11 +238,14 @@ const RepactuacaoLoteApp = {
     if (!ym) return;
     const gen = (this.state._previewGen = (this.state._previewGen || 0) + 1);
     this.state.previewLoading = true;
+    this.state.previewProgress = 12;
     this.state.previewError = "";
     this.renderPreviewOnly();
     try {
       await this.ensureIndexers();
       if (gen !== this.state._previewGen) return;
+      this.state.previewProgress = 28;
+      this.renderPreviewOnly();
       const adjustIso = `${ym}-01`;
       const list = (this.state.indexers || []).filter((i) => this.isPreviewIndexer(i));
       // Preferir ativos do cadastro de Indexadores, se houver
@@ -254,8 +260,11 @@ const RepactuacaoLoteApp = {
       const use = (pool.length ? pool : list).slice().sort((a, b) => String(a.name).localeCompare(String(b.name), "pt-BR"));
 
       const rows = [];
-      for (const idx of use) {
+      for (let i = 0; i < use.length; i++) {
+        const idx = use[i];
         if (gen !== this.state._previewGen) return;
+        this.state.previewProgress = Math.round(28 + ((i + 1) / use.length) * 68);
+        this.renderPreviewOnly();
         const retro = idx.revenueRetroactivity != null ? Number(idx.revenueRetroactivity) : 0;
         const expectedBase = this.expectedBaseIso(adjustIso, retro);
         let rates = {};
@@ -310,7 +319,12 @@ const RepactuacaoLoteApp = {
     const rows = this.state.previewRows || [];
     let body = "";
     if (loading) {
-      body = `<p style="margin:0;color:#64748b;font-size:0.85rem;">Consultando BCB e cadastro Sienge dos indexadores…</p>`;
+      const pct = Math.max(8, Math.min(100, Number(this.state.previewProgress) || 8));
+      body = `<div class="ml-load">
+        <div class="loading-spinner" aria-hidden="true"></div>
+        <div class="loading-status-text">Consultando os indexadores…</div>
+        <div class="ml-load-track"><div class="loading-progress-bar" style="width:${pct}%"></div></div>
+      </div>`;
     } else if (err) {
       body = `<p style="margin:0;color:#b91c1c;font-size:0.85rem;">Falha na prévia: ${this.esc(err)}</p>`;
     } else if (!rows.length) {

@@ -1264,7 +1264,7 @@ const GerarPagamentoApp = {
         : "";
       return `<div class="gp-conf" role="status">
         <span class="loading-spinner gp-conf-spin"></span>
-        <div><strong>Conferindo pagamentos e notas em segundo plano.</strong> ${v.feitos} de ${v.total}.${falha}</div>
+        <div><strong>Conferindo pagamentos e notas em segundo plano.</strong> <span id="gp-conf-contagem">${v.feitos} de ${v.total}.${falha}</span></div>
       </div>`;
     }
     if (v.falhas) {
@@ -1329,26 +1329,78 @@ const GerarPagamentoApp = {
     if (typeof window.siengeFetchWithRetry !== "function" || !window.BoletoCheck) return;
     const chaves = [...new Set(s.titulos.filter((r) => !r.pago && r.aPagar > 0.009 && r.autorizacao && r.autorizacao.ok).map((r) => this.chaveTitulo(r.titulo, r.parcela)))]
       .filter((k) => !s.loteSienge[k] && !this.loteIntegraDe(k));
+    const naTela = (k) => {
+      const t = this.resumoTitulo(k);
+      if (!t) return false;
+      const r = t.rows[0];
+      const venc = String(r.vencimento || "").slice(0, 10);
+      const dia = this.diaDoLote(venc) || venc;
+      const noDia = s.diaRetro
+        ? (dia === s.diaRetro || venc === s.diaRetro)
+        : (this.noPeriodoBuscado(dia) || this.noPeriodoBuscado(venc));
+      const emp = String(s.abaEmpresa || "");
+      return noDia && (!emp || String(r.companyId || "") === emp);
+    };
+    chaves.sort((a, b) => (naTela(a) ? 0 : 1) - (naTela(b) ? 0 : 1));
     s.validacao = { feitos: 0, total: chaves.length, rodando: chaves.length > 0, falhas: 0, limite: false };
     if (chaves.length) this.paintTitulos();
     let ultima = 0;
+    let pausaAte = 0;
     const fila = chaves.slice();
-    const pintar = () => {
-      if (Date.now() - ultima < 700) return;
-      ultima = Date.now();
+    const marcarLimite = (msg) => {
+      if (!/\b429\b/.test(msg || "")) return;
+      s.validacao.limite = true;
+      pausaAte = Math.max(pausaAte, Date.now() + 2500);
+    };
+    const atualizarContagem = () => {
+      const el = document.getElementById("gp-conf-contagem");
+      if (!el) return;
+      const v = s.validacao;
+      const falha = v.falhas
+        ? ` ${v.falhas} já falharam${v.limite ? " porque o Sienge limitou as consultas (429)" : ""}. Esses deixam de aparecer como Conferindo.`
+        : "";
+      el.textContent = `${v.feitos} de ${v.total}.${falha}`;
+    };
+    const pintar = (chave) => {
+      const agora = Date.now();
+      const visivel = chave && naTela(chave);
+      if (!visivel && agora - ultima < 1600) {
+        atualizarContagem();
+        return;
+      }
+      if (visivel && agora - ultima < 400) {
+        atualizarContagem();
+        return;
+      }
+      ultima = agora;
       this.paintTitulos();
     };
     const worker = async () => {
       while (fila.length && gen === s.gen) {
+        const espera = pausaAte - Date.now();
+        if (espera > 0) await new Promise((res) => setTimeout(res, espera));
+        if (gen !== s.gen || !fila.length) return;
         const chave = fila.shift();
         const t = this.resumoTitulo(chave);
         if (!t) {
           s.validacao.feitos += 1;
-          pintar();
+          pintar(chave);
           continue;
         }
         const r = t.rows[0];
         const forma = s.formaSienge[chave] || {};
+        const NF = window.NotaFiscalCheck;
+        const servico = !!(NF && !NF.semRetencao(r.docId, r.docNome) && NF.ehServico(r.docId, r.docNome));
+        const parecePix = /pix/i.test(forma.tipo || "");
+        const pareceBoleto = /boleto|bloqueto|cobran/i.test(forma.tipo || "");
+        const falhaFiscal = (e) => {
+          const msg = this.textoFalhaConsulta(e);
+          marcarLimite(msg);
+          return { nivel: "erro", falhaConsulta: true, resumo: msg, erros: [msg], avisos: [], infos: [] };
+        };
+        const fiscalP = servico ? NF.analisar({ billId: r.titulo, credorId: r.credorId, bruto: t.valor }).catch(falhaFiscal) : null;
+        const credorP = parecePix ? this.carregarCredor(r.credorId) : null;
+        const notaP = pareceBoleto && !servico && NF ? NF.lerNota(r.titulo).catch(() => null) : null;
         let payment;
         try {
           payment = await this.lerFormaPagamento(r.titulo, r.parcela, forma.tipo);
@@ -1357,35 +1409,33 @@ const GerarPagamentoApp = {
           const msg = this.textoFalhaConsulta(e);
           s.pagInfo[chave] = { payment: undefined, check: BoletoCheck.checkFalhaConsulta(msg), fiscal: null, tipoSienge: forma.tipo || "", falha: true };
           s.validacao.falhas += 1;
-          if (/\b429\b/.test(msg)) s.validacao.limite = true;
+          marcarLimite(msg);
           Object.keys(s.sel).forEach((k) => {
             if (k.endsWith("|" + chave)) s.sel[k] = false;
           });
           s.validacao.feitos += 1;
-          pintar();
+          pintar(chave);
           continue;
         }
         if (gen !== s.gen) return;
-        const credor = payment && payment.kind === "pix" ? await this.carregarCredor(r.credorId) : undefined;
+        let credor = credorP ? await credorP : undefined;
+        if (!credor && payment && payment.kind === "pix") credor = await this.carregarCredor(r.credorId);
         if (gen !== s.gen) return;
         const ctx = { valor: t.aPagar, vencimento: r.vencimento, credor, tipo: forma.tipo || "" };
         let check = BoletoCheck.validar(payment, ctx);
-        let fiscal = null;
+        let fiscal = fiscalP ? await fiscalP : null;
+        if (gen !== s.gen) return;
         const boletoMenor = check.valorBoleto != null && check.valorBoleto > 0 && check.valorBoleto < t.aPagar - 0.01;
-        if (window.NotaFiscalCheck && !NotaFiscalCheck.semRetencao(r.docId, r.docNome) && (NotaFiscalCheck.ehServico(r.docId, r.docNome) || boletoMenor)) {
-          fiscal = await NotaFiscalCheck.analisar({ billId: r.titulo, credorId: r.credorId, bruto: t.valor }).catch((e) => {
-            const msg = this.textoFalhaConsulta(e);
-            if (/\b429\b/.test(msg)) s.validacao.limite = true;
-            return { nivel: "erro", falhaConsulta: true, resumo: msg, erros: [msg], avisos: [], infos: [] };
-          });
+        if (!fiscal && NF && !NF.semRetencao(r.docId, r.docNome) && (NF.ehServico(r.docId, r.docNome) || boletoMenor)) {
+          fiscal = await NF.analisar({ billId: r.titulo, credorId: r.credorId, bruto: t.valor }).catch(falhaFiscal);
           if (gen !== s.gen) return;
-          if (fiscal && fiscal.falhaConsulta) s.validacao.falhas += 1;
-          if (fiscal && fiscal.retidoPagamento > 0.009) check = BoletoCheck.validar(payment, Object.assign({}, ctx, { retido: fiscal.retidoPagamento }));
         }
+        if (fiscal && fiscal.falhaConsulta) s.validacao.falhas += 1;
+        if (fiscal && fiscal.retidoPagamento > 0.009) check = BoletoCheck.validar(payment, Object.assign({}, ctx, { retido: fiscal.retidoPagamento }));
         if (gen !== s.gen) return;
         let notaBenef = fiscal && fiscal.nota;
-        if (window.BoletoCheck && BoletoCheck.ehBoleto(payment) && payment.kind === "boleto-bancario" && !notaBenef && window.NotaFiscalCheck) {
-          notaBenef = await NotaFiscalCheck.lerNota(r.titulo).catch(() => null);
+        if (BoletoCheck.ehBoleto(payment) && payment.kind === "boleto-bancario" && !notaBenef && NF) {
+          notaBenef = notaP ? await notaP : await NF.lerNota(r.titulo).catch(() => null);
           if (gen !== s.gen) return;
         }
         await this.alertarBeneficiarioBoleto(check, payment, notaBenef, r.titulo);
@@ -1400,10 +1450,11 @@ const GerarPagamentoApp = {
           });
         }
         s.validacao.feitos += 1;
-        pintar();
+        pintar(chave);
       }
     };
-    await Promise.all([worker(), worker(), worker()]);
+    const nWorkers = Math.min(4, Math.max(1, fila.length));
+    await Promise.all(Array.from({ length: nWorkers }, () => worker()));
     if (gen !== s.gen) return;
     this.reconciliarGuiasUnificadas();
     s.validacao.rodando = false;
@@ -4030,7 +4081,7 @@ const GerarPagamentoApp = {
   paintTitulos() {
     const box = document.getElementById("gp-titulos-box");
     if (box) box.innerHTML = this.titulosHtml();
-    if (window.lucide) lucide.createIcons();
+    if (window.lucide && box) lucide.createIcons({ root: box });
   },
 
   render() {
@@ -4257,8 +4308,7 @@ const GerarPagamentoApp = {
         <div class="crm-card" style="overflow:hidden;padding:0;">
           <div class="gp-busca">
             <div style="flex:1 1 220px;">
-              <h3 style="margin:0 0 4px;color:var(--color-primary);font-size:1rem;">Títulos a pagar dos centros de custo de parceiro</h3>
-              <p style="margin:0;color:#64748b;font-size:0.78rem;">Abre no dia seguinte. Na sexta, de sábado a segunda. Previsões ficam de fora.</p>
+              <h3 style="margin:0;color:var(--color-primary);font-size:1rem;">Programação de Pagamentos</h3>
             </div>
             <div class="form-group">
               <label>Vencimento de</label>
