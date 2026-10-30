@@ -5,6 +5,7 @@ const ContabilDepara = {
     parceiros: [],
     empresaId: "",
     parceiroId: "",
+    ccId: "",
     planos: [],
     contas: [],
     contasEmp: "",
@@ -58,18 +59,17 @@ const ContabilDepara = {
 
   async garantir() {
     if (this._garantindo) return;
+    const pronto = this.state.mapaLido && this.state.planos.length && this.state.empresas.length
+      && this.state.contasEmp === String(this.state.empresaId) && this.state.contas.length;
+    if (pronto) {
+      this.pintar();
+      return;
+    }
     this._garantindo = true;
-    this.state.lendo = true;
     this.state.erro = "";
-    this.state.msg = "Lendo as parcerias…";
-    this.state.progresso = 12;
-    this.pintar();
     try {
       await this.carregarMapa();
       await this.carregarParceiros();
-      this.state.msg = "Lendo o plano financeiro…";
-      this.state.progresso = 36;
-      this.pintar();
       await this.carregarPlano();
       this.escolherPadrao();
       await this.carregarContas(this.state.empresaId);
@@ -77,7 +77,6 @@ const ContabilDepara = {
       this.state.erro = (e && e.message) || "Não consegui abrir a parametrização.";
     }
     this.state.lendo = false;
-    this.state.progresso = 100;
     this._garantindo = false;
     this.pintar();
   },
@@ -181,6 +180,41 @@ const ContabilDepara = {
     if (!empresas.some((e) => e.id === this.state.empresaId)) this.state.empresaId = empresas[0].id;
     const pars = this.parceirosDa(this.state.empresaId);
     if (!pars.some((p) => p.id === this.state.parceiroId)) this.state.parceiroId = pars.length ? pars[0].id : "";
+    this.escolherCentro();
+  },
+
+  parceiroAtual() {
+    return this.state.parceiros.find((p) => p.id === this.state.parceiroId) || null;
+  },
+
+  /** Centros de custo ligados às obras desta parceria. */
+  centrosDo(p) {
+    if (!p) return [];
+    const app = window.ParametrizacaoParceiroApp;
+    const vistos = new Set();
+    const lista = [];
+    const por = (cc) => {
+      if (!cc) return;
+      const id = String(cc.id != null ? cc.id : cc).replace(/\D/g, "");
+      if (!id || vistos.has(id)) return;
+      vistos.add(id);
+      lista.push({ id: id, nome: String(cc.name || cc.nome || "").trim() });
+    };
+    (p.obras || []).forEach((o) => {
+      const ligados = o.costCenters || [];
+      if (ligados.length) ligados.forEach(por);
+      else if (app && typeof app.centrosDaObra === "function" && typeof app.ehCcParceiro === "function" && o.code) {
+        app.centrosDaObra(o.code).filter((cc) => app.ehCcParceiro(cc)).forEach(por);
+      }
+    });
+    if (!lista.length) (p.costCenters || []).forEach(por);
+    lista.sort((a, b) => Number(a.id) - Number(b.id));
+    return lista;
+  },
+
+  escolherCentro() {
+    const lista = this.centrosDo(this.parceiroAtual());
+    if (!lista.some((c) => c.id === this.state.ccId)) this.state.ccId = lista.length ? lista[0].id : "";
   },
 
   parceirosDa(empresaId) {
@@ -209,10 +243,6 @@ const ContabilDepara = {
       this.state.contasEmp = String(empresaId);
       return;
     }
-    this.state.lendo = true;
-    this.state.msg = "Lendo o plano contábil da empresa…";
-    this.state.progresso = 55;
-    this.pintar();
     const brutos = await api.getAccountancyAccounts(empresaId);
     const ler = window.ContabilEquiv && ContabilEquiv.lerConta ? (c) => ContabilEquiv.lerConta(c) : (c) => ({
       id: c.id != null ? String(c.id) : "",
@@ -226,22 +256,39 @@ const ContabilDepara = {
       return { id: base.id, codigo: base.codigo, nome: base.nome, analitica: analitica };
     }).filter((c) => c.codigo || c.id);
     this.state.contasEmp = String(empresaId);
-    this.state.lendo = false;
-    this.state.msg = this.state.contas.length ? (this.state.contas.length + " contas contábeis.") : "O Sienge não devolveu o plano contábil desta empresa.";
+    if (this.state.contas.length) {
+      if (this.state.erro === "O Sienge não devolveu o plano contábil desta empresa.") this.state.erro = "";
+    } else this.state.erro = "O Sienge não devolveu o plano contábil desta empresa.";
   },
 
   mapaDo(parceiroId) {
     const id = String(parceiroId || "");
     if (!this.state.mapa[id] || typeof this.state.mapa[id] !== "object") this.state.mapa[id] = {};
-    return this.state.mapa[id];
+    const mapa = this.state.mapa[id];
+    if (!mapa._porCc || typeof mapa._porCc !== "object") mapa._porCc = {};
+    return mapa;
+  },
+
+  ehLinha(obj) {
+    return !!(obj && typeof obj === "object" && ("codigo" in obj || "reduzida" in obj || "nome" in obj));
   },
 
   linha(planoId) {
-    return this.mapaDo(this.state.parceiroId)[String(planoId)] || { codigo: "", reduzida: "", nome: "" };
+    const mapa = this.mapaDo(this.state.parceiroId);
+    const cc = String(this.state.ccId || "");
+    const doCc = cc && mapa._porCc[cc] && mapa._porCc[cc][String(planoId)];
+    if (this.ehLinha(doCc)) return doCc;
+    const legado = mapa[String(planoId)];
+    if (this.ehLinha(legado)) return legado;
+    return { codigo: "", reduzida: "", nome: "" };
   },
 
   gravarLinha(planoId, dados) {
-    this.mapaDo(this.state.parceiroId)[String(planoId)] = {
+    const mapa = this.mapaDo(this.state.parceiroId);
+    const cc = String(this.state.ccId || "");
+    if (!cc) return;
+    if (!mapa._porCc[cc] || typeof mapa._porCc[cc] !== "object") mapa._porCc[cc] = {};
+    mapa._porCc[cc][String(planoId)] = {
       codigo: String(dados.codigo || ""),
       reduzida: String(dados.reduzida || ""),
       nome: String(dados.nome || "")
@@ -401,6 +448,7 @@ const ContabilDepara = {
     this.state.busca = "";
     const pars = this.parceirosDa(id);
     this.state.parceiroId = pars.length ? pars[0].id : "";
+    this.escolherCentro();
     this.pintar();
     await this.carregarContas(this.state.empresaId);
     this.pintar();
@@ -409,6 +457,14 @@ const ContabilDepara = {
   setParceiro(id) {
     this.fecharLista();
     this.state.parceiroId = String(id);
+    this.state.busca = "";
+    this.escolherCentro();
+    this.pintar();
+  },
+
+  setCentro(id) {
+    this.fecharLista();
+    this.state.ccId = String(id || "");
     this.state.busca = "";
     this.pintar();
   },
@@ -451,6 +507,11 @@ const ContabilDepara = {
     const sub = pars.map((p) =>
       `<button type="button" role="tab" aria-selected="${p.id === s.parceiroId}" class="ml-tab${p.id === s.parceiroId ? " is-active" : ""}" onclick="ContabilDepara.setParceiro('${this.esc(p.id)}')"><i data-lucide="handshake"></i> ${this.esc(this.rotuloParceiro(p))}</button>`
     ).join("");
+    const centros = this.centrosDo(this.parceiroAtual());
+    const ccs = centros.map((c) => {
+      const nome = c.nome ? (" " + c.nome) : "";
+      return `<button type="button" role="tab" aria-selected="${c.id === s.ccId}" class="ml-tab${c.id === s.ccId ? " is-active" : ""}" onclick="ContabilDepara.setCentro('${this.esc(c.id)}')"><i data-lucide="landmark"></i> ${this.esc(c.id + nome)}</button>`;
+    }).join("");
     const busca = this.norm(s.busca);
     const linhas = this.linhasOrdenadas().map((c) => {
       const m = this.linha(c.id);
@@ -460,25 +521,24 @@ const ContabilDepara = {
       return `<tr data-plano="${this.esc(c.id)}" data-busca="${this.esc(blob)}"${esconde}>
         <td class="ctb-dp-cod">${this.esc(cod)}</td>
         <td>${this.esc(c.nome)}</td>
-        <td><input class="ctb-depara-inp ctb-dp-conta" value="${this.esc(m.codigo)}" placeholder="2.1.03.02.001"${dis} oninput="ContabilDepara.onConta('${this.esc(c.id)}', this.value)"></td>
-        <td><input class="ctb-depara-inp ctb-dp-red" value="${this.esc(m.reduzida)}" placeholder="691"${dis} oninput="ContabilDepara.onReduzida('${this.esc(c.id)}', this.value)"></td>
+        <td><input class="ctb-depara-inp ctb-dp-conta" value="${this.esc(m.codigo)}"${dis} oninput="ContabilDepara.onConta('${this.esc(c.id)}', this.value)"></td>
+        <td><input class="ctb-depara-inp ctb-dp-red" value="${this.esc(m.reduzida)}"${dis} oninput="ContabilDepara.onReduzida('${this.esc(c.id)}', this.value)"></td>
         <td><input class="ctb-depara-inp ctb-dp-nome" value="${this.esc(m.nome)}" placeholder="Buscar pelo nome"${dis} oninput="ContabilDepara.onNome('${this.esc(c.id)}', this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();ContabilDepara.escolher('${this.esc(c.id)}',0)}"></td>
       </tr>`;
     }).join("");
     const vazio = !s.empresas.length
       ? "Nenhuma parceria cadastrada. Ao criar uma em Prestação de contas → Configurações, a aba da empresa e a do parceiro aparecem aqui."
-      : (!s.planos.length && !s.lendo ? "O plano financeiro desta empresa ainda não carregou." : "Nenhuma conta de resultado neste filtro.");
+      : (!centros.length && s.parceiroId
+        ? "Este parceiro ainda não tem centro de custo na parceria."
+        : (!s.planos.length ? "O plano financeiro desta empresa ainda não carregou." : "Nenhuma conta de resultado neste filtro."));
+    const tabela = s.empresas.length && centros.length;
     root.innerHTML = `<div class="cc-page ctb-depara">
       ${s.empresas.length ? `<div class="ml-tabs ctb-depara-tabs" role="tablist">${empresas}</div>` : ""}
       ${sub ? `<div class="ml-tabs ctb-depara-sub" role="tablist">${sub}</div>` : ""}
-      <p class="ctb-eq-help">Cada linha é uma conta de resultado do plano financeiro da empresa do parceiro. O número da conta preenche a reduzida e o nome. A reduzida preenche a conta e o nome. No nome, a busca pega partes do texto: IRPJ a recolher encontra IRPJ LUCRO PRESUMIDO A RECOLHER.</p>
-      ${s.lendo ? `<div class="ml-load" style="margin:0 0 12px;">
-        <div class="loading-spinner" aria-hidden="true"></div>
-        <div class="loading-status-text">${this.esc(s.msg || "Carregando…")}</div>
-        <div class="ml-load-track"><div class="loading-progress-bar" style="width:${Math.max(12, s.progresso || 20)}%"></div></div>
-      </div>` : ""}
+      ${ccs ? `<div class="ml-tabs ctb-depara-cc" role="tablist">${ccs}</div>` : ""}
+      <p class="ctb-eq-help">Cada linha é uma conta de resultado do plano financeiro. A conta e a reduzida são as deste centro de custo. O número da conta preenche a reduzida e o nome. A reduzida preenche a conta e o nome.</p>
       ${s.erro ? `<p class="ctb-eq-status" style="color:#b91c1c;margin:0 0 8px;">${this.esc(s.erro)}</p>` : ""}
-      ${s.empresas.length ? `<div style="margin:0 0 10px;max-width:360px;">
+      ${tabela ? `<div style="margin:0 0 10px;max-width:360px;">
         <input type="search" class="ctb-depara-inp" value="${this.esc(s.busca)}" placeholder="Buscar no plano financeiro" oninput="ContabilDepara.filtrar(this.value)">
       </div>
       <div class="cc-scroll">

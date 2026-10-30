@@ -11483,7 +11483,8 @@ tr.pr-liberado td { background: #f7faf8; }
 @media (max-width: 900px) { .eho-ops { grid-template-columns: 1fr; } }
 
 .ctb-depara-tabs { margin: 0 0 4px; }
-.ctb-depara-sub { margin: 0 0 12px; }
+.ctb-depara-sub { margin: 0 0 4px; }
+.ctb-depara-cc { margin: 0 0 12px; }
 .ctb-depara-inp { width: 100%; height: 32px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0 8px; font-size: 0.8rem; background: #fff; box-sizing: border-box; }
 .ctb-dp-cod { font-family: ui-monospace, Consolas, monospace; white-space: nowrap; }
 .ctb-depara-lista { position: fixed; z-index: 80; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12); max-height: 240px; overflow: auto; }

@@ -815,10 +815,18 @@ const RepactuacaoLoteApp = {
     if (!id) return [];
     const fetchFn = window.siengeFetchWithRetry;
     let list = [];
+    let houveResposta = false;
     if (typeof fetchFn === "function") {
       const limit = 200;
       for (let offset = 0; offset < 5000; offset += limit) {
-        const res = await fetchFn(`/accounts-receivable/receivable-bills/${encodeURIComponent(id)}/installments?limit=${limit}&offset=${offset}`);
+        let res;
+        try {
+          res = await fetchFn(`/accounts-receivable/receivable-bills/${encodeURIComponent(id)}/installments?limit=${limit}&offset=${offset}`);
+          houveResposta = true;
+        } catch (e) {
+          console.warn("[Repactuação] installments", id, offset, e);
+          break;
+        }
         const rows = (res && (res.results || res.data || res.installments)) || (Array.isArray(res) ? res : []);
         if (!rows.length) break;
         list = list.concat(rows);
@@ -829,6 +837,7 @@ const RepactuacaoLoteApp = {
     } else if (window.SiengeApiService && typeof SiengeApiService.getBillInstallments === "function") {
       const inst = await SiengeApiService.getBillInstallments(id);
       list = (inst && inst.results) || inst || [];
+      houveResposta = true;
     }
     if (!Array.isArray(list)) list = [];
 
@@ -851,6 +860,7 @@ const RepactuacaoLoteApp = {
         console.warn("[Repactuação] extract-history", id, e2);
       }
     }
+    if (!list.length && !houveResposta) throw new Error("Sienge não respondeu às parcelas do título " + id);
     return list;
   },
 

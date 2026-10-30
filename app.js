@@ -20334,6 +20334,73 @@ function renegValorParcelaAtual(bills) {
   return vals[Math.floor((vals.length - 1) / 2)];
 }
 
+function renegParseDinheiro(v) {
+  const s = String(v == null ? "" : v).trim().replace(/R\$\s?/i, "").replace(/\s/g, "");
+  if (!s) return null;
+  const n = s.includes(",") ? Number(s.replace(/\./g, "").replace(",", ".")) : Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+function renegFmtPct(p) {
+  const n = Math.round((Number(p) || 0) * 100) / 100;
+  return n.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+/** Valor fechado do sinal: fica na alçada e pode baixar até 1 ponto percentual do mínimo, para arredondar. */
+function renegLerSinal(grossDebt, minPct, maxPct) {
+  const bruto = Number(grossDebt) || 0;
+  const minimo = Math.max(0, Number(minPct) || 0);
+  const maximo = Math.max(minimo, Number(maxPct) || 100);
+  const piso = Math.max(0, minimo - 1);
+  const sel = document.getElementById("reneg-sinal-pct");
+  const inp = document.getElementById("reneg-sinal-valor");
+  const faixa = document.getElementById("reneg-sinal-faixa");
+  const pctLista = Number(sel && sel.value);
+  let pct = Number.isFinite(pctLista) ? pctLista : minimo;
+  let valor = Math.round(bruto * (pct / 100) * 100) / 100;
+  let aviso = "";
+  let ok = true;
+  if (window._renegSinalModo === "valor" && inp && bruto > 0.009) {
+    const digitado = renegParseDinheiro(inp.value);
+    if (digitado == null) {
+      ok = false;
+      aviso = "Informe o valor do sinal.";
+    } else {
+      const centavos = Math.round(digitado * 100) / 100;
+      const minVal = Math.round(bruto * (piso / 100) * 100) / 100;
+      const maxVal = Math.round(bruto * (maximo / 100) * 100) / 100;
+      if (centavos + 0.001 < minVal || centavos - 0.001 > maxVal) {
+        ok = false;
+        aviso = "Esse valor sai da alçada. O sinal pode ir de " + minVal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) + " (" + renegFmtPct(piso) + "%) a " + maxVal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) + " (" + renegFmtPct(maximo) + "%). O mínimo da alçada é " + renegFmtPct(minimo) + "% e há 1% de folga para arredondar.";
+      } else {
+        valor = centavos;
+        pct = bruto > 0.009 ? (valor / bruto) * 100 : 0;
+      }
+    }
+  } else if (inp && document.activeElement !== inp) {
+    inp.value = valor > 0.009 ? valor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "";
+  }
+  if (faixa) {
+    if (aviso) {
+      faixa.textContent = aviso;
+      faixa.style.color = "#b91c1c";
+    } else if (window._renegSinalModo === "valor" && bruto > 0.009) {
+      faixa.textContent = "Equivale a " + renegFmtPct(pct) + "% do total. Alçada de " + renegFmtPct(minimo) + "% a " + renegFmtPct(maximo) + "%, com folga até " + renegFmtPct(piso) + "% para valor fechado.";
+      faixa.style.color = "#64748b";
+    } else if (bruto > 0.009) {
+      faixa.textContent = "Pode digitar um valor fechado. A alçada aceita de " + renegFmtPct(minimo) + "% a " + renegFmtPct(maximo) + "% e, para arredondar, até " + renegFmtPct(piso) + "%.";
+      faixa.style.color = "#64748b";
+    } else {
+      faixa.textContent = "";
+    }
+  }
+  if (!ok && window._renegSinalModo === "valor") {
+    pct = Number.isFinite(pctLista) ? pctLista : minimo;
+    valor = Math.round(bruto * (pct / 100) * 100) / 100;
+  }
+  return { pct: pct, valor: valor, ok: ok };
+}
+
 function renegPreencherSinal(min, max) {
   const sel = document.getElementById("reneg-sinal-pct");
   if (!sel) return 0;
@@ -20576,7 +20643,12 @@ function calculateRenegotiation() {
   const taxaTxt = contractRate > 0
     ? `${renegFormatTaxa(interestRate)} a.m. do contrato`
     : `${renegFormatTaxa(interestRate)} a.m. (contrato sem juros)`;
-  let sinalPct = isCartao ? 0 : (Number(document.getElementById("reneg-sinal-pct")?.value) || ruleSinalMin);
+  const principalCedo = selectedBills.reduce((acc, b) => acc + (b.value || 0), 0);
+  const corrigidoCedo = selectedBills.reduce((acc, b) => acc + (b.computedCorrected || b.value || 0), 0);
+  const grossCedo = principalCedo + (corrigidoCedo - principalCedo) * (1 - discountPct / 100);
+  const sinalLido = isCartao ? { pct: 0, valor: 0, ok: true } : renegLerSinal(grossCedo, ruleSinalMin, ruleSinalMax);
+  let sinalPct = sinalLido.pct;
+  const sinalValorInformado = isCartao ? 0 : sinalLido.valor;
   if (isCartao) {
     const sinalInput = document.getElementById("reneg-sinal-pct");
     if (sinalInput) sinalInput.value = "0";
@@ -20638,7 +20710,7 @@ function calculateRenegotiation() {
   const grossDebt = principal + adjustedCharges;
   
   // Sinal
-  const sinalValue = grossDebt * (sinalPct / 100);
+  const sinalValue = isCartao ? 0 : sinalValorInformado;
   const remainingAfterSinal = grossDebt - sinalValue;
 
   // Taxa de cartão (repasse embutido na divisão, se configurado)
@@ -20717,7 +20789,7 @@ function calculateRenegotiation() {
   }
   
   if (mathCustoOperacaoEl) mathCustoOperacaoEl.textContent = fmt(financingCost);
-  if (headerSinalPctEl) headerSinalPctEl.textContent = sinalPct;
+  if (headerSinalPctEl) headerSinalPctEl.textContent = renegFmtPct(sinalPct);
   if (headerParcelasEl) {
     if (cenario === "diluir") {
       headerParcelasEl.textContent = instQty > 0 ? `${instQty}\u00D7 acréscimo de ${fmt(installmentValue)}` : "Sem outras parcelas não vencidas";
@@ -20821,7 +20893,7 @@ function calculateRenegotiation() {
   
   // Sinal summary
   if (sinalSummaryEl) {
-    sinalSummaryEl.textContent = sinalPct > 0 ? `${fmt(sinalValue)} (${sinalPct}%)` : 'Sem sinal';
+    sinalSummaryEl.textContent = sinalPct > 0 ? `${fmt(sinalValue)} (${renegFmtPct(sinalPct)}%)` : 'Sem sinal';
   }
   if (sinalDateEl) {
     if (sinalPct > 0 && sinalDueStr) {
@@ -21561,6 +21633,11 @@ window.renegChecarPropostaAtiva = async function() {
     const opt = Array.from(sinalPct.options).find(function(o) { return String(o.value) === String(p.sinalPct); });
     if (!opt) sinalPct.insertAdjacentHTML("beforeend", '<option value="' + p.sinalPct + '">' + p.sinalPct + "%</option>");
     sinalPct.value = String(p.sinalPct);
+  }
+  if (p.sinalValue > 0) {
+    window._renegSinalModo = "valor";
+    const sinalValorEl = document.getElementById("reneg-sinal-valor");
+    if (sinalValorEl) sinalValorEl.value = Number(p.sinalValue).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
   const qty = document.getElementById("reneg-installments-qty");
   if (qty && p.instQty != null) {
