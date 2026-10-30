@@ -3305,6 +3305,11 @@ const SiengeApiService = {
     }
   },
 
+  async postRemadeInstallments(payload) {
+    if (s_apiMode === "simulado") return { ok: true, simulated: true };
+    return await siengePost("/remade-installments", payload || {});
+  },
+
   // 9. Histórico de notificações
   async getNotificationHistory(saleId) {
     if (s_apiMode === "simulado") return window.MOCK_DATA.COLLECTIONS_NOTIFICATION_HISTORY[saleId] || [];

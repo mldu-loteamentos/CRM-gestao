@@ -3995,6 +3995,10 @@ function auditActionMeta(action, summary, module) {
     if (/erro|fail|falha/.test(blob)) return { group: "anexo", label: "Falha no envio de anexo" };
     return { group: "anexo", label: "Envio de Anexo" };
   }
+  if (key === "Reparcelar título") {
+    if (/erro|falha/.test(blob)) return { group: "sienge", label: "Falha ao reparcelar no Sienge" };
+    return { group: "sienge", label: "Reparcelamento enviado ao Sienge" };
+  }
   if (key === "Lançar equivalência") {
     if (/erro|falha/.test(blob)) return { group: "sienge", label: "Falha ao lançar equivalência no Sienge" };
     return { group: "sienge", label: "Equivalência lançada no Sienge" };
@@ -21389,11 +21393,16 @@ window.renegPropostaDeCliente = function(client) {
   return map.get(renegPropostaId(client.customerId, client.saleId)) || null;
 };
 
+/** Fila e tag da proposta ficam desligadas até o reparcelamento estar conferido. */
+window.RENEG_MOSTRA_NA_FILA = false;
+
 window.clientTemPropostaAguardandoSinal = function(client) {
+  if (!window.RENEG_MOSTRA_NA_FILA) return false;
   return window.renegPropostaEstaAtiva(window.renegPropostaDeCliente(client));
 };
 
 window.clientTemPropostaParaConfessao = function(client) {
+  if (!window.RENEG_MOSTRA_NA_FILA) return false;
   const p = window.renegPropostaDeCliente(client);
   return window.renegPropostaProntaParaConfessao(p) && !!p.sinalPago;
 };
@@ -21664,7 +21673,7 @@ window.renegChecarPropostaAtiva = async function() {
   }
 };
 
-async function renegSalvarProposta(results) {
+async function renegSalvarProposta(results, extra) {
   const fc = window.firebaseCollections;
   if (!window.firebaseDb || !fc || !fc.setDoc || !fc.doc) throw new Error("Firebase indisponível");
   const customer = g_renegCustomer || {};
@@ -21699,6 +21708,18 @@ async function renegSalvarProposta(results) {
   };
   await fc.setDoc(fc.doc(window.firebaseDb, "reneg_propostas", id), dados, { merge: true });
   dados.id = id;
+  if (extra && extra.codigo) {
+    const anterior = window._renegPropostasMap && window._renegPropostasMap.get(id);
+    if (anterior && anterior.codigoAuth && anterior.codigoAuth !== extra.codigo) {
+      fc.setDoc(fc.doc(window.firebaseDb, "documentos_autenticados", anterior.codigoAuth), { substituido: true }, { merge: true }).catch(function() {});
+    }
+    dados.codigoAuth = extra.codigo;
+    dados.reparcelamento = extra.reparcelamento || null;
+    await fc.setDoc(fc.doc(window.firebaseDb, "reneg_propostas", id), {
+      codigoAuth: extra.codigo,
+      reparcelamento: extra.reparcelamento || null
+    }, { merge: true });
+  }
   window._renegPropostasMap = window._renegPropostasMap || new Map();
   window._renegPropostasMap.set(id, dados);
   return dados;
@@ -21718,7 +21739,7 @@ async function renegConcluirProposta() {
   }
 }
 
-async function baixarHtmlComoPdf(html, nomeArquivo) {
+async function baixarHtmlComoPdf(html, nomeArquivo, opts) {
   if (!window.jspdf || !window.jspdf.jsPDF || typeof html2canvas !== "function") {
     throw new Error("gerador de PDF indisponível");
   }
@@ -21749,11 +21770,231 @@ async function baixarHtmlComoPdf(html, nomeArquivo) {
       y += sliceH;
       page += 1;
     }
-    pdf.save(nomeArquivo);
+    const bytes = new Uint8Array(pdf.output("arraybuffer"));
+    if (!(opts && opts.devolver)) renegBaixarBytes(bytes, nomeArquivo);
+    return bytes;
   } finally {
     host.remove();
   }
 }
+
+function renegBaixarBytes(bytes, nomeArquivo) {
+  const blob = new Blob([bytes], { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nomeArquivo || "acordo.pdf";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(function() { URL.revokeObjectURL(url); }, 4000);
+}
+
+function renegNumeroMoeda(txt) {
+  const s = String(txt || "").replace(/[^\d,.-]/g, "").trim();
+  if (!s) return 0;
+  if (s.indexOf(",") >= 0) return Number(s.replace(/\./g, "").replace(",", ".")) || 0;
+  return Number(s) || 0;
+}
+
+function renegDataBrIso(dataBr) {
+  const p = String(dataBr || "").split("/");
+  if (p.length < 3) return "";
+  return p[2].slice(0, 4) + "-" + p[1] + "-" + p[0];
+}
+
+function renegPayloadRemade(results) {
+  const sale = g_renegSale || {};
+  const bill = String(sale.receivableBillId || sale.id || "").replace(/^B-/i, "").split("-")[0].replace(/\D/g, "");
+  const nums = renegParcelasMarcadas().map(function(b) {
+    return String(b.installmentId || b.installmentNum || b.installmentNumber || "").replace(/\D/g, "");
+  }).filter(Boolean);
+  const hoje = renegIsoHoje();
+  const faixas = [];
+  renegLerAgenda().forEach(function(item) {
+    const valor = renegNumeroMoeda(item.total);
+    const inicio = renegDataBrIso(item.data);
+    const sinal = String(item.tipo || "").indexOf("SINAL") >= 0;
+    const ult = faixas[faixas.length - 1];
+    if (ult && ult.sinal === sinal && Math.abs(ult.valor - valor) < 0.02) ult.qtd += 1;
+    else faixas.push({ sinal: sinal, valor: valor, inicio: inicio, qtd: 1 });
+  });
+  let acordo = 0;
+  const paymentConditions = faixas.filter(function(f) { return f.qtd > 0 && f.valor > 0 && f.inicio; }).map(function(f) {
+    const tipo = f.sinal ? "SA" : ("A" + String(++acordo));
+    return {
+      conditionTypeId: tipo,
+      installmentsNumber: f.qtd,
+      firstPayment: f.inicio,
+      totalValue: Math.round(f.valor * f.qtd * 100) / 100
+    };
+  });
+  return {
+    billReceivableId: Number(bill) || 0,
+    remadeDate: hoje,
+    calculationDate: hoje,
+    installments: nums.join(","),
+    remadeDescription: "Acordo interno Integra",
+    paymentConditions: paymentConditions
+  };
+}
+
+function renegCarregarQrLib() {
+  if (window.QRCode && typeof window.QRCode.toDataURL === "function") return Promise.resolve(window.QRCode);
+  if (window.CessaoPopup && typeof CessaoPopup.carregarQrLib === "function") return CessaoPopup.carregarQrLib();
+  if (window._renegQrLib) return window._renegQrLib;
+  window._renegQrLib = new Promise(function(resolve, reject) {
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.4.4/qrcode.min.js";
+    s.onload = function() {
+      if (window.QRCode && window.QRCode.toDataURL) resolve(window.QRCode);
+      else reject(new Error("O gerador de QR Code não carregou."));
+    };
+    s.onerror = function() { reject(new Error("O gerador de QR Code não carregou.")); };
+    document.head.appendChild(s);
+  });
+  window._renegQrLib.catch(function() { window._renegQrLib = null; });
+  return window._renegQrLib;
+}
+
+async function renegGuardarProva(codigo, hash, info, payload) {
+  const fx = window.firebaseCollections;
+  const db = window.firebaseDb;
+  if (!fx || !db || !fx.setDoc || !fx.doc) throw new Error("O Firebase não está disponível para guardar a prova do acordo.");
+  await fx.setDoc(fx.doc(db, "documentos_autenticados", codigo), {
+    tipo: "acordo",
+    tipoNome: "Acordo",
+    codigo: codigo,
+    hash: hash || "",
+    titulo: info.titulo || "",
+    unidade: info.unidade || "",
+    cliente: info.cliente || "",
+    reparcelamento: payload || null,
+    em: new Date().toISOString()
+  }, { merge: true });
+}
+
+async function renegCarimbarAcordo(bytes, results, codigoPronto) {
+  const codigo = codigoPronto || ("ac-" + (window.crypto && crypto.randomUUID ? crypto.randomUUID().replace(/-/g, "").slice(0, 12) : Date.now().toString(36)));
+  const payload = renegPayloadRemade(results);
+  const sale = g_renegSale || {};
+  const cli = g_renegCustomer || {};
+  const unit = (window.AppState && AppState.units && sale.unitId && AppState.units[sale.unitId]) || {};
+  const info = {
+    tipo: "Acordo",
+    titulo: String(sale.receivableBillId || sale.id || ""),
+    unidade: [unit.costCenterId || sale.costCenterId || sale.enterpriseId, unit.name || unit.unitName || sale.unitName].filter(Boolean).join(" - "),
+    cliente: cli.name || ""
+  };
+  try {
+    const rel = window.RelacionamentoApp;
+    if (!rel || typeof rel._carregarPdfLib !== "function") throw new Error("O editor de PDF não está disponível.");
+    const PDFLib = await rel._carregarPdfLib();
+    const qr = await renegCarregarQrLib();
+    const { PDFDocument, StandardFonts, rgb } = PDFLib;
+    const limpo = function(s) { return String(s || "").replace(/[|\r\n]/g, " ").trim().slice(0, 80); };
+    const texto = ["INTEGRA", codigo, limpo(info.tipo), limpo(info.titulo), limpo(info.unidade), limpo(info.cliente)].join("|");
+    const dataUrl = await qr.toDataURL(texto, { margin: 1, width: 320, errorCorrectionLevel: "M" });
+    const cru = Uint8Array.from(atob(String(dataUrl).split(",")[1] || ""), function(c) { return c.charCodeAt(0); });
+    const pdf = await PDFDocument.load(bytes);
+    const png = await pdf.embedPng(cru);
+    const font = await pdf.embedFont(StandardFonts.Helvetica);
+    const semAcento = function(s) { return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7E]/g, ""); };
+    const page = pdf.addPage([595.28, 841.89]);
+    pdf.setSubject("INTEGRA|" + codigo);
+    pdf.setKeywords(["INTEGRA", codigo]);
+    page.drawText("Autenticacao do documento", { x: 48, y: 760, size: 16, font: font, color: rgb(0.06, 0.2, 0.13) });
+    page.drawText("Codigo " + codigo, { x: 48, y: 732, size: 12, font: font, color: rgb(0.12, 0.16, 0.2) });
+    page.drawText("Acordo", { x: 48, y: 708, size: 12, font: font, color: rgb(0.12, 0.16, 0.2) });
+    page.drawText("Titulo: " + semAcento(info.titulo || "-").slice(0, 70), { x: 48, y: 686, size: 11, font: font, color: rgb(0.2, 0.25, 0.3) });
+    page.drawText("Unidade: " + semAcento(info.unidade || "-").slice(0, 70), { x: 48, y: 668, size: 11, font: font, color: rgb(0.2, 0.25, 0.3) });
+    page.drawText("Cliente: " + semAcento(info.cliente || "-").slice(0, 70), { x: 48, y: 650, size: 11, font: font, color: rgb(0.2, 0.25, 0.3) });
+    page.drawImage(png, { x: 48, y: 460, width: 168, height: 168 });
+    const out = new Uint8Array(await pdf.save());
+    let aviso = "";
+    try {
+      const hash = await renegSha256(out);
+      await renegGuardarProva(codigo, hash, info, payload);
+    } catch (e) {
+      aviso = "O QR Code foi impresso, mas a prova do reparcelamento não ficou salva. " + ((e && e.message) || "");
+    }
+    return { bytes: out, codigo: codigo, reparcelamento: payload, aviso: aviso };
+  } catch (e) {
+    return {
+      bytes: bytes,
+      codigo: "",
+      reparcelamento: payload,
+      aviso: "O PDF foi gerado sem o QR Code. " + ((e && e.message) || "")
+    };
+  }
+}
+
+function renegSha256(bytes) {
+  const buf = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  return crypto.subtle.digest("SHA-256", buf).then(function(dig) {
+    return Array.from(new Uint8Array(dig)).map(function(b) { return b.toString(16).padStart(2, "0"); }).join("");
+  });
+}
+
+async function renegMontarPdfAcordo(results, nomeArquivo) {
+  const pdf = baixarPropostaAcordoPdf(results, nomeArquivo);
+  const cru = new Uint8Array(pdf.output("arraybuffer"));
+  return renegCarimbarAcordo(cru, results, "");
+}
+
+window.subirReparcelamentoPorCodigo = async function(codigo) {
+  const fx = window.firebaseCollections;
+  const db = window.firebaseDb;
+  const vazio = { ok: false, motivo: "sem-reparcelamento" };
+  if (!codigo || !fx || !db || !fx.getDoc || !fx.doc) return vazio;
+  const snap = await fx.getDoc(fx.doc(db, "documentos_autenticados", codigo));
+  if (!snap || !snap.exists || !snap.exists()) return vazio;
+  const prova = snap.data() || {};
+  if (prova.tipo !== "acordo" || !prova.reparcelamento) return vazio;
+  if (prova.substituido) return { ok: false, motivo: "substituido" };
+  if (prova.reparcelamentoEnviado) return { ok: false, motivo: "ja-enviado" };
+  const corpo = prova.reparcelamento;
+  const u = (window.AuditService && AuditService.currentUser) ? AuditService.currentUser() : ((window.AppState && AppState.currentUser) || {});
+  const registrar = function(status, summary) {
+    if (!window.AuditService || typeof AuditService.logEvent !== "function") return;
+    AuditService.logEvent({
+      module: "Cobrança",
+      action: "Reparcelar título",
+      status: status,
+      summary: summary,
+      user: u.name || u.nome || "",
+      userEmail: u.email || "",
+      customerLabel: prova.cliente || "",
+      titleId: String((corpo && corpo.billReceivableId) || prova.titulo || ""),
+      enterpriseId: String(prova.unidade || "").split(" ")[0] || ""
+    });
+  };
+  if (!(Number(corpo.billReceivableId) > 0) || !corpo.installments || !(corpo.paymentConditions || []).length) {
+    registrar("erro", "Reparcelamento do título " + (corpo.billReceivableId || prova.titulo || "") + " não foi enviado: faltam parcelas ou condições.");
+    return { ok: false, motivo: "erro", detalhe: "O acordo não tem parcelas suficientes para o reparcelamento." };
+  }
+  const api = window.SiengeApiService;
+  if (!api || typeof api.postRemadeInstallments !== "function") {
+    registrar("erro", "Reparcelamento do título " + corpo.billReceivableId + " não foi enviado: a API não está disponível.");
+    return { ok: false, motivo: "erro", detalhe: "A API de reparcelamento não está disponível. Atualize a página com Ctrl+F5." };
+  }
+  try {
+    const res = await api.postRemadeInstallments(corpo);
+    if (res && res.simulated) {
+      return { ok: false, motivo: "erro", detalhe: "O Integra está em modo simulado. O reparcelamento não foi enviado ao Sienge." };
+    }
+    await fx.setDoc(fx.doc(db, "documentos_autenticados", codigo), {
+      reparcelamentoEnviado: true,
+      reparcelamentoEnviadoEm: new Date().toISOString()
+    }, { merge: true });
+    registrar("ok", "Reparcelamento do título " + corpo.billReceivableId + " enviado ao Sienge para " + (prova.cliente || "o cliente") + ".");
+    return { ok: true };
+  } catch (e) {
+    const detalhe = (e && e.message) || "O Sienge recusou o reparcelamento.";
+    registrar("erro", "Falha ao reparcelar o título " + corpo.billReceivableId + " de " + (prova.cliente || "o cliente") + ": " + detalhe);
+    return { ok: false, motivo: "erro", detalhe: detalhe };
+  }
+};
 
 function renegLerAgenda() {
   const body = document.getElementById("reneg-schedule-body");
@@ -22178,7 +22419,7 @@ function baixarPropostaAcordoPdf(results, nomeArquivo) {
     const aviso = "Sinal de " + brl(results.sinalValue) + " até " + (sinalData || "a data combinada") + ". Sem o pagamento, a proposta expira em " + (expira || "dois dias depois") + ".";
     pdf.text(pdf.splitTextToSize(aviso, largura), m, y + 3);
   }
-  pdf.save(nomeArquivo);
+  return pdf;
 }
 
 function generateAgreementPDF() {
@@ -22206,9 +22447,11 @@ function generateAgreementPDF() {
           nome: (g_renegCustomer && g_renegCustomer.name) || ""
         })
       : "Proposta de acordo.pdf";
-    baixarPropostaAcordoPdf(results, nomeProp);
+    const pack = await renegMontarPdfAcordo(results, nomeProp);
+    renegBaixarBytes(pack.bytes, nomeProp);
+    if (pack.aviso) alert(pack.aviso);
     let salva = null;
-    try { salva = await renegSalvarProposta(results); }
+    try { salva = await renegSalvarProposta(results, { codigo: pack.codigo, reparcelamento: pack.reparcelamento }); }
     catch (e) { alert("O PDF da proposta foi baixado, mas não consegui gravar no Firebase: " + ((e && e.message) || e)); return; }
     renegMontarAvisoProposta(salva, false);
     window.atualizarBotaoReneg();
@@ -22288,7 +22531,11 @@ function generateAgreementPDF() {
         nome: (g_renegCustomer && g_renegCustomer.name) || ""
       })
     : (modo === "proposta" ? "Proposta de acordo.pdf" : "Confissão de dívida.pdf");
-  await baixarHtmlComoPdf(docHtml, nomeArq);
+  const cru = await baixarHtmlComoPdf(docHtml, nomeArq, { devolver: true });
+  const ja = renegPropostaAtual();
+  const pack = await renegCarimbarAcordo(cru, results, (ja && ja.codigoAuth) || "");
+  renegBaixarBytes(pack.bytes, nomeArq);
+  if (pack.aviso) alert(pack.aviso);
   if (modo === "proposta") {
     let salva = null;
     try { salva = await renegSalvarProposta(results); }

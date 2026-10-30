@@ -3707,6 +3707,13 @@ const AnexosApp = {
           cliente: prova.cliente || lido.cliente || ""
         };
       }
+      const ehAcordo = /acordo/i.test(String(lido.tipo || "")) || prova.tipo === "acordo";
+      if (ehAcordo && typeof window.subirReparcelamentoPorCodigo === "function") {
+        const r = await window.subirReparcelamentoPorCodigo(lido.codigo);
+        fileObj.reparcelamento = r && r.ok
+          ? { estado: "enviado" }
+          : { estado: (r && r.motivo) || "erro", detalhe: (r && r.detalhe) || "" };
+      }
     } catch (e) {
       fileObj.autenticacao = { estado: "erro", detalhe: e && e.message ? e.message : "" };
     }
@@ -3944,7 +3951,7 @@ const AnexosApp = {
               const linha = [a.tipo, a.titulo ? "Título " + a.titulo : "", a.unidade, a.cliente].filter(Boolean).map(escTag).join(" · ");
               if (a.estado === "conferindo") return `<span class="badge" style="background:#e2e8f0;color:#334155;white-space:nowrap;">Conferindo autenticidade</span>`;
               if (a.estado === "original") return `<span class="badge badge-success" style="white-space:nowrap;">Original do Integra</span>${linha ? `<div style="font-size:0.72rem;color:#105436;text-align:right;max-width:240px;">${linha}</div>` : ""}`;
-              if (a.estado === "alterado") return `<span class="badge badge-danger" style="white-space:nowrap;">Arquivo alterado</span>${linha ? `<div style="font-size:0.72rem;color:#991b1b;text-align:right;max-width:240px;">${linha}</div>` : ""}`;
+              if (a.estado === "alterado") return `<span class="badge badge-danger" style="white-space:nowrap;">Arquivo alterado</span>${linha ? `<div style="font-size:0.72rem;color:#991b1b;text-align:right;max-width:240px;">${linha}</div>` : ""}${rep}`;
               if (a.estado === "sem-prova") return `<span class="badge badge-warning" style="white-space:nowrap;">QR do Integra sem prova salva</span>`;
               return `<span class="badge badge-warning" style="white-space:nowrap;">Não foi possível conferir o QR</span>`;
             })()}

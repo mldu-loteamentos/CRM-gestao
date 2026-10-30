@@ -10123,6 +10123,28 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .rmod-dica b { display: block; margin-bottom: 4px; color: #105436; font-size: 0.82rem; }
 .rmod-dica p { margin: 0; }
 .rmod-dica .rmod-porque { margin-top: 8px; padding-top: 8px; border-top: 1px solid #e2e8f0; color: #0f172a; white-space: pre-line; }
+.reneg-quadro-campos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 14px;
+}
+.reneg-quadro-campos > .form-group { min-width: 0; }
+.reneg-sinal-linha { grid-column: 1 / -1; }
+.reneg-sinal-campos {
+  display: grid;
+  grid-template-columns: minmax(0, 120px) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: end;
+}
+.reneg-sinal-campos > * { min-width: 0; overflow: hidden; }
+.reneg-sinal-campos .form-control {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
 .reneg-mod-alerta {
   grid-column: 1 / -1;
   display: flex;
