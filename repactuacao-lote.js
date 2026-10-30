@@ -13,6 +13,8 @@ const RepactuacaoLoteApp = {
   state: {
     inited: false,
     fileName: "",
+    salvo: null,
+    salvando: false,
     loading: false,
     stop: false,
     period: null,
@@ -187,6 +189,7 @@ const RepactuacaoLoteApp = {
       this.state.previewProgress = 8;
       this.render();
       this.loadIndexerPreview();
+      this.carregarSalva();
     } catch (e) {
       console.error("[Repactuação lote] init", e);
       const root = document.getElementById("repactuacao-lote-root");
@@ -442,7 +445,8 @@ const RepactuacaoLoteApp = {
     };
   },
 
-  async loadFile(file) {
+  async loadFile(file, opts) {
+    const jaSalva = !!(opts && opts.jaSalva);
     this.state.fileName = file.name;
     this.state.loading = true;
     this.state.stop = false;
@@ -454,6 +458,7 @@ const RepactuacaoLoteApp = {
       const sheet = wb.Sheets[wb.SheetNames[0]];
       const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: "" });
       this.parseMatrix(matrix);
+      if (!jaSalva) this.salvarPlanilha(file, buf);
       await this.ensureIndexers();
       this.applyIndexerLogic();
       this.render();
@@ -848,8 +853,72 @@ const RepactuacaoLoteApp = {
     this.state.stop = false;
     this.state.filter = "all";
     this.state.empresa = "";
-    // Mantém o mês escolhido pelo operador e a prévia dos indexadores
     this.render();
+  },
+
+  async carregarSalva() {
+    const fc = window.firebaseCollections;
+    if (!window.firebaseDb || !fc || typeof fc.getDoc !== "function") return;
+    try {
+      const snap = await fc.getDoc(fc.doc(window.firebaseDb, "config", "repactuacao_planilha"));
+      if (!snap || typeof snap.exists !== "function" || !snap.exists()) return;
+      const d = snap.data() || {};
+      if (!d.url || !d.name) return;
+      this.state.salvo = {
+        name: String(d.name),
+        url: String(d.url),
+        path: String(d.path || ""),
+        savedAt: String(d.savedAt || ""),
+        parcelas: Number(d.parcelas) || 0,
+        titulos: Number(d.titulos) || 0
+      };
+      if (!this.state.fileName) this.render();
+    } catch (e) {
+      console.warn("[Repactuação] planilha salva", e);
+    }
+  },
+
+  async salvarPlanilha(file, buf) {
+    const fc = window.firebaseCollections;
+    if (!window.firebaseStorage || !window.firebaseDb || !fc || !fc.ref || !fc.uploadBytes || !fc.getDownloadURL || !fc.setDoc) return;
+    this.state.salvando = true;
+    try {
+      const path = "repactuacao/planilha-titulos.xlsx";
+      const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      await fc.uploadBytes(fc.ref(window.firebaseStorage, path), blob, { contentType: blob.type });
+      const url = await fc.getDownloadURL(fc.ref(window.firebaseStorage, path));
+      const salvo = {
+        name: file.name,
+        url,
+        path,
+        savedAt: new Date().toISOString(),
+        parcelas: this.state.rows.length,
+        titulos: new Set(this.state.rows.map((r) => r.titulo)).size,
+        adjustMonth: this.state.adjustMonth || ""
+      };
+      await fc.setDoc(fc.doc(window.firebaseDb, "config", "repactuacao_planilha"), salvo);
+      this.state.salvo = salvo;
+    } catch (e) {
+      console.warn("[Repactuação] salvar planilha", e);
+    }
+    this.state.salvando = false;
+    const meta = document.querySelector("#repactuacao-lote-root .repac-arquivo-meta");
+    if (meta) meta.textContent = this.state.salvo ? "salva" : "";
+  },
+
+  async abrirSalva() {
+    const s = this.state.salvo;
+    if (!s || !s.url || this.state.loading) return;
+    try {
+      const res = await fetch(s.url);
+      if (!res.ok) throw new Error("Não consegui baixar a planilha salva.");
+      const buf = await res.arrayBuffer();
+      const file = new File([buf], s.name || "planilha.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      await this.loadFile(file, { jaSalva: true });
+    } catch (e) {
+      console.warn("[Repactuação] abrir planilha salva", e);
+      alert((e && e.message) || "Não consegui abrir a planilha salva.");
+    }
   },
 
   setFilter(f) {
@@ -892,32 +961,38 @@ const RepactuacaoLoteApp = {
   },
 
   uploadZoneHtml() {
-    const hasFile = !!this.state.fileName;
-    if (hasFile) {
+    const salvo = this.state.salvo;
+    const quando = salvo && salvo.savedAt ? this.fmtDate(String(salvo.savedAt).slice(0, 10)) : "";
+    const input = `<input type="file" id="repac-input-excel" accept=".xlsx,.xls" style="display:none;">`;
+    if (this.state.fileName) {
+      const marca = this.state.salvando ? "salvando…" : (salvo && salvo.name === this.state.fileName ? "salva" : "");
       return `
-        <div class="repac-file-chip" style="display:inline-flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:8px;max-width:100%;">
-          <i data-lucide="paperclip" style="width:18px;height:18px;color:var(--color-primary);flex-shrink:0;"></i>
-          <div style="min-width:0;flex:1;">
-            <div style="font-size:0.72rem;font-weight:700;color:#15803d;text-transform:uppercase;letter-spacing:0.02em;">Anexo</div>
-            <div style="font-size:0.85rem;color:#14532d;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${this.esc(this.state.fileName)}">${this.esc(this.state.fileName)}</div>
-          </div>
-          <button type="button" class="btn btn-cancel" style="padding:6px 10px;font-size:0.78rem;flex-shrink:0;" onclick="event.stopPropagation(); RepactuacaoLoteApp.clearFile()" title="Remover planilha">
-            <i data-lucide="trash-2" style="width:14px;height:14px;"></i> Remover
-          </button>
-          <input type="file" id="repac-input-excel" accept=".xlsx,.xls" style="display:none;">
-        </div>
-      `;
+        <div class="repac-arquivo">
+          <i data-lucide="paperclip"></i>
+          <span class="repac-arquivo-nome" title="${this.esc(this.state.fileName)}">${this.esc(this.state.fileName)}</span>
+          <span class="repac-arquivo-meta">${marca}</span>
+          <button type="button" class="repac-arquivo-btn" onclick="document.getElementById('repac-input-excel').click()">Trocar</button>
+          <button type="button" class="repac-arquivo-btn" onclick="RepactuacaoLoteApp.clearFile()">Remover</button>
+          ${input}
+        </div>`;
+    }
+    if (salvo && salvo.url) {
+      return `
+        <div class="repac-arquivo">
+          <i data-lucide="paperclip"></i>
+          <span class="repac-arquivo-nome" title="${this.esc(salvo.name)}">${this.esc(salvo.name)}</span>
+          <span class="repac-arquivo-meta">salva${quando ? " em " + this.esc(quando) : ""}</span>
+          <button type="button" class="repac-arquivo-btn" onclick="RepactuacaoLoteApp.abrirSalva()">Abrir</button>
+          <button type="button" class="repac-arquivo-btn" onclick="document.getElementById('repac-input-excel').click()">Enviar outra</button>
+          ${input}
+        </div>`;
     }
     return `
-      <div id="repac-dropzone" class="dropzone" style="border:2px dashed #94a3b8;padding:14px 16px;text-align:left;border-radius:8px;cursor:pointer;background:#f8fafc;display:flex;align-items:center;gap:12px;max-width:420px;">
-        <i data-lucide="file-spreadsheet" style="width:28px;height:28px;color:var(--color-primary);flex-shrink:0;"></i>
-        <div>
-          <p style="margin:0;color:#334155;font-size:0.9rem;font-weight:600;">Clique ou arraste o Excel (.xlsx)</p>
-          <p style="margin:2px 0 0;font-size:0.75rem;color:#64748b;">Planilha Títulos para Repactuação</p>
-        </div>
-        <input type="file" id="repac-input-excel" accept=".xlsx,.xls" style="display:none;">
-      </div>
-    `;
+      <div id="repac-dropzone" class="repac-arquivo is-empty">
+        <i data-lucide="paperclip"></i>
+        <span>Enviar planilha .xlsx</span>
+        ${input}
+      </div>`;
   },
 
   tableHtml() {
@@ -997,14 +1072,13 @@ const RepactuacaoLoteApp = {
     root.innerHTML = `
       <div class="est-stock-page">
         ${this.previewHtml()}
-        <div class="search-filter-panel" style="margin-bottom:16px;">
-          <h3 style="margin:0 0 10px;font-size:0.9rem;color:#334155;">Planilha de títulos</h3>
+        <div class="search-filter-panel repac-planilha">
           ${this.uploadZoneHtml()}
-          <p id="repac-progress" style="font-size:0.82rem;color:#64748b;margin:10px 0 0;">${this.state.loading ? "Processando…" : (n ? `${n} parcelas · ${titles} títulos` : "")}</p>
-          ${this.state.loading ? `<button type="button" class="btn btn-cancel" style="margin-top:8px;" onclick="RepactuacaoLoteApp.parar()">Parar</button>` : ""}
+          <p id="repac-progress">${this.state.loading ? "Processando…" : (n ? `${n} parcelas · ${titles} títulos` : "")}</p>
+          ${this.state.loading ? `<button type="button" class="btn btn-cancel" onclick="RepactuacaoLoteApp.parar()">Parar</button>` : ""}
         </div>
         ${n ? `
-        <div id="repac-kpis" class="est-stock-kpis" style="margin-bottom:12px;">
+        <div id="repac-kpis" class="repac-kpis">
           <div class="est-fin-card"><label>Parcelas</label><strong>${n}</strong></div>
           <div class="est-fin-card is-ok"><label>Bateram</label><strong>${ok}</strong></div>
           <div class="est-fin-card is-warn"><label>Data base divergente</label><strong>${baseFail}</strong></div>
