@@ -684,6 +684,31 @@ const HomeDashboard = {
     return n.includes("ADMINISTRADOR");
   },
 
+  veEscalaHome(user) {
+    if (!user) return false;
+    if (this.isBackOfficeUser(user)) return true;
+    return this.isInternoCobrancaUser(user);
+  },
+
+  renderEscalaHome() {
+    const box = document.getElementById("home-op-escala");
+    if (!box) return;
+    const user = this.getViewUser();
+    const escala = window.EscalaHomeOffice;
+    if (!this.veEscalaHome(user) || !escala) {
+      box.style.display = "none";
+      box.innerHTML = "";
+      return;
+    }
+    const pintar = () => {
+      const eu = escala.chaveNome(user && (user.name || user.nome));
+      box.style.display = "block";
+      box.innerHTML = escala.htmlHome(eu);
+    };
+    if (escala.state && escala.state.pronto) pintar();
+    else if (typeof escala.carregar === "function") escala.carregar().then(pintar).catch(() => {});
+  },
+
   init() {
     const user = (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo()) || window.AppState?.currentUser;
     const isOperador = this.showsOperadorHome(user);
@@ -695,6 +720,7 @@ const HomeDashboard = {
       
       this.renderPreviewBar();
       this.updateGreeting();
+      this.renderEscalaHome();
       this.renderPetSelector();
       this.updatePetIcon();
       
@@ -1980,6 +2006,7 @@ window.buildSprintOperatorSummaries = function() {
 };
 
 // Funções globais necessárias para os botões do HTML
+window.HomeDashboard = HomeDashboard;
 window.renderOperadorHomeDashboard = () => HomeDashboard.init();
 window.loadOperadorHomeData = () => HomeDashboard.loadData();
 window.setHomePreviewOperator = (siengeUser) => {

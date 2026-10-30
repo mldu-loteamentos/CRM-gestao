@@ -27,6 +27,17 @@ const RepactuacaoLoteApp = {
     ratesByIndexer: {},
     filter: "all",
     abertos: {},
+    progresso: 0,
+    bills: {},
+    filtroEmp: [],
+    filtroObra: [],
+    filtroIdx: [],
+    empOpen: false,
+    obraOpen: false,
+    idxOpen: false,
+    empQuery: "",
+    obraQuery: "",
+    idxQuery: "",
     previewLoading: false,
     previewProgress: 0,
     previewRows: [],
@@ -596,6 +607,10 @@ const RepactuacaoLoteApp = {
     }
     this.state.period = this.state.period || period;
     this.state.rows = rows;
+    this.state.bills = {};
+    this.state.filtroEmp = [];
+    this.state.filtroObra = [];
+    this.state.filtroIdx = [];
   },
 
   async ensureIndexers() {
@@ -762,6 +777,10 @@ const RepactuacaoLoteApp = {
   },
 
   async conferirSienge() {
+    this.state.loading = true;
+    this.state.progresso = 8;
+    this.render();
+
     const uniqueIdx = [...new Set(this.state.rows.map((r) => r.indexerId).filter(Boolean))];
     for (const id of uniqueIdx) {
       const idx = this.indexerById(id);
@@ -778,36 +797,159 @@ const RepactuacaoLoteApp = {
         return { ...row, accPct: acc.pct, factor: acc.factor, accMissing: acc.missing };
       });
     }
-    this.state.loading = false;
-    this.render();
 
     const titles = [...new Set(this.state.rows.map((r) => r.titulo).filter(Boolean))];
-    this.state.loading = true;
-    this.render();
-
     const concurrency = 6;
     let done = 0;
+    const total = titles.length || 1;
     for (let i = 0; i < titles.length; i += concurrency) {
       if (this.state.stop) break;
       const chunk = titles.slice(i, i + concurrency);
       await Promise.all(chunk.map(async (titulo) => {
         if (this.state.stop) return;
+        const billP = this.fetchBill(titulo);
+        let insts = [];
         try {
-          const insts = await this.fetchInstallments(titulo);
+          insts = await this.fetchInstallments(titulo);
           this.applyTitleInstallments(titulo, insts);
         } catch (e) {
           console.warn("[Repactuação] título", titulo, e);
+        }
+        try {
+          const bill = await billP;
+          const info = await this.completarCadastro(this.lerCadastro(bill, insts));
+          this.applyCadastro(titulo, info);
+        } catch (e) {
+          console.warn("[Repactuação] cadastro", titulo, e);
         } finally {
           done += 1;
-          const el = document.getElementById("repac-progress");
-          if (el) el.textContent = `Conferindo valores no Sienge ${done}/${titles.length}…`;
+          this.state.progresso = Math.max(8, Math.round((done / total) * 100));
+          this.atualizarCarga();
         }
       }));
       this.renderTableOnly();
       this.renderKpisOnly();
     }
     this.state.loading = false;
+    this.state.progresso = 100;
     this.render();
+  },
+
+  async fetchBill(titulo) {
+    const id = String(titulo || "").replace(/^B-/i, "").trim();
+    if (!id) return null;
+    if (Object.prototype.hasOwnProperty.call(this.state.bills, id)) return this.state.bills[id];
+    const fetchFn = window.siengeFetchWithRetry;
+    if (typeof fetchFn !== "function") {
+      this.state.bills[id] = null;
+      return null;
+    }
+    try {
+      const bill = await fetchFn("/accounts-receivable/receivable-bills/" + encodeURIComponent(id), 1);
+      this.state.bills[id] = bill && typeof bill === "object" ? bill : null;
+    } catch (e) {
+      this.state.bills[id] = null;
+    }
+    return this.state.bills[id];
+  },
+
+  centrosCatalogo() {
+    const listas = [];
+    if (window.CentrosCustoState && Array.isArray(CentrosCustoState.costCenters)) listas.push(CentrosCustoState.costCenters);
+    const st = window.AppState || {};
+    if (Array.isArray(st.cachedCostCenters)) listas.push(st.cachedCostCenters);
+    if (Array.isArray(st.costCenters)) listas.push(st.costCenters);
+    try {
+      const raw = JSON.parse(localStorage.getItem("crm_cost_centers_data") || "[]");
+      if (Array.isArray(raw)) listas.push(raw);
+    } catch (e) {}
+    return listas;
+  },
+
+  centroPorId(id) {
+    const chave = String(id || "").replace(/\D/g, "");
+    if (!chave) return null;
+    const listas = this.centrosCatalogo();
+    for (let i = 0; i < listas.length; i++) {
+      const hit = listas[i].find((c) => c && String(c.id).replace(/\D/g, "") === chave);
+      if (hit) return hit;
+    }
+    return null;
+  },
+
+  nomeEmpresa(id) {
+    const n = String(id || "").replace(/\D/g, "");
+    if (!n) return "";
+    if (typeof window.getCompanyName === "function") {
+      const curto = window.getCompanyName(n, true);
+      if (curto && !/^EMPRESA #/i.test(curto)) return curto;
+    }
+    const st = window.AppState || {};
+    const custom = st.companiesCustom && (st.companiesCustom[n] || st.companiesCustom[String(Number(n))]);
+    if (custom && custom.nome_usual && String(custom.nome_usual).trim()) return String(custom.nome_usual).trim().toUpperCase();
+    try {
+      const raw = JSON.parse(localStorage.getItem("crm_companies_custom") || "{}");
+      const c = raw[n] || raw[String(Number(n))];
+      if (c && c.nome_usual && String(c.nome_usual).trim()) return String(c.nome_usual).trim().toUpperCase();
+    } catch (e) {}
+    return "";
+  },
+
+  lerCadastro(bill, insts) {
+    const b = bill || {};
+    const inst = (insts && insts[0]) || {};
+    const ccBruto = b.costCenterId || b.enterpriseId || b.enterpriseCode
+      || (b.costCenter && (b.costCenter.id || b.costCenter))
+      || inst.costCenterId || inst.enterpriseId || "";
+    const ccId = String(ccBruto).replace(/\D/g, "");
+    const cc = this.centroPorId(ccId);
+    const companyId = String(b.companyId || inst.companyId || (cc && (cc.idCompany || cc.companyId)) || "").replace(/\D/g, "");
+    const empreendimento = String((cc && cc.name) || b.enterpriseName || b.costCenterName || b.buildingName || (b.enterprise && b.enterprise.name) || "").trim();
+    return {
+      companyId: companyId,
+      empresa: this.nomeEmpresa(companyId),
+      ccId: ccId,
+      obraId: ccId || empreendimento,
+      empreendimento: empreendimento
+    };
+  },
+
+  async completarCadastro(info) {
+    const dado = info || {};
+    if (dado.empreendimento || !dado.ccId) {
+      if (!dado.empresa && dado.companyId) dado.empresa = this.nomeEmpresa(dado.companyId);
+      return dado;
+    }
+    const api = window.SiengeApiService;
+    if (!api || typeof api.getCostCenter !== "function") return dado;
+    try {
+      const cc = await api.getCostCenter(dado.ccId);
+      if (cc && cc.name) dado.empreendimento = String(cc.name).trim();
+      if (!dado.companyId) dado.companyId = String((cc && (cc.idCompany || cc.companyId)) || "").replace(/\D/g, "");
+      if (!dado.obraId) dado.obraId = dado.ccId || dado.empreendimento;
+      if (dado.companyId) dado.empresa = this.nomeEmpresa(dado.companyId);
+    } catch (e) {}
+    return dado;
+  },
+
+  applyCadastro(titulo, info) {
+    const dado = info || {};
+    this.state.rows = this.state.rows.map((row) => {
+      if (String(row.titulo) !== String(titulo)) return row;
+      return {
+        ...row,
+        companyId: dado.companyId || row.companyId || "",
+        empresa: dado.empresa || row.empresa || "",
+        ccId: dado.ccId || row.ccId || "",
+        obraId: dado.obraId || dado.ccId || row.obraId || "",
+        empreendimento: dado.empreendimento || row.empreendimento || row.cc || ""
+      };
+    });
+  },
+
+  atualizarCarga() {
+    const bar = document.querySelector("#repac-load .loading-progress-bar");
+    if (bar) bar.style.width = Math.max(8, this.state.progresso || 8) + "%";
   },
 
   async fetchInstallments(titulo) {
@@ -870,11 +1012,16 @@ const RepactuacaoLoteApp = {
     }
     this.state.fileName = "";
     this.state.rows = [];
+    this.state.bills = {};
     this.state.loading = false;
     this.state.stop = false;
     this.state.filter = "all";
     this.state.abertos = {};
     this.state.empresa = "";
+    this.state.filtroEmp = [];
+    this.state.filtroObra = [];
+    this.state.filtroIdx = [];
+    this.state.progresso = 0;
     this.render();
   },
 
@@ -944,8 +1091,14 @@ const RepactuacaoLoteApp = {
   },
 
   setFilter(f) {
-    this.state.filter = f;
-    this.render();
+    const atual = this.state.filter;
+    this.state.filter = atual === f ? "all" : f;
+    const box = document.querySelector("#repac-table-wrap .cc-scroll");
+    const top = box ? box.scrollTop : 0;
+    this.renderTableOnly();
+    this.renderKpisOnly();
+    const next = document.querySelector("#repac-table-wrap .cc-scroll");
+    if (next) next.scrollTop = top;
   },
 
   parar() {
@@ -953,23 +1106,26 @@ const RepactuacaoLoteApp = {
   },
 
   contagens() {
-    const rows = this.state.rows;
-    return {
-      n: rows.length,
-      baseFail: rows.filter((r) => r.baseOk === false).length,
-      valFail: rows.filter((r) => r.valorOk === false).length,
-      ok: rows.filter((r) => r.valorOk === true).length,
-      missingSienge: rows.filter((r) => r.siengeConsultado && !r.siengeAchou).length
-    };
+    const grupos = this.gruposDimensao();
+    let conferidos = 0;
+    let divergentes = 0;
+    grupos.forEach((g) => {
+      const s = this.statusGrupo(g.parcelas);
+      if (s === "conferido") conferidos += 1;
+      else if (s === "divergente") divergentes += 1;
+    });
+    return { titles: grupos.length, conferidos: conferidos, divergentes: divergentes, n: this.state.rows.length };
   },
 
   kpisHtml(c) {
+    const on = (f) => this.state.filter === f ? " is-on" : "";
     return `
-      <div class="est-fin-card"><label>Parcelas</label><strong>${c.n}</strong></div>
-      <div class="est-fin-card is-ok"><label>Valor conferido</label><strong>${c.ok}</strong></div>
-      <div class="est-fin-card is-warn"><label>Data base divergente</label><strong>${c.baseFail}</strong></div>
-      <div class="est-fin-card is-warn"><label>Valor divergente</label><strong>${c.valFail}</strong></div>
-      <div class="est-fin-card${c.missingSienge ? " is-warn" : ""}"><label>Sem valor Sienge</label><strong>${c.missingSienge}</strong></div>
+      <button type="button" class="est-fin-card is-ok repac-kpi${on("ok")}" onclick="RepactuacaoLoteApp.setFilter('ok')">
+        <label>Títulos conferidos</label><strong>${c.conferidos}</strong>
+      </button>
+      <button type="button" class="est-fin-card is-warn repac-kpi${on("valor")}" onclick="RepactuacaoLoteApp.setFilter('valor')">
+        <label>Títulos divergentes</label><strong>${c.divergentes}</strong>
+      </button>
     `;
   },
 
@@ -1009,8 +1165,7 @@ const RepactuacaoLoteApp = {
     return `<span class="est-fin-chip est-fin-apurar">Pendente</span>`;
   },
 
-  gruposTabela() {
-    const f = this.state.filter;
+  gruposMontados() {
     const ordem = [];
     const map = {};
     this.state.rows.forEach((r) => {
@@ -1021,8 +1176,12 @@ const RepactuacaoLoteApp = {
           titulo: r.titulo,
           cliente: r.cliente,
           empresa: r.empresa,
+          companyId: r.companyId || "",
           documento: r.documento,
           cc: r.cc,
+          ccId: r.ccId || "",
+          obraId: r.obraId || r.ccId || r.empreendimento || r.cc || "",
+          empreendimento: r.empreendimento || r.cc || "",
           indexerId: r.indexerId,
           indexerName: r.indexerName,
           retro: r.retro,
@@ -1035,22 +1194,49 @@ const RepactuacaoLoteApp = {
       }
       const g = map[k];
       g.parcelas.push(r);
+      if (!g.companyId && r.companyId) g.companyId = r.companyId;
+      if ((!g.empresa || g.empresa === "—") && r.empresa) g.empresa = r.empresa;
+      if (!g.empreendimento && (r.empreendimento || r.cc)) g.empreendimento = r.empreendimento || r.cc;
+      if (!g.obraId && (r.obraId || r.ccId || g.empreendimento)) g.obraId = r.obraId || r.ccId || g.empreendimento;
+      if (!g.ccId && r.ccId) g.ccId = r.ccId;
       if (r.baseOk === false) g.baseOk = false;
       else if (g.baseOk == null && r.baseOk === true) g.baseOk = true;
       if (g.accPct == null && r.accPct != null) g.accPct = r.accPct;
       if (!g.expectedBase && r.expectedBase) g.expectedBase = r.expectedBase;
     });
-    let grupos = ordem.map((k) => map[k]);
+    return ordem.map((k) => map[k]);
+  },
+
+  gruposDimensao() {
+    let grupos = this.gruposMontados();
+    const emp = this.state.filtroEmp || [];
+    const obra = this.state.filtroObra || [];
+    const idx = this.state.filtroIdx || [];
+    if (emp.length) grupos = grupos.filter((g) => emp.includes(String(g.companyId || "")));
+    if (obra.length) grupos = grupos.filter((g) => obra.includes(String(g.obraId || "")));
+    if (idx.length) grupos = grupos.filter((g) => idx.includes(String(g.indexerId || "")));
+    return grupos;
+  },
+
+  gruposTabela() {
+    let grupos = this.gruposDimensao();
+    const f = this.state.filter;
     if (f === "ok") grupos = grupos.filter((g) => this.statusGrupo(g.parcelas) === "conferido");
-    else if (f === "valor") grupos = grupos.filter((g) => g.parcelas.some((r) => r.valorOk === false));
+    else if (f === "valor") grupos = grupos.filter((g) => this.statusGrupo(g.parcelas) === "divergente");
     else if (f === "base") grupos = grupos.filter((g) => g.parcelas.some((r) => r.baseOk === false));
     return grupos;
   },
 
   toggleTitulo(key) {
+    const box = document.querySelector("#repac-table-wrap .cc-scroll");
+    const top = box ? box.scrollTop : 0;
+    const pageY = window.scrollY || window.pageYOffset || 0;
     const k = decodeURIComponent(String(key || ""));
     this.state.abertos[k] = !this.state.abertos[k];
     this.renderTableOnly();
+    const next = document.querySelector("#repac-table-wrap .cc-scroll");
+    if (next) next.scrollTop = top;
+    if ((window.scrollY || window.pageYOffset || 0) !== pageY) window.scrollTo(0, pageY);
   },
 
   parcelasHtml(g) {
@@ -1087,35 +1273,156 @@ const RepactuacaoLoteApp = {
     const salvo = this.state.salvo;
     const quando = salvo && salvo.savedAt ? this.fmtDate(String(salvo.savedAt).slice(0, 10)) : "";
     const input = `<input type="file" id="repac-input-excel" accept=".xlsx,.xls" style="display:none;">`;
-    if (this.state.fileName) {
-      const marca = this.state.salvando ? "salvando…" : (salvo && salvo.name === this.state.fileName ? "salva" : "");
-      return `
-        <div class="repac-arquivo">
-          <i data-lucide="paperclip"></i>
-          <span class="repac-arquivo-nome" title="${this.esc(this.state.fileName)}">${this.esc(this.state.fileName)}</span>
-          <span class="repac-arquivo-meta">${marca}</span>
-          <button type="button" class="repac-arquivo-btn" onclick="document.getElementById('repac-input-excel').click()">Trocar</button>
-          <button type="button" class="repac-arquivo-btn" onclick="RepactuacaoLoteApp.clearFile()">Remover</button>
-          ${input}
-        </div>`;
-    }
-    if (salvo && salvo.url) {
-      return `
-        <div class="repac-arquivo">
-          <i data-lucide="paperclip"></i>
-          <span class="repac-arquivo-nome" title="${this.esc(salvo.name)}">${this.esc(salvo.name)}</span>
-          <span class="repac-arquivo-meta">salva${quando ? " em " + this.esc(quando) : ""}</span>
-          <button type="button" class="repac-arquivo-btn" onclick="RepactuacaoLoteApp.abrirSalva()">Abrir</button>
-          <button type="button" class="repac-arquivo-btn" onclick="document.getElementById('repac-input-excel').click()">Enviar outra</button>
-          ${input}
-        </div>`;
-    }
+    const nome = this.state.fileName || (salvo && salvo.name) || "";
+    const meta = this.state.fileName
+      ? (this.state.salvando ? "salvando…" : (salvo && salvo.name === this.state.fileName ? "salva" : ""))
+      : (salvo && salvo.url ? ("salva" + (quando ? " em " + quando : "")) : "");
     return `
-      <div id="repac-dropzone" class="repac-arquivo is-empty">
-        <i data-lucide="paperclip"></i>
-        <span>Enviar planilha .xlsx</span>
+      <div class="repac-arquivo${this.state.fileName || (salvo && salvo.url) ? "" : " is-empty"}" ${this.state.fileName || (salvo && salvo.url) ? "" : "id=\"repac-dropzone\""}>
+        <i data-lucide="file-spreadsheet"></i>
+        <span class="repac-arquivo-nome" title="${this.esc(nome)}">${this.esc(nome || "Enviar planilha .xlsx")}</span>
+        ${meta ? `<span class="repac-arquivo-meta">${meta}</span>` : ""}
+        ${this.state.fileName ? `<button type="button" class="repac-arquivo-btn" onclick="document.getElementById('repac-input-excel').click()">Trocar</button>
+          <button type="button" class="repac-arquivo-btn" onclick="RepactuacaoLoteApp.clearFile()">Remover</button>` : ""}
+        ${!this.state.fileName && salvo && salvo.url ? `<button type="button" class="repac-arquivo-btn" onclick="RepactuacaoLoteApp.abrirSalva()">Abrir</button>
+          <button type="button" class="repac-arquivo-btn" onclick="document.getElementById('repac-input-excel').click()">Enviar outra</button>` : ""}
         ${input}
       </div>`;
+  },
+
+  itensEmpresa() {
+    const map = new Map();
+    this.gruposMontados().forEach((g) => {
+      const id = String(g.companyId || "");
+      if (!id || map.has(id)) return;
+      const nome = String(g.empresa || this.nomeEmpresa(id) || "").trim().toUpperCase();
+      map.set(id, { id: id, label: nome ? (id + " - " + nome) : id });
+    });
+    return Array.from(map.values()).sort((a, b) => Number(a.id) - Number(b.id));
+  },
+
+  itensObra() {
+    const map = new Map();
+    this.gruposMontados().forEach((g) => {
+      const id = String(g.obraId || "");
+      const nome = String(g.empreendimento || "").trim();
+      if (!id && !nome) return;
+      const chave = id || nome;
+      if (map.has(chave)) return;
+      map.set(chave, { id: chave, label: nome ? nome.toUpperCase() : chave });
+    });
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+  },
+
+  itensIndexador() {
+    const map = new Map();
+    this.gruposMontados().forEach((g) => {
+      const id = String(g.indexerId || "");
+      if (!id || map.has(id)) return;
+      const nome = String(g.indexerName || "").trim();
+      map.set(id, { id: id, label: nome && nome !== "—" ? (id + " - " + nome.toUpperCase()) : id });
+    });
+    return Array.from(map.values()).sort((a, b) => Number(a.id) - Number(b.id));
+  },
+
+  filtrosHtml() {
+    if (!this.state.rows.length || !window.MlEmpresaFilter) return "";
+    const obraNouns = { singular: "empreendimento", plural: "empreendimentos", none: "Nenhum empreendimento", noMatch: "Nenhum empreendimento com esse nome." };
+    const idxNouns = { singular: "indexador", plural: "indexadores", none: "Nenhum indexador", noMatch: "Nenhum indexador com esse nome." };
+    return `
+      <div class="cc-toolbar repac-filtros">
+        <div class="cc-filters">
+          ${MlEmpresaFilter.html({ id: "repac-emp", label: "Empresas", items: this.itensEmpresa(), selectedIds: this.state.filtroEmp, open: this.state.empOpen, query: this.state.empQuery, emptyMeansAll: true })}
+          ${MlEmpresaFilter.html({ id: "repac-obra", label: "Empreendimentos", items: this.itensObra(), selectedIds: this.state.filtroObra, open: this.state.obraOpen, query: this.state.obraQuery, emptyMeansAll: true, nouns: obraNouns })}
+          ${MlEmpresaFilter.html({ id: "repac-idx", label: "Indexadores", items: this.itensIndexador(), selectedIds: this.state.filtroIdx, open: this.state.idxOpen, query: this.state.idxQuery, emptyMeansAll: true, nouns: idxNouns })}
+        </div>
+      </div>`;
+  },
+
+  pintarFiltros() {
+    const el = document.getElementById("repac-filtros");
+    if (!el) return;
+    el.innerHTML = this.filtrosHtml();
+    this.bindFiltros();
+  },
+
+  bindFiltros() {
+    if (!window.MlEmpresaFilter) return;
+    const app = this;
+    const par = (id, openKey, queryKey, campo, itensFn, outros) => {
+      MlEmpresaFilter.bind(id, {
+        toggleOpen() {
+          app.state[openKey] = !app.state[openKey];
+          if (app.state[openKey]) outros.forEach((k) => { app.state[k] = false; });
+          app.pintarFiltros();
+        },
+        close() {
+          app.state[openKey] = false;
+          app.pintarFiltros();
+        },
+        setQuery(q) {
+          app.state[queryKey] = q || "";
+          app.atualizarListaFiltro(id);
+        },
+        toggleId(itemId, on) { app.alternarFiltro(campo, itemId, on, itensFn.call(app)); },
+        selectAll() {
+          app.state[campo] = itensFn.call(app).map((x) => x.id);
+          app.depoisFiltro();
+        },
+        selectNone() {
+          app.state[campo] = [];
+          app.depoisFiltro();
+        }
+      });
+    };
+    par("repac-emp", "empOpen", "empQuery", "filtroEmp", this.itensEmpresa, ["obraOpen", "idxOpen"]);
+    par("repac-obra", "obraOpen", "obraQuery", "filtroObra", this.itensObra, ["empOpen", "idxOpen"]);
+    par("repac-idx", "idxOpen", "idxQuery", "filtroIdx", this.itensIndexador, ["empOpen", "obraOpen"]);
+  },
+
+  atualizarListaFiltro(id) {
+    const box = document.getElementById(id + "-list");
+    if (!box || !window.MlEmpresaFilter) return;
+    const mapa = {
+      "repac-emp": [this.itensEmpresa(), this.state.filtroEmp, this.state.empQuery, null],
+      "repac-obra": [this.itensObra(), this.state.filtroObra, this.state.obraQuery, { singular: "empreendimento", plural: "empreendimentos", none: "Nenhum empreendimento", noMatch: "Nenhum empreendimento com esse nome." }],
+      "repac-idx": [this.itensIndexador(), this.state.filtroIdx, this.state.idxQuery, { singular: "indexador", plural: "indexadores", none: "Nenhum indexador", noMatch: "Nenhum indexador com esse nome." }]
+    };
+    const cfg = mapa[id];
+    if (!cfg) return;
+    box.innerHTML = MlEmpresaFilter.listHtml({ id: id, items: cfg[0], selectedIds: cfg[1], query: cfg[2], nouns: cfg[3] });
+  },
+
+  alternarFiltro(campo, id, on, itens) {
+    const sid = String(id);
+    let sel = (this.state[campo] || []).map(String);
+    if (on) { if (!sel.includes(sid)) sel.push(sid); }
+    else sel = sel.filter((x) => x !== sid);
+    const todos = (itens || []).map((x) => String(x.id));
+    if (sel.length && sel.length === todos.length) sel = [];
+    this.state[campo] = sel;
+    this.depoisFiltro();
+  },
+
+  depoisFiltro() {
+    const box = document.querySelector("#repac-table-wrap .cc-scroll");
+    const top = box ? box.scrollTop : 0;
+    this.pintarFiltros();
+    this.renderTableOnly();
+    this.renderKpisOnly();
+    const next = document.querySelector("#repac-table-wrap .cc-scroll");
+    if (next) next.scrollTop = top;
+  },
+
+  cargaHtml() {
+    if (!this.state.loading) return "";
+    const w = Math.max(8, this.state.progresso || 8);
+    return `<div class="ml-load" id="repac-load">
+      <div class="loading-spinner" aria-hidden="true"></div>
+      <div class="loading-status-text">Conferindo os títulos…</div>
+      <div class="ml-load-track"><div class="loading-progress-bar" style="width:${w}%"></div></div>
+      <button type="button" class="btn btn-cancel" onclick="RepactuacaoLoteApp.parar()">Parar</button>
+    </div>`;
   },
 
   tableHtml() {
@@ -1134,9 +1441,9 @@ const RepactuacaoLoteApp = {
         <td class="repac-seta-cel"><i data-lucide="chevron-right" class="repac-seta"></i></td>
         <td>${this.esc(g.titulo)}</td>
         <td>${this.esc(g.cliente)}</td>
-        <td>${this.esc(g.empresa || "—")}</td>
+        <td class="repac-nome">${this.esc(g.empresa || "—")}</td>
         <td>${this.esc(g.documento || "—")}</td>
-        <td>${this.esc(g.cc || "—")}</td>
+        <td class="repac-nome">${this.esc(g.empreendimento || "—")}</td>
         <td>${this.esc(g.indexerId)} — ${this.esc(g.indexerName || "—")}</td>
         <td>${g.retro == null ? "—" : this.esc(g.retro)}</td>
         <td style="${baseClass}">${this.esc(this.fmtDate(g.expectedBase))}</td>
@@ -1146,8 +1453,8 @@ const RepactuacaoLoteApp = {
       </tr>${aberto ? this.parcelasHtml(g) : ""}`;
     }).join("");
     return `
-      <div class="table-container crm-scroll-table" style="max-height:62vh;">
-        <table class="custom-table repac-titulos">
+      <div class="cc-scroll">
+        <table class="cc-table repac-titulos">
           <thead>
             <tr>
               <th></th>
@@ -1155,7 +1462,7 @@ const RepactuacaoLoteApp = {
               <th>Cliente</th>
               <th>Empresa</th>
               <th>Documento</th>
-              <th>Centro de custo</th>
+              <th>Empreendimento</th>
               <th>Indexador</th>
               <th>Retro</th>
               <th>Data base</th>
@@ -1176,29 +1483,20 @@ const RepactuacaoLoteApp = {
     if (!root) return;
     const c = this.contagens();
     const n = c.n;
-    const titles = new Set(this.state.rows.map((r) => r.titulo)).size;
     root.innerHTML = `
-      <div class="est-stock-page">
+      <div class="cc-page repac-page">
         ${this.previewHtml()}
-        <div class="search-filter-panel repac-planilha">
+        <div class="repac-planilha">
           ${this.uploadZoneHtml()}
-          <p id="repac-progress">${this.state.loading ? "Processando…" : (n ? `${n} parcelas · ${titles} títulos` : "")}</p>
-          ${this.state.loading ? `<button type="button" class="btn btn-cancel" onclick="RepactuacaoLoteApp.parar()">Parar</button>` : ""}
         </div>
-        ${n ? `
-        <div id="repac-kpis" class="repac-kpis">
-          ${this.kpisHtml(c)}
-        </div>
-        <div class="est-stock-pills" style="margin-bottom:12px;">
-          <button type="button" class="est-pill${this.state.filter === "all" ? " is-active" : ""}" onclick="RepactuacaoLoteApp.setFilter('all')">Todas</button>
-          <button type="button" class="est-pill${this.state.filter === "ok" ? " is-active" : ""}" onclick="RepactuacaoLoteApp.setFilter('ok')">Valor conferido</button>
-          <button type="button" class="est-pill${this.state.filter === "base" ? " is-active" : ""}" onclick="RepactuacaoLoteApp.setFilter('base')">Data base</button>
-          <button type="button" class="est-pill${this.state.filter === "valor" ? " is-active" : ""}" onclick="RepactuacaoLoteApp.setFilter('valor')">Valor</button>
-        </div>` : ""}
+        ${this.cargaHtml()}
+        <div id="repac-filtros">${n ? this.filtrosHtml() : ""}</div>
+        ${n ? `<div id="repac-kpis" class="repac-kpis">${this.kpisHtml(c)}</div>` : ""}
         <div id="repac-table-wrap">${this.tableHtml()}</div>
       </div>
     `;
     this.bindUpload();
+    this.bindFiltros();
     if (window.lucide) window.lucide.createIcons();
   }
 };
