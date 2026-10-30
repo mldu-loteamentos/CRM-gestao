@@ -99,26 +99,86 @@ window.BoletoCheck = {
     return l;
   },
 
-  /** Lê os campos do Sienge (payment-information) e devolve código, linha e problemas de formato. */
+  /** Trechos de 44, 47 ou 48 dígitos (código ou linha), sem colar data e texto no mesmo número. */
+  codigosNoTexto(v) {
+    const out = [];
+    String(v == null ? "" : v).split(/[^\d.\s-]+/).forEach((p) => {
+      const n = p.replace(/\D/g, "");
+      if (n.length === 44 || n.length === 47 || n.length === 48) out.push(n);
+    });
+    return out;
+  },
+
+  codigosNoObjeto(d, depth) {
+    const out = [];
+    if (d == null || (depth || 0) > 4) return out;
+    if (typeof d === "string" || typeof d === "number") return this.codigosNoTexto(d);
+    if (typeof d !== "object") return out;
+    Object.keys(d).forEach((k) => {
+      if (k === "links" || k === "resultSetMetadata") return;
+      this.codigosNoObjeto(d[k], (depth || 0) + 1).forEach((n) => out.push(n));
+    });
+    return out;
+  },
+
+  /** O GET às vezes embrulha o boleto em results[0] em vez de devolver o objeto direto. */
+  corpoForma(data) {
+    if (!data || typeof data !== "object" || Array.isArray(data)) return data;
+    const listas = [data.results, data.data].filter(Array.isArray);
+    for (let i = 0; i < listas.length; i++) {
+      const objs = listas[i].filter((x) => x && typeof x === "object");
+      if (!objs.length) continue;
+      return objs.find((x) => this.codigosNoObjeto(x).length) || objs.find((x) => this.temDadosForma(x)) || objs[0];
+    }
+    if (data.data && typeof data.data === "object" && !Array.isArray(data.data)) {
+      const topo = Object.assign({}, data);
+      delete topo.data;
+      delete topo.results;
+      delete topo.resultSetMetadata;
+      if (!this.temDadosForma(topo) && !this.codigosNoObjeto(topo).length) return data.data;
+    }
+    return data;
+  },
+
+  /** Lê os campos do Sienge (payment-information e, se vier, a parcela) e devolve código e linha. */
   ler(payment) {
     const d = (payment && payment.data) || {};
+    const extra = (payment && payment.extra) || {};
     const kind = payment && payment.kind;
-    const pick = (...ks) => {
-      for (const k of ks) { const v = this.digits(d[k]); if (v) return v; }
+    const arrecadacao = kind === "boleto-concessionaria" || kind === "boleto-tax";
+    const pick = (lens, ...ks) => {
+      for (const fonte of [d, extra]) {
+        for (const k of ks) {
+          const v = this.digits(fonte[k]);
+          if (lens.indexOf(v.length) >= 0) return v;
+        }
+      }
       return "";
     };
-    if (kind === "boleto-concessionaria" || kind === "boleto-tax") {
-      return {
+    const r = arrecadacao
+      ? {
         tipo: "arrecadacao",
-        codigo: pick("boletoConcessionariaBarCodeNumber", "taxBarCodeNumber", "barCode", "barCodeNumber"),
-        linha: pick("boletoConcessionariaManualBarCodeNumber", "taxManualBarCodeNumber", "digitableNumber", "digitableLine")
+        codigo: pick([44], "boletoConcessionariaBarCodeNumber", "taxBarCodeNumber", "barCode", "barCodeNumber", "barcode"),
+        linha: pick([48, 47], "boletoConcessionariaManualBarCodeNumber", "taxManualBarCodeNumber", "digitableNumber", "digitableLine", "barcode")
+      }
+      : {
+        tipo: "bancario",
+        codigo: pick([44], "boletoBancarioBarCodeNumber", "barCode", "barCodeNumber", "barcode"),
+        linha: pick([47, 48], "boletoBancarioManualBarCodeNumber", "digitableNumber", "digitableLine", "barcode")
       };
-    }
-    return {
-      tipo: "bancario",
-      codigo: pick("boletoBancarioBarCodeNumber", "barCode", "barCodeNumber"),
-      linha: pick("boletoBancarioManualBarCodeNumber", "digitableNumber", "digitableLine")
-    };
+    if (r.codigo && r.linha) return r;
+    const achados = this.codigosNoObjeto(d).concat(this.codigosNoObjeto(extra));
+    let linha47 = "";
+    let linha48 = "";
+    let codigo = "";
+    achados.forEach((n) => {
+      if (n.length === 47 && !linha47) linha47 = n;
+      else if (n.length === 48 && !linha48) linha48 = n;
+      else if (n.length === 44 && !codigo) codigo = n;
+    });
+    if (!r.codigo) r.codigo = codigo;
+    if (!r.linha) r.linha = arrecadacao ? (linha48 || linha47) : (linha47 || linha48);
+    return r;
   },
 
   ehBoleto(payment) {
@@ -126,7 +186,7 @@ window.BoletoCheck = {
   },
 
   /** O Sienge devolve estes campos em toda forma consultada, mesmo quando a parcela usa outra forma (as observações saem iguais em todas). */
-  CAMPOS_FORMA_COMUNS: ["paymentTypeId", "notes", "links", "beneficiaryAccountType", "isUsingCreditorData", "discountDueDate",
+  CAMPOS_FORMA_COMUNS: ["paymentTypeId", "notes", "links", "resultSetMetadata", "results", "beneficiaryAccountType", "isUsingCreditorData", "discountDueDate",
     "tedFinalityCode", "docFinalityCode", "boletoConcessionariaPaymentType", "taxPayerType"],
 
   temDadosForma(data) {
@@ -156,17 +216,32 @@ window.BoletoCheck = {
    * tipo = nome da forma na parcela (paymentType); sem ele, lê as parcelas do título.
    * Lança erro quando o Sienge não respondeu, para a tela não confundir falha de consulta com título sem forma.
    */
-  async lerForma(billId, parcela, tipo) {
+  escalares(obj) {
+    const out = {};
+    if (!obj || typeof obj !== "object") return out;
+    Object.keys(obj).forEach((k) => {
+      const v = obj[k];
+      if (v == null || typeof v === "object") return;
+      out[k] = v;
+    });
+    return out;
+  },
+
+  async lerForma(billId, parcela, tipo, extra) {
     const get = (path) => window.siengeFetchWithRetry(path, 4);
     const enc = encodeURIComponent;
     const num = parcela || 1;
     const nao404 = (e) => !(Number(e && e.status) === 404 || /\b404\b/.test(String((e && e.message) || "")));
     let nome = tipo;
+    let parcelaObj = null;
+    const guardarParcela = (res) => {
+      const lista = (res && (res.results || res.data)) || (Array.isArray(res) ? res : []);
+      parcelaObj = lista.find((x) => String(x.installmentNumber != null ? x.installmentNumber : x.installmentId) === String(num)) || null;
+      return parcelaObj;
+    };
     if (nome == null) {
       try {
-        const res = await get(`/bills/${enc(billId)}/installments`);
-        const lista = (res && (res.results || res.data)) || (Array.isArray(res) ? res : []);
-        const p = lista.find((x) => String(x.installmentNumber != null ? x.installmentNumber : x.installmentId) === String(num));
+        const p = guardarParcela(await get(`/bills/${enc(billId)}/installments`));
         nome = p ? String(p.paymentType || "") : "";
       } catch (e) {
         nome = "";
@@ -175,6 +250,11 @@ window.BoletoCheck = {
     const { kinds, especifico } = this.tiposForma(nome);
     let falhou = false;
     let principal = null;
+    const montar = (kind, data) => {
+      const payment = { kind, data: this.corpoForma(data) || {}, extra: this.escalares(extra) };
+      if (parcelaObj) payment.extra = Object.assign(payment.extra, this.escalares(parcelaObj));
+      return payment;
+    };
     for (let i = 0; i < kinds.length; i++) {
       let data;
       try {
@@ -183,10 +263,28 @@ window.BoletoCheck = {
         if (nao404(e)) falhou = true;
         continue;
       }
-      if (this.temDadosForma(data)) return { kind: kinds[i], data };
-      if (i === 0 && data && typeof data === "object") principal = { kind: kinds[i], data };
+      const corpo = this.corpoForma(data);
+      const candidato = montar(kinds[i], corpo);
+      const lido = this.ler(candidato);
+      if (this.temDadosForma(corpo) || this.codigosNoObjeto(corpo).length || lido.codigo || lido.linha) return candidato;
+      if (i === 0 && corpo && typeof corpo === "object") principal = candidato;
     }
-    if (especifico && principal) return principal;
+    let payment = especifico && principal ? principal : null;
+    const daParcela = parcelaObj || (extra && typeof extra === "object" ? extra : null);
+    if (!payment && daParcela && this.codigosNoObjeto(daParcela).length) {
+      const kind = (kinds[0] && /^boleto-/.test(kinds[0])) ? kinds[0] : "boleto-bancario";
+      payment = montar(kind, {});
+    }
+    const lido = payment ? this.ler(payment) : null;
+    if (payment && !lido.codigo && !lido.linha && !parcelaObj && !extra) {
+      try {
+        guardarParcela(await get(`/bills/${enc(billId)}/installments`));
+        if (parcelaObj) payment.extra = Object.assign(payment.extra || {}, this.escalares(parcelaObj));
+      } catch (e) {
+        if (nao404(e)) falhou = true;
+      }
+    }
+    if (payment) return payment;
     if (falhou) throw new Error("O Sienge não respondeu à consulta da forma de pagamento.");
     return null;
   },

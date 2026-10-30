@@ -32,6 +32,8 @@ const RepactuacaoLoteApp = {
     filtroEmp: [],
     filtroObra: [],
     filtroIdx: [],
+    aba: "previa",
+    resumoAbertos: {},
     empOpen: false,
     obraOpen: false,
     idxOpen: false,
@@ -344,6 +346,7 @@ const RepactuacaoLoteApp = {
     const loading = this.state.previewLoading;
     const err = this.state.previewError;
     const rows = this.state.previewRows || [];
+    const naPrevia = (this.state.aba || "previa") !== "resumo";
     let body = "";
     if (loading) {
       const pct = Math.max(8, Math.min(100, Number(this.state.previewProgress) || 8));
@@ -420,7 +423,7 @@ const RepactuacaoLoteApp = {
     }
     return `
       <div id="repac-indexer-preview" class="search-filter-panel" style="margin-bottom:16px;border:1px solid #d1fae5;background:linear-gradient(180deg,#f0fdf4 0%,#fff 42%);">
-        <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px;margin-bottom:16px;">
+        <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px;margin-bottom:${naPrevia ? "16px" : "0"};">
           <div class="form-group" style="margin:0;min-width:200px;">
             <label for="repac-adjust-month" style="font-size:0.75rem;font-weight:700;color:#166534;text-transform:uppercase;letter-spacing:0.03em;">Mês da repactuação</label>
             <input type="month" id="repac-adjust-month" class="form-control" value="${this.esc(ym || "")}"
@@ -441,13 +444,13 @@ const RepactuacaoLoteApp = {
             </button>
           </div>
         </div>
-        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+        ${naPrevia ? `<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
           <h3 style="margin:0;font-size:0.85rem;color:#166534;font-weight:800;text-transform:uppercase;letter-spacing:0.04em;">
             Prévia dos indexadores
           </h3>
           <span style="font-size:0.72rem;color:#94a3b8;">Data base = mês + retro Sienge · % BCB 12m</span>
         </div>
-        ${body}
+        ${body}` : ""}
       </div>
     `;
   },
@@ -1052,6 +1055,7 @@ const RepactuacaoLoteApp = {
     this.state.filtroEmp = [];
     this.state.filtroObra = [];
     this.state.filtroIdx = [];
+    this.state.resumoAbertos = {};
     this.state.progresso = 0;
     this.render();
   },
@@ -1385,17 +1389,27 @@ const RepactuacaoLoteApp = {
         <i data-lucide="file-spreadsheet"></i>
         <span class="repac-arquivo-nome" title="${this.esc(nome)}">${this.esc(nome || "Enviar planilha .xlsx")}</span>
         ${meta ? `<span class="repac-arquivo-meta">${meta}</span>` : ""}
-        ${this.state.fileName ? `<button type="button" class="repac-arquivo-btn" onclick="document.getElementById('repac-input-excel').click()">Trocar</button>
+        ${this.state.fileName ? `<button type="button" class="repac-arquivo-btn" title="Escolher outro arquivo .xlsx" onclick="document.getElementById('repac-input-excel').click()">Enviar outra</button>
           <button type="button" class="repac-arquivo-btn" onclick="RepactuacaoLoteApp.clearFile()">Remover</button>` : ""}
-        ${!this.state.fileName && salvo && salvo.url ? `<button type="button" class="repac-arquivo-btn" onclick="RepactuacaoLoteApp.abrirSalva()">Abrir</button>
-          <button type="button" class="repac-arquivo-btn" onclick="document.getElementById('repac-input-excel').click()">Enviar outra</button>` : ""}
+        ${!this.state.fileName && salvo && salvo.url ? `<button type="button" class="repac-arquivo-btn repac-arquivo-btn-go" title="Conferir a planilha já salva" onclick="RepactuacaoLoteApp.abrirSalva()">Conferir salva</button>
+          <button type="button" class="repac-arquivo-btn" title="Escolher outro arquivo .xlsx" onclick="document.getElementById('repac-input-excel').click()">Enviar outra</button>` : ""}
         ${input}
       </div>`;
   },
 
+  /** Grupos visíveis para montar um filtro, sem aplicar o próprio filtro. Empresa e empreendimento se limitam um ao outro. */
+  gruposParaLista(qual) {
+    let grupos = this.gruposMontados();
+    const emp = this.state.filtroEmp || [];
+    const obra = this.state.filtroObra || [];
+    if (qual !== "emp" && emp.length) grupos = grupos.filter((g) => emp.includes(String(g.companyId || "")));
+    if (qual !== "obra" && obra.length) grupos = grupos.filter((g) => obra.includes(String(g.obraId || "")));
+    return grupos;
+  },
+
   itensEmpresa() {
     const map = new Map();
-    this.gruposMontados().forEach((g) => {
+    this.gruposParaLista("emp").forEach((g) => {
       const id = String(g.companyId || "");
       if (!id || map.has(id)) return;
       const nome = String(g.empresa || this.nomeEmpresa(id) || "").trim().toUpperCase();
@@ -1406,7 +1420,7 @@ const RepactuacaoLoteApp = {
 
   itensObra() {
     const map = new Map();
-    this.gruposMontados().forEach((g) => {
+    this.gruposParaLista("obra").forEach((g) => {
       const id = String(g.obraId || "");
       const nome = String(g.empreendimento || "").trim();
       if (!id && !nome) return;
@@ -1419,13 +1433,30 @@ const RepactuacaoLoteApp = {
 
   itensIndexador() {
     const map = new Map();
-    this.state.rows.forEach((r) => {
-      const id = String(r.indexerId || "");
-      if (!id || map.has(id)) return;
-      const nome = String(r.indexerName || "").trim();
-      map.set(id, { id: id, label: nome && nome !== "—" ? (id + " - " + nome.toUpperCase()) : id });
+    this.gruposParaLista("idx").forEach((g) => {
+      (g.parcelas || []).forEach((r) => {
+        const id = String(r.indexerId || "");
+        if (!id || map.has(id)) return;
+        const nome = String(r.indexerName || "").trim();
+        map.set(id, { id: id, label: nome && nome !== "—" ? (id + " - " + nome.toUpperCase()) : id });
+      });
     });
     return Array.from(map.values()).sort((a, b) => Number(a.id) - Number(b.id));
+  },
+
+  podarFiltrosCruzados(origem) {
+    if (origem !== "obra") {
+      const obras = new Set(this.itensObra().map((x) => String(x.id)));
+      this.state.filtroObra = (this.state.filtroObra || []).map(String).filter((id) => obras.has(id));
+    }
+    if (origem !== "emp") {
+      const emps = new Set(this.itensEmpresa().map((x) => String(x.id)));
+      this.state.filtroEmp = (this.state.filtroEmp || []).map(String).filter((id) => emps.has(id));
+    }
+    if (origem !== "idx") {
+      const idxs = new Set(this.itensIndexador().map((x) => String(x.id)));
+      this.state.filtroIdx = (this.state.filtroIdx || []).map(String).filter((id) => idxs.has(id));
+    }
   },
 
   filtrosHtml() {
@@ -1452,7 +1483,7 @@ const RepactuacaoLoteApp = {
   bindFiltros() {
     if (!window.MlEmpresaFilter) return;
     const app = this;
-    const par = (id, openKey, queryKey, campo, itensFn, outros) => {
+    const par = (id, openKey, queryKey, campo, origem, itensFn, outros) => {
       MlEmpresaFilter.bind(id, {
         toggleOpen() {
           app.state[openKey] = !app.state[openKey];
@@ -1467,20 +1498,22 @@ const RepactuacaoLoteApp = {
           app.state[queryKey] = q || "";
           app.atualizarListaFiltro(id);
         },
-        toggleId(itemId, on) { app.alternarFiltro(campo, itemId, on, itensFn.call(app)); },
+        toggleId(itemId, on) { app.alternarFiltro(campo, origem, itemId, on, itensFn.call(app)); },
         selectAll() {
           app.state[campo] = itensFn.call(app).map((x) => x.id);
+          app.podarFiltrosCruzados(origem);
           app.depoisFiltro();
         },
         selectNone() {
           app.state[campo] = [];
+          app.podarFiltrosCruzados(origem);
           app.depoisFiltro();
         }
       });
     };
-    par("repac-emp", "empOpen", "empQuery", "filtroEmp", this.itensEmpresa, ["obraOpen", "idxOpen"]);
-    par("repac-obra", "obraOpen", "obraQuery", "filtroObra", this.itensObra, ["empOpen", "idxOpen"]);
-    par("repac-idx", "idxOpen", "idxQuery", "filtroIdx", this.itensIndexador, ["empOpen", "obraOpen"]);
+    par("repac-emp", "empOpen", "empQuery", "filtroEmp", "emp", this.itensEmpresa, ["obraOpen", "idxOpen"]);
+    par("repac-obra", "obraOpen", "obraQuery", "filtroObra", "obra", this.itensObra, ["empOpen", "idxOpen"]);
+    par("repac-idx", "idxOpen", "idxQuery", "filtroIdx", "idx", this.itensIndexador, ["empOpen", "obraOpen"]);
   },
 
   atualizarListaFiltro(id) {
@@ -1496,7 +1529,7 @@ const RepactuacaoLoteApp = {
     box.innerHTML = MlEmpresaFilter.listHtml({ id: id, items: cfg[0], selectedIds: cfg[1], query: cfg[2], nouns: cfg[3] });
   },
 
-  alternarFiltro(campo, id, on, itens) {
+  alternarFiltro(campo, origem, id, on, itens) {
     const sid = String(id);
     let sel = (this.state[campo] || []).map(String);
     if (on) { if (!sel.includes(sid)) sel.push(sid); }
@@ -1504,6 +1537,7 @@ const RepactuacaoLoteApp = {
     const todos = (itens || []).map((x) => String(x.id));
     if (sel.length && sel.length === todos.length) sel = [];
     this.state[campo] = sel;
+    this.podarFiltrosCruzados(origem);
     this.depoisFiltro();
   },
 
@@ -1513,8 +1547,169 @@ const RepactuacaoLoteApp = {
     this.pintarFiltros();
     this.renderTableOnly();
     this.renderKpisOnly();
+    this.renderResumoOnly();
     const next = document.querySelector("#repac-table-wrap .cc-scroll");
     if (next) next.scrollTop = top;
+  },
+
+  setAba(id) {
+    if (!id || this.state.aba === id) return;
+    this.state.aba = id;
+    this.state.empOpen = false;
+    this.state.obraOpen = false;
+    this.state.idxOpen = false;
+    this.render();
+  },
+
+  abasHtml() {
+    const atual = this.state.aba || "previa";
+    const tabs = [
+      { id: "previa", label: "Prévia de Repactuação", icon: "table-2" },
+      { id: "resumo", label: "Resumo", icon: "layout-dashboard" }
+    ];
+    return `<div class="ml-tabs repac-tabs" role="tablist">
+      ${tabs.map((t) => `<button type="button" role="tab" aria-selected="${atual === t.id}" class="ml-tab${atual === t.id ? " is-active" : ""}" onclick="RepactuacaoLoteApp.setAba('${t.id}')"><i data-lucide="${t.icon}"></i> ${t.label}</button>`).join("")}
+    </div>`;
+  },
+
+  pctDoIndexador(id, fallback) {
+    const prev = (this.state.previewRows || []).find((r) => String(r.id) === String(id));
+    if (prev && prev.accPct != null) return prev.accPct;
+    return fallback;
+  },
+
+  contagemPorIdx(grupos) {
+    const map = new Map();
+    (grupos || []).forEach((g) => {
+      const vistos = new Set();
+      (g.parcelas || []).forEach((r) => {
+        const id = String(r.indexerId ?? "");
+        if (!id || vistos.has(id)) return;
+        vistos.add(id);
+        if (!map.has(id)) map.set(id, { id: id, nome: r.indexerName || "", n: 0 });
+        const item = map.get(id);
+        item.n += 1;
+        if ((!item.nome || item.nome === "—") && r.indexerName) item.nome = r.indexerName;
+      });
+    });
+    return [...map.values()].sort((a, b) => Number(a.id) - Number(b.id));
+  },
+
+  pillsIdx(grupos) {
+    const n = (grupos || []).length;
+    const pills = this.contagemPorIdx(grupos).map((item) => {
+      const nome = item.nome && item.nome !== "—" ? item.nome : item.id;
+      return `<span class="repac-arv-pill">${item.n} · ${this.esc(nome)}</span>`;
+    }).join("");
+    return `<span class="repac-arv-total">${n} título${n === 1 ? "" : "s"}</span>${pills}`;
+  },
+
+  resumoCardsHtml() {
+    const grupos = this.gruposDimensao();
+    const porIdx = new Map();
+    grupos.forEach((g) => {
+      const contrato = String(g.documento || g.key);
+      const vistos = new Set();
+      (g.parcelas || []).forEach((r) => {
+        const id = String(r.indexerId ?? "");
+        if (!id || vistos.has(id)) return;
+        vistos.add(id);
+        if (!porIdx.has(id)) porIdx.set(id, { id: id, nome: r.indexerName || "", retro: r.retro, accPct: r.accPct, contratos: new Set() });
+        const item = porIdx.get(id);
+        item.contratos.add(contrato);
+        if (item.accPct == null && r.accPct != null) item.accPct = r.accPct;
+        if (item.retro == null && r.retro != null) item.retro = r.retro;
+        if ((!item.nome || item.nome === "—") && r.indexerName) item.nome = r.indexerName;
+      });
+    });
+    const lista = [...porIdx.values()].sort((a, b) => Number(a.id) - Number(b.id));
+    if (!lista.length) return `<p class="repac-resumo-vazio">Envie a planilha para ver quantos contratos cada indexador reajusta.</p>`;
+    return `<div class="repac-resumo-idx">${lista.map((item) => {
+      const real = this.ehReal({ name: item.nome }, item.id);
+      const pct = this.pctDoIndexador(item.id, item.accPct);
+      const nome = item.nome && item.nome !== "—" ? item.nome : ("Indexador " + item.id);
+      const retro = item.retro == null ? "" : (" · retro " + item.retro);
+      const reaj = real || pct == null ? "Sem reajuste" : this.pct(pct);
+      const n = item.contratos.size;
+      return `<article class="repac-resumo-card">
+        <div class="repac-resumo-nome">${this.esc(nome)}</div>
+        <div class="repac-resumo-sub">ID ${this.esc(item.id)}${this.esc(retro)}</div>
+        <div class="repac-resumo-num">
+          <strong>${this.esc(reaj)}</strong>
+          <span>${n} contrato${n === 1 ? "" : "s"}</span>
+        </div>
+        <div class="repac-resumo-reaj">${real || pct == null ? "Este indexador não corrige o saldo" : "Reajuste aplicado"}</div>
+      </article>`;
+    }).join("")}</div>`;
+  },
+
+  resumoArvoreHtml() {
+    const grupos = this.gruposDimensao();
+    const empresas = new Map();
+    grupos.forEach((g) => {
+      const empId = String(g.companyId || g.empresa || "—");
+      if (!empresas.has(empId)) empresas.set(empId, { id: empId, nome: g.empresa || "—", obras: new Map(), grupos: [] });
+      const emp = empresas.get(empId);
+      if (g.empresa && (emp.nome === "—" || !emp.nome)) emp.nome = g.empresa;
+      emp.grupos.push(g);
+      const obraId = String(g.obraId || g.empreendimento || "—");
+      if (!emp.obras.has(obraId)) emp.obras.set(obraId, { id: obraId, nome: g.empreendimento || "—", grupos: [] });
+      const obra = emp.obras.get(obraId);
+      if (g.empreendimento && (obra.nome === "—" || !obra.nome)) obra.nome = g.empreendimento;
+      obra.grupos.push(g);
+    });
+    const emps = [...empresas.values()].sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0) || a.nome.localeCompare(b.nome, "pt-BR"));
+    if (!emps.length) return `<p class="repac-resumo-vazio">Nenhum título neste filtro.</p>`;
+    return `<div class="repac-arv">${emps.map((emp) => {
+      const ek = "e:" + emp.id;
+      const aberto = !!this.state.resumoAbertos[ek];
+      const obras = [...emp.obras.values()].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+      const miolo = aberto ? obras.map((obra) => {
+        const ok = "o:" + emp.id + ":" + obra.id;
+        const oAberto = !!this.state.resumoAbertos[ok];
+        const tits = oAberto ? [...obra.grupos].sort((a, b) => (Number(a.titulo) || 0) - (Number(b.titulo) || 0)).map((g) => {
+          const idx = this.textoIndexador(g);
+          return `<div class="repac-arv-tit"><b>${this.esc(g.titulo || "—")}</b><span>${this.esc(g.cliente || "—")}</span><em title="${this.esc(idx.title)}">${this.esc(idx.texto)}</em></div>`;
+        }).join("") : "";
+        return `<div class="repac-arv-obra">
+          <button type="button" class="repac-arv-row" onclick="RepactuacaoLoteApp.toggleResumo('${encodeURIComponent(ok)}')">
+            <i data-lucide="chevron-right" class="repac-seta${oAberto ? " is-open" : ""}"></i>
+            <span class="repac-arv-nome" title="${this.esc(obra.nome)}">${this.esc(obra.nome)}</span>
+            <span class="repac-arv-contas">${this.pillsIdx(obra.grupos)}</span>
+          </button>
+          ${tits}
+        </div>`;
+      }).join("") : "";
+      const rotuloEmp = (emp.id && emp.id !== "—" ? emp.id + " — " : "") + (emp.nome || "—");
+      return `<div class="repac-arv-emp">
+        <button type="button" class="repac-arv-row" onclick="RepactuacaoLoteApp.toggleResumo('${encodeURIComponent(ek)}')">
+          <i data-lucide="chevron-right" class="repac-seta${aberto ? " is-open" : ""}"></i>
+          <span class="repac-arv-nome" title="${this.esc(emp.nome || "")}">${this.esc(rotuloEmp)}</span>
+          <span class="repac-arv-contas">${this.pillsIdx(emp.grupos)}</span>
+        </button>
+        ${miolo}
+      </div>`;
+    }).join("")}</div>`;
+  },
+
+  resumoCorpoHtml() {
+    if (!this.state.rows.length) {
+      return `<p class="repac-resumo-vazio">Com o mês escolhido acima, envie a planilha para montar o resumo.</p>`;
+    }
+    return `${this.resumoCardsHtml()}<div class="repac-resumo-sec">Abertura por empresa</div>${this.resumoArvoreHtml()}`;
+  },
+
+  renderResumoOnly() {
+    const box = document.getElementById("repac-resumo");
+    if (!box) return;
+    box.innerHTML = this.resumoCorpoHtml();
+    if (window.lucide) window.lucide.createIcons();
+  },
+
+  toggleResumo(key) {
+    const k = decodeURIComponent(String(key || ""));
+    this.state.resumoAbertos[k] = !this.state.resumoAbertos[k];
+    this.renderResumoOnly();
   },
 
   cargaHtml() {
@@ -1538,22 +1733,23 @@ const RepactuacaoLoteApp = {
       const nums = g.parcelas.map((r) => r.parcela).filter((n) => n != null).sort((a, b) => a - b);
       const faixa = nums.length > 1 ? `${nums[0]}–${nums[nums.length - 1]}` : (nums.length ? String(nums[0]) : "—");
       const conferidas = g.parcelas.filter((r) => r.valorOk === true).length;
-      const parcTxt = `${g.parcelas.length} · ${faixa}${conferidas ? ` · ${conferidas} conferida${conferidas === 1 ? "" : "s"}` : ""}`;
+      const parcTxt = `${g.parcelas.length} · ${faixa}`;
+      const parcTitle = `${g.parcelas.length} parcelas · ${faixa}${conferidas ? ` · ${conferidas} conferida${conferidas === 1 ? "" : "s"}` : ""}`;
       const idx = this.textoIndexador(g);
       const base = this.textoDataBase(g);
       const baseClass = base.ruim ? "color:#b91c1c;font-weight:700;" : (base.ok ? "color:#15803d;" : "");
       return `<tr class="repac-tit${aberto ? " is-open" : ""}" onclick="RepactuacaoLoteApp.toggleTitulo('${encodeURIComponent(g.key)}')">
         <td class="repac-seta-cel"><i data-lucide="chevron-right" class="repac-seta"></i></td>
         <td>${this.esc(g.titulo)}</td>
-        <td title="${this.esc(g.cliente)}">${this.esc(g.cliente)}</td>
-        <td class="repac-nome" title="${this.esc(g.empresa || "")}">${this.esc(g.empresa || "—")}</td>
-        <td title="${this.esc(g.documento || "")}">${this.esc(g.documento || "—")}</td>
-        <td class="repac-nome" title="${this.esc(g.empreendimento || "")}">${this.esc(g.empreendimento || "—")}</td>
-        <td title="${this.esc(idx.title)}">${this.esc(idx.texto)}</td>
+        <td class="repac-elipse" title="${this.esc(g.cliente)}">${this.esc(g.cliente)}</td>
+        <td class="repac-elipse repac-empresa" title="${this.esc(g.empresa || "")}">${this.esc(g.empresa || "—")}</td>
+        <td class="repac-elipse" title="${this.esc(g.documento || "")}">${this.esc(g.documento || "—")}</td>
+        <td class="repac-elipse" title="${this.esc(g.empreendimento || "")}">${this.esc(g.empreendimento || "—")}</td>
+        <td class="repac-elipse" title="${this.esc(idx.title)}">${this.esc(idx.texto)}</td>
         <td>${this.esc(this.textoRetro(g))}</td>
-        <td style="${baseClass}" title="${this.esc(base.title)}">${this.esc(base.texto)}</td>
+        <td class="repac-elipse" style="${baseClass}" title="${this.esc(base.title)}">${this.esc(base.texto)}</td>
         <td>${this.esc(this.textoAcum(g))}</td>
-        <td class="repac-parc" title="${this.esc(parcTxt)}">${this.esc(parcTxt)}</td>
+        <td class="repac-parc" title="${this.esc(parcTitle)}">${this.esc(parcTxt)}</td>
         <td class="repac-status">${this.statusChip(this.statusGrupo(g.parcelas))}</td>
       </tr>${aberto ? this.parcelasHtml(g) : ""}`;
     }).join("");
@@ -1561,18 +1757,18 @@ const RepactuacaoLoteApp = {
       <div class="cc-scroll">
         <table class="cc-table repac-titulos">
           <colgroup>
-            <col class="repac-c-seta">
-            <col class="repac-c-tit">
-            <col class="repac-c-cli">
-            <col class="repac-c-emp">
-            <col class="repac-c-doc">
-            <col class="repac-c-obra">
-            <col class="repac-c-idx">
-            <col class="repac-c-retro">
-            <col class="repac-c-base">
-            <col class="repac-c-acum">
-            <col class="repac-c-parc">
-            <col class="repac-c-st">
+            <col class="repac-c-seta" style="width:3%">
+            <col class="repac-c-tit" style="width:5%">
+            <col class="repac-c-cli" style="width:8%">
+            <col class="repac-c-emp" style="width:22%">
+            <col class="repac-c-doc" style="width:8%">
+            <col class="repac-c-obra" style="width:11%">
+            <col class="repac-c-idx" style="width:8%">
+            <col class="repac-c-retro" style="width:3.5%">
+            <col class="repac-c-base" style="width:7.5%">
+            <col class="repac-c-acum" style="width:6%">
+            <col class="repac-c-parc" style="width:6%">
+            <col class="repac-c-st" style="width:12%">
           </colgroup>
           <thead>
             <tr>
@@ -1603,13 +1799,18 @@ const RepactuacaoLoteApp = {
     const c = this.contagens();
     const n = c.n;
     const conferindo = !!this.state.loading;
+    const aba = this.state.aba || "previa";
+    const filtros = n ? `<div id="repac-filtros" class="repac-filtros">${this.filtrosHtml()}</div>` : "";
+    const corpo = conferindo
+      ? `<div class="repac-carga-tela">${this.cargaHtml()}</div>`
+      : (aba === "resumo"
+        ? `<div class="repac-barra">${filtros}</div><div id="repac-resumo">${this.resumoCorpoHtml()}</div>`
+        : `${n ? `<div class="repac-barra"><div id="repac-kpis" class="repac-kpis">${this.kpisHtml(c)}</div>${filtros}</div>` : ""}<div id="repac-table-wrap">${this.tableHtml()}</div>`);
     root.innerHTML = `
       <div class="cc-page repac-page">
+        ${this.abasHtml()}
         ${this.previewHtml()}
-        ${conferindo ? `<div class="repac-carga-tela">${this.cargaHtml()}</div>` : `
-        <div id="repac-filtros">${n ? this.filtrosHtml() : ""}</div>
-        ${n ? `<div id="repac-kpis" class="repac-kpis">${this.kpisHtml(c)}</div>` : ""}
-        <div id="repac-table-wrap">${this.tableHtml()}</div>`}
+        ${corpo}
       </div>
     `;
     this.bindUpload();

@@ -213,8 +213,15 @@ const ContabilDepara = {
   nomeCentro(cc) {
     const id = this.idCentro(cc);
     const catalogo = this.centroCatalogo(id) || {};
-    const nomes = [catalogo.name, catalogo.nome, cc && cc.name, cc && cc.nome].map((v) => String(v || "").trim());
-    return nomes.find((n) => /parce(ir|ri)/i.test(n)) || nomes.find(Boolean) || "";
+    const conhecido = window.KNOWN_COST_CENTER_NAMES && window.KNOWN_COST_CENTER_NAMES[id];
+    const oficial = String(catalogo.name || catalogo.nome || conhecido || "").trim();
+    if (oficial) return oficial;
+    return String((cc && (cc.name || cc.nome)) || "").trim();
+  },
+
+  /* Ligado = o interruptor Entra na conta. Ausente conta como ligado (cadastro antigo). */
+  estaLigado(cc) {
+    return !cc || cc.inAccount !== false;
   },
 
   /* O centro da parceria é o que está escrito como parceria. O da obra termina em 00. */
@@ -227,21 +234,19 @@ const ContabilDepara = {
     return /parce(ir|ri)/i.test(nome);
   },
 
-  /** Centros de custo da parceria, sem o centro da obra. */
+  /** Centro escrito como parceria e com Entra na conta ligado. Sem o centro da obra. */
   centrosDo(p) {
     if (!p) return [];
-    const app = window.ParametrizacaoParceiroApp;
     const vistos = new Set();
     const brutos = [];
     const juntar = (cc) => {
       const id = this.idCentro(cc);
-      if (!id || /00$/.test(id) || vistos.has(id)) return;
+      if (!id || /00$/.test(id) || vistos.has(id) || !this.estaLigado(cc)) return;
       vistos.add(id);
       brutos.push(cc);
     };
     (p.obras || []).forEach((o) => {
       (o.costCenters || []).forEach(juntar);
-      if (app && typeof app.centrosDaObra === "function" && o.code) app.centrosDaObra(o.code).forEach(juntar);
     });
     if (!brutos.length) (p.costCenters || []).forEach(juntar);
     const marcados = brutos.filter((cc) => this.marcadoParceria(cc));

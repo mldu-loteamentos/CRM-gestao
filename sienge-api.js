@@ -1216,6 +1216,7 @@ async function siengeFetch(endpoint) {
   const url = `${baseUrl}${endpoint}`;
   const response = await fetch(url, {
     method: "GET",
+    cache: String(endpoint).indexOf("payment-information") >= 0 ? "no-store" : "default",
     headers: {
       "Authorization": getBasicAuthHeader(),
       "Accept": "application/json",

@@ -21921,9 +21921,77 @@ function renegSha256(bytes) {
   });
 }
 
-async function renegMontarPdfAcordo(results, nomeArquivo) {
+async function renegAnexarPdf(bytes, extraBytes) {
+  const rel = window.RelacionamentoApp;
+  if (!rel || typeof rel._carregarPdfLib !== "function") throw new Error("O editor de PDF não está disponível.");
+  const PDFLib = await rel._carregarPdfLib();
+  const out = await PDFLib.PDFDocument.load(bytes);
+  let ext;
+  try {
+    ext = await PDFLib.PDFDocument.load(extraBytes, { ignoreEncryption: true });
+  } catch (e) {
+    throw new Error("Não consegui ler o PDF da chave PIX. Envie o arquivo gerado pelo banco.");
+  }
+  if (!ext.getPageCount()) throw new Error("O PDF da chave PIX está vazio.");
+  const pages = await out.copyPages(ext, ext.getPageIndices());
+  pages.forEach(function(p) { out.addPage(p); });
+  return new Uint8Array(await out.save());
+}
+
+function renegPedirPdfPix() {
+  return new Promise(function(resolve) {
+    const overlay = document.getElementById("reneg-pix-overlay");
+    const input = document.getElementById("reneg-pix-arquivo");
+    const nome = document.getElementById("reneg-pix-nome");
+    const gerar = document.getElementById("reneg-pix-gerar");
+    const cancelar = document.getElementById("reneg-pix-cancelar");
+    const fecharBtn = document.getElementById("reneg-pix-fechar");
+    if (!overlay || !input || !gerar) {
+      resolve(null);
+      return;
+    }
+    let feito = false;
+    const fechar = function(buf) {
+      if (feito) return;
+      feito = true;
+      overlay.classList.remove("active");
+      gerar.disabled = true;
+      gerar.style.opacity = "0.55";
+      input.value = "";
+      resolve(buf || null);
+    };
+    input.value = "";
+    if (nome) nome.textContent = "Nenhum arquivo selecionado.";
+    gerar.disabled = true;
+    gerar.style.opacity = "0.55";
+    input.onchange = function() {
+      const f = input.files && input.files[0];
+      if (nome) nome.textContent = f ? f.name : "Nenhum arquivo selecionado.";
+      const pdf = !!(f && (f.type === "application/pdf" || /\.pdf$/i.test(f.name)));
+      gerar.disabled = !pdf;
+      gerar.style.opacity = pdf ? "1" : "0.55";
+      if (f && !pdf) alert("Envie o PDF da chave PIX gerado pelo banco.");
+    };
+    if (cancelar) cancelar.onclick = function() { fechar(null); };
+    if (fecharBtn) fecharBtn.onclick = function() { fechar(null); };
+    gerar.onclick = function() {
+      const f = input.files && input.files[0];
+      if (!f || gerar.disabled) return;
+      gerar.disabled = true;
+      f.arrayBuffer().then(function(buf) { fechar(buf); }).catch(function() {
+        gerar.disabled = false;
+        gerar.style.opacity = "1";
+        alert("Não consegui ler o arquivo. Envie o PDF novamente.");
+      });
+    };
+    overlay.classList.add("active");
+  });
+}
+
+async function renegMontarPdfAcordo(results, nomeArquivo, pixBytes) {
   const pdf = baixarPropostaAcordoPdf(results, nomeArquivo);
-  const cru = new Uint8Array(pdf.output("arraybuffer"));
+  let cru = new Uint8Array(pdf.output("arraybuffer"));
+  if (pixBytes) cru = await renegAnexarPdf(cru, pixBytes);
   return renegCarimbarAcordo(cru, results, "");
 }
 
@@ -22422,6 +22490,8 @@ function generateAgreementPDF() {
   const pago = window.renegPropostaProntaParaConfessao(proposta);
   const modo = pago ? "confissao" : "proposta";
   if (modo === "proposta") {
+    const pix = await renegPedirPdfPix();
+    if (!pix) return;
     const unitProp = (g_renegSale && AppState.units && AppState.units[g_renegSale.unitId]) || {};
     const unitNameProp = unitProp.name || unitProp.unitName || (g_renegSale && g_renegSale.unitName) || "";
     const nomeProp = typeof window.buildFichaPdfFilename === "function"
@@ -22432,7 +22502,7 @@ function generateAgreementPDF() {
           nome: (g_renegCustomer && g_renegCustomer.name) || ""
         })
       : "Proposta de acordo.pdf";
-    const pack = await renegMontarPdfAcordo(results, nomeProp);
+    const pack = await renegMontarPdfAcordo(results, nomeProp, pix);
     renegBaixarBytes(pack.bytes, nomeProp);
     if (pack.aviso) alert(pack.aviso);
     let salva = null;
@@ -39794,7 +39864,7 @@ window.saveRulesConfig = function(scope) {
       });
       localStorage.setItem("crm_moura_judiciais", JSON.stringify(window.EtapasJudiciaisState));
     }
-    if (window.EtapasFinanciamentoState) {
+    if (Array.isArray(window.EtapasFinanciamentoState) && window.EtapasFinanciamentoState.length) {
       localStorage.setItem("crm_moura_financiamento", JSON.stringify(window.EtapasFinanciamentoState));
     }
     if (typeof window.invalidateDailyQueueCache === "function") {
@@ -41367,13 +41437,52 @@ window.removerEtapaJudicial = function(id) {
   }
 };
 
+window.ETAPAS_FINANCIAMENTO_PADRAO = [
+  { id: "fin-01", nome: "Enviar Termo de Simulação para financiamento", dias: 1, descricao: "Envio ao cliente do termo contendo as condições preliminares e simulação do financiamento para análise." },
+  { id: "fin-02", nome: "Aguardar retorno do cliente", dias: 15, descricao: "Período destinado à manifestação do cliente quanto ao interesse e aceitação das condições apresentadas." },
+  { id: "fin-03", nome: "Validar projeto aprovado", dias: 3, descricao: "Conferência da aprovação do projeto e dos documentos necessários para prosseguimento do financiamento." },
+  { id: "fin-04", nome: "Realizar aditamento para financiamento", dias: 5, descricao: "Elaboração e formalização do aditivo contratual adequando o contrato à operação de financiamento." },
+  { id: "fin-05", nome: "Emitir Carta de Quitação para Financiamento", dias: 3, descricao: "Emissão da carta informando o saldo a ser quitado pela instituição financeira para conclusão do financiamento." },
+  { id: "fin-06", nome: "Aguardar minuta", dias: 30, descricao: "Acompanhamento do recebimento da minuta contratual emitida pela instituição financeira." },
+  { id: "fin-07", nome: "Validar minuta", dias: 2, descricao: "Análise e conferência da minuta recebida, verificando informações, valores e condições contratuais." },
+  { id: "fin-08", nome: "Aguardar assinatura diretoria", dias: 5, descricao: "Período destinado à coleta das assinaturas dos diretores responsáveis pela formalização do contrato." },
+  { id: "fin-09", nome: "Gerar PFIN", dias: 7, descricao: "Geração do processo financeiro interno para controle e acompanhamento da liberação do crédito." },
+  { id: "fin-10", nome: "Acompanhar desbloqueio do crédito", dias: 20, descricao: "Monitoramento da liberação dos recursos financeiros pela instituição financiadora." },
+  { id: "fin-11", nome: "Realizar quitação do contrato", dias: 1, descricao: "Baixa financeira e quitação do contrato do cliente após o recebimento dos recursos do financiamento." },
+  { id: "fin-12", nome: "Emitir Termo de Quitação para Financiamento", dias: 2, descricao: "Emissão do documento formal que comprove a quitação das obrigações contratuais pela operação de financiamento." }
+];
+
+window.ensureEtapasFinanciamento = function() {
+  if (!Array.isArray(window.EtapasFinanciamentoState)) window.EtapasFinanciamentoState = [];
+  if (window.EtapasFinanciamentoState.length) return false;
+  window.EtapasFinanciamentoState = window.ETAPAS_FINANCIAMENTO_PADRAO.map((e, i) => ({
+    id: e.id,
+    nome: e.nome,
+    dias: e.dias,
+    descricao: e.descricao,
+    parentId: null,
+    order: (i + 1) * 10
+  }));
+  try {
+    localStorage.setItem("crm_moura_financiamento", JSON.stringify(window.EtapasFinanciamentoState));
+  } catch (e) {}
+  setTimeout(() => {
+    if (!window._commitConfigBusy && typeof window.forceUploadLocalConfig === "function") {
+      window.forceUploadLocalConfig(true);
+    }
+  }, 1800);
+  return true;
+};
+
 window.persistEtapasFinanciamento = function() {
   if (!Array.isArray(window.EtapasFinanciamentoState)) window.EtapasFinanciamentoState = [];
   localStorage.setItem("crm_moura_financiamento", JSON.stringify(window.EtapasFinanciamentoState));
   if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(console.error);
 };
+window.ensureEtapasFinanciamento();
 
 window.buildFinanciamentoStageCatalog = function() {
+  if (typeof window.ensureEtapasFinanciamento === "function") window.ensureEtapasFinanciamento();
   const etapas = [...(window.EtapasFinanciamentoState || [])];
   etapas.forEach((e, i) => { if (typeof e.order === "undefined") e.order = i * 10; });
   const sorted = etapas.sort((a, b) => (a.order || 0) - (b.order || 0));
@@ -41502,6 +41611,7 @@ window.onDropFinNode = function(e, targetId) {
 window.renderEtapasFinanciamento = function() {
   const container = document.getElementById("financiamento-tree-container");
   if (!container) return;
+  if (typeof window.ensureEtapasFinanciamento === "function") window.ensureEtapasFinanciamento();
   container.innerHTML = "";
   if (!window.EtapasFinanciamentoState || window.EtapasFinanciamentoState.length === 0) {
     container.innerHTML = `<div style="text-align: center; color: #94a3b8; font-size: 0.9rem; padding: 20px;">Nenhuma etapa configurada.</div>`;
@@ -51069,6 +51179,12 @@ window.syncGlobalConfigFromFirebase = async function() {
             try {
                 const fin = JSON.parse(localStorage.getItem("crm_moura_financiamento") || "[]");
                 if (Array.isArray(fin)) window.EtapasFinanciamentoState = fin;
+                if (typeof window.ensureEtapasFinanciamento === "function" && window.ensureEtapasFinanciamento()) {
+                    changed = true;
+                }
+                if (typeof window.renderEtapasFinanciamento === "function" && document.getElementById("financiamento-tree-container")) {
+                    window.renderEtapasFinanciamento();
+                }
             } catch (e) {}
             if (typeof window.ensureTimelineReguaDefaults === "function") {
                 try {

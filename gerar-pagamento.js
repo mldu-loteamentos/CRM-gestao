@@ -958,7 +958,11 @@ const GerarPagamentoApp = {
           parcelas.forEach((p) => {
             const num = p.installmentId != null ? p.installmentId : p.installmentNumber;
             if (num == null) return;
-            s.formaSienge[this.chaveTitulo(billId, num)] = { tipo: String(p.paymentType || ""), tipoId: p.paymentTypeId != null ? String(p.paymentTypeId) : "" };
+            s.formaSienge[this.chaveTitulo(billId, num)] = {
+              tipo: String(p.paymentType || ""),
+              tipoId: p.paymentTypeId != null ? String(p.paymentTypeId) : "",
+              parcela: window.BoletoCheck && typeof BoletoCheck.escalares === "function" ? BoletoCheck.escalares(p) : {}
+            };
             if (p.batchNumber != null || p.sentToBank === true) {
               s.loteSienge[this.chaveTitulo(billId, num)] = p.batchNumber != null ? String(p.batchNumber) : "sim";
             }
@@ -1038,7 +1042,8 @@ const GerarPagamentoApp = {
 
   /* ---------- forma de pagamento: boleto conferido (código, valor, vencimento, desconto) ---------- */
   lerFormaPagamento(titulo, parcela, tipo) {
-    return window.BoletoCheck.lerForma(titulo, parcela, tipo);
+    const forma = this.state.formaSienge[this.chaveTitulo(titulo, parcela)] || {};
+    return window.BoletoCheck.lerForma(titulo, parcela, tipo, forma.parcela);
   },
 
   /** Cadastro do credor para conferir o titular da chave PIX: CPF/CNPJ, telefones, e-mails e chaves PIX cadastradas. */
