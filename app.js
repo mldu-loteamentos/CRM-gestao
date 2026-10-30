@@ -4847,6 +4847,9 @@ async function processSuccessfulLogin(loggedUser) {
       if (typeof window.checkNexDueAlerts === "function") {
         window.checkNexDueAlerts();
       }
+      if (typeof window.checkDistratoPrazoMes === "function") {
+        window.checkDistratoPrazoMes();
+      }
       if (window.GerarPagamentoApp && typeof window.GerarPagamentoApp.avisoFechamento === "function") {
         window.GerarPagamentoApp.avisoFechamento();
       }
@@ -11945,6 +11948,9 @@ async function _loadDashboardData_Impl(forceRefresh = false) {
     rawList.filter(c => typeof window.clientIsSubjudiceIntegra === "function" && window.clientIsSubjudiceIntegra(c))
   );
   window.rawClientList = rawList;
+  if (typeof window.atualizarAvisoDistratoPrazo === "function") {
+    try { window.atualizarAvisoDistratoPrazo(); } catch (e) {}
+  }
   if (window.VerificarConstrucaoApp && typeof window.VerificarConstrucaoApp.onPortfolioReady === "function") {
     try { window.VerificarConstrucaoApp.onPortfolioReady(); } catch (e) {}
   }
@@ -37555,6 +37561,202 @@ window.checkNexDueAlerts = function(isTest) {
   }
   modal.style.display = "flex";
   if (isTest && !pending.length) alert("Nenhum vencimento no prazo.");
+};
+
+window.DISTRATO_PRAZO_ACK_KEY = "crm_distrato_prazo_ack";
+
+window.distratoPrazoEsc = function(v) {
+  return String(v == null ? "" : v)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+};
+
+window.distratoPrazoDoMes = function(iso) {
+  const hoje = String(iso || (typeof window.nexTodayIso === "function" ? window.nexTodayIso() : "")).slice(0, 10);
+  const y = Number(hoje.slice(0, 4));
+  const m = Number(hoje.slice(5, 7));
+  if (!y || !m || typeof window.addDaysIso !== "function" || typeof window.isBusinessDayIso !== "function") {
+    return { hoje: hoje, ultimo: "", penultimo: "", fase: "" };
+  }
+  const fim = new Date(y, m, 0);
+  const pad = function(n) { return String(n).padStart(2, "0"); };
+  let cursor = y + "-" + pad(m) + "-" + pad(fim.getDate());
+  const uteis = [];
+  let guard = 0;
+  while (uteis.length < 2 && guard < 24) {
+    if (window.isBusinessDayIso(cursor)) uteis.push(cursor);
+    cursor = window.addDaysIso(cursor, -1);
+    guard++;
+  }
+  const ultimo = uteis[0] || "";
+  const penultimo = uteis[1] || "";
+  const fase = hoje === ultimo ? "ultimo" : (hoje === penultimo ? "penultimo" : "");
+  return { hoje: hoje, ultimo: ultimo, penultimo: penultimo, fase: fase };
+};
+
+window.usuarioVeAvisoDistratoPrazo = function() {
+  const u = (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo())
+    || (window.AppState && AppState.currentUser)
+    || null;
+  if (!u) return { ok: false, analise: false };
+  if (typeof window.isAdvogadoCobrancaUser === "function" && window.isAdvogadoCobrancaUser(u)) return { ok: false, analise: false };
+  if (typeof window.crmOperatorType === "function" && window.crmOperatorType(u) === "advogado") return { ok: false, analise: false };
+  const profile = u.profile_name || u.profile || "";
+  if (typeof window.isOperadorCobrancaTerceirizadoProfile === "function" && window.isOperadorCobrancaTerceirizadoProfile(profile)) {
+    return { ok: false, analise: false };
+  }
+  const kind = typeof window.crmProfileKind === "function" ? window.crmProfileKind(profile) : "";
+  const nome = typeof window.normalizeCrmProfileName === "function"
+    ? window.normalizeCrmProfileName(profile)
+    : String(profile || "").toUpperCase();
+  const cobranca = kind === "cobranca" || kind === "back_office";
+  const relacionamento = nome.indexOf("RELACIONAMENTO") >= 0;
+  if (!cobranca && !relacionamento) return { ok: false, analise: false };
+  return { ok: true, analise: cobranca };
+};
+
+window.distratoPrazoJaViu = function() {
+  const hoje = typeof window.nexTodayIso === "function" ? window.nexTodayIso() : "";
+  const u = (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo()) || null;
+  const email = String((u && u.email) || "").toLowerCase();
+  try {
+    const raw = JSON.parse(localStorage.getItem(window.DISTRATO_PRAZO_ACK_KEY) || "null");
+    return !!(raw && raw.day === hoje && String(raw.email || "").toLowerCase() === email);
+  } catch (e) {
+    return false;
+  }
+};
+
+window.distratoPrazoClientes = function() {
+  const lista = window.rawClientList || window.clientList || [];
+  const nex = [];
+  const suspensiva = [];
+  const vistos = new Set();
+  lista.forEach(function(c) {
+    if (!c || c.distratado) return;
+    const chave = String(c.customerId || "") + "|" + String(c.saleId || "");
+    if (vistos.has(chave)) return;
+    vistos.add(chave);
+    const sig = typeof window.filaLookupSignals === "function" ? window.filaLookupSignals(c) : null;
+    const temConstrucao = !!(sig && sig.construction);
+    const nexOk = typeof window.clientHasNexCumprida === "function" && window.clientHasNexCumprida(c);
+    if (nexOk && !temConstrucao) {
+      const pct = typeof window.clientPaidPercent === "function" ? window.clientPaidPercent(c) : null;
+      const zero = c.isZeroPaid === true || (typeof window.clientIsZeroPercentPaid === "function" && window.clientIsZeroPercentPaid(c));
+      const baixo = pct != null && pct < 10;
+      if (zero || baixo) nex.push(c);
+    }
+    if (typeof window.clientShowsSuspenderAction === "function" && window.clientShowsSuspenderAction(c)) suspensiva.push(c);
+  });
+  const porNome = function(a, b) {
+    return String(a.customerName || a.name || "").localeCompare(String(b.customerName || b.name || ""), "pt-BR");
+  };
+  nex.sort(porNome);
+  suspensiva.sort(porNome);
+  return { nex: nex, suspensiva: suspensiva, filaPronta: Array.isArray(window.rawClientList) };
+};
+
+window.distratoPrazoListaHtml = function(titulo, gente, vazio) {
+  const nomes = (gente || []).slice(0, 12).map(function(c) {
+    const nome = c.customerName || c.name || ("Cliente " + (c.customerId || ""));
+    const tituloId = c.saleId ? " · título " + c.saleId : "";
+    return "<li>" + window.distratoPrazoEsc(nome + tituloId) + "</li>";
+  }).join("");
+  const resto = (gente || []).length > 12 ? "<li>e mais " + ((gente || []).length - 12) + "</li>" : "";
+  const corpo = gente && gente.length
+    ? "<ul style=\"margin:6px 0 0;padding-left:18px;color:#334155;\">" + nomes + resto + "</ul>"
+    : "<p style=\"margin:6px 0 0;color:#64748b;\">" + vazio + "</p>";
+  return "<div style=\"border:1px solid #e7eee9;border-radius:8px;padding:10px 12px;background:#f7faf8;\">"
+    + "<strong style=\"color:#1f3d30;font-size:0.84rem;\">" + titulo + " (" + ((gente && gente.length) || 0) + ")</strong>"
+    + corpo + "</div>";
+};
+
+window.distratoPrazoCorpoHtml = function(info, analise) {
+  const fmt = function(iso) { return typeof window.formatIsoDateBr === "function" ? window.formatIsoDateBr(iso) : iso; };
+  const data = fmt(info.ultimo);
+  const amanha = typeof window.addDaysIso === "function" ? window.addDaysIso(info.hoje, 1) : "";
+  const texto = info.fase === "penultimo"
+    ? (amanha === info.ultimo
+      ? "Amanhã, " + data + ", é o último dia para subir distrato no Sienge. O lançamento vale até o último dia útil do mês."
+      : "O último dia para subir distrato no Sienge é " + data + ". O lançamento vale até o último dia útil do mês.")
+    : "Hoje, " + data + ", é o último dia para lançar distrato no Sienge.";
+  let extra = "";
+  if (analise) {
+    const pend = window.distratoPrazoClientes();
+    const carregando = !pend.filaPronta;
+    extra = "<div style=\"display:flex;flex-direction:column;gap:8px;margin-top:14px;\">"
+      + (carregando ? "<p style=\"margin:0;color:#64748b;font-size:0.84rem;\">A fila ainda está carregando. A lista de clientes aparece em seguida.</p>" : "")
+      + window.distratoPrazoListaHtml(
+        "NEX cumprida com distrato aplicável",
+        carregando ? [] : pend.nex,
+        carregando ? "Aguardando a fila." : "Nenhum cliente com NEX cumprida aplicável ao distrato."
+      )
+      + window.distratoPrazoListaHtml(
+        "Cláusula suspensiva com prazo vencido",
+        carregando ? [] : pend.suspensiva,
+        carregando ? "Aguardando a fila." : "Nenhum cliente com cláusula suspensiva pendente de suspensão."
+      )
+      + "</div>";
+  }
+  return "<p style=\"margin:0;color:#334155;font-size:0.92rem;line-height:1.5;\">" + texto + "</p>" + extra;
+};
+
+window.ensureDistratoPrazoModal = function() {
+  let modal = document.getElementById("modal-distrato-prazo");
+  if (modal) return modal;
+  modal = document.createElement("div");
+  modal.id = "modal-distrato-prazo";
+  modal.style.cssText = "display:none;position:fixed;inset:0;background:rgba(15,23,42,0.45);z-index:10040;align-items:center;justify-content:center;padding:16px;";
+  modal.innerHTML = "<div style=\"background:#fff;width:min(560px,100%);border-radius:12px;padding:20px 20px 16px;box-shadow:0 18px 40px rgba(0,0,0,0.2);\">"
+    + "<h3 style=\"margin:0 0 10px;color:#105436;font-size:1.05rem;\">Prazo de distrato no Sienge</h3>"
+    + "<div id=\"distrato-prazo-corpo\"></div>"
+    + "<div style=\"display:flex;justify-content:flex-end;margin-top:16px;\">"
+    + "<button type=\"button\" class=\"btn btn-primary\" onclick=\"window.darCienciaDistratoPrazo()\">Ciência</button>"
+    + "</div></div>";
+  document.body.appendChild(modal);
+  return modal;
+};
+
+window.darCienciaDistratoPrazo = function() {
+  const hoje = typeof window.nexTodayIso === "function" ? window.nexTodayIso() : "";
+  const u = (typeof window.crmUsuarioEfetivo === "function" && window.crmUsuarioEfetivo()) || null;
+  try {
+    localStorage.setItem(window.DISTRATO_PRAZO_ACK_KEY, JSON.stringify({
+      day: hoje,
+      email: String((u && u.email) || "").toLowerCase()
+    }));
+  } catch (e) {}
+  const modal = document.getElementById("modal-distrato-prazo");
+  if (modal) modal.style.display = "none";
+};
+
+window.checkDistratoPrazoMes = function() {
+  const quem = window.usuarioVeAvisoDistratoPrazo();
+  const modal = document.getElementById("modal-distrato-prazo");
+  if (!quem.ok || window.distratoPrazoJaViu()) {
+    if (modal) modal.style.display = "none";
+    return;
+  }
+  const info = window.distratoPrazoDoMes();
+  if (!info.fase) {
+    if (modal) modal.style.display = "none";
+    return;
+  }
+  const caixa = window.ensureDistratoPrazoModal();
+  const corpo = document.getElementById("distrato-prazo-corpo");
+  if (corpo) corpo.innerHTML = window.distratoPrazoCorpoHtml(info, quem.analise);
+  caixa.style.display = "flex";
+};
+
+window.atualizarAvisoDistratoPrazo = function() {
+  const modal = document.getElementById("modal-distrato-prazo");
+  if (modal && modal.style.display === "flex") {
+    const quem = window.usuarioVeAvisoDistratoPrazo();
+    const info = window.distratoPrazoDoMes();
+    const corpo = document.getElementById("distrato-prazo-corpo");
+    if (quem.ok && info.fase && corpo) corpo.innerHTML = window.distratoPrazoCorpoHtml(info, quem.analise);
+    return;
+  }
+  window.checkDistratoPrazoMes();
 };
 
 window.nexFindFilaClient = function(customerId, saleId) {
