@@ -22874,7 +22874,8 @@ window.resetDistratoEditableFields = function(opts) {
   setVal("dist-restitution-pct", "60");
   setVal("dist-restitution-val", "0,00");
   setVal("dist-restitution-choice", "lei");
-  setVal("dist-restitution-installments", "12");
+  setVal("dist-restitution-installments", "1");
+  window._distRefundAutoValor = null;
   setVal("dist-iniciativa", "cliente");
   setVal("dist-fruition-months", "1");
   ["dist-taxa-assoc", "dist-iptu", "dist-agua", "dist-luz", "dist-homolog", "dist-outros", "dist-comissao"].forEach((id) => {
@@ -23577,25 +23578,17 @@ window.handleDistratoChoiceChange = function() {
     if (pctContainer) pctContainer.style.display = "flex";
   }
 
-  // Parcelamento based on Negotiated Refund
+  // Parcelamento: cada parcela fica perto de R$ 1.000. R$ 800 não vira 12 vezes.
   const instEl = document.getElementById("dist-restitution-installments");
   const instMin = isPermuta ? 1 : Math.max(1, Number(distAlcada.minInstallments) || 1);
   const instMax = isPermuta ? 12 : Math.max(instMin, Number(distAlcada.maxInstallments) || 12);
-  let instQty = Number(instEl && instEl.value) || instMax;
+  const refundCash = isPermuta ? distPermutaRemainingCash() : negotiatedRefund;
+  const instQty = distratoDefinirParcelasDevolucao(refundCash, instMax);
   if (instEl) {
-    instEl.min = String(instMin);
+    instEl.min = "1";
     instEl.max = String(instMax);
   }
-  if (instQty > instMax) {
-    instQty = instMax;
-    if (instEl) instEl.value = String(instMax);
-  }
-  if (instQty < instMin) {
-    instQty = instMin;
-    if (instEl) instEl.value = String(instMin);
-  }
-  const refundCash = isPermuta ? distPermutaRemainingCash() : negotiatedRefund;
-  const refundInstallment = (isPermuta ? refundCash : negotiatedRefund) / instQty;
+  const refundInstallment = instQty ? (isPermuta ? refundCash : negotiatedRefund) / instQty : 0;
 
   const penaltyLabel = document.getElementById("dist-penalty-label");
   if (penaltyLabel) penaltyLabel.textContent = isPermuta ? "Multa por permuta (10% do recebido)" : "Multa por Rescisão (10% do contrato)";
@@ -23886,6 +23879,42 @@ function distratoNeedsClientPayout() {
   return distratoClientPayoutAmount() > 0.009;
 }
 
+/** Quantidade de parcelas cuja prestação fica mais perto de R$ 1.000. Empate fica com menos parcelas. */
+function distratoQtdParcelasPertoDeMil(valor, instMax) {
+  const total = Math.round((Number(valor) || 0) * 100) / 100;
+  const max = Math.max(1, Number(instMax) || 1);
+  if (!(total > 0.009)) return 1;
+  let melhor = 1;
+  let melhorDif = Math.abs(total - 1000);
+  for (let n = 2; n <= max; n++) {
+    const dif = Math.abs(total / n - 1000);
+    if (dif < melhorDif - 0.004) {
+      melhorDif = dif;
+      melhor = n;
+    }
+  }
+  return melhor;
+}
+
+/** Recalcula as parcelas quando o valor da devolução muda. O número digitado à mão vale até o valor mudar. */
+function distratoDefinirParcelasDevolucao(valor, instMax) {
+  const instEl = document.getElementById("dist-restitution-installments");
+  const total = Math.round((Number(valor) || 0) * 100) / 100;
+  const max = Math.max(1, Number(instMax) || 1);
+  const manual = document.activeElement === instEl;
+  const anterior = window._distRefundAutoValor;
+  const mudou = anterior == null || Math.abs(anterior - total) > 0.009;
+  let instQty = Number(instEl && instEl.value) || 1;
+  if (!manual && (mudou || !(instQty > 0))) {
+    instQty = distratoQtdParcelasPertoDeMil(total, max);
+    window._distRefundAutoValor = total;
+  }
+  if (instQty > max) instQty = max;
+  if (instQty < 1) instQty = 1;
+  if (instEl && !manual) instEl.value = String(instQty);
+  return instQty;
+}
+
 function updateDistratoRefundScheduleAmounts() {
   const isPermuta = !!(document.getElementById("dist-permuta-toggle") && document.getElementById("dist-permuta-toggle").checked);
   const negotiated = (AppState.currentDistratoResult && AppState.currentDistratoResult.refundNet != null)
@@ -23895,9 +23924,7 @@ function updateDistratoRefundScheduleAmounts() {
   const alcada = (AppState.currentDistratoResult && AppState.currentDistratoResult.distratoAlcada) || null;
   const instMin = isPermuta ? 1 : Math.max(1, Number(alcada && alcada.minInstallments) || 1);
   const instMax = isPermuta ? 12 : Math.max(instMin, Number(alcada && alcada.maxInstallments) || 12);
-  let instQty = Number(document.getElementById("dist-restitution-installments") && document.getElementById("dist-restitution-installments").value) || 12;
-  if (instQty > instMax) instQty = instMax;
-  if (instQty < instMin) instQty = instMin;
+  const instQty = distratoDefinirParcelasDevolucao(cash, instMax);
   const refundInstallment = instQty ? cash / instQty : 0;
   if (AppState.currentDistratoResult) {
     AppState.currentDistratoResult.refundCash = cash;

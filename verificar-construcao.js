@@ -1163,7 +1163,6 @@ window.VerificarConstrucaoApp = {
                                 <p style="margin:2px 0 0; font-size:0.78rem; color:rgba(255,255,255,0.7);">Empreendimentos com obra ativa — clientes dispensados de vistoria</p>
                             </div>
                         </div>
-                        <button type="button" class="btn btn-fechar" onclick="document.getElementById('modal-obras-andamento').style.display='none'">Fechar</button>
                     </div>
                     <div style="padding:20px 28px; max-height:55vh; overflow-y:auto;">
                         <div id="obras-andamento-list">Carregando...</div>
