@@ -115,7 +115,7 @@ ComprasControleApp.transform = function (payload) {
                 situacao: this.billSituation(bill, pay),
                 operacao,
                 conta,
-                departamento: (dep && dep.name) || this.ccDeptHint((cat && cat.costCenterName) || "") || "",
+                departamento: this.departamentoTexto(bill) || this.ccDeptHint((cat && cat.costCenterName) || "") || "",
                 departamentoId: dep && (dep.id != null ? dep.id : (dep.departmentId != null ? dep.departmentId : dep.departamentId)) != null
                   ? String(dep.id != null ? dep.id : (dep.departmentId != null ? dep.departmentId : dep.departamentId))
                   : "",
@@ -1676,6 +1676,9 @@ ComprasControleApp.abrirTituloRow = async function (row) {
     if (this._tituloGen !== gen) return;
     this._tituloDetalhe.loading = false;
     this._tituloDetalhe.bill = bill || null;
+    const depBill = this.departamentoTexto(bill, row);
+    if (depBill) row.departamento = depBill;
+    if (!row.departamento || /^\d+(\s*·\s*\d+)*$/.test(String(row.departamento))) this.resolverDepartamento(bill, row, gen);
     this._tituloDetalhe.attachments = attachments || [];
     this._tituloDetalhe.payment = payment;
     this._tituloDetalhe.impostos = Array.isArray(impostos) ? impostos : [];
@@ -1724,6 +1727,54 @@ ComprasControleApp.abrirTituloRow = async function (row) {
     this._tituloDetalhe.error = this.textoErroSienge((e && e.message) || "Não consegui abrir o título.");
     this.pintarTitulo();
   }
+};
+
+/** "31 - Tesouraria" a partir da apropriação por departamento do título no Sienge. */
+ComprasControleApp.departamentoTexto = function (bill, row) {
+  const pronto = String((row && row.departamento) || "").trim();
+  if (pronto && !/^\d+(\s*·\s*\d+)*$/.test(pronto)) return pronto;
+  const itens = [];
+  const listas = [];
+  if (bill && typeof bill === "object") {
+    ["departamentsCosts", "departmentsCost", "departmentsCosts", "departaments", "departments", "departmentCosts"].forEach((k) => {
+      if (bill[k] != null) listas.push(bill[k]);
+    });
+    Object.keys(bill).forEach((k) => {
+      if (!/depart/i.test(k) || bill[k] == null || typeof bill[k] !== "object") return;
+      if (listas.indexOf(bill[k]) < 0) listas.push(bill[k]);
+    });
+  }
+  listas.forEach((lista) => {
+    this.listOrNull(lista).forEach((dep) => {
+      if (!dep || typeof dep !== "object") return;
+      const id = dep.id != null ? dep.id : (dep.departmentId != null ? dep.departmentId : dep.departamentId);
+      const nome = String(dep.name || dep.departmentName || dep.departamentName || dep.description || "").trim();
+      const rotulo = [id != null && String(id) !== "" ? String(id) : "", nome].filter(Boolean).join(" - ");
+      if (rotulo && itens.indexOf(rotulo) < 0) itens.push(rotulo);
+    });
+  });
+  return itens.join(" · ") || pronto;
+};
+
+ComprasControleApp.resolverDepartamento = async function (bill, row, gen) {
+  const atual = this.departamentoTexto(bill, row);
+  if (atual && !/^\d+(\s*·\s*\d+)*$/.test(atual)) {
+    row.departamento = atual;
+    return;
+  }
+  const ids = (atual ? atual.split("·") : []).map((x) => x.trim()).filter(Boolean);
+  if (!ids.length || !window.SiengeApiService || typeof SiengeApiService.getDepartments !== "function") {
+    if (atual) row.departamento = atual;
+    return;
+  }
+  let catalogo = [];
+  try { catalogo = await SiengeApiService.getDepartments(); } catch (e) { catalogo = []; }
+  if (this._tituloGen !== gen || !this._tituloDetalhe) return;
+  row.departamento = ids.map((id) => {
+    const d = (catalogo || []).find((x) => String(x.id) === String(id));
+    return d && d.name ? id + " - " + d.name : id;
+  }).join(" · ");
+  this.pintarTitulo();
 };
 
 ComprasControleApp.companyLabel = function (id) {

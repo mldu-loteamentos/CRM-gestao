@@ -875,6 +875,8 @@ const GerarPagamentoApp = {
           docNome: String(docNome || bill.documentIdentificationName || "").trim(),
           emissao: String(bill.issueDate || "").slice(0, 10),
           vencimento: String(bill.dueDate || "").slice(0, 10),
+          departamento: window.ComprasControleApp && typeof ComprasControleApp.departamentoTexto === "function"
+            ? ComprasControleApp.departamentoTexto(bill) : "",
           pagamento: datas.length ? datas[datas.length - 1] : "",
           valor: original * fat,
           saldo: saldo,
@@ -1687,6 +1689,7 @@ const GerarPagamentoApp = {
       ccNome: t.ccs.length > 1 ? "rateado" : (t.ccs[0] && t.ccs[0].nome) || r.ccNome,
       rateioHtml: this.rateioHtml(this.conferirRateio(t.ccs, t.valor, t.ctx)),
       companyId: cc ? this.companyIdOf(cc) : "",
+      departamento: r.departamento || "",
       natureza: r.pago ? "pago" : "",
       dataPagamento: r.pagamento || "",
       conta: r.contas && r.contas.length ? "C/C " + r.contas.join(", ") : "",
@@ -3869,35 +3872,15 @@ const GerarPagamentoApp = {
     return conf.problemas[0] + (conf.problemas.length > 1 ? ` (e mais ${conf.problemas.length - 1} divergência(s) no rateio)` : "");
   },
 
-  /** Centros de custo do título em ordem crescente: % do título e % dentro da obra (rateio Moura Leite × parceiro). */
+  /** Centros de custo do título: o selo fica na célula e o passe do mouse abre a mesma visão da tela de rateio. */
   ccsCelulaHtml(it) {
-    const ccs = (it.ccs || []).slice().sort((a, b) => Number(a.id) - Number(b.id))
-      .map((c) => ({ ...c, parceria: (it.ccs || []).length > 1 ? this.ccDeParceriaPeloNome(c.id, c.nome) : c.parceria }));
-    const doRateio = {};
-    const ausentes = [];
-    ((it.rateio && it.rateio.obras) || []).forEach((o) => o.linhas.forEach((l) => {
-      if (l.ausente) ausentes.push(l);
-      else doRateio[l.id] = { titulo: l.pct, obra: o.pct > 0 ? l.pct * 100 / o.pct : 0, linha: l };
-    }));
     const resumo = this.rateioResumo(it);
-    const idHtml = (c) => (c.parceria ? `<strong>${this.esc(c.id)}</strong>` : `<span class="gp-cc-outro">${this.esc(c.id)}</span>`);
-    const status = (l) => {
-      if (!l) return `<span class="gp-muted">—</span>`;
-      if (l.ausente) return `<span class="bchk bchk-erro">Falta ✗</span>`;
-      if (l.ok === false || l.planoErro) return `<span class="bchk bchk-erro">${l.planoErro && l.ok !== false ? "Plano ✗" : "Rateio ✗"}</span>`;
-      return l.ok || (l.ok == null && it.rateio && it.rateio.ok) ? `<span class="bchk bchk-ok">Rateio ✓</span>` : `<span class="gp-muted">—</span>`;
-    };
-    const linhas = ccs.map((c) => {
-      const r = doRateio[c.id];
-      return `<tr><td>${idHtml(c)} <span class="gp-cc-pop-nome">${this.esc(c.nome || "")}</span></td>
-        <td class="num">${r ? this.pct(r.titulo) : "—"}</td>
-        <td class="num">${r ? this.pct(r.obra) : "—"}</td>
-        <td>${status(r && r.linha)}</td></tr>`;
-    }).concat(ausentes.map((l) => `<tr><td><strong>${this.esc(l.id)}</strong> <span class="gp-cc-pop-nome">${this.esc(l.nome || "")}</span></td>
-        <td class="num">—</td><td class="num">${l.padrao != null ? this.pct(l.padrao) : "—"}</td><td>${status(l)}</td></tr>`)).join("");
-    const pop = `<table class="gp-cc-pop-tab"><thead><tr><th>Centro de custo</th><th class="num">Rateio título</th><th class="num">Rateio parceria</th><th>Status</th></tr></thead><tbody>${linhas}</tbody></table>`;
     const selo = `<span class="bchk ${resumo.cls}">${this.esc(resumo.texto)}</span>`;
-    return `<span class="gp-cc-lista" title="${this.esc(resumo.dica)}" onmouseenter="GerarPagamentoApp.ccPopAbrir(this)" onmouseleave="GerarPagamentoApp.ccPopFechar()">${selo}<template>${pop}</template></span>`;
+    const visao = this.rateioHtml(it && it.rateio);
+    const pop = visao
+      ? `<div class="gp-cc-pop-rateio">${visao}</div>`
+      : `<div class="gp-cc-pop-vazio">${this.esc(resumo.dica || "O rateio deste título ainda não foi conferido.")}</div>`;
+    return `<span class="gp-cc-lista" onmouseenter="GerarPagamentoApp.ccPopAbrir(this)" onmouseleave="GerarPagamentoApp.ccPopFechar()">${selo}<template>${pop}</template></span>`;
   },
 
   /** Primeira conferência: se o título tem rateio entre centros e se esse rateio passou na validação atual. */
@@ -4012,7 +3995,13 @@ const GerarPagamentoApp = {
   ccsHtml(r) {
     const ccs = (r.ccsTitulo && r.ccsTitulo.length ? r.ccsTitulo : [{ id: r.ccId, nome: r.ccNome, parceria: true }])
       .slice().sort((a, b) => Number(a.id) - Number(b.id));
-    const semObra = ccs.filter((c) => c.parceria && !ccs.some((o) => !o.parceria && this.obra(o.id) === this.obra(c.id)));
+    const nomeDe = (c) => c.nome || ((this.ccDe(c.id) || {}).name) || "";
+    const ehParc = (c) => this.ccDeParceriaPeloNome(c.id, nomeDe(c));
+    const semObra = ccs.filter((c) => {
+      if (!ehParc(c)) return false;
+      const ob = this.obra(c.id);
+      return !ccs.some((o) => String(o.id) !== String(c.id) && this.obra(o.id) === ob && !ehParc(o));
+    });
     const nomes = ccs.map((c) => `${c.id} ${c.nome}${c.rateio != null ? ` · ${this.pct(c.rateio)}` : ""}${c.parceria ? " (parceria)" : ""}`).join("\n");
     const conf = this.conferirRateio(ccs, r.tituloValor != null ? r.tituloValor : r.valor, this.contextoRateio(r));
     return `<span title="${this.esc(nomes)}">${ccs.map((c) => (c.parceria ? `<strong>${this.esc(c.id)}</strong>` : `<span class="gp-cc-outro">${this.esc(c.id)}</span>`)).join(" / ")} <span class="gp-muted">${this.esc(ccs.length === 1 ? ccs[0].nome : "rateado")}</span></span>`
@@ -4269,7 +4258,10 @@ const GerarPagamentoApp = {
           #gerar-pagamento-root .gp-aut { display:inline-flex; align-items:center; gap:2px; flex-wrap:wrap; }
           #gerar-pagamento-root .gp-aut-seta { width:12px; height:12px; color:#94a3b8; }
           #gerar-pagamento-root .gp-cc-lista { display:inline-flex; flex-direction:column; align-items:flex-start; gap:3px; cursor:help; font-size:0.85rem; }
-          .gp-cc-pop { display:none; position:fixed; z-index:3000; background:#fff; border:1px solid #e2e8f0; border-radius:10px; box-shadow:0 10px 30px rgba(15,23,42,.18); padding:8px 10px; pointer-events:none; }
+          .gp-cc-pop { display:none; position:fixed; z-index:3000; background:#fff; border:1px solid #e2e8f0; border-radius:10px; box-shadow:0 10px 30px rgba(15,23,42,.18); padding:12px 14px; pointer-events:none; max-width:min(980px, 96vw); max-height:min(70vh, 640px); overflow:auto; }
+          .gp-cc-pop h4 { margin:0 0 8px; color:#105436; font-size:0.92rem; }
+          .gp-cc-pop .gp-rateio { font-size:0.78rem; }
+          .gp-cc-pop-vazio { color:#475569; font-size:0.82rem; max-width:280px; }
           .gp-cc-pop-tab { border-collapse:collapse; font-size:0.8rem; color:#1e293b; }
           .gp-cc-pop-tab th { text-align:left; font-size:0.68rem; text-transform:uppercase; color:#64748b; font-weight:700; padding:4px 10px; border-bottom:1px solid #e2e8f0; white-space:nowrap; }
           .gp-cc-pop-tab td { padding:5px 10px; border-bottom:1px solid #f1f5f9; white-space:nowrap; }
