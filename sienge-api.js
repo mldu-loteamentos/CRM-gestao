@@ -2296,16 +2296,14 @@ const SiengeApiService = {
         }
       }
 
-      // Sáb/dom/feriado: 1º acesso do dia força base completa (warmup não roda nesses dias)
-      const effectiveForce = shouldForceFilaFullRefreshOnAccess(forceRefresh);
-      if (effectiveForce && !forceRefresh) {
-        console.log('%c[Sienge] 📅 FDS/feriado — primeiro acesso: atualizando base completa da fila.', 'color:#f59e0b;font-weight:bold;');
-      }
-
-      if (this._defaultersPromise && !effectiveForce) {
+      // Só o botão de atualizar descarta a busca em andamento.
+      // Sáb/dom/feriado usa a base de hoje se ela já existe; a busca completa
+      // fica para quando o cache do dia ainda não foi gravado.
+      const explicitForce = !!forceRefresh;
+      if (this._defaultersPromise && !explicitForce) {
         return this._defaultersPromise;
       }
-      if (effectiveForce && this._defaultersPromise) {
+      if (explicitForce && this._defaultersPromise) {
         this._defaultersFetchGen = (this._defaultersFetchGen || 0) + 1;
         this._defaultersPromise = null;
         this._progressListeners = [];
@@ -2314,7 +2312,7 @@ const SiengeApiService = {
       this._lastProgressState = null;
       this._defaultersFetchGen = (this._defaultersFetchGen || 0) + 1;
       const fetchGen = this._defaultersFetchGen;
-      if (window.ApiUsage) ApiUsage.pushSource(effectiveForce ? "user" : "system", "fila_inadimplentes");
+      if (window.ApiUsage) ApiUsage.pushSource(explicitForce ? "user" : "system", "fila_inadimplentes");
       this._defaultersPromise = (async () => {
         try {
         const t0 = performance.now();
@@ -2323,7 +2321,7 @@ const SiengeApiService = {
         try { await hydratePaidMapsFromDailyCache(todayStr); } catch (e) {}
 
         // 1) VERIFICAÇÃO DO CACHE DIÁRIO (INDEXEDDB E FIRESTORE)
-        if (!effectiveForce) {
+        if (!explicitForce) {
            
            // A) Tentar ler do IndexedDB (Cache Local, rápido e sem limite de quota)
            try {
@@ -2347,6 +2345,7 @@ const SiengeApiService = {
                      cached: true
                    };
                    if (typeof window.updateFilaCacheStatusIndicator === "function") window.updateFilaCacheStatusIndicator();
+                   if (isFilaNonBusinessDay(todayStr)) markFilaFullRefreshDone(todayStr);
                    return localCache.data;
                    }
                }
@@ -2411,6 +2410,7 @@ const SiengeApiService = {
                        cacheRev: meta.cacheRev || DEFAULTERS_CACHE_REV
                    }).catch(() => {});
 
+                   if (isFilaNonBusinessDay(todayStr)) markFilaFullRefreshDone(todayStr);
                    return result;
                    }
                  } else {
@@ -2422,6 +2422,9 @@ const SiengeApiService = {
            }
         }
 
+        if (!explicitForce && isFilaNonBusinessDay(todayStr)) {
+          console.log('%c[Sienge] 📅 FDS/feriado sem a base de hoje — atualizando a fila.', 'color:#f59e0b;font-weight:bold;');
+        }
         console.log('%c[Sienge] ⏱ Iniciando busca completa de inadimplentes na API...', 'color:#f59e0b;font-weight:bold;');
         const broadcastProgress = (cId, cc, idx, total, cName, wData) => {
              this._lastProgressState = [cId, cc, idx, total, cName, wData];

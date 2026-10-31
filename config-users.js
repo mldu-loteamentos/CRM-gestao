@@ -217,6 +217,16 @@ const ConfigUsersApp = {
       const newKey = "sub_rel_geral_buscar_cliente_" + flag;
       if (savedPerms.mod_rel === true && savedPerms[newKey] == null && savedPerms[oldKey] === true) savedPerms[newKey] = true;
     });
+    ["acessar", "visualizar", "editar"].forEach((flag) => {
+      const src = "sub_rel_geral_buscar_cliente_" + flag;
+      const dst = "sub_rel_geral_documentos_assinar_" + flag;
+      if (savedPerms.mod_rel === true && savedPerms[dst] == null && savedPerms[src] === true) savedPerms[dst] = true;
+    });
+    if (savedPerms.sub_rel_docs == null && (
+      savedPerms.sub_rel_geral_documentos_assinar_acessar === true
+      || savedPerms.sub_rel_geral_documentos_assinar_visualizar === true
+      || savedPerms.sub_rel_geral_documentos_assinar_editar === true
+    )) savedPerms.sub_rel_docs = true;
     if (!savedPerms.mod_orc && (
       savedPerms.sub_fin_orc === true
       || savedPerms.sub_fin_orc_orcamento_acessar === true
@@ -520,7 +530,8 @@ const ConfigUsersApp = {
     {
       name: "Relacionamento", icon: "users", key: "mod_rel",
       submodules: [
-        { name: "Buscar Cliente", key: "sub_rel_busca", actions: [{ id: "buscar_cliente", label: "Buscar Cliente", permBase: "sub_rel_geral_buscar_cliente" }] }
+        { name: "Buscar Cliente", key: "sub_rel_busca", actions: [{ id: "buscar_cliente", label: "Buscar Cliente", permBase: "sub_rel_geral_buscar_cliente" }] },
+        { name: "Documentos para assinar", key: "sub_rel_docs", actions: [{ id: "documentos_assinar", label: "Documentos para assinar", permBase: "sub_rel_geral_documentos_assinar" }] }
       ]
     },
     {

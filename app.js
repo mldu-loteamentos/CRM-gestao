@@ -2818,9 +2818,8 @@ window.moraComHonorarios = function(baseVal, diasAtraso, taxaMultiplier, honorar
   };
 };
 
-/** Dias de atraso do relatório Sienge: do vencimento até a data de pagamento.
- *  No sábado, domingo ou feriado a mora só começa no dia útil seguinte, mas,
- *  uma vez vencida, a contagem usa o vencimento original (não perde esses dias). */
+/** Dias de atraso do relatório Sienge, da posição até o primeiro dia útil do vencimento.
+ *  Sábado, domingo e feriado não entram: a mora começa no dia útil seguinte. */
 window.diasAtrasoSienge = function(inst, targetDate) {
   let dueIso = "";
   if (inst && inst.due instanceof Date && !isNaN(inst.due.getTime())) {
@@ -2842,11 +2841,9 @@ window.diasAtrasoSienge = function(inst, targetDate) {
   const chargeIso = typeof window.installmentChargeDueIso === "function"
     ? window.installmentChargeDueIso(dueIso)
     : dueIso;
-  if (chargeIso) {
-    const charge = new Date(chargeIso + "T12:00:00");
-    if (!isNaN(charge.getTime()) && target.getTime() <= charge.getTime()) return 0;
-  }
-  const diff = Math.round((target.getTime() - due.getTime()) / 86400000);
+  const inicio = /^\d{4}-\d{2}-\d{2}$/.test(chargeIso || "") ? new Date(chargeIso + "T12:00:00") : due;
+  if (isNaN(inicio.getTime()) || target.getTime() <= inicio.getTime()) return 0;
+  const diff = Math.round((target.getTime() - inicio.getTime()) / 86400000);
   return diff > 0 ? diff : 0;
 };
 
@@ -2978,33 +2975,18 @@ window.abrirSaldoDevedorAdvogado = function() {
           <p id="saldo-devedor-vazio" class="saldo-devedor-vazio" style="display:none;">Não há parcelas vencidas nesta data.</p>
         </div>
         <div class="saldo-devedor-acoes">
-          <button type="button" class="btn btn-primary" id="saldo-devedor-copiar">Copiar para o cliente</button>
-          <button type="button" class="btn btn-fechar" id="saldo-devedor-fechar-2">Fechar</button>
+          <button type="button" class="btn btn-primary" id="saldo-devedor-copiar" title="Gera um recorte em PDF da posição, como uma captura da tela">Copiar para o cliente</button>
         </div>
       </div>`;
     document.body.appendChild(modal);
     const fechar = function() { modal.style.display = "none"; };
     modal.addEventListener("click", function(ev) { if (ev.target === modal) fechar(); });
     modal.querySelector("#saldo-devedor-fechar").addEventListener("click", fechar);
-    modal.querySelector("#saldo-devedor-fechar-2").addEventListener("click", fechar);
     modal.querySelector("#saldo-devedor-ate").addEventListener("change", function() {
       window.pintarSaldoDevedorAdvogado(this.value);
     });
     modal.querySelector("#saldo-devedor-copiar").addEventListener("click", function() {
-      const texto = modal.getAttribute("data-texto") || "";
-      const btn = this;
-      const antigo = btn.textContent;
-      const marcar = function() {
-        btn.textContent = "Copiado";
-        setTimeout(function() { btn.textContent = antigo; }, 1600);
-      };
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(texto).then(marcar).catch(function() {
-          window.prompt("Copie a mensagem para o cliente:", texto);
-        });
-      } else {
-        window.prompt("Copie a mensagem para o cliente:", texto);
-      }
+      window.gerarRecorteSaldoDevedor();
     });
   }
   const dataEl = document.getElementById("simulador-data");
@@ -3059,28 +3041,66 @@ window.pintarSaldoDevedorAdvogado = function(dataIso) {
       : "";
   }
   if (vazio) vazio.style.display = rows.length ? "none" : "block";
-  const linhasTxt = rows.map(function(r) {
-    return "Parcela " + r.parcela
-      + "  venc. " + dataBr(r.vencimento)
-      + "  " + r.dias + " dias"
-      + "  corrigido " + money(r.corrigido)
-      + "  multa " + money(r.multa)
-      + "  juros " + money(r.juros)
-      + "  atualizado " + money(r.atualizado);
-  });
-  const texto = [
-    "Saldo devedor",
-    nome + (titulo ? " — título " + titulo : ""),
-    "Posição em " + dataBr(dataIso),
-    "",
-    linhasTxt.join("\n"),
-    "",
-    "Principal corrigido: " + money(principal),
-    "Juros e multa: " + money(encargos),
-    "Total atualizado: " + money(total)
-  ].join("\n");
-  const modal = document.getElementById("saldo-devedor-modal");
-  if (modal) modal.setAttribute("data-texto", texto);
+};
+
+window.gerarRecorteSaldoDevedor = async function() {
+  const btn = document.getElementById("saldo-devedor-copiar");
+  if (!window.jspdf || !window.jspdf.jsPDF || typeof html2canvas !== "function") {
+    window.alert("Não foi possível gerar o recorte.");
+    return;
+  }
+  const antigo = btn ? btn.textContent : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Gerando…";
+  }
+  const subEl = document.getElementById("saldo-devedor-sub");
+  const ateEl = document.getElementById("saldo-devedor-ate");
+  const tabela = document.querySelector("#saldo-devedor-modal .saldo-devedor-tabela");
+  const vazio = document.getElementById("saldo-devedor-vazio");
+  const partes = String((ateEl && ateEl.value) || "").slice(0, 10).split("-");
+  const dataBr = partes.length === 3 ? (partes[2] + "/" + partes[1] + "/" + partes[0]) : "";
+  const sub = (subEl && subEl.textContent.trim()) || "";
+  const folha = document.createElement("div");
+  folha.className = "saldo-devedor-recorte";
+  folha.innerHTML = "<h2>Saldo devedor</h2>"
+    + "<p class=\"saldo-devedor-recorte-sub\"></p>"
+    + "<p class=\"saldo-devedor-recorte-data\"></p>"
+    + (tabela ? tabela.outerHTML : "")
+    + (vazio && vazio.style.display !== "none" ? "<p class=\"saldo-devedor-recorte-vazio\"></p>" : "");
+  folha.querySelector(".saldo-devedor-recorte-sub").textContent = sub;
+  folha.querySelector(".saldo-devedor-recorte-data").textContent = dataBr ? ("Posição em " + dataBr) : "";
+  const vazioFolha = folha.querySelector(".saldo-devedor-recorte-vazio");
+  if (vazioFolha && vazio) vazioFolha.textContent = vazio.textContent;
+  document.body.appendChild(folha);
+  try {
+    const canvas = await html2canvas(folha, {
+      scale: 2,
+      backgroundColor: "#ffffff",
+      logging: false,
+      useCORS: true
+    });
+    const { jsPDF } = window.jspdf;
+    const largo = canvas.width >= canvas.height;
+    const pdf = new jsPDF({
+      orientation: largo ? "l" : "p",
+      unit: "px",
+      format: [canvas.width, canvas.height],
+      hotfixes: ["px_scaling"]
+    });
+    pdf.addImage(canvas.toDataURL("image/jpeg", 0.95), "JPEG", 0, 0, canvas.width, canvas.height);
+    const titulo = (sub.match(/Título\s+([^\s·]+)/i) || [])[1] || "cliente";
+    pdf.save("saldo-devedor-" + String(titulo).replace(/[^\w.-]+/g, "") + ".pdf");
+  } catch (e) {
+    console.error("[Saldo devedor] recorte", e);
+    window.alert("Não foi possível gerar o recorte.");
+  } finally {
+    folha.remove();
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = antigo || "Copiar para o cliente";
+    }
+  }
 };
 
 window.boletoJurosIndex = function(rows, taxa, honorariosPct) {
@@ -5127,6 +5147,9 @@ async function processSuccessfulLogin(loggedUser) {
       if (window.EscalaHomeOffice && typeof window.EscalaHomeOffice.avisar === "function") {
         window.EscalaHomeOffice.avisar();
       }
+      if (typeof window.avisarRepactuacaoUltimoDia === "function") {
+        window.avisarRepactuacaoUltimoDia();
+      }
     }, 2500);
   } catch (err) {
     console.error("Erro no login:", err);
@@ -5286,6 +5309,7 @@ window.expandCrmMenuPerms = function(perms) {
     fill("sub_eng_geral_caucao_" + flag, "sub_eng_geral_engenharia_" + flag);
     fill("sub_eng_geral_config_" + flag, "sub_eng_geral_engenharia_" + flag);
     if (copy.mod_rel === true) fill("sub_rel_geral_buscar_cliente_" + flag, "sub_rel_geral_relacionamento_" + flag);
+    if (copy.mod_rel === true) fill("sub_rel_geral_documentos_assinar_" + flag, "sub_rel_geral_buscar_cliente_" + flag);
   });
   if (copy.mod_rel === false) {
     Object.keys(copy).forEach(function(k) {
@@ -11276,17 +11300,7 @@ async function loadDashboardData(forceRefresh = false) {
       if (window.EmpresasApp && typeof EmpresasApp.ensureDefaultCobrancaFlags === "function") {
         EmpresasApp.ensureDefaultCobrancaFlags();
       }
-      let force = !!forceRefresh;
-      if (!force && !filterOnly && typeof window.shouldForceFilaRefreshOnNonBusinessAccess === "function") {
-        force = window.shouldForceFilaRefreshOnNonBusinessAccess();
-      } else if (!force && !filterOnly) {
-        try {
-          const today = typeof window.localDateStr === "function" ? window.localDateStr(new Date()) : null;
-          if (today && typeof window.isBusinessDayIso === "function" && !window.isBusinessDayIso(today)) {
-            force = localStorage.getItem(`crm_fila_full_refresh_${today}`) !== "done";
-          }
-        } catch (e) {}
-      }
+      const force = !!forceRefresh;
       if (force) window._filaProntaCache = null;
       let filaJaPronta = false;
       if (!force && getSiengeApiMode() === "real" && typeof window.carregarFilaProntaDoDia === "function") {
@@ -13669,14 +13683,7 @@ document.addEventListener("DOMContentLoaded", () => {
          if (window.EmpresasApp && typeof EmpresasApp.ensureDefaultCobrancaFlags === "function") {
            EmpresasApp.ensureDefaultCobrancaFlags();
          }
-         let force = false;
-         try {
-           const today = typeof window.localDateStr === "function" ? window.localDateStr(new Date()) : null;
-           if (today && typeof window.isBusinessDayIso === "function" && !window.isBusinessDayIso(today)) {
-             force = localStorage.getItem(`crm_fila_full_refresh_${today}`) !== "done";
-           }
-         } catch (e) {}
-         const bills = await SiengeApiService.getDefaulters(null, null, force);
+         const bills = await SiengeApiService.getDefaulters();
          AppState.defaultersBills = bills;
          AppState.defaultersLoaded = true;
          if (window.crmCarteiraPrecisaPintar && window.crmCarteiraPrecisaPintar()) {
@@ -38264,6 +38271,112 @@ window.darCienciaDistratoPrazo = function() {
   } catch (e) {}
   const modal = document.getElementById("modal-distrato-prazo");
   if (modal) modal.style.display = "none";
+};
+
+window.crmIsoLocal = function(data) {
+  const d = data instanceof Date ? data : new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+};
+
+window.crmDiaUtil = function(iso) {
+  const key = String(iso || "").slice(0, 10);
+  if (typeof window.isBusinessDayIso === "function") return window.isBusinessDayIso(key);
+  const d = new Date(key + "T12:00:00");
+  const dow = d.getDay();
+  return dow !== 0 && dow !== 6;
+};
+
+window.crmUltimoDiaUtilDoMes = function(iso) {
+  const p = String(iso || "").slice(0, 10).split("-");
+  const y = Number(p[0]);
+  const m = Number(p[1]);
+  if (!y || !m) return "";
+  const fim = new Date(y, m, 0).getDate();
+  let cursor = y + "-" + String(m).padStart(2, "0") + "-" + String(fim).padStart(2, "0");
+  let guard = 0;
+  while (cursor && !window.crmDiaUtil(cursor) && guard < 12) {
+    cursor = window.addDaysIso(cursor, -1);
+    guard += 1;
+  }
+  return cursor || "";
+};
+
+window.crmPrimeiroDiaUtilDoMes = function(iso) {
+  const p = String(iso || "").slice(0, 10).split("-");
+  const y = Number(p[0]);
+  const m = Number(p[1]);
+  if (!y || !m) return "";
+  let cursor = y + "-" + String(m).padStart(2, "0") + "-01";
+  let guard = 0;
+  while (cursor && !window.crmDiaUtil(cursor) && guard < 12) {
+    cursor = window.addDaysIso(cursor, 1);
+    guard += 1;
+  }
+  return cursor || "";
+};
+
+window.avisarRepactuacaoUltimoDia = function(dataForcada) {
+  const u = window.AppState && window.AppState.currentUser;
+  if (!u || typeof window.crmProfileKind !== "function") return;
+  const rec = typeof window.findCrmRegisteredUser === "function" ? window.findCrmRegisteredUser(u) : null;
+  const perfil = (rec && rec.profile_name) || u.profile_name || "";
+  if (window.crmProfileKind(perfil) !== "back_office") return;
+  const hoje = /^\d{4}-\d{2}-\d{2}$/.test(String(dataForcada || ""))
+    ? String(dataForcada).slice(0, 10)
+    : window.crmIsoLocal(new Date());
+  if (!window.crmDiaUtil(hoje)) return;
+  const ultimo = window.crmUltimoDiaUtilDoMes(hoje);
+  const primeiro = window.crmPrimeiroDiaUtilDoMes(hoje);
+  const modo = hoje === ultimo ? "ultimo" : (hoje === primeiro ? "primeiro" : "");
+  if (!modo) return;
+  const chave = "crm_repac_" + modo + "_dia_" + String(u.email || u.name || "op").toLowerCase() + "_" + hoje;
+  try { if (localStorage.getItem(chave) === "ciente") return; } catch (e) {}
+  if (document.getElementById("repac-ultimo-dia")) return;
+  const agora = new Date(hoje + "T12:00:00");
+  const comp = new Date(agora.getFullYear(), agora.getMonth() + 1, 1);
+  const fimDia = new Date(comp.getFullYear(), comp.getMonth() + 1, 0).getDate();
+  const mm = String(comp.getMonth() + 1).padStart(2, "0");
+  const aa = String(comp.getFullYear());
+  const meses = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+  const competencia = meses[comp.getMonth()] + " de " + aa;
+  const periodo = "01/" + mm + "/" + aa + " a " + String(fimDia).padStart(2, "0") + "/" + mm + "/" + aa;
+  const ico = `<svg class="repac-dia-sienge" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#f26522"/><text x="12" y="16.5" text-anchor="middle" fill="#fff" font-size="13" font-weight="800" font-family="Outfit,sans-serif">S</text></svg>`;
+  const link = (url, rotulo) => `<a class="repac-dia-link" href="${url}" target="_blank" rel="noopener noreferrer">${ico}<span>Clicar aqui</span><small>${rotulo}</small></a>`;
+  const titulo = modo === "ultimo" ? "Último dia útil do mês" : "Primeiro dia útil do mês";
+  const corpo = modo === "ultimo"
+    ? `<p>Hoje é o último dia útil para cadastrar os indexadores no Sienge e fazer a prévia da repactuação no IntegrA.</p>
+    <p>A competência que será reajustada é <strong>${competencia}</strong>. Tire no Sienge o relatório desse mês, informando o período <strong>${periodo}</strong>. Depois faça o upload desse arquivo em Repactuação, no IntegrA.</p>
+    <div class="repac-dia-acoes">
+      ${link("https://mouraleite.sienge.com.br/sienge/8/index.html#/common/page/954", "Cadastrar os indexadores")}
+      ${link("https://mouraleite.sienge.com.br/sienge/8/index.html#/common/page/2817", "Tirar o relatório")}
+    </div>`
+    : `<p>Hoje é o dia de gerar os boletos da remessa. Antes disso, aplique a repactuação dos contratos.</p>
+    <div class="repac-dia-acoes">
+      <button type="button" class="btn btn-primary" id="repac-dia-repac">Abrir repactuação</button>
+    </div>`;
+  const overlay = document.createElement("div");
+  overlay.id = "repac-ultimo-dia";
+  overlay.className = "repac-dia";
+  overlay.setAttribute("role", "alertdialog");
+  overlay.setAttribute("aria-labelledby", "repac-dia-titulo");
+  overlay.innerHTML = `<div class="repac-dia-box">
+    <div class="repac-dia-head">
+      <h3 id="repac-dia-titulo">${titulo}</h3>
+      <button type="button" class="btn btn-fechar" id="repac-dia-fechar">Fechar</button>
+    </div>
+    ${corpo}
+  </div>`;
+  document.body.appendChild(overlay);
+  const fechar = () => {
+    try { localStorage.setItem(chave, "ciente"); } catch (e) {}
+    overlay.remove();
+  };
+  overlay.querySelector("#repac-dia-fechar").addEventListener("click", fechar);
+  const abrir = overlay.querySelector("#repac-dia-repac");
+  if (abrir) abrir.addEventListener("click", function() {
+    fechar();
+    if (typeof window.switchTab === "function") window.switchTab("repactuacao-lote", "Repactuação");
+  });
 };
 
 window.checkDistratoPrazoMes = function() {

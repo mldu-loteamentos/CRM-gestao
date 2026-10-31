@@ -621,10 +621,17 @@ const SocietarioApp = {
 
   ensurePositions() {
     const ents = this.graph.entities || [];
-    if (!ents.length) return;
-    if (ents.some(e => e.x == null || e.y == null || Number.isNaN(e.x) || Number.isNaN(e.y))) {
-      this.autoLayout(false);
-    }
+    const faltam = ents.filter((e) => e && (e.x == null || e.y == null || Number.isNaN(Number(e.x)) || Number.isNaN(Number(e.y))));
+    if (!faltam.length) return;
+    let maxY = 40;
+    ents.forEach((e) => {
+      if (!e || faltam.indexOf(e) >= 0) return;
+      maxY = Math.max(maxY, (Number(e.y) || 0) + this.NODE_H);
+    });
+    faltam.forEach((e, i) => {
+      e.x = 80 + (i % 6) * (this.NODE_W + 28);
+      e.y = maxY + 40 + Math.floor(i / 6) * (this.NODE_H + 28);
+    });
   },
 
   autoLayout(persistAfter) {
@@ -1166,6 +1173,8 @@ const SocietarioApp = {
     if (existente) return existente;
     const c = this.companies().find((x) => String(x.id) === id);
     if (!c) return null;
+    const ys = (this.graph.entities || []).map((e) => Number(e.y) || 0);
+    const y = (ys.length ? Math.max.apply(null, ys) : 40) + this.NODE_H + 36;
     const ent = {
       id: this.uid("ent"),
       name: this.nomeUsualDaEmpresa(c) || this.nomeCadastro(c),
@@ -1174,8 +1183,8 @@ const SocietarioApp = {
       note: "",
       companyId: String(c.id),
       partnerId: "",
-      x: 40,
-      y: 16
+      x: 80,
+      y: y
     };
     this.graph.entities.push(ent);
     return ent;
@@ -2472,7 +2481,6 @@ const SocietarioApp = {
     const fromPort = (this._pendingLink && this._pendingLink.fromPort)
       || (existing && existing.fromPort)
       || "";
-    let nova = false;
     if (existing) {
       existing.from = from;
       existing.to = to;
@@ -2489,10 +2497,8 @@ const SocietarioApp = {
         const linha = { id: this.uid("lnk"), from, to, pct, note };
         if (fromPort) linha.fromPort = fromPort;
         this.graph.links.push(linha);
-        nova = true;
       }
     }
-    if (nova && !this.filhoDoCentro(para.id) && !this.ehCentro(de)) this.subirFilhasDasHoldings(this.graph.hubId);
     this._pendingLink = null;
     this.persist();
     const seguir = !spe && window.ContabilEquiv && typeof ContabilEquiv.receberDoOrganograma === "function"

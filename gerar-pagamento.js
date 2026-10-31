@@ -2292,12 +2292,18 @@ const GerarPagamentoApp = {
     const marcados = lista.reduce((t, g) => t + g.itens.filter((it) => it.marcado && !it.emLote && !it.bloqueio).length, 0);
     const valor = lista.reduce((t, g) => t + g.itens.filter((it) => it.marcado && !it.emLote && !it.bloqueio).reduce((s, it) => s + this.valorPagar(it), 0), 0);
     const kpi = (tom, icone, rotulo, valorKpi) => `<div class="gp-kpi gp-kpi-${tom}"><span class="gp-kpi-ic"><i data-lucide="${icone}"></i></span><span><small>${rotulo}</small><strong>${valorKpi}</strong></span></div>`;
+    const massa = `<div class="gp-massa">
+      <button type="button" class="btn btn-sm btn-outline" onclick="GerarPagamentoApp.marcarLotes(true)">Marcar todos os lotes</button>
+      <button type="button" class="btn btn-sm btn-outline" onclick="GerarPagamentoApp.marcarLotes(false)">Desmarcar todos os lotes</button>
+      <button type="button" class="btn btn-sm btn-primary" title="Gera os lotes marcados de todas as empresas do período" onclick="GerarPagamentoApp.gerarLotesMarcados()">Gerar lotes marcados</button>
+    </div>`;
     return `<section class="gp-lotes-painel" style="margin-bottom:0;">
       <header class="gp-lotes-topo">
         <div>
           <h3>Lotes a gerar</h3>
           <p>Títulos deste período ainda fora de lote, agrupados pela conta de pagamento e pela data da baixa.</p>
         </div>
+        ${massa}
       </header>
       <div class="gp-kpis">
         ${kpi("wait", "layers", "Lotes a gerar", nLotes)}
@@ -3439,15 +3445,10 @@ const GerarPagamentoApp = {
       return `${faixa()}${this.painelLotesHtml(gerados)}${emLoteVis.length ? `<div class="gp-lotes-painel">${emLoteVis.map(card).join("")}</div>` : ""}`;
     }
     const alerta = this.retroAlertaHtml(diasRetro);
-    const massa = `<div class="gp-massa">
-      <button type="button" class="btn btn-sm btn-outline" onclick="GerarPagamentoApp.marcarLotes(true)">Marcar todos os lotes</button>
-      <button type="button" class="btn btn-sm btn-outline" onclick="GerarPagamentoApp.marcarLotes(false)">Desmarcar todos os lotes</button>
-      <button type="button" class="btn btn-sm btn-primary" title="Gera os lotes marcados de todas as empresas do período" onclick="GerarPagamentoApp.gerarLotesMarcados()">Gerar lotes marcados</button>
-    </div>`;
     if (s.diaRetro) {
       const titulosRetro = retroVis.reduce((t, g) => t + g.itens.length, 0);
       const totalRetro = retroVis.reduce((t, g) => t + g.itens.reduce((s2, it) => s2 + this.valorPagar(it), 0), 0);
-      return `${faixa(massa)}${alerta}${this.resumoAGerarHtml(retroVis)}
+      return `${faixa()}${alerta}${this.resumoAGerarHtml(retroVis)}
         <div class="gp-retro-vendo">
           <span><i data-lucide="history" style="width:15px;height:15px;"></i> Pendências de <strong>${this.dataBr(s.diaRetro)}</strong>, antes do período buscado · ${titulosRetro} título(s) · ${this.money(totalRetro)}</span>
           <button type="button" class="btn btn-outline btn-sm" onclick="GerarPagamentoApp.setDiaRetro('')"><i data-lucide="arrow-left" style="width:14px;height:14px;"></i> Voltar ao período ${this.dataBr(s.startDate)}${s.endDate !== s.startDate ? " a " + this.dataBr(s.endDate) : ""}</button>
@@ -3457,7 +3458,7 @@ const GerarPagamentoApp = {
     const vazioPeriodo = this.state.titulos.some((r) => noPeriodo(String(r.vencimento || "").slice(0, 10)) && !r.pago && r.aPagar > 0.009)
       ? "Nenhum título a gerar lote nesta empresa no período: todos já estão em lote."
       : "Nenhum título em aberto com vencimento no período buscado.";
-    return `${this.conferenciaHtml()}${faixa(massa)}${alerta}${aGerarVis.length ? this.resumoAGerarHtml(aGerarVis) + `<div class="gp-lotes-painel" style="margin-top:0;">${aGerarVis.map(card).join("")}</div>` : vazio(vazioPeriodo)}`;
+    return `${this.conferenciaHtml()}${faixa()}${alerta}${aGerarVis.length ? this.resumoAGerarHtml(aGerarVis) + `<div class="gp-lotes-painel" style="margin-top:0;">${aGerarVis.map(card).join("")}</div>` : vazio(vazioPeriodo)}`;
   },
 
   grupoStatus(r) {
@@ -4217,7 +4218,7 @@ const GerarPagamentoApp = {
           #gerar-pagamento-root .gp-visao { height:34px; padding:0 14px; border-radius:8px; border:1px solid #cbd5e1; background:#fff; color:#334155; font-size:0.82rem; font-weight:700; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
           #gerar-pagamento-root .gp-visao.is-active { background:#105436; border-color:#105436; color:#fff; }
           #gerar-pagamento-root .gp-lotes-painel { margin:8px 16px 16px; }
-          #gerar-pagamento-root .gp-lotes-topo { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; margin-bottom:14px; }
+          #gerar-pagamento-root .gp-lotes-topo { display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap; margin-bottom:14px; }
           #gerar-pagamento-root .gp-lotes-topo h3 { margin:0 0 4px; color:#0f172a; font-size:1.15rem; }
           #gerar-pagamento-root .gp-lotes-topo p { margin:0; max-width:640px; color:#64748b; font-size:0.82rem; line-height:1.4; }
           #gerar-pagamento-root .gp-lotes-periodo { display:inline-flex; align-items:center; gap:8px; height:38px; padding:0 12px; border:1px solid #e2e8f0; border-radius:10px; background:#fff; color:#334155; font-size:0.82rem; font-weight:700; }
@@ -4326,7 +4327,7 @@ const GerarPagamentoApp = {
           #gerar-pagamento-root .gp-baixa { display:inline-flex; align-items:center; gap:6px; font-size:0.75rem; font-weight:700; color:#334155; white-space:nowrap; }
           #gerar-pagamento-root .gp-baixa input { height:36px; border:1px solid #cbd5e1; border-radius:8px; padding:0 8px; font-size:0.82rem; color:#0f172a; background:#fff; }
           #gerar-pagamento-root .gp-lote-todos { display:inline-flex; align-items:center; gap:6px; font-size:0.8rem; color:#334155; cursor:pointer; }
-          #gerar-pagamento-root .gp-massa { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:0 0 8px auto; }
+          #gerar-pagamento-root .gp-massa { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:0; flex:0 0 auto; justify-content:flex-end; }
           #gerar-pagamento-root .gp-lote-total { font-size:1.05rem; color:#0f172a; min-width:120px; text-align:right; }
           #gerar-pagamento-root .gp-lote .gp-titulos { min-width:1000px; }
           #gerar-pagamento-root .gp-robo-btn { height:36px; padding:0 14px; border:1px solid #105436; border-radius:8px; background:#fff; color:#105436; font-weight:800; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
