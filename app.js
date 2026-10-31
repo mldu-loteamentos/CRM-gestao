@@ -16141,19 +16141,26 @@ function formatCpfCnpj(val) {
           let receiptDate = inst.dueDate;
           
           if (receipts.length > 0) {
-            // Use nested receipts[] array (per API schema)
-            // Sum all receipts for this installment
-            receipts.forEach(r => {
-              net += (r.receiptValue || 0);
-            });
-            const firstReceipt = receipts[0];
-            receiptDate = firstReceipt.receiptDate || inst.dueDate;
-            // No rId from receipts schema — default to Recebimento for paid installments
-            rId = "2";
-            rType = "Recebimento";
-            const diff = net - orig;
-            extra = diff > 0 ? diff : 0;
-            discount = diff < 0 ? Math.abs(diff) : 0;
+            const genuine = receipts.filter(r => typeof window.isWriteOffReceipt !== "function" || !window.isWriteOffReceipt(r));
+            const baixas = receipts.filter(r => typeof window.isWriteOffReceipt === "function" && window.isWriteOffReceipt(r));
+            const base = genuine.length ? genuine : receipts;
+            base.forEach(r => { net += (r.receiptValue || 0); });
+            const firstReceipt = base[0];
+            receiptDate = firstReceipt.receiptDate || firstReceipt.paymentDate || inst.dueDate;
+            if (!genuine.length && baixas.length) {
+              const rawType = String(baixas[0].type || baixas[0].receiptType || baixas[0].receiptTypeId || "3");
+              rId = rawType === "2" ? "3" : rawType;
+              rType = rawType === "7" ? "Distrato" : "Cancelamento";
+              net = 0;
+              extra = 0;
+              discount = 0;
+            } else {
+              rId = "2";
+              rType = "Recebimento";
+              const diff = net - orig;
+              extra = diff > 0 ? diff : 0;
+              discount = diff < 0 ? Math.abs(diff) : 0;
+            }
           } else {
             // Fallback: flat inst fields
             rId = String(inst.receiptId || inst.receiptType || "");
@@ -34747,13 +34754,9 @@ window.nexPayStore = function() {
 
 window.nexReceiptPayIso = function(rec) {
   if (!rec || typeof rec !== "object") return "";
-  if (typeof window.isWriteOffReceipt === "function" && window.isWriteOffReceipt(rec)) return "";
-  const type = String(rec.type || rec.receiptType || rec.receiptTypeId || rec.typeId || rec.receiptId || rec.operationTypeId || "").toLowerCase();
-  const name = String(rec.typeName || rec.receiptTypeName || rec.operationTypeName || rec.description || rec.historic || "").toLowerCase();
-  const blob = (type + " " + name).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  if (blob.trim() && type !== "2" && !blob.includes("recebimento")) return "";
-  const val = Number(rec.receiptValue || rec.value || rec.netReceiptValue || rec.grossAmount || 0);
-  if (!(val > 0.01)) return "";
+  if (typeof window.isGenuineRecebimento === "function") {
+    if (!window.isGenuineRecebimento(rec)) return "";
+  } else if (typeof window.isWriteOffReceipt === "function" && window.isWriteOffReceipt(rec)) return "";
   const pay = window.nexParseIso(rec.receiptDate || rec.paymentDate);
   if (pay) return pay;
   const generic = window.nexParseIso(rec.date);
@@ -34767,16 +34770,19 @@ window.nexInstallmentPayIsos = function(installments) {
   (installments || []).forEach(inst => {
     if (!inst) return;
     const receipts = Array.isArray(inst.receipts) ? inst.receipts : [];
-    let found = false;
-    receipts.forEach(r => {
-      const d = window.nexReceiptPayIso(r);
-      if (!d) return;
-      dates.push(d);
-      found = true;
-    });
-    if (found) return;
+    if (receipts.length) {
+      receipts.forEach(r => {
+        const d = window.nexReceiptPayIso(r);
+        if (d) dates.push(d);
+      });
+      return;
+    }
+    if (typeof window.isWriteOffReceipt === "function" && window.isWriteOffReceipt(inst)) return;
+    const tipo = String(inst.receiptId || inst.receiptType || inst.receiptTypeStr || "").toLowerCase();
+    if (tipo === "3" || tipo === "7" || tipo.includes("cancel") || tipo.includes("distrato") || (tipo.includes("baixa") && !tipo.includes("recebimento"))) return;
     const paid = inst.installmentSituation === 2 || String(inst.installmentSituation) === "2" || inst.isValidReceipt || inst.status === "PAID" || inst.status === "Quitado";
     if (!paid) return;
+    if (tipo && tipo !== "2" && !tipo.includes("recebimento")) return;
     const due = window.nexParseIso(inst.dueDate || inst.due);
     const d = window.nexParseIso(inst.payOffDate || inst.paymentDate || inst.receiptDate);
     if (!d || d === due) return;
@@ -34785,6 +34791,43 @@ window.nexInstallmentPayIsos = function(installments) {
     dates.push(d);
   });
   return dates;
+};
+
+window.nexItemEhCec = function(it) {
+  return /cec|efetivac[aã]o de cancelamento/i.test(String((it && it.letterType) || ""));
+};
+
+window.nexCancelamentoDoTitulo = function() {
+  const insts = (typeof AppState !== "undefined" && AppState.currentContractInstallments) || [];
+  let data = "";
+  let tem = false;
+  insts.forEach(inst => {
+    if (!inst) return;
+    const recs = Array.isArray(inst.receipts) ? inst.receipts : [];
+    recs.forEach(rec => {
+      if (typeof window.isWriteOffReceipt !== "function" || !window.isWriteOffReceipt(rec)) return;
+      tem = true;
+      const d = window.nexParseIso(rec.receiptDate || rec.paymentDate || rec.date);
+      if (d && (!data || d > data)) data = d;
+    });
+    if (!recs.length && typeof window.isWriteOffReceipt === "function" && window.isWriteOffReceipt(inst)) {
+      tem = true;
+      const d = window.nexParseIso(inst.receiptDate || inst.payOffDate);
+      if (d && (!data || d > data)) data = d;
+    }
+  });
+  return { tem: tem, data: data };
+};
+
+window.nexPayoffContaComoRecebimento = function(bill) {
+  if (!bill) return false;
+  const insts = [].concat(bill.installments || [], bill.defaulterInstallments || []);
+  const recs = [].concat(bill.receipts || []);
+  insts.forEach(inst => {
+    ((inst && inst.receipts) || []).forEach(r => recs.push(r));
+  });
+  if (!recs.length) return true;
+  return recs.some(r => window.nexReceiptPayIso(r));
 };
 
 window.nexPaymentDatesAfter = function(isoDate, installments) {
@@ -34832,7 +34875,7 @@ window.nexReceiptDatesForSale = function(saleId) {
         window.nexInstallmentPayIsos([inst]).forEach(d2 => dates.push(d2));
       });
       const payoff = window.nexParseIso(b.payOffDate);
-      if (payoff) dates.push(payoff);
+      if (payoff && window.nexPayoffContaComoRecebimento(b)) dates.push(payoff);
     });
   };
   addFrom(AppState.defaultersBills);
@@ -35700,7 +35743,7 @@ window.renderNexHistory = async function() {
   const items = await window.loadNexHistory(customerId, saleId);
   if (seq !== window._nexHistoryRenderSeq) return;
   const tituloAtual = AppState.currentReceivableBillId || AppState.selectedTitulo || saleId;
-  window.syncCecButton(items);
+  window.syncCecButton((items || []).filter(it => !window.nexItemEhCec(it)));
   if (!items.length) {
     root.innerHTML = `<div style="background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;padding:30px;text-align:center;color:#64748b;">
       <i data-lucide="inbox" style="width:48px;height:48px;color:#94a3b8;margin-bottom:12px;"></i>
@@ -35710,9 +35753,26 @@ window.renderNexHistory = async function() {
     if (window.lucide) lucide.createIcons();
     return;
   }
-  const sorted = [...items].sort((a, b) => String(b.createdAt || b.date || "").localeCompare(String(a.createdAt || a.date || "")));
+  const sorted = [...items].filter(it => !window.nexItemEhCec(it)).sort((a, b) => String(b.createdAt || b.date || "").localeCompare(String(a.createdAt || a.date || "")));
+  const cancel = window.nexCancelamentoDoTitulo();
+  const cancelBar = cancel.tem
+    ? `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <span style="font-size:0.8rem;font-weight:700;color:#9a3412;">Cancelado em ${cancel.data ? window.nexFmtBr(cancel.data) : "—"}</span>
+        <button type="button" onclick="window.verCecGerada()" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#166534;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:0.75rem;font-weight:700;">Ver CEC</button>
+      </div>`
+    : "";
+  if (!sorted.length) {
+    root.innerHTML = `<div style="background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;padding:30px;text-align:center;color:#64748b;">
+      <p style="margin:0;font-size:0.95rem;">Nenhuma NEX neste título <strong>${tituloAtual}</strong>.</p>
+    </div>`;
+    if (window.lucide) lucide.createIcons();
+    return;
+  }
   root.innerHTML = `
-    <div style="font-size:0.8rem;color:#166534;font-weight:700;margin-bottom:8px;">Título ${items[0].titulo || tituloAtual}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px;">
+      <div style="font-size:0.8rem;color:#166534;font-weight:700;">Título ${sorted[0].titulo || tituloAtual}</div>
+      ${cancelBar}
+    </div>
     <div class="table-container" style="box-shadow:none;overflow:auto;">
       <table class="ficha-hist-table" style="min-width:1280px;">
         <thead>
@@ -35802,7 +35862,7 @@ window.renderNexHistory = async function() {
         </tbody>
       </table>
     </div>
-    <p style="margin:10px 0 0;font-size:0.75rem;color:#64748b;">O <strong>status da carta</strong> só libera depois de informar o <strong>objeto de rastreio</strong> e anexar o <strong>AR Digital</strong> (mesmo comportamento do Follow-up). ENTREGUE pede a data da entrega. Se essa data for a mesma do PDF do AR, ela fica travada. NEX entregue não pode ser excluída. Se o cliente pagou depois do envio, a carta perde validade e sai do grupo Nex cumprida.</p>
+    <p style="margin:10px 0 0;font-size:0.75rem;color:#64748b;">O <strong>status da carta</strong> só libera depois de informar o <strong>objeto de rastreio</strong> e anexar o <strong>AR Digital</strong> (mesmo comportamento do Follow-up). ENTREGUE pede a data da entrega. Se essa data for a mesma do PDF do AR, ela fica travada. NEX entregue não pode ser excluída. Pagamento de parcela depois do envio tira a validade. Baixa de distrato ou cancelamento não tira.</p>
   `;
   const lostAny = sorted.some(it => window.nexLostValidityByPayment(it).lost);
   if (lostAny) {
@@ -36067,6 +36127,69 @@ window.viewNexPdf = async function(id) {
   if (window.lucide) lucide.createIcons();
 };
 
+window.verCecGerada = async function() {
+  const customerId = AppState && AppState.selectedCustomerId;
+  const saleId = (typeof window.nexCanonicalTitulo === "function" && window.nexCanonicalTitulo()) || (AppState && (AppState.currentReceivableBillId || AppState.selectedTitulo || AppState.selectedSaleId));
+  const title = document.getElementById("pdf-modal-title");
+  const content = document.getElementById("pdf-document-content");
+  const overlay = document.getElementById("pdf-view-overlay");
+  const abrirHtml = (html, quando) => {
+    if (title) title.textContent = "CEC" + (quando ? " de " + window.nexFmtBr(quando) : "");
+    if (content) content.innerHTML = html;
+    if (overlay) overlay.classList.add("active");
+    if (window.lucide) lucide.createIcons();
+  };
+  try {
+    const items = await window.loadNexHistory(customerId, saleId);
+    const cec = [...(items || [])].reverse().find(it => window.nexItemEhCec(it) && it.html);
+    if (cec) {
+      abrirHtml(cec.html, cec.date);
+      return;
+    }
+  } catch (e) {}
+  if (typeof window.nexToast === "function") window.nexToast("Procurando a CEC na unidade...");
+  try {
+    const ctx = window.nexSiengeUnitContext(customerId, saleId, null);
+    if (typeof window.anexosFindSiengeUnitId !== "function" || typeof window.siengeFetchWithRetry !== "function") {
+      alert("Não há CEC salva nesta ficha e o Sienge não está disponível para abrir o arquivo da unidade.");
+      return;
+    }
+    const unitId = await window.anexosFindSiengeUnitId(ctx.sale, ctx.costCenterId, ctx.unitName);
+    const host = window.location.hostname;
+    const isLocal = !host || host === "localhost" || host === "127.0.0.1";
+    const port = (window.location.port === "5500" || !window.location.port) ? "3000" : window.location.port;
+    const origin = isLocal ? "http://localhost:" + port : "";
+    const auth = typeof getBasicAuthHeader === "function" ? getBasicAuthHeader() : "";
+    const listRes = await fetch(origin + "/api/sienge-proxy/units/" + encodeURIComponent(unitId) + "/attachments?limit=200&offset=0", {
+      headers: { Authorization: auth, Accept: "application/json" }
+    });
+    const listed = listRes.ok ? await listRes.json() : {};
+    const rows = (listed && (listed.results || listed.data)) || (Array.isArray(listed) ? listed : []);
+    const hits = rows.filter(a => /CEC|EFETIVACAO DE CANCELAMENTO|EFETIVAÇÃO DE CANCELAMENTO/i.test(String((a && (a.description || a.name || a.fileName)) || "")));
+    hits.sort((a, b) => String(b.uploadDate || b.createdAt || b.description || "").localeCompare(String(a.uploadDate || a.createdAt || a.description || "")));
+    const att = hits[0];
+    const attId = att && (att.attachmentid || att.attachmentId || att.id);
+    if (!attId) {
+      alert("Não encontrei a CEC deste título. Gere a comunicação de efetivação de cancelamento para poder abrir.");
+      return;
+    }
+    const fileRes = await fetch(origin + "/api/sienge-proxy/units/" + encodeURIComponent(unitId) + "/attachments/" + encodeURIComponent(attId) + "/file", {
+      headers: { Authorization: auth }
+    });
+    if (!fileRes.ok) {
+      alert("A CEC está na unidade, mas o arquivo não abriu.");
+      return;
+    }
+    const blob = await fileRes.blob();
+    const url = URL.createObjectURL(blob);
+    if (title) title.textContent = "CEC";
+    if (content) content.innerHTML = `<iframe src="${url}" title="CEC" style="width:100%;height:78vh;border:0;background:#fff;"></iframe>`;
+    if (overlay) overlay.classList.add("active");
+  } catch (err) {
+    alert("Não foi possível abrir a CEC: " + ((err && err.message) || err));
+  }
+};
+
 window.hydrateNexHistoryBag = async function() {
   if (window._nexBagHydrated) return;
   if (window._nexBagHydratePromise) return window._nexBagHydratePromise;
@@ -36225,7 +36348,7 @@ window.nexEnsureLookups = function(force) {
       window.nexInstallmentPayIsos([inst]).forEach(d2 => dates.push(d2));
     });
     const payoff = window.nexParseIso(b.payOffDate);
-    if (payoff) dates.push(payoff);
+    if (payoff && window.nexPayoffContaComoRecebimento(b)) dates.push(payoff);
     if (!dates.length) return;
     const keys = [];
     [b.saleId, b.receivableBillId, b.id].forEach(v => {
@@ -37563,7 +37686,7 @@ window.checkNexDueAlerts = function(isTest) {
   if (isTest && !pending.length) alert("Nenhum vencimento no prazo.");
 };
 
-window.DISTRATO_PRAZO_ACK_KEY = "crm_distrato_prazo_ack";
+window.DISTRATO_PRAZO_ACK_KEY = "crm_distrato_prazo_ack_v2";
 
 window.distratoPrazoEsc = function(v) {
   return String(v == null ? "" : v)
@@ -37706,9 +37829,10 @@ window.ensureDistratoPrazoModal = function() {
   modal = document.createElement("div");
   modal.id = "modal-distrato-prazo";
   modal.style.cssText = "display:none;position:fixed;inset:0;background:rgba(15,23,42,0.45);z-index:10040;align-items:center;justify-content:center;padding:16px;";
-  modal.innerHTML = "<div style=\"background:#fff;width:min(560px,100%);border-radius:12px;padding:20px 20px 16px;box-shadow:0 18px 40px rgba(0,0,0,0.2);\">"
-    + "<h3 style=\"margin:0 0 10px;color:#105436;font-size:1.05rem;\">Prazo de distrato no Sienge</h3>"
+  modal.innerHTML = "<div style=\"background:#fff;width:min(560px,100%);border-radius:12px;padding:20px 20px 16px;box-shadow:0 18px 40px rgba(0,0,0,0.2);border-top:4px solid #f37021;\">"
+    + "<h3 style=\"margin:0 0 10px;color:#9a3412;font-size:1.05rem;display:flex;align-items:center;gap:8px;\"><i data-lucide=\"triangle-alert\" style=\"width:22px;height:22px;color:#f37021;\"></i> Prazo de distrato no Sienge</h3>"
     + "<div id=\"distrato-prazo-corpo\"></div>"
+    + "<div id=\"distrato-prazo-follow\"></div>"
     + "<div style=\"display:flex;justify-content:flex-end;margin-top:16px;\">"
     + "<button type=\"button\" class=\"btn btn-primary\" onclick=\"window.darCienciaDistratoPrazo()\">Ciência</button>"
     + "</div></div>";
@@ -37745,6 +37869,9 @@ window.checkDistratoPrazoMes = function() {
   const corpo = document.getElementById("distrato-prazo-corpo");
   if (corpo) corpo.innerHTML = window.distratoPrazoCorpoHtml(info, quem.analise);
   caixa.style.display = "flex";
+  if (window.lucide && typeof window.crmCriarIcones === "function") window.crmCriarIcones(caixa);
+  else if (window.lucide && lucide.createIcons) lucide.createIcons();
+  window.preencherDistratoPrazoFollow();
 };
 
 window.atualizarAvisoDistratoPrazo = function() {
@@ -37754,9 +37881,48 @@ window.atualizarAvisoDistratoPrazo = function() {
     const info = window.distratoPrazoDoMes();
     const corpo = document.getElementById("distrato-prazo-corpo");
     if (quem.ok && info.fase && corpo) corpo.innerHTML = window.distratoPrazoCorpoHtml(info, quem.analise);
+    window.preencherDistratoPrazoFollow();
     return;
   }
   window.checkDistratoPrazoMes();
+};
+
+window.distratoPrazoFollowup = async function() {
+  const app = window.DocAssinaturaApp;
+  if (!app || typeof app.carregar !== "function") return { pronto: false, itens: [] };
+  if (!app.itens.length && !app.carregando) {
+    try { await app.carregar(); } catch (e) {}
+  }
+  if (typeof app.reconciliarDistratos === "function") {
+    try { await app.reconciliarDistratos(); } catch (e) {}
+  }
+  const itens = (app.itens || []).filter(function(r) {
+    return r && r.tipo === "distrato" && r.status !== "lancado" && app.mesmoUsuario(r);
+  });
+  return { pronto: true, itens: itens };
+};
+
+window.preencherDistratoPrazoFollow = async function() {
+  const box = document.getElementById("distrato-prazo-follow");
+  if (!box) return;
+  box.innerHTML = "<p style=\"margin:12px 0 0;color:#64748b;font-size:0.84rem;\">Conferindo o follow-up e se o distrato já está no Sienge…</p>";
+  let pacote = { pronto: false, itens: [] };
+  try { pacote = await window.distratoPrazoFollowup(); } catch (e) {}
+  const el = document.getElementById("distrato-prazo-follow");
+  if (!el || el !== box) return;
+  if (!pacote.pronto) {
+    el.innerHTML = "<p style=\"margin:12px 0 0;color:#64748b;font-size:0.84rem;\">O follow-up ainda não está disponível nesta sessão.</p>";
+    return;
+  }
+  const n = pacote.itens.length;
+  const frase = n
+    ? "Você tem " + n + " distrato" + (n === 1 ? "" : "s") + " no follow-up que ainda não " + (n === 1 ? "foi finalizado" : "foram finalizados") + ". O que já está como distrato no Sienge ou no Integra saiu desta lista."
+    : "Você não tem distrato aguardando finalização no follow-up. O que já está como distrato no Sienge ou no Integra não entra nesta lista.";
+  const gente = pacote.itens.map(function(r) {
+    return { customerName: r.cliente, saleId: r.titulo && r.titulo !== "—" ? r.titulo : "" };
+  });
+  el.innerHTML = "<p style=\"margin:12px 0 8px;color:" + (n ? "#9a3412" : "#64748b") + ";font-size:0.88rem;line-height:1.45;\">" + frase + "</p>"
+    + (n ? window.distratoPrazoListaHtml("Ainda no follow-up", gente, "") : "");
 };
 
 window.nexFindFilaClient = function(customerId, saleId) {
@@ -38171,6 +38337,18 @@ window.gerarDocumentoFisicoCEC = async function(customerId, saleId) {
     }
     try {
         const docHtml = await window.generateSingleNEXHtml(customerId, saleId, "cec");
+        const cecRec = {
+          id: "cec-" + Date.now(),
+          letterType: "CEC",
+          date: typeof window.nexTodayIso === "function" ? window.nexTodayIso() : new Date().toISOString().slice(0, 10),
+          createdAt: new Date().toISOString(),
+          html: docHtml,
+          titulo: String(saleId || ""),
+          customerId: String(customerId || "")
+        };
+        window.nexStampLetterMeta(cecRec, customerId, saleId);
+        const semCec = (existing || []).filter(it => !window.nexItemEhCec(it));
+        await window.saveNexHistory(customerId, saleId, semCec.concat(cecRec));
         document.getElementById("pdf-modal-title").textContent = "Comunicação de Efetivação de Cancelamento";
         document.getElementById("pdf-document-content").innerHTML = docHtml;
         document.getElementById("pdf-view-overlay").classList.add("active");

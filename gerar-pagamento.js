@@ -2285,6 +2285,29 @@ const GerarPagamentoApp = {
     return "há " + d + (d === 1 ? " dia" : " dias");
   },
 
+  resumoAGerarHtml(grupos) {
+    const lista = grupos || [];
+    const nLotes = lista.filter((g) => g.key !== "__sem").length;
+    const nTitulos = lista.reduce((t, g) => t + g.itens.length, 0);
+    const marcados = lista.reduce((t, g) => t + g.itens.filter((it) => it.marcado && !it.emLote && !it.bloqueio).length, 0);
+    const valor = lista.reduce((t, g) => t + g.itens.filter((it) => it.marcado && !it.emLote && !it.bloqueio).reduce((s, it) => s + this.valorPagar(it), 0), 0);
+    const kpi = (tom, icone, rotulo, valorKpi) => `<div class="gp-kpi gp-kpi-${tom}"><span class="gp-kpi-ic"><i data-lucide="${icone}"></i></span><span><small>${rotulo}</small><strong>${valorKpi}</strong></span></div>`;
+    return `<section class="gp-lotes-painel" style="margin-bottom:0;">
+      <header class="gp-lotes-topo">
+        <div>
+          <h3>Lotes a gerar</h3>
+          <p>Títulos deste período ainda fora de lote, agrupados pela conta de pagamento e pela data da baixa.</p>
+        </div>
+      </header>
+      <div class="gp-kpis">
+        ${kpi("wait", "layers", "Lotes a gerar", nLotes)}
+        ${kpi("info", "files", "Títulos", nTitulos)}
+        ${kpi("ok", "check-circle-2", "Marcados", marcados)}
+        ${kpi("money", "banknote", "Valor marcado", this.money(valor))}
+      </div>
+    </section>`;
+  },
+
   painelLotesHtml(gerados) {
     const s = this.state;
     const lista = this.ordenarLotes(gerados);
@@ -3328,38 +3351,20 @@ const GerarPagamentoApp = {
           <td class="gp-status">${tag}</td>
         </tr>`;
       }).join("");
-      const vencs = [...new Set(g.itens.map((it) => String(it.vencimento || "").slice(0, 10)).filter(Boolean))].sort();
-      const faixa = !sem && vencs.length && (vencs[0] !== g.dia || vencs[vencs.length - 1] !== g.dia)
-        ? ` · vencimentos de ${this.dataBr(vencs[0])} a ${this.dataBr(vencs[vencs.length - 1])}`
-        : "";
-      const resumo = sem
-        ? "Cadastre a conta em Centros de Custo para incluir estes títulos em lote."
-        : (jaGerado
-          ? `${g.itens.length} título(s) · todos já em lote (${lotesDoDia.map((x) => this.esc(x)).join(", ")})${faixa}`
-          : `${g.itens.length} título(s) · ${disponiveis.length} disponível(is) · ${marcados.length} marcado(s)${lotesDoDia.length ? ` · ${g.itens.length - disponiveis.length} já em lote` : ""}${divergentes ? ` · <b class="gp-bloq">${divergentes} bloqueado(s) por divergência</b>` : ""}${faixa}`);
       const somaGrupo = g.itens.reduce((t, it) => t + this.valorPagar(it), 0);
       const aberto = !!s.lotesAbertos[g.key];
-      return `<div class="gp-lote${sem ? " gp-lote-sem" : ""}${jaGerado ? " gp-lote-feito" : ""}${aberto ? " is-open" : ""}">
-        <div class="gp-lote-h" role="button" tabindex="0" aria-expanded="${aberto}" title="${aberto ? "Clique para fechar o lote" : "Clique para ver os títulos do lote"}"
-          onclick="GerarPagamentoApp.toggleLote('${this.esc(g.key)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();GerarPagamentoApp.toggleLote('${this.esc(g.key)}');}">
-          <div class="gp-lote-tit">
-            <i data-lucide="chevron-right" class="gp-lote-seta"></i>
-            <div>
-              <div class="gp-lote-conta">${sem ? "Sem conta de parceria cadastrada" : `${jaGerado ? '<span class="gp-cc-rotulo">Conta corrente</span> ' : ""}${this.esc(this.contaLabel(g.conta))} <span class="gp-lote-dia"><i data-lucide="calendar" style="width:13px;height:13px;"></i> ${this.dataBr(g.dia)}</span>`}</div>
-              <small>${resumo} · ${this.money(somaGrupo)}</small>
-            </div>
-          </div>
-          ${sem ? "" : (jaGerado ? `<div class="gp-lote-acoes" onclick="event.stopPropagation()">
-            <span class="gp-pill gp-ok" style="height:30px;display:inline-flex;align-items:center;gap:6px;padding:0 12px;"><i data-lucide="check-circle-2" style="width:14px;height:14px;"></i> Lote já gerado</span>
-          </div>` : `<div class="gp-lote-acoes" onclick="event.stopPropagation()">
+      const tom = sem ? "bad" : (jaGerado || this.loteConferido(g) ? "ok" : "wait");
+      const icone = sem ? "alert-circle" : (jaGerado ? "check-circle-2" : "layers");
+      const status = sem
+        ? `<span class="gp-card-badge gp-card-badge-bad"><i data-lucide="alert-circle"></i> Sem conta</span><small>Cadastre a conta para incluir no lote</small>`
+        : (jaGerado
+          ? `<span class="gp-card-badge gp-card-badge-ok"><i data-lucide="check-circle-2"></i> Lote já gerado</span><small>${this.esc(lotesDoDia.join(", ") || "Neste período")}</small>`
+          : (this.loteConferido(g)
+            ? `<span class="gp-card-badge gp-card-badge-ok"><i data-lucide="circle-check"></i> Conferido</span><small>${marcados.length} marcado(s)</small>`
+            : `<span class="gp-card-badge gp-card-badge-wait"><i data-lucide="clock"></i> A gerar</span><small>${divergentes ? divergentes + " bloqueado(s)" : marcados.length + " marcado(s)"}</small>`));
+      const acoes = sem || jaGerado ? "" : `<div class="gp-card-acoes" onclick="event.stopPropagation()">
             <label class="gp-lote-todos"><input type="checkbox" ${todos ? "checked" : ""} ${gerando || !liberados.length ? "disabled" : ""} onchange="GerarPagamentoApp.toggleGrupo('${this.esc(g.key)}', this.checked)"> Marcar todos</label>
-            <label class="gp-baixa">Data da baixa
-              <input type="date" value="${this.esc(this.dataBaixaDoGrupo(g))}" ${gerando ? "disabled" : ""}
-                title="O robô preenche esta data no campo Data da baixa do Sienge"
-                onchange="GerarPagamentoApp.setDataBaixa('${this.esc(g.key)}', this.value)">
-            </label>
-            <strong class="gp-lote-total">${this.money(total)}</strong>
-            <button type="button" class="gp-conferido${this.loteConferido(g) ? " is-on" : ""}" onclick="event.stopPropagation(); GerarPagamentoApp.marcarConferido('${this.esc(g.key)}')"
+            <button type="button" class="gp-conferido${this.loteConferido(g) ? " is-on" : ""}" onclick="GerarPagamentoApp.marcarConferido('${this.esc(g.key)}')"
               title="${this.loteConferido(g) ? "Classificação aceita. Clique para desfazer o aceite deste lote." : "Aceite de que a classificação, o rateio e a conta estão corretos. O Integra passa a reconhecer este padrão."}">
               <i data-lucide="${this.loteConferido(g) ? "circle-check" : "circle-alert"}" style="width:14px;height:14px;"></i> Conferido
             </button>
@@ -3368,18 +3373,36 @@ const GerarPagamentoApp = {
               style="height:36px;width:150px;justify-content:center;display:inline-flex;align-items:center;gap:6px;">
               ${gerando ? '<span class="btn-spin"></span> Gerando…' : '<i data-lucide="layers" style="width:14px;"></i> Gerar lote'}
             </button>
-          </div>`)}
+          </div>`;
+      const baixa = sem ? "" : `<div class="gp-card-meta" onclick="event.stopPropagation()"><i data-lucide="calendar"></i><span><small>Data da baixa</small>${jaGerado ? `<b>${this.dataBr(g.dia)}</b>` : `<input type="date" class="gp-card-data" value="${this.esc(this.dataBaixaDoGrupo(g))}" ${gerando ? "disabled" : ""} title="O robô preenche esta data no campo Data da baixa do Sienge" onchange="GerarPagamentoApp.setDataBaixa('${this.esc(g.key)}', this.value)">`}</span></div>`;
+      return `<article class="gp-card gp-card-${tom}${aberto ? " is-open" : ""}">
+        <div class="gp-card-h" role="button" tabindex="0" aria-expanded="${aberto}" title="${aberto ? "Clique para fechar o lote" : "Clique para ver os títulos do lote"}"
+          onclick="GerarPagamentoApp.toggleLote('${this.esc(g.key)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();GerarPagamentoApp.toggleLote('${this.esc(g.key)}');}">
+          <span class="gp-card-ic"><i data-lucide="${icone}"></i></span>
+          <div class="gp-card-id">
+            <small>${sem ? "Pendente" : "Conta"}</small>
+            <strong>${sem ? "Sem conta de parceria cadastrada" : this.esc(this.contaLabel(g.conta))}</strong>
+            <span>${sem ? "Cadastre a conta para incluir no lote" : `${g.itens.length} título(s)${marcados.length ? " · " + marcados.length + " marcado(s)" : ""}${divergentes ? " · " + divergentes + " bloqueado(s)" : ""}`}</span>
+          </div>
+          ${baixa}
+          <div class="gp-card-meta"><i data-lucide="files"></i><span><small>Títulos</small><b>${g.itens.length}</b></span></div>
+          <div class="gp-card-meta"><i data-lucide="banknote"></i><span><small>${jaGerado || sem ? "Valor" : "Valor marcado"}</small><b>${this.money(jaGerado || sem ? somaGrupo : total)}</b></span></div>
+          <div class="gp-card-status">${status}</div>
+          ${acoes}
+          <i data-lucide="chevron-down" class="gp-card-seta"></i>
         </div>
         ${this.transferenciasHtml(this.transferenciasDe(g.itens))}
-        ${jaGerado ? this.resumoEmLoteHtml(g) : ""}
-        <div class="gp-lote-corpo" style="overflow:auto;"${aberto ? "" : " hidden"}>
-          <table class="gp-table gp-titulos">
+        <div class="gp-card-body"${aberto ? "" : " hidden"}>
+          <div class="gp-card-sub">Títulos do lote (${g.itens.length})</div>
+          <div style="overflow:auto;">
+          <table class="gp-table gp-titulos gp-card-tab">
             <colgroup><col style="width:3%"><col style="width:8%"><col style="width:7%"><col style="width:12%"><col style="width:9%"><col style="width:11%"><col style="width:9%"><col style="width:10%"><col style="width:9%"><col style="width:12%"><col style="width:10%"></colgroup>
             <thead><tr><th></th><th>Vencimento</th><th>Título</th><th>Credor</th><th>Documento</th><th>Rateio</th><th style="text-align:right;">A pagar</th><th>Pagamento</th><th title="Imposto retido lançado no Sienge × nota fiscal anexada × CNAE do prestador">Fiscal</th><th>Autorização</th><th>Situação</th></tr></thead>
             <tbody>${linhas}</tbody>
           </table>
+          </div>
         </div>
-      </div>`;
+      </article>`;
     };
     const noPeriodo = (dia) => this.noPeriodoBuscado(dia);
     const aGerarTodos = grupos.map((g) => ({ ...g, itens: g.itens.filter((it) => !it.emLote) })).filter((g) => g.itens.length);
@@ -3413,7 +3436,7 @@ const GerarPagamentoApp = {
       .filter((l) => !emp || this.empresaDoGrupo({ empresaConta: l.empresaConta, itens: l.itens || [] }) === emp)
       .sort((a, b) => String(b.criadoEm).localeCompare(String(a.criadoEm)));
     if (aba === "lote") {
-      return `${faixa()}${this.painelLotesHtml(gerados)}${emLoteVis.length ? emLoteVis.map(card).join("") : ""}`;
+      return `${faixa()}${this.painelLotesHtml(gerados)}${emLoteVis.length ? `<div class="gp-lotes-painel">${emLoteVis.map(card).join("")}</div>` : ""}`;
     }
     const alerta = this.retroAlertaHtml(diasRetro);
     const massa = `<div class="gp-massa">
@@ -3424,17 +3447,17 @@ const GerarPagamentoApp = {
     if (s.diaRetro) {
       const titulosRetro = retroVis.reduce((t, g) => t + g.itens.length, 0);
       const totalRetro = retroVis.reduce((t, g) => t + g.itens.reduce((s2, it) => s2 + this.valorPagar(it), 0), 0);
-      return `${faixa(massa)}${alerta}
+      return `${faixa(massa)}${alerta}${this.resumoAGerarHtml(retroVis)}
         <div class="gp-retro-vendo">
           <span><i data-lucide="history" style="width:15px;height:15px;"></i> Pendências de <strong>${this.dataBr(s.diaRetro)}</strong>, antes do período buscado · ${titulosRetro} título(s) · ${this.money(totalRetro)}</span>
           <button type="button" class="btn btn-outline btn-sm" onclick="GerarPagamentoApp.setDiaRetro('')"><i data-lucide="arrow-left" style="width:14px;height:14px;"></i> Voltar ao período ${this.dataBr(s.startDate)}${s.endDate !== s.startDate ? " a " + this.dataBr(s.endDate) : ""}</button>
         </div>
-        ${retroVis.map(card).join("")}`;
+        <div class="gp-lotes-painel" style="margin-top:0;">${retroVis.map(card).join("")}</div>`;
     }
     const vazioPeriodo = this.state.titulos.some((r) => noPeriodo(String(r.vencimento || "").slice(0, 10)) && !r.pago && r.aPagar > 0.009)
       ? "Nenhum título a gerar lote nesta empresa no período: todos já estão em lote."
       : "Nenhum título em aberto com vencimento no período buscado.";
-    return `${this.conferenciaHtml()}${faixa(massa)}${alerta}${aGerarVis.length ? aGerarVis.map(card).join("") : vazio(vazioPeriodo)}`;
+    return `${this.conferenciaHtml()}${faixa(massa)}${alerta}${aGerarVis.length ? this.resumoAGerarHtml(aGerarVis) + `<div class="gp-lotes-painel" style="margin-top:0;">${aGerarVis.map(card).join("")}</div>` : vazio(vazioPeriodo)}`;
   },
 
   grupoStatus(r) {
@@ -4239,7 +4262,8 @@ const GerarPagamentoApp = {
           #gerar-pagamento-root .gp-card-badge-bad { color:#dc2626; }
           #gerar-pagamento-root .gp-card-badge-ok { color:#105436; }
           #gerar-pagamento-root .gp-card-badge-wait { color:#2563eb; }
-          #gerar-pagamento-root .gp-card-acoes { display:flex; align-items:center; gap:8px; }
+          #gerar-pagamento-root .gp-card-acoes { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+          #gerar-pagamento-root .gp-card-data { height:32px; border:1px solid #cbd5e1; border-radius:8px; padding:0 8px; font-size:0.82rem; color:#0f172a; background:#fff; }
           #gerar-pagamento-root .gp-card-seta { width:18px; height:18px; color:#94a3b8; transition:transform .15s ease; }
           #gerar-pagamento-root .gp-card.is-open .gp-card-seta { transform:rotate(180deg); }
           #gerar-pagamento-root .gp-mais { position:relative; }

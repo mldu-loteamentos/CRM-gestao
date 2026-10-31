@@ -356,9 +356,14 @@ const ContabilDepara = {
     const mapa = this.mapaDo(this.state.parceiroId);
     const cc = String(this.state.ccId || "");
     const doCc = cc && mapa._porCc[cc] && mapa._porCc[cc][String(planoId)];
-    if (this.ehLinha(doCc)) return doCc;
     const legado = mapa[String(planoId)];
-    if (this.ehLinha(legado)) return legado;
+    const bruto = this.ehLinha(doCc) ? doCc : (this.ehLinha(legado) ? legado : null);
+    if (!bruto) return { codigo: "", reduzida: "", nome: "" };
+    const codigo = String(bruto.codigo || "").trim();
+    const reduzida = String(bruto.reduzida || "").trim();
+    const nome = String(bruto.nome || "").trim();
+    if (codigo && reduzida && nome) return { codigo: codigo, reduzida: reduzida, nome: nome };
+    if (codigo || reduzida || nome) this.gravarLinha(planoId, { codigo: "", reduzida: "", nome: "" });
     return { codigo: "", reduzida: "", nome: "" };
   },
 
@@ -410,24 +415,97 @@ const ContabilDepara = {
     return this.norm(q).split(/[^A-Z0-9]+/).filter((t) => t.length >= 2);
   },
 
-  buscarNome(q) {
-    const toks = this.tokens(q);
-    if (!toks.length) return [];
+  buscarRapido(q) {
+    const bruto = String(q || "").trim();
+    if (!bruto) return [];
+    const dig = this.digitos(bruto);
+    const toks = this.tokens(bruto);
     const hits = this.state.contas.filter((c) => {
+      const id = String(c.id || "");
+      const cod = this.digitos(c.codigo);
       const nome = this.norm(c.nome);
-      return toks.every((t) => nome.indexOf(t) >= 0);
+      if (dig && (id.indexOf(dig) === 0 || cod.indexOf(dig) === 0)) return true;
+      if (dig.length >= 3 && (id.indexOf(dig) >= 0 || cod.indexOf(dig) >= 0)) return true;
+      if (toks.length && toks.every((t) => nome.indexOf(t) >= 0 || id.indexOf(t) === 0)) return true;
+      return false;
     });
     hits.sort((a, b) => {
-      if (a.analitica !== b.analitica) return a.analitica ? -1 : 1;
-      const na = this.norm(a.nome);
-      const nb = this.norm(b.nome);
-      const pa = na.indexOf(toks[0]) === 0 ? 0 : 1;
-      const pb = nb.indexOf(toks[0]) === 0 ? 0 : 1;
-      if (pa !== pb) return pa - pb;
-      if (na.length !== nb.length) return na.length - nb.length;
+      const nota = (c) => {
+        const id = String(c.id || "");
+        const cod = this.digitos(c.codigo);
+        let n = c.analitica ? 0 : 4;
+        if (dig && id.indexOf(dig) === 0) n -= 2;
+        if (dig && cod.indexOf(dig) === 0) n -= 1;
+        return n;
+      };
+      const d = nota(a) - nota(b);
+      if (d) return d;
       return String(a.codigo).localeCompare(String(b.codigo), "pt-BR", { numeric: true });
     });
     return hits.slice(0, 12);
+  },
+
+  limparLinha(planoId) {
+    this.fecharLista();
+    this.gravarLinha(planoId, { codigo: "", reduzida: "", nome: "" });
+    const tr = document.querySelector('#ctb-depara-tab tr[data-plano="' + CSS.escape(String(planoId)) + '"]');
+    if (!tr) return;
+    [".ctb-dp-conta", ".ctb-dp-red", ".ctb-dp-nome"].forEach((sel) => {
+      const el = tr.querySelector(sel);
+      if (el) el.value = "";
+    });
+  },
+
+  exatoDoCampo(valor, seletor) {
+    const texto = String(valor || "").trim();
+    if (!texto) return null;
+    if (seletor === ".ctb-dp-red") {
+      const hits = this.state.contas.filter((c) => String(c.id || "").indexOf(texto) === 0);
+      if (hits.length === 1 && String(hits[0].id) === texto) return hits[0];
+      return null;
+    }
+    if (seletor === ".ctb-dp-conta") return this.acharPorCodigo(texto);
+    return null;
+  },
+
+  aoDigitar(planoId, valor, seletor) {
+    if (!String(valor || "").trim()) {
+      this.limparLinha(planoId);
+      return;
+    }
+    const exato = this.exatoDoCampo(valor, seletor);
+    if (exato) {
+      this.preencher(planoId, exato);
+      this.fecharLista();
+      return;
+    }
+    this._listaPlano = String(planoId);
+    this.mostrarLista(planoId, this.buscarRapido(valor), seletor);
+  },
+
+  aoSair(planoId) {
+    clearTimeout(this._sairTimer);
+    this._sairTimer = setTimeout(() => {
+      if (document.getElementById("ctb-depara-lista")) return;
+      const tr = document.querySelector('#ctb-depara-tab tr[data-plano="' + CSS.escape(String(planoId)) + '"]');
+      if (!tr) return;
+      const conta = tr.querySelector(".ctb-dp-conta");
+      const red = tr.querySelector(".ctb-dp-red");
+      const nome = tr.querySelector(".ctb-dp-nome");
+      const a = String((conta && conta.value) || "").trim();
+      const b = String((red && red.value) || "").trim();
+      const c = String((nome && nome.value) || "").trim();
+      if (!a || !b || !c) {
+        this.limparLinha(planoId);
+        return;
+      }
+      const salva = this.linha(planoId);
+      if (a !== salva.codigo || b !== salva.reduzida || c !== salva.nome) {
+        if (conta) conta.value = salva.codigo;
+        if (red) red.value = salva.reduzida;
+        if (nome) nome.value = salva.nome;
+      }
+    }, 180);
   },
 
   preencher(planoId, conta) {
@@ -445,32 +523,23 @@ const ContabilDepara = {
   },
 
   onConta(planoId, valor) {
-    this.gravarLinha(planoId, Object.assign({}, this.linha(planoId), { codigo: valor }));
-    clearTimeout(this._timer["c" + planoId]);
-    this._timer["c" + planoId] = setTimeout(() => {
-      const achou = this.acharPorCodigo(valor);
-      if (achou) this.preencher(planoId, achou);
-    }, 280);
+    this.aoDigitar(planoId, valor, ".ctb-dp-conta");
   },
 
   onReduzida(planoId, valor) {
-    this.gravarLinha(planoId, Object.assign({}, this.linha(planoId), { reduzida: valor }));
-    const achou = this.acharPorReduzida(valor);
-    if (achou) this.preencher(planoId, achou);
+    this.aoDigitar(planoId, valor, ".ctb-dp-red");
   },
 
   onNome(planoId, valor) {
-    this.gravarLinha(planoId, Object.assign({}, this.linha(planoId), { nome: valor }));
-    this._listaPlano = String(planoId);
-    this.mostrarLista(planoId, this.buscarNome(valor));
+    this.aoDigitar(planoId, valor, ".ctb-dp-nome");
   },
 
-  mostrarLista(planoId, itens) {
+  mostrarLista(planoId, itens, seletor) {
     this._listaAtual = itens || [];
     this.fecharLista();
     if (!itens.length) return;
     const tr = document.querySelector('#ctb-depara-tab tr[data-plano="' + CSS.escape(String(planoId)) + '"]');
-    const input = tr && tr.querySelector(".ctb-dp-nome");
+    const input = tr && tr.querySelector(seletor || ".ctb-dp-nome");
     if (!input) return;
     const box = document.createElement("div");
     box.id = "ctb-depara-lista";
@@ -607,9 +676,9 @@ const ContabilDepara = {
       return `<tr data-plano="${this.esc(c.id)}" data-busca="${this.esc(blob)}"${esconde}>
         <td class="ctb-dp-cod">${this.esc(cod)}</td>
         <td>${this.esc(c.nome)}</td>
-        <td><input class="ctb-depara-inp ctb-dp-conta" value="${this.esc(m.codigo)}"${dis} oninput="ContabilDepara.onConta('${this.esc(c.id)}', this.value)"></td>
-        <td><input class="ctb-depara-inp ctb-dp-red" value="${this.esc(m.reduzida)}"${dis} oninput="ContabilDepara.onReduzida('${this.esc(c.id)}', this.value)"></td>
-        <td><input class="ctb-depara-inp ctb-dp-nome" value="${this.esc(m.nome)}" placeholder="Buscar pelo nome"${dis} oninput="ContabilDepara.onNome('${this.esc(c.id)}', this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();ContabilDepara.escolher('${this.esc(c.id)}',0)}"></td>
+        <td><input class="ctb-depara-inp ctb-dp-conta" value="${this.esc(m.codigo)}" placeholder="Parte da conta"${dis} oninput="ContabilDepara.onConta('${this.esc(c.id)}', this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();ContabilDepara.escolher('${this.esc(c.id)}',0)}" onblur="ContabilDepara.aoSair('${this.esc(c.id)}')"></td>
+        <td><input class="ctb-depara-inp ctb-dp-red" value="${this.esc(m.reduzida)}" placeholder="Código reduzido"${dis} oninput="ContabilDepara.onReduzida('${this.esc(c.id)}', this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();ContabilDepara.escolher('${this.esc(c.id)}',0)}" onblur="ContabilDepara.aoSair('${this.esc(c.id)}')"></td>
+        <td><input class="ctb-depara-inp ctb-dp-nome" value="${this.esc(m.nome)}" placeholder="Parte do nome"${dis} oninput="ContabilDepara.onNome('${this.esc(c.id)}', this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();ContabilDepara.escolher('${this.esc(c.id)}',0)}" onblur="ContabilDepara.aoSair('${this.esc(c.id)}')"></td>
       </tr>`;
     }).join("");
     const vazio = !s.empresas.length
@@ -652,7 +721,7 @@ const ContabilDepara = {
 document.addEventListener("click", (ev) => {
   const lista = document.getElementById("ctb-depara-lista");
   if (!lista) return;
-  if (ev.target.closest && (ev.target.closest("#ctb-depara-lista") || ev.target.closest(".ctb-dp-nome"))) return;
+  if (ev.target.closest && (ev.target.closest("#ctb-depara-lista") || ev.target.closest(".ctb-dp-conta") || ev.target.closest(".ctb-dp-red") || ev.target.closest(".ctb-dp-nome"))) return;
   ContabilDepara.fecharLista();
 });
 

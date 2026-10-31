@@ -1021,6 +1021,7 @@ async function anexosFetchTermoBlobForContract(contract) {
   return new File([blob], fileName, { type: blob.type || 'application/pdf' });
 }
 
+window.anexosFindSiengeUnitId = anexosFindSiengeUnitId;
 window.anexosFetchTermoBlobForContract = anexosFetchTermoBlobForContract;
 window.anexosLoadMapaEnvios = anexosLoadMapaEnvios;
 window.anexosSoftRender = anexosSoftRender;

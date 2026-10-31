@@ -104,11 +104,11 @@ const ProcessoContraApp = {
   },
 
   init() {
-    this.lerMotivosLocal();
+    this.motivos = this.motivosDoCadastro();
     this.popup = this.podeEditar();
     this.render();
     this.carregar();
-    this.carregarMotivosNuvem();
+    this.carregarMotivosFluxos();
     this.carregarEmpreendimentos();
     if (typeof window.startCustomerBackgroundSync === "function") window.startCustomerBackgroundSync(false, true);
   },
@@ -122,9 +122,12 @@ const ProcessoContraApp = {
     root.innerHTML = this.popup && edita
       ? `<div class="pc-page">${this.htmlPopup()}</div>`
       : `<div class="pc-page">
-        <div class="search-box-wrapper pc-busca pc-filtro">
-          <input type="text" id="pc-filtro" class="search-input" placeholder="Número do processo ou motivo..." style="font-style: italic;" autocomplete="off" value="${this.esc(this.filtro)}">
-          <i data-lucide="search" class="search-icon"></i>
+        <div class="pc-lista-topo">
+          <div class="search-box-wrapper pc-busca pc-filtro">
+            <input type="text" id="pc-filtro" class="search-input" placeholder="Número do processo ou motivo..." style="font-style: italic;" autocomplete="off" value="${this.esc(this.filtro)}">
+            <i data-lucide="search" class="search-icon"></i>
+          </div>
+          ${edita ? `<button type="button" class="btn btn-primary" id="pc-novo">Novo processo</button>` : ""}
         </div>
         <div id="pc-lista"></div>
       </div>`;
@@ -135,7 +138,9 @@ const ProcessoContraApp = {
       this.pintarLista();
     });
     const num = document.getElementById("pc-numero");
-    if (num) num.addEventListener("input", () => { this.processo = num.value || ""; });
+    if (num) num.addEventListener("input", () => this.mascaraProcesso(num));
+    const novo = document.getElementById("pc-novo");
+    if (novo) novo.addEventListener("click", () => { this.popup = true; this.render(); });
     this.ligarMotivo();
     this.ligarPopup();
     const cancelar = document.getElementById("pc-cancelar");
@@ -300,9 +305,6 @@ const ProcessoContraApp = {
     const autorBusca = this.papelAutor === "cliente" ? `${this.htmlPesquisa()}${this.htmlFichaBloco()}` : `<div id="pc-autor-slot"></div>`;
     const largo = this.papelAutor === "cliente" || (this.papelAutor !== "cliente" && this.tipoParte === "cliente");
     return `<div class="pc-tela pc-folha" id="pc-popup">
-      <div class="pc-tela-bar">
-        <button type="button" class="btn btn-fechar" id="pc-fechar">Fechar</button>
-      </div>
       <div class="pc-popup-corpo">
         <div class="pc-partes${largo ? " is-stack" : ""}">
           <section class="pc-parte">
@@ -385,10 +387,10 @@ const ProcessoContraApp = {
     const arquivos = (this.anexos || []).map((f, i) => `<li><span>${this.esc(f.name)}</span><button type="button" class="tvig-ico is-danger" title="Excluir" data-pc-arq="${i}"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button></li>`).join("");
     return `<div class="pc-form" id="pc-form">
         <label>Número do processo
-          <input type="text" id="pc-numero" value="${this.esc(this.processo)}" autocomplete="off">
+          <input type="text" id="pc-numero" inputmode="numeric" placeholder="0000000-00.0000.0.00.0000" maxlength="25" value="${this.esc(this.formatarProcesso(this.processo))}" autocomplete="off">
         </label>
         <label>Valor da causa
-          <input type="text" id="pc-valor" inputmode="decimal" placeholder="0,00" value="${this.esc(this.valorCausa)}" autocomplete="off">
+          <input type="text" id="pc-valor" inputmode="decimal" placeholder="R$ 0,00" value="${this.esc(this.textoMoeda(this.valorCausa))}" autocomplete="off">
         </label>
         ${this.htmlMotivo()}
         <label class="pc-anexo-campo">Anexos
@@ -403,13 +405,11 @@ const ProcessoContraApp = {
   },
 
   ligarPopup() {
-    const fechar = document.getElementById("pc-fechar");
-    if (fechar) fechar.addEventListener("click", () => this.limpar());
     document.querySelectorAll("[data-pc-autor]").forEach((btn) => {
       btn.addEventListener("click", () => this.setPapel(btn.getAttribute("data-pc-autor")));
     });
     const valor = document.getElementById("pc-valor");
-    if (valor) valor.addEventListener("input", () => { this.valorCausa = valor.value || ""; });
+    if (valor) valor.addEventListener("input", () => this.mascaraMoeda(valor));
     document.querySelectorAll("[data-pc-tipo]").forEach((btn) => {
       btn.addEventListener("click", () => this.setTipo(btn.getAttribute("data-pc-tipo")));
     });
@@ -1237,7 +1237,7 @@ const ProcessoContraApp = {
       return `<tr>
         <td class="cc-nome">${this.esc(lados.autor)}</td>
         <td class="cc-nome">${this.esc(lados.reu)}</td>
-        <td>${this.esc(item.processo || "—")}</td>
+        <td>${this.esc(this.formatarProcesso(item.processo) || item.processo || "—")}</td>
         <td class="cc-nome">${this.esc(item.motivo || "—")}</td>
         <td>${this.esc(this.money(item.valorCausa))}</td>
         <td class="pc-anexos-cell">${this.htmlAnexosItem(item)}</td>
@@ -1278,6 +1278,73 @@ const ProcessoContraApp = {
     const v = Number(n);
     if (!Number.isFinite(v)) return "—";
     return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  },
+
+  textoMoeda(v) {
+    if (v == null || v === "") return "";
+    const texto = String(v);
+    if (/R\$\s*\d/.test(texto)) return texto;
+    const n = this.lerValor(texto);
+    if (n == null) return "";
+    return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  },
+
+  mascaraMoeda(input) {
+    const digitos = String(input.value || "").replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+    if (!digitos) {
+      input.value = "";
+      this.valorCausa = "";
+      return;
+    }
+    const n = Number(digitos) / 100;
+    const txt = n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    input.value = txt;
+    this.valorCausa = txt;
+  },
+
+  formatarProcesso(valor) {
+    const d = String(valor || "").replace(/\D/g, "").slice(0, 20);
+    if (!d) return "";
+    let out = d.slice(0, 7);
+    if (d.length > 7) out += "-" + d.slice(7, 9);
+    if (d.length > 9) out += "." + d.slice(9, 13);
+    if (d.length > 13) out += "." + d.slice(13, 14);
+    if (d.length > 14) out += "." + d.slice(14, 16);
+    if (d.length > 16) out += "." + d.slice(16, 20);
+    return out;
+  },
+
+  mascaraProcesso(input) {
+    const txt = this.formatarProcesso(input.value);
+    input.value = txt;
+    this.processo = txt;
+  },
+
+  motivosDoCadastro() {
+    const app = window.FluxosProcesso;
+    const lista = (app && app.state && app.state.fluxos) || [];
+    return lista.filter((f) => {
+      const nome = String(f && f.nome || "").trim();
+      if (!nome) return false;
+      const n = nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/\s+/g, " ");
+      return n !== "COBRANCA JUDICIAL";
+    }).map((f) => ({ id: String(f.id), nome: String(f.nome).trim() }))
+      .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+  },
+
+  async carregarMotivosFluxos() {
+    const app = window.FluxosProcesso;
+    if (app && !app.state.abertoId) {
+      if (!app.state.pronto) app.carregarLocal();
+      const remoto = await app.lerRemoto();
+      if (Array.isArray(remoto) && remoto.length && !app.state.abertoId) app.state.fluxos = remoto;
+    }
+    this.motivos = this.motivosDoCadastro();
+    if (this.motivoId && !this.motivos.some((m) => m.id === this.motivoId)) {
+      this.motivoId = "";
+      this.motivo = "";
+    }
+    this.pintarMotivoPainel();
   },
 
   lerValor(v) {
@@ -1372,11 +1439,6 @@ const ProcessoContraApp = {
           <input id="pc-motivo-busca" type="text" placeholder="Buscar..." value="${this.esc(this.motivoBusca)}" autocomplete="off">
         </div>
         <div class="ml-emp-filter-list" id="pc-motivo-lista">${this.htmlMotivoLista()}</div>
-        <div class="pc-motivo-novo">
-          <input id="pc-motivo-novo" type="text" placeholder="Novo motivo" autocomplete="off">
-          <button type="button" class="btn btn-primary" id="pc-motivo-incluir">Incluir</button>
-        </div>
-        <p id="pc-motivo-aviso" class="pc-motivo-aviso"></p>
       </div>
     </div>`;
   },
@@ -1384,23 +1446,13 @@ const ProcessoContraApp = {
   htmlMotivoLista() {
     const q = this.fold(this.motivoBusca).trim();
     const lista = this.motivos.filter((m) => !q || this.fold(m.nome).indexOf(q) >= 0);
+    if (!this.motivos.length) return `<div class="ml-emp-filter-empty">Nenhum fluxo disponível. Cobrança judicial não entra em novo processo.</div>`;
     if (!lista.length) return `<div class="ml-emp-filter-empty">Nenhum motivo com esse nome.</div>`;
     return lista.map((m) => {
       const on = m.id === this.motivoId;
-      if (this.motivoEditId === m.id) {
-        return `<div class="ml-emp-filter-item pc-motivo-item is-edit">
-          <input type="text" class="pc-motivo-renome" data-id="${this.esc(m.id)}" value="${this.esc(m.nome)}">
-          <button type="button" class="btn btn-primary pc-motivo-salvar" data-id="${this.esc(m.id)}">Salvar</button>
-          <button type="button" class="btn btn-cancel pc-motivo-cancelar-edit">Cancelar</button>
-        </div>`;
-      }
-      const uso = this.motivoEmUso(m);
-      const lapis = uso ? "" : `<button type="button" class="tvig-ico" title="Editar" data-pc-edit="${this.esc(m.id)}"><i data-lucide="pencil" style="width:15px;height:15px;"></i></button>`;
-      const dica = uso ? ` title="Este motivo já está em um processo e não pode ser editado."` : "";
-      return `<div class="ml-emp-filter-item pc-motivo-item${on ? " is-on" : ""}"${dica} data-pc-mot="${this.esc(m.id)}">
+      return `<div class="ml-emp-filter-item pc-motivo-item${on ? " is-on" : ""}" data-pc-mot="${this.esc(m.id)}">
         <input type="radio" name="pc-motivo-radio"${on ? " checked" : ""} tabindex="-1">
         <span>${this.esc(m.nome)}</span>
-        ${lapis}
       </div>`;
     }).join("");
   },
@@ -1572,12 +1624,6 @@ const ProcessoContraApp = {
       this.motivoBusca = busca.value || "";
       this.pintarMotivoLista();
     });
-    const incluir = document.getElementById("pc-motivo-incluir");
-    const novo = document.getElementById("pc-motivo-novo");
-    if (incluir) incluir.addEventListener("click", () => this.incluirMotivo());
-    if (novo) novo.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") { e.preventDefault(); this.incluirMotivo(); }
-    });
     const lista = document.getElementById("pc-motivo-lista");
     if (lista) lista.addEventListener("click", (e) => this.cliqueMotivo(e));
     if (!this._motivoFora) {
@@ -1632,6 +1678,8 @@ const ProcessoContraApp = {
     if (!this.podeEditar() || this.salvando) return;
     const campoValor = document.getElementById("pc-valor");
     if (campoValor) this.valorCausa = campoValor.value || "";
+    const campoNum = document.getElementById("pc-numero");
+    if (campoNum) this.processo = this.formatarProcesso(campoNum.value);
     const parte = this.montarParte();
     const empresaAutora = this.papelAutor === "empresa";
     if (empresaAutora && (!parte || parte.tipo === "empresa")) {
@@ -1660,7 +1708,7 @@ const ProcessoContraApp = {
       alert(empresaAutora ? "Escolha a empresa autora." : (porTitulo ? "Esse título não tem empresa vinculada." : "Escolha a empresa que é a ré."));
       return;
     }
-    if (!processo) { alert("Informe o número do processo."); return; }
+    if (processo.replace(/\D/g, "").length !== 20) { alert("Informe o número no padrão 0000000-00.0000.0.00.0000."); return; }
     if (valor == null || valor <= 0) { alert("Informe o valor da causa."); return; }
     if (!escolhido) { alert("Escolha o motivo na lista."); return; }
     const fc = this.fb();

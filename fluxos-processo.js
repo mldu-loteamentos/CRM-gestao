@@ -5,7 +5,9 @@ const FluxosProcesso = {
   state: {
     fluxos: [],
     filtroResp: "",
-    filtroNome: "",
+    filtroFluxoIds: [],
+    filtroNomeOpen: false,
+    filtroNomeQuery: "",
     consulted: false,
     shown: [],
     abertoId: "",
@@ -230,12 +232,83 @@ const FluxosProcesso = {
     return nomes;
   },
 
+  fluxosFiltroItens() {
+    return (this.state.fluxos || []).map((f) => ({
+      id: String(f.id),
+      label: String(f.nome || "Sem nome").toUpperCase()
+    })).sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+  },
+
+  filtroNomeOpts() {
+    return {
+      id: "fluxo-filtro-nome",
+      items: this.fluxosFiltroItens(),
+      selectedIds: this.state.filtroFluxoIds || [],
+      query: this.state.filtroNomeQuery || "",
+      keepOrder: true,
+      nouns: {
+        singular: "fluxo",
+        plural: "fluxos",
+        none: "Nenhum fluxo",
+        noMatch: "Nenhum fluxo com esse nome."
+      }
+    };
+  },
+
+  pintarFiltroNome() {
+    const slot = document.getElementById("fluxo-filtro-nome-slot");
+    if (!slot || !window.MlEmpresaFilter) return;
+    slot.innerHTML = MlEmpresaFilter.html(Object.assign({
+      label: "Nome do fluxo",
+      open: !!this.state.filtroNomeOpen,
+      emptyMeansAll: true
+    }, this.filtroNomeOpts()));
+    if (window.lucide) window.lucide.createIcons();
+  },
+
+  bindFiltroNome() {
+    if (!window.MlEmpresaFilter) return;
+    const self = this;
+    MlEmpresaFilter.bind("fluxo-filtro-nome", {
+      toggleOpen() {
+        self.state.filtroNomeOpen = !self.state.filtroNomeOpen;
+        self.pintarFiltroNome();
+        if (self.state.filtroNomeOpen) {
+          const inp = document.getElementById("fluxo-filtro-nome-search");
+          if (inp) inp.focus();
+        }
+      },
+      setQuery(q) {
+        self.state.filtroNomeQuery = q || "";
+        const box = document.getElementById("fluxo-filtro-nome-list");
+        if (box) box.innerHTML = MlEmpresaFilter.listHtml(self.filtroNomeOpts());
+      },
+      toggleId(itemId, on) {
+        const sid = String(itemId);
+        const cur = (self.state.filtroFluxoIds || []).map(String);
+        self.state.filtroFluxoIds = on ? (cur.indexOf(sid) >= 0 ? cur : cur.concat(sid)) : cur.filter((x) => x !== sid);
+        self.state.filtroNomeOpen = true;
+        self.pintarFiltroNome();
+      },
+      selectAll() {
+        self.state.filtroFluxoIds = self.fluxosFiltroItens().map((x) => String(x.id));
+        self.state.filtroNomeOpen = true;
+        self.pintarFiltroNome();
+      },
+      selectNone() {
+        self.state.filtroFluxoIds = [];
+        self.state.filtroNomeOpen = true;
+        self.pintarFiltroNome();
+      }
+    });
+  },
+
   consultar() {
-    const nome = this.norm(this.state.filtroNome);
+    const ids = (this.state.filtroFluxoIds || []).map(String);
     const resp = this.norm(this.state.filtroResp);
     this.state.shown = (this.state.fluxos || []).filter((f) => {
       if (resp && this.norm(f.responsavelNome) !== resp) return false;
-      if (nome && this.norm(f.nome).indexOf(nome) < 0) return false;
+      if (ids.length && ids.indexOf(String(f.id)) < 0) return false;
       return true;
     });
     this.state.consulted = true;
@@ -244,7 +317,9 @@ const FluxosProcesso = {
 
   limpar() {
     this.state.filtroResp = "";
-    this.state.filtroNome = "";
+    this.state.filtroFluxoIds = [];
+    this.state.filtroNomeOpen = false;
+    this.state.filtroNomeQuery = "";
     this.state.consulted = false;
     this.state.shown = [];
     this.mostrarLista();
@@ -260,12 +335,9 @@ const FluxosProcesso = {
     root.innerHTML = `<div class="tvig-page">
       <div class="search-filter-panel tvig-params">
         <h3 class="tvig-section-title">Parâmetros da consulta</h3>
-        <div class="tvig-filters">
-          <div class="tvig-filter-slot">
-            <label class="tvig-comp-label" for="fluxo-filtro-nome">Nome do fluxo</label>
-            <input type="search" id="fluxo-filtro-nome" class="form-control" value="${this.esc(this.state.filtroNome)}" placeholder="Buscar pelo nome" oninput="FluxosProcesso.state.filtroNome = this.value">
-          </div>
-          <div class="tvig-filter-slot">
+        <div class="tvig-filters fluxo-consulta-filtros">
+          <div id="fluxo-filtro-nome-slot" class="tvig-filter-slot fluxo-consulta-nome"></div>
+          <div class="tvig-filter-slot fluxo-consulta-resp">
             <label class="tvig-comp-label" for="fluxo-filtro-resp">Responsável</label>
             <select id="fluxo-filtro-resp" class="form-control" onchange="FluxosProcesso.state.filtroResp = this.value">
               <option value="">Todos</option>
@@ -283,6 +355,8 @@ const FluxosProcesso = {
       <p style="margin: 0 0 10px; color: #64748b; font-size: 0.85rem;">Quem cria o fluxo é o responsável. O supervisor dele também edita e pode trocar o responsável. Copiar gera um fluxo seu, para ajustar sem começar do zero.</p>
       <div id="fluxos-processo-results"></div>
     </div>`;
+    this.bindFiltroNome();
+    this.pintarFiltroNome();
     this.renderLista();
     if (window.lucide) window.lucide.createIcons();
   },
@@ -404,20 +478,26 @@ const FluxosProcesso = {
     if (editor) editor.style.display = "";
     const fluxo = this.fluxoAberto();
     if (!fluxo || !topo) return;
+    const nomeVivo = document.getElementById("fluxo-nome");
+    if (nomeVivo && document.activeElement === nomeVivo) fluxo.nome = nomeVivo.value;
     const troca = !this.state.leitura && this.podeTrocar(fluxo);
     const pessoas = this.usuarios().map((u) => {
       const sel = this.pessoaBate(u, fluxo.responsavelEmail, fluxo.responsavelNome) ? " selected" : "";
       return `<option value="${this.esc(u.email || u.id)}"${sel}>${this.esc(u.name || u.sienge_user || u.email)}</option>`;
     }).join("");
+    this._pintandoTopo = true;
     topo.innerHTML = `<div class="fluxo-topo">
-      <button type="button" class="btn btn-outline" onclick="FluxosProcesso.fechar()">Voltar</button>
-      <label>Nome do fluxo
-        <input id="fluxo-nome" value="${this.esc(fluxo.nome)}" ${this.state.leitura ? "disabled" : ""} oninput="FluxosProcesso.renomear(this.value)">
+      <button type="button" class="btn btn-outline fluxo-voltar" onclick="FluxosProcesso.fechar()">Voltar</button>
+      <label class="fluxo-campo fluxo-campo-nome">Nome do fluxo
+        <input id="fluxo-nome" value="${this.esc(fluxo.nome)}" ${this.state.leitura ? "disabled" : ""}>
       </label>
-      <div class="fluxo-meta"><span>Responsável</span>${this.esc(fluxo.responsavelNome || "—")}</div>
-      <div class="fluxo-meta"><span>Supervisor</span>${this.esc(fluxo.supervisorNome || "—")}</div>
-      ${troca ? `<label>Trocar responsável<select onchange="FluxosProcesso.trocarResponsavel(this.value)">${pessoas}</select></label>` : ""}
+      <div class="fluxo-campo fluxo-campo-pessoa"><span>Responsável</span><div class="fluxo-valor" title="${this.esc(fluxo.responsavelNome || "")}">${this.esc(fluxo.responsavelNome || "—")}</div></div>
+      <div class="fluxo-campo fluxo-campo-pessoa"><span>Supervisor</span><div class="fluxo-valor" title="${this.esc(fluxo.supervisorNome || "")}">${this.esc(fluxo.supervisorNome || "—")}</div></div>
+      ${troca ? `<label class="fluxo-campo fluxo-campo-troca">Trocar responsável<select onchange="FluxosProcesso.trocarResponsavel(this.value)">${pessoas}</select></label>` : ""}
     </div>`;
+    this._pintandoTopo = false;
+    const nomeEl = document.getElementById("fluxo-nome");
+    if (nomeEl && !nomeEl.disabled) nomeEl.addEventListener("input", () => this.renomear(nomeEl.value));
     const add = document.getElementById("fluxo-add-etapa");
     if (add) add.style.display = this.state.leitura ? "none" : "";
     if (typeof window.renderEtapasJudiciais === "function") window.renderEtapasJudiciais();
@@ -425,9 +505,14 @@ const FluxosProcesso = {
   },
 
   renomear(valor) {
+    if (this._pintandoTopo) return;
     const fluxo = this.fluxoAberto();
     if (!fluxo || this.state.leitura) return;
-    fluxo.nome = String(valor || "");
+    const texto = String(valor == null ? "" : valor);
+    const el = document.getElementById("fluxo-nome");
+    if (!texto.trim() && String(fluxo.nome || "").trim() && (!el || document.activeElement !== el)) return;
+    if (texto === String(fluxo.nome || "")) return;
+    fluxo.nome = texto;
     fluxo.updatedAt = Date.now();
     this.persistir();
   },

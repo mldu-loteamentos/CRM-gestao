@@ -13,7 +13,9 @@ const RepactuacaoLoteApp = {
   state: {
     inited: false,
     fileName: "",
+    fileMonth: "",
     salvo: null,
+    planilhas: {},
     salvando: false,
     loading: false,
     stop: false,
@@ -237,13 +239,36 @@ const RepactuacaoLoteApp = {
   },
 
   setAdjustMonth(ym) {
+    const antes = this.state.adjustMonth;
     this.applyAdjustMonthToState(ym);
-    if (this.state.rows.length) {
+    if (antes !== this.state.adjustMonth) {
+      this.state._confGen = (this.state._confGen || 0) + 1;
+      this.state.stop = true;
+      this.state.fileName = "";
+      this.state.fileMonth = "";
+      this.state.rows = [];
+      this.state.bills = {};
+      this.state.loading = false;
+      this.state.stop = false;
+      this.state.filter = "all";
+      this.state.abertos = {};
+      this.state.progresso = 0;
+      this.state.filtroEmp = [];
+      this.state.filtroObra = [];
+      this.state.filtroIdx = [];
+      this.aplicarPlanilhaDaCompetencia();
+    } else if (this.state.rows.length && this.state.fileMonth === this.state.adjustMonth) {
       this.applyIndexerLogic();
       this.conferirSienge();
     }
     this.render();
     this.loadIndexerPreview();
+  },
+
+  aplicarPlanilhaDaCompetencia() {
+    const ym = this.state.adjustMonth || "";
+    const item = ym && this.state.planilhas ? this.state.planilhas[ym] : null;
+    this.state.salvo = item && item.url ? item : null;
   },
 
   monthLabel(ym) {
@@ -478,6 +503,7 @@ const RepactuacaoLoteApp = {
   async loadFile(file, opts) {
     const jaSalva = !!(opts && opts.jaSalva);
     this.state.fileName = file.name;
+    this.state.fileMonth = this.state.adjustMonth || "";
     this.state.loading = true;
     this.state.stop = false;
     this.render();
@@ -813,6 +839,8 @@ const RepactuacaoLoteApp = {
   },
 
   async conferirSienge() {
+    const gen = (this.state._confGen = (this.state._confGen || 0) + 1);
+    const vivo = () => this.state._confGen === gen && !this.state.stop;
     this.state.loading = true;
     this.state.progresso = 8;
     this.render();
@@ -827,6 +855,7 @@ const RepactuacaoLoteApp = {
       } catch (e) {
         console.warn("[Repactuação] série BCB planilha", idx && idx.name, e);
       }
+      if (!vivo()) return;
       this.state.rows = this.state.rows.map((row) => {
         if (String(row.indexerId) !== String(id) || !row.expectedBase) return row;
         const acc = this.accumulated12(rates, row.expectedBase);
@@ -839,21 +868,24 @@ const RepactuacaoLoteApp = {
     let done = 0;
     const total = titles.length || 1;
     for (let i = 0; i < titles.length; i += concurrency) {
-      if (this.state.stop) break;
+      if (!vivo()) break;
       const chunk = titles.slice(i, i + concurrency);
       await Promise.all(chunk.map(async (titulo) => {
-        if (this.state.stop) return;
+        if (!vivo()) return;
         const billP = this.fetchBill(titulo);
         let insts = [];
         try {
           insts = await this.fetchInstallments(titulo);
+          if (!vivo()) return;
           this.applyTitleInstallments(titulo, insts);
         } catch (e) {
           console.warn("[Repactuação] título", titulo, e);
         }
         try {
           const bill = await billP;
+          if (!vivo()) return;
           const info = await this.completarCadastro(this.lerCadastro(bill, insts));
+          if (!vivo()) return;
           this.applyCadastro(titulo, info);
         } catch (e) {
           console.warn("[Repactuação] cadastro", titulo, e);
@@ -864,6 +896,7 @@ const RepactuacaoLoteApp = {
         }
       }));
     }
+    if (!vivo()) return;
     this.state.loading = false;
     this.state.progresso = 100;
     this.render();
@@ -1045,6 +1078,7 @@ const RepactuacaoLoteApp = {
       this.state.stop = true;
     }
     this.state.fileName = "";
+    this.state.fileMonth = "";
     this.state.rows = [];
     this.state.bills = {};
     this.state.loading = false;
@@ -1067,15 +1101,21 @@ const RepactuacaoLoteApp = {
       const snap = await fc.getDoc(fc.doc(window.firebaseDb, "config", "repactuacao_planilha"));
       if (!snap || typeof snap.exists !== "function" || !snap.exists()) return;
       const d = snap.data() || {};
-      if (!d.url || !d.name) return;
-      this.state.salvo = {
-        name: String(d.name),
-        url: String(d.url),
-        path: String(d.path || ""),
-        savedAt: String(d.savedAt || ""),
-        parcelas: Number(d.parcelas) || 0,
-        titulos: Number(d.titulos) || 0
-      };
+      const porMes = Object.assign({}, d.porMes && typeof d.porMes === "object" ? d.porMes : {});
+      const mesAntigo = String(d.adjustMonth || "");
+      if (d.url && d.name && /^\d{4}-\d{2}$/.test(mesAntigo) && !porMes[mesAntigo]) {
+        porMes[mesAntigo] = {
+          name: String(d.name),
+          url: String(d.url),
+          path: String(d.path || ""),
+          savedAt: String(d.savedAt || ""),
+          parcelas: Number(d.parcelas) || 0,
+          titulos: Number(d.titulos) || 0,
+          adjustMonth: mesAntigo
+        };
+      }
+      this.state.planilhas = porMes;
+      this.aplicarPlanilhaDaCompetencia();
       if (!this.state.fileName) this.render();
     } catch (e) {
       console.warn("[Repactuação] planilha salva", e);
@@ -1085,9 +1125,11 @@ const RepactuacaoLoteApp = {
   async salvarPlanilha(file, buf) {
     const fc = window.firebaseCollections;
     if (!window.firebaseStorage || !window.firebaseDb || !fc || !fc.ref || !fc.uploadBytes || !fc.getDownloadURL || !fc.setDoc) return;
+    const ym = this.state.adjustMonth || "";
+    if (!/^\d{4}-\d{2}$/.test(ym)) return;
     this.state.salvando = true;
     try {
-      const path = "repactuacao/planilha-titulos.xlsx";
+      const path = "repactuacao/" + ym + "/planilha-titulos.xlsx";
       const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
       await fc.uploadBytes(fc.ref(window.firebaseStorage, path), blob, { contentType: blob.type });
       const url = await fc.getDownloadURL(fc.ref(window.firebaseStorage, path));
@@ -1098,16 +1140,40 @@ const RepactuacaoLoteApp = {
         savedAt: new Date().toISOString(),
         parcelas: this.state.rows.length,
         titulos: new Set(this.state.rows.map((r) => r.titulo)).size,
-        adjustMonth: this.state.adjustMonth || ""
+        adjustMonth: ym
       };
-      await fc.setDoc(fc.doc(window.firebaseDb, "config", "repactuacao_planilha"), salvo);
+      const ref = fc.doc(window.firebaseDb, "config", "repactuacao_planilha");
+      let porMes = Object.assign({}, this.state.planilhas || {});
+      try {
+        const snap = await fc.getDoc(ref);
+        if (snap && typeof snap.exists === "function" && snap.exists()) {
+          const d = snap.data() || {};
+          porMes = Object.assign({}, d.porMes && typeof d.porMes === "object" ? d.porMes : {}, porMes);
+          const mesAntigo = String(d.adjustMonth || "");
+          if (d.url && d.name && /^\d{4}-\d{2}$/.test(mesAntigo) && !porMes[mesAntigo]) {
+            porMes[mesAntigo] = {
+              name: String(d.name),
+              url: String(d.url),
+              path: String(d.path || ""),
+              savedAt: String(d.savedAt || ""),
+              parcelas: Number(d.parcelas) || 0,
+              titulos: Number(d.titulos) || 0,
+              adjustMonth: mesAntigo
+            };
+          }
+        }
+      } catch (e) {}
+      porMes[ym] = salvo;
+      await fc.setDoc(ref, { porMes: porMes }, { merge: true });
+      this.state.planilhas = porMes;
       this.state.salvo = salvo;
+      this.state.fileMonth = ym;
     } catch (e) {
       console.warn("[Repactuação] salvar planilha", e);
     }
     this.state.salvando = false;
     const meta = document.querySelector("#repactuacao-lote-root .repac-arquivo-meta");
-    if (meta) meta.textContent = this.state.salvo ? "salva" : "";
+    if (meta) meta.textContent = this.state.salvo && this.state.salvo.adjustMonth === this.state.adjustMonth ? "Salva nesta competência" : "";
   },
 
   async abrirSalva() {
@@ -1378,21 +1444,40 @@ const RepactuacaoLoteApp = {
 
   uploadZoneHtml() {
     const salvo = this.state.salvo;
+    const aberto = !!this.state.fileName;
     const quando = salvo && salvo.savedAt ? this.fmtDate(String(salvo.savedAt).slice(0, 10)) : "";
     const input = `<input type="file" id="repac-input-excel" accept=".xlsx,.xls" style="display:none;">`;
-    const nome = this.state.fileName || (salvo && salvo.name) || "";
-    const meta = this.state.fileName
-      ? (this.state.salvando ? "salvando…" : (salvo && salvo.name === this.state.fileName ? "salva" : ""))
-      : (salvo && salvo.url ? ("salva" + (quando ? " em " + quando : "")) : "");
-    return `
-      <div class="repac-arquivo${this.state.fileName || (salvo && salvo.url) ? "" : " is-empty"}" ${this.state.fileName || (salvo && salvo.url) ? "" : "id=\"repac-dropzone\""}>
+    if (!aberto && !(salvo && salvo.url)) {
+      return `
+      <div class="repac-arquivo is-empty" id="repac-dropzone">
         <i data-lucide="file-spreadsheet"></i>
-        <span class="repac-arquivo-nome" title="${this.esc(nome)}">${this.esc(nome || "Enviar planilha .xlsx")}</span>
-        ${meta ? `<span class="repac-arquivo-meta">${meta}</span>` : ""}
-        ${this.state.fileName ? `<button type="button" class="repac-arquivo-btn" title="Escolher outro arquivo .xlsx" onclick="document.getElementById('repac-input-excel').click()">Enviar outra</button>
-          <button type="button" class="repac-arquivo-btn" onclick="RepactuacaoLoteApp.clearFile()">Remover</button>` : ""}
-        ${!this.state.fileName && salvo && salvo.url ? `<button type="button" class="repac-arquivo-btn repac-arquivo-btn-go" title="Conferir a planilha já salva" onclick="RepactuacaoLoteApp.abrirSalva()">Conferir salva</button>
-          <button type="button" class="repac-arquivo-btn" title="Escolher outro arquivo .xlsx" onclick="document.getElementById('repac-input-excel').click()">Enviar outra</button>` : ""}
+        <span class="repac-arquivo-nome">Enviar planilha .xlsx</span>
+        ${input}
+      </div>`;
+    }
+    if (aberto) {
+      const meta = this.state.salvando ? "Salvando…" : (salvo && salvo.name === this.state.fileName ? "Salva nesta competência" : "");
+      return `
+      <div class="repac-arquivo">
+        <i data-lucide="file-spreadsheet"></i>
+        <span class="repac-arquivo-nome" title="${this.esc(this.state.fileName)}">${this.esc(this.state.fileName)}</span>
+        ${meta ? `<span class="repac-arquivo-meta">${this.esc(meta)}</span>` : ""}
+        <span class="repac-arquivo-acoes">
+          <button type="button" class="repac-arquivo-btn" title="Escolher outro arquivo .xlsx" onclick="document.getElementById('repac-input-excel').click()">Enviar outra</button>
+          <button type="button" class="repac-arquivo-btn" onclick="RepactuacaoLoteApp.clearFile()">Remover</button>
+        </span>
+        ${input}
+      </div>`;
+    }
+    return `
+      <div class="repac-arquivo">
+        <i data-lucide="file-spreadsheet"></i>
+        <span class="repac-arquivo-nome" title="${this.esc(salvo.name)}">${this.esc(salvo.name)}</span>
+        <span class="repac-arquivo-meta">${quando ? "Salva em " + this.esc(quando) : "Salva nesta competência"}</span>
+        <span class="repac-arquivo-acoes">
+          <button type="button" class="repac-arquivo-btn repac-arquivo-btn-go" title="Abrir a planilha desta competência" onclick="RepactuacaoLoteApp.abrirSalva()">Conferir planilha</button>
+          <button type="button" class="repac-arquivo-btn" title="Escolher outro arquivo .xlsx" onclick="document.getElementById('repac-input-excel').click()">Enviar outra</button>
+        </span>
         ${input}
       </div>`;
   },

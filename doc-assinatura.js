@@ -235,6 +235,7 @@ const DocAssinaturaApp = {
     if (nuvem.length || !this.aviso) this.gravarLocal(this.itens);
     this.carregando = false;
     this.pintar();
+    this.reconciliarDistratos();
   },
 
   abrir() {
@@ -268,10 +269,88 @@ const DocAssinaturaApp = {
 
   visiveis() {
     return this.itens.filter((row) => {
+      if (row && row.status === "lancado") return false;
       if (this.tipo && row.tipo !== this.tipo) return false;
       if (this.vista === "meus" && !this.mesmoUsuario(row)) return false;
       return true;
     });
+  },
+
+  nomeUnidade(row) {
+    const u = String((row && row.unidade) || "").trim();
+    const cc = this.centroDe(row);
+    if (/^U-\d+/i.test(u)) {
+      const rest = u.replace(/^U-/i, "");
+      if (cc && rest.indexOf(cc + "-") === 0) return rest.slice(cc.length + 1).replace(/-/g, " ");
+      const partes = rest.split("-");
+      return partes.slice(1).join("-").replace(/-/g, " ") || rest;
+    }
+    if (u.indexOf(" - ") >= 0) return u.split(" - ").slice(1).join(" - ").trim();
+    return u;
+  },
+
+  normUn(v) {
+    return String(v || "").replace(/[\s-]+/g, "").toUpperCase();
+  },
+
+  async temDistratoGravado(row) {
+    if (!row || row.tipo !== "distrato") return false;
+    const centro = this.centroDe(row);
+    const un = this.normUn(this.nomeUnidade(row));
+    const titulo = String(row.titulo || "").replace(/\D/g, "");
+    if (centro && typeof window.anexosLoadMapaEnvios === "function") {
+      this._mapas = this._mapas || {};
+      if (!this._mapas[centro]) this._mapas[centro] = await window.anexosLoadMapaEnvios(centro);
+      const mapa = this._mapas[centro] || {};
+      const noIntegra = Object.keys(mapa).some((k) => {
+        const rec = mapa[k];
+        if (!rec || String(rec.tag || k.split("_").pop() || "").toUpperCase() !== "DISTRATO") return false;
+        const nome = this.normUn(rec.unitName || rec.unidade || "");
+        const ids = [rec.contractId, rec.contractNumber, rec.receivableBillId, rec.titulo].map((v) => String(v || "").replace(/\D/g, ""));
+        if (titulo && ids.indexOf(titulo) >= 0) return true;
+        return !!(un && nome && (nome === un || nome.indexOf(un) >= 0 || un.indexOf(nome) >= 0));
+      });
+      if (noIntegra) return true;
+    }
+    if (!centro || !un || typeof window.anexosFindSiengeUnitId !== "function" || typeof window.siengeFetchWithRetry !== "function") return false;
+    const cacheKey = centro + "|" + un;
+    this._siengeDistrato = this._siengeDistrato || {};
+    if (Object.prototype.hasOwnProperty.call(this._siengeDistrato, cacheKey)) return this._siengeDistrato[cacheKey];
+    let achou = false;
+    try {
+      const unitId = await window.anexosFindSiengeUnitId(null, centro, this.nomeUnidade(row));
+      if (!unitId) return false;
+      const res = await window.siengeFetchWithRetry("/units/" + encodeURIComponent(unitId) + "/attachments?limit=200&offset=0");
+      const rows = (res && (res.results || res.data)) || (Array.isArray(res) ? res : []);
+      achou = (Array.isArray(rows) ? rows : []).some((a) => /DISTRATO/i.test(String((a && (a.description || a.name || a.fileName)) || "")));
+      this._siengeDistrato[cacheKey] = achou;
+    } catch (e) {}
+    return achou;
+  },
+
+  async marcarLancado(row) {
+    if (!row || row.status === "lancado") return;
+    row.status = "lancado";
+    const id = String(row.id || "");
+    this.gravarLocal(this.lerLocal().map((x) => (String(x.id) === id ? Object.assign({}, x, { status: "lancado" }) : x)));
+    const fx = window.firebaseCollections;
+    const db = window.firebaseDb;
+    if (!fx || !db || !fx.updateDoc || !fx.doc || id.indexOf("local-") === 0) return;
+    try { await fx.updateDoc(fx.doc(db, this.COL, id), { status: "lancado" }); } catch (e) {}
+  },
+
+  async reconciliarDistratos() {
+    if (this._reconciliando) return this._reconciliando;
+    const pendentes = (this.itens || []).filter((r) => r && r.tipo === "distrato" && r.status !== "lancado");
+    this._reconciliando = (async () => {
+      for (let i = 0; i < pendentes.length; i++) {
+        let gravado = false;
+        try { gravado = await this.temDistratoGravado(pendentes[i]); } catch (e) { gravado = false; }
+        if (gravado) await this.marcarLancado(pendentes[i]);
+      }
+      if (document.getElementById("docs-ass-body")) this.pintar();
+    })();
+    try { await this._reconciliando; } finally { this._reconciliando = null; }
   },
 
   ordenar(lista) {
@@ -296,7 +375,7 @@ const DocAssinaturaApp = {
   },
 
   th(key, label) {
-    return `<th onclick="DocAssinaturaApp.toggleSort('${key}')" style="cursor:pointer;user-select:none;">${label} <i data-lucide="chevrons-up-down" style="width:11px;vertical-align:middle;"></i></th>`;
+    return `<th onclick="DocAssinaturaApp.toggleSort('${key}')" style="cursor:pointer;user-select:none;">${label} <i data-lucide="chevrons-up-down" style="width:11px;vertical-align:middle;color:currentColor;"></i></th>`;
   },
 
   pintar() {
@@ -350,7 +429,7 @@ const DocAssinaturaApp = {
       return `<tr class="docs-obra"><td colspan="8">${this.esc(rotulo)} <span>${lista.length}</span></td></tr>${lista.map(linha).join("")}`;
     }).join("");
     const tabela = rows.length
-      ? `<div class="docs-wrap"><table class="docs-table">
+      ? `<div class="cc-scroll"><table class="cc-table docs-cc-table">
           <thead><tr>
             ${this.th("quando", "Quando")}
             ${this.th("tipo", "Documento")}
@@ -359,14 +438,14 @@ const DocAssinaturaApp = {
             ${this.th("unidade", "Unidade")}
             ${this.th("quem", "Gerado por")}
             <th>Situação</th>
-            <th class="docs-acoes">Ações</th>
+            <th class="is-center">Ações</th>
           </tr></thead>
           <tbody>${corpo}</tbody>
         </table></div>`
       : `<p class="docs-vazio">Nenhum documento nesta visão.</p>`;
     body.innerHTML = `
       ${aviso}
-      <div class="docs-bar">
+      <div class="cc-toolbar">
         ${tabs}
         <label class="docs-filtro">Documento
           <select class="form-control" onchange="DocAssinaturaApp.setTipo(this.value)">${opts}</select>
