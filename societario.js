@@ -583,14 +583,8 @@ const SocietarioApp = {
       const de = this.garantirCaixaEmpresa(destino);
       const para = this.garantirCaixaEmpresa(origem);
       if (!de || !para || de.id === para.id) return;
-      const atual = (this.graph.links || []).find((l) => l.to === para.id);
-      if (atual) {
-        if (atual.from !== de.id) {
-          atual.from = de.id;
-          mudou = true;
-        }
-        return;
-      }
+      const mesmoPar = (this.graph.links || []).find((l) => l.from === de.id && l.to === para.id);
+      if (mesmoPar) return;
       let pct = 0;
       const cadeia = window.ContabilEquiv && Array.isArray(ContabilEquiv.CADEIA) ? ContabilEquiv.CADEIA : [];
       const conhecido = cadeia.find((p) => String(p.origem) === origem && String(p.destino) === destino);
@@ -796,7 +790,7 @@ const SocietarioApp = {
       const a = this.entity(link.from);
       const b = this.entity(link.to);
       if (!a || !b) return;
-      const tra = this.tracoDaLigacao(a, b);
+      const tra = this.tracoDaLigacao(a, b, link);
       const sel = this.selectedLinkId === link.id;
       const stroke = sel ? "#f59e0b" : "#105436";
       parts.push(`<path d="${tra.d}" fill="none" stroke="${stroke}" stroke-width="${sel ? 3.5 : 2.2}" marker-end="url(#soc-arrow)"/>`);
@@ -883,11 +877,12 @@ const SocietarioApp = {
           const sobCursor = this.nodeAtPoint(this.canvasPoint(ev));
           if (sobCursor && sobCursor !== this._connect.from) toId = sobCursor;
           const from = this._connect.from;
+          const port = this._connect.port;
           this._connect = null;
           this._tempLine = null;
           this.linkMode = false;
           this.redrawEdges();
-          if (toId && from && toId !== from) this.beginLink(from, toId);
+          if (toId && from && toId !== from) this.beginLink(from, toId, port);
           return;
         }
         if (this._drag) {
@@ -914,8 +909,10 @@ const SocietarioApp = {
         if (ev.target.classList.contains("soc-port")) {
           ev.preventDefault();
           ev.stopPropagation();
-          const pt = this.canvasPoint(ev);
-          this._connect = { from: id, x1: pt.x, y1: pt.y };
+          const port = ev.target.classList.contains("soc-port-bottom") ? "bottom" : "top";
+          const ent = this.entity(id);
+          const saida = ent ? this.borda(ent, port) : this.canvasPoint(ev);
+          this._connect = { from: id, port: port, x1: saida.x, y1: saida.y };
           this.linkMode = true;
           startTrack();
           return;
@@ -937,7 +934,7 @@ const SocietarioApp = {
     });
   },
 
-  beginLink(from, to) {
+  beginLink(from, to, port) {
     const a = this.entity(from);
     const b = this.entity(to);
     if ((a && a.kind === "pf") || (b && b.kind === "pf")) {
@@ -952,7 +949,7 @@ const SocietarioApp = {
     this.selectedLinkId = "";
     this.selectedId = null;
     this.panel = "link";
-    this._pendingLink = { from, to, pct: 0, note: "" };
+    this._pendingLink = { from, to, pct: 0, note: "", fromPort: port === "top" || port === "bottom" ? port : "" };
     this._linkFrom = from || "";
     this._linkTo = to || "";
     this.linkFromOpen = false;
@@ -979,20 +976,17 @@ const SocietarioApp = {
     return (this.graph.links || []).some((l) => l.from === this.graph.hubId && l.to === id);
   },
 
-  /* A Moura Leite continua dona única. Uma holding pode ligar de novo uma empresa que já é da Moura Leite. */
+  /* A Moura Leite liga cada empresa uma vez. Holding liga em quantas empresas quiser. */
   participadaOcupada(companyId, excetoLinkId, deId) {
     const id = String(companyId || "");
     if (!id) return false;
     const de = deId ? this.entity(deId) : null;
-    const holding = de && !this.ehCentro(de);
+    if (!de || !this.ehCentro(de)) return false;
     return (this.graph.links || []).some((l) => {
       if (excetoLinkId && l.id === excetoLinkId) return false;
       if (this.idsDaLigacao(l).para !== id) return false;
-      if (holding) {
-        const dono = this.entity(l.from);
-        if (dono && this.ehCentro(dono)) return false;
-      }
-      return true;
+      const dono = this.entity(l.from);
+      return !!(dono && this.ehCentro(dono));
     });
   },
 
@@ -1002,31 +996,26 @@ const SocietarioApp = {
     return lado === "top" ? { x: x, y: y } : { x: x, y: y + this.NODE_H };
   },
 
-  tracoDaLigacao(de, para) {
-    const cp = this.nodeCenter(para);
-    const sobe = cp.y < Number(de.y);
-    const p1 = this.borda(de, sobe ? "top" : "bottom");
-    const p2 = this.borda(para, sobe ? "bottom" : "top");
-    if (sobe && !this.ehCentro(de)) return this.tracoPorFora(de, para);
-    const c1y = p1.y + (p2.y - p1.y) * 0.35;
-    const c2y = p1.y + (p2.y - p1.y) * 0.65;
+  tracoDaLigacao(de, para, link) {
+    let sai = link && (link.fromPort === "top" || link.fromPort === "bottom") ? link.fromPort : "";
+    if (!sai) {
+      const meio = (Number(de.y) || 0) + this.NODE_H / 2;
+      sai = this.nodeCenter(para).y < meio ? "top" : "bottom";
+    }
+    const p1 = this.borda(de, sai);
+    const topo = this.borda(para, "top");
+    const base = this.borda(para, "bottom");
+    const perto = (p) => (p.x - p1.x) * (p.x - p1.x) + (p.y - p1.y) * (p.y - p1.y);
+    const p2 = perto(topo) <= perto(base) ? topo : base;
+    const entraPorCima = p2.y === topo.y;
+    const folga = Math.max(28, Math.min(72, Math.abs(p2.y - p1.y) * 0.45 + 20));
+    const c1y = p1.y + (sai === "top" ? -folga : folga);
+    const c2y = p2.y + (entraPorCima ? -folga : folga);
     return {
       d: `M ${p1.x} ${p1.y} C ${p1.x} ${c1y}, ${p2.x} ${c2y}, ${p2.x} ${p2.y}`,
       lx: (p1.x + p2.x) / 2,
       ly: (p1.y + p2.y) / 2
     };
-  },
-
-  tracoPorFora(de, para) {
-    const sai = this.borda(de, "bottom");
-    const entra = this.borda(para, "bottom");
-    const desce = sai.y + 16;
-    const xs = (this.graph.entities || []).map((e) => Number(e.x) || 0);
-    const minX = xs.length ? Math.min.apply(null, xs) : 40;
-    const maxR = xs.length ? Math.max.apply(null, xs) + this.NODE_W : 400;
-    const gutter = sai.x < (minX + maxR) / 2 ? Math.max(8, minX - 28) : maxR + 28;
-    const d = `M ${sai.x} ${sai.y} L ${sai.x} ${desce} L ${gutter} ${desce} L ${gutter} ${entra.y} L ${entra.x} ${entra.y}`;
-    return { d: d, lx: (gutter + entra.x) / 2, ly: entra.y };
   },
 
   colocarFileiraAcima(de, row) {
@@ -1498,14 +1487,14 @@ const SocietarioApp = {
           <strong id="soc-link-title">Interligação (participação)</strong>
           <button type="button" class="btn btn-fechar" onclick="SocietarioApp.closePanel()">Fechar</button>
         </div>
-        <p class="soc-link-help">Escolha duas empresas do cadastro, pelo nome completo, em ordem de id. Pessoa física não entra aqui. A holding pode participar de várias empresas, inclusive de uma que já é da Moura Leite. Essa empresa sobe para cima da holding, para a linha não atravessar as ligações da empresa 1. O mesmo par não se repete. <span id="soc-link-contas-nota">${this.esc(notaContas)}</span></p>
+        <p class="soc-link-help">Escolha duas empresas do cadastro, pelo nome completo, em ordem de id. Pessoa física não entra aqui. A holding liga em várias empresas, inclusive nas que a Moura Leite já participa. A linha sai da bolinha que você puxou. O mesmo par não se repete. <span id="soc-link-contas-nota">${this.esc(notaContas)}</span></p>
         <div class="soc-link-grid">
           <div style="${this.lbl}">De (sócio / holding)
             ${this.hint("Quem possui a participação. Holding interna e SPE sócio entram aqui, mesmo sem caixa no organograma.")}
             <div id="soc-lnk-from-box"></div>
           </div>
           <div style="${this.lbl}">Para (participada)
-            ${this.hint("Quem recebe a participação. A Moura Leite liga cada uma uma vez. Uma holding pode ligar de novo uma empresa que já é da Moura Leite.")}
+            ${this.hint("Quem recebe a participação. A Moura Leite liga cada empresa uma vez. Uma holding liga em várias.")}
             <div id="soc-lnk-to-box"></div>
           </div>
         </div>
@@ -1917,8 +1906,8 @@ const SocietarioApp = {
     const app = window.ParametrizacaoParceiroApp;
     const sociedade = app && app.isSociedade && app.isSociedade(p);
     const mista = app && app.isMista && app.isMista(p);
-    const pj = this.ehPessoaJuridica(p.partnerName, p.creditor && p.creditor.cpfCnpj);
     const tipo = mista ? "Mista" : (sociedade ? "Sociedade" : "Parceria");
+    const clsParceiro = sociedade || mista ? "is-pj" : "is-pf";
     const obras = (p.obras || []).slice().sort((a, b) => String(a.code).localeCompare(String(b.code), "pt-BR", { numeric: true }));
     const caixas = mista || sociedade ? [] : obras.flatMap((o) => this.caixasParceriaDaObra(o, p.companyId));
     const kids = mista
@@ -1926,7 +1915,7 @@ const SocietarioApp = {
       : (!sociedade && caixas.length
         ? `<ul>${caixas.map(c => `<li><span class="soc-tree-pct">${this.esc(c.pct)}</span>${this.caixaHtml(c.id, c.nome ? `<small>${this.esc(c.nome)}</small>` : "", "is-cc")}</li>`).join("")}</ul>`
         : "");
-    return `<li><div class="soc-tree-lado"><div class="soc-tree-lado-titulo">${tipo}</div>${this.caixaHtml(p.partnerName || "Sem nome", "", pj ? "is-pj" : "is-pf")}${kids}${this.listasDaParceria(p)}</div></li>`;
+    return `<li><div class="soc-tree-lado"><div class="soc-tree-lado-titulo">${tipo}</div>${this.caixaHtml(p.partnerName || "Sem nome", "", clsParceiro)}${kids}${this.listasDaParceria(p)}</div></li>`;
   },
 
   parceriaHtml() {
@@ -1946,9 +1935,6 @@ const SocietarioApp = {
     }).join("");
     const itens = atual.itens.slice().sort((a, b) => String(a.partnerName || "").localeCompare(String(b.partnerName || ""), "pt-BR"));
     return `<div class="soc-page">
-      <div class="soc-toolbar">
-        <p class="soc-help">A caixa de cima é a empresa, no centro da estrutura. Embaixo, cada parceria ou sociedade. Na parceria, só o centro de custo com parceiro no nome. Na sociedade, os centros dos sócios ficam só na tabela. Na mista, o empreendedor e o terrenista ficam separados, cada um com o seu centro de custo. Arraste o quadro para o lado para ver quem fica à direita.</p>
-      </div>
       <div class="ml-tabs soc-emp-tabs" role="tablist">${abas}</div>
       <div class="soc-stage">
         <div class="soc-canvas-wrap">
@@ -2029,7 +2015,7 @@ const SocietarioApp = {
       }).filter(Boolean);
       netos.sort((a, b) => (Number(a.ent.x) || 0) - (Number(b.ent.x) || 0));
       const nota = [l.note, ent.note].map((s) => String(s || "").trim()).filter(Boolean).join(" ");
-      return { ent: ent, pct: Number(l.pct) || 0, note: nota, netos: netos.slice(0, 2) };
+      return { ent: ent, pct: Number(l.pct) || 0, note: nota, netos: netos };
     }).filter(Boolean);
     filhos.sort((a, b) => (Number(a.ent.x) || 0) - (Number(b.ent.x) || 0));
     return { hub: hub, socios: socios, filhos: filhos };
@@ -2039,7 +2025,10 @@ const SocietarioApp = {
     const partes = [];
     if (filho.note) partes.push(filho.note);
     if (filho.netos.length) {
-      const meio = filho.netos.map((n) => this.fmtPdfPct(n.pct) + " na " + this.nomePdf(n.ent)).join(" e ");
+      const partesNeto = filho.netos.map((n) => this.fmtPdfPct(n.pct) + " na " + this.nomePdf(n.ent));
+      const meio = partesNeto.length < 2
+        ? (partesNeto[0] || "")
+        : partesNeto.slice(0, -1).join(", ") + " e " + partesNeto[partesNeto.length - 1];
       partes.push(this.nomePdf(hub) + " tem " + this.fmtPdfPct(filho.pct) + " na " + this.nomePdf(filho.ent) + ", que por sua vez tem " + meio + ".");
     }
     return partes.join(" ");
@@ -2058,19 +2047,30 @@ const SocietarioApp = {
     const pad = 26;
     const frameW = inner + pad * 2;
     const headerH = 58;
-    const yOwn = headerH + 10;
-    const yBusTop = yOwn + boxH + 20;
-    const yHub = yBusTop + 14;
     const hubW = 210;
     const hubH = 46;
-    const yBusBot = yHub + hubH + 18;
-    const yChild = yBusBot + 26;
     const maxNetos = filhos.reduce((m, f) => Math.max(m, f.netos.length), 0);
     const netoH = 56;
-    const yNeto = yChild + boxH + 24;
-    const depois = maxNetos ? (yNeto + maxNetos * netoH + (maxNetos - 1) * 16) : (yChild + boxH);
-    const yNota = depois + 14;
-    const frameH = yNota + 86;
+    const yOwn0 = headerH + 10;
+    const yBusTop0 = yOwn0 + boxH + 20;
+    const yHub0 = yBusTop0 + 14;
+    const yBusBot0 = yHub0 + hubH + 18;
+    const yChild0 = yBusBot0 + 26;
+    const yNeto0 = yChild0 + boxH + 24;
+    const depois0 = maxNetos ? (yNeto0 + maxNetos * netoH + (maxNetos - 1) * 16) : (yChild0 + boxH);
+    const yNota0 = depois0 + 14;
+    const naturalFim = yNota0 + 48;
+    const ratioAlvo = 297 / 210;
+    const frameH = Math.max(naturalFim, Math.round(frameW / ratioAlvo));
+    const sobra = frameH - naturalFim;
+    const empurra = (y) => Math.round(y + sobra * ((y - headerH) / Math.max(1, naturalFim - headerH)));
+    const yOwn = empurra(yOwn0);
+    const yBusTop = empurra(yBusTop0);
+    const yHub = empurra(yHub0);
+    const yBusBot = empurra(yBusBot0);
+    const yChild = empurra(yChild0);
+    const yNeto = empurra(yNeto0);
+    const yNota = empurra(yNota0);
     const topStart = pad + (inner - topW) / 2;
     const botStart = pad + (inner - botW) / 2;
     const hubX = pad + (inner - hubW) / 2;
@@ -2151,7 +2151,10 @@ const SocietarioApp = {
     }
     const btn = document.querySelector(".soc-pdf-btn");
     this._pdf = true;
-    if (btn) btn.disabled = true;
+    if (btn) {
+      btn.disabled = true;
+      btn.classList.add("is-busy");
+    }
     const page = document.createElement("div");
     page.style.cssText = "position:fixed;left:-14000px;top:0;background:#fff;z-index:0;";
     page.innerHTML = this.htmlEstruturaPdf(folha);
@@ -2163,7 +2166,7 @@ const SocietarioApp = {
       const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
       const pageW = pdf.internal.pageSize.getWidth();
       const pageH = pdf.internal.pageSize.getHeight();
-      const margem = 8;
+      const margem = 4;
       const ratio = Math.min((pageW - margem * 2) / canvas.width, (pageH - margem * 2) / canvas.height);
       const w = canvas.width * ratio;
       const h = canvas.height * ratio;
@@ -2174,7 +2177,10 @@ const SocietarioApp = {
     }
     page.remove();
     this._pdf = false;
-    if (btn) btn.disabled = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove("is-busy");
+    }
   },
 
   render() {
@@ -2201,7 +2207,7 @@ const SocietarioApp = {
             <button type="button" class="btn btn-outline btn-sm soc-btn-link${linkBtn}" onclick="SocietarioApp.openNewLink()" title="Cria a participação entre duas caixas. Também dá para arrastar o ponto de uma caixa até a outra.">Interligação</button>
             <button type="button" class="btn btn-outline btn-sm" onclick="SocietarioApp.resetLayout()" title="Reposiciona as caixas. As ligações e os percentuais permanecem.">Reorganizar</button>
             <button type="button" class="btn btn-primary btn-sm soc-save-pos" onclick="SocietarioApp.salvarPosicoes()" title="Grava o lugar de cada caixa. Ao abrir de novo, o organograma fica neste arranjo.">Salvar posições</button>
-            <button type="button" class="btn btn-outline btn-sm soc-pdf-btn" onclick="SocietarioApp.exportarPdf()" title="Gera o PDF da estrutura da Moura Leite, com os sócios e as participações.">PDF</button>
+            <button type="button" class="btn btn-outline btn-sm soc-pdf-btn" onclick="SocietarioApp.exportarPdf()" title="Gera o PDF da estrutura da Moura Leite, com os sócios e as participações."><span class="soc-pdf-spin" aria-hidden="true"></span><span>PDF</span></button>
           </div>
         </div>
         <div class="soc-body">
@@ -2455,10 +2461,7 @@ const SocietarioApp = {
       return;
     }
     if (this.participadaOcupada(para.companyId, existing && existing.id, de.id)) {
-      const dona = this.ehCentro(de)
-        ? "Essa participada já tem uma interligação. A Moura Leite liga cada empresa uma vez."
-        : "Essa empresa já está interligada a outra holding. O mesmo par não se repete, e cada holding liga a sua.";
-      alert(dona);
+      alert("A Moura Leite já participa dessa empresa. Cada empresa entra uma vez na ligação da empresa 1.");
       return;
     }
     if (!Number.isFinite(pct) || pct < 0 || pct > 100) { alert("Percentual entre 0 e 100."); return; }
@@ -2466,19 +2469,26 @@ const SocietarioApp = {
       alert("Informe a conta de débito e a de crédito do lucro e do prejuízo.");
       return;
     }
+    const fromPort = (this._pendingLink && this._pendingLink.fromPort)
+      || (existing && existing.fromPort)
+      || "";
     let nova = false;
     if (existing) {
       existing.from = from;
       existing.to = to;
       existing.pct = pct;
       existing.note = note;
+      if (fromPort) existing.fromPort = fromPort;
     } else {
       const dup = this.graph.links.find(l => l.from === from && l.to === to);
       if (dup) {
         dup.pct = pct;
         dup.note = note || dup.note;
+        if (fromPort) dup.fromPort = fromPort;
       } else {
-        this.graph.links.push({ id: this.uid("lnk"), from, to, pct, note });
+        const linha = { id: this.uid("lnk"), from, to, pct, note };
+        if (fromPort) linha.fromPort = fromPort;
+        this.graph.links.push(linha);
         nova = true;
       }
     }

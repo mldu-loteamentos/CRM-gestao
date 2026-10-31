@@ -66,12 +66,13 @@ body {
   padding: 2rem 1.5rem;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: flex-start;
+  overflow: hidden;
   position: fixed;
   height: 100vh;
   left: 0;
   top: 0;
-  z-index: 100;
+  z-index: 300;
   box-shadow: 4px 0 24px rgba(12, 41, 29, 0.15);
   transition: var(--transition-smooth);
 }
@@ -197,7 +198,7 @@ body {
   flex-grow: 1;
 }
 
-.nav-item a {
+.nav-links > .nav-item > a {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -211,17 +212,22 @@ body {
   cursor: pointer;
 }
 
-.nav-item a:hover, 
-.nav-item.active a {
+.nav-links > .nav-item > a:hover,
+.nav-links > .nav-item.active > a {
   color: var(--color-white);
   background-color: rgba(27, 130, 83, 0.2);
   border-left: 4px solid var(--color-secondary);
 }
 
-.nav-item a i,
-.nav-item a svg {
+.nav-links > .nav-item > a > i,
+.nav-links > .nav-item > a > svg {
   width: 24px !important;
   height: 24px !important;
+}
+.nav-submenu .nav-chevron,
+.nav-submenu .nav-chevron svg {
+  width: 16px !important;
+  height: 16px !important;
 }
 
 .btn-logout i,
@@ -232,6 +238,7 @@ body {
 
 .sidebar-footer {
   margin-top: auto;
+  flex-shrink: 0;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   padding-top: 1.5rem;
 }
@@ -2497,25 +2504,30 @@ circle.donut-segment {
 /* Submenu Configura??es */
 .nav-submenu {
   list-style: none;
-  padding-left: 20px;
-  margin: 0;
+  margin: 2px 0 4px 10px;
+  padding: 2px 0 2px 10px;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 1px;
+  background: transparent;
+  border-left: 2px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0;
 }
 .nav-submenu li a {
   display: block;
-  padding: 8px 10px;
-  color: var(--color-text-muted);
+  padding: 6px 10px;
+  color: rgba(255, 255, 255, 0.72);
   text-decoration: none;
-  border-radius: 4px;
-  transition: all 0.2s ease;
+  border-radius: 6px;
+  background: transparent;
+  transition: background 0.2s ease, color 0.2s ease;
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 0.84rem;
+  font-weight: 500;
 }
 .nav-submenu li a:hover {
-  background: var(--color-background-alt);
-  color: var(--color-text);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
 }
 .nav-group > a {
   display: flex;
@@ -2532,6 +2544,7 @@ circle.donut-segment {
 
 /* Ajuste de Rolagem do Menu Lateral */
 .nav-links {
+  flex: 1 1 0;
   overflow-y: auto;
   overflow-x: hidden;
   overflow-anchor: none;
@@ -2554,16 +2567,20 @@ circle.donut-segment {
 
 /* N?vel 2 - Submenu (Grupos ou Itens Diretos) */
 .nav-submenu {
-  background: rgba(0, 0, 0, 0.15); /* Fundo um pouco mais escuro para o bloco do submenu */
-  border-radius: 6px;
-  padding: 5px 0 5px 15px; /* Margem esquerda para recuo */
-  margin-top: 5px;
+  background: transparent;
+  border-radius: 0;
+  padding: 2px 0 2px 10px;
+  margin: 2px 0 4px 10px;
 }
 
 .nav-submenu > li > a {
-  font-size: 0.9rem !important;
-  color: rgba(255, 255, 255, 0.6) !important;
-  padding: 8px 12px !important;
+  display: block !important;
+  font-size: 0.84rem !important;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.72) !important;
+  padding: 6px 10px !important;
+  border-radius: 6px;
+  background: transparent !important;
   border-left: 3px solid transparent !important;
 }
 
@@ -10663,7 +10680,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .ppcc-papel { width: 100%; height: 32px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #0f172a; font: inherit; font-size: 0.75rem; font-weight: 700; padding: 0 8px; }
 .cc-table.ppcc-table td.ppcc-vazio { text-align: center; color: #94a3b8; padding: 26px; height: auto; }
 .cc-table.ppcc-table .moura-switch { justify-content: center; vertical-align: middle; }
-.ppcc-rodape { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; font-size: 0.76rem; color: #64748b; }
+.ppcc-rodape { display: flex; justify-content: flex-end; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; font-size: 0.76rem; color: #64748b; }
 .ppcc-rodape .btn { height: 36px; min-width: 120px; }
 
 /* Vistoria (Verificar Construção) */
@@ -11052,6 +11069,9 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .soc-help { margin: 0; max-width: 460px; font-size: 0.8rem; line-height: 1.45; color: #64748b; }
 .soc-toolbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-left: auto; }
 .soc-toolbar .btn-sm { height: 34px; display: inline-flex; align-items: center; font-weight: 700; }
+.soc-toolbar .soc-pdf-btn { width: 108px; justify-content: center; gap: 8px; box-sizing: border-box; }
+.soc-pdf-spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid transparent; box-sizing: border-box; flex: 0 0 14px; }
+.soc-pdf-btn.is-busy .soc-pdf-spin { border-color: rgba(16, 84, 54, 0.28); border-top-color: #105436; animation: spin 0.8s linear infinite; }
 .soc-btn-link.is-on { background: #f37021; border-color: #f37021; color: #fff; }
 .soc-body { display: flex; flex: 1; min-height: 0; gap: 12px; }
 .soc-stage { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; }

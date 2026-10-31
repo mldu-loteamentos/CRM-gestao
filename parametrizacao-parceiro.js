@@ -3435,7 +3435,6 @@ const ParametrizacaoParceiroApp = {
           </table>
         </div>
         <div class="ppcc-rodape">
-          <span>Desligue o C.C. para tirá-lo da conta sem perder o cadastro.</span>
           <button type="button" class="btn btn-primary" onclick="ParametrizacaoParceiroApp.salvarCentros()" title="Grava os centros desta obra">Salvar</button>
         </div>
       </div>

@@ -95,8 +95,7 @@
       { id: "rastrear_pedido", label: "Rastrear pedido" }
     ]},
     { id: "gerencial", label: "Gerencial", subs: [
-      { id: "participacoes", label: "Prestação contas Ellenco" },
-      { id: "estrutura", label: "Organograma Societário" }
+      { id: "participacoes", label: "Prestação contas Ellenco" }
     ]},
     { id: "comercial", label: "Comercial", subs: [
       { id: "dash_com", label: "Dashboard" },

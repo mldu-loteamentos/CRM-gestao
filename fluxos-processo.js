@@ -219,29 +219,84 @@ const FluxosProcesso = {
     }
   },
 
+  momento(fluxo) {
+    return Math.max(Number(fluxo && fluxo.nomeEm) || 0, Number(fluxo && fluxo.updatedAt) || 0);
+  },
+
   aplicarRemoto(remoto) {
     if (!remoto || !Array.isArray(remoto.fluxos) || !remoto.fluxos.length) return false;
     if (this.state.abertoId) return false;
-    if ((remoto.seq || 0) < (this._seq || 0)) return false;
-    this.state.fluxos = remoto.fluxos;
-    this._seq = Math.max(this._seq || 0, remoto.seq || 0);
-    if (this.normalizarNomes()) this.persistir();
-    return true;
+    const local = Array.isArray(this.state.fluxos) ? this.state.fluxos : [];
+    const porId = new Map();
+    remoto.fluxos.forEach((f) => { if (f && f.id != null) porId.set(String(f.id), f); });
+    let localMaisNovo = (Number(remoto.seq) || 0) < (Number(this._seq) || 0);
+    local.forEach((f) => {
+      if (!f || f.id == null) return;
+      const id = String(f.id);
+      const outro = porId.get(id);
+      if (!outro) {
+        porId.set(id, f);
+        localMaisNovo = true;
+        return;
+      }
+      const localAt = this.momento(f);
+      const remotoAt = this.momento(outro);
+      const nomeLocal = String(f.nome || "");
+      const nomeRemoto = String(outro.nome || "");
+      if (localAt > remotoAt || (localAt === remotoAt && nomeLocal !== nomeRemoto && (Number(this._seq) || 0) >= (Number(remoto.seq) || 0))) {
+        porId.set(id, f);
+        if (nomeLocal !== nomeRemoto || localAt > remotoAt) localMaisNovo = true;
+      }
+    });
+    const fundidos = Array.from(porId.values());
+    const antes = JSON.stringify(local);
+    this.state.fluxos = fundidos;
+    this._seq = Math.max(Number(this._seq) || 0, Number(remoto.seq) || 0);
+    this.normalizarNomes();
+    if (localMaisNovo) this.persistir();
+    return JSON.stringify(this.state.fluxos) !== antes;
   },
 
   persistir() {
+    this.capturarNomeAberto();
     this._seq = (this._seq || 0) + 1;
-    const seq = this._seq;
-    const dados = { fluxos: JSON.parse(JSON.stringify(this.state.fluxos || [])), seq: seq };
+    const dados = {
+      fluxos: JSON.parse(JSON.stringify(this.state.fluxos || [])),
+      seq: this._seq,
+      updatedAt: Date.now()
+    };
     try { localStorage.setItem("crm_fluxos_processo", JSON.stringify(dados)); } catch (e) {}
+    this._pendenteNuvem = dados;
+    this.enviarNuvem();
+  },
+
+  enviarNuvem() {
     const fc = window.firebaseCollections;
     if (!window.firebaseDb || !fc || !fc.setDoc) return;
-    this._gravando = (this._gravando || Promise.resolve()).catch(() => {}).then(() => {
-      if (seq !== this._seq) return null;
-      return fc.setDoc(fc.doc(window.firebaseDb, "config", "fluxos_processo"), dados, { merge: true });
-    }).catch((e) => {
+    if (this._enviando) return;
+    const dados = this._pendenteNuvem;
+    if (!dados) return;
+    this._pendenteNuvem = null;
+    this._enviando = true;
+    const falha = dados;
+    fc.setDoc(fc.doc(window.firebaseDb, "config", "fluxos_processo"), dados, { merge: true }).catch((e) => {
       console.warn("[Fluxos] gravação", e);
+      if (!this._pendenteNuvem) this._pendenteNuvem = falha;
+    }).then(() => {
+      this._enviando = false;
+      if (this._pendenteNuvem && this._pendenteNuvem !== falha) this.enviarNuvem();
     });
+  },
+
+  capturarNomeAberto() {
+    const el = document.getElementById("fluxo-nome");
+    const fluxo = this.fluxoAberto();
+    if (!el || !fluxo || el.disabled || this.state.leitura) return;
+    const texto = String(el.value || "").toUpperCase();
+    if (!texto.trim() || texto === String(fluxo.nome || "")) return;
+    fluxo.nome = texto;
+    fluxo.nomeEm = Date.now();
+    fluxo.updatedAt = fluxo.nomeEm;
   },
 
   gravarEtapasAbertas() {
@@ -267,16 +322,11 @@ const FluxosProcesso = {
   async init() {
     if (!this.state.pronto) {
       this.carregarLocal();
-      if (this.normalizarNomes()) this.persistir();
+      this.normalizarNomes();
+      const remoto = await this.lerRemoto();
+      this.aplicarRemoto(remoto);
       this.garantirOficial();
       this.state.pronto = true;
-      this.pintar();
-      const remoto = await this.lerRemoto();
-      if (this.aplicarRemoto(remoto)) {
-        this.garantirOficial();
-        this.pintar();
-      }
-      return;
     }
     this.pintar();
   },
@@ -648,7 +698,8 @@ const FluxosProcesso = {
     if (!texto.trim() && String(fluxo.nome || "").trim() && (!el || document.activeElement !== el)) return;
     if (texto !== String(fluxo.nome || "")) {
       fluxo.nome = texto;
-      fluxo.updatedAt = Date.now();
+      fluxo.nomeEm = Date.now();
+      fluxo.updatedAt = fluxo.nomeEm;
       this.persistir();
     }
     if (propagar) this.propagarNome(fluxo);
@@ -804,4 +855,8 @@ window.FluxosProcesso = FluxosProcesso;
 
 document.addEventListener("tabChanged", function (e) {
   if (e.detail === "juridico-config") FluxosProcesso.init();
+});
+
+window.addEventListener("beforeunload", function () {
+  if (window.FluxosProcesso && FluxosProcesso.fluxoAberto()) FluxosProcesso.persistir();
 });

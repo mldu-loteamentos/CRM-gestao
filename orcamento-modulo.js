@@ -91,7 +91,7 @@ const OrcamentoModuloApp = {
 
   init(tabId) {
     if (tabId === "orcamento-novo") {
-      this.renderNovo();
+      this.voltarLista();
       this.carregarCadastro();
       return;
     }
@@ -152,6 +152,12 @@ const OrcamentoModuloApp = {
     if (!window.MlEmpresaFilter) return;
     const self = this;
     MlEmpresaFilter.bind("orc-emp", {
+      close() {
+        if (!self.novo.openEmp && !self.novo.qEmp) return;
+        self.novo.openEmp = false;
+        self.novo.qEmp = "";
+        self.renderNovo();
+      },
       toggleOpen() {
         self.novo.openEmp = !self.novo.openEmp;
         if (self.novo.openEmp) self.novo.openCc = false;
@@ -194,6 +200,12 @@ const OrcamentoModuloApp = {
       noMatch: "Nenhum centro de custo com esse nome."
     };
     MlEmpresaFilter.bind("orc-cc", {
+      close() {
+        if (!self.novo.openCc && !self.novo.qCc) return;
+        self.novo.openCc = false;
+        self.novo.qCc = "";
+        self.renderNovo();
+      },
       toggleOpen() {
         if (!self.novo.companyId) return;
         self.novo.openCc = !self.novo.openCc;
@@ -596,11 +608,21 @@ const OrcamentoModuloApp = {
     this.renderNovo();
   },
 
-  alterarEscolha() {
+  voltarLista() {
     this.novo.etapa = "lista";
+    this.novo.aba = "kardex";
     this.novo.openEmp = false;
     this.novo.openCc = false;
+    this.novo.qEmp = "";
+    this.novo.qCc = "";
+    this.novo.ccId = "";
+    this.novo.erro = "";
+    this.novo.resultado = null;
     this.renderNovo();
+  },
+
+  alterarEscolha() {
+    this.voltarLista();
   },
 
   setAno(campo, valor) {

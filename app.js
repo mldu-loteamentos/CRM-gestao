@@ -5434,7 +5434,11 @@ window.CRM_MENU_PERMS_RETIRADAS = [
   "sub_fin_orc",
   "sub_orc_geral_acompanhamento_acessar",
   "sub_orc_geral_acompanhamento_visualizar",
-  "sub_orc_geral_acompanhamento_editar"
+  "sub_orc_geral_acompanhamento_editar",
+  "sub_soc_geral",
+  "sub_soc_geral_estrutura_societaria_acessar",
+  "sub_soc_geral_estrutura_societaria_visualizar",
+  "sub_soc_geral_estrutura_societaria_editar"
 ];
 
 window.crmPermShrinkConfirmed = function(obj) {
@@ -7057,24 +7061,15 @@ window.permCoversMenuKey = function(perms, modKey) {
   }
   if (modKey === "mod_gerencial") {
     return perms.mod_participacoes === true
-      || perms.mod_societario === true
       || perms.sub_part_geral === true
-      || perms.sub_soc_geral === true
       || perms.sub_part_geral_participacoes_acessar === true
       || perms.sub_part_geral_participacoes_visualizar === true
-      || perms.sub_soc_geral_estrutura_societaria_acessar === true
-      || perms.sub_soc_geral_estrutura_societaria_visualizar === true
-      || perms.sub_soc_geral_estrutura_societaria_editar === true;
+      || perms.sub_part_geral_participacoes_editar === true;
   }
   if (modKey === "mod_participacoes" || modKey === "sub_part_geral_participacoes_acessar") {
     return perms.mod_participacoes === true
       || perms.sub_part_geral_participacoes_acessar === true
       || perms.sub_part_geral_participacoes_visualizar === true;
-  }
-  if (modKey === "sub_soc_geral_estrutura_societaria_acessar") {
-    return perms.mod_societario === true
-      || perms.sub_soc_geral_estrutura_societaria_visualizar === true
-      || perms.sub_soc_geral_estrutura_societaria_editar === true;
   }
   if (modKey === "mod_rel" || String(modKey).indexOf("sub_rel_") === 0) {
     if (perms.mod_rel !== true) return false;
@@ -8199,7 +8194,7 @@ function toggleNavMenu(event, submenuId) {
   if (submenu) {
     const parentGroup = submenu.closest('.nav-group');
     if (submenu.style.display === 'none') {
-      submenu.style.display = 'block';
+      submenu.style.display = '';
       if (parentGroup) parentGroup.classList.add('active');
     } else {
       submenu.style.display = 'none';
@@ -55086,62 +55081,646 @@ window.mapaJuridicoOpenClient = async function(customerId, saleId) {
   }
 };
 
+window.mapaJuridicoHojeIso = function() {
+  const now = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  if (typeof window.localDateStr === "function") return window.localDateStr(now);
+  return now.getFullYear() + "-" + p(now.getMonth() + 1) + "-" + p(now.getDate());
+};
+
+window.mapaJuridicoSomaDia = function(iso, dias) {
+  const d = new Date(String(iso).slice(0, 10) + "T12:00:00");
+  d.setDate(d.getDate() + (Number(dias) || 0));
+  const p = (n) => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+};
+
+window.mapaJuridicoIsoDe = function(dStr) {
+  if (!dStr) return "";
+  const s = String(dStr).slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  if (typeof parseSafeDate !== "function") return "";
+  const d = parseSafeDate(dStr);
+  if (!d || isNaN(d.getTime())) return "";
+  const p = (n) => String(n).padStart(2, "0");
+  return d.getUTCFullYear() + "-" + p(d.getUTCMonth() + 1) + "-" + p(d.getUTCDate());
+};
+
+window.mapaJuridicoLabelData = function(iso, comAno) {
+  const p = String(iso || "").slice(0, 10).split("-");
+  if (p.length !== 3) return String(iso || "");
+  return comAno ? (p[2] + "/" + p[1] + "/" + p[0]) : (p[2] + "/" + p[1]);
+};
+
+window.mapaJuridicoTitulosDoSnap = function(s) {
+  const d = s && s.subjudice_detail;
+  let fromDetail = 0;
+  if (d && Array.isArray(d.clients) && d.clients.some((c) => Number(c && c.titles) > 0)) {
+    fromDetail = d.clients.reduce((n, c) => n + (Number(c.titles) || 0), 0);
+  } else if (d && Array.isArray(d.cost_centers) && d.cost_centers.some((c) => Number(c && c.titles) > 0)) {
+    fromDetail = d.cost_centers.reduce((n, c) => n + (Number(c.titles) || 0), 0);
+  }
+  const count = Number(s && s.subjudice_count);
+  if (fromDetail > 0 && (!Number.isFinite(count) || fromDetail >= count)) return fromDetail;
+  if (Number.isFinite(count)) return count;
+  return Number(s && s.subjudice_customers) || 0;
+};
+
+window.mapaJuridicoPosicaoViva = function() {
+  const generalList = window._subjudiceList || [];
+  const byId = {};
+  const empMap = {};
+  let totalValue = 0;
+  let totalTitles = 0;
+  let totalDays = 0;
+  let withDelay = 0;
+  const clients = new Set();
+  generalList.forEach((c) => {
+    const id = String(c.customerId);
+    const value = (Number(c.overdueValue) || 0) + (Number(c.overdueCharges) || 0);
+    const titles = window.mapaJuridicoQtdTitulos(c);
+    const cc = String((typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId) || "N/D");
+    totalValue += value;
+    totalTitles += titles;
+    clients.add(id);
+    if (c.maxDaysDelay > 0) {
+      totalDays += Number(c.maxDaysDelay) || 0;
+      withDelay += 1;
+    }
+    if (!byId[id]) byId[id] = { id: id, name: c.customerName || ("Cliente " + id), value: 0, cc: cc, titles: 0 };
+    byId[id].value += value;
+    byId[id].titles += titles;
+    if (!empMap[cc]) empMap[cc] = { id: cc, name: window.mapaJuridicoEmpLabel(c.costCenterId), titles: new Set(), value: 0 };
+    empMap[cc].value += value;
+    if (c.billIds && c.billIds.length) c.billIds.forEach((billId) => empMap[cc].titles.add(String(billId)));
+    else empMap[cc].titles.add(id);
+  });
+  const ccRows = Object.values(empMap).map((e) => ({
+    id: String(e.id),
+    name: e.name,
+    titles: e.titles.size,
+    value: e.value
+  })).sort((a, b) => b.value - a.value);
+  return {
+    date: window.mapaJuridicoHojeIso(),
+    value: totalValue,
+    titles: totalTitles,
+    clients: clients.size,
+    avgDelay: withDelay ? Math.round(totalDays / withDelay) : 0,
+    byId: byId,
+    ccRows: ccRows
+  };
+};
+
+window.mapaJuridicoPersistirPosicao = function(pos) {
+  try {
+    if (!pos || !window.firebaseCollections || !window.firebaseDb) return;
+    const docRef = window.firebaseCollections.doc(window.firebaseDb, "inadimplencia_snapshots", pos.date);
+    window.firebaseCollections.setDoc(docRef, {
+      date: pos.date,
+      subjudice_count: pos.titles,
+      subjudice_customers: pos.clients,
+      subjudice_value: pos.value,
+      subjudice_detail: {
+        clients: Object.values(pos.byId || {}),
+        cost_centers: pos.ccRows || []
+      }
+    }, { merge: true }).catch(() => {});
+  } catch (e) { /* a posição de hoje segue no mapa mesmo sem gravar o histórico */ }
+};
+
+window.mapaJuridicoAbrirTela = function() {
+  const generalList = window._subjudiceList || [];
+  if (!generalList.length) {
+    alert("Não há clientes no Sub Judice para gerar o mapa.");
+    return;
+  }
+  const nameMap = typeof window.mapaJuridicoMontarCaixas === "function" ? window.mapaJuridicoMontarCaixas() : {};
+  window._mapaJuridicoCache = { byKey: {}, generalList: generalList, nameMap: nameMap };
+  const empOptionsMap = {};
+  generalList.forEach((c) => {
+    const ccId = String((typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId) || "N/D");
+    if (!empOptionsMap[ccId]) empOptionsMap[ccId] = window.mapaJuridicoEmpLabel(c.costCenterId);
+  });
+  const empOptions = Object.keys(empOptionsMap).map((id) => ({ id: id, name: empOptionsMap[id] }))
+    .sort((a, b) => String(a.name).localeCompare(String(b.name), "pt-BR"));
+  const seenCo = {};
+  const companyOptions = [];
+  generalList.forEach((c) => {
+    const id = String(c.companyId || "");
+    if (!id || seenCo[id]) return;
+    seenCo[id] = true;
+    const comp = (window.AppState && AppState.companies || []).find((x) => Number(x.id) === Number(id));
+    const full = (comp && (comp.name || comp.tradeName)) || (typeof getCompanyName === "function" ? getCompanyName(id) : "") || ("Empresa " + id);
+    companyOptions.push({ id: id, name: String(full).toUpperCase() });
+  });
+  companyOptions.sort((a, b) => String(a.name).localeCompare(String(b.name), "pt-BR"));
+  const now = new Date();
+  const nowLabel = now.toLocaleDateString("pt-BR") + " às " + now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  window.showMapaJuridicoOverlay({ nowLabel: nowLabel, companyOptions: companyOptions, empOptions: empOptions });
+  try { window.mapaJuridicoPersistirPosicao(window.mapaJuridicoPosicaoViva()); } catch (e) {}
+};
+
+window.mapaJuridicoCarregarSnapshots = async function() {
+  if (Array.isArray(window._mapaJuridicoSnapsCache)) return window._mapaJuridicoSnapsCache;
+  const snapshots = [];
+  try {
+    if (window.firebaseCollections && window.firebaseDb) {
+      const snapRef = window.firebaseCollections.collection(window.firebaseDb, "inadimplencia_snapshots");
+      const q = window.firebaseCollections.query(snapRef, window.firebaseCollections.orderBy("date", "asc"));
+      const fbDocs = await window.firebaseCollections.getDocs(q);
+      fbDocs.forEach((d) => { const data = d.data(); if (data) snapshots.push(data); });
+      window._mapaJuridicoSnapsCache = snapshots;
+    }
+  } catch (e) {
+    console.warn("Mapa jurídico: snapshots indisponíveis", e);
+  }
+  return snapshots;
+};
+
+window.mapaJuridicoRecebimentosPeriodo = async function(inicio, fim) {
+  const vazio = { linhas: [], ok: false };
+  const api = window.SiengeApiService;
+  if (!inicio || !fim || inicio > fim) return { linhas: [], ok: true };
+  if (!api || typeof api.getBulkIncome !== "function") return vazio;
+  const list = window._subjudiceList || [];
+  const ids = [];
+  const seen = {};
+  list.forEach((c) => {
+    const id = c && c.companyId;
+    if (id == null || String(id) === "" || seen[String(id)]) return;
+    seen[String(id)] = true;
+    ids.push(id);
+  });
+  let rows = [];
+  try {
+    const res = await api.getBulkIncome(inicio, fim);
+    rows = (res && res.data) || [];
+  } catch (e) {
+    rows = [];
+  }
+  if (!rows.length && ids.length) {
+    try {
+      const parts = await Promise.all(ids.map((id) => api.getBulkIncome(inicio, fim, id).catch(() => ({ data: [] }))));
+      parts.forEach((p) => { rows = rows.concat((p && p.data) || []); });
+    } catch (e) {
+      console.warn("Mapa jurídico: recebimentos indisponíveis", e);
+      return vazio;
+    }
+  }
+  const linhas = [];
+  const conta = (r) => {
+    if (!r) return false;
+    const op = String(r.operationTypeId != null ? r.operationTypeId : (r.typeId != null ? r.typeId : ""));
+    const nome = String(r.operationTypeName || r.operationName || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    if (nome.indexOf("DISTRAT") >= 0 || nome.indexOf("CANCEL") >= 0) return false;
+    if (op === "2") return true;
+    if (!op && nome.indexOf("RECEB") >= 0) return true;
+    return false;
+  };
+  const valorDe = (r) => {
+    const n = Number(r && (r.netAmount != null ? r.netAmount : (r.receiptNetAmount != null ? r.receiptNetAmount : (r.grossAmount != null ? r.grossAmount : (r.receiptValue != null ? r.receiptValue : r.value)))));
+    return Number.isFinite(n) ? n : 0;
+  };
+  const dataDe = (r, item) => String((r && (r.paymentDate || r.receiptDate || r.date)) || (item && item.paymentDate) || "").slice(0, 10);
+  rows.forEach((item) => {
+    const cid = String(item.clientId || item.customerId || "");
+    const push = (r) => {
+      if (!conta(r)) return;
+      const dt = dataDe(r, item);
+      const amount = valorDe(r);
+      if (!cid || !dt || dt < inicio || dt > fim || !(amount > 0)) return;
+      linhas.push({ id: cid, date: dt, amount: amount });
+    };
+    if (item.receipts && item.receipts.length) item.receipts.forEach(push);
+    else if (item.receiptsCategories && item.receiptsCategories.length) {
+      item.receiptsCategories.forEach((cat) => (cat.receipts || []).forEach(push));
+    } else if (conta(item)) push(item);
+  });
+  return { linhas: linhas, ok: true };
+};
+
+window.mapaJuridicoMontarMovimento = function(opts) {
+  const currentById = opts.byId || {};
+  const closeSnap = opts.closeSnap;
+  const closeDate = opts.closeDate;
+  const limite = opts.limite;
+  const porCliente = opts.porCliente || {};
+  const ccRows = opts.ccRows || [];
+  const closeDetail = (closeSnap && closeSnap.subjudice_detail) || {};
+  const closeClients = {};
+  (closeDetail.clients || []).forEach((c) => { if (c && c.id != null) closeClients[String(c.id)] = c; });
+  const nameOf = (id) => {
+    if (currentById[id] && currentById[id].name) return currentById[id].name;
+    if (closeClients[id] && closeClients[id].name) return closeClients[id].name;
+    const raw = (window.rawClientList || []).find((c) => String(c.customerId) === String(id));
+    return (raw && raw.customerName) || ("Cliente " + id);
+  };
+  const ccOf = (id, fallback) => {
+    if (currentById[id] && currentById[id].cc) return String(currentById[id].cc);
+    if (closeClients[id] && closeClients[id].cc) return String(closeClients[id].cc);
+    return String(fallback || "N/D");
+  };
+  const movers = {};
+  const touch = (id) => {
+    const k = String(id);
+    if (!movers[k]) movers[k] = { id: k, name: String(nameOf(k) || "").toUpperCase(), entrou: 0, saiu: 0, caixa: 0, cc: ccOf(k) };
+    return movers[k];
+  };
+  if (opts.usarHistorico) {
+    let history = {};
+    try { history = JSON.parse(localStorage.getItem("subjudiceHistory") || "{}"); } catch (e) { history = {}; }
+    const afterClose = (dStr) => {
+      const iso = window.mapaJuridicoIsoDe(dStr);
+      return !!(iso && iso > closeDate && iso <= limite);
+    };
+    Object.values(currentById).forEach((c) => {
+      const mem = history[c.id] || history[Number(c.id)];
+      const entered = (mem && afterClose(mem.entryDate)) || (closeSnap && closeDetail.clients && !closeClients[c.id]);
+      if (entered) touch(c.id).entrou += Number(c.value) || 0;
+    });
+    Object.keys(history).forEach((id) => {
+      const mem = history[id];
+      if (!mem || !mem.exitDate || currentById[String(id)]) return;
+      if (!afterClose(mem.exitDate)) return;
+      const m = touch(id);
+      m.saiu += Number((closeClients[String(id)] && closeClients[String(id)].value) || 0);
+      m.cc = ccOf(id, m.cc);
+    });
+  } else {
+    Object.values(currentById).forEach((c) => {
+      if (!closeClients[c.id]) touch(c.id).entrou += Number(c.value) || 0;
+    });
+    Object.keys(closeClients).forEach((id) => {
+      if (currentById[id]) return;
+      const m = touch(id);
+      m.saiu += Number(closeClients[id].value) || 0;
+      m.cc = ccOf(id, m.cc);
+    });
+  }
+  const caixaDe = (id) => Number(porCliente[String(id)] || 0);
+  Object.values(movers).forEach((m) => {
+    m.caixa = caixaDe(m.id);
+    m.total = m.entrou - m.saiu;
+  });
+  const empMove = {};
+  const ensureEmp = (cc, name) => {
+    const k = String(cc || "N/D");
+    if (!empMove[k]) empMove[k] = { id: k, name: name || (typeof window.mapaJuridicoEmpLabel === "function" ? window.mapaJuridicoEmpLabel(k) : k), close: 0, saiu: 0, caixa: 0, entrou: 0, hoje: 0 };
+    if (name) empMove[k].name = name;
+    return empMove[k];
+  };
+  ccRows.forEach((e) => { ensureEmp(e.id, e.name).hoje = Number(e.value) || 0; });
+  (closeDetail.cost_centers || []).forEach((e) => { ensureEmp(e.id, e.name).close = Number(e.value) || 0; });
+  Object.values(movers).forEach((m) => {
+    const row = ensureEmp(m.cc);
+    row.entrou += m.entrou;
+    row.saiu += m.saiu;
+    row.caixa += m.caixa;
+  });
+  const hasCloseCc = Array.isArray(closeDetail.cost_centers) && closeDetail.cost_centers.length > 0;
+  if (!hasCloseCc) {
+    Object.values(empMove).forEach((e) => { e.close = e.hoje - e.entrou + e.saiu; });
+  }
+  const empSorted = Object.values(empMove).sort((a, b) => b.hoje - a.hoje);
+  const topEmp = empSorted.slice(0, 10);
+  const restEmp = empSorted.slice(10);
+  const empRows = topEmp.map((e) => Object.assign({ isOther: false }, e));
+  if (restEmp.length) {
+    empRows.push({
+      name: "OUTROS", isOther: true,
+      close: restEmp.reduce((s, e) => s + e.close, 0),
+      saiu: restEmp.reduce((s, e) => s + e.saiu, 0),
+      caixa: restEmp.reduce((s, e) => s + e.caixa, 0),
+      entrou: restEmp.reduce((s, e) => s + e.entrou, 0),
+      hoje: restEmp.reduce((s, e) => s + e.hoje, 0)
+    });
+  }
+  const empTot = empSorted.reduce((acc, e) => ({
+    close: acc.close + e.close, saiu: acc.saiu + e.saiu, caixa: acc.caixa + e.caixa, entrou: acc.entrou + e.entrou, hoje: acc.hoje + e.hoje
+  }), { close: 0, saiu: 0, caixa: 0, entrou: 0, hoje: 0 });
+  const moverList = Object.values(movers).sort((a, b) => (Math.abs(b.total) || (b.entrou + b.saiu)) - (Math.abs(a.total) || (a.entrou + a.saiu)));
+  const top10 = moverList.slice(0, 10);
+  const others = moverList.slice(10);
+  const clientRows = top10.map((m) => Object.assign({ isOther: false }, m));
+  if (others.length) {
+    clientRows.push({
+      name: "OUTROS", isOther: true,
+      entrou: others.reduce((s, m) => s + m.entrou, 0),
+      saiu: others.reduce((s, m) => s + m.saiu, 0),
+      caixa: others.reduce((s, m) => s + m.caixa, 0),
+      total: others.reduce((s, m) => s + m.total, 0)
+    });
+  }
+  const moveTot = moverList.reduce((acc, m) => ({
+    entrou: acc.entrou + m.entrou, saiu: acc.saiu + m.saiu, caixa: acc.caixa + m.caixa, total: acc.total + m.total
+  }), { entrou: 0, saiu: 0, caixa: 0, total: 0 });
+  return { empRows: empRows, empTot: empTot, clientRows: clientRows, moveTot: moveTot, semDetalhe: !opts.usarHistorico && !(closeDetail.clients && closeDetail.clients.length) && !Object.keys(currentById).length };
+};
+
+window.mapaJuridicoDadosRelatorio = async function(iso) {
+  const hoje = window.mapaJuridicoHojeIso();
+  const pedido = String(iso || "").slice(0, 10);
+  const alvo = !pedido || pedido > hoje ? hoje : pedido;
+  const isToday = alvo === hoje;
+  const snaps = await window.mapaJuridicoCarregarSnapshots();
+  const dataSnap = (s) => String(s && s.date || "").slice(0, 10);
+  let snap = null;
+  if (!isToday) {
+    const ate = snaps.filter((s) => dataSnap(s) && dataSnap(s) <= alvo).sort((a, b) => dataSnap(a).localeCompare(dataSnap(b)));
+    snap = ate.length ? ate[ate.length - 1] : null;
+    if (!snap) {
+      alert("Não há posição gravada até " + window.mapaJuridicoLabelData(alvo, true) + ".");
+      return null;
+    }
+  }
+  const limite = isToday ? hoje : dataSnap(snap);
+  const closes = snaps.filter((s) => s && s.is_month_close && dataSnap(s) && dataSnap(s) <= limite)
+    .sort((a, b) => dataSnap(a).localeCompare(dataSnap(b)));
+  let closeSnap = closes.length ? closes[closes.length - 1] : null;
+  if (closeSnap && dataSnap(closeSnap) === limite && closes.length > 1) closeSnap = closes[closes.length - 2];
+  const closeDate = closeSnap && dataSnap(closeSnap) ? dataSnap(closeSnap) : (limite.slice(0, 8) + "01");
+  const inicioCaixa = closeSnap ? window.mapaJuridicoSomaDia(closeDate, 1) : (limite.slice(0, 8) + "01");
+  const rec = await window.mapaJuridicoRecebimentosPeriodo(inicioCaixa, limite);
+  const porCliente = {};
+  (rec.linhas || []).forEach((l) => {
+    if (!l || l.date < inicioCaixa || l.date > limite) return;
+    porCliente[l.id] = (porCliente[l.id] || 0) + l.amount;
+  });
+  let byId = {};
+  let ccRows = [];
+  let titles = 0;
+  let clients = 0;
+  let value = 0;
+  let avgDelay = null;
+  if (isToday) {
+    const pos = window.mapaJuridicoPosicaoViva();
+    byId = pos.byId;
+    ccRows = pos.ccRows;
+    titles = pos.titles;
+    clients = pos.clients;
+    value = pos.value;
+    avgDelay = pos.avgDelay;
+    window.mapaJuridicoPersistirPosicao(pos);
+  } else {
+    const detail = (snap && snap.subjudice_detail) || {};
+    (detail.clients || []).forEach((c) => {
+      const id = String(c.id);
+      byId[id] = {
+        id: id,
+        name: c.name || ("Cliente " + id),
+        value: Number(c.value) || 0,
+        cc: String(c.cc || "N/D"),
+        titles: Number(c.titles) || 0
+      };
+    });
+    ccRows = (detail.cost_centers || []).map((e) => ({
+      id: String(e.id),
+      name: e.name,
+      titles: Number(e.titles) || 0,
+      value: Number(e.value) || 0
+    }));
+    if (!ccRows.length) {
+      const acc = {};
+      Object.values(byId).forEach((c) => {
+        if (!acc[c.cc]) acc[c.cc] = { id: c.cc, name: window.mapaJuridicoEmpLabel(c.cc), titles: 0, value: 0 };
+        acc[c.cc].value += c.value;
+        acc[c.cc].titles += c.titles;
+      });
+      ccRows = Object.values(acc);
+    }
+    titles = window.mapaJuridicoTitulosDoSnap(snap);
+    clients = snap && snap.subjudice_customers != null ? Number(snap.subjudice_customers) : Object.keys(byId).length;
+    value = Number(snap && snap.subjudice_value) || Object.values(byId).reduce((s, c) => s + c.value, 0);
+  }
+  const movimento = window.mapaJuridicoMontarMovimento({
+    byId: byId,
+    ccRows: ccRows,
+    closeSnap: closeSnap,
+    closeDate: closeDate,
+    limite: limite,
+    porCliente: porCliente,
+    usarHistorico: isToday
+  });
+  const pontosBase = closes
+    .filter((s) => dataSnap(s) < limite)
+    .slice(-11)
+    .map((s) => ({ date: dataSnap(s), label: window.mapaJuridicoLabelData(dataSnap(s), false), titles: window.mapaJuridicoTitulosDoSnap(s), isPosition: false }));
+  pontosBase.push({ date: limite, label: window.mapaJuridicoLabelData(limite, false), titles: titles, isPosition: true });
+  const caixaMov = movimento.moveTot.caixa || 0;
+  const caixaGeral = Object.keys(porCliente).reduce((s, id) => s + porCliente[id], 0);
+  let caixaNota = "Caixa é a baixa do tipo Recebimento, de " + window.mapaJuridicoLabelData(inicioCaixa, true) + " a " + window.mapaJuridicoLabelData(limite, true) + ". Distrato e cancelamento saem da carteira e não entram no caixa.";
+  if (!rec.ok) caixaNota = "Não foi possível ler as baixas de recebimento. A coluna Caixa ficou zerada.";
+  else if (!(caixaMov > 0) && caixaGeral > 0) caixaNota = "Houve recebimento no período em outros clientes. Quem entrou ou saiu do sub judice não teve baixa do tipo Recebimento.";
+  const baseNota = (!isToday && dataSnap(snap) !== pedido)
+    ? ("Pedido " + window.mapaJuridicoLabelData(pedido, true) + " · base gravada em " + window.mapaJuridicoLabelData(limite, true))
+    : "";
+  return {
+    rotulo: "Posição em " + window.mapaJuridicoLabelData(limite, true),
+    baseNota: baseNota,
+    titles: titles,
+    clients: clients,
+    value: value,
+    avgDelay: avgDelay,
+    pontos: pontosBase,
+    empRows: movimento.empRows,
+    empTot: movimento.empTot,
+    clientRows: movimento.clientRows,
+    moveTot: movimento.moveTot,
+    semDetalhe: movimento.semDetalhe,
+    caixaNota: caixaNota,
+    periodo: "Desde o fechamento de " + window.mapaJuridicoLabelData(closeDate, true)
+  };
+};
+
+window.mapaJuridicoHtmlRelatorio = function(dados) {
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+  const fmt = (v) => Math.round(Number(v) || 0).toLocaleString("pt-BR");
+  const pontos = dados.pontos || [];
+  const W = 640;
+  const H = 132;
+  const padTop = 28;
+  const padBot = 18;
+  const padSide = 28;
+  const n = pontos.length;
+  const maxVal = Math.max.apply(null, pontos.map((p) => p.titles).concat([1]));
+  const stepX = (W - padSide * 2) / Math.max(n - 1, 1);
+  const barWidth = Math.min(26, n === 1 ? 28 : stepX * 0.5);
+  const closeIdx = Math.max(0, n - 2);
+  const xAt = (i) => padSide + i * stepX;
+  let bars = "";
+  let texts = "";
+  let labels = "";
+  pontos.forEach((p, i) => {
+    const x = xAt(i);
+    const barH = (p.titles / maxVal) * (H - padTop - padBot);
+    const y = H - padBot - barH;
+    const color = p.isPosition ? "#105436" : (i === closeIdx ? "#94a3b8" : "#86efac");
+    bars += '<rect x="' + (x - barWidth / 2) + '" y="' + y + '" width="' + barWidth + '" height="' + Math.max(barH, 1) + '" fill="' + color + '" rx="2"/>';
+    texts += '<text x="' + x + '" y="' + (y - 4) + '" text-anchor="middle" font-size="11" font-weight="700" fill="#334155">' + Math.round(p.titles) + "</text>";
+    labels += '<text x="' + x + '" y="' + (H - 4) + '" text-anchor="middle" font-size="10" fill="#64748b">' + esc(p.label) + "</text>";
+  });
+  let arrow = "";
+  if (n > 1) {
+    const first = pontos[closeIdx].titles;
+    const last = pontos[n - 1].titles;
+    const diff = last - first;
+    const pct = first ? ((diff / first) * 100).toFixed(1) : "0.0";
+    const sign = diff > 0 ? "+" : "";
+    const x1 = xAt(closeIdx);
+    const x2 = xAt(n - 1);
+    const ay = 11;
+    arrow = '<path d="M ' + x1 + " " + (ay + 5) + " L " + x1 + " " + ay + " L " + x2 + " " + ay + " L " + x2 + " " + (ay + 5) + '" fill="none" stroke="#0f172a" stroke-width="1.3"/>' +
+      '<path d="M ' + (x2 - 3) + " " + (ay + 2) + " L " + x2 + " " + (ay + 5) + " L " + (x2 + 3) + " " + (ay + 2) + '" fill="none" stroke="#0f172a" stroke-width="1.3"/>' +
+      '<text x="' + ((x1 + x2) / 2) + '" y="' + (ay + 3) + '" text-anchor="middle" font-size="11" font-weight="700" fill="#0f172a">' + sign + Math.round(diff) + " | " + sign + pct + "%</text>";
+  }
+  const th = "padding:5px 6px;font-size:10px;font-weight:700;color:#fff;text-transform:uppercase;letter-spacing:0.2px;white-space:nowrap;";
+  const td = "padding:4px 6px;font-size:11px;color:#0f172a;white-space:nowrap;";
+  const zebra = (i, other) => other ? "#ecfdf5" : (i % 2 ? "#f8fafc" : "#fff");
+  const empBody = (dados.empRows || []).map((r, i) =>
+    "<tr style=\"background:" + zebra(i, r.isOther) + ";\">" +
+    "<td style=\"" + td + "font-weight:700;max-width:210px;overflow:hidden;text-overflow:ellipsis;\">" + esc(r.name) + "</td>" +
+    "<td style=\"" + td + "text-align:right;\">" + fmt(r.close) + "</td>" +
+    "<td style=\"" + td + "text-align:right;\">" + fmt(r.saiu) + "</td>" +
+    "<td style=\"" + td + "text-align:right;font-weight:800;color:#105436;\">" + fmt(r.caixa) + "</td>" +
+    "<td style=\"" + td + "text-align:right;\">" + fmt(r.entrou) + "</td>" +
+    "<td style=\"" + td + "text-align:right;font-weight:700;\">" + fmt(r.hoje) + "</td></tr>"
+  ).join("");
+  const et = dados.empTot || {};
+  const cliBody = (dados.clientRows || []).map((r, i) =>
+    "<tr style=\"background:" + zebra(i, r.isOther) + ";\">" +
+    "<td style=\"" + td + "font-weight:700;max-width:220px;overflow:hidden;text-overflow:ellipsis;\">" + esc(r.name) + "</td>" +
+    "<td style=\"" + td + "text-align:right;\">" + fmt(r.saiu) + "</td>" +
+    "<td style=\"" + td + "text-align:right;font-weight:800;color:#105436;\">" + fmt(r.caixa) + "</td>" +
+    "<td style=\"" + td + "text-align:right;\">" + fmt(r.entrou) + "</td>" +
+    "<td style=\"" + td + "text-align:right;font-weight:700;\">" + fmt(r.total) + "</td></tr>"
+  ).join("");
+  const mt = dados.moveTot || {};
+  const atraso = dados.avgDelay == null ? "—" : (fmt(dados.avgDelay) + " d");
+  const vazio = dados.semDetalhe
+    ? "<p style=\"margin:8px 0 0;font-size:12px;color:#64748b;\">Essa data não tem o movimento cliente a cliente gravado.</p>"
+    : "";
+  return "" +
+    "<div style=\"background:#105436;color:#fff;border-radius:8px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;\">" +
+      "<div style=\"font-size:16px;font-weight:800;\">Mapa Jurídico</div>" +
+      "<div style=\"text-align:right;font-size:12px;font-weight:700;\">" + esc(dados.rotulo) + (dados.baseNota ? "<div style=\"font-weight:500;font-size:11px;opacity:0.9;\">" + esc(dados.baseNota) + "</div>" : "") + "</div>" +
+    "</div>" +
+    "<div style=\"display:flex;gap:18px;margin:12px 0 4px;\">" +
+      "<div><div style=\"font-size:10px;font-weight:700;color:#64748b;letter-spacing:0.4px;\">TÍTULOS</div><div style=\"font-size:22px;font-weight:800;color:#105436;\">" + fmt(dados.titles) + "</div></div>" +
+      "<div><div style=\"font-size:10px;font-weight:700;color:#64748b;letter-spacing:0.4px;\">ATUALIZADO</div><div style=\"font-size:22px;font-weight:800;color:#0f172a;\">" + fmt(dados.value) + "</div></div>" +
+      "<div><div style=\"font-size:10px;font-weight:700;color:#64748b;letter-spacing:0.4px;\">ATRASO MÉDIO</div><div style=\"font-size:22px;font-weight:800;color:#0f172a;\">" + atraso + "</div></div>" +
+    "</div>" +
+    "<div style=\"text-align:center;font-size:12px;font-weight:800;color:#105436;letter-spacing:0.6px;margin-top:6px;\">TÍTULOS</div>" +
+    "<svg width=\"" + W + "\" height=\"" + H + "\" style=\"display:block;margin:0 auto 8px;\">" + arrow +
+      "<line x1=\"0\" y1=\"" + (H - padBot) + "\" x2=\"" + W + "\" y2=\"" + (H - padBot) + "\" stroke=\"#e2e8f0\" stroke-width=\"1.5\"/>" +
+      bars + texts + labels + "</svg>" +
+    "<div style=\"font-size:11px;color:#64748b;margin:0 0 8px;\">" + esc(dados.periodo) + ". A barra cinza é o último fechamento.</div>" +
+    "<div style=\"display:flex;gap:12px;align-items:flex-start;\">" +
+      "<table style=\"width:58%;border-collapse:collapse;\">" +
+        "<thead><tr style=\"background:#105436;\">" +
+          "<th style=\"" + th + "text-align:left;\">Empreendimento</th>" +
+          "<th style=\"" + th + "text-align:right;\">Fechamento</th>" +
+          "<th style=\"" + th + "text-align:right;\">Saiu</th>" +
+          "<th style=\"" + th + "text-align:right;\">Caixa</th>" +
+          "<th style=\"" + th + "text-align:right;\">Entrou</th>" +
+          "<th style=\"" + th + "text-align:right;\">Posição</th>" +
+        "</tr></thead><tbody>" + empBody +
+        "<tr style=\"background:#f0fdf4;font-weight:800;\">" +
+          "<td style=\"" + td + "font-weight:800;\">Total</td>" +
+          "<td style=\"" + td + "text-align:right;font-weight:800;\">" + fmt(et.close) + "</td>" +
+          "<td style=\"" + td + "text-align:right;font-weight:800;\">" + fmt(et.saiu) + "</td>" +
+          "<td style=\"" + td + "text-align:right;font-weight:800;color:#105436;\">" + fmt(et.caixa) + "</td>" +
+          "<td style=\"" + td + "text-align:right;font-weight:800;\">" + fmt(et.entrou) + "</td>" +
+          "<td style=\"" + td + "text-align:right;font-weight:800;\">" + fmt(et.hoje) + "</td></tr></tbody></table>" +
+      "<table style=\"width:42%;border-collapse:collapse;\">" +
+        "<thead><tr style=\"background:#105436;\">" +
+          "<th style=\"" + th + "text-align:left;\">Cliente</th>" +
+          "<th style=\"" + th + "text-align:right;\">Saiu</th>" +
+          "<th style=\"" + th + "text-align:right;\">Caixa</th>" +
+          "<th style=\"" + th + "text-align:right;\">Entrou</th>" +
+          "<th style=\"" + th + "text-align:right;\">Líquido</th>" +
+        "</tr></thead><tbody>" + cliBody +
+        "<tr style=\"background:#f0fdf4;\">" +
+          "<td style=\"" + td + "font-weight:800;\">Total</td>" +
+          "<td style=\"" + td + "text-align:right;font-weight:800;\">" + fmt(mt.saiu) + "</td>" +
+          "<td style=\"" + td + "text-align:right;font-weight:800;color:#105436;\">" + fmt(mt.caixa) + "</td>" +
+          "<td style=\"" + td + "text-align:right;font-weight:800;\">" + fmt(mt.entrou) + "</td>" +
+          "<td style=\"" + td + "text-align:right;font-weight:800;\">" + fmt(mt.total) + "</td></tr></tbody></table>" +
+    "</div>" + vazio +
+    "<p style=\"margin:10px 0 0;font-size:11px;color:#475569;line-height:1.4;\">" + esc(dados.caixaNota) + "</p>";
+};
+
+window.mapaJuridicoPedirData = function() {
+  return new Promise((resolve) => {
+    const prev = document.getElementById("mapa-pdf-data");
+    if (prev) prev.remove();
+    const hoje = window.mapaJuridicoHojeIso();
+    const wrap = document.createElement("div");
+    wrap.id = "mapa-pdf-data";
+    wrap.style.cssText = "position:fixed;inset:0;z-index:13000;background:rgba(15,23,42,0.45);display:flex;align-items:center;justify-content:center;";
+    wrap.innerHTML = "" +
+      "<div style=\"background:#fff;border-radius:12px;padding:18px;width:min(440px,92vw);box-shadow:0 16px 40px rgba(15,23,42,0.2);\">" +
+        "<div style=\"font-weight:800;color:#105436;font-size:1rem;margin-bottom:6px;\">Posição do relatório</div>" +
+        "<p style=\"margin:0 0 12px;color:#64748b;font-size:0.85rem;line-height:1.4;\">Escolha o dia. O PDF mostra os títulos, o que saiu da carteira e o que entrou no caixa até essa data. O mapa na tela continua na posição de hoje.</p>" +
+        "<label style=\"display:block;font-size:0.75rem;font-weight:700;color:#334155;margin-bottom:14px;\">Data" +
+          "<input id=\"mapa-pdf-data-input\" type=\"date\" value=\"" + hoje + "\" max=\"" + hoje + "\" style=\"display:block;margin-top:4px;height:38px;width:100%;box-sizing:border-box;border:1px solid #cfe3d6;border-radius:8px;padding:0 10px;background:#fff;\">" +
+        "</label>" +
+        "<div style=\"display:flex;justify-content:flex-end;gap:8px;\">" +
+          "<button type=\"button\" class=\"btn btn-cancel\" id=\"mapa-pdf-data-cancel\">Cancelar</button>" +
+          "<button type=\"button\" class=\"btn btn-primary\" id=\"mapa-pdf-data-ok\">Gerar PDF</button>" +
+        "</div>" +
+      "</div>";
+    document.body.appendChild(wrap);
+    const finish = (v) => { wrap.remove(); resolve(v || ""); };
+    wrap.querySelector("#mapa-pdf-data-cancel").onclick = () => finish("");
+    const ok = wrap.querySelector("#mapa-pdf-data-ok");
+    const input = wrap.querySelector("#mapa-pdf-data-input");
+    ok.onclick = () => { if (input.value) finish(input.value); };
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter" && input.value) finish(input.value); });
+  });
+};
+
 window.exportMapaJuridicoPDF = async function() {
-  const parts = window._mapaJuridicoPdfHtml;
-  if (!parts) {
+  if (!window._subjudiceList || !window._subjudiceList.length) {
     alert("Abra o mapa jurídico antes de gerar o PDF.");
     return;
   }
+  const iso = await window.mapaJuridicoPedirData();
+  if (!iso) return;
   const btn = document.getElementById("btn-mapa-juridico-pdf");
   const old = btn ? btn.innerHTML : "";
   if (btn) {
     btn.disabled = true;
-    btn.innerHTML = "Gerando PDF...";
+    btn.textContent = "Gerando PDF...";
   }
-  let container1 = null;
-  let container2 = null;
+  let box = null;
   try {
-    const yieldUI = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 40)));
-    container1 = document.createElement("div");
-    container1.style.cssText = parts.style1;
-    container1.innerHTML = parts.page1;
-    container2 = document.createElement("div");
-    container2.style.cssText = parts.style2;
-    container2.innerHTML = parts.page2;
-    document.body.appendChild(container1);
-    await yieldUI();
-    const canvasOpts = { scale: 1.5, useCORS: true, backgroundColor: "#ffffff", logging: false };
-    const fitPage = (pdf, imgData) => {
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
-      const props = pdf.getImageProperties(imgData);
-      const ratio = props.width / props.height;
-      let w = pdfWidth;
-      let h = pdfWidth / ratio;
-      if (h > pdfHeight) { h = pdfHeight; w = pdfHeight * ratio; }
-      pdf.addImage(imgData, "JPEG", (pdfWidth - w) / 2, 0, w, h);
-    };
-    const canvas1 = await html2canvas(container1, canvasOpts);
-    const { jsPDF } = window.jspdf;
+    const dados = await window.mapaJuridicoDadosRelatorio(iso);
+    if (!dados) return;
+    if (typeof html2canvas !== "function" || !window.jspdf) throw new Error("PDF indisponível");
+    box = document.createElement("div");
+    box.style.cssText = "position:fixed;left:-4000px;top:0;width:1040px;background:#fff;padding:16px 18px 18px;font-family:Inter,Segoe UI,sans-serif;color:#0f172a;box-sizing:border-box;";
+    box.innerHTML = window.mapaJuridicoHtmlRelatorio(dados);
+    document.body.appendChild(box);
+    await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 40)));
+    const canvas = await html2canvas(box, { scale: 1, useCORS: true, backgroundColor: "#ffffff", logging: false });
+    const jsPDF = window.jspdf.jsPDF;
     const pdf = new jsPDF("l", "mm", "a4");
-    fitPage(pdf, canvas1.toDataURL("image/jpeg", 0.92));
-    if (container1.parentNode) document.body.removeChild(container1);
-    container1 = null;
-    await yieldUI();
-    document.body.appendChild(container2);
-    await yieldUI();
-    const canvas2 = await html2canvas(container2, canvasOpts);
-    pdf.addPage();
-    fitPage(pdf, canvas2.toDataURL("image/jpeg", 0.92));
-    if (container2.parentNode) document.body.removeChild(container2);
-    container2 = null;
-    pdf.save("Mapa_Juridico_SubJudice.pdf");
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = pdf.internal.pageSize.getHeight();
+    const img = canvas.toDataURL("image/jpeg", 0.86);
+    const props = pdf.getImageProperties(img);
+    const ratio = props.width / props.height;
+    let w = pdfWidth;
+    let h = pdfWidth / ratio;
+    if (h > pdfHeight) { h = pdfHeight; w = pdfHeight * ratio; }
+    pdf.addImage(img, "JPEG", (pdfWidth - w) / 2, 0, w, h);
+    pdf.save("Mapa_Juridico_" + iso + ".pdf");
   } catch (e) {
     console.error("Erro ao gerar PDF do mapa jurídico:", e);
     alert("Ocorreu um erro ao gerar o PDF.");
-    if (container1 && container1.parentNode) document.body.removeChild(container1);
-    if (container2 && container2.parentNode) document.body.removeChild(container2);
   } finally {
+    if (box && box.parentNode) box.parentNode.removeChild(box);
     if (btn) {
       btn.disabled = false;
       btn.innerHTML = old || "Gerar PDF";
@@ -55149,6 +55728,7 @@ window.exportMapaJuridicoPDF = async function() {
     }
   }
 };
+
 
 window.showMapaJuridicoOverlay = function(ui) {
   window.closeMapaJuridico();
@@ -55460,587 +56040,8 @@ window.openMapaJuridico = function() {
   return window.gerarMapaJuridicoPDF();
 };
 
-window.gerarMapaJuridicoPDF = async function() {
-    if (!window._subjudiceList || window._subjudiceList.length === 0) {
-        alert("Não há clientes no Sub Judice para gerar o mapa.");
-        return;
-    }
-
-    const btn = document.getElementById('btn-gerar-mapa-juridico') || document.querySelector('button[onclick="gerarMapaJuridicoPDF()"]');
-    const oldHtml = btn ? btn.innerHTML : '';
-    const restoreBtn = () => {
-        if (!btn) return;
-        btn.innerHTML = oldHtml;
-        btn.disabled = false;
-        if (window.lucide) window.lucide.createIcons();
-    };
-    if (btn) {
-        const lockedWidth = Math.max(btn.offsetWidth, 188);
-        btn.style.minWidth = lockedWidth + 'px';
-        btn.style.width = lockedWidth + 'px';
-        btn.innerHTML = `<span style="width:16px;height:16px;border:2px solid rgba(255,255,255,0.35);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;display:inline-block;flex-shrink:0;"></span>`;
-        btn.disabled = true;
-    }
-
-    const yieldUI = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 40)));
-    await yieldUI();
-
-    let container1 = null;
-    let container2 = null;
-    try {
-        let snapshots = [];
-        try {
-            if (window.firebaseCollections && window.firebaseDb) {
-                const snapRef = window.firebaseCollections.collection(window.firebaseDb, 'inadimplencia_snapshots');
-                const q = window.firebaseCollections.query(snapRef, window.firebaseCollections.orderBy('date', 'asc'));
-                const fbDocs = await window.firebaseCollections.getDocs(q);
-                fbDocs.forEach(d => { const data = d.data(); if (data) snapshots.push(data); });
-            }
-        } catch (snapErr) {
-            console.warn('Mapa jurídico: snapshots indisponíveis', snapErr);
-        }
-
-        const nameMap = window.mapaJuridicoMontarCaixas();
-
-        const fmtBRL = (val) => val.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-
-        const buildTimelineHtml = (title, list, isGeneral = false, compId = "") => {
-            const agg = {};
-            Object.values(nameMap).forEach(v => {
-                agg[v.prefix] = { ...v, count: 0, value: 0, clients: [] };
-            });
-            list.forEach(client => {
-                const phaseInfo = (typeof window.getClientJudicialPhaseInfo === "function")
-                    ? window.getClientJudicialPhaseInfo(client)
-                    : { fase: "Sem Fase", faseLabel: "Sem Fase" };
-                const mapped = window.mapaJuridicoCaixaDaFase(nameMap, phaseInfo) || nameMap["Sem Fase"];
-                const value = (client.overdueValue || 0) + (client.overdueCharges || 0);
-                if (mapped && agg[mapped.prefix]) {
-                    agg[mapped.prefix].count += window.mapaJuridicoQtdTitulos(client);
-                    agg[mapped.prefix].value += value;
-                    agg[mapped.prefix].clients.push(client);
-                }
-            });
-            const sortedAgg = Object.values(agg).sort((a, b) => a.order - b.order);
-            
-            const titleHtml = `<div style="font-size: ${isGeneral ? '13px' : '11px'}; font-weight: 900; color: #0f172a; margin-bottom: 6px; text-transform: uppercase;">${title}</div>`;
-            
-            const timelineHtml = `<div style="display: flex; flex-wrap: nowrap; gap: 2px; align-items: center; width: 100%; padding-top: 10px;">
-                ${sortedAgg.map((item, idx) => {
-                    const isActive = item.count > 0;
-                    const cardHtml = isActive
-                        ? `<div style="background: white; border: 1.5px solid #065f46; border-radius: 6px; width: 44px; padding: 10px 2px 4px 2px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); position: relative; flex-shrink: 0;">
-                            <div style="background: #065f46; color: white; width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 8px; position: absolute; top: -9px; left: 50%; transform: translateX(-50%); border: 2px solid white;">${item.prefix}</div>
-                            <div style="color: #64748b; font-size: 7px; text-transform: uppercase; font-weight: 700; margin-bottom: 1px;">Tít.</div>
-                            <div style="font-size: 11px; font-weight: 900; color: #0f172a;">${item.count}</div>
-                            <div style="height: 1px; background: #e2e8f0; margin: 4px 0;"></div>
-                            <div style="color: #ef4444; font-size: 8px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 1px;">${fmtBRL(item.value)}</div>
-                        </div>`
-                        : `<div style="background: white; border: 1px solid #e2e8f0; border-radius: 4px; width: 18px; padding: 6px 1px 2px 1px; text-align: center; position: relative; flex-shrink: 0; opacity: 0.6;">
-                            <div style="background: #475569; color: white; width: 12px; height: 12px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 6px; position: absolute; top: -6px; left: 50%; transform: translateX(-50%); border: 1px solid white;">${item.prefix}</div>
-                            <div style="font-size: 8px; font-weight: 900; color: #475569;">0</div>
-                        </div>`;
-                    const arrowHtml = idx < sortedAgg.length - 1
-                        ? `<div style="display: flex; align-items: center; justify-content: center; flex: 1; min-width: 4px;">
-                            <div style="width: 100%; height: 1.5px; background: #cbd5e1; position: relative;">
-                                <div style="position: absolute; right: -2px; top: -2.5px; width: 0; height: 0; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-left: 4px solid #cbd5e1;"></div>
-                            </div>
-                        </div>`
-                        : '';
-                    return cardHtml + arrowHtml;
-                }).join('')}
-            </div>`;
-            
-            return {
-                html: `<div style="margin-bottom: ${isGeneral ? '15px' : '10px'}; border-bottom: ${isGeneral ? '1px dashed #e2e8f0' : 'none'}; padding-bottom: ${isGeneral ? '10px' : '0'};">
-                    ${titleHtml}
-                    ${timelineHtml}
-                </div>`,
-                agg: sortedAgg // para extrairmos os dados globais da legenda
-            };
-        };
-
-        const generalList = window._subjudiceList || [];
-        
-        let totalValue = 0, totalTitles = 0, totalDaysDelay = 0, clientsWithDelay = 0;
-        generalList.forEach(client => {
-            totalValue += (client.overdueValue || 0) + (client.overdueCharges || 0);
-            totalTitles += (client.billIds ? client.billIds.length : 1);
-            if (client.maxDaysDelay > 0) {
-                totalDaysDelay += client.maxDaysDelay;
-                clientsWithDelay++;
-            }
-        });
-        const avgDelay = clientsWithDelay > 0 ? Math.round(totalDaysDelay / clientsWithDelay) : 0;
-        const totalClients = new Set(generalList.map(c => c.customerId)).size;
-
-        const companyGroups = {};
-        generalList.forEach(c => {
-            const compId = String(c.companyId);
-            if (!companyGroups[compId]) companyGroups[compId] = [];
-            companyGroups[compId].push(c);
-        });
-
-        const sortedCompanies = Object.keys(companyGroups).sort((a,b) => {
-            const nameA = window.getCompanyName ? window.getCompanyName(a) : `Empresa ${a}`;
-            const nameB = window.getCompanyName ? window.getCompanyName(b) : `Empresa ${b}`;
-            return nameA.localeCompare(nameB);
-        });
-
-        const usualCompanyName = (compId) => {
-            if (typeof getCompanyName === 'function') {
-                return getCompanyName(compId, true) || getCompanyName(compId) || `Empresa ${compId}`;
-            }
-            return `Empresa ${compId}`;
-        };
-        const companyLegalLabel = (compId) => {
-            const comp = (window.AppState && AppState.companies || []).find(c => Number(c.id) === Number(compId));
-            const full = (comp && (comp.name || comp.tradeName)) || (typeof getCompanyName === "function" ? getCompanyName(compId) : "") || `Empresa ${compId}`;
-            return `${compId} - ${String(full).toUpperCase()}`;
-        };
-
-        const generalResult = buildTimelineHtml("Visão Geral", generalList, true, "");
-        let timelinesHtml = generalResult.html;
-        const byKey = {};
-        const registerAgg = (agg, scopeId, scopeName) => {
-            (agg || []).forEach(item => {
-                const key = (scopeId ? ("c:" + scopeId + "|") : "g|") + String(item.prefix);
-                byKey[key] = {
-                    prefix: item.prefix,
-                    name: item.name,
-                    scopeName: scopeName || "",
-                    clients: item.clients || [],
-                    days: item.days || 0,
-                    descricao: item.descricao || "",
-                    children: item.children || []
-                };
-            });
-        };
-        registerAgg(generalResult.agg, "", "Visão Geral");
-        const vencidosList = generalList.filter(c => window.mapaJuridicoEtapaVencida(c));
-        const vencidosResult = buildTimelineHtml("Etapas vencidas", vencidosList, true, "vencidos");
-        timelinesHtml += vencidosResult.html;
-        registerAgg(vencidosResult.agg, "vencidos", "Etapas vencidas");
-
-        const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({
-            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-        }[ch]));
-        const fmtInt = (val) => Math.round(Number(val) || 0).toLocaleString('pt-BR');
-        const clientValue = (c) => (c.overdueValue || 0) + (c.overdueCharges || 0);
-        const empLabel = (ccId) => window.mapaJuridicoEmpLabel(ccId);
-        const ellipsisTd = 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-
-        const companyRows = Object.keys(companyGroups).map(compId => {
-            const list = companyGroups[compId];
-            const titles = new Set();
-            let value = 0;
-            list.forEach(c => {
-                value += clientValue(c);
-                if (c.billIds && c.billIds.length) c.billIds.forEach(id => titles.add(id));
-                else titles.add(c.customerId);
-            });
-            return { id: compId, name: usualCompanyName(compId), titles: titles.size, value };
-        }).sort((a, b) => b.value - a.value);
-
-        const empMap = {};
-        generalList.forEach(c => {
-            const ccId = (typeof getPrimaryCostCenter === 'function' ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId) || 'N/D';
-            if (!empMap[ccId]) empMap[ccId] = { id: ccId, name: empLabel(c.costCenterId), titles: new Set(), value: 0 };
-            empMap[ccId].value += clientValue(c);
-            if (c.billIds && c.billIds.length) c.billIds.forEach(id => empMap[ccId].titles.add(id));
-            else empMap[ccId].titles.add(c.customerId);
-        });
-        const empSorted = Object.values(empMap).map(e => ({ ...e, titles: e.titles.size })).sort((a, b) => b.value - a.value);
-
-        const pad2 = n => String(n).padStart(2, '0');
-        const now = new Date();
-        const todayStr = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
-        const labelDM = (iso) => {
-            const p = String(iso || '').slice(0, 10).split('-');
-            return p.length === 3 ? `${p[2]}/${p[1]}` : String(iso || '');
-        };
-        const isoFromAny = (dStr) => {
-            if (!dStr) return '';
-            const d = parseSafeDate(dStr);
-            if (!d || isNaN(d.getTime())) return '';
-            return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
-        };
-        const sjVal = (s) => Number(s && s.subjudice_value) || 0;
-        const sjCli = (s) => Number((s && (s.subjudice_customers != null ? s.subjudice_customers : s.subjudice_count)) || 0);
-
-        const closeSnaps = snapshots
-            .filter(s => s && s.is_month_close)
-            .sort((a, b) => String(a.date).localeCompare(String(b.date)))
-            .slice(-12);
-        const lastClose = closeSnaps.length ? closeSnaps[closeSnaps.length - 1] : null;
-        const closeDateStr = lastClose && lastClose.date ? String(lastClose.date).slice(0, 10) : `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-01`;
-
-        const chartPoints = closeSnaps.map(s => ({
-            date: String(s.date).slice(0, 10),
-            label: labelDM(s.date),
-            value: sjVal(s),
-            clients: sjCli(s),
-            isToday: false
-        }));
-        if (!chartPoints.some(p => p.date === todayStr)) {
-            chartPoints.push({ date: todayStr, label: labelDM(todayStr), value: totalValue, clients: totalClients, isToday: true });
-        } else {
-            const p = chartPoints.find(x => x.date === todayStr);
-            p.value = totalValue;
-            p.clients = totalClients;
-            p.isToday = true;
-        }
-
-        const fmtM = (v) => (Number(v) / 1000000).toFixed(3).replace('.', ',');
-        const juridicoBarChart = (data, labels, isVal) => {
-            if (!data.length) return '<div style="color:#94a3b8;font-size:9px;text-align:center;padding:20px 0;">Sem histórico ainda — as colunas aparecem conforme a base for carregada.</div>';
-            const maxVal = Math.max(...data, 1);
-            const W = 500, H = 118, padTop = 28, padBot = 18, padSide = 28;
-            const n = data.length;
-            const stepX = (W - padSide * 2) / Math.max(n - 1, 1);
-            const barWidth = Math.min(22, n === 1 ? 28 : stepX * 0.55);
-            const closeIdx = Math.max(0, n - (chartPoints[n - 1] && chartPoints[n - 1].isToday && n > 1 ? 2 : 1));
-            const todayIdx = n - 1;
-            const firstVal = data[closeIdx];
-            const lastVal = data[todayIdx];
-            const diff = lastVal - firstVal;
-            const pct = firstVal ? ((diff / firstVal) * 100).toFixed(1) : '0.0';
-            const sign = diff > 0 ? '+' : '';
-            const formatVal = (v) => isVal ? fmtM(v) : String(Math.round(v));
-            const xAt = (i) => padSide + i * stepX;
-            let bars = '', texts = '', xLabels = '';
-            data.forEach((v, i) => {
-                const x = xAt(i);
-                const barH = (v / maxVal) * (H - padTop - padBot);
-                const y = H - padBot - barH;
-                const isClose = i === closeIdx && !(chartPoints[i] && chartPoints[i].isToday && n === 1);
-                const color = isClose ? '#94a3b8' : (v <= firstVal ? '#4ade80' : '#f87171');
-                bars += `<rect x="${x - barWidth / 2}" y="${y}" width="${barWidth}" height="${Math.max(barH, 1)}" fill="${color}" rx="2"/>`;
-                texts += `<text x="${x}" y="${y - 4}" text-anchor="middle" font-size="8" font-weight="700" fill="#334155">${formatVal(v)}</text>`;
-                xLabels += `<text x="${x}" y="${H - 4}" text-anchor="middle" font-size="8" fill="#64748b">${labels[i]}</text>`;
-            });
-            let arrow = '';
-            if (n > 1) {
-                const x1 = xAt(closeIdx), x2 = xAt(todayIdx), ay = 10;
-                const diffText = isVal ? `${sign}${fmtM(diff)} | ${sign}${pct}%` : `${sign}${Math.round(diff)} | ${sign}${pct}%`;
-                arrow = `<path d="M ${x1} ${ay + 5} L ${x1} ${ay} L ${x2} ${ay} L ${x2} ${ay + 5}" fill="none" stroke="#0f1e17" stroke-width="1.4"/>
-                    <path d="M ${x2 - 3} ${ay + 2} L ${x2} ${ay + 5} L ${x2 + 3} ${ay + 2}" fill="none" stroke="#0f1e17" stroke-width="1.4"/>
-                    <rect x="${(x1 + x2) / 2 - 42}" y="${ay - 9}" width="84" height="14" fill="#fff"/>
-                    <text x="${(x1 + x2) / 2}" y="${ay + 2}" text-anchor="middle" font-size="9" font-weight="800" fill="#0f1e17">${diffText}</text>`;
-            }
-            return `<svg width="${W}" height="${H}" style="overflow:visible;display:block;margin:0 auto;">
-                ${arrow}
-                <line x1="0" y1="${H - padBot}" x2="${W}" y2="${H - padBot}" stroke="#e2e8f0" stroke-width="1.5"/>
-                ${bars}${texts}${xLabels}
-            </svg>`;
-        };
-
-        const subjudiceHistory = JSON.parse(localStorage.getItem('subjudiceHistory') || '{}');
-        const closeDetail = (lastClose && lastClose.subjudice_detail) || {};
-        const closeClients = {};
-        (closeDetail.clients || []).forEach(c => { closeClients[String(c.id)] = c; });
-        const currentById = {};
-        generalList.forEach(c => {
-            const id = String(c.customerId);
-            const cc = String((typeof getPrimaryCostCenter === 'function' ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId) || 'N/D');
-            if (!currentById[id]) currentById[id] = { id, name: c.customerName || `Cliente ${id}`, value: 0, cc, titles: 0 };
-            currentById[id].value += clientValue(c);
-            currentById[id].titles += (c.billIds && c.billIds.length) ? c.billIds.length : 1;
-        });
-        const nameOf = (id) => {
-            if (currentById[id] && currentById[id].name) return currentById[id].name;
-            if (closeClients[id] && closeClients[id].name) return closeClients[id].name;
-            const raw = (window.rawClientList || []).find(c => String(c.customerId) === String(id));
-            return (raw && raw.customerName) || `Cliente ${id}`;
-        };
-        const ccOf = (id, fallback) => {
-            if (currentById[id]) return currentById[id].cc;
-            if (closeClients[id] && closeClients[id].cc) return String(closeClients[id].cc);
-            return String(fallback || 'N/D');
-        };
-        const afterClose = (dStr) => {
-            const iso = isoFromAny(dStr);
-            return iso && iso > closeDateStr && iso <= todayStr;
-        };
-
-        const movers = {};
-        const touchMover = (id) => {
-            const k = String(id);
-            if (!movers[k]) movers[k] = { id: k, name: nameOf(k).toUpperCase(), entrou: 0, saiu: 0, cc: ccOf(k) };
-            return movers[k];
-        };
-        Object.values(currentById).forEach(c => {
-            const mem = subjudiceHistory[c.id] || subjudiceHistory[Number(c.id)];
-            const entered = (mem && afterClose(mem.entryDate)) || (lastClose && closeDetail.clients && !closeClients[c.id]);
-            if (entered) touchMover(c.id).entrou += c.value;
-        });
-        Object.keys(subjudiceHistory).forEach(id => {
-            const mem = subjudiceHistory[id];
-            if (!mem || !mem.exitDate || currentById[String(id)]) return;
-            if (!afterClose(mem.exitDate)) return;
-            const m = touchMover(id);
-            m.saiu += Number((closeClients[String(id)] && closeClients[String(id)].value) || 0);
-            m.cc = ccOf(id, m.cc);
-        });
-        Object.values(movers).forEach(m => { m.total = m.entrou - m.saiu; });
-
-        const hasCloseCc = Array.isArray(closeDetail.cost_centers) && closeDetail.cost_centers.length > 0;
-        const empMove = {};
-        const ensureEmp = (cc, name) => {
-            const k = String(cc || 'N/D');
-            if (!empMove[k]) empMove[k] = { id: k, name: name || empLabel(k), close: 0, saiu: 0, entrou: 0, hoje: 0 };
-            if (name) empMove[k].name = name;
-            return empMove[k];
-        };
-        empSorted.forEach(e => { ensureEmp(e.id, e.name).hoje = e.value; });
-        (closeDetail.cost_centers || []).forEach(e => { ensureEmp(e.id, e.name).close = Number(e.value) || 0; });
-        Object.values(movers).forEach(m => {
-            const row = ensureEmp(m.cc);
-            row.entrou += m.entrou;
-            row.saiu += m.saiu;
-        });
-        if (!hasCloseCc) {
-            Object.values(empMove).forEach(e => { e.close = e.hoje - e.entrou + e.saiu; });
-        }
-
-        const empFlowSorted = Object.values(empMove).sort((a, b) => b.hoje - a.hoje);
-        const empTop = empFlowSorted.slice(0, 10);
-        const empRest = empFlowSorted.slice(10);
-        const empFlowRows = empTop.map(e => ({ ...e, isOther: false }));
-        if (empRest.length) {
-            empFlowRows.push({
-                name: 'OUTROS', isOther: true,
-                close: empRest.reduce((s, e) => s + e.close, 0),
-                saiu: empRest.reduce((s, e) => s + e.saiu, 0),
-                entrou: empRest.reduce((s, e) => s + e.entrou, 0),
-                hoje: empRest.reduce((s, e) => s + e.hoje, 0)
-            });
-        }
-        const empFlowTot = empFlowSorted.reduce((acc, e) => ({
-            close: acc.close + e.close, saiu: acc.saiu + e.saiu, entrou: acc.entrou + e.entrou, hoje: acc.hoje + e.hoje
-        }), { close: 0, saiu: 0, entrou: 0, hoje: 0 });
-
-        const moverList = Object.values(movers).sort((a, b) => (Math.abs(b.total) || (b.entrou + b.saiu)) - (Math.abs(a.total) || (a.entrou + a.saiu)));
-        const top10 = moverList.slice(0, 10);
-        const others = moverList.slice(10);
-        const clientMoveRows = top10.map(m => ({ ...m, isOther: false }));
-        if (others.length) {
-            clientMoveRows.push({
-                name: 'OUTROS', isOther: true,
-                entrou: others.reduce((s, m) => s + m.entrou, 0),
-                saiu: others.reduce((s, m) => s + m.saiu, 0),
-                total: others.reduce((s, m) => s + m.total, 0)
-            });
-        }
-        const moveTot = moverList.reduce((acc, m) => ({
-            entrou: acc.entrou + m.entrou, saiu: acc.saiu + m.saiu, total: acc.total + m.total
-        }), { entrou: 0, saiu: 0, total: 0 });
-
-        try {
-            if (window.firebaseCollections && window.firebaseDb) {
-                const docRef = window.firebaseCollections.doc(window.firebaseDb, 'inadimplencia_snapshots', todayStr);
-                window.firebaseCollections.setDoc(docRef, {
-                    date: todayStr,
-                    subjudice_count: totalTitles,
-                    subjudice_customers: totalClients,
-                    subjudice_value: totalValue,
-                    subjudice_detail: {
-                        clients: Object.values(currentById),
-                        cost_centers: empSorted.map(e => ({ id: String(e.id), name: e.name, titles: e.titles, value: e.value }))
-                    }
-                }, { merge: true }).catch(() => {});
-            }
-        } catch (persistErr) { /* histórico cresce na próxima geração */ }
-
-        const th = (label, align, extra) => `<th style="text-align:${align || 'left'};padding:4px 6px;font-size:8px;font-weight:700;color:#fff;text-transform:uppercase;letter-spacing:0.3px;white-space:nowrap;${extra || ''}">${label}</th>`;
-        const orangeZebra = (i) => i % 2 === 0 ? '#fff' : '#ffedd5';
-        const signed = (v) => {
-            const n = Number(v) || 0;
-            const txt = (n < 0 ? '-' : '') + fmtInt(Math.abs(n));
-            const color = n < 0 ? '#16a34a' : (n > 0 ? '#c2410c' : '#64748b');
-            return `<span style="color:${color};font-weight:700;">${txt}</span>`;
-        };
-
-        const companyTable = `
-            <table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:9px;">
-                <colgroup><col style="width:12%"><col style="width:48%"><col style="width:16%"><col style="width:24%"></colgroup>
-                <thead><tr style="background:#ea580c;">${th('ID','center')}${th('EMPRESA')}${th('TÍTULOS','center')}${th('ATUALIZADO','right')}</tr></thead>
-                <tbody>
-                    ${companyRows.map((r, i) => `<tr style="background:${orangeZebra(i)};">
-                        <td style="padding:5px 6px;text-align:center;color:#9a3412;">${esc(r.id)}</td>
-                        <td style="padding:5px 6px;${ellipsisTd}font-weight:700;color:#c2410c;" title="${esc(r.name)}">${esc(r.name)}</td>
-                        <td style="padding:5px 6px;text-align:center;color:#7c2d12;">${r.titles}</td>
-                        <td style="padding:5px 6px;text-align:right;font-weight:800;color:#9a3412;white-space:nowrap;">${fmtInt(r.value)}</td>
-                    </tr>`).join('')}
-                    <tr style="background:#fff7ed;">
-                        <td style="padding:6px 8px;border-top:2px solid #fdba74;"></td>
-                        <td style="padding:6px 8px;border-top:2px solid #fdba74;font-weight:800;color:#ea580c;font-size:10px;">Total</td>
-                        <td style="padding:6px 8px;border-top:2px solid #fdba74;text-align:center;font-weight:800;color:#ea580c;">${totalTitles}</td>
-                        <td style="padding:6px 8px;border-top:2px solid #fdba74;text-align:right;font-weight:800;color:#ea580c;font-size:10px;white-space:nowrap;">${fmtInt(totalValue)}</td>
-                    </tr>
-                </tbody>
-            </table>`;
-
-        const empFlowTable = `
-            <table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:8.5px;">
-                <colgroup><col style="width:36%"><col style="width:16%"><col style="width:16%"><col style="width:16%"><col style="width:16%"></colgroup>
-                <thead><tr style="background:#ea580c;">${th('EMPREENDIMENTO')}${th('FECHAMENTO','right')}${th('SAIU','right')}${th('ENTROU','right')}${th('HOJE','right')}</tr></thead>
-                <tbody>
-                    ${empFlowRows.map((r, i) => `<tr style="background:${orangeZebra(i)};">
-                        <td style="padding:4px 6px;${ellipsisTd}font-weight:700;color:${r.isOther ? '#64748b' : '#9a3412'};" title="${esc(r.name)}">${esc(r.name)}</td>
-                        <td style="padding:4px 6px;text-align:right;white-space:nowrap;">${fmtInt(r.close)}</td>
-                        <td style="padding:4px 6px;text-align:right;white-space:nowrap;color:#16a34a;font-weight:700;">${fmtInt(r.saiu)}</td>
-                        <td style="padding:4px 6px;text-align:right;white-space:nowrap;color:#c2410c;font-weight:700;">${fmtInt(r.entrou)}</td>
-                        <td style="padding:4px 6px;text-align:right;white-space:nowrap;font-weight:800;">${fmtInt(r.hoje)}</td>
-                    </tr>`).join('') || `<tr><td colspan="5" style="padding:12px;text-align:center;color:#94a3b8;">Sem dados por empreendimento</td></tr>`}
-                    <tr style="background:#fff7ed;">
-                        <td style="padding:5px 6px;border-top:2px solid #fdba74;font-weight:800;color:#ea580c;">Total</td>
-                        <td style="padding:5px 6px;border-top:2px solid #fdba74;text-align:right;font-weight:800;color:#ea580c;">${fmtInt(empFlowTot.close)}</td>
-                        <td style="padding:5px 6px;border-top:2px solid #fdba74;text-align:right;font-weight:800;color:#ea580c;">${fmtInt(empFlowTot.saiu)}</td>
-                        <td style="padding:5px 6px;border-top:2px solid #fdba74;text-align:right;font-weight:800;color:#ea580c;">${fmtInt(empFlowTot.entrou)}</td>
-                        <td style="padding:5px 6px;border-top:2px solid #fdba74;text-align:right;font-weight:800;color:#ea580c;">${fmtInt(empFlowTot.hoje)}</td>
-                    </tr>
-                </tbody>
-            </table>`;
-
-        const clientMoveTable = `
-            <table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:8.5px;">
-                <colgroup><col style="width:46%"><col style="width:18%"><col style="width:18%"><col style="width:18%"></colgroup>
-                <thead><tr style="background:#ea580c;">${th('CLIENTE')}${th('ENTROU','right')}${th('SAIU','right')}${th('TOTAL','right')}</tr></thead>
-                <tbody>
-                    ${clientMoveRows.length ? clientMoveRows.map((r, i) => `<tr style="background:${orangeZebra(i)};">
-                        <td style="padding:4px 6px;${ellipsisTd}font-weight:700;color:${r.isOther ? '#64748b' : '#9a3412'};" title="${esc(r.name)}">${esc(r.name)}</td>
-                        <td style="padding:4px 6px;text-align:right;white-space:nowrap;">${fmtInt(r.entrou)}</td>
-                        <td style="padding:4px 6px;text-align:right;white-space:nowrap;">${fmtInt(r.saiu)}</td>
-                        <td style="padding:4px 6px;text-align:right;white-space:nowrap;">${signed(r.total)}</td>
-                    </tr>`).join('') : `<tr><td colspan="4" style="padding:12px;text-align:center;color:#94a3b8;">Sem entradas ou saídas desde o fechamento (${labelDM(closeDateStr)})</td></tr>`}
-                    <tr style="background:#fff7ed;">
-                        <td style="padding:5px 6px;border-top:2px solid #fdba74;font-weight:800;color:#ea580c;">Total</td>
-                        <td style="padding:5px 6px;border-top:2px solid #fdba74;text-align:right;font-weight:800;color:#ea580c;">${fmtInt(moveTot.entrou)}</td>
-                        <td style="padding:5px 6px;border-top:2px solid #fdba74;text-align:right;font-weight:800;color:#ea580c;">${fmtInt(moveTot.saiu)}</td>
-                        <td style="padding:5px 6px;border-top:2px solid #fdba74;text-align:right;font-weight:800;">${signed(moveTot.total)}</td>
-                    </tr>
-                </tbody>
-            </table>`;
-
-        const svgAlert = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>`;
-        const svgUsers = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>`;
-        const svgFile = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line></svg>`;
-        const svgClock = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>`;
-        const kpiBox = (bg, fg, icon, label, value) => `
-            <div style="flex:1;display:flex;align-items:center;justify-content:space-between;gap:8px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;">
-                <div>
-                    <div style="font-size:9px;font-weight:700;color:#64748b;letter-spacing:0.4px;text-transform:uppercase;">${label}</div>
-                    <div style="font-size:18px;font-weight:800;color:#0f172a;margin-top:2px;">${value}</div>
-                </div>
-                <div style="width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:${bg};color:${fg};">${icon}</div>
-            </div>`;
-
-        const quadro = (title, body) => `
-            <div style="min-width:0;height:100%;background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;display:flex;flex-direction:column;">
-                <div style="background:#ea580c;color:#fff;padding:6px 10px;font-weight:800;font-size:10px;letter-spacing:0.4px;text-transform:uppercase;">${esc(title)}</div>
-                <div style="flex:1;min-height:0;padding:6px 8px;">${body}</div>
-            </div>`;
-
-        const chartLabels = chartPoints.map(p => p.label);
-        const chartBody = `
-            <div style="display:flex;flex-direction:column;gap:4px;height:100%;">
-                <div style="font-size:8px;font-weight:800;color:#475569;text-transform:uppercase;text-align:center;">Valores (em milhões)</div>
-                ${juridicoBarChart(chartPoints.map(p => p.value), chartLabels, true)}
-                <div style="font-size:8px;font-weight:800;color:#475569;text-transform:uppercase;text-align:center;margin-top:2px;">Clientes</div>
-                ${juridicoBarChart(chartPoints.map(p => p.clients), chartLabels, false)}
-            </div>`;
-
-        const nowLabel = `${now.toLocaleDateString('pt-BR')} às ${now.toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}`;
-        const logoUrl = "https://yt3.googleusercontent.com/rx0DOaXFXLF0HHeZtC_xI7vR23Y7Jxmm7gA6o_emTX6qFNIDo3J91z11ASXDNypT57crV1EPOQ=s900-c-k-c0x00ffffff-no-rj";
-
-        container1 = document.createElement("div");
-        container1.style.cssText = "position:absolute;top:-9999px;left:-9999px;width:1122px;height:793px;background:#fff;padding:14px 18px;font-family:'Inter','Segoe UI',sans-serif;box-sizing:border-box;display:flex;flex-direction:column;";
-        container1.id = "mapa-juridico-pdf-container-1";
-        container1.innerHTML = `
-            <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #e2e8f0;padding-bottom:8px;margin-bottom:8px;flex-shrink:0;">
-                <div style="display:flex;align-items:center;gap:12px;">
-                    <img src="${logoUrl}" alt="Logo" style="height:32px;object-fit:contain;">
-                    <div>
-                        <h1 style="margin:0;color:#0f172a;font-size:16px;font-weight:800;">Mapa Jurídico — Sub Judice</h1>
-                        <p style="margin:2px 0 0 0;color:#64748b;font-size:10px;">Posição em: ${nowLabel}</p>
-                    </div>
-                </div>
-            </div>
-            <div style="display:flex;gap:8px;margin-bottom:8px;flex-shrink:0;">
-                ${kpiBox('#fee2e2','#ef4444', svgAlert, 'VALOR EM ATRASO', fmtInt(totalValue))}
-                ${kpiBox('#fef3c7','#f59e0b', svgUsers, 'CLIENTES EM ATRASO', totalClients)}
-                ${kpiBox('#dcfce7','#10b981', svgFile, 'TÍTULOS VENCIDOS', totalTitles)}
-                ${kpiBox('#e0f2fe','#3b82f6', svgClock, 'ATRASO MÉDIO', avgDelay + ' dias')}
-            </div>
-            <div style="flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:8px;">
-                ${quadro('Por empresa', companyTable)}
-                ${quadro('Jurídico — 2º dia útil (12 meses) × hoje', chartBody)}
-                ${quadro('Empreendimento — fechamento × movimento do mês', empFlowTable)}
-                ${quadro('Top 10 clientes — entrou / saiu no mês', clientMoveTable)}
-            </div>
-        `;
-
-        container2 = document.createElement("div");
-        container2.style.cssText = "position:absolute;top:-9999px;left:-9999px;width:1122px;min-height:793px;background:#fff;font-family:'Inter','Segoe UI',sans-serif;padding:20px 30px;box-sizing:border-box;";
-        container2.id = "mapa-juridico-pdf-container-2";
-        container2.innerHTML = `
-            <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #e2e8f0;padding-bottom:12px;margin-bottom:15px;">
-                <div style="display:flex;align-items:center;gap:15px;">
-                    <img src="${logoUrl}" alt="Logo" style="height:35px;object-fit:contain;">
-                    <div>
-                        <h1 style="margin:0;color:#0f172a;font-size:16px;font-weight:800;">Mapa Jurídico - Estágios</h1>
-                        <p style="margin:2px 0 0 0;color:#64748b;font-size:10px;">Posição em: ${nowLabel}</p>
-                    </div>
-                </div>
-            </div>
-            <div style="display:flex;flex-direction:column;width:100%;">${timelinesHtml}</div>
-            <div style="background:white;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin-top:15px;">
-                <div style="display:flex;flex-wrap:wrap;gap:4px;">
-                    ${generalResult.agg.map(item => `
-                        <div style="display:flex;align-items:center;background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:8px;border:1px solid #e2e8f0;">
-                            <span style="background:${item.count > 0 ? '#065f46' : '#475569'};color:white;width:14px;height:14px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:7px;margin-right:4px;">${item.prefix}</span>
-                            <span style="font-weight:700;color:#334155;margin-right:3px;">${esc(item.name)}</span>
-                            <span style="color:#64748b;font-size:7px;">(${item.days} d)</span>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        `;
-
-        const companyNames = {};
-        sortedCompanies.forEach(id => { companyNames[id] = usualCompanyName(id); });
-        const empOptionsMap = {};
-        generalList.forEach(c => {
-            const ccId = (typeof getPrimaryCostCenter === "function" ? getPrimaryCostCenter(c.costCenterId) : c.costCenterId) || "N/D";
-            if (!empOptionsMap[ccId]) empOptionsMap[ccId] = empLabel(c.costCenterId);
-        });
-        const empOptions = Object.keys(empOptionsMap).map(id => ({ id, name: empOptionsMap[id] }))
-            .sort((a, b) => String(a.name).localeCompare(String(b.name), "pt-BR"));
-        const companyOptions = sortedCompanies.map(id => ({ id, name: companyLegalLabel(id) }));
-
-        window._mapaJuridicoCache = {
-            byKey,
-            generalList,
-            nameMap,
-            companyGroups,
-            sortedCompanies,
-            companyNames
-        };
-        window._mapaJuridicoPdfHtml = {
-            page1: container1.innerHTML,
-            page2: container2.innerHTML,
-            style1: "position:absolute;top:-9999px;left:-9999px;width:1122px;height:793px;background:#fff;padding:14px 18px;font-family:'Inter','Segoe UI',sans-serif;box-sizing:border-box;display:flex;flex-direction:column;",
-            style2: "position:absolute;top:-9999px;left:-9999px;width:1122px;min-height:793px;background:#fff;font-family:'Inter','Segoe UI',sans-serif;padding:20px 30px;box-sizing:border-box;"
-        };
-
-        window.showMapaJuridicoOverlay({ nowLabel, companyOptions, empOptions });
-        restoreBtn();
-    } catch (e) {
-        console.error("Erro ao gerar mapa jurídico:", e);
-        alert("Ocorreu um erro ao abrir o mapa jurídico. Verifique o console.");
-        restoreBtn();
-    }
+window.gerarMapaJuridicoPDF = function() {
+  return window.mapaJuridicoAbrirTela();
 };
 
 window.extractSaleBrokerId = function(sale) {
