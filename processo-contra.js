@@ -262,10 +262,8 @@ const ProcessoContraApp = {
     }
     if (this.erroBusca) return `<p class="cj-nota">${this.esc(this.erroBusca)}</p>`;
     if (!this.fichaHtml) return "";
-    return `<div class="crm-card" id="pc-cliente-card" style="margin-bottom:16px;">
-      <div class="crm-card-header" style="background-color:#f3f4f6;padding:12px 20px;border-bottom:1px solid #e5e7eb;border-radius:8px 8px 0 0;">
-        <h3 style="margin:0;font-size:1.1rem;color:var(--color-primary);">Dados do cliente</h3>
-      </div>
+    return `<div class="crm-card" id="pc-cliente-card">
+      <div class="crm-card-header pc-pesq-head"><h3>Dados do cliente</h3></div>
       <div class="crm-card-content">${this.fichaHtml}</div>
     </div>`;
   },
@@ -303,7 +301,7 @@ const ProcessoContraApp = {
 
   htmlPopup() {
     const autorBusca = this.papelAutor === "cliente" ? `${this.htmlPesquisa()}${this.htmlFichaBloco()}` : `<div id="pc-autor-slot"></div>`;
-    const largo = this.papelAutor === "cliente" || (this.papelAutor !== "cliente" && this.tipoParte === "cliente");
+    const largo = true;
     return `<div class="pc-tela pc-folha" id="pc-popup">
       <div class="pc-popup-corpo">
         <div class="pc-partes${largo ? " is-stack" : ""}">
@@ -336,14 +334,19 @@ const ProcessoContraApp = {
       return `<button type="button" class="pc-hit${on ? " is-on" : ""}" data-pc-credor="${this.esc(c.id)}">${this.esc(String(c.id || "") + " - " + (c.name || "") + (doc ? " - " + doc : ""))}</button>`;
     }).join("");
     const lista = this.credorLista && this.credorLista.length
-      ? `<div class="pc-hits">${linhas}</div>`
+      ? `<div class="pc-hits" id="pc-credor-hits">${linhas}</div>`
       : (this.credorMsg ? `<p class="cj-nota">${this.esc(this.credorMsg)}</p>` : "");
-    return `<div class="pc-busca-tipo">
-      <div class="pc-busca-linha">
-        <label>Credor<input type="text" id="pc-credor-q" placeholder="Nome, CPF ou CNPJ" value="${this.esc(this.credorBusca)}" autocomplete="off"></label>
-        <button type="button" class="btn btn-primary" id="pc-credor-buscar">Pesquisar</button>
+    return `<div class="crm-card pc-pesq">
+      <div class="crm-card-header pc-pesq-head"><h3>Pesquisar</h3></div>
+      <div class="crm-card-content">
+        <div class="pc-pesq-grid">
+          <div class="form-group" style="grid-column:1 / 4;"><label>Credor</label>
+            <input type="text" class="form-control" id="pc-credor-q" placeholder="Nome, CPF ou CNPJ" value="${this.esc(this.credorBusca)}" autocomplete="off"></div>
+          <div class="form-group" style="display:flex;align-items:flex-end;">
+            <button type="button" class="btn btn-primary" id="pc-credor-buscar" style="height:38px;width:100%;"><i data-lucide="search" style="width:14px;margin-right:6px;"></i> Pesquisar</button></div>
+        </div>
+        ${lista}
       </div>
-      ${lista}
     </div>`;
   },
 
@@ -367,41 +370,117 @@ const ProcessoContraApp = {
       const on = this.prefNome && this.fold(this.prefNome) === this.fold(n);
       return `<button type="button" class="pc-hit${on ? " is-on" : ""}" data-pc-pref="${this.esc(n)}">${this.esc(n)}</button>`;
     }).join("");
-    const vazio = todas.length
-      ? (lista.length ? "" : `<p class="cj-nota">Nenhuma prefeitura com esse nome.</p>`)
-      : `<label>Nome da prefeitura<input type="text" id="pc-pref-livre" placeholder="Digite o nome" value="${this.esc(this.prefNome)}" autocomplete="off"></label>`;
-    return `<div class="pc-busca-tipo">
-      <label>Prefeitura<input type="text" id="pc-pref-q" placeholder="Buscar pelo nome..." value="${this.esc(this.prefBusca)}" autocomplete="off"></label>
-      ${todas.length ? `<div class="pc-hits">${itens}</div>` : vazio}
+    return `<div class="crm-card pc-pesq" id="pc-pref-box">
+      <div class="crm-card-header pc-pesq-head"><h3>Pesquisar</h3></div>
+      <div class="crm-card-content">
+        <div class="pc-pesq-grid">
+          <div class="form-group" style="grid-column:1 / -1;"><label>Prefeitura</label>
+            ${todas.length
+              ? `<input type="text" class="form-control" id="pc-pref-q" placeholder="Buscar pelo nome..." value="${this.esc(this.prefBusca)}" autocomplete="off">`
+              : `<input type="text" class="form-control" id="pc-pref-livre" placeholder="Digite o nome" value="${this.esc(this.prefNome)}" autocomplete="off">`}
+          </div>
+        </div>
+        ${todas.length ? `<div class="pc-hits" id="pc-pref-hits">${itens || `<p class="cj-nota">Nenhuma prefeitura com esse nome.</p>`}</div>` : ""}
+      </div>
     </div>`;
   },
 
   htmlTerceiro() {
-    return `<div class="pc-busca-tipo pc-terc">
-      <label>Nome<input type="text" id="pc-terc-nome" placeholder="Nome" value="${this.esc(this.terceiroNome)}" autocomplete="off"></label>
-      <label>CPF/CNPJ<input type="text" id="pc-terc-doc" placeholder="000.000.000-00" value="${this.esc(this.terceiroDoc)}" autocomplete="off"></label>
+    return `<div class="crm-card pc-pesq">
+      <div class="crm-card-header pc-pesq-head"><h3>Pesquisar</h3></div>
+      <div class="crm-card-content">
+        <div class="pc-pesq-grid">
+          <div class="form-group" style="grid-column:1 / 3;"><label>Nome</label>
+            <input type="text" class="form-control" id="pc-terc-nome" placeholder="Nome" value="${this.esc(this.terceiroNome)}" autocomplete="off"></div>
+          <div class="form-group"><label>CPF/CNPJ</label>
+            <input type="text" class="form-control" id="pc-terc-doc" placeholder="000.000.000-00" value="${this.esc(this.terceiroDoc)}" autocomplete="off"></div>
+        </div>
+      </div>
     </div>`;
   },
 
+  tamanhoArquivo(n) {
+    const v = Number(n) || 0;
+    if (v < 1024) return v + " B";
+    if (v < 1048576) return Math.round(v / 1024) + " KB";
+    return (v / 1048576).toFixed(1).replace(".", ",") + " MB";
+  },
+
+  ehPdf(f) {
+    if (!f) return false;
+    return f.type === "application/pdf" || /\.pdf$/i.test(String(f.name || ""));
+  },
+
+  temPdf() {
+    return (this.anexos || []).some((f) => this.ehPdf(f));
+  },
+
   htmlDadosProcesso() {
-    const arquivos = (this.anexos || []).map((f, i) => `<li><span>${this.esc(f.name)}</span><button type="button" class="tvig-ico is-danger" title="Excluir" data-pc-arq="${i}"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button></li>`).join("");
+    const arquivos = (this.anexos || []).map((f, i) => {
+      const pdf = this.ehPdf(f);
+      return `<li><span class="pc-anexo-nome"><i data-lucide="${pdf ? "file-text" : "paperclip"}"></i><span>${this.esc(f.name)}</span><small>${this.esc(this.tamanhoArquivo(f.size))}</small></span><button type="button" class="tvig-ico is-danger" title="Excluir" data-pc-arq="${i}"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button></li>`;
+    }).join("");
+    const motivoVazio = this.motivo ? "" : " is-vazio";
     return `<div class="pc-form" id="pc-form">
         <label>Número do processo
-          <input type="text" id="pc-numero" inputmode="numeric" placeholder="0000000-00.0000.0.00.0000" maxlength="25" value="${this.esc(this.formatarProcesso(this.processo))}" autocomplete="off">
+          <span class="pc-numero-linha">
+            <input type="text" id="pc-numero" inputmode="numeric" placeholder="0000000-00.0000.0.00.0000" maxlength="25" value="${this.esc(this.formatarProcesso(this.processo))}" autocomplete="off">
+            <button type="button" class="btn btn-primary" id="pc-consultar-proc"><i data-lucide="search" style="width:14px;"></i> Consultar</button>
+          </span>
         </label>
         <label>Valor da causa
           <input type="text" id="pc-valor" inputmode="decimal" placeholder="R$ 0,00" value="${this.esc(this.textoMoeda(this.valorCausa))}" autocomplete="off">
         </label>
-        ${this.htmlMotivo()}
-        <label class="pc-anexo-campo">Anexos
-          <input type="file" id="pc-anexos" multiple>
-        </label>
-        ${arquivos ? `<ul class="pc-anexo-lista">${arquivos}</ul>` : ""}
+        <div class="pc-motivo-wrap${motivoVazio}">${this.htmlMotivo()}</div>
+        <div class="pc-anexo-campo">
+          <span class="pc-anexo-rotulo">PDF do processo</span>
+          <div class="pc-anexo-drop" id="pc-anexo-drop">
+            <i data-lucide="file-up"></i>
+            <div>
+              <strong>Anexar o PDF do processo aberto</strong>
+              <span>Arraste o arquivo ou escolha no computador. O PDF é obrigatório.</span>
+            </div>
+            <button type="button" class="btn btn-primary" id="pc-anexo-btn">Anexar PDF</button>
+          </div>
+          <input type="file" id="pc-anexos" accept=".pdf,application/pdf,.png,.jpg,.jpeg,.doc,.docx" multiple hidden>
+          ${arquivos ? `<ul class="pc-anexo-lista">${arquivos}</ul>` : ""}
+        </div>
         <div class="pc-acoes">
           <button type="button" class="btn btn-cancel" id="pc-cancelar">Cancelar</button>
           <button type="button" class="btn btn-primary" id="pc-abrir"${this.salvando ? " disabled" : ""}>${this.salvando ? "Abrindo…" : "Abrir processo"}</button>
         </div>
       </div>`;
+  },
+
+  consultarNumero() {
+    const input = document.getElementById("pc-numero");
+    const val = this.formatarProcesso(input ? input.value : this.processo);
+    if (input && input.value !== val) input.value = val;
+    this.processo = val;
+    if (!val || val.replace(/\D/g, "").length !== 20) {
+      alert("Preencha o número do processo no padrão 0000000-00.0000.0.00.0000.");
+      return;
+    }
+    const urlParams = "&numero_processo=" + encodeURIComponent(val) + "&numero=" + encodeURIComponent(val) + "&txtNumProcesso=" + encodeURIComponent(val) + "&processo=" + encodeURIComponent(val);
+    const eprocUrl = "https://eproc-consulta.tjsp.jus.br/consulta_1g/externo_controlador.php?acao=tjsp@consulta_unificada_publica/consultar" + urlParams;
+    const abrir = () => window.open(eprocUrl, "_blank");
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(val).then(() => {
+        alert("Número " + val + " copiado para a área de transferência!\nCole-o (Ctrl+V) na página de Consulta do Tribunal, caso não preencha sozinho.");
+        abrir();
+      }).catch(() => abrir());
+    } else {
+      alert("Número " + val + ".\nCole-o (Ctrl+V) na página de Consulta do Tribunal, caso não preencha sozinho.");
+      abrir();
+    }
+  },
+
+  receberArquivos(files) {
+    Array.from(files || []).forEach((f) => {
+      if (!f) return;
+      if (!this.anexos.some((x) => x.name === f.name && x.size === f.size)) this.anexos.push(f);
+    });
+    this.render();
   },
 
   ligarPopup() {
@@ -425,11 +504,12 @@ const ProcessoContraApp = {
         if (c) this.escolherCredor(c);
       });
     });
+    const consultar = document.getElementById("pc-consultar-proc");
+    if (consultar) consultar.addEventListener("click", () => this.consultarNumero());
     const prefQ = document.getElementById("pc-pref-q");
     if (prefQ) prefQ.addEventListener("input", () => {
       this.prefBusca = prefQ.value || "";
-      const box = prefQ.parentElement && prefQ.parentElement.parentElement;
-      const hits = box ? box.querySelector(".pc-hits") : null;
+      const hits = document.getElementById("pc-pref-hits");
       if (!hits) return;
       const q = this.fold(this.prefBusca).trim();
       const lista = this.prefeituras().filter((n) => !q || this.fold(n).indexOf(q) >= 0).slice(0, 80);
@@ -453,12 +533,25 @@ const ProcessoContraApp = {
     if (tercNome) tercNome.addEventListener("input", () => { this.terceiroNome = tercNome.value || ""; });
     if (tercDoc) tercDoc.addEventListener("input", () => { this.mascaraDoc(tercDoc); this.terceiroDoc = tercDoc.value || ""; });
     const arq = document.getElementById("pc-anexos");
-    if (arq) arq.addEventListener("change", () => {
-      Array.from(arq.files || []).forEach((f) => {
-        if (!this.anexos.some((x) => x.name === f.name && x.size === f.size)) this.anexos.push(f);
+    const drop = document.getElementById("pc-anexo-drop");
+    const arqBtn = document.getElementById("pc-anexo-btn");
+    if (arqBtn && arq) arqBtn.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); arq.click(); });
+    if (drop && arq) drop.addEventListener("click", (e) => {
+      if (e.target && e.target.closest && e.target.closest("#pc-anexo-btn")) return;
+      arq.click();
+    });
+    if (drop) {
+      drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("is-over"); });
+      drop.addEventListener("dragleave", () => drop.classList.remove("is-over"));
+      drop.addEventListener("drop", (e) => {
+        e.preventDefault();
+        drop.classList.remove("is-over");
+        this.receberArquivos(e.dataTransfer && e.dataTransfer.files);
       });
+    }
+    if (arq) arq.addEventListener("change", () => {
+      this.receberArquivos(arq.files);
       arq.value = "";
-      this.render();
     });
     document.querySelectorAll("[data-pc-arq]").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -549,9 +642,7 @@ const ProcessoContraApp = {
       return `<option value="${this.esc(u.id)}"${sel}>${this.esc(u.name || u.id)}</option>`;
     }).join("");
     return `<div class="crm-card pc-pesq">
-      <div class="crm-card-header" style="background-color:#f3f4f6;padding:12px 20px;border-bottom:1px solid #e5e7eb;border-radius:8px 8px 0 0;margin-bottom:20px;">
-        <h3 style="margin:0;font-size:1.1rem;color:var(--color-primary);">Pesquisar</h3>
-      </div>
+      <div class="crm-card-header pc-pesq-head"><h3>Pesquisar</h3></div>
       <div class="crm-card-content" style="padding-bottom:0;">
         <div class="pc-pesq-grid">
           <div class="form-group"><label>Título (Contas a Receber)</label>
@@ -1238,7 +1329,7 @@ const ProcessoContraApp = {
         <td class="cc-nome">${this.esc(lados.autor)}</td>
         <td class="cc-nome">${this.esc(lados.reu)}</td>
         <td>${this.esc(this.formatarProcesso(item.processo) || item.processo || "—")}</td>
-        <td class="cc-nome">${this.esc(item.motivo || "—")}</td>
+        <td class="cc-nome">${this.esc(this.nomeMotivoItem(item))}</td>
         <td>${this.esc(this.money(item.valorCausa))}</td>
         <td class="pc-anexos-cell">${this.htmlAnexosItem(item)}</td>
         <td class="cj-quem"><span class="cj-quem-linha">${this.esc(item.createdBy || "—")}${quando ? `<span class="cj-quando">${this.esc(quando)}</span>` : ""}</span></td>
@@ -1323,21 +1414,29 @@ const ProcessoContraApp = {
   motivosDoCadastro() {
     const app = window.FluxosProcesso;
     const lista = (app && app.state && app.state.fluxos) || [];
-    return lista.filter((f) => {
-      const nome = String(f && f.nome || "").trim();
-      if (!nome) return false;
-      const n = nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/\s+/g, " ");
-      return n !== "COBRANCA JUDICIAL";
-    }).map((f) => ({ id: String(f.id), nome: String(f.nome).trim() }))
-      .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+    return lista.filter((f) => String(f && f.nome || "").trim()).map((f) => ({
+      id: String(f.id),
+      nome: String(f.nome).trim().toUpperCase()
+    })).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+  },
+
+  nomeMotivoItem(item) {
+    const id = String(item && item.motivoId || "");
+    const fluxo = ((window.FluxosProcesso && FluxosProcesso.state && FluxosProcesso.state.fluxos) || [])
+      .find((f) => id && String(f.id) === id);
+    if (fluxo && String(fluxo.nome || "").trim()) return String(fluxo.nome).trim().toUpperCase();
+    const salvo = String(item && item.motivo || "").trim();
+    return salvo ? salvo.toUpperCase() : "—";
   },
 
   async carregarMotivosFluxos() {
     const app = window.FluxosProcesso;
     if (app && !app.state.abertoId) {
-      if (!app.state.pronto) app.carregarLocal();
+      if (!app.state.pronto && typeof app.carregarLocal === "function") app.carregarLocal();
       const remoto = await app.lerRemoto();
-      if (Array.isArray(remoto) && remoto.length && !app.state.abertoId) app.state.fluxos = remoto;
+      if (remoto && typeof app.aplicarRemoto === "function") app.aplicarRemoto(remoto);
+      else if (Array.isArray(remoto) && remoto.length) app.state.fluxos = remoto;
+      if (typeof app.normalizarNomes === "function" && app.normalizarNomes()) app.persistir();
     }
     this.motivos = this.motivosDoCadastro();
     if (this.motivoId && !this.motivos.some((m) => m.id === this.motivoId)) {
@@ -1428,7 +1527,7 @@ const ProcessoContraApp = {
 
   htmlMotivo() {
     const aberto = this.motivoAberto ? " is-open" : "";
-    return `<div class="ml-emp-filter pc-motivo-filter${aberto}" id="pc-motivo-filter" onmousedown="event.stopPropagation()">
+    return `<div class="ml-emp-filter pc-motivo-filter ml-emp-filter--corte${aberto}" id="pc-motivo-filter" onmousedown="event.stopPropagation()">
       <div class="ml-emp-filter-label">Motivo</div>
       <button type="button" class="ml-emp-filter-btn" id="pc-motivo-btn">
         <span>${this.esc(this.motivo || "Selecione")}</span>
@@ -1446,7 +1545,7 @@ const ProcessoContraApp = {
   htmlMotivoLista() {
     const q = this.fold(this.motivoBusca).trim();
     const lista = this.motivos.filter((m) => !q || this.fold(m.nome).indexOf(q) >= 0);
-    if (!this.motivos.length) return `<div class="ml-emp-filter-empty">Nenhum fluxo disponível. Cobrança judicial não entra em novo processo.</div>`;
+    if (!this.motivos.length) return `<div class="ml-emp-filter-empty">Nenhum fluxo disponível.</div>`;
     if (!lista.length) return `<div class="ml-emp-filter-empty">Nenhum motivo com esse nome.</div>`;
     return lista.map((m) => {
       const on = m.id === this.motivoId;
@@ -1493,6 +1592,8 @@ const ProcessoContraApp = {
   pintarMotivoPainel() {
     const root = document.getElementById("pc-motivo-filter");
     if (!root) return;
+    const wrap = root.parentElement;
+    if (wrap && wrap.classList.contains("pc-motivo-wrap")) wrap.classList.toggle("is-vazio", !this.motivo);
     root.classList.toggle("is-open", !!this.motivoAberto);
     const span = root.querySelector(".ml-emp-filter-btn span");
     if (span) span.textContent = this.motivo || "Selecione";
@@ -1711,6 +1812,7 @@ const ProcessoContraApp = {
     if (processo.replace(/\D/g, "").length !== 20) { alert("Informe o número no padrão 0000000-00.0000.0.00.0000."); return; }
     if (valor == null || valor <= 0) { alert("Informe o valor da causa."); return; }
     if (!escolhido) { alert("Escolha o motivo na lista."); return; }
+    if (!this.temPdf()) { alert("Anexe o PDF do processo aberto. Ele é obrigatório."); return; }
     const fc = this.fb();
     if (!fc) { alert("O Firebase não está disponível."); return; }
     const u = (window.AppState && AppState.currentUser) || {};

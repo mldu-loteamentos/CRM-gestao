@@ -186,9 +186,10 @@ window.MlEmpresaFilter = {
       }
       const itemId = String(it.id);
       const on = selected.has(itemId);
-      html += `<label class="ml-emp-filter-item">
+      const rotulo = this.formatItemLabel(it);
+      html += `<label class="ml-emp-filter-item" title="${this.esc(rotulo)}">
         <input type="${kind}"${group} data-ml-item="${this.esc(itemId)}" ${on ? "checked" : ""}>
-        <span>${this.esc(this.formatItemLabel(it))}</span>
+        <span title="${this.esc(rotulo)}">${this.esc(rotulo)}</span>
       </label>`;
     });
     return html;
@@ -205,7 +206,7 @@ window.MlEmpresaFilter = {
     return `<div class="ml-emp-filter${extra}${open ? " is-open" : ""}" id="${this.esc(id)}" onmousedown="event.stopPropagation()">
       <div class="ml-emp-filter-label">${this.esc(label)}</div>
       <button type="button" class="ml-emp-filter-btn" onclick="event.preventDefault();event.stopPropagation();${opts.toggleJs || `MlEmpresaFilter.toggleOpen(${this.jsArg(id)})`}">
-        <span>${this.esc(btn)}</span>
+        <span title="${this.esc(btn)}">${this.esc(btn)}</span>
         <i data-lucide="chevron-down" style="width:16px;height:16px;flex-shrink:0;pointer-events:none;"></i>
       </button>
       <div class="ml-emp-filter-panel" id="${this.esc(id)}-panel">

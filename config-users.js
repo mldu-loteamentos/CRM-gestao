@@ -61,6 +61,9 @@ window.syncUserModalProfile = function(sel) {
   if (opType && isTerc) opType.value = "externo";
   if (advBox) advBox.style.display = ((isAdv && papel !== "assistente") || (isOp && opType && opType.value === "advogado")) ? "block" : "none";
   if (window.ConfigUsersApp && typeof ConfigUsersApp.syncDeptBox === "function") ConfigUsersApp.syncDeptBox();
+  if (window.ConfigUsersApp && typeof ConfigUsersApp.preencherGestorRelacionamento === "function") {
+    ConfigUsersApp.preencherGestorRelacionamento(true);
+  }
 };
 
 /** Quem está usando o sistema agora, inclusive no teste de conta. */
@@ -411,6 +414,7 @@ const ConfigUsersApp = {
             { id: "agenda", label: "Agenda do Operador" },
             { id: "zero_paid", label: "Clientes 0% Pago" },
             { id: "notificacoes", label: "Notificações" },
+            { id: "followup_cnd", label: "Follow-up CND", permBase: "sub_fin_cr_followup_cnd" },
             { id: "recebimentos_webro", label: "Recebimentos Webro" },
             { id: "scod", label: "Scod" },
             { id: "relatorios", label: "Relatórios" },
@@ -466,8 +470,8 @@ const ConfigUsersApp = {
       submodules: [{ name: "Jurídico", key: "sub_jur_geral", actions: [
         { id: "cobranca_sub_judice", label: "Cobrança Sub judice", permBase: "sub_fin_cr_sub_judice" },
         { id: "mapa_juridico", label: "Mapa Jurídico", permBase: "sub_jur_geral_mapa_juridico" },
-        { id: "pagar_reembolso", label: "Pagar reembolso", permBase: "sub_fin_cr_pagar_reembolso" },
         { id: "processo_contra", label: "Novo processo", permBase: "sub_jur_geral_processo_contra" },
+        { id: "pagar_reembolso", label: "Pagar reembolso", permBase: "sub_fin_cr_pagar_reembolso" },
         { id: "reintegracao_posse", label: "Reintegração de posse", permBase: "sub_jur_geral_reintegracao_posse" },
         { id: "configuracoes", label: "Configurações", permBase: "sub_jur_geral_configuracoes" }
       ] }]
@@ -569,7 +573,7 @@ const ConfigUsersApp = {
   selectedProfile: "admin",
   view: "usuarios",
   modView: { module: "", sub: "", action: "" },
-  userFilters: { nome: "", perfil: "", email: "", status: "todos" },
+  userFilters: { nome: "", perfil: "", perfilIds: [], perfilOpen: false, perfilQuery: "", email: "", status: "todos" },
 
   async loadUsers() {
     try {
@@ -643,6 +647,9 @@ const ConfigUsersApp = {
     }
     if (this.restoreNaiaraCadastroName()) {
       try { await this.persistUsers(); } catch (e) { console.warn("[ConfigUsers] nome Naiara:", e); }
+    }
+    if (this.preencherSupervisorTimeRelacionamento()) {
+      try { await this.persistUsers(); } catch (e) { console.warn("[ConfigUsers] supervisor relacionamento:", e); }
     }
     } catch (e) {
       console.error("[ConfigUsers] loadUsers:", e);
@@ -1774,6 +1781,7 @@ const ConfigUsersApp = {
       `;
       document.body.insertAdjacentHTML('beforeend', modalHtml);
       this.syncDeptBox();
+      this.preencherGestorRelacionamento(false);
       if (!this.isPagadoriaProfile(user && user.profile_name)) {
         this._deptDraft = this.deptHistoryOf(user);
         this._deptCatalog = this._deptCatalog || [];
@@ -1805,8 +1813,15 @@ const ConfigUsersApp = {
       if (profileName) {
         try { await this.ensureProfileNamed(profileName); } catch (e) {}
       }
-      const managerName = document.getElementById('umodal-manager-name').value.trim();
-      const managerEmail = document.getElementById('umodal-manager-email').value.trim();
+      let managerName = document.getElementById('umodal-manager-name').value.trim();
+      let managerEmail = document.getElementById('umodal-manager-email').value.trim();
+      if (this.ehTimeRelacionamento(profileName)) {
+        const sup = this.supervisorRelacionamento();
+        if (sup) {
+          if (!managerName) managerName = String(sup.name || "").trim();
+          if (!managerEmail) managerEmail = String(sup.email || "").trim();
+        }
+      }
       const operatorTypeEl = document.getElementById('umodal-operator-type');
       let operatorType = operatorTypeEl ? operatorTypeEl.value : null;
       if (window.isOperadorCobrancaTerceirizadoProfile(profileName)) {
@@ -2114,8 +2129,54 @@ const ConfigUsersApp = {
       </div>`;
   },
 
+  ehTimeRelacionamento(profileName) {
+    const n = String(profileName || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    return n === "TIME RELACIONAMENTO" || (n.includes("TIME") && n.includes("RELACIONAMENTO") && !n.includes("SUPERVISOR"));
+  },
+
+  supervisorRelacionamento() {
+    return (this.users || []).find((u) => {
+      if (!u || String(u.status || "").toUpperCase() === "INATIVO") return false;
+      const n = String(u.profile_name || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+      return n.includes("SUPERVISOR") && n.includes("RELACIONAMENTO");
+    }) || null;
+  },
+
+  preencherSupervisorTimeRelacionamento() {
+    const sup = this.supervisorRelacionamento();
+    if (!sup) return false;
+    const nome = String(sup.name || "").trim();
+    const email = String(sup.email || "").trim();
+    if (!nome && !email) return false;
+    let mudou = false;
+    (this.users || []).forEach((u) => {
+      if (!u || !this.ehTimeRelacionamento(u.profile_name)) return;
+      if (!String(u.manager_name || "").trim() && nome) {
+        u.manager_name = nome;
+        mudou = true;
+      }
+      if (!String(u.manager_email || "").trim() && email) {
+        u.manager_email = email;
+        mudou = true;
+      }
+    });
+    return mudou;
+  },
+
+  preencherGestorRelacionamento(forcar) {
+    const perfil = document.getElementById("umodal-profile");
+    if (!perfil || !this.ehTimeRelacionamento(perfil.value)) return;
+    const sup = this.supervisorRelacionamento();
+    if (!sup) return;
+    const nome = document.getElementById("umodal-manager-name");
+    const email = document.getElementById("umodal-manager-email");
+    if (nome && (forcar || !String(nome.value || "").trim())) nome.value = sup.name || "";
+    if (email && (forcar || !String(email.value || "").trim())) email.value = sup.email || "";
+  },
+
   onUserFilter(field, value) {
-    if (!this.userFilters) this.userFilters = { nome: "", perfil: "", email: "", status: "todos" };
+    if (!this.userFilters) this.userFilters = { nome: "", perfil: "", perfilIds: [], perfilOpen: false, perfilQuery: "", email: "", status: "todos" };
+    this.userFilters.perfilOpen = false;
     this.userFilters[field] = value;
     const el = document.activeElement;
     const id = el && el.id;
@@ -2134,13 +2195,13 @@ const ConfigUsersApp = {
     const f = this.userFilters || {};
     const nome = String(f.nome || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     const email = String(f.email || "").toLowerCase().trim();
-    const perfil = String(f.perfil || "");
+    const perfilIds = (Array.isArray(f.perfilIds) ? f.perfilIds : (f.perfil ? [f.perfil] : [])).map(String);
     const status = f.status || "todos";
     return (this.users || []).filter((u) => {
       const un = String(u.name || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       if (nome && un.indexOf(nome) < 0) return false;
       if (email && String(u.email || "").toLowerCase().indexOf(email) < 0) return false;
-      if (perfil && String(u.profile_name || "") !== perfil) return false;
+      if (perfilIds.length && perfilIds.indexOf(String(u.profile_name || "")) < 0) return false;
       const st = String(u.status || "").toUpperCase();
       if (status === "ativos" && st !== "ATIVO") return false;
       if (status === "inativos" && st !== "INATIVO") return false;
@@ -2194,21 +2255,6 @@ const ConfigUsersApp = {
     }
 
     const filters = this.userFilters || { nome: "", perfil: "", email: "", status: "todos" };
-    const profileChoices = [];
-    const seenProfile = {};
-    (this.profiles || []).forEach((p) => {
-      const name = String(p && p.name || "").trim();
-      if (!name || seenProfile[name]) return;
-      seenProfile[name] = true;
-      profileChoices.push(name);
-    });
-    (this.users || []).forEach((u) => {
-      const name = String(u && u.profile_name || "").trim();
-      if (!name || seenProfile[name]) return;
-      seenProfile[name] = true;
-      profileChoices.push(name);
-    });
-    profileChoices.sort((a, b) => a.localeCompare(b, "pt-BR"));
 
     const optionsHtml = this.profilesOrdenados().map(p => {
        const isSelected = p.id === this.selectedProfile;
@@ -2374,6 +2420,8 @@ const ConfigUsersApp = {
         .cfg-filters { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
         .cfg-filters > div { flex: 1 1 180px; min-width: 160px; }
         .cfg-filters > .cfg-f-nome, .cfg-filters > .cfg-f-email { flex: 1.4 1 240px; }
+        .cfg-filters > .cfg-f-perfil { flex: 1 1 220px; min-width: 180px; max-width: 320px; }
+        #config-users-root .cfg-f-perfil .ml-emp-filter { width: 100%; max-width: none; min-width: 0; flex: none; }
         .cfg-filters .form-control { height: 36px; border: 1px solid #334155; border-radius: 6px; background: #fff; color: #0f172a; padding: 0 10px; width: 100%; box-sizing: border-box; font-size: 0.85rem; font-weight: 600; }
         .cfg-filters .form-control:focus { outline: none; border-color: #105436; box-shadow: 0 0 0 2px rgba(16, 84, 54, 0.15); }
         .cfg-filters > .cfg-count { flex: 0 0 auto; min-width: 0; height: 36px; display: flex; align-items: center; padding: 0 12px; border-radius: 6px; background: #e7f6ee; color: #105436; font-weight: 800; font-size: 0.82rem; white-space: nowrap; }
@@ -2432,12 +2480,8 @@ const ConfigUsersApp = {
               <label for="cfg-user-nome" class="ml-emp-filter-label">Nome</label>
               <input id="cfg-user-nome" class="form-control" type="search" placeholder="Nome do usuário" value="${this.esc(filters.nome)}" oninput="ConfigUsersApp.onUserFilter('nome', this.value)">
             </div>
-            <div>
-              <label for="cfg-user-perfil" class="ml-emp-filter-label">Perfil</label>
-              <select id="cfg-user-perfil" class="form-control" onchange="ConfigUsersApp.onUserFilter('perfil', this.value)">
-                <option value="">Todos</option>
-                ${profileChoices.map((name) => `<option value="${this.esc(name)}" ${filters.perfil === name ? "selected" : ""}>${this.esc(name)}</option>`).join("")}
-              </select>
+            <div class="cfg-f-perfil">
+              <div id="cfg-perfil-slot"></div>
             </div>
             <div class="cfg-f-email">
               <label for="cfg-user-email" class="ml-emp-filter-label">E-mail</label>
@@ -2494,7 +2538,107 @@ const ConfigUsersApp = {
       </div>
     `;
 
-    lucide.createIcons();
+    if (window.lucide) lucide.createIcons();
+    if (this.view === "usuarios") {
+      this.bindFiltroPerfil();
+      this.pintarFiltroPerfil();
+    }
+  },
+
+  filtroPerfilOpts() {
+    const f = this.userFilters || {};
+    const nomes = [];
+    const visto = {};
+    (this.profiles || []).forEach((p) => {
+      const name = String(p && p.name || "").trim();
+      if (!name || visto[name]) return;
+      visto[name] = true;
+      nomes.push(name);
+    });
+    (this.users || []).forEach((u) => {
+      const name = String(u && u.profile_name || "").trim();
+      if (!name || visto[name]) return;
+      visto[name] = true;
+      nomes.push(name);
+    });
+    nomes.sort((a, b) => a.localeCompare(b, "pt-BR"));
+    return {
+      id: "cfg-perfil",
+      items: nomes.map((name) => ({ id: name, label: name })),
+      selectedIds: f.perfilIds || [],
+      query: f.perfilQuery || "",
+      keepOrder: true,
+      nouns: {
+        singular: "perfil",
+        plural: "perfis",
+        none: "Nenhum perfil",
+        noMatch: "Nenhum perfil com esse nome."
+      }
+    };
+  },
+
+  pintarFiltroPerfil() {
+    const slot = document.getElementById("cfg-perfil-slot");
+    if (!slot || !window.MlEmpresaFilter) return;
+    const f = this.userFilters || {};
+    slot.innerHTML = MlEmpresaFilter.html(Object.assign({
+      label: "Perfil",
+      open: !!f.perfilOpen,
+      emptyMeansAll: true,
+      extraClass: "ml-emp-filter--corte"
+    }, this.filtroPerfilOpts()));
+    if (window.lucide) window.lucide.createIcons();
+  },
+
+  bindFiltroPerfil() {
+    if (!window.MlEmpresaFilter || this._perfilBound) return;
+    this._perfilBound = true;
+    const self = this;
+    MlEmpresaFilter.bind("cfg-perfil", {
+      toggleOpen() {
+        if (!self.userFilters) self.userFilters = {};
+        self.userFilters.perfilOpen = !self.userFilters.perfilOpen;
+        self.pintarFiltroPerfil();
+        if (self.userFilters.perfilOpen) {
+          const inp = document.getElementById("cfg-perfil-search");
+          if (inp) inp.focus();
+        }
+      },
+      close() {
+        if (!self.userFilters) return;
+        self.userFilters.perfilOpen = false;
+        self.userFilters.perfilQuery = "";
+        self.pintarFiltroPerfil();
+      },
+      setQuery(q) {
+        self.userFilters.perfilQuery = q || "";
+        const box = document.getElementById("cfg-perfil-list");
+        if (box) box.innerHTML = MlEmpresaFilter.listHtml(self.filtroPerfilOpts());
+      },
+      toggleId(itemId, on) {
+        const sid = String(itemId);
+        const cur = (self.userFilters.perfilIds || []).map(String);
+        self.userFilters.perfilIds = on ? (cur.indexOf(sid) >= 0 ? cur : cur.concat(sid)) : cur.filter((x) => x !== sid);
+        self.userFilters.perfilOpen = true;
+        self.render();
+        const inp = document.getElementById("cfg-perfil-search");
+        if (inp) inp.focus();
+      },
+      selectAll() {
+        self.userFilters.perfilIds = self.filtroPerfilOpts().items.map((x) => String(x.id));
+        self.userFilters.perfilOpen = true;
+        self.render();
+        const inp = document.getElementById("cfg-perfil-search");
+        if (inp) inp.focus();
+      },
+      selectNone() {
+        self.userFilters.perfilIds = [];
+        self.userFilters.perfilOpen = true;
+        self.render();
+        const inp = document.getElementById("cfg-perfil-search");
+        if (inp) inp.focus();
+      }
+    });
   },
 
   profilesOrdenados() {

@@ -2818,6 +2818,271 @@ window.moraComHonorarios = function(baseVal, diasAtraso, taxaMultiplier, honorar
   };
 };
 
+/** Dias de atraso do relatório Sienge: do vencimento até a data de pagamento.
+ *  No sábado, domingo ou feriado a mora só começa no dia útil seguinte, mas,
+ *  uma vez vencida, a contagem usa o vencimento original (não perde esses dias). */
+window.diasAtrasoSienge = function(inst, targetDate) {
+  let dueIso = "";
+  if (inst && inst.due instanceof Date && !isNaN(inst.due.getTime())) {
+    const d = inst.due;
+    dueIso = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  } else if (typeof window.installmentDueIsoDate === "function") {
+    dueIso = window.installmentDueIsoDate(inst) || "";
+  } else {
+    dueIso = String((inst && (inst.dueDate || inst.due)) || "").slice(0, 10);
+  }
+  let target = targetDate;
+  if (!(target instanceof Date) || isNaN(target.getTime())) {
+    const tIso = String(targetDate || "").slice(0, 10);
+    target = /^\d{4}-\d{2}-\d{2}$/.test(tIso) ? new Date(tIso + "T12:00:00") : new Date();
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dueIso)) return 0;
+  const due = new Date(dueIso + "T12:00:00");
+  if (isNaN(due.getTime())) return 0;
+  const chargeIso = typeof window.installmentChargeDueIso === "function"
+    ? window.installmentChargeDueIso(dueIso)
+    : dueIso;
+  if (chargeIso) {
+    const charge = new Date(chargeIso + "T12:00:00");
+    if (!isNaN(charge.getTime()) && target.getTime() <= charge.getTime()) return 0;
+  }
+  const diff = Math.round((target.getTime() - due.getTime()) / 86400000);
+  return diff > 0 ? diff : 0;
+};
+
+/** Base da mora no mesmo critério do Sienge (valor corrigido da parcela em aberto). */
+window.baseCorrigidaParcela = function(inst) {
+  if (!inst) return 0;
+  const cb = Number(inst.cb != null ? inst.cb : inst.currentBalance);
+  const corr = Number(inst.correctedValueWithoutAdditions);
+  const face = Number(inst.originalValue != null ? inst.originalValue : inst.value);
+  let base = Number.isFinite(cb) && cb > 0.009 ? cb : 0;
+  if (Number.isFinite(corr) && corr > base + 0.009) {
+    const teto = (base > 0.009 ? base : (Number.isFinite(face) ? face : corr)) * 1.35 + 1;
+    if (corr <= teto) base = corr;
+  }
+  if (!(base > 0.009) && Number.isFinite(face) && face > 0.009) base = face;
+  return base;
+};
+
+/** Se o extrato já traz o valor atualizado do Sienge e ele é maior que a mora
+ *  recalculada, usa esse total. A multa continua 2% e o restante fica em juros. */
+window.encargosParcelaSienge = function(inst, base, dias, taxa) {
+  const t = Number.isFinite(Number(taxa)) ? Number(taxa) : 1;
+  const ch = window.computeLateCharges(base, dias, t);
+  let multa = ch.multa || 0;
+  let juros = ch.juros || 0;
+  const api = Number(
+    inst && inst.correctedValueWithAdditions != null ? inst.correctedValueWithAdditions
+      : (inst && inst.currentBalanceWithAddition != null ? inst.currentBalanceWithAddition : NaN)
+  );
+  const b = Number(base) || 0;
+  if (Number.isFinite(api) && b > 0.009 && api > b + multa + juros + 0.05 && api < b * 4) {
+    const multaApi = b * 0.02 * t;
+    const jurosApi = api - b - multaApi;
+    if (jurosApi > juros + 0.009) {
+      multa = multaApi;
+      juros = jurosApi;
+    }
+  }
+  return { multa: multa, juros: juros };
+};
+
+window.linhasSaldoDevedor = function(dataIso) {
+  const lista = (typeof AppState !== "undefined" && AppState.currentContractInstallments) || [];
+  const alvo = String(dataIso || (typeof window.todayIsoLocal === "function" ? window.todayIsoLocal() : "")).slice(0, 10);
+  const rows = [];
+  lista.forEach((inst) => {
+    if (!inst || Number(inst.installmentSituation) !== 1) return;
+    const base = window.baseCorrigidaParcela(inst);
+    if (!(base > 0.009)) return;
+    const dueIso = typeof window.installmentDueIsoDate === "function"
+      ? window.installmentDueIsoDate(inst)
+      : String(inst.dueDate || "").slice(0, 10);
+    if (!dueIso) return;
+    const overdue = typeof window.installmentIsChargeOverdue === "function"
+      ? window.installmentIsChargeOverdue(inst, alvo)
+      : dueIso < alvo;
+    if (!overdue) return;
+    const dias = window.diasAtrasoSienge(inst, alvo);
+    const ch = window.encargosParcelaSienge(inst, base, dias, 1);
+    const original = Number(inst.originalValue != null ? inst.originalValue : inst.value) || base;
+    rows.push({
+      parcela: inst.installmentNumber || inst.installmentId || "—",
+      vencimento: dueIso,
+      dias: dias,
+      original: original,
+      corrigido: base,
+      multa: ch.multa || 0,
+      juros: ch.juros || 0,
+      atualizado: base + (ch.multa || 0) + (ch.juros || 0)
+    });
+  });
+  rows.sort((a, b) => String(a.vencimento).localeCompare(String(b.vencimento)) || String(a.parcela).localeCompare(String(b.parcela), "pt-BR", { numeric: true }));
+  return rows;
+};
+
+window.syncAbaSaldoAdvogado = function(isAdvogado) {
+  const btn = document.querySelector('button[data-target="tab-simulacao"]');
+  if (!btn) return;
+  const adv = !!isAdvogado;
+  btn.innerHTML = adv
+    ? '<i data-lucide="scale"></i> Ver saldo devedor'
+    : '<i data-lucide="calendar-clock"></i> Simulação de Vencidas';
+  btn.onclick = function() {
+    if (adv) {
+      if (typeof window.abrirSaldoDevedorAdvogado === "function") window.abrirSaldoDevedorAdvogado();
+      return;
+    }
+    if (typeof switchCustomerTab === "function") switchCustomerTab("tab-simulacao");
+  };
+  if (window.lucide) lucide.createIcons();
+};
+
+window.abrirSaldoDevedorAdvogado = function() {
+  let modal = document.getElementById("saldo-devedor-modal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "saldo-devedor-modal";
+    modal.className = "saldo-devedor-modal";
+    modal.innerHTML = `
+      <div class="saldo-devedor-card" role="dialog" aria-modal="true" aria-labelledby="saldo-devedor-titulo">
+        <div class="saldo-devedor-head">
+          <div>
+            <h2 id="saldo-devedor-titulo">Saldo devedor</h2>
+            <p id="saldo-devedor-sub"></p>
+          </div>
+          <button type="button" class="btn btn-fechar" id="saldo-devedor-fechar">Fechar</button>
+        </div>
+        <div class="saldo-devedor-data">
+          <label for="saldo-devedor-ate">Posição em</label>
+          <input type="date" id="saldo-devedor-ate">
+        </div>
+        <div class="saldo-devedor-scroll">
+          <table class="saldo-devedor-tabela">
+            <thead>
+              <tr>
+                <th>Parcela</th>
+                <th>Vencimento</th>
+                <th>Atraso</th>
+                <th>Original</th>
+                <th>Corrigido</th>
+                <th>Multa (2%)</th>
+                <th>Juros (1% a.m.)</th>
+                <th>Atualizado</th>
+              </tr>
+            </thead>
+            <tbody id="saldo-devedor-body"></tbody>
+            <tfoot id="saldo-devedor-foot"></tfoot>
+          </table>
+          <p id="saldo-devedor-vazio" class="saldo-devedor-vazio" style="display:none;">Não há parcelas vencidas nesta data.</p>
+        </div>
+        <div class="saldo-devedor-acoes">
+          <button type="button" class="btn btn-primary" id="saldo-devedor-copiar">Copiar para o cliente</button>
+          <button type="button" class="btn btn-fechar" id="saldo-devedor-fechar-2">Fechar</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    const fechar = function() { modal.style.display = "none"; };
+    modal.addEventListener("click", function(ev) { if (ev.target === modal) fechar(); });
+    modal.querySelector("#saldo-devedor-fechar").addEventListener("click", fechar);
+    modal.querySelector("#saldo-devedor-fechar-2").addEventListener("click", fechar);
+    modal.querySelector("#saldo-devedor-ate").addEventListener("change", function() {
+      window.pintarSaldoDevedorAdvogado(this.value);
+    });
+    modal.querySelector("#saldo-devedor-copiar").addEventListener("click", function() {
+      const texto = modal.getAttribute("data-texto") || "";
+      const btn = this;
+      const antigo = btn.textContent;
+      const marcar = function() {
+        btn.textContent = "Copiado";
+        setTimeout(function() { btn.textContent = antigo; }, 1600);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(texto).then(marcar).catch(function() {
+          window.prompt("Copie a mensagem para o cliente:", texto);
+        });
+      } else {
+        window.prompt("Copie a mensagem para o cliente:", texto);
+      }
+    });
+  }
+  const dataEl = document.getElementById("simulador-data");
+  const hoje = typeof window.todayIsoLocal === "function" ? window.todayIsoLocal() : "";
+  const ate = document.getElementById("saldo-devedor-ate");
+  if (ate) {
+    ate.min = hoje;
+    ate.value = (dataEl && dataEl.value && dataEl.value >= hoje) ? dataEl.value : hoje;
+  }
+  window.pintarSaldoDevedorAdvogado(ate ? ate.value : hoje);
+  modal.style.display = "flex";
+};
+
+window.pintarSaldoDevedorAdvogado = function(dataIso) {
+  const money = function(n) {
+    return (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  };
+  const dataBr = function(iso) {
+    const p = String(iso || "").slice(0, 10).split("-");
+    return p.length === 3 ? (p[2] + "/" + p[1] + "/" + p[0]) : "";
+  };
+  const nomeEl = document.getElementById("det-name");
+  const titEl = document.getElementById("det-bill-id");
+  const nome = (nomeEl && nomeEl.textContent.trim()) || "Cliente";
+  const titulo = (titEl && titEl.textContent.trim()) || "";
+  const sub = document.getElementById("saldo-devedor-sub");
+  if (sub) sub.textContent = [nome, titulo ? ("Título " + titulo) : ""].filter(Boolean).join(" · ");
+  const rows = window.linhasSaldoDevedor(dataIso);
+  const body = document.getElementById("saldo-devedor-body");
+  const foot = document.getElementById("saldo-devedor-foot");
+  const vazio = document.getElementById("saldo-devedor-vazio");
+  let principal = 0;
+  let encargos = 0;
+  if (body) body.innerHTML = rows.map(function(r) {
+    principal += r.corrigido;
+    encargos += r.multa + r.juros;
+    return "<tr>"
+      + "<td>" + r.parcela + "</td>"
+      + "<td>" + dataBr(r.vencimento) + "</td>"
+      + "<td>" + (r.dias > 0 ? r.dias : "—") + "</td>"
+      + "<td>" + money(r.original) + "</td>"
+      + "<td>" + money(r.corrigido) + "</td>"
+      + "<td>" + money(r.multa) + "</td>"
+      + "<td>" + money(r.juros) + "</td>"
+      + "<td>" + money(r.atualizado) + "</td>"
+      + "</tr>";
+  }).join("");
+  const total = principal + encargos;
+  if (foot) {
+    foot.innerHTML = rows.length
+      ? ("<tr><td colspan=\"4\">Total</td><td>" + money(principal) + "</td><td colspan=\"2\">" + money(encargos) + "</td><td>" + money(total) + "</td></tr>")
+      : "";
+  }
+  if (vazio) vazio.style.display = rows.length ? "none" : "block";
+  const linhasTxt = rows.map(function(r) {
+    return "Parcela " + r.parcela
+      + "  venc. " + dataBr(r.vencimento)
+      + "  " + r.dias + " dias"
+      + "  corrigido " + money(r.corrigido)
+      + "  multa " + money(r.multa)
+      + "  juros " + money(r.juros)
+      + "  atualizado " + money(r.atualizado);
+  });
+  const texto = [
+    "Saldo devedor",
+    nome + (titulo ? " — título " + titulo : ""),
+    "Posição em " + dataBr(dataIso),
+    "",
+    linhasTxt.join("\n"),
+    "",
+    "Principal corrigido: " + money(principal),
+    "Juros e multa: " + money(encargos),
+    "Total atualizado: " + money(total)
+  ].join("\n");
+  const modal = document.getElementById("saldo-devedor-modal");
+  if (modal) modal.setAttribute("data-texto", texto);
+};
+
 window.boletoJurosIndex = function(rows, taxa, honorariosPct) {
   const list = Array.isArray(rows) ? rows : [];
   const t = Number.isFinite(Number(taxa)) ? Number(taxa) : 1;
@@ -3542,6 +3807,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "participacoes": "Prestação contas Ellenco",
     "parametrizacoes": "Gestão de Empresas",
     "centros-custo": "Gestão de Centros de Custo",
+    "followup-cnd": "Follow-up CND",
     "kmz": "Upload de Mapeamento (KMZ)",
     "upload-kmz": "Upload de KMZ",
     "upload-mapa": "Upload de Projeto Urbanístico",
@@ -3761,6 +4027,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     loadEmpresasConfigTab();
   } else if (tabId === "centros-custo") {
     loadCentrosCustoTab();
+  } else if (tabId === "followup-cnd") {
+    if (window.FollowupCndApp && typeof FollowupCndApp.abrir === "function") FollowupCndApp.abrir();
   } else if (tabId === "doc-padrao") {
     loadDocPadraoTemplates();
   } else if (tabId === "upload-kmz") {
@@ -4849,6 +5117,9 @@ async function processSuccessfulLogin(loggedUser) {
       }
       if (typeof window.checkDistratoPrazoMes === "function") {
         window.checkDistratoPrazoMes();
+      }
+      if (window.FollowupCndApp && typeof FollowupCndApp.avisar === "function") {
+        FollowupCndApp.avisar();
       }
       if (window.GerarPagamentoApp && typeof window.GerarPagamentoApp.avisoFechamento === "function") {
         window.GerarPagamentoApp.avisoFechamento();
@@ -8609,7 +8880,12 @@ window.cancelamentoBillsDoExtrato = function(res) {
 };
 
 window.cancelamentoResumoDeKpis = function(kpis) {
-  const contrato = Math.max(0, Number(kpis && kpis.kpiTotalContrato) || Number(kpis && kpis.kpiSomaOriginal) || 0);
+  const somaOriginal = Math.max(0, Number(kpis && kpis.kpiSomaOriginal) || 0);
+  const totalEmAberto = Math.max(0, Number(kpis && kpis.kpiTotalContrato) || 0);
+  // Mesma base do medidor "Pago do Contrato": soma do valor original de todas as parcelas.
+  // O total (pago + vencido + a vencer) deixa de fora parcela com saldo zero. No título 16649
+  // isso igualava o contrato às 2 parcelas já pagas e o percentual virava 100%.
+  const contrato = somaOriginal > 0.009 ? somaOriginal : totalEmAberto;
   const pago = Math.max(0, (Number(kpis && kpis.kpiPago) || 0) - (Number(kpis && kpis.kpiDesconto) || 0));
   const multa = Math.round(contrato * 0.10 * 100) / 100;
   const restituicao = Math.max(0, Math.round((pago - multa) * 100) / 100);
@@ -8719,19 +8995,117 @@ window.cancelamentoDocsOk = function() {
   const assoc = document.getElementById("cancel-assoc-file");
   const webro = document.getElementById("cancel-webro-file");
   if (!exig.obraAndamento && !(cnd && cnd.files && cnd.files[0])) return false;
+  if (!exig.obraAndamento && !window.cancelamentoCertidaoPronta()) return false;
   if (exig.loteamentoFechado && !exig.obraAndamento && !(assoc && assoc.files && assoc.files[0])) return false;
   if (exig.webro && !(webro && webro.files && webro.files[0])) return false;
   return true;
 };
 
+window.cancelamentoCertidaoPronta = function() {
+  const leitura = window._cancelLeitura || {};
+  const c = leitura.cnd;
+  if (!c || c.status === "lendo") return false;
+  if (c.status === "erro") return false;
+  if (c.classe && c.classe.certidao) return true;
+  const extra = leitura.certidao;
+  return !!(extra && extra.status === "ok" && extra.classe && extra.classe.certidao);
+};
+
 window.cancelamentoLiberarSeguir = function() {
   const btn = document.getElementById("cancel-seguir-btn");
   if (!btn) return;
-  const ok = window.cancelamentoDocsOk();
+  const leitura = window._cancelLeitura || {};
+  const lendo = (leitura.cnd && leitura.cnd.status === "lendo") || (leitura.certidao && leitura.certidao.status === "lendo");
+  const ok = !lendo && window.cancelamentoDocsOk();
   btn.disabled = !ok;
   btn.style.opacity = ok ? "" : "0.45";
   btn.style.cursor = ok ? "" : "not-allowed";
-  btn.title = ok ? "" : "Anexe os documentos pedidos para seguir com o distrato.";
+  btn.title = ok ? "" : (lendo ? "Lendo o documento…" : "Anexe a certidão da prefeitura para seguir com o distrato.");
+};
+
+window.cancelamentoMostrarPedidoCertidao = function(classe) {
+  const box = document.getElementById("cancel-cnd-extra");
+  if (!box) return;
+  const motivo = classe && (classe.tipo === "extrato" || classe.tipo === "boleto")
+    ? "Este arquivo é extrato ou boleto de IPTU, não a certidão. Anexe a certidão da prefeitura em PDF."
+    : "Este arquivo não é uma certidão da prefeitura. Anexe a certidão em PDF. O sistema lê o texto para confirmar.";
+  const ja = document.getElementById("cancel-certidao-file");
+  const nome = ja && ja.files && ja.files[0] ? ja.files[0].name : "";
+  box.innerHTML = `<div style="margin-top:12px;padding:10px 12px;border-radius:8px;background:#fff7ed;border:1px solid #fdba74;">
+    <p style="margin:0 0 8px;font-size:0.82rem;color:#9a3412;font-weight:700;">${motivo}</p>
+    <label style="display:block;font-size:0.82rem;font-weight:700;color:#0f172a;margin-bottom:4px;">Certidão da prefeitura</label>
+    <input type="file" id="cancel-certidao-file" accept=".pdf,application/pdf" onchange="window.cancelamentoAoAnexarCertidao()" style="width:100%;box-sizing:border-box;padding:8px;border:1px dashed #cbd5e1;border-radius:8px;background:#fff;font-size:0.85rem;">
+    <p id="cancel-certidao-aviso" style="margin:6px 0 0;font-size:0.78rem;color:#64748b;">${nome ? "Arquivo anterior descartado ao trocar o primeiro documento. Envie a certidão de novo." : ""}</p>
+  </div>`;
+  window._cancelLeitura = window._cancelLeitura || {};
+  window._cancelLeitura.certidao = null;
+};
+
+window.cancelamentoAoAnexarCnd = async function() {
+  const input = document.getElementById("cancel-cnd-file");
+  const file = input && input.files && input.files[0];
+  window._cancelLeitura = window._cancelLeitura || {};
+  const box = document.getElementById("cancel-cnd-extra");
+  if (!file) {
+    window._cancelLeitura.cnd = null;
+    window._cancelLeitura.certidao = null;
+    if (box) box.innerHTML = "";
+    window.cancelamentoLiberarSeguir();
+    return;
+  }
+  window._cancelLeitura.cnd = { status: "lendo" };
+  window._cancelLeitura.certidao = null;
+  if (box) box.innerHTML = `<p style="margin:8px 0 0;font-size:0.8rem;color:#64748b;">Lendo o documento…</p>`;
+  window.cancelamentoLiberarSeguir();
+  let classe = null;
+  try {
+    classe = window.FollowupCndApp && typeof FollowupCndApp.classificarArquivo === "function"
+      ? await FollowupCndApp.classificarArquivo(file)
+      : { tipo: "outro", certidao: false, follow: false, rotulo: "outro documento" };
+  } catch (e) {
+    classe = { tipo: "outro", certidao: false, follow: false, rotulo: "outro documento", erro: true };
+  }
+  if (!document.getElementById("cancel-cnd-file")) return;
+  window._cancelLeitura.cnd = { status: "ok", classe: classe, nome: file.name };
+  if (!classe.certidao) window.cancelamentoMostrarPedidoCertidao(classe);
+  else if (box) box.innerHTML = `<p style="margin:8px 0 0;font-size:0.8rem;color:#105436;">Documento lido: ${window.cancelContratoEsc ? window.cancelContratoEsc(classe.rotulo || "certidão") : (classe.rotulo || "certidão")}.</p>`;
+  window.cancelamentoLiberarSeguir();
+};
+
+window.cancelamentoAoAnexarCertidao = async function() {
+  const input = document.getElementById("cancel-certidao-file");
+  const aviso = document.getElementById("cancel-certidao-aviso");
+  const file = input && input.files && input.files[0];
+  window._cancelLeitura = window._cancelLeitura || {};
+  if (!file) {
+    window._cancelLeitura.certidao = null;
+    if (aviso) aviso.textContent = "";
+    window.cancelamentoLiberarSeguir();
+    return;
+  }
+  window._cancelLeitura.certidao = { status: "lendo" };
+  if (aviso) { aviso.style.color = "#64748b"; aviso.textContent = "Lendo a certidão…"; }
+  window.cancelamentoLiberarSeguir();
+  let classe = null;
+  try {
+    classe = window.FollowupCndApp && typeof FollowupCndApp.classificarArquivo === "function"
+      ? await FollowupCndApp.classificarArquivo(file)
+      : null;
+  } catch (e) {
+    classe = null;
+  }
+  if (!document.getElementById("cancel-certidao-file")) return;
+  window._cancelLeitura.certidao = { status: "ok", classe: classe, nome: file.name };
+  if (!classe || !classe.certidao) {
+    if (aviso) {
+      aviso.style.color = "#9a3412";
+      aviso.textContent = "Não reconheci uma certidão de prefeitura neste PDF. Envie a certidão com texto selecionável.";
+    }
+  } else if (aviso) {
+    aviso.style.color = "#105436";
+    aviso.textContent = "Certidão reconhecida: " + (classe.rotulo || "certidão da prefeitura") + ".";
+  }
+  window.cancelamentoLiberarSeguir();
 };
 
 window.cancelamentoGuardarDocsESeguir = function(customerId, saleId) {
@@ -8742,8 +9116,10 @@ window.cancelamentoGuardarDocsESeguir = function(customerId, saleId) {
   const cnd = document.getElementById("cancel-cnd-file");
   const assoc = document.getElementById("cancel-assoc-file");
   const webro = document.getElementById("cancel-webro-file");
+  const cert = document.getElementById("cancel-certidao-file");
   window._cancelDocs = {
     cnd: cnd && cnd.files && cnd.files[0] ? cnd.files[0] : null,
+    certidao: cert && cert.files && cert.files[0] ? cert.files[0] : null,
     associacao: assoc && assoc.files && assoc.files[0] ? assoc.files[0] : null,
     webro: webro && webro.files && webro.files[0] ? webro.files[0] : null
   };
@@ -8839,11 +9215,13 @@ window.abrirAvaliacaoCancelamento = async function(customerId, saleId) {
     };
     const saleJs = String(client.saleId || saleId).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
     const cidNum = Number(client.customerId) || 0;
+    window._cancelLeitura = {};
     const campoArquivo = function(id, rotulo, ajuda) {
+      const muda = id === "cancel-cnd-file" ? "window.cancelamentoAoAnexarCnd()" : "window.cancelamentoLiberarSeguir()";
       return `<div style="margin-top:12px;">
         <label style="display:block;font-size:0.82rem;font-weight:700;color:#0f172a;margin-bottom:4px;">${rotulo}</label>
         <p style="margin:0 0 6px;font-size:0.78rem;color:#64748b;">${ajuda}</p>
-        <input type="file" id="${id}" accept="image/*,.png,.jpg,.jpeg,.webp,.pdf,application/pdf" onchange="window.cancelamentoLiberarSeguir()" style="width:100%;box-sizing:border-box;padding:8px;border:1px dashed #cbd5e1;border-radius:8px;background:#f8fafc;font-size:0.85rem;">
+        <input type="file" id="${id}" accept="image/*,.png,.jpg,.jpeg,.webp,.pdf,application/pdf" onchange="${muda}" style="width:100%;box-sizing:border-box;padding:8px;border:1px dashed #cbd5e1;border-radius:8px;background:#f8fafc;font-size:0.85rem;">
       </div>`;
     };
     let docsHtml = "";
@@ -8851,7 +9229,8 @@ window.abrirAvaliacaoCancelamento = async function(customerId, saleId) {
       if (exig.obraAndamento) {
         docsHtml += `<p style="margin:12px 0 0;font-size:0.82rem;color:#166534;background:#f0fdf4;border-radius:8px;padding:8px 10px;">Obra em andamento: CND e CND da associação dispensadas.</p>`;
       } else {
-        docsHtml += campoArquivo("cancel-cnd-file", "CND", "A certidão sobe no cadastro da unidade, como na suspensão do contrato.");
+        docsHtml += campoArquivo("cancel-cnd-file", "CND", "A certidão sobe no cadastro da unidade. Se o arquivo for extrato ou boleto, o sistema pede a certidão da prefeitura em PDF e confere o texto.");
+        docsHtml += `<div id="cancel-cnd-extra"></div>`;
         if (exig.loteamentoFechado) {
           docsHtml += campoArquivo("cancel-assoc-file", "CND da associação", "Loteamento fechado. Anexe a CND da associação.");
         }
@@ -9009,6 +9388,13 @@ window.enviarCancelamentoContrato = async function() {
   const exig = window._cancelExigencias || {};
   const docs = window._cancelDocs || {};
   if (!exig.obraAndamento && !docs.cnd) { falha("Anexe a CND antes de cancelar."); return; }
+  const leituraCancel = window._cancelLeitura || {};
+  const classeCnd = leituraCancel.cnd && leituraCancel.cnd.classe;
+  const classeCert = leituraCancel.certidao && leituraCancel.certidao.classe;
+  if (!exig.obraAndamento && classeCnd && !classeCnd.certidao && !(docs.certidao && classeCert && classeCert.certidao)) {
+    falha("O arquivo da CND não é uma certidão da prefeitura. Anexe a certidão em PDF.");
+    return;
+  }
   if (exig.loteamentoFechado && !exig.obraAndamento && !docs.associacao) { falha("Anexe a CND da associação antes de cancelar."); return; }
   if (exig.webro && !docs.webro) { falha("Anexe o print da baixa da Webro antes de cancelar."); return; }
   if (btn) btn.disabled = true;
@@ -9019,7 +9405,13 @@ window.enviarCancelamentoContrato = async function() {
       if (aviso) aviso.textContent = "Enviando " + rotulo + " para a unidade…";
       await window.nexUploadToSiengeUnit(client.customerId, client.saleId, arquivo, tags, null, contexto);
     };
-    await subir(docs.cnd, ["CND", "CERTIDAO NEGATIVA DE DEBITO", "CERTIDAO NEGATIVA DE DEBITO IPTU"], "cancelamento-cnd", "a CND");
+    const cndEhCertidao = !!(classeCnd && classeCnd.certidao);
+    if (docs.cnd && !cndEhCertidao) {
+      await subir(docs.cnd, ["EXTRATO IPTU", "BOLETO IPTU", "IPTU"], "cancelamento-iptu", "o extrato ou boleto de IPTU");
+      await subir(docs.certidao, ["CND", "CERTIDAO NEGATIVA DE DEBITO", "CERTIDAO NEGATIVA DE DEBITO IPTU"], "cancelamento-cnd", "a certidão da prefeitura");
+    } else {
+      await subir(docs.cnd, ["CND", "CERTIDAO NEGATIVA DE DEBITO", "CERTIDAO NEGATIVA DE DEBITO IPTU"], "cancelamento-cnd", "a CND");
+    }
     await subir(docs.associacao, ["CND ASSOCIACAO", "CND DA ASSOCIACAO", "TAXA ASSOCIATIVA"], "cancelamento-associacao", "a CND da associação");
     await subir(docs.webro, ["BAIXA WEBRO", "PRINT WEBRO", "WEBRO", "COMPROVANTE BAIXA WEBRO"], "cancelamento-webro", "o print da baixa Webro");
   } catch (e) {
@@ -9052,7 +9444,20 @@ window.enviarCancelamentoContrato = async function() {
     const anexosTxt = [docs.cnd && "CND", docs.associacao && "CND da associação", docs.webro && "print da baixa Webro"].filter(Boolean).join(", ");
     const resumo = "Contrato " + contract.id + " cancelado no Sienge, subtipo " + subNome + " (" + subtipo + "), motivo " + rot.codigo + " (" + rot.texto + "), título " + client.saleId + " · " + (client.customerName || "") + (anexosTxt ? ". Documentos na unidade: " + anexosTxt : "");
     window.cancelContratoRegistrar(client, "ok", resumo, { contractId: contract.id, reason: rot.codigo, reasonTexto: rot.texto, subType: subtipo, date: data, cnd: !!docs.cnd, associacao: !!docs.associacao, webro: !!docs.webro });
-    if (window.showToast) window.showToast("Contrato cancelado no Sienge.", "success");
+    let avisoFollow = "";
+    if (window.FollowupCndApp && typeof FollowupCndApp.registrarDoDistrato === "function") {
+      try {
+        await FollowupCndApp.registrarDoDistrato({
+          client: client,
+          data: data,
+          contract: contract,
+          leitura: leituraCancel
+        });
+      } catch (errFollow) {
+        avisoFollow = " O follow-up da CND não gravou.";
+      }
+    }
+    if (window.showToast) window.showToast("Contrato cancelado no Sienge." + avisoFollow, avisoFollow ? "warning" : "success");
     window.fecharCancelamentoContrato();
   } catch (e) {
     const msg = (e && e.message) ? String(e.message) : "Falha ao cancelar o contrato.";
@@ -10229,7 +10634,8 @@ window.getClientJudicialPhaseInfo = function(client) {
   }
   const fase = stage ? stage.nome : (window.canonicalJudicialPhaseName(last.fase) || "Sem Fase");
   const faseLabel = stage ? stage.label : (fase === "Sem Fase" ? "Sem Fase" : fase);
-  const enteredAt = last.date ? new Date(last.date) : null;
+  const entradaFonte = (last.semAlteracao && last.etapaInicio) ? last.etapaInicio : last.date;
+  const enteredAt = entradaFonte ? new Date(entradaFonte) : null;
   let prazoDate = null;
   if (last.prazo) {
     const raw = String(last.prazo).split('T')[0];
@@ -13960,6 +14366,7 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
       'tab-comportamento', 'tab-repactuacoes', 'tab-construcao', 'tab-notificacoes'
   ];
   
+  if (typeof window.syncAbaSaldoAdvogado === "function") window.syncAbaSaldoAdvogado(isAdvogado);
   const hideAdvogadoTabs = ['tab-repactuacoes', 'tab-notificacoes'];
   bottomTabsIds.forEach(tabId => {
       const btn = document.querySelector(`button[data-target="${tabId}"]`);
@@ -16189,6 +16596,9 @@ function formatCpfCnpj(val) {
             receipts: receipts,
             installmentSituation: situationCode,
             value: orig,
+            originalValue: orig,
+            balanceDue: inst.balanceDue,
+            correctedValue: inst.correctedValue,
             currentBalance: inst.currentBalance || orig,
             currentBalanceWithAddition: inst.currentBalanceWithAddition !== undefined ? inst.currentBalanceWithAddition : (inst.correctedValueWithAdditions !== undefined ? inst.correctedValueWithAdditions : (inst.currentBalance !== undefined ? inst.currentBalance + (inst.additionalValue || 0) : orig + (inst.additionalValue || 0))),
             additionalValue: inst.additionalValue,
@@ -16800,12 +17210,13 @@ function formatCpfCnpj(val) {
          
          if (AppState.currentContractInstallments) {
             AppState.currentContractInstallments.forEach(inst => {
-               const cb = inst.currentBalance || 0;
-               const isPaid = inst.receipts && inst.receipts.some(r => r.receiptType !== null && r.receiptType !== undefined);
+               const cb = typeof window.baseCorrigidaParcela === "function"
+                 ? window.baseCorrigidaParcela(inst)
+                 : (inst.currentBalance || 0);
                const dueIso = typeof window.installmentDueIsoDate === "function"
                  ? window.installmentDueIsoDate(inst)
                  : String(inst.dueDate || "").slice(0, 10);
-               if (isPaid || cb <= 0 || inst.installmentSituation !== 1 || !dueIso) return;
+               if (cb <= 0.009 || inst.installmentSituation !== 1 || !dueIso) return;
                const overdue = typeof window.installmentIsChargeOverdue === "function"
                  ? window.installmentIsChargeOverdue(inst, hojeIso)
                  : dueIso < hojeIso;
@@ -16822,8 +17233,8 @@ function formatCpfCnpj(val) {
                   generatedBillet: !!hasBoletoFlag,
                   isActiveBoleto: false,
                   isFetchingBoleto: !!hasBoletoFlag,
-                  originalValue: Number(inst.originalValue != null ? inst.originalValue : cb),
-                  correctedValue: Number(inst.correctedValue != null ? inst.correctedValue : (inst.balanceDue != null ? inst.balanceDue : cb))
+                  originalValue: Number(inst.originalValue != null ? inst.originalValue : (inst.value != null ? inst.value : cb)),
+                  correctedValue: cb
                };
                const blocksSienge = (typeof window.installmentIsParcelaWebro === "function" && window.installmentIsParcelaWebro(row))
                  || (typeof window.installmentAllowsSiengeBoleto === "function" && !window.installmentAllowsSiengeBoleto(row));
@@ -16897,7 +17308,9 @@ function formatCpfCnpj(val) {
                if (vencidasSimulador.some(s => String(s.installmentId) === String(id))) return;
                const src = (AppState.currentContractInstallments || []).find(i => String(i.installmentId) === String(id));
                if (!src || !src.dueDate) return;
-               const cb = src.currentBalance || 0;
+               const cb = typeof window.baseCorrigidaParcela === "function"
+                 ? window.baseCorrigidaParcela(src)
+                 : (src.currentBalance || 0);
                vencidasSimulador.push({
                   ...src,
                   cb,
@@ -16909,8 +17322,8 @@ function formatCpfCnpj(val) {
                   generatedBillet: true,
                   isActiveBoleto: false,
                   isFetchingBoleto: true,
-                  originalValue: Number(src.originalValue != null ? src.originalValue : cb),
-                  correctedValue: Number(src.correctedValue != null ? src.correctedValue : (src.balanceDue != null ? src.balanceDue : cb))
+                  originalValue: Number(src.originalValue != null ? src.originalValue : (src.value != null ? src.value : cb)),
+                  correctedValue: cb
                });
             });
             vencidasSimulador.sort((a, b) => a.due - b.due);
@@ -16972,16 +17385,19 @@ function formatCpfCnpj(val) {
             }
 
             vencidasSimulador.forEach((inst, index) => {
-               const diasAtraso = typeof window.daysOverdueUntilTarget === "function"
-                 ? window.daysOverdueUntilTarget(inst, targetDate)
+               const diasAtraso = typeof window.diasAtrasoSienge === "function"
+                 ? window.diasAtrasoSienge(inst, targetDate)
                  : Math.max(0, Math.round((targetDate - inst.due) / (1000 * 60 * 60 * 24)) || 0);
                const charges = typeof window.moraComHonorarios === "function"
                  ? window.moraComHonorarios(inst.cb, diasAtraso, taxaMultiplier, margemHon)
                  : (typeof window.computeLateCharges === "function"
                    ? window.computeLateCharges(inst.cb, diasAtraso, taxaMultiplier)
                    : { multa: 0, juros: 0, jurosPadrao: 0, honorarios: 0 });
-               const multa = charges.multa;
-               const jurosContrato = charges.jurosPadrao != null ? charges.jurosPadrao : charges.juros;
+               const oficial = typeof window.encargosParcelaSienge === "function"
+                 ? window.encargosParcelaSienge(inst, inst.cb, diasAtraso, taxaMultiplier)
+                 : null;
+               const multa = oficial ? oficial.multa : charges.multa;
+               const jurosContrato = oficial ? oficial.juros : (charges.jurosPadrao != null ? charges.jurosPadrao : charges.juros);
                const honorarios = charges.honorarios || 0;
                const juros = jurosContrato + honorarios;
                
@@ -17123,12 +17539,14 @@ function formatCpfCnpj(val) {
             
             // KPI cards: valor = soma de TODAS as vencidas (independente de seleção)
             const totalAtualizadoKPI = vencidasSimulador.filter(i => i.isOverdue).reduce((acc, inst) => {
-              const diasAtraso2 = typeof window.daysOverdueUntilTarget === "function"
-                ? window.daysOverdueUntilTarget(inst, targetDate)
+              const diasAtraso2 = typeof window.diasAtrasoSienge === "function"
+                ? window.diasAtrasoSienge(inst, targetDate)
                 : Math.max(0, Math.round((targetDate - inst.due) / (1000 * 60 * 60 * 24)) || 0);
-              const ch = typeof window.computeLateCharges === "function"
-                ? window.computeLateCharges(inst.cb, diasAtraso2, taxaMultiplier)
-                : { multa: 0, juros: 0 };
+              const ch = typeof window.encargosParcelaSienge === "function"
+                ? window.encargosParcelaSienge(inst, inst.cb, diasAtraso2, taxaMultiplier)
+                : (typeof window.computeLateCharges === "function"
+                  ? window.computeLateCharges(inst.cb, diasAtraso2, taxaMultiplier)
+                  : { multa: 0, juros: 0 });
                return acc + inst.cb + ch.multa + ch.juros;
             }, 0);
 
@@ -41809,9 +42227,48 @@ window.updateJudFaseDropdown = function() {
   sel.innerHTML = html;
 };
 
+window.mesmaFaseJudicial = function(a, b) {
+  if (!a || !b) return false;
+  if (a.faseId && b.faseId) return String(a.faseId) === String(b.faseId);
+  const nome = function(item) {
+    const raw = item && item.fase;
+    if (typeof window.canonicalJudicialPhaseName === "function") {
+      return window.canonicalJudicialPhaseName(raw) || raw || "";
+    }
+    return raw || "";
+  };
+  const na = nome(a);
+  const nb = nome(b);
+  return !!(na && nb && na === nb);
+};
+
+window.pintarAvisoSemAlteracao = function() {
+  const el = document.getElementById("jud-sem-alteracao-hint");
+  const pin = window._judSemAlteracao;
+  if (!el) return;
+  if (!pin || !pin.etapaInicio) {
+    el.style.display = "none";
+    el.textContent = "";
+    return;
+  }
+  const dt = new Date(pin.etapaInicio);
+  const quando = isNaN(dt.getTime()) ? "" : dt.toLocaleDateString("pt-BR");
+  el.style.display = "block";
+  el.textContent = quando
+    ? "Sem alteração: a contagem desta etapa continua desde " + quando + ". O prazo não recomeça."
+    : "Sem alteração: o prazo desta etapa não recomeça.";
+};
+
 window.handleJudFaseChange = function(sel) {
    const selectedOption = sel && sel.options ? sel.options[sel.selectedIndex] : null;
    const dias = selectedOption ? selectedOption.getAttribute('data-dias') : null;
+   const pin = window._judSemAlteracao;
+   const faseIdSel = selectedOption ? selectedOption.getAttribute("data-id") : null;
+   const mesma = !!(pin && sel && String(sel.value || "") === String(pin.fase || "")
+     && (!pin.faseId || !faseIdSel || String(faseIdSel) === String(pin.faseId)));
+   if (pin && sel && sel.value && !mesma && sel.value !== "Nota Interna" && sel.value !== "Proposta de renegociação") {
+     window._judSemAlteracao = null;
+   }
    
    const prazoInput = document.getElementById('jud-prazo-date');
    const prazoRow = document.getElementById('jud-prazo-row');
@@ -41839,7 +42296,9 @@ window.handleJudFaseChange = function(sel) {
        if (prazoLabel) prazoLabel.innerHTML = 'Prazo para resolução <span style="color: var(--color-danger);">*</span>';
        if (prazoInput) {
            prazoInput.setAttribute('readonly', 'true');
-           if(dias && !isNaN(dias)) {
+           if (mesma && pin && pin.prazo) {
+               prazoInput.value = String(pin.prazo).slice(0, 10);
+           } else if(dias && !isNaN(dias)) {
                const d = new Date();
                d.setDate(d.getDate() + parseInt(dias));
                prazoInput.value = d.toISOString().split('T')[0];
@@ -41848,6 +42307,7 @@ window.handleJudFaseChange = function(sel) {
            }
        }
    }
+   if (typeof window.pintarAvisoSemAlteracao === "function") window.pintarAvisoSemAlteracao();
    if (typeof lucide !== 'undefined') lucide.createIcons();
 };
 
@@ -48456,6 +48916,12 @@ window.saveJudicialOccurrence = function() {
     }
   }
 
+  const pinSem = window._judSemAlteracao;
+  const segueSemAlteracao = !!(pinSem && pinSem.etapaInicio
+    && fase !== "Nota Interna" && fase !== "Proposta de renegociação"
+    && String(pinSem.fase || "") === String(fase)
+    && (!pinSem.faseId || !faseId || String(pinSem.faseId) === String(faseId)));
+
   const occurrence = {
     id: 'jud_' + Date.now(),
     date: new Date().toISOString(),
@@ -48463,9 +48929,11 @@ window.saveJudicialOccurrence = function() {
     fase: fase,
     faseId: faseId,
     text: text,
-    prazo: (fase !== 'Nota Interna') ? prazo : null,
+    prazo: (fase !== 'Nota Interna') ? (segueSemAlteracao && pinSem.prazo ? String(pinSem.prazo).slice(0, 10) : prazo) : null,
     pinned: isPinned,
-    type: "Judicial"
+    type: "Judicial",
+    semAlteracao: segueSemAlteracao,
+    etapaInicio: segueSemAlteracao ? pinSem.etapaInicio : null
   };
 
   if (!AppState.judNotes) AppState.judNotes = {};
@@ -48490,10 +48958,15 @@ window.saveJudicialOccurrence = function() {
   }
 
   // Clear fields
+  window._judSemAlteracao = null;
   if(faseEl) faseEl.value = "";
-  if(noteEl) noteEl.value = "";
+  if(noteEl) {
+    noteEl.value = "";
+    noteEl.placeholder = "Descreva os detalhes do andamento ou contato com o cliente...";
+  }
   if(prazoEl) prazoEl.value = "";
   if(pinEl) pinEl.checked = false;
+  if (typeof window.pintarAvisoSemAlteracao === "function") window.pintarAvisoSemAlteracao();
 
   // Restore defaults
   const prazoRow = document.getElementById('jud-prazo-row');
@@ -48719,8 +49192,8 @@ window.renderJudicialTimeline = function() {
     let repetirBtnHtml = "";
     if (canInsertJud && occ.id === mostRecentOccId && !isExpired && occ.fase !== 'Nota Interna' && occ.fase !== 'Proposta de renegociação') {
         repetirBtnHtml = `
-            <button class="btn btn-outline btn-sm" type="button" onclick="window.repeatJudicialOcc('${encodeURIComponent(occ.id || occ.date || "")}')" style="padding: 2px 6px; font-size: 0.65rem; display: inline-flex; align-items: center; gap: 2px; margin-left: 4px;">
-               <i data-lucide="copy" style="width: 10px; height: 10px;"></i> Repetir
+            <button class="btn btn-outline btn-sm" type="button" onclick="window.repeatJudicialOcc('${encodeURIComponent(occ.id || occ.date || "")}')" style="padding: 2px 8px; font-size: 0.65rem; display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; font-weight: 700; letter-spacing: 0.02em;">
+               SEM ALTERAÇÃO
             </button>
         `;
     }
@@ -48990,7 +49463,19 @@ window.repeatJudicialOcc = function(key) {
   const faseEl = document.getElementById("jud-fase");
   const noteEl = document.getElementById("jud-note-text");
   const prazoEl = document.getElementById("jud-prazo-date");
-  const prazoOriginal = occ.prazo ? String(occ.prazo).slice(0, 10) : "";
+
+  const notas = judList.filter((n) => n && n.type === "Judicial" && n.status !== "Cancelada"
+    && n.fase !== "Nota Interna" && n.fase !== "Proposta de renegociação");
+  notas.sort((a, b) => new Date(a.date) - new Date(b.date));
+  let inicio = occ;
+  const idx = notas.findIndex((n) => String(n.id || "") === String(occ.id || "") || String(n.date) === String(occ.date));
+  if (idx >= 0) {
+    let i = idx;
+    while (i > 0 && typeof window.mesmaFaseJudicial === "function" && window.mesmaFaseJudicial(notas[i - 1], occ)) i--;
+    inicio = notas[i];
+  }
+  const etapaInicio = inicio.etapaInicio || inicio.date;
+  const prazoOriginal = String(inicio.prazo || occ.prazo || "").slice(0, 10);
 
   if (faseEl) {
       faseEl.value = occ.fase || "";
@@ -48998,15 +49483,26 @@ window.repeatJudicialOcc = function(key) {
         const opt = Array.from(faseEl.options || []).find((o) => o.getAttribute("data-id") === String(occ.faseId));
         if (opt) faseEl.value = opt.value;
       }
-      if (window.handleJudFaseChange) window.handleJudFaseChange(faseEl);
   }
+  const faseId = (faseEl && faseEl.options && faseEl.selectedIndex >= 0)
+    ? (faseEl.options[faseEl.selectedIndex].getAttribute("data-id") || occ.faseId || null)
+    : (occ.faseId || null);
+  window._judSemAlteracao = {
+    fase: faseEl ? faseEl.value : (occ.fase || ""),
+    faseId: faseId,
+    etapaInicio: etapaInicio,
+    prazo: prazoOriginal
+  };
+  if (faseEl && window.handleJudFaseChange) window.handleJudFaseChange(faseEl);
   if (prazoEl && prazoOriginal && occ.fase !== "Nota Interna" && occ.fase !== "Proposta de renegociação") {
       prazoEl.value = prazoOriginal;
   }
   if (noteEl) {
-      noteEl.value = occ.text || "";
+      noteEl.value = "";
+      noteEl.placeholder = "Escreva a nota que justifica seguir nesta etapa, sem alterar a contagem do prazo.";
       noteEl.focus();
   }
+  if (typeof window.pintarAvisoSemAlteracao === "function") window.pintarAvisoSemAlteracao();
 };
 
 window.openAnexosClienteModal = async function(customerId) {

@@ -4,7 +4,11 @@
 const FluxosProcesso = {
   state: {
     fluxos: [],
-    filtroResp: "",
+    filtroRespIds: [],
+    filtroRespOpen: false,
+    filtroRespQuery: "",
+    trocaOpen: false,
+    trocaQuery: "",
     filtroFluxoIds: [],
     filtroNomeOpen: false,
     filtroNomeQuery: "",
@@ -96,8 +100,35 @@ const FluxosProcesso = {
     return this.sou(fluxo, "responsavel") || this.sou(fluxo, "supervisor");
   },
 
+  souAdmin() {
+    const eu = this.eu();
+    return typeof window.isCrmAdministrator === "function" && window.isCrmAdministrator(eu);
+  },
+
   podeTrocar(fluxo) {
-    return this.sou(fluxo, "supervisor");
+    return this.souAdmin() || this.sou(fluxo, "supervisor");
+  },
+
+  cadastrados() {
+    let lista = [];
+    try { lista = JSON.parse(localStorage.getItem("crm_users") || "[]") || []; } catch (e) { lista = []; }
+    return lista.filter((u) => u && (u.name || u.email || u.sienge_user));
+  },
+
+  subordinado(pessoa) {
+    const eu = this.eu();
+    if (!eu || !pessoa) return false;
+    return this.pessoaBate(eu, pessoa.manager_email, pessoa.manager_name);
+  },
+
+  pessoasTroca(fluxo) {
+    const ordem = (a, b) => String(a.name || a.sienge_user || a.email || "").localeCompare(String(b.name || b.sienge_user || b.email || ""), "pt-BR");
+    const todos = this.cadastrados().slice().sort(ordem);
+    if (this.souAdmin()) return todos;
+    const subs = todos.filter((u) => this.subordinado(u));
+    const atual = fluxo ? todos.find((u) => this.pessoaBate(u, fluxo.responsavelEmail, fluxo.responsavelNome)) : null;
+    if (atual && !subs.some((u) => String(u.email || u.id) === String(atual.email || atual.id))) subs.unshift(atual);
+    return subs;
   },
 
   achar(id) {
@@ -124,7 +155,7 @@ const FluxosProcesso = {
       oficial = Object.assign({
         id: "fluxo-judicial",
         oficial: true,
-        nome: "Fluxo judicial",
+        nome: "FLUXO JUDICIAL",
         etapas: etapasVivas,
         createdAt: Date.now(),
         updatedAt: Date.now()
@@ -143,15 +174,30 @@ const FluxosProcesso = {
       oficial.etapas = etapasVivas;
       mudou = true;
     }
+    if (this.normalizarNomes()) mudou = true;
     if (mudou) this.persistir();
+  },
+
+  normalizarNomes() {
+    let mudou = false;
+    (this.state.fluxos || []).forEach((f) => {
+      const nome = String(f && f.nome || "").trim().toUpperCase();
+      if (nome && nome !== f.nome) {
+        f.nome = nome;
+        mudou = true;
+      }
+    });
+    return mudou;
   },
 
   carregarLocal() {
     try {
       const raw = JSON.parse(localStorage.getItem("crm_fluxos_processo") || "null");
       this.state.fluxos = raw && Array.isArray(raw.fluxos) ? raw.fluxos : [];
+      this._seq = Number(raw && raw.seq) || 0;
     } catch (e) {
       this.state.fluxos = [];
+      this._seq = 0;
     }
   },
 
@@ -163,19 +209,37 @@ const FluxosProcesso = {
       const existe = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists);
       if (!existe) return null;
       const data = snap.data() || {};
-      return Array.isArray(data.fluxos) ? data.fluxos : [];
+      return {
+        fluxos: Array.isArray(data.fluxos) ? data.fluxos : [],
+        seq: Number(data.seq) || 0
+      };
     } catch (e) {
       console.warn("[Fluxos] leitura", e);
       return null;
     }
   },
 
+  aplicarRemoto(remoto) {
+    if (!remoto || !Array.isArray(remoto.fluxos) || !remoto.fluxos.length) return false;
+    if (this.state.abertoId) return false;
+    if ((remoto.seq || 0) < (this._seq || 0)) return false;
+    this.state.fluxos = remoto.fluxos;
+    this._seq = Math.max(this._seq || 0, remoto.seq || 0);
+    if (this.normalizarNomes()) this.persistir();
+    return true;
+  },
+
   persistir() {
-    const dados = { fluxos: this.state.fluxos };
+    this._seq = (this._seq || 0) + 1;
+    const seq = this._seq;
+    const dados = { fluxos: JSON.parse(JSON.stringify(this.state.fluxos || [])), seq: seq };
     try { localStorage.setItem("crm_fluxos_processo", JSON.stringify(dados)); } catch (e) {}
     const fc = window.firebaseCollections;
     if (!window.firebaseDb || !fc || !fc.setDoc) return;
-    fc.setDoc(fc.doc(window.firebaseDb, "config", "fluxos_processo"), dados, { merge: true }).catch((e) => {
+    this._gravando = (this._gravando || Promise.resolve()).catch(() => {}).then(() => {
+      if (seq !== this._seq) return null;
+      return fc.setDoc(fc.doc(window.firebaseDb, "config", "fluxos_processo"), dados, { merge: true });
+    }).catch((e) => {
       console.warn("[Fluxos] gravação", e);
     });
   },
@@ -203,12 +267,12 @@ const FluxosProcesso = {
   async init() {
     if (!this.state.pronto) {
       this.carregarLocal();
+      if (this.normalizarNomes()) this.persistir();
       this.garantirOficial();
       this.state.pronto = true;
       this.pintar();
       const remoto = await this.lerRemoto();
-      if (!this.state.abertoId && Array.isArray(remoto) && remoto.length) {
-        this.state.fluxos = remoto;
+      if (this.aplicarRemoto(remoto)) {
         this.garantirOficial();
         this.pintar();
       }
@@ -261,7 +325,8 @@ const FluxosProcesso = {
     slot.innerHTML = MlEmpresaFilter.html(Object.assign({
       label: "Nome do fluxo",
       open: !!this.state.filtroNomeOpen,
-      emptyMeansAll: true
+      emptyMeansAll: true,
+      extraClass: "ml-emp-filter--corte"
     }, this.filtroNomeOpts()));
     if (window.lucide) window.lucide.createIcons();
   },
@@ -303,11 +368,76 @@ const FluxosProcesso = {
     });
   },
 
+  filtroRespOpts() {
+    return {
+      id: "fluxo-filtro-resp",
+      items: this.responsaveis().map((n) => ({ id: n, label: n.toUpperCase() })),
+      selectedIds: this.state.filtroRespIds || [],
+      query: this.state.filtroRespQuery || "",
+      keepOrder: true,
+      nouns: {
+        singular: "responsável",
+        plural: "responsáveis",
+        none: "Nenhum responsável",
+        noMatch: "Nenhum responsável com esse nome."
+      }
+    };
+  },
+
+  pintarFiltroResp() {
+    const slot = document.getElementById("fluxo-filtro-resp-slot");
+    if (!slot || !window.MlEmpresaFilter) return;
+    slot.innerHTML = MlEmpresaFilter.html(Object.assign({
+      label: "Responsável",
+      open: !!this.state.filtroRespOpen,
+      emptyMeansAll: true,
+      extraClass: "ml-emp-filter--corte"
+    }, this.filtroRespOpts()));
+    if (window.lucide) window.lucide.createIcons();
+  },
+
+  bindFiltroResp() {
+    if (!window.MlEmpresaFilter) return;
+    const self = this;
+    MlEmpresaFilter.bind("fluxo-filtro-resp", {
+      toggleOpen() {
+        self.state.filtroRespOpen = !self.state.filtroRespOpen;
+        self.pintarFiltroResp();
+        if (self.state.filtroRespOpen) {
+          const inp = document.getElementById("fluxo-filtro-resp-search");
+          if (inp) inp.focus();
+        }
+      },
+      setQuery(q) {
+        self.state.filtroRespQuery = q || "";
+        const box = document.getElementById("fluxo-filtro-resp-list");
+        if (box) box.innerHTML = MlEmpresaFilter.listHtml(self.filtroRespOpts());
+      },
+      toggleId(itemId, on) {
+        const sid = String(itemId);
+        const cur = (self.state.filtroRespIds || []).map(String);
+        self.state.filtroRespIds = on ? (cur.indexOf(sid) >= 0 ? cur : cur.concat(sid)) : cur.filter((x) => x !== sid);
+        self.state.filtroRespOpen = true;
+        self.pintarFiltroResp();
+      },
+      selectAll() {
+        self.state.filtroRespIds = self.responsaveis().slice();
+        self.state.filtroRespOpen = true;
+        self.pintarFiltroResp();
+      },
+      selectNone() {
+        self.state.filtroRespIds = [];
+        self.state.filtroRespOpen = true;
+        self.pintarFiltroResp();
+      }
+    });
+  },
+
   consultar() {
     const ids = (this.state.filtroFluxoIds || []).map(String);
-    const resp = this.norm(this.state.filtroResp);
+    const resps = (this.state.filtroRespIds || []).map((n) => this.norm(n));
     this.state.shown = (this.state.fluxos || []).filter((f) => {
-      if (resp && this.norm(f.responsavelNome) !== resp) return false;
+      if (resps.length && resps.indexOf(this.norm(f.responsavelNome)) < 0) return false;
       if (ids.length && ids.indexOf(String(f.id)) < 0) return false;
       return true;
     });
@@ -316,7 +446,9 @@ const FluxosProcesso = {
   },
 
   limpar() {
-    this.state.filtroResp = "";
+    this.state.filtroRespIds = [];
+    this.state.filtroRespOpen = false;
+    this.state.filtroRespQuery = "";
     this.state.filtroFluxoIds = [];
     this.state.filtroNomeOpen = false;
     this.state.filtroNomeQuery = "";
@@ -331,19 +463,12 @@ const FluxosProcesso = {
     if (editor) editor.style.display = "none";
     if (root) root.style.display = "";
     if (!root) return;
-    const opts = this.responsaveis().map((n) => `<option value="${this.esc(n)}"${this.norm(n) === this.norm(this.state.filtroResp) ? " selected" : ""}>${this.esc(n)}</option>`).join("");
     root.innerHTML = `<div class="tvig-page">
       <div class="search-filter-panel tvig-params">
         <h3 class="tvig-section-title">Parâmetros da consulta</h3>
         <div class="tvig-filters fluxo-consulta-filtros">
           <div id="fluxo-filtro-nome-slot" class="tvig-filter-slot fluxo-consulta-nome"></div>
-          <div class="tvig-filter-slot fluxo-consulta-resp">
-            <label class="tvig-comp-label" for="fluxo-filtro-resp">Responsável</label>
-            <select id="fluxo-filtro-resp" class="form-control" onchange="FluxosProcesso.state.filtroResp = this.value">
-              <option value="">Todos</option>
-              ${opts}
-            </select>
-          </div>
+          <div id="fluxo-filtro-resp-slot" class="tvig-filter-slot fluxo-consulta-resp"></div>
           <div class="tvig-filter-actions">
             <button type="button" class="btn btn-primary" onclick="FluxosProcesso.consultar()"><i data-lucide="search" style="width:16px;"></i> Consultar</button>
             <button type="button" class="btn btn-cancel" onclick="FluxosProcesso.limpar()">Limpar</button>
@@ -357,6 +482,8 @@ const FluxosProcesso = {
     </div>`;
     this.bindFiltroNome();
     this.pintarFiltroNome();
+    this.bindFiltroResp();
+    this.pintarFiltroResp();
     this.renderLista();
     if (window.lucide) window.lucide.createIcons();
   },
@@ -389,7 +516,7 @@ const FluxosProcesso = {
 
   linha(f) {
     const edita = this.podeEditar(f);
-    const nome = f.nome || "Sem nome";
+    const nome = String(f.nome || "Sem nome").toUpperCase();
     const excluir = edita && !f.oficial
       ? `<button type="button" class="tvig-ico is-danger" title="Excluir" onclick="FluxosProcesso.excluir('${this.esc(f.id)}')"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button>`
       : "";
@@ -431,7 +558,7 @@ const FluxosProcesso = {
     const fluxo = Object.assign({
       id: "fp" + Date.now(),
       oficial: false,
-      nome: "Cópia de " + (src.nome || "fluxo"),
+      nome: ("Cópia de " + (src.nome || "fluxo")).toUpperCase(),
       etapas: JSON.parse(JSON.stringify(src.etapas || [])),
       createdAt: Date.now(),
       updatedAt: Date.now()
@@ -481,47 +608,169 @@ const FluxosProcesso = {
     const nomeVivo = document.getElementById("fluxo-nome");
     if (nomeVivo && document.activeElement === nomeVivo) fluxo.nome = nomeVivo.value;
     const troca = !this.state.leitura && this.podeTrocar(fluxo);
-    const pessoas = this.usuarios().map((u) => {
-      const sel = this.pessoaBate(u, fluxo.responsavelEmail, fluxo.responsavelNome) ? " selected" : "";
-      return `<option value="${this.esc(u.email || u.id)}"${sel}>${this.esc(u.name || u.sienge_user || u.email)}</option>`;
-    }).join("");
     this._pintandoTopo = true;
     topo.innerHTML = `<div class="fluxo-topo">
       <button type="button" class="btn btn-outline fluxo-voltar" onclick="FluxosProcesso.fechar()">Voltar</button>
       <label class="fluxo-campo fluxo-campo-nome">Nome do fluxo
-        <input id="fluxo-nome" value="${this.esc(fluxo.nome)}" ${this.state.leitura ? "disabled" : ""}>
+        <input id="fluxo-nome" value="${this.esc(String(fluxo.nome || "").toUpperCase())}" ${this.state.leitura ? "disabled" : ""} style="text-transform:uppercase;">
       </label>
       <div class="fluxo-campo fluxo-campo-pessoa"><span>Responsável</span><div class="fluxo-valor" title="${this.esc(fluxo.responsavelNome || "")}">${this.esc(fluxo.responsavelNome || "—")}</div></div>
       <div class="fluxo-campo fluxo-campo-pessoa"><span>Supervisor</span><div class="fluxo-valor" title="${this.esc(fluxo.supervisorNome || "")}">${this.esc(fluxo.supervisorNome || "—")}</div></div>
-      ${troca ? `<label class="fluxo-campo fluxo-campo-troca">Trocar responsável<select onchange="FluxosProcesso.trocarResponsavel(this.value)">${pessoas}</select></label>` : ""}
+      ${troca ? `<div class="fluxo-campo-troca" id="fluxo-troca-slot"></div>` : ""}
     </div>`;
     this._pintandoTopo = false;
+    if (troca) {
+      this.bindTroca();
+      this.pintarTroca();
+    }
     const nomeEl = document.getElementById("fluxo-nome");
-    if (nomeEl && !nomeEl.disabled) nomeEl.addEventListener("input", () => this.renomear(nomeEl.value));
+    if (nomeEl && !nomeEl.disabled) {
+      nomeEl.addEventListener("input", () => this.renomear(nomeEl.value));
+      nomeEl.addEventListener("blur", () => this.renomear(nomeEl.value, true));
+    }
     const add = document.getElementById("fluxo-add-etapa");
     if (add) add.style.display = this.state.leitura ? "none" : "";
     if (typeof window.renderEtapasJudiciais === "function") window.renderEtapasJudiciais();
     if (window.lucide) window.lucide.createIcons();
   },
 
-  renomear(valor) {
+  renomear(valor, propagar) {
     if (this._pintandoTopo) return;
     const fluxo = this.fluxoAberto();
     if (!fluxo || this.state.leitura) return;
-    const texto = String(valor == null ? "" : valor);
+    const texto = String(valor == null ? "" : valor).toUpperCase();
     const el = document.getElementById("fluxo-nome");
+    if (el && el.value !== texto && document.activeElement === el) {
+      const pos = el.selectionStart;
+      el.value = texto;
+      try { if (pos != null) el.setSelectionRange(pos, pos); } catch (e) {}
+    }
     if (!texto.trim() && String(fluxo.nome || "").trim() && (!el || document.activeElement !== el)) return;
-    if (texto === String(fluxo.nome || "")) return;
-    fluxo.nome = texto;
-    fluxo.updatedAt = Date.now();
-    this.persistir();
+    if (texto !== String(fluxo.nome || "")) {
+      fluxo.nome = texto;
+      fluxo.updatedAt = Date.now();
+      this.persistir();
+    }
+    if (propagar) this.propagarNome(fluxo);
+  },
+
+  async propagarNome(fluxo) {
+    const nome = String(fluxo && fluxo.nome || "").trim().toUpperCase();
+    if (!fluxo || !nome) return;
+    const app = window.ProcessoContraApp;
+    if (app) {
+      if (Array.isArray(app.motivos)) {
+        app.motivos = typeof app.motivosDoCadastro === "function" ? app.motivosDoCadastro() : app.motivos;
+      }
+      if (String(app.motivoId || "") === String(fluxo.id)) app.motivo = nome;
+      if (typeof app.pintarMotivoPainel === "function") app.pintarMotivoPainel();
+      if (Array.isArray(app.itens)) {
+        let mudouLista = false;
+        app.itens.forEach((it) => {
+          if (String(it.motivoId) === String(fluxo.id) && it.motivo !== nome) {
+            it.motivo = nome;
+            mudouLista = true;
+          }
+        });
+        if (mudouLista && typeof app.pintarLista === "function") app.pintarLista();
+      }
+    }
+    const fc = window.firebaseCollections;
+    if (!window.firebaseDb || !fc || !fc.getDocs || !fc.collection || !fc.doc || !fc.setDoc) return;
+    try {
+      const snap = await fc.getDocs(fc.collection(window.firebaseDb, "processos_contra"));
+      const jobs = [];
+      snap.forEach((d) => {
+        const data = d.data() || {};
+        if (String(data.motivoId) !== String(fluxo.id)) return;
+        if (String(data.motivo || "") === nome) return;
+        jobs.push(fc.setDoc(fc.doc(window.firebaseDb, "processos_contra", d.id), { motivo: nome }, { merge: true }));
+      });
+      if (jobs.length) await Promise.all(jobs);
+    } catch (e) {
+      console.warn("[Fluxos] nome nos processos", e);
+    }
+  },
+
+  trocaOpts() {
+    const fluxo = this.fluxoAberto();
+    const pessoas = this.pessoasTroca(fluxo);
+    const atual = pessoas.find((u) => fluxo && this.pessoaBate(u, fluxo.responsavelEmail, fluxo.responsavelNome));
+    return {
+      id: "fluxo-troca-resp",
+      items: pessoas.map((u) => ({
+        id: String(u.email || u.id),
+        label: String(u.name || u.sienge_user || u.email || "").toUpperCase()
+      })),
+      selectedIds: atual ? [String(atual.email || atual.id)] : [],
+      query: this.state.trocaQuery || "",
+      keepOrder: true,
+      single: true,
+      nouns: {
+        singular: "pessoa",
+        plural: "pessoas",
+        none: "Nenhuma pessoa",
+        noMatch: "Nenhuma pessoa com esse nome."
+      }
+    };
+  },
+
+  pintarTroca() {
+    const slot = document.getElementById("fluxo-troca-slot");
+    if (!slot || !window.MlEmpresaFilter) return;
+    slot.innerHTML = MlEmpresaFilter.html(Object.assign({
+      label: "Trocar responsável",
+      open: !!this.state.trocaOpen,
+      emptyMeansAll: false,
+      emptyLabel: "Selecione",
+      extraClass: "ml-emp-filter--corte"
+    }, this.trocaOpts()));
+    if (window.lucide) window.lucide.createIcons();
+  },
+
+  bindTroca() {
+    if (!window.MlEmpresaFilter) return;
+    const self = this;
+    MlEmpresaFilter.bind("fluxo-troca-resp", {
+      toggleOpen() {
+        self.state.trocaOpen = !self.state.trocaOpen;
+        self.pintarTroca();
+        if (self.state.trocaOpen) {
+          const inp = document.getElementById("fluxo-troca-resp-search");
+          if (inp) inp.focus();
+        }
+      },
+      close() {
+        self.state.trocaOpen = false;
+        self.state.trocaQuery = "";
+        self.pintarTroca();
+      },
+      setQuery(q) {
+        self.state.trocaQuery = q || "";
+        const box = document.getElementById("fluxo-troca-resp-list");
+        if (box) box.innerHTML = MlEmpresaFilter.listHtml(self.trocaOpts());
+      },
+      toggleId(itemId, on) {
+        if (!on) return;
+        self.state.trocaOpen = false;
+        self.state.trocaQuery = "";
+        self.trocarResponsavel(itemId);
+      },
+      selectAll() {},
+      selectNone() {}
+    });
   },
 
   trocarResponsavel(email) {
     const fluxo = this.fluxoAberto();
     if (!fluxo || !this.podeTrocar(fluxo)) return;
-    const user = this.usuarios().find((u) => String(u.email || u.id) === String(email));
+    const lista = this.souAdmin() ? this.cadastrados() : this.pessoasTroca(fluxo);
+    const user = lista.find((u) => String(u.email || u.id) === String(email));
     if (!user) return;
+    if (!this.souAdmin() && !this.subordinado(user)) {
+      this.mostrarEditor();
+      return;
+    }
     Object.assign(fluxo, this.donoDe(user));
     fluxo.updatedAt = Date.now();
     this.state.leitura = !this.podeEditar(fluxo);
@@ -530,6 +779,10 @@ const FluxosProcesso = {
   },
 
   fechar() {
+    const nomeEl = document.getElementById("fluxo-nome");
+    if (nomeEl && !this.state.leitura) this.renomear(nomeEl.value, true);
+    this.state.trocaOpen = false;
+    this.state.trocaQuery = "";
     this.state.abertoId = "";
     this.state.leitura = false;
     this.restaurarOficialNaMemoria();

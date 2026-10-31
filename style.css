@@ -1054,6 +1054,97 @@ button.btn-fechar:hover,
   box-shadow: 0 4px 12px rgba(243, 112, 33, 0.15);
 }
 
+.saldo-devedor-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.45);
+  padding: 24px;
+}
+.saldo-devedor-card {
+  width: min(980px, 100%);
+  max-height: min(86vh, 820px);
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.saldo-devedor-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px 8px;
+}
+.saldo-devedor-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: #105436;
+}
+.saldo-devedor-head p {
+  margin: 4px 0 0;
+  font-size: 0.82rem;
+  color: #64748b;
+}
+.saldo-devedor-data {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 18px 12px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #334155;
+}
+.saldo-devedor-data input {
+  height: 36px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 0 8px;
+}
+.saldo-devedor-scroll {
+  overflow: auto;
+  padding: 0 18px;
+}
+.saldo-devedor-tabela {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+.saldo-devedor-tabela th {
+  text-align: left;
+  color: #105436;
+  font-size: 0.72rem;
+  padding: 8px 6px;
+  border-bottom: 2px solid #105436;
+  white-space: nowrap;
+}
+.saldo-devedor-tabela td {
+  padding: 7px 6px;
+  border-bottom: 1px solid #e2e8f0;
+  white-space: nowrap;
+}
+.saldo-devedor-tabela tfoot td {
+  font-weight: 700;
+  color: #105436;
+  border-bottom: none;
+  border-top: 2px solid #105436;
+}
+.saldo-devedor-vazio {
+  margin: 12px 0 18px;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+.saldo-devedor-acoes {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 18px 16px;
+}
 .btn-outline {
   background-color: transparent;
   border: 1.5px solid var(--color-primary);
@@ -2629,6 +2720,18 @@ circle.donut-segment {
 .ml-emp-filter-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #f1f5f9; cursor: pointer; font-size: 0.82rem; color: #334155; font-weight: 600; }
 .ml-emp-filter-item:last-child { border-bottom: none; }
 .ml-emp-filter-item span { min-width: 0; white-space: normal; line-height: 1.35; }
+.ml-emp-filter--corte { width: 100%; max-width: none; min-width: 0; flex: none; }
+.ml-emp-filter--corte .ml-emp-filter-item { align-items: center; }
+.ml-emp-filter--corte .ml-emp-filter-item span,
+.ml-emp-filter--corte .ml-emp-filter-btn span {
+  flex: 1;
+  min-width: 0;
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}
 #parametrizacao-parceiro-root .pp-vinculo-filtros { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-start; }
 #parametrizacao-parceiro-root .pp-vinculo-filtros .pp-vinculo-slot { flex: 1 1 280px; min-width: 240px; }
 #parametrizacao-parceiro-root .pp-vinculo-filtros .ml-emp-filter { flex: none; width: 100%; max-width: none; min-width: 0; }
@@ -9284,7 +9387,11 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
   flex: none;
 }
 #fluxos-processo-root .fluxo-consulta-nome .ml-emp-filter-btn { height: 38px; min-height: 38px; }
-#fluxos-processo-root .fluxo-consulta-resp .form-control { width: 100%; height: 38px; box-sizing: border-box; }
+#fluxos-processo-root .fluxo-consulta-resp .ml-emp-filter,
+#fluxos-processo-editor .fluxo-campo-troca .ml-emp-filter { width: 100%; max-width: none; min-width: 0; flex: none; }
+#fluxos-processo-root .fluxo-consulta-resp .ml-emp-filter-btn,
+#fluxos-processo-editor .fluxo-campo-troca .ml-emp-filter-btn { height: 38px; min-height: 38px; }
+#fluxos-processo-editor .fluxo-campo-troca { flex: 1 1 320px; min-width: 240px; max-width: 420px; }
 .cc-table td.fluxo-acoes { white-space: nowrap; width: 148px; }
 .tvig-list-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
 .tvig-list-table thead th {
@@ -10456,6 +10563,13 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .alog-del { background: none; border: none; cursor: pointer; color: #b91c1c; padding: 4px; display: inline-flex; }
 .alog-del svg, .alog-del i { width: 16px; height: 16px; }
 
+.fcnd-page .cc-table th { cursor: pointer; user-select: none; }
+.fcnd-page .cc-table th.is-acao { cursor: default; }
+.fcnd-page .cc-table td.fcnd-relato { white-space: normal; line-height: 1.35; overflow: visible; }
+.fcnd-page .fcnd-pendente { color: #9a3412; font-weight: 700; }
+.fcnd-page .fcnd-ok { color: #105436; font-weight: 700; }
+.fcnd-pop-grade { display: grid; grid-template-columns: 140px 1fr; gap: 4px 12px; font-size: 0.88rem; margin: 0 0 12px; }
+.fcnd-pop-grade span { color: #64748b; }
 .cc-page { padding: 4px 2px 12px; }
 .cc-toolbar { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 .cc-filters { display: flex; gap: 12px; flex: 1 1 520px; min-width: 0; align-items: flex-end; }
@@ -11359,6 +11473,44 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 #pc-popup .pc-form .pc-motivo-filter.ml-emp-filter { width: 100%; max-width: none; min-width: 0; }
 #pc-popup .pc-motivo-filter .ml-emp-filter-label { text-transform: none; letter-spacing: 0; font-size: 0.75rem; margin-bottom: 6px; }
 #pc-popup .pc-form input[type="file"] { height: auto; width: auto; max-width: 100%; padding: 0; border: 0; background: transparent; }
+#pc-popup .pc-form input:not([type="file"]):not([type="radio"]):not([type="checkbox"]),
+#pc-popup #pc-motivo-filter .ml-emp-filter-btn {
+  height: 38px;
+  min-height: 38px;
+  border: 1px solid #94a3b8;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+#pc-popup .pc-form input::placeholder { color: #94a3b8; font-weight: 400; }
+#pc-popup .pc-motivo-wrap { min-width: 0; }
+#pc-popup .pc-motivo-wrap .pc-motivo-filter.ml-emp-filter { width: 100%; max-width: none; min-width: 0; flex: none; }
+#pc-popup .pc-motivo-wrap.is-vazio #pc-motivo-filter .ml-emp-filter-btn span { color: #94a3b8; font-weight: 400; }
+#pc-popup .pc-numero-linha { display: flex; gap: 8px; align-items: center; min-width: 0; }
+#pc-popup .pc-numero-linha input { flex: 1; min-width: 0; width: auto; }
+#pc-popup .pc-numero-linha .btn { height: 38px; flex: none; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; }
+#pc-popup .pc-pesq-head { background: #f3f4f6; padding: 8px 14px; border-bottom: 1px solid #e5e7eb; border-radius: 8px 8px 0 0; margin: 0; }
+#pc-popup .pc-pesq-head h3 { margin: 0; font-size: 0.95rem; color: var(--color-primary); }
+#pc-popup .pc-pesq { margin-bottom: 8px; }
+#pc-popup .pc-pesq-grid { margin-bottom: 8px; gap: 10px 12px; }
+#pc-popup .pc-parte { padding: 10px 12px; }
+#pc-popup .pc-reu-fixo { padding: 8px 12px; }
+#pc-popup #pc-cliente-card { margin-bottom: 8px; }
+#pc-popup #pc-cliente-card .cessao-customer-grid { gap: 8px; padding: 8px 12px 10px; }
+#pc-popup #pc-cliente-card .cessao-customer-field { min-height: 0; padding: 6px 8px; }
+#pc-popup #pc-cliente-card .cessao-val { font-size: 0.82rem; line-height: 1.3; }
+#pc-popup .pc-anexo-rotulo { font-size: 0.75rem; font-weight: 700; color: #64748b; }
+#pc-popup .pc-anexo-drop { display: flex; align-items: center; gap: 14px; border: 1px dashed #94a3b8; border-radius: 8px; background: #fff; padding: 12px 14px; cursor: pointer; }
+#pc-popup .pc-anexo-drop.is-over { border-color: #105436; background: #f0fdf4; }
+#pc-popup .pc-anexo-drop > svg { width: 28px; height: 28px; color: #105436; flex: none; }
+#pc-popup .pc-anexo-drop strong { display: block; color: #1c2e24; font-size: 0.9rem; }
+#pc-popup .pc-anexo-drop span { display: block; color: #64748b; font-size: 0.78rem; font-weight: 500; }
+#pc-popup .pc-anexo-drop .btn { margin-left: auto; height: 38px; flex: none; white-space: nowrap; }
+#pc-popup .pc-anexo-nome { display: flex; align-items: center; gap: 8px; min-width: 0; }
+#pc-popup .pc-anexo-nome svg { width: 16px; height: 16px; color: #105436; flex: none; }
+#pc-popup .pc-anexo-nome small { color: #64748b; font-weight: 600; }
 #pc-popup .pc-busca-linha { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
 #pc-popup .pc-busca-linha .btn { height: 38px; }
 #pc-popup .pc-terc { grid-template-columns: minmax(0, 1fr) 220px; }

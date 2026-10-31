@@ -20,7 +20,7 @@ const GerarPagamentoApp = {
     titulos: [],
     previsoesIgnoradas: 0,
     filtro: "todos",
-    visao: "lotes",
+    visao: "titulos",
     abaLotes: "gerar",
     ordemLotes: "baixa-desc",
     abaEmpresa: "",
@@ -4068,8 +4068,7 @@ const GerarPagamentoApp = {
     const nAbertos = new Set(s.titulos.filter((r) => !r.pago && r.aPagar > 0.009 && this.noPeriodoBuscado(String(r.vencimento || "").slice(0, 10)))
       .map((r) => this.chaveTitulo(r.titulo, r.parcela))).size;
     const visoes = `<div class="gp-visoes">
-        <button type="button" class="gp-visao${s.visao !== "lotes" ? " is-active" : ""}" onclick="GerarPagamentoApp.setVisao('titulos')"><i data-lucide="list" style="width:14px;"></i> Títulos</button>
-        <button type="button" class="gp-visao${s.visao === "lotes" ? " is-active" : ""}" onclick="GerarPagamentoApp.setVisao('lotes')"><i data-lucide="layers" style="width:14px;"></i> Lotes por conta e dia <b>${nAbertos}</b></button>
+        <button type="button" class="gp-visao${s.visao === "lotes" ? " is-active" : ""}" title="${s.visao === "lotes" ? "Voltar para a programação" : "Ver os lotes por conta e dia"}" onclick="GerarPagamentoApp.setVisao('${s.visao === "lotes" ? "titulos" : "lotes"}')"><i data-lucide="layers" style="width:14px;"></i> Lotes por conta e dia <b>${nAbertos}</b></button>
       </div>`;
     if (s.visao === "lotes") return visoes + this.lotesHtml();
     const todos = this.titulosAgrupados();
