@@ -2036,11 +2036,7 @@ const PrestacaoContasApp = {
         </div>
         <div class="pcx-total">${rows.length} lançamento(s) · <strong style="color:${corTotal};">${this.fmt(resultado)}</strong></div>
       </div>
-      <p class="pcx-ajuda">
-        ${repasse
-          ? "Pago neste mês, mas é a distribuição do mês anterior. Não entra nas despesas da obra."
-          : "Cada obra começa fechada. Centros irmãos, como a parceria, ficam na mesma obra. 14304, 14305, 14703 e 14704 aparecem separados. O desconto de juros contratuais entra em Venda de imóveis, nas receitas."}
-      </p>
+      ${repasse ? `<p class="pcx-ajuda">Pago neste mês, mas é a distribuição do mês anterior. Não entra nas despesas da obra.</p>` : ""}
       <div class="cc-scroll pcx-scroll" id="pc-conf-scroll">
         <table class="cc-table pcx-table">
           <colgroup>

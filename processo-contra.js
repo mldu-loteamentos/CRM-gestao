@@ -245,6 +245,8 @@ const ProcessoContraApp = {
     this.empresaId = "";
     this.credorLista = [];
     this.credorBusca = "";
+    this.credorMsg = "";
+    clearTimeout(this._credorTimer);
     this.prefNome = "";
     this.prefBusca = "";
     this.render();
@@ -327,25 +329,25 @@ const ProcessoContraApp = {
     return this.htmlTerceiro();
   },
 
+  htmlHitCredor(c) {
+    const doc = c.cpf || c.cnpj || "";
+    const on = this.parte && this.parte.tipo === "credor" && String(this.parte.id) === String(c.id);
+    return `<button type="button" class="pc-hit${on ? " is-on" : ""}" data-pc-credor="${this.esc(c.id)}">${this.esc(String(c.id || "") + " - " + (c.name || "") + (doc ? " - " + doc : ""))}</button>`;
+  },
+
+  htmlHitsCredor() {
+    if (this.credorLista && this.credorLista.length) return this.credorLista.map((c) => this.htmlHitCredor(c)).join("");
+    if (this.credorMsg) return `<p class="cj-nota">${this.esc(this.credorMsg)}</p>`;
+    return "";
+  },
+
   htmlBuscaCredor() {
-    const linhas = (this.credorLista || []).map((c) => {
-      const doc = c.cpf || c.cnpj || "";
-      const on = this.parte && this.parte.tipo === "credor" && String(this.parte.id) === String(c.id);
-      return `<button type="button" class="pc-hit${on ? " is-on" : ""}" data-pc-credor="${this.esc(c.id)}">${this.esc(String(c.id || "") + " - " + (c.name || "") + (doc ? " - " + doc : ""))}</button>`;
-    }).join("");
-    const lista = this.credorLista && this.credorLista.length
-      ? `<div class="pc-hits" id="pc-credor-hits">${linhas}</div>`
-      : (this.credorMsg ? `<p class="cj-nota">${this.esc(this.credorMsg)}</p>` : "");
     return `<div class="crm-card pc-pesq">
       <div class="crm-card-header pc-pesq-head"><h3>Pesquisar</h3></div>
-      <div class="crm-card-content">
-        <div class="pc-pesq-grid">
-          <div class="form-group" style="grid-column:1 / 4;"><label>Credor</label>
-            <input type="text" class="form-control" id="pc-credor-q" placeholder="Nome, CPF ou CNPJ" value="${this.esc(this.credorBusca)}" autocomplete="off"></div>
-          <div class="form-group" style="display:flex;align-items:flex-end;">
-            <button type="button" class="btn btn-primary" id="pc-credor-buscar" style="height:38px;width:100%;"><i data-lucide="search" style="width:14px;margin-right:6px;"></i> Pesquisar</button></div>
-        </div>
-        ${lista}
+      <div class="crm-card-content pc-credor-wrap">
+        <label class="pc-credor-rotulo" for="pc-credor-q">Credor</label>
+        <input type="text" class="form-control" id="pc-credor-q" placeholder="Digite o nome, CPF ou CNPJ" value="${this.esc(this.credorBusca)}" autocomplete="off">
+        <div id="pc-credor-hits" class="pc-hits">${this.htmlHitsCredor()}</div>
       </div>
     </div>`;
   },
@@ -493,17 +495,17 @@ const ProcessoContraApp = {
       btn.addEventListener("click", () => this.setTipo(btn.getAttribute("data-pc-tipo")));
     });
     const credQ = document.getElementById("pc-credor-q");
-    const credBtn = document.getElementById("pc-credor-buscar");
-    if (credQ) credQ.addEventListener("input", () => { this.credorBusca = credQ.value || ""; });
-    if (credQ) credQ.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); this.buscarCredor(); } });
-    if (credBtn) credBtn.addEventListener("click", () => this.buscarCredor());
-    document.querySelectorAll("[data-pc-credor]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const id = btn.getAttribute("data-pc-credor");
-        const c = (this.credorLista || []).find((x) => String(x.id) === String(id));
-        if (c) this.escolherCredor(c);
+    if (credQ) {
+      this.baseCredores().catch(() => {});
+      credQ.addEventListener("input", () => {
+        this.credorBusca = credQ.value || "";
+        this.agendarCredor();
       });
-    });
+      credQ.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); this.filtrarCredorAgora(); }
+      });
+    }
+    this.ligarHitsCredor();
     const consultar = document.getElementById("pc-consultar-proc");
     if (consultar) consultar.addEventListener("click", () => this.consultarNumero());
     const prefQ = document.getElementById("pc-pref-q");
@@ -677,51 +679,69 @@ const ProcessoContraApp = {
     return this.lerCredoresSienge();
   },
 
-  async buscarCredor() {
+  ligarHitsCredor() {
+    document.querySelectorAll("[data-pc-credor]").forEach((btn) => {
+      btn.addEventListener("mousedown", (e) => e.preventDefault());
+      btn.addEventListener("click", () => {
+        const id = btn.getAttribute("data-pc-credor");
+        const c = (this.credorLista || []).find((x) => String(x.id) === String(id));
+        if (c) this.escolherCredor(c);
+      });
+    });
+  },
+
+  pintarHitsCredor() {
+    const box = document.getElementById("pc-credor-hits");
+    if (!box) return;
+    box.innerHTML = this.htmlHitsCredor();
+    this.ligarHitsCredor();
+  },
+
+  agendarCredor() {
+    clearTimeout(this._credorTimer);
     const q = String(this.credorBusca || "").trim();
     const dig = q.replace(/\D/g, "");
-    if (q.length < 3 && dig.length < 11) {
-      this.credorMsg = "Digite ao menos 3 letras, ou o CPF/CNPJ.";
+    if (q.length < 2 && dig.length < 3) {
       this.credorLista = [];
-      this.render();
+      this.credorMsg = "";
+      this.pintarHitsCredor();
       return;
     }
-    if (typeof window.siengeFetchWithRetry !== "function") {
-      this.credorMsg = "A consulta de credores não está disponível.";
-      this.render();
+    this._credorTimer = setTimeout(() => this.filtrarCredorAgora(), 300);
+  },
+
+  async filtrarCredorAgora() {
+    clearTimeout(this._credorTimer);
+    const q = String(this.credorBusca || "").trim();
+    const dig = q.replace(/\D/g, "");
+    if (q.length < 2 && dig.length < 3) {
+      this.credorLista = [];
+      this.credorMsg = "";
+      this.pintarHitsCredor();
       return;
     }
     this._credorBuscaToken = (this._credorBuscaToken || 0) + 1;
     const token = this._credorBuscaToken;
-    const porDocumento = dig.length === 11 || dig.length === 14;
-    this.credorMsg = porDocumento || (this._baseCredores && this._baseCredores.length)
-      ? "Buscando…"
-      : "Carregando a base de credores…";
-    this.credorLista = [];
-    this.render();
+    if (!(this._baseCredores && this._baseCredores.length)) {
+      this.credorLista = [];
+      this.credorMsg = "Carregando a base de credores…";
+      this.pintarHitsCredor();
+    }
     try {
-      let lista = [];
-      if (porDocumento) {
-        const path = dig.length === 11
-          ? "/creditors?limit=15&cpf=" + encodeURIComponent(dig)
-          : "/creditors?limit=15&cnpj=" + encodeURIComponent(dig);
-        const data = await window.siengeFetchWithRetry(path, 1);
-        lista = ((data && data.results) || []).map((row) => this.normalizarCredor(row)).filter((c) => c && this.credorCombina(c, q));
-      } else {
-        const base = await this.baseCredores();
-        lista = base.filter((c) => this.credorCombina(c, q))
-          .sort((a, b) => this.fold(a.name).localeCompare(this.fold(b.name), "pt"))
-          .slice(0, 40);
-      }
+      const base = await this.baseCredores();
       if (token !== this._credorBuscaToken) return;
+      if (String(this.credorBusca || "").trim() !== q) return;
+      const lista = base.filter((c) => this.credorCombina(c, q))
+        .sort((a, b) => this.fold(a.name).localeCompare(this.fold(b.name), "pt"))
+        .slice(0, 40);
       this.credorLista = lista;
-      this.credorMsg = lista.length ? "" : (porDocumento ? "Nenhum credor com esse CPF/CNPJ." : "Nenhum credor com esse nome.");
+      this.credorMsg = lista.length ? "" : "Nenhum credor com esse nome.";
     } catch (e) {
       if (token !== this._credorBuscaToken) return;
       this.credorLista = [];
       this.credorMsg = (e && e.message) || "Não consegui pesquisar o credor.";
     }
-    this.render();
+    this.pintarHitsCredor();
   },
 
   async subirAnexos(id) {

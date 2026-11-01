@@ -45113,14 +45113,22 @@ function kmzDirectText(node, tag) {
   return "";
 }
 
+function kmzLimparNome(name) {
+  return String(name || "").replace(/\u00a0/g, " ").replace(/\.kmz$/i, "").replace(/\.kml$/i, "").trim();
+}
+
+function kmzSemAcento(name) {
+  return kmzLimparNome(name).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
 function kmzCodigoEmpreendimento(name) {
-  const s = String(name || "").trim().replace(/\.kml$/i, "");
+  const s = kmzLimparNome(name);
   const m = s.match(/^(\d{4,6})$/);
   return m ? m[1] : "";
 }
 
 function kmzEhQuadra(name) {
-  return /^poligono\s*\d+/i.test(String(name || "").trim());
+  return /^poligono\s*\d+/.test(kmzSemAcento(name));
 }
 
 function kmzEhPastaDeLotes(name) {
@@ -45154,51 +45162,67 @@ function kmzCoordsDoPlacemark(pm) {
 }
 
 function kmzCodigoNoNomeDoLote(name) {
-  const m = String(name || "").trim().match(/^(\d{4,6})\s*[-–]\s*\S+/);
+  const m = kmzLimparNome(name).match(/^(\d{4,6})\s*[-–—−‐]\s*\S+/);
   return m ? m[1] : "";
 }
 
-function kmzPareceLote(name, empId) {
-  const raw = String(name || "").trim();
+function kmzEhLote(name, empId, pastaLotes) {
+  const raw = kmzLimparNome(name);
   if (!raw || kmzEhQuadra(raw)) return false;
   if (kmzCodigoNoNomeDoLote(raw)) return true;
-  if (empId && raw.replace(/\s/g, "").indexOf(String(empId)) === 0 && /[-–]/.test(raw)) return true;
-  return /^[A-Za-z0-9]+(?:\s*[-–]\s*[A-Za-z0-9]+)+$/.test(raw);
+  if (empId && raw.replace(/\s/g, "").indexOf(String(empId)) === 0 && /[-–—−‐]/.test(raw)) return true;
+  return !!pastaLotes;
 }
 
-/** Lê a hierarquia: pasta do empreendimento, polígonos das quadras e pasta dos lotes. */
+/**
+ * Um KMZ só. Cada empreendimento é uma pasta ou um .kml (12400, 12800, 14100).
+ * Os polígonos ficam no centro. A pasta Lotes traz a unidade inteira (14100-A-01).
+ */
 function kmzLerDocumento(xmlDoc, empDoArquivo, grupos) {
-  const visitar = (node, emp, pastaLotes) => {
+  const itens = [];
+  const visitar = (node, emp, pastaLotes, container) => {
     if (!node || !node.childNodes) return;
     for (const child of node.childNodes) {
       if (!child || child.nodeType !== 1) continue;
       const tag = kmzTag(child);
       if (tag === "Folder" || tag === "Document") {
         const nome = kmzDirectText(child, "name");
-        const proxEmp = kmzCodigoEmpreendimento(nome) || emp;
-        const proxPasta = kmzEhPastaDeLotes(nome) || pastaLotes;
-        visitar(child, proxEmp, proxPasta);
+        const codigoPasta = kmzCodigoEmpreendimento(nome);
+        visitar(child, codigoPasta || emp, kmzEhPastaDeLotes(nome) || pastaLotes, codigoPasta || container);
         continue;
       }
       if (tag !== "Placemark") {
-        visitar(child, emp, pastaLotes);
+        visitar(child, emp, pastaLotes, container);
         continue;
       }
       const nome = kmzDirectText(child, "name");
       const coords = kmzCoordsDoPlacemark(child);
       if (!nome || !coords) continue;
-      const empDoNome = kmzCodigoNoNomeDoLote(nome);
-      const codigo = emp || empDoNome || empDoArquivo;
-      if (!codigo) continue;
-      if (!grupos[codigo]) grupos[codigo] = { lots: [], quadras: [] };
-      if (kmzEhQuadra(nome) || (!pastaLotes && !kmzPareceLote(nome, codigo))) {
-        grupos[codigo].quadras.push({ name: nome, coords });
-      } else {
-        grupos[codigo].lots.push({ name: nome, coords });
-      }
+      itens.push({ nome: nome, coords: coords, emp: emp, pastaLotes: pastaLotes, container: container });
     }
   };
-  if (xmlDoc && xmlDoc.documentElement) visitar(xmlDoc.documentElement, empDoArquivo || "", false);
+  if (xmlDoc && xmlDoc.documentElement) visitar(xmlDoc.documentElement, empDoArquivo || "", false, empDoArquivo || "raiz");
+
+  const codigosDoContainer = {};
+  itens.forEach((it) => {
+    const cod = it.emp || kmzCodigoNoNomeDoLote(it.nome) || empDoArquivo || "";
+    if (!cod) return;
+    if (!codigosDoContainer[it.container]) codigosDoContainer[it.container] = {};
+    codigosDoContainer[it.container][cod] = true;
+  });
+
+  itens.forEach((it) => {
+    let codigo = it.emp || kmzCodigoNoNomeDoLote(it.nome) || empDoArquivo || "";
+    if (!codigo) {
+      const mapa = codigosDoContainer[it.container] || {};
+      const chaves = Object.keys(mapa);
+      if (chaves.length === 1) codigo = chaves[0];
+    }
+    if (!codigo) return;
+    if (!grupos[codigo]) grupos[codigo] = { lots: [], quadras: [] };
+    if (kmzEhLote(it.nome, codigo, it.pastaLotes)) grupos[codigo].lots.push({ name: it.nome, coords: it.coords });
+    else grupos[codigo].quadras.push({ name: it.nome, coords: it.coords });
+  });
 }
 
 async function uploadKMZ() {
@@ -45219,30 +45243,34 @@ async function uploadKMZ() {
   try {
     const parser = new DOMParser();
     const grupos = {};
-    const nomeBaixo = String(file.name || "").toLowerCase();
-    if (nomeBaixo.endsWith(".kml")) {
-      const xmlDoc = parser.parseFromString(await file.text(), "text/xml");
-      kmzLerDocumento(xmlDoc, kmzCodigoEmpreendimento(file.name), grupos);
+    const cabeca = new Uint8Array(await file.slice(0, 4).arrayBuffer());
+    const zipado = cabeca[0] === 0x50 && cabeca[1] === 0x4b;
+    const lerXml = (xml, empArquivo) => {
+      const xmlDoc = parser.parseFromString(xml, "text/xml");
+      if (xmlDoc.getElementsByTagName("parsererror").length) return;
+      kmzLerDocumento(xmlDoc, empArquivo, grupos);
+    };
+    if (!zipado) {
+      lerXml(await file.text(), kmzCodigoEmpreendimento(file.name));
     } else {
       const zip = await JSZip.loadAsync(file);
       for (const filename of Object.keys(zip.files)) {
         if (!filename.toLowerCase().endsWith(".kml") || zip.files[filename].dir) continue;
         const kmlContent = await zip.files[filename].async("string");
-        const xmlDoc = parser.parseFromString(kmlContent, "text/xml");
-        const base = filename.split("/").pop();
-        kmzLerDocumento(xmlDoc, kmzCodigoEmpreendimento(base), grupos);
+        const base = filename.split(/[/\\]/).pop();
+        lerXml(kmlContent, kmzCodigoEmpreendimento(base) || kmzCodigoEmpreendimento(file.name));
       }
     }
 
     const codigos = Object.keys(grupos).filter((id) => grupos[id].lots.length || grupos[id].quadras.length)
       .sort((a, b) => Number(a) - Number(b));
     if (!codigos.length) {
-      throw new Error("Não encontrei empreendimento nem lote. A pasta do centro precisa ter o código (12400) e os lotes no formato 12400-A-01.");
+      throw new Error("Não encontrei empreendimento nem lote. Cada centro entra como 12400, 12800 ou 14100. Os polígonos ficam nele e a pasta Lotes traz a unidade, como 14100-A-01.");
     }
 
     const semLote = codigos.filter((id) => !grupos[id].lots.length);
     if (semLote.length === codigos.length) {
-      throw new Error("Os polígonos das quadras foram lidos, mas nenhum lote dentro da pasta (ex.: 12400-A-01).");
+      throw new Error("Os polígonos do centro foram lidos, mas a pasta Lotes não tem unidade no formato 14100-A-01.");
     }
 
     const { doc, setDoc } = window.firebaseCollections;
