@@ -45178,8 +45178,9 @@ function kmzEhLote(name, empId, pastaLotes) {
  * Um KMZ só. Cada empreendimento é uma pasta ou um .kml (12400, 12800, 14100).
  * Os polígonos ficam no centro. A pasta Lotes traz a unidade inteira (14100-A-01).
  */
-function kmzLerDocumento(xmlDoc, empDoArquivo, grupos) {
+function kmzLerDocumento(xmlDoc, empDoArquivo, grupos, stats) {
   const itens = [];
+  let seq = 0;
   const visitar = (node, emp, pastaLotes, container) => {
     if (!node || !node.childNodes) return;
     for (const child of node.childNodes) {
@@ -45188,7 +45189,11 @@ function kmzLerDocumento(xmlDoc, empDoArquivo, grupos) {
       if (tag === "Folder" || tag === "Document") {
         const nome = kmzDirectText(child, "name");
         const codigoPasta = kmzCodigoEmpreendimento(nome);
-        visitar(child, codigoPasta || emp, kmzEhPastaDeLotes(nome) || pastaLotes, codigoPasta || container);
+        const proxPasta = kmzEhPastaDeLotes(nome) || pastaLotes;
+        let proxContainer = container;
+        if (codigoPasta) proxContainer = codigoPasta;
+        else if (!proxPasta) proxContainer = container + "/" + (++seq);
+        visitar(child, codigoPasta || emp, proxPasta, proxContainer);
         continue;
       }
       if (tag !== "Placemark") {
@@ -45218,7 +45223,10 @@ function kmzLerDocumento(xmlDoc, empDoArquivo, grupos) {
       const chaves = Object.keys(mapa);
       if (chaves.length === 1) codigo = chaves[0];
     }
-    if (!codigo) return;
+    if (!codigo) {
+      if (stats && kmzEhQuadra(it.nome)) stats.soltos++;
+      return;
+    }
     if (!grupos[codigo]) grupos[codigo] = { lots: [], quadras: [] };
     if (kmzEhLote(it.nome, codigo, it.pastaLotes)) grupos[codigo].lots.push({ name: it.nome, coords: it.coords });
     else grupos[codigo].quadras.push({ name: it.nome, coords: it.coords });
@@ -45243,12 +45251,13 @@ async function uploadKMZ() {
   try {
     const parser = new DOMParser();
     const grupos = {};
+    const stats = { soltos: 0 };
     const cabeca = new Uint8Array(await file.slice(0, 4).arrayBuffer());
     const zipado = cabeca[0] === 0x50 && cabeca[1] === 0x4b;
     const lerXml = (xml, empArquivo) => {
       const xmlDoc = parser.parseFromString(xml, "text/xml");
       if (xmlDoc.getElementsByTagName("parsererror").length) return;
-      kmzLerDocumento(xmlDoc, empArquivo, grupos);
+      kmzLerDocumento(xmlDoc, empArquivo, grupos, stats);
     };
     if (!zipado) {
       lerXml(await file.text(), kmzCodigoEmpreendimento(file.name));
@@ -45265,7 +45274,10 @@ async function uploadKMZ() {
     const codigos = Object.keys(grupos).filter((id) => grupos[id].lots.length || grupos[id].quadras.length)
       .sort((a, b) => Number(a) - Number(b));
     if (!codigos.length) {
-      throw new Error("Não encontrei empreendimento nem lote. Cada centro entra como 12400, 12800 ou 14100. Os polígonos ficam nele e a pasta Lotes traz a unidade, como 14100-A-01.");
+      const avisoSolto = stats.soltos
+        ? " Li " + stats.soltos + " polígonos soltos, sem pasta de centro e sem pasta Lotes."
+        : "";
+      throw new Error("Não encontrei empreendimento nem lote." + avisoSolto + " Salve o Meus lugares do Google Earth: cada centro é 12400, 12800 ou 14100, os polígonos ficam nele e a pasta Lotes traz a unidade, como 14100-A-01.");
     }
 
     const semLote = codigos.filter((id) => !grupos[id].lots.length);
