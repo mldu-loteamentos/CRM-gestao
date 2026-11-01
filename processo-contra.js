@@ -582,6 +582,101 @@ const ProcessoContraApp = {
     this.render();
   },
 
+  normalizarCredor(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    let src = raw;
+    if (typeof raw.raw_data === "string") {
+      try { src = Object.assign({}, JSON.parse(raw.raw_data), raw); } catch (e) {}
+    } else if (raw.raw_data && typeof raw.raw_data === "object") {
+      src = Object.assign({}, raw.raw_data, raw);
+    }
+    const id = src.id != null ? src.id : (src.creditorId != null ? src.creditorId : "");
+    const name = String(src.name || src.nome || src.creditorName || "").trim();
+    if (id === "" && !name) return null;
+    const doc = String(src.cpfCnpj || src.document || "").trim();
+    const docDig = doc.replace(/\D/g, "");
+    return {
+      id: String(id),
+      name: name,
+      fantasia: String(src.fantasyName || src.tradeName || src.nomeFantasia || "").trim(),
+      cpf: String(src.cpf || (docDig.length === 11 ? doc : "")).trim(),
+      cnpj: String(src.cnpj || (docDig.length === 14 ? doc : "")).trim()
+    };
+  },
+
+  credorCombina(c, q) {
+    const texto = this.fold(q).trim();
+    const dig = String(q || "").replace(/\D/g, "");
+    const termos = texto.split(/\s+/).filter(Boolean);
+    const nome = this.fold([c.name, c.fantasia].filter(Boolean).join(" "));
+    const doc = String(c.cpf || "").replace(/\D/g, "") + String(c.cnpj || "").replace(/\D/g, "");
+    const nomeOk = termos.length && termos.every((t) => nome.indexOf(t) >= 0 || String(c.id) === t);
+    const docOk = dig.length >= 3 && doc.indexOf(dig) >= 0;
+    return nomeOk || docOk;
+  },
+
+  async lerCredoresSienge() {
+    if (typeof window.siengeFetchWithRetry !== "function") return [];
+    const itens = [];
+    const vistos = new Set();
+    const limit = 200;
+    let offset = 0;
+    for (let page = 0; page < 50; page++) {
+      const res = await window.siengeFetchWithRetry("/creditors?limit=" + limit + "&offset=" + offset, 1);
+      const lote = (res && (res.results || res.resultSet || res.data)) || [];
+      if (!lote.length) break;
+      lote.forEach((row) => {
+        const c = this.normalizarCredor(row);
+        if (!c || !c.id || vistos.has(c.id)) return;
+        vistos.add(c.id);
+        itens.push(c);
+      });
+      if (lote.length < limit) break;
+      offset += limit;
+    }
+    return itens;
+  },
+
+  async lerCredoresFirebase() {
+    const fc = this.fb();
+    if (!fc) return [];
+    const itens = [];
+    const vistos = new Set();
+    for (let i = 0; i < ["sienge_creditors", "creditors"].length; i++) {
+      const nome = ["sienge_creditors", "creditors"][i];
+      try {
+        const snap = await fc.getDocs(fc.collection(window.firebaseDb, nome));
+        if (snap && typeof snap.forEach === "function") {
+          snap.forEach((d) => {
+            const data = (d && d.data && d.data()) || {};
+            const c = this.normalizarCredor(Object.assign({ id: d.id }, data));
+            if (!c || !c.id || c.id.charAt(0) === "_" || !c.name || vistos.has(c.id)) return;
+            vistos.add(c.id);
+            itens.push(c);
+          });
+        }
+        if (itens.length) break;
+      } catch (e) {}
+    }
+    return itens;
+  },
+
+  baseCredores() {
+    if (this._baseCredores && this._baseCredores.length) return Promise.resolve(this._baseCredores);
+    if (this._baseCredoresJob) return this._baseCredoresJob;
+    this._baseCredoresJob = this.lerBaseCredores().then((lista) => {
+      this._baseCredores = lista || [];
+      return this._baseCredores;
+    }).finally(() => { this._baseCredoresJob = null; });
+    return this._baseCredoresJob;
+  },
+
+  async lerBaseCredores() {
+    const gravados = await this.lerCredoresFirebase();
+    if (gravados.length) return gravados;
+    return this.lerCredoresSienge();
+  },
+
   async buscarCredor() {
     const q = String(this.credorBusca || "").trim();
     const dig = q.replace(/\D/g, "");
@@ -596,16 +691,33 @@ const ProcessoContraApp = {
       this.render();
       return;
     }
-    this.credorMsg = "Buscando…";
+    this._credorBuscaToken = (this._credorBuscaToken || 0) + 1;
+    const token = this._credorBuscaToken;
+    const porDocumento = dig.length === 11 || dig.length === 14;
+    this.credorMsg = porDocumento || (this._baseCredores && this._baseCredores.length)
+      ? "Buscando…"
+      : "Carregando a base de credores…";
+    this.credorLista = [];
     this.render();
-    let path = "/creditors?limit=15&name=" + encodeURIComponent(q);
-    if (dig.length === 11) path = "/creditors?limit=15&cpf=" + encodeURIComponent(dig);
-    else if (dig.length === 14) path = "/creditors?limit=15&cnpj=" + encodeURIComponent(dig);
     try {
-      const data = await window.siengeFetchWithRetry(path, 1);
-      this.credorLista = (data && data.results) || [];
-      this.credorMsg = this.credorLista.length ? "" : "Nenhum credor com esse nome.";
+      let lista = [];
+      if (porDocumento) {
+        const path = dig.length === 11
+          ? "/creditors?limit=15&cpf=" + encodeURIComponent(dig)
+          : "/creditors?limit=15&cnpj=" + encodeURIComponent(dig);
+        const data = await window.siengeFetchWithRetry(path, 1);
+        lista = ((data && data.results) || []).map((row) => this.normalizarCredor(row)).filter((c) => c && this.credorCombina(c, q));
+      } else {
+        const base = await this.baseCredores();
+        lista = base.filter((c) => this.credorCombina(c, q))
+          .sort((a, b) => this.fold(a.name).localeCompare(this.fold(b.name), "pt"))
+          .slice(0, 40);
+      }
+      if (token !== this._credorBuscaToken) return;
+      this.credorLista = lista;
+      this.credorMsg = lista.length ? "" : (porDocumento ? "Nenhum credor com esse CPF/CNPJ." : "Nenhum credor com esse nome.");
     } catch (e) {
+      if (token !== this._credorBuscaToken) return;
       this.credorLista = [];
       this.credorMsg = (e && e.message) || "Não consegui pesquisar o credor.";
     }

@@ -513,11 +513,11 @@ const ConfigUsersApp = {
       name: "Comercial", icon: "store", key: "mod_comercial",
       submodules: [
         { name: "Dashboard Comercial", key: "sub_com_dash", actions: [{ id: "dashboard", label: "Dashboard Comercial", permBase: "sub_com_geral_dashboard" }] },
-        { name: "Posição de estoque", key: "sub_com_estoque", actions: [{ id: "estoque", label: "Posição de estoque", permBase: "sub_com_geral_estoque" }] },
         { name: "Assistente de Anexos", key: "sub_com_anexos", actions: [{ id: "assistente_anexos", label: "Assistente de Anexos", permBase: "sub_com_geral_assistente_anexos" }] },
         { name: "Condições de Pagamento", key: "sub_com_condicoes", actions: [{ id: "condicoes_pagamento", label: "Condições de Pagamento", permBase: "sub_com_geral_condicoes_pagamento" }] },
-        { name: "Tabelas vigentes", key: "sub_com_tabelas", actions: [{ id: "tabelas_vigentes", label: "Tabelas vigentes", permBase: "sub_com_geral_tabelas_vigentes" }] },
-        { name: "Controle de comissão", key: "sub_com_comissao", actions: [{ id: "controle_comissao", label: "Controle de comissão", permBase: "sub_com_geral_controle_comissao" }] }
+        { name: "Controle de comissão", key: "sub_com_comissao", actions: [{ id: "controle_comissao", label: "Controle de comissão", permBase: "sub_com_geral_controle_comissao" }] },
+        { name: "Posição de estoque", key: "sub_com_estoque", actions: [{ id: "estoque", label: "Posição de estoque", permBase: "sub_com_geral_estoque" }] },
+        { name: "Tabelas vigentes", key: "sub_com_tabelas", actions: [{ id: "tabelas_vigentes", label: "Tabelas vigentes", permBase: "sub_com_geral_tabelas_vigentes" }] }
       ]
     },
     {

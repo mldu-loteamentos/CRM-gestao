@@ -16,6 +16,7 @@ const DocAssinaturaApp = {
   sortDir: "desc",
   carregando: false,
   aviso: "",
+  mostrarFinalizados: false,
 
   esc(s) {
     return String(s == null ? "" : s)
@@ -258,6 +259,11 @@ const DocAssinaturaApp = {
     this.pintar();
   },
 
+  setFinalizados(on) {
+    this.mostrarFinalizados = !!on;
+    this.pintar();
+  },
+
   toggleSort(key) {
     if (this.sortKey === key) this.sortDir = this.sortDir === "asc" ? "desc" : "asc";
     else {
@@ -269,7 +275,7 @@ const DocAssinaturaApp = {
 
   visiveis() {
     return this.itens.filter((row) => {
-      if (row && row.status === "lancado") return false;
+      if (row && row.status === "lancado" && !this.mostrarFinalizados) return false;
       if (this.tipo && row.tipo !== this.tipo) return false;
       if (this.vista === "meus" && !this.mesmoUsuario(row)) return false;
       return true;
@@ -328,15 +334,68 @@ const DocAssinaturaApp = {
     return achou;
   },
 
+  async tituloBaixadoNoSienge(row) {
+    if (!row || row.tipo !== "distrato") return false;
+    const billId = String(row.titulo || "").replace(/\D/g, "");
+    if (!billId || typeof window.siengeFetchWithRetry !== "function") return false;
+    this._baixaDistrato = this._baixaDistrato || {};
+    if (Object.prototype.hasOwnProperty.call(this._baixaDistrato, billId)) return this._baixaDistrato[billId];
+    let achou = false;
+    try {
+      let bill = null;
+      try {
+        bill = await window.siengeFetchWithRetry("/accounts-receivable/receivable-bills/" + encodeURIComponent(billId), 1);
+      } catch (e) {
+        const status = Number(e && e.status) || 0;
+        const msg = String((e && e.message) || e || "");
+        if (status === 404 || /\b404\b/.test(msg)) {
+          this._baixaDistrato[billId] = false;
+          return false;
+        }
+        throw e;
+      }
+      if (bill && typeof bill === "object") {
+        const sit = String(bill.status || bill.situation || "").toUpperCase();
+        const cancel = bill.cancellationDate || bill.revokedDate || bill.revokedBillReceivableDate || bill.cancelDate;
+        if ((bill.active === false && !bill.payOffDate && !bill.payoffDate) || sit === "CANCELED" || sit === "DISTRATO" || cancel) achou = true;
+        if (!achou) {
+          const res = await window.siengeFetchWithRetry("/accounts-receivable/receivable-bills/" + encodeURIComponent(billId) + "/installments?limit=200", 1);
+          const inst = (res && res.results) || (Array.isArray(res) ? res : []);
+          let aberto = 0;
+          let baixa = false;
+          inst.forEach((p) => {
+            aberto += Number(p && (p.currentBalance != null ? p.currentBalance : p.balanceDue)) || 0;
+            ((p && p.receipts) || []).forEach((rc) => {
+              const off = typeof window.isWriteOffReceipt === "function"
+                ? window.isWriteOffReceipt(rc)
+                : /distrat|cancel/.test(String((rc && (rc.type || rc.receiptType || "")) || "").toLowerCase());
+              if (off) baixa = true;
+            });
+          });
+          if (baixa && aberto <= 0.009) achou = true;
+        }
+        if (!achou && bill.customerId) {
+          const res = await window.siengeFetchWithRetry("/sales-contracts?customerId=" + encodeURIComponent(bill.customerId) + "&situation=3&limit=200", 1);
+          const lista = (res && res.results) || [];
+          achou = lista.some((c) => String(c.receivableBillId || "").replace(/\D/g, "") === billId);
+        }
+      }
+    } catch (e) {}
+    this._baixaDistrato[billId] = achou;
+    return achou;
+  },
+
   async marcarLancado(row) {
     if (!row || row.status === "lancado") return;
     row.status = "lancado";
+    row.lancadoEm = new Date().toISOString();
     const id = String(row.id || "");
-    this.gravarLocal(this.lerLocal().map((x) => (String(x.id) === id ? Object.assign({}, x, { status: "lancado" }) : x)));
+    const patch = { status: "lancado", lancadoEm: row.lancadoEm };
+    this.gravarLocal(this.lerLocal().map((x) => (String(x.id) === id ? Object.assign({}, x, patch) : x)));
     const fx = window.firebaseCollections;
     const db = window.firebaseDb;
     if (!fx || !db || !fx.updateDoc || !fx.doc || id.indexOf("local-") === 0) return;
-    try { await fx.updateDoc(fx.doc(db, this.COL, id), { status: "lancado" }); } catch (e) {}
+    try { await fx.updateDoc(fx.doc(db, this.COL, id), patch); } catch (e) {}
   },
 
   async reconciliarDistratos() {
@@ -345,7 +404,10 @@ const DocAssinaturaApp = {
     this._reconciliando = (async () => {
       for (let i = 0; i < pendentes.length; i++) {
         let gravado = false;
-        try { gravado = await this.temDistratoGravado(pendentes[i]); } catch (e) { gravado = false; }
+        try { gravado = await this.tituloBaixadoNoSienge(pendentes[i]); } catch (e) { gravado = false; }
+        if (!gravado) {
+          try { gravado = await this.temDistratoGravado(pendentes[i]); } catch (e) { gravado = false; }
+        }
         if (gravado) await this.marcarLancado(pendentes[i]);
       }
       if (document.getElementById("docs-ass-body")) this.pintar();
@@ -418,7 +480,7 @@ const DocAssinaturaApp = {
             <td>${this.esc(r.titulo || "—")}</td>
             <td>${this.esc(r.unidade || "—")}</td>
             <td>${this.esc(r.userName || "—")}${this.mesmoUsuario(r) ? ` <span class="docs-voce">você</span>` : ""}</td>
-            <td><span class="docs-sit">Aguardando</span></td>
+            <td><span class="docs-sit${r.status === "lancado" ? " is-feito" : ""}">${r.status === "lancado" ? "Lançado no Sienge" : "Aguardando"}</span></td>
             <td class="docs-acoes"><button type="button" class="tvig-ico" title="${tem ? "Consultar documento" : "PDF não salvo para consulta"}" style="${tem ? "" : "opacity:.35"}" onclick="DocAssinaturaApp.consultar('${chave}')"><i data-lucide="paperclip" style="width:15px;height:15px;"></i></button><button type="button" class="tvig-ico is-danger" title="Remover" onclick="DocAssinaturaApp.remover('${chave}')"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button></td>
           </tr>`;
     };
@@ -447,9 +509,16 @@ const DocAssinaturaApp = {
       ${aviso}
       <div class="cc-toolbar">
         ${tabs}
-        <label class="docs-filtro">Documento
-          <select class="form-control" onchange="DocAssinaturaApp.setTipo(this.value)">${opts}</select>
-        </label>
+        <div class="cc-toolbar-actions">
+          <label class="moura-switch">
+            <input type="checkbox" ${this.mostrarFinalizados ? "checked" : ""} onchange="DocAssinaturaApp.setFinalizados(this.checked)" aria-label="Mostrar finalizados">
+            <span class="moura-switch-track" aria-hidden="true"></span>
+            <span class="moura-switch-text">Mostrar finalizados</span>
+          </label>
+          <label class="docs-filtro">Documento
+            <select class="form-control" onchange="DocAssinaturaApp.setTipo(this.value)">${opts}</select>
+          </label>
+        </div>
       </div>
       ${tabela}`;
     if (window.lucide && lucide.createIcons) lucide.createIcons();

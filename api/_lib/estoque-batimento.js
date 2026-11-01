@@ -47,12 +47,31 @@ const CONCURRENCY = 3;
 const BATIMENTO_PAUSED = process.env.BATIMENTO_PAUSED === "1";
 const DELTA_DAYS = 5;
 
+function flag(req, key) {
+  const from = req.query && req.query[key];
+  if (from != null && String(from) !== "") return String(Array.isArray(from) ? from[0] : from);
+  const raw = String((req && req.url) || "");
+  const m = raw.match(new RegExp("[?&]" + key + "=([^&]*)"));
+  return m ? decodeURIComponent(m[1]) : "";
+}
+
 function authorized(req) {
   const secret = process.env.CRON_SECRET || process.env.WARMUP_SECRET;
   if (!secret) return true;
-  const auth = String(req.headers.authorization || "");
-  const q = req.query && (req.query.secret || req.query.token);
-  return auth === `Bearer ${secret}` || String(q || "") === secret;
+  const auth = String((req.headers && req.headers.authorization) || "");
+  const q = flag(req, "secret") || flag(req, "token");
+  return auth === `Bearer ${secret}` || q === secret;
+}
+
+/** A tela e o fechamento da fila pedem o batimento sem o segredo do cron. Só vale por 30 minutos depois do pedido. */
+async function pedidoRecente() {
+  const snap = await getDoc(doc(db, "sienge_defaulters_history", todayIsoSP()));
+  if (!snap.exists()) return false;
+  const data = snap.data() || {};
+  const pronta = Number(data.chunks) > 0 && !!(data.paidMap || data.warmupDone || data.atFull || data.timestampStr);
+  if (!pronta) return false;
+  const at = Date.parse(data.batimentoPedidoEm || "");
+  return Number.isFinite(at) && Date.now() - at < 30 * 60 * 1000;
 }
 
 async function siengeFetch(url, retries = 4) {
@@ -291,10 +310,18 @@ function continuarBatimento(req) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 2500);
   const secret = process.env.CRON_SECRET || process.env.WARMUP_SECRET || "";
-  fetch(`${originFromReq(req)}/api/estoque-batimento`, {
+  fetch(`${originFromReq(req)}/api/estoque-batimento?cont=1`, {
     headers: secret ? { Authorization: `Bearer ${secret}` } : {},
     signal: ctrl.signal
   }).catch(() => {}).finally(() => clearTimeout(timer));
+}
+
+function segueSozinho(req) {
+  return flag(req, "local") !== "1";
+}
+
+function semVazio(value) {
+  return JSON.parse(JSON.stringify(value == null ? null : value));
 }
 
 async function saveCc(ccId, allUnits) {
@@ -302,14 +329,14 @@ async function saveCc(ccId, allUnits) {
   const list = allUnits.filter((u) => String(u.enterpriseId) === cc);
   const empName = (list[0] && list[0].enterpriseName) || "";
   const chunks = chunkBySize(list);
-  await Promise.all(chunks.map((units, n) => setDoc(doc(db, FB_COL, `cc_${cc}_${n}`), {
+  await Promise.all(chunks.map((units, n) => setDoc(doc(db, FB_COL, `cc_${cc}_${n}`), semVazio({
     enterpriseId: cc,
     enterpriseName: empName,
     chunk: n,
     units,
     updatedAt: new Date().toISOString(),
     date: todayIsoSP()
-  })));
+  }))));
   const stale = [];
   for (let n = chunks.length; n < chunks.length + 4; n++) {
     stale.push(deleteDoc(doc(db, FB_COL, `cc_${cc}_${n}`)).catch(() => {}));
@@ -338,16 +365,19 @@ async function saveCaixaPosicao(units, today) {
   return pos.length;
 }
 
-module.exports = async function handler(req, res) {
+async function handler(req, res) {
   if (req.method === "OPTIONS") {
     res.setHeader("Access-Control-Allow-Origin", "*");
     return res.status(204).end();
   }
   if (!authorized(req)) {
-    return res.status(401).json({ error: "unauthorized" });
+    const querPedido = flag(req, "pedido") === "1";
+    if (!querPedido || !(await pedidoRecente())) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
   }
 
-  const force = !!(req.query && (req.query.force === "1" || req.query.force === "true"));
+  const force = flag(req, "force") === "1" || flag(req, "force") === "true";
   if (!force && BATIMENTO_PAUSED) {
     return res.status(200).json({
       skipped: true,
@@ -392,12 +422,26 @@ module.exports = async function handler(req, res) {
         message: "Batimento do dia já concluído."
       });
     }
+    const continuacao = flag(req, "cont") === "1";
+    if (!force && !continuacao && Number(state.passes) > 0) {
+      const touched = Date.parse(state.touchedAt || "");
+      if (Number.isFinite(touched) && Date.now() - touched < 90000) {
+        return res.status(200).json({
+          done: false,
+          running: true,
+          date: today,
+          pass: state.passes,
+          message: "O batimento deste dia já está em andamento."
+        });
+      }
+    }
+    state.touchedAt = new Date().toISOString();
     state.passes = (Number(state.passes) || 0) + 1;
+    await setDoc(doc(db, FB_COL, STATE_ID), { ...state, done: false });
 
     let units = await loadUnits();
     if (!units.length) {
-      await setDoc(doc(db, FB_COL, STATE_ID), { ...state, done: true, mode: "empty", message: "sem unidades" });
-      return res.status(200).json({ done: true, date: today, message: "Sem estoque no Firebase." });
+      return res.status(200).json({ done: false, date: today, message: "Sem estoque no Firebase. A posição não foi fechada para o dia poder tentar de novo." });
     }
 
     if (!Array.isArray(state.contractsSeen)) state.contractsSeen = [];
@@ -433,7 +477,7 @@ module.exports = async function handler(req, res) {
       state.contractsLeft = contractsLeft;
       await setDoc(doc(db, FB_COL, STATE_ID), { ...state, done: false });
       if (contractsLeft > 0 && state.passes < 800) {
-        continuarBatimento(req);
+        if (segueSozinho(req)) continuarBatimento(req);
         return res.status(200).json({
           done: false,
           phase: "contratos",
@@ -484,6 +528,7 @@ module.exports = async function handler(req, res) {
         batimentoDone: !!done,
         batimentoMode: mode,
         censusLeft: state.censusLeft || 0,
+        unitsSavedDate: done ? today : (state.unitsSavedDate || null),
         snapshotAt: new Date().toISOString()
       }, { merge: true });
       if (!done && state.passes % 20 !== 0) return null;
@@ -539,7 +584,7 @@ module.exports = async function handler(req, res) {
     const nextUnits = [...byId.values()];
     const n = await persistSnapshot(nextUnits, state.done);
 
-    if (!state.done && state.passes < 800) continuarBatimento(req);
+    if (!state.done && state.passes < 800 && segueSozinho(req)) continuarBatimento(req);
     return res.status(200).json({
       done: !!state.done,
       date: today,
@@ -563,4 +608,48 @@ module.exports = async function handler(req, res) {
     console.error("[estoque-batimento]", error);
     return res.status(500).json({ error: error.message, log });
   }
-};
+}
+
+function chamarLocal(query) {
+  return new Promise((resolve) => {
+    const qs = Object.keys(query).map((k) => k + "=" + encodeURIComponent(query[k])).join("&");
+    const req = { method: "GET", headers: {}, query, url: "/api/estoque-batimento?" + qs };
+    const res = {
+      status() { return this; },
+      setHeader() {},
+      json(body) { resolve(body); },
+      end() { resolve({ ended: true }); }
+    };
+    Promise.resolve(handler(req, res)).catch((e) => resolve({ error: String((e && e.message) || e) }));
+  });
+}
+
+/** Roda o batimento neste processo, uma passada atrás da outra, até fechar o dia. */
+async function runDaily(maxPasses) {
+  const limit = maxPasses || 80;
+  const logs = [];
+  for (let n = 0; n < limit; n++) {
+    const body = await chamarLocal({
+      local: "1",
+      cont: n ? "1" : "0",
+      force: n === 0 && process.env.ESTOQUE_FORCE === "1" ? "1" : "0"
+    });
+    logs.push(body);
+    console.log("[estoque-batimento]", JSON.stringify({
+      pass: n + 1,
+      done: body && body.done,
+      phase: body && body.phase,
+      mode: body && body.mode,
+      message: body && body.message,
+      censusLeft: body && body.censusLeft,
+      fichaLeft: body && body.fichaLeft,
+      waiting: body && body.waiting,
+      error: body && body.error
+    }));
+    if (!body || body.done || body.waiting || body.skipped || body.running || body.error) break;
+  }
+  return logs;
+}
+
+handler.runDaily = runDaily;
+module.exports = handler;

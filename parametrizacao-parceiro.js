@@ -3334,20 +3334,21 @@ const ParametrizacaoParceiroApp = {
   obrasTabHtml(p, obra, sociedade, inAccount) {
     const centros = obra ? this.obraDetailHtml(p, obra, inAccount, { semChips: true }) : "";
     return `
-      <div class="crm-card" style="padding:16px;overflow:hidden;">
-        <h3 style="margin:0 0 8px;font-size:0.95rem;color:var(--color-primary);">Obras deste terrenista</h3>
-        ${this.obraChipsHtml(p, sociedade)}
-        <div style="display:grid;grid-template-columns:${sociedade ? "minmax(0,1fr) 148px" : "minmax(0,1fr) 220px 148px"};gap:8px 10px;align-items:end;">
-          <label style="font-size:0.72rem;font-weight:700;color:#475569;">Adicionar obra (C.C.)
-            <input id="pp-add-obra-cc" inputmode="numeric" maxlength="5" oninput="ParametrizacaoParceiroApp.aoDigitarCentroObra(this)" style="width:100%;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;box-sizing:border-box;display:block;margin-top:4px;">
-          </label>
-          ${sociedade ? "" : `<label style="font-size:0.72rem;font-weight:700;color:#475569;">Rateio do parceiro desta obra (%)
-            <input id="pp-add-obra-share" type="number" min="0" max="100" step="0.01" value="" placeholder="Vem do centro de custo" style="width:100%;height:34px;border:1px solid #e2e8f0;border-radius:6px;padding:0 10px;box-sizing:border-box;display:block;margin-top:4px;background:#f8fafc;">
-          </label>`}
-          <button class="btn btn-primary" onclick="ParametrizacaoParceiroApp.addObraFromForm()" style="height:34px;width:148px;font-size:0.78rem;white-space:nowrap;">Incluir obra</button>
-          ${sociedade || p.obras.length <= 1 ? "" : `<button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.removeObra('${this.esc(obra && obra.code)}')" style="grid-column:3;height:34px;width:148px;font-size:0.78rem;color:#dc2626;">Remover obra</button>`}
+      <div class="crm-card pp-obras">
+        <div class="pp-obras-intro">
+          <h3>Obras deste terrenista</h3>
+          <p>Escolha a obra e marque os centros que entram na prestação de contas.</p>
         </div>
-        ${sociedade && p.obras.length > 1 ? `<div style="margin-top:10px;"><button class="btn btn-secondary" onclick="ParametrizacaoParceiroApp.removeObra('${this.esc(obra && obra.code)}')" style="height:34px;font-size:0.78rem;color:#dc2626;">Remover obra</button></div>` : ""}
+        ${this.obraChipsHtml(p, sociedade)}
+        <div class="pp-obras-nova">
+          <label>Código da obra
+            <input id="pp-add-obra-cc" inputmode="numeric" maxlength="5" placeholder="133" oninput="ParametrizacaoParceiroApp.aoDigitarCentroObra(this)">
+          </label>
+          ${sociedade ? "" : `<label>Rateio do parceiro
+            <input id="pp-add-obra-share" type="number" min="0" max="100" step="0.01" value="" placeholder="Do centro" title="Se ficar vazio, o percentual vem do centro de custo.">
+          </label>`}
+          <button type="button" class="btn btn-primary" onclick="ParametrizacaoParceiroApp.addObraFromForm()">Incluir obra</button>
+        </div>
       </div>
       ${centros}
     `;
@@ -3382,6 +3383,9 @@ const ParametrizacaoParceiroApp = {
           <span class="ppcc-kpi-rot">Rateio da obra (%)</span>
           <input class="ppcc-kpi-input" type="number" min="0" max="100" step="0.01" value="${obra.defaultPartnerShare}" onchange="ParametrizacaoParceiroApp.updateObraShare(this.value)">
         </label>`;
+    const remover = (p.obras || []).length > 1
+      ? `<button type="button" class="btn btn-secondary pp-obras-remover" onclick="ParametrizacaoParceiroApp.removeObra('${this.esc(obra.code)}')">Remover obra</button>`
+      : "";
     const linhas = centros.map(cc => `<tr>
         <td class="ppcc-id">${this.esc(cc.id)}</td>
         <td class="ppcc-nome" title="${this.esc(cc.name)}">${this.esc(cc.name)}</td>
@@ -3404,14 +3408,17 @@ const ParametrizacaoParceiroApp = {
         <div class="ppcc-head">
           <div>
             <div class="ppcc-titulo">Obra ${this.esc(obra.code)}</div>
-            <div class="ppcc-sub">${sociedade ? "Os centros entram na conta da SPE, sem rateio." : (mista ? "Marque o centro dos sócios empreendedores e o do parceiro terrenista. Os dois entram na prestação." : "Centros de custo que entram na prestação de contas desta obra.")}</div>
+            <div class="ppcc-sub">${sociedade ? "Os centros entram na conta da SPE, sem rateio." : (mista ? "Marque o centro dos sócios e o do terrenista. Os dois entram na prestação." : "Centros que entram na prestação desta obra.")}</div>
           </div>
-          <div class="ppcc-kpis">
-            <div class="ppcc-kpi">
-              <span class="ppcc-kpi-rot">Entram na conta</span>
-              <span class="ppcc-kpi-val"><span id="ppcc-qtd">${inAccount.length}</span><small> de ${total}</small></span>
+          <div class="ppcc-lado">
+            <div class="ppcc-kpis">
+              <div class="ppcc-kpi">
+                <span class="ppcc-kpi-rot">Entram na conta</span>
+                <span class="ppcc-kpi-val"><span id="ppcc-qtd">${inAccount.length}</span><small> de ${total}</small></span>
+              </div>
+              ${rateio}
             </div>
-            ${rateio}
+            ${remover}
           </div>
         </div>
         <div class="cc-toolbar ppcc-toolbar">

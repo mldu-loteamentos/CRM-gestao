@@ -106,10 +106,10 @@ const SocietarioApp = {
     return this.companies().filter((c) => this.flagEmpresa(c, "holding_interna") || this.flagEmpresa(c, "spe_socios"));
   },
 
-  /** Empresa do organograma: gerida pelo grupo ou Gestão Ellenco no cadastro. */
+  /** Empresa do organograma: gerida pelo grupo, Gestão Ellenco ou holding interna. */
   empresasDaEstrutura() {
     if (!this.cadastroPronto()) return [];
-    return this.companies().filter((c) => this.flagEmpresa(c, "gerida_pelo_grupo") || this.flagEmpresa(c, "gestao_elenco"));
+    return this.companies().filter((c) => this.flagEmpresa(c, "gerida_pelo_grupo") || this.flagEmpresa(c, "gestao_elenco") || this.flagEmpresa(c, "holding_interna"));
   },
 
   tokensNome(s) {
@@ -1499,7 +1499,7 @@ const SocietarioApp = {
         <p class="soc-link-help">Escolha duas empresas do cadastro, pelo nome completo, em ordem de id. Pessoa física não entra aqui. A holding liga em várias empresas, inclusive nas que a Moura Leite já participa. A linha sai da bolinha que você puxou. O mesmo par não se repete. <span id="soc-link-contas-nota">${this.esc(notaContas)}</span></p>
         <div class="soc-link-grid">
           <div style="${this.lbl}">De (sócio / holding)
-            ${this.hint("Quem possui a participação. Holding interna e SPE sócio entram aqui, mesmo sem caixa no organograma.")}
+            ${this.hint("Quem possui a participação. Holding interna e SPE sócio entram aqui.")}
             <div id="soc-lnk-from-box"></div>
           </div>
           <div style="${this.lbl}">Para (participada)

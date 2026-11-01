@@ -4,6 +4,7 @@ const rotas = {
   "sienge-proxy": require("./_lib/sienge-proxy"),
   "sienge-builder-proxy": require("./_lib/sienge-builder-proxy"),
   "sync-customers": require("./_lib/sync-customers"),
+  "sync-creditors": require("./_lib/sync-creditors"),
   "cvcrm-proxy": require("./_lib/cvcrm-proxy"),
   "scod-proxy": require("./_lib/scod-proxy"),
   "clicksign": require("./_lib/clicksign"),
@@ -14,6 +15,7 @@ const rotas = {
   "participacoes": require("./_lib/participacoes"),
   "morning-warmup": require("./_lib/morning-warmup"),
   "caucao-batimento": require("./_lib/morning-warmup"),
+  "distrato-followup": require("./_lib/morning-warmup"),
   "estoque-batimento": require("./_lib/estoque-batimento")
 };
 

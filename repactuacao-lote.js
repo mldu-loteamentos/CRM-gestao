@@ -448,14 +448,14 @@ const RepactuacaoLoteApp = {
     }
     return `
       <div id="repac-indexer-preview" class="search-filter-panel" style="margin-bottom:16px;border:1px solid #d1fae5;background:linear-gradient(180deg,#f0fdf4 0%,#fff 42%);">
-        <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px;margin-bottom:${naPrevia ? "16px" : "0"};">
-          <div class="form-group" style="margin:0;min-width:200px;">
+        <div class="repac-mes-linha" style="margin-bottom:${naPrevia ? "16px" : "0"};">
+          <div class="form-group repac-mes-campo">
             <label for="repac-adjust-month" style="font-size:0.75rem;font-weight:700;color:#166534;text-transform:uppercase;letter-spacing:0.03em;">Mês da repactuação</label>
             <input type="month" id="repac-adjust-month" class="form-control" value="${this.esc(ym || "")}"
               onchange="RepactuacaoLoteApp.setAdjustMonth(this.value)"
               style="max-width:200px;font-weight:600;">
           </div>
-          <div style="flex:1;min-width:180px;">
+          <div class="repac-mes-rotulo">
             <div style="font-size:0.95rem;font-weight:800;color:#14532d;">${this.esc(this.monthLabel(ym))}</div>
             <div style="font-size:0.78rem;color:#64748b;">
               1º dia útil <strong style="color:#334155;">${this.esc(this.fmtDate(fbd))}</strong>

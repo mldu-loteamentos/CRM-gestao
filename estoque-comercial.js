@@ -957,6 +957,60 @@ const EstoqueComercialApp = {
     this.persistQuitacaoIfDirty();
     this.updateMeta();
     this.renderTable();
+    this.pedirBatimentoDiario().catch(() => {});
+  },
+
+  /** A posição do dia roda no servidor. Se ainda não fechou, pede o batimento e acompanha a gravação. */
+  async pedirBatimentoDiario() {
+    const today = this.todayStr();
+    if (this._pedidoBatimento) return;
+    if (this.state.batimentoDate === today && this.state.batimentoDone) return;
+    if (!this.fbReady()) return;
+    this._pedidoBatimento = true;
+    try {
+      const { doc, setDoc } = window.firebaseCollections;
+      await setDoc(doc(window.firebaseDb, "sienge_defaulters_history", today), {
+        batimentoPedidoEm: new Date().toISOString()
+      }, { merge: true });
+      fetch("/api/estoque-batimento?pedido=1", { method: "GET", keepalive: true }).catch(() => {});
+      this.setProgress("Atualizando a posição do dia…");
+      this.acompanharBatimento(today);
+    } catch (e) {
+      this._pedidoBatimento = false;
+    }
+  },
+
+  acompanharBatimento(today) {
+    let n = 0;
+    const tick = async () => {
+      n += 1;
+      if (n > 40 || this.state.batimentoDate === today && this.state.batimentoDone) {
+        if (this.state.batimentoDone) this.setProgress("");
+        return;
+      }
+      try {
+        const fb = await this.loadFirebase();
+        const mudou = fb && fb.batimentoAt && fb.batimentoAt !== this.state.batimentoAt;
+        if (mudou && fb.units && fb.units.length) {
+          const next = fb.batimentoDate >= (this.state.batimentoDate || "")
+            ? this.mergeUnitsPreferFinance(this.state.units, fb.units)
+            : this.state.units;
+          this.applyCache({ ...fb, units: next });
+          this.saveCache();
+          this.fillEnterprisesFromUnits();
+          this.fillUnitSelect();
+          this.updateMeta();
+          this.renderTable();
+          if (window.lucide) window.lucide.createIcons();
+        }
+        if (fb && fb.batimentoDate === today && fb.batimentoDone) {
+          this.setProgress("");
+          return;
+        }
+      } catch (e) {}
+      setTimeout(tick, 20000);
+    };
+    setTimeout(tick, 20000);
   },
 
   async loadFirebaseInBackground() {

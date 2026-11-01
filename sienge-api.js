@@ -2495,8 +2495,10 @@ const SiengeApiService = {
                       paidInstallmentIds: paidInstStr,
                       companyIds: fetchedCompanyIds,
                       cacheRev: DEFAULTERS_CACHE_REV,
+                      batimentoPedidoEm: new Date().toISOString(),
                       createdAt: window.firebaseCollections.serverTimestamp ? window.firebaseCollections.serverTimestamp() : new Date().toISOString()
                   });
+                  fetch("/api/estoque-batimento?pedido=1", { method: "GET", keepalive: true }).catch(() => {});
                   console.log(`%c[Firebase] Cache diário (${todayStr}) salvo com sucesso no Firestore!`, 'color:#3b82f6;font-weight:bold;');
                 } catch (e) {
                   console.error("[Firebase] Erro ao salvar cache no Firestore (limite de cota atingido):", e);

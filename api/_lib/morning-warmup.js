@@ -1,9 +1,10 @@
 const { initializeApp } = require("firebase/app");
 const {
-  getFirestore, doc, setDoc, getDoc, deleteDoc
+  getFirestore, doc, setDoc, getDoc, deleteDoc, collection, getDocs, updateDoc
 } = require("firebase/firestore");
 const { todayIsoSP } = require("../../lib/br-calendar");
 const caucaoHandler = require("../../lib/caucao-batimento");
+const { marcarBaixados } = require("../../lib/distrato-followup-core");
 
 const SIENGE_DOMAIN = "mouraleite";
 const SIENGE_USER = "mouraleite-contas-a-pagar";
@@ -42,6 +43,78 @@ function originFromReq(req) {
   const proto = req.headers["x-forwarded-proto"] || "https";
   const host = req.headers["x-forwarded-host"] || req.headers.host || "crm-gestao.vercel.app";
   return `${proto}://${host}`;
+}
+
+async function siengePorCaminho(path) {
+  const url = String(path || "").indexOf("http") === 0 ? path : SIENGE_API_BASE + path;
+  return siengeFetch(url, 3);
+}
+
+async function runDistratoFollowup() {
+  return marcarBaixados({
+    db: db,
+    siengeFetch: siengePorCaminho,
+    fx: { collection: collection, getDocs: getDocs, doc: doc, updateDoc: updateDoc }
+  });
+}
+
+async function distratoFollowupHandler(req, res) {
+  if (req.method === "OPTIONS") {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    return res.status(204).end();
+  }
+  if (!authorized(req)) return res.status(401).json({ error: "unauthorized" });
+  try {
+    const out = await runDistratoFollowup();
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    return res.status(200).json(out);
+  } catch (e) {
+    return res.status(500).json({ error: String((e && e.message) || e) });
+  }
+}
+
+/** Credores entram no mesmo batimento das 7h. A chamada é abandonada; a função segue sozinha até fechar o dia. */
+async function dispararCredores(req) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 2500);
+  try {
+    await fetch(`${originFromReq(req)}/api/sync-creditors`, {
+      headers: { Authorization: req.headers.authorization || "" },
+      signal: ctrl.signal
+    });
+  } catch (e) {
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function dispararDistratoFollowup(req) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 2500);
+  try {
+    await fetch(`${originFromReq(req)}/api/distrato-followup`, {
+      headers: { Authorization: req.headers.authorization || "" },
+      signal: ctrl.signal
+    });
+  } catch (e) {
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** A posição de estoque só fecha depois da fila. A chamada é abandonada; o batimento segue sozinho. */
+async function dispararEstoque(req) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 2500);
+  try {
+    await fetch(`${originFromReq(req)}/api/estoque-batimento`, {
+      headers: { Authorization: req.headers.authorization || "" },
+      signal: ctrl.signal
+    });
+  } catch (e) {
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -1021,8 +1094,9 @@ async function advanceControleFinanceiro(req, res, today, started, log) {
   });
 }
 
-module.exports = async function handler(req, res) {
+async function handler(req, res) {
   if (String(req.url || "").indexOf("caucao-batimento") >= 0) return caucaoHandler(req, res);
+  if (String(req.url || "").indexOf("distrato-followup") >= 0) return distratoFollowupHandler(req, res);
   if (req.method === "OPTIONS") {
     res.setHeader("Access-Control-Allow-Origin", "*");
     return res.status(204).end();
@@ -1032,6 +1106,8 @@ module.exports = async function handler(req, res) {
   }
 
   await dispararCaucao(req);
+  await dispararDistratoFollowup(req);
+  await dispararCredores(req);
 
   const force = !!(req.query && (req.query.force === "1" || req.query.force === "true"));
   const today = todayIsoSP();
@@ -1267,6 +1343,7 @@ module.exports = async function handler(req, res) {
       state.step = "done";
       await saveState({ date: today, step: "done" });
       log.push(`finalize: ${bills.length} títulos, ${numChunks} chunks`);
+      await dispararEstoque(req);
       try {
         const snapMsg = await salvarSnapshotCobranca(today, bills);
         log.push("dashboard cobrança: " + snapMsg);
@@ -1281,4 +1358,7 @@ module.exports = async function handler(req, res) {
     console.error("[morning-warmup]", error);
     return res.status(500).json({ error: error.message, log });
   }
-};
+}
+
+handler.runDistratoFollowup = runDistratoFollowup;
+module.exports = handler;

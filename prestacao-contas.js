@@ -446,7 +446,7 @@ const PrestacaoContasApp = {
   },
 
   setAba(id) {
-    const ok = { obra: 1, repasse: 1, vendas: 1, estoque: 1, carteira: 1, inad: 1 };
+    const ok = { obra: 1, repasse: 1, saldo: 1, vendas: 1, estoque: 1, carteira: 1, inad: 1 };
     this.aba = ok[id] ? id : "obra";
     this.confFiltro = "";
     this.confAberta = "";
@@ -1439,7 +1439,7 @@ const PrestacaoContasApp = {
     const conf = this.conferencias || { receitas: [], despesas: [], repasses: [] };
     const nFora = (rows) => (rows || []).filter(r => r.status === "fora").length;
     const pad = n => String(n).padStart(2, "0");
-    const abas = { obra: 1, repasse: 1, vendas: 1, estoque: 1, carteira: 1, inad: 1 };
+    const abas = { obra: 1, repasse: 1, saldo: 1, vendas: 1, estoque: 1, carteira: 1, inad: 1 };
     const aba = abas[this.aba] ? this.aba : "obra";
     const tab = (id, icon, txt, count) => `<button type="button" role="tab" aria-selected="${aba === id}" class="ml-tab${aba === id ? " is-active" : ""}" onclick="PrestacaoContasApp.setAba('${id}')"><i data-lucide="${icon}"></i> ${txt}${count ? ` <span class="ml-tab-count">${count}</span>` : ""}</button>`;
     const ccs = this.costCenters();
@@ -1505,9 +1505,10 @@ const PrestacaoContasApp = {
           ${tab("carteira", "wallet", "Carteira")}
           ${tab("inad", "alert-circle", "Inadimplência")}
           ${tab("repasse", "split", "Repasse anterior", nFora(conf.repasses))}
+          ${tab("saldo", "landmark", "Saldo")}
         </div>
 
-        ${this.loading ? this.loadHtml() : (aba === "obra" || aba === "repasse" ? this.conferirHtml(aba) : this.painelHtml(aba))}
+        ${this.loading ? this.loadHtml() : (aba === "saldo" ? this.saldoParceriaHtml() : (aba === "obra" || aba === "repasse" ? this.conferirHtml(aba) : this.painelHtml(aba)))}
       </div>
     `;
     if (window.lucide) lucide.createIcons();
@@ -1980,7 +1981,7 @@ const PrestacaoContasApp = {
     }
   },
 
-  saldoParceriaHtml(soFechamento) {
+  saldoParceriaHtml() {
     const s = this.saldoCc;
     if (!s) return "";
     if (s.erro) return `<div class="pcx-alert is-warn">${this.esc(s.erro)}</div>`;
@@ -1991,34 +1992,16 @@ const PrestacaoContasApp = {
     const money = (v) => (v == null ? "—" : this.fmt(v));
     const rotuloAtual = s.atualEhHoje ? "Saldo atual" : "Saldo no fim do mês";
     const dataFechamento = this.fmtData(s.dataAnterior);
-    return `<section class="pcx-cc">${s.contas.map((c) => {
-      const soma = c.movimentos.reduce((acc, m) => acc + (Number(m.valor) || 0), 0);
-      const linhas = c.movimentos.map((m) => `<tr>
-        <td>${this.esc(this.fmtData(m.data))}</td>
-        <td>${this.esc(m.historico)}</td>
-        <td class="is-right ${cor(m.valor)}">${this.fmt(m.valor)}</td>
-        <td class="is-right">${m.saldo == null ? "—" : this.fmt(m.saldo)}</td>
-      </tr>`).join("");
-      const corpo = soFechamento ? "" : (c.erroExtrato
-        ? `<p class="pcx-ajuda">${this.esc(c.erroExtrato)}</p>`
-        : (c.movimentos.length
-          ? `<div class="pcx-cc-mov"><table><thead><tr><th>Data</th><th>Histórico</th><th class="is-right">Valor</th><th class="is-right">Saldo</th></tr></thead><tbody>${linhas}</tbody></table></div>`
-          : `<p class="pcx-ajuda">Nenhum movimento nesta conta entre ${this.esc(this.fmtData(s.inicioMov || s.dataAtual))} e ${this.esc(this.fmtData(s.dataAtual))}.</p>`));
-      const demais = soFechamento ? "" : `
-          <div><small>${rotuloAtual} · ${this.esc(this.fmtData(s.dataAtual))}</small><strong class="${cor(c.atual)}">${money(c.atual)}</strong></div>
-          <div><small>${c.movimentos.length} movimento(s)</small><strong class="${cor(soma)}">${c.movimentos.length ? this.fmt(soma) : "—"}</strong></div>`;
-      return `<article class="pcx-cc-card">
+    return `<section class="pcx-cc">${s.contas.map((c) => `<article class="pcx-cc-card">
         <header>
           <strong>${this.esc(c.rotulo)}</strong>
           <span>Centros ${this.esc(c.centros.join(", "))}</span>
         </header>
         <div class="pcx-cc-saldos">
           <div><small>Último fechamento · ${this.esc(dataFechamento)}</small><strong class="${cor(c.anterior)}">${money(c.anterior)}</strong></div>
-          ${demais}
+          <div><small>${rotuloAtual} · ${this.esc(this.fmtData(s.dataAtual))}</small><strong class="${cor(c.atual)}">${money(c.atual)}</strong></div>
         </div>
-        ${corpo}
-      </article>`;
-    }).join("")}</section>`;
+      </article>`).join("")}</section>`;
   },
 
   conferirHtml(aba) {
@@ -2043,9 +2026,7 @@ const PrestacaoContasApp = {
     const corpo = rows.length ? this.obrasHtml(rows, repasse) : `<tr><td colspan="8" class="pcx-vazio">${vazio}</td></tr>`;
     const corTotal = resultado < -0.004 ? "#b91c1c" : "#15803d";
     const dist = repasse ? "" : this.distribuicaoMistaHtml();
-    const saldo = this.saldoParceriaHtml(!repasse);
     return `
-      ${saldo}
       ${dist}
       <div class="pcx-resumo">
         <div class="pcx-pills">
@@ -2500,7 +2481,7 @@ const PrestacaoContasApp = {
   },
 
   kpisHtml(itens) {
-    return `<div class="pcx-kpis">${itens.map((k) => `<div class="pcx-kpi"><span>${k.rot}</span><strong class="${k.cls || ""}">${k.val}</strong><small>${k.nota || ""}</small></div>`).join("")}</div>`;
+    return `<div class="pcx-kpis">${itens.map((k) => `<div class="pcx-kpi${k.cls ? " " + k.cls : ""}"><span>${k.rot}</span><strong class="${k.cls || ""}">${k.val}</strong><small>${k.nota || ""}</small></div>`).join("")}</div>`;
   },
 
   blocoHtml(titulo, nota, corpo) {
@@ -2869,8 +2850,9 @@ const PrestacaoContasApp = {
           label: o.nome,
           data: o.valores,
           backgroundColor: cores[i % cores.length],
+          borderRadius: 4,
           stack: "receber",
-          maxBarThickness: 46
+          maxBarThickness: 42
         }))
       },
       options: {
@@ -2878,14 +2860,16 @@ const PrestacaoContasApp = {
         maintainAspectRatio: false,
         layout: { padding: { top: 22 } },
         plugins: {
-          legend: { position: "bottom", labels: { boxWidth: 12, boxHeight: 12 } },
+          legend: { position: "bottom", labels: { boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: "circle", color: "#475569", font: { size: 12, weight: "600" }, padding: 14 } },
           tooltip: { callbacks: { label: (c) => " " + c.dataset.label + ": " + fmtMi(c.parsed.y || 0) } }
         },
         scales: {
-          x: { stacked: true, grid: { display: false } },
+          x: { stacked: true, grid: { display: false }, ticks: { color: "#64748b", font: { size: 11 } } },
           y: {
             stacked: true,
-            ticks: { callback: (v) => (Number(v) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + " Mi" }
+            grid: { color: "#eef2f6" },
+            border: { display: false },
+            ticks: { color: "#64748b", font: { size: 11 }, callback: (v) => (Number(v) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + " Mi" }
           }
         }
       },
@@ -2985,37 +2969,53 @@ const PrestacaoContasApp = {
   },
 
   graficoCarteiraHtml(bills) {
-    const cores = ["#105436", "#f37021", "#c2410c", "#14532d"];
-    const cards = this.anelLotes(bills).map((g, i) => {
+    const corAtiva = "#105436";
+    const corQuieto = "#d7dee6";
+    const cards = this.anelLotes(bills).map((g) => {
       const ativos = g.ativos;
-      const demais = g.total - ativos;
+      const demais = Math.max(0, g.total - ativos);
       const total = g.total;
       const pAt = total ? (ativos / total) * 100 : 0;
       const pQ = total ? Math.round((demais / total) * 100) : 0;
       const pA = total ? Math.round(pAt) : 0;
-      const cor = cores[i % cores.length];
+      const gap = total && ativos && demais ? 1.4 : 0;
+      const fimAtivo = Math.max(0, pAt - gap / 2);
+      const iniQuieto = Math.min(100, pAt + gap / 2);
+      const ring = pAt <= 0
+        ? corQuieto
+        : (pAt >= 100
+          ? corAtiva
+          : "conic-gradient(" + corAtiva + " 0 " + fimAtivo.toFixed(2) + "%, transparent " + fimAtivo.toFixed(2) + "% " + iniQuieto.toFixed(2) + "%, " + corQuieto + " " + iniQuieto.toFixed(2) + "% 100%)");
       return `<article class="pcx-don">
         <h3>${this.esc(g.obraNome)}</h3>
         <div class="pcx-don-anel">
-          <div class="pcx-don-ring" style="background:conic-gradient(${cor} 0 ${pAt.toFixed(2)}%, #c5cdd6 ${pAt.toFixed(2)}% 100%)"></div>
-          ${ativos ? `<span class="pcx-don-tag is-ativo">${ativos} (${pA}%)</span>` : ""}
-          ${demais ? `<span class="pcx-don-tag is-quit">${demais} (${pQ}%)</span>` : ""}
-          <div class="pcx-don-hole"><strong>${total}</strong><span>Lotes</span></div>
+          <div class="pcx-don-ring" style="background:${ring}"></div>
+          <div class="pcx-don-hole"><strong>${total}</strong><span>lotes</span></div>
         </div>
-        <div class="pcx-don-leg">
-          <span><i style="background:#c5cdd6"></i>Sem parcela a pagar ${demais} (${pQ}%)</span>
-          <span><i style="background:${cor}"></i>Carteira ativa ${ativos} (${pA}%)</span>
+        <div class="pcx-don-barra" title="Carteira ativa ${pA}%"><span style="width:${pA}%"></span></div>
+        <div class="pcx-don-nums">
+          <div><b>${ativos}</b><span>ativa</span><small>${pA}%</small></div>
+          <div><b>${demais}</b><span>sem parcela</span><small>${pQ}%</small></div>
         </div>
       </article>`;
     }).join("");
     if (!cards) return "";
-    return `<div class="pcx-don-titulo">Lotes vendáveis</div><div class="pcx-dons">${cards}</div>`;
+    return `<section class="pcx-dons-wrap">
+      <div class="pcx-dons-topo">
+        <h3>Lotes vendáveis</h3>
+        <div class="pcx-don-leg">
+          <span><i style="background:${corAtiva}"></i>Carteira ativa</span>
+          <span><i style="background:${corQuieto}"></i>Sem parcela a pagar</span>
+        </div>
+      </div>
+      <div class="pcx-dons">${cards}</div>
+    </section>`;
   },
 
   graficoTempoHtml() {
     const serie = this.serieTempo();
     if (!serie || !serie.anos.length) {
-      return `<section class="pcx-tempo"><h3>Distribuição da carteira no tempo</h3><p class="pcx-ajuda">Sem saldo a receber nos centros de custo do parceiro.</p></section>`;
+      return `<p class="pcx-tempo-vazio">Não há saldo a receber nos centros do parceiro para mostrar no tempo.</p>`;
     }
     return `<section class="pcx-tempo">
       <h3>Distribuição da carteira no tempo</h3>
@@ -3071,7 +3071,7 @@ const PrestacaoContasApp = {
         { rot: "Em aberto", val: this.fmt(aVencer), nota: "Saldo que ainda não venceu" },
         { rot: "Vencido", val: this.fmt(vencido), nota: "Saldo com vencimento passado", cls: "is-out" }
       ])}
-      <p class="pcx-ajuda">Posição de hoje dos contratos de venda. O anel conta os lotes de cada obra, menos os transferidos. Os demais status entram como vendáveis. Carteira ativa é o lote vendável que ainda tem parcela a pagar. Recebido no mês usa a data da baixa dentro do mês de referência. Em aberto é o saldo a vencer; vencido é o saldo atrasado.</p>
+      <p class="pcx-ajuda">Posição de hoje. O anel conta os lotes vendáveis de cada obra, sem os transferidos. Verde é o lote que ainda tem parcela a pagar. Recebido no mês é a baixa dentro do mês. Em aberto ainda não venceu; vencido já passou da data.</p>
       ${this.graficoTempoHtml()}
       ${this.graficoCarteiraHtml(lista0)}
       ${tabelas || `<div class="pcx-alert is-info">Nenhum título de venda nestes centros.</div>`}

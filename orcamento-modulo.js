@@ -270,6 +270,9 @@ const OrcamentoModuloApp = {
     ].map((t) => `<button type="button" role="tab" aria-selected="${aba === t.id}" class="ml-tab${aba === t.id ? " is-active" : ""}" onclick="OrcamentoModuloApp.setAba('${t.id}')"><i data-lucide="${t.icon}"></i> ${t.label}</button>`).join("");
     const lead = aba === "entradas" ? this.textoReajusteHoje() : this.textoKardex();
     root.innerHTML = `
+      <button type="button" class="btn btn-outline orc-voltar" onclick="OrcamentoModuloApp.voltarLista()">
+        <i data-lucide="arrow-left"></i> Voltar
+      </button>
       <div class="ml-tabs orc-novo-tabs" role="tablist">${abas}</div>
       <p class="orc-rec-lead">${this.esc(lead)}</p>
       ${this.barraOrcamento()}
@@ -2340,8 +2343,10 @@ const OrcamentoModuloApp = {
     return `
       <div class="orc-kx-head">
         <div class="orc-kx-nums">${nums}</div>
-        <label class="orc-kx-ticket-campo">Ticket médio<input type="text" inputmode="decimal" value="${this.esc(ticketTxt)}" aria-label="Ticket médio" onchange="OrcamentoModuloApp.setTicketMedio(this.value)"></label>
-        <label class="orc-kx-ticket-campo">Comissão %<input type="text" inputmode="decimal" class="orc-kx-comissao" value="${this.esc(this.comissaoPct() > 0 ? this.numero(this.comissaoPct()) : "")}" aria-label="Percentual de comissão" onchange="OrcamentoModuloApp.setComissao(this.value)"></label>
+        <div class="orc-kx-campos">
+          <label class="orc-kx-ticket-campo">Ticket médio<input type="text" inputmode="decimal" value="${this.esc(ticketTxt)}" aria-label="Ticket médio" onchange="OrcamentoModuloApp.setTicketMedio(this.value)"></label>
+          <label class="orc-kx-ticket-campo">Comissão %<input type="text" inputmode="decimal" class="orc-kx-comissao" value="${this.esc(this.comissaoPct() > 0 ? this.numero(this.comissaoPct()) : "")}" aria-label="Percentual de comissão" onchange="OrcamentoModuloApp.setComissao(this.value)"></label>
+        </div>
       </div>
       ${aviso ? `<p class="orc-kx-nota">${this.esc(aviso)}</p>` : ""}
       ${faixa}

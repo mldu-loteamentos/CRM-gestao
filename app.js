@@ -4054,7 +4054,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
   } else if (tabId === "upload-kmz") {
     loadKMZList();
   } else if (tabId === "upload-mapa") {
-    if (window.loadMapaList) window.loadMapaList();
+    if (window.mapaPlantaAbrir) window.mapaPlantaAbrir();
+    else if (window.loadMapaList) window.loadMapaList();
   } else if (tabId === "zeropaid") {
     if (typeof window.updateOperatorTabsUI === "function") window.updateOperatorTabsUI(true);
     loadZeroPaidTab();
@@ -15338,11 +15339,9 @@ function formatCpfCnpj(val) {
           }
 
           const match = kmzMissing ? null : data.find(p => {
-            if (!p.name) return false;
-            const ln = p.name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-            const bfn = blockLotFromName.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-            const un = unitDisplayStr.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-            return ln === bfn || ln === un || ln.endsWith(bfn) || ln.endsWith(un) || ln.includes(bfn) || ln.includes(un) || bfn.includes(ln);
+            if (!p || !p.name || typeof window.kmzLotMatches !== "function") return false;
+            return window.kmzLotMatches(p.name, unitDisplayStr, empIdToUse)
+              || window.kmzLotMatches(p.name, blockLotFromName, empIdToUse);
           });
           
           if (!kmzMissing) {
@@ -22354,6 +22353,49 @@ function renegSha256(bytes) {
   });
 }
 
+async function renegTextoPdf(bytes) {
+  const lib = window["pdfjs-dist/build/pdf"] || window.pdfjsLib;
+  if (!lib) throw new Error("Não consegui ler o PDF do banco. Atualize a página.");
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const doc = await lib.getDocument({ data: data }).promise;
+  let text = "";
+  const n = Math.min(doc.numPages || 1, 2);
+  for (let p = 1; p <= n; p++) {
+    const page = await doc.getPage(p);
+    const tc = await page.getTextContent();
+    text += "\n" + (tc.items || []).map(function(it) { return it.str || ""; }).join(" ");
+  }
+  return text;
+}
+
+function renegValidarPdfPix(texto, sinal) {
+  const cru = String(texto || "");
+  const n = cru.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").toLowerCase();
+  if (n.indexOf("dados do qr code") < 0 || n.indexOf("pix copia e cola") < 0) {
+    return "Este arquivo não é o PDF do QR Code gerado pelo banco. Envie o PDF do Itaú, com os dados do QR Code e o Pix copia e cola.";
+  }
+  if (n.indexOf("moura leite") < 0) {
+    return "O recebedor deste QR Code não é a Moura Leite. Envie o PDF gerado na conta da Moura Leite.";
+  }
+  if (n.indexOf("chave pix") < 0) {
+    return "Não encontrei a chave Pix neste PDF.";
+  }
+  if (!/000201/.test(cru.replace(/\s/g, ""))) {
+    return "Não encontrei o Pix copia e cola neste PDF. Envie o arquivo gerado pelo banco, com o QR Code.";
+  }
+  const sinalNum = Number(sinal) || 0;
+  const m = cru.match(/valor\s*R\$\s*([\d.]+,\d{2})/i);
+  if (sinalNum > 0.009) {
+    if (!m) return "Não encontrei o valor do QR Code neste PDF.";
+    const num = Number(m[1].replace(/\./g, "").replace(",", "."));
+    if (!(num > 0) || Math.abs(num - sinalNum) > 0.02) {
+      const brl = function(v) { return Number(v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }); };
+      return "O valor deste QR Code é " + brl(num) + " e o sinal da proposta é " + brl(sinalNum) + ". Envie o PDF do sinal deste acordo.";
+    }
+  }
+  return "";
+}
+
 async function renegAnexarPdf(bytes, extraBytes) {
   const rel = window.RelacionamentoApp;
   if (!rel || typeof rel._carregarPdfLib !== "function") throw new Error("O editor de PDF não está disponível.");
@@ -22411,10 +22453,17 @@ function renegPedirPdfPix() {
       const f = input.files && input.files[0];
       if (!f || gerar.disabled) return;
       gerar.disabled = true;
-      f.arrayBuffer().then(function(buf) { fechar(buf); }).catch(function() {
+      f.arrayBuffer().then(function(buf) {
+        const sinal = window.AppState && AppState.currentRenegResult ? Number(AppState.currentRenegResult.sinalValue) || 0 : 0;
+        return renegTextoPdf(buf).then(function(texto) {
+          const erro = renegValidarPdfPix(texto, sinal);
+          if (erro) throw new Error(erro);
+          fechar(buf);
+        });
+      }).catch(function(e) {
         gerar.disabled = false;
         gerar.style.opacity = "1";
-        alert("Não consegui ler o arquivo. Envie o PDF novamente.");
+        alert((e && e.message) || "Não consegui ler o arquivo. Envie o PDF novamente.");
       });
     };
     overlay.classList.add("active");
@@ -22424,7 +22473,12 @@ function renegPedirPdfPix() {
 async function renegMontarPdfAcordo(results, nomeArquivo, pixBytes) {
   const pdf = baixarPropostaAcordoPdf(results, nomeArquivo);
   let cru = new Uint8Array(pdf.output("arraybuffer"));
-  if (pixBytes) cru = await renegAnexarPdf(cru, pixBytes);
+  if (pixBytes) {
+    const textoPix = await renegTextoPdf(pixBytes);
+    const erroPix = renegValidarPdfPix(textoPix, Number(results && results.sinalValue) || 0);
+    if (erroPix) throw new Error(erroPix);
+    cru = await renegAnexarPdf(cru, pixBytes);
+  }
   return renegCarimbarAcordo(cru, results, "");
 }
 
@@ -22736,11 +22790,10 @@ function baixarPropostaAcordoPdf(results, nomeArquivo) {
   const info = renegInfoReajuste(sale);
   const sinalData = renegIsoBr(results.sinalDueStr);
   const expira = renegIsoBr(renegIsoMaisDias(results.sinalDueStr, 2));
-  const contrato = [sale.documentId, sale.documentNumber].filter(Boolean).join("") || sale.id || "";
   const unidade = [unit.costCenterId || sale.costCenterId || sale.enterpriseId, unit.name || unit.unitName || sale.unitName].filter(Boolean).join(" - ");
-  const emp = unit.enterpriseName || unit.costCenterName || sale.enterpriseName || sale.costCenterName || "";
+  const cabEmp = typeof window.cabecalhoCalculoDistrato === "function" ? window.cabecalhoCalculoDistrato(sale, unit) : {};
+  const emp = (cabEmp && cabEmp.enterpriseName) || unit.enterpriseName || unit.costCenterName || sale.enterpriseName || sale.costCenterName || "";
   const docCli = cli.cpf || cli.document || cli.cnpj || "";
-  const local = [emp, unidade].filter(Boolean).join(" · ") || "—";
   const agora = new Date();
   const emissao = String(agora.getDate()).padStart(2, "0") + "/" + String(agora.getMonth() + 1).padStart(2, "0") + "/" + agora.getFullYear();
   const pct = sit.original > 0.009 ? Math.round((sit.pago / sit.original) * 100) : 0;
@@ -22776,13 +22829,27 @@ function baixarPropostaAcordoPdf(results, nomeArquivo) {
   pdf.setDrawColor(16, 84, 54);
   pdf.setLineWidth(0.5);
   pdf.line(m, y, m + largura, y);
-  y += 5;
-  pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(8);
-  pdf.setTextColor(71, 85, 105);
-  const sub = pdf.splitTextToSize("Documento para o cliente. A aceitação se dá pelo pagamento do sinal. Não há assinatura nesta proposta. Sem esse pagamento, ela não tem validade.", largura);
-  pdf.text(sub, m, y);
-  y += sub.length * 3.6 + 3;
+  y += 7;
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(13);
+  pdf.setTextColor(16, 84, 54);
+  const nomeCli = pdf.splitTextToSize(String(cli.name || "—"), largura);
+  pdf.text(nomeCli, m, y);
+  y += nomeCli.length * 5.4 + 1.4;
+  if (emp) {
+    pdf.setFontSize(11);
+    const nomeEmp = pdf.splitTextToSize(String(emp), largura);
+    pdf.text(nomeEmp, m, y);
+    y += nomeEmp.length * 4.8 + 1.2;
+  }
+  if (unidade) {
+    pdf.setFontSize(11);
+    const nomeUn = pdf.splitTextToSize(String(unidade), largura);
+    pdf.text(nomeUn, m, y);
+    y += nomeUn.length * 4.8 + 3;
+  } else {
+    y += 2;
+  }
 
   pdf.autoTable(Object.assign({}, grade, {
     startY: y,
@@ -22790,11 +22857,8 @@ function baixarPropostaAcordoPdf(results, nomeArquivo) {
     tableWidth: largura,
     head: [["", ""]],
     body: [
-      ["Cliente", String(cli.name || "—")],
       ["CPF/CNPJ", docCli || "—"],
-      ["Contrato", contrato || "—"],
-      ["Título", sale.receivableBillId ? String(sale.receivableBillId) : "—"],
-      ["Unidade", local]
+      ["Título", sale.receivableBillId ? String(sale.receivableBillId) : "—"]
     ],
     showHead: "never",
     columnStyles: {
@@ -22834,7 +22898,8 @@ function baixarPropostaAcordoPdf(results, nomeArquivo) {
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(7.5);
   pdf.setTextColor(100, 116, 139);
-  const comp = "Valores pagos: original " + brl(sit.pago) + " + acréscimo " + brl(sit.juros) + " − desconto " + brl(sit.desconto) + ".";
+  const brl1 = (v) => Number(v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const comp = "Valores pagos: original " + brl1(sit.pago) + " + acréscimo " + brl1(sit.juros) + " - desconto " + brl1(sit.desconto) + ".";
   pdf.text(comp, m, y);
   y += 6;
   if (linhaIndice) {
@@ -22902,12 +22967,12 @@ function baixarPropostaAcordoPdf(results, nomeArquivo) {
   pdf.text("Condições", m, y);
   y += 5;
   const clausulas = [
-    "Esta proposta apresenta as condições para regularizar as parcelas em aberto do contrato indicado acima. Ela não é o acordo e não substitui o termo de confissão de dívida.",
+    "Esta proposta apresenta as condições para regularizar as parcelas em aberto da unidade indicada acima. Ela não é o acordo e não substitui o termo de confissão de dívida.",
     temSinal
       ? "A proposta só tem validade com o pagamento do sinal de " + brl(results.sinalValue) + " até " + (sinalData || "a data combinada") + ", pelo PIX da página seguinte. Sem esse pagamento, a proposta não vale e fica sem efeito em " + (expira || "dois dias depois") + "."
       : "A proposta só tem validade com o pagamento do sinal, pelo PIX da página seguinte. Sem esse pagamento, a proposta não vale.",
     "O pagamento do sinal é o aceite do cliente. Não há assinatura nesta proposta.",
-    "Confirmado o pagamento do sinal, a Moura Leite emite o termo de confissão de dívida. Esse termo formaliza o acordo, reconhece o saldo e fixa o cronograma descrito neste documento.",
+    "O termo de confissão de dívida será emitido após o pagamento do sinal e formaliza o acordo, reconhece o saldo e fixa o cronograma descrito neste documento.",
     "As parcelas seguem os vencimentos e os valores do cronograma proposto." + (linhaIndice ? " O saldo permanece no " + linhaIndice.charAt(0).toLowerCase() + linhaIndice.slice(1) : ""),
     "Enquanto o sinal não for pago, o contrato permanece como está. Nada desta proposta altera parcelas, vencimentos ou saldo antes desse pagamento e da emissão do termo."
   ];
@@ -44798,6 +44863,7 @@ window.uploadEmpreendimentoMapa = async function() {
 };
 
 window.showProjectMap = function(url) {
+  if (!url) return;
   console.log("Abrindo mapa:", url);
   const modal = document.getElementById('map-viewer-modal');
   const iframe = document.getElementById('map-viewer-iframe');
@@ -44812,216 +44878,505 @@ window.showProjectMap = function(url) {
   }
 };
 
+window._mapaPlanta = window._mapaPlanta || { open: false, query: "", id: "" };
+
+window.mapaPlantaRotulo = function(id) {
+  const hit = (window._mapaPlantaCentros || []).find((c) => String(c.id) === String(id));
+  const nome = hit && hit.name ? String(hit.name) : "";
+  return nome ? (String(id) + " - " + nome) : String(id || "");
+};
+
+window.mapaPlantaCarregarCentros = async function() {
+  if (window._mapaPlantaCentros && window._mapaPlantaCentros.length) return window._mapaPlantaCentros;
+  let ccs = [];
+  try {
+    if (window.SiengeApiService && typeof SiengeApiService.getCostCenters === "function") {
+      ccs = await SiengeApiService.getCostCenters();
+    }
+  } catch (e) {}
+  let custom = {};
+  try { custom = JSON.parse(localStorage.getItem("crm_centros_custo_custom") || "{}") || {}; } catch (e) {}
+  const tipos = ["Loteamento Aberto", "Loteamento Fechado", "Incorporação"];
+  const base = (ccs || []).filter((c) => c && /^[12]/.test(String(c.id || "").trim()));
+  const typed = base.filter((c) => tipos.includes(String((custom[c.id] || custom[String(c.id)] || {}).tipo_cc || "")));
+  window._mapaPlantaCentros = (typed.length ? typed : base).map((c) => ({
+    id: String(c.id),
+    name: String(c.name || c.description || "").toUpperCase()
+  })).sort((a, b) => Number(a.id) - Number(b.id));
+  return window._mapaPlantaCentros;
+};
+
+window.mapaPlantaBind = function() {
+  if (!window.MlEmpresaFilter || window._mapaPlantaBind) return;
+  window._mapaPlantaBind = true;
+  MlEmpresaFilter.bind("mapa-cc", {
+    toggleOpen() {
+      const st = window._mapaPlanta;
+      st.open = !st.open;
+      if (st.open) st.query = "";
+      window.mapaPlantaPintarFiltro();
+    },
+    close() {
+      const st = window._mapaPlanta;
+      if (!st.open) return;
+      st.open = false;
+      st.query = "";
+      window.mapaPlantaPintarFiltro();
+    },
+    setQuery(q) {
+      window._mapaPlanta.query = q || "";
+      const box = document.getElementById("mapa-cc-list");
+      if (!box || !window.MlEmpresaFilter) return;
+      box.innerHTML = MlEmpresaFilter.listHtml({
+        id: "mapa-cc",
+        items: window._mapaPlantaCentros || [],
+        selectedIds: window._mapaPlanta.id ? [window._mapaPlanta.id] : [],
+        query: window._mapaPlanta.query,
+        single: true,
+        nouns: { singular: "centro de custo", noMatch: "Nenhum centro de custo com esse nome." }
+      });
+    },
+    toggleId(itemId, on) {
+      window._mapaPlanta.id = on ? String(itemId) : "";
+      window._mapaPlanta.open = true;
+      window.mapaPlantaPintarFiltro();
+    }
+  });
+};
+
+window.mapaPlantaPintarFiltro = function() {
+  const wrap = document.getElementById("mapa-filtro-cc");
+  if (!wrap || !window.MlEmpresaFilter) return;
+  window.mapaPlantaBind();
+  const st = window._mapaPlanta;
+  wrap.innerHTML = MlEmpresaFilter.html({
+    id: "mapa-cc",
+    label: "Centro de custo",
+    items: window._mapaPlantaCentros || [],
+    selectedIds: st.id ? [st.id] : [],
+    open: !!st.open,
+    query: st.query || "",
+    single: true,
+    emptyMeansAll: false,
+    emptyLabel: "Selecione",
+    extraClass: "ml-emp-filter--corte",
+    nouns: { singular: "centro de custo", plural: "centros de custo", none: "Nenhum centro de custo", noMatch: "Nenhum centro de custo com esse nome." }
+  });
+  const hidden = document.getElementById("mapa-empreendimento-id");
+  if (hidden) hidden.value = st.id || "";
+  if (window.lucide) window.lucide.createIcons();
+};
+
+window.mapaPlantaAbrir = async function() {
+  await window.mapaPlantaCarregarCentros();
+  window.mapaPlantaPintarFiltro();
+  if (window.loadMapaList) await window.loadMapaList();
+};
+
+window.mapaPlantaEnviar = async function(empId, file) {
+  const statusDiv = document.getElementById("mapa-upload-status");
+  const dizer = (cor, texto) => {
+    if (!statusDiv) return;
+    statusDiv.style.color = cor;
+    statusDiv.textContent = texto;
+  };
+  if (!empId) {
+    dizer("var(--color-danger)", "Selecione o centro de custo.");
+    return false;
+  }
+  if (!file) {
+    dizer("var(--color-danger)", "Selecione um arquivo PDF.");
+    return false;
+  }
+  if (!String(file.name || "").toLowerCase().endsWith(".pdf")) {
+    dizer("var(--color-danger)", "O arquivo precisa ser PDF.");
+    return false;
+  }
+  if (!window.firebaseStorage || !window.firebaseCollections) {
+    dizer("var(--color-danger)", "O armazenamento não está disponível.");
+    return false;
+  }
+  dizer("var(--color-primary)", "Enviando a planta de " + window.mapaPlantaRotulo(empId) + "…");
+  const storageRef = window.firebaseCollections.ref(window.firebaseStorage, "mapas/" + empId + ".pdf");
+  await window.firebaseCollections.uploadBytes(storageRef, file);
+  dizer("#105436", "Planta de " + window.mapaPlantaRotulo(empId) + " enviada.");
+  if (window.loadMapaList) await window.loadMapaList();
+  return true;
+};
+
 window.loadMapaList = async function() {
-  const container = document.getElementById('mapa-list-container');
+  const container = document.getElementById("mapa-list-container");
   if (!container) return;
-  
+  if (!window._mapaPlantaCentros) {
+    try { await window.mapaPlantaCarregarCentros(); } catch (e) {}
+  }
   if (!window.firebaseStorage || !window.firebaseCollections) {
     container.innerHTML = '<div style="color: var(--color-danger); padding: 15px;">Erro: Firebase não configurado.</div>';
     return;
   }
-  
   try {
     const { ref, listAll, getDownloadURL } = window.firebaseCollections;
-    const listRef = ref(window.firebaseStorage, 'mapas');
-    const res = await listAll(listRef);
-    
-    if (res.items.length === 0) {
+    const res = await listAll(ref(window.firebaseStorage, "mapas"));
+    const itens = (res.items || []).filter((item) => String(item.name || "").toLowerCase().endsWith(".pdf"));
+    if (!itens.length) {
       container.innerHTML = '<div style="text-align: center; color: #666; padding: 15px;">Nenhum projeto urbanístico carregado.</div>';
       return;
     }
-    
-    let html = `
-      <div class="table-container" style="max-height: 400px; overflow-y: auto;">
-        <table class="custom-table" style="font-size: 0.85rem; width: 100%;">
-          <thead>
-            <tr>
-              <th>ID Centro de Custo</th>
-              <th>Status</th>
-              <th>Ações</th>
-            </tr>
-          </thead>
-          <tbody>
-    `;
-    
-    for (const item of res.items) {
-      const empId = item.name.replace('.pdf', '');
+    itens.sort((a, b) => Number(String(a.name).replace(".pdf", "")) - Number(String(b.name).replace(".pdf", "")));
+    window._mapaPlantaUrls = {};
+    const esc = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const linhas = [];
+    for (const item of itens) {
+      const empId = String(item.name).replace(/\.pdf$/i, "");
       let url = "";
-      try {
-        url = await getDownloadURL(item);
-      } catch (e) {
-        console.error(e);
-      }
-      
-      html += `
-        <tr>
-          <td style="font-weight: 600;">${empId}</td>
-          <td><span class="badge badge-success">PROJETO PDF</span></td>
-          <td>
-            <div style="display: flex; gap: 8px;">
-              <button class="btn btn-outline btn-sm" onclick="window.showProjectMap('${url}')" style="padding: 4px 8px; font-size: 0.75rem;">
-                <i data-lucide="eye" style="width: 14px;"></i> Visualizar
-              </button>
-              <button class="btn btn-danger btn-sm" onclick="window.deleteMapa('${empId}')" style="padding: 4px 8px; font-size: 0.75rem;">
-                <i data-lucide="trash-2" style="width: 14px;"></i> Excluir
-              </button>
-            </div>
-          </td>
-        </tr>
-      `;
+      try { url = await getDownloadURL(item); } catch (e) {}
+      window._mapaPlantaUrls[empId] = url;
+      const rotulo = window.mapaPlantaRotulo(empId);
+      linhas.push(`<tr>
+        <td title="${esc(rotulo)}"><strong>${esc(rotulo)}</strong></td>
+        <td class="is-right" style="width: 120px; white-space: nowrap;">
+          <button type="button" class="tvig-ico" title="Visualizar" onclick="window.showProjectMap(window._mapaPlantaUrls['${empId}'] || '')">
+            <i data-lucide="eye" style="width:15px;height:15px;"></i>
+          </button>
+          <button type="button" class="tvig-ico" title="Editar" onclick="window.editarMapa('${empId}')">
+            <i data-lucide="pencil" style="width:15px;height:15px;"></i>
+          </button>
+          <button type="button" class="tvig-ico is-danger" title="Remover" onclick="window.deleteMapa('${empId}')">
+            <i data-lucide="trash-2" style="width:15px;height:15px;"></i>
+          </button>
+        </td>
+      </tr>`);
     }
-    
-    html += `</tbody></table></div>`;
-    container.innerHTML = html;
+    container.innerHTML = `<div class="table-container" style="max-height: 420px; overflow-y: auto;">
+      <table class="custom-table" style="font-size: 0.85rem; width: 100%;">
+        <thead><tr><th>Centro de custo</th><th class="is-right" style="width: 120px;">Ações</th></tr></thead>
+        <tbody>${linhas.join("")}</tbody>
+      </table>
+    </div>`;
     if (window.lucide) window.lucide.createIcons();
   } catch (err) {
-    container.innerHTML = `<div style="color: var(--color-danger); padding: 15px;">Erro ao carregar lista do Storage: ${err.message}</div>`;
+    container.innerHTML = `<div style="color: var(--color-danger); padding: 15px;">Erro ao carregar a lista: ${err.message}</div>`;
   }
 };
 
+window.editarMapa = function(empId) {
+  window._mapaPlantaSubstituir = String(empId || "");
+  const input = document.getElementById("mapa-file-replace");
+  if (!input) return;
+  input.value = "";
+  input.click();
+};
+
+window.substituirMapa = async function(input) {
+  const empId = window._mapaPlantaSubstituir || "";
+  const file = input && input.files && input.files[0];
+  if (!empId || !file) return;
+  try {
+    await window.mapaPlantaEnviar(empId, file);
+  } catch (err) {
+    const statusDiv = document.getElementById("mapa-upload-status");
+    if (statusDiv) {
+      statusDiv.style.color = "var(--color-danger)";
+      statusDiv.textContent = (err && err.message) || "Falha ao substituir a planta.";
+    }
+  }
+  if (input) input.value = "";
+};
+
 window.deleteMapa = async function(empId) {
-  if (!confirm(`Tem certeza que deseja excluir o projeto do empreendimento ${empId}?`)) return;
-  
+  const rotulo = window.mapaPlantaRotulo(empId);
+  const ok = typeof window.mouraConfirm === "function"
+    ? await window.mouraConfirm("Remover a planta de " + rotulo + "?")
+    : confirm("Remover a planta de " + rotulo + "?");
+  if (!ok) return;
   if (!window.firebaseStorage || !window.firebaseCollections) return;
   const { ref, deleteObject } = window.firebaseCollections;
-  const mapRef = ref(window.firebaseStorage, `mapas/${empId}.pdf`);
-  
-  deleteObject(mapRef).then(() => {
+  try {
+    await deleteObject(ref(window.firebaseStorage, "mapas/" + empId + ".pdf"));
     window.loadMapaList();
-  }).catch(err => {
-    alert("Erro ao excluir mapa: " + err.message);
-  });
+  } catch (err) {
+    alert("Erro ao remover a planta: " + err.message);
+  }
 };
 
 // --- Integração com KMZ (Google Earth) ---
 
+function kmzTag(node) {
+  return String((node && (node.localName || node.nodeName)) || "").replace(/^.*:/, "");
+}
+
+function kmzDirectText(node, tag) {
+  if (!node || !node.childNodes) return "";
+  for (const child of node.childNodes) {
+    if (child && child.nodeType === 1 && kmzTag(child) === tag) return String(child.textContent || "").trim();
+  }
+  return "";
+}
+
+function kmzCodigoEmpreendimento(name) {
+  const s = String(name || "").trim().replace(/\.kml$/i, "");
+  const m = s.match(/^(\d{4,6})$/);
+  return m ? m[1] : "";
+}
+
+function kmzEhQuadra(name) {
+  return /^poligono\s*\d+/i.test(String(name || "").trim());
+}
+
+function kmzEhPastaDeLotes(name) {
+  const n = String(name || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return n === "lotes" || n === "lote" || n === "pasta" || n === "unidades" || n === "unidade";
+}
+
+function kmzCoordsDoPlacemark(pm) {
+  let polygon = "";
+  let qualquer = "";
+  const scan = (node, noPoligono) => {
+    if (!node || !node.childNodes) return;
+    for (const child of node.childNodes) {
+      if (!child || child.nodeType !== 1) continue;
+      const tag = kmzTag(child);
+      if (tag === "coordinates") {
+        const text = String(child.textContent || "").trim().replace(/\s+/g, " ");
+        if (!text) continue;
+        if (noPoligono) {
+          if (text.length > polygon.length) polygon = text;
+        } else if (!qualquer) {
+          qualquer = text;
+        }
+      } else {
+        scan(child, noPoligono || tag === "Polygon");
+      }
+    }
+  };
+  scan(pm, false);
+  return polygon || qualquer;
+}
+
+function kmzCodigoNoNomeDoLote(name) {
+  const m = String(name || "").trim().match(/^(\d{4,6})\s*[-–]\s*\S+/);
+  return m ? m[1] : "";
+}
+
+function kmzPareceLote(name, empId) {
+  const raw = String(name || "").trim();
+  if (!raw || kmzEhQuadra(raw)) return false;
+  if (kmzCodigoNoNomeDoLote(raw)) return true;
+  if (empId && raw.replace(/\s/g, "").indexOf(String(empId)) === 0 && /[-–]/.test(raw)) return true;
+  return /^[A-Za-z0-9]+(?:\s*[-–]\s*[A-Za-z0-9]+)+$/.test(raw);
+}
+
+/** Lê a hierarquia: pasta do empreendimento, polígonos das quadras e pasta dos lotes. */
+function kmzLerDocumento(xmlDoc, empDoArquivo, grupos) {
+  const visitar = (node, emp, pastaLotes) => {
+    if (!node || !node.childNodes) return;
+    for (const child of node.childNodes) {
+      if (!child || child.nodeType !== 1) continue;
+      const tag = kmzTag(child);
+      if (tag === "Folder" || tag === "Document") {
+        const nome = kmzDirectText(child, "name");
+        const proxEmp = kmzCodigoEmpreendimento(nome) || emp;
+        const proxPasta = kmzEhPastaDeLotes(nome) || pastaLotes;
+        visitar(child, proxEmp, proxPasta);
+        continue;
+      }
+      if (tag !== "Placemark") {
+        visitar(child, emp, pastaLotes);
+        continue;
+      }
+      const nome = kmzDirectText(child, "name");
+      const coords = kmzCoordsDoPlacemark(child);
+      if (!nome || !coords) continue;
+      const empDoNome = kmzCodigoNoNomeDoLote(nome);
+      const codigo = emp || empDoNome || empDoArquivo;
+      if (!codigo) continue;
+      if (!grupos[codigo]) grupos[codigo] = { lots: [], quadras: [] };
+      if (kmzEhQuadra(nome) || (!pastaLotes && !kmzPareceLote(nome, codigo))) {
+        grupos[codigo].quadras.push({ name: nome, coords });
+      } else {
+        grupos[codigo].lots.push({ name: nome, coords });
+      }
+    }
+  };
+  if (xmlDoc && xmlDoc.documentElement) visitar(xmlDoc.documentElement, empDoArquivo || "", false);
+}
+
 async function uploadKMZ() {
-  const empId = document.getElementById('kmz-empreendimento-id').value.trim();
   const fileInput = document.getElementById('kmz-file-input');
   const statusDiv = document.getElementById('kmz-upload-status');
+  const esc = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-  if (!empId) {
-    statusDiv.textContent = "Erro: Preencha o Código do Empreendimento.";
-    statusDiv.style.color = "var(--color-danger)";
-    return;
-  }
-
-  if (fileInput.files.length === 0) {
-    statusDiv.textContent = "Erro: Selecione um arquivo .kmz.";
+  if (!fileInput || fileInput.files.length === 0) {
+    statusDiv.innerHTML = "Selecione um arquivo .kmz.";
     statusDiv.style.color = "var(--color-danger)";
     return;
   }
 
   const file = fileInput.files[0];
-  statusDiv.textContent = "Processando arquivo...";
+  statusDiv.innerHTML = "Lendo a hierarquia do arquivo…";
   statusDiv.style.color = "var(--color-primary)";
 
   try {
-    const zip = await JSZip.loadAsync(file);
-    const placemarks = [];
     const parser = new DOMParser();
-
-    const collectPlacemarkNodes = (node, out) => {
-      if (!node || !node.childNodes) return;
-      for (const child of node.childNodes) {
-        if (!child || child.nodeType !== 1) continue;
-        const localName = child.localName || child.nodeName;
-        if (localName === 'Placemark') {
-          out.push(child);
-        }
-        collectPlacemarkNodes(child, out);
-      }
-    };
-
-    for (const filename of Object.keys(zip.files)) {
-      if (filename.toLowerCase().endsWith('.kml')) {
+    const grupos = {};
+    const nomeBaixo = String(file.name || "").toLowerCase();
+    if (nomeBaixo.endsWith(".kml")) {
+      const xmlDoc = parser.parseFromString(await file.text(), "text/xml");
+      kmzLerDocumento(xmlDoc, kmzCodigoEmpreendimento(file.name), grupos);
+    } else {
+      const zip = await JSZip.loadAsync(file);
+      for (const filename of Object.keys(zip.files)) {
+        if (!filename.toLowerCase().endsWith(".kml") || zip.files[filename].dir) continue;
         const kmlContent = await zip.files[filename].async("string");
         const xmlDoc = parser.parseFromString(kmlContent, "text/xml");
-        const nodes = [];
-        collectPlacemarkNodes(xmlDoc.documentElement, nodes);
-
-        for (const pm of nodes) {
-          let nameNode = null;
-          let coordsNode = null;
-          const children = pm.getElementsByTagName("*");
-          for (let j = 0; j < children.length; j++) {
-            if (children[j].localName === "name" && !nameNode) nameNode = children[j];
-            if (children[j].localName === "coordinates" && !coordsNode) coordsNode = children[j];
-          }
-
-          if (nameNode && coordsNode) {
-            const name = nameNode.textContent.trim();
-            const coords = coordsNode.textContent.trim().replace(/\s+/g, ' ');
-            if (name && coords) {
-              placemarks.push({ name, coords });
-            }
-          }
-        }
+        const base = filename.split("/").pop();
+        kmzLerDocumento(xmlDoc, kmzCodigoEmpreendimento(base), grupos);
       }
     }
 
-    if (placemarks.length === 0) {
-      throw new Error("Nenhuma marcação (Placemark) com coordenada encontrada.");
+    const codigos = Object.keys(grupos).filter((id) => grupos[id].lots.length || grupos[id].quadras.length)
+      .sort((a, b) => Number(a) - Number(b));
+    if (!codigos.length) {
+      throw new Error("Não encontrei empreendimento nem lote. A pasta do centro precisa ter o código (12400) e os lotes no formato 12400-A-01.");
     }
 
-    const { doc, setDoc, ref, uploadBytes } = window.firebaseCollections;
+    const semLote = codigos.filter((id) => !grupos[id].lots.length);
+    if (semLote.length === codigos.length) {
+      throw new Error("Os polígonos das quadras foram lidos, mas nenhum lote dentro da pasta (ex.: 12400-A-01).");
+    }
 
-    const docRef = doc(window.firebaseDb, 'kmz_coordinates', empId);
-    await setDoc(docRef, {
-      empreendimento_id: empId,
-      placemarks: placemarks,
-      count: placemarks.length,
-      updatedAt: new Date().toISOString()
-    });
+    const { doc, setDoc } = window.firebaseCollections;
+    const agora = new Date().toISOString();
+    for (let i = 0; i < codigos.length; i++) {
+      const empId = codigos[i];
+      const pack = grupos[empId];
+      if (!pack.lots.length) continue;
+      statusDiv.innerHTML = "Gravando " + esc(empId) + " (" + (i + 1) + "/" + codigos.length + ")…";
+      const payload = {
+        empreendimento_id: empId,
+        placemarks: pack.lots,
+        quadras: pack.quadras,
+        count: pack.lots.length,
+        quadraCount: pack.quadras.length,
+        updatedAt: agora
+      };
+      const docRef = doc(window.firebaseDb, "kmz_coordinates", empId);
+      try {
+        await setDoc(docRef, payload);
+      } catch (e) {
+        await setDoc(docRef, {
+          empreendimento_id: empId,
+          placemarks: pack.lots,
+          quadras: [],
+          quadrasDoc: empId + "_quadras",
+          count: pack.lots.length,
+          quadraCount: pack.quadras.length,
+          updatedAt: agora
+        });
+        await setDoc(doc(window.firebaseDb, "kmz_coordinates", empId + "_quadras"), {
+          empreendimento_id: empId,
+          quadras: pack.quadras,
+          updatedAt: agora
+        });
+      }
+    }
 
-    statusDiv.textContent = `Sucesso! ${placemarks.length} lotes mapeados e salvos para o Empreendimento ${empId}.`;
-    statusDiv.style.color = "var(--color-success)";
+    const linhas = codigos.filter((id) => grupos[id].lots.length).map((id) => {
+      const g = grupos[id];
+      return "<div><strong>" + esc(id) + "</strong> · " + g.lots.length + " lote(s) · " + g.quadras.length + " quadra(s)</div>";
+    }).join("");
+    const aviso = semLote.length
+      ? "<div style=\"margin-top:6px;color:#b45309;\">Sem lote na pasta: " + esc(semLote.join(", ")) + ". Esses centros não foram substituídos.</div>"
+      : "";
+    statusDiv.innerHTML = "<div>Arquivo lido. Cada centro ficou separado pelo código da pasta.</div>" + linhas + aviso;
+    statusDiv.style.color = "var(--color-primary)";
     fileInput.value = "";
     loadKMZList();
-
-    try {
-      const storageRef = ref(window.firebaseStorage, `kmz/${empId}.kmz`);
-      uploadBytes(storageRef, file).catch(() => {
-        console.warn("Upload do arquivo .kmz bloqueado por CORS. As coordenadas já foram salvas.");
-      });
-    } catch (e) {
-      console.warn("Upload do arquivo .kmz bloqueado por CORS. Continuando apenas com as coordenadas.");
-    }
-
   } catch (err) {
     console.error(err);
-    statusDiv.textContent = "Erro: " + err.message;
+    statusDiv.innerHTML = esc(err.message || err);
     statusDiv.style.color = "var(--color-danger)";
   }
 }
 
+window.desenharQuadrasKmz = async function(map, empId) {
+  if (!map || !empId || !window.firebaseDb || !window.firebaseCollections || typeof L === "undefined") return;
+  try {
+    const { doc, getDoc } = window.firebaseCollections;
+    const snap = await getDoc(doc(window.firebaseDb, "kmz_coordinates", String(empId)));
+    if (!snap.exists()) return;
+    const data = snap.data() || {};
+    let quadras = Array.isArray(data.quadras) ? data.quadras : [];
+    if (!quadras.length && data.quadrasDoc) {
+      const extra = await getDoc(doc(window.firebaseDb, "kmz_coordinates", String(data.quadrasDoc)));
+      if (extra.exists()) quadras = (extra.data() || {}).quadras || [];
+    }
+    const poligono = (coords) => {
+      const pts = (window.parseKmzCoordPoints ? window.parseKmzCoordPoints(coords) : [])
+        .map((p) => [p.lat, p.lng])
+        .filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+      return pts.length >= 3 ? pts : null;
+    };
+    quadras.forEach((q) => {
+      const pts = poligono(q && (q.coords || q.coordinates));
+      if (!pts) return;
+      L.polygon(pts, {
+        color: "#f8fafc",
+        weight: 1.5,
+        fillColor: "#f37021",
+        fillOpacity: 0.14,
+        interactive: false
+      }).addTo(map);
+    });
+    (data.placemarks || []).forEach((p) => {
+      const pts = poligono(p && (p.coords || p.coordinates));
+      if (!pts) return;
+      L.polygon(pts, {
+        color: "#ffffff",
+        weight: 1,
+        fillOpacity: 0,
+        interactive: false
+      }).addTo(map);
+    });
+  } catch (e) {
+    console.warn("[KMZ] quadras", e);
+  }
+};
+
 async function loadKMZList() {
   const body = document.getElementById("kmz-list-body");
   if (!body) return;
-  body.innerHTML = '<tr><td colspan="3" style="text-align:center;">Carregando arquivos...</td></tr>';
+  body.innerHTML = '<tr><td colspan="4" style="text-align:center;">Carregando arquivos...</td></tr>';
   
   try {
     const { collection, getDocs } = window.firebaseCollections;
     const querySnapshot = await getDocs(collection(window.firebaseDb, "kmz_coordinates"));
     const data = [];
-    querySnapshot.forEach((doc) => {
-      data.push(doc.data());
+    querySnapshot.forEach((docSnap) => {
+      const item = docSnap.data() || {};
+      const id = String(item.empreendimento_id || docSnap.id || "");
+      if (!/^\d{4,6}$/.test(id)) return;
+      data.push(item);
     });
+    data.sort((a, b) => Number(a.empreendimento_id) - Number(b.empreendimento_id));
     
     if (data.length === 0) {
-      body.innerHTML = '<tr><td colspan="3" style="text-align:center;">Nenhum arquivo KMZ cadastrado no banco de dados.</td></tr>';
+      body.innerHTML = '<tr><td colspan="4" style="text-align:center;">Nenhum arquivo KMZ cadastrado no banco de dados.</td></tr>';
       return;
     }
     
     body.innerHTML = '';
     data.forEach(item => {
+      const lotes = item.count !== undefined ? item.count : (item.placemarks ? item.placemarks.length : 0);
+      const quadras = item.quadraCount !== undefined ? item.quadraCount : (item.quadras ? item.quadras.length : 0);
       const row = document.createElement('tr');
       row.innerHTML = `
         <td><strong>${item.empreendimento_id}</strong></td>
-        <td><span class="badge badge-info">${item.count !== undefined ? item.count : (item.placemarks ? item.placemarks.length : 0)} Lotes Sincronizados</span></td>
-        <td>
-          <button class="btn btn-danger btn-sm" onclick="deleteKMZ('${item.empreendimento_id}')">
-            <i data-lucide="trash-2" style="width: 14px;"></i> Excluir
+        <td><span class="badge badge-info">${lotes} lotes</span></td>
+        <td>${quadras ? quadras + " quadras" : "—"}</td>
+        <td class="is-right">
+          <button type="button" class="tvig-ico is-danger" title="Excluir" onclick="deleteKMZ('${item.empreendimento_id}')">
+            <i data-lucide="trash-2" style="width: 15px; height: 15px;"></i>
           </button>
         </td>
       `;
@@ -45106,7 +45461,7 @@ function abrirLoteGoogleEarth(lotName, coordinatesStr, empId = null) {
       const googleSatLeft = L.tileLayer('http://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{
         maxZoom: 21,
         subdomains:['mt0','mt1','mt2','mt3']
-      }).addTo(map);
+      });
 
       // Coordenadas SkyFi Iniciais (Bounding Box extraído do metadata.json)
       const defaultSkyfiBounds = [[-22.921611011537024, -48.48699912428856], [-22.900898680161365, -48.464992605149746]];
@@ -45122,7 +45477,7 @@ function abrirLoteGoogleEarth(lotName, coordinatesStr, empId = null) {
       // Camada 2 (Direita): SkyFi PNG usando as coordenadas calibradas
       const skyfiLayer = L.imageOverlay('uploads/skyfi.png', window.currentSkyfiBounds, {
         pane: 'skyfiPane'
-      }).addTo(map);
+      });
 
       // Funções globais de calibração
       window.calibrateSkyFi = function(dLng, dLat) {
@@ -45177,18 +45532,12 @@ function abrirLoteGoogleEarth(lotName, coordinatesStr, empId = null) {
           return div;
         }
       });
-      map.addControl(new CalibrationControl());
 
-      // Sobrescrever getContainer para retornar o painel (que tem as mesmas dimensões do mapa), 
+      // Sobrescrever getContainer para retornar o painel (que tem as mesmas dimensões do mapa),
       // assim o sideBySide corta o painel corretamente, em vez de tentar cortar a tag <img> deslocada.
       skyfiLayer.getContainer = function() {
         return map.getPane('skyfiPane');
       };
-
-      // Controle Side-by-Side
-      if (window.L.control.sideBySide) {
-         L.control.sideBySide(googleSatLeft, skyfiLayer).addTo(map);
-      }
       
       // Controle de Informação da Imagem SkyFi
       const captureDate = new Date("2026-05-04T17:33:13-03:00");
@@ -45211,7 +45560,19 @@ function abrirLoteGoogleEarth(lotName, coordinatesStr, empId = null) {
           `;
           return div;
       };
-      skyfiInfoControl.addTo(map);
+
+      // Comparação, ajuste fino e o prazo da captura SkyFi continuam aqui.
+      // false esconde os três do operador e deixa só o satélite do Google.
+      const mostrarComparacaoSkyFi = false;
+      if (mostrarComparacaoSkyFi) {
+        googleSatLeft.addTo(map);
+        skyfiLayer.addTo(map);
+        map.addControl(new CalibrationControl());
+        if (window.L.control.sideBySide) {
+          L.control.sideBySide(googleSatLeft, skyfiLayer).addTo(map);
+        }
+        skyfiInfoControl.addTo(map);
+      }
 
       // Adicionar marcador principal do lote clicado
       L.circleMarker([lat, lng], {
@@ -45221,6 +45582,8 @@ function abrirLoteGoogleEarth(lotName, coordinatesStr, empId = null) {
         fillOpacity: 1,
         radius: 8
       }).addTo(map);
+
+      if (empId && typeof window.desenharQuadrasKmz === "function") window.desenharQuadrasKmz(map, empId);
 
       // Renderizar os rótulos de TODOS os lotes se tivermos o ID do empreendimento
       if (empId) {
@@ -56555,51 +56918,17 @@ window.gerarMapaZeropaidPDF = async function() {
 
 
 window.uploadMapa = async function() {
-  const empIdInput = document.getElementById("mapa-empreendimento-id");
   const fileInput = document.getElementById("mapa-file-input");
   const statusDiv = document.getElementById("mapa-upload-status");
-
-  if (!empIdInput || !fileInput || !statusDiv) return;
-
-  const empId = empIdInput.value.trim();
-  if (!empId) {
-    statusDiv.style.color = "var(--color-danger)";
-    statusDiv.innerHTML = "Informe o ID do Empreendimento.";
-    return;
-  }
-
-  const file = fileInput.files[0];
-  if (!file) {
-    statusDiv.style.color = "var(--color-danger)";
-    statusDiv.innerHTML = "Selecione um arquivo (.pdf).";
-    return;
-  }
-
-  if (!file.name.toLowerCase().endsWith('.pdf')) {
-    statusDiv.style.color = "var(--color-danger)";
-    statusDiv.innerHTML = "Selecione um arquivo PDF vÃ¡lido.";
-    return;
-  }
-
-  statusDiv.style.color = "var(--color-primary)";
-  statusDiv.innerHTML = '<div class="loading-spinner" style="width:16px;height:16px;display:inline-block;vertical-align:middle;margin-right:8px;"></div> Processando arquivo...';
-
-  if (!window.firebaseStorage || !window.firebaseCollections) {
-    statusDiv.style.color = "var(--color-danger)";
-    statusDiv.innerHTML = "âŒ Erro: ServiÃ§o de nuvem indisponÃ­vel.";
-    return;
-  }
-
+  const empId = (window._mapaPlanta && window._mapaPlanta.id) || ((document.getElementById("mapa-empreendimento-id") || {}).value || "").trim();
+  const file = fileInput && fileInput.files && fileInput.files[0];
   try {
-      const storageRef = window.firebaseCollections.ref(window.firebaseStorage, `mapas/${empId}.pdf`);
-      await window.firebaseCollections.uploadBytes(storageRef, file);
-      
-      statusDiv.style.color = "#2e7d32";
-      statusDiv.innerHTML = "âœ… Projeto carregado com sucesso!";
-      fileInput.value = "";
-      if (window.loadMapaList) window.loadMapaList();
+    const ok = await window.mapaPlantaEnviar(empId, file);
+    if (ok && fileInput) fileInput.value = "";
   } catch (err) {
+    if (statusDiv) {
       statusDiv.style.color = "var(--color-danger)";
-      statusDiv.innerHTML = "âŒ Erro: " + (err && err.message ? err.message : 'Falha ao enviar ao Firebase Storage.');
+      statusDiv.textContent = (err && err.message) || "Falha ao enviar a planta.";
+    }
   }
 };
