@@ -45253,8 +45253,18 @@ async function uploadKMZ() {
   }
 
   const file = fileInput.files[0];
-  statusDiv.innerHTML = "Lendo a hierarquia do arquivo…";
-  statusDiv.style.color = "var(--color-primary)";
+  const kmzCarga = (texto, pct) => {
+    if (!statusDiv) return;
+    statusDiv.style.color = "";
+    if (!document.getElementById("kmz-load")) {
+      statusDiv.innerHTML = '<div class="ml-load" id="kmz-load"><div class="loading-spinner" aria-hidden="true"></div><div class="loading-status-text" id="kmz-load-text"></div><div class="ml-load-track"><div class="loading-progress-bar" id="kmz-load-bar" style="width:0%"></div></div></div>';
+    }
+    const rotulo = document.getElementById("kmz-load-text");
+    const barra = document.getElementById("kmz-load-bar");
+    if (rotulo) rotulo.textContent = texto;
+    if (barra) barra.style.width = Math.max(0, Math.min(100, pct)) + "%";
+  };
+  kmzCarga("Procurando lotes", 12);
 
   try {
     const parser = new DOMParser();
@@ -45271,6 +45281,7 @@ async function uploadKMZ() {
       if (xmlDoc.getElementsByTagName("parsererror").length) return;
       kmzLerDocumento(xmlDoc, empArquivo, grupos, stats);
     };
+    kmzCarga("Procurando lotes", 28);
     if (!zipado) {
       lerXml(await file.text(), kmzCodigoEmpreendimento(file.name));
     } else {
@@ -45282,6 +45293,7 @@ async function uploadKMZ() {
         lerXml(kmlContent, kmzCodigoEmpreendimento(base) || kmzCodigoEmpreendimento(file.name));
       }
     }
+    kmzCarga("Procurando lotes", 36);
 
     const codigos = Object.keys(grupos).filter((id) => grupos[id].lots.length || grupos[id].quadras.length)
       .sort((a, b) => Number(a) - Number(b));
@@ -45299,11 +45311,12 @@ async function uploadKMZ() {
 
     const { doc, setDoc } = window.firebaseCollections;
     const agora = new Date().toISOString();
-    for (let i = 0; i < codigos.length; i++) {
-      const empId = codigos[i];
+    const gravar = codigos.filter((id) => grupos[id].lots.length);
+    kmzCarga("Registrando coordenadas", 42);
+    for (let i = 0; i < gravar.length; i++) {
+      const empId = gravar[i];
       const pack = grupos[empId];
-      if (!pack.lots.length) continue;
-      statusDiv.innerHTML = "Gravando " + esc(empId) + " (" + (i + 1) + "/" + codigos.length + ")…";
+      kmzCarga("Registrando coordenadas", 42 + Math.round(((i + 1) / gravar.length) * 30));
       const payload = {
         empreendimento_id: empId,
         placemarks: pack.lots,
@@ -45333,17 +45346,13 @@ async function uploadKMZ() {
       }
     }
 
-    const linhas = codigos.filter((id) => grupos[id].lots.length).map((id) => {
-      const g = grupos[id];
-      return "<div><strong>" + esc(id) + "</strong> · " + g.lots.length + " lote(s) · " + g.quadras.length + " polígono(s)</div>";
-    }).join("");
-    const aviso = semLote.length
-      ? "<div style=\"margin-top:6px;color:#b45309;\">Sem lote na pasta: " + esc(semLote.join(", ")) + ". Esses centros não foram substituídos.</div>"
-      : "";
-    statusDiv.innerHTML = "<div>Arquivo lido. Cada centro ficou separado pelo código da pasta.</div>" + linhas + aviso;
-    statusDiv.style.color = "var(--color-primary)";
+    kmzCarga("Desenhando polígonos", 86);
     fileInput.value = "";
-    loadKMZList();
+    await loadKMZList();
+    kmzCarga("Desenhando polígonos", 100);
+    await new Promise((resolver) => setTimeout(resolver, 350));
+    statusDiv.innerHTML = "";
+    statusDiv.style.color = "";
   } catch (err) {
     console.error(err);
     statusDiv.innerHTML = esc(err.message || err);
@@ -45409,6 +45418,71 @@ window.desenharQuadrasKmz = async function(map, empId) {
   }
 };
 
+window.abrirMapaKmz = async function(empId) {
+  const id = String(empId || "");
+  const modal = document.getElementById("map-modal-overlay");
+  const title = document.getElementById("map-modal-title");
+  const box = document.getElementById("map-iframe-container");
+  if (!modal || !box || typeof L === "undefined") return;
+  const nome = kmzNomeCentro(id);
+  if (title) title.textContent = nome ? (id + " - " + nome) : id;
+  box.innerHTML = '<div id="leaflet-map-div" style="width:100%;height:100%;"></div>';
+  modal.style.display = "";
+  modal.classList.add("active");
+
+  let data = {};
+  try {
+    const { doc, getDoc } = window.firebaseCollections;
+    const snap = await getDoc(doc(window.firebaseDb, "kmz_coordinates", id));
+    if (snap.exists()) data = snap.data() || {};
+    if ((!data.quadras || !data.quadras.length) && data.quadrasDoc) {
+      const extra = await getDoc(doc(window.firebaseDb, "kmz_coordinates", String(data.quadrasDoc)));
+      if (extra.exists()) data.quadras = (extra.data() || {}).quadras || [];
+    }
+  } catch (e) {
+    console.warn("[KMZ] mapa", e);
+  }
+
+  setTimeout(() => {
+    if (window.leafletMapInstance) {
+      window.leafletMapInstance.remove();
+      window.leafletMapInstance = null;
+    }
+    const map = L.map("leaflet-map-div");
+    window.leafletMapInstance = map;
+    L.tileLayer("http://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}", {
+      maxZoom: 21,
+      subdomains: ["mt0", "mt1", "mt2", "mt3"]
+    }).addTo(map);
+    const limites = [];
+    const guardar = (coords) => {
+      const pts = (window.parseKmzCoordPoints ? window.parseKmzCoordPoints(coords) : [])
+        .map((p) => [p.lat, p.lng])
+        .filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+      pts.forEach((p) => limites.push(p));
+      return pts;
+    };
+    if (typeof window.desenharQuadrasKmz === "function") window.desenharQuadrasKmz(map, id);
+    (data.placemarks || []).forEach((p) => {
+      const pts = guardar(p && (p.coords || p.coordinates));
+      if (pts.length !== 1) return;
+      const nomeLote = String((p && (p.name || p.lot_name)) || "").trim();
+      const mark = L.circleMarker(pts[0], {
+        radius: 4,
+        color: "#854d0e",
+        weight: 1,
+        fillColor: "#facc15",
+        fillOpacity: 1
+      }).addTo(map);
+      if (nomeLote) mark.bindTooltip(nomeLote, { direction: "top" });
+    });
+    (data.quadras || []).forEach((q) => guardar(q && (q.coords || q.coordinates)));
+    if (limites.length) map.fitBounds(limites, { padding: [28, 28], maxZoom: 18 });
+    else map.setView([-14.2, -51.9], 4);
+    setTimeout(() => map.invalidateSize(), 180);
+  }, 60);
+};
+
 window._kmzListaOrdem = window._kmzListaOrdem || { campo: "id", dir: 1 };
 
 function kmzNomeCentro(id) {
@@ -45445,6 +45519,9 @@ function kmzPintarLista() {
       <td class="is-right">${item.lotes.toLocaleString("pt-BR")}</td>
       <td class="is-right">${item.poligonos.toLocaleString("pt-BR")}</td>
       <td class="kmz-acoes">
+        <button type="button" class="tvig-ico" title="Abrir mapa" onclick="abrirMapaKmz('${esc(item.id)}')">
+          <i data-lucide="eye" style="width: 15px; height: 15px;"></i>
+        </button>
         <button type="button" class="tvig-ico is-danger" title="Excluir" onclick="deleteKMZ('${esc(item.id)}')">
           <i data-lucide="trash-2" style="width: 15px; height: 15px;"></i>
         </button>

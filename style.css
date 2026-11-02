@@ -10674,7 +10674,6 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .fcnd-page .fcnd-ok { color: #105436; font-weight: 700; }
 .fcnd-pop-grade { display: grid; grid-template-columns: 140px 1fr; gap: 4px 12px; font-size: 0.88rem; margin: 0 0 12px; }
 .fcnd-pop-grade span { color: #64748b; }
-.kmz-page .kmz-help { margin: 0 0 12px; max-width: 920px; color: #64748b; font-size: 0.82rem; line-height: 1.45; }
 .kmz-page .cc-toolbar-actions { margin-left: 0; }
 .kmz-page .kmz-arquivo { flex: 1 1 320px; max-width: 480px; min-width: 240px; }
 .kmz-page .kmz-arquivo label { display: block; margin: 0 0 4px; font-size: 0.72rem; font-weight: 700; color: #475569; }
@@ -10684,7 +10683,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .kmz-page col.kmz-c-id { width: 72px; }
 .kmz-page col.kmz-c-nome { width: auto; }
 .kmz-page col.kmz-c-num { width: 110px; }
-.kmz-page col.kmz-c-acao { width: 64px; }
+.kmz-page col.kmz-c-acao { width: 88px; }
 .kmz-page .cc-table td.kmz-acoes { overflow: visible; text-align: center; white-space: nowrap; }
 .kmz-page .cc-table thead th.is-right { text-align: right; }
 .kmz-page .cc-table thead th.is-center { text-align: center; }
