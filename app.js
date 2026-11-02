@@ -45175,8 +45175,9 @@ function kmzEhLote(name, empId, pastaLotes) {
 }
 
 /**
- * Um KMZ só. Cada empreendimento é uma pasta ou um .kml (12400, 12800, 14100).
- * Os polígonos ficam no centro. A pasta Lotes traz a unidade inteira (14100-A-01).
+ * Um KMZ só. Cada empreendimento é uma pasta, como 13900.
+ * Os polígonos soltos ficam nessa pasta, mesmo quando a linha não fecha.
+ * A pasta Lotes, dentro do empreendimento, traz a unidade (13900-A-01).
  */
 function kmzXmlLegivel(xml) {
   let texto = String(xml || "").replace(/^\s*var\s+map\s*=.*$/gm, "");
@@ -45287,14 +45288,14 @@ async function uploadKMZ() {
       .sort((a, b) => Number(a) - Number(b));
     if (!codigos.length) {
       const avisoSolto = stats.soltos
-        ? " Li " + stats.soltos + " polígonos soltos, sem pasta de centro e sem pasta Lotes."
+        ? " Li " + stats.soltos + " polígonos soltos, sem a pasta do empreendimento e sem a pasta Lotes."
         : "";
-      throw new Error("Não encontrei empreendimento nem lote." + avisoSolto + " Salve o Meus lugares do Google Earth: cada centro é 12400, 12800 ou 14100, os polígonos ficam nele e a pasta Lotes traz a unidade, como 14100-A-01.");
+      throw new Error("Não encontrei empreendimento nem lote." + avisoSolto + " Cada empreendimento é uma pasta, como 13900. Os polígonos soltos ficam nela e a pasta Lotes traz a unidade, como 13900-A-01.");
     }
 
     const semLote = codigos.filter((id) => !grupos[id].lots.length);
     if (semLote.length === codigos.length) {
-      throw new Error("Os polígonos do centro foram lidos, mas a pasta Lotes não tem unidade no formato 14100-A-01.");
+      throw new Error("Os polígonos do centro foram lidos, mas a pasta Lotes não tem unidade no formato 13900-A-01.");
     }
 
     const { doc, setDoc } = window.firebaseCollections;
@@ -45335,7 +45336,7 @@ async function uploadKMZ() {
 
     const linhas = codigos.filter((id) => grupos[id].lots.length).map((id) => {
       const g = grupos[id];
-      return "<div><strong>" + esc(id) + "</strong> · " + g.lots.length + " lote(s) · " + g.quadras.length + " quadra(s)</div>";
+      return "<div><strong>" + esc(id) + "</strong> · " + g.lots.length + " lote(s) · " + g.quadras.length + " polígono(s)</div>";
     }).join("");
     const aviso = semLote.length
       ? "<div style=\"margin-top:6px;color:#b45309;\">Sem lote na pasta: " + esc(semLote.join(", ")) + ". Esses centros não foram substituídos.</div>"
@@ -45363,32 +45364,46 @@ window.desenharQuadrasKmz = async function(map, empId) {
       const extra = await getDoc(doc(window.firebaseDb, "kmz_coordinates", String(data.quadrasDoc)));
       if (extra.exists()) quadras = (extra.data() || {}).quadras || [];
     }
-    const poligono = (coords) => {
-      const pts = (window.parseKmzCoordPoints ? window.parseKmzCoordPoints(coords) : [])
+    const pontos = (coords) => {
+      return (window.parseKmzCoordPoints ? window.parseKmzCoordPoints(coords) : [])
         .map((p) => [p.lat, p.lng])
         .filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]));
-      return pts.length >= 3 ? pts : null;
+    };
+    const anelFechado = (pts) => {
+      if (pts.length < 4) return false;
+      const a = pts[0];
+      const b = pts[pts.length - 1];
+      return Math.abs(a[0] - b[0]) < 1e-5 && Math.abs(a[1] - b[1]) < 1e-5;
+    };
+    const desenharLimite = (coords, estilo) => {
+      const pts = pontos(coords);
+      if (pts.length < 2) return;
+      if (anelFechado(pts)) {
+        L.polygon(pts, estilo).addTo(map);
+        return;
+      }
+      L.polyline(pts, {
+        color: estilo.color,
+        weight: estilo.weight,
+        interactive: false
+      }).addTo(map);
     };
     quadras.forEach((q) => {
-      const pts = poligono(q && (q.coords || q.coordinates));
-      if (!pts) return;
-      L.polygon(pts, {
+      desenharLimite(q && (q.coords || q.coordinates), {
         color: "#f8fafc",
-        weight: 1.5,
+        weight: 2,
         fillColor: "#f37021",
         fillOpacity: 0.14,
         interactive: false
-      }).addTo(map);
+      });
     });
     (data.placemarks || []).forEach((p) => {
-      const pts = poligono(p && (p.coords || p.coordinates));
-      if (!pts) return;
-      L.polygon(pts, {
+      desenharLimite(p && (p.coords || p.coordinates), {
         color: "#ffffff",
         weight: 1,
         fillOpacity: 0,
         interactive: false
-      }).addTo(map);
+      });
     });
   } catch (e) {
     console.warn("[KMZ] quadras", e);
@@ -45425,7 +45440,7 @@ async function loadKMZList() {
       row.innerHTML = `
         <td><strong>${item.empreendimento_id}</strong></td>
         <td><span class="badge badge-info">${lotes} lotes</span></td>
-        <td>${quadras ? quadras + " quadras" : "—"}</td>
+        <td>${quadras ? quadras + " polígonos" : "—"}</td>
         <td class="is-right">
           <button type="button" class="tvig-ico is-danger" title="Excluir" onclick="deleteKMZ('${item.empreendimento_id}')">
             <i data-lucide="trash-2" style="width: 15px; height: 15px;"></i>
