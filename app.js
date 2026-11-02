@@ -45175,9 +45175,8 @@ function kmzEhLote(name, empId, pastaLotes) {
 }
 
 /**
- * Um KMZ só. Cada empreendimento é uma pasta, como 13900.
- * Os polígonos soltos ficam nessa pasta, mesmo quando a linha não fecha.
- * A pasta Lotes, dentro do empreendimento, traz a unidade (13900-A-01).
+ * Um KMZ só, salvo de Meus lugares.
+ * Pasta 12400 > documento 12400.kml > polígonos soltos e pasta Lotes (12400-A-01).
  */
 function kmzXmlLegivel(xml) {
   let texto = String(xml || "").replace(/^\s*var\s+map\s*=.*$/gm, "");
@@ -45288,9 +45287,9 @@ async function uploadKMZ() {
       .sort((a, b) => Number(a) - Number(b));
     if (!codigos.length) {
       const avisoSolto = stats.soltos
-        ? " Li " + stats.soltos + " polígonos soltos, sem a pasta do empreendimento e sem a pasta Lotes."
+        ? " Li " + stats.soltos + " polígonos soltos, no desenho do Metrica."
         : "";
-      throw new Error("Não encontrei empreendimento nem lote." + avisoSolto + " Cada empreendimento é uma pasta, como 13900. Os polígonos soltos ficam nela e a pasta Lotes traz a unidade, como 13900-A-01.");
+      throw new Error("Não encontrei a pasta do centro nem a pasta Lotes." + avisoSolto + " Salve Meus lugares como .kmz. A hierarquia é a pasta 12400, dentro o 12400.kml, com os polígonos e a pasta Lotes, como 12400-A-01.");
     }
 
     const semLote = codigos.filter((id) => !grupos[id].lots.length);
