@@ -45178,6 +45178,14 @@ function kmzEhLote(name, empId, pastaLotes) {
  * Um KMZ só. Cada empreendimento é uma pasta ou um .kml (12400, 12800, 14100).
  * Os polígonos ficam no centro. A pasta Lotes traz a unidade inteira (14100-A-01).
  */
+function kmzXmlLegivel(xml) {
+  let texto = String(xml || "").replace(/^\s*var\s+map\s*=.*$/gm, "");
+  if (/<gx:/i.test(texto) && !/xmlns:gx\s*=/i.test(texto)) {
+    texto = texto.replace(/<kml\b/i, '<kml xmlns:gx="http://www.google.com/kml/ext/2.2"');
+  }
+  return texto;
+}
+
 function kmzLerDocumento(xmlDoc, empDoArquivo, grupos, stats) {
   const itens = [];
   let seq = 0;
@@ -45255,7 +45263,11 @@ async function uploadKMZ() {
     const cabeca = new Uint8Array(await file.slice(0, 4).arrayBuffer());
     const zipado = cabeca[0] === 0x50 && cabeca[1] === 0x4b;
     const lerXml = (xml, empArquivo) => {
-      const xmlDoc = parser.parseFromString(xml, "text/xml");
+      const texto = kmzXmlLegivel(xml);
+      let xmlDoc = parser.parseFromString(texto, "text/xml");
+      if (xmlDoc.getElementsByTagName("parsererror").length) {
+        xmlDoc = parser.parseFromString(texto.replace(/<\/?gx:/gi, (marca) => marca.replace(/gx:/i, "")), "text/xml");
+      }
       if (xmlDoc.getElementsByTagName("parsererror").length) return;
       kmzLerDocumento(xmlDoc, empArquivo, grupos, stats);
     };
