@@ -45409,49 +45409,90 @@ window.desenharQuadrasKmz = async function(map, empId) {
   }
 };
 
+window._kmzListaOrdem = window._kmzListaOrdem || { campo: "id", dir: 1 };
+
+function kmzNomeCentro(id) {
+  const listas = [];
+  if (Array.isArray(window._mapaPlantaCentros)) listas.push(window._mapaPlantaCentros);
+  const app = window.AppState && (AppState.cachedCostCenters || AppState.costCenters);
+  if (Array.isArray(app)) listas.push(app);
+  for (let i = 0; i < listas.length; i++) {
+    const hit = listas[i].find((c) => c && String(c.id) === String(id));
+    const nome = hit && (hit.name || hit.description);
+    if (nome) return String(nome);
+  }
+  return "";
+}
+
+function kmzPintarLista() {
+  const body = document.getElementById("kmz-list-body");
+  if (!body) return;
+  const esc = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const ord = window._kmzListaOrdem || { campo: "id", dir: 1 };
+  const rows = (window._kmzLista || []).slice().sort((a, b) => {
+    if (ord.campo === "nome") return a.nome.localeCompare(b.nome, "pt") * ord.dir || (a.id - b.id);
+    return (Number(a[ord.campo]) - Number(b[ord.campo])) * ord.dir || (a.id - b.id);
+  });
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="5" class="is-center">Nenhum centro de custo com lotes e polígonos.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map((item) => {
+    const nome = item.nome || "—";
+    return `<tr>
+      <td><strong>${esc(item.id)}</strong></td>
+      <td class="cc-nome" title="${esc(item.nome)}">${esc(nome)}</td>
+      <td class="is-right">${item.lotes.toLocaleString("pt-BR")}</td>
+      <td class="is-right">${item.poligonos.toLocaleString("pt-BR")}</td>
+      <td class="kmz-acoes">
+        <button type="button" class="tvig-ico is-danger" title="Excluir" onclick="deleteKMZ('${esc(item.id)}')">
+          <i data-lucide="trash-2" style="width: 15px; height: 15px;"></i>
+        </button>
+      </td>
+    </tr>`;
+  }).join("");
+  if (window.lucide) lucide.createIcons();
+}
+
+window.kmzOrdenarLista = function(campo) {
+  const ord = window._kmzListaOrdem || { campo: "id", dir: 1 };
+  if (ord.campo === campo) ord.dir = -ord.dir;
+  else {
+    ord.campo = campo;
+    ord.dir = 1;
+  }
+  window._kmzListaOrdem = ord;
+  kmzPintarLista();
+};
+
 async function loadKMZList() {
   const body = document.getElementById("kmz-list-body");
   if (!body) return;
-  body.innerHTML = '<tr><td colspan="4" style="text-align:center;">Carregando arquivos...</td></tr>';
-  
+  body.innerHTML = '<tr><td colspan="5" class="is-center">Carregando centros de custo...</td></tr>';
+
   try {
+    if (window.mapaPlantaCarregarCentros) {
+      try { await window.mapaPlantaCarregarCentros(); } catch (e) {}
+    }
     const { collection, getDocs } = window.firebaseCollections;
     const querySnapshot = await getDocs(collection(window.firebaseDb, "kmz_coordinates"));
-    const data = [];
+    const porId = {};
     querySnapshot.forEach((docSnap) => {
       const item = docSnap.data() || {};
       const id = String(item.empreendimento_id || docSnap.id || "");
       if (!/^\d{4,6}$/.test(id)) return;
-      data.push(item);
+      const lotes = Number(item.count !== undefined ? item.count : (item.placemarks ? item.placemarks.length : 0)) || 0;
+      const poligonos = Number(item.quadraCount !== undefined ? item.quadraCount : (item.quadras ? item.quadras.length : 0)) || 0;
+      if (lotes <= 0 || poligonos <= 0) return;
+      const atual = porId[id];
+      if (atual && atual.lotes + atual.poligonos >= lotes + poligonos) return;
+      porId[id] = { id: Number(id), nome: kmzNomeCentro(id), lotes: lotes, poligonos: poligonos };
     });
-    data.sort((a, b) => Number(a.empreendimento_id) - Number(b.empreendimento_id));
-    
-    if (data.length === 0) {
-      body.innerHTML = '<tr><td colspan="4" style="text-align:center;">Nenhum arquivo KMZ cadastrado no banco de dados.</td></tr>';
-      return;
-    }
-    
-    body.innerHTML = '';
-    data.forEach(item => {
-      const lotes = item.count !== undefined ? item.count : (item.placemarks ? item.placemarks.length : 0);
-      const quadras = item.quadraCount !== undefined ? item.quadraCount : (item.quadras ? item.quadras.length : 0);
-      const row = document.createElement('tr');
-      row.innerHTML = `
-        <td><strong>${item.empreendimento_id}</strong></td>
-        <td><span class="badge badge-info">${lotes} lotes</span></td>
-        <td>${quadras ? quadras + " polígonos" : "—"}</td>
-        <td class="is-right">
-          <button type="button" class="tvig-ico is-danger" title="Excluir" onclick="deleteKMZ('${item.empreendimento_id}')">
-            <i data-lucide="trash-2" style="width: 15px; height: 15px;"></i>
-          </button>
-        </td>
-      `;
-      body.appendChild(row);
-    });
-    if (window.lucide) lucide.createIcons();
+    window._kmzLista = Object.keys(porId).map((id) => porId[id]);
+    kmzPintarLista();
   } catch (error) {
     console.error("Erro ao carregar lista de KMZ:", error);
-    body.innerHTML = '<tr><td colspan="4" style="text-align:center; color:red;">Erro ao carregar arquivos KMZ.</td></tr>';
+    body.innerHTML = '<tr><td colspan="5" class="is-center" style="color:#b91c1c;">Erro ao carregar os centros de custo.</td></tr>';
   }
 }
 
