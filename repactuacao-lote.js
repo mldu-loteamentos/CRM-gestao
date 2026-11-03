@@ -1511,9 +1511,9 @@ const RepactuacaoLoteApp = {
       if (!id && !nome) return;
       const chave = id || nome;
       if (map.has(chave)) return;
-      map.set(chave, { id: chave, label: nome ? nome.toUpperCase() : chave });
+      map.set(chave, { id: chave, label: this.rotuloObra(chave, nome) });
     });
-    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+    return Array.from(map.values()).sort((a, b) => this.ordemObra(a.id, b.id) || a.label.localeCompare(b.label, "pt-BR"));
   },
 
   itensIndexador() {
@@ -1728,6 +1728,25 @@ const RepactuacaoLoteApp = {
     }).join("")}</div>`;
   },
 
+  /** ID e nome no padrão do centro de custo: 14100 - BOTUCATU - PARQUE CIDADE. */
+  rotuloObra(id, nome) {
+    const n = String(nome || "").trim();
+    const num = String(id || "").replace(/\D/g, "");
+    const nomeOk = !!n && n !== "—";
+    if (num && nomeOk && n.replace(/\D/g, "") !== num && !n.startsWith(num + " - ") && !n.startsWith(num + " — ")) {
+      return num + " - " + n;
+    }
+    if (nomeOk) return n;
+    return num || "—";
+  },
+
+  ordemObra(a, b) {
+    const na = Number(String(a || "").replace(/\D/g, "")) || 0;
+    const nb = Number(String(b || "").replace(/\D/g, "")) || 0;
+    if (na && nb && na !== nb) return na - nb;
+    return 0;
+  },
+
   resumoArvoreHtml() {
     const grupos = this.gruposDimensao();
     const empresas = new Map();
@@ -1748,7 +1767,7 @@ const RepactuacaoLoteApp = {
     return `<div class="repac-arv">${emps.map((emp) => {
       const ek = "e:" + emp.id;
       const aberto = !!this.state.resumoAbertos[ek];
-      const obras = [...emp.obras.values()].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+      const obras = [...emp.obras.values()].sort((a, b) => this.ordemObra(a.id, b.id) || a.nome.localeCompare(b.nome, "pt-BR"));
       const miolo = aberto ? obras.map((obra) => {
         const ok = "o:" + emp.id + ":" + obra.id;
         const oAberto = !!this.state.resumoAbertos[ok];
@@ -1756,10 +1775,11 @@ const RepactuacaoLoteApp = {
           const idx = this.textoIndexador(g);
           return `<div class="repac-arv-tit"><b>${this.esc(g.titulo || "—")}</b><span>${this.esc(g.cliente || "—")}</span><em title="${this.esc(idx.title)}">${this.esc(idx.texto)}</em></div>`;
         }).join("") : "";
+        const rotuloObra = this.rotuloObra(obra.id, obra.nome);
         return `<div class="repac-arv-obra">
           <button type="button" class="repac-arv-row" onclick="RepactuacaoLoteApp.toggleResumo('${encodeURIComponent(ok)}')">
             <i data-lucide="chevron-right" class="repac-seta${oAberto ? " is-open" : ""}"></i>
-            <span class="repac-arv-nome" title="${this.esc(obra.nome)}">${this.esc(obra.nome)}</span>
+            <span class="repac-arv-nome" title="${this.esc(rotuloObra)}">${this.esc(rotuloObra)}</span>
             <span class="repac-arv-contas">${this.pillsIdx(obra.grupos)}</span>
           </button>
           ${tits}
@@ -1822,6 +1842,7 @@ const RepactuacaoLoteApp = {
       const parcTitle = `${g.parcelas.length} parcelas · ${faixa}${conferidas ? ` · ${conferidas} conferida${conferidas === 1 ? "" : "s"}` : ""}`;
       const idx = this.textoIndexador(g);
       const base = this.textoDataBase(g);
+      const obraTxt = this.rotuloObra(g.obraId || g.ccId, g.empreendimento);
       const baseClass = base.ruim ? "color:#b91c1c;font-weight:700;" : (base.ok ? "color:#15803d;" : "");
       return `<tr class="repac-tit${aberto ? " is-open" : ""}" onclick="RepactuacaoLoteApp.toggleTitulo('${encodeURIComponent(g.key)}')">
         <td class="repac-seta-cel"><i data-lucide="chevron-right" class="repac-seta"></i></td>
@@ -1829,7 +1850,7 @@ const RepactuacaoLoteApp = {
         <td class="repac-elipse" title="${this.esc(g.cliente)}">${this.esc(g.cliente)}</td>
         <td class="repac-elipse repac-empresa" title="${this.esc(g.empresa || "")}">${this.esc(g.empresa || "—")}</td>
         <td class="repac-elipse" title="${this.esc(g.documento || "")}">${this.esc(g.documento || "—")}</td>
-        <td class="repac-elipse" title="${this.esc(g.empreendimento || "")}">${this.esc(g.empreendimento || "—")}</td>
+        <td class="repac-elipse" title="${this.esc(obraTxt)}">${this.esc(obraTxt)}</td>
         <td class="repac-elipse" title="${this.esc(idx.title)}">${this.esc(idx.texto)}</td>
         <td>${this.esc(this.textoRetro(g))}</td>
         <td class="repac-elipse" style="${baseClass}" title="${this.esc(base.title)}">${this.esc(base.texto)}</td>

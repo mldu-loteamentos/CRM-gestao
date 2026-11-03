@@ -48335,6 +48335,38 @@ window.searchRelacionamento = async function() {
       return val;
     }
 
+    function nomeUnidadeDe(src) {
+      if (!src) return "";
+      const emp = String(src.enterpriseId || "").replace(/\D/g, "");
+      const limpa = (v) => {
+        let t = String(v || "").replace(/^Quadra-Lote:\s*/i, "").trim();
+        if (!t || t === "N/D" || t === "-" || t === "—") return "";
+        if (emp && t.startsWith(emp + " - ")) t = t.slice(emp.length + 3).trim();
+        else if (emp && t.startsWith(emp + "-")) t = t.slice(emp.length + 1).trim();
+        else if (emp && t.startsWith(emp + " ")) t = t.slice(emp.length + 1).trim();
+        if (!t || (emp && t.replace(/\D/g, "") === emp && !/[a-zA-Z]/.test(t))) return "";
+        return t;
+      };
+      let nome = limpa(src.unitName || src.unityName);
+      if (!nome && typeof src.units === "string") nome = limpa(src.units);
+      if (!nome && src.block && src.lot) nome = limpa(String(src.block).trim() + "-" + String(src.lot).trim());
+      const lista = src.salesContractUnits || (Array.isArray(src.units) ? src.units : null) || src.salesContractBuildings || [];
+      if (!nome && Array.isArray(lista) && lista.length) {
+        const u = lista.find((x) => x && (x.main === true || x.main === "true" || x.main === "S")) || lista[0];
+        if (u && typeof u === "object") {
+          nome = limpa(u.name || u.unitName || u.unityName);
+          if (!nome && u.block && u.lot) nome = limpa(String(u.block).trim() + "-" + String(u.lot).trim());
+        }
+      }
+      if (!nome && src.unitId) {
+        const bruto = String(src.unitId).trim();
+        const partes = bruto.split("-");
+        const deChave = partes.length >= 3 && partes[0] === "U" ? partes.slice(2).join("-") : bruto;
+        if (/[a-zA-Z]/.test(deChave) || deChave.includes("-")) nome = limpa(deChave);
+      }
+      return nome;
+    }
+
     results = await Promise.all(contratos.map(async c => {
        const tituloId = c.receivableBillId || c.contractNumber || c.id;
 
@@ -48358,12 +48390,7 @@ window.searchRelacionamento = async function() {
        let ccObj = allCcs.find(cc => String(cc.id) === empStr);
        let empName = ccObj ? `${ccObj.id} - ${ccObj.name}` : empStr;
 
-       let unitStr = (c.unitName || c.unityName || '').replace('Quadra-Lote: ', '').trim();
-       if (!unitStr && c.block && c.lot) {
-           unitStr = `${c.block}-${c.lot}`;
-       } else if (!unitStr && c.unitId) {
-           unitStr = c.unitId;
-       }
+       let unitStr = nomeUnidadeDe(c);
 
        // Resgatar todos os dados reais do receivable-bills (extrato analítico) que pertencem a este contrato
        const contractBills = receivableBills.filter(b => String(b._matchedContractId) === String(c.id));
@@ -48371,9 +48398,16 @@ window.searchRelacionamento = async function() {
        // Vamos pegar o 'rb' primário para usar como referência de unidade/documento, se houver
        const rb = contractBills.length > 0 ? contractBills[0] : null;
        
-       if (rb && rb.unityName) {
-           let rbUnit = rb.unityName.replace('Quadra-Lote: ', '').trim();
-           let cUnit = (c.unitName || c.unityName || '').replace('Quadra-Lote: ', '').trim();
+       if (rb && (rb.unityName || rb.unitName || rb.units)) {
+           let rbUnit = nomeUnidadeDe({
+             enterpriseId: rb.enterpriseId || c.enterpriseId,
+             unityName: rb.unityName,
+             unitName: rb.unitName,
+             units: rb.units,
+             block: rb.block,
+             lot: rb.lot
+           });
+           let cUnit = unitStr;
            
            if (cUnit && rbUnit && !rbUnit.includes(cUnit) && !cUnit.includes(rbUnit)) {
                unitStr = `${cUnit} - ${rbUnit}`;
@@ -48387,6 +48421,15 @@ window.searchRelacionamento = async function() {
 
        if (isTarget && targetUnityName) {
            unitStr = targetUnityName.replace('Quadra-Lote: ', '').trim();
+       }
+
+       // O título a receber fica no cliente principal. No secundário a lista de títulos vem vazia e a unidade some.
+       if (!unitStr && c.receivableBillId && typeof window.relSiengeGet === "function") {
+           try {
+               const bill = await window.relSiengeGet("/accounts-receivable/receivable-bills/" + encodeURIComponent(c.receivableBillId));
+               const fromBill = nomeUnidadeDe(Object.assign({ enterpriseId: c.enterpriseId }, bill || {}));
+               if (fromBill) unitStr = fromBill;
+           } catch (e) {}
        }
 
        let realContractStr = '-';

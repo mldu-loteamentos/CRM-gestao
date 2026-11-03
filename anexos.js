@@ -626,6 +626,143 @@ async function anexosFingerprintFromCanvas(canvas, ocrText) {
   return { phrases, phraseKey: phrases.slice(0, 12).join(' '), colors, aspect };
 }
 
+function anexosTagEhCessao(tags) {
+  return (tags || []).some((t) => /CESS[AÃ]O/i.test(String(t || "")));
+}
+
+function anexosTextoCessao(s) {
+  return String(s || "")
+    .toUpperCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function anexosNormParte(s) {
+  return anexosTextoCessao(s)
+    .replace(/[^A-Z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function anexosNomeDeQualificacao(trecho) {
+  let n = anexosNormParte(trecho)
+    .replace(/^(DE UM LADO|DE OUTRO LADO|E)\s+/, "")
+    .trim();
+  const corte = n.split(/\b(BRASILEIR\w*|INSCRIT\w*|PORTADOR\w*|CPF|CNPJ|RESIDENTE\w*|DOMICILIAD\w*|CASAD\w*|SOLTEIR\w*|DIVORCIAD\w*|VIUV\w*|SEPARAD\w*|EMPRESARI\w*|APOSENTAD\w*|NACIONALIDADE)\b/)[0].trim();
+  n = corte.replace(/[,\s]+$/, "").trim();
+  if (n.length < 5) return "";
+  return n;
+}
+
+function anexosNomesDeTrecho(trecho) {
+  const bruto = anexosTextoCessao(trecho);
+  if (!bruto) return [];
+  return [...new Set(bruto.split(/\s*;\s+(?:E\s+)?/).map(anexosNomeDeQualificacao).filter(Boolean))].sort();
+}
+
+function anexosPartesDeTexto(texto) {
+  const n = anexosTextoCessao(texto);
+  if (!n) return { ok: false, cedentes: [], cessionarios: [] };
+  const um = n.match(/DE UM LADO (.+?) DE ORA EM DIANTE CHAMAD/);
+  const outro = n.match(/DE OUTRO LADO,? (.+?) DE ORA EM DIANTE DENOMINAD/);
+  const cedentes = anexosNomesDeTrecho(um ? um[1] : "");
+  const cessionarios = anexosNomesDeTrecho(outro ? outro[1] : "");
+  return { ok: cedentes.length > 0 && cessionarios.length > 0, cedentes, cessionarios };
+}
+
+function anexosPartesNormalizadas(cedentes, cessionarios) {
+  const ced = [...new Set((cedentes || []).map(anexosNormParte).filter((x) => x.length >= 5))].sort();
+  const ces = [...new Set((cessionarios || []).map(anexosNormParte).filter((x) => x.length >= 5))].sort();
+  return { ok: ced.length > 0 && ces.length > 0, cedentes: ced, cessionarios: ces };
+}
+
+async function anexosTextoPdf(buf) {
+  const pdfjsLib = window["pdfjs-dist/build/pdf"];
+  if (!pdfjsLib || !buf) return "";
+  const pdf = await pdfjsLib.getDocument({ data: buf.slice(0) }).promise;
+  try {
+    const n = Math.min(pdf.numPages || 1, 2);
+    let texto = "";
+    for (let i = 1; i <= n; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      texto += (content.items || []).map((it) => it.str || "").join(" ") + "\n";
+    }
+    return texto;
+  } finally {
+    try { pdf.destroy(); } catch (e) {}
+  }
+}
+
+async function anexosImagemCessao(fileObj, buf) {
+  const ext = String(fileObj && fileObj.ext || "").toLowerCase();
+  if (["jpg", "jpeg", "png"].includes(ext) && fileObj.base64) return fileObj.base64;
+  const pdfjsLib = window["pdfjs-dist/build/pdf"];
+  if (!pdfjsLib || !buf) return "";
+  const pdf = await pdfjsLib.getDocument({ data: buf.slice(0) }).promise;
+  try {
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: 1.4 });
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+    return canvas.toDataURL("image/jpeg", 0.8);
+  } finally {
+    try { pdf.destroy(); } catch (e) {}
+  }
+}
+
+async function anexosPartesCessaoOcr(imagem) {
+  if (!imagem) return { ok: false, cedentes: [], cessionarios: [] };
+  const res = await fetch(anexosApiUrl("/api/ocr/classify"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ image_data: imagem, modo: "cessao-partes" })
+  });
+  const data = await res.json().catch(() => ({}));
+  return anexosPartesNormalizadas(data.cedentes, data.cessionarios);
+}
+
+async function anexosPrepararComparacaoCessao(fileObj) {
+  if (!fileObj || fileObj._cessaoLendo || fileObj._cessaoPronto) return;
+  if (!anexosTagEhCessao(fileObj.tags)) return;
+  fileObj._cessaoLendo = true;
+  try {
+    let hash = "";
+    let buf = null;
+    if (fileObj.file && fileObj.file.size > 0) {
+      buf = new Uint8Array(await fileObj.file.arrayBuffer());
+      if (window.AnexosApp && typeof AnexosApp.sha256Arquivo === "function") {
+        hash = await AnexosApp.sha256Arquivo(buf);
+        fileObj._arquivoHash = hash;
+      }
+    }
+    let partes = { ok: false, cedentes: [], cessionarios: [] };
+    if (buf && String(fileObj.ext || "").toLowerCase() === "pdf") {
+      partes = anexosPartesDeTexto(await anexosTextoPdf(buf));
+    }
+    if (!partes.ok) {
+      const imagem = await anexosImagemCessao(fileObj, buf);
+      partes = await anexosPartesCessaoOcr(imagem);
+    }
+    fileObj._cessaoPartes = partes;
+    fileObj._arquivoHash = hash;
+    if (partes.ok) fileObj._cessaoChave = "p:" + partes.cedentes.join("|") + ">" + partes.cessionarios.join("|");
+    else if (hash) fileObj._cessaoChave = "h:" + hash;
+    else fileObj._cessaoChave = "n:" + String(fileObj.originalName || "") + ":" + String(fileObj.size || "");
+  } catch (e) {
+    fileObj._cessaoChave = fileObj._arquivoHash
+      ? "h:" + fileObj._arquivoHash
+      : "n:" + String(fileObj.originalName || "") + ":" + String(fileObj.size || "");
+  } finally {
+    fileObj._cessaoLendo = false;
+    fileObj._cessaoPronto = true;
+    if (window.AnexosApp && typeof AnexosApp.checkCanSend === "function") AnexosApp.checkCanSend();
+  }
+}
+
 function anexosMatchTagMemory(fp) {
   const mem = AnexosState.tagMemory || [];
   if (!fp || !mem.length) return '';
@@ -4211,10 +4348,29 @@ const AnexosApp = {
     // Verifica duplicidades
     const seenKeys = new Set();
     let hasDuplicates = false;
+    let hasCessaoIgual = false;
+    let cessaoPendente = false;
     let hasMissingTarget = false;
+    const prontos = AnexosState.files.filter(f => f.status === 'Pronto' || f.status === 'Enviado' || isModal);
+    const cessoes = prontos.filter(f => anexosTagEhCessao(f.tags));
+    const comparaCessao = cessoes.length > 1;
     
     AnexosState.files.forEach(f => {
       if (f.status === 'Pronto' || f.status === 'Enviado' || isModal) {
+        if (anexosTagEhCessao(f.tags) && comparaCessao) {
+          if (!f._cessaoPronto) {
+            anexosPrepararComparacaoCessao(f);
+            cessaoPendente = true;
+            return;
+          }
+          const uniqueKey = "cessao__" + (f._cessaoChave || ("n:" + f.id));
+          if (seenKeys.has(uniqueKey)) {
+            hasDuplicates = true;
+            hasCessaoIgual = true;
+          }
+          seenKeys.add(uniqueKey);
+          return;
+        }
         let mainTag = AnexosState.tagsAtivas.find(t => t.name === f.tags[0]);
         let isClienteDest = mainTag && mainTag.destino === 'Cliente';
         
@@ -4241,6 +4397,7 @@ const AnexosApp = {
 
     const canSend = AnexosState.files.length > 0 && 
                     !hasDuplicates && 
+                    !cessaoPendente &&
                     !hasMissingTarget &&
                     !needsTagConfirm &&
                     AnexosState.files.every(f => {
@@ -4265,8 +4422,12 @@ const AnexosApp = {
           hint.innerText = 'Preencha a data em todos os arquivos para enviar';
         } else if (hasMissingTarget) {
           hint.innerText = 'Selecione ao menos um cliente alvo para os documentos de Pessoa/Cliente';
+        } else if (cessaoPendente) {
+          hint.innerText = 'Conferindo cedentes e cessionários das cessões...';
         } else if (hasDuplicates) {
-          hint.innerText = 'Erro: Você não pode usar a mesma TAG para a mesma pessoa/unidade.';
+          hint.innerText = hasCessaoIgual
+            ? 'Erro: Já existe uma cessão com os mesmos cedentes e cessionários.'
+            : 'Erro: Você não pode usar a mesma TAG para a mesma pessoa/unidade.';
         } else if (needsTagConfirm) {
           hint.innerText = 'Confirme se a tag automática está correta (Acertei a tag?)';
         } else if (!isModal) {

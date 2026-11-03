@@ -816,6 +816,43 @@ const server = http.createServer(async (req, res) => {
       if (pathRoute === '/api/ocr/classify' && req.method === 'POST') {
         const body = await getJsonBody(req);
         
+        if (body.modo === 'cessao-partes') {
+          if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY.includes('COLOQUE_SUA_CHAVE')) {
+            return sendJson(res, 200, { cedentes: [], cessionarios: [] });
+          }
+          const partesRes = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+            },
+            body: JSON.stringify({
+              model: 'gpt-4o',
+              messages: [{
+                role: 'user',
+                content: [
+                  {
+                    type: 'text',
+                    text: 'Leia esta cessão de direitos. Responda somente JSON no formato {"cedentes":["NOME COMPLETO"],"cessionarios":["NOME COMPLETO"]}. Cedente é quem cede o imóvel. Cessionário é quem recebe. Liste cada titular, sem cônjuge repetido só como cônjuge. Sem texto fora do JSON.'
+                  },
+                  { type: 'image_url', image_url: { url: body.image_data } }
+                ]
+              }],
+              max_tokens: 400
+            })
+          });
+          const partesAi = await partesRes.json();
+          const bruto = (partesAi.choices && partesAi.choices[0] && partesAi.choices[0].message && partesAi.choices[0].message.content) || '{}';
+          let partes = { cedentes: [], cessionarios: [] };
+          try {
+            partes = JSON.parse(String(bruto).replace(/```json|```/gi, '').trim());
+          } catch (e) {}
+          return sendJson(res, 200, {
+            cedentes: Array.isArray(partes.cedentes) ? partes.cedentes : [],
+            cessionarios: Array.isArray(partes.cessionarios) ? partes.cessionarios : []
+          });
+        }
+
         if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY.includes('COLOQUE_SUA_CHAVE')) {
           // Mock se não houver chave
           console.log('OpenAI Key ausente. Mockando OCR.');

@@ -76,7 +76,7 @@ const ResultadoCaixaApp = {
     if (!this.date) this.date = new Date().toISOString().slice(0, 10);
     if (!this._ok) {
       this._ok = true;
-      if (!this.mes) this.mes = new Date().getMonth() + 1;
+      if (!this.mes) this.mes = this.mesFechado();
       this.lerLocal();
       this.montarVista();
     }
@@ -702,6 +702,12 @@ const ResultadoCaixaApp = {
     return y + "-" + String(m).padStart(2, "0");
   },
 
+  /** Último mês já fechado. Em novembro o realizado vai até outubro; novembro e dezembro ficam no forecast. */
+  mesFechado() {
+    const hoje = new Date().getMonth();
+    return hoje === 0 ? 12 : hoje;
+  },
+
   migrarLegado(anos) {
     const base = new Date().getFullYear();
     const mes = String(Number(this.mes) || (new Date().getMonth() + 1)).padStart(2, "0");
@@ -721,13 +727,43 @@ const ResultadoCaixaApp = {
     return cheio(ant) || cheio(mes);
   },
 
+  /** Um arquivo por empresa: vale o da competência mais recente, até o mês escolhido. */
+  arquivosVigentes(ano) {
+    const y = String(ano);
+    const base = String(this.anoBase());
+    if (y !== base) {
+      const ant = this.acervo && this.acervo.anterior && this.acervo.anterior[y];
+      return (ant && ant.arquivos) || {};
+    }
+    const teto = this.chaveMes(base);
+    const chaves = Object.keys((this.acervo && this.acervo.meses) || {})
+      .filter((k) => k.slice(0, 4) === base && k <= teto)
+      .sort();
+    const porEmp = new Map();
+    chaves.forEach((slot) => {
+      const arquivos = (this.acervo.meses[slot] && this.acervo.meses[slot].arquivos) || {};
+      Object.keys(arquivos).forEach((nome) => {
+        const arq = arquivos[nome];
+        if (!arq) return;
+        const emp = Number(arq.empresa) || this.empresaId(nome) || 0;
+        porEmp.set(emp ? ("e:" + emp) : ("n:" + nome), { nome: nome, arq: arq, slot: slot });
+      });
+    });
+    const out = {};
+    porEmp.forEach((item) => {
+      item.arq._vigencia = item.slot;
+      out[item.nome] = item.arq;
+    });
+    return out;
+  },
+
   montarVista() {
     const ano = this.anoBase();
     const vista = {};
-    const ant = this.acervo && this.acervo.anterior && this.acervo.anterior[String(ano - 1)];
-    if (ant && ant.arquivos && Object.keys(ant.arquivos).length) vista[String(ano - 1)] = ant;
-    const cur = this.acervo && this.acervo.meses && this.acervo.meses[this.chaveMes(ano)];
-    if (cur && cur.arquivos && Object.keys(cur.arquivos).length) vista[String(ano)] = cur;
+    const ant = this.arquivosVigentes(ano - 1);
+    if (Object.keys(ant).length) vista[String(ano - 1)] = { arquivos: ant };
+    const cur = this.arquivosVigentes(ano);
+    if (Object.keys(cur).length) vista[String(ano)] = { arquivos: cur };
     this.anos = vista;
   },
 
@@ -1602,6 +1638,20 @@ const ResultadoCaixaApp = {
         _slot: destino.id,
         _doc: docId
       };
+      if (destino.tipo === "mes" && empresa) {
+        Object.keys(this.acervo.meses || {}).forEach((k) => {
+          if (k === destino.chave || String(k).slice(0, 4) !== String(ano)) return;
+          const bag = this.acervo.meses[k];
+          if (!bag || !bag.arquivos) return;
+          Object.keys(bag.arquivos).forEach((nome) => {
+            const outro = bag.arquivos[nome];
+            if (nome !== nomeArquivo && Number(outro && outro.empresa) !== empresa) return;
+            if (outro && outro._doc && outro._doc !== docId) this.apagarNuvem(outro._doc);
+            delete bag.arquivos[nome];
+          });
+          if (!Object.keys(bag.arquivos).length) delete this.acervo.meses[k];
+        });
+      }
     });
     this._dfcKey = "";
     this._dfcPedido = "";
@@ -1680,17 +1730,33 @@ const ResultadoCaixaApp = {
     try { nome = decodeURIComponent(chave); } catch (e) {}
     const y = Number(ano);
     const base = this.anoBase();
-    const bolsa = y === base ? (this.acervo.meses[this.chaveMes(base)] || null) : (this.acervo.anterior[String(y)] || null);
+    if (y === base) {
+      const slots = Object.keys(this.acervo.meses || {}).filter((k) => k.slice(0, 4) === String(base));
+      let achou = false;
+      slots.forEach((k) => {
+        const bolsa = this.acervo.meses[k];
+        if (!bolsa || !bolsa.arquivos || !bolsa.arquivos[nome]) return;
+        achou = true;
+        this.apagarNuvem(bolsa.arquivos[nome]._doc);
+        delete bolsa.arquivos[nome];
+        if (!Object.keys(bolsa.arquivos).length) delete this.acervo.meses[k];
+      });
+      if (!achou) this.removerAno(ano);
+      this._dfcKey = "";
+      this._dfcPedido = "";
+      this.montarVista();
+      this.gravarLocal();
+      this.render();
+      return;
+    }
+    const bolsa = this.acervo.anterior[String(y)] || null;
     if (!bolsa || !bolsa.arquivos || !bolsa.arquivos[nome]) {
       this.removerAno(ano);
       return;
     }
     const docId = bolsa.arquivos[nome]._doc;
     delete bolsa.arquivos[nome];
-    if (!Object.keys(bolsa.arquivos).length) {
-      if (y === base) delete this.acervo.meses[this.chaveMes(base)];
-      else delete this.acervo.anterior[String(y)];
-    }
+    if (!Object.keys(bolsa.arquivos).length) delete this.acervo.anterior[String(y)];
     this.apagarNuvem(docId);
     this._dfcKey = "";
     this._dfcPedido = "";
@@ -2388,8 +2454,11 @@ const ResultadoCaixaApp = {
   },
 
   chipsForecast() {
+    const usados = {};
+    this.mesesSeguintes().forEach((ym) => { usados[ym] = 1; });
     const mapa = new Map();
     Object.keys(this.forecasts || {}).forEach((ym) => {
+      if (!usados[ym]) return;
       const por = (this.forecasts[ym] && this.forecasts[ym].porArquivo) || {};
       Object.keys(por).forEach((nome) => {
         if (!mapa.has(nome)) mapa.set(nome, { arq: por[nome] || {}, meses: [] });
@@ -2418,7 +2487,14 @@ const ResultadoCaixaApp = {
       const ib = Number(b.arq.empresa) || this.empresaId(b.nome) || 9999;
       if (ia !== ib) return ia - ib;
       return this.rotuloArquivo(a.nome, a.arq).localeCompare(this.rotuloArquivo(b.nome, b.arq), "pt");
-    }).map((item) => this.chipArquivo(String(y), item.nome, item.arq, "")).join("");
+    }).map((item) => {
+      let extra = "";
+      const slot = String((item.arq && item.arq._vigencia) || "");
+      if (/^\d{4}-\d{2}$/.test(slot)) {
+        extra = (this.MESES[Number(slot.slice(5, 7)) - 1] || "") + "/" + slot.slice(0, 4);
+      }
+      return this.chipArquivo(String(y), item.nome, item.arq, extra);
+    }).join("");
   },
 
   faltaCentroNasSaidas() {
@@ -2445,7 +2521,10 @@ const ResultadoCaixaApp = {
     const chipsAtual = atual ? this.chipsDoAno(atual) : "";
     const chipsAnt = antN ? this.chipsDoAno(antN) : "";
     const nomesFc = {};
+    const seguintes = {};
+    this.mesesSeguintes().forEach((ym) => { seguintes[ym] = 1; });
     Object.keys(this.forecasts || {}).forEach((ym) => {
+      if (!seguintes[ym]) return;
       Object.keys((this.forecasts[ym] && this.forecasts[ym].porArquivo) || {}).forEach((nome) => { nomesFc[nome] = 1; });
     });
     const qtdArq = [atual, antN].reduce((s, y) => {
@@ -2455,7 +2534,7 @@ const ResultadoCaixaApp = {
     const chipForecast = this.chipsForecast();
     const agrupa = this.agrupar ? " Com “% Consolidação”, cada valor está no % Consolidação da empresa, e só entra quem tem a consolidação padrão ligada." : "";
     const mesNomeFaixa = nomesMes[(Number(this.mes) || 1) - 1] || "";
-    const base = "Orçado e realizado de " + (atual || "—") + " vêm do arquivo enviado para " + mesNomeFaixa + ". A coluna de " + (antN || "o ano anterior") + " é o realizado desse arquivo, de janeiro até o mês escolhido, no mesmo % Consolidação.";
+    const base = "Orçado e realizado de " + (atual || "—") + " vêm do arquivo mais recente de cada empresa, até " + mesNomeFaixa + ". A coluna de " + (antN || "o ano anterior") + " é o realizado do arquivo mais recente dessa empresa, de janeiro até o mês escolhido, no mesmo % Consolidação.";
     const nota = lado === "entradas"
       ? base + " Livia, Livia I e Livia II aparecem como Central Parque. Empreendimentos com o mesmo nome ganham a sigla da cidade. MLDU aparece como Corporativo. Os quatro maiores desvios positivos e os quatro negativos do acumulado ficam à vista; o restante abre ao clicar em Outros."
         + " No gráfico de linhas, a linha do ano atual é o realizado até o mês escolhido. Cada mês seguinte, até dezembro, usa o forecast enviado nesta tela, pelas mesmas contas da visão DFC (Receitas e receitas financeiras)." + agrupa
@@ -2527,7 +2606,7 @@ const ResultadoCaixaApp = {
       ${avisoMes}
       ${avisoAnt}
       ${this.dfcErro ? `<div class="rcx-erro">${caixaEsc(this.dfcErro)}</div>` : ""}
-      ${anos.length ? `<details class="rcx-ajuda"><summary><i data-lucide="info"></i> Como ler esta tabela</summary><p>${nota}</p></details>` : `<p class="rcx-vazio">Suba o comparativo orçado × realizado por centro de custo. Pode ser o arquivo analítico das contas financeiras: ele entra na visão DFC. O de ${antN || "o ano anterior"} fica salvo para todos os meses. O de ${atual || "o ano corrente"} vale só para o mês selecionado.</p>`}
+      ${anos.length ? `<details class="rcx-ajuda"><summary><i data-lucide="info"></i> Como ler esta tabela</summary><p>${nota}</p></details>` : `<p class="rcx-vazio">Suba o comparativo orçado × realizado por centro de custo. Pode ser o arquivo analítico das contas financeiras: ele entra na visão DFC. O de ${antN || "o ano anterior"} e o de ${atual || "o ano corrente"} ficam pelo arquivo mais recente de cada empresa. O mês escolhido é o último realizado; os meses seguintes vêm do forecast mais novo.</p>`}
     `;
   },
 

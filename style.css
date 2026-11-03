@@ -4408,7 +4408,7 @@ circle.donut-segment {
 .rcx-arqs-box { display: flex; flex-wrap: wrap; gap: 10px 24px; align-items: flex-start; margin-bottom: 10px; padding: 10px 12px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; }
 .rcx-arqs-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1 1 260px; }
 .rcx-arqs-label { font-size: 0.68rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: #64748b; }
-.rcx-arqs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.rcx-arqs { display: flex; flex-direction: column; flex-wrap: nowrap; gap: 6px; align-items: flex-start; }
 .rcx-arq { display: inline-flex; align-items: center; gap: 4px; font-size: 0.74rem; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 999px; padding: 2px 4px 2px 4px; }
 .rcx-arq.is-off { background: #f8fafc; color: #94a3b8; }
 .rcx-arq.is-off .rcx-arq-nome { text-decoration: line-through; }
