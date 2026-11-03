@@ -288,6 +288,12 @@ const DocAssinaturaApp = {
     });
   },
 
+  rotuloUnidade(row) {
+    const u = String((row && row.unidade) || "").trim();
+    if (!u || u === "—") return "—";
+    return u.replace(/^U-/i, "");
+  },
+
   nomeUnidade(row) {
     const u = String((row && row.unidade) || "").trim();
     const cc = this.centroDe(row);
@@ -632,7 +638,7 @@ const DocAssinaturaApp = {
             <td>${this.esc(this.tipoLabel(r.tipo))}</td>
             <td>${this.esc(r.cliente || "—")}</td>
             <td>${this.esc(r.titulo || "—")}</td>
-            <td>${this.esc(r.unidade || "—")}</td>
+            <td>${this.esc(this.rotuloUnidade(r))}</td>
             <td>${this.esc(r.userName || "—")}${this.mesmoUsuario(r) ? ` <span class="docs-voce">você</span>` : ""}</td>
             <td><span class="docs-sit${r.status === "lancado" ? " is-feito" : ""}">${r.status === "lancado" ? "Lançado no Sienge" : "Aguardando"}</span></td>
             <td class="docs-acoes"><button type="button" class="tvig-ico" title="${tem ? "Consultar documento" : "PDF não salvo para consulta"}" style="${tem ? "" : "opacity:.35"}" onclick="DocAssinaturaApp.consultar('${chave}')"><i data-lucide="paperclip" style="width:15px;height:15px;"></i></button><button type="button" class="tvig-ico is-danger" title="Remover" onclick="DocAssinaturaApp.remover('${chave}')"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button></td>
@@ -664,7 +670,7 @@ const DocAssinaturaApp = {
       <div class="cc-toolbar">
         ${tabs}
         <div class="cc-toolbar-actions">
-          <label class="moura-switch">
+          <label class="moura-switch docs-finalizados">
             <input type="checkbox" ${this.mostrarFinalizados ? "checked" : ""} onchange="DocAssinaturaApp.setFinalizados(this.checked)" aria-label="Mostrar finalizados">
             <span class="moura-switch-track" aria-hidden="true"></span>
             <span class="moura-switch-text">Mostrar finalizados</span>

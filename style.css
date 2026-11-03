@@ -9519,6 +9519,7 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .docs-aviso { margin: 0 0 10px; color: #9a3412; font-size: 0.82rem; }
 .docs-bar { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 .docs-bar .ml-tabs { flex: 1 1 auto; margin-bottom: 0; }
+.docs-finalizados { align-self: flex-end; height: 36px; }
 .docs-filtro { display: flex; flex-direction: column; gap: 4px; font-size: 0.78rem; font-weight: 700; color: #64748b; }
 .cc-toolbar-actions .docs-filtro { margin-left: 0; }
 .docs-filtro select { min-width: 220px; height: 36px; }
@@ -12046,4 +12047,32 @@ tr.pr-liberado td { background: #f7faf8; }
 .repac-dia-link:hover { background: #f0fdf4; }
 .repac-dia-link small { font-weight: 600; color: #64748b; }
 .repac-dia-sienge { width: 18px; height: 18px; flex: 0 0 18px; display: block; }
+
+.cce-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 28px 20px; }
+.cce-dialog { background: #fff; border-radius: 12px; width: min(1120px, 96vw); max-height: min(880px, 92vh); box-shadow: 0 24px 48px rgba(15, 23, 42, 0.22); display: flex; flex-direction: column; }
+.cce-head { padding: 16px 22px; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.cce-head h3 { margin: 0; font-size: 1.05rem; line-height: 1.35; color: var(--color-primary); }
+.cce-body { padding: 18px 22px 22px; overflow: auto; display: flex; flex-direction: column; gap: 16px; }
+.cce-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 18px; }
+.cce-label { display: block; font-weight: 700; margin-bottom: 6px; font-size: 0.8rem; color: #334155; }
+.cce-hint { display: block; margin: 6px 0 0; color: #64748b; font-size: 0.75rem; line-height: 1.45; }
+.cce-hint.is-ok { color: #105436; font-weight: 600; }
+.cce-tipo { display: flex; gap: 8px; align-items: center; }
+.cce-tipo .form-control { flex: 1; min-width: 0; }
+.cce-check { display: flex; align-items: center; gap: 8px; min-height: 38px; }
+.cce-check label { font-weight: 700; font-size: 0.85rem; cursor: pointer; margin: 0; }
+.cce-note { margin: 0; padding: 10px 12px; border-radius: 8px; background: #f0fdf4; color: #14532d; font-size: 0.8rem; line-height: 1.45; }
+.cce-split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: stretch; }
+.cce-card { padding: 14px 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; }
+.cce-card.is-parceiro { background: #fffbeb; border-color: #fde68a; }
+.cce-card h4 { margin: 0 0 6px; color: #334155; font-size: 0.9rem; }
+.cce-card p { margin: 0 0 10px; font-size: 0.75rem; color: #64748b; line-height: 1.45; }
+.cce-card .form-control, .cce-grid .form-control, .cce-reg .form-control { width: 100%; box-sizing: border-box; }
+.cce-reg textarea { min-height: 132px; resize: vertical; line-height: 1.45; }
+.cce-foot { padding: 14px 22px; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; gap: 10px; background: #f8fafc; border-radius: 0 0 12px 12px; }
+.cce-auto { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 18px; }
+.cce-auto label { font-weight: 700; font-size: 0.85rem; cursor: pointer; }
+@media (max-width: 860px) {
+  .cce-grid, .cce-split { grid-template-columns: 1fr; }
+}
 

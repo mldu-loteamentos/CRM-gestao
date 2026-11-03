@@ -90,6 +90,10 @@ const OrcamentoModuloApp = {
   },
 
   init(tabId) {
+    if (tabId === "orcamento-forecast") {
+      if (window.OrcamentoForecastApp) OrcamentoForecastApp.init();
+      return;
+    }
     if (tabId === "orcamento-novo") {
       this.voltarLista();
       this.carregarCadastro();
